@@ -33,6 +33,23 @@ export const workflowTypeLabels: Record<WorkflowType, string> = {
   WARRANTY_GENERATOR: "무상(보증) Generator",
 };
 
+/**
+ * 아래 두 맵은 화면 표시 전용 데모 파생 값이다. DATABASE_DESIGN.md에는
+ * "제품 구분"/"유상·무상" 컬럼이 별도로 정의되어 있지 않으며, 여기서는
+ * 기존 WorkflowType 값 하나로부터 두 개의 표시용 문구를 파생시킨다.
+ * 실제 DB 스키마에 이 두 컬럼을 그대로 추가한다는 결정이 아니다.
+ */
+export const productCategoryLabels: Record<WorkflowType, string> = {
+  MATCHER: "Matcher",
+  PAID_GENERATOR: "Generator",
+  WARRANTY_GENERATOR: "Generator",
+};
+export const paidOrWarrantyLabels: Record<WorkflowType, string> = {
+  MATCHER: "-",
+  PAID_GENERATOR: "유상",
+  WARRANTY_GENERATOR: "무상",
+};
+
 // 데모 전용 단순화 상태 값이다. 실제 스키마는 workflow_version/current_step +
 // nullable exception_status 조합으로 표현되며(DATABASE_DESIGN.md 13번),
 // 이 평탄화된 상태는 Phase 2/3의 정규 모델로 대체될 예정이다.
@@ -96,6 +113,8 @@ export type EndUser = {
 export type Product = {
   id: string;
   modelName: string;
+  /** Lot Number. 데모 값은 전부 가상이다. */
+  lotNumber: string;
   serialNumber: string;
 };
 
@@ -114,6 +133,11 @@ export type RepairCase = {
   customerRequestedDueDate: string | null;
   /** 내부적으로 관리하는 목표 출하일 — 지연 여부 계산의 기준 */
   internalTargetShipmentDate: string | null;
+  /**
+   * 실제로 출하가 완료된 날짜. status가 SHIPMENT_COMPLETED가 아닌 건은
+   * 보통 null이다. internalTargetShipmentDate(목표일)의 대용으로 쓰지 않는다.
+   */
+  actualShipmentDate: string | null;
   isLocked: boolean;
   createdAt: string;
 };
