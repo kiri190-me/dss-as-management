@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
-import PlaceholderPage from "@/components/layout/PlaceholderPage";
-import { mockRepairCases } from "@/lib/domain/mock-data";
+import { notFound } from "next/navigation";
+import { buildRepairCaseDetail } from "@/lib/domain/repair-case-detail";
+import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
+import ExceptionStatusNotice from "@/components/repair-cases/detail/ExceptionStatusNotice";
+import IntakeInfoSection from "@/components/repair-cases/detail/IntakeInfoSection";
+import ProductInfoSection from "@/components/repair-cases/detail/ProductInfoSection";
+import FaultServiceSection from "@/components/repair-cases/detail/FaultServiceSection";
+import WorkflowProgress from "@/components/repair-cases/detail/WorkflowProgress";
 
 export const metadata: Metadata = {
   title: "A/S 상세 | DSS A/S 관리 시스템",
@@ -12,21 +18,24 @@ export default async function RepairCaseDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const repairCase = mockRepairCases.find((candidate) => candidate.id === id);
+  const detail = buildRepairCaseDetail(id);
 
-  if (!repairCase) {
-    return (
-      <PlaceholderPage
-        title="접수 건을 찾을 수 없습니다"
-        description="요청하신 인수번호를 확인할 수 없습니다. 전체 A/S 현황 목록에서 다시 선택해 주세요."
-      />
-    );
+  // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 detail은
+  // 항상 존재해야 한다. 방어적으로만 남겨둔다.
+  if (!detail) {
+    notFound();
   }
 
   return (
-    <PlaceholderPage
-      title={repairCase.intakeNumber}
-      description="A/S 상세 화면은 준비 중입니다. 다음 단계에서 제공될 예정입니다."
-    />
+    <div className="flex flex-col gap-4">
+      <DetailHeader detail={detail} />
+      <ExceptionStatusNotice exceptionStatus={detail.repairCase.exceptionStatus} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <IntakeInfoSection detail={detail} />
+        <ProductInfoSection detail={detail} />
+      </div>
+      <FaultServiceSection detail={detail} />
+      <WorkflowProgress repairCase={detail.repairCase} />
+    </div>
   );
 }

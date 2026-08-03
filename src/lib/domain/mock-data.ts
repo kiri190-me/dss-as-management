@@ -226,8 +226,11 @@ export const mockProducts: Product[] = [
 ];
 
 // 아래는 각 워크플로 유형의 확정된 단계 순서를 그대로 옮긴 정적 참조 데이터다
-// (PROJECT_REQUIREMENTS.md "워크플로 정의" 참조). 개별 접수 건과 연결되지
-// 않으며, 부품 조달 단계는 이번 단계 합의에 따라 "부품 수급"으로 표기한다.
+// (PROJECT_REQUIREMENTS.md "워크플로 정의" 참조). 부품 조달 단계는 이번 단계
+// 합의에 따라 "부품 수급"으로 표기한다. Matcher 워크플로는 "교산 회신 대기"가
+// order 4와 8에 두 번 등장하며, 이 둘은 서로 다른 key
+// (waiting_kyosan_reply / waiting_kyosan_reply_followup)를 가진다 — 한글
+// 라벨이 같아도 개별 접수 건의 currentWorkflowStepKey는 둘을 구분한다.
 export const workflowSteps: WorkflowStep[] = [
   // MATCHER
   { workflowType: "MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
@@ -298,6 +301,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: "2026-06-24",
     isLocked: true,
     createdAt: "2026-06-01T01:00:00.000Z",
+    reportedSymptom: "전원 인가 시 출력이 불안정하다는 신고",
+    intakeInspectionResult: "외관 및 기본 동작 점검 결과 특이사항 없음",
+    currentDiagnosisSummary: "부품 교체 후 정상 동작 확인 완료",
+    nextPlannedAction: "출하 완료로 추가 조치 없음",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "shipment_completed",
   },
   {
     id: "rc-002",
@@ -315,6 +324,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: "2026-06-29",
     isLocked: true,
     createdAt: "2026-06-03T01:00:00.000Z",
+    reportedSymptom: "측정값이 기준치보다 낮게 나온다는 신고",
+    intakeInspectionResult: "내부 부품 노후로 인한 성능 저하 확인",
+    currentDiagnosisSummary: "불량 부품 교체 후 정상 범위 확인",
+    nextPlannedAction: "출하 완료로 추가 조치 없음",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "shipment_completed",
   },
   {
     id: "rc-003",
@@ -335,6 +350,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: "2026-08-02",
     isLocked: true,
     createdAt: "2026-06-10T01:00:00.000Z",
+    reportedSymptom: "사용 중 자동 전원 종료 현상 신고",
+    intakeInspectionResult: "보증 기간 내 결함으로 확인",
+    currentDiagnosisSummary: "무상 수리 완료, 정상 동작 확인",
+    nextPlannedAction: "출하 완료로 추가 조치 없음",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "shipment_completed",
   },
   {
     id: "rc-004",
@@ -354,6 +375,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-02T01:00:00.000Z",
+    reportedSymptom: "화면 표시부 일부 깜빡임 신고",
+    intakeInspectionResult: "표시부 연결 불량 확인",
+    currentDiagnosisSummary: "수리 및 테스트 완료, 출하 대기 중",
+    nextPlannedAction: "출하 절차 진행 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_shipment",
   },
   {
     id: "rc-005",
@@ -371,6 +398,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-05T01:00:00.000Z",
+    reportedSymptom: "출력 세기 저하 신고",
+    intakeInspectionResult: "내부 회로 손상 확인",
+    currentDiagnosisSummary: "수리 완료, 교산 출하 승인 대기 중",
+    nextPlannedAction: "교산 승인 회신 대기",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_kyosan_shipment_approval",
   },
   {
     id: "rc-006",
@@ -388,6 +421,13 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-08T01:00:00.000Z",
+    reportedSymptom: "간헐적 재시작 현상 신고",
+    intakeInspectionResult: "원인 특정을 위한 추가 점검 필요 확인",
+    currentDiagnosisSummary: "부품 수급 완료, 보류 상태로 수리 일시 중단",
+    nextPlannedAction: "보류 사유 해소 후 수리 재개 예정",
+    // 워크플로 진행(수리 중)과 별개로 예외 상태가 동시에 붙는 데모 사례.
+    exceptionStatus: "ON_HOLD",
+    currentWorkflowStepKey: "repair_or_defective_parts_replacement",
   },
   {
     id: "rc-007",
@@ -406,6 +446,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-10T01:00:00.000Z",
+    reportedSymptom: "소음 발생 신고",
+    intakeInspectionResult: "내부 팬 이상 확인",
+    currentDiagnosisSummary: "부품 수급 완료, 수리 진행 중",
+    nextPlannedAction: "수리 완료 후 테스트 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "repair_in_progress",
   },
   {
     id: "rc-008",
@@ -423,6 +469,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-14T01:00:00.000Z",
+    reportedSymptom: "기능 일부 미동작 신고",
+    intakeInspectionResult: "필요 부품 확인 완료",
+    currentDiagnosisSummary: "부품 수급 대기 중",
+    nextPlannedAction: "부품 입고 후 수리 착수 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "parts_supply",
   },
   {
     id: "rc-009",
@@ -441,6 +493,13 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-07-18T01:00:00.000Z",
+    reportedSymptom: "측정 오차 발생 신고",
+    intakeInspectionResult: "핵심 부품 결함 확인",
+    currentDiagnosisSummary: "해외 부품 수급 지연으로 대기 중",
+    nextPlannedAction: "부품 입고 확인 후 수리 재개 예정",
+    // 워크플로 상태(부품 수급 대기)와 예외 상태(부품 대기)가 동시에 표시되는 데모 사례.
+    exceptionStatus: "PARTS_WAITING",
+    currentWorkflowStepKey: "parts_supply",
   },
   {
     id: "rc-010",
@@ -458,6 +517,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-01T01:00:00.000Z",
+    reportedSymptom: "전원이 켜지지 않는다는 신고",
+    intakeInspectionResult: null,
+    currentDiagnosisSummary: null,
+    nextPlannedAction: "인수점검 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "intake_inspection",
   },
   {
     id: "rc-011",
@@ -475,6 +540,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-02T01:00:00.000Z",
+    reportedSymptom: "이상 동작음 발생 신고",
+    intakeInspectionResult: null,
+    currentDiagnosisSummary: null,
+    nextPlannedAction: "인수점검 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "intake_inspection",
   },
   {
     id: "rc-012",
@@ -492,6 +563,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-02T01:00:00.000Z",
+    reportedSymptom: "정밀도 저하 신고",
+    intakeInspectionResult: "보증 대상 여부 확인 중",
+    currentDiagnosisSummary: "교산 측 응답 대기 중",
+    nextPlannedAction: "교산 응답 수신 후 처리 방향 결정",
+    exceptionStatus: "WAITING_KYOSAN_RESPONSE",
+    currentWorkflowStepKey: "waiting_kyosan_reply",
   },
   {
     id: "rc-013",
@@ -509,6 +586,15 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-03T01:00:00.000Z",
+    reportedSymptom: "반복적인 오작동 신고",
+    intakeInspectionResult: "1차 점검 및 교산 문의 완료",
+    currentDiagnosisSummary: "교산 후속 회신 대기 중",
+    nextPlannedAction: "회신 수신 후 견적 작성 예정",
+    exceptionStatus: null,
+    // Matcher 워크플로의 두 번째 "교산 회신 대기"(order 8) 사례 — 첫 번째
+    // occurrence(order 4, waiting_kyosan_reply)와 key가 다름을 보여주기 위해
+    // 의도적으로 두 번째 key를 사용한다.
+    currentWorkflowStepKey: "waiting_kyosan_reply_followup",
   },
   {
     id: "rc-014",
@@ -526,6 +612,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-03T01:00:00.000Z",
+    reportedSymptom: "출력 불안정 신고",
+    intakeInspectionResult: "부품 교체 필요 확인",
+    currentDiagnosisSummary: "견적 발송 완료, 고객 PO 대기 중",
+    nextPlannedAction: "PO 접수 후 부품 수급 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_po",
   },
   {
     id: "rc-015",
@@ -533,7 +625,11 @@ export const mockRepairCases: RepairCase[] = [
     customerId: "c-001",
     endUserId: "eu-001",
     productId: "p-004",
-    workflowType: "WARRANTY_GENERATOR",
+    // 데이터 정합성 수정: 무상(보증) Generator 워크플로에는 PO 단계가 전혀
+    // 없다(보증 수리는 유상이 아니므로 발주 절차가 없음). 기존
+    // WARRANTY_GENERATOR + WAITING_PO 조합은 실제로 불가능한 상태였다.
+    // Stage C-1에서 유상 Generator로 정정한다.
+    workflowType: "PAID_GENERATOR",
     status: "WAITING_PO",
     priority: "LOW",
     assignedEngineerId: "u-004",
@@ -543,6 +639,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-03T01:00:00.000Z",
+    reportedSymptom: "화면 오류 표시 신고",
+    intakeInspectionResult: "제어 보드 이상 확인",
+    currentDiagnosisSummary: "견적 발송 완료, 고객 PO 대기 중",
+    nextPlannedAction: "PO 접수 후 부품 수급 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_po",
   },
   {
     id: "rc-016",
@@ -560,6 +662,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-04T01:00:00.000Z",
+    reportedSymptom: "긴급 고장 신고",
+    intakeInspectionResult: "주요 부품 손상 확인",
+    currentDiagnosisSummary: "긴급 수리 진행 중",
+    nextPlannedAction: "수리 완료 후 테스트 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "repair_in_progress",
   },
   {
     id: "rc-017",
@@ -577,6 +685,12 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-04T01:00:00.000Z",
+    reportedSymptom: "성능 저하 신고",
+    intakeInspectionResult: "부품 노후 확인",
+    currentDiagnosisSummary: "수리 및 테스트 완료, 출하 승인 대기 중",
+    nextPlannedAction: "교산 승인 회신 대기",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_kyosan_shipment_approval",
   },
   {
     id: "rc-018",
@@ -584,7 +698,11 @@ export const mockRepairCases: RepairCase[] = [
     customerId: "c-004",
     endUserId: "eu-005",
     productId: "p-009",
-    workflowType: "WARRANTY_GENERATOR",
+    // 데이터 정합성 수정: 무상(보증) Generator 워크플로에는 "출하 대기"에
+    // 해당하는 단계가 없다(출하 승인 이후 바로 출하 완료로 이어짐). 이
+    // 단계는 Matcher 워크플로에만 존재하므로 Stage C-1에서 Matcher로
+    // 정정한다.
+    workflowType: "MATCHER",
     status: "WAITING_SHIPMENT",
     priority: "NORMAL",
     assignedEngineerId: "u-004",
@@ -594,33 +712,122 @@ export const mockRepairCases: RepairCase[] = [
     actualShipmentDate: null,
     isLocked: false,
     createdAt: "2026-08-04T01:00:00.000Z",
+    reportedSymptom: "연결 불량 신고",
+    intakeInspectionResult: "커넥터 손상 확인",
+    currentDiagnosisSummary: "출하 승인 완료, 출하 대기 중",
+    nextPlannedAction: "출하 절차 진행 예정",
+    exceptionStatus: null,
+    currentWorkflowStepKey: "waiting_shipment",
   },
 ];
 
 export const mockWorkHistories: WorkHistory[] = [
-  { id: "wh-001", repairCaseId: "rc-001", engineerId: "u-004", workDate: "2026-06-05", description: "인수점검 완료, 이상 없음 확인" },
-  { id: "wh-002", repairCaseId: "rc-001", engineerId: "u-004", workDate: "2026-06-15", description: "부품 교체 후 전원 인가 테스트 통과" },
-  { id: "wh-003", repairCaseId: "rc-002", engineerId: "u-005", workDate: "2026-06-06", description: "인수점검 및 초기 진단 수행" },
-  { id: "wh-004", repairCaseId: "rc-002", engineerId: "u-005", workDate: "2026-06-20", description: "불량 부품 교체 완료" },
-  { id: "wh-005", repairCaseId: "rc-003", engineerId: "u-006", workDate: "2026-06-12", description: "무상 보증 대상 확인, 인수점검 완료" },
-  { id: "wh-006", repairCaseId: "rc-003", engineerId: "u-006", workDate: "2026-06-25", description: "수리 완료 및 전원 인가 테스트 통과" },
-  { id: "wh-007", repairCaseId: "rc-004", engineerId: "u-004", workDate: "2026-07-03", description: "인수점검 수행, 경미한 손상 확인" },
-  { id: "wh-008", repairCaseId: "rc-004", engineerId: "u-004", workDate: "2026-07-20", description: "수리 및 전원 인가 테스트 완료, 출하 대기" },
-  { id: "wh-009", repairCaseId: "rc-005", engineerId: "u-005", workDate: "2026-07-06", description: "인수점검 완료" },
-  { id: "wh-010", repairCaseId: "rc-005", engineerId: "u-005", workDate: "2026-07-25", description: "수리 완료, 교산 출하 승인 대기 상태로 전환" },
-  { id: "wh-011", repairCaseId: "rc-006", engineerId: "u-006", workDate: "2026-07-09", description: "인수점검 및 부품 수급 요청" },
-  { id: "wh-012", repairCaseId: "rc-006", engineerId: "u-006", workDate: "2026-08-01", description: "부품 수급 완료, 수리 진행 중" },
-  { id: "wh-013", repairCaseId: "rc-007", engineerId: "u-004", workDate: "2026-07-11", description: "인수점검 완료, 부품 수급 대기" },
-  { id: "wh-014", repairCaseId: "rc-007", engineerId: "u-004", workDate: "2026-07-29", description: "부품 수급 완료, 수리 착수" },
-  { id: "wh-015", repairCaseId: "rc-008", engineerId: "u-005", workDate: "2026-07-15", description: "인수점검 완료, 필요 부품 확인" },
-  { id: "wh-016", repairCaseId: "rc-009", engineerId: "u-006", workDate: "2026-07-19", description: "인수점검 완료, 해외 부품 수급 요청" },
-  { id: "wh-017", repairCaseId: "rc-012", engineerId: "u-004", workDate: "2026-08-02", description: "인수점검 완료, 교산 측 회신 대기 중" },
-  { id: "wh-018", repairCaseId: "rc-013", engineerId: "u-005", workDate: "2026-08-03", description: "인수점검 완료, 교산 연락 및 보고서 발송" },
-  { id: "wh-019", repairCaseId: "rc-014", engineerId: "u-006", workDate: "2026-08-03", description: "견적 발송 완료, 고객 PO 대기" },
-  { id: "wh-020", repairCaseId: "rc-015", engineerId: "u-004", workDate: "2026-08-03", description: "견적 발송 완료, 고객 PO 대기" },
-  { id: "wh-021", repairCaseId: "rc-016", engineerId: "u-005", workDate: "2026-08-04", description: "인수점검 완료, 긴급 수리 착수" },
-  { id: "wh-022", repairCaseId: "rc-017", engineerId: "u-006", workDate: "2026-08-04", description: "수리 및 전원 인가 테스트 완료, 출하 승인 대기" },
-  { id: "wh-023", repairCaseId: "rc-018", engineerId: "u-004", workDate: "2026-08-04", description: "출하 승인 완료, 출하 대기" },
+  { id: "wh-001", repairCaseId: "rc-001", engineerId: "u-004", workedAt: "2026-06-05T09:30:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 이상 없음 확인", symptom: "전원 인가 시 출력 불안정", suspectedCause: "내부 부품 노후 추정", actionTaken: null, partsUsed: null, nextAction: "정밀 진단 및 부품 교체 검토", previousStatus: null, newStatus: null },
+  { id: "wh-002", repairCaseId: "rc-001", engineerId: "u-004", workedAt: "2026-06-15T13:00:00+09:00", workType: "REPAIR", description: "부품 교체 후 전원 인가 테스트 통과", symptom: null, suspectedCause: null, actionTaken: "전원부 부품 교체", partsUsed: "전원부 안정화 모듈 1개", nextAction: "출하 절차 진행", previousStatus: null, newStatus: null },
+
+  { id: "wh-003", repairCaseId: "rc-002", engineerId: "u-005", workedAt: "2026-06-06T10:00:00+09:00", workType: "INSPECTION", description: "인수점검 및 초기 진단 수행", symptom: "측정값 기준치 미달", suspectedCause: "내부 부품 노후 추정", actionTaken: null, partsUsed: null, nextAction: "불량 부품 확인 후 교체 예정", previousStatus: null, newStatus: null },
+  { id: "wh-004", repairCaseId: "rc-002", engineerId: "u-005", workedAt: "2026-06-20T11:30:00+09:00", workType: "REPAIR", description: "불량 부품 교체 완료", symptom: null, suspectedCause: null, actionTaken: "불량 부품 교체", partsUsed: "측정 모듈 1개", nextAction: "출하 절차 진행", previousStatus: null, newStatus: null },
+
+  { id: "wh-005", repairCaseId: "rc-003", engineerId: "u-006", workedAt: "2026-06-12T09:00:00+09:00", workType: "INSPECTION", description: "무상 보증 대상 확인, 인수점검 완료", symptom: "사용 중 자동 전원 종료", suspectedCause: "보증 기간 내 결함", actionTaken: null, partsUsed: null, nextAction: "무상 수리 진행", previousStatus: null, newStatus: null },
+  { id: "wh-006", repairCaseId: "rc-003", engineerId: "u-006", workedAt: "2026-06-25T14:00:00+09:00", workType: "REPAIR", description: "수리 완료 및 전원 인가 테스트 통과", symptom: null, suspectedCause: null, actionTaken: "결함 부품 교체", partsUsed: "전원 제어 모듈 1개", nextAction: "출하 절차 진행", previousStatus: null, newStatus: null },
+
+  { id: "wh-007", repairCaseId: "rc-004", engineerId: "u-004", workedAt: "2026-07-03T09:30:00+09:00", workType: "INSPECTION", description: "인수점검 수행, 경미한 손상 확인", symptom: "화면 표시부 깜빡임", suspectedCause: "표시부 연결 불량 추정", actionTaken: null, partsUsed: null, nextAction: "연결부 수리 예정", previousStatus: null, newStatus: null },
+  { id: "wh-008", repairCaseId: "rc-004", engineerId: "u-004", workedAt: "2026-07-20T15:00:00+09:00", workType: "REPAIR", description: "수리 및 전원 인가 테스트 완료, 출하 대기", symptom: null, suspectedCause: null, actionTaken: "표시부 연결 케이블 교체", partsUsed: "연결 케이블 1개", nextAction: "출하 절차 진행", previousStatus: null, newStatus: null },
+
+  { id: "wh-009", repairCaseId: "rc-005", engineerId: "u-005", workedAt: "2026-07-06T09:00:00+09:00", workType: "INSPECTION", description: "인수점검 완료", symptom: "출력 세기 저하", suspectedCause: "내부 회로 손상 추정", actionTaken: null, partsUsed: null, nextAction: "회로 수리 예정", previousStatus: null, newStatus: null },
+  {
+    id: "wh-010",
+    repairCaseId: "rc-005",
+    engineerId: "u-005",
+    workedAt: "2026-07-25T16:00:00+09:00",
+    workType: "STATUS_CHANGE",
+    description: "수리 완료, 교산 출하 승인 대기 상태로 전환",
+    symptom: null,
+    suspectedCause: null,
+    actionTaken: "손상 회로 수리 완료",
+    partsUsed: "회로 기판 1개",
+    nextAction: "교산 승인 회신 대기",
+    previousStatus: "IN_REPAIR",
+    newStatus: "WAITING_SHIPMENT_APPROVAL",
+  },
+
+  { id: "wh-011", repairCaseId: "rc-006", engineerId: "u-006", workedAt: "2026-07-09T09:00:00+09:00", workType: "INSPECTION", description: "인수점검 및 부품 수급 요청", symptom: "간헐적 재시작 현상", suspectedCause: "원인 특정을 위한 추가 점검 필요", actionTaken: null, partsUsed: null, nextAction: "부품 수급 요청", previousStatus: null, newStatus: null },
+  { id: "wh-012", repairCaseId: "rc-006", engineerId: "u-006", workedAt: "2026-08-01T10:30:00+09:00", workType: "REPAIR", description: "부품 수급 완료, 수리 진행 중(보류 상태)", symptom: null, suspectedCause: null, actionTaken: "수급된 부품으로 교체 착수", partsUsed: "제어 보드 1개", nextAction: "보류 사유 해소 후 수리 재개", previousStatus: null, newStatus: null },
+
+  { id: "wh-013", repairCaseId: "rc-007", engineerId: "u-004", workedAt: "2026-07-11T09:00:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 부품 수급 대기", symptom: "소음 발생", suspectedCause: "내부 팬 이상 추정", actionTaken: null, partsUsed: null, nextAction: "부품 수급 대기", previousStatus: null, newStatus: null },
+  { id: "wh-014", repairCaseId: "rc-007", engineerId: "u-004", workedAt: "2026-07-29T11:00:00+09:00", workType: "REPAIR", description: "부품 수급 완료, 수리 착수", symptom: null, suspectedCause: null, actionTaken: "냉각팬 교체 착수", partsUsed: "냉각팬 1개", nextAction: "수리 완료 후 테스트 예정", previousStatus: null, newStatus: null },
+
+  { id: "wh-015", repairCaseId: "rc-008", engineerId: "u-005", workedAt: "2026-07-15T09:30:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 필요 부품 확인", symptom: "기능 일부 미동작", suspectedCause: "구동부 부품 결함 추정", actionTaken: null, partsUsed: null, nextAction: "부품 입고 후 수리 착수 예정", previousStatus: null, newStatus: null },
+
+  { id: "wh-016", repairCaseId: "rc-009", engineerId: "u-006", workedAt: "2026-07-19T09:00:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 해외 부품 수급 요청", symptom: "측정 오차 발생", suspectedCause: "핵심 부품 결함 확인", actionTaken: null, partsUsed: null, nextAction: "해외 부품 입고 대기", previousStatus: null, newStatus: null },
+
+  { id: "wh-017", repairCaseId: "rc-012", engineerId: "u-004", workedAt: "2026-08-02T09:30:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 교산 측 회신 대기 중", symptom: "정밀도 저하", suspectedCause: "보증 대상 여부 확인 필요", actionTaken: null, partsUsed: null, nextAction: "교산 응답 대기", previousStatus: null, newStatus: null },
+
+  { id: "wh-018", repairCaseId: "rc-013", engineerId: "u-005", workedAt: "2026-08-03T10:00:00+09:00", workType: "COMMUNICATION", description: "인수점검 완료, 교산 연락 및 보고서 발송", symptom: "반복적인 오작동", suspectedCause: null, actionTaken: "교산에 점검 보고서 발송", partsUsed: null, nextAction: "교산 후속 회신 대기", previousStatus: null, newStatus: null },
+
+  {
+    id: "wh-019",
+    repairCaseId: "rc-014",
+    engineerId: "u-006",
+    workedAt: "2026-08-03T14:00:00+09:00",
+    workType: "STATUS_CHANGE",
+    description: "견적 발송 완료, 고객 PO 대기 상태로 전환",
+    symptom: null,
+    suspectedCause: null,
+    actionTaken: "고객에게 견적서 발송",
+    partsUsed: null,
+    nextAction: "PO 접수 대기",
+    previousStatus: "WAITING_KYOSAN_REPLY",
+    newStatus: "WAITING_PO",
+  },
+  {
+    id: "wh-020",
+    repairCaseId: "rc-015",
+    engineerId: "u-004",
+    workedAt: "2026-08-03T14:30:00+09:00",
+    workType: "STATUS_CHANGE",
+    description: "견적 발송 완료, 고객 PO 대기 상태로 전환",
+    symptom: null,
+    suspectedCause: null,
+    actionTaken: "고객에게 견적서 발송",
+    partsUsed: null,
+    nextAction: "PO 접수 대기",
+    previousStatus: "WAITING_KYOSAN_REPLY",
+    newStatus: "WAITING_PO",
+  },
+
+  { id: "wh-021", repairCaseId: "rc-016", engineerId: "u-005", workedAt: "2026-08-04T09:00:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 긴급 수리 착수", symptom: "긴급 고장", suspectedCause: "주요 부품 손상", actionTaken: "긴급 수리 착수", partsUsed: null, nextAction: "수리 완료 후 테스트 예정", previousStatus: null, newStatus: null },
+
+  {
+    id: "wh-022",
+    repairCaseId: "rc-017",
+    engineerId: "u-006",
+    workedAt: "2026-08-04T11:00:00+09:00",
+    workType: "STATUS_CHANGE",
+    description: "수리 및 전원 인가 테스트 완료, 출하 승인 대기 상태로 전환",
+    symptom: null,
+    suspectedCause: null,
+    actionTaken: "부품 교체 및 전원 인가 테스트 완료",
+    partsUsed: "구동 모듈 1개",
+    nextAction: "교산 승인 회신 대기",
+    previousStatus: "IN_REPAIR",
+    newStatus: "WAITING_SHIPMENT_APPROVAL",
+  },
+  {
+    id: "wh-023",
+    repairCaseId: "rc-018",
+    engineerId: "u-004",
+    workedAt: "2026-08-04T15:00:00+09:00",
+    workType: "STATUS_CHANGE",
+    description: "출하 승인 완료, 출하 대기 상태로 전환",
+    symptom: null,
+    suspectedCause: null,
+    actionTaken: "출하 승인 처리",
+    partsUsed: null,
+    nextAction: "출하 절차 진행",
+    previousStatus: "WAITING_SHIPMENT_APPROVAL",
+    newStatus: "WAITING_SHIPMENT",
+  },
 ];
 
 export const mockAttachments: AttachmentMetadata[] = [

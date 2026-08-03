@@ -15,3 +15,14 @@ export function formatDemoReferenceDateLabel(date: Date = DEMO_REFERENCE_DATE): 
 export function formatYearMonth(date: Date = DEMO_REFERENCE_DATE): string {
   return date.toISOString().slice(0, 7);
 }
+
+/**
+ * WorkHistory.workedAt("YYYY-MM-DDTHH:mm:00+09:00")을 "YYYY-MM-DD HH:mm"으로
+ * 표시한다. 항상 +09:00 오프셋으로 데이터를 작성하므로, 서버 실행 환경의
+ * 타임존과 무관하게 문자열을 직접 잘라 사용한다(Date 변환 후 로컬 타임존으로
+ * 다시 포맷하면 서버 환경에 따라 시각이 달라질 수 있어 이를 피한다).
+ */
+export function formatWorkedAt(workedAt: string): string {
+  const [datePart, timePart] = workedAt.split("T");
+  return `${datePart} ${timePart.slice(0, 5)}`;
+}

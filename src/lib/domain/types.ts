@@ -85,6 +85,60 @@ export const priorityLabels: Record<Priority, string> = {
   URGENT: "긴급",
 };
 
+/**
+ * DATABASE_DESIGN.md 13번 / PROJECT_REQUIREMENTS.md "예외 상태" 절에 정의된
+ * 9종 예외 상태를 그대로 코드화한 것이다(용어를 임의로 바꾸거나 새 항목을
+ * 추가하지 않았다). "삭제"는 두 문서 모두 예외 상태에서 명시적으로 제외한다.
+ * exceptionStatus는 RepairStatus/currentWorkflowStepKey와 독립적인 nullable
+ * 필드이며, 워크플로 진행 표시와 절대 합쳐서 렌더링하지 않는다.
+ */
+export const EXCEPTION_STATUS_CODES = [
+  "ON_HOLD",
+  "WAITING_CUSTOMER_RESPONSE",
+  "WAITING_KYOSAN_RESPONSE",
+  "PARTS_WAITING",
+  "REPAIR_NOT_POSSIBLE",
+  "REPAIR_FAILED",
+  "CUSTOMER_CANCELLED_REPAIR",
+  "FREE_RETURN",
+  "DISPOSED",
+] as const;
+export type ExceptionStatus = (typeof EXCEPTION_STATUS_CODES)[number];
+export const exceptionStatusLabels: Record<ExceptionStatus, string> = {
+  ON_HOLD: "보류",
+  WAITING_CUSTOMER_RESPONSE: "고객 응답 대기",
+  WAITING_KYOSAN_RESPONSE: "교산 응답 대기",
+  PARTS_WAITING: "부품 대기",
+  REPAIR_NOT_POSSIBLE: "수리 불가",
+  REPAIR_FAILED: "수리 실패",
+  CUSTOMER_CANCELLED_REPAIR: "고객 수리 취소",
+  FREE_RETURN: "무상 반송",
+  DISPOSED: "폐기",
+};
+
+// 데모 전용 작업 이력 구분값이다. DATABASE_DESIGN.md에 별도로 정의되어 있지
+// 않으며, 상태 변경 이력(STATUS_CHANGE)을 일반 작업 기록과 시각적으로
+// 구분하기 위한 목적으로 도입했다.
+export const WORK_HISTORY_TYPE_CODES = [
+  "INSPECTION",
+  "DIAGNOSIS",
+  "REPAIR",
+  "TEST",
+  "COMMUNICATION",
+  "STATUS_CHANGE",
+  "OTHER",
+] as const;
+export type WorkHistoryType = (typeof WORK_HISTORY_TYPE_CODES)[number];
+export const workHistoryTypeLabels: Record<WorkHistoryType, string> = {
+  INSPECTION: "점검",
+  DIAGNOSIS: "진단",
+  REPAIR: "수리/부품교체",
+  TEST: "테스트",
+  COMMUNICATION: "연락/보고",
+  STATUS_CHANGE: "상태 변경",
+  OTHER: "기타",
+};
+
 export type User = {
   id: string;
   name: string;
@@ -140,14 +194,54 @@ export type RepairCase = {
   actualShipmentDate: string | null;
   isLocked: boolean;
   createdAt: string;
+
+  // 아래 6개 필드는 Stage C-1에서 추가된 데모 전용 스냅샷 필드다.
+  // 실제 운영 스키마 결정이 아니며, 값은 전부 가상/비기술적 데모 문구다.
+
+  /** 고객이 최초 신고한 증상 요약 */
+  reportedSymptom: string | null;
+  /** 인수점검 결과. 아직 인수점검 전인 건은 null이다. */
+  intakeInspectionResult: string | null;
+  /** 현재까지의 진단/조치 한 줄 요약(최신 상태 스냅샷). 상세 이력은 WorkHistory 참조. */
+  currentDiagnosisSummary: string | null;
+  /** 다음 예정 작업 */
+  nextPlannedAction: string | null;
+  /** 워크플로 진행과 독립적인 예외 상태(nullable) */
+  exceptionStatus: ExceptionStatus | null;
+  /**
+   * 이 접수 건이 현재 위치한 워크플로 단계의 key(WorkflowStep.key와 매칭).
+   * DATABASE_DESIGN.md의 향후 `repair_cases.current_step_id` 관계를
+   * 단순화하여 흉내 낸 데모 필드이며, 실제 DB 구현이 아니다.
+   * RepairStatus로부터 역산하지 않고 이 필드가 진행 상태의 단일 소스다.
+   */
+  currentWorkflowStepKey: string;
 };
 
 export type WorkHistory = {
   id: string;
   repairCaseId: string;
   engineerId: string;
-  workDate: string;
+  /**
+   * ISO 8601 날짜/시각(+09:00 고정 오프셋). Stage B-2까지 쓰던 날짜 전용
+   * workDate 필드를 대체한다 — 같은 의미의 필드를 두 개 두지 않기 위해
+   * workDate는 제거했다(다음 마이그레이션 참고: workDate("YYYY-MM-DD") →
+   * workedAt("YYYY-MM-DDTHH:mm:00+09:00"), 시각은 데모용 가상 값으로 새로 부여).
+   */
+  workedAt: string;
+  workType: WorkHistoryType;
   description: string;
+  symptom: string | null;
+  suspectedCause: string | null;
+  actionTaken: string | null;
+  partsUsed: string | null;
+  nextAction: string | null;
+  /**
+   * workType이 STATUS_CHANGE인 항목만 두 값 모두 채운다. 그 외 항목은
+   * 항상 null이며, 설명 문자열에서 상태를 파싱하지 않고 이 타입 필드로만
+   * 렌더링한다.
+   */
+  previousStatus: RepairStatus | null;
+  newStatus: RepairStatus | null;
 };
 
 export type AttachmentMetadata = {
