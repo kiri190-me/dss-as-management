@@ -20,14 +20,16 @@ export default function AppShell({ children, user }: AppShellProps) {
 
   return (
     <div className="flex flex-1 flex-col">
-      <TopBar title={title} user={user} onMenuClick={() => setMobileNavOpen(true)} />
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="hidden border-r border-zinc-200 md:flex md:w-60 md:flex-col dark:border-zinc-800">
+      <div className="print:hidden">
+        <TopBar title={title} user={user} onMenuClick={() => setMobileNavOpen(true)} />
+      </div>
+      <div className="flex flex-1 overflow-hidden print:overflow-visible">
+        <aside className="hidden border-r border-zinc-200 md:flex md:w-60 md:flex-col print:hidden dark:border-zinc-800">
           <Sidebar activeHref={pathname} />
         </aside>
 
         {mobileNavOpen && (
-          <div className="fixed inset-0 z-40 flex md:hidden">
+          <div className="fixed inset-0 z-40 flex md:hidden print:hidden">
             <button
               type="button"
               aria-label="메뉴 닫기"
@@ -43,7 +45,7 @@ export default function AppShell({ children, user }: AppShellProps) {
           </div>
         )}
 
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">{children}</main>
       </div>
     </div>
   );

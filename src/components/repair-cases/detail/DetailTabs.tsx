@@ -15,12 +15,13 @@ export default function DetailTabs({ id }: DetailTabsProps) {
     { label: "작업 이력", href: `/repair-cases/${id}/work-history` },
     { label: "파일 관리", href: `/repair-cases/${id}/files` },
     { label: "검수/승인", href: `/repair-cases/${id}/approval` },
+    { label: "보고서", href: `/repair-cases/${id}/report` },
   ];
 
   return (
     <nav
       aria-label="A/S 상세 탐색"
-      className="flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800"
+      className="flex gap-1 overflow-x-auto border-b border-zinc-200 print:hidden dark:border-zinc-800"
     >
       {tabs.map((tab) => {
         const isActive = pathname === tab.href;

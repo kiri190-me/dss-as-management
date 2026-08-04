@@ -24,3 +24,63 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * Stage F-1 인쇄 전용 규칙이다. 아래 선택자는 전부 .report-document
+ * 하위로 스코프한다 — 전역 인쇄 규칙을 추가하지 않는다. 앱 크롬
+ * (TopBar/Sidebar/탭/컨트롤 패널/인쇄 버튼)은 이미 각 컴포넌트에 적용된
+ * Tailwind print:hidden 유틸리티로 숨겨지므로 여기서는 어떤 크롬도 직접
+ * 숨기지 않는다.
+ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm 12mm;
+  }
+
+  .report-document {
+    max-width: 100%;
+    background: #ffffff !important;
+    color: #171717 !important;
+  }
+
+  /* 다크 모드가 켜진 채로 인쇄되어도 항상 흑백 대비가 유지되도록 강제한다.
+     상태/경고는 이미 컴포넌트 레벨에서 색상이 아니라 문구로도 전달되므로
+     (예: 배지 안의 텍스트, 완전한 한국어 경고 문장), 인쇄 시 색 구분이
+     사라져도 정보 손실은 없다. */
+  .report-document * {
+    background-color: transparent !important;
+    color: #171717 !important;
+    border-color: #a1a1aa !important;
+    box-shadow: none !important;
+  }
+
+  .report-document table {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .report-document [class*="overflow-x-auto"] {
+    overflow-x: visible !important;
+  }
+
+  .report-document thead {
+    display: table-header-group;
+  }
+
+  .report-document tr {
+    break-inside: avoid;
+  }
+
+  .report-section-compact {
+    break-inside: avoid;
+  }
+
+  .report-document .report-timeline-list > li {
+    break-inside: avoid;
+  }
+
+  .report-page-break {
+    break-before: page;
+  }
+}
