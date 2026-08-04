@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { mockUsers } from "@/lib/domain/mock-data";
 import { isLocalId } from "@/lib/domain/local/local-types";
-import { resolveMockRepairCaseById } from "@/lib/domain/local/resolved-repair-case";
+import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import ApprovalScreen from "@/components/repair-cases/approval/ApprovalScreen";
 import LocalApprovalContent from "@/components/repair-cases/approval/LocalApprovalContent";
@@ -11,6 +11,8 @@ import LocalApprovalContent from "@/components/repair-cases/approval/LocalApprov
 export const metadata: Metadata = {
   title: "검수/승인 | DSS A/S 관리 시스템",
 };
+
+export const dynamic = "force-dynamic";
 
 export default async function RepairCaseApprovalPage({
   params,
@@ -43,7 +45,7 @@ export default async function RepairCaseApprovalPage({
     return <LocalApprovalContent id={id} actingUser={actingUser} />;
   }
 
-  const resolved = resolveMockRepairCaseById(id);
+  const resolved = await resolveRepairCaseForServer(id);
   // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는
   // 항상 존재해야 한다. 방어적으로만 남겨둔다.
   if (!resolved) {

@@ -1,8 +1,13 @@
 import { notFound } from "next/navigation";
-import { mockRepairCases } from "@/lib/domain/mock-data";
 import { isLocalId } from "@/lib/domain/local/local-types";
+import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import DetailTabs from "@/components/repair-cases/detail/DetailTabs";
 import LocalCaseGate from "@/components/repair-cases/detail/LocalCaseGate";
+
+// This segment resolves session-independent, read-source-dependent data
+// (mock lookup or a live DB query) on every request — never statically
+// cached.
+export const dynamic = "force-dynamic";
 
 export default async function RepairCaseDetailLayout({
   children,
@@ -20,9 +25,15 @@ export default async function RepairCaseDetailLayout({
     return <LocalCaseGate id={id}>{children}</LocalCaseGate>;
   }
 
-  const exists = mockRepairCases.some((candidate) => candidate.id === id);
+  // Read-source-aware: resolves against mock-data.ts in mock mode, or
+  // queries PostgreSQL in database mode (request-deduplicated via
+  // resolveRepairCaseForServer's cache() — [id]/page.tsx and the other
+  // tabs resolving the same id in this request reuse this same result
+  // rather than re-querying). A genuine DB failure is not caught here —
+  // it propagates to repair-cases/error.tsx, never becomes notFound().
+  const resolved = await resolveRepairCaseForServer(id);
 
-  if (!exists) {
+  if (!resolved) {
     notFound();
   }
 

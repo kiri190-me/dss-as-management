@@ -29,7 +29,7 @@ import { isLocalId, type LocalRepairCase } from "./local-types";
  */
 export type ResolvedRepairCase = {
   id: string;
-  source: "MOCK" | "LOCAL_DEMO";
+  source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
   productId: string | null;
   intakeNumber: string;
   workflowType: WorkflowType;

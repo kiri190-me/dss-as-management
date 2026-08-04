@@ -41,7 +41,7 @@ export type ReportHeaderSummaryProps = {
   generatedByName: string | null;
   currentStatusLabel: string;
   currentWorkflowStepLabel: string;
-  source: "MOCK" | "LOCAL_DEMO";
+  source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
   proposedFilename: string;
   isOnHold: boolean;
   isOverdue: boolean;

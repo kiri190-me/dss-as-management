@@ -195,7 +195,7 @@ export type RepairCaseReportData = {
     isOnHold: boolean;
     holdReason: string | null;
     isOverdue: boolean;
-    source: "MOCK" | "LOCAL_DEMO";
+    source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
   };
 
   customer: { customerName: string; endUserName: string | null };

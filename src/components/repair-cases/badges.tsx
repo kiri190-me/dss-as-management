@@ -21,17 +21,27 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`${baseBadgeClass} ${tone}`}>{priorityLabels[priority]}</span>;
 }
 
-export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" }) {
-  if (source !== "LOCAL_DEMO") {
-    return null;
+export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" | "DATABASE" }) {
+  if (source === "LOCAL_DEMO") {
+    return (
+      <span
+        className={`${baseBadgeClass} bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400`}
+      >
+        로컬 데모 데이터
+      </span>
+    );
   }
-  return (
-    <span
-      className={`${baseBadgeClass} bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400`}
-    >
-      로컬 데모 데이터
-    </span>
-  );
+  if (source === "DATABASE") {
+    return (
+      <span
+        className={`${baseBadgeClass} bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400`}
+      >
+        DB
+      </span>
+    );
+  }
+  // MOCK stays unbadged, unchanged from before Stage G-2.
+  return null;
 }
 
 export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {

@@ -2,8 +2,9 @@
 
 import { useMemo } from "react";
 import { DEMO_REFERENCE_DATE } from "../../demo-clock";
+import { mockRepairCases } from "../../mock-data";
 import { isRepairCaseOverdue, type RepairStatus } from "../../types";
-import { resolveAllRepairCases, type ResolvedRepairCase } from "../resolved-repair-case";
+import { toResolvedFromLocal, toResolvedFromMock, type ResolvedRepairCase } from "../resolved-repair-case";
 import { useLocalRepairCases } from "../use-local-repair-cases";
 import { useWorkflowStore } from "./use-workflow-data";
 import type { HoldState, LocalWorkflowState } from "./workflow-types";
@@ -79,8 +80,15 @@ export function useEffectiveRepairCase(resolved: ResolvedRepairCase | null): {
   return { effective, isHydrated: workflowStore.isHydrated, isMalformed: workflowStore.isMalformed };
 }
 
-/** 대시보드/전체 현황처럼 mock+local 전체 목록이 필요한 화면에서 쓰는 단일 진입점이다. */
-export function useEffectiveRepairCases(): {
+/**
+ * Stage G-2: the single reusable primitive every list-style screen must go
+ * through. Takes an explicit, already-resolved "base" case array — the
+ * non-local rows, either Mock (existing behavior) or Database (Stage G-2
+ * list integration) — and layers in browser-local cases + workflow
+ * overrides exactly once. `baseCases` must never itself already contain a
+ * mix of Mock and Database rows; callers choose exactly one source.
+ */
+export function useEffectiveRepairCasesFromBase(baseCases: ResolvedRepairCase[]): {
   cases: EffectiveRepairCase[];
   isHydrated: boolean;
   isMalformed: boolean;
@@ -89,13 +97,29 @@ export function useEffectiveRepairCases(): {
   const workflowStore = useWorkflowStore();
 
   const cases = useMemo(() => {
-    const resolved = resolveAllRepairCases(localCases);
-    return resolved.map((r) => applyWorkflowOverride(r, findOverride(workflowStore.states, r.id)));
-  }, [localCases, workflowStore.states]);
+    const resolvedLocal = localCases.map((c) => toResolvedFromLocal(c));
+    const allResolved = [...baseCases, ...resolvedLocal];
+    return allResolved.map((r) => applyWorkflowOverride(r, findOverride(workflowStore.states, r.id)));
+  }, [baseCases, localCases, workflowStore.states]);
 
   return {
     cases,
     isHydrated: localHydrated && workflowStore.isHydrated,
     isMalformed: workflowStore.isMalformed,
   };
+}
+
+/**
+ * 대시보드/전체 현황(Mock 모드)처럼 mock+local 전체 목록이 필요한 화면에서 쓰는
+ * 기존 공개 진입점이다. Stage G-2 이후에도 동작은 완전히 동일하다 — 내부적으로
+ * mock base case 배열을 한 번 계산해 useEffectiveRepairCasesFromBase에
+ * 위임할 뿐, override 알고리즘을 별도로 복제하지 않는다.
+ */
+export function useEffectiveRepairCases(): {
+  cases: EffectiveRepairCase[];
+  isHydrated: boolean;
+  isMalformed: boolean;
+} {
+  const mockBaseCases = useMemo(() => mockRepairCases.map((c) => toResolvedFromMock(c)), []);
+  return useEffectiveRepairCasesFromBase(mockBaseCases);
 }

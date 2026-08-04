@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { mockCustomers } from "@/lib/domain/mock-data";
-import { useEffectiveRepairCases } from "@/lib/domain/local/workflow/effective-repair-case";
+import { mockCustomers, mockRepairCases } from "@/lib/domain/mock-data";
+import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import { useEffectiveRepairCasesFromBase } from "@/lib/domain/local/workflow/effective-repair-case";
 import {
   applyFilters,
   DEFAULT_FILTERS,
@@ -25,9 +26,26 @@ import Pagination from "./Pagination";
 const DEFAULT_SORT: SortState = { column: "receivedAt", direction: "desc" };
 const DEFAULT_PAGINATION: PaginationState = { page: 1, pageSize: 10 };
 
-export default function RepairCaseListPage() {
+type RepairCaseListPageProps = {
+  /**
+   * Non-local base rows fetched server-side (Stage G-2 database mode).
+   * Undefined means "use existing Mock behavior" — the two must never be
+   * combined, so when this is provided it entirely replaces the Mock base
+   * set rather than adding to it (see effective-repair-case.ts).
+   */
+  serverBaseCases?: ResolvedRepairCase[];
+};
+
+export default function RepairCaseListPage({ serverBaseCases }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
-  const { cases: rows, isHydrated } = useEffectiveRepairCases();
+
+  // Only actually used when serverBaseCases is undefined (Mock mode) — kept
+  // as a plain, unconditional useMemo (not a conditional hook call) so the
+  // hook order below never depends on the serverBaseCases prop.
+  const mockBaseCases = useMemo(() => mockRepairCases.map((c) => toResolvedFromMock(c)), []);
+  const baseCases = serverBaseCases ?? mockBaseCases;
+
+  const { cases: rows, isHydrated } = useEffectiveRepairCasesFromBase(baseCases);
 
   const [filters, setFilters] = useState<Filters>(() =>
     parseInitialFilters(searchParams)

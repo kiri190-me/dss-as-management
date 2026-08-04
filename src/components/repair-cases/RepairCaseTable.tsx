@@ -99,11 +99,9 @@ export default function RepairCaseTable({ rows, sort, onSortChange }: RepairCase
                 >
                   {row.intakeNumber}
                 </Link>
-                {row.source === "LOCAL_DEMO" && (
-                  <span className="ml-1 align-middle">
-                    <SourceBadge source={row.source} />
-                  </span>
-                )}
+                <span className="ml-1 align-middle">
+                  <SourceBadge source={row.source} />
+                </span>
               </td>
               <td className="px-3 py-2 whitespace-nowrap">{row.receivedAt}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.productCategory}</td>

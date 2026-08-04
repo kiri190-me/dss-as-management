@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { mockUsers } from "@/lib/domain/mock-data";
 import { isLocalId } from "@/lib/domain/local/local-types";
-import { resolveMockRepairCaseById } from "@/lib/domain/local/resolved-repair-case";
+import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import ReportScreen from "@/components/repair-cases/report/ReportScreen";
 import LocalReportContent from "@/components/repair-cases/report/LocalReportContent";
@@ -11,6 +11,8 @@ import LocalReportContent from "@/components/repair-cases/report/LocalReportCont
 export const metadata: Metadata = {
   title: "보고서 | DSS A/S 관리 시스템",
 };
+
+export const dynamic = "force-dynamic";
 
 export default async function RepairCaseReportPage({
   params,
@@ -45,7 +47,7 @@ export default async function RepairCaseReportPage({
     return <LocalReportContent repairCaseId={id} generatedByUser={generatedByUser} />;
   }
 
-  const resolved = resolveMockRepairCaseById(id);
+  const resolved = await resolveRepairCaseForServer(id);
   // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는
   // 항상 존재해야 한다. 방어적으로만 남겨둔다(실제 HTTP 404를 그대로 보존한다).
   if (!resolved) {
