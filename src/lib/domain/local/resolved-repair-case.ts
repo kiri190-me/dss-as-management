@@ -41,6 +41,8 @@ export type ResolvedRepairCase = {
   customerRequestedDueDate: string | null;
   internalTargetShipmentDate: string | null;
   actualShipmentDate: string | null;
+  /** Stage E-2 활동 타임라인의 CASE_CREATED 이벤트가 사용한다(등록 처리 시각). */
+  createdAt: string;
   isOverdue: boolean;
   productCategory: string;
   paidOrWarranty: string;
@@ -94,6 +96,7 @@ export function toResolvedFromMock(
     customerRequestedDueDate: repairCase.customerRequestedDueDate,
     internalTargetShipmentDate: repairCase.internalTargetShipmentDate,
     actualShipmentDate: repairCase.actualShipmentDate,
+    createdAt: repairCase.createdAt,
     isOverdue: isRepairCaseOverdue(repairCase, referenceDate),
     productCategory: productCategoryLabels[repairCase.workflowType],
     paidOrWarranty: paidOrWarrantyLabels[repairCase.workflowType],
@@ -139,6 +142,7 @@ export function toResolvedFromLocal(
     customerRequestedDueDate: localCase.customerRequestedDueDate,
     internalTargetShipmentDate: localCase.internalTargetShipmentDate,
     actualShipmentDate: localCase.actualShipmentDate,
+    createdAt: localCase.createdAt,
     isOverdue: isRepairCaseOverdue(localCase, referenceDate),
     productCategory: productCategoryLabels[localCase.workflowType],
     paidOrWarranty: paidOrWarrantyLabels[localCase.workflowType],

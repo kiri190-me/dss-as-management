@@ -1,30 +1,37 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { isLocalId } from "@/lib/domain/local/local-types";
-import { buildWorkHistoryRows } from "@/lib/domain/work-history-rows";
-import WorkHistoryList from "@/components/repair-cases/work-history/WorkHistoryList";
+import { resolveMockRepairCaseById } from "@/lib/domain/local/resolved-repair-case";
+import ActivityTimelineScreen from "@/components/repair-cases/work-history/ActivityTimelineScreen";
+import LocalActivityContent from "@/components/repair-cases/work-history/LocalActivityContent";
 
 export const metadata: Metadata = {
   title: "작업 이력 | DSS A/S 관리 시스템",
 };
 
+/**
+ * Stage E-2: 이 화면은 mockWorkHistories뿐 아니라 로컬 워크플로/승인/첨부파일
+ * 이벤트까지 하나의 타임라인으로 병합해야 하므로(3개 모두 클라이언트 전용
+ * localStorage 소스) approval/files 페이지와 동일한 서버 분기 패턴을 따른다.
+ * 이 스테이지는 쓰기 동작을 추가하지 않으므로 readSession()은 필요 없다.
+ */
 export default async function WorkHistoryPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  // 상위 layout.tsx가 존재 여부를 이미 확인했으므로(notFound() 처리 또는
-  // LocalCaseGate) 여기서는 별도의 존재 확인 없이 바로 이력을 조회한다.
-  //
-  // local- 접수 건은 이 스테이지에서 작업 이력 생성 기능이 구현되지 않았으므로
-  // "항상 빈 배열"이 명시적인 결정이다 — mockWorkHistories를 local id로 조회했을
-  // 때 우연히 빈 배열이 나오는 것에 기대지 않는다.
-  const entries = isLocalId(id) ? [] : buildWorkHistoryRows(id);
 
-  return (
-    <div>
-      <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-zinc-50">작업 이력</h2>
-      <WorkHistoryList entries={entries} />
-    </div>
-  );
+  if (isLocalId(id)) {
+    return <LocalActivityContent id={id} />;
+  }
+
+  const resolved = resolveMockRepairCaseById(id);
+  // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는
+  // 항상 존재해야 한다. 방어적으로만 남겨둔다.
+  if (!resolved) {
+    notFound();
+  }
+
+  return <ActivityTimelineScreen resolved={resolved} />;
 }
