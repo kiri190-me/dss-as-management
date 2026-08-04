@@ -1,9 +1,9 @@
 import Link from "next/link";
-import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
-import { OverdueBadge, PriorityBadge, SourceBadge, StatusBadge } from "./badges";
+import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
+import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
 
 type RepairCaseCardListProps = {
-  rows: ResolvedRepairCase[];
+  rows: EffectiveRepairCase[];
 };
 
 export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
@@ -19,11 +19,13 @@ export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">
               {row.intakeNumber}
             </span>
-            <StatusBadge status={row.status} />
+            <StatusBadge status={row.effectiveStatus} />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <PriorityBadge priority={row.priority} />
-            <OverdueBadge isOverdue={row.isOverdue} />
+            <OverdueBadge isOverdue={row.effectiveIsOverdue} />
+            <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
+            <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
             <SourceBadge source={row.source} />
           </div>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">

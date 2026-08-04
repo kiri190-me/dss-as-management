@@ -6,7 +6,7 @@ import {
   type RepairStatus,
   type WorkflowType,
 } from "./types";
-import type { ResolvedRepairCase } from "./local/resolved-repair-case";
+import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
 export type Filters = {
   query: string;
@@ -73,7 +73,7 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   };
 }
 
-function matchesQuery(row: ResolvedRepairCase, query: string): boolean {
+function matchesQuery(row: EffectiveRepairCase, query: string): boolean {
   const haystack = [
     row.intakeNumber,
     row.customerName,
@@ -88,22 +88,27 @@ function matchesQuery(row: ResolvedRepairCase, query: string): boolean {
   return haystack.includes(query);
 }
 
-function matchesShipmentMonth(row: ResolvedRepairCase, month: string): boolean {
-  if (row.status !== "SHIPMENT_COMPLETED" || !row.actualShipmentDate) {
+function matchesShipmentMonth(row: EffectiveRepairCase, month: string): boolean {
+  if (row.effectiveStatus !== "SHIPMENT_COMPLETED" || !row.effectiveActualShipmentDate) {
     return false;
   }
-  return row.actualShipmentDate.slice(0, 7) === month;
+  return row.effectiveActualShipmentDate.slice(0, 7) === month;
 }
 
-export function applyFilters(rows: ResolvedRepairCase[], filters: Filters): ResolvedRepairCase[] {
+/**
+ * Stage E-1부터는 원본 status/isOverdue/actualShipmentDate가 아니라
+ * effectiveStatus/effectiveIsOverdue/effectiveActualShipmentDate로 필터링한다
+ * — 워크플로 재정의가 있으면 그 결과가, 없으면 원본과 동일한 값이 반영된다.
+ */
+export function applyFilters(rows: EffectiveRepairCase[], filters: Filters): EffectiveRepairCase[] {
   const query = filters.query.trim().toLowerCase();
 
   return rows.filter((row) => {
-    if (filters.status !== "ALL" && row.status !== filters.status) return false;
+    if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) return false;
     if (filters.workflowType !== "ALL" && row.workflowType !== filters.workflowType) return false;
     if (filters.customerId !== "ALL" && row.customerId !== filters.customerId) return false;
     if (filters.priority !== "ALL" && row.priority !== filters.priority) return false;
-    if (filters.overdueOnly && !row.isOverdue) return false;
+    if (filters.overdueOnly && !row.effectiveIsOverdue) return false;
     if (filters.shipmentMonth && !matchesShipmentMonth(row, filters.shipmentMonth)) return false;
     if (query && !matchesQuery(row, query)) return false;
     return true;
@@ -132,7 +137,7 @@ function compareNullableString(a: string | null, b: string | null): number {
   return a.localeCompare(b);
 }
 
-export function sortRows(rows: ResolvedRepairCase[], sort: SortState): ResolvedRepairCase[] {
+export function sortRows(rows: EffectiveRepairCase[], sort: SortState): EffectiveRepairCase[] {
   const sorted = [...rows].sort((a, b) => {
     switch (sort.column) {
       case "intakeNumber":
@@ -142,7 +147,7 @@ export function sortRows(rows: ResolvedRepairCase[], sort: SortState): ResolvedR
       case "customerName":
         return a.customerName.localeCompare(b.customerName);
       case "status":
-        return REPAIR_STATUS_CODES.indexOf(a.status) - REPAIR_STATUS_CODES.indexOf(b.status);
+        return REPAIR_STATUS_CODES.indexOf(a.effectiveStatus) - REPAIR_STATUS_CODES.indexOf(b.effectiveStatus);
       case "priority":
         return PRIORITY_CODES.indexOf(a.priority) - PRIORITY_CODES.indexOf(b.priority);
       case "customerRequestedDueDate":

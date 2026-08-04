@@ -1,6 +1,6 @@
 import { computeWorkflowProgress } from "@/lib/domain/workflow-progress";
 import { workflowSteps } from "@/lib/domain/mock-data";
-import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import type { WorkflowType } from "@/lib/domain/types";
 
 const stateLabels = {
   completed: "완료",
@@ -14,12 +14,20 @@ const stateClasses = {
   future: "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
 } as const;
 
-export default function WorkflowProgress({ resolved }: { resolved: ResolvedRepairCase }) {
-  const result = computeWorkflowProgress(
-    resolved.workflowType,
-    resolved.currentWorkflowStepKey,
-    workflowSteps
-  );
+/**
+ * Stage E-1부터 currentWorkflowStepKey는 원본 ResolvedRepairCase가 아니라
+ * 호출부(RepairCaseDetailView)가 effective-repair-case.ts로 계산한 유효
+ * 단계를 명시적으로 전달한다 — 이 컴포넌트 자체는 워크플로 재정의를 알지
+ * 못한다(단일 병합 지점 원칙을 지키기 위해 resolved 전체를 받지 않는다).
+ */
+export default function WorkflowProgress({
+  workflowType,
+  currentWorkflowStepKey,
+}: {
+  workflowType: WorkflowType;
+  currentWorkflowStepKey: string;
+}) {
+  const result = computeWorkflowProgress(workflowType, currentWorkflowStepKey, workflowSteps);
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

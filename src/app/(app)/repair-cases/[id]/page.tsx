@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { readSession } from "@/lib/auth/session";
+import { mockUsers } from "@/lib/domain/mock-data";
 import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveAllRepairCases, resolveMockRepairCaseById } from "@/lib/domain/local/resolved-repair-case";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
+import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 import LocalRepairCaseDetailContent from "@/components/repair-cases/detail/LocalRepairCaseDetailContent";
 
@@ -17,8 +20,25 @@ export default async function RepairCaseDetailPage({
 }) {
   const { id } = await params;
 
+  // Stage E-1 워크플로 제어판이 처리 주체(actingUser)를 필요로 하므로
+  // approval/files 페이지와 동일한 기존 readSession 패턴을 그대로 재사용한다.
+  const session = await readSession();
+  if (!session) {
+    redirect("/login");
+  }
+
+  const currentMockUser = mockUsers.find((u) => u.id === session.userId);
+  const actingUser: ActingUser | null = currentMockUser
+    ? {
+        id: currentMockUser.id,
+        name: currentMockUser.name,
+        role: currentMockUser.role,
+        approvalStatus: currentMockUser.approvalStatus,
+      }
+    : null;
+
   if (isLocalId(id)) {
-    return <LocalRepairCaseDetailContent id={id} />;
+    return <LocalRepairCaseDetailContent id={id} actingUser={actingUser} />;
   }
 
   const resolved = resolveMockRepairCaseById(id);
@@ -34,5 +54,5 @@ export default async function RepairCaseDetailPage({
   // 동일하다).
   const related = findProductHistoryMatches(resolveAllRepairCases([]), resolved);
 
-  return <RepairCaseDetailView resolved={resolved} related={related} />;
+  return <RepairCaseDetailView resolved={resolved} related={related} actingUser={actingUser} />;
 }

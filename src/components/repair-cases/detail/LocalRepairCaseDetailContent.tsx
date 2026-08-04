@@ -8,8 +8,15 @@ import RegisteredSuccessNotice from "@/components/repair-cases/detail/Registered
 import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
 import { resolveAllRepairCases, resolveRepairCaseById } from "@/lib/domain/local/resolved-repair-case";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
+import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 
-export default function LocalRepairCaseDetailContent({ id }: { id: string }) {
+export default function LocalRepairCaseDetailContent({
+  id,
+  actingUser,
+}: {
+  id: string;
+  actingUser: ActingUser | null;
+}) {
   const { cases: localCases, isHydrated } = useLocalRepairCases();
 
   if (!isHydrated) {
@@ -29,7 +36,7 @@ export default function LocalRepairCaseDetailContent({ id }: { id: string }) {
       <Suspense fallback={null}>
         <RegisteredSuccessNotice id={id} intakeNumber={resolved.intakeNumber} />
       </Suspense>
-      <RepairCaseDetailView resolved={resolved} related={related} />
+      <RepairCaseDetailView resolved={resolved} related={related} actingUser={actingUser} />
     </div>
   );
 }

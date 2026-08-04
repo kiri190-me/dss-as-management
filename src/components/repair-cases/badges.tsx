@@ -46,3 +46,26 @@ export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
     </span>
   );
 }
+
+/**
+ * Stage E-1: 워크플로 보류(holdState)는 exceptionStatus·isOverdue와 완전히
+ * 별개의 축이다 — 이 배지는 절대 다른 배지와 문자열/의미를 합치지 않는다.
+ */
+export function HoldBadge({ isOnHold }: { isOnHold: boolean }) {
+  if (!isOnHold) return null;
+  return (
+    <span className={`${baseBadgeClass} bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300`}>
+      보류 중
+    </span>
+  );
+}
+
+/** 해당 접수 건에 Stage E-1 로컬 워크플로 재정의가 적용되어 있음을 표시한다. */
+export function WorkflowOverrideBadge({ hasOverride }: { hasOverride: boolean }) {
+  if (!hasOverride) return null;
+  return (
+    <span className={`${baseBadgeClass} bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-400`}>
+      로컬 워크플로 재정의
+    </span>
+  );
+}

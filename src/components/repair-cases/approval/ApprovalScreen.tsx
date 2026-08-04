@@ -9,8 +9,15 @@ import ApprovalEventTimeline from "./ApprovalEventTimeline";
 import { useApprovalStore, useShipmentDelegations } from "@/lib/domain/local/approval/use-approval-data";
 import { findRecordFor, isInspectionApprovedFor, type ActingUser } from "@/lib/domain/local/approval/transitions";
 import { getKyosanEvidenceSnapshot } from "@/lib/domain/local/approval/kyosan-evidence";
+import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 
+/**
+ * Stage E-1부터 검수/승인 탭 헤더도 워크플로 재정의 효과 상태를 반영해야
+ * 하므로(원본 상태만 보여주고 방치하지 않는다) useEffectiveRepairCase로
+ * 계산한 effective를 ApprovalHeaderSummary에 전달한다 — 승인 로직 자체는
+ * 여전히 원본 resolved.id(=effective.id와 동일한 접수 건 id)만 사용한다.
+ */
 export default function ApprovalScreen({
   resolved,
   actingUser,
@@ -20,8 +27,9 @@ export default function ApprovalScreen({
 }) {
   const approvalStore = useApprovalStore();
   const delegationStore = useShipmentDelegations();
+  const { effective, isHydrated: workflowHydrated } = useEffectiveRepairCase(resolved);
 
-  if (!approvalStore.isHydrated || !delegationStore.isHydrated) {
+  if (!approvalStore.isHydrated || !delegationStore.isHydrated || !workflowHydrated || !effective) {
     return <LoadingNotice />;
   }
 
@@ -45,7 +53,7 @@ export default function ApprovalScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <ApprovalHeaderSummary resolved={resolved} />
+      <ApprovalHeaderSummary resolved={effective} />
 
       {(approvalStore.isMalformed || delegationStore.isMalformed) && (
         <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">

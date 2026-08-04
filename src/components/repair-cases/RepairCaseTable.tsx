@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
-import { OverdueBadge, PriorityBadge, SourceBadge, StatusBadge } from "./badges";
+import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
 
 type RepairCaseTableProps = {
-  rows: ResolvedRepairCase[];
+  rows: EffectiveRepairCase[];
   sort: SortState;
   onSortChange: (column: SortColumn) => void;
 };
@@ -114,7 +114,11 @@ export default function RepairCaseTable({ rows, sort, onSortChange }: RepairCase
               <td className="px-3 py-2 whitespace-nowrap">{row.customerName}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.endUserName ?? "-"}</td>
               <td className="px-3 py-2 whitespace-nowrap">
-                <StatusBadge status={row.status} />
+                <div className="flex flex-wrap items-center gap-1">
+                  <StatusBadge status={row.effectiveStatus} />
+                  <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
+                  <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
+                </div>
               </td>
               <td className="px-3 py-2 whitespace-nowrap">
                 <PriorityBadge priority={row.priority} />
@@ -123,7 +127,7 @@ export default function RepairCaseTable({ rows, sort, onSortChange }: RepairCase
               <td className="px-3 py-2 whitespace-nowrap">{row.customerRequestedDueDate ?? "-"}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.internalTargetShipmentDate ?? "-"}</td>
               <td className="px-3 py-2 whitespace-nowrap">
-                <OverdueBadge isOverdue={row.isOverdue} />
+                <OverdueBadge isOverdue={row.effectiveIsOverdue} />
               </td>
               <td className="px-3 py-2 whitespace-nowrap">
                 <Link

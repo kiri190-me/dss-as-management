@@ -5,16 +5,12 @@ import SummaryCard from "@/components/dashboard/SummaryCard";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import { computeDashboardSummary } from "@/lib/domain/dashboard-metrics";
 import { DEMO_REFERENCE_DATE, formatYearMonth } from "@/lib/domain/demo-clock";
-import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
-import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
+import { useEffectiveRepairCases } from "@/lib/domain/local/workflow/effective-repair-case";
 
 export default function DashboardContent() {
-  const { cases: localCases, isHydrated } = useLocalRepairCases();
+  const { cases, isHydrated } = useEffectiveRepairCases();
 
-  const summary = useMemo(() => {
-    const resolved = resolveAllRepairCases(localCases, DEMO_REFERENCE_DATE);
-    return computeDashboardSummary(resolved, DEMO_REFERENCE_DATE);
-  }, [localCases]);
+  const summary = useMemo(() => computeDashboardSummary(cases, DEMO_REFERENCE_DATE), [cases]);
 
   const shipmentMonth = formatYearMonth(DEMO_REFERENCE_DATE);
 

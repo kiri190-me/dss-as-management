@@ -21,6 +21,7 @@ import {
   summarizeAttachments,
   type AttachmentFilters as AttachmentFiltersState,
 } from "@/lib/domain/local/attachments/filters";
+import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import AttachmentCardList from "./AttachmentCardList";
@@ -46,6 +47,7 @@ export default function FilesScreen({
   actingUser: ActingUser | null;
 }) {
   const attachmentStore = useAttachmentStore();
+  const { effective, isHydrated: workflowHydrated } = useEffectiveRepairCase(resolved);
 
   const [filters, setFilters] = useState<AttachmentFiltersState>(DEFAULT_ATTACHMENT_FILTERS);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
@@ -79,7 +81,7 @@ export default function FilesScreen({
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [caseRecords]);
 
-  if (!attachmentStore.isHydrated) {
+  if (!attachmentStore.isHydrated || !workflowHydrated || !effective) {
     return <LoadingNotice />;
   }
 
@@ -191,7 +193,7 @@ export default function FilesScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <FilesHeaderSummary resolved={resolved} />
+      <FilesHeaderSummary resolved={effective} />
       <StorageDisclaimer />
 
       {attachmentStore.isMalformed && (

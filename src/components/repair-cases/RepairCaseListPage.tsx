@@ -3,8 +3,7 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { mockCustomers } from "@/lib/domain/mock-data";
-import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
-import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
+import { useEffectiveRepairCases } from "@/lib/domain/local/workflow/effective-repair-case";
 import {
   applyFilters,
   DEFAULT_FILTERS,
@@ -28,15 +27,13 @@ const DEFAULT_PAGINATION: PaginationState = { page: 1, pageSize: 10 };
 
 export default function RepairCaseListPage() {
   const searchParams = useSearchParams();
-  const { cases: localCases, isHydrated } = useLocalRepairCases();
+  const { cases: rows, isHydrated } = useEffectiveRepairCases();
 
   const [filters, setFilters] = useState<Filters>(() =>
     parseInitialFilters(searchParams)
   );
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pagination, setPagination] = useState<PaginationState>(DEFAULT_PAGINATION);
-
-  const rows = useMemo(() => resolveAllRepairCases(localCases), [localCases]);
 
   const filteredRows = useMemo(() => applyFilters(rows, filters), [rows, filters]);
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
