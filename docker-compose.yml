@@ -1,0 +1,44 @@
+services:
+  db-dev:
+    image: postgres:16.14-alpine3.24
+    container_name: dss-as-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dss_app
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD}
+      POSTGRES_DB: dss_as_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - dss-as-postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dss_app -d dss_as_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-staging:
+    image: postgres:16.14-alpine3.24
+    container_name: dss-as-postgres-staging
+    restart: unless-stopped
+    profiles:
+      - staging
+    environment:
+      POSTGRES_USER: dss_app
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD}
+      POSTGRES_DB: dss_as_staging
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - dss-as-postgres-staging-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dss_app -d dss_as_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dss-as-postgres-dev-data:
+    name: dss-as-postgres-dev-data
+  dss-as-postgres-staging-data:
+    name: dss-as-postgres-staging-data
