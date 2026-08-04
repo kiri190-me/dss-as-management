@@ -6,7 +6,7 @@ import {
   type RepairStatus,
   type WorkflowType,
 } from "./types";
-import type { RepairCaseRow } from "./repair-case-rows";
+import type { ResolvedRepairCase } from "./local/resolved-repair-case";
 
 export type Filters = {
   query: string;
@@ -73,7 +73,7 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   };
 }
 
-function matchesQuery(row: RepairCaseRow, query: string): boolean {
+function matchesQuery(row: ResolvedRepairCase, query: string): boolean {
   const haystack = [
     row.intakeNumber,
     row.customerName,
@@ -88,14 +88,14 @@ function matchesQuery(row: RepairCaseRow, query: string): boolean {
   return haystack.includes(query);
 }
 
-function matchesShipmentMonth(row: RepairCaseRow, month: string): boolean {
+function matchesShipmentMonth(row: ResolvedRepairCase, month: string): boolean {
   if (row.status !== "SHIPMENT_COMPLETED" || !row.actualShipmentDate) {
     return false;
   }
   return row.actualShipmentDate.slice(0, 7) === month;
 }
 
-export function applyFilters(rows: RepairCaseRow[], filters: Filters): RepairCaseRow[] {
+export function applyFilters(rows: ResolvedRepairCase[], filters: Filters): ResolvedRepairCase[] {
   const query = filters.query.trim().toLowerCase();
 
   return rows.filter((row) => {
@@ -132,7 +132,7 @@ function compareNullableString(a: string | null, b: string | null): number {
   return a.localeCompare(b);
 }
 
-export function sortRows(rows: RepairCaseRow[], sort: SortState): RepairCaseRow[] {
+export function sortRows(rows: ResolvedRepairCase[], sort: SortState): ResolvedRepairCase[] {
   const sorted = [...rows].sort((a, b) => {
     switch (sort.column) {
       case "intakeNumber":

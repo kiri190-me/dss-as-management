@@ -268,7 +268,7 @@ export type WorkflowStep = {
  * 포함하지 않는다.
  */
 export function isRepairCaseOverdue(
-  repairCase: RepairCase,
+  repairCase: Pick<RepairCase, "status" | "internalTargetShipmentDate">,
   today: Date = new Date()
 ): boolean {
   if (repairCase.status === "SHIPMENT_COMPLETED") {

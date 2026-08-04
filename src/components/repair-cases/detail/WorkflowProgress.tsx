@@ -1,6 +1,6 @@
 import { computeWorkflowProgress } from "@/lib/domain/workflow-progress";
 import { workflowSteps } from "@/lib/domain/mock-data";
-import type { RepairCase } from "@/lib/domain/types";
+import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 
 const stateLabels = {
   completed: "완료",
@@ -14,10 +14,10 @@ const stateClasses = {
   future: "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
 } as const;
 
-export default function WorkflowProgress({ repairCase }: { repairCase: RepairCase }) {
+export default function WorkflowProgress({ resolved }: { resolved: ResolvedRepairCase }) {
   const result = computeWorkflowProgress(
-    repairCase.workflowType,
-    repairCase.currentWorkflowStepKey,
+    resolved.workflowType,
+    resolved.currentWorkflowStepKey,
     workflowSteps
   );
 

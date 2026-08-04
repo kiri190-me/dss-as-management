@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import type { RepairCaseRow } from "@/lib/domain/repair-case-rows";
+import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
-import { OverdueBadge, PriorityBadge, StatusBadge } from "./badges";
+import { OverdueBadge, PriorityBadge, SourceBadge, StatusBadge } from "./badges";
 
 type RepairCaseTableProps = {
-  rows: RepairCaseRow[];
+  rows: ResolvedRepairCase[];
   sort: SortState;
   onSortChange: (column: SortColumn) => void;
 };
@@ -99,6 +99,11 @@ export default function RepairCaseTable({ rows, sort, onSortChange }: RepairCase
                 >
                   {row.intakeNumber}
                 </Link>
+                {row.source === "LOCAL_DEMO" && (
+                  <span className="ml-1 align-middle">
+                    <SourceBadge source={row.source} />
+                  </span>
+                )}
               </td>
               <td className="px-3 py-2 whitespace-nowrap">{row.receivedAt}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.productCategory}</td>

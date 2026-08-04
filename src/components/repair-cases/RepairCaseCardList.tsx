@@ -1,9 +1,9 @@
 import Link from "next/link";
-import type { RepairCaseRow } from "@/lib/domain/repair-case-rows";
-import { OverdueBadge, PriorityBadge, StatusBadge } from "./badges";
+import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import { OverdueBadge, PriorityBadge, SourceBadge, StatusBadge } from "./badges";
 
 type RepairCaseCardListProps = {
-  rows: RepairCaseRow[];
+  rows: ResolvedRepairCase[];
 };
 
 export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
@@ -24,6 +24,7 @@ export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
           <div className="flex flex-wrap items-center gap-2">
             <PriorityBadge priority={row.priority} />
             <OverdueBadge isOverdue={row.isOverdue} />
+            <SourceBadge source={row.source} />
           </div>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <div>

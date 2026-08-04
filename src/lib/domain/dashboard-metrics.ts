@@ -1,8 +1,5 @@
 import { DEMO_REFERENCE_DATE } from "./demo-clock";
-import {
-  isRepairCaseOverdue,
-  type RepairCase,
-} from "./types";
+import type { ResolvedRepairCase } from "./local/resolved-repair-case";
 
 export type DashboardSummary = {
   currentIntakeCount: number;
@@ -26,14 +23,14 @@ function isSameYearMonth(dateStr: string, reference: Date): boolean {
 }
 
 /**
- * 대시보드의 10개 카드는 전부 이 함수를 통해 mockRepairCases로부터
- * 계산되며, 어떤 카드 수치도 별도로 하드코딩하지 않는다.
+ * 대시보드의 10개 카드는 전부 이 함수를 통해 ResolvedRepairCase[](mock +
+ * 로컬 데모 병합)로부터 계산되며, 어떤 카드 수치도 별도로 하드코딩하지 않는다.
  */
 export function computeDashboardSummary(
-  cases: RepairCase[],
+  cases: ResolvedRepairCase[],
   referenceDate: Date = DEMO_REFERENCE_DATE
 ): DashboardSummary {
-  const countByStatus = (status: RepairCase["status"]) =>
+  const countByStatus = (status: ResolvedRepairCase["status"]) =>
     cases.filter((c) => c.status === status).length;
 
   return {
@@ -51,6 +48,6 @@ export function computeDashboardSummary(
         c.actualShipmentDate !== null &&
         isSameYearMonth(c.actualShipmentDate, referenceDate)
     ).length,
-    overdueCount: cases.filter((c) => isRepairCaseOverdue(c, referenceDate)).length,
+    overdueCount: cases.filter((c) => c.isOverdue).length,
   };
 }

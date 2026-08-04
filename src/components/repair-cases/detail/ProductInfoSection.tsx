@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { StatusBadge } from "@/components/repair-cases/badges";
-import { productCategoryLabels } from "@/lib/domain/types";
-import type { RepairCaseDetail } from "@/lib/domain/repair-case-detail";
+import { StatusBadge, SourceBadge } from "@/components/repair-cases/badges";
+import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -12,23 +12,27 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function ProductInfoSection({ detail }: { detail: RepairCaseDetail }) {
-  const { repairCase, modelName, lotNumber, serialNumber, relatedCases } = detail;
-
+export default function ProductInfoSection({
+  resolved,
+  related,
+}: {
+  resolved: ResolvedRepairCase;
+  related: RelatedMatch[];
+}) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">제품 정보</h2>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-        <Field label="제품 구분" value={productCategoryLabels[repairCase.workflowType]} />
-        <Field label="Model" value={modelName} />
-        <Field label="L/N" value={lotNumber} />
-        <Field label="S/N" value={serialNumber} />
+        <Field label="제품 구분" value={resolved.productCategory} />
+        <Field label="Model" value={resolved.modelName} />
+        <Field label="L/N" value={resolved.lotNumber} />
+        <Field label="S/N" value={resolved.serialNumber} />
       </dl>
 
       <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        {relatedCases.length > 0 ? (
+        {related.length > 0 ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            이 제품의 과거 A/S 이력: {relatedCases.length}건
+            이 제품의 과거 A/S 이력: {related.length}건
           </p>
         ) : (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -36,29 +40,31 @@ export default function ProductInfoSection({ detail }: { detail: RepairCaseDetai
           </p>
         )}
         <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-          데모에서는 동일한 모의 제품 ID(productId)를 가지면서 접수일이 더
-          이른 접수 건만 단순 매칭한 것이며, 실제 운영 매칭 로직이 아닙니다.
+          데모 매칭 기준: 모의 데이터끼리는 동일 제품 ID로, 로컬 데모 데이터가
+          포함된 비교는 정규화된 Model + L/N + S/N 일치로 매칭합니다. 실제
+          운영 매칭 로직이 아닙니다.
         </p>
-        {relatedCases.length > 0 && (
+        {related.length > 0 && (
           <ul className="mt-2 flex flex-col gap-2">
-            {relatedCases.map((related) => (
-              <li key={related.id}>
+            {related.map((item) => (
+              <li key={item.id}>
                 <Link
-                  href={`/repair-cases/${related.id}`}
+                  href={`/repair-cases/${item.id}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-100 p-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
                 >
-                  <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                    {related.intakeNumber}
+                  <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-50">
+                    {item.intakeNumber}
+                    <SourceBadge source={item.source} />
                   </span>
                   <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    접수일 {related.receivedAt}
+                    접수일 {item.receivedAt}
                   </span>
-                  {related.status === "SHIPMENT_COMPLETED" && related.actualShipmentDate ? (
+                  {item.status === "SHIPMENT_COMPLETED" && item.actualShipmentDate ? (
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      출하 완료 {related.actualShipmentDate}
+                      출하 완료 {item.actualShipmentDate}
                     </span>
                   ) : (
-                    <StatusBadge status={related.status} />
+                    <StatusBadge status={item.status} />
                   )}
                 </Link>
               </li>

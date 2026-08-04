@@ -21,6 +21,19 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`${baseBadgeClass} ${tone}`}>{priorityLabels[priority]}</span>;
 }
 
+export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" }) {
+  if (source !== "LOCAL_DEMO") {
+    return null;
+  }
+  return (
+    <span
+      className={`${baseBadgeClass} bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400`}
+    >
+      로컬 데모 데이터
+    </span>
+  );
+}
+
 export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
   if (!isOverdue) {
     return <span className="text-xs text-zinc-500 dark:text-zinc-400">정상</span>;
