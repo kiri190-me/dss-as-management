@@ -15,6 +15,13 @@
       "when": 1785863089174,
       "tag": "0001_numerous_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785864514844,
+      "tag": "0002_lazy_robbie_robertson",
+      "breakpoints": true
     }
   ]
 }

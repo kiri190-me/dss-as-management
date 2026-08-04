@@ -57,6 +57,17 @@ import { exceptionStatuses, workflowSteps, workflowVersions } from "./workflow";
  * work-history fields, approval fields. The flat `status` (RepairStatus)
  * field is also excluded — authoritative state is current_workflow_step_id
  * (+ nullable exception_status_id) instead.
+ *
+ * `internal_target_inspection_completion_date` / `delay_reason` (Stage G-3R
+ * Batch 1): both nullable, no default, matching the same intake-field
+ * convention as every other optional column here. Validated at read/write
+ * time in a later batch — not enforced by any DB constraint here.
+ *
+ * `part_number` (products table) and `reason_for_removal` (this table) are
+ * retained per Stage G-3R's approved removed-field policy: the new-intake
+ * UI stops collecting them, but the columns themselves are never dropped or
+ * altered — both are already nullable and, as of this batch, still hold
+ * `NULL` in every existing row.
  */
 export const repairCases = pgTable(
   "repair_cases",
@@ -93,8 +104,12 @@ export const repairCases = pgTable(
     ),
     receivedAt: date("received_at").notNull(),
     customerRequestedDueDate: date("customer_requested_due_date"),
+    internalTargetInspectionCompletionDate: date(
+      "internal_target_inspection_completion_date"
+    ),
     internalTargetShipmentDate: date("internal_target_shipment_date"),
     actualShipmentDate: date("actual_shipment_date"),
+    delayReason: text("delay_reason"),
     isLocked: boolean("is_locked").notNull().default(false),
     // Full free text from the intake UI. Nullable (not "") — "not entered"
     // must stay distinguishable from "entered as empty".
