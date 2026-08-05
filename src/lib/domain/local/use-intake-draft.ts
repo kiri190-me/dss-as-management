@@ -9,6 +9,7 @@ import {
   writeDraft,
   type IntakeDraftData,
 } from "./draft-storage";
+import { getOrCreateIntakeIdempotencyKey, resetIntakeIdempotencyKey } from "./intake-idempotency-key";
 
 const AUTO_SAVE_DELAY_MS = 500;
 
@@ -34,6 +35,7 @@ export function useIntakeDraft() {
   const [initial] = useState(() => readDraft());
   const [draft, setDraftState] = useState<IntakeDraftData>(initial.draft);
   const [savedAtIso, setSavedAtIso] = useState<string | null>(initial.savedAt);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => getOrCreateIntakeIdempotencyKey());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstRender = useRef(true);
 
@@ -62,6 +64,10 @@ export function useIntakeDraft() {
     clearDraft();
     setDraftState(createDefaultDraft());
     setSavedAtIso(null);
+    // A new draft starts here (successful submit or explicit "지우기") — the
+    // old key must never be reused by whatever the user types next.
+    resetIntakeIdempotencyKey();
+    setIdempotencyKey(getOrCreateIntakeIdempotencyKey());
   }, []);
 
   return {
@@ -70,5 +76,6 @@ export function useIntakeDraft() {
     isEmpty: isDraftEmpty(draft),
     savedAtLabel: formatSavedAtLabel(savedAtIso),
     clear,
+    idempotencyKey,
   };
 }

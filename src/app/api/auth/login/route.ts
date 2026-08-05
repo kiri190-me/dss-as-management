@@ -6,6 +6,9 @@ import {
   SESSION_MAX_AGE_SECONDS,
 } from "@/lib/auth/session";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
+import { getAuthSource } from "@/lib/config/auth-source";
+import { resolveDbLogin } from "@/lib/auth/db-login";
+import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
 
 // 데모 전용 로그인 라우트다. DEMO_LOGIN_ENABLED가 정확히 "true"일 때만
 // 동작한다. 운영 환경에서는 절대 활성화해서는 안 되며, Kakao OAuth/회사
@@ -30,20 +33,37 @@ export async function POST(request: NextRequest) {
   }
 
   const formData = await request.formData();
-  const userId = formData.get("userId");
+  const authSource = getAuthSource();
 
-  if (typeof userId !== "string") {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+  let sessionUser: { id: string; role: Role; approvalStatus: AccountApprovalStatus };
+
+  if (authSource === "database") {
+    const email = formData.get("email");
+    if (typeof email !== "string") {
+      return NextResponse.redirect(new URL("/login", request.url), 303);
+    }
+    const loginResult = await resolveDbLogin(email);
+    if (loginResult.outcome !== "SESSION") {
+      return NextResponse.redirect(new URL("/login", request.url), 303);
+    }
+    // loginResult.user.id is always a real users.id UUID here (never a
+    // mock-data id) — see resolveDbLogin/db-login.integration.test.ts.
+    sessionUser = loginResult.user;
+  } else {
+    const userId = formData.get("userId");
+    if (typeof userId !== "string") {
+      return NextResponse.redirect(new URL("/login", request.url), 303);
+    }
+    const user = mockUsers.find((candidate) => candidate.id === userId);
+    if (!user) {
+      return NextResponse.redirect(new URL("/login", request.url), 303);
+    }
+    sessionUser = user;
   }
 
-  const user = mockUsers.find((candidate) => candidate.id === userId);
-  if (!user) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
-  }
-
-  const token = createSessionToken(user);
+  const token = createSessionToken(sessionUser);
   const destination =
-    user.approvalStatus === "APPROVED" ? "/dashboard" : "/pending-approval";
+    sessionUser.approvalStatus === "APPROVED" ? "/dashboard" : "/pending-approval";
 
   const response = NextResponse.redirect(new URL(destination, request.url), 303);
   response.cookies.set(SESSION_COOKIE_NAME, token, {

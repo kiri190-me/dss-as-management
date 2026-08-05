@@ -30,6 +30,7 @@ function selectRepairCaseJoin() {
   return db
     .select({
       id: repairCases.id,
+      version: repairCases.version,
       intakeNumber: repairCases.intakeNumber,
       customerId: repairCases.customerId,
       customerName: customers.name,
@@ -47,6 +48,7 @@ function selectRepairCaseJoin() {
       exceptionStatusCode: exceptionStatuses.code,
       receivedAt: repairCases.receivedAt,
       customerRequestedDueDate: repairCases.customerRequestedDueDate,
+      internalTargetInspectionCompletionDate: repairCases.internalTargetInspectionCompletionDate,
       internalTargetShipmentDate: repairCases.internalTargetShipmentDate,
       actualShipmentDate: repairCases.actualShipmentDate,
       reportedSymptom: repairCases.reportedSymptom,
@@ -98,4 +100,27 @@ export async function getRepairCaseById(id: string): Promise<ResolvedRepairCase 
 
   const row = rows[0];
   return row ? mapRepairCaseRow(row) : null;
+}
+
+export type RepairCaseEditGuard = { id: string; isLocked: boolean };
+
+/**
+ * Minimal, edit-authorization-only lookup — used by update-repair-case.ts's
+ * Server Action to check the shipment-lock policy (PROJECT_REQUIREMENTS.md
+ * "출하 완료 후 수정(잠금 해제) 정책", SECURITY_POLICY.md §2) before
+ * attempting any write, without pulling the full 8-table join just to read
+ * one boolean.
+ */
+export async function getRepairCaseEditGuardById(id: string): Promise<RepairCaseEditGuard | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+
+  const [row] = await db
+    .select({ id: repairCases.id, isLocked: repairCases.isLocked })
+    .from(repairCases)
+    .where(and(eq(repairCases.isDeleted, false), eq(repairCases.id, id)))
+    .limit(1);
+
+  return row ?? null;
 }

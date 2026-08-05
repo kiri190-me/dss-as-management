@@ -18,6 +18,7 @@ import { deriveRepairStatus } from "./repair-status";
  */
 export type RepairCaseJoinRow = {
   id: string;
+  version: number;
   intakeNumber: string;
   customerId: string;
   customerName: string;
@@ -35,6 +36,7 @@ export type RepairCaseJoinRow = {
   exceptionStatusCode: string | null;
   receivedAt: string;
   customerRequestedDueDate: string | null;
+  internalTargetInspectionCompletionDate: string | null;
   internalTargetShipmentDate: string | null;
   actualShipmentDate: string | null;
   reportedSymptom: string | null;
@@ -76,6 +78,7 @@ export function mapRepairCaseRow(
 
   return {
     id: row.id,
+    version: row.version,
     source: "DATABASE",
     productId: row.productId,
     intakeNumber: row.intakeNumber,
@@ -86,6 +89,7 @@ export function mapRepairCaseRow(
     currentWorkflowStepKey: row.currentWorkflowStepKey,
     receivedAt: row.receivedAt,
     customerRequestedDueDate: row.customerRequestedDueDate,
+    internalTargetInspectionCompletionDate: row.internalTargetInspectionCompletionDate,
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     actualShipmentDate: row.actualShipmentDate,
     createdAt: createdAtIso,

@@ -17,6 +17,9 @@ import { submitNewLocalCase, type IntakeSubmissionInput } from "@/lib/domain/loc
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { findProductHistoryMatchesForDraft } from "@/lib/domain/local/product-history-match";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
+import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
+import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
+import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import DerivedProductFields from "./DerivedProductFields";
 import ProductHistoryNotice from "./ProductHistoryNotice";
 import ClearDraftDialog from "./ClearDraftDialog";
@@ -87,23 +90,58 @@ const FIELD_ORDER: FieldKey[] = [
   "serialNumber",
 ];
 
-export default function IntakeFormInner() {
+type IntakeFormInnerProps = {
+  writeSource: "local" | "database";
+  referenceData: IntakeReferenceData | null;
+};
+
+// Server Action result codes → Korean message. Field-attributable codes
+// also populate `errors` via fieldErrors so the existing inline per-field
+// error UI (and focusFirstInvalid) works unchanged for server-detected
+// problems too, not just client-side validateDraft() failures.
+const RESULT_CODE_MESSAGES: Record<CreateRepairCaseResultCode, string> = {
+  VALIDATION_ERROR: "입력값을 확인해 주세요.",
+  UNAUTHORIZED: "로그인이 필요합니다. 다시 로그인해 주세요.",
+  FORBIDDEN: "A/S 접수 등록 권한이 없습니다.",
+  REFERENCE_NOT_FOUND: "선택한 값을 확인할 수 없습니다. 다시 선택해 주세요.",
+  REFERENCE_MISMATCH: "선택한 End-User가 고객사와 일치하지 않습니다. 다시 선택해 주세요.",
+  ENGINEER_NOT_ALLOWED: "선택한 담당 엔지니어는 배정할 수 없습니다. 다시 선택해 주세요.",
+  WORKFLOW_NOT_ALLOWED: "선택한 워크플로를 사용할 수 없습니다.",
+  INTAKE_SEQUENCE_EXHAUSTED:
+    "선택한 달의 인수번호를 모두 사용했습니다(99건 초과). 다른 인수일을 선택해 주세요.",
+  CONFLICT: "저장 중 충돌이 발생했습니다. 다시 시도해 주세요.",
+  DATABASE_UNAVAILABLE: "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  SUBMISSION_IN_PROGRESS: "이전 제출이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.",
+};
+
+export default function IntakeFormInner({ writeSource, referenceData }: IntakeFormInnerProps) {
   const router = useRouter();
   const { cases: localCases } = useLocalRepairCases();
-  const { draft, updateDraft, isEmpty, savedAtLabel, clear } = useIntakeDraft();
+  const { draft, updateDraft, isEmpty, savedAtLabel, clear, idempotencyKey } = useIntakeDraft();
 
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
   const fieldRefs = useRef<Partial<Record<FieldKey, HTMLElement | null>>>({});
 
+  // Database mode must offer real database rows (UUID-keyed) — the mock
+  // string IDs (mockCustomers/mockEndUsers/mockUsers, e.g. "c-001") do not
+  // exist in Postgres at all. Local mode keeps the exact original data
+  // source (referenceData is always null in that mode).
+  const customerOptions = referenceData ? referenceData.customers : mockCustomers;
+  const allEndUserOptions = referenceData ? referenceData.endUsers : mockEndUsers;
+
   const eligibleEngineers = useMemo(
-    () => mockUsers.filter((u) => u.role === "AS_ENGINEER" && u.approvalStatus === "APPROVED"),
-    []
+    () =>
+      referenceData
+        ? referenceData.engineers
+        : mockUsers.filter((u) => u.role === "AS_ENGINEER" && u.approvalStatus === "APPROVED"),
+    [referenceData]
   );
   const availableEndUsers = useMemo(
-    () => mockEndUsers.filter((e) => e.customerId === draft.customerId),
-    [draft.customerId]
+    () => allEndUserOptions.filter((e) => e.customerId === draft.customerId),
+    [allEndUserOptions, draft.customerId]
   );
 
   const estimatedIntakeNumber = useMemo(
@@ -122,7 +160,7 @@ export default function IntakeFormInner() {
   }
 
   function handleCustomerChange(customerId: string) {
-    const stillValid = mockEndUsers.some(
+    const stillValid = allEndUserOptions.some(
       (e) => e.id === draft.endUserId && e.customerId === customerId
     );
     updateDraft({ customerId, endUserId: stillValid ? draft.endUserId : null });
@@ -138,9 +176,14 @@ export default function IntakeFormInner() {
     }
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitError(null);
+
+    // Guards double-click/Enter-twice: the button is also disabled while
+    // isSubmitting, but this is a second, state-based backstop that holds
+    // even if a click somehow lands before the disabled attribute commits.
+    if (isSubmitting) return;
 
     const fieldErrors = validateDraft(draft);
     setErrors(fieldErrors);
@@ -174,6 +217,26 @@ export default function IntakeFormInner() {
       contactPhone: draft.contactPhone,
       contactEmail: draft.contactEmail,
     };
+
+    if (writeSource === "database") {
+      setIsSubmitting(true);
+      try {
+        const result = await createRepairCaseAction(input, idempotencyKey);
+        if (!result.ok) {
+          if (result.fieldErrors) {
+            setErrors((prev) => ({ ...prev, ...result.fieldErrors }));
+            focusFirstInvalid(result.fieldErrors as Partial<Record<FieldKey, string>>);
+          }
+          setSubmitError(result.message || RESULT_CODE_MESSAGES[result.code]);
+          return;
+        }
+        clear();
+        router.push(`/repair-cases/${result.id}?registered=1`);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     const result = submitNewLocalCase(input);
     if (!result.ok) {
@@ -273,7 +336,7 @@ export default function IntakeFormInner() {
               aria-describedby={errors.customerId ? "customerId-error" : undefined}
             >
               <option value="">선택해 주세요</option>
-              {mockCustomers.map((c) => (
+              {customerOptions.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
@@ -594,9 +657,15 @@ export default function IntakeFormInner() {
       <div className="flex justify-end">
         <button
           type="submit"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          disabled={isSubmitting}
+          aria-busy={isSubmitting}
+          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
-          A/S 접수 등록 (로컬 데모)
+          {isSubmitting
+            ? "저장 중..."
+            : writeSource === "database"
+              ? "A/S 접수 등록"
+              : "A/S 접수 등록 (로컬 데모)"}
         </button>
       </div>
     </form>

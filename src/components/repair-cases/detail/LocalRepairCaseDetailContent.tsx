@@ -36,7 +36,15 @@ export default function LocalRepairCaseDetailContent({
       <Suspense fallback={null}>
         <RegisteredSuccessNotice id={id} intakeNumber={resolved.intakeNumber} />
       </Suspense>
-      <RepairCaseDetailView resolved={resolved} related={related} actingUser={actingUser} />
+      <RepairCaseDetailView
+        resolved={resolved}
+        related={related}
+        actingUser={actingUser}
+        referenceData={null}
+        workflowHistory={null}
+        workflowHoldState={null}
+        currentApprovals={null}
+      />
     </div>
   );
 }

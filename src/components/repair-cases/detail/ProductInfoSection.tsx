@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { StatusBadge, SourceBadge } from "@/components/repair-cases/badges";
-import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
+import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
+import ProductInfoEditForm from "./edit/ProductInfoEditForm";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -15,19 +17,48 @@ function Field({ label, value }: { label: string; value: string }) {
 export default function ProductInfoSection({
   resolved,
   related,
+  editableFields,
+  editingSection,
+  onStartEdit,
+  onDone,
 }: {
-  resolved: ResolvedRepairCase;
+  resolved: EffectiveRepairCase;
   related: RelatedMatch[];
+  editableFields: readonly string[] | null;
+  editingSection: RepairCaseEditSection | null;
+  onStartEdit: () => void;
+  onDone: () => void;
 }) {
+  const isEditing = editingSection === "PRODUCT";
+  const canShowEditButton = editableFields !== null && editingSection === null;
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">제품 정보</h2>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-        <Field label="제품 구분" value={resolved.productCategory} />
-        <Field label="Model" value={resolved.modelName} />
-        <Field label="L/N" value={resolved.lotNumber} />
-        <Field label="S/N" value={resolved.serialNumber} />
-      </dl>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">제품 정보</h2>
+        {canShowEditButton && (
+          <button
+            type="button"
+            onClick={onStartEdit}
+            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+          >
+            수정
+          </button>
+        )}
+      </div>
+
+      {isEditing && editableFields ? (
+        <div className="mt-3">
+          <ProductInfoEditForm resolved={resolved} editableFields={editableFields} onDone={onDone} />
+        </div>
+      ) : (
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+          <Field label="제품 구분" value={resolved.productCategory} />
+          <Field label="Model" value={resolved.modelName} />
+          <Field label="L/N" value={resolved.lotNumber} />
+          <Field label="S/N" value={resolved.serialNumber} />
+        </dl>
+      )}
 
       <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
         {related.length > 0 ? (

@@ -28,6 +28,7 @@ import {
   EXCEPTION_STATUS_CODES,
   exceptionStatusLabels,
 } from "../src/lib/domain/types";
+import { FINAL_SHIPMENT_REPRESENTATIVE_USER_ID } from "../src/lib/domain/local/approval/representative";
 
 /**
  * Seeds the dev database from the existing fictional domain modules only —
@@ -89,6 +90,10 @@ async function main() {
       role: u.role,
       approvalStatus: u.approvalStatus,
       isDeveloper: false,
+      // Mirrors the local-demo layer's single hardcoded FINAL_SHIPMENT
+      // representative (representative.ts) so dev-seed behavior agrees
+      // between mock and database modes.
+      isShipmentRepresentative: u.id === FINAL_SHIPMENT_REPRESENTATIVE_USER_ID,
       failedLoginCount: 0,
       lockedAt: null,
       isActive: true,
@@ -110,6 +115,7 @@ async function main() {
           name: sql`excluded.name`,
           role: sql`excluded.role`,
           approvalStatus: sql`excluded.approval_status`,
+          isShipmentRepresentative: sql`excluded.is_shipment_representative`,
           updatedAt: sql`excluded.updated_at`,
         },
       });

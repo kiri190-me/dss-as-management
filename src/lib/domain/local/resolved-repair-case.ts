@@ -29,6 +29,14 @@ import { isLocalId, type LocalRepairCase } from "./local-types";
  */
 export type ResolvedRepairCase = {
   id: string;
+  /**
+   * Optimistic-concurrency token (repair_cases.version). Only DATABASE-
+   * sourced rows carry a real, meaningful value — MOCK/LOCAL_DEMO rows are
+   * never database-editable through the edit Server Action (see
+   * repair-case-edit-authorization.ts's source gate), so they're fixed at
+   * 1 purely for type consistency, never read back or incremented.
+   */
+  version: number;
   source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
   productId: string | null;
   intakeNumber: string;
@@ -39,6 +47,8 @@ export type ResolvedRepairCase = {
   currentWorkflowStepKey: string;
   receivedAt: string;
   customerRequestedDueDate: string | null;
+  /** Not carried by mock/local demo data (Stage G-3R column) — always null there. */
+  internalTargetInspectionCompletionDate: string | null;
   internalTargetShipmentDate: string | null;
   actualShipmentDate: string | null;
   /** Stage E-2 활동 타임라인의 CASE_CREATED 이벤트가 사용한다(등록 처리 시각). */
@@ -84,6 +94,7 @@ export function toResolvedFromMock(
 
   return {
     id: repairCase.id,
+    version: 1,
     source: "MOCK",
     productId: repairCase.productId,
     intakeNumber: repairCase.intakeNumber,
@@ -94,6 +105,7 @@ export function toResolvedFromMock(
     currentWorkflowStepKey: repairCase.currentWorkflowStepKey,
     receivedAt: repairCase.receivedAt,
     customerRequestedDueDate: repairCase.customerRequestedDueDate,
+    internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: repairCase.internalTargetShipmentDate,
     actualShipmentDate: repairCase.actualShipmentDate,
     createdAt: repairCase.createdAt,
@@ -130,6 +142,7 @@ export function toResolvedFromLocal(
 ): ResolvedRepairCase {
   return {
     id: localCase.id,
+    version: 1,
     source: "LOCAL_DEMO",
     productId: null,
     intakeNumber: localCase.intakeNumber,
@@ -140,6 +153,7 @@ export function toResolvedFromLocal(
     currentWorkflowStepKey: localCase.currentWorkflowStepKey,
     receivedAt: localCase.receivedAt,
     customerRequestedDueDate: localCase.customerRequestedDueDate,
+    internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: localCase.internalTargetShipmentDate,
     actualShipmentDate: localCase.actualShipmentDate,
     createdAt: localCase.createdAt,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
-import { mockUsers } from "@/lib/domain/mock-data";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -31,17 +31,9 @@ export default async function RepairCaseReportPage({
     redirect("/login");
   }
 
-  const currentMockUser = mockUsers.find((u) => u.id === session.userId);
   // 클라이언트에는 최소한의 검증된 정보만 넘긴다(id/name/role/approvalStatus).
   // 세션 쿠키 자체나 원본 세션 payload를 내려보내지 않는다.
-  const generatedByUser: ActingUser | null = currentMockUser
-    ? {
-        id: currentMockUser.id,
-        name: currentMockUser.name,
-        role: currentMockUser.role,
-        approvalStatus: currentMockUser.approvalStatus,
-      }
-    : null;
+  const generatedByUser: ActingUser | null = await resolveActingUserForSession(session);
 
   if (isLocalId(id)) {
     return <LocalReportContent repairCaseId={id} generatedByUser={generatedByUser} />;

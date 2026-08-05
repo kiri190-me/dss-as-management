@@ -34,6 +34,11 @@ const queryClient =
 
 export const db = globalForDb.__dssDb ?? drizzle(queryClient, { schema });
 
+// Exposed only for standalone scripts/tests that need a clean shutdown
+// (postgres.js keeps the process alive on an open pool otherwise) — Next.js
+// app code never calls this.
+export const pgClient = queryClient;
+
 if (process.env.NODE_ENV !== "production") {
   globalForDb.__dssPgClient = queryClient;
   globalForDb.__dssDb = db;

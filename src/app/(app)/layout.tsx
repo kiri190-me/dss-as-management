@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import AppShell from "@/components/layout/AppShell";
 import { readSession } from "@/lib/auth/session";
-import { mockUsers } from "@/lib/domain/mock-data";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { roleLabels } from "@/lib/domain/types";
 
 export default async function AppLayout({
@@ -17,7 +17,7 @@ export default async function AppLayout({
     redirect("/pending-approval");
   }
 
-  const user = mockUsers.find((candidate) => candidate.id === session.userId);
+  const user = await resolveActingUserForSession(session);
 
   return (
     <AppShell

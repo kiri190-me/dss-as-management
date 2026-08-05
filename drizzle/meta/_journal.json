@@ -22,6 +22,27 @@
       "when": 1785864514844,
       "tag": "0002_lazy_robbie_robertson",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785890808787,
+      "tag": "0003_cheerful_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785893373576,
+      "tag": "0004_minor_argent",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785896697822,
+      "tag": "0005_amazing_blue_marvel",
+      "breakpoints": true
     }
   ]
 }

@@ -4,3 +4,6 @@ export * from "./products";
 export * from "./workflow";
 export * from "./repair-cases";
 export * from "./intake-sequences";
+export * from "./idempotency-keys";
+export * from "./status-change-histories";
+export * from "./repair-case-approvals";

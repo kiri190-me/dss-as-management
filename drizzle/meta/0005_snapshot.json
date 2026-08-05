@@ -1,0 +1,2115 @@
+{
+  "id": "3a4167be-1f27-4e80-901a-e45a665b1feb",
+  "prevId": "e9867a9f-e6eb-4aa9-b0e0-de2e19858b5e",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "role_code",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approval_status": {
+          "name": "approval_status",
+          "type": "account_approval_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "is_developer": {
+          "name": "is_developer",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_shipment_representative": {
+          "name": "is_shipment_representative",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "failed_login_count": {
+          "name": "failed_login_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "locked_at": {
+          "name": "locked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_not_deleted_idx": {
+          "name": "users_not_deleted_idx",
+          "columns": [
+            {
+              "expression": "is_deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_deleted = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "users_deleted_by_users_id_fk": {
+          "name": "users_deleted_by_users_id_fk",
+          "tableFrom": "users",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.customers": {
+      "name": "customers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_name": {
+          "name": "contact_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_email": {
+          "name": "contact_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_phone": {
+          "name": "contact_phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "customers_not_deleted_idx": {
+          "name": "customers_not_deleted_idx",
+          "columns": [
+            {
+              "expression": "is_deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_deleted = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "customers_deleted_by_users_id_fk": {
+          "name": "customers_deleted_by_users_id_fk",
+          "tableFrom": "customers",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.end_users": {
+      "name": "end_users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_name": {
+          "name": "contact_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_email": {
+          "name": "contact_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "end_users_customer_id_idx": {
+          "name": "end_users_customer_id_idx",
+          "columns": [
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "end_users_not_deleted_idx": {
+          "name": "end_users_not_deleted_idx",
+          "columns": [
+            {
+              "expression": "is_deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_deleted = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "end_users_customer_id_customers_id_fk": {
+          "name": "end_users_customer_id_customers_id_fk",
+          "tableFrom": "end_users",
+          "tableTo": "customers",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "end_users_deleted_by_users_id_fk": {
+          "name": "end_users_deleted_by_users_id_fk",
+          "tableFrom": "end_users",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.products": {
+      "name": "products",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "model_name": {
+          "name": "model_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "serial_number": {
+          "name": "serial_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lot_number": {
+          "name": "lot_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "part_number": {
+          "name": "part_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "products_model_lot_serial_unique": {
+          "name": "products_model_lot_serial_unique",
+          "columns": [
+            {
+              "expression": "model_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lot_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "serial_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "products_model_name_idx": {
+          "name": "products_model_name_idx",
+          "columns": [
+            {
+              "expression": "model_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "products_not_deleted_idx": {
+          "name": "products_not_deleted_idx",
+          "columns": [
+            {
+              "expression": "is_deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_deleted = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "products_deleted_by_users_id_fk": {
+          "name": "products_deleted_by_users_id_fk",
+          "tableFrom": "products",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.exception_statuses": {
+      "name": "exception_statuses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "exception_statuses_code_unique": {
+          "name": "exception_statuses_code_unique",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.workflow_steps": {
+      "name": "workflow_steps",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workflow_version_id": {
+          "name": "workflow_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "step_order": {
+          "name": "step_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workflow_steps_version_order_unique": {
+          "name": "workflow_steps_version_order_unique",
+          "columns": [
+            {
+              "expression": "workflow_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "step_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workflow_steps_version_key_unique": {
+          "name": "workflow_steps_version_key_unique",
+          "columns": [
+            {
+              "expression": "workflow_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "workflow_steps_workflow_version_id_workflow_versions_id_fk": {
+          "name": "workflow_steps_workflow_version_id_workflow_versions_id_fk",
+          "tableFrom": "workflow_steps",
+          "tableTo": "workflow_versions",
+          "columnsFrom": [
+            "workflow_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.workflow_templates": {
+      "name": "workflow_templates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "code": {
+          "name": "code",
+          "type": "workflow_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workflow_templates_code_unique": {
+          "name": "workflow_templates_code_unique",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.workflow_versions": {
+      "name": "workflow_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workflow_template_id": {
+          "name": "workflow_template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "workflow_version_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workflow_versions_template_version_unique": {
+          "name": "workflow_versions_template_version_unique",
+          "columns": [
+            {
+              "expression": "workflow_template_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workflow_versions_current_per_template_unique": {
+          "name": "workflow_versions_current_per_template_unique",
+          "columns": [
+            {
+              "expression": "workflow_template_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'PUBLISHED' AND is_current = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "workflow_versions_workflow_template_id_workflow_templates_id_fk": {
+          "name": "workflow_versions_workflow_template_id_workflow_templates_id_fk",
+          "tableFrom": "workflow_versions",
+          "tableTo": "workflow_templates",
+          "columnsFrom": [
+            "workflow_template_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "workflow_versions_created_by_users_id_fk": {
+          "name": "workflow_versions_created_by_users_id_fk",
+          "tableFrom": "workflow_versions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.repair_cases": {
+      "name": "repair_cases",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "intake_number": {
+          "name": "intake_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_user_id": {
+          "name": "end_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workflow_version_id": {
+          "name": "workflow_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "current_workflow_step_id": {
+          "name": "current_workflow_step_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exception_status_id": {
+          "name": "exception_status_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assigned_engineer_id": {
+          "name": "assigned_engineer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_requested_due_date": {
+          "name": "customer_requested_due_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internal_target_inspection_completion_date": {
+          "name": "internal_target_inspection_completion_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internal_target_shipment_date": {
+          "name": "internal_target_shipment_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actual_shipment_date": {
+          "name": "actual_shipment_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delay_reason": {
+          "name": "delay_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_locked": {
+          "name": "is_locked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reported_symptom": {
+          "name": "reported_symptom",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "intake_inspection_result": {
+          "name": "intake_inspection_result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_diagnosis_summary": {
+          "name": "current_diagnosis_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_planned_action": {
+          "name": "next_planned_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accessory_list": {
+          "name": "accessory_list",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_condition_summary": {
+          "name": "external_condition_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason_for_removal": {
+          "name": "reason_for_removal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_name_snapshot": {
+          "name": "contact_name_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_phone_snapshot": {
+          "name": "contact_phone_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_email_snapshot": {
+          "name": "contact_email_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "is_deleted": {
+          "name": "is_deleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_reason": {
+          "name": "delete_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "repair_cases_intake_number_unique": {
+          "name": "repair_cases_intake_number_unique",
+          "columns": [
+            {
+              "expression": "intake_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_customer_id_idx": {
+          "name": "repair_cases_customer_id_idx",
+          "columns": [
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_end_user_id_idx": {
+          "name": "repair_cases_end_user_id_idx",
+          "columns": [
+            {
+              "expression": "end_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_product_id_idx": {
+          "name": "repair_cases_product_id_idx",
+          "columns": [
+            {
+              "expression": "product_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_workflow_version_id_idx": {
+          "name": "repair_cases_workflow_version_id_idx",
+          "columns": [
+            {
+              "expression": "workflow_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_current_workflow_step_id_idx": {
+          "name": "repair_cases_current_workflow_step_id_idx",
+          "columns": [
+            {
+              "expression": "current_workflow_step_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_exception_status_id_idx": {
+          "name": "repair_cases_exception_status_id_idx",
+          "columns": [
+            {
+              "expression": "exception_status_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_assigned_engineer_id_idx": {
+          "name": "repair_cases_assigned_engineer_id_idx",
+          "columns": [
+            {
+              "expression": "assigned_engineer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_created_at_idx": {
+          "name": "repair_cases_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_cases_not_deleted_idx": {
+          "name": "repair_cases_not_deleted_idx",
+          "columns": [
+            {
+              "expression": "is_deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_deleted = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "repair_cases_customer_id_customers_id_fk": {
+          "name": "repair_cases_customer_id_customers_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "customers",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_end_user_id_end_users_id_fk": {
+          "name": "repair_cases_end_user_id_end_users_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "end_users",
+          "columnsFrom": [
+            "end_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_product_id_products_id_fk": {
+          "name": "repair_cases_product_id_products_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "products",
+          "columnsFrom": [
+            "product_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_workflow_version_id_workflow_versions_id_fk": {
+          "name": "repair_cases_workflow_version_id_workflow_versions_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "workflow_versions",
+          "columnsFrom": [
+            "workflow_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_current_workflow_step_id_workflow_steps_id_fk": {
+          "name": "repair_cases_current_workflow_step_id_workflow_steps_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "workflow_steps",
+          "columnsFrom": [
+            "current_workflow_step_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_exception_status_id_exception_statuses_id_fk": {
+          "name": "repair_cases_exception_status_id_exception_statuses_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "exception_statuses",
+          "columnsFrom": [
+            "exception_status_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_assigned_engineer_id_users_id_fk": {
+          "name": "repair_cases_assigned_engineer_id_users_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "users",
+          "columnsFrom": [
+            "assigned_engineer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_cases_deleted_by_users_id_fk": {
+          "name": "repair_cases_deleted_by_users_id_fk",
+          "tableFrom": "repair_cases",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "repair_cases_intake_number_format": {
+          "name": "repair_cases_intake_number_format",
+          "value": "\"repair_cases\".\"intake_number\" ~ '^D[0-9]{2}(0[1-9]|1[0-2])[0-9]{2}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.repair_case_intake_sequences": {
+      "name": "repair_case_intake_sequences",
+      "schema": "",
+      "columns": {
+        "year_month": {
+          "name": "year_month",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_sequence": {
+          "name": "last_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "repair_case_intake_sequences_year_month_format": {
+          "name": "repair_case_intake_sequences_year_month_format",
+          "value": "\"repair_case_intake_sequences\".\"year_month\" ~ '^[0-9]{2}(0[1-9]|1[0-2])$'"
+        },
+        "repair_case_intake_sequences_last_sequence_range": {
+          "name": "repair_case_intake_sequences_last_sequence_range",
+          "value": "\"repair_case_intake_sequences\".\"last_sequence\" BETWEEN 0 AND 99"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.repair_case_idempotency_keys": {
+      "name": "repair_case_idempotency_keys",
+      "schema": "",
+      "columns": {
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "requester_user_id": {
+          "name": "requester_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "idempotency_key_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PROCESSING'"
+        },
+        "repair_case_id": {
+          "name": "repair_case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_snapshot": {
+          "name": "response_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "repair_case_idempotency_keys_requester_user_id_idx": {
+          "name": "repair_case_idempotency_keys_requester_user_id_idx",
+          "columns": [
+            {
+              "expression": "requester_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_case_idempotency_keys_expires_at_idx": {
+          "name": "repair_case_idempotency_keys_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "repair_case_idempotency_keys_requester_user_id_users_id_fk": {
+          "name": "repair_case_idempotency_keys_requester_user_id_users_id_fk",
+          "tableFrom": "repair_case_idempotency_keys",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requester_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_case_idempotency_keys_repair_case_id_repair_cases_id_fk": {
+          "name": "repair_case_idempotency_keys_repair_case_id_repair_cases_id_fk",
+          "tableFrom": "repair_case_idempotency_keys",
+          "tableTo": "repair_cases",
+          "columnsFrom": [
+            "repair_case_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "repair_case_idempotency_keys_succeeded_has_repair_case": {
+          "name": "repair_case_idempotency_keys_succeeded_has_repair_case",
+          "value": "status <> 'SUCCEEDED' OR repair_case_id IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.status_change_histories": {
+      "name": "status_change_histories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "repair_case_id": {
+          "name": "repair_case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workflow_version_id": {
+          "name": "workflow_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_step_id": {
+          "name": "from_step_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_step_id": {
+          "name": "to_step_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action_type": {
+          "name": "action_type",
+          "type": "status_change_action_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "status_change_histories_repair_case_id_created_at_idx": {
+          "name": "status_change_histories_repair_case_id_created_at_idx",
+          "columns": [
+            {
+              "expression": "repair_case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "status_change_histories_actor_user_id_idx": {
+          "name": "status_change_histories_actor_user_id_idx",
+          "columns": [
+            {
+              "expression": "actor_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "status_change_histories_repair_case_id_repair_cases_id_fk": {
+          "name": "status_change_histories_repair_case_id_repair_cases_id_fk",
+          "tableFrom": "status_change_histories",
+          "tableTo": "repair_cases",
+          "columnsFrom": [
+            "repair_case_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "status_change_histories_workflow_version_id_workflow_versions_id_fk": {
+          "name": "status_change_histories_workflow_version_id_workflow_versions_id_fk",
+          "tableFrom": "status_change_histories",
+          "tableTo": "workflow_versions",
+          "columnsFrom": [
+            "workflow_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "status_change_histories_from_step_id_workflow_steps_id_fk": {
+          "name": "status_change_histories_from_step_id_workflow_steps_id_fk",
+          "tableFrom": "status_change_histories",
+          "tableTo": "workflow_steps",
+          "columnsFrom": [
+            "from_step_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "status_change_histories_to_step_id_workflow_steps_id_fk": {
+          "name": "status_change_histories_to_step_id_workflow_steps_id_fk",
+          "tableFrom": "status_change_histories",
+          "tableTo": "workflow_steps",
+          "columnsFrom": [
+            "to_step_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "status_change_histories_actor_user_id_users_id_fk": {
+          "name": "status_change_histories_actor_user_id_users_id_fk",
+          "tableFrom": "status_change_histories",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.repair_case_approvals": {
+      "name": "repair_case_approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "repair_case_id": {
+          "name": "repair_case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approval_type": {
+          "name": "approval_type",
+          "type": "repair_case_approval_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "repair_case_approval_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'REQUESTED'"
+        },
+        "requested_by_user_id": {
+          "name": "requested_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "request_reason": {
+          "name": "request_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_by_user_id": {
+          "name": "decided_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_reason": {
+          "name": "decision_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delegated_from_user_id": {
+          "name": "delegated_from_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "repair_case_version_at_request": {
+          "name": "repair_case_version_at_request",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "repair_case_approvals_one_active_request": {
+          "name": "repair_case_approvals_one_active_request",
+          "columns": [
+            {
+              "expression": "repair_case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "approval_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'REQUESTED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_case_approvals_repair_case_id_idx": {
+          "name": "repair_case_approvals_repair_case_id_idx",
+          "columns": [
+            {
+              "expression": "repair_case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "repair_case_approvals_requested_by_user_id_idx": {
+          "name": "repair_case_approvals_requested_by_user_id_idx",
+          "columns": [
+            {
+              "expression": "requested_by_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "repair_case_approvals_repair_case_id_repair_cases_id_fk": {
+          "name": "repair_case_approvals_repair_case_id_repair_cases_id_fk",
+          "tableFrom": "repair_case_approvals",
+          "tableTo": "repair_cases",
+          "columnsFrom": [
+            "repair_case_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_case_approvals_requested_by_user_id_users_id_fk": {
+          "name": "repair_case_approvals_requested_by_user_id_users_id_fk",
+          "tableFrom": "repair_case_approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requested_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_case_approvals_decided_by_user_id_users_id_fk": {
+          "name": "repair_case_approvals_decided_by_user_id_users_id_fk",
+          "tableFrom": "repair_case_approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "decided_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "repair_case_approvals_delegated_from_user_id_users_id_fk": {
+          "name": "repair_case_approvals_delegated_from_user_id_users_id_fk",
+          "tableFrom": "repair_case_approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "delegated_from_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "repair_case_approvals_decision_metadata": {
+          "name": "repair_case_approvals_decision_metadata",
+          "value": "\n        (status = 'REQUESTED' AND decided_by_user_id IS NULL AND decided_at IS NULL AND decision_reason IS NULL)\n        OR\n        (status = 'APPROVED' AND decided_by_user_id IS NOT NULL AND decided_at IS NOT NULL)\n        OR\n        (status = 'REJECTED' AND decided_by_user_id IS NOT NULL AND decided_at IS NOT NULL AND decision_reason IS NOT NULL)\n      "
+        },
+        "repair_case_approvals_delegation_only_for_final_shipment": {
+          "name": "repair_case_approvals_delegation_only_for_final_shipment",
+          "value": "delegated_from_user_id IS NULL OR approval_type = 'FINAL_SHIPMENT'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.account_approval_status": {
+      "name": "account_approval_status",
+      "schema": "public",
+      "values": [
+        "PENDING",
+        "APPROVED"
+      ]
+    },
+    "public.role_code": {
+      "name": "role_code",
+      "schema": "public",
+      "values": [
+        "SUPER_ADMIN",
+        "ADMIN",
+        "AS_ENGINEER",
+        "SALES",
+        "INVENTORY_MANAGER"
+      ]
+    },
+    "public.workflow_type": {
+      "name": "workflow_type",
+      "schema": "public",
+      "values": [
+        "MATCHER",
+        "PAID_GENERATOR",
+        "WARRANTY_GENERATOR"
+      ]
+    },
+    "public.workflow_version_status": {
+      "name": "workflow_version_status",
+      "schema": "public",
+      "values": [
+        "DRAFT",
+        "PUBLISHED",
+        "ARCHIVED"
+      ]
+    },
+    "public.idempotency_key_status": {
+      "name": "idempotency_key_status",
+      "schema": "public",
+      "values": [
+        "PROCESSING",
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "public.status_change_action_type": {
+      "name": "status_change_action_type",
+      "schema": "public",
+      "values": [
+        "STEP_ADVANCED",
+        "STEP_RETURNED",
+        "HOLD_STARTED",
+        "HOLD_RELEASED",
+        "SHIPMENT_COMPLETED"
+      ]
+    },
+    "public.repair_case_approval_status": {
+      "name": "repair_case_approval_status",
+      "schema": "public",
+      "values": [
+        "REQUESTED",
+        "APPROVED",
+        "REJECTED"
+      ]
+    },
+    "public.repair_case_approval_type": {
+      "name": "repair_case_approval_type",
+      "schema": "public",
+      "values": [
+        "REPAIR_INSPECTION",
+        "FINAL_SHIPMENT"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

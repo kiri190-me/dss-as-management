@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
-import { mockUsers } from "@/lib/domain/mock-data";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 
 export const metadata: Metadata = {
   title: "승인 대기 | DSS A/S 관리 시스템",
@@ -16,7 +16,7 @@ export default async function PendingApprovalPage() {
     redirect("/dashboard");
   }
 
-  const user = mockUsers.find((candidate) => candidate.id === session.userId);
+  const user = await resolveActingUserForSession(session);
   const name = user?.name ?? "사용자";
 
   return (

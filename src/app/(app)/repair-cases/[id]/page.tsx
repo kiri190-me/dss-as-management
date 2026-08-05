@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
-import { mockUsers } from "@/lib/domain/mock-data";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
+import { getRepairCaseWriteSource } from "@/lib/config/write-source";
+import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
+import { getCurrentApprovalsForCase } from "@/lib/db/queries/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 import LocalRepairCaseDetailContent from "@/components/repair-cases/detail/LocalRepairCaseDetailContent";
@@ -30,15 +34,7 @@ export default async function RepairCaseDetailPage({
     redirect("/login");
   }
 
-  const currentMockUser = mockUsers.find((u) => u.id === session.userId);
-  const actingUser: ActingUser | null = currentMockUser
-    ? {
-        id: currentMockUser.id,
-        name: currentMockUser.name,
-        role: currentMockUser.role,
-        approvalStatus: currentMockUser.approvalStatus,
-      }
-    : null;
+  const actingUser: ActingUser | null = await resolveActingUserForSession(session);
 
   if (isLocalId(id)) {
     return <LocalRepairCaseDetailContent id={id} actingUser={actingUser} />;
@@ -60,5 +56,31 @@ export default async function RepairCaseDetailPage({
   // 않음).
   const related = findProductHistoryMatches(resolveAllRepairCases([]), resolved);
 
-  return <RepairCaseDetailView resolved={resolved} related={related} actingUser={actingUser} />;
+  // Section editing only ever targets a DATABASE-sourced row (the update
+  // Server Action itself independently re-checks both this and the write-
+  // source flag) — only fetch the real customer/End-User/engineer option
+  // lists when both conditions actually hold, same gating IntakeForm's
+  // create path already uses.
+  const writeSource = getRepairCaseWriteSource();
+  const isDatabaseBacked = resolved.source === "DATABASE" && writeSource === "database";
+  const referenceData = isDatabaseBacked ? await getIntakeReferenceData() : null;
+
+  // Workflow history/hold-state are DB-only concepts (event-sourced from
+  // status_change_histories — see Phase-1 report) — never fetched for
+  // MOCK/LOCAL_DEMO rows.
+  const workflowHistory = isDatabaseBacked ? await getWorkflowHistoryForCase(resolved.id) : null;
+  const workflowHoldState = workflowHistory ? deriveCurrentHoldState(workflowHistory) : null;
+  const currentApprovals = isDatabaseBacked ? await getCurrentApprovalsForCase(resolved.id) : null;
+
+  return (
+    <RepairCaseDetailView
+      resolved={resolved}
+      related={related}
+      actingUser={actingUser}
+      referenceData={referenceData}
+      workflowHistory={workflowHistory}
+      workflowHoldState={workflowHoldState}
+      currentApprovals={currentApprovals}
+    />
+  );
 }
