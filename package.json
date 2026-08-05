@@ -11,7 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/seed-dev-db.ts",
     "db:check": "tsx scripts/check-dev-db.ts",
-    "test": "node --conditions=react-server --import tsx --test src/lib/validation/repair-case-input.test.ts src/lib/config/write-source.test.ts src/lib/config/auth-source.test.ts src/lib/domain/local/intake-idempotency-key.test.ts src/lib/validation/repair-case-update-input.test.ts src/lib/auth/repair-case-edit-authorization.test.ts src/lib/validation/workflow-transition-input.test.ts src/lib/validation/repair-case-approval-input.test.ts",
+    "test": "node --conditions=react-server --import tsx --test src/lib/validation/repair-case-input.test.ts src/lib/config/write-source.test.ts src/lib/config/auth-source.test.ts src/lib/domain/local/intake-idempotency-key.test.ts src/lib/validation/repair-case-update-input.test.ts src/lib/auth/repair-case-edit-authorization.test.ts src/lib/validation/workflow-transition-input.test.ts src/lib/validation/repair-case-approval-input.test.ts src/lib/auth/session.test.ts src/lib/auth/request-guards.test.ts src/app/login/login-view-model.test.ts",
     "test:db": "node --conditions=react-server --import tsx --test src/lib/db/mutations/repair-cases.integration.test.ts src/lib/db/mutations/idempotency-keys.integration.test.ts src/lib/db/mutations/repair-cases-update.integration.test.ts src/lib/db/mutations/workflow-transitions.integration.test.ts src/lib/auth/db-login.integration.test.ts src/lib/auth/acting-user.test.ts src/lib/auth/acting-user.integration.test.ts src/lib/auth/session-actor-e2e.integration.test.ts src/lib/db/mutations/repair-case-approvals.integration.test.ts src/lib/db/mutations/workflow-transitions-approval-gating.integration.test.ts"
   },
   "dependencies": {

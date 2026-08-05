@@ -3,7 +3,7 @@ import "../../../scripts/load-env";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, pgClient } from "@/lib/db/connection";
 import { users } from "@/lib/db/schema";
 import { resolveDbLogin } from "./db-login";
@@ -29,12 +29,24 @@ let lockedTestEmail: string;
 let disabledTestEmail: string;
 
 before(async () => {
+  // isActive/isDeleted/lockedAt are all filtered too, not just
+  // approvalStatus — a genuinely loginable "seeded reference user" must
+  // never accidentally resolve to a leftover authfix-test-* fixture row
+  // from a prior interrupted run (those are deliberately locked/deactivated
+  // and would make this file's own "resolves to a SESSION" tests fail).
   const [approved] = await db
     .select({ id: users.id, email: users.email, role: users.role })
     .from(users)
-    .where(eq(users.approvalStatus, "APPROVED"))
+    .where(
+      and(
+        eq(users.approvalStatus, "APPROVED"),
+        eq(users.isActive, true),
+        eq(users.isDeleted, false),
+        isNull(users.lockedAt)
+      )
+    )
     .limit(1);
-  assert.ok(approved, "expected at least one APPROVED user in the dev DB");
+  assert.ok(approved, "expected at least one APPROVED, active, unlocked user in the dev DB");
   seededEmail = approved.email;
   seededUserId = approved.id;
   seededRole = approved.role;

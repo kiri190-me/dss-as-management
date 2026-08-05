@@ -29,8 +29,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 /**
  * Used by acting-user.ts to resolve a session's userId (a real users.id
  * UUID in database mode) back to display/role information on every
- * request. Excludes soft-deleted rows — a deleted user resolves to null,
- * same as a nonexistent one.
+ * request. Excludes soft-deleted, deactivated, and locked rows — any of
+ * those resolves to null, same as a nonexistent one, so a session survives
+ * only as long as the account behind it stays deleted-free, active, and
+ * unlocked (re-checked on every request, not just at login).
  *
  * A non-UUID-shaped id resolves to null before ever reaching the DB,
  * instead of letting Postgres throw "invalid input syntax for type uuid" —
@@ -45,7 +47,7 @@ export async function getUserById(id: string): Promise<UserRow | null> {
   const [row] = await db
     .select(SELECT_COLUMNS)
     .from(users)
-    .where(and(eq(users.id, id), eq(users.isDeleted, false)))
+    .where(and(eq(users.id, id), eq(users.isDeleted, false), eq(users.isActive, true), isNull(users.lockedAt)))
     .limit(1);
   return row ?? null;
 }

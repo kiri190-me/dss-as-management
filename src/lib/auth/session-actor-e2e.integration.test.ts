@@ -3,7 +3,7 @@ import "../../../scripts/load-env";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, isNull, like } from "drizzle-orm";
 import { db, pgClient } from "@/lib/db/connection";
 import { customers, products, repairCaseIntakeSequences, repairCases, statusChangeHistories, users } from "@/lib/db/schema";
 import { resolveDbLogin } from "./db-login";
@@ -57,9 +57,17 @@ before(async () => {
   const [engineer] = await db
     .select({ id: users.id, email: users.email })
     .from(users)
-    .where(and(eq(users.role, "AS_ENGINEER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false)))
+    .where(
+      and(
+        eq(users.role, "AS_ENGINEER"),
+        eq(users.approvalStatus, "APPROVED"),
+        eq(users.isDeleted, false),
+        eq(users.isActive, true),
+        isNull(users.lockedAt)
+      )
+    )
     .limit(1);
-  assert.ok(engineer, "expected at least one approved AS_ENGINEER in the dev DB");
+  assert.ok(engineer, "expected at least one approved, active, unlocked AS_ENGINEER in the dev DB");
   engineerId = engineer.id;
   engineerEmail = engineer.email;
 });

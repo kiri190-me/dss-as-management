@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { mockUsers } from "@/lib/domain/mock-data";
 import { roleLabels } from "@/lib/domain/types";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listUsersForLoginPicker } from "@/lib/db/queries/users";
+import { getLoginViewModel } from "./login-view-model";
 
 export const metadata: Metadata = {
   title: "로그인 | DSS A/S 관리 시스템",
@@ -13,23 +15,41 @@ export const metadata: Metadata = {
 export default async function LoginPage() {
   const session = await readSession();
   if (session) {
-    redirect(session.approvalStatus === "APPROVED" ? "/dashboard" : "/pending-approval");
+    // A structurally valid token alone must not hide the login screen — it
+    // must still resolve to a real, currently-usable account (same check
+    // (app)/layout.tsx applies) before treating this browser as logged in.
+    // Otherwise a stale cookie (deleted/deactivated/locked account, or an
+    // AUTH_SOURCE switch since the cookie was issued) would permanently
+    // block access to /login with no way to sign in as anyone else.
+    const user = await resolveActingUserForSession(session);
+    if (user) {
+      redirect(user.approvalStatus === "APPROVED" ? "/dashboard" : "/pending-approval");
+    }
   }
 
   const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
   const authSource = getAuthSource();
   const dbUsers =
     demoLoginEnabled && authSource === "database" ? await listUsersForLoginPicker() : null;
+  const viewModel = getLoginViewModel(authSource);
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-        로그인 (데모)
-      </h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        실제 인증(카카오 로그인, 회사 이메일 인증)이 도입되기 전까지 임시로
-        제공되는 데모 로그인입니다.
-      </p>
+      <div className="flex items-center gap-2">
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+          {viewModel.heading}
+        </h1>
+        <span
+          className={
+            authSource === "database"
+              ? "inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+              : "inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          }
+        >
+          {viewModel.sourceBadgeLabel}
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{viewModel.description}</p>
 
       {!demoLoginEnabled ? (
         <p className="mt-6 rounded-md border border-zinc-200 p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
@@ -44,13 +64,24 @@ export default async function LoginPage() {
           {dbUsers
             ? dbUsers.map((user) => (
                 <label
-                  key={user.id}
+                  key={user.email}
                   className="flex items-center gap-2 rounded-md border border-zinc-200 p-3 text-sm text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   <input type="radio" name="email" value={user.email} required />
-                  <span>
-                    {user.name} ({roleLabels[user.role]})
-                    {user.approvalStatus === "PENDING" ? " · 승인 대기" : ""}
+                  <span className="flex flex-col">
+                    <span>
+                      {user.name} ({roleLabels[user.role]})
+                      {user.approvalStatus === "PENDING" ? " · 승인 대기" : ""}
+                    </span>
+                    {/* Email only — user.id (a real users.id UUID) is deliberately
+                        never used anywhere on this page, not even as a React key:
+                        Next.js's RSC hydration payload serializes key values into
+                        the page's HTML, so a UUID key would leak into the response
+                        even though it's never rendered as visible text. email is
+                        already unique (users_email_unique) and already the radio's
+                        value, so it's a safe, already-public key. No session/token
+                        data reaches this page either way. */}
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{user.email}</span>
                   </span>
                 </label>
               ))

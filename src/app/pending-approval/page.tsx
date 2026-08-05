@@ -12,12 +12,16 @@ export default async function PendingApprovalPage() {
   if (!session) {
     redirect("/login");
   }
-  if (session.approvalStatus === "APPROVED") {
+
+  // Same fail-closed rule as (app)/layout.tsx and /login: a signed token
+  // alone doesn't mean the account behind it is still usable.
+  const user = await resolveActingUserForSession(session);
+  if (!user) {
+    redirect("/login");
+  }
+  if (user.approvalStatus === "APPROVED") {
     redirect("/dashboard");
   }
-
-  const user = await resolveActingUserForSession(session);
-  const name = user?.name ?? "사용자";
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 text-center">
@@ -25,7 +29,7 @@ export default async function PendingApprovalPage() {
         승인 대기 중입니다
       </h1>
       <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
-        {name}님, 계정이 아직 관리자 승인 대기 중입니다. 승인이 완료되면 다시
+        {user.name}님, 계정이 아직 관리자 승인 대기 중입니다. 승인이 완료되면 다시
         로그인해 주세요.
       </p>
       <form method="post" action="/api/auth/logout" className="mt-6">

@@ -3,7 +3,7 @@ import "../../../scripts/load-env";
 import { after, before, beforeEach, afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, pgClient } from "@/lib/db/connection";
 import { users } from "@/lib/db/schema";
 import { resolveActingUserForSession } from "./acting-user";
@@ -13,11 +13,19 @@ import type { SessionPayload } from "./session";
  * Real-DB integration test for resolveActingUserForSession() in
  * AUTH_SOURCE=database mode — the centralized resolver that replaced the 6
  * duplicated mockUsers.find(session.userId) call sites. Confirms it reads
- * the real users row (not mock-data), fails closed on an unknown/deleted
- * id, and never falls back to a mock lookup while in database mode.
+ * the real users row (not mock-data), fails closed on an unknown/deleted/
+ * deactivated/locked id, and never falls back to a mock lookup while in
+ * database mode.
  *
- * Self-cleaning: only inserts one soft-deleted throwaway row, deleted in
- * after(). Never touches seeded users.
+ * Also the regression test for the login/logout UI bug (auth-fix-follow-up
+ * task's final report): (app)/layout.tsx and /login now redirect based on
+ * this function's null/non-null result rather than trusting a merely
+ * signature-valid session token, so every fail-closed case proven here
+ * translates directly into "session no longer grants access" at the page
+ * level.
+ *
+ * Self-cleaning: only inserts throwaway rows (soft-deleted/deactivated/
+ * locked), deleted in after(). Never touches seeded users.
  */
 
 function sessionFor(userId: string): SessionPayload {
@@ -37,14 +45,22 @@ let seededName: string;
 let seededRole: string;
 let seededApprovalStatus: string;
 let deletedTestUserId: string;
+let deactivatedTestUserId: string;
+let lockedTestUserId: string;
 
 before(async () => {
+  // Filters on isActive/lockedAt too, not just isDeleted — a genuinely
+  // usable "seeded reference user" must never accidentally resolve to a
+  // leftover authfix-test-* fixture row from a prior interrupted run (those
+  // are deliberately deactivated/locked and would make this file's own
+  // "resolves to that row's data" test fail against a row that fails
+  // closed by design).
   const [row] = await db
     .select({ id: users.id, name: users.name, role: users.role, approvalStatus: users.approvalStatus })
     .from(users)
-    .where(eq(users.isDeleted, false))
+    .where(and(eq(users.isDeleted, false), eq(users.isActive, true), isNull(users.lockedAt)))
     .limit(1);
-  assert.ok(row, "expected at least one non-deleted user in the dev DB");
+  assert.ok(row, "expected at least one non-deleted, active, unlocked user in the dev DB");
   seededUserId = row.id;
   seededName = row.name;
   seededRole = row.role;
@@ -63,10 +79,37 @@ before(async () => {
     })
     .returning({ id: users.id });
   deletedTestUserId = deleted.id;
+
+  const [deactivated] = await db
+    .insert(users)
+    .values({
+      email: `authfix-test-deactivated-${randomUUID().slice(0, 8)}@example.test`,
+      name: "AuthFix Deactivated Test",
+      role: "AS_ENGINEER",
+      approvalStatus: "APPROVED",
+      isActive: false,
+    })
+    .returning({ id: users.id });
+  deactivatedTestUserId = deactivated.id;
+
+  const [locked] = await db
+    .insert(users)
+    .values({
+      email: `authfix-test-locked-${randomUUID().slice(0, 8)}@example.test`,
+      name: "AuthFix Locked Test",
+      role: "AS_ENGINEER",
+      approvalStatus: "APPROVED",
+      isActive: true,
+      lockedAt: new Date(),
+    })
+    .returning({ id: users.id });
+  lockedTestUserId = locked.id;
 });
 
 after(async () => {
   await db.delete(users).where(eq(users.id, deletedTestUserId));
+  await db.delete(users).where(eq(users.id, deactivatedTestUserId));
+  await db.delete(users).where(eq(users.id, lockedTestUserId));
   await pgClient.end({ timeout: 5 });
 });
 
@@ -102,5 +145,15 @@ test("database mode: an unknown UUID resolves to null (fails closed)", async () 
 
 test("database mode: a soft-deleted user resolves to null", async () => {
   const result = await resolveActingUserForSession(sessionFor(deletedTestUserId));
+  assert.equal(result, null);
+});
+
+test("database mode: a deactivated (is_active=false) user resolves to null — fails closed mid-session, not just at login", async () => {
+  const result = await resolveActingUserForSession(sessionFor(deactivatedTestUserId));
+  assert.equal(result, null);
+});
+
+test("database mode: a locked (locked_at set) user resolves to null — fails closed mid-session, not just at login", async () => {
+  const result = await resolveActingUserForSession(sessionFor(lockedTestUserId));
   assert.equal(result, null);
 });

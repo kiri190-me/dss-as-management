@@ -13,16 +13,29 @@ export default async function AppLayout({
   if (!session) {
     redirect("/login");
   }
-  if (session.approvalStatus !== "APPROVED") {
+
+  // Resolve the live account before trusting anything else about this
+  // session. A structurally valid (correctly signed, unexpired) token can
+  // still point at an account that no longer exists or is no longer usable
+  // (deleted/deactivated/locked, or AUTH_SOURCE changed since the cookie
+  // was issued) — that must be treated as "not authenticated", not as a
+  // session that silently renders the app shell with no user info and no
+  // way to log out or switch accounts.
+  const user = await resolveActingUserForSession(session);
+  if (!user) {
+    redirect("/login");
+  }
+
+  // approvalStatus is read from the live resolved user, not the session
+  // token's embedded (possibly stale) field — an account demoted from
+  // APPROVED to PENDING after the token was issued must lose access
+  // immediately, not just once the 8-hour token expires.
+  if (user.approvalStatus !== "APPROVED") {
     redirect("/pending-approval");
   }
 
-  const user = await resolveActingUserForSession(session);
-
   return (
-    <AppShell
-      user={user ? { name: user.name, roleLabel: roleLabels[user.role] } : undefined}
-    >
+    <AppShell user={{ name: user.name, roleLabel: roleLabels[user.role] }}>
       {children}
     </AppShell>
   );

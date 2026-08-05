@@ -8,7 +8,12 @@ import Sidebar from "./Sidebar";
 
 type AppShellProps = {
   children: React.ReactNode;
-  user?: { name: string; roleLabel: string };
+  // Required, not optional: (app)/layout.tsx — AppShell's only caller —
+  // resolves and validates the acting user before ever rendering this
+  // component, redirecting to /login otherwise. A shell without a known
+  // user must never render, so the logout control can never be silently
+  // hidden.
+  user: { name: string; roleLabel: string };
 };
 
 export default function AppShell({ children, user }: AppShellProps) {
