@@ -9,7 +9,7 @@ import ApprovalScreen from "@/components/repair-cases/approval/ApprovalScreen";
 import DatabaseApprovalScreen from "@/components/repair-cases/approval/DatabaseApprovalScreen";
 import LocalApprovalContent from "@/components/repair-cases/approval/LocalApprovalContent";
 import { getCurrentApprovalsForCase, getApprovalHistoryForCase } from "@/lib/db/queries/repair-case-approvals";
-import { isUserShipmentRepresentative } from "@/lib/db/queries/users";
+import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 
 export const metadata: Metadata = {
   title: "검수/승인 | DSS A/S 관리 시스템",
@@ -48,10 +48,10 @@ export default async function RepairCaseApprovalPage({
   }
 
   if (resolved.source === "DATABASE") {
-    const [currentApprovals, history, isRepresentative] = await Promise.all([
+    const [currentApprovals, history, decideAuthorization] = await Promise.all([
       getCurrentApprovalsForCase(resolved.id),
       getApprovalHistoryForCase(resolved.id),
-      actingUser ? isUserShipmentRepresentative(actingUser.id) : Promise.resolve(false),
+      actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
     ]);
     return (
       <DatabaseApprovalScreen
@@ -59,7 +59,7 @@ export default async function RepairCaseApprovalPage({
         actingUser={actingUser}
         currentApprovals={currentApprovals}
         history={history}
-        isRepresentative={isRepresentative}
+        decideAuthorization={decideAuthorization}
       />
     );
   }

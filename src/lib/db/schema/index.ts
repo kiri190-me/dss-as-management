@@ -7,3 +7,5 @@ export * from "./intake-sequences";
 export * from "./idempotency-keys";
 export * from "./status-change-histories";
 export * from "./repair-case-approvals";
+export * from "./shipment-approval-delegations";
+export * from "./representative-change-history";

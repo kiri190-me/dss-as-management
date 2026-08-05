@@ -7,6 +7,7 @@ import ApprovalActionDialog from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
+import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 
 const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
@@ -24,24 +25,25 @@ function displayStatusOf(record: ApprovalRecordRow | null): DatabaseDisplayAppro
 }
 
 /**
- * Database-mode counterpart to FinalShipmentCard.tsx. No delegation UI —
- * database mode only supports the representative deciding directly (see
- * users.is_shipment_representative and the Phase-1 report's flagged
- * architectural decision); `isRepresentative` is resolved server-side
- * (repair-cases/[id]/approval/page.tsx) since it isn't part of the shared
- * ActingUser shape.
+ * Database-mode counterpart to FinalShipmentCard.tsx. Supports both direct
+ * representative approval and delegated approval — decideAuthorization is
+ * resolved server-side (resolveShipmentDecideAuthorization, repair-cases/
+ * [id]/approval/page.tsx) since it isn't part of the shared ActingUser
+ * shape and requires a DB read the client must never be trusted with. This
+ * is a UI hint only: decideRepairCaseApproval() (the mutation) always
+ * independently re-derives and re-verifies the same authorization itself.
  */
 export default function DatabaseFinalShipmentCard({
   repairCaseId,
   record,
   actingUser,
-  isRepresentative,
+  decideAuthorization,
   inspectionApproved,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
   actingUser: ActingUser;
-  isRepresentative: boolean;
+  decideAuthorization: ShipmentDecideAuthorization;
   inspectionApproved: boolean;
 }) {
   const router = useRouter();
@@ -69,13 +71,13 @@ export default function DatabaseFinalShipmentCard({
       disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
     }
   } else if (displayStatus === "REQUESTED") {
-    if (isRepresentative) {
+    if (decideAuthorization.allowed) {
       actions.push(
         { key: "approve", label: "출하 승인", onClick: () => setDialogState("APPROVED") },
         { key: "reject", label: "출하 반려", onClick: () => setDialogState("REJECTED"), tone: "danger" }
       );
     } else {
-      disabledReason = "대표로 지정된 계정만 처리할 수 있습니다.";
+      disabledReason = "대표로 지정된 계정 또는 유효한 위임을 받은 대리 승인자만 처리할 수 있습니다.";
     }
   } else if (displayStatus === "APPROVED") {
     disabledReason = "이미 승인 완료되어 추가 처리를 할 수 없습니다.";
@@ -108,7 +110,11 @@ export default function DatabaseFinalShipmentCard({
       <div>
         <dt className="text-xs text-zinc-500 dark:text-zinc-400">처리 자격</dt>
         <dd className="text-zinc-900 dark:text-zinc-50">
-          {isRepresentative ? "대표로 지정된 계정입니다." : "대표로 지정된 계정이 아닙니다."}
+          {decideAuthorization.allowed && decideAuthorization.mode === "DIRECT"
+            ? "대표로 지정된 계정입니다."
+            : decideAuthorization.allowed && decideAuthorization.mode === "DELEGATED"
+              ? `${decideAuthorization.representativeName}의 위임을 받아 처리할 수 있습니다.`
+              : "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다."}
         </dd>
       </div>
     </dl>

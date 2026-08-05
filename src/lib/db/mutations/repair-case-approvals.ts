@@ -1,11 +1,14 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, lte } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { repairCaseApprovals, repairCases, users } from "../schema";
+import { repairCaseApprovals, repairCases, shipmentApprovalDelegations, users } from "../schema";
 import type {
   ApprovalActionResult,
   RepairCaseApprovalType,
 } from "@/lib/validation/repair-case-approval-input";
+
+const delegationRepresentative = alias(users, "delegation_representative");
 
 /**
  * Database-backed approval request/decision persistence, replacing the
@@ -20,10 +23,16 @@ import type {
  * since those are pure/framework-agnostic; role-list literals are simple
  * enough to duplicate rather than reach across the mock/DB boundary for).
  *
- * FINAL_SHIPMENT decision eligibility uses users.is_shipment_representative
- * (direct only) — no delegation persistence exists yet (see the Phase-1
- * report's flagged architectural decision); delegated_from_user_id is
- * always NULL from this module.
+ * FINAL_SHIPMENT decision eligibility: either the actor is a currently-
+ * eligible representative (direct — delegated_from_user_id stays null), or
+ * the actor is the currently-valid delegate of a currently-eligible
+ * representative (delegated — delegated_from_user_id stores that
+ * representative, decided_by_user_id stores the actual delegate; see
+ * shipment-delegations.ts for delegation create/revoke). Both the
+ * representative's and the delegate's eligibility are re-verified live,
+ * inside this same transaction, never trusted from the delegation row
+ * alone (a representative can be unflagged, or an account
+ * deactivated/locked, after a delegation was granted).
  *
  * No self-approval restriction: the local-demo layer's decideApproval never
  * checks requestedByUserId against the deciding actingUser, so none is
@@ -151,21 +160,83 @@ export async function decideRepairCaseApproval(
       if (!current) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
 
       const [actor] = await tx
-        .select({ role: users.role, approvalStatus: users.approvalStatus, isShipmentRepresentative: users.isShipmentRepresentative })
+        .select({
+          role: users.role,
+          approvalStatus: users.approvalStatus,
+          isShipmentRepresentative: users.isShipmentRepresentative,
+          isActive: users.isActive,
+          lockedAt: users.lockedAt,
+        })
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
       if (actor.approvalStatus !== "APPROVED") {
         fail("FORBIDDEN", "승인되지 않은 계정은 이 작업을 수행할 수 없습니다.");
       }
+      let delegatedFromUserId: string | null = null;
       if (approvalType === "REPAIR_INSPECTION") {
+        // Unchanged from before this task — REPAIR_INSPECTION eligibility
+        // stays role + approvalStatus only, deliberately not touched here.
         if (!(INSPECTION_DECIDE_ELIGIBLE_ROLES as readonly string[]).includes(actor.role)) {
           fail("FORBIDDEN", "현재 역할로는 이 작업을 수행할 수 없습니다.");
         }
-      } else {
-        if (!actor.isShipmentRepresentative) {
-          fail("FORBIDDEN", "대표만 최종 출하 승인을 처리할 수 있습니다.");
+      } else if (!actor.isActive || actor.lockedAt !== null) {
+        // Applies to both direct representatives and delegates alike (the
+        // task's Delegation Validity list explicitly requires "the delegate
+        // is active ... and non-locked"; a representative deciding directly
+        // must meet the same bar — resolveShipmentDecideAuthorization's UI
+        // hint already checks this, so the mutation must too). Deliberately
+        // scoped to the FINAL_SHIPMENT branch only — REPAIR_INSPECTION's
+        // eligibility above is untouched.
+        fail("FORBIDDEN", "비활성화되었거나 잠긴 계정은 이 작업을 수행할 수 없습니다.");
+      } else if (!actor.isShipmentRepresentative) {
+        // Not a direct representative — check for a currently-valid active
+        // delegation (window includes now, not revoked) whose representative
+        // is still itself eligible right now.
+        const now = new Date();
+        const delegations = await tx
+          .select({
+            representativeUserId: shipmentApprovalDelegations.representativeUserId,
+            representativeIsShipmentRepresentative: delegationRepresentative.isShipmentRepresentative,
+            representativeApprovalStatus: delegationRepresentative.approvalStatus,
+            representativeIsActive: delegationRepresentative.isActive,
+            representativeLockedAt: delegationRepresentative.lockedAt,
+            representativeIsDeleted: delegationRepresentative.isDeleted,
+          })
+          .from(shipmentApprovalDelegations)
+          .innerJoin(
+            delegationRepresentative,
+            eq(shipmentApprovalDelegations.representativeUserId, delegationRepresentative.id)
+          )
+          .where(
+            and(
+              eq(shipmentApprovalDelegations.delegateUserId, actorUserId),
+              eq(shipmentApprovalDelegations.status, "ACTIVE"),
+              lte(shipmentApprovalDelegations.startsAt, now),
+              gt(shipmentApprovalDelegations.endsAt, now)
+            )
+          )
+          // Locks both the candidate delegation row(s) and the joined
+          // representative's users row for this transaction's duration —
+          // revokeShipmentDelegation() and setShipmentRepresentative() each
+          // already lock exactly these same rows before writing, so a
+          // decide() racing against either one serializes correctly instead
+          // of reading a stale eligible/valid snapshot that a concurrent
+          // revoke/unflag is simultaneously invalidating.
+          .for("update");
+
+        const validDelegation = delegations.find(
+          (d) =>
+            d.representativeIsShipmentRepresentative &&
+            d.representativeApprovalStatus === "APPROVED" &&
+            d.representativeIsActive &&
+            d.representativeLockedAt === null &&
+            !d.representativeIsDeleted
+        );
+        if (!validDelegation) {
+          fail("FORBIDDEN", "대표 또는 유효한 위임을 받은 대리 승인자만 최종 출하 승인을 처리할 수 있습니다.");
         }
+        delegatedFromUserId = validDelegation.representativeUserId;
       }
 
       // Row-lock the latest request for this (case, type) so a concurrent
@@ -201,6 +272,7 @@ export async function decideRepairCaseApproval(
           decidedByUserId: actorUserId,
           decidedAt: new Date(),
           decisionReason,
+          delegatedFromUserId,
           updatedAt: new Date(),
         })
         .where(and(eq(repairCaseApprovals.id, latest.id), eq(repairCaseApprovals.status, "REQUESTED")))

@@ -24,6 +24,18 @@ function formatTimestamp(iso: string | null): string | null {
   });
 }
 
+/**
+ * delegatedFromName is only ever non-null on a FINAL_SHIPMENT row (schema
+ * CHECK constraint), so this branch never fires for REPAIR_INSPECTION —
+ * safe to compute unconditionally here rather than needing an
+ * approvalType prop.
+ */
+function decidedByLabel(record: ApprovalRecordRow | null): string | null {
+  if (!record?.decidedByName) return null;
+  if (!record.delegatedFromName) return record.decidedByName;
+  return `${record.decidedByName} (${record.delegatedFromName}를 대신하여 승인)`;
+}
+
 export type DatabaseApprovalActionButton = {
   key: string;
   label: string;
@@ -73,7 +85,7 @@ export default function DatabaseApprovalCard({
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
         <Field label="요청자" value={record?.requestedByName ?? null} />
-        <Field label="승인자" value={record?.decidedByName ?? null} />
+        <Field label="승인자" value={decidedByLabel(record)} />
         <Field label="요청 시각" value={formatTimestamp(record?.requestedAt ?? null)} />
         <Field label="결정 시각" value={formatTimestamp(record?.decidedAt ?? null)} />
       </dl>

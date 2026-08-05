@@ -94,21 +94,3 @@ export async function listUsersForLoginPicker(): Promise<LoginPickerUserRow[]> {
     .orderBy(users.name);
 }
 
-/**
- * UI hint only (whether to show the FINAL_SHIPMENT decide buttons at all)
- * — never the enforcement boundary. decideRepairCaseApproval() (mutation
- * layer) independently re-reads this same flag from the DB before allowing
- * a FINAL_SHIPMENT decision, exactly like every other server-re-checks-what-
- * the-UI-hid pattern in this codebase.
- */
-export async function isUserShipmentRepresentative(id: string): Promise<boolean> {
-  if (!UUID_PATTERN.test(id)) {
-    return false;
-  }
-  const [row] = await db
-    .select({ isShipmentRepresentative: users.isShipmentRepresentative })
-    .from(users)
-    .where(and(eq(users.id, id), eq(users.isDeleted, false)))
-    .limit(1);
-  return row?.isShipmentRepresentative ?? false;
-}

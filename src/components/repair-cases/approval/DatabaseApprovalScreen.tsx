@@ -5,6 +5,7 @@ import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { ApprovalRecordRow, CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
+import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 
 /**
  * Database-mode counterpart to ApprovalScreen.tsx (local-demo). Rendered by
@@ -17,13 +18,13 @@ export default function DatabaseApprovalScreen({
   actingUser,
   currentApprovals,
   history,
-  isRepresentative,
+  decideAuthorization,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
   currentApprovals: CurrentApprovalState[];
   history: ApprovalRecordRow[];
-  isRepresentative: boolean;
+  decideAuthorization: ShipmentDecideAuthorization;
 }) {
   if (!actingUser) {
     return (
@@ -47,7 +48,7 @@ export default function DatabaseApprovalScreen({
           repairCaseId={resolved.id}
           record={shipmentState}
           actingUser={actingUser}
-          isRepresentative={isRepresentative}
+          decideAuthorization={decideAuthorization}
           inspectionApproved={inspectionApproved}
         />
       </div>
