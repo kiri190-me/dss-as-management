@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { navItems } from "@/lib/navigation";
+import type { Role } from "@/lib/domain/types";
 import TopBar from "./TopBar";
 import Sidebar from "./Sidebar";
 
@@ -12,8 +13,11 @@ type AppShellProps = {
   // resolves and validates the acting user before ever rendering this
   // component, redirecting to /login otherwise. A shell without a known
   // user must never render, so the logout control can never be silently
-  // hidden.
-  user: { name: string; roleLabel: string };
+  // hidden. `role` drives Sidebar's nav-item visibility filter only — a
+  // UX convenience, never the enforcement boundary (every gated page
+  // re-checks the same predicate server-side regardless of what this
+  // shell renders).
+  user: { name: string; roleLabel: string; role: Role };
 };
 
 export default function AppShell({ children, user }: AppShellProps) {
@@ -30,7 +34,7 @@ export default function AppShell({ children, user }: AppShellProps) {
       </div>
       <div className="flex flex-1 overflow-hidden print:overflow-visible">
         <aside className="hidden border-r border-zinc-200 md:flex md:w-60 md:flex-col print:hidden dark:border-zinc-800">
-          <Sidebar activeHref={pathname} />
+          <Sidebar activeHref={pathname} role={user.role} />
         </aside>
 
         {mobileNavOpen && (
@@ -44,6 +48,7 @@ export default function AppShell({ children, user }: AppShellProps) {
             <aside className="relative z-50 flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
               <Sidebar
                 activeHref={pathname}
+                role={user.role}
                 onNavigate={() => setMobileNavOpen(false)}
               />
             </aside>

@@ -1,15 +1,18 @@
 import Link from "next/link";
-import { navItems } from "@/lib/navigation";
+import { navItems, filterNavItemsForRole } from "@/lib/navigation";
+import type { Role } from "@/lib/domain/types";
 
 type SidebarProps = {
   activeHref: string;
+  role: Role;
   onNavigate?: () => void;
 };
 
-export default function Sidebar({ activeHref, onNavigate }: SidebarProps) {
+export default function Sidebar({ activeHref, role, onNavigate }: SidebarProps) {
+  const visibleItems = filterNavItemsForRole(navItems, role);
   return (
     <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-      {navItems.map((item) => {
+      {visibleItems.map((item) => {
         const isActive = item.href === activeHref;
         return (
           <Link

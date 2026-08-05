@@ -1,0 +1,432 @@
+import "server-only";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { db } from "../client";
+import {
+  procedureTemplates,
+  procedureTemplateNodes,
+  procedureTemplateEdges,
+  procedureChecklistSections,
+  procedureChecklistItems,
+  procedureTroubleshootingEntries,
+  procedureTemplateValidationIssues,
+  users,
+} from "../schema";
+import type {
+  ProcedureBranchType,
+  ProcedureEquipmentType,
+  ProcedureNodeType,
+  ProcedureTemplateSourceType,
+  ProcedureTemplateStatus,
+  ProcedureValidationIssueType,
+  ProcedureValidationSeverity,
+} from "@/lib/domain/procedure-template-types";
+
+export type ProcedureTemplateListRow = {
+  id: string;
+  code: string;
+  name: string;
+  equipmentType: ProcedureEquipmentType;
+  version: number;
+  status: ProcedureTemplateStatus;
+  sourceType: ProcedureTemplateSourceType;
+  sourceFileName: string | null;
+  sourceWorksheetCount: number;
+  nodeCount: number;
+  checklistItemCount: number;
+  validationWarningCount: number;
+  validationErrorCount: number;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+/**
+ * List for /procedures. `includeAllStatuses` gates DRAFT/ARCHIVED
+ * visibility — the caller (the page) decides this from the acting user's
+ * role via canViewAllProcedureTemplateStatuses, never from a client-passed
+ * flag, so this function's own default (published-only) is the safe one
+ * if a caller ever forgets to pass it explicitly.
+ */
+export async function listProcedureTemplates(
+  includeAllStatuses: boolean
+): Promise<ProcedureTemplateListRow[]> {
+  const templates = await db
+    .select()
+    .from(procedureTemplates)
+    .where(includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED"))
+    .orderBy(desc(procedureTemplates.createdAt));
+  if (templates.length === 0) return [];
+
+  const templateIds = templates.map((t) => t.id);
+
+  const nodeAgg = await db
+    .select({
+      templateId: procedureTemplateNodes.procedureTemplateId,
+      nodeCount: sql<number>`count(*)::int`,
+      worksheetCount: sql<number>`count(distinct ${procedureTemplateNodes.sourceWorksheet})::int`,
+    })
+    .from(procedureTemplateNodes)
+    .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
+    .groupBy(procedureTemplateNodes.procedureTemplateId);
+  const nodeAggByTemplate = new Map(nodeAgg.map((r) => [r.templateId, r]));
+
+  const checklistAgg = await db
+    .select({
+      templateId: procedureTemplateNodes.procedureTemplateId,
+      itemCount: sql<number>`count(${procedureChecklistItems.id})::int`,
+    })
+    .from(procedureChecklistItems)
+    .innerJoin(procedureChecklistSections, eq(procedureChecklistItems.sectionId, procedureChecklistSections.id))
+    .innerJoin(procedureTemplateNodes, eq(procedureChecklistSections.nodeId, procedureTemplateNodes.id))
+    .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
+    .groupBy(procedureTemplateNodes.procedureTemplateId);
+  const checklistCountByTemplate = new Map(checklistAgg.map((r) => [r.templateId, r.itemCount]));
+
+  const issueAgg = await db
+    .select({
+      templateId: procedureTemplateValidationIssues.procedureTemplateId,
+      severity: procedureTemplateValidationIssues.severity,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(procedureTemplateValidationIssues)
+    .where(
+      and(
+        inArray(procedureTemplateValidationIssues.procedureTemplateId, templateIds),
+        isNull(procedureTemplateValidationIssues.resolvedAt)
+      )
+    )
+    .groupBy(procedureTemplateValidationIssues.procedureTemplateId, procedureTemplateValidationIssues.severity);
+  const warningCountByTemplate = new Map<string, number>();
+  const errorCountByTemplate = new Map<string, number>();
+  for (const row of issueAgg) {
+    if (row.severity === "WARNING") warningCountByTemplate.set(row.templateId, row.count);
+    if (row.severity === "ERROR") errorCountByTemplate.set(row.templateId, row.count);
+  }
+
+  return templates.map((t) => ({
+    id: t.id,
+    code: t.code,
+    name: t.name,
+    equipmentType: t.equipmentType,
+    version: t.version,
+    status: t.status,
+    sourceType: t.sourceType,
+    sourceFileName: t.sourceFileName,
+    sourceWorksheetCount: nodeAggByTemplate.get(t.id)?.worksheetCount ?? 0,
+    nodeCount: nodeAggByTemplate.get(t.id)?.nodeCount ?? 0,
+    checklistItemCount: checklistCountByTemplate.get(t.id) ?? 0,
+    validationWarningCount: warningCountByTemplate.get(t.id) ?? 0,
+    validationErrorCount: errorCountByTemplate.get(t.id) ?? 0,
+    createdAt: t.createdAt.toISOString(),
+    publishedAt: t.publishedAt ? t.publishedAt.toISOString() : null,
+  }));
+}
+
+export type ProcedureTemplateNodeRow = {
+  id: string;
+  nodeCode: string;
+  nodeType: ProcedureNodeType;
+  title: string;
+  description: string | null;
+  objective: string | null;
+  preparation: string | null;
+  toolsAndEquipment: string | null;
+  safetyCaution: string | null;
+  instructions: string | null;
+  expectedNormalResult: string | null;
+  ngSymptoms: string | null;
+  recommendedCorrectiveAction: string | null;
+  acceptanceCriteria: string | null;
+  workerMayAddNextTask: boolean;
+  positionX: number;
+  positionY: number;
+  sortOrder: number;
+  sourceWorksheet: string | null;
+  sourceShapeId: string | null;
+  sourceCellRange: string | null;
+};
+
+export type ProcedureTemplateEdgeRow = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  branchType: ProcedureBranchType;
+  branchLabel: string | null;
+  sortOrder: number;
+  sourceConnectorId: string | null;
+};
+
+export type ProcedureChecklistItemRow = {
+  id: string;
+  itemCode: string;
+  title: string;
+  instructions: string | null;
+  measurementType: string | null;
+  measurementUnit: string | null;
+  minValue: string | null;
+  maxValue: string | null;
+  expectedText: string | null;
+  acceptanceRule: string | null;
+  required: boolean;
+  sortOrder: number;
+  sourceCellRange: string | null;
+};
+
+export type ProcedureChecklistSectionRow = {
+  id: string;
+  nodeId: string;
+  title: string;
+  sortOrder: number;
+  sourceWorksheet: string | null;
+  sourceCellRange: string | null;
+  items: ProcedureChecklistItemRow[];
+};
+
+export type ProcedureTroubleshootingEntryRow = {
+  id: string;
+  nodeId: string;
+  symptom: string;
+  inspectionAction: string | null;
+  normalNextAction: string | null;
+  ngAction: string | null;
+  retryInstruction: string | null;
+  sortOrder: number;
+  sourceCellRange: string | null;
+};
+
+export type ProcedureValidationIssueRow = {
+  id: string;
+  severity: ProcedureValidationSeverity;
+  issueType: ProcedureValidationIssueType;
+  message: string;
+  sourceWorksheet: string | null;
+  sourceReference: string | null;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
+  resolutionNote: string | null;
+  createdAt: string;
+};
+
+export type ProcedureTemplateDetail = {
+  id: string;
+  code: string;
+  name: string;
+  equipmentType: ProcedureEquipmentType;
+  description: string | null;
+  status: ProcedureTemplateStatus;
+  version: number;
+  sourceType: ProcedureTemplateSourceType;
+  sourceFileName: string | null;
+  sourceFileHash: string | null;
+  createdByName: string;
+  publishedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string | null;
+  archivedAt: string | null;
+  nodes: ProcedureTemplateNodeRow[];
+  edges: ProcedureTemplateEdgeRow[];
+  checklistSections: ProcedureChecklistSectionRow[];
+  troubleshootingEntries: ProcedureTroubleshootingEntryRow[];
+  validationIssues: ProcedureValidationIssueRow[];
+};
+
+export async function getProcedureTemplateDetail(id: string): Promise<ProcedureTemplateDetail | null> {
+  const createdBy = users;
+  const [row] = await db
+    .select({
+      id: procedureTemplates.id,
+      code: procedureTemplates.code,
+      name: procedureTemplates.name,
+      equipmentType: procedureTemplates.equipmentType,
+      description: procedureTemplates.description,
+      status: procedureTemplates.status,
+      version: procedureTemplates.version,
+      sourceType: procedureTemplates.sourceType,
+      sourceFileName: procedureTemplates.sourceFileName,
+      sourceFileHash: procedureTemplates.sourceFileHash,
+      createdByName: createdBy.name,
+      createdAt: procedureTemplates.createdAt,
+      updatedAt: procedureTemplates.updatedAt,
+      publishedAt: procedureTemplates.publishedAt,
+      archivedAt: procedureTemplates.archivedAt,
+      publishedByUserId: procedureTemplates.publishedByUserId,
+    })
+    .from(procedureTemplates)
+    .innerJoin(createdBy, eq(procedureTemplates.createdByUserId, createdBy.id))
+    .where(eq(procedureTemplates.id, id));
+  if (!row) return null;
+
+  let publishedByName: string | null = null;
+  if (row.publishedByUserId) {
+    const [publisher] = await db.select({ name: users.name }).from(users).where(eq(users.id, row.publishedByUserId));
+    publishedByName = publisher?.name ?? null;
+  }
+
+  const nodes = await db
+    .select()
+    .from(procedureTemplateNodes)
+    .where(eq(procedureTemplateNodes.procedureTemplateId, id))
+    .orderBy(procedureTemplateNodes.sortOrder);
+
+  const edges = await db
+    .select()
+    .from(procedureTemplateEdges)
+    .where(eq(procedureTemplateEdges.procedureTemplateId, id))
+    .orderBy(procedureTemplateEdges.sortOrder);
+
+  const nodeIds = nodes.map((n) => n.id);
+
+  const sections =
+    nodeIds.length > 0
+      ? await db
+          .select()
+          .from(procedureChecklistSections)
+          .where(inArray(procedureChecklistSections.nodeId, nodeIds))
+          .orderBy(procedureChecklistSections.sortOrder)
+      : [];
+  const sectionIds = sections.map((s) => s.id);
+  const items =
+    sectionIds.length > 0
+      ? await db
+          .select()
+          .from(procedureChecklistItems)
+          .where(inArray(procedureChecklistItems.sectionId, sectionIds))
+          .orderBy(procedureChecklistItems.sortOrder)
+      : [];
+  const itemsBySection = new Map<string, ProcedureChecklistItemRow[]>();
+  for (const item of items) {
+    const list = itemsBySection.get(item.sectionId) ?? [];
+    list.push({
+      id: item.id,
+      itemCode: item.itemCode,
+      title: item.title,
+      instructions: item.instructions,
+      measurementType: item.measurementType,
+      measurementUnit: item.measurementUnit,
+      minValue: item.minValue,
+      maxValue: item.maxValue,
+      expectedText: item.expectedText,
+      acceptanceRule: item.acceptanceRule,
+      required: item.required,
+      sortOrder: item.sortOrder,
+      sourceCellRange: item.sourceCellRange,
+    });
+    itemsBySection.set(item.sectionId, list);
+  }
+
+  const troubleshootingEntries =
+    nodeIds.length > 0
+      ? await db
+          .select()
+          .from(procedureTroubleshootingEntries)
+          .where(inArray(procedureTroubleshootingEntries.nodeId, nodeIds))
+          .orderBy(procedureTroubleshootingEntries.sortOrder)
+      : [];
+
+  const issues = await db
+    .select({
+      id: procedureTemplateValidationIssues.id,
+      severity: procedureTemplateValidationIssues.severity,
+      issueType: procedureTemplateValidationIssues.issueType,
+      message: procedureTemplateValidationIssues.message,
+      sourceWorksheet: procedureTemplateValidationIssues.sourceWorksheet,
+      sourceReference: procedureTemplateValidationIssues.sourceReference,
+      resolvedAt: procedureTemplateValidationIssues.resolvedAt,
+      resolutionNote: procedureTemplateValidationIssues.resolutionNote,
+      createdAt: procedureTemplateValidationIssues.createdAt,
+      resolvedByUserId: procedureTemplateValidationIssues.resolvedByUserId,
+    })
+    .from(procedureTemplateValidationIssues)
+    .where(eq(procedureTemplateValidationIssues.procedureTemplateId, id))
+    .orderBy(desc(procedureTemplateValidationIssues.severity), procedureTemplateValidationIssues.createdAt);
+
+  const resolverIds = [...new Set(issues.map((i) => i.resolvedByUserId).filter((v): v is string => v !== null))];
+  const resolverNameById = new Map<string, string>();
+  if (resolverIds.length > 0) {
+    const resolvers = await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, resolverIds));
+    for (const r of resolvers) resolverNameById.set(r.id, r.name);
+  }
+
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    equipmentType: row.equipmentType,
+    description: row.description,
+    status: row.status,
+    version: row.version,
+    sourceType: row.sourceType,
+    sourceFileName: row.sourceFileName,
+    sourceFileHash: row.sourceFileHash,
+    createdByName: row.createdByName,
+    publishedByName,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      nodeCode: n.nodeCode,
+      nodeType: n.nodeType,
+      title: n.title,
+      description: n.description,
+      objective: n.objective,
+      preparation: n.preparation,
+      toolsAndEquipment: n.toolsAndEquipment,
+      safetyCaution: n.safetyCaution,
+      instructions: n.instructions,
+      expectedNormalResult: n.expectedNormalResult,
+      ngSymptoms: n.ngSymptoms,
+      recommendedCorrectiveAction: n.recommendedCorrectiveAction,
+      acceptanceCriteria: n.acceptanceCriteria,
+      workerMayAddNextTask: n.workerMayAddNextTask,
+      positionX: n.positionX,
+      positionY: n.positionY,
+      sortOrder: n.sortOrder,
+      sourceWorksheet: n.sourceWorksheet,
+      sourceShapeId: n.sourceShapeId,
+      sourceCellRange: n.sourceCellRange,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      fromNodeId: e.fromNodeId,
+      toNodeId: e.toNodeId,
+      branchType: e.branchType,
+      branchLabel: e.branchLabel,
+      sortOrder: e.sortOrder,
+      sourceConnectorId: e.sourceConnectorId,
+    })),
+    checklistSections: sections.map((s) => ({
+      id: s.id,
+      nodeId: s.nodeId,
+      title: s.title,
+      sortOrder: s.sortOrder,
+      sourceWorksheet: s.sourceWorksheet,
+      sourceCellRange: s.sourceCellRange,
+      items: itemsBySection.get(s.id) ?? [],
+    })),
+    troubleshootingEntries: troubleshootingEntries.map((t) => ({
+      id: t.id,
+      nodeId: t.nodeId,
+      symptom: t.symptom,
+      inspectionAction: t.inspectionAction,
+      normalNextAction: t.normalNextAction,
+      ngAction: t.ngAction,
+      retryInstruction: t.retryInstruction,
+      sortOrder: t.sortOrder,
+      sourceCellRange: t.sourceCellRange,
+    })),
+    validationIssues: issues.map((i) => ({
+      id: i.id,
+      severity: i.severity,
+      issueType: i.issueType as ProcedureValidationIssueType,
+      message: i.message,
+      sourceWorksheet: i.sourceWorksheet,
+      sourceReference: i.sourceReference,
+      resolvedAt: i.resolvedAt ? i.resolvedAt.toISOString() : null,
+      resolvedByName: i.resolvedByUserId ? resolverNameById.get(i.resolvedByUserId) ?? null : null,
+      resolutionNote: i.resolutionNote,
+      createdAt: i.createdAt.toISOString(),
+    })),
+  };
+}

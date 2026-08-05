@@ -12,6 +12,13 @@ import {
   workflowSteps,
   exceptionStatuses,
   repairCases,
+  procedureTemplates,
+  procedureTemplateNodes,
+  procedureTemplateEdges,
+  procedureChecklistSections,
+  procedureChecklistItems,
+  procedureTroubleshootingEntries,
+  procedureTemplateValidationIssues,
 } from "../src/lib/db/schema";
 
 /**
@@ -28,6 +35,13 @@ const tables = [
   { name: "workflow_steps", table: workflowSteps },
   { name: "exception_statuses", table: exceptionStatuses },
   { name: "repair_cases", table: repairCases },
+  { name: "procedure_templates", table: procedureTemplates },
+  { name: "procedure_template_nodes", table: procedureTemplateNodes },
+  { name: "procedure_template_edges", table: procedureTemplateEdges },
+  { name: "procedure_checklist_sections", table: procedureChecklistSections },
+  { name: "procedure_checklist_items", table: procedureChecklistItems },
+  { name: "procedure_troubleshooting_entries", table: procedureTroubleshootingEntries },
+  { name: "procedure_template_validation_issues", table: procedureTemplateValidationIssues },
 ] as const;
 
 async function main() {

@@ -50,6 +50,13 @@
       "when": 1785913139336,
       "tag": "0006_numerous_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785933331252,
+      "tag": "0007_add_procedure_templates",
+      "breakpoints": true
     }
   ]
 }
