@@ -9,6 +9,7 @@ import {
   procedureChecklistItems,
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
+  procedureReferenceItems,
   users,
 } from "../schema";
 import { canImportProcedureTemplates, canPublishProcedureTemplates, canArchiveProcedureTemplates, canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
@@ -126,6 +127,7 @@ export async function createDraftProcedureTemplateFromImport(
           sourceType: "EXCEL_IMPORT",
           sourceFileName: source.sourceFileName,
           sourceFileHash: source.sourceFileHash,
+          isReferenceOnly: extracted.isReferenceOnly,
           createdByUserId: actor.id,
         })
         .returning({ id: procedureTemplates.id });
@@ -147,7 +149,10 @@ export async function createDraftProcedureTemplateFromImport(
 async function insertTemplateContent(
   tx: Tx,
   templateId: string,
-  extracted: Pick<ExtractedTemplate, "nodes" | "edges" | "checklistSections" | "troubleshootingEntries" | "issues">
+  extracted: Pick<
+    ExtractedTemplate,
+    "nodes" | "edges" | "checklistSections" | "troubleshootingEntries" | "referenceItems" | "issues"
+  >
 ): Promise<void> {
   const nodeIdByCode = new Map<string, string>();
   if (extracted.nodes.length > 0) {
@@ -251,6 +256,21 @@ async function insertTemplateContent(
       sortOrder: entry.sortOrder,
       sourceCellRange: entry.sourceCellRange ?? null,
     });
+  }
+
+  if (extracted.referenceItems.length > 0) {
+    await tx.insert(procedureReferenceItems).values(
+      extracted.referenceItems.map((item) => ({
+        procedureTemplateId: templateId,
+        itemType: item.itemType,
+        label: item.label,
+        sourceWorksheet: item.sourceWorksheet,
+        sourceCellRange: item.sourceCellRange ?? null,
+        hyperlinkTarget: item.hyperlinkTarget ?? null,
+        crossReferenceNumber: item.crossReferenceNumber ?? null,
+        sortOrder: item.sortOrder,
+      }))
+    );
   }
 
   if (extracted.issues.length > 0) {
@@ -402,6 +422,7 @@ export async function createNewDraftVersion(
           sourceType: published.sourceType,
           sourceFileName: published.sourceFileName,
           sourceFileHash: published.sourceFileHash,
+          isReferenceOnly: published.isReferenceOnly,
           supersedesTemplateId: published.id,
           createdByUserId: actor.id,
         })
@@ -546,7 +567,154 @@ export async function createNewDraftVersion(
         if (rows.length > 0) await tx.insert(procedureTroubleshootingEntries).values(rows);
       }
 
+      const oldReferenceItems = await tx
+        .select()
+        .from(procedureReferenceItems)
+        .where(eq(procedureReferenceItems.procedureTemplateId, published.id));
+      if (oldReferenceItems.length > 0) {
+        await tx.insert(procedureReferenceItems).values(
+          oldReferenceItems.map((item) => ({
+            procedureTemplateId: newDraft.id,
+            itemType: item.itemType,
+            label: item.label,
+            sourceWorksheet: item.sourceWorksheet,
+            sourceCellRange: item.sourceCellRange,
+            hyperlinkTarget: item.hyperlinkTarget,
+            crossReferenceNumber: item.crossReferenceNumber,
+            sortOrder: item.sortOrder,
+          }))
+        );
+      }
+
       return { ok: true, id: newDraft.id };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
+    throw err;
+  }
+}
+
+export type ReplaceDraftTemplatesResult =
+  | {
+      ok: true;
+      deleted: {
+        code: string;
+        id: string;
+        nodeCount: number;
+        edgeCount: number;
+        checklistSectionCount: number;
+        checklistItemCount: number;
+        troubleshootingEntryCount: number;
+        referenceItemCount: number;
+        issueCount: number;
+      }[];
+    }
+  | { ok: false; code: ProcedureTemplateResultCode; message: string };
+
+/**
+ * Explicit, disclosed replace mode for the Phase 2.5 template
+ * reorganization (task brief: "implement an explicit safe replace/reimport
+ * mode... do not manually delete existing reviewed templates without
+ * disclosure"). Only ever touches rows whose `code` is in the given list
+ * AND whose `status` is still 'DRAFT' — a template that was ever published
+ * (even if since archived) is never matched here regardless of code, so
+ * this can never destroy version-chain history. Deletes child rows first
+ * (respecting the existing onDelete:"restrict" FKs), all inside one
+ * transaction together with the template-row deletes, and returns exactly
+ * what was removed so the caller can print it for disclosure.
+ */
+export async function replaceDraftProcedureTemplates(
+  codes: string[],
+  actorUserId: string
+): Promise<ReplaceDraftTemplatesResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await resolveEligibleActor(tx, actorUserId);
+      if (!canImportProcedureTemplates(actor.role)) {
+        fail("FORBIDDEN", "가져오기 권한이 없습니다 (SUPER_ADMIN 전용).");
+      }
+
+      if (codes.length === 0) return { ok: true, deleted: [] };
+
+      const targets = await tx
+        .select({ id: procedureTemplates.id, code: procedureTemplates.code })
+        .from(procedureTemplates)
+        .where(and(inArray(procedureTemplates.code, codes), eq(procedureTemplates.status, "DRAFT")));
+
+      const deleted: (ReplaceDraftTemplatesResult & { ok: true })["deleted"] = [];
+
+      for (const target of targets) {
+        const nodes = await tx
+          .select({ id: procedureTemplateNodes.id })
+          .from(procedureTemplateNodes)
+          .where(eq(procedureTemplateNodes.procedureTemplateId, target.id));
+        const nodeIds = nodes.map((n) => n.id);
+
+        const deletedIssues = await tx
+          .delete(procedureTemplateValidationIssues)
+          .where(eq(procedureTemplateValidationIssues.procedureTemplateId, target.id))
+          .returning({ id: procedureTemplateValidationIssues.id });
+
+        const deletedReferenceItems = await tx
+          .delete(procedureReferenceItems)
+          .where(eq(procedureReferenceItems.procedureTemplateId, target.id))
+          .returning({ id: procedureReferenceItems.id });
+
+        let deletedChecklistItemCount = 0;
+        let deletedSectionCount = 0;
+        let deletedTroubleshootingCount = 0;
+        if (nodeIds.length > 0) {
+          const sections = await tx
+            .select({ id: procedureChecklistSections.id })
+            .from(procedureChecklistSections)
+            .where(inArray(procedureChecklistSections.nodeId, nodeIds));
+          const sectionIds = sections.map((s) => s.id);
+          if (sectionIds.length > 0) {
+            const deletedItems = await tx
+              .delete(procedureChecklistItems)
+              .where(inArray(procedureChecklistItems.sectionId, sectionIds))
+              .returning({ id: procedureChecklistItems.id });
+            deletedChecklistItemCount = deletedItems.length;
+          }
+          const deletedSections = await tx
+            .delete(procedureChecklistSections)
+            .where(inArray(procedureChecklistSections.nodeId, nodeIds))
+            .returning({ id: procedureChecklistSections.id });
+          deletedSectionCount = deletedSections.length;
+
+          const deletedTroubleshooting = await tx
+            .delete(procedureTroubleshootingEntries)
+            .where(inArray(procedureTroubleshootingEntries.nodeId, nodeIds))
+            .returning({ id: procedureTroubleshootingEntries.id });
+          deletedTroubleshootingCount = deletedTroubleshooting.length;
+        }
+
+        const deletedEdges = await tx
+          .delete(procedureTemplateEdges)
+          .where(eq(procedureTemplateEdges.procedureTemplateId, target.id))
+          .returning({ id: procedureTemplateEdges.id });
+
+        const deletedNodes = await tx
+          .delete(procedureTemplateNodes)
+          .where(eq(procedureTemplateNodes.procedureTemplateId, target.id))
+          .returning({ id: procedureTemplateNodes.id });
+
+        await tx.delete(procedureTemplates).where(eq(procedureTemplates.id, target.id));
+
+        deleted.push({
+          code: target.code,
+          id: target.id,
+          nodeCount: deletedNodes.length,
+          edgeCount: deletedEdges.length,
+          checklistSectionCount: deletedSectionCount,
+          checklistItemCount: deletedChecklistItemCount,
+          troubleshootingEntryCount: deletedTroubleshootingCount,
+          referenceItemCount: deletedReferenceItems.length,
+          issueCount: deletedIssues.length,
+        });
+      }
+
+      return { ok: true, deleted };
     });
   } catch (err) {
     if (err instanceof ProcedureTemplateMutationError) return err.result;

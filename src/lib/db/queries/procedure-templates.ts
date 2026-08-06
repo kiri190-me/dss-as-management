@@ -9,12 +9,14 @@ import {
   procedureChecklistItems,
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
+  procedureReferenceItems,
   users,
 } from "../schema";
 import type {
   ProcedureBranchType,
   ProcedureEquipmentType,
   ProcedureNodeType,
+  ProcedureReferenceItemType,
   ProcedureTemplateSourceType,
   ProcedureTemplateStatus,
   ProcedureValidationIssueType,
@@ -30,9 +32,11 @@ export type ProcedureTemplateListRow = {
   status: ProcedureTemplateStatus;
   sourceType: ProcedureTemplateSourceType;
   sourceFileName: string | null;
+  isReferenceOnly: boolean;
   sourceWorksheetCount: number;
   nodeCount: number;
   checklistItemCount: number;
+  referenceItemCount: number;
   validationWarningCount: number;
   validationErrorCount: number;
   createdAt: string;
@@ -68,6 +72,17 @@ export async function listProcedureTemplates(
     .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
     .groupBy(procedureTemplateNodes.procedureTemplateId);
   const nodeAggByTemplate = new Map(nodeAgg.map((r) => [r.templateId, r]));
+
+  const referenceAgg = await db
+    .select({
+      templateId: procedureReferenceItems.procedureTemplateId,
+      itemCount: sql<number>`count(*)::int`,
+      worksheetCount: sql<number>`count(distinct ${procedureReferenceItems.sourceWorksheet})::int`,
+    })
+    .from(procedureReferenceItems)
+    .where(inArray(procedureReferenceItems.procedureTemplateId, templateIds))
+    .groupBy(procedureReferenceItems.procedureTemplateId);
+  const referenceAggByTemplate = new Map(referenceAgg.map((r) => [r.templateId, r]));
 
   const checklistAgg = await db
     .select({
@@ -111,9 +126,12 @@ export async function listProcedureTemplates(
     status: t.status,
     sourceType: t.sourceType,
     sourceFileName: t.sourceFileName,
-    sourceWorksheetCount: nodeAggByTemplate.get(t.id)?.worksheetCount ?? 0,
+    isReferenceOnly: t.isReferenceOnly,
+    sourceWorksheetCount:
+      nodeAggByTemplate.get(t.id)?.worksheetCount ?? referenceAggByTemplate.get(t.id)?.worksheetCount ?? 0,
     nodeCount: nodeAggByTemplate.get(t.id)?.nodeCount ?? 0,
     checklistItemCount: checklistCountByTemplate.get(t.id) ?? 0,
+    referenceItemCount: referenceAggByTemplate.get(t.id)?.itemCount ?? 0,
     validationWarningCount: warningCountByTemplate.get(t.id) ?? 0,
     validationErrorCount: errorCountByTemplate.get(t.id) ?? 0,
     createdAt: t.createdAt.toISOString(),
@@ -206,6 +224,17 @@ export type ProcedureValidationIssueRow = {
   createdAt: string;
 };
 
+export type ProcedureReferenceItemRow = {
+  id: string;
+  itemType: ProcedureReferenceItemType;
+  label: string;
+  sourceWorksheet: string;
+  sourceCellRange: string | null;
+  hyperlinkTarget: string | null;
+  crossReferenceNumber: string | null;
+  sortOrder: number;
+};
+
 export type ProcedureTemplateDetail = {
   id: string;
   code: string;
@@ -217,6 +246,7 @@ export type ProcedureTemplateDetail = {
   sourceType: ProcedureTemplateSourceType;
   sourceFileName: string | null;
   sourceFileHash: string | null;
+  isReferenceOnly: boolean;
   createdByName: string;
   publishedByName: string | null;
   createdAt: string;
@@ -227,6 +257,7 @@ export type ProcedureTemplateDetail = {
   edges: ProcedureTemplateEdgeRow[];
   checklistSections: ProcedureChecklistSectionRow[];
   troubleshootingEntries: ProcedureTroubleshootingEntryRow[];
+  referenceItems: ProcedureReferenceItemRow[];
   validationIssues: ProcedureValidationIssueRow[];
 };
 
@@ -244,6 +275,7 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       sourceType: procedureTemplates.sourceType,
       sourceFileName: procedureTemplates.sourceFileName,
       sourceFileHash: procedureTemplates.sourceFileHash,
+      isReferenceOnly: procedureTemplates.isReferenceOnly,
       createdByName: createdBy.name,
       createdAt: procedureTemplates.createdAt,
       updatedAt: procedureTemplates.updatedAt,
@@ -323,6 +355,12 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
           .orderBy(procedureTroubleshootingEntries.sortOrder)
       : [];
 
+  const referenceItems = await db
+    .select()
+    .from(procedureReferenceItems)
+    .where(eq(procedureReferenceItems.procedureTemplateId, id))
+    .orderBy(procedureReferenceItems.sortOrder);
+
   const issues = await db
     .select({
       id: procedureTemplateValidationIssues.id,
@@ -358,6 +396,7 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
     sourceType: row.sourceType,
     sourceFileName: row.sourceFileName,
     sourceFileHash: row.sourceFileHash,
+    isReferenceOnly: row.isReferenceOnly,
     createdByName: row.createdByName,
     publishedByName,
     createdAt: row.createdAt.toISOString(),
@@ -415,6 +454,16 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       retryInstruction: t.retryInstruction,
       sortOrder: t.sortOrder,
       sourceCellRange: t.sourceCellRange,
+    })),
+    referenceItems: referenceItems.map((r) => ({
+      id: r.id,
+      itemType: r.itemType,
+      label: r.label,
+      sourceWorksheet: r.sourceWorksheet,
+      sourceCellRange: r.sourceCellRange,
+      hyperlinkTarget: r.hyperlinkTarget,
+      crossReferenceNumber: r.crossReferenceNumber,
+      sortOrder: r.sortOrder,
     })),
     validationIssues: issues.map((i) => ({
       id: i.id,

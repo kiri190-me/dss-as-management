@@ -24,10 +24,12 @@ export function combineShapeGraphSheets(
     equipmentType: opts.equipmentType,
     description: opts.description,
     sourceWorksheets: sheets.map((s) => s.name),
+    isReferenceOnly: false,
     nodes: [],
     edges: [],
     checklistSections: [],
     troubleshootingEntries: [],
+    referenceItems: [],
     issues: [],
   };
 

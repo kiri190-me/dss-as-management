@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -92,6 +92,8 @@ const nodeTypes = { procedureNode: ProcedureNode };
  * workbook itself uses (Phase 1 report §5) so the rendering reads
  * naturally to QC staff already used to the paper diagrams.
  */
+const ALL_WORKSHEETS = "ALL";
+
 export default function ProcedureFlowGraph({
   nodes: nodeRows,
   edges: edgeRows,
@@ -99,12 +101,59 @@ export default function ProcedureFlowGraph({
   nodes: ProcedureTemplateNodeRow[];
   edges: ProcedureTemplateEdgeRow[];
 }) {
+  // Worksheet filter (Phase 2.5 read-only perf work) — a combined
+  // multi-sheet template (e.g. rfg-full-lifecycle, ~10 source sheets) can
+  // have hundreds of nodes; letting a reviewer isolate one source sheet at
+  // a time is a pure client-side view filter, no editing capability.
+  const worksheets = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const n of nodeRows) {
+      if (n.sourceWorksheet && !seen.has(n.sourceWorksheet)) {
+        seen.add(n.sourceWorksheet);
+        ordered.push(n.sourceWorksheet);
+      }
+    }
+    return ordered;
+  }, [nodeRows]);
+
+  const [worksheetFilter, setWorksheetFilter] = useState<string>(ALL_WORKSHEETS);
+
+  const filteredNodeRows = useMemo(
+    () => (worksheetFilter === ALL_WORKSHEETS ? nodeRows : nodeRows.filter((n) => n.sourceWorksheet === worksheetFilter)),
+    [nodeRows, worksheetFilter]
+  );
+
+  // Grouping by worksheet (Phase 2.5 read-only perf work) — a combined
+  // multi-sheet template's node positions each come from that node's own
+  // sheet-local shape coordinates (extract-shape-graph.ts), with no offset
+  // applied between sheets, so different sheets' node clusters land on top
+  // of each other once combined into one template. Stacking each
+  // worksheet into its own vertical band here is purely a view-layer
+  // translation — it never touches the stored position_x/position_y
+  // (still the source-traceable original coordinates), it only changes
+  // where this read-only viewer draws them.
+  const worksheetYOffset = useMemo(() => {
+    const offsets = new Map<string, number>();
+    const margin = 150;
+    let cursorY = 0;
+    for (const ws of worksheets) {
+      const wsNodes = nodeRows.filter((n) => n.sourceWorksheet === ws);
+      if (wsNodes.length === 0) continue;
+      const minY = Math.min(...wsNodes.map((n) => n.positionY));
+      const maxY = Math.max(...wsNodes.map((n) => n.positionY));
+      offsets.set(ws, cursorY - minY);
+      cursorY += maxY - minY + margin;
+    }
+    return offsets;
+  }, [nodeRows, worksheets]);
+
   const flowNodes = useMemo<Node[]>(
     () =>
-      nodeRows.map((n) => ({
+      filteredNodeRows.map((n) => ({
         id: n.id,
         type: "procedureNode",
-        position: { x: n.positionX, y: n.positionY },
+        position: { x: n.positionX, y: n.positionY + (n.sourceWorksheet ? worksheetYOffset.get(n.sourceWorksheet) ?? 0 : 0) },
         data: {
           title: n.title,
           nodeType: n.nodeType,
@@ -112,12 +161,14 @@ export default function ProcedureFlowGraph({
           sourceShapeId: n.sourceShapeId,
         } satisfies ProcedureNodeData,
       })),
-    [nodeRows]
+    [filteredNodeRows, worksheetYOffset]
   );
 
-  const flowEdges = useMemo<Edge[]>(
-    () =>
-      edgeRows.map((e) => {
+  const flowEdges = useMemo<Edge[]>(() => {
+    const visibleNodeIds = new Set(filteredNodeRows.map((n) => n.id));
+    return edgeRows
+      .filter((e) => visibleNodeIds.has(e.fromNodeId) && visibleNodeIds.has(e.toNodeId))
+      .map((e) => {
         const color = BRANCH_TYPE_COLORS[e.branchType];
         const isLoopBack = e.branchType === "LOOP_BACK";
         return {
@@ -131,28 +182,58 @@ export default function ProcedureFlowGraph({
           markerEnd: { type: MarkerType.ArrowClosed, color },
           animated: isLoopBack,
         } satisfies Edge;
-      }),
-    [edgeRows]
-  );
+      });
+  }, [edgeRows, filteredNodeRows]);
 
   if (nodeRows.length === 0) return null;
 
   return (
-    <div style={{ height: 600 }} className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <ReactFlow
-        nodes={flowNodes}
-        edges={flowEdges}
-        nodeTypes={nodeTypes}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={true}
-        fitView
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={24} />
-        <Controls showInteractive={false} />
-        <MiniMap pannable zoomable className="!hidden sm:!block" />
-      </ReactFlow>
+    <div className="flex flex-col gap-2">
+      {worksheets.length > 1 && (
+        <div className="flex items-center gap-2 text-xs">
+          <label htmlFor="procedure-flow-worksheet-filter" className="text-zinc-500 dark:text-zinc-400">
+            원본 시트로 보기 필터:
+          </label>
+          <select
+            id="procedure-flow-worksheet-filter"
+            value={worksheetFilter}
+            onChange={(e) => setWorksheetFilter(e.target.value)}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+          >
+            <option value={ALL_WORKSHEETS}>전체 ({nodeRows.length}개 노드)</option>
+            {worksheets.map((ws) => (
+              <option key={ws} value={ws}>
+                {ws} ({nodeRows.filter((n) => n.sourceWorksheet === ws).length}개 노드)
+              </option>
+            ))}
+          </select>
+          {worksheetFilter !== ALL_WORKSHEETS && (
+            <span className="text-zinc-400 dark:text-zinc-600">
+              — 다른 시트로 이어지는 재진행(LOOP_BACK) 분기는 이 필터에서 숨겨질 수 있습니다.
+            </span>
+          )}
+        </div>
+      )}
+      <div style={{ height: 600 }} className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <ReactFlow
+          key={worksheetFilter}
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={true}
+          onlyRenderVisibleElements
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          minZoom={0.02}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background gap={24} />
+          <Controls showInteractive={false} />
+          <MiniMap pannable zoomable className="!hidden sm:!block" />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

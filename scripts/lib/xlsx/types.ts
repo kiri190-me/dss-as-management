@@ -2,6 +2,7 @@ import type {
   ProcedureBranchType,
   ProcedureEquipmentType,
   ProcedureNodeType,
+  ProcedureReferenceItemType,
   ProcedureValidationIssueType,
   ProcedureValidationSeverity,
 } from "@/lib/domain/procedure-template-types";
@@ -90,15 +91,34 @@ export type ExtractedValidationIssue = {
   sourceReference?: string | null;
 };
 
+/**
+ * A row of a reference-only template's content (Main page / QC — see
+ * extract-reference-index.ts). These templates have zero
+ * ExtractedNode/ExtractedEdge rows by design; this is their entire content.
+ */
+export type ExtractedReferenceItem = {
+  itemType: ProcedureReferenceItemType;
+  label: string;
+  sourceWorksheet: string;
+  sourceCellRange?: string | null;
+  hyperlinkTarget?: string | null;
+  crossReferenceNumber?: string | null;
+  sortOrder: number;
+};
+
 export type ExtractedTemplate = {
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
   description: string;
   sourceWorksheets: string[];
+  // True only for the two navigational/reference-index templates (Main
+  // page, QC) — see procedure_templates.is_reference_only.
+  isReferenceOnly: boolean;
   nodes: ExtractedNode[];
   edges: ExtractedEdge[];
   checklistSections: ExtractedChecklistSection[];
   troubleshootingEntries: ExtractedTroubleshootingEntry[];
+  referenceItems: ExtractedReferenceItem[];
   issues: ExtractedValidationIssue[];
 };

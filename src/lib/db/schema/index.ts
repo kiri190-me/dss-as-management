@@ -15,3 +15,4 @@ export * from "./procedure-template-edges";
 export * from "./procedure-checklist";
 export * from "./procedure-troubleshooting";
 export * from "./procedure-template-validation-issues";
+export * from "./procedure-reference-items";

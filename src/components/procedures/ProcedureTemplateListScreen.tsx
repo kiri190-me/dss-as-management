@@ -62,6 +62,11 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status]}`}>
                       {procedureTemplateStatusLabels[t.status]}
                     </span>
+                    {t.isReferenceOnly && (
+                      <span className="ml-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                        참고용
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 truncate max-w-[160px] text-zinc-600 dark:text-zinc-400" title={t.sourceFileName ?? undefined}>
                     {t.sourceWorksheetCount}개 시트

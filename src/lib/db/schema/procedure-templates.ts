@@ -1,4 +1,5 @@
 import {
+  boolean,
   integer,
   pgEnum,
   pgTable,
@@ -31,14 +32,18 @@ export const procedureTemplateSourceTypeEnum = pgEnum("procedure_template_source
   "EXCEL_IMPORT",
 ]);
 
-// Only the two equipment families found in the source workbook (Phase 1
-// report). Not reused from workflowTypeEnum (MATCHER/PAID_GENERATOR/
+// The two equipment families found in the source workbook (Phase 1 report),
+// plus COMMON (Phase 2.5) for sheets that aren't equipment-specific at all —
+// "Main page" (a navigational index into both RFG and MB detail sheets) and
+// "QC" (repair-center-wide operational checklist, not tied to one equipment
+// family). Not reused from workflowTypeEnum (MATCHER/PAID_GENERATOR/
 // WARRANTY_GENERATOR) — that enum encodes billing/product distinctions for
 // the high-level workflow, not the equipment family a technical procedure
 // applies to.
 export const procedureEquipmentTypeEnum = pgEnum("procedure_equipment_type", [
   "RFG",
   "MB",
+  "COMMON",
 ]);
 
 /**
@@ -64,6 +69,14 @@ export const procedureTemplates = pgTable(
     equipmentType: procedureEquipmentTypeEnum("equipment_type").notNull(),
     description: text("description"),
     status: procedureTemplateStatusEnum("status").notNull().default("DRAFT"),
+    // Phase 2.5: true only for the two navigational/reference-index
+    // templates (Main page, QC) — no procedure_template_nodes rows, no
+    // graph, just procedure_reference_items. A future repair-case
+    // execution-assignment feature (out of this phase's scope) must filter
+    // on this being false before offering a template as an executable
+    // workflow source; nothing in this phase enforces that yet since no
+    // such assignment mechanism exists.
+    isReferenceOnly: boolean("is_reference_only").notNull().default(false),
     // Increments only on publish (Phase 1 report §10) — never bumped by a
     // plain draft edit, matching workflow_versions.version_number's
     // integer-per-published-row precedent elsewhere in this schema.

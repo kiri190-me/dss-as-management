@@ -13,6 +13,7 @@ import {
   procedureChecklistItems,
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
+  procedureReferenceItems,
   users,
 } from "../schema";
 import {
@@ -20,13 +21,17 @@ import {
   publishProcedureTemplate,
   archiveProcedureTemplate,
   createNewDraftVersion,
+  replaceDraftProcedureTemplates,
 } from "./procedure-templates";
 import {
   canViewPublishedProcedureTemplates,
   canViewAllProcedureTemplateStatuses,
 } from "@/lib/auth/procedure-template-authorization";
 import { listProcedureTemplates, getProcedureTemplateDetail } from "../queries/procedure-templates";
+import { combineShapeGraphSheets } from "../../../../scripts/lib/xlsx/combine-shape-graph-sheets";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
+import type { LoadedSheet } from "../../../../scripts/lib/xlsx/workbook-loader";
+import type { DrawingAnchor } from "../../../../scripts/lib/xlsx/ooxml-parser";
 
 /**
  * Real-DB integration tests for the Phase 2 procedure-template mutation
@@ -66,6 +71,8 @@ function makeTemplate(opts: {
     equipmentType: "RFG",
     description: "통합 테스트용 합성 템플릿",
     sourceWorksheets: ["(TEST) 가상 시트"],
+    isReferenceOnly: false,
+    referenceItems: [],
     nodes: [
       { nodeCode: "n1", nodeType: "TASK", title: "시작 작업", positionX: 0, positionY: 0, sortOrder: 0, sourceWorksheet: "(TEST) 가상 시트", sourceShapeId: "1" },
       { nodeCode: "n2", nodeType: "DECISION", title: "판단 작업", positionX: 100, positionY: 0, sortOrder: 1, sourceWorksheet: "(TEST) 가상 시트", sourceShapeId: "2" },
@@ -204,6 +211,7 @@ after(async () => {
     if (sectionIds.length > 0) await db.delete(procedureChecklistSections).where(inArray(procedureChecklistSections.id, sectionIds));
     if (nodeIds.length > 0) await db.delete(procedureTroubleshootingEntries).where(inArray(procedureTroubleshootingEntries.nodeId, nodeIds));
     await db.delete(procedureTemplateValidationIssues).where(inArray(procedureTemplateValidationIssues.procedureTemplateId, allIds));
+    await db.delete(procedureReferenceItems).where(inArray(procedureReferenceItems.procedureTemplateId, allIds));
     await db.delete(procedureTemplateEdges).where(inArray(procedureTemplateEdges.procedureTemplateId, allIds));
     if (nodeIds.length > 0) await db.delete(procedureTemplateNodes).where(inArray(procedureTemplateNodes.id, nodeIds));
     await db.delete(procedureTemplates).where(inArray(procedureTemplates.id, allIds));
@@ -520,6 +528,227 @@ describe("createNewDraftVersion", () => {
     assert.equal(newNodes.length, 8);
     const newEdges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
     assert.equal(newEdges.length, 8);
+  });
+});
+
+describe("Phase 2.5: full-lifecycle combine, replace mode, reference-only templates", () => {
+  /**
+   * Synthetic 3-sheet fixture reproducing the real workbook's two verified
+   * RFG cross-stage loop-backs firing simultaneously against the same
+   * combined template: (RFG)(7)-shaped source A uses the stage-7 wording
+   * ("...과정부터 재진행 실시"), (RFG)(11)-shaped source B uses the
+   * stage-11 wording ("...재실시") — both name stage 4, and both must
+   * resolve to a real LOOP_BACK edge into the same (RFG)(4)-shaped
+   * target's START node once all three sheets are combined.
+   */
+  function buildStage7Sheet(): LoadedSheet {
+    const drawing: DrawingAnchor[] = [
+      { kind: "shape", id: "1", name: "n1", descr: null, geom: "rect", text: "에이징 테스트 실시", fill: null, from: { col: 0, row: 0 }, to: { col: 2, row: 1 } },
+      { kind: "shape", id: "2", name: "n2", descr: null, geom: "rect", text: "(4)기본 정전 검사 과정부터 재진행 실시", fill: null, from: { col: 0, row: 3 }, to: { col: 2, row: 4 } },
+      { kind: "connector", id: "c1", name: "c1", geom: "straightConnector1", stCxnId: "1", endCxnId: "2", headType: "none", tailType: "triangle", from: { col: 0, row: 1 }, to: { col: 0, row: 3 } },
+    ];
+    return {
+      name: "(TEST-RFG) (7)원복 검사 및 개선 작업",
+      sheetId: "9107",
+      worksheetPath: "xl/worksheets/sheetStage7.xml",
+      drawingPath: "xl/drawings/drawingStage7.xml",
+      worksheet: { dimension: "A1:F10", merges: [], hyperlinks: [], cells: {} },
+      drawing,
+    };
+  }
+
+  function buildStage11Sheet(): LoadedSheet {
+    const drawing: DrawingAnchor[] = [
+      { kind: "shape", id: "1", name: "n1", descr: null, geom: "rect", text: "출하 준비 확인", fill: null, from: { col: 0, row: 0 }, to: { col: 2, row: 1 } },
+      { kind: "shape", id: "2", name: "n2", descr: null, geom: "rect", text: "(4) 기본 정전 검사 재실시", fill: null, from: { col: 0, row: 3 }, to: { col: 2, row: 4 } },
+      { kind: "connector", id: "c1", name: "c1", geom: "straightConnector1", stCxnId: "1", endCxnId: "2", headType: "none", tailType: "triangle", from: { col: 0, row: 1 }, to: { col: 0, row: 3 } },
+    ];
+    return {
+      name: "(TEST-RFG) (11)출하 준비",
+      sheetId: "9111",
+      worksheetPath: "xl/worksheets/sheetStage11.xml",
+      drawingPath: "xl/drawings/drawingStage11.xml",
+      worksheet: { dimension: "A1:F10", merges: [], hyperlinks: [], cells: {} },
+      drawing,
+    };
+  }
+
+  function buildStage4Sheet(): LoadedSheet {
+    const drawing: DrawingAnchor[] = [
+      { kind: "shape", id: "1", name: "n1", descr: null, geom: "rect", text: "판금 탈거 및 외관 확인", fill: null, from: { col: 0, row: 0 }, to: { col: 2, row: 1 } },
+      { kind: "shape", id: "2", name: "n2", descr: null, geom: "rect", text: "통전 검사 실시", fill: null, from: { col: 0, row: 3 }, to: { col: 2, row: 4 } },
+      { kind: "connector", id: "c1", name: "c1", geom: "straightConnector1", stCxnId: "1", endCxnId: "2", headType: "none", tailType: "triangle", from: { col: 0, row: 1 }, to: { col: 0, row: 3 } },
+    ];
+    return {
+      name: "(TEST-RFG) (4)기본 정전 검사",
+      sheetId: "9104",
+      worksheetPath: "xl/worksheets/sheetStage4.xml",
+      drawingPath: "xl/drawings/drawingStage4.xml",
+      worksheet: { dimension: "A1:F10", merges: [], hyperlinks: [], cells: {} },
+      drawing,
+    };
+  }
+
+  function buildRfgLifecycleFixture(code: string): ExtractedTemplate {
+    return combineShapeGraphSheets([buildStage7Sheet(), buildStage11Sheet(), buildStage4Sheet()], {
+      code,
+      name: "테스트 RFG 전체 수명주기",
+      equipmentType: "RFG",
+      description: "합성 3시트 결합 테스트 — 두 개의 독립된 재진행(LOOP_BACK) 참조가 동일 대상으로 수렴한다.",
+    });
+  }
+
+  test("20. a combined multi-sheet template with two independent stage-restart references persists two LOOP_BACK edges into the same target START node", async () => {
+    const code = uniqueCode("rfg-two-loopbacks");
+    const template = buildRfgLifecycleFixture(code);
+    assert.equal(template.edges.filter((e) => e.branchType === "LOOP_BACK").length, 2, "extractor-level sanity check");
+
+    const result = await createDraftProcedureTemplateFromImport(template, superAdminId, {
+      sourceFileName: "test-fixture.xlsx",
+      sourceFileHash: `hash-${code}`,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    createdTemplateIds.push(result.id);
+
+    const edges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
+    const loopBackEdges = edges.filter((e) => e.branchType === "LOOP_BACK");
+    assert.equal(loopBackEdges.length, 2, "both verified loop-backs must persist as real edges");
+    const targets = new Set(loopBackEdges.map((e) => e.toNodeId));
+    assert.equal(targets.size, 1, "both loop-backs must resolve to the same target START node");
+
+    const targetNode = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, [...targets][0]));
+    assert.equal(targetNode[0].sourceWorksheet, "(TEST-RFG) (4)기본 정전 검사");
+  });
+
+  test("21. re-running the importer against the same combined-template source is idempotent — zero duplicate rows, identical node/edge counts", async () => {
+    const code = uniqueCode("rfg-idempotent-combine");
+    const hash = `hash-${code}`;
+
+    const first = await createDraftProcedureTemplateFromImport(buildRfgLifecycleFixture(code), superAdminId, {
+      sourceFileName: "test-fixture.xlsx",
+      sourceFileHash: hash,
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    createdTemplateIds.push(first.id);
+
+    const second = await createDraftProcedureTemplateFromImport(buildRfgLifecycleFixture(code), superAdminId, {
+      sourceFileName: "test-fixture.xlsx",
+      sourceFileHash: hash,
+    });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(second.alreadyImported, true);
+    assert.equal(second.id, first.id);
+
+    const templateRows = await db.select({ id: procedureTemplates.id }).from(procedureTemplates).where(eq(procedureTemplates.code, code));
+    assert.equal(templateRows.length, 1);
+    const nodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, first.id));
+    const edges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, first.id));
+    assert.equal(nodes.length, 6, "3 sheets x 2 flow shapes each — no duplicate node rows from the second run");
+    assert.equal(edges.length, 5, "3 internal connector edges + 2 loop-back edges — no duplicate edge rows");
+  });
+
+  test("22. replaceDraftProcedureTemplates deletes only DRAFT rows matching the given codes, and never touches a PUBLISHED template with the same code", async () => {
+    const publishedCode = uniqueCode("replace-guard-published");
+    const publishedImport = await importTemplate({ code: publishedCode, includeErrorIssue: false });
+    assert.equal(publishedImport.ok, true);
+    if (!publishedImport.ok) return;
+    const publishResult = await publishProcedureTemplate(publishedImport.id, superAdminId);
+    assert.equal(publishResult.ok, true);
+
+    const draftOnlyCode = uniqueCode("replace-guard-draft");
+    const draftImport = await importTemplate({ code: draftOnlyCode, includeErrorIssue: false });
+    assert.equal(draftImport.ok, true);
+    if (!draftImport.ok) return;
+
+    const replaceResult = await replaceDraftProcedureTemplates([publishedCode, draftOnlyCode], superAdminId);
+    assert.equal(replaceResult.ok, true);
+    if (!replaceResult.ok) return;
+
+    const deletedCodes = replaceResult.deleted.map((d) => d.code);
+    assert.ok(deletedCodes.includes(draftOnlyCode), "the DRAFT-status template must be deleted");
+    assert.ok(!deletedCodes.includes(publishedCode), "the PUBLISHED-status template must never be deleted");
+
+    const [publishedRow] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, publishedImport.id));
+    assert.ok(publishedRow, "the published template row must still exist");
+    assert.equal(publishedRow.status, "PUBLISHED");
+
+    const draftRows = await db.select({ id: procedureTemplates.id }).from(procedureTemplates).where(eq(procedureTemplates.code, draftOnlyCode));
+    assert.equal(draftRows.length, 0, "the draft template row must be gone");
+
+    // Only createdTemplateIds not deleted need to remain tracked for cleanup.
+    createdTemplateIds.push(publishedImport.id);
+  });
+
+  test("23. a reference-only template imports with zero procedure_template_nodes rows and its reference items persist and are queryable", async () => {
+    const code = uniqueCode("reference-only");
+    const template: ExtractedTemplate = {
+      code,
+      name: "테스트 참고용 인덱스",
+      equipmentType: "COMMON",
+      description: "합성 참고용 템플릿",
+      sourceWorksheets: ["(TEST) Main page"],
+      isReferenceOnly: true,
+      nodes: [],
+      edges: [],
+      checklistSections: [],
+      troubleshootingEntries: [],
+      referenceItems: [
+        {
+          itemType: "NAV_LINK",
+          label: "1. 고장/이슈 발생",
+          sourceWorksheet: "(TEST) Main page",
+          sourceCellRange: "A3:A4",
+          hyperlinkTarget: "(TEST-RFG) (1)고장 접수 확인",
+          crossReferenceNumber: null,
+          sortOrder: 0,
+        },
+        {
+          itemType: "CROSS_REFERENCE_ID",
+          label: "68",
+          sourceWorksheet: "(TEST) Main page",
+          sourceCellRange: "C5",
+          hyperlinkTarget: null,
+          crossReferenceNumber: "68",
+          sortOrder: 1,
+        },
+      ],
+      issues: [
+        {
+          severity: "INFO",
+          issueType: "ORPHAN_REFERENCE_ITEM",
+          message: "셀 C5의 교차 참조 번호가 해석되지 않습니다.",
+          sourceWorksheet: "(TEST) Main page",
+          sourceReference: "C5",
+        },
+      ],
+    };
+
+    const result = await createDraftProcedureTemplateFromImport(template, superAdminId, {
+      sourceFileName: "test-fixture.xlsx",
+      sourceFileHash: `hash-${code}`,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    createdTemplateIds.push(result.id);
+
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
+    assert.equal(row.equipmentType, "COMMON");
+    assert.equal(row.isReferenceOnly, true);
+
+    const nodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, result.id));
+    assert.equal(nodes.length, 0, "a reference-only template must have zero executable nodes");
+
+    const items = await db.select().from(procedureReferenceItems).where(eq(procedureReferenceItems.procedureTemplateId, result.id));
+    assert.equal(items.length, 2);
+
+    const detail = await getProcedureTemplateDetail(result.id);
+    assert.ok(detail);
+    assert.equal(detail?.isReferenceOnly, true);
+    assert.equal(detail?.referenceItems.length, 2);
+    assert.equal(detail?.nodes.length, 0);
   });
 });
 

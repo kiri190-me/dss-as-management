@@ -3,34 +3,61 @@ import "./load-env";
 import { and, eq } from "drizzle-orm";
 import { db, pgClient } from "../src/lib/db/connection";
 import { users } from "../src/lib/db/schema";
-import { createDraftProcedureTemplateFromImport } from "../src/lib/db/mutations/procedure-templates";
+import {
+  createDraftProcedureTemplateFromImport,
+  replaceDraftProcedureTemplates,
+} from "../src/lib/db/mutations/procedure-templates";
 import { loadWorkbook, type LoadedSheet, type LoadedWorkbook } from "./lib/xlsx/workbook-loader";
-import { extractSheetGraph } from "./lib/xlsx/extract-shape-graph";
 import { combineShapeGraphSheets } from "./lib/xlsx/combine-shape-graph-sheets";
 import { extractChecklistForm } from "./lib/xlsx/extract-checklist-form";
 import { extractTroubleshootingMatrix } from "./lib/xlsx/extract-troubleshooting-matrix";
+import { extractPlainInstruction } from "./lib/xlsx/extract-plain-instruction";
+import { extractReferenceIndex } from "./lib/xlsx/extract-reference-index";
 import type { ExtractedTemplate } from "./lib/xlsx/types";
 
 /**
- * Deterministic workbook → DRAFT procedure_templates importer (Phase 2).
+ * Deterministic workbook → DRAFT procedure_templates importer (Phase 2.5).
  * No AI interpretation or translation anywhere in this file or the
- * scripts/lib/xlsx/* modules it calls — every node/edge/section/item is
- * either copied verbatim from a cell/shape or mechanically derived from a
- * fixed, documented rule (branch-classification.ts, node-classification.ts).
+ * scripts/lib/xlsx/* modules it calls — every node/edge/section/item/
+ * reference-item is either copied verbatim from a cell/shape or
+ * mechanically derived from a fixed, documented rule.
  *
- * Always produces DRAFT templates; never publishes (that is a separate,
- * later, human-triggered action — see publishProcedureTemplate). Never
- * imports an edge whose endpoint can't be resolved — those are recorded as
- * validation issues instead (see extract-shape-graph.ts).
+ * Always produces DRAFT templates; never publishes.
  *
- * Scope (Phase 2 report "Templates imported" / "Content deferred"): this
- * run imports the recommended representative sequence from the task
- * brief — one RFG shape-graph workflow (combined across the 3 sheets
- * needed to demonstrate a real cross-stage LOOP_BACK edge), one MB
- * shape-graph workflow, the MB cell-anchored checklist form, and the MB
- * symptom-troubleshooting matrix — not all 18 worksheets. See the Phase 2
- * report for exactly what was deferred and why.
+ * All 18 worksheets in the real workbook are accounted for by exactly one
+ * of the four templates built below — see the Phase 2.5 report for the
+ * full sheet inventory and the reasoning behind this specific grouping
+ * (in short: a real cross-sheet LOOP_BACK edge only exists when both ends
+ * are nodes of the *same* template — see procedure_template_edges' schema
+ * comment — so every RFG shape-graph sheet is combined into one lifecycle
+ * template, and likewise for MB).
  */
+
+const RFG_LIFECYCLE_SHEET_NAMES = [
+  "(RFG) (1)고장 접수 확인",
+  "(RFG) (2)외관 검사",
+  "(RFG) (3)안전검사",
+  "(RFG) (4)기본 정전 검사",
+  "(RFG) (5)통전검사(3상입력)",
+  "(RFG) (6)개선 사항 확인",
+  "(RFG) (7)원복 검사 및 개선 작업",
+  "(RFG) (8)고객 연락",
+  "(RFG) (11)출하 준비",
+  "(RFG) (12)출하 완료",
+];
+
+const MB_SHAPE_GRAPH_SHEET_NAMES = ["(MB) 고장 접수 확인", "(MB) 통전검사", "(MB) 출하완료"];
+const MB_CHECKLIST_SHEET_NAME = "(MB) 외관 및 내부 검사";
+const MB_TROUBLESHOOTING_SHEET_NAME = "(MB) 수리";
+const MB_PLAIN_INSTRUCTION_SHEET_NAME = "(MB) 고객 연락";
+
+/** The 4 narrow Phase 2 sample templates this phase's reorganization supersedes. */
+const OLD_SAMPLE_TEMPLATE_CODES = [
+  "rfg-safety-deenergized-shipprep",
+  "mb-power-on-test",
+  "mb-visual-internal-inspection",
+  "mb-symptom-troubleshooting",
+];
 
 function findSheet(wb: LoadedWorkbook, name: string): LoadedSheet {
   const sheet = wb.sheets.find((s) => s.name === name);
@@ -59,19 +86,90 @@ async function resolveSuperAdminActorId(): Promise<string> {
   return row.id;
 }
 
-function parseArgs(): { file: string } {
+function parseArgs(): { file: string; replaceOldSamples: boolean } {
   const args = process.argv.slice(2);
   const fileFlagIndex = args.indexOf("--file");
   const file = fileFlagIndex >= 0 ? args[fileFlagIndex + 1] : undefined;
   if (!file) {
-    console.error("Usage: tsx scripts/import-procedure-templates.ts --file <path-to-xlsx>");
+    console.error(
+      "Usage: tsx scripts/import-procedure-templates.ts --file <path-to-xlsx> [--replace-old-samples]"
+    );
     process.exit(1);
   }
-  return { file };
+  return { file, replaceOldSamples: args.includes("--replace-old-samples") };
+}
+
+function buildRfgLifecycleTemplate(wb: LoadedWorkbook): ExtractedTemplate {
+  const sheets = RFG_LIFECYCLE_SHEET_NAMES.map((n) => findSheet(wb, n));
+  return combineShapeGraphSheets(sheets, {
+    code: "rfg-full-lifecycle",
+    name: "RF Generator 전체 표준 절차 (1~12단계)",
+    equipmentType: "RFG",
+    description:
+      "RFG 전체 10개 시트(고장 접수 확인 ~ 출하 완료)를 결합한 전체 수명주기 절차 — (7)원복 검사 및 개선 작업 시트가 " +
+      "9단계(수리 작업)·10단계(출하 검사)를 구조적으로 포함한다(별도 시트 없음, Main page 하이퍼링크로 확인). " +
+      "검증된 재진행(LOOP_BACK) 분기 2건을 모두 포함한다: (11)출하 준비 → (4)기본 정전 검사, (7)원복 검사 및 개선 작업 → " +
+      "(4)기본 정전 검사(에이징 테스트 실패 시).",
+  });
+}
+
+function buildMbLifecycleTemplate(wb: LoadedWorkbook): ExtractedTemplate {
+  const graphSheets = MB_SHAPE_GRAPH_SHEET_NAMES.map((n) => findSheet(wb, n));
+  const template = combineShapeGraphSheets(graphSheets, {
+    code: "mb-full-lifecycle",
+    name: "Matching Box 전체 표준 절차",
+    equipmentType: "MB",
+    description:
+      "MB 도형 기반 흐름도 3개 시트(고장 접수 확인, 통전검사, 출하완료) + 외관 및 내부 검사 체크리스트 + 고장 증상별 " +
+      "진단표 + 고객 연락 지침을 하나의 절차로 결합했다. 출하 준비(MB)는 별도 시트가 아니라 외관 및 내부 검사 시트의 " +
+      "마지막 섹션(C1396 행, Main page의 '7. 출하 준비' 링크가 가리키는 위치)으로 이미 포함되어 있다.",
+  });
+
+  const checklistSheet = findSheet(wb, MB_CHECKLIST_SHEET_NAME);
+  const checklist = extractChecklistForm(checklistSheet);
+  const troubleshootingSheet = findSheet(wb, MB_TROUBLESHOOTING_SHEET_NAME);
+  const troubleshooting = extractTroubleshootingMatrix(troubleshootingSheet);
+  const plainInstructionSheet = findSheet(wb, MB_PLAIN_INSTRUCTION_SHEET_NAME);
+  const plainInstruction = extractPlainInstruction(plainInstructionSheet);
+
+  template.sourceWorksheets.push(
+    checklistSheet.name,
+    troubleshootingSheet.name,
+    plainInstructionSheet.name
+  );
+  template.nodes.push(checklist.node, troubleshooting.node, plainInstruction.node);
+  template.checklistSections.push(...checklist.sections);
+  template.troubleshootingEntries.push(...troubleshooting.entries);
+  template.issues.push(...checklist.issues, ...troubleshooting.issues, ...plainInstruction.issues);
+
+  return template;
+}
+
+function buildReferenceOnlyTemplate(
+  wb: LoadedWorkbook,
+  sheetName: string,
+  opts: { code: string; name: string; description: string }
+): ExtractedTemplate {
+  const sheet = findSheet(wb, sheetName);
+  const { referenceItems, issues } = extractReferenceIndex(sheet);
+  return {
+    code: opts.code,
+    name: opts.name,
+    equipmentType: "COMMON",
+    description: opts.description,
+    sourceWorksheets: [sheet.name],
+    isReferenceOnly: true,
+    nodes: [],
+    edges: [],
+    checklistSections: [],
+    troubleshootingEntries: [],
+    referenceItems,
+    issues,
+  };
 }
 
 async function main() {
-  const { file } = parseArgs();
+  const { file, replaceOldSamples } = parseArgs();
   console.log(`Loading workbook: ${file}`);
   const wb = loadWorkbook(file);
   console.log(`  source_file_hash: ${wb.sourceFileHash}`);
@@ -80,69 +178,47 @@ async function main() {
   const actorId = await resolveSuperAdminActorId();
   console.log(`Acting as SUPER_ADMIN user: ${actorId}\n`);
 
-  const templates: ExtractedTemplate[] = [];
+  if (replaceOldSamples) {
+    console.log("=".repeat(72));
+    console.log("REPLACE MODE — deleting the 4 Phase 2 sample templates (only if still DRAFT)");
+    console.log("=".repeat(72));
+    const result = await replaceDraftProcedureTemplates(OLD_SAMPLE_TEMPLATE_CODES, actorId);
+    if (!result.ok) {
+      console.error(`  -> FAILED: [${result.code}] ${result.message}`);
+      process.exit(1);
+    }
+    if (result.deleted.length === 0) {
+      console.log("  -> no matching DRAFT templates found (already replaced, or never imported).");
+    }
+    for (const d of result.deleted) {
+      console.log(
+        `  -> deleted "${d.code}" (id=${d.id}): nodes=${d.nodeCount} edges=${d.edgeCount} ` +
+          `checklistSections=${d.checklistSectionCount} checklistItems=${d.checklistItemCount} ` +
+          `troubleshootingEntries=${d.troubleshootingEntryCount} referenceItems=${d.referenceItemCount} ` +
+          `issues=${d.issueCount}`
+      );
+    }
+    console.log("");
+  }
 
-  // ---- 1. RFG shape-graph workflow (combined, demonstrates a real cross-stage LOOP_BACK) ----
-  const rfgSheetNames = ["(RFG) (3)안전검사", "(RFG) (4)기본 정전 검사", "(RFG) (11)출하 준비"];
-  const rfgSheets = rfgSheetNames.map((n) => findSheet(wb, n));
-  templates.push(
-    combineShapeGraphSheets(rfgSheets, {
-      code: "rfg-safety-deenergized-shipprep",
-      name: "RF Generator 표준 절차 (안전검사 · 기본 정전 검사 · 출하 준비)",
-      equipmentType: "RFG",
+  const templates: ExtractedTemplate[] = [
+    buildRfgLifecycleTemplate(wb),
+    buildMbLifecycleTemplate(wb),
+    buildReferenceOnlyTemplate(wb, "Main page", {
+      code: "main-page-index",
+      name: "Main Page (탐색 인덱스)",
       description:
-        "RFG 안전검사, 기본 정전 검사, 출하 준비 3개 시트를 결합한 대표 절차 — 출하 준비 단계의 노후화 점검 실패 시 " +
-        "기본 정전 검사(4단계)로 되돌아가는 실제 검증된 재진행(LOOP_BACK) 분기를 포함한다 (Phase 1 보고서 §2).",
-    })
-  );
-
-  // ---- 2. MB shape-graph workflow ----
-  const mbGraphSheet = findSheet(wb, "(MB) 통전검사");
-  const mbGraphResult = extractSheetGraph(mbGraphSheet);
-  templates.push({
-    code: "mb-power-on-test",
-    name: "Matching Box 통전검사",
-    equipmentType: "MB",
-    description: "MB 통전검사 절차 — 댕글링 커넥터 및 텍스트 포함 화살표 도형 등 실제 원본의 모호한 참조 사례를 포함한다.",
-    sourceWorksheets: [mbGraphSheet.name],
-    nodes: mbGraphResult.nodes,
-    edges: mbGraphResult.edges,
-    checklistSections: [],
-    troubleshootingEntries: [],
-    issues: mbGraphResult.issues,
-  });
-
-  // ---- 3. MB cell-anchored checklist form ----
-  const mbChecklistSheet = findSheet(wb, "(MB) 외관 및 내부 검사");
-  const checklist = extractChecklistForm(mbChecklistSheet);
-  templates.push({
-    code: "mb-visual-internal-inspection",
-    name: "Matching Box 외관 및 내부 검사",
-    equipmentType: "MB",
-    description: "16개 섹션으로 구성된 대형 인수 검사 체크리스트 (Phase 1 보고서 §3) — 측정 기준값과 #VALUE! 수식 오류를 포함한다.",
-    sourceWorksheets: [mbChecklistSheet.name],
-    nodes: [checklist.node],
-    edges: [],
-    checklistSections: checklist.sections,
-    troubleshootingEntries: [],
-    issues: checklist.issues,
-  });
-
-  // ---- 4. MB symptom-troubleshooting matrix ----
-  const mbTroubleshootingSheet = findSheet(wb, "(MB) 수리");
-  const troubleshooting = extractTroubleshootingMatrix(mbTroubleshootingSheet);
-  templates.push({
-    code: "mb-symptom-troubleshooting",
-    name: "Matching Box 고장 증상별 수리",
-    equipmentType: "MB",
-    description: "11개 고장 증상별 점검·조치 표 — 도형이 아닌 셀 텍스트(↓, N.G.)로 표현된 분기를 포함한다 (Phase 1 보고서 §3).",
-    sourceWorksheets: [mbTroubleshootingSheet.name],
-    nodes: [troubleshooting.node],
-    edges: [],
-    checklistSections: [],
-    troubleshootingEntries: troubleshooting.entries,
-    issues: troubleshooting.issues,
-  });
+        "수리소 업무 정리 워크북의 메인 탐색 페이지 — RFG 1~12단계, MB 1~8단계 각 상세 시트로의 이동 링크와 " +
+        "미해결 교차 참조 번호로 구성된 순수 참고용 인덱스. 실행 가능한 절차 노드를 포함하지 않는다.",
+    }),
+    buildReferenceOnlyTemplate(wb, "QC", {
+      code: "qc-common-operations",
+      name: "QC (수리소 운영 공통 사항)",
+      description:
+        "계측기/설비/지그 관리, 5M+1E, 수리품 리스트 관리 등 수리소 운영 공통 업무 인덱스 — 외부 네트워크 파일 " +
+        "경로와 미해결 교차 참조 번호로 구성된 순수 참고용 인덱스. 실행 가능한 절차 노드를 포함하지 않는다.",
+    }),
+  ];
 
   console.log("=".repeat(72));
   console.log("IMPORT SUMMARY");
@@ -153,10 +229,11 @@ async function main() {
     const warningCount = template.issues.filter((i) => i.severity === "WARNING").length;
     const infoCount = template.issues.filter((i) => i.severity === "INFO").length;
 
-    console.log(`\n[${template.code}] ${template.name}`);
+    console.log(`\n[${template.code}] ${template.name}${template.isReferenceOnly ? " (참고용 — 실행 불가)" : ""}`);
     console.log(
       `  sheets=${template.sourceWorksheets.length} nodes=${template.nodes.length} edges=${template.edges.length} ` +
-        `checklistSections=${template.checklistSections.length} troubleshootingEntries=${template.troubleshootingEntries.length}`
+        `checklistSections=${template.checklistSections.length} troubleshootingEntries=${template.troubleshootingEntries.length} ` +
+        `referenceItems=${template.referenceItems.length}`
     );
     console.log(`  validation issues: ERROR=${errorCount} WARNING=${warningCount} INFO=${infoCount}`);
 

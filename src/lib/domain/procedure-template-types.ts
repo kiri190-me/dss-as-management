@@ -26,11 +26,26 @@ export const procedureTemplateSourceTypeLabels: Record<ProcedureTemplateSourceTy
   EXCEL_IMPORT: "Excel 가져오기",
 };
 
-export const PROCEDURE_EQUIPMENT_TYPE_CODES = ["RFG", "MB"] as const;
+export const PROCEDURE_EQUIPMENT_TYPE_CODES = ["RFG", "MB", "COMMON"] as const;
 export type ProcedureEquipmentType = (typeof PROCEDURE_EQUIPMENT_TYPE_CODES)[number];
 export const procedureEquipmentTypeLabels: Record<ProcedureEquipmentType, string> = {
   RFG: "RF Generator",
   MB: "Matching Box",
+  COMMON: "공통",
+};
+
+export const PROCEDURE_REFERENCE_ITEM_TYPE_CODES = [
+  "NAV_LINK",
+  "EXTERNAL_FILE_LINK",
+  "CROSS_REFERENCE_ID",
+  "TEXT_NOTE",
+] as const;
+export type ProcedureReferenceItemType = (typeof PROCEDURE_REFERENCE_ITEM_TYPE_CODES)[number];
+export const procedureReferenceItemTypeLabels: Record<ProcedureReferenceItemType, string> = {
+  NAV_LINK: "시트 이동 링크",
+  EXTERNAL_FILE_LINK: "외부 파일/폴더 링크",
+  CROSS_REFERENCE_ID: "교차 참조 번호",
+  TEXT_NOTE: "설명 텍스트",
 };
 
 export const PROCEDURE_NODE_TYPE_CODES = [
@@ -104,6 +119,8 @@ export const PROCEDURE_VALIDATION_ISSUE_TYPES = [
   "MISSING_WORKSHEET",
   "UNSUPPORTED_OBJECT",
   "DUPLICATE_NODE_CODE",
+  "ORPHAN_REFERENCE_ITEM",
+  "UNRESOLVED_CROSS_SHEET_REFERENCE",
 ] as const;
 export type ProcedureValidationIssueType = (typeof PROCEDURE_VALIDATION_ISSUE_TYPES)[number];
 export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssueType, string> = {
@@ -117,4 +134,6 @@ export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssue
   MISSING_WORKSHEET: "워크시트 누락",
   UNSUPPORTED_OBJECT: "지원되지 않는 개체",
   DUPLICATE_NODE_CODE: "노드 코드 중복",
+  ORPHAN_REFERENCE_ITEM: "미해결 교차 참조 번호",
+  UNRESOLVED_CROSS_SHEET_REFERENCE: "시트 간 참조 대상 누락",
 };

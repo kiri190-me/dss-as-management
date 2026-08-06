@@ -3,6 +3,7 @@
 import ProcedureFlowGraph from "./ProcedureFlowGraph";
 import ProcedureChecklistViewer from "./ProcedureChecklistViewer";
 import ProcedureTroubleshootingViewer from "./ProcedureTroubleshootingViewer";
+import ProcedureReferenceItemsViewer from "./ProcedureReferenceItemsViewer";
 import ProcedureValidationIssuePanel from "./ProcedureValidationIssuePanel";
 import {
   procedureEquipmentTypeLabels,
@@ -35,6 +36,7 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
   const hasGraph = template.edges.length > 0 || template.nodes.some((n) => n.nodeType !== "CHECKLIST" && n.nodeType !== "TROUBLESHOOTING");
   const hasChecklist = template.checklistSections.length > 0;
   const hasTroubleshooting = template.troubleshootingEntries.length > 0;
+  const hasReferenceItems = template.referenceItems.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,6 +49,11 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
           <span className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
             v{template.version}
           </span>
+          {template.isReferenceOnly && (
+            <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+              참고용 — 실행 불가
+            </span>
+          )}
         </div>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-600">{template.code}</p>
         {template.description && (
@@ -87,7 +94,7 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
             <dd className="mt-0.5 text-zinc-700 dark:text-zinc-300">
               노드 {template.nodes.length}개 · 분기 {template.edges.length}개 · 체크리스트 항목{" "}
               {template.checklistSections.reduce((sum, s) => sum + s.items.length, 0)}개 · 고장 진단 항목{" "}
-              {template.troubleshootingEntries.length}개
+              {template.troubleshootingEntries.length}개 · 참고 항목 {template.referenceItems.length}개
             </dd>
           </div>
         </dl>
@@ -120,6 +127,17 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
         <section>
           <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">고장 증상별 진단표</h2>
           <ProcedureTroubleshootingViewer entries={template.troubleshootingEntries} />
+        </section>
+      )}
+
+      {hasReferenceItems && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">참고 항목</h2>
+          <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+            이 템플릿은 참고용 인덱스로, 실행 가능한 절차 노드를 포함하지 않습니다. 원본 워크북의 이동 링크·외부
+            파일 경로·교차 참조 번호를 그대로 보존한 목록입니다.
+          </p>
+          <ProcedureReferenceItemsViewer items={template.referenceItems} />
         </section>
       )}
     </div>
