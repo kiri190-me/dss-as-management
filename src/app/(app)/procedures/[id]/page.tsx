@@ -9,6 +9,7 @@ import { getProcedureTemplateDetail } from "@/lib/db/queries/procedure-templates
 import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
+  canViewProcedureValidationManagement,
 } from "@/lib/auth/procedure-template-authorization";
 
 export const metadata: Metadata = {
@@ -62,5 +63,10 @@ export default async function ProcedureTemplateDetailPage({
     notFound();
   }
 
-  return <ProcedureTemplateDetailScreen template={template} />;
+  return (
+    <ProcedureTemplateDetailScreen
+      template={template}
+      canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
+    />
+  );
 }

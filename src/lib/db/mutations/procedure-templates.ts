@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
 import {
   procedureTemplates,
@@ -282,6 +282,7 @@ async function insertTemplateContent(
         message: issue.message,
         sourceWorksheet: issue.sourceWorksheet ?? null,
         sourceReference: issue.sourceReference ?? null,
+        rawEvidence: issue.rawEvidence ?? null,
       }))
     );
   }
@@ -308,6 +309,10 @@ export async function publishProcedureTemplate(
         fail("CONFLICT", "초안(DRAFT) 상태의 템플릿만 게시할 수 있습니다.");
       }
 
+      // Phase 3A: resolution_status, not resolved_at nullity, is the
+      // publish-blocking signal — DEFERRED still has resolved_at/by/note
+      // set (a human did look at it) but must continue blocking, while
+      // RESOLVED_WITH_GRAPH_CHANGE/RESOLVED_NO_CHANGE both clear it.
       const [unresolvedError] = await tx
         .select({ id: procedureTemplateValidationIssues.id })
         .from(procedureTemplateValidationIssues)
@@ -315,7 +320,7 @@ export async function publishProcedureTemplate(
           and(
             eq(procedureTemplateValidationIssues.procedureTemplateId, templateId),
             eq(procedureTemplateValidationIssues.severity, "ERROR"),
-            isNull(procedureTemplateValidationIssues.resolvedAt)
+            inArray(procedureTemplateValidationIssues.resolutionStatus, ["UNRESOLVED", "DEFERRED"])
           )
         )
         .limit(1);

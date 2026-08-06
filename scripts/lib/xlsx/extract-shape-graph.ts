@@ -2,7 +2,7 @@ import type { LoadedSheet } from "./workbook-loader";
 import type { DrawingConnector, DrawingShape, DrawingPos } from "./ooxml-parser";
 import { classifyBranchLabel, matchStageRestartReference } from "./branch-classification";
 import { classifyNodeType } from "./node-classification";
-import type { ExtractedEdge, ExtractedNode, ExtractedValidationIssue } from "./types";
+import type { ExtractedEdge, ExtractedNode, ExtractedValidationIssue, ExtractedValidationIssueCandidate } from "./types";
 import type { ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 
 const NODE_SPACING_X = 220;
@@ -10,6 +10,9 @@ const NODE_SPACING_Y = 130;
 const LABEL_MAX_LEN = 12;
 const LABEL_MATCH_THRESHOLD = 4;
 const LABEL_CONFIDENT_THRESHOLD = 2.5;
+const MAX_EVIDENCE_CANDIDATES = 8;
+/** Exact-match branch-label vocabulary — a shape with exactly this text is a branch label, never a valid bind candidate (Phase 3A evidence ranking). */
+const EXACT_LABEL_TEXT_RE = /^(N\.?\s*G\.?|YES|NO|OK|O\.\s*K\.?|정상)$/i;
 
 function mid(pos: { from: DrawingPos | null; to: DrawingPos | null }): { x: number; y: number } {
   if (!pos.from) return { x: 0, y: 0 };
@@ -19,6 +22,36 @@ function mid(pos: { from: DrawingPos | null; to: DrawingPos | null }): { x: numb
 
 function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function toXY(pos: DrawingPos): { x: number; y: number } {
+  return { x: pos.col, y: pos.row };
+}
+
+/**
+ * Ranks real content shapes near an anchor point by distance, for the
+ * Phase 3A "raw connector inspector" evidence — reuses the exact same
+ * col/row Euclidean metric already used above for label matching. Branch
+ * labels (NG/YES/NO/OK/정상) and explicitly excluded shape ids (an
+ * already-known endpoint, or the node's own shape) are never candidates —
+ * this ranks *possible bind targets*, not everything nearby.
+ */
+function rankCandidates(
+  anchor: { x: number; y: number },
+  shapes: DrawingShape[],
+  excludeShapeIds: Set<string>
+): ExtractedValidationIssueCandidate[] {
+  return shapes
+    .filter(
+      (s) =>
+        s.id &&
+        !excludeShapeIds.has(s.id) &&
+        s.text.trim().length > 0 &&
+        !EXACT_LABEL_TEXT_RE.test(s.text.trim())
+    )
+    .map((s) => ({ shapeId: s.id!, text: firstLine(s.text), distance: dist(anchor, mid(s)) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, MAX_EVIDENCE_CANDIDATES);
 }
 
 function firstLine(text: string): string {
@@ -136,24 +169,48 @@ export function extractSheetGraph(sheet: LoadedSheet): SheetGraphResult {
   const rawEdges: { fromNodeCode: string; toNodeCode: string; branchType: ProcedureBranchType; branchLabel: string | null; sourceConnectorId: string | null }[] = [];
   for (const c of connectors) {
     if (!c.stCxnId || !c.endCxnId) {
+      const excludeIds = new Set<string>([c.stCxnId, c.endCxnId].filter((x): x is string => !!x));
       issues.push({
         severity: "ERROR",
         issueType: "DANGLING_CONNECTOR",
         message: `연결선의 시작 또는 끝 도형 참조가 없습니다 (connector#${c.id ?? "?"}).`,
         sourceWorksheet: sheet.name,
         sourceReference: c.id ? `connector#${c.id}` : null,
+        rawEvidence: {
+          connectorId: c.id ?? null,
+          stCxnId: c.stCxnId ?? null,
+          endCxnId: c.endCxnId ?? null,
+          from: c.from ?? null,
+          to: c.to ?? null,
+          headType: c.headType ?? null,
+          tailType: c.tailType ?? null,
+          fromCandidates: !c.stCxnId && c.from ? rankCandidates(toXY(c.from), shapes, excludeIds) : undefined,
+          toCandidates: !c.endCxnId && c.to ? rankCandidates(toXY(c.to), shapes, excludeIds) : undefined,
+        },
       });
       continue;
     }
     const fromCode = nodeCodeByShapeId.get(c.stCxnId);
     const toCode = nodeCodeByShapeId.get(c.endCxnId);
     if (!fromCode || !toCode) {
+      const excludeIds = new Set<string>([c.stCxnId, c.endCxnId]);
       issues.push({
         severity: "ERROR",
         issueType: "MISSING_SOURCE_NODE",
         message: `연결선(connector#${c.id ?? "?"})이 참조하는 도형(shape#${!fromCode ? c.stCxnId : c.endCxnId})을 찾을 수 없습니다.`,
         sourceWorksheet: sheet.name,
         sourceReference: c.id ? `connector#${c.id}` : null,
+        rawEvidence: {
+          connectorId: c.id ?? null,
+          stCxnId: c.stCxnId,
+          endCxnId: c.endCxnId,
+          from: c.from ?? null,
+          to: c.to ?? null,
+          headType: c.headType ?? null,
+          tailType: c.tailType ?? null,
+          fromCandidates: !fromCode && c.from ? rankCandidates(toXY(c.from), shapes, excludeIds) : undefined,
+          toCandidates: !toCode && c.to ? rankCandidates(toXY(c.to), shapes, excludeIds) : undefined,
+        },
       });
       continue;
     }
@@ -232,12 +289,25 @@ export function extractSheetGraph(sheet: LoadedSheet): SheetGraphResult {
     const outgoing = outgoingByNode.get(node.nodeCode) ?? [];
     const hasCompleteYesNo = outgoing.includes("YES") && outgoing.includes("NO");
     if (!outgoing.includes("DEFAULT") && !outgoing.includes("NORMAL") && !hasCompleteYesNo) {
+      const shape = node.sourceShapeId ? orderedFlowShapes.find((s) => s.id === node.sourceShapeId) : undefined;
+      const alreadyTargetedIds = new Set<string>(
+        connectors.filter((c) => c.stCxnId === node.sourceShapeId && c.endCxnId).map((c) => c.endCxnId!)
+      );
+      if (node.sourceShapeId) alreadyTargetedIds.add(node.sourceShapeId);
       issues.push({
         severity: "ERROR",
         issueType: "MISSING_OUTGOING_PATH",
         message: `판단 노드 "${node.title}"에 정상/기본 진행 경로가 없습니다 (NG/YES/NO 분기만 존재).`,
         sourceWorksheet: sheet.name,
         sourceReference: `shape#${node.sourceShapeId}`,
+        rawEvidence: shape
+          ? {
+              shapeId: node.sourceShapeId,
+              from: shape.from,
+              to: shape.to,
+              candidates: rankCandidates(mid(shape), shapes, alreadyTargetedIds),
+            }
+          : undefined,
       });
     }
   }

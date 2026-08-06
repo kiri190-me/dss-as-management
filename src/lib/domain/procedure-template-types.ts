@@ -137,3 +137,50 @@ export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssue
   ORPHAN_REFERENCE_ITEM: "미해결 교차 참조 번호",
   UNRESOLVED_CROSS_SHEET_REFERENCE: "시트 간 참조 대상 누락",
 };
+
+export const PROCEDURE_VALIDATION_RESOLUTION_STATUS_CODES = [
+  "UNRESOLVED",
+  "RESOLVED_WITH_GRAPH_CHANGE",
+  "RESOLVED_NO_CHANGE",
+  "DEFERRED",
+] as const;
+export type ProcedureValidationResolutionStatus = (typeof PROCEDURE_VALIDATION_RESOLUTION_STATUS_CODES)[number];
+export const procedureValidationResolutionStatusLabels: Record<ProcedureValidationResolutionStatus, string> = {
+  UNRESOLVED: "미해결",
+  RESOLVED_WITH_GRAPH_CHANGE: "해결됨 (그래프 변경)",
+  RESOLVED_NO_CHANGE: "해결됨 (변경 없음)",
+  DEFERRED: "보류",
+};
+
+export const PROCEDURE_VALIDATION_RESOLUTION_ACTION_TYPE_CODES = [
+  "ADD_EDGE",
+  "BIND_SOURCE",
+  "BIND_TARGET",
+  "RETARGET_EDGE",
+  "RELABEL_EDGE",
+  "MARK_NO_CHANGE",
+  "DEFER",
+  "REOPEN",
+  "ROLLBACK_EDGE",
+] as const;
+export type ProcedureValidationResolutionActionType = (typeof PROCEDURE_VALIDATION_RESOLUTION_ACTION_TYPE_CODES)[number];
+export const procedureValidationResolutionActionTypeLabels: Record<ProcedureValidationResolutionActionType, string> = {
+  ADD_EDGE: "분기 추가",
+  BIND_SOURCE: "시작 노드 연결",
+  BIND_TARGET: "대상 노드 연결",
+  RETARGET_EDGE: "분기 대상 변경",
+  RELABEL_EDGE: "분기 라벨 변경",
+  MARK_NO_CHANGE: "변경 없이 확인",
+  DEFER: "보류",
+  REOPEN: "재검토 재개",
+  ROLLBACK_EDGE: "분기 되돌리기",
+};
+
+/** Confidence classification for the deterministic-known-issue matcher (src/lib/domain/procedure-validation-known-issues.ts) — display-only, never used to gate or auto-apply a resolution. */
+export const PROCEDURE_VALIDATION_CONFIDENCE_CODES = ["HIGH", "MEDIUM", "LOW"] as const;
+export type ProcedureValidationConfidence = (typeof PROCEDURE_VALIDATION_CONFIDENCE_CODES)[number];
+export const procedureValidationConfidenceLabels: Record<ProcedureValidationConfidence, string> = {
+  HIGH: "높음",
+  MEDIUM: "중간",
+  LOW: "낮음",
+};

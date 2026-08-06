@@ -20,6 +20,7 @@ import {
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
   procedureReferenceItems,
+  procedureValidationResolutionHistory,
 } from "../src/lib/db/schema";
 
 /**
@@ -44,6 +45,7 @@ const tables = [
   { name: "procedure_troubleshooting_entries", table: procedureTroubleshootingEntries },
   { name: "procedure_template_validation_issues", table: procedureTemplateValidationIssues },
   { name: "procedure_reference_items", table: procedureReferenceItems },
+  { name: "procedure_validation_resolution_history", table: procedureValidationResolutionHistory },
 ] as const;
 
 async function main() {

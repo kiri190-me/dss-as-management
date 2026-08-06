@@ -119,3 +119,30 @@ test("extractSheetGraph: a node with no outgoing edges is classified END", () =>
   const node3 = nodes.find((n) => n.sourceShapeId === "3")!;
   assert.equal(node3.nodeType, "END");
 });
+
+test("extractSheetGraph (Phase 3A): a dangling connector's rawEvidence captures the raw geometry and ranks a real candidate for the missing endpoint", () => {
+  const { issues } = extractSheetGraph(buildFixtureSheet());
+  const issue = issues.find((i) => i.issueType === "DANGLING_CONNECTOR")!;
+  assert.equal(issue.rawEvidence?.connectorId, "c3");
+  assert.equal(issue.rawEvidence?.stCxnId, "1");
+  assert.equal(issue.rawEvidence?.endCxnId, null);
+  assert.deepEqual(issue.rawEvidence?.to, { col: 1, row: 2 });
+  // endCxnId is missing, so toCandidates must be populated; stCxnId is
+  // known, so fromCandidates must not be.
+  assert.equal(issue.rawEvidence?.fromCandidates, undefined);
+  assert.ok(issue.rawEvidence?.toCandidates && issue.rawEvidence.toCandidates.length > 0);
+  const nearest = issue.rawEvidence!.toCandidates![0];
+  assert.equal(nearest.shapeId, "2"); // "판단 확인" is the closest real shape to (col:1,row:2)
+  // branch-label shapes (NG, O.K.) must never appear as candidates.
+  assert.ok(!issue.rawEvidence!.toCandidates!.some((c) => c.shapeId === "8" || c.shapeId === "9"));
+});
+
+test("extractSheetGraph (Phase 3A): a MISSING_OUTGOING_PATH issue's rawEvidence excludes the already-targeted NG shape", () => {
+  const { issues } = extractSheetGraph(buildFixtureSheet());
+  const issue = issues.find((i) => i.issueType === "MISSING_OUTGOING_PATH")!;
+  assert.equal(issue.rawEvidence?.shapeId, "2");
+  assert.ok(issue.rawEvidence?.candidates && issue.rawEvidence.candidates.length > 0);
+  // shape#3 is already the NG target of shape#2 — must not reappear as a candidate.
+  assert.ok(!issue.rawEvidence!.candidates!.some((c) => c.shapeId === "3"));
+  assert.equal(issue.rawEvidence!.candidates![0].shapeId, "1");
+});

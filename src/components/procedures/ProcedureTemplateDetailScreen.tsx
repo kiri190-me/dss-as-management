@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import ProcedureFlowGraph from "./ProcedureFlowGraph";
 import ProcedureChecklistViewer from "./ProcedureChecklistViewer";
 import ProcedureTroubleshootingViewer from "./ProcedureTroubleshootingViewer";
@@ -32,7 +33,13 @@ function formatDate(iso: string | null): string {
  * principle carry more than one, so these are independent, not
  * mutually-exclusive branches.
  */
-export default function ProcedureTemplateDetailScreen({ template }: { template: ProcedureTemplateDetail }) {
+export default function ProcedureTemplateDetailScreen({
+  template,
+  canManageValidation,
+}: {
+  template: ProcedureTemplateDetail;
+  canManageValidation: boolean;
+}) {
   const hasGraph = template.edges.length > 0 || template.nodes.some((n) => n.nodeType !== "CHECKLIST" && n.nodeType !== "TROUBLESHOOTING");
   const hasChecklist = template.checklistSections.length > 0;
   const hasTroubleshooting = template.troubleshootingEntries.length > 0;
@@ -41,7 +48,8 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{template.name}</h1>
           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[template.status]}`}>
             {procedureTemplateStatusLabels[template.status]}
@@ -53,6 +61,15 @@ export default function ProcedureTemplateDetailScreen({ template }: { template: 
             <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
               참고용 — 실행 불가
             </span>
+          )}
+          </div>
+          {canManageValidation && !template.isReferenceOnly && (
+            <Link
+              href={`/procedures/${template.id}/validation`}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              검증 문제 검토
+            </Link>
           )}
         </div>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-600">{template.code}</p>

@@ -59,6 +59,19 @@ const OLD_SAMPLE_TEMPLATE_CODES = [
   "mb-symptom-troubleshooting",
 ];
 
+/**
+ * The 4 templates this importer currently produces. Phase 3A's
+ * --replace-current flag targets exactly these — used once, deliberately,
+ * to backfill the new raw_evidence validation-issue column onto templates
+ * imported before that column existed (the plain idempotent path is a
+ * no-op for an unchanged source_file_hash, so backfilling requires an
+ * explicit, disclosed delete+reimport, same guarded pattern as
+ * --replace-old-samples: only DRAFT rows matching these exact codes are
+ * ever touched, and every deleted row's contents are printed before
+ * commit).
+ */
+const CURRENT_TEMPLATE_CODES = ["rfg-full-lifecycle", "mb-full-lifecycle", "main-page-index", "qc-common-operations"];
+
 function findSheet(wb: LoadedWorkbook, name: string): LoadedSheet {
   const sheet = wb.sheets.find((s) => s.name === name);
   if (!sheet) throw new Error(`Sheet not found in workbook: "${name}"`);
@@ -86,17 +99,21 @@ async function resolveSuperAdminActorId(): Promise<string> {
   return row.id;
 }
 
-function parseArgs(): { file: string; replaceOldSamples: boolean } {
+function parseArgs(): { file: string; replaceOldSamples: boolean; replaceCurrent: boolean } {
   const args = process.argv.slice(2);
   const fileFlagIndex = args.indexOf("--file");
   const file = fileFlagIndex >= 0 ? args[fileFlagIndex + 1] : undefined;
   if (!file) {
     console.error(
-      "Usage: tsx scripts/import-procedure-templates.ts --file <path-to-xlsx> [--replace-old-samples]"
+      "Usage: tsx scripts/import-procedure-templates.ts --file <path-to-xlsx> [--replace-old-samples] [--replace-current]"
     );
     process.exit(1);
   }
-  return { file, replaceOldSamples: args.includes("--replace-old-samples") };
+  return {
+    file,
+    replaceOldSamples: args.includes("--replace-old-samples"),
+    replaceCurrent: args.includes("--replace-current"),
+  };
 }
 
 function buildRfgLifecycleTemplate(wb: LoadedWorkbook): ExtractedTemplate {
@@ -169,7 +186,7 @@ function buildReferenceOnlyTemplate(
 }
 
 async function main() {
-  const { file, replaceOldSamples } = parseArgs();
+  const { file, replaceOldSamples, replaceCurrent } = parseArgs();
   console.log(`Loading workbook: ${file}`);
   const wb = loadWorkbook(file);
   console.log(`  source_file_hash: ${wb.sourceFileHash}`);
@@ -189,6 +206,29 @@ async function main() {
     }
     if (result.deleted.length === 0) {
       console.log("  -> no matching DRAFT templates found (already replaced, or never imported).");
+    }
+    for (const d of result.deleted) {
+      console.log(
+        `  -> deleted "${d.code}" (id=${d.id}): nodes=${d.nodeCount} edges=${d.edgeCount} ` +
+          `checklistSections=${d.checklistSectionCount} checklistItems=${d.checklistItemCount} ` +
+          `troubleshootingEntries=${d.troubleshootingEntryCount} referenceItems=${d.referenceItemCount} ` +
+          `issues=${d.issueCount}`
+      );
+    }
+    console.log("");
+  }
+
+  if (replaceCurrent) {
+    console.log("=".repeat(72));
+    console.log("REPLACE-CURRENT MODE — deleting the 4 current templates (only if still DRAFT)");
+    console.log("=".repeat(72));
+    const result = await replaceDraftProcedureTemplates(CURRENT_TEMPLATE_CODES, actorId);
+    if (!result.ok) {
+      console.error(`  -> FAILED: [${result.code}] ${result.message}`);
+      process.exit(1);
+    }
+    if (result.deleted.length === 0) {
+      console.log("  -> no matching DRAFT templates found.");
     }
     for (const d of result.deleted) {
       console.log(

@@ -64,6 +64,13 @@
       "when": 1785978108360,
       "tag": "0008_noisy_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785987261807,
+      "tag": "0009_daily_loa",
+      "breakpoints": true
     }
   ]
 }

@@ -51,3 +51,22 @@ export function canArchiveProcedureTemplates(role: Role): boolean {
 export function canCreateProcedureTemplateDraft(role: Role): boolean {
   return role === "SUPER_ADMIN";
 }
+
+/**
+ * Phase 3A: gates whether the validation-resolution routes/button exist at
+ * all for a role. SUPER_ADMIN and ADMIN both get read access (issue list,
+ * evidence, candidates, history) — ADMIN's access is view-only, enforced by
+ * canResolveProcedureValidationIssues below, not by a second view-gate
+ * function. No existing policy in this codebase grants ADMIN any
+ * procedure-template mutation, so this phase does not add a separate
+ * ADMIN-can-comment write path either — a deliberate scope decision, not an
+ * oversight.
+ */
+export function canViewProcedureValidationManagement(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
+/** Bind a connector, resolve/defer without a graph change, reopen, or roll back an edge — SUPER_ADMIN only, same tier as import/publish/archive. */
+export function canResolveProcedureValidationIssues(role: Role): boolean {
+  return role === "SUPER_ADMIN";
+}

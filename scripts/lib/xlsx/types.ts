@@ -83,12 +83,50 @@ export type ExtractedTroubleshootingEntry = {
   sourceCellRange?: string | null;
 };
 
+/**
+ * A geometrically-ranked candidate shape for an unresolved connector/node
+ * gap (Phase 3A) — never a chosen answer, just a distance-sorted option for
+ * a human reviewer. `distance` uses the same col/row Euclidean metric as
+ * the label-matching heuristic in extract-shape-graph.ts.
+ */
+export type ExtractedValidationIssueCandidate = {
+  shapeId: string;
+  text: string;
+  distance: number;
+};
+
+/**
+ * Structured (never binary) snapshot of the workbook geometry behind a
+ * DANGLING_CONNECTOR / MISSING_SOURCE_NODE / MISSING_OUTGOING_PATH issue,
+ * computed once at import time (Phase 3A) so the validation-resolution UI
+ * can render a "raw connector inspector" and ranked candidates without the
+ * running server ever needing filesystem access to the source .xlsx.
+ */
+export type ExtractedValidationIssueRawEvidence = {
+  connectorId?: string | null;
+  stCxnId?: string | null;
+  endCxnId?: string | null;
+  from?: { col: number; row: number } | null;
+  to?: { col: number; row: number } | null;
+  headType?: string | null;
+  tailType?: string | null;
+  /** the decision shape itself, for MISSING_OUTGOING_PATH */
+  shapeId?: string | null;
+  /** candidates near the connector's 'from' anchor — present only when stCxnId is missing */
+  fromCandidates?: ExtractedValidationIssueCandidate[];
+  /** candidates near the connector's 'to' anchor — present only when endCxnId is missing */
+  toCandidates?: ExtractedValidationIssueCandidate[];
+  /** candidates near a decision shape's own position — MISSING_OUTGOING_PATH only */
+  candidates?: ExtractedValidationIssueCandidate[];
+};
+
 export type ExtractedValidationIssue = {
   severity: ProcedureValidationSeverity;
   issueType: ProcedureValidationIssueType;
   message: string;
   sourceWorksheet?: string | null;
   sourceReference?: string | null;
+  rawEvidence?: ExtractedValidationIssueRawEvidence | null;
 };
 
 /**
