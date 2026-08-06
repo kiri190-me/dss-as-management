@@ -10,6 +10,7 @@ import {
   type ProcedureValidationResolutionStatus,
 } from "@/lib/domain/procedure-template-types";
 import type { ValidationIssueListResult } from "@/lib/db/queries/procedure-validation-resolutions";
+import { buildWorkflowViewHref, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 
 const ALL = "ALL";
 
@@ -135,32 +136,64 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
                 <th className="px-3 py-2 font-medium">상태</th>
                 <th className="px-3 py-2 font-medium">처리자</th>
                 <th className="px-3 py-2 font-medium">처리일</th>
+                <th className="px-3 py-2 font-medium">처리</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((issue) => (
-                <tr key={issue.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50">
-                  <td className="px-3 py-2">{procedureValidationSeverityLabels[issue.severity]}</td>
-                  <td className="px-3 py-2">
-                    <Link href={`/procedures/${template.id}/validation/${issue.id}`} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
-                      {procedureValidationIssueTypeLabels[issue.issueType] ?? issue.issueType}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{issue.sourceWorksheet}</td>
-                  <td className="px-3 py-2 font-mono">{issue.sourceReference}</td>
-                  <td className="px-3 py-2 max-w-[280px] truncate text-zinc-600 dark:text-zinc-400" title={issue.message}>
-                    {issue.message}
-                  </td>
-                  <td className="px-3 py-2">{issue.classification ? procedureValidationConfidenceLabels[issue.classification.confidence] : "-"}</td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_BADGE[issue.resolutionStatus]}`}>
-                      {procedureValidationResolutionStatusLabels[issue.resolutionStatus]}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{issue.resolvedByName ?? "-"}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{issue.resolvedAt ? formatDate(issue.resolvedAt) : "-"}</td>
-                </tr>
-              ))}
+              {filtered.map((issue) => {
+                const { shapeId, connectorId } = parseSourceReference(issue.sourceReference);
+                // Always navigates straight into 오류 집중 보기 (Problem 2) —
+                // the graph screen re-derives exact/fallback/candidate-only
+                // state from these same stable identifiers, never from node
+                // title text.
+                const workflowHref = buildWorkflowViewHref({
+                  templateId: template.id,
+                  issueId: issue.id,
+                  worksheet: issue.sourceWorksheet,
+                  shapeId,
+                  connectorId,
+                  errorFocus: true,
+                });
+                return (
+                  <tr key={issue.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50">
+                    <td className="px-3 py-2">{procedureValidationSeverityLabels[issue.severity]}</td>
+                    <td className="px-3 py-2">
+                      <Link href={`/procedures/${template.id}/validation/${issue.id}`} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
+                        {procedureValidationIssueTypeLabels[issue.issueType] ?? issue.issueType}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{issue.sourceWorksheet}</td>
+                    <td className="px-3 py-2 font-mono">{issue.sourceReference}</td>
+                    <td className="px-3 py-2 max-w-[280px] truncate text-zinc-600 dark:text-zinc-400" title={issue.message}>
+                      {issue.message}
+                    </td>
+                    <td className="px-3 py-2">{issue.classification ? procedureValidationConfidenceLabels[issue.classification.confidence] : "-"}</td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_BADGE[issue.resolutionStatus]}`}>
+                        {procedureValidationResolutionStatusLabels[issue.resolutionStatus]}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{issue.resolvedByName ?? "-"}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{issue.resolvedAt ? formatDate(issue.resolvedAt) : "-"}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex flex-col items-start gap-1">
+                        <Link
+                          href={workflowHref}
+                          className="rounded-md border border-blue-300 px-2 py-1 text-[10px] font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                        >
+                          오류 위치 보기
+                        </Link>
+                        <Link
+                          href={`/procedures/${template.id}/validation/${issue.id}`}
+                          className="rounded-md border border-zinc-300 px-2 py-1 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          처리
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

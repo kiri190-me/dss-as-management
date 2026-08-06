@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import ProcedureTemplateDetailScreen from "@/components/procedures/ProcedureTemplateDetailScreen";
@@ -64,9 +65,11 @@ export default async function ProcedureTemplateDetailPage({
   }
 
   return (
-    <ProcedureTemplateDetailScreen
-      template={template}
-      canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
-    />
+    <Suspense fallback={null}>
+      <ProcedureTemplateDetailScreen
+        template={template}
+        canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
+      />
+    </Suspense>
   );
 }

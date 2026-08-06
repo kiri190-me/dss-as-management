@@ -4,14 +4,17 @@ import {
   procedureValidationIssueTypeLabels,
   procedureValidationResolutionStatusLabels,
   procedureValidationConfidenceLabels,
-  procedureBranchTypeLabels,
-  procedureNodeTypeLabels,
 } from "@/lib/domain/procedure-template-types";
+import { getNodeChipVisual } from "@/lib/domain/procedure-visual-language";
+import { buildWorkflowViewHref } from "@/lib/domain/procedure-graph-navigation";
 import type {
   ValidationIssueDetail,
   ValidationIssueCandidateRow,
+  ValidationIssueDetailNodeSummary,
   ValidationResolutionHistoryRow,
 } from "@/lib/db/queries/procedure-validation-resolutions";
+import ProcedureNodeChip from "../visual/ProcedureNodeChip";
+import ProcedureBranchBadge from "../visual/ProcedureBranchBadge";
 import BindConnectorForm from "./BindConnectorForm";
 import NoChangeResolutionForm from "./NoChangeResolutionForm";
 import ReopenRollbackControls from "./ReopenRollbackControls";
@@ -22,6 +25,18 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   MEDIUM: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
   LOW: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
 };
+
+function NodeSummaryChip({ node }: { node: ValidationIssueDetailNodeSummary }) {
+  const { semanticType, iconKey } = getNodeChipVisual(node.nodeType);
+  return (
+    <ProcedureNodeChip
+      semanticType={semanticType}
+      iconKey={iconKey}
+      title={node.title}
+      subtitle={`${node.sourceWorksheet ?? ""} · ${node.nodeCode}`}
+    />
+  );
+}
 
 function CandidateTable({ title, candidates }: { title: string; candidates: ValidationIssueCandidateRow[] }) {
   if (candidates.length === 0) return null;
@@ -34,7 +49,6 @@ function CandidateTable({ title, candidates }: { title: string; candidates: Vali
             <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
               <th className="px-3 py-2 font-medium">shape#</th>
               <th className="px-3 py-2 font-medium">가져온 노드</th>
-              <th className="px-3 py-2 font-medium">유형</th>
               <th className="px-3 py-2 font-medium">거리</th>
               <th className="px-3 py-2 font-medium">이미 연결됨</th>
               <th className="px-3 py-2 font-medium">후보 사유</th>
@@ -44,8 +58,15 @@ function CandidateTable({ title, candidates }: { title: string; candidates: Vali
             {candidates.map((c) => (
               <tr key={c.shapeId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                 <td className="px-3 py-2 font-mono">{c.shapeId}</td>
-                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{c.title ?? "(가져오지 않음)"}</td>
-                <td className="px-3 py-2">{c.nodeType ? procedureNodeTypeLabels[c.nodeType] : "-"}</td>
+                <td className="px-3 py-2">
+                  {c.nodeId && c.nodeType ? (
+                    <NodeSummaryChip
+                      node={{ id: c.nodeId, nodeCode: "", nodeType: c.nodeType, title: c.title ?? c.shapeId, sourceWorksheet: c.sourceWorksheet, sourceShapeId: c.shapeId }}
+                    />
+                  ) : (
+                    <span className="text-zinc-400 dark:text-zinc-600">(가져오지 않음)</span>
+                  )}
+                </td>
                 <td className="px-3 py-2">{c.distance.toFixed(2)}</td>
                 <td className="px-3 py-2">{c.alreadyConnected ? "예" : "아니오"}</td>
                 <td className="px-3 py-2">{c.whyCandidate === "bound_endpoint" ? "원본 연결선의 기존 바인딩 끝점" : "근접 거리 기반 후보"}</td>
@@ -76,12 +97,34 @@ export default function ValidationIssueDetailScreen({
   const topGenericCandidate = issue.candidates[0];
   const lastGraphChangeHistory = history.find((h) => ["ADD_EDGE", "BIND_SOURCE", "BIND_TARGET", "RETARGET_EDGE"].includes(h.actionType));
 
+  // Error-to-node navigation (Phase 3B revision) — currentNode is the exact
+  // match; fallbackNodeId only exists when currentNode is null (an
+  // unbound-connector issue), so it is always the approximation, never both.
+  const workflowTargetNodeId = issue.currentNode?.id ?? issue.fallbackNodeId ?? null;
+  const isWorkflowTargetFallback = !issue.currentNode && !!issue.fallbackNodeId;
+  const workflowHref = buildWorkflowViewHref({
+    templateId: issue.procedureTemplateId,
+    issueId: issue.id,
+    worksheet: issue.sourceWorksheet,
+    nodeId: workflowTargetNodeId,
+    isFallback: isWorkflowTargetFallback,
+    errorFocus: true,
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/procedures/${issue.procedureTemplateId}/validation`} className="text-xs text-blue-700 hover:underline dark:text-blue-400">
-          ← 검증 이슈 목록으로
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Link href={`/procedures/${issue.procedureTemplateId}/validation`} className="text-xs text-blue-700 hover:underline dark:text-blue-400">
+            ← 검증 이슈 목록으로
+          </Link>
+          <Link
+            href={workflowHref}
+            className="rounded-md border border-blue-300 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950"
+          >
+            오류 위치로 이동{!workflowTargetNodeId ? " (연결된 노드 없음)" : isWorkflowTargetFallback ? " (근접 노드)" : ""}
+          </Link>
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{procedureValidationIssueTypeLabels[issue.issueType] ?? issue.issueType}</h1>
           <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
@@ -125,7 +168,7 @@ export default function ValidationIssueDetailScreen({
           </div>
           <div>
             <dt className="text-zinc-400 dark:text-zinc-600">현재 노드</dt>
-            <dd className="mt-0.5 text-zinc-700 dark:text-zinc-300">{issue.currentNode ? `${issue.currentNode.title} (${issue.currentNode.nodeCode})` : "-"}</dd>
+            <dd className="mt-0.5">{issue.currentNode ? <NodeSummaryChip node={issue.currentNode} /> : <span className="text-zinc-700 dark:text-zinc-300">-</span>}</dd>
           </div>
           <div>
             <dt className="text-zinc-400 dark:text-zinc-600">처리자 / 처리일</dt>
@@ -145,20 +188,24 @@ export default function ValidationIssueDetailScreen({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">나가는 분기 ({issue.outgoingEdges.length})</h3>
-              <ul className="mt-1 flex flex-col gap-1 text-xs">
+              <ul className="mt-1 flex flex-col gap-2 text-xs">
                 {issue.outgoingEdges.map((e) => (
-                  <li key={e.id} className="rounded border border-zinc-100 px-2 py-1 dark:border-zinc-800">
-                    [{procedureBranchTypeLabels[e.branchType]}{e.branchLabel ? ` "${e.branchLabel}"` : ""}] → {e.otherNode.title}
+                  <li key={e.id} className="flex flex-wrap items-center gap-1.5 rounded border border-zinc-100 px-2 py-1 dark:border-zinc-800">
+                    <ProcedureBranchBadge branchType={e.branchType} label={e.branchLabel} />
+                    <span className="text-zinc-400 dark:text-zinc-600">→</span>
+                    <NodeSummaryChip node={e.otherNode} />
                   </li>
                 ))}
               </ul>
             </div>
             <div>
               <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">들어오는 분기 ({issue.incomingEdges.length})</h3>
-              <ul className="mt-1 flex flex-col gap-1 text-xs">
+              <ul className="mt-1 flex flex-col gap-2 text-xs">
                 {issue.incomingEdges.map((e) => (
-                  <li key={e.id} className="rounded border border-zinc-100 px-2 py-1 dark:border-zinc-800">
-                    [{procedureBranchTypeLabels[e.branchType]}{e.branchLabel ? ` "${e.branchLabel}"` : ""}] ← {e.otherNode.title}
+                  <li key={e.id} className="flex flex-wrap items-center gap-1.5 rounded border border-zinc-100 px-2 py-1 dark:border-zinc-800">
+                    <ProcedureBranchBadge branchType={e.branchType} label={e.branchLabel} />
+                    <span className="text-zinc-400 dark:text-zinc-600">←</span>
+                    <NodeSummaryChip node={e.otherNode} />
                   </li>
                 ))}
               </ul>
@@ -222,7 +269,7 @@ export default function ValidationIssueDetailScreen({
       )}
 
       {canAct && issue.resolutionStatus === "UNRESOLVED" && (
-        <section className="flex flex-col gap-4">
+        <section id="resolution" className="flex flex-col gap-4">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">처리</h2>
           <BindConnectorForm
             issueId={issue.id}

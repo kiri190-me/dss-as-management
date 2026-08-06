@@ -1,5 +1,6 @@
 import { procedureValidationResolutionActionTypeLabels } from "@/lib/domain/procedure-template-types";
 import type { ValidationResolutionHistoryRow } from "@/lib/db/queries/procedure-validation-resolutions";
+import ProcedureBranchBadge from "../visual/ProcedureBranchBadge";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
@@ -33,7 +34,10 @@ export default function ResolutionHistoryPanel({ history }: { history: Validatio
           </div>
           {row.note && <p className="mt-2 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">{row.note}</p>}
           {row.branchType && (
-            <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600">분기 유형: {row.branchType}</p>
+            <div className="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-600">
+              <span>분기 유형:</span>
+              <ProcedureBranchBadge branchType={row.branchType} />
+            </div>
           )}
           {row.affectedEdgeId && (
             <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600">영향받은 분기 ID: {row.affectedEdgeId}</p>

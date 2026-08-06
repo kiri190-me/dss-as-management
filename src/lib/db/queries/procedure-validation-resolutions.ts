@@ -183,6 +183,16 @@ export type ValidationIssueDetail = {
   fromCandidates: ValidationIssueCandidateRow[];
   toCandidates: ValidationIssueCandidateRow[];
   candidates: ValidationIssueCandidateRow[];
+  /**
+   * Phase 3B: the best already-imported node to center the graph on when
+   * `currentNode` is null (an unbound-connector issue with no single
+   * "current node" field) — the nearest ranked candidate that is already a
+   * real, connected node, falling back to the single nearest candidate
+   * regardless of connection state. Null when there is truly no candidate
+   * at all. Never set when `currentNode` is already known — that is always
+   * the exact match, not an approximation.
+   */
+  fallbackNodeId: string | null;
 };
 
 function shapeRefFromSourceReference(sourceReference: string | null): string | null {
@@ -277,6 +287,20 @@ export async function getValidationIssueDetail(issueId: string): Promise<Validat
     });
   }
 
+  const fromCandidates = annotateCandidates(rawEvidence?.fromCandidates, rawEvidence?.stCxnId);
+  const toCandidates = annotateCandidates(rawEvidence?.toCandidates, rawEvidence?.endCxnId);
+  const candidates = annotateCandidates(rawEvidence?.candidates, null);
+
+  // "center on the nearest bound source or target node" for an issue with
+  // no single current node — prefer a ranked candidate that is already a
+  // real, connected node over one that was merely proximity-ranked, since
+  // an already-connected shape is a genuine existing node in the graph.
+  const fallbackNodeId = currentNodeRow
+    ? null
+    : ([...fromCandidates, ...toCandidates, ...candidates].find((c) => c.alreadyConnected && c.nodeId)?.nodeId ??
+      [...fromCandidates, ...toCandidates, ...candidates].find((c) => c.nodeId)?.nodeId ??
+      null);
+
   return {
     id: issue.id,
     procedureTemplateId: issue.procedureTemplateId,
@@ -301,9 +325,10 @@ export async function getValidationIssueDetail(issueId: string): Promise<Validat
     currentNode: currentNodeRow ? toSummary(currentNodeRow) : null,
     outgoingEdges,
     incomingEdges,
-    fromCandidates: annotateCandidates(rawEvidence?.fromCandidates, rawEvidence?.stCxnId),
-    toCandidates: annotateCandidates(rawEvidence?.toCandidates, rawEvidence?.endCxnId),
-    candidates: annotateCandidates(rawEvidence?.candidates, null),
+    fromCandidates,
+    toCandidates,
+    candidates,
+    fallbackNodeId,
   };
 }
 

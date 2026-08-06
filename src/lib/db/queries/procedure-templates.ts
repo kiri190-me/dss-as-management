@@ -22,6 +22,7 @@ import type {
   ProcedureValidationIssueType,
   ProcedureValidationSeverity,
 } from "@/lib/domain/procedure-template-types";
+import { parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 
 export type ProcedureTemplateListRow = {
   id: string;
@@ -259,6 +260,17 @@ export type ProcedureTemplateDetail = {
   troubleshootingEntries: ProcedureTroubleshootingEntryRow[];
   referenceItems: ProcedureReferenceItemRow[];
   validationIssues: ProcedureValidationIssueRow[];
+  /**
+   * Phase 3B: per-node open (UNRESOLVED or DEFERRED — the same predicate the
+   * publish gate uses) ERROR/WARNING validation issue, for the graph's
+   * warning badge and its click-to-issue link. Matched by sourceWorksheet +
+   * the shape id parsed out of the issue's sourceReference, the same
+   * sourceWorksheet::sourceShapeId technique Phase 3A's
+   * getValidationIssueDetail already uses — not a guess, and not a new
+   * column. When a node has more than one open issue, the most severe
+   * (ERROR over WARNING) wins; INFO-severity issues never produce a badge.
+   */
+  openIssuesByNodeId: { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" }[];
 };
 
 export async function getProcedureTemplateDetail(id: string): Promise<ProcedureTemplateDetail | null> {
@@ -369,6 +381,7 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       message: procedureTemplateValidationIssues.message,
       sourceWorksheet: procedureTemplateValidationIssues.sourceWorksheet,
       sourceReference: procedureTemplateValidationIssues.sourceReference,
+      resolutionStatus: procedureTemplateValidationIssues.resolutionStatus,
       resolvedAt: procedureTemplateValidationIssues.resolvedAt,
       resolutionNote: procedureTemplateValidationIssues.resolutionNote,
       createdAt: procedureTemplateValidationIssues.createdAt,
@@ -383,6 +396,30 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
   if (resolverIds.length > 0) {
     const resolvers = await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, resolverIds));
     for (const r of resolvers) resolverNameById.set(r.id, r.name);
+  }
+
+  // Phase 3B: which nodes have an open (UNRESOLVED/DEFERRED), ERROR/WARNING
+  // issue — matched by sourceWorksheet + the shape id parsed from
+  // sourceReference (e.g. "shape#50"), same pattern Phase 3A's
+  // getValidationIssueDetail already uses. When a node has more than one
+  // open issue, ERROR wins over WARNING so the badge always reflects the
+  // most severe unresolved state.
+  const nodeByShapeAndSheetForIssues = new Map<string, string>();
+  for (const n of nodes) {
+    if (n.sourceShapeId && n.sourceWorksheet) nodeByShapeAndSheetForIssues.set(`${n.sourceWorksheet}::${n.sourceShapeId}`, n.id);
+  }
+  const openIssueByNodeId = new Map<string, { issueId: string; severity: "ERROR" | "WARNING" }>();
+  for (const issue of issues) {
+    if (issue.resolutionStatus !== "UNRESOLVED" && issue.resolutionStatus !== "DEFERRED") continue;
+    if (issue.severity !== "ERROR" && issue.severity !== "WARNING") continue;
+    const { shapeId } = parseSourceReference(issue.sourceReference);
+    if (!shapeId || !issue.sourceWorksheet) continue;
+    const nodeId = nodeByShapeAndSheetForIssues.get(`${issue.sourceWorksheet}::${shapeId}`);
+    if (!nodeId) continue;
+    const existing = openIssueByNodeId.get(nodeId);
+    if (!existing || (existing.severity === "WARNING" && issue.severity === "ERROR")) {
+      openIssueByNodeId.set(nodeId, { issueId: issue.id, severity: issue.severity });
+    }
   }
 
   return {
@@ -477,5 +514,6 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       resolutionNote: i.resolutionNote,
       createdAt: i.createdAt.toISOString(),
     })),
+    openIssuesByNodeId: [...openIssueByNodeId].map(([nodeId, v]) => ({ nodeId, issueId: v.issueId, severity: v.severity })),
   };
 }
