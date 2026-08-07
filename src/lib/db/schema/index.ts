@@ -18,3 +18,4 @@ export * from "./procedure-template-validation-issues";
 export * from "./procedure-reference-items";
 export * from "./procedure-validation-resolution-history";
 export * from "./procedure-template-edit-history";
+export * from "./procedure-case-execution";
