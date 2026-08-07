@@ -13,6 +13,7 @@ import {
   users,
 } from "../schema";
 import { canImportProcedureTemplates, canPublishProcedureTemplates, canArchiveProcedureTemplates, canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
+import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 import type { Role } from "@/lib/domain/types";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 
@@ -31,7 +32,8 @@ export type ProcedureTemplateResultCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
-  | "HAS_UNRESOLVED_ERRORS";
+  | "HAS_UNRESOLVED_ERRORS"
+  | "HAS_STRUCTURAL_ERRORS";
 
 export type ProcedureTemplateResult =
   | { ok: true; id: string; alreadyImported?: boolean }
@@ -50,9 +52,10 @@ function fail(code: ProcedureTemplateResultCode, message: string): never {
 }
 
 type EligibleActor = { id: string; role: Role };
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function resolveEligibleActor(
+/** Exported for reuse by procedure-template-editor.ts — every Phase 4A editor mutation re-checks the same live actor eligibility this file's own mutations always have, never a second/looser copy of the check. */
+export async function resolveEligibleActor(
   tx: Tx,
   actorUserId: string
 ): Promise<EligibleActor> {
@@ -328,6 +331,27 @@ export async function publishProcedureTemplate(
         fail("HAS_UNRESOLVED_ERRORS", "해결되지 않은 오류(ERROR)가 있어 게시할 수 없습니다.");
       }
 
+      // Phase 4A — independent of the stored-issue check above: an editor
+      // mutation (retarget, type change, new edge) can introduce a
+      // structural problem that was never an imported issue row at all.
+      // Re-running the deterministic structural validator here, live, at
+      // the moment of publish is what makes "ERROR severity must continue
+      // blocking publication" hold for editor-introduced problems too,
+      // without needing to persist/dedupe validator findings into
+      // procedure_template_validation_issues.
+      const templateNodes = await tx
+        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
+      const templateEdges = await tx
+        .select({ id: procedureTemplateEdges.id, fromNodeId: procedureTemplateEdges.fromNodeId, toNodeId: procedureTemplateEdges.toNodeId, branchType: procedureTemplateEdges.branchType })
+        .from(procedureTemplateEdges)
+        .where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
+      const structuralIssues = validateProcedureGraphStructure(templateNodes, templateEdges);
+      if (structuralIssues.some((i) => i.severity === "ERROR")) {
+        fail("HAS_STRUCTURAL_ERRORS", "그래프 구조 오류(ERROR)가 있어 게시할 수 없습니다. 편집기에서 검증을 확인하세요.");
+      }
+
       await tx
         .update(procedureTemplates)
         .set({ status: "PUBLISHED", publishedByUserId: actor.id, publishedAt: new Date(), updatedAt: new Date() })
@@ -506,6 +530,12 @@ export async function createNewDraftVersion(
             conditionDefinition: e.conditionDefinition,
             sortOrder: e.sortOrder,
             sourceConnectorId: e.sourceConnectorId,
+            // Phase 4A — the exact parent-version edge this row was cloned
+            // from, so the editor's DRAFT-vs-parent comparison can tell a
+            // retargeted edge apart from a newly-added one (edges get a
+            // fresh id on every clone; unlike nodes there is no other
+            // stable cross-version identity to rely on).
+            clonedFromEdgeId: e.id,
           }))
         );
       }

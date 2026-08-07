@@ -2,8 +2,11 @@ import Link from "next/link";
 import {
   NODE_VISUAL_CONFIG,
   NODE_SIZE,
+  NODE_BORDER,
   ISSUE_BADGE_STYLES,
   computeNodeDimensions,
+  getNodeContentExtraHorizontalPadding,
+  shouldShowNodeIcon,
   type NodeShapeKind,
   type SemanticNodeVisualType,
   type IconKey,
@@ -91,6 +94,12 @@ export default function ProcedureNodeChip({
   // and the box actually rendered here can never disagree.
   const dims = size === "graph" ? computeNodeDimensions({ title, shape: config.shape }) : null;
   const badgeStyle = issueBadge ? ISSUE_BADGE_STYLES[issueBadge.severity] : null;
+  // "For very compact nodes, the icon may be omitted before sacrificing
+  // title readability" — see shouldShowNodeIcon's own doc comment. Compact
+  // (validation-screen pill) size always shows its icon; this only applies
+  // to the graph size's centered stack.
+  const showGraphIcon = size === "graph" && shouldShowNodeIcon(dims);
+  const graphContentExtraPadding = size === "graph" ? getNodeContentExtraHorizontalPadding(config.shape) : 0;
 
   // Theme-aware colors come from a JS config (per-semantic-type hex pairs),
   // not static Tailwind palette classes — so light/dark switching goes
@@ -123,12 +132,28 @@ export default function ProcedureNodeChip({
         // bug the badge had) — so selection and issue-state indicators
         // live on this plain, unclipped outer box instead. For non-clipped
         // shapes this just draws around the same visible edge as before.
-        isSelected ? "ring-2 ring-offset-1 ring-blue-500" : "",
+        // Selection (box-shadow ring), the WARNING/ERROR badge (CSS
+        // outline), and the hover/focus glow below (filter: drop-shadow)
+        // are three independent CSS channels, so any combination of them
+        // stays visually distinguishable rather than one silently
+        // overwriting another.
+        // ring-offset defaults to white, which reads as an unwanted bright
+        // halo against the app's dark canvas (`body`'s `--background:
+        // #0a0a0a` in globals.css) — pin it to that same color in dark mode
+        // so only the blue ring itself stands out, not a white gap around it.
+        isSelected ? "ring-[3px] ring-offset-2 ring-blue-500 ring-offset-white dark:ring-blue-400 dark:ring-offset-[#0a0a0a]" : "",
         badgeStyle ? badgeStyle.outlineClass : "",
         isDimmed ? (isSeverelyDimmed ? "opacity-15" : "opacity-35") : "opacity-100",
-        "transition-opacity duration-150",
+        // drop-shadow (unlike box-shadow) hugs the actual rendered alpha
+        // silhouette, so this hover/focus glow automatically follows the
+        // diamond/document/pentagon clip-path shapes too, with no
+        // shape-specific code — and it never moves or resizes the node
+        // since `filter` doesn't participate in layout.
+        "hover:drop-shadow-[0_0_3px_var(--node-border-light)] dark:hover:drop-shadow-[0_0_3px_var(--node-border-dark)]",
+        "focus-within:drop-shadow-[0_0_3px_var(--node-border-light)] dark:focus-within:drop-shadow-[0_0_3px_var(--node-border-dark)]",
+        "transition-[opacity,filter] duration-150",
       ].join(" ")}
-      style={{ width: dims?.width, minHeight: dims?.height }}
+      style={{ width: dims?.width, minHeight: dims?.height, ...cssVars }}
       title={tooltip}
     >
       {/* Shape layer: background/border/clip-path only — purely decorative.
@@ -136,46 +161,100 @@ export default function ProcedureNodeChip({
           (diamond/document/pentagon) can never clip the title text or the
           issue badge, which sit in a sibling layer that ignores this one's
           clip entirely. */}
-      <div
-        aria-hidden="true"
-        className={[
-          "bg-[var(--node-bg-light)] dark:bg-[var(--node-bg-dark)]",
-          "border-[var(--node-border-light)] dark:border-[var(--node-border-dark)]",
-          "absolute inset-0 border",
-          SHAPE_CLASS[config.shape],
-          isDoubleBorder
-            ? "shadow-[0_0_0_2px_var(--node-bg-light),0_0_0_3px_var(--node-border-light)] dark:shadow-[0_0_0_2px_var(--node-bg-dark),0_0_0_3px_var(--node-border-dark)]"
-            : "",
-        ].join(" ")}
-        style={{ ...cssVars, clipPath: clipShape, borderWidth: isDoubleBorder ? 1 : 1.5 }}
-      />
+      {clipShape ? (
+        <>
+          {/* A CSS `border` on an element that also has `clip-path` only
+              survives where the polygon touches the box's straight edges
+              (e.g. the diamond's flat top/bottom segments) — every diagonal
+              edge loses its border stroke entirely, since clip-path crops
+              the whole rendered box (border included) to the polygon.
+              Layered clip-path border instead: an outer div filled with the
+              border color and clipped to the polygon, plus an inner div
+              inset by NODE_BORDER.NORMAL_WIDTH, filled with the node's own
+              background and clipped to the *same* polygon, painted on top —
+              since clip-path polygons are percentage-based they scale with
+              the inset box, so the visible ring follows the shape's actual
+              outline (including diagonal edges) rather than faking a
+              rectangular border around a non-rectangular node. */}
+          <div
+            aria-hidden="true"
+            data-node-shape-layer="true"
+            className={["bg-[var(--node-border-light)] dark:bg-[var(--node-border-dark)]", "absolute inset-0", SHAPE_CLASS[config.shape]].join(" ")}
+            style={{ clipPath: clipShape }}
+          />
+          <div
+            aria-hidden="true"
+            className={["bg-[var(--node-bg-light)] dark:bg-[var(--node-bg-dark)]", "absolute", SHAPE_CLASS[config.shape]].join(" ")}
+            style={{ inset: NODE_BORDER.NORMAL_WIDTH, clipPath: clipShape }}
+          />
+        </>
+      ) : (
+        <div
+          aria-hidden="true"
+          data-node-shape-layer="true"
+          className={[
+            "bg-[var(--node-bg-light)] dark:bg-[var(--node-bg-dark)]",
+            "border-[var(--node-border-light)] dark:border-[var(--node-border-dark)]",
+            "absolute inset-0 border",
+            SHAPE_CLASS[config.shape],
+            isDoubleBorder ? "shadow-[var(--node-double-border-shadow-light)] dark:shadow-[var(--node-double-border-shadow-dark)]" : "",
+          ].join(" ")}
+          style={{
+            borderWidth: isDoubleBorder ? NODE_BORDER.DOUBLE_INNER_WIDTH : NODE_BORDER.NORMAL_WIDTH,
+            ...(isDoubleBorder
+              ? ({
+                  "--node-double-border-shadow-light": `0 0 0 ${NODE_BORDER.DOUBLE_GAP}px var(--node-bg-light), 0 0 0 ${NODE_BORDER.DOUBLE_GAP + NODE_BORDER.DOUBLE_OUTER_WIDTH}px var(--node-border-light)`,
+                  "--node-double-border-shadow-dark": `0 0 0 ${NODE_BORDER.DOUBLE_GAP}px var(--node-bg-dark), 0 0 0 ${NODE_BORDER.DOUBLE_GAP + NODE_BORDER.DOUBLE_OUTER_WIDTH}px var(--node-border-dark)`,
+                } as React.CSSProperties)
+              : {}),
+          }}
+        />
+      )}
 
-      {/* Content layer: never clipped, never shrunk by the badge. */}
+      {/* Content layer: never clipped, never shrunk by the badge. UI-
+          stabilization pass — the whole icon/type-label/title/subtitle
+          group renders as one centered vertical stack (never icon-left +
+          text-right) so the title stays visually centered inside the
+          shape's safe inner area regardless of shape, icon presence, or
+          badge/handle layers sitting outside this one entirely. */}
       <div
+        data-node-content="true"
         className={[
           "text-[var(--node-text-light)] dark:text-[var(--node-text-dark)]",
-          "relative z-[1] flex w-full min-w-0 gap-1.5",
-          size === "graph" ? "items-start px-2.5 py-1.5" : "items-center px-2 py-0.5 text-xs",
+          "relative z-[1] flex w-full min-w-0",
+          size === "graph" ? "h-full flex-col items-center justify-center gap-0.5 py-1.5 text-center" : "items-center gap-1.5 px-2 py-0.5 text-xs",
         ].join(" ")}
-        style={cssVars}
+        style={{
+          ...cssVars,
+          ...(size === "graph" ? { paddingLeft: 10 + graphContentExtraPadding, paddingRight: 10 + graphContentExtraPadding } : {}),
+        }}
       >
-        <ProcedureNodeIcon iconKey={iconKey} className={size === "graph" ? "mt-0.5 h-4 w-4 shrink-0" : "h-3 w-3 shrink-0"} />
-        <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          {size === "graph" && (
-            <span className="text-[9px] font-bold tracking-wide opacity-75">{config.label}</span>
-          )}
-          <span
-            className={size === "graph" ? "font-semibold break-words whitespace-pre-line" : "truncate font-medium"}
-            style={
-              size === "graph" && dims?.isTruncated
-                ? { display: "-webkit-box", WebkitLineClamp: NODE_SIZE.MAX_VISIBLE_LINES, WebkitBoxOrient: "vertical", overflow: "hidden" }
-                : undefined
-            }
-          >
-            {title}
-          </span>
-          {size === "graph" && subtitle && <span className="truncate text-[9px] opacity-55">{subtitle}</span>}
-        </div>
+        {size === "graph" ? (
+          <>
+            {(showGraphIcon || config.label) && (
+              <div className="flex w-full items-center justify-center gap-1">
+                {showGraphIcon && <ProcedureNodeIcon iconKey={iconKey} className="h-4 w-4 shrink-0" />}
+                <span className="text-[9px] font-bold tracking-wide opacity-75">{config.label}</span>
+              </div>
+            )}
+            <span
+              className="w-full break-words whitespace-pre-line text-center font-semibold leading-tight"
+              style={
+                dims?.isTruncated
+                  ? { display: "-webkit-box", WebkitLineClamp: NODE_SIZE.MAX_VISIBLE_LINES, WebkitBoxOrient: "vertical", overflow: "hidden" }
+                  : undefined
+              }
+            >
+              {title}
+            </span>
+            {subtitle && <span className="w-full truncate text-center text-[9px] opacity-55">{subtitle}</span>}
+          </>
+        ) : (
+          <>
+            <ProcedureNodeIcon iconKey={iconKey} className="h-3 w-3 shrink-0" />
+            <span className="truncate font-medium">{title}</span>
+          </>
+        )}
       </div>
 
       {/* Badge layer: absolutely positioned outside the shape entirely — a

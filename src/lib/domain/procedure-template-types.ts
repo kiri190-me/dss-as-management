@@ -121,6 +121,22 @@ export const PROCEDURE_VALIDATION_ISSUE_TYPES = [
   "DUPLICATE_NODE_CODE",
   "ORPHAN_REFERENCE_ITEM",
   "UNRESOLVED_CROSS_SHEET_REFERENCE",
+  // Phase 4A — structural-validator categories (see
+  // procedure-graph-structural-validation.ts). These are only ever produced
+  // live by the editor's Validate action / publish gate, never written to
+  // procedure_template_validation_issues — added here only so the shared
+  // label map stays a single source of truth for every issue-type string
+  // this codebase can ever surface.
+  "INVALID_START_STRUCTURE",
+  "INVALID_END_STRUCTURE",
+  "DUPLICATE_EDGE",
+  "INVALID_SELF_EDGE",
+  "CROSS_TEMPLATE_REFERENCE",
+  "ORPHAN_NODE",
+  "INVALID_LOOP_BACK_TARGET",
+  "INVALID_BRANCH_TYPE_FOR_NODE",
+  "REFERENCE_NODE_IN_EXECUTABLE_PATH",
+  "INVALID_CHECKLIST_OR_TROUBLESHOOTING_REFERENCE",
 ] as const;
 export type ProcedureValidationIssueType = (typeof PROCEDURE_VALIDATION_ISSUE_TYPES)[number];
 export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssueType, string> = {
@@ -136,6 +152,16 @@ export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssue
   DUPLICATE_NODE_CODE: "노드 코드 중복",
   ORPHAN_REFERENCE_ITEM: "미해결 교차 참조 번호",
   UNRESOLVED_CROSS_SHEET_REFERENCE: "시트 간 참조 대상 누락",
+  INVALID_START_STRUCTURE: "시작 노드 구조 오류",
+  INVALID_END_STRUCTURE: "종료 노드 구조 오류",
+  DUPLICATE_EDGE: "중복 분기",
+  INVALID_SELF_EDGE: "자기 자신으로의 분기",
+  CROSS_TEMPLATE_REFERENCE: "다른 템플릿 참조",
+  ORPHAN_NODE: "고립 노드",
+  INVALID_LOOP_BACK_TARGET: "잘못된 재진행 대상",
+  INVALID_BRANCH_TYPE_FOR_NODE: "노드 유형에 맞지 않는 분기 유형",
+  REFERENCE_NODE_IN_EXECUTABLE_PATH: "실행 경로 내 참조 노드",
+  INVALID_CHECKLIST_OR_TROUBLESHOOTING_REFERENCE: "체크리스트/고장 진단표 참조 오류",
 };
 
 export const PROCEDURE_VALIDATION_RESOLUTION_STATUS_CODES = [

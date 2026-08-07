@@ -67,6 +67,22 @@ export function buildWorkflowViewHref(params: WorkflowViewLinkParams): string {
   return `/procedures/${params.templateId}${query ? `?${query}` : ""}`;
 }
 
+/**
+ * Phase 4A — the editor route's own version of buildWorkflowViewHref, same
+ * query-param shape (issue/worksheet/node/shape/connector/fallback/mode)
+ * but pointing at /procedures/{id}/edit instead of /procedures/{id}, so
+ * "검토/처리 화면 열기"-style links can send a reviewer straight into the
+ * controlled editor already focused on the right node, instead of the
+ * read-only graph. Deliberately a thin wrapper around buildWorkflowViewHref
+ * rather than a duplicate implementation — the two hrefs must never drift
+ * apart in how they encode state.
+ */
+export function buildProcedureEditorHref(params: WorkflowViewLinkParams): string {
+  const readOnlyHref = buildWorkflowViewHref(params);
+  const [path, query] = readOnlyHref.split("?");
+  return `${path}/edit${query ? `?${query}` : ""}`;
+}
+
 export type GraphNavigationParams = {
   nodeParam?: string | null;
   worksheetParam?: string | null;

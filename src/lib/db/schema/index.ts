@@ -17,3 +17,4 @@ export * from "./procedure-troubleshooting";
 export * from "./procedure-template-validation-issues";
 export * from "./procedure-reference-items";
 export * from "./procedure-validation-resolution-history";
+export * from "./procedure-template-edit-history";

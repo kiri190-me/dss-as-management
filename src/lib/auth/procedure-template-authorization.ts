@@ -70,3 +70,19 @@ export function canViewProcedureValidationManagement(role: Role): boolean {
 export function canResolveProcedureValidationIssues(role: Role): boolean {
   return role === "SUPER_ADMIN";
 }
+
+/**
+ * Phase 4A — the controlled workflow editor (/procedures/[id]/edit):
+ * editing a DRAFT's node/edge properties, repositioning nodes, retargeting
+ * or creating edges, saving layout, and triggering a validate run. Gates
+ * the same tier as import/publish/archive/canCreateProcedureTemplateDraft
+ * (this task's explicit permission table: "ADMIN: Read-only for this phase
+ * unless an existing explicit procedure-edit permission already exists" —
+ * none does, so ADMIN gets no new write access here, only the pre-existing
+ * canViewAllProcedureTemplateStatuses read access). Every mutation in
+ * procedure-template-editor.ts re-checks this independently of whatever
+ * the editor UI renders, exactly like every other function in this file.
+ */
+export function canEditProcedureTemplateDraft(role: Role): boolean {
+  return role === "SUPER_ADMIN";
+}

@@ -77,6 +77,15 @@ export const procedureTemplateNodes = pgTable(
       .default(true),
     positionX: doublePrecision("position_x").notNull().default(0),
     positionY: doublePrecision("position_y").notNull().default(0),
+    // Phase 4A editor — 사용자 배치 (user layout) override, entirely separate
+    // from position_x/position_y so the original source-imported (or
+    // parent-version-cloned) coordinates are never overwritten. Null means
+    // "never repositioned by a reviewer yet"; a node with a null override
+    // always falls back to position_x/position_y for rendering. Only ever
+    // written by the editor's explicit "저장" (save layout) action — never
+    // on every pointer movement, and never backfilled for existing nodes.
+    userPositionX: doublePrecision("user_position_x"),
+    userPositionY: doublePrecision("user_position_y"),
     sortOrder: integer("sort_order").notNull().default(0),
     sourceWorksheet: text("source_worksheet"),
     sourceShapeId: text("source_shape_id"),

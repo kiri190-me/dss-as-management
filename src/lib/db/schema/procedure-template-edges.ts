@@ -6,6 +6,7 @@ import {
   pgTable,
   text,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { procedureTemplates } from "./procedure-templates";
 import { procedureTemplateNodes } from "./procedure-template-nodes";
@@ -65,6 +66,17 @@ export const procedureTemplateEdges = pgTable(
     conditionDefinition: jsonb("condition_definition"),
     sortOrder: integer("sort_order").notNull().default(0),
     sourceConnectorId: text("source_connector_id"),
+    // Phase 4A editor — the exact parent-version edge row this one was
+    // cloned from by createNewDraftVersion (null for an edge created
+    // directly by the editor's "add connection" feature). Edges get a
+    // fresh UUID on every clone (unlike nodes, which keep a stable
+    // node_code across versions), so without this column a retargeted edge
+    // is indistinguishable from "deleted + newly added" when comparing a
+    // DRAFT against its parent. onDelete:"restrict" matches every other
+    // edge/node FK in this table — Phase 4A never deletes an edge row.
+    clonedFromEdgeId: uuid("cloned_from_edge_id").references((): AnyPgColumn => procedureTemplateEdges.id, {
+      onDelete: "restrict",
+    }),
   },
   (table) => [
     index("procedure_template_edges_template_id_idx").on(

@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { PROCEDURE_NODE_TYPE_CODES, PROCEDURE_BRANCH_TYPE_CODES } from "./procedure-template-types";
 import {
   NODE_VISUAL_CONFIG,
+  NODE_BORDER,
+  ISSUE_BADGE_STYLES,
   EDGE_VISUAL_CONFIG,
   GRAPH_SPACING,
   NODE_SIZE,
+  SEMANTIC_NODE_VISUAL_TYPES,
   getSemanticNodeVisualType,
   getNodeIconKey,
   getNodeChipVisual,
@@ -14,6 +17,8 @@ import {
   groupNodesByWorksheet,
   computeNodeDimensions,
   computeStageSortedLayout,
+  getNodeContentExtraHorizontalPadding,
+  shouldShowNodeIcon,
   type MinimalEdge,
   type StageSortedLayoutNode,
   type StageSortedLayoutEdge,
@@ -63,6 +68,49 @@ test("getNodeChipVisual: bundles semantic type and icon key for a real stored no
   const result = getNodeChipVisual("INSPECTION");
   assert.equal(result.semanticType, "TASK");
   assert.equal(result.iconKey, "inspection");
+});
+
+// ---- Phase 4A node-outline visibility pass ----
+
+const WASHED_OUT_GRAYS = new Set(["#A1A1AA", "#71717A", "#a1a1aa", "#71717a"]);
+
+test("NODE_VISUAL_CONFIG: every semantic node visual type has a defined, non-transparent light and dark border color", () => {
+  for (const type of SEMANTIC_NODE_VISUAL_TYPES) {
+    const config = NODE_VISUAL_CONFIG[type];
+    assert.ok(config.borderLight, `${type}: borderLight must be defined`);
+    assert.ok(config.borderDark, `${type}: borderDark must be defined`);
+    assert.notEqual(config.borderLight, "transparent", `${type}: borderLight must not be transparent`);
+    assert.notEqual(config.borderDark, "transparent", `${type}: borderDark must not be transparent`);
+  }
+});
+
+test("NODE_VISUAL_CONFIG: no semantic type still uses the old washed-out zinc-400/zinc-500 gray border", () => {
+  for (const type of SEMANTIC_NODE_VISUAL_TYPES) {
+    const config = NODE_VISUAL_CONFIG[type];
+    assert.ok(!WASHED_OUT_GRAYS.has(config.borderLight), `${type}: borderLight (${config.borderLight}) must not be a washed-out gray`);
+    assert.ok(!WASHED_OUT_GRAYS.has(config.borderDark), `${type}: borderDark (${config.borderDark}) must not be a washed-out gray`);
+  }
+});
+
+test("NODE_VISUAL_CONFIG: light and dark border values differ (each theme gets its own tuned color, not a raw reuse)", () => {
+  for (const type of SEMANTIC_NODE_VISUAL_TYPES) {
+    const config = NODE_VISUAL_CONFIG[type];
+    assert.notEqual(config.borderLight, config.borderDark, `${type}: light and dark borders should be distinct theme-tuned values`);
+  }
+});
+
+test("NODE_BORDER: every width constant is a positive number", () => {
+  for (const [key, value] of Object.entries(NODE_BORDER)) {
+    assert.ok(typeof value === "number" && value > 0, `NODE_BORDER.${key} must be a positive number, got ${value}`);
+  }
+});
+
+test("ISSUE_BADGE_STYLES: WARNING and ERROR outlines differ in more than color (dashed vs solid) and both define a dark-mode color", () => {
+  assert.ok(ISSUE_BADGE_STYLES.WARNING.outlineClass.includes("dashed"), "WARNING must be dashed");
+  assert.ok(!ISSUE_BADGE_STYLES.ERROR.outlineClass.includes("dashed"), "ERROR must be solid, not dashed");
+  assert.ok(ISSUE_BADGE_STYLES.WARNING.outlineClass.includes("dark:"), "WARNING must define a dark-mode outline color");
+  assert.ok(ISSUE_BADGE_STYLES.ERROR.outlineClass.includes("dark:"), "ERROR must define a dark-mode outline color");
+  assert.notEqual(ISSUE_BADGE_STYLES.WARNING.outlineClass, ISSUE_BADGE_STYLES.ERROR.outlineClass);
 });
 
 test("EDGE_VISUAL_CONFIG: every stored ProcedureBranchType maps to a defined entry", () => {
@@ -219,6 +267,30 @@ test("computeNodeDimensions: badge/issue state is not a parameter — text sizin
 test("GRAPH_SPACING: the compact layout uses smaller spacing than the previous fixed grid (BAND_GAP < 150, NODE_V_GAP < 130)", () => {
   assert.ok(GRAPH_SPACING.BAND_GAP < 150, "worksheet-band gap must be smaller than the old fixed 150px margin");
   assert.ok(GRAPH_SPACING.NODE_V_GAP < 130, "row pitch must be smaller than the old fixed 130px row height");
+});
+
+test("getNodeContentExtraHorizontalPadding: only the diamond (DECISION) shape gets extra padding for its angled edges", () => {
+  assert.ok(getNodeContentExtraHorizontalPadding("diamond") > 0);
+  for (const shape of ["capsule", "rect", "double-border-rect", "document", "pentagon-warning"] as const) {
+    assert.equal(getNodeContentExtraHorizontalPadding(shape), 0, `${shape} should not need extra padding`);
+  }
+});
+
+test("shouldShowNodeIcon: shows the icon by default (no dims, i.e. compact size)", () => {
+  assert.equal(shouldShowNodeIcon(null), true);
+});
+
+test("shouldShowNodeIcon: shows the icon while the title still fits within MAX_VISIBLE_LINES", () => {
+  const dims = computeNodeDimensions({ title: "짧은 제목", shape: "rect" });
+  assert.equal(dims.isTruncated, false);
+  assert.equal(shouldShowNodeIcon(dims), true);
+});
+
+test("shouldShowNodeIcon: hides the icon once the title is already truncated at MAX_VISIBLE_LINES, favoring title readability", () => {
+  const veryLongTitle = "가".repeat(400);
+  const dims = computeNodeDimensions({ title: veryLongTitle, shape: "rect" });
+  assert.equal(dims.isTruncated, true);
+  assert.equal(shouldShowNodeIcon(dims), false);
 });
 
 function makeLayoutNode(id: string, title: string, nodeType: StageSortedLayoutNode["nodeType"], sortOrder: number, sourceWorksheet: string): StageSortedLayoutNode {

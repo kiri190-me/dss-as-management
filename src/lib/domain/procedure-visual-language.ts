@@ -86,8 +86,8 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
     shape: "capsule",
     bgLight: "#ECFDF5",
     bgDark: "#052e1f",
-    borderLight: "#10B981",
-    borderDark: "#34d399",
+    borderLight: "#0D9488",
+    borderDark: "#2dd4bf",
     textLight: "#065F46",
     textDark: "#6ee7b7",
     label: "시작",
@@ -97,10 +97,10 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
     shape: "capsule",
     bgLight: "#F4F4F5",
     bgDark: "#27272a",
-    borderLight: "#71717A",
-    borderDark: "#a1a1aa",
-    textLight: "#3F3F46",
-    textDark: "#d4d4d8",
+    borderLight: "#16A34A",
+    borderDark: "#4ade80",
+    textLight: "#166534",
+    textDark: "#86efac",
     label: "완료",
     iconKey: "end",
   },
@@ -108,8 +108,8 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
     shape: "rect",
     bgLight: "#FAFAFA",
     bgDark: "#18181b",
-    borderLight: "#A1A1AA",
-    borderDark: "#71717a",
+    borderLight: "#475569",
+    borderDark: "#94a3b8",
     textLight: "#27272A",
     textDark: "#e4e4e7",
     label: "작업",
@@ -128,23 +128,23 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
   },
   CHECKLIST: {
     shape: "double-border-rect",
-    bgLight: "#F5F3FF",
-    bgDark: "#2e1065",
-    borderLight: "#7C3AED",
-    borderDark: "#a78bfa",
-    textLight: "#5B21B6",
-    textDark: "#ddd6fe",
-    label: "체크리스트",
-    iconKey: "checklist",
-  },
-  TROUBLESHOOTING: {
-    shape: "double-border-rect",
     bgLight: "#EEF2FF",
     bgDark: "#1e1b4b",
     borderLight: "#4F46E5",
     borderDark: "#818cf8",
     textLight: "#3730A3",
     textDark: "#c7d2fe",
+    label: "체크리스트",
+    iconKey: "checklist",
+  },
+  TROUBLESHOOTING: {
+    shape: "double-border-rect",
+    bgLight: "#F5F3FF",
+    bgDark: "#2e1065",
+    borderLight: "#7C3AED",
+    borderDark: "#a78bfa",
+    textLight: "#5B21B6",
+    textDark: "#ddd6fe",
     label: "트러블슈팅",
     iconKey: "troubleshooting",
   },
@@ -152,10 +152,10 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
     shape: "document",
     bgLight: "#F8FAFC",
     bgDark: "#0f172a",
-    borderLight: "#64748B",
-    borderDark: "#94a3b8",
-    textLight: "#334155",
-    textDark: "#cbd5e1",
+    borderLight: "#0E7490",
+    borderDark: "#22d3ee",
+    textLight: "#155E75",
+    textDark: "#a5f3fc",
     label: "참조",
     iconKey: "document",
   },
@@ -182,6 +182,23 @@ export const NODE_VISUAL_CONFIG: Record<SemanticNodeVisualType, NodeVisualConfig
     iconKey: "task",
   },
 };
+
+/**
+ * Single source of truth for node-outline pixel widths — consumed via
+ * inline `style` in ProcedureNodeChip (Tailwind arbitrary-value classes
+ * can't read a JS constant at build time, so anything that must vary by
+ * this exact number goes through `style`, not a className string).
+ */
+export const NODE_BORDER = {
+  /** single-border shapes' border-width, and the inset used for the clip-path shapes' layered border (outer border-color fill minus this inset = inner bg-color fill) */
+  NORMAL_WIDTH: 2,
+  /** CHECKLIST/TROUBLESHOOTING's existing inner CSS border */
+  DOUBLE_INNER_WIDTH: 1,
+  /** background gap in the double-border box-shadow ring */
+  DOUBLE_GAP: 2,
+  /** outer ring thickness in the double-border box-shadow, beyond the gap */
+  DOUBLE_OUTER_WIDTH: 2,
+} as const;
 
 /** Icon override for stored node types that share a semantic shape/color family but must stay individually recognizable (TASK vs INSPECTION vs CORRECTIVE_ACTION all render as the TASK rect). */
 const NODE_TYPE_ICON_OVERRIDE: Partial<Record<ProcedureNodeType, IconKey>> = {
@@ -377,6 +394,37 @@ export function computeNodeDimensions(params: { title: string; shape: NodeShapeK
   return { width, height, visibleLines, isTruncated };
 }
 
+/**
+ * Extra horizontal breathing room a node's centered content stack needs
+ * beyond the chip's ordinary padding, so a title never crowds a shape's
+ * decorative clipped edges (this UI-stabilization pass's "keep enough
+ * left/right padding for the angled edges" requirement). Only the diamond
+ * (DECISION) shape clips inward on both sides at 10%/90% width — every
+ * other shape either doesn't clip horizontally at all (capsule/rect/
+ * double-border-rect) or only clips a small corner that sits outside the
+ * centered content area already (document's folded corner, pentagon's
+ * top point), so they keep the chip's normal padding.
+ */
+export function getNodeContentExtraHorizontalPadding(shape: NodeShapeKind): number {
+  return shape === "diamond" ? 10 : 0;
+}
+
+/**
+ * "For very compact nodes, the icon may be omitted before sacrificing
+ * title readability" — isTruncated already means the title is at its
+ * maximum allowed line count (MAX_VISIBLE_LINES) and still doesn't fully
+ * fit, i.e. the box is as generous as this node's title will ever get.
+ * Dropping the icon at that point trades a purely decorative element for
+ * a little more of the box's vertical room going to the title instead.
+ * Never applies to the compact (validation-screen pill) size, which has
+ * no icon-vs-title space contention to begin with (single truncated
+ * line).
+ */
+export function shouldShowNodeIcon(dims: NodeDimensions | null): boolean {
+  if (!dims) return true;
+  return !dims.isTruncated;
+}
+
 export type IssueBadgeSeverity = "ERROR" | "WARNING";
 
 export type NodeIssueBadge = { severity: IssueBadgeSeverity; issueId: string };
@@ -389,12 +437,12 @@ export type NodeIssueBadge = { severity: IssueBadgeSeverity; issueId: string };
 export const ISSUE_BADGE_STYLES: Record<IssueBadgeSeverity, { badgeBgClass: string; outlineClass: string; label: string }> = {
   ERROR: {
     badgeBgClass: "bg-red-600",
-    outlineClass: "outline outline-2 outline-offset-1 outline-red-600",
+    outlineClass: "outline outline-[3px] outline-offset-2 outline-red-600 dark:outline-red-500",
     label: "미해결 오류",
   },
   WARNING: {
     badgeBgClass: "bg-amber-500",
-    outlineClass: "outline outline-2 outline-dashed outline-offset-1 outline-amber-500",
+    outlineClass: "outline outline-2 outline-dashed outline-offset-1 outline-amber-500 dark:outline-amber-400",
     label: "미해결 경고",
   },
 };

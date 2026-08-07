@@ -71,6 +71,13 @@
       "when": 1785987261807,
       "tag": "0009_daily_loa",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786013640130,
+      "tag": "0010_cool_raza",
+      "breakpoints": true
     }
   ]
 }

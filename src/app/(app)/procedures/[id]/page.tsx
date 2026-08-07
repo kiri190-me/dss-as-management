@@ -11,6 +11,8 @@ import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
   canViewProcedureValidationManagement,
+  canCreateProcedureTemplateDraft,
+  canEditProcedureTemplateDraft,
 } from "@/lib/auth/procedure-template-authorization";
 
 export const metadata: Metadata = {
@@ -69,6 +71,8 @@ export default async function ProcedureTemplateDetailPage({
       <ProcedureTemplateDetailScreen
         template={template}
         canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
+        canCreateDraftVersion={canCreateProcedureTemplateDraft(actingUser.role)}
+        canEditDraft={canEditProcedureTemplateDraft(actingUser.role)}
       />
     </Suspense>
   );

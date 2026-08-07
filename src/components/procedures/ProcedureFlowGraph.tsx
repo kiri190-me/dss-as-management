@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -43,6 +43,7 @@ import {
   type RoutableNode,
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
+import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 
@@ -158,17 +159,23 @@ const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge };
 
 const ALL_WORKSHEETS = "ALL";
 
-type LayoutMode = "SOURCE" | "STAGE_SORTED";
+type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
+/** Phase 4A — additive-only widening: a plain read-only ProcedureTemplateNodeRow has neither field, which is fine since both are optional; the editor's EditorNodeRow (a structural superset) supplies them for the 사용자 배치 layout. */
+type ProcedureFlowGraphNode = ProcedureTemplateNodeRow & { userPositionX?: number | null; userPositionY?: number | null };
+
 /**
- * Read-only flowchart viewer (Phase 3B: standardized visual language) — no
+ * Flowchart viewer (Phase 3B: standardized visual language; Phase 4A:
+ * optional controlled-editor affordances). Read-only by default — no
  * editing (no onNodesChange/onEdgesChange wired up, nodes/edges are not
- * draggable-and-persisted). Node shape/color/icon, edge style, and layout
- * spacing come entirely from procedure-visual-language.ts, the same config
- * every other screen (validation-resolution, future editor) reuses — never
- * invented locally here.
+ * draggable-and-persisted) unless `editable` is set, in which case node
+ * drag is allowed only in the 사용자 배치 layout and only ever reported
+ * back via callbacks; this component itself never persists anything. Node
+ * shape/color/icon, edge style, and layout spacing come entirely from
+ * procedure-visual-language.ts, the same config every other screen
+ * (validation-resolution, editor) reuses — never invented locally here.
  */
 export default function ProcedureFlowGraph({
   templateId,
@@ -178,9 +185,13 @@ export default function ProcedureFlowGraph({
   initialWorksheet = null,
   initialSelectedNodeId = null,
   errorFocusMode = false,
+  editable = false,
+  onNodeSelectionChange,
+  onEdgeSelectionChange,
+  onNodeDragStop,
 }: {
   templateId: string;
-  nodes: ProcedureTemplateNodeRow[];
+  nodes: ProcedureFlowGraphNode[];
   edges: ProcedureTemplateEdgeRow[];
   openIssuesByNodeId?: ProcedureFlowGraphOpenIssue[];
   /** Error-to-node navigation (Phase 3B revision): the worksheet to auto-select on first render, resolved server/screen-side from a validation issue's stable source identity — read once as initial state, not kept in sync afterward (a fresh navigation always remounts this component with fresh values). */
@@ -189,6 +200,14 @@ export default function ProcedureFlowGraph({
   initialSelectedNodeId?: string | null;
   /** Problem 2 revision (오류 집중 보기) — when true and initialSelectedNodeId resolved to a real node, the first camera fit targets the node's immediate connected neighborhood (not just the single node), and unrelated nodes/edges dim much more strongly than an ordinary manual node selection does. */
   errorFocusMode?: boolean;
+  /** Phase 4A — enables the 사용자 배치 layout option and node-drag reporting. Never enables editing of any other kind by itself (no free-form add/delete, no direct persistence) — the editor screen owns all of that via its own side panels and Server Actions. */
+  editable?: boolean;
+  /** Fires whenever the selected node changes (including deselection), in addition to this component's own path-highlight/dim behavior — lets the editor open/close its node property panel in lockstep. */
+  onNodeSelectionChange?: (nodeId: string | null) => void;
+  /** Fires when an edge is clicked — this component has no built-in edge-selection visual state of its own, this is purely a notification for the editor's edge property panel. */
+  onEdgeSelectionChange?: (edgeId: string | null) => void;
+  /** Fires once a drag gesture ends, in 사용자 배치 layout only — the editor accumulates these client-side and persists them only on an explicit Save, never here. */
+  onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
 }) {
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   // Fires the camera fit exactly once, the first time the instance for the
@@ -334,6 +353,10 @@ export default function ProcedureFlowGraph({
     [selectedNodeId, minimalEdges]
   );
 
+  useEffect(() => {
+    onNodeSelectionChange?.(selectedNodeId);
+  }, [selectedNodeId, onNodeSelectionChange]);
+
   function selectAndFit(nodeId: string) {
     setSelectedNodeId(nodeId);
     reactFlowInstanceRef.current?.fitView({ nodes: [{ id: nodeId }], duration: 300, padding: 1.5 });
@@ -341,10 +364,13 @@ export default function ProcedureFlowGraph({
 
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
+      const bandAdjustedSource = { positionX: n.positionX, positionY: n.positionY + (n.sourceWorksheet ? bands.get(n.sourceWorksheet)?.yOffset ?? 0 : 0) };
       const sourcePos =
         layoutMode === "STAGE_SORTED"
           ? stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }
-          : { x: n.positionX, y: n.positionY + (n.sourceWorksheet ? bands.get(n.sourceWorksheet)?.yOffset ?? 0 : 0) };
+          : layoutMode === "USER"
+            ? resolveEffectiveNodePosition({ ...bandAdjustedSource, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER")
+            : { x: bandAdjustedSource.positionX, y: bandAdjustedSource.positionY };
       return {
         id: n.id,
         type: "procedureNode",
@@ -578,7 +604,8 @@ export default function ProcedureFlowGraph({
             className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
           >
             <option value="SOURCE">원본 배치</option>
-            <option value="STAGE_SORTED">단계별 정렬 (컴팩트)</option>
+            {editable && <option value="USER">사용자 배치</option>}
+            <option value="STAGE_SORTED">단계별 정렬 {editable ? "미리보기" : "(컴팩트)"}</option>
           </select>
         </div>
         {layoutMode === "STAGE_SORTED" && (
@@ -654,8 +681,9 @@ export default function ProcedureFlowGraph({
       <ProcedureGraphLegend />
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게
-        표시됩니다.
+        {editable
+          ? "편집 모드 — 사용자 배치에서는 노드를 드래그해 위치를 조정할 수 있습니다 (명시적으로 저장하기 전까지 반영되지 않습니다). 노드/분기를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."
+          : "읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."}
       </p>
 
       <div style={{ height: 600 }} className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -665,10 +693,14 @@ export default function ProcedureFlowGraph({
           edges={flowEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          nodesDraggable={false}
+          nodesDraggable={editable && layoutMode === "USER"}
           nodesConnectable={false}
           elementsSelectable={true}
           onlyRenderVisibleElements
+          onNodeDragStop={(_, node) => {
+            if (editable && layoutMode === "USER") onNodeDragStop?.(node.id, { x: node.position.x, y: node.position.y });
+          }}
+          onEdgeClick={(_, edge) => onEdgeSelectionChange?.(edge.id)}
           onInit={(instance) => {
             reactFlowInstanceRef.current = instance;
             const targetId = initialFitNodeIdRef.current;
@@ -687,9 +719,13 @@ export default function ProcedureFlowGraph({
           }}
           onNodeClick={(_, node) => {
             if (node.type === "procedureStageHeader") return;
+            onEdgeSelectionChange?.(null);
             setSelectedNodeId((current) => (current === node.id ? null : node.id));
           }}
-          onPaneClick={() => setSelectedNodeId(null)}
+          onPaneClick={() => {
+            setSelectedNodeId(null);
+            onEdgeSelectionChange?.(null);
+          }}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.02}

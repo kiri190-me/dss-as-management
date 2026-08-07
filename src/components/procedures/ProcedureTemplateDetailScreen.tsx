@@ -7,6 +7,7 @@ import ProcedureChecklistViewer from "./ProcedureChecklistViewer";
 import ProcedureTroubleshootingViewer from "./ProcedureTroubleshootingViewer";
 import ProcedureReferenceItemsViewer from "./ProcedureReferenceItemsViewer";
 import ProcedureValidationIssuePanel from "./ProcedureValidationIssuePanel";
+import CreateDraftVersionButton from "./editor/CreateDraftVersionButton";
 import {
   procedureEquipmentTypeLabels,
   procedureTemplateSourceTypeLabels,
@@ -38,9 +39,15 @@ function formatDate(iso: string | null): string {
 export default function ProcedureTemplateDetailScreen({
   template,
   canManageValidation,
+  canCreateDraftVersion = false,
+  canEditDraft = false,
 }: {
   template: ProcedureTemplateDetail;
   canManageValidation: boolean;
+  /** Phase 4A — "새 DRAFT 버전 만들기" from a PUBLISHED template. */
+  canCreateDraftVersion?: boolean;
+  /** Phase 4A — "편집 시작" straight into the controlled editor for an already-editable DRAFT. */
+  canEditDraft?: boolean;
 }) {
   const hasGraph = template.edges.length > 0 || template.nodes.some((n) => n.nodeType !== "CHECKLIST" && n.nodeType !== "TROUBLESHOOTING");
   const hasChecklist = template.checklistSections.length > 0;
@@ -124,14 +131,25 @@ export default function ProcedureTemplateDetailScreen({
             </span>
           )}
           </div>
-          {canManageValidation && !template.isReferenceOnly && (
-            <Link
-              href={`/procedures/${template.id}/validation`}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              검증 문제 검토
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageValidation && !template.isReferenceOnly && (
+              <Link
+                href={`/procedures/${template.id}/validation`}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                검증 문제 검토
+              </Link>
+            )}
+            {!template.isReferenceOnly && template.status === "PUBLISHED" && canCreateDraftVersion && <CreateDraftVersionButton templateId={template.id} />}
+            {!template.isReferenceOnly && template.status === "DRAFT" && canEditDraft && (
+              <Link
+                href={`/procedures/${template.id}/edit`}
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900"
+              >
+                편집 시작
+              </Link>
+            )}
+          </div>
         </div>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-600">{template.code}</p>
         {template.description && (

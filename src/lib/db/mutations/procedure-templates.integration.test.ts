@@ -89,8 +89,17 @@ function makeTemplate(opts: {
       { fromNodeCode: "n2", toNodeCode: "n4", branchType: "NORMAL", branchLabel: "정상", sortOrder: 2, sourceConnectorId: "c3" },
       { fromNodeCode: "n2", toNodeCode: "n6", branchType: "NO", branchLabel: "NO", sortOrder: 3, sourceConnectorId: "c4" },
       { fromNodeCode: "n3", toNodeCode: "n2", branchType: "RETRY", branchLabel: "재측정", sortOrder: 4, sourceConnectorId: "c5" },
-      { fromNodeCode: "n4", toNodeCode: "n5", branchType: "YES", branchLabel: "YES", sortOrder: 5, sourceConnectorId: "c6" },
-      { fromNodeCode: "n5", toNodeCode: "n1", branchType: "LOOP_BACK", branchLabel: "처음부터 재진행", sortOrder: 6, sourceConnectorId: null },
+      // Phase 4A note: YES/NO/NG/NORMAL are only structurally valid as a
+      // DECISION node's own outcome (see procedure-graph-structural-
+      // validation.ts's INVALID_BRANCH_TYPE_FOR_NODE rule) — n4 is TASK, so
+      // this is a plain DEFAULT edge, same as the real workbook's pattern
+      // of an ordinary task-to-task hand-off.
+      { fromNodeCode: "n4", toNodeCode: "n5", branchType: "DEFAULT", branchLabel: null, sortOrder: 5, sourceConnectorId: "c6" },
+      // LOOP_BACK must not target an END node (INVALID_LOOP_BACK_TARGET) —
+      // sourced from n6 (CORRECTIVE_ACTION) instead of n5 (END), matching
+      // the real RFG workbook's pattern of looping back from a corrective/
+      // recheck step, never from the flow's actual completion node.
+      { fromNodeCode: "n6", toNodeCode: "n1", branchType: "LOOP_BACK", branchLabel: "처음부터 재진행", sortOrder: 6, sourceConnectorId: null },
       { fromNodeCode: "n1", toNodeCode: "n6", branchType: "CUSTOM", branchLabel: "특수분기", sortOrder: 7, sourceConnectorId: "c7" },
     ],
     checklistSections: [
@@ -528,6 +537,19 @@ describe("createNewDraftVersion", () => {
     assert.equal(newNodes.length, 8);
     const newEdges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
     assert.equal(newEdges.length, 8);
+
+    // Phase 4A — every cloned edge must carry clonedFromEdgeId pointing at
+    // its exact parent-version counterpart (never null for a clone), and
+    // every one of those parent ids must actually belong to the published
+    // template this draft was created from — the DRAFT-vs-parent edge diff
+    // depends on this being exact, not a best-effort guess.
+    const publishedEdges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, imported.id));
+    const publishedEdgeIds = new Set(publishedEdges.map((e) => e.id));
+    for (const e of newEdges) {
+      assert.ok(e.clonedFromEdgeId, `cloned edge ${e.id} must have clonedFromEdgeId set`);
+      assert.ok(publishedEdgeIds.has(e.clonedFromEdgeId!), `clonedFromEdgeId ${e.clonedFromEdgeId} must point at a real edge on the published parent`);
+    }
+    assert.equal(new Set(newEdges.map((e) => e.clonedFromEdgeId)).size, newEdges.length, "each cloned edge must map to a distinct parent edge, never shared");
   });
 });
 

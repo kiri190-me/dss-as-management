@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseSourceReference,
   buildWorkflowViewHref,
+  buildProcedureEditorHref,
   resolveInitialGraphTarget,
   type NavigableNode,
   type NavigableEdge,
@@ -71,6 +72,19 @@ const nodes: NavigableNode[] = [
   { id: "node-c", sourceWorksheet: "sheet-A", sourceShapeId: "60" },
 ];
 const edges: NavigableEdge[] = [{ fromNodeId: "node-c", toNodeId: "node-a", sourceConnectorId: "57" }];
+
+test("buildProcedureEditorHref (Phase 4A): points at /procedures/{id}/edit, preserving every query param buildWorkflowViewHref would set", () => {
+  const href = buildProcedureEditorHref({ templateId: "t1", issueId: "i1", nodeId: "n1", errorFocus: true });
+  const url = new URL(href, "http://localhost");
+  assert.equal(url.pathname, "/procedures/t1/edit");
+  assert.equal(url.searchParams.get("issue"), "i1");
+  assert.equal(url.searchParams.get("node"), "n1");
+  assert.equal(url.searchParams.get("mode"), "error-focus");
+});
+
+test("buildProcedureEditorHref (Phase 4A): with no optional params, produces a bare /edit link", () => {
+  assert.equal(buildProcedureEditorHref({ templateId: "t1" }), "/procedures/t1/edit");
+});
 
 test("resolveInitialGraphTarget: an explicit node param wins outright and always uses stable ids, never title text", () => {
   const result = resolveInitialGraphTarget({ nodeParam: "node-a", worksheetParam: "sheet-A" }, nodes, edges);
