@@ -1,0 +1,2 @@
+ALTER TYPE "public"."procedure_template_edit_action_type" ADD VALUE 'SAVE_EDGE_ROUTE' BEFORE 'DISCARD_DRAFT_CHANGES';--> statement-breakpoint
+ALTER TABLE "procedure_template_edges" ADD COLUMN "user_route_points" jsonb;

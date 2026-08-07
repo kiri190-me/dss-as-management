@@ -16,13 +16,14 @@ import { createDraftProcedureTemplateFromImport, publishProcedureTemplate, creat
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
-  saveProcedureTemplateNodeLayout,
+  saveProcedureTemplateLayout,
   updateProcedureTemplateEdge,
   retargetProcedureTemplateEdge,
   createProcedureTemplateEdge,
   validateProcedureTemplate,
 } from "./procedure-template-editor";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
+import { MAX_ROUTE_POINTS } from "@/lib/domain/procedure-edge-waypoints";
 
 /**
  * Phase 4A integration tests for the controlled-editor mutation layer.
@@ -270,7 +271,7 @@ describe("procedure-template-editor: layout (user position)", () => {
     const n3 = nodes.get("n3")!;
     const templateRow = await loadTemplateRow(templateId);
 
-    const result = await saveProcedureTemplateNodeLayout(templateId, superAdminId, [{ nodeId: n3.id, x: 777, y: 888 }], templateRow.updatedAt.toISOString());
+    const result = await saveProcedureTemplateLayout(templateId, superAdminId, [{ nodeId: n3.id, x: 777, y: 888 }], [], templateRow.updatedAt.toISOString());
     assert.equal(result.ok, true, JSON.stringify(result));
 
     const [updated] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
@@ -286,7 +287,7 @@ describe("procedure-template-editor: layout (user position)", () => {
     const n3 = nodes.get("n3")!;
 
     // "Discard" in the editor UI is purely client-side — it never issues a
-    // saveProcedureTemplateNodeLayout call at all, so the correct
+    // saveProcedureTemplateLayout call at all, so the correct
     // assertion here is simply that user_position_x/y remain null (the
     // as-imported state) since this test never calls the mutation.
     const [row] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
@@ -422,7 +423,7 @@ describe("procedure-template-editor: audit history", () => {
     assert.equal(r1.ok, true);
     if (!r1.ok) return;
 
-    const r2 = await saveProcedureTemplateNodeLayout(templateId, superAdminId, [{ nodeId: nodes.get("n3")!.id, x: 1, y: 2 }], r1.updatedAt);
+    const r2 = await saveProcedureTemplateLayout(templateId, superAdminId, [{ nodeId: nodes.get("n3")!.id, x: 1, y: 2 }], [], r1.updatedAt);
     assert.equal(r2.ok, true);
     if (!r2.ok) return;
 
@@ -496,5 +497,298 @@ describe("procedure-template-editor: traceability", () => {
     assert.equal(updated.sourceWorksheet, n3.sourceWorksheet);
     assert.equal(updated.sourceShapeId, n3.sourceShapeId);
     assert.equal(updated.nodeCode, n3.nodeCode);
+  });
+});
+
+describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
+  test("20. saving an edge route persists ordered waypoints exactly as sent", async () => {
+    const templateId = await createDraft(uniqueCode("route-persist"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const points = [
+      { x: 10, y: 20 },
+      { x: 30, y: 5 },
+      { x: 50, y: 40 },
+    ];
+    const result = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points }], templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [updated] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.deepEqual(updated.userRoutePoints, points);
+  });
+
+  test("21. a malformed or non-finite route point is rejected and nothing is persisted", async () => {
+    const templateId = await createDraft(uniqueCode("route-malformed"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const badPayloads: unknown[] = [
+      [{ x: 1, y: 1 }, { x: NaN, y: 2 }],
+      [{ x: 1, y: 1 }, { x: Infinity, y: 2 }],
+      [{ x: 1, y: 1 }, { x: "1", y: 2 }],
+      [{ x: 1, y: 1 }, { x: 1 }],
+      "not-an-array",
+    ];
+
+    for (const points of badPayloads) {
+      const result = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: points as never }], templateRow.updatedAt.toISOString());
+      assert.equal(result.ok, false, `expected rejection for payload ${JSON.stringify(points)}`);
+      if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    }
+
+    const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(row.userRoutePoints, null, "nothing must be persisted when validation fails");
+  });
+
+  test("22. more than the maximum allowed waypoints is rejected", async () => {
+    const templateId = await createDraft(uniqueCode("route-maxpoints"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const tooMany = Array.from({ length: MAX_ROUTE_POINTS + 1 }, (_, i) => ({ x: i, y: i }));
+    const result = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: tooMany }], templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+
+    const withinLimit = Array.from({ length: MAX_ROUTE_POINTS }, (_, i) => ({ x: i, y: i }));
+    const okResult = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: withinLimit }], templateRow.updatedAt.toISOString());
+    assert.equal(okResult.ok, true, "exactly MAX_ROUTE_POINTS must still be accepted");
+  });
+
+  test("23. saving an empty waypoint array normalizes to NULL (automatic routing), not an empty array", async () => {
+    const templateId = await createDraft(uniqueCode("route-empty"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const first = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 1, y: 1 }] }], templateRow.updatedAt.toISOString());
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const second = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [] }], first.updatedAt);
+    assert.equal(second.ok, true, JSON.stringify(second));
+
+    const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(row.userRoutePoints, null);
+  });
+
+  test("24. explicitly clearing a manual route (points: null) restores automatic routing", async () => {
+    const templateId = await createDraft(uniqueCode("route-clear"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const first = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [],
+      [{ edgeId: edge.id, points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }],
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const second = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: null }], first.updatedAt);
+    assert.equal(second.ok, true, JSON.stringify(second));
+
+    const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(row.userRoutePoints, null);
+  });
+
+  test("25. saving a manual route never changes the edge's own endpoints or branch type/label", async () => {
+    const templateId = await createDraft(uniqueCode("route-preserve-semantics"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n2")!.id && e.branchType === "YES")!;
+
+    const result = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 5, y: 5 }] }], templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(row.fromNodeId, edge.fromNodeId);
+    assert.equal(row.toNodeId, edge.toNodeId);
+    assert.equal(row.branchType, edge.branchType);
+    assert.equal(row.branchLabel, edge.branchLabel);
+  });
+
+  test("26. a combined save persists node positions and edge routes together in one call", async () => {
+    const templateId = await createDraft(uniqueCode("combined-save"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const n3 = nodes.get("n3")!;
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const result = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [{ nodeId: n3.id, x: 111, y: 222 }],
+      [{ edgeId: edge.id, points: [{ x: 9, y: 9 }] }],
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [updatedNode] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
+    const [updatedEdge] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(updatedNode.userPositionX, 111);
+    assert.equal(updatedNode.userPositionY, 222);
+    assert.deepEqual(updatedEdge.userRoutePoints, [{ x: 9, y: 9 }]);
+
+    const history = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId))
+      .orderBy(procedureTemplateEditHistory.createdAt);
+    assert.equal(history.length, 2, "one SAVE_LAYOUT row and one SAVE_EDGE_ROUTE row — never conflated into a single entry");
+    assert.equal(history[0].actionType, "SAVE_LAYOUT");
+    assert.equal(history[1].actionType, "SAVE_EDGE_ROUTE");
+  });
+
+  test("27. a stale combined save persists neither the node position nor the edge route", async () => {
+    const templateId = await createDraft(uniqueCode("combined-stale"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const n3 = nodes.get("n3")!;
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+    const staleToken = templateRow.updatedAt.toISOString();
+
+    const bump = await updateProcedureTemplateNode(n3.id, superAdminId, { title: "revision bump" }, staleToken);
+    assert.equal(bump.ok, true);
+
+    const result = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [{ nodeId: n3.id, x: 555, y: 666 }],
+      [{ edgeId: edge.id, points: [{ x: 1, y: 1 }] }],
+      staleToken
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "STALE_REVISION");
+
+    const [updatedNode] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
+    const [updatedEdge] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edge.id));
+    assert.equal(updatedNode.userPositionX, null, "no partial position write on a rejected stale save");
+    assert.equal(updatedEdge.userRoutePoints, null, "no partial route write on a rejected stale save");
+  });
+
+  test("28. a PUBLISHED template rejects a combined layout save (node position + edge route)", async () => {
+    const templateId = await createDraft(uniqueCode("route-published-guard"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true);
+
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [{ nodeId: nodes.get("n3")!.id, x: 1, y: 1 }],
+      [{ edgeId: edges[0].id, points: [{ x: 1, y: 1 }] }],
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
+  });
+
+  test("29. an unauthorized (non-SUPER_ADMIN) actor cannot save an edge route", async () => {
+    const templateId = await createDraft(uniqueCode("route-unauthorized"));
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    const result = await saveProcedureTemplateLayout(templateId, adminId, [], [{ edgeId: edges[0].id, points: [{ x: 1, y: 1 }] }], templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+
+    const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edges[0].id));
+    assert.equal(row.userRoutePoints, null);
+  });
+
+  test("30. saving an edge route identical to its current stored value writes no new SAVE_EDGE_ROUTE row and does not advance the revision", async () => {
+    const templateId = await createDraft(uniqueCode("route-noop-history"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const first = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 3, y: 3 }] }], templateRow.updatedAt.toISOString());
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const historyAfterFirst = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(historyAfterFirst.length, 1);
+
+    const second = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 3, y: 3 }] }], first.updatedAt);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(second.updatedAt, first.updatedAt, "a true no-op save must not advance the revision token");
+
+    const historyAfterSecond = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(historyAfterSecond.length, 1, "no new history row for an unchanged route");
+  });
+
+  test("31. a SAVE_EDGE_ROUTE history row records before/after points, reason, actor, and timestamp", async () => {
+    const templateId = await createDraft(uniqueCode("route-history-fields"));
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const result = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [],
+      [{ edgeId: edge.id, points: [{ x: 7, y: 7 }] }],
+      templateRow.updatedAt.toISOString(),
+      "시각적 명확성을 위한 경로 조정"
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [row] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "SAVE_EDGE_ROUTE")));
+    assert.ok(row);
+    assert.equal(row.actorUserId, superAdminId);
+    assert.equal(row.reason, "시각적 명확성을 위한 경로 조정");
+    assert.ok(row.createdAt);
+    assert.deepEqual(row.beforeState, [{ edgeId: edge.id, points: null }]);
+    assert.deepEqual(row.afterState, [{ edgeId: edge.id, points: [{ x: 7, y: 7 }] }]);
+  });
+
+  test("32. createNewDraftVersion clones edges with userRoutePoints reset to null, even if the parent had a manual route", async () => {
+    const code = uniqueCode("route-clone-reset");
+    const templateId = await createDraft(code);
+    const nodes = await loadNodesByCode(templateId);
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+
+    const saveResult = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 2, y: 2 }] }], templateRow.updatedAt.toISOString());
+    assert.equal(saveResult.ok, true);
+
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true);
+    if (!published.ok) return;
+
+    const newDraft = await createNewDraftVersion(templateId, superAdminId);
+    assert.equal(newDraft.ok, true);
+    if (!newDraft.ok) return;
+    createdTemplateIds.push(newDraft.id);
+
+    const clonedEdges = await loadEdges(newDraft.id);
+    const clonedEdge = clonedEdges.find((e) => e.clonedFromEdgeId === edge.id)!;
+    assert.ok(clonedEdge, "the cloned edge must carry clonedFromEdgeId lineage");
+    assert.equal(clonedEdge.userRoutePoints, null, "a new DRAFT clone must never inherit the parent's manual route");
   });
 });

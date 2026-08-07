@@ -6,6 +6,7 @@ import type { EditorEdgeRow, EditorNodeRow } from "@/lib/db/queries/procedure-te
 import { updateProcedureTemplateEdgeAction, retargetProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
 import { buildEdgeRetargetPreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
+import type { RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
 
 /**
  * Edge property side panel (Phase 4A) — branchType/branchLabel edit
@@ -20,12 +21,23 @@ export default function EdgePropertyPanel({
   canEdit,
   expectedTemplateUpdatedAt,
   onSaved,
+  routePoints,
+  selectedWaypointIndex,
+  onAddWaypoint,
+  onRemoveSelectedWaypoint,
+  onResetRoute,
 }: {
   edge: EditorEdgeRow;
   nodes: EditorNodeRow[];
   canEdit: boolean;
   expectedTemplateUpdatedAt: string;
   onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
+  /** Phase 4B — the edge's *working* (saved + pending-merged) manual route; null means automatic/deterministic routing. */
+  routePoints: RoutePoint[] | null;
+  selectedWaypointIndex: number | null;
+  onAddWaypoint: () => void;
+  onRemoveSelectedWaypoint: () => void;
+  onResetRoute: () => void;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
   const [branchType, setBranchType] = useState<ProcedureBranchType>(edge.branchType);
@@ -130,6 +142,46 @@ export default function EdgePropertyPanel({
           {isSaving ? "저장 중..." : "속성 저장"}
         </button>
       )}
+
+      <div className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">연결선 경로 (사용자 배치에서만 표시)</h4>
+        <p className="text-zinc-500 dark:text-zinc-400">{routePoints && routePoints.length > 0 ? `수동 경로 — 경로점 ${routePoints.length}개` : "자동 경로 (계산된 경로 사용 중)"}</p>
+        {canEdit && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={onAddWaypoint} className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+              경로점 추가
+            </button>
+            <button
+              type="button"
+              onClick={onRemoveSelectedWaypoint}
+              disabled={selectedWaypointIndex === null}
+              className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              선택 경로점 삭제
+            </button>
+            <button
+              type="button"
+              onClick={onResetRoute}
+              disabled={!routePoints || routePoints.length === 0}
+              className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              자동 경로로 초기화
+            </button>
+          </div>
+        )}
+        {routePoints && routePoints.length > 0 && (
+          <details className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            <summary className="cursor-pointer select-none">기술 정보 (경로점 좌표)</summary>
+            <ul className="mt-1 flex flex-col gap-0.5 font-mono">
+              {routePoints.map((p, i) => (
+                <li key={i} className={i === selectedWaypointIndex ? "font-semibold text-blue-700 dark:text-blue-400" : ""}>
+                  #{i + 1}: ({Math.round(p.x)}, {Math.round(p.y)})
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
 
       {canEdit && (
         <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">

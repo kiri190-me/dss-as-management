@@ -77,6 +77,17 @@ export const procedureTemplateEdges = pgTable(
     clonedFromEdgeId: uuid("cloned_from_edge_id").references((): AnyPgColumn => procedureTemplateEdges.id, {
       onDelete: "restrict",
     }),
+    // Phase 4B editor — 사용자 배치 (USER layout) manual-route override, the
+    // edge-level sibling of procedure_template_nodes.user_position_x/y.
+    // Null (the default for every existing edge) means "use deterministic
+    // routing" (procedure-edge-routing.ts, unchanged); a non-empty ordered
+    // array of {x,y} points means the edge renders as an explicit polyline
+    // instead. Only ever meaningful in USER layout — see
+    // resolveEffectiveEdgeRoute in procedure-edge-waypoints.ts. Every value
+    // written here passes through sanitizeRoutePoints first (ordered,
+    // finite-number-only points, deduped, capped, never a raw ReactFlow
+    // object), so this column can never hold anything else.
+    userRoutePoints: jsonb("user_route_points").$type<{ x: number; y: number }[]>(),
   },
   (table) => [
     index("procedure_template_edges_template_id_idx").on(

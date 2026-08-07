@@ -6,7 +6,7 @@ import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-aut
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
-  saveProcedureTemplateNodeLayout,
+  saveProcedureTemplateLayout,
   updateProcedureTemplateEdge,
   retargetProcedureTemplateEdge,
   createProcedureTemplateEdge,
@@ -14,6 +14,7 @@ import {
   type UpdateNodePatch,
   type UpdateEdgePatch,
   type LayoutPosition,
+  type EdgeRouteInput,
   type NodeMutationResult,
   type ChangeNodeTypeResult,
   type SaveLayoutResult,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/db/mutations/procedure-template-editor";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
 import { PROCEDURE_BRANCH_TYPE_CODES, PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
+import { isValidRoutePoint } from "@/lib/domain/procedure-edge-waypoints";
 
 /**
  * Server Actions for the Phase 4A controlled editor — same layering as
@@ -100,19 +102,25 @@ export async function changeProcedureTemplateNodeTypeAction(input: {
   );
 }
 
-export async function saveProcedureTemplateNodeLayoutAction(input: {
+/** Phase 4B — combined save (node positions + manual edge routes) behind the editor's single "저장" button. Route-point shape gets a shallow sanity check here (every array entry looks like a route point); the mutation layer's sanitizeRoutePoints is still the authoritative, unconditional gate. */
+export async function saveProcedureTemplateLayoutAction(input: {
   templateId: string;
   positions: LayoutPosition[];
+  edgeRoutes: EdgeRouteInput[];
   expectedTemplateUpdatedAt: string;
+  reason?: string | null;
 }): Promise<SaveLayoutResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.templateId) || input.positions.some((p) => !isValidUuid(p.nodeId))) {
     return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
   }
+  if (input.edgeRoutes.some((er) => !isValidUuid(er.edgeId) || (er.points !== null && !er.points.every(isValidRoutePoint)))) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
 
-  return withErrorRedaction("saveProcedureTemplateNodeLayoutAction", () =>
-    saveProcedureTemplateNodeLayout(input.templateId, actorCheck.userId, input.positions, input.expectedTemplateUpdatedAt)
+  return withErrorRedaction("saveProcedureTemplateLayoutAction", () =>
+    saveProcedureTemplateLayout(input.templateId, actorCheck.userId, input.positions, input.edgeRoutes, input.expectedTemplateUpdatedAt, input.reason?.trim() || null)
   );
 }
 

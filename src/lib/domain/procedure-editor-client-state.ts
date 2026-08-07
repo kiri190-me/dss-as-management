@@ -1,4 +1,5 @@
 import type { ProcedureBranchType, ProcedureNodeType } from "./procedure-template-types";
+import { routePointsEqual, type RoutePoint } from "./procedure-edge-waypoints";
 
 /**
  * Phase 4A — pure client-side editor state helpers. Nothing here touches
@@ -61,6 +62,25 @@ export function computeUnsavedLayoutNodeIds(saved: Map<string, { x: number; y: n
   return unsaved;
 }
 
+/**
+ * Phase 4B — which edge ids currently have a manual-route override that
+ * differs from what's last saved. Structurally identical to
+ * computeUnsavedLayoutNodeIds (a Map-diff against a "saved" baseline), just
+ * comparing an ordered point array instead of an x/y pair — reuses
+ * routePointsEqual so this can never disagree with the mutation layer's
+ * own no-op detection about what counts as "actually changed." A pure
+ * selection/zoom/pan (which never touches this map at all) can never mark
+ * anything dirty — only an actual add/move/remove/reset does.
+ */
+export function computeUnsavedEdgeRouteIds(saved: Map<string, RoutePoint[] | null>, working: Map<string, RoutePoint[] | null>): Set<string> {
+  const unsaved = new Set<string>();
+  for (const [id, points] of working) {
+    const savedPoints = saved.get(id) ?? null;
+    if (!routePointsEqual(savedPoints, points)) unsaved.add(id);
+  }
+  return unsaved;
+}
+
 export type EditorSaveState = "SAVED" | "UNSAVED" | "SAVING" | "SAVE_FAILED";
 
 /** Single source of truth for the toolbar's saved/unsaved/saving/failed indicator — never infers this from scattered ad-hoc booleans. */
@@ -70,10 +90,11 @@ export function computeEditorSaveState(params: {
   unsavedNodeIds: Set<string>;
   unsavedEdgeIds: Set<string>;
   unsavedLayoutNodeIds: Set<string>;
+  unsavedEdgeRouteIds: Set<string>;
 }): EditorSaveState {
   if (params.isSaving) return "SAVING";
   if (params.lastSaveFailed) return "SAVE_FAILED";
-  if (params.unsavedNodeIds.size > 0 || params.unsavedEdgeIds.size > 0 || params.unsavedLayoutNodeIds.size > 0) return "UNSAVED";
+  if (params.unsavedNodeIds.size > 0 || params.unsavedEdgeIds.size > 0 || params.unsavedLayoutNodeIds.size > 0 || params.unsavedEdgeRouteIds.size > 0) return "UNSAVED";
   return "SAVED";
 }
 

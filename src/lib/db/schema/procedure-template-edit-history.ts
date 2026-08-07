@@ -12,7 +12,8 @@ import { users } from "./users";
  * validation issue" (bind/retarget/defer/reopen), while this one is the
  * general append-only audit trail for every controlled-editor mutation
  * (node property edits, node type changes, node moves, edge edits/
- * retargets/creation, layout saves, template-level validate runs) —
+ * retargets/creation, layout saves, manual edge-route saves, template-
+ * level validate runs) —
  * overloading the narrower table would have muddied both its meaning and
  * its queries.
  *
@@ -30,6 +31,10 @@ export const procedureTemplateEditActionTypeEnum = pgEnum("procedure_template_ed
   "RETARGET_EDGE",
   "CREATE_EDGE",
   "SAVE_LAYOUT",
+  // Phase 4B — batched manual edge-route (waypoint) save, kept distinct
+  // from SAVE_LAYOUT (node positions) so the two concerns never conflate
+  // in the audit trail, same convention as every other action type here.
+  "SAVE_EDGE_ROUTE",
   "DISCARD_DRAFT_CHANGES",
   "VALIDATE_TEMPLATE",
 ]);

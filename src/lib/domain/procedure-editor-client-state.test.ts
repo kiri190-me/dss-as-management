@@ -4,6 +4,7 @@ import {
   computeUnsavedNodeIds,
   computeUnsavedEdgeIds,
   computeUnsavedLayoutNodeIds,
+  computeUnsavedEdgeRouteIds,
   computeEditorSaveState,
   buildEdgeRetargetPreview,
   buildNewEdgePreview,
@@ -61,25 +62,65 @@ test("computeUnsavedLayoutNodeIds: only nodes whose position actually changed ar
   assert.deepEqual(computeUnsavedLayoutNodeIds(saved, working), new Set(["n2"]));
 });
 
+test("computeUnsavedEdgeRouteIds: only edges whose manual route actually changed are unsaved", () => {
+  const saved = new Map([
+    ["e1", [{ x: 1, y: 1 }]],
+    ["e2", null],
+  ]);
+  const working = new Map([
+    ["e1", [{ x: 1, y: 1 }]],
+    ["e2", [{ x: 5, y: 5 }]],
+  ]);
+  assert.deepEqual(computeUnsavedEdgeRouteIds(saved, working), new Set(["e2"]));
+});
+
+test("computeUnsavedEdgeRouteIds: null and an empty array are equally 'not unsaved' against a null baseline", () => {
+  const saved = new Map([["e1", null]]);
+  const working = new Map([["e1", []]]);
+  assert.deepEqual(computeUnsavedEdgeRouteIds(saved, working), new Set());
+});
+
+test("computeUnsavedEdgeRouteIds: an edge absent from working (never touched this session) is never marked unsaved", () => {
+  const saved = new Map([["e1", [{ x: 1, y: 1 }]]]);
+  const working = new Map<string, { x: number; y: number }[] | null>();
+  assert.deepEqual(computeUnsavedEdgeRouteIds(saved, working), new Set());
+});
+
+test("computeUnsavedEdgeRouteIds: explicitly clearing a route (working=null against a saved override) is detected as unsaved", () => {
+  const saved = new Map([["e1", [{ x: 1, y: 1 }]]]);
+  const working = new Map<string, { x: number; y: number }[] | null>([["e1", null]]);
+  assert.deepEqual(computeUnsavedEdgeRouteIds(saved, working), new Set(["e1"]));
+});
+
 test("computeEditorSaveState: SAVING takes priority over everything else", () => {
-  const state = computeEditorSaveState({ isSaving: true, lastSaveFailed: true, unsavedNodeIds: new Set(["n1"]), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set() });
+  const state = computeEditorSaveState({ isSaving: true, lastSaveFailed: true, unsavedNodeIds: new Set(["n1"]), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set(), unsavedEdgeRouteIds: new Set() });
   assert.equal(state, "SAVING");
 });
 
 test("computeEditorSaveState: SAVE_FAILED shows when not currently saving but the last attempt failed", () => {
-  const state = computeEditorSaveState({ isSaving: false, lastSaveFailed: true, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set() });
+  const state = computeEditorSaveState({ isSaving: false, lastSaveFailed: true, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set(), unsavedEdgeRouteIds: new Set() });
   assert.equal(state, "SAVE_FAILED");
 });
 
-test("computeEditorSaveState: UNSAVED when any of node/edge/layout has pending changes", () => {
-  const base = { isSaving: false, lastSaveFailed: false, unsavedNodeIds: new Set<string>(), unsavedEdgeIds: new Set<string>(), unsavedLayoutNodeIds: new Set<string>() };
+test("computeEditorSaveState: UNSAVED when any of node/edge/layout/edge-route has pending changes", () => {
+  const base = { isSaving: false, lastSaveFailed: false, unsavedNodeIds: new Set<string>(), unsavedEdgeIds: new Set<string>(), unsavedLayoutNodeIds: new Set<string>(), unsavedEdgeRouteIds: new Set<string>() };
   assert.equal(computeEditorSaveState({ ...base, unsavedNodeIds: new Set(["n1"]) }), "UNSAVED");
   assert.equal(computeEditorSaveState({ ...base, unsavedEdgeIds: new Set(["e1"]) }), "UNSAVED");
   assert.equal(computeEditorSaveState({ ...base, unsavedLayoutNodeIds: new Set(["n1"]) }), "UNSAVED");
+  assert.equal(computeEditorSaveState({ ...base, unsavedEdgeRouteIds: new Set(["e1"]) }), "UNSAVED");
 });
 
 test("computeEditorSaveState: SAVED when nothing is pending and nothing failed", () => {
-  const state = computeEditorSaveState({ isSaving: false, lastSaveFailed: false, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set() });
+  const state = computeEditorSaveState({ isSaving: false, lastSaveFailed: false, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set(), unsavedEdgeRouteIds: new Set() });
+  assert.equal(state, "SAVED");
+});
+
+test("computeEditorSaveState: pure selection/zoom/pan never produces a dirty edge-route id (nothing to mark unsaved with an empty set)", () => {
+  // Selection/zoom/pan never touch pendingEdgeRouteMoves at all in the
+  // editor screen, so unsavedEdgeRouteIds is always empty from those
+  // interactions alone — this test documents that computeEditorSaveState
+  // has no other, hidden way to go UNSAVED from an empty set.
+  const state = computeEditorSaveState({ isSaving: false, lastSaveFailed: false, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds: new Set(), unsavedEdgeRouteIds: new Set() });
   assert.equal(state, "SAVED");
 });
 

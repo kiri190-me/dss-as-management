@@ -11,6 +11,7 @@ import {
   Position,
   BaseEdge,
   EdgeLabelRenderer,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeProps,
@@ -44,6 +45,7 @@ import {
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
 import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
+import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 
@@ -139,6 +141,87 @@ function ProcedureOuterLaneEdge({ data, style, markerEnd, label, labelStyle, lab
   );
 }
 
+type ManualRouteEdgeData = {
+  points: RoutePoint[];
+  /** Only the currently-selected edge, in editable+USER layout, renders draggable handles — every other edge with a manual route still renders the correct polyline shape, just without the interactive overlay. */
+  isInteractive: boolean;
+  selectedWaypointIndex: number | null;
+  onWaypointSelect?: (index: number | null) => void;
+  onWaypointMove?: (index: number, point: RoutePoint) => void;
+};
+
+/**
+ * Phase 4B — renders an edge as an explicit polyline through its manual
+ * waypoints (source -> points... -> target), the same "render from a
+ * precomputed path string" technique ProcedureOuterLaneEdge already proves
+ * out. sourceX/Y and targetX/Y come from ReactFlow itself (computed from
+ * the node's actual rendered position + this edge's sourceHandle/
+ * targetHandle, same handles the deterministic edges use) — waypoints and
+ * these coordinates already share one coordinate space, so no conversion
+ * is needed to build the path.
+ *
+ * Dragging a handle uses setPointerCapture so pointermove/pointerup keep
+ * firing on the same element regardless of where the cursor physically
+ * ends up — no window-level listener bookkeeping required. Every drag only
+ * ever calls onWaypointMove(index, point), which the editor screen wires
+ * to pendingEdgeRouteMoves only — it can never touch this edge's own
+ * source/target node ids, satisfying "route-point dragging must never
+ * retarget the edge endpoints" structurally, not by a separate check.
+ */
+function ProcedureManualRouteEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label, labelStyle, labelBgStyle, labelBgPadding, data }: EdgeProps & { data?: ManualRouteEdgeData }) {
+  const { screenToFlowPosition } = useReactFlow();
+  if (!data) return null;
+
+  const chain = [{ x: sourceX, y: sourceY }, ...data.points, { x: targetX, y: targetY }];
+  const path = chain.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  // BaseEdge needs an explicit label position for a multi-point path (it
+  // can only infer one from a single getXxxPath() call, which this
+  // hand-built polyline never goes through) — the chain's centroid is a
+  // simple, always-on-the-line-ish default; it doesn't need to be exact.
+  const labelX = chain.reduce((sum, p) => sum + p.x, 0) / chain.length;
+  const labelY = chain.reduce((sum, p) => sum + p.y, 0) / chain.length;
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} label={label} labelX={labelX} labelY={labelY} labelStyle={labelStyle} labelBgStyle={labelBgStyle} labelBgPadding={labelBgPadding} />
+      {data.isInteractive && (
+        <EdgeLabelRenderer>
+          {data.points.map((p, index) => (
+            <div
+              key={index}
+              className="nodrag nopan"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                data.onWaypointSelect?.(index);
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                if (e.buttons !== 1) return;
+                data.onWaypointMove?.(index, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+              }}
+              onPointerUp={(e) => {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              }}
+              style={{
+                position: "absolute",
+                transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`,
+                width: 10,
+                height: 10,
+                borderRadius: "9999px",
+                background: index === data.selectedWaypointIndex ? "#2563eb" : "#ffffff",
+                border: "2px solid #2563eb",
+                cursor: "grab",
+                pointerEvents: "all",
+                zIndex: 20,
+              }}
+            />
+          ))}
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
 type StageHeaderData = { worksheet: string; count: number };
 
 /** SUBPROCESS_OR_STAGE-styled band header (Phase 3B) — a presentation-only label above each worksheet's node cluster, never a real procedure_template_nodes row. */
@@ -155,7 +238,7 @@ function ProcedureStageHeaderNode({ data }: NodeProps & { data: StageHeaderData 
 }
 
 const nodeTypes = { procedureNode: ProcedureNode, procedureStageHeader: ProcedureStageHeaderNode };
-const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge };
+const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualRoute: ProcedureManualRouteEdge };
 
 const ALL_WORKSHEETS = "ALL";
 
@@ -189,6 +272,12 @@ export default function ProcedureFlowGraph({
   onNodeSelectionChange,
   onEdgeSelectionChange,
   onNodeDragStop,
+  selectedEdgeId = null,
+  edgeRoutesByEdgeId,
+  selectedWaypointIndex = null,
+  onWaypointSelectionChange,
+  onWaypointMove,
+  onEdgeDoubleClickInsert,
 }: {
   templateId: string;
   nodes: ProcedureFlowGraphNode[];
@@ -208,6 +297,17 @@ export default function ProcedureFlowGraph({
   onEdgeSelectionChange?: (edgeId: string | null) => void;
   /** Fires once a drag gesture ends, in 사용자 배치 layout only — the editor accumulates these client-side and persists them only on an explicit Save, never here. */
   onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
+  /** Phase 4B — the editor's currently-selected edge id (lifted to the parent, unlike selectedNodeId which stays local here) — only this edge ever gets draggable waypoint handles. */
+  selectedEdgeId?: string | null;
+  /** Phase 4B — the editor's *working* (saved + pending-merged) manual route per edge id; absent/undefined for a read-only viewer that never passes this prop at all. Only ever rendered/interactive in 사용자 배치 — see resolveEffectiveEdgeRoute. */
+  edgeRoutesByEdgeId?: Map<string, RoutePoint[] | null>;
+  /** Phase 4B — which waypoint index (within the selected edge's route) is selected, for the "선택 경로점 삭제" button/keyboard shortcut, owned by the parent so both the graph's handles and the side panel's delete button agree. */
+  selectedWaypointIndex?: number | null;
+  onWaypointSelectionChange?: (index: number | null) => void;
+  /** Fires on every waypoint drag frame — client-state only, same "no auto-save" contract as onNodeDragStop. */
+  onWaypointMove?: (edgeId: string, index: number, point: { x: number; y: number }) => void;
+  /** The double-click-on-an-edge shortcut (never the only way to add a waypoint — see the editor's own "경로점 추가" button) — fires with the click position already converted to flow coordinates. */
+  onEdgeDoubleClickInsert?: (edgeId: string, point: { x: number; y: number }) => void;
 }) {
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   // Fires the camera fit exactly once, the first time the instance for the
@@ -432,13 +532,58 @@ export default function ProcedureFlowGraph({
     const visibleEdgeRows = edgeRows.filter((e) => visibleNodeIds.has(e.fromNodeId) && visibleNodeIds.has(e.toNodeId));
 
     if (layoutMode !== "STAGE_SORTED") {
-      // 원본 배치 — unchanged from Phase 3B: every edge is a plain top/bottom
-      // smoothstep (or a bezier for LOOP_BACK/RETRY), no semantic routing.
+      // 원본 배치 / 사용자 배치 — unchanged from Phase 3B: every edge is a
+      // plain top/bottom smoothstep (or a bezier for LOOP_BACK/RETRY), no
+      // semantic routing — UNLESS (Phase 4B) it has a manual route override
+      // and we're actually in 사용자 배치, in which case it renders through
+      // ProcedureManualRouteEdge instead. resolveEffectiveEdgeRoute already
+      // encodes "only USER layout" — 원본 배치 never sees a manual route
+      // even if one is stored, by construction, not by an extra check here.
       return visibleEdgeRows.map((e) => {
         const config = EDGE_VISUAL_CONFIG[e.branchType];
         const isHighlighted = connectedEdgeIds.has(e.id);
         const isDimmed = selectedNodeId !== null && !isHighlighted;
         const dimOpacity = errorFocusMode ? 0.08 : 0.25;
+        const effectiveRoute = resolveEffectiveEdgeRoute({ userRoutePoints: edgeRoutesByEdgeId?.get(e.id) ?? null }, layoutMode);
+
+        const style = {
+          stroke: config.strokeLight,
+          strokeWidth: isHighlighted ? config.strokeWidth + 1.5 : config.strokeWidth,
+          strokeDasharray: config.dashPattern,
+          opacity: isDimmed ? dimOpacity : 1,
+        };
+        const labelStyle = { fill: config.strokeLight, fontWeight: 700, fontSize: 10 };
+        const labelBgStyle = { fill: "#ffffff", fillOpacity: isDimmed ? (errorFocusMode ? 0.15 : 0.3) : 1 };
+        const label = e.branchLabel ?? (config.defaultLabel ? procedureBranchTypeLabels[e.branchType] : undefined);
+        const markerEnd = { type: config.markerShape === "arrow-open" ? MarkerType.Arrow : MarkerType.ArrowClosed, color: config.strokeLight };
+
+        if (effectiveRoute) {
+          const isSelectedEdge = editable && layoutMode === "USER" && e.id === selectedEdgeId;
+          return {
+            id: e.id,
+            source: e.fromNodeId,
+            target: e.toNodeId,
+            sourceHandle: "bottom-out",
+            targetHandle: "top-in",
+            type: "procedureManualRoute",
+            data: {
+              points: effectiveRoute,
+              isInteractive: isSelectedEdge,
+              selectedWaypointIndex: isSelectedEdge ? selectedWaypointIndex : null,
+              onWaypointSelect: onWaypointSelectionChange,
+              onWaypointMove: (index: number, point: RoutePoint) => onWaypointMove?.(e.id, index, point),
+            } satisfies ManualRouteEdgeData,
+            label,
+            labelStyle,
+            labelBgStyle,
+            labelBgPadding: [3, 2] as [number, number],
+            style,
+            markerEnd,
+            animated: config.animated,
+            zIndex: isHighlighted ? 10 : 0,
+          } satisfies Edge;
+        }
+
         return {
           id: e.id,
           source: e.fromNodeId,
@@ -450,17 +595,12 @@ export default function ProcedureFlowGraph({
           // local smoothstep flow — the two verified RFG LOOP_BACK edges
           // must be "especially easy to identify."
           type: config.routeStyle === "loopback-curve" ? "default" : "smoothstep",
-          label: e.branchLabel ?? (config.defaultLabel ? procedureBranchTypeLabels[e.branchType] : undefined),
-          labelStyle: { fill: config.strokeLight, fontWeight: 700, fontSize: 10 },
-          labelBgStyle: { fill: "#ffffff", fillOpacity: isDimmed ? (errorFocusMode ? 0.15 : 0.3) : 1 },
+          label,
+          labelStyle,
+          labelBgStyle,
           labelBgPadding: [3, 2] as [number, number],
-          style: {
-            stroke: config.strokeLight,
-            strokeWidth: isHighlighted ? config.strokeWidth + 1.5 : config.strokeWidth,
-            strokeDasharray: config.dashPattern,
-            opacity: isDimmed ? dimOpacity : 1,
-          },
-          markerEnd: { type: config.markerShape === "arrow-open" ? MarkerType.Arrow : MarkerType.ArrowClosed, color: config.strokeLight },
+          style,
+          markerEnd,
           animated: config.animated,
           zIndex: isHighlighted ? 10 : 0,
         } satisfies Edge;
@@ -560,6 +700,12 @@ export default function ProcedureFlowGraph({
     nodeDimsById,
     stageSortedLayout,
     laneAssignment,
+    editable,
+    edgeRoutesByEdgeId,
+    selectedEdgeId,
+    selectedWaypointIndex,
+    onWaypointSelectionChange,
+    onWaypointMove,
   ]);
 
   if (nodeRows.length === 0) return null;
@@ -682,7 +828,7 @@ export default function ProcedureFlowGraph({
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         {editable
-          ? "편집 모드 — 사용자 배치에서는 노드를 드래그해 위치를 조정할 수 있습니다 (명시적으로 저장하기 전까지 반영되지 않습니다). 노드/분기를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."
+          ? "편집 모드 — 사용자 배치에서는 노드를 드래그해 위치를 조정하고, 분기를 선택한 뒤 경로점을 추가/이동/삭제해 연결선 경로를 조정할 수 있습니다 (명시적으로 저장하기 전까지 반영되지 않습니다). 노드/분기를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."
           : "읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."}
       </p>
 
@@ -701,6 +847,16 @@ export default function ProcedureFlowGraph({
             if (editable && layoutMode === "USER") onNodeDragStop?.(node.id, { x: node.position.x, y: node.position.y });
           }}
           onEdgeClick={(_, edge) => onEdgeSelectionChange?.(edge.id)}
+          onEdgeDoubleClick={(event, edge) => {
+            // The double-click shortcut for inserting a waypoint — never
+            // the only way to add one (see the editor's "경로점 추가"
+            // button) — only meaningful in editable 사용자 배치, same gate
+            // node dragging and the waypoint handles themselves use.
+            onEdgeSelectionChange?.(edge.id);
+            if (!editable || layoutMode !== "USER" || !reactFlowInstanceRef.current) return;
+            const point = reactFlowInstanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+            onEdgeDoubleClickInsert?.(edge.id, point);
+          }}
           onInit={(instance) => {
             reactFlowInstanceRef.current = instance;
             const targetId = initialFitNodeIdRef.current;

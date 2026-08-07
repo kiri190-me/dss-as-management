@@ -16,7 +16,7 @@ function node(overrides: Partial<DiffNode> & { id: string; nodeCode: string }): 
   };
 }
 function edge(overrides: Partial<DiffEdge> & { id: string }): DiffEdge {
-  return { clonedFromEdgeId: null, fromNodeCode: "n1", toNodeCode: "n2", branchType: "DEFAULT", branchLabel: null, ...overrides };
+  return { clonedFromEdgeId: null, fromNodeCode: "n1", toNodeCode: "n2", branchType: "DEFAULT", branchLabel: null, userRoutePoints: null, ...overrides };
 }
 
 test("compareDraftAndParentGraphs: identical draft and parent produce an entirely empty diff", () => {
@@ -25,7 +25,7 @@ test("compareDraftAndParentGraphs: identical draft and parent produce an entirel
   const parentNodes = [node({ id: "p1", nodeCode: "n1" })];
   const parentEdges = [edge({ id: "pe1" })];
   const result = compareDraftAndParentGraphs(nodes, edges, parentNodes, parentEdges);
-  assert.deepEqual(result, { changedNodes: [], movedNodes: [], changedNodeTypes: [], changedEdges: [], retargetedEdges: [], newlyAddedEdges: [] });
+  assert.deepEqual(result, { changedNodes: [], movedNodes: [], changedNodeTypes: [], changedEdges: [], retargetedEdges: [], newlyAddedEdges: [], routeChangedEdges: [] });
 });
 
 test("compareDraftAndParentGraphs: a changed title/description surfaces as a changedNodes entry with per-field before/after", () => {
@@ -92,4 +92,52 @@ test("compareDraftAndParentGraphs: a draft node with no parent counterpart (shou
   const result = compareDraftAndParentGraphs(draftNodes, [], [], []);
   assert.deepEqual(result.changedNodes, []);
   assert.deepEqual(result.movedNodes, []);
+});
+
+// ---- Phase 4B: 연결선 경로 수동 조정 (manual edge-route diff indicator) ----
+
+test("compareDraftAndParentGraphs: an edge with a new manual route (parent had none) surfaces as routeChangedEdges with a summary, never raw coordinates", () => {
+  const draftEdges = [edge({ id: "de1", clonedFromEdgeId: "pe1", userRoutePoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }] })];
+  const parentEdges = [edge({ id: "pe1", userRoutePoints: null })];
+  const result = compareDraftAndParentGraphs([], draftEdges, [], parentEdges);
+  assert.deepEqual(result.routeChangedEdges, [
+    { draftEdgeId: "de1", fromNodeCode: "n1", toNodeCode: "n2", before: { isManual: false, pointCount: 0 }, after: { isManual: true, pointCount: 2 } },
+  ]);
+  // The requirement is explicit: no raw coordinate arrays in the main comparison result — only isManual + a count.
+  assert.equal("userRoutePoints" in result.routeChangedEdges[0].before, false);
+  assert.equal("userRoutePoints" in result.routeChangedEdges[0].after, false);
+});
+
+test("compareDraftAndParentGraphs: restoring a route to automatic (draft null, parent manual) also surfaces as a route change", () => {
+  const draftEdges = [edge({ id: "de1", clonedFromEdgeId: "pe1", userRoutePoints: null })];
+  const parentEdges = [edge({ id: "pe1", userRoutePoints: [{ x: 5, y: 5 }] })];
+  const result = compareDraftAndParentGraphs([], draftEdges, [], parentEdges);
+  assert.deepEqual(result.routeChangedEdges, [
+    { draftEdgeId: "de1", fromNodeCode: "n1", toNodeCode: "n2", before: { isManual: true, pointCount: 1 }, after: { isManual: false, pointCount: 0 } },
+  ]);
+});
+
+test("compareDraftAndParentGraphs: a changed waypoint count on an already-manual route is detected", () => {
+  const draftEdges = [edge({ id: "de1", clonedFromEdgeId: "pe1", userRoutePoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] })];
+  const parentEdges = [edge({ id: "pe1", userRoutePoints: [{ x: 1, y: 1 }] })];
+  const result = compareDraftAndParentGraphs([], draftEdges, [], parentEdges);
+  assert.deepEqual(result.routeChangedEdges, [
+    { draftEdgeId: "de1", fromNodeCode: "n1", toNodeCode: "n2", before: { isManual: true, pointCount: 1 }, after: { isManual: true, pointCount: 3 } },
+  ]);
+});
+
+test("compareDraftAndParentGraphs: an identical manual route (same points, same order) on both sides is not reported as a route change", () => {
+  const points = [{ x: 1, y: 1 }, { x: 2, y: 2 }];
+  const draftEdges = [edge({ id: "de1", clonedFromEdgeId: "pe1", userRoutePoints: points })];
+  const parentEdges = [edge({ id: "pe1", userRoutePoints: [{ x: 1, y: 1 }, { x: 2, y: 2 }] })];
+  const result = compareDraftAndParentGraphs([], draftEdges, [], parentEdges);
+  assert.deepEqual(result.routeChangedEdges, []);
+});
+
+test("compareDraftAndParentGraphs: an edge with no route change alongside a real branch-label change reports only the branch-label change, not a phantom route change", () => {
+  const draftEdges = [edge({ id: "de1", clonedFromEdgeId: "pe1", branchLabel: "새 라벨", userRoutePoints: null })];
+  const parentEdges = [edge({ id: "pe1", branchLabel: "원래 라벨", userRoutePoints: null })];
+  const result = compareDraftAndParentGraphs([], draftEdges, [], parentEdges);
+  assert.equal(result.changedEdges.length, 1);
+  assert.deepEqual(result.routeChangedEdges, []);
 });

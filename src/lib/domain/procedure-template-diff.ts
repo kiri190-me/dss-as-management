@@ -1,4 +1,5 @@
 import type { ProcedureBranchType, ProcedureNodeType } from "./procedure-template-types";
+import { routePointsEqual, type RoutePoint } from "./procedure-edge-waypoints";
 
 /**
  * Phase 4A — pure DRAFT-vs-parent comparison. Operates on two already-
@@ -36,7 +37,12 @@ export type DiffEdge = {
   toNodeCode: string;
   branchType: ProcedureBranchType;
   branchLabel: string | null;
+  /** Phase 4B — 사용자 배치 manual-route override (null = automatic/deterministic routing). */
+  userRoutePoints: RoutePoint[] | null;
 };
+
+/** A summary of "was this route manual, and how many points" — never the raw coordinate array, per this task's "no raw JSON coordinates by default" requirement. A details/technical view may still read the raw arrays directly off the draft/parent EditorEdgeRow if needed; this type is only what the main comparison UI renders. */
+export type RouteChangeSummary = { isManual: boolean; pointCount: number };
 
 export type FieldChange = { field: string; before: unknown; after: unknown };
 
@@ -47,7 +53,14 @@ export type DraftParentComparison = {
   changedEdges: { draftEdgeId: string; fromNodeCode: string; toNodeCode: string; before: { branchType: ProcedureBranchType; branchLabel: string | null }; after: { branchType: ProcedureBranchType; branchLabel: string | null } }[];
   retargetedEdges: { draftEdgeId: string; before: { fromNodeCode: string; toNodeCode: string }; after: { fromNodeCode: string; toNodeCode: string } }[];
   newlyAddedEdges: { draftEdgeId: string; fromNodeCode: string; toNodeCode: string; branchType: ProcedureBranchType; branchLabel: string | null }[];
+  /** Phase 4B — "연결선 경로 수동 조정": edges (matched to a parent via clonedFromEdgeId) whose manual-route override differs from the parent's. Summary only (manual-or-not + point count) — never the raw coordinate arrays, per this task's UI requirement. */
+  routeChangedEdges: { draftEdgeId: string; fromNodeCode: string; toNodeCode: string; before: RouteChangeSummary; after: RouteChangeSummary }[];
 };
+
+function summarizeRoute(points: RoutePoint[] | null): RouteChangeSummary {
+  const normalized = points && points.length > 0 ? points : null;
+  return { isManual: normalized !== null, pointCount: normalized?.length ?? 0 };
+}
 
 const NODE_COMPARE_FIELDS = ["title", "description", "instructions", "sortOrder", "isActive"] as const;
 
@@ -87,6 +100,7 @@ export function compareDraftAndParentGraphs(draftNodes: DiffNode[], draftEdges: 
   const changedEdges: DraftParentComparison["changedEdges"] = [];
   const retargetedEdges: DraftParentComparison["retargetedEdges"] = [];
   const newlyAddedEdges: DraftParentComparison["newlyAddedEdges"] = [];
+  const routeChangedEdges: DraftParentComparison["routeChangedEdges"] = [];
 
   for (const draftEdge of draftEdges) {
     if (!draftEdge.clonedFromEdgeId) {
@@ -122,7 +136,17 @@ export function compareDraftAndParentGraphs(draftNodes: DiffNode[], draftEdges: 
         after: { branchType: draftEdge.branchType, branchLabel: draftEdge.branchLabel },
       });
     }
+
+    if (!routePointsEqual(parentEdge.userRoutePoints, draftEdge.userRoutePoints)) {
+      routeChangedEdges.push({
+        draftEdgeId: draftEdge.id,
+        fromNodeCode: draftEdge.fromNodeCode,
+        toNodeCode: draftEdge.toNodeCode,
+        before: summarizeRoute(parentEdge.userRoutePoints),
+        after: summarizeRoute(draftEdge.userRoutePoints),
+      });
+    }
   }
 
-  return { changedNodes, movedNodes, changedNodeTypes, changedEdges, retargetedEdges, newlyAddedEdges };
+  return { changedNodes, movedNodes, changedNodeTypes, changedEdges, retargetedEdges, newlyAddedEdges, routeChangedEdges };
 }

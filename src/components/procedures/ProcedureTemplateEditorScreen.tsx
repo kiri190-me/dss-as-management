@@ -11,10 +11,11 @@ import CreateEdgePanel from "./editor/CreateEdgePanel";
 import type { ProcedureTemplateForEditor, EditHistoryRow, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
-import { computeUnsavedLayoutNodeIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
-import { saveProcedureTemplateNodeLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
+import { computeUnsavedLayoutNodeIds, computeUnsavedEdgeRouteIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
+import { saveProcedureTemplateLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
 import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
-import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
+import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
+import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge";
 
@@ -108,24 +109,53 @@ export default function ProcedureTemplateEditorScreen({
     return map;
   }, [savedLayoutPositions, pendingLayoutMoves]);
   const unsavedLayoutNodeIds = useMemo(() => computeUnsavedLayoutNodeIds(savedLayoutPositions, workingLayoutPositions), [savedLayoutPositions, workingLayoutPositions]);
+
+  // Phase 4B — 사용자 배치 manual edge-route (waypoint) pending state, the
+  // edge-level sibling of pendingLayoutMoves above. A map *entry with
+  // `null`* means "explicitly restored to automatic routing this session"
+  // (distinct from *no entry*, meaning "untouched") — both
+  // computeUnsavedEdgeRouteIds and the save payload below rely on that
+  // distinction.
+  const savedEdgeRoutes = useMemo(() => {
+    const map = new Map<string, RoutePoint[] | null>();
+    for (const e of template.edges) map.set(e.id, e.userRoutePoints && e.userRoutePoints.length > 0 ? e.userRoutePoints : null);
+    return map;
+  }, [template.edges]);
+  const [pendingEdgeRouteMoves, setPendingEdgeRouteMoves] = useState<Map<string, RoutePoint[] | null>>(new Map());
+  const workingEdgeRoutes = useMemo(() => {
+    const map = new Map(savedEdgeRoutes);
+    for (const [id, points] of pendingEdgeRouteMoves) map.set(id, points);
+    return map;
+  }, [savedEdgeRoutes, pendingEdgeRouteMoves]);
+  const unsavedEdgeRouteIds = useMemo(() => computeUnsavedEdgeRouteIds(savedEdgeRoutes, workingEdgeRoutes), [savedEdgeRoutes, workingEdgeRoutes]);
+  const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
+
   const [isSavingLayout, setIsSavingLayout] = useState(false);
   const [layoutSaveFailed, setLayoutSaveFailed] = useState(false);
   const [layoutErrorMessage, setLayoutErrorMessage] = useState<string | null>(null);
-  const saveState = computeEditorSaveState({ isSaving: isSavingLayout, lastSaveFailed: layoutSaveFailed, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds });
+  const saveState = computeEditorSaveState({ isSaving: isSavingLayout, lastSaveFailed: layoutSaveFailed, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds, unsavedEdgeRouteIds });
+  const hasPendingLayoutChanges = unsavedLayoutNodeIds.size > 0 || unsavedEdgeRouteIds.size > 0;
 
-  // Unsaved-navigation guard (Phase 4A) — covers browser close/refresh;
-  // the editor's own "나가기" link separately confirms via window.confirm
-  // before navigating away in-app. Does not intercept every possible
-  // in-app link (e.g. the global sidebar) — see the final report's
-  // documented limitation.
+  // Unsaved-navigation guard (Phase 4A, widened Phase 4B) — covers browser
+  // close/refresh; the editor's own "나가기" link separately confirms via
+  // window.confirm before navigating away in-app. Does not intercept every
+  // possible in-app link (e.g. the global sidebar) — see the final
+  // report's documented limitation.
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (unsavedLayoutNodeIds.size === 0) return;
+      if (!hasPendingLayoutChanges) return;
       e.preventDefault();
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [unsavedLayoutNodeIds]);
+  }, [hasPendingLayoutChanges]);
+
+  // A waypoint selection only ever makes sense for the currently-selected
+  // edge — switching (or clearing) the selected edge always clears it, so
+  // a stale index can never point at the wrong edge's route array.
+  useEffect(() => {
+    setSelectedWaypointIndex(null);
+  }, [selectedEdgeId]);
 
   function handleSaved(newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) {
     setCurrentUpdatedAt(newUpdatedAt);
@@ -133,12 +163,22 @@ export default function ProcedureTemplateEditorScreen({
     router.refresh();
   }
 
+  /**
+   * Phase 4B — one combined save behind the single "저장" button: node
+   * position moves and manual edge-route changes go in the same
+   * saveProcedureTemplateLayoutAction call, so they commit or fail
+   * together (see saveProcedureTemplateLayout's own doc comment for the
+   * transactional guarantee this relies on). A failed save intentionally
+   * never clears either pending map — the reviewer's in-progress work must
+   * survive a rejected save (e.g. STALE_REVISION) so nothing is lost.
+   */
   async function handleSaveLayout() {
-    if (pendingLayoutMoves.size === 0) return;
+    if (pendingLayoutMoves.size === 0 && pendingEdgeRouteMoves.size === 0) return;
     setIsSavingLayout(true);
     setLayoutErrorMessage(null);
     const positions = [...pendingLayoutMoves].map(([nodeId, pos]) => ({ nodeId, x: pos.x, y: pos.y }));
-    const result = await saveProcedureTemplateNodeLayoutAction({ templateId: template.id, positions, expectedTemplateUpdatedAt: currentUpdatedAt });
+    const edgeRoutes: EdgeRouteInput[] = [...pendingEdgeRouteMoves].map(([edgeId, points]) => ({ edgeId, points }));
+    const result = await saveProcedureTemplateLayoutAction({ templateId: template.id, positions, edgeRoutes, expectedTemplateUpdatedAt: currentUpdatedAt });
     setIsSavingLayout(false);
     if (!result.ok) {
       setLayoutSaveFailed(true);
@@ -147,6 +187,8 @@ export default function ProcedureTemplateEditorScreen({
     }
     setLayoutSaveFailed(false);
     setPendingLayoutMoves(new Map());
+    setPendingEdgeRouteMoves(new Map());
+    setSelectedWaypointIndex(null);
     handleSaved(result.updatedAt);
   }
 
@@ -156,8 +198,16 @@ export default function ProcedureTemplateEditorScreen({
     // for a case where server state actually changed, which never applies
     // here).
     setPendingLayoutMoves(new Map());
+    setPendingEdgeRouteMoves(new Map());
+    setSelectedWaypointIndex(null);
     setLayoutSaveFailed(false);
     setLayoutErrorMessage(null);
+  }
+
+  /** Reads a route's current *working* points (pending override if this session touched it, else the last-saved value) — the one baseline every waypoint mutation below builds its next array from. */
+  function currentWorkingRoutePoints(pending: Map<string, RoutePoint[] | null>, edgeId: string): RoutePoint[] {
+    const points = pending.has(edgeId) ? pending.get(edgeId) : savedEdgeRoutes.get(edgeId);
+    return points ?? [];
   }
 
   async function handleValidate() {
@@ -172,7 +222,7 @@ export default function ProcedureTemplateEditorScreen({
   }
 
   function handleExit() {
-    if (unsavedLayoutNodeIds.size > 0 && !window.confirm("저장하지 않은 배치 변경사항이 있습니다. 나가시겠습니까?")) {
+    if (hasPendingLayoutChanges && !window.confirm("저장하지 않은 배치 변경사항이 있습니다. 나가시겠습니까?")) {
       return;
     }
     router.push(`/procedures/${template.id}`);
@@ -200,6 +250,95 @@ export default function ProcedureTemplateEditorScreen({
       return next;
     });
   }, []);
+
+  // ---- Phase 4B: manual edge-route (waypoint) editing ----
+  // Every one of these only ever touches pendingEdgeRouteMoves — client
+  // state only, never a Server Action call. "No auto-save" holds for
+  // every one of add/move/remove/reset, not just node dragging.
+
+  const handleWaypointSelectionChange = useCallback((index: number | null) => {
+    setSelectedWaypointIndex(index);
+  }, []);
+
+  const handleWaypointMove = useCallback(
+    (edgeId: string, index: number, point: RoutePoint) => {
+      setPendingEdgeRouteMoves((prev) => {
+        const next = new Map(prev);
+        next.set(edgeId, moveWaypoint(currentWorkingRoutePoints(prev, edgeId), index, point));
+        return next;
+      });
+    },
+    [savedEdgeRoutes]
+  );
+
+  /** The double-click-on-the-edge shortcut (never the only way to add a point — see handleAddWaypoint for the primary, explicit-button method). */
+  const handleWaypointInsertAt = useCallback(
+    (edgeId: string, point: RoutePoint) => {
+      const edge = template.edges.find((e) => e.id === edgeId);
+      const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
+      const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
+      if (!edge || !source || !target) return;
+      setPendingEdgeRouteMoves((prev) => {
+        const next = new Map(prev);
+        next.set(edgeId, insertWaypointAtSegment(currentWorkingRoutePoints(prev, edgeId), source, target, point));
+        return next;
+      });
+    },
+    [template.edges, workingLayoutPositions, savedEdgeRoutes]
+  );
+
+  /** "경로점 추가" — the primary insertion method, no click position required: inserts at the midpoint of the selected edge's longest current segment. */
+  const handleAddWaypoint = useCallback(() => {
+    if (!selectedEdgeId) return;
+    const edge = template.edges.find((e) => e.id === selectedEdgeId);
+    const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
+    const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
+    if (!edge || !source || !target) return;
+    setPendingEdgeRouteMoves((prev) => {
+      const next = new Map(prev);
+      next.set(selectedEdgeId, addWaypointAtDefaultPosition(currentWorkingRoutePoints(prev, selectedEdgeId), source, target));
+      return next;
+    });
+  }, [selectedEdgeId, template.edges, workingLayoutPositions, savedEdgeRoutes]);
+
+  /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. */
+  const handleRemoveSelectedWaypoint = useCallback(() => {
+    if (!selectedEdgeId || selectedWaypointIndex === null) return;
+    setPendingEdgeRouteMoves((prev) => {
+      const next = new Map(prev);
+      next.set(selectedEdgeId, removeWaypoint(currentWorkingRoutePoints(prev, selectedEdgeId), selectedWaypointIndex));
+      return next;
+    });
+    setSelectedWaypointIndex(null);
+  }, [selectedEdgeId, selectedWaypointIndex, savedEdgeRoutes]);
+
+  /** "자동 경로로 초기화" — explicit restore, discoverable beyond deleting every point one at a time. */
+  const handleResetEdgeRoute = useCallback((edgeId: string) => {
+    setPendingEdgeRouteMoves((prev) => {
+      const next = new Map(prev);
+      next.set(edgeId, null);
+      return next;
+    });
+    setSelectedWaypointIndex(null);
+  }, []);
+
+  // Delete/Backspace removes the selected waypoint — only when a waypoint
+  // is actually selected and focus isn't inside a text input/textarea/
+  // select/contenteditable element (never hijack ordinary text editing
+  // elsewhere in the editor, e.g. the property panels' own fields).
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (!canEdit || !selectedEdgeId || selectedWaypointIndex === null) return;
+      const active = document.activeElement;
+      const tag = active?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (active instanceof HTMLElement && active.isContentEditable)) return;
+      e.preventDefault();
+      handleRemoveSelectedWaypoint();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canEdit, selectedEdgeId, selectedWaypointIndex, handleRemoveSelectedWaypoint]);
 
   const selectedNode = selectedNodeId ? template.nodes.find((n) => n.id === selectedNodeId) ?? null : null;
   const selectedEdge = selectedEdgeId ? template.edges.find((e) => e.id === selectedEdgeId) ?? null : null;
@@ -243,10 +382,10 @@ export default function ProcedureTemplateEditorScreen({
         <div className="flex flex-wrap items-center gap-2">
           {canEdit && (
             <>
-              <button type="button" onClick={() => void handleSaveLayout()} disabled={unsavedLayoutNodeIds.size === 0 || isSavingLayout} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900">
+              <button type="button" onClick={() => void handleSaveLayout()} disabled={!hasPendingLayoutChanges || isSavingLayout} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900">
                 저장
               </button>
-              <button type="button" onClick={handleDiscardLayout} disabled={unsavedLayoutNodeIds.size === 0} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+              <button type="button" onClick={handleDiscardLayout} disabled={!hasPendingLayoutChanges} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
                 취소
               </button>
             </>
@@ -278,6 +417,12 @@ export default function ProcedureTemplateEditorScreen({
             onNodeSelectionChange={handleNodeSelectionChange}
             onEdgeSelectionChange={handleEdgeSelectionChange}
             onNodeDragStop={handleNodeDragStop}
+            selectedEdgeId={selectedEdgeId}
+            edgeRoutesByEdgeId={workingEdgeRoutes}
+            selectedWaypointIndex={selectedWaypointIndex}
+            onWaypointSelectionChange={handleWaypointSelectionChange}
+            onWaypointMove={handleWaypointMove}
+            onEdgeDoubleClickInsert={handleWaypointInsertAt}
           />
           <ProcedureGraphLegend />
         </div>
@@ -300,7 +445,19 @@ export default function ProcedureTemplateEditorScreen({
             <NodePropertyPanel key={selectedNode.id} node={selectedNode} canEdit={canEdit} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} />
           )}
           {rightPanelTab === "properties" && !selectedNode && selectedEdge && (
-            <EdgePropertyPanel key={selectedEdge.id} edge={selectedEdge} nodes={template.nodes} canEdit={canEdit} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} />
+            <EdgePropertyPanel
+              key={selectedEdge.id}
+              edge={selectedEdge}
+              nodes={template.nodes}
+              canEdit={canEdit}
+              expectedTemplateUpdatedAt={currentUpdatedAt}
+              onSaved={handleSaved}
+              routePoints={workingEdgeRoutes.get(selectedEdge.id) ?? null}
+              selectedWaypointIndex={selectedWaypointIndex}
+              onAddWaypoint={handleAddWaypoint}
+              onRemoveSelectedWaypoint={handleRemoveSelectedWaypoint}
+              onResetRoute={() => handleResetEdgeRoute(selectedEdge.id)}
+            />
           )}
           {rightPanelTab === "properties" && !selectedNode && !selectedEdge && <p className="text-xs text-zinc-400 dark:text-zinc-600">그래프에서 노드나 분기를 선택하세요.</p>}
 
@@ -417,6 +574,13 @@ export default function ProcedureTemplateEditorScreen({
                 {comparison.comparison.newlyAddedEdges.map((e) => (
                   <li key={e.draftEdgeId}>
                     {e.fromNodeCode}→{e.toNodeCode} ({procedureBranchTypeLabels[e.branchType]})
+                  </li>
+                ))}
+              </CompareSection>
+              <CompareSection title={`연결선 경로 수동 조정 (${comparison.comparison.routeChangedEdges.length})`}>
+                {comparison.comparison.routeChangedEdges.map((e) => (
+                  <li key={e.draftEdgeId}>
+                    {e.fromNodeCode}→{e.toNodeCode}: {e.before.isManual ? `수동 (경로점 ${e.before.pointCount}개)` : "자동"} → {e.after.isManual ? `수동 (경로점 ${e.after.pointCount}개)` : "자동"}
                   </li>
                 ))}
               </CompareSection>

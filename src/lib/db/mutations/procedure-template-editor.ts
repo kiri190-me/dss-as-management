@@ -18,6 +18,7 @@ import {
   type StructuralValidationIssue,
 } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
+import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
 
 /**
  * Phase 4A — the controlled procedure-workflow editor's mutation layer.
@@ -303,55 +304,138 @@ export type SaveLayoutResult = { ok: true; updatedAt: string } | Failure;
  * coordinates, preserved forever). A no-op (empty positions array) is a
  * plain success with no audit row, since nothing actually changed.
  */
-export async function saveProcedureTemplateNodeLayout(
+export type EdgeRouteInput = { edgeId: string; points: RoutePoint[] | null };
+
+/**
+ * Phase 4B — the single combined save behind the editor's one "저장"
+ * button in 사용자 배치: node position moves and manual edge-route
+ * (waypoint) changes commit or fail together, gated by exactly one
+ * assertEditableDraft check (a stale expectedTemplateUpdatedAt rejects the
+ * whole call — neither category partially applies). Each category is
+ * diffed against its current DB value independently: an item the caller
+ * sends whose value already matches what's stored is silently excluded
+ * from both the write and the audit row, so re-saving unchanged data (or a
+ * pure selection/zoom/pan that never actually produced a delta) can never
+ * fabricate a no-op history entry. Every route-point array passes through
+ * sanitizeRoutePoints before anything else runs, independent of whatever
+ * the client already validated.
+ */
+export async function saveProcedureTemplateLayout(
   templateId: string,
   actorUserId: string,
   positions: LayoutPosition[],
-  expectedTemplateUpdatedAt: string
+  edgeRoutes: EdgeRouteInput[],
+  expectedTemplateUpdatedAt: string,
+  reason?: string | null
 ): Promise<SaveLayoutResult> {
+  const sanitizedEdgeRoutes: EdgeRouteInput[] = [];
+  for (const er of edgeRoutes) {
+    const sanitized = sanitizeRoutePoints(er.points);
+    if (!sanitized.ok) return { ok: false, code: "INVALID_INPUT", message: sanitized.message };
+    sanitizedEdgeRoutes.push({ edgeId: er.edgeId, points: sanitized.points });
+  }
+
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
       await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt);
 
-      if (positions.length === 0) {
-        return { ok: true, updatedAt: expectedTemplateUpdatedAt };
-      }
+      let anyChange = false;
 
-      const nodeIds = positions.map((p) => p.nodeId);
-      const existingNodes = await tx
-        .select({ id: procedureTemplateNodes.id, procedureTemplateId: procedureTemplateNodes.procedureTemplateId, userPositionX: procedureTemplateNodes.userPositionX, userPositionY: procedureTemplateNodes.userPositionY })
-        .from(procedureTemplateNodes)
-        .where(inArray(procedureTemplateNodes.id, nodeIds));
-      const existingById = new Map(existingNodes.map((n) => [n.id, n]));
+      // ---- node positions (SAVE_LAYOUT) ----
+      if (positions.length > 0) {
+        const nodeIds = positions.map((p) => p.nodeId);
+        const existingNodes = await tx
+          .select({ id: procedureTemplateNodes.id, procedureTemplateId: procedureTemplateNodes.procedureTemplateId, userPositionX: procedureTemplateNodes.userPositionX, userPositionY: procedureTemplateNodes.userPositionY })
+          .from(procedureTemplateNodes)
+          .where(inArray(procedureTemplateNodes.id, nodeIds));
+        const existingById = new Map(existingNodes.map((n) => [n.id, n]));
 
-      for (const p of positions) {
-        const existing = existingById.get(p.nodeId);
-        if (!existing || existing.procedureTemplateId !== templateId) {
-          fail("NOT_FOUND", `노드 ${p.nodeId}이(가) 이 템플릿에 존재하지 않습니다.`);
+        for (const p of positions) {
+          const existing = existingById.get(p.nodeId);
+          if (!existing || existing.procedureTemplateId !== templateId) {
+            fail("NOT_FOUND", `노드 ${p.nodeId}이(가) 이 템플릿에 존재하지 않습니다.`);
+          }
+        }
+
+        const changedPositions = positions.filter((p) => {
+          const existing = existingById.get(p.nodeId)!;
+          return existing.userPositionX !== p.x || existing.userPositionY !== p.y;
+        });
+
+        if (changedPositions.length > 0) {
+          anyChange = true;
+          const beforeState = changedPositions.map((p) => {
+            const existing = existingById.get(p.nodeId)!;
+            return { nodeId: p.nodeId, x: existing.userPositionX, y: existing.userPositionY };
+          });
+          const afterState = changedPositions.map((p) => ({ nodeId: p.nodeId, x: p.x, y: p.y }));
+
+          for (const p of changedPositions) {
+            await tx
+              .update(procedureTemplateNodes)
+              .set({ userPositionX: p.x, userPositionY: p.y, updatedAt: new Date() })
+              .where(eq(procedureTemplateNodes.id, p.nodeId));
+          }
+
+          await insertEditHistory(tx, {
+            procedureTemplateId: templateId,
+            actionType: "SAVE_LAYOUT",
+            beforeState,
+            afterState,
+            reason: reason ?? null,
+            actorUserId: actor.id,
+          });
         }
       }
 
-      const beforeState = positions.map((p) => {
-        const existing = existingById.get(p.nodeId)!;
-        return { nodeId: p.nodeId, x: existing.userPositionX, y: existing.userPositionY };
-      });
-      const afterState = positions.map((p) => ({ nodeId: p.nodeId, x: p.x, y: p.y }));
+      // ---- manual edge routes (SAVE_EDGE_ROUTE) ----
+      if (sanitizedEdgeRoutes.length > 0) {
+        const edgeIds = sanitizedEdgeRoutes.map((e) => e.edgeId);
+        const existingEdges = await tx
+          .select({ id: procedureTemplateEdges.id, procedureTemplateId: procedureTemplateEdges.procedureTemplateId, userRoutePoints: procedureTemplateEdges.userRoutePoints })
+          .from(procedureTemplateEdges)
+          .where(inArray(procedureTemplateEdges.id, edgeIds));
+        const existingEdgeById = new Map(existingEdges.map((e) => [e.id, e]));
 
-      for (const p of positions) {
-        await tx
-          .update(procedureTemplateNodes)
-          .set({ userPositionX: p.x, userPositionY: p.y, updatedAt: new Date() })
-          .where(eq(procedureTemplateNodes.id, p.nodeId));
+        for (const er of sanitizedEdgeRoutes) {
+          const existing = existingEdgeById.get(er.edgeId);
+          if (!existing || existing.procedureTemplateId !== templateId) {
+            fail("NOT_FOUND", `분기 ${er.edgeId}이(가) 이 템플릿에 존재하지 않습니다.`);
+          }
+        }
+
+        const changedRoutes = sanitizedEdgeRoutes.filter((er) => {
+          const existing = existingEdgeById.get(er.edgeId)!;
+          return !routePointsEqual(existing.userRoutePoints ?? null, er.points);
+        });
+
+        if (changedRoutes.length > 0) {
+          anyChange = true;
+          const beforeState = changedRoutes.map((er) => {
+            const existing = existingEdgeById.get(er.edgeId)!;
+            return { edgeId: er.edgeId, points: existing.userRoutePoints ?? null };
+          });
+          const afterState = changedRoutes.map((er) => ({ edgeId: er.edgeId, points: er.points }));
+
+          for (const er of changedRoutes) {
+            await tx.update(procedureTemplateEdges).set({ userRoutePoints: er.points }).where(eq(procedureTemplateEdges.id, er.edgeId));
+          }
+
+          await insertEditHistory(tx, {
+            procedureTemplateId: templateId,
+            actionType: "SAVE_EDGE_ROUTE",
+            beforeState,
+            afterState,
+            reason: reason ?? null,
+            actorUserId: actor.id,
+          });
+        }
       }
 
-      await insertEditHistory(tx, {
-        procedureTemplateId: templateId,
-        actionType: "SAVE_LAYOUT",
-        beforeState,
-        afterState,
-        actorUserId: actor.id,
-      });
+      if (!anyChange) {
+        return { ok: true, updatedAt: expectedTemplateUpdatedAt };
+      }
 
       const updatedAt = await touchTemplate(tx, templateId);
       return { ok: true, updatedAt };

@@ -53,6 +53,8 @@ export type EditorNodeRow = {
   hasTroubleshootingContent: boolean;
 };
 
+export type RoutePoint = { x: number; y: number };
+
 export type EditorEdgeRow = {
   id: string;
   fromNodeId: string;
@@ -62,6 +64,8 @@ export type EditorEdgeRow = {
   sortOrder: number;
   sourceConnectorId: string | null;
   clonedFromEdgeId: string | null;
+  /** Phase 4B — 사용자 배치 manual-route override; null means "use deterministic routing." See resolveEffectiveEdgeRoute in procedure-edge-waypoints.ts. */
+  userRoutePoints: RoutePoint[] | null;
 };
 
 export type EditorUnresolvedIssue = {
@@ -151,6 +155,7 @@ export async function getProcedureTemplateForEditor(templateId: string): Promise
     sortOrder: e.sortOrder,
     sourceConnectorId: e.sourceConnectorId,
     clonedFromEdgeId: e.clonedFromEdgeId,
+    userRoutePoints: e.userRoutePoints ?? null,
   }));
 
   const unresolvedIssueRows = await db
@@ -250,7 +255,7 @@ function toDiffEdges(edges: EditorEdgeRow[], nodeCodeById: Map<string, string>):
       const fromNodeCode = nodeCodeById.get(e.fromNodeId);
       const toNodeCode = nodeCodeById.get(e.toNodeId);
       if (!fromNodeCode || !toNodeCode) return null;
-      return { id: e.id, clonedFromEdgeId: e.clonedFromEdgeId, fromNodeCode, toNodeCode, branchType: e.branchType, branchLabel: e.branchLabel };
+      return { id: e.id, clonedFromEdgeId: e.clonedFromEdgeId, fromNodeCode, toNodeCode, branchType: e.branchType, branchLabel: e.branchLabel, userRoutePoints: e.userRoutePoints };
     })
     .filter((e): e is DiffEdge => e !== null);
 }
