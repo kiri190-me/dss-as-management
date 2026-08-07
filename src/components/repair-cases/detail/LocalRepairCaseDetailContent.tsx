@@ -44,6 +44,7 @@ export default function LocalRepairCaseDetailContent({
         workflowHistory={null}
         workflowHoldState={null}
         currentApprovals={null}
+        partRequestData={null}
       />
     </div>
   );

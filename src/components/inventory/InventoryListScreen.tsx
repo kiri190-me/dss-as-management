@@ -3,11 +3,17 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import PartCreateDialog from "./PartCreateDialog";
+import InventoryTabs from "./InventoryTabs";
 import type { PartListRow } from "@/lib/db/queries/inventory";
 import { STOCK_OWNER_CODES, stockOwnerLabels } from "@/lib/domain/inventory-types";
 
 /** Same string-typed local mirror of canCreateOrEditPart's logic used throughout the Phase 5A client components (e.g. ExecutionNodeCard.tsx) — the server auth module's Role-typed functions aren't meant to be cast from a plain session-derived string prop; this is a UX convenience only, the mutation layer re-checks independently regardless. */
 function canCreateOrEditPart(role: string): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
+}
+
+/** Same three-role list as canProcessPartRequests — gates visibility of the 부품 요청 관리 tab link only (AS_ENGINEER manages their own requests from the repair-case page instead, never this manager screen; SALES has no request-screen access at all). */
+function canProcessPartRequests(role: string): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
 }
 
@@ -51,6 +57,7 @@ export default function InventoryListScreen({
 
   return (
     <div className="flex flex-col gap-4">
+      {canProcessPartRequests(actingUserRole) && <InventoryTabs active="LIST" />}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">재고 관리</h1>
         {canCreate && (

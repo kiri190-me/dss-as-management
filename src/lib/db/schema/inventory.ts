@@ -15,6 +15,7 @@ import {
 import { repairCases } from "./repair-cases";
 import { procedureCaseExecutionNodes } from "./procedure-case-execution";
 import { users } from "./users";
+import { inventoryPartRequestItems, inventoryPartRequestIssues } from "./inventory-part-requests";
 
 /**
  * Phase 5B-2 — core inventory ledger. Grounded in the Phase 5B-1 audit of
@@ -138,6 +139,15 @@ export const stockTransactions = pgTable(
     // §6); there is no standalone "credit" RETURN in Phase 5B-2 (a
     // delivery correction with no prior USE is just an ordinary RECEIPT).
     reversalOfId: uuid("reversal_of_id").references((): AnyPgColumn => stockTransactions.id, { onDelete: "restrict" }),
+    // Phase 5B-3 — set together (both or neither, enforced below) only on a
+    // USE row produced by a confirmed parts-request issue action; never set
+    // on a direct/destination-only USE, and never on RECEIPT/RETURN. A
+    // RETURN reversing a request-originated USE does NOT carry these
+    // columns itself — it's still traceable via reversalOfId -> the
+    // original USE row -> these two columns (see inventory-part-requests.ts
+    // schema comment and the mutation layer's RETURN-interaction notes).
+    requestItemId: uuid("request_item_id").references(() => inventoryPartRequestItems.id, { onDelete: "restrict" }),
+    requestIssueId: uuid("request_issue_id").references(() => inventoryPartRequestIssues.id, { onDelete: "restrict" }),
     actorUserId: uuid("actor_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -161,10 +171,24 @@ export const stockTransactions = pgTable(
       "stock_transactions_execution_node_only_on_use",
       sql`${table.procedureExecutionNodeId} IS NULL OR ${table.transactionType} = 'USE'`
     ),
+    check(
+      "stock_transactions_request_item_only_on_use",
+      sql`${table.requestItemId} IS NULL OR ${table.transactionType} = 'USE'`
+    ),
+    check(
+      "stock_transactions_request_issue_only_on_use",
+      sql`${table.requestIssueId} IS NULL OR ${table.transactionType} = 'USE'`
+    ),
+    check(
+      "stock_transactions_request_linkage_consistent",
+      sql`(${table.requestItemId} IS NULL) = (${table.requestIssueId} IS NULL)`
+    ),
     index("stock_transactions_balance_id_idx").on(table.partStockBalanceId),
     index("stock_transactions_repair_case_id_idx").on(table.repairCaseId),
     index("stock_transactions_execution_node_id_idx").on(table.procedureExecutionNodeId),
     index("stock_transactions_reversal_of_id_idx").on(table.reversalOfId),
     index("stock_transactions_created_at_idx").on(table.createdAt),
+    index("stock_transactions_request_item_id_idx").on(table.requestItemId),
+    index("stock_transactions_request_issue_id_idx").on(table.requestIssueId),
   ]
 );

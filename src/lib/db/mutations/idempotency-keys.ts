@@ -10,7 +10,14 @@ import { repairCaseIdempotencyKeys } from "../schema";
  * automated sweep job exists yet — expires_at is written so one can be
  * added later without a schema change (out of scope for this task).
  */
-const IDEMPOTENCY_KEY_TTL_MS = 2 * 60 * 60 * 1000;
+/**
+ * Exported so Phase 5B-3's inventory-part-request idempotency table
+ * (db/mutations/internal/inventory-request-idempotency.ts) reuses this
+ * exact 2-hour policy rather than defining a second literal — same
+ * SECURITY_POLICY.md §12-1 rationale applies there (short-lived operational
+ * table, non-PII snapshot).
+ */
+export const IDEMPOTENCY_KEY_TTL_MS = 2 * 60 * 60 * 1000;
 
 /** Never store more than this — see the schema file's PII note. */
 export type IdempotencyResponseSnapshot = {

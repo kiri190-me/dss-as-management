@@ -10,6 +10,8 @@ import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
 import { getCurrentApprovalsForCase } from "@/lib/db/queries/repair-case-approvals";
+import { getPartList } from "@/lib/db/queries/inventory";
+import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 import LocalRepairCaseDetailContent from "@/components/repair-cases/detail/LocalRepairCaseDetailContent";
@@ -72,6 +74,20 @@ export default async function RepairCaseDetailPage({
   const workflowHoldState = workflowHistory ? deriveCurrentHoldState(workflowHistory) : null;
   const currentApprovals = isDatabaseBacked ? await getCurrentApprovalsForCase(resolved.id) : null;
 
+  // Phase 5B-3 부품 요청 section — AS_ENGINEER only, DATABASE-backed cases
+  // only (the request tables have no local/mock equivalent). Fetched here
+  // (not inside the section itself) so an unauthorized/ineligible role
+  // never even receives the query results — a UX convenience only, the
+  // mutation layer re-checks assignment/lock independently regardless.
+  const partRequestData =
+    isDatabaseBacked && actingUser?.role === "AS_ENGINEER"
+      ? {
+          caseContext: await getRequestCaseContext(resolved.id),
+          availableParts: await getPartList(),
+          ownRequests: await getOwnPartRequestsForCase(resolved.id, actingUser.id),
+        }
+      : null;
+
   return (
     <RepairCaseDetailView
       resolved={resolved}
@@ -81,6 +97,7 @@ export default async function RepairCaseDetailPage({
       workflowHistory={workflowHistory}
       workflowHoldState={workflowHoldState}
       currentApprovals={currentApprovals}
+      partRequestData={partRequestData}
     />
   );
 }

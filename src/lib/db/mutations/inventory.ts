@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../client";
 import { parts, partStockBalances, stockTransactions, repairCases, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
+import { applyStockUseCore } from "./internal/inventory-stock-use";
 import {
   canCreateOrEditPart,
   canReceiveStock,
@@ -295,41 +296,28 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
         fail("INVALID_INPUT", "수리 건 또는 사용처를 입력해 주세요.");
       }
 
-      const [balance] = await tx
-        .select()
-        .from(partStockBalances)
-        .where(eq(partStockBalances.id, input.partStockBalanceId))
-        .for("update");
-      if (!balance) fail("NOT_FOUND", "해당 재고를 찾을 수 없습니다.");
-      if (balance.version !== input.expectedVersion) {
-        fail("CONFLICT", "다른 사용자가 이 재고를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
-      }
-
-      let repairCase: { id: string; isLocked: boolean; assignedEngineerId: string | null } | null = null;
+      let repairCase: { id: string; isLocked: boolean } | null = null;
       if (input.repairCaseId) {
         const [rc] = await tx
-          .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+          .select({ id: repairCases.id, isLocked: repairCases.isLocked })
           .from(repairCases)
           .where(and(eq(repairCases.id, input.repairCaseId), eq(repairCases.isDeleted, false)));
         if (!rc) fail("NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
         repairCase = rc;
       }
 
-      // procedureExecutionNodeId is only ever an *additional* authorization
-      // input for AS_ENGINEER (plan §9) — re-validated live, never trusted
-      // at face value. It must belong to an execution whose repair case is
-      // exactly the one submitted, or it's rejected outright (closes the
-      // "reference an unrelated case's node to fake assignment" gap).
-      let isEffectiveAssigneeOfSuppliedNode = false;
+      // procedureExecutionNodeId is kept as a general reverse-traceability
+      // input for any role that supplies it (Phase 5B-3: no longer tied to
+      // AS_ENGINEER authorization specifically, since AS_ENGINEER can never
+      // reach this mutation at all now — see canUseStock) — still
+      // re-validated live: it must belong to an execution whose repair case
+      // is exactly the one submitted, never trusted at face value.
       if (input.procedureExecutionNodeId) {
         if (!input.repairCaseId) {
           fail("INVALID_INPUT", "절차 작업을 지정하려면 수리 건도 함께 지정해야 합니다.");
         }
         const [node] = await tx
-          .select({
-            assignedEngineerId: procedureCaseExecutionNodes.assignedEngineerId,
-            executionId: procedureCaseExecutionNodes.executionId,
-          })
+          .select({ executionId: procedureCaseExecutionNodes.executionId })
           .from(procedureCaseExecutionNodes)
           .where(eq(procedureCaseExecutionNodes.id, input.procedureExecutionNodeId));
         if (!node) fail("INVALID_INPUT", "해당 절차 작업을 찾을 수 없습니다.");
@@ -341,9 +329,6 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
         if (!execution || execution.repairCaseId !== input.repairCaseId) {
           fail("INVALID_INPUT", "지정한 절차 작업이 해당 수리 건에 속하지 않습니다.");
         }
-
-        const effectiveAssigneeId = node.assignedEngineerId ?? repairCase?.assignedEngineerId ?? null;
-        isEffectiveAssigneeOfSuppliedNode = effectiveAssigneeId !== null && effectiveAssigneeId === actor.id;
       }
 
       // Locked-case check is explicit and separate from canUseStock so the
@@ -357,38 +342,32 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
       const authContext: UseStockAuthorizationContext = {
         hasRepairCase: input.repairCaseId != null,
         isCaseLocked: repairCase?.isLocked ?? false,
-        isAssignedToCase: repairCase?.assignedEngineerId === actor.id,
-        isEffectiveAssigneeOfSuppliedNode,
       };
       if (!canUseStock(actor.role, authContext)) {
         fail("FORBIDDEN", "재고를 사용할 권한이 없습니다.");
       }
 
-      // No negative stock, ever, for any role — no override path exists.
-      if (balance.currentQuantity < input.quantity) {
+      const result = await applyStockUseCore(
+        tx,
+        {
+          partStockBalanceId: input.partStockBalanceId,
+          quantity: input.quantity,
+          actorUserId: actor.id,
+          repairCaseId: input.repairCaseId ?? null,
+          destinationNote: input.destinationNote ?? null,
+          procedureExecutionNodeId: input.procedureExecutionNodeId ?? null,
+          reason: input.reason ?? null,
+        },
+        { expectedVersion: input.expectedVersion }
+      );
+
+      if (!result.ok) {
+        if (result.code === "NOT_FOUND") fail("NOT_FOUND", "해당 재고를 찾을 수 없습니다.");
+        if (result.code === "CONFLICT") fail("CONFLICT", "다른 사용자가 이 재고를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
         fail("INSUFFICIENT_STOCK", "재고가 부족합니다.");
       }
 
-      const resultingQuantity = balance.currentQuantity - input.quantity;
-
-      await tx.insert(stockTransactions).values({
-        partStockBalanceId: balance.id,
-        transactionType: "USE",
-        quantityDelta: -input.quantity,
-        resultingQuantity,
-        repairCaseId: input.repairCaseId ?? null,
-        destinationNote: input.destinationNote ?? null,
-        procedureExecutionNodeId: input.procedureExecutionNodeId ?? null,
-        actorUserId: actor.id,
-        reason: input.reason ?? null,
-      });
-
-      await tx
-        .update(partStockBalances)
-        .set({ currentQuantity: resultingQuantity, version: balance.version + 1, updatedAt: new Date() })
-        .where(eq(partStockBalances.id, balance.id));
-
-      return { ok: true, version: balance.version + 1, resultingQuantity, partStockBalanceId: balance.id };
+      return { ok: true, version: result.version, resultingQuantity: result.resultingQuantity, partStockBalanceId: input.partStockBalanceId };
     });
   } catch (err) {
     if (err instanceof InventoryMutationError) return err.result;

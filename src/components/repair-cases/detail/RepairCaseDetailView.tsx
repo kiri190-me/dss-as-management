@@ -19,6 +19,9 @@ import type { CurrentHoldState, WorkflowHistoryEntry } from "@/lib/db/queries/wo
 import type { CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
 import { editableFieldsForRoleInSection } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
+import PartRequestSection from "@/components/inventory/PartRequestSection";
+import type { PartListRow } from "@/lib/db/queries/inventory";
+import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
 
 /**
  * mock(서버 조회)과 local(클라이언트 조회) 두 경로가 모두 이 컴포넌트 하나로
@@ -45,6 +48,7 @@ export default function RepairCaseDetailView({
   workflowHistory,
   workflowHoldState,
   currentApprovals,
+  partRequestData,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -54,6 +58,8 @@ export default function RepairCaseDetailView({
   workflowHistory: WorkflowHistoryEntry[] | null;
   workflowHoldState: CurrentHoldState | null;
   currentApprovals: CurrentApprovalState[] | null;
+  /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
+  partRequestData: { caseContext: RequestCaseContext | null; availableParts: PartListRow[]; ownRequests: OwnPartRequestRow[] } | null;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -119,6 +125,15 @@ export default function RepairCaseDetailView({
         />
       ) : (
         <WorkflowControlPanel effective={effective} actingUser={actingUser} />
+      )}
+      {partRequestData && partRequestData.caseContext && (
+        <PartRequestSection
+          repairCaseId={partRequestData.caseContext.id}
+          isCaseLocked={partRequestData.caseContext.isLocked}
+          isAssignedToCase={partRequestData.caseContext.assignedEngineerId === actingUser?.id}
+          availableParts={partRequestData.availableParts}
+          ownRequests={partRequestData.ownRequests}
+        />
       )}
     </div>
   );

@@ -430,7 +430,7 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
     }
   });
 
-  test("9. AS_ENGINEER can USE against a repair case they are directly assigned to", async () => {
+  test("9. Phase 5B-3: AS_ENGINEER is FORBIDDEN from direct USE even against a repair case they are directly assigned to — their only path to consuming stock is the parts-request/issue workflow", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 5, actorUserId: inventoryManagerId });
@@ -444,7 +444,8 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
       actorUserId: engineerId,
       expectedVersion: received.version,
     });
-    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.ok, false, JSON.stringify(result));
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
   test("10. AS_ENGINEER cannot USE against a repair case they are not assigned to, and cannot use a destination-only USE at all", async () => {
@@ -475,7 +476,7 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
     if (!destinationOnlyResult.ok) assert.equal(destinationOnlyResult.code, "FORBIDDEN", "a destination-only USE is valid input — AS_ENGINEER is simply never authorized to make one");
   });
 
-  test("11. AS_ENGINEER can USE against a case they aren't the case-level assignee of, when they are the effective assignee of a supplied, matching procedure-execution node", async () => {
+  test("11. Phase 5B-3: a supplied procedureExecutionNodeId no longer grants AS_ENGINEER a direct-USE path, even when they are its effective assignee — canUseStock has no AS_ENGINEER branch left at all", async () => {
     const partId = await createTestPart();
     // Case is assigned to engineer2, but engineer1 self-claimed the specific execution node.
     const fixture = await createExecutionNodeFixture(engineer2Id);
@@ -498,7 +499,8 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
       actorUserId: engineerId,
       expectedVersion: received.version,
     });
-    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.ok, false, JSON.stringify(result));
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
   test("12. AS_ENGINEER supplying a procedureExecutionNodeId that belongs to a different repair case than the one submitted is rejected with INVALID_INPUT (anti-bypass)", async () => {
@@ -758,7 +760,7 @@ describe("inventory: read queries", () => {
       partStockBalanceId: received.partStockBalanceId,
       quantity: 2,
       repairCaseId: created.id,
-      actorUserId: engineerId,
+      actorUserId: inventoryManagerId,
       expectedVersion: received.version,
     });
     assert.equal(used.ok, true);
