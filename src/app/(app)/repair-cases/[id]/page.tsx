@@ -8,8 +8,6 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
-import { getCurrentApprovalsForCase } from "@/lib/db/queries/repair-case-approvals";
 import { getPartList } from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -29,8 +27,10 @@ export default async function RepairCaseDetailPage({
 }) {
   const { id } = await params;
 
-  // Stage E-1 워크플로 제어판이 처리 주체(actingUser)를 필요로 하므로
-  // approval/files 페이지와 동일한 기존 readSession 패턴을 그대로 재사용한다.
+  // Section editing과 PartRequestSection이 처리 주체(actingUser)를 필요로
+  // 하므로 approval/files 페이지와 동일한 기존 readSession 패턴을 그대로
+  // 재사용한다(워크플로 제어 액션 자체는 Phase 5C-1부터 execution/page.tsx로
+  // 이동했다).
   const session = await readSession();
   if (!session) {
     redirect("/login");
@@ -67,13 +67,6 @@ export default async function RepairCaseDetailPage({
   const isDatabaseBacked = resolved.source === "DATABASE" && writeSource === "database";
   const referenceData = isDatabaseBacked ? await getIntakeReferenceData() : null;
 
-  // Workflow history/hold-state are DB-only concepts (event-sourced from
-  // status_change_histories — see Phase-1 report) — never fetched for
-  // MOCK/LOCAL_DEMO rows.
-  const workflowHistory = isDatabaseBacked ? await getWorkflowHistoryForCase(resolved.id) : null;
-  const workflowHoldState = workflowHistory ? deriveCurrentHoldState(workflowHistory) : null;
-  const currentApprovals = isDatabaseBacked ? await getCurrentApprovalsForCase(resolved.id) : null;
-
   // Phase 5B-3 부품 요청 section — AS_ENGINEER only, DATABASE-backed cases
   // only (the request tables have no local/mock equivalent). Fetched here
   // (not inside the section itself) so an unauthorized/ineligible role
@@ -94,9 +87,6 @@ export default async function RepairCaseDetailPage({
       related={related}
       actingUser={actingUser}
       referenceData={referenceData}
-      workflowHistory={workflowHistory}
-      workflowHoldState={workflowHoldState}
-      currentApprovals={currentApprovals}
       partRequestData={partRequestData}
     />
   );

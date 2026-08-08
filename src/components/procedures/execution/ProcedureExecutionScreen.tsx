@@ -104,6 +104,7 @@ export default function ProcedureExecutionScreen({
   if (!activeExecution || !executionDetail) {
     return (
       <div className="flex flex-col gap-4">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
         <ExecutionStartCard repairCaseId={repairCaseId} actingUserRole={actingUser.role} templateOptions={templateOptions} />
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">이전 수리 이력</h2>
@@ -127,6 +128,7 @@ export default function ProcedureExecutionScreen({
 
   return (
     <div className="flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
       <ProgressSummary detail={executionDetail} />
 
       <NodeSection

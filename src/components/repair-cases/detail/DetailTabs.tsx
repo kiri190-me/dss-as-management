@@ -12,7 +12,7 @@ export default function DetailTabs({ id }: DetailTabsProps) {
 
   const tabs = [
     { label: "기본 정보", href: `/repair-cases/${id}` },
-    { label: "표준 절차 실행", href: `/repair-cases/${id}/execution` },
+    { label: "작업내용", href: `/repair-cases/${id}/execution` },
     { label: "작업 이력", href: `/repair-cases/${id}/work-history` },
     { label: "파일 관리", href: `/repair-cases/${id}/files` },
     { label: "검수/승인", href: `/repair-cases/${id}/approval` },

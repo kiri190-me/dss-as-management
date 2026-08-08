@@ -5,8 +5,14 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import LocalRepairCaseExecutionContent, {
+  NonDatabaseWorkContent,
+} from "@/components/repair-cases/detail/LocalRepairCaseExecutionContent";
+import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
+import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
-import DatabaseModeOnlyNotice from "@/components/procedures/execution/DatabaseModeOnlyNotice";
+import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
+import { getCurrentApprovalsForCase } from "@/lib/db/queries/repair-case-approvals";
 import {
   getActiveExecutionForCase,
   getExecutionDetail,
@@ -16,18 +22,22 @@ import {
 } from "@/lib/db/queries/procedure-case-execution";
 
 export const metadata: Metadata = {
-  title: "표준 절차 실행 | DSS A/S 관리 시스템",
+  title: "작업내용 | DSS A/S 관리 시스템",
 };
 
 export const dynamic = "force-dynamic";
 
 /**
- * Phase 5A — repair-case procedure execution tab. Database-mode only: the
- * feature is genuinely greenfield (procedure_case_executions has a real FK
- * to repair_cases.id, which mock/local-demo ids never satisfy), so a
- * local/mock repair case shows a short explanatory notice instead of a
- * broken local variant, same as this codebase's other DB-only features
- * report their mode requirement rather than silently failing.
+ * Phase 5C-1 — "작업내용" tab (URL unchanged: /repair-cases/[id]/execution,
+ * see DetailTabs.tsx for the visible-label-only rename). This screen now
+ * owns both the workflow-transition action list (moved off 기본 정보 —
+ * DatabaseWorkflowControlPanel / local WorkflowControlPanel, plus the
+ * workflowHistory/holdState/currentApprovals fetch that used to live in
+ * [id]/page.tsx) and the existing Phase 5A procedure-execution UI.
+ *
+ * The procedure-execution feature itself remains database-mode only (see
+ * ProcedureExecutionScreen/DatabaseModeOnlyNotice) — that Phase 5A
+ * constraint is unchanged by this restructuring.
  */
 export default async function RepairCaseExecutionPage({
   params,
@@ -44,7 +54,7 @@ export default async function RepairCaseExecutionPage({
   const actingUser: ActingUser | null = await resolveActingUserForSession(session);
 
   if (isLocalId(id)) {
-    return <DatabaseModeOnlyNotice />;
+    return <LocalRepairCaseExecutionContent id={id} actingUser={actingUser} />;
   }
 
   const resolved = await resolveRepairCaseForServer(id);
@@ -53,7 +63,7 @@ export default async function RepairCaseExecutionPage({
   }
 
   if (resolved.source !== "DATABASE") {
-    return <DatabaseModeOnlyNotice />;
+    return <NonDatabaseWorkContent resolved={resolved} actingUser={actingUser} />;
   }
 
   if (!actingUser) {
@@ -64,11 +74,17 @@ export default async function RepairCaseExecutionPage({
     );
   }
 
-  const activeExecution = await getActiveExecutionForCase(resolved.id);
+  const [workflowHistory, currentApprovals, activeExecution] = await Promise.all([
+    getWorkflowHistoryForCase(resolved.id),
+    getCurrentApprovalsForCase(resolved.id),
+    getActiveExecutionForCase(resolved.id),
+  ]);
+  const holdState = deriveCurrentHoldState(workflowHistory);
 
+  let procedureScreen: React.ReactNode;
   if (!activeExecution) {
     const templateOptions = await getExecutableTemplateOptions();
-    return (
+    procedureScreen = (
       <ProcedureExecutionScreen
         repairCaseId={resolved.id}
         actingUser={actingUser}
@@ -79,25 +95,46 @@ export default async function RepairCaseExecutionPage({
         relatedHistory={{ sameProduct: [], sameModelReference: [] }}
       />
     );
+  } else {
+    const [executionDetail, history, relatedHistory] = await Promise.all([
+      getExecutionDetail(activeExecution.id),
+      getExecutionHistory(activeExecution.id),
+      resolved.productId
+        ? getRelatedRepairHistory(resolved.id, resolved.productId)
+        : Promise.resolve({ sameProduct: [], sameModelReference: [] }),
+    ]);
+    procedureScreen = (
+      <ProcedureExecutionScreen
+        repairCaseId={resolved.id}
+        actingUser={actingUser}
+        activeExecution={activeExecution}
+        templateOptions={[]}
+        executionDetail={executionDetail}
+        history={history}
+        relatedHistory={relatedHistory}
+      />
+    );
   }
 
-  const [executionDetail, history, relatedHistory] = await Promise.all([
-    getExecutionDetail(activeExecution.id),
-    getExecutionHistory(activeExecution.id),
-    resolved.productId
-      ? getRelatedRepairHistory(resolved.id, resolved.productId)
-      : Promise.resolve({ sameProduct: [], sameModelReference: [] }),
-  ]);
-
   return (
-    <ProcedureExecutionScreen
-      repairCaseId={resolved.id}
-      actingUser={actingUser}
-      activeExecution={activeExecution}
-      templateOptions={[]}
-      executionDetail={executionDetail}
-      history={history}
-      relatedHistory={relatedHistory}
-    />
+    <div className="flex flex-col gap-4">
+      <DatabaseWorkflowControlPanel
+        resolved={resolved}
+        actingUser={actingUser}
+        holdState={holdState}
+        currentApprovals={currentApprovals}
+      />
+
+      {procedureScreen}
+
+      <details>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-50">
+          워크플로 변경 이력
+        </summary>
+        <div className="mt-2">
+          <DatabaseWorkflowHistoryList entries={workflowHistory} />
+        </div>
+      </details>
+    </div>
   );
 }

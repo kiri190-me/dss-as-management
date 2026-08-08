@@ -8,15 +8,11 @@ import IntakeInfoSection from "@/components/repair-cases/detail/IntakeInfoSectio
 import ProductInfoSection from "@/components/repair-cases/detail/ProductInfoSection";
 import FaultServiceSection from "@/components/repair-cases/detail/FaultServiceSection";
 import WorkflowProgress from "@/components/repair-cases/detail/WorkflowProgress";
-import WorkflowControlPanel from "@/components/repair-cases/workflow/WorkflowControlPanel";
-import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import type { CurrentHoldState, WorkflowHistoryEntry } from "@/lib/db/queries/workflow-history";
-import type { CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
 import { editableFieldsForRoleInSection } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import PartRequestSection from "@/components/inventory/PartRequestSection";
@@ -39,25 +35,25 @@ import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inv
  * computed from the centralized authorization helper — hiding a section's
  * Edit button here is a UX convenience only, never the enforcement
  * boundary (update-repair-case.ts's Server Action re-checks independently).
+ *
+ * Phase 5C-1: this screen ("기본 정보") no longer renders the workflow
+ * control panel — the executable-actions UI (WorkflowControlPanel /
+ * DatabaseWorkflowControlPanel) moved to the "작업내용" screen
+ * (repair-cases/[id]/execution/page.tsx), which now owns fetching
+ * workflowHistory/holdState/currentApprovals itself. WorkflowProgress
+ * (read-only stage visualization) stays here.
  */
 export default function RepairCaseDetailView({
   resolved,
   related,
   actingUser,
   referenceData,
-  workflowHistory,
-  workflowHoldState,
-  currentApprovals,
   partRequestData,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
   actingUser: ActingUser | null;
   referenceData: IntakeReferenceData | null;
-  /** Only populated (non-null) for a DATABASE-sourced row — see [id]/page.tsx. */
-  workflowHistory: WorkflowHistoryEntry[] | null;
-  workflowHoldState: CurrentHoldState | null;
-  currentApprovals: CurrentApprovalState[] | null;
   /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
   partRequestData: { caseContext: RequestCaseContext | null; availableParts: PartListRow[]; ownRequests: OwnPartRequestRow[] } | null;
 }) {
@@ -115,17 +111,6 @@ export default function RepairCaseDetailView({
         onDone={handleDone}
       />
       <WorkflowProgress workflowType={effective.workflowType} currentWorkflowStepKey={effective.effectiveWorkflowStepKey} />
-      {resolved.source === "DATABASE" && workflowHistory && workflowHoldState && currentApprovals ? (
-        <DatabaseWorkflowControlPanel
-          resolved={resolved}
-          actingUser={actingUser}
-          history={workflowHistory}
-          holdState={workflowHoldState}
-          currentApprovals={currentApprovals}
-        />
-      ) : (
-        <WorkflowControlPanel effective={effective} actingUser={actingUser} />
-      )}
       {partRequestData && partRequestData.caseContext && (
         <PartRequestSection
           repairCaseId={partRequestData.caseContext.id}

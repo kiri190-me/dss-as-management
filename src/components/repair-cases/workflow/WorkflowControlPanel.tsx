@@ -25,8 +25,7 @@ import ReleaseHoldDialog from "./ReleaseHoldDialog";
 import ShipmentCompletionDialog from "./ShipmentCompletionDialog";
 import TransitionDialog from "./TransitionDialog";
 import WorkflowActionList, { type WorkflowActionItem } from "./WorkflowActionList";
-import WorkflowEventTimeline from "./WorkflowEventTimeline";
-import WorkflowSummaryCard from "./WorkflowSummaryCard";
+import WorkflowStageStatus from "./WorkflowStageStatus";
 
 function stepLabelAndOrder(workflowType: EffectiveRepairCase["workflowType"], stepKey: string) {
   const step = workflowSteps.find((s) => s.workflowType === workflowType && s.key === stepKey);
@@ -178,17 +177,15 @@ export default function WorkflowControlPanel({
     },
   ];
 
-  const caseEvents = workflowStore.events.filter((e) => e.repairCaseId === effective.id);
-
   return (
     <div className="flex flex-col gap-4">
-      <WorkflowSummaryCard
-        effective={effective}
+      <WorkflowStageStatus
         stepLabel={stepInfo.label}
         stepOrder={stepInfo.order}
         responsibleRoleLabel={responsibleRoleLabel}
-        inspectionApprovalStatus={inspectionStatus}
-        shipmentApprovalStatus={shipmentApprovalStatus}
+        isOnHold={holdState.isOnHold}
+        holdReason={holdState.reason}
+        holdStartedByName={holdState.startedByNameSnapshot}
       />
 
       {workflowStore.isMalformed && (
@@ -212,8 +209,6 @@ export default function WorkflowControlPanel({
       )}
 
       <WorkflowActionList actions={actions} />
-
-      <WorkflowEventTimeline events={caseEvents} approvalRecords={approvalStore.records} />
 
       <TransitionDialog
         isOpen={openDialog === "advance"}

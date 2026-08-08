@@ -10,7 +10,7 @@ import { getStepCategory, roleForCategory } from "@/lib/domain/local/workflow/st
 import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
-import type { CurrentHoldState, WorkflowHistoryEntry } from "@/lib/db/queries/workflow-history";
+import type { CurrentHoldState } from "@/lib/db/queries/workflow-history";
 import type { CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
 import { transitionWorkflowAction } from "@/lib/server/actions/transition-workflow";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
@@ -19,8 +19,7 @@ import ReleaseHoldDialog from "./ReleaseHoldDialog";
 import ShipmentCompletionDialog from "./ShipmentCompletionDialog";
 import TransitionDialog from "./TransitionDialog";
 import WorkflowActionList, { type WorkflowActionItem } from "./WorkflowActionList";
-import DatabaseWorkflowHistoryList from "./DatabaseWorkflowHistoryList";
-import DatabaseWorkflowSummaryCard from "./DatabaseWorkflowSummaryCard";
+import WorkflowStageStatus from "./WorkflowStageStatus";
 
 function stepLabelAndOrder(workflowType: ResolvedRepairCase["workflowType"], stepKey: string) {
   const step = workflowSteps.find((s) => s.workflowType === workflowType && s.key === stepKey);
@@ -42,13 +41,16 @@ type DialogKind = "advance" | "return" | "hold" | "release" | "ship" | null;
 
 /**
  * Database-mode counterpart to WorkflowControlPanel.tsx (local mode) —
- * rendered instead of it when resolved.source === "DATABASE"
- * (RepairCaseDetailView.tsx). Reuses WorkflowActionList and all four
- * transition dialogs verbatim (already pure/prop-driven, no localStorage
- * coupling) and the same eligibility-computation functions the local panel
- * uses (findTransitionDefinition/checkTransitionEligibility/
+ * rendered on the /execution ("작업내용") screen for a DATABASE-sourced case
+ * (execution/page.tsx), not on 기본 정보 (Phase 5C-1 moved it off that
+ * screen). Reuses WorkflowActionList and all four transition dialogs
+ * verbatim (already pure/prop-driven, no localStorage coupling) and the
+ * same eligibility-computation functions the local panel uses
+ * (findTransitionDefinition/checkTransitionEligibility/
  * checkHoldEligibility) purely for UI hints — the Server Action
- * independently re-evaluates everything; nothing here is trusted.
+ * independently re-evaluates everything; nothing here is trusted. History
+ * (DatabaseWorkflowHistoryList) is rendered separately by the page as a
+ * collapsible "워크플로 변경 이력" section, not by this component.
  *
  * Approval-gated transitions (requiredApprovalType set) check
  * currentApprovals (repair_case_approvals, fetched server-side) for a
@@ -60,13 +62,11 @@ type DialogKind = "advance" | "return" | "hold" | "release" | "ship" | null;
 export default function DatabaseWorkflowControlPanel({
   resolved,
   actingUser,
-  history,
   holdState,
   currentApprovals,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
-  history: WorkflowHistoryEntry[];
   holdState: CurrentHoldState;
   currentApprovals: CurrentApprovalState[];
 }) {
@@ -220,12 +220,13 @@ export default function DatabaseWorkflowControlPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <DatabaseWorkflowSummaryCard
-        resolved={resolved}
+      <WorkflowStageStatus
         stepLabel={stepInfo.label}
         stepOrder={stepInfo.order}
         responsibleRoleLabel={responsibleRoleLabel}
-        holdState={holdState}
+        isOnHold={holdState.isOnHold}
+        holdReason={holdState.reason}
+        holdStartedByName={holdState.startedByName}
       />
 
       {statusMessage && (
@@ -255,8 +256,6 @@ export default function DatabaseWorkflowControlPanel({
       )}
 
       <WorkflowActionList actions={actions} />
-
-      <DatabaseWorkflowHistoryList entries={history} />
 
       <TransitionDialog
         isOpen={openDialog === "advance"}
