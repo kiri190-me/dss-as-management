@@ -25,6 +25,11 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
  * mode) previously lived on 기본 정보 and would otherwise be stranded with
  * nowhere to render once removed from there — this screen is its new home,
  * matching where DB-mode users now find the same actions.
+ *
+ * Phase 5C-2: repair_case_work_records has a real FK to repair_cases.id,
+ * same DB-only limitation as procedure_case_executions — local/mock cases
+ * show the same DatabaseModeOnlyNotice (reused with featureLabel="작업 기록")
+ * instead of a mock work-record system.
  */
 export default function LocalRepairCaseExecutionContent({
   id,
@@ -76,6 +81,13 @@ export function NonDatabaseWorkContent({
   return (
     <div className="flex flex-col gap-4">
       <WorkflowControlPanel effective={effective} actingUser={actingUser} />
+
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">작업 기록</h2>
+        <div className="mt-2">
+          <DatabaseModeOnlyNotice featureLabel="작업 기록" />
+        </div>
+      </div>
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>

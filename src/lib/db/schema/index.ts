@@ -21,3 +21,4 @@ export * from "./procedure-template-edit-history";
 export * from "./procedure-case-execution";
 export * from "./inventory";
 export * from "./inventory-part-requests";
+export * from "./repair-case-work-records";

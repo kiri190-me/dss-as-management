@@ -11,6 +11,7 @@ import LocalRepairCaseExecutionContent, {
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
+import WorkRecordsSection from "@/components/repair-cases/work-records/WorkRecordsSection";
 import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
 import { getCurrentApprovalsForCase } from "@/lib/db/queries/repair-case-approvals";
 import {
@@ -20,6 +21,9 @@ import {
   getExecutableTemplateOptions,
   getRelatedRepairHistory,
 } from "@/lib/db/queries/procedure-case-execution";
+import { getRecentWorkRecordsForCase, getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
+import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
+import { workflowSteps } from "@/lib/domain/mock-data";
 
 export const metadata: Metadata = {
   title: "작업내용 | DSS A/S 관리 시스템",
@@ -74,14 +78,18 @@ export default async function RepairCaseExecutionPage({
     );
   }
 
-  const [workflowHistory, currentApprovals, activeExecution] = await Promise.all([
+  const [workflowHistory, currentApprovals, activeExecution, recentWorkRecords, workRecordCaseContext] = await Promise.all([
     getWorkflowHistoryForCase(resolved.id),
     getCurrentApprovalsForCase(resolved.id),
     getActiveExecutionForCase(resolved.id),
+    getRecentWorkRecordsForCase(resolved.id, 5),
+    getWorkRecordCaseContext(resolved.id),
   ]);
   const holdState = deriveCurrentHoldState(workflowHistory);
+  const isCaseLocked = workRecordCaseContext?.isLocked ?? true;
 
   let procedureScreen: React.ReactNode;
+  let inProgressNodes: { id: string; title: string }[] = [];
   if (!activeExecution) {
     const templateOptions = await getExecutableTemplateOptions();
     procedureScreen = (
@@ -114,7 +122,20 @@ export default async function RepairCaseExecutionPage({
         relatedHistory={relatedHistory}
       />
     );
+    inProgressNodes = executionDetail
+      ? executionDetail.nodes.filter((n) => n.status === "IN_PROGRESS").map((n) => ({ id: n.id, title: n.title }))
+      : [];
   }
+
+  const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
+  const canCreate = canCreateWorkRecord(actingUser.role, { isAssignedToCase, isCaseLocked });
+  const canInvalidate = canInvalidateWorkRecord(actingUser.role, { isCaseLocked });
+  const createDisabledReason = isCaseLocked
+    ? "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다."
+    : !canCreate
+      ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다."
+      : null;
+  const currentStep = workflowSteps.find((s) => s.workflowType === resolved.workflowType && s.key === resolved.currentWorkflowStepKey);
 
   return (
     <div className="flex flex-col gap-4">
@@ -123,6 +144,16 @@ export default async function RepairCaseExecutionPage({
         actingUser={actingUser}
         holdState={holdState}
         currentApprovals={currentApprovals}
+      />
+
+      <WorkRecordsSection
+        repairCaseId={resolved.id}
+        currentStepLabel={currentStep?.label ?? resolved.currentWorkflowStepKey}
+        currentStepOrder={currentStep?.order ?? null}
+        inProgressNodes={inProgressNodes}
+        createDisabledReason={createDisabledReason}
+        canInvalidate={canInvalidate}
+        recentRecords={recentWorkRecords}
       />
 
       {procedureScreen}
