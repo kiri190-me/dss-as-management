@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   integer,
   pgEnum,
   pgTable,
@@ -47,6 +49,40 @@ export const procedureEquipmentTypeEnum = pgEnum("procedure_equipment_type", [
 ]);
 
 /**
+ * Phase 5C-5A — the technical/business-content discriminator this table
+ * always needed but never had: WHAT KIND of procedure a row is, completely
+ * independent of `status` (DRAFT/PUBLISHED/ARCHIVED, WHERE a row is in its
+ * own edit/publish lifecycle) and of `workflow_templates`/`workflow_steps`
+ * (the separate high-level system that tracks WHERE a repair_case is in
+ * the business process — see this file's own top-of-file comment; nothing
+ * about that system is touched or renamed by this enum).
+ *
+ *  - FULL_SERVICE: a comprehensive whole-product service/repair procedure
+ *    spanning a product's entire servicing journey — today's two real
+ *    executable templates (rfg-full-lifecycle, mb-full-lifecycle). At most
+ *    one active (non-deleted) execution per repair case — see
+ *    procedure_case_executions' own uniqueness comment.
+ *  - TECHNICAL_TASK: a focused, symptom/task-specific technical procedure
+ *    (e.g. "RFG 출력 없음 진단", "AMP 점검") — none exist yet; Phase 5C-5A
+ *    only prepares the type/schema/authorization foundation, Phase 5C-5B
+ *    adds the authoring UI/CRUD. Multiple concurrent executions per repair
+ *    case are allowed.
+ *  - REFERENCE: non-executable navigational/index content — today's other
+ *    two real templates (main-page-index, qc-common-operations). Always
+ *    paired with `is_reference_only = true` — see the CHECK constraint
+ *    below. Can never gain a procedure_case_executions row.
+ *
+ * No application-level default — every insertion path (the Excel importer,
+ * createNewDraftVersion) must supply this explicitly; there is no sensible
+ * universal default across three semantically distinct categories.
+ */
+export const procedureTemplateCategoryEnum = pgEnum("procedure_template_category", [
+  "FULL_SERVICE",
+  "TECHNICAL_TASK",
+  "REFERENCE",
+]);
+
+/**
  * Versioning model (Phase 1 report §10, ratified by this task's brief):
  * publishing a template freezes its node/edge rows permanently — a new
  * version is always a fresh row here (never an in-place edit of a published
@@ -67,6 +103,9 @@ export const procedureTemplates = pgTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     equipmentType: procedureEquipmentTypeEnum("equipment_type").notNull(),
+    // Phase 5C-5A — see procedureTemplateCategoryEnum's own doc comment.
+    // NOT NULL, no default: every insert must decide this explicitly.
+    category: procedureTemplateCategoryEnum("category").notNull(),
     description: text("description"),
     status: procedureTemplateStatusEnum("status").notNull().default("DRAFT"),
     // Phase 2.5: true only for the two navigational/reference-index
@@ -118,6 +157,18 @@ export const procedureTemplates = pgTable(
     uniqueIndex("procedure_templates_code_version_unique").on(
       table.code,
       table.version
+    ),
+    // Phase 5C-5A — the only three valid (category, is_reference_only)
+    // pairs: REFERENCE always means is_reference_only=true (no graph, no
+    // execution); FULL_SERVICE/TECHNICAL_TASK always mean
+    // is_reference_only=false (both are real executable graph content).
+    // Verified compatible with every existing and planned insertion path
+    // (the Excel importer's two reference-only builders set both fields
+    // together; createNewDraftVersion copies both fields verbatim from its
+    // parent, which already satisfies this by construction).
+    check(
+      "procedure_templates_category_reference_only_consistency",
+      sql`(category = 'REFERENCE' AND is_reference_only = true) OR (category <> 'REFERENCE' AND is_reference_only = false)`
     ),
   ]
 );

@@ -173,6 +173,11 @@ function buildReferenceOnlyTemplate(
     code: opts.code,
     name: opts.name,
     equipmentType: "COMMON",
+    // Phase 5C-5A — this helper is only ever called for the two real
+    // navigational/reference-index templates (main-page-index,
+    // qc-common-operations) — hardcoded explicitly, matching
+    // isReferenceOnly's own hardcoded-true convention immediately below.
+    category: "REFERENCE",
     description: opts.description,
     sourceWorksheets: [sheet.name],
     isReferenceOnly: true,

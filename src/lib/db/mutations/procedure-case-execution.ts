@@ -169,7 +169,12 @@ export async function startProcedureExecution(
       assertOrdinaryMutationAuthorized(actor, repairCase, null);
 
       const [template] = await tx
-        .select({ id: procedureTemplates.id, status: procedureTemplates.status, isReferenceOnly: procedureTemplates.isReferenceOnly })
+        .select({
+          id: procedureTemplates.id,
+          status: procedureTemplates.status,
+          isReferenceOnly: procedureTemplates.isReferenceOnly,
+          category: procedureTemplates.category,
+        })
         .from(procedureTemplates)
         .where(eq(procedureTemplates.id, procedureTemplateId));
       if (!template) fail("NOT_FOUND", "해당 절차 템플릿을 찾을 수 없습니다.");
@@ -179,9 +184,15 @@ export async function startProcedureExecution(
 
       let executionId: string;
       try {
+        // Phase 5C-5A — templateCategory is always this freshly-loaded DB
+        // row's own category, never anything derived from caller input
+        // (startProcedureExecution's only caller-supplied identifiers are
+        // repairCaseId/procedureTemplateId — there is no category
+        // parameter on this function at all, so there is nothing for a
+        // client to spoof here even in principle).
         const [inserted] = await tx
           .insert(procedureCaseExecutions)
-          .values({ repairCaseId, procedureTemplateId, startedBy: actor.id })
+          .values({ repairCaseId, procedureTemplateId, templateCategory: template.category, startedBy: actor.id })
           .returning({ id: procedureCaseExecutions.id });
         executionId = inserted.id;
       } catch (err) {

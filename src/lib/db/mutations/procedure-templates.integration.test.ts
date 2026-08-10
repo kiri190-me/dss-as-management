@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   procedureTemplates,
@@ -71,6 +71,7 @@ function makeTemplate(opts: {
     equipmentType: "RFG",
     description: "통합 테스트용 합성 템플릿",
     sourceWorksheets: ["(TEST) 가상 시트"],
+    category: "FULL_SERVICE",
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [
@@ -533,6 +534,12 @@ describe("createNewDraftVersion", () => {
     assert.equal(newRow.supersedesTemplateId, imported.id);
     assert.equal(newRow.code, code);
 
+    // Phase 5C-5A — a new DRAFT version must preserve its parent's category
+    // exactly; no conversion/switching path exists.
+    const [publishedRow] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, imported.id));
+    assert.equal(newRow.category, publishedRow.category);
+    assert.equal(newRow.category, "FULL_SERVICE");
+
     const newNodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, result.id));
     assert.equal(newNodes.length, 8);
     const newEdges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
@@ -550,6 +557,114 @@ describe("createNewDraftVersion", () => {
       assert.ok(publishedEdgeIds.has(e.clonedFromEdgeId!), `clonedFromEdgeId ${e.clonedFromEdgeId} must point at a real edge on the published parent`);
     }
     assert.equal(new Set(newEdges.map((e) => e.clonedFromEdgeId)).size, newEdges.length, "each cloned edge must map to a distinct parent edge, never shared");
+  });
+});
+
+describe("Phase 5C-5A: procedure_templates.category foundation", () => {
+  test("24. category/is_reference_only valid combinations round-trip exactly as inserted (FULL_SERVICE+false, TECHNICAL_TASK+false, REFERENCE+true)", async () => {
+    const fullServiceCode = uniqueCode("category-full-service");
+    const fullServiceResult = await createDraftProcedureTemplateFromImport(
+      { ...makeTemplate({ code: fullServiceCode, includeErrorIssue: false }), category: "FULL_SERVICE", isReferenceOnly: false },
+      superAdminId,
+      { sourceFileName: "test-fixture.xlsx", sourceFileHash: `hash-${fullServiceCode}` }
+    );
+    assert.equal(fullServiceResult.ok, true);
+    if (fullServiceResult.ok) {
+      createdTemplateIds.push(fullServiceResult.id);
+      const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, fullServiceResult.id));
+      assert.equal(row.category, "FULL_SERVICE");
+      assert.equal(row.isReferenceOnly, false);
+    }
+
+    const technicalCode = uniqueCode("category-technical-task");
+    const technicalResult = await createDraftProcedureTemplateFromImport(
+      { ...makeTemplate({ code: technicalCode, includeErrorIssue: false }), category: "TECHNICAL_TASK", isReferenceOnly: false },
+      superAdminId,
+      { sourceFileName: "test-fixture.xlsx", sourceFileHash: `hash-${technicalCode}` }
+    );
+    assert.equal(technicalResult.ok, true);
+    if (technicalResult.ok) {
+      createdTemplateIds.push(technicalResult.id);
+      const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, technicalResult.id));
+      assert.equal(row.category, "TECHNICAL_TASK");
+      assert.equal(row.isReferenceOnly, false);
+    }
+  });
+
+  /**
+   * drizzle-orm wraps the driver's real PostgresError — the original is on
+   * `.cause`, same convention this file's own isUniqueViolation-style
+   * helpers rely on elsewhere in this codebase (see
+   * db/mutations/procedure-case-execution.ts's isUniqueViolation). The
+   * *outer* thrown error's own .message is just "Failed query: ...", never
+   * the constraint-violation text — so the check-violation assertion must
+   * inspect .cause, not the top-level error, or it fails for the wrong
+   * reason even when the CHECK correctly did its job.
+   */
+  function isCheckViolation(err: unknown, constraintName: string): boolean {
+    const cause = err instanceof Error ? err.cause : undefined;
+    const message = cause instanceof Error ? cause.message : String(err);
+    return /violates check constraint/i.test(message) && message.includes(constraintName);
+  }
+
+  test("25. an invalid category/is_reference_only combination is rejected at the DB level by the CHECK constraint", async () => {
+    const code = uniqueCode("category-invalid-combo");
+    await assert.rejects(
+      () =>
+        db.insert(procedureTemplates).values({
+          code,
+          name: "잘못된 조합 테스트",
+          equipmentType: "COMMON",
+          // Invalid: FULL_SERVICE must always pair with isReferenceOnly=false.
+          category: "FULL_SERVICE",
+          isReferenceOnly: true,
+          status: "DRAFT",
+          version: 1,
+          sourceType: "MANUAL",
+          createdByUserId: superAdminId,
+        }),
+      (err: unknown) => isCheckViolation(err, "procedure_templates_category_reference_only_consistency"),
+      "a FULL_SERVICE + is_reference_only=true row must be rejected by procedure_templates_category_reference_only_consistency"
+    );
+
+    await assert.rejects(
+      () =>
+        db.insert(procedureTemplates).values({
+          code: uniqueCode("category-invalid-combo-2"),
+          name: "잘못된 조합 테스트 2",
+          equipmentType: "COMMON",
+          // Invalid: REFERENCE must always pair with isReferenceOnly=true.
+          category: "REFERENCE",
+          isReferenceOnly: false,
+          status: "DRAFT",
+          version: 1,
+          sourceType: "MANUAL",
+          createdByUserId: superAdminId,
+        }),
+      (err: unknown) => isCheckViolation(err, "procedure_templates_category_reference_only_consistency"),
+      "a REFERENCE + is_reference_only=false row must be rejected by procedure_templates_category_reference_only_consistency"
+    );
+  });
+
+  test("26. the exact 4 real templates carry exactly the approved explicit category backfill (rfg/mb-full-lifecycle -> FULL_SERVICE, main-page-index/qc-common-operations -> REFERENCE) — read-only, never written by this suite", async () => {
+    const rows = await db
+      .select({ code: procedureTemplates.code, category: procedureTemplates.category, isReferenceOnly: procedureTemplates.isReferenceOnly })
+      .from(procedureTemplates)
+      .where(sql`code not like ${TEST_CODE_PREFIX + "%"}`);
+    const byCode = new Map(rows.map((r) => [r.code, r]));
+
+    assert.equal(byCode.get("rfg-full-lifecycle")?.category, "FULL_SERVICE");
+    assert.equal(byCode.get("rfg-full-lifecycle")?.isReferenceOnly, false);
+    assert.equal(byCode.get("mb-full-lifecycle")?.category, "FULL_SERVICE");
+    assert.equal(byCode.get("mb-full-lifecycle")?.isReferenceOnly, false);
+    assert.equal(byCode.get("main-page-index")?.category, "REFERENCE");
+    assert.equal(byCode.get("main-page-index")?.isReferenceOnly, true);
+    assert.equal(byCode.get("qc-common-operations")?.category, "REFERENCE");
+    assert.equal(byCode.get("qc-common-operations")?.isReferenceOnly, true);
+
+    // Every non-test row must have been explicitly classified — the backfill
+    // must never leave a real row's category unaccounted for.
+    assert.equal(rows.length, 4, `expected exactly the 4 known real templates, found: ${rows.map((r) => r.code).join(", ")}`);
   });
 });
 
@@ -712,6 +827,7 @@ describe("Phase 2.5: full-lifecycle combine, replace mode, reference-only templa
       equipmentType: "COMMON",
       description: "합성 참고용 템플릿",
       sourceWorksheets: ["(TEST) Main page"],
+      category: "REFERENCE",
       isReferenceOnly: true,
       nodes: [],
       edges: [],
@@ -759,6 +875,7 @@ describe("Phase 2.5: full-lifecycle combine, replace mode, reference-only templa
     const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
     assert.equal(row.equipmentType, "COMMON");
     assert.equal(row.isReferenceOnly, true);
+    assert.equal(row.category, "REFERENCE");
 
     const nodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, result.id));
     assert.equal(nodes.length, 0, "a reference-only template must have zero executable nodes");

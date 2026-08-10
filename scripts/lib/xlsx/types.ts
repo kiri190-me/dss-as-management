@@ -3,6 +3,7 @@ import type {
   ProcedureEquipmentType,
   ProcedureNodeType,
   ProcedureReferenceItemType,
+  ProcedureTemplateCategory,
   ProcedureValidationIssueType,
   ProcedureValidationSeverity,
 } from "@/lib/domain/procedure-template-types";
@@ -148,6 +149,10 @@ export type ExtractedTemplate = {
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
+  // Phase 5C-5A — explicit per-builder value (see combineShapeGraphSheets
+  // and buildReferenceOnlyTemplate in scripts/import-procedure-templates.ts),
+  // never inferred here. See procedure_templates.category.
+  category: ProcedureTemplateCategory;
   description: string;
   sourceWorksheets: string[];
   // True only for the two navigational/reference-index templates (Main

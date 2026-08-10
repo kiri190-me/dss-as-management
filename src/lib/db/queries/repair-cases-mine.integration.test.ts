@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray, like, ne, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   customers,
@@ -47,6 +47,7 @@ let engineerBId: string;
 let customerId: string;
 let waitingKyosanExceptionStatusId: string;
 let realTemplateId: string;
+let realTemplateCategory: "FULL_SERVICE" | "TECHNICAL_TASK" | "REFERENCE";
 
 function uniqueSuffix(): string {
   return randomUUID().slice(0, 8);
@@ -138,7 +139,7 @@ async function insertStatusHistory(repairCaseId: string, actorId: string, create
 async function insertExecutionHistory(repairCaseId: string, actorId: string, createdAt?: Date) {
   const [execution] = await db
     .insert(procedureCaseExecutions)
-    .values({ repairCaseId, procedureTemplateId: realTemplateId, startedBy: actorId })
+    .values({ repairCaseId, procedureTemplateId: realTemplateId, templateCategory: realTemplateCategory, startedBy: actorId })
     .returning({ id: procedureCaseExecutions.id });
   await db.insert(procedureCaseExecutionHistory).values({
     executionId: execution.id,
@@ -178,14 +179,23 @@ before(async () => {
   assert.ok(exceptionStatus, "expected the seeded WAITING_KYOSAN_RESPONSE exception status");
   waitingKyosanExceptionStatusId = exceptionStatus.id;
 
-  // Any real, pre-existing template works — procedure_case_executions.
+  // Any real, pre-existing non-REFERENCE template works — procedure_case_executions.
   // procedure_template_id just needs a valid FK target here (this suite
   // inserts execution/history rows directly, bypassing the "start
   // execution" mutation and its own PUBLISHED-only business rule). The
-  // template itself is never modified, published, or deleted.
-  const [template] = await db.select({ id: procedureTemplates.id }).from(procedureTemplates).limit(1);
-  assert.ok(template, "expected at least one procedure template in the dev DB");
+  // template itself is never modified, published, or deleted. Must exclude
+  // REFERENCE (Phase 5C-5A): procedure_case_executions now has its own
+  // CHECK (template_category <> 'REFERENCE'), so an arbitrary unfiltered
+  // pick could otherwise land on main-page-index/qc-common-operations and
+  // fail this insert outright.
+  const [template] = await db
+    .select({ id: procedureTemplates.id, category: procedureTemplates.category })
+    .from(procedureTemplates)
+    .where(ne(procedureTemplates.category, "REFERENCE"))
+    .limit(1);
+  assert.ok(template, "expected at least one non-REFERENCE procedure template in the dev DB");
   realTemplateId = template.id;
+  realTemplateCategory = template.category;
 });
 
 after(async () => {

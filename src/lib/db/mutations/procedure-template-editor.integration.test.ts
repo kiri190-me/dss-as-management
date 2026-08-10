@@ -57,6 +57,7 @@ function makeEditableTemplate(code: string): ExtractedTemplate {
     equipmentType: "RFG",
     description: "Phase 4A editor mutation integration test fixture",
     sourceWorksheets: ["(TEST) 편집기 시트"],
+    category: "FULL_SERVICE",
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [
@@ -151,7 +152,7 @@ describe("procedure-template-editor: authorization and draft/reference-only gati
 
   test("2. a reference-only DRAFT template cannot be validated/edited", async () => {
     const code = uniqueCode("reference-only");
-    const extracted: ExtractedTemplate = { ...makeEditableTemplate(code), isReferenceOnly: true, nodes: [], edges: [] };
+    const extracted: ExtractedTemplate = { ...makeEditableTemplate(code), category: "REFERENCE", isReferenceOnly: true, nodes: [], edges: [] };
     const result = await createDraftProcedureTemplateFromImport(extracted, superAdminId, { sourceFileName: "ref.xlsx", sourceFileHash: `hash-${code}` });
     assert.equal(result.ok, true);
     if (!result.ok) return;

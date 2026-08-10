@@ -22,6 +22,11 @@ export function combineShapeGraphSheets(
     code: opts.code,
     name: opts.name,
     equipmentType: opts.equipmentType,
+    // Phase 5C-5A — this function is only ever called for the two real
+    // whole-product executable templates (rfg-full-lifecycle,
+    // mb-full-lifecycle) — hardcoded explicitly, matching isReferenceOnly's
+    // own hardcoded-false convention immediately below.
+    category: "FULL_SERVICE",
     description: opts.description,
     sourceWorksheets: sheets.map((s) => s.name),
     isReferenceOnly: false,

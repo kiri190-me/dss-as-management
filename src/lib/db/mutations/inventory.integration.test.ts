@@ -133,6 +133,7 @@ async function createExecutionNodeFixture(assignedEngineerIdForCase: string) {
     equipmentType: "RFG",
     description: "Phase 5B-2 inventory integration test fixture",
     sourceWorksheets: [sheet],
+    category: "FULL_SERVICE",
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [

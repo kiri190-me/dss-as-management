@@ -37,6 +37,14 @@ export const procedureTemplateEditActionTypeEnum = pgEnum("procedure_template_ed
   "SAVE_EDGE_ROUTE",
   "DISCARD_DRAFT_CHANGES",
   "VALIDATE_TEMPLATE",
+  // Phase 5C-5A — schema/enum foundation only for Phase 5C-5B's node/edge
+  // CRUD (add node, delete node, delete edge). No mutation function writes
+  // these yet; adding the enum values now so the eventual 5C-5B mutations
+  // need no further migration, and so this file's type derivation
+  // (procedure-template-editor.ts's EditActionType) is already complete.
+  "CREATE_NODE",
+  "DELETE_NODE",
+  "DELETE_EDGE",
 ]);
 
 export const procedureTemplateEditHistory = pgTable(

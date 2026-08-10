@@ -81,7 +81,7 @@ function uniqueCode(suffix: string): string {
  * inline reference only triggers a WARNING, never an ERROR — confirmed by
  * reading the validator directly), so publish always succeeds.
  */
-function makeExecutionTestTemplate(code: string): ExtractedTemplate {
+function makeExecutionTestTemplate(code: string, category: ExtractedTemplate["category"] = "FULL_SERVICE"): ExtractedTemplate {
   const sheet = "(TEST) 실행 테스트 시트";
   return {
     code,
@@ -89,6 +89,7 @@ function makeExecutionTestTemplate(code: string): ExtractedTemplate {
     equipmentType: "RFG",
     description: "Phase 5A execution mutation integration test fixture",
     sourceWorksheets: [sheet],
+    category,
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [
@@ -115,6 +116,25 @@ function makeExecutionTestTemplate(code: string): ExtractedTemplate {
   };
 }
 
+/** Phase 5C-5A — minimal REFERENCE-category fixture (no nodes/edges, isReferenceOnly=true), matching the shape the real importer's buildReferenceOnlyTemplate produces for main-page-index/qc-common-operations. */
+function makeReferenceTestTemplate(code: string): ExtractedTemplate {
+  return {
+    code,
+    name: `참조 자료 테스트 ${code}`,
+    equipmentType: "COMMON",
+    description: "Phase 5C-5A REFERENCE-category execution-rejection fixture",
+    sourceWorksheets: ["(TEST) 참조 시트"],
+    category: "REFERENCE",
+    isReferenceOnly: true,
+    referenceItems: [],
+    nodes: [],
+    edges: [],
+    checklistSections: [],
+    troubleshootingEntries: [],
+    issues: [],
+  };
+}
+
 async function loadNodesByCode(templateId: string) {
   const rows = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
   return new Map(rows.map((n) => [n.nodeCode, n]));
@@ -124,8 +144,8 @@ async function loadEdges(templateId: string) {
   return db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
 }
 
-async function createPublishedTemplate(code: string) {
-  const draftResult = await createDraftProcedureTemplateFromImport(makeExecutionTestTemplate(code), superAdminId, {
+async function createPublishedTemplate(code: string, category: ExtractedTemplate["category"] = "FULL_SERVICE") {
+  const draftResult = await createDraftProcedureTemplateFromImport(makeExecutionTestTemplate(code, category), superAdminId, {
     sourceFileName: "execution-fixture.xlsx",
     sourceFileHash: `hash-${code}`,
   });
@@ -982,6 +1002,98 @@ describe("procedure-case-execution: START is a non-interactive system entry mark
     assert.equal(unchangedRow.version, n1.version);
     assert.equal(unchangedRow.status, "COMPLETED");
     assert.equal(unchangedRow.workMemo, null);
+  });
+});
+
+describe("procedure-case-execution: Phase 5C-5A category foundation", () => {
+  test("22. template_category is always derived from the DB template row, never a client-suppliable value — startProcedureExecution's own signature has no category parameter", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("category-derived"), "FULL_SERVICE");
+    const created = await createTestCase();
+
+    const result = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(result.ok, true, `start failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [execution] = await db.select().from(procedureCaseExecutions).where(eq(procedureCaseExecutions.id, result.executionId));
+    assert.equal(execution.templateCategory, "FULL_SERVICE", "templateCategory must exactly match the referenced template's own category");
+  });
+
+  test("23. FULL_SERVICE keeps the pre-5C-5A 'at most one active execution per case' restriction (same guarantee as test 2, confirmed again explicitly under the new category-scoped index)", async () => {
+    const { templateId: templateA } = await createPublishedTemplate(uniqueCode("full-service-a"), "FULL_SERVICE");
+    const { templateId: templateB } = await createPublishedTemplate(uniqueCode("full-service-b"), "FULL_SERVICE");
+    const created = await createTestCase();
+
+    const first = await startProcedureExecution(created.id, templateA, engineerId);
+    assert.equal(first.ok, true);
+    const second = await startProcedureExecution(created.id, templateB, engineerId);
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.code, "ALREADY_STARTED", "a second FULL_SERVICE execution (even from a different template) must still be rejected");
+  });
+
+  test("24. multiple TECHNICAL_TASK executions are allowed concurrently on the same repair case", async () => {
+    const { templateId: templateA } = await createPublishedTemplate(uniqueCode("technical-a"), "TECHNICAL_TASK");
+    const { templateId: templateB } = await createPublishedTemplate(uniqueCode("technical-b"), "TECHNICAL_TASK");
+    const created = await createTestCase();
+
+    const first = await startProcedureExecution(created.id, templateA, engineerId);
+    const second = await startProcedureExecution(created.id, templateB, engineerId);
+    assert.equal(first.ok, true, `first TECHNICAL_TASK start failed: ${JSON.stringify(first)}`);
+    assert.equal(second.ok, true, `second concurrent TECHNICAL_TASK start failed: ${JSON.stringify(second)}`);
+
+    if (first.ok && second.ok) {
+      const rows = await db
+        .select({ id: procedureCaseExecutions.id, isDeleted: procedureCaseExecutions.isDeleted, templateCategory: procedureCaseExecutions.templateCategory })
+        .from(procedureCaseExecutions)
+        .where(eq(procedureCaseExecutions.repairCaseId, created.id));
+      const active = rows.filter((r) => !r.isDeleted);
+      assert.equal(active.length, 2, "both TECHNICAL_TASK executions must coexist as active (non-deleted) rows");
+      assert.ok(active.every((r) => r.templateCategory === "TECHNICAL_TASK"));
+    }
+  });
+
+  test("25. a FULL_SERVICE and a TECHNICAL_TASK execution can coexist on the same case (only FULL_SERVICE-vs-FULL_SERVICE is restricted)", async () => {
+    const { templateId: fullServiceTemplate } = await createPublishedTemplate(uniqueCode("mixed-full-service"), "FULL_SERVICE");
+    const { templateId: technicalTemplate } = await createPublishedTemplate(uniqueCode("mixed-technical"), "TECHNICAL_TASK");
+    const created = await createTestCase();
+
+    const fullServiceResult = await startProcedureExecution(created.id, fullServiceTemplate, engineerId);
+    const technicalResult = await startProcedureExecution(created.id, technicalTemplate, engineerId);
+    assert.equal(fullServiceResult.ok, true);
+    assert.equal(technicalResult.ok, true, `TECHNICAL_TASK start alongside an active FULL_SERVICE execution must succeed: ${JSON.stringify(technicalResult)}`);
+  });
+
+  test("26. a REFERENCE-category template can never start an execution (rejected the same way as any other is_reference_only template)", async () => {
+    const draftResult = await createDraftProcedureTemplateFromImport(makeReferenceTestTemplate(uniqueCode("reference-guard")), superAdminId, {
+      sourceFileName: "execution-fixture.xlsx",
+      sourceFileHash: `hash-reference-${randomUUID()}`,
+    });
+    assert.equal(draftResult.ok, true, `reference fixture import failed: ${JSON.stringify(draftResult)}`);
+    if (!draftResult.ok) return;
+    createdTemplateIds.push(draftResult.id);
+
+    const publishResult = await publishProcedureTemplate(draftResult.id, superAdminId);
+    assert.equal(publishResult.ok, true, `reference fixture publish failed: ${JSON.stringify(publishResult)}`);
+
+    const created = await createTestCase();
+    const result = await startProcedureExecution(created.id, draftResult.id, engineerId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "TEMPLATE_NOT_EXECUTABLE");
+  });
+
+  test("27. locked-case and assignment rules are unchanged for TECHNICAL_TASK (same authorization path as FULL_SERVICE)", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("technical-locked"), "TECHNICAL_TASK");
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    await lockCase(created.id);
+
+    const lockedResult = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(lockedResult.ok, false);
+    if (!lockedResult.ok) assert.equal(lockedResult.code, "CASE_LOCKED");
+
+    const { templateId: templateB } = await createPublishedTemplate(uniqueCode("technical-unassigned"), "TECHNICAL_TASK");
+    const created2 = await createTestCase({ assignedEngineerId: engineerId });
+    const unassignedResult = await startProcedureExecution(created2.id, templateB, engineer2Id);
+    assert.equal(unassignedResult.ok, false);
+    if (!unassignedResult.ok) assert.equal(unassignedResult.code, "FORBIDDEN");
   });
 });
 

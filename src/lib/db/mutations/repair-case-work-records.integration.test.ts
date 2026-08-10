@@ -76,6 +76,7 @@ function makeMinimalTestTemplate(code: string): ExtractedTemplate {
     equipmentType: "RFG",
     description: "Phase 5C-2 work-record integration test fixture",
     sourceWorksheets: [sheet],
+    category: "FULL_SERVICE",
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [

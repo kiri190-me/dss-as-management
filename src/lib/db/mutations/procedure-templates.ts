@@ -124,6 +124,11 @@ export async function createDraftProcedureTemplateFromImport(
           code: extracted.code,
           name: extracted.name,
           equipmentType: extracted.equipmentType,
+          // Phase 5C-5A — explicit, hardcoded per builder function in
+          // scripts/import-procedure-templates.ts (mirroring how
+          // isReferenceOnly is already hardcoded there), never inferred
+          // here from code/name/equipmentType.
+          category: extracted.category,
           description: extracted.description,
           status: "DRAFT",
           version: 1,
@@ -445,6 +450,10 @@ export async function createNewDraftVersion(
           code: published.code,
           name: published.name,
           equipmentType: published.equipmentType,
+          // Phase 5C-5A — a new DRAFT version always preserves its parent's
+          // category exactly; no conversion/switching path exists or is
+          // planned (see procedureTemplateCategoryEnum's own doc comment).
+          category: published.category,
           description: published.description,
           status: "DRAFT",
           version: published.version + 1,

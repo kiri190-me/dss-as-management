@@ -34,6 +34,22 @@ export const procedureEquipmentTypeLabels: Record<ProcedureEquipmentType, string
   COMMON: "공통",
 };
 
+/**
+ * Phase 5C-5A — WHAT KIND of procedure a template is, independent of
+ * `status` (WHERE it is in its own DRAFT/PUBLISHED/ARCHIVED lifecycle) and
+ * entirely independent of the separate `workflow_templates`/`workflow_steps`
+ * system (WHERE a repair_case is in the business process — untouched by
+ * this enum). See the schema's own doc comment
+ * (db/schema/procedure-templates.ts) for the full rationale per value.
+ */
+export const PROCEDURE_TEMPLATE_CATEGORY_CODES = ["FULL_SERVICE", "TECHNICAL_TASK", "REFERENCE"] as const;
+export type ProcedureTemplateCategory = (typeof PROCEDURE_TEMPLATE_CATEGORY_CODES)[number];
+export const procedureTemplateCategoryLabels: Record<ProcedureTemplateCategory, string> = {
+  FULL_SERVICE: "종합 수리 절차",
+  TECHNICAL_TASK: "기술 작업 절차",
+  REFERENCE: "참조 자료",
+};
+
 export const PROCEDURE_REFERENCE_ITEM_TYPE_CODES = [
   "NAV_LINK",
   "EXTERNAL_FILE_LINK",

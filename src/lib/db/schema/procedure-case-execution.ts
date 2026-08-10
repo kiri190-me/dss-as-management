@@ -13,7 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { repairCases } from "./repair-cases";
-import { procedureTemplates } from "./procedure-templates";
+import { procedureTemplates, procedureTemplateCategoryEnum } from "./procedure-templates";
 import { procedureTemplateNodes } from "./procedure-template-nodes";
 import { procedureTemplateEdges } from "./procedure-template-edges";
 import { users } from "./users";
@@ -71,6 +71,19 @@ export const procedureCaseExecutions = pgTable(
     procedureTemplateId: uuid("procedure_template_id")
       .notNull()
       .references(() => procedureTemplates.id, { onDelete: "restrict" }),
+    // Phase 5C-5A — immutable snapshot of the bound template's category,
+    // captured once at insert time by the mutation layer (never accepted
+    // from the client, never independently chosen — always derived from
+    // the live procedure_templates row the same transaction just locked
+    // and verified PUBLISHED). Safe to snapshot permanently because a
+    // template's category can never change after creation (no
+    // conversion/switching UI exists or is planned — see
+    // procedureTemplateCategoryEnum's own doc comment) and because a
+    // PUBLISHED template's row is otherwise immutable already. This column
+    // exists purely so the uniqueness index below can be category-aware
+    // without a cross-table subquery, which Postgres partial unique
+    // indexes cannot express.
+    templateCategory: procedureTemplateCategoryEnum("template_category").notNull(),
     startedBy: uuid("started_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -92,11 +105,26 @@ export const procedureCaseExecutions = pgTable(
     deleteReason: text("delete_reason"),
   },
   (table) => [
-    // "One active execution per case" in Phase 5A is simply "one non-deleted
-    // row" — there is no status column to additionally filter on.
-    uniqueIndex("procedure_case_executions_one_active_per_case")
+    // Phase 5C-5A — "one active execution per case" now applies only to
+    // FULL_SERVICE (matching Phase 5A's original behavior exactly, since
+    // every template that could ever be executed before this phase was
+    // FULL_SERVICE-equivalent). TECHNICAL_TASK deliberately allows
+    // multiple concurrent non-deleted rows per case — see
+    // procedureTemplateCategoryEnum's own doc comment. Same partial-unique-
+    // index technique DATABASE_DESIGN.md §7 already documents for
+    // workflow_versions' "one active PUBLISHED version per template" rule
+    // — not a new pattern.
+    uniqueIndex("procedure_case_executions_one_active_full_service_per_case")
       .on(table.repairCaseId)
-      .where(sql`is_deleted = false`),
+      .where(sql`is_deleted = false and template_category = 'FULL_SERVICE'`),
+    // Defense-in-depth: startProcedureExecution already unconditionally
+    // rejects any is_reference_only template before this table is ever
+    // written to (TEMPLATE_NOT_EXECUTABLE), and the CHECK on
+    // procedure_templates ties REFERENCE to is_reference_only=true, so a
+    // REFERENCE row can never legitimately reach this insert — this CHECK
+    // costs nothing and closes the gap permanently at the DB level too, in
+    // case a future code path ever forgets the application-layer check.
+    check("procedure_case_executions_no_reference_execution", sql`template_category <> 'REFERENCE'`),
     index("procedure_case_executions_repair_case_id_idx").on(table.repairCaseId),
     index("procedure_case_executions_procedure_template_id_idx").on(table.procedureTemplateId),
   ]

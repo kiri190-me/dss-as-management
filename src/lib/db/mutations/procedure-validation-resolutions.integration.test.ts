@@ -58,6 +58,7 @@ function makeBindableTemplate(code: string): ExtractedTemplate {
     equipmentType: "RFG",
     description: "통합 테스트용 합성 템플릿",
     sourceWorksheets: ["(TEST) 가상 시트"],
+    category: "FULL_SERVICE",
     isReferenceOnly: false,
     referenceItems: [],
     nodes: [
