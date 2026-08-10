@@ -5,10 +5,15 @@ import { useRouter } from "next/navigation";
 import { workflowSteps } from "@/lib/domain/mock-data";
 import { roleLabels } from "@/lib/domain/types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import { checkHoldEligibility, checkTransitionEligibility } from "@/lib/domain/local/workflow/permissions";
 import { getStepCategory, roleForCategory } from "@/lib/domain/local/workflow/step-category";
 import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
+import {
+  evaluateHoldAvailability,
+  evaluateTransitionAvailability,
+  explainUnavailableWorkflowActions,
+  type ApprovalGateStatus,
+} from "@/lib/domain/local/workflow/workflow-action-availability";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { CurrentHoldState } from "@/lib/db/queries/workflow-history";
 import type { CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
@@ -58,17 +63,31 @@ type DialogKind = "advance" | "return" | "hold" | "release" | "ship" | null;
  * discipline as every other check here: transitionWorkflow() (the Server
  * Action's mutation) independently re-derives and re-verifies this from
  * the DB, never trusting what this component computed.
+ *
+ * The four availability checks (evaluate/evaluateHold) and the "why is
+ * everything disabled" summary banner (actionExplanation) both delegate to
+ * workflow-action-availability.ts — pure, unit-tested functions, extracted
+ * so this exact behavior can be verified without a router-dependent
+ * component render. isCaseLocked is checked first and unconditionally in
+ * both (no admin/superadmin bypass, matching workflow-transitions.ts's own
+ * `if (current.isLocked)` check, which has always applied backend-side to
+ * every action code). The banner never shows for a role/hold reason a
+ * per-button message already covers more specifically — see that file's
+ * doc comment for the exact priority.
  */
 export default function DatabaseWorkflowControlPanel({
   resolved,
   actingUser,
   holdState,
   currentApprovals,
+  isCaseLocked,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
   holdState: CurrentHoldState;
   currentApprovals: CurrentApprovalState[];
+  /** Authoritative repair_cases.is_locked, already loaded by execution/page.tsx (same value the WorkRecordsSection lock-hint already uses) — reused here rather than re-fetched, per the disabled-buttons audit's finding that this panel never checked it. */
+  isCaseLocked: boolean;
 }) {
   const router = useRouter();
   const [openDialog, setOpenDialog] = useState<DialogKind>(null);
@@ -89,53 +108,38 @@ export default function DatabaseWorkflowControlPanel({
     ? `관리자 또는 ${roleLabels[roleForCategory(category)]}`
     : "관리자(SUPER_ADMIN/ADMIN)";
 
+  function approvalGateStatusFor(transition: ReturnType<typeof findTransitionDefinition> | null): ApprovalGateStatus {
+    if (!transition?.requiredApprovalType) return "SATISFIED";
+    const approval = currentApprovals.find((a) => a.approvalType === transition.requiredApprovalType)?.latest ?? null;
+    if (!approval || approval.status !== "APPROVED") return "NOT_APPROVED";
+    if (approval.repairCaseVersionAtRequest !== resolved.version) return "STALE";
+    return "SATISFIED";
+  }
+
   function evaluate(actionCode: "STEP_ADVANCED" | "STEP_RETURNED" | "SHIPMENT_COMPLETED") {
     const transition =
-      actionCode === "STEP_ADVANCED" ? advanceTransition : actionCode === "STEP_RETURNED" ? returnTransition : shipmentTransition;
-    if (!transition) {
-      return {
-        available: false as const,
-        reason:
-          actionCode === "STEP_ADVANCED"
-            ? "이 단계에서는 다음 단계로 진행할 수 없습니다."
-            : actionCode === "STEP_RETURNED"
-              ? "이 단계에서는 이전 단계로 되돌릴 수 없습니다."
-              : "현재 단계에서는 출하 완료 처리를 할 수 없습니다.",
-      };
-    }
-    if (!actingUser) return { available: false as const, reason: "로그인한 사용자 정보를 확인할 수 없습니다." };
-
-    const eligibility = checkTransitionEligibility(transition, actingUser, resolved.assignedEngineerId, holdStateForCheck);
-    if (!eligibility.allowed) return { available: false as const, reason: eligibility.reason };
-
-    if (transition.requiredApprovalType) {
-      const approval = currentApprovals.find((a) => a.approvalType === transition.requiredApprovalType)?.latest ?? null;
-      if (!approval || approval.status !== "APPROVED") {
-        return {
-          available: false as const,
-          reason:
-            transition.requiredApprovalType === "REPAIR_INSPECTION"
-              ? "수리 검수 승인이 완료되어야 합니다."
-              : "최종 출하 승인이 완료되어야 합니다.",
-        };
-      }
-      if (approval.repairCaseVersionAtRequest !== resolved.version) {
-        return {
-          available: false as const,
-          reason: "접수 건 정보가 승인 이후 변경되어 기존 승인을 다시 받아야 합니다.",
-        };
-      }
-    }
-    return { available: true as const };
+      (actionCode === "STEP_ADVANCED" ? advanceTransition : actionCode === "STEP_RETURNED" ? returnTransition : shipmentTransition) ?? null;
+    return evaluateTransitionAvailability({
+      transition,
+      actionCode,
+      actingUser,
+      assignedEngineerId: resolved.assignedEngineerId,
+      holdState: holdStateForCheck,
+      isCaseLocked,
+      approvalGateStatus: approvalGateStatusFor(transition),
+    });
   }
 
   function evaluateHold(isRelease: boolean) {
-    if (!actingUser) return { available: false as const, reason: "로그인한 사용자 정보를 확인할 수 없습니다." };
-    if (isRelease && !holdState.isOnHold) return { available: false as const, reason: "보류 중이 아닙니다." };
-    if (!isRelease && holdState.isOnHold) return { available: false as const, reason: "이미 보류 중입니다." };
-    const eligibility = checkHoldEligibility(resolved.workflowType, currentStepKey, actingUser, resolved.assignedEngineerId);
-    if (!eligibility.allowed) return { available: false as const, reason: eligibility.reason };
-    return { available: true as const };
+    return evaluateHoldAvailability({
+      isRelease,
+      actingUser,
+      holdState: holdStateForCheck,
+      workflowType: resolved.workflowType,
+      currentStepKey,
+      assignedEngineerId: resolved.assignedEngineerId,
+      isCaseLocked,
+    });
   }
 
   const advanceAvailability = evaluate("STEP_ADVANCED");
@@ -143,6 +147,16 @@ export default function DatabaseWorkflowControlPanel({
   const shipAvailability = evaluate("SHIPMENT_COMPLETED");
   const holdStartAvailability = evaluateHold(false);
   const holdReleaseAvailability = evaluateHold(true);
+
+  const actionExplanation = actingUser
+    ? explainUnavailableWorkflowActions({
+        workflowType: resolved.workflowType,
+        currentStepKey,
+        actingRole: actingUser.role,
+        isCaseLocked,
+        isOnHold: holdState.isOnHold,
+      })
+    : null;
 
   async function submit(actionCode: WorkflowActionCode, reason: string | null, successText: string) {
     if (isSubmitting) return;
@@ -253,6 +267,12 @@ export default function DatabaseWorkflowControlPanel({
             최신 정보 다시 불러오기
           </button>
         </div>
+      )}
+
+      {actionExplanation && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          {actionExplanation.message}
+        </p>
       )}
 
       <WorkflowActionList actions={actions} />

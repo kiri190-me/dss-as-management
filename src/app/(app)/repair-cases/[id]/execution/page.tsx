@@ -144,6 +144,7 @@ export default async function RepairCaseExecutionPage({
         actingUser={actingUser}
         holdState={holdState}
         currentApprovals={currentApprovals}
+        isCaseLocked={isCaseLocked}
       />
 
       <WorkRecordsSection

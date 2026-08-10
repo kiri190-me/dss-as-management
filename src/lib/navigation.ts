@@ -1,6 +1,7 @@
 import type { Role } from "@/lib/domain/types";
 import { canViewPublishedProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
 import { canViewInventory } from "@/lib/auth/inventory-authorization";
+import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
 
 export type NavItem = {
   key: string;
@@ -19,6 +20,7 @@ export type NavItem = {
 export const navItems: NavItem[] = [
   { key: "dashboard", href: "/dashboard", label: "대시보드" },
   { key: "repairCases", href: "/repair-cases", label: "전체 A/S 현황" },
+  { key: "myActiveWork", href: "/repair-cases/mine", label: "내 담당 제품", isVisibleForRole: canViewMyActiveWork },
   { key: "repairCaseNew", href: "/repair-cases/new", label: "A/S 접수" },
   {
     key: "excelKyosanIntakeList",

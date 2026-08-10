@@ -15,13 +15,17 @@ import { navItems, filterNavItemsForRole } from "./navigation";
  * (canViewInventory) currently returns true for all 5 roles, so it never
  * actually hides for anyone, but it still counts as "restricted" (has an
  * isVisibleForRole predicate at all) for the purposes of these tests.
+ *
+ * Phase 5C-3 adds a third gated entry, "myActiveWork" — unlike the other
+ * two, its predicate (canViewMyActiveWork) is AS_ENGINEER-only, deliberately
+ * excluding ADMIN/SUPER_ADMIN (see my-active-work-authorization.ts).
  */
 
-test("navigation: procedures and inventory are the only role-gated items (unchanged default for everything else)", () => {
+test("navigation: procedures, inventory, and myActiveWork are the only role-gated items (unchanged default for everything else)", () => {
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["inventory", "procedures"]
+    ["inventory", "myActiveWork", "procedures"]
   );
 });
 
@@ -46,10 +50,25 @@ test("filterNavItemsForRole: every role sees the inventory entry", () => {
   }
 });
 
+test("filterNavItemsForRole: only AS_ENGINEER sees the myActiveWork entry", () => {
+  assert.ok(filterNavItemsForRole(navItems, "AS_ENGINEER").some((i) => i.key === "myActiveWork"));
+  for (const role of ["SUPER_ADMIN", "ADMIN", "SALES", "INVENTORY_MANAGER"] as const) {
+    const visible = filterNavItemsForRole(navItems, role);
+    assert.equal(visible.some((i) => i.key === "myActiveWork"), false, `expected myActiveWork hidden for ${role}`);
+  }
+});
+
 test("filterNavItemsForRole: unrestricted items remain visible to every role", () => {
+  const hiddenCountByRole: Record<string, number> = {
+    SUPER_ADMIN: 1, // myActiveWork
+    ADMIN: 1, // myActiveWork
+    AS_ENGINEER: 0,
+    SALES: 2, // procedures + myActiveWork
+    INVENTORY_MANAGER: 2, // procedures + myActiveWork
+  };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);
-    assert.equal(visible.length, navItems.length - (role === "SALES" || role === "INVENTORY_MANAGER" ? 1 : 0));
+    assert.equal(visible.length, navItems.length - hiddenCountByRole[role]);
     assert.ok(visible.some((i) => i.key === "dashboard"));
     assert.ok(visible.some((i) => i.key === "users"));
   }
