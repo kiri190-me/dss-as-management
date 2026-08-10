@@ -2,10 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
   MarkerType,
   Handle,
   Position,
@@ -18,7 +14,7 @@ import {
   type EdgeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import GraphCanvas from "@/components/graph-editor-core/GraphCanvas";
 import { procedureBranchTypeLabels, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { ProcedureTemplateEdgeRow, ProcedureTemplateNodeRow } from "@/lib/db/queries/procedure-templates";
 import {
@@ -26,13 +22,13 @@ import {
   EDGE_VISUAL_CONFIG,
   GRAPH_SPACING,
   getNodeChipVisual,
-  computeConnectedIds,
   searchNodes,
   groupNodesByWorksheet,
   computeStageSortedLayout,
   computeNodeDimensions,
   type NodeIssueBadge,
 } from "@/lib/domain/procedure-visual-language";
+import { computeConnectedIds } from "@/lib/graph-editor-core/selection";
 import {
   classifyAndAssignEdgeRoute,
   assignEdgeLanes,
@@ -44,8 +40,8 @@ import {
   type RoutableNode,
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
-import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
-import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
+import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
+import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 
@@ -462,6 +458,44 @@ export default function ProcedureFlowGraph({
     reactFlowInstanceRef.current?.fitView({ nodes: [{ id: nodeId }], duration: 300, padding: 1.5 });
   }
 
+  // ---- GraphCanvas interaction wiring (Phase 5C-4) — GraphCanvas itself
+  // knows nothing about worksheets, layout modes, or editability; every one
+  // of these handlers carries exactly the domain-conditional behavior the
+  // canvas's own onNodeClick/onPaneClick/onEdgeDoubleClick JSX props used to
+  // apply inline, unchanged. ----
+
+  function handleCanvasNodeClick(nodeId: string) {
+    onEdgeSelectionChange?.(null);
+    setSelectedNodeId((current) => (current === nodeId ? null : nodeId));
+  }
+
+  function handleCanvasPaneClick() {
+    setSelectedNodeId(null);
+    onEdgeSelectionChange?.(null);
+  }
+
+  /** The double-click shortcut for inserting a waypoint — never the only way to add one (see the editor's "경로점 추가" button) — only meaningful in editable 사용자 배치, same gate node dragging and the waypoint handles themselves use. Edge selection itself always happens on any double click, regardless of mode. */
+  function handleCanvasEdgeDoubleClick(edgeId: string, point: { x: number; y: number }) {
+    onEdgeSelectionChange?.(edgeId);
+    if (!editable || layoutMode !== "USER") return;
+    onEdgeDoubleClickInsert?.(edgeId, point);
+  }
+
+  function handleCanvasInit(instance: ReactFlowInstance) {
+    reactFlowInstanceRef.current = instance;
+    const targetId = initialFitNodeIdRef.current;
+    if (targetId) {
+      initialFitNodeIdRef.current = null;
+      // 오류 집중 보기: fit the focused region (the issue node plus its
+      // immediate connected neighborhood), not the whole graph — an
+      // ordinary node-click fit still targets just the one node.
+      const fitTargets = errorFocusMode ? [targetId, ...connectedNodeIds].map((id) => ({ id })) : [{ id: targetId }];
+      requestAnimationFrame(() => {
+        instance.fitView({ nodes: fitTargets, duration: 300, padding: 1.5 });
+      });
+    }
+  }
+
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
       const bandAdjustedSource = { positionX: n.positionX, positionY: n.positionY + (n.sourceWorksheet ? bands.get(n.sourceWorksheet)?.yOffset ?? 0 : 0) };
@@ -832,66 +866,23 @@ export default function ProcedureFlowGraph({
           : "읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."}
       </p>
 
-      <div style={{ height: 600 }} className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <ReactFlow
-          key={`${worksheetFilter}-${layoutMode}`}
-          nodes={flowNodes}
-          edges={flowEdges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          nodesDraggable={editable && layoutMode === "USER"}
-          nodesConnectable={false}
-          elementsSelectable={true}
-          onlyRenderVisibleElements
-          onNodeDragStop={(_, node) => {
-            if (editable && layoutMode === "USER") onNodeDragStop?.(node.id, { x: node.position.x, y: node.position.y });
-          }}
-          onEdgeClick={(_, edge) => onEdgeSelectionChange?.(edge.id)}
-          onEdgeDoubleClick={(event, edge) => {
-            // The double-click shortcut for inserting a waypoint — never
-            // the only way to add one (see the editor's "경로점 추가"
-            // button) — only meaningful in editable 사용자 배치, same gate
-            // node dragging and the waypoint handles themselves use.
-            onEdgeSelectionChange?.(edge.id);
-            if (!editable || layoutMode !== "USER" || !reactFlowInstanceRef.current) return;
-            const point = reactFlowInstanceRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-            onEdgeDoubleClickInsert?.(edge.id, point);
-          }}
-          onInit={(instance) => {
-            reactFlowInstanceRef.current = instance;
-            const targetId = initialFitNodeIdRef.current;
-            if (targetId) {
-              initialFitNodeIdRef.current = null;
-              // 오류 집중 보기: fit the focused region (the issue node plus
-              // its immediate connected neighborhood), not the whole graph —
-              // an ordinary node-click fit still targets just the one node.
-              const fitTargets = errorFocusMode
-                ? [targetId, ...connectedNodeIds].map((id) => ({ id }))
-                : [{ id: targetId }];
-              requestAnimationFrame(() => {
-                instance.fitView({ nodes: fitTargets, duration: 300, padding: 1.5 });
-              });
-            }
-          }}
-          onNodeClick={(_, node) => {
-            if (node.type === "procedureStageHeader") return;
-            onEdgeSelectionChange?.(null);
-            setSelectedNodeId((current) => (current === node.id ? null : node.id));
-          }}
-          onPaneClick={() => {
-            setSelectedNodeId(null);
-            onEdgeSelectionChange?.(null);
-          }}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.02}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background gap={24} />
-          <Controls showInteractive={false} />
-          <MiniMap pannable zoomable className="!hidden sm:!block" />
-        </ReactFlow>
-      </div>
+      <GraphCanvas
+        remountKey={`${worksheetFilter}-${layoutMode}`}
+        nodes={flowNodes}
+        edges={flowEdges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        nodesDraggable={editable && layoutMode === "USER"}
+        nodesConnectable={false}
+        elementsSelectable={true}
+        minZoom={0.02}
+        onNodeDragStop={onNodeDragStop}
+        onEdgeClick={onEdgeSelectionChange}
+        onEdgeDoubleClick={handleCanvasEdgeDoubleClick}
+        onInit={handleCanvasInit}
+        onNodeClick={handleCanvasNodeClick}
+        onPaneClick={handleCanvasPaneClick}
+      />
     </div>
   );
 }

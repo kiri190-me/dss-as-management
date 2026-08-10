@@ -11,7 +11,7 @@ import {
   moveWaypoint,
   removeWaypoint,
   routePointsEqual,
-} from "./procedure-edge-waypoints";
+} from "./routing";
 
 test("isValidRoutePoint: accepts exactly {x, y} with finite numbers", () => {
   assert.equal(isValidRoutePoint({ x: 1, y: 2 }), true);

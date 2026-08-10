@@ -23,7 +23,7 @@ import {
   validateProcedureTemplate,
 } from "./procedure-template-editor";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
-import { MAX_ROUTE_POINTS } from "@/lib/domain/procedure-edge-waypoints";
+import { MAX_ROUTE_POINTS } from "@/lib/graph-editor-core/routing";
 
 /**
  * Phase 4A integration tests for the controlled-editor mutation layer.

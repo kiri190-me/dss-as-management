@@ -10,12 +10,12 @@ import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
 import type { ProcedureTemplateForEditor, EditHistoryRow, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
-import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
+import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
 import { computeUnsavedLayoutNodeIds, computeUnsavedEdgeRouteIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
 import { saveProcedureTemplateLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
 import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
-import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
+import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge";
 

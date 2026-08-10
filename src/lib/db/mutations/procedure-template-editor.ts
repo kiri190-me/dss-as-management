@@ -18,7 +18,7 @@ import {
   type StructuralValidationIssue,
 } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
-import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
+import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
  * Phase 4A — the controlled procedure-workflow editor's mutation layer.

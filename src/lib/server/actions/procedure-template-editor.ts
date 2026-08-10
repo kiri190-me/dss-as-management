@@ -25,7 +25,7 @@ import {
 } from "@/lib/db/mutations/procedure-template-editor";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
 import { PROCEDURE_BRANCH_TYPE_CODES, PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
-import { isValidRoutePoint } from "@/lib/domain/procedure-edge-waypoints";
+import { isValidRoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
  * Server Actions for the Phase 4A controlled editor — same layering as

@@ -1,5 +1,5 @@
 import type { ProcedureBranchType, ProcedureNodeType } from "./procedure-template-types";
-import { routePointsEqual, type RoutePoint } from "./procedure-edge-waypoints";
+import { routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
  * Phase 4A — pure DRAFT-vs-parent comparison. Operates on two already-

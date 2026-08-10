@@ -1,11 +1,17 @@
 /**
- * Phase 4B — pure waypoint math for manual edge-route editing. Nothing
- * here touches the DB or React/ReactFlow; both the mutation layer
- * (server-side validation) and the editor UI (client-side interaction)
- * call into this module, so the two can never disagree about what a
- * "valid" or "effective" route looks like. Mirrors
- * procedure-template-layout.ts's override/fallback convention exactly:
- * `user_route_points = null` always means "use deterministic routing."
+ * Generic graph-editor-core — pure waypoint/route-point mathematics for
+ * manual edge-route editing. Domain-free: operates only on {x,y} points and
+ * generic layout-mode strings, with no knowledge of procedure templates,
+ * repair cases, or any other consumer's persisted data model. Extracted
+ * unchanged from the procedure domain's procedure-edge-waypoints.ts (Phase
+ * 5C-4) — every function body, constant, and behavior below is identical to
+ * that module; only its home moved.
+ *
+ * Both a mutation/persistence layer (server-side validation) and an editor
+ * UI (client-side interaction) can call into this module, so any number of
+ * domain adapters can share one definition of what a "valid" or "effective"
+ * route looks like without disagreeing. `null`/absent always means "use
+ * deterministic/automatic routing" — this convention must never drift.
  */
 
 export type RoutePoint = { x: number; y: number };
@@ -80,10 +86,10 @@ export type EditorLayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
 /**
  * Waypoints are coordinate-space-dependent on the node layout they were
- * drawn against, so they only ever apply in 사용자 배치 (USER) — never in
- * 원본 배치 or 단계별 정렬, exactly mirroring how node dragging itself is
- * scoped. Every other layout mode always renders through the unchanged
- * deterministic routing regardless of what's stored.
+ * drawn against, so they only ever apply in a layout mode the caller
+ * designates as "USER" — never in any other mode. Every other layout mode
+ * always renders through the unchanged deterministic routing regardless of
+ * what's stored.
  */
 export function resolveEffectiveEdgeRoute(edge: { userRoutePoints: RoutePoint[] | null | undefined }, layoutMode: EditorLayoutMode): RoutePoint[] | null {
   if (layoutMode !== "USER") return null;
@@ -109,10 +115,9 @@ function distanceToSegment(p: RoutePoint, a: RoutePoint, b: RoutePoint): number 
 /**
  * Inserts `insertAt` into `points` at whichever segment of the full chain
  * (source -> points... -> target) it sits closest to — the double-click
- * shortcut's insertion rule (this task's "additional shortcut", never the
- * only way to add a point). Nearest-segment projection, not raw click
- * position vs. every point, so a click anywhere along a long segment still
- * inserts in the right place.
+ * shortcut's insertion rule (never the only way to add a point). Nearest-
+ * segment projection, not raw click position vs. every point, so a click
+ * anywhere along a long segment still inserts in the right place.
  */
 export function insertWaypointAtSegment(points: RoutePoint[], source: RoutePoint, target: RoutePoint, insertAt: RoutePoint): RoutePoint[] {
   const chain = [source, ...points, target];
@@ -131,7 +136,7 @@ export function insertWaypointAtSegment(points: RoutePoint[], source: RoutePoint
 }
 
 /**
- * The primary insertion method (explicit "경로점 추가" button, no click
+ * The primary insertion method (explicit "add waypoint" action, no click
  * position available) — inserts at the midpoint of the single longest
  * segment in the chain, a deterministic, always-sensible default.
  */

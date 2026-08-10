@@ -20,7 +20,7 @@ import type {
   ProcedureValidationIssueType,
 } from "@/lib/domain/procedure-template-types";
 import { validateProcedureGraphStructure, countBySeverity } from "@/lib/domain/procedure-graph-structural-validation";
-import { resolveEffectiveNodePosition } from "@/lib/domain/procedure-template-layout";
+import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
 import { compareDraftAndParentGraphs, type DraftParentComparison, type DiffNode, type DiffEdge } from "@/lib/domain/procedure-template-diff";
 
 export type EditorNodeRow = {

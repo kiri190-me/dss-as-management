@@ -1,4 +1,5 @@
 import type { ProcedureBranchType, ProcedureNodeType } from "./procedure-template-types";
+import { packNodesIntoRows, type PackableNode } from "@/lib/graph-editor-core/layout";
 
 /**
  * Phase 3B — the single shared, deterministic visual language for every
@@ -475,6 +476,17 @@ export type StageSortedLayoutResult = {
  * nodes get extra trailing gap proportional to their outgoing branch count;
  * rows touching a LOOP_BACK/RETRY endpoint get extra vertical clearance.
  * Never persisted, never reads or writes stored position_x/position_y.
+ *
+ * Phase 5C-4 — the generic wrapped-row packing mechanics (given sized items,
+ * where do they land) were extracted into graph-editor-core/layout.ts's
+ * packNodesIntoRows; this function keeps everything procedure-specific
+ * (worksheet-band grouping/ordering, the header row per worksheet,
+ * DECISION_BRANCH_GAP, and LOOP_BACK/RETRY row clearance) and calls that
+ * primitive once per worksheet band, translating its own domain concepts
+ * into the primitive's plain `extraTrailingGap`/`causesExtraRowGap` hints.
+ * Output is unchanged from the pre-extraction implementation — verified by
+ * this file's own unit tests plus a real-data pixel-regression check
+ * (RFG 403 nodes/542 edges, MB 14/9) run before/after this refactor.
  */
 export function computeStageSortedLayout(
   nodes: StageSortedLayoutNode[],
@@ -507,39 +519,35 @@ export function computeStageSortedLayout(
     // render a header tall enough to visually overlap the first row.
     const headerDims = computeNodeDimensions({ title: ws, shape: NODE_VISUAL_CONFIG.SUBPROCESS_OR_STAGE.shape });
     canvasMaxX = Math.max(canvasMaxX, headerDims.width);
-    let rowY = cursorY + headerDims.height + GRAPH_SPACING.HEADER_GAP;
-    let x = 0;
-    let rowMaxHeight = 0;
-    let rowHasLoopBack = false;
-    let rowIndex = 0;
+    const rowStartY = cursorY + headerDims.height + GRAPH_SPACING.HEADER_GAP;
 
-    for (const n of wsNodes) {
+    const packableNodes: PackableNode[] = wsNodes.map((n) => {
       const { shape } = NODE_VISUAL_CONFIG[getSemanticNodeVisualType(n.nodeType)];
       const dims = computeNodeDimensions({ title: n.title, shape });
+      const extraTrailingGap =
+        shape === "diamond" ? GRAPH_SPACING.DECISION_BRANCH_GAP * Math.max(0, (outgoingCountByNode.get(n.id) ?? 0) - 1) : 0;
+      return {
+        id: n.id,
+        width: dims.width,
+        height: dims.height,
+        extraTrailingGap,
+        causesExtraRowGap: loopBackEndpointIds.has(n.id),
+      };
+    });
 
-      if (x > 0 && x + dims.width > GRAPH_SPACING.ROW_MAX_WIDTH) {
-        rowY += rowMaxHeight + GRAPH_SPACING.NODE_V_GAP + (rowHasLoopBack ? GRAPH_SPACING.LOOPBACK_ROW_EXTRA_GAP : 0);
-        x = 0;
-        rowMaxHeight = 0;
-        rowHasLoopBack = false;
-        rowIndex += 1;
-      }
+    const packed = packNodesIntoRows(packableNodes, {
+      startY: rowStartY,
+      rowMaxWidth: GRAPH_SPACING.ROW_MAX_WIDTH,
+      hGap: GRAPH_SPACING.NODE_H_GAP,
+      vGap: GRAPH_SPACING.NODE_V_GAP,
+      extraRowGap: GRAPH_SPACING.LOOPBACK_ROW_EXTRA_GAP,
+    });
 
-      positions.set(n.id, { x, y: rowY });
-      rowIndexByNodeId.set(n.id, rowIndex);
+    for (const [id, pos] of packed.positions) positions.set(id, pos);
+    for (const [id, rowIndex] of packed.rowIndexByNodeId) rowIndexByNodeId.set(id, rowIndex);
+    canvasMaxX = Math.max(canvasMaxX, packed.maxX);
 
-      let advance = dims.width + GRAPH_SPACING.NODE_H_GAP;
-      if (shape === "diamond") {
-        const branches = outgoingCountByNode.get(n.id) ?? 0;
-        advance += GRAPH_SPACING.DECISION_BRANCH_GAP * Math.max(0, branches - 1);
-      }
-      x += advance;
-      canvasMaxX = Math.max(canvasMaxX, x - GRAPH_SPACING.NODE_H_GAP);
-      rowMaxHeight = Math.max(rowMaxHeight, dims.height);
-      if (loopBackEndpointIds.has(n.id)) rowHasLoopBack = true;
-    }
-
-    const bandHeight = rowY + rowMaxHeight - cursorY;
+    const bandHeight = headerDims.height + GRAPH_SPACING.HEADER_GAP + packed.height;
     cursorY += bandHeight + GRAPH_SPACING.BAND_GAP;
   }
 
@@ -547,30 +555,10 @@ export function computeStageSortedLayout(
 }
 
 // ---- pure, unit-testable interaction helpers (no DOM/React dependency) ----
-
-export type MinimalEdge = { id: string; source: string; target: string };
-
-/** 1-hop incoming+outgoing node/edge ids for the selected node — the basis for path highlighting and dimming everything else. Returns empty sets when nothing is selected. */
-export function computeConnectedIds(
-  selectedNodeId: string | null,
-  edges: MinimalEdge[]
-): { nodeIds: Set<string>; edgeIds: Set<string> } {
-  const nodeIds = new Set<string>();
-  const edgeIds = new Set<string>();
-  if (!selectedNodeId) return { nodeIds, edgeIds };
-  nodeIds.add(selectedNodeId);
-  for (const e of edges) {
-    if (e.source === selectedNodeId) {
-      nodeIds.add(e.target);
-      edgeIds.add(e.id);
-    }
-    if (e.target === selectedNodeId) {
-      nodeIds.add(e.source);
-      edgeIds.add(e.id);
-    }
-  }
-  return { nodeIds, edgeIds };
-}
+//
+// computeConnectedIds (selection/neighborhood highlighting) moved to
+// graph-editor-core/selection.ts in Phase 5C-4 — it was already
+// domain-free (a plain {id,source,target} edge shape) — see that module.
 
 export type SearchableNode = {
   id: string;

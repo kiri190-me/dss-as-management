@@ -12,14 +12,12 @@ import {
   getSemanticNodeVisualType,
   getNodeIconKey,
   getNodeChipVisual,
-  computeConnectedIds,
   searchNodes,
   groupNodesByWorksheet,
   computeNodeDimensions,
   computeStageSortedLayout,
   getNodeContentExtraHorizontalPadding,
   shouldShowNodeIcon,
-  type MinimalEdge,
   type StageSortedLayoutNode,
   type StageSortedLayoutEdge,
 } from "./procedure-visual-language";
@@ -137,37 +135,8 @@ test("EDGE_VISUAL_CONFIG: LOOP_BACK has a distinct dash/route from DEFAULT and R
   assert.notEqual(loopBack.animated, retry.animated);
 });
 
-test("computeConnectedIds: returns empty sets when nothing is selected", () => {
-  const edges: MinimalEdge[] = [{ id: "e1", source: "a", target: "b" }];
-  const result = computeConnectedIds(null, edges);
-  assert.equal(result.nodeIds.size, 0);
-  assert.equal(result.edgeIds.size, 0);
-});
-
-test("computeConnectedIds: returns 1-hop incoming+outgoing sets for the selected node", () => {
-  const edges: MinimalEdge[] = [
-    { id: "e1", source: "a", target: "b" },
-    { id: "e2", source: "c", target: "b" },
-    { id: "e3", source: "b", target: "d" },
-    { id: "e4", source: "x", target: "y" },
-  ];
-  const result = computeConnectedIds("b", edges);
-  assert.deepEqual([...result.nodeIds].sort(), ["a", "b", "c", "d"]);
-  assert.deepEqual([...result.edgeIds].sort(), ["e1", "e2", "e3"]);
-});
-
-test("computeConnectedIds: correctly includes both endpoints of a real RFG LOOP_BACK-style edge", () => {
-  // Regression guard for the two real LOOP_BACK edges wired in Phase 2.5 — a
-  // loop-back edge is just a normal source/target pair to this function, so
-  // selecting either endpoint must surface the other.
-  const edges: MinimalEdge[] = [{ id: "loop-1", source: "node-late-step", target: "node-earlier-step" }];
-  const fromLateStep = computeConnectedIds("node-late-step", edges);
-  assert.ok(fromLateStep.nodeIds.has("node-earlier-step"));
-  assert.ok(fromLateStep.edgeIds.has("loop-1"));
-  const fromEarlierStep = computeConnectedIds("node-earlier-step", edges);
-  assert.ok(fromEarlierStep.nodeIds.has("node-late-step"));
-  assert.ok(fromEarlierStep.edgeIds.has("loop-1"));
-});
+// computeConnectedIds's tests moved to graph-editor-core/selection.test.ts
+// in Phase 5C-4, alongside the function itself.
 
 test("searchNodes: matches by title, node code, or source shape id (case-insensitive substring)", () => {
   const nodes = [

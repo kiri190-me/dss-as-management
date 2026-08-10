@@ -6,7 +6,7 @@ import type { EditorEdgeRow, EditorNodeRow } from "@/lib/db/queries/procedure-te
 import { updateProcedureTemplateEdgeAction, retargetProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
 import { buildEdgeRetargetPreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
-import type { RoutePoint } from "@/lib/domain/procedure-edge-waypoints";
+import type { RoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
  * Edge property side panel (Phase 4A) — branchType/branchLabel edit
