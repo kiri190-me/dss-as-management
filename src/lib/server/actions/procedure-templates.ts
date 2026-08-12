@@ -7,8 +7,10 @@ import { canCreateTechnicalTemplateDraftVersion, canManageTechnicalTemplates } f
 import {
   createNewDraftVersion,
   createManualTechnicalProcedureTemplate,
+  renameTechnicalProcedureTemplate,
   type ProcedureTemplateResult,
   type CreateManualTechnicalTemplateInput,
+  type RenameTechnicalTemplateResult,
 } from "@/lib/db/mutations/procedure-templates";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 import { PROCEDURE_EQUIPMENT_TYPE_CODES } from "@/lib/domain/procedure-template-types";
@@ -79,6 +81,46 @@ export async function createManualTechnicalProcedureTemplateAction(
     );
   } catch (err) {
     console.error("createManualTechnicalProcedureTemplateAction: unexpected DB error", err);
+    return { ok: false, code: "CONFLICT", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
+/**
+ * Phase 5C-5B usability item 5 — rename a TECHNICAL_TASK DRAFT's name from
+ * the existing editor screen. Same session/role short-circuit pattern as
+ * every other action here; renameTechnicalProcedureTemplate re-checks
+ * category/status/role/optimistic-concurrency against the live DB
+ * regardless of what this fast pre-check allows.
+ */
+export async function renameTechnicalProcedureTemplateAction(input: {
+  templateId: string;
+  name: string;
+  expectedTemplateUpdatedAt: string;
+}): Promise<RenameTechnicalTemplateResult> {
+  if (getAuthSource() !== "database") {
+    return { ok: false, code: "FORBIDDEN", message: "데이터베이스 저장 모드가 아닙니다." };
+  }
+  const session = await readSession();
+  if (!session) return { ok: false, code: "FORBIDDEN", message: "로그인이 필요합니다." };
+  if (session.approvalStatus !== "APPROVED") {
+    return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
+  }
+  if (!canManageTechnicalTemplates(session.role)) {
+    return { ok: false, code: "FORBIDDEN", message: "이름 변경 권한이 없습니다." };
+  }
+  if (!isValidUuid(input.templateId)) {
+    return { ok: false, code: "NOT_FOUND", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  try {
+    return await renameTechnicalProcedureTemplate(
+      input.templateId,
+      session.userId,
+      input.name,
+      input.expectedTemplateUpdatedAt
+    );
+  } catch (err) {
+    console.error("renameTechnicalProcedureTemplateAction: unexpected DB error", err);
     return { ok: false, code: "CONFLICT", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
   }
 }

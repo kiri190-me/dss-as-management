@@ -96,6 +96,73 @@ test("a long, multiline title uses centered text alignment and stays inside the 
   assert.ok(titleSpanMatch![1].includes("w-full"), "the title span must span the full content width for centering to have any visible effect");
 });
 
+/**
+ * Multiline node titles (Shift+Enter). Only the server-rendered markup is
+ * practical to assert here (react-dom/server has no live DOM/event
+ * dispatch, so the Shift+Enter keydown handler itself
+ * — a plain `if (e.key === "Enter" && !e.shiftKey) e.preventDefault()` in
+ * NodePropertyPanel/CreateNodePanel — isn't exercisable by this test
+ * runner; that behavior was verified by direct code review instead, and
+ * the user will confirm it manually in Chrome per this task's own
+ * instruction not to attempt an automated browser walkthrough).
+ */
+test("a multiline (\\n-containing) title renders with whitespace-pre-line so the newline shows as a real line break, not a collapsed space", () => {
+  const html = renderGraphChip({ title: "1차 확인\n2차 확인" });
+  const contentHtml = sliceFromContentLayer(html);
+  const titleSpanMatch = contentHtml.match(/<span class="([^"]*)"[^>]*>[^<]*1차 확인/);
+  assert.ok(titleSpanMatch, "the title span must be found within the content layer");
+  assert.ok(titleSpanMatch![1].includes("whitespace-pre-line"), "the title span must honor explicit newlines as real line breaks");
+  assert.ok(html.includes("1차 확인\n2차 확인"), "the literal newline character must survive into the rendered output, never collapsed to a space");
+});
+
+test("a multiline title grows the chip's minHeight compared to an equivalent single-line title", () => {
+  const singleLineHtml = renderGraphChip({ title: "1차 확인 2차 확인" });
+  const multilineHtml = renderGraphChip({ title: "1차 확인\n2차 확인\n3차 확인\n4차 확인" });
+  const singleLineHeight = Number(singleLineHtml.match(/min-height:\s*(\d+)px/)?.[1]);
+  const multilineHeight = Number(multilineHtml.match(/min-height:\s*(\d+)px/)?.[1]);
+  assert.ok(Number.isFinite(singleLineHeight) && Number.isFinite(multilineHeight));
+  assert.ok(multilineHeight > singleLineHeight, "4 explicit lines must reserve more height than the same words wrapped as running text");
+});
+
+/**
+ * Cursor-disappearing root cause fix (round 3) — the hover/focus glow
+ * used `filter: drop-shadow(...)`, a documented trigger for a
+ * Chromium/WebKit GPU-compositing bug where the OS cursor can vanish
+ * while the pointer moves across many `filter`-bearing elements, made
+ * worse by the simultaneous `opacity` transitions every OTHER node gets
+ * once one node is selected. Locks down that the wrapper never uses
+ * `filter`/`drop-shadow` anywhere, only `box-shadow` (via Tailwind's
+ * `shadow-*`), regardless of selection/dim state.
+ */
+test("the node wrapper never uses filter/drop-shadow for its hover/focus glow (the confirmed cursor-disappearing trigger) — box-shadow only", () => {
+  for (const overrides of [{}, { isSelected: true }, { isDimmed: true }, { isDimmed: true, isSeverelyDimmed: true }]) {
+    const html = renderGraphChip(overrides);
+    const wrapperClass = getWrapperClass(html);
+    assert.ok(!wrapperClass.includes("drop-shadow"), `wrapper must never use drop-shadow (state: ${JSON.stringify(overrides)})`);
+    assert.ok(!/(^|\s)filter(-|:)/.test(wrapperClass), `wrapper must never use a filter utility (state: ${JSON.stringify(overrides)})`);
+    assert.ok(wrapperClass.includes("hover:shadow-"), "the hover glow must be present as a box-shadow utility instead");
+  }
+});
+
+/**
+ * Cursor-disappearing root cause fix, round 2 — swapping filter for
+ * box-shadow alone did not resolve the reported bug. Selecting a node
+ * dims dozens of OTHER nodes at once, and the selected node itself picks
+ * up a continuous `:focus-within` box-shadow (React Flow focuses a
+ * selected node for keyboard-nav) — animating opacity/box-shadow on that
+ * many simultaneously-changing elements, right at the moment a node is
+ * selected, is a further GPU compositing-layer-promotion trigger. Locks
+ * down that neither property is ever transitioned/animated on this
+ * wrapper, in any state — opacity/box-shadow apply instantly.
+ */
+test("the node wrapper never transitions/animates opacity or box-shadow (the round-2 cursor-disappearing trigger) — changes apply instantly", () => {
+  for (const overrides of [{}, { isSelected: true }, { isDimmed: true }, { isDimmed: true, isSeverelyDimmed: true }]) {
+    const html = renderGraphChip(overrides);
+    const wrapperClass = getWrapperClass(html);
+    assert.ok(!/transition/.test(wrapperClass), `wrapper must never declare a transition utility (state: ${JSON.stringify(overrides)})`);
+  }
+});
+
 test("icon, title, and subtitle render as one centered vertical stack, in that order", () => {
   const html = renderGraphChip({ title: "제목", subtitle: "부제목" });
   const contentHtml = sliceFromContentLayer(html);

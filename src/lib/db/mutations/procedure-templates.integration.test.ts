@@ -14,6 +14,7 @@ import {
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
   procedureReferenceItems,
+  procedureTemplateEditHistory,
   users,
 } from "../schema";
 import {
@@ -23,12 +24,13 @@ import {
   createNewDraftVersion,
   replaceDraftProcedureTemplates,
   createManualTechnicalProcedureTemplate,
+  renameTechnicalProcedureTemplate,
 } from "./procedure-templates";
 import {
   canViewPublishedProcedureTemplates,
   canViewAllProcedureTemplateStatuses,
 } from "@/lib/auth/procedure-template-authorization";
-import { listProcedureTemplates, getProcedureTemplateDetail } from "../queries/procedure-templates";
+import { listProcedureTemplates, getProcedureTemplateDetail, listTechnicalProcedureTemplates } from "../queries/procedure-templates";
 import { combineShapeGraphSheets } from "../../../../scripts/lib/xlsx/combine-shape-graph-sheets";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { LoadedSheet } from "../../../../scripts/lib/xlsx/workbook-loader";
@@ -1133,5 +1135,149 @@ describe("createManualTechnicalProcedureTemplate", () => {
     const edges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
     assert.equal(nodes.length, 0);
     assert.equal(edges.length, 0);
+  });
+});
+
+/**
+ * Phase 5C-5B usability item 5 — renameTechnicalProcedureTemplate. Same
+ * self-cleaning convention (createdTemplateIds) as every other describe
+ * block here.
+ */
+describe("renameTechnicalProcedureTemplate", () => {
+  async function createDraft() {
+    const code = uniqueCode("rename");
+    const result = await createManualTechnicalProcedureTemplate({ code, name: "원래 이름", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("setup failed");
+    createdTemplateIds.push(result.id);
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
+    return row;
+  }
+
+  test("ADMIN and SUPER_ADMIN can rename a TECHNICAL_TASK DRAFT; the name is trimmed", async () => {
+    const draft = await createDraft();
+    const result = await renameTechnicalProcedureTemplate(draft.id, nonSuperAdminId, "  새 이름  ", draft.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.name, "새 이름");
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, draft.id));
+    assert.equal(row.name, "새 이름");
+    assert.equal(row.updatedAt.toISOString(), result.updatedAt);
+  });
+
+  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const draft = await createDraft();
+      const result = await renameTechnicalProcedureTemplate(draft.id, actorId, "변경 시도", draft.updatedAt.toISOString());
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("a blank/whitespace-only name is rejected with INVALID_INPUT", async () => {
+    const draft = await createDraft();
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "   ", draft.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
+  test("a stale expectedTemplateUpdatedAt is rejected with CONFLICT, and the name is left unchanged", async () => {
+    const draft = await createDraft();
+    const stale = new Date(draft.updatedAt.getTime() - 1000).toISOString();
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "변경 시도", stale);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "CONFLICT");
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, draft.id));
+    assert.equal(row.name, "원래 이름");
+  });
+
+  test("a PUBLISHED TECHNICAL_TASK template cannot be renamed", async () => {
+    const draft = await createDraft();
+    const published = await publishProcedureTemplate(draft.id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, draft.id));
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "변경 시도", row.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "CONFLICT");
+  });
+
+  test("SUPER_ADMIN cannot rename a FULL_SERVICE template through this function — no broadening beyond TECHNICAL_TASK", async () => {
+    const code = uniqueCode("rename-full-service");
+    const imported = await importTemplate({ code, includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, imported.id));
+    const result = await renameTechnicalProcedureTemplate(imported.id, superAdminId, "변경 시도", row.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("renaming does not insert a procedure_template_edit_history row (no existing action type represents template metadata rename)", async () => {
+    const draft = await createDraft();
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "이력 없음 확인", draft.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const historyRows = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(eq(procedureTemplateEditHistory.procedureTemplateId, draft.id));
+    assert.equal(historyRows.length, 0);
+  });
+
+  test("the code is never changed by a rename", async () => {
+    const draft = await createDraft();
+    const originalCode = draft.code;
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "코드 불변 확인", draft.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, draft.id));
+    assert.equal(row.code, originalCode);
+  });
+});
+
+/** Phase 5C-5B — listTechnicalProcedureTemplates: the technical-library list query. */
+describe("listTechnicalProcedureTemplates", () => {
+  test("only returns TECHNICAL_TASK rows, excluding FULL_SERVICE/REFERENCE templates created by other suites in this file", async () => {
+    const code = uniqueCode("list-technical");
+    const created = await createManualTechnicalProcedureTemplate({ code, name: "목록 조회 테스트", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    const rows = await listTechnicalProcedureTemplates(true);
+    assert.ok(rows.some((r) => r.id === created.id));
+
+    // No FULL_SERVICE/REFERENCE row this file creates can ever appear here.
+    const fullServiceImport = await importTemplate({ code: uniqueCode("list-technical-full-service"), includeErrorIssue: false });
+    assert.equal(fullServiceImport.ok, true);
+    if (!fullServiceImport.ok) return;
+    const rowsAfter = await listTechnicalProcedureTemplates(true);
+    assert.equal(rowsAfter.some((r) => r.id === fullServiceImport.id), false, "a FULL_SERVICE row must never appear in the technical list");
+  });
+
+  test("includeAllStatuses=false hides a DRAFT technical template; true shows it", async () => {
+    const code = uniqueCode("list-technical-draft");
+    const created = await createManualTechnicalProcedureTemplate({ code, name: "DRAFT 표시 테스트", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    const publishedOnly = await listTechnicalProcedureTemplates(false);
+    assert.equal(publishedOnly.some((r) => r.id === created.id), false, "a DRAFT row must be hidden when includeAllStatuses=false");
+
+    const all = await listTechnicalProcedureTemplates(true);
+    assert.equal(all.some((r) => r.id === created.id), true, "a DRAFT row must be visible when includeAllStatuses=true");
+  });
+
+  test("nodeCount/edgeCount reflect the template's actual graph", async () => {
+    const code = uniqueCode("list-technical-counts");
+    const created = await createManualTechnicalProcedureTemplate({ code, name: "그래프 수 테스트", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    const before = await listTechnicalProcedureTemplates(true);
+    const rowBefore = before.find((r) => r.id === created.id);
+    assert.ok(rowBefore);
+    assert.equal(rowBefore.nodeCount, 0);
+    assert.equal(rowBefore.edgeCount, 0);
   });
 });

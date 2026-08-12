@@ -132,11 +132,13 @@ export default function ProcedureNodeChip({
         // bug the badge had) — so selection and issue-state indicators
         // live on this plain, unclipped outer box instead. For non-clipped
         // shapes this just draws around the same visible edge as before.
-        // Selection (box-shadow ring), the WARNING/ERROR badge (CSS
-        // outline), and the hover/focus glow below (filter: drop-shadow)
-        // are three independent CSS channels, so any combination of them
-        // stays visually distinguishable rather than one silently
-        // overwriting another.
+        // Selection (a Tailwind `ring`), the WARNING/ERROR badge (CSS
+        // outline), and the hover/focus glow below (a plain `box-shadow`)
+        // are independent CSS channels — Tailwind's ring/shadow utilities
+        // are designed to compose into one final box-shadow declaration
+        // (see the cursor-bug note below for why this is box-shadow, not
+        // filter: drop-shadow, now), so any combination stays visually
+        // distinguishable rather than one silently overwriting another.
         // ring-offset defaults to white, which reads as an unwanted bright
         // halo against the app's dark canvas (`body`'s `--background:
         // #0a0a0a` in globals.css) — pin it to that same color in dark mode
@@ -144,14 +146,35 @@ export default function ProcedureNodeChip({
         isSelected ? "ring-[3px] ring-offset-2 ring-blue-500 ring-offset-white dark:ring-blue-400 dark:ring-offset-[#0a0a0a]" : "",
         badgeStyle ? badgeStyle.outlineClass : "",
         isDimmed ? (isSeverelyDimmed ? "opacity-15" : "opacity-35") : "opacity-100",
-        // drop-shadow (unlike box-shadow) hugs the actual rendered alpha
-        // silhouette, so this hover/focus glow automatically follows the
-        // diamond/document/pentagon clip-path shapes too, with no
-        // shape-specific code — and it never moves or resizes the node
-        // since `filter` doesn't participate in layout.
-        "hover:drop-shadow-[0_0_3px_var(--node-border-light)] dark:hover:drop-shadow-[0_0_3px_var(--node-border-dark)]",
-        "focus-within:drop-shadow-[0_0_3px_var(--node-border-light)] dark:focus-within:drop-shadow-[0_0_3px_var(--node-border-dark)]",
-        "transition-[opacity,filter] duration-150",
+        // Cursor-disappearing root cause, round 1 (found by audit, not by
+        // adding another capture/blur handler) — this hover/focus glow
+        // used to be `filter: drop-shadow(...)`. `filter` is a documented
+        // trigger for a Chromium/WebKit GPU-compositing bug where the OS
+        // cursor can become invisible while the pointer moves across many
+        // `filter`-bearing elements. `box-shadow` avoids that specific
+        // compositing path — the one real tradeoff is it hugs the node's
+        // rectangular bounding box rather than the diamond/document/
+        // pentagon clip-path outline (drop-shadow's one advantage),
+        // accepted here since a correct cursor takes priority over that
+        // shape-hugging detail.
+        "hover:shadow-[0_0_3px_var(--node-border-light)] dark:hover:shadow-[0_0_3px_var(--node-border-dark)]",
+        "focus-within:shadow-[0_0_3px_var(--node-border-light)] dark:focus-within:shadow-[0_0_3px_var(--node-border-dark)]",
+        // Cursor-disappearing root cause, round 2 — the round-1 fix
+        // (filter -> box-shadow) alone did not resolve it. Selecting a
+        // node dims potentially DOZENS of OTHER nodes simultaneously
+        // (isDimmed above); this element also gains `:focus-within`
+        // continuously for as long as it stays selected (React Flow
+        // focuses a selected node for keyboard-nav accessibility), so its
+        // own box-shadow (ring + focus-glow, layered) stays live/combined
+        // the whole time it's selected too. Animating ANY of opacity or
+        // box-shadow here — on potentially dozens of nodes at once, at the
+        // exact moment ("select a node") the bug is anchored to — forces
+        // GPU compositing-layer promotion for the transition's duration;
+        // with no way to verify in a live browser which specific property
+        // is the trigger, the transition is removed entirely rather than
+        // guessed at property-by-property: opacity/box-shadow now apply
+        // instantly, never animated, on every node, in every state. Pure
+        // CSS-property removal only — no cursor value is forced anywhere.
       ].join(" ")}
       style={{ width: dims?.width, minHeight: dims?.height, ...cssVars }}
       title={tooltip}

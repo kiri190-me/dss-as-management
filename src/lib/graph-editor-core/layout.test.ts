@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveEffectiveNodePosition, hasUserLayoutOverride, packNodesIntoRows, type PackableNode } from "./layout";
+import {
+  resolveEffectiveNodePosition,
+  hasUserLayoutOverride,
+  packNodesIntoRows,
+  computeRelativePosition,
+  computeLayeredGraphLayout,
+  isAlignedVerticalConnection,
+  type PackableNode,
+} from "./layout";
 
 test("resolveEffectiveNodePosition: SOURCE mode always returns position_x/position_y, even when a valid override exists", () => {
   const node = { positionX: 10, positionY: 20, userPositionX: 999, userPositionY: 888 };
@@ -143,4 +151,270 @@ test("packNodesIntoRows: empty input returns empty maps and zero maxX/height", (
   assert.equal(result.positions.size, 0);
   assert.equal(result.maxX, 0);
   assert.equal(result.height, 0);
+});
+
+const SPACING = { horizontal: 280, vertical: 150 };
+
+test("computeRelativePosition: LEFT/RIGHT place the target just outside the reference's bounding box (edge + gap), y unchanged", () => {
+  const ref = { x: 100, y: 200, width: 180 };
+  assert.deepEqual(computeRelativePosition(ref, "LEFT", SPACING, 132), { x: 100 - 280 - 132, y: 200 });
+  assert.deepEqual(computeRelativePosition(ref, "RIGHT", SPACING, 132), { x: 100 + 180 + 280, y: 200 });
+});
+
+test("computeRelativePosition: UP/DOWN preserve the reference's CENTER x (equal widths), y offset by the vertical spacing", () => {
+  const ref = { x: 100, y: 200, width: 180 };
+  assert.deepEqual(computeRelativePosition(ref, "UP", SPACING, 180), { x: 100, y: 200 - 150 });
+  assert.deepEqual(computeRelativePosition(ref, "DOWN", SPACING, 180), { x: 100, y: 200 + 150 });
+});
+
+/**
+ * Round-2 fix — the actual bug behind "vertical alignment still wrong in
+ * the browser": DOWN/UP must preserve CENTER x, not left-edge x, once the
+ * reference and target nodes have different widths (e.g. one has a
+ * multiline title). This is the case the earlier (left-edge-only) version
+ * silently got wrong.
+ */
+test("computeRelativePosition: DOWN centers a narrower/wider target under the reference's real center, not its left edge", () => {
+  const wideRef = { x: 100, y: 200, width: 240 };
+  const narrowTarget = computeRelativePosition(wideRef, "DOWN", SPACING, 132);
+  // reference center = 100 + 240/2 = 220; narrow target's own center must land on 220 too.
+  assert.equal(narrowTarget.x + 132 / 2, 220);
+  assert.notEqual(narrowTarget.x, wideRef.x, "left-edge x must NOT match here — that would mean the centers are misaligned instead");
+
+  const narrowRef = { x: 100, y: 200, width: 132 };
+  const wideTarget = computeRelativePosition(narrowRef, "DOWN", SPACING, 240);
+  // reference center = 100 + 132/2 = 166; wide target's own center must land on 166 too.
+  assert.equal(wideTarget.x + 240 / 2, 166);
+});
+
+test("computeRelativePosition: LEFT/RIGHT never overlap the reference's bounding box regardless of target width", () => {
+  const ref = { x: 100, y: 200, width: 180 };
+  const wideTarget = computeRelativePosition(ref, "LEFT", SPACING, 400);
+  assert.ok(wideTarget.x + 400 <= ref.x - SPACING.horizontal, "a wide target placed LEFT must still end entirely before the reference's left edge minus the gap");
+  const right = computeRelativePosition(ref, "RIGHT", SPACING, 400);
+  assert.equal(right.x, ref.x + ref.width + SPACING.horizontal);
+});
+
+test("computeRelativePosition: never mutates the reference object", () => {
+  const ref = { x: 100, y: 200, width: 180 };
+  computeRelativePosition(ref, "RIGHT", SPACING, 132);
+  assert.deepEqual(ref, { x: 100, y: 200, width: 180 });
+});
+
+const LAYERED_SPACING = { horizontal: 280, vertical: 150 };
+
+test("computeLayeredGraphLayout: a straight A->B->C chain stays at the same x (vertical continuation), one depth per hop", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0 },
+    { id: "b", sortOrder: 1, width: 0 },
+    { id: "c", sortOrder: 2, width: 0 },
+  ];
+  const edges = [
+    { fromNodeId: "a", toNodeId: "b" },
+    { fromNodeId: "b", toNodeId: "c" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  const a = result.get("a")!;
+  const b = result.get("b")!;
+  const c = result.get("c")!;
+  assert.equal(a.x, b.x, "B must share A's x — a single-parent/single-child continuation");
+  assert.equal(b.x, c.x, "C must share B's x");
+  assert.equal(b.y - a.y, 150);
+  assert.equal(c.y - b.y, 150);
+});
+
+test("computeLayeredGraphLayout: a DECISION's two children (branch) fan out symmetrically left/right of the parent, at the same depth", () => {
+  const nodes = [
+    { id: "d", sortOrder: 0, width: 0 },
+    { id: "yes", sortOrder: 1, width: 0 },
+    { id: "no", sortOrder: 2, width: 0 },
+  ];
+  const edges = [
+    { fromNodeId: "d", toNodeId: "yes" },
+    { fromNodeId: "d", toNodeId: "no" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  const d = result.get("d")!;
+  const yes = result.get("yes")!;
+  const no = result.get("no")!;
+  assert.equal(yes.y, no.y, "both branch children land at the same depth/row");
+  assert.equal((yes.x + no.x) / 2, d.x, "children are centered symmetrically around the parent's x");
+  assert.notEqual(yes.x, no.x, "siblings must not overlap in x");
+});
+
+test("computeLayeredGraphLayout: two independent root chains never overlap at the same depth", () => {
+  const nodes = [
+    { id: "r1", sortOrder: 0, width: 0 },
+    { id: "r2", sortOrder: 1, width: 0 },
+  ];
+  const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  const r1 = result.get("r1")!;
+  const r2 = result.get("r2")!;
+  assert.equal(r1.y, 0);
+  assert.equal(r2.y, 0);
+  assert.notEqual(r1.x, r2.x);
+});
+
+test("computeLayeredGraphLayout: a LOOP_BACK cycle (C -> A) never infinite-loops and every node still gets a position", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0 },
+    { id: "b", sortOrder: 1, width: 0 },
+    { id: "c", sortOrder: 2, width: 0 },
+  ];
+  const edges = [
+    { fromNodeId: "a", toNodeId: "b" },
+    { fromNodeId: "b", toNodeId: "c" },
+    { fromNodeId: "c", toNodeId: "a" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.size, 3);
+  for (const n of nodes) assert.ok(Number.isFinite(result.get(n.id)!.x) && Number.isFinite(result.get(n.id)!.y));
+});
+
+test("computeLayeredGraphLayout: empty input returns an empty map", () => {
+  assert.equal(computeLayeredGraphLayout([], [], LAYERED_SPACING).size, 0);
+});
+
+test("computeLayeredGraphLayout: an edge referencing an unknown node id is ignored, never throws", () => {
+  const nodes = [{ id: "a", sortOrder: 0, width: 0 }];
+  const edges = [{ fromNodeId: "a", toNodeId: "ghost" }];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.size, 1);
+  assert.deepEqual(result.get("a"), { x: 0, y: 0 });
+});
+
+/**
+ * Round-2 usability fix — "layout and line geometry must agree": an
+ * unpositioned child under a manually-dragged (pinned) parent must center
+ * on the parent's REAL persisted x, not a synthetic depth-based x this
+ * function would otherwise invent in isolation.
+ */
+test("computeLayeredGraphLayout: an unpinned single child centers on its pinned parent's REAL x, not a synthetic one", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, pinnedX: 9999 }, // manually dragged far from where the algorithm would otherwise seed it
+    { id: "b", sortOrder: 1, width: 0 },
+  ];
+  const edges = [{ fromNodeId: "a", toNodeId: "b" }];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.get("a")!.x, 9999);
+  assert.equal(result.get("b")!.x, 9999, "B must align under A's actual pinned x, not a depth-0-seeded synthetic x");
+});
+
+test("computeLayeredGraphLayout: a pinned node's own x is never overwritten by the synthetic fan-out formula", () => {
+  const nodes = [
+    { id: "d", sortOrder: 0, width: 0 },
+    { id: "yes", sortOrder: 1, width: 0, pinnedX: 500 },
+    { id: "no", sortOrder: 2, width: 0 },
+  ];
+  const edges = [
+    { fromNodeId: "d", toNodeId: "yes" },
+    { fromNodeId: "d", toNodeId: "no" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.get("yes")!.x, 500);
+});
+
+test("computeLayeredGraphLayout: the same-depth collision pass never pushes a pinned node, only its unpinned neighbor", () => {
+  const nodes = [
+    { id: "r1", sortOrder: 0, width: 0, pinnedX: 100 },
+    { id: "r2", sortOrder: 1, width: 0 }, // unpinned root; would synthetically seed very close to r1
+  ];
+  const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  assert.equal(result.get("r1")!.x, 100, "the pinned node's x must never move, even to resolve a collision");
+  assert.ok(Math.abs(result.get("r2")!.x - 100) >= LAYERED_SPACING.horizontal, "the unpinned neighbor is pushed clear instead");
+});
+
+test("computeLayeredGraphLayout: a grandchild with no override still chains correctly under a pinned grandparent", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, pinnedX: -400 },
+    { id: "b", sortOrder: 1, width: 0 },
+    { id: "c", sortOrder: 2, width: 0 },
+  ];
+  const edges = [
+    { fromNodeId: "a", toNodeId: "b" },
+    { fromNodeId: "b", toNodeId: "c" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.get("b")!.x, -400);
+  assert.equal(result.get("c")!.x, -400);
+});
+
+test("computeLayeredGraphLayout: pinnedX of null/undefined/non-finite is treated as unpinned (falls back to the synthetic formula)", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, pinnedX: null },
+    { id: "b", sortOrder: 1, width: 0, pinnedX: undefined },
+    { id: "c", sortOrder: 2, width: 0, pinnedX: NaN },
+  ];
+  const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  assert.equal(result.size, 3);
+  for (const n of nodes) assert.ok(Number.isFinite(result.get(n.id)!.x));
+});
+
+/**
+ * Round-3 usability fix — center-based alignment. React Flow's
+ * node.position is TOP-LEFT, so two nodes sharing the same left-edge x do
+ * NOT share the same center once their widths differ (e.g. a multiline
+ * title made one node wider) — and center, not left edge, is what the
+ * bottom/top handles (and therefore the rendered connector) actually key
+ * off. These tests use different widths specifically to prove alignment
+ * survives that difference.
+ */
+test("computeLayeredGraphLayout: a single child centers on its parent even when the child is much wider (different node widths)", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 132 }, // narrow parent
+    { id: "b", sortOrder: 1, width: 240 }, // much wider child (e.g. a multiline title)
+  ];
+  const edges = [{ fromNodeId: "a", toNodeId: "b" }];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  const a = result.get("a")!;
+  const b = result.get("b")!;
+  const aCenterX = a.x + 132 / 2;
+  const bCenterX = b.x + 240 / 2;
+  assert.equal(aCenterX, bCenterX, "centers must match even though left-edge x will necessarily differ for different widths");
+  assert.notEqual(a.x, b.x, "left-edge x must NOT match here — that would mean the centers are misaligned instead");
+});
+
+test("computeLayeredGraphLayout: a 3-node vertical chain has identical center x throughout, even with three different widths", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 132 },
+    { id: "b", sortOrder: 1, width: 240 },
+    { id: "c", sortOrder: 2, width: 180 },
+  ];
+  const edges = [
+    { fromNodeId: "a", toNodeId: "b" },
+    { fromNodeId: "b", toNodeId: "c" },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  const centerXOf = (id: string, width: number) => result.get(id)!.x + width / 2;
+  const centers = [centerXOf("a", 132), centerXOf("b", 240), centerXOf("c", 180)];
+  assert.equal(centers[0], centers[1]);
+  assert.equal(centers[1], centers[2]);
+});
+
+test("computeLayeredGraphLayout: an unpinned child centers on a pinned parent's real center, accounting for the pinned parent's own width", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 200, pinnedX: 1000 }, // pinned top-left x=1000, width 200 -> real center = 1100
+    { id: "b", sortOrder: 1, width: 132 },
+  ];
+  const edges = [{ fromNodeId: "a", toNodeId: "b" }];
+  const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
+  assert.equal(result.get("b")!.x + 132 / 2, 1100, "the child's center must equal the pinned parent's REAL center (1000 + 200/2), not its raw pinnedX");
+});
+
+test("isAlignedVerticalConnection: identical centers are aligned", () => {
+  assert.equal(isAlignedVerticalConnection(500, 500), true);
+});
+
+test("isAlignedVerticalConnection: centers within floating-point drift are still aligned", () => {
+  assert.equal(isAlignedVerticalConnection(500, 500.0000001), true);
+});
+
+test("isAlignedVerticalConnection: a real horizontal offset (a branch/offset edge) is not aligned", () => {
+  assert.equal(isAlignedVerticalConnection(500, 780), false);
+});
+
+test("isAlignedVerticalConnection: a non-finite input (an unresolved node) is never a false positive", () => {
+  assert.equal(isAlignedVerticalConnection(NaN, NaN), false);
+  assert.equal(isAlignedVerticalConnection(500, NaN), false);
+  assert.equal(isAlignedVerticalConnection(NaN, 500), false);
 });

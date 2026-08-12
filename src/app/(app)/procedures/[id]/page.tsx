@@ -11,9 +11,8 @@ import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
   canViewProcedureValidationManagement,
-  canCreateProcedureTemplateDraft,
-  canEditProcedureTemplateDraft,
 } from "@/lib/auth/procedure-template-authorization";
+import { canActorEditTemplateOfCategory, canActorCreateDraftVersionOfCategory } from "@/lib/auth/technical-procedure-template-authorization";
 
 export const metadata: Metadata = {
   title: "기술 절차 템플릿 상세 | DSS A/S 관리 시스템",
@@ -71,8 +70,8 @@ export default async function ProcedureTemplateDetailPage({
       <ProcedureTemplateDetailScreen
         template={template}
         canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
-        canCreateDraftVersion={canCreateProcedureTemplateDraft(actingUser.role)}
-        canEditDraft={canEditProcedureTemplateDraft(actingUser.role)}
+        canCreateDraftVersion={canActorCreateDraftVersionOfCategory(actingUser.role, template.category)}
+        canEditDraft={canActorEditTemplateOfCategory(actingUser.role, template.category)}
       />
     </Suspense>
   );

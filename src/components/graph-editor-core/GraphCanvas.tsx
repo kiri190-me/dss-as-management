@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -82,6 +82,35 @@ export default function GraphCanvas({
   onInit,
 }: GraphCanvasProps) {
   const instanceRef = useRef<ReactFlowInstance | null>(null);
+
+  // Cursor-disappearing bugfix (round 2) — React Flow's own node-drag/
+  // pane-pan/connection-drag tracking (d3-drag, and its own manual
+  // connection-line listener) attaches its move/end listeners as native
+  // `mousemove`/`mouseup` on `window` at drag-start and only tears them
+  // down again on its own `mouseup` handler — it has no blur/
+  // visibilitychange handling of its own. If the window loses focus (or
+  // the tab is hidden) mid-drag — Alt+Tab, a browser/system dialog, or
+  // switching to another application — the real mouseup can be lost
+  // entirely, leaving React Flow's internal dragging state (and the
+  // `.dragging { cursor: grabbing }` CSS class it applies) stuck until
+  // another full drag gesture completes. Dispatching a synthetic mouseup
+  // on window lets that already-attached listener run its own normal
+  // end-of-drag cleanup, exactly as if the button had been released
+  // normally — a no-op whenever nothing is actually being dragged.
+  useEffect(() => {
+    function releaseStuckDrag() {
+      window.dispatchEvent(new MouseEvent("mouseup"));
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") releaseStuckDrag();
+    }
+    window.addEventListener("blur", releaseStuckDrag);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", releaseStuckDrag);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   return (
     <div style={{ height }} className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">

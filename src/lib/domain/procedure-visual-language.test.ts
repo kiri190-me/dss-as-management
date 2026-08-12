@@ -203,6 +203,33 @@ test("computeNodeDimensions: an extremely long title is bounded — clamped with
   assert.equal(dims.width, NODE_SIZE.MAX_WIDTH);
 });
 
+test("computeNodeDimensions: a Shift+Enter multiline title with short lines counts each explicit line, never collapsing them into one via total character count", () => {
+  const dims = computeNodeDimensions({ title: "A\nB\nC", shape: "rect" });
+  assert.equal(dims.visibleLines, 3, "3 short `\\n`-separated segments must still be 3 visible lines, not 1 (raw total length is only 3 chars)");
+  assert.equal(dims.isTruncated, false);
+});
+
+test("computeNodeDimensions: a multiline title's width is driven by its longest single line, not the combined character count across all lines", () => {
+  const multiline = computeNodeDimensions({ title: "가\n가\n가\n가\n가", shape: "rect" }); // 5 lines, 1 char each — total 5 chars but each line is trivially short
+  const singleLineSameTotalLen = computeNodeDimensions({ title: "가가가가가", shape: "rect" }); // same 5 raw chars, one line
+  assert.ok(multiline.width < singleLineSameTotalLen.width, "a multiline title must not be widened by its total character count across all lines");
+  assert.ok(multiline.width - NODE_SIZE.MIN_WIDTH < 10, "each line is only 1 char — width should sit right at the minimum, not scaled by the 5-char total");
+});
+
+test("computeNodeDimensions: a multiline title with more real lines than MAX_VISIBLE_LINES is truncated even though its total character count is small", () => {
+  const dims = computeNodeDimensions({ title: "1\n2\n3\n4\n5", shape: "rect" }); // 5 explicit lines, 9 raw chars total
+  assert.equal(dims.isTruncated, true, "5 explicit lines must be truncated at MAX_VISIBLE_LINES=4, regardless of how few total characters they add up to");
+  assert.equal(dims.visibleLines, NODE_SIZE.MAX_VISIBLE_LINES);
+  assert.equal(dims.height, NODE_SIZE.MAX_HEIGHT);
+});
+
+test("computeNodeDimensions: a long single line within a multiline title still wraps within that line's own segment", () => {
+  const longLine = "종단 AMP 디바이스 기판 외관 및 다이오드 상태를 육안으로 정밀하게 확인하고 이상 유무를 기록한다";
+  const dims = computeNodeDimensions({ title: `${longLine}\n확인 완료`, shape: "rect" });
+  const singleLineDims = computeNodeDimensions({ title: longLine, shape: "rect" });
+  assert.ok(dims.visibleLines > singleLineDims.visibleLines, "the second explicit line adds at least one more visible line on top of the first line's own wrap count");
+});
+
 test("computeNodeDimensions: DECISION (diamond) gets wider bounds than an ordinary TASK (rect) for the same title", () => {
   const title = "CHOPPER IGBT 다이오드 확인 시 정상 경로가 없는 경우 다음 단계는 무엇인가?";
   const decisionDims = computeNodeDimensions({ title, shape: "diamond" });

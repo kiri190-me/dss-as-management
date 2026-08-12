@@ -377,16 +377,27 @@ export type NodeDimensions = {
  */
 export function computeNodeDimensions(params: { title: string; shape: NodeShapeKind }): NodeDimensions {
   const title = params.title.trim();
-  const len = title.length;
+  // Multiline titles (Shift+Enter) — the chip renders with `white-space:
+  // pre-line`, so an explicit `\n` always forces a new line regardless of
+  // how short the surrounding text is. Sizing off the raw total length
+  // (the pre-multiline-title formula) would both under-count lines (three
+  // short `\n`-separated words wrap to 3 real lines, not 1) and over-widen
+  // the box (a multiline title isn't visually as wide as its total
+  // character count, only as wide as its single longest line) — so width
+  // is driven by the longest line, and line count is the sum of each
+  // line's own wrap count, never the combined character total.
+  const segments = title.split("\n");
+  const longestSegmentLen = segments.reduce((max, s) => Math.max(max, s.length), 0);
   const isDecision = params.shape === "diamond";
   const minWidth = isDecision ? NODE_SIZE.DECISION_MIN_WIDTH : NODE_SIZE.MIN_WIDTH;
   const maxWidth = isDecision ? NODE_SIZE.DECISION_MAX_WIDTH : NODE_SIZE.MAX_WIDTH;
 
-  const targetWidth = minWidth + Math.min(len * 4.2, maxWidth - minWidth);
+  const targetWidth = minWidth + Math.min(longestSegmentLen * 4.2, maxWidth - minWidth);
   const width = Math.round(Math.max(minWidth, Math.min(maxWidth, targetWidth)));
 
   const charsPerLine = Math.max(6, Math.round((width / 100) * NODE_SIZE.CHARS_PER_100PX));
-  const estimatedLines = len === 0 ? 1 : Math.max(1, Math.ceil(len / charsPerLine));
+  const estimatedLines =
+    title.length === 0 ? 1 : Math.max(1, segments.reduce((sum, s) => sum + (s.length === 0 ? 1 : Math.ceil(s.length / charsPerLine)), 0));
   const visibleLines = Math.min(estimatedLines, NODE_SIZE.MAX_VISIBLE_LINES);
   const isTruncated = estimatedLines > NODE_SIZE.MAX_VISIBLE_LINES;
 

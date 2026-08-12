@@ -76,6 +76,16 @@ export function canViewPublishedTechnicalTemplates(role: Role): boolean {
 }
 
 /**
+ * Phase 5C-5B — DRAFT/ARCHIVED technical-template visibility for the
+ * technical library list (mirrors canViewAllProcedureTemplateStatuses'
+ * role, SUPER_ADMIN+ADMIN, which happens to be the exact same set as
+ * canManageTechnicalTemplates — reused directly rather than duplicated).
+ */
+export function canViewAllTechnicalTemplateStatuses(role: Role): boolean {
+  return canManageTechnicalTemplates(role);
+}
+
+/**
  * Phase 5C-5B — category-dispatching authorization for the three
  * template-lifecycle actions whose permission tier now depends on WHICH
  * category the target row actually is, not just on `role` alone: edit/

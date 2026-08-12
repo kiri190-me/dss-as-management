@@ -16,3 +16,26 @@ export function validateRequiredNote(value: unknown): { ok: true; note: string }
   }
   return { ok: true, note: trimmed };
 }
+
+/**
+ * Phase 5C-5B usability — TECHNICAL_TASK authoring's own reason fields
+ * (delete node/edge, node-type change, retarget, create edge) are optional,
+ * unlike every other reason field in this codebase (all still mandatory via
+ * validateRequiredNote above, untouched). Same absent/null/empty-normalizes-
+ * to-null convention as validateReasonFormat elsewhere in this codebase
+ * (workflow-transition-input.ts etc.) — still enforces the max-length cap
+ * when a reason IS supplied.
+ */
+export function validateOptionalNote(value: unknown): { ok: true; note: string | null } | { ok: false; error: string } {
+  if (value === null || value === undefined || value === "") {
+    return { ok: true, note: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false, error: "사유 값을 확인할 수 없습니다." };
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_NOTE_LENGTH) {
+    return { ok: false, error: `사유는 ${MAX_NOTE_LENGTH}자를 초과할 수 없습니다.` };
+  }
+  return { ok: true, note: trimmed === "" ? null : trimmed };
+}

@@ -19,13 +19,18 @@ import { navItems, filterNavItemsForRole } from "./navigation";
  * Phase 5C-3 adds a third gated entry, "myActiveWork" — unlike the other
  * two, its predicate (canViewMyActiveWork) is AS_ENGINEER-only, deliberately
  * excluding ADMIN/SUPER_ADMIN (see my-active-work-authorization.ts).
+ *
+ * Phase 5C-5B adds a fourth gated entry, "technicalProcedures" — its
+ * predicate (canViewPublishedTechnicalTemplates) is defined as exactly
+ * canViewPublishedProcedureTemplates, so it hides for the same roles as
+ * "procedures" (SALES/INVENTORY_MANAGER).
  */
 
-test("navigation: procedures, inventory, and myActiveWork are the only role-gated items (unchanged default for everything else)", () => {
+test("navigation: procedures, inventory, myActiveWork, and technicalProcedures are the only role-gated items (unchanged default for everything else)", () => {
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["inventory", "myActiveWork", "procedures"]
+    ["inventory", "myActiveWork", "procedures", "technicalProcedures"]
   );
 });
 
@@ -58,13 +63,22 @@ test("filterNavItemsForRole: only AS_ENGINEER sees the myActiveWork entry", () =
   }
 });
 
+test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER see the technicalProcedures entry; SALES / INVENTORY_MANAGER do not", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.ok(filterNavItemsForRole(navItems, role).some((i) => i.key === "technicalProcedures"), `expected technicalProcedures visible for ${role}`);
+  }
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(filterNavItemsForRole(navItems, role).some((i) => i.key === "technicalProcedures"), false, `expected technicalProcedures hidden for ${role}`);
+  }
+});
+
 test("filterNavItemsForRole: unrestricted items remain visible to every role", () => {
   const hiddenCountByRole: Record<string, number> = {
     SUPER_ADMIN: 1, // myActiveWork
     ADMIN: 1, // myActiveWork
     AS_ENGINEER: 0,
-    SALES: 2, // procedures + myActiveWork
-    INVENTORY_MANAGER: 2, // procedures + myActiveWork
+    SALES: 3, // procedures + myActiveWork + technicalProcedures
+    INVENTORY_MANAGER: 3, // procedures + myActiveWork + technicalProcedures
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);

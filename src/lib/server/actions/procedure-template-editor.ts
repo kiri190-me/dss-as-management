@@ -15,6 +15,7 @@ import {
   createProcedureTemplateNode,
   deleteProcedureTemplateNode,
   deleteProcedureTemplateEdge,
+  insertProcedureTemplateNodeOnEdge,
   type UpdateNodePatch,
   type UpdateEdgePatch,
   type LayoutPosition,
@@ -29,8 +30,9 @@ import {
   type CreateNodeResult,
   type DeleteNodeResult,
   type DeleteEdgeResult,
+  type InsertNodeOnEdgeResult,
 } from "@/lib/db/mutations/procedure-template-editor";
-import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
+import { isValidUuid, validateOptionalNote } from "@/lib/validation/procedure-validation-resolution-input";
 import {
   PROCEDURE_BRANCH_TYPE_CODES,
   PROCEDURE_NODE_TYPE_CODES,
@@ -106,7 +108,7 @@ export async function updateProcedureTemplateNodeAction(input: {
 export async function changeProcedureTemplateNodeTypeAction(input: {
   nodeId: string;
   newNodeType: ProcedureNodeType;
-  reason: string;
+  reason?: string | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<ChangeNodeTypeResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
@@ -115,7 +117,13 @@ export async function changeProcedureTemplateNodeTypeAction(input: {
   if (!(PROCEDURE_NODE_TYPE_CODES as readonly string[]).includes(input.newNodeType)) {
     return { ok: false, code: "FORBIDDEN", message: "지원되지 않는 노드 유형입니다." };
   }
-  const reasonValidation = validateRequiredNote(input.reason);
+  // Phase 5C-5B usability — a reason is optional here at the fast-check
+  // layer for BOTH categories; the mutation itself is what enforces
+  // "mandatory unless TECHNICAL_TASK" once the template's category is
+  // known, so this layer must never reject a blank reason on FULL_SERVICE's
+  // behalf pre-emptively either — that would just surface as a confusing
+  // generic FORBIDDEN instead of the mutation's own precise INVALID_INPUT.
+  const reasonValidation = validateOptionalNote(input.reason);
   if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
 
   return withErrorRedaction("changeProcedureTemplateNodeTypeAction", () =>
@@ -167,7 +175,7 @@ export async function retargetProcedureTemplateEdgeAction(input: {
   edgeId: string;
   newFromNodeId: string;
   newToNodeId: string;
-  reason: string;
+  reason?: string | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<RetargetEdgeResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
@@ -175,7 +183,8 @@ export async function retargetProcedureTemplateEdgeAction(input: {
   if (!isValidUuid(input.edgeId) || !isValidUuid(input.newFromNodeId) || !isValidUuid(input.newToNodeId)) {
     return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
   }
-  const reasonValidation = validateRequiredNote(input.reason);
+  // Phase 5C-5B usability — see changeProcedureTemplateNodeTypeAction's own note.
+  const reasonValidation = validateOptionalNote(input.reason);
   if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
 
   return withErrorRedaction("retargetProcedureTemplateEdgeAction", () =>
@@ -189,7 +198,7 @@ export async function createProcedureTemplateEdgeAction(input: {
   toNodeId: string;
   branchType: ProcedureBranchType;
   branchLabel?: string | null;
-  reason: string;
+  reason?: string | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<CreateEdgeResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
@@ -200,7 +209,8 @@ export async function createProcedureTemplateEdgeAction(input: {
   if (!(PROCEDURE_BRANCH_TYPE_CODES as readonly string[]).includes(input.branchType)) {
     return { ok: false, code: "FORBIDDEN", message: "분기 유형을 확인할 수 없습니다." };
   }
-  const reasonValidation = validateRequiredNote(input.reason);
+  // Phase 5C-5B usability — see changeProcedureTemplateNodeTypeAction's own note.
+  const reasonValidation = validateOptionalNote(input.reason);
   if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
 
   return withErrorRedaction("createProcedureTemplateEdgeAction", () =>
@@ -250,6 +260,8 @@ export async function createProcedureTemplateNodeAction(input: {
   templateId: string;
   nodeType: ManualTechnicalNodeType;
   title: string;
+  /** Phase 5C-5B usability — "directly below the selected node, center-aligned", computed client-side (see CreateNodePanel). Omitted when no node is selected — the mutation then falls back to its own default stacking. */
+  position?: { x: number; y: number } | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<CreateNodeResult | Forbidden> {
   const actorCheck = await resolveTechnicalGraphActorId();
@@ -258,21 +270,25 @@ export async function createProcedureTemplateNodeAction(input: {
   if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
     return { ok: false, code: "FORBIDDEN", message: "지원되지 않는 노드 유형입니다." };
   }
+  if (input.position && (!Number.isFinite(input.position.x) || !Number.isFinite(input.position.y))) {
+    return { ok: false, code: "FORBIDDEN", message: "노드 위치를 확인할 수 없습니다." };
+  }
 
   return withErrorRedaction("createProcedureTemplateNodeAction", () =>
-    createProcedureTemplateNode(input.templateId, actorCheck.userId, { nodeType: input.nodeType, title: input.title }, input.expectedTemplateUpdatedAt)
+    createProcedureTemplateNode(input.templateId, actorCheck.userId, { nodeType: input.nodeType, title: input.title, position: input.position }, input.expectedTemplateUpdatedAt)
   );
 }
 
 export async function deleteProcedureTemplateNodeAction(input: {
   nodeId: string;
-  reason: string;
+  reason?: string | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<DeleteNodeResult | Forbidden> {
   const actorCheck = await resolveTechnicalGraphActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.nodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
-  const reasonValidation = validateRequiredNote(input.reason);
+  // Phase 5C-5B usability — this capability is already TECHNICAL_TASK-only, so a reason is never mandatory.
+  const reasonValidation = validateOptionalNote(input.reason);
   if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
 
   return withErrorRedaction("deleteProcedureTemplateNodeAction", () =>
@@ -282,16 +298,39 @@ export async function deleteProcedureTemplateNodeAction(input: {
 
 export async function deleteProcedureTemplateEdgeAction(input: {
   edgeId: string;
-  reason: string;
+  reason?: string | null;
   expectedTemplateUpdatedAt: string;
 }): Promise<DeleteEdgeResult | Forbidden> {
   const actorCheck = await resolveTechnicalGraphActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.edgeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
-  const reasonValidation = validateRequiredNote(input.reason);
+  // Phase 5C-5B usability — this capability is already TECHNICAL_TASK-only, so a reason is never mandatory.
+  const reasonValidation = validateOptionalNote(input.reason);
   if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
 
   return withErrorRedaction("deleteProcedureTemplateEdgeAction", () =>
     deleteProcedureTemplateEdge(input.edgeId, actorCheck.userId, reasonValidation.note, input.expectedTemplateUpdatedAt)
+  );
+}
+
+export async function insertProcedureTemplateNodeOnEdgeAction(input: {
+  edgeId: string;
+  nodeType: ManualTechnicalNodeType;
+  title: string;
+  position: { x: number; y: number };
+  expectedTemplateUpdatedAt: string;
+}): Promise<InsertNodeOnEdgeResult | Forbidden> {
+  const actorCheck = await resolveTechnicalGraphActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.edgeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
+    return { ok: false, code: "FORBIDDEN", message: "지원되지 않는 노드 유형입니다." };
+  }
+  if (!Number.isFinite(input.position.x) || !Number.isFinite(input.position.y)) {
+    return { ok: false, code: "FORBIDDEN", message: "노드 위치를 확인할 수 없습니다." };
+  }
+
+  return withErrorRedaction("insertProcedureTemplateNodeOnEdgeAction", () =>
+    insertProcedureTemplateNodeOnEdge(input.edgeId, actorCheck.userId, { nodeType: input.nodeType, title: input.title, position: input.position }, input.expectedTemplateUpdatedAt)
   );
 }

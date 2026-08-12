@@ -8,16 +8,18 @@ import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 import NodePropertyPanel from "./editor/NodePropertyPanel";
 import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
+import CreateNodePanel from "./editor/CreateNodePanel";
 import type { ProcedureTemplateForEditor, EditHistoryRow, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
 import { computeUnsavedLayoutNodeIds, computeUnsavedEdgeRouteIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
 import { saveProcedureTemplateLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
+import { renameTechnicalProcedureTemplateAction } from "@/lib/server/actions/procedure-templates";
 import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
 import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
 
-type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge";
+type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode";
 
 /**
  * The Phase 4A controlled workflow editor — deliberately a thin shell
@@ -161,6 +163,63 @@ export default function ProcedureTemplateEditorScreen({
     setCurrentUpdatedAt(newUpdatedAt);
     if (structuralValidation) setLastStructuralValidation(structuralValidation);
     router.refresh();
+  }
+
+  // Phase 5C-5B — the new TECHNICAL_TASK-only node/edge structural CRUD.
+  // canActorManageTechnicalTemplateGraph (the mutation layer's real
+  // authorization boundary) is category-locked to TECHNICAL_TASK for every
+  // role, including SUPER_ADMIN — this UI gate mirrors that exactly, so
+  // FULL_SERVICE/REFERENCE never even render the add-node tab or delete
+  // sections, regardless of canEdit.
+  const isTechnical = template.category === "TECHNICAL_TASK";
+  const canDeleteGraph = isTechnical && canEdit;
+
+  function handleNodeDeleted(newUpdatedAt: string) {
+    setSelectedNodeId(null);
+    handleSaved(newUpdatedAt);
+  }
+  function handleEdgeDeleted(newUpdatedAt: string) {
+    setSelectedEdgeId(null);
+    handleSaved(newUpdatedAt);
+  }
+
+  // Phase 5C-5B usability item 5 — inline rename, TECHNICAL_TASK DRAFT only
+  // (canDeleteGraph already encodes exactly this eligibility: isTechnical &&
+  // canEdit, and canEdit only reaches this screen for a DRAFT template).
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(template.name);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  function startEditingName() {
+    setNameDraft(template.name);
+    setRenameError(null);
+    setIsEditingName(true);
+  }
+  function cancelEditingName() {
+    setIsEditingName(false);
+    setRenameError(null);
+  }
+  async function handleRenameSubmit() {
+    const trimmed = nameDraft.trim();
+    if (trimmed.length === 0 || trimmed === template.name) {
+      setIsEditingName(false);
+      return;
+    }
+    setIsRenaming(true);
+    setRenameError(null);
+    const result = await renameTechnicalProcedureTemplateAction({
+      templateId: template.id,
+      name: trimmed,
+      expectedTemplateUpdatedAt: currentUpdatedAt,
+    });
+    setIsRenaming(false);
+    if (!result.ok) {
+      setRenameError(result.message);
+      return;
+    }
+    setIsEditingName(false);
+    handleSaved(result.updatedAt);
   }
 
   /**
@@ -373,10 +432,46 @@ export default function ProcedureTemplateEditorScreen({
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-semibold text-zinc-900 dark:text-zinc-50">{template.name}</span>
+          {isEditingName ? (
+            <span className="flex items-center gap-1">
+              <input
+                type="text"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                disabled={isRenaming}
+                autoFocus
+                className="rounded-md border border-zinc-300 px-2 py-1 text-sm font-semibold text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              />
+              <button
+                type="button"
+                onClick={() => void handleRenameSubmit()}
+                disabled={isRenaming || nameDraft.trim().length === 0}
+                className="rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+              >
+                저장
+              </button>
+              <button type="button" onClick={cancelEditingName} disabled={isRenaming} className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+                취소
+              </button>
+              {renameError && <span className="text-xs text-red-600 dark:text-red-400">{renameError}</span>}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <span className="font-semibold text-zinc-900 dark:text-zinc-50">{template.name}</span>
+              {canDeleteGraph && (
+                <button type="button" onClick={startEditingName} className="rounded-md border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400">
+                  이름 변경
+                </button>
+              )}
+            </span>
+          )}
           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">v{template.version}</span>
           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{procedureTemplateStatusLabels[template.status]}</span>
-          {!canEdit && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">읽기 전용 (SUPER_ADMIN만 편집 가능)</span>}
+          {!canEdit && (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+              읽기 전용{isTechnical ? "" : " (SUPER_ADMIN만 편집 가능)"}
+            </span>
+          )}
           <span className={`text-xs font-medium ${SAVE_STATE_CLASS[saveState]}`}>● {SAVE_STATE_LABEL[saveState]}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -414,6 +509,7 @@ export default function ProcedureTemplateEditorScreen({
             initialSelectedNodeId={navigationTarget.nodeId}
             errorFocusMode={errorFocusMode}
             editable={canEdit}
+            useAutoLayoutForUnpositionedNodes={isTechnical}
             onNodeSelectionChange={handleNodeSelectionChange}
             onEdgeSelectionChange={handleEdgeSelectionChange}
             onNodeDragStop={handleNodeDragStop}
@@ -429,20 +525,32 @@ export default function ProcedureTemplateEditorScreen({
 
         <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="flex flex-wrap gap-1 border-b border-zinc-200 pb-2 text-xs dark:border-zinc-800">
-            {(["properties", "validation", "history", "createEdge"] as RightPanelTab[]).map((tab) => (
+            {(["properties", "validation", "history", "createEdge", ...(canDeleteGraph ? (["addNode"] as const) : [])] as RightPanelTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => setRightPanelTab(tab)}
                 className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
-                {tab === "properties" ? "속성" : tab === "validation" ? "검증" : tab === "history" ? "이력" : "연결 추가"}
+                {tab === "properties" ? "속성" : tab === "validation" ? "검증" : tab === "history" ? "이력" : tab === "createEdge" ? "연결 추가" : "노드 추가"}
               </button>
             ))}
           </div>
 
           {rightPanelTab === "properties" && selectedNode && (
-            <NodePropertyPanel key={selectedNode.id} node={selectedNode} canEdit={canEdit} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} />
+            <NodePropertyPanel
+              key={selectedNode.id}
+              node={selectedNode}
+              allNodes={template.nodes}
+              templateId={template.id}
+              canEdit={canEdit}
+              expectedTemplateUpdatedAt={currentUpdatedAt}
+              onSaved={handleSaved}
+              canDelete={canDeleteGraph}
+              onDeleted={handleNodeDeleted}
+              canPosition={canDeleteGraph}
+              isTechnical={isTechnical}
+            />
           )}
           {rightPanelTab === "properties" && !selectedNode && selectedEdge && (
             <EdgePropertyPanel
@@ -457,12 +565,29 @@ export default function ProcedureTemplateEditorScreen({
               onAddWaypoint={handleAddWaypoint}
               onRemoveSelectedWaypoint={handleRemoveSelectedWaypoint}
               onResetRoute={() => handleResetEdgeRoute(selectedEdge.id)}
+              canDelete={canDeleteGraph}
+              onDeleted={handleEdgeDeleted}
+              canInsertNode={canDeleteGraph}
+              isTechnical={isTechnical}
             />
           )}
           {rightPanelTab === "properties" && !selectedNode && !selectedEdge && <p className="text-xs text-zinc-400 dark:text-zinc-600">그래프에서 노드나 분기를 선택하세요.</p>}
 
           {rightPanelTab === "createEdge" && (
-            <CreateEdgePanel key={selectedNodeId ?? "none"} templateId={template.id} nodes={template.nodes} canEdit={canEdit} expectedTemplateUpdatedAt={currentUpdatedAt} prefillFromNodeId={selectedNodeId} onSaved={handleSaved} />
+            <CreateEdgePanel
+              key={selectedNodeId ?? "none"}
+              templateId={template.id}
+              nodes={template.nodes}
+              canEdit={canEdit}
+              expectedTemplateUpdatedAt={currentUpdatedAt}
+              prefillFromNodeId={selectedNodeId}
+              onSaved={handleSaved}
+              isTechnical={isTechnical}
+            />
+          )}
+
+          {rightPanelTab === "addNode" && canDeleteGraph && (
+            <CreateNodePanel templateId={template.id} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} selectedNode={selectedNode} />
           )}
 
           {rightPanelTab === "validation" && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MarkerType,
   Handle,
@@ -8,6 +8,8 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   useReactFlow,
+  getStraightPath,
+  getSmoothStepPath,
   type Node,
   type Edge,
   type NodeProps,
@@ -40,7 +42,8 @@ import {
   type RoutableNode,
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
-import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
+import { resolveEffectiveNodePosition, hasUserLayoutOverride, computeLayeredGraphLayout, isAlignedVerticalConnection } from "@/lib/graph-editor-core/layout";
+import { releasePointerCaptureSafely, createCaptureBlurGuard } from "@/lib/graph-editor-core/pointer";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
@@ -137,6 +140,60 @@ function ProcedureOuterLaneEdge({ data, style, markerEnd, label, labelStyle, lab
   );
 }
 
+/**
+ * Round-2 straight-edge fix — extracted as a plain function (no JSX/React)
+ * specifically so it's unit-testable on its own: given the exact
+ * EdgeProps geometry React Flow passes to a custom edge renderer, decide
+ * straight-vs-smoothstep from `sourceX`/`targetX` DIRECTLY — never from
+ * this codebase's own node-position/width estimate. See
+ * ProcedureDefaultEdge's own doc comment for why that distinction matters.
+ */
+export function computeDefaultEdgePath(params: {
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+  sourcePosition: Position;
+  targetPosition: Position;
+}): [string, number, number] {
+  const [path, labelX, labelY] = isAlignedVerticalConnection(params.sourceX, params.targetX)
+    ? getStraightPath({ sourceX: params.sourceX, sourceY: params.sourceY, targetX: params.targetX, targetY: params.targetY })
+    : getSmoothStepPath(params);
+  return [path, labelX, labelY];
+}
+
+/**
+ * Round-2 straight-edge fix — the ordinary (원본/사용자 배치, non-manual-
+ * route, non-LOOP_BACK) edge type. Earlier, the caller decided `type:
+ * "straight" | "smoothstep"` ahead of time from its OWN estimate of each
+ * node's center x (nodeCenterXById, built from computeNodeDimensions +
+ * node.position) — if that estimate ever disagreed with what React Flow
+ * actually measured/rendered, the decision would be wrong regardless of
+ * how correct the layout math itself was. This component instead decides
+ * INSIDE the renderer (via computeDefaultEdgePath above), using
+ * `sourceX`/`targetX` — React Flow's own authoritative, live handle
+ * coordinates (computed from the real `internals.positionAbsolute` and
+ * the handle's own measured DOM position, not anything this codebase
+ * estimates) — so the straight-vs-bent choice can never drift from what's
+ * actually on screen.
+ */
+function ProcedureDefaultEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, label, labelStyle, labelBgStyle, labelBgPadding }: EdgeProps) {
+  const [path, labelX, labelY] = computeDefaultEdgePath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  return (
+    <BaseEdge
+      path={path}
+      labelX={labelX}
+      labelY={labelY}
+      style={style}
+      markerEnd={markerEnd}
+      label={label}
+      labelStyle={labelStyle}
+      labelBgStyle={labelBgStyle}
+      labelBgPadding={labelBgPadding}
+    />
+  );
+}
+
 type ManualRouteEdgeData = {
   points: RoutePoint[];
   /** Only the currently-selected edge, in editable+USER layout, renders draggable handles — every other edge with a manual route still renders the correct polyline shape, just without the interactive overlay. */
@@ -163,9 +220,49 @@ type ManualRouteEdgeData = {
  * to pendingEdgeRouteMoves only — it can never touch this edge's own
  * source/target node ids, satisfying "route-point dragging must never
  * retarget the edge endpoints" structurally, not by a separate check.
+ *
+ * Phase 5C-5B bugfix (cursor-disappearing investigation, round 1) — the
+ * original version only released capture on `onPointerUp`. A drag
+ * interrupted any other way (Alt+Tab, a system/browser dialog stealing
+ * focus, a right-click context menu, losing touch/pen contact) fires
+ * `pointercancel` instead, which this element never handled — the pointer
+ * stayed captured by this 10x10px handle indefinitely. While the pointer
+ * remains captured, every subsequent pointer event keeps routing to (and
+ * being cursor-styled by) this off-screen/stale element instead of
+ * whatever the OS pointer is actually over, which is exactly what made the
+ * cursor appear to "vanish" even after moving off the graph entirely onto
+ * a property panel — the capture, not the panel, was the actual site of
+ * the bug. Released on both `onPointerUp` and `onPointerCancel`,
+ * defensively (see releasePointerCaptureSafely, graph-editor-core/pointer.ts).
+ *
+ * Round 2 (the fix above wasn't sufficient) — two more release paths were
+ * still missing:
+ *  - `onLostPointerCapture`, the one event the Pointer Capture spec
+ *    actually *guarantees* fires on every release, implicit or explicit
+ *    (disabled/removed element, capture reassigned elsewhere, etc.) —
+ *    `pointerup`/`pointercancel` cover the common cases but not all of
+ *    them.
+ *  - A window `blur` (Alt+Tab, a dialog, switching to another app) or the
+ *    tab going hidden: pointer capture is defined to be independent of
+ *    window focus, so losing focus mid-drag releases neither the capture
+ *    nor fires `pointercancel`/`lostpointercapture` — the handle can keep
+ *    controlling the page's rendered cursor until an actual `pointerup`
+ *    eventually arrives, which may never happen if the button was released
+ *    while a different window had OS focus. `createCaptureBlurGuard`
+ *    (graph-editor-core/pointer.ts) proactively releases the capture it's
+ *    tracking the moment that happens.
  */
 function ProcedureManualRouteEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label, labelStyle, labelBgStyle, labelBgPadding, data }: EdgeProps & { data?: ManualRouteEdgeData }) {
   const { screenToFlowPosition } = useReactFlow();
+  const captureGuardRef = useRef<ReturnType<typeof createCaptureBlurGuard> | null>(null);
+  useEffect(() => {
+    const guard = createCaptureBlurGuard(window, document);
+    captureGuardRef.current = guard;
+    return () => {
+      guard.dispose();
+      captureGuardRef.current = null;
+    };
+  }, []);
   if (!data) return null;
 
   const chain = [{ x: sourceX, y: sourceY }, ...data.points, { x: targetX, y: targetY }];
@@ -189,15 +286,23 @@ function ProcedureManualRouteEdge({ id, sourceX, sourceY, targetX, targetY, styl
               onPointerDown={(e) => {
                 e.stopPropagation();
                 data.onWaypointSelect?.(index);
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                const el = e.currentTarget as HTMLElement;
+                el.setPointerCapture(e.pointerId);
+                captureGuardRef.current?.track(el, e.pointerId);
               }}
               onPointerMove={(e) => {
                 if (e.buttons !== 1) return;
                 data.onWaypointMove?.(index, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
               }}
               onPointerUp={(e) => {
-                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                releasePointerCaptureSafely(e.currentTarget as HTMLElement, e.pointerId);
+                captureGuardRef.current?.untrack();
               }}
+              onPointerCancel={(e) => {
+                releasePointerCaptureSafely(e.currentTarget as HTMLElement, e.pointerId);
+                captureGuardRef.current?.untrack();
+              }}
+              onLostPointerCapture={() => captureGuardRef.current?.untrack()}
               style={{
                 position: "absolute",
                 transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`,
@@ -234,7 +339,7 @@ function ProcedureStageHeaderNode({ data }: NodeProps & { data: StageHeaderData 
 }
 
 const nodeTypes = { procedureNode: ProcedureNode, procedureStageHeader: ProcedureStageHeaderNode };
-const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualRoute: ProcedureManualRouteEdge };
+const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualRoute: ProcedureManualRouteEdge, procedureDefault: ProcedureDefaultEdge };
 
 const ALL_WORKSHEETS = "ALL";
 
@@ -242,8 +347,8 @@ type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
-/** Phase 4A — additive-only widening: a plain read-only ProcedureTemplateNodeRow has neither field, which is fine since both are optional; the editor's EditorNodeRow (a structural superset) supplies them for the 사용자 배치 layout. */
-type ProcedureFlowGraphNode = ProcedureTemplateNodeRow & { userPositionX?: number | null; userPositionY?: number | null };
+/** Phase 5C-5B — ProcedureTemplateNodeRow itself now carries userPositionX/Y (previously editor-only, added to the read-only detail query's row shape too so both screens can resolve the same saved override — see this file's own layout-unification notes). EditorNodeRow (a structural superset) satisfies this type as-is. */
+type ProcedureFlowGraphNode = ProcedureTemplateNodeRow;
 
 /**
  * Flowchart viewer (Phase 3B: standardized visual language; Phase 4A:
@@ -265,6 +370,7 @@ export default function ProcedureFlowGraph({
   initialSelectedNodeId = null,
   errorFocusMode = false,
   editable = false,
+  useAutoLayoutForUnpositionedNodes = false,
   onNodeSelectionChange,
   onEdgeSelectionChange,
   onNodeDragStop,
@@ -287,6 +393,25 @@ export default function ProcedureFlowGraph({
   errorFocusMode?: boolean;
   /** Phase 4A — enables the 사용자 배치 layout option and node-drag reporting. Never enables editing of any other kind by itself (no free-form add/delete, no direct persistence) — the editor screen owns all of that via its own side panels and Server Actions. */
   editable?: boolean;
+  /**
+   * Phase 5C-5B — true for a manually-authored (never Excel-imported)
+   * template, i.e. `sourceType === "MANUAL"` (in practice: every
+   * TECHNICAL_TASK template) — its raw position_x/position_y are only ever
+   * the synthetic creation-order stack createProcedureTemplateNode assigns,
+   * never a real drawn layout, so they are not a meaningful "readable"
+   * fallback the way an EXCEL_IMPORT template's imported coordinates are.
+   * When true, any node with no saved user-position override falls back to
+   * the same topological/row-packed computation STAGE_SORTED already uses,
+   * instead of its raw (meaningless) position_x/position_y. Used by BOTH
+   * the read-only detail view and the editor, identically — see
+   * resolveBaselinePosition below — so the two screens never disagree
+   * about where an unpositioned node belongs, and a saved user-position
+   * override is honored the same way in both places too (see this file's
+   * own Phase 5C-5B usability-correction notes). Defaults false, so
+   * FULL_SERVICE/REFERENCE keep their exact existing fallback (raw
+   * position_x/position_y).
+   */
+  useAutoLayoutForUnpositionedNodes?: boolean;
   /** Fires whenever the selected node changes (including deselection), in addition to this component's own path-highlight/dim behavior — lets the editor open/close its node property panel in lockstep. */
   onNodeSelectionChange?: (nodeId: string | null) => void;
   /** Fires when an edge is clicked — this component has no built-in edge-selection visual state of its own, this is purely a notification for the editor's edge property panel. */
@@ -366,6 +491,50 @@ export default function ProcedureFlowGraph({
   const stageSortedLayout = useMemo(
     () => computeStageSortedLayout(nodeRows, edgeRows, worksheets),
     [nodeRows, edgeRows, worksheets]
+  );
+
+  /**
+   * Phase 5C-5B — the auto-layout fallback for a MANUAL template's
+   * unpositioned nodes (useAutoLayoutForUnpositionedNodes), deliberately
+   * NOT stageSortedLayout above: that's a row-*wrapping* flow layout with
+   * no concept of graph depth at all, so a straight linear A->B->C chain
+   * could land side by side in one row purely because it fits under
+   * ROW_MAX_WIDTH — the opposite of "vertical continuation forms a
+   * column." computeLayeredGraphLayout is a real depth-based layout
+   * instead. Only computed when actually needed (guarded, not just
+   * memoized) — this is graph-editor-core's own concern, no reason to pay
+   * for it on a 400+ node FULL_SERVICE template that will never use it.
+   */
+  const layeredLayout = useMemo(
+    () =>
+      useAutoLayoutForUnpositionedNodes
+        ? computeLayeredGraphLayout(
+            nodeRows.map((n) => ({
+              id: n.id,
+              sortOrder: n.sortOrder,
+              // Round-3 usability fix — center-based alignment: a
+              // multiline title can make one node wider than its neighbor,
+              // so aligning by left-edge x (the old behavior) no longer
+              // guarantees the same CENTER x, which is what actually
+              // determines whether the bottom/top handles line up into a
+              // straight connector. computeLayeredGraphLayout now needs
+              // each node's real width to align by center instead.
+              width: computeNodeDimensions({ title: n.title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(n.nodeType).semanticType].shape }).width,
+              // Round-2 usability fix — "layout and line geometry must
+              // agree": an unpositioned child under a manually-dragged
+              // parent must center on the parent's REAL rendered x, not a
+              // synthetic depth-based one this function would otherwise
+              // invent for it in isolation (see computeLayeredGraphLayout's
+              // own doc comment on pinnedX).
+              pinnedX: hasUserLayoutOverride({ userPositionX: n.userPositionX, userPositionY: n.userPositionY })
+                ? resolveEffectiveNodePosition({ positionX: n.positionX, positionY: n.positionY, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER").x
+                : undefined,
+            })),
+            edgeRows.map((e) => ({ fromNodeId: e.fromNodeId, toNodeId: e.toNodeId })),
+            { horizontal: 280, vertical: 150 }
+          )
+        : new Map<string, { x: number; y: number }>(),
+    [useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows]
   );
 
   // Problem 1 revision — semantic edge routing, computed only for the
@@ -496,15 +665,36 @@ export default function ProcedureFlowGraph({
     }
   }
 
+  /**
+   * Phase 5C-5B — the ONE non-STAGE_SORTED position resolution, shared by
+   * every non-preview layoutMode ("SOURCE" and "USER" used to disagree
+   * here — "SOURCE" ignored a saved userPosition override entirely, which
+   * is exactly the detail-vs-editor mismatch this phase's usability
+   * correction fixes). Priority: (1) a saved user-position override, if
+   * both coordinates are present and valid, wins unconditionally — this is
+   * also the drag-persisted position, so free node dragging round-trips
+   * correctly on refresh; (2) otherwise, a manually-authored template
+   * (useAutoLayoutForUnpositionedNodes) falls back to the same topological/
+   * row-packed computation STAGE_SORTED renders, since its raw
+   * position_x/position_y are only ever a meaningless creation-order stack;
+   * (3) otherwise, the real imported (or worksheet-band-adjusted) source
+   * coordinates, unchanged from this file's original behavior.
+   */
+  const resolveBaselinePosition = useCallback(
+    (n: ProcedureFlowGraphNode): { x: number; y: number } => {
+      if (hasUserLayoutOverride({ userPositionX: n.userPositionX, userPositionY: n.userPositionY })) {
+        return resolveEffectiveNodePosition({ positionX: n.positionX, positionY: n.positionY, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER");
+      }
+      const bandOffsetY = n.sourceWorksheet ? (bands.get(n.sourceWorksheet)?.yOffset ?? 0) : 0;
+      if (useAutoLayoutForUnpositionedNodes) return layeredLayout.get(n.id) ?? { x: n.positionX, y: n.positionY + bandOffsetY };
+      return { x: n.positionX, y: n.positionY + bandOffsetY };
+    },
+    [bands, useAutoLayoutForUnpositionedNodes, layeredLayout]
+  );
+
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
-      const bandAdjustedSource = { positionX: n.positionX, positionY: n.positionY + (n.sourceWorksheet ? bands.get(n.sourceWorksheet)?.yOffset ?? 0 : 0) };
-      const sourcePos =
-        layoutMode === "STAGE_SORTED"
-          ? stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }
-          : layoutMode === "USER"
-            ? resolveEffectiveNodePosition({ ...bandAdjustedSource, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER")
-            : { x: bandAdjustedSource.positionX, y: bandAdjustedSource.positionY };
+      const sourcePos = layoutMode === "STAGE_SORTED" ? (stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }) : resolveBaselinePosition(n);
       return {
         id: n.id,
         type: "procedureNode",
@@ -552,6 +742,7 @@ export default function ProcedureFlowGraph({
     bands,
     layoutMode,
     stageSortedLayout,
+    resolveBaselinePosition,
     worksheetFilter,
     worksheets,
     templateId,
@@ -627,8 +818,13 @@ export default function ProcedureFlowGraph({
           // LOOP_BACK/RETRY get a curved bezier (`type: "default"`) so a
           // big cross-stage jump reads visually differently from ordinary
           // local smoothstep flow — the two verified RFG LOOP_BACK edges
-          // must be "especially easy to identify."
-          type: config.routeStyle === "loopback-curve" ? "default" : "smoothstep",
+          // must be "especially easy to identify." Every other edge here
+          // renders through ProcedureDefaultEdge, which decides straight-
+          // vs-smoothstep itself, live, from React Flow's own authoritative
+          // sourceX/targetX (see that component's own doc comment) — never
+          // a pre-computed guess based on this file's own position/width
+          // estimates.
+          type: config.routeStyle === "loopback-curve" ? "default" : "procedureDefault",
           label,
           labelStyle,
           labelBgStyle,

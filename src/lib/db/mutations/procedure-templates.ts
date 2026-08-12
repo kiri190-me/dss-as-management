@@ -17,6 +17,7 @@ import {
   canManageTechnicalTemplates,
   canActorPublishTemplateOfCategory,
   canActorCreateDraftVersionOfCategory,
+  canActorManageTechnicalTemplateGraph,
 } from "@/lib/auth/technical-procedure-template-authorization";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_EQUIPMENT_TYPE_CODES, type ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
@@ -243,6 +244,80 @@ export async function createManualTechnicalProcedureTemplate(
       // (code, version=1) pair.
       return { ok: false, code: "CONFLICT", message: "이미 사용 중인 코드입니다." };
     }
+    throw err;
+  }
+}
+
+export type RenameTechnicalTemplateResult =
+  | { ok: true; id: string; name: string; updatedAt: string }
+  | { ok: false; code: ProcedureTemplateResultCode; message: string };
+
+/**
+ * Phase 5C-5B usability item 5 — rename a TECHNICAL_TASK DRAFT's name only
+ * (code stays the stable identity and is never editable here). Uses
+ * canActorManageTechnicalTemplateGraph, the same hard TECHNICAL_TASK-only
+ * gate (no SUPER_ADMIN carve-out for FULL_SERVICE) already established for
+ * the structural node/edge CRUD in procedure-template-editor.ts, since this
+ * is the same kind of brand-new capability no category had before.
+ *
+ * Deliberately does not insert a procedure_template_edit_history row: every
+ * existing action_type enum value is either node/edge-scoped or means
+ * something else entirely (CREATE_DRAFT_VERSION, SAVE_LAYOUT,
+ * VALIDATE_TEMPLATE, DISCARD_DRAFT_CHANGES) — none represent "template
+ * metadata changed", and adding a new enum value requires an ALTER TYPE
+ * migration this task explicitly does not authorize. updated_at is still
+ * bumped (and returned) so optimistic concurrency and the editor's existing
+ * refresh convention both keep working.
+ */
+export async function renameTechnicalProcedureTemplate(
+  templateId: string,
+  actorUserId: string,
+  newName: string,
+  expectedTemplateUpdatedAt: string
+): Promise<RenameTechnicalTemplateResult> {
+  const name = typeof newName === "string" ? newName.trim() : "";
+  if (name.length === 0) return { ok: false, code: "INVALID_INPUT", message: "이름을 입력해야 합니다." };
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await resolveEligibleActor(tx, actorUserId);
+      // Coarse pre-gate before any template row is looked up — same
+      // non-disclosure rationale as every other mutation in this file.
+      if (!canManageTechnicalTemplates(actor.role)) {
+        fail("FORBIDDEN", "이름 변경 권한이 없습니다.");
+      }
+
+      const [template] = await tx
+        .select({
+          id: procedureTemplates.id,
+          category: procedureTemplates.category,
+          status: procedureTemplates.status,
+          updatedAt: procedureTemplates.updatedAt,
+        })
+        .from(procedureTemplates)
+        .where(eq(procedureTemplates.id, templateId))
+        .for("update");
+      if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+      if (!canActorManageTechnicalTemplateGraph(actor.role, template.category)) {
+        fail("FORBIDDEN", "이 템플릿의 이름을 변경할 권한이 없습니다.");
+      }
+      if (template.status !== "DRAFT") {
+        fail("CONFLICT", "초안(DRAFT) 상태의 템플릿만 이름을 변경할 수 있습니다.");
+      }
+      if (template.updatedAt.toISOString() !== expectedTemplateUpdatedAt) {
+        fail("CONFLICT", "다른 사용자가 이 초안을 수정했습니다. 새로고침 후 다시 시도하세요.");
+      }
+
+      const [updated] = await tx
+        .update(procedureTemplates)
+        .set({ name, updatedAt: new Date() })
+        .where(eq(procedureTemplates.id, templateId))
+        .returning({ updatedAt: procedureTemplates.updatedAt });
+
+      return { ok: true, id: templateId, name, updatedAt: updated.updatedAt.toISOString() };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
     throw err;
   }
 }

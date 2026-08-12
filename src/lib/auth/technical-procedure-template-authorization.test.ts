@@ -9,6 +9,7 @@ import {
   canPublishTechnicalTemplates,
   canCreateTechnicalTemplateDraftVersion,
   canViewPublishedTechnicalTemplates,
+  canViewAllTechnicalTemplateStatuses,
   canActorEditTemplateOfCategory,
   canActorPublishTemplateOfCategory,
   canActorCreateDraftVersionOfCategory,
@@ -52,6 +53,12 @@ test("AS_ENGINEER, SALES, INVENTORY_MANAGER have zero technical-template managem
 test("canViewPublishedTechnicalTemplates matches canViewPublishedProcedureTemplates exactly for every role (reused, not duplicated policy)", () => {
   for (const role of ROLE_CODES) {
     assert.equal(canViewPublishedTechnicalTemplates(role), canViewPublishedProcedureTemplates(role), `mismatch for ${role}`);
+  }
+});
+
+test("canViewAllTechnicalTemplateStatuses matches canManageTechnicalTemplates exactly for every role", () => {
+  for (const role of ROLE_CODES) {
+    assert.equal(canViewAllTechnicalTemplateStatuses(role), canManageTechnicalTemplates(role), `mismatch for ${role}`);
   }
 });
 

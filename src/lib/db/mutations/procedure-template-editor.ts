@@ -340,6 +340,20 @@ export async function updateProcedureTemplateNode(
   expectedTemplateUpdatedAt: string,
   reason?: string | null
 ): Promise<NodeMutationResult> {
+  // Multiline titles (Shift+Enter) — trim only the leading/trailing whitespace
+  // around the whole title (same convention as createProcedureTemplateNode);
+  // an intentional internal `\n` must never be collapsed/normalized to a
+  // space here. A title that becomes blank after trimming (including one
+  // that was only whitespace/newlines) is rejected, same as node creation.
+  let normalizedPatch = patch;
+  if (patch.title !== undefined) {
+    const trimmedTitle = typeof patch.title === "string" ? patch.title.trim() : "";
+    if (trimmedTitle.length === 0) {
+      return { ok: false, code: "INVALID_INPUT", message: "제목을 입력해야 합니다." };
+    }
+    normalizedPatch = { ...patch, title: trimmedTitle };
+  }
+
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
@@ -356,11 +370,11 @@ export async function updateProcedureTemplateNode(
         sortOrder: node.sortOrder,
         isActive: node.isActive,
       };
-      const afterState = { ...beforeState, ...patch };
+      const afterState = { ...beforeState, ...normalizedPatch };
 
       await tx
         .update(procedureTemplateNodes)
-        .set({ ...patch, updatedAt: new Date() })
+        .set({ ...normalizedPatch, updatedAt: new Date() })
         .where(eq(procedureTemplateNodes.id, nodeId));
 
       await insertEditHistory(tx, {
@@ -388,10 +402,9 @@ export async function changeProcedureTemplateNodeType(
   nodeId: string,
   actorUserId: string,
   newNodeType: ProcedureNodeType,
-  reason: string,
+  reason: string | null | undefined,
   expectedTemplateUpdatedAt: string
 ): Promise<ChangeNodeTypeResult> {
-  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "노드 유형 변경에는 사유가 필요합니다." };
   if (!PROCEDURE_NODE_TYPE_CODES.includes(newNodeType)) {
     return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
   }
@@ -403,7 +416,17 @@ export async function changeProcedureTemplateNodeType(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+
+      // Phase 5C-5B usability — TECHNICAL_TASK authoring never requires a
+      // reason for an ordinary edit; FULL_SERVICE/REFERENCE keep the
+      // original mandatory-reason rule unchanged. Category is only known
+      // once the template row is loaded, so this check cannot run before
+      // the transaction the way it used to.
+      if (template.category !== "TECHNICAL_TASK" && isBlank(reason)) {
+        fail("INVALID_INPUT", "노드 유형 변경에는 사유가 필요합니다.");
+      }
+      const storedReason = isBlank(reason) ? null : reason!.trim();
 
       const beforeState = { nodeType: node.nodeType };
       const afterState = { nodeType: newNodeType };
@@ -416,7 +439,7 @@ export async function changeProcedureTemplateNodeType(
         nodeId,
         beforeState,
         afterState,
-        reason,
+        reason: storedReason,
         actorUserId: actor.id,
       });
 
@@ -674,10 +697,9 @@ export async function retargetProcedureTemplateEdge(
   actorUserId: string,
   newFromNodeId: string,
   newToNodeId: string,
-  reason: string,
+  reason: string | null | undefined,
   expectedTemplateUpdatedAt: string
 ): Promise<RetargetEdgeResult> {
-  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "분기 대상 변경에는 사유가 필요합니다." };
   if (newFromNodeId === newToNodeId) return { ok: false, code: "SELF_EDGE", message: "분기의 시작과 대상 노드는 같을 수 없습니다." };
 
   try {
@@ -687,7 +709,13 @@ export async function retargetProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+
+      // Phase 5C-5B usability — see changeProcedureTemplateNodeType's own note.
+      if (template.category !== "TECHNICAL_TASK" && isBlank(reason)) {
+        fail("INVALID_INPUT", "분기 대상 변경에는 사유가 필요합니다.");
+      }
+      const storedReason = isBlank(reason) ? null : reason!.trim();
 
       await loadNodeInTemplate(tx, edge.procedureTemplateId, newFromNodeId);
       await loadNodeInTemplate(tx, edge.procedureTemplateId, newToNodeId);
@@ -704,7 +732,7 @@ export async function retargetProcedureTemplateEdge(
         edgeId,
         beforeState,
         afterState,
-        reason,
+        reason: storedReason,
         actorUserId: actor.id,
       });
 
@@ -725,7 +753,7 @@ export type CreateEdgeInput = {
   toNodeId: string;
   branchType: ProcedureBranchType;
   branchLabel?: string | null;
-  reason: string;
+  reason?: string | null;
 };
 
 export type CreateEdgeResult = (NodeMutationResult & { ok: true; edgeId: string; structuralValidation: StructuralValidationSummary }) | Failure;
@@ -736,7 +764,6 @@ export async function createProcedureTemplateEdge(
   input: CreateEdgeInput,
   expectedTemplateUpdatedAt: string
 ): Promise<CreateEdgeResult> {
-  if (isBlank(input.reason)) return { ok: false, code: "INVALID_INPUT", message: "새 연결 추가에는 사유가 필요합니다." };
   if (input.fromNodeId === input.toNodeId) return { ok: false, code: "SELF_EDGE", message: "분기의 시작과 대상 노드는 같을 수 없습니다." };
   if (input.branchType === "CUSTOM" && isBlank(input.branchLabel)) {
     return { ok: false, code: "INVALID_INPUT", message: "사용자 정의(CUSTOM) 분기에는 라벨이 필요합니다." };
@@ -745,7 +772,13 @@ export async function createProcedureTemplateEdge(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+
+      // Phase 5C-5B usability — see changeProcedureTemplateNodeType's own note.
+      if (template.category !== "TECHNICAL_TASK" && isBlank(input.reason)) {
+        fail("INVALID_INPUT", "새 연결 추가에는 사유가 필요합니다.");
+      }
+      const storedReason = isBlank(input.reason) ? null : input.reason!.trim();
 
       await loadNodeInTemplate(tx, templateId, input.fromNodeId);
       await loadNodeInTemplate(tx, templateId, input.toNodeId);
@@ -778,7 +811,7 @@ export async function createProcedureTemplateEdge(
         edgeId: inserted.id,
         beforeState: null,
         afterState: { fromNodeId: input.fromNodeId, toNodeId: input.toNodeId, branchType: input.branchType, branchLabel: input.branchLabel ?? null },
-        reason: input.reason,
+        reason: storedReason,
         actorUserId: actor.id,
       });
 
@@ -955,6 +988,20 @@ function serializeEdgeSnapshot(
 export type CreateNodeInput = {
   nodeType: ManualTechnicalNodeType;
   title: string;
+  /**
+   * Phase 5C-5B usability — optional explicit initial position (e.g. "place
+   * directly below the currently-selected node, center-aligned" — computed
+   * client-side from that node's own effective position). When provided, it
+   * becomes BOTH position_x/y and user_position_x/y (same convention
+   * insertProcedureTemplateNodeOnEdge already uses for a route-point-placed
+   * node), so the placement survives a refresh regardless of the auto-
+   * layout fallback ProcedureFlowGraph applies to any node with no saved
+   * override. When omitted (no node was selected), falls back to the
+   * original default: position_x=0, position_y=(max existing position_y)+150,
+   * no user-position override — unchanged from this function's original
+   * behavior.
+   */
+  position?: { x: number; y: number } | null;
 };
 
 export type CreateNodeResult = { ok: true; nodeId: string; updatedAt: string } | Failure;
@@ -968,8 +1015,10 @@ export type CreateNodeResult = { ok: true; nodeId: string; updatedAt: string } |
  * or trusting client input, and the existing unique(template_id, node_code)
  * index remains a defense-in-depth backstop rather than the primary
  * uniqueness mechanism. Position defaults to a simple vertical stack
- * (x=0, y = previous max + 150) — real placement is left to the existing
- * saveProcedureTemplateLayout "저장" action, same as every other node.
+ * (x=0, y = previous max + 150) unless the caller supplies an explicit
+ * `input.position` — real free-form placement is otherwise left to the
+ * existing saveProcedureTemplateLayout "저장" action, same as every other
+ * node.
  */
 export async function createProcedureTemplateNode(
   templateId: string,
@@ -981,6 +1030,9 @@ export async function createProcedureTemplateNode(
   if (title.length === 0) return { ok: false, code: "INVALID_INPUT", message: "제목을 입력해야 합니다." };
   if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
     return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
+  }
+  if (input.position && (!Number.isFinite(input.position.x) || !Number.isFinite(input.position.y))) {
+    return { ok: false, code: "INVALID_INPUT", message: "노드 위치가 올바르지 않습니다." };
   }
 
   try {
@@ -996,13 +1048,24 @@ export async function createProcedureTemplateNode(
         .limit(1);
       const nextSortOrder = (maxSortRow?.sortOrder ?? -1) + 1;
 
-      const [maxPositionYRow] = await tx
-        .select({ positionY: procedureTemplateNodes.positionY })
-        .from(procedureTemplateNodes)
-        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
-        .orderBy(desc(procedureTemplateNodes.positionY))
-        .limit(1);
-      const nextPositionY = maxPositionYRow ? maxPositionYRow.positionY + 150 : 0;
+      let positionX = 0;
+      let positionY = 0;
+      let userPositionX: number | null = null;
+      let userPositionY: number | null = null;
+      if (input.position) {
+        positionX = input.position.x;
+        positionY = input.position.y;
+        userPositionX = input.position.x;
+        userPositionY = input.position.y;
+      } else {
+        const [maxPositionYRow] = await tx
+          .select({ positionY: procedureTemplateNodes.positionY })
+          .from(procedureTemplateNodes)
+          .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
+          .orderBy(desc(procedureTemplateNodes.positionY))
+          .limit(1);
+        positionY = maxPositionYRow ? maxPositionYRow.positionY + 150 : 0;
+      }
 
       const nodeId = randomUUID();
       const nodeCode = `manual-${nodeId}`;
@@ -1015,8 +1078,10 @@ export async function createProcedureTemplateNode(
           nodeCode,
           nodeType: input.nodeType,
           title,
-          positionX: 0,
-          positionY: nextPositionY,
+          positionX,
+          positionY,
+          userPositionX,
+          userPositionY,
           sortOrder: nextSortOrder,
           sourceWorksheet: null,
           sourceShapeId: null,
@@ -1068,10 +1133,14 @@ export type DeleteEdgeResult = { ok: true; updatedAt: string } | Failure | EdgeH
 export async function deleteProcedureTemplateEdge(
   edgeId: string,
   actorUserId: string,
-  reason: string,
+  reason: string | null | undefined,
   expectedTemplateUpdatedAt: string
 ): Promise<DeleteEdgeResult> {
-  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "분기 삭제에는 사유가 필요합니다." };
+  // Phase 5C-5B usability — this mutation is already TECHNICAL_TASK-only
+  // (assertTechnicalGraphEditable below), so a reason is never mandatory
+  // here at all, unlike the shared FULL_SERVICE+TECHNICAL_TASK functions
+  // above.
+  const storedReason = isBlank(reason) ? null : reason!.trim();
 
   try {
     return await db.transaction(async (tx) => {
@@ -1128,7 +1197,7 @@ export async function deleteProcedureTemplateEdge(
         edgeId: edge.id,
         beforeState,
         afterState: null,
-        reason,
+        reason: storedReason,
         actorUserId: actor.id,
       });
 
@@ -1162,10 +1231,11 @@ export type DeleteNodeResult = { ok: true; updatedAt: string } | Failure | NodeH
 export async function deleteProcedureTemplateNode(
   nodeId: string,
   actorUserId: string,
-  reason: string,
+  reason: string | null | undefined,
   expectedTemplateUpdatedAt: string
 ): Promise<DeleteNodeResult> {
-  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "노드 삭제에는 사유가 필요합니다." };
+  // Phase 5C-5B usability — already TECHNICAL_TASK-only (assertTechnicalGraphEditable below); a reason is never mandatory here.
+  const storedReason = isBlank(reason) ? null : reason!.trim();
 
   try {
     return await db.transaction(async (tx) => {
@@ -1241,7 +1311,7 @@ export async function deleteProcedureTemplateNode(
         nodeId: node.id,
         beforeState,
         afterState: null,
-        reason,
+        reason: storedReason,
         actorUserId: actor.id,
       });
 
@@ -1257,6 +1327,168 @@ export async function deleteProcedureTemplateNode(
     // NodeHasDependentContentFailure payload (never the edge-shaped one) —
     // safe to narrow here.
     if (err instanceof DetailedEditorFailure) return err.result as NodeHasConnectedEdgesFailure | NodeHasDependentContentFailure;
+    throw err;
+  }
+}
+
+// ---- insert node on an edge's route point (split) ----
+
+export type InsertNodeOnEdgeInput = {
+  nodeType: ManualTechnicalNodeType;
+  title: string;
+  /** Flow-space coordinates of the route point the caller split at — becomes both the new node's position_x/position_y (same "natural placement" convention createProcedureTemplateNode uses) AND its user_position_x/y override, so it renders exactly there regardless of the auto-layout fallback a MANUAL template's unpositioned nodes otherwise get (see ProcedureFlowGraph's useAutoLayoutForUnpositionedNodes). */
+  position: { x: number; y: number };
+};
+
+export type InsertNodeOnEdgeResult = { ok: true; nodeId: string; firstEdgeId: string; secondEdgeId: string; updatedAt: string } | Failure;
+
+/**
+ * Splits an existing TECHNICAL_TASK DRAFT edge (A -[branch]-> B) at a
+ * chosen route point into two: A -[the exact same branchType/branchLabel/
+ * conditionDefinition, untouched]-> NEW, and NEW -[a plain DEFAULT
+ * continuation, never a copy of A's condition]-> B. A route point is a
+ * routing/geometry detail, not a second decision — duplicating A's branch
+ * semantics onto the new edge would silently change the graph's meaning.
+ *
+ * One transaction, one authoritative mutation (no client-side multi-step
+ * sequence that could leave A->NEW without NEW->B): create the node,
+ * retarget the first edge's toNodeId (its own transaction-internal
+ * equivalent of retargetProcedureTemplateEdge — that function cannot be
+ * called directly here, since it opens its own separate transaction, which
+ * would break atomicity with the rest of this split), create the second
+ * edge, and write three history rows reusing existing action types
+ * (CREATE_NODE / RETARGET_EDGE / CREATE_EDGE — no new enum value, no
+ * migration) — all inside the same db.transaction(), so a failure at any
+ * step rolls back everything.
+ */
+export async function insertProcedureTemplateNodeOnEdge(
+  edgeId: string,
+  actorUserId: string,
+  input: InsertNodeOnEdgeInput,
+  expectedTemplateUpdatedAt: string
+): Promise<InsertNodeOnEdgeResult> {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (title.length === 0) return { ok: false, code: "INVALID_INPUT", message: "제목을 입력해야 합니다." };
+  if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
+    return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
+  }
+  if (!Number.isFinite(input.position.x) || !Number.isFinite(input.position.y)) {
+    return { ok: false, code: "INVALID_INPUT", message: "노드 위치가 올바르지 않습니다." };
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireEditor(tx, actorUserId);
+
+      const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
+      if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
+
+      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+
+      // Defensive invariant check — same rationale as deleteProcedureTemplateEdge's own: a DRAFT edge should be structurally unreachable from procedure_case_execution_nodes (executions only ever reference PUBLISHED rows), but retargeting a referenced edge's toNodeId would be just as corrupting as deleting it, so this is never assumed silently either.
+      const [executionRef] = await tx
+        .select({ id: procedureCaseExecutionNodes.id })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.selectedOutgoingEdgeId, edgeId))
+        .limit(1);
+      if (executionRef) {
+        fail("EXECUTION_REFERENCE_CONFLICT", "이 분기가 실행 기록에서 참조되고 있어 노드를 삽입할 수 없습니다.");
+      }
+
+      const nodeId = randomUUID();
+      const nodeCode = `manual-${nodeId}`;
+
+      const [maxNodeSortRow] = await tx
+        .select({ sortOrder: procedureTemplateNodes.sortOrder })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, edge.procedureTemplateId))
+        .orderBy(desc(procedureTemplateNodes.sortOrder))
+        .limit(1);
+      const nextNodeSortOrder = (maxNodeSortRow?.sortOrder ?? -1) + 1;
+
+      const [insertedNode] = await tx
+        .insert(procedureTemplateNodes)
+        .values({
+          id: nodeId,
+          procedureTemplateId: edge.procedureTemplateId,
+          nodeCode,
+          nodeType: input.nodeType,
+          title,
+          positionX: input.position.x,
+          positionY: input.position.y,
+          userPositionX: input.position.x,
+          userPositionY: input.position.y,
+          sortOrder: nextNodeSortOrder,
+          sourceWorksheet: null,
+          sourceShapeId: null,
+          sourceCellRange: null,
+          isActive: true,
+        })
+        .returning();
+
+      const originalToNodeId = edge.toNodeId;
+
+      await tx.update(procedureTemplateEdges).set({ toNodeId: nodeId }).where(eq(procedureTemplateEdges.id, edgeId));
+
+      const [maxEdgeSortRow] = await tx
+        .select({ sortOrder: procedureTemplateEdges.sortOrder })
+        .from(procedureTemplateEdges)
+        .where(and(eq(procedureTemplateEdges.procedureTemplateId, edge.procedureTemplateId), eq(procedureTemplateEdges.fromNodeId, nodeId)))
+        .orderBy(desc(procedureTemplateEdges.sortOrder))
+        .limit(1);
+      const nextEdgeSortOrder = (maxEdgeSortRow?.sortOrder ?? -1) + 1;
+
+      const [secondEdge] = await tx
+        .insert(procedureTemplateEdges)
+        .values({
+          procedureTemplateId: edge.procedureTemplateId,
+          fromNodeId: nodeId,
+          toNodeId: originalToNodeId,
+          branchType: "DEFAULT",
+          branchLabel: null,
+          sortOrder: nextEdgeSortOrder,
+          sourceConnectorId: null,
+          clonedFromEdgeId: null,
+        })
+        .returning({ id: procedureTemplateEdges.id });
+
+      const splitReason = `경로점 위치에 새 노드를 삽입하며 분기를 분할했습니다 (${nodeCode}).`;
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: edge.procedureTemplateId,
+        actionType: "CREATE_NODE",
+        nodeId: insertedNode.id,
+        beforeState: null,
+        afterState: serializeNodeSnapshot(insertedNode),
+        reason: null,
+        actorUserId: actor.id,
+      });
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: edge.procedureTemplateId,
+        actionType: "RETARGET_EDGE",
+        edgeId: edge.id,
+        beforeState: { fromNodeId: edge.fromNodeId, toNodeId: originalToNodeId, branchType: edge.branchType },
+        afterState: { fromNodeId: edge.fromNodeId, toNodeId: nodeId, branchType: edge.branchType },
+        reason: splitReason,
+        actorUserId: actor.id,
+      });
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: edge.procedureTemplateId,
+        actionType: "CREATE_EDGE",
+        edgeId: secondEdge.id,
+        beforeState: null,
+        afterState: { fromNodeId: nodeId, toNodeId: originalToNodeId, branchType: "DEFAULT", branchLabel: null },
+        reason: splitReason,
+        actorUserId: actor.id,
+      });
+
+      const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);
+      return { ok: true, nodeId: insertedNode.id, firstEdgeId: edge.id, secondEdgeId: secondEdge.id, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof EditorMutationError) return err.result;
     throw err;
   }
 }

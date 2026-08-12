@@ -31,9 +31,12 @@ import {
   createProcedureTemplateNode,
   deleteProcedureTemplateNode,
   deleteProcedureTemplateEdge,
+  insertProcedureTemplateNodeOnEdge,
 } from "./procedure-template-editor";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import { MAX_ROUTE_POINTS } from "@/lib/graph-editor-core/routing";
+import { getProcedureTemplateForEditor } from "../queries/procedure-template-editor";
+import { getProcedureTemplateDetail } from "../queries/procedure-templates";
 
 /**
  * Phase 4A integration tests for the controlled-editor mutation layer.
@@ -1393,17 +1396,20 @@ describe("deleteProcedureTemplateEdge", () => {
     if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
   });
 
-  test("a blank reason is rejected, and no DELETE_EDGE history row is written", async () => {
+  test("Phase 5C-5B usability: a blank reason no longer blocks the delete — it succeeds, and the DELETE_EDGE history row's reason is null", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("delete-edge-blank-reason"));
     const seed = await seedTechnicalGraph(templateId);
     const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "   ", seed.updatedAt);
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    assert.equal(result.ok, true, JSON.stringify(result));
 
     const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
-    assert.ok(stillThere);
-    const history = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
-    assert.equal(history.filter((h) => h.actionType === "DELETE_EDGE").length, 0);
+    assert.equal(stillThere, undefined, "the edge must actually be deleted");
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_EDGE")));
+    assert.ok(history, "a DELETE_EDGE history row must still be written — optional reason never means no audit trail");
+    assert.equal(history.reason, null, "a whitespace-only reason normalizes to null, never an empty string");
   });
 
   test("using a different technical template's revision token is rejected (STALE_REVISION) — the token is scoped to the edge's own owning template, never guessable/reusable across templates", async () => {
@@ -1608,7 +1614,7 @@ describe("deleteProcedureTemplateNode", () => {
     if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
   });
 
-  test("a blank reason is rejected, and no DELETE_NODE history row is written", async () => {
+  test("Phase 5C-5B usability: a blank reason no longer blocks the delete — it succeeds, and the DELETE_NODE history row's reason is null", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("delete-node-blank-reason"));
     const templateRow = await loadTemplateRow(templateId);
     const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
@@ -1616,13 +1622,16 @@ describe("deleteProcedureTemplateNode", () => {
     if (!created.ok) return;
 
     const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "", created.updatedAt);
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    assert.equal(result.ok, true, JSON.stringify(result));
 
     const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
-    assert.ok(stillThere);
-    const history = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
-    assert.equal(history.filter((h) => h.actionType === "DELETE_NODE").length, 0);
+    assert.equal(stillThere, undefined, "the node must actually be deleted");
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_NODE")));
+    assert.ok(history, "a DELETE_NODE history row must still be written — optional reason never means no audit trail");
+    assert.equal(history.reason, null);
   });
 
   test("using a different technical template's revision token is rejected (STALE_REVISION)", async () => {
@@ -1688,9 +1697,10 @@ describe("Phase 5C-5B-1 transaction atomicity", () => {
     const rejected1 = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "사유", seed.updatedAt);
     assert.equal(rejected1.ok, false);
 
-    // 2. rejected delete (blank reason) — no DELETE_EDGE row.
-    const rejected2 = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "", seed.updatedAt);
+    // 2. rejected delete (nonexistent edge id — reason is optional now, so this scenario no longer uses a blank reason) — no DELETE_EDGE row.
+    const rejected2 = await deleteProcedureTemplateEdge(randomUUID(), superAdminId, "사유", seed.updatedAt);
     assert.equal(rejected2.ok, false);
+    if (!rejected2.ok) assert.equal(rejected2.code, "NOT_FOUND");
 
     // 3. rejected create (bad node type) — no CREATE_NODE row.
     const rejected3 = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "CHECKLIST" as never, title: "x" }, seed.updatedAt);
@@ -1705,5 +1715,456 @@ describe("Phase 5C-5B-1 transaction atomicity", () => {
     assert.equal(success.ok, true, JSON.stringify(success));
     const historyAfterSuccess = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
     assert.equal(historyAfterSuccess.length, 4);
+  });
+});
+
+/**
+ * Phase 5C-5B usability follow-up — confirms the EXISTING
+ * updateProcedureTemplateEdge/saveProcedureTemplateLayout mutations (no new
+ * mutation added) behave identically on a TECHNICAL_TASK DRAFT as they
+ * already do for FULL_SERVICE: connection-type change persists with CUSTOM
+ * branch-label validation intact, and a dragged node position persists via
+ * userPositionX/Y (never positionX/Y) — both now reachable through the
+ * technical editor UI (EdgePropertyPanel / node drag + defaultLayoutMode).
+ */
+describe("Phase 5C-5B usability follow-up: connection-type editing and node-drag persistence on TECHNICAL_TASK", () => {
+  test("changing an edge's branch type on a TECHNICAL_TASK DRAFT persists after a fresh read, and CUSTOM branch-label validation still applies", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("edge-type-technical"));
+    const seed = await seedTechnicalGraph(templateId, adminId);
+
+    const blankLabel = await updateProcedureTemplateEdge(seed.edgeId, adminId, { branchType: "CUSTOM", branchLabel: null }, seed.updatedAt);
+    assert.equal(blankLabel.ok, false, "CUSTOM without a label must still be rejected, same as FULL_SERVICE");
+    if (!blankLabel.ok) assert.equal(blankLabel.code, "INVALID_INPUT");
+
+    const result = await updateProcedureTemplateEdge(seed.edgeId, adminId, { branchType: "CUSTOM", branchLabel: "특수 조건" }, seed.updatedAt, "연결 유형 변경");
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.structuralValidation !== undefined, true, "structural re-validation must still run, unweakened");
+
+    const [persisted] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.equal(persisted.branchType, "CUSTOM");
+    assert.equal(persisted.branchLabel, "특수 조건");
+  });
+
+  test("a dragged node position on a TECHNICAL_TASK DRAFT persists via userPositionX/Y through saveProcedureTemplateLayout, never touching positionX/Y (source coordinates)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("node-drag-technical"));
+    const seed = await seedTechnicalGraph(templateId, superAdminId);
+    const [nodeBefore] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+
+    const result = await saveProcedureTemplateLayout(templateId, superAdminId, [{ nodeId: seed.nodeAId, x: 321, y: 654 }], [], seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [persisted] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    assert.equal(persisted.userPositionX, 321);
+    assert.equal(persisted.userPositionY, 654);
+    assert.equal(persisted.positionX, nodeBefore.positionX, "position_x (source coordinate) must never change");
+    assert.equal(persisted.positionY, nodeBefore.positionY, "position_y (source coordinate) must never change");
+  });
+
+  test("a read-only actor (AS_ENGINEER) cannot persist a layout move on a TECHNICAL_TASK DRAFT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("node-drag-readonly"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const result = await saveProcedureTemplateLayout(templateId, asEngineerId, [{ nodeId: seed.nodeAId, x: 10, y: 10 }], [], seed.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    assert.equal(node.userPositionX, null, "a rejected save must never persist a partial position");
+  });
+});
+
+/** Phase 5C-5B usability follow-up — insertProcedureTemplateNodeOnEdge: splitting a route point into a new node. */
+describe("insertProcedureTemplateNodeOnEdge", () => {
+  async function seedCustomEdge(templateId: string, actorId = superAdminId) {
+    const templateRow = await loadTemplateRow(templateId);
+    const n1 = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "시작" }, templateRow.updatedAt.toISOString());
+    assert.equal(n1.ok, true);
+    if (!n1.ok) throw new Error("unreachable");
+    const n2 = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "끝" }, n1.updatedAt);
+    assert.equal(n2.ok, true);
+    if (!n2.ok) throw new Error("unreachable");
+    const edge = await createProcedureTemplateEdge(templateId, actorId, { fromNodeId: n1.nodeId, toNodeId: n2.nodeId, branchType: "CUSTOM", branchLabel: "특수 조건", reason: "테스트" }, n2.updatedAt);
+    assert.equal(edge.ok, true);
+    if (!edge.ok) throw new Error("unreachable");
+    return { nodeAId: n1.nodeId, nodeBId: n2.nodeId, edgeId: edge.edgeId, updatedAt: edge.updatedAt };
+  }
+
+  test("splits an edge: A->NEW preserves original branch semantics (CUSTOM label), NEW->B is a plain DEFAULT continuation, and the route-point coordinate becomes the new node's user position", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-basic"));
+    const seed = await seedCustomEdge(templateId);
+
+    const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "INSPECTION", title: "삽입 노드", position: { x: 111, y: 222 } }, seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const [firstEdge] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.equal(firstEdge.fromNodeId, seed.nodeAId);
+    assert.equal(firstEdge.toNodeId, result.nodeId, "the original edge must now point at the new node");
+    assert.equal(firstEdge.branchType, "CUSTOM", "original branch semantics must be preserved");
+    assert.equal(firstEdge.branchLabel, "특수 조건");
+
+    const [secondEdge] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, result.secondEdgeId));
+    assert.equal(secondEdge.fromNodeId, result.nodeId);
+    assert.equal(secondEdge.toNodeId, seed.nodeBId);
+    assert.equal(secondEdge.branchType, "DEFAULT", "the new continuation edge must never duplicate CUSTOM/YES/NO semantics");
+    assert.equal(secondEdge.branchLabel, null);
+
+    const allEdges = await loadEdges(templateId);
+    assert.equal(allEdges.length, 2, "exactly the (retargeted) original edge and the new continuation edge — nothing else");
+
+    const [newNode] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(newNode.nodeType, "INSPECTION");
+    assert.equal(newNode.title, "삽입 노드");
+    assert.equal(newNode.userPositionX, 111, "the route-point coordinate becomes the new node's user position");
+    assert.equal(newNode.userPositionY, 222);
+  });
+
+  test("writes exactly CREATE_NODE, RETARGET_EDGE, and CREATE_EDGE history rows (existing action types — no schema change), with correct before/after state", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-history"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "TASK", title: "삽입", position: { x: 5, y: 5 } }, seed.updatedAt);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const history = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId))
+      .orderBy(procedureTemplateEditHistory.createdAt);
+    // seedTechnicalGraph itself already wrote 3 rows (CREATE_NODE x2, CREATE_EDGE x1); the split adds exactly 3 more.
+    const splitRows = history.slice(3);
+    assert.equal(splitRows.length, 3);
+    assert.equal(splitRows[0].actionType, "CREATE_NODE");
+    assert.equal(splitRows[0].nodeId, result.nodeId);
+    assert.equal(splitRows[1].actionType, "RETARGET_EDGE");
+    assert.equal(splitRows[1].edgeId, seed.edgeId);
+    assert.deepEqual(splitRows[1].beforeState, { fromNodeId: seed.nodeAId, toNodeId: seed.nodeBId, branchType: "DEFAULT" });
+    assert.deepEqual(splitRows[1].afterState, { fromNodeId: seed.nodeAId, toNodeId: result.nodeId, branchType: "DEFAULT" });
+    assert.equal(splitRows[2].actionType, "CREATE_EDGE");
+    assert.equal(splitRows[2].edgeId, result.secondEdgeId);
+  });
+
+  test("FULL_SERVICE: node insertion through this NEW mutation fails even for SUPER_ADMIN, and nothing changes", async () => {
+    const templateId = await createDraft(uniqueCode("split-full-service"));
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await insertProcedureTemplateNodeOnEdge(edges[0].id, superAdminId, { nodeType: "TASK", title: "x", position: { x: 0, y: 0 } }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    const edgesAfter = await loadEdges(templateId);
+    assert.equal(edgesAfter.length, edges.length, "no edge must be added/changed on a denied FULL_SERVICE attempt");
+  });
+
+  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-denied"));
+    const seed = await seedTechnicalGraph(templateId);
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, actorId, { nodeType: "TASK", title: "x", position: { x: 0, y: 0 } }, seed.updatedAt);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("a PUBLISHED technical template's edge cannot be split (NOT_DRAFT)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-published"));
+    const seed = await seedTechnicalGraph(templateId);
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+    const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "TASK", title: "x", position: { x: 0, y: 0 } }, seed.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
+  });
+
+  test("a blank title and an out-of-allow-list node type are both rejected with INVALID_INPUT, and the split is fully atomic (nothing partially created)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-invalid"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const blankTitle = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "TASK", title: "   ", position: { x: 0, y: 0 } }, seed.updatedAt);
+    assert.equal(blankTitle.ok, false);
+    if (!blankTitle.ok) assert.equal(blankTitle.code, "INVALID_INPUT");
+
+    const badType = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "CHECKLIST" as never, title: "x", position: { x: 0, y: 0 } }, seed.updatedAt);
+    assert.equal(badType.ok, false);
+    if (!badType.ok) assert.equal(badType.code, "INVALID_INPUT");
+
+    const nodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
+    assert.equal(nodes.length, 2, "still exactly the 2 seed nodes — nothing partially created by either rejected attempt");
+    const edges = await loadEdges(templateId);
+    assert.equal(edges.length, 1, "still exactly the 1 seed edge, unretargeted");
+  });
+
+  test("a stale expectedTemplateUpdatedAt token is rejected (STALE_REVISION), and the edge/graph is left untouched", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-stale"));
+    const seed = await seedTechnicalGraph(templateId);
+    const staleToken = seed.updatedAt;
+
+    const bump = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "무관한 변경" }, staleToken);
+    assert.equal(bump.ok, true);
+
+    const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, superAdminId, { nodeType: "TASK", title: "x", position: { x: 0, y: 0 } }, staleToken);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "STALE_REVISION");
+
+    const [edgeAfter] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.equal(edgeAfter.toNodeId, seed.nodeBId, "the edge must still point at its original target after a rejected split");
+  });
+});
+
+/**
+ * Phase 5C-5B usability correction — the detail view (getProcedureTemplateDetail)
+ * previously never fetched userPositionX/userPositionY at all (a
+ * pre-existing gap, not introduced this phase), so it could never reflect
+ * a saved 사용자 배치 override the editor (getProcedureTemplateForEditor)
+ * already showed — the root cause of the detail-vs-editor layout mismatch.
+ * These tests prove both read models now agree.
+ */
+describe("Phase 5C-5B usability correction: detail and editor read models expose the same saved position", () => {
+  test("getProcedureTemplateDetail now includes userPositionX/userPositionY, matching getProcedureTemplateForEditor exactly, after a drag-save", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("detail-editor-consistency"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const saved = await saveProcedureTemplateLayout(templateId, superAdminId, [{ nodeId: created.nodeId, x: 456, y: 789 }], [], created.updatedAt);
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+
+    const editorView = await getProcedureTemplateForEditor(templateId);
+    const detailView = await getProcedureTemplateDetail(templateId);
+    assert.ok(editorView);
+    assert.ok(detailView);
+    const editorNode = editorView!.nodes.find((n) => n.id === created.nodeId);
+    const detailNode = detailView!.nodes.find((n) => n.id === created.nodeId);
+    assert.ok(editorNode);
+    assert.ok(detailNode);
+    assert.equal(detailNode!.userPositionX, 456);
+    assert.equal(detailNode!.userPositionY, 789);
+    assert.equal(detailNode!.userPositionX, editorNode!.userPositionX, "detail and editor must report the identical saved override");
+    assert.equal(detailNode!.userPositionY, editorNode!.userPositionY);
+  });
+
+  test("a node with no saved override reports userPositionX/userPositionY as null in both read models", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("detail-editor-no-override"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const editorView = await getProcedureTemplateForEditor(templateId);
+    const detailView = await getProcedureTemplateDetail(templateId);
+    const editorNode = editorView!.nodes.find((n) => n.id === created.nodeId);
+    const detailNode = detailView!.nodes.find((n) => n.id === created.nodeId);
+    assert.equal(detailNode!.userPositionX, null);
+    assert.equal(detailNode!.userPositionY, null);
+    assert.equal(editorNode!.userPositionX, null);
+    assert.equal(editorNode!.userPositionY, null);
+  });
+});
+
+/**
+ * Phase 5C-5B usability — reasons become optional for TECHNICAL_TASK
+ * authoring. deleteProcedureTemplateNode/deleteProcedureTemplateEdge were
+ * already TECHNICAL_TASK-only, so they're unconditionally optional now;
+ * changeProcedureTemplateNodeType/retargetProcedureTemplateEdge/
+ * createProcedureTemplateEdge are shared with FULL_SERVICE, so they must
+ * stay category-aware — optional only for TECHNICAL_TASK, still mandatory
+ * for FULL_SERVICE (no permission broadening).
+ */
+describe("Phase 5C-5B usability: reasons are optional for TECHNICAL_TASK, still mandatory for FULL_SERVICE", () => {
+  test("deleteProcedureTemplateNode/deleteProcedureTemplateEdge: blank/omitted reason succeeds, history.reason = null; a supplied reason is trimmed and stored", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("optional-reason-delete"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const deletedEdge = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "", seed.updatedAt);
+    assert.equal(deletedEdge.ok, true, JSON.stringify(deletedEdge));
+    if (!deletedEdge.ok) return;
+    const [edgeHistory] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_EDGE")));
+    assert.equal(edgeHistory.reason, null);
+
+    const deletedNode = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "  실제 사유  ", deletedEdge.updatedAt);
+    assert.equal(deletedNode.ok, true, JSON.stringify(deletedNode));
+    const [nodeHistory] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_NODE")));
+    assert.equal(nodeHistory.reason, "실제 사유", "a supplied reason must still be trimmed and stored");
+  });
+
+  test("changeProcedureTemplateNodeType: blank reason succeeds on TECHNICAL_TASK (reason=null); still mandatory (INVALID_INPUT) on FULL_SERVICE", async () => {
+    const technicalId = await createTechnicalDraft(uniqueCode("optional-reason-type-technical"));
+    const techRow = await loadTemplateRow(technicalId);
+    const created = await createProcedureTemplateNode(technicalId, superAdminId, { nodeType: "TASK", title: "노드" }, techRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const result = await changeProcedureTemplateNodeType(created.nodeId, superAdminId, "INSPECTION", "", created.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, technicalId), eq(procedureTemplateEditHistory.actionType, "CHANGE_NODE_TYPE")));
+    assert.equal(history.reason, null);
+
+    const fullServiceId = await createDraft(uniqueCode("optional-reason-type-full-service"));
+    const fsNodes = await loadNodesByCode(fullServiceId);
+    const fsRow = await loadTemplateRow(fullServiceId);
+    const blocked = await changeProcedureTemplateNodeType(fsNodes.get("n3")!.id, superAdminId, "INSPECTION", "", fsRow.updatedAt.toISOString());
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "INVALID_INPUT", "FULL_SERVICE must still require a reason — no broadening");
+  });
+
+  test("retargetProcedureTemplateEdge: blank reason succeeds on TECHNICAL_TASK; still mandatory on FULL_SERVICE", async () => {
+    const technicalId = await createTechnicalDraft(uniqueCode("optional-reason-retarget-technical"));
+    const seed = await seedTechnicalGraph(technicalId);
+    const techRow = await loadTemplateRow(technicalId);
+    const third = await createProcedureTemplateNode(technicalId, superAdminId, { nodeType: "TASK", title: "셋째" }, techRow.updatedAt.toISOString());
+    assert.equal(third.ok, true);
+    if (!third.ok) return;
+    const result = await retargetProcedureTemplateEdge(seed.edgeId, superAdminId, seed.nodeAId, third.nodeId, "", third.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const fullServiceId = await createDraft(uniqueCode("optional-reason-retarget-full-service"));
+    const fsEdges = await loadEdges(fullServiceId);
+    const fsNodes = await loadNodesByCode(fullServiceId);
+    const fsRow = await loadTemplateRow(fullServiceId);
+    const edgeToRetarget = fsEdges.find((e) => e.fromNodeId === fsNodes.get("n1")!.id)!;
+    const blocked = await retargetProcedureTemplateEdge(edgeToRetarget.id, superAdminId, fsNodes.get("n1")!.id, fsNodes.get("n4")!.id, "", fsRow.updatedAt.toISOString());
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "INVALID_INPUT", "FULL_SERVICE must still require a reason — no broadening");
+  });
+
+  test("createProcedureTemplateEdge: blank/omitted reason succeeds on TECHNICAL_TASK; still mandatory on FULL_SERVICE", async () => {
+    const technicalId = await createTechnicalDraft(uniqueCode("optional-reason-create-edge-technical"));
+    const techRow = await loadTemplateRow(technicalId);
+    const n1 = await createProcedureTemplateNode(technicalId, superAdminId, { nodeType: "TASK", title: "A" }, techRow.updatedAt.toISOString());
+    assert.equal(n1.ok, true);
+    if (!n1.ok) return;
+    const n2 = await createProcedureTemplateNode(technicalId, superAdminId, { nodeType: "TASK", title: "B" }, n1.updatedAt);
+    assert.equal(n2.ok, true);
+    if (!n2.ok) return;
+    const result = await createProcedureTemplateEdge(technicalId, superAdminId, { fromNodeId: n1.nodeId, toNodeId: n2.nodeId, branchType: "DEFAULT" }, n2.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const fullServiceId = await createDraft(uniqueCode("optional-reason-create-edge-full-service"));
+    const fsNodes = await loadNodesByCode(fullServiceId);
+    const fsRow = await loadTemplateRow(fullServiceId);
+    const blocked = await createProcedureTemplateEdge(fullServiceId, superAdminId, { fromNodeId: fsNodes.get("n3")!.id, toNodeId: fsNodes.get("n5")!.id, branchType: "CUSTOM", branchLabel: "예외" }, fsRow.updatedAt.toISOString());
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "INVALID_INPUT", "FULL_SERVICE must still require a reason — no broadening");
+  });
+});
+
+/** Phase 5C-5B usability — createProcedureTemplateNode's optional explicit `position` (selection-aware add-node placement). */
+describe("Phase 5C-5B usability: createProcedureTemplateNode with an explicit position", () => {
+  test("an explicit position becomes BOTH position_x/y and user_position_x/y, so it survives regardless of the auto-layout fallback", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-explicit-position"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "선택 아래 추가", position: { x: 42, y: 199 } }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(node.positionX, 42);
+    assert.equal(node.positionY, 199);
+    assert.equal(node.userPositionX, 42);
+    assert.equal(node.userPositionY, 199);
+  });
+
+  test("omitting position falls back to the original default stacking, unchanged", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-default-position"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "기본 위치" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(node.positionX, 0);
+    assert.equal(node.positionY, 0);
+    assert.equal(node.userPositionX, null);
+    assert.equal(node.userPositionY, null);
+  });
+
+  test("an invalid (non-finite) position is rejected with INVALID_INPUT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-bad-position"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "x", position: { x: Number.NaN, y: 0 } }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+});
+
+/**
+ * Multiline node titles (Shift+Enter). Server validation must preserve
+ * internal `\n` (never normalize/collapse it to
+ * a space) while still trimming only the outer whitespace, and must
+ * reject a title that is effectively blank after trimming even when it
+ * contains only whitespace/newlines.
+ */
+describe("Phase 5C-5B usability item 4: multiline node titles", () => {
+  test("createProcedureTemplateNode: a multiline title persists its internal newlines exactly, with only outer whitespace trimmed", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("multiline-create"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(
+      templateId,
+      superAdminId,
+      { nodeType: "TASK", title: "  1차 확인\n2차 확인  " },
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(node.title, "1차 확인\n2차 확인");
+  });
+
+  test("createProcedureTemplateNode: a title that is only whitespace/newlines is rejected with INVALID_INPUT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("multiline-create-blank"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "  \n\n  \n " }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
+  test("updateProcedureTemplateNode: a multiline title patch persists its internal newlines exactly, with only outer whitespace trimmed", async () => {
+    const templateId = await createDraft(uniqueCode("multiline-update"));
+    const nodes = await loadNodesByCode(templateId);
+    const n3 = nodes.get("n3")!;
+    const templateRow = await loadTemplateRow(templateId);
+
+    const result = await updateProcedureTemplateNode(n3.id, superAdminId, { title: "  1단계\n2단계\n3단계  " }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [updated] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
+    assert.equal(updated.title, "1단계\n2단계\n3단계");
+  });
+
+  test("updateProcedureTemplateNode: a title patch that is only whitespace/newlines is rejected with INVALID_INPUT, and the stored title is left unchanged", async () => {
+    const templateId = await createDraft(uniqueCode("multiline-update-blank"));
+    const nodes = await loadNodesByCode(templateId);
+    const n3 = nodes.get("n3")!;
+    const templateRow = await loadTemplateRow(templateId);
+    const originalTitle = n3.title;
+
+    const result = await updateProcedureTemplateNode(n3.id, superAdminId, { title: "\n \n" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+
+    const [row] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
+    assert.equal(row.title, originalTitle);
+  });
+
+  test("updateProcedureTemplateNode: a patch that never touches title (title undefined) is unaffected by the new validation — other fields still update", async () => {
+    const templateId = await createDraft(uniqueCode("multiline-update-other-fields"));
+    const nodes = await loadNodesByCode(templateId);
+    const n3 = nodes.get("n3")!;
+    const templateRow = await loadTemplateRow(templateId);
+
+    const result = await updateProcedureTemplateNode(n3.id, superAdminId, { isActive: false }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [row] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
+    assert.equal(row.title, n3.title, "title must remain exactly what it was — omitted from the patch entirely");
+    assert.equal(row.isActive, false);
   });
 });

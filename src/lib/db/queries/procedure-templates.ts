@@ -143,6 +143,65 @@ export async function listProcedureTemplates(
   }));
 }
 
+export type TechnicalProcedureTemplateListRow = {
+  id: string;
+  code: string;
+  name: string;
+  equipmentType: ProcedureEquipmentType;
+  version: number;
+  status: ProcedureTemplateStatus;
+  nodeCount: number;
+  edgeCount: number;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+/**
+ * Phase 5C-5B — a deliberately separate, lighter-weight list query for the
+ * new technical-template library, rather than reusing listProcedureTemplates
+ * (whose checklist/reference-item/import-validation-issue aggregates are
+ * all always-empty for TECHNICAL_TASK rows today — no importer, no manual
+ * checklist authoring yet). `includeAllStatuses` gates DRAFT/ARCHIVED
+ * visibility exactly like listProcedureTemplates' own parameter — the
+ * caller (the page) decides this from canViewAllTechnicalTemplateStatuses,
+ * never from a client-passed flag.
+ */
+export async function listTechnicalProcedureTemplates(includeAllStatuses: boolean): Promise<TechnicalProcedureTemplateListRow[]> {
+  const templates = await db
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.category, "TECHNICAL_TASK"), includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED")))
+    .orderBy(desc(procedureTemplates.createdAt));
+  if (templates.length === 0) return [];
+
+  const templateIds = templates.map((t) => t.id);
+  const nodeAgg = await db
+    .select({ templateId: procedureTemplateNodes.procedureTemplateId, nodeCount: sql<number>`count(*)::int` })
+    .from(procedureTemplateNodes)
+    .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
+    .groupBy(procedureTemplateNodes.procedureTemplateId);
+  const edgeAgg = await db
+    .select({ templateId: procedureTemplateEdges.procedureTemplateId, edgeCount: sql<number>`count(*)::int` })
+    .from(procedureTemplateEdges)
+    .where(inArray(procedureTemplateEdges.procedureTemplateId, templateIds))
+    .groupBy(procedureTemplateEdges.procedureTemplateId);
+  const nodeCountByTemplate = new Map(nodeAgg.map((r) => [r.templateId, r.nodeCount]));
+  const edgeCountByTemplate = new Map(edgeAgg.map((r) => [r.templateId, r.edgeCount]));
+
+  return templates.map((t) => ({
+    id: t.id,
+    code: t.code,
+    name: t.name,
+    equipmentType: t.equipmentType,
+    version: t.version,
+    status: t.status,
+    nodeCount: nodeCountByTemplate.get(t.id) ?? 0,
+    edgeCount: edgeCountByTemplate.get(t.id) ?? 0,
+    createdAt: t.createdAt.toISOString(),
+    publishedAt: t.publishedAt ? t.publishedAt.toISOString() : null,
+  }));
+}
+
 export type ProcedureTemplateNodeRow = {
   id: string;
   nodeCode: string;
@@ -161,6 +220,9 @@ export type ProcedureTemplateNodeRow = {
   workerMayAddNextTask: boolean;
   positionX: number;
   positionY: number;
+  /** Phase 5C-5B fix — previously dropped by this read model entirely, so the read-only detail view could never reflect a saved 사용자 배치 override (from either the FULL_SERVICE editor's drag-to-reposition or the technical editor's relative-position/drag/route-split actions), only the editor screen (a separate query, getProcedureTemplateForEditor) could. Null means "never repositioned" — same override-vs-fallback contract as EditorNodeRow's own fields. */
+  userPositionX: number | null;
+  userPositionY: number | null;
   sortOrder: number;
   sourceWorksheet: string | null;
   sourceShapeId: string | null;
@@ -464,6 +526,8 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       workerMayAddNextTask: n.workerMayAddNextTask,
       positionX: n.positionX,
       positionY: n.positionY,
+      userPositionX: n.userPositionX,
+      userPositionY: n.userPositionY,
       sortOrder: n.sortOrder,
       sourceWorksheet: n.sourceWorksheet,
       sourceShapeId: n.sourceShapeId,

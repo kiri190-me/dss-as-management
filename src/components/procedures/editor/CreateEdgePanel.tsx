@@ -21,6 +21,7 @@ export default function CreateEdgePanel({
   expectedTemplateUpdatedAt,
   prefillFromNodeId,
   onSaved,
+  isTechnical,
 }: {
   templateId: string;
   nodes: EditorNodeRow[];
@@ -28,6 +29,8 @@ export default function CreateEdgePanel({
   expectedTemplateUpdatedAt: string;
   prefillFromNodeId?: string | null;
   onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
+  /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the "추가 사유" from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
+  isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
   const [fromNodeId, setFromNodeId] = useState(prefillFromNodeId ?? nodes[0]?.id ?? "");
@@ -48,7 +51,7 @@ export default function CreateEdgePanel({
   }, [confirming]);
 
   const labelRequired = branchType === "CUSTOM" && branchLabel.trim().length === 0;
-  const canReview = fromNodeId.length > 0 && toNodeId.length > 0 && fromNodeId !== toNodeId && !labelRequired && reason.trim().length > 0;
+  const canReview = fromNodeId.length > 0 && toNodeId.length > 0 && fromNodeId !== toNodeId && !labelRequired && (isTechnical || reason.trim().length > 0);
 
   async function handleConfirm() {
     setIsSubmitting(true);
@@ -117,7 +120,7 @@ export default function CreateEdgePanel({
         <input value={branchLabel} onChange={(e) => setBranchLabel(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
       <label className="flex flex-col gap-1">
-        추가 사유 (필수)
+        추가 사유 {isTechnical ? "(선택)" : "(필수)"}
         <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
       {fromNodeId && toNodeId && fromNodeId === toNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}

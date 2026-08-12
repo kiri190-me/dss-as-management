@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PROCEDURE_BRANCH_TYPE_CODES, procedureBranchTypeLabels, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
+import {
+  PROCEDURE_BRANCH_TYPE_CODES,
+  procedureBranchTypeLabels,
+  MANUAL_TECHNICAL_NODE_TYPE_CODES,
+  procedureNodeTypeLabels,
+  type ProcedureBranchType,
+  type ManualTechnicalNodeType,
+} from "@/lib/domain/procedure-template-types";
 import type { EditorEdgeRow, EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
-import { updateProcedureTemplateEdgeAction, retargetProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
+import {
+  updateProcedureTemplateEdgeAction,
+  retargetProcedureTemplateEdgeAction,
+  deleteProcedureTemplateEdgeAction,
+  insertProcedureTemplateNodeOnEdgeAction,
+} from "@/lib/server/actions/procedure-template-editor";
 import { buildEdgeRetargetPreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
@@ -26,6 +38,10 @@ export default function EdgePropertyPanel({
   onAddWaypoint,
   onRemoveSelectedWaypoint,
   onResetRoute,
+  canDelete,
+  onDeleted,
+  canInsertNode,
+  isTechnical,
 }: {
   edge: EditorEdgeRow;
   nodes: EditorNodeRow[];
@@ -38,6 +54,13 @@ export default function EdgePropertyPanel({
   onAddWaypoint: () => void;
   onRemoveSelectedWaypoint: () => void;
   onResetRoute: () => void;
+  /** Phase 5C-5B — true only for a TECHNICAL_TASK DRAFT; always false for FULL_SERVICE/REFERENCE. */
+  canDelete: boolean;
+  onDeleted: (newUpdatedAt: string) => void;
+  /** Phase 5C-5B — same gate as canDelete (TECHNICAL_TASK DRAFT, ADMIN+SUPER_ADMIN); a separate prop only so the two capabilities stay independently named/readable at each call site. */
+  canInsertNode: boolean;
+  /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the retarget reason from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
+  isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
   const [branchType, setBranchType] = useState<ProcedureBranchType>(edge.branchType);
@@ -52,6 +75,14 @@ export default function EdgePropertyPanel({
   const [confirmingRetarget, setConfirmingRetarget] = useState(false);
   const [isRetargeting, setIsRetargeting] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+
+  const [deleteReason, setDeleteReason] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [showInsertNodeForm, setShowInsertNodeForm] = useState(false);
+  const [insertNodeType, setInsertNodeType] = useState<ManualTechnicalNodeType>("TASK");
+  const [insertNodeTitle, setInsertNodeTitle] = useState("");
+  const [isInsertingNode, setIsInsertingNode] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -98,6 +129,41 @@ export default function EdgePropertyPanel({
     }
     setConfirmingRetarget(false);
     onSaved(result.updatedAt, result.structuralValidation);
+  }
+
+  async function handleDelete() {
+    setIsDeleting(true);
+    setErrorMessage(null);
+    const result = await deleteProcedureTemplateEdgeAction({ edgeId: edge.id, reason: deleteReason, expectedTemplateUpdatedAt });
+    setIsDeleting(false);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+    onDeleted(result.updatedAt);
+  }
+
+  async function handleInsertNodeAtRoutePoint() {
+    if (selectedWaypointIndex === null || !routePoints) return;
+    const point = routePoints[selectedWaypointIndex];
+    if (!point) return;
+    setIsInsertingNode(true);
+    setErrorMessage(null);
+    const result = await insertProcedureTemplateNodeOnEdgeAction({
+      edgeId: edge.id,
+      nodeType: insertNodeType,
+      title: insertNodeTitle,
+      position: point,
+      expectedTemplateUpdatedAt,
+    });
+    setIsInsertingNode(false);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+    setShowInsertNodeForm(false);
+    setInsertNodeTitle("");
+    onSaved(result.updatedAt);
   }
 
   const preview = hasRetarget
@@ -167,6 +233,63 @@ export default function EdgePropertyPanel({
             >
               자동 경로로 초기화
             </button>
+            {canInsertNode && (
+              <button
+                type="button"
+                onClick={() => setShowInsertNodeForm((v) => !v)}
+                disabled={selectedWaypointIndex === null}
+                className="rounded-md border border-blue-400 px-2.5 py-1 text-xs text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
+              >
+                이 위치에 노드 추가
+              </button>
+            )}
+          </div>
+        )}
+        {canInsertNode && showInsertNodeForm && selectedWaypointIndex !== null && (
+          <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 dark:border-blue-900 dark:bg-blue-950">
+            <p className="text-blue-800 dark:text-blue-300">
+              선택된 경로점 위치에 새 노드를 삽입하고, 이 분기를 두 개로 나눕니다. 원래 분기 유형/라벨은 첫 번째 구간에 그대로 유지되고, 두 번째 구간은 기본(정상 진행) 연결이 됩니다.
+            </p>
+            <label className="flex flex-col gap-1">
+              노드 유형
+              <select
+                value={insertNodeType}
+                onChange={(e) => setInsertNodeType(e.target.value as ManualTechnicalNodeType)}
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                {MANUAL_TECHNICAL_NODE_TYPE_CODES.map((t) => (
+                  <option key={t} value={t}>
+                    {procedureNodeTypeLabels[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              제목 (필수)
+              <input
+                value={insertNodeTitle}
+                onChange={(e) => setInsertNodeTitle(e.target.value)}
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={insertNodeTitle.trim().length === 0 || isInsertingNode}
+                onClick={() => void handleInsertNodeAtRoutePoint()}
+                className="self-start rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                {isInsertingNode ? "추가 중..." : "노드 삽입"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowInsertNodeForm(false)}
+                disabled={isInsertingNode}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                취소
+              </button>
+            </div>
           </div>
         )}
         {routePoints && routePoints.length > 0 && (
@@ -210,18 +333,39 @@ export default function EdgePropertyPanel({
             rows={2}
             value={retargetReason}
             onChange={(e) => setRetargetReason(e.target.value)}
-            placeholder="변경 사유 (필수)"
+            placeholder={isTechnical ? "변경 사유 (선택)" : "변경 사유 (필수)"}
             className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
           <button
             type="button"
-            disabled={!hasRetarget || newFromNodeId === newToNodeId || retargetReason.trim().length === 0}
+            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0)}
             onClick={() => setConfirmingRetarget(true)}
             className="self-start rounded-md border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
           >
             변경 검토
           </button>
           {newFromNodeId === newToNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
+        </div>
+      )}
+
+      {canDelete && (
+        <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
+          <h4 className="text-xs font-semibold text-red-900 dark:text-red-300">분기 삭제</h4>
+          <textarea
+            rows={2}
+            value={deleteReason}
+            onChange={(e) => setDeleteReason(e.target.value)}
+            placeholder="삭제 사유 (선택)"
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={() => void handleDelete()}
+            className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
+          >
+            {isDeleting ? "삭제 중..." : "분기 삭제"}
+          </button>
         </div>
       )}
 

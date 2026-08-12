@@ -216,6 +216,7 @@ export default function ProcedureTemplateDetailScreen({
             initialWorksheet={navigationTarget.worksheetFilter}
             initialSelectedNodeId={navigationTarget.nodeId}
             errorFocusMode={errorFocusMode}
+            useAutoLayoutForUnpositionedNodes={template.category === "TECHNICAL_TASK"}
           />
         </section>
       )}

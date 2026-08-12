@@ -45,6 +45,53 @@ export function hasUserLayoutOverride(node: LayoutOverride): boolean {
   return isValidOverrideCoordinate(node.userPositionX) && isValidOverrideCoordinate(node.userPositionY);
 }
 
+// ---- relative positioning ("상대 위치로 이동") ----
+
+export type RelativeDirection = "LEFT" | "RIGHT" | "UP" | "DOWN";
+
+/**
+ * Computes a target coordinate near a reference node, in one of the four
+ * cardinal directions — the pure math behind "상대 위치로 이동"
+ * (NodePropertyPanel) and "새 노드를 선택된 노드 아래에 추가" (CreateNodePanel).
+ * Domain-free: takes an already-resolved reference position (the caller
+ * decides whether that's a node's source or user-overridden position), no
+ * procedure/node-type concept here at all.
+ *
+ * Round-2 fix — this used to take/return only `{x, y}` (left-edge,
+ * React Flow's own position convention) and never knew either node's
+ * width, so DOWN/UP silently copied the reference's LEFT edge, not its
+ * CENTER — invisible for same-width nodes, but visibly crooked the moment
+ * two nodes differ in width (e.g. a multiline title). This was the actual
+ * reason the earlier computeLayeredGraphLayout center-fix didn't fix
+ * real-world alignment: creating a node via "노드 추가" (or moving one via
+ * "상대 위치로 이동") always writes an explicit/pinned userPositionX/Y —
+ * computeLayeredGraphLayout's fallback never runs for it at all, so its
+ * own correctness was never the bottleneck; this function was.
+ *
+ * DOWN/UP now preserve the reference's CENTER x
+ * (`referenceCenterX - targetWidth / 2`) regardless of either node's
+ * width. LEFT/RIGHT place the target just outside the reference's actual
+ * bounding box (edge + gap), never overlapping regardless of width.
+ */
+export function computeRelativePosition(
+  reference: { x: number; y: number; width: number },
+  direction: RelativeDirection,
+  spacing: { horizontal: number; vertical: number },
+  targetWidth: number
+): { x: number; y: number } {
+  const referenceCenterX = reference.x + reference.width / 2;
+  switch (direction) {
+    case "LEFT":
+      return { x: reference.x - spacing.horizontal - targetWidth, y: reference.y };
+    case "RIGHT":
+      return { x: reference.x + reference.width + spacing.horizontal, y: reference.y };
+    case "UP":
+      return { x: referenceCenterX - targetWidth / 2, y: reference.y - spacing.vertical };
+    case "DOWN":
+      return { x: referenceCenterX - targetWidth / 2, y: reference.y + spacing.vertical };
+  }
+}
+
 // ---- generic row-packing primitive ----
 
 export type PackableNode = {
@@ -120,4 +167,206 @@ export function packNodesIntoRows(nodes: PackableNode[], options: PackNodesIntoR
   }
 
   return { positions, rowIndexByNodeId, maxX, height: rowY + rowMaxHeight - options.startY };
+}
+
+// ---- layered (depth-based) graph layout ----
+
+/**
+ * `pinnedX`, when present, is a node's already-resolved TOP-LEFT x (a
+ * persisted userPositionX override, same convention as positionX/
+ * userPositionX elsewhere) — see computeLayeredGraphLayout's own doc
+ * comment for why this must be threaded through rather than letting the
+ * algorithm invent its own x for every node independently.
+ *
+ * `width` is the node's actual rendered width (e.g. from
+ * computeNodeDimensions — nodes can differ in width because a multiline
+ * title needs more horizontal room). Required so this function can align
+ * nodes by CENTER x rather than left-edge x — React Flow's `position` is
+ * top-left-based, so two nodes sharing the same `position.x` do NOT share
+ * the same center once their widths differ, and their bottom/top handles
+ * (computed from each node's own center) would then disagree too,
+ * producing a visibly bent connector despite `position.x` matching.
+ */
+export type LayeredLayoutNode = { id: string; sortOrder: number; width: number; pinnedX?: number | null };
+export type LayeredLayoutEdge = { fromNodeId: string; toNodeId: string };
+export type LayeredLayoutSpacing = { horizontal: number; vertical: number };
+
+/**
+ * A minimal layered/hierarchical DAG layout: `y` is purely BFS depth from
+ * each root (a node with no incoming edge among the given set) times
+ * `spacing.vertical`; the returned `x` follows one rule, computed by
+ * CENTER — a node with exactly one parent inherits that parent's CENTER x
+ * exactly (`childCenterX = parentCenterX`, converted back to the returned
+ * top-left `x = childCenterX - childWidth / 2`) UNLESS it has siblings
+ * (other children of the same parent), in which case siblings fan out
+ * symmetrically around the parent's center. All internal arithmetic
+ * (seeding, fan-out offsets, same-depth collision spacing) operates in
+ * this CENTER-x space throughout, only converting to left-edge `x` in the
+ * final result — aligning left edges instead would silently break for any
+ * two nodes of different width (see LayeredLayoutNode's own doc comment).
+ * This is deliberately NOT the same algorithm as
+ * packNodesIntoRows/computeStageSortedLayout above (a row-*wrapping* flow
+ * layout, which does not track graph depth at all and can place an
+ * unrelated pair of nodes side by side in the same row purely because they
+ * fit — see this function's own call site in ProcedureFlowGraph.tsx for
+ * why that distinction matters): a straight single-parent/single-child
+ * chain (A->B->C) always lands in the same `x` column here, one row per
+ * hop, which is the "vertical continuation" a row-packing layout cannot
+ * guarantee.
+ *
+ * Cycle-safe (LOOP_BACK/RETRY edges are common in this domain): depth is
+ * assigned on first BFS discovery only, so a back-edge to an
+ * already-visited node never re-queues it or loops forever. A node with no
+ * discoverable root (an isolated cycle, or entirely edge-less) is seeded as
+ * its own depth-0 root, in `sortOrder`, once the primary BFS is exhausted.
+ * A same-depth collision pass (sort by `x`, push right in minimum-spacing
+ * increments) guarantees no two nodes at the same depth ever overlap,
+ * regardless of how many independent root chains share that depth — a
+ * pinned node is never itself pushed (a persisted manual position must
+ * never move), only unpinned siblings are shifted clear of it.
+ *
+ * `pinnedX` (usability fix — "layout and line geometry must agree"): a
+ * node the caller marks pinned (its actual persisted userPositionX, i.e.
+ * hasUserLayoutOverride) keeps that exact x here rather than getting a
+ * synthetic depth-based one, AND every unpinned child's `baseX` is derived
+ * from its parent's real position (pinned or computed) via the same
+ * `xById` lookup either way. Without this, a child left unpositioned under
+ * a manually-dragged parent would center itself on where the algorithm
+ * *thinks* the parent is (a from-scratch, override-blind computation),
+ * not where the parent actually renders — producing a visibly crooked
+ * connector even though this function believed it had drawn a perfectly
+ * straight one.
+ */
+export function computeLayeredGraphLayout(
+  nodes: LayeredLayoutNode[],
+  edges: LayeredLayoutEdge[],
+  spacing: LayeredLayoutSpacing
+): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>();
+  if (nodes.length === 0) return result;
+
+  const childrenOf = new Map<string, string[]>();
+  const parentsOf = new Map<string, string[]>();
+  for (const n of nodes) {
+    childrenOf.set(n.id, []);
+    parentsOf.set(n.id, []);
+  }
+  for (const e of edges) {
+    if (!childrenOf.has(e.fromNodeId) || !parentsOf.has(e.toNodeId)) continue;
+    childrenOf.get(e.fromNodeId)!.push(e.toNodeId);
+    parentsOf.get(e.toNodeId)!.push(e.fromNodeId);
+  }
+
+  const sortedNodes = [...nodes].sort((a, b) => a.sortOrder - b.sortOrder);
+  const depthById = new Map<string, number>();
+  const discoveryOrder: string[] = [];
+
+  function seedAndBfs(rootId: string) {
+    depthById.set(rootId, 0);
+    const queue = [rootId];
+    discoveryOrder.push(rootId);
+    let qi = 0;
+    while (qi < queue.length) {
+      const id = queue[qi++];
+      const d = depthById.get(id)!;
+      for (const childId of childrenOf.get(id) ?? []) {
+        if (depthById.has(childId)) continue;
+        depthById.set(childId, d + 1);
+        queue.push(childId);
+        discoveryOrder.push(childId);
+      }
+    }
+  }
+
+  for (const n of sortedNodes) {
+    if ((parentsOf.get(n.id)?.length ?? 0) === 0 && !depthById.has(n.id)) seedAndBfs(n.id);
+  }
+  // Any node still unreached (isolated cycle with no zero-indegree entry point) becomes its own root, in sortOrder.
+  for (const n of sortedNodes) {
+    if (!depthById.has(n.id)) seedAndBfs(n.id);
+  }
+
+  const maxDepth = Math.max(...discoveryOrder.map((id) => depthById.get(id)!));
+  const nodesByDepth: string[][] = Array.from({ length: maxDepth + 1 }, () => []);
+  for (const id of discoveryOrder) nodesByDepth[depthById.get(id)!].push(id);
+
+  const widthById = new Map<string, number>();
+  for (const n of nodes) widthById.set(n.id, Number.isFinite(n.width) ? n.width : 0);
+
+  // Pinned CENTER x, not the raw (left-edge) pinnedX — every downstream
+  // comparison/inheritance in this function operates in center-x space.
+  const pinnedXById = new Map<string, number>();
+  for (const n of nodes) {
+    if (typeof n.pinnedX === "number" && Number.isFinite(n.pinnedX)) {
+      pinnedXById.set(n.id, n.pinnedX + (widthById.get(n.id) ?? 0) / 2);
+    }
+  }
+
+  /** A persisted manual position is never pushed to resolve a same-depth collision — only its unpinned neighbors are. Shared by depth 0 (root seeding has no other collision guard of its own) and every deeper depth. */
+  function resolveCollisions(idsAtDepth: string[]) {
+    const order = [...idsAtDepth].sort((a, b) => centerXById.get(a)! - centerXById.get(b)!);
+    for (let i = 1; i < order.length; i++) {
+      if (pinnedXById.has(order[i])) continue;
+      const minX = centerXById.get(order[i - 1])! + spacing.horizontal;
+      if (centerXById.get(order[i])! < minX) centerXById.set(order[i], minX);
+    }
+  }
+
+  const centerXById = new Map<string, number>();
+  nodesByDepth[0].forEach((id, i) => centerXById.set(id, (i - (nodesByDepth[0].length - 1) / 2) * spacing.horizontal));
+  for (const [id, x] of pinnedXById) if (depthById.get(id) === 0) centerXById.set(id, x);
+  resolveCollisions(nodesByDepth[0]);
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const idsAtDepth = nodesByDepth[depth];
+    const byParentKey = new Map<string, string[]>();
+    for (const id of idsAtDepth) {
+      const knownParents = (parentsOf.get(id) ?? []).filter((p) => centerXById.has(p));
+      const key = knownParents.length > 0 ? knownParents.slice().sort().join(",") : `__root__${id}`;
+      if (!byParentKey.has(key)) byParentKey.set(key, []);
+      byParentKey.get(key)!.push(id);
+    }
+    for (const [key, ids] of byParentKey) {
+      // A single child (the common vertical-continuation case) always
+      // gets offset 0 here — it inherits the parent's center x exactly,
+      // regardless of either node's width. No row-packing or width-based
+      // heuristic ever moves a lone child sideways.
+      const baseX = key.startsWith("__root__") ? 0 : key.split(",").reduce((sum, p) => sum + (centerXById.get(p) ?? 0), 0) / key.split(",").length;
+      ids.forEach((id, i) => {
+        const offset = (i - (ids.length - 1) / 2) * spacing.horizontal;
+        centerXById.set(id, baseX + offset);
+      });
+    }
+    // A pinned node's own center is never a synthetic fan-out value —
+    // restore it now that the loop above may have overwritten it, same as
+    // the depth-0 seeding above. Its children's baseX lookups next
+    // iteration therefore always see the real center.
+    for (const id of idsAtDepth) {
+      const pinned = pinnedXById.get(id);
+      if (pinned !== undefined) centerXById.set(id, pinned);
+    }
+    resolveCollisions(idsAtDepth);
+  }
+
+  for (const id of discoveryOrder) {
+    const centerX = centerXById.get(id) ?? 0;
+    const width = widthById.get(id) ?? 0;
+    result.set(id, { x: centerX - width / 2, y: depthById.get(id)! * spacing.vertical });
+  }
+  return result;
+}
+
+/**
+ * Round-3 straight-edge fix — whether a source/target pair's rendered
+ * CENTER x are close enough to treat as a genuine vertical continuation,
+ * the only condition under which a caller should draw an explicit
+ * straight connector rather than falling through to its normal
+ * (smoothstep/branch) routing. A small epsilon guards only against
+ * floating-point drift from layout arithmetic (e.g.
+ * computeLayeredGraphLayout above) — it is not a visual "close enough"
+ * tolerance, and a non-finite input (an unknown/unresolved node) always
+ * returns false, never a false positive.
+ */
+export function isAlignedVerticalConnection(sourceCenterX: number, targetCenterX: number): boolean {
+  return Number.isFinite(sourceCenterX) && Number.isFinite(targetCenterX) && Math.abs(sourceCenterX - targetCenterX) < 0.5;
 }

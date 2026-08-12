@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/domain/types";
 import { canViewPublishedProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
+import { canViewPublishedTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
 import { canViewInventory } from "@/lib/auth/inventory-authorization";
 import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
 
@@ -29,6 +30,7 @@ export const navItems: NavItem[] = [
   },
   { key: "users", href: "/users", label: "사용자 관리" },
   { key: "procedures", href: "/procedures", label: "기술 절차 템플릿", isVisibleForRole: canViewPublishedProcedureTemplates },
+  { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차", isVisibleForRole: canViewPublishedTechnicalTemplates },
   { key: "inventory", href: "/inventory", label: "재고 관리", isVisibleForRole: canViewInventory },
   { key: "settings", href: "/settings", label: "시스템 설정" },
 ];
