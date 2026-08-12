@@ -42,6 +42,9 @@ const TEST_CODE_PREFIX = "test-editor-";
 
 let superAdminId: string;
 let adminId: string;
+let asEngineerId: string;
+let salesId: string;
+let inventoryManagerId: string;
 
 const createdTemplateIds: string[] = [];
 
@@ -118,6 +121,30 @@ before(async () => {
     .limit(1);
   assert.ok(admin, "expected an approved ADMIN in the dev DB");
   adminId = admin.id;
+
+  const [engineer] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "AS_ENGINEER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true)))
+    .limit(1);
+  assert.ok(engineer, "expected an approved AS_ENGINEER in the dev DB");
+  asEngineerId = engineer.id;
+
+  const [sales] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "SALES"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true)))
+    .limit(1);
+  assert.ok(sales, "expected an approved SALES user in the dev DB");
+  salesId = sales.id;
+
+  const [inventoryManager] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "INVENTORY_MANAGER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true)))
+    .limit(1);
+  assert.ok(inventoryManager, "expected an approved INVENTORY_MANAGER in the dev DB");
+  inventoryManagerId = inventoryManager.id;
 });
 
 after(async () => {
@@ -791,5 +818,240 @@ describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
     const clonedEdge = clonedEdges.find((e) => e.clonedFromEdgeId === edge.id)!;
     assert.ok(clonedEdge, "the cloned edge must carry clonedFromEdgeId lineage");
     assert.equal(clonedEdge.userRoutePoints, null, "a new DRAFT clone must never inherit the parent's manual route");
+  });
+});
+
+describe("procedure-template-editor: Phase 5C-5B coarse-then-fine authorization ordering", () => {
+  const NONEXISTENT_ID = "00000000-0000-4000-8000-000000000000";
+
+  test("33. AS_ENGINEER against a nonexistent node id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    const result = await updateProcedureTemplateNode(NONEXISTENT_ID, asEngineerId, { title: "x" }, new Date().toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("34. SALES against a nonexistent node id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    const result = await updateProcedureTemplateNode(NONEXISTENT_ID, salesId, { title: "x" }, new Date().toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("35. INVENTORY_MANAGER against a nonexistent node id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    const result = await updateProcedureTemplateNode(NONEXISTENT_ID, inventoryManagerId, { title: "x" }, new Date().toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("36. ADMIN passes the coarse pre-gate, so a nonexistent node id surfaces as NOT_FOUND (the disclosed, accepted ordering trade-off)", async () => {
+    const result = await updateProcedureTemplateNode(NONEXISTENT_ID, adminId, { title: "x" }, new Date().toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("37. ADMIN against an EXISTING FULL_SERVICE draft node is FORBIDDEN at the fine-grained, category-specific check (not merely NOT_DRAFT/other)", async () => {
+    const templateId = await createDraft(uniqueCode("admin-full-service-forbidden"));
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await updateProcedureTemplateNode(nodes.get("n3")!.id, adminId, { title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("38. SUPER_ADMIN retains existing broad FULL_SERVICE management behavior after the authorization refactor (edit succeeds)", async () => {
+    const templateId = await createDraft(uniqueCode("super-admin-unchanged"));
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await updateProcedureTemplateNode(nodes.get("n3")!.id, superAdminId, { title: "super admin still works" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true);
+  });
+
+  // validateProcedureTemplate has its own separate inline authorization
+  // check (it does not call assertEditableDraft) — proven independently
+  // here so the refactor of that second code path isn't only covered by
+  // the assertEditableDraft-based functions above.
+  test("39. validateProcedureTemplate: AS_ENGINEER against a nonexistent template id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    const result = await validateProcedureTemplate(NONEXISTENT_ID, asEngineerId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("40. validateProcedureTemplate: ADMIN passes the coarse pre-gate, so a nonexistent template id surfaces as NOT_FOUND", async () => {
+    const result = await validateProcedureTemplate(NONEXISTENT_ID, adminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("41. validateProcedureTemplate: ADMIN against an EXISTING FULL_SERVICE draft is FORBIDDEN at the fine-grained check", async () => {
+    const templateId = await createDraft(uniqueCode("admin-validate-forbidden"));
+    const result = await validateProcedureTemplate(templateId, adminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("42. validateProcedureTemplate: SUPER_ADMIN retains existing behavior (validate succeeds) after the authorization refactor", async () => {
+    const templateId = await createDraft(uniqueCode("super-admin-validate-unchanged"));
+    const result = await validateProcedureTemplate(templateId, superAdminId);
+    assert.equal(result.ok, true);
+  });
+});
+
+/**
+ * Phase 5C-5B — proves the applied 0017 migration's live DB behavior
+ * directly (DDL-level, not through any production mutation — neither
+ * deleteProcedureTemplateNode nor deleteProcedureTemplateEdge exists yet).
+ * Every fixture here is synthetic, created via direct db.insert/db.delete
+ * against a TEST_CODE_PREFIX-coded DRAFT template, cleaned up by this
+ * file's existing after() hook. None of the four real templates are ever
+ * touched.
+ */
+describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history pointers, RESTRICT graph integrity — DB-level only)", () => {
+  /**
+   * drizzle-orm wraps the driver's real PostgresError — the original is on
+   * `.cause`, same convention as this codebase's other isXViolation helpers
+   * (procedure-case-execution.ts's isUniqueViolation,
+   * procedure-templates.integration.test.ts's isCheckViolation). Postgres
+   * error code 23503 is foreign_key_violation; the message additionally
+   * names the referencing table ("update or delete on table ... violates
+   * foreign key constraint ... on table \"<referencingTable>\""), which is
+   * what distinguishes *which* RESTRICT FK actually fired.
+   */
+  function isForeignKeyViolation(err: unknown, referencingTable: string): boolean {
+    const cause = err instanceof Error ? err.cause : undefined;
+    const code = cause !== undefined && cause !== null && typeof cause === "object" && "code" in cause ? (cause as { code?: unknown }).code : undefined;
+    const message = cause instanceof Error ? cause.message : String(err);
+    return code === "23503" && message.includes(referencingTable);
+  }
+
+  test("43. deleting a node with no connected edges succeeds, and every history row referencing it survives with node_id set to NULL (before/after state and row count unchanged)", async () => {
+    const templateId = await createDraft(uniqueCode("fk-node-set-null"));
+
+    const [isolatedNode] = await db
+      .insert(procedureTemplateNodes)
+      .values({
+        procedureTemplateId: templateId,
+        nodeCode: `manual-test-${randomUUID()}`,
+        nodeType: "TASK",
+        title: "고립 노드 (FK 테스트 전용)",
+      })
+      .returning({ id: procedureTemplateNodes.id });
+
+    const historyBefore = await db
+      .insert(procedureTemplateEditHistory)
+      .values([
+        {
+          procedureTemplateId: templateId,
+          actionType: "CREATE_NODE",
+          nodeId: isolatedNode.id,
+          beforeState: null,
+          afterState: { nodeCode: "synthetic", nodeType: "TASK", title: "고립 노드 (FK 테스트 전용)" },
+          actorUserId: superAdminId,
+        },
+        {
+          procedureTemplateId: templateId,
+          actionType: "UPDATE_NODE",
+          nodeId: isolatedNode.id,
+          beforeState: { title: "old" },
+          afterState: { title: "고립 노드 (FK 테스트 전용)" },
+          reason: null,
+          actorUserId: superAdminId,
+        },
+      ])
+      .returning({ id: procedureTemplateEditHistory.id, beforeState: procedureTemplateEditHistory.beforeState, afterState: procedureTemplateEditHistory.afterState });
+    assert.equal(historyBefore.length, 2);
+
+    await db.delete(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, isolatedNode.id));
+
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, isolatedNode.id));
+    assert.equal(stillThere, undefined, "the node row must actually be gone");
+
+    const historyAfter = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(inArray(procedureTemplateEditHistory.id, historyBefore.map((h) => h.id)))
+      .orderBy(procedureTemplateEditHistory.createdAt);
+    assert.equal(historyAfter.length, 2, "both history rows must survive the node deletion");
+    for (let i = 0; i < historyAfter.length; i++) {
+      assert.equal(historyAfter[i].nodeId, null, "node_id must become NULL via ON DELETE SET NULL");
+      assert.deepEqual(historyAfter[i].beforeState, historyBefore[i].beforeState, "beforeState must be byte-for-byte unchanged");
+      assert.deepEqual(historyAfter[i].afterState, historyBefore[i].afterState, "afterState must be byte-for-byte unchanged");
+    }
+  });
+
+  test("44. deleting an edge succeeds, and every history row referencing it survives with edge_id set to NULL", async () => {
+    const templateId = await createDraft(uniqueCode("fk-edge-set-null"));
+    const nodes = await loadNodesByCode(templateId);
+
+    const [syntheticEdge] = await db
+      .insert(procedureTemplateEdges)
+      .values({
+        procedureTemplateId: templateId,
+        fromNodeId: nodes.get("n4")!.id, // n4 (END) already has no outgoing edges in the base fixture — safe to attach one extra edge from it for this isolated test without disturbing the base graph's own structural validity elsewhere.
+        toNodeId: nodes.get("n1")!.id,
+        branchType: "LOOP_BACK",
+      })
+      .returning({ id: procedureTemplateEdges.id });
+
+    const historyBefore = await db
+      .insert(procedureTemplateEditHistory)
+      .values({
+        procedureTemplateId: templateId,
+        actionType: "CREATE_EDGE",
+        edgeId: syntheticEdge.id,
+        beforeState: null,
+        afterState: { fromNodeId: nodes.get("n4")!.id, toNodeId: nodes.get("n1")!.id, branchType: "LOOP_BACK" },
+        reason: "fk-test",
+        actorUserId: superAdminId,
+      })
+      .returning({ id: procedureTemplateEditHistory.id, beforeState: procedureTemplateEditHistory.beforeState, afterState: procedureTemplateEditHistory.afterState });
+
+    await db.delete(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, syntheticEdge.id));
+
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, syntheticEdge.id));
+    assert.equal(stillThere, undefined, "the edge row must actually be gone");
+
+    const [historyAfter] = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.id, historyBefore[0].id));
+    assert.ok(historyAfter, "the history row must survive the edge deletion");
+    assert.equal(historyAfter.edgeId, null, "edge_id must become NULL via ON DELETE SET NULL");
+    assert.deepEqual(historyAfter.beforeState, historyBefore[0].beforeState);
+    assert.deepEqual(historyAfter.afterState, historyBefore[0].afterState);
+  });
+
+  test("45. RESTRICT defense: a node with a live connected edge still cannot be directly deleted (from_node_id/to_node_id remain RESTRICT — changing the history FKs did not weaken graph integrity)", async () => {
+    const templateId = await createDraft(uniqueCode("fk-restrict-defense-node"));
+    const nodes = await loadNodesByCode(templateId);
+    // n1 (START) has a real outgoing edge (n1->n2) in the base fixture.
+    await assert.rejects(
+      () => db.delete(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodes.get("n1")!.id)),
+      (err: unknown) => isForeignKeyViolation(err, "procedure_template_edges"),
+      "deleting a node that still has a connected edge must be rejected by the from_node_id/to_node_id RESTRICT FK"
+    );
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodes.get("n1")!.id));
+    assert.ok(stillThere, "the node must still exist after the rejected delete");
+  });
+
+  test("46. RESTRICT defense: an edge referenced by another edge's cloned_from_edge_id (a PUBLISHED parent edge already cloned into a DRAFT version) cannot be directly deleted", async () => {
+    const templateId = await createDraft(uniqueCode("fk-restrict-defense-clone"));
+    const nodes = await loadNodesByCode(templateId);
+    const parentEdges = await loadEdges(templateId);
+    const publishResult = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(publishResult.ok, true);
+
+    const newDraft = await createNewDraftVersion(templateId, superAdminId);
+    assert.equal(newDraft.ok, true);
+    if (!newDraft.ok) return;
+    createdTemplateIds.push(newDraft.id);
+
+    const childEdges = await loadEdges(newDraft.id);
+    const parentEdgeThatWasCloned = parentEdges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
+    const childClone = childEdges.find((e) => e.clonedFromEdgeId === parentEdgeThatWasCloned.id);
+    assert.ok(childClone, "the child draft must carry an edge whose cloned_from_edge_id points at the parent edge");
+
+    await assert.rejects(
+      () => db.delete(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, parentEdgeThatWasCloned.id)),
+      (err: unknown) => isForeignKeyViolation(err, "procedure_template_edges"),
+      "deleting a PUBLISHED parent edge that a DRAFT child's cloned_from_edge_id still points at must be rejected by RESTRICT"
+    );
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, parentEdgeThatWasCloned.id));
+    assert.ok(stillThere, "the parent edge must still exist after the rejected delete");
   });
 });

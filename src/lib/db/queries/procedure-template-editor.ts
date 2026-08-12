@@ -14,6 +14,7 @@ import {
 import type {
   ProcedureBranchType,
   ProcedureNodeType,
+  ProcedureTemplateCategory,
   ProcedureTemplateStatus,
   ProcedureEquipmentType,
   ProcedureValidationSeverity,
@@ -82,6 +83,7 @@ export type ProcedureTemplateForEditor = {
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
+  category: ProcedureTemplateCategory;
   description: string | null;
   status: ProcedureTemplateStatus;
   isReferenceOnly: boolean;
@@ -180,6 +182,7 @@ export async function getProcedureTemplateForEditor(templateId: string): Promise
     code: template.code,
     name: template.name,
     equipmentType: template.equipmentType,
+    category: template.category,
     description: template.description,
     status: template.status,
     isReferenceOnly: template.isReferenceOnly,

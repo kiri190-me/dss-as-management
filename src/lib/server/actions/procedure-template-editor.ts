@@ -3,6 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
+import { canEditTechnicalTemplateDraft } from "@/lib/auth/technical-procedure-template-authorization";
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
@@ -47,8 +48,15 @@ async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } 
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
   }
-  if (!canEditProcedureTemplateDraft(session.role)) {
-    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "편집 권한이 없습니다 (SUPER_ADMIN 전용)." } };
+  // Phase 5C-5B — this fast pre-check is a UX short-circuit only, run
+  // before any template row (and therefore its category) is known; it must
+  // admit anyone who could possibly be authorized for EITHER category
+  // (FULL_SERVICE's existing SUPER_ADMIN-only function OR TECHNICAL_TASK's
+  // ADMIN+SUPER_ADMIN function). The mutation layer's category-aware check
+  // (procedure-template-editor.ts's assertEditableDraft /
+  // validateProcedureTemplate) remains the sole authoritative boundary.
+  if (!canEditProcedureTemplateDraft(session.role) && !canEditTechnicalTemplateDraft(session.role)) {
+    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "편집 권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };
 }

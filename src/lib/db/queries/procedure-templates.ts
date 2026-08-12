@@ -17,6 +17,7 @@ import type {
   ProcedureEquipmentType,
   ProcedureNodeType,
   ProcedureReferenceItemType,
+  ProcedureTemplateCategory,
   ProcedureTemplateSourceType,
   ProcedureTemplateStatus,
   ProcedureValidationIssueType,
@@ -29,6 +30,7 @@ export type ProcedureTemplateListRow = {
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
+  category: ProcedureTemplateCategory;
   version: number;
   status: ProcedureTemplateStatus;
   sourceType: ProcedureTemplateSourceType;
@@ -123,6 +125,7 @@ export async function listProcedureTemplates(
     code: t.code,
     name: t.name,
     equipmentType: t.equipmentType,
+    category: t.category,
     version: t.version,
     status: t.status,
     sourceType: t.sourceType,
@@ -241,6 +244,7 @@ export type ProcedureTemplateDetail = {
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
+  category: ProcedureTemplateCategory;
   description: string | null;
   status: ProcedureTemplateStatus;
   version: number;
@@ -281,6 +285,7 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
       code: procedureTemplates.code,
       name: procedureTemplates.name,
       equipmentType: procedureTemplates.equipmentType,
+      category: procedureTemplates.category,
       description: procedureTemplates.description,
       status: procedureTemplates.status,
       version: procedureTemplates.version,
@@ -427,6 +432,7 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
     code: row.code,
     name: row.name,
     equipmentType: row.equipmentType,
+    category: row.category,
     description: row.description,
     status: row.status,
     version: row.version,

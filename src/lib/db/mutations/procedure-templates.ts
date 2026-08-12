@@ -12,7 +12,12 @@ import {
   procedureReferenceItems,
   users,
 } from "../schema";
-import { canImportProcedureTemplates, canPublishProcedureTemplates, canArchiveProcedureTemplates, canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
+import { canImportProcedureTemplates, canArchiveProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
+import {
+  canManageTechnicalTemplates,
+  canActorPublishTemplateOfCategory,
+  canActorCreateDraftVersionOfCategory,
+} from "@/lib/auth/technical-procedure-template-authorization";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 import type { Role } from "@/lib/domain/types";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
@@ -303,16 +308,25 @@ export async function publishProcedureTemplate(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canPublishProcedureTemplates(actor.role)) {
-        fail("FORBIDDEN", "게시 권한이 없습니다 (SUPER_ADMIN 전용).");
+      // Phase 5C-5B — coarse pre-gate (SUPER_ADMIN or ADMIN) before any
+      // template row is looked up, same non-disclosure rationale as
+      // procedure-template-editor.ts's requireEditor.
+      if (!canManageTechnicalTemplates(actor.role)) {
+        fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
 
       const [template] = await tx
-        .select({ id: procedureTemplates.id, status: procedureTemplates.status })
+        .select({ id: procedureTemplates.id, status: procedureTemplates.status, category: procedureTemplates.category })
         .from(procedureTemplates)
         .where(eq(procedureTemplates.id, templateId))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+      // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
+      // fall through to canPublishProcedureTemplates unchanged (SUPER_ADMIN
+      // only); only TECHNICAL_TASK evaluates the broader technical policy.
+      if (!canActorPublishTemplateOfCategory(actor.role, template.category)) {
+        fail("FORBIDDEN", "게시 권한이 없습니다.");
+      }
       if (template.status !== "DRAFT") {
         fail("CONFLICT", "초안(DRAFT) 상태의 템플릿만 게시할 수 있습니다.");
       }
@@ -421,8 +435,9 @@ export async function createNewDraftVersion(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canCreateProcedureTemplateDraft(actor.role)) {
-        fail("FORBIDDEN", "새 버전 작성 권한이 없습니다 (SUPER_ADMIN 전용).");
+      // Phase 5C-5B — coarse pre-gate before any template row is looked up.
+      if (!canManageTechnicalTemplates(actor.role)) {
+        fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
       }
 
       const [published] = await tx
@@ -431,6 +446,13 @@ export async function createNewDraftVersion(
         .where(eq(procedureTemplates.id, publishedTemplateId))
         .for("update");
       if (!published) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+      // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
+      // fall through to canCreateProcedureTemplateDraft unchanged
+      // (SUPER_ADMIN only); only TECHNICAL_TASK evaluates the broader
+      // technical policy.
+      if (!canActorCreateDraftVersionOfCategory(actor.role, published.category)) {
+        fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
+      }
       if (published.status !== "PUBLISHED") {
         fail("CONFLICT", "게시(PUBLISHED) 상태의 템플릿만 새 버전을 만들 수 있습니다.");
       }

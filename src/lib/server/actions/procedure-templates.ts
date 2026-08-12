@@ -3,6 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
+import { canCreateTechnicalTemplateDraftVersion } from "@/lib/auth/technical-procedure-template-authorization";
 import { createNewDraftVersion, type ProcedureTemplateResult } from "@/lib/db/mutations/procedure-templates";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 
@@ -21,8 +22,11 @@ export async function createNewDraftVersionAction(input: { templateId: string })
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canCreateProcedureTemplateDraft(session.role)) {
-    return { ok: false, code: "FORBIDDEN", message: "새 버전 작성 권한이 없습니다 (SUPER_ADMIN 전용)." };
+  // Phase 5C-5B — fast pre-check broadened to admit either category's
+  // permission (FULL_SERVICE's existing function OR TECHNICAL_TASK's);
+  // createNewDraftVersion's own category-aware check remains authoritative.
+  if (!canCreateProcedureTemplateDraft(session.role) && !canCreateTechnicalTemplateDraftVersion(session.role)) {
+    return { ok: false, code: "FORBIDDEN", message: "새 버전 작성 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {
     return { ok: false, code: "NOT_FOUND", message: "요청 정보를 확인할 수 없습니다." };

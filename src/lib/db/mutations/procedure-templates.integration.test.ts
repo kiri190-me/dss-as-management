@@ -53,6 +53,8 @@ const TEST_CODE_PREFIX = "test-proc-";
 let superAdminId: string;
 let nonSuperAdminId: string; // ADMIN — used for unauthorized-action tests
 let asEngineerId: string;
+let salesId: string;
+let inventoryManagerId: string;
 
 const createdTemplateIds: string[] = [];
 
@@ -196,6 +198,22 @@ before(async () => {
     .limit(1);
   assert.ok(engineer, "expected an approved AS_ENGINEER in the dev DB");
   asEngineerId = engineer.id;
+
+  const [sales] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "SALES"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true)))
+    .limit(1);
+  assert.ok(sales, "expected an approved SALES user in the dev DB");
+  salesId = sales.id;
+
+  const [inventoryManager] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "INVENTORY_MANAGER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true)))
+    .limit(1);
+  assert.ok(inventoryManager, "expected an approved INVENTORY_MANAGER in the dev DB");
+  inventoryManagerId = inventoryManager.id;
 });
 
 after(async () => {
@@ -915,5 +933,71 @@ describe("archiveProcedureTemplate", () => {
     const doubleArchive = await archiveProcedureTemplate(imported.id, superAdminId);
     assert.equal(doubleArchive.ok, false);
     if (!doubleArchive.ok) assert.equal(doubleArchive.code, "CONFLICT");
+  });
+});
+
+describe("Phase 5C-5B: coarse-then-fine authorization ordering (publishProcedureTemplate / createNewDraftVersion)", () => {
+  const NONEXISTENT_ID = "00000000-0000-4000-8000-000000000000";
+
+  test("27. publishProcedureTemplate: AS_ENGINEER/SALES/INVENTORY_MANAGER against a nonexistent template id are rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const result = await publishProcedureTemplate(NONEXISTENT_ID, actorId);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("28. publishProcedureTemplate: ADMIN passes the coarse pre-gate, so a nonexistent template id surfaces as NOT_FOUND", async () => {
+    const result = await publishProcedureTemplate(NONEXISTENT_ID, nonSuperAdminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("29. publishProcedureTemplate: ADMIN against an EXISTING FULL_SERVICE DRAFT is FORBIDDEN at the fine-grained, category-specific check", async () => {
+    const imported = await importTemplate({ code: uniqueCode("admin-publish-forbidden"), includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const result = await publishProcedureTemplate(imported.id, nonSuperAdminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("30. createNewDraftVersion: AS_ENGINEER/SALES/INVENTORY_MANAGER against a nonexistent template id are rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const result = await createNewDraftVersion(NONEXISTENT_ID, actorId);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("31. createNewDraftVersion: ADMIN passes the coarse pre-gate, so a nonexistent template id surfaces as NOT_FOUND", async () => {
+    const result = await createNewDraftVersion(NONEXISTENT_ID, nonSuperAdminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("32. createNewDraftVersion: ADMIN against an EXISTING PUBLISHED FULL_SERVICE template is FORBIDDEN at the fine-grained, category-specific check", async () => {
+    const imported = await importTemplate({ code: uniqueCode("admin-new-version-forbidden"), includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const published = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(published.ok, true);
+
+    const result = await createNewDraftVersion(imported.id, nonSuperAdminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("33. SUPER_ADMIN retains existing publish/createNewDraftVersion behavior unchanged after the authorization refactor", async () => {
+    const imported = await importTemplate({ code: uniqueCode("super-admin-unchanged"), includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const published = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(published.ok, true, `publish failed: ${JSON.stringify(published)}`);
+
+    const newVersion = await createNewDraftVersion(imported.id, superAdminId);
+    assert.equal(newVersion.ok, true, `createNewDraftVersion failed: ${JSON.stringify(newVersion)}`);
+    if (newVersion.ok) createdTemplateIds.push(newVersion.id);
   });
 });

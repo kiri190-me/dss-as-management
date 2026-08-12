@@ -57,9 +57,18 @@ export const procedureTemplateEditHistory = pgTable(
     actionType: procedureTemplateEditActionTypeEnum("action_type").notNull(),
     // Null for template-level actions (CREATE_DRAFT_VERSION, SAVE_LAYOUT
     // touching multiple nodes at once, VALIDATE_TEMPLATE) — non-null for a
-    // single node/edge-scoped action.
-    nodeId: uuid("node_id").references(() => procedureTemplateNodes.id, { onDelete: "restrict" }),
-    edgeId: uuid("edge_id").references(() => procedureTemplateEdges.id, { onDelete: "restrict" }),
+    // single node/edge-scoped action. Phase 5C-5B: also becomes null
+    // automatically (onDelete:"set null") when the referenced node/edge is
+    // later hard-deleted by deleteProcedureTemplateNode/
+    // deleteProcedureTemplateEdge — same precedent as
+    // procedure_validation_resolution_history.affected_edge_id: the full
+    // identity of what was deleted already lives in before_state, so losing
+    // the live pointer while keeping the historical row is intended
+    // behavior, not data loss. No application code ever UPDATEs an existing
+    // history row's node_id/edge_id — this is a DB-level referential action
+    // only.
+    nodeId: uuid("node_id").references(() => procedureTemplateNodes.id, { onDelete: "set null" }),
+    edgeId: uuid("edge_id").references(() => procedureTemplateEdges.id, { onDelete: "set null" }),
     beforeState: jsonb("before_state"),
     afterState: jsonb("after_state"),
     // Required at the mutation-layer for CHANGE_NODE_TYPE and

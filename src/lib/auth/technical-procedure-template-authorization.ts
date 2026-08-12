@@ -1,5 +1,11 @@
 import type { Role } from "@/lib/domain/types";
-import { canViewPublishedProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
+import type { ProcedureTemplateCategory } from "@/lib/domain/procedure-template-types";
+import {
+  canViewPublishedProcedureTemplates,
+  canEditProcedureTemplateDraft,
+  canPublishProcedureTemplates,
+  canCreateProcedureTemplateDraft,
+} from "@/lib/auth/procedure-template-authorization";
 
 /**
  * Phase 5C-5A — centralized, server-side authorization for TECHNICAL_TASK
@@ -67,4 +73,36 @@ export function canCreateTechnicalTemplateDraftVersion(role: Role): boolean {
  */
 export function canViewPublishedTechnicalTemplates(role: Role): boolean {
   return canViewPublishedProcedureTemplates(role);
+}
+
+/**
+ * Phase 5C-5B — category-dispatching authorization for the three
+ * template-lifecycle actions whose permission tier now depends on WHICH
+ * category the target row actually is, not just on `role` alone: edit/
+ * validate a DRAFT, publish, and create a new DRAFT version from a
+ * PUBLISHED row. Each function's `else` branch (FULL_SERVICE or REFERENCE)
+ * calls the exact pre-existing procedure-template-authorization.ts
+ * function, unchanged — only TECHNICAL_TASK ever evaluates a different
+ * (broader) permission. REFERENCE is included in the dispatch only so it's
+ * total over every category value; in practice a REFERENCE template never
+ * reaches any of these three checks at all (assertEditableDraft's
+ * isReferenceOnly guard, and createNewDraftVersion's PUBLISHED-only source
+ * requirement, both block it upstream regardless of role).
+ *
+ * Deliberately three separate functions, not one generic
+ * "canActorMutateTemplate" — edit/publish/create-draft-version are distinct
+ * actions with independently reviewed FULL_SERVICE permission functions
+ * today, and collapsing them into one dispatch would obscure that each one
+ * still calls its own, unrelated existing SUPER_ADMIN-only function.
+ */
+export function canActorEditTemplateOfCategory(role: Role, category: ProcedureTemplateCategory): boolean {
+  return category === "TECHNICAL_TASK" ? canEditTechnicalTemplateDraft(role) : canEditProcedureTemplateDraft(role);
+}
+
+export function canActorPublishTemplateOfCategory(role: Role, category: ProcedureTemplateCategory): boolean {
+  return category === "TECHNICAL_TASK" ? canPublishTechnicalTemplates(role) : canPublishProcedureTemplates(role);
+}
+
+export function canActorCreateDraftVersionOfCategory(role: Role, category: ProcedureTemplateCategory): boolean {
+  return category === "TECHNICAL_TASK" ? canCreateTechnicalTemplateDraftVersion(role) : canCreateProcedureTemplateDraft(role);
 }

@@ -11,7 +11,7 @@ import {
   procedureTemplateEditActionTypeEnum,
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
-import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
+import { canManageTechnicalTemplates, canActorEditTemplateOfCategory } from "@/lib/auth/technical-procedure-template-authorization";
 import {
   validateProcedureGraphStructure,
   countBySeverity,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import type { Role } from "@/lib/domain/types";
 
 /**
  * Phase 4A — the controlled procedure-workflow editor's mutation layer.
@@ -26,8 +27,16 @@ import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/gr
  *   - re-checks the actor from the live DB (resolveEligibleActor, same
  *     helper procedure-templates.ts's own mutations use — never a looser
  *     copy of the check);
- *   - requires canEditProcedureTemplateDraft (SUPER_ADMIN only — ADMIN
- *     never gets a write path here, per this task's explicit policy);
+ *   - authorizes in two stages (Phase 5C-5B): a coarse pre-gate
+ *     (canManageTechnicalTemplates — SUPER_ADMIN or ADMIN) runs in
+ *     requireEditor, before any node/edge/template row is ever looked up,
+ *     so AS_ENGINEER/SALES/INVENTORY_MANAGER learn nothing about whether a
+ *     given id exists; the fine-grained, category-specific check
+ *     (canActorEditTemplateOfCategory — SUPER_ADMIN-only for FULL_SERVICE,
+ *     unchanged; SUPER_ADMIN+ADMIN for TECHNICAL_TASK) runs immediately
+ *     after the template row is loaded, inside assertEditableDraft (or
+ *     validateProcedureTemplate's own inline equivalent), the first point
+ *     that actually has the row's category in hand;
  *   - locks and re-verifies the owning template is still DRAFT and not
  *     reference-only, inside the same transaction as the actual write
  *     (never trusting that the editor UI already checked this);
@@ -77,15 +86,24 @@ function fail(code: EditorMutationResultCode, message: string): never {
 
 /**
  * Locks the template row (FOR UPDATE) and re-verifies every safety
- * condition this whole module depends on: exists, still DRAFT, not
- * reference-only, and the caller's expectedTemplateUpdatedAt still
- * matches — the exact "template has not changed since the editor loaded"
- * / "template is still DRAFT" checks this task's concurrency section
- * requires, run fresh inside every mutation's own transaction.
+ * condition this whole module depends on: exists, the actor is authorized
+ * for THIS row's specific category (Phase 5C-5B — requireEditor's own
+ * check is only the coarse SUPER_ADMIN/ADMIN pre-gate; this is the real,
+ * fine-grained boundary), still DRAFT, not reference-only, and the
+ * caller's expectedTemplateUpdatedAt still matches — run fresh inside
+ * every mutation's own transaction.
+ *
+ * Authorization is checked immediately after the row loads, before any of
+ * the status-specific errors (NOT_DRAFT/REFERENCE_ONLY/STALE_REVISION) —
+ * an actor who fails the category-specific check learns only that they're
+ * FORBIDDEN, never the template's current status.
  */
-async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string) {
+async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
   const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+  if (!canActorEditTemplateOfCategory(actorRole, template.category)) {
+    fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
+  }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
   if (template.isReferenceOnly) fail("REFERENCE_ONLY", "참고용 템플릿은 편집할 수 없습니다.");
   if (template.updatedAt.toISOString() !== expectedTemplateUpdatedAt) {
@@ -174,8 +192,15 @@ async function requireEditor(tx: Tx, actorUserId: string) {
     // instead of returning a normal { ok: false } result.
     return fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
   }
-  if (!canEditProcedureTemplateDraft(actor.role)) {
-    fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다 (SUPER_ADMIN 전용).");
+  // Phase 5C-5B — coarse pre-gate only: reject any role that can never
+  // manage ANY category of template before this transaction looks up a
+  // single node/edge/template row, so AS_ENGINEER/SALES/INVENTORY_MANAGER
+  // learn nothing about whether a given id exists. The real, category-
+  // specific boundary is assertEditableDraft (or validateProcedureTemplate's
+  // own inline equivalent), which runs after the template row — and
+  // therefore its category — is known.
+  if (!canManageTechnicalTemplates(actor.role)) {
+    fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
   }
   return actor;
 }
@@ -210,7 +235,7 @@ export async function updateProcedureTemplateNode(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
 
       const beforeState = {
         title: node.title,
@@ -266,7 +291,7 @@ export async function changeProcedureTemplateNodeType(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
 
       const beforeState = { nodeType: node.nodeType };
       const afterState = { nodeType: newNodeType };
@@ -338,7 +363,7 @@ export async function saveProcedureTemplateLayout(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
 
       let anyChange = false;
 
@@ -465,7 +490,7 @@ export async function updateProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
 
       const nextBranchType = patch.branchType ?? edge.branchType;
       const nextBranchLabel = patch.branchLabel !== undefined ? patch.branchLabel : edge.branchLabel;
@@ -550,7 +575,7 @@ export async function retargetProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
 
       await loadNodeInTemplate(tx, edge.procedureTemplateId, newFromNodeId);
       await loadNodeInTemplate(tx, edge.procedureTemplateId, newToNodeId);
@@ -608,7 +633,7 @@ export async function createProcedureTemplateEdge(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt);
+      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
 
       await loadNodeInTemplate(tx, templateId, input.fromNodeId);
       await loadNodeInTemplate(tx, templateId, input.toNodeId);
@@ -666,6 +691,12 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
 
       const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+      // Same category-specific boundary as assertEditableDraft, duplicated
+      // here because this function never calls it (validate intentionally
+      // skips the expectedTemplateUpdatedAt/STALE_REVISION check).
+      if (!canActorEditTemplateOfCategory(actor.role, template.category)) {
+        fail("FORBIDDEN", "이 템플릿을 검증할 권한이 없습니다.");
+      }
       if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 검증할 수 있습니다.");
       if (template.isReferenceOnly) fail("REFERENCE_ONLY", "참고용 템플릿은 검증할 수 없습니다.");
 
