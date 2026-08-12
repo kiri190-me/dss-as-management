@@ -539,6 +539,17 @@ describe("procedure-template-editor: audit history", () => {
     assert.equal(history[0].actorUserId, superAdminId);
     assert.ok(history[0].beforeState);
     assert.ok(history[0].afterState);
+    // Phase 5C-5C — two separate mutation calls (separate transactions) are
+    // two separate logical operations: each gets its own non-null
+    // change_group_id, and the two must differ.
+    assert.ok(history[0].changeGroupId);
+    assert.ok(history[1].changeGroupId);
+    assert.notEqual(history[0].changeGroupId, history[1].changeGroupId);
+    assert.equal(history[0].origin, "USER_EDIT");
+    assert.equal(history[0].sourceGroupId, null);
+    assert.equal(history[0].restoreTargetGroupId, null);
+    assert.equal(typeof history[0].sequenceNumber, "number");
+    assert.ok(history[1].sequenceNumber > history[0].sequenceNumber, "sequence_number must be DB-generated and monotonically increasing");
     void templateRow;
   });
 });
@@ -753,10 +764,22 @@ describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
       .select()
       .from(procedureTemplateEditHistory)
       .where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId))
-      .orderBy(procedureTemplateEditHistory.createdAt);
+      // Phase 5C-5C — both rows are written inside the same transaction, so
+      // created_at (transaction-scoped now()) can tie between them;
+      // sequence_number is IDENTITY-allocated and therefore the only column
+      // guaranteed to preserve insertion order here.
+      .orderBy(procedureTemplateEditHistory.sequenceNumber);
     assert.equal(history.length, 2, "one SAVE_LAYOUT row and one SAVE_EDGE_ROUTE row — never conflated into a single entry");
     assert.equal(history[0].actionType, "SAVE_LAYOUT");
     assert.equal(history[1].actionType, "SAVE_EDGE_ROUTE");
+    // Phase 5C-5C — one combined "저장" click is one logical operation: both
+    // rows must share the same change_group_id.
+    assert.ok(history[0].changeGroupId);
+    assert.equal(history[0].changeGroupId, history[1].changeGroupId);
+    assert.equal(history[0].origin, "USER_EDIT");
+    assert.equal(history[1].origin, "USER_EDIT");
+    assert.equal(history[0].sourceGroupId, null);
+    assert.equal(history[0].restoreTargetGroupId, null);
   });
 
   test("27. a stale combined save persists neither the node position nor the edge route", async () => {
@@ -1022,6 +1045,7 @@ describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history p
           beforeState: null,
           afterState: { nodeCode: "synthetic", nodeType: "TASK", title: "고립 노드 (FK 테스트 전용)" },
           actorUserId: superAdminId,
+          changeGroupId: randomUUID(),
         },
         {
           procedureTemplateId: templateId,
@@ -1031,6 +1055,7 @@ describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history p
           afterState: { title: "고립 노드 (FK 테스트 전용)" },
           reason: null,
           actorUserId: superAdminId,
+          changeGroupId: randomUUID(),
         },
       ])
       .returning({ id: procedureTemplateEditHistory.id, beforeState: procedureTemplateEditHistory.beforeState, afterState: procedureTemplateEditHistory.afterState });
@@ -1045,7 +1070,11 @@ describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history p
       .select()
       .from(procedureTemplateEditHistory)
       .where(inArray(procedureTemplateEditHistory.id, historyBefore.map((h) => h.id)))
-      .orderBy(procedureTemplateEditHistory.createdAt);
+      // Phase 5C-5C — historyBefore's two rows came from one array insert
+      // (same transaction), so created_at can tie; sequence_number is the
+      // only column guaranteed to preserve insertion order for the
+      // index-correlated comparison below.
+      .orderBy(procedureTemplateEditHistory.sequenceNumber);
     assert.equal(historyAfter.length, 2, "both history rows must survive the node deletion");
     for (let i = 0; i < historyAfter.length; i++) {
       assert.equal(historyAfter[i].nodeId, null, "node_id must become NULL via ON DELETE SET NULL");
@@ -1078,6 +1107,7 @@ describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history p
         afterState: { fromNodeId: nodes.get("n4")!.id, toNodeId: nodes.get("n1")!.id, branchType: "LOOP_BACK" },
         reason: "fk-test",
         actorUserId: superAdminId,
+        changeGroupId: randomUUID(),
       })
       .returning({ id: procedureTemplateEditHistory.id, beforeState: procedureTemplateEditHistory.beforeState, afterState: procedureTemplateEditHistory.afterState });
 
@@ -1832,7 +1862,12 @@ describe("insertProcedureTemplateNodeOnEdge", () => {
       .select()
       .from(procedureTemplateEditHistory)
       .where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId))
-      .orderBy(procedureTemplateEditHistory.createdAt);
+      // Phase 5C-5C — the split's 3 rows are written inside one transaction,
+      // so created_at (transaction-scoped now()) can tie between them;
+      // sequence_number is IDENTITY-allocated (globally monotonic across
+      // every transaction) and is the only column guaranteed to preserve
+      // insertion order here.
+      .orderBy(procedureTemplateEditHistory.sequenceNumber);
     // seedTechnicalGraph itself already wrote 3 rows (CREATE_NODE x2, CREATE_EDGE x1); the split adds exactly 3 more.
     const splitRows = history.slice(3);
     assert.equal(splitRows.length, 3);
@@ -1840,10 +1875,22 @@ describe("insertProcedureTemplateNodeOnEdge", () => {
     assert.equal(splitRows[0].nodeId, result.nodeId);
     assert.equal(splitRows[1].actionType, "RETARGET_EDGE");
     assert.equal(splitRows[1].edgeId, seed.edgeId);
-    assert.deepEqual(splitRows[1].beforeState, { fromNodeId: seed.nodeAId, toNodeId: seed.nodeBId, branchType: "DEFAULT" });
-    assert.deepEqual(splitRows[1].afterState, { fromNodeId: seed.nodeAId, toNodeId: result.nodeId, branchType: "DEFAULT" });
+    // Phase 5C-5C — `id` is now embedded in RETARGET_EDGE's before/afterState too (identity permanence fix).
+    assert.deepEqual(splitRows[1].beforeState, { id: seed.edgeId, fromNodeId: seed.nodeAId, toNodeId: seed.nodeBId, branchType: "DEFAULT" });
+    assert.deepEqual(splitRows[1].afterState, { id: seed.edgeId, fromNodeId: seed.nodeAId, toNodeId: result.nodeId, branchType: "DEFAULT" });
     assert.equal(splitRows[2].actionType, "CREATE_EDGE");
     assert.equal(splitRows[2].edgeId, result.secondEdgeId);
+    // Phase 5C-5C — one "split" call is one logical compound operation: all
+    // three rows must share the same change_group_id, distinct from the
+    // group ids seedTechnicalGraph's own (separate-transaction) rows used.
+    assert.ok(splitRows[0].changeGroupId);
+    assert.equal(splitRows[0].changeGroupId, splitRows[1].changeGroupId);
+    assert.equal(splitRows[0].changeGroupId, splitRows[2].changeGroupId);
+    for (const row of splitRows) {
+      assert.equal(row.origin, "USER_EDIT");
+      assert.equal(row.sourceGroupId, null);
+      assert.equal(row.restoreTargetGroupId, null);
+    }
   });
 
   test("FULL_SERVICE: node insertion through this NEW mutation fails even for SUPER_ADMIN, and nothing changes", async () => {

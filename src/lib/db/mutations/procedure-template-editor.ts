@@ -32,6 +32,7 @@ import {
 } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import type { Role } from "@/lib/domain/types";
+import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
 
 /**
  * Phase 4A — the controlled procedure-workflow editor's mutation layer.
@@ -107,7 +108,8 @@ type Failure = {
   message: string;
 };
 
-class EditorMutationError extends Error {
+/** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo shares this module's Failure shape/narrowing convention rather than defining a parallel one. */
+export class EditorMutationError extends Error {
   result: Failure;
   constructor(result: Failure) {
     super(result.message);
@@ -210,7 +212,8 @@ async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateU
  * reusing assertEditableDraft here would incorrectly let SUPER_ADMIN
  * create/delete nodes on a FULL_SERVICE template.
  */
-async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
+/** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo is a TECHNICAL_TASK-graph-editing capability and must share this exact gate, never a looser copy. */
+export async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
   const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
   if (!canActorManageTechnicalTemplateGraph(actorRole, template.category)) {
@@ -224,7 +227,8 @@ async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expected
   return template;
 }
 
-async function touchTemplate(tx: Tx, templateId: string): Promise<string> {
+/** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo bumps the same optimistic-concurrency token every other mutation in this module does. */
+export async function touchTemplate(tx: Tx, templateId: string): Promise<string> {
   const now = new Date();
   await tx.update(procedureTemplates).set({ updatedAt: now }).where(eq(procedureTemplates.id, templateId));
   return now.toISOString();
@@ -264,7 +268,13 @@ async function runStructuralValidation(tx: Tx, templateId: string): Promise<Stru
 
 type EditActionType = (typeof procedureTemplateEditActionTypeEnum.enumValues)[number];
 
-async function insertEditHistory(
+/**
+ * Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo writes
+ * rows through this exact same helper (never a parallel insert path), only
+ * supplying the three Phase 5C-5C fields every other call site leaves at
+ * their USER_EDIT/null defaults.
+ */
+export async function insertEditHistory(
   tx: Tx,
   row: {
     procedureTemplateId: string;
@@ -276,6 +286,19 @@ async function insertEditHistory(
     reason?: string | null;
     relatedValidationIssueId?: string | null;
     actorUserId: string;
+    // Phase 5C-5C — one UUID per logical user operation (see schema's own
+    // doc comment). The caller generates it, not this helper, so that a
+    // compound operation issuing multiple insertEditHistory calls inside
+    // one transaction (e.g. insertProcedureTemplateNodeOnEdge's CREATE_NODE
+    // + RETARGET_EDGE + CREATE_EDGE) can pass the same value to all of them.
+    changeGroupId: string;
+    // Phase 5C-5C — every pre-existing call site is a plain user edit and
+    // leaves these at their defaults (USER_EDIT / null / null); only
+    // procedure-template-undo-redo.ts's Undo/Redo mutations ever pass
+    // origin=UNDO|REDO with a non-null sourceGroupId.
+    origin?: EditHistoryOrigin;
+    sourceGroupId?: string | null;
+    restoreTargetGroupId?: string | null;
   }
 ): Promise<void> {
   await tx.insert(procedureTemplateEditHistory).values({
@@ -288,10 +311,15 @@ async function insertEditHistory(
     reason: row.reason ?? null,
     relatedValidationIssueId: row.relatedValidationIssueId ?? null,
     actorUserId: row.actorUserId,
+    changeGroupId: row.changeGroupId,
+    origin: row.origin ?? "USER_EDIT",
+    sourceGroupId: row.sourceGroupId ?? null,
+    restoreTargetGroupId: row.restoreTargetGroupId ?? null,
   });
 }
 
-async function requireEditor(tx: Tx, actorUserId: string) {
+/** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo authorizes through the exact same actor-resolution + coarse pre-gate as every other mutation in this module. */
+export async function requireEditor(tx: Tx, actorUserId: string) {
   let actor: Awaited<ReturnType<typeof resolveEligibleActor>>;
   try {
     actor = await resolveEligibleActor(tx, actorUserId);
@@ -363,7 +391,13 @@ export async function updateProcedureTemplateNode(
 
       await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
 
+      // Phase 5C-5C — `id` is carried in both states so historical
+      // replay/Undo/Redo/Restore can identify this node even after
+      // node_id (the FK column) is later nulled by an eventual delete
+      // (ON DELETE SET NULL, migration 0017) — never rely on the FK
+      // column alone for a row that outlives the entity it describes.
       const beforeState = {
+        id: nodeId,
         title: node.title,
         description: node.description,
         instructions: node.instructions,
@@ -385,6 +419,7 @@ export async function updateProcedureTemplateNode(
         afterState,
         reason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, node.procedureTemplateId);
@@ -428,8 +463,9 @@ export async function changeProcedureTemplateNodeType(
       }
       const storedReason = isBlank(reason) ? null : reason!.trim();
 
-      const beforeState = { nodeType: node.nodeType };
-      const afterState = { nodeType: newNodeType };
+      // Phase 5C-5C — see updateProcedureTemplateNode's own comment on `id`.
+      const beforeState = { id: nodeId, nodeType: node.nodeType };
+      const afterState = { id: nodeId, nodeType: newNodeType };
 
       await tx.update(procedureTemplateNodes).set({ nodeType: newNodeType, updatedAt: new Date() }).where(eq(procedureTemplateNodes.id, nodeId));
 
@@ -441,6 +477,7 @@ export async function changeProcedureTemplateNodeType(
         afterState,
         reason: storedReason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, node.procedureTemplateId);
@@ -500,6 +537,12 @@ export async function saveProcedureTemplateLayout(
       const actor = await requireEditor(tx, actorUserId);
       await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
 
+      // One shared change_group_id for this whole call: node-position and
+      // edge-route saves are one logical "저장" click (see this function's
+      // own doc comment — they commit or fail together), so both history
+      // rows below belong to the same compound operation even though they
+      // use two different action types.
+      const changeGroupId = randomUUID();
       let anyChange = false;
 
       // ---- node positions (SAVE_LAYOUT) ----
@@ -545,6 +588,7 @@ export async function saveProcedureTemplateLayout(
             afterState,
             reason: reason ?? null,
             actorUserId: actor.id,
+            changeGroupId,
           });
         }
       }
@@ -588,6 +632,7 @@ export async function saveProcedureTemplateLayout(
             beforeState,
             afterState,
             reason: reason ?? null,
+            changeGroupId,
             actorUserId: actor.id,
           });
         }
@@ -633,8 +678,9 @@ export async function updateProcedureTemplateEdge(
         fail("INVALID_INPUT", "사용자 정의(CUSTOM) 분기에는 라벨이 필요합니다.");
       }
 
-      const beforeState = { branchType: edge.branchType, branchLabel: edge.branchLabel };
-      const afterState = { branchType: nextBranchType, branchLabel: nextBranchLabel };
+      // Phase 5C-5C — see updateProcedureTemplateNode's own comment on `id`.
+      const beforeState = { id: edgeId, branchType: edge.branchType, branchLabel: edge.branchLabel };
+      const afterState = { id: edgeId, branchType: nextBranchType, branchLabel: nextBranchLabel };
 
       await tx
         .update(procedureTemplateEdges)
@@ -649,6 +695,7 @@ export async function updateProcedureTemplateEdge(
         afterState,
         reason: note,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);
@@ -721,8 +768,9 @@ export async function retargetProcedureTemplateEdge(
       await loadNodeInTemplate(tx, edge.procedureTemplateId, newToNodeId);
       await assertNoDuplicateEdge(tx, edge.procedureTemplateId, newFromNodeId, newToNodeId, edge.branchType, edgeId);
 
-      const beforeState = { fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId, branchType: edge.branchType };
-      const afterState = { fromNodeId: newFromNodeId, toNodeId: newToNodeId, branchType: edge.branchType };
+      // Phase 5C-5C — see updateProcedureTemplateNode's own comment on `id`.
+      const beforeState = { id: edgeId, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId, branchType: edge.branchType };
+      const afterState = { id: edgeId, fromNodeId: newFromNodeId, toNodeId: newToNodeId, branchType: edge.branchType };
 
       await tx.update(procedureTemplateEdges).set({ fromNodeId: newFromNodeId, toNodeId: newToNodeId }).where(eq(procedureTemplateEdges.id, edgeId));
 
@@ -734,6 +782,7 @@ export async function retargetProcedureTemplateEdge(
         afterState,
         reason: storedReason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);
@@ -810,9 +859,14 @@ export async function createProcedureTemplateEdge(
         actionType: "CREATE_EDGE",
         edgeId: inserted.id,
         beforeState: null,
-        afterState: { fromNodeId: input.fromNodeId, toNodeId: input.toNodeId, branchType: input.branchType, branchLabel: input.branchLabel ?? null },
+        // Phase 5C-5C — `id` included so this row stays self-identifying
+        // even after edge_id (the FK column) is later nulled by an
+        // eventual delete of this same edge — see
+        // updateProcedureTemplateNode's own comment on `id`.
+        afterState: { id: inserted.id, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId, branchType: input.branchType, branchLabel: input.branchLabel ?? null },
         reason: storedReason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, templateId);
@@ -857,6 +911,7 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
         beforeState: null,
         afterState: { errorCount: structuralValidation.errorCount, warningCount: structuralValidation.warningCount, infoCount: structuralValidation.infoCount },
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       return { ok: true, structuralValidation };
@@ -907,8 +962,8 @@ export type NodeSnapshot = {
   updatedAt: string;
 };
 
-/** Shared by createProcedureTemplateNode's CREATE_NODE afterState and deleteProcedureTemplateNode's DELETE_NODE beforeState — the exact same complete-node shape either way, so a reviewer reading the audit trail sees identical fields regardless of which action produced the row. */
-function serializeNodeSnapshot(node: typeof procedureTemplateNodes.$inferSelect): NodeSnapshot {
+/** Shared by createProcedureTemplateNode's CREATE_NODE afterState and deleteProcedureTemplateNode's DELETE_NODE beforeState — the exact same complete-node shape either way, so a reviewer reading the audit trail sees identical fields regardless of which action produced the row. Exported for reuse by procedure-template-undo-redo.ts, which needs the identical shape for its own CREATE_NODE/DELETE_NODE inverse and forward-replay history rows. */
+export function serializeNodeSnapshot(node: typeof procedureTemplateNodes.$inferSelect): NodeSnapshot {
   return {
     id: node.id,
     procedureTemplateId: node.procedureTemplateId,
@@ -958,8 +1013,8 @@ export type EdgeSnapshot = {
   userRoutePoints: RoutePoint[] | null;
 };
 
-/** deleteProcedureTemplateEdge's DELETE_EDGE beforeState — denormalizes the endpoint nodes' code/title onto the snapshot (edges only store fromNodeId/toNodeId) so the audit row stays human-readable even after the node itself is later deleted too. */
-function serializeEdgeSnapshot(
+/** deleteProcedureTemplateEdge's DELETE_EDGE beforeState — denormalizes the endpoint nodes' code/title onto the snapshot (edges only store fromNodeId/toNodeId) so the audit row stays human-readable even after the node itself is later deleted too. Exported for reuse by procedure-template-undo-redo.ts. */
+export function serializeEdgeSnapshot(
   edge: typeof procedureTemplateEdges.$inferSelect,
   fromNode: { nodeCode: string; title: string },
   toNode: { nodeCode: string; title: string }
@@ -1104,6 +1159,7 @@ export async function createProcedureTemplateNode(
         afterState,
         reason: null,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       const updatedAt = await touchTemplate(tx, templateId);
@@ -1199,6 +1255,7 @@ export async function deleteProcedureTemplateEdge(
         afterState: null,
         reason: storedReason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       await tx.delete(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId));
@@ -1313,6 +1370,7 @@ export async function deleteProcedureTemplateNode(
         afterState: null,
         reason: storedReason,
         actorUserId: actor.id,
+        changeGroupId: randomUUID(),
       });
 
       await tx.delete(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId));
@@ -1454,6 +1512,14 @@ export async function insertProcedureTemplateNodeOnEdge(
 
       const splitReason = `경로점 위치에 새 노드를 삽입하며 분기를 분할했습니다 (${nodeCode}).`;
 
+      // One shared change_group_id for all three rows below — this is a
+      // single logical "split" operation from the caller's perspective (one
+      // authoritative mutation, one transaction, see this function's own
+      // doc comment), so the eventual Undo/Redo fold must treat CREATE_NODE
+      // + RETARGET_EDGE + CREATE_EDGE as one atomic unit, never three
+      // independently undoable steps.
+      const changeGroupId = randomUUID();
+
       await insertEditHistory(tx, {
         procedureTemplateId: edge.procedureTemplateId,
         actionType: "CREATE_NODE",
@@ -1462,16 +1528,20 @@ export async function insertProcedureTemplateNodeOnEdge(
         afterState: serializeNodeSnapshot(insertedNode),
         reason: null,
         actorUserId: actor.id,
+        changeGroupId,
       });
 
+      // Phase 5C-5C — `id` included in both rows below (see
+      // updateProcedureTemplateNode's own comment on `id`).
       await insertEditHistory(tx, {
         procedureTemplateId: edge.procedureTemplateId,
         actionType: "RETARGET_EDGE",
         edgeId: edge.id,
-        beforeState: { fromNodeId: edge.fromNodeId, toNodeId: originalToNodeId, branchType: edge.branchType },
-        afterState: { fromNodeId: edge.fromNodeId, toNodeId: nodeId, branchType: edge.branchType },
+        beforeState: { id: edge.id, fromNodeId: edge.fromNodeId, toNodeId: originalToNodeId, branchType: edge.branchType },
+        afterState: { id: edge.id, fromNodeId: edge.fromNodeId, toNodeId: nodeId, branchType: edge.branchType },
         reason: splitReason,
         actorUserId: actor.id,
+        changeGroupId,
       });
 
       await insertEditHistory(tx, {
@@ -1479,9 +1549,10 @@ export async function insertProcedureTemplateNodeOnEdge(
         actionType: "CREATE_EDGE",
         edgeId: secondEdge.id,
         beforeState: null,
-        afterState: { fromNodeId: nodeId, toNodeId: originalToNodeId, branchType: "DEFAULT", branchLabel: null },
+        afterState: { id: secondEdge.id, fromNodeId: nodeId, toNodeId: originalToNodeId, branchType: "DEFAULT", branchLabel: null },
         reason: splitReason,
         actorUserId: actor.id,
+        changeGroupId,
       });
 
       const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);

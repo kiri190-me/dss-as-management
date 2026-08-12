@@ -1,4 +1,5 @@
-import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { bigint, check, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { procedureTemplates } from "./procedure-templates";
 import { procedureTemplateNodes } from "./procedure-template-nodes";
 import { procedureTemplateEdges } from "./procedure-template-edges";
@@ -45,6 +46,26 @@ export const procedureTemplateEditActionTypeEnum = pgEnum("procedure_template_ed
   "CREATE_NODE",
   "DELETE_NODE",
   "DELETE_EDGE",
+  // Phase 5C-5C — technical-template rename (procedure-templates.ts's
+  // renameTechnicalProcedureTemplate). Only {name} in before/after; template
+  // code stays immutable. Template-level (node_id/edge_id both null), same
+  // as VALIDATE_TEMPLATE/CREATE_DRAFT_VERSION.
+  "UPDATE_TEMPLATE_METADATA",
+]);
+
+/**
+ * Phase 5C-5C — Undo/Redo/Restore foundation. Distinguishes who/what
+ * produced a history row so the client-authoritative-free event fold
+ * (see procedure-template-editor mutation module, once implemented) can
+ * reconstruct appliedStack/redoStack purely by replaying origin +
+ * source_group_id/restore_target_group_id in sequence_number order —
+ * never from a mutable persisted cursor.
+ */
+export const procedureTemplateEditHistoryOriginEnum = pgEnum("procedure_template_edit_history_origin", [
+  "USER_EDIT",
+  "UNDO",
+  "REDO",
+  "RESTORE",
 ]);
 
 export const procedureTemplateEditHistory = pgTable(
@@ -88,10 +109,47 @@ export const procedureTemplateEditHistory = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Phase 5C-5C — one UUID per logical operation; every row written by the
+    // same insertEditHistory call site inside one transaction shares it.
+    // NOT NULL from day one: legacy rows are backfilled with their own
+    // singleton UUID by migration 0018 (no historical compound grouping is
+    // reconstructed — acceptable because FULL_SERVICE history stays
+    // read-only display and is never fed through the Undo/Redo/Restore fold).
+    changeGroupId: uuid("change_group_id").notNull(),
+    // Sole ordering key — created_at is display-only (Postgres now() is
+    // transaction-scoped, so same-transaction compound-group rows can tie on
+    // created_at; this column is IDENTITY-generated and therefore
+    // allocation-ordered even within one transaction). Backfilled
+    // deterministically by migration 0018 via
+    // ROW_NUMBER() OVER (ORDER BY created_at, id), then converted to
+    // GENERATED ALWAYS AS IDENTITY for all future inserts.
+    sequenceNumber: bigint("sequence_number", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
+    // USER_EDIT/RESTORE are forward-reversible operations (pushed onto the
+    // fold's appliedStack); UNDO/REDO reference exactly one prior forward
+    // group via source_group_id. See the origin-consistency CHECK below.
+    origin: procedureTemplateEditHistoryOriginEnum("origin").notNull().default("USER_EDIT"),
+    // Non-null iff origin IN (UNDO, REDO) — identifies the change_group_id of
+    // the forward group (USER_EDIT or RESTORE) being reversed/reapplied.
+    sourceGroupId: uuid("source_group_id"),
+    // Non-null iff origin = RESTORE — identifies the change_group_id of the
+    // historical group the user chose to restore to. Every row in one
+    // RESTORE group carries the same value.
+    restoreTargetGroupId: uuid("restore_target_group_id"),
   },
   (table) => [
     index("procedure_template_edit_history_template_id_idx").on(table.procedureTemplateId),
     index("procedure_template_edit_history_node_id_idx").on(table.nodeId),
     index("procedure_template_edit_history_edge_id_idx").on(table.edgeId),
+    uniqueIndex("procedure_template_edit_history_sequence_number_unique").on(table.sequenceNumber),
+    index("procedure_template_edit_history_template_sequence_idx").on(
+      table.procedureTemplateId,
+      table.sequenceNumber
+    ),
+    check(
+      "procedure_template_edit_history_origin_consistency",
+      sql`(${table.origin} = 'USER_EDIT' AND ${table.sourceGroupId} IS NULL AND ${table.restoreTargetGroupId} IS NULL)
+        OR (${table.origin} IN ('UNDO', 'REDO') AND ${table.sourceGroupId} IS NOT NULL AND ${table.restoreTargetGroupId} IS NULL)
+        OR (${table.origin} = 'RESTORE' AND ${table.sourceGroupId} IS NULL AND ${table.restoreTargetGroupId} IS NOT NULL)`
+    ),
   ]
 );

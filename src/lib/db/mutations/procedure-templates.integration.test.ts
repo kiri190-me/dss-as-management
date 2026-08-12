@@ -245,6 +245,14 @@ after(async () => {
     await db.delete(procedureReferenceItems).where(inArray(procedureReferenceItems.procedureTemplateId, allIds));
     await db.delete(procedureTemplateEdges).where(inArray(procedureTemplateEdges.procedureTemplateId, allIds));
     if (nodeIds.length > 0) await db.delete(procedureTemplateNodes).where(inArray(procedureTemplateNodes.id, nodeIds));
+    // Phase 5C-5C — procedure_template_edit_history.procedure_template_id is
+    // onDelete:"restrict" (unlike its node_id/edge_id, which are "set
+    // null"), so any row referencing one of these templates must be deleted
+    // before the template itself. Previously nothing in this file ever
+    // wrote a history row (renameTechnicalProcedureTemplate didn't yet), so
+    // this was never exercised; renameTechnicalProcedureTemplate now writes
+    // UPDATE_TEMPLATE_METADATA on every successful rename.
+    await db.delete(procedureTemplateEditHistory).where(inArray(procedureTemplateEditHistory.procedureTemplateId, allIds));
     await db.delete(procedureTemplates).where(inArray(procedureTemplates.id, allIds));
   }
 
@@ -1212,15 +1220,27 @@ describe("renameTechnicalProcedureTemplate", () => {
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
-  test("renaming does not insert a procedure_template_edit_history row (no existing action type represents template metadata rename)", async () => {
+  test("renaming inserts exactly one UPDATE_TEMPLATE_METADATA history row with before/after {name} and Phase 5C-5C group/sequence fields populated", async () => {
     const draft = await createDraft();
-    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "이력 없음 확인", draft.updatedAt.toISOString());
+    const result = await renameTechnicalProcedureTemplate(draft.id, superAdminId, "이력 확인", draft.updatedAt.toISOString());
     assert.equal(result.ok, true, JSON.stringify(result));
     const historyRows = await db
       .select()
       .from(procedureTemplateEditHistory)
       .where(eq(procedureTemplateEditHistory.procedureTemplateId, draft.id));
-    assert.equal(historyRows.length, 0);
+    assert.equal(historyRows.length, 1);
+    const [row] = historyRows;
+    assert.equal(row.actionType, "UPDATE_TEMPLATE_METADATA");
+    assert.equal(row.nodeId, null);
+    assert.equal(row.edgeId, null);
+    assert.deepEqual(row.beforeState, { name: "원래 이름" });
+    assert.deepEqual(row.afterState, { name: "이력 확인" });
+    assert.ok(row.changeGroupId, "changeGroupId must be populated");
+    assert.equal(row.origin, "USER_EDIT");
+    assert.equal(row.sourceGroupId, null);
+    assert.equal(row.restoreTargetGroupId, null);
+    assert.equal(typeof row.sequenceNumber, "number");
+    assert.ok(row.sequenceNumber > 0, "sequence_number must be DB-generated (IDENTITY)");
   });
 
   test("the code is never changed by a rename", async () => {

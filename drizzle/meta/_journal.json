@@ -127,6 +127,13 @@
       "when": 1786343622101,
       "tag": "0017_procedure_template_edit_history_set_null",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786519709818,
+      "tag": "0018_procedure_template_edit_history_undo_redo_foundation",
+      "breakpoints": true
     }
   ]
 }

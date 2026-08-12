@@ -1,5 +1,6 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { db } from "../client";
 import {
   procedureTemplates,
@@ -10,6 +11,7 @@ import {
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
   procedureReferenceItems,
+  procedureTemplateEditHistory,
   users,
 } from "../schema";
 import { canImportProcedureTemplates, canArchiveProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
@@ -293,6 +295,7 @@ export async function renameTechnicalProcedureTemplate(
           category: procedureTemplates.category,
           status: procedureTemplates.status,
           updatedAt: procedureTemplates.updatedAt,
+          name: procedureTemplates.name,
         })
         .from(procedureTemplates)
         .where(eq(procedureTemplates.id, templateId))
@@ -313,6 +316,19 @@ export async function renameTechnicalProcedureTemplate(
         .set({ name, updatedAt: new Date() })
         .where(eq(procedureTemplates.id, templateId))
         .returning({ updatedAt: procedureTemplates.updatedAt });
+
+      // Phase 5C-5C — template-level (node_id/edge_id both null), same
+      // convention as VALIDATE_TEMPLATE/CREATE_DRAFT_VERSION; before/after
+      // carry only {name}, since code stays immutable and this action can
+      // only ever change name.
+      await tx.insert(procedureTemplateEditHistory).values({
+        procedureTemplateId: templateId,
+        actionType: "UPDATE_TEMPLATE_METADATA",
+        beforeState: { name: template.name },
+        afterState: { name },
+        actorUserId: actor.id,
+        changeGroupId: randomUUID(),
+      });
 
       return { ok: true, id: templateId, name, updatedAt: updated.updatedAt.toISOString() };
     });
