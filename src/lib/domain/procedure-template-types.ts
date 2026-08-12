@@ -88,6 +88,30 @@ export const procedureNodeTypeLabels: Record<ProcedureNodeType, string> = {
   END: "종료",
 };
 
+/**
+ * Phase 5C-5B-1 — the server-side allow-list for
+ * createProcedureTemplateNode (manual TECHNICAL_TASK authoring v1).
+ * Deliberately a narrower, separate constant from PROCEDURE_NODE_TYPE_CODES
+ * rather than a change to the global enum: CHECKLIST/TROUBLESHOOTING are
+ * container node types whose real content lives in
+ * procedure_checklist_sections/procedure_troubleshooting_entries, and v1
+ * manual authoring has no UI or mutation path for creating that child
+ * content yet — allowing either type here would create a node with no way
+ * to ever populate it. Existing imported FULL_SERVICE rows of either type
+ * are completely unaffected; this only gates what a NEW manually-created
+ * node may be.
+ */
+export const MANUAL_TECHNICAL_NODE_TYPE_CODES = [
+  "START",
+  "TASK",
+  "INSPECTION",
+  "DECISION",
+  "CORRECTIVE_ACTION",
+  "DOCUMENT_REFERENCE",
+  "END",
+] as const satisfies readonly ProcedureNodeType[];
+export type ManualTechnicalNodeType = (typeof MANUAL_TECHNICAL_NODE_TYPE_CODES)[number];
+
 export const PROCEDURE_BRANCH_TYPE_CODES = [
   "DEFAULT",
   "NORMAL",

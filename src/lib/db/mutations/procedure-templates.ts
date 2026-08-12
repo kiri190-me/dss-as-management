@@ -19,6 +19,7 @@ import {
   canActorCreateDraftVersionOfCategory,
 } from "@/lib/auth/technical-procedure-template-authorization";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
+import { PROCEDURE_EQUIPMENT_TYPE_CODES, type ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 
@@ -38,7 +39,11 @@ export type ProcedureTemplateResultCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "HAS_UNRESOLVED_ERRORS"
-  | "HAS_STRUCTURAL_ERRORS";
+  | "HAS_STRUCTURAL_ERRORS"
+  // Phase 5C-5B-1 — createManualTechnicalProcedureTemplate's own input
+  // validation (blank code/name, unsupported equipmentType). No existing
+  // caller of this file's other functions returns this code.
+  | "INVALID_INPUT";
 
 export type ProcedureTemplateResult =
   | { ok: true; id: string; alreadyImported?: boolean }
@@ -87,8 +92,21 @@ export async function resolveEligibleActor(
   return actor;
 }
 
+function hasPgCode(err: unknown, code: string): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === code;
+}
+
+// Phase 5C-5B-1 fix: drizzle-orm's postgres-js driver wraps the real
+// PostgresError under `.cause` (the outer DrizzleQueryError's own `.code` is
+// always undefined) — same convention as procedure-case-execution.ts's
+// isUniqueViolation. The original single-line check here (err.code only)
+// never actually matched a real driver error; checking both is what makes
+// this catchable at all, for both this function's existing caller
+// (createDraftProcedureTemplateFromImport) and createManualTechnicalProcedureTemplate below.
 function isPgUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "23505";
+  if (hasPgCode(err, "23505")) return true;
+  const cause = err instanceof Error ? err.cause : undefined;
+  return hasPgCode(cause, "23505");
 }
 
 /**
@@ -153,6 +171,77 @@ export async function createDraftProcedureTemplateFromImport(
     if (err instanceof ProcedureTemplateMutationError) return err.result;
     if (isPgUniqueViolation(err)) {
       return { ok: false, code: "CONFLICT", message: "동일한 코드의 템플릿이 이미 존재합니다 (다른 원본 파일 기준)." };
+    }
+    throw err;
+  }
+}
+
+export type CreateManualTechnicalTemplateInput = {
+  code: string;
+  name: string;
+  equipmentType: ProcedureEquipmentType;
+  description?: string | null;
+};
+
+/**
+ * Phase 5C-5B-1 — the first template-creation path that does not go
+ * through the Excel importer: an ADMIN/SUPER_ADMIN authoring a
+ * TECHNICAL_TASK procedure entirely by hand, starting from an empty graph
+ * (procedure-template-editor.ts's createProcedureTemplateNode fills it in
+ * afterward, one node at a time). category/isReferenceOnly/status/version/
+ * sourceType are all fixed here — there is no parameter through which a
+ * caller could request anything other than a TECHNICAL_TASK DRAFT, so
+ * category can never be spoofed by client input. Deliberately mirrors
+ * createDraftProcedureTemplateFromImport's own coarse-actor-check +
+ * unique-violation-translation shape rather than introducing a third
+ * pattern.
+ */
+export async function createManualTechnicalProcedureTemplate(
+  input: CreateManualTechnicalTemplateInput,
+  actorUserId: string
+): Promise<ProcedureTemplateResult> {
+  const code = typeof input.code === "string" ? input.code.trim() : "";
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const description = typeof input.description === "string" ? input.description.trim() : null;
+
+  if (code.length === 0) return { ok: false, code: "INVALID_INPUT", message: "코드를 입력해야 합니다." };
+  if (name.length === 0) return { ok: false, code: "INVALID_INPUT", message: "이름을 입력해야 합니다." };
+  if (!(PROCEDURE_EQUIPMENT_TYPE_CODES as readonly string[]).includes(input.equipmentType)) {
+    return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 장비 유형입니다." };
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await resolveEligibleActor(tx, actorUserId);
+      if (!canManageTechnicalTemplates(actor.role)) {
+        fail("FORBIDDEN", "기술 절차 템플릿 생성 권한이 없습니다.");
+      }
+
+      const [template] = await tx
+        .insert(procedureTemplates)
+        .values({
+          code,
+          name,
+          equipmentType: input.equipmentType,
+          category: "TECHNICAL_TASK",
+          description: description && description.length > 0 ? description : null,
+          status: "DRAFT",
+          version: 1,
+          sourceType: "MANUAL",
+          isReferenceOnly: false,
+          createdByUserId: actor.id,
+        })
+        .returning({ id: procedureTemplates.id });
+
+      return { ok: true, id: template.id };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
+    if (isPgUniqueViolation(err)) {
+      // Deliberately generic — must never disclose the category (or any
+      // other detail) of whichever existing template already holds this
+      // (code, version=1) pair.
+      return { ok: false, code: "CONFLICT", message: "이미 사용 중인 코드입니다." };
     }
     throw err;
   }

@@ -106,3 +106,19 @@ export function canActorPublishTemplateOfCategory(role: Role, category: Procedur
 export function canActorCreateDraftVersionOfCategory(role: Role, category: ProcedureTemplateCategory): boolean {
   return category === "TECHNICAL_TASK" ? canCreateTechnicalTemplateDraftVersion(role) : canCreateProcedureTemplateDraft(role);
 }
+
+/**
+ * Phase 5C-5B-1 — authorization for the node/edge STRUCTURAL CRUD
+ * capabilities (create node, delete node, delete edge) that no category
+ * had before this phase. Deliberately NOT canActorEditTemplateOfCategory:
+ * that function's FULL_SERVICE/REFERENCE branch falls through to the
+ * existing canEditProcedureTemplateDraft (SUPER_ADMIN-only) property-edit
+ * policy, which would incorrectly hand SUPER_ADMIN this brand-new
+ * destructive/structural capability on FULL_SERVICE templates too — the
+ * task brief is explicit that this is a hard deny for every role on
+ * FULL_SERVICE/REFERENCE, with no SUPER_ADMIN carve-out. This function is
+ * therefore TECHNICAL_TASK-only by construction, never a role-only check.
+ */
+export function canActorManageTechnicalTemplateGraph(role: Role, category: ProcedureTemplateCategory): boolean {
+  return category === "TECHNICAL_TASK" && canManageTechnicalTemplates(role);
+}

@@ -12,6 +12,7 @@ import {
   canActorEditTemplateOfCategory,
   canActorPublishTemplateOfCategory,
   canActorCreateDraftVersionOfCategory,
+  canActorManageTechnicalTemplateGraph,
 } from "./technical-procedure-template-authorization";
 import {
   canEditProcedureTemplateDraft,
@@ -134,4 +135,24 @@ test("AS_ENGINEER, SALES, INVENTORY_MANAGER are forbidden for every category on 
       assert.equal(canActorCreateDraftVersionOfCategory(role, category), false, `createDraftVersion, role=${role}, category=${category}`);
     }
   }
+});
+
+// ---- Phase 5C-5B-1: node/edge structural CRUD authorization (TECHNICAL_TASK-only, no SUPER_ADMIN carve-out) ----
+
+test("canActorManageTechnicalTemplateGraph: TECHNICAL_TASK admits ADMIN+SUPER_ADMIN only, matching canManageTechnicalTemplates exactly", () => {
+  for (const role of ROLE_CODES) {
+    assert.equal(canActorManageTechnicalTemplateGraph(role, "TECHNICAL_TASK"), canManageTechnicalTemplates(role), `TECHNICAL_TASK, role=${role}`);
+  }
+});
+
+test("canActorManageTechnicalTemplateGraph: FULL_SERVICE and REFERENCE are hard-denied for every role, including SUPER_ADMIN — no carve-out", () => {
+  for (const role of ROLE_CODES) {
+    assert.equal(canActorManageTechnicalTemplateGraph(role, "FULL_SERVICE"), false, `FULL_SERVICE must hard-deny role=${role}`);
+    assert.equal(canActorManageTechnicalTemplateGraph(role, "REFERENCE"), false, `REFERENCE must hard-deny role=${role}`);
+  }
+});
+
+test("canActorManageTechnicalTemplateGraph differs from canActorEditTemplateOfCategory specifically on SUPER_ADMIN + FULL_SERVICE (the whole point of the new function)", () => {
+  assert.equal(canActorEditTemplateOfCategory("SUPER_ADMIN", "FULL_SERVICE"), true, "the existing property-edit policy still allows SUPER_ADMIN on FULL_SERVICE");
+  assert.equal(canActorManageTechnicalTemplateGraph("SUPER_ADMIN", "FULL_SERVICE"), false, "the NEW structural-CRUD policy must never allow this, even for SUPER_ADMIN");
 });

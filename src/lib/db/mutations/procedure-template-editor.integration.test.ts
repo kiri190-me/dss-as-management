@@ -10,9 +10,16 @@ import {
   procedureTemplateNodes,
   procedureTemplateEdges,
   procedureTemplateEditHistory,
+  procedureChecklistSections,
+  procedureTroubleshootingEntries,
   users,
 } from "../schema";
-import { createDraftProcedureTemplateFromImport, publishProcedureTemplate, createNewDraftVersion } from "./procedure-templates";
+import {
+  createDraftProcedureTemplateFromImport,
+  publishProcedureTemplate,
+  createNewDraftVersion,
+  createManualTechnicalProcedureTemplate,
+} from "./procedure-templates";
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
@@ -21,6 +28,9 @@ import {
   retargetProcedureTemplateEdge,
   createProcedureTemplateEdge,
   validateProcedureTemplate,
+  createProcedureTemplateNode,
+  deleteProcedureTemplateNode,
+  deleteProcedureTemplateEdge,
 } from "./procedure-template-editor";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import { MAX_ROUTE_POINTS } from "@/lib/graph-editor-core/routing";
@@ -91,6 +101,58 @@ async function createDraft(code: string) {
   return result.id;
 }
 
+/** Phase 5C-5B-1 — a manual TECHNICAL_TASK DRAFT with no nodes/edges yet, the starting point for createProcedureTemplateNode/deleteProcedureTemplateNode/deleteProcedureTemplateEdge tests. */
+async function createTechnicalDraft(code: string, actorId = superAdminId) {
+  const result = await createManualTechnicalProcedureTemplate({ code, name: `기술 절차 테스트 ${code}`, equipmentType: "COMMON" }, actorId);
+  assert.equal(result.ok, true, `technical draft creation failed: ${JSON.stringify(result)}`);
+  if (!result.ok) throw new Error("unreachable");
+  createdTemplateIds.push(result.id);
+  return result.id;
+}
+
+/**
+ * Phase 5C-5B-1 — a REFERENCE DRAFT fixture. No production creation path
+ * exists for REFERENCE templates yet (only the Excel importer's two
+ * hardcoded navigational builders create real ones — see
+ * scripts/import-procedure-templates.ts) — a direct insert is the only way
+ * to get a synthetic one for the "REFERENCE hard-denies the new
+ * capability" tests, same test-only-direct-DB-operation convention this
+ * file's own tests 43-46 already use for isolated FK-behavior proofs.
+ */
+async function createReferenceDraft(code: string) {
+  const [row] = await db
+    .insert(procedureTemplates)
+    .values({
+      code,
+      name: `참조 템플릿 테스트 ${code}`,
+      equipmentType: "COMMON",
+      category: "REFERENCE",
+      isReferenceOnly: true,
+      status: "DRAFT",
+      version: 1,
+      sourceType: "MANUAL",
+      createdByUserId: superAdminId,
+    })
+    .returning({ id: procedureTemplates.id });
+  createdTemplateIds.push(row.id);
+  return row.id;
+}
+
+/** Phase 5C-5B-1 — builds a 2-TASK-node, 1-DEFAULT-edge graph on an existing (empty) technical DRAFT via the production mutations themselves (createProcedureTemplateNode x2, then the existing createProcedureTemplateEdge), so delete-edge/delete-node tests start from a realistic, mutation-produced fixture rather than a raw insert. */
+async function seedTechnicalGraph(templateId: string, actorId = superAdminId) {
+  const templateRow = await loadTemplateRow(templateId);
+  const n1 = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "노드1" }, templateRow.updatedAt.toISOString());
+  assert.equal(n1.ok, true, `seed node 1 failed: ${JSON.stringify(n1)}`);
+  if (!n1.ok) throw new Error("unreachable");
+  const n2 = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "노드2" }, n1.updatedAt);
+  assert.equal(n2.ok, true, `seed node 2 failed: ${JSON.stringify(n2)}`);
+  if (!n2.ok) throw new Error("unreachable");
+  const edge = await createProcedureTemplateEdge(templateId, actorId, { fromNodeId: n1.nodeId, toNodeId: n2.nodeId, branchType: "DEFAULT", reason: "테스트 연결" }, n2.updatedAt);
+  assert.equal(edge.ok, true, `seed edge failed: ${JSON.stringify(edge)}`);
+  if (!edge.ok) throw new Error("unreachable");
+  return { nodeAId: n1.nodeId, nodeBId: n2.nodeId, edgeId: edge.edgeId, updatedAt: edge.updatedAt };
+}
+
 async function loadTemplateRow(templateId: string) {
   const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId));
   return row;
@@ -156,6 +218,18 @@ after(async () => {
     // procedure_templates/nodes/edges — must go first, or the later
     // template/node/edge deletes below would themselves be restricted.
     await db.delete(procedureTemplateEditHistory).where(inArray(procedureTemplateEditHistory.procedureTemplateId, allIds));
+
+    // Phase 5C-5B-1 — the NODE_HAS_DEPENDENT_CONTENT tests attach synthetic
+    // checklist sections/troubleshooting entries directly; both are
+    // onDelete:"restrict" against node_id, so they must go before the node
+    // delete below too.
+    const nodeRows = await db.select({ id: procedureTemplateNodes.id }).from(procedureTemplateNodes).where(inArray(procedureTemplateNodes.procedureTemplateId, allIds));
+    const nodeIds = nodeRows.map((n) => n.id);
+    if (nodeIds.length > 0) {
+      await db.delete(procedureChecklistSections).where(inArray(procedureChecklistSections.nodeId, nodeIds));
+      await db.delete(procedureTroubleshootingEntries).where(inArray(procedureTroubleshootingEntries.nodeId, nodeIds));
+    }
+
     await db.delete(procedureTemplateEdges).where(inArray(procedureTemplateEdges.procedureTemplateId, allIds));
     await db.delete(procedureTemplateNodes).where(inArray(procedureTemplateNodes.procedureTemplateId, allIds));
     await db.delete(procedureTemplates).where(inArray(procedureTemplates.id, allIds));
@@ -1053,5 +1127,583 @@ describe("procedure-template-editor: Phase 5C-5B FK behavior (SET NULL history p
     );
     const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, parentEdgeThatWasCloned.id));
     assert.ok(stillThere, "the parent edge must still exist after the rejected delete");
+  });
+});
+
+/**
+ * Phase 5C-5B-1 — createProcedureTemplateNode: manual TECHNICAL_TASK node
+ * authoring. All fixtures are synthetic (createTechnicalDraft/
+ * createReferenceDraft), self-cleaning via this file's existing after()
+ * hook and TEST_CODE_PREFIX convention.
+ */
+describe("createProcedureTemplateNode", () => {
+  test("ADMIN creates a node on a TECHNICAL_TASK DRAFT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-admin"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, adminId, { nodeType: "TASK", title: "작업 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("SUPER_ADMIN creates a node on a TECHNICAL_TASK DRAFT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-super"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "작업 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("FULL_SERVICE: node creation through this NEW mutation fails even for SUPER_ADMIN", async () => {
+    const templateId = await createDraft(uniqueCode("create-node-full-service"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("REFERENCE: node creation fails", async () => {
+    const templateId = await createReferenceDraft(uniqueCode("create-node-reference"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-denied"));
+    const templateRow = await loadTemplateRow(templateId);
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const result = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("a PUBLISHED technical template fails (NOT_DRAFT)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-published"));
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
+  });
+
+  test("CHECKLIST is rejected — not in the v1 manual authoring allow-list", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-checklist"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "CHECKLIST" as never, title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
+  test("TROUBLESHOOTING is rejected — not in the v1 manual authoring allow-list", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-troubleshooting"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TROUBLESHOOTING" as never, title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
+  test("title is required and trimmed", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-title"));
+    const templateRow = await loadTemplateRow(templateId);
+
+    const blank = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "   " }, templateRow.updatedAt.toISOString());
+    assert.equal(blank.ok, false);
+    if (!blank.ok) assert.equal(blank.code, "INVALID_INPUT");
+
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "  실제 제목  " }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(node.title, "실제 제목");
+  });
+
+  test("id/nodeCode are server-generated: nodeCode is exactly manual-<the node's own full UUID>, never client-supplied", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-id"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    assert.equal(node.nodeCode, `manual-${node.id}`);
+  });
+
+  test("sortOrder increments across successive creates; position defaults deterministically (x=0, y = previous max + 150, first node y=0)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-position"));
+    let templateRow = await loadTemplateRow(templateId);
+
+    const first = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "첫 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const [firstNode] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, first.nodeId));
+    assert.equal(firstNode.positionX, 0);
+    assert.equal(firstNode.positionY, 0, "the first node in an empty template must default to y=0");
+    assert.equal(firstNode.sortOrder, 0);
+
+    templateRow = await loadTemplateRow(templateId);
+    const second = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "둘째 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const [secondNode] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, second.nodeId));
+    assert.equal(secondNode.positionX, 0);
+    assert.equal(secondNode.positionY, firstNode.positionY + 150);
+    assert.equal(secondNode.sortOrder, firstNode.sortOrder + 1);
+  });
+
+  test("no reason is required to create a node, and CREATE_NODE history's afterState matches the persisted node exactly", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-history"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "INSPECTION", title: "검사 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, result.nodeId));
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "CREATE_NODE")));
+    assert.ok(history, "expected exactly one CREATE_NODE history row");
+    assert.equal(history.nodeId, node.id);
+    assert.equal(history.beforeState, null);
+    assert.equal(history.reason, null, "creation never requires or records a reason");
+    assert.deepEqual(history.afterState, {
+      id: node.id,
+      procedureTemplateId: node.procedureTemplateId,
+      nodeCode: node.nodeCode,
+      nodeType: node.nodeType,
+      title: node.title,
+      description: node.description,
+      objective: node.objective,
+      preparation: node.preparation,
+      toolsAndEquipment: node.toolsAndEquipment,
+      safetyCaution: node.safetyCaution,
+      instructions: node.instructions,
+      expectedNormalResult: node.expectedNormalResult,
+      ngSymptoms: node.ngSymptoms,
+      recommendedCorrectiveAction: node.recommendedCorrectiveAction,
+      acceptanceCriteria: node.acceptanceCriteria,
+      workerMayAddNextTask: node.workerMayAddNextTask,
+      positionX: node.positionX,
+      positionY: node.positionY,
+      userPositionX: node.userPositionX,
+      userPositionY: node.userPositionY,
+      sortOrder: node.sortOrder,
+      sourceWorksheet: node.sourceWorksheet,
+      sourceShapeId: node.sourceShapeId,
+      sourceCellRange: node.sourceCellRange,
+      isActive: node.isActive,
+      createdAt: node.createdAt.toISOString(),
+      updatedAt: node.updatedAt.toISOString(),
+    });
+    assert.equal(node.workerMayAddNextTask, true, "workerMayAddNextTask must use the column default");
+    assert.equal(node.isActive, true);
+    assert.equal(node.sourceWorksheet, null);
+    assert.equal(node.sourceShapeId, null);
+    assert.equal(node.sourceCellRange, null);
+  });
+
+  test("a stale expectedTemplateUpdatedAt token is rejected (STALE_REVISION), and no CREATE_NODE history row is written", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-stale"));
+    const templateRow = await loadTemplateRow(templateId);
+    const staleToken = templateRow.updatedAt.toISOString();
+
+    const first = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "첫 변경" }, staleToken);
+    assert.equal(first.ok, true);
+
+    const historyBefore = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(historyBefore.length, 1);
+
+    const second = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "재사용된 낡은 토큰" }, staleToken);
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.code, "STALE_REVISION");
+
+    const historyAfter = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(historyAfter.length, 1, "a rejected stale create must not add a second history row");
+  });
+});
+
+/** Phase 5C-5B-1 — deleteProcedureTemplateEdge. Fixtures via seedTechnicalGraph/createDraft/createReferenceDraft, all synthetic. */
+describe("deleteProcedureTemplateEdge", () => {
+  test("ADMIN deletes an edge on a TECHNICAL_TASK DRAFT; the edge is gone, DELETE_EDGE history survives with edge_id=NULL and beforeState/reason intact", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-admin"));
+    const seed = await seedTechnicalGraph(templateId, adminId);
+
+    const [nodeA] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    const [nodeB] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeBId));
+
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, adminId, "더 이상 필요하지 않은 연결", seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.equal(stillThere, undefined, "the edge row must actually be gone");
+
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_EDGE")));
+    assert.ok(history, "expected a DELETE_EDGE history row");
+    assert.equal(history.edgeId, null, "edge_id must become NULL via ON DELETE SET NULL (migration 0017)");
+    assert.equal(history.afterState, null);
+    assert.equal(history.reason, "더 이상 필요하지 않은 연결");
+    assert.deepEqual(history.beforeState, {
+      id: seed.edgeId,
+      procedureTemplateId: templateId,
+      fromNodeId: seed.nodeAId,
+      toNodeId: seed.nodeBId,
+      fromNodeCode: nodeA.nodeCode,
+      fromNodeTitle: nodeA.title,
+      toNodeCode: nodeB.nodeCode,
+      toNodeTitle: nodeB.title,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      conditionDefinition: null,
+      sortOrder: 0,
+      sourceConnectorId: null,
+      clonedFromEdgeId: null,
+      userRoutePoints: null,
+    });
+  });
+
+  test("SUPER_ADMIN deletes an edge on a TECHNICAL_TASK DRAFT", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-super"));
+    const seed = await seedTechnicalGraph(templateId);
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "사유", seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("FULL_SERVICE: edge deletion through this NEW mutation fails even for SUPER_ADMIN", async () => {
+    const templateId = await createDraft(uniqueCode("delete-edge-full-service"));
+    const edges = await loadEdges(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await deleteProcedureTemplateEdge(edges[0].id, superAdminId, "사유", templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edges[0].id));
+    assert.ok(stillThere, "the FULL_SERVICE edge must be untouched");
+  });
+
+  test("a PUBLISHED technical template's edge cannot be deleted (NOT_DRAFT)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-published"));
+    const seed = await seedTechnicalGraph(templateId);
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "사유", seed.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
+  });
+
+  test("a blank reason is rejected, and no DELETE_EDGE history row is written", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-blank-reason"));
+    const seed = await seedTechnicalGraph(templateId);
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "   ", seed.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.ok(stillThere);
+    const history = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(history.filter((h) => h.actionType === "DELETE_EDGE").length, 0);
+  });
+
+  test("using a different technical template's revision token is rejected (STALE_REVISION) — the token is scoped to the edge's own owning template, never guessable/reusable across templates", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-cross-a"));
+    const seed = await seedTechnicalGraph(templateId);
+    const otherTemplateId = await createTechnicalDraft(uniqueCode("delete-edge-cross-b"));
+    const otherTemplateRow = await loadTemplateRow(otherTemplateId);
+
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "사유", otherTemplateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "STALE_REVISION");
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.ok(stillThere);
+  });
+
+  test("EDGE_HAS_CLONE_DEPENDENTS: an edge still referenced by another edge's clonedFromEdgeId cannot be deleted", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-edge-clone-parent"));
+    const seed = await seedTechnicalGraph(templateId);
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const newDraft = await createNewDraftVersion(templateId, adminId);
+    assert.equal(newDraft.ok, true, JSON.stringify(newDraft));
+    if (!newDraft.ok) return;
+    createdTemplateIds.push(newDraft.id);
+
+    const childEdges = await loadEdges(newDraft.id);
+    const childClone = childEdges.find((e) => e.clonedFromEdgeId === seed.edgeId);
+    assert.ok(childClone, "the child draft must carry an edge whose clonedFromEdgeId points at the parent edge");
+
+    // deleteProcedureTemplateEdge is DRAFT-only, and clonedFromEdgeId always
+    // points at a PUBLISHED source (createNewDraftVersion's only source) —
+    // so under normal production flows the owning template of a
+    // clone-dependent edge can never be DRAFT, and this dependency check
+    // can never actually fire through the DRAFT-only gate above it.
+    // Restoring the parent template to DRAFT here is a deliberate,
+    // synthetic, test-only DB operation (same convention this file's own
+    // tests 43-46 already use) purely to exercise this defensive branch in
+    // isolation; no real template is ever touched this way.
+    const now = new Date();
+    await db.update(procedureTemplates).set({ status: "DRAFT", updatedAt: now }).where(eq(procedureTemplates.id, templateId));
+
+    const result = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "사유", now.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "EDGE_HAS_CLONE_DEPENDENTS");
+      const detailed = result as typeof result & { dependentEdgeCount: number; dependentEdgeIds: string[] };
+      assert.equal(detailed.dependentEdgeCount, 1);
+      assert.deepEqual(detailed.dependentEdgeIds, [childClone.id]);
+    }
+    const [stillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.ok(stillThere, "the edge must still exist after the rejected delete");
+    const history = await db.select().from(procedureTemplateEditHistory).where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_EDGE")));
+    assert.equal(history.length, 0, "a rejected delete (dependency check failed) must never write a DELETE_EDGE history row");
+  });
+});
+
+/** Phase 5C-5B-1 — deleteProcedureTemplateNode. */
+describe("deleteProcedureTemplateNode", () => {
+  test("an unconnected node (no edges) deletes; the node is gone, DELETE_NODE history survives with node_id=NULL and beforeState/reason intact", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-unconnected"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "고립 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "잘못 생성된 노드 정리", created.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
+    assert.equal(stillThere, undefined, "the node row must actually be gone");
+
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(and(eq(procedureTemplateEditHistory.procedureTemplateId, templateId), eq(procedureTemplateEditHistory.actionType, "DELETE_NODE")));
+    assert.ok(history, "expected a DELETE_NODE history row");
+    assert.equal(history.nodeId, null, "node_id must become NULL via ON DELETE SET NULL (migration 0017)");
+    assert.equal(history.afterState, null);
+    assert.equal(history.reason, "잘못 생성된 노드 정리");
+    assert.deepEqual(history.beforeState, {
+      id: node.id,
+      procedureTemplateId: node.procedureTemplateId,
+      nodeCode: node.nodeCode,
+      nodeType: node.nodeType,
+      title: node.title,
+      description: node.description,
+      objective: node.objective,
+      preparation: node.preparation,
+      toolsAndEquipment: node.toolsAndEquipment,
+      safetyCaution: node.safetyCaution,
+      instructions: node.instructions,
+      expectedNormalResult: node.expectedNormalResult,
+      ngSymptoms: node.ngSymptoms,
+      recommendedCorrectiveAction: node.recommendedCorrectiveAction,
+      acceptanceCriteria: node.acceptanceCriteria,
+      workerMayAddNextTask: node.workerMayAddNextTask,
+      positionX: node.positionX,
+      positionY: node.positionY,
+      userPositionX: node.userPositionX,
+      userPositionY: node.userPositionY,
+      sortOrder: node.sortOrder,
+      sourceWorksheet: node.sourceWorksheet,
+      sourceShapeId: node.sourceShapeId,
+      sourceCellRange: node.sourceCellRange,
+      isActive: node.isActive,
+      createdAt: node.createdAt.toISOString(),
+      updatedAt: node.updatedAt.toISOString(),
+    });
+  });
+
+  test("NODE_HAS_CONNECTED_EDGES: a node with a live edge cannot be deleted; blockingEdgeIds/count are correct, and edges are never cascade-deleted", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-connected"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const result = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "사유", seed.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "NODE_HAS_CONNECTED_EDGES");
+      const detailed = result as typeof result & { blockingEdgeCount: number; blockingEdgeIds: string[]; blockingEdges: { edgeId: string; direction: string; otherNodeId: string }[] };
+      assert.equal(detailed.blockingEdgeCount, 1);
+      assert.deepEqual(detailed.blockingEdgeIds, [seed.edgeId]);
+      assert.equal(detailed.blockingEdges.length, 1);
+      assert.equal(detailed.blockingEdges[0].edgeId, seed.edgeId);
+      assert.equal(detailed.blockingEdges[0].direction, "OUTGOING");
+      assert.equal(detailed.blockingEdges[0].otherNodeId, seed.nodeBId);
+    }
+    const [nodeStillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    assert.ok(nodeStillThere, "the node must still exist after the rejected delete");
+    const [edgeStillThere] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, seed.edgeId));
+    assert.ok(edgeStillThere, "the connected edge must never be cascade-deleted");
+  });
+
+  test("NODE_HAS_DEPENDENT_CONTENT: a node with a checklist section cannot be deleted", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-checklist"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "체크리스트 보유 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    // Synthetic dependent content, direct DB operation — no production
+    // mutation creates procedure_checklist_sections rows yet.
+    await db.insert(procedureChecklistSections).values({ nodeId: created.nodeId, title: "테스트 섹션", sortOrder: 0, sourceWorksheet: null, sourceCellRange: null });
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "사유", created.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "NODE_HAS_DEPENDENT_CONTENT");
+      const detailed = result as typeof result & { checklistSectionCount: number; troubleshootingEntryCount: number };
+      assert.equal(detailed.checklistSectionCount, 1);
+      assert.equal(detailed.troubleshootingEntryCount, 0);
+    }
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
+    assert.ok(stillThere);
+  });
+
+  test("NODE_HAS_DEPENDENT_CONTENT: a node with a troubleshooting entry cannot be deleted", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-troubleshooting"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "고장 진단표 보유 노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    await db.insert(procedureTroubleshootingEntries).values({ nodeId: created.nodeId, symptom: "테스트 증상", sortOrder: 0, sourceCellRange: null });
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "사유", created.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "NODE_HAS_DEPENDENT_CONTENT");
+      const detailed = result as typeof result & { checklistSectionCount: number; troubleshootingEntryCount: number };
+      assert.equal(detailed.checklistSectionCount, 0);
+      assert.equal(detailed.troubleshootingEntryCount, 1);
+    }
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
+    assert.ok(stillThere);
+  });
+
+  test("FULL_SERVICE: node deletion through this NEW mutation fails even for SUPER_ADMIN", async () => {
+    const templateId = await createDraft(uniqueCode("delete-node-full-service"));
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+    const target = nodes.get("n4")!; // n4 (END) has no outgoing edges in the base fixture, but incoming edges still exist — irrelevant here since FORBIDDEN fires before any dependency check.
+    const result = await deleteProcedureTemplateNode(target.id, superAdminId, "사유", templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, target.id));
+    assert.ok(stillThere);
+  });
+
+  test("a PUBLISHED technical template's node cannot be deleted (NOT_DRAFT)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-published"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const published = await publishProcedureTemplate(templateId, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "사유", created.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_DRAFT");
+  });
+
+  test("a blank reason is rejected, and no DELETE_NODE history row is written", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-blank-reason"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "", created.updatedAt);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, created.nodeId));
+    assert.ok(stillThere);
+    const history = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(history.filter((h) => h.actionType === "DELETE_NODE").length, 0);
+  });
+
+  test("using a different technical template's revision token is rejected (STALE_REVISION)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-cross-a"));
+    const templateRow = await loadTemplateRow(templateId);
+    const created = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "TASK", title: "노드" }, templateRow.updatedAt.toISOString());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const otherTemplateId = await createTechnicalDraft(uniqueCode("delete-node-cross-b"));
+    const otherTemplateRow = await loadTemplateRow(otherTemplateId);
+
+    const result = await deleteProcedureTemplateNode(created.nodeId, superAdminId, "사유", otherTemplateRow.updatedAt.toISOString());
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "STALE_REVISION");
+  });
+
+  test("delete edge, then delete the now-unconnected node: succeeds", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("delete-node-after-edge"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const blocked = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "사유", seed.updatedAt);
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "NODE_HAS_CONNECTED_EDGES");
+
+    const edgeDeleted = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "연결 제거", seed.updatedAt);
+    assert.equal(edgeDeleted.ok, true, JSON.stringify(edgeDeleted));
+    if (!edgeDeleted.ok) return;
+
+    const nodeDeleted = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "이제 연결 없는 노드 삭제", edgeDeleted.updatedAt);
+    assert.equal(nodeDeleted.ok, true, JSON.stringify(nodeDeleted));
+
+    const [stillThere] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    assert.equal(stillThere, undefined);
+  });
+});
+
+/**
+ * Phase 5C-5B-1 — transaction atomicity: every rejection path in
+ * createProcedureTemplateNode/deleteProcedureTemplateNode/
+ * deleteProcedureTemplateEdge above (FORBIDDEN, NOT_DRAFT, STALE_REVISION,
+ * INVALID_INPUT, NODE_HAS_CONNECTED_EDGES, NODE_HAS_DEPENDENT_CONTENT,
+ * EDGE_HAS_CLONE_DEPENDENTS) fails BEFORE insertEditHistory ever runs — the
+ * per-test assertions above already prove no orphan CREATE_NODE/DELETE_NODE/
+ * DELETE_EDGE history row exists after each rejection. This block adds one
+ * more end-to-end proof: a whole batch of mixed successes and failures
+ * against the same template leaves history exactly matching only the
+ * successes, in order, nothing more, nothing less. (The remaining
+ * atomicity claim in the task brief — history-insert-succeeds-but-DELETE-
+ * later-fails must roll back both — is not independently fault-injectable
+ * without instrumenting the transaction; it is guaranteed by construction,
+ * since the insert and the DELETE are two statements in the same
+ * db.transaction() with no intervening commit, the same standard Postgres
+ * atomicity guarantee this codebase's every other multi-statement mutation
+ * already relies on and none of its existing tests fault-inject either.)
+ */
+describe("Phase 5C-5B-1 transaction atomicity", () => {
+  test("a rejected create/delete never leaves a partial history row; a subsequent success is unaffected", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("atomicity"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    // 1. rejected delete (connected edges) — no DELETE_NODE row.
+    const rejected1 = await deleteProcedureTemplateNode(seed.nodeAId, superAdminId, "사유", seed.updatedAt);
+    assert.equal(rejected1.ok, false);
+
+    // 2. rejected delete (blank reason) — no DELETE_EDGE row.
+    const rejected2 = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "", seed.updatedAt);
+    assert.equal(rejected2.ok, false);
+
+    // 3. rejected create (bad node type) — no CREATE_NODE row.
+    const rejected3 = await createProcedureTemplateNode(templateId, superAdminId, { nodeType: "CHECKLIST" as never, title: "x" }, seed.updatedAt);
+    assert.equal(rejected3.ok, false);
+
+    const historyAfterFailures = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    // seedTechnicalGraph itself wrote CREATE_NODE x2 + CREATE_EDGE x1 = 3 legitimate rows; none of the 3 rejections above added a 4th.
+    assert.equal(historyAfterFailures.length, 3, "none of the three rejected calls may add a history row");
+
+    // 4. a real success afterward proceeds normally, unaffected by the failed attempts.
+    const success = await deleteProcedureTemplateEdge(seed.edgeId, superAdminId, "정상 삭제", seed.updatedAt);
+    assert.equal(success.ok, true, JSON.stringify(success));
+    const historyAfterSuccess = await db.select().from(procedureTemplateEditHistory).where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+    assert.equal(historyAfterSuccess.length, 4);
   });
 });

@@ -3,7 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
-import { canEditTechnicalTemplateDraft } from "@/lib/auth/technical-procedure-template-authorization";
+import { canEditTechnicalTemplateDraft, canManageTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
@@ -12,6 +12,9 @@ import {
   retargetProcedureTemplateEdge,
   createProcedureTemplateEdge,
   validateProcedureTemplate,
+  createProcedureTemplateNode,
+  deleteProcedureTemplateNode,
+  deleteProcedureTemplateEdge,
   type UpdateNodePatch,
   type UpdateEdgePatch,
   type LayoutPosition,
@@ -23,9 +26,19 @@ import {
   type RetargetEdgeResult,
   type CreateEdgeResult,
   type ValidateTemplateResult,
+  type CreateNodeResult,
+  type DeleteNodeResult,
+  type DeleteEdgeResult,
 } from "@/lib/db/mutations/procedure-template-editor";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
-import { PROCEDURE_BRANCH_TYPE_CODES, PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
+import {
+  PROCEDURE_BRANCH_TYPE_CODES,
+  PROCEDURE_NODE_TYPE_CODES,
+  MANUAL_TECHNICAL_NODE_TYPE_CODES,
+  type ProcedureBranchType,
+  type ProcedureNodeType,
+  type ManualTechnicalNodeType,
+} from "@/lib/domain/procedure-template-types";
 import { isValidRoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
@@ -206,4 +219,79 @@ export async function validateProcedureTemplateAction(input: { templateId: strin
   if (!isValidUuid(input.templateId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
 
   return withErrorRedaction("validateProcedureTemplateAction", () => validateProcedureTemplate(input.templateId, actorCheck.userId));
+}
+
+/**
+ * Phase 5C-5B-1 — fast pre-check for the NEW node/edge structural-CRUD
+ * actions below. Deliberately separate from resolveAuthorizedActorId
+ * (which admits either category's property-edit policy): the new
+ * capability is TECHNICAL_TASK-only for every role, so
+ * canManageTechnicalTemplates is the correct (and only) coarse gate here.
+ * The mutation layer's assertTechnicalGraphEditable/
+ * canActorManageTechnicalTemplateGraph remains the sole authoritative
+ * boundary — this is a UX short-circuit only.
+ */
+async function resolveTechnicalGraphActorId(): Promise<{ ok: true; userId: string } | { ok: false; result: Forbidden }> {
+  if (getAuthSource() !== "database") {
+    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "데이터베이스 저장 모드가 아닙니다." } };
+  }
+  const session = await readSession();
+  if (!session) return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "로그인이 필요합니다." } };
+  if (session.approvalStatus !== "APPROVED") {
+    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
+  }
+  if (!canManageTechnicalTemplates(session.role)) {
+    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "권한이 없습니다." } };
+  }
+  return { ok: true, userId: session.userId };
+}
+
+export async function createProcedureTemplateNodeAction(input: {
+  templateId: string;
+  nodeType: ManualTechnicalNodeType;
+  title: string;
+  expectedTemplateUpdatedAt: string;
+}): Promise<CreateNodeResult | Forbidden> {
+  const actorCheck = await resolveTechnicalGraphActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.templateId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
+    return { ok: false, code: "FORBIDDEN", message: "지원되지 않는 노드 유형입니다." };
+  }
+
+  return withErrorRedaction("createProcedureTemplateNodeAction", () =>
+    createProcedureTemplateNode(input.templateId, actorCheck.userId, { nodeType: input.nodeType, title: input.title }, input.expectedTemplateUpdatedAt)
+  );
+}
+
+export async function deleteProcedureTemplateNodeAction(input: {
+  nodeId: string;
+  reason: string;
+  expectedTemplateUpdatedAt: string;
+}): Promise<DeleteNodeResult | Forbidden> {
+  const actorCheck = await resolveTechnicalGraphActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.nodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  const reasonValidation = validateRequiredNote(input.reason);
+  if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
+
+  return withErrorRedaction("deleteProcedureTemplateNodeAction", () =>
+    deleteProcedureTemplateNode(input.nodeId, actorCheck.userId, reasonValidation.note, input.expectedTemplateUpdatedAt)
+  );
+}
+
+export async function deleteProcedureTemplateEdgeAction(input: {
+  edgeId: string;
+  reason: string;
+  expectedTemplateUpdatedAt: string;
+}): Promise<DeleteEdgeResult | Forbidden> {
+  const actorCheck = await resolveTechnicalGraphActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.edgeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  const reasonValidation = validateRequiredNote(input.reason);
+  if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
+
+  return withErrorRedaction("deleteProcedureTemplateEdgeAction", () =>
+    deleteProcedureTemplateEdge(input.edgeId, actorCheck.userId, reasonValidation.note, input.expectedTemplateUpdatedAt)
+  );
 }

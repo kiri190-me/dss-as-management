@@ -1,5 +1,6 @@
 import "server-only";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { db } from "../client";
 import {
   procedureTemplates,
@@ -7,17 +8,28 @@ import {
   procedureTemplateEdges,
   procedureChecklistSections,
   procedureTroubleshootingEntries,
+  procedureCaseExecutionNodes,
   procedureTemplateEditHistory,
   procedureTemplateEditActionTypeEnum,
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
-import { canManageTechnicalTemplates, canActorEditTemplateOfCategory } from "@/lib/auth/technical-procedure-template-authorization";
+import {
+  canManageTechnicalTemplates,
+  canActorEditTemplateOfCategory,
+  canActorManageTechnicalTemplateGraph,
+} from "@/lib/auth/technical-procedure-template-authorization";
 import {
   validateProcedureGraphStructure,
   countBySeverity,
   type StructuralValidationIssue,
 } from "@/lib/domain/procedure-graph-structural-validation";
-import { PROCEDURE_NODE_TYPE_CODES, type ProcedureBranchType, type ProcedureNodeType } from "@/lib/domain/procedure-template-types";
+import {
+  PROCEDURE_NODE_TYPE_CODES,
+  MANUAL_TECHNICAL_NODE_TYPE_CODES,
+  type ProcedureBranchType,
+  type ProcedureNodeType,
+  type ManualTechnicalNodeType,
+} from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import type { Role } from "@/lib/domain/types";
 
@@ -61,7 +73,19 @@ export type EditorMutationResultCode =
   | "DUPLICATE_EDGE"
   | "SELF_EDGE"
   | "CROSS_TEMPLATE"
-  | "INVALID_INPUT";
+  | "INVALID_INPUT"
+  // Phase 5C-5B-1 — node/edge structural CRUD's own dependency/invariant
+  // errors. EDGE_HAS_CLONE_DEPENDENTS/NODE_HAS_CONNECTED_EDGES/
+  // NODE_HAS_DEPENDENT_CONTENT carry extra structured detail (see
+  // EdgeHasCloneDependentsFailure etc. below) rather than being plain
+  // Failure objects. EXECUTION_REFERENCE_CONFLICT is the plain-Failure
+  // defensive invariant error for the (should-be-impossible-for-a-DRAFT-
+  // row) case where procedure_case_execution_nodes still references the
+  // node/edge being deleted.
+  | "EDGE_HAS_CLONE_DEPENDENTS"
+  | "NODE_HAS_CONNECTED_EDGES"
+  | "NODE_HAS_DEPENDENT_CONTENT"
+  | "EXECUTION_REFERENCE_CONFLICT";
 
 export type StructuralValidationSummary = {
   errorCount: number;
@@ -70,7 +94,18 @@ export type StructuralValidationSummary = {
   issues: StructuralValidationIssue[];
 };
 
-type Failure = { ok: false; code: EditorMutationResultCode; message: string };
+// Phase 5C-5B-1: the three rich dependency-error codes are deliberately
+// excluded from Failure's own `code` type (see EdgeHasCloneDependentsFailure
+// etc. below) — they must always carry their extra structured fields, never
+// be thrown as a plain { code, message } via fail(). This also gives every
+// caller (including tests) correct TS discriminated-union narrowing on
+// `code` between Failure and the three rich types, which a shared wide
+// `code: EditorMutationResultCode` on both would defeat.
+type Failure = {
+  ok: false;
+  code: Exclude<EditorMutationResultCode, "EDGE_HAS_CLONE_DEPENDENTS" | "NODE_HAS_CONNECTED_EDGES" | "NODE_HAS_DEPENDENT_CONTENT">;
+  message: string;
+};
 
 class EditorMutationError extends Error {
   result: Failure;
@@ -80,8 +115,60 @@ class EditorMutationError extends Error {
   }
 }
 
-function fail(code: EditorMutationResultCode, message: string): never {
+function fail(code: Failure["code"], message: string): never {
   throw new EditorMutationError({ ok: false, code, message });
+}
+
+// ---- Phase 5C-5B-1: structured dependency-error contracts ----
+//
+// A plain { code, message } Failure loses the "why" a human/UI needs to act
+// on (which edges are blocking, how many, etc.) — these three carry the
+// extra detail the task brief asks for, thrown via the separate
+// DetailedEditorFailure error class below so the existing fail()/
+// EditorMutationError pair (used by all 15 pre-5C-5B-1 mutations) stays
+// completely untouched.
+
+export type EdgeHasCloneDependentsFailure = {
+  ok: false;
+  code: "EDGE_HAS_CLONE_DEPENDENTS";
+  message: string;
+  dependentEdgeCount: number;
+  dependentEdgeIds: string[];
+};
+
+export type BlockingEdgeSummary = {
+  edgeId: string;
+  direction: "INCOMING" | "OUTGOING";
+  otherNodeId: string;
+  otherNodeTitle: string;
+  branchType: ProcedureBranchType;
+};
+
+export type NodeHasConnectedEdgesFailure = {
+  ok: false;
+  code: "NODE_HAS_CONNECTED_EDGES";
+  message: string;
+  blockingEdgeCount: number;
+  blockingEdgeIds: string[];
+  blockingEdges: BlockingEdgeSummary[];
+};
+
+export type NodeHasDependentContentFailure = {
+  ok: false;
+  code: "NODE_HAS_DEPENDENT_CONTENT";
+  message: string;
+  checklistSectionCount: number;
+  troubleshootingEntryCount: number;
+};
+
+type DetailedFailure = EdgeHasCloneDependentsFailure | NodeHasConnectedEdgesFailure | NodeHasDependentContentFailure;
+
+class DetailedEditorFailure extends Error {
+  result: DetailedFailure;
+  constructor(result: DetailedFailure) {
+    super(result.message);
+    this.result = result;
+  }
 }
 
 /**
@@ -103,6 +190,31 @@ async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateU
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
   if (!canActorEditTemplateOfCategory(actorRole, template.category)) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
+  }
+  if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
+  if (template.isReferenceOnly) fail("REFERENCE_ONLY", "참고용 템플릿은 편집할 수 없습니다.");
+  if (template.updatedAt.toISOString() !== expectedTemplateUpdatedAt) {
+    fail("STALE_REVISION", "다른 검토자가 이 초안을 수정했습니다. 새로고침 후 다시 시도하세요.");
+  }
+  return template;
+}
+
+/**
+ * Phase 5C-5B-1 — the analogous lock-and-verify gate for the NEW node/edge
+ * structural-CRUD capabilities (create node, delete node, delete edge).
+ * Identical in shape and ordering to assertEditableDraft (exists →
+ * authorized → still DRAFT → not reference-only → expectedTemplateUpdatedAt
+ * matches), but authorizes via canActorManageTechnicalTemplateGraph
+ * (TECHNICAL_TASK-only, hard-denies FULL_SERVICE/REFERENCE for every role
+ * including SUPER_ADMIN) instead of canActorEditTemplateOfCategory —
+ * reusing assertEditableDraft here would incorrectly let SUPER_ADMIN
+ * create/delete nodes on a FULL_SERVICE template.
+ */
+async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
+  const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
+  if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+  if (!canActorManageTechnicalTemplateGraph(actorRole, template.category)) {
+    fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
   if (template.isReferenceOnly) fail("REFERENCE_ONLY", "참고용 템플릿은 편집할 수 없습니다.");
@@ -718,6 +830,433 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
     });
   } catch (err) {
     if (err instanceof EditorMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- Phase 5C-5B-1: technical-only node/edge structural CRUD ----
+//
+// Everything below is new, structural (create/delete a node or edge row
+// entirely, not just edit its properties) capability that no category had
+// before this phase, gated by assertTechnicalGraphEditable/
+// canActorManageTechnicalTemplateGraph rather than assertEditableDraft/
+// canActorEditTemplateOfCategory — see that function's own doc comment for
+// why the two must not be conflated. Every existing function above this
+// point is untouched.
+
+export type NodeSnapshot = {
+  id: string;
+  procedureTemplateId: string;
+  nodeCode: string;
+  nodeType: ProcedureNodeType;
+  title: string;
+  description: string | null;
+  objective: string | null;
+  preparation: string | null;
+  toolsAndEquipment: string | null;
+  safetyCaution: string | null;
+  instructions: string | null;
+  expectedNormalResult: string | null;
+  ngSymptoms: string | null;
+  recommendedCorrectiveAction: string | null;
+  acceptanceCriteria: string | null;
+  workerMayAddNextTask: boolean;
+  positionX: number;
+  positionY: number;
+  userPositionX: number | null;
+  userPositionY: number | null;
+  sortOrder: number;
+  sourceWorksheet: string | null;
+  sourceShapeId: string | null;
+  sourceCellRange: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Shared by createProcedureTemplateNode's CREATE_NODE afterState and deleteProcedureTemplateNode's DELETE_NODE beforeState — the exact same complete-node shape either way, so a reviewer reading the audit trail sees identical fields regardless of which action produced the row. */
+function serializeNodeSnapshot(node: typeof procedureTemplateNodes.$inferSelect): NodeSnapshot {
+  return {
+    id: node.id,
+    procedureTemplateId: node.procedureTemplateId,
+    nodeCode: node.nodeCode,
+    nodeType: node.nodeType,
+    title: node.title,
+    description: node.description,
+    objective: node.objective,
+    preparation: node.preparation,
+    toolsAndEquipment: node.toolsAndEquipment,
+    safetyCaution: node.safetyCaution,
+    instructions: node.instructions,
+    expectedNormalResult: node.expectedNormalResult,
+    ngSymptoms: node.ngSymptoms,
+    recommendedCorrectiveAction: node.recommendedCorrectiveAction,
+    acceptanceCriteria: node.acceptanceCriteria,
+    workerMayAddNextTask: node.workerMayAddNextTask,
+    positionX: node.positionX,
+    positionY: node.positionY,
+    userPositionX: node.userPositionX,
+    userPositionY: node.userPositionY,
+    sortOrder: node.sortOrder,
+    sourceWorksheet: node.sourceWorksheet,
+    sourceShapeId: node.sourceShapeId,
+    sourceCellRange: node.sourceCellRange,
+    isActive: node.isActive,
+    createdAt: node.createdAt.toISOString(),
+    updatedAt: node.updatedAt.toISOString(),
+  };
+}
+
+export type EdgeSnapshot = {
+  id: string;
+  procedureTemplateId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  fromNodeCode: string;
+  fromNodeTitle: string;
+  toNodeCode: string;
+  toNodeTitle: string;
+  branchType: ProcedureBranchType;
+  branchLabel: string | null;
+  conditionDefinition: unknown;
+  sortOrder: number;
+  sourceConnectorId: string | null;
+  clonedFromEdgeId: string | null;
+  userRoutePoints: RoutePoint[] | null;
+};
+
+/** deleteProcedureTemplateEdge's DELETE_EDGE beforeState — denormalizes the endpoint nodes' code/title onto the snapshot (edges only store fromNodeId/toNodeId) so the audit row stays human-readable even after the node itself is later deleted too. */
+function serializeEdgeSnapshot(
+  edge: typeof procedureTemplateEdges.$inferSelect,
+  fromNode: { nodeCode: string; title: string },
+  toNode: { nodeCode: string; title: string }
+): EdgeSnapshot {
+  return {
+    id: edge.id,
+    procedureTemplateId: edge.procedureTemplateId,
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    fromNodeCode: fromNode.nodeCode,
+    fromNodeTitle: fromNode.title,
+    toNodeCode: toNode.nodeCode,
+    toNodeTitle: toNode.title,
+    branchType: edge.branchType,
+    branchLabel: edge.branchLabel,
+    conditionDefinition: edge.conditionDefinition,
+    sortOrder: edge.sortOrder,
+    sourceConnectorId: edge.sourceConnectorId,
+    clonedFromEdgeId: edge.clonedFromEdgeId,
+    userRoutePoints: edge.userRoutePoints,
+  };
+}
+
+// ---- create node ----
+
+export type CreateNodeInput = {
+  nodeType: ManualTechnicalNodeType;
+  title: string;
+};
+
+export type CreateNodeResult = { ok: true; nodeId: string; updatedAt: string } | Failure;
+
+/**
+ * Manual TECHNICAL_TASK node authoring v1 — deliberately minimal (nodeType
+ * + title only; every other field starts null/default). id and nodeCode
+ * are both server-generated and never accepted from the caller: nodeCode is
+ * always `manual-<the node's own id>`, so it is trivially unique per
+ * template (the id is a fresh UUID) without needing a per-template counter
+ * or trusting client input, and the existing unique(template_id, node_code)
+ * index remains a defense-in-depth backstop rather than the primary
+ * uniqueness mechanism. Position defaults to a simple vertical stack
+ * (x=0, y = previous max + 150) — real placement is left to the existing
+ * saveProcedureTemplateLayout "저장" action, same as every other node.
+ */
+export async function createProcedureTemplateNode(
+  templateId: string,
+  actorUserId: string,
+  input: CreateNodeInput,
+  expectedTemplateUpdatedAt: string
+): Promise<CreateNodeResult> {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (title.length === 0) return { ok: false, code: "INVALID_INPUT", message: "제목을 입력해야 합니다." };
+  if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(input.nodeType)) {
+    return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireEditor(tx, actorUserId);
+      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+
+      const [maxSortRow] = await tx
+        .select({ sortOrder: procedureTemplateNodes.sortOrder })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
+        .orderBy(desc(procedureTemplateNodes.sortOrder))
+        .limit(1);
+      const nextSortOrder = (maxSortRow?.sortOrder ?? -1) + 1;
+
+      const [maxPositionYRow] = await tx
+        .select({ positionY: procedureTemplateNodes.positionY })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
+        .orderBy(desc(procedureTemplateNodes.positionY))
+        .limit(1);
+      const nextPositionY = maxPositionYRow ? maxPositionYRow.positionY + 150 : 0;
+
+      const nodeId = randomUUID();
+      const nodeCode = `manual-${nodeId}`;
+
+      const [inserted] = await tx
+        .insert(procedureTemplateNodes)
+        .values({
+          id: nodeId,
+          procedureTemplateId: templateId,
+          nodeCode,
+          nodeType: input.nodeType,
+          title,
+          positionX: 0,
+          positionY: nextPositionY,
+          sortOrder: nextSortOrder,
+          sourceWorksheet: null,
+          sourceShapeId: null,
+          sourceCellRange: null,
+          isActive: true,
+          // workerMayAddNextTask, description, objective, etc. all use the
+          // column's own default/null — never set explicitly here.
+        })
+        .returning();
+
+      const afterState = serializeNodeSnapshot(inserted);
+
+      // No reason required for creation (only the two DELETE mutations
+      // below require one) — matches this phase's explicit brief.
+      await insertEditHistory(tx, {
+        procedureTemplateId: templateId,
+        actionType: "CREATE_NODE",
+        nodeId: inserted.id,
+        beforeState: null,
+        afterState,
+        reason: null,
+        actorUserId: actor.id,
+      });
+
+      const updatedAt = await touchTemplate(tx, templateId);
+      return { ok: true, nodeId: inserted.id, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof EditorMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- delete edge ----
+
+export type DeleteEdgeResult = { ok: true; updatedAt: string } | Failure | EdgeHasCloneDependentsFailure;
+
+/**
+ * Hard-deletes an edge row (never a soft/isActive flag — edges have none).
+ * Requires a mandatory non-blank reason (unlike CREATE_NODE) since this is
+ * destructive and, unlike a node, has no "undo by recreating with the same
+ * id" path. The DELETE_EDGE history row is inserted BEFORE the DELETE
+ * statement, inside the same transaction — the FK from
+ * procedure_template_edit_history.edge_id is ON DELETE SET NULL (migration
+ * 0017), so the DELETE below automatically nulls out the edge_id on the
+ * history row just inserted (and any earlier history rows referencing this
+ * edge) as a DB-level side effect, never a second application UPDATE.
+ */
+export async function deleteProcedureTemplateEdge(
+  edgeId: string,
+  actorUserId: string,
+  reason: string,
+  expectedTemplateUpdatedAt: string
+): Promise<DeleteEdgeResult> {
+  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "분기 삭제에는 사유가 필요합니다." };
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireEditor(tx, actorUserId);
+
+      const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
+      if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
+
+      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+
+      // Dependency check: another edge's clonedFromEdgeId still points at
+      // this one (a PUBLISHED-then-cloned-into-DRAFT lineage pointer) —
+      // must never surface as a raw RESTRICT FK violation.
+      const dependents = await tx
+        .select({ id: procedureTemplateEdges.id })
+        .from(procedureTemplateEdges)
+        .where(eq(procedureTemplateEdges.clonedFromEdgeId, edgeId));
+      if (dependents.length > 0) {
+        throw new DetailedEditorFailure({
+          ok: false,
+          code: "EDGE_HAS_CLONE_DEPENDENTS",
+          message: "다른 초안 버전이 이 분기를 복제 참조하고 있어 삭제할 수 없습니다.",
+          dependentEdgeCount: dependents.length,
+          dependentEdgeIds: dependents.map((d) => d.id),
+        });
+      }
+
+      // Defensive invariant check: a DRAFT edge should be structurally
+      // unreachable from procedure_case_execution_nodes.selected_outgoing_
+      // edge_id (executions only ever reference PUBLISHED template rows),
+      // but this is never assumed silently — audited live, every call.
+      const [executionRef] = await tx
+        .select({ id: procedureCaseExecutionNodes.id })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.selectedOutgoingEdgeId, edgeId))
+        .limit(1);
+      if (executionRef) {
+        fail("EXECUTION_REFERENCE_CONFLICT", "이 분기가 실행 기록에서 참조되고 있어 삭제할 수 없습니다.");
+      }
+
+      const endpointNodes = await tx
+        .select({ id: procedureTemplateNodes.id, nodeCode: procedureTemplateNodes.nodeCode, title: procedureTemplateNodes.title })
+        .from(procedureTemplateNodes)
+        .where(inArray(procedureTemplateNodes.id, [edge.fromNodeId, edge.toNodeId]));
+      const fromNode = endpointNodes.find((n) => n.id === edge.fromNodeId);
+      const toNode = endpointNodes.find((n) => n.id === edge.toNodeId);
+      if (!fromNode || !toNode) fail("NOT_FOUND", "분기의 시작 또는 대상 노드를 찾을 수 없습니다.");
+
+      const beforeState = serializeEdgeSnapshot(edge, fromNode, toNode);
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: edge.procedureTemplateId,
+        actionType: "DELETE_EDGE",
+        edgeId: edge.id,
+        beforeState,
+        afterState: null,
+        reason,
+        actorUserId: actor.id,
+      });
+
+      await tx.delete(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId));
+
+      const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);
+      return { ok: true, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof EditorMutationError) return err.result;
+    // By construction, deleteProcedureTemplateEdge only ever throws
+    // DetailedEditorFailure with an EdgeHasCloneDependentsFailure payload
+    // (never the two node-shaped ones) — safe to narrow here.
+    if (err instanceof DetailedEditorFailure) return err.result as EdgeHasCloneDependentsFailure;
+    throw err;
+  }
+}
+
+// ---- delete node ----
+
+export type DeleteNodeResult = { ok: true; updatedAt: string } | Failure | NodeHasConnectedEdgesFailure | NodeHasDependentContentFailure;
+
+/**
+ * Hard-deletes a node row. Never cascade-deletes its edges — a node with
+ * any live incoming/outgoing edge is rejected outright
+ * (NODE_HAS_CONNECTED_EDGES); the caller must delete those edges first via
+ * deleteProcedureTemplateEdge. Same DELETE_NODE-history-before-DELETE +
+ * onDelete:"set null" (migration 0017) pattern as deleteProcedureTemplateEdge
+ * above.
+ */
+export async function deleteProcedureTemplateNode(
+  nodeId: string,
+  actorUserId: string,
+  reason: string,
+  expectedTemplateUpdatedAt: string
+): Promise<DeleteNodeResult> {
+  if (isBlank(reason)) return { ok: false, code: "INVALID_INPUT", message: "노드 삭제에는 사유가 필요합니다." };
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireEditor(tx, actorUserId);
+
+      const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
+      if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
+
+      await assertTechnicalGraphEditable(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+
+      // A. connected edges (incoming or outgoing) — never cascade-deleted.
+      const connectedEdges = await tx
+        .select({ id: procedureTemplateEdges.id, fromNodeId: procedureTemplateEdges.fromNodeId, toNodeId: procedureTemplateEdges.toNodeId, branchType: procedureTemplateEdges.branchType })
+        .from(procedureTemplateEdges)
+        .where(or(eq(procedureTemplateEdges.fromNodeId, nodeId), eq(procedureTemplateEdges.toNodeId, nodeId)));
+      if (connectedEdges.length > 0) {
+        const otherNodeIds = connectedEdges.map((e) => (e.fromNodeId === nodeId ? e.toNodeId : e.fromNodeId));
+        const otherNodes = await tx
+          .select({ id: procedureTemplateNodes.id, title: procedureTemplateNodes.title })
+          .from(procedureTemplateNodes)
+          .where(inArray(procedureTemplateNodes.id, otherNodeIds));
+        const titleById = new Map(otherNodes.map((n) => [n.id, n.title]));
+        const blockingEdges: BlockingEdgeSummary[] = connectedEdges.map((e) => {
+          const direction: "INCOMING" | "OUTGOING" = e.fromNodeId === nodeId ? "OUTGOING" : "INCOMING";
+          const otherNodeId = e.fromNodeId === nodeId ? e.toNodeId : e.fromNodeId;
+          return { edgeId: e.id, direction, otherNodeId, otherNodeTitle: titleById.get(otherNodeId) ?? "", branchType: e.branchType };
+        });
+        throw new DetailedEditorFailure({
+          ok: false,
+          code: "NODE_HAS_CONNECTED_EDGES",
+          message: "이 노드에 연결된 분기가 있어 삭제할 수 없습니다. 먼저 분기를 삭제하세요.",
+          blockingEdgeCount: connectedEdges.length,
+          blockingEdgeIds: connectedEdges.map((e) => e.id),
+          blockingEdges,
+        });
+      }
+
+      // B/C. dependent checklist-section / troubleshooting-entry content —
+      // same NODE_HAS_DEPENDENT_CONTENT contract either way, carrying both
+      // counts so the caller can tell which (or both) blocked the delete.
+      const [sections, entries] = await Promise.all([
+        tx.select({ id: procedureChecklistSections.id }).from(procedureChecklistSections).where(eq(procedureChecklistSections.nodeId, nodeId)),
+        tx.select({ id: procedureTroubleshootingEntries.id }).from(procedureTroubleshootingEntries).where(eq(procedureTroubleshootingEntries.nodeId, nodeId)),
+      ]);
+      if (sections.length > 0 || entries.length > 0) {
+        throw new DetailedEditorFailure({
+          ok: false,
+          code: "NODE_HAS_DEPENDENT_CONTENT",
+          message: "이 노드에 체크리스트 또는 고장 진단표 내용이 있어 삭제할 수 없습니다.",
+          checklistSectionCount: sections.length,
+          troubleshootingEntryCount: entries.length,
+        });
+      }
+
+      // D. defensive invariant check: a DRAFT node should be structurally
+      // unreachable from procedure_case_execution_nodes (executions only
+      // ever reference PUBLISHED template rows), but never assumed
+      // silently — audited live, every call. Never mutates execution rows.
+      const [executionRef] = await tx
+        .select({ id: procedureCaseExecutionNodes.id })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.procedureTemplateNodeId, nodeId))
+        .limit(1);
+      if (executionRef) {
+        fail("EXECUTION_REFERENCE_CONFLICT", "이 노드가 실행 기록에서 참조되고 있어 삭제할 수 없습니다.");
+      }
+
+      const beforeState = serializeNodeSnapshot(node);
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: node.procedureTemplateId,
+        actionType: "DELETE_NODE",
+        nodeId: node.id,
+        beforeState,
+        afterState: null,
+        reason,
+        actorUserId: actor.id,
+      });
+
+      await tx.delete(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId));
+
+      const updatedAt = await touchTemplate(tx, node.procedureTemplateId);
+      return { ok: true, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof EditorMutationError) return err.result;
+    // By construction, deleteProcedureTemplateNode only ever throws
+    // DetailedEditorFailure with a NodeHasConnectedEdgesFailure or
+    // NodeHasDependentContentFailure payload (never the edge-shaped one) —
+    // safe to narrow here.
+    if (err instanceof DetailedEditorFailure) return err.result as NodeHasConnectedEdgesFailure | NodeHasDependentContentFailure;
     throw err;
   }
 }

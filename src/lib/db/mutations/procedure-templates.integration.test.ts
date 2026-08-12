@@ -22,6 +22,7 @@ import {
   archiveProcedureTemplate,
   createNewDraftVersion,
   replaceDraftProcedureTemplates,
+  createManualTechnicalProcedureTemplate,
 } from "./procedure-templates";
 import {
   canViewPublishedProcedureTemplates,
@@ -999,5 +1000,138 @@ describe("Phase 5C-5B: coarse-then-fine authorization ordering (publishProcedure
     const newVersion = await createNewDraftVersion(imported.id, superAdminId);
     assert.equal(newVersion.ok, true, `createNewDraftVersion failed: ${JSON.stringify(newVersion)}`);
     if (newVersion.ok) createdTemplateIds.push(newVersion.id);
+  });
+});
+
+/**
+ * Phase 5C-5B-1 — createManualTechnicalProcedureTemplate: the first
+ * template-creation path that is not the Excel importer. Self-cleaning via
+ * the same TEST_CODE_PREFIX convention as every other describe block in
+ * this file.
+ */
+describe("createManualTechnicalProcedureTemplate", () => {
+  async function trackAndReturn(result: Awaited<ReturnType<typeof createManualTechnicalProcedureTemplate>>) {
+    if (result.ok) createdTemplateIds.push(result.id);
+    return result;
+  }
+
+  test("ADMIN creates a TECHNICAL_TASK DRAFT", async () => {
+    const code = uniqueCode("manual-admin");
+    const result = await trackAndReturn(
+      await createManualTechnicalProcedureTemplate({ code, name: "수동 생성 절차", equipmentType: "COMMON", description: "설명" }, nonSuperAdminId)
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("SUPER_ADMIN creates a TECHNICAL_TASK DRAFT", async () => {
+    const code = uniqueCode("manual-super");
+    const result = await trackAndReturn(
+      await createManualTechnicalProcedureTemplate({ code, name: "수동 생성 절차", equipmentType: "RFG" }, superAdminId)
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+      const code = uniqueCode("manual-denied");
+      const result = await createManualTechnicalProcedureTemplate({ code, name: "x", equipmentType: "COMMON" }, actorId);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    }
+  });
+
+  test("the created row is always category=TECHNICAL_TASK, isReferenceOnly=false, status=DRAFT, version=1, sourceType=MANUAL", async () => {
+    const code = uniqueCode("manual-fields");
+    const result = await trackAndReturn(await createManualTechnicalProcedureTemplate({ code, name: "필드 확인", equipmentType: "MB" }, superAdminId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
+    assert.equal(row.category, "TECHNICAL_TASK");
+    assert.equal(row.isReferenceOnly, false);
+    assert.equal(row.status, "DRAFT");
+    assert.equal(row.version, 1);
+    assert.equal(row.sourceType, "MANUAL");
+    assert.equal(row.code, code);
+    assert.equal(row.equipmentType, "MB");
+  });
+
+  test("category cannot be spoofed by client input — the input type has no category/isReferenceOnly/status/version/sourceType field at all, so passing one (as an out-of-band/loosely-typed payload) is silently ignored, never read", async () => {
+    const code = uniqueCode("manual-spoof");
+    const spoofed = { code, name: "위조 시도", equipmentType: "COMMON" as const, category: "FULL_SERVICE", isReferenceOnly: true, status: "PUBLISHED", version: 99, sourceType: "EXCEL_IMPORT" };
+    const result = await trackAndReturn(await createManualTechnicalProcedureTemplate(spoofed as never, superAdminId));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
+    assert.equal(row.category, "TECHNICAL_TASK", "the extra category field on the input object must never be read");
+    assert.equal(row.isReferenceOnly, false);
+    assert.equal(row.status, "DRAFT");
+    assert.equal(row.version, 1);
+    assert.equal(row.sourceType, "MANUAL");
+  });
+
+  test("blank code, blank name, and an unsupported equipmentType are all rejected with INVALID_INPUT", async () => {
+    const blankCode = await createManualTechnicalProcedureTemplate({ code: "   ", name: "x", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(blankCode.ok, false);
+    if (!blankCode.ok) assert.equal(blankCode.code, "INVALID_INPUT");
+
+    const blankName = await createManualTechnicalProcedureTemplate({ code: uniqueCode("manual-blank-name"), name: "   ", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(blankName.ok, false);
+    if (!blankName.ok) assert.equal(blankName.code, "INVALID_INPUT");
+
+    const badEquipment = await createManualTechnicalProcedureTemplate({ code: uniqueCode("manual-bad-equip"), name: "x", equipmentType: "NOT_REAL" as never }, superAdminId);
+    assert.equal(badEquipment.ok, false);
+    if (!badEquipment.ok) assert.equal(badEquipment.code, "INVALID_INPUT");
+  });
+
+  test("code/name are trimmed before storage", async () => {
+    const rawCode = uniqueCode("manual-trim");
+    const result = await trackAndReturn(
+      await createManualTechnicalProcedureTemplate({ code: `  ${rawCode}  `, name: "  공백 포함 이름  ", equipmentType: "COMMON" }, superAdminId)
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, result.id));
+    assert.equal(row.code, rawCode);
+    assert.equal(row.name, "공백 포함 이름");
+  });
+
+  test("a duplicate (code, version=1) is translated to a clean CONFLICT, never a raw unique-constraint error, and never discloses the colliding template's category", async () => {
+    const code = uniqueCode("manual-dup");
+    const first = await trackAndReturn(await createManualTechnicalProcedureTemplate({ code, name: "첫 번째", equipmentType: "COMMON" }, superAdminId));
+    assert.equal(first.ok, true);
+
+    const second = await createManualTechnicalProcedureTemplate({ code, name: "두 번째 (중복)", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(second.ok, false);
+    if (!second.ok) {
+      assert.equal(second.code, "CONFLICT");
+      assert.doesNotMatch(second.message.toUpperCase(), /FULL_SERVICE|TECHNICAL_TASK|REFERENCE/, "the CONFLICT message must never disclose the colliding template's category");
+    }
+  });
+
+  test("a duplicate against an EXISTING FULL_SERVICE imported template's code is also translated to the same generic CONFLICT, without disclosing that the collision is against a different category", async () => {
+    const code = uniqueCode("manual-dup-cross-category");
+    const imported = await importTemplate({ code, includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const result = await createManualTechnicalProcedureTemplate({ code, name: "충돌 시도", equipmentType: "COMMON" }, superAdminId);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "CONFLICT");
+      assert.doesNotMatch(result.message.toUpperCase(), /FULL_SERVICE|TECHNICAL_TASK|REFERENCE/);
+    }
+  });
+
+  test("no nodes/edges are created automatically — a freshly created manual template has an empty graph", async () => {
+    const code = uniqueCode("manual-empty-graph");
+    const result = await trackAndReturn(await createManualTechnicalProcedureTemplate({ code, name: "빈 그래프", equipmentType: "COMMON" }, superAdminId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const nodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, result.id));
+    const edges = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, result.id));
+    assert.equal(nodes.length, 0);
+    assert.equal(edges.length, 0);
   });
 });
