@@ -240,8 +240,12 @@ export async function validateProcedureTemplateAction(input: { templateId: strin
  * The mutation layer's assertTechnicalGraphEditable/
  * canActorManageTechnicalTemplateGraph remains the sole authoritative
  * boundary — this is a UX short-circuit only.
+ *
+ * Exported for reuse by procedure-template-undo-redo.ts and
+ * procedure-template-restore.ts's own actions (Phase 5C-5C) — Undo/Redo/
+ * Restore share this exact TECHNICAL_TASK-only gate, never a looser copy.
  */
-async function resolveTechnicalGraphActorId(): Promise<{ ok: true; userId: string } | { ok: false; result: Forbidden }> {
+export async function resolveTechnicalGraphActorId(): Promise<{ ok: true; userId: string } | { ok: false; result: Forbidden }> {
   if (getAuthSource() !== "database") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "데이터베이스 저장 모드가 아닙니다." } };
   }

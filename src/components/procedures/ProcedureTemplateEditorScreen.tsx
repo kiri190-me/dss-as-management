@@ -3,18 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import ProcedureFlowGraph from "./ProcedureFlowGraph";
+import ProcedureFlowGraph, { type LayoutMode } from "./ProcedureFlowGraph";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 import NodePropertyPanel from "./editor/NodePropertyPanel";
 import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
 import CreateNodePanel from "./editor/CreateNodePanel";
-import type { ProcedureTemplateForEditor, EditHistoryRow, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
+import EditHistoryPanel from "./editor/EditHistoryPanel";
+import UndoRedoControls from "./editor/UndoRedoControls";
+import type { ProcedureTemplateForEditor, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
+import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
 import { computeUnsavedLayoutNodeIds, computeUnsavedEdgeRouteIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
 import { saveProcedureTemplateLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
 import { renameTechnicalProcedureTemplateAction } from "@/lib/server/actions/procedure-templates";
+import { undoProcedureTemplateChangeAction, redoProcedureTemplateChangeAction } from "@/lib/server/actions/procedure-template-undo-redo";
 import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
 import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
@@ -33,12 +37,12 @@ type RightPanelTab = "properties" | "validation" | "history" | "compare" | "crea
  */
 export default function ProcedureTemplateEditorScreen({
   template,
-  editHistory,
+  historyView,
   comparison,
   canEdit,
 }: {
   template: ProcedureTemplateForEditor;
-  editHistory: EditHistoryRow[];
+  historyView: TemplateHistoryView;
   comparison: DraftParentComparisonResult | null;
   canEdit: boolean;
 }) {
@@ -74,6 +78,14 @@ export default function ProcedureTemplateEditorScreen({
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(navigationTarget.nodeId);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  // Phase 5C-5B usability bugfix — lifted (was ProcedureFlowGraph's own
+  // internal state) so handleAddWaypoint can force USER mode the instant a
+  // route point is added: route-point markers only render/are clickable in
+  // USER mode (resolveEffectiveEdgeRoute), and EdgePropertyPanel's "경로점
+  // 추가" button — a completely separate component from the graph — had no
+  // way to request that switch, permanently blocking "이 위치에 노드 추가"
+  // for anyone starting from the default 원본 배치 view.
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("SOURCE");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -173,6 +185,41 @@ export default function ProcedureTemplateEditorScreen({
   // sections, regardless of canEdit.
   const isTechnical = template.category === "TECHNICAL_TASK";
   const canDeleteGraph = isTechnical && canEdit;
+
+  // Phase 5C-5C — Undo/Redo controls share canDeleteGraph's exact gate
+  // (TECHNICAL_TASK + ADMIN/SUPER_ADMIN): FULL_SERVICE/REFERENCE never see
+  // these buttons, regardless of canEdit. canUndo/canRedo come from
+  // historyView (server-derived from the live 0018 fold model on every
+  // load/refresh) — never client-memory state that could diverge from the
+  // server, and correctly reflects reality again after a refresh or
+  // re-login since it's re-read from the DB every time.
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [isRedoing, setIsRedoing] = useState(false);
+  const [undoRedoError, setUndoRedoError] = useState<string | null>(null);
+
+  async function handleUndo() {
+    setIsUndoing(true);
+    setUndoRedoError(null);
+    const result = await undoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
+    setIsUndoing(false);
+    if (!result.ok) {
+      setUndoRedoError(result.message);
+      return;
+    }
+    handleSaved(result.updatedAt);
+  }
+
+  async function handleRedo() {
+    setIsRedoing(true);
+    setUndoRedoError(null);
+    const result = await redoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
+    setIsRedoing(false);
+    if (!result.ok) {
+      setUndoRedoError(result.message);
+      return;
+    }
+    handleSaved(result.updatedAt);
+  }
 
   function handleNodeDeleted(newUpdatedAt: string) {
     setSelectedNodeId(null);
@@ -346,13 +393,21 @@ export default function ProcedureTemplateEditorScreen({
     [template.edges, workingLayoutPositions, savedEdgeRoutes]
   );
 
-  /** "경로점 추가" — the primary insertion method, no click position required: inserts at the midpoint of the selected edge's longest current segment. */
+  /**
+   * "경로점 추가" — the primary insertion method, no click position
+   * required: inserts at the midpoint of the selected edge's longest
+   * current segment. Forces USER (사용자 배치) mode — the newly-added point
+   * is otherwise invisible/unclickable (see this file's own layoutMode
+   * doc comment), silently blocking the very next step the side panel
+   * asks for ("선택된 경로점 위치에 새 노드를 삽입").
+   */
   const handleAddWaypoint = useCallback(() => {
     if (!selectedEdgeId) return;
     const edge = template.edges.find((e) => e.id === selectedEdgeId);
     const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
     const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
     if (!edge || !source || !target) return;
+    setLayoutMode("USER");
     setPendingEdgeRouteMoves((prev) => {
       const next = new Map(prev);
       next.set(selectedEdgeId, addWaypointAtDefaultPosition(currentWorkingRoutePoints(prev, selectedEdgeId), source, target));
@@ -485,6 +540,16 @@ export default function ProcedureTemplateEditorScreen({
               </button>
             </>
           )}
+          {canDeleteGraph && (
+            <UndoRedoControls
+              canUndo={historyView.canUndo}
+              canRedo={historyView.canRedo}
+              isUndoing={isUndoing}
+              isRedoing={isRedoing}
+              onUndo={() => void handleUndo()}
+              onRedo={() => void handleRedo()}
+            />
+          )}
           <button type="button" onClick={() => void handleValidate()} disabled={isValidating} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
             {isValidating ? "검증 중..." : "검증"}
           </button>
@@ -497,6 +562,7 @@ export default function ProcedureTemplateEditorScreen({
         </div>
       </div>
       {layoutErrorMessage && <p className="text-xs text-red-600 dark:text-red-400">{layoutErrorMessage}</p>}
+      {undoRedoError && <p className="text-xs text-red-600 dark:text-red-400">{undoRedoError}</p>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-2">
@@ -519,6 +585,8 @@ export default function ProcedureTemplateEditorScreen({
             onWaypointSelectionChange={handleWaypointSelectionChange}
             onWaypointMove={handleWaypointMove}
             onEdgeDoubleClickInsert={handleWaypointInsertAt}
+            layoutMode={layoutMode}
+            onLayoutModeChange={setLayoutMode}
           />
           <ProcedureGraphLegend />
         </div>
@@ -635,22 +703,7 @@ export default function ProcedureTemplateEditorScreen({
           )}
 
           {rightPanelTab === "history" && (
-            <ol className="flex flex-col gap-2 text-xs">
-              {editHistory.length === 0 ? (
-                <p className="text-zinc-400 dark:text-zinc-600">아직 편집 이력이 없습니다.</p>
-              ) : (
-                editHistory.map((row) => (
-                  <li key={row.id} className="rounded border border-zinc-100 p-2 dark:border-zinc-800">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">{row.actionType}</span>
-                      <span className="text-zinc-400 dark:text-zinc-600">{row.actorName}</span>
-                    </div>
-                    <p className="text-zinc-400 dark:text-zinc-600">{new Date(row.createdAt).toLocaleString("ko-KR")}</p>
-                    {row.reason && <p className="mt-1 whitespace-pre-wrap">사유: {row.reason}</p>}
-                  </li>
-                ))
-              )}
-            </ol>
+            <EditHistoryPanel templateId={template.id} historyView={historyView} canManage={canDeleteGraph} expectedTemplateUpdatedAt={currentUpdatedAt} onRestored={handleSaved} />
           )}
 
           {rightPanelTab === "compare" && comparison && comparison.ok && (

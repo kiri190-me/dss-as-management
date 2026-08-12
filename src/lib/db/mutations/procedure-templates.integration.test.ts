@@ -675,7 +675,13 @@ describe("Phase 5C-5A: procedure_templates.category foundation", () => {
     );
   });
 
-  test("26. the exact 4 real templates carry exactly the approved explicit category backfill (rfg/mb-full-lifecycle -> FULL_SERVICE, main-page-index/qc-common-operations -> REFERENCE) — read-only, never written by this suite", async () => {
+  test("26. the four baseline legacy templates still exist and retain exactly the approved explicit category backfill (rfg/mb-full-lifecycle -> FULL_SERVICE, main-page-index/qc-common-operations -> REFERENCE) — read-only, never written by this suite", async () => {
+    // Deliberately NOT asserting a total real-template row count: Phase
+    // 5C-5B shipped createManualTechnicalProcedureTemplate, so legitimate
+    // new real TECHNICAL_TASK rows are an expected, by-design outcome, not
+    // an invariant violation — the only thing this test protects is that
+    // these 4 specific legacy rows were never left unclassified/altered by
+    // the one-time backfill, never "the database contains exactly 4 rows".
     const rows = await db
       .select({ code: procedureTemplates.code, category: procedureTemplates.category, isReferenceOnly: procedureTemplates.isReferenceOnly })
       .from(procedureTemplates)
@@ -690,10 +696,6 @@ describe("Phase 5C-5A: procedure_templates.category foundation", () => {
     assert.equal(byCode.get("main-page-index")?.isReferenceOnly, true);
     assert.equal(byCode.get("qc-common-operations")?.category, "REFERENCE");
     assert.equal(byCode.get("qc-common-operations")?.isReferenceOnly, true);
-
-    // Every non-test row must have been explicitly classified — the backfill
-    // must never leave a real row's category unaccounted for.
-    assert.equal(rows.length, 4, `expected exactly the 4 known real templates, found: ${rows.map((r) => r.code).join(", ")}`);
   });
 });
 

@@ -8,7 +8,8 @@ import CreateDraftVersionButton from "@/components/procedures/editor/CreateDraft
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getProcedureTemplateForEditor, getProcedureTemplateEditHistory, compareDraftWithParent } from "@/lib/db/queries/procedure-template-editor";
+import { getProcedureTemplateForEditor, compareDraftWithParent } from "@/lib/db/queries/procedure-template-editor";
+import { getProcedureTemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
@@ -112,11 +113,11 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
 
   // status === "DRAFT" from here on.
   const canEdit = canActorEditTemplateOfCategory(actingUser.role, template.category);
-  const [editHistory, comparison] = await Promise.all([getProcedureTemplateEditHistory(template.id), compareDraftWithParent(template.id)]);
+  const [historyView, comparison] = await Promise.all([getProcedureTemplateHistoryView(template.id), compareDraftWithParent(template.id)]);
 
   return (
     <Suspense fallback={null}>
-      <ProcedureTemplateEditorScreen template={template} editHistory={editHistory} comparison={comparison} canEdit={canEdit} />
+      <ProcedureTemplateEditorScreen template={template} historyView={historyView} comparison={comparison} canEdit={canEdit} />
     </Suspense>
   );
 }

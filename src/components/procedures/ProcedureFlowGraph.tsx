@@ -343,7 +343,8 @@ const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualR
 
 const ALL_WORKSHEETS = "ALL";
 
-type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
+/** Exported for reuse by ProcedureTemplateEditorScreen.tsx, which lifts and controls this value — see this component's own layoutMode/onLayoutModeChange prop doc comment for why. */
+export type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
@@ -380,6 +381,8 @@ export default function ProcedureFlowGraph({
   onWaypointSelectionChange,
   onWaypointMove,
   onEdgeDoubleClickInsert,
+  layoutMode: controlledLayoutMode,
+  onLayoutModeChange,
 }: {
   templateId: string;
   nodes: ProcedureFlowGraphNode[];
@@ -429,6 +432,20 @@ export default function ProcedureFlowGraph({
   onWaypointMove?: (edgeId: string, index: number, point: { x: number; y: number }) => void;
   /** The double-click-on-an-edge shortcut (never the only way to add a waypoint — see the editor's own "경로점 추가" button) — fires with the click position already converted to flow coordinates. */
   onEdgeDoubleClickInsert?: (edgeId: string, point: { x: number; y: number }) => void;
+  /**
+   * Phase 5C-5B usability bugfix — 원본 배치/사용자 배치 view mode, optionally
+   * controlled by the caller. Route-point markers are only ever rendered/
+   * interactive in USER mode (resolveEffectiveEdgeRoute returns null for
+   * every other mode) — the editor screen needs to force USER mode the
+   * moment a route point is added via its side panel's "경로점 추가" button
+   * (a completely separate component from this graph), or the newly-added
+   * point can never be clicked/selected, permanently blocking "이 위치에
+   * 노드 추가". Uncontrolled (internal useState, defaulting to "SOURCE",
+   * unchanged from before) when omitted — ProcedureTemplateDetailScreen's
+   * read-only usage never passes these and is completely unaffected.
+   */
+  layoutMode?: LayoutMode;
+  onLayoutModeChange?: (mode: LayoutMode) => void;
 }) {
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   // Fires the camera fit exactly once, the first time the instance for the
@@ -460,7 +477,13 @@ export default function ProcedureFlowGraph({
   }, [nodeRows]);
 
   const [worksheetFilter, setWorksheetFilter] = useState<string>(() => initialWorksheet ?? ALL_WORKSHEETS);
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("SOURCE");
+  // Controlled-with-uncontrolled-fallback: ProcedureTemplateEditorScreen
+  // passes both props and drives this value; every other caller (e.g.
+  // ProcedureTemplateDetailScreen's read-only view) omits them and keeps
+  // the exact original self-contained behavior.
+  const [internalLayoutMode, setInternalLayoutMode] = useState<LayoutMode>("SOURCE");
+  const layoutMode = controlledLayoutMode ?? internalLayoutMode;
+  const setLayoutMode = onLayoutModeChange ?? setInternalLayoutMode;
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => initialSelectedNodeId);
   const [searchQuery, setSearchQuery] = useState("");
   // Graph visibility mode (Problem 1, part B) — only meaningful in the

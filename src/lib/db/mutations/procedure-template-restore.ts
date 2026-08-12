@@ -65,6 +65,17 @@ function fail(code: RestoreResultCode, message: string): never {
 
 const ELIGIBLE_RESTORE_TARGET_ORIGINS = new Set(["USER_EDIT", "REDO", "RESTORE"]);
 
+/**
+ * Exported for reuse by the read-only history query layer (src/lib/db/
+ * queries/procedure-template-history.ts) — the UI must never decide restore
+ * eligibility with its own separate copy of this rule; this is the single
+ * source of truth, and the mutation above remains the authoritative
+ * enforcement regardless of what the UI renders.
+ */
+export function isEligibleRestoreTargetOrigin(origin: string): boolean {
+  return ELIGIBLE_RESTORE_TARGET_ORIGINS.has(origin);
+}
+
 function toNodeSnapshot(templateId: string, n: ReplayNodeState): NodeSnapshot {
   return {
     id: n.id,
