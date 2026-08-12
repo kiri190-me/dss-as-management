@@ -47,20 +47,26 @@ export default function TopBar({ title, onMenuClick, user }: TopBarProps) {
           </>
         )}
       </div>
-      <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-2 sm:flex">
-          <span className="text-sm text-zinc-700 dark:text-zinc-300">
-            {user.name}님 · {user.roleLabel}
-          </span>
-          <form action="/api/auth/logout" method="post">
-            <button
-              type="submit"
-              className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              로그아웃
-            </button>
-          </form>
-        </div>
+      <div className="flex items-center gap-2">
+        <span className="hidden text-sm text-zinc-700 sm:inline dark:text-zinc-300">
+          {user.name}님 · {user.roleLabel}
+        </span>
+        {/* Mobile UX fix — this used to live inside a `hidden sm:flex`
+            wrapper alongside the name/role label, so a narrow phone
+            screen (below the sm breakpoint) had no logout affordance at
+            all. The button itself now stays visible at every width;
+            only the name/role text keeps its existing sm:-and-up
+            visibility, unchanged from before. Same form/action/method as
+            always — reuses the existing POST /api/auth/logout route,
+            never a second logout path. */}
+        <form action="/api/auth/logout" method="post">
+          <button
+            type="submit"
+            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            로그아웃
+          </button>
+        </form>
         <ThemeToggle />
       </div>
     </header>

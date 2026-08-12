@@ -17,6 +17,26 @@ function isDemoLoginEnabled(): boolean {
   return process.env.DEMO_LOGIN_ENABLED === "true";
 }
 
+/**
+ * Mobile-LAN redirect fix — `NextResponse.redirect(new URL(path,
+ * request.url), 303)` resolves `path` against `request.url`, which a live
+ * `next dev` diagnostic confirmed can report the server's own bind
+ * address (`http://localhost:3000`) even for a request a LAN client
+ * genuinely addressed to `http://192.168.1.132:3000` (Host/
+ * X-Forwarded-Host on that same request both correctly showed the real
+ * LAN address — only request.url/nextUrl disagreed). That produced an
+ * absolute `Location: http://localhost:3000/...` a phone cannot follow
+ * (`localhost` there is the phone itself), even though login/logout
+ * themselves succeeded. A relative Location header sidesteps the bug
+ * entirely — per RFC 9110 the browser resolves a relative Location
+ * against the request's own (correct) current origin, so this never
+ * needs request.url/nextUrl, and works identically for localhost, any
+ * LAN address, or a future real domain with no environment-specific code.
+ */
+function redirectTo(path: string): NextResponse {
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
+}
+
 export async function POST(request: NextRequest) {
   if (!isDemoLoginEnabled()) {
     return NextResponse.json(
@@ -40,11 +60,11 @@ export async function POST(request: NextRequest) {
   if (authSource === "database") {
     const email = formData.get("email");
     if (typeof email !== "string") {
-      return NextResponse.redirect(new URL("/login", request.url), 303);
+      return redirectTo("/login");
     }
     const loginResult = await resolveDbLogin(email);
     if (loginResult.outcome !== "SESSION") {
-      return NextResponse.redirect(new URL("/login", request.url), 303);
+      return redirectTo("/login");
     }
     // loginResult.user.id is always a real users.id UUID here (never a
     // mock-data id) — see resolveDbLogin/db-login.integration.test.ts.
@@ -52,11 +72,11 @@ export async function POST(request: NextRequest) {
   } else {
     const userId = formData.get("userId");
     if (typeof userId !== "string") {
-      return NextResponse.redirect(new URL("/login", request.url), 303);
+      return redirectTo("/login");
     }
     const user = mockUsers.find((candidate) => candidate.id === userId);
     if (!user) {
-      return NextResponse.redirect(new URL("/login", request.url), 303);
+      return redirectTo("/login");
     }
     sessionUser = user;
   }
@@ -65,7 +85,7 @@ export async function POST(request: NextRequest) {
   const destination =
     sessionUser.approvalStatus === "APPROVED" ? "/dashboard" : "/pending-approval";
 
-  const response = NextResponse.redirect(new URL(destination, request.url), 303);
+  const response = redirectTo(destination);
   response.cookies.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",

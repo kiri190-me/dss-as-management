@@ -2,6 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
 
+// Mobile-LAN redirect fix — see login/route.ts's redirectTo doc comment
+// for the confirmed root cause. A relative Location lets the browser
+// resolve against its own current origin instead of request.url.
+function redirectTo(path: string): NextResponse {
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
+}
+
 export async function POST(request: NextRequest) {
   if (!isTrustedOrigin(request)) {
     return NextResponse.json(
@@ -10,7 +17,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const response = NextResponse.redirect(new URL("/login", request.url), 303);
+  const response = redirectTo("/login");
   response.cookies.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
     sameSite: "lax",
