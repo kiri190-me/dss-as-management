@@ -101,7 +101,8 @@ async function insertFlowchartEditHistory(
   });
 }
 
-async function loadCaseForUpdate(tx: Tx, repairCaseId: string) {
+/** Exported for reuse by repair-case-flowchart-graph.ts (5C-6C) — the graph-editing gate locks/re-checks the same case row this file's own mutations always have, never a second/looser copy of the query. */
+export async function loadCaseForUpdate(tx: Tx, repairCaseId: string) {
   const [repairCase] = await tx
     .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
     .from(repairCases)
