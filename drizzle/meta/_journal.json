@@ -134,6 +134,13 @@
       "when": 1786519709818,
       "tag": "0018_procedure_template_edit_history_undo_redo_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786580691338,
+      "tag": "0019_repair_case_flowcharts_foundation",
+      "breakpoints": true
     }
   ]
 }

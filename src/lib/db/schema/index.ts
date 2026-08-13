@@ -22,3 +22,7 @@ export * from "./procedure-case-execution";
 export * from "./inventory";
 export * from "./inventory-part-requests";
 export * from "./repair-case-work-records";
+export * from "./repair-case-flowcharts";
+export * from "./repair-case-flowchart-nodes";
+export * from "./repair-case-flowchart-edges";
+export * from "./repair-case-flowchart-edit-history";
