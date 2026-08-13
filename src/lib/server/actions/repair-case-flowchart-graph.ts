@@ -12,6 +12,9 @@ import {
   updateRepairCaseFlowchartEdge,
   retargetRepairCaseFlowchartEdge,
   deleteRepairCaseFlowchartEdge,
+  saveRepairCaseFlowchartEdgeRoute,
+  insertRepairCaseFlowchartNodeOnEdge,
+  type NodeHasConnectedEdgesFailure,
 } from "@/lib/db/mutations/repair-case-flowchart-graph";
 import {
   isValidUuid,
@@ -20,6 +23,7 @@ import {
   isValidBranchType,
   isValidPosition,
   isValidLayoutPositions,
+  isValidRoutePoints,
   validateNodeTitle,
   validateNodeDescription,
   validateBranchLabel,
@@ -195,7 +199,7 @@ export async function deleteRepairCaseFlowchartNodeAction(input: {
   flowchartId: string;
   nodeId: string;
   expectedFlowchartUpdatedAt: string;
-}): Promise<ActionResult<{ updatedAt: string }>> {
+}): Promise<ActionResult<{ updatedAt: string }> | NodeHasConnectedEdgesFailure> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return unauthorized(actorCheck.result.message);
   if (!isValidUuid(input.repairCaseId) || !isValidUuid(input.flowchartId) || !isValidUuid(input.nodeId)) return validationError("요청을 확인할 수 없습니다.");
@@ -339,5 +343,68 @@ export async function deleteRepairCaseFlowchartEdgeAction(input: {
     });
   } catch (err) {
     return databaseUnavailable(err, "deleteRepairCaseFlowchartEdgeAction");
+  }
+}
+
+// ---- routing (5C-6D) ----
+
+export async function saveRepairCaseFlowchartEdgeRouteAction(input: {
+  repairCaseId: string;
+  flowchartId: string;
+  edgeId: string;
+  routePoints: unknown;
+  expectedFlowchartUpdatedAt: string;
+}): Promise<ActionResult<{ updatedAt: string; changed: boolean }>> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return unauthorized(actorCheck.result.message);
+  if (!isValidUuid(input.repairCaseId) || !isValidUuid(input.flowchartId) || !isValidUuid(input.edgeId)) return validationError("요청을 확인할 수 없습니다.");
+  if (!isValidExpectedUpdatedAt(input.expectedFlowchartUpdatedAt)) return validationError("요청이 올바르지 않습니다. 새로고침 후 다시 시도하세요.");
+  if (!isValidRoutePoints(input.routePoints)) return validationError("경로점이 올바르지 않습니다.");
+
+  try {
+    return await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId: input.repairCaseId,
+      flowchartId: input.flowchartId,
+      edgeId: input.edgeId,
+      actorUserId: actorCheck.userId,
+      routePoints: input.routePoints,
+      expectedFlowchartUpdatedAt: input.expectedFlowchartUpdatedAt,
+    });
+  } catch (err) {
+    return databaseUnavailable(err, "saveRepairCaseFlowchartEdgeRouteAction");
+  }
+}
+
+export async function insertRepairCaseFlowchartNodeOnEdgeAction(input: {
+  repairCaseId: string;
+  flowchartId: string;
+  edgeId: string;
+  nodeType: string;
+  title: string;
+  position: { x: number; y: number };
+  expectedFlowchartUpdatedAt: string;
+}): Promise<ActionResult<{ nodeId: string; firstEdgeId: string; secondEdgeId: string; updatedAt: string }>> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return unauthorized(actorCheck.result.message);
+  if (!isValidUuid(input.repairCaseId) || !isValidUuid(input.flowchartId) || !isValidUuid(input.edgeId)) return validationError("요청을 확인할 수 없습니다.");
+  if (!isValidNodeType(input.nodeType)) return validationError("지원되지 않는 노드 유형입니다.");
+  if (!isValidPosition(input.position)) return validationError("노드 위치가 올바르지 않습니다.");
+  if (!isValidExpectedUpdatedAt(input.expectedFlowchartUpdatedAt)) return validationError("요청이 올바르지 않습니다. 새로고침 후 다시 시도하세요.");
+  const titleValidation = validateNodeTitle(input.title);
+  if (!titleValidation.ok) return validationError(titleValidation.error);
+
+  try {
+    return await insertRepairCaseFlowchartNodeOnEdge({
+      repairCaseId: input.repairCaseId,
+      flowchartId: input.flowchartId,
+      edgeId: input.edgeId,
+      actorUserId: actorCheck.userId,
+      nodeType: input.nodeType,
+      title: titleValidation.title,
+      position: input.position,
+      expectedFlowchartUpdatedAt: input.expectedFlowchartUpdatedAt,
+    });
+  } catch (err) {
+    return databaseUnavailable(err, "insertRepairCaseFlowchartNodeOnEdgeAction");
   }
 }

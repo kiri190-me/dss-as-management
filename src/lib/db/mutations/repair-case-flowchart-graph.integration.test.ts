@@ -27,6 +27,8 @@ import {
   updateRepairCaseFlowchartEdge,
   retargetRepairCaseFlowchartEdge,
   deleteRepairCaseFlowchartEdge,
+  saveRepairCaseFlowchartEdgeRoute,
+  insertRepairCaseFlowchartNodeOnEdge,
 } from "./repair-case-flowchart-graph";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -908,5 +910,235 @@ describe("cross-flowchart (IDOR) defense", () => {
 
     const historyAfter = await db.select({ id: repairCaseFlowchartEditHistory.id }).from(repairCaseFlowchartEditHistory).where(eq(repairCaseFlowchartEditHistory.flowchartId, flowchartA.id));
     assert.equal(historyAfter.length, historyBefore.length, "no rejected cross-flowchart attempt may write history");
+  });
+});
+
+// =====================================================================
+// EDGE ROUTING (5C-6D)
+// =====================================================================
+
+describe("saveRepairCaseFlowchartEdgeRoute", () => {
+  test("persists an explicit waypoint chain and writes one SAVE_EDGE_ROUTE row", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+    const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
+    const edge = await mustCreateEdge({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, fromNodeId: nodeA.nodeId, toNodeId: nodeB.nodeId, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+
+    const result = await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      routePoints: [{ x: 100, y: 200 }, { x: 150, y: 250 }],
+      expectedFlowchartUpdatedAt: edge.updatedAt,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.changed, true);
+
+    const [row] = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, edge.edgeId));
+    assert.deepEqual(row.routePoints, [{ x: 100, y: 200 }, { x: 150, y: 250 }]);
+
+    const historyRows = await db
+      .select()
+      .from(repairCaseFlowchartEditHistory)
+      .where(and(eq(repairCaseFlowchartEditHistory.edgeId, edge.edgeId), eq(repairCaseFlowchartEditHistory.actionType, "SAVE_EDGE_ROUTE")));
+    assert.equal(historyRows.length, 1);
+  });
+
+  test("null clears the route back to automatic routing", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+    const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
+    const edge = await mustCreateEdge({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, fromNodeId: nodeA.nodeId, toNodeId: nodeB.nodeId, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+
+    const setResult = await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      routePoints: [{ x: 10, y: 20 }],
+      expectedFlowchartUpdatedAt: edge.updatedAt,
+    });
+    assert.equal(setResult.ok, true);
+    if (!setResult.ok) throw new Error("unreachable");
+
+    const clearResult = await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      routePoints: null,
+      expectedFlowchartUpdatedAt: setResult.updatedAt,
+    });
+    assert.equal(clearResult.ok, true);
+
+    const [row] = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, edge.edgeId));
+    assert.equal(row.routePoints, null);
+  });
+
+  test("an unchanged route (same points) writes no history", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+    const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
+    const edge = await mustCreateEdge({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, fromNodeId: nodeA.nodeId, toNodeId: nodeB.nodeId, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+
+    const result = await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      routePoints: null,
+      expectedFlowchartUpdatedAt: edge.updatedAt,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.changed, false, "null -> null (no existing route) must be a no-op");
+
+    const historyRows = await db
+      .select()
+      .from(repairCaseFlowchartEditHistory)
+      .where(and(eq(repairCaseFlowchartEditHistory.edgeId, edge.edgeId), eq(repairCaseFlowchartEditHistory.actionType, "SAVE_EDGE_ROUTE")));
+    assert.equal(historyRows.length, 0);
+  });
+
+  test("a mismatched flowchart is rejected with CROSS_FLOWCHART", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchartA = await createTestFlowchart(repairCaseId);
+    const flowchartB = await createTestFlowchart(repairCaseId);
+    const a1 = await mustCreateNode({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, title: "A1", expectedFlowchartUpdatedAt: flowchartA.updatedAt });
+    const a2 = await mustCreateNode({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, title: "A2", expectedFlowchartUpdatedAt: a1.updatedAt });
+    const edgeA = await mustCreateEdge({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, fromNodeId: a1.nodeId, toNodeId: a2.nodeId, expectedFlowchartUpdatedAt: a2.updatedAt });
+
+    const result = await saveRepairCaseFlowchartEdgeRoute({
+      repairCaseId,
+      flowchartId: flowchartB.id,
+      edgeId: edgeA.edgeId,
+      actorUserId: superAdminId,
+      routePoints: [{ x: 1, y: 1 }],
+      expectedFlowchartUpdatedAt: flowchartB.updatedAt,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "CROSS_FLOWCHART");
+  });
+});
+
+// =====================================================================
+// NODE-ON-EDGE INSERTION (5C-6D)
+// =====================================================================
+
+describe("insertRepairCaseFlowchartNodeOnEdge", () => {
+  test("A -> B becomes A -> NEW -> B with correct coordinate, one transaction, one changeGroupId", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+    const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
+    const edge = await mustCreateEdge({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, fromNodeId: nodeA.nodeId, toNodeId: nodeB.nodeId, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+
+    const result = await insertRepairCaseFlowchartNodeOnEdge({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      nodeType: "TASK",
+      title: "NEW",
+      position: { x: 42, y: 84 },
+      expectedFlowchartUpdatedAt: edge.updatedAt,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+
+    // Correct coordinate.
+    const [newNode] = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.id, result.nodeId));
+    assert.equal(newNode.title, "NEW");
+    assert.equal(newNode.positionX, 42);
+    assert.equal(newNode.positionY, 84);
+
+    // Original edge retargeted: A -> NEW.
+    const [firstEdge] = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, result.firstEdgeId));
+    assert.equal(firstEdge.fromNodeId, nodeA.nodeId);
+    assert.equal(firstEdge.toNodeId, result.nodeId);
+
+    // Continuation edge created: NEW -> B, plain DEFAULT.
+    const [secondEdge] = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, result.secondEdgeId));
+    assert.equal(secondEdge.fromNodeId, result.nodeId);
+    assert.equal(secondEdge.toNodeId, nodeB.nodeId);
+    assert.equal(secondEdge.branchType, "DEFAULT");
+
+    // Topology confirmed: exactly 3 nodes, 2 edges, forming A -> NEW -> B.
+    const allNodes = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.flowchartId, flowchart.id));
+    const allEdges = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.flowchartId, flowchart.id));
+    assert.equal(allNodes.length, 3);
+    assert.equal(allEdges.length, 2);
+
+    // One changeGroupId, correct history action sequence.
+    const historyRows = await db
+      .select()
+      .from(repairCaseFlowchartEditHistory)
+      .where(eq(repairCaseFlowchartEditHistory.flowchartId, flowchart.id))
+      .orderBy(repairCaseFlowchartEditHistory.sequenceNumber);
+    // CREATE_FLOWCHART (setup) + CREATE_NODE x2 (setup) + CREATE_EDGE (setup) + this insertion's own 3 rows.
+    const insertionRows = historyRows.filter(
+      (r) =>
+        (r.actionType === "CREATE_NODE" && r.nodeId === result.nodeId) ||
+        (r.actionType === "RETARGET_EDGE" && r.edgeId === result.firstEdgeId) ||
+        (r.actionType === "CREATE_EDGE" && r.edgeId === result.secondEdgeId)
+    );
+    assert.equal(insertionRows.length, 3);
+    assert.deepEqual(insertionRows.map((r) => r.actionType), ["CREATE_NODE", "RETARGET_EDGE", "CREATE_EDGE"]);
+    const changeGroupIds = new Set(insertionRows.map((r) => r.changeGroupId));
+    assert.equal(changeGroupIds.size, 1, "all three rows must share one changeGroupId");
+    for (const row of insertionRows) {
+      assert.equal(row.origin, "USER_EDIT");
+    }
+  });
+
+  test("a mismatched flowchart is rejected atomically, leaving the graph unchanged", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchartA = await createTestFlowchart(repairCaseId);
+    const flowchartB = await createTestFlowchart(repairCaseId);
+    const a1 = await mustCreateNode({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, title: "A1", expectedFlowchartUpdatedAt: flowchartA.updatedAt });
+    const a2 = await mustCreateNode({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, title: "A2", expectedFlowchartUpdatedAt: a1.updatedAt });
+    const edgeA = await mustCreateEdge({ repairCaseId, flowchartId: flowchartA.id, actorUserId: superAdminId, fromNodeId: a1.nodeId, toNodeId: a2.nodeId, expectedFlowchartUpdatedAt: a2.updatedAt });
+
+    const result = await insertRepairCaseFlowchartNodeOnEdge({
+      repairCaseId,
+      flowchartId: flowchartB.id,
+      edgeId: edgeA.edgeId,
+      actorUserId: superAdminId,
+      nodeType: "TASK",
+      title: "NEW",
+      position: { x: 0, y: 0 },
+      expectedFlowchartUpdatedAt: flowchartB.updatedAt,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "CROSS_FLOWCHART");
+
+    const allNodesA = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.flowchartId, flowchartA.id));
+    assert.equal(allNodesA.length, 2, "no node must be inserted when the target edge belongs to a different flowchart");
+  });
+
+  test("a blank title is rejected", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+    const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
+    const edge = await mustCreateEdge({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, fromNodeId: nodeA.nodeId, toNodeId: nodeB.nodeId, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+
+    const result = await insertRepairCaseFlowchartNodeOnEdge({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      edgeId: edge.edgeId,
+      actorUserId: superAdminId,
+      nodeType: "TASK",
+      title: "   ",
+      position: { x: 0, y: 0 },
+      expectedFlowchartUpdatedAt: edge.updatedAt,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
   });
 });

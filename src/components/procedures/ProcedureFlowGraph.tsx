@@ -7,9 +7,6 @@ import {
   Position,
   BaseEdge,
   EdgeLabelRenderer,
-  useReactFlow,
-  getStraightPath,
-  getSmoothStepPath,
   type Node,
   type Edge,
   type NodeProps,
@@ -42,9 +39,9 @@ import {
   type RoutableNode,
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
-import { resolveEffectiveNodePosition, hasUserLayoutOverride, computeLayeredGraphLayout, isAlignedVerticalConnection } from "@/lib/graph-editor-core/layout";
-import { releasePointerCaptureSafely, createCaptureBlurGuard } from "@/lib/graph-editor-core/pointer";
+import { resolveEffectiveNodePosition, hasUserLayoutOverride, computeLayeredGraphLayout } from "@/lib/graph-editor-core/layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 
@@ -140,189 +137,6 @@ function ProcedureOuterLaneEdge({ data, style, markerEnd, label, labelStyle, lab
   );
 }
 
-/**
- * Round-2 straight-edge fix — extracted as a plain function (no JSX/React)
- * specifically so it's unit-testable on its own: given the exact
- * EdgeProps geometry React Flow passes to a custom edge renderer, decide
- * straight-vs-smoothstep from `sourceX`/`targetX` DIRECTLY — never from
- * this codebase's own node-position/width estimate. See
- * ProcedureDefaultEdge's own doc comment for why that distinction matters.
- */
-export function computeDefaultEdgePath(params: {
-  sourceX: number;
-  sourceY: number;
-  targetX: number;
-  targetY: number;
-  sourcePosition: Position;
-  targetPosition: Position;
-}): [string, number, number] {
-  const [path, labelX, labelY] = isAlignedVerticalConnection(params.sourceX, params.targetX)
-    ? getStraightPath({ sourceX: params.sourceX, sourceY: params.sourceY, targetX: params.targetX, targetY: params.targetY })
-    : getSmoothStepPath(params);
-  return [path, labelX, labelY];
-}
-
-/**
- * Round-2 straight-edge fix — the ordinary (원본/사용자 배치, non-manual-
- * route, non-LOOP_BACK) edge type. Earlier, the caller decided `type:
- * "straight" | "smoothstep"` ahead of time from its OWN estimate of each
- * node's center x (nodeCenterXById, built from computeNodeDimensions +
- * node.position) — if that estimate ever disagreed with what React Flow
- * actually measured/rendered, the decision would be wrong regardless of
- * how correct the layout math itself was. This component instead decides
- * INSIDE the renderer (via computeDefaultEdgePath above), using
- * `sourceX`/`targetX` — React Flow's own authoritative, live handle
- * coordinates (computed from the real `internals.positionAbsolute` and
- * the handle's own measured DOM position, not anything this codebase
- * estimates) — so the straight-vs-bent choice can never drift from what's
- * actually on screen.
- */
-function ProcedureDefaultEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, label, labelStyle, labelBgStyle, labelBgPadding }: EdgeProps) {
-  const [path, labelX, labelY] = computeDefaultEdgePath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
-  return (
-    <BaseEdge
-      path={path}
-      labelX={labelX}
-      labelY={labelY}
-      style={style}
-      markerEnd={markerEnd}
-      label={label}
-      labelStyle={labelStyle}
-      labelBgStyle={labelBgStyle}
-      labelBgPadding={labelBgPadding}
-    />
-  );
-}
-
-type ManualRouteEdgeData = {
-  points: RoutePoint[];
-  /** Only the currently-selected edge, in editable+USER layout, renders draggable handles — every other edge with a manual route still renders the correct polyline shape, just without the interactive overlay. */
-  isInteractive: boolean;
-  selectedWaypointIndex: number | null;
-  onWaypointSelect?: (index: number | null) => void;
-  onWaypointMove?: (index: number, point: RoutePoint) => void;
-};
-
-/**
- * Phase 4B — renders an edge as an explicit polyline through its manual
- * waypoints (source -> points... -> target), the same "render from a
- * precomputed path string" technique ProcedureOuterLaneEdge already proves
- * out. sourceX/Y and targetX/Y come from ReactFlow itself (computed from
- * the node's actual rendered position + this edge's sourceHandle/
- * targetHandle, same handles the deterministic edges use) — waypoints and
- * these coordinates already share one coordinate space, so no conversion
- * is needed to build the path.
- *
- * Dragging a handle uses setPointerCapture so pointermove/pointerup keep
- * firing on the same element regardless of where the cursor physically
- * ends up — no window-level listener bookkeeping required. Every drag only
- * ever calls onWaypointMove(index, point), which the editor screen wires
- * to pendingEdgeRouteMoves only — it can never touch this edge's own
- * source/target node ids, satisfying "route-point dragging must never
- * retarget the edge endpoints" structurally, not by a separate check.
- *
- * Phase 5C-5B bugfix (cursor-disappearing investigation, round 1) — the
- * original version only released capture on `onPointerUp`. A drag
- * interrupted any other way (Alt+Tab, a system/browser dialog stealing
- * focus, a right-click context menu, losing touch/pen contact) fires
- * `pointercancel` instead, which this element never handled — the pointer
- * stayed captured by this 10x10px handle indefinitely. While the pointer
- * remains captured, every subsequent pointer event keeps routing to (and
- * being cursor-styled by) this off-screen/stale element instead of
- * whatever the OS pointer is actually over, which is exactly what made the
- * cursor appear to "vanish" even after moving off the graph entirely onto
- * a property panel — the capture, not the panel, was the actual site of
- * the bug. Released on both `onPointerUp` and `onPointerCancel`,
- * defensively (see releasePointerCaptureSafely, graph-editor-core/pointer.ts).
- *
- * Round 2 (the fix above wasn't sufficient) — two more release paths were
- * still missing:
- *  - `onLostPointerCapture`, the one event the Pointer Capture spec
- *    actually *guarantees* fires on every release, implicit or explicit
- *    (disabled/removed element, capture reassigned elsewhere, etc.) —
- *    `pointerup`/`pointercancel` cover the common cases but not all of
- *    them.
- *  - A window `blur` (Alt+Tab, a dialog, switching to another app) or the
- *    tab going hidden: pointer capture is defined to be independent of
- *    window focus, so losing focus mid-drag releases neither the capture
- *    nor fires `pointercancel`/`lostpointercapture` — the handle can keep
- *    controlling the page's rendered cursor until an actual `pointerup`
- *    eventually arrives, which may never happen if the button was released
- *    while a different window had OS focus. `createCaptureBlurGuard`
- *    (graph-editor-core/pointer.ts) proactively releases the capture it's
- *    tracking the moment that happens.
- */
-function ProcedureManualRouteEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label, labelStyle, labelBgStyle, labelBgPadding, data }: EdgeProps & { data?: ManualRouteEdgeData }) {
-  const { screenToFlowPosition } = useReactFlow();
-  const captureGuardRef = useRef<ReturnType<typeof createCaptureBlurGuard> | null>(null);
-  useEffect(() => {
-    const guard = createCaptureBlurGuard(window, document);
-    captureGuardRef.current = guard;
-    return () => {
-      guard.dispose();
-      captureGuardRef.current = null;
-    };
-  }, []);
-  if (!data) return null;
-
-  const chain = [{ x: sourceX, y: sourceY }, ...data.points, { x: targetX, y: targetY }];
-  const path = chain.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  // BaseEdge needs an explicit label position for a multi-point path (it
-  // can only infer one from a single getXxxPath() call, which this
-  // hand-built polyline never goes through) — the chain's centroid is a
-  // simple, always-on-the-line-ish default; it doesn't need to be exact.
-  const labelX = chain.reduce((sum, p) => sum + p.x, 0) / chain.length;
-  const labelY = chain.reduce((sum, p) => sum + p.y, 0) / chain.length;
-
-  return (
-    <>
-      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} label={label} labelX={labelX} labelY={labelY} labelStyle={labelStyle} labelBgStyle={labelBgStyle} labelBgPadding={labelBgPadding} />
-      {data.isInteractive && (
-        <EdgeLabelRenderer>
-          {data.points.map((p, index) => (
-            <div
-              key={index}
-              className="nodrag nopan"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                data.onWaypointSelect?.(index);
-                const el = e.currentTarget as HTMLElement;
-                el.setPointerCapture(e.pointerId);
-                captureGuardRef.current?.track(el, e.pointerId);
-              }}
-              onPointerMove={(e) => {
-                if (e.buttons !== 1) return;
-                data.onWaypointMove?.(index, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
-              }}
-              onPointerUp={(e) => {
-                releasePointerCaptureSafely(e.currentTarget as HTMLElement, e.pointerId);
-                captureGuardRef.current?.untrack();
-              }}
-              onPointerCancel={(e) => {
-                releasePointerCaptureSafely(e.currentTarget as HTMLElement, e.pointerId);
-                captureGuardRef.current?.untrack();
-              }}
-              onLostPointerCapture={() => captureGuardRef.current?.untrack()}
-              style={{
-                position: "absolute",
-                transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`,
-                width: 10,
-                height: 10,
-                borderRadius: "9999px",
-                background: index === data.selectedWaypointIndex ? "#2563eb" : "#ffffff",
-                border: "2px solid #2563eb",
-                cursor: "grab",
-                pointerEvents: "all",
-                zIndex: 20,
-              }}
-            />
-          ))}
-        </EdgeLabelRenderer>
-      )}
-    </>
-  );
-}
-
 type StageHeaderData = { worksheet: string; count: number };
 
 /** SUBPROCESS_OR_STAGE-styled band header (Phase 3B) — a presentation-only label above each worksheet's node cluster, never a real procedure_template_nodes row. */
@@ -339,7 +153,7 @@ function ProcedureStageHeaderNode({ data }: NodeProps & { data: StageHeaderData 
 }
 
 const nodeTypes = { procedureNode: ProcedureNode, procedureStageHeader: ProcedureStageHeaderNode };
-const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualRoute: ProcedureManualRouteEdge, procedureDefault: ProcedureDefaultEdge };
+const edgeTypes = { procedureOuterLane: ProcedureOuterLaneEdge, procedureManualRoute: ManualRouteEdge, procedureDefault: DefaultStraightOrStepEdge };
 
 const ALL_WORKSHEETS = "ALL";
 
@@ -784,7 +598,7 @@ export default function ProcedureFlowGraph({
       // plain top/bottom smoothstep (or a bezier for LOOP_BACK/RETRY), no
       // semantic routing — UNLESS (Phase 4B) it has a manual route override
       // and we're actually in 사용자 배치, in which case it renders through
-      // ProcedureManualRouteEdge instead. resolveEffectiveEdgeRoute already
+      // ManualRouteEdge (graph-editor-core/GraphEdges.tsx) instead. resolveEffectiveEdgeRoute already
       // encodes "only USER layout" — 원본 배치 never sees a manual route
       // even if one is stored, by construction, not by an extra check here.
       return visibleEdgeRows.map((e) => {
@@ -842,7 +656,7 @@ export default function ProcedureFlowGraph({
           // big cross-stage jump reads visually differently from ordinary
           // local smoothstep flow — the two verified RFG LOOP_BACK edges
           // must be "especially easy to identify." Every other edge here
-          // renders through ProcedureDefaultEdge, which decides straight-
+          // renders through DefaultStraightOrStepEdge (graph-editor-core/GraphEdges.tsx), which decides straight-
           // vs-smoothstep itself, live, from React Flow's own authoritative
           // sourceX/targetX (see that component's own doc comment) — never
           // a pre-computed guess based on this file's own position/width

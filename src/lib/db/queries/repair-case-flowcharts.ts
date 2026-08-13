@@ -2,9 +2,29 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { repairCaseFlowcharts, users } from "../schema";
+import { repairCaseFlowcharts, repairCases, users } from "../schema";
 
 const updatedByUser = alias(users, "flowchart_updated_by_user");
+
+export type RepairCaseFlowchartPageContext = { id: string; isLocked: boolean; assignedEngineerId: string | null };
+
+/**
+ * UI-hint context for the case-flowchart editor page's canEdit derivation
+ * (5C-6D) — same convention as getWorkRecordCaseContext
+ * (repair-case-work-records.ts): the mutation layer independently re-reads
+ * and re-locks this same row, never trusting this. Deliberately not
+ * resolveRepairCaseForServer (repair-case-resolver.ts) — that resolver is
+ * mock/database read-source-aware and its ResolvedRepairCase shape doesn't
+ * carry isLocked, while case-flowchart mutations are database-mode-only
+ * (every server action gates on getAuthSource() === "database").
+ */
+export async function getRepairCaseFlowchartPageContext(repairCaseId: string): Promise<RepairCaseFlowchartPageContext | null> {
+  const [row] = await db
+    .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+    .from(repairCases)
+    .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)));
+  return row ?? null;
+}
 
 export type RepairCaseFlowchartRow = {
   id: string;

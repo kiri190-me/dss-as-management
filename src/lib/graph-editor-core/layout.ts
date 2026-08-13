@@ -92,6 +92,177 @@ export function computeRelativePosition(
   }
 }
 
+// ---- effective node dimensions (5C-6D follow-up #5) ----
+
+export type NodeDimensionsLike = { width: number; height: number };
+
+/**
+ * THE single, authoritative measured-vs-fallback priority rule — used
+ * identically for a relative-position operation's target, reference, AND
+ * every column-snap candidate node, so none of them can ever drift onto a
+ * different resolution rule than the others. `measured` is the RAW,
+ * possibly-partial value straight from React Flow's own internal node
+ * store (each axis independently `number | undefined` until that axis has
+ * actually been measured) — resolved PER AXIS, not all-or-nothing, so a
+ * node with only one dimension measured so far still gets the real value
+ * for that axis and only falls back on the other. `fallback` (the
+ * presentation-only, description-blind `computeNodeDimensions` estimate)
+ * is used only for whichever axis isn't validly measured — a valid
+ * measured value on an axis is NEVER overridden by the fallback, no matter
+ * how different the two disagree (that disagreement, in fact, is exactly
+ * what root-caused the original bug this function fixes: description text
+ * the estimate never accounted for).
+ *
+ * `> 0` (not just finite) — a measured 0 is never a real chip's rendered
+ * size, so it's treated the same as "not yet measured."
+ */
+export function resolveEffectiveNodeDimensions(measured: { width?: number; height?: number } | null | undefined, fallback: NodeDimensionsLike): NodeDimensionsLike {
+  const width = measured && Number.isFinite(measured.width) && (measured.width as number) > 0 ? (measured.width as number) : fallback.width;
+  const height = measured && Number.isFinite(measured.height) && (measured.height as number) > 0 ? (measured.height as number) : fallback.height;
+  return { width, height };
+}
+
+// ---- straighten-connection (double-click edge, 5C-6D follow-up #6) ----
+
+export type ConnectedNodeGeometry = { x: number; y: number; width: number; height: number };
+export type StraightenedConnectionOrientation = "VERTICAL" | "HORIZONTAL";
+export type StraightenedConnectionResult = { orientation: StraightenedConnectionOrientation; position: { x: number; y: number } };
+
+/**
+ * "Double-click an edge to straighten it" — keeps the SOURCE node fixed and
+ * computes where the TARGET node should move so their VISUAL centers align
+ * on whichever axis currently separates them more (the dominant separation
+ * represents the user's visible intent: a mostly-vertical relationship
+ * straightens vertically, a mostly-horizontal one straightens
+ * horizontally). A tie (`|dy| === |dx|`) prefers VERTICAL, matching this
+ * domain's own top-to-bottom flow convention.
+ *
+ * VERTICAL: target's Y is left untouched; only X moves, to
+ * `sourceCenterX - target.width / 2`. HORIZONTAL: target's X is left
+ * untouched; only Y moves, to `sourceCenterY - target.height / 2`. Uses
+ * each node's ACTUAL width/height (not raw left-edge/top-edge equality) —
+ * see this checkpoint's own doc trail (follow-up #5) for why an estimate-
+ * only approach silently misaligns nodes with different rendered sizes
+ * (multiline titles, descriptions, different shapes).
+ *
+ * Domain-agnostic and deliberately ignorant of edge id, branch type,
+ * routePoints, or persistence — a caller decides whether/how to apply the
+ * returned position and whether an edge's own manual route should also
+ * reset to automatic. Never mutates its inputs. If the nodes are already
+ * exactly aligned on the dominant axis, the returned position equals the
+ * target's current position (nothing moves) — this is the formula's own
+ * natural behavior, not a special case handled here.
+ */
+export function computeStraightenedConnectedNodePosition(source: ConnectedNodeGeometry, target: ConnectedNodeGeometry): StraightenedConnectionResult {
+  const sourceCenterX = source.x + source.width / 2;
+  const sourceCenterY = source.y + source.height / 2;
+  const targetCenterX = target.x + target.width / 2;
+  const targetCenterY = target.y + target.height / 2;
+  const dx = targetCenterX - sourceCenterX;
+  const dy = targetCenterY - sourceCenterY;
+
+  if (Math.abs(dy) >= Math.abs(dx)) {
+    return { orientation: "VERTICAL", position: { x: sourceCenterX - target.width / 2, y: target.y } };
+  }
+  return { orientation: "HORIZONTAL", position: { x: target.x, y: sourceCenterY - target.height / 2 } };
+}
+
+// ---- center-aligned relative positioning (5C-6D follow-up #3) ----
+
+/**
+ * Same LEFT/RIGHT/UP/DOWN math as computeRelativePosition, except LEFT/RIGHT
+ * now also align by vertical CENTER, not raw top-left y — two nodes of
+ * different height (a multiline title, a different node shape) must still
+ * share the same center y once placed side by side, or their connecting
+ * edge visibly kinks even though "y" superficially matched. UP/DOWN are
+ * unchanged (computeRelativePosition already center-aligns those by x);
+ * reproduced here rather than delegating, so this function is a complete,
+ * self-contained replacement a caller can switch to on its own.
+ *
+ * Deliberately a NEW function, not a change to computeRelativePosition in
+ * place — that function is still called by the Procedure editor
+ * (NodePropertyPanel.tsx/CreateNodePanel.tsx), and changing its LEFT/RIGHT
+ * behavior there was explicitly out of scope for this checkpoint (5C-6D-1
+ * will decide whether to standardize this across both editors). Case
+ * Flowchart is the only caller of this function today.
+ */
+export function computeCenterAlignedRelativePosition(
+  reference: { x: number; y: number; width: number; height: number },
+  direction: RelativeDirection,
+  spacing: { horizontal: number; vertical: number },
+  target: { width: number; height: number }
+): { x: number; y: number } {
+  const referenceCenterX = reference.x + reference.width / 2;
+  const referenceCenterY = reference.y + reference.height / 2;
+  switch (direction) {
+    case "LEFT":
+      return { x: reference.x - spacing.horizontal - target.width, y: referenceCenterY - target.height / 2 };
+    case "RIGHT":
+      return { x: reference.x + reference.width + spacing.horizontal, y: referenceCenterY - target.height / 2 };
+    case "UP":
+      return { x: referenceCenterX - target.width / 2, y: reference.y - spacing.vertical };
+    case "DOWN":
+      return { x: referenceCenterX - target.width / 2, y: reference.y + spacing.vertical };
+  }
+}
+
+// ---- column-aware snapping for LEFT/RIGHT relative placement ----
+
+export type ColumnSnapCandidate = { id: string; x: number; y: number; width: number; height: number };
+export type ColumnSnapResult = { x: number; y: number; snappedToNodeId: string | null };
+
+/**
+ * Refines a LEFT/RIGHT candidate position (typically from
+ * computeCenterAlignedRelativePosition) so that placing a node into a
+ * column that already has a node directly above it snaps to that existing
+ * node's exact center-x column, instead of landing at a slightly different
+ * x purely because this particular reference node happens to have a
+ * different width. Deterministic: among existing nodes strictly ABOVE the
+ * candidate (smaller center y — a node at or below the candidate is never a
+ * column candidate, see the caller-facing tests) and within `tolerance` of
+ * the candidate's own center x, the one closest above (largest center y)
+ * wins — never array order.
+ *
+ * `tolerance` should be derived from real layout geometry by the caller
+ * (e.g. half its own horizontal relative-position spacing constant), never
+ * an arbitrary large number — this function applies whatever tolerance
+ * it's given without judging it, so a caller passing too large a value can
+ * still produce a surprising jump; keeping the tolerance sane is the
+ * caller's responsibility, by design (this stays a generic, domain-agnostic
+ * helper with no opinion on any particular editor's spacing constants).
+ *
+ * UP/DOWN never call this — column snapping is a LEFT/RIGHT-only concept
+ * for this checkpoint.
+ */
+export function resolveColumnSnappedRelativePosition(input: {
+  candidateX: number;
+  candidateY: number;
+  targetWidth: number;
+  targetHeight: number;
+  existingNodes: ColumnSnapCandidate[];
+  excludeNodeIds: string[];
+  tolerance: number;
+}): ColumnSnapResult {
+  const candidateCenterX = input.candidateX + input.targetWidth / 2;
+  const candidateCenterY = input.candidateY + input.targetHeight / 2;
+  const excludeSet = new Set(input.excludeNodeIds);
+
+  let best: { node: ColumnSnapCandidate; centerY: number } | null = null;
+  for (const node of input.existingNodes) {
+    if (excludeSet.has(node.id)) continue;
+    const nodeCenterY = node.y + node.height / 2;
+    if (nodeCenterY >= candidateCenterY) continue; // only nodes strictly ABOVE the intended target position qualify
+    const nodeCenterX = node.x + node.width / 2;
+    if (Math.abs(nodeCenterX - candidateCenterX) > input.tolerance) continue; // outside the candidate's column
+    if (best === null || nodeCenterY > best.centerY) best = { node, centerY: nodeCenterY };
+  }
+
+  if (best === null) return { x: input.candidateX, y: input.candidateY, snappedToNodeId: null };
+
+  const snappedCenterX = best.node.x + best.node.width / 2;
+  return { x: snappedCenterX - input.targetWidth / 2, y: input.candidateY, snappedToNodeId: best.node.id };
+}
+
 // ---- generic row-packing primitive ----
 
 export type PackableNode = {

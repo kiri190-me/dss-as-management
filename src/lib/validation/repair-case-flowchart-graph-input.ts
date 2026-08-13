@@ -77,6 +77,19 @@ export function isValidPosition(value: unknown): value is { x: number; y: number
   );
 }
 
+/**
+ * Action-layer shape check only — the authoritative normalization is
+ * sanitizeRoutePoints (graph-editor-core/routing.ts), called unconditionally
+ * inside saveRepairCaseFlowchartEdgeRoute regardless of what passes here.
+ * This just rejects an obviously-malformed payload before it reaches the
+ * mutation layer at all.
+ */
+export function isValidRoutePoints(value: unknown): value is { x: number; y: number }[] | null {
+  if (value === null || value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  return value.every((p) => isValidPosition(p));
+}
+
 export type LayoutPositionInput = { id: string; positionX: number; positionY: number };
 
 export function isValidLayoutPositions(value: unknown): value is LayoutPositionInput[] {

@@ -57,9 +57,17 @@ export type GraphCanvasProps = {
   onEdgeClick?: (edgeId: string) => void;
   /** Fires on any edge double-click, with the click position already converted to flow-space coordinates — the conversion requires the live React Flow instance, which only this component (the direct parent of `<ReactFlow>`) can access without a `<ReactFlowProvider>`. Always fires when provided; a caller that only wants this in certain interaction states gates its own handler body, not this prop. */
   onEdgeDoubleClick?: (edgeId: string, flowPoint: { x: number; y: number }) => void;
+  /** Fires once at the start of a node drag gesture, before any movement — a caller wanting to capture a drag anchor (e.g. for an axis-constrained drag) reads shiftKey here, once, rather than re-deriving "was Shift held" from later frames. */
+  onNodeDragStart?: (nodeId: string, position: { x: number; y: number }, shiftKey: boolean) => void;
+  /** Fires on every pointer-move frame during an active node drag, with React Flow's own live (possibly since-corrected) position — a caller wanting to visually constrain the drag path (not just correct it after drop) uses this together with the underlying React Flow instance's own imperative update API, never anything this component wraps or restricts. */
+  onNodeDrag?: (nodeId: string, position: { x: number; y: number }, shiftKey: boolean) => void;
   onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
   /** Fires once, when the underlying React Flow instance becomes ready — lets the caller run its own one-shot logic (e.g. an initial camera fit) without this component needing to know why. */
   onInit?: (instance: ReactFlowInstance) => void;
+  /** React Flow's own `selectionKeyCode` — the key that must be held during a pane-background drag to start a rectangle/box selection instead of panning. Omit to keep React Flow's own default ("Shift"); pass `null` to disable box-selection outright. A domain that reserves Shift for its own node-drag modifier (e.g. axis-locked dragging) needs this — by default, React Flow treats a Shift-held drag as a selection gesture even when it starts on a node, which pre-empts that node's own drag entirely. */
+  selectionKeyCode?: string | string[] | null;
+  /** React Flow's own `multiSelectionKeyCode` — the key that toggles a node into/out of the current selection on click. Omit to keep React Flow's own default. */
+  multiSelectionKeyCode?: string | string[] | null;
 };
 
 export default function GraphCanvas({
@@ -78,8 +86,12 @@ export default function GraphCanvas({
   onPaneClick,
   onEdgeClick,
   onEdgeDoubleClick,
+  onNodeDragStart,
+  onNodeDrag,
   onNodeDragStop,
   onInit,
+  selectionKeyCode,
+  multiSelectionKeyCode,
 }: GraphCanvasProps) {
   const instanceRef = useRef<ReactFlowInstance | null>(null);
 
@@ -124,6 +136,8 @@ export default function GraphCanvas({
         nodesConnectable={nodesConnectable}
         elementsSelectable={elementsSelectable}
         onlyRenderVisibleElements
+        onNodeDragStart={(event, node) => onNodeDragStart?.(node.id, { x: node.position.x, y: node.position.y }, event.shiftKey)}
+        onNodeDrag={(event, node) => onNodeDrag?.(node.id, { x: node.position.x, y: node.position.y }, event.shiftKey)}
         onNodeDragStop={(_, node) => onNodeDragStop?.(node.id, { x: node.position.x, y: node.position.y })}
         onEdgeClick={(_, edge) => onEdgeClick?.(edge.id)}
         onEdgeDoubleClick={(event, edge) => {
@@ -144,6 +158,8 @@ export default function GraphCanvas({
         fitViewOptions={{ padding: fitViewPadding }}
         minZoom={minZoom}
         proOptions={{ hideAttribution: true }}
+        selectionKeyCode={selectionKeyCode}
+        multiSelectionKeyCode={multiSelectionKeyCode}
       >
         <Background gap={24} />
         <Controls showInteractive={false} />

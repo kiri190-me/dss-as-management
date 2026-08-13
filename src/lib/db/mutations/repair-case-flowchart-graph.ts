@@ -17,6 +17,7 @@ import {
   type RepairCaseFlowchartNodeType,
   type RepairCaseFlowchartBranchType,
 } from "@/lib/domain/repair-case-flowchart-types";
+import { sanitizeRoutePoints, routePointsEqual } from "@/lib/graph-editor-core/routing";
 
 /**
  * Phase 5C-6C — graph (node/edge) CRUD for case-owned diagnostic
@@ -156,7 +157,8 @@ type GraphEditActionType =
   | "UPDATE_EDGE"
   | "RETARGET_EDGE"
   | "DELETE_EDGE"
-  | "SAVE_LAYOUT";
+  | "SAVE_LAYOUT"
+  | "SAVE_EDGE_ROUTE";
 
 async function insertGraphEditHistory(
   tx: Tx,
@@ -825,6 +827,194 @@ export async function deleteRepairCaseFlowchartEdge(params: {
 
       const updatedAt = await touchFlowchart(tx, flowchart.id, actor.id);
       return { ok: true, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof GraphMutationError) return err.result;
+    throw err;
+  }
+}
+
+// =====================================================================
+// EDGE ROUTING (5C-6D — waypoint/route-point persistence)
+// =====================================================================
+
+export type SaveEdgeRouteResult = { ok: true; updatedAt: string; changed: boolean } | Failure;
+
+/**
+ * Persists a single edge's manual route (its ordered waypoint chain, or
+ * null to restore automatic routing). Single-edge scoped, unlike
+ * saveRepairCaseFlowchartLayout's batched-array-of-nodes shape — routing
+ * UX naturally edits one selected edge's route at a time (add/move/remove
+ * waypoint), so a dedicated per-edge mutation is the right granularity
+ * here rather than forcing route saves through the layout batch. Every
+ * input passes through sanitizeRoutePoints (graph-editor-core/routing.ts)
+ * server-side, regardless of what the client already validated — the same
+ * gate saveProcedureTemplateLayout's edge-route half uses.
+ */
+export async function saveRepairCaseFlowchartEdgeRoute(params: {
+  repairCaseId: string;
+  flowchartId: string;
+  edgeId: string;
+  actorUserId: string;
+  routePoints: unknown;
+  expectedFlowchartUpdatedAt: string;
+}): Promise<SaveEdgeRouteResult> {
+  const sanitized = sanitizeRoutePoints(params.routePoints);
+  if (!sanitized.ok) return { ok: false, code: "INVALID_INPUT", message: sanitized.message };
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, params.actorUserId);
+      const flowchart = await loadFlowchartForGraphEdit(tx, params.repairCaseId, params.flowchartId, params.expectedFlowchartUpdatedAt, actor);
+
+      const [edge] = await tx.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, params.edgeId)).for("update");
+      if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
+      if (edge.flowchartId !== flowchart.id) fail("CROSS_FLOWCHART", "다른 Flowchart에 속한 분기는 수정할 수 없습니다.");
+
+      if (routePointsEqual(edge.routePoints ?? null, sanitized.points)) {
+        return { ok: true, updatedAt: flowchart.updatedAt.toISOString(), changed: false };
+      }
+
+      const beforeState = { id: edge.id, points: edge.routePoints ?? null };
+      const afterState = { id: edge.id, points: sanitized.points };
+
+      await tx.update(repairCaseFlowchartEdges).set({ routePoints: sanitized.points }).where(eq(repairCaseFlowchartEdges.id, edge.id));
+
+      await insertGraphEditHistory(tx, {
+        flowchartId: flowchart.id,
+        actionType: "SAVE_EDGE_ROUTE",
+        edgeId: edge.id,
+        beforeState,
+        afterState,
+        actorUserId: actor.id,
+        changeGroupId: randomUUID(),
+      });
+
+      const updatedAt = await touchFlowchart(tx, flowchart.id, actor.id);
+      return { ok: true, updatedAt, changed: true };
+    });
+  } catch (err) {
+    if (err instanceof GraphMutationError) return err.result;
+    throw err;
+  }
+}
+
+// =====================================================================
+// NODE-ON-EDGE INSERTION (5C-6D — route-point split)
+// =====================================================================
+
+export type InsertNodeOnEdgeResult =
+  | { ok: true; nodeId: string; firstEdgeId: string; secondEdgeId: string; updatedAt: string }
+  | Failure;
+
+/**
+ * Splits an existing edge (A -[branch]-> B) at a chosen waypoint into two:
+ * A -[the exact same branchType/branchLabel, untouched]-> NEW, and
+ * NEW -[a plain DEFAULT continuation, never a copy of A's branch]-> B. A
+ * route point is a routing/geometry detail, not a second decision —
+ * duplicating A's branch semantics onto the new edge would silently change
+ * the graph's meaning. Same pattern as
+ * insertProcedureTemplateNodeOnEdge (procedure-template-editor.ts): one
+ * transaction, one authoritative mutation — create the node, retarget the
+ * first edge's toNodeId (inline, not via retargetRepairCaseFlowchartEdge,
+ * which opens its own transaction), create the second edge, all under one
+ * changeGroupId (CREATE_NODE + RETARGET_EDGE + CREATE_EDGE) so a future
+ * Undo/Redo fold (6E) treats this as one atomic reversible unit, never
+ * three independent steps. Never a client-side three-call sequence.
+ */
+export async function insertRepairCaseFlowchartNodeOnEdge(params: {
+  repairCaseId: string;
+  flowchartId: string;
+  edgeId: string;
+  actorUserId: string;
+  nodeType: string;
+  title: string;
+  position: { x: number; y: number };
+  expectedFlowchartUpdatedAt: string;
+}): Promise<InsertNodeOnEdgeResult> {
+  const title = params.title.trim();
+  if (title.length === 0) return { ok: false, code: "INVALID_INPUT", message: "노드 제목을 입력해 주세요." };
+  if (!(REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES as readonly string[]).includes(params.nodeType)) {
+    return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
+  }
+  if (!Number.isFinite(params.position.x) || !Number.isFinite(params.position.y)) {
+    return { ok: false, code: "INVALID_INPUT", message: "노드 위치가 올바르지 않습니다." };
+  }
+  const nodeType = params.nodeType as RepairCaseFlowchartNodeType;
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, params.actorUserId);
+      const flowchart = await loadFlowchartForGraphEdit(tx, params.repairCaseId, params.flowchartId, params.expectedFlowchartUpdatedAt, actor);
+
+      const [edge] = await tx.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.id, params.edgeId)).for("update");
+      if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
+      if (edge.flowchartId !== flowchart.id) fail("CROSS_FLOWCHART", "다른 Flowchart에 속한 분기에는 노드를 삽입할 수 없습니다.");
+
+      const [insertedNode] = await tx
+        .insert(repairCaseFlowchartNodes)
+        .values({
+          flowchartId: flowchart.id,
+          nodeType,
+          title,
+          description: null,
+          positionX: params.position.x,
+          positionY: params.position.y,
+        })
+        .returning();
+
+      const originalToNodeId = edge.toNodeId;
+
+      await tx.update(repairCaseFlowchartEdges).set({ toNodeId: insertedNode.id }).where(eq(repairCaseFlowchartEdges.id, edge.id));
+
+      const [secondEdge] = await tx
+        .insert(repairCaseFlowchartEdges)
+        .values({
+          flowchartId: flowchart.id,
+          fromNodeId: insertedNode.id,
+          toNodeId: originalToNodeId,
+          branchType: "DEFAULT",
+          branchLabel: null,
+        })
+        .returning();
+
+      // One shared change_group_id for all three rows — a single logical
+      // "split" operation, so a future Undo/Redo fold treats CREATE_NODE +
+      // RETARGET_EDGE + CREATE_EDGE as one atomic unit.
+      const changeGroupId = randomUUID();
+
+      await insertGraphEditHistory(tx, {
+        flowchartId: flowchart.id,
+        actionType: "CREATE_NODE",
+        nodeId: insertedNode.id,
+        beforeState: null,
+        afterState: serializeNodeSnapshot(insertedNode),
+        actorUserId: actor.id,
+        changeGroupId,
+      });
+
+      await insertGraphEditHistory(tx, {
+        flowchartId: flowchart.id,
+        actionType: "RETARGET_EDGE",
+        edgeId: edge.id,
+        beforeState: { id: edge.id, fromNodeId: edge.fromNodeId, toNodeId: originalToNodeId },
+        afterState: { id: edge.id, fromNodeId: edge.fromNodeId, toNodeId: insertedNode.id },
+        actorUserId: actor.id,
+        changeGroupId,
+      });
+
+      await insertGraphEditHistory(tx, {
+        flowchartId: flowchart.id,
+        actionType: "CREATE_EDGE",
+        edgeId: secondEdge.id,
+        beforeState: null,
+        afterState: serializeEdgeSnapshot(secondEdge),
+        actorUserId: actor.id,
+        changeGroupId,
+      });
+
+      const updatedAt = await touchFlowchart(tx, flowchart.id, actor.id);
+      return { ok: true, nodeId: insertedNode.id, firstEdgeId: edge.id, secondEdgeId: secondEdge.id, updatedAt };
     });
   } catch (err) {
     if (err instanceof GraphMutationError) return err.result;
