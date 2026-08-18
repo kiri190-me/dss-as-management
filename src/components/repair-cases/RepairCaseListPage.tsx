@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { mockCustomers, mockRepairCases } from "@/lib/domain/mock-data";
 import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
@@ -135,6 +135,29 @@ export default function RepairCaseListPage({
   );
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pagination, setPagination] = useState<PaginationState>(DEFAULT_PAGINATION);
+
+  /**
+   * 페이지 이동 후 목록 상단으로 되돌리는 앵커다. 이 화면의 페이지네이션은
+   * 라우팅이 아니라 순수 useState 변경이라(아래 Pagination의 onPageChange),
+   * 화면 전환이 없으니 브라우저도 라우터도 스크롤을 건드리지 않는다. 그래서
+   * 폰에서 화면 맨 아래 "다음"을 누르면 새 페이지의 끝부분을 보고 있게 된다.
+   *
+   * 스크롤 주체가 window가 아니라 AppShell의 <main>(overflow-y-auto)이므로
+   * window.scrollTo는 아무 효과가 없다 — 스크롤 컨테이너를 직접 찾지 않아도
+   * 되도록 앵커 엘리먼트의 scrollIntoView를 쓴다.
+   */
+  const listTopRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    // block: "nearest" — 보이지 않을 때만 최소한으로 스크롤하는 옵션이다.
+    // 모바일에서는 목록 상단이 화면 위쪽 밖이라 상단이 맨 위에 오도록
+    // 올라가고, 데스크톱처럼 이미 목록 상단이 보이는 상태에서는 아무 일도
+    // 일어나지 않는다. 뷰포트 폭 분기를 코드에 박지 않고도 "모바일에서만
+    // 실질적으로 동작"이 되는 이유이며, 같은 성질 덕분에 필터 변경으로
+    // page가 1로 리셋될 때(사용자는 필터 패널이 있는 상단에 있다)도
+    // 화면이 튀지 않는다.
+    listTopRef.current?.scrollIntoView({ block: "nearest" });
+  }, [pagination.page, pagination.pageSize]);
 
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -580,7 +603,10 @@ export default function RepairCaseListPage({
             <LoadingNotice />
           ) : (
             <>
-              <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
+              {/* ref: 페이지 이동 후 되돌아올 "목록 상단" 지점 (listTopRef 주석 참조).
+                  표/카드 목록 바로 위의 이 줄을 앵커로 잡아, 스크롤 후 첫 행이
+                  건수 안내 바로 아래에 오도록 한다. */}
+              <p ref={listTopRef} aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
                 조건에 맞는 A/S 접수 건 {sortedRows.length}건
               </p>
 
