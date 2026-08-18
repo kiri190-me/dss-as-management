@@ -6,6 +6,7 @@ import { canViewRepairCaseFlowcharts } from "@/lib/auth/repair-case-flowchart-au
 import { canViewCustomers } from "@/lib/auth/customer-authorization";
 import { canViewProductModels } from "@/lib/auth/product-model-authorization";
 import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
+import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 
 export type NavItem = {
   key: string;
@@ -27,6 +28,7 @@ export const navItems: NavItem[] = [
   { key: "myActiveWork", href: "/repair-cases/mine", label: "내 담당 제품", isVisibleForRole: canViewMyActiveWork },
   { key: "repairCaseNew", href: "/repair-cases/new", label: "A/S 접수" },
   { key: "diagnosisFlowcharts", href: "/diagnosis-flowcharts", label: "진단 Flowchart 관리", isVisibleForRole: canViewRepairCaseFlowcharts },
+  { key: "workflows", href: "/workflows", label: "워크플로 관리", isVisibleForRole: canViewWorkflowTemplates },
   {
     key: "excelKyosanIntakeList",
     href: "/excel-reports/kyosan-intake-list",
@@ -63,7 +65,7 @@ export type NavGroup = {
  * groups — a group with zero visible children simply renders nothing.
  */
 export const navGroups: NavGroup[] = [
-  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "excelKyosanIntakeList"] },
+  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
   { key: "techResources", label: "기술 / 자원", itemKeys: ["technicalProcedures", "inventory"] },
   { key: "admin", label: "관리", itemKeys: ["users", "customers", "productModels", "repairCaseExcelImport", "settings"] },
 ];

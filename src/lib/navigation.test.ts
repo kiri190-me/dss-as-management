@@ -45,8 +45,27 @@ test("navigation: the approved feature entries are the only role-gated items", (
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["customers", "diagnosisFlowcharts", "inventory", "myActiveWork", "productModels", "repairCaseExcelImport", "technicalProcedures"]
+    ["customers", "diagnosisFlowcharts", "inventory", "myActiveWork", "productModels", "repairCaseExcelImport", "technicalProcedures", "workflows"]
   );
+});
+
+// 워크플로 관리는 규칙 자체를 바꾸는 화면이라 엔지니어 이상만 본다
+// (2026-08-18 결정). 영업·재고 담당자는 자기 담당 구간을 정규 워크플로로
+// 진행하는 것은 그대로 가능하며, 여기서 막는 것은 규칙 편집뿐이다.
+test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER see the workflows entry; SALES / INVENTORY_MANAGER do not", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.ok(
+      filterNavItemsForRole(navItems, role).some((i) => i.key === "workflows"),
+      `expected workflows visible for ${role}`
+    );
+  }
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(
+      filterNavItemsForRole(navItems, role).some((i) => i.key === "workflows"),
+      false,
+      `expected workflows hidden for ${role}`
+    );
+  }
 });
 
 test("navigation: no 'procedures' (all-category list) entry exists", () => {
@@ -132,7 +151,7 @@ test("navGroups: every itemKey references a real navItems key", () => {
 
 test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / 관리 structure", () => {
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
-  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "excelKyosanIntakeList"]);
+  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["users", "customers", "productModels", "repairCaseExcelImport", "settings"]);
 });
@@ -142,8 +161,8 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     SUPER_ADMIN: 1, // myActiveWork
     ADMIN: 1, // myActiveWork
     AS_ENGINEER: 1, // repairCaseExcelImport
-    SALES: 3, // myActiveWork + technicalProcedures + repairCaseExcelImport
-    INVENTORY_MANAGER: 5, // myActiveWork + technicalProcedures + customers + productModels + repairCaseExcelImport
+    SALES: 4, // myActiveWork + technicalProcedures + repairCaseExcelImport + workflows
+    INVENTORY_MANAGER: 6, // myActiveWork + technicalProcedures + customers + productModels + repairCaseExcelImport + workflows
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);
