@@ -11,11 +11,19 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
-// Current three workflow types (types.ts WORKFLOW_TYPE_CODES).
+// Ten persisted workflow types: legacy MATCHER, six final-billing workflows,
+// and three Excel-only pending-billing workflows.
 export const workflowTypeEnum = pgEnum("workflow_type", [
   "MATCHER",
+  "PAID_MATCHER",
+  "WARRANTY_MATCHER",
   "PAID_GENERATOR",
   "WARRANTY_GENERATOR",
+  "PAID_TOTAL_CONTROLLER",
+  "WARRANTY_TOTAL_CONTROLLER",
+  "PENDING_MATCHER",
+  "PENDING_GENERATOR",
+  "PENDING_TOTAL_CONTROLLER",
 ]);
 
 export const workflowVersionStatusEnum = pgEnum("workflow_version_status", [

@@ -8,6 +8,7 @@ import { db, pgClient } from "../connection";
 import {
   users,
   customers,
+  products,
   repairCases,
   repairCaseIntakeSequences,
   repairCaseFlowcharts,
@@ -40,6 +41,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 const TEST_YEAR_MONTH = "9902";
 const TEST_RECEIVED_AT = "2099-02-10";
 const TEST_SHIPMENT_DATE = "2099-02-20";
+const TEST_MODEL_PREFIX = "FLOWCHART-SCHEMA-TEST-";
 
 let superAdminId: string;
 let engineerId: string;
@@ -52,13 +54,14 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
     receivedAt: TEST_RECEIVED_AT,
     customerRequestedDueDate: null,
     internalTargetShipmentDate: TEST_SHIPMENT_DATE,
-    modelName: `FLOWCHART-SCHEMA-TEST-${suffix}`,
+    modelName: `${TEST_MODEL_PREFIX}${suffix}`,
     lotNumber: `LOT-${suffix}`,
     serialNumber: `SN-${suffix}`,
     partNumber: null,
@@ -151,6 +154,7 @@ after(async () => {
     await db.delete(repairCaseFlowcharts).where(inArray(repairCaseFlowcharts.id, createdFlowchartIds));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
+  await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
   await pgClient.end({ timeout: 5 });
 });

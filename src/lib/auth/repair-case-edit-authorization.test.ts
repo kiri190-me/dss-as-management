@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   authorizeSubmittedFields,
+  canBulkDeleteRepairCases,
   canEditSection,
+  canPermanentlyDeleteRepairCases,
+  canRestoreRepairCases,
   editableFieldsForRoleInSection,
   isBlockedByShipmentLock,
   isFieldEditable,
@@ -16,7 +19,8 @@ test("SUPER_ADMIN and ADMIN may edit every field in every section", () => {
     assert.equal(canEditSection(role, "PRODUCT"), true);
     assert.equal(canEditSection(role, "FAULT_SERVICE"), true);
     assert.equal(isFieldEditable(role, "customerId"), true);
-    assert.equal(isFieldEditable(role, "modelName"), true);
+    assert.equal(isFieldEditable(role, "productModelId"), true);
+    assert.equal(isFieldEditable(role, "newProductModelName"), true);
     assert.equal(isFieldEditable(role, "assignedEngineerId"), true);
   }
 });
@@ -29,14 +33,35 @@ test("AS_ENGINEER may edit technical/service and product fields", () => {
   assert.equal(isFieldEditable("AS_ENGINEER", "reportedSymptom"), true);
   assert.equal(isFieldEditable("AS_ENGINEER", "assignedEngineerId"), true);
   assert.equal(isFieldEditable("AS_ENGINEER", "internalTargetShipmentDate"), true);
-  assert.equal(isFieldEditable("AS_ENGINEER", "modelName"), true);
+  assert.equal(isFieldEditable("AS_ENGINEER", "productModelId"), true);
+  assert.equal(
+    isFieldEditable("AS_ENGINEER", "newProductModelName"),
+    false,
+    "AS_ENGINEER may select an existing Product Model but must not register a new one"
+  );
 });
 
-test("AS_ENGINEER may not edit customer/intake fields", () => {
-  assert.equal(canEditSection("AS_ENGINEER", "INTAKE"), false);
+test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/End-User edit)", () => {
+  assert.equal(canEditSection("AS_ENGINEER", "INTAKE"), true);
+  for (const field of ["customerId", "newCustomerName", "endUserId", "newEndUserName"]) {
+    assert.equal(isFieldEditable("AS_ENGINEER", field), true, `AS_ENGINEER should edit ${field}`);
+  }
+  assert.deepEqual(
+    editableFieldsForRoleInSection("AS_ENGINEER", "INTAKE"),
+    [
+      "customerId",
+      "newCustomerName",
+      "endUserId",
+      "newEndUserName",
+      "billingType",
+      "internalTargetInspectionCompletionDate",
+      "internalTargetShipmentDate",
+    ]
+  );
+});
+
+test("AS_ENGINEER may not edit the rest of INTAKE (receivedAt/dates/contact fields stay SALES-only)", () => {
   for (const field of [
-    "customerId",
-    "endUserId",
     "receivedAt",
     "customerRequestedDueDate",
     "contactName",
@@ -47,13 +72,44 @@ test("AS_ENGINEER may not edit customer/intake fields", () => {
   }
 });
 
+test("AS_ENGINEER may edit 종류(workflowKind)/billingType; SALES may not (checkpoint: 종류 edit permissions)", () => {
+  assert.equal(isFieldEditable("AS_ENGINEER", "workflowKind"), true);
+  assert.equal(isFieldEditable("AS_ENGINEER", "billingType"), true);
+  assert.equal(isFieldEditable("SALES", "workflowKind"), false);
+  assert.equal(isFieldEditable("SALES", "billingType"), false);
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "workflowKind"), false);
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "billingType"), false);
+});
+
+test("priority is SUPER_ADMIN/ADMIN-only for now (인수 정보 priority-editing checkpoint) — AS_ENGINEER/SALES/INVENTORY_MANAGER never see it", () => {
+  assert.equal(isFieldEditable("SUPER_ADMIN", "priority"), true);
+  assert.equal(isFieldEditable("ADMIN", "priority"), true);
+  assert.equal(isFieldEditable("AS_ENGINEER", "priority"), false);
+  assert.equal(isFieldEditable("SALES", "priority"), false);
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "priority"), false);
+});
+
+test("no role — including SUPER_ADMIN/ADMIN — may edit the 3 derived-summary fields (record_kind checkpoint)", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    for (const field of ["intakeInspectionResult", "currentDiagnosisSummary", "nextPlannedAction"]) {
+      assert.equal(isFieldEditable(role, field), false, `${role} should never edit derived field ${field}`);
+    }
+  }
+  assert.deepEqual(
+    editableFieldsForRoleInSection("SUPER_ADMIN", "FAULT_SERVICE"),
+    ["reportedSymptom", "notes", "assignedEngineerId"]
+  );
+});
+
 // -------------------------------------------------------------------- SALES
 
 test("SALES may edit intake/contact fields and notes", () => {
   assert.equal(canEditSection("SALES", "INTAKE"), true);
   for (const field of [
     "customerId",
+    "newCustomerName",
     "endUserId",
+    "newEndUserName",
     "receivedAt",
     "customerRequestedDueDate",
     "contactName",
@@ -71,10 +127,10 @@ test("SALES may not edit diagnosis/technical/product fields", () => {
     "currentDiagnosisSummary",
     "nextPlannedAction",
     "assignedEngineerId",
-    "modelName",
+    "productModelId",
+    "newProductModelName",
     "lotNumber",
     "serialNumber",
-    "partNumber",
     "internalTargetInspectionCompletionDate",
     "internalTargetShipmentDate",
     "accessoryList",
@@ -99,6 +155,39 @@ test("INVENTORY_MANAGER is read-only in every section", () => {
   assert.equal(canEditSection("INVENTORY_MANAGER", "PRODUCT"), false);
   assert.equal(canEditSection("INVENTORY_MANAGER", "FAULT_SERVICE"), false);
   assert.deepEqual(editableFieldsForRoleInSection("INVENTORY_MANAGER", "INTAKE"), []);
+});
+
+// ------------------------------------------------------ canBulkDeleteRepairCases
+
+test("canBulkDeleteRepairCases: SUPER_ADMIN/ADMIN only", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
+    assert.equal(canBulkDeleteRepairCases(role), true, `expected ${role} to bulk-delete repair cases`);
+  }
+  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canBulkDeleteRepairCases(role), false, `expected ${role} not to bulk-delete repair cases`);
+  }
+});
+
+// ---------------------------------------------------------- canRestoreRepairCases
+
+test("canRestoreRepairCases: SUPER_ADMIN/ADMIN only", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
+    assert.equal(canRestoreRepairCases(role), true, `expected ${role} to restore repair cases`);
+  }
+  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canRestoreRepairCases(role), false, `expected ${role} not to restore repair cases`);
+  }
+});
+
+// ------------------------------------------------ canPermanentlyDeleteRepairCases
+
+test("canPermanentlyDeleteRepairCases: SUPER_ADMIN/ADMIN only", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
+    assert.equal(canPermanentlyDeleteRepairCases(role), true, `expected ${role} to permanently delete repair cases`);
+  }
+  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canPermanentlyDeleteRepairCases(role), false, `expected ${role} not to permanently delete repair cases`);
+  }
 });
 
 // -------------------------------------------------------- authorizeSubmittedFields
@@ -127,7 +216,7 @@ test("authorizeSubmittedFields: SALES submitting notes + a technical field is re
 
 // ---------------------------------------------------------------- shipment lock
 
-test("isBlockedByShipmentLock blocks whenever isLocked is true, independent of role", () => {
-  assert.equal(isBlockedByShipmentLock(true), true);
+test("isBlockedByShipmentLock never blocks (shipment-lock removal policy) — a shipped case stays editable", () => {
+  assert.equal(isBlockedByShipmentLock(true), false);
   assert.equal(isBlockedByShipmentLock(false), false);
 });

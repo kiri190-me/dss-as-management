@@ -12,14 +12,14 @@ const BALANCE_X = "66666666-6666-6666-6666-666666666666";
 
 test("CREATE_REQUEST fingerprint: identical logical cart in different entry order produces the same fingerprint", () => {
   const mergedA = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: 3, note: "a" },
-    { partId: PART_B, quantity: 1 },
-    { partId: PART_A, quantity: 2, note: "b" },
+    { partId: PART_A, quantity: 3, owner: "DSS", note: "a" },
+    { partId: PART_B, quantity: 1, owner: "KYOSAN" },
+    { partId: PART_A, quantity: 2, owner: "DSS", note: "b" },
   ]);
   const mergedB = mergeDuplicateRequestItems([
-    { partId: PART_B, quantity: 1 },
-    { partId: PART_A, quantity: 2, note: "b" },
-    { partId: PART_A, quantity: 3, note: "a" },
+    { partId: PART_B, quantity: 1, owner: "KYOSAN" },
+    { partId: PART_A, quantity: 2, owner: "DSS", note: "b" },
+    { partId: PART_A, quantity: 3, owner: "DSS", note: "a" },
   ]);
   assert.equal(mergedA.ok, true);
   assert.equal(mergedB.ok, true);
@@ -38,7 +38,7 @@ test("CREATE_REQUEST fingerprint: identical logical cart in different entry orde
 });
 
 test("CREATE_REQUEST fingerprint: header note is included — changing it changes the fingerprint", () => {
-  const merged = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 1 }]);
+  const merged = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 1, owner: "DSS" }]);
   assert.equal(merged.ok, true);
   if (!merged.ok) return;
 
@@ -48,8 +48,8 @@ test("CREATE_REQUEST fingerprint: header note is included — changing it change
 });
 
 test("CREATE_REQUEST fingerprint: different quantity produces a different fingerprint", () => {
-  const merged3 = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 3 }]);
-  const merged5 = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 5 }]);
+  const merged3 = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 3, owner: "DSS" }]);
+  const merged5 = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 5, owner: "DSS" }]);
   assert.equal(merged3.ok, true);
   assert.equal(merged5.ok, true);
   if (!merged3.ok || !merged5.ok) return;
@@ -57,6 +57,18 @@ test("CREATE_REQUEST fingerprint: different quantity produces a different finger
   const fp3 = computeRequestFingerprint({ operationType: "CREATE_REQUEST", payload: { repairCaseId: CASE_ID, note: null, items: merged3.items } });
   const fp5 = computeRequestFingerprint({ operationType: "CREATE_REQUEST", payload: { repairCaseId: CASE_ID, note: null, items: merged5.items } });
   assert.notEqual(fp3, fp5);
+});
+
+test("CREATE_REQUEST fingerprint: a different owner for the same part/quantity produces a different fingerprint", () => {
+  const mergedDss = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 3, owner: "DSS" }]);
+  const mergedKyosan = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 3, owner: "KYOSAN" }]);
+  assert.equal(mergedDss.ok, true);
+  assert.equal(mergedKyosan.ok, true);
+  if (!mergedDss.ok || !mergedKyosan.ok) return;
+
+  const fpDss = computeRequestFingerprint({ operationType: "CREATE_REQUEST", payload: { repairCaseId: CASE_ID, note: null, items: mergedDss.items } });
+  const fpKyosan = computeRequestFingerprint({ operationType: "CREATE_REQUEST", payload: { repairCaseId: CASE_ID, note: null, items: mergedKyosan.items } });
+  assert.notEqual(fpDss, fpKyosan, "owner is a request-defining dimension — it must differentiate the idempotency fingerprint");
 });
 
 test("ISSUE fingerprint: allocation order does not affect the fingerprint (merge sorts deterministically)", () => {

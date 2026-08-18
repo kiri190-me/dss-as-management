@@ -53,10 +53,12 @@ test("canUseStock: SUPER_ADMIN/ADMIN/INVENTORY_MANAGER behavior is unchanged —
   }
 });
 
-test("canUseStock: a locked case blocks USE unconditionally, for every role including SUPER_ADMIN — unchanged existing behavior", () => {
-  for (const role of ALL_ROLES) {
-    assert.equal(canUseStock(role, { hasRepairCase: true, isCaseLocked: true }), false, role);
+test("canUseStock: shipment-lock removal policy — a shipped (locked) case no longer blocks USE for the privileged roles", () => {
+  for (const role of PRIVILEGED_ROLES) {
+    assert.equal(canUseStock(role, { hasRepairCase: true, isCaseLocked: true }), true, role);
   }
+  assert.equal(canUseStock("AS_ENGINEER", { hasRepairCase: true, isCaseLocked: true }), false, "still denied by role, not by lock");
+  assert.equal(canUseStock("SALES", { hasRepairCase: true, isCaseLocked: true }), false, "still denied by role, not by lock");
 });
 
 test("canUseStock: SALES is never authorized to USE, with or without a case — unchanged existing behavior", () => {
@@ -66,12 +68,11 @@ test("canUseStock: SALES is never authorized to USE, with or without a case — 
 
 // ---- Phase 5B-3: Parts Request & Issue Workflow ----
 
-test("canCreatePartRequest: AS_ENGINEER only, requires assignment, locked case blocks unconditionally", () => {
-  assert.equal(canCreatePartRequest("AS_ENGINEER", { isAssignedToCase: true, isCaseLocked: false }), true);
-  assert.equal(canCreatePartRequest("AS_ENGINEER", { isAssignedToCase: false, isCaseLocked: false }), false);
-  assert.equal(canCreatePartRequest("AS_ENGINEER", { isAssignedToCase: true, isCaseLocked: true }), false, "locked case blocks even an assigned engineer");
+test("canCreatePartRequest: AS_ENGINEER only, assignment NOT required (Parts Request permission checkpoint); shipment-lock removal policy — a shipped case no longer blocks", () => {
+  assert.equal(canCreatePartRequest("AS_ENGINEER", { isCaseLocked: false }), true, "any AS_ENGINEER may request, not only the assigned one");
+  assert.equal(canCreatePartRequest("AS_ENGINEER", { isCaseLocked: true }), true, "a shipped case no longer blocks an AS_ENGINEER");
   for (const role of ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER", "SALES"] as const) {
-    assert.equal(canCreatePartRequest(role, { isAssignedToCase: true, isCaseLocked: false }), false, `${role} cannot create a request (no on-behalf creation)`);
+    assert.equal(canCreatePartRequest(role, { isCaseLocked: false }), false, `${role} cannot create a request (no on-behalf creation)`);
   }
 });
 
@@ -92,11 +93,11 @@ test("canProcessPartRequests / canViewPartRequests: SALES has zero access, AS_EN
   for (const role of PRIVILEGED_ROLES) assert.equal(canViewPartRequests(role), true, role);
 });
 
-test("canIssuePartRequest: same three privileged roles, locked case blocks unconditionally, only PENDING/PARTIALLY_ISSUED are issuable", () => {
+test("canIssuePartRequest: same three privileged roles, only PENDING/PARTIALLY_ISSUED are issuable; shipment-lock removal policy — a shipped case no longer blocks", () => {
   for (const role of PRIVILEGED_ROLES) {
     assert.equal(canIssuePartRequest(role, { isCaseLocked: false, status: "PENDING" }), true, role);
     assert.equal(canIssuePartRequest(role, { isCaseLocked: false, status: "PARTIALLY_ISSUED" }), true, role);
-    assert.equal(canIssuePartRequest(role, { isCaseLocked: true, status: "PENDING" }), false, `${role}: locked case blocks issue unconditionally, no bypass`);
+    assert.equal(canIssuePartRequest(role, { isCaseLocked: true, status: "PENDING" }), true, `${role}: a shipped case no longer blocks issue`);
     for (const terminal of ["FULLY_ISSUED", "PARTIALLY_CLOSED", "REJECTED", "CANCELLED"] as const) {
       assert.equal(canIssuePartRequest(role, { isCaseLocked: false, status: terminal }), false, `${role}/${terminal}`);
     }

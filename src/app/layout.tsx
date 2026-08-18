@@ -56,7 +56,23 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/*
+        Sidebar-footer layout fix — this was `min-h-full`, which lets body
+        grow TALLER than the viewport to fit long page content (e.g. the
+        A/S 접수 form). Once body inflates, every flex descendant down to
+        AppShell's own row (sidebar + main) inflates with it via normal
+        flex stretch sizing, dragging the sidebar's footer below the fold
+        along with everything else. `h-full` caps body at exactly the
+        viewport height (html is already `h-full` above), which — combined
+        with `min-h-0` on the flex containers between here and <main>/<nav>
+        (see AppShell.tsx/Sidebar.tsx) — is what lets `<main>`'s and the
+        sidebar nav's own `overflow-y-auto` finally engage as REAL internal
+        scroll instead of the whole page growing. Standalone pages outside
+        AppShell (e.g. /login) are unaffected: without an inner
+        `overflow-hidden`, taller-than-viewport content there still scrolls
+        the document normally exactly as before.
+      */}
+      <body className="h-full flex flex-col">{children}</body>
     </html>
   );
 }

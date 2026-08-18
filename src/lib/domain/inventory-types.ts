@@ -19,6 +19,59 @@ export const stockOwnerLabels: Record<StockOwner, string> = {
   TEST: "TEST용",
 };
 
+/**
+ * Parts Request 소유구분 checkpoint — inventory_part_request_items.owner is
+ * nullable (migration 0024) and deliberately never backfilled: every
+ * request item created before this checkpoint stays NULL forever. Every
+ * display surface must use this helper (never stockOwnerLabels[owner]
+ * directly on a possibly-null value) so "미지정" is the single canonical
+ * rendering of that historical NULL, never a guessed owner.
+ */
+export function stockOwnerLabelOrUnspecified(owner: StockOwner | null): string {
+  return owner ? stockOwnerLabels[owner] : "미지정";
+}
+
+/**
+ * Parts Request 소유구분-scoped availability checkpoint — looks up a single
+ * (partId, owner) cell out of the per-part-per-owner availability map (see
+ * getPartOwnerAvailability's doc comment for how that map is built: SUM of
+ * part_stock_balances.current_quantity across every location bucket for
+ * that exact part+owner pair, the same aggregate already used everywhere
+ * else, just grouped one level finer).
+ *
+ * Returns null when no owner is selected yet — callers must render a
+ * neutral prompt in that case, never an all-owner total. Returns 0 (never
+ * null) when an owner IS selected but no balance row exists for that
+ * (partId, owner) pair — a real, displayable "nothing here" answer, not an
+ * "unknown" state.
+ */
+export function ownerScopedAvailability(
+  byPartId: Record<string, Partial<Record<StockOwner, number>>>,
+  partId: string,
+  owner: StockOwner | ""
+): number | null {
+  if (!owner) return null;
+  return byPartId[partId]?.[owner] ?? 0;
+}
+
+/**
+ * Pure reshape of a flat (partId, owner, quantity) row list — as returned by
+ * getPartOwnerAvailability — into a lookup map. Kept here (framework-free,
+ * no "server-only") rather than in the query module itself so it stays
+ * unit-testable in the fast suite; shared by every caller (Parts Request
+ * creation form, 재고관리 list) so the grouping logic exists exactly once.
+ * A missing (partId, owner) key means 0, never "unknown".
+ */
+export function groupPartOwnerAvailability(
+  rows: { partId: string; owner: StockOwner; quantity: number }[]
+): Record<string, Partial<Record<StockOwner, number>>> {
+  const byPartId: Record<string, Partial<Record<StockOwner, number>>> = {};
+  for (const row of rows) {
+    (byPartId[row.partId] ??= {})[row.owner] = row.quantity;
+  }
+  return byPartId;
+}
+
 export const STOCK_TRANSACTION_TYPE_CODES = ["RECEIPT", "USE", "RETURN"] as const;
 export type StockTransactionType = (typeof STOCK_TRANSACTION_TYPE_CODES)[number];
 export const stockTransactionTypeLabels: Record<StockTransactionType, string> = {

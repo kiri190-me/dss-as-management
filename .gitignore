@@ -36,8 +36,23 @@ yarn-error.log*
 .env.*.local
 !.env.example
 
+# Local database safety backups contain database data and must never be
+# committed. Keep the directory available for timestamped pg_dump files.
+backups/
+
+# raw PostgreSQL dump/backup files, wherever they end up in the tree
+*.dump
+*.backup
+
+# local-only agent working notes; never intended for the published repo
+AGENTS.md
+HANDOFF.md
+
 # vercel
 .vercel
+
+# generated purge-job logs (scripts/run-nightly-purge.ps1)
+/logs/
 
 # typescript
 *.tsbuildinfo

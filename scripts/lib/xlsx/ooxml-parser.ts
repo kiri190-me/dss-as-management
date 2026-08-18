@@ -93,12 +93,145 @@ export type ParsedWorksheet = {
   merges: string[];
   hyperlinks: Hyperlink[];
   cells: Record<string, string>;
+  /** Additive audit metadata; `cells` above keeps its historical behavior. */
+  cellMetadata?: Record<string, ParsedCellMetadata>;
 };
+
+export type ParsedCellMetadata = {
+  cellType: string;
+  rawValue: string | null;
+  cachedFormulaValue: string | null;
+  formula: string | null;
+  styleIndex: number | null;
+  /** Optional additive fill evidence used by the Repair Case legacy importer. */
+  fill?: WorkbookFill | null;
+};
+
+export type WorkbookColor = {
+  source: "rgb" | "indexed" | "theme" | "auto";
+  value: string;
+  tint: number | null;
+  resolvedRgb: string | null;
+};
+
+export type WorkbookFill = {
+  fillId: number;
+  patternType: string | null;
+  foreground: WorkbookColor | null;
+  background: WorkbookColor | null;
+  /** Cell-XF evidence is additive and intentionally separate from fill rendering. */
+  cellXfApplyFill?: boolean | null;
+  cellXfId?: number | null;
+};
+
+export type WorkbookStyles = {
+  cellXfsNumFmtIds: number[];
+  cellXfsFillIds: number[];
+  cellXfsApplyFill?: Array<boolean | null>;
+  cellXfsBaseIds?: Array<number | null>;
+  fills: WorkbookFill[];
+  themeColors: string[];
+  customNumberFormats: Record<number, string>;
+};
+
+export function parseWorkbookDateSystem(xml: string): "1900" | "1904" {
+  const workbookPr = xml.match(/<workbookPr\b([^>]*)\/?\s*>/);
+  if (!workbookPr) return "1900";
+  return /\bdate1904="(?:1|true)"/.test(workbookPr[1]) ? "1904" : "1900";
+}
+
+function parseThemeColors(xml: string | null): string[] {
+  if (!xml) return [];
+  const block = xml.match(/<a:clrScheme\b[^>]*>([\s\S]*?)<\/a:clrScheme>/)?.[1];
+  if (!block) return [];
+  return [...block.matchAll(/<a:(?:dk1|lt1|dk2|lt2|accent[1-6]|hlink|folHlink)>[\s\S]*?<(?:a:sysClr|a:srgbClr)\b([^>]*)\/>[\s\S]*?<\/a:(?:dk1|lt1|dk2|lt2|accent[1-6]|hlink|folHlink)>/g)]
+    .map((match) => (match[1].match(/\b(?:lastClr|val)="([0-9A-Fa-f]{6})"/)?.[1] ?? "").toUpperCase());
+}
+
+const INDEXED_COLORS: Readonly<Record<number, string>> = {
+  0: "000000", 1: "FFFFFF", 2: "FF0000", 3: "00FF00", 4: "0000FF", 5: "FFFF00",
+  6: "FF00FF", 7: "00FFFF", 8: "000000", 9: "FFFFFF", 10: "FF0000", 11: "00FF00",
+  12: "0000FF", 13: "FFFF00", 14: "FF00FF", 15: "00FFFF", 41: "00CCFF",
+};
+
+function parseWorkbookColor(attrs: string | undefined, themeColors: string[]): WorkbookColor | null {
+  if (!attrs) return null;
+  const tintValue = attrs.match(/\btint="(-?\d+(?:\.\d+)?)"/)?.[1];
+  const tint = tintValue === undefined ? null : Number(tintValue);
+  const rgb = attrs.match(/\brgb="([0-9A-Fa-f]{6,8})"/)?.[1]?.toUpperCase();
+  if (rgb) return { source: "rgb", value: rgb, tint, resolvedRgb: rgb.slice(-6) };
+  const indexed = attrs.match(/\bindexed="(\d+)"/)?.[1];
+  if (indexed !== undefined) return { source: "indexed", value: indexed, tint, resolvedRgb: INDEXED_COLORS[Number(indexed)] ?? null };
+  const theme = attrs.match(/\btheme="(\d+)"/)?.[1];
+  if (theme !== undefined) return { source: "theme", value: theme, tint, resolvedRgb: themeColors[Number(theme)] || null };
+  if (/\bauto="(?:1|true)"/.test(attrs)) return { source: "auto", value: "true", tint, resolvedRgb: null };
+  return null;
+}
+
+export function parseWorkbookStyles(xml: string | null, themeXml: string | null = null): WorkbookStyles {
+  const themeColors = parseThemeColors(themeXml);
+  if (!xml) return { cellXfsNumFmtIds: [], cellXfsFillIds: [], cellXfsApplyFill: [], cellXfsBaseIds: [], fills: [], themeColors, customNumberFormats: {} };
+
+  const customNumberFormats: Record<number, string> = {};
+  const numFmtRe = /<numFmt\b([^>]*)\/?\s*>/g;
+  let numFmtMatch: RegExpExecArray | null;
+  while ((numFmtMatch = numFmtRe.exec(xml))) {
+    const id = numFmtMatch[1].match(/\bnumFmtId="(\d+)"/);
+    const code = numFmtMatch[1].match(/\bformatCode="([^"]*)"/);
+    if (id && code) customNumberFormats[Number(id[1])] = decodeXmlEntities(code[1]);
+  }
+
+  const cellXfsNumFmtIds: number[] = [];
+  const cellXfsFillIds: number[] = [];
+  const cellXfsApplyFill: Array<boolean | null> = [];
+  const cellXfsBaseIds: Array<number | null> = [];
+  const cellXfs = xml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/);
+  if (cellXfs) {
+    const xfRe = /<xf\b([^>]*)\/?\s*>/g;
+    let xfMatch: RegExpExecArray | null;
+    while ((xfMatch = xfRe.exec(cellXfs[1]))) {
+      const id = xfMatch[1].match(/\bnumFmtId="(\d+)"/);
+      cellXfsNumFmtIds.push(id ? Number(id[1]) : 0);
+      const fillId = xfMatch[1].match(/\bfillId="(\d+)"/);
+      cellXfsFillIds.push(fillId ? Number(fillId[1]) : 0);
+      const applyFill = xfMatch[1].match(/\bapplyFill="([^"]+)"/);
+      cellXfsApplyFill.push(applyFill ? ["1", "true"].includes(applyFill[1]) : null);
+      const xfId = xfMatch[1].match(/\bxfId="(\d+)"/);
+      cellXfsBaseIds.push(xfId ? Number(xfId[1]) : null);
+    }
+  }
+  const fillsBlock = xml.match(/<fills\b[^>]*>([\s\S]*?)<\/fills>/)?.[1] ?? "";
+  const fills = [...fillsBlock.matchAll(/<fill>([\s\S]*?)<\/fill>/g)].map((match, fillId): WorkbookFill => {
+    const body = match[1];
+    const patternType = body.match(/<patternFill\b[^>]*\bpatternType="([^"]+)"/)?.[1] ?? null;
+    return {
+      fillId,
+      patternType,
+      foreground: parseWorkbookColor(body.match(/<fgColor\b([^>]*)\/>/)?.[1], themeColors),
+      background: parseWorkbookColor(body.match(/<bgColor\b([^>]*)\/>/)?.[1], themeColors),
+    };
+  });
+  return { cellXfsNumFmtIds, cellXfsFillIds, cellXfsApplyFill, cellXfsBaseIds, fills, themeColors, customNumberFormats };
+}
+
+export function resolveCellFill(styleIndex: number | null, styles?: WorkbookStyles): WorkbookFill | null {
+  if (styleIndex === null || !styles) return null;
+  const fillId = styles.cellXfsFillIds[styleIndex];
+  const fill = fillId === undefined ? null : styles.fills[fillId] ?? null;
+  return fill
+    ? {
+        ...fill,
+        cellXfApplyFill: styles.cellXfsApplyFill?.[styleIndex] ?? null,
+        cellXfId: styles.cellXfsBaseIds?.[styleIndex] ?? null,
+      }
+    : null;
+}
 
 export function parseWorksheet(
   xml: string,
   sharedStrings: string[],
-  sheetRels: Record<string, string>
+  sheetRels: Record<string, string>,
+  styles?: WorkbookStyles
 ): ParsedWorksheet {
   const dimM = xml.match(/<dimension ref="([^"]+)"/);
   const dimension = dimM ? dimM[1] : null;
@@ -133,18 +266,28 @@ export function parseWorksheet(
   }
 
   const cells: Record<string, string> = {};
+  const cellMetadata: Record<string, ParsedCellMetadata> = {};
   const rowRe = /<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
   let rm: RegExpExecArray | null;
   while ((rm = rowRe.exec(xml))) {
     const rowBody = rm[2];
-    const cRe = /<c r="([A-Z]+\d+)"([^>]*)>([\s\S]*?)<\/c>|<c r="([A-Z]+\d+)"([^>]*)\/>/g;
+    // Self-closing cells must be matched first. Otherwise the opening half
+    // of `<c r="I3"/>` can be mistaken for a normal cell and consume the
+    // following J3 cell through its closing tag.
+    const cRe = /<c r="([A-Z]+\d+)"([^>]*)\/>|<c r="([A-Z]+\d+)"([^>]*)>([\s\S]*?)<\/c>/g;
     let cm: RegExpExecArray | null;
     while ((cm = cRe.exec(rowBody))) {
-      const ref = cm[1] || cm[4];
-      const attrs = cm[2] || cm[5] || "";
-      const body = cm[3] || "";
+      const ref = cm[1] || cm[3];
+      const attrs = cm[2] || cm[4] || "";
+      const body = cm[5] || "";
       const tMatch = attrs.match(/t="([^"]+)"/);
       const type = tMatch ? tMatch[1] : "n";
+      const styleMatch = attrs.match(/\bs="(\d+)"/);
+      const formulaMatch = body.match(/<f(?:\s[^>]*)?>([\s\S]*?)<\/f>|<f(?:\s[^>]*)?\/>/);
+      const valueMatch = body.match(/<v>([\s\S]*?)<\/v>/);
+      const cachedFormulaValue = formulaMatch && valueMatch
+        ? decodeXmlEntities(valueMatch[1])
+        : null;
       let value: string | null = null;
       if (type === "s") {
         const vM = body.match(/<v>([\s\S]*?)<\/v>/);
@@ -165,11 +308,19 @@ export function parseWorksheet(
         const vM = body.match(/<v>([\s\S]*?)<\/v>/);
         if (vM) value = vM[1];
       }
+      cellMetadata[ref] = {
+        cellType: type,
+        rawValue: valueMatch ? decodeXmlEntities(valueMatch[1]) : value,
+        cachedFormulaValue,
+        formula: formulaMatch ? decodeXmlEntities(formulaMatch[1] ?? "") : null,
+        styleIndex: styleMatch ? Number(styleMatch[1]) : null,
+        fill: resolveCellFill(styleMatch ? Number(styleMatch[1]) : null, styles),
+      };
       if (value !== null && value !== "") cells[ref] = value;
     }
   }
 
-  return { dimension, merges, hyperlinks, cells };
+  return { dimension, merges, hyperlinks, cells, cellMetadata };
 }
 
 // ---- drawing (shapes / connectors / pictures / groups) ----

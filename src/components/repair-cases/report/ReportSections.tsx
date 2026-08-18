@@ -102,6 +102,7 @@ export function BasicInfoSection({
       </div>
       <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
         <Field label="접수번호" value={repairCase.intakeNumber} />
+        <Field label="보고서번호" value={repairCase.legacyReportNumber} />
         <Field label="인수일" value={formatReportDateOnly(repairCase.receivedAt)} />
         <Field label="접수 등록 일시" value={formatReportDateTime(repairCase.createdAt)} />
         <Field label="담당 엔지니어" value={assignedEngineerName} />
@@ -136,7 +137,6 @@ export function ProductInfoSection({ product }: { product: RepairCaseReportData[
         <Field label="Model" value={product.modelName} />
         <Field label="L/N" value={product.lotNumber} />
         <Field label="S/N" value={product.serialNumber} />
-        <Field label="Part Number" value={product.partNumber} />
       </dl>
     </section>
   );

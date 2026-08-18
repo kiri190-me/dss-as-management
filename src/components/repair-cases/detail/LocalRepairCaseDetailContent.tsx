@@ -42,6 +42,7 @@ export default function LocalRepairCaseDetailContent({
         actingUser={actingUser}
         referenceData={null}
         partRequestData={null}
+        derivedServiceSummary={null}
       />
     </div>
   );

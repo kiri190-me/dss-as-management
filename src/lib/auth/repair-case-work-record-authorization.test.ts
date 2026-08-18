@@ -36,13 +36,16 @@ test("SALES and INVENTORY_MANAGER may never create, even unassigned/unlocked", (
   }
 });
 
-test("the lock check is unconditional for create — no role bypass, including SUPER_ADMIN", () => {
-  for (const role of ALL_ROLES) {
+test("shipment-lock removal policy: isCaseLocked no longer blocks create, including on an already-shipped case", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
     assert.equal(
       canCreateWorkRecord(role, { isAssignedToCase: true, isCaseLocked: true }),
-      false,
-      `${role} must be blocked on a locked case`
+      true,
+      `${role} must stay able to create on a shipped case`
     );
+  }
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canCreateWorkRecord(role, { isAssignedToCase: true, isCaseLocked: true }), false, `${role} is still denied by role, not by lock`);
   }
 });
 
@@ -56,8 +59,8 @@ test("only SUPER_ADMIN and ADMIN may invalidate, never AS_ENGINEER even for thei
   assert.equal(canInvalidateWorkRecord("INVENTORY_MANAGER", { isCaseLocked: false }), false);
 });
 
-test("the lock check is unconditional for invalidate — no hidden SUPER_ADMIN bypass", () => {
+test("shipment-lock removal policy: isCaseLocked no longer blocks invalidate, including on an already-shipped case", () => {
   for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
-    assert.equal(canInvalidateWorkRecord(role, { isCaseLocked: true }), false, `${role} must be blocked on a locked case`);
+    assert.equal(canInvalidateWorkRecord(role, { isCaseLocked: true }), true, `${role} must stay able to invalidate on a shipped case`);
   }
 });

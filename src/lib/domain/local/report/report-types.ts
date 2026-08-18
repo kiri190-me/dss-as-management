@@ -183,6 +183,7 @@ export type RepairCaseReportData = {
   repairCase: {
     id: string;
     intakeNumber: string;
+    legacyReportNumber: string | null;
     receivedAt: string;
     createdAt: string;
     currentStatus: RepairStatus;

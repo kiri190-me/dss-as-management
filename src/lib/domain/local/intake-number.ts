@@ -4,6 +4,21 @@ import type { LocalRepairCase } from "./local-types";
 const INTAKE_NUMBER_PATTERN = /^D(\d{2})(\d{2})(\d{2})$/;
 
 /**
+ * Strict format check for a USER-TYPED intake-number override — matches
+ * the database's own `repair_cases_intake_number_format` CHECK constraint
+ * exactly (month must be 01-12), unlike the looser INTAKE_NUMBER_PATTERN
+ * above (used only to PARSE numbers this module already generated itself,
+ * where a stricter month check was never needed). Shared by both the local
+ * and database-mode intake paths so an override is rejected with the same
+ * rule everywhere, before ever reaching a DB round-trip.
+ */
+const INTAKE_NUMBER_STRICT_PATTERN = /^D[0-9]{2}(0[1-9]|1[0-2])[0-9]{2}$/;
+
+export function isValidIntakeNumberFormat(value: string): boolean {
+  return INTAKE_NUMBER_STRICT_PATTERN.test(value);
+}
+
+/**
  * "D" + YY + MM + 2자리 월별 순번 형식이다. 순번은 선택한 인수일의 연/월을
  * 기준으로 계산하며(데모 기준일이 아니라 폼에서 고른 날짜), 매달 최대
  * 99건까지만 허용한다.
@@ -30,6 +45,11 @@ function maxSequenceForMonth(intakeNumbers: Iterable<string>, yy: string, mm: st
 
 function allIntakeNumbers(localCases: LocalRepairCase[]): string[] {
   return [...mockRepairCases.map((c) => c.intakeNumber), ...localCases.map((c) => c.intakeNumber)];
+}
+
+/** Local-mode duplicate check for a manually-typed intake-number override — mirrors the database's unique index (repair_cases_intake_number_unique), checked against the same mock+local case set the auto-generator itself already consults. */
+export function isIntakeNumberTaken(intakeNumber: string, localCases: LocalRepairCase[]): boolean {
+  return allIntakeNumbers(localCases).includes(intakeNumber);
 }
 
 /**

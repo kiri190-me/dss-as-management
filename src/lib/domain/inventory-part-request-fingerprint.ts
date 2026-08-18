@@ -53,7 +53,7 @@ function canonicalJson(input: FingerprintPayload): string {
         operationType: input.operationType,
         repairCaseId: input.payload.repairCaseId,
         note: input.payload.note,
-        items: input.payload.items.map((i) => ({ partId: i.partId, quantity: i.quantity, note: i.note })),
+        items: input.payload.items.map((i) => ({ partId: i.partId, quantity: i.quantity, owner: i.owner, note: i.note })),
       });
     case "ISSUE":
       return JSON.stringify({

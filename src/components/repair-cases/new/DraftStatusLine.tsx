@@ -1,7 +1,7 @@
-export default function DraftStatusLine({ savedAtLabel }: { savedAtLabel: string | null }) {
+export default function DraftStatusLine() {
   return (
-    <p aria-live="polite" className="text-xs text-zinc-500 dark:text-zinc-400">
-      {savedAtLabel ? `마지막 저장: ${savedAtLabel}` : "아직 저장된 임시 작성 내용이 없습니다."}
+    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      작성 중인 내용은 저장되지 않습니다 — 새로고침하거나 이 페이지를 벗어나면 초기화됩니다.
     </p>
   );
 }

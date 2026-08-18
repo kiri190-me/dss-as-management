@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { repairCases } from "./repair-cases";
 import { parts } from "./inventory";
+import { stockOwnerEnum } from "./inventory-enums";
 import { users } from "./users";
 
 /**
@@ -68,9 +69,19 @@ export const inventoryPartRequests = pgTable(
   "inventory_part_requests",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repairCaseId: uuid("repair_case_id")
-      .notNull()
-      .references(() => repairCases.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (repair-case permanent-delete schema
+    // foundation checkpoint) — was NOT NULL + RESTRICT, which made a
+    // repair_cases hard-delete impossible at the DB level. This row (and
+    // its child items/issues/history rows, none of which reference
+    // repair_cases directly and are therefore entirely unaffected by this
+    // column going NULL) is inventory-accounting-relevant and must outlive
+    // the case's own hard-delete. Existing rows are untouched by this —
+    // only a future repair_cases hard-delete ever nulls it. Same proven
+    // pattern as repair_case_flowchart_edit_history.flowchart_id
+    // (migration 0026).
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, {
+      onDelete: "set null",
+    }),
     requestedByUserId: uuid("requested_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -92,10 +103,13 @@ export const inventoryPartRequests = pgTable(
 
 /**
  * Request line — part-based (plan §4): the engineer requests a PART, never a
- * specific owner/location bucket. The inventory manager picks the concrete
- * part_stock_balances row at issue time (see stockTransactions). At most one
- * line per part per request (UNIQUE below) — createPartRequest merges
- * duplicate part selections in the cart before insert.
+ * specific owner/location *bucket*. The inventory manager still picks the
+ * concrete part_stock_balances row (owner + location) at issue time (see
+ * stockTransactions) — `owner` below is a request-time ownership
+ * *preference* only, a separate, coarser concept from that issue-time
+ * bucket choice. At most one line per part per request (UNIQUE below) —
+ * createPartRequest merges duplicate part selections in the cart before
+ * insert.
  *
  * requestedQuantity/partId are immutable after insert. issuedQuantity is a
  * cached, system-maintained-only projection — never an ordinary UI edit
@@ -103,6 +117,15 @@ export const inventoryPartRequests = pgTable(
  * stock_transactions: the authoritative issued amount is always
  * reconstructable as SUM(-quantity_delta) over stock_transactions rows
  * linked to this item via request_item_id. No ordinary delete path exists.
+ *
+ * `owner` — Parts Request 소유구분 checkpoint. Nullable at the DB level and
+ * deliberately never backfilled/defaulted: every request item that existed
+ * before this column was added stays NULL forever (displayed as "미지정"),
+ * a truthful "we don't know" rather than a guessed value. NOT NULL is
+ * enforced only at the application/server-validation layer for newly
+ * created request items (see repair-case-work-record precedent's
+ * "never guess" convention) — never a DB-level constraint, so historical
+ * rows remain valid without any migration-time UPDATE.
  */
 export const inventoryPartRequestItems = pgTable(
   "inventory_part_request_items",
@@ -116,6 +139,7 @@ export const inventoryPartRequestItems = pgTable(
       .references(() => parts.id, { onDelete: "restrict" }),
     requestedQuantity: integer("requested_quantity").notNull(),
     issuedQuantity: integer("issued_quantity").notNull().default(0),
+    owner: stockOwnerEnum("owner"),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

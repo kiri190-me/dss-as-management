@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { ReactFlowInstance } from "@xyflow/react";
 import ProcedureFlowGraph, { type LayoutMode } from "./ProcedureFlowGraph";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 import NodePropertyPanel from "./editor/NodePropertyPanel";
@@ -11,17 +12,43 @@ import CreateEdgePanel from "./editor/CreateEdgePanel";
 import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
 import UndoRedoControls from "./editor/UndoRedoControls";
-import type { ProcedureTemplateForEditor, DraftParentComparisonResult } from "@/lib/db/queries/procedure-template-editor";
+import type { ProcedureTemplateForEditor, DraftParentComparisonResult, EditorNodeRow, EditorEdgeRow } from "@/lib/db/queries/procedure-template-editor";
 import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
-import { resolveEffectiveNodePosition } from "@/lib/graph-editor-core/layout";
-import { computeUnsavedLayoutNodeIds, computeUnsavedEdgeRouteIds, computeEditorSaveState } from "@/lib/domain/procedure-editor-client-state";
-import { saveProcedureTemplateLayoutAction, validateProcedureTemplateAction } from "@/lib/server/actions/procedure-template-editor";
+import { resolveEffectiveNodePosition, resolveEffectiveNodeDimensions, computeStraightenedConnectedNodePosition } from "@/lib/graph-editor-core/layout";
+import { NODE_VISUAL_CONFIG, getNodeChipVisual, computeNodeDimensions } from "@/lib/domain/procedure-visual-language";
+import {
+  saveProcedureTemplateLayoutAction,
+  validateProcedureTemplateAction,
+  updateProcedureTemplateNodeAction,
+  updateProcedureTemplateEdgeAction,
+} from "@/lib/server/actions/procedure-template-editor";
 import { renameTechnicalProcedureTemplateAction } from "@/lib/server/actions/procedure-templates";
 import { undoProcedureTemplateChangeAction, redoProcedureTemplateChangeAction } from "@/lib/server/actions/procedure-template-undo-redo";
 import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
-import { addWaypointAtDefaultPosition, insertWaypointAtSegment, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import { addWaypointAtDefaultPosition, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import {
+  mergeProcedureNodeForRender,
+  mergeProcedureEdgeForRender,
+  computeDirtyProcedureNodeFieldEntries,
+  computeDirtyProcedureEdgeFieldEntries,
+  computeDirtyProcedurePositionNodeIds,
+  computeDirtyProcedureRouteEdgeIds,
+  planProcedureSaveSteps,
+  runProcedureSaveSequence,
+  succeededProcedureNodeFieldIds,
+  succeededProcedureEdgeFieldIds,
+  succeededProcedureLayoutNodeIds,
+  succeededProcedureRouteEdgeIds,
+  type ProcedureNodeFieldDraft,
+  type ProcedureEdgeFieldDraft,
+  type ProcedureServerNodeSnapshot,
+  type ProcedureServerEdgeSnapshot,
+  type ProcedureSaveStep,
+  type ProcedureSaveStepResult,
+  type Position,
+} from "@/lib/domain/procedure-editor-save-state";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode";
 
@@ -34,6 +61,43 @@ type RightPanelTab = "properties" | "validation" | "history" | "compare" | "crea
  * focused forms (node/edge property, create-connection); this shell only
  * owns layout drag-batching (the one genuinely "continuous" editing
  * surface) and which panel is showing.
+ *
+ * ================================ SAVE CONTRACT (5C-6D-1C) ================================
+ * Adopts the same live-preview + explicit-global-Save model the Repair
+ * Case Flowchart editor already established, but SCOPED to exactly the
+ * safe-to-defer fields audited in 5C-6D-1B: node title/description/
+ * instructions/sortOrder/isActive, node position (drag only — "상대 위치로
+ * 이동" stays its own immediate action, see NodePropertyPanel, per 1D's
+ * scope), edge branchType/branchLabel, edge route (waypoints). STRUCTURAL/
+ * REVIEWED operations — node type change, edge retarget, edge/node create,
+ * edge/node delete, node-on-edge insertion, validation, publish/version,
+ * Undo/Redo itself — remain their own immediate, separately-reasoned/
+ * confirmed actions, entirely untouched by this contract.
+ *
+ * SERVER BASELINE (template.nodes/edges) + LOCAL DRAFT OVERRIDES
+ * (pendingNodeFieldDraftsById / pendingLayoutMoves / pendingEdgeFieldDraftsById /
+ * pendingEdgeRouteMoves) = RENDERED GRAPH (renderedNodes/renderedEdges,
+ * via procedure-editor-save-state.ts's merge helpers — used directly, not
+ * duplicated here). Editing a safe field updates the canvas immediately;
+ * no server call happens until the global [저장] button runs.
+ *
+ * PARTIAL-FAILURE REBASE (the one piece with no Case Flowchart precedent
+ * to copy — see this checkpoint's own explicit requirement): a step that
+ * succeeds mid-sequence must stop being "pending" (so a retry never
+ * re-sends it, which would create a spurious duplicate history row — see
+ * updateProcedureTemplateNode's own lack of a no-op guard) while STILL
+ * rendering its just-persisted value, even though no router.refresh() has
+ * happened yet (this screen deliberately avoids refreshing on anything
+ * short of full success — see handleGlobalSave's own doc comment).
+ * justSaved{NodeFields,Positions,EdgeFields,Routes}ById hold exactly that:
+ * a shadow, folded into the SAME baseline serverNodesById/serverEdgesById
+ * that dirty-detection and rendering both already use, so no new merge
+ * logic is invented — mergeProcedureNodeForRender/mergeProcedureEdgeForRender
+ * are simply called twice (once to fold the shadow into the baseline, once
+ * to fold the current pending draft on top). Cleared automatically the
+ * moment a real refresh brings a fresh template.updatedAt (same adjust-
+ * state-during-render convention currentUpdatedAt already used).
+ * ============================================================================================
  */
 export default function ProcedureTemplateEditorScreen({
   template,
@@ -68,12 +132,23 @@ export default function ProcedureTemplateEditorScreen({
   // currentUpdatedAt can also be advanced directly by a successful
   // mutation (handleSaved), so it can't just be derived from the prop on
   // every render; it only needs to resync when the prop itself changes
-  // (e.g. after router.refresh() brings a fresh template).
+  // (e.g. after router.refresh() brings a fresh template). The four
+  // justSaved* shadows (5C-6D-1C) are cleared in the same block — the
+  // moment a real refresh arrives, whatever they were shadowing is now
+  // genuinely reflected in `template` itself, so the shadow is redundant.
   const [prevTemplateUpdatedAt, setPrevTemplateUpdatedAt] = useState(template.updatedAt);
   const [currentUpdatedAt, setCurrentUpdatedAt] = useState(template.updatedAt);
+  const [justSavedNodeFieldsById, setJustSavedNodeFieldsById] = useState<Map<string, ProcedureNodeFieldDraft>>(new Map());
+  const [justSavedPositionsById, setJustSavedPositionsById] = useState<Map<string, Position>>(new Map());
+  const [justSavedEdgeFieldsById, setJustSavedEdgeFieldsById] = useState<Map<string, ProcedureEdgeFieldDraft>>(new Map());
+  const [justSavedRoutesById, setJustSavedRoutesById] = useState<Map<string, RoutePoint[] | null>>(new Map());
   if (template.updatedAt !== prevTemplateUpdatedAt) {
     setPrevTemplateUpdatedAt(template.updatedAt);
     setCurrentUpdatedAt(template.updatedAt);
+    setJustSavedNodeFieldsById(new Map());
+    setJustSavedPositionsById(new Map());
+    setJustSavedEdgeFieldsById(new Map());
+    setJustSavedRoutesById(new Map());
   }
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(navigationTarget.nodeId);
@@ -89,6 +164,34 @@ export default function ProcedureTemplateEditorScreen({
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
+
+  // 5C-6D-1D — the live React Flow instance, captured once via
+  // ProcedureFlowGraph's onInstanceReady (same mechanism/timing as
+  // CaseFlowchartGraph's own onInstanceReady). A ref, not state — the
+  // instance itself never changes after mount and must never trigger a
+  // re-render on its own. Real measured node dimensions come from its
+  // `getInternalNode(id)?.measured`, used by NodePropertyPanel's and
+  // CreateNodePanel's relative-position math so Y-center/X-column
+  // alignment is based on what's actually on screen (a description/
+  // subtitle line the presentation-only computeNodeDimensions estimate
+  // never accounts for) rather than a second, potentially-drifting size
+  // estimator — ported directly from CaseFlowchartEditorScreen's own
+  // resolveMeasuredNodeDimensions/estimatedNodeDimensions/
+  // resolveNodeDimensions trio, not reinvented here.
+  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+
+  function resolveMeasuredNodeDimensions(nodeId: string): { width?: number; height?: number } | null {
+    return reactFlowInstanceRef.current?.getInternalNode(nodeId)?.measured ?? null;
+  }
+
+  function estimatedNodeDimensions(n: EditorNodeRow) {
+    return computeNodeDimensions({ title: n.title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(n.nodeType).semanticType].shape });
+  }
+
+  /** THE single, shared effective-dimension resolver (measured-first, estimate-fallback) — passed down to NodePropertyPanel and CreateNodePanel identically, so both read the same runtime geometry. */
+  function resolveNodeDimensions(n: EditorNodeRow): { width: number; height: number } {
+    return resolveEffectiveNodeDimensions(resolveMeasuredNodeDimensions(n.id), estimatedNodeDimensions(n));
+  }
 
   // Same sourceWorksheet+sourceShapeId matching technique
   // getProcedureTemplateDetail's openIssuesByNodeId already uses — the
@@ -111,25 +214,26 @@ export default function ProcedureTemplateEditorScreen({
     return result;
   }, [template.nodes, template.unresolvedIssues]);
 
+  // ---- position (drag) pending state — UNCHANGED from before 1C, per this
+  // checkpoint's own scope boundary ("if position is already pending
+  // today, preserve its existing behavior"; the relative-position BUTTON
+  // in NodePropertyPanel stays its own immediate action until 1D). ----
   const savedLayoutPositions = useMemo(() => {
     const map = new Map<string, { x: number; y: number }>();
     for (const n of template.nodes) map.set(n.id, resolveEffectiveNodePosition(n, "USER"));
     return map;
   }, [template.nodes]);
-  const [pendingLayoutMoves, setPendingLayoutMoves] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [pendingLayoutMoves, setPendingLayoutMoves] = useState<Map<string, Position>>(new Map());
   const workingLayoutPositions = useMemo(() => {
     const map = new Map(savedLayoutPositions);
     for (const [id, pos] of pendingLayoutMoves) map.set(id, pos);
     return map;
   }, [savedLayoutPositions, pendingLayoutMoves]);
-  const unsavedLayoutNodeIds = useMemo(() => computeUnsavedLayoutNodeIds(savedLayoutPositions, workingLayoutPositions), [savedLayoutPositions, workingLayoutPositions]);
 
   // Phase 4B — 사용자 배치 manual edge-route (waypoint) pending state, the
   // edge-level sibling of pendingLayoutMoves above. A map *entry with
   // `null`* means "explicitly restored to automatic routing this session"
-  // (distinct from *no entry*, meaning "untouched") — both
-  // computeUnsavedEdgeRouteIds and the save payload below rely on that
-  // distinction.
+  // (distinct from *no entry*, meaning "untouched").
   const savedEdgeRoutes = useMemo(() => {
     const map = new Map<string, RoutePoint[] | null>();
     for (const e of template.edges) map.set(e.id, e.userRoutePoints && e.userRoutePoints.length > 0 ? e.userRoutePoints : null);
@@ -141,28 +245,152 @@ export default function ProcedureTemplateEditorScreen({
     for (const [id, points] of pendingEdgeRouteMoves) map.set(id, points);
     return map;
   }, [savedEdgeRoutes, pendingEdgeRouteMoves]);
-  const unsavedEdgeRouteIds = useMemo(() => computeUnsavedEdgeRouteIds(savedEdgeRoutes, workingEdgeRoutes), [savedEdgeRoutes, workingEdgeRoutes]);
   const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
 
-  const [isSavingLayout, setIsSavingLayout] = useState(false);
-  const [layoutSaveFailed, setLayoutSaveFailed] = useState(false);
-  const [layoutErrorMessage, setLayoutErrorMessage] = useState<string | null>(null);
-  const saveState = computeEditorSaveState({ isSaving: isSavingLayout, lastSaveFailed: layoutSaveFailed, unsavedNodeIds: new Set(), unsavedEdgeIds: new Set(), unsavedLayoutNodeIds, unsavedEdgeRouteIds });
-  const hasPendingLayoutChanges = unsavedLayoutNodeIds.size > 0 || unsavedEdgeRouteIds.size > 0;
+  // ---- 5C-6D-1C: node/edge SAFE-FIELD pending drafts ----
+  const [pendingNodeFieldDraftsById, setPendingNodeFieldDraftsById] = useState<Map<string, ProcedureNodeFieldDraft>>(new Map());
+  const [pendingEdgeFieldDraftsById, setPendingEdgeFieldDraftsById] = useState<Map<string, ProcedureEdgeFieldDraft>>(new Map());
+  /** The edge "검토자 메모" — a write-only per-save audit annotation (see procedure-editor-save-state.ts's own doc comment on why it's excluded from ProcedureEdgeFieldDraft entirely). Lifted here, alongside pendingEdgeFieldDraftsById, so it survives an edge-selection change (EdgePropertyPanel remounts via `key=`) until the deferred EDGE_FIELDS step actually runs. */
+  const [pendingEdgeSaveNoteById, setPendingEdgeSaveNoteById] = useState<Map<string, string>>(new Map());
 
-  // Unsaved-navigation guard (Phase 4A, widened Phase 4B) — covers browser
-  // close/refresh; the editor's own "나가기" link separately confirms via
-  // window.confirm before navigating away in-app. Does not intercept every
-  // possible in-app link (e.g. the global sidebar) — see the final
-  // report's documented limitation.
+  const [globalSaveStatus, setGlobalSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
+
+  // "저장 완료" is a transient confirmation, not a permanent state — reverts
+  // to idle on its own so the button doesn't get stuck claiming a save
+  // that already happened minutes ago (same convention the Repair Case
+  // Flowchart editor's own global Save button uses).
+  useEffect(() => {
+    if (globalSaveStatus !== "saved") return;
+    const timer = setTimeout(() => setGlobalSaveStatus("idle"), 2500);
+    return () => clearTimeout(timer);
+  }, [globalSaveStatus]);
+
+  // ---- rendered graph (server baseline + justSaved shadow + pending drafts, merged) ----
+
+  const serverNodesById = useMemo(() => {
+    const map = new Map<string, ProcedureServerNodeSnapshot>();
+    for (const n of template.nodes) {
+      const effectivePos = resolveEffectiveNodePosition(n, "USER");
+      const raw: ProcedureServerNodeSnapshot = {
+        id: n.id,
+        title: n.title,
+        description: n.description,
+        instructions: n.instructions,
+        sortOrder: n.sortOrder,
+        isActive: n.isActive,
+        positionX: effectivePos.x,
+        positionY: effectivePos.y,
+      };
+      map.set(n.id, mergeProcedureNodeForRender(raw, justSavedNodeFieldsById.get(n.id), justSavedPositionsById.get(n.id)));
+    }
+    return map;
+  }, [template.nodes, justSavedNodeFieldsById, justSavedPositionsById]);
+
+  const serverEdgesById = useMemo(() => {
+    const map = new Map<string, ProcedureServerEdgeSnapshot>();
+    for (const e of template.edges) {
+      const raw: ProcedureServerEdgeSnapshot = {
+        id: e.id,
+        branchType: e.branchType,
+        branchLabel: e.branchLabel,
+        routePoints: e.userRoutePoints && e.userRoutePoints.length > 0 ? e.userRoutePoints : null,
+      };
+      map.set(e.id, mergeProcedureEdgeForRender(raw, justSavedEdgeFieldsById.get(e.id), justSavedRoutesById.get(e.id)));
+    }
+    return map;
+  }, [template.edges, justSavedEdgeFieldsById, justSavedRoutesById]);
+
+  function nodeFieldDraft(nodeId: string): ProcedureNodeFieldDraft {
+    const pending = pendingNodeFieldDraftsById.get(nodeId);
+    if (pending) return pending;
+    const server = serverNodesById.get(nodeId);
+    return { title: server?.title ?? "", description: server?.description ?? "", instructions: server?.instructions ?? "", sortOrder: server?.sortOrder ?? 0, isActive: server?.isActive ?? true };
+  }
+  function updateNodeFieldDraft(nodeId: string, patch: Partial<ProcedureNodeFieldDraft>) {
+    setPendingNodeFieldDraftsById((prev) => {
+      const next = new Map(prev);
+      next.set(nodeId, { ...nodeFieldDraft(nodeId), ...patch });
+      return next;
+    });
+  }
+
+  function edgeFieldDraft(edgeId: string): ProcedureEdgeFieldDraft {
+    const pending = pendingEdgeFieldDraftsById.get(edgeId);
+    if (pending) return pending;
+    const server = serverEdgesById.get(edgeId);
+    return { branchType: server?.branchType ?? "DEFAULT", branchLabel: server?.branchLabel ?? "" };
+  }
+  function updateEdgeFieldDraft(edgeId: string, patch: Partial<ProcedureEdgeFieldDraft>) {
+    setPendingEdgeFieldDraftsById((prev) => {
+      const next = new Map(prev);
+      next.set(edgeId, { ...edgeFieldDraft(edgeId), ...patch });
+      return next;
+    });
+  }
+  function edgeSaveNote(edgeId: string): string {
+    return pendingEdgeSaveNoteById.get(edgeId) ?? "";
+  }
+  function updateEdgeSaveNote(edgeId: string, note: string) {
+    setPendingEdgeSaveNoteById((prev) => {
+      const next = new Map(prev);
+      next.set(edgeId, note);
+      return next;
+    });
+  }
+
+  const dirtyNodeFieldEntries = computeDirtyProcedureNodeFieldEntries(pendingNodeFieldDraftsById, serverNodesById);
+  const dirtyEdgeFieldEntries = computeDirtyProcedureEdgeFieldEntries(pendingEdgeFieldDraftsById, serverEdgesById);
+  const dirtyPositionNodeIds = computeDirtyProcedurePositionNodeIds(pendingLayoutMoves, serverNodesById);
+  const dirtyRouteEdgeIds = computeDirtyProcedureRouteEdgeIds(pendingEdgeRouteMoves, serverEdgesById);
+  const totalPendingCount = dirtyNodeFieldEntries.length + dirtyEdgeFieldEntries.length + dirtyPositionNodeIds.length + dirtyRouteEdgeIds.length;
+  const hasAnyPendingChanges = totalPendingCount > 0;
+
+  /** Full EditorNodeRow rows, safe-to-defer fields overridden by live drafts — passed to ProcedureFlowGraph/panels so there is exactly one rendered graph, never a separate copy for the canvas and another for Save. userPositionX/Y is only ever touched when THIS session actually has a position override pending or just-saved for that node — otherwise the original row's own value (null, or a real prior override) passes through untouched, preserving SOURCE-mode/layered-layout fallback behavior for every node this session never dragged. */
+  const renderedNodes: EditorNodeRow[] = useMemo(
+    () =>
+      template.nodes.map((n) => {
+        const baseline = serverNodesById.get(n.id)!;
+        const merged = mergeProcedureNodeForRender(baseline, pendingNodeFieldDraftsById.get(n.id), pendingLayoutMoves.get(n.id));
+        const hasSessionPositionOverride = pendingLayoutMoves.has(n.id) || justSavedPositionsById.has(n.id);
+        return {
+          ...n,
+          title: merged.title,
+          description: merged.description,
+          instructions: merged.instructions,
+          sortOrder: merged.sortOrder,
+          isActive: merged.isActive,
+          userPositionX: hasSessionPositionOverride ? merged.positionX : n.userPositionX,
+          userPositionY: hasSessionPositionOverride ? merged.positionY : n.userPositionY,
+        };
+      }),
+    [template.nodes, serverNodesById, pendingNodeFieldDraftsById, pendingLayoutMoves, justSavedPositionsById]
+  );
+
+  const renderedEdges: EditorEdgeRow[] = useMemo(
+    () =>
+      template.edges.map((e) => {
+        const baseline = serverEdgesById.get(e.id)!;
+        const merged = mergeProcedureEdgeForRender(baseline, pendingEdgeFieldDraftsById.get(e.id), pendingEdgeRouteMoves.get(e.id));
+        return { ...e, branchType: merged.branchType, branchLabel: merged.branchLabel, userRoutePoints: merged.routePoints };
+      }),
+    [template.edges, serverEdgesById, pendingEdgeFieldDraftsById, pendingEdgeRouteMoves]
+  );
+
+  // Unsaved-navigation guard (Phase 4A, widened Phase 4B, extended 5C-6D-1C
+  // to every safe-to-defer category, not just layout/route) — covers
+  // browser close/refresh; the editor's own "나가기" link separately
+  // confirms via window.confirm before navigating away in-app. Does not
+  // intercept every possible in-app link (e.g. the global sidebar) — see
+  // the final report's documented limitation.
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (!hasPendingLayoutChanges) return;
+      if (!hasAnyPendingChanges) return;
       e.preventDefault();
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasPendingLayoutChanges]);
+  }, [hasAnyPendingChanges]);
 
   // A waypoint selection only ever makes sense for the currently-selected
   // edge — switching (or clearing) the selected edge always clears it, so
@@ -191,13 +419,20 @@ export default function ProcedureTemplateEditorScreen({
   // these buttons, regardless of canEdit. canUndo/canRedo come from
   // historyView (server-derived from the live 0018 fold model on every
   // load/refresh) — never client-memory state that could diverge from the
-  // server, and correctly reflects reality again after a refresh or
-  // re-login since it's re-read from the DB every time.
+  // server. 5C-6D-1C adds a client-side guard on TOP of that: Undo/Redo is
+  // additionally disabled whenever any safe-to-defer draft is pending,
+  // since applying a historical Undo/Redo underneath an in-progress,
+  // unsaved local edit would silently rebase that edit against a state the
+  // user never asked it to apply to. No such guard existed before this
+  // checkpoint (audited directly — handleUndo/handleRedo had no
+  // hasPendingLayoutChanges check at all); this is a genuinely new, but
+  // explicitly requested, safety behavior, not a preserved one.
   const [isUndoing, setIsUndoing] = useState(false);
   const [isRedoing, setIsRedoing] = useState(false);
   const [undoRedoError, setUndoRedoError] = useState<string | null>(null);
 
   async function handleUndo() {
+    if (hasAnyPendingChanges) return;
     setIsUndoing(true);
     setUndoRedoError(null);
     const result = await undoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
@@ -210,6 +445,7 @@ export default function ProcedureTemplateEditorScreen({
   }
 
   async function handleRedo() {
+    if (hasAnyPendingChanges) return;
     setIsRedoing(true);
     setUndoRedoError(null);
     const result = await redoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
@@ -222,11 +458,46 @@ export default function ProcedureTemplateEditorScreen({
   }
 
   function handleNodeDeleted(newUpdatedAt: string) {
+    if (selectedNodeId) {
+      setPendingNodeFieldDraftsById((prev) => {
+        if (!prev.has(selectedNodeId)) return prev;
+        const next = new Map(prev);
+        next.delete(selectedNodeId);
+        return next;
+      });
+      setPendingLayoutMoves((prev) => {
+        if (!prev.has(selectedNodeId)) return prev;
+        const next = new Map(prev);
+        next.delete(selectedNodeId);
+        return next;
+      });
+    }
     setSelectedNodeId(null);
     handleSaved(newUpdatedAt);
   }
   function handleEdgeDeleted(newUpdatedAt: string) {
+    if (selectedEdgeId) {
+      setPendingEdgeFieldDraftsById((prev) => {
+        if (!prev.has(selectedEdgeId)) return prev;
+        const next = new Map(prev);
+        next.delete(selectedEdgeId);
+        return next;
+      });
+      setPendingEdgeRouteMoves((prev) => {
+        if (!prev.has(selectedEdgeId)) return prev;
+        const next = new Map(prev);
+        next.delete(selectedEdgeId);
+        return next;
+      });
+      setPendingEdgeSaveNoteById((prev) => {
+        if (!prev.has(selectedEdgeId)) return prev;
+        const next = new Map(prev);
+        next.delete(selectedEdgeId);
+        return next;
+      });
+    }
     setSelectedEdgeId(null);
+    setSelectedWaypointIndex(null);
     handleSaved(newUpdatedAt);
   }
 
@@ -269,51 +540,177 @@ export default function ProcedureTemplateEditorScreen({
     handleSaved(result.updatedAt);
   }
 
-  /**
-   * Phase 4B — one combined save behind the single "저장" button: node
-   * position moves and manual edge-route changes go in the same
-   * saveProcedureTemplateLayoutAction call, so they commit or fail
-   * together (see saveProcedureTemplateLayout's own doc comment for the
-   * transactional guarantee this relies on). A failed save intentionally
-   * never clears either pending map — the reviewer's in-progress work must
-   * survive a rejected save (e.g. STALE_REVISION) so nothing is lost.
-   */
-  async function handleSaveLayout() {
-    if (pendingLayoutMoves.size === 0 && pendingEdgeRouteMoves.size === 0) return;
-    setIsSavingLayout(true);
-    setLayoutErrorMessage(null);
-    const positions = [...pendingLayoutMoves].map(([nodeId, pos]) => ({ nodeId, x: pos.x, y: pos.y }));
-    const edgeRoutes: EdgeRouteInput[] = [...pendingEdgeRouteMoves].map(([edgeId, points]) => ({ edgeId, points }));
-    const result = await saveProcedureTemplateLayoutAction({ templateId: template.id, positions, edgeRoutes, expectedTemplateUpdatedAt: currentUpdatedAt });
-    setIsSavingLayout(false);
-    if (!result.ok) {
-      setLayoutSaveFailed(true);
-      setLayoutErrorMessage(result.message);
-      return;
-    }
-    setLayoutSaveFailed(false);
-    setPendingLayoutMoves(new Map());
-    setPendingEdgeRouteMoves(new Map());
-    setSelectedWaypointIndex(null);
-    handleSaved(result.updatedAt);
-  }
-
-  function handleDiscardLayout() {
-    // Client-only — nothing was ever persisted, so there is no server call
-    // and no DISCARD_DRAFT_CHANGES audit row (that action type is reserved
-    // for a case where server state actually changed, which never applies
-    // here).
-    setPendingLayoutMoves(new Map());
-    setPendingEdgeRouteMoves(new Map());
-    setSelectedWaypointIndex(null);
-    setLayoutSaveFailed(false);
-    setLayoutErrorMessage(null);
-  }
-
-  /** Reads a route's current *working* points (pending override if this session touched it, else the last-saved value) — the one baseline every waypoint mutation below builds its next array from. */
+  /** Reads a route's current *working* points (pending override if this session touched it, else the last-saved value) — the one baseline every waypoint mutation below builds its next array from. Unchanged from before 1C. */
   function currentWorkingRoutePoints(pending: Map<string, RoutePoint[] | null>, edgeId: string): RoutePoint[] {
     const points = pending.has(edgeId) ? pending.get(edgeId) : savedEdgeRoutes.get(edgeId);
     return points ?? [];
+  }
+
+  /**
+   * Maps each ProcedureSaveStep to its EXISTING server action (5C-6D-1C
+   * §10 audit): NODE_FIELDS -> updateProcedureTemplateNodeAction,
+   * EDGE_FIELDS -> updateProcedureTemplateEdgeAction,
+   * LAYOUT_AND_ROUTES -> saveProcedureTemplateLayoutAction (already the
+   * single combined mutation both drag-position and route changes go
+   * through, unchanged). No new "save whole procedure" mutation exists or
+   * is needed. `capturedStructuralValidation` is a plain local variable —
+   * the generic runSaveSequence executor only ever sees `{ok, updatedAt}`;
+   * this auxiliary result is captured here, in the screen's own closure,
+   * per this checkpoint's explicit instruction not to pollute
+   * graph-editor-core with Procedure-specific data.
+   */
+  async function handleGlobalSave() {
+    if (!hasAnyPendingChanges) return;
+    setGlobalSaveStatus("saving");
+    setGlobalSaveError(null);
+
+    const steps = planProcedureSaveSteps({ dirtyNodeFieldEntries, dirtyEdgeFieldEntries, dirtyPositionNodeIds, dirtyRouteEdgeIds });
+
+    let capturedStructuralValidation: StructuralValidationSummary | null = null;
+
+    async function executeStep(step: ProcedureSaveStep, expectedUpdatedAt: string): Promise<ProcedureSaveStepResult> {
+      if (step.kind === "NODE_FIELDS") {
+        const draft = nodeFieldDraft(step.nodeId);
+        const result = await updateProcedureTemplateNodeAction({
+          nodeId: step.nodeId,
+          patch: { title: draft.title, description: draft.description.trim() || null, instructions: draft.instructions.trim() || null, sortOrder: draft.sortOrder, isActive: draft.isActive },
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+      }
+      if (step.kind === "EDGE_FIELDS") {
+        const draft = edgeFieldDraft(step.edgeId);
+        const note = edgeSaveNote(step.edgeId).trim() || null;
+        const result = await updateProcedureTemplateEdgeAction({
+          edgeId: step.edgeId,
+          patch: { branchType: draft.branchType, branchLabel: draft.branchLabel.trim() || null },
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+          note,
+        });
+        if (!result.ok) return { ok: false, message: result.message };
+        // EDGE_FIELDS is the one step kind whose mutation always re-runs
+        // structural validation, even for a plain branchType/label edit
+        // (5C-6D-1B audit finding) — never silently dropped.
+        capturedStructuralValidation = result.structuralValidation;
+        return { ok: true, updatedAt: result.updatedAt };
+      }
+      // LAYOUT_AND_ROUTES
+      const positions = step.nodeIds.map((nodeId) => {
+        const pos = pendingLayoutMoves.get(nodeId)!;
+        return { nodeId, x: pos.x, y: pos.y };
+      });
+      const edgeRoutes: EdgeRouteInput[] = step.edgeIds.map((edgeId) => ({ edgeId, points: pendingEdgeRouteMoves.has(edgeId) ? (pendingEdgeRouteMoves.get(edgeId) ?? null) : null }));
+      const result = await saveProcedureTemplateLayoutAction({ templateId: template.id, positions, edgeRoutes, expectedTemplateUpdatedAt: expectedUpdatedAt });
+      return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+    }
+
+    const outcome = await runProcedureSaveSequence(steps, currentUpdatedAt, executeStep);
+
+    const flushedNodeFieldIds = succeededProcedureNodeFieldIds(outcome.succeededSteps);
+    const flushedEdgeFieldIds = succeededProcedureEdgeFieldIds(outcome.succeededSteps);
+    const flushedLayoutNodeIds = succeededProcedureLayoutNodeIds(outcome.succeededSteps);
+    const flushedRouteEdgeIds = succeededProcedureRouteEdgeIds(outcome.succeededSteps);
+
+    // Shadow every just-persisted value BEFORE clearing its pending entry,
+    // so the canvas keeps showing the correct (just-saved) result even
+    // though no refresh has happened yet — see this file's own SAVE
+    // CONTRACT doc comment.
+    if (flushedNodeFieldIds.length > 0) {
+      setJustSavedNodeFieldsById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedNodeFieldIds) next.set(id, nodeFieldDraft(id));
+        return next;
+      });
+      setPendingNodeFieldDraftsById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedNodeFieldIds) next.delete(id);
+        return next;
+      });
+    }
+    if (flushedEdgeFieldIds.length > 0) {
+      setJustSavedEdgeFieldsById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedEdgeFieldIds) next.set(id, edgeFieldDraft(id));
+        return next;
+      });
+      setPendingEdgeFieldDraftsById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedEdgeFieldIds) next.delete(id);
+        return next;
+      });
+      setPendingEdgeSaveNoteById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedEdgeFieldIds) next.delete(id);
+        return next;
+      });
+    }
+    if (flushedLayoutNodeIds.length > 0) {
+      setJustSavedPositionsById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedLayoutNodeIds) {
+          const pos = pendingLayoutMoves.get(id);
+          if (pos) next.set(id, pos);
+        }
+        return next;
+      });
+      setPendingLayoutMoves((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedLayoutNodeIds) next.delete(id);
+        return next;
+      });
+    }
+    if (flushedRouteEdgeIds.length > 0) {
+      setJustSavedRoutesById((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedRouteEdgeIds) next.set(id, pendingEdgeRouteMoves.has(id) ? (pendingEdgeRouteMoves.get(id) ?? null) : null);
+        return next;
+      });
+      setPendingEdgeRouteMoves((prev) => {
+        const next = new Map(prev);
+        for (const id of flushedRouteEdgeIds) next.delete(id);
+        return next;
+      });
+    }
+
+    setCurrentUpdatedAt(outcome.finalUpdatedAt);
+    if (capturedStructuralValidation) setLastStructuralValidation(capturedStructuralValidation);
+
+    if (outcome.failedAtStep) {
+      // PARTIAL FAILURE: retain failed/unrun drafts (never touched above),
+      // rebase the concurrency token, but do NOT refresh — a refresh here
+      // would fetch a server state that doesn't yet include enough of this
+      // save to be safely reconciled against the drafts that are still
+      // pending, and none of that reconciliation is needed anyway: the
+      // justSaved shadows already make the canvas correct without it.
+      setGlobalSaveStatus("failed");
+      setGlobalSaveError(outcome.failureMessage);
+      return;
+    }
+
+    // FULL SUCCESS: every pending category is now empty, so a refresh is
+    // both safe and useful (fresh unresolvedIssues, node codes for a
+    // freshly-inserted node from an unrelated action, etc.) — the
+    // justSaved shadows built above become redundant the instant this
+    // refresh lands and are cleared by the adjust-state-during-render
+    // block at the top of this component.
+    setSelectedWaypointIndex(null);
+    setGlobalSaveStatus("saved");
+    router.refresh();
+  }
+
+  function handleDiscardAllPending() {
+    // Client-only — nothing was ever persisted for anything still pending
+    // at this point, so there is no server call and no DISCARD_DRAFT_CHANGES
+    // audit row (that action type is reserved for a case where server
+    // state actually changed, which never applies here).
+    setPendingNodeFieldDraftsById(new Map());
+    setPendingEdgeFieldDraftsById(new Map());
+    setPendingEdgeSaveNoteById(new Map());
+    setPendingLayoutMoves(new Map());
+    setPendingEdgeRouteMoves(new Map());
+    setSelectedWaypointIndex(null);
+    setGlobalSaveStatus("idle");
+    setGlobalSaveError(null);
   }
 
   async function handleValidate() {
@@ -328,7 +725,7 @@ export default function ProcedureTemplateEditorScreen({
   }
 
   function handleExit() {
-    if (hasPendingLayoutChanges && !window.confirm("저장하지 않은 배치 변경사항이 있습니다. 나가시겠습니까?")) {
+    if (hasAnyPendingChanges && !window.confirm("저장하지 않은 변경사항이 있습니다. 나가시겠습니까?")) {
       return;
     }
     router.push(`/procedures/${template.id}`);
@@ -349,7 +746,8 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedEdgeId(edgeId);
     if (edgeId) setRightPanelTab("properties");
   }, []);
-  const handleNodeDragStop = useCallback((nodeId: string, position: { x: number; y: number }) => {
+  /** 5C-6D-1D — the ONE place both a canvas drag-stop and NodePropertyPanel's "상대 위치로 이동" buttons funnel through, mirroring CaseFlowchartEditorScreen's own setPendingNodePosition. No mutation call here; position is dirty/pending like every other field, only global [저장] persists it. */
+  const setPendingPosition = useCallback((nodeId: string, position: Position) => {
     setPendingLayoutMoves((prev) => {
       const next = new Map(prev);
       next.set(nodeId, position);
@@ -357,10 +755,16 @@ export default function ProcedureTemplateEditorScreen({
     });
   }, []);
 
-  // ---- Phase 4B: manual edge-route (waypoint) editing ----
-  // Every one of these only ever touches pendingEdgeRouteMoves — client
-  // state only, never a Server Action call. "No auto-save" holds for
-  // every one of add/move/remove/reset, not just node dragging.
+  const handleNodeDragStop = useCallback(
+    (nodeId: string, position: Position) => {
+      setPendingPosition(nodeId, position);
+    },
+    [setPendingPosition]
+  );
+
+  // ---- Phase 4B: manual edge-route (waypoint) editing — UNCHANGED from
+  // before 1C. Every one of these only ever touches pendingEdgeRouteMoves —
+  // client state only, never a Server Action call, same as before. ----
 
   const handleWaypointSelectionChange = useCallback((index: number | null) => {
     setSelectedWaypointIndex(index);
@@ -377,20 +781,61 @@ export default function ProcedureTemplateEditorScreen({
     [savedEdgeRoutes]
   );
 
-  /** The double-click-on-the-edge shortcut (never the only way to add a point — see handleAddWaypoint for the primary, explicit-button method). */
-  const handleWaypointInsertAt = useCallback(
-    (edgeId: string, point: RoutePoint) => {
+  /**
+   * 5C-6D-1E — double-click "straighten this connection", ported from
+   * CaseFlowchartEditorScreen's own handleEdgeDoubleClick (same
+   * computeStraightenedConnectedNodePosition call, same source-fixed/
+   * target-moves rule, same route-reset-to-automatic behavior). Replaces
+   * the retired waypoint-insert-on-double-click meaning — explicit
+   * waypoint add/remove/reset stays fully available via handleAddWaypoint/
+   * handleRemoveSelectedWaypoint/handleResetEdgeRoute, untouched below.
+   *
+   * Also the handler behind EdgePropertyPanel's new "연결 정렬" button
+   * (canStraighten below) — one function, no duplicated math, no
+   * duplicated save path, called identically from either entry point.
+   *
+   * Position/dimension sources match 1D exactly: workingLayoutPositions
+   * (server baseline + pendingLayoutMoves merged — the CURRENT visible
+   * position, including any unsaved drag) and resolveNodeDimensions
+   * (measured-first via the React Flow instance, estimate-fallback) on
+   * renderedNodes (baseline + pending-draft-merged rows). No no-op
+   * position guard here — matching Case's own precedent exactly:
+   * computeStraightenedConnectedNodePosition already returns the target's
+   * unchanged position when already aligned, and
+   * computeDirtyProcedurePositionNodeIds already excludes an entry that
+   * equals the server baseline from dirty/Save — no separate check is
+   * needed. The route reset IS guarded (only when a manual route actually
+   * exists) so an already-automatic edge never gets a meaningless pending
+   * entry.
+   */
+  const handleEdgeDoubleClick = useCallback(
+    (edgeId: string) => {
       const edge = template.edges.find((e) => e.id === edgeId);
-      const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
-      const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
-      if (!edge || !source || !target) return;
-      setPendingEdgeRouteMoves((prev) => {
-        const next = new Map(prev);
-        next.set(edgeId, insertWaypointAtSegment(currentWorkingRoutePoints(prev, edgeId), source, target, point));
-        return next;
-      });
+      if (!edge) return;
+      const sourceNode = renderedNodes.find((n) => n.id === edge.fromNodeId);
+      const targetNode = renderedNodes.find((n) => n.id === edge.toNodeId);
+      const sourcePos = workingLayoutPositions.get(edge.fromNodeId);
+      const targetPos = workingLayoutPositions.get(edge.toNodeId);
+      if (!sourceNode || !targetNode || !sourcePos || !targetPos) return;
+
+      const sourceDims = resolveNodeDimensions(sourceNode);
+      const targetDims = resolveNodeDimensions(targetNode);
+      const straightened = computeStraightenedConnectedNodePosition(
+        { x: sourcePos.x, y: sourcePos.y, width: sourceDims.width, height: sourceDims.height },
+        { x: targetPos.x, y: targetPos.y, width: targetDims.width, height: targetDims.height }
+      );
+      setPendingPosition(targetNode.id, straightened.position);
+
+      const currentRoute = currentWorkingRoutePoints(pendingEdgeRouteMoves, edgeId);
+      if (currentRoute.length > 0) {
+        setPendingEdgeRouteMoves((prev) => {
+          const next = new Map(prev);
+          next.set(edgeId, null);
+          return next;
+        });
+      }
     },
-    [template.edges, workingLayoutPositions, savedEdgeRoutes]
+    [template.edges, renderedNodes, workingLayoutPositions, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]
   );
 
   /**
@@ -399,7 +844,7 @@ export default function ProcedureTemplateEditorScreen({
    * current segment. Forces USER (사용자 배치) mode — the newly-added point
    * is otherwise invisible/unclickable (see this file's own layoutMode
    * doc comment), silently blocking the very next step the side panel
-   * asks for ("선택된 경로점 위치에 새 노드를 삽입").
+   * asks for ("선택된 경로점 위치에 새 노드를 삽입"). Unchanged from before 1C.
    */
   const handleAddWaypoint = useCallback(() => {
     if (!selectedEdgeId) return;
@@ -415,7 +860,7 @@ export default function ProcedureTemplateEditorScreen({
     });
   }, [selectedEdgeId, template.edges, workingLayoutPositions, savedEdgeRoutes]);
 
-  /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. */
+  /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. Unchanged from before 1C. */
   const handleRemoveSelectedWaypoint = useCallback(() => {
     if (!selectedEdgeId || selectedWaypointIndex === null) return;
     setPendingEdgeRouteMoves((prev) => {
@@ -426,7 +871,7 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedWaypointIndex(null);
   }, [selectedEdgeId, selectedWaypointIndex, savedEdgeRoutes]);
 
-  /** "자동 경로로 초기화" — explicit restore, discoverable beyond deleting every point one at a time. */
+  /** "자동 경로로 초기화" — explicit restore, discoverable beyond deleting every point one at a time. Unchanged from before 1C. */
   const handleResetEdgeRoute = useCallback((edgeId: string) => {
     setPendingEdgeRouteMoves((prev) => {
       const next = new Map(prev);
@@ -440,6 +885,7 @@ export default function ProcedureTemplateEditorScreen({
   // is actually selected and focus isn't inside a text input/textarea/
   // select/contenteditable element (never hijack ordinary text editing
   // elsewhere in the editor, e.g. the property panels' own fields).
+  // Unchanged from before 1C.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
@@ -454,21 +900,11 @@ export default function ProcedureTemplateEditorScreen({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canEdit, selectedEdgeId, selectedWaypointIndex, handleRemoveSelectedWaypoint]);
 
-  const selectedNode = selectedNodeId ? template.nodes.find((n) => n.id === selectedNodeId) ?? null : null;
-  const selectedEdge = selectedEdgeId ? template.edges.find((e) => e.id === selectedEdgeId) ?? null : null;
+  const selectedNode = selectedNodeId ? renderedNodes.find((n) => n.id === selectedNodeId) ?? null : null;
+  const selectedEdge = selectedEdgeId ? renderedEdges.find((e) => e.id === selectedEdgeId) ?? null : null;
 
-  const SAVE_STATE_LABEL: Record<typeof saveState, string> = {
-    SAVED: "저장됨",
-    UNSAVED: "저장되지 않은 변경사항",
-    SAVING: "저장 중...",
-    SAVE_FAILED: "저장 실패",
-  };
-  const SAVE_STATE_CLASS: Record<typeof saveState, string> = {
-    SAVED: "text-emerald-700 dark:text-emerald-400",
-    UNSAVED: "text-amber-700 dark:text-amber-400",
-    SAVING: "text-zinc-500 dark:text-zinc-400",
-    SAVE_FAILED: "text-red-600 dark:text-red-400",
-  };
+  /** 5C-6D-1E — same gate ProcedureFlowGraph's own double-click handler already applies before requesting a straighten (editable + 사용자 배치 only); the explicit "연결 정렬" button in EdgePropertyPanel must never offer an action the canvas gesture itself wouldn't currently allow. */
+  const canStraighten = canEdit && layoutMode === "USER";
 
   return (
     <div className="flex flex-col gap-4">
@@ -527,23 +963,35 @@ export default function ProcedureTemplateEditorScreen({
               읽기 전용{isTechnical ? "" : " (SUPER_ADMIN만 편집 가능)"}
             </span>
           )}
-          <span className={`text-xs font-medium ${SAVE_STATE_CLASS[saveState]}`}>● {SAVE_STATE_LABEL[saveState]}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canEdit && (
             <>
-              <button type="button" onClick={() => void handleSaveLayout()} disabled={!hasPendingLayoutChanges || isSavingLayout} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900">
-                저장
+              <button
+                type="button"
+                onClick={() => void handleGlobalSave()}
+                disabled={!hasAnyPendingChanges || globalSaveStatus === "saving"}
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+              >
+                {globalSaveStatus === "saving"
+                  ? "저장 중..."
+                  : !hasAnyPendingChanges
+                    ? "저장할 변경 없음"
+                    : globalSaveStatus === "failed"
+                      ? "저장 실패 - 다시 시도"
+                      : "저장"}
               </button>
-              <button type="button" onClick={handleDiscardLayout} disabled={!hasPendingLayoutChanges} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+              <button type="button" onClick={handleDiscardAllPending} disabled={!hasAnyPendingChanges} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
                 취소
               </button>
+              {globalSaveStatus === "saved" && <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">저장 완료</span>}
+              {hasAnyPendingChanges && globalSaveStatus === "idle" && <span className="text-xs text-zinc-500 dark:text-zinc-400">변경사항 {totalPendingCount}건 저장 대기 중</span>}
             </>
           )}
           {canDeleteGraph && (
             <UndoRedoControls
-              canUndo={historyView.canUndo}
-              canRedo={historyView.canRedo}
+              canUndo={historyView.canUndo && !hasAnyPendingChanges}
+              canRedo={historyView.canRedo && !hasAnyPendingChanges}
               isUndoing={isUndoing}
               isRedoing={isRedoing}
               onUndo={() => void handleUndo()}
@@ -561,15 +1009,18 @@ export default function ProcedureTemplateEditorScreen({
           </button>
         </div>
       </div>
-      {layoutErrorMessage && <p className="text-xs text-red-600 dark:text-red-400">{layoutErrorMessage}</p>}
+      {globalSaveStatus === "failed" && globalSaveError && <p className="text-xs text-red-600 dark:text-red-400">{globalSaveError}</p>}
       {undoRedoError && <p className="text-xs text-red-600 dark:text-red-400">{undoRedoError}</p>}
+      {canDeleteGraph && hasAnyPendingChanges && (historyView.canUndo || historyView.canRedo) && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">저장하지 않은 변경사항이 있어 실행 취소/다시 실행을 사용할 수 없습니다. 먼저 저장하거나 취소하세요.</p>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-2">
           <ProcedureFlowGraph
             templateId={template.id}
-            nodes={template.nodes}
-            edges={template.edges}
+            nodes={renderedNodes}
+            edges={renderedEdges}
             openIssuesByNodeId={openIssuesByNodeId}
             initialWorksheet={navigationTarget.worksheetFilter}
             initialSelectedNodeId={navigationTarget.nodeId}
@@ -584,9 +1035,12 @@ export default function ProcedureTemplateEditorScreen({
             selectedWaypointIndex={selectedWaypointIndex}
             onWaypointSelectionChange={handleWaypointSelectionChange}
             onWaypointMove={handleWaypointMove}
-            onEdgeDoubleClickInsert={handleWaypointInsertAt}
+            onEdgeDoubleClick={handleEdgeDoubleClick}
             layoutMode={layoutMode}
             onLayoutModeChange={setLayoutMode}
+            onInstanceReady={(instance) => {
+              reactFlowInstanceRef.current = instance;
+            }}
           />
           <ProcedureGraphLegend />
         </div>
@@ -607,12 +1061,14 @@ export default function ProcedureTemplateEditorScreen({
 
           {rightPanelTab === "properties" && selectedNode && (
             <NodePropertyPanel
-              key={selectedNode.id}
               node={selectedNode}
-              allNodes={template.nodes}
-              templateId={template.id}
+              allNodes={renderedNodes}
               canEdit={canEdit}
               expectedTemplateUpdatedAt={currentUpdatedAt}
+              draft={nodeFieldDraft(selectedNode.id)}
+              onDraftChange={(patch) => updateNodeFieldDraft(selectedNode.id, patch)}
+              onPositionDraftChange={(position) => setPendingPosition(selectedNode.id, position)}
+              resolveNodeDimensions={resolveNodeDimensions}
               onSaved={handleSaved}
               canDelete={canDeleteGraph}
               onDeleted={handleNodeDeleted}
@@ -622,17 +1078,21 @@ export default function ProcedureTemplateEditorScreen({
           )}
           {rightPanelTab === "properties" && !selectedNode && selectedEdge && (
             <EdgePropertyPanel
-              key={selectedEdge.id}
               edge={selectedEdge}
-              nodes={template.nodes}
+              nodes={renderedNodes}
               canEdit={canEdit}
               expectedTemplateUpdatedAt={currentUpdatedAt}
+              draft={edgeFieldDraft(selectedEdge.id)}
+              onDraftChange={(patch) => updateEdgeFieldDraft(selectedEdge.id, patch)}
+              note={edgeSaveNote(selectedEdge.id)}
+              onNoteChange={(note) => updateEdgeSaveNote(selectedEdge.id, note)}
               onSaved={handleSaved}
               routePoints={workingEdgeRoutes.get(selectedEdge.id) ?? null}
               selectedWaypointIndex={selectedWaypointIndex}
               onAddWaypoint={handleAddWaypoint}
               onRemoveSelectedWaypoint={handleRemoveSelectedWaypoint}
               onResetRoute={() => handleResetEdgeRoute(selectedEdge.id)}
+              onStraighten={canStraighten ? () => handleEdgeDoubleClick(selectedEdge.id) : null}
               canDelete={canDeleteGraph}
               onDeleted={handleEdgeDeleted}
               canInsertNode={canDeleteGraph}
@@ -643,9 +1103,8 @@ export default function ProcedureTemplateEditorScreen({
 
           {rightPanelTab === "createEdge" && (
             <CreateEdgePanel
-              key={selectedNodeId ?? "none"}
               templateId={template.id}
-              nodes={template.nodes}
+              nodes={renderedNodes}
               canEdit={canEdit}
               expectedTemplateUpdatedAt={currentUpdatedAt}
               prefillFromNodeId={selectedNodeId}
@@ -655,7 +1114,7 @@ export default function ProcedureTemplateEditorScreen({
           )}
 
           {rightPanelTab === "addNode" && canDeleteGraph && (
-            <CreateNodePanel templateId={template.id} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} selectedNode={selectedNode} />
+            <CreateNodePanel templateId={template.id} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} selectedNode={selectedNode} resolveNodeDimensions={resolveNodeDimensions} />
           )}
 
           {rightPanelTab === "validation" && (

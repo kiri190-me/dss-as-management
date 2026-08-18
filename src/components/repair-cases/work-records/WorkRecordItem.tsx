@@ -1,7 +1,12 @@
 import type { WorkRecordRow } from "@/lib/db/queries/repair-case-work-records";
+import { workRecordKindLabels } from "@/lib/domain/types";
 
 const badgeClass =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+
+/** Distinct (slightly stronger) styling from the plain step/procedure badges above, so 기록 구분 reads as the record's own classification rather than blending into its context badges. Always shown, including GENERAL. */
+const recordKindBadgeClass =
+  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-200";
 
 function formatDateTime(iso: string): string {
   const date = new Date(iso);
@@ -29,6 +34,7 @@ export default function WorkRecordItem({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-zinc-900 dark:text-zinc-50">{record.authorName}</span>
+          <span className={recordKindBadgeClass}>{workRecordKindLabels[record.recordKind]}</span>
           {record.workflowStepLabel && <span className={badgeClass}>{record.workflowStepLabel}</span>}
           {record.procedureNodeTitle && <span className={badgeClass}>{record.procedureNodeTitle}</span>}
           {record.isInvalidated && (

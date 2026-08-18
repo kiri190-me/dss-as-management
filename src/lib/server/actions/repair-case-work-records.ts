@@ -8,6 +8,7 @@ import {
   isValidOptionalUuid,
   isValidUuid,
   validateWorkRecordMemo,
+  validateWorkRecordKind,
   validateInvalidationReason,
   type CreateWorkRecordActionResult,
   type InvalidateWorkRecordActionResult,
@@ -43,6 +44,8 @@ function isPgErrorLike(err: unknown): err is { code?: string } {
 export async function createWorkRecordAction(input: {
   repairCaseId: string;
   memo: string;
+  /** Omitted/null/"" all default to GENERAL — see validateWorkRecordKind. */
+  recordKind?: string | null;
   relatedProcedureExecutionNodeId?: string | null;
   clientRequestId: string;
 }): Promise<CreateWorkRecordActionResult> {
@@ -62,12 +65,17 @@ export async function createWorkRecordAction(input: {
   if (!memoValidation.ok) {
     return { ok: false, code: "VALIDATION_ERROR", message: memoValidation.error };
   }
+  const kindValidation = validateWorkRecordKind(input.recordKind);
+  if (!kindValidation.ok) {
+    return { ok: false, code: "VALIDATION_ERROR", message: kindValidation.error };
+  }
 
   try {
     const result = await createWorkRecord({
       repairCaseId: input.repairCaseId,
       actorUserId: actorCheck.userId,
       memo: memoValidation.memo,
+      recordKind: kindValidation.recordKind,
       relatedProcedureExecutionNodeId: input.relatedProcedureExecutionNodeId ?? null,
       clientRequestId: input.clientRequestId,
     });

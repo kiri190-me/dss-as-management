@@ -68,10 +68,13 @@ export async function requestRepairCaseApproval(
   try {
     return await db.transaction(async (tx) => {
       const [current] = await tx
-        .select({ id: repairCases.id, version: repairCases.version, isLocked: repairCases.isLocked })
+        .select({ id: repairCases.id, version: repairCases.version, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
         .from(repairCases)
         .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)));
       if (!current) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (current.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 승인을 요청할 수 있습니다.");
+      }
       if (current.isLocked) {
         fail("CASE_LOCKED", "출하 완료 후 잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다.");
       }
@@ -154,10 +157,13 @@ export async function decideRepairCaseApproval(
   try {
     return await db.transaction(async (tx) => {
       const [current] = await tx
-        .select({ id: repairCases.id })
+        .select({ id: repairCases.id, billingType: repairCases.billingType })
         .from(repairCases)
         .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)));
       if (!current) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (current.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 승인 또는 반려할 수 있습니다.");
+      }
 
       const [actor] = await tx
         .select({

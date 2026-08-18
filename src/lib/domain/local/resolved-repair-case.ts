@@ -7,9 +7,10 @@ import {
   mockUsers,
 } from "../mock-data";
 import {
+  billingTypeLabels,
   isRepairCaseOverdue,
-  paidOrWarrantyLabels,
   productCategoryLabels,
+  type BillingType,
   type ExceptionStatus,
   type Priority,
   type RepairCase,
@@ -40,6 +41,8 @@ export type ResolvedRepairCase = {
   source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
   productId: string | null;
   intakeNumber: string;
+  /** Excel legacy report identifier; unrelated to any future official report number. */
+  legacyReportNumber: string | null;
   workflowType: WorkflowType;
   status: RepairStatus;
   priority: Priority;
@@ -56,6 +59,8 @@ export type ResolvedRepairCase = {
   isOverdue: boolean;
   productCategory: string;
   paidOrWarranty: string;
+  /** Raw value behind `paidOrWarranty`'s label — needed by 종류 재배정 UX (never guesses when null). */
+  billingType: BillingType | null;
   modelName: string;
   lotNumber: string;
   serialNumber: string;
@@ -98,6 +103,7 @@ export function toResolvedFromMock(
     source: "MOCK",
     productId: repairCase.productId,
     intakeNumber: repairCase.intakeNumber,
+    legacyReportNumber: null,
     workflowType: repairCase.workflowType,
     status: repairCase.status,
     priority: repairCase.priority,
@@ -111,7 +117,8 @@ export function toResolvedFromMock(
     createdAt: repairCase.createdAt,
     isOverdue: isRepairCaseOverdue(repairCase, referenceDate),
     productCategory: productCategoryLabels[repairCase.workflowType],
-    paidOrWarranty: paidOrWarrantyLabels[repairCase.workflowType],
+    paidOrWarranty: repairCase.billingType ? billingTypeLabels[repairCase.billingType] : "-",
+    billingType: repairCase.billingType,
     modelName: product?.modelName ?? "-",
     lotNumber: product?.lotNumber ?? "-",
     serialNumber: product?.serialNumber ?? "-",
@@ -146,6 +153,7 @@ export function toResolvedFromLocal(
     source: "LOCAL_DEMO",
     productId: null,
     intakeNumber: localCase.intakeNumber,
+    legacyReportNumber: null,
     workflowType: localCase.workflowType,
     status: localCase.status,
     priority: localCase.priority,
@@ -159,7 +167,8 @@ export function toResolvedFromLocal(
     createdAt: localCase.createdAt,
     isOverdue: isRepairCaseOverdue(localCase, referenceDate),
     productCategory: productCategoryLabels[localCase.workflowType],
-    paidOrWarranty: paidOrWarrantyLabels[localCase.workflowType],
+    paidOrWarranty: billingTypeLabels[localCase.billingType],
+    billingType: localCase.billingType,
     modelName: localCase.modelName,
     lotNumber: localCase.lotNumber,
     serialNumber: localCase.serialNumber,

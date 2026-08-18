@@ -1,4 +1,5 @@
 import { routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import { runSaveSequence as runGenericSaveSequence, type SaveStepResult as GenericSaveStepResult } from "@/lib/graph-editor-core/save-sequence";
 import type { RepairCaseFlowchartNodeType, RepairCaseFlowchartBranchType } from "@/lib/domain/repair-case-flowchart-types";
 
 /**
@@ -26,9 +27,20 @@ import type { RepairCaseFlowchartNodeType, RepairCaseFlowchartBranchType } from 
  * for why) — everything else a user can edit on an EXISTING node/edge
  * (title, description, type, branch type/label, retarget, route, position)
  * goes through this draft/render/save model.
+ *
+ * `runSaveSequence` (5C-6D-1A) is a thin, Case-Flowchart-flavored adapter
+ * over graph-editor-core/save-sequence.ts's domain-agnostic executor — the
+ * actual sequential-execution/token-chaining/stop-on-first-failure loop
+ * lives there now, unowned by any domain. This file keeps its own exported
+ * `SaveStep`/`SaveStepResult`/`SaveSequenceOutcome` shapes (with their
+ * `updatedAt`/`finalUpdatedAt` field names) unchanged so
+ * CaseFlowchartEditorScreen.tsx needed zero changes for this extraction —
+ * only `planSaveSteps` (what a pending change is, how steps are ordered)
+ * and the post-outcome id-reconciliation helpers below stay genuinely
+ * Case-Flowchart-specific.
  */
 
-export type CaseFlowchartNodeDraft = { title: string; description: string; nodeType: RepairCaseFlowchartNodeType };
+export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType };
 export type CaseFlowchartEdgeDraft = { branchType: RepairCaseFlowchartBranchType; branchLabel: string; fromNodeId: string; toNodeId: string };
 export type Position = { x: number; y: number };
 
@@ -36,6 +48,7 @@ export type ServerNodeSnapshot = {
   id: string;
   title: string;
   description: string | null;
+  instructions: string | null;
   nodeType: RepairCaseFlowchartNodeType;
   positionX: number;
   positionY: number;
@@ -58,6 +71,7 @@ export function mergeNodeForRender(server: ServerNodeSnapshot, pendingDraft: Cas
     nodeType: pendingDraft?.nodeType ?? server.nodeType,
     title: pendingDraft?.title ?? server.title,
     description: pendingDraft ? (pendingDraft.description.length > 0 ? pendingDraft.description : null) : server.description,
+    instructions: pendingDraft ? (pendingDraft.instructions.length > 0 ? pendingDraft.instructions : null) : server.instructions,
     positionX: pendingPosition?.x ?? server.positionX,
     positionY: pendingPosition?.y ?? server.positionY,
   };
@@ -84,7 +98,12 @@ export function mergeEdgeForRender(server: ServerEdgeSnapshot, pendingDraft: Cas
 // ==================== DIRTY (rendered draft vs baseline) ====================
 
 export function isNodeDraftDirty(draft: CaseFlowchartNodeDraft, server: ServerNodeSnapshot): boolean {
-  return draft.title !== server.title || draft.description !== (server.description ?? "") || draft.nodeType !== server.nodeType;
+  return (
+    draft.title !== server.title ||
+    draft.description !== (server.description ?? "") ||
+    draft.instructions !== (server.instructions ?? "") ||
+    draft.nodeType !== server.nodeType
+  );
 }
 
 export function isEdgeDraftDirty(draft: CaseFlowchartEdgeDraft, server: ServerEdgeSnapshot): boolean {
@@ -165,7 +184,7 @@ export function planSaveSteps(input: {
   for (const [nodeId, draft] of input.dirtyNodes) {
     const server = input.serverNodesById.get(nodeId);
     if (!server) continue;
-    if (draft.title !== server.title || draft.description !== (server.description ?? "")) steps.push({ kind: "NODE_FIELDS", nodeId });
+    if (draft.title !== server.title || draft.description !== (server.description ?? "") || draft.instructions !== (server.instructions ?? "")) steps.push({ kind: "NODE_FIELDS", nodeId });
     if (draft.nodeType !== server.nodeType) steps.push({ kind: "NODE_TYPE", nodeId });
   }
   if (input.dirtyPositionNodeIds.length > 0) {
@@ -200,19 +219,25 @@ export type SaveSequenceOutcome = {
  * draft stays pending for a retry. `finalUpdatedAt` is always the latest
  * token actually confirmed by the server, whether the sequence fully
  * succeeded or stopped partway.
+ *
+ * Delegates the actual loop to graph-editor-core/save-sequence.ts's
+ * `runSaveSequence` (5C-6D-1A) — this wrapper exists only to translate
+ * between the generic `{ok, token}` shape and this domain's own
+ * `{ok, updatedAt}`/`finalUpdatedAt` naming, so every caller (in
+ * particular CaseFlowchartEditorScreen.tsx) keeps working unchanged.
  */
 export async function runSaveSequence(steps: SaveStep[], initialUpdatedAt: string, executeStep: (step: SaveStep, expectedUpdatedAt: string) => Promise<SaveStepResult>): Promise<SaveSequenceOutcome> {
-  let updatedAt = initialUpdatedAt;
-  const succeededSteps: SaveStep[] = [];
-  for (const step of steps) {
-    const result = await executeStep(step, updatedAt);
-    if (!result.ok) {
-      return { succeededSteps, failedAtStep: step, failureMessage: result.message, finalUpdatedAt: updatedAt };
-    }
-    updatedAt = result.updatedAt;
-    succeededSteps.push(step);
-  }
-  return { succeededSteps, failedAtStep: null, failureMessage: null, finalUpdatedAt: updatedAt };
+  const genericExecuteStep = async (step: SaveStep, expectedToken: string): Promise<GenericSaveStepResult<string>> => {
+    const result = await executeStep(step, expectedToken);
+    return result.ok ? { ok: true, token: result.updatedAt } : { ok: false, message: result.message };
+  };
+  const outcome = await runGenericSaveSequence(steps, initialUpdatedAt, genericExecuteStep);
+  return {
+    succeededSteps: outcome.succeededSteps,
+    failedAtStep: outcome.failedAtStep,
+    failureMessage: outcome.failureMessage,
+    finalUpdatedAt: outcome.finalToken,
+  };
 }
 
 /** A node's PROPERTY draft (title/description/type) counts as fully flushed only when EVERY step planned for it (fields and/or type) succeeded — a node with a succeeded fields-update but a failed type-change must stay pending (its recomputed dirty state naturally narrows to just the type field on retry). Position is tracked separately — see `succeededPositionNodeIds`. */

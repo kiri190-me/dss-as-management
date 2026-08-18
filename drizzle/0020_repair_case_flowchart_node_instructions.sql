@@ -1,0 +1,1 @@
+ALTER TABLE "repair_case_flowchart_nodes" ADD COLUMN "instructions" text;

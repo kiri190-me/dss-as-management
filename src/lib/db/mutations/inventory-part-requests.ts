@@ -27,7 +27,7 @@ import {
   type RawRequestItem,
   type RawIssueAllocation,
 } from "@/lib/domain/inventory-part-request-rules";
-import type { InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
+import type { InventoryPartRequestStatus, StockOwner } from "@/lib/domain/inventory-types";
 
 /**
  * Phase 5B-3 — Parts Request & Issue Workflow mutations. Every mutation
@@ -58,7 +58,8 @@ export type InventoryPartRequestResultCode =
   | "EXCEEDS_REMAINING_REQUESTED"
   | "NOT_ISSUABLE"
   | "IDEMPOTENCY_PAYLOAD_MISMATCH"
-  | "IDEMPOTENCY_UNRESOLVED";
+  | "IDEMPOTENCY_UNRESOLVED"
+  | "BILLING_DECISION_REQUIRED";
 
 type Failure = { ok: false; code: InventoryPartRequestResultCode; message: string };
 
@@ -128,13 +129,15 @@ export async function createPartRequest(input: CreatePartRequestInput): Promise<
       if (claim.state !== "CLAIMED") failOnNonClaimState(claim.state);
 
       const [rc] = await tx
-        .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+        .select({ id: repairCases.id, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
         .from(repairCases)
         .where(and(eq(repairCases.id, input.repairCaseId), eq(repairCases.isDeleted, false)));
       if (!rc) fail("NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
+      if (rc.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 부품을 요청할 수 있습니다.");
+      }
 
-      if (!canCreatePartRequest(actor.role, { isAssignedToCase: rc.assignedEngineerId === actor.id, isCaseLocked: rc.isLocked })) {
-        if (rc.isLocked) fail("CASE_LOCKED", "잠금된 접수 건입니다. 새 요청을 생성할 수 없습니다.");
+      if (!canCreatePartRequest(actor.role, { isCaseLocked: rc.isLocked })) {
         fail("FORBIDDEN", "부품 요청 권한이 없습니다.");
       }
 
@@ -151,7 +154,13 @@ export async function createPartRequest(input: CreatePartRequestInput): Promise<
         .returning({ id: inventoryPartRequests.id });
 
       await tx.insert(inventoryPartRequestItems).values(
-        merged.items.map((item) => ({ requestId: request.id, partId: item.partId, requestedQuantity: item.quantity, note: item.note }))
+        merged.items.map((item) => ({
+          requestId: request.id,
+          partId: item.partId,
+          requestedQuantity: item.quantity,
+          owner: item.owner,
+          note: item.note,
+        }))
       );
 
       await tx.insert(inventoryPartRequestHistory).values({
@@ -406,11 +415,22 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
       const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
       if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
 
-      const [rc] = await tx.select({ isLocked: repairCases.isLocked }).from(repairCases).where(eq(repairCases.id, request.repairCaseId));
+      // repair_case_id is nullable (repair-case permanent-delete schema
+      // foundation checkpoint): a request whose repair case has since been
+      // permanently purged is a legitimate historical row, but issuing NEW
+      // stock against it is never sensible — there is no live case left to
+      // receive the parts. Reject cleanly here rather than querying a
+      // nonexistent case; cancel/reject/partiallyClose (which don't touch
+      // stock) are unaffected by this and remain reachable for such a row.
+      if (!request.repairCaseId) fail("NOT_FOUND", "이 요청과 연결된 접수 건이 더 이상 존재하지 않아 불출할 수 없습니다.");
+
+      const [rc] = await tx.select({ isLocked: repairCases.isLocked, billingType: repairCases.billingType }).from(repairCases).where(eq(repairCases.id, request.repairCaseId));
+      if (rc?.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 부품을 불출할 수 있습니다.");
+      }
       const isCaseLocked = rc?.isLocked ?? false;
 
       if (!canIssuePartRequest(actor.role, { isCaseLocked, status: request.status })) {
-        if (isCaseLocked) fail("CASE_LOCKED", "잠금된 접수 건입니다. 불출을 진행할 수 없습니다.");
         if (!isIssuableStatus(request.status)) fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
         fail("FORBIDDEN", "불출 권한이 없습니다.");
       }
@@ -442,15 +462,26 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
         .orderBy(partStockBalances.id)
         .for("update");
       if (lockedBalances.length !== balanceIds.length) fail("NOT_FOUND", "재고 정보를 찾을 수 없습니다.");
-      const balanceStateById = new Map<string, PrelockedBalanceState & { partId: string }>(
-        lockedBalances.map((b) => [b.id, { id: b.id, currentQuantity: b.currentQuantity, version: b.version, partId: b.partId }])
+      const balanceStateById = new Map<string, PrelockedBalanceState & { partId: string; owner: StockOwner }>(
+        lockedBalances.map((b) => [b.id, { id: b.id, currentQuantity: b.currentQuantity, version: b.version, partId: b.partId, owner: b.owner }])
       );
 
       // Part-match: the request item's part must equal the selected balance's part.
+      // Owner-match (Parts Request 소유구분 checkpoint): when the request
+      // item states an owner (non-null — every item created after
+      // migration 0024 always does; legacy pre-existing items are NULL and
+      // impose no constraint here, remaining issuable from any bucket
+      // exactly as before), the selected balance's owner must match it
+      // exactly. The requested owner is the requester's stated
+      // requirement — never silently overridden by whichever bucket the
+      // inventory manager happens to pick.
       for (const allocation of merged.allocations) {
         const item = itemById.get(allocation.requestItemId)!;
         const balance = balanceStateById.get(allocation.partStockBalanceId)!;
         if (item.partId !== balance.partId) fail("INVALID_INPUT", "선택한 재고의 부품이 요청 항목과 일치하지 않습니다.");
+        if (item.owner !== null && item.owner !== balance.owner) {
+          fail("INVALID_INPUT", "선택한 재고의 소유구분이 요청한 소유구분과 일치하지 않습니다.");
+        }
       }
 
       // Aggregate validation per item — the roundIssueQuantity (already

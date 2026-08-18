@@ -33,27 +33,25 @@ export default function CaseFlowchartCreateEdgePanel({
 }) {
   // Adjust-state-during-render (same convention as
   // CaseFlowchartEditorScreen's own currentUpdatedAt/prevFlowchartUpdatedAt
-  // pair) — auto-resyncs fromNodeId to the graph's currently-selected node
-  // whenever prefillFromNodeId changes, EXCEPT once the user has manually
-  // picked a different FROM node in this open form themselves
-  // (userTouchedFrom): a later selection change elsewhere in the graph
-  // must never silently overwrite a choice the user already made. Resets
-  // on a successful create (the form is conceptually closed/reset), so the
-  // next open form prefills fresh again.
+  // pair) — whenever prefillFromNodeId changes (the graph's selected node
+  // changed), the whole form resets rather than just resyncing FROM: an
+  // in-progress draft (TO/branch type/branch label) for one FROM node isn't
+  // meaningful once the selection points at a different one.
   const [prevPrefillFromNodeId, setPrevPrefillFromNodeId] = useState(prefillFromNodeId ?? null);
-  const [userTouchedFrom, setUserTouchedFrom] = useState(false);
   const [fromNodeId, setFromNodeId] = useState(prefillFromNodeId ?? nodes[0]?.id ?? "");
-  if ((prefillFromNodeId ?? null) !== prevPrefillFromNodeId) {
-    setPrevPrefillFromNodeId(prefillFromNodeId ?? null);
-    if (!userTouchedFrom) {
-      setFromNodeId(prefillFromNodeId ?? nodes[0]?.id ?? "");
-    }
-  }
   const [toNodeId, setToNodeId] = useState("");
   const [branchType, setBranchType] = useState<RepairCaseFlowchartBranchType>("DEFAULT");
   const [branchLabel, setBranchLabel] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  if ((prefillFromNodeId ?? null) !== prevPrefillFromNodeId) {
+    setPrevPrefillFromNodeId(prefillFromNodeId ?? null);
+    setFromNodeId(prefillFromNodeId ?? nodes[0]?.id ?? "");
+    setToNodeId("");
+    setBranchType("DEFAULT");
+    setBranchLabel("");
+    setErrorMessage(null);
+  }
 
   const labelRequired = branchType === "CUSTOM" && branchLabel.trim().length === 0;
   const isSelfEdge = fromNodeId.length > 0 && fromNodeId === toNodeId;
@@ -77,7 +75,6 @@ export default function CaseFlowchartCreateEdgePanel({
       return;
     }
     setToNodeId("");
-    setUserTouchedFrom(false);
     onSaved(result.updatedAt);
   }
 
@@ -90,10 +87,7 @@ export default function CaseFlowchartCreateEdgePanel({
         시작 노드
         <select
           value={fromNodeId}
-          onChange={(e) => {
-            setFromNodeId(e.target.value);
-            setUserTouchedFrom(true);
-          }}
+          onChange={(e) => setFromNodeId(e.target.value)}
           className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           <option value="">노드를 선택하세요</option>

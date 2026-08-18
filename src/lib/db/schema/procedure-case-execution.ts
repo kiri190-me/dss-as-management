@@ -65,9 +65,21 @@ export const procedureCaseExecutions = pgTable(
   "procedure_case_executions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repairCaseId: uuid("repair_case_id")
-      .notNull()
-      .references(() => repairCases.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (repair-case permanent-delete schema
+    // foundation checkpoint) — was NOT NULL + RESTRICT, which made a
+    // repair_cases hard-delete impossible at the DB level. This row (and
+    // its child procedure_case_execution_nodes/procedure_case_execution_history
+    // rows, neither of which reference repair_cases directly and are
+    // therefore entirely unaffected by this column going NULL) represents
+    // actual repair work performed and must outlive the case's own hard-
+    // delete. Existing rows are untouched by this — only a future
+    // repair_cases hard-delete ever nulls it. Multiple NULLs never collide
+    // with the partial unique index below (Postgres unique indexes treat
+    // every NULL as distinct). Same proven pattern as
+    // repair_case_flowchart_edit_history.flowchart_id (migration 0026).
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, {
+      onDelete: "set null",
+    }),
     procedureTemplateId: uuid("procedure_template_id")
       .notNull()
       .references(() => procedureTemplates.id, { onDelete: "restrict" }),

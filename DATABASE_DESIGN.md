@@ -12,7 +12,7 @@
 | Customer | 고객사 |
 | EndUser | End-User (고객사 산하 실사용자/설치처) |
 | Product | 제품(장비) 마스터 |
-| RepairCase | A/S 접수(제품 접수) — 인수번호 부여, 워크플로 버전/현재 단계/예외 상태/잠금 상태 보유 |
+| RepairCase | A/S 접수(제품 접수) — 인수번호 부여, 워크플로 버전/현재 단계/예외 상태/출하 완료 표시(`is_locked`, 데이터 수정을 제한하지 않음) 보유 |
 | WorkflowTemplate | 워크플로 템플릿 (Matcher / 유상 Generator / 무상 Generator) — 안정적인 워크플로 유형 식별자 |
 | WorkflowVersion | 워크플로 버전 — 템플릿의 특정 시점 단계 구성 스냅샷 (발행 후 불변) |
 | WorkflowStep | 워크플로 단계 — 특정 버전에 속한 순서 있는 단계 |
@@ -24,7 +24,7 @@
 | ShipmentApproval | 출하 승인 (직접 승인 또는 위임 승인) |
 | ShipmentApprovalDelegation | 기간제 출하 승인 위임 (특정 A/S 건에 종속되지 않음) |
 | QuotePo | 견적/PO |
-| UnlockRequest | 출하 완료 후 수정(잠금 해제) 요청 |
+| UnlockRequest | (정책 변경으로 폐기됨 — 출하 완료 후에도 잠금 해제 절차 없이 통상 권한으로 수정 가능. 15번 참고) |
 | TerminologyDictionary | 한국어/영어/일본어 기술 용어 사전 |
 | AuditLog | 감사 로그 |
 | ExcelImportRecord | 기존 Excel 데이터 이전 매핑 |
@@ -337,12 +337,11 @@ FK는 기본적으로 `ON DELETE RESTRICT`로 하고, Soft Delete 정책과 결�
 
 ---
 
-## 15. Unlock / Post-Shipment Modification Strategy
+## 15. Post-Shipment Modification Strategy (정책 변경 — `unlock_requests` 폐기)
 
-- `unlock_requests` 필드(개요): `id`, `repair_case_id`, `requested_by`, `request_reason`, `requested_at`, `status`(PENDING/APPROVED/REJECTED), `approved_by`, `approved_at`, `modification_reason`(수정 시 필수), `reviewed_by`, `reviewed_at`, `locked_again_at`.
-- `repair_cases.is_locked`는 출하 완료 시 `true`로 설정되며, 승인된 `unlock_requests` 기간 동안만 `false`로 전환된다.
-- 일반 사용자는 `is_locked = true`인 레코드를 직접 수정할 수 없다(애플리케이션 레벨 강제).
-- 전체 흐름: 수정 요청 → 관리자 승인(임시 잠금 해제) → 사유 필수 입력 수정 → 재검토 및 재승인 → 재잠금.
+- 출하 완료는 A/S 접수 건 데이터를 자동으로 읽기 전용으로 만들지 않는다. 출하 완료된 건도 통상의 역할별/필드별 권한 규칙(SECURITY_POLICY.md §2)에 따라 동일하게 수정 가능하며, 별도의 잠금 해제 요청/승인 절차나 `unlock_requests` 테이블은 존재하지 않는다.
+- `repair_cases.is_locked`는 출하 완료(`shipment_completed`) 시 여전히 `true`로 설정되지만, 데이터 수정 가능 여부를 더 이상 좌우하지 않는다 — 워크플로가 종료 단계에 도달했음을 나타내는 표시로만 사용된다.
+- 워크플로 단계 전이만 종료 상태로 보호된다: `shipment_completed`는 워크플로의 종료 단계이며 그 이후로 이동 가능한 다음 단계는 정의되어 있지 않다.
 
 ---
 

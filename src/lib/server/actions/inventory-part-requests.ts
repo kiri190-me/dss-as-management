@@ -57,7 +57,7 @@ const IDEMPOTENCY_KEY_FIELD_ERROR: Forbidden = { ok: false, code: "FORBIDDEN", m
 
 export async function createPartRequestAction(input: {
   repairCaseId: string;
-  items: { partId: string; quantity: number; note?: string | null }[];
+  items: { partId: string; quantity: number; owner: unknown; note?: string | null }[];
   note?: string | null;
   idempotencyKey: string;
 }): Promise<CreatePartRequestResult | Forbidden> {

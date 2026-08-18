@@ -11,7 +11,6 @@ import {
 } from "@/lib/domain/procedure-template-types";
 import type { EditorEdgeRow, EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
 import {
-  updateProcedureTemplateEdgeAction,
   retargetProcedureTemplateEdgeAction,
   deleteProcedureTemplateEdgeAction,
   insertProcedureTemplateNodeOnEdgeAction,
@@ -19,25 +18,41 @@ import {
 import { buildEdgeRetargetPreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
+import type { ProcedureEdgeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
 
 /**
- * Edge property side panel (Phase 4A) — branchType/branchLabel edit
- * through its own explicit "저장"; retargeting always shows a current-vs-
- * proposed preview inside a native <dialog> confirmation (same pattern as
- * BindConnectorForm) and always requires a reason — it must never silently
- * replace an edge.
+ * Edge property side panel (Phase 4A; branchType/branchLabel converted to a
+ * screen-owned pending draft in 5C-6D-1C) — branchType/branchLabel are a
+ * controlled draft (`draft`/`onDraftChange`) persisted by the screen's
+ * global [저장], together with any other pending change. "검토자 메모"
+ * (`note`/`onNoteChange`) is lifted to the same place for the same reason
+ * (this panel remounts — `key={edge.id}` — on selection change, before a
+ * deferred save might run) but stays deliberately OUTSIDE the draft/dirty
+ * comparison: it has no persisted server-side baseline (write-only, sent
+ * only as that save's history `reason`), so it can never be "dirty" or
+ * "clean" against a baseline that doesn't exist. Retargeting stays its own
+ * separate, IMMEDIATE action — it always shows a current-vs-proposed
+ * preview inside a native <dialog> confirmation (same pattern as
+ * BindConnectorForm) and always requires a reason (unless isTechnical) — it
+ * must never silently replace an edge. 5C-6D-1C explicitly keeps this
+ * untouched.
  */
 export default function EdgePropertyPanel({
   edge,
   nodes,
   canEdit,
   expectedTemplateUpdatedAt,
+  draft,
+  onDraftChange,
+  note,
+  onNoteChange,
   onSaved,
   routePoints,
   selectedWaypointIndex,
   onAddWaypoint,
   onRemoveSelectedWaypoint,
   onResetRoute,
+  onStraighten,
   canDelete,
   onDeleted,
   canInsertNode,
@@ -47,6 +62,12 @@ export default function EdgePropertyPanel({
   nodes: EditorNodeRow[];
   canEdit: boolean;
   expectedTemplateUpdatedAt: string;
+  /** 5C-6D-1C — screen-owned pending draft for branchType/branchLabel; already reflects any locally-unsaved edit (this panel never keeps its own copy). */
+  draft: ProcedureEdgeFieldDraft;
+  onDraftChange: (patch: Partial<ProcedureEdgeFieldDraft>) => void;
+  /** 5C-6D-1C — screen-owned "검토자 메모" text, sent only if/when the EDGE_FIELDS save step for this edge actually runs; blank means no note. Not part of `draft` — see this file's own doc comment. */
+  note: string;
+  onNoteChange: (note: string) => void;
   onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
   /** Phase 4B — the edge's *working* (saved + pending-merged) manual route; null means automatic/deterministic routing. */
   routePoints: RoutePoint[] | null;
@@ -54,6 +75,8 @@ export default function EdgePropertyPanel({
   onAddWaypoint: () => void;
   onRemoveSelectedWaypoint: () => void;
   onResetRoute: () => void;
+  /** 5C-6D-1E — "연결 정렬": null when the screen's own canStraighten gate (canEdit && layoutMode === "USER") is false, so the button is simply absent rather than a visible-but-disabled affordance for an action the canvas double-click itself wouldn't currently allow either. When present, calls the EXACT SAME screen handler double-click uses — no duplicated math, no duplicated save path. */
+  onStraighten: (() => void) | null;
   /** Phase 5C-5B — true only for a TECHNICAL_TASK DRAFT; always false for FULL_SERVICE/REFERENCE. */
   canDelete: boolean;
   onDeleted: (newUpdatedAt: string) => void;
@@ -63,10 +86,6 @@ export default function EdgePropertyPanel({
   isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
-  const [branchType, setBranchType] = useState<ProcedureBranchType>(edge.branchType);
-  const [branchLabel, setBranchLabel] = useState(edge.branchLabel ?? "");
-  const [note, setNote] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [newFromNodeId, setNewFromNodeId] = useState(edge.fromNodeId);
@@ -91,26 +110,8 @@ export default function EdgePropertyPanel({
     else if (!confirmingRetarget && dialog.open) dialog.close();
   }, [confirmingRetarget]);
 
-  const hasFieldChanges = branchType !== edge.branchType || branchLabel !== (edge.branchLabel ?? "");
   const hasRetarget = newFromNodeId !== edge.fromNodeId || newToNodeId !== edge.toNodeId;
-  const labelRequired = branchType === "CUSTOM" && branchLabel.trim().length === 0;
-
-  async function handleSaveFields() {
-    setIsSaving(true);
-    setErrorMessage(null);
-    const result = await updateProcedureTemplateEdgeAction({
-      edgeId: edge.id,
-      patch: { branchType, branchLabel: branchLabel.trim() || null },
-      expectedTemplateUpdatedAt,
-      note,
-    });
-    setIsSaving(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    onSaved(result.updatedAt, result.structuralValidation);
-  }
+  const labelRequired = draft.branchType === "CUSTOM" && draft.branchLabel.trim().length === 0;
 
   async function handleConfirmRetarget() {
     setIsRetargeting(true);
@@ -181,7 +182,12 @@ export default function EdgePropertyPanel({
 
       <label className="flex flex-col gap-1">
         분기 유형
-        <select value={branchType} onChange={(e) => setBranchType(e.target.value as ProcedureBranchType)} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900">
+        <select
+          value={draft.branchType}
+          onChange={(e) => onDraftChange({ branchType: e.target.value as ProcedureBranchType })}
+          disabled={!canEdit}
+          className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+        >
           {PROCEDURE_BRANCH_TYPE_CODES.map((bt) => (
             <option key={bt} value={bt}>
               {procedureBranchTypeLabels[bt]}
@@ -190,23 +196,57 @@ export default function EdgePropertyPanel({
         </select>
       </label>
       <label className="flex flex-col gap-1">
-        분기 라벨 {branchType === "CUSTOM" ? "(필수)" : "(선택)"}
-        <input value={branchLabel} onChange={(e) => setBranchLabel(e.target.value)} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
+        분기 라벨 {draft.branchType === "CUSTOM" ? "(필수)" : "(선택)"}
+        <input value={draft.branchLabel} onChange={(e) => onDraftChange({ branchLabel: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
+      {labelRequired && <p className="text-amber-600 dark:text-amber-400">사용자 정의(CUSTOM) 분기에는 라벨이 필요합니다.</p>}
       <label className="flex flex-col gap-1">
-        검토자 메모 (선택)
-        <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
+        검토자 메모 (선택, 저장 시 함께 기록됨)
+        <textarea rows={2} value={note} onChange={(e) => onNoteChange(e.target.value)} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
 
+      {canEdit && <p className="text-[11px] text-zinc-400 dark:text-zinc-600">위 속성 변경은 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.</p>}
+
       {canEdit && (
-        <button
-          type="button"
-          disabled={!hasFieldChanges || labelRequired || isSaving}
-          onClick={() => void handleSaveFields()}
-          className="self-start rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
-        >
-          {isSaving ? "저장 중..." : "속성 저장"}
-        </button>
+        <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
+          <h4 className="text-xs font-semibold text-blue-900 dark:text-blue-300">분기 대상 변경</h4>
+          <label className="flex flex-col gap-1">
+            시작 노드
+            <select value={newFromNodeId} onChange={(e) => setNewFromNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title} ({n.nodeCode})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            대상 노드
+            <select value={newToNodeId} onChange={(e) => setNewToNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title} ({n.nodeCode})
+                </option>
+              ))}
+            </select>
+          </label>
+          <textarea
+            rows={2}
+            value={retargetReason}
+            onChange={(e) => setRetargetReason(e.target.value)}
+            placeholder={isTechnical ? "변경 사유 (선택)" : "변경 사유 (필수)"}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <button
+            type="button"
+            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0)}
+            onClick={() => setConfirmingRetarget(true)}
+            className="self-start rounded-md border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
+          >
+            변경 검토
+          </button>
+          {newFromNodeId === newToNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
+        </div>
       )}
 
       <div className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
@@ -233,6 +273,15 @@ export default function EdgePropertyPanel({
             >
               자동 경로로 초기화
             </button>
+            {onStraighten && (
+              <button
+                type="button"
+                onClick={onStraighten}
+                className="rounded-md border border-emerald-400 px-2.5 py-1 text-xs text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              >
+                연결 정렬
+              </button>
+            )}
             {canInsertNode && (
               <button
                 type="button"
@@ -305,48 +354,6 @@ export default function EdgePropertyPanel({
           </details>
         )}
       </div>
-
-      {canEdit && (
-        <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
-          <h4 className="text-xs font-semibold text-blue-900 dark:text-blue-300">분기 대상 변경</h4>
-          <label className="flex flex-col gap-1">
-            시작 노드
-            <select value={newFromNodeId} onChange={(e) => setNewFromNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title} ({n.nodeCode})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            대상 노드
-            <select value={newToNodeId} onChange={(e) => setNewToNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title} ({n.nodeCode})
-                </option>
-              ))}
-            </select>
-          </label>
-          <textarea
-            rows={2}
-            value={retargetReason}
-            onChange={(e) => setRetargetReason(e.target.value)}
-            placeholder={isTechnical ? "변경 사유 (선택)" : "변경 사유 (필수)"}
-            className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <button
-            type="button"
-            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0)}
-            onClick={() => setConfirmingRetarget(true)}
-            className="self-start rounded-md border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
-          >
-            변경 검토
-          </button>
-          {newFromNodeId === newToNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
-        </div>
-      )}
 
       {canDelete && (
         <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">

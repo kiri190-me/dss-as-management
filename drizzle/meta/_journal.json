@@ -141,6 +141,139 @@
       "when": 1786580691338,
       "tag": "0019_repair_case_flowcharts_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786666088462,
+      "tag": "0020_repair_case_flowchart_node_instructions",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786685310279,
+      "tag": "0021_repair_case_billing_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786687812040,
+      "tag": "0022_customer_end_user_free_entry_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786802851335,
+      "tag": "0023_small_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786808531928,
+      "tag": "0024_demonic_squadron_supreme",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786868607144,
+      "tag": "0025_add_restore_flowchart_action_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786877108486,
+      "tag": "0026_flowchart_permanent_delete_schema_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786882160546,
+      "tag": "0027_audit_logs_schema_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786886018849,
+      "tag": "0028_repair_case_priority",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786889169386,
+      "tag": "0029_end_user_contacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786893476914,
+      "tag": "0030_product_model_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786940076907,
+      "tag": "0031_repair_case_permanent_delete_schema_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786949477812,
+      "tag": "0032_excel_import_persistence_schema_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786983772052,
+      "tag": "0033_skinny_mikhail_rasputin",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786983782167,
+      "tag": "0034_six_workflow_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786986943564,
+      "tag": "0035_partial_paid_pending_billing_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786986975035,
+      "tag": "0036_pending_billing_workflow_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786992946412,
+      "tag": "0037_legacy_import_state_set",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786996797270,
+      "tag": "0038_legacy_report_number",
+      "breakpoints": true
     }
   ]
 }

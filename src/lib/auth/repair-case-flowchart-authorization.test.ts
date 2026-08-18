@@ -11,29 +11,23 @@ test("all 5 roles may view repair-case flowcharts", () => {
   }
 });
 
-test("SUPER_ADMIN and ADMIN may mutate on any unlocked case, regardless of assignment", () => {
-  for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
-    assert.equal(canMutateRepairCaseFlowchart(role, { isAssignedToCase: false, isCaseLocked: false }), true);
+test("SUPER_ADMIN, ADMIN, and AS_ENGINEER may mutate any repair case's flowcharts (Checkpoint 3A — no assignment scoping)", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.equal(canMutateRepairCaseFlowchart(role, { isCaseLocked: false }), true, `${role} should be able to mutate any case`);
   }
 });
 
-test("AS_ENGINEER may mutate only on their own assigned unlocked case", () => {
-  assert.equal(canMutateRepairCaseFlowchart("AS_ENGINEER", { isAssignedToCase: true, isCaseLocked: false }), true);
-  assert.equal(canMutateRepairCaseFlowchart("AS_ENGINEER", { isAssignedToCase: false, isCaseLocked: false }), false);
-});
-
-test("SALES and INVENTORY_MANAGER may never mutate, even assigned/unlocked", () => {
+test("SALES and INVENTORY_MANAGER may never mutate", () => {
   for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
-    assert.equal(canMutateRepairCaseFlowchart(role, { isAssignedToCase: true, isCaseLocked: false }), false);
+    assert.equal(canMutateRepairCaseFlowchart(role, { isCaseLocked: false }), false);
   }
 });
 
-test("the lock check is unconditional — no role bypass, including SUPER_ADMIN", () => {
-  for (const role of ALL_ROLES) {
-    assert.equal(
-      canMutateRepairCaseFlowchart(role, { isAssignedToCase: true, isCaseLocked: true }),
-      false,
-      `${role} must be blocked on a locked case`
-    );
+test("shipment-lock removal policy: isCaseLocked no longer blocks any role, including on an already-shipped case", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.equal(canMutateRepairCaseFlowchart(role, { isCaseLocked: true }), true, `${role} must stay able to mutate a shipped case`);
+  }
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canMutateRepairCaseFlowchart(role, { isCaseLocked: true }), false, `${role} is still denied by role, not by lock`);
   }
 });

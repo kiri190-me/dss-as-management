@@ -5,41 +5,53 @@ import { useRouter } from "next/navigation";
 import { createPartRequestAction, cancelPartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import type { PartListRow } from "@/lib/db/queries/inventory";
 import type { OwnPartRequestRow } from "@/lib/db/queries/inventory-part-requests";
-import { inventoryPartRequestStatusLabels } from "@/lib/domain/inventory-types";
-
-type CartLine = { partId: string; partName: string; quantity: string; note: string };
+import {
+  inventoryPartRequestStatusLabels,
+  ownerScopedAvailability,
+  STOCK_OWNER_CODES,
+  stockOwnerLabels,
+  stockOwnerLabelOrUnspecified,
+  type StockOwner,
+} from "@/lib/domain/inventory-types";
+import { applyCartLinePatch, type CartLine } from "@/lib/domain/inventory-part-request-cart";
 
 /**
- * AS_ENGINEER's 부품 요청 section, embedded in their assigned repair-case
- * detail page. Submitting never reserves or deducts stock (plan §12) —
- * availability shown here is informational only. The server independently
- * re-checks assignment/lock/authorization regardless of what this section
- * renders — a disabled/hidden form here is a UX convenience only.
+ * AS_ENGINEER's 부품 요청 section, embedded in a repair-case detail page —
+ * Parts Request permission checkpoint: any AS_ENGINEER may submit a request
+ * for any repair case, not only their own assigned ones (this component is
+ * only ever rendered for an AS_ENGINEER at all — see [id]/page.tsx's
+ * partRequestData gate, which is role-only). Submitting never reserves or
+ * deducts stock (plan §12) — availability shown here is informational only.
+ * The server independently re-checks role/authorization regardless of what
+ * this section renders — a disabled/hidden form here is a UX convenience
+ * only.
+ *
+ * Shipment-lock removal policy: this section no longer takes an
+ * isCaseLocked prop and always shows the create form — a shipped case's
+ * part requests stay fully creatable, matching canCreatePartRequest
+ * (inventory-authorization.ts), which the server independently enforces
+ * regardless.
  */
 export default function PartRequestSection({
   repairCaseId,
-  isCaseLocked,
-  isAssignedToCase,
   availableParts,
+  ownerAvailabilityByPartId,
   ownRequests,
 }: {
   repairCaseId: string;
-  isCaseLocked: boolean;
-  isAssignedToCase: boolean;
   availableParts: PartListRow[];
+  /** 소유구분-scoped 가용 수량 checkpoint — a missing (partId, owner) entry means 0, never "unknown". */
+  ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
   ownRequests: OwnPartRequestRow[];
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [requestNote, setRequestNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const idempotencyKeyRef = useRef<string | null>(null);
-
-  const canCreate = isAssignedToCase && !isCaseLocked;
 
   const filteredParts = availableParts.filter((p) => {
     if (!search.trim()) return false;
@@ -54,7 +66,7 @@ export default function PartRequestSection({
 
   function addToCart(part: PartListRow) {
     if (cart.some((line) => line.partId === part.id)) return;
-    setCart((prev) => [...prev, { partId: part.id, partName: part.partName, quantity: "1", note: "" }]);
+    setCart((prev) => [...prev, { partId: part.id, partName: part.partName, quantity: "1", owner: "", note: "" }]);
   }
 
   function removeFromCart(partId: string) {
@@ -62,7 +74,7 @@ export default function PartRequestSection({
   }
 
   function updateCartLine(partId: string, patch: Partial<CartLine>) {
-    setCart((prev) => prev.map((line) => (line.partId === partId ? { ...line, ...patch } : line)));
+    setCart((prev) => applyCartLinePatch(prev, partId, patch));
   }
 
   function getOrCreateIdempotencyKey(): string {
@@ -75,14 +87,18 @@ export default function PartRequestSection({
       setErrorMessage("요청할 부품을 1개 이상 추가해 주세요.");
       return;
     }
-    const items: { partId: string; quantity: number; note?: string | null }[] = [];
+    const items: { partId: string; quantity: number; owner: StockOwner; note?: string | null }[] = [];
     for (const line of cart) {
       const quantity = Number(line.quantity);
       if (!Number.isInteger(quantity) || quantity <= 0) {
         setErrorMessage(`${line.partName}의 수량은 1 이상의 정수여야 합니다.`);
         return;
       }
-      items.push({ partId: line.partId, quantity, note: line.note || null });
+      if (!line.owner) {
+        setErrorMessage(`${line.partName}의 소유구분을 선택해 주세요.`);
+        return;
+      }
+      items.push({ partId: line.partId, quantity, owner: line.owner, note: line.note || null });
     }
 
     setIsSubmitting(true);
@@ -90,7 +106,7 @@ export default function PartRequestSection({
     const result = await createPartRequestAction({
       repairCaseId,
       items,
-      note: requestNote || null,
+      note: null,
       idempotencyKey: getOrCreateIdempotencyKey(),
     });
     setIsSubmitting(false);
@@ -100,7 +116,6 @@ export default function PartRequestSection({
     }
     idempotencyKeyRef.current = null;
     setCart([]);
-    setRequestNote("");
     setSearch("");
     router.refresh();
   }
@@ -127,17 +142,7 @@ export default function PartRequestSection({
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">부품 요청</h2>
 
-      {isCaseLocked && (
-        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-          이 수리 건이 잠금되어 새 부품 요청을 생성할 수 없습니다. 기존 요청의 취소는 계속 가능합니다.
-        </p>
-      )}
-      {!isAssignedToCase && !isCaseLocked && (
-        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">이 수리 건에 배정된 담당자만 부품을 요청할 수 있습니다.</p>
-      )}
-
-      {canCreate && (
-        <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-3 flex flex-col gap-2">
           <input
             type="text"
             placeholder="재고 조회: 품명 / 품명2 / 도번 / 교산 품번 검색"
@@ -173,12 +178,16 @@ export default function PartRequestSection({
                   <tr>
                     <th className="px-2 py-1">부품</th>
                     <th className="px-2 py-1">요청 수량</th>
+                    <th className="px-2 py-1">소유구분 *</th>
+                    <th className="px-2 py-1">가용</th>
                     <th className="px-2 py-1">항목 메모</th>
                     <th className="px-2 py-1" />
                   </tr>
                 </thead>
                 <tbody>
-                  {cart.map((line) => (
+                  {cart.map((line) => {
+                    const availability = ownerScopedAvailability(ownerAvailabilityByPartId, line.partId, line.owner);
+                    return (
                     <tr key={line.partId} className="border-t border-zinc-100 dark:border-zinc-800">
                       <td className="px-2 py-1">{line.partName}</td>
                       <td className="px-2 py-1">
@@ -190,6 +199,27 @@ export default function PartRequestSection({
                           onChange={(e) => updateCartLine(line.partId, { quantity: e.target.value })}
                           className="w-16 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
                         />
+                      </td>
+                      <td className="px-2 py-1">
+                        <select
+                          value={line.owner}
+                          onChange={(e) => updateCartLine(line.partId, { owner: e.target.value as StockOwner | "" })}
+                          className="rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                        >
+                          <option value="">선택</option>
+                          {STOCK_OWNER_CODES.map((code) => (
+                            <option key={code} value={code}>
+                              {stockOwnerLabels[code]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1 whitespace-nowrap">
+                        {availability === null ? (
+                          <span className="text-zinc-400 dark:text-zinc-500">소유구분을 선택해 주세요</span>
+                        ) : (
+                          <span>가용 {availability}개</span>
+                        )}
                       </td>
                       <td className="px-2 py-1">
                         <input
@@ -205,19 +235,12 @@ export default function PartRequestSection({
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
-
-          <textarea
-            placeholder="요청 메모 (선택)"
-            rows={2}
-            value={requestNote}
-            onChange={(e) => setRequestNote(e.target.value)}
-            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          />
 
           <div>
             <button
@@ -230,7 +253,6 @@ export default function PartRequestSection({
             </button>
           </div>
         </div>
-      )}
 
       {errorMessage && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMessage}</p>}
 
@@ -249,7 +271,8 @@ export default function PartRequestSection({
                 <ul className="mt-1 flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-300">
                   {request.items.map((item) => (
                     <li key={item.id}>
-                      {item.partName} — 요청 {item.requestedQuantity} / 불출 {item.issuedQuantity}
+                      {item.partName} ({stockOwnerLabelOrUnspecified(item.owner)}) — 요청 {item.requestedQuantity} / 불출 {item.issuedQuantity}
+                      <span className="block text-zinc-500 dark:text-zinc-400">항목 메모: {item.note ?? "-"}</span>
                     </li>
                   ))}
                 </ul>

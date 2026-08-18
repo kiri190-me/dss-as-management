@@ -23,31 +23,88 @@ export const accountApprovalStatusLabels: Record<AccountApprovalStatus, string> 
 
 export const WORKFLOW_TYPE_CODES = [
   "MATCHER",
+  "PAID_MATCHER",
+  "WARRANTY_MATCHER",
   "PAID_GENERATOR",
   "WARRANTY_GENERATOR",
+  "PAID_TOTAL_CONTROLLER",
+  "WARRANTY_TOTAL_CONTROLLER",
+  "PENDING_MATCHER",
+  "PENDING_GENERATOR",
+  "PENDING_TOTAL_CONTROLLER",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPE_CODES)[number];
+export const NEW_INTAKE_WORKFLOW_TYPE_CODES = [
+  "PAID_MATCHER",
+  "WARRANTY_MATCHER",
+  "PAID_GENERATOR",
+  "WARRANTY_GENERATOR",
+  "PAID_TOTAL_CONTROLLER",
+  "WARRANTY_TOTAL_CONTROLLER",
+] as const satisfies readonly WorkflowType[];
+export type NewIntakeWorkflowType = (typeof NEW_INTAKE_WORKFLOW_TYPE_CODES)[number];
+export const PENDING_BILLING_WORKFLOW_TYPE_CODES = [
+  "PENDING_MATCHER",
+  "PENDING_GENERATOR",
+  "PENDING_TOTAL_CONTROLLER",
+] as const satisfies readonly WorkflowType[];
+export type PendingBillingWorkflowType = (typeof PENDING_BILLING_WORKFLOW_TYPE_CODES)[number];
 export const workflowTypeLabels: Record<WorkflowType, string> = {
-  MATCHER: "Matcher",
+  MATCHER: "Matcher (기존 이력)",
+  PAID_MATCHER: "유상 Matcher",
+  WARRANTY_MATCHER: "무상(보증) Matcher",
   PAID_GENERATOR: "유상 Generator",
   WARRANTY_GENERATOR: "무상(보증) Generator",
+  PAID_TOTAL_CONTROLLER: "유상 Total Controller",
+  WARRANTY_TOTAL_CONTROLLER: "무상(보증) Total Controller",
+  PENDING_MATCHER: "추후결정 Matcher",
+  PENDING_GENERATOR: "추후결정 Generator",
+  PENDING_TOTAL_CONTROLLER: "추후결정 Total Controller",
 };
 
 /**
- * 아래 두 맵은 화면 표시 전용 데모 파생 값이다. DATABASE_DESIGN.md에는
- * "제품 구분"/"유상·무상" 컬럼이 별도로 정의되어 있지 않으며, 여기서는
- * 기존 WorkflowType 값 하나로부터 두 개의 표시용 문구를 파생시킨다.
- * 실제 DB 스키마에 이 두 컬럼을 그대로 추가한다는 결정이 아니다.
+ * "제품 구분"은 DATABASE_DESIGN.md에 별도 컬럼으로 정의되어 있지 않으며,
+ * 여기서는 기존 WorkflowType 값으로부터 표시용 문구를 파생시키는 화면
+ * 표시 전용 데모 값이다. 실제 DB 스키마에 이 컬럼을 그대로 추가한다는
+ * 결정이 아니다.
  */
 export const productCategoryLabels: Record<WorkflowType, string> = {
-  MATCHER: "Matcher",
+  MATCHER: "Matcher (기존 이력)",
+  PAID_MATCHER: "Matcher",
+  WARRANTY_MATCHER: "Matcher",
   PAID_GENERATOR: "Generator",
   WARRANTY_GENERATOR: "Generator",
+  PAID_TOTAL_CONTROLLER: "Total Controller",
+  WARRANTY_TOTAL_CONTROLLER: "Total Controller",
+  PENDING_MATCHER: "Matcher",
+  PENDING_GENERATOR: "Generator",
+  PENDING_TOTAL_CONTROLLER: "Total Controller",
 };
-export const paidOrWarrantyLabels: Record<WorkflowType, string> = {
-  MATCHER: "-",
-  PAID_GENERATOR: "유상",
-  WARRANTY_GENERATOR: "무상",
+
+/**
+ * 유상/무상 — migration 0021로 repair_cases.billing_type이 workflowType과
+ * 독립된 실제 컬럼이 되었다(A/S INTAKE UX 체크포인트, 감사 승인). 더 이상
+ * workflowType으로부터 유도하지 않는다. PAID/PARTIAL_PAID/WARRANTY는
+ * 최종 분류이고 PENDING_DECISION은 Excel 이관 전용 임시 분류다.
+ */
+export const BILLING_TYPE_CODES = [
+  "PAID",
+  "PARTIAL_PAID",
+  "WARRANTY",
+  "PENDING_DECISION",
+] as const;
+export type BillingType = (typeof BILLING_TYPE_CODES)[number];
+export const MANUAL_INTAKE_BILLING_TYPE_CODES = [
+  "PAID",
+  "PARTIAL_PAID",
+  "WARRANTY",
+] as const satisfies readonly BillingType[];
+export type ManualIntakeBillingType = (typeof MANUAL_INTAKE_BILLING_TYPE_CODES)[number];
+export const billingTypeLabels: Record<BillingType, string> = {
+  PAID: "유상",
+  PARTIAL_PAID: "일부유상",
+  WARRANTY: "무상",
+  PENDING_DECISION: "추후결정",
 };
 
 // 데모 전용 단순화 상태 값이다. 실제 스키마는 workflow_version/current_step +
@@ -139,6 +196,26 @@ export const workHistoryTypeLabels: Record<WorkHistoryType, string> = {
   OTHER: "기타",
 };
 
+/**
+ * migration 0023 — repair_case_work_records.record_kind. Author-selected at
+ * creation only (WorkRecordForm), never inferred/edited afterward. Not the
+ * same concept as WorkHistoryType above (an older, unrelated mock work-
+ * history event categorization) — do not conflate the two.
+ */
+export const WORK_RECORD_KIND_CODES = [
+  "GENERAL",
+  "INTAKE_INSPECTION_RESULT",
+  "DIAGNOSIS_REPAIR_SUMMARY",
+  "NEXT_PLANNED_ACTION",
+] as const;
+export type WorkRecordKind = (typeof WORK_RECORD_KIND_CODES)[number];
+export const workRecordKindLabels: Record<WorkRecordKind, string> = {
+  GENERAL: "일반",
+  INTAKE_INSPECTION_RESULT: "인수점검 결과",
+  DIAGNOSIS_REPAIR_SUMMARY: "진단/조치",
+  NEXT_PLANNED_ACTION: "다음 예정 작업",
+};
+
 export type User = {
   id: string;
   name: string;
@@ -179,6 +256,11 @@ export type RepairCase = {
   endUserId: string | null;
   productId: string;
   workflowType: WorkflowType;
+  /**
+   * 유상/무상 — workflowType과 독립된 필드다(migration 0021). 과거 MATCHER
+   * 행처럼 알 수 없는 값을 추측해 채우지 않으므로 nullable이다.
+   */
+  billingType: BillingType | null;
   status: RepairStatus;
   priority: Priority;
   assignedEngineerId: string | null;

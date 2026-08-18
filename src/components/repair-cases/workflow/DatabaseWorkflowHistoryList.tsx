@@ -6,6 +6,7 @@ const ACTION_LABELS: Record<WorkflowHistoryEntry["actionType"], string> = {
   HOLD_STARTED: "보류 시작",
   HOLD_RELEASED: "보류 해제",
   SHIPMENT_COMPLETED: "출하 완료 처리",
+  LEGACY_IMPORT_STATE_SET: "과거 상태 이관",
 };
 
 function formatDateTime(iso: string): string {

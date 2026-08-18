@@ -46,11 +46,6 @@ function ProgressSummary({ detail }: { detail: ExecutionDetail }) {
         <span>건너뜀 {skipped}</span>
         <span>차단됨 {blocked}</span>
       </div>
-      {detail.isCaseLocked && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-          이 접수 건은 잠금 상태입니다 — 실행 상태를 변경할 수 없습니다.
-        </p>
-      )}
     </div>
   );
 }
@@ -59,13 +54,11 @@ function NodeSection({
   title,
   nodes,
   actingUser,
-  isCaseLocked,
   emptyMessage,
 }: {
   title: string;
   nodes: ExecutionDetail["nodes"];
   actingUser: { id: string; role: string };
-  isCaseLocked: boolean;
   emptyMessage: string;
 }) {
   return (
@@ -77,7 +70,7 @@ function NodeSection({
         {nodes.length === 0 ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{emptyMessage}</p>
         ) : (
-          nodes.map((node) => <ExecutionNodeCard key={node.id} node={node} actingUser={actingUser} isCaseLocked={isCaseLocked} />)
+          nodes.map((node) => <ExecutionNodeCard key={node.id} node={node} actingUser={actingUser} />)
         )}
       </div>
     </div>
@@ -123,8 +116,10 @@ export default function ProcedureExecutionScreen({
   const doneNodes = executionDetail.nodes.filter((n) => n.status === "COMPLETED" || n.status === "SKIPPED");
   const blockedNodes = executionDetail.nodes.filter((n) => n.status === "BLOCKED");
 
-  const extraTaskEligible =
-    !executionDetail.isCaseLocked && (ORDINARY_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
+  // Shipment-lock removal policy: role-only now — see isBlockedByCaseLock
+  // (procedure-case-execution-authorization.ts), which the server
+  // independently enforces regardless of this UI hint.
+  const extraTaskEligible = (ORDINARY_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
 
   return (
     <div className="flex flex-col gap-4">
@@ -135,28 +130,24 @@ export default function ProcedureExecutionScreen({
         title="실행 가능"
         nodes={pendingNodes}
         actingUser={actingUser}
-        isCaseLocked={executionDetail.isCaseLocked}
         emptyMessage="대기 중인 작업이 없습니다."
       />
       <NodeSection
         title="진행 중"
         nodes={inProgressNodes}
         actingUser={actingUser}
-        isCaseLocked={executionDetail.isCaseLocked}
         emptyMessage="진행 중인 작업이 없습니다."
       />
       <NodeSection
         title="차단됨"
         nodes={blockedNodes}
         actingUser={actingUser}
-        isCaseLocked={executionDetail.isCaseLocked}
         emptyMessage="차단된 작업이 없습니다."
       />
       <NodeSection
         title="완료 / 건너뜀"
         nodes={doneNodes}
         actingUser={actingUser}
-        isCaseLocked={executionDetail.isCaseLocked}
         emptyMessage="완료되거나 건너뛴 작업이 없습니다."
       />
 

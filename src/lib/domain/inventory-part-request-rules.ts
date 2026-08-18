@@ -1,5 +1,5 @@
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
-import type { InventoryPartRequestStatus } from "./inventory-types";
+import { STOCK_OWNER_CODES, type InventoryPartRequestStatus, type StockOwner } from "./inventory-types";
 
 /**
  * Phase 5B-3 — pure rules for the Parts Request & Issue Workflow. No DOM,
@@ -78,18 +78,39 @@ export function safeAddQuantity(a: number, b: number): SafeAddResult {
 
 // ---- CREATE_REQUEST: raw item validation + duplicate-part merge ----
 
-export type RawRequestItem = { partId: string; quantity: number; note?: string | null };
-export type NormalizedRequestItem = { partId: string; quantity: number; note: string | null };
+/** owner is `unknown` — raw, unvalidated client input, same discipline as every other raw field here (validated by validateRawOwner, never trusted). */
+export type RawRequestItem = { partId: string; quantity: number; owner: unknown; note?: string | null };
+export type NormalizedRequestItem = { partId: string; quantity: number; owner: StockOwner; note: string | null };
+
+export type ValidateRawOwnerResult = { ok: true; owner: StockOwner } | { ok: false; message: string };
+
+/**
+ * Parts Request 소유구분 checkpoint — required on every NEW request item
+ * (never optional, never guessed/defaulted). Validated against the exact
+ * canonical stock_owner values (STOCK_OWNER_CODES) — reused, not
+ * duplicated. Historical rows predating this checkpoint are NULL in the DB
+ * (migration 0024) and are never produced by this validator; that NULL is
+ * a read-path/display concern only (see stockOwnerLabelOrUnspecified), not
+ * something this create-path validator ever emits.
+ */
+export function validateRawOwner(value: unknown): ValidateRawOwnerResult {
+  if (typeof value !== "string" || !(STOCK_OWNER_CODES as readonly string[]).includes(value)) {
+    return { ok: false, message: "소유구분을 선택해 주세요." };
+  }
+  return { ok: true, owner: value as StockOwner };
+}
 
 export type ValidateRawRequestItemsResult = { ok: true } | { ok: false; message: string };
 
-/** Step 1-2 of the approved CREATE_REQUEST order: reject an empty cart, then validate every raw line independently before any merge ever happens. */
+/** Step 1-2 of the approved CREATE_REQUEST order: reject an empty cart, then validate every raw line independently (including owner) before any merge ever happens. */
 export function validateRawRequestItems(rawItems: RawRequestItem[]): ValidateRawRequestItemsResult {
   if (rawItems.length === 0) return { ok: false, message: "요청할 부품을 1개 이상 선택해 주세요." };
   for (const item of rawItems) {
     if (!isValidUuid(item.partId)) return { ok: false, message: "부품 정보를 확인할 수 없습니다." };
     const quantityCheck = validateRawQuantity(item.quantity);
     if (!quantityCheck.ok) return quantityCheck;
+    const ownerCheck = validateRawOwner(item.owner);
+    if (!ownerCheck.ok) return ownerCheck;
   }
   return { ok: true };
 }
@@ -103,26 +124,37 @@ export type MergeDuplicateRequestItemsResult = { ok: true; items: NormalizedRequ
  * "\n" (empty if none), result sorted by partId — so the same logical cart
  * always normalizes to the same item list regardless of entry order (this
  * is what makes the CREATE_REQUEST fingerprint order-independent).
+ *
+ * owner is carried through per part, never silently reconciled: two raw
+ * lines for the same part with different owners is a genuine conflict
+ * (this table has exactly one owner value per request-item row) and is
+ * rejected outright, same discipline as the duplicate-quantity-sign
+ * behavior this function already has for its neighbors.
  */
 export function mergeDuplicateRequestItems(rawItems: RawRequestItem[]): MergeDuplicateRequestItemsResult {
-  const byPart = new Map<string, { quantity: number; notes: string[] }>();
+  const byPart = new Map<string, { quantity: number; owner: StockOwner; notes: string[] }>();
   for (const item of rawItems) {
+    const ownerCheck = validateRawOwner(item.owner);
+    if (!ownerCheck.ok) return { ok: false, message: ownerCheck.message };
     const normalizedNote = normalizeNote(item.note);
     const existing = byPart.get(item.partId);
     if (existing) {
+      if (existing.owner !== ownerCheck.owner) {
+        return { ok: false, message: "동일 부품에 서로 다른 소유구분이 지정되었습니다." };
+      }
       const sum = safeAddQuantity(existing.quantity, item.quantity);
       if (!sum.ok) return { ok: false, message: sum.message };
       existing.quantity = sum.value;
       if (normalizedNote) existing.notes.push(normalizedNote);
     } else {
-      byPart.set(item.partId, { quantity: item.quantity, notes: normalizedNote ? [normalizedNote] : [] });
+      byPart.set(item.partId, { quantity: item.quantity, owner: ownerCheck.owner, notes: normalizedNote ? [normalizedNote] : [] });
     }
   }
 
   const items: NormalizedRequestItem[] = [...byPart.entries()]
-    .map(([partId, { quantity, notes }]) => {
+    .map(([partId, { quantity, owner, notes }]) => {
       const dedupedSortedNotes = [...new Set(notes)].sort(compareOrdinal);
-      return { partId, quantity, note: dedupedSortedNotes.length > 0 ? dedupedSortedNotes.join("\n") : null };
+      return { partId, quantity, owner, note: dedupedSortedNotes.length > 0 ? dedupedSortedNotes.join("\n") : null };
     })
     .sort((a, b) => compareOrdinal(a.partId, b.partId));
 

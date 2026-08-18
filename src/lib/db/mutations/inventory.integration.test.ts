@@ -26,7 +26,7 @@ import { createRepairCase } from "./repair-cases";
 import { createDraftProcedureTemplateFromImport, publishProcedureTemplate } from "./procedure-templates";
 import { startProcedureExecution } from "./procedure-case-execution";
 import { createPart, receiveStock, consumeStock, returnStock } from "./inventory";
-import { getPartList, getPartDetail, getPartTransactionHistory, getReturnableUseTransactions } from "../queries/inventory";
+import { getPartList, getPartDetail, getPartTransactionHistory, getReturnableUseTransactions, getPartOwnerAvailability } from "../queries/inventory";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -49,7 +49,12 @@ const TEST_RECEIVED_AT = "2099-06-10";
 const TEST_SHIPMENT_DATE = "2099-06-20";
 const TEST_LOCATION = "TEST-SHELF-A";
 
-let realDataBaseline: { repairCaseCount: number; procedureTemplateCount: number; procedureCaseExecutionCount: number };
+let realDataBaseline: {
+  repairCaseCount: number;
+  procedureTemplateCount: number;
+  procedureCaseExecutionCount: number;
+  partsCount: number;
+};
 
 let superAdminId: string;
 let adminId: string;
@@ -87,6 +92,7 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
@@ -228,10 +234,16 @@ before(async () => {
     .from(procedureTemplates)
     .where(sql`code not like ${TEST_TEMPLATE_PREFIX + "%"}`);
   const [procedureCaseExecutionCount] = await db.select({ count: sql<number>`count(*)::int` }).from(procedureCaseExecutions);
+  // Real parts may already legitimately exist in a shared dev DB (this
+  // suite is not the only writer to `parts`, and inventory is no longer
+  // greenfield) — baselined here for the same "unchanged, not zero"
+  // treatment as the other three counts above.
+  const [partsCount] = await db.select({ count: sql<number>`count(*)::int` }).from(parts).where(sql`part_name not like ${TEST_PART_PREFIX + "%"}`);
   realDataBaseline = {
     repairCaseCount: repairCaseCount?.count ?? 0,
     procedureTemplateCount: procedureTemplateCount?.count ?? 0,
     procedureCaseExecutionCount: procedureCaseExecutionCount?.count ?? 0,
+    partsCount: partsCount?.count ?? 0,
   };
 });
 
@@ -553,7 +565,7 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
     if (!withDestination.ok) assert.equal(withDestination.code, "FORBIDDEN");
   });
 
-  test("14. a USE against a locked repair case is rejected with CASE_LOCKED for every role, including SUPER_ADMIN", async () => {
+  test("14. shipment-lock removal policy: USE on a locked (shipped) repair case no longer blocks the privileged roles; AS_ENGINEER remains denied by role, not lock", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
     await lockCase(created.id);
@@ -562,16 +574,30 @@ describe("inventory: USE authorization matrix (plan §9)", () => {
     assert.equal(received.ok, true);
     if (!received.ok) return;
 
-    for (const actorUserId of [superAdminId, adminId, inventoryManagerId, engineerId]) {
+    const engineerAttempt = await consumeStock({
+      partStockBalanceId: received.partStockBalanceId,
+      quantity: 1,
+      repairCaseId: created.id,
+      actorUserId: engineerId,
+      expectedVersion: received.version,
+    });
+    assert.equal(engineerAttempt.ok, false);
+    if (!engineerAttempt.ok) assert.equal(engineerAttempt.code, "FORBIDDEN");
+
+    // Each successful consume bumps the balance's version, so chain
+    // expectedVersion through the loop rather than reusing the stale
+    // original value.
+    let currentVersion = received.version;
+    for (const actorUserId of [superAdminId, adminId, inventoryManagerId]) {
       const result = await consumeStock({
         partStockBalanceId: received.partStockBalanceId,
         quantity: 1,
         repairCaseId: created.id,
         actorUserId,
-        expectedVersion: received.version,
+        expectedVersion: currentVersion,
       });
-      assert.equal(result.ok, false, `${actorUserId} should have been rejected`);
-      if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+      assert.equal(result.ok, true, `${actorUserId} should succeed: ${JSON.stringify(result)}`);
+      if (result.ok) currentVersion = result.version;
     }
   });
 });
@@ -739,6 +765,32 @@ describe("inventory: read queries", () => {
     assert.equal(results[0].totalQuantity, 7, "totalQuantity sums every bucket for this part");
   });
 
+  test("22b. getPartOwnerAvailability: a part with stock across multiple owners reports each owner's quantity separately, not an all-owner total", async () => {
+    const partId = await createTestPart();
+    await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 5, actorUserId: inventoryManagerId });
+    await receiveStock({ partId, owner: "KYOSAN", location: TEST_LOCATION, quantity: 3, actorUserId: inventoryManagerId });
+    await receiveStock({ partId, owner: "SERVICE_SPARE", location: TEST_LOCATION, quantity: 2, actorUserId: inventoryManagerId });
+
+    const rows = await getPartOwnerAvailability();
+    const forThisPart = rows.filter((r) => r.partId === partId);
+    const byOwner = new Map(forThisPart.map((r) => [r.owner, r.quantity]));
+    assert.equal(byOwner.get("DSS"), 5);
+    assert.equal(byOwner.get("KYOSAN"), 3);
+    assert.equal(byOwner.get("SERVICE_SPARE"), 2);
+    assert.equal(byOwner.get("TEST"), undefined, "an owner with zero balance rows must simply be absent, not present with 0");
+  });
+
+  test("22c. getPartOwnerAvailability: multiple locations for the same part+owner sum into one row, using the same aggregate as totalQuantity", async () => {
+    const partId = await createTestPart();
+    await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 4, actorUserId: inventoryManagerId });
+    await receiveStock({ partId, owner: "DSS", location: "TEST-SHELF-B", quantity: 6, actorUserId: inventoryManagerId });
+
+    const rows = await getPartOwnerAvailability();
+    const forThisPartAndOwner = rows.filter((r) => r.partId === partId && r.owner === "DSS");
+    assert.equal(forThisPartAndOwner.length, 1, "one row per (partId, owner) regardless of how many location buckets exist");
+    assert.equal(forThisPartAndOwner[0].quantity, 10, "must sum across every location bucket for that owner, same as getPartList's totalQuantity would for the whole part");
+  });
+
   test("23. getPartDetail returns the balance grid across all owner/location buckets", async () => {
     const partId = await createTestPart();
     await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 2, actorUserId: inventoryManagerId });
@@ -824,6 +876,10 @@ describe("inventory: real-data safety", () => {
     assert.equal(realCaseCount?.count ?? 0, realDataBaseline.repairCaseCount, "no real repair case was created, modified, or removed by this suite");
     assert.equal(realTemplateCount?.count ?? 0, realDataBaseline.procedureTemplateCount, "no real procedure template was touched by this suite");
     assert.equal(realExecutionCount?.count ?? 0, realDataBaseline.procedureCaseExecutionCount, "no real procedure-case execution was touched by this suite");
-    assert.equal(realPartsCount?.count ?? 0, 0, "no non-test-prefixed part should ever be created by this suite (inventory is greenfield)");
+    assert.equal(
+      realPartsCount?.count ?? 0,
+      realDataBaseline.partsCount,
+      "the non-test-prefixed part count must be unchanged from this suite's own before() baseline — this suite never asserts it's zero, since real parts may legitimately already exist in a shared dev DB"
+    );
   });
 });

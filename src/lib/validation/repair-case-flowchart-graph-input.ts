@@ -24,6 +24,7 @@ export function isValidBranchType(value: unknown): value is string {
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 4000;
+const MAX_INSTRUCTIONS_LENGTH = 4000;
 const MAX_BRANCH_LABEL_LENGTH = 200;
 
 export type NodeTitleValidationResult = { ok: true; title: string } | { ok: false; error: string };
@@ -51,6 +52,20 @@ export function validateNodeDescription(value: unknown): NodeDescriptionValidati
     return { ok: false, error: `노드 설명은 ${MAX_DESCRIPTION_LENGTH}자를 초과할 수 없습니다.` };
   }
   return { ok: true, description: trimmed };
+}
+
+export type NodeInstructionsValidationResult = { ok: true; instructions: string | null } | { ok: false; error: string };
+
+/** Same shape/limit as validateNodeDescription (own copy, per this module's per-field convention). */
+export function validateNodeInstructions(value: unknown): NodeInstructionsValidationResult {
+  if (value === null || value === undefined) return { ok: true, instructions: null };
+  if (typeof value !== "string") return { ok: false, error: "작업 지시 요약 형식이 올바르지 않습니다." };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: true, instructions: null };
+  if (trimmed.length > MAX_INSTRUCTIONS_LENGTH) {
+    return { ok: false, error: `작업 지시 요약은 ${MAX_INSTRUCTIONS_LENGTH}자를 초과할 수 없습니다.` };
+  }
+  return { ok: true, instructions: trimmed };
 }
 
 export type BranchLabelValidationResult = { ok: true; branchLabel: string | null } | { ok: false; error: string };

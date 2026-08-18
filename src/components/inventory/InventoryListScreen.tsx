@@ -5,7 +5,7 @@ import Link from "next/link";
 import PartCreateDialog from "./PartCreateDialog";
 import InventoryTabs from "./InventoryTabs";
 import type { PartListRow } from "@/lib/db/queries/inventory";
-import { STOCK_OWNER_CODES, stockOwnerLabels } from "@/lib/domain/inventory-types";
+import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/domain/inventory-types";
 
 /** Same string-typed local mirror of canCreateOrEditPart's logic used throughout the Phase 5A client components (e.g. ExecutionNodeCard.tsx) — the server auth module's Role-typed functions aren't meant to be cast from a plain session-derived string prop; this is a UX convenience only, the mutation layer re-checks independently regardless. */
 function canCreateOrEditPart(role: string): boolean {
@@ -26,11 +26,14 @@ function canProcessPartRequests(role: string): boolean {
  */
 export default function InventoryListScreen({
   parts,
+  ownerAvailabilityByPartId,
   categories,
   itemTypes,
   actingUserRole,
 }: {
   parts: PartListRow[];
+  /** 소유구분별 재고 수량 checkpoint — grouped (part, owner) sum of part_stock_balances.current_quantity, same aggregate totalQuantity already uses. A missing (partId, owner) entry means 0, never "unknown". */
+  ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
   categories: string[];
   itemTypes: string[];
   actingUserRole: string;
@@ -102,7 +105,7 @@ export default function InventoryListScreen({
               <th className="px-3 py-2">교산 품번</th>
               <th className="px-3 py-2">도번</th>
               <th className="px-3 py-2">분류</th>
-              <th className="px-3 py-2 text-right">총 재고</th>
+              <th className="px-3 py-2 text-right">재고 수량</th>
             </tr>
           </thead>
           <tbody>
@@ -124,7 +127,21 @@ export default function InventoryListScreen({
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-300">{p.kyosanPartNo ?? "-"}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-300">{p.drawingNo ?? "-"}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-300">{p.category ?? "-"}</td>
-                  <td className="px-3 py-2 text-right text-zinc-900 dark:text-zinc-50">{p.totalQuantity}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-zinc-900 dark:text-zinc-50">총 {p.totalQuantity}</span>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {STOCK_OWNER_CODES.map((owner) => (
+                          <span
+                            key={owner}
+                            className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                          >
+                            {stockOwnerLabels[owner]} {ownerAvailabilityByPartId[p.id]?.[owner] ?? 0}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </td>
                 </tr>
               ))
             )}

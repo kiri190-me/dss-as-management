@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { getPartList, getDistinctCategories, getDistinctItemTypes } from "@/lib/db/queries/inventory";
+import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability, getDistinctCategories, getDistinctItemTypes } from "@/lib/db/queries/inventory";
 import InventoryListScreen from "@/components/inventory/InventoryListScreen";
 
 export const metadata: Metadata = {
@@ -26,7 +26,21 @@ export default async function InventoryPage() {
     );
   }
 
-  const [parts, categories, itemTypes] = await Promise.all([getPartList(), getDistinctCategories(), getDistinctItemTypes()]);
+  const [parts, ownerAvailabilityRows, categories, itemTypes] = await Promise.all([
+    getPartList(),
+    getPartOwnerAvailability(),
+    getDistinctCategories(),
+    getDistinctItemTypes(),
+  ]);
+  const ownerAvailabilityByPartId = groupPartOwnerAvailability(ownerAvailabilityRows);
 
-  return <InventoryListScreen parts={parts} categories={categories} itemTypes={itemTypes} actingUserRole={actingUser.role} />;
+  return (
+    <InventoryListScreen
+      parts={parts}
+      ownerAvailabilityByPartId={ownerAvailabilityByPartId}
+      categories={categories}
+      itemTypes={itemTypes}
+      actingUserRole={actingUser.role}
+    />
+  );
 }

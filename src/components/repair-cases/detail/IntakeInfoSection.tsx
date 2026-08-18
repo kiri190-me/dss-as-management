@@ -66,10 +66,17 @@ export default function IntakeInfoSection({
             value={resolved.customerRequestedDueDate ?? "-"}
           />
           <Field
+            label="사내 목표 검수 완료일"
+            value={resolved.internalTargetInspectionCompletionDate ?? "-"}
+          />
+          <Field
             label="사내 목표 출하일"
             value={resolved.internalTargetShipmentDate ?? "-"}
           />
           <Field label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
+          <Field label="담당자 성함" value={resolved.contactName ?? "-"} />
+          <Field label="연락처(전화)" value={resolved.contactPhone ?? "-"} />
+          <Field label="연락처(이메일)" value={resolved.contactEmail ?? "-"} />
         </dl>
       )}
     </section>

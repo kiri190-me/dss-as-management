@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { requireActiveTestDatabase } from "./test-database-safety";
 
 // No "server-only" import here on purpose — this module is also loaded
 // directly by standalone tsx scripts (scripts/seed-dev-db.ts,
@@ -14,6 +15,10 @@ if (!databaseUrl) {
   throw new Error(
     "DATABASE_URL is not set. Define it in .env.local (see .env.example) before using the database client."
   );
+}
+
+if (process.env.DSS_DB_TEST_MODE === "1") {
+  requireActiveTestDatabase(databaseUrl);
 }
 
 // Dev-safe singleton: without this, every hot-reload in `next dev` would

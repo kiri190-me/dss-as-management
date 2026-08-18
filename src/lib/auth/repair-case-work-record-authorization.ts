@@ -16,14 +16,16 @@ import type { Role } from "@/lib/domain/types";
  *    visibility), so work-record visibility follows the same "if you can
  *    open this case, you can read its work records" rule as every other
  *    section on the page.
- *  - Create: SUPER_ADMIN/ADMIN on any unlocked case; AS_ENGINEER only on
- *    an unlocked case they are directly assigned to. SALES/
- *    INVENTORY_MANAGER never create.
- *  - Invalidate: SUPER_ADMIN/ADMIN only, only on an unlocked case. Never
- *    AS_ENGINEER (not even their own record), never SALES/
- *    INVENTORY_MANAGER. No hidden SUPER_ADMIN bypass of the lock check —
- *    checked first, unconditionally, same discipline as
- *    isBlockedByCaseLock in procedure-case-execution-authorization.ts.
+ *  - Create: SUPER_ADMIN/ADMIN on any case; AS_ENGINEER only on a case they
+ *    are directly assigned to. SALES/INVENTORY_MANAGER never create.
+ *  - Invalidate: SUPER_ADMIN/ADMIN only. Never AS_ENGINEER (not even their
+ *    own record), never SALES/INVENTORY_MANAGER.
+ *  - Shipment-lock removal policy: `ctx.isCaseLocked` is intentionally
+ *    still accepted by both functions below (every call site keeps passing
+ *    the real repair_cases.is_locked value, unchanged) but is no longer
+ *    read — a shipped case's work records stay fully create/invalidate-able.
+ *    See isBlockedByShipmentLock (repair-case-edit-authorization.ts) for the
+ *    full policy-change rationale.
  *  - There is no edit authorization function at all — no mutation exists
  *    to edit a work record's text, for any role.
  */
@@ -37,9 +39,9 @@ export type CreateWorkRecordContext = {
   isCaseLocked: boolean;
 };
 
-/** AS_ENGINEER may only create on their own assigned case; SUPER_ADMIN/ADMIN may create on any case. The lock check is unconditional and checked first — no role bypass. */
+/** AS_ENGINEER may only create on their own assigned case; SUPER_ADMIN/ADMIN may create on any case. */
 export function canCreateWorkRecord(role: Role, ctx: CreateWorkRecordContext): boolean {
-  if (ctx.isCaseLocked) return false;
+  void ctx.isCaseLocked;
   if (role === "SUPER_ADMIN" || role === "ADMIN") return true;
   if (role === "AS_ENGINEER") return ctx.isAssignedToCase;
   return false;
@@ -49,8 +51,8 @@ export type InvalidateWorkRecordContext = {
   isCaseLocked: boolean;
 };
 
-/** SUPER_ADMIN/ADMIN only, and only on an unlocked case — never AS_ENGINEER, regardless of authorship. */
+/** SUPER_ADMIN/ADMIN only — never AS_ENGINEER, regardless of authorship. */
 export function canInvalidateWorkRecord(role: Role, ctx: InvalidateWorkRecordContext): boolean {
-  if (ctx.isCaseLocked) return false;
+  void ctx.isCaseLocked;
   return role === "SUPER_ADMIN" || role === "ADMIN";
 }

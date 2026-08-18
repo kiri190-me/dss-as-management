@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -15,6 +16,34 @@ import { customers, endUsers } from "./customers";
 import { products } from "./products";
 import { users } from "./users";
 import { exceptionStatuses, workflowSteps, workflowVersions } from "./workflow";
+
+/**
+ * 유상/무상 — independent of workflowType (A/S INTAKE UX 체크포인트 감사
+ * 승인). workflowType은 그대로 워크플로 템플릿/버전/단계 선택자로만 남고,
+ * billing_type은 신규 접수부터 애플리케이션 레벨에서 별도로 입력받는
+ * 비즈니스 분류 값이다. 일반 접수는 세 최종값만, Excel 이관은 확정 전
+ * PENDING_DECISION도 허용한다. 과거 데이터를 추측하지 않기 위해 nullable —
+ * PAID_GENERATOR/WARRANTY_GENERATOR였던 기존 행만 확실하게 백필하고,
+ * MATCHER였던 기존 행은 NULL로 남긴다(마이그레이션 파일 참고).
+ */
+export const billingTypeEnum = pgEnum("billing_type", [
+  "PAID",
+  "PARTIAL_PAID",
+  "WARRANTY",
+  "PENDING_DECISION",
+]);
+
+/**
+ * 우선순위 — domain/types.ts의 PRIORITY_CODES(LOW/NORMAL/HIGH/URGENT)와 값이
+ * 정확히 일치해야 한다(billingTypeEnum/BILLING_TYPE_CODES와 같은 원칙 —
+ * 스키마 레이어는 도메인 레이어를 import하지 않으므로 값을 그대로 복제해
+ * 유지한다; 둘 중 하나를 바꾸면 반드시 같이 바꿀 것). NOT NULL DEFAULT
+ * 'NORMAL' — billing_type과 달리 과거 데이터를 추측해야 하는 모호함이 없다
+ * (지금까지 이 컬럼 자체가 없어 모든 DB 행이 이미 매퍼에서 "NORMAL"로
+ * 고정 표시되고 있었으므로, 실제 컬럼을 만들 때도 같은 값으로 시작하는 것이
+ * 유일하게 맞는 백필이다).
+ */
+export const priorityEnum = pgEnum("priority", ["LOW", "NORMAL", "HIGH", "URGENT"]);
 
 /**
  * intake_number allocator (MISSING — documented for the next gate):
@@ -53,10 +82,13 @@ import { exceptionStatuses, workflowSteps, workflowVersions } from "./workflow";
  * Fields still intentionally NOT carried over from the demo/local intake
  * layer, because they are not documented anywhere in DATABASE_DESIGN.md,
  * PROJECT_REQUIREMENTS.md or API_SPECIFICATION.md and were not approved for
- * persistence: `priority`, PDF/export metadata, attachment fields,
- * work-history fields, approval fields. The flat `status` (RepairStatus)
- * field is also excluded — authoritative state is current_workflow_step_id
- * (+ nullable exception_status_id) instead.
+ * persistence: PDF/export metadata, attachment fields, work-history fields,
+ * approval fields. The flat `status` (RepairStatus) field is also excluded
+ * — authoritative state is current_workflow_step_id (+ nullable
+ * exception_status_id) instead. `priority` WAS in this excluded list
+ * (fixed to a non-persisted "NORMAL" placeholder in the row mapper) until
+ * the 인수 정보 priority-editing checkpoint added the real `priority` column
+ * below — see priorityEnum's own comment.
  *
  * `internal_target_inspection_completion_date` / `delay_reason` (Stage G-3R
  * Batch 1): both nullable, no default, matching the same intake-field
@@ -102,6 +134,12 @@ export const repairCases = pgTable(
       () => users.id,
       { onDelete: "restrict" }
     ),
+    // 유상/무상 — workflowType과 독립적인 별도 필드다(파일 상단 billingTypeEnum
+    // 주석 참고). nullable: 신규 접수는 애플리케이션 레벨에서 필수로 받지만,
+    // 과거 MATCHER 행은 추측할 근거가 없어 NULL로 남는다.
+    billingType: billingTypeEnum("billing_type"),
+    // 인수 정보 편집 폼의 우선순위 필드 — priorityEnum 자체 주석 참고.
+    priority: priorityEnum("priority").notNull().default("NORMAL"),
     receivedAt: date("received_at").notNull(),
     customerRequestedDueDate: date("customer_requested_due_date"),
     internalTargetInspectionCompletionDate: date(
@@ -109,6 +147,9 @@ export const repairCases = pgTable(
     ),
     internalTargetShipmentDate: date("internal_target_shipment_date"),
     actualShipmentDate: date("actual_shipment_date"),
+    // Excel legacy `목록` A-column identifier. Nullable, non-unique and never
+    // auto-numbered; the future official report_number is a separate concept.
+    legacyReportNumber: text("legacy_report_number"),
     delayReason: text("delay_reason"),
     isLocked: boolean("is_locked").notNull().default(false),
     // Full free text from the intake UI. Nullable (not "") — "not entered"

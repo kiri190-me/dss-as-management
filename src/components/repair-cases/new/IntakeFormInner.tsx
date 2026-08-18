@@ -4,19 +4,29 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   PRIORITY_CODES,
-  WORKFLOW_TYPE_CODES,
+  billingTypeLabels,
+  MANUAL_INTAKE_BILLING_TYPE_CODES,
   priorityLabels,
   workflowTypeLabels,
+  type BillingType,
 } from "@/lib/domain/types";
+import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
+import {
+  deriveWorkflowType,
+  workflowKindLabels,
+  workflowKindOf,
+  type WorkflowKind,
+} from "@/lib/domain/workflow-kind";
 import { mockCustomers, mockEndUsers, mockUsers } from "@/lib/domain/mock-data";
 import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
 import { useIntakeDraft } from "@/lib/domain/local/use-intake-draft";
 import type { IntakeDraftData } from "@/lib/domain/local/draft-storage";
-import { estimateIntakeNumber } from "@/lib/domain/local/intake-number";
+import { estimateIntakeNumber, isValidIntakeNumberFormat } from "@/lib/domain/local/intake-number";
 import { submitNewLocalCase, type IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { findProductHistoryMatchesForDraft } from "@/lib/domain/local/product-history-match";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
+import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -27,38 +37,66 @@ import DraftStatusLine from "./DraftStatusLine";
 
 type FieldKey =
   | "customerId"
+  | "endUserId"
   | "assignedEngineerId"
+  | "billingType"
   | "receivedAt"
+  | "internalTargetInspectionCompletionDate"
   | "internalTargetShipmentDate"
   | "customerRequestedDueDate"
   | "modelName"
   | "lotNumber"
-  | "serialNumber";
+  | "serialNumber"
+  | "intakeNumber";
 
 const inputClass =
   "w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
 const labelClass = "text-xs text-zinc-500 dark:text-zinc-400";
 const errorClass = "mt-1 text-xs text-red-600 dark:text-red-400";
 
-function validateDraft(draft: IntakeDraftData): Partial<Record<FieldKey, string>> {
+function validateDraft(
+  draft: IntakeDraftData,
+  ctx: { requireProductModelSelection: boolean; canRegisterProductModel: boolean }
+): Partial<Record<FieldKey, string>> {
   const errors: Partial<Record<FieldKey, string>> = {};
 
-  if (!draft.customerId) errors.customerId = "고객사를 선택해 주세요.";
-  if (!draft.assignedEngineerId) errors.assignedEngineerId = "담당 엔지니어를 선택해 주세요.";
+  if (!draft.customerId && !draft.customerCreateNew) {
+    errors.customerId = draft.customerName.trim()
+      ? "등록된 고객사를 선택하거나 '새 고객사로 등록'을 눌러주세요."
+      : "고객사를 입력해 주세요.";
+  }
+  if (!draft.endUserId && !draft.endUserCreateNew && draft.endUserName.trim()) {
+    errors.endUserId = "등록된 End-User를 선택하거나 '새 End-User로 등록'을 눌러주세요.";
+  }
+
+  if (!draft.billingType) {
+    errors.billingType = "유상/무상을 선택해 주세요.";
+  }
 
   if (!isValidDateString(draft.receivedAt)) {
     errors.receivedAt = "인수일을 올바른 날짜로 입력해 주세요.";
   }
 
-  if (!draft.internalTargetShipmentDate) {
-    errors.internalTargetShipmentDate = "사내 목표 출하일을 입력해 주세요.";
-  } else if (!isValidDateString(draft.internalTargetShipmentDate)) {
-    errors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
-  } else if (
-    isValidDateString(draft.receivedAt) &&
-    !isNotEarlierThan(draft.internalTargetShipmentDate, draft.receivedAt)
-  ) {
-    errors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+  if (draft.internalTargetInspectionCompletionDate) {
+    if (!isValidDateString(draft.internalTargetInspectionCompletionDate)) {
+      errors.internalTargetInspectionCompletionDate = "사내 목표 검수 완료일을 올바른 날짜로 입력해 주세요.";
+    } else if (
+      isValidDateString(draft.receivedAt) &&
+      !isNotEarlierThan(draft.internalTargetInspectionCompletionDate, draft.receivedAt)
+    ) {
+      errors.internalTargetInspectionCompletionDate = "사내 목표 검수 완료일은 인수일보다 이전일 수 없습니다.";
+    }
+  }
+
+  if (draft.internalTargetShipmentDate) {
+    if (!isValidDateString(draft.internalTargetShipmentDate)) {
+      errors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
+    } else if (
+      isValidDateString(draft.receivedAt) &&
+      !isNotEarlierThan(draft.internalTargetShipmentDate, draft.receivedAt)
+    ) {
+      errors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+    }
   }
 
   if (draft.customerRequestedDueDate) {
@@ -72,7 +110,13 @@ function validateDraft(draft: IntakeDraftData): Partial<Record<FieldKey, string>
     }
   }
 
-  if (!draft.modelName.trim()) errors.modelName = "Model을 입력해 주세요.";
+  if (!draft.modelName.trim()) {
+    errors.modelName = "Model을 입력해 주세요.";
+  } else if (ctx.requireProductModelSelection && !draft.productModelId && !draft.productModelCreateNew) {
+    errors.modelName = ctx.canRegisterProductModel
+      ? "등록된 Model을 선택하거나 '새 모델로 등록'을 눌러주세요."
+      : "등록된 Model을 선택해 주세요.";
+  }
   if (!draft.lotNumber.trim()) errors.lotNumber = "L/N을 입력해 주세요.";
   if (!draft.serialNumber.trim()) errors.serialNumber = "S/N을 입력해 주세요.";
 
@@ -81,10 +125,14 @@ function validateDraft(draft: IntakeDraftData): Partial<Record<FieldKey, string>
 
 const FIELD_ORDER: FieldKey[] = [
   "customerId",
+  "endUserId",
   "assignedEngineerId",
+  "billingType",
   "receivedAt",
+  "internalTargetInspectionCompletionDate",
   "internalTargetShipmentDate",
   "customerRequestedDueDate",
+  "intakeNumber",
   "modelName",
   "lotNumber",
   "serialNumber",
@@ -93,7 +141,17 @@ const FIELD_ORDER: FieldKey[] = [
 type IntakeFormInnerProps = {
   writeSource: "local" | "database";
   referenceData: IntakeReferenceData | null;
+  /** Product Model Master 연결 체크포인트 — SUPER_ADMIN/ADMIN만 true. DB
+   * 모드에서만 의미 있다(로컬 모드는 애초에 콤보박스를 렌더링하지 않는다). */
+  canRegisterProductModel: boolean;
 };
+
+// 사용자는 workflowType을 직접 고르지 않는다 — "종류"와 유상/무상
+// + "유상/무상" 두 값의 조합으로부터 내부적으로 유도한다(workflow-kind.ts —
+// 접수/상세 편집 양쪽이 재사용하는 단일 매핑 규칙). workflowType 자체는
+// 워크플로 템플릿/버전/단계 선택을 위해 그대로 저장/사용된다(변경 없음) —
+// 조합으로 신규 생성 가능한 6종 중 하나를 결정한다. 레거시 MATCHER는
+// 기존 이력 조회에만 사용하며 이 화면에서는 생성하지 않는다.
 
 // Server Action result codes → Korean message. Field-attributable codes
 // also populate `errors` via fieldErrors so the existing inline per-field
@@ -109,18 +167,22 @@ const RESULT_CODE_MESSAGES: Record<CreateRepairCaseResultCode, string> = {
   WORKFLOW_NOT_ALLOWED: "선택한 워크플로를 사용할 수 없습니다.",
   INTAKE_SEQUENCE_EXHAUSTED:
     "선택한 달의 인수번호를 모두 사용했습니다(99건 초과). 다른 인수일을 선택해 주세요.",
+  INTAKE_NUMBER_DUPLICATE: "이미 사용 중인 인수번호입니다. 다른 번호를 입력해 주세요.",
   CONFLICT: "저장 중 충돌이 발생했습니다. 다시 시도해 주세요.",
   DATABASE_UNAVAILABLE: "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   SUBMISSION_IN_PROGRESS: "이전 제출이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.",
 };
 
-export default function IntakeFormInner({ writeSource, referenceData }: IntakeFormInnerProps) {
+export default function IntakeFormInner({ writeSource, referenceData, canRegisterProductModel }: IntakeFormInnerProps) {
   const router = useRouter();
   const { cases: localCases } = useLocalRepairCases();
-  const { draft, updateDraft, isEmpty, savedAtLabel, clear, idempotencyKey } = useIntakeDraft();
+  const { draft, updateDraft, isEmpty, clear, idempotencyKey } = useIntakeDraft();
 
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // 인수번호는 제출 시점에만 최종 확정되므로 초안(useIntakeDraft)에는 절대
+  // 저장하지 않는다 — 이 override는 컴포넌트 로컬 state로만 존재한다.
+  const [intakeNumberOverride, setIntakeNumberOverride] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
   const fieldRefs = useRef<Partial<Record<FieldKey, HTMLElement | null>>>({});
@@ -128,9 +190,40 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
   // Database mode must offer real database rows (UUID-keyed) — the mock
   // string IDs (mockCustomers/mockEndUsers/mockUsers, e.g. "c-001") do not
   // exist in Postgres at all. Local mode keeps the exact original data
-  // source (referenceData is always null in that mode).
-  const customerOptions = referenceData ? referenceData.customers : mockCustomers;
-  const allEndUserOptions = referenceData ? referenceData.endUsers : mockEndUsers;
+  // source (referenceData is always null in that mode), plus any customer/
+  // End-User previously created by an earlier LOCAL intake (free-entry
+  // "새로 등록" — local mode has no separate customers table, so these are
+  // only discoverable by scanning existing local cases' own snapshots; see
+  // local-entity-resolve.ts for the matching submission-time counterpart).
+  const localCustomerOptions = useMemo(() => {
+    if (referenceData) return [];
+    const mockIds = new Set(mockCustomers.map((c) => c.id));
+    const seen = new Map<string, { id: string; name: string }>();
+    for (const c of localCases) {
+      if (mockIds.has(c.customerId) || seen.has(c.customerId)) continue;
+      seen.set(c.customerId, { id: c.customerId, name: c.customerNameSnapshot });
+    }
+    return [...seen.values()];
+  }, [referenceData, localCases]);
+  const localEndUserOptions = useMemo(() => {
+    if (referenceData) return [];
+    const mockIds = new Set(mockEndUsers.map((e) => e.id));
+    const seen = new Map<string, { id: string; customerId: string; name: string }>();
+    for (const c of localCases) {
+      if (!c.endUserId || !c.endUserNameSnapshot) continue;
+      if (mockIds.has(c.endUserId) || seen.has(c.endUserId)) continue;
+      seen.set(c.endUserId, { id: c.endUserId, customerId: c.customerId, name: c.endUserNameSnapshot });
+    }
+    return [...seen.values()];
+  }, [referenceData, localCases]);
+  const customerOptions = useMemo(
+    () => (referenceData ? referenceData.customers : [...mockCustomers, ...localCustomerOptions]),
+    [referenceData, localCustomerOptions]
+  );
+  const allEndUserOptions = useMemo(
+    () => (referenceData ? referenceData.endUsers : [...mockEndUsers, ...localEndUserOptions]),
+    [referenceData, localEndUserOptions]
+  );
 
   const eligibleEngineers = useMemo(
     () =>
@@ -142,6 +235,24 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
   const availableEndUsers = useMemo(
     () => allEndUserOptions.filter((e) => e.customerId === draft.customerId),
     [allEndUserOptions, draft.customerId]
+  );
+  const MAX_SUGGESTIONS = 8;
+  const customerSuggestions = useMemo(
+    () => rankSimilarNames(draft.customerName, customerOptions).slice(0, MAX_SUGGESTIONS),
+    [draft.customerName, customerOptions]
+  );
+  const endUserSuggestions = useMemo(
+    () => rankSimilarNames(draft.endUserName, availableEndUsers).slice(0, MAX_SUGGESTIONS),
+    [draft.endUserName, availableEndUsers]
+  );
+
+  // Product Model Master — DB 모드에서만 존재한다(referenceData가 null이면
+  // 로컬 모드이고, 아래 JSX가 그 경우 기존 자유 입력 필드를 그대로 렌더링해
+  // 이 목록/제안을 아예 쓰지 않는다).
+  const productModelOptions = useMemo(() => referenceData?.productModels ?? [], [referenceData]);
+  const productModelSuggestions = useMemo(
+    () => rankSimilarNames(draft.modelName, productModelOptions).slice(0, MAX_SUGGESTIONS),
+    [draft.modelName, productModelOptions]
   );
 
   const estimatedIntakeNumber = useMemo(
@@ -159,11 +270,103 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);
   }
 
-  function handleCustomerChange(customerId: string) {
-    const stillValid = allEndUserOptions.some(
-      (e) => e.id === draft.endUserId && e.customerId === customerId
-    );
-    updateDraft({ customerId, endUserId: stillValid ? draft.endUserId : null });
+  // 고객사/End-User는 편집 가능한 콤보박스다: 자유 입력 + 기존 등록 값
+  // 제안(rankSimilarNames로 정렬됨). 제출에 쓰이는 실제 값은 customerId/
+  // endUserId(해석된 ID)이거나, 사용자가 명시적으로 "새로 등록"을 눌렀을
+  // 때만 채워지는 customerCreateNew/endUserCreateNew다 — 입력한 문자열이
+  // 기존 이름과 정규화 기준(trim + 공백 축약 + 대소문자 무시) 정확히
+  // 일치할 때만 자동으로 연결된다. 일치하지 않으면 매 키 입력마다 새로
+  // 만들지 않고, validateDraft()가 이를 "선택하거나 새로 등록" 오류로
+  // 표시한다 — 명시적으로 등록 버튼을 눌러야만 새 레코드로 확정된다.
+  function handleCustomerNameChange(text: string) {
+    const match = customerOptions.find((c) => normalizeEntityName(c.name) === normalizeEntityName(text));
+    const resolvedCustomerId = match?.id ?? "";
+    // 새로 매칭된 고객사가 이전과 동일한 기존 고객사가 아니면(신규 등록으로
+    // 전환되거나, 다른 고객사로 바뀌거나, 매칭이 풀리는 모든 경우) End-User
+    // 선택/등록 의사를 전부 초기화한다 — 엉뚱한 고객사에 조용히 붙는 것을
+    // 막는다.
+    const customerUnchanged = resolvedCustomerId !== "" && resolvedCustomerId === draft.customerId;
+    updateDraft({
+      customerName: text,
+      customerId: resolvedCustomerId,
+      customerCreateNew: false,
+      ...(customerUnchanged ? {} : { endUserId: null, endUserName: "", endUserCreateNew: false }),
+    });
+  }
+
+  function handleCreateNewCustomer() {
+    updateDraft({ customerCreateNew: true });
+  }
+
+  function handleEndUserNameChange(text: string) {
+    if (!text.trim()) {
+      updateDraft({ endUserName: "", endUserId: null, endUserCreateNew: false });
+      return;
+    }
+    const match = availableEndUsers.find((e) => normalizeEntityName(e.name) === normalizeEntityName(text));
+    updateDraft({ endUserName: text, endUserId: match?.id ?? null, endUserCreateNew: false });
+  }
+
+  function handleCreateNewEndUser() {
+    updateDraft({ endUserCreateNew: true });
+  }
+
+  // 고객사/End-User와 같은 원칙 — DB 모드에서만 쓰인다(referenceData가 null인
+  // 로컬 모드에서는 이 핸들러들이 호출될 UI 자체가 없다). 텍스트가 기존
+  // Model과 정확히(정규화 기준) 일치할 때만 productModelId가 채워지고, 그
+  // 외에는 SUPER_ADMIN/ADMIN만 "새 모델로 등록"을 눌러 명시적으로 확정한다.
+  function handleModelNameChange(text: string) {
+    const match = productModelOptions.find((m) => normalizeEntityName(m.name) === normalizeEntityName(text));
+    updateDraft({ modelName: text, productModelId: match?.id ?? "", productModelCreateNew: false });
+  }
+
+  function handleCreateNewProductModel() {
+    updateDraft({ productModelCreateNew: true });
+  }
+
+  function handleWorkflowKindChange(kind: WorkflowKind) {
+    // 아직 유상/무상을 고르지 않은 채 종류를 선택하는 중간 상태는
+    // 정상이다 — deriveWorkflowType은 이럴 때 절대 추측하지 않고 null을
+    // 반환하므로, 내부 표시용 workflowType은 임시 기본값(PAID_GENERATOR)을
+    // 쓴다. 실제 제출은 billingType 자체의 필수 검증이 막는다.
+    const currentBillingType = draft.billingType === "" ? null : draft.billingType;
+    const fallbackByKind = {
+      MATCHER: "PAID_MATCHER",
+      GENERATOR: "PAID_GENERATOR",
+      TOTAL_CONTROLLER: "PAID_TOTAL_CONTROLLER",
+    } as const;
+    const workflowType = deriveWorkflowType(kind, currentBillingType) ?? fallbackByKind[kind];
+    updateDraft({ workflowType });
+  }
+
+  function handleBillingTypeChange(billingType: BillingType | "") {
+    const resolvedBillingType = billingType === "" ? null : billingType;
+    const workflowType =
+      deriveWorkflowType(workflowKindOf(draft.workflowType), resolvedBillingType) ?? draft.workflowType;
+    updateDraft({ billingType, workflowType });
+  }
+
+  // 사내 목표 검수 완료일 기본값 = 인수일 + 14일. 사용자가 이 필드를 아직
+  // 직접 손대지 않은 동안(internalTargetInspectionCompletionDateTouched가
+  // false인 동안)에만 인수일 변경 시 자동으로 다시 계산한다 — 한 번이라도
+  // 직접 손대면(빈 값으로 지우는 것 포함) 그 이후로는 인수일이 바뀌어도
+  // 절대 덮어쓰지 않는다(draft-storage.ts의 타입 주석 참고).
+  function handleReceivedAtChange(value: string) {
+    updateDraft({
+      receivedAt: value,
+      internalTargetInspectionCompletionDate: nextTargetInspectionCompletionDate({
+        newReceivedAt: value,
+        touched: draft.internalTargetInspectionCompletionDateTouched,
+        currentValue: draft.internalTargetInspectionCompletionDate,
+      }),
+    });
+  }
+
+  function handleInternalTargetInspectionCompletionDateChange(value: string) {
+    updateDraft({
+      internalTargetInspectionCompletionDate: value,
+      internalTargetInspectionCompletionDateTouched: true,
+    });
   }
 
   function focusFirstInvalid(fieldErrors: Partial<Record<FieldKey, string>>) {
@@ -185,23 +388,40 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
     // even if a click somehow lands before the disabled attribute commits.
     if (isSubmitting) return;
 
-    const fieldErrors = validateDraft(draft);
+    const fieldErrors = validateDraft(draft, {
+      requireProductModelSelection: writeSource === "database",
+      canRegisterProductModel,
+    });
+    const trimmedIntakeNumberOverride = intakeNumberOverride.trim();
+    if (trimmedIntakeNumberOverride && !isValidIntakeNumberFormat(trimmedIntakeNumberOverride)) {
+      fieldErrors.intakeNumber = "인수번호 형식이 올바르지 않습니다. (예: D260601)";
+    }
     setErrors(fieldErrors);
     if (Object.keys(fieldErrors).length > 0) {
       focusFirstInvalid(fieldErrors);
       return;
     }
+    // validateDraft() above already required this to be non-empty — this
+    // guard only gives TS real narrowing from BillingType | "" to BillingType.
+    if (!draft.billingType) return;
 
     const input: IntakeSubmissionInput = {
       workflowType: draft.workflowType,
-      customerId: draft.customerId,
+      billingType: draft.billingType,
+      customerId: draft.customerId || null,
+      newCustomerName: draft.customerCreateNew ? draft.customerName.trim() : null,
       endUserId: draft.endUserId,
-      assignedEngineerId: draft.assignedEngineerId,
+      newEndUserName: draft.endUserCreateNew ? draft.endUserName.trim() : null,
+      assignedEngineerId: draft.assignedEngineerId || null,
       priority: draft.priority,
       receivedAt: draft.receivedAt,
       customerRequestedDueDate: draft.customerRequestedDueDate || null,
-      internalTargetShipmentDate: draft.internalTargetShipmentDate,
+      internalTargetInspectionCompletionDate: draft.internalTargetInspectionCompletionDate || null,
+      internalTargetShipmentDate: draft.internalTargetShipmentDate || null,
+      intakeNumber: trimmedIntakeNumberOverride || null,
       modelName: draft.modelName,
+      productModelId: draft.productModelCreateNew ? null : draft.productModelId || null,
+      newProductModelName: draft.productModelCreateNew ? draft.modelName.trim() : null,
       lotNumber: draft.lotNumber,
       serialNumber: draft.serialNumber,
       partNumber: draft.partNumber,
@@ -209,9 +429,6 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
       externalConditionSummary: draft.externalConditionSummary,
       reasonForRemoval: draft.reasonForRemoval,
       reportedSymptom: draft.reportedSymptom,
-      intakeInspectionResult: draft.intakeInspectionResult,
-      currentDiagnosisSummary: draft.currentDiagnosisSummary,
-      nextPlannedAction: draft.nextPlannedAction,
       notes: draft.notes,
       contactName: draft.contactName,
       contactPhone: draft.contactPhone,
@@ -247,7 +464,14 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
         SEQUENCE_EXHAUSTED:
           "선택한 달의 인수번호를 모두 사용했습니다(99건 초과). 다른 인수일을 선택해 주세요.",
         STORAGE_CONFLICT: "저장 중 충돌이 발생했습니다. 다시 시도해 주세요.",
+        INTAKE_NUMBER_INVALID_FORMAT: "인수번호 형식이 올바르지 않습니다. (예: D260601)",
+        INTAKE_NUMBER_DUPLICATE: "이미 사용 중인 인수번호입니다. 다른 번호를 입력해 주세요.",
       };
+      if (result.reason === "INTAKE_NUMBER_INVALID_FORMAT" || result.reason === "INTAKE_NUMBER_DUPLICATE") {
+        const intakeNumberFieldErrors = { intakeNumber: messages[result.reason] };
+        setErrors((prev) => ({ ...prev, ...intakeNumberFieldErrors }));
+        focusFirstInvalid(intakeNumberFieldErrors);
+      }
       setSubmitError(messages[result.reason]);
       return;
     }
@@ -267,7 +491,7 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <DraftStatusLine savedAtLabel={savedAtLabel} />
+        <DraftStatusLine />
         <button
           type="button"
           onClick={handleClearClick}
@@ -288,35 +512,73 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">워크플로 / 예상 인수번호</h2>
-        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label htmlFor="workflowType" className={labelClass}>워크플로 유형</label>
+            <label htmlFor="workflowKind" className={labelClass}>종류 *</label>
             <select
-              id="workflowType"
+              id="workflowKind"
               className={inputClass}
-              value={draft.workflowType}
-              onChange={(e) => setField("workflowType", e.target.value as IntakeDraftData["workflowType"])}
+              value={workflowKindOf(draft.workflowType)}
+              onChange={(e) => handleWorkflowKindChange(e.target.value as WorkflowKind)}
             >
-              {WORKFLOW_TYPE_CODES.map((type) => (
-                <option key={type} value={type}>
-                  {workflowTypeLabels[type]}
+              {(Object.keys(workflowKindLabels) as WorkflowKind[]).map((kind) => (
+                <option key={kind} value={kind}>
+                  {workflowKindLabels[kind]}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <span className={labelClass}>예상 인수번호</span>
-            <p className="text-sm text-zinc-900 dark:text-zinc-50">
-              {estimatedIntakeNumber ?? "-"}
-              <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
-                (예상 인수번호이며, 최종 번호는 제출 시 확정됩니다)
-              </span>
-            </p>
+            <label htmlFor="billingType" className={labelClass}>유상/무상 *</label>
+            <select
+              id="billingType"
+              ref={(el) => {
+                fieldRefs.current.billingType = el;
+              }}
+              className={inputClass}
+              value={draft.billingType}
+              onChange={(e) => handleBillingTypeChange(e.target.value as IntakeDraftData["billingType"])}
+              aria-invalid={Boolean(errors.billingType)}
+              aria-describedby={errors.billingType ? "billingType-error" : undefined}
+            >
+              <option value="">선택해 주세요</option>
+              {MANUAL_INTAKE_BILLING_TYPE_CODES.map((type) => (
+                <option key={type} value={type}>
+                  {billingTypeLabels[type]}
+                </option>
+              ))}
+            </select>
+            {errors.billingType && <p id="billingType-error" className={errorClass}>{errors.billingType}</p>}
+          </div>
+          <div>
+            <label htmlFor="intakeNumber" className={labelClass}>인수번호</label>
+            <input
+              id="intakeNumber"
+              ref={(el) => {
+                fieldRefs.current.intakeNumber = el;
+              }}
+              className={inputClass}
+              placeholder={estimatedIntakeNumber ?? undefined}
+              value={intakeNumberOverride}
+              onChange={(e) => setIntakeNumberOverride(e.target.value)}
+              aria-invalid={Boolean(errors.intakeNumber)}
+              aria-describedby={errors.intakeNumber ? "intakeNumber-error" : "intakeNumber-help"}
+            />
+            {errors.intakeNumber ? (
+              <p id="intakeNumber-error" className={errorClass}>{errors.intakeNumber}</p>
+            ) : (
+              <p id="intakeNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                비워두면 예상 인수번호({estimatedIntakeNumber ?? "-"})가 자동으로 채번됩니다. 직접 입력한 값은 제출 시 형식과 중복 여부를 다시 확인합니다.
+              </p>
+            )}
           </div>
         </div>
         <div className="mt-3">
           <DerivedProductFields workflowType={draft.workflowType} />
         </div>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          적용 워크플로: {workflowTypeLabels[draft.workflowType]} (종류/유상·무상 선택에 따라 자동 결정됩니다)
+        </p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -324,43 +586,101 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="customerId" className={labelClass}>고객사 *</label>
-            <select
+            <input
               id="customerId"
+              list="customerId-suggestions"
+              autoComplete="off"
               ref={(el) => {
                 fieldRefs.current.customerId = el;
               }}
               className={inputClass}
-              value={draft.customerId}
-              onChange={(e) => handleCustomerChange(e.target.value)}
+              placeholder="고객사명을 입력하세요"
+              value={draft.customerName}
+              onChange={(e) => handleCustomerNameChange(e.target.value)}
               aria-invalid={Boolean(errors.customerId)}
-              aria-describedby={errors.customerId ? "customerId-error" : undefined}
-            >
-              <option value="">선택해 주세요</option>
-              {customerOptions.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+              aria-describedby={errors.customerId ? "customerId-error" : "customerId-help"}
+            />
+            <datalist id="customerId-suggestions">
+              {customerSuggestions.map((c) => (
+                <option key={c.id} value={c.name} />
               ))}
-            </select>
+            </datalist>
             {errors.customerId && <p id="customerId-error" className={errorClass}>{errors.customerId}</p>}
+            {!draft.customerId && draft.customerName.trim() && (
+              draft.customerCreateNew ? (
+                <p id="customerId-help" className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  ✓ 새 고객사 &apos;{draft.customerName.trim()}&apos;로 등록됩니다.{" "}
+                  <button
+                    type="button"
+                    onClick={() => updateDraft({ customerCreateNew: false })}
+                    className="underline"
+                  >
+                    취소
+                  </button>
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  id="customerId-help"
+                  onClick={handleCreateNewCustomer}
+                  className="mt-1 text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                >
+                  새 고객사로 등록: &apos;{draft.customerName.trim()}&apos;
+                </button>
+              )
+            )}
           </div>
 
           <div>
             <label htmlFor="endUserId" className={labelClass}>End-User</label>
-            <select
+            <input
               id="endUserId"
+              list="endUserId-suggestions"
+              autoComplete="off"
+              ref={(el) => {
+                fieldRefs.current.endUserId = el;
+              }}
               className={inputClass}
-              value={draft.endUserId ?? ""}
-              disabled={!draft.customerId}
-              onChange={(e) => setField("endUserId", e.target.value || null)}
-            >
-              <option value="">선택 안 함</option>
-              {availableEndUsers.map((e) => (
-                <option key={e.id} value={e.id}>{e.name}</option>
+              placeholder="End-User명을 입력하세요 (선택)"
+              value={draft.endUserName}
+              disabled={!draft.customerId && !draft.customerCreateNew}
+              onChange={(e) => handleEndUserNameChange(e.target.value)}
+              aria-invalid={Boolean(errors.endUserId)}
+              aria-describedby={errors.endUserId ? "endUserId-error" : "endUserId-help"}
+            />
+            <datalist id="endUserId-suggestions">
+              {endUserSuggestions.map((e) => (
+                <option key={e.id} value={e.name} />
               ))}
-            </select>
+            </datalist>
+            {errors.endUserId && <p id="endUserId-error" className={errorClass}>{errors.endUserId}</p>}
+            {!draft.endUserId && draft.endUserName.trim() && (
+              draft.endUserCreateNew ? (
+                <p id="endUserId-help" className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  ✓ 새 End-User &apos;{draft.endUserName.trim()}&apos;로 등록됩니다.{" "}
+                  <button
+                    type="button"
+                    onClick={() => updateDraft({ endUserCreateNew: false })}
+                    className="underline"
+                  >
+                    취소
+                  </button>
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  id="endUserId-help"
+                  onClick={handleCreateNewEndUser}
+                  className="mt-1 text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                >
+                  새 End-User로 등록: &apos;{draft.endUserName.trim()}&apos;
+                </button>
+              )
+            )}
           </div>
 
           <div>
-            <label htmlFor="assignedEngineerId" className={labelClass}>담당 엔지니어 *</label>
+            <label htmlFor="assignedEngineerId" className={labelClass}>담당 엔지니어</label>
             <select
               id="assignedEngineerId"
               ref={(el) => {
@@ -372,7 +692,7 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
               aria-invalid={Boolean(errors.assignedEngineerId)}
               aria-describedby={errors.assignedEngineerId ? "assignedEngineerId-error" : undefined}
             >
-              <option value="">선택해 주세요</option>
+              <option value="">선택 안 함</option>
               {eligibleEngineers.map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
@@ -400,7 +720,7 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">일정</h2>
-        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label htmlFor="receivedAt" className={labelClass}>인수일 *</label>
             <input
@@ -411,34 +731,11 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
               }}
               className={inputClass}
               value={draft.receivedAt}
-              onChange={(e) => setField("receivedAt", e.target.value)}
+              onChange={(e) => handleReceivedAtChange(e.target.value)}
               aria-invalid={Boolean(errors.receivedAt)}
               aria-describedby={errors.receivedAt ? "receivedAt-error" : undefined}
             />
             {errors.receivedAt && <p id="receivedAt-error" className={errorClass}>{errors.receivedAt}</p>}
-          </div>
-
-          <div>
-            <label htmlFor="internalTargetShipmentDate" className={labelClass}>사내 목표 출하일 *</label>
-            <input
-              id="internalTargetShipmentDate"
-              type="date"
-              ref={(el) => {
-                fieldRefs.current.internalTargetShipmentDate = el;
-              }}
-              className={inputClass}
-              value={draft.internalTargetShipmentDate}
-              onChange={(e) => setField("internalTargetShipmentDate", e.target.value)}
-              aria-invalid={Boolean(errors.internalTargetShipmentDate)}
-              aria-describedby={
-                errors.internalTargetShipmentDate ? "internalTargetShipmentDate-error" : undefined
-              }
-            />
-            {errors.internalTargetShipmentDate && (
-              <p id="internalTargetShipmentDate-error" className={errorClass}>
-                {errors.internalTargetShipmentDate}
-              </p>
-            )}
           </div>
 
           <div>
@@ -463,6 +760,56 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
               </p>
             )}
           </div>
+
+          <div>
+            <label htmlFor="internalTargetInspectionCompletionDate" className={labelClass}>
+              사내 목표 검수 완료일
+            </label>
+            <input
+              id="internalTargetInspectionCompletionDate"
+              type="date"
+              ref={(el) => {
+                fieldRefs.current.internalTargetInspectionCompletionDate = el;
+              }}
+              className={inputClass}
+              value={draft.internalTargetInspectionCompletionDate}
+              onChange={(e) => handleInternalTargetInspectionCompletionDateChange(e.target.value)}
+              aria-invalid={Boolean(errors.internalTargetInspectionCompletionDate)}
+              aria-describedby={
+                errors.internalTargetInspectionCompletionDate
+                  ? "internalTargetInspectionCompletionDate-error"
+                  : undefined
+              }
+            />
+            {errors.internalTargetInspectionCompletionDate && (
+              <p id="internalTargetInspectionCompletionDate-error" className={errorClass}>
+                {errors.internalTargetInspectionCompletionDate}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="internalTargetShipmentDate" className={labelClass}>사내 목표 출하일</label>
+            <input
+              id="internalTargetShipmentDate"
+              type="date"
+              ref={(el) => {
+                fieldRefs.current.internalTargetShipmentDate = el;
+              }}
+              className={inputClass}
+              value={draft.internalTargetShipmentDate}
+              onChange={(e) => setField("internalTargetShipmentDate", e.target.value)}
+              aria-invalid={Boolean(errors.internalTargetShipmentDate)}
+              aria-describedby={
+                errors.internalTargetShipmentDate ? "internalTargetShipmentDate-error" : undefined
+              }
+            />
+            {errors.internalTargetShipmentDate && (
+              <p id="internalTargetShipmentDate-error" className={errorClass}>
+                {errors.internalTargetShipmentDate}
+              </p>
+            )}
+          </div>
         </div>
       </section>
 
@@ -471,18 +818,70 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="modelName" className={labelClass}>Model *</label>
-            <input
-              id="modelName"
-              ref={(el) => {
-                fieldRefs.current.modelName = el;
-              }}
-              className={inputClass}
-              value={draft.modelName}
-              onChange={(e) => setField("modelName", e.target.value)}
-              aria-invalid={Boolean(errors.modelName)}
-              aria-describedby={errors.modelName ? "modelName-error" : undefined}
-            />
-            {errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
+            {referenceData ? (
+              <>
+                <input
+                  id="modelName"
+                  list="modelName-suggestions"
+                  autoComplete="off"
+                  ref={(el) => {
+                    fieldRefs.current.modelName = el;
+                  }}
+                  className={inputClass}
+                  placeholder="Model명을 입력하세요"
+                  value={draft.modelName}
+                  onChange={(e) => handleModelNameChange(e.target.value)}
+                  aria-invalid={Boolean(errors.modelName)}
+                  aria-describedby={errors.modelName ? "modelName-error" : "modelName-help"}
+                />
+                <datalist id="modelName-suggestions">
+                  {productModelSuggestions.map((m) => (
+                    <option key={m.id} value={m.name} />
+                  ))}
+                </datalist>
+                {errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
+                {!draft.productModelId && draft.modelName.trim() && (
+                  draft.productModelCreateNew ? (
+                    <p id="modelName-help" className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      ✓ 새 Model &apos;{draft.modelName.trim()}&apos;로 등록됩니다.{" "}
+                      <button
+                        type="button"
+                        onClick={() => updateDraft({ productModelCreateNew: false })}
+                        className="underline"
+                      >
+                        취소
+                      </button>
+                    </p>
+                  ) : canRegisterProductModel ? (
+                    <button
+                      type="button"
+                      id="modelName-help"
+                      onClick={handleCreateNewProductModel}
+                      className="mt-1 text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                    >
+                      새 모델로 등록: &apos;{draft.modelName.trim()}&apos;
+                    </button>
+                  ) : (
+                    <p id="modelName-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      등록된 Model 중에서 선택해 주세요. 목록에 없다면 관리자에게 등록을 요청해 주세요.
+                    </p>
+                  )
+                )}
+              </>
+            ) : (
+              <input
+                id="modelName"
+                ref={(el) => {
+                  fieldRefs.current.modelName = el;
+                }}
+                className={inputClass}
+                value={draft.modelName}
+                onChange={(e) => setField("modelName", e.target.value)}
+                aria-invalid={Boolean(errors.modelName)}
+                aria-describedby={errors.modelName ? "modelName-error" : undefined}
+              />
+            )}
+            {!referenceData && errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
           </div>
           <div>
             <label htmlFor="lotNumber" className={labelClass}>L/N *</label>
@@ -513,15 +912,6 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
               aria-describedby={errors.serialNumber ? "serialNumber-error" : undefined}
             />
             {errors.serialNumber && <p id="serialNumber-error" className={errorClass}>{errors.serialNumber}</p>}
-          </div>
-          <div>
-            <label htmlFor="partNumber" className={labelClass}>Part Number</label>
-            <input
-              id="partNumber"
-              className={inputClass}
-              value={draft.partNumber}
-              onChange={(e) => setField("partNumber", e.target.value)}
-            />
           </div>
           <div className="sm:col-span-2">
             <label htmlFor="accessoryList" className={labelClass}>동봉 액세서리</label>
@@ -569,36 +959,6 @@ export default function IntakeFormInner({ writeSource, referenceData }: IntakeFo
               className={inputClass}
               value={draft.reportedSymptom}
               onChange={(e) => setField("reportedSymptom", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="intakeInspectionResult" className={labelClass}>인수점검 결과</label>
-            <textarea
-              id="intakeInspectionResult"
-              rows={2}
-              className={inputClass}
-              value={draft.intakeInspectionResult}
-              onChange={(e) => setField("intakeInspectionResult", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="currentDiagnosisSummary" className={labelClass}>현재 진단/조치 요약</label>
-            <textarea
-              id="currentDiagnosisSummary"
-              rows={2}
-              className={inputClass}
-              value={draft.currentDiagnosisSummary}
-              onChange={(e) => setField("currentDiagnosisSummary", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="nextPlannedAction" className={labelClass}>다음 예정 작업</label>
-            <textarea
-              id="nextPlannedAction"
-              rows={2}
-              className={inputClass}
-              value={draft.nextPlannedAction}
-              onChange={(e) => setField("nextPlannedAction", e.target.value)}
             />
           </div>
           <div className="sm:col-span-2">

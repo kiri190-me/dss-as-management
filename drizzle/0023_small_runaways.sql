@@ -1,0 +1,3 @@
+CREATE TYPE "public"."repair_case_work_record_kind" AS ENUM('GENERAL', 'INTAKE_INSPECTION_RESULT', 'DIAGNOSIS_REPAIR_SUMMARY', 'NEXT_PLANNED_ACTION');--> statement-breakpoint
+ALTER TABLE "repair_case_work_records" ADD COLUMN "record_kind" "repair_case_work_record_kind" DEFAULT 'GENERAL' NOT NULL;--> statement-breakpoint
+CREATE INDEX "repair_case_work_records_repair_case_id_record_kind_created_at_idx" ON "repair_case_work_records" USING btree ("repair_case_id","record_kind","created_at") WHERE invalidated_at is null;

@@ -3,7 +3,7 @@ import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "../client";
 import { parts, partStockBalances, stockTransactions, repairCases, users } from "../schema";
 import { computeReturnableQuantity } from "@/lib/domain/inventory-return-rules";
-import type { StockOwner, StockTransactionType } from "@/lib/domain/inventory-types";
+import { groupPartOwnerAvailability, type StockOwner, type StockTransactionType } from "@/lib/domain/inventory-types";
 
 /**
  * Phase 5B-2 — read queries for the core inventory ledger. Same convention
@@ -80,6 +80,30 @@ export async function getPartList(filters: PartListFilters = {}): Promise<PartLi
 
   return rows;
 }
+
+export type PartOwnerAvailabilityRow = { partId: string; owner: StockOwner; quantity: number };
+
+/**
+ * Parts Request 소유구분-scoped availability checkpoint — per (part, owner)
+ * sum of part_stock_balances.current_quantity across every location bucket,
+ * the exact same aggregate getPartList's totalQuantity already uses, just
+ * grouped one level finer (by owner too, not only by part). A (part, owner)
+ * pair with no balance row simply never appears in the result — callers
+ * must treat a missing lookup as 0, never as "unknown".
+ */
+export async function getPartOwnerAvailability(): Promise<PartOwnerAvailabilityRow[]> {
+  return db
+    .select({
+      partId: partStockBalances.partId,
+      owner: partStockBalances.owner,
+      quantity: sql<number>`coalesce(sum(${partStockBalances.currentQuantity}), 0)::int`,
+    })
+    .from(partStockBalances)
+    .groupBy(partStockBalances.partId, partStockBalances.owner);
+}
+
+/** Re-exported for callers already importing from this query module — the actual pure grouping logic lives in inventory-types.ts (framework-free, so it stays unit-testable outside DB integration tests). */
+export { groupPartOwnerAvailability };
 
 // ---- 부품 상세 (part detail — master + balance grid) ----
 

@@ -13,11 +13,14 @@ import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-re
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { editableFieldsForRoleInSection } from "@/lib/auth/repair-case-edit-authorization";
+import { editableFieldsForRoleInSection, isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import PartRequestSection from "@/components/inventory/PartRequestSection";
 import type { PartListRow } from "@/lib/db/queries/inventory";
 import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
+import type { StockOwner } from "@/lib/domain/inventory-types";
+import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
+import PendingBillingDecisionCard from "@/components/repair-cases/detail/PendingBillingDecisionCard";
 
 /**
  * mock(서버 조회)과 local(클라이언트 조회) 두 경로가 모두 이 컴포넌트 하나로
@@ -49,13 +52,21 @@ export default function RepairCaseDetailView({
   actingUser,
   referenceData,
   partRequestData,
+  derivedServiceSummary,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
   actingUser: ActingUser | null;
   referenceData: IntakeReferenceData | null;
   /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
-  partRequestData: { caseContext: RequestCaseContext | null; availableParts: PartListRow[]; ownRequests: OwnPartRequestRow[] } | null;
+  partRequestData: {
+    caseContext: RequestCaseContext | null;
+    availableParts: PartListRow[];
+    ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
+    ownRequests: OwnPartRequestRow[];
+  } | null;
+  /** record_kind 분류 체크포인트 — DATABASE 소스 건에만 존재, see [id]/page.tsx. */
+  derivedServiceSummary: DerivedServiceSummary | null;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -75,6 +86,7 @@ export default function RepairCaseDetailView({
   const intakeFields = fieldsFor("INTAKE");
   const productFields = fieldsFor("PRODUCT");
   const faultServiceFields = fieldsFor("FAULT_SERVICE");
+  const canEditEngineer = canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "assignedEngineerId");
 
   function handleDone() {
     setEditingSection(null);
@@ -82,8 +94,15 @@ export default function RepairCaseDetailView({
 
   return (
     <div className="flex flex-col gap-4">
-      <DetailHeader resolved={effective} />
+      <DetailHeader resolved={effective} canEditEngineer={canEditEngineer} referenceData={referenceData} />
       <ExceptionStatusNotice exceptionStatus={effective.exceptionStatus} />
+      {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
+        <PendingBillingDecisionCard
+          repairCaseId={effective.id}
+          expectedVersion={effective.version}
+          canResolve={actingUser !== null && isFieldEditable(actingUser.role, "billingType")}
+        />
+      )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <IntakeInfoSection
           resolved={effective}
@@ -98,6 +117,7 @@ export default function RepairCaseDetailView({
           related={related}
           editableFields={productFields}
           editingSection={editingSection}
+          referenceData={referenceData}
           onStartEdit={() => setEditingSection("PRODUCT")}
           onDone={handleDone}
         />
@@ -106,7 +126,7 @@ export default function RepairCaseDetailView({
         resolved={effective}
         editableFields={faultServiceFields}
         editingSection={editingSection}
-        referenceData={referenceData}
+        derivedServiceSummary={derivedServiceSummary}
         onStartEdit={() => setEditingSection("FAULT_SERVICE")}
         onDone={handleDone}
       />
@@ -114,9 +134,8 @@ export default function RepairCaseDetailView({
       {partRequestData && partRequestData.caseContext && (
         <PartRequestSection
           repairCaseId={partRequestData.caseContext.id}
-          isCaseLocked={partRequestData.caseContext.isLocked}
-          isAssignedToCase={partRequestData.caseContext.assignedEngineerId === actingUser?.id}
           availableParts={partRequestData.availableParts}
+          ownerAvailabilityByPartId={partRequestData.ownerAvailabilityByPartId}
           ownRequests={partRequestData.ownRequests}
         />
       )}

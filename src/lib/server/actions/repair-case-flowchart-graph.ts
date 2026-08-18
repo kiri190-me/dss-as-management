@@ -26,6 +26,7 @@ import {
   isValidRoutePoints,
   validateNodeTitle,
   validateNodeDescription,
+  validateNodeInstructions,
   validateBranchLabel,
 } from "@/lib/validation/repair-case-flowchart-graph-input";
 
@@ -116,6 +117,7 @@ export async function updateRepairCaseFlowchartNodeAction(input: {
   nodeId: string;
   title: string;
   description?: string | null;
+  instructions?: string | null;
   expectedFlowchartUpdatedAt: string;
 }): Promise<ActionResult<{ updatedAt: string; changed: boolean }>> {
   const actorCheck = await resolveAuthorizedActorId();
@@ -126,6 +128,8 @@ export async function updateRepairCaseFlowchartNodeAction(input: {
   if (!titleValidation.ok) return validationError(titleValidation.error);
   const descriptionValidation = validateNodeDescription(input.description);
   if (!descriptionValidation.ok) return validationError(descriptionValidation.error);
+  const instructionsValidation = validateNodeInstructions(input.instructions);
+  if (!instructionsValidation.ok) return validationError(instructionsValidation.error);
 
   try {
     return await updateRepairCaseFlowchartNode({
@@ -135,6 +139,7 @@ export async function updateRepairCaseFlowchartNodeAction(input: {
       actorUserId: actorCheck.userId,
       title: titleValidation.title,
       description: descriptionValidation.description,
+      instructions: instructionsValidation.instructions,
       expectedFlowchartUpdatedAt: input.expectedFlowchartUpdatedAt,
     });
   } catch (err) {

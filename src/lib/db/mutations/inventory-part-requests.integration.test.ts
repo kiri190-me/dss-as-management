@@ -29,6 +29,7 @@ import {
   partiallyCloseRequest,
   issuePartRequest,
 } from "./inventory-part-requests";
+import { getOwnPartRequestsForCase } from "../queries/inventory-part-requests";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -55,6 +56,7 @@ let engineerId: string;
 let engineer2Id: string;
 let salesId: string;
 let customerId: string;
+let realPartsCountBaseline: number;
 
 const createdPartIds: string[] = [];
 
@@ -74,6 +76,7 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
@@ -162,6 +165,14 @@ before(async () => {
   const [customer] = await db.select({ id: customers.id }).from(customers).where(eq(customers.isDeleted, false)).limit(1);
   assert.ok(customer, "expected at least one non-deleted customer in the dev DB");
   customerId = customer.id;
+
+  // Baseline captured before this suite creates anything — same
+  // baseline-relative precedent as inventory.integration.test.ts's
+  // realDataBaseline. Real parts may already legitimately exist in a
+  // shared dev DB; this suite must only ever assert the count is
+  // UNCHANGED by its own run, never that it's zero.
+  const [realPartsCount] = await db.select({ count: sql<number>`count(*)::int` }).from(parts).where(sql`part_name not like ${TEST_PART_PREFIX + "%"}`);
+  realPartsCountBaseline = realPartsCount?.count ?? 0;
 });
 
 after(async () => {
@@ -217,8 +228,8 @@ describe("createPartRequest", () => {
     const result = await createPartRequest({
       repairCaseId: created.id,
       items: [
-        { partId, quantity: 3 },
-        { partId, quantity: 4 },
+        { partId, quantity: 3, owner: "DSS" },
+        { partId, quantity: 4, owner: "DSS" },
       ],
       actorUserId: engineerId,
       idempotencyKey: randomUUID(),
@@ -237,8 +248,8 @@ describe("createPartRequest", () => {
     const result = await createPartRequest({
       repairCaseId: created.id,
       items: [
-        { partId, quantity: 5 },
-        { partId, quantity: -2 },
+        { partId, quantity: 5, owner: "DSS" },
+        { partId, quantity: -2, owner: "DSS" },
       ],
       actorUserId: engineerId,
       idempotencyKey: randomUUID(),
@@ -254,7 +265,7 @@ describe("createPartRequest", () => {
     const partId = await createTestPart();
     const created = await createTestCase();
     for (const quantity of [1.5, 0, 2147483648]) {
-      const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+      const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
       assert.equal(result.ok, false, `quantity ${quantity} should be rejected`);
       if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
     }
@@ -267,40 +278,104 @@ describe("createPartRequest", () => {
     if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
   });
 
-  test("5. only AS_ENGINEER assigned to the case may create a request; unassigned engineer and non-engineer roles are rejected", async () => {
+  test("5. any AS_ENGINEER may create a request regardless of case assignment (Parts Request permission checkpoint); non-engineer roles remain rejected", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
 
-    const unassigned = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineer2Id, idempotencyKey: randomUUID() });
-    assert.equal(unassigned.ok, false);
-    if (!unassigned.ok) assert.equal(unassigned.code, "FORBIDDEN");
+    // engineer2Id is deliberately NOT assigned to this case — must still succeed.
+    const unassigned = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineer2Id, idempotencyKey: randomUUID() });
+    assert.equal(unassigned.ok, true, `unassigned AS_ENGINEER should be allowed to request: ${JSON.stringify(unassigned)}`);
 
     for (const actorUserId of [superAdminId, adminId, inventoryManagerId, salesId]) {
-      const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId, idempotencyKey: randomUUID() });
+      const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId, idempotencyKey: randomUUID() });
       assert.equal(result.ok, false, `${actorUserId} should be forbidden`);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
   });
 
-  test("6. a locked repair case blocks new request creation unconditionally, no role bypass", async () => {
+  test("6. shipment-lock removal policy: a locked (shipped) repair case no longer blocks new request creation", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
     await lockCase(created.id);
 
-    const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+    const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("7. submitting a request does not reserve or deduct stock — balance is unaffected", async () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase();
-    const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(result.ok, true, JSON.stringify(result));
 
     const [balance] = await db.select().from(partStockBalances).where(eq(partStockBalances.id, received.partStockBalanceId));
     assert.equal(balance.currentQuantity, 10, "creating a request must never change the balance");
+  });
+
+  test("7b. a missing or invalid owner is rejected with INVALID_INPUT, and no row is written", async () => {
+    const partId = await createTestPart();
+    const created = await createTestCase();
+
+    const missing = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: undefined }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, "INVALID_INPUT");
+
+    const invalid = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "NOT_A_REAL_OWNER" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    assert.equal(invalid.ok, false);
+    if (!invalid.ok) assert.equal(invalid.code, "INVALID_INPUT");
+
+    const requests = await db.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.repairCaseId, created.id));
+    assert.equal(requests.length, 0, "neither the missing- nor invalid-owner attempt should have written a request row");
+  });
+
+  test("7c. every valid stock_owner code persists correctly on inventory_part_request_items.owner", async () => {
+    for (const owner of ["DSS", "KYOSAN", "SERVICE_SPARE", "TEST"] as const) {
+      const partId = await createTestPart();
+      const created = await createTestCase();
+      const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      if (!result.ok) continue;
+      const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, result.requestId));
+      assert.equal(item.owner, owner);
+    }
+  });
+
+  test("7d. a multi-item request can carry a different owner per item", async () => {
+    const partA = await createTestPart();
+    const partB = await createTestPart();
+    const created = await createTestCase();
+    const result = await createPartRequest({
+      repairCaseId: created.id,
+      items: [
+        { partId: partA, quantity: 1, owner: "DSS" },
+        { partId: partB, quantity: 1, owner: "KYOSAN" },
+      ],
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const items = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, result.requestId));
+    const ownerByPart = new Map(items.map((i) => [i.partId, i.owner]));
+    assert.equal(ownerByPart.get(partA), "DSS");
+    assert.equal(ownerByPart.get(partB), "KYOSAN");
+  });
+
+  test("7e. two raw lines for the same part with different owners are rejected outright, never silently reconciled", async () => {
+    const partId = await createTestPart();
+    const created = await createTestCase();
+    const result = await createPartRequest({
+      repairCaseId: created.id,
+      items: [
+        { partId, quantity: 1, owner: "DSS" },
+        { partId, quantity: 1, owner: "KYOSAN" },
+      ],
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
   });
 });
 
@@ -309,7 +384,7 @@ describe("idempotency", () => {
     const partId = await createTestPart();
     const created = await createTestCase();
     const key = randomUUID();
-    const input = { repairCaseId: created.id, items: [{ partId, quantity: 2 }], actorUserId: engineerId, idempotencyKey: key };
+    const input = { repairCaseId: created.id, items: [{ partId, quantity: 2, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: key };
 
     const first = await createPartRequest(input);
     assert.equal(first.ok, true, JSON.stringify(first));
@@ -327,10 +402,10 @@ describe("idempotency", () => {
     const created = await createTestCase();
     const key = randomUUID();
 
-    const first = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 2 }], actorUserId: engineerId, idempotencyKey: key });
+    const first = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 2, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: key });
     assert.equal(first.ok, true, JSON.stringify(first));
 
-    const second = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5 }], actorUserId: engineerId, idempotencyKey: key });
+    const second = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: key });
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.code, "IDEMPOTENCY_PAYLOAD_MISMATCH");
 
@@ -343,10 +418,10 @@ describe("idempotency", () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const key = randomUUID();
 
-    const first = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: key });
+    const first = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: key });
     assert.equal(first.ok, true, JSON.stringify(first));
 
-    const second = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineer2Id, idempotencyKey: key });
+    const second = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineer2Id, idempotencyKey: key });
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.code, "FORBIDDEN");
   });
@@ -355,7 +430,7 @@ describe("idempotency", () => {
     const partId = await createTestPart();
     const created = await createTestCase();
     const key = randomUUID();
-    const input = { repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: key };
+    const input = { repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: key };
 
     const [a, b] = await Promise.all([createPartRequest(input), createPartRequest(input)]);
     assert.equal(a.ok, true, JSON.stringify(a));
@@ -372,7 +447,7 @@ describe("cancelPartRequest / rejectPartRequest", () => {
   test("12. AS_ENGINEER may cancel only their own PENDING request; requires a nonblank reason", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
 
@@ -397,7 +472,7 @@ describe("cancelPartRequest / rejectPartRequest", () => {
     const partId = await createTestPart();
     await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
 
@@ -417,7 +492,7 @@ describe("cancelPartRequest / rejectPartRequest", () => {
   test("14. cancel/reject remain allowed on an already-locked case (neither deducts stock)", async () => {
     const partId = await createTestPart();
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
 
@@ -433,7 +508,7 @@ describe("issuePartRequest", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 6 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 6, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -464,7 +539,7 @@ describe("issuePartRequest", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 20);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -496,7 +571,7 @@ describe("issuePartRequest", () => {
     const balanceA = await receiveTestStock(partId, 20, TEST_LOCATION_A);
     const balanceB = await receiveTestStock(partId, 20, TEST_LOCATION_B);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -535,7 +610,7 @@ describe("issuePartRequest", () => {
     const balanceA = await receiveTestStock(partId, 20, TEST_LOCATION_A);
     const balanceB = await receiveTestStock(partId, 20, TEST_LOCATION_B);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -559,12 +634,89 @@ describe("issuePartRequest", () => {
     assert.equal(itemAfter.issuedQuantity, 5);
   });
 
+  test("18b. issue succeeds when the selected balance's owner matches the request item's requested owner", async () => {
+    const partId = await createTestPart();
+    const balance = await receiveStock({ partId, owner: "KYOSAN", location: TEST_LOCATION_A, quantity: 10, actorUserId: inventoryManagerId });
+    assert.equal(balance.ok, true, JSON.stringify(balance));
+    if (!balance.ok) return;
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4, owner: "KYOSAN" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    assert.equal(request.ok, true);
+    if (!request.ok) return;
+    const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
+
+    const issued = await issuePartRequest({
+      requestId: request.requestId,
+      allocations: [{ requestItemId: item.id, partStockBalanceId: balance.partStockBalanceId, quantity: 4 }],
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(issued.ok, true, JSON.stringify(issued));
+  });
+
+  test("18c. issue is rejected when the selected balance's owner does not match the request item's requested owner, and nothing is written", async () => {
+    const partId = await createTestPart();
+    const balance = await receiveStock({ partId, owner: "KYOSAN", location: TEST_LOCATION_A, quantity: 10, actorUserId: inventoryManagerId });
+    assert.equal(balance.ok, true, JSON.stringify(balance));
+    if (!balance.ok) return;
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    assert.equal(request.ok, true);
+    if (!request.ok) return;
+    const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
+
+    const result = await issuePartRequest({
+      requestId: request.requestId,
+      allocations: [{ requestItemId: item.id, partStockBalanceId: balance.partStockBalanceId, quantity: 4 }],
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, false, "requested owner DSS must never be silently fulfilled from a KYOSAN bucket");
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+
+    const [balanceAfter] = await db.select().from(partStockBalances).where(eq(partStockBalances.id, balance.partStockBalanceId));
+    assert.equal(balanceAfter.currentQuantity, 10, "the rejected owner-mismatched allocation must never move stock");
+    const [itemAfter] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.id, item.id));
+    assert.equal(itemAfter.issuedQuantity, 0);
+  });
+
+  test("18d. a legacy request item with owner=NULL (predating migration 0024) remains issuable from any balance, unconstrained", async () => {
+    const partId = await createTestPart();
+    const balance = await receiveStock({ partId, owner: "SERVICE_SPARE", location: TEST_LOCATION_A, quantity: 10, actorUserId: inventoryManagerId });
+    assert.equal(balance.ok, true, JSON.stringify(balance));
+    if (!balance.ok) return;
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    // Simulate a pre-migration-0024 row by inserting directly, bypassing
+    // createPartRequest (which always requires and validates an owner for
+    // any NEW item) — this is the only way to reproduce the historical
+    // owner=NULL state in a fresh test-created row.
+    const [legacyRequest] = await db
+      .insert(inventoryPartRequests)
+      .values({ repairCaseId: created.id, requestedByUserId: engineerId, status: "PENDING", note: null })
+      .returning({ id: inventoryPartRequests.id });
+    const [legacyItem] = await db
+      .insert(inventoryPartRequestItems)
+      .values({ requestId: legacyRequest.id, partId, requestedQuantity: 5, owner: null, note: null })
+      .returning({ id: inventoryPartRequestItems.id });
+    const [legacyItemReread] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.id, legacyItem.id));
+    assert.equal(legacyItemReread.owner, null, "legacy item must read back with owner=NULL, never a guessed value");
+
+    const issued = await issuePartRequest({
+      requestId: legacyRequest.id,
+      allocations: [{ requestItemId: legacyItem.id, partStockBalanceId: balance.partStockBalanceId, quantity: 5 }],
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(issued.ok, true, `a NULL-owner legacy item must remain issuable from any balance: ${JSON.stringify(issued)}`);
+  });
+
   test("19. request item's part must match the selected balance's part (defensive re-check)", async () => {
     const partA = await createTestPart();
     const partB = await createTestPart();
     const balanceOfB = await receiveTestStock(partB, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId: partA, quantity: 1 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId: partA, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -583,7 +735,7 @@ describe("issuePartRequest", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -608,17 +760,20 @@ describe("issuePartRequest", () => {
     assert.equal(noIssueEvent.length, 0, "no issue event should exist from either rejected attempt");
   });
 
-  test("21. issue is blocked unconditionally on a locked case, no role bypass, even SUPER_ADMIN", async () => {
+  test("21. shipment-lock removal policy: issue on a locked (shipped) case no longer blocks, for every privileged role", async () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 3 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 3, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
 
     await lockCase(created.id);
 
+    // 3 issuers x quantity 1 each = the full requested quantity 3, so every
+    // iteration stays issuable (PENDING then PARTIALLY_ISSUED) up to the
+    // final one, which completes the request.
     for (const actorUserId of [superAdminId, adminId, inventoryManagerId]) {
       const result = await issuePartRequest({
         requestId: request.requestId,
@@ -626,8 +781,7 @@ describe("issuePartRequest", () => {
         actorUserId,
         idempotencyKey: randomUUID(),
       });
-      assert.equal(result.ok, false, `${actorUserId} should be blocked`);
-      if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+      assert.equal(result.ok, true, `${actorUserId} should succeed: ${JSON.stringify(result)}`);
     }
   });
 
@@ -635,7 +789,7 @@ describe("issuePartRequest", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 3);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -659,7 +813,7 @@ describe("partiallyCloseRequest", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -699,7 +853,7 @@ describe("history linkage constraints", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -722,7 +876,7 @@ describe("history linkage constraints", () => {
   test("25. a raw INSERT bypassing the mutation layer with action_type=REJECTED and a NULL reason violates the DB CHECK constraint", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const partId = await createTestPart();
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
 
@@ -753,7 +907,7 @@ describe("traceability", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 5, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -784,7 +938,7 @@ describe("RETURN interaction", () => {
     const partId = await createTestPart();
     const received = await receiveTestStock(partId, 10);
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const request = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 4, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
     assert.equal(request.ok, true);
     if (!request.ok) return;
     const [item] = await db.select().from(inventoryPartRequestItems).where(eq(inventoryPartRequestItems.requestId, request.requestId));
@@ -825,8 +979,8 @@ describe("concurrency: multi-balance deadlock avoidance", () => {
     const caseA = await createTestCase({ assignedEngineerId: engineerId });
     const caseB = await createTestCase({ assignedEngineerId: engineer2Id });
 
-    const requestA = await createPartRequest({ repairCaseId: caseA.id, items: [{ partId, quantity: 10 }], actorUserId: engineerId, idempotencyKey: randomUUID() });
-    const requestB = await createPartRequest({ repairCaseId: caseB.id, items: [{ partId, quantity: 10 }], actorUserId: engineer2Id, idempotencyKey: randomUUID() });
+    const requestA = await createPartRequest({ repairCaseId: caseA.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineerId, idempotencyKey: randomUUID() });
+    const requestB = await createPartRequest({ repairCaseId: caseB.id, items: [{ partId, quantity: 10, owner: "DSS" }], actorUserId: engineer2Id, idempotencyKey: randomUUID() });
     assert.equal(requestA.ok, true);
     assert.equal(requestB.ok, true);
     if (!requestA.ok || !requestB.ok) return;
@@ -865,6 +1019,48 @@ describe("concurrency: multi-balance deadlock avoidance", () => {
   });
 });
 
+describe("read queries: getOwnPartRequestsForCase — 내 요청 항목 메모 checkpoint", () => {
+  test("30. an item's note round-trips through getOwnPartRequestsForCase, distinct from the request-level note", async () => {
+    const partId = await createTestPart();
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const request = await createPartRequest({
+      repairCaseId: created.id,
+      items: [{ partId, quantity: 2, owner: "DSS", note: "테스트용 교체 요청" }],
+      note: "이 요청-레벨 메모는 항목 메모와 달라야 한다",
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(request.ok, true, JSON.stringify(request));
+    if (!request.ok) return;
+
+    const rows = await getOwnPartRequestsForCase(created.id, engineerId);
+    const row = rows.find((r) => r.id === request.requestId);
+    assert.ok(row);
+    assert.equal(row!.note, "이 요청-레벨 메모는 항목 메모와 달라야 한다", "request-level note is a separate field on the row, not merged into the item");
+    assert.equal(row!.items.length, 1);
+    assert.equal(row!.items[0].note, "테스트용 교체 요청", "item-level note must round-trip from inventory_part_request_items.note");
+  });
+
+  test("31. an item created without a note reads back as note=null (never an empty string, never the request-level note)", async () => {
+    const partId = await createTestPart();
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const request = await createPartRequest({
+      repairCaseId: created.id,
+      items: [{ partId, quantity: 1, owner: "DSS" }],
+      note: "요청-레벨 메모만 있음",
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(request.ok, true, JSON.stringify(request));
+    if (!request.ok) return;
+
+    const rows = await getOwnPartRequestsForCase(created.id, engineerId);
+    const row = rows.find((r) => r.id === request.requestId);
+    assert.ok(row);
+    assert.equal(row!.items[0].note, null, "an item with no note must read back as null, not borrow the request-level note");
+  });
+});
+
 describe("real-data safety", () => {
   test("29. real repair cases and parts are unchanged after the full suite", async () => {
     const [realCaseCount] = await db.select({ count: sql<number>`count(*)::int` }).from(repairCases).where(sql`intake_number not like ${`D${TEST_YEAR_MONTH}%`}`);
@@ -874,6 +1070,10 @@ describe("real-data safety", () => {
     // by the read-only audit script, not hardcoded here (this suite runs
     // alongside others and must not assume it's the only writer).
     assert.ok(realCaseCount.count >= 0);
-    assert.equal(realPartsCount.count, 0, "no non-test-prefixed part should ever be created by this suite");
+    assert.equal(
+      realPartsCount.count,
+      realPartsCountBaseline,
+      "the non-test-prefixed part count must be unchanged from this suite's own before() baseline — this suite never asserts it's zero, since real parts may legitimately already exist in a shared dev DB"
+    );
   });
 });

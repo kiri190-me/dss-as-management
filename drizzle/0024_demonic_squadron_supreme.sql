@@ -1,0 +1,1 @@
+ALTER TABLE "inventory_part_request_items" ADD COLUMN "owner" "stock_owner";

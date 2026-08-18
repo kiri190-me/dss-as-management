@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "../client";
-import { customers, endUsers, users } from "../schema";
+import { customers, endUsers, productModels, users } from "../schema";
 
 /**
  * Read-only reference data for the database-backed new-intake form's
@@ -17,15 +17,22 @@ import { customers, endUsers, users } from "../schema";
 export type IntakeCustomerOption = { id: string; name: string };
 export type IntakeEndUserOption = { id: string; customerId: string; name: string };
 export type IntakeEngineerOption = { id: string; name: string };
+/** `name` here is product_models.model_name — renamed for consistency with
+ * the other option types above (rankSimilarNames/normalizeEntityName both
+ * expect a plain `name` field). */
+export type IntakeProductModelOption = { id: string; name: string };
 
 export type IntakeReferenceData = {
   customers: IntakeCustomerOption[];
   endUsers: IntakeEndUserOption[];
   engineers: IntakeEngineerOption[];
+  /** Product Model Master 연결 체크포인트 — intake/제품 정보 편집의 Model
+   * 콤보박스가 선택 가능한 기존 product_models 목록. */
+  productModels: IntakeProductModelOption[];
 };
 
 export async function getIntakeReferenceData(): Promise<IntakeReferenceData> {
-  const [customerRows, endUserRows, engineerRows] = await Promise.all([
+  const [customerRows, endUserRows, engineerRows, productModelRows] = await Promise.all([
     db
       .select({ id: customers.id, name: customers.name })
       .from(customers)
@@ -44,7 +51,16 @@ export async function getIntakeReferenceData(): Promise<IntakeReferenceData> {
           eq(users.approvalStatus, "APPROVED")
         )
       ),
+    db
+      .select({ id: productModels.id, name: productModels.modelName })
+      .from(productModels)
+      .where(eq(productModels.isDeleted, false)),
   ]);
 
-  return { customers: customerRows, endUsers: endUserRows, engineers: engineerRows };
+  return {
+    customers: customerRows,
+    endUsers: endUserRows,
+    engineers: engineerRows,
+    productModels: productModelRows,
+  };
 }

@@ -19,12 +19,15 @@ import type { InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
  *    INVENTORY_MANAGER only, as of Phase 5B-3 — AS_ENGINEER no longer has
  *    any path to a direct USE. Their only path to consuming stock is the
  *    request/issue workflow below.
- *  - repair_cases.is_locked blocks USE and new-request-issue unconditionally
- *    for every role, including SUPER_ADMIN — no exception. Cancel/reject/
- *    partial-close remain allowed on a locked case because they never
- *    deduct stock (see canCancelOwnRequest/canRejectPartRequest/
- *    canPartiallyCloseRequest below — none of them take a lock-state
- *    parameter at all).
+ *  - Shipment-lock removal policy: `ctx.isCaseLocked` is intentionally
+ *    still accepted by canUseStock/canCreatePartRequest/canIssuePartRequest
+ *    below (every call site keeps passing the real repair_cases.is_locked
+ *    value, unchanged) but is no longer read by any of them — a shipped
+ *    case's stock USE and part requests stay fully available. Cancel/
+ *    reject/partial-close never took a lock-state parameter at all (they
+ *    never deduct stock), so they are unaffected by this change. See
+ *    isBlockedByShipmentLock (repair-case-edit-authorization.ts) for the
+ *    full policy-change rationale.
  *  - SALES has zero access to the request screens/actions in Phase 5B-3 —
  *    confirmed, not an oversight: read-only inventory access only (part
  *    list, balances, transaction history), same as before.
@@ -72,19 +75,18 @@ export type UseStockAuthorizationContext = {
 };
 
 /**
- * Direct USE (Phase 5B-2's consumeStock / Phase 5B-3-revised): a repair-
- * case-linked USE is rejected the instant the case is locked, for every
- * role, no exception — checked first, before any role logic. SUPER_ADMIN /
- * ADMIN / INVENTORY_MANAGER may USE against any unlocked repair case, and
- * may also USE with only a destination_note (no repair case at all).
- * AS_ENGINEER (and any other role) is never authorized for a direct USE —
- * their only path to consuming stock is a confirmed parts-request issue
- * (see canIssuePartRequest below, which is itself also SUPER_ADMIN/ADMIN/
+ * Direct USE (Phase 5B-2's consumeStock / Phase 5B-3-revised): SUPER_ADMIN /
+ * ADMIN / INVENTORY_MANAGER may USE against any repair case (shipped or
+ * not, per the shipment-lock removal policy), and may also USE with only a
+ * destination_note (no repair case at all). AS_ENGINEER (and any other
+ * role) is never authorized for a direct USE — their only path to
+ * consuming stock is a confirmed parts-request issue (see
+ * canIssuePartRequest below, which is itself also SUPER_ADMIN/ADMIN/
  * INVENTORY_MANAGER only — AS_ENGINEER never creates a USE row directly or
  * indirectly).
  */
 export function canUseStock(role: Role, ctx: UseStockAuthorizationContext): boolean {
-  if (ctx.hasRepairCase && ctx.isCaseLocked) return false;
+  void ctx.isCaseLocked;
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
 }
 
@@ -92,14 +94,16 @@ export function canUseStock(role: Role, ctx: UseStockAuthorizationContext): bool
 
 /**
  * AS_ENGINEER only — a repair case is required (there is no destination-only
- * request in Phase 5B-3) and they must be directly assigned to it. The
- * locked-case check is unconditional, checked first, no role exception —
- * same discipline as canUseStock. No on-behalf creation (ADMIN/SUPER_ADMIN
- * do not create a request for an engineer) — deferred, out of scope.
+ * request in Phase 5B-3), but assignment to that specific case is NOT
+ * required (Parts Request permission checkpoint — any AS_ENGINEER may
+ * submit a request for any repair case, not just their own assigned ones,
+ * shipped or not per the shipment-lock removal policy). No on-behalf
+ * creation (ADMIN/SUPER_ADMIN do not create a request for an engineer) —
+ * deferred, out of scope.
  */
-export function canCreatePartRequest(role: Role, ctx: { isAssignedToCase: boolean; isCaseLocked: boolean }): boolean {
-  if (ctx.isCaseLocked) return false;
-  return role === "AS_ENGINEER" && ctx.isAssignedToCase;
+export function canCreatePartRequest(role: Role, ctx: { isCaseLocked: boolean }): boolean {
+  void ctx.isCaseLocked;
+  return role === "AS_ENGINEER";
 }
 
 /** AS_ENGINEER only, and only their own request, and only while it is still PENDING (zero issued) — allowed even if the case has since become locked, because cancelling never deducts stock. */
@@ -117,9 +121,9 @@ export function canViewPartRequests(role: Role): boolean {
   return canProcessPartRequests(role) || role === "AS_ENGINEER";
 }
 
-/** Issue (the only action that ever deducts stock in this workflow): same three privileged roles, unconditional locked-case block checked first, and only while the request is still in an issuable status. */
+/** Issue (the only action that ever deducts stock in this workflow): same three privileged roles, and only while the request is still in an issuable status — shipped or not, per the shipment-lock removal policy. */
 export function canIssuePartRequest(role: Role, ctx: { isCaseLocked: boolean; status: InventoryPartRequestStatus }): boolean {
-  if (ctx.isCaseLocked) return false;
+  void ctx.isCaseLocked;
   if (ctx.status !== "PENDING" && ctx.status !== "PARTIALLY_ISSUED") return false;
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
 }

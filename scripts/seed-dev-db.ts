@@ -7,6 +7,7 @@ import {
   users,
   customers,
   endUsers,
+  endUserContacts,
   products,
   workflowTemplates,
   workflowVersions,
@@ -69,15 +70,41 @@ function deterministicUuid(key: string): string {
 const userId = (mockId: string) => deterministicUuid(`user:${mockId}`);
 const customerIdFor = (mockId: string) => deterministicUuid(`customer:${mockId}`);
 const endUserIdFor = (mockId: string) => deterministicUuid(`end-user:${mockId}`);
+const endUserContactIdFor = (mockId: string) => deterministicUuid(`end-user-contact:${mockId}`);
 const productIdFor = (mockId: string) => deterministicUuid(`product:${mockId}`);
-const templateIdFor = (code: string) => deterministicUuid(`workflow-template:${code}`);
-const versionIdFor = (code: string) => deterministicUuid(`workflow-version:${code}`);
+const FOUNDATION_WORKFLOW_CODES = new Set([
+  "PAID_MATCHER",
+  "WARRANTY_MATCHER",
+  "PAID_TOTAL_CONTROLLER",
+  "WARRANTY_TOTAL_CONTROLLER",
+  // Migration 0036 (pending_billing_workflow_foundation) inserted these three
+  // codes' templates/versions/steps directly via the same
+  // md5('dss-as-workflow-<kind>:...')::uuid formula as migrationUuid() below.
+  // They must stay in this set so templateIdFor/versionIdFor/stepIdFor keep
+  // computing the same ids as that migration, instead of colliding with it
+  // on workflow_templates_code_unique via the sha256 deterministicUuid path.
+  "PENDING_MATCHER",
+  "PENDING_GENERATOR",
+  "PENDING_TOTAL_CONTROLLER",
+]);
+const migrationUuid = (key: string) => {
+  const hex = createHash("md5").update(key).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+const templateIdFor = (code: string) => FOUNDATION_WORKFLOW_CODES.has(code)
+  ? migrationUuid(`dss-as-workflow-template:${code}`)
+  : deterministicUuid(`workflow-template:${code}`);
+const versionIdFor = (code: string) => FOUNDATION_WORKFLOW_CODES.has(code)
+  ? migrationUuid(`dss-as-workflow-version:${code}:1`)
+  : deterministicUuid(`workflow-version:${code}`);
 const stepIdFor = (code: string, key: string) =>
-  deterministicUuid(`workflow-step:${code}:${key}`);
+  FOUNDATION_WORKFLOW_CODES.has(code)
+    ? migrationUuid(`dss-as-workflow-step:${code}:${key}`)
+    : deterministicUuid(`workflow-step:${code}:${key}`);
 const exceptionStatusIdFor = (code: string) =>
   deterministicUuid(`exception-status:${code}`);
 
-async function main() {
+export async function seedDevelopmentFixtures() {
   const counts: Record<string, number> = {};
 
   await db.transaction(async (tx) => {
@@ -229,13 +256,15 @@ async function main() {
       });
     counts.customers = customerRows.length;
 
-    // 7. end_users — depends on customers.
+    // 7. end_users — depends on customers. contactName/contactEmail are no
+    // longer end_users columns (End-User 다중 담당자 체크포인트, migration
+    // 0029) — mock-data.ts's EndUser entries still carry those two fields
+    // (unchanged, still used by local/mock mode elsewhere), but the seed
+    // script now routes them into end_user_contacts below instead.
     const endUserRows = mockEndUsers.map((eu) => ({
       id: endUserIdFor(eu.id),
       customerId: customerIdFor(eu.customerId),
       name: eu.name,
-      contactName: eu.contactName,
-      contactEmail: eu.contactEmail,
       createdAt: SEED_FIXED_TIMESTAMP,
       updatedAt: SEED_FIXED_TIMESTAMP,
       isDeleted: false,
@@ -250,12 +279,42 @@ async function main() {
         target: endUsers.id,
         set: {
           name: sql`excluded.name`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+    counts.endUsers = endUserRows.length;
+
+    // 7b. end_user_contacts — depends on end_users. One contact row per
+    // mockEndUsers entry that has a contactName/contactEmail (today, every
+    // entry does — this filter is defensive for future mock entries that
+    // might omit both, matching end_user_contacts.contact_name's own NOT
+    // NULL constraint: a contact row is never created without a name).
+    const endUserContactRows = mockEndUsers
+      .filter((eu) => eu.contactName || eu.contactEmail)
+      .map((eu) => ({
+        id: endUserContactIdFor(eu.id),
+        endUserId: endUserIdFor(eu.id),
+        contactName: eu.contactName,
+        contactEmail: eu.contactEmail,
+        createdAt: SEED_FIXED_TIMESTAMP,
+        updatedAt: SEED_FIXED_TIMESTAMP,
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        deleteReason: null,
+      }));
+    await tx
+      .insert(endUserContacts)
+      .values(endUserContactRows)
+      .onConflictDoUpdate({
+        target: endUserContacts.id,
+        set: {
           contactName: sql`excluded.contact_name`,
           contactEmail: sql`excluded.contact_email`,
           updatedAt: sql`excluded.updated_at`,
         },
       });
-    counts.endUsers = endUserRows.length;
+    counts.endUserContacts = endUserContactRows.length;
 
     // 8. products
     const productRows = mockProducts.map((p) => ({
@@ -369,9 +428,11 @@ async function main() {
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Seed failed:", err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
+if (process.env.DSS_SEED_TEST_WRAPPER !== "1") {
+  seedDevelopmentFixtures()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Seed failed:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+}

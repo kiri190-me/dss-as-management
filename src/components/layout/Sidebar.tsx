@@ -1,35 +1,120 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
-import { navItems, filterNavItemsForRole } from "@/lib/navigation";
+import { navItems, navGroups, filterNavItemsForRole, type NavItem } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
+import SidebarFooter from "./SidebarFooter";
 
 type SidebarProps = {
   activeHref: string;
   role: Role;
+  user: { name: string; roleLabel: string };
   onNavigate?: () => void;
+  /** Whole-sidebar narrow/icon-only mode (distinct from per-group collapse below). Omitted (mobile drawer) means "always expanded" — the mobile drawer has no narrow/icon-only mode of its own. */
+  isCollapsed?: boolean;
+  /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
+  onToggleCollapsed?: () => void;
 };
 
-export default function Sidebar({ activeHref, role, onNavigate }: SidebarProps) {
+const DASHBOARD_KEY = "dashboard";
+
+function navLinkClassName(isActive: boolean): string {
+  return isActive
+    ? "rounded-md border-l-2 border-zinc-900 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-50 dark:bg-zinc-800 dark:text-zinc-50"
+    : "rounded-md border-l-2 border-transparent px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50";
+}
+
+/**
+ * Checkpoint 2A (grouped sidebar) + refinement passes. 대시보드 renders
+ * standalone (never inside a group, per the approved IA); every other item
+ * is partitioned into navigation.ts's navGroups. Role-based visibility is
+ * still decided ONLY by filterNavItemsForRole (unchanged) — grouping is a
+ * pure display concern layered on top, never a second gate: a group whose
+ * every child is filtered out for this role renders nothing at all (no
+ * empty header).
+ *
+ * Two INDEPENDENT collapse concepts live in this file, deliberately never
+ * merged into one state:
+ *  - `collapsedGroupKeys` (per-group, local state) — which GROUPS show
+ *    their children at all when the sidebar itself is expanded. Starts
+ *    empty (every group open by default), driven only by this set, never
+ *    re-derived from `activeHref`.
+ *  - `isCollapsed` (whole-sidebar, owned by AppShell — a prop here, not
+ *    local state, since it also drives the <aside>'s own width). While
+ *    true, this checkpoint hides the ENTIRE nav area outright (no items,
+ *    no group headers, not even glyphs) — only SidebarFooter's toggle
+ *    control and account/theme/logout controls remain visible. Collapsing
+ *    never touches `collapsedGroupKeys`: re-expanding the sidebar shows
+ *    every group's header/chevron reflecting whatever that set already
+ *    held, unchanged the entire time the sidebar was narrow.
+ *
+ * Both persist across client-side navigation within this component's
+ * mounted lifetime (AppShell/Sidebar don't remount on route change) —
+ * reset only on a full page load, no localStorage (not required yet).
+ */
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed }: SidebarProps) {
   const visibleItems = filterNavItemsForRole(navItems, role);
+  const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
+
+  const dashboardItem = visibleByKey.get(DASHBOARD_KEY);
+
+  function toggleGroup(key: string) {
+    setCollapsedGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function renderItem(item: NavItem) {
+    const isActive = item.href === activeHref;
+    return (
+      <Link key={item.href} href={item.href} onClick={onNavigate} aria-current={isActive ? "page" : undefined} className={navLinkClassName(isActive)}>
+        {item.label}
+      </Link>
+    );
+  }
+
   return (
-    <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-      {visibleItems.map((item) => {
-        const isActive = item.href === activeHref;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            aria-current={isActive ? "page" : undefined}
-            className={
-              isActive
-                ? "rounded-md border-l-2 border-zinc-900 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-50 dark:bg-zinc-800 dark:text-zinc-50"
-                : "rounded-md border-l-2 border-transparent px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            }
-          >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
+        {!isCollapsed && (
+          <>
+            {dashboardItem && renderItem(dashboardItem)}
+
+            {navGroups.map((group) => {
+              const groupItems = group.itemKeys.map((key) => visibleByKey.get(key)).filter((item): item is NavItem => !!item);
+              if (groupItems.length === 0) return null;
+
+              const isExpanded = !collapsedGroupKeys.has(group.key);
+
+              return (
+                <div key={group.key} className="mt-3 flex flex-col gap-0.5 border-t border-zinc-100 pt-2 first:mt-1 first:border-0 first:pt-0 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.key)}
+                    aria-expanded={isExpanded}
+                    className="flex items-center justify-between rounded-md bg-zinc-50 px-3 py-2 text-xs font-bold tracking-wide text-zinc-600 uppercase hover:bg-zinc-100 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <span>{group.label}</span>
+                    <span className={`text-zinc-400 transition-transform dark:text-zinc-500 ${isExpanded ? "rotate-90" : ""}`} aria-hidden="true">
+                      ▸
+                    </span>
+                  </button>
+                  {isExpanded && (
+                    <div className="ml-3 flex flex-col gap-0.5 border-l border-zinc-200 py-1 pl-2 dark:border-zinc-800">{groupItems.map(renderItem)}</div>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+      </nav>
+
+      <SidebarFooter user={user} isCollapsed={isCollapsed} onToggleCollapsed={onToggleCollapsed} />
+    </div>
   );
 }

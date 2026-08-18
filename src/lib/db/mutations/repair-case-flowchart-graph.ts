@@ -38,8 +38,9 @@ import { sanitizeRoutePoints, routePointsEqual } from "@/lib/graph-editor-core/r
  *  - locks the flowchart row FOR UPDATE, scoped by (id, repairCaseId,
  *    isDeleted=false) — a soft-deleted or cross-case flowchart is NOT_FOUND;
  *  - locks the repair case row and re-evaluates
- *    canMutateRepairCaseFlowchart (assignment + case-lock), unconditional
- *    for every role including SUPER_ADMIN;
+ *    canMutateRepairCaseFlowchart (role + case-lock — no assignment
+ *    scoping as of Checkpoint 3A), unconditional for every role including
+ *    SUPER_ADMIN;
  *  - verifies expectedFlowchartUpdatedAt against the flowchart row (never a
  *    per-node/per-edge token);
  *  - writes exactly one repair_case_flowchart_edit_history group per
@@ -56,7 +57,8 @@ export type GraphMutationResultCode =
   | "INVALID_INPUT"
   | "SELF_EDGE"
   | "DUPLICATE_EDGE"
-  | "CROSS_FLOWCHART";
+  | "CROSS_FLOWCHART"
+  | "BILLING_DECISION_REQUIRED";
 
 type Failure = { ok: false; code: GraphMutationResultCode; message: string };
 
@@ -108,9 +110,10 @@ async function requireActor(tx: Tx, actorUserId: string): Promise<EligibleActor>
 /**
  * The one authoritative gate every graph mutation in this file calls first.
  * Sequence: resolve actor -> lock+load flowchart (scoped by
- * repairCaseId+isDeleted=false) -> lock+load case -> authorize (assignment +
- * lock, unconditional) -> verify expectedFlowchartUpdatedAt. Returns the
- * locked flowchart row so callers never re-query it.
+ * repairCaseId+isDeleted=false) -> lock+load case -> authorize (role + lock,
+ * unconditional — Checkpoint 3A removed AS_ENGINEER's assignment scoping) ->
+ * verify expectedFlowchartUpdatedAt. Returns the locked flowchart row so
+ * callers never re-query it.
  */
 async function loadFlowchartForGraphEdit(
   tx: Tx,
@@ -128,10 +131,11 @@ async function loadFlowchartForGraphEdit(
 
   const repairCase = await loadCaseForUpdate(tx, repairCaseId);
   if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+  if (repairCase.billingType === "PENDING_DECISION") {
+    fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 진행할 수 있습니다.");
+  }
 
-  const isAssignedToCase = repairCase.assignedEngineerId === actor.id;
-  if (!canMutateRepairCaseFlowchart(actor.role, { isAssignedToCase, isCaseLocked: repairCase.isLocked })) {
-    if (repairCase.isLocked) fail("CASE_LOCKED", "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다.");
+  if (!canMutateRepairCaseFlowchart(actor.role, { isCaseLocked: repairCase.isLocked })) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 
@@ -194,6 +198,7 @@ export type RepairCaseFlowchartNodeSnapshot = {
   nodeType: RepairCaseFlowchartNodeType;
   title: string;
   description: string | null;
+  instructions: string | null;
   positionX: number;
   positionY: number;
 };
@@ -205,6 +210,7 @@ function serializeNodeSnapshot(node: typeof repairCaseFlowchartNodes.$inferSelec
     nodeType: node.nodeType,
     title: node.title,
     description: node.description,
+    instructions: node.instructions,
     positionX: node.positionX,
     positionY: node.positionY,
   };
@@ -348,6 +354,7 @@ export async function updateRepairCaseFlowchartNode(params: {
   actorUserId: string;
   title: string;
   description: string | null;
+  instructions: string | null;
   expectedFlowchartUpdatedAt: string;
 }): Promise<UpdateNodeResult> {
   const title = params.title.trim();
@@ -362,17 +369,17 @@ export async function updateRepairCaseFlowchartNode(params: {
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
       if (node.flowchartId !== flowchart.id) fail("CROSS_FLOWCHART", "다른 Flowchart에 속한 노드는 수정할 수 없습니다.");
 
-      const changed = node.title !== title || node.description !== params.description;
+      const changed = node.title !== title || node.description !== params.description || node.instructions !== params.instructions;
       if (!changed) {
         return { ok: true, updatedAt: flowchart.updatedAt.toISOString(), changed: false };
       }
 
-      const beforeState = { id: node.id, title: node.title, description: node.description };
-      const afterState = { id: node.id, title, description: params.description };
+      const beforeState = { id: node.id, title: node.title, description: node.description, instructions: node.instructions };
+      const afterState = { id: node.id, title, description: params.description, instructions: params.instructions };
 
       await tx
         .update(repairCaseFlowchartNodes)
-        .set({ title, description: params.description, updatedAt: new Date() })
+        .set({ title, description: params.description, instructions: params.instructions, updatedAt: new Date() })
         .where(eq(repairCaseFlowchartNodes.id, node.id));
 
       await insertGraphEditHistory(tx, {

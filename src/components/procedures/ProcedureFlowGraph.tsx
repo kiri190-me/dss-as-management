@@ -41,6 +41,7 @@ import {
 } from "@/lib/domain/procedure-edge-routing";
 import { resolveEffectiveNodePosition, hasUserLayoutOverride, computeLayeredGraphLayout } from "@/lib/graph-editor-core/layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
@@ -194,9 +195,10 @@ export default function ProcedureFlowGraph({
   selectedWaypointIndex = null,
   onWaypointSelectionChange,
   onWaypointMove,
-  onEdgeDoubleClickInsert,
+  onEdgeDoubleClick,
   layoutMode: controlledLayoutMode,
   onLayoutModeChange,
+  onInstanceReady,
 }: {
   templateId: string;
   nodes: ProcedureFlowGraphNode[];
@@ -244,8 +246,8 @@ export default function ProcedureFlowGraph({
   onWaypointSelectionChange?: (index: number | null) => void;
   /** Fires on every waypoint drag frame — client-state only, same "no auto-save" contract as onNodeDragStop. */
   onWaypointMove?: (edgeId: string, index: number, point: { x: number; y: number }) => void;
-  /** The double-click-on-an-edge shortcut (never the only way to add a waypoint — see the editor's own "경로점 추가" button) — fires with the click position already converted to flow coordinates. */
-  onEdgeDoubleClickInsert?: (edgeId: string, point: { x: number; y: number }) => void;
+  /** 5C-6D-1E — the double-click-on-an-edge shortcut, now "straighten this connection" (aligns the connected nodes; parity with CaseFlowchartGraph's own onEdgeDoubleClick) rather than waypoint insertion — see this component's own handleCanvasEdgeDoubleClick doc comment for the full rationale. Only the edge id is needed; the click position is no longer used. */
+  onEdgeDoubleClick?: (edgeId: string) => void;
   /**
    * Phase 5C-5B usability bugfix — 원본 배치/사용자 배치 view mode, optionally
    * controlled by the caller. Route-point markers are only ever rendered/
@@ -260,6 +262,8 @@ export default function ProcedureFlowGraph({
    */
   layoutMode?: LayoutMode;
   onLayoutModeChange?: (mode: LayoutMode) => void;
+  /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
+  onInstanceReady?: (instance: ReactFlowInstance) => void;
 }) {
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   // Fires the camera fit exactly once, the first time the instance for the
@@ -267,6 +271,37 @@ export default function ProcedureFlowGraph({
   // manual worksheet-filter change (which remounts <ReactFlow> via its
   // `key`) never re-triggers the original error's auto-fit.
   const initialFitNodeIdRef = useRef<string | null>(initialSelectedNodeId);
+
+  // 5C-6D-1D — Shift+drag axis lock, ported verbatim from CaseFlowchartGraph
+  // (graph-editor-core/axis-lock.ts's own pure resolveDragAxis/applyAxisLock,
+  // no second implementation here). Only ever receives drag events at all
+  // when nodesDraggable is true below (editable && layoutMode === "USER") —
+  // SOURCE/STAGE_SORTED never become draggable just to support this, so no
+  // extra mode gating is needed in these handlers themselves.
+  const activeDragRef = useRef<{ nodeId: string; start: Point; axis: DragAxis; shiftHeld: boolean } | null>(null);
+
+  function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {
+    activeDragRef.current = { nodeId, start: position, axis: null, shiftHeld: shiftKey };
+  }
+
+  function handleNodeDrag(nodeId: string, position: Point) {
+    const drag = activeDragRef.current;
+    if (!drag || drag.nodeId !== nodeId || !drag.shiftHeld) return;
+    if (drag.axis === null) {
+      drag.axis = resolveDragAxis(drag.start, position);
+      if (drag.axis === null) return; // still below the commit threshold — let it move freely for now
+    }
+    const constrained = applyAxisLock(drag.start, position, drag.axis);
+    if (constrained.x === position.x && constrained.y === position.y) return;
+    reactFlowInstanceRef.current?.setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, position: constrained } : n)));
+  }
+
+  function handleNodeDragStopWithAxisLock(nodeId: string, position: Point) {
+    const drag = activeDragRef.current;
+    const finalPosition = drag && drag.nodeId === nodeId && drag.shiftHeld && drag.axis !== null ? applyAxisLock(drag.start, position, drag.axis) : position;
+    activeDragRef.current = null;
+    onNodeDragStop?.(nodeId, finalPosition);
+  }
 
   const issueBadgeByNodeId = useMemo(() => {
     const map = new Map<string, NodeIssueBadge>();
@@ -480,15 +515,29 @@ export default function ProcedureFlowGraph({
     onEdgeSelectionChange?.(null);
   }
 
-  /** The double-click shortcut for inserting a waypoint — never the only way to add one (see the editor's "경로점 추가" button) — only meaningful in editable 사용자 배치, same gate node dragging and the waypoint handles themselves use. Edge selection itself always happens on any double click, regardless of mode. */
-  function handleCanvasEdgeDoubleClick(edgeId: string, point: { x: number; y: number }) {
+  /**
+   * 5C-6D-1E — double-click now selects the edge AND (in editable 사용자
+   * 배치 only) requests a "straighten this connection" alignment —
+   * parity with CaseFlowchartGraph's own double-click meaning. No longer
+   * inserts a waypoint (that conflicting meaning is retired per the
+   * approved 1E decision); explicit waypoint add/remove/reset stays fully
+   * available via the edge panel's own controls (onAddWaypoint etc.,
+   * unchanged). Edge selection itself always happens on any double click,
+   * regardless of mode — only the straighten REQUEST is gated to editable
+   * USER mode, same gate node dragging and the waypoint handles use. The
+   * actual straighten math/state lives in the screen
+   * (ProcedureTemplateEditorScreen), never here — this component only
+   * forwards the click.
+   */
+  function handleCanvasEdgeDoubleClick(edgeId: string) {
     onEdgeSelectionChange?.(edgeId);
     if (!editable || layoutMode !== "USER") return;
-    onEdgeDoubleClickInsert?.(edgeId, point);
+    onEdgeDoubleClick?.(edgeId);
   }
 
   function handleCanvasInit(instance: ReactFlowInstance) {
     reactFlowInstanceRef.current = instance;
+    onInstanceReady?.(instance);
     const targetId = initialFitNodeIdRef.current;
     if (targetId) {
       initialFitNodeIdRef.current = null;
@@ -909,7 +958,16 @@ export default function ProcedureFlowGraph({
         nodesConnectable={false}
         elementsSelectable={true}
         minZoom={0.02}
-        onNodeDragStop={onNodeDragStop}
+        // Procedure has no multi-select workflow (confirmed by the 5C-6D-1
+        // architecture audit) — Shift is reserved for axis-locked dragging
+        // in editable 사용자 배치, same as Case Flowchart's own
+        // CaseFlowchartGraph. React Flow's default selectionKeyCode
+        // ("Shift") would otherwise pre-empt a Shift-held node drag
+        // entirely and start a box-selection gesture instead.
+        selectionKeyCode={null}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStopWithAxisLock}
         onEdgeClick={onEdgeSelectionChange}
         onEdgeDoubleClick={handleCanvasEdgeDoubleClick}
         onInit={handleCanvasInit}

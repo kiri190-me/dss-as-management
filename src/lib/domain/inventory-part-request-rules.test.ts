@@ -6,6 +6,7 @@ import {
   validateRequiredReason,
   validateRawQuantity,
   safeAddQuantity,
+  validateRawOwner,
   validateRawRequestItems,
   mergeDuplicateRequestItems,
   validateRawIssueAllocations,
@@ -64,6 +65,22 @@ test("safeAddQuantity: rejects overflow beyond the Postgres integer range", () =
   assert.equal(overflow2.ok, false);
 });
 
+test("validateRawOwner: accepts every canonical stock_owner code", () => {
+  for (const code of ["DSS", "KYOSAN", "SERVICE_SPARE", "TEST"] as const) {
+    const result = validateRawOwner(code);
+    assert.equal(result.ok, true, code);
+    if (result.ok) assert.equal(result.owner, code);
+  }
+});
+
+test("validateRawOwner: rejects missing/null/invalid values", () => {
+  assert.equal(validateRawOwner(undefined).ok, false);
+  assert.equal(validateRawOwner(null).ok, false);
+  assert.equal(validateRawOwner("").ok, false);
+  assert.equal(validateRawOwner("NOT_A_REAL_OWNER").ok, false);
+  assert.equal(validateRawOwner(123).ok, false);
+});
+
 test("validateRawRequestItems: rejects an empty cart", () => {
   const result = validateRawRequestItems([]);
   assert.equal(result.ok, false);
@@ -71,39 +88,59 @@ test("validateRawRequestItems: rejects an empty cart", () => {
 
 test("validateRawRequestItems: a single invalid raw line fails validation even if a duplicate positive line exists for the same part (must fail BEFORE merge)", () => {
   const result = validateRawRequestItems([
-    { partId: PART_A, quantity: 5 },
-    { partId: PART_A, quantity: -2 },
+    { partId: PART_A, quantity: 5, owner: "DSS" },
+    { partId: PART_A, quantity: -2, owner: "DSS" },
   ]);
   assert.equal(result.ok, false, "the -2 line must be rejected outright, never merged into a net 3");
 });
 
 test("validateRawRequestItems: rejects invalid partId, fractional/zero/negative/oversized quantity", () => {
-  assert.equal(validateRawRequestItems([{ partId: "not-a-uuid", quantity: 1 }]).ok, false);
-  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 0 }]).ok, false);
-  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 1.5 }]).ok, false);
-  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: PG_INTEGER_MAX + 1 }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: "not-a-uuid", quantity: 1, owner: "DSS" }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 0, owner: "DSS" }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 1.5, owner: "DSS" }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: PG_INTEGER_MAX + 1, owner: "DSS" }]).ok, false);
+});
+
+test("validateRawRequestItems: rejects a missing or invalid owner even when quantity/partId are valid", () => {
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 1, owner: undefined }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 1, owner: "" }]).ok, false);
+  assert.equal(validateRawRequestItems([{ partId: PART_A, quantity: 1, owner: "NOT_A_REAL_OWNER" }]).ok, false);
 });
 
 test("mergeDuplicateRequestItems: same part selected twice normalizes into one item with summed quantity", () => {
   const result = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: 3 },
-    { partId: PART_A, quantity: 4 },
+    { partId: PART_A, quantity: 3, owner: "DSS" },
+    { partId: PART_A, quantity: 4, owner: "DSS" },
   ]);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].partId, PART_A);
   assert.equal(result.items[0].quantity, 7);
+  assert.equal(result.items[0].owner, "DSS");
+});
+
+test("mergeDuplicateRequestItems: rejects when the same part is submitted twice with different owners", () => {
+  const result = mergeDuplicateRequestItems([
+    { partId: PART_A, quantity: 3, owner: "DSS" },
+    { partId: PART_A, quantity: 4, owner: "KYOSAN" },
+  ]);
+  assert.equal(result.ok, false, "conflicting owners for the same part must never be silently reconciled");
+});
+
+test("mergeDuplicateRequestItems: rejects a raw item with a missing/invalid owner", () => {
+  const result = mergeDuplicateRequestItems([{ partId: PART_A, quantity: 1, owner: "NOT_A_REAL_OWNER" }]);
+  assert.equal(result.ok, false);
 });
 
 test("mergeDuplicateRequestItems: merges notes deterministically regardless of entry order", () => {
   const orderA = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: 1, note: "urgent" },
-    { partId: PART_A, quantity: 2, note: "for repair" },
+    { partId: PART_A, quantity: 1, owner: "DSS", note: "urgent" },
+    { partId: PART_A, quantity: 2, owner: "DSS", note: "for repair" },
   ]);
   const orderB = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: 2, note: "for repair" },
-    { partId: PART_A, quantity: 1, note: "urgent" },
+    { partId: PART_A, quantity: 2, owner: "DSS", note: "for repair" },
+    { partId: PART_A, quantity: 1, owner: "DSS", note: "urgent" },
   ]);
   assert.equal(orderA.ok, true);
   assert.equal(orderB.ok, true);
@@ -114,15 +151,15 @@ test("mergeDuplicateRequestItems: merges notes deterministically regardless of e
 
 test("mergeDuplicateRequestItems: exact duplicate notes are deduped; blank/whitespace-only notes drop out; no notes -> null", () => {
   const result = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: 1, note: "same" },
-    { partId: PART_A, quantity: 1, note: "same" },
-    { partId: PART_A, quantity: 1, note: "   " },
+    { partId: PART_A, quantity: 1, owner: "DSS", note: "same" },
+    { partId: PART_A, quantity: 1, owner: "DSS", note: "same" },
+    { partId: PART_A, quantity: 1, owner: "DSS", note: "   " },
   ]);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.items[0].note, "same");
 
-  const noNotes = mergeDuplicateRequestItems([{ partId: PART_B, quantity: 1 }]);
+  const noNotes = mergeDuplicateRequestItems([{ partId: PART_B, quantity: 1, owner: "DSS" }]);
   assert.equal(noNotes.ok, true);
   if (!noNotes.ok) return;
   assert.equal(noNotes.items[0].note, null);
@@ -130,18 +167,19 @@ test("mergeDuplicateRequestItems: exact duplicate notes are deduped; blank/white
 
 test("mergeDuplicateRequestItems: result is sorted by partId", () => {
   const result = mergeDuplicateRequestItems([
-    { partId: PART_B, quantity: 1 },
-    { partId: PART_A, quantity: 1 },
+    { partId: PART_B, quantity: 1, owner: "DSS" },
+    { partId: PART_A, quantity: 1, owner: "KYOSAN" },
   ]);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.deepEqual(result.items.map((i) => i.partId), [PART_A, PART_B]);
+  assert.deepEqual(result.items.map((i) => i.owner), ["KYOSAN", "DSS"]);
 });
 
 test("mergeDuplicateRequestItems: rejects when duplicate quantities overflow the Postgres integer range", () => {
   const result = mergeDuplicateRequestItems([
-    { partId: PART_A, quantity: PG_INTEGER_MAX },
-    { partId: PART_A, quantity: 10 },
+    { partId: PART_A, quantity: PG_INTEGER_MAX, owner: "DSS" },
+    { partId: PART_A, quantity: 10, owner: "DSS" },
   ]);
   assert.equal(result.ok, false);
 });

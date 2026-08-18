@@ -1,0 +1,1 @@
+ALTER TABLE "repair_cases" ADD COLUMN "legacy_report_number" text;

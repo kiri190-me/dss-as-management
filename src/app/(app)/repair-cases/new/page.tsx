@@ -3,6 +3,9 @@ import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import IntakeForm from "@/components/repair-cases/new/IntakeForm";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { readSession } from "@/lib/auth/session";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { canEditProductModels } from "@/lib/auth/product-model-authorization";
 
 export const metadata: Metadata = {
   title: "A/S 접수 | DSS A/S 관리 시스템",
@@ -17,6 +20,18 @@ export default async function RepairCaseNewPage() {
   // mockEndUsers/mockUsers exactly as before (no DB access at all).
   const referenceData = writeSource === "database" ? await getIntakeReferenceData() : null;
 
+  // Product Model Master 연결 체크포인트 — "새 모델로 등록" 버튼을 보여줄지
+  // 결정하는 UX 힌트일 뿐이다(실제 권한 재확인은 create-repair-case.ts
+  // Server Action이 독립적으로 수행한다). 세션이 없거나 DB 모드가 아니면
+  // 항상 false로 안전하게 기본값 처리한다 — 이 페이지 자체는 계속 로그인을
+  // 강제하지 않는다(기존 동작 유지, Server Action이 최종 인가자).
+  let canRegisterProductModel = false;
+  if (writeSource === "database") {
+    const session = await readSession();
+    const actingUser = session ? await resolveActingUserForSession(session) : null;
+    canRegisterProductModel = actingUser !== null && canEditProductModels(actingUser.role);
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-baseline justify-between gap-4">
@@ -28,7 +43,7 @@ export default async function RepairCaseNewPage() {
           ? "이 화면에서 등록한 접수 건은 데이터베이스에 저장됩니다."
           : "이 화면에서 등록한 접수 건은 이 브라우저에만 저장되는 로컬 데모 데이터입니다."}
       </p>
-      <IntakeForm writeSource={writeSource} referenceData={referenceData} />
+      <IntakeForm writeSource={writeSource} referenceData={referenceData} canRegisterProductModel={canRegisterProductModel} />
     </div>
   );
 }

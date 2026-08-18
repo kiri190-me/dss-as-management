@@ -51,6 +51,7 @@ export type CaseFlowchartGraphNode = {
   nodeType: RepairCaseFlowchartNodeType;
   title: string;
   description: string | null;
+  instructions: string | null;
   positionX: number;
   positionY: number;
 };

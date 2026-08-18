@@ -26,6 +26,41 @@ body {
 }
 
 /*
+ * Native <dialog> (showModal) centering — every confirmation/dialog in this
+ * app (29 components, e.g. DeleteAttachmentDialog, ReturnStockDialog,
+ * TransitionDialog, and this checkpoint's DeleteFlowchartDialog) uses the
+ * same native <dialog>/showModal() pattern, no third-party modal library.
+ * Tailwind's preflight resets `margin: 0` on every element via a universal
+ * selector (tailwindcss/preflight.css) — that zeroes out the browser's own
+ * UA-stylesheet `margin: auto` rule dialogs rely on to center themselves in
+ * the top layer, which is exactly why dialogs were rendering pinned near
+ * the viewport edge instead of centered. Restoring `margin: auto` here
+ * fixes every dialog in the app at once (they're all outranked by this
+ * type-selector rule the same way, none override margin themselves) —
+ * never a per-component fix.
+ */
+dialog {
+  margin: auto;
+}
+
+/*
+ * Small-screen safety gutter. Each dialog already sets its own responsive
+ * width via Tailwind utility classes (typically `w-full max-w-md`), which
+ * correctly shrinks down to the max-width breakpoint but — being exactly
+ * 100% of the viewport below it — touches both edges with zero horizontal
+ * breathing room on narrow phones. `dialog:modal` legally outranks a
+ * single utility class in specificity (one pseudo-class + one type
+ * selector beats one class selector), so this narrows the box by a small
+ * fixed inset on small screens without `!important` and without touching
+ * any individual dialog component.
+ */
+@media (max-width: 30rem) {
+  dialog:modal {
+    width: calc(100% - 2rem);
+  }
+}
+
+/*
  * Stage F-1 인쇄 전용 규칙이다. 아래 선택자는 전부 .report-document
  * 하위로 스코프한다 — 전역 인쇄 규칙을 추가하지 않는다. 앱 크롬
  * (TopBar/Sidebar/탭/컨트롤 패널/인쇄 버튼)은 이미 각 컴포넌트에 적용된

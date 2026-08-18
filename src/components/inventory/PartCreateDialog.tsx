@@ -65,7 +65,6 @@ export default function PartCreateDialog({
       return;
     }
     onClose();
-    router.push(`/inventory/${result.partId}`);
     router.refresh();
   }
 

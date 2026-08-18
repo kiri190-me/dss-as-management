@@ -40,6 +40,8 @@ import {
 
 export type CaseFlowchartMetadata = { id: string; repairCaseId: string; title: string; description: string | null; updatedAt: string };
 
+type CaseRightPanelTab = "properties" | "addNode" | "createEdge";
+
 /**
  * Case-flowchart graph editor screen (Phase 5C-6D, editor model corrected
  * in 5C-6D follow-up #2). Deliberately not a clone of
@@ -172,6 +174,12 @@ export default function CaseFlowchartEditorScreen({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
+
+  // Phase B (5C-6D-1F design pass) — right-panel tabs, mirroring
+  // ProcedureTemplateEditorScreen's rightPanelTab pattern at the IA level
+  // only (no 검증/이력 tabs — Case has neither). Selecting a node or edge on
+  // the canvas always jumps to "properties", same as the Procedure screen.
+  const [rightPanelTab, setRightPanelTab] = useState<CaseRightPanelTab>("properties");
 
   const [pendingNodeDraftsById, setPendingNodeDraftsById] = useState<Map<string, CaseFlowchartNodeDraft>>(new Map());
   const [pendingNodePositionsById, setPendingNodePositionsById] = useState<Map<string, Position>>(new Map());
@@ -311,7 +319,12 @@ export default function CaseFlowchartEditorScreen({
     const pending = pendingNodeDraftsById.get(nodeId);
     if (pending) return pending;
     const serverNode = nodes.find((n) => n.id === nodeId);
-    return { title: serverNode?.title ?? "", description: serverNode?.description ?? "", nodeType: serverNode?.nodeType ?? "TASK" };
+    return {
+      title: serverNode?.title ?? "",
+      description: serverNode?.description ?? "",
+      instructions: serverNode?.instructions ?? "",
+      nodeType: serverNode?.nodeType ?? "TASK",
+    };
   }
 
   function updateNodeDraft(nodeId: string, patch: Partial<CaseFlowchartNodeDraft>) {
@@ -457,6 +470,18 @@ export default function CaseFlowchartEditorScreen({
   const totalPendingCount = dirtyNodeEntries.length + dirtyPositionNodeIds.length + dirtyEdgeEntries.length + dirtyRouteEdgeIds.length;
   const hasAnyPendingChanges = totalPendingCount > 0;
 
+  // Unsaved-navigation guard (parity with ProcedureTemplateEditorScreen) —
+  // covers browser close/refresh; this screen is embedded in a tab (no
+  // dedicated "나가기" link of its own to separately confirm).
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (!hasAnyPendingChanges) return;
+      e.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasAnyPendingChanges]);
+
   // ---- rendered graph (server baseline + pending drafts, merged) ----
 
   const renderedNodes: CaseFlowchartGraphNode[] = nodes.map((n) => mergeNodeForRender(n, pendingNodeDraftsById.get(n.id), pendingNodePositionsById.get(n.id)));
@@ -475,6 +500,7 @@ export default function CaseFlowchartEditorScreen({
         nodeId: step.nodeId,
         title: draft.title,
         description: draft.description.trim() || null,
+        instructions: draft.instructions.trim() || null,
         expectedFlowchartUpdatedAt: expectedUpdatedAt,
       });
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
@@ -606,6 +632,17 @@ export default function CaseFlowchartEditorScreen({
     router.refresh();
   }
 
+  /** Client-only reset of every pending draft/position/route map — mirrors ProcedureTemplateEditorScreen's handleDiscardAllPending. Nothing here was ever persisted, so there is no server call and no audit row. */
+  function handleDiscardAllPending() {
+    setPendingNodeDraftsById(new Map());
+    setPendingNodePositionsById(new Map());
+    setPendingEdgeDraftsById(new Map());
+    setPendingRoutePointsByEdgeId(new Map());
+    setSelectedWaypointIndex(null);
+    setGlobalSaveStatus("idle");
+    setGlobalSaveError(null);
+  }
+
   async function handleSaveMetadata() {
     setIsSavingMetadata(true);
     setMetadataError(null);
@@ -650,6 +687,14 @@ export default function CaseFlowchartEditorScreen({
                   ? "저장 실패 - 다시 시도"
                   : "저장"}
           </button>
+          <button
+            type="button"
+            onClick={handleDiscardAllPending}
+            disabled={!hasAnyPendingChanges}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+          >
+            취소
+          </button>
           {globalSaveStatus === "saved" && <span className="text-emerald-700 dark:text-emerald-400">저장 완료</span>}
           {globalSaveStatus === "failed" && globalSaveError && <span className="text-red-600 dark:text-red-400">{globalSaveError}</span>}
           {hasAnyPendingChanges && globalSaveStatus === "idle" && (
@@ -692,85 +737,108 @@ export default function CaseFlowchartEditorScreen({
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="min-h-[500px] rounded-lg border border-zinc-200 dark:border-zinc-800">
-          {nodes.length === 0 ? (
-            <p className="p-6 text-sm text-zinc-500 dark:text-zinc-400">아직 노드가 없습니다. 오른쪽 패널에서 첫 노드를 추가하세요.</p>
-          ) : (
-            <CaseFlowchartGraph
-              nodes={renderedNodes}
-              edges={renderedEdges}
-              editable={canEdit}
-              selectedNodeId={selectedNodeId}
-              selectedEdgeId={selectedEdgeId}
-              onNodeClick={(nodeId) => {
-                setSelectedNodeId(nodeId);
-                setSelectedEdgeId(null);
-                setSelectedWaypointIndex(null);
-              }}
-              onEdgeClick={(edgeId) => {
-                setSelectedEdgeId(edgeId);
-                setSelectedNodeId(null);
-                setSelectedWaypointIndex(null);
-              }}
-              onEdgeDoubleClick={handleEdgeDoubleClick}
-              onPaneClick={() => {
-                setSelectedNodeId(null);
-                setSelectedEdgeId(null);
-                setSelectedWaypointIndex(null);
-              }}
-              onNodeDragStop={handleNodeDragStop}
-              selectedWaypointIndex={selectedWaypointIndex}
-              onWaypointSelectionChange={setSelectedWaypointIndex}
-              onWaypointMove={handleWaypointMove}
-              onInstanceReady={(instance) => {
-                reactFlowInstanceRef.current = instance;
-              }}
-            />
-          )}
+        <div className="flex flex-col gap-2">
+          <div className="min-h-[500px] rounded-lg border border-zinc-200 dark:border-zinc-800">
+            {nodes.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-500 dark:text-zinc-400">아직 노드가 없습니다. 오른쪽 패널에서 첫 노드를 추가하세요.</p>
+            ) : (
+              <CaseFlowchartGraph
+                nodes={renderedNodes}
+                edges={renderedEdges}
+                editable={canEdit}
+                selectedNodeId={selectedNodeId}
+                selectedEdgeId={selectedEdgeId}
+                onNodeClick={(nodeId) => {
+                  setSelectedNodeId(nodeId);
+                  setSelectedEdgeId(null);
+                  setSelectedWaypointIndex(null);
+                  setRightPanelTab("properties");
+                }}
+                onEdgeClick={(edgeId) => {
+                  setSelectedEdgeId(edgeId);
+                  setSelectedNodeId(null);
+                  setSelectedWaypointIndex(null);
+                  setRightPanelTab("properties");
+                }}
+                onEdgeDoubleClick={handleEdgeDoubleClick}
+                onPaneClick={() => {
+                  setSelectedNodeId(null);
+                  setSelectedEdgeId(null);
+                  setSelectedWaypointIndex(null);
+                }}
+                onNodeDragStop={handleNodeDragStop}
+                selectedWaypointIndex={selectedWaypointIndex}
+                onWaypointSelectionChange={setSelectedWaypointIndex}
+                onWaypointMove={handleWaypointMove}
+                onInstanceReady={(instance) => {
+                  reactFlowInstanceRef.current = instance;
+                }}
+              />
+            )}
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {canEdit
+              ? "편집 모드 — 노드를 드래그해 위치를 조정하고, 분기를 선택한 뒤 경로점을 추가/이동/삭제해 연결선 경로를 조정할 수 있습니다 (명시적으로 저장하기 전까지 반영되지 않습니다). 노드/분기를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."
+              : "읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."}
+          </p>
         </div>
 
-        <div className="flex flex-col gap-4">
-          {selectedNode && (
-            <CaseFlowchartNodePropertyPanel
-              node={selectedNode}
-              allNodes={renderedNodes}
-              repairCaseId={repairCaseId}
-              flowchartId={flowchart.id}
-              canEdit={canEdit}
-              expectedFlowchartUpdatedAt={currentUpdatedAt}
-              draft={nodeDraft(selectedNode.id)}
-              onDraftChange={(patch) => updateNodeDraft(selectedNode.id, patch)}
-              onPositionDraftChange={(position) => setPendingNodePosition(selectedNode.id, position)}
-              onDeleted={handleNodeDeleted}
-              resolveNodeDimensions={resolveNodeDimensions}
-            />
-          )}
-          {selectedEdge && (
-            <CaseFlowchartEdgePropertyPanel
-              edge={selectedEdge}
-              nodes={renderedNodes}
-              repairCaseId={repairCaseId}
-              flowchartId={flowchart.id}
-              canEdit={canEdit}
-              expectedFlowchartUpdatedAt={currentUpdatedAt}
-              draft={edgeDraft(selectedEdge.id)}
-              onDraftChange={(patch) => updateEdgeDraft(selectedEdge.id, patch)}
-              onSaved={handleSaved}
-              onDeleted={handleEdgeDeleted}
-              routePoints={workingRoutePoints(selectedEdge.id)}
-              selectedWaypointIndex={selectedWaypointIndex}
-              onAddWaypoint={handleAddWaypoint}
-              onRemoveSelectedWaypoint={handleRemoveSelectedWaypoint}
-              onResetRoute={handleResetRoute}
-            />
-          )}
-          {!selectedNode && !selectedEdge && !canEdit && <p className="text-xs text-zinc-500 dark:text-zinc-400">노드 또는 분기를 선택하면 상세 정보가 표시됩니다.</p>}
+        <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex flex-wrap gap-1 border-b border-zinc-200 pb-2 text-xs dark:border-zinc-800">
+            {(canEdit ? (["properties", "addNode", "createEdge"] as const) : (["properties"] as const)).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setRightPanelTab(tab)}
+                className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+              >
+                {tab === "properties" ? "속성" : tab === "addNode" ? "노드 추가" : "연결 추가"}
+              </button>
+            ))}
+          </div>
 
-          {/* Always available while editable — placing a new node below the
-              currently-selected node (if any) is a normal part of building
-              the graph, not an alternative to inspecting that node's
-              properties above. */}
-          {canEdit && (
+          {rightPanelTab === "properties" && (
+            <>
+              {selectedNode && (
+                <CaseFlowchartNodePropertyPanel
+                  node={selectedNode}
+                  allNodes={renderedNodes}
+                  repairCaseId={repairCaseId}
+                  flowchartId={flowchart.id}
+                  canEdit={canEdit}
+                  expectedFlowchartUpdatedAt={currentUpdatedAt}
+                  draft={nodeDraft(selectedNode.id)}
+                  onDraftChange={(patch) => updateNodeDraft(selectedNode.id, patch)}
+                  onPositionDraftChange={(position) => setPendingNodePosition(selectedNode.id, position)}
+                  onDeleted={handleNodeDeleted}
+                  resolveNodeDimensions={resolveNodeDimensions}
+                />
+              )}
+              {selectedEdge && (
+                <CaseFlowchartEdgePropertyPanel
+                  edge={selectedEdge}
+                  nodes={renderedNodes}
+                  repairCaseId={repairCaseId}
+                  flowchartId={flowchart.id}
+                  canEdit={canEdit}
+                  expectedFlowchartUpdatedAt={currentUpdatedAt}
+                  draft={edgeDraft(selectedEdge.id)}
+                  onDraftChange={(patch) => updateEdgeDraft(selectedEdge.id, patch)}
+                  onSaved={handleSaved}
+                  onDeleted={handleEdgeDeleted}
+                  routePoints={workingRoutePoints(selectedEdge.id)}
+                  selectedWaypointIndex={selectedWaypointIndex}
+                  onAddWaypoint={handleAddWaypoint}
+                  onRemoveSelectedWaypoint={handleRemoveSelectedWaypoint}
+                  onResetRoute={handleResetRoute}
+                  onStraighten={() => handleEdgeDoubleClick(selectedEdge.id)}
+                />
+              )}
+              {!selectedNode && !selectedEdge && <p className="text-xs text-zinc-500 dark:text-zinc-400">노드 또는 분기를 선택하면 상세 정보가 표시됩니다.</p>}
+            </>
+          )}
+
+          {rightPanelTab === "addNode" && canEdit && (
             <CaseFlowchartCreateNodePanel
               repairCaseId={repairCaseId}
               flowchartId={flowchart.id}
@@ -780,7 +848,7 @@ export default function CaseFlowchartEditorScreen({
             />
           )}
 
-          {canEdit && nodes.length > 0 && (
+          {rightPanelTab === "createEdge" && canEdit && nodes.length > 0 && (
             <CaseFlowchartCreateEdgePanel
               repairCaseId={repairCaseId}
               flowchartId={flowchart.id}

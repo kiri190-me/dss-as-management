@@ -68,9 +68,18 @@ export const repairCaseApprovals = pgTable(
   "repair_case_approvals",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repairCaseId: uuid("repair_case_id")
-      .notNull()
-      .references(() => repairCases.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (repair-case permanent-delete schema
+    // foundation checkpoint) — was NOT NULL + RESTRICT, which made a
+    // repair_cases hard-delete impossible at the DB level. This table is
+    // immutable/append-only approval history (검수/출하 승인) that must
+    // outlive the case's own hard-delete; the row's own approvalType/status/
+    // decision columns permanently preserve the decision regardless of this
+    // column going NULL. Existing rows are untouched by this — only a
+    // future repair_cases hard-delete ever nulls it. Same proven pattern as
+    // repair_case_flowchart_edit_history.flowchart_id (migration 0026).
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, {
+      onDelete: "set null",
+    }),
     approvalType: approvalTypeEnum("approval_type").notNull(),
     status: approvalStatusEnum("status").notNull().default("REQUESTED"),
     requestedByUserId: uuid("requested_by_user_id")

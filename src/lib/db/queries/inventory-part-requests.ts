@@ -30,6 +30,8 @@ export type PartRequestItemRow = {
   partSpec: string | null;
   requestedQuantity: number;
   issuedQuantity: number;
+  /** Parts Request 소유구분 checkpoint — NULL for every item created before migration 0024 (never backfilled/guessed). Display via stockOwnerLabelOrUnspecified, never stockOwnerLabels[owner] directly. */
+  owner: StockOwner | null;
   note: string | null;
   totalAvailableQuantity: number;
 };
@@ -46,6 +48,7 @@ async function attachItemsWithAvailability(requestIds: string[]): Promise<Map<st
       partSpec: parts.partSpec,
       requestedQuantity: inventoryPartRequestItems.requestedQuantity,
       issuedQuantity: inventoryPartRequestItems.issuedQuantity,
+      owner: inventoryPartRequestItems.owner,
       note: inventoryPartRequestItems.note,
     })
     .from(inventoryPartRequestItems)
@@ -72,6 +75,7 @@ async function attachItemsWithAvailability(requestIds: string[]): Promise<Map<st
       partSpec: item.partSpec,
       requestedQuantity: item.requestedQuantity,
       issuedQuantity: item.issuedQuantity,
+      owner: item.owner,
       note: item.note,
       totalAvailableQuantity: availabilityByPart.get(item.partId) ?? 0,
     };
@@ -90,17 +94,37 @@ export type ManagerPartRequestRow = {
   status: InventoryPartRequestStatus;
   note: string | null;
   version: number;
-  repairCaseId: string;
+  /**
+   * Nullable (repair-case permanent-delete schema foundation checkpoint):
+   * NULL means the request's repair case has since been permanently purged
+   * — the request row itself is preserved (inventory-accounting history),
+   * it just no longer has a live case to link to. UI must never build a
+   * `/repair-cases/${repairCaseId}` link when this is null.
+   */
+  repairCaseId: string | null;
+  /** "삭제된 접수 건" fallback when repairCaseId is null — never the real intake number of an unrelated case. */
   intakeNumber: string;
   customerName: string;
   modelName: string;
   serialNumber: string;
   requestedByName: string;
+  /** false (never locked) when the case no longer exists — there's nothing left to lock, and every mutation that actually cares (issuePartRequest) independently re-verifies repairCaseId itself rather than trusting this display flag. */
   isCaseLocked: boolean;
   items: PartRequestItemRow[];
 };
 
-/** Every request across every repair case — the manager screen filters/sorts client-side over this full list (small real catalog, same convention as getPartList). */
+/**
+ * Every request across every repair case — the manager screen filters/sorts
+ * client-side over this full list (small real catalog, same convention as
+ * getPartList). LEFT JOIN to repairCases (was INNER JOIN): repair_case_id
+ * is now nullable, and an INNER JOIN would silently drop every request
+ * whose case has been permanently purged from this list entirely — this
+ * table is the accounting-relevant record of what was requested/issued and
+ * must keep showing up, with a "삭제된 접수 건" fallback in place of the
+ * now-missing case fields, never hidden. For still-active cases (every real
+ * row today, since no purge mutation exists yet) this produces byte-for-
+ * byte identical results to the old INNER JOIN.
+ */
 export async function getPartRequestsForManager(): Promise<ManagerPartRequestRow[]> {
   const rows = await db
     .select({
@@ -118,8 +142,8 @@ export async function getPartRequestsForManager(): Promise<ManagerPartRequestRow
       requestedByName: users.name,
     })
     .from(inventoryPartRequests)
-    .innerJoin(repairCases, eq(inventoryPartRequests.repairCaseId, repairCases.id))
-    .innerJoin(customers, eq(repairCases.customerId, customers.id))
+    .leftJoin(repairCases, eq(inventoryPartRequests.repairCaseId, repairCases.id))
+    .leftJoin(customers, eq(repairCases.customerId, customers.id))
     .leftJoin(products, eq(repairCases.productId, products.id))
     .innerJoin(users, eq(inventoryPartRequests.requestedByUserId, users.id))
     .orderBy(desc(inventoryPartRequests.createdAt));
@@ -133,12 +157,12 @@ export async function getPartRequestsForManager(): Promise<ManagerPartRequestRow
     note: r.note,
     version: r.version,
     repairCaseId: r.repairCaseId,
-    intakeNumber: r.intakeNumber,
-    customerName: r.customerName,
+    intakeNumber: r.intakeNumber ?? "삭제된 접수 건",
+    customerName: r.customerName ?? "-",
     modelName: r.modelName ?? "-",
     serialNumber: r.serialNumber ?? "-",
     requestedByName: r.requestedByName,
-    isCaseLocked: r.isCaseLocked,
+    isCaseLocked: r.isCaseLocked ?? false,
     items: itemsByRequest.get(r.id) ?? [],
   }));
 }

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."repair_case_flowchart_edit_action_type" ADD VALUE 'RESTORE_FLOWCHART' BEFORE 'CREATE_NODE';

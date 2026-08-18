@@ -80,10 +80,103 @@ const WARRANTY_GENERATOR_STEP_STATUS: readonly StepStatusEntry[] = [
   { key: "shipment_completed", status: "SHIPMENT_COMPLETED" }, // CONFIRMED: rc-003
 ];
 
+
+const PAID_MATCHER_STEP_STATUS: readonly StepStatusEntry[] = [
+  { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" }, // INFERRED
+  { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" }, // CONFIRMED: rc-010
+  { key: "kyosan_contact_report_sent", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "waiting_kyosan_reply", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-012(WARRANTY, same key)
+  { key: "kyosan_instruction_confirmed", status: "IN_REPAIR" }, // INFERRED
+  { key: "instructed_parts_replacement_or_check", status: "IN_REPAIR" }, // INFERRED
+  { key: "kyosan_followup_report_sent", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_reply_followup", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-013
+  { key: "quote_drafted_per_kyosan_instruction", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "customer_quote_sent", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED(pattern): wh-019/020
+  { key: "waiting_po", status: "WAITING_PO" }, // CONFIRMED: rc-014/015(PAID_GENERATOR, same key)
+  { key: "po_received", status: "WAITING_PO" }, // INFERRED
+  { key: "parts_supply", status: "WAITING_PARTS_SUPPLY" }, // CONFIRMED: rc-008/009(same key)
+  { key: "repair_in_progress", status: "IN_REPAIR" }, // CONFIRMED: rc-007, rc-016
+  { key: "power_on_test", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_shipment_approval", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED: rc-005/017(same key)
+  { key: "shipment_approved", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED(pattern): wh-023
+  { key: "waiting_shipment", status: "WAITING_SHIPMENT" }, // CONFIRMED: rc-004, rc-018
+  { key: "shipment_completed", status: "SHIPMENT_COMPLETED" }, // CONFIRMED: rc-001
+];
+
+const WARRANTY_MATCHER_STEP_STATUS: readonly StepStatusEntry[] = [
+  { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" }, // INFERRED
+  { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" }, // CONFIRMED: rc-010
+  { key: "kyosan_contact_report_sent", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "waiting_kyosan_reply", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-012(WARRANTY, same key)
+  { key: "kyosan_instruction_confirmed", status: "IN_REPAIR" }, // INFERRED
+  { key: "instructed_parts_replacement_or_check", status: "IN_REPAIR" }, // INFERRED
+  { key: "kyosan_followup_report_sent", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_reply_followup", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-013
+  { key: "quote_drafted_per_kyosan_instruction", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "customer_quote_sent", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED(pattern): wh-019/020
+  { key: "waiting_po", status: "WAITING_PO" }, // CONFIRMED: rc-014/015(PAID_GENERATOR, same key)
+  { key: "po_received", status: "WAITING_PO" }, // INFERRED
+  { key: "parts_supply", status: "WAITING_PARTS_SUPPLY" }, // CONFIRMED: rc-008/009(same key)
+  { key: "repair_in_progress", status: "IN_REPAIR" }, // CONFIRMED: rc-007, rc-016
+  { key: "power_on_test", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_shipment_approval", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED: rc-005/017(same key)
+  { key: "shipment_approved", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED(pattern): wh-023
+  { key: "waiting_shipment", status: "WAITING_SHIPMENT" }, // CONFIRMED: rc-004, rc-018
+  { key: "shipment_completed", status: "SHIPMENT_COMPLETED" }, // CONFIRMED: rc-001
+];
+
+const PAID_TOTAL_CONTROLLER_STEP_STATUS: readonly StepStatusEntry[] = [
+  { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" }, // INFERRED
+  { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" }, // CONFIRMED: rc-011
+  { key: "parts_supply", status: "WAITING_PARTS_SUPPLY" }, // CONFIRMED: rc-008(same key)
+  { key: "repair_or_defective_parts_replacement", status: "IN_REPAIR" }, // CONFIRMED: rc-006(same key)
+  { key: "power_on_test", status: "IN_REPAIR" }, // INFERRED
+  { key: "kyosan_contact_report_sent", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "waiting_kyosan_reply", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-012(same key)
+  { key: "quote_drafted_per_kyosan_instruction", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "customer_quote_sent", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: wh-019/020(rc-014/015)
+  { key: "waiting_po", status: "WAITING_PO" }, // CONFIRMED: rc-014, rc-015
+  { key: "po_received", status: "WAITING_PO" }, // INFERRED
+  { key: "final_power_on_test_decision", status: "IN_REPAIR" }, // INFERRED (두 번째 IN_REPAIR 구간)
+  { key: "final_power_on_test", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_shipment_approval", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED: rc-005, rc-017
+  { key: "shipment_approved", status: "WAITING_SHIPMENT_APPROVAL" }, // CONFIRMED(pattern): wh-022
+  { key: "shipment_completed", status: "SHIPMENT_COMPLETED" }, // CONFIRMED: rc-002
+];
+
+const WARRANTY_TOTAL_CONTROLLER_STEP_STATUS: readonly StepStatusEntry[] = [
+  { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" }, // INFERRED
+  { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" }, // INFERRED (다른 두 워크플로와 대칭)
+  { key: "parts_supply", status: "WAITING_PARTS_SUPPLY" }, // CONFIRMED: rc-009(same key)
+  { key: "kyosan_contact_report_sent", status: "WAITING_KYOSAN_REPLY" }, // INFERRED
+  { key: "waiting_kyosan_reply", status: "WAITING_KYOSAN_REPLY" }, // CONFIRMED: rc-012
+  { key: "repair_or_defective_parts_replacement", status: "IN_REPAIR" }, // CONFIRMED: rc-006(same key)
+  { key: "power_on_test", status: "IN_REPAIR" }, // INFERRED
+  { key: "waiting_kyosan_shipment_approval", status: "WAITING_SHIPMENT_APPROVAL" }, // INFERRED (대칭)
+  { key: "shipment_approved", status: "WAITING_SHIPMENT_APPROVAL" }, // INFERRED (wh-022/023 패턴과 대칭)
+  { key: "shipment_completed", status: "SHIPMENT_COMPLETED" }, // CONFIRMED: rc-003
+];
+
 const STEP_STATUS_BY_WORKFLOW: Record<WorkflowType, readonly StepStatusEntry[]> = {
   MATCHER: MATCHER_STEP_STATUS,
+  PAID_MATCHER: PAID_MATCHER_STEP_STATUS,
+  WARRANTY_MATCHER: WARRANTY_MATCHER_STEP_STATUS,
   PAID_GENERATOR: PAID_GENERATOR_STEP_STATUS,
   WARRANTY_GENERATOR: WARRANTY_GENERATOR_STEP_STATUS,
+  PAID_TOTAL_CONTROLLER: PAID_TOTAL_CONTROLLER_STEP_STATUS,
+  WARRANTY_TOTAL_CONTROLLER: WARRANTY_TOTAL_CONTROLLER_STEP_STATUS,
+  PENDING_MATCHER: [
+    { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" },
+    { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" },
+  ],
+  PENDING_GENERATOR: [
+    { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" },
+    { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" },
+  ],
+  PENDING_TOTAL_CONTROLLER: [
+    { key: "product_intake", status: "WAITING_INTAKE_INSPECTION" },
+    { key: "intake_inspection", status: "WAITING_INTAKE_INSPECTION" },
+  ],
 };
 
 const LOOKUP: Record<string, RepairStatus> = {};

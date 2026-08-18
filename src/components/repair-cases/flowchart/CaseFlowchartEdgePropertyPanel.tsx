@@ -50,6 +50,7 @@ export default function CaseFlowchartEdgePropertyPanel({
   onAddWaypoint,
   onRemoveSelectedWaypoint,
   onResetRoute,
+  onStraighten,
 }: {
   edge: CaseFlowchartGraphEdge;
   nodes: CaseFlowchartGraphNode[];
@@ -66,6 +67,8 @@ export default function CaseFlowchartEdgePropertyPanel({
   onAddWaypoint: () => void;
   onRemoveSelectedWaypoint: () => void;
   onResetRoute: () => void;
+  /** 5C-6D-1E — "연결 정렬": explicit discoverable equivalent of the edge double-click gesture, calling the exact same CaseFlowchartEditorScreen handler — no duplicated math, no duplicated save path. Always present when canEdit (Case has no layoutMode gate to also satisfy, unlike Procedure). */
+  onStraighten: () => void;
 }) {
   const nodesById = new Map(nodes.map((n) => [n.id, n]));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -123,7 +126,6 @@ export default function CaseFlowchartEdgePropertyPanel({
         <p className="mt-0.5 text-zinc-500 dark:text-zinc-400">
           {nodesById.get(edge.fromNodeId)?.title ?? edge.fromNodeId} → {nodesById.get(edge.toNodeId)?.title ?? edge.toNodeId}
         </p>
-        {canEdit && <p className="mt-1 text-zinc-500 dark:text-zinc-400">분기 유형/라벨/대상 변경은 화면 상단의 [저장] 버튼으로 함께 저장됩니다.</p>}
       </div>
 
       <label className="flex flex-col gap-1">
@@ -141,6 +143,35 @@ export default function CaseFlowchartEdgePropertyPanel({
         <input value={draft.branchLabel} onChange={(e) => onDraftChange({ branchLabel: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
       {labelRequired && <p className="text-red-600 dark:text-red-400">사용자 정의(CUSTOM) 분기에는 라벨이 필요합니다.</p>}
+
+      {canEdit && <p className="text-[11px] text-zinc-400 dark:text-zinc-600">위 속성 변경은 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.</p>}
+
+      {canEdit && (
+        <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
+          <h4 className="text-xs font-semibold text-blue-900 dark:text-blue-300">분기 대상 변경</h4>
+          <label className="flex flex-col gap-1">
+            시작 노드
+            <select value={draft.fromNodeId} onChange={(e) => onDraftChange({ fromNodeId: e.target.value })} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            대상 노드
+            <select value={draft.toNodeId} onChange={(e) => onDraftChange({ toNodeId: e.target.value })} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          {draft.fromNodeId === draft.toNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
         <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">연결선 경로</h4>
@@ -165,6 +196,13 @@ export default function CaseFlowchartEdgePropertyPanel({
               className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               자동 경로로 초기화
+            </button>
+            <button
+              type="button"
+              onClick={onStraighten}
+              className="rounded-md border border-emerald-400 px-2.5 py-1 text-xs text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900"
+            >
+              연결 정렬
             </button>
             <button
               type="button"
@@ -223,33 +261,6 @@ export default function CaseFlowchartEdgePropertyPanel({
           </details>
         )}
       </div>
-
-      {canEdit && (
-        <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
-          <h4 className="text-xs font-semibold text-blue-900 dark:text-blue-300">분기 대상 변경</h4>
-          <label className="flex flex-col gap-1">
-            시작 노드
-            <select value={draft.fromNodeId} onChange={(e) => onDraftChange({ fromNodeId: e.target.value })} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            대상 노드
-            <select value={draft.toNodeId} onChange={(e) => onDraftChange({ toNodeId: e.target.value })} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          {draft.fromNodeId === draft.toNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
-        </div>
-      )}
 
       {canEdit && (
         <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">

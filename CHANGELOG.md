@@ -2,6 +2,13 @@
 
 이 문서는 [Keep a Changelog](https://keepachangelog.com/) 형식을 따른다.
 
+## [Unreleased]
+
+### Changed
+
+- **정책 변경**: 출하 완료가 A/S 접수 건 데이터를 자동으로 읽기 전용으로 만들지 않도록 정책을 뒤집었다. 출하 완료된 건도 통상의 역할별/필드별 권한 규칙에 따라 계속 수정 가능하며, [0.2.0]에서 확정했던 "출하 완료 후 수정(잠금 해제)" 6단계 흐름 및 `unlock_requests` 엔티티/API(단수형 폐기 후 복수형 4개 엔드포인트로 대체했던 바로 그 구조)는 전부 폐기한다. 워크플로 단계 전이만 기존과 동일하게 종료 단계(`shipment_completed`)로 보호되며 그 이후 단계로의 진행/반려는 지원하지 않는다.
+- PROJECT_REQUIREMENTS.md, SECURITY_POLICY.md, API_SPECIFICATION.md, DATABASE_DESIGN.md, DEVELOPMENT_ROADMAP.md, UI_GUIDELINE.md의 관련 서술을 새 정책에 맞게 갱신.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added

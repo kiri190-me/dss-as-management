@@ -15,6 +15,12 @@ import {
  * Policy source: this task's approved authorization matrix. Field lists
  * mirror SECTION_FIELD_NAMES exactly (a role's set is always a subset of
  * the section's known fields) so the two modules can never silently drift.
+ *
+ * intakeInspectionResult/currentDiagnosisSummary/nextPlannedAction are not
+ * section fields at all anymore (removed from SECTION_FIELD_NAMES by the
+ * record_kind derived-summary checkpoint) — they never appear in any role's
+ * editable set here, not even SUPER_ADMIN/ADMIN's, because ALL_EDITABLE_FIELDS
+ * is derived from SECTION_FIELD_NAMES rather than hand-maintained.
  */
 const ALL_EDITABLE_FIELDS: readonly string[] = [
   ...SECTION_FIELD_NAMES.INTAKE,
@@ -22,11 +28,14 @@ const ALL_EDITABLE_FIELDS: readonly string[] = [
   ...SECTION_FIELD_NAMES.FAULT_SERVICE,
 ];
 
+// "priority" (SECTION_FIELD_NAMES.INTAKE) is deliberately absent from both
+// AS_ENGINEER_FIELDS and SALES_FIELDS below — it's only in ALL_EDITABLE_FIELDS,
+// so today only SUPER_ADMIN/ADMIN can edit it (자동 상속, 아래 두 목록에 손댈
+// 필요 없음). No requirement specified which non-admin roles should also get
+// it; broaden deliberately later if needed, not as a side effect of some
+// other change.
 const AS_ENGINEER_FIELDS: readonly string[] = [
   "reportedSymptom",
-  "intakeInspectionResult",
-  "currentDiagnosisSummary",
-  "nextPlannedAction",
   "accessoryList",
   "externalConditionSummary",
   "reasonForRemoval",
@@ -34,15 +43,22 @@ const AS_ENGINEER_FIELDS: readonly string[] = [
   "assignedEngineerId",
   "internalTargetInspectionCompletionDate",
   "internalTargetShipmentDate",
-  "modelName",
+  "productModelId",
   "lotNumber",
   "serialNumber",
-  "partNumber",
+  "customerId",
+  "newCustomerName",
+  "endUserId",
+  "newEndUserName",
+  "workflowKind",
+  "billingType",
 ];
 
 const SALES_FIELDS: readonly string[] = [
   "customerId",
+  "newCustomerName",
   "endUserId",
+  "newEndUserName",
   "receivedAt",
   "customerRequestedDueDate",
   "contactName",
@@ -103,17 +119,67 @@ export function authorizeSubmittedFields(
 }
 
 /**
- * Documented policy (PROJECT_REQUIREMENTS.md "출하 완료 후 수정(잠금 해제)
- * 정책", SECURITY_POLICY.md §2): a shipment-locked repair case can only be
- * edited via a separate request → 관리자 승인 → 임시 잠금 해제 → 사유 필수
- * 입력 후 수정 → 재검토 및 재승인 → 재잠금 procedure — which this task does
- * not implement (out of scope: no workflow-transition/approval persistence
- * here). So this general edit action blocks ALL roles, including
- * SUPER_ADMIN/ADMIN, whenever isLocked is true; it is not a per-role
- * exception like the rest of this file. This is a deliberate difference
- * from the task's suggested default matrix (which didn't mention isLocked
- * at all) — see the final report.
+ * Product policy change (shipment-lock removal checkpoint): shipment
+ * completion must NOT automatically make a repair case read-only. This
+ * reverses the previously documented policy (PROJECT_REQUIREMENTS.md "출하
+ * 완료 후 수정(잠금 해제) 정책", SECURITY_POLICY.md §2 — both now stale,
+ * flagged for the user to update separately) that required a
+ * request → 관리자 승인 → 임시 잠금 해제 → 사유 필수 입력 후 수정 → 재검토
+ * 및 재승인 → 재잠금 procedure, which was never actually implemented (no
+ * unlock_requests persistence ever existed) — every repair case was
+ * simply permanently read-only after shipment instead.
+ *
+ * `isLocked` is intentionally still accepted here (not removed from the
+ * signature) so every call site's shape stays unchanged and this remains
+ * the single place to reintroduce edit-locking later if ever needed —
+ * always returns false now, unconditionally.
  */
 export function isBlockedByShipmentLock(isLocked: boolean): boolean {
-  return isLocked;
+  void isLocked;
+  return false;
+}
+
+/**
+ * Bulk soft-delete for /repair-cases (전체 A/S 현황) — SUPER_ADMIN/ADMIN only.
+ * Independent of the field-level edit matrix above (deleting a case is not a
+ * field edit) — a pure role predicate, same shape/precedent as
+ * canEditProductModels/canEditCustomers, re-checked independently by
+ * bulk-delete-repair-cases.ts's Server Action regardless of what the UI
+ * happened to render.
+ */
+export function canBulkDeleteRepairCases(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
+/**
+ * Trash view + restore for /repair-cases (Repair Case Trash + Restore
+ * checkpoint) — same SUPER_ADMIN/ADMIN-only role set as
+ * canBulkDeleteRepairCases (soft-delete and restore/view-trash are two
+ * halves of one admin-only lifecycle for this entity — unlike repair case
+ * flowcharts, where AS_ENGINEER also gets mutate/restore rights, there is no
+ * corresponding split here). Kept as its own named predicate rather than
+ * calling canBulkDeleteRepairCases directly at trash/restore call sites,
+ * purely so each call site reads correctly for what it's actually gating.
+ * Gates both "is the 휴지통 tab visible at all" and "may this restore
+ * request proceed" — re-checked independently by restore-repair-cases.ts's
+ * Server Action regardless of what the UI happened to render.
+ */
+export function canRestoreRepairCases(role: Role): boolean {
+  return canBulkDeleteRepairCases(role);
+}
+
+/**
+ * Permanent delete (hard delete of an already-soft-deleted repair case, 휴지통
+ * 완전 삭제) — SUPER_ADMIN/ADMIN only, same role set as
+ * canBulkDeleteRepairCases/canRestoreRepairCases. Kept as its own named
+ * predicate rather than calling one of those directly — same call-site-
+ * clarity precedent as canRestoreRepairCases, and mirrors
+ * canPermanentlyDeleteRepairCaseFlowchart's own separate-narrower-predicate
+ * shape (repair-case-flowchart-authorization.ts) even though the role set
+ * happens to be identical here. Re-checked independently by
+ * permanently-delete-repair-cases.ts's Server Action regardless of what the
+ * UI happened to render.
+ */
+export function canPermanentlyDeleteRepairCases(role: Role): boolean {
+  return canBulkDeleteRepairCases(role);
 }

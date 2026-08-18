@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
+import { WORK_RECORD_KIND_CODES, workRecordKindLabels, type WorkRecordKind } from "@/lib/domain/types";
 
 export default function WorkRecordForm({
   repairCaseId,
@@ -19,6 +20,7 @@ export default function WorkRecordForm({
   disabledReason: string | null;
 }) {
   const router = useRouter();
+  const [recordKind, setRecordKind] = useState<WorkRecordKind>("GENERAL");
   const [memo, setMemo] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [clientRequestId, setClientRequestId] = useState(() => crypto.randomUUID());
@@ -38,6 +40,7 @@ export default function WorkRecordForm({
     const result = await createWorkRecordAction({
       repairCaseId,
       memo,
+      recordKind,
       relatedProcedureExecutionNodeId: selectedNodeId || null,
       clientRequestId,
     });
@@ -46,6 +49,7 @@ export default function WorkRecordForm({
       setErrorMessage(result.message);
       return;
     }
+    setRecordKind("GENERAL");
     setMemo("");
     setSelectedNodeId("");
     setClientRequestId(crypto.randomUUID());
@@ -58,6 +62,25 @@ export default function WorkRecordForm({
         현재 단계: {currentStepOrder !== null ? `${currentStepOrder}. ` : ""}
         {currentStepLabel}
       </p>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="work-record-kind-select" className="text-xs text-zinc-500 dark:text-zinc-400">
+          기록 구분
+        </label>
+        <select
+          id="work-record-kind-select"
+          value={recordKind}
+          onChange={(event) => setRecordKind(event.target.value as WorkRecordKind)}
+          disabled={disabled || isSubmitting}
+          className="w-full max-w-sm rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        >
+          {WORK_RECORD_KIND_CODES.map((code) => (
+            <option key={code} value={code}>
+              {workRecordKindLabels[code]}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <textarea
         rows={4}

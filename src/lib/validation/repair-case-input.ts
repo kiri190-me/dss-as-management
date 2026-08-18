@@ -1,6 +1,15 @@
-import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
+import {
+  BILLING_TYPE_CODES,
+  MANUAL_INTAKE_BILLING_TYPE_CODES,
+  NEW_INTAKE_WORKFLOW_TYPE_CODES,
+  PENDING_BILLING_WORKFLOW_TYPE_CODES,
+  type BillingType,
+  type WorkflowType,
+} from "@/lib/domain/types";
 import { isNotEarlierThan, isValidDateString } from "@/lib/domain/local/validation";
+import { isValidIntakeNumberFormat } from "@/lib/domain/local/intake-number";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
+import { deriveWorkflowType, workflowKindOf } from "@/lib/domain/workflow-kind";
 
 /**
  * Pure, DB-free, React-free validation for database-backed repair-case
@@ -16,13 +25,43 @@ import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
  */
 export type ValidatedCreateRepairCaseInput = {
   workflowType: WorkflowType;
-  customerId: string;
+  /** 유상/무상 — workflowType과 독립된 필수 값이다(migration 0021). */
+  billingType: BillingType;
+  /**
+   * 고객사 해석 — customerId(기존 재사용)와 newCustomerName(자유 입력으로
+   * 새로 명시 등록)은 상호 배타적이다. 둘 다 optional인 이유는 이 타입을
+   * 직접 만드는 기존 호출부(통합 테스트 등)가 영향을 받지 않게 하기
+   * 위함이다 — 실제로는 이 함수를 거치면 항상 둘 중 하나만 채워진다.
+   */
+  customerId: string | null;
+  newCustomerName?: string | null;
   endUserId: string | null;
-  assignedEngineerId: string;
+  newEndUserName?: string | null;
+  assignedEngineerId: string | null;
   receivedAt: string;
   customerRequestedDueDate: string | null;
-  internalTargetShipmentDate: string;
+  internalTargetShipmentDate: string | null;
+  /**
+   * 사내 목표 검수 완료일 — A/S 접수 일정 체크포인트부터 [일정] 섹션에서
+   * 직접 입력받는다(기본값 = 인수일 + 14일, 클라이언트의 draft가 계산해
+   * 보낸다 — 여기서는 재계산하지 않고 제출된 값만 형식/순서 검증한다).
+   * Optional인 이유는 다른 optional 필드들과 같다 — 이 타입을 직접 만드는
+   * 기존 호출부(통합 테스트 등)가 영향을 받지 않게 하기 위함이다.
+   */
+  internalTargetInspectionCompletionDate?: string | null;
+  /** Manual 인수번호 override, already format-validated here; omitted/null means "use the existing auto-generator." Optional so existing call sites that build this type directly (integration tests, etc.) are unaffected. */
+  intakeNumber?: string | null;
   modelName: string;
+  /**
+   * Product Model Master 연결 체크포인트 — customerId/newCustomerName과
+   * 같은 원칙으로 상호 배타적이다. Optional인 이유도 같다: 이 타입을 직접
+   * 만드는 기존 호출부(통합 테스트 등, resolveProduct를 레거시 자유 입력
+   * modelName만으로 호출)가 영향을 받지 않게 하기 위함이다 — 실제로
+   * validateCreateRepairCaseInput을 거치면(DB 모드 A/S 접수) 항상 둘 중
+   * 하나가 채워진다.
+   */
+  productModelId?: string | null;
+  newProductModelName?: string | null;
   lotNumber: string;
   serialNumber: string;
   partNumber: string | null;
@@ -30,9 +69,18 @@ export type ValidatedCreateRepairCaseInput = {
   externalConditionSummary: string | null;
   reasonForRemoval: string | null;
   reportedSymptom: string | null;
-  intakeInspectionResult: string | null;
-  currentDiagnosisSummary: string | null;
-  nextPlannedAction: string | null;
+  /**
+   * record_kind 분류 체크포인트부터 A/S 접수 폼이 더 이상 이 3개 필드를
+   * 받지 않는다 — validateCreateRepairCaseInput은 client가 무엇을 보내든
+   * 이 값들을 절대 읽지 않으며, 반환되는 data에도 포함하지 않는다. Optional
+   * 로만 남겨둔 이유는 이 타입을 직접 만드는 기존 호출부(통합 테스트 등)가
+   * 영향을 받지 않게 하기 위함이다 — 실제로 이 함수를 거치면 항상 undefined
+   * 다. 신규 접수 건은 이 컬럼들이 NULL로 남는다(레거시 히스토리 전용
+   * 컬럼 — DB 컬럼 자체는 그대로 보존).
+   */
+  intakeInspectionResult?: string | null;
+  currentDiagnosisSummary?: string | null;
+  nextPlannedAction?: string | null;
   notes: string | null;
   contactName: string | null;
   contactPhone: string | null;
@@ -48,6 +96,7 @@ export type CreateRepairCaseResultCode =
   | "ENGINEER_NOT_ALLOWED"
   | "WORKFLOW_NOT_ALLOWED"
   | "INTAKE_SEQUENCE_EXHAUSTED"
+  | "INTAKE_NUMBER_DUPLICATE"
   | "CONFLICT"
   | "DATABASE_UNAVAILABLE"
   // The same idempotency key is still being processed by an earlier,
@@ -88,6 +137,13 @@ function trimToNull(value: string | null | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/**
+ * intakeInspectionResult/currentDiagnosisSummary/nextPlannedAction are
+ * deliberately absent — record_kind 분류 체크포인트부터 이 3개 필드는 A/S
+ * 접수에서 더 이상 입력받지 않는다(고장 및 서비스 정보 페이지가
+ * repair_case_work_records에서만 파생한다). Client가 이 키들을 보내더라도
+ * 여기서 절대 읽지 않는다.
+ */
 const LONG_TEXT_FIELDS: ReadonlyArray<{
   key: keyof Pick<
     IntakeSubmissionInput,
@@ -95,9 +151,6 @@ const LONG_TEXT_FIELDS: ReadonlyArray<{
     | "externalConditionSummary"
     | "reasonForRemoval"
     | "reportedSymptom"
-    | "intakeInspectionResult"
-    | "currentDiagnosisSummary"
-    | "nextPlannedAction"
     | "notes"
   >;
   label: string;
@@ -106,9 +159,6 @@ const LONG_TEXT_FIELDS: ReadonlyArray<{
   { key: "externalConditionSummary", label: "외관 상태 요약" },
   { key: "reasonForRemoval", label: "탈거 사유" },
   { key: "reportedSymptom", label: "신고 증상" },
-  { key: "intakeInspectionResult", label: "인수점검 결과" },
-  { key: "currentDiagnosisSummary", label: "현재 진단/조치 요약" },
-  { key: "nextPlannedAction", label: "다음 예정 작업" },
   { key: "notes", label: "비고" },
 ];
 
@@ -120,37 +170,80 @@ const LONG_TEXT_FIELDS: ReadonlyArray<{
  * doesn't need (localStorage has no column-length constraint to mirror).
  */
 export function validateCreateRepairCaseInput(
-  input: IntakeSubmissionInput
+  input: IntakeSubmissionInput,
+  options: { allowPendingBilling?: boolean } = {}
 ): FieldValidationResult {
   const fieldErrors: Record<string, string> = {};
+  const allowedWorkflowTypes = options.allowPendingBilling
+    ? [...NEW_INTAKE_WORKFLOW_TYPE_CODES, ...PENDING_BILLING_WORKFLOW_TYPE_CODES]
+    : NEW_INTAKE_WORKFLOW_TYPE_CODES;
 
-  if (!(WORKFLOW_TYPE_CODES as readonly string[]).includes(input.workflowType)) {
+  if (!(allowedWorkflowTypes as readonly string[]).includes(input.workflowType)) {
     fieldErrors.workflowType = "워크플로 유형을 확인해 주세요.";
   }
 
+  if (!(BILLING_TYPE_CODES as readonly string[]).includes(input.billingType)) {
+    fieldErrors.billingType = "유상/무상을 선택해 주세요.";
+  } else if (
+    input.billingType === "PENDING_DECISION" &&
+    !options.allowPendingBilling
+  ) {
+    fieldErrors.billingType = "일반 신규 접수에서는 추후결정을 선택할 수 없습니다.";
+  } else if (
+    ((MANUAL_INTAKE_BILLING_TYPE_CODES as readonly string[]).includes(input.billingType) ||
+      input.billingType === "PENDING_DECISION") &&
+    deriveWorkflowType(workflowKindOf(input.workflowType), input.billingType) !== input.workflowType
+  ) {
+    fieldErrors.workflowType = "제품 종류와 유상/무상에 맞는 워크플로를 선택해 주세요.";
+  }
+
   const customerId = trimToNull(input.customerId);
-  if (!customerId) {
-    fieldErrors.customerId = "고객사를 선택해 주세요.";
+  const newCustomerName = trimToNull(input.newCustomerName);
+  if (!customerId && !newCustomerName) {
+    fieldErrors.customerId = "고객사를 선택하거나 새로 등록해 주세요.";
+  } else if (newCustomerName && newCustomerName.length > MAX_SHORT_TEXT) {
+    fieldErrors.customerId = "고객사명이 너무 깁니다.";
   }
 
   const endUserId = trimToNull(input.endUserId);
+  const newEndUserName = trimToNull(input.newEndUserName);
+  if (newEndUserName && newEndUserName.length > MAX_SHORT_TEXT) {
+    fieldErrors.endUserId = "End-User명이 너무 깁니다.";
+  }
 
   const assignedEngineerId = trimToNull(input.assignedEngineerId);
-  if (!assignedEngineerId) {
-    fieldErrors.assignedEngineerId = "담당 엔지니어를 선택해 주세요.";
-  }
 
   if (!isValidDateString(input.receivedAt)) {
     fieldErrors.receivedAt = "인수일을 올바른 날짜로 입력해 주세요.";
   }
 
-  if (!input.internalTargetShipmentDate || !isValidDateString(input.internalTargetShipmentDate)) {
-    fieldErrors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
-  } else if (
-    isValidDateString(input.receivedAt) &&
-    !isNotEarlierThan(input.internalTargetShipmentDate, input.receivedAt)
-  ) {
-    fieldErrors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+  const internalTargetShipmentDate = trimToNull(input.internalTargetShipmentDate);
+  if (internalTargetShipmentDate) {
+    if (!isValidDateString(internalTargetShipmentDate)) {
+      fieldErrors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
+    } else if (
+      isValidDateString(input.receivedAt) &&
+      !isNotEarlierThan(internalTargetShipmentDate, input.receivedAt)
+    ) {
+      fieldErrors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+    }
+  }
+
+  const internalTargetInspectionCompletionDate = trimToNull(input.internalTargetInspectionCompletionDate);
+  if (internalTargetInspectionCompletionDate) {
+    if (!isValidDateString(internalTargetInspectionCompletionDate)) {
+      fieldErrors.internalTargetInspectionCompletionDate = "사내 목표 검수 완료일을 올바른 날짜로 입력해 주세요.";
+    } else if (
+      isValidDateString(input.receivedAt) &&
+      !isNotEarlierThan(internalTargetInspectionCompletionDate, input.receivedAt)
+    ) {
+      fieldErrors.internalTargetInspectionCompletionDate = "사내 목표 검수 완료일은 인수일보다 이전일 수 없습니다.";
+    }
+  }
+
+  const intakeNumber = trimToNull(input.intakeNumber);
+  if (intakeNumber && !isValidIntakeNumberFormat(intakeNumber)) {
+    fieldErrors.intakeNumber = "인수번호 형식이 올바르지 않습니다. (예: D260601)";
   }
 
   const customerRequestedDueDate = trimToNull(input.customerRequestedDueDate);
@@ -168,6 +261,23 @@ export function validateCreateRepairCaseInput(
   const modelName = trimToNull(input.modelName);
   if (!modelName) fieldErrors.modelName = "Model을 입력해 주세요.";
   else if (modelName.length > MAX_SHORT_TEXT) fieldErrors.modelName = "Model이 너무 깁니다.";
+
+  // Product Model Master 연결 — productModelId(기존 Model 선택)와
+  // newProductModelName(새 Model 등록, SUPER_ADMIN/ADMIN만 create-repair-
+  // case.ts에서 허용)은 상호 배타적이며 DB 모드 A/S 접수에서는 항상 둘 중
+  // 하나가 필요하다. modelName 자체는 위에서 이미 검증된 표시용 텍스트로
+  // 계속 남지만, 실제 products.model_name 스냅샷은 mutation layer가
+  // productModelId/newProductModelName으로부터 마스터의 현재 이름을 다시
+  // 조회해 결정한다(클라이언트 텍스트를 그대로 신뢰하지 않는다).
+  const productModelId = trimToNull(input.productModelId ?? null);
+  const newProductModelName = trimToNull(input.newProductModelName ?? null);
+  if (!productModelId && !newProductModelName) {
+    fieldErrors.modelName = fieldErrors.modelName || "Model을 선택하거나 새로 등록해 주세요.";
+  } else if (productModelId && !UUID_PATTERN.test(productModelId)) {
+    fieldErrors.modelName = "선택한 Model을 확인할 수 없습니다.";
+  } else if (newProductModelName && newProductModelName.length > MAX_SHORT_TEXT) {
+    fieldErrors.modelName = "Model명이 너무 깁니다.";
+  }
 
   const lotNumber = trimToNull(input.lotNumber);
   if (!lotNumber) fieldErrors.lotNumber = "L/N을 입력해 주세요.";
@@ -216,13 +326,20 @@ export function validateCreateRepairCaseInput(
     ok: true,
     data: {
       workflowType: input.workflowType,
-      customerId: customerId!,
+      billingType: input.billingType,
+      customerId,
+      newCustomerName,
       endUserId,
-      assignedEngineerId: assignedEngineerId!,
+      newEndUserName,
+      assignedEngineerId,
       receivedAt: input.receivedAt,
       customerRequestedDueDate,
-      internalTargetShipmentDate: input.internalTargetShipmentDate,
+      internalTargetShipmentDate,
+      internalTargetInspectionCompletionDate,
+      intakeNumber,
       modelName: modelName!,
+      productModelId,
+      newProductModelName,
       lotNumber: lotNumber!,
       serialNumber: serialNumber!,
       partNumber,
@@ -230,9 +347,6 @@ export function validateCreateRepairCaseInput(
       externalConditionSummary: normalizedLongText.externalConditionSummary,
       reasonForRemoval: normalizedLongText.reasonForRemoval,
       reportedSymptom: normalizedLongText.reportedSymptom,
-      intakeInspectionResult: normalizedLongText.intakeInspectionResult,
-      currentDiagnosisSummary: normalizedLongText.currentDiagnosisSummary,
-      nextPlannedAction: normalizedLongText.nextPlannedAction,
       notes: normalizedLongText.notes,
       contactName,
       contactPhone,

@@ -53,7 +53,8 @@ export type ExecutionMutationResultCode =
   | "DECISION_SELECTION_REQUIRED"
   | "INVALID_DECISION_SELECTION"
   | "INVALID_INPUT"
-  | "SYSTEM_MANAGED_NODE";
+  | "SYSTEM_MANAGED_NODE"
+  | "BILLING_DECISION_REQUIRED";
 
 type Failure = { ok: false; code: ExecutionMutationResultCode; message: string };
 
@@ -160,11 +161,14 @@ export async function startProcedureExecution(
       const actor = await requireActor(tx, actorUserId);
 
       const [repairCase] = await tx
-        .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+        .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId, billingType: repairCases.billingType })
         .from(repairCases)
         .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)))
         .for("update");
       if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure를 실행할 수 있습니다.");
+      }
 
       assertOrdinaryMutationAuthorized(actor, repairCase, null);
 
@@ -259,7 +263,7 @@ export async function startProcedureExecution(
 type LoadedExecutionNode = {
   node: typeof procedureCaseExecutionNodes.$inferSelect;
   execution: { id: string; repairCaseId: string; procedureTemplateId: string };
-  repairCase: { id: string; isLocked: boolean; assignedEngineerId: string | null };
+  repairCase: { id: string; isLocked: boolean; assignedEngineerId: string | null; billingType: string | null };
   nodeType: ProcedureNodeType | null;
 };
 
@@ -281,11 +285,25 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
     .where(eq(procedureCaseExecutions.id, node.executionId));
   if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
 
+  // repair_case_id is nullable (repair-case permanent-delete schema
+  // foundation checkpoint): an execution whose repair case has since been
+  // permanently purged is a legitimate historical row (its own nodes/
+  // history are untouched by that purge), but every mutation reachable
+  // through this shared loader (start/complete/skip/block/reopen a node,
+  // update its memo) fundamentally requires a live, assignable case —
+  // there is none left to check lock/assignment against. Reject cleanly
+  // here rather than querying a nonexistent case.
+  if (!execution.repairCaseId) fail("NOT_FOUND", "이 작업과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+  const executionRepairCaseId = execution.repairCaseId;
+
   const [repairCase] = await tx
-    .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+    .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId, billingType: repairCases.billingType })
     .from(repairCases)
-    .where(and(eq(repairCases.id, execution.repairCaseId), eq(repairCases.isDeleted, false)));
+    .where(and(eq(repairCases.id, executionRepairCaseId), eq(repairCases.isDeleted, false)));
   if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+  if (repairCase.billingType === "PENDING_DECISION") {
+    fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure 작업을 변경할 수 있습니다.");
+  }
 
   let nodeType: ProcedureNodeType | null = null;
   if (node.procedureTemplateNodeId) {
@@ -296,7 +314,12 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
     nodeType = templateNode?.nodeType ?? null;
   }
 
-  return { node, execution, repairCase, nodeType };
+  // Rebuilt with the already-narrowed executionRepairCaseId (not the
+  // original `execution` object) so LoadedExecutionNode.execution's
+  // declared repairCaseId: string is satisfied by construction, without a
+  // non-null assertion — TS control-flow narrowing on execution.repairCaseId
+  // doesn't reliably persist across the awaited queries above.
+  return { node, execution: { ...execution, repairCaseId: executionRepairCaseId }, repairCase, nodeType };
 }
 
 export type ExecutionNodeMutationResult = { ok: true; version: number } | Failure;
@@ -654,11 +677,22 @@ export async function addExecutionExtraTask(
         .where(and(eq(procedureCaseExecutions.id, executionId), eq(procedureCaseExecutions.isDeleted, false)));
       if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
 
+      // repair_case_id is nullable (repair-case permanent-delete schema
+      // foundation checkpoint) — see loadExecutionNodeOrFail's identical
+      // guard. Adding a brand-new extra task fundamentally requires a live
+      // case to authorize/assign against; an orphaned (purged-case)
+      // execution can never accept new work.
+      if (!execution.repairCaseId) fail("NOT_FOUND", "이 실행과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+      const executionRepairCaseId = execution.repairCaseId;
+
       const [repairCase] = await tx
-        .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+        .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId, billingType: repairCases.billingType })
         .from(repairCases)
-        .where(and(eq(repairCases.id, execution.repairCaseId), eq(repairCases.isDeleted, false)));
+        .where(and(eq(repairCases.id, executionRepairCaseId), eq(repairCases.isDeleted, false)));
       if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure 작업을 추가할 수 있습니다.");
+      }
 
       // No node-level assignment override exists yet (the row doesn't
       // exist until this insert) — the effective assignee for authorizing

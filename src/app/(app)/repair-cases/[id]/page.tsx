@@ -8,8 +8,9 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { getPartList } from "@/lib/db/queries/inventory";
+import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability } from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
+import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 import LocalRepairCaseDetailContent from "@/components/repair-cases/detail/LocalRepairCaseDetailContent";
@@ -77,9 +78,20 @@ export default async function RepairCaseDetailPage({
       ? {
           caseContext: await getRequestCaseContext(resolved.id),
           availableParts: await getPartList(),
+          // 소유구분-scoped 가용 수량 checkpoint — grouped by (part, owner);
+          // a missing (partId, owner) entry means 0, never "unknown" (see
+          // getPartOwnerAvailability's doc comment).
+          ownerAvailabilityByPartId: groupPartOwnerAvailability(await getPartOwnerAvailability()),
           ownRequests: await getOwnPartRequestsForCase(resolved.id, actingUser.id),
         }
       : null;
+
+  // 고장 및 서비스 정보의 3개 요약 필드(인수점검 결과/현재 진단·조치 요약/
+  // 다음 예정 작업)의 정상 소스 — DATABASE 소스 건에만 존재하는
+  // repair_case_work_records.record_kind에서 결정론적으로 도출한다
+  // (record_kind 분류 체크포인트). MOCK/LOCAL_DEMO는 이 테이블 자체가
+  // 없으므로 조회하지 않는다.
+  const derivedServiceSummary = resolved.source === "DATABASE" ? await getDerivedServiceSummaryForCase(resolved.id) : null;
 
   return (
     <RepairCaseDetailView
@@ -88,6 +100,7 @@ export default async function RepairCaseDetailPage({
       actingUser={actingUser}
       referenceData={referenceData}
       partRequestData={partRequestData}
+      derivedServiceSummary={derivedServiceSummary}
     />
   );
 }

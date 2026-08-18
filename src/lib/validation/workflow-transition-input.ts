@@ -66,6 +66,7 @@ export type TransitionActionResultCode =
   | "CASE_LOCKED"
   | "APPROVAL_REQUIRED"
   | "APPROVAL_STALE"
+  | "BILLING_DECISION_REQUIRED"
   | "DATABASE_UNAVAILABLE";
 
 export type TransitionActionResult =

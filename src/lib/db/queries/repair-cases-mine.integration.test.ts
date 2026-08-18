@@ -26,13 +26,14 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 
 /**
  * Phase 5C-3 integration tests for listMyActiveRepairCases, against the
- * real dev DB. Self-cleaning convention (same as
+ * isolated test DB. Self-cleaning convention (same as
  * repair-case-work-records.integration.test.ts): every repair case uses
  * intake month TEST_YEAR_MONTH ("9912", distinct from every other isolated
  * month already in use this project), every product uses TEST_MODEL_PREFIX.
  * after() deletes every row this suite created — in FK-safe order,
- * dependents before parents — and never touches the 19 real repair cases,
- * 4 real templates, or any other real data. procedure_case_executions in
+ * dependents before parents — and never touches the pre-existing seeded
+ * repair cases, baseline templates, or any other fixture data.
+ * procedure_case_executions in
  * this suite reference a REAL, pre-existing template purely as a required
  * FK target (read-only reference — the template itself is never modified).
  */
@@ -48,6 +49,7 @@ let customerId: string;
 let waitingKyosanExceptionStatusId: string;
 let realTemplateId: string;
 let realTemplateCategory: "FULL_SERVICE" | "TECHNICAL_TASK" | "REFERENCE";
+let protectedRepairCaseIdsBefore: string[] = [];
 
 function uniqueSuffix(): string {
   return randomUUID().slice(0, 8);
@@ -57,6 +59,7 @@ function baseCreateInput(engineerId: string, overrides: Partial<ValidatedCreateR
   const suffix = uniqueSuffix();
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
@@ -159,6 +162,14 @@ async function insertPartRequest(
 }
 
 before(async () => {
+  protectedRepairCaseIdsBefore = (
+    await db
+      .select({ id: repairCases.id })
+      .from(repairCases)
+      .where(sql`intake_number not like ${"D" + TEST_YEAR_MONTH + "%"}`)
+      .orderBy(repairCases.id)
+  ).map((row) => row.id);
+
   const engineers = await db
     .select({ id: users.id })
     .from(users)
@@ -405,7 +416,17 @@ describe("listMyActiveRepairCases: parts-request summary", () => {
 
 describe("listMyActiveRepairCases: real-data safety", () => {
   test("37. never mutates repair_cases, work records, status/execution history, or parts requests — this suite only ever reads via listMyActiveRepairCases", async () => {
-    const [realCaseCount] = await db.select({ count: sql<number>`count(*)::int` }).from(repairCases).where(sql`intake_number not like ${"D" + TEST_YEAR_MONTH + "%"}`);
-    assert.ok((realCaseCount?.count ?? 0) >= 19, "the 19 real repair cases must remain, listMyActiveRepairCases never writes");
+    const protectedRepairCaseIdsAfter = (
+      await db
+        .select({ id: repairCases.id })
+        .from(repairCases)
+        .where(sql`intake_number not like ${"D" + TEST_YEAR_MONTH + "%"}`)
+        .orderBy(repairCases.id)
+    ).map((row) => row.id);
+    assert.deepEqual(
+      protectedRepairCaseIdsAfter,
+      protectedRepairCaseIdsBefore,
+      "all repair cases that predated this suite must remain unchanged by the read query"
+    );
   });
 });

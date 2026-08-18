@@ -9,6 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
+import { productModels } from "./product-models";
 
 /**
  * Uniqueness strategy (revised in the Gate 4 correction batch):
@@ -66,6 +67,13 @@ export const products = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     modelName: text("model_name").notNull(),
+    // Nullable — added for Product Model Master phase 1 (backfilled by
+    // exact model_name match for every existing row; left NULL for any new
+    // row created via the still-unchanged resolveProduct() flow until a
+    // later checkpoint teaches it to resolve/create the master too).
+    // products.model_name itself is untouched — it remains the per-unit's
+    // own recorded free-text string, unaffected by this column's presence.
+    productModelId: uuid("product_model_id").references(() => productModels.id, { onDelete: "restrict" }),
     serialNumber: text("serial_number"),
     lotNumber: text("lot_number"),
     partNumber: text("part_number"),

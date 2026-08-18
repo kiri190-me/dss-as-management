@@ -8,6 +8,7 @@ import { db, pgClient } from "../connection";
 import {
   users,
   customers,
+  products,
   repairCases,
   repairCaseIntakeSequences,
   repairCaseFlowcharts,
@@ -47,6 +48,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 const TEST_YEAR_MONTH = "9802";
 const RECEIVED_AT = "2098-02-10";
 const SHIPMENT_DATE = "2098-02-20";
+const TEST_MODEL_PREFIX = "FLOWCHART-GRAPH-6C-TEST-";
 
 let superAdminId: string;
 let adminId: string;
@@ -63,13 +65,14 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
     receivedAt: RECEIVED_AT,
     customerRequestedDueDate: null,
     internalTargetShipmentDate: SHIPMENT_DATE,
-    modelName: `FLOWCHART-GRAPH-6C-TEST-${suffix}`,
+    modelName: `${TEST_MODEL_PREFIX}${suffix}`,
     lotNumber: `LOT-${suffix}`,
     serialNumber: `SN-${suffix}`,
     partNumber: null,
@@ -203,6 +206,7 @@ after(async () => {
     await db.delete(repairCaseFlowcharts).where(inArray(repairCaseFlowcharts.id, createdFlowchartIds));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
+  await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
   await pgClient.end({ timeout: 5 });
 });
@@ -258,7 +262,7 @@ describe("createRepairCaseFlowchartNode", () => {
     if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
   });
 
-  test("a non-assigned AS_ENGINEER is denied", async () => {
+  test("AS_ENGINEER may create a node even when not assigned to the case (Checkpoint 3A — assignment scoping removed)", async () => {
     const repairCaseId = await createTestRepairCase({ assignedEngineerId: engineerId });
     const flowchart = await createTestFlowchart(repairCaseId);
     const result = await createRepairCaseFlowchartNode({
@@ -270,8 +274,7 @@ describe("createRepairCaseFlowchartNode", () => {
       description: null,
       expectedFlowchartUpdatedAt: flowchart.updatedAt,
     });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("SALES and INVENTORY_MANAGER are denied", async () => {
@@ -292,7 +295,7 @@ describe("createRepairCaseFlowchartNode", () => {
     }
   });
 
-  test("a locked case is denied, even for SUPER_ADMIN", async () => {
+  test("shipment-lock removal policy: a locked (shipped) case no longer blocks node creation", async () => {
     const repairCaseId = await createTestRepairCase();
     const flowchart = await createTestFlowchart(repairCaseId);
     await lockCase(repairCaseId);
@@ -305,8 +308,7 @@ describe("createRepairCaseFlowchartNode", () => {
       description: null,
       expectedFlowchartUpdatedAt: flowchart.updatedAt,
     });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("a stale expectedFlowchartUpdatedAt is rejected atomically", async () => {
@@ -336,7 +338,7 @@ describe("createRepairCaseFlowchartNode", () => {
 });
 
 describe("updateRepairCaseFlowchartNode", () => {
-  test("persists title/description and reports changed:true", async () => {
+  test("persists title/description/instructions and reports changed:true", async () => {
     const repairCaseId = await createTestRepairCase();
     const flowchart = await createTestFlowchart(repairCaseId);
     const node = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "원래 제목", expectedFlowchartUpdatedAt: flowchart.updatedAt });
@@ -348,6 +350,7 @@ describe("updateRepairCaseFlowchartNode", () => {
       actorUserId: superAdminId,
       title: "새 제목",
       description: "새 설명",
+      instructions: "새 작업 지시 요약",
       expectedFlowchartUpdatedAt: node.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -357,9 +360,33 @@ describe("updateRepairCaseFlowchartNode", () => {
     const [row] = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.id, node.nodeId));
     assert.equal(row.title, "새 제목");
     assert.equal(row.description, "새 설명");
+    assert.equal(row.instructions, "새 작업 지시 요약");
   });
 
-  test("a no-op update writes no history and returns changed:false", async () => {
+  test("instructions-only change (title/description unchanged) still persists and reports changed:true", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const flowchart = await createTestFlowchart(repairCaseId);
+    const node = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "제목", expectedFlowchartUpdatedAt: flowchart.updatedAt });
+
+    const result = await updateRepairCaseFlowchartNode({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      nodeId: node.nodeId,
+      actorUserId: superAdminId,
+      title: "제목",
+      description: null,
+      instructions: "지시 요약만 변경",
+      expectedFlowchartUpdatedAt: node.updatedAt,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.changed, true);
+
+    const [row] = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.id, node.nodeId));
+    assert.equal(row.instructions, "지시 요약만 변경");
+  });
+
+  test("a no-op update (including instructions) writes no history and returns changed:false", async () => {
     const repairCaseId = await createTestRepairCase();
     const flowchart = await createTestFlowchart(repairCaseId);
     const node = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "동일 제목", expectedFlowchartUpdatedAt: flowchart.updatedAt });
@@ -373,6 +400,7 @@ describe("updateRepairCaseFlowchartNode", () => {
       actorUserId: superAdminId,
       title: "동일 제목",
       description: null,
+      instructions: null,
       expectedFlowchartUpdatedAt: node.updatedAt,
     });
     assert.equal(result.ok, true);
@@ -753,7 +781,7 @@ describe("repair_case_flowchart_edit_history writes for graph mutations", () => 
     const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
     const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
 
-    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchart.id, nodeId: nodeA.nodeId, actorUserId: superAdminId, title: "A 변경", description: null, expectedFlowchartUpdatedAt: nodeB.updatedAt });
+    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchart.id, nodeId: nodeA.nodeId, actorUserId: superAdminId, title: "A 변경", description: null, instructions: "작업 지시 요약", expectedFlowchartUpdatedAt: nodeB.updatedAt });
     assert.equal(updateResult.ok, true);
     if (!updateResult.ok) throw new Error("unreachable");
 
@@ -805,6 +833,15 @@ describe("repair_case_flowchart_edit_history writes for graph mutations", () => 
     const sequenceNumbers = rows.map((r) => r.sequenceNumber);
     assert.deepEqual(sequenceNumbers, [...sequenceNumbers].sort((a, b) => a - b));
     assert.equal(new Set(sequenceNumbers).size, sequenceNumbers.length);
+
+    // 6E replay must be able to recover instructions from a flat before/afterState snapshot — UPDATE_NODE included.
+    const [updateNodeRow] = rows.filter((r) => r.actionType === "UPDATE_NODE");
+    assert.equal((updateNodeRow.beforeState as { instructions: string | null }).instructions, null);
+    assert.equal((updateNodeRow.afterState as { instructions: string | null }).instructions, "작업 지시 요약");
+
+    // DELETE_NODE's beforeState is the full node snapshot (serializeNodeSnapshot) — instructions must be present, reflecting the UPDATE_NODE that ran just before it.
+    const [deleteNodeRow] = rows.filter((r) => r.actionType === "DELETE_NODE");
+    assert.equal((deleteNodeRow.beforeState as { instructions: string | null }).instructions, "작업 지시 요약");
   });
 
   test("DELETE_NODE history survives with node_id NULL, DELETE_EDGE history survives with edge_id NULL", async () => {
@@ -854,7 +891,7 @@ describe("cross-flowchart (IDOR) defense", () => {
     const historyBefore = await db.select({ id: repairCaseFlowchartEditHistory.id }).from(repairCaseFlowchartEditHistory).where(eq(repairCaseFlowchartEditHistory.flowchartId, flowchartA.id));
 
     // 1. update B1 through Flowchart A
-    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchartA.id, nodeId: b1.nodeId, actorUserId: superAdminId, title: "가로채기", description: null, expectedFlowchartUpdatedAt: currentAUpdatedAt });
+    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchartA.id, nodeId: b1.nodeId, actorUserId: superAdminId, title: "가로채기", description: null, instructions: null, expectedFlowchartUpdatedAt: currentAUpdatedAt });
     assert.equal(updateResult.ok, false);
     if (!updateResult.ok) assert.equal(updateResult.code, "CROSS_FLOWCHART");
 

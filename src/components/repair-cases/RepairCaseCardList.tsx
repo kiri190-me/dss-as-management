@@ -4,11 +4,32 @@ import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, Workf
 
 type RepairCaseCardListProps = {
   rows: EffectiveRepairCase[];
+  /** Bulk soft-delete selection (/repair-cases 삭제 모드) — same optional,
+   * default-off shape as RepairCaseTable's own selection props; every other
+   * caller of this component is unaffected. See RepairCaseTable.tsx's doc
+   * comment for the full rationale. */
+  selectionMode?: boolean;
+  selectedIds?: ReadonlySet<string>;
+  selectableIds?: ReadonlySet<string>;
+  onToggleSelect?: (id: string) => void;
 };
 
-export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
+/**
+ * Shown below the `lg` breakpoint (medium/narrow width and mobile) — an
+ * intentional layout threshold for this screen, not overflow-measured, so
+ * the card list appears before the compact table would feel cramped
+ * rather than only once it would literally scroll. Mirrors RepairCaseTable's
+ * own `hidden lg:block` wrapper.
+ */
+export default function RepairCaseCardList({
+  rows,
+  selectionMode,
+  selectedIds,
+  selectableIds,
+  onToggleSelect,
+}: RepairCaseCardListProps) {
   return (
-    <div className="flex flex-col gap-3 md:hidden">
+    <div className="flex flex-col gap-3 lg:hidden">
       {rows.map((row) => (
         <Link
           key={row.id}
@@ -16,9 +37,28 @@ export default function RepairCaseCardList({ rows }: RepairCaseCardListProps) {
           className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800/60"
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-              {row.intakeNumber}
-            </span>
+            <div className="flex items-center gap-2">
+              {selectionMode && (
+                // stopPropagation keeps the checkbox's own toggle from
+                // triggering the surrounding <Link>'s navigation — clicking
+                // anywhere else on the card still navigates to the detail
+                // page exactly as before (the detail link is never removed).
+                <span onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`${row.intakeNumber} 선택`}
+                    checked={selectedIds?.has(row.id) ?? false}
+                    disabled={!(selectableIds?.has(row.id) ?? false)}
+                    onChange={() => onToggleSelect?.(row.id)}
+                    className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
+                  />
+                </span>
+              )}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                {row.intakeNumber}
+              </span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">보고서번호 {row.legacyReportNumber ?? "—"}</span>
+            </div>
             <StatusBadge status={row.effectiveStatus} />
           </div>
           <div className="flex flex-wrap items-center gap-2">

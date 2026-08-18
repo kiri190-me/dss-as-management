@@ -40,7 +40,8 @@ export type InventoryMutationResultCode =
   | "CASE_LOCKED"
   | "INVALID_INPUT"
   | "INVALID_RETURN_TARGET"
-  | "OVER_RETURN";
+  | "OVER_RETURN"
+  | "BILLING_DECISION_REQUIRED";
 
 type Failure = { ok: false; code: InventoryMutationResultCode; message: string };
 
@@ -296,13 +297,16 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
         fail("INVALID_INPUT", "수리 건 또는 사용처를 입력해 주세요.");
       }
 
-      let repairCase: { id: string; isLocked: boolean } | null = null;
+      let repairCase: { id: string; isLocked: boolean; billingType: string | null } | null = null;
       if (input.repairCaseId) {
         const [rc] = await tx
-          .select({ id: repairCases.id, isLocked: repairCases.isLocked })
+          .select({ id: repairCases.id, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
           .from(repairCases)
           .where(and(eq(repairCases.id, input.repairCaseId), eq(repairCases.isDeleted, false)));
         if (!rc) fail("NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
+        if (rc.billingType === "PENDING_DECISION") {
+          fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 재고를 사용할 수 있습니다.");
+        }
         repairCase = rc;
       }
 
@@ -326,19 +330,24 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
           .select({ repairCaseId: procedureCaseExecutions.repairCaseId })
           .from(procedureCaseExecutions)
           .where(eq(procedureCaseExecutions.id, node.executionId));
+        // execution.repairCaseId is nullable (repair-case permanent-delete
+        // schema foundation checkpoint) — input.repairCaseId is guaranteed
+        // a real string by the guard above, so an orphaned (purged-case)
+        // execution's null already correctly fails this `!==` comparison
+        // (null can never equal a real uuid) and falls into the same
+        // cross-case-mismatch rejection as any other unrelated execution —
+        // no special-casing needed.
         if (!execution || execution.repairCaseId !== input.repairCaseId) {
           fail("INVALID_INPUT", "지정한 절차 작업이 해당 수리 건에 속하지 않습니다.");
         }
       }
 
-      // Locked-case check is explicit and separate from canUseStock so the
-      // caller gets the distinct CASE_LOCKED code (not a generic
-      // FORBIDDEN) — unconditional for every role, including
-      // SUPER_ADMIN/ADMIN, no exception.
-      if (repairCase?.isLocked) {
-        fail("CASE_LOCKED", "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다.");
-      }
-
+      // Shipment-lock removal policy: USE is no longer blocked by
+      // repair_cases.is_locked (see canUseStock's own doc comment) — this
+      // explicit pre-check was the sole enforcement point and has been
+      // removed accordingly, rather than left as a dead branch that could
+      // still misfire a stale CASE_LOCKED message for an otherwise-
+      // unauthorized caller.
       const authContext: UseStockAuthorizationContext = {
         hasRepairCase: input.repairCaseId != null,
         isCaseLocked: repairCase?.isLocked ?? false,

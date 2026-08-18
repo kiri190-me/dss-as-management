@@ -34,11 +34,14 @@ export default function CreateNodePanel({
   expectedTemplateUpdatedAt,
   onSaved,
   selectedNode,
+  resolveNodeDimensions,
 }: {
   templateId: string;
   expectedTemplateUpdatedAt: string;
   onSaved: (newUpdatedAt: string) => void;
   selectedNode: EditorNodeRow | null;
+  /** 5C-6D-1D — the screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback; same instance NodePropertyPanel's own relative-position math uses). Used ONLY for `selectedNode`'s width below — the about-to-be-created node itself has no rendered instance to measure yet, so its own width still comes from the plain computeNodeDimensions estimate, unchanged. */
+  resolveNodeDimensions: (n: EditorNodeRow) => { width: number; height: number };
 }) {
   const [nodeType, setNodeType] = useState<ManualTechnicalNodeType>("TASK");
   const [title, setTitle] = useState("");
@@ -49,11 +52,15 @@ export default function CreateNodePanel({
     setIsSubmitting(true);
     setErrorMessage(null);
     // Round-2 alignment fix — computeRelativePosition needs both nodes'
-    // ACTUAL rendered widths (the same computeNodeDimensions the graph
-    // itself sizes/positions nodes with) to center the new node under the
-    // selected one; a plain left-edge copy silently breaks the moment the
-    // two titles produce different widths (e.g. one wraps to multiple
-    // lines and the other doesn't).
+    // ACTUAL rendered widths to center the new node under the selected
+    // one; a plain left-edge copy silently breaks the moment the two
+    // titles produce different widths. 5C-6D-1D — selectedNode's width now
+    // comes from resolveNodeDimensions (measured-first: React Flow's own
+    // rendered size when available, the same estimate as before only as a
+    // fallback) instead of the estimate alone, since selectedNode already
+    // exists on screen and can actually be measured; the new node being
+    // created has no rendered instance yet, so its own width is still the
+    // plain estimate — there is nothing to measure it against.
     const position = selectedNode
       ? computeRelativePosition(
           {
@@ -61,7 +68,7 @@ export default function CreateNodePanel({
               { positionX: selectedNode.positionX, positionY: selectedNode.positionY, userPositionX: selectedNode.userPositionX, userPositionY: selectedNode.userPositionY },
               "USER"
             ),
-            width: computeNodeDimensions({ title: selectedNode.title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(selectedNode.nodeType).semanticType].shape }).width,
+            width: resolveNodeDimensions(selectedNode).width,
           },
           "DOWN",
           BELOW_SELECTED_SPACING,

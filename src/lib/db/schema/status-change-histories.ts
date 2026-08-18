@@ -38,15 +38,25 @@ export const statusChangeActionTypeEnum = pgEnum("status_change_action_type", [
   "HOLD_STARTED",
   "HOLD_RELEASED",
   "SHIPMENT_COMPLETED",
+  "LEGACY_IMPORT_STATE_SET",
 ]);
 
 export const statusChangeHistories = pgTable(
   "status_change_histories",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repairCaseId: uuid("repair_case_id")
-      .notNull()
-      .references(() => repairCases.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (repair-case permanent-delete schema
+    // foundation checkpoint) — was NOT NULL + RESTRICT, which made a
+    // repair_cases hard-delete impossible at the DB level. This table is
+    // immutable/append-only workflow history that must outlive the case's
+    // own hard-delete; the row's own action_type/from_step_id/to_step_id/
+    // metadata permanently preserve what happened regardless of this column
+    // going NULL. Existing rows are untouched by this — only a future
+    // repair_cases hard-delete ever nulls it. Same proven pattern as
+    // repair_case_flowchart_edit_history.flowchart_id (migration 0026).
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, {
+      onDelete: "set null",
+    }),
     workflowVersionId: uuid("workflow_version_id")
       .notNull()
       .references(() => workflowVersions.id, { onDelete: "restrict" }),

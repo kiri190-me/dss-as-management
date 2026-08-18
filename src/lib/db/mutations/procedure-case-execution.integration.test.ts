@@ -165,6 +165,7 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
@@ -821,9 +822,41 @@ describe("procedure-case-execution: concurrency (plan's revised test list)", () 
   });
 });
 
-describe("procedure-case-execution: locked-case behavior, no role exception (plan §11)", () => {
-  test("19. every mutation is rejected with CASE_LOCKED once the case is locked, even for SUPER_ADMIN", async () => {
-    const { templateId } = await createPublishedTemplate(uniqueCode("locked-case"));
+describe("procedure-case-execution: shipment-lock removal policy (locked case no longer blocks)", () => {
+  test("19a. start/complete/skip/block on a locked (shipped) case all succeed for SUPER_ADMIN", async () => {
+    // Each mutation gets its own fresh execution + node so a prior
+    // mutation's status change never invalidates the next check's version
+    // or produces an unrelated invalid-transition error.
+    async function freshLockedNode(labelSuffix: string) {
+      const { templateId } = await createPublishedTemplate(uniqueCode(`locked-case-${labelSuffix}`));
+      const created = await createTestCase({ assignedEngineerId: engineerId });
+      const started = await startProcedureExecution(created.id, templateId, engineerId);
+      assert.equal(started.ok, true);
+      if (!started.ok) throw new Error("unreachable");
+      const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+      await lockCase(created.id);
+      return { executionId: started.executionId, n2: byCode.get("n2")! };
+    }
+
+    const start = await freshLockedNode("start");
+    const startResult = await startExecutionNode(start.n2.id, superAdminId, start.n2.version);
+    assert.equal(startResult.ok, true, JSON.stringify(startResult));
+
+    const complete = await freshLockedNode("complete");
+    const completeResult = await completeExecutionNode({ executionNodeId: complete.n2.id, actorUserId: superAdminId, expectedVersion: complete.n2.version });
+    assert.equal(completeResult.ok, true, JSON.stringify(completeResult));
+
+    const skip = await freshLockedNode("skip");
+    const skipResult = await skipExecutionNode(skip.n2.id, superAdminId, skip.n2.version, "사유");
+    assert.equal(skipResult.ok, true, JSON.stringify(skipResult));
+
+    const block = await freshLockedNode("block");
+    const blockResult = await blockExecutionNode(block.n2.id, superAdminId, block.n2.version, "사유");
+    assert.equal(blockResult.ok, true, JSON.stringify(blockResult));
+  });
+
+  test("19b. adding an extra task, updating a memo, and starting a new execution all succeed on a locked (shipped) case", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("locked-case-misc"));
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const started = await startProcedureExecution(created.id, templateId, engineerId);
     assert.equal(started.ok, true);
@@ -834,36 +867,14 @@ describe("procedure-case-execution: locked-case behavior, no role exception (pla
 
     await lockCase(created.id);
 
-    const startResult = await startExecutionNode(n2.id, superAdminId, n2.version);
-    assert.equal(startResult.ok, false);
-    if (!startResult.ok) assert.equal(startResult.code, "CASE_LOCKED");
-
-    const completeResult = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: superAdminId, expectedVersion: n2.version });
-    assert.equal(completeResult.ok, false);
-    if (!completeResult.ok) assert.equal(completeResult.code, "CASE_LOCKED");
-
-    const skipResult = await skipExecutionNode(n2.id, superAdminId, n2.version, "사유");
-    assert.equal(skipResult.ok, false);
-    if (!skipResult.ok) assert.equal(skipResult.code, "CASE_LOCKED");
-
-    const blockResult = await blockExecutionNode(n2.id, superAdminId, n2.version, "사유");
-    assert.equal(blockResult.ok, false);
-    if (!blockResult.ok) assert.equal(blockResult.code, "CASE_LOCKED");
-
     const extraTaskResult = await addExecutionExtraTask(started.executionId, superAdminId, "추가 작업", null);
-    assert.equal(extraTaskResult.ok, false);
-    if (!extraTaskResult.ok) assert.equal(extraTaskResult.code, "CASE_LOCKED");
+    assert.equal(extraTaskResult.ok, true, JSON.stringify(extraTaskResult));
 
     const memoResult = await updateExecutionNodeMemo(n2.id, superAdminId, n2.version, "메모");
-    assert.equal(memoResult.ok, false);
-    if (!memoResult.ok) assert.equal(memoResult.code, "CASE_LOCKED");
-
-    const newExecutionResult = await startProcedureExecution(created.id, templateId, superAdminId);
-    assert.equal(newExecutionResult.ok, false);
-    if (!newExecutionResult.ok) assert.equal(newExecutionResult.code, "CASE_LOCKED");
+    assert.equal(memoResult.ok, true, JSON.stringify(memoResult));
   });
 
-  test("20. reopen is also rejected with CASE_LOCKED, even for SUPER_ADMIN", async () => {
+  test("20. reopen also succeeds on a locked (shipped) case", async () => {
     const { templateId } = await createPublishedTemplate(uniqueCode("locked-case-reopen"));
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const started = await startProcedureExecution(created.id, templateId, engineerId);
@@ -879,8 +890,7 @@ describe("procedure-case-execution: locked-case behavior, no role exception (pla
     await lockCase(created.id);
 
     const reopenResult = await reopenExecutionNode(n2.id, superAdminId, completed.version, "사유");
-    assert.equal(reopenResult.ok, false);
-    if (!reopenResult.ok) assert.equal(reopenResult.code, "CASE_LOCKED");
+    assert.equal(reopenResult.ok, true, JSON.stringify(reopenResult));
   });
 });
 
@@ -1080,14 +1090,13 @@ describe("procedure-case-execution: Phase 5C-5A category foundation", () => {
     if (!result.ok) assert.equal(result.code, "TEMPLATE_NOT_EXECUTABLE");
   });
 
-  test("27. locked-case and assignment rules are unchanged for TECHNICAL_TASK (same authorization path as FULL_SERVICE)", async () => {
+  test("27. shipment-lock removal policy and assignment rules are unchanged for TECHNICAL_TASK (same authorization path as FULL_SERVICE)", async () => {
     const { templateId } = await createPublishedTemplate(uniqueCode("technical-locked"), "TECHNICAL_TASK");
     const created = await createTestCase({ assignedEngineerId: engineerId });
     await lockCase(created.id);
 
     const lockedResult = await startProcedureExecution(created.id, templateId, engineerId);
-    assert.equal(lockedResult.ok, false);
-    if (!lockedResult.ok) assert.equal(lockedResult.code, "CASE_LOCKED");
+    assert.equal(lockedResult.ok, true, JSON.stringify(lockedResult));
 
     const { templateId: templateB } = await createPublishedTemplate(uniqueCode("technical-unassigned"), "TECHNICAL_TASK");
     const created2 = await createTestCase({ assignedEngineerId: engineerId });

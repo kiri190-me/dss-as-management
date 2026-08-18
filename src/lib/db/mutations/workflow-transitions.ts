@@ -34,7 +34,8 @@ export type TransitionMutationResultCode =
   | "FORBIDDEN"
   | "CASE_LOCKED"
   | "APPROVAL_REQUIRED"
-  | "APPROVAL_STALE";
+  | "APPROVAL_STALE"
+  | "BILLING_DECISION_REQUIRED";
 
 export type TransitionMutationResult =
   | { ok: true; id: string; version: number; currentWorkflowStepKey: string }
@@ -73,6 +74,7 @@ export async function transitionWorkflow(
           version: repairCases.version,
           isLocked: repairCases.isLocked,
           assignedEngineerId: repairCases.assignedEngineerId,
+          billingType: repairCases.billingType,
           workflowVersionId: repairCases.workflowVersionId,
           currentWorkflowStepId: repairCases.currentWorkflowStepId,
           currentStepKey: workflowSteps.key,
@@ -86,6 +88,13 @@ export async function transitionWorkflow(
 
       if (!current) {
         return { ok: false, code: "NOT_FOUND", message: "해당 접수 건을 찾을 수 없습니다." };
+      }
+      if (current.billingType === "PENDING_DECISION") {
+        return {
+          ok: false,
+          code: "BILLING_DECISION_REQUIRED",
+          message: "유·무상을 확정한 후 워크플로를 진행할 수 있습니다.",
+        };
       }
       if (current.isLocked) {
         return {

@@ -39,7 +39,7 @@ export default async function CaseFlowchartListPage({ params }: { params: Promis
     !!session &&
     session.approvalStatus === "APPROVED" &&
     !!pageContext &&
-    canMutateRepairCaseFlowchart(session.role, { isAssignedToCase: pageContext.assignedEngineerId === session.userId, isCaseLocked: pageContext.isLocked });
+    canMutateRepairCaseFlowchart(session.role, { isCaseLocked: pageContext.isLocked });
 
   const flowcharts = await listRepairCaseFlowcharts(id);
 

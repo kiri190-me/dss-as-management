@@ -184,6 +184,7 @@ describe("setShipmentRepresentative", () => {
     const suffix = randomUUID().slice(0, 8);
     const input: ValidatedCreateRepairCaseInput = {
       workflowType: "MATCHER",
+      billingType: "PAID",
       customerId: customer.id,
       endUserId: null,
       assignedEngineerId: engineerId,

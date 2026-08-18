@@ -28,7 +28,11 @@ import { startProcedureExecution } from "./procedure-case-execution";
 import { transitionWorkflow } from "./workflow-transitions";
 import * as workRecordMutations from "./repair-case-work-records";
 import { createWorkRecord, invalidateWorkRecord } from "./repair-case-work-records";
-import { getRecentWorkRecordsForCase, getWorkRecordHistoryForCase } from "../queries/repair-case-work-records";
+import {
+  getRecentWorkRecordsForCase,
+  getWorkRecordHistoryForCase,
+  getDerivedServiceSummaryForCase,
+} from "../queries/repair-case-work-records";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -124,6 +128,7 @@ function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,
@@ -275,7 +280,7 @@ describe("createWorkRecord: authorization", () => {
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "점검 완료, 이상 없음",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -287,49 +292,47 @@ describe("createWorkRecord: authorization", () => {
       repairCaseId: created.id,
       actorUserId: engineer2Id,
       memo: "다른 엔지니어가 작성 시도",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
-  test("3. AS_ENGINEER cannot create on a locked case, even their own assigned case", async () => {
+  test("3. shipment-lock removal policy: AS_ENGINEER may still create on a locked (shipped) case they're assigned to", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     await lockCase(created.id);
     const result = await createWorkRecord({
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "잠금된 건 작성 시도",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
-  test("4. ADMIN/SUPER_ADMIN may create on any unlocked case, but never on a locked one — no hidden bypass", async () => {
+  test("4. ADMIN/SUPER_ADMIN may create on any case, locked (shipped) or not — shipment-lock removal policy", async () => {
     for (const actorId of [adminId, superAdminId]) {
       const created = await createTestCase({ assignedEngineerId: engineerId });
       const ok = await createWorkRecord({
         repairCaseId: created.id,
         actorUserId: actorId,
         memo: "관리자 작성",
-        relatedProcedureExecutionNodeId: null,
+        recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
         clientRequestId: randomUUID(),
       });
       assert.equal(ok.ok, true, JSON.stringify(ok));
 
       await lockCase(created.id);
-      const blocked = await createWorkRecord({
+      const afterLock = await createWorkRecord({
         repairCaseId: created.id,
         actorUserId: actorId,
-        memo: "잠금 후 관리자 작성 시도",
-        relatedProcedureExecutionNodeId: null,
+        memo: "잠금 후 관리자 작성",
+        recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
         clientRequestId: randomUUID(),
       });
-      assert.equal(blocked.ok, false);
-      if (!blocked.ok) assert.equal(blocked.code, "CASE_LOCKED");
+      assert.equal(afterLock.ok, true, JSON.stringify(afterLock));
     }
   });
 
@@ -339,7 +342,7 @@ describe("createWorkRecord: authorization", () => {
       repairCaseId: created.id,
       actorUserId: salesId,
       memo: "영업 담당자 작성 시도",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, false);
@@ -352,7 +355,7 @@ describe("createWorkRecord: authorization", () => {
       repairCaseId: created.id,
       actorUserId: inventoryManagerId,
       memo: "재고 담당자 작성 시도",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, false);
@@ -369,7 +372,7 @@ describe("createWorkRecord: workflow-step and procedure-node context", () => {
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "1단계에서 작성",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, true);
@@ -387,7 +390,7 @@ describe("createWorkRecord: workflow-step and procedure-node context", () => {
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "진행 전 작성",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, true);
@@ -406,7 +409,7 @@ describe("createWorkRecord: workflow-step and procedure-node context", () => {
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "노드 연결 없는 일반 메모",
-      relatedProcedureExecutionNodeId: null,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: null,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -420,7 +423,7 @@ describe("createWorkRecord: workflow-step and procedure-node context", () => {
       repairCaseId: created.id,
       actorUserId: engineerId,
       memo: "특정 절차 항목 작업 중 작성",
-      relatedProcedureExecutionNodeId: nodeId,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: nodeId,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -435,7 +438,7 @@ describe("createWorkRecord: workflow-step and procedure-node context", () => {
       repairCaseId: caseB.id,
       actorUserId: engineerId,
       memo: "다른 접수 건의 절차 항목을 연결 시도",
-      relatedProcedureExecutionNodeId: nodeFromCaseA,
+      recordKind: "GENERAL", relatedProcedureExecutionNodeId: nodeFromCaseA,
       clientRequestId: randomUUID(),
     });
     assert.equal(result.ok, false);
@@ -449,12 +452,12 @@ describe("createWorkRecord: idempotency", () => {
     const clientRequestId = randomUUID();
     const memo = "동일 요청 재시도 테스트";
 
-    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId });
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(first.ok, true);
     if (!first.ok) return;
     assert.equal(first.replayed, false);
 
-    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId });
+    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(second.ok, true);
     if (!second.ok) return;
     assert.equal(second.replayed, true);
@@ -468,10 +471,10 @@ describe("createWorkRecord: idempotency", () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const clientRequestId = randomUUID();
 
-    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "원래 메모", relatedProcedureExecutionNodeId: null, clientRequestId });
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "원래 메모", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(first.ok, true);
 
-    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "다른 메모", relatedProcedureExecutionNodeId: null, clientRequestId });
+    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "다른 메모", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.code, "IDEMPOTENCY_CONFLICT");
 
@@ -485,10 +488,10 @@ describe("createWorkRecord: idempotency", () => {
     const clientRequestId = randomUUID();
     const memo = "노드 연결 변경 재시도 테스트";
 
-    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId });
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(first.ok, true);
 
-    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: nodeId, clientRequestId });
+    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: nodeId, clientRequestId });
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.code, "IDEMPOTENCY_CONFLICT");
   });
@@ -499,8 +502,8 @@ describe("createWorkRecord: idempotency", () => {
     const memo = "동시 제출 테스트";
 
     const [a, b] = await Promise.all([
-      createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId }),
-      createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId }),
+      createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId }),
+      createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId }),
     ]);
     assert.equal(a.ok, true);
     assert.equal(b.ok, true);
@@ -516,7 +519,7 @@ describe("createWorkRecord: idempotency", () => {
     const clientRequestId = randomUUID();
     const memo = "단계 진행 후 재시도 테스트";
 
-    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId });
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(first.ok, true);
     if (!first.ok) return;
 
@@ -527,7 +530,7 @@ describe("createWorkRecord: idempotency", () => {
     // the case's current_workflow_step_id has now genuinely changed, but
     // that server-derived fact must never be compared as part of the
     // client payload.
-    const retry = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, relatedProcedureExecutionNodeId: null, clientRequestId });
+    const retry = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
     assert.equal(retry.ok, true);
     if (!retry.ok) return;
     assert.equal(retry.replayed, true);
@@ -549,7 +552,7 @@ describe("invalidateWorkRecord", () => {
   test("18. ADMIN/SUPER_ADMIN may invalidate an unlocked record with a mandatory reason; AS_ENGINEER/SALES may not, even the author", async () => {
     for (const actorId of [adminId, superAdminId]) {
       const created = await createTestCase({ assignedEngineerId: engineerId });
-      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리 대상", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리 대상", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
       assert.equal(record.ok, true);
       if (!record.ok) continue;
 
@@ -559,7 +562,7 @@ describe("invalidateWorkRecord", () => {
 
     for (const actorId of [engineerId, salesId]) {
       const created = await createTestCase({ assignedEngineerId: engineerId });
-      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리 시도 대상", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리 시도 대상", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
       assert.equal(record.ok, true);
       if (!record.ok) continue;
 
@@ -571,7 +574,7 @@ describe("invalidateWorkRecord", () => {
 
   test("19. an already-invalidated record cannot be invalidated again — rejected, not a silent no-op", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "이중 무효 처리 테스트", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "이중 무효 처리 테스트", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
     assert.equal(record.ok, true);
     if (!record.ok) return;
 
@@ -588,7 +591,7 @@ describe("invalidateWorkRecord", () => {
 
   test("20. invalidation never changes the original memo/author/created_at", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "원본 메모는 보존되어야 함", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "원본 메모는 보존되어야 함", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
     assert.equal(record.ok, true);
     if (!record.ok) return;
 
@@ -603,23 +606,22 @@ describe("invalidateWorkRecord", () => {
     assert.deepEqual(after1.createdAt, before.createdAt);
   });
 
-  test("21. invalidation on a locked case is rejected, for ADMIN and SUPER_ADMIN alike — no hidden bypass", async () => {
+  test("21. shipment-lock removal policy: invalidation on a locked (shipped) case still succeeds, for ADMIN and SUPER_ADMIN", async () => {
     for (const actorId of [adminId, superAdminId]) {
       const created = await createTestCase({ assignedEngineerId: engineerId });
-      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "잠금 전 작성", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+      const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "잠금 전 작성", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
       assert.equal(record.ok, true);
       if (!record.ok) continue;
 
       await lockCase(created.id);
-      const result = await invalidateWorkRecord({ workRecordId: record.id, actorUserId: actorId, reason: "잠금 후 무효 처리 시도" });
-      assert.equal(result.ok, false);
-      if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
+      const result = await invalidateWorkRecord({ workRecordId: record.id, actorUserId: actorId, reason: "잠금 후 무효 처리" });
+      assert.equal(result.ok, true, JSON.stringify(result));
     }
   });
 
   test("22. an invalidated record remains readable via both the recent and full-history queries", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
-    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리되어도 조회는 되어야 함", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리되어도 조회는 되어야 함", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
     assert.equal(record.ok, true);
     if (!record.ok) return;
 
@@ -644,7 +646,7 @@ describe("query ordering and pagination", () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const result = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: `기록 ${i}`, relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+      const result = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: `기록 ${i}`, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
       assert.equal(result.ok, true);
       if (result.ok) ids.push(result.id);
     }
@@ -660,7 +662,7 @@ describe("query ordering and pagination", () => {
   test("24. full history is paginated correctly", async () => {
     const created = await createTestCase({ assignedEngineerId: engineerId });
     for (let i = 0; i < 7; i++) {
-      const result = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: `이력 ${i}`, relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+      const result = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: `이력 ${i}`, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
       assert.equal(result.ok, true);
     }
 
@@ -678,8 +680,175 @@ describe("query ordering and pagination", () => {
   });
 });
 
+describe("createWorkRecord: record_kind classification (migration 0023)", () => {
+  test("25. each record_kind value persists exactly as submitted and is returned by both read queries", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const kinds = ["GENERAL", "INTAKE_INSPECTION_RESULT", "DIAGNOSIS_REPAIR_SUMMARY", "NEXT_PLANNED_ACTION"] as const;
+    for (const kind of kinds) {
+      const result = await createWorkRecord({
+        repairCaseId: created.id,
+        actorUserId: engineerId,
+        memo: `분류 테스트: ${kind}`,
+        recordKind: kind,
+        relatedProcedureExecutionNodeId: null,
+        clientRequestId: randomUUID(),
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+
+    const recent = await getRecentWorkRecordsForCase(created.id, 10);
+    const recentKinds = new Set(recent.map((r) => r.recordKind));
+    for (const kind of kinds) assert.ok(recentKinds.has(kind), `expected ${kind} to be persisted and readable via getRecentWorkRecordsForCase`);
+
+    const history = await getWorkRecordHistoryForCase(created.id, { limit: 10, offset: 0 });
+    const historyKinds = new Set(history.rows.map((r) => r.recordKind));
+    for (const kind of kinds) assert.ok(historyKinds.has(kind), `expected ${kind} to appear in getWorkRecordHistoryForCase`);
+  });
+
+  test("26. idempotent replay returns the original record_kind, unaffected by a benign identical retry", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const clientRequestId = randomUUID();
+    const memo = "분류값 유지 재시도 테스트";
+
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(second.replayed, true);
+    assert.equal(second.id, first.id);
+
+    const [row] = await db.select({ recordKind: repairCaseWorkRecords.recordKind }).from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, first.id));
+    assert.equal(row.recordKind, "DIAGNOSIS_REPAIR_SUMMARY");
+  });
+
+  test("27. same client_request_id + different record_kind is rejected as an idempotency conflict, never silently overwritten", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const clientRequestId = randomUUID();
+    const memo = "분류값만 다른 재시도 테스트";
+
+    const first = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId });
+    assert.equal(first.ok, true);
+
+    const second = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo, recordKind: "NEXT_PLANNED_ACTION", relatedProcedureExecutionNodeId: null, clientRequestId });
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.code, "IDEMPOTENCY_CONFLICT");
+
+    const rows = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.repairCaseId, created.id));
+    assert.equal(rows.length, 1, "the mismatched retry must never create or overwrite a row");
+    assert.equal(rows[0].recordKind, "GENERAL", "the original record_kind must never be silently overwritten");
+  });
+
+  test("28. invalidation never changes an existing record's record_kind", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({
+      repairCaseId: created.id,
+      actorUserId: engineerId,
+      memo: "무효 처리해도 분류는 보존",
+      recordKind: "INTAKE_INSPECTION_RESULT",
+      relatedProcedureExecutionNodeId: null,
+      clientRequestId: randomUUID(),
+    });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    const invalidateResult = await invalidateWorkRecord({ workRecordId: record.id, actorUserId: adminId, reason: "테스트 무효 처리" });
+    assert.equal(invalidateResult.ok, true, JSON.stringify(invalidateResult));
+
+    const [row] = await db.select({ recordKind: repairCaseWorkRecords.recordKind }).from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+    assert.equal(row.recordKind, "INTAKE_INSPECTION_RESULT");
+  });
+});
+
+describe("getDerivedServiceSummaryForCase (고장 및 서비스 정보 derived summary)", () => {
+  test("29. the latest non-invalidated record of each relevant kind is selected; GENERAL is never used", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    // Two GENERAL records first — must never leak into any of the 3 summary fields.
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "일반 메모 1", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "일반 메모 2", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+
+    // Two per relevant kind, oldest first — only the second (latest) of each must win.
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "인수점검 결과 (구)", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "인수점검 결과 (최신)", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "진단 요약 (구)", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "진단 요약 (최신)", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "다음 계획 (구)", recordKind: "NEXT_PLANNED_ACTION", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "다음 계획 (최신)", recordKind: "NEXT_PLANNED_ACTION", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+
+    const summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.intakeInspectionResult, "인수점검 결과 (최신)");
+    assert.equal(summary.currentDiagnosisSummary, "진단 요약 (최신)");
+    assert.equal(summary.nextPlannedAction, "다음 계획 (최신)");
+  });
+
+  test("30. an invalidated latest record falls back to the previous non-invalidated record of the same kind, then to null once none remain", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const older = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "이전 인수점검 결과", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const newer = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "최신 인수점검 결과", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(older.ok, true);
+    assert.equal(newer.ok, true);
+    if (!older.ok || !newer.ok) return;
+
+    let summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.intakeInspectionResult, "최신 인수점검 결과");
+
+    await invalidateWorkRecord({ workRecordId: newer.id, actorUserId: adminId, reason: "최신 기록 무효 처리" });
+    summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.intakeInspectionResult, "이전 인수점검 결과", "must fall back to the previous valid record, not go blank");
+
+    await invalidateWorkRecord({ workRecordId: older.id, actorUserId: adminId, reason: "이전 기록도 무효 처리" });
+    summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.intakeInspectionResult, null, "no valid record remains — must be null (UI renders '-')");
+  });
+
+  test("31. a case with no matching classified records returns null for all 3 fields", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.deepEqual(summary, { intakeInspectionResult: null, currentDiagnosisSummary: null, nextPlannedAction: null });
+  });
+
+  test("32. a same-created_at tie between two records of the same kind is broken by id DESC, matching every other work-record read", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const tiedTimestamp = new Date("2099-11-15T00:00:00.000Z");
+
+    const [rowA, rowB] = await db
+      .insert(repairCaseWorkRecords)
+      .values([
+        { repairCaseId: created.id, authorUserId: engineerId, memo: "동시각 기록 A", recordKind: "NEXT_PLANNED_ACTION", createdAt: tiedTimestamp },
+        { repairCaseId: created.id, authorUserId: engineerId, memo: "동시각 기록 B", recordKind: "NEXT_PLANNED_ACTION", createdAt: tiedTimestamp },
+      ])
+      .returning({ id: repairCaseWorkRecords.id, memo: repairCaseWorkRecords.memo });
+
+    const expectedWinner = rowA.id > rowB.id ? rowA : rowB;
+
+    const summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.nextPlannedAction, expectedWinner.memo, "the row with the lexicographically greater id must win an exact created_at tie");
+  });
+
+  test("33. the legacy repair_cases text columns are never used as the derived source", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    await db
+      .update(repairCases)
+      .set({
+        intakeInspectionResult: "레거시 값 (무시되어야 함)",
+        currentDiagnosisSummary: "레거시 값 (무시되어야 함)",
+        nextPlannedAction: "레거시 값 (무시되어야 함)",
+      })
+      .where(eq(repairCases.id, created.id));
+
+    // No work records of any classified kind exist for this case — the
+    // legacy columns above must never leak through as a fallback source.
+    const summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.deepEqual(summary, { intakeInspectionResult: null, currentDiagnosisSummary: null, nextPlannedAction: null });
+  });
+});
+
 describe("real-data safety", () => {
-  test("25. this suite never touches the real repair cases, templates, nodes, edges, or ERROR issues", async () => {
+  test("34. this suite never touches the real repair cases, templates, nodes, edges, or ERROR issues", async () => {
     const [repairCaseCounts] = await db.select({ count: sql<number>`count(*)::int` }).from(repairCases).where(sql`intake_number not like ${"D" + TEST_YEAR_MONTH + "%"}`);
     const [templateCounts] = await db.select({ count: sql<number>`count(*)::int` }).from(procedureTemplates).where(sql`code not like ${TEST_CODE_PREFIX + "%"}`);
     const [nodeCounts] = await db

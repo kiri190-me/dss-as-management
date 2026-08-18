@@ -6,7 +6,7 @@ import { deleteRepairCaseFlowchartNodeAction } from "@/lib/server/actions/repair
 import { computeCenterAlignedRelativePosition, resolveColumnSnappedRelativePosition, type RelativeDirection, type ColumnSnapCandidate } from "@/lib/graph-editor-core/layout";
 import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
 
-export type CaseFlowchartNodeDraft = { title: string; description: string; nodeType: RepairCaseFlowchartNodeType };
+export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType };
 
 /** Same fixed spacing as the procedure editor's "상대 위치로 이동" (NodePropertyPanel.tsx) — vertical reuses the server mutation's own default node-stacking gap for consistency. */
 const RELATIVE_POSITION_SPACING = { horizontal: 280, vertical: 150 } as const;
@@ -159,9 +159,6 @@ export default function CaseFlowchartNodePropertyPanel({
   return (
     <div className="flex flex-col gap-4 text-xs">
       <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">노드 속성</h3>
-      {canEdit && (
-        <p className="text-zinc-500 dark:text-zinc-400">변경 내용은 그래프에 즉시 표시되며, 화면 상단의 [저장] 버튼을 눌러야 서버에 저장됩니다.</p>
-      )}
 
       <label className="flex flex-col gap-1">
         제목 (Shift+Enter로 줄바꿈)
@@ -181,6 +178,17 @@ export default function CaseFlowchartNodePropertyPanel({
         <textarea rows={2} value={draft.description} onChange={(e) => onDraftChange({ description: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
       <label className="flex flex-col gap-1">
+        작업 지시 요약
+        <textarea
+          rows={4}
+          maxLength={4000}
+          value={draft.instructions}
+          onChange={(e) => onDraftChange({ instructions: e.target.value })}
+          disabled={!canEdit}
+          className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
         노드 유형
         <select
           value={draft.nodeType}
@@ -195,6 +203,8 @@ export default function CaseFlowchartNodePropertyPanel({
           ))}
         </select>
       </label>
+
+      {canEdit && <p className="text-[11px] text-zinc-400 dark:text-zinc-600">위 속성 변경은 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.</p>}
 
       {canEdit && otherNodes.length > 0 && (
         <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">

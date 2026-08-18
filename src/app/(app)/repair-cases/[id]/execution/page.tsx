@@ -130,11 +130,12 @@ export default async function RepairCaseExecutionPage({
   const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
   const canCreate = canCreateWorkRecord(actingUser.role, { isAssignedToCase, isCaseLocked });
   const canInvalidate = canInvalidateWorkRecord(actingUser.role, { isCaseLocked });
-  const createDisabledReason = isCaseLocked
-    ? "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다."
-    : !canCreate
-      ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다."
-      : null;
+  // Shipment-lock removal policy: isCaseLocked is still fed into
+  // DatabaseWorkflowControlPanel below (workflow-transition gating is
+  // unchanged, a separate concern from work-record editing — see this
+  // checkpoint's audit report), but no longer determines this message,
+  // since canCreateWorkRecord itself no longer factors in lock state.
+  const createDisabledReason = !canCreate ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다." : null;
   const currentStep = workflowSteps.find((s) => s.workflowType === resolved.workflowType && s.key === resolved.currentWorkflowStepKey);
 
   return (

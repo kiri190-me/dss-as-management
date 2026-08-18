@@ -18,9 +18,10 @@ import type { Role } from "@/lib/domain/types";
  *    assignee" coalesce). May reopen a BLOCKED node they're assigned to,
  *    but never a COMPLETED/SKIPPED one (that requires ADMIN+).
  *  - SALES / INVENTORY_MANAGER: read-only.
- *  - Locked-case behavior is unconditional for every role, including
- *    SUPER_ADMIN — see isBlockedByCaseLock, mirroring
- *    repair-case-edit-authorization.ts's isBlockedByShipmentLock.
+ *  - Shipment-lock removal policy: isBlockedByCaseLock below always
+ *    returns false now — a shipped case's procedure execution stays fully
+ *    mutable. See isBlockedByShipmentLock (repair-case-edit-authorization.ts)
+ *    for the full policy-change rationale.
  */
 
 export function canViewProcedureExecution(role: Role): boolean {
@@ -57,14 +58,14 @@ export function canReopenBlockedNode(role: Role, assignment: EffectiveAssigneeCo
 }
 
 /**
- * Locked-case behavior is unconditional for every role, including
- * SUPER_ADMIN/ADMIN — no exception, per the Phase 5A plan §11. Post-shipment
- * correction is out of scope for Phase 5A entirely (blocked on the
- * not-yet-implemented unlock_requests mechanism), so there is no override
- * path here at all, unlike a role-gated function.
+ * `isLocked` is intentionally still accepted here (not removed from the
+ * signature) so every call site's shape stays unchanged and this remains
+ * the single place to reintroduce execution-locking later if ever needed —
+ * always returns false now, unconditionally (shipment-lock removal policy).
  */
 export function isBlockedByCaseLock(isLocked: boolean): boolean {
-  return isLocked;
+  void isLocked;
+  return false;
 }
 
 /** Convenience guard combining role/assignment + lock check for the common "ordinary mutation" path — mutations call this once instead of composing the two checks themselves at every call site. */

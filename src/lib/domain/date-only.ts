@@ -42,3 +42,19 @@ export function daysSinceIntake(receivedAt: string, now: Date = new Date()): num
   const receivedUtcMidnight = parseDateOnlyToUtcMidnight(receivedAt);
   return Math.round((todayUtcMidnight - receivedUtcMidnight) / 86_400_000);
 }
+
+/**
+ * Adds `days` whole calendar days to a "YYYY-MM-DD" date-only string,
+ * returning a new "YYYY-MM-DD" string — e.g. the A/S intake 일정 section's
+ * 사내 목표 검수 완료일 default (receivedAt + 14). Built on the same
+ * UTC-midnight parsing this file already uses for daysSinceIntake, so
+ * month/year rollovers (e.g. 2026-12-25 + 14 -> 2027-01-08) are handled by
+ * real date arithmetic, never string/field-by-field month math.
+ */
+export function addCalendarDays(dateOnly: string, days: number): string {
+  const shifted = new Date(parseDateOnlyToUtcMidnight(dateOnly) + days * 86_400_000);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

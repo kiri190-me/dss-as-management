@@ -4,6 +4,7 @@ import {
   isValidUuid,
   isValidOptionalUuid,
   validateWorkRecordMemo,
+  validateWorkRecordKind,
   validateInvalidationReason,
 } from "./repair-case-work-record-input";
 
@@ -47,6 +48,33 @@ test("validateWorkRecordMemo accepts content at exactly the 4000-character limit
   const result = validateWorkRecordMemo(exact);
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.memo.length, 4000);
+});
+
+test("validateWorkRecordKind: absent/null/empty all default to GENERAL, never rejected", () => {
+  for (const value of [undefined, null, ""]) {
+    const result = validateWorkRecordKind(value);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.recordKind, "GENERAL");
+  }
+});
+
+test("validateWorkRecordKind: each migration-0023 enum value is accepted as-is", () => {
+  for (const value of [
+    "GENERAL",
+    "INTAKE_INSPECTION_RESULT",
+    "DIAGNOSIS_REPAIR_SUMMARY",
+    "NEXT_PLANNED_ACTION",
+  ] as const) {
+    const result = validateWorkRecordKind(value);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.recordKind, value);
+  }
+});
+
+test("validateWorkRecordKind rejects any value outside the enum, including near-misses and non-strings", () => {
+  for (const value of ["general", "OTHER", "INTAKE_INSPECTION", 123, {}]) {
+    assert.equal(validateWorkRecordKind(value).ok, false);
+  }
 });
 
 test("validateInvalidationReason is mandatory — unlike a transition reason, there is no 'not supplied is fine' branch", () => {

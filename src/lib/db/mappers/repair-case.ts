@@ -1,9 +1,11 @@
 import { DEMO_REFERENCE_DATE } from "@/lib/domain/demo-clock";
 import {
+  billingTypeLabels,
   isRepairCaseOverdue,
-  paidOrWarrantyLabels,
   productCategoryLabels,
+  type BillingType,
   type ExceptionStatus,
+  type Priority,
   type WorkflowType,
 } from "@/lib/domain/types";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
@@ -20,6 +22,7 @@ export type RepairCaseJoinRow = {
   id: string;
   version: number;
   intakeNumber: string;
+  legacyReportNumber: string | null;
   customerId: string;
   customerName: string;
   endUserId: string | null;
@@ -32,6 +35,8 @@ export type RepairCaseJoinRow = {
   assignedEngineerId: string | null;
   engineerName: string | null;
   workflowTypeCode: WorkflowType;
+  billingType: BillingType | null;
+  priority: Priority;
   currentWorkflowStepKey: string;
   exceptionStatusCode: string | null;
   receivedAt: string;
@@ -54,15 +59,44 @@ export type RepairCaseJoinRow = {
 };
 
 /**
+ * Trash view row shape (Repair Case Trash + Restore checkpoint) — every
+ * RepairCaseJoinRow column plus the 4 soft-delete metadata columns.
+ * `deletedAt` stays nullable at the type level (it's the same nullable DB
+ * column either way) even though a row only ever reaches this shape via
+ * selectRepairCaseTrashJoin()'s `is_deleted = true` filter, where
+ * softDeleteRepairCase guarantees deleted_at is always set in that same
+ * update — mapRepairCaseTrashRow asserts the non-null invariant explicitly.
+ */
+export type RepairCaseTrashJoinRow = RepairCaseJoinRow & {
+  deletedAt: Date | null;
+  deleteReason: string | null;
+  deletedByUserId: string | null;
+  deletedByUserName: string | null;
+};
+
+/**
+ * DB-only extension of ResolvedRepairCase for the trash list — never
+ * produced by the mock/local resolvers (a local/draft repair case has no
+ * server-side row and can never be soft-deleted), so this type lives here
+ * rather than alongside ResolvedRepairCase's mock/local variants.
+ */
+export type TrashedRepairCase = ResolvedRepairCase & {
+  deletedAt: string;
+  deleteReason: string | null;
+  deletedByUserId: string | null;
+  deletedByUserName: string | null;
+};
+
+/**
  * Maps one joined DB row to the existing ResolvedRepairCase shape
  * (source: "DATABASE"). Pure function, no mutation, no logging of its own —
  * callers are responsible for not logging the row (it may contain the
  * contact-snapshot PII columns; see repair-cases.ts schema comment).
  *
- * `priority` has no DB column (excluded from the schema in the Gate 4
- * correction batches) and is fixed to "NORMAL" as a non-persisted display
- * placeholder — it is never read back from this value, never implies a
- * real triage decision was made, and does not affect status derivation.
+ * `priority` now reads the real `repair_cases.priority` column (인수 정보
+ * priority-editing checkpoint) — no longer a fixed "NORMAL" placeholder.
+ * It still never affects status derivation (deriveRepairStatus/isOverdue
+ * are computed independently of priority).
  */
 export function mapRepairCaseRow(
   row: RepairCaseJoinRow,
@@ -82,9 +116,10 @@ export function mapRepairCaseRow(
     source: "DATABASE",
     productId: row.productId,
     intakeNumber: row.intakeNumber,
+    legacyReportNumber: row.legacyReportNumber,
     workflowType: row.workflowTypeCode,
     status,
-    priority: "NORMAL",
+    priority: row.priority,
     exceptionStatus: row.exceptionStatusCode as ExceptionStatus | null,
     currentWorkflowStepKey: row.currentWorkflowStepKey,
     receivedAt: row.receivedAt,
@@ -98,7 +133,8 @@ export function mapRepairCaseRow(
       referenceDate
     ),
     productCategory: productCategoryLabels[row.workflowTypeCode],
-    paidOrWarranty: paidOrWarrantyLabels[row.workflowTypeCode],
+    paidOrWarranty: row.billingType ? billingTypeLabels[row.billingType] : "-",
+    billingType: row.billingType,
     modelName: row.modelName,
     lotNumber: row.lotNumber ?? "-",
     serialNumber: row.serialNumber ?? "-",
@@ -120,5 +156,23 @@ export function mapRepairCaseRow(
     contactName: row.contactNameSnapshot,
     contactPhone: row.contactPhoneSnapshot,
     contactEmail: row.contactEmailSnapshot,
+  };
+}
+
+/** Maps one joined trash-list DB row (see RepairCaseTrashJoinRow) to TrashedRepairCase. */
+export function mapRepairCaseTrashRow(
+  row: RepairCaseTrashJoinRow,
+  referenceDate: Date = DEMO_REFERENCE_DATE
+): TrashedRepairCase {
+  return {
+    ...mapRepairCaseRow(row, referenceDate),
+    // Non-null invariant: this row only ever reaches here via the trash
+    // list's is_deleted=true filter, and softDeleteRepairCase always sets
+    // deleted_at in that same update — see this file's RepairCaseTrashJoinRow
+    // doc comment.
+    deletedAt: row.deletedAt!.toISOString(),
+    deleteReason: row.deleteReason,
+    deletedByUserId: row.deletedByUserId,
+    deletedByUserName: row.deletedByUserName,
   };
 }

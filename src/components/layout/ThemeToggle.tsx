@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import { SunIcon, MoonIcon, SystemThemeIcon } from "./FooterIcons";
 
 type ThemeMode = "light" | "dark" | "system";
 
 const STORAGE_KEY = "theme";
 
-const options: { mode: ThemeMode; label: string }[] = [
-  { mode: "light", label: "밝게" },
-  { mode: "dark", label: "어둡게" },
-  { mode: "system", label: "시스템 설정" },
+const options: { mode: ThemeMode; label: string; Icon: (props: { className?: string }) => React.JSX.Element }[] = [
+  { mode: "light", label: "밝게", Icon: SunIcon },
+  { mode: "dark", label: "어둡게", Icon: MoonIcon },
+  { mode: "system", label: "시스템 설정", Icon: SystemThemeIcon },
 ];
 
 const listeners = new Set<() => void>();
@@ -46,7 +47,12 @@ function setMode(next: ThemeMode) {
   listeners.forEach((listener) => listener());
 }
 
-export default function ThemeToggle() {
+type ThemeToggleProps = {
+  /** Icon-only buttons stacked vertically — for the collapsed sidebar footer, where a horizontal 3-label group doesn't fit. Same mode state/logic either way, only the rendering changes. */
+  compact?: boolean;
+};
+
+export default function ThemeToggle({ compact = false }: ThemeToggleProps) {
   const mode = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
@@ -64,21 +70,27 @@ export default function ThemeToggle() {
     <div
       role="group"
       aria-label="테마 선택"
-      className="flex items-center gap-1 rounded-md border border-zinc-200 p-1 dark:border-zinc-700"
+      className={compact ? "flex flex-col items-center gap-1" : "flex items-center gap-1 rounded-md border border-zinc-200 p-1 dark:border-zinc-700"}
     >
       {options.map((option) => (
         <button
           key={option.mode}
           type="button"
           aria-pressed={mode === option.mode}
+          title={option.label}
+          aria-label={option.label}
           onClick={() => setMode(option.mode)}
           className={
-            mode === option.mode
-              ? "rounded px-2 py-1 text-xs font-medium bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
-              : "rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            compact
+              ? mode === option.mode
+                ? "flex h-8 w-8 items-center justify-center rounded bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                : "flex h-8 w-8 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              : mode === option.mode
+                ? "rounded px-2 py-1 text-xs font-medium bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                : "rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
           }
         >
-          {option.label}
+          {compact ? <option.Icon className="h-4 w-4" /> : option.label}
         </button>
       ))}
     </div>

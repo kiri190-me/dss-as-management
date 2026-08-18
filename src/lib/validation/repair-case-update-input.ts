@@ -1,4 +1,6 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
+import { BILLING_TYPE_CODES, PRIORITY_CODES, type BillingType, type Priority } from "@/lib/domain/types";
+import { WORKFLOW_REASSIGNMENT_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,26 +29,41 @@ export function isValidRepairCaseEditSection(value: unknown): value is RepairCas
 export const SECTION_FIELD_NAMES = {
   INTAKE: [
     "customerId",
+    "newCustomerName",
     "endUserId",
+    "newEndUserName",
     "receivedAt",
+    "billingType",
+    "priority",
     "customerRequestedDueDate",
+    // 사내 목표 검수 완료일 — 인수정보/A/S 접수 일정 체크포인트부터 이
+    // 섹션이 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다).
+    "internalTargetInspectionCompletionDate",
+    "internalTargetShipmentDate",
     "contactName",
     "contactPhone",
     "contactEmail",
   ],
-  PRODUCT: ["modelName", "lotNumber", "serialNumber", "partNumber"],
-  FAULT_SERVICE: [
-    "reportedSymptom",
-    "intakeInspectionResult",
-    "currentDiagnosisSummary",
-    "nextPlannedAction",
+  PRODUCT: [
+    "productModelId",
+    "newProductModelName",
+    "lotNumber",
+    "serialNumber",
+    "workflowKind",
     "accessoryList",
     "externalConditionSummary",
     "reasonForRemoval",
+  ],
+  // 인수점검 결과/현재 진단·조치 요약/다음 예정 작업은 여기 없다 —
+  // record_kind 분류 체크포인트부터 repair_case_work_records에서 결정론적
+  //으로 파생되는 읽기 전용 값이며(getDerivedServiceSummaryForCase), 이
+  // Server Action으로는 더 이상 제출되지 않는다(제출 시 "이 구역에서
+  // 허용되지 않는 필드"로 거부됨 — Part Number 제거와 동일한 원칙). 레거시
+  // repair_cases 컬럼 자체는 스키마/데이터 모두 그대로 보존된다.
+  FAULT_SERVICE: [
+    "reportedSymptom",
     "notes",
     "assignedEngineerId",
-    "internalTargetInspectionCompletionDate",
-    "internalTargetShipmentDate",
   ],
 } as const satisfies Record<RepairCaseEditSection, readonly string[]>;
 
@@ -166,8 +183,44 @@ function normalizeRequiredDate(
 
 export type IntakeSectionUpdateFields = Partial<{
   customerId: string;
+  /**
+   * 고객사 자유 입력 등록 — customerId와 상호 배타적이다(동시에 둘 다
+   * 제출되지 않는다; 편집 폼이 콤보박스 상태에서 정확히 하나만 채워
+   * 보낸다). intake의 IntakeSubmissionInput.newCustomerName과 동일한
+   * 원칙 — 매 키 입력마다 자동으로 새로 만들지 않고, "새 고객사로 등록"을
+   * 명시적으로 눌렀을 때만 값이 채워진다.
+   */
+  newCustomerName: string;
   endUserId: string | null;
+  /** customerId/newCustomerName과 같은 원칙 — End-User 버전. */
+  newEndUserName: string;
   receivedAt: string;
+  /**
+   * 유상/무상 — 종류/워크플로 배정과 독립적이다(mutation layer가 재확인).
+   * 인수정보가 이 값의 단일한 정상 편집 지점이다(제품 정보에는 더 이상
+   * 없다). 값을 비워 다시 null로 되돌리는 옵션은 없다 — "선택 안 함"은
+   * "제출하지 않음"과 같다(현재 값을 그대로 둔다).
+   */
+  billingType: BillingType;
+  /**
+   * 우선순위 — domain/types.ts의 PRIORITY_CODES를 그대로 재사용한다(별도
+   * enum을 새로 만들지 않는다). NOT NULL 컬럼이라 billingType과 달리 "선택
+   * 안 함"/미제출로 되돌리는 옵션이 없다 — 제출되면 항상 4개 코드 중 하나로
+   * 확정된다.
+   */
+  priority: Priority;
+  /**
+   * 사내 목표 출하일 — 인수정보가 이 값의 단일한 정상 편집 지점이다(고장 및
+   * 서비스 정보에는 더 이상 없다). 선택 입력이라 null로 지울 수 있다(고객
+   * 요청 납기일과 같은 원칙).
+   */
+  internalTargetShipmentDate: string | null;
+  /**
+   * 사내 목표 검수 완료일 — 인수정보/A/S 접수 일정 체크포인트부터 이 섹션이
+   * 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다). 선택 입력이라
+   * null로 지울 수 있다(사내 목표 출하일과 같은 원칙).
+   */
+  internalTargetInspectionCompletionDate: string | null;
   customerRequestedDueDate: string | null;
   contactName: string | null;
   contactPhone: string | null;
@@ -183,6 +236,20 @@ export function validateIntakeSectionFields(
   const customerId = normalizeRequiredShortText(raw, "customerId", "고객사", fieldErrors);
   if (customerId !== undefined) data.customerId = customerId;
 
+  if ("newCustomerName" in raw) {
+    const value = raw.newCustomerName;
+    if (typeof value !== "string" || value.trim() === "") {
+      fieldErrors.customerId = "새 고객사명을 입력해 주세요.";
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.length > MAX_SHORT_TEXT) {
+        fieldErrors.customerId = "고객사명이 너무 깁니다.";
+      } else {
+        data.newCustomerName = trimmed;
+      }
+    }
+  }
+
   if ("endUserId" in raw) {
     const value = raw.endUserId;
     if (value === null || value === "") {
@@ -194,8 +261,44 @@ export function validateIntakeSectionFields(
     }
   }
 
+  if ("newEndUserName" in raw) {
+    const value = raw.newEndUserName;
+    if (typeof value !== "string" || value.trim() === "") {
+      fieldErrors.endUserId = "새 End-User명을 입력해 주세요.";
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.length > MAX_SHORT_TEXT) {
+        fieldErrors.endUserId = "End-User명이 너무 깁니다.";
+      } else {
+        data.newEndUserName = trimmed;
+      }
+    }
+  }
+
   const receivedAt = normalizeRequiredDate(raw, "receivedAt", "인수일", fieldErrors);
   if (receivedAt !== undefined) data.receivedAt = receivedAt;
+
+  if ("billingType" in raw) {
+    const value = raw.billingType;
+    if (
+      typeof value !== "string" ||
+      !(BILLING_TYPE_CODES as readonly string[]).includes(value) ||
+      value === "PENDING_DECISION"
+    ) {
+      fieldErrors.billingType = "유상/무상 값을 확인할 수 없습니다.";
+    } else {
+      data.billingType = value as BillingType;
+    }
+  }
+
+  if ("priority" in raw) {
+    const value = raw.priority;
+    if (typeof value !== "string" || !(PRIORITY_CODES as readonly string[]).includes(value)) {
+      fieldErrors.priority = "우선순위 값을 확인할 수 없습니다.";
+    } else {
+      data.priority = value as Priority;
+    }
+  }
 
   const customerRequestedDueDate = normalizeNullableDate(
     raw,
@@ -204,6 +307,24 @@ export function validateIntakeSectionFields(
     fieldErrors
   );
   if (customerRequestedDueDate !== undefined) data.customerRequestedDueDate = customerRequestedDueDate;
+
+  const internalTargetShipmentDate = normalizeNullableDate(
+    raw,
+    "internalTargetShipmentDate",
+    "사내 목표 출하일",
+    fieldErrors
+  );
+  if (internalTargetShipmentDate !== undefined) data.internalTargetShipmentDate = internalTargetShipmentDate;
+
+  const internalTargetInspectionCompletionDate = normalizeNullableDate(
+    raw,
+    "internalTargetInspectionCompletionDate",
+    "사내 목표 검수 완료일",
+    fieldErrors
+  );
+  if (internalTargetInspectionCompletionDate !== undefined) {
+    data.internalTargetInspectionCompletionDate = internalTargetInspectionCompletionDate;
+  }
 
   const contactName = normalizeShortText(raw, "contactName", "담당자 성함", fieldErrors);
   if (contactName !== undefined) data.contactName = contactName;
@@ -244,7 +365,9 @@ export type UpdateRepairCaseActionResultCode =
   | "REFERENCE_NOT_FOUND"
   | "REFERENCE_MISMATCH"
   | "ENGINEER_NOT_ALLOWED"
-  | "DATABASE_UNAVAILABLE";
+  | "DATABASE_UNAVAILABLE"
+  | "WORKFLOW_REASSIGNMENT_NOT_ALLOWED"
+  | "WORKFLOW_NOT_ALLOWED";
 
 export type UpdateRepairCaseActionResult =
   | { ok: true; id: string; version: number }
@@ -258,10 +381,31 @@ export type UpdateRepairCaseActionResult =
 // --------------------------------------------------------------- PRODUCT --
 
 export type ProductSectionUpdateFields = Partial<{
-  modelName: string;
+  /**
+   * Product Model Master 선택 — 기존 product_models 행 재사용. Model 관련
+   * 편집을 아예 하지 않으면 둘 다 제출되지 않고(제품 정보 편집 폼의 dirty
+   * 체크), 이 경우 mutation layer가 현재 연결된 productModelId/modelName을
+   * 그대로 유지한다.
+   */
+  productModelId: string;
+  /** productModelId와 상호 배타적 — 새 Model 등록(SUPER_ADMIN/ADMIN만, 필드
+   * 권한 매트릭스가 재확인한다). */
+  newProductModelName: string;
   lotNumber: string;
   serialNumber: string;
-  partNumber: string | null;
+  /**
+   * 종류(매쳐/제너레이터) 재배정 요청 — DB 컬럼이 아니라 workflow-kind.ts의
+   * deriveWorkflowType()을 거쳐 workflowVersionId/currentWorkflowStepId로
+   * 변환되는 UI 전용 값이다. intake_inspection 단계 + 이력 없음일 때만
+   * 허용된다(mutation layer에서 검사). 유상/무상은 더 이상 이 섹션에서
+   * 제출되지 않는다(인수정보 섹션 소관) — GENERATOR로 재배정 시 mutation
+   * layer가 현재 저장된 billing_type을 그대로 사용하며, 없으면 절대
+   * 추측하지 않고 거부한다.
+   */
+  workflowKind: WorkflowKind;
+  accessoryList: string | null;
+  externalConditionSummary: string | null;
+  reasonForRemoval: string | null;
 }>;
 
 export function validateProductSectionFields(
@@ -270,8 +414,28 @@ export function validateProductSectionFields(
   const fieldErrors: Record<string, string> = {};
   const data: ProductSectionUpdateFields = {};
 
-  const modelName = normalizeRequiredShortText(raw, "modelName", "Model", fieldErrors);
-  if (modelName !== undefined) data.modelName = modelName;
+  if ("productModelId" in raw) {
+    const value = raw.productModelId;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      fieldErrors.productModelId = "선택한 Model을 확인할 수 없습니다.";
+    } else {
+      data.productModelId = value;
+    }
+  }
+
+  if ("newProductModelName" in raw) {
+    const value = raw.newProductModelName;
+    if (typeof value !== "string" || value.trim() === "") {
+      fieldErrors.newProductModelName = "새 Model명을 입력해 주세요.";
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.length > MAX_SHORT_TEXT) {
+        fieldErrors.newProductModelName = "Model명이 너무 깁니다.";
+      } else {
+        data.newProductModelName = trimmed;
+      }
+    }
+  }
 
   const lotNumber = normalizeRequiredShortText(raw, "lotNumber", "L/N", fieldErrors);
   if (lotNumber !== undefined) data.lotNumber = lotNumber;
@@ -279,8 +443,24 @@ export function validateProductSectionFields(
   const serialNumber = normalizeRequiredShortText(raw, "serialNumber", "S/N", fieldErrors);
   if (serialNumber !== undefined) data.serialNumber = serialNumber;
 
-  const partNumber = normalizeShortText(raw, "partNumber", "Part Number", fieldErrors);
-  if (partNumber !== undefined) data.partNumber = partNumber;
+  if ("workflowKind" in raw) {
+    const value = raw.workflowKind;
+    if (typeof value !== "string" || !(WORKFLOW_REASSIGNMENT_KIND_CODES as readonly string[]).includes(value)) {
+      fieldErrors.workflowKind = "종류 값을 확인할 수 없습니다.";
+    } else {
+      data.workflowKind = value as WorkflowKind;
+    }
+  }
+
+  const productLongTextFields = [
+    ["accessoryList", "동봉 액세서리"],
+    ["externalConditionSummary", "외관 상태 요약"],
+    ["reasonForRemoval", "탈거 사유"],
+  ] as const;
+  for (const [key, label] of productLongTextFields) {
+    const value = normalizeLongText(raw, key, label, fieldErrors);
+    if (value !== undefined) (data as Record<string, string | null>)[key] = value;
+  }
 
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
   return { ok: true, data };
@@ -290,16 +470,9 @@ export function validateProductSectionFields(
 
 export type FaultServiceSectionUpdateFields = Partial<{
   reportedSymptom: string | null;
-  intakeInspectionResult: string | null;
-  currentDiagnosisSummary: string | null;
-  nextPlannedAction: string | null;
-  accessoryList: string | null;
-  externalConditionSummary: string | null;
-  reasonForRemoval: string | null;
   notes: string | null;
-  assignedEngineerId: string;
-  internalTargetInspectionCompletionDate: string | null;
-  internalTargetShipmentDate: string;
+  /** 선택 입력이다 — 비워두면 null(미배정). */
+  assignedEngineerId: string | null;
 }>;
 
 export function validateFaultServiceSectionFields(
@@ -310,12 +483,6 @@ export function validateFaultServiceSectionFields(
 
   const longTextFields = [
     ["reportedSymptom", "신고 증상"],
-    ["intakeInspectionResult", "인수점검 결과"],
-    ["currentDiagnosisSummary", "현재 진단/조치 요약"],
-    ["nextPlannedAction", "다음 예정 작업"],
-    ["accessoryList", "동봉 액세서리"],
-    ["externalConditionSummary", "외관 상태 요약"],
-    ["reasonForRemoval", "탈거 사유"],
     ["notes", "비고"],
   ] as const;
   for (const [key, label] of longTextFields) {
@@ -323,31 +490,21 @@ export function validateFaultServiceSectionFields(
     if (value !== undefined) (data as Record<string, string | null>)[key] = value;
   }
 
-  const assignedEngineerId = normalizeRequiredShortText(
-    raw,
-    "assignedEngineerId",
-    "담당 엔지니어",
-    fieldErrors
-  );
-  if (assignedEngineerId !== undefined) data.assignedEngineerId = assignedEngineerId;
-
-  const internalTargetInspectionCompletionDate = normalizeNullableDate(
-    raw,
-    "internalTargetInspectionCompletionDate",
-    "사내 목표 검수완료일",
-    fieldErrors
-  );
-  if (internalTargetInspectionCompletionDate !== undefined) {
-    data.internalTargetInspectionCompletionDate = internalTargetInspectionCompletionDate;
+  if ("assignedEngineerId" in raw) {
+    const value = raw.assignedEngineerId;
+    if (value === null || value === "") {
+      data.assignedEngineerId = null;
+    } else if (typeof value !== "string") {
+      fieldErrors.assignedEngineerId = "담당 엔지니어 값을 확인할 수 없습니다.";
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.length > MAX_SHORT_TEXT) {
+        fieldErrors.assignedEngineerId = "담당 엔지니어 값이 너무 깁니다.";
+      } else {
+        data.assignedEngineerId = trimmed;
+      }
+    }
   }
-
-  const internalTargetShipmentDate = normalizeRequiredDate(
-    raw,
-    "internalTargetShipmentDate",
-    "사내 목표 출하일",
-    fieldErrors
-  );
-  if (internalTargetShipmentDate !== undefined) data.internalTargetShipmentDate = internalTargetShipmentDate;
 
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
   return { ok: true, data };

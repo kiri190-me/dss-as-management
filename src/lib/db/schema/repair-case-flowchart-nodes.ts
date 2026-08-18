@@ -57,6 +57,7 @@ export const repairCaseFlowchartNodes = pgTable(
     nodeType: repairCaseFlowchartNodeTypeEnum("node_type").notNull(),
     title: text("title").notNull(),
     description: text("description"),
+    instructions: text("instructions"),
     positionX: doublePrecision("position_x").notNull().default(0),
     positionY: doublePrecision("position_y").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })

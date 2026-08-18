@@ -134,6 +134,18 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     .where(and(eq(procedureCaseExecutions.id, executionId), eq(procedureCaseExecutions.isDeleted, false)));
   if (!execution) return null;
 
+  // repair_case_id is nullable (repair-case permanent-delete schema
+  // foundation checkpoint), but the INNER JOIN to repairCases above
+  // guarantees it's non-null for any row that actually comes back (a NULL
+  // FK can never satisfy a join equality) — this guard only documents/
+  // enforces that invariant for TypeScript, which can't infer nullability
+  // across a join. It should never actually trigger: this function is only
+  // ever reached from the live case's own /repair-cases/[id]/execution
+  // route, which already 404s on a purged (or merely soft-deleted) case
+  // before getExecutionDetail is called at all — see that page's own
+  // getRepairCaseById gate.
+  if (!execution.repairCaseId) return null;
+
   const execNodes = await db
     .select()
     .from(procedureCaseExecutionNodes)

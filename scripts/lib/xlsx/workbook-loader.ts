@@ -5,10 +5,13 @@ import {
   parseDrawing,
   parseRels,
   parseSharedStrings,
+  parseWorkbookDateSystem,
+  parseWorkbookStyles,
   parseWorkbookSheets,
   parseWorksheet,
   type DrawingAnchor,
   type ParsedWorksheet,
+  type WorkbookStyles,
 } from "./ooxml-parser";
 
 export type LoadedSheet = {
@@ -24,6 +27,9 @@ export type LoadedWorkbook = {
   sourceFileName: string;
   sourceFileHash: string;
   sheets: LoadedSheet[];
+  /** Additive metadata for deterministic numeric-date interpretation. */
+  dateSystem?: "1900" | "1904";
+  styles?: WorkbookStyles;
 };
 
 /** sha256 of the raw file bytes — what makes the importer idempotent (§ importer). */
@@ -38,6 +44,11 @@ export function loadWorkbook(filePath: string): LoadedWorkbook {
   const sourceFileName = filePath.split(/[/\\]/).pop() ?? filePath;
 
   const workbookXml = zip.readText("xl/workbook.xml");
+  const dateSystem = parseWorkbookDateSystem(workbookXml);
+  const styles = parseWorkbookStyles(
+    zip.readTextOrNull("xl/styles.xml"),
+    zip.readTextOrNull("xl/theme/theme1.xml")
+  );
   const workbookRels = parseRels(zip.readTextOrNull("xl/_rels/workbook.xml.rels"));
   const sheetRefs = parseWorkbookSheets(workbookXml);
   const sharedStrings = parseSharedStrings(zip.readTextOrNull("xl/sharedStrings.xml"));
@@ -53,7 +64,7 @@ export function loadWorkbook(filePath: string): LoadedWorkbook {
 
     const worksheetXml = zip.readTextOrNull(worksheetPath);
     if (!worksheetXml) continue;
-    const worksheet = parseWorksheet(worksheetXml, sharedStrings, sheetRels);
+    const worksheet = parseWorksheet(worksheetXml, sharedStrings, sheetRels, styles);
 
     let drawingPath: string | null = null;
     let drawing: DrawingAnchor[] | null = null;
@@ -75,5 +86,5 @@ export function loadWorkbook(filePath: string): LoadedWorkbook {
     });
   }
 
-  return { sourceFileName, sourceFileHash, sheets };
+  return { sourceFileName, sourceFileHash, sheets, dateSystem, styles };
 }

@@ -1,9 +1,24 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { repairCases } from "./repair-cases";
 import { users } from "./users";
 import { workflowSteps } from "./workflow";
 import { procedureCaseExecutionNodes } from "./procedure-case-execution";
+
+/**
+ * Author-selected, explicit classification for the automatic 고장 및 서비스
+ * 정보 summary derivation (인수점검 결과/현재 진단·조치 요약/다음 예정 작업)
+ * — never inferred from memo text or related_workflow_step_id. GENERAL is
+ * the safe default for both ordinary notes and every pre-existing row (see
+ * record_kind's column-level DEFAULT below — no backfill UPDATE is ever
+ * run; historical rows become GENERAL purely through that default).
+ */
+export const repairCaseWorkRecordKindEnum = pgEnum("repair_case_work_record_kind", [
+  "GENERAL",
+  "INTAKE_INSPECTION_RESULT",
+  "DIAGNOSIS_REPAIR_SUMMARY",
+  "NEXT_PLANNED_ACTION",
+]);
 
 /**
  * Phase 5C-2 — durable, append-oriented per-case work history ("작업 기록"),
@@ -39,13 +54,25 @@ export const repairCaseWorkRecords = pgTable(
   "repair_case_work_records",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repairCaseId: uuid("repair_case_id")
-      .notNull()
-      .references(() => repairCases.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (repair-case permanent-delete schema
+    // foundation checkpoint) — was NOT NULL + RESTRICT, which made a
+    // repair_cases hard-delete impossible at the DB level. Engineer work-
+    // history/memo log that must outlive the case's own hard-delete; the
+    // row's own memo/recordKind/workflowStepId permanently preserve what
+    // was recorded regardless of this column going NULL. Existing rows are
+    // untouched by this — only a future repair_cases hard-delete ever nulls
+    // it. Same proven pattern as
+    // repair_case_flowchart_edit_history.flowchart_id (migration 0026).
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, {
+      onDelete: "set null",
+    }),
     authorUserId: uuid("author_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     memo: text("memo").notNull(),
+    // Immutable once set, same as every other column on this row — there is
+    // no update mutation for record_kind, ever (see module doc comment).
+    recordKind: repairCaseWorkRecordKindEnum("record_kind").notNull().default("GENERAL"),
     relatedWorkflowStepId: uuid("related_workflow_step_id").references(() => workflowSteps.id, {
       onDelete: "restrict",
     }),
@@ -81,6 +108,13 @@ export const repairCaseWorkRecords = pgTable(
     // case, newest first.
     index("repair_case_work_records_repair_case_id_created_at_idx").on(table.repairCaseId, table.createdAt),
     index("repair_case_work_records_author_user_id_idx").on(table.authorUserId),
+    // Serves "latest non-invalidated record of a given kind for this case"
+    // — the derived-summary read pattern (인수점검 결과/진단·조치 요약/다음
+    // 예정 작업). Partial on invalidated_at IS NULL, same convention as the
+    // procedure-execution-node index below.
+    index("repair_case_work_records_repair_case_id_record_kind_created_at_idx")
+      .on(table.repairCaseId, table.recordKind, table.createdAt)
+      .where(sql`invalidated_at is null`),
     // Partial: supports "was this node referenced by a work record" lookups
     // cheaply; most rows have this NULL (plain memo, no node context).
     index("repair_case_work_records_procedure_execution_node_id_idx")

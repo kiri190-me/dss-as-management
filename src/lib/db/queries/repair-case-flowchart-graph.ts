@@ -9,6 +9,7 @@ export type RepairCaseFlowchartGraphNode = {
   nodeType: RepairCaseFlowchartNodeType;
   title: string;
   description: string | null;
+  instructions: string | null;
   positionX: number;
   positionY: number;
 };
@@ -65,6 +66,7 @@ export async function getRepairCaseFlowchartGraph(params: {
         nodeType: repairCaseFlowchartNodes.nodeType,
         title: repairCaseFlowchartNodes.title,
         description: repairCaseFlowchartNodes.description,
+        instructions: repairCaseFlowchartNodes.instructions,
         positionX: repairCaseFlowchartNodes.positionX,
         positionY: repairCaseFlowchartNodes.positionY,
       })

@@ -37,11 +37,9 @@ function canReopenBlocked(role: string, actorId: string, effectiveAssigneeId: st
 export default function ExecutionNodeCard({
   node,
   actingUser,
-  isCaseLocked,
 }: {
   node: ExecutionNodeDetail;
   actingUser: { id: string; role: string };
-  isCaseLocked: boolean;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -50,12 +48,14 @@ export default function ExecutionNodeCard({
   const [memoDraft, setMemoDraft] = useState(node.workMemo ?? "");
   const [isMemoDirty, setIsMemoDirty] = useState(false);
 
-  const ordinaryEligible = !isCaseLocked && canActOrdinary(actingUser.role, actingUser.id, node.effectiveAssigneeId);
+  // Shipment-lock removal policy: eligibility is role/assignment-only now —
+  // see isBlockedByCaseLock (procedure-case-execution-authorization.ts),
+  // which the server independently enforces regardless of this UI hint.
+  const ordinaryEligible = canActOrdinary(actingUser.role, actingUser.id, node.effectiveAssigneeId);
   const reopenEligible =
-    !isCaseLocked &&
-    (node.status === "BLOCKED"
+    node.status === "BLOCKED"
       ? canReopenBlocked(actingUser.role, actingUser.id, node.effectiveAssigneeId)
-      : canReopenCompletedOrSkipped(actingUser.role));
+      : canReopenCompletedOrSkipped(actingUser.role);
 
   async function runAction<T extends { ok: boolean; message?: string }>(run: () => Promise<T>) {
     setIsSubmitting(true);

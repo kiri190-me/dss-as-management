@@ -1,3 +1,5 @@
+import { WORK_RECORD_KIND_CODES, type WorkRecordKind } from "@/lib/domain/types";
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -33,6 +35,27 @@ export function isValidOptionalUuid(value: unknown): value is string | null | un
 const MAX_MEMO_LENGTH = 4000;
 
 export type MemoValidationResult = { ok: true; memo: string } | { ok: false; error: string };
+
+export type WorkRecordKindValidationResult = { ok: true; recordKind: WorkRecordKind } | { ok: false; error: string };
+
+/**
+ * GENERAL is the safe default (matches record_kind's DB-level DEFAULT) —
+ * absent/null/"" all normalize to GENERAL rather than being rejected, since
+ * the client always submits an explicit selection but a non-UI/legacy
+ * caller omitting the field should never be treated as an error. Any other
+ * non-empty value must be one of the migration 0023 enum's exact values —
+ * reuses WORK_RECORD_KIND_CODES (domain/types.ts) rather than a separate
+ * copy of the union.
+ */
+export function validateWorkRecordKind(value: unknown): WorkRecordKindValidationResult {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true, recordKind: "GENERAL" };
+  }
+  if (typeof value !== "string" || !(WORK_RECORD_KIND_CODES as readonly string[]).includes(value)) {
+    return { ok: false, error: "기록 구분 값을 확인할 수 없습니다." };
+  }
+  return { ok: true, recordKind: value as WorkRecordKind };
+}
 
 /** Required, non-blank, trimmed, capped — never silently truncated. */
 export function validateWorkRecordMemo(value: unknown): MemoValidationResult {
@@ -80,6 +103,7 @@ export type CreateWorkRecordActionResultCode =
   | "CASE_LOCKED"
   | "INVALID_INPUT"
   | "IDEMPOTENCY_CONFLICT"
+  | "BILLING_DECISION_REQUIRED"
   | "DATABASE_UNAVAILABLE";
 
 export type CreateWorkRecordActionResult =
@@ -93,6 +117,7 @@ export type InvalidateWorkRecordActionResultCode =
   | "NOT_FOUND"
   | "CASE_LOCKED"
   | "ALREADY_INVALIDATED"
+  | "BILLING_DECISION_REQUIRED"
   | "DATABASE_UNAVAILABLE";
 
 export type InvalidateWorkRecordActionResult =

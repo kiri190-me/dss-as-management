@@ -8,11 +8,20 @@ import { buildNewEdgePreview, type NodeLookup } from "@/lib/domain/procedure-edi
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 
 /**
- * Add-connection panel (Phase 4A) — only ever links two existing nodes
- * (no node creation), always requires an explicit reason and a preview
- * confirmation before the edge is persisted. A caller may pre-fill
- * fromNodeId (e.g. "새 연결 추가" invoked with a node already selected) but
- * the reviewer still must pick the target and confirm.
+ * Add-connection panel (Phase 4A; form-reset behavior standardized in the
+ * 5C-6D-1E follow-up) — only ever links two existing nodes (no node
+ * creation), always requires an explicit reason and a preview confirmation
+ * before the edge is persisted. A caller may pre-fill fromNodeId (e.g. "새
+ * 연결 추가" invoked with a node already selected).
+ *
+ * Not remounted via `key={selectedNodeId}` at the call site
+ * (ProcedureTemplateEditorScreen) — the panel stays mounted and instead
+ * resets its own fields via adjust-state-during-render whenever
+ * `prefillFromNodeId` changes, i.e. whenever the canvas selection changes.
+ * The whole form resets (FROM/TO/branch type/branch label/reason, and
+ * closes any open review dialog) rather than only resyncing FROM, since an
+ * in-progress draft for one FROM node isn't meaningful once the canvas
+ * selection points at a different one. Mirrors CaseFlowchartCreateEdgePanel.
  */
 export default function CreateEdgePanel({
   templateId,
@@ -33,6 +42,7 @@ export default function CreateEdgePanel({
   isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
+  const [prevPrefillFromNodeId, setPrevPrefillFromNodeId] = useState(prefillFromNodeId ?? null);
   const [fromNodeId, setFromNodeId] = useState(prefillFromNodeId ?? nodes[0]?.id ?? "");
   const [toNodeId, setToNodeId] = useState("");
   const [branchType, setBranchType] = useState<ProcedureBranchType>("DEFAULT");
@@ -41,6 +51,16 @@ export default function CreateEdgePanel({
   const [confirming, setConfirming] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  if ((prefillFromNodeId ?? null) !== prevPrefillFromNodeId) {
+    setPrevPrefillFromNodeId(prefillFromNodeId ?? null);
+    setFromNodeId(prefillFromNodeId ?? nodes[0]?.id ?? "");
+    setToNodeId("");
+    setBranchType("DEFAULT");
+    setBranchLabel("");
+    setReason("");
+    setConfirming(false);
+    setErrorMessage(null);
+  }
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -85,7 +105,11 @@ export default function CreateEdgePanel({
       <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-300">새 연결 추가</h3>
       <label className="flex flex-col gap-1">
         시작 노드
-        <select value={fromNodeId} onChange={(e) => setFromNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+        <select
+          value={fromNodeId}
+          onChange={(e) => setFromNodeId(e.target.value)}
+          className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        >
           <option value="">노드를 선택하세요</option>
           {nodes.map((n) => (
             <option key={n.id} value={n.id}>

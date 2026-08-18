@@ -3,13 +3,15 @@ import { StatusBadge, SourceBadge } from "@/components/repair-cases/badges";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
+import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { workflowKindLabels, workflowKindOf } from "@/lib/domain/workflow-kind";
 import ProductInfoEditForm from "./edit/ProductInfoEditForm";
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
-      <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value}</dd>
+      <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value ?? "-"}</dd>
     </div>
   );
 }
@@ -19,6 +21,7 @@ export default function ProductInfoSection({
   related,
   editableFields,
   editingSection,
+  referenceData,
   onStartEdit,
   onDone,
 }: {
@@ -26,6 +29,7 @@ export default function ProductInfoSection({
   related: RelatedMatch[];
   editableFields: readonly string[] | null;
   editingSection: RepairCaseEditSection | null;
+  referenceData: IntakeReferenceData | null;
   onStartEdit: () => void;
   onDone: () => void;
 }) {
@@ -49,14 +53,22 @@ export default function ProductInfoSection({
 
       {isEditing && editableFields ? (
         <div className="mt-3">
-          <ProductInfoEditForm resolved={resolved} editableFields={editableFields} onDone={onDone} />
+          <ProductInfoEditForm
+            resolved={resolved}
+            editableFields={editableFields}
+            referenceData={referenceData}
+            onDone={onDone}
+          />
         </div>
       ) : (
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-          <Field label="제품 구분" value={resolved.productCategory} />
+          <Field label="종류" value={workflowKindLabels[workflowKindOf(resolved.workflowType)]} />
           <Field label="Model" value={resolved.modelName} />
           <Field label="L/N" value={resolved.lotNumber} />
           <Field label="S/N" value={resolved.serialNumber} />
+          <Field label="동봉 액세서리" value={resolved.accessoryList} />
+          <Field label="외관 상태 요약" value={resolved.externalConditionSummary} />
+          <Field label="탈거 사유" value={resolved.reasonForRemoval} />
         </dl>
       )}
 

@@ -21,20 +21,27 @@ const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_DIR_SIGNATURE = 0x02014b50;
 const LOCAL_HEADER_SIGNATURE = 0x04034b50;
 
-type CentralDirEntry = {
+export type ZipEntryMetadata = {
   name: string;
   compressionMethod: number;
   compressedSize: number;
+  uncompressedSize: number;
   localHeaderOffset: number;
 };
 
 export class ZipArchive {
   private readonly buf: Buffer;
-  private readonly entries: Map<string, CentralDirEntry>;
+  private readonly entries: Map<string, ZipEntryMetadata>;
+  private readonly duplicateEntryCount: number;
 
-  private constructor(buf: Buffer, entries: Map<string, CentralDirEntry>) {
+  private constructor(
+    buf: Buffer,
+    entries: Map<string, ZipEntryMetadata>,
+    duplicateEntryCount: number
+  ) {
     this.buf = buf;
     this.entries = entries;
+    this.duplicateEntryCount = duplicateEntryCount;
   }
 
   static fromFile(filePath: string): ZipArchive {
@@ -47,7 +54,9 @@ export class ZipArchive {
     const totalEntries = buf.readUInt16LE(eocdOffset + 10);
     const centralDirOffset = buf.readUInt32LE(eocdOffset + 16);
 
-    const entries = new Map<string, CentralDirEntry>();
+    const entries = new Map<string, ZipEntryMetadata>();
+    const normalizedNames = new Set<string>();
+    let duplicateEntryCount = 0;
     let ptr = centralDirOffset;
     for (let i = 0; i < totalEntries; i++) {
       const sig = buf.readUInt32LE(ptr);
@@ -58,17 +67,27 @@ export class ZipArchive {
       }
       const compressionMethod = buf.readUInt16LE(ptr + 10);
       const compressedSize = buf.readUInt32LE(ptr + 20);
+      const uncompressedSize = buf.readUInt32LE(ptr + 24);
       const nameLen = buf.readUInt16LE(ptr + 28);
       const extraLen = buf.readUInt16LE(ptr + 30);
       const commentLen = buf.readUInt16LE(ptr + 32);
       const localHeaderOffset = buf.readUInt32LE(ptr + 42);
       const name = buf.toString("utf8", ptr + 46, ptr + 46 + nameLen);
 
-      entries.set(name, { name, compressionMethod, compressedSize, localHeaderOffset });
+      const normalizedName = name.replace(/\\/g, "/").toLowerCase();
+      if (normalizedNames.has(normalizedName)) duplicateEntryCount++;
+      normalizedNames.add(normalizedName);
+      entries.set(name, {
+        name,
+        compressionMethod,
+        compressedSize,
+        uncompressedSize,
+        localHeaderOffset,
+      });
       ptr += 46 + nameLen + extraLen + commentLen;
     }
 
-    return new ZipArchive(buf, entries);
+    return new ZipArchive(buf, entries, duplicateEntryCount);
   }
 
   has(entryName: string): boolean {
@@ -79,8 +98,21 @@ export class ZipArchive {
     return [...this.entries.keys()];
   }
 
+  /** Central-directory metadata only; does not inflate entry contents. */
+  listEntries(): ZipEntryMetadata[] {
+    return [...this.entries.values()].map((entry) => ({ ...entry }));
+  }
+
+  hasDuplicateEntryNames(): boolean {
+    return this.duplicateEntryCount > 0;
+  }
+
+  entryCount(): number {
+    return this.entries.size + this.duplicateEntryCount;
+  }
+
   /** Returns the entry's decompressed bytes, or null if it doesn't exist. */
-  readEntry(entryName: string): Buffer | null {
+  readEntry(entryName: string, maxOutputLength?: number): Buffer | null {
     const entry = this.entries.get(entryName);
     if (!entry) return null;
 
@@ -95,22 +127,32 @@ export class ZipArchive {
     const dataStart = entry.localHeaderOffset + 30 + nameLen + extraLen;
     const compressed = this.buf.subarray(dataStart, dataStart + entry.compressedSize);
 
-    if (entry.compressionMethod === 0) return Buffer.from(compressed);
-    if (entry.compressionMethod === 8) return inflateRawSync(compressed);
+    if (entry.compressionMethod === 0) {
+      if (maxOutputLength !== undefined && compressed.length > maxOutputLength) {
+        throw new Error(`Zip entry exceeds configured output limit: "${entryName}"`);
+      }
+      return Buffer.from(compressed);
+    }
+    if (entry.compressionMethod === 8) {
+      return inflateRawSync(
+        compressed,
+        maxOutputLength === undefined ? undefined : { maxOutputLength }
+      );
+    }
     throw new Error(
       `Unsupported zip compression method ${entry.compressionMethod} for entry "${entryName}"`
     );
   }
 
   /** Same as readEntry, but decoded as UTF-8 text; throws if the entry is missing. */
-  readText(entryName: string): string {
-    const bytes = this.readEntry(entryName);
+  readText(entryName: string, maxOutputLength?: number): string {
+    const bytes = this.readEntry(entryName, maxOutputLength);
     if (!bytes) throw new Error(`Zip entry not found: "${entryName}"`);
     return bytes.toString("utf8");
   }
 
-  readTextOrNull(entryName: string): string | null {
-    const bytes = this.readEntry(entryName);
+  readTextOrNull(entryName: string, maxOutputLength?: number): string | null {
+    const bytes = this.readEntry(entryName, maxOutputLength);
     return bytes ? bytes.toString("utf8") : null;
   }
 }

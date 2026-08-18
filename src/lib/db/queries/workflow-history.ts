@@ -12,7 +12,8 @@ export type WorkflowActionType =
   | "STEP_RETURNED"
   | "HOLD_STARTED"
   | "HOLD_RELEASED"
-  | "SHIPMENT_COMPLETED";
+  | "SHIPMENT_COMPLETED"
+  | "LEGACY_IMPORT_STATE_SET";
 
 export type WorkflowHistoryEntry = {
   id: string;

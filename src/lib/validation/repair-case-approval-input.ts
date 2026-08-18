@@ -61,6 +61,7 @@ export type ApprovalActionResultCode =
   | "CONFLICT"
   | "ALREADY_REQUESTED"
   | "CASE_LOCKED"
+  | "BILLING_DECISION_REQUIRED"
   | "INVALID_APPROVAL_TYPE"
   | "DATABASE_UNAVAILABLE";
 

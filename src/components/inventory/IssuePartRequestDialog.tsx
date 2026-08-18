@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { issuePartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
-import { stockOwnerLabels } from "@/lib/domain/inventory-types";
+import { stockOwnerLabels, stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
 
 type AllocationRow = { key: string; requestItemId: string; partStockBalanceId: string; quantity: string };
 
@@ -143,7 +143,7 @@ export default function IssuePartRequestDialog({
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium">{item.partName}</span>
                 <span className="text-zinc-500 dark:text-zinc-400">
-                  요청 {item.requestedQuantity} / 불출 {item.issuedQuantity} / 남음 {remaining}
+                  요청 {item.requestedQuantity} / 불출 {item.issuedQuantity} / 남음 {remaining} · 요청 소유구분: {stockOwnerLabelOrUnspecified(item.owner)}
                 </span>
               </div>
               <div className="mt-2 flex flex-col gap-1">

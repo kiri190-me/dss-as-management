@@ -6,6 +6,8 @@ import {
   createRepairCaseFlowchart,
   updateRepairCaseFlowchartMetadata,
   softDeleteRepairCaseFlowchart,
+  restoreRepairCaseFlowchart,
+  permanentlyDeleteRepairCaseFlowchart,
 } from "@/lib/db/mutations/repair-case-flowcharts";
 import {
   isValidRepairCaseId,
@@ -14,9 +16,12 @@ import {
   validateFlowchartTitle,
   validateFlowchartDescription,
   validateFlowchartDeleteReason,
+  validatePermanentDeleteReason,
   type CreateRepairCaseFlowchartActionResult,
   type UpdateRepairCaseFlowchartMetadataActionResult,
   type SoftDeleteRepairCaseFlowchartActionResult,
+  type RestoreRepairCaseFlowchartActionResult,
+  type PermanentlyDeleteRepairCaseFlowchartActionResult,
 } from "@/lib/validation/repair-case-flowchart-input";
 
 /**
@@ -151,6 +156,76 @@ export async function softDeleteRepairCaseFlowchartAction(input: {
   } catch (err) {
     const code = isPgErrorLike(err) ? err.code : undefined;
     console.error("softDeleteRepairCaseFlowchartAction: unexpected DB error", { code });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
+export async function restoreRepairCaseFlowchartAction(input: {
+  repairCaseId: string;
+  flowchartId: string;
+  expectedUpdatedAt: string;
+}): Promise<RestoreRepairCaseFlowchartActionResult> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return { ok: false, code: "UNAUTHORIZED", message: actorCheck.result.message };
+
+  if (!isValidRepairCaseId(input.repairCaseId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "접수 건을 확인할 수 없습니다." };
+  }
+  if (!isValidFlowchartId(input.flowchartId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "해당 Flowchart를 확인할 수 없습니다." };
+  }
+  if (!isValidExpectedUpdatedAt(input.expectedUpdatedAt)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "요청이 올바르지 않습니다. 새로고침 후 다시 시도하세요." };
+  }
+
+  try {
+    const result = await restoreRepairCaseFlowchart({
+      repairCaseId: input.repairCaseId,
+      flowchartId: input.flowchartId,
+      actorUserId: actorCheck.userId,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+    });
+    return result;
+  } catch (err) {
+    const code = isPgErrorLike(err) ? err.code : undefined;
+    console.error("restoreRepairCaseFlowchartAction: unexpected DB error", { code });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
+export async function permanentlyDeleteRepairCaseFlowchartAction(input: {
+  repairCaseId: string;
+  flowchartId: string;
+  deleteReason: string;
+  expectedUpdatedAt: string;
+}): Promise<PermanentlyDeleteRepairCaseFlowchartActionResult> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return { ok: false, code: "UNAUTHORIZED", message: actorCheck.result.message };
+
+  if (!isValidRepairCaseId(input.repairCaseId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "접수 건을 확인할 수 없습니다." };
+  }
+  if (!isValidFlowchartId(input.flowchartId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "해당 Flowchart를 확인할 수 없습니다." };
+  }
+  if (!isValidExpectedUpdatedAt(input.expectedUpdatedAt)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "요청이 올바르지 않습니다. 새로고침 후 다시 시도하세요." };
+  }
+  const reasonValidation = validatePermanentDeleteReason(input.deleteReason);
+  if (!reasonValidation.ok) return { ok: false, code: "VALIDATION_ERROR", message: reasonValidation.error };
+
+  try {
+    const result = await permanentlyDeleteRepairCaseFlowchart({
+      repairCaseId: input.repairCaseId,
+      flowchartId: input.flowchartId,
+      actorUserId: actorCheck.userId,
+      deleteReason: reasonValidation.reason,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+    });
+    return result;
+  } catch (err) {
+    const code = isPgErrorLike(err) ? err.code : undefined;
+    console.error("permanentlyDeleteRepairCaseFlowchartAction: unexpected DB error", { code });
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
   }
 }

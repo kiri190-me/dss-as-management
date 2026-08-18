@@ -45,7 +45,7 @@ DSS A/S 관리 시스템의 초기(Initial) REST API 엔드포인트 정의 문�
 | GET | /api/repair-cases | 전체 현황 조회/검색(필터: 상태, 고객사, 기간 등) | 로그인 사용자 전체 |
 | POST | /api/repair-cases | A/S 접수 생성(제품 인수 등록, 인수번호 DB 트랜잭션 자동 발급, 워크플로 최신 활성 버전 배정) | ADMIN, AS_ENGINEER, SALES |
 | GET | /api/repair-cases/{id} | A/S 상세 조회 | 로그인 사용자 전체 |
-| PATCH | /api/repair-cases/{id} | A/S 접수 정보 수정 (잠금 상태(`is_locked`)일 경우 서버에서 거부) | ADMIN, AS_ENGINEER |
+| PATCH | /api/repair-cases/{id} | A/S 접수 정보 수정 (출하 완료 후에도 통상 역할/필드 권한에 따라 계속 허용) | ADMIN, AS_ENGINEER |
 | PATCH | /api/repair-cases/{id}/status | 상태 변경(status_change_histories 기록) | ADMIN, AS_ENGINEER |
 | GET | /api/repair-cases/{id}/history-comparison | 동일 제품 과거 수리 이력 비교 조회 | 로그인 사용자 전체 |
 
@@ -121,18 +121,11 @@ DSS A/S 관리 시스템의 초기(Initial) REST API 엔드포인트 정의 문�
 |---|---|---|---|
 | POST | /api/excel-reports/kyosan-intake-list | 일본 본사 인수품 LIST Excel 자동 작성 (출력물은 일본어, 용어사전 참조) | ADMIN, INVENTORY_MANAGER |
 
-## 13. Unlock Requests (출하 완료 후 수정 — Placeholder, 상세 스키마 TBD)
+## 13. Unlock Requests (폐기됨 — 정책 변경으로 더 이상 존재하지 않음)
 
-아래 4개 엔드포인트를 잠금 해제·수정 절차의 단일 정규(canonical) 구조로 사용한다.
+이 섹션에 정의되었던 `unlock-requests` 4개 엔드포인트(수정 요청 생성/관리자 승인/잠금 해제 상태에서 수정/재검토·재승인)는 정책 변경으로 전부 폐기(obsolete)되었다. 출하 완료는 A/S 접수 건 데이터를 읽기 전용으로 만들지 않으며, 출하 완료 후에도 `PATCH /api/repair-cases/{id}`를 통해 통상 역할/필드 권한에 따라 계속 수정할 수 있다 — 별도의 잠금 해제 요청/승인 엔드포인트는 필요하지 않다. 상세 정책은 PROJECT_REQUIREMENTS.md "출하 완료 후 수정 정책", SECURITY_POLICY.md §2를 참고한다.
 
-| Method | Path | 설명 | 권한(잠정) |
-|---|---|---|---|
-| POST | /api/repair-cases/{id}/unlock-requests | 수정 요청 생성 | AS_ENGINEER, ADMIN, SALES, INVENTORY_MANAGER |
-| PATCH | /api/repair-cases/{id}/unlock-requests/{requestId}/approve | 관리자 승인 → 임시 잠금 해제 | ADMIN, SUPER_ADMIN |
-| PATCH | /api/repair-cases/{id} | 잠금 해제 상태에서 수정 (요청 바디에 `modification_reason` 필수, 서버에서 `is_locked` 상태 검증) | ADMIN, AS_ENGINEER |
-| PATCH | /api/repair-cases/{id}/unlock-requests/{requestId}/review | 재검토 및 재승인 → 재잠금 | ADMIN, SUPER_ADMIN |
-
-> 이전 설계에 존재하던 단수형 `POST /api/repair-cases/{id}/unlock-request`는 폐기(obsolete)되었다. 위 `/unlock-requests`(복수형) 4개 엔드포인트로 대체되었으며, 더 이상 사용하지 않는다.
+워크플로 단계 전이(`PATCH /api/repair-cases/{id}/status`, 4번 섹션)는 이 변경과 무관하게 그대로 종료 단계(`shipment_completed`)로 보호된다 — 출하 완료 후 이동 가능한 다음 단계는 정의되어 있지 않다.
 
 ---
 

@@ -39,6 +39,8 @@ export const repairCaseFlowchartEditActionTypeEnum = pgEnum(
     "CREATE_FLOWCHART",
     "UPDATE_FLOWCHART_METADATA",
     "SOFT_DELETE_FLOWCHART",
+    "RESTORE_FLOWCHART",
+    "PURGE_FLOWCHART",
     "CREATE_NODE",
     "UPDATE_NODE",
     "CHANGE_NODE_TYPE",
@@ -67,9 +69,19 @@ export const repairCaseFlowchartEditHistory = pgTable(
   "repair_case_flowchart_edit_history",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    flowchartId: uuid("flowchart_id")
-      .notNull()
-      .references(() => repairCaseFlowcharts.id, { onDelete: "restrict" }),
+    // Nullable, ON DELETE SET NULL (permanent-delete schema foundation
+    // checkpoint) — was NOT NULL + RESTRICT, which made a flowchart
+    // hard-delete impossible at the DB level. Every history row for a
+    // flowchart (including the final PURGE_FLOWCHART row written in the
+    // same transaction as the hard-delete) must outlive that hard-delete,
+    // same proven pattern as node_id/edge_id below: the row's own
+    // before_state/after_state JSON permanently preserves the flowchart's
+    // identity/state regardless of this column going NULL. Existing rows
+    // are untouched by this — every row written before this migration keeps
+    // its non-null flowchart_id; only a future hard-delete ever nulls it.
+    flowchartId: uuid("flowchart_id").references(() => repairCaseFlowcharts.id, {
+      onDelete: "set null",
+    }),
     actionType: repairCaseFlowchartEditActionTypeEnum("action_type").notNull(),
     // Null for flowchart-level actions (CREATE_FLOWCHART,
     // UPDATE_FLOWCHART_METADATA, SOFT_DELETE_FLOWCHART, SAVE_LAYOUT/

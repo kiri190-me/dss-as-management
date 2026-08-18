@@ -4,6 +4,7 @@ import { db } from "../client";
 import { repairCases, repairCaseWorkRecords, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
+import type { WorkRecordKind } from "@/lib/domain/types";
 
 /**
  * Phase 5C-2 — repair-case work record mutations. Same conventions as
@@ -22,8 +23,8 @@ import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-
  * row; the only allowed change is the one-way invalidation below.
  */
 
-export type CreateWorkRecordMutationResultCode = "FORBIDDEN" | "NOT_FOUND" | "CASE_LOCKED" | "INVALID_INPUT" | "IDEMPOTENCY_CONFLICT";
-export type InvalidateWorkRecordMutationResultCode = "FORBIDDEN" | "NOT_FOUND" | "CASE_LOCKED" | "ALREADY_INVALIDATED";
+export type CreateWorkRecordMutationResultCode = "FORBIDDEN" | "NOT_FOUND" | "CASE_LOCKED" | "INVALID_INPUT" | "IDEMPOTENCY_CONFLICT" | "BILLING_DECISION_REQUIRED";
+export type InvalidateWorkRecordMutationResultCode = "FORBIDDEN" | "NOT_FOUND" | "CASE_LOCKED" | "ALREADY_INVALIDATED" | "BILLING_DECISION_REQUIRED";
 
 type CreateFailure = { ok: false; code: CreateWorkRecordMutationResultCode; message: string };
 type InvalidateFailure = { ok: false; code: InvalidateWorkRecordMutationResultCode; message: string };
@@ -98,6 +99,8 @@ export async function createWorkRecord(params: {
   actorUserId: string;
   /** Already validated/trimmed by repair-case-work-record-input.ts. */
   memo: string;
+  /** Already validated/defaulted to "GENERAL" by validateWorkRecordKind. */
+  recordKind: WorkRecordKind;
   relatedProcedureExecutionNodeId: string | null;
   clientRequestId: string;
 }): Promise<CreateWorkRecordResult> {
@@ -111,21 +114,32 @@ export async function createWorkRecord(params: {
           isLocked: repairCases.isLocked,
           assignedEngineerId: repairCases.assignedEngineerId,
           currentWorkflowStepId: repairCases.currentWorkflowStepId,
+          billingType: repairCases.billingType,
         })
         .from(repairCases)
         .where(and(eq(repairCases.id, params.repairCaseId), eq(repairCases.isDeleted, false)))
         .for("update");
       if (!repairCase) failCreate("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        failCreate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 작업 기록을 작성할 수 있습니다.");
+      }
 
       const isAssignedToCase = repairCase.assignedEngineerId === actor.id;
       if (!canCreateWorkRecord(actor.role, { isAssignedToCase, isCaseLocked: repairCase.isLocked })) {
-        if (repairCase.isLocked) failCreate("CASE_LOCKED", "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다.");
         failCreate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
       // Optional procedure-execution-node linkage: must belong to a
       // non-deleted execution of THIS repair case — the client-supplied id
-      // is never trusted beyond "which row to look up."
+      // is never trusted beyond "which row to look up." params.repairCaseId
+      // is always a live case id (verified above), while
+      // executionRepairCaseId is nullable (repair-case permanent-delete
+      // schema foundation checkpoint) — an execution whose own case has
+      // since been purged has executionRepairCaseId=null, which this
+      // `!==` comparison already correctly treats as a mismatch (null can
+      // never equal params.repairCaseId's real uuid), so it's rejected by
+      // the same branch as any other cross-case node, with no special
+      // handling needed.
       if (params.relatedProcedureExecutionNodeId !== null) {
         const [node] = await tx
           .select({
@@ -147,6 +161,7 @@ export async function createWorkRecord(params: {
           repairCaseId: params.repairCaseId,
           authorUserId: actor.id,
           memo: params.memo,
+          recordKind: params.recordKind,
           // Server-derived context, captured now — never re-derived later
           // from the case's (possibly since-moved) current step.
           relatedWorkflowStepId: repairCase.currentWorkflowStepId,
@@ -172,6 +187,7 @@ export async function createWorkRecord(params: {
           createdAt: repairCaseWorkRecords.createdAt,
           authorUserId: repairCaseWorkRecords.authorUserId,
           memo: repairCaseWorkRecords.memo,
+          recordKind: repairCaseWorkRecords.recordKind,
           relatedProcedureExecutionNodeId: repairCaseWorkRecords.relatedProcedureExecutionNodeId,
         })
         .from(repairCaseWorkRecords)
@@ -191,6 +207,7 @@ export async function createWorkRecord(params: {
       const isSameClientPayload =
         existing.authorUserId === actor.id &&
         existing.memo === params.memo &&
+        existing.recordKind === params.recordKind &&
         existing.relatedProcedureExecutionNodeId === params.relatedProcedureExecutionNodeId;
 
       if (!isSameClientPayload) {
@@ -241,15 +258,28 @@ export async function invalidateWorkRecord(params: {
         failInvalidate("ALREADY_INVALIDATED", "이미 무효 처리된 작업 기록입니다.");
       }
 
+      // repair_case_id is nullable (repair-case permanent-delete schema
+      // foundation checkpoint): a work record whose case has since been
+      // permanently purged is a legitimate historical row. This mirrors
+      // the pre-existing behavior for a merely soft-deleted case, which
+      // this same `eq(repairCases.isDeleted, false)` check already turned
+      // into NOT_FOUND before this checkpoint — a purged case is just a
+      // more final version of "not live," so it gets the identical
+      // response, not new/different behavior.
+      if (!record.repairCaseId) failInvalidate("NOT_FOUND", "이 작업 기록과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+      const recordRepairCaseId = record.repairCaseId;
+
       const [repairCase] = await tx
-        .select({ id: repairCases.id, isLocked: repairCases.isLocked })
+        .select({ id: repairCases.id, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
         .from(repairCases)
-        .where(and(eq(repairCases.id, record.repairCaseId), eq(repairCases.isDeleted, false)))
+        .where(and(eq(repairCases.id, recordRepairCaseId), eq(repairCases.isDeleted, false)))
         .for("update");
       if (!repairCase) failInvalidate("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        failInvalidate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 작업 기록을 변경할 수 있습니다.");
+      }
 
       if (!canInvalidateWorkRecord(actor.role, { isCaseLocked: repairCase.isLocked })) {
-        if (repairCase.isLocked) failInvalidate("CASE_LOCKED", "잠금된 접수 건입니다. 이 작업을 수행할 수 없습니다.");
         failInvalidate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

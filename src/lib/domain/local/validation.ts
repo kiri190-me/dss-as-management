@@ -1,13 +1,22 @@
 import {
+  BILLING_TYPE_CODES,
   PRIORITY_CODES,
   REPAIR_STATUS_CODES,
   WORKFLOW_TYPE_CODES,
+  type BillingType,
   type Priority,
   type RepairStatus,
   type WorkflowType,
 } from "../types";
 import { mockCustomers, mockEndUsers, mockUsers, workflowSteps } from "../mock-data";
-import { isLocalId, type LocalRepairCase } from "./local-types";
+import {
+  isLocalCustomerId,
+  isLocalEndUserId,
+  isLocalId,
+  localCustomerId,
+  localEndUserId,
+  type LocalRepairCase,
+} from "./local-types";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -60,6 +69,7 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
   if (!isNonEmptyTrimmedString(r.id) || !isLocalId(r.id)) return null;
   if (!isNonEmptyTrimmedString(r.intakeNumber)) return null;
   if (!isOneOf<WorkflowType>(r.workflowType, WORKFLOW_TYPE_CODES)) return null;
+  if (!isOneOf<BillingType>(r.billingType, BILLING_TYPE_CODES)) return null;
   // 이 스테이지에서 로컬로 생성되는 건은 항상 인수점검 대기 상태여야 한다.
   if (!isOneOf<RepairStatus>(r.status, REPAIR_STATUS_CODES)) return null;
   if (r.status !== "WAITING_INTAKE_INSPECTION") return null;
@@ -80,8 +90,13 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
   ) {
     return null;
   }
-  if (!isValidDateString(r.internalTargetShipmentDate)) return null;
-  if (!isNotEarlierThan(r.internalTargetShipmentDate as string, r.receivedAt as string)) {
+  if (r.internalTargetShipmentDate !== null && !isValidDateString(r.internalTargetShipmentDate)) {
+    return null;
+  }
+  if (
+    typeof r.internalTargetShipmentDate === "string" &&
+    !isNotEarlierThan(r.internalTargetShipmentDate, r.receivedAt as string)
+  ) {
     return null;
   }
   if (r.actualShipmentDate !== null) return null;
@@ -89,25 +104,39 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
   if (!isValidIsoDateTimeString(r.createdAt)) return null;
 
   if (!isNonEmptyTrimmedString(r.customerId)) return null;
-  const customer = mockCustomers.find((c) => c.id === r.customerId);
-  if (!customer) return null;
   if (!isNonEmptyTrimmedString(r.customerNameSnapshot)) return null;
+  if (isLocalCustomerId(r.customerId)) {
+    // 새로 등록된(자유 입력) 고객사 — ID가 스냅샷 이름으로부터 정확히
+    // 유도된 형태인지만 확인한다(모의 목록에는 당연히 없다).
+    if (r.customerId !== localCustomerId(r.customerNameSnapshot)) return null;
+  } else {
+    const customer = mockCustomers.find((c) => c.id === r.customerId);
+    if (!customer) return null;
+  }
 
   if (r.endUserId !== null) {
     if (!isNonEmptyTrimmedString(r.endUserId)) return null;
-    const endUser = mockEndUsers.find((e) => e.id === r.endUserId);
-    if (!endUser || endUser.customerId !== r.customerId) return null;
     if (!isNonEmptyTrimmedString(r.endUserNameSnapshot)) return null;
+    if (isLocalEndUserId(r.endUserId)) {
+      if (r.endUserId !== localEndUserId(r.customerId, r.endUserNameSnapshot)) return null;
+    } else {
+      const endUser = mockEndUsers.find((e) => e.id === r.endUserId);
+      if (!endUser || endUser.customerId !== r.customerId) return null;
+    }
   } else if (r.endUserNameSnapshot !== null) {
     return null;
   }
 
-  if (!isNonEmptyTrimmedString(r.assignedEngineerId)) return null;
-  const engineer = mockUsers.find((u) => u.id === r.assignedEngineerId);
-  if (!engineer || engineer.role !== "AS_ENGINEER" || engineer.approvalStatus !== "APPROVED") {
+  if (r.assignedEngineerId !== null) {
+    if (!isNonEmptyTrimmedString(r.assignedEngineerId)) return null;
+    const engineer = mockUsers.find((u) => u.id === r.assignedEngineerId);
+    if (!engineer || engineer.role !== "AS_ENGINEER" || engineer.approvalStatus !== "APPROVED") {
+      return null;
+    }
+    if (!isNonEmptyTrimmedString(r.assignedEngineerNameSnapshot)) return null;
+  } else if (r.assignedEngineerNameSnapshot !== null) {
     return null;
   }
-  if (!isNonEmptyTrimmedString(r.assignedEngineerNameSnapshot)) return null;
 
   if (!isNonEmptyTrimmedString(r.modelName)) return null;
   if (!isNonEmptyTrimmedString(r.lotNumber)) return null;
@@ -136,12 +165,13 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
     id: r.id as string,
     intakeNumber: r.intakeNumber as string,
     workflowType: r.workflowType as WorkflowType,
+    billingType: r.billingType as BillingType,
     status: r.status as RepairStatus,
     priority: r.priority as Priority,
     currentWorkflowStepKey: r.currentWorkflowStepKey as string,
     receivedAt: r.receivedAt as string,
     customerRequestedDueDate: (r.customerRequestedDueDate as string | null) ?? null,
-    internalTargetShipmentDate: r.internalTargetShipmentDate as string,
+    internalTargetShipmentDate: (r.internalTargetShipmentDate as string | null) ?? null,
     actualShipmentDate: null,
     exceptionStatus: null,
     createdAt: r.createdAt as string,
@@ -149,8 +179,8 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
     customerNameSnapshot: r.customerNameSnapshot as string,
     endUserId: (r.endUserId as string | null) ?? null,
     endUserNameSnapshot: (r.endUserNameSnapshot as string | null) ?? null,
-    assignedEngineerId: r.assignedEngineerId as string,
-    assignedEngineerNameSnapshot: r.assignedEngineerNameSnapshot as string,
+    assignedEngineerId: (r.assignedEngineerId as string | null) ?? null,
+    assignedEngineerNameSnapshot: (r.assignedEngineerNameSnapshot as string | null) ?? null,
     modelName: r.modelName as string,
     lotNumber: r.lotNumber as string,
     serialNumber: r.serialNumber as string,

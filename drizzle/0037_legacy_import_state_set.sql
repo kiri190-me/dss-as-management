@@ -1,0 +1,1 @@
+ALTER TYPE "public"."status_change_action_type" ADD VALUE 'LEGACY_IMPORT_STATE_SET';

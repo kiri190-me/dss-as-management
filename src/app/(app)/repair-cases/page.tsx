@@ -2,8 +2,15 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
-import { listRepairCases } from "@/lib/db/queries/repair-cases";
+import { getRepairCaseWriteSource } from "@/lib/config/write-source";
+import {
+  canBulkDeleteRepairCases,
+  canPermanentlyDeleteRepairCases,
+  canRestoreRepairCases,
+} from "@/lib/auth/repair-case-edit-authorization";
+import { listDeletedRepairCases, listRepairCases } from "@/lib/db/queries/repair-cases";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
 
 export const metadata: Metadata = {
@@ -37,9 +44,37 @@ export default async function RepairCasesPage() {
 
   const serverBaseCases = await listRepairCases();
 
+  // Bulk soft-delete checkpoint — UX hint only (canBulkDeleteRepairCases is
+  // independently re-checked by bulkDeleteRepairCasesAction regardless of
+  // what this renders). Only ever true in DATABASE write-source mode, same
+  // gate create-repair-case.ts/update-repair-case.ts's Server Actions
+  // enforce for their own writes.
+  const actingUser = await resolveActingUserForSession(session);
+  const isDatabaseWriteMode = getRepairCaseWriteSource() === "database";
+  const canBulkDelete = isDatabaseWriteMode && actingUser !== null && canBulkDeleteRepairCases(actingUser.role);
+
+  // Repair Case Trash + Restore checkpoint — same UX-hint-only precedent as
+  // canBulkDelete (restoreRepairCasesAction independently re-checks role/
+  // write-source). The 휴지통 query only ever runs for an admin session in
+  // DATABASE mode — every other role/mode never even fetches deleted rows.
+  const canRestore = isDatabaseWriteMode && actingUser !== null && canRestoreRepairCases(actingUser.role);
+  const serverTrashCases = canRestore ? await listDeletedRepairCases() : undefined;
+
+  // Repair Case Permanent Delete checkpoint — same UX-hint-only precedent
+  // as canBulkDelete/canRestore (permanentlyDeleteRepairCasesAction
+  // independently re-checks role/write-source).
+  const canPermanentlyDelete =
+    isDatabaseWriteMode && actingUser !== null && canPermanentlyDeleteRepairCases(actingUser.role);
+
   return (
     <Suspense>
-      <RepairCaseListPage serverBaseCases={serverBaseCases} />
+      <RepairCaseListPage
+        serverBaseCases={serverBaseCases}
+        canBulkDelete={canBulkDelete}
+        serverTrashCases={serverTrashCases}
+        canRestore={canRestore}
+        canPermanentlyDelete={canPermanentlyDelete}
+      />
     </Suspense>
   );
 }

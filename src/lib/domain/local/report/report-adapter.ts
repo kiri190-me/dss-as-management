@@ -154,6 +154,7 @@ export function buildReportData(input: BuildReportDataInput): RepairCaseReportDa
     repairCase: {
       id: effective.id,
       intakeNumber: effective.intakeNumber,
+      legacyReportNumber: effective.legacyReportNumber,
       receivedAt: effective.receivedAt,
       createdAt: effective.createdAt,
       currentStatus: effective.effectiveStatus,

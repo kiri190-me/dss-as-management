@@ -43,7 +43,7 @@ export default async function CaseFlowchartEditorPage({ params }: { params: Prom
     !!session &&
     session.approvalStatus === "APPROVED" &&
     !!pageContext &&
-    canMutateRepairCaseFlowchart(session.role, { isAssignedToCase: pageContext.assignedEngineerId === session.userId, isCaseLocked: pageContext.isLocked });
+    canMutateRepairCaseFlowchart(session.role, { isCaseLocked: pageContext.isLocked });
 
   return <CaseFlowchartEditorScreen repairCaseId={id} flowchart={graph.flowchart} nodes={graph.nodes} edges={graph.edges} canEdit={canEdit} />;
 }

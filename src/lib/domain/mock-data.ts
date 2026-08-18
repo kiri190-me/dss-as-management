@@ -253,6 +253,48 @@ export const workflowSteps: WorkflowStep[] = [
   { workflowType: "MATCHER", order: 18, key: "waiting_shipment", label: "출하 대기" },
   { workflowType: "MATCHER", order: 19, key: "shipment_completed", label: "출하 완료" },
 
+  // PAID_MATCHER — independent initial snapshot of legacy MATCHER.
+  { workflowType: "PAID_MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "PAID_MATCHER", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "PAID_MATCHER", order: 3, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
+  { workflowType: "PAID_MATCHER", order: 4, key: "waiting_kyosan_reply", label: "교산 회신 대기" },
+  { workflowType: "PAID_MATCHER", order: 5, key: "kyosan_instruction_confirmed", label: "교산 지시사항 확인" },
+  { workflowType: "PAID_MATCHER", order: 6, key: "instructed_parts_replacement_or_check", label: "지시된 부품 교체 또는 미비 점검 항목 확인" },
+  { workflowType: "PAID_MATCHER", order: 7, key: "kyosan_followup_report_sent", label: "교산 후속 연락/보고서 발송" },
+  { workflowType: "PAID_MATCHER", order: 8, key: "waiting_kyosan_reply_followup", label: "교산 회신 대기" },
+  { workflowType: "PAID_MATCHER", order: 9, key: "quote_drafted_per_kyosan_instruction", label: "교산 지시에 따른 견적 작성" },
+  { workflowType: "PAID_MATCHER", order: 10, key: "customer_quote_sent", label: "고객 견적 발송" },
+  { workflowType: "PAID_MATCHER", order: 11, key: "waiting_po", label: "PO 대기" },
+  { workflowType: "PAID_MATCHER", order: 12, key: "po_received", label: "PO 접수" },
+  { workflowType: "PAID_MATCHER", order: 13, key: "parts_supply", label: "부품 수급" },
+  { workflowType: "PAID_MATCHER", order: 14, key: "repair_in_progress", label: "수리" },
+  { workflowType: "PAID_MATCHER", order: 15, key: "power_on_test", label: "전원 인가 테스트" },
+  { workflowType: "PAID_MATCHER", order: 16, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
+  { workflowType: "PAID_MATCHER", order: 17, key: "shipment_approved", label: "출하 승인" },
+  { workflowType: "PAID_MATCHER", order: 18, key: "waiting_shipment", label: "출하 대기" },
+  { workflowType: "PAID_MATCHER", order: 19, key: "shipment_completed", label: "출하 완료" },
+
+  // WARRANTY_MATCHER — independent initial snapshot of legacy MATCHER.
+  { workflowType: "WARRANTY_MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "WARRANTY_MATCHER", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "WARRANTY_MATCHER", order: 3, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
+  { workflowType: "WARRANTY_MATCHER", order: 4, key: "waiting_kyosan_reply", label: "교산 회신 대기" },
+  { workflowType: "WARRANTY_MATCHER", order: 5, key: "kyosan_instruction_confirmed", label: "교산 지시사항 확인" },
+  { workflowType: "WARRANTY_MATCHER", order: 6, key: "instructed_parts_replacement_or_check", label: "지시된 부품 교체 또는 미비 점검 항목 확인" },
+  { workflowType: "WARRANTY_MATCHER", order: 7, key: "kyosan_followup_report_sent", label: "교산 후속 연락/보고서 발송" },
+  { workflowType: "WARRANTY_MATCHER", order: 8, key: "waiting_kyosan_reply_followup", label: "교산 회신 대기" },
+  { workflowType: "WARRANTY_MATCHER", order: 9, key: "quote_drafted_per_kyosan_instruction", label: "교산 지시에 따른 견적 작성" },
+  { workflowType: "WARRANTY_MATCHER", order: 10, key: "customer_quote_sent", label: "고객 견적 발송" },
+  { workflowType: "WARRANTY_MATCHER", order: 11, key: "waiting_po", label: "PO 대기" },
+  { workflowType: "WARRANTY_MATCHER", order: 12, key: "po_received", label: "PO 접수" },
+  { workflowType: "WARRANTY_MATCHER", order: 13, key: "parts_supply", label: "부품 수급" },
+  { workflowType: "WARRANTY_MATCHER", order: 14, key: "repair_in_progress", label: "수리" },
+  { workflowType: "WARRANTY_MATCHER", order: 15, key: "power_on_test", label: "전원 인가 테스트" },
+  { workflowType: "WARRANTY_MATCHER", order: 16, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
+  { workflowType: "WARRANTY_MATCHER", order: 17, key: "shipment_approved", label: "출하 승인" },
+  { workflowType: "WARRANTY_MATCHER", order: 18, key: "waiting_shipment", label: "출하 대기" },
+  { workflowType: "WARRANTY_MATCHER", order: 19, key: "shipment_completed", label: "출하 완료" },
+
   // PAID_GENERATOR (유상 Generator)
   { workflowType: "PAID_GENERATOR", order: 1, key: "product_intake", label: "제품 인수" },
   { workflowType: "PAID_GENERATOR", order: 2, key: "intake_inspection", label: "인수점검" },
@@ -282,9 +324,56 @@ export const workflowSteps: WorkflowStep[] = [
   { workflowType: "WARRANTY_GENERATOR", order: 8, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
   { workflowType: "WARRANTY_GENERATOR", order: 9, key: "shipment_approved", label: "출하 승인" },
   { workflowType: "WARRANTY_GENERATOR", order: 10, key: "shipment_completed", label: "출하 완료" },
+
+  // PAID_TOTAL_CONTROLLER — independent initial snapshot of PAID_GENERATOR.
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 3, key: "parts_supply", label: "부품 수급" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 4, key: "repair_or_defective_parts_replacement", label: "수리 또는 불량 부품 교체" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 5, key: "power_on_test", label: "전원 인가 테스트" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 6, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 7, key: "waiting_kyosan_reply", label: "교산 회신 대기" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 8, key: "quote_drafted_per_kyosan_instruction", label: "교산 지시에 따른 견적 작성" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 9, key: "customer_quote_sent", label: "고객 견적 발송" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 10, key: "waiting_po", label: "PO 대기" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 11, key: "po_received", label: "PO 접수" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 12, key: "final_power_on_test_decision", label: "최종 전원 인가 테스트 필요 여부 판단" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 13, key: "final_power_on_test", label: "최종 전원 인가 테스트 수행" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 14, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 15, key: "shipment_approved", label: "출하 승인" },
+  { workflowType: "PAID_TOTAL_CONTROLLER", order: 16, key: "shipment_completed", label: "출하 완료" },
+
+  // WARRANTY_TOTAL_CONTROLLER — independent initial snapshot of WARRANTY_GENERATOR.
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 3, key: "parts_supply", label: "부품 수급" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 4, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 5, key: "waiting_kyosan_reply", label: "교산 회신 대기" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 6, key: "repair_or_defective_parts_replacement", label: "수리 또는 불량 부품 교체" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 7, key: "power_on_test", label: "전원 인가 테스트" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 8, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 9, key: "shipment_approved", label: "출하 승인" },
+  { workflowType: "WARRANTY_TOTAL_CONTROLLER", order: 10, key: "shipment_completed", label: "출하 완료" },
+
+  // Pending billing workflows deliberately stop at intake inspection.
+  { workflowType: "PENDING_MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "PENDING_MATCHER", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "PENDING_GENERATOR", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "PENDING_GENERATOR", order: 2, key: "intake_inspection", label: "인수점검" },
+  { workflowType: "PENDING_TOTAL_CONTROLLER", order: 1, key: "product_intake", label: "제품 인수" },
+  { workflowType: "PENDING_TOTAL_CONTROLLER", order: 2, key: "intake_inspection", label: "인수점검" },
 ];
 
-export const mockRepairCases: RepairCase[] = [
+/**
+ * billingType은 아래 백필 규칙으로 mockRepairCases 내보내기 시 한 번만
+ * 채워 넣는다(실제 DB migration 0021의 백필 규칙과 동일 — PAID_GENERATOR
+ * -> PAID, WARRANTY_GENERATOR -> WARRANTY, MATCHER -> null/추측하지 않음).
+ * 이 데모 픽스처는 "이미 존재하는 과거 데이터"를 흉내 내는 것이지,
+ * workflowType으로부터 실시간으로 유도하는 로직이 아니다 — 신규 접수는
+ * 항상 사용자가 직접 고른 실제 billingType 값을 갖는다
+ * (submit-intake.ts/repair-case-input.ts 참고).
+ */
+const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
   {
     id: "rc-001",
     intakeNumber: "D260601",
@@ -720,6 +809,24 @@ export const mockRepairCases: RepairCase[] = [
     currentWorkflowStepKey: "waiting_shipment",
   },
 ];
+
+const BILLING_TYPE_BACKFILL: Record<RepairCase["workflowType"], RepairCase["billingType"]> = {
+  MATCHER: null,
+  PAID_MATCHER: "PAID",
+  WARRANTY_MATCHER: "WARRANTY",
+  PAID_GENERATOR: "PAID",
+  WARRANTY_GENERATOR: "WARRANTY",
+  PAID_TOTAL_CONTROLLER: "PAID",
+  WARRANTY_TOTAL_CONTROLLER: "WARRANTY",
+  PENDING_MATCHER: "PENDING_DECISION",
+  PENDING_GENERATOR: "PENDING_DECISION",
+  PENDING_TOTAL_CONTROLLER: "PENDING_DECISION",
+};
+
+export const mockRepairCases: RepairCase[] = mockRepairCasesRaw.map((c) => ({
+  ...c,
+  billingType: BILLING_TYPE_BACKFILL[c.workflowType],
+}));
 
 export const mockWorkHistories: WorkHistory[] = [
   { id: "wh-001", repairCaseId: "rc-001", engineerId: "u-004", workedAt: "2026-06-05T09:30:00+09:00", workType: "INSPECTION", description: "인수점검 완료, 이상 없음 확인", symptom: "전원 인가 시 출력 불안정", suspectedCause: "내부 부품 노후 추정", actionTaken: null, partsUsed: null, nextAction: "정밀 진단 및 부품 교체 검토", previousStatus: null, newStatus: null },

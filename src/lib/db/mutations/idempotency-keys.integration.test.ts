@@ -99,6 +99,7 @@ function baseInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}): Val
   const suffix = randomUUID().slice(0, 8);
   return {
     workflowType: "MATCHER",
+    billingType: "PAID",
     customerId,
     endUserId: null,
     assignedEngineerId: engineerId,

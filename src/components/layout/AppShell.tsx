@@ -23,18 +23,31 @@ type AppShellProps = {
 export default function AppShell({ children, user }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Whole-sidebar narrow/icon-only mode — owned here (not inside Sidebar)
+  // because the <aside>'s own width class must react to it too. Toggling
+  // this never touches router state, so it can never change the current
+  // route; it's also entirely separate from Sidebar's own per-group
+  // collapsedGroupKeys state (see Sidebar.tsx's doc comment).
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const activeItem = navItems.find((item) => item.href === pathname);
   const title = activeItem?.label ?? "";
 
   return (
-    <div className="flex flex-1 flex-col">
+    // min-h-0 lets this root shrink to body's now-capped h-full height
+    // instead of growing to fit its own content (the classic flex "min-
+    // height:auto" gotcha) — the first link in the height chain that makes
+    // <main>'s and the sidebar's own overflow-y-auto actually scroll
+    // internally rather than inflating the whole page.
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="print:hidden">
-        <TopBar title={title} user={user} onMenuClick={() => setMobileNavOpen(true)} />
+        <TopBar title={title} onMenuClick={() => setMobileNavOpen(true)} />
       </div>
-      <div className="flex flex-1 overflow-hidden print:overflow-visible">
-        <aside className="hidden border-r border-zinc-200 md:flex md:w-60 md:flex-col print:hidden dark:border-zinc-800">
-          <Sidebar activeHref={pathname} role={user.role} />
+      <div className="flex min-h-0 flex-1 overflow-hidden print:overflow-visible">
+        <aside
+          className={`hidden min-h-0 border-r border-zinc-200 transition-[width] duration-150 md:flex md:flex-col print:hidden dark:border-zinc-800 ${isSidebarCollapsed ? "md:w-14" : "md:w-52"}`}
+        >
+          <Sidebar activeHref={pathname} role={user.role} user={user} isCollapsed={isSidebarCollapsed} onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)} />
         </aside>
 
         {mobileNavOpen && (
@@ -45,17 +58,18 @@ export default function AppShell({ children, user }: AppShellProps) {
               onClick={() => setMobileNavOpen(false)}
               className="absolute inset-0 bg-black/40"
             />
-            <aside className="relative z-50 flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <aside className="relative z-50 flex min-h-0 w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
               <Sidebar
                 activeHref={pathname}
                 role={user.role}
+                user={user}
                 onNavigate={() => setMobileNavOpen(false)}
               />
             </aside>
           </div>
         )}
 
-        <main className="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">{children}</main>
       </div>
     </div>
   );

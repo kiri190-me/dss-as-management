@@ -16,6 +16,9 @@ import { repairCases } from "./repair-cases";
 import { procedureCaseExecutionNodes } from "./procedure-case-execution";
 import { users } from "./users";
 import { inventoryPartRequestItems, inventoryPartRequestIssues } from "./inventory-part-requests";
+import { stockOwnerEnum } from "./inventory-enums";
+
+export { stockOwnerEnum };
 
 /**
  * Phase 5B-2 — core inventory ledger. Grounded in the Phase 5B-1 audit of
@@ -26,10 +29,10 @@ import { inventoryPartRequestItems, inventoryPartRequestIssues } from "./invento
  * Excel-style before/after column; RECEIPT/USE/RETURN are the only
  * workbook-proven transaction types (no ADJUSTMENT/TRANSFER/
  * OWNER_TRANSFER/DISPOSAL/RECOVERY/PURCHASE_RECEIPT — none evidenced, all
- * deferred); RETURN always reverses a specific prior USE.
+ * deferred); RETURN always reverses a specific prior USE. stockOwnerEnum
+ * itself now lives in ./inventory-enums.ts (re-exported here unchanged) —
+ * see that file's doc comment for why.
  */
-export const stockOwnerEnum = pgEnum("stock_owner", ["DSS", "KYOSAN", "SERVICE_SPARE", "TEST"]);
-
 export const stockTransactionTypeEnum = pgEnum("stock_transaction_type", ["RECEIPT", "USE", "RETURN"]);
 
 /**
@@ -120,8 +123,21 @@ export const stockTransactions = pgTable(
     // of truth; this column is neither).
     resultingQuantity: integer("resulting_quantity").notNull(),
     // USE only — nullable FK, never duplicates the intake number (always
-    // join through repair_cases.intake_number for display).
-    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, { onDelete: "restrict" }),
+    // join through repair_cases.intake_number for display). ON DELETE SET
+    // NULL (repair-case permanent-delete schema foundation checkpoint) —
+    // was already nullable but RESTRICT, which made a repair_cases hard-
+    // delete impossible at the DB level. This is the accounting-critical
+    // stock ledger and must outlive the case's own hard-delete.
+    // IMPORTANT (not handled by this migration): the
+    // stock_transactions_use_has_destination CHECK below requires
+    // repair_case_id IS NOT NULL OR destination_note IS NOT NULL for every
+    // USE row — a future repair-case hard-delete MUST backfill
+    // destination_note on this case's USE rows (case-linked, PII-free, e.g.
+    // the intake number) in the same transaction before triggering this
+    // SET NULL, or that later UPDATE will violate the CHECK and abort the
+    // whole purge. Existing rows are untouched by this schema change alone
+    // — only a future repair_cases hard-delete ever nulls this column.
+    repairCaseId: uuid("repair_case_id").references(() => repairCases.id, { onDelete: "set null" }),
     // USE only — free-text fallback for the real "상해수리소"-style
     // destinations the workbook audit found (not every USE ties to a
     // repair case).

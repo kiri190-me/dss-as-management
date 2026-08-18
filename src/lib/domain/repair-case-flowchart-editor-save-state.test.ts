@@ -35,7 +35,7 @@ import {
  * action-calling panels, for the same reason).
  */
 
-const serverNode: ServerNodeSnapshot = { id: "n1", title: "원래 제목", description: "원래 설명", nodeType: "TASK", positionX: 500, positionY: 300 };
+const serverNode: ServerNodeSnapshot = { id: "n1", title: "원래 제목", description: "원래 설명", instructions: "원래 지시", nodeType: "TASK", positionX: 500, positionY: 300 };
 const serverEdge: ServerEdgeSnapshot = { id: "e1", branchType: "DEFAULT", branchLabel: null, fromNodeId: "n1", toNodeId: "n2", routePoints: null };
 
 // ==================== LIVE PREVIEW (merge) ====================
@@ -46,15 +46,27 @@ test("mergeNodeForRender: no pending draft/position renders the server baseline 
 });
 
 test("mergeNodeForRender: pending title overrides the baseline title", () => {
-  const draft: CaseFlowchartNodeDraft = { title: "Driver Board 점검", description: serverNode.description ?? "", nodeType: serverNode.nodeType };
+  const draft: CaseFlowchartNodeDraft = { title: "Driver Board 점검", description: serverNode.description ?? "", instructions: serverNode.instructions ?? "", nodeType: serverNode.nodeType };
   const rendered = mergeNodeForRender(serverNode, draft, undefined);
   assert.equal(rendered.title, "Driver Board 점검");
 });
 
 test("mergeNodeForRender: pending nodeType overrides the baseline type", () => {
-  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", nodeType: "DECISION" };
+  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: serverNode.instructions ?? "", nodeType: "DECISION" };
   const rendered = mergeNodeForRender(serverNode, draft, undefined);
   assert.equal(rendered.nodeType, "DECISION");
+});
+
+test("mergeNodeForRender: pending instructions overrides the baseline instructions", () => {
+  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: "새 작업 지시 요약", nodeType: serverNode.nodeType };
+  const rendered = mergeNodeForRender(serverNode, draft, undefined);
+  assert.equal(rendered.instructions, "새 작업 지시 요약");
+});
+
+test("mergeNodeForRender: pending instructions cleared to empty string renders as null (same rule as description)", () => {
+  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: "", nodeType: serverNode.nodeType };
+  const rendered = mergeNodeForRender(serverNode, draft, undefined);
+  assert.equal(rendered.instructions, null);
 });
 
 test("mergeNodeForRender: pending position overrides the baseline positionX/positionY", () => {
@@ -64,9 +76,9 @@ test("mergeNodeForRender: pending position overrides the baseline positionX/posi
 });
 
 test("mergeNodeForRender: title, type, and position overrides all apply together", () => {
-  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", nodeType: "DECISION" };
+  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", instructions: "새 지시", nodeType: "DECISION" };
   const rendered = mergeNodeForRender(serverNode, draft, { x: 10, y: 20 });
-  assert.deepEqual(rendered, { id: "n1", title: "새 제목", description: "새 설명", nodeType: "DECISION", positionX: 10, positionY: 20 });
+  assert.deepEqual(rendered, { id: "n1", title: "새 제목", description: "새 설명", instructions: "새 지시", nodeType: "DECISION", positionX: 10, positionY: 20 });
 });
 
 test("mergeEdgeForRender: no pending draft/route renders the server baseline unchanged", () => {
@@ -106,20 +118,27 @@ test("mergeEdgeForRender: route key absent (undefined) falls back to the baselin
 // ==================== DIRTY ====================
 
 test("unchanged node draft is not dirty", () => {
-  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", nodeType: serverNode.nodeType };
+  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: serverNode.instructions ?? "", nodeType: serverNode.nodeType };
   const entries = computeDirtyNodeEntries(new Map([["n1", draft]]), new Map([["n1", serverNode]]));
   assert.deepEqual(entries, []);
 });
 
 test("changed node title makes the entry dirty", () => {
-  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: serverNode.description ?? "", nodeType: serverNode.nodeType };
+  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: serverNode.description ?? "", instructions: serverNode.instructions ?? "", nodeType: serverNode.nodeType };
+  const entries = computeDirtyNodeEntries(new Map([["n1", draft]]), new Map([["n1", serverNode]]));
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0][0], "n1");
+});
+
+test("changed node instructions (with title/description/type unchanged) makes the entry dirty", () => {
+  const draft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: "새 작업 지시 요약", nodeType: serverNode.nodeType };
   const entries = computeDirtyNodeEntries(new Map([["n1", draft]]), new Map([["n1", serverNode]]));
   assert.equal(entries.length, 1);
   assert.equal(entries[0][0], "n1");
 });
 
 test("a draft referencing a deleted node never counts as dirty", () => {
-  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", nodeType: "TASK" };
+  const draft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", instructions: "", nodeType: "TASK" };
   const entries = computeDirtyNodeEntries(new Map([["ghost", draft]]), new Map());
   assert.deepEqual(entries, []);
 });
@@ -178,7 +197,7 @@ test("a position draft referencing a deleted node never counts as dirty", () => 
 // ==================== SAVE PLAN ====================
 
 test("planSaveSteps orders: node changes, then node positions (one batched step), then edge changes, then route changes", () => {
-  const dirtyNodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", nodeType: "DECISION" };
+  const dirtyNodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", instructions: "새 지시", nodeType: "DECISION" };
   const dirtyEdgeDraft: CaseFlowchartEdgeDraft = { branchType: "CUSTOM", branchLabel: "특이", fromNodeId: "n1", toNodeId: "n3" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", dirtyNodeDraft]],
@@ -211,7 +230,7 @@ test("planSaveSteps omits the NODE_POSITIONS step entirely when no position is d
 });
 
 test("planSaveSteps emits only the fields actually needing change (type-only change emits no NODE_FIELDS step)", () => {
-  const typeOnlyDraft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", nodeType: "DECISION" };
+  const typeOnlyDraft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: serverNode.instructions ?? "", nodeType: "DECISION" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", typeOnlyDraft]],
     serverNodesById: new Map([["n1", serverNode]]),
@@ -221,6 +240,19 @@ test("planSaveSteps emits only the fields actually needing change (type-only cha
     dirtyRouteEdgeIds: [],
   });
   assert.deepEqual(steps, [{ kind: "NODE_TYPE", nodeId: "n1" }]);
+});
+
+test("planSaveSteps emits NODE_FIELDS for an instructions-only change (title/description/type unchanged)", () => {
+  const instructionsOnlyDraft: CaseFlowchartNodeDraft = { title: serverNode.title, description: serverNode.description ?? "", instructions: "새 작업 지시 요약", nodeType: serverNode.nodeType };
+  const steps = planSaveSteps({
+    dirtyNodes: [["n1", instructionsOnlyDraft]],
+    serverNodesById: new Map([["n1", serverNode]]),
+    dirtyPositionNodeIds: [],
+    dirtyEdges: [],
+    serverEdgesById: new Map(),
+    dirtyRouteEdgeIds: [],
+  });
+  assert.deepEqual(steps, [{ kind: "NODE_FIELDS", nodeId: "n1" }]);
 });
 
 function makeSuccessExecutor(sequenceLog: string[]): (step: SaveStep, expectedUpdatedAt: string) => Promise<SaveStepResult> {
@@ -234,7 +266,7 @@ function makeSuccessExecutor(sequenceLog: string[]): (step: SaveStep, expectedUp
 }
 
 test("save all pending changes: one call flushes node + position + edge + route changes, in order, chaining updatedAt", async () => {
-  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", nodeType: "TASK" };
+  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", instructions: "", nodeType: "TASK" };
   const edgeDraft: CaseFlowchartEdgeDraft = { branchType: "NORMAL", branchLabel: "", fromNodeId: "n1", toNodeId: "n2" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", nodeDraft]],
@@ -254,7 +286,7 @@ test("save all pending changes: one call flushes node + position + edge + route 
 });
 
 test("successful save clears every pending entry that was flushed, including positions", async () => {
-  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", nodeType: "TASK" };
+  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", instructions: "", nodeType: "TASK" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", nodeDraft]],
     serverNodesById: new Map([["n1", serverNode]]),
@@ -269,7 +301,7 @@ test("successful save clears every pending entry that was flushed, including pos
 });
 
 test("first failure stops subsequent steps and leaves them unrun", async () => {
-  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", nodeType: "DECISION" }; // dirty in both fields + type
+  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "", instructions: "", nodeType: "DECISION" }; // dirty in both fields + type
   const edgeDraft: CaseFlowchartEdgeDraft = { branchType: "CUSTOM", branchLabel: "특이", fromNodeId: "n1", toNodeId: "n2" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", nodeDraft]],
@@ -304,7 +336,7 @@ test("first failure stops subsequent steps and leaves them unrun", async () => {
 });
 
 test("a node with two planned property steps (fields + type) is fully flushed only once both succeed", async () => {
-  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", nodeType: "DECISION" };
+  const nodeDraft: CaseFlowchartNodeDraft = { title: "새 제목", description: "새 설명", instructions: "", nodeType: "DECISION" };
   const steps = planSaveSteps({
     dirtyNodes: [["n1", nodeDraft]],
     serverNodesById: new Map([["n1", serverNode]]),

@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import InventoryTabs from "./InventoryTabs";
 import IssuePartRequestDialog from "./IssuePartRequestDialog";
 import RejectPartRequestDialog from "./RejectPartRequestDialog";
 import PartiallyCloseRequestDialog from "./PartiallyCloseRequestDialog";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
-import { INVENTORY_PART_REQUEST_STATUS_CODES, inventoryPartRequestStatusLabels, type InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
+import { INVENTORY_PART_REQUEST_STATUS_CODES, inventoryPartRequestStatusLabels, stockOwnerLabelOrUnspecified, type InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
 
 type DialogState = { requestId: string; action: "ISSUE" | "REJECT" | "PARTIALLY_CLOSE" } | null;
 
@@ -50,7 +51,7 @@ export default function PartRequestManagerScreen({
           <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <tr>
               <th className="px-3 py-2">요청 일시</th>
-              <th className="px-3 py-2">접수번호</th>
+              <th className="px-3 py-2">인수번호</th>
               <th className="px-3 py-2">고객</th>
               <th className="px-3 py-2">모델 / S/N</th>
               <th className="px-3 py-2">요청 엔지니어</th>
@@ -70,13 +71,32 @@ export default function PartRequestManagerScreen({
               filtered.map((request) => {
                 const totalIssued = request.items.reduce((sum, i) => sum + i.issuedQuantity, 0);
                 const totalRemaining = request.items.reduce((sum, i) => sum + Math.max(0, i.requestedQuantity - i.issuedQuantity), 0);
-                const canIssue = !request.isCaseLocked && (request.status === "PENDING" || request.status === "PARTIALLY_ISSUED");
+                // Shipment-lock removal policy: status-only now — see
+                // canIssuePartRequest (inventory-authorization.ts), which
+                // the server independently enforces regardless of this UI hint.
+                // repairCaseId===null means the case has been permanently
+                // purged (repair-case permanent-delete schema foundation
+                // checkpoint) — issuePartRequest rejects that server-side
+                // (NOT_FOUND, nothing left to issue against), so the button
+                // is hidden here rather than offering an action guaranteed
+                // to fail.
+                const canIssue =
+                  request.repairCaseId !== null &&
+                  (request.status === "PENDING" || request.status === "PARTIALLY_ISSUED");
                 const canReject = request.status === "PENDING" && totalIssued === 0;
                 const canPartiallyClose = request.status === "PARTIALLY_ISSUED" && totalIssued > 0 && totalRemaining > 0;
                 return (
                   <tr key={request.id} className="border-t border-zinc-200 align-top dark:border-zinc-800">
                     <td className="px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300">{new Date(request.createdAt).toLocaleString("ko-KR")}</td>
-                    <td className="px-3 py-2">{request.intakeNumber}</td>
+                    <td className="px-3 py-2">
+                      {request.repairCaseId !== null ? (
+                        <Link href={`/repair-cases/${request.repairCaseId}`} className="text-blue-700 hover:underline dark:text-blue-400">
+                          {request.intakeNumber}
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-500 dark:text-zinc-400">{request.intakeNumber}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">{request.customerName}</td>
                     <td className="px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300">
                       {request.modelName} / {request.serialNumber}
@@ -86,7 +106,8 @@ export default function PartRequestManagerScreen({
                       <ul className="flex flex-col gap-0.5">
                         {request.items.map((item) => (
                           <li key={item.id}>
-                            {item.partName} — 요청 {item.requestedQuantity} / 불출 {item.issuedQuantity} (가용 {item.totalAvailableQuantity})
+                            {item.partName} ({stockOwnerLabelOrUnspecified(item.owner)}) — 요청 {item.requestedQuantity} / 불출 {item.issuedQuantity} (가용 {item.totalAvailableQuantity})
+                            <span className="block text-zinc-500 dark:text-zinc-400">항목 메모: {item.note ?? "-"}</span>
                           </li>
                         ))}
                       </ul>
@@ -94,9 +115,6 @@ export default function PartRequestManagerScreen({
                     <td className="px-3 py-2">
                       <div className="flex flex-col gap-1">
                         <span className="text-xs font-medium">{inventoryPartRequestStatusLabels[request.status]}</span>
-                        {request.isCaseLocked && (
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">잠금된 접수 건</span>
-                        )}
                       </div>
                     </td>
                     <td className="px-3 py-2">

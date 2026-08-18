@@ -66,6 +66,21 @@ export function validateFlowchartDeleteReason(value: unknown): FlowchartDeleteRe
   return { ok: true, reason: trimmed };
 }
 
+export type PermanentDeleteReasonValidationResult = { ok: true; reason: string } | { ok: false; error: string };
+
+/** Mandatory — unlike validateFlowchartDeleteReason (soft-delete's reason stays optional): permanent deletion is irreversible, so a reason is always required, never null-normalized. */
+export function validatePermanentDeleteReason(value: unknown): PermanentDeleteReasonValidationResult {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return { ok: false, error: "영구 삭제 사유를 입력해 주세요." };
+  }
+  const trimmed = value.trim();
+  const MAX_REASON_LENGTH = 2000;
+  if (trimmed.length > MAX_REASON_LENGTH) {
+    return { ok: false, error: `영구 삭제 사유는 ${MAX_REASON_LENGTH}자를 초과할 수 없습니다.` };
+  }
+  return { ok: true, reason: trimmed };
+}
+
 export function isValidExpectedUpdatedAt(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const parsed = new Date(value);
@@ -79,6 +94,7 @@ export type CreateRepairCaseFlowchartActionResultCode =
   | "NOT_FOUND"
   | "CASE_LOCKED"
   | "INVALID_INPUT"
+  | "BILLING_DECISION_REQUIRED"
   | "DATABASE_UNAVAILABLE";
 
 export type CreateRepairCaseFlowchartActionResult =
@@ -93,6 +109,7 @@ export type UpdateRepairCaseFlowchartMetadataActionResultCode =
   | "CASE_LOCKED"
   | "INVALID_INPUT"
   | "STALE_REVISION"
+  | "BILLING_DECISION_REQUIRED"
   | "DATABASE_UNAVAILABLE";
 
 export type UpdateRepairCaseFlowchartMetadataActionResult =
@@ -111,3 +128,28 @@ export type SoftDeleteRepairCaseFlowchartActionResultCode =
 export type SoftDeleteRepairCaseFlowchartActionResult =
   | { ok: true; id: string; deletedAt: string }
   | { ok: false; code: SoftDeleteRepairCaseFlowchartActionResultCode; message: string };
+
+export type RestoreRepairCaseFlowchartActionResultCode =
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "CASE_LOCKED"
+  | "STALE_REVISION"
+  | "DATABASE_UNAVAILABLE";
+
+export type RestoreRepairCaseFlowchartActionResult =
+  | { ok: true; id: string; updatedAt: string }
+  | { ok: false; code: RestoreRepairCaseFlowchartActionResultCode; message: string };
+
+export type PermanentlyDeleteRepairCaseFlowchartActionResultCode =
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "STALE_REVISION"
+  | "DATABASE_UNAVAILABLE";
+
+export type PermanentlyDeleteRepairCaseFlowchartActionResult =
+  | { ok: true; id: string }
+  | { ok: false; code: PermanentlyDeleteRepairCaseFlowchartActionResultCode; message: string };
