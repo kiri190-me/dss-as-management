@@ -1,14 +1,23 @@
 import Link from "next/link";
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
+import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
 import { ExceptionStatusBadge } from "./ExceptionStatusBadge";
 import { formatLastActivity, formatPartsRequestStatus } from "./format";
 import { daysSinceIntake } from "@/lib/domain/date-only";
 
-/** Phase 5C-3 mobile card list — same responsive split and Link-wrapped-card/dl-dt-dd pattern as RepairCaseCardList, carrying this screen's own column set. */
+/**
+ * 좁은 화면용 카드 목록 — RepairCaseCardList와 같은 반응형 분기,
+ * Link로 감싼 카드, dl/dt/dd 구성을 쓰고 이 화면 고유의 항목을 담는다.
+ *
+ * 2026-08-19: 표와 함께 전체 A/S 현황 쪽에 맞췄다. 끊는 지점을 md에서 lg로
+ * 옮긴 것은(표는 lg:block, 카드는 lg:hidden) 그쪽과 같은 값이다 — 접은 표라도
+ * 태블릿 폭에서는 답답해서, 그쪽도 카드로 넘긴다. 제품 줄에 유·무상을 붙인
+ * 것도 같은 이유다.
+ */
 export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[] }) {
   return (
-    <div className="flex flex-col gap-3 md:hidden">
+    <div className="flex flex-col gap-3 lg:hidden">
       {rows.map((row) => (
         <Link
           key={row.id}
@@ -32,13 +41,15 @@ export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[]
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">End-User</dt>
               <dd>{row.endUserName ?? "-"}</dd>
             </div>
-            <div>
-              <dt className="text-xs text-zinc-500 dark:text-zinc-500">Model / S/N</dt>
-              <dd>{row.modelName} / {row.serialNumber}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-zinc-500 dark:text-zinc-500">L/N</dt>
-              <dd>{row.lotNumber}</dd>
+            <div className="col-span-2">
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">제품</dt>
+              <dd>
+                {row.productCategory} / {row.modelName} /{" "}
+                {row.billingType ? billingTypeLabels[row.billingType] : "-"}
+              </dd>
+              <dd className="text-xs text-zinc-500 dark:text-zinc-400">
+                S/N {row.serialNumber} / L/N {row.lotNumber}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">사내 목표 검수완료일</dt>

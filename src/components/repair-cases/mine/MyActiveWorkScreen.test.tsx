@@ -9,9 +9,11 @@ function row(overrides: Partial<MyActiveWorkRow> = {}): MyActiveWorkRow {
     id: "case-1",
     intakeNumber: "D260813",
     receivedAt: "2026-08-03",
+    customerId: "cust-1",
     customerName: "대성RF시스템",
     endUserName: "대성RF 대전연구소",
     productCategory: "Generator",
+    billingType: "PAID",
     modelName: "TEST-MODEL-A",
     serialNumber: "TEST-SN-002",
     lotNumber: "TEST-LN-001",
@@ -33,10 +35,11 @@ test("empty state: no assigned cases at all shows the exact required copy", () =
   assert.ok(!html.includes("필터 초기화"), "the no-cases-at-all state must not offer a filter-reset button");
 });
 
-test("renders both the desktop table (hidden md:block) and mobile card list (md:hidden) for the same rows", () => {
+test("표(hidden lg:block)와 카드 목록(lg:hidden)을 같은 행으로 함께 그린다", () => {
+  // 끊는 지점은 2026-08-19에 md → lg로 옮겼다 — 전체 A/S 현황과 같은 값이다.
   const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
-  assert.ok(html.includes("hidden") && html.includes("md:block"), "desktop table wrapper must carry the responsive classes");
-  assert.ok(html.includes("md:hidden"), "mobile card list wrapper must carry the responsive class");
+  assert.ok(html.includes("hidden") && html.includes("lg:block"), "desktop table wrapper must carry the responsive classes");
+  assert.ok(html.includes("lg:hidden"), "mobile card list wrapper must carry the responsive class");
 });
 
 test("row's intake number links to the existing repair-case detail route, not a new detail screen", () => {
@@ -109,4 +112,66 @@ test("summary shows 현재 담당 건수 based on the full (unfiltered) row coun
   const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row({ id: "1" }), row({ id: "2" }), row({ id: "3" })]} />);
   assert.ok(html.includes("현재 담당 건수"));
   assert.ok(html.includes("3건"));
+});
+
+// ─────────────────────────────── 2026-08-19 전체 A/S 현황과 같은 UI
+
+test("담당 건이 하나도 없으면 필터 카드 자체를 그리지 않는다", () => {
+  // 거를 것이 없는 화면에 검색·선택 항목만 남기면 빈 화면이 더 복잡해진다.
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[]} />);
+  assert.ok(!html.includes("제품 구분"), "필터 카드가 나오면 안 된다");
+  assert.ok(!html.includes("필터 초기화"));
+});
+
+test("전체 A/S 현황과 같은 필터 항목을 같은 순서로 그린다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
+  for (const label of ["검색", "현재 상태", "제품 구분", "고객사", "예외 상태", "필터 초기화"]) {
+    assert.ok(html.includes(label), `필터 항목 "${label}"이 있어야 한다`);
+  }
+  // 순서는 라벨 글자가 아니라 입력 요소 id로 본다 — "고객사"는 검색 안내
+  // 문구에도 나오므로 글자 위치로 재면 엉뚱한 곳을 짚는다.
+  const order = ["my-work-search", "my-work-status", "my-work-product-category", "my-work-customer", "my-work-exception-status"];
+  const positions = order.map((id) => html.indexOf(id));
+  assert.ok(positions.every((pos) => pos >= 0), "다섯 항목이 모두 있어야 한다");
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions, "선택 항목 순서도 그쪽과 같아야 한다");
+});
+
+test("제품 열은 전체 A/S 현황과 같이 한 칸에 접어 보여 준다", () => {
+  const html = renderToStaticMarkup(
+    <MyActiveWorkScreen
+      rows={[row({ productCategory: "Generator", modelName: "TG-350", billingType: "PAID", serialNumber: "SN-1", lotNumber: "LN-1" })]}
+    />
+  );
+  assert.ok(html.includes("Generator / TG-350 / 유상"), "제품 구분/모델/유·무상이 한 줄이어야 한다");
+  assert.ok(html.includes("S/N SN-1 / L/N LN-1"), "S/N·L/N이 둘째 줄이어야 한다");
+  assert.ok(!html.includes(">제품 구분</th>"), "제품 구분이 다시 독립 열로 돌아오면 안 된다");
+});
+
+test("유·무상이 정해지지 않았으면 제품 줄에 '-'로 적는다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row({ productCategory: "Generator", modelName: "TG-350", billingType: null })]} />);
+  assert.ok(html.includes("Generator / TG-350 / -"));
+});
+
+test("목록 위에 조건에 맞는 건수를 적는다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row({ id: "1" }), row({ id: "2" })]} />);
+  assert.ok(html.includes("조건에 맞는 담당 제품 2건"));
+});
+
+test("접었어도 원래 보여 주던 값은 하나도 사라지지 않았다", () => {
+  const html = renderToStaticMarkup(
+    <MyActiveWorkScreen
+      rows={[
+        row({
+          endUserName: "부산공장",
+          internalTargetInspectionCompletionDate: "2026-08-21",
+          internalTargetShipmentDate: "2026-08-27",
+          customerRequestedDueDate: "2026-08-30",
+        }),
+      ]}
+    />
+  );
+  for (const value of ["부산공장", "2026-08-21", "2026-08-27", "2026-08-30"]) {
+    assert.ok(html.includes(value), `${value}가 어딘가에는 남아 있어야 한다`);
+  }
+  assert.ok(html.includes("입고 후"), "입고 후 경과일도 남아 있어야 한다");
 });

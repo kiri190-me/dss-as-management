@@ -17,7 +17,7 @@ import {
   inventoryPartRequests,
 } from "../schema";
 import { resolveRepairStatusFromStep } from "../mappers/repair-status";
-import { productCategoryLabels, type ExceptionStatus, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
+import { productCategoryLabels, type BillingType, type ExceptionStatus, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
 
 /**
  * Phase 5C-3 — "내 담당 제품" / My Active Work. A dedicated query, not an
@@ -37,10 +37,13 @@ export type MyActiveWorkRow = {
   id: string;
   intakeNumber: string;
   receivedAt: string;
+  customerId: string;
   customerName: string;
   endUserName: string | null;
   productCategory: string;
   modelName: string;
+  /** 유·무상. 전체 A/S 현황과 같은 "제품" 열을 만들기 위해 필요하다(미정이면 null). */
+  billingType: BillingType | null;
   serialNumber: string;
   lotNumber: string;
   status: RepairStatus;
@@ -59,7 +62,9 @@ type JoinRow = {
   id: string;
   intakeNumber: string;
   receivedAt: string;
+  customerId: string;
   customerName: string;
+  billingType: BillingType | null;
   endUserName: string | null;
   workflowTypeCode: WorkflowType;
   currentWorkflowStepKey: string;
@@ -120,10 +125,12 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
     id: row.id,
     intakeNumber: row.intakeNumber,
     receivedAt: row.receivedAt,
+    customerId: row.customerId,
     customerName: row.customerName,
     endUserName: row.endUserName,
     productCategory: productCategoryLabels[row.workflowTypeCode],
     modelName: row.modelName,
+    billingType: row.billingType,
     serialNumber: row.serialNumber ?? "-",
     lotNumber: row.lotNumber ?? "-",
     status: resolveRepairStatusFromStep({
@@ -158,7 +165,9 @@ export async function listMyActiveRepairCases(actorId: string): Promise<MyActive
       id: repairCases.id,
       intakeNumber: repairCases.intakeNumber,
       receivedAt: repairCases.receivedAt,
+      customerId: repairCases.customerId,
       customerName: customers.name,
+      billingType: repairCases.billingType,
       endUserName: endUsers.name,
       workflowTypeCode: workflowTemplates.code,
       currentWorkflowStepKey: workflowSteps.key,
