@@ -51,15 +51,16 @@ export default function TransitionDialog({
     }
   }, [isOpen]);
 
+  // 되돌리기 사유는 선택 입력이다(2026-08-18 완화 — transition-definitions.ts의
+  // STEP_RETURNED requiresReason: false와 짝을 이룬다). 비워 두면 null로
+  // 넘겨 서버가 사유 없이 기록하고, 적으면 이전과 동일하게 그 값이 감사
+  // 이력에 남는다. 다시 필수로 되돌릴 때는 여기 빈 값 가드와 그 플래그를
+  // 함께 되돌려야 한다 — 한쪽만 바꾸면 화면에서는 막히는데 서버는 허용하는
+  // (또는 그 반대의) 어긋난 상태가 된다.
   function handleConfirm() {
     if (mode === "return") {
       const trimmed = reason.trim();
-      if (!trimmed) {
-        setError("되돌리기 사유를 입력해 주세요.");
-        textareaRef.current?.focus();
-        return;
-      }
-      onConfirm(trimmed);
+      onConfirm(trimmed === "" ? null : trimmed);
       return;
     }
     onConfirm(null);
@@ -103,7 +104,7 @@ export default function TransitionDialog({
       {mode === "return" && (
         <div className="mt-3 flex flex-col gap-1">
           <label htmlFor="transition-return-reason" className="text-xs text-zinc-500 dark:text-zinc-400">
-            되돌리기 사유 *
+            되돌리기 사유 (선택)
           </label>
           <textarea
             id="transition-return-reason"

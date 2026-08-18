@@ -39,6 +39,15 @@ export const statusChangeActionTypeEnum = pgEnum("status_change_action_type", [
   "HOLD_RELEASED",
   "SHIPMENT_COMPLETED",
   "LEGACY_IMPORT_STATE_SET",
+  /**
+   * 정규 전이표(transition-definitions.ts)를 거치지 않고 현재 단계를 직접
+   * 지정한 기록이다(2026-08-18 승인). 관리자/담당 엔지니어가 작업내용 탭의
+   * 드롭다운으로 단계를 고른 경우이며, STEP_ADVANCED/STEP_RETURNED와 반드시
+   * 구분되어야 한다 — 이력을 읽을 때 "정상 진행"과 "사람이 손으로 맞춘 값"이
+   * 섞이면 추적이 무의미해지기 때문이다. 그래서 기존 코드를 재사용하지 않고
+   * 새 enum 값을 추가했다. 이 경로는 사유가 항상 필수다(reason non-null).
+   */
+  "STEP_SET_MANUALLY",
 ]);
 
 export const statusChangeHistories = pgTable(

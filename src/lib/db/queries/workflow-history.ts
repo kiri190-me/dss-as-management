@@ -13,7 +13,11 @@ export type WorkflowActionType =
   | "HOLD_STARTED"
   | "HOLD_RELEASED"
   | "SHIPMENT_COMPLETED"
-  | "LEGACY_IMPORT_STATE_SET";
+  | "LEGACY_IMPORT_STATE_SET"
+  // 정규 전이를 거치지 않고 단계를 직접 지정한 기록(2026-08-18). 이력 화면은
+  // 이 값을 반드시 STEP_ADVANCED/STEP_RETURNED와 다른 문구로 표시해야 한다 —
+  // 라벨 매핑은 DatabaseWorkflowHistoryList 참조.
+  | "STEP_SET_MANUALLY";
 
 export type WorkflowHistoryEntry = {
   id: string;

@@ -5,7 +5,13 @@ import { useEffect, useRef, useState } from "react";
 type HoldDialogProps = {
   isOpen: boolean;
   isSubmitting: boolean;
-  onConfirm: (reason: string) => void;
+  /**
+   * 보류 사유는 선택 입력이다(2026-08-18 완화) — 비워 두면 null이 넘어가고
+   * 서버도 사유 없이 보류를 시작한다(workflow-transitions.ts의 hold 분기).
+   * 다시 필수로 만들려면 아래 handleConfirm의 빈 값 가드와 그 분기를 함께
+   * 되돌려야 한다.
+   */
+  onConfirm: (reason: string | null) => void;
   onCancel: () => void;
 };
 
@@ -29,12 +35,7 @@ export default function HoldDialog({ isOpen, isSubmitting, onConfirm, onCancel }
 
   function handleConfirm() {
     const trimmed = reason.trim();
-    if (!trimmed) {
-      setError("보류 사유를 입력해 주세요.");
-      textareaRef.current?.focus();
-      return;
-    }
-    onConfirm(trimmed);
+    onConfirm(trimmed === "" ? null : trimmed);
   }
 
   return (
@@ -56,7 +57,7 @@ export default function HoldDialog({ isOpen, isSubmitting, onConfirm, onCancel }
 
       <div className="mt-3 flex flex-col gap-1">
         <label htmlFor="hold-reason" className="text-xs text-zinc-500 dark:text-zinc-400">
-          보류 사유 *
+          보류 사유 (선택)
         </label>
         <textarea
           id="hold-reason"

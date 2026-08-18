@@ -202,7 +202,11 @@ describe("transitionWorkflow", () => {
     assert.equal(row.currentWorkflowStepId, await stepIdForKey("kyosan_contact_report_sent"));
   });
 
-  test("2. valid return succeeds (ADMIN/SUPER_ADMIN, reason required)", async () => {
+  // 제목의 "reason required"는 2026-08-18 완화로 더 이상 사실이 아니라
+  // 제거했다 — 사유를 함께 넘기는 이 시나리오 자체는 그대로 유효하다
+  // (선택 입력이므로 넘겨도 정상 기록된다). 사유 없이 되돌리는 경로는
+  // 아래 10-1이 따로 검증한다.
+  test("2. valid return succeeds (ADMIN/SUPER_ADMIN, with a reason)", async () => {
     const created = await createTestCase();
     const advanced = await transitionWorkflow(created.id, 1, "STEP_ADVANCED", engineerId, null);
     assert.equal(advanced.ok, true);
@@ -284,11 +288,48 @@ describe("transitionWorkflow", () => {
     assert.equal(rows.length, 1, "the stale/conflicting attempt must not have inserted a second history row");
   });
 
-  test("10. hold requires a reason", async () => {
+  // 2026-08-18 완화: 보류 사유는 필수에서 선택으로 바뀌었다. 이 테스트는
+  // 원래 "hold requires a reason"(REASON_REQUIRED 반환)을 검증하던 자리이며,
+  // 완화된 동작을 그대로 뒤집어 고정한다 — 사유 없이도 보류가 시작되고,
+  // 감사 이력에는 reason이 null로 남는다. 사유 요구를 다시 켜면 이 테스트가
+  // 실패하므로, 의도치 않은 재강화도 여기서 걸린다.
+  test("10. hold without a reason succeeds and records a null reason", async () => {
     const created = await createTestCase();
     const result = await transitionWorkflow(created.id, 1, "HOLD_STARTED", engineerId, null);
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "REASON_REQUIRED");
+    assert.equal(result.ok, true, `hold without reason failed: ${JSON.stringify(result)}`);
+
+    const [row] = await db
+      .select({ actionType: statusChangeHistories.actionType, reason: statusChangeHistories.reason })
+      .from(statusChangeHistories)
+      .where(eq(statusChangeHistories.repairCaseId, created.id));
+    assert.equal(row.actionType, "HOLD_STARTED");
+    assert.equal(row.reason, null, "사유를 적지 않으면 빈 문자열이 아니라 null로 기록되어야 한다");
+  });
+
+  // 같은 완화의 되돌리기 쪽 짝. 이전에는 STEP_RETURNED가
+  // SUPER_ADMIN/ADMIN 전용 + 사유 필수였다 — 이제 담당 엔지니어 본인도
+  // 사유 없이 되돌릴 수 있어야 한다(transition-definitions.ts 헤더 주석 참조).
+  test("10-1. assigned AS_ENGINEER can return a step without a reason", async () => {
+    const created = await createTestCase();
+    const advanced = await transitionWorkflow(created.id, 1, "STEP_ADVANCED", engineerId, null);
+    assert.equal(advanced.ok, true, `advance failed: ${JSON.stringify(advanced)}`);
+    if (!advanced.ok) return;
+
+    const returned = await transitionWorkflow(created.id, advanced.version, "STEP_RETURNED", engineerId, null);
+    assert.equal(returned.ok, true, `engineer return failed: ${JSON.stringify(returned)}`);
+    if (!returned.ok) return;
+    assert.equal(returned.currentWorkflowStepKey, "intake_inspection");
+
+    const rows = await db
+      .select({ actionType: statusChangeHistories.actionType, reason: statusChangeHistories.reason })
+      .from(statusChangeHistories)
+      .where(eq(statusChangeHistories.repairCaseId, created.id))
+      .orderBy(statusChangeHistories.createdAt);
+    assert.deepEqual(
+      rows.map((r) => r.actionType),
+      ["STEP_ADVANCED", "STEP_RETURNED"]
+    );
+    assert.equal(rows[1].reason, null);
   });
 
   test("11. hold start + release hold works, and hold state is correctly derived afterward", async () => {
@@ -372,5 +413,97 @@ describe("transitionWorkflow", () => {
     const result = await transitionWorkflow(randomUUID(), 1, "STEP_ADVANCED", engineerId, null);
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+// ──────────────────────────────────────────────────────────────────────
+  // STEP_SET_MANUALLY — 정규 전이표를 거치지 않는 단계 직접 변경 (2026-08-18)
+  // ──────────────────────────────────────────────────────────────────────
+  // 이 경로는 워크플로 규칙의 유일한 우회로이므로, "된다"보다 "막아야 할 것이
+  // 막힌다"를 더 촘촘히 고정한다.
+
+  test("14. manual step set: 관리자는 임의 단계로 직접 이동하고 STEP_SET_MANUALLY로 기록된다", async () => {
+    const created = await createTestCase();
+    const target = "waiting_kyosan_reply";
+
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "고객 요청으로 단계 조정", target);
+    assert.equal(result.ok, true, `manual set failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+    assert.equal(result.currentWorkflowStepKey, target);
+    assert.equal(result.version, 2, "직접 변경도 낙관적 잠금 버전을 정확히 1 올린다");
+
+    const row = await fetchRow(created.id);
+    assert.equal(row.currentWorkflowStepId, await stepIdForKey(target));
+
+    const [history] = await db
+      .select({ actionType: statusChangeHistories.actionType, reason: statusChangeHistories.reason })
+      .from(statusChangeHistories)
+      .where(eq(statusChangeHistories.repairCaseId, created.id));
+    assert.equal(history.actionType, "STEP_SET_MANUALLY", "정규 진행/되돌리기와 반드시 구분되어야 한다");
+    assert.equal(history.reason, "고객 요청으로 단계 조정");
+  });
+
+  test("15. manual step set: 사유가 없으면 REASON_REQUIRED (되돌리기·보류와 달리 항상 필수)", async () => {
+    const created = await createTestCase();
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, null, "waiting_kyosan_reply");
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "REASON_REQUIRED");
+
+    const rows = await db.select().from(statusChangeHistories).where(eq(statusChangeHistories.repairCaseId, created.id));
+    assert.equal(rows.length, 0, "거부된 시도는 이력을 남기지 않는다");
+  });
+
+  test("16. manual step set: 승인 게이트 단계로는 이동할 수 없다 (승인 우회 차단)", async () => {
+    const created = await createTestCase();
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "출하 처리 필요", "shipment_completed");
+    assert.equal(result.ok, false, "최종 출하 승인 없이 출하 완료로 점프할 수 있으면 안 된다");
+    if (!result.ok) assert.equal(result.code, "INVALID_TRANSITION");
+
+    const row = await fetchRow(created.id);
+    assert.equal(row.version, 1, "거부된 시도는 버전을 올리지 않는다");
+  });
+
+  test("17. manual step set: 존재하지 않는 단계 키는 거부된다", async () => {
+    const created = await createTestCase();
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "테스트", "존재하지_않는_단계");
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_TRANSITION");
+  });
+
+  test("18. manual step set: 현재와 같은 단계를 다시 지정하면 거부된다", async () => {
+    const created = await createTestCase();
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "테스트", "intake_inspection");
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_TRANSITION");
+  });
+
+  test("19. manual step set: 담당 엔지니어 본인은 가능하고, 담당이 아닌 역할(SALES)은 FORBIDDEN", async () => {
+    const engineerCase = await createTestCase();
+    const byEngineer = await transitionWorkflow(engineerCase.id, 1, "STEP_SET_MANUALLY", engineerId, "현장 판단", "waiting_kyosan_reply");
+    assert.equal(byEngineer.ok, true, `assigned engineer manual set failed: ${JSON.stringify(byEngineer)}`);
+
+    const salesCase = await createTestCase();
+    const bySales = await transitionWorkflow(salesCase.id, 1, "STEP_SET_MANUALLY", salesId, "영업 판단", "waiting_kyosan_reply");
+    assert.equal(bySales.ok, false, "SALES는 단계를 임의로 옮길 수 없다");
+    if (!bySales.ok) assert.equal(bySales.code, "FORBIDDEN");
+  });
+
+  test("20. manual step set: 보류 중에는 거부된다", async () => {
+    const created = await createTestCase();
+    const held = await transitionWorkflow(created.id, 1, "HOLD_STARTED", engineerId, "부품 대기");
+    assert.equal(held.ok, true);
+    if (!held.ok) return;
+
+    const result = await transitionWorkflow(created.id, held.version, "STEP_SET_MANUALLY", adminId, "그래도 옮기기", "waiting_kyosan_reply");
+    assert.equal(result.ok, false, "보류 중 다른 작업 금지 규칙이 이 경로에도 적용되어야 한다");
+    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("21. manual step set: 버전이 어긋나면 CONFLICT", async () => {
+    const created = await createTestCase();
+    const first = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "1차 조정", "waiting_kyosan_reply");
+    assert.equal(first.ok, true);
+
+    const stale = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "2차 조정", "kyosan_contact_report_sent");
+    assert.equal(stale.ok, false);
+    if (!stale.ok) assert.equal(stale.code, "CONFLICT");
   });
 });

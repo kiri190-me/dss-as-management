@@ -9,6 +9,7 @@ import LocalRepairCaseExecutionContent, {
   NonDatabaseWorkContent,
 } from "@/components/repair-cases/detail/LocalRepairCaseExecutionContent";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
+import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
 import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
 import WorkRecordsSection from "@/components/repair-cases/work-records/WorkRecordsSection";
@@ -24,6 +25,7 @@ import {
 import { getRecentWorkRecordsForCase, getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
 import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
 import { workflowSteps } from "@/lib/domain/mock-data";
+import { listManuallySelectableSteps } from "@/lib/domain/local/workflow/manual-step-options";
 
 export const metadata: Metadata = {
   title: "작업내용 | DSS A/S 관리 시스템",
@@ -137,6 +139,10 @@ export default async function RepairCaseExecutionPage({
   // since canCreateWorkRecord itself no longer factors in lock state.
   const createDisabledReason = !canCreate ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다." : null;
   const currentStep = workflowSteps.find((s) => s.workflowType === resolved.workflowType && s.key === resolved.currentWorkflowStepKey);
+  // 단계 직접 변경 후보. 승인 게이트가 걸린 단계와 상태 매핑이 없는 단계는
+  // 여기서 이미 빠진다(manual-step-options.ts) — 서버도 같은 함수로 다시
+  // 검증하므로 이 목록은 순수한 표시용이다.
+  const manualStepOptions = listManuallySelectableSteps(resolved.workflowType);
 
   return (
     <div className="flex flex-col gap-4">
@@ -145,6 +151,26 @@ export default async function RepairCaseExecutionPage({
         actingUser={actingUser}
         holdState={holdState}
         currentApprovals={currentApprovals}
+        isCaseLocked={isCaseLocked}
+      />
+
+      {/* 실행 가능 작업(위)은 그대로 두고, 규칙을 우회하는 직접 변경은 별도
+          섹션으로 분리해 나란히 놓는다 — 두 경로가 화면에서 섞이면 안 된다는
+          요구(2026-08-18)에 따른 배치다. */}
+      <ManualStepSetPanel
+        repairCaseId={resolved.id}
+        version={resolved.version}
+        currentStepKey={resolved.currentWorkflowStepKey}
+        options={manualStepOptions}
+        actingUser={actingUser}
+        assignedEngineerId={resolved.assignedEngineerId}
+        holdState={{
+          isOnHold: holdState.isOnHold,
+          reason: holdState.reason,
+          startedByUserId: holdState.startedByUserId,
+          startedByNameSnapshot: holdState.startedByName,
+          startedAt: holdState.startedAt,
+        }}
         isCaseLocked={isCaseLocked}
       />
 

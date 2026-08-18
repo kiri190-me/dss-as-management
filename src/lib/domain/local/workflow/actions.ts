@@ -161,10 +161,14 @@ export function returnStep(input: AdvanceOrReturnInput): WorkflowActionResult {
   const eligibility = checkTransitionEligibility(transition, input.actingUser, input.assignedEngineerId, current.holdState);
   if (!eligibility.allowed) return { ok: false, reason: "NOT_ELIGIBLE", message: eligibility.reason };
 
-  const reason = input.reason?.trim() ?? "";
-  if (!reason) {
-    return { ok: false, reason: "REASON_REQUIRED", message: "되돌리기 사유를 입력해 주세요." };
-  }
+  // 되돌리기 사유는 선택 입력이다(2026-08-18 완화). DB 모드가
+  // transition.requiresReason 플래그로 판정하는 것과 달리 로컬 모드는 여기서
+  // 무조건 필수로 검사하고 있었다 — 그 하드코딩된 검사를 제거해 두 모드를
+  // 다시 일치시킨다. 다시 필수로 되돌린다면 이 자리에
+  // `if (transition.requiresReason && !reason)` 형태로 플래그를 보게 하는 편이
+  // 낫다(그래야 표 한 곳만 고치면 양쪽이 같이 움직인다).
+  const trimmedReason = input.reason?.trim() ?? "";
+  const reason = trimmedReason === "" ? null : trimmedReason;
 
   const nowIso = new Date().toISOString();
   const nextState: LocalWorkflowState = {
@@ -201,7 +205,12 @@ export function returnStep(input: AdvanceOrReturnInput): WorkflowActionResult {
   return commit(states, events, nextState, event);
 }
 
-export type HoldActionInput = BaseInput & { reason: string };
+/**
+ * reason이 string | null인 이유: 보류 시작/해제 사유는 2026-08-18 완화로
+ * 선택 입력이 되었다(DB 모드의 workflow-transitions.ts hold 분기와 동일한
+ * 취급 — 두 모드의 동작이 갈리면 안 된다).
+ */
+export type HoldActionInput = BaseInput & { reason: string | null };
 
 export function startHold(input: HoldActionInput): WorkflowActionResult {
   const { states, events } = getWorkflowStoreSnapshot();
@@ -213,10 +222,9 @@ export function startHold(input: HoldActionInput): WorkflowActionResult {
   const eligibility = checkHoldEligibility(input.workflowType, current.stepKey, input.actingUser, input.assignedEngineerId);
   if (!eligibility.allowed) return { ok: false, reason: "NOT_ELIGIBLE", message: eligibility.reason };
 
-  const reason = input.reason.trim();
-  if (!reason) {
-    return { ok: false, reason: "REASON_REQUIRED", message: "보류 사유를 입력해 주세요." };
-  }
+  // 사유 미입력 시 null로 기록한다(REASON_REQUIRED 반환은 2026-08-18 제거).
+  const trimmedReason = input.reason?.trim() ?? "";
+  const reason = trimmedReason === "" ? null : trimmedReason;
 
   const nowIso = new Date().toISOString();
   const holdState: HoldState = {
@@ -270,10 +278,9 @@ export function releaseHold(input: HoldActionInput): WorkflowActionResult {
   const eligibility = checkHoldEligibility(input.workflowType, current.stepKey, input.actingUser, input.assignedEngineerId);
   if (!eligibility.allowed) return { ok: false, reason: "NOT_ELIGIBLE", message: eligibility.reason };
 
-  const reason = input.reason.trim();
-  if (!reason) {
-    return { ok: false, reason: "REASON_REQUIRED", message: "보류 해제 사유를 입력해 주세요." };
-  }
+  // 사유 미입력 시 null로 기록한다(REASON_REQUIRED 반환은 2026-08-18 제거).
+  const trimmedReason = input.reason?.trim() ?? "";
+  const reason = trimmedReason === "" ? null : trimmedReason;
 
   const nowIso = new Date().toISOString();
   const nextState: LocalWorkflowState = {

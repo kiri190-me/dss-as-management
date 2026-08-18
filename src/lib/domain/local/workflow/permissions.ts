@@ -111,3 +111,45 @@ export function checkTransitionEligibility(
 
   return { allowed: true };
 }
+
+/**
+ * 작업내용 탭의 "현재 단계 직접 변경"(STEP_SET_MANUALLY) 자격 판정이다.
+ * 정규 전이가 아니므로 TransitionDefinition 행이 존재하지 않고, 따라서
+ * checkTransitionEligibility를 재사용할 수 없다 — 대신 그 함수와 같은 순서
+ * (역할 → 담당 엔지니어 → 보류)로 같은 성격의 검사를 수행한다.
+ *
+ * 허용 역할은 SUPER_ADMIN/ADMIN/AS_ENGINEER이며(2026-08-18 승인), AS_ENGINEER는
+ * 자신이 담당으로 배정된 접수 건만 변경할 수 있다 — 교정 반환(STEP_RETURNED)에
+ * 적용한 것과 동일한 제약이다. SALES/INVENTORY_MANAGER는 단계 자체를 임의로
+ * 옮길 수 없다(정규 전이에서 각자 담당 구간을 진행하는 것은 그대로 가능하다).
+ *
+ * 잠금(is_locked)은 여기서 보지 않는다 — 호출부가 전이와 동일하게 가장 먼저,
+ * 무조건 검사한다(workflow-transitions.ts / DatabaseWorkflowControlPanel의
+ * isCaseLocked 처리와 같은 규율). 이 함수에 잠금 검사를 넣으면 두 곳에서
+ * 서로 다른 메시지가 나올 수 있다.
+ */
+export function checkManualStepSetEligibility(
+  actingUser: ActingUser,
+  assignedEngineerId: string | null,
+  holdState: HoldState
+): PermissionCheckResult {
+  if (!isApprovedAccount(actingUser)) {
+    return { allowed: false, reason: "승인되지 않은 계정은 이 작업을 수행할 수 없습니다." };
+  }
+  if (
+    actingUser.role !== "SUPER_ADMIN" &&
+    actingUser.role !== "ADMIN" &&
+    actingUser.role !== "AS_ENGINEER"
+  ) {
+    return { allowed: false, reason: "현재 역할로는 단계를 직접 변경할 수 없습니다." };
+  }
+  if (actingUser.role === "AS_ENGINEER") {
+    if (!assignedEngineerId) {
+      return { allowed: false, reason: "이 접수 건에는 담당 엔지니어가 배정되어 있지 않습니다." };
+    }
+    if (assignedEngineerId !== actingUser.id) {
+      return { allowed: false, reason: "담당 엔지니어만 단계를 직접 변경할 수 있습니다." };
+    }
+  }
+  return checkNotOnHold(holdState, false);
+}

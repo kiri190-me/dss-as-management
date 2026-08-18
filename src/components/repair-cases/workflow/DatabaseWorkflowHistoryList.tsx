@@ -7,6 +7,9 @@ const ACTION_LABELS: Record<WorkflowHistoryEntry["actionType"], string> = {
   HOLD_RELEASED: "보류 해제",
   SHIPMENT_COMPLETED: "출하 완료 처리",
   LEGACY_IMPORT_STATE_SET: "과거 상태 이관",
+  // "진행"/"되돌리기"와 반드시 구분되는 문구를 쓴다 — 이력을 읽는 사람이
+  // 정규 워크플로를 탄 것과 사람이 직접 맞춘 것을 구별할 수 있어야 한다.
+  STEP_SET_MANUALLY: "단계 직접 변경",
 };
 
 function formatDateTime(iso: string): string {

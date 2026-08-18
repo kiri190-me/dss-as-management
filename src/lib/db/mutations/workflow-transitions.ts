@@ -2,7 +2,12 @@ import "server-only";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, statusChangeHistories, users, workflowSteps, workflowTemplates, workflowVersions } from "../schema";
-import { checkHoldEligibility, checkTransitionEligibility } from "@/lib/domain/local/workflow/permissions";
+import {
+  checkHoldEligibility,
+  checkManualStepSetEligibility,
+  checkTransitionEligibility,
+} from "@/lib/domain/local/workflow/permissions";
+import { isManuallySelectableStep } from "@/lib/domain/local/workflow/manual-step-options";
 import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -27,6 +32,7 @@ import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-in
  */
 
 export type TransitionMutationResultCode =
+  | "VALIDATION_ERROR"
   | "NOT_FOUND"
   | "CONFLICT"
   | "INVALID_TRANSITION"
@@ -59,12 +65,18 @@ class TransitionConflictError extends Error {
   }
 }
 
+/**
+ * targetStepKey는 actionCode가 "STEP_SET_MANUALLY"일 때만 의미를 갖는다 —
+ * 정규 전이 5종은 이동 대상을 전이표에서 스스로 결정하므로 이 값을 무시한다
+ * (호출부가 실수로 넘겨도 영향이 없도록 해당 분기에서만 읽는다).
+ */
 export async function transitionWorkflow(
   repairCaseId: string,
   expectedVersion: number,
-  actionCode: WorkflowActionCode,
+  actionCode: WorkflowActionCode | "STEP_SET_MANUALLY",
   actorUserId: string,
-  reason: string | null
+  reason: string | null,
+  targetStepKey?: string
 ): Promise<TransitionMutationResult> {
   try {
     return await db.transaction(async (tx): Promise<TransitionMutationResult> => {
@@ -143,7 +155,11 @@ export async function transitionWorkflow(
         updatedAt: sql`now()`,
       };
 
-      if (STEP_MOVING_ACTIONS.has(actionCode)) {
+      // actionCode !== "STEP_SET_MANUALLY" 를 먼저 두는 것은 타입 좁히기용이다 —
+      // Set.has()는 TypeScript가 유니온을 좁혀 주지 못하므로, 이 명시적 비교가
+      // 있어야 아래 findTransitionDefinition에 정규 액션 5종만 전달됨이
+      // 컴파일 시점에 보장된다(단계 직접 변경은 전이표에 행이 없다).
+      if (actionCode !== "STEP_SET_MANUALLY" && STEP_MOVING_ACTIONS.has(actionCode)) {
         const transition = findTransitionDefinition(current.workflowTypeCode, actionCode, current.currentStepKey);
         if (!transition) {
           const message =
@@ -223,6 +239,78 @@ export async function transitionWorkflow(
           setValues.isLocked = true;
           setValues.actualShipmentDate = new Date().toISOString().slice(0, 10);
         }
+      } else if (actionCode === "STEP_SET_MANUALLY") {
+        // ────────────────────────────────────────────────────────────────
+        // 단계 직접 변경 — 정규 전이표를 거치지 않는 유일한 경로 (2026-08-18)
+        // ────────────────────────────────────────────────────────────────
+        // 전이표 조회(findTransitionDefinition) 대신 호출부가 지정한 단계로
+        // 곧장 이동한다. 그래서 전이표가 평소 보장해 주던 것들을 여기서 직접
+        // 다시 세운다 — 아래 검사 중 하나라도 빠지면 이 경로가 나머지 모든
+        // 워크플로 규칙의 우회로가 된다.
+        //
+        // 잠금(is_locked)/버전 충돌은 이 분기보다 앞에서 이미 검사되었으므로
+        // 여기서 반복하지 않는다(정규 전이와 완전히 동일한 지점에서 걸린다).
+        const requestedStepKey = targetStepKey ?? "";
+        if (!requestedStepKey) {
+          return { ok: false, code: "VALIDATION_ERROR", message: "변경할 단계를 선택해 주세요." };
+        }
+
+        // 사유는 항상 필수다(2026-08-18 사용자 결정). 되돌리기·보류의 사유가
+        // 선택으로 완화된 것과 의도적으로 다르다 — 규칙을 우회하는 경로라
+        // 사유가 유일한 추적 수단이기 때문이다.
+        if (!reason) {
+          return {
+            ok: false,
+            code: "REASON_REQUIRED",
+            message: "단계를 직접 변경하려면 사유를 입력해야 합니다.",
+          };
+        }
+
+        const eligibility = checkManualStepSetEligibility(actingUser, current.assignedEngineerId, holdState);
+        if (!eligibility.allowed) {
+          return { ok: false, code: "FORBIDDEN", message: eligibility.reason };
+        }
+
+        // 클라이언트가 보낸 단계 키를 신뢰하지 않는다. UI가 그리는 목록과
+        // 정확히 같은 규칙(승인 게이트 단계 제외 + 상태 매핑 존재)을 서버가
+        // 다시 평가한다 — manual-step-options.ts 참고.
+        if (!isManuallySelectableStep(current.workflowTypeCode, requestedStepKey)) {
+          return {
+            ok: false,
+            code: "INVALID_TRANSITION",
+            message: "이 단계로는 직접 변경할 수 없습니다.",
+          };
+        }
+        if (requestedStepKey === current.currentStepKey) {
+          return {
+            ok: false,
+            code: "INVALID_TRANSITION",
+            message: "이미 해당 단계입니다.",
+          };
+        }
+
+        // 대상 단계는 반드시 이 접수 건의 워크플로 버전에 실제로 존재하는
+        // 행이어야 한다(정규 전이가 toStepKey를 해석할 때와 같은 조회).
+        const [manualToStep] = await tx
+          .select({ id: workflowSteps.id })
+          .from(workflowSteps)
+          .where(
+            and(
+              eq(workflowSteps.workflowVersionId, current.workflowVersionId),
+              eq(workflowSteps.key, requestedStepKey)
+            )
+          );
+        if (!manualToStep) {
+          return {
+            ok: false,
+            code: "INVALID_TRANSITION",
+            message: "이 단계로는 직접 변경할 수 없습니다.",
+          };
+        }
+
+        toStepId = manualToStep.id;
+        toStepKeyForResult = requestedStepKey;
+        setValues.currentWorkflowStepId = manualToStep.id;
       } else {
         // HOLD_STARTED / HOLD_RELEASED — never in transition-definitions.ts
         // (they don't move steps); eligibility is category-based, exactly
@@ -244,13 +332,18 @@ export async function transitionWorkflow(
         if (!eligibility.allowed) {
           return { ok: false, code: "FORBIDDEN", message: eligibility.reason };
         }
-        if (!reason) {
-          return {
-            ok: false,
-            code: "REASON_REQUIRED",
-            message: isRelease ? "보류 해제 사유를 입력해 주세요." : "보류 사유를 입력해 주세요.",
-          };
-        }
+        // 보류 시작/해제의 사유는 사용자 승인(2026-08-18)에 따라 필수에서
+        // 선택으로 완화되었다 — 여기 있던 `if (!reason) REASON_REQUIRED`
+        // 반환을 제거한 것이 그 완화의 전부다. 입력창(HoldDialog/
+        // ReleaseHoldDialog)은 그대로 뜨며, 사유를 적으면 이전과 동일하게
+        // status_change_histories.reason에 기록된다. 적지 않으면 null로
+        // 남는다. 되돌리기 쪽 완화가 transition-definitions.ts의
+        // requiresReason 플래그로 표현되는 것과 달리, 보류는 그 표에 행이
+        // 없어(단계를 옮기지 않으므로) 이 분기에서 직접 다룬다.
+        //
+        // REASON_REQUIRED 코드 자체는 남겨 둔다 — 출하 완료 메모와
+        // requiresReason가 true인 전이가 여전히 이 코드를 사용한다.
+        //
         // current_workflow_step_id intentionally omitted from setValues —
         // hold actions never move the step.
       }

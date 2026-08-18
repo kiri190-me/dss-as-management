@@ -1,0 +1,1 @@
+ALTER TYPE "public"."status_change_action_type" ADD VALUE 'STEP_SET_MANUALLY';
