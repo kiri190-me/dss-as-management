@@ -87,15 +87,35 @@ export default function ManualStepSetPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/40 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">현재 단계 직접 변경</h3>
-        <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+    /*
+      기본 접힘 상태다(<details>에 open 속성을 주지 않는다 — 2026-08-18 요구).
+      정규 워크플로를 벗어나는 예외 조작이라 평소 화면에서는 눈에 띄지 않는
+      편이 맞고, 바로 위 "실행 가능 작업"이 늘 우선해서 보여야 한다.
+
+      useState 토글 대신 네이티브 <details>를 쓴 것은 이 앱의 기존 관례를
+      따른 것이다(작업내용/작업 이력 화면의 "워크플로 변경 이력"이 같은 방식).
+      상태를 하나도 늘리지 않고, 키보드 조작·접근성도 브라우저가 처리한다.
+
+      접힌 동안 내부 입력은 렌더는 되지만 화면에 없다. 제출 버튼이 details
+      바깥에 있지 않으므로 접힌 채로 실수로 제출되는 경로는 없다.
+    */
+    <details className="group rounded-lg border border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+        <span>현재 단계 직접 변경</span>
+        {/* 펼침 여부에 따라 문구를 바꾼다 — 네이티브 삼각형 마커를 list-none으로
+            숨겼으므로 이 문구가 유일한 상태 표시가 된다. */}
+        <span className="text-xs font-normal text-zinc-600 dark:text-zinc-400">
+          <span className="group-open:hidden">더보기</span>
+          <span className="hidden group-open:inline">접기</span>
+        </span>
+      </summary>
+
+      <div className="flex flex-col gap-3 border-t border-amber-200 p-4 dark:border-amber-900">
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">
           정규 워크플로 순서를 따르지 않고 현재 단계를 바로 지정합니다. 변경 이력에 &ldquo;단계 직접
           변경&rdquo;으로 따로 기록되며, 사유는 반드시 남겨야 합니다. 승인이 필요한 단계(출하 완료 등)는
           목록에 나오지 않습니다 — 승인 절차를 거쳐 진행해 주세요.
         </p>
-      </div>
 
       {unavailableReason && (
         <p className="rounded-md border border-zinc-200 bg-white p-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
@@ -167,6 +187,7 @@ export default function ManualStepSetPanel({
           {isSubmitting ? "변경 중..." : "단계 변경"}
         </button>
       </div>
-    </section>
+      </div>
+    </details>
   );
 }
