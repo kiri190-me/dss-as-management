@@ -1,6 +1,6 @@
 import type { WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
-import { getStepCategory, roleForCategory } from "./step-category";
+import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
 
@@ -63,12 +63,32 @@ export function checkHoldEligibility(
   actingUser: ActingUser,
   assignedEngineerId: string | null
 ): PermissionCheckResult {
+  // 로컬(mock) 모드 전용 진입점 — 분류를 TS 표에서 찾아 아래 공통 판정에
+  // 넘긴다. DB 모드는 checkHoldEligibilityForCategory를 직접 호출해 DB의
+  // workflow_steps.category를 넘긴다(Phase 2). 판정 로직 자체는 한 벌뿐이다.
+  return checkHoldEligibilityForCategory(
+    getStepCategory(workflowType, stepKey) ?? null,
+    actingUser,
+    assignedEngineerId
+  );
+}
+
+/**
+ * 보류 자격 판정의 실제 구현. 단계의 담당 분류를 **인자로 받는다** — 분류를
+ * 어디서 얻었는지(TS 표인지 DB인지)는 판정과 무관해야 하기 때문이다.
+ * Phase 2에서 규칙 출처를 DB로 옮기면서, 이 함수를 두 벌로 복제하는 대신
+ * 입력만 분리했다.
+ */
+export function checkHoldEligibilityForCategory(
+  category: StepCategory | null,
+  actingUser: ActingUser,
+  assignedEngineerId: string | null
+): PermissionCheckResult {
   if (!isApprovedAccount(actingUser)) {
     return { allowed: false, reason: "승인되지 않은 계정은 이 작업을 수행할 수 없습니다." };
   }
   if (actingUser.role === "SUPER_ADMIN" || actingUser.role === "ADMIN") return { allowed: true };
 
-  const category = getStepCategory(workflowType, stepKey);
   if (!category) {
     return { allowed: false, reason: "이 단계에서는 보류를 시작하거나 해제할 수 없습니다." };
   }

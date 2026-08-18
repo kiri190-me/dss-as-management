@@ -3,12 +3,15 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, statusChangeHistories, users, workflowSteps, workflowTemplates, workflowVersions } from "../schema";
 import {
-  checkHoldEligibility,
+  checkHoldEligibilityForCategory,
   checkManualStepSetEligibility,
   checkTransitionEligibility,
 } from "@/lib/domain/local/workflow/permissions";
-import { isManuallySelectableStep } from "@/lib/domain/local/workflow/manual-step-options";
-import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
+import {
+  findTransitionInRules,
+  isManuallySelectableStepInRules,
+  loadWorkflowRules,
+} from "../queries/workflow-rules";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
@@ -148,6 +151,23 @@ export async function transitionWorkflow(
         startedAt: null,
       };
 
+      /**
+       * Phase 2: 규칙의 출처가 transition-definitions.ts(TS 표)에서 DB로
+       * 바뀌었다. 접수 건에 고정된 workflow_version_id의 규칙만 읽으므로,
+       * 새 버전이 발행돼도 진행 중인 건은 예전 규칙 그대로 흘러간다.
+       *
+       * 규칙을 못 읽으면 조용히 "전이 없음"으로 처리하지 않고 명확히
+       * 실패시킨다 — 빈 규칙으로 통과시키면 모든 이동이 이유 없이 막힌다.
+       */
+      const rules = await loadWorkflowRules(tx, current.workflowVersionId);
+      if (!rules) {
+        return {
+          ok: false,
+          code: "INVALID_TRANSITION",
+          message: "이 접수 건의 워크플로 규칙을 확인할 수 없습니다.",
+        };
+      }
+
       let toStepId = current.currentWorkflowStepId;
       let toStepKeyForResult = current.currentStepKey;
       const setValues: Record<string, unknown> = {
@@ -160,7 +180,7 @@ export async function transitionWorkflow(
       // 있어야 아래 findTransitionDefinition에 정규 액션 5종만 전달됨이
       // 컴파일 시점에 보장된다(단계 직접 변경은 전이표에 행이 없다).
       if (actionCode !== "STEP_SET_MANUALLY" && STEP_MOVING_ACTIONS.has(actionCode)) {
-        const transition = findTransitionDefinition(current.workflowTypeCode, actionCode, current.currentStepKey);
+        const transition = findTransitionInRules(rules, actionCode, current.currentStepKey);
         if (!transition) {
           const message =
             actionCode === "STEP_ADVANCED"
@@ -224,10 +244,9 @@ export async function transitionWorkflow(
           }
         }
 
-        const [toStep] = await tx
-          .select({ id: workflowSteps.id })
-          .from(workflowSteps)
-          .where(and(eq(workflowSteps.workflowVersionId, current.workflowVersionId), eq(workflowSteps.key, transition.toStepKey)));
+        // 규칙과 함께 이미 읽어 둔 단계 목록에서 꺼낸다 — 같은 버전의 단계를
+        // 다시 조회할 이유가 없다.
+        const toStep = rules.stepByKey.get(transition.toStepKey);
         if (!toStep) {
           return { ok: false, code: "INVALID_TRANSITION", message: "대상 단계를 확인할 수 없습니다." };
         }
@@ -274,7 +293,7 @@ export async function transitionWorkflow(
         // 클라이언트가 보낸 단계 키를 신뢰하지 않는다. UI가 그리는 목록과
         // 정확히 같은 규칙(승인 게이트 단계 제외 + 상태 매핑 존재)을 서버가
         // 다시 평가한다 — manual-step-options.ts 참고.
-        if (!isManuallySelectableStep(current.workflowTypeCode, requestedStepKey)) {
+        if (!isManuallySelectableStepInRules(rules, requestedStepKey)) {
           return {
             ok: false,
             code: "INVALID_TRANSITION",
@@ -291,15 +310,7 @@ export async function transitionWorkflow(
 
         // 대상 단계는 반드시 이 접수 건의 워크플로 버전에 실제로 존재하는
         // 행이어야 한다(정규 전이가 toStepKey를 해석할 때와 같은 조회).
-        const [manualToStep] = await tx
-          .select({ id: workflowSteps.id })
-          .from(workflowSteps)
-          .where(
-            and(
-              eq(workflowSteps.workflowVersionId, current.workflowVersionId),
-              eq(workflowSteps.key, requestedStepKey)
-            )
-          );
+        const manualToStep = rules.stepByKey.get(requestedStepKey);
         if (!manualToStep) {
           return {
             ok: false,
@@ -323,9 +334,11 @@ export async function transitionWorkflow(
           return { ok: false, code: "INVALID_TRANSITION", message: "이미 보류 중입니다." };
         }
 
-        const eligibility = checkHoldEligibility(
-          current.workflowTypeCode,
-          current.currentStepKey,
+        // 단계의 담당 분류도 DB에서 읽은 규칙에서 가져온다(Phase 2) —
+        // 이 mutation 안에 TS 표를 보는 경로가 하나라도 남으면 두 출처가
+        // 갈라졌을 때 그 지점만 다르게 판정한다.
+        const eligibility = checkHoldEligibilityForCategory(
+          rules.stepByKey.get(current.currentStepKey)?.category ?? null,
           actingUser,
           current.assignedEngineerId
         );
