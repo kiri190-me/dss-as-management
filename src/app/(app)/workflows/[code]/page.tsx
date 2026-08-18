@@ -45,8 +45,25 @@ const ACTION_LABELS: Record<string, string> = {
  * 실제 흐름을 알 수 없기 때문이다 — 이 앱의 워크플로는 순서대로 한 칸씩
  * 가는 것이 아니라 전이 규칙이 정하는 대로 움직인다.
  */
-export default async function WorkflowDetailPage({ params }: { params: Promise<{ code: string }> }) {
+/**
+ * done 쿼리는 초안 편집기에서 폐기·발행 후 이동해 올 때만 붙는다. 그 조작들은
+ * 화면을 떠나며 끝나므로 편집기 쪽 메시지가 함께 사라지고, 그러면 "됐나?"를
+ * 알 수 없다 — 결과를 도착 화면에서 한 번 더 말해 준다.
+ */
+const DONE_MESSAGES: Record<string, string> = {
+  published: "초안을 발행했습니다. 아래 버전 이력에서 새 버전이 '현재'인지 확인하세요.",
+  discarded: "초안을 폐기했습니다. 구성은 발행본 그대로입니다.",
+};
+
+export default async function WorkflowDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ code: string }>;
+  searchParams: Promise<{ done?: string }>;
+}) {
   const { code } = await params;
+  const { done } = await searchParams;
 
   const session = await readSession();
   if (!session) redirect("/login");
@@ -71,6 +88,15 @@ export default async function WorkflowDetailPage({ params }: { params: Promise<{
         </h1>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-500">{detail.code}</p>
       </div>
+
+      {done && DONE_MESSAGES[done] && (
+        <p
+          role="status"
+          className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
+        >
+          {DONE_MESSAGES[done]}
+        </p>
+      )}
 
       {canEditWorkflowTemplates(actingUser.role) && (
         <WorkflowDraftEntry

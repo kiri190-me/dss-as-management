@@ -57,7 +57,18 @@ export default function WorkflowDraftEditor({
   const [newStatus, setNewStatus] = useState<string>(REPAIR_STATUS_CODES[0]);
   const [newCategory, setNewCategory] = useState<string>("");
 
-  function run(action: () => Promise<{ ok: boolean; message?: string }>, successText?: string) {
+  /**
+   * options.navigateTo가 있으면 이동만 하고 refresh는 하지 않는다.
+   *
+   * 이 구분이 없으면 폐기·발행 직후 404가 뜬다: push로 목록 화면으로 떠나는
+   * 동시에 refresh가 **방금 사라진 초안 페이지**를 다시 그리려 하고, 그
+   * 페이지는 초안이 없으면 notFound()이기 때문이다. 이동하는 경우에는 목적지
+   * 화면이 알아서 새로 읽으므로 refresh 자체가 불필요하다.
+   */
+  function run(
+    action: () => Promise<{ ok: boolean; message?: string }>,
+    options?: { navigateTo?: string }
+  ) {
     setMessage(null);
     startTransition(async () => {
       const result = await action();
@@ -65,9 +76,11 @@ export default function WorkflowDraftEditor({
         setMessage({ type: "error", text: result.message ?? "처리하지 못했습니다." });
         return;
       }
-      if (successText || result.message) {
-        setMessage({ type: "success", text: result.message ?? successText! });
+      if (options?.navigateTo) {
+        router.push(options.navigateTo);
+        return;
       }
+      if (result.message) setMessage({ type: "success", text: result.message });
       router.refresh();
     });
   }
@@ -339,10 +352,8 @@ export default function WorkflowDraftEditor({
           disabled={isPending}
           onClick={() => {
             if (!confirm("초안을 폐기합니다. 편집한 내용이 모두 사라집니다.")) return;
-            run(async () => {
-              const result = await discardWorkflowDraftAction(versionId);
-              if (result.ok) router.push(`/workflows/${templateCode}`);
-              return result;
+            run(() => discardWorkflowDraftAction(versionId), {
+              navigateTo: `/workflows/${templateCode}?done=discarded`,
             });
           }}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
@@ -359,10 +370,8 @@ export default function WorkflowDraftEditor({
             disabled={isPending || blocking.length > 0}
             onClick={() => {
               if (!confirm("이 초안을 발행합니다. 이후 접수되는 건부터 이 구성이 적용됩니다.")) return;
-              run(async () => {
-                const result = await publishWorkflowDraftAction(versionId);
-                if (result.ok) router.push(`/workflows/${templateCode}`);
-                return result;
+              run(() => publishWorkflowDraftAction(versionId), {
+                navigateTo: `/workflows/${templateCode}?done=published`,
               });
             }}
             className="rounded-md bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
