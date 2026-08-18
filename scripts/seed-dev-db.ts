@@ -229,7 +229,13 @@ export async function seedDevelopmentFixtures() {
       label: s.label,
       repairStatus: getStepStatus(s.workflowType, s.key) ?? null,
       category: getStepCategory(s.workflowType, s.key) ?? null,
-      isActive: true,
+      // product_intake는 전이 그래프에서 의도적으로 제외된 단계다
+      // (transition-definitions.ts 헤더 주석) — 들어오는 규칙도 나가는 규칙도
+      // 없어서, 접수 건이 이 단계에 놓이면 진행도 되돌리기도 못 하고 갇힌다.
+      // 실제로 DEMO 시드가 59건을 그렇게 만들었고 2026-08-18에 정리했다
+      // (scripts/fix-stranded-intake-steps.ts). 비활성으로 만들어 두면
+      // seed-realistic-demo.ts가 is_active 필터로 자동으로 피해 간다.
+      isActive: s.key !== "product_intake",
       createdAt: SEED_FIXED_TIMESTAMP,
       updatedAt: SEED_FIXED_TIMESTAMP,
     }));
