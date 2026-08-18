@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/repair-case-edit-authorization";
 import { listDeletedRepairCases, listRepairCases } from "@/lib/db/queries/repair-cases";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "전체 A/S 현황 | DSS A/S 관리 시스템",
@@ -23,6 +24,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function RepairCasesPage() {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("repairCases");
+
   // (app)/layout.tsx already gates session + approval status for every
   // route in this group; this repeats the no-session check at the point of
   // the DB query itself (same defensive pattern [id]/page.tsx already

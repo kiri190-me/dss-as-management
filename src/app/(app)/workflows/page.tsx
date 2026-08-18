@@ -6,6 +6,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 import { listWorkflowTemplateSummaries } from "@/lib/db/queries/workflow-templates";
 import { workflowTypeLabels } from "@/lib/domain/types";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "워크플로 관리 | DSS A/S 관리 시스템",
@@ -21,6 +22,11 @@ export const dynamic = "force-dynamic";
  * 250건이 걸린 워크플로와 0건짜리 아카이브 워크플로를 같은 무게로 다룰 수 없다.
  */
 export default async function WorkflowsPage() {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("workflows");
+
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);

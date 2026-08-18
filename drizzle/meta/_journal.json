@@ -295,6 +295,13 @@
       "when": 1787065447930,
       "tag": "0041_case_scoped_workflow_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787068265504,
+      "tag": "0042_role_permissions",
+      "breakpoints": true
     }
   ]
 }

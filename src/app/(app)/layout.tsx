@@ -3,6 +3,7 @@ import AppShell from "@/components/layout/AppShell";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { roleLabels } from "@/lib/domain/types";
+import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 
 export default async function AppLayout({
   children,
@@ -34,8 +35,15 @@ export default async function AppLayout({
     redirect("/pending-approval");
   }
 
+  // 사이드바에서 감출 항목을 정하기 위한 것이다. 차단 자체는 각 페이지가
+  // requireAreaAccess로 따로 하므로, 여기서 열려 있다고 들어가지지는 않는다.
+  const accessibleAreaKeys = await listAccessibleAreaKeys(user.role);
+
   return (
-    <AppShell user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}>
+    <AppShell
+      user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
+      accessibleAreaKeys={accessibleAreaKeys}
+    >
       {children}
     </AppShell>
   );

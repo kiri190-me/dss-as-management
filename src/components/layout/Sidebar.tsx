@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { navItems, navGroups, filterNavItemsForRole, type NavItem } from "@/lib/navigation";
+import { navItems, navGroups, filterNavItemsForAccess, type NavItem } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
 import SidebarFooter from "./SidebarFooter";
 
@@ -13,6 +13,8 @@ type SidebarProps = {
   onNavigate?: () => void;
   /** Whole-sidebar narrow/icon-only mode (distinct from per-group collapse below). Omitted (mobile drawer) means "always expanded" — the mobile drawer has no narrow/icon-only mode of its own. */
   isCollapsed?: boolean;
+  /** 관리자가 설정한 접근 가능 영역. null이면 역할 기준만으로 거른다(navigation.ts 참조). */
+  accessibleAreaKeys?: readonly string[] | null;
   /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
   onToggleCollapsed?: () => void;
 };
@@ -29,7 +31,7 @@ function navLinkClassName(isActive: boolean): string {
  * Checkpoint 2A (grouped sidebar) + refinement passes. 대시보드 renders
  * standalone (never inside a group, per the approved IA); every other item
  * is partitioned into navigation.ts's navGroups. Role-based visibility is
- * still decided ONLY by filterNavItemsForRole (unchanged) — grouping is a
+ * still decided ONLY by filterNavItemsForAccess (unchanged) — grouping is a
  * pure display concern layered on top, never a second gate: a group whose
  * every child is filtered out for this role renders nothing at all (no
  * empty header).
@@ -53,8 +55,8 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed }: SidebarProps) {
-  const visibleItems = filterNavItemsForRole(navItems, role);
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null }: SidebarProps) {
+  const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
 

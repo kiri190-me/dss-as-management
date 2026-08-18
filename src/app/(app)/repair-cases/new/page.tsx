@@ -6,6 +6,7 @@ import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references"
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { canEditProductModels } from "@/lib/auth/product-model-authorization";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "A/S 접수 | DSS A/S 관리 시스템",
@@ -14,6 +15,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function RepairCaseNewPage() {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("repairCaseNew");
+
   const writeSource = getRepairCaseWriteSource();
 
   // Only queried in database mode — local mode keeps using mockCustomers/

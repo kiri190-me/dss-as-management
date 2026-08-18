@@ -8,6 +8,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getExcelImportPreviewPage } from "@/lib/db/queries/excel-import-preview";
 import { parseExcelImportPreviewFilter } from "@/lib/domain/excel-import-preview-filter";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "수리품 목록 Excel 이관 | DSS A/S 관리 시스템",
@@ -22,6 +23,11 @@ export default async function RepairCaseExcelImportPage({
 }: {
   searchParams: Promise<{ batch?: string; page?: string; notice?: string; filter?: string }>;
 }) {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("repairCaseExcelImport");
+
   if (getAuthSource() !== "database") {
     return <PlaceholderPage title="수리품 목록 Excel 이관" description="이 화면은 데이터베이스 저장 모드에서만 사용할 수 있습니다." />;
   }

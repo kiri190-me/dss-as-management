@@ -6,6 +6,9 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@/lib/db/queries/shipment-delegations";
+import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
+import { requireAreaAccess } from "@/lib/auth/area-guard";
+import { buildRolePermissionViews } from "@/lib/auth/role-permission-views";
 
 export const metadata: Metadata = {
   title: "사용자 관리 | DSS A/S 관리 시스템",
@@ -41,10 +44,23 @@ export default async function UsersPage() {
     redirect("/login");
   }
 
+  await requireAreaAccess("users", actingUser.role);
+
   const [users, delegations] = await Promise.all([
     listUsersForRepresentativeManagement(),
     listShipmentDelegations(),
   ]);
 
-  return <RepresentativeManagementScreen actingUser={actingUser} users={users} delegations={delegations} />;
+  // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
+  // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다.
+  const rolePermissions = canManageRolePermissions(actingUser.role) ? await buildRolePermissionViews() : null;
+
+  return (
+    <RepresentativeManagementScreen
+      actingUser={actingUser}
+      users={users}
+      delegations={delegations}
+      rolePermissions={rolePermissions}
+    />
+  );
 }

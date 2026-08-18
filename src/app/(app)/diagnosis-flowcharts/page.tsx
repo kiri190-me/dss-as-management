@@ -12,6 +12,7 @@ import {
   canManageRepairCaseFlowchartsGlobally,
   canPermanentlyDeleteRepairCaseFlowchart,
 } from "@/lib/auth/repair-case-flowchart-authorization";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "진단 Flowchart 관리 | DSS A/S 관리 시스템",
@@ -52,6 +53,11 @@ export const dynamic = "force-dynamic";
  * permanentlyDeleteRepairCaseFlowchartAction regardless of this hint.
  */
 export default async function DiagnosisFlowchartsPage() {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("diagnosisFlowcharts");
+
   if (getAuthSource() !== "database") {
     return <PlaceholderPage title="진단 Flowchart 관리" description="이 화면은 데이터베이스 저장 모드에서만 사용할 수 있습니다." />;
   }

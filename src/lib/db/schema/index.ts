@@ -30,3 +30,4 @@ export * from "./repair-case-flowchart-edges";
 export * from "./repair-case-flowchart-edit-history";
 export * from "./audit-logs";
 export * from "./excel-imports";
+export * from "./role-permissions";

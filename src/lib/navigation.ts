@@ -47,6 +47,27 @@ export function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
   return items.filter((item) => !item.isVisibleForRole || item.isVisibleForRole(role));
 }
 
+/**
+ * 관리자가 설정한 접근 권한으로 거른다(2026-08-19).
+ *
+ * 역할 기반 필터(위)를 대체하지 않고 **뒤에 겹친다**. 설정은 좁히는 방향으로만
+ * 작동하므로, 역할이 원래 못 보던 항목이 설정 때문에 나타나는 일은 없어야 한다.
+ * accessibleAreaKeys가 null이면(권한을 아직 못 읽은 경우, mock 모드 등) 역할
+ * 필터 결과를 그대로 쓴다 — 못 읽었다고 메뉴를 전부 감추면 화면이 통째로
+ * 비어 고장처럼 보인다. 어차피 각 페이지가 서버에서 다시 막으므로 여기서
+ * 열려 있다고 들어가지지는 않는다.
+ */
+export function filterNavItemsForAccess(
+  items: NavItem[],
+  role: Role,
+  accessibleAreaKeys: readonly string[] | null
+): NavItem[] {
+  const byRole = filterNavItemsForRole(items, role);
+  if (!accessibleAreaKeys) return byRole;
+  const allowed = new Set(accessibleAreaKeys);
+  return byRole.filter((item) => allowed.has(item.key));
+}
+
 export type NavGroup = {
   key: string;
   label: string;

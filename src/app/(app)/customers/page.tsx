@@ -7,6 +7,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canViewCustomers } from "@/lib/auth/customer-authorization";
 import { listCustomersWithCounts } from "@/lib/db/queries/customers";
+import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
   title: "고객사 관리 | DSS A/S 관리 시스템",
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
  * from an unauthorized role gets everywhere else in this app.
  */
 export default async function CustomersPage() {
+  // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
+  // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
+  // 막은 것이 아니다.
+  await requireAreaAccessForCurrentUser("customers");
+
   if (getAuthSource() !== "database") {
     return (
       <PlaceholderPage
