@@ -164,6 +164,20 @@ export type WorkflowDraftStepView = {
   category: StepCategory | null;
 };
 
+/** 초안 편집 화면이 이동 규칙 한 줄을 그리는 데 필요한 전부. */
+export type WorkflowDraftTransitionView = {
+  id: string;
+  actionCode: string;
+  fromStepId: string;
+  toStepId: string;
+  fromStepKey: string;
+  toStepKey: string;
+  allowedRoles: string[];
+  requiresAssignedEngineer: boolean;
+  requiresReason: boolean;
+  requiredApprovalType: string | null;
+};
+
 export type WorkflowDraftDetail = {
   versionId: string;
   versionNumber: number;
@@ -171,7 +185,7 @@ export type WorkflowDraftDetail = {
   templateName: string;
   createdByName: string;
   steps: WorkflowDraftStepView[];
-  transitions: { id: string; actionCode: string; fromStepKey: string; toStepKey: string }[];
+  transitions: WorkflowDraftTransitionView[];
   validation: DraftValidationResult;
 };
 
@@ -217,16 +231,26 @@ export async function getWorkflowDraftDetail(versionId: string): Promise<Workflo
       actionCode: workflowTransitions.actionCode,
       fromStepId: workflowTransitions.fromStepId,
       toStepId: workflowTransitions.toStepId,
+      allowedRoles: workflowTransitions.allowedRoles,
+      requiresAssignedEngineer: workflowTransitions.requiresAssignedEngineer,
+      requiresReason: workflowTransitions.requiresReason,
+      requiredApprovalType: workflowTransitions.requiredApprovalType,
     })
     .from(workflowTransitions)
     .where(eq(workflowTransitions.workflowVersionId, versionId));
 
   const keyById = new Map(stepRows.map((s) => [s.id, s.key]));
-  const transitions = transitionRows.map((t) => ({
+  const transitions: WorkflowDraftTransitionView[] = transitionRows.map((t) => ({
     id: t.id,
     actionCode: t.actionCode as string,
+    fromStepId: t.fromStepId,
+    toStepId: t.toStepId,
     fromStepKey: keyById.get(t.fromStepId) ?? "",
     toStepKey: keyById.get(t.toStepId) ?? "",
+    allowedRoles: t.allowedRoles as string[],
+    requiresAssignedEngineer: t.requiresAssignedEngineer,
+    requiresReason: t.requiresReason,
+    requiredApprovalType: t.requiredApprovalType,
   }));
 
   const validation = validateWorkflowDraft(

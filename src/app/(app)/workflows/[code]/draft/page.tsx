@@ -53,7 +53,7 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
         templateCode={draft.templateCode}
         steps={draft.steps}
         validation={draft.validation}
-        transitionCount={draft.transitions.length}
+        transitions={draft.transitions}
       />
     </div>
   );

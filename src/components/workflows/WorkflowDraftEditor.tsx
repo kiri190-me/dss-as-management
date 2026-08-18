@@ -5,14 +5,20 @@ import { useRouter } from "next/navigation";
 import { REPAIR_STATUS_CODES, repairStatusLabels } from "@/lib/domain/types";
 import { STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
 import type { DraftValidationResult } from "@/lib/domain/workflow-draft-validation";
-import type { WorkflowDraftStepView } from "@/lib/db/queries/workflow-templates";
+import type {
+  WorkflowDraftStepView,
+  WorkflowDraftTransitionView,
+} from "@/lib/db/queries/workflow-templates";
+import WorkflowDraftTransitionEditor from "./WorkflowDraftTransitionEditor";
 import {
   addWorkflowDraftStepAction,
   discardWorkflowDraftAction,
   publishWorkflowDraftAction,
   removeWorkflowDraftStepAction,
+  removeWorkflowDraftTransitionAction,
   reorderWorkflowDraftStepsAction,
   updateWorkflowDraftStepAction,
+  upsertWorkflowDraftTransitionAction,
 } from "@/lib/server/actions/workflow-drafts";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -35,13 +41,13 @@ export default function WorkflowDraftEditor({
   templateCode,
   steps,
   validation,
-  transitionCount,
+  transitions,
 }: {
   versionId: string;
   templateCode: string;
   steps: WorkflowDraftStepView[];
   validation: DraftValidationResult;
-  transitionCount: number;
+  transitions: WorkflowDraftTransitionView[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -122,7 +128,7 @@ export default function WorkflowDraftEditor({
       <section className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">단계 {steps.length}개</h2>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">이동 규칙 {transitionCount}개 (편집은 다음 단계에서 지원)</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">이동 규칙 {transitions.length}개</p>
         </div>
 
         <ul className="flex flex-col gap-2">
@@ -231,6 +237,28 @@ export default function WorkflowDraftEditor({
                   </button>
                 </div>
               </div>
+
+              <WorkflowDraftTransitionEditor
+                step={step}
+                steps={steps}
+                transitions={transitions}
+                disabled={isPending}
+                onSave={(actionCode, form) =>
+                  run(() =>
+                    upsertWorkflowDraftTransitionAction({
+                      versionId,
+                      actionCode,
+                      fromStepId: step.id,
+                      toStepId: form.toStepId,
+                      allowedRoles: form.allowedRoles,
+                      requiresAssignedEngineer: form.requiresAssignedEngineer,
+                      requiresReason: form.requiresReason,
+                      requiredApprovalType: form.requiredApprovalType,
+                    })
+                  )
+                }
+                onRemove={(transitionId) => run(() => removeWorkflowDraftTransitionAction(transitionId))}
+              />
             </li>
           ))}
         </ul>

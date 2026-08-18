@@ -12,7 +12,11 @@ import {
   reorderWorkflowDraftSteps,
   updateWorkflowDraftStep,
 } from "@/lib/db/mutations/workflow-draft-steps";
-import { REPAIR_STATUS_CODES, type RepairStatus } from "@/lib/domain/types";
+import { REPAIR_STATUS_CODES, ROLE_CODES, type RepairStatus, type Role } from "@/lib/domain/types";
+import {
+  removeWorkflowDraftTransition,
+  upsertWorkflowDraftTransition,
+} from "@/lib/db/mutations/workflow-draft-transitions";
 import { STEP_CATEGORY_CODES, type StepCategory } from "@/lib/domain/local/workflow/step-category";
 import type { DraftValidationIssue } from "@/lib/domain/workflow-draft-validation";
 
@@ -144,4 +148,51 @@ export async function removeWorkflowDraftStepAction(stepId: string): Promise<Wor
     };
   }
   return { ok: false, message: result.message };
+}
+
+const ACTION_CODES = ["STEP_ADVANCED", "STEP_RETURNED", "SHIPMENT_COMPLETED"] as const;
+const APPROVAL_TYPES = ["REPAIR_INSPECTION", "FINAL_SHIPMENT"] as const;
+
+export async function upsertWorkflowDraftTransitionAction(input: {
+  versionId: string;
+  actionCode: string;
+  fromStepId: string;
+  toStepId: string;
+  allowedRoles: string[];
+  requiresAssignedEngineer: boolean;
+  requiresReason: boolean;
+  requiredApprovalType: string | null;
+}): Promise<WorkflowDraftActionResult> {
+  const session = await requireSession();
+  if (!session.ok) return session;
+
+  if (!(ACTION_CODES as readonly string[]).includes(input.actionCode)) {
+    return { ok: false, message: "이동 종류를 확인할 수 없습니다." };
+  }
+  if (!Array.isArray(input.allowedRoles) || input.allowedRoles.some((r) => !(ROLE_CODES as readonly string[]).includes(r))) {
+    return { ok: false, message: "역할 값을 확인할 수 없습니다." };
+  }
+  if (input.requiredApprovalType !== null && !(APPROVAL_TYPES as readonly string[]).includes(input.requiredApprovalType)) {
+    return { ok: false, message: "승인 종류를 확인할 수 없습니다." };
+  }
+
+  const result = await upsertWorkflowDraftTransition({
+    versionId: input.versionId,
+    actionCode: input.actionCode as (typeof ACTION_CODES)[number],
+    fromStepId: input.fromStepId,
+    toStepId: input.toStepId,
+    allowedRoles: input.allowedRoles as Role[],
+    requiresAssignedEngineer: Boolean(input.requiresAssignedEngineer),
+    requiresReason: Boolean(input.requiresReason),
+    requiredApprovalType: input.requiredApprovalType as (typeof APPROVAL_TYPES)[number] | null,
+    actorUserId: session.userId,
+  });
+  return result.ok ? { ok: true } : { ok: false, message: result.message };
+}
+
+export async function removeWorkflowDraftTransitionAction(transitionId: string): Promise<WorkflowDraftActionResult> {
+  const session = await requireSession();
+  if (!session.ok) return session;
+  const result = await removeWorkflowDraftTransition({ transitionId, actorUserId: session.userId });
+  return result.ok ? { ok: true, message: "이동 규칙을 삭제했습니다." } : { ok: false, message: result.message };
 }
