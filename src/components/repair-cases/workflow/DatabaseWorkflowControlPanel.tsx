@@ -9,7 +9,8 @@ import { roleForCategory } from "@/lib/domain/local/workflow/step-category";
 import { findTransitionInDto, type WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import {
-  evaluateHoldAvailability,
+  evaluateAddCaseStepAvailability,
+  evaluateHoldAvailabilityForCategory,
   evaluateTransitionAvailability,
   explainUnavailableWorkflowActions,
   type ApprovalGateStatus,
@@ -17,8 +18,10 @@ import {
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { CurrentHoldState } from "@/lib/db/queries/workflow-history";
 import type { CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
+import { addCaseWorkflowStepAction } from "@/lib/server/actions/case-workflow-steps";
 import { transitionWorkflowAction } from "@/lib/server/actions/transition-workflow";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
+import CaseWorkflowStepDialog from "./CaseWorkflowStepDialog";
 import HoldDialog from "./HoldDialog";
 import ReleaseHoldDialog from "./ReleaseHoldDialog";
 import ShipmentCompletionDialog from "./ShipmentCompletionDialog";
@@ -47,7 +50,7 @@ function toHoldState(current: CurrentHoldState): HoldState {
 }
 
 type StatusMessage = { type: "success" | "error"; text: string };
-type DialogKind = "advance" | "return" | "hold" | "release" | "ship" | null;
+type DialogKind = "advance" | "return" | "hold" | "release" | "ship" | "addStep" | null;
 
 /**
  * Database-mode counterpart to WorkflowControlPanel.tsx (local mode) —
@@ -143,12 +146,14 @@ export default function DatabaseWorkflowControlPanel({
   }
 
   function evaluateHold(isRelease: boolean) {
-    return evaluateHoldAvailability({
+    // 분류는 이 건의 DB 규칙(rules)에서 온다 — TS 분류표에는 건별로 추가한
+    // 단계(case_step_N)가 없어서, 표로 찾으면 서버가 허용하는 보류를 화면이
+    // 잠근다.
+    return evaluateHoldAvailabilityForCategory({
       isRelease,
       actingUser,
       holdState: holdStateForCheck,
-      workflowType: resolved.workflowType,
-      currentStepKey,
+      stepCategory: category,
       assignedEngineerId: resolved.assignedEngineerId,
       isCaseLocked,
     });
@@ -159,6 +164,11 @@ export default function DatabaseWorkflowControlPanel({
   const shipAvailability = evaluate("SHIPMENT_COMPLETED");
   const holdStartAvailability = evaluateHold(false);
   const holdReleaseAvailability = evaluateHold(true);
+  const addStepAvailability = evaluateAddCaseStepAvailability({
+    actingUser,
+    assignedEngineerId: resolved.assignedEngineerId,
+    isCaseLocked,
+  });
 
   const actionExplanation = actingUser
     ? explainUnavailableWorkflowActions({
@@ -190,6 +200,32 @@ export default function DatabaseWorkflowControlPanel({
       }
       setOpenDialog(null);
       setStatusMessage({ type: "success", text: successText });
+      router.refresh();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitAddStep(input: { label: string; status: string; category: string | null }) {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setStatusMessage(null);
+    try {
+      const result = await addCaseWorkflowStepAction({
+        repairCaseId: resolved.id,
+        expectedVersion: resolved.version,
+        label: input.label,
+        status: input.status,
+        category: input.category,
+      });
+      if (!result.ok) {
+        setStatusMessage({ type: "error", text: result.message });
+        return;
+      }
+      setOpenDialog(null);
+      setStatusMessage({ type: "success", text: result.message });
+      // 단계를 끼워넣으면 이 건의 workflow_version이 통째로 바뀐다 —
+      // 화면이 들고 있는 rules가 곧바로 낡으므로 반드시 다시 읽어야 한다.
       router.refresh();
     } finally {
       setIsSubmitting(false);
@@ -235,6 +271,12 @@ export default function DatabaseWorkflowControlPanel({
           onClick: () => setOpenDialog("hold"),
           tone: "warning",
         },
+    {
+      key: "add-step",
+      label: "이 건에만 단계 추가",
+      availability: isConflict ? { available: false, reason: "최신 정보를 다시 불러와야 합니다." } : addStepAvailability,
+      onClick: () => setOpenDialog("addStep"),
+    },
     {
       key: "ship",
       label: "출하 완료 처리",
@@ -329,6 +371,15 @@ export default function DatabaseWorkflowControlPanel({
         holdReason={holdState.reason}
         isSubmitting={isSubmitting}
         onConfirm={(reason) => void submit("HOLD_RELEASED", reason, "보류를 해제했습니다.")}
+        onCancel={() => setOpenDialog(null)}
+      />
+
+      <CaseWorkflowStepDialog
+        isOpen={openDialog === "addStep"}
+        currentStepLabel={stepInfo.label}
+        nextStepLabel={advanceTransition ? stepLabelAndOrder(rules, advanceTransition.toStepKey).label : null}
+        isSubmitting={isSubmitting}
+        onConfirm={(input) => void submitAddStep(input)}
         onCancel={() => setOpenDialog(null)}
       />
 

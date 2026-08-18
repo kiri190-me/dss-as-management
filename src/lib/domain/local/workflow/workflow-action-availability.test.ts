@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   evaluateTransitionAvailability,
-  evaluateHoldAvailability,
+  evaluateHoldAvailabilityForCategory,
   explainUnavailableWorkflowActions,
   LOCKED_CASE_MESSAGE,
 } from "./workflow-action-availability";
@@ -118,16 +118,15 @@ test("everything satisfied: available", () => {
   assert.deepEqual(result, { available: true });
 });
 
-// --------------------------------------------------------------- evaluateHoldAvailability
+// ------------------------------------------------------- evaluateHoldAvailabilityForCategory
 
 test("locked case blocks hold start/release too, unconditionally — no admin bypass", () => {
   for (const role of ["AS_ENGINEER", "ADMIN", "SUPER_ADMIN"] as const) {
-    const result = evaluateHoldAvailability({
+    const result = evaluateHoldAvailabilityForCategory({
       isRelease: false,
       actingUser: user(role),
       holdState: NOT_ON_HOLD,
-      workflowType: "MATCHER",
-      currentStepKey: "repair_in_progress",
+      stepCategory: "TECHNICAL",
       assignedEngineerId: "actor-1",
       isCaseLocked: true,
     });
@@ -136,12 +135,11 @@ test("locked case blocks hold start/release too, unconditionally — no admin by
 });
 
 test("hold-release attempted while not on hold: unavailable", () => {
-  const result = evaluateHoldAvailability({
+  const result = evaluateHoldAvailabilityForCategory({
     isRelease: true,
     actingUser: user("SUPER_ADMIN"),
     holdState: NOT_ON_HOLD,
-    workflowType: "MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     assignedEngineerId: null,
     isCaseLocked: false,
   });
@@ -150,12 +148,11 @@ test("hold-release attempted while not on hold: unavailable", () => {
 });
 
 test("hold-start attempted while already on hold: unavailable", () => {
-  const result = evaluateHoldAvailability({
+  const result = evaluateHoldAvailabilityForCategory({
     isRelease: false,
     actingUser: user("SUPER_ADMIN"),
     holdState: ON_HOLD,
-    workflowType: "MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     assignedEngineerId: null,
     isCaseLocked: false,
   });
@@ -164,16 +161,39 @@ test("hold-start attempted while already on hold: unavailable", () => {
 });
 
 test("AS_ENGINEER on their own TECHNICAL step, unlocked, not on hold: hold start is available", () => {
-  const result = evaluateHoldAvailability({
+  const result = evaluateHoldAvailabilityForCategory({
     isRelease: false,
     actingUser: user("AS_ENGINEER"),
     holdState: NOT_ON_HOLD,
-    workflowType: "MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     assignedEngineerId: "actor-1",
     isCaseLocked: false,
   });
   assert.deepEqual(result, { available: true });
+});
+
+test("분류가 없는 단계(건별로 추가한 case_step_N 등)에서는 관리자만 보류할 수 있다", () => {
+  // 서버(checkHoldEligibilityForCategory)와 같은 판정이다. 예전처럼 TS 표에서
+  // 분류를 찾았다면 DB에만 있는 단계는 늘 null이 되어 담당자까지 막혔다.
+  const engineer = evaluateHoldAvailabilityForCategory({
+    isRelease: false,
+    actingUser: user("AS_ENGINEER"),
+    holdState: NOT_ON_HOLD,
+    stepCategory: null,
+    assignedEngineerId: "actor-1",
+    isCaseLocked: false,
+  });
+  assert.equal(engineer.available, false);
+
+  const admin = evaluateHoldAvailabilityForCategory({
+    isRelease: false,
+    actingUser: user("ADMIN"),
+    holdState: NOT_ON_HOLD,
+    stepCategory: null,
+    assignedEngineerId: "actor-1",
+    isCaseLocked: false,
+  });
+  assert.deepEqual(admin, { available: true });
 });
 
 // ------------------------------------------------------- explainUnavailableWorkflowActions

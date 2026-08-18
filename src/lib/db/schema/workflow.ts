@@ -116,11 +116,32 @@ export const workflowVersions = pgTable(
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    /**
+     * 접수 건 하나만을 위한 변주 버전인가(2026-08-19 승인).
+     *
+     * 템플릿 워크플로를 바탕으로 그 건에만 단계를 끼워넣을 때 만들어진다.
+     * 워크플로 관리 화면의 버전 이력에서는 제외해야 하므로 그 필터 기준이
+     * 이 플래그다.
+     *
+     * 아래 repair_case_id와 역할이 다르다. 그쪽은 추적용이고, 판정은 항상 이
+     * 플래그로 한다 — 접수 건이 영구 삭제되어 참조가 의미를 잃어도 "건 전용"
+     * 이라는 사실은 남아야 템플릿 이력을 오염시키지 않는다.
+     */
+    isCaseScoped: boolean("is_case_scoped").notNull().default(false),
+    /**
+     * 이 변주를 만들어낸 접수 건(추적·표시용). **외래키를 걸지 않았다** —
+     * repair_cases 스키마가 이미 workflow_versions를 참조하므로 반대 방향
+     * FK를 추가하면 두 모듈이 순환 참조가 된다. 무결성이 필요한 판정은 이
+     * 컬럼이 아니라 is_case_scoped로 하며, 접수 건이 영구 삭제되면 이 값은
+     * 가리키는 곳 없는 uuid로 남는다(표시에서만 "알 수 없음"이 된다).
+     */
+    repairCaseId: uuid("repair_case_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => [
+    index("workflow_versions_case_scoped_idx").on(table.repairCaseId),
     uniqueIndex("workflow_versions_template_version_unique").on(
       table.workflowTemplateId,
       table.versionNumber

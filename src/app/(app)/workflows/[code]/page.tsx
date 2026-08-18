@@ -150,6 +150,12 @@ export default async function WorkflowDetailPage({
             </tbody>
           </table>
         </div>
+        {detail.caseScopedVersionCount > 0 && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            이 워크플로를 바탕으로 만든 <strong>접수 건 전용 변주</strong>가 {detail.caseScopedVersionCount}건 있습니다.
+            해당 접수 건에서만 쓰이므로 위 목록에는 넣지 않았습니다 — 그래서 버전 번호가 중간에 건너뛸 수 있습니다.
+          </p>
+        )}
       </section>
 
       {!rules ? (

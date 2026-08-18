@@ -109,6 +109,13 @@ export type WorkflowTemplateDetail = {
   code: WorkflowType;
   name: string;
   versions: WorkflowVersionSummary[];
+  /**
+   * 목록에서 걸러낸 "건 전용 버전"의 수. 이 화면은 템플릿을 관리하는 곳이므로
+   * 접수 건 하나에만 붙은 변주는 목록에 올리지 않는다. 다만 그 버전들도 같은
+   * 템플릿의 번호를 하나씩 가져가므로 목록의 버전 번호가 v1, v2, v5처럼 건너뛴다
+   * — 빠진 번호가 사라진 것이 아님을 알리기 위해 수만 함께 넘긴다.
+   */
+  caseScopedVersionCount: number;
 };
 
 export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowTemplateDetail | null> {
@@ -133,12 +140,18 @@ export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowT
     })
     .from(workflowVersions)
     .innerJoin(users, eq(users.id, workflowVersions.createdBy))
-    .where(eq(workflowVersions.workflowTemplateId, template.id))
+    .where(and(eq(workflowVersions.workflowTemplateId, template.id), eq(workflowVersions.isCaseScoped, false)))
     .orderBy(desc(workflowVersions.versionNumber));
+
+  const [caseScoped] = await db
+    .select({ n: count() })
+    .from(workflowVersions)
+    .where(and(eq(workflowVersions.workflowTemplateId, template.id), eq(workflowVersions.isCaseScoped, true)));
 
   return {
     code: template.code as WorkflowType,
     name: template.name,
+    caseScopedVersionCount: Number(caseScoped?.n ?? 0),
     versions: versions.map((v) => ({
       id: v.id,
       versionNumber: v.versionNumber,

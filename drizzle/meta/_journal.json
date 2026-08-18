@@ -288,6 +288,13 @@
       "when": 1787058352664,
       "tag": "0040_workflow_rules_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787065447930,
+      "tag": "0041_case_scoped_workflow_versions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import type { Role, WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
-import { checkHoldEligibility, checkTransitionEligibility } from "./permissions";
-import { getStepCategory, roleForCategory } from "./step-category";
+import { checkHoldEligibilityForCategory, checkTransitionEligibility } from "./permissions";
+import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
 
@@ -84,13 +84,25 @@ export function evaluateTransitionAvailability(params: {
   return { available: true };
 }
 
-/** Mirrors DatabaseWorkflowControlPanel's original evaluateHold() exactly, with the same unconditional lock check added first. */
-export function evaluateHoldAvailability(params: {
+/**
+ * 보류 시작/해제 버튼의 표시 판정. 단계의 담당 분류를 TS 표(getStepCategory)에서
+ * 찾지 않고 **인자로 받는다** — 서버가 그 접수 건의 workflow_steps.category를 읽어
+ * 넘겨 준다.
+ *
+ * 나눈 이유: TS 표는 워크플로 타입 + 단계 키로 찾는데, DB에는 그 표에 없는
+ * 단계가 있을 수 있다(건별 변주로 추가한 case_step_N이 대표적이다). 그러면
+ * 분류를 못 찾아 화면은 보류 버튼을 잠그는데 서버(checkHoldEligibilityForCategory,
+ * DB 분류 사용)는 허용한다 — 눌리지 않는 버튼과 통과하는 요청이 어긋난다.
+ * 판정 로직은 여전히 checkHoldEligibilityForCategory 한 벌뿐이고, 분류를 얻는
+ * 경로만 화면과 서버가 같아진다. (분류를 TS 표에서 찾던 이전 판(evaluateHold-
+ * Availability)은 이 함수로 대체되어 사라졌다 — 로컬/mock 패널은 예전부터
+ * checkHoldEligibility를 직접 부르고 있어 영향이 없다.)
+ */
+export function evaluateHoldAvailabilityForCategory(params: {
   isRelease: boolean;
   actingUser: ActingUser | null;
   holdState: HoldState;
-  workflowType: WorkflowType;
-  currentStepKey: string;
+  stepCategory: StepCategory | null;
   assignedEngineerId: string | null;
   isCaseLocked: boolean;
 }): ActionAvailability {
@@ -101,7 +113,7 @@ export function evaluateHoldAvailability(params: {
   if (params.isRelease && !params.holdState.isOnHold) return { available: false, reason: "보류 중이 아닙니다." };
   if (!params.isRelease && params.holdState.isOnHold) return { available: false, reason: "이미 보류 중입니다." };
 
-  const eligibility = checkHoldEligibility(params.workflowType, params.currentStepKey, params.actingUser, params.assignedEngineerId);
+  const eligibility = checkHoldEligibilityForCategory(params.stepCategory, params.actingUser, params.assignedEngineerId);
   if (!eligibility.allowed) return { available: false, reason: eligibility.reason };
   return { available: true };
 }
@@ -182,4 +194,36 @@ export function explainUnavailableWorkflowActions(params: {
     message: `현재 단계는 ${STAGE_LABEL[owningRole]}입니다. 다음 작업은 ${ACTOR_LABEL[owningRole]}가 진행할 수 있습니다.`,
     owningRole,
   };
+}
+
+/**
+ * "이 건에만 단계 추가"(case-workflow-steps.ts) 버튼의 표시 판정.
+ *
+ * 전이가 아니라 워크플로 자체를 손대는 조작이므로 위의 두 함수와 규칙이 다르다.
+ * 보류 중에도 막지 않는다 — 단계를 하나 정의하는 것은 이 수리품에 대한 작업이
+ * 아니라 앞으로 할 일을 적어 두는 것이고, 보류는 작업을 멈추는 것이지 계획을
+ * 멈추는 것이 아니다. 반대로 잠금(출하 완료)은 막는다: 끝난 건의 워크플로를
+ * 바꿀 이유가 없다.
+ *
+ * 담당 엔지니어 본인만 쓸 수 있다(사용자 결정). 관리자는 이 앱의 다른 모든
+ * 담당 검사와 마찬가지로 우회한다. 여기서의 판정은 화면 힌트일 뿐이고
+ * addCaseWorkflowStep()이 DB를 다시 읽어 같은 판정을 독립적으로 수행한다.
+ */
+export function evaluateAddCaseStepAvailability(params: {
+  actingUser: ActingUser | null;
+  assignedEngineerId: string | null;
+  isCaseLocked: boolean;
+}): ActionAvailability {
+  if (params.isCaseLocked) return { available: false, reason: LOCKED_CASE_MESSAGE };
+  if (!params.actingUser) return { available: false, reason: "로그인한 사용자 정보를 확인할 수 없습니다." };
+
+  const role = params.actingUser.role;
+  if (role === "SUPER_ADMIN" || role === "ADMIN") return { available: true };
+  if (role !== "AS_ENGINEER") {
+    return { available: false, reason: "담당 엔지니어 또는 관리자만 단계를 추가할 수 있습니다." };
+  }
+  if (params.assignedEngineerId !== params.actingUser.id) {
+    return { available: false, reason: "이 접수 건의 담당 엔지니어만 단계를 추가할 수 있습니다." };
+  }
+  return { available: true };
 }
