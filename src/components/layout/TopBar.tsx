@@ -22,7 +22,13 @@ type TopBarProps = {
  */
 export default function TopBar({ title, onMenuClick }: TopBarProps) {
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900">
+    // `h-14`가 `min-h-14`로 바뀐 것은 뒤의 pt 인셋 때문이다: 고정 높이
+    // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
+    // 인셋 값이 0인 환경(데스크톱, 대부분의 세로 화면)에서는 min-h-14가
+    // 기존 h-14와 정확히 같은 56px로 렌더된다. 인셋이 있는 경우
+    // (viewport-fit=cover로 화면 전체를 쓰게 되면서 상태 표시줄/노치 밑까지
+    // 뷰포트가 확장된 상태)에만 그만큼 헤더가 아래로 밀린다.
+    <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 pt-[env(safe-area-inset-top)] dark:border-zinc-800 dark:bg-zinc-900">
       <button
         type="button"
         onClick={onMenuClick}

@@ -34,7 +34,12 @@ export default async function LoginPage() {
   const viewModel = getLoginViewModel(authSource);
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+    // AppShell 밖의 독립 화면이라 하단 여백 보정을 여기서 따로 해준다.
+    // min-h-screen(=100vh)은 모바일 하단 툴바가 펼쳐지면 그만큼 화면 밖으로
+    // 넘치므로 min-h-dvh로 바꾸고, 세로 패딩에 안전 영역 인셋을 더한다.
+    // 계정 목록이 길어 화면보다 커지는 폰에서는 기존과 동일하게 문서 전체가
+    // 스크롤된다(justify-center는 그대로 두었다).
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 pt-[calc(2rem+env(safe-area-inset-top))] pb-[calc(2rem+env(safe-area-inset-bottom))]">
       <div className="flex items-center gap-2">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           {viewModel.heading}

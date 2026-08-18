@@ -24,7 +24,10 @@ export default async function PendingApprovalPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 text-center">
+    // AppShell 밖의 독립 화면이라 하단 여백 보정을 여기서 따로 해준다.
+    // min-h-screen(=100vh)은 모바일 하단 툴바가 펼쳐지면 그만큼 화면 밖으로
+    // 넘치므로 min-h-dvh로 바꾸고, 세로 패딩에 안전 영역 인셋을 더한다.
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 pt-[calc(2rem+env(safe-area-inset-top))] pb-[calc(2rem+env(safe-area-inset-bottom))] text-center">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
         승인 대기 중입니다
       </h1>
