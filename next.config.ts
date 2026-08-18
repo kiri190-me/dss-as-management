@@ -30,7 +30,16 @@ const nextConfig: NextConfig = {
   // 상태였고, 그대로 두면 폰에서 접속할 때 위에 적힌 stale-bundle 증상이
   // 그대로 재현된다 — 모바일 레이아웃/PWA 검증 자체가 불가능해진다.
   // 앞의 두 주소는 위 주석의 판단대로 그대로 남겨 둔다.
-  allowedDevOrigins: ["192.168.1.132", "192.168.35.215", "192.168.0.12"],
+  //
+  // 10.150.71.135 added: PC가 폰 핫스팟("... S25")에 접속하면서 IP 대역 자체가
+  // 사설 192.168.x가 아닌 10.150.71.x로 바뀌었다. 이 목록에 살아 있는 주소가
+  // 없으면 위에 기록된 stale-bundle 사고가 그대로 재발한다.
+  //
+  // 이 목록이 오늘 하루에만 세 번 늘어난 데서 보이듯, 접속 네트워크가 바뀔
+  // 때마다 여기를 고쳐야 한다. 근본 해결은 공유기 DHCP 예약(고정 IP)이며,
+  // 핫스팟처럼 고정할 수 없는 환경이라면 접속 전에 `Get-NetIPAddress`로
+  // 현재 IP를 확인하고 이 배열과 폰 쪽 설정을 함께 갱신해야 한다.
+  allowedDevOrigins: ["192.168.1.132", "192.168.35.215", "192.168.0.12", "10.150.71.135"],
   experimental: {
     // The application still rejects workbook bytes above 20 MiB. This
     // slightly larger transport ceiling leaves room for multipart metadata.
