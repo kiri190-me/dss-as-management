@@ -5,10 +5,31 @@ import SummaryCard from "@/components/dashboard/SummaryCard";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import { computeDashboardSummary } from "@/lib/domain/dashboard-metrics";
 import { DEMO_REFERENCE_DATE, formatYearMonth } from "@/lib/domain/demo-clock";
-import { useEffectiveRepairCases } from "@/lib/domain/local/workflow/effective-repair-case";
+import { mockRepairCases } from "@/lib/domain/mock-data";
+import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import { useEffectiveRepairCasesFromBase } from "@/lib/domain/local/workflow/effective-repair-case";
 
-export default function DashboardContent() {
-  const { cases, isHydrated } = useEffectiveRepairCases();
+type DashboardContentProps = {
+  /**
+   * Non-local base rows fetched server-side (database mode) — the exact
+   * same listRepairCases() result 전체 A/S 현황(RepairCaseListPage)이 받는
+   * 것과 동일한 집합이다. 두 화면이 같은 행을 세게 만드는 것이 이 prop의
+   * 존재 이유이므로, 여기에 대시보드 전용으로 필터링·집계된 다른 배열을
+   * 넘기면 안 된다. Undefined면 기존 Mock 동작 그대로이며, Mock과 Database
+   * 행은 절대 섞이지 않는다(effective-repair-case.ts 참고).
+   */
+  serverBaseCases?: ResolvedRepairCase[];
+};
+
+export default function DashboardContent({ serverBaseCases }: DashboardContentProps) {
+  // Only actually used when serverBaseCases is undefined (Mock mode) — kept
+  // as a plain, unconditional useMemo (not a conditional hook call) so the
+  // hook order below never depends on the serverBaseCases prop. 같은 이유로
+  // RepairCaseListPage도 동일한 형태를 쓴다.
+  const mockBaseCases = useMemo(() => mockRepairCases.map((c) => toResolvedFromMock(c)), []);
+  const baseCases = serverBaseCases ?? mockBaseCases;
+
+  const { cases, isHydrated } = useEffectiveRepairCasesFromBase(baseCases);
 
   const summary = useMemo(() => computeDashboardSummary(cases, DEMO_REFERENCE_DATE), [cases]);
 
