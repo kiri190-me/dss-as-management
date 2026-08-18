@@ -1,5 +1,6 @@
 import { normalizeEntityName } from "../entity-name-match";
 import type { BillingType, Priority, RepairStatus, WorkflowType } from "../types";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 // 브라우저 localStorage에만 저장되는 데모 전용 로컬 접수 건이다. 실제 DB 스키마
 // 결정이 아니며, 모의(mock) RepairCase와 달리 고객/제품 FK 대신 스냅샷 값을
@@ -77,7 +78,7 @@ export function isLocalId(id: string): boolean {
 }
 
 export function generateLocalCaseId(): string {
-  return `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
+  return `${LOCAL_ID_PREFIX}${generateClientUuid()}`;
 }
 
 // 새로 등록되는 로컬 고객사/End-User의 결정적(deterministic) ID 스킴 —

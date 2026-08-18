@@ -14,6 +14,7 @@ import {
   type StockOwner,
 } from "@/lib/domain/inventory-types";
 import { applyCartLinePatch, type CartLine } from "@/lib/domain/inventory-part-request-cart";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 /**
  * AS_ENGINEER's 부품 요청 section, embedded in a repair-case detail page —
@@ -78,7 +79,7 @@ export default function PartRequestSection({
   }
 
   function getOrCreateIdempotencyKey(): string {
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = generateClientUuid();
     return idempotencyKeyRef.current;
   }
 
@@ -127,7 +128,7 @@ export default function PartRequestSection({
     }
     setIsSubmitting(true);
     setErrorMessage(null);
-    const result = await cancelPartRequestAction({ requestId, reason: cancelReason, idempotencyKey: crypto.randomUUID() });
+    const result = await cancelPartRequestAction({ requestId, reason: cancelReason, idempotencyKey: generateClientUuid() });
     setIsSubmitting(false);
     if (!result.ok) {
       setErrorMessage(result.message);

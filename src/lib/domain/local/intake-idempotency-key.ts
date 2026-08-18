@@ -1,3 +1,5 @@
+import { generateClientUuid } from "@/lib/client-uuid";
+
 const IDEMPOTENCY_KEY_STORAGE_KEY = "dss-as-intake-idempotency-key-v1";
 
 function isBrowser(): boolean {
@@ -5,33 +7,13 @@ function isBrowser(): boolean {
 }
 
 /**
- * `crypto.randomUUID()` requires a "secure context" per the Web Crypto API
- * spec — available on `https://` and on `http://localhost`, but NOT on a
- * plain-HTTP LAN address like `http://192.168.1.132:3000` (confirmed root
- * cause of a live mobile crash: "TypeError: crypto.randomUUID is not a
- * function", desktop-via-localhost unaffected, LAN-via-phone crashing on
- * every call). `crypto.getRandomValues()` has no such secure-context
- * restriction and is available on effectively every real browser this app
- * targets, so it's the fallback here — a hand-built RFC 4122 v4 UUID from
- * its random bytes, standards-compatible and just as unguessable/collision-
- * resistant as `randomUUID()` itself. No Math.random() fallback: this
- * project has no existing precedent for one (grepped, none found), and the
- * `getRandomValues()` tier already covers every realistic case
- * `randomUUID()` itself doesn't.
+ * generateUuid의 실제 구현은 src/lib/client-uuid.ts로 옮겼다. 원래 이 파일
+ * 안에만 있던 private 함수였는데, 같은 secure-context 문제로 작업내용 탭이
+ * 또 죽으면서(WorkRecordForm) "한 곳만 고치고 나머지 호출부는 남겨 둔" 것이
+ * 재발 원인이었음이 드러났다. 이제 브라우저 UUID 생성은 전부 그 모듈을 거친다.
+ * 이 별칭은 아래 기존 호출부와 테스트를 그대로 두기 위한 것이다.
  */
-function generateUuid(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
-    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10, 16).join("")}`;
-  }
-  throw new Error("No secure random UUID source available in this browser.");
-}
+const generateUuid = generateClientUuid;
 
 /**
  * Client-side half of server-side idempotency protection for repair-case

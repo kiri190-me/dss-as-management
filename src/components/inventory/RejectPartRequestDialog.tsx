@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { rejectPartRequestAction } from "@/lib/server/actions/inventory-part-requests";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 /** 거절 — only ever offered for a PENDING, zero-issued request (server re-verifies independently); reason required. */
 export default function RejectPartRequestDialog({
@@ -41,7 +42,7 @@ export default function RejectPartRequestDialog({
       setErrorMessage("거절 사유를 입력해 주세요.");
       return;
     }
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = generateClientUuid();
     setIsSubmitting(true);
     setErrorMessage(null);
     const result = await rejectPartRequestAction({ requestId, reason, idempotencyKey: idempotencyKeyRef.current });

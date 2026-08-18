@@ -10,12 +10,13 @@ import {
   type ActingUser,
 } from "./transitions";
 import type { ApprovalType, LocalApprovalEvent, LocalApprovalRecord } from "./approval-types";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 function generateApprovalRecordId(): string {
-  return `approval-${crypto.randomUUID()}`;
+  return `approval-${generateClientUuid()}`;
 }
 function generateApprovalEventId(): string {
-  return `approval-event-${crypto.randomUUID()}`;
+  return `approval-event-${generateClientUuid()}`;
 }
 
 export type ActionErrorReason =

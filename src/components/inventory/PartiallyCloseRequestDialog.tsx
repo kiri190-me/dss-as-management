@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { partiallyCloseRequestAction } from "@/lib/server/actions/inventory-part-requests";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 /** 부분 불출 종료 — only ever offered for a PARTIALLY_ISSUED request with something already issued and something still remaining (server re-verifies independently); reason required. Request-lifecycle closure only, no purchasing/backorder implication. */
 export default function PartiallyCloseRequestDialog({
@@ -41,7 +42,7 @@ export default function PartiallyCloseRequestDialog({
       setErrorMessage("종료 사유를 입력해 주세요.");
       return;
     }
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = generateClientUuid();
     setIsSubmitting(true);
     setErrorMessage(null);
     const result = await partiallyCloseRequestAction({ requestId, reason, idempotencyKey: idempotencyKeyRef.current });

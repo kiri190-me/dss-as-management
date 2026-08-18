@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { issuePartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
 import { stockOwnerLabels, stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 type AllocationRow = { key: string; requestItemId: string; partStockBalanceId: string; quantity: string };
 
@@ -78,7 +79,7 @@ export default function IssuePartRequestDialog({
   }
 
   function getOrCreateIdempotencyKey(): string {
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = generateClientUuid();
     return idempotencyKeyRef.current;
   }
 

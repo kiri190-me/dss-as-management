@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
 import { WORK_RECORD_KIND_CODES, workRecordKindLabels, type WorkRecordKind } from "@/lib/domain/types";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 export default function WorkRecordForm({
   repairCaseId,
@@ -23,7 +24,7 @@ export default function WorkRecordForm({
   const [recordKind, setRecordKind] = useState<WorkRecordKind>("GENERAL");
   const [memo, setMemo] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
-  const [clientRequestId, setClientRequestId] = useState(() => crypto.randomUUID());
+  const [clientRequestId, setClientRequestId] = useState(() => generateClientUuid());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -52,7 +53,7 @@ export default function WorkRecordForm({
     setRecordKind("GENERAL");
     setMemo("");
     setSelectedNodeId("");
-    setClientRequestId(crypto.randomUUID());
+    setClientRequestId(generateClientUuid());
     router.refresh();
   }
 

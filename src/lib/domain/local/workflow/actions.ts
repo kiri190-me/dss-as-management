@@ -11,12 +11,13 @@ import {
   type LocalWorkflowState,
 } from "./workflow-types";
 import { validateWorkflowEvent, validateWorkflowState } from "./validation";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 function generateStateId(): string {
-  return `workflow-state-${crypto.randomUUID()}`;
+  return `workflow-state-${generateClientUuid()}`;
 }
 function generateEventId(): string {
-  return `workflow-event-${crypto.randomUUID()}`;
+  return `workflow-event-${generateClientUuid()}`;
 }
 
 export type WorkflowActionErrorReason =
@@ -145,7 +146,7 @@ export function advanceStep(input: AdvanceOrReturnInput): WorkflowActionResult {
   return commit(states, events, nextState, event);
 }
 
-/** STEP_RETURNED: SUPER_ADMIN/ADMIN 전용, 항상 사유 필수, SHIPMENT_COMPLETED 이후에는 표에 대응 행이 없어 자동으로 차단된다. */
+/** STEP_RETURNED: SUPER_ADMIN/ADMIN + 담당 AS_ENGINEER, 사유는 선택(2026-08-18 완화 — 아래 주석 참조), SHIPMENT_COMPLETED 이후에는 표에 대응 행이 없어 자동으로 차단된다. */
 export function returnStep(input: AdvanceOrReturnInput): WorkflowActionResult {
   const { states, events } = getWorkflowStoreSnapshot();
   const current = resolveCurrent(states, input);

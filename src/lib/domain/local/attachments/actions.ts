@@ -19,12 +19,13 @@ import {
   isSafeFileNameString,
 } from "./filename";
 import { validateAttachmentEvent, validateAttachmentRecord } from "./validation";
+import { generateClientUuid } from "@/lib/client-uuid";
 
 function generateAttachmentId(): string {
-  return `attachment-${crypto.randomUUID()}`;
+  return `attachment-${generateClientUuid()}`;
 }
 function generateAttachmentEventId(): string {
-  return `attachment-event-${crypto.randomUUID()}`;
+  return `attachment-event-${generateClientUuid()}`;
 }
 
 export type AttachmentActionErrorReason =
