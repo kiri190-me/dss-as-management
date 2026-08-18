@@ -756,7 +756,11 @@ describe("updateRepairCase", () => {
     assert.equal(historyRows.length, 0);
   });
 
-  test("45. a progressed Generator case (real transition, via transitionWorkflow) cannot change billing_type — rejected, never left inconsistent", async () => {
+  // 2026-08-18 원칙 변경으로 이 시나리오의 기대가 뒤집혔다 — 진행 중인 건도
+  // 유·무상을 바꿀 수 있어야 한다. 단, 워크플로와 유·무상이 어긋난 상태
+  // (PAID_GENERATOR + WARRANTY)를 만들지 않는다는 원래 불변식은 그대로다:
+  // 값만 바꾸는 게 아니라 대상 워크플로로 함께 옮긴다.
+  test("45. a progressed Generator case CAN change billing_type and is reassigned consistently", async () => {
     const created = await createTestCase({ workflowType: "PAID_GENERATOR", billingType: "PAID" });
     const before1 = await fetchRow(created.id);
 
@@ -764,18 +768,59 @@ describe("updateRepairCase", () => {
     assert.equal(advanced.ok, true, `setup transition failed: ${JSON.stringify(advanced)}`);
     if (!advanced.ok) return;
 
-    const result = await updateRepairCase(created.id, 2, "INTAKE", { billingType: "WARRANTY" });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "WORKFLOW_REASSIGNMENT_NOT_ALLOWED");
+    const result = await updateRepairCase(created.id, 2, "INTAKE", { billingType: "WARRANTY" }, engineerId);
+    assert.equal(result.ok, true, JSON.stringify(result));
 
     const after1 = await fetchRow(created.id);
-    assert.equal(after1.billingType, "PAID", "billing_type must not have changed");
-    assert.equal(after1.workflowVersionId, before1.workflowVersionId, "must not have been reassigned");
+    assert.equal(after1.billingType, "WARRANTY");
+    assert.notEqual(after1.workflowVersionId, before1.workflowVersionId, "대상 워크플로로 옮겨져야 한다");
     const afterTemplate = await templateCodeAndInitialStep(after1.workflowVersionId);
-    assert.equal(afterTemplate?.code, "PAID_GENERATOR", "must remain a consistent PAID_GENERATOR, never PAID_GENERATOR+WARRANTY");
+    assert.equal(afterTemplate?.code, "WARRANTY_GENERATOR", "유·무상과 워크플로가 어긋난 상태는 여전히 만들지 않는다");
   });
 
-  test("46. a Generator case back at intake_inspection but already has transition history (STEP_RETURNED) cannot change billing_type — step key alone is not trusted", async () => {
+  // 2026-08-18 원칙 변경으로 기대가 뒤집혔다. 이 시나리오(되돌려서 다시
+  // 인수점검에 와 있고 전이 이력이 있는 건)는 예전에 "단계 key만 믿지 않는다"의
+  // 근거였는데, 이제는 이력 유무와 무관하게 변경이 허용된다. 무상 → 유상은
+  // 무상 단계 집합이 유상의 부분집합이라 항상 같은 단계로 옮겨갈 수 있다.
+  // 유상 → 무상만 유일하게 "갈 곳이 없는" 방향이다. 유상 Generator의 견적/PO
+  // 관련 6단계는 무상 흐름에 아예 존재하지 않는다(2026-08-18 측정: 공통 10,
+  // 유상 전용 6, 무상 전용 0). 그때 앞으로 건너뛰면 하지 않은 작업을 완료한
+  // 것처럼 만들어 버리므로, 현재보다 앞선 단계 중 대상에도 있는 가장 뒤
+  // 단계로 물러난다. 이 테스트가 그 규칙을 고정한다.
+  test("46-1. paid-only step falls back to the nearest earlier common step when switching to WARRANTY", async () => {
+    const created = await createTestCase({ workflowType: "PAID_GENERATOR", billingType: "PAID" });
+
+    // 견적/PO 구간까지 정상 전이로 끌고 가려면 준비가 과도하게 길어진다.
+    // 이 파일의 기존 선례(특정 상태에 도달시키기 위한 직접 UPDATE)와 같은
+    // 방식으로 대상 단계에 놓는다 — 검증 대상은 전이가 아니라 유·무상 변경이다.
+    const before1 = await fetchRow(created.id);
+    const [paidOnlyStep] = await db
+      .select({ id: workflowSteps.id })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.workflowVersionId, before1.workflowVersionId), eq(workflowSteps.key, "waiting_po")));
+    assert.ok(paidOnlyStep, "setup: PAID_GENERATOR에 waiting_po 단계가 있어야 한다");
+    await db.update(repairCases).set({ currentWorkflowStepId: paidOnlyStep.id }).where(eq(repairCases.id, created.id));
+
+    const result = await updateRepairCase(created.id, 1, "INTAKE", { billingType: "WARRANTY" }, engineerId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after1 = await fetchRow(created.id);
+    const afterTemplate = await templateCodeAndInitialStep(after1.workflowVersionId);
+    assert.equal(afterTemplate?.code, "WARRANTY_GENERATOR");
+
+    const [afterStep] = await db
+      .select({ key: workflowSteps.key })
+      .from(repairCases)
+      .innerJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
+      .where(eq(repairCases.id, created.id));
+    assert.equal(
+      afterStep.key,
+      "waiting_kyosan_reply",
+      "PO 대기(유상 전용)에서 무상으로 바꾸면 직전 공통 단계인 교산 회신 대기로 물러나야 한다"
+    );
+  });
+
+  test("46. a Generator case with transition history CAN change billing_type, keeping its current step", async () => {
     const created = await createTestCase({ workflowType: "WARRANTY_GENERATOR", billingType: "WARRANTY" });
     const before1 = await fetchRow(created.id);
 
@@ -788,13 +833,22 @@ describe("updateRepairCase", () => {
     if (!returned.ok) return;
     assert.equal(returned.currentWorkflowStepKey, "intake_inspection", "setup: case must be back at intake_inspection");
 
-    const result = await updateRepairCase(created.id, 3, "INTAKE", { billingType: "PAID" });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "WORKFLOW_REASSIGNMENT_NOT_ALLOWED");
+    const result = await updateRepairCase(created.id, 3, "INTAKE", { billingType: "PAID" }, engineerId);
+    assert.equal(result.ok, true, JSON.stringify(result));
 
     const after1 = await fetchRow(created.id);
-    assert.equal(after1.billingType, "WARRANTY", "billing_type must not have changed");
-    assert.equal(after1.workflowVersionId, before1.workflowVersionId, "must not have been reassigned");
+    assert.equal(after1.billingType, "PAID");
+    assert.notEqual(after1.workflowVersionId, before1.workflowVersionId, "PAID_GENERATOR로 옮겨져야 한다");
+    const afterTemplate = await templateCodeAndInitialStep(after1.workflowVersionId);
+    assert.equal(afterTemplate?.code, "PAID_GENERATOR");
+
+    // 현재 단계는 유지된다 — 유·무상을 바꿨다고 진행 상황이 초기화되면 안 된다.
+    const [afterStep] = await db
+      .select({ key: workflowSteps.key })
+      .from(repairCases)
+      .innerJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
+      .where(eq(repairCases.id, created.id));
+    assert.equal(afterStep.key, "intake_inspection");
   });
 
   test("47. locked Generator case: already covered by the unconditional, section-agnostic shipment-lock gate", () => {

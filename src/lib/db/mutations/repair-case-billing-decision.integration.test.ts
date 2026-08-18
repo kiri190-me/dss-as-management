@@ -158,9 +158,24 @@ describe("Partial Paid + Pending Billing foundation", () => {
     assert.equal(histories.length, 1);
     assert.equal(histories[0].previousBillingType, "PENDING_DECISION");
     assert.equal(histories[0].nextBillingType, "PARTIAL_PAID");
+    // 2026-08-18 원칙 변경: 한 번 확정했다고 끝이 아니다. 일부유상 → 무상처럼
+    // 이미 확정된 값도 다시 바꿀 수 있어야 한다(예전에는 여기서
+    // BILLING_ALREADY_DECIDED로 막혔다).
     const second = await resolveRepairCaseBillingDecision({ repairCaseId: pending.id, expectedVersion: result.version, nextBillingType: "WARRANTY", actorUserId: adminId });
-    assert.equal(second.ok, false);
-    if (!second.ok) assert.equal(second.code, "BILLING_ALREADY_DECIDED");
+    assert.equal(second.ok, true, JSON.stringify(second));
+    if (!second.ok) return;
+    const [afterSecond] = await db.select({ billingType: repairCases.billingType, workflowType: workflowTemplates.code, stepKey: workflowSteps.key })
+      .from(repairCases).innerJoin(workflowVersions, eq(workflowVersions.id, repairCases.workflowVersionId))
+      .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
+      .innerJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId)).where(eq(repairCases.id, pending.id));
+    assert.deepEqual(afterSecond, { billingType: "WARRANTY", workflowType: "WARRANTY_MATCHER", stepKey: "intake_inspection" });
+    const allHistories = await db.select().from(repairCaseBillingDecisionHistories).where(eq(repairCaseBillingDecisionHistories.repairCaseId, pending.id));
+    assert.equal(allHistories.length, 2, "변경마다 이력이 남아야 한다");
+
+    // 같은 값으로의 변경만 여전히 거부된다(무의미한 이력을 남기지 않기 위해).
+    const noop = await resolveRepairCaseBillingDecision({ repairCaseId: pending.id, expectedVersion: second.version, nextBillingType: "WARRANTY", actorUserId: adminId });
+    assert.equal(noop.ok, false);
+    if (!noop.ok) assert.equal(noop.code, "BILLING_ALREADY_DECIDED");
   });
 
   test("concurrent decisions allow exactly one winner", async () => {
@@ -175,14 +190,16 @@ describe("Partial Paid + Pending Billing foundation", () => {
     if (loser && !loser.ok) assert.equal(loser.code, "STALE_VERSION");
   });
 
-  test("related activity blocks resolution without partial changes", async () => {
+  // 2026-08-18 원칙 변경으로 제목의 의미가 뒤집혔다. 실제 업무에서 일부유상
+  // 판단은 수리를 진행하다(=관련 활동이 이미 쌓인 뒤) 나오므로, 활동이 있다고
+  // 막으면 그 판단을 시스템에 반영할 방법이 사라진다.
+  test("related activity no longer blocks resolution", async () => {
     const pending = await createPendingCase(84);
     const [flowchart] = await db.insert(repairCaseFlowcharts).values({ repairCaseId: pending.id, title: "resolution blocker", description: null, createdBy: adminId, updatedBy: adminId }).returning({ id: repairCaseFlowcharts.id });
     createdFlowchartIds.push(flowchart.id);
     const result = await resolveRepairCaseBillingDecision({ repairCaseId: pending.id, expectedVersion: pending.version, nextBillingType: "PAID", actorUserId: adminId });
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "RELATED_ACTIVITY_EXISTS");
+    assert.equal(result.ok, true, JSON.stringify(result));
     const [row] = await db.select({ billingType: repairCases.billingType, version: repairCases.version }).from(repairCases).where(eq(repairCases.id, pending.id));
-    assert.deepEqual(row, { billingType: "PENDING_DECISION", version: pending.version });
+    assert.deepEqual(row, { billingType: "PAID", version: pending.version + 1 });
   });
 });

@@ -2,20 +2,9 @@ import "server-only";
 
 import { and, eq } from "drizzle-orm";
 import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
-import { deriveWorkflowType, workflowKindOf } from "@/lib/domain/workflow-kind";
+import { resolveBillingWorkflowTarget } from "./billing-workflow-target";
 import { db } from "../client";
-import {
-  procedureCaseExecutions,
-  repairCaseApprovals,
-  repairCaseBillingDecisionHistories,
-  repairCaseFlowcharts,
-  repairCaseWorkRecords,
-  repairCases,
-  statusChangeHistories,
-  workflowSteps,
-  workflowTemplates,
-  workflowVersions,
-} from "../schema";
+import { repairCaseBillingDecisionHistories, repairCases } from "../schema";
 import { insertAuditLog } from "./audit-logs";
 import { resolveEligibleActor } from "./procedure-templates";
 
@@ -41,6 +30,8 @@ export type ResolveRepairCaseBillingResult =
         | "BILLING_ALREADY_DECIDED"
         | "WORKFLOW_REASSIGNMENT_NOT_ALLOWED"
         | "RELATED_ACTIVITY_EXISTS"
+        | "NO_COMPATIBLE_STEP"
+        | "BILLING_NOT_SET"
         | "WORKFLOW_NOT_ALLOWED";
       message: string;
     };
@@ -58,32 +49,26 @@ function fail(
   throw new BillingDecisionError({ ok: false, code, message });
 }
 
-async function hasRelatedActivity(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  repairCaseId: string
-): Promise<boolean> {
-  const [statusHistory] = await tx.select({ id: statusChangeHistories.id })
-    .from(statusChangeHistories).where(eq(statusChangeHistories.repairCaseId, repairCaseId)).limit(1);
-  if (statusHistory) return true;
-  const [workRecord] = await tx.select({ id: repairCaseWorkRecords.id })
-    .from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.repairCaseId, repairCaseId)).limit(1);
-  if (workRecord) return true;
-  const [approval] = await tx.select({ id: repairCaseApprovals.id })
-    .from(repairCaseApprovals).where(eq(repairCaseApprovals.repairCaseId, repairCaseId)).limit(1);
-  if (approval) return true;
-  const [procedure] = await tx.select({ id: procedureCaseExecutions.id })
-    .from(procedureCaseExecutions).where(eq(procedureCaseExecutions.repairCaseId, repairCaseId)).limit(1);
-  if (procedure) return true;
-  const [flowchart] = await tx.select({ id: repairCaseFlowcharts.id })
-    .from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.repairCaseId, repairCaseId)).limit(1);
-  return Boolean(flowchart);
-}
 
 /**
- * One-way resolution of an Excel-imported pending billing decision. The
- * locked Repair Case is only reassigned while it is still pristine at the
- * pending intake_inspection step. No source Excel text is copied to either
- * history sink.
+ * 유·무상(유상/일부유상/무상) 변경. 원래는 Excel 이관 건의 "추후결정 →
+ * 확정" 한 방향만 처리하던 함수였고, 대상이 아직 pending intake_inspection
+ * 단계에서 손대지 않은 상태일 때만 허용했다.
+ *
+ * 2026-08-18 사용자 결정으로 원칙이 바뀌었다 — **유·무상은 언제든, 어느
+ * 단계에서든 변경 가능하다.** 수리를 진행하다 일부만 유상 청구로 판단되는
+ * 상황이 실제로 발생하며(일부유상), 그 판단은 본래 진행 중에 나온다. 그래서
+ * 아래 네 가지 제약을 제거했다:
+ *   - 현재 유·무상이 PENDING_DECISION이어야 한다
+ *   - 현재 워크플로가 PENDING_* 이어야 한다
+ *   - 현재 단계가 intake_inspection이어야 한다
+ *   - 작업 기록/승인/이력 등 관련 활동이 없어야 한다
+ *
+ * 남겨 둔 것: 역할 권한, 낙관적 잠금(expectedVersion), 행 잠금(FOR UPDATE),
+ * 같은 값으로의 무의미한 변경 거부, 그리고 변경 이력·감사 로그 기록.
+ *
+ * 대상 워크플로/단계 결정은 billing-workflow-target.ts가 전담한다(수정 폼
+ * 경로와 공유). No source Excel text is copied to either history sink.
  */
 export async function resolveRepairCaseBillingDecision(params: {
   repairCaseId: string;
@@ -118,52 +103,25 @@ export async function resolveRepairCaseBillingDecision(params: {
       if (current.version !== params.expectedVersion) {
         fail("STALE_VERSION", "다른 사용자가 접수 건을 먼저 변경했습니다. 새로고침 후 다시 시도해 주세요.");
       }
-      if (current.billingType !== "PENDING_DECISION") {
-        fail("BILLING_ALREADY_DECIDED", "이미 유·무상이 확정된 접수 건입니다.");
+      // 유·무상이 아예 비어 있는 레거시 행(billing_type NULL)만 거부한다.
+      // 변경 이력의 previous_billing_type이 NOT NULL이라 기록할 수 없기
+      // 때문이며, 그 행들은 데이터 정리로 값을 채운 뒤 정상 대상이 된다.
+      if (!current.billingType) {
+        fail("BILLING_NOT_SET", "유·무상이 설정되지 않은 접수 건입니다. 먼저 값을 지정해 주세요.");
       }
-      const [currentWorkflow] = await tx
-        .select({ currentStepKey: workflowSteps.key, workflowType: workflowTemplates.code })
-        .from(workflowVersions)
-        .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
-        .innerJoin(workflowSteps, eq(workflowSteps.id, current.currentWorkflowStepId))
-        .where(eq(workflowVersions.id, current.workflowVersionId));
-      if (!currentWorkflow || !currentWorkflow.workflowType.startsWith("PENDING_")) {
-        fail("WORKFLOW_REASSIGNMENT_NOT_ALLOWED", "추후결정 워크플로 상태를 확인할 수 없습니다.");
+      if (current.billingType === params.nextBillingType) {
+        fail("BILLING_ALREADY_DECIDED", "이미 같은 유·무상 상태입니다.");
       }
-      if (currentWorkflow.currentStepKey !== "intake_inspection") {
-        fail("WORKFLOW_REASSIGNMENT_NOT_ALLOWED", "최초 접수 단계에서만 유·무상을 확정할 수 있습니다.");
-      }
-      if (await hasRelatedActivity(tx, current.id)) {
-        fail("RELATED_ACTIVITY_EXISTS", "이미 수리 진행 기록이 있어 유·무상을 자동 전환할 수 없습니다.");
-      }
+      // 대상 워크플로/단계 결정은 수정 폼 경로와 공유하는 단일 지점에 맡긴다
+      // (billing-workflow-target.ts). 여기서 다시 계산하면 두 경로의 규칙이
+      // 갈라지는, 원래 이 작업이 없애려던 문제가 그대로 재현된다.
+      const target = await resolveBillingWorkflowTarget(tx, {
+        currentWorkflowVersionId: current.workflowVersionId,
+        currentWorkflowStepId: current.currentWorkflowStepId,
+        nextBillingType: params.nextBillingType,
+      });
+      if (!target.ok) fail(target.code, target.message);
 
-      const targetWorkflowType = deriveWorkflowType(
-        workflowKindOf(currentWorkflow.workflowType),
-        params.nextBillingType
-      );
-      if (!targetWorkflowType || targetWorkflowType.startsWith("PENDING_")) {
-        fail("WORKFLOW_NOT_ALLOWED", "대상 워크플로를 결정할 수 없습니다.");
-      }
-
-      const [target] = await tx
-        .select({ workflowVersionId: workflowVersions.id, workflowStepId: workflowSteps.id })
-        .from(workflowVersions)
-        .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
-        .innerJoin(
-          workflowSteps,
-          and(
-            eq(workflowSteps.workflowVersionId, workflowVersions.id),
-            eq(workflowSteps.key, "intake_inspection")
-          )
-        )
-        .where(
-          and(
-            eq(workflowTemplates.code, targetWorkflowType),
-            eq(workflowVersions.status, "PUBLISHED"),
-            eq(workflowVersions.isCurrent, true)
-          )
-        );
-      if (!target) fail("WORKFLOW_NOT_ALLOWED", "현재 사용할 수 있는 대상 워크플로를 찾을 수 없습니다.");
 
       const [updated] = await tx
         .update(repairCases)
@@ -178,7 +136,10 @@ export async function resolveRepairCaseBillingDecision(params: {
           and(
             eq(repairCases.id, current.id),
             eq(repairCases.version, current.version),
-            eq(repairCases.billingType, "PENDING_DECISION")
+            // 읽은 시점의 실제 값으로 잠근다. 전에는 "PENDING_DECISION"이
+            // 하드코딩되어 있었는데, 그대로 두면 추후결정이 아닌 모든 변경이
+            // 0행 갱신 → STALE_VERSION으로 조용히 실패한다.
+            eq(repairCases.billingType, current.billingType)
           )
         )
         .returning({ version: repairCases.version });
@@ -188,7 +149,7 @@ export async function resolveRepairCaseBillingDecision(params: {
         .insert(repairCaseBillingDecisionHistories)
         .values({
           repairCaseId: current.id,
-          previousBillingType: "PENDING_DECISION",
+          previousBillingType: current.billingType,
           nextBillingType: params.nextBillingType,
           previousWorkflowVersionId: current.workflowVersionId,
           nextWorkflowVersionId: target.workflowVersionId,

@@ -144,7 +144,15 @@ export async function updateRepairCaseAction(
   }
 
   try {
-    return await updateRepairCase(input.repairCaseId, input.expectedVersion, input.section, formatValidation.data);
+    // actorUserId를 넘기는 것은 유·무상 변경 시 전용 이력(누가 바꿨는지)을
+    // 남기기 위해서다 — 이 값을 빠뜨리면 변경은 되지만 이력이 비어 버린다.
+    return await updateRepairCase(
+      input.repairCaseId,
+      input.expectedVersion,
+      input.section,
+      formatValidation.data,
+      session.userId
+    );
   } catch (err) {
     // Never forward the raw error (may reference Postgres internals, SQL
     // text, or schema details) to the browser — same discipline as

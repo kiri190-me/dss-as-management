@@ -6,6 +6,7 @@ import {
   products,
   repairCaseIdempotencyKeys,
   repairCaseIntakeSequences,
+  repairCaseBillingDecisionHistories,
   repairCases,
   statusChangeHistories,
   stockTransactions,
@@ -15,10 +16,11 @@ import {
   workflowVersions,
 } from "../schema";
 import { insertAuditLog } from "./audit-logs";
+import { resolveBillingWorkflowTarget } from "./billing-workflow-target";
 import { purgeAllRepairCaseFlowchartsForCase } from "./repair-case-flowcharts";
 import { formatIntakeNumber, yearMonthFromDate } from "@/lib/domain/local/intake-number";
 import { isNotEarlierThan } from "@/lib/domain/local/validation";
-import { deriveWorkflowType, workflowKindOf, type WorkflowKind } from "@/lib/domain/workflow-kind";
+import { deriveWorkflowType, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { BillingType, WorkflowType } from "@/lib/domain/types";
 import type {
   CreateRepairCaseResult,
@@ -560,7 +562,15 @@ export async function updateRepairCase(
   repairCaseId: string,
   expectedVersion: number,
   section: RepairCaseEditSection,
-  fields: Record<string, string | null>
+  fields: Record<string, string | null>,
+  /**
+   * 유·무상 변경 시 repair_case_billing_decision_histories에 남길 행위자다.
+   * 선택 인자인 이유는 오직 기존 통합 테스트 60여 개의 호출부를 그대로 두기
+   * 위해서이며, 실제 운영 경로(update-repair-case.ts Server Action)는 항상
+   * 넘긴다. 값이 없으면 전용 변경 이력은 남지 않는다(일반 감사 로그는 별개로
+   * 항상 기록된다).
+   */
+  actorUserId?: string
 ): Promise<UpdateRepairCaseResult> {
   return db.transaction(async (tx): Promise<UpdateRepairCaseResult> => {
     const [current] = await tx
@@ -572,6 +582,8 @@ export async function updateRepairCase(
         customerRequestedDueDate: repairCases.customerRequestedDueDate,
         productId: repairCases.productId,
         currentWorkflowStepId: repairCases.currentWorkflowStepId,
+        // 유·무상 변경 시 대상 워크플로를 해석하려면 현재 버전 id가 필요하다.
+        workflowVersionId: repairCases.workflowVersionId,
         billingType: repairCases.billingType,
         // repair_cases has no direct workflowType column — it's derived via
         // workflow_version_id -> workflow_versions.workflow_template_id ->
@@ -589,6 +601,22 @@ export async function updateRepairCase(
     }
 
     const setValues: Record<string, unknown> = {};
+    /**
+     * 유·무상이 실제로 바뀐 경우에만 채워지며, UPDATE가 성공한 뒤
+     * repair_case_billing_decision_histories에 그대로 기록된다. 확정
+     * mutation(repair-case-billing-decision.ts)과 같은 이력을 남겨야 두
+     * 경로 중 어느 쪽으로 바꿨든 "언제 누가 무엇을 무엇으로" 추적된다.
+     */
+    let billingReassignment:
+      | {
+          previousBillingType: BillingType;
+          nextBillingType: BillingType;
+          previousWorkflowVersionId: string;
+          nextWorkflowVersionId: string;
+          previousWorkflowStepId: string;
+          nextWorkflowStepId: string;
+        }
+      | null = null;
 
     if (section === "INTAKE") {
       let effectiveCustomerId = current.customerId;
@@ -728,43 +756,43 @@ export async function updateRepairCase(
       if ("billingType" in fields) {
         const newBillingType = fields.billingType as BillingType;
         const billingTypeIsChanging = newBillingType !== current.billingType;
-        const currentKind = workflowKindOf(current.workflowType);
 
-        if (
-          billingTypeIsChanging &&
-          current.workflowType !== "MATCHER" &&
-          currentKind !== "GENERATOR"
-        ) {
-          return {
-            ok: false,
-            code: "WORKFLOW_REASSIGNMENT_NOT_ALLOWED",
-            fieldErrors: { billingType: "이 워크플로의 유상/무상 변경은 아직 지원하지 않습니다." },
-            message: "이 워크플로의 유상/무상 변경은 아직 지원하지 않습니다.",
-          };
-        }
-
-        if (billingTypeIsChanging && currentKind === "GENERATOR") {
-          const eligible = await checkWorkflowReassignmentEligible(tx, repairCaseId, current.currentWorkflowStepId);
-          if (!eligible) {
+        // 2026-08-18 원칙 변경: 유·무상은 언제든, 어느 단계에서든 바꿀 수 있다.
+        // 여기 있던 두 가드("Matcher/Total Controller는 아직 지원하지 않음",
+        // "Generator도 진행 후에는 불가")를 제거했다. 실제 업무에서 일부유상
+        // 판단은 수리를 진행하다 나오므로, 진행 전에만 허용하는 규칙은 그
+        // 판단을 시스템에 반영할 방법을 아예 없앤다.
+        //
+        // 대상 워크플로/단계는 확정 mutation과 같은 해석기를 쓴다 —
+        // 두 경로가 각자 계산하던 것이 규칙이 갈라진 원인이었다.
+        if (billingTypeIsChanging) {
+          const target = await resolveBillingWorkflowTarget(tx, {
+            currentWorkflowVersionId: current.workflowVersionId,
+            currentWorkflowStepId: current.currentWorkflowStepId,
+            nextBillingType: newBillingType,
+          });
+          if (!target.ok) {
             return {
               ok: false,
               code: "WORKFLOW_REASSIGNMENT_NOT_ALLOWED",
-              fieldErrors: { billingType: "워크플로 진행 후에는 유상/무상을 변경할 수 없습니다." },
-              message: "워크플로 진행 후에는 유상/무상을 변경할 수 없습니다.",
+              fieldErrors: { billingType: target.message },
+              message: target.message,
             };
           }
 
-          // newBillingType is always a validated "PAID"|"WARRANTY" string
-          // here (this mutation's own docstring: fields is already
-          // per-field format-validated) — unlike the 종류 reassignment
-          // path below (which derives from current.billingType, genuinely
-          // nullable for legacy rows), this can never return null.
-          const targetWorkflowType = deriveWorkflowType("GENERATOR", newBillingType)!;
-          const resolution = await resolveTargetWorkflowVersionAndStep(tx, targetWorkflowType);
-          if (!resolution.ok) return resolution.result;
-
-          setValues.workflowVersionId = resolution.workflowVersionId;
-          setValues.currentWorkflowStepId = resolution.workflowStepId;
+          setValues.workflowVersionId = target.workflowVersionId;
+          setValues.currentWorkflowStepId = target.workflowStepId;
+          // previous_billing_type이 NOT NULL이라, 값이 비어 있던 레거시 행은
+          // 전용 이력을 남기지 못한다(일반 감사 로그에는 그대로 남는다).
+          // 그 행들은 데이터 정리로 값을 채우면 이후부터 정상 기록된다.
+          if (current.billingType) billingReassignment = {
+            previousBillingType: current.billingType,
+            nextBillingType: newBillingType,
+            previousWorkflowVersionId: current.workflowVersionId,
+            nextWorkflowVersionId: target.workflowVersionId,
+            previousWorkflowStepId: current.currentWorkflowStepId,
+            nextWorkflowStepId: target.workflowStepId,
+          };
         }
 
         setValues.billingType = newBillingType;
@@ -992,6 +1020,24 @@ export async function updateRepairCase(
     }
 
     const updated = updatedRows[0];
+
+    // 유·무상이 실제로 바뀐 경우에만, 확정 mutation과 동일한 형태의 전용
+    // 이력을 남긴다. UPDATE가 성공한 뒤에 넣는 이유는 버전 충돌로 0행이
+    // 갱신된 경우 이력만 남는 상황을 막기 위해서다(같은 트랜잭션이라
+    // 이후 예외가 나면 둘 다 롤백된다).
+    if (billingReassignment && actorUserId) {
+      await tx.insert(repairCaseBillingDecisionHistories).values({
+        repairCaseId,
+        previousBillingType: billingReassignment.previousBillingType,
+        nextBillingType: billingReassignment.nextBillingType,
+        previousWorkflowVersionId: billingReassignment.previousWorkflowVersionId,
+        nextWorkflowVersionId: billingReassignment.nextWorkflowVersionId,
+        previousWorkflowStepId: billingReassignment.previousWorkflowStepId,
+        nextWorkflowStepId: billingReassignment.nextWorkflowStepId,
+        decidedBy: actorUserId,
+      });
+    }
+
     return { ok: true, id: updated.id, version: updated.version };
   });
 }
