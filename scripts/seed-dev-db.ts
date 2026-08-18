@@ -30,6 +30,7 @@ import {
   exceptionStatusLabels,
 } from "../src/lib/domain/types";
 import { FINAL_SHIPMENT_REPRESENTATIVE_USER_ID } from "../src/lib/domain/local/approval/representative";
+import { seedRealisticDemoDataset } from "./seed-realistic-demo";
 
 /**
  * Seeds the dev database from the existing fictional domain modules only —
@@ -105,6 +106,10 @@ const exceptionStatusIdFor = (code: string) =>
   deterministicUuid(`exception-status:${code}`);
 
 export async function seedDevelopmentFixtures() {
+  const databaseIdentity = await db.execute(sql`select current_database() as name`);
+  if (process.env.DSS_SEED_TEST_WRAPPER !== "1" && databaseIdentity[0]?.name !== "dss_as_dev") {
+    throw new Error(`Refusing to seed: expected dss_as_dev, connected to ${String(databaseIdentity[0]?.name ?? "unknown")}`);
+  }
   const counts: Record<string, number> = {};
 
   await db.transaction(async (tx) => {
@@ -426,6 +431,7 @@ export async function seedDevelopmentFixtures() {
   for (const [table, count] of Object.entries(counts)) {
     console.log(`  ${table}: ${count}`);
   }
+  if (process.env.DSS_SEED_TEST_WRAPPER !== "1") await seedRealisticDemoDataset();
 }
 
 if (process.env.DSS_SEED_TEST_WRAPPER !== "1") {
