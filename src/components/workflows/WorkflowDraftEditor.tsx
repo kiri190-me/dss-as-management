@@ -10,6 +10,7 @@ import type {
   WorkflowDraftTransitionView,
 } from "@/lib/db/queries/workflow-templates";
 import WorkflowDraftTransitionEditor from "./WorkflowDraftTransitionEditor";
+import WorkflowDraftConfirmDialog, { type WorkflowDraftConfirmKind } from "./WorkflowDraftConfirmDialog";
 import {
   addWorkflowDraftStepAction,
   discardWorkflowDraftAction,
@@ -38,12 +39,14 @@ const CATEGORY_LABELS: Record<string, string> = {
  */
 export default function WorkflowDraftEditor({
   versionId,
+  versionNumber,
   templateCode,
   steps,
   validation,
   transitions,
 }: {
   versionId: string;
+  versionNumber: number;
   templateCode: string;
   steps: WorkflowDraftStepView[];
   validation: DraftValidationResult;
@@ -56,6 +59,11 @@ export default function WorkflowDraftEditor({
   const [newLabel, setNewLabel] = useState("");
   const [newStatus, setNewStatus] = useState<string>(REPAIR_STATUS_CODES[0]);
   const [newCategory, setNewCategory] = useState<string>("");
+  /**
+   * 브라우저 기본 confirm() 대신 앱의 다이얼로그를 쓴다. 열려 있는 확인 창의
+   * 종류를 상태로 들고 있고, 실제 실행은 다이얼로그의 onConfirm에서 한다.
+   */
+  const [confirming, setConfirming] = useState<WorkflowDraftConfirmKind | null>(null);
 
   /**
    * options.navigateTo가 있으면 이동만 하고 refresh는 하지 않는다.
@@ -350,12 +358,7 @@ export default function WorkflowDraftEditor({
         <button
           type="button"
           disabled={isPending}
-          onClick={() => {
-            if (!confirm("초안을 폐기합니다. 편집한 내용이 모두 사라집니다.")) return;
-            run(() => discardWorkflowDraftAction(versionId), {
-              navigateTo: `/workflows/${templateCode}?done=discarded`,
-            });
-          }}
+          onClick={() => setConfirming("discard")}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
         >
           초안 폐기
@@ -368,18 +371,34 @@ export default function WorkflowDraftEditor({
           <button
             type="button"
             disabled={isPending || blocking.length > 0}
-            onClick={() => {
-              if (!confirm("이 초안을 발행합니다. 이후 접수되는 건부터 이 구성이 적용됩니다.")) return;
-              run(() => publishWorkflowDraftAction(versionId), {
-                navigateTo: `/workflows/${templateCode}?done=published`,
-              });
-            }}
+            onClick={() => setConfirming("publish")}
             className="rounded-md bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "처리 중..." : "발행"}
           </button>
         </div>
       </section>
+
+      <WorkflowDraftConfirmDialog
+        isOpen={confirming !== null}
+        kind={confirming ?? "discard"}
+        versionNumber={versionNumber}
+        isSubmitting={isPending}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          const kind = confirming;
+          setConfirming(null);
+          if (kind === "publish") {
+            run(() => publishWorkflowDraftAction(versionId), {
+              navigateTo: `/workflows/${templateCode}?done=published`,
+            });
+          } else if (kind === "discard") {
+            run(() => discardWorkflowDraftAction(versionId), {
+              navigateTo: `/workflows/${templateCode}?done=discarded`,
+            });
+          }
+        }}
+      />
     </div>
   );
 }

@@ -50,6 +50,7 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
 
       <WorkflowDraftEditor
         versionId={draft.versionId}
+        versionNumber={draft.versionNumber}
         templateCode={draft.templateCode}
         steps={draft.steps}
         validation={draft.validation}
