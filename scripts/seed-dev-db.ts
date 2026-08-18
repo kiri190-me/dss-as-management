@@ -30,6 +30,8 @@ import {
   exceptionStatusLabels,
 } from "../src/lib/domain/types";
 import { FINAL_SHIPMENT_REPRESENTATIVE_USER_ID } from "../src/lib/domain/local/approval/representative";
+import { getStepStatus } from "../src/lib/domain/local/workflow/step-status-map";
+import { getStepCategory } from "../src/lib/domain/local/workflow/step-category";
 import { seedRealisticDemoDataset } from "./seed-realistic-demo";
 
 /**
@@ -213,12 +215,20 @@ export async function seedDevelopmentFixtures() {
     counts.workflowVersions = versionRows.length;
 
     // 5. workflow_steps
+    //
+    // repair_status/category는 Phase 1(워크플로 규칙 DB 이관)에서 추가된
+    // 컬럼이다. 시드가 채우지 않으면 새로 만든 DB의 단계는 값이 빈 채로
+    // 남고, 그 단계에 놓인 접수 건은 목록·대시보드를 읽을 때마다
+    // UnmappedWorkflowStepError로 화면을 깨뜨린다. 값의 출처는 런타임이
+    // 쓰는 것과 같은 표다 — 시드만의 별도 매핑을 만들지 않는다.
     const stepRows = mockWorkflowSteps.map((s) => ({
       id: stepIdFor(s.workflowType, s.key),
       workflowVersionId: versionIdFor(s.workflowType),
       stepOrder: s.order,
       key: s.key,
       label: s.label,
+      repairStatus: getStepStatus(s.workflowType, s.key) ?? null,
+      category: getStepCategory(s.workflowType, s.key) ?? null,
       isActive: true,
       createdAt: SEED_FIXED_TIMESTAMP,
       updatedAt: SEED_FIXED_TIMESTAMP,
@@ -228,7 +238,12 @@ export async function seedDevelopmentFixtures() {
       .values(stepRows)
       .onConflictDoUpdate({
         target: workflowSteps.id,
-        set: { label: sql`excluded.label`, updatedAt: sql`excluded.updated_at` },
+        set: {
+          label: sql`excluded.label`,
+          repairStatus: sql`excluded.repair_status`,
+          category: sql`excluded.category`,
+          updatedAt: sql`excluded.updated_at`,
+        },
       });
     counts.workflowSteps = stepRows.length;
 

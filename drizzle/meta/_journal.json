@@ -281,6 +281,13 @@
       "when": 1787041740835,
       "tag": "0039_manual_step_set",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787058352664,
+      "tag": "0040_workflow_rules_foundation",
+      "breakpoints": true
     }
   ]
 }
