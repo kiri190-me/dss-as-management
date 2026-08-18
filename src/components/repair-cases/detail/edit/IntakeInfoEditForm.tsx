@@ -3,7 +3,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { BILLING_TYPE_CODES, billingTypeLabels, PRIORITY_CODES, priorityLabels, type BillingType, type Priority } from "@/lib/domain/types";
-import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { useSectionEditSubmit } from "./useSectionEditSubmit";
@@ -107,11 +106,12 @@ export default function IntakeInfoEditForm({
   // 정확히 같은 원칙으로, currentWorkflowStepKey만 미리 확인하고
   // status_change_histories(STEP_RETURNED 등)까지 재확인하는 서버가 최종
   // 권한자다. MATCHER는 원래부터 완전히 독립적이라 항상 통과한다.
-  const currentKind = workflowKindOf(resolved.workflowType);
-  const canChangeBillingType =
-    canEdit("billingType") &&
-    (resolved.workflowType === "MATCHER" ||
-      (currentKind === "GENERATOR" && resolved.currentWorkflowStepKey === "intake_inspection"));
+  // 2026-08-18 원칙 변경: 유·무상은 언제든, 어느 단계에서든 바꿀 수 있다.
+  // 여기 있던 "MATCHER이거나 Generator가 인수점검에 있을 때만" 게이트를
+  // 제거했다 — 서버에서 같은 제약을 걷어냈는데(billing-workflow-target.ts,
+  // repair-cases.ts) 화면에만 남아 있어, 실제로는 거의 모든 접수 건에서
+  // 선택 상자가 아예 렌더되지 않았다. 권한(역할) 검사만 남긴다.
+  const canChangeBillingType = canEdit("billingType");
 
   const customerOptions = useMemo(() => referenceData?.customers ?? [], [referenceData]);
   const allEndUsers = useMemo(() => referenceData?.endUsers ?? [], [referenceData]);
@@ -225,7 +225,11 @@ export default function IntakeInfoEditForm({
               onChange={(e) => setBillingType(e.target.value as BillingType | "")}
             >
               <option value="">선택 안 함</option>
-              {BILLING_TYPE_CODES.map((code) => (
+              {/* 추후결정은 제외한다 — repair-case-update-input.ts가 이 값을
+                  거부하기 때문이다(확정된 건을 미확정으로 되돌리면 단계가
+                  2개뿐인 추후결정 워크플로로 밀려나 진행 상황을 잃는다).
+                  고르면 반드시 실패하는 선택지를 보여주지 않는다. */}
+              {BILLING_TYPE_CODES.filter((code) => code !== "PENDING_DECISION").map((code) => (
                 <option key={code} value={code}>
                   {billingTypeLabels[code]}
                 </option>
@@ -234,14 +238,7 @@ export default function IntakeInfoEditForm({
             {fieldErrors.billingType && <p className={editErrorClass}>{fieldErrors.billingType}</p>}
           </div>
         ) : (
-          <div>
-            <ReadOnlyField label="유상/무상" value={resolved.paidOrWarranty} />
-            {canEdit("billingType") && currentKind === "GENERATOR" && (
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                워크플로 진행 후에는 유상/무상을 변경할 수 없습니다.
-              </p>
-            )}
-          </div>
+          <ReadOnlyField label="유상/무상" value={resolved.paidOrWarranty} />
         )}
 
         {canEdit("customerId") ? (
