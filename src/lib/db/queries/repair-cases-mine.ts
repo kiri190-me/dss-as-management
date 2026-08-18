@@ -16,7 +16,7 @@ import {
   procedureCaseExecutions,
   inventoryPartRequests,
 } from "../schema";
-import { deriveRepairStatus } from "../mappers/repair-status";
+import { resolveRepairStatusFromStep } from "../mappers/repair-status";
 import { productCategoryLabels, type ExceptionStatus, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
 
 /**
@@ -63,6 +63,7 @@ type JoinRow = {
   endUserName: string | null;
   workflowTypeCode: WorkflowType;
   currentWorkflowStepKey: string;
+  currentWorkflowStepRepairStatus: RepairStatus | null;
   currentWorkflowStepLabel: string;
   exceptionStatusCode: string | null;
   modelName: string;
@@ -125,10 +126,11 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
     modelName: row.modelName,
     serialNumber: row.serialNumber ?? "-",
     lotNumber: row.lotNumber ?? "-",
-    status: deriveRepairStatus({
+    status: resolveRepairStatusFromStep({
       repairCaseId: row.id,
       workflowType: row.workflowTypeCode,
       currentStepKey: row.currentWorkflowStepKey,
+      stepRepairStatus: row.currentWorkflowStepRepairStatus,
     }),
     currentWorkflowStepLabel: row.currentWorkflowStepLabel,
     exceptionStatus: row.exceptionStatusCode as ExceptionStatus | null,
@@ -160,6 +162,8 @@ export async function listMyActiveRepairCases(actorId: string): Promise<MyActive
       endUserName: endUsers.name,
       workflowTypeCode: workflowTemplates.code,
       currentWorkflowStepKey: workflowSteps.key,
+      // Phase 2c: 상태를 TS 표가 아니라 이 컬럼에서 읽는다.
+      currentWorkflowStepRepairStatus: workflowSteps.repairStatus,
       currentWorkflowStepLabel: workflowSteps.label,
       exceptionStatusCode: exceptionStatuses.code,
       modelName: products.modelName,

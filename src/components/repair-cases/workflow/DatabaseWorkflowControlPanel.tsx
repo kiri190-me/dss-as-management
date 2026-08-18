@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { workflowSteps } from "@/lib/domain/mock-data";
+
 import { roleLabels } from "@/lib/domain/types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import { getStepCategory, roleForCategory } from "@/lib/domain/local/workflow/step-category";
-import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
+import { roleForCategory } from "@/lib/domain/local/workflow/step-category";
+import { findTransitionInDto, type WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import {
   evaluateHoldAvailability,
@@ -26,8 +26,13 @@ import TransitionDialog from "./TransitionDialog";
 import WorkflowActionList, { type WorkflowActionItem } from "./WorkflowActionList";
 import WorkflowStageStatus from "./WorkflowStageStatus";
 
-function stepLabelAndOrder(workflowType: ResolvedRepairCase["workflowType"], stepKey: string) {
-  const step = workflowSteps.find((s) => s.workflowType === workflowType && s.key === stepKey);
+/**
+ * Phase 2d: 단계 라벨·순서를 mock-data의 TS 표가 아니라 서버가 내려준 규칙
+ * (DB)에서 찾는다. 이 패널은 DATABASE 모드 전용이므로 TS 표를 볼 이유가 없다 —
+ * 로컬 데모 모드에는 WorkflowControlPanel.tsx가 따로 있다.
+ */
+function stepLabelAndOrder(rules: WorkflowRulesDto, stepKey: string) {
+  const step = rules.steps.find((s) => s.key === stepKey);
   return { label: step?.label ?? stepKey, order: step?.order ?? null };
 }
 
@@ -81,6 +86,7 @@ export default function DatabaseWorkflowControlPanel({
   holdState,
   currentApprovals,
   isCaseLocked,
+  rules,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -88,6 +94,12 @@ export default function DatabaseWorkflowControlPanel({
   currentApprovals: CurrentApprovalState[];
   /** Authoritative repair_cases.is_locked, already loaded by execution/page.tsx (same value the WorkRecordsSection lock-hint already uses) — reused here rather than re-fetched, per the disabled-buttons audit's finding that this panel never checked it. */
   isCaseLocked: boolean;
+  /**
+   * 서버가 이 접수 건의 workflow_version에서 읽어 내려준 규칙(Phase 2d).
+   * 화면 표시는 어차피 힌트일 뿐이지만, 그 힌트가 서버 판정과 다른 표를 보면
+   * "버튼은 눌리는데 서버가 거부한다"(또는 그 반대)가 된다.
+   */
+  rules: WorkflowRulesDto;
 }) {
   const router = useRouter();
   const [openDialog, setOpenDialog] = useState<DialogKind>(null);
@@ -98,17 +110,17 @@ export default function DatabaseWorkflowControlPanel({
   const currentStepKey = resolved.currentWorkflowStepKey;
   const holdStateForCheck = toHoldState(holdState);
 
-  const advanceTransition = findTransitionDefinition(resolved.workflowType, "STEP_ADVANCED", currentStepKey);
-  const returnTransition = findTransitionDefinition(resolved.workflowType, "STEP_RETURNED", currentStepKey);
-  const shipmentTransition = findTransitionDefinition(resolved.workflowType, "SHIPMENT_COMPLETED", currentStepKey);
+  const advanceTransition = findTransitionInDto(rules, "STEP_ADVANCED", currentStepKey);
+  const returnTransition = findTransitionInDto(rules, "STEP_RETURNED", currentStepKey);
+  const shipmentTransition = findTransitionInDto(rules, "SHIPMENT_COMPLETED", currentStepKey);
 
-  const stepInfo = stepLabelAndOrder(resolved.workflowType, currentStepKey);
-  const category = getStepCategory(resolved.workflowType, currentStepKey);
+  const stepInfo = stepLabelAndOrder(rules, currentStepKey);
+  const category = rules.steps.find((s) => s.key === currentStepKey)?.category ?? null;
   const responsibleRoleLabel = category
     ? `관리자 또는 ${roleLabels[roleForCategory(category)]}`
     : "관리자(SUPER_ADMIN/ADMIN)";
 
-  function approvalGateStatusFor(transition: ReturnType<typeof findTransitionDefinition> | null): ApprovalGateStatus {
+  function approvalGateStatusFor(transition: ReturnType<typeof findTransitionInDto> | null): ApprovalGateStatus {
     if (!transition?.requiredApprovalType) return "SATISFIED";
     const approval = currentApprovals.find((a) => a.approvalType === transition.requiredApprovalType)?.latest ?? null;
     if (!approval || approval.status !== "APPROVED") return "NOT_APPROVED";
@@ -194,7 +206,7 @@ export default function DatabaseWorkflowControlPanel({
     {
       key: "advance",
       label: advanceTransition
-        ? `다음 단계로 진행 (${stepLabelAndOrder(resolved.workflowType, advanceTransition.toStepKey).label})`
+        ? `다음 단계로 진행 (${stepLabelAndOrder(rules, advanceTransition.toStepKey).label})`
         : "다음 단계로 진행",
       availability: isConflict ? { available: false, reason: "최신 정보를 다시 불러와야 합니다." } : advanceAvailability,
       onClick: () => setOpenDialog("advance"),
@@ -202,7 +214,7 @@ export default function DatabaseWorkflowControlPanel({
     {
       key: "return",
       label: returnTransition
-        ? `이전 단계로 되돌리기 (${stepLabelAndOrder(resolved.workflowType, returnTransition.toStepKey).label})`
+        ? `이전 단계로 되돌리기 (${stepLabelAndOrder(rules, returnTransition.toStepKey).label})`
         : "이전 단계로 되돌리기",
       availability: isConflict ? { available: false, reason: "최신 정보를 다시 불러와야 합니다." } : returnAvailability,
       onClick: () => setOpenDialog("return"),
@@ -281,7 +293,7 @@ export default function DatabaseWorkflowControlPanel({
         isOpen={openDialog === "advance"}
         mode="advance"
         fromStepLabel={stepInfo.label}
-        toStepLabel={advanceTransition ? stepLabelAndOrder(resolved.workflowType, advanceTransition.toStepKey).label : ""}
+        toStepLabel={advanceTransition ? stepLabelAndOrder(rules, advanceTransition.toStepKey).label : ""}
         toStatusLabel={advanceTransition?.toStatus ?? ""}
         requiresApprovalLabel={
           advanceTransition?.requiredApprovalType === "REPAIR_INSPECTION"
@@ -297,7 +309,7 @@ export default function DatabaseWorkflowControlPanel({
         isOpen={openDialog === "return"}
         mode="return"
         fromStepLabel={stepInfo.label}
-        toStepLabel={returnTransition ? stepLabelAndOrder(resolved.workflowType, returnTransition.toStepKey).label : ""}
+        toStepLabel={returnTransition ? stepLabelAndOrder(rules, returnTransition.toStepKey).label : ""}
         toStatusLabel={returnTransition?.toStatus ?? ""}
         requiresApprovalLabel={null}
         isSubmitting={isSubmitting}

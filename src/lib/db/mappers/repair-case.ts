@@ -6,10 +6,11 @@ import {
   type BillingType,
   type ExceptionStatus,
   type Priority,
+  type RepairStatus,
   type WorkflowType,
 } from "@/lib/domain/types";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
-import { deriveRepairStatus } from "./repair-status";
+import { resolveRepairStatusFromStep } from "./repair-status";
 
 /**
  * Flat shape produced by the single joined query in
@@ -38,6 +39,16 @@ export type RepairCaseJoinRow = {
   billingType: BillingType | null;
   priority: Priority;
   currentWorkflowStepKey: string;
+  /**
+   * Phase 2c: 상태의 출처가 step-status-map.ts(TS 표)에서 DB의
+   * workflow_steps.repair_status로 바뀌었다. 쿼리가 이미 workflow_steps를
+   * 조인하고 있으므로 컬럼 하나를 더 고르는 것으로 끝난다.
+   *
+   * nullable인 것은 컬럼이 아직 NOT NULL로 승격되지 않았기 때문이다. 비어
+   * 있으면 조용히 넘기지 않고 UnmappedWorkflowStepError로 실패한다 — 예전
+   * 표에 매핑이 없을 때와 정확히 같은 동작이다.
+   */
+  currentWorkflowStepRepairStatus: RepairStatus | null;
   exceptionStatusCode: string | null;
   receivedAt: string;
   customerRequestedDueDate: string | null;
@@ -102,10 +113,11 @@ export function mapRepairCaseRow(
   row: RepairCaseJoinRow,
   referenceDate: Date = DEMO_REFERENCE_DATE
 ): ResolvedRepairCase {
-  const status = deriveRepairStatus({
+  const status = resolveRepairStatusFromStep({
     repairCaseId: row.id,
     workflowType: row.workflowTypeCode,
     currentStepKey: row.currentWorkflowStepKey,
+    stepRepairStatus: row.currentWorkflowStepRepairStatus,
   });
 
   const createdAtIso = row.createdAt.toISOString();

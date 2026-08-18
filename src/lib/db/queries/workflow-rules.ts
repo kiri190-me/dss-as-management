@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import type { db } from "../client";
-import { workflowSteps, workflowTemplates, workflowTransitions, workflowVersions } from "../schema";
+import { repairCases, workflowSteps, workflowTemplates, workflowTransitions, workflowVersions } from "../schema";
 import type {
   TransitionDefinition,
   TransitionDirection,
@@ -10,18 +10,16 @@ import type {
 import type { ActionCode } from "@/lib/domain/local/workflow/workflow-types";
 import type { RepairStatus, WorkflowType } from "@/lib/domain/types";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
+import type { WorkflowRuleStep, WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+/**
+ * 트랜잭션 핸들과 최상위 db 양쪽을 받는다 — mutation은 트랜잭션 안에서,
+ * 서버 컴포넌트(페이지)는 트랜잭션 없이 읽기 때문이다. 읽기 전용이라 둘 중
+ * 무엇으로 실행하든 의미가 같다.
+ */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
-export type WorkflowRuleStep = {
-  id: string;
-  key: string;
-  label: string;
-  order: number;
-  isActive: boolean;
-  status: RepairStatus;
-  category: StepCategory | null;
-};
+export type { WorkflowRuleStep, WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
 
 export type WorkflowRules = {
   workflowVersionId: string;
@@ -194,3 +192,28 @@ export function listManuallySelectableStepsFromRules(rules: WorkflowRules): Work
 export function isManuallySelectableStepInRules(rules: WorkflowRules, stepKey: string): boolean {
   return listManuallySelectableStepsFromRules(rules).some((step) => step.key === stepKey);
 }
+
+/**
+ * 접수 건 하나의 규칙을 읽는다. 페이지(서버 컴포넌트)용 진입점이며,
+ * ResolvedRepairCase가 workflow_version_id를 담지 않기 때문에 필요하다.
+ * 그 값을 ResolvedRepairCase에 얹지 않은 것은 로컬(mock) 모드의 접수 건에는
+ * 대응하는 DB 버전이 존재하지 않기 때문이다.
+ */
+export async function loadWorkflowRulesForCase(tx: Tx, repairCaseId: string): Promise<WorkflowRules | null> {
+  const [row] = await tx
+    .select({ workflowVersionId: repairCases.workflowVersionId })
+    .from(repairCases)
+    .where(eq(repairCases.id, repairCaseId));
+  if (!row) return null;
+  return loadWorkflowRules(tx, row.workflowVersionId);
+}
+
+/**
+ * 클라이언트로 넘길 수 있는 형태로 좁힌다(Map 제거). 타입과 조회 함수는
+ * domain/workflow-rules-view.ts에 있다 — 이 파일에는 server-only가 붙어 있어
+ * 클라이언트 컴포넌트가 import할 수 없기 때문이다.
+ */
+export function toWorkflowRulesDto(rules: WorkflowRules): WorkflowRulesDto {
+  return { workflowType: rules.workflowType, steps: rules.steps, transitions: rules.transitions };
+}
+

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { repairStatusLabels } from "@/lib/domain/types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { checkManualStepSetEligibility } from "@/lib/domain/local/workflow/permissions";
-import type { ManualStepOption } from "@/lib/domain/local/workflow/manual-step-options";
+import type { WorkflowRuleStep } from "@/lib/domain/workflow-rules-view";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import { setWorkflowStepAction } from "@/lib/server/actions/set-workflow-step";
 
@@ -34,7 +34,7 @@ export default function ManualStepSetPanel({
   version: number;
   currentStepKey: string;
   /** 승인 게이트 단계가 제외된 후보 목록 — manual-step-options.ts가 산출한다. */
-  options: ManualStepOption[];
+  options: WorkflowRuleStep[];
   actingUser: ActingUser | null;
   /** 접수 건의 담당 엔지니어(없으면 null). AS_ENGINEER 본인 확인용 UI 힌트이며,
    *  최종 판정은 서버가 DB 값으로 다시 한다. */

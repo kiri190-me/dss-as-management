@@ -51,6 +51,8 @@ function repairCaseBaseColumns() {
     billingType: repairCases.billingType,
     priority: repairCases.priority,
     currentWorkflowStepKey: workflowSteps.key,
+    // Phase 2c: 상태를 TS 표가 아니라 이 컬럼에서 읽는다(mappers/repair-status.ts).
+    currentWorkflowStepRepairStatus: workflowSteps.repairStatus,
     exceptionStatusCode: exceptionStatuses.code,
     receivedAt: repairCases.receivedAt,
     customerRequestedDueDate: repairCases.customerRequestedDueDate,

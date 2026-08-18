@@ -24,8 +24,12 @@ import {
 } from "@/lib/db/queries/procedure-case-execution";
 import { getRecentWorkRecordsForCase, getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
 import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
-import { workflowSteps } from "@/lib/domain/mock-data";
-import { listManuallySelectableSteps } from "@/lib/domain/local/workflow/manual-step-options";
+import {
+  listManuallySelectableStepsFromRules,
+  loadWorkflowRulesForCase,
+  toWorkflowRulesDto,
+} from "@/lib/db/queries/workflow-rules";
+import { db } from "@/lib/db/client";
 
 export const metadata: Metadata = {
   title: "작업내용 | DSS A/S 관리 시스템",
@@ -138,11 +142,18 @@ export default async function RepairCaseExecutionPage({
   // checkpoint's audit report), but no longer determines this message,
   // since canCreateWorkRecord itself no longer factors in lock state.
   const createDisabledReason = !canCreate ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다." : null;
-  const currentStep = workflowSteps.find((s) => s.workflowType === resolved.workflowType && s.key === resolved.currentWorkflowStepKey);
-  // 단계 직접 변경 후보. 승인 게이트가 걸린 단계와 상태 매핑이 없는 단계는
-  // 여기서 이미 빠진다(manual-step-options.ts) — 서버도 같은 함수로 다시
-  // 검증하므로 이 목록은 순수한 표시용이다.
-  const manualStepOptions = listManuallySelectableSteps(resolved.workflowType);
+  /**
+   * Phase 2d: 이 화면의 워크플로 관련 표시는 전부 DB에서 읽은 규칙을 쓴다.
+   * 예전에는 mock-data의 단계 표와 manual-step-options.ts(TS)를 봤는데, 서버
+   * 판정이 DB로 옮겨간 뒤에도 화면만 옛 표를 보면 "버튼은 눌리는데 서버가
+   * 거부한다"가 된다 — 유·무상 작업에서 실제로 겪은 증상이다.
+   */
+  const workflowRules = await loadWorkflowRulesForCase(db, resolved.id);
+  if (!workflowRules) notFound();
+  const currentStep = workflowRules.steps.find((s) => s.key === resolved.currentWorkflowStepKey);
+  // 단계 직접 변경 후보. 승인 게이트가 걸린 단계는 여기서 이미 빠진다 —
+  // 서버(mutation)도 같은 함수로 다시 검증하므로 이 목록은 표시용이다.
+  const manualStepOptions = listManuallySelectableStepsFromRules(workflowRules);
 
   return (
     <div className="flex flex-col gap-4">
@@ -152,6 +163,7 @@ export default async function RepairCaseExecutionPage({
         holdState={holdState}
         currentApprovals={currentApprovals}
         isCaseLocked={isCaseLocked}
+        rules={toWorkflowRulesDto(workflowRules)}
       />
 
       {/* 실행 가능 작업(위)은 그대로 두고, 규칙을 우회하는 직접 변경은 별도
