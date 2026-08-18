@@ -3,7 +3,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
+import {
+  canEditWorkflowTemplates,
+  canViewWorkflowTemplates,
+} from "@/lib/auth/workflow-template-authorization";
+import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
+import WorkflowDraftEntry from "@/components/workflows/WorkflowDraftEntry";
 import { getWorkflowTemplateDetail } from "@/lib/db/queries/workflow-templates";
 import { loadWorkflowRules } from "@/lib/db/queries/workflow-rules";
 import { db } from "@/lib/db/client";
@@ -53,6 +58,7 @@ export default async function WorkflowDetailPage({ params }: { params: Promise<{
 
   const currentVersion = detail.versions.find((v) => v.isCurrent && v.status === "PUBLISHED") ?? null;
   const rules = currentVersion ? await loadWorkflowRules(db, currentVersion.id) : null;
+  const draft = canEditWorkflowTemplates(actingUser.role) ? await findWorkflowDraft(code) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -65,6 +71,15 @@ export default async function WorkflowDetailPage({ params }: { params: Promise<{
         </h1>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-500">{detail.code}</p>
       </div>
+
+      {canEditWorkflowTemplates(actingUser.role) && (
+        <WorkflowDraftEntry
+          templateCode={detail.code}
+          hasDraft={draft !== null}
+          draftVersionNumber={draft?.versionNumber ?? null}
+          canCreate={currentVersion !== null}
+        />
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">버전 이력</h2>

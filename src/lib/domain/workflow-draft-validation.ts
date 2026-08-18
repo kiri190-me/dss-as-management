@@ -230,3 +230,18 @@ export function validateWorkflowDraft(
 
   return { ok: errors.length === 0, errors, warnings };
 }
+
+/**
+ * 이 워크플로가 "종료 단계 없이 빠져나가는" 부류인지 판단한다.
+ *
+ * 화면(발행 전 미리보기)과 서버(발행 mutation)가 각자 판단하면 두 판정이
+ * 갈라지고, 그러면 "화면에는 통과인데 발행이 거부되는"(또는 그 반대) 상황이
+ * 된다 — 이 프로젝트에서 같은 종류의 어긋남을 이미 여러 번 겪었다. 판단을
+ * 여기 한 곳에 둔다.
+ *
+ * 추후결정(PENDING_*) 워크플로가 유일한 부류다. 단계가 접수·인수점검 둘뿐이고,
+ * 유·무상을 확정하는 순간 해당 유상/무상 워크플로로 옮겨간다.
+ */
+export function workflowExitsWithoutTerminalStep(workflowCode: string): boolean {
+  return workflowCode.startsWith("PENDING_");
+}

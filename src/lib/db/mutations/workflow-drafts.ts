@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth/workflow-template-authorization";
 import {
   validateWorkflowDraft,
+  workflowExitsWithoutTerminalStep,
   type DraftValidationIssue,
 } from "@/lib/domain/workflow-draft-validation";
 import type { WorkflowType } from "@/lib/domain/types";
@@ -252,9 +253,7 @@ export async function publishWorkflowDraft(params: {
         toStepKey: stepKeyById.get(t.toStepId) ?? "",
       })),
       {
-        // 추후결정 워크플로는 유·무상 확정으로 빠져나가므로 자체 종료 단계가
-        // 없는 것이 정상이다(workflow-draft-validation.ts 참고).
-        exitsWithoutTerminalStep: draft.templateCode.startsWith("PENDING_"),
+        exitsWithoutTerminalStep: workflowExitsWithoutTerminalStep(draft.templateCode),
       }
     );
     if (!validation.ok) {

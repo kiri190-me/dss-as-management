@@ -10,7 +10,13 @@ import {
   workflowTransitions,
   workflowVersions,
 } from "../schema";
-import type { WorkflowType } from "@/lib/domain/types";
+import type { RepairStatus, WorkflowType } from "@/lib/domain/types";
+import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
+import {
+  validateWorkflowDraft,
+  workflowExitsWithoutTerminalStep,
+  type DraftValidationResult,
+} from "@/lib/domain/workflow-draft-validation";
 
 /**
  * 워크플로 기본 틀 조회(Phase 3). 읽기 전용이며, 목록/버전 이력 화면이 쓴다.
@@ -145,5 +151,109 @@ export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowT
       transitionCount: Number(v.transitionCount),
       caseCount: Number(v.caseCount),
     })),
+  };
+}
+
+export type WorkflowDraftStepView = {
+  id: string;
+  key: string;
+  label: string;
+  order: number;
+  isActive: boolean;
+  status: RepairStatus | null;
+  category: StepCategory | null;
+};
+
+export type WorkflowDraftDetail = {
+  versionId: string;
+  versionNumber: number;
+  templateCode: WorkflowType;
+  templateName: string;
+  createdByName: string;
+  steps: WorkflowDraftStepView[];
+  transitions: { id: string; actionCode: string; fromStepKey: string; toStepKey: string }[];
+  validation: DraftValidationResult;
+};
+
+/**
+ * 초안 편집 화면이 쓰는 조회. 검증 결과를 함께 돌려주는 이유는, 편집자가
+ * "지금 발행하면 무엇이 걸리는지"를 저장할 때마다 보아야 하기 때문이다.
+ * 같은 판정을 발행 mutation이 서버에서 다시 실행하며, 예외 판단
+ * (workflowExitsWithoutTerminalStep)도 같은 함수를 공유한다.
+ */
+export async function getWorkflowDraftDetail(versionId: string): Promise<WorkflowDraftDetail | null> {
+  const [version] = await db
+    .select({
+      id: workflowVersions.id,
+      versionNumber: workflowVersions.versionNumber,
+      status: workflowVersions.status,
+      templateCode: workflowTemplates.code,
+      templateName: workflowTemplates.name,
+      createdByName: users.name,
+    })
+    .from(workflowVersions)
+    .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
+    .innerJoin(users, eq(users.id, workflowVersions.createdBy))
+    .where(eq(workflowVersions.id, versionId));
+  if (!version || version.status !== "DRAFT") return null;
+
+  const stepRows = await db
+    .select({
+      id: workflowSteps.id,
+      key: workflowSteps.key,
+      label: workflowSteps.label,
+      order: workflowSteps.stepOrder,
+      isActive: workflowSteps.isActive,
+      status: workflowSteps.repairStatus,
+      category: workflowSteps.category,
+    })
+    .from(workflowSteps)
+    .where(eq(workflowSteps.workflowVersionId, versionId))
+    .orderBy(asc(workflowSteps.stepOrder));
+
+  const transitionRows = await db
+    .select({
+      id: workflowTransitions.id,
+      actionCode: workflowTransitions.actionCode,
+      fromStepId: workflowTransitions.fromStepId,
+      toStepId: workflowTransitions.toStepId,
+    })
+    .from(workflowTransitions)
+    .where(eq(workflowTransitions.workflowVersionId, versionId));
+
+  const keyById = new Map(stepRows.map((s) => [s.id, s.key]));
+  const transitions = transitionRows.map((t) => ({
+    id: t.id,
+    actionCode: t.actionCode as string,
+    fromStepKey: keyById.get(t.fromStepId) ?? "",
+    toStepKey: keyById.get(t.toStepId) ?? "",
+  }));
+
+  const validation = validateWorkflowDraft(
+    stepRows.map((s) => ({
+      key: s.key,
+      label: s.label,
+      order: s.order,
+      isActive: s.isActive,
+      status: s.status,
+      category: s.category,
+    })),
+    transitions.map((t) => ({
+      actionCode: t.actionCode as "STEP_ADVANCED" | "STEP_RETURNED" | "SHIPMENT_COMPLETED",
+      fromStepKey: t.fromStepKey,
+      toStepKey: t.toStepKey,
+    })),
+    { exitsWithoutTerminalStep: workflowExitsWithoutTerminalStep(version.templateCode) }
+  );
+
+  return {
+    versionId: version.id,
+    versionNumber: version.versionNumber,
+    templateCode: version.templateCode as WorkflowType,
+    templateName: version.templateName,
+    createdByName: version.createdByName,
+    steps: stepRows,
+    transitions,
+    validation,
   };
 }
