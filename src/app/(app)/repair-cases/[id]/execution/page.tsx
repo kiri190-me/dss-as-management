@@ -23,7 +23,8 @@ import {
   getRelatedRepairHistory,
 } from "@/lib/db/queries/procedure-case-execution";
 import { getRecentWorkRecordsForCase, getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
-import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
+import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   listManuallySelectableStepsFromRules,
   loadWorkflowRulesForCase,
@@ -134,8 +135,11 @@ export default async function RepairCaseExecutionPage({
   }
 
   const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
-  const canCreate = canCreateWorkRecord(actingUser.role, { isAssignedToCase, isCaseLocked });
-  const canInvalidate = canInvalidateWorkRecord(actingUser.role, { isCaseLocked });
+  const canCreate =
+    (!workRecordRequiresOwnAssignment(actingUser.role) || isAssignedToCase) &&
+    (await hasPermission(actingUser.role, "repairCases.workRecords", "WRITE"));
+  const canInvalidate = await hasPermission(actingUser.role, "repairCases.workRecords", "MANAGE");
+  void isCaseLocked;
   // Shipment-lock removal policy: isCaseLocked is still fed into
   // DatabaseWorkflowControlPanel below (workflow-transition gating is
   // unchanged, a separate concern from work-record editing — see this

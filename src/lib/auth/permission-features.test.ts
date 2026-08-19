@@ -10,12 +10,19 @@ import {
   findPermissionFeature,
   hasFeatures,
   isPermissionLeafKey,
+  isSettingsEnforced,
   levelHintOfLeaf,
   maxMeaningfulLevelOfLeaf,
   minMeaningfulLevelOfLeaf,
   selectableLevelsOfLeaf,
 } from "./permission-features";
 import { baselineLeafLevel, baselinePermissionLevel } from "./permission-baseline";
+import {
+  canBulkDeleteRepairCases,
+  canRestoreRepairCases,
+  canPermanentlyDeleteRepairCases,
+  canEditSection,
+} from "./repair-case-edit-authorization";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 function featureMax(areaKey: string, role: Role): PermissionLevel {
@@ -147,6 +154,32 @@ test("영업·재고 담당자는 진단 흐름도를 편집할 수 없다", () 
   assert.equal(baselineLeafLevel("diagnosisFlowcharts.edit", "SALES"), "NONE");
   assert.equal(baselineLeafLevel("diagnosisFlowcharts.edit", "INVENTORY_MANAGER"), "NONE");
   assert.equal(baselineLeafLevel("diagnosisFlowcharts.edit", "AS_ENGINEER"), "WRITE");
+});
+
+test("삭제·복원 세 조작은 역할 집합이 같아서 한 노드로 접어도 된다", () => {
+  // repairCases.lifecycle이 일괄 삭제·복원·영구 삭제를 한 칸에 담는 근거다.
+  // 셋 중 하나라도 정책이 갈리면 진단 흐름도에서 났던 것과 같은 누수가 되므로,
+  // 갈리는 순간 여기서 잡힌다.
+  for (const role of ROLE_CODES) {
+    const bulk = canBulkDeleteRepairCases(role);
+    assert.equal(canRestoreRepairCases(role), bulk, `${role}: 복원이 일괄 삭제와 갈렸다`);
+    assert.equal(canPermanentlyDeleteRepairCases(role), bulk, `${role}: 영구 삭제가 갈렸다`);
+  }
+});
+
+test("접수 건 수정은 구간마다 역할이 달라서 한 노드로 접을 수 없다", () => {
+  // 영업은 접수·고장 정보는 고치지만 제품 정보는 못 고친다. repairCases.edit을
+  // 설정으로 옮기지 않은 이유이고(EDITABLE_FIELDS_BY_ROLE는 필드 단위라 4단계
+  // 사다리보다 잘다), 이 차이가 사라지면 접어도 되는지 다시 판단해야 한다.
+  assert.equal(canEditSection("SALES", "INTAKE"), true);
+  assert.equal(canEditSection("SALES", "FAULT_SERVICE"), true);
+  assert.equal(canEditSection("SALES", "PRODUCT"), false);
+  assert.equal(
+    isSettingsEnforced("repairCases.edit"),
+    false,
+    "구간별 차이가 남아 있는 한 이 노드는 설정이 최종 판정일 수 없다"
+  );
+  assert.equal(isSettingsEnforced("repairCases.lifecycle"), true);
 });
 
 test("엔지니어는 흐름도를 고칠 수 있지만 영구 삭제는 못 한다", () => {

@@ -355,9 +355,34 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
   "diagnosisFlowcharts",
 ]);
 
-/** 이 메뉴(또는 이 잎이 속한 메뉴)의 설정이 실제 판정을 지배하는가. */
+/**
+ * 메뉴 전체가 아니라 노드 하나만 전환된 경우.
+ *
+ * '전체 A/S 현황'이 그렇다 — 조회·작업 기록·삭제복원·절차 수행은 설정이
+ * 판정하지만, **접수 건 수정은 그럴 수 없다.** 그 정책은 역할별 편집 가능
+ * 필드 목록(EDITABLE_FIELDS_BY_ROLE)이라 4단계 사다리보다 잘다. 예를 들어
+ * 영업은 접수 정보와 고장·서비스는 고치지만 제품 정보는 못 고치는데, 이 구분은
+ * 수준 하나로 접히지 않는다. 접으면 영업에게 제품 정보가 열린다.
+ *
+ * 그래서 그 노드만 남겨 두고, 화면이 노드별로 사실대로 말한다.
+ */
+const SETTINGS_ENFORCED_LEAVES = new Set<string>([
+  "repairCases.view",
+  "repairCases.workRecords",
+  "repairCases.lifecycle",
+  "repairCases.procedureExecution",
+]);
+
+/** 이 노드의 설정이 실제 판정을 지배하는가. */
 export function isSettingsEnforced(key: string): boolean {
-  return SETTINGS_ENFORCED_AREAS.has(key.includes(".") ? key.split(".")[0] : key);
+  if (key.includes(".")) {
+    return SETTINGS_ENFORCED_AREAS.has(key.split(".")[0]) || SETTINGS_ENFORCED_LEAVES.has(key);
+  }
+  // 메뉴는 하위가 **전부** 전환됐을 때만 전환된 것으로 본다. 하나라도 남아
+  // 있으면 "이 메뉴는 설정이 최종 판정"이라고 말할 수 없다.
+  if (SETTINGS_ENFORCED_AREAS.has(key)) return true;
+  const children = featuresOfArea(key);
+  return children.length > 0 && children.every((feature) => SETTINGS_ENFORCED_LEAVES.has(feature.key));
 }
 
 /** 이 메뉴의 하위 기능. 없으면 빈 배열이고, 그때는 메뉴 자체가 잎이다. */

@@ -3,7 +3,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import { repairCases, repairCaseWorkRecords, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
-import { canCreateWorkRecord, canInvalidateWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
+import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { WorkRecordKind } from "@/lib/domain/types";
 
 /**
@@ -125,7 +126,9 @@ export async function createWorkRecord(params: {
       }
 
       const isAssignedToCase = repairCase.assignedEngineerId === actor.id;
-      if (!canCreateWorkRecord(actor.role, { isAssignedToCase, isCaseLocked: repairCase.isLocked })) {
+      // 담당 조건은 엔지니어에게만 붙는다 — 역할은 설정이, 담당 여부는 여기가 본다.
+      const assignmentOk = !workRecordRequiresOwnAssignment(actor.role) || isAssignedToCase;
+      if (!assignmentOk || !(await hasPermission(actor.role, "repairCases.workRecords", "WRITE"))) {
         failCreate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -279,7 +282,7 @@ export async function invalidateWorkRecord(params: {
         failInvalidate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 작업 기록을 변경할 수 있습니다.");
       }
 
-      if (!canInvalidateWorkRecord(actor.role, { isCaseLocked: repairCase.isLocked })) {
+      if (!(await hasPermission(actor.role, "repairCases.workRecords", "MANAGE"))) {
         failInvalidate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

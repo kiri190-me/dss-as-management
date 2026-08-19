@@ -12,12 +12,11 @@ import {
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import {
-  canPerformOrdinaryExecutionMutation,
-  canReopenCompletedOrSkippedNode,
-  canReopenBlockedNode,
+  executionRequiresOwnAssignment,
   isBlockedByCaseLock,
   type EffectiveAssigneeContext,
 } from "@/lib/auth/procedure-case-execution-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isExecutableNodeType, isSystemEntryNodeType } from "@/lib/domain/procedure-execution-topology";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
@@ -111,15 +110,20 @@ function assertNotSystemEntryNode(nodeType: ProcedureNodeType | null): void {
 }
 
 /** Lock check + role/assignment check for the common "ordinary mutation" tier (start execution, start/complete/skip/block a node, add an extra task, update a memo). */
-function assertOrdinaryMutationAuthorized(
+async function assertOrdinaryMutationAuthorized(
   actor: { id: string; role: Role },
   repairCase: { isLocked: boolean; assignedEngineerId: string | null },
   nodeAssignedEngineerId: string | null
-): void {
+): Promise<void> {
   assertNotLocked(repairCase);
+
+  // 역할은 설정이 정하고, "내 담당 건인가"는 종전대로 여기서 본다. 담당 조건은
+  // 엔지니어에게만 붙는 것이라 맥락만으로는 답이 나오지 않는다.
   const effectiveAssigneeId = nodeAssignedEngineerId ?? repairCase.assignedEngineerId;
-  const assignment: EffectiveAssigneeContext = { effectiveAssigneeId, actorUserId: actor.id };
-  if (!canPerformOrdinaryExecutionMutation(actor.role, assignment)) {
+  const isAssigned = effectiveAssigneeId !== null && effectiveAssigneeId === actor.id;
+  const assignmentOk = !executionRequiresOwnAssignment(actor.role) || isAssigned;
+
+  if (!assignmentOk || !(await hasPermission(actor.role, "repairCases.procedureExecution", "WRITE"))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 }
@@ -170,7 +174,7 @@ export async function startProcedureExecution(
         fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure를 실행할 수 있습니다.");
       }
 
-      assertOrdinaryMutationAuthorized(actor, repairCase, null);
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
 
       const [template] = await tx
         .select({
@@ -337,7 +341,7 @@ export async function startExecutionNode(
       const ctx = await loadExecutionNodeOrFail(tx, executionNodeId);
       assertNotSystemEntryNode(ctx.nodeType);
 
-      assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
 
       // Version staleness is checked first: under the row lock, a second
       // concurrent caller unblocks only after the first already committed,
@@ -401,7 +405,7 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
       const ctx = await loadExecutionNodeOrFail(tx, input.executionNodeId);
       assertNotSystemEntryNode(ctx.nodeType);
 
-      assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
 
       // Version checked before status — see startExecutionNode's comment.
       if (ctx.node.version !== input.expectedVersion) {
@@ -490,7 +494,7 @@ async function transitionToExceptionalStatus(
   }
 ): Promise<number> {
   assertNotSystemEntryNode(params.ctx.nodeType);
-  assertOrdinaryMutationAuthorized(params.actor, params.ctx.repairCase, params.ctx.node.assignedEngineerId);
+  await assertOrdinaryMutationAuthorized(params.actor, params.ctx.repairCase, params.ctx.node.assignedEngineerId);
 
   // Version checked before status — see startExecutionNode's comment.
   if (params.ctx.node.version !== params.expectedVersion) {
@@ -615,9 +619,13 @@ export async function reopenExecutionNode(
         effectiveAssigneeId: ctx.node.assignedEngineerId ?? ctx.repairCase.assignedEngineerId,
         actorUserId: actor.id,
       };
+      const isAssigned =
+        assignment.effectiveAssigneeId !== null && assignment.effectiveAssigneeId === actor.id;
       const allowed = wasCompletedOrSkipped
-        ? canReopenCompletedOrSkippedNode(actor.role)
-        : canReopenBlockedNode(actor.role, assignment);
+        ? // 이미 끝난 단계를 되돌리는 것은 담당 여부와 무관하게 관리 수준이다.
+          await hasPermission(actor.role, "repairCases.procedureExecution", "MANAGE")
+        : (!executionRequiresOwnAssignment(actor.role) || isAssigned) &&
+          (await hasPermission(actor.role, "repairCases.procedureExecution", "WRITE"));
       if (!allowed) {
         fail("FORBIDDEN", "이 작업을 재개(되돌림)할 권한이 없습니다.");
       }
@@ -697,7 +705,7 @@ export async function addExecutionExtraTask(
       // No node-level assignment override exists yet (the row doesn't
       // exist until this insert) — the effective assignee for authorizing
       // this action is the case's own assigned engineer only.
-      assertOrdinaryMutationAuthorized(actor, repairCase, null);
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
 
       const trimmedTitle = title.trim();
       if (trimmedTitle.length === 0) {
@@ -760,7 +768,7 @@ export async function updateExecutionNodeMemo(
       const ctx = await loadExecutionNodeOrFail(tx, executionNodeId);
       assertNotSystemEntryNode(ctx.nodeType);
 
-      assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
 
       // Stale-version detection always takes priority over the no-op check
       // below — a caller acting on stale data must see CONFLICT even if

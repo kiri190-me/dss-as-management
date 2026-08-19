@@ -39,6 +39,14 @@ function isAssignedActor(ctx: EffectiveAssigneeContext): boolean {
 }
 
 /** Start execution, start/complete/block/skip a node, add an extra task, update a memo — the Phase 5A "ordinary mutation" tier. */
+/**
+ * 이 역할은 자기 담당 건에서만 절차를 진행할 수 있는가.
+ * repair-case-work-record-authorization.ts의 같은 이름 함수와 같은 이유로 있다.
+ */
+export function executionRequiresOwnAssignment(role: Role): boolean {
+  return role === "AS_ENGINEER";
+}
+
 export function canPerformOrdinaryExecutionMutation(role: Role, assignment: EffectiveAssigneeContext): boolean {
   if (role === "SUPER_ADMIN" || role === "ADMIN") return true;
   if (role === "AS_ENGINEER") return isAssignedActor(assignment);

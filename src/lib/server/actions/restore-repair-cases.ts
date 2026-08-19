@@ -4,7 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
-import { canRestoreRepairCases } from "@/lib/auth/repair-case-edit-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isValidExpectedVersion, isValidRepairCaseId } from "@/lib/validation/repair-case-update-input";
 import { restoreRepairCase } from "@/lib/db/mutations/repair-cases";
 
@@ -67,7 +67,7 @@ export async function restoreRepairCasesAction(input: {
   if (!actingUser) {
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
-  if (!canRestoreRepairCases(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "repairCases.lifecycle", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "A/S 접수 건 복원 권한이 없습니다." };
   }
 

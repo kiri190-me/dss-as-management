@@ -47,6 +47,21 @@ export function canCreateWorkRecord(role: Role, ctx: CreateWorkRecordContext): b
   return false;
 }
 
+/**
+ * 이 역할은 자기 담당 건에서만 기록을 남길 수 있는가.
+ *
+ * 권한 판정이 role_permissions 설정으로 넘어가면서 부르는 쪽이 "이 역할이
+ * 기록을 남길 수 있는가"와 "이 건이 그 사람 담당인가"를 따로 물어야 한다.
+ * 뒤엣것은 맥락만으로는 답이 안 나온다 — 관리자에게는 아예 붙지 않는 조건이라
+ * 역할을 함께 봐야 한다. 그래서 순수 맥락 술어가 아니라 이 형태다.
+ *
+ * canCreateWorkRecord와 같은 규칙을 두 번 적지 않도록, 위 함수도 이 값과 같은
+ * 뜻으로 읽히게 두었다(엔지니어만 ctx.isAssignedToCase를 본다).
+ */
+export function workRecordRequiresOwnAssignment(role: Role): boolean {
+  return role === "AS_ENGINEER";
+}
+
 export type InvalidateWorkRecordContext = {
   isCaseLocked: boolean;
 };

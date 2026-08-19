@@ -5,11 +5,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
-import {
-  canBulkDeleteRepairCases,
-  canPermanentlyDeleteRepairCases,
-  canRestoreRepairCases,
-} from "@/lib/auth/repair-case-edit-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listDeletedRepairCases, listRepairCases } from "@/lib/db/queries/repair-cases";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -57,20 +53,25 @@ export default async function RepairCasesPage() {
   // enforce for their own writes.
   const actingUser = await resolveActingUserForSession(session);
   const isDatabaseWriteMode = getRepairCaseWriteSource() === "database";
-  const canBulkDelete = isDatabaseWriteMode && actingUser !== null && canBulkDeleteRepairCases(actingUser.role);
+  // 일괄 삭제·복원·영구 삭제는 한 노드가 지배한다 — 세 함수의 역할 집합이
+  // 정확히 같음을 확인하고 접었다(전부 관리자 이상). 한 번만 묻는다.
+  const mayManageLifecycle =
+    isDatabaseWriteMode &&
+    actingUser !== null &&
+    (await hasPermission(actingUser.role, "repairCases.lifecycle", "MANAGE"));
+  const canBulkDelete = mayManageLifecycle;
 
   // Repair Case Trash + Restore checkpoint — same UX-hint-only precedent as
   // canBulkDelete (restoreRepairCasesAction independently re-checks role/
   // write-source). The 휴지통 query only ever runs for an admin session in
   // DATABASE mode — every other role/mode never even fetches deleted rows.
-  const canRestore = isDatabaseWriteMode && actingUser !== null && canRestoreRepairCases(actingUser.role);
+  const canRestore = mayManageLifecycle;
   const serverTrashCases = canRestore ? await listDeletedRepairCases() : undefined;
 
   // Repair Case Permanent Delete checkpoint — same UX-hint-only precedent
   // as canBulkDelete/canRestore (permanentlyDeleteRepairCasesAction
   // independently re-checks role/write-source).
-  const canPermanentlyDelete =
-    isDatabaseWriteMode && actingUser !== null && canPermanentlyDeleteRepairCases(actingUser.role);
+  const canPermanentlyDelete = mayManageLifecycle;
 
   return (
     <Suspense>
