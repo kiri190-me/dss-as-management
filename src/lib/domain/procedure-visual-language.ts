@@ -343,10 +343,32 @@ const NODE_MAX_VISIBLE_TITLE_LINES = 4;
 
 export const NODE_SIZE = {
   MIN_WIDTH: 132,
-  MAX_WIDTH: 240,
-  /** DECISION gets wider bounds than other shapes — the hexagon clip-path needs more raw width to keep a usable safe text zone (see ProcedureNodeChip's SHAPE_CLIP_PATH) */
+  /** DECISION starts wider than other shapes — the diamond clip-path needs more raw width to keep a usable safe text zone (see ProcedureNodeChip's SHAPE_CLIP_PATH) */
   DECISION_MIN_WIDTH: 172,
-  DECISION_MAX_WIDTH: 300,
+  /**
+   * DECISION은 clip-path가 좌우 끝을 잘라내 같은 글자 수라도 실제로 글자가
+   * 놓일 수 있는 폭이 더 좁다 — 그만큼 폭을 더 잡아준다(예전에는 최소/최대
+   * 폭을 각각 따로 크게 잡아 같은 일을 했다).
+   */
+  DECISION_WIDTH_FACTOR: 1.25,
+  /** 글자가 테두리에 닿지 않도록 좌우로 남기는 여백 */
+  TEXT_INSET_X: 16,
+  /** 그래프 칩의 제목 글꼴 크기(px) — 아래 글자 폭 추정의 기준이다. */
+  TITLE_FONT_PX: 13,
+  /**
+   * 글자 폭 추정 계수(글꼴 크기 대비). 한글/한자/가나/전각 문자는 거의 정사각형
+   * (1em)이고, 라틴 문자·숫자·공백은 그 절반 남짓이다. 이 둘을 하나의 평균값으로
+   * 뭉개면(예전 CHARS_PER_100PX=13, 즉 글자당 7.7px) 한글 제목의 실제 폭을 거의
+   * 절반으로 과소평가해, 폭을 넓혀도 글자는 계속 줄바꿈됐다.
+   */
+  WIDE_CHAR_EM: 1,
+  NARROW_CHAR_EM: 0.55,
+  /**
+   * 글자 폭 추정에 곱하는 여유. 굵기(semibold)·자간·글꼴별 차이만큼 실제 폭이
+   * 추정보다 조금 넓을 수 있는데, 그 몇 px 때문에 제목이 한 줄에서 밀려나면
+   * 상자 전체가 다시 접힌다 — 모자란 쪽보다 남는 쪽이 낫다.
+   */
+  WIDTH_SAFETY: 1.06,
   /** = CHROME_HEIGHT + one title line — derived, not independently tunable, so it can never drift out of sync with the line-wrapping formula below */
   MIN_HEIGHT: NODE_CHROME_HEIGHT + NODE_TITLE_LINE_HEIGHT,
   /** = CHROME_HEIGHT + MAX_VISIBLE_LINES title lines — same derivation guarantee as MIN_HEIGHT */
@@ -355,25 +377,64 @@ export const NODE_SIZE = {
   LINE_HEIGHT: NODE_TITLE_LINE_HEIGHT,
   /** beyond this many wrapped lines, the title is clamped and the full text relies on the tooltip instead */
   MAX_VISIBLE_LINES: NODE_MAX_VISIBLE_TITLE_LINES,
-  /** rough estimate of characters (mixed Korean/Latin/digits) per 100px of width at the chip's font size — sizes the box only, never used to actually cut text (CSS wrapping does that) */
-  CHARS_PER_100PX: 13,
 } as const;
+
+/** 한글/한자/가나/전각 — 폭이 글꼴 크기와 거의 같은(1em) 문자대. 그 외(라틴/숫자/기호/공백)는 절반 남짓으로 본다. */
+function isWideChar(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x1100 && codePoint <= 0x11ff) || // 한글 자모
+    (codePoint >= 0x3040 && codePoint <= 0x30ff) || // 가나
+    (codePoint >= 0x3130 && codePoint <= 0x318f) || // 호환 한글 자모
+    (codePoint >= 0x3400 && codePoint <= 0x4dbf) || // 한자 확장 A
+    (codePoint >= 0x4e00 && codePoint <= 0x9fff) || // 한자
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) || // 한글 음절
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) || // 한자 호환
+    (codePoint >= 0xff00 && codePoint <= 0xff60) // 전각 영숫자/기호
+  );
+}
+
+/**
+ * 한 줄의 렌더링 폭(px) 추정 — 글자 수가 아니라 글자대(폭)로 센다. 순수 함수라
+ * 서버 레이아웃 계산과 브라우저 렌더링이 같은 값을 쓴다(DOM 측정 없이).
+ * 정확한 폰트 메트릭이 아니라 근사치이며, 실제 렌더링은 CSS 줄바꿈이 담당한다.
+ */
+export function estimateTextWidthPx(text: string): number {
+  let em = 0;
+  for (const char of text) {
+    em += isWideChar(char.codePointAt(0) ?? 0) ? NODE_SIZE.WIDE_CHAR_EM : NODE_SIZE.NARROW_CHAR_EM;
+  }
+  return em * NODE_SIZE.TITLE_FONT_PX;
+}
 
 export type NodeDimensions = {
   width: number;
   height: number;
   visibleLines: number;
-  /** true only once estimated content exceeds MAX_VISIBLE_LINES — the chip then clamps and leans on its tooltip for the rest, per "extremely long text -> concise visible title plus full text in tooltip" */
+  /**
+   * true only once estimated content exceeds MAX_VISIBLE_LINES — the chip
+   * then clamps and leans on its tooltip for the rest. 가로폭에 상한이 없어진
+   * 뒤로는 \n 없는 제목이 여기에 걸리는 일이 없다(폭이 늘어 한 줄로 들어간다)
+   * — Shift+Enter로 5줄 이상 직접 넣은 제목에서만 발생한다.
+   */
   isTruncated: boolean;
 };
 
 /**
- * Deterministic, presentation-only sizing for a graph node chip — grows
- * with title length up to a shape-specific maximum width, then wraps
- * additional lines (growing height) up to MAX_VISIBLE_LINES before finally
- * clamping. The same numbers drive both the chip's own rendered size and
+ * Deterministic, presentation-only sizing for a graph node chip — 제목
+ * 길이에 따라 가로폭이 자란다. **가로폭 상한은 없다**(적응형 노드 폭
+ * 체크포인트): 제목이 길면 그만큼 넓은 노드가 되고, 줄바꿈이나 말줄임으로
+ * 접지 않는다. 세로로 늘어나는 경우는 제목에 \n을 직접 넣었을 때뿐이며, 그
+ * 줄 수가 MAX_VISIBLE_LINES를 넘을 때만 clamp된다.
+ *
+ * 폭과 줄 수는 둘 다 estimateTextWidthPx(한글 1em / 라틴 0.55em)라는 하나의
+ * 글자 폭 추정에서 나온다 — 예전에는 폭(글자당 4.2px)과 줄바꿈(글자당 약
+ * 7.7px)이 서로 다른 계수를 썼고, 그마저도 한글 실제 폭(약 13px)의 절반이라
+ * 폭을 아무리 늘려도 한글 제목은 계속 여러 줄로 접혔다.
+ *
+ * The same numbers drive both the chip's own rendered size and
  * computeStageSortedLayout's row packing below, so layout and rendering can
- * never disagree about how much room a node needs.
+ * never disagree about how much room a node needs. 폭이 한 행의 최대 너비
+ * (ROW_MAX_WIDTH)를 넘는 노드는 packNodesIntoRows가 그 행을 혼자 쓰게 한다.
  */
 export function computeNodeDimensions(params: { title: string; shape: NodeShapeKind }): NodeDimensions {
   const title = params.title.trim();
@@ -387,17 +448,28 @@ export function computeNodeDimensions(params: { title: string; shape: NodeShapeK
   // is driven by the longest line, and line count is the sum of each
   // line's own wrap count, never the combined character total.
   const segments = title.split("\n");
-  const longestSegmentLen = segments.reduce((max, s) => Math.max(max, s.length), 0);
+  const longestSegmentWidth = segments.reduce((max, s) => Math.max(max, estimateTextWidthPx(s)), 0);
   const isDecision = params.shape === "diamond";
   const minWidth = isDecision ? NODE_SIZE.DECISION_MIN_WIDTH : NODE_SIZE.MIN_WIDTH;
-  const maxWidth = isDecision ? NODE_SIZE.DECISION_MAX_WIDTH : NODE_SIZE.MAX_WIDTH;
 
-  const targetWidth = minWidth + Math.min(longestSegmentLen * 4.2, maxWidth - minWidth);
-  const width = Math.round(Math.max(minWidth, Math.min(maxWidth, targetWidth)));
+  const shapeWidthFactor = isDecision ? NODE_SIZE.DECISION_WIDTH_FACTOR : 1;
+  const contentWidth = Math.ceil(longestSegmentWidth * NODE_SIZE.WIDTH_SAFETY);
+  const width = Math.round(Math.max(minWidth, (NODE_SIZE.TEXT_INSET_X + contentWidth) * shapeWidthFactor));
 
-  const charsPerLine = Math.max(6, Math.round((width / 100) * NODE_SIZE.CHARS_PER_100PX));
+  // 한 줄이 쓸 수 있는 폭 = 상자를 그 폭으로 잡게 만든 근거 그대로다. 반올림된
+  // width에서 거꾸로 계산하면 1px 차이로 가장 긴 줄이 두 줄로 세어질 수 있다.
+  // 최소 폭에 걸린 짧은 제목은 그만큼 여유가 더 생긴다.
+  const lineCapacity = Math.max(1, contentWidth, minWidth - NODE_SIZE.TEXT_INSET_X);
   const estimatedLines =
-    title.length === 0 ? 1 : Math.max(1, segments.reduce((sum, s) => sum + (s.length === 0 ? 1 : Math.ceil(s.length / charsPerLine)), 0));
+    title.length === 0
+      ? 1
+      : Math.max(
+          1,
+          segments.reduce(
+            (sum, s) => sum + (s.length === 0 ? 1 : Math.ceil(Math.ceil(estimateTextWidthPx(s)) / lineCapacity)),
+            0
+          )
+        );
   const visibleLines = Math.min(estimatedLines, NODE_SIZE.MAX_VISIBLE_LINES);
   const isTruncated = estimatedLines > NODE_SIZE.MAX_VISIBLE_LINES;
 

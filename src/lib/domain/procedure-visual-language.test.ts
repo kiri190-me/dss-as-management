@@ -15,6 +15,7 @@ import {
   searchNodes,
   groupNodesByWorksheet,
   computeNodeDimensions,
+  estimateTextWidthPx,
   computeStageSortedLayout,
   getNodeContentExtraHorizontalPadding,
   shouldShowNodeIcon,
@@ -186,21 +187,42 @@ test("computeNodeDimensions: a short title produces a compact box, well below th
   assert.equal(dims.isTruncated, false);
 });
 
-test("computeNodeDimensions: a long Korean TASK title wraps to multiple lines without being truncated", () => {
+test("computeNodeDimensions: a long Korean TASK title widens instead of wrapping, and is never truncated", () => {
   const longTitle = "종단 AMP 디바이스 기판 외관 및 다이오드 상태를 육안으로 정밀하게 확인하고 이상 유무를 기록한다";
   const dims = computeNodeDimensions({ title: longTitle, shape: "rect" });
-  assert.ok(dims.visibleLines > 1, "a long title must wrap to more than one visible line");
-  assert.equal(dims.isTruncated, false, "a moderately long title must not be truncated — it should grow height instead");
-  assert.ok(dims.height > NODE_SIZE.MIN_HEIGHT, "height must grow to fit the wrapped lines");
+  assert.equal(dims.visibleLines, 1, "가로폭 상한이 없으므로 \n 없는 제목은 한 줄에 들어간다");
+  assert.equal(dims.isTruncated, false);
+  assert.equal(dims.height, NODE_SIZE.MIN_HEIGHT, "한 줄이면 높이는 최소 높이 그대로다");
+  assert.ok(dims.width > 400, `제목 길이만큼 넓어져야 한다, got width=${dims.width}`);
 });
 
-test("computeNodeDimensions: an extremely long title is bounded — clamped with isTruncated, never grows past MAX_HEIGHT", () => {
+test("estimateTextWidthPx: 한글은 같은 글자 수의 라틴 문자보다 훨씬 넓다 — 하나의 평균 글자 폭으로 뭉개지 않는다", () => {
+  const hangul = estimateTextWidthPx("가나다라마");
+  const latin = estimateTextWidthPx("abcde");
+  assert.ok(hangul > latin * 1.5, `한글 ${hangul}px vs 라틴 ${latin}px`);
+  assert.equal(estimateTextWidthPx(""), 0);
+});
+
+test("computeNodeDimensions: 한글 제목도 한 줄에 들어갈 만큼 넓어진다", () => {
+  // 회귀 방지: 폭은 넓혔지만 줄바꿈 추정이 한글 폭을 절반(글자당 7.7px)으로
+  // 보던 동안에는, 넓어진 상자 안에서 한글 제목이 계속 4줄로 접히고 잘렸다.
+  const title = "확인된 고장품, 예방교환 부품 교환 및 조정, 개선 작업 실시";
+  const dims = computeNodeDimensions({ title, shape: "capsule" });
+  assert.equal(dims.visibleLines, 1);
+  assert.equal(dims.isTruncated, false);
+  assert.ok(
+    dims.width >= estimateTextWidthPx(title),
+    `상자 폭(${dims.width})은 글자가 실제로 차지하는 폭(${estimateTextWidthPx(title)}) 이상이어야 한다`
+  );
+});
+
+test("computeNodeDimensions: an extremely long title keeps widening — there is no maximum width", () => {
   const extremeTitle = "가".repeat(500);
   const dims = computeNodeDimensions({ title: extremeTitle, shape: "rect" });
-  assert.equal(dims.isTruncated, true);
-  assert.equal(dims.visibleLines, NODE_SIZE.MAX_VISIBLE_LINES);
-  assert.equal(dims.height, NODE_SIZE.MAX_HEIGHT);
-  assert.equal(dims.width, NODE_SIZE.MAX_WIDTH);
+  const halfAsLong = computeNodeDimensions({ title: "가".repeat(250), shape: "rect" });
+  assert.equal(dims.isTruncated, false, "가로로 자라므로 잘리지 않는다");
+  assert.equal(dims.visibleLines, 1);
+  assert.ok(dims.width > halfAsLong.width, "길수록 계속 넓어진다 — 상한에서 멈추지 않는다");
 });
 
 test("computeNodeDimensions: a Shift+Enter multiline title with short lines counts each explicit line, never collapsing them into one via total character count", () => {
@@ -210,10 +232,17 @@ test("computeNodeDimensions: a Shift+Enter multiline title with short lines coun
 });
 
 test("computeNodeDimensions: a multiline title's width is driven by its longest single line, not the combined character count across all lines", () => {
-  const multiline = computeNodeDimensions({ title: "가\n가\n가\n가\n가", shape: "rect" }); // 5 lines, 1 char each — total 5 chars but each line is trivially short
-  const singleLineSameTotalLen = computeNodeDimensions({ title: "가가가가가", shape: "rect" }); // same 5 raw chars, one line
+  const segment = "가".repeat(20);
+  const multiline = computeNodeDimensions({ title: `${segment}\n${segment}\n${segment}`, shape: "rect" }); // 3 lines × 20자
+  const singleLineSameTotalLen = computeNodeDimensions({ title: "가".repeat(60), shape: "rect" }); // 같은 60자, 한 줄
   assert.ok(multiline.width < singleLineSameTotalLen.width, "a multiline title must not be widened by its total character count across all lines");
-  assert.ok(multiline.width - NODE_SIZE.MIN_WIDTH < 10, "each line is only 1 char — width should sit right at the minimum, not scaled by the 5-char total");
+  assert.equal(
+    multiline.width,
+    computeNodeDimensions({ title: segment, shape: "rect" }).width,
+    "폭은 가장 긴 한 줄이 정한다 — 줄 수와 무관하다"
+  );
+  const oneCharPerLine = computeNodeDimensions({ title: "가\n가\n가", shape: "rect" });
+  assert.equal(oneCharPerLine.width, NODE_SIZE.MIN_WIDTH, "각 줄이 1자면 폭은 최소값에 머문다");
 });
 
 test("computeNodeDimensions: a multiline title with more real lines than MAX_VISIBLE_LINES is truncated even though its total character count is small", () => {
@@ -223,27 +252,32 @@ test("computeNodeDimensions: a multiline title with more real lines than MAX_VIS
   assert.equal(dims.height, NODE_SIZE.MAX_HEIGHT);
 });
 
-test("computeNodeDimensions: a long single line within a multiline title still wraps within that line's own segment", () => {
+test("computeNodeDimensions: an explicit second line adds a line, and the box is widened by the longest line only", () => {
   const longLine = "종단 AMP 디바이스 기판 외관 및 다이오드 상태를 육안으로 정밀하게 확인하고 이상 유무를 기록한다";
   const dims = computeNodeDimensions({ title: `${longLine}\n확인 완료`, shape: "rect" });
   const singleLineDims = computeNodeDimensions({ title: longLine, shape: "rect" });
-  assert.ok(dims.visibleLines > singleLineDims.visibleLines, "the second explicit line adds at least one more visible line on top of the first line's own wrap count");
+  assert.ok(dims.visibleLines > singleLineDims.visibleLines, "the second explicit line adds one more visible line");
+  assert.equal(dims.width, singleLineDims.width, "짧은 둘째 줄은 폭을 넓히지 않는다 — 폭은 가장 긴 줄이 정한다");
 });
 
 test("computeNodeDimensions: DECISION (diamond) gets wider bounds than an ordinary TASK (rect) for the same title", () => {
   const title = "CHOPPER IGBT 다이오드 확인 시 정상 경로가 없는 경우 다음 단계는 무엇인가?";
   const decisionDims = computeNodeDimensions({ title, shape: "diamond" });
   const taskDims = computeNodeDimensions({ title, shape: "rect" });
-  assert.ok(decisionDims.width >= taskDims.width, "DECISION's wider bounds must never produce a narrower box than TASK for the same text");
-  assert.ok(decisionDims.width <= NODE_SIZE.DECISION_MAX_WIDTH);
+  assert.ok(decisionDims.width > taskDims.width, "같은 글자라도 마름모는 clip-path가 좌우를 잘라내므로 더 넓어야 한다");
 });
 
-test("computeNodeDimensions: width and height always stay within configured min/max bounds across a range of title lengths", () => {
+test("computeNodeDimensions: width never drops below the shape minimum and never shrinks as the title grows; height stays within bounds", () => {
   for (const shape of ["rect", "diamond", "capsule", "double-border-rect", "document", "pentagon-warning"] as const) {
-    const [minW, maxW] = shape === "diamond" ? [NODE_SIZE.DECISION_MIN_WIDTH, NODE_SIZE.DECISION_MAX_WIDTH] : [NODE_SIZE.MIN_WIDTH, NODE_SIZE.MAX_WIDTH];
+    const minW = shape === "diamond" ? NODE_SIZE.DECISION_MIN_WIDTH : NODE_SIZE.MIN_WIDTH;
+    let previousWidth = 0;
     for (const len of [0, 1, 5, 20, 50, 120, 300, 1000]) {
       const dims = computeNodeDimensions({ title: "가".repeat(len), shape });
-      assert.ok(dims.width >= minW && dims.width <= maxW, `width ${dims.width} out of [${minW},${maxW}] for shape=${shape} len=${len}`);
+      assert.ok(dims.width >= minW, `width ${dims.width} below minimum ${minW} for shape=${shape} len=${len}`);
+      assert.ok(dims.width >= previousWidth, `width must never shrink as the title grows (shape=${shape} len=${len})`);
+      previousWidth = dims.width;
+      // 높이는 여전히 유계다 — \n 없는 제목은 한 줄이고, 여러 줄은
+      // MAX_VISIBLE_LINES에서 clamp된다.
       assert.ok(
         dims.height >= NODE_SIZE.MIN_HEIGHT && dims.height <= NODE_SIZE.MAX_HEIGHT,
         `height ${dims.height} out of [${NODE_SIZE.MIN_HEIGHT},${NODE_SIZE.MAX_HEIGHT}] for shape=${shape} len=${len}`
@@ -283,7 +317,9 @@ test("shouldShowNodeIcon: shows the icon while the title still fits within MAX_V
 });
 
 test("shouldShowNodeIcon: hides the icon once the title is already truncated at MAX_VISIBLE_LINES, favoring title readability", () => {
-  const veryLongTitle = "가".repeat(400);
+  // 가로폭에 상한이 없어진 뒤로 잘림은 \n을 직접 넣어 MAX_VISIBLE_LINES를
+  // 넘겼을 때만 생긴다 — 긴 한 줄은 이제 넓어질 뿐 잘리지 않는다.
+  const veryLongTitle = ["가", "나", "다", "라", "마", "바"].join("\n");
   const dims = computeNodeDimensions({ title: veryLongTitle, shape: "rect" });
   assert.equal(dims.isTruncated, true);
   assert.equal(shouldShowNodeIcon(dims), false);

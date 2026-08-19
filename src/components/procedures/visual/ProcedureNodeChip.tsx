@@ -261,12 +261,19 @@ export default function ProcedureNodeChip({
               </div>
             )}
             <span
-              className="w-full break-words whitespace-pre-line text-center font-semibold leading-tight"
-              style={
-                dims?.isTruncated
+              className="w-full break-words whitespace-pre-line text-center font-semibold"
+              style={{
+                // 글꼴 크기를 여기서 못 박는다. 지금까지 이 span에는 크기
+                // 지정이 없어 브라우저 기본값(16px)으로 그려졌는데, 상자 크기
+                // 계산(computeNodeDimensions)은 TITLE_FONT_PX=13 기준이었다 —
+                // 그 차이만큼 상자가 항상 모자라 제목이 접히고 잘렸다. 두 값이
+                // 다시 어긋나지 않도록 같은 상수에서 가져온다.
+                fontSize: `${NODE_SIZE.TITLE_FONT_PX}px`,
+                lineHeight: `${NODE_SIZE.LINE_HEIGHT}px`,
+                ...(dims?.isTruncated
                   ? { display: "-webkit-box", WebkitLineClamp: NODE_SIZE.MAX_VISIBLE_LINES, WebkitBoxOrient: "vertical", overflow: "hidden" }
-                  : undefined
-              }
+                  : {}),
+              }}
             >
               {title}
             </span>
