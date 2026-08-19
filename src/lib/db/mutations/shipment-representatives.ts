@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "../client";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { repairCaseApprovals, representativeChangeHistory, users } from "../schema";
 import type { ShipmentManagementResult, ShipmentManagementResultCode } from "@/lib/validation/shipment-delegation-input";
 
@@ -39,8 +40,11 @@ export async function setShipmentRepresentative(
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
-      if (actor.approvalStatus !== "APPROVED" || actor.role !== "SUPER_ADMIN") {
-        fail("FORBIDDEN", "최고관리자만 출하 승인 대표 지정을 변경할 수 있습니다.");
+      if (
+        actor.approvalStatus !== "APPROVED" ||
+        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+      ) {
+        fail("FORBIDDEN", "출하 승인 대표 지정을 변경할 권한이 없습니다.");
       }
 
       // Row-locked re-read of the target — the transactional backstop that

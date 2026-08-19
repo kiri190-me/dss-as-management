@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   EXCEL_IMPORT_EXECUTION_CHUNK_SIZE,
   EXCEL_IMPORT_EXECUTION_PARSER_VERSION,
@@ -52,7 +52,8 @@ export type ExcelImportExecutionTestHooks = {
 
 async function allowedActor(actorUserId: string) {
   const [actor] = await db.select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isDeleted: users.isDeleted }).from(users).where(eq(users.id, actorUserId)).limit(1);
-  return actor && !actor.isDeleted && actor.approvalStatus === "APPROVED" && canManageExcelImports(actor.role) ? actor : null;
+  if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED") return null;
+  return (await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE")) ? actor : null;
 }
 
 export async function confirmExcelImportExecution(input: { batchId: string; actorUserId: string; expectedBatchVersion: number }): Promise<ConfirmExcelImportExecutionResult> {

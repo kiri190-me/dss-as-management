@@ -4,7 +4,7 @@ import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
-import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listMyActiveRepairCases } from "@/lib/db/queries/repair-cases-mine";
 import MyActiveWorkScreen from "@/components/repair-cases/mine/MyActiveWorkScreen";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -48,7 +48,7 @@ export default async function MyActiveWorkPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewMyActiveWork(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "myActiveWork", "READ"))) {
     return (
       <PlaceholderPage
         title="내 담당 제품"

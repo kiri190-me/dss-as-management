@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import RepairCaseExcelImportScreen from "@/components/excel-imports/RepairCaseExcelImportScreen";
-import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
@@ -35,7 +35,7 @@ export default async function RepairCaseExcelImportPage({
   if (!session) redirect("/login");
   const actor = await resolveActingUserForSession(session);
   if (!actor) redirect("/login");
-  if (!canManageExcelImports(actor.role)) {
+  if (!(await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE"))) {
     return <PlaceholderPage title="수리품 목록 Excel 이관" description="이 화면에 접근할 권한이 없습니다." />;
   }
 

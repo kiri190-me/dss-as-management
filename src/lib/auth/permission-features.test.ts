@@ -311,6 +311,21 @@ test("상한도 고를 수 있는 값이어야 한다", () => {
 
 // ────────────────────────────────────────────────────────────── 고정 노드
 
+test("고정 노드는 설정이 최종 판정일 수 없고, 그 때문에 메뉴가 미전환으로 남지도 않는다", () => {
+  // '역할별 접근 권한 설정'은 영원히 설정 밖에 있다 — 설정으로 닫을 수 있게
+  // 하면 잘못 저장한 순간 되돌릴 사람이 없어진다. 그렇다고 그것 때문에
+  // '사용자 관리'가 영원히 전환 중으로 보이면 화면이 거짓말을 하는 셈이다.
+  assert.equal(isSettingsEnforced("users.rolePermissions"), false);
+  assert.equal(isSettingsEnforced("users.view"), true);
+  assert.equal(isSettingsEnforced("users.shipmentRepresentatives"), true);
+  assert.equal(isSettingsEnforced("users"), true);
+});
+
+test("접수 건 수정이 남아 있는 한 '전체 A/S 현황'은 전환 완료가 아니다", () => {
+  // 노드 하나만 남아도 메뉴 단위로는 '설정이 최종 판정'이라고 말할 수 없다.
+  assert.equal(isSettingsEnforced("repairCases"), false);
+});
+
 test("설정으로 건드릴 수 없는 노드는 권한 설정 화면 하나뿐이다", () => {
   const fixed = PERMISSION_AREAS.flatMap((area) => featuresOfArea(area.key)).filter(
     (feature) => feature.fixed

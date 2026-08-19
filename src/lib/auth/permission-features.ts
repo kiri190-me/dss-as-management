@@ -371,6 +371,17 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCases.workRecords",
   "repairCases.lifecycle",
   "repairCases.procedureExecution",
+  "users.view",
+  "users.shipmentRepresentatives",
+  // 하위 기능이 없는 메뉴들. 대시보드·A/S 접수·Excel 생성·시스템 설정은 원래
+  // 역할 검사가 없어 페이지 가드(= 설정)가 이미 유일한 관문이었고, 나머지 둘은
+  // 이번에 옮겼다.
+  "dashboard",
+  "myActiveWork",
+  "repairCaseNew",
+  "excelKyosanIntakeList",
+  "repairCaseExcelImport",
+  "settings",
 ]);
 
 /** 이 노드의 설정이 실제 판정을 지배하는가. */
@@ -381,7 +392,11 @@ export function isSettingsEnforced(key: string): boolean {
   // 메뉴는 하위가 **전부** 전환됐을 때만 전환된 것으로 본다. 하나라도 남아
   // 있으면 "이 메뉴는 설정이 최종 판정"이라고 말할 수 없다.
   if (SETTINGS_ENFORCED_AREAS.has(key)) return true;
-  const children = featuresOfArea(key);
+  // 하위 기능이 없는 메뉴는 그 메뉴 자체가 잎이다.
+  if (!hasFeatures(key)) return SETTINGS_ENFORCED_LEAVES.has(key);
+  // 고정 노드는 설정 대상이 아니므로 '전부 전환됐는가' 판정에서 뺀다 —
+  // 넣어 두면 '사용자 관리'는 영원히 전환 중으로 보인다.
+  const children = featuresOfArea(key).filter((feature) => !feature.fixed);
   return children.length > 0 && children.every((feature) => SETTINGS_ENFORCED_LEAVES.has(feature.key));
 }
 

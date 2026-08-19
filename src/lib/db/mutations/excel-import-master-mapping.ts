@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   EXCEL_IMPORT_MASTER_MAPPING_PARSER_VERSION,
   excelImportMappingGroupKey,
@@ -171,7 +171,7 @@ export async function applyExcelImportMasterMapping(input: {
     return await db.transaction(async (tx): Promise<ExcelImportMasterMappingResult> => {
       const [actor] = await tx.select({ role: users.role, approvalStatus: users.approvalStatus, isDeleted: users.isDeleted })
         .from(users).where(eq(users.id, input.actorUserId)).limit(1);
-      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !canManageExcelImports(actor.role)) {
+      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE"))) {
         return { ok: false, code: "ACTOR_NOT_ALLOWED" };
       }
       const [batch] = await tx.select().from(excelImportBatches)
@@ -299,7 +299,7 @@ export async function confirmExcelImportMasterPlan(input: {
     return await db.transaction(async (tx): Promise<ConfirmExcelImportMasterPlanResult> => {
       const [actor] = await tx.select({ role: users.role, approvalStatus: users.approvalStatus, isDeleted: users.isDeleted })
         .from(users).where(eq(users.id, input.actorUserId)).limit(1);
-      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !canManageExcelImports(actor.role)) {
+      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE"))) {
         return { ok: false, code: "ACTOR_NOT_ALLOWED" };
       }
       const [batch] = await tx.select().from(excelImportBatches)

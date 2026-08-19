@@ -9,7 +9,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { normalizeEntityName } from "@/lib/domain/entity-name-match";
 import {
   EXCEL_IMPORT_PREVIEW_RETENTION_MS,
@@ -90,7 +90,7 @@ export async function markExcelImportSourceFileDeleted(input: {
         .from(users)
         .where(eq(users.id, input.actorUserId))
         .limit(1);
-      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !canManageExcelImports(actor.role)) {
+      if (!actor || actor.isDeleted || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE"))) {
         return false;
       }
       const [updated] = await tx
@@ -191,7 +191,7 @@ export async function persistExcelImportPreview(
         !actor ||
         actor.isDeleted ||
         actor.approvalStatus !== "APPROVED" ||
-        !canManageExcelImports(actor.role)
+        !(await hasPermission(actor.role, "repairCaseExcelImport", "MANAGE"))
       ) {
         return { ok: false, code: "ACTOR_NOT_ALLOWED" };
       }

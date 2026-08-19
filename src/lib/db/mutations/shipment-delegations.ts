@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "../client";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { shipmentApprovalDelegations, users } from "../schema";
 import type { ShipmentManagementResult, ShipmentManagementResultCode } from "@/lib/validation/shipment-delegation-input";
 
@@ -66,8 +67,14 @@ export async function createShipmentDelegation(
         .where(eq(users.id, actorUserId));
       if (!isEligibleActor(actor)) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
       const isSelfDelegating = actor.id === representativeUserId;
-      if (!isSelfDelegating && actor.role !== "SUPER_ADMIN") {
-        fail("FORBIDDEN", "대표 본인 또는 최고관리자만 위임을 지정할 수 있습니다.");
+      // 본인 위임은 권한과 무관하게 열려 있다 — 설정으로 좁히더라도 대표가
+      // 자기 위임을 못 하게 되면 대표 제도 자체가 멈춘다. 남을 대신할 때만
+      // 권한을 본다.
+      if (
+        !isSelfDelegating &&
+        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+      ) {
+        fail("FORBIDDEN", "대표 본인 또는 권한이 있는 관리자만 위임을 지정할 수 있습니다.");
       }
 
       const [representativeRow] = await tx
@@ -180,8 +187,11 @@ export async function revokeShipmentDelegation(
       }
 
       const isSelfRevoking = actor.id === delegation.representativeUserId;
-      if (!isSelfRevoking && actor.role !== "SUPER_ADMIN") {
-        fail("FORBIDDEN", "대표 본인 또는 최고관리자만 위임을 철회할 수 있습니다.");
+      if (
+        !isSelfRevoking &&
+        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+      ) {
+        fail("FORBIDDEN", "대표 본인 또는 권한이 있는 관리자만 위임을 철회할 수 있습니다.");
       }
 
       const updated = await tx
