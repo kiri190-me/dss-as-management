@@ -7,7 +7,8 @@ import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } 
 import { computeConnectedIds } from "@/lib/graph-editor-core/selection";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
 import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
-import { EDGE_VISUAL_CONFIG, getNodeChipVisual } from "@/lib/domain/procedure-visual-language";
+import { resolveConnectionHandles, HORIZONTAL_HANDLE_IDS, type ConnectedNodeGeometry } from "@/lib/graph-editor-core/layout";
+import { EDGE_VISUAL_CONFIG, NODE_VISUAL_CONFIG, computeNodeDimensions, getNodeChipVisual } from "@/lib/domain/procedure-visual-language";
 import { repairCaseFlowchartBranchTypeLabels, type RepairCaseFlowchartNodeType, type RepairCaseFlowchartBranchType } from "@/lib/domain/repair-case-flowchart-types";
 import ProcedureNodeChip from "@/components/procedures/visual/ProcedureNodeChip";
 
@@ -72,6 +73,11 @@ function CaseFlowchartNodeHandles() {
     <>
       <Handle id="top-in" type="target" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
       <Handle id="bottom-out" type="source" position={Position.Bottom} style={HIDDEN_HANDLE_STYLE} />
+      {/* 가로 직선 연결선 전용 — 절차 편집기와 같은 id/같은 위치(옆면 세로 중앙)다. */}
+      <Handle id={HORIZONTAL_HANDLE_IDS.rightOut} type="source" position={Position.Right} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.leftIn} type="target" position={Position.Left} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.leftOut} type="source" position={Position.Left} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.rightIn} type="target" position={Position.Right} style={HIDDEN_HANDLE_STYLE} />
     </>
   );
 }
@@ -197,6 +203,15 @@ export default function CaseFlowchartGraph({
   }, [nodeRows, selectedNodeId, connectedNodeIds, editable]);
 
   const flowEdges = useMemo<Edge[]>(() => {
+    // 절차 편집기와 같은 규칙 — 나란히 놓인 관계는 옆면끼리 붙어 수평 직선이
+    // 된다. 크기는 렌더링과 같은 추정치(computeNodeDimensions)를 쓴다.
+    const nodeGeometryById = new Map<string, ConnectedNodeGeometry>();
+    for (const n of nodeRows) {
+      const { semanticType } = getNodeChipVisual(n.nodeType);
+      const dims = computeNodeDimensions({ title: n.title, shape: NODE_VISUAL_CONFIG[semanticType].shape });
+      nodeGeometryById.set(n.id, { x: n.positionX, y: n.positionY, width: dims.width, height: dims.height });
+    }
+
     return edgeRows.map((e) => {
       const config = EDGE_VISUAL_CONFIG[e.branchType];
       const isHighlighted = connectedEdgeIds.has(e.id);
@@ -211,7 +226,6 @@ export default function CaseFlowchartGraph({
       const labelBgStyle = { fill: "#ffffff", fillOpacity: isDimmed ? 0.3 : 1 };
       const label = e.branchLabel ?? (config.defaultLabel ? repairCaseFlowchartBranchTypeLabels[e.branchType] : undefined);
       const markerEnd = { type: config.markerShape === "arrow-open" ? MarkerType.Arrow : MarkerType.ArrowClosed, color: config.strokeLight };
-
       if (e.routePoints && e.routePoints.length > 0) {
         const isSelectedEdge = editable && e.id === selectedEdgeId;
         return {
@@ -239,12 +253,18 @@ export default function CaseFlowchartGraph({
         } satisfies Edge;
       }
 
+      // LOOP_BACK/RETRY의 곡선은 그 자체가 구분 표시라 항상 아래→위로 둔다.
+      const handles =
+        config.routeStyle === "loopback-curve"
+          ? { sourceHandle: "bottom-out", targetHandle: "top-in" }
+          : resolveConnectionHandles(nodeGeometryById.get(e.fromNodeId), nodeGeometryById.get(e.toNodeId));
+
       return {
         id: e.id,
         source: e.fromNodeId,
         target: e.toNodeId,
-        sourceHandle: "bottom-out",
-        targetHandle: "top-in",
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         type: config.routeStyle === "loopback-curve" ? "default" : "caseFlowchartDefault",
         label,
         labelStyle,
@@ -256,7 +276,7 @@ export default function CaseFlowchartGraph({
         zIndex: isHighlighted ? 10 : 0,
       } satisfies Edge;
     });
-  }, [edgeRows, connectedEdgeIds, selectedNodeId, editable, selectedEdgeId, selectedWaypointIndex, onWaypointSelectionChange, onWaypointMove]);
+  }, [edgeRows, nodeRows, connectedEdgeIds, selectedNodeId, editable, selectedEdgeId, selectedWaypointIndex, onWaypointSelectionChange, onWaypointMove]);
 
   return (
     <GraphCanvas

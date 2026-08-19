@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, getStraightPath, getSmoothStepPath, type EdgeProps, type Position } from "@xyflow/react";
 import { releasePointerCaptureSafely, createCaptureBlurGuard } from "@/lib/graph-editor-core/pointer";
-import { isAlignedVerticalConnection } from "@/lib/graph-editor-core/layout";
+import { isAlignedHorizontalConnection, isAlignedVerticalConnection } from "@/lib/graph-editor-core/layout";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
 
 /**
@@ -38,7 +38,12 @@ export function computeDefaultEdgePath(params: {
   sourcePosition: Position;
   targetPosition: Position;
 }): [string, number, number] {
-  const [path, labelX, labelY] = isAlignedVerticalConnection(params.sourceX, params.targetX)
+  const isStraight =
+    isAlignedVerticalConnection(params.sourceX, params.targetX) ||
+    // 가로로 나란히 놓인 노드끼리 옆면 핸들로 붙은 경우 — 세로와 같은 자격으로
+    // 직선을 그린다(예전에는 세로 정렬만 직선이라, 가로 관계는 항상 계단이었다).
+    isAlignedHorizontalConnection(params.sourceY, params.targetY);
+  const [path, labelX, labelY] = isStraight
     ? getStraightPath({ sourceX: params.sourceX, sourceY: params.sourceY, targetX: params.targetX, targetY: params.targetY })
     : getSmoothStepPath(params);
   return [path, labelX, labelY];

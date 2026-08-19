@@ -21,8 +21,8 @@ import {
 } from "@/lib/graph-editor-core/layout";
 import type { ProcedureNodeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
 
-/** Phase 5C-5B — fixed spacing for "상대 위치로 이동": vertical reuses createProcedureTemplateNode's own default node-stacking gap (150) for consistency; horizontal is sized to comfortably clear the widest node chip (NODE_SIZE.MAX_WIDTH=240 in procedure-visual-language.ts) plus a margin. */
-const RELATIVE_POSITION_SPACING = { horizontal: 280, vertical: 150 } as const;
+/** Phase 5C-5B — fixed spacing for "상대 위치로 이동": vertical reuses createProcedureTemplateNode's own default node-stacking gap (150) for consistency; horizontal is a fixed step between columns. 노드 폭에 상한이 없어진 뒤로는 "가장 넓은 노드를 비켜갈 만큼"이라는 기준이 성립하지 않으므로, 폭이 아니라 사람이 보기 좋은 열 간격으로 정한다(겹치는 경우 열 스냅과 직접 드래그로 조정). */
+const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
 
 /** 5C-6D-1D — same derivation as Case Flowchart's own COLUMN_SNAP_TOLERANCE: half the standard horizontal spacing, close enough to catch "same column, slightly different due to a different reference node's width" while staying far short of a full column-to-column distance. */
 const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;

@@ -39,7 +39,14 @@ import {
   type RoutableNode,
   type EdgeRouteAssignment,
 } from "@/lib/domain/procedure-edge-routing";
-import { resolveEffectiveNodePosition, hasUserLayoutOverride, computeLayeredGraphLayout } from "@/lib/graph-editor-core/layout";
+import {
+  resolveEffectiveNodePosition,
+  hasUserLayoutOverride,
+  computeLayeredGraphLayout,
+  resolveConnectionHandles,
+  HORIZONTAL_HANDLE_IDS,
+  type ConnectedNodeGeometry,
+} from "@/lib/graph-editor-core/layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
@@ -77,6 +84,13 @@ function ProcedureNodeHandles() {
       <Handle id="loop-in" type="target" position={Position.Top} style={{ ...HIDDEN_HANDLE_STYLE, left: "85%" }} />
       <Handle id="cross-out" type="source" position={Position.Right} style={{ ...HIDDEN_HANDLE_STYLE, top: "80%" }} />
       <Handle id="cross-in" type="target" position={Position.Left} style={{ ...HIDDEN_HANDLE_STYLE, top: "80%" }} />
+      {/* 가로 직선 연결선 전용(HORIZONTAL_HANDLE_IDS) — 옆면 세로 중앙에 붙어야
+          나란히 놓인 두 노드 사이가 진짜 수평선이 된다. 기존 옆면 핸들들
+          (left-out 70%, cross-* 80%)은 각자 다른 라우팅이 쓰고 있어 건드리지 않는다. */}
+      <Handle id={HORIZONTAL_HANDLE_IDS.rightOut} type="source" position={Position.Right} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.leftIn} type="target" position={Position.Left} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.leftOut} type="source" position={Position.Left} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HORIZONTAL_HANDLE_IDS.rightIn} type="target" position={Position.Right} style={HIDDEN_HANDLE_STYLE} />
     </>
   );
 }
@@ -642,6 +656,17 @@ export default function ProcedureFlowGraph({
     const visibleNodeIds = new Set(filteredNodeRows.map((n) => n.id));
     const visibleEdgeRows = edgeRows.filter((e) => visibleNodeIds.has(e.fromNodeId) && visibleNodeIds.has(e.toNodeId));
 
+    // 가로/세로 중 어느 쪽으로 붙일지는 두 노드의 실제 배치로 정한다 —
+    // resolveConnectionHandles가 판단하고, 여기서는 그 판단에 필요한 기하만
+    // 모아 넘긴다. STAGE_SORTED(아래 분기)는 자체 라우팅 규칙이 있어 쓰지 않는다.
+    const nodeGeometryById = new Map<string, ConnectedNodeGeometry>();
+    for (const n of filteredNodeRows) {
+      const position = resolveBaselinePosition(n);
+      const dims = nodeDimsById.get(n.id);
+      if (!dims) continue;
+      nodeGeometryById.set(n.id, { x: position.x, y: position.y, width: dims.width, height: dims.height });
+    }
+
     if (layoutMode !== "STAGE_SORTED") {
       // 원본 배치 / 사용자 배치 — unchanged from Phase 3B: every edge is a
       // plain top/bottom smoothstep (or a bezier for LOOP_BACK/RETRY), no
@@ -695,12 +720,19 @@ export default function ProcedureFlowGraph({
           } satisfies Edge;
         }
 
+        // LOOP_BACK/RETRY(아래 bezier)는 크게 도는 곡선이 그 자체로 의미라
+        // 항상 아래→위로 둔다 — 옆면에 붙이면 그 구분이 사라진다.
+        const handles =
+          config.routeStyle === "loopback-curve"
+            ? { sourceHandle: "bottom-out", targetHandle: "top-in" }
+            : resolveConnectionHandles(nodeGeometryById.get(e.fromNodeId), nodeGeometryById.get(e.toNodeId));
+
         return {
           id: e.id,
           source: e.fromNodeId,
           target: e.toNodeId,
-          sourceHandle: "bottom-out",
-          targetHandle: "top-in",
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
           // LOOP_BACK/RETRY get a curved bezier (`type: "default"`) so a
           // big cross-stage jump reads visually differently from ordinary
           // local smoothstep flow — the two verified RFG LOOP_BACK edges
@@ -814,6 +846,7 @@ export default function ProcedureFlowGraph({
     visibilityMode,
     issueBadgeByNodeId,
     nodeDimsById,
+    resolveBaselinePosition,
     stageSortedLayout,
     laneAssignment,
     editable,

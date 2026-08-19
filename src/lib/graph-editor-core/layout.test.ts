@@ -11,6 +11,10 @@ import {
   computeStraightenedConnectedNodePosition,
   computeLayeredGraphLayout,
   isAlignedVerticalConnection,
+  isAlignedHorizontalConnection,
+  resolveConnectionHandles,
+  HORIZONTAL_HANDLE_IDS,
+  VERTICAL_HANDLE_IDS,
   type PackableNode,
   type ColumnSnapCandidate,
 } from "./layout";
@@ -756,4 +760,48 @@ test("isAlignedVerticalConnection: a non-finite input (an unresolved node) is ne
   assert.equal(isAlignedVerticalConnection(NaN, NaN), false);
   assert.equal(isAlignedVerticalConnection(500, NaN), false);
   assert.equal(isAlignedVerticalConnection(NaN, 500), false);
+});
+
+// ---- resolveConnectionHandles (가로 직선 연결선) ----
+
+const geo = (x: number, y: number, width = 100, height = 50) => ({ x, y, width, height });
+
+test("resolveConnectionHandles: 위아래로 놓인 관계는 지금까지처럼 아래→위로 붙는다", () => {
+  const result = resolveConnectionHandles(geo(0, 0), geo(0, 200));
+  assert.equal(result.orientation, "VERTICAL");
+  assert.equal(result.sourceHandle, VERTICAL_HANDLE_IDS.bottomOut);
+  assert.equal(result.targetHandle, VERTICAL_HANDLE_IDS.topIn);
+});
+
+test("resolveConnectionHandles: 오른쪽에 나란히 놓인 관계는 오른면→왼면으로 붙는다", () => {
+  const result = resolveConnectionHandles(geo(0, 0), geo(300, 0));
+  assert.equal(result.orientation, "HORIZONTAL");
+  assert.equal(result.sourceHandle, HORIZONTAL_HANDLE_IDS.rightOut);
+  assert.equal(result.targetHandle, HORIZONTAL_HANDLE_IDS.leftIn);
+});
+
+test("resolveConnectionHandles: 왼쪽으로 되돌아가는 관계는 왼면→오른면으로 붙는다", () => {
+  const result = resolveConnectionHandles(geo(300, 0), geo(0, 20));
+  assert.equal(result.orientation, "HORIZONTAL");
+  assert.equal(result.sourceHandle, HORIZONTAL_HANDLE_IDS.leftOut);
+  assert.equal(result.targetHandle, HORIZONTAL_HANDLE_IDS.rightIn);
+});
+
+test("resolveConnectionHandles: 대각선이면 더 많이 벌어진 축을 따르고, 동률이면 세로다(곧게 펴기와 같은 규칙)", () => {
+  assert.equal(resolveConnectionHandles(geo(0, 0), geo(100, 400)).orientation, "VERTICAL");
+  assert.equal(resolveConnectionHandles(geo(0, 0), geo(400, 100)).orientation, "HORIZONTAL");
+  // |dx| === |dy| — computeStraightenedConnectedNodePosition과 같이 세로 우선
+  assert.equal(resolveConnectionHandles(geo(0, 0), geo(200, 200)).orientation, "VERTICAL");
+});
+
+test("resolveConnectionHandles: 위치를 모르는 노드는 언제나 기존 세로 동작으로 남는다 — 추측하지 않는다", () => {
+  assert.equal(resolveConnectionHandles(null, geo(300, 0)).orientation, "VERTICAL");
+  assert.equal(resolveConnectionHandles(geo(0, 0), undefined).orientation, "VERTICAL");
+  assert.equal(resolveConnectionHandles(geo(Number.NaN, 0), geo(300, 0)).orientation, "VERTICAL");
+});
+
+test("isAlignedHorizontalConnection: y가 사실상 같을 때만 참이다", () => {
+  assert.equal(isAlignedHorizontalConnection(100, 100.4), true);
+  assert.equal(isAlignedHorizontalConnection(100, 101), false);
+  assert.equal(isAlignedHorizontalConnection(Number.NaN, 100), false);
 });

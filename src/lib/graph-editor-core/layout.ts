@@ -541,3 +541,63 @@ export function computeLayeredGraphLayout(
 export function isAlignedVerticalConnection(sourceCenterX: number, targetCenterX: number): boolean {
   return Number.isFinite(sourceCenterX) && Number.isFinite(targetCenterX) && Math.abs(sourceCenterX - targetCenterX) < 0.5;
 }
+
+/** 세로 판정(isAlignedVerticalConnection)의 가로 짝 — 양 끝 핸들의 y가 사실상 같으면 가로 직선으로 그린다. 판정 기준·epsilon 모두 세로와 동일하다. */
+export function isAlignedHorizontalConnection(sourceY: number, targetY: number): boolean {
+  return Number.isFinite(sourceY) && Number.isFinite(targetY) && Math.abs(sourceY - targetY) < 0.5;
+}
+
+/**
+ * 가로 직선 연결선 전용 핸들 id. 세로 흐름의 bottom-out/top-in과 별개로 두어,
+ * 기존 라우팅(분기 핸들, 워크시트 간 이동 등)이 쓰는 id와 절대 겹치지 않는다.
+ * 두 그래프(절차 편집기 / 케이스 플로우차트)가 같은 id를 쓴다.
+ */
+export const HORIZONTAL_HANDLE_IDS = {
+  rightOut: "h-right-out",
+  leftIn: "h-left-in",
+  leftOut: "h-left-out",
+  rightIn: "h-right-in",
+} as const;
+
+/** 기본(세로) 연결 핸들 — 지금까지 모든 일반 엣지가 쓰던 그 쌍이다. */
+export const VERTICAL_HANDLE_IDS = { bottomOut: "bottom-out", topIn: "top-in" } as const;
+
+export type ResolvedConnectionHandles = {
+  sourceHandle: string;
+  targetHandle: string;
+  orientation: StraightenedConnectionOrientation;
+};
+
+/**
+ * 두 노드의 실제 위치/크기로부터 "이 연결선을 세로로 붙일지 가로로 붙일지"와
+ * 그에 맞는 핸들 쌍을 고른다. 지금까지 일반 엣지는 무조건 아래→위(bottom-out/
+ * top-in)로 붙어서, 노드를 나란히 옆에 놓아도 선이 아래로 나갔다가 옆으로 도는
+ * 계단 모양이 됐다 — 가로로 놓인 관계는 가로로 붙어야 직선이 된다.
+ *
+ * 판정은 중심 간 거리의 지배축이며, 동률(|dy| === |dx|)이면 세로다 —
+ * computeStraightenedConnectedNodePosition("연결선 곧게 펴기")과 정확히 같은
+ * 규칙이라, 곧게 편 결과와 선이 붙는 방향이 서로 어긋나지 않는다.
+ *
+ * 위치/크기를 알 수 없는 노드(아직 측정 전, 필터로 빠진 노드 등)는 언제나
+ * 기존 동작 그대로 세로다 — 추측해서 옆으로 붙이지 않는다.
+ */
+export function resolveConnectionHandles(
+  source: ConnectedNodeGeometry | null | undefined,
+  target: ConnectedNodeGeometry | null | undefined
+): ResolvedConnectionHandles {
+  const vertical: ResolvedConnectionHandles = {
+    sourceHandle: VERTICAL_HANDLE_IDS.bottomOut,
+    targetHandle: VERTICAL_HANDLE_IDS.topIn,
+    orientation: "VERTICAL",
+  };
+  if (!source || !target) return vertical;
+
+  const dx = target.x + target.width / 2 - (source.x + source.width / 2);
+  const dy = target.y + target.height / 2 - (source.y + source.height / 2);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return vertical;
+  if (Math.abs(dy) >= Math.abs(dx)) return vertical;
+
+  return dx > 0
+    ? { sourceHandle: HORIZONTAL_HANDLE_IDS.rightOut, targetHandle: HORIZONTAL_HANDLE_IDS.leftIn, orientation: "HORIZONTAL" }
+    : { sourceHandle: HORIZONTAL_HANDLE_IDS.leftOut, targetHandle: HORIZONTAL_HANDLE_IDS.rightIn, orientation: "HORIZONTAL" };
+}

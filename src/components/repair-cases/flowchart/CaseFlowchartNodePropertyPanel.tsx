@@ -9,7 +9,7 @@ import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
 export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType };
 
 /** Same fixed spacing as the procedure editor's "상대 위치로 이동" (NodePropertyPanel.tsx) — vertical reuses the server mutation's own default node-stacking gap for consistency. */
-const RELATIVE_POSITION_SPACING = { horizontal: 280, vertical: 150 } as const;
+const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
 
 /** Derived from the same horizontal spacing constant, not an arbitrary number — half the standard gap is close enough to catch "same column, slightly different due to a different reference node's width" while staying far short of a full column-to-column distance (width + spacing), so an unrelated column is never snapped to. */
 const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
