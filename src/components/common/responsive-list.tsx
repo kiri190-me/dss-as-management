@@ -9,8 +9,8 @@ import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOver
  * ============================================================================
  * 이 서비스의 목록은 전부 같은 규칙을 따른다:
  *
- *     표가 안 들어가면 → **카드**
- *     들어가면        → **토글로 고른 대로** (기본 표)
+ *     아직 고른 적 없으면 → 표가 들어가면 **표**, 안 들어가면 **카드**
+ *     한 번이라도 골랐으면 → **고른 대로**
  *
  * ── 왜 이 파일이 생겼나 ─────────────────────────────────────────────────
  * 규칙 자체는 전부터 있었지만 화면마다 기준이 달랐다 — 접수 건·고객사·제품
@@ -33,6 +33,20 @@ import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOver
  * 화면 밖에 둔 채 계속 잰다. 그 덕에 자리가 다시 넓어지면 표로 돌아온다 —
  * 지워 버리면 잴 것이 없어져 영영 카드로 남는다.
  *
+ * ── 토글은 언제나 보인다 ────────────────────────────────────────────────
+ * 예전에는 "표가 안 들어가면 눌러도 소용없으니 감춘다"였다. 그런데 이 서비스에서
+ * 제일 넓은 표(전체 A/S 현황, 7열에 머리글이 두 줄)는 웬만한 창에서 늘 넘쳤고,
+ * 그래서 정작 그 화면에서만 토글이 한 번도 보이지 않았다. 좁은 표를 쓰는 옆
+ * 화면에는 있고 여기에는 없으니, 규칙이 아니라 누락으로 읽혔다.
+ *
+ * 그래서 반대로 뒤집었다 — 토글은 항상 보이고, 안 들어가는 폭에서 "표"를 고르면
+ * **가로 스크롤로** 표를 준다. 열을 다 놓고 봐야 하는 순간이 실제로 있고, 그때
+ * 옆으로 미는 것은 정상적인 표 읽기 방식이지 고장이 아니다.
+ *
+ * 대신 **고른 적이 없으면 예전 그대로**다. 저장된 값이 없을 때만 자동으로 정하고
+ * (들어가면 표, 안 들어가면 카드), 한 번 고른 뒤에는 그 선택이 이긴다. 처음 오는
+ * 사람이 보는 화면은 이 변경 전후가 같다.
+ *
  * ── 표 껍데기는 여기가 소유한다 ─────────────────────────────────────────
  * 부르는 쪽은 <table>만 넘긴다. 스크롤 래퍼를 각자 들고 있으면 넘침이 그
  * 안쪽에서 흡수되어 바깥은 영원히 "들어간다"고 답한다. 테두리·모서리도 여기서
@@ -53,13 +67,24 @@ import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOver
 export const LIST_CARD_GRID = "grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-3";
 
 /**
- * 고른 보기 방식.
- *
- * TABLE은 "항상 표"가 아니라 "들어가면 표"다 — 안 들어가는 폭에서는 어차피
- * 카드로 내려간다. 그래서 토글은 표가 안 들어갈 때 감춘다: 눌러도 아무 일이
- * 없는 버튼을 보여 주면 고장으로 읽힌다.
+ * 사람이 고른 보기 방식. 아직 고른 적이 없으면 null이고, 그때만 폭을 보고
+ * 자동으로 정한다(resolveShowTable 참조).
  */
-type ViewMode = "TABLE" | "CARD";
+export type ViewMode = "TABLE" | "CARD";
+
+/**
+ * 표를 보여 줄지 카드를 보여 줄지 — 목록의 유일한 판단.
+ *
+ * 고른 적이 없으면(stored === null) 폭이 정한다. 한 번이라도 골랐으면 그 선택이
+ * 이긴다 — TABLE을 골라 둔 사람은 안 들어가는 폭에서도 표를 본다(가로 스크롤).
+ * 화면 밖에서 계속 재는 fits는 그래도 계속 유효하다: 자동으로 두는 사람에게는
+ * 이것이 곧 답이고, 골라 둔 사람에게도 폭이 다시 넓어졌을 때 스크롤이 저절로
+ * 사라지게 하는 것은 CSS(overflow-x-auto) 쪽이라 따로 되돌릴 것이 없다.
+ */
+export function resolveShowTable(stored: ViewMode | null, fits: boolean): boolean {
+  if (stored === null) return fits;
+  return stored === "TABLE";
+}
 
 const listeners = new Set<() => void>();
 
@@ -74,8 +99,9 @@ function storageKeyOf(listId: string): string {
   return `list-view-mode:${listId}`;
 }
 
-function read(listId: string): ViewMode {
-  return window.localStorage.getItem(storageKeyOf(listId)) === "CARD" ? "CARD" : "TABLE";
+function read(listId: string): ViewMode | null {
+  const stored = window.localStorage.getItem(storageKeyOf(listId));
+  return stored === "CARD" || stored === "TABLE" ? stored : null;
 }
 
 /**
@@ -85,11 +111,11 @@ function read(listId: string): ViewMode {
  * effect에서 읽어 setState하면 한 프레임 동안 잘못된 화면이 스쳐 지나간다.
  * useSyncExternalStore가 정확히 이 상황을 위한 것이다.
  */
-function readServer(): ViewMode {
-  return "TABLE";
+function readServer(): ViewMode | null {
+  return null;
 }
 
-function useViewMode(listId: string): ViewMode {
+function useViewMode(listId: string): ViewMode | null {
   return useSyncExternalStore(subscribe, () => read(listId), readServer);
 }
 
@@ -122,14 +148,19 @@ export function ResponsiveList({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fits = useTableFitsWithoutOverflow(wrapperRef, measureKey ?? []);
   const mode = useViewMode(listId);
-  const showTable = fits && mode === "TABLE";
+  const showTable = resolveShowTable(mode, fits);
 
   return (
     <div className="@container relative flex flex-col gap-2">
       <div className="flex items-center justify-end gap-2">
         {meta}
-        {/* 표가 안 들어가면 고를 것이 없다. */}
-        {fits && <ViewModeToggle value={mode} onChange={(next) => setViewMode(listId, next)} />}
+        {/* 지금 눌린 쪽은 "저장해 둔 값"이 아니라 "지금 화면에 있는 것"이다 —
+            아직 고른 적이 없는 사람에게도 어느 쪽을 보고 있는지 맞게 보인다. */}
+        <ViewModeToggle
+          value={showTable ? "TABLE" : "CARD"}
+          fits={fits}
+          onChange={(next) => setViewMode(listId, next)}
+        />
       </div>
 
       <div
@@ -137,7 +168,9 @@ export function ResponsiveList({
         aria-hidden={!showTable}
         className={
           showTable
-            ? "overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+            ? // 안 들어가는 폭에서 표를 고른 경우에만 실제로 스크롤이 생긴다.
+              // 들어갈 때는 넘칠 것이 없으므로 hidden이던 때와 화면이 같다.
+              "overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800"
             : "invisible pointer-events-none absolute inset-x-0 bottom-0 overflow-x-hidden"
         }
       >
@@ -151,13 +184,17 @@ export function ResponsiveList({
 
 function ViewModeToggle({
   value,
+  fits,
   onChange,
 }: {
+  /** 지금 화면에 실제로 있는 것. */
   value: ViewMode;
+  /** 표가 지금 폭에 들어가는지. 안 들어가면 "표"는 가로 스크롤이 된다고 미리 알린다. */
+  fits: boolean;
   onChange: (next: ViewMode) => void;
 }) {
-  const options: { mode: ViewMode; label: string }[] = [
-    { mode: "TABLE", label: "표" },
+  const options: { mode: ViewMode; label: string; title?: string }[] = [
+    { mode: "TABLE", label: "표", title: fits ? undefined : "지금 폭에는 표가 다 들어가지 않아 옆으로 밀어 봐야 합니다" },
     { mode: "CARD", label: "카드" },
   ];
   return (
@@ -171,6 +208,7 @@ function ViewModeToggle({
           key={option.mode}
           type="button"
           aria-pressed={value === option.mode}
+          title={option.title}
           onClick={() => onChange(option.mode)}
           className={`px-2.5 py-1 text-xs ${
             value === option.mode
