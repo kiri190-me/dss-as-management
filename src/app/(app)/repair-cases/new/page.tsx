@@ -5,7 +5,7 @@ import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { canEditProductModels } from "@/lib/auth/product-model-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -35,7 +35,8 @@ export default async function RepairCaseNewPage() {
   if (writeSource === "database") {
     const session = await readSession();
     const actingUser = session ? await resolveActingUserForSession(session) : null;
-    canRegisterProductModel = actingUser !== null && canEditProductModels(actingUser.role);
+    canRegisterProductModel =
+      actingUser !== null && (await hasPermission(actingUser.role, "productModels.edit", "WRITE"));
   }
 
   return (

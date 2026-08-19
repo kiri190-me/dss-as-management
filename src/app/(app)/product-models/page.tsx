@@ -5,7 +5,7 @@ import ProductModelListScreen from "@/components/product-models/ProductModelList
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canViewProductModels } from "@/lib/auth/product-model-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listProductModels } from "@/lib/db/queries/product-models";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -48,7 +48,7 @@ export default async function ProductModelsPage() {
     redirect("/login");
   }
 
-  if (!canViewProductModels(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "productModels.view", "READ"))) {
     return <PlaceholderPage title="제품 모델 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 

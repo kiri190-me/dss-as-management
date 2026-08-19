@@ -5,7 +5,7 @@ import ProductModelDetailScreen from "@/components/product-models/ProductModelDe
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canEditProductModels, canViewProductModels } from "@/lib/auth/product-model-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getProductModelDetailById } from "@/lib/db/queries/product-models";
 import { listRepairCasesByProductModelId } from "@/lib/db/queries/repair-cases";
 
@@ -50,7 +50,7 @@ export default async function ProductModelDetailPage({
     redirect("/login");
   }
 
-  if (!canViewProductModels(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "productModels.view", "READ"))) {
     return <PlaceholderPage title="제품 모델 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -65,7 +65,7 @@ export default async function ProductModelDetailPage({
     <ProductModelDetailScreen
       detail={detail}
       repairCases={repairCases}
-      canEdit={canEditProductModels(actingUser.role)}
+      canEdit={await hasPermission(actingUser.role, "productModels.edit", "WRITE")}
     />
   );
 }
