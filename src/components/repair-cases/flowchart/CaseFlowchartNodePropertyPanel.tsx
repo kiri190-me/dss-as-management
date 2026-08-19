@@ -65,6 +65,10 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
 export default function CaseFlowchartNodePropertyPanel({
   node,
   allNodes,
+  isPickingReference = false,
+  onStartPickReference,
+  onCancelPickReference,
+  pickedReferenceNode = null,
   repairCaseId,
   flowchartId,
   canEdit,
@@ -79,6 +83,11 @@ export default function CaseFlowchartNodePropertyPanel({
   node: CaseFlowchartGraphNode;
   /** Every node in the flowchart, ALSO rendered/merged — so "상대 위치로 이동"'s reference-node picker positions against what's actually on screen, including an unsaved drag on the reference node itself. */
   allNodes: CaseFlowchartGraphNode[];
+  /** "화면에서 선택" — 절차 편집기 NodePropertyPanel과 같은 규약이다. */
+  isPickingReference?: boolean;
+  onStartPickReference?: () => void;
+  onCancelPickReference?: () => void;
+  pickedReferenceNode?: { nodeId: string; seq: number } | null;
   repairCaseId: string;
   flowchartId: string;
   canEdit: boolean;
@@ -96,6 +105,12 @@ export default function CaseFlowchartNodePropertyPanel({
 
   const otherNodes = allNodes.filter((n) => n.id !== node.id);
   const [referenceNodeId, setReferenceNodeId] = useState(otherNodes[0]?.id ?? "");
+  // 절차 편집기의 NodePropertyPanel과 같은 규약 — 캔버스에서 고른 결과가 seq와 함께 내려온다.
+  const [prevPickedReferenceSeq, setPrevPickedReferenceSeq] = useState(pickedReferenceNode?.seq ?? 0);
+  if (pickedReferenceNode && pickedReferenceNode.seq !== prevPickedReferenceSeq) {
+    setPrevPickedReferenceSeq(pickedReferenceNode.seq);
+    if (pickedReferenceNode.nodeId !== node.id) setReferenceNodeId(pickedReferenceNode.nodeId);
+  }
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState<string | null>(null);
@@ -209,16 +224,38 @@ export default function CaseFlowchartNodePropertyPanel({
       {canEdit && otherNodes.length > 0 && (
         <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">
           <h4 className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">상대 위치로 이동</h4>
-          <label className="flex flex-col gap-1">
-            기준 노드 선택
-            <select value={referenceNodeId} onChange={(e) => setReferenceNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {otherNodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="case-relative-reference-node">기준 노드 선택</label>
+            <div className="flex items-center gap-2">
+              <select
+                id="case-relative-reference-node"
+                value={referenceNodeId}
+                onChange={(e) => setReferenceNodeId(e.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                {otherNodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.title}
+                  </option>
+                ))}
+              </select>
+              {(onStartPickReference || onCancelPickReference) && (
+                <button
+                  type="button"
+                  onClick={() => (isPickingReference ? onCancelPickReference?.() : onStartPickReference?.())}
+                  aria-pressed={isPickingReference}
+                  className={`shrink-0 rounded-md border px-2 py-1.5 text-xs ${
+                    isPickingReference
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-emerald-400 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900"
+                  }`}
+                >
+                  {isPickingReference ? "선택 취소" : "화면에서 선택"}
+                </button>
+              )}
+            </div>
+            {isPickingReference && <p className="text-emerald-800 dark:text-emerald-300">그래프에서 기준으로 삼을 노드를 클릭하세요.</p>}
+          </div>
           <div className="flex flex-wrap gap-2">
             {(
               [

@@ -53,6 +53,10 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
 export default function NodePropertyPanel({
   node,
   allNodes,
+  isPickingReference = false,
+  onStartPickReference,
+  onCancelPickReference,
+  pickedReferenceNode = null,
   canEdit,
   expectedTemplateUpdatedAt,
   draft,
@@ -68,6 +72,17 @@ export default function NodePropertyPanel({
   node: EditorNodeRow;
   /** Phase 5C-5B — every node in the template, for "상대 위치로 이동"'s reference-node picker. 5C-6D-1D — also every OTHER node's current visible position/dimensions feed column-snap candidacy, so this must be the screen's rendered (baseline + pending-draft-merged) list, never the raw server rows alone. */
   allNodes: EditorNodeRow[];
+  /**
+   * "화면에서 선택" — 기준 노드를 목록에서 고르는 대신 캔버스에서 직접 클릭해
+   * 지정하는 모드. 클릭을 받는 쪽이 캔버스라 모드 자체는 화면(부모)이 소유하고,
+   * 여기서는 상태 표시와 시작/취소 요청만 한다(CreateEdgePanel의 대상 노드
+   * 고르기와 같은 규약).
+   */
+  isPickingReference?: boolean;
+  onStartPickReference?: () => void;
+  onCancelPickReference?: () => void;
+  /** 캔버스에서 고른 결과. 같은 노드를 다시 골라도 반영되도록 seq를 함께 올린다. */
+  pickedReferenceNode?: { nodeId: string; seq: number } | null;
   canEdit: boolean;
   expectedTemplateUpdatedAt: string;
   /** 5C-6D-1C — screen-owned pending draft for title/description/instructions/sortOrder/isActive; already reflects any locally-unsaved edit (this panel never keeps its own copy). */
@@ -120,6 +135,13 @@ export default function NodePropertyPanel({
 
   const otherNodes = allNodes.filter((n) => n.id !== node.id);
   const [referenceNodeId, setReferenceNodeId] = useState(otherNodes[0]?.id ?? "");
+  // 캔버스에서 고른 기준 노드를 받아 반영한다 — 같은 노드를 다시 골라도 반영되도록
+  // 화면이 seq를 함께 올려 보낸다. 자기 자신은 기준이 될 수 없으므로 무시한다.
+  const [prevPickedReferenceSeq, setPrevPickedReferenceSeq] = useState(pickedReferenceNode?.seq ?? 0);
+  if (pickedReferenceNode && pickedReferenceNode.seq !== prevPickedReferenceSeq) {
+    setPrevPickedReferenceSeq(pickedReferenceNode.seq);
+    if (pickedReferenceNode.nodeId !== node.id) setReferenceNodeId(pickedReferenceNode.nodeId);
+  }
 
   /** Selecting a different type never mutates by itself — it only opens the confirm dialog. Re-selecting the current type again (or the dialog's own cancel) never calls the mutation. */
   function handleSelectNodeType(value: ProcedureNodeType) {
@@ -309,16 +331,38 @@ export default function NodePropertyPanel({
       {canPosition && otherNodes.length > 0 && (
         <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">
           <h4 className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">상대 위치로 이동</h4>
-          <label className="flex flex-col gap-1">
-            기준 노드 선택
-            <select value={referenceNodeId} onChange={(e) => setReferenceNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              {otherNodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title} ({n.nodeCode})
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="relative-reference-node">기준 노드 선택</label>
+            <div className="flex items-center gap-2">
+              <select
+                id="relative-reference-node"
+                value={referenceNodeId}
+                onChange={(e) => setReferenceNodeId(e.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                {otherNodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.title} ({n.nodeCode})
+                  </option>
+                ))}
+              </select>
+              {(onStartPickReference || onCancelPickReference) && (
+                <button
+                  type="button"
+                  onClick={() => (isPickingReference ? onCancelPickReference?.() : onStartPickReference?.())}
+                  aria-pressed={isPickingReference}
+                  className={`shrink-0 rounded-md border px-2 py-1.5 text-xs ${
+                    isPickingReference
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-emerald-400 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900"
+                  }`}
+                >
+                  {isPickingReference ? "선택 취소" : "화면에서 선택"}
+                </button>
+              )}
+            </div>
+            {isPickingReference && <p className="text-emerald-800 dark:text-emerald-300">그래프에서 기준으로 삼을 노드를 클릭하세요.</p>}
+          </div>
           <div className="flex flex-wrap gap-2">
             {(
               [

@@ -11,7 +11,16 @@ import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
 import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
-import UndoRedoControls from "./editor/UndoRedoControls";
+import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
+import {
+  createUndoStack,
+  pushUndoStep,
+  undoStep,
+  redoStep,
+  canUndo as canUndoStack,
+  canRedo as canRedoStack,
+  type UndoStack,
+} from "@/lib/graph-editor-core/undo-stack";
 import type { ProcedureTemplateForEditor, DraftParentComparisonResult, EditorNodeRow, EditorEdgeRow } from "@/lib/db/queries/procedure-template-editor";
 import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
@@ -99,6 +108,34 @@ type RightPanelTab = "properties" | "validation" | "history" | "compare" | "crea
  * state-during-render convention currentUpdatedAt already used).
  * ============================================================================================
  */
+/**
+ * 저장 전(아직 서버에 보내지 않은) 편집 상태 전부. [이전]/[앞으로]는 이 묶음을
+ * 통째로 갈아끼우는 방식으로 동작한다.
+ */
+type PendingSnapshot = {
+  layoutMoves: Map<string, Position>;
+  edgeRouteMoves: Map<string, RoutePoint[] | null>;
+  nodeFieldDrafts: Map<string, ProcedureNodeFieldDraft>;
+  edgeFieldDrafts: Map<string, ProcedureEdgeFieldDraft>;
+  edgeSaveNotes: Map<string, string>;
+};
+
+/** 스냅샷 두 개가 같은 상태인지 — 키 순서를 고정해 직렬화한 뒤 비교한다(작은 Map 몇 개라 비용이 문제되지 않는다). */
+function pendingSnapshotSignature(snapshot: PendingSnapshot): string {
+  const dump = (map: Map<string, unknown>) => [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([
+    dump(snapshot.layoutMoves),
+    dump(snapshot.edgeRouteMoves),
+    dump(snapshot.nodeFieldDrafts),
+    dump(snapshot.edgeFieldDrafts),
+    dump(snapshot.edgeSaveNotes),
+  ]);
+}
+
+function pendingSnapshotsEqual(a: PendingSnapshot, b: PendingSnapshot): boolean {
+  return pendingSnapshotSignature(a) === pendingSnapshotSignature(b);
+}
+
 export default function ProcedureTemplateEditorScreen({
   template,
   historyView,
@@ -153,6 +190,26 @@ export default function ProcedureTemplateEditorScreen({
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(navigationTarget.nodeId);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  /**
+   * "화면에서 선택" — 연결 추가 패널의 대상 노드를 캔버스 클릭으로 고르는 모드.
+   * 고르는 동안 화면 선택은 전혀 바뀌지 않는다(그래프가 클릭을 우리에게 넘기고
+   * 자기 선택은 건드리지 않는다 — handleNodeClickIntercept 참고). 그래서 연결
+   * 추가 패널은 시작 노드가 그대로라 작성 중이던 내용을 잃지 않는다.
+   *
+   * 모드 플래그를 ref로도 들고 있는 이유는 이 콜백들이 반드시 안정된 참조여야
+   * 하기 때문이다(ProcedureFlowGraph의 선택 동기화 effect가 의존성으로 갖는다).
+   */
+  const isPickingEdgeTargetRef = useRef(false);
+  const [isPickingEdgeTarget, setIsPickingEdgeTarget] = useState(false);
+  const [pickedEdgeTarget, setPickedEdgeTarget] = useState<{ nodeId: string; seq: number } | null>(null);
+  /**
+   * "상대 위치로 이동"의 기준 노드를 캔버스에서 고르는 모드. 대상 노드 고르기와
+   * 다른 점이 하나 있다: 여기서는 선택을 절대 옮기지 않는다 — 선택이 옮겨가면
+   * 속성 패널 자체가 다른 노드로 바뀌어, 방금 고른 기준을 쓸 화면이 사라진다.
+   */
+  const isPickingReferenceNodeRef = useRef(false);
+  const [isPickingReferenceNode, setIsPickingReferenceNode] = useState(false);
+  const [pickedReferenceNode, setPickedReferenceNode] = useState<{ nodeId: string; seq: number } | null>(null);
   // Phase 5C-5B usability bugfix — lifted (was ProcedureFlowGraph's own
   // internal state) so handleAddWaypoint can force USER mode the instant a
   // route point is added: route-point markers only render/are clickable in
@@ -253,6 +310,63 @@ export default function ProcedureTemplateEditorScreen({
   /** The edge "검토자 메모" — a write-only per-save audit annotation (see procedure-editor-save-state.ts's own doc comment on why it's excluded from ProcedureEdgeFieldDraft entirely). Lifted here, alongside pendingEdgeFieldDraftsById, so it survives an edge-selection change (EdgePropertyPanel remounts via `key=`) until the deferred EDGE_FIELDS step actually runs. */
   const [pendingEdgeSaveNoteById, setPendingEdgeSaveNoteById] = useState<Map<string, string>>(new Map());
 
+  // ---- 저장 전 되돌리기(클라이언트 스냅샷 스택) ----
+  //
+  // [이전]은 이제 두 체계를 순서대로 쓴다: 저장하지 않은 변경이 있으면 그것부터
+  // 한 단계씩 되돌리고, 다 되돌린 뒤에야 서버 이력을 되돌린다. 예전에는 저장 전
+  // 변경이 하나라도 있으면 버튼 자체가 꺼져 있어서, 노드를 옮긴 뒤에는 되돌릴
+  // 방법이 "모두 취소"밖에 없었다.
+  //
+  // 스냅샷은 저장 전 상태 다섯 가지를 통째로 담는다 — 조작마다 역연산을 따로
+  // 만들면 조작이 늘 때마다 짝을 맞춰야 해서 어긋나기 쉽다(undo-stack.ts 주석 참고).
+  const [pendingUndoStack, setPendingUndoStack] = useState<UndoStack<PendingSnapshot>>(() => createUndoStack<PendingSnapshot>());
+  /**
+   * 항상 "가장 최근에 렌더링된" 저장 전 상태를 가리킨다 — 스냅샷을 찍는 쪽은
+   * 이벤트 핸들러(드래그 시작, 버튼 클릭)라 렌더 이후에 실행되므로 이 값이
+   * 최신이다. 상태 다섯 개를 의존성으로 끌고 다니면 콜백 신원이 매번 바뀌어
+   * 그래프의 선택 동기화 effect까지 흔들리므로 ref로 둔다.
+   */
+  const pendingSnapshotRef = useRef<PendingSnapshot>({
+    layoutMoves: new Map(),
+    edgeRouteMoves: new Map(),
+    nodeFieldDrafts: new Map(),
+    edgeFieldDrafts: new Map(),
+    edgeSaveNotes: new Map(),
+  });
+  useEffect(() => {
+    pendingSnapshotRef.current = {
+      layoutMoves: pendingLayoutMoves,
+      edgeRouteMoves: pendingEdgeRouteMoves,
+      nodeFieldDrafts: pendingNodeFieldDraftsById,
+      edgeFieldDrafts: pendingEdgeFieldDraftsById,
+      edgeSaveNotes: pendingEdgeSaveNoteById,
+    };
+  }, [pendingLayoutMoves, pendingEdgeRouteMoves, pendingNodeFieldDraftsById, pendingEdgeFieldDraftsById, pendingEdgeSaveNoteById]);
+
+  /** 드래그 중에는 프레임마다 스냅샷을 찍지 않는다 — 한 번의 드래그가 한 단계다(시작할 때만 찍는다). */
+  const isNodeDraggingRef = useRef(false);
+  /**
+   * 글자 입력은 "입력칸 단위로 한 단계"다. 직전에 손댄 칸과 같은 칸이면 새 단계를
+   * 만들지 않고, 다른 칸(또는 다른 노드/연결)으로 옮겨가거나 다른 조작을 하면
+   * 그때 한 단계가 끊긴다 — 한 글자마다 단계가 쌓이는 것을 막는다.
+   */
+  const lastFieldEditKeyRef = useRef<string | null>(null);
+
+  const pushPendingUndoStep = useCallback((fieldEditKey: string | null = null) => {
+    if (fieldEditKey !== null && lastFieldEditKeyRef.current === fieldEditKey) return;
+    lastFieldEditKeyRef.current = fieldEditKey;
+    setPendingUndoStack((prev) => pushUndoStep(prev, pendingSnapshotRef.current, pendingSnapshotsEqual));
+  }, []);
+
+  const applyPendingSnapshot = useCallback((snapshot: PendingSnapshot) => {
+    setPendingLayoutMoves(new Map(snapshot.layoutMoves));
+    setPendingEdgeRouteMoves(new Map(snapshot.edgeRouteMoves));
+    setPendingNodeFieldDraftsById(new Map(snapshot.nodeFieldDrafts));
+    setPendingEdgeFieldDraftsById(new Map(snapshot.edgeFieldDrafts));
+    setPendingEdgeSaveNoteById(new Map(snapshot.edgeSaveNotes));
+    lastFieldEditKeyRef.current = null;
+  }, []);
+
   const [globalSaveStatus, setGlobalSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
 
@@ -308,6 +422,7 @@ export default function ProcedureTemplateEditorScreen({
     return { title: server?.title ?? "", description: server?.description ?? "", instructions: server?.instructions ?? "", sortOrder: server?.sortOrder ?? 0, isActive: server?.isActive ?? true };
   }
   function updateNodeFieldDraft(nodeId: string, patch: Partial<ProcedureNodeFieldDraft>) {
+    pushPendingUndoStep(`node:${nodeId}:${Object.keys(patch).sort().join(",")}`);
     setPendingNodeFieldDraftsById((prev) => {
       const next = new Map(prev);
       next.set(nodeId, { ...nodeFieldDraft(nodeId), ...patch });
@@ -322,6 +437,7 @@ export default function ProcedureTemplateEditorScreen({
     return { branchType: server?.branchType ?? "DEFAULT", branchLabel: server?.branchLabel ?? "" };
   }
   function updateEdgeFieldDraft(edgeId: string, patch: Partial<ProcedureEdgeFieldDraft>) {
+    pushPendingUndoStep(`edge:${edgeId}:${Object.keys(patch).sort().join(",")}`);
     setPendingEdgeFieldDraftsById((prev) => {
       const next = new Map(prev);
       next.set(edgeId, { ...edgeFieldDraft(edgeId), ...patch });
@@ -332,6 +448,7 @@ export default function ProcedureTemplateEditorScreen({
     return pendingEdgeSaveNoteById.get(edgeId) ?? "";
   }
   function updateEdgeSaveNote(edgeId: string, note: string) {
+    pushPendingUndoStep(`edgeNote:${edgeId}`);
     setPendingEdgeSaveNoteById((prev) => {
       const next = new Map(prev);
       next.set(edgeId, note);
@@ -431,7 +548,22 @@ export default function ProcedureTemplateEditorScreen({
   const [isRedoing, setIsRedoing] = useState(false);
   const [undoRedoError, setUndoRedoError] = useState<string | null>(null);
 
+  /**
+   * [이전] — 저장하지 않은 변경이 남아 있으면 그것부터 한 단계씩 되돌리고,
+   * 다 되돌린 뒤에야 서버 이력을 되돌린다. 사용자에게는 버튼 하나로 보이지만
+   * 대상이 둘이며, 순서가 뒤바뀌면 아직 저장도 안 된 화면 상태 위에 서버
+   * 되돌리기가 겹쳐 무엇이 남았는지 알 수 없게 된다 — 그래서 저장 전 변경이
+   * 하나라도 남아 있는 동안에는 서버 이력에 손대지 않는다.
+   */
   async function handleUndo() {
+    if (canUndoStack(pendingUndoStack)) {
+      const result = undoStep(pendingUndoStack, pendingSnapshotRef.current, pendingSnapshotsEqual);
+      setPendingUndoStack(result.stack);
+      if (result.restored) {
+        applyPendingSnapshot(result.restored);
+        return;
+      }
+    }
     if (hasAnyPendingChanges) return;
     setIsUndoing(true);
     setUndoRedoError(null);
@@ -444,7 +576,16 @@ export default function ProcedureTemplateEditorScreen({
     handleSaved(result.updatedAt);
   }
 
+  /** [앞으로] — handleUndo와 정확히 대칭이다(저장 전 단계를 먼저, 그다음 서버 이력). */
   async function handleRedo() {
+    if (canRedoStack(pendingUndoStack)) {
+      const result = redoStep(pendingUndoStack, pendingSnapshotRef.current, pendingSnapshotsEqual);
+      setPendingUndoStack(result.stack);
+      if (result.restored) {
+        applyPendingSnapshot(result.restored);
+        return;
+      }
+    }
     if (hasAnyPendingChanges) return;
     setIsRedoing(true);
     setUndoRedoError(null);
@@ -695,10 +836,17 @@ export default function ProcedureTemplateEditorScreen({
     // block at the top of this component.
     setSelectedWaypointIndex(null);
     setGlobalSaveStatus("saved");
+    // 저장에 성공한 변경은 이제 서버 이력의 몫이다 — 클라이언트 스택을 비워
+    // 같은 변경이 두 체계에 중복으로 남지 않게 한다([이전]을 누르면 서버
+    // 이력으로 곧바로 넘어간다).
+    setPendingUndoStack(createUndoStack<PendingSnapshot>());
+    lastFieldEditKeyRef.current = null;
     router.refresh();
   }
 
   function handleDiscardAllPending() {
+    // "모두 취소"도 한 단계다 — 실수로 눌렀다면 [이전]으로 통째로 되살릴 수 있다.
+    pushPendingUndoStep();
     // Client-only — nothing was ever persisted for anything still pending
     // at this point, so there is no server call and no DISCARD_DRAFT_CHANGES
     // audit row (that action type is reserved for a case where server
@@ -719,7 +867,7 @@ export default function ProcedureTemplateEditorScreen({
     setIsValidating(false);
     if (result.ok) {
       setLastStructuralValidation(result.structuralValidation);
-      setRightPanelTab("validation");
+      switchRightPanelTab("validation");
       router.refresh();
     }
   }
@@ -742,22 +890,71 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedNodeId(nodeId);
     if (nodeId) setRightPanelTab("properties");
   }, []);
+
+  /**
+   * "화면에서 선택" 모드의 클릭 처리. 그래프의 선택 변경 통지가 아니라 누른
+   * 노드 id를 그대로 받는다 — 그래프는 이미 선택된 노드를 다시 누르면 선택을
+   * 해제하므로, 선택 변경으로 받으면 "같은 노드를 다시 고르기"가 통하지 않는다.
+   * true를 돌려주면 그래프는 선택을 건드리지 않는다: 고르는 동안 화면 선택이
+   * 그대로 유지돼야 오른쪽 패널(연결 추가 / 속성)이 사라지지 않는다.
+   */
+  const handleNodeClickIntercept = useCallback((nodeId: string) => {
+    if (isPickingEdgeTargetRef.current) {
+      isPickingEdgeTargetRef.current = false;
+      setIsPickingEdgeTarget(false);
+      setPickedEdgeTarget((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
+      return true;
+    }
+    if (isPickingReferenceNodeRef.current) {
+      isPickingReferenceNodeRef.current = false;
+      setIsPickingReferenceNode(false);
+      setPickedReferenceNode((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
+      return true;
+    }
+    return false;
+  }, []);
+  /** 오른쪽 패널 탭을 바꾸는 단일 경로 — 탭을 떠나면 선택 대기와 시작 노드 고정을 함께 푼다(모드가 켜진 채로 남아 다음 클릭을 가로채지 않게). */
+  const switchRightPanelTab = useCallback((tab: RightPanelTab) => {
+    isPickingEdgeTargetRef.current = false;
+    setIsPickingEdgeTarget(false);
+    isPickingReferenceNodeRef.current = false;
+    setIsPickingReferenceNode(false);
+    setRightPanelTab(tab);
+  }, []);
   const handleEdgeSelectionChange = useCallback((edgeId: string | null) => {
+    // 분기를 고르는 것은 대상 노드 고르기가 아니다 — 선택 대기 중이었다면
+    // 여기서 함께 해제한다(모드가 남아 다음 노드 클릭을 가로채지 않게).
+    isPickingEdgeTargetRef.current = false;
+    setIsPickingEdgeTarget(false);
+    isPickingReferenceNodeRef.current = false;
+    setIsPickingReferenceNode(false);
     setSelectedEdgeId(edgeId);
     if (edgeId) setRightPanelTab("properties");
   }, []);
   /** 5C-6D-1D — the ONE place both a canvas drag-stop and NodePropertyPanel's "상대 위치로 이동" buttons funnel through, mirroring CaseFlowchartEditorScreen's own setPendingNodePosition. No mutation call here; position is dirty/pending like every other field, only global [저장] persists it. */
+  // pushPendingUndoStep는 useCallback([])으로 신원이 고정돼 있어 의존성에 넣어도
+  // 이 콜백의 신원이 흔들리지 않는다(그래프 선택 동기화 effect 참고).
   const setPendingPosition = useCallback((nodeId: string, position: Position) => {
+    // 드래그는 시작할 때 이미 한 단계를 찍었다 — 프레임마다 또 찍지 않는다.
+    // 버튼(상대 위치로 이동)으로 온 호출은 여기서 한 단계가 된다.
+    if (!isNodeDraggingRef.current) pushPendingUndoStep();
     setPendingLayoutMoves((prev) => {
       const next = new Map(prev);
       next.set(nodeId, position);
       return next;
     });
-  }, []);
+  }, [pushPendingUndoStep]);
+
+  /** 드래그 한 번이 되돌리기 한 단계다 — 시작할 때 직전 상태를 찍고, 끝날 때까지 더 찍지 않는다. */
+  const handleNodeDragStart = useCallback(() => {
+    pushPendingUndoStep();
+    isNodeDraggingRef.current = true;
+  }, [pushPendingUndoStep]);
 
   const handleNodeDragStop = useCallback(
     (nodeId: string, position: Position) => {
       setPendingPosition(nodeId, position);
+      isNodeDraggingRef.current = false;
     },
     [setPendingPosition]
   );
@@ -766,9 +963,16 @@ export default function ProcedureTemplateEditorScreen({
   // before 1C. Every one of these only ever touches pendingEdgeRouteMoves —
   // client state only, never a Server Action call, same as before. ----
 
-  const handleWaypointSelectionChange = useCallback((index: number | null) => {
-    setSelectedWaypointIndex(index);
-  }, []);
+  const handleWaypointSelectionChange = useCallback(
+    (index: number | null) => {
+      // 경로점을 누른 시점(=끌기 시작)에 한 단계를 찍는다. 끌지 않고 고르기만
+      // 했다면 상태가 그대로라, 그 단계는 [이전]을 누를 때 조용히 버려진다
+      // (undo-stack.ts의 "헛도는 단계는 건너뛴다" 규칙).
+      if (index !== null) pushPendingUndoStep();
+      setSelectedWaypointIndex(index);
+    },
+    [pushPendingUndoStep]
+  );
 
   const handleWaypointMove = useCallback(
     (edgeId: string, index: number, point: RoutePoint) => {
@@ -848,6 +1052,7 @@ export default function ProcedureTemplateEditorScreen({
    */
   const handleAddWaypoint = useCallback(() => {
     if (!selectedEdgeId) return;
+    pushPendingUndoStep();
     const edge = template.edges.find((e) => e.id === selectedEdgeId);
     const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
     const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
@@ -858,28 +1063,30 @@ export default function ProcedureTemplateEditorScreen({
       next.set(selectedEdgeId, addWaypointAtDefaultPosition(currentWorkingRoutePoints(prev, selectedEdgeId), source, target));
       return next;
     });
-  }, [selectedEdgeId, template.edges, workingLayoutPositions, savedEdgeRoutes]);
+  }, [selectedEdgeId, template.edges, workingLayoutPositions, savedEdgeRoutes, pushPendingUndoStep]);
 
   /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. Unchanged from before 1C. */
   const handleRemoveSelectedWaypoint = useCallback(() => {
     if (!selectedEdgeId || selectedWaypointIndex === null) return;
+    pushPendingUndoStep();
     setPendingEdgeRouteMoves((prev) => {
       const next = new Map(prev);
       next.set(selectedEdgeId, removeWaypoint(currentWorkingRoutePoints(prev, selectedEdgeId), selectedWaypointIndex));
       return next;
     });
     setSelectedWaypointIndex(null);
-  }, [selectedEdgeId, selectedWaypointIndex, savedEdgeRoutes]);
+  }, [selectedEdgeId, selectedWaypointIndex, savedEdgeRoutes, pushPendingUndoStep]);
 
   /** "자동 경로로 초기화" — explicit restore, discoverable beyond deleting every point one at a time. Unchanged from before 1C. */
   const handleResetEdgeRoute = useCallback((edgeId: string) => {
+    pushPendingUndoStep();
     setPendingEdgeRouteMoves((prev) => {
       const next = new Map(prev);
       next.set(edgeId, null);
       return next;
     });
     setSelectedWaypointIndex(null);
-  }, []);
+  }, [pushPendingUndoStep]);
 
   // Delete/Backspace removes the selected waypoint — only when a waypoint
   // is actually selected and focus isn't inside a text input/textarea/
@@ -990,8 +1197,8 @@ export default function ProcedureTemplateEditorScreen({
           )}
           {canDeleteGraph && (
             <UndoRedoControls
-              canUndo={historyView.canUndo && !hasAnyPendingChanges}
-              canRedo={historyView.canRedo && !hasAnyPendingChanges}
+              canUndo={canUndoStack(pendingUndoStack) || (historyView.canUndo && !hasAnyPendingChanges)}
+              canRedo={canRedoStack(pendingUndoStack) || (historyView.canRedo && !hasAnyPendingChanges)}
               isUndoing={isUndoing}
               isRedoing={isRedoing}
               onUndo={() => void handleUndo()}
@@ -1001,7 +1208,7 @@ export default function ProcedureTemplateEditorScreen({
           <button type="button" onClick={() => void handleValidate()} disabled={isValidating} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
             {isValidating ? "검증 중..." : "검증"}
           </button>
-          <button type="button" onClick={() => setRightPanelTab("compare")} disabled={!comparison} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+          <button type="button" onClick={() => switchRightPanelTab("compare")} disabled={!comparison} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
             부모 버전과 비교
           </button>
           <button type="button" onClick={handleExit} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300">
@@ -1028,13 +1235,16 @@ export default function ProcedureTemplateEditorScreen({
             editable={canEdit}
             useAutoLayoutForUnpositionedNodes={isTechnical}
             onNodeSelectionChange={handleNodeSelectionChange}
+            onNodeClickIntercept={handleNodeClickIntercept}
             onEdgeSelectionChange={handleEdgeSelectionChange}
+            onNodeDragStart={handleNodeDragStart}
             onNodeDragStop={handleNodeDragStop}
             selectedEdgeId={selectedEdgeId}
             edgeRoutesByEdgeId={workingEdgeRoutes}
             selectedWaypointIndex={selectedWaypointIndex}
             onWaypointSelectionChange={handleWaypointSelectionChange}
             onWaypointMove={handleWaypointMove}
+
             onEdgeDoubleClick={handleEdgeDoubleClick}
             layoutMode={layoutMode}
             onLayoutModeChange={setLayoutMode}
@@ -1051,7 +1261,7 @@ export default function ProcedureTemplateEditorScreen({
               <button
                 key={tab}
                 type="button"
-                onClick={() => setRightPanelTab(tab)}
+                onClick={() => switchRightPanelTab(tab)}
                 className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
                 {tab === "properties" ? "속성" : tab === "validation" ? "검증" : tab === "history" ? "이력" : tab === "createEdge" ? "연결 추가" : "노드 추가"}
@@ -1063,6 +1273,16 @@ export default function ProcedureTemplateEditorScreen({
             <NodePropertyPanel
               node={selectedNode}
               allNodes={renderedNodes}
+              isPickingReference={isPickingReferenceNode}
+              onStartPickReference={() => {
+                isPickingReferenceNodeRef.current = true;
+                setIsPickingReferenceNode(true);
+              }}
+              onCancelPickReference={() => {
+                isPickingReferenceNodeRef.current = false;
+                setIsPickingReferenceNode(false);
+              }}
+              pickedReferenceNode={pickedReferenceNode}
               canEdit={canEdit}
               expectedTemplateUpdatedAt={currentUpdatedAt}
               draft={nodeFieldDraft(selectedNode.id)}
@@ -1108,6 +1328,16 @@ export default function ProcedureTemplateEditorScreen({
               canEdit={canEdit}
               expectedTemplateUpdatedAt={currentUpdatedAt}
               prefillFromNodeId={selectedNodeId}
+              isPickingTarget={isPickingEdgeTarget}
+              onStartPickTarget={() => {
+                isPickingEdgeTargetRef.current = true;
+                setIsPickingEdgeTarget(true);
+              }}
+              onCancelPickTarget={() => {
+                isPickingEdgeTargetRef.current = false;
+                setIsPickingEdgeTarget(false);
+              }}
+              pickedTarget={pickedEdgeTarget}
               onSaved={handleSaved}
               isTechnical={isTechnical}
             />

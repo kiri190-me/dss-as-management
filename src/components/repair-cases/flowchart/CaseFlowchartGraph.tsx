@@ -121,6 +121,7 @@ export default function CaseFlowchartGraph({
   onEdgeClick,
   onPaneClick,
   onNodeDragStop,
+  onNodeDragStart,
   selectedWaypointIndex = null,
   onWaypointSelectionChange,
   onWaypointMove,
@@ -137,9 +138,12 @@ export default function CaseFlowchartGraph({
   onEdgeClick?: (edgeId: string) => void;
   onPaneClick?: () => void;
   onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
+  /** 드래그가 시작되는 순간 한 번 — 편집기가 "이 드래그 직전 상태"를 되돌리기 단계로 기록할 수 있게 한다(절차 편집기와 같은 규약). */
+  onNodeDragStart?: (nodeId: string) => void;
   selectedWaypointIndex?: number | null;
   onWaypointSelectionChange?: (index: number | null) => void;
   onWaypointMove?: (edgeId: string, index: number, point: RoutePoint) => void;
+
   /** Forwards the live React Flow instance up to the screen (5C-6D follow-up #4/#5) — lets a sibling component (the node property panel, and the screen itself) read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position/straighten-connection math, rather than a duplicated size estimate that can drift from what's actually rendered. Fired once, same timing as GraphCanvas's own onInit. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
   /** Fires on an edge double-click, with just the case-flowchart edge id (GraphCanvas's own onEdgeDoubleClick also carries a flow-space click point, unused by this checkpoint's "double-click straightens the connection" feature — see CaseFlowchartEditorScreen's own doc comment). */
@@ -160,6 +164,7 @@ export default function CaseFlowchartGraph({
 
   function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {
     activeDragRef.current = { nodeId, start: position, axis: null, shiftHeld: shiftKey };
+    onNodeDragStart?.(nodeId);
   }
 
   function handleNodeDrag(nodeId: string, position: Point) {

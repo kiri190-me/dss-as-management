@@ -71,7 +71,13 @@ export async function getRepairCaseFlowchartGraph(params: {
         positionY: repairCaseFlowchartNodes.positionY,
       })
       .from(repairCaseFlowchartNodes)
-      .where(eq(repairCaseFlowchartNodes.flowchartId, flowchart.id)),
+      .where(eq(repairCaseFlowchartNodes.flowchartId, flowchart.id))
+      // 추가된 순서(오래된 것 → 최근 것)로 고정한다. 정렬이 없으면 Postgres가
+      // 돌려주는 순서는 보장되지 않아 노드 선택 목록의 순서가 새로고침마다
+      // 달라질 수 있고, "새 연결 추가"의 대상 노드 기본값(가장 최근에 추가한
+      // 노드 = 마지막 원소)도 성립하지 않는다. createdAt이 같은 극단적인
+      // 경우를 위해 id를 2차 정렬 키로 둔다.
+      .orderBy(repairCaseFlowchartNodes.createdAt, repairCaseFlowchartNodes.id),
     db
       .select({
         id: repairCaseFlowchartEdges.id,

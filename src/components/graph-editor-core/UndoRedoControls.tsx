@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * Phase 5C-5C UI — the editor toolbar's [이전]/[앞으로] buttons. Purely
- * presentational: canUndo/canRedo always come from the server-derived
- * historyView (see procedure-template-history.ts's own doc comment) —
- * never a client-memory undo stack, never optimistic state that could
- * diverge from the server. Disabled whenever unavailable OR a request is
- * already in flight (either button, since Undo and Redo are mutually
- * exclusive in-flight operations against the same template).
+ * 편집기 도구모음의 [이전]/[앞으로] 버튼 — 순수 표시 전용이다(어떤 되돌리기
+ * 체계인지 전혀 모른다). 두 편집기가 함께 쓰므로 graph-editor-core에 있다.
+ *
+ * canUndo/canRedo의 출처는 화면마다 다르다: 절차 편집기는 저장 전 변경이 있으면
+ * 클라이언트 스냅샷 스택(graph-editor-core/undo-stack.ts)을, 다 되돌린 뒤에는
+ * 서버 이력(procedure-template-history.ts)을 쓴다. 진단 Flowchart 편집기는
+ * 서버 이력이 없어 클라이언트 스택만 쓴다. 어느 쪽이든 이 컴포넌트는 넘겨받은
+ * 값 그대로 렌더링할 뿐, 스스로 상태를 만들지 않는다.
+ *
+ * 요청이 진행 중이면(둘은 같은 대상에 대해 동시에 일어날 수 없다) 양쪽 다 비활성.
  */
 export default function UndoRedoControls({
   canUndo,

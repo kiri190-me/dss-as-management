@@ -5,6 +5,7 @@ import { PROCEDURE_BRANCH_TYPE_CODES, procedureBranchTypeLabels, type ProcedureB
 import type { EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
 import { createProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
 import { buildNewEdgePreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
+import { pickDefaultTargetNodeId } from "@/lib/graph-editor-core/edge-default-target";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 
 /**
@@ -29,6 +30,10 @@ export default function CreateEdgePanel({
   canEdit,
   expectedTemplateUpdatedAt,
   prefillFromNodeId,
+  isPickingTarget = false,
+  onStartPickTarget,
+  onCancelPickTarget,
+  pickedTarget = null,
   onSaved,
   isTechnical,
 }: {
@@ -37,29 +42,60 @@ export default function CreateEdgePanel({
   canEdit: boolean;
   expectedTemplateUpdatedAt: string;
   prefillFromNodeId?: string | null;
+  /**
+   * "화면에서 선택" — true인 동안 캔버스 노드 클릭이 시작 노드 선택이 아니라
+   * 이 패널의 대상 노드로 들어온다. 모드 자체는 화면(부모)이 소유한다 —
+   * 클릭을 받는 쪽이 캔버스이기 때문이다.
+   */
+  isPickingTarget?: boolean;
+  onStartPickTarget?: () => void;
+  onCancelPickTarget?: () => void;
+  /** 부모가 캔버스에서 고른 결과. 같은 노드를 다시 골라도 반영되도록 seq를 함께 올린다. */
+  pickedTarget?: { nodeId: string; seq: number } | null;
   onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
   /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the "추가 사유" from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
   isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
+  // 노드 생성 시 sortOrder가 max+1로 매겨지므로(createProcedureTemplateNode),
+  // sortOrder 오름차순이 곧 추가된 순서다 — nodes prop 자체의 배열 순서는
+  // 쿼리에 orderBy가 없어 신뢰할 수 없다.
+  const nodesOldestFirst = [...nodes].sort((a, b) => a.sortOrder - b.sortOrder);
+  const mostRecentNodeId = nodesOldestFirst[nodesOldestFirst.length - 1]?.id ?? null;
+  const initialFromNodeId = prefillFromNodeId ?? nodes[0]?.id ?? "";
   const [prevPrefillFromNodeId, setPrevPrefillFromNodeId] = useState(prefillFromNodeId ?? null);
-  const [fromNodeId, setFromNodeId] = useState(prefillFromNodeId ?? nodes[0]?.id ?? "");
-  const [toNodeId, setToNodeId] = useState("");
+  const [fromNodeId, setFromNodeId] = useState(initialFromNodeId);
+  const [toNodeId, setToNodeId] = useState(() => pickDefaultTargetNodeId(nodesOldestFirst, initialFromNodeId));
   const [branchType, setBranchType] = useState<ProcedureBranchType>("DEFAULT");
   const [branchLabel, setBranchLabel] = useState("");
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  if ((prefillFromNodeId ?? null) !== prevPrefillFromNodeId) {
+  const [prevMostRecentNodeId, setPrevMostRecentNodeId] = useState(mostRecentNodeId);
+  const [prevPickedSeq, setPrevPickedSeq] = useState(pickedTarget?.seq ?? 0);
+  if (pickedTarget && pickedTarget.seq !== prevPickedSeq) {
+    // 캔버스에서 고른 노드는 대상 노드만 바꾼다 — 작성 중이던 나머지 입력은
+    // 그대로 둔다(부모가 선택 대기 중에는 prefillFromNodeId를 고정해 두므로
+    // 아래 초기화 분기는 이때 돌지 않는다).
+    setPrevPickedSeq(pickedTarget.seq);
+    setToNodeId(pickedTarget.nodeId);
+  } else if ((prefillFromNodeId ?? null) !== prevPrefillFromNodeId) {
+    const nextFromNodeId = prefillFromNodeId ?? nodes[0]?.id ?? "";
     setPrevPrefillFromNodeId(prefillFromNodeId ?? null);
-    setFromNodeId(prefillFromNodeId ?? nodes[0]?.id ?? "");
-    setToNodeId("");
+    setFromNodeId(nextFromNodeId);
+    setToNodeId(pickDefaultTargetNodeId(nodesOldestFirst, nextFromNodeId));
     setBranchType("DEFAULT");
     setBranchLabel("");
     setReason("");
     setConfirming(false);
     setErrorMessage(null);
+  } else if (mostRecentNodeId !== prevMostRecentNodeId) {
+    // 노드를 새로 추가하면 그 노드가 곧 이어붙일 대상인 경우가 대부분이다 —
+    // 대상 노드만 다시 기본값으로 맞추고, 작성 중이던 나머지 입력(분기 유형/
+    // 라벨/사유)은 건드리지 않는다.
+    setPrevMostRecentNodeId(mostRecentNodeId);
+    setToNodeId(pickDefaultTargetNodeId(nodesOldestFirst, fromNodeId));
   }
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -118,17 +154,39 @@ export default function CreateEdgePanel({
           ))}
         </select>
       </label>
-      <label className="flex flex-col gap-1">
-        대상 노드
-        <select value={toNodeId} onChange={(e) => setToNodeId(e.target.value)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-          <option value="">노드를 선택하세요</option>
-          {nodes.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.title} ({n.nodeCode})
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="create-edge-to-node">대상 노드</label>
+        <div className="flex items-center gap-2">
+          <select
+            id="create-edge-to-node"
+            value={toNodeId}
+            onChange={(e) => setToNodeId(e.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <option value="">노드를 선택하세요</option>
+            {nodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.title} ({n.nodeCode})
+              </option>
+            ))}
+          </select>
+          {(onStartPickTarget || onCancelPickTarget) && (
+            <button
+              type="button"
+              onClick={() => (isPickingTarget ? onCancelPickTarget?.() : onStartPickTarget?.())}
+              aria-pressed={isPickingTarget}
+              className={`shrink-0 rounded-md border px-2 py-1.5 text-xs ${
+                isPickingTarget
+                  ? "border-emerald-700 bg-emerald-700 text-white"
+                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {isPickingTarget ? "선택 취소" : "화면에서 선택"}
+            </button>
+          )}
+        </div>
+        {isPickingTarget && <p className="text-emerald-800 dark:text-emerald-300">그래프에서 대상 노드를 클릭하세요.</p>}
+      </div>
       <label className="flex flex-col gap-1">
         분기 유형
         <select value={branchType} onChange={(e) => setBranchType(e.target.value as ProcedureBranchType)} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">

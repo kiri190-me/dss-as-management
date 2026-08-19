@@ -4,12 +4,25 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactFlowInstance } from "@xyflow/react";
 import CaseFlowchartGraph, { type CaseFlowchartGraphNode, type CaseFlowchartGraphEdge } from "./CaseFlowchartGraph";
+import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
+import {
+  createUndoStack,
+  pushUndoStep,
+  undoStep,
+  redoStep,
+  canUndo as canUndoStack,
+  canRedo as canRedoStack,
+  type UndoStack,
+} from "@/lib/graph-editor-core/undo-stack";
 import CaseFlowchartCreateNodePanel from "./CaseFlowchartCreateNodePanel";
 import CaseFlowchartNodePropertyPanel, { type CaseFlowchartNodeDraft } from "./CaseFlowchartNodePropertyPanel";
 import CaseFlowchartCreateEdgePanel from "./CaseFlowchartCreateEdgePanel";
 import CaseFlowchartEdgePropertyPanel, { type CaseFlowchartEdgeDraft } from "./CaseFlowchartEdgePropertyPanel";
+import type { RepairCaseFlowchartBranchType, RepairCaseFlowchartNodeType } from "@/lib/domain/repair-case-flowchart-types";
 import { updateRepairCaseFlowchartMetadataAction } from "@/lib/server/actions/repair-case-flowcharts";
 import {
+  createRepairCaseFlowchartEdgeAction,
+  createRepairCaseFlowchartNodeAction,
   saveRepairCaseFlowchartLayoutAction,
   saveRepairCaseFlowchartEdgeRouteAction,
   updateRepairCaseFlowchartNodeAction,
@@ -145,6 +158,65 @@ type CaseRightPanelTab = "properties" | "addNode" | "createEdge";
  * beyond "editing existing visible graph properties/positions/routes."
  * =================================================================================
  */
+/** 저장 전(아직 서버에 보내지 않은) 편집 상태 전부 — [이전]/[앞으로]가 통째로 갈아끼우는 단위다. */
+type CasePendingSnapshot = {
+  nodeDrafts: Map<string, CaseFlowchartNodeDraft>;
+  nodePositions: Map<string, Position>;
+  edgeDrafts: Map<string, CaseFlowchartEdgeDraft>;
+  routePoints: Map<string, RoutePoint[] | null>;
+};
+
+/**
+ * 되돌리기 한 단계. 대부분은 저장 전 상태 스냅샷 하나면 충분하지만, 연결선
+ * 삭제는 이미 서버에 반영된 뒤라 화면 상태만 되돌려서는 되살아나지 않는다 —
+ * 그런 단계는 무엇을 다시 만들어야 하는지(restoreEdge)를 함께 들고 있다가,
+ * 되돌릴 때 서버에 다시 만든다.
+ */
+type CaseUndoStep = {
+  snapshot: CasePendingSnapshot;
+  /**
+   * 삭제된 노드를 되살리는 단계. 노드 삭제는 연결선이 하나도 남지 않은
+   * 노드에서만 허용되므로(deleteRepairCaseFlowchartNodeAction), 되살릴 때
+   * 함께 복구할 연결선은 없다 — 노드 하나만 다시 만들면 된다.
+   */
+  restoreNode?: {
+    nodeType: RepairCaseFlowchartNodeType;
+    title: string;
+    description: string | null;
+    instructions: string | null;
+    position: { x: number; y: number };
+  };
+  restoreEdge?: {
+    fromNodeId: string;
+    toNodeId: string;
+    branchType: RepairCaseFlowchartBranchType;
+    branchLabel: string | null;
+    /** 삭제 시점의 경로점 — 되살린 연결선은 새 id를 받으므로, 그 id로 저장 전 변경에 다시 얹는다. */
+    routePoints: RoutePoint[] | null;
+  };
+};
+
+/** 절차 편집기의 pendingSnapshotSignature와 같은 방식 — 키 순서를 고정해 직렬화한 뒤 비교한다. */
+function casePendingSnapshotSignature(snapshot: CasePendingSnapshot): string {
+  const dump = (map: Map<string, unknown>) => [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([
+    dump(snapshot.nodeDrafts),
+    dump(snapshot.nodePositions),
+    dump(snapshot.edgeDrafts),
+    dump(snapshot.routePoints),
+  ]);
+}
+
+/**
+ * 서버 되살리기가 딸린 단계는 어떤 것과도 같지 않다고 본다 — 화면 상태가
+ * 우연히 같더라도 "지워진 연결선을 되살린다"는 할 일이 남아 있어, 합치거나
+ * 건너뛰면 그 일이 통째로 사라진다.
+ */
+function caseUndoStepsEqual(a: CaseUndoStep, b: CaseUndoStep): boolean {
+  if (a.restoreEdge || b.restoreEdge || a.restoreNode || b.restoreNode) return false;
+  return casePendingSnapshotSignature(a.snapshot) === casePendingSnapshotSignature(b.snapshot);
+}
+
 export default function CaseFlowchartEditorScreen({
   repairCaseId,
   flowchart,
@@ -174,6 +246,23 @@ export default function CaseFlowchartEditorScreen({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
+  /**
+   * "화면에서 선택" — 연결 추가 패널의 대상 노드를 캔버스 클릭으로 고르는
+   * 모드다(ProcedureTemplateEditorScreen과 같은 규칙). 여기 캔버스 콜백은
+   * 인라인 함수라 참조 안정성 제약이 없어 ref 없이 state만으로 충분하다.
+   *
+   * 고르는 동안 화면 선택은 전혀 바뀌지 않는다 — 선택이 옮겨가면 패널이 시작
+   * 노드가 바뀐 것으로 보고 작성 중이던 내용을 초기화한다(절차 편집기와 같은 규칙).
+   */
+  const [isPickingEdgeTarget, setIsPickingEdgeTarget] = useState(false);
+  const [pickedEdgeTarget, setPickedEdgeTarget] = useState<{ nodeId: string; seq: number } | null>(null);
+  /**
+   * "상대 위치로 이동"의 기준 노드를 캔버스에서 고르는 모드 — 대상 노드
+   * 고르기와 달리 선택을 옮기지 않는다(선택이 옮겨가면 속성 패널이 다른 노드로
+   * 바뀌어, 방금 고른 기준을 쓸 화면이 사라진다).
+   */
+  const [isPickingReferenceNode, setIsPickingReferenceNode] = useState(false);
+  const [pickedReferenceNode, setPickedReferenceNode] = useState<{ nodeId: string; seq: number } | null>(null);
 
   // Phase B (5C-6D-1F design pass) — right-panel tabs, mirroring
   // ProcedureTemplateEditorScreen's rightPanelTab pattern at the IA level
@@ -185,6 +274,166 @@ export default function CaseFlowchartEditorScreen({
   const [pendingNodePositionsById, setPendingNodePositionsById] = useState<Map<string, Position>>(new Map());
   const [pendingEdgeDraftsById, setPendingEdgeDraftsById] = useState<Map<string, CaseFlowchartEdgeDraft>>(new Map());
   const [pendingRoutePointsByEdgeId, setPendingRoutePointsByEdgeId] = useState<Map<string, RoutePoint[] | null>>(new Map());
+
+  // ---- 저장 전 되돌리기(클라이언트 스냅샷 스택) ----
+  //
+  // 이 편집기에는 서버 편집 이력이 없다(절차 템플릿과 달리 케이스 Flowchart는
+  // 발행/이력 개념이 없는 작업 문서다) — 그래서 [이전]/[앞으로]는 저장하지 않은
+  // 변경만 다룬다. 스냅샷 방식과 한 단계의 단위는 절차 편집기와 같다
+  // (graph-editor-core/undo-stack.ts 주석 참고).
+  const [pendingUndoStack, setPendingUndoStack] = useState<UndoStack<CaseUndoStep>>(() => createUndoStack<CaseUndoStep>());
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
+  const pendingSnapshotRef = useRef<CasePendingSnapshot>({
+    nodeDrafts: new Map(),
+    nodePositions: new Map(),
+    edgeDrafts: new Map(),
+    routePoints: new Map(),
+  });
+  useEffect(() => {
+    pendingSnapshotRef.current = {
+      nodeDrafts: pendingNodeDraftsById,
+      nodePositions: pendingNodePositionsById,
+      edgeDrafts: pendingEdgeDraftsById,
+      routePoints: pendingRoutePointsByEdgeId,
+    };
+  }, [pendingNodeDraftsById, pendingNodePositionsById, pendingEdgeDraftsById, pendingRoutePointsByEdgeId]);
+
+  /** 드래그 한 번이 한 단계다 — 시작할 때만 찍는다. */
+  const isNodeDraggingRef = useRef(false);
+  /** 글자 입력은 입력칸 단위로 한 단계 — 같은 칸을 계속 고치는 동안에는 단계가 늘지 않는다. */
+  const lastFieldEditKeyRef = useRef<string | null>(null);
+
+  function pushPendingUndoStep(fieldEditKey: string | null = null) {
+    if (!canEdit) return;
+    if (fieldEditKey !== null && lastFieldEditKeyRef.current === fieldEditKey) return;
+    lastFieldEditKeyRef.current = fieldEditKey;
+    setPendingUndoStack((prev) => pushUndoStep(prev, { snapshot: pendingSnapshotRef.current }, caseUndoStepsEqual));
+  }
+
+  /**
+   * 연결선 삭제 단계 — 이미 서버에 반영된 삭제라, 되돌리려면 같은 연결선을
+   * 다시 만들어야 한다. 그 재료를 이 단계에 함께 담는다.
+   */
+  function pushEdgeDeletionUndoStep(restoreEdge: NonNullable<CaseUndoStep["restoreEdge"]>) {
+    if (!canEdit) return;
+    lastFieldEditKeyRef.current = null;
+    setPendingUndoStack((prev) => pushUndoStep(prev, { snapshot: pendingSnapshotRef.current, restoreEdge }, caseUndoStepsEqual));
+  }
+
+  /** 노드 삭제 단계 — 연결선 삭제와 같은 원리로, 되살릴 재료를 단계에 담아 둔다. */
+  function pushNodeDeletionUndoStep(restoreNode: NonNullable<CaseUndoStep["restoreNode"]>) {
+    if (!canEdit) return;
+    lastFieldEditKeyRef.current = null;
+    setPendingUndoStack((prev) => pushUndoStep(prev, { snapshot: pendingSnapshotRef.current, restoreNode }, caseUndoStepsEqual));
+  }
+
+  function applyPendingSnapshot(snapshot: CasePendingSnapshot) {
+    setPendingNodeDraftsById(new Map(snapshot.nodeDrafts));
+    setPendingNodePositionsById(new Map(snapshot.nodePositions));
+    setPendingEdgeDraftsById(new Map(snapshot.edgeDrafts));
+    setPendingRoutePointsByEdgeId(new Map(snapshot.routePoints));
+    lastFieldEditKeyRef.current = null;
+  }
+
+  /**
+   * [이전] — 저장하지 않은 변경을 한 단계씩 되돌린다. 그 단계가 "삭제된 연결선"
+   * 이면 서버에 같은 연결선을 다시 만든다. 되살린 연결선은 새 id를 받으므로
+   * 삭제 전 경로점은 그 새 id로 저장 전 변경에 얹어 둔다([저장]으로 확정된다).
+   *
+   * 서버 작업이 낀 단계는 [앞으로](다시 적용) 대상에서 뺀다 — 되살린 것을 다시
+   * 지우는 동작까지 자동으로 해주면, 실수로 한 번 더 눌렀을 때 방금 되살린 것이
+   * 조용히 사라진다. 지우려면 삭제 버튼을 다시 누르는 편이 분명하다.
+   */
+  async function handleUndo() {
+    const result = undoStep(pendingUndoStack, { snapshot: pendingSnapshotRef.current }, caseUndoStepsEqual);
+    setUndoError(null);
+    if (!result.restored) {
+      setPendingUndoStack(result.stack);
+      return;
+    }
+    const step = result.restored;
+    if (step.restoreNode) {
+      setIsUndoing(true);
+      const created = await createRepairCaseFlowchartNodeAction({
+        repairCaseId,
+        flowchartId: flowchart.id,
+        nodeType: step.restoreNode.nodeType,
+        title: step.restoreNode.title,
+        description: step.restoreNode.description,
+        position: step.restoreNode.position,
+        expectedFlowchartUpdatedAt: currentUpdatedAt,
+      });
+      if (!created.ok) {
+        setIsUndoing(false);
+        setUndoError(created.message);
+        return;
+      }
+      // 작업 내용(instructions)은 생성 액션이 받지 않는다 — 만든 직후 한 번 더
+      // 채워 넣어야 삭제 전 노드와 같아진다. 이 두 번째 호출이 실패해도 노드
+      // 자체는 이미 되살아났으므로, 되돌리기를 무르지 않고 사유만 알린다.
+      let latestUpdatedAt = created.updatedAt;
+      if (step.restoreNode.instructions && step.restoreNode.instructions.trim().length > 0) {
+        const filled = await updateRepairCaseFlowchartNodeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          nodeId: created.nodeId,
+          title: step.restoreNode.title,
+          description: step.restoreNode.description,
+          instructions: step.restoreNode.instructions,
+          expectedFlowchartUpdatedAt: latestUpdatedAt,
+        });
+        if (filled.ok) latestUpdatedAt = filled.updatedAt;
+        else setUndoError(`노드는 되살렸지만 작업 내용을 복원하지 못했습니다: ${filled.message}`);
+      }
+      setIsUndoing(false);
+      setPendingUndoStack({ past: result.stack.past, future: [] });
+      applyPendingSnapshot(step.snapshot);
+      handleSaved(latestUpdatedAt);
+      return;
+    }
+
+    if (!step.restoreEdge) {
+      setPendingUndoStack(result.stack);
+      applyPendingSnapshot(step.snapshot);
+      return;
+    }
+
+    setIsUndoing(true);
+    const created = await createRepairCaseFlowchartEdgeAction({
+      repairCaseId,
+      flowchartId: flowchart.id,
+      fromNodeId: step.restoreEdge.fromNodeId,
+      toNodeId: step.restoreEdge.toNodeId,
+      branchType: step.restoreEdge.branchType,
+      branchLabel: step.restoreEdge.branchLabel,
+      expectedFlowchartUpdatedAt: currentUpdatedAt,
+    });
+    setIsUndoing(false);
+    if (!created.ok) {
+      // 스택은 건드리지 않는다 — 되돌리기가 일어나지 않았으므로 그 단계는 그대로 남아야 한다.
+      setUndoError(created.message);
+      return;
+    }
+
+    setPendingUndoStack({ past: result.stack.past, future: [] });
+    applyPendingSnapshot(step.snapshot);
+    const restoredRoute = step.restoreEdge.routePoints;
+    if (restoredRoute && restoredRoute.length > 0) {
+      setPendingRoutePointsByEdgeId((prev) => {
+        const next = new Map(prev);
+        next.set(created.edgeId, restoredRoute);
+        return next;
+      });
+    }
+    handleSaved(created.updatedAt);
+  }
+
+  function handleRedo() {
+    const result = redoStep(pendingUndoStack, { snapshot: pendingSnapshotRef.current }, caseUndoStepsEqual);
+    setPendingUndoStack(result.stack);
+    if (result.restored) applyPendingSnapshot(result.restored.snapshot);
+  }
 
   const [titleDraft, setTitleDraft] = useState(flowchart.title);
   const [descriptionDraft, setDescriptionDraft] = useState(flowchart.description ?? "");
@@ -262,6 +511,20 @@ export default function CaseFlowchartEditorScreen({
 
   function handleNodeDeleted(newUpdatedAt: string) {
     if (selectedNodeId) {
+      // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
+      // 수정/이동이 있었다면 그것) 기준으로 되살린다.
+      const deleted = nodes.find((n) => n.id === selectedNodeId);
+      const draft = pendingNodeDraftsById.get(selectedNodeId);
+      const pendingPosition = pendingNodePositionsById.get(selectedNodeId);
+      if (deleted) {
+        pushNodeDeletionUndoStep({
+          nodeType: draft?.nodeType ?? deleted.nodeType,
+          title: (draft ? draft.title.trim() : deleted.title) || deleted.title,
+          description: (draft ? draft.description.trim() || null : deleted.description) ?? null,
+          instructions: (draft ? draft.instructions.trim() || null : deleted.instructions) ?? null,
+          position: pendingPosition ?? { x: deleted.positionX, y: deleted.positionY },
+        });
+      }
       setPendingNodeDraftsById((prev) => {
         if (!prev.has(selectedNodeId)) return prev;
         const next = new Map(prev);
@@ -281,6 +544,21 @@ export default function CaseFlowchartEditorScreen({
 
   function handleEdgeDeleted(newUpdatedAt: string) {
     if (selectedEdgeId) {
+      // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
+      // 수정이 있었다면 그것)을 기준으로, 되살릴 때 같은 연결선이 되도록.
+      const deleted = edges.find((e) => e.id === selectedEdgeId);
+      const draft = pendingEdgeDraftsById.get(selectedEdgeId);
+      if (deleted) {
+        pushEdgeDeletionUndoStep({
+          fromNodeId: draft?.fromNodeId ?? deleted.fromNodeId,
+          toNodeId: draft?.toNodeId ?? deleted.toNodeId,
+          branchType: draft?.branchType ?? deleted.branchType,
+          branchLabel: (draft ? draft.branchLabel.trim() || null : deleted.branchLabel) ?? null,
+          routePoints: pendingRoutePointsByEdgeId.has(selectedEdgeId)
+            ? pendingRoutePointsByEdgeId.get(selectedEdgeId) ?? null
+            : deleted.routePoints,
+        });
+      }
       setPendingEdgeDraftsById((prev) => {
         if (!prev.has(selectedEdgeId)) return prev;
         const next = new Map(prev);
@@ -301,6 +579,9 @@ export default function CaseFlowchartEditorScreen({
 
   /** Sets (or replaces) a node's pending position — the ONE place both canvas drag-stop and the property panel's "상대 위치로 이동" buttons funnel through. No mutation call here; position is dirty/pending like every other field, only [저장] persists it. */
   function setPendingNodePosition(nodeId: string, position: Position) {
+    // 드래그는 시작할 때 이미 한 단계를 찍었다 — 버튼(상대 위치로 이동)으로 온
+    // 호출만 여기서 한 단계가 된다.
+    if (!isNodeDraggingRef.current) pushPendingUndoStep();
     setPendingNodePositionsById((prev) => {
       const next = new Map(prev);
       next.set(nodeId, position);
@@ -311,6 +592,20 @@ export default function CaseFlowchartEditorScreen({
   function handleNodeDragStop(nodeId: string, position: Position) {
     if (!canEdit) return;
     setPendingNodePosition(nodeId, position);
+    isNodeDraggingRef.current = false;
+  }
+
+  /** 드래그 한 번이 되돌리기 한 단계다 — 시작할 때 직전 상태를 찍는다. */
+  function handleNodeDragStart() {
+    if (!canEdit) return;
+    pushPendingUndoStep();
+    isNodeDraggingRef.current = true;
+  }
+
+  /** 경로점을 누른 시점(=끌기 시작)에 한 단계. 고르기만 하고 끝났다면 상태가 그대로라 [이전]을 누를 때 조용히 버려진다. */
+  function handleWaypointSelectionChange(index: number | null) {
+    if (index !== null) pushPendingUndoStep();
+    setSelectedWaypointIndex(index);
   }
 
   // ---- node draft (title/description/nodeType) ----
@@ -328,6 +623,7 @@ export default function CaseFlowchartEditorScreen({
   }
 
   function updateNodeDraft(nodeId: string, patch: Partial<CaseFlowchartNodeDraft>) {
+    pushPendingUndoStep(`node:${nodeId}:${Object.keys(patch).sort().join(",")}`);
     setPendingNodeDraftsById((prev) => {
       const next = new Map(prev);
       next.set(nodeId, { ...nodeDraft(nodeId), ...patch });
@@ -354,6 +650,7 @@ export default function CaseFlowchartEditorScreen({
   }
 
   function updateEdgeDraft(edgeId: string, patch: Partial<CaseFlowchartEdgeDraft>) {
+    pushPendingUndoStep(`edge:${edgeId}:${Object.keys(patch).sort().join(",")}`);
     setPendingEdgeDraftsById((prev) => {
       const next = new Map(prev);
       next.set(edgeId, { ...edgeDraft(edgeId), ...patch });
@@ -395,6 +692,7 @@ export default function CaseFlowchartEditorScreen({
 
   function handleRemoveSelectedWaypoint() {
     if (!canEdit || !selectedEdgeId || selectedWaypointIndex === null) return;
+    pushPendingUndoStep();
     setPendingRoutePointsByEdgeId((prev) => {
       const next = new Map(prev);
       next.set(selectedEdgeId, removeWaypoint(workingRoutePoints(selectedEdgeId) ?? [], selectedWaypointIndex));
@@ -405,6 +703,7 @@ export default function CaseFlowchartEditorScreen({
 
   function handleResetRoute() {
     if (!canEdit || !selectedEdgeId) return;
+    pushPendingUndoStep();
     setPendingRoutePointsByEdgeId((prev) => {
       const next = new Map(prev);
       next.set(selectedEdgeId, null);
@@ -629,11 +928,16 @@ export default function CaseFlowchartEditorScreen({
 
     setSelectedWaypointIndex(null);
     setGlobalSaveStatus("saved");
+    // 저장된 변경은 더 이상 "저장 전"이 아니다 — 스택을 비운다.
+    setPendingUndoStack(createUndoStack<CaseUndoStep>());
+    lastFieldEditKeyRef.current = null;
     router.refresh();
   }
 
   /** Client-only reset of every pending draft/position/route map — mirrors ProcedureTemplateEditorScreen's handleDiscardAllPending. Nothing here was ever persisted, so there is no server call and no audit row. */
   function handleDiscardAllPending() {
+    // "모두 취소"도 한 단계다 — 실수로 눌렀다면 [이전]으로 통째로 되살릴 수 있다.
+    pushPendingUndoStep();
     setPendingNodeDraftsById(new Map());
     setPendingNodePositionsById(new Map());
     setPendingEdgeDraftsById(new Map());
@@ -695,6 +999,17 @@ export default function CaseFlowchartEditorScreen({
           >
             취소
           </button>
+          {/* 저장 전 변경만 다룬다 — 이 편집기에는 서버 편집 이력이 없다.
+              진행 중 표시(isUndoing/isRedoing)는 서버 요청이 없으므로 항상 false다. */}
+          <UndoRedoControls
+            canUndo={canUndoStack(pendingUndoStack)}
+            canRedo={canRedoStack(pendingUndoStack)}
+            isUndoing={isUndoing}
+            isRedoing={false}
+            onUndo={() => void handleUndo()}
+            onRedo={handleRedo}
+          />
+          {undoError && <span className="text-red-600 dark:text-red-400">{undoError}</span>}
           {globalSaveStatus === "saved" && <span className="text-emerald-700 dark:text-emerald-400">저장 완료</span>}
           {globalSaveStatus === "failed" && globalSaveError && <span className="text-red-600 dark:text-red-400">{globalSaveError}</span>}
           {hasAnyPendingChanges && globalSaveStatus === "idle" && (
@@ -749,12 +1064,27 @@ export default function CaseFlowchartEditorScreen({
                 selectedNodeId={selectedNodeId}
                 selectedEdgeId={selectedEdgeId}
                 onNodeClick={(nodeId) => {
+                  if (isPickingEdgeTarget) {
+                    // 선택 대기 중의 클릭은 "대상 노드 지정"이다 — 선택은 그대로
+                    // 두어(연결 추가 패널이 초기화되지 않게) 대상만 바꾼다.
+                    setIsPickingEdgeTarget(false);
+                    setPickedEdgeTarget((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
+                    return;
+                  }
+                  if (isPickingReferenceNode) {
+                    // 기준 노드만 바꾸고 선택은 그대로 둔다.
+                    setIsPickingReferenceNode(false);
+                    setPickedReferenceNode((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
+                    return;
+                  }
                   setSelectedNodeId(nodeId);
                   setSelectedEdgeId(null);
                   setSelectedWaypointIndex(null);
                   setRightPanelTab("properties");
                 }}
                 onEdgeClick={(edgeId) => {
+                  setIsPickingEdgeTarget(false);
+                  setIsPickingReferenceNode(false);
                   setSelectedEdgeId(edgeId);
                   setSelectedNodeId(null);
                   setSelectedWaypointIndex(null);
@@ -768,8 +1098,10 @@ export default function CaseFlowchartEditorScreen({
                 }}
                 onNodeDragStop={handleNodeDragStop}
                 selectedWaypointIndex={selectedWaypointIndex}
-                onWaypointSelectionChange={setSelectedWaypointIndex}
+                onWaypointSelectionChange={handleWaypointSelectionChange}
+                onNodeDragStart={handleNodeDragStart}
                 onWaypointMove={handleWaypointMove}
+
                 onInstanceReady={(instance) => {
                   reactFlowInstanceRef.current = instance;
                 }}
@@ -789,7 +1121,12 @@ export default function CaseFlowchartEditorScreen({
               <button
                 key={tab}
                 type="button"
-                onClick={() => setRightPanelTab(tab)}
+                onClick={() => {
+                  // 탭을 떠나면 선택 대기와 시작 노드 고정을 함께 푼다.
+                  setIsPickingEdgeTarget(false);
+                  setIsPickingReferenceNode(false);
+                  setRightPanelTab(tab);
+                }}
                 className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
                 {tab === "properties" ? "속성" : tab === "addNode" ? "노드 추가" : "연결 추가"}
@@ -803,6 +1140,10 @@ export default function CaseFlowchartEditorScreen({
                 <CaseFlowchartNodePropertyPanel
                   node={selectedNode}
                   allNodes={renderedNodes}
+                  isPickingReference={isPickingReferenceNode}
+                  onStartPickReference={() => setIsPickingReferenceNode(true)}
+                  onCancelPickReference={() => setIsPickingReferenceNode(false)}
+                  pickedReferenceNode={pickedReferenceNode}
                   repairCaseId={repairCaseId}
                   flowchartId={flowchart.id}
                   canEdit={canEdit}
@@ -856,6 +1197,10 @@ export default function CaseFlowchartEditorScreen({
               canEdit={canEdit}
               expectedFlowchartUpdatedAt={currentUpdatedAt}
               prefillFromNodeId={selectedNodeId}
+              isPickingTarget={isPickingEdgeTarget}
+              onStartPickTarget={() => setIsPickingEdgeTarget(true)}
+              onCancelPickTarget={() => setIsPickingEdgeTarget(false)}
+              pickedTarget={pickedEdgeTarget}
               onSaved={handleSaved}
             />
           )}

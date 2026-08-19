@@ -202,8 +202,10 @@ export default function ProcedureFlowGraph({
   editable = false,
   useAutoLayoutForUnpositionedNodes = false,
   onNodeSelectionChange,
+  onNodeClickIntercept,
   onEdgeSelectionChange,
   onNodeDragStop,
+  onNodeDragStart,
   selectedEdgeId = null,
   edgeRoutesByEdgeId,
   selectedWaypointIndex = null,
@@ -247,10 +249,14 @@ export default function ProcedureFlowGraph({
   useAutoLayoutForUnpositionedNodes?: boolean;
   /** Fires whenever the selected node changes (including deselection), in addition to this component's own path-highlight/dim behavior — lets the editor open/close its node property panel in lockstep. */
   onNodeSelectionChange?: (nodeId: string | null) => void;
+  /** 노드를 누른 순간, 선택 토글이 일어나기 전에 그 id를 그대로 받는다. true를 돌려주면 "이 클릭은 내가 썼다"는 뜻이며 선택 상태는 바뀌지 않는다(편집기의 "화면에서 선택" 모드용). */
+  onNodeClickIntercept?: (nodeId: string) => boolean;
   /** Fires when an edge is clicked — this component has no built-in edge-selection visual state of its own, this is purely a notification for the editor's edge property panel. */
   onEdgeSelectionChange?: (edgeId: string | null) => void;
   /** Fires once a drag gesture ends, in 사용자 배치 layout only — the editor accumulates these client-side and persists them only on an explicit Save, never here. */
   onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
+  /** 드래그가 시작되는 순간 한 번 — 편집기가 "이 드래그 직전 상태"를 되돌리기 단계로 기록할 수 있게 한다(위치 자체는 Stop에서만 넘어온다). */
+  onNodeDragStart?: (nodeId: string) => void;
   /** Phase 4B — the editor's currently-selected edge id (lifted to the parent, unlike selectedNodeId which stays local here) — only this edge ever gets draggable waypoint handles. */
   selectedEdgeId?: string | null;
   /** Phase 4B — the editor's *working* (saved + pending-merged) manual route per edge id; absent/undefined for a read-only viewer that never passes this prop at all. Only ever rendered/interactive in 사용자 배치 — see resolveEffectiveEdgeRoute. */
@@ -260,6 +266,7 @@ export default function ProcedureFlowGraph({
   onWaypointSelectionChange?: (index: number | null) => void;
   /** Fires on every waypoint drag frame — client-state only, same "no auto-save" contract as onNodeDragStop. */
   onWaypointMove?: (edgeId: string, index: number, point: { x: number; y: number }) => void;
+
   /** 5C-6D-1E — the double-click-on-an-edge shortcut, now "straighten this connection" (aligns the connected nodes; parity with CaseFlowchartGraph's own onEdgeDoubleClick) rather than waypoint insertion — see this component's own handleCanvasEdgeDoubleClick doc comment for the full rationale. Only the edge id is needed; the click position is no longer used. */
   onEdgeDoubleClick?: (edgeId: string) => void;
   /**
@@ -296,6 +303,7 @@ export default function ProcedureFlowGraph({
 
   function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {
     activeDragRef.current = { nodeId, start: position, axis: null, shiftHeld: shiftKey };
+    onNodeDragStart?.(nodeId);
   }
 
   function handleNodeDrag(nodeId: string, position: Point) {
@@ -520,6 +528,12 @@ export default function ProcedureFlowGraph({
   // apply inline, unchanged. ----
 
   function handleCanvasNodeClick(nodeId: string) {
+    // "화면에서 선택" 같은 고르기 모드가 이 클릭을 가져갈 수 있다. 이 그래프는
+    // 선택 상태를 스스로 들고 있고, 이미 선택된 노드를 다시 누르면 선택을
+    // 해제(toggle)하므로 — 고르기를 선택 변경 통지(onNodeSelectionChange)로
+    // 받으면 "같은 노드를 다시 고르기"가 선택 해제로 둔갑한다. 그래서 누른
+    // 노드 id를 있는 그대로 먼저 넘기고, 소비되면 선택은 건드리지 않는다.
+    if (onNodeClickIntercept?.(nodeId)) return;
     onEdgeSelectionChange?.(null);
     setSelectedNodeId((current) => (current === nodeId ? null : nodeId));
   }
