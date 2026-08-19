@@ -35,11 +35,14 @@ test("empty state: no assigned cases at all shows the exact required copy", () =
   assert.ok(!html.includes("필터 초기화"), "the no-cases-at-all state must not offer a filter-reset button");
 });
 
-test("표(hidden lg:block)와 카드 목록(lg:hidden)을 같은 행으로 함께 그린다", () => {
-  // 끊는 지점은 2026-08-19에 md → lg로 옮겼다 — 전체 A/S 현황과 같은 값이다.
+test("표와 카드를 함께 그리고, 공용 기준(@4xl)으로 하나만 보인다", () => {
+  // 끊는 지점은 화면마다 따로 정하지 않는다 — components/common/responsive-list.tsx
+  // 한 곳이 정하고 모든 목록이 그것을 쓴다. 여기서 검사하는 것은 이 화면이
+  // 그 공용 기준을 타고 있는가이지, 값 자체가 아니다.
   const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
-  assert.ok(html.includes("hidden") && html.includes("lg:block"), "desktop table wrapper must carry the responsive classes");
-  assert.ok(html.includes("lg:hidden"), "mobile card list wrapper must carry the responsive class");
+  assert.ok(html.includes("@container"), "공용 기준은 컨테이너 폭을 본다 — 화면 폭이 아니다");
+  assert.ok(html.includes("@4xl:block"), "넓을 때 보일 표 래퍼가 있어야 한다");
+  assert.ok(html.includes("@4xl:hidden"), "좁을 때만 보일 카드 래퍼가 있어야 한다");
 });
 
 test("row's intake number links to the existing repair-case detail route, not a new detail screen", () => {

@@ -1,4 +1,5 @@
 import type { TrashedRepairCase } from "@/lib/db/mappers/repair-case";
+import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import { StatusBadge } from "../badges";
 import RepairCaseTrashRetentionBadge from "./RepairCaseTrashRetentionBadge";
 
@@ -26,7 +27,7 @@ export default function RepairCaseTrashCardList({
   onPermanentlyDeleteOne: (id: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 lg:hidden">
+    <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
         <div
           key={row.id}

@@ -15,6 +15,7 @@ import {
 import MyWorkSummary from "./MyWorkSummary";
 import MyWorkFilters from "./MyWorkFilters";
 import MyActiveWorkTable from "./MyActiveWorkTable";
+import { ResponsiveList } from "@/components/common/responsive-list";
 import MyActiveWorkCardList from "./MyActiveWorkCardList";
 
 /**
@@ -90,10 +91,11 @@ export default function MyActiveWorkScreen({ rows }: { rows: MyActiveWorkRow[] }
               </div>
             </div>
           ) : (
-            <>
-              <MyActiveWorkTable rows={sortedRows} sort={sort} onSortChange={handleSortChange} />
-              <MyActiveWorkCardList rows={sortedRows} />
-            </>
+            <ResponsiveList
+              listId="my-active-work"
+              table={<MyActiveWorkTable rows={sortedRows} sort={sort} onSortChange={handleSortChange} />}
+              cards={<MyActiveWorkCardList rows={sortedRows} />}
+            />
           )}
         </>
       )}

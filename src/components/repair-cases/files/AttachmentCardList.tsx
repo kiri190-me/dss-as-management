@@ -1,6 +1,7 @@
 "use client";
 
 import type { LocalAttachmentMetadata } from "@/lib/domain/local/attachments/attachment-types";
+import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import { formatAttachmentDateTime, formatFileSizeKorean } from "@/lib/domain/local/attachments/format";
 import { CategoryBadge, DeletedStatusBadge, MalwareScanStatusBadge, PreviewStatusBadge } from "./badges";
 import type { AttachmentRowActions } from "./types";
@@ -22,7 +23,7 @@ export default function AttachmentCardList({
   onRestore,
 }: AttachmentCardListProps) {
   return (
-    <div className="flex flex-col gap-3 md:hidden">
+    <div className={LIST_CARD_GRID}>
       {records.map((record) => (
         <div
           key={record.id}

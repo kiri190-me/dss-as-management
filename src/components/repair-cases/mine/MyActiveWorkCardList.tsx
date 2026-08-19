@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
 import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
@@ -17,7 +18,7 @@ import { daysSinceIntake } from "@/lib/domain/date-only";
  */
 export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[] }) {
   return (
-    <div className="flex flex-col gap-3 lg:hidden">
+    <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
         <Link
           key={row.id}

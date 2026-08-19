@@ -25,7 +25,7 @@ export default function AttachmentTable({
   onRestore,
 }: AttachmentTableProps) {
   return (
-    <div className="hidden overflow-x-auto rounded-lg border border-zinc-200 md:block dark:border-zinc-800">
+    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table className="w-full min-w-[1200px] border-collapse text-sm">
         <caption className="sr-only">첨부파일 메타데이터 목록</caption>
         <thead>

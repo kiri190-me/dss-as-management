@@ -144,7 +144,7 @@ export default function RepairCaseTable({
   onToggleSelect,
 }: RepairCaseTableProps) {
   return (
-    <div className="hidden overflow-x-hidden rounded-lg border border-zinc-200 lg:block dark:border-zinc-800">
+    <div className="overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table className="w-full min-w-[960px] border-collapse text-sm">
         <thead className="sticky top-0 z-10">
           <tr>

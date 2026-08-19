@@ -32,7 +32,7 @@ export default function RepairCaseTrashTable({
   onPermanentlyDeleteOne: (id: string) => void;
 }) {
   return (
-    <div className="hidden overflow-x-auto rounded-lg border border-zinc-200 lg:block dark:border-zinc-800">
+    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table className="w-full min-w-[1100px] border-collapse text-sm">
         <thead className="sticky top-0 z-10">
           <tr>

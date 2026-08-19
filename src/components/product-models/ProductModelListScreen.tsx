@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import Link from "next/link";
 import type { ProductModelListRow } from "@/lib/db/queries/product-models";
 
@@ -65,8 +66,10 @@ export default function ProductModelListScreen({ rows }: { rows: ProductModelLis
           {rows.length === 0 ? "등록된 제품 모델이 없습니다." : "검색 조건에 맞는 모델이 없습니다."}
         </div>
       ) : (
-        <>
-          <div className="hidden overflow-x-hidden rounded-lg border border-zinc-200 lg:block dark:border-zinc-800">
+        <ResponsiveList
+          listId="product-models"
+          table={
+            <div className="overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 bg-white text-left text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
@@ -105,9 +108,10 @@ export default function ProductModelListScreen({ rows }: { rows: ProductModelLis
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="flex flex-col gap-3 lg:hidden">
+            </div>
+          }
+          cards={
+            <div className={LIST_CARD_GRID}>
             {filteredRows.map((row) => (
               <Link
                 key={row.id}
@@ -139,8 +143,9 @@ export default function ProductModelListScreen({ rows }: { rows: ProductModelLis
                 </dl>
               </Link>
             ))}
-          </div>
-        </>
+            </div>
+          }
+        />
       )}
     </div>
   );

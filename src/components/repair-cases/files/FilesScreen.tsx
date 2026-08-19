@@ -30,6 +30,7 @@ import AttachmentFilters from "./AttachmentFilters";
 import AttachmentFormDialog, { type AttachmentFormSubmitInput } from "./AttachmentFormDialog";
 import AttachmentSummaryCards from "./AttachmentSummaryCards";
 import AttachmentTable from "./AttachmentTable";
+import { ResponsiveList } from "@/components/common/responsive-list";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
 import FilesHeaderSummary from "./FilesHeaderSummary";
@@ -250,26 +251,31 @@ export default function FilesScreen({
           조건에 맞는 첨부파일이 없습니다.
         </div>
       ) : (
-        <>
-          <AttachmentTable
-            records={filteredRecords}
-            onRename={setRenameTarget}
-            onEditDescription={setDescriptionTarget}
-            onPreview={setPreviewTarget}
-            onDownload={setDownloadTarget}
-            onDelete={setDeleteTarget}
-            onRestore={setRestoreTarget}
-          />
-          <AttachmentCardList
-            records={filteredRecords}
-            onRename={setRenameTarget}
-            onEditDescription={setDescriptionTarget}
-            onPreview={setPreviewTarget}
-            onDownload={setDownloadTarget}
-            onDelete={setDeleteTarget}
-            onRestore={setRestoreTarget}
-          />
-        </>
+        <ResponsiveList
+          listId="repair-case-attachments"
+          table={
+            <AttachmentTable
+              records={filteredRecords}
+              onRename={setRenameTarget}
+              onEditDescription={setDescriptionTarget}
+              onPreview={setPreviewTarget}
+              onDownload={setDownloadTarget}
+              onDelete={setDeleteTarget}
+              onRestore={setRestoreTarget}
+            />
+          }
+          cards={
+            <AttachmentCardList
+              records={filteredRecords}
+              onRename={setRenameTarget}
+              onEditDescription={setDescriptionTarget}
+              onPreview={setPreviewTarget}
+              onDownload={setDownloadTarget}
+              onDelete={setDeleteTarget}
+              onRestore={setRestoreTarget}
+            />
+          }
+        />
       )}
 
       <AttachmentEventTimeline events={caseEvents} recordsById={recordsById} />

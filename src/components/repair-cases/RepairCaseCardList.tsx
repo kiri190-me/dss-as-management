@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
 
@@ -29,7 +30,7 @@ export default function RepairCaseCardList({
   onToggleSelect,
 }: RepairCaseCardListProps) {
   return (
-    <div className="flex flex-col gap-3 lg:hidden">
+    <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
         <Link
           key={row.id}

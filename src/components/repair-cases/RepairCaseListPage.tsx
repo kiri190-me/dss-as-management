@@ -20,6 +20,7 @@ import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import RepairCaseFilters from "./RepairCaseFilters";
 import RepairCaseTable from "./RepairCaseTable";
+import { ResponsiveList } from "@/components/common/responsive-list";
 import RepairCaseCardList from "./RepairCaseCardList";
 import RepairCaseBulkDeleteBar from "./RepairCaseBulkDeleteBar";
 import RepairCaseBulkDeleteDialog from "./RepairCaseBulkDeleteDialog";
@@ -549,24 +550,29 @@ export default function RepairCaseListPage({
               휴지통이 비어 있습니다.
             </div>
           ) : (
-            <>
-              <RepairCaseTrashTable
-                rows={trashCases}
-                selectedIds={trashSelectedIds}
-                onToggleSelect={handleToggleTrashSelect}
-                onRestoreOne={handleRequestRestoreOne}
-                canPermanentlyDelete={canPermanentlyDelete}
-                onPermanentlyDeleteOne={handleRequestPermanentDeleteOne}
-              />
-              <RepairCaseTrashCardList
-                rows={trashCases}
-                selectedIds={trashSelectedIds}
-                onToggleSelect={handleToggleTrashSelect}
-                onRestoreOne={handleRequestRestoreOne}
-                canPermanentlyDelete={canPermanentlyDelete}
-                onPermanentlyDeleteOne={handleRequestPermanentDeleteOne}
-              />
-            </>
+            <ResponsiveList
+              listId="repair-case-trash"
+              table={
+                <RepairCaseTrashTable
+                  rows={trashCases}
+                  selectedIds={trashSelectedIds}
+                  onToggleSelect={handleToggleTrashSelect}
+                  onRestoreOne={handleRequestRestoreOne}
+                  canPermanentlyDelete={canPermanentlyDelete}
+                  onPermanentlyDeleteOne={handleRequestPermanentDeleteOne}
+                />
+              }
+              cards={
+                <RepairCaseTrashCardList
+                  rows={trashCases}
+                  selectedIds={trashSelectedIds}
+                  onToggleSelect={handleToggleTrashSelect}
+                  onRestoreOne={handleRequestRestoreOne}
+                  canPermanentlyDelete={canPermanentlyDelete}
+                  onPermanentlyDeleteOne={handleRequestPermanentDeleteOne}
+                />
+              }
+            />
           )}
         </>
       ) : (
@@ -625,21 +631,28 @@ export default function RepairCaseListPage({
                 </div>
               ) : (
                 <>
-                  <RepairCaseTable
-                    rows={pagedRows}
-                    sort={sort}
-                    onSortChange={handleSortChange}
-                    selectionMode={isDeleteMode}
-                    selectedIds={selectedIds}
-                    selectableIds={selectableIds}
-                    onToggleSelect={handleToggleSelect}
-                  />
-                  <RepairCaseCardList
-                    rows={pagedRows}
-                    selectionMode={isDeleteMode}
-                    selectedIds={selectedIds}
-                    selectableIds={selectableIds}
-                    onToggleSelect={handleToggleSelect}
+                  <ResponsiveList
+                    listId="repair-cases"
+                    table={
+                      <RepairCaseTable
+                        rows={pagedRows}
+                        sort={sort}
+                        onSortChange={handleSortChange}
+                        selectionMode={isDeleteMode}
+                        selectedIds={selectedIds}
+                        selectableIds={selectableIds}
+                        onToggleSelect={handleToggleSelect}
+                      />
+                    }
+                    cards={
+                      <RepairCaseCardList
+                        rows={pagedRows}
+                        selectionMode={isDeleteMode}
+                        selectedIds={selectedIds}
+                        selectableIds={selectableIds}
+                        onToggleSelect={handleToggleSelect}
+                      />
+                    }
                   />
                   <Pagination
                     page={currentPage}
