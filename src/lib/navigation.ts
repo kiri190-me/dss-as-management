@@ -5,7 +5,6 @@ import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
 import { canViewRepairCaseFlowcharts } from "@/lib/auth/repair-case-flowchart-authorization";
 import { canViewCustomers } from "@/lib/auth/customer-authorization";
 import { canViewProductModels } from "@/lib/auth/product-model-authorization";
-import { canManageExcelImports } from "@/lib/auth/excel-import-authorization";
 import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 
 export type NavItem = {
@@ -37,7 +36,6 @@ export const navItems: NavItem[] = [
   { key: "users", href: "/users", label: "사용자 관리" },
   { key: "customers", href: "/customers", label: "고객사 관리", isVisibleForRole: canViewCustomers },
   { key: "productModels", href: "/product-models", label: "제품 모델 관리", isVisibleForRole: canViewProductModels },
-  { key: "repairCaseExcelImport", href: "/excel-imports/repair-cases", label: "수리품 목록 Excel 이관", isVisibleForRole: canManageExcelImports },
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차", isVisibleForRole: canViewPublishedTechnicalTemplates },
   { key: "inventory", href: "/inventory", label: "재고 관리", isVisibleForRole: canViewInventory },
   { key: "settings", href: "/settings", label: "시스템 설정" },
@@ -88,5 +86,5 @@ export type NavGroup = {
 export const navGroups: NavGroup[] = [
   { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
   { key: "techResources", label: "기술 / 자원", itemKeys: ["technicalProcedures", "inventory"] },
-  { key: "admin", label: "관리", itemKeys: ["users", "customers", "productModels", "repairCaseExcelImport", "settings"] },
+  { key: "admin", label: "관리", itemKeys: ["users", "customers", "productModels", "settings"] },
 ];

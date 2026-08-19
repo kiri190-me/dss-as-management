@@ -45,7 +45,7 @@ test("navigation: the approved feature entries are the only role-gated items", (
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["customers", "diagnosisFlowcharts", "inventory", "myActiveWork", "productModels", "repairCaseExcelImport", "technicalProcedures", "workflows"]
+    ["customers", "diagnosisFlowcharts", "inventory", "myActiveWork", "productModels", "technicalProcedures", "workflows"]
   );
 });
 
@@ -117,15 +117,6 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER / SALES see the p
   assert.equal(filterNavItemsForRole(navItems, "INVENTORY_MANAGER").some((i) => i.key === "productModels"), false);
 });
 
-test("filterNavItemsForRole: only SUPER_ADMIN and ADMIN see the Repair Case Excel Import entry", () => {
-  for (const role of ["SUPER_ADMIN", "ADMIN"] as const) {
-    assert.ok(filterNavItemsForRole(navItems, role).some((i) => i.key === "repairCaseExcelImport"));
-  }
-  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
-    assert.equal(filterNavItemsForRole(navItems, role).some((i) => i.key === "repairCaseExcelImport"), false);
-  }
-});
-
 /**
  * Checkpoint 2A — navGroups is a pure presentation grouping over navItems
  * (Sidebar's collapsible sections). "dashboard" is deliberately excluded
@@ -153,16 +144,17 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / 관리 stru
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
   assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
-  assert.deepEqual(byKey.get("admin")?.itemKeys, ["users", "customers", "productModels", "repairCaseExcelImport", "settings"]);
+  assert.deepEqual(byKey.get("admin")?.itemKeys, ["users", "customers", "productModels", "settings"]);
 });
 
 test("filterNavItemsForRole: unrestricted items remain visible to every role", () => {
   const hiddenCountByRole: Record<string, number> = {
     SUPER_ADMIN: 1, // myActiveWork
     ADMIN: 1, // myActiveWork
-    AS_ENGINEER: 1, // repairCaseExcelImport
-    SALES: 4, // myActiveWork + technicalProcedures + repairCaseExcelImport + workflows
-    INVENTORY_MANAGER: 6, // myActiveWork + technicalProcedures + customers + productModels + repairCaseExcelImport + workflows
+    // Excel 이관 메뉴가 사라지면서 역할별로 감춰지는 항목이 하나씩 줄었다.
+    AS_ENGINEER: 0,
+    SALES: 3, // myActiveWork + technicalProcedures + workflows
+    INVENTORY_MANAGER: 5, // myActiveWork + technicalProcedures + customers + productModels + workflows
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);

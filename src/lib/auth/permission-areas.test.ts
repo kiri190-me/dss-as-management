@@ -14,7 +14,6 @@ import { navItems } from "@/lib/navigation";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 import { canViewCustomers, canEditCustomers } from "./customer-authorization";
-import { canManageExcelImports } from "./excel-import-authorization";
 import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
@@ -107,7 +106,6 @@ test("지금 되돌리기 어려운 조작을 할 수 있으면 상한이 관리
   for (const role of ROLE_CODES) {
     if (canProcessPartRequests(role)) assertCeilingAllows("inventory", role, "MANAGE", "부품 요청 처리");
     if (canPublishWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "MANAGE", "워크플로 발행");
-    if (canManageExcelImports(role)) assertCeilingAllows("repairCaseExcelImport", role, "MANAGE", "Excel 이관");
   }
 });
 
@@ -119,9 +117,6 @@ test("지금 못 보는 화면은 상한이 접근 불가다", () => {
     }
     if (!canViewMyActiveWork(role)) {
       assert.equal(baselinePermissionLevel("myActiveWork", role), "NONE", `${role} 내 담당 제품`);
-    }
-    if (!canManageExcelImports(role)) {
-      assert.equal(baselinePermissionLevel("repairCaseExcelImport", role), "NONE", `${role} Excel 이관`);
     }
   }
 });

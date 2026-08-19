@@ -380,7 +380,6 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "myActiveWork",
   "repairCaseNew",
   "excelKyosanIntakeList",
-  "repairCaseExcelImport",
   "settings",
 ]);
 

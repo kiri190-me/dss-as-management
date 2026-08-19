@@ -147,12 +147,6 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "WRITE",
   },
   {
-    key: "repairCaseExcelImport",
-    label: "수리품 목록 Excel 이관",
-    description: "과거 Excel 자료의 일괄 반입",
-    maxMeaningfulLevel: "MANAGE",
-  },
-  {
     key: "technicalProcedures",
     label: "기술 작업 절차",
     description: "작업 절차 문서. 쓰기는 초안 편집, 관리는 발행·보관",

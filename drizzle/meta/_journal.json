@@ -309,6 +309,13 @@
       "when": 1787112402931,
       "tag": "0043_complex_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787115394408,
+      "tag": "0044_strong_surge",
+      "breakpoints": true
     }
   ]
 }

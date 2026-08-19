@@ -15,7 +15,6 @@ import {
   canEditEndUserContact,
   canRemoveEndUserContact,
 } from "./customer-authorization";
-import { canManageExcelImports } from "./excel-import-authorization";
 import {
   canViewInventory,
   canCreateOrEditPart,
@@ -172,9 +171,6 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
 
     case "productModels":
       return ladder({ write: canEditProductModels(role), read: canViewProductModels(role) });
-
-    case "repairCaseExcelImport":
-      return canManageExcelImports(role) ? "MANAGE" : "NONE";
 
     case "technicalProcedures":
       return ladder({
