@@ -14,6 +14,11 @@ import {
   canIssuePartRequest,
   canRejectPartRequest,
   canPartiallyCloseRequest,
+  isRequestHoldable,
+  isRequestHoldReleasable,
+  statusAfterHoldRelease,
+  isRequestIssuable,
+  isRequestRejectable,
 } from "./inventory-authorization";
 import type { Role } from "@/lib/domain/types";
 
@@ -135,4 +140,38 @@ test("locked-case exception is scoped correctly: cancel/reject/partial-close nev
   assert.equal(canCancelOwnRequest("AS_ENGINEER", { isOwnRequest: true, status: "PENDING" }), true);
   assert.equal(canRejectPartRequest("INVENTORY_MANAGER", { status: "PENDING", issuedQuantityAcrossItems: 0 }), true);
   assert.equal(canPartiallyCloseRequest("INVENTORY_MANAGER", { status: "PARTIALLY_ISSUED", issuedQuantityAcrossItems: 3, remainingQuantityAcrossItems: 2 }), true);
+});
+
+// ────────────────────────────────────────────────────────────────── 보류
+
+test("보류는 아직 끝나지 않은 요청에만 걸린다", () => {
+  assert.equal(isRequestHoldable({ status: "PENDING" }), true);
+  assert.equal(isRequestHoldable({ status: "PARTIALLY_ISSUED" }), true);
+  // 끝난 요청에는 멈출 것이 없다.
+  assert.equal(isRequestHoldable({ status: "FULLY_ISSUED" }), false);
+  assert.equal(isRequestHoldable({ status: "PARTIALLY_CLOSED" }), false);
+  assert.equal(isRequestHoldable({ status: "REJECTED" }), false);
+  assert.equal(isRequestHoldable({ status: "CANCELLED" }), false);
+  // 이미 보류 중인 것을 또 보류하는 것도 뜻이 없다.
+  assert.equal(isRequestHoldable({ status: "ON_HOLD" }), false);
+});
+
+test("보류 중에는 불출도 거절도 막힌다", () => {
+  // 따로 조건을 넣지 않았다 — 두 술어의 상태 목록에 ON_HOLD가 없어서 저절로
+  // 막힌다. 이 테스트는 그 사실이 우연이 아니라 의도임을 고정한다.
+  assert.equal(isRequestIssuable({ status: "ON_HOLD" }), false);
+  assert.equal(isRequestRejectable({ status: "ON_HOLD", issuedQuantityAcrossItems: 0 }), false);
+});
+
+test("해제는 보류 중일 때만 된다", () => {
+  assert.equal(isRequestHoldReleasable({ status: "ON_HOLD" }), true);
+  assert.equal(isRequestHoldReleasable({ status: "PENDING" }), false);
+  assert.equal(isRequestHoldReleasable({ status: "PARTIALLY_ISSUED" }), false);
+});
+
+test("해제하면 나간 수량에 따라 돌아갈 상태가 정해진다", () => {
+  // 보류 직전 상태를 저장하지 않는 이유다 — 그 사이 불출이 일어났다면 옛 상태로
+  // 되돌리는 것이 오히려 틀린 답이 된다.
+  assert.equal(statusAfterHoldRelease({ issuedQuantityAcrossItems: 0 }), "PENDING");
+  assert.equal(statusAfterHoldRelease({ issuedQuantityAcrossItems: 3 }), "PARTIALLY_ISSUED");
 });

@@ -269,6 +269,19 @@ export default function PartRequestSection({
                   <span className="font-medium text-zinc-800 dark:text-zinc-200">{inventoryPartRequestStatusLabels[request.status]}</span>
                   <span className="text-zinc-500 dark:text-zinc-400">{new Date(request.createdAt).toLocaleString("ko-KR")}</span>
                 </div>
+                {/* 보류 사유 — 관리자가 왜 멈춰 뒀는지 요청자가 여기서 본다.
+                    이걸 보여 주지 않으면 같은 요청을 다시 올리거나 담당자를
+                    찾아다니게 된다. */}
+                {request.hold && (
+                  <div className="mt-1 rounded-md bg-violet-50 px-2 py-1.5 dark:bg-violet-950/40">
+                    <p className="font-medium text-violet-900 dark:text-violet-200">보류 사유</p>
+                    <p className="mt-0.5 text-violet-900 dark:text-violet-200">{request.hold.reason}</p>
+                    <p className="mt-0.5 text-[11px] text-violet-700/70 dark:text-violet-300/70">
+                      {request.hold.heldByName} · {new Date(request.hold.heldAt).toLocaleString("ko-KR")}
+                    </p>
+                  </div>
+                )}
+
                 <ul className="mt-1 flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-300">
                   {request.items.map((item) => (
                     <li key={item.id}>

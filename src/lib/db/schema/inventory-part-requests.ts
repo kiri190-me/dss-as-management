@@ -31,6 +31,9 @@ export const inventoryPartRequestStatusEnum = pgEnum("inventory_part_request_sta
   "PARTIALLY_CLOSED",
   "REJECTED",
   "CANCELLED",
+  // 보류 — 종료 상태가 아니다. 해제하면 보류 직전 상태(불출된 것이 있으면
+  // PARTIALLY_ISSUED, 없으면 PENDING)로 돌아간다.
+  "ON_HOLD",
 ]);
 
 export const inventoryPartRequestActionTypeEnum = pgEnum("inventory_part_request_action_type", [
@@ -39,6 +42,8 @@ export const inventoryPartRequestActionTypeEnum = pgEnum("inventory_part_request
   "REJECTED",
   "CANCELLED",
   "PARTIALLY_CLOSED",
+  "HELD",
+  "HOLD_RELEASED",
 ]);
 
 export const inventoryPartRequestIdempotencyOperationEnum = pgEnum("inventory_part_request_idempotency_operation", [
@@ -47,6 +52,8 @@ export const inventoryPartRequestIdempotencyOperationEnum = pgEnum("inventory_pa
   "CANCEL",
   "REJECT",
   "PARTIALLY_CLOSE",
+  "HOLD",
+  "RELEASE_HOLD",
 ]);
 
 /**
@@ -213,9 +220,17 @@ export const inventoryPartRequestHistory = pgTable(
       "inventory_part_request_history_issue_linkage_consistent",
       sql`(${table.actionType} = 'ISSUED') = (${table.requestIssueId} IS NOT NULL)`
     ),
+    // 이름을 바꾼 이유: 보류(HELD)도 사유가 필수인데 종료 동작이 아니다.
+    // 옛 이름(_for_terminal_actions)은 이제 사실이 아니게 된다.
+    //
+    // action_type을 text로 캐스팅해 비교하는 이유: Postgres는 ALTER TYPE ...
+    // ADD VALUE로 방금 추가한 enum 값을 **같은 트랜잭션 안에서** 쓰지 못한다.
+    // 이 제약은 'HELD'를 참조하는데 그 값이 바로 위 문장에서 추가되므로,
+    // enum 리터럴로 두면 마이그레이션이 "unsafe use of new value"로 실패한다.
+    // text 비교는 의미가 같으면서 그 제한에 걸리지 않는다.
     check(
-      "inventory_part_request_history_reason_required_for_terminal_actions",
-      sql`${table.actionType} NOT IN ('REJECTED', 'CANCELLED', 'PARTIALLY_CLOSED') OR (${table.reason} IS NOT NULL AND btrim(${table.reason}) <> '')`
+      "inventory_part_request_history_reason_required_actions",
+      sql`${table.actionType}::text NOT IN ('REJECTED', 'CANCELLED', 'PARTIALLY_CLOSED', 'HELD') OR (${table.reason} IS NOT NULL AND btrim(${table.reason}) <> '')`
     ),
     index("inventory_part_request_history_request_id_idx").on(table.requestId),
     index("inventory_part_request_history_created_at_idx").on(table.createdAt),

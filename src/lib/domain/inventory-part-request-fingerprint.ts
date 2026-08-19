@@ -41,10 +41,16 @@ export type RequestActionFingerprintPayload = {
   reason: string; // already trimmed, already validated non-blank
 };
 
+/** 사유 없이 요청만 가리키는 조작 — 보류 해제가 그렇다. */
+export type RequestOnlyFingerprintPayload = {
+  requestId: string;
+};
+
 export type FingerprintPayload =
   | { operationType: "CREATE_REQUEST"; payload: CreateRequestFingerprintPayload }
   | { operationType: "ISSUE"; payload: IssueFingerprintPayload }
-  | { operationType: "CANCEL" | "REJECT" | "PARTIALLY_CLOSE"; payload: RequestActionFingerprintPayload };
+  | { operationType: "CANCEL" | "REJECT" | "PARTIALLY_CLOSE" | "HOLD"; payload: RequestActionFingerprintPayload }
+  | { operationType: "RELEASE_HOLD"; payload: RequestOnlyFingerprintPayload };
 
 function canonicalJson(input: FingerprintPayload): string {
   switch (input.operationType) {
@@ -69,10 +75,16 @@ function canonicalJson(input: FingerprintPayload): string {
     case "CANCEL":
     case "REJECT":
     case "PARTIALLY_CLOSE":
+    case "HOLD":
       return JSON.stringify({
         operationType: input.operationType,
         requestId: input.payload.requestId,
         reason: input.payload.reason,
+      });
+    case "RELEASE_HOLD":
+      return JSON.stringify({
+        operationType: input.operationType,
+        requestId: input.payload.requestId,
       });
   }
 }

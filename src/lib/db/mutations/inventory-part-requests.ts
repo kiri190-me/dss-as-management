@@ -11,6 +11,9 @@ import {
   isRequestIssuable,
   isRequestRejectable,
   isRequestPartiallyClosable,
+  isRequestHoldable,
+  isRequestHoldReleasable,
+  statusAfterHoldRelease,
 } from "@/lib/auth/inventory-authorization";
 import { computeRequestFingerprint } from "@/lib/domain/inventory-part-request-fingerprint";
 import {
@@ -584,6 +587,155 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
       await finalizeIdempotencySuccess(tx, input.idempotencyKey, request.id, snapshot);
 
       return { ok: true, requestId: request.id, requestIssueId: issueEvent.id, status: newStatus };
+    });
+  } catch (err) {
+    if (err instanceof InventoryPartRequestMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 요청 보류 / 해제 (HOLD / RELEASE_HOLD — privileged roles) ----
+
+/**
+ * ============================================================================
+ * 보류
+ * ============================================================================
+ * "지금은 처리하지 않는다"를 사유와 함께 남겨 두는 중간 상태다. 보류 중에는
+ * 불출도 거절도 되지 않는다 — 그 판정은 따로 넣지 않았고, isRequestIssuable /
+ * isRequestRejectable이 상태 목록에 ON_HOLD를 포함하지 않으므로 저절로 막힌다.
+ * 다시 처리하려면 먼저 해제해야 한다.
+ *
+ * 엔지니어의 취소도 같은 이유로 막힌다(isRequestCancellable은 PENDING만 본다).
+ * 보류된 요청을 접고 싶으면 관리자가 해제한 뒤 취소하거나 거절하면 된다.
+ *
+ * 사유는 history.reason에 남긴다 — 거절·취소와 같은 자리이고, DB의 CHECK
+ * 제약이 비어 있는 사유를 거부한다. 엔지니어는 접수 건 상세에서 이 사유를 본다.
+ * ============================================================================
+ */
+export type HoldPartRequestInput = { requestId: string; reason: string; actorUserId: string; idempotencyKey: string };
+
+export async function holdPartRequest(input: HoldPartRequestInput): Promise<RequestActionResult> {
+  const reasonCheck = validateRequiredReason(input.reason);
+  if (!reasonCheck.ok) return { ok: false, code: "INVALID_INPUT", message: reasonCheck.message };
+
+  const fingerprint = computeRequestFingerprint({
+    operationType: "HOLD",
+    payload: { requestId: input.requestId, reason: reasonCheck.reason },
+  });
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+
+      const claim = await claimOrReplayIdempotency<{ requestId: string; status: InventoryPartRequestStatus }>(tx, {
+        idempotencyKey: input.idempotencyKey,
+        actorUserId: actor.id,
+        operationType: "HOLD",
+        fingerprint,
+      });
+      if (claim.state === "REPLAY") return { ok: true, requestId: claim.snapshot.requestId, status: claim.snapshot.status };
+      if (claim.state !== "CLAIMED") failOnNonClaimState(claim.state);
+
+      const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
+      if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
+
+      if (!isRequestHoldable({ status: request.status })) {
+        fail("NOT_ISSUABLE", "보류할 수 있는 상태가 아닙니다.");
+      }
+      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
+        fail("FORBIDDEN", "요청을 보류할 권한이 없습니다.");
+      }
+
+      await tx
+        .update(inventoryPartRequests)
+        .set({ status: "ON_HOLD", version: request.version + 1, updatedAt: new Date() })
+        .where(eq(inventoryPartRequests.id, request.id));
+
+      await tx.insert(inventoryPartRequestHistory).values({
+        requestId: request.id,
+        actionType: "HELD",
+        beforeState: { status: request.status },
+        afterState: { status: "ON_HOLD" },
+        reason: reasonCheck.reason,
+        actorUserId: actor.id,
+      });
+
+      const snapshot = { requestId: request.id, status: "ON_HOLD" as const };
+      await finalizeIdempotencySuccess(tx, input.idempotencyKey, request.id, snapshot);
+
+      return { ok: true, requestId: request.id, status: "ON_HOLD" };
+    });
+  } catch (err) {
+    if (err instanceof InventoryPartRequestMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 보류 해제.
+ *
+ * 돌아갈 상태는 저장해 둔 값이 아니라 지금 나간 수량에서 다시 구한다
+ * (statusAfterHoldRelease) — 보류 직전 상태를 적어 두면 그 사이 사정이 달라졌을
+ * 때 실제와 어긋난다.
+ *
+ * 사유는 받지 않는다. 보류는 왜 멈추는지가 남아야 하지만, 푸는 것은 "다시
+ * 진행한다"는 뜻뿐이라 적을 것이 없다. 누가 언제 풀었는지는 이력에 남는다.
+ */
+export type ReleasePartRequestHoldInput = { requestId: string; actorUserId: string; idempotencyKey: string };
+
+export async function releasePartRequestHold(input: ReleasePartRequestHoldInput): Promise<RequestActionResult> {
+  const fingerprint = computeRequestFingerprint({
+    operationType: "RELEASE_HOLD",
+    payload: { requestId: input.requestId },
+  });
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+
+      const claim = await claimOrReplayIdempotency<{ requestId: string; status: InventoryPartRequestStatus }>(tx, {
+        idempotencyKey: input.idempotencyKey,
+        actorUserId: actor.id,
+        operationType: "RELEASE_HOLD",
+        fingerprint,
+      });
+      if (claim.state === "REPLAY") return { ok: true, requestId: claim.snapshot.requestId, status: claim.snapshot.status };
+      if (claim.state !== "CLAIMED") failOnNonClaimState(claim.state);
+
+      const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
+      if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
+
+      if (!isRequestHoldReleasable({ status: request.status })) {
+        fail("NOT_ISSUABLE", "보류 중인 요청이 아닙니다.");
+      }
+      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
+        fail("FORBIDDEN", "보류를 해제할 권한이 없습니다.");
+      }
+
+      const items = await tx
+        .select({ issuedQuantity: inventoryPartRequestItems.issuedQuantity })
+        .from(inventoryPartRequestItems)
+        .where(eq(inventoryPartRequestItems.requestId, request.id));
+      const totalIssued = items.reduce((sum, item) => sum + item.issuedQuantity, 0);
+      const nextStatus = statusAfterHoldRelease({ issuedQuantityAcrossItems: totalIssued });
+
+      await tx
+        .update(inventoryPartRequests)
+        .set({ status: nextStatus, version: request.version + 1, updatedAt: new Date() })
+        .where(eq(inventoryPartRequests.id, request.id));
+
+      await tx.insert(inventoryPartRequestHistory).values({
+        requestId: request.id,
+        actionType: "HOLD_RELEASED",
+        beforeState: { status: request.status },
+        afterState: { status: nextStatus },
+        actorUserId: actor.id,
+      });
+
+      const snapshot = { requestId: request.id, status: nextStatus };
+      await finalizeIdempotencySuccess(tx, input.idempotencyKey, request.id, snapshot);
+
+      return { ok: true, requestId: request.id, status: nextStatus };
     });
   } catch (err) {
     if (err instanceof InventoryPartRequestMutationError) return err.result;

@@ -93,6 +93,9 @@ export const INVENTORY_PART_REQUEST_STATUS_CODES = [
   "PARTIALLY_CLOSED",
   "REJECTED",
   "CANCELLED",
+  // 보류(2026-08-19 승인) — 종료 상태가 아니다. 관리자가 "지금은 처리하지
+  // 않는다"고 표시해 둔 중간 상태이고, 해제하면 보류 직전 상태로 돌아간다.
+  "ON_HOLD",
 ] as const;
 export type InventoryPartRequestStatus = (typeof INVENTORY_PART_REQUEST_STATUS_CODES)[number];
 export const inventoryPartRequestStatusLabels: Record<InventoryPartRequestStatus, string> = {
@@ -102,6 +105,7 @@ export const inventoryPartRequestStatusLabels: Record<InventoryPartRequestStatus
   PARTIALLY_CLOSED: "부분 불출 종료",
   REJECTED: "거절",
   CANCELLED: "취소",
+  ON_HOLD: "보류",
 };
 
 export const INVENTORY_PART_REQUEST_TERMINAL_STATUSES: readonly InventoryPartRequestStatus[] = [
@@ -111,7 +115,15 @@ export const INVENTORY_PART_REQUEST_TERMINAL_STATUSES: readonly InventoryPartReq
   "CANCELLED",
 ];
 
-export const INVENTORY_PART_REQUEST_ACTION_TYPE_CODES = ["SUBMITTED", "ISSUED", "REJECTED", "CANCELLED", "PARTIALLY_CLOSED"] as const;
+export const INVENTORY_PART_REQUEST_ACTION_TYPE_CODES = [
+  "SUBMITTED",
+  "ISSUED",
+  "REJECTED",
+  "CANCELLED",
+  "PARTIALLY_CLOSED",
+  "HELD",
+  "HOLD_RELEASED",
+] as const;
 export type InventoryPartRequestActionType = (typeof INVENTORY_PART_REQUEST_ACTION_TYPE_CODES)[number];
 export const inventoryPartRequestActionTypeLabels: Record<InventoryPartRequestActionType, string> = {
   SUBMITTED: "요청 제출",
@@ -119,6 +131,8 @@ export const inventoryPartRequestActionTypeLabels: Record<InventoryPartRequestAc
   REJECTED: "거절",
   CANCELLED: "취소",
   PARTIALLY_CLOSED: "부분 불출 종료",
+  HELD: "보류",
+  HOLD_RELEASED: "보류 해제",
 };
 
 export const INVENTORY_PART_REQUEST_IDEMPOTENCY_OPERATION_CODES = [
@@ -127,5 +141,7 @@ export const INVENTORY_PART_REQUEST_IDEMPOTENCY_OPERATION_CODES = [
   "CANCEL",
   "REJECT",
   "PARTIALLY_CLOSE",
+  "HOLD",
+  "RELEASE_HOLD",
 ] as const;
 export type InventoryPartRequestIdempotencyOperation = (typeof INVENTORY_PART_REQUEST_IDEMPOTENCY_OPERATION_CODES)[number];

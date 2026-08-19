@@ -6,6 +6,14 @@ import InventoryTabs from "./InventoryTabs";
 import IssuePartRequestDialog from "./IssuePartRequestDialog";
 import RejectPartRequestDialog from "./RejectPartRequestDialog";
 import PartiallyCloseRequestDialog from "./PartiallyCloseRequestDialog";
+import HoldPartRequestDialog from "./HoldPartRequestDialog";
+import { releasePartRequestHoldAction } from "@/lib/server/actions/inventory-part-requests";
+import { generateClientUuid } from "@/lib/client-uuid";
+import { useRouter } from "next/navigation";
+import {
+  isRequestHoldable,
+  isRequestHoldReleasable,
+} from "@/lib/auth/inventory-authorization";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
 import {
   INVENTORY_PART_REQUEST_STATUS_CODES,
@@ -15,7 +23,7 @@ import {
 } from "@/lib/domain/inventory-types";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 
-type DialogAction = "ISSUE" | "REJECT" | "PARTIALLY_CLOSE";
+type DialogAction = "ISSUE" | "REJECT" | "PARTIALLY_CLOSE" | "HOLD";
 type DialogState = { requestId: string; action: DialogAction } | null;
 
 /**
@@ -29,6 +37,9 @@ const statusBadgeClass: Record<InventoryPartRequestStatus, string> = {
   PARTIALLY_CLOSED: "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200",
   REJECTED: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   CANCELLED: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+  // 보류는 "멈춰 있다"가 한눈에 보여야 한다 — 대기(주황)와 헷갈리면 처리해야
+  // 할 것으로 착각한다.
+  ON_HOLD: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
 };
 
 /**
@@ -58,6 +69,10 @@ function availableActions(request: ManagerPartRequestRow): DialogAction[] {
   if (request.status === "PARTIALLY_ISSUED" && totalIssued > 0 && totalRemaining > 0) {
     actions.push("PARTIALLY_CLOSE");
   }
+  // 보류는 아직 끝나지 않은 요청에만 건다. 보류 중에는 위의 조작들이 상태
+  // 조건에서 이미 걸러지므로(ON_HOLD는 어느 목록에도 없다) 여기 남는 것은
+  // '보류 해제'뿐이다 — 그건 별도 버튼이라 이 목록에 넣지 않는다.
+  if (isRequestHoldable({ status: request.status })) actions.push("HOLD");
   return actions;
 }
 
@@ -78,6 +93,7 @@ const actionLabels: Record<DialogAction, string> = {
   ISSUE: "불출",
   REJECT: "거절",
   PARTIALLY_CLOSE: "부분 불출 종료",
+  HOLD: "보류",
 };
 
 /** 부품 요청 관리 — SUPER_ADMIN/ADMIN/INVENTORY_MANAGER only (server-gated in page.tsx; SALES and AS_ENGINEER never reach this screen). */
@@ -90,6 +106,23 @@ export default function PartRequestManagerScreen({
 }) {
   const [statusFilter, setStatusFilter] = useState<InventoryPartRequestStatus | "ALL">("ALL");
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
+  const router = useRouter();
+
+  /**
+   * 보류 해제는 사유를 받지 않으므로 다이얼로그 없이 바로 부른다 — 푸는 것은
+   * "다시 진행한다"는 뜻뿐이라 적을 것이 없다.
+   */
+  async function releaseHold(requestId: string) {
+    if (releasingId) return;
+    setReleasingId(requestId);
+    const result = await releasePartRequestHoldAction({
+      requestId,
+      idempotencyKey: generateClientUuid(),
+    });
+    setReleasingId(null);
+    if (result.ok) router.refresh();
+  }
 
   const balancesMap = useMemo(() => new Map(Object.entries(balancesByPartId)), [balancesByPartId]);
 
@@ -132,11 +165,24 @@ export default function PartRequestManagerScreen({
               {filtered.length}건
             </span>
           }
-          table={<RequestTable requests={filtered} onAction={openDialog} />}
+          table={
+            <RequestTable
+              requests={filtered}
+              onAction={openDialog}
+              onReleaseHold={releaseHold}
+              releasingId={releasingId}
+            />
+          }
           cards={
             <ul className={LIST_CARD_GRID}>
               {filtered.map((request) => (
-                <RequestCard key={request.id} request={request} onAction={openDialog} />
+                <RequestCard
+                  key={request.id}
+                  request={request}
+                  onAction={openDialog}
+                  onReleaseHold={releaseHold}
+                  releasingId={releasingId}
+                />
               ))}
             </ul>
           }
@@ -153,6 +199,9 @@ export default function PartRequestManagerScreen({
       )}
       {selectedRequest && dialog?.action === "REJECT" && (
         <RejectPartRequestDialog isOpen onClose={() => setDialog(null)} requestId={selectedRequest.id} intakeNumber={selectedRequest.intakeNumber} />
+      )}
+      {selectedRequest && dialog?.action === "HOLD" && (
+        <HoldPartRequestDialog isOpen onClose={() => setDialog(null)} requestId={selectedRequest.id} intakeNumber={selectedRequest.intakeNumber} />
       )}
       {selectedRequest && dialog?.action === "PARTIALLY_CLOSE" && (
         <PartiallyCloseRequestDialog isOpen onClose={() => setDialog(null)} requestId={selectedRequest.id} intakeNumber={selectedRequest.intakeNumber} />
@@ -181,6 +230,22 @@ function ModelSerial({ modelName, serialNumber }: { modelName: string; serialNum
         <dd className="break-all text-zinc-600 dark:text-zinc-300">{serialNumber}</dd>
       </div>
     </dl>
+  );
+}
+
+/**
+ * 보류 사유. 관리자 화면에도 보여 준다 — 다른 사람이 보류해 둔 것을 보고
+ * "왜 멈춰 있는지" 이력을 뒤지게 하지 않기 위해서다.
+ */
+function HoldReason({ hold }: { hold: ManagerPartRequestRow["hold"] }) {
+  if (!hold) return null;
+  return (
+    <div className="rounded-md bg-violet-50 px-2 py-1.5 text-[11px] dark:bg-violet-950/40">
+      <p className="text-violet-900 dark:text-violet-200">{hold.reason}</p>
+      <p className="mt-0.5 text-violet-700/70 dark:text-violet-300/70">
+        {hold.heldByName} · {formatRequestedAt(hold.heldAt)}
+      </p>
+    </div>
   );
 }
 
@@ -270,13 +335,32 @@ function RequestItems({ items }: { items: ManagerPartRequestRow["items"] }) {
 function ActionButtons({
   request,
   onAction,
+  onReleaseHold,
+  releasing,
   size,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
+  onReleaseHold: (requestId: string) => void;
+  releasing: boolean;
   size: "card" | "table";
 }) {
   const actions = availableActions(request);
+
+  // 보류 중이면 할 수 있는 것은 해제뿐이다.
+  if (isRequestHoldReleasable({ status: request.status })) {
+    return (
+      <button
+        type="button"
+        disabled={releasing}
+        onClick={() => onReleaseHold(request.id)}
+        className="rounded-md border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
+      >
+        {releasing ? "처리 중..." : "보류 해제"}
+      </button>
+    );
+  }
+
   if (actions.length === 0) {
     return <span className="text-xs text-zinc-400 dark:text-zinc-500">처리할 것 없음</span>;
   }
@@ -293,7 +377,9 @@ function ActionButtons({
               ? "bg-zinc-900 font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
               : action === "REJECT"
                 ? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-                : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                : action === "HOLD"
+                  ? "border border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
+                  : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           }`}
         >
           {actionLabels[action]}
@@ -306,9 +392,13 @@ function ActionButtons({
 function RequestCard({
   request,
   onAction,
+  onReleaseHold,
+  releasingId,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
+  onReleaseHold: (requestId: string) => void;
+  releasingId: string | null;
 }) {
   return (
     <li className="flex flex-col rounded-lg border border-zinc-200 bg-white focus-within:ring-2 focus-within:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900">
@@ -341,12 +431,18 @@ function RequestCard({
         </p>
       </div>
 
+      {request.hold && (
+        <div className="px-3 pb-2">
+          <HoldReason hold={request.hold} />
+        </div>
+      )}
+
       <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
         <RequestItems items={request.items} />
       </div>
 
       <div className="mt-auto border-t border-zinc-200 p-3 dark:border-zinc-800">
-        <ActionButtons request={request} onAction={onAction} size="card" />
+        <ActionButtons request={request} onAction={onAction} onReleaseHold={onReleaseHold} releasing={releasingId === request.id} size="card" />
       </div>
     </li>
   );
@@ -356,9 +452,13 @@ function RequestCard({
 function RequestTable({
   requests,
   onAction,
+  onReleaseHold,
+  releasingId,
 }: {
   requests: ManagerPartRequestRow[];
   onAction: (requestId: string, action: DialogAction) => void;
+  onReleaseHold: (requestId: string) => void;
+  releasingId: string | null;
 }) {
   return (
       <table className="w-full min-w-[64rem] text-sm">
@@ -399,11 +499,18 @@ function RequestTable({
               <td className="w-[22rem] px-3 py-2">
                 <RequestItems items={request.items} />
               </td>
-              <td className="whitespace-nowrap px-3 py-2">
-                <StatusBadge status={request.status} />
+              <td className="px-3 py-2">
+                <div className="flex flex-col gap-1">
+                  <StatusBadge status={request.status} />
+                  {request.hold && (
+                    <div className="max-w-[16rem]">
+                      <HoldReason hold={request.hold} />
+                    </div>
+                  )}
+                </div>
               </td>
               <td className="px-3 py-2">
-                <ActionButtons request={request} onAction={onAction} size="table" />
+                <ActionButtons request={request} onAction={onAction} onReleaseHold={onReleaseHold} releasing={releasingId === request.id} size="table" />
               </td>
             </tr>
           ))}

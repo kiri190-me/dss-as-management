@@ -186,6 +186,32 @@ export function isRequestRejectable(ctx: {
   return ctx.status === "PENDING" && ctx.issuedQuantityAcrossItems === 0;
 }
 
+/**
+ * 보류할 수 있는 상태인가 — 아직 끝나지 않았고, 이미 보류 중도 아닐 때만.
+ *
+ * 보류는 "지금은 처리하지 않는다"는 표시다. 이미 끝난 요청에는 걸 것이 없고,
+ * 보류 중인 것을 또 보류하는 것도 뜻이 없다.
+ */
+export function isRequestHoldable(ctx: { status: InventoryPartRequestStatus }): boolean {
+  return ctx.status === "PENDING" || ctx.status === "PARTIALLY_ISSUED";
+}
+
+/** 보류를 풀 수 있는 상태인가 — 보류 중일 때만. */
+export function isRequestHoldReleasable(ctx: { status: InventoryPartRequestStatus }): boolean {
+  return ctx.status === "ON_HOLD";
+}
+
+/**
+ * 보류를 풀면 돌아갈 상태.
+ *
+ * 보류 직전 상태를 따로 저장하지 않는다. 저장해 두면 그 사이 불출이 일어났을 때
+ * 옛 상태로 되돌아가 실제와 어긋난다 — 나간 수량에서 다시 구하는 편이 언제나
+ * 맞다(불출된 것이 있으면 일부 불출, 없으면 요청 대기).
+ */
+export function statusAfterHoldRelease(ctx: { issuedQuantityAcrossItems: number }): InventoryPartRequestStatus {
+  return ctx.issuedQuantityAcrossItems > 0 ? "PARTIALLY_ISSUED" : "PENDING";
+}
+
 /** 부분 마감할 수 있는 상태인가 — 일부는 나갔고 일부는 남아 있을 때만. */
 export function isRequestPartiallyClosable(ctx: {
   status: InventoryPartRequestStatus;

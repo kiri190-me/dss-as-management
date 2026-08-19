@@ -88,6 +88,60 @@ async function attachItemsWithAvailability(requestIds: string[]): Promise<Map<st
 
 // ---- 부품 요청 관리 (inventory-manager list) ----
 
+/**
+ * 지금 걸려 있는 보류의 사유·누가·언제.
+ *
+ * 보류 사유는 요청 표에 컬럼으로 두지 않고 이력(history)에 남긴다 — 거절·취소
+ * 사유와 같은 자리이고, 보류가 여러 번 반복돼도 그 때마다의 사유가 그대로
+ * 남는다. 화면에 보여 줄 "지금" 사유는 그중 가장 최근 HELD 항목이다.
+ */
+export type PartRequestHoldInfo = {
+  reason: string;
+  heldByName: string;
+  heldAt: string;
+};
+
+/**
+ * 요청 여러 건의 최근 HELD 이력을 한 번에 읽는다.
+ *
+ * 상태가 ON_HOLD가 아닌 요청에도 과거 HELD 이력이 남아 있을 수 있으므로,
+ * 부르는 쪽이 상태를 보고 붙일지 말지 정한다 — 여기서 상태까지 보지 않는 이유는
+ * 이력 조회와 상태 판정을 한 함수에 섞으면 나중에 "왜 사유가 안 보이지"를
+ * 두 곳에서 찾게 되기 때문이다.
+ */
+async function loadLatestHoldByRequest(requestIds: string[]): Promise<Map<string, PartRequestHoldInfo>> {
+  if (requestIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      requestId: inventoryPartRequestHistory.requestId,
+      reason: inventoryPartRequestHistory.reason,
+      actorName: users.name,
+      createdAt: inventoryPartRequestHistory.createdAt,
+    })
+    .from(inventoryPartRequestHistory)
+    .innerJoin(users, eq(inventoryPartRequestHistory.actorUserId, users.id))
+    .where(
+      and(
+        inArray(inventoryPartRequestHistory.requestId, requestIds),
+        eq(inventoryPartRequestHistory.actionType, "HELD")
+      )
+    )
+    .orderBy(desc(inventoryPartRequestHistory.createdAt));
+
+  const latest = new Map<string, PartRequestHoldInfo>();
+  for (const row of rows) {
+    // 내림차순이므로 처음 만나는 것이 가장 최근이다.
+    if (latest.has(row.requestId)) continue;
+    latest.set(row.requestId, {
+      reason: row.reason ?? "",
+      heldByName: row.actorName,
+      heldAt: row.createdAt.toISOString(),
+    });
+  }
+  return latest;
+}
+
 export type ManagerPartRequestRow = {
   id: string;
   createdAt: string;
@@ -110,6 +164,8 @@ export type ManagerPartRequestRow = {
   requestedByName: string;
   /** false (never locked) when the case no longer exists — there's nothing left to lock, and every mutation that actually cares (issuePartRequest) independently re-verifies repairCaseId itself rather than trusting this display flag. */
   isCaseLocked: boolean;
+  /** 상태가 보류일 때만 채워진다. 왜 멈춰 있는지가 목록에서 바로 보여야 한다. */
+  hold: PartRequestHoldInfo | null;
   items: PartRequestItemRow[];
 };
 
@@ -149,8 +205,10 @@ export async function getPartRequestsForManager(): Promise<ManagerPartRequestRow
     .orderBy(desc(inventoryPartRequests.createdAt));
 
   const itemsByRequest = await attachItemsWithAvailability(rows.map((r) => r.id));
+  const holdByRequest = await loadLatestHoldByRequest(rows.map((r) => r.id));
 
   return rows.map((r) => ({
+    hold: r.status === "ON_HOLD" ? (holdByRequest.get(r.id) ?? null) : null,
     id: r.id,
     createdAt: r.createdAt.toISOString(),
     status: r.status,
@@ -175,6 +233,13 @@ export type OwnPartRequestRow = {
   status: InventoryPartRequestStatus;
   note: string | null;
   version: number;
+  /**
+   * 상태가 보류일 때만 채워진다.
+   *
+   * 요청을 올린 엔지니어가 접수 건 상세에서 이걸 본다 — 관리자가 왜 멈춰 뒀는지
+   * 모르면 같은 요청을 다시 올리거나 담당자를 찾아다니게 된다.
+   */
+  hold: PartRequestHoldInfo | null;
   items: PartRequestItemRow[];
 };
 
@@ -192,6 +257,7 @@ export async function getOwnPartRequestsForCase(repairCaseId: string, requestedB
     .orderBy(desc(inventoryPartRequests.createdAt));
 
   const itemsByRequest = await attachItemsWithAvailability(rows.map((r) => r.id));
+  const holdByRequest = await loadLatestHoldByRequest(rows.map((r) => r.id));
 
   return rows.map((r) => ({
     id: r.id,
@@ -199,6 +265,7 @@ export async function getOwnPartRequestsForCase(repairCaseId: string, requestedB
     status: r.status,
     note: r.note,
     version: r.version,
+    hold: r.status === "ON_HOLD" ? (holdByRequest.get(r.id) ?? null) : null,
     items: itemsByRequest.get(r.id) ?? [],
   }));
 }

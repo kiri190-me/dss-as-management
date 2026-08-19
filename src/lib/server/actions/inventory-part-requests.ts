@@ -11,6 +11,8 @@ import {
   type CreatePartRequestResult,
   type RequestActionResult,
   type IssuePartRequestResult,
+  holdPartRequest,
+  releasePartRequestHold,
 } from "@/lib/db/mutations/inventory-part-requests";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 
@@ -127,6 +129,48 @@ export async function issuePartRequestAction(input: {
       requestId: input.requestId,
       allocations: input.allocations,
       note: input.note ?? null,
+      actorUserId: actorCheck.userId,
+      idempotencyKey: input.idempotencyKey,
+    })
+  );
+}
+
+/**
+ * 보류 / 보류 해제.
+ *
+ * 다른 요청 조작과 같은 층위의 일만 한다 — 세션, 형식 검증, 오류 은닉. 상태
+ * 전이 가능 여부·권한·사유 필수는 mutation이 DB를 다시 읽어 판정한다.
+ */
+export async function holdPartRequestAction(input: {
+  requestId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<RequestActionResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.requestId) || !isValidUuid(input.idempotencyKey)) return IDEMPOTENCY_KEY_FIELD_ERROR;
+
+  return withErrorRedaction("holdPartRequestAction", () =>
+    holdPartRequest({
+      requestId: input.requestId,
+      reason: input.reason,
+      actorUserId: actorCheck.userId,
+      idempotencyKey: input.idempotencyKey,
+    })
+  );
+}
+
+export async function releasePartRequestHoldAction(input: {
+  requestId: string;
+  idempotencyKey: string;
+}): Promise<RequestActionResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.requestId) || !isValidUuid(input.idempotencyKey)) return IDEMPOTENCY_KEY_FIELD_ERROR;
+
+  return withErrorRedaction("releasePartRequestHoldAction", () =>
+    releasePartRequestHold({
+      requestId: input.requestId,
       actorUserId: actorCheck.userId,
       idempotencyKey: input.idempotencyKey,
     })

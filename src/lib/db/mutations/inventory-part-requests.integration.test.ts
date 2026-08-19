@@ -28,6 +28,8 @@ import {
   rejectPartRequest,
   partiallyCloseRequest,
   issuePartRequest,
+  holdPartRequest,
+  releasePartRequestHold,
 } from "./inventory-part-requests";
 import { getOwnPartRequestsForCase } from "../queries/inventory-part-requests";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
@@ -894,11 +896,11 @@ describe("history linkage constraints", () => {
     assert.ok(caught, "expected the raw insert to be rejected by the DB CHECK constraint");
     const cause = caught instanceof Error ? caught.cause : undefined;
     const combinedMessage = `${caught instanceof Error ? caught.message : String(caught)} ${cause instanceof Error ? cause.message : ""}`;
-    // Postgres truncates constraint identifiers over 63 bytes — the full
-    // name "..._reason_required_for_terminal_actions" is cut to
-    // "..._reason_required_for_terminal_act", so match the guaranteed-
-    // untruncated prefix rather than the full name.
-    assert.match(combinedMessage, /reason_required_for_terminal_act/i);
+    // 제약 이름이 2026-08-19에 바뀌었다: 보류(HELD)도 사유가 필수가 되면서
+    // "_for_terminal_actions"가 더 이상 사실이 아니게 됐다(보류는 종료가
+    // 아니다). Postgres가 63바이트를 넘는 식별자를 자르므로 잘리지 않는 앞부분만
+    // 맞춰 본다.
+    assert.match(combinedMessage, /reason_required_action/i);
   });
 });
 
@@ -1075,5 +1077,157 @@ describe("real-data safety", () => {
       realPartsCountBaseline,
       "the non-test-prefixed part count must be unchanged from this suite's own before() baseline — this suite never asserts it's zero, since real parts may legitimately already exist in a shared dev DB"
     );
+  });
+});
+
+describe("보류 / 보류 해제", () => {
+  async function createPendingRequest() {
+    const partId = await createTestPart();
+    const created = await createTestCase();
+    const result = await createPartRequest({
+      repairCaseId: created.id,
+      items: [{ partId, quantity: 3, owner: "DSS" }],
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("setup failed");
+    return result.requestId;
+  }
+
+  async function statusOf(requestId: string) {
+    const [row] = await db
+      .select({ status: inventoryPartRequests.status })
+      .from(inventoryPartRequests)
+      .where(eq(inventoryPartRequests.id, requestId));
+    return row?.status ?? null;
+  }
+
+  test("보류하면 상태가 ON_HOLD가 되고 사유가 이력에 남는다", async () => {
+    const requestId = await createPendingRequest();
+
+    const held = await holdPartRequest({
+      requestId,
+      reason: "고객 확인 대기 중",
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(held.ok, true, JSON.stringify(held));
+    assert.equal(await statusOf(requestId), "ON_HOLD");
+
+    const history = await db
+      .select({ actionType: inventoryPartRequestHistory.actionType, reason: inventoryPartRequestHistory.reason })
+      .from(inventoryPartRequestHistory)
+      .where(eq(inventoryPartRequestHistory.requestId, requestId));
+    const heldEntry = history.find((h) => h.actionType === "HELD");
+    assert.ok(heldEntry, "HELD 이력이 남아야 한다");
+    assert.equal(heldEntry.reason, "고객 확인 대기 중");
+  });
+
+  test("사유 없이 보류할 수 없다", async () => {
+    const requestId = await createPendingRequest();
+    const result = await holdPartRequest({
+      requestId,
+      reason: "   ",
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(await statusOf(requestId), "PENDING", "거절됐으면 상태가 그대로여야 한다");
+  });
+
+  test("보류 중에는 불출도 거절도 막힌다", async () => {
+    const requestId = await createPendingRequest();
+    await holdPartRequest({ requestId, reason: "잠시 멈춤", actorUserId: inventoryManagerId, idempotencyKey: randomUUID() });
+
+    const rejected = await rejectPartRequest({
+      requestId,
+      reason: "그냥 거절",
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(rejected.ok, false, "보류 중에는 거절되지 않아야 한다");
+
+    const issued = await issuePartRequest({
+      requestId,
+      allocations: [],
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(issued.ok, false, "보류 중에는 불출되지 않아야 한다");
+
+    assert.equal(await statusOf(requestId), "ON_HOLD");
+  });
+
+  test("해제하면 나간 것이 없으므로 요청 대기로 돌아가고, 다시 처리할 수 있다", async () => {
+    const requestId = await createPendingRequest();
+    await holdPartRequest({ requestId, reason: "확인 필요", actorUserId: inventoryManagerId, idempotencyKey: randomUUID() });
+
+    const released = await releasePartRequestHold({
+      requestId,
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(released.ok, true, JSON.stringify(released));
+    assert.equal(await statusOf(requestId), "PENDING");
+
+    // 해제 후에는 다시 처리된다 — 보류가 영구 차단이 아니라는 것이 요점이다.
+    const rejected = await rejectPartRequest({
+      requestId,
+      reason: "확인 결과 불필요",
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected));
+    assert.equal(await statusOf(requestId), "REJECTED");
+  });
+
+  test("보류 중이 아닌 요청은 해제할 수 없다", async () => {
+    const requestId = await createPendingRequest();
+    const result = await releasePartRequestHold({
+      requestId,
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(await statusOf(requestId), "PENDING");
+  });
+
+  test("엔지니어는 보류할 수 없다 — 요청 처리 권한이 필요하다", async () => {
+    const requestId = await createPendingRequest();
+    const result = await holdPartRequest({
+      requestId,
+      reason: "내가 멈추겠다",
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(await statusOf(requestId), "PENDING");
+  });
+
+  test("보류 사유는 요청을 올린 엔지니어의 화면 자료에 담겨 나간다", async () => {
+    const partId = await createTestPart();
+    const created = await createTestCase();
+    const createdRequest = await createPartRequest({
+      repairCaseId: created.id,
+      items: [{ partId, quantity: 2, owner: "DSS" }],
+      actorUserId: engineerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(createdRequest.ok, true);
+    if (!createdRequest.ok) return;
+
+    await holdPartRequest({
+      requestId: createdRequest.requestId,
+      reason: "부품 입고 지연",
+      actorUserId: inventoryManagerId,
+      idempotencyKey: randomUUID(),
+    });
+
+    const own = await getOwnPartRequestsForCase(created.id, engineerId);
+    const row = own.find((r) => r.id === createdRequest.requestId);
+    assert.ok(row, "요청이 조회돼야 한다");
+    assert.equal(row.status, "ON_HOLD");
+    assert.equal(row.hold?.reason, "부품 입고 지연", "엔지니어가 사유를 볼 수 있어야 한다");
   });
 });
