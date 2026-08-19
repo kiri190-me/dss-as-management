@@ -8,6 +8,7 @@ import { db, pgClient } from "../connection";
 import { parts, rolePermissions, users } from "../schema";
 import { saveRolePermissions } from "./role-permissions";
 import { createPart } from "./inventory";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { PERMISSION_LEAF_KEYS } from "@/lib/auth/permission-features";
 import { baselineLeafLevel } from "@/lib/auth/permission-baseline";
 import type { PermissionLevel } from "@/lib/auth/permission-areas";
@@ -237,6 +238,38 @@ test("설정으로 넓히면 실제로 그 조작이 열린다 — 영업의 부
   if (allowed.ok) {
     await db.delete(parts).where(eq(parts.id, allowed.partId));
   }
+});
+
+test("한 노드 안에서 쓰기와 관리가 갈린다 — End-User 등록 vs 이름 변경", async () => {
+  // 이 구분이 하위 기능 권한을 만든 계기다. 메뉴 하나에 수준 하나만 붙이던
+  // 시절에는 "고객사 = 읽기+쓰기"가 곧 이름 변경 허용이었다.
+  assert.equal(baselineLeafLevel("customers.endUsers", "SALES"), "WRITE");
+
+  // 기본 상태: 영업은 등록은 되고 이름 변경은 안 된다.
+  assert.equal(await hasPermission("SALES", "customers.endUsers", "WRITE"), true);
+  assert.equal(await hasPermission("SALES", "customers.endUsers", "MANAGE"), false);
+
+  // 최고관리자가 영업에게 이름 변경까지 열어 준다.
+  const widened = await saveRolePermissions({
+    changes: [{ role: "SALES", levels: { "customers.endUsers": "MANAGE" } }],
+    actorUserId: superAdminId,
+  });
+  assert.equal(widened.ok, true);
+  assert.equal(await hasPermission("SALES", "customers.endUsers", "MANAGE"), true);
+});
+
+test("좁히면 그 노드의 위쪽 수준만 닫힌다 — 담당자 삭제만 회수", async () => {
+  assert.equal(baselineLeafLevel("customers.contacts", "AS_ENGINEER"), "WRITE");
+
+  // 엔지니어는 원래 추가·수정만 되고 삭제는 안 된다. 관리자가 추가·수정까지
+  // 회수하면 그 노드가 통째로 닫힌다 — 조회는 customers.view가 따로 맡는다.
+  const narrowed = await saveRolePermissions({
+    changes: [{ role: "AS_ENGINEER", levels: { "customers.contacts": "NONE" } }],
+    actorUserId: adminId,
+  });
+  assert.equal(narrowed.ok, true);
+  assert.equal(await hasPermission("AS_ENGINEER", "customers.contacts", "WRITE"), false);
+  assert.equal(await hasPermission("AS_ENGINEER", "customers.view", "READ"), true);
 });
 
 test("모든 역할의 모든 잎에 대해 기본값 그대로 저장하면 행이 하나도 생기지 않는다", async () => {

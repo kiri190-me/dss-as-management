@@ -3,13 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import {
-  canAddEndUserContact,
-  canCreateEndUser,
-  canEditEndUserContact,
-  canRemoveEndUserContact,
-  canRenameEndUser,
-} from "@/lib/auth/customer-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   isValidCustomerId,
   isValidEndUserContactId,
@@ -79,7 +73,7 @@ export async function createEndUserAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!canCreateEndUser(auth.actingUser.role)) {
+  if (!(await hasPermission(auth.actingUser.role, "customers.endUsers", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidCustomerId(input.customerId)) {
@@ -111,7 +105,8 @@ export async function renameEndUserAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!canRenameEndUser(auth.actingUser.role)) {
+  // 등록(쓰기)보다 한 단계 위다 — 이 구분이 하위 기능 권한을 만든 계기다.
+  if (!(await hasPermission(auth.actingUser.role, "customers.endUsers", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserId(input.endUserId)) {
@@ -155,7 +150,7 @@ export async function createEndUserContactAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!canAddEndUserContact(auth.actingUser.role)) {
+  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserId(input.endUserId)) {
@@ -192,7 +187,7 @@ export async function updateEndUserContactAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!canEditEndUserContact(auth.actingUser.role)) {
+  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserContactId(input.contactId)) {
@@ -236,7 +231,8 @@ export async function removeEndUserContactAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!canRemoveEndUserContact(auth.actingUser.role)) {
+  // 삭제는 추가·수정보다 한 단계 위다.
+  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserContactId(input.contactId)) {

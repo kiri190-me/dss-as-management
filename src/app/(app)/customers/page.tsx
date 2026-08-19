@@ -5,7 +5,7 @@ import CustomerListScreen from "@/components/customers/CustomerListScreen";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canViewCustomers } from "@/lib/auth/customer-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listCustomersWithCounts } from "@/lib/db/queries/customers";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -47,7 +47,7 @@ export default async function CustomersPage() {
     redirect("/login");
   }
 
-  if (!canViewCustomers(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customers.view", "READ"))) {
     return <PlaceholderPage title="고객사 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 

@@ -5,15 +5,8 @@ import CustomerDetailScreen from "@/components/customers/CustomerDetailScreen";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import {
-  canAddEndUserContact,
-  canCreateEndUser,
-  canEditCustomers,
-  canEditEndUserContact,
-  canRemoveEndUserContact,
-  canRenameEndUser,
-  canViewCustomers,
-} from "@/lib/auth/customer-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
+import { resolveCustomerCapabilities } from "@/lib/auth/customer-capabilities";
 import { getCustomerDetailById, listEndUserContactsByCustomerId, listEndUsersByCustomerId } from "@/lib/db/queries/customers";
 import { listRepairCasesByCustomerId } from "@/lib/db/queries/repair-cases";
 
@@ -57,7 +50,7 @@ export default async function CustomerDetailPage({
     redirect("/login");
   }
 
-  if (!canViewCustomers(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customers.view", "READ"))) {
     return <PlaceholderPage title="고객사 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -72,18 +65,20 @@ export default async function CustomerDetailPage({
     listRepairCasesByCustomerId(customer.id),
   ]);
 
+  const capabilities = await resolveCustomerCapabilities(actingUser.role);
+
   return (
     <CustomerDetailScreen
       customer={customer}
       endUsers={endUsers}
       endUserContacts={endUserContacts}
       repairCases={repairCases}
-      canEdit={canEditCustomers(actingUser.role)}
-      canCreateEndUser={canCreateEndUser(actingUser.role)}
-      canRenameEndUser={canRenameEndUser(actingUser.role)}
-      canAddEndUserContact={canAddEndUserContact(actingUser.role)}
-      canEditEndUserContact={canEditEndUserContact(actingUser.role)}
-      canRemoveEndUserContact={canRemoveEndUserContact(actingUser.role)}
+      canEdit={capabilities.edit}
+      canCreateEndUser={capabilities.createEndUser}
+      canRenameEndUser={capabilities.renameEndUser}
+      canAddEndUserContact={capabilities.editContact}
+      canEditEndUserContact={capabilities.editContact}
+      canRemoveEndUserContact={capabilities.removeContact}
     />
   );
 }

@@ -3,7 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canEditCustomers } from "@/lib/auth/customer-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   isValidCustomerId,
   isValidExpectedUpdatedAt,
@@ -58,7 +58,7 @@ export async function updateCustomerAction(
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
 
-  if (!canEditCustomers(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customers.edit", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
 

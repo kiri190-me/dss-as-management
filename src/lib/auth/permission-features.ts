@@ -340,7 +340,7 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
  * 관리자는 열어 줬다고 믿고, 사용자는 여전히 막힌 채로 서로 다른 화면을 본다.
  * ============================================================================
  */
-const SETTINGS_ENFORCED_AREAS = new Set<string>(["inventory"]);
+const SETTINGS_ENFORCED_AREAS = new Set<string>(["inventory", "customers"]);
 
 /** 이 메뉴(또는 이 잎이 속한 메뉴)의 설정이 실제 판정을 지배하는가. */
 export function isSettingsEnforced(key: string): boolean {
