@@ -278,12 +278,11 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
       return canViewRepairCaseFlowcharts(role) ? "READ" : "NONE";
     case "diagnosisFlowcharts.edit":
       return canMutateRepairCaseFlowchart(role, PERMISSIVE_CASE_LOCK) ? "WRITE" : "NONE";
-    case "diagnosisFlowcharts.manageAll":
-      return ladder({
-        manage:
-          canManageRepairCaseFlowchartsGlobally(role) || canPermanentlyDeleteRepairCaseFlowchart(role),
-        read: false,
-      });
+    case "diagnosisFlowcharts.permanentDelete":
+      // canManageRepairCaseFlowchartsGlobally를 여기 섞지 않는다 — 그 함수는
+      // canMutateRepairCaseFlowchart와 같은 역할 집합(엔지니어 포함)이라
+      // 함께 접으면 영구 삭제가 엔지니어에게 열린다.
+      return ladder({ manage: canPermanentlyDeleteRepairCaseFlowchart(role), read: false });
 
     // ── 워크플로 관리 ─────────────────────────────────────────────────────
     case "workflows.view":

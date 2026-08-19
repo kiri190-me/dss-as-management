@@ -6,7 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseFlowchartPageContext } from "@/lib/db/queries/repair-case-flowcharts";
 import { getRepairCaseFlowchartGraph } from "@/lib/db/queries/repair-case-flowchart-graph";
-import { canMutateRepairCaseFlowchart } from "@/lib/auth/repair-case-flowchart-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import CaseFlowchartEditorScreen from "@/components/repair-cases/flowchart/CaseFlowchartEditorScreen";
 
 export const metadata: Metadata = {
@@ -43,7 +43,7 @@ export default async function CaseFlowchartEditorPage({ params }: { params: Prom
     !!session &&
     session.approvalStatus === "APPROVED" &&
     !!pageContext &&
-    canMutateRepairCaseFlowchart(session.role, { isCaseLocked: pageContext.isLocked });
+    (await hasPermission(session.role, "diagnosisFlowcharts.edit", "WRITE"));
 
   return <CaseFlowchartEditorScreen repairCaseId={id} flowchart={graph.flowchart} nodes={graph.nodes} edges={graph.edges} canEdit={canEdit} />;
 }

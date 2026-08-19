@@ -149,6 +149,15 @@ test("영업·재고 담당자는 진단 흐름도를 편집할 수 없다", () 
   assert.equal(baselineLeafLevel("diagnosisFlowcharts.edit", "AS_ENGINEER"), "WRITE");
 });
 
+test("엔지니어는 흐름도를 고칠 수 있지만 영구 삭제는 못 한다", () => {
+  // 이 둘을 한 노드에 접었다가 엔지니어에게 영구 삭제가 열린 적이 있다.
+  // canManageRepairCaseFlowchartsGlobally가 canMutateRepairCaseFlowchart와
+  // 같은 역할 집합(엔지니어 포함)인데, 더 좁은 영구 삭제와 함께 묶었던 탓이다.
+  assert.equal(baselineLeafLevel("diagnosisFlowcharts.edit", "AS_ENGINEER"), "WRITE");
+  assert.equal(baselineLeafLevel("diagnosisFlowcharts.permanentDelete", "AS_ENGINEER"), "NONE");
+  assert.equal(baselineLeafLevel("diagnosisFlowcharts.permanentDelete", "ADMIN"), "MANAGE");
+});
+
 test("출하 대표자 지정은 최고관리자만이다", () => {
   assert.equal(baselineLeafLevel("users.shipmentRepresentatives", "SUPER_ADMIN"), "MANAGE");
   for (const role of ROLE_CODES.filter((candidate) => candidate !== "SUPER_ADMIN")) {

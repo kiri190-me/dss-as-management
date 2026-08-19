@@ -147,17 +147,23 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       maxMeaningfulLevel: "READ",
     },
     edit: {
+      // '담당이 아닌 건까지'를 따로 두지 않는 이유: 지금 코드가 그 구분을 하지
+      // 않는다(canManageRepairCaseFlowchartsGlobally는 canMutateRepairCaseFlowchart를
+      // 그대로 부른다). 코드에 없는 구분을 노드로 만들면 화면이 정책을 지어내게 된다.
       label: "흐름도 편집",
       minMeaningfulLevel: "WRITE",
-      description: "흐름도의 노드와 연결선을 고칩니다.",
-      levelHints: { WRITE: "만들고 고치고 되살립니다" },
+      description: "흐름도를 만들고 고칩니다. 담당이 아닌 건도 포함합니다.",
+      levelHints: { WRITE: "만들고, 고치고, 되살립니다" },
       maxMeaningfulLevel: "WRITE",
     },
-    manageAll: {
-      label: "전체 관리·영구 삭제",
+    permanentDelete: {
+      // 편집보다 좁다 — 편집은 엔지니어까지 되지만 영구 삭제는 관리자 이상만이다.
+      // 이 둘을 한 칸에 접었다가 엔지니어에게 영구 삭제가 열리는 사고가 났고,
+      // 통합 테스트가 잡았다. 하위 기능 트리를 만든 이유가 정확히 이것이다.
+      label: "영구 삭제",
       minMeaningfulLevel: "MANAGE",
-      description: "담당이 아닌 건의 흐름도까지 손댑니다.",
-      levelHints: { MANAGE: "남의 건도 고치고, 영구 삭제합니다" },
+      description: "휴지통의 흐름도를 되돌릴 수 없게 지웁니다.",
+      levelHints: { MANAGE: "영구 삭제합니다 — 되돌릴 수 없습니다" },
       maxMeaningfulLevel: "MANAGE",
     },
   }),
@@ -346,6 +352,7 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
   "productModels",
   "workflows",
   "technicalProcedures",
+  "diagnosisFlowcharts",
 ]);
 
 /** 이 메뉴(또는 이 잎이 속한 메뉴)의 설정이 실제 판정을 지배하는가. */

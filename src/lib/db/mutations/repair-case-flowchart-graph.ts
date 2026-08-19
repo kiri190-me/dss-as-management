@@ -10,7 +10,7 @@ import {
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { loadCaseForUpdate } from "./repair-case-flowcharts";
-import { canMutateRepairCaseFlowchart } from "@/lib/auth/repair-case-flowchart-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES,
   REPAIR_CASE_FLOWCHART_BRANCH_TYPE_CODES,
@@ -135,7 +135,7 @@ async function loadFlowchartForGraphEdit(
     fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 진행할 수 있습니다.");
   }
 
-  if (!canMutateRepairCaseFlowchart(actor.role, { isCaseLocked: repairCase.isLocked })) {
+  if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 

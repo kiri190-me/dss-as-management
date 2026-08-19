@@ -7,11 +7,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listRepairCaseFlowchartsForManagement, listDeletedRepairCaseFlowchartsForManagement } from "@/lib/db/queries/repair-case-flowcharts";
 import { listRepairCasesForFlowchartCreateSelector } from "@/lib/db/queries/repair-cases";
-import {
-  canViewRepairCaseFlowcharts,
-  canManageRepairCaseFlowchartsGlobally,
-  canPermanentlyDeleteRepairCaseFlowchart,
-} from "@/lib/auth/repair-case-flowchart-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -67,12 +63,18 @@ export default async function DiagnosisFlowchartsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewRepairCaseFlowcharts(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "diagnosisFlowcharts.view", "READ"))) {
     return <PlaceholderPage title="진단 Flowchart 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
-  const canManage = canManageRepairCaseFlowchartsGlobally(actingUser.role);
-  const canPermanentlyDelete = canPermanentlyDeleteRepairCaseFlowchart(actingUser.role);
+  // 전체 관리는 편집과 같은 권한이다(코드가 둘을 구분하지 않는다). 영구 삭제는
+  // 더 좁아서 별도 노드다 — 엔지니어는 고칠 수 있어도 영구 삭제는 못 한다.
+  const canManage = await hasPermission(actingUser.role, "diagnosisFlowcharts.edit", "WRITE");
+  const canPermanentlyDelete = await hasPermission(
+    actingUser.role,
+    "diagnosisFlowcharts.permanentDelete",
+    "MANAGE"
+  );
   const [rows, trashRows, repairCaseOptions] = await Promise.all([
     listRepairCaseFlowchartsForManagement(),
     listDeletedRepairCaseFlowchartsForManagement(),
