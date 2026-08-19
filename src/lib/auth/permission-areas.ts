@@ -135,8 +135,10 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   {
     key: "customers",
     label: "고객사 관리",
-    description: "고객사·End-User·담당자 정보",
-    maxMeaningfulLevel: "WRITE",
+    // 관리 수준이 있는 이유: End-User 이름 변경과 담당자 삭제가 관리자 전용이라
+    // 쓰기와 갈린다(permission-features.ts의 customers.endUsers / .contacts).
+    description: "고객사·End-User·담당자 정보. 관리는 이름 변경·담당자 삭제",
+    maxMeaningfulLevel: "MANAGE",
   },
   {
     key: "productModels",

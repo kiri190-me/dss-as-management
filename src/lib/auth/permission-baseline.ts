@@ -1,14 +1,63 @@
 import type { Role } from "@/lib/domain/types";
-import { PERMISSION_AREAS, lowerPermissionLevel, type PermissionLevel } from "./permission-areas";
+import {
+  PERMISSION_AREAS,
+  lowerPermissionLevel,
+  permissionLevelRank,
+  type PermissionLevel,
+} from "./permission-areas";
 
-import { canViewCustomers, canEditCustomers } from "./customer-authorization";
+import {
+  canViewCustomers,
+  canEditCustomers,
+  canCreateEndUser,
+  canRenameEndUser,
+  canAddEndUserContact,
+  canEditEndUserContact,
+  canRemoveEndUserContact,
+} from "./customer-authorization";
 import { canManageExcelImports } from "./excel-import-authorization";
-import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
+import {
+  canViewInventory,
+  canCreateOrEditPart,
+  canProcessPartRequests,
+  canReceiveStock,
+  canReturnStock,
+  canUseStock,
+  canViewTransactionHistory,
+  canViewPartRequests,
+  canCreatePartRequest,
+} from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
-import { canBulkDeleteRepairCases, canRestoreRepairCases, canEditSection } from "./repair-case-edit-authorization";
+import {
+  canBulkDeleteRepairCases,
+  canRestoreRepairCases,
+  canPermanentlyDeleteRepairCases,
+  canEditSection,
+} from "./repair-case-edit-authorization";
+import {
+  canViewWorkRecords,
+  canCreateWorkRecord,
+  canInvalidateWorkRecord,
+} from "./repair-case-work-record-authorization";
+import {
+  canViewProcedureExecution,
+  canPerformOrdinaryExecutionMutation,
+  canReopenCompletedOrSkippedNode,
+} from "./procedure-case-execution-authorization";
+import {
+  canViewProcedureValidationManagement,
+  canResolveProcedureValidationIssues,
+} from "./procedure-template-authorization";
+import { canManageRolePermissions } from "./role-permission-authorization";
+import {
+  maxMeaningfulLevelOfLeaf,
+  minMeaningfulLevelOfLeaf,
+  isPermissionLeafKey,
+} from "./permission-features";
 import {
   canViewRepairCaseFlowcharts,
+  canMutateRepairCaseFlowchart,
   canManageRepairCaseFlowchartsGlobally,
   canPermanentlyDeleteRepairCaseFlowchart,
 } from "./repair-case-flowchart-authorization";
@@ -16,6 +65,7 @@ import {
   canViewPublishedTechnicalTemplates,
   canEditTechnicalTemplateDraft,
   canPublishTechnicalTemplates,
+  canManageTechnicalTemplates,
 } from "./technical-procedure-template-authorization";
 import {
   canViewWorkflowTemplates,
@@ -168,4 +218,182 @@ export function baselinePermissionMap(role: Role): Record<string, PermissionLeve
     map[area.key] = baselinePermissionLevel(area.key, role);
   }
   return map;
+}
+
+/**
+ * ============================================================================
+ * 하위 기능 노드의 상한
+ * ============================================================================
+ * 메뉴 상한과 같은 원칙이다 — 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서**
+ * 구한다. 정책이 바뀌면 상한도 저절로 따라 바뀐다.
+ *
+ * ── 맥락 인자를 받는 함수는 '가장 유리한 맥락'으로 부른다 ───────────────
+ * canCreateWorkRecord(role, ctx)처럼 맥락을 함께 보는 함수가 있다. 상한은
+ * "이 역할이 최선의 상황에서 할 수 있는 최대치"여야 하므로, 잠기지 않았고
+ * 본인이 담당인 맥락을 넣어 역할 부분만 뽑는다.
+ *
+ * 이렇게 해도 권한이 새지 않는다. 실제 판정에서는 그 함수가 **진짜 맥락으로
+ * 다시 불린다** — 이 트리는 "누가"만 정하고, "언제"는 종전대로 그 함수가 정한다.
+ * 담당이 아닌 엔지니어는 상한이 쓰기여도 남의 건에는 여전히 기록을 못 남긴다.
+ * ============================================================================
+ */
+
+/** 잠기지 않았고, 본인이 담당이고, 대상이 존재하는 맥락. 위 주석 참조. */
+const PERMISSIVE_WORK_RECORD = { isAssignedToCase: true, isCaseLocked: false } as const;
+const PERMISSIVE_CASE_LOCK = { isCaseLocked: false } as const;
+const PERMISSIVE_USE_STOCK = { hasRepairCase: true, isCaseLocked: false } as const;
+const PERMISSIVE_ASSIGNMENT = { effectiveAssigneeId: "self", actorUserId: "self" } as const;
+
+function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
+  switch (leafKey) {
+    // ── 전체 A/S 현황 ─────────────────────────────────────────────────────
+    case "repairCases.view":
+      // 역할 검사 없음 — 로그인한 사람은 모두 목록을 본다.
+      return "READ";
+    case "repairCases.edit":
+      return canEditAnyRepairCaseSection(role) ? "WRITE" : "NONE";
+    case "repairCases.workRecords":
+      return ladder({
+        manage: canInvalidateWorkRecord(role, PERMISSIVE_CASE_LOCK),
+        write: canCreateWorkRecord(role, PERMISSIVE_WORK_RECORD),
+        read: canViewWorkRecords(role),
+      });
+    case "repairCases.lifecycle":
+      return ladder({
+        manage:
+          canBulkDeleteRepairCases(role) ||
+          canRestoreRepairCases(role) ||
+          canPermanentlyDeleteRepairCases(role),
+        read: false,
+      });
+    case "repairCases.procedureExecution":
+      return ladder({
+        manage: canReopenCompletedOrSkippedNode(role),
+        write: canPerformOrdinaryExecutionMutation(role, PERMISSIVE_ASSIGNMENT),
+        read: canViewProcedureExecution(role),
+      });
+
+    // ── 진단 Flowchart 관리 ───────────────────────────────────────────────
+    case "diagnosisFlowcharts.view":
+      return canViewRepairCaseFlowcharts(role) ? "READ" : "NONE";
+    case "diagnosisFlowcharts.edit":
+      return canMutateRepairCaseFlowchart(role, PERMISSIVE_CASE_LOCK) ? "WRITE" : "NONE";
+    case "diagnosisFlowcharts.manageAll":
+      return ladder({
+        manage:
+          canManageRepairCaseFlowchartsGlobally(role) || canPermanentlyDeleteRepairCaseFlowchart(role),
+        read: false,
+      });
+
+    // ── 워크플로 관리 ─────────────────────────────────────────────────────
+    case "workflows.view":
+      return canViewWorkflowTemplates(role) ? "READ" : "NONE";
+    case "workflows.editDraft":
+      return canEditWorkflowTemplates(role) ? "WRITE" : "NONE";
+    case "workflows.publish":
+      return ladder({ manage: canPublishWorkflowTemplates(role), read: false });
+
+    // ── 사용자 관리 ───────────────────────────────────────────────────────
+    case "users.view":
+      // 역할 검사 없음 — 지금은 로그인한 누구나 계정 목록을 본다.
+      return "READ";
+    case "users.shipmentRepresentatives":
+      // shipment-representatives.ts가 최고관리자만 통과시킨다.
+      return ladder({ manage: role === "SUPER_ADMIN", read: false });
+    case "users.rolePermissions":
+      // 고정 노드다(permission-features.ts의 fixed). 설정으로 바꿀 수 없고,
+      // 여기서는 화면에 표시할 현재 값을 알려 주기 위해서만 계산한다.
+      return ladder({ manage: canManageRolePermissions(role), read: false });
+
+    // ── 고객사 관리 ───────────────────────────────────────────────────────
+    case "customers.view":
+      return canViewCustomers(role) ? "READ" : "NONE";
+    case "customers.edit":
+      return ladder({ write: canEditCustomers(role), read: canViewCustomers(role) });
+    case "customers.endUsers":
+      // 등록(영업까지)과 이름 변경(관리자만)이 갈린다 — 쓰기/관리로 나눠 담는다.
+      return ladder({
+        manage: canRenameEndUser(role),
+        write: canCreateEndUser(role),
+        read: canViewCustomers(role),
+      });
+    case "customers.contacts":
+      // 추가·수정(영업까지)과 삭제(관리자만)가 갈린다.
+      return ladder({
+        manage: canRemoveEndUserContact(role),
+        write: canAddEndUserContact(role) || canEditEndUserContact(role),
+        read: canViewCustomers(role),
+      });
+
+    // ── 제품 모델 관리 ────────────────────────────────────────────────────
+    case "productModels.view":
+      return canViewProductModels(role) ? "READ" : "NONE";
+    case "productModels.edit":
+      return ladder({ write: canEditProductModels(role), read: canViewProductModels(role) });
+
+    // ── 기술 작업 절차 ────────────────────────────────────────────────────
+    case "technicalProcedures.view":
+      return canViewPublishedTechnicalTemplates(role) ? "READ" : "NONE";
+    case "technicalProcedures.editDraft":
+      return ladder({
+        write: canEditTechnicalTemplateDraft(role),
+        read: canViewPublishedTechnicalTemplates(role),
+      });
+    case "technicalProcedures.publish":
+      return ladder({
+        manage: canPublishTechnicalTemplates(role) || canManageTechnicalTemplates(role),
+        read: false,
+      });
+    case "technicalProcedures.validation":
+      return ladder({
+        write: canResolveProcedureValidationIssues(role),
+        read: canViewProcedureValidationManagement(role),
+      });
+
+    // ── 재고 관리 ─────────────────────────────────────────────────────────
+    case "inventory.view":
+      return canViewInventory(role) ? "READ" : "NONE";
+    case "inventory.parts":
+      return ladder({ write: canCreateOrEditPart(role), read: canViewInventory(role) });
+    case "inventory.stock":
+      return ladder({
+        write: canReceiveStock(role) || canReturnStock(role) || canUseStock(role, PERMISSIVE_USE_STOCK),
+        read: canViewInventory(role),
+      });
+    case "inventory.history":
+      return canViewTransactionHistory(role) ? "READ" : "NONE";
+    case "inventory.requests":
+      return ladder({
+        write: canCreatePartRequest(role, PERMISSIVE_CASE_LOCK),
+        read: canViewPartRequests(role),
+      });
+    case "inventory.requestProcessing":
+      return ladder({ manage: canProcessPartRequests(role), read: false });
+
+    default:
+      // 트리에 없는 키는 열어 주지 않는다. 노드를 permission-features.ts에만
+      // 추가하고 여기를 빠뜨리면 조용히 전원 허용되는 편보다 낫다.
+      return "NONE";
+  }
+}
+
+/**
+ * 이 역할이 이 잎에서 가질 수 있는 가장 높은 수준.
+ *
+ * 하위 기능이 없는 메뉴는 잎이 메뉴 자체이므로 메뉴 상한을 그대로 쓴다.
+ */
+export function baselineLeafLevel(leafKey: string, role: Role): PermissionLevel {
+  if (!isPermissionLeafKey(leafKey)) return "NONE";
+  if (!leafKey.includes(".")) return baselinePermissionLevel(leafKey, role);
+
+  const clamped = lowerPermissionLevel(rawLeafBaseline(leafKey, role), maxMeaningfulLevelOfLeaf(leafKey));
+
+  // 최소 의미 수준에 못 미치면 그 기능은 이 역할에게 없는 것이다. 예를 들어
+  // '고객사 정보 수정'은 쓰기부터 의미가 있으므로, 보기만 되는 역할에게는
+  // 읽기가 아니라 접근 불가다 — 보는 일은 같은 메뉴의 '고객사 조회'가 맡는다.
+  // 여기서 읽기로 남겨 두면 화면에 고를 수 없는 값이 표시된다.
+  if (permissionLevelRank(clamped) < permissionLevelRank(minMeaningfulLevelOfLeaf(leafKey))) {
+    return "NONE";
+  }
+  return clamped;
 }
