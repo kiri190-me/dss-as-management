@@ -6,11 +6,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listTechnicalProcedureTemplates } from "@/lib/db/queries/procedure-templates";
 import { redirect } from "next/navigation";
-import {
-  canViewPublishedTechnicalTemplates,
-  canViewAllTechnicalTemplateStatuses,
-  canManageTechnicalTemplates,
-} from "@/lib/auth/technical-procedure-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -41,11 +37,14 @@ export default async function TechnicalProceduresPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewPublishedTechnicalTemplates(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "technicalProcedures.view", "READ"))) {
     return <PlaceholderPage title="기술 작업 절차" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
-  const templates = await listTechnicalProcedureTemplates(canViewAllTechnicalTemplateStatuses(actingUser.role));
+  // 초안까지 보이는 것과 초안을 고칠 수 있는 것은 같은 권한이다 — 볼 수 없는
+  // 초안을 고칠 수는 없고, 고칠 수 있는데 안 보이면 화면이 쓸모없다.
+  const mayEditDraft = await hasPermission(actingUser.role, "technicalProcedures.editDraft", "WRITE");
+  const templates = await listTechnicalProcedureTemplates(mayEditDraft);
 
-  return <TechnicalProcedureTemplateListScreen templates={templates} canCreate={canManageTechnicalTemplates(actingUser.role)} />;
+  return <TechnicalProcedureTemplateListScreen templates={templates} canCreate={mayEditDraft} />;
 }

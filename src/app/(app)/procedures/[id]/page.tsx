@@ -10,9 +10,12 @@ import { getProcedureTemplateDetail } from "@/lib/db/queries/procedure-templates
 import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
-  canViewProcedureValidationManagement,
 } from "@/lib/auth/procedure-template-authorization";
-import { canActorEditTemplateOfCategory, canActorCreateDraftVersionOfCategory } from "@/lib/auth/technical-procedure-template-authorization";
+import {
+  mayEditTemplateOfCategory,
+  mayCreateDraftVersionOfCategory,
+} from "@/lib/auth/technical-procedure-capabilities";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 
 export const metadata: Metadata = {
   title: "기술 절차 템플릿 상세 | DSS A/S 관리 시스템",
@@ -69,9 +72,9 @@ export default async function ProcedureTemplateDetailPage({
     <Suspense fallback={null}>
       <ProcedureTemplateDetailScreen
         template={template}
-        canManageValidation={canViewProcedureValidationManagement(actingUser.role)}
-        canCreateDraftVersion={canActorCreateDraftVersionOfCategory(actingUser.role, template.category)}
-        canEditDraft={canActorEditTemplateOfCategory(actingUser.role, template.category)}
+        canManageValidation={await hasPermission(actingUser.role, "technicalProcedures.validation", "READ")}
+        canCreateDraftVersion={await mayCreateDraftVersionOfCategory(actingUser.role, template.category)}
+        canEditDraft={await mayEditTemplateOfCategory(actingUser.role, template.category)}
       />
     </Suspense>
   );

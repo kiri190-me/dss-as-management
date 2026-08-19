@@ -9,7 +9,7 @@ import {
   procedureValidationResolutionHistory,
   users,
 } from "../schema";
-import { canResolveProcedureValidationIssues } from "@/lib/auth/procedure-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { ProcedureBranchType, ProcedureValidationResolutionActionType } from "@/lib/domain/procedure-template-types";
 import type { ExtractedValidationIssueRawEvidence } from "../../../../scripts/lib/xlsx/types";
 import type { Role } from "@/lib/domain/types";
@@ -109,7 +109,7 @@ export async function bindValidationIssueEdge(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canResolveProcedureValidationIssues(actor.role)) {
+      if (!(await hasPermission(actor.role, "technicalProcedures.validation", "WRITE"))) {
         fail("FORBIDDEN", "검증 이슈 해결 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
       if (!input.resolutionNote || input.resolutionNote.trim().length === 0) {
@@ -254,7 +254,7 @@ export async function resolveValidationIssueWithoutGraphChange(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canResolveProcedureValidationIssues(actor.role)) {
+      if (!(await hasPermission(actor.role, "technicalProcedures.validation", "WRITE"))) {
         fail("FORBIDDEN", "검증 이슈 해결 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
       if (!input.resolutionNote || input.resolutionNote.trim().length === 0) {
@@ -326,7 +326,7 @@ export async function reopenValidationIssue(issueId: string, actorUserId: string
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canResolveProcedureValidationIssues(actor.role)) {
+      if (!(await hasPermission(actor.role, "technicalProcedures.validation", "WRITE"))) {
         fail("FORBIDDEN", "재검토 재개 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
       if (!input.note || input.note.trim().length === 0) {
@@ -396,7 +396,7 @@ export async function rollbackValidationIssueEdge(issueId: string, actorUserId: 
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canResolveProcedureValidationIssues(actor.role)) {
+      if (!(await hasPermission(actor.role, "technicalProcedures.validation", "WRITE"))) {
         fail("FORBIDDEN", "분기 되돌리기 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
       if (!input.note || input.note.trim().length === 0) {

@@ -10,7 +10,7 @@ import {
   getValidationResolutionHistory,
   listTemplateNodesForBinding,
 } from "@/lib/db/queries/procedure-validation-resolutions";
-import { canViewProcedureValidationManagement, canResolveProcedureValidationIssues } from "@/lib/auth/procedure-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 
 export const metadata: Metadata = {
   title: "검증 이슈 상세 | DSS A/S 관리 시스템",
@@ -37,7 +37,7 @@ export default async function ProcedureValidationIssueDetailPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewProcedureValidationManagement(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "technicalProcedures.validation", "READ"))) {
     return <PlaceholderPage title="검증 이슈 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -56,7 +56,7 @@ export default async function ProcedureValidationIssueDetailPage({
       issue={issue}
       history={history}
       nodeOptions={nodeOptions}
-      canResolve={canResolveProcedureValidationIssues(actingUser.role)}
+      canResolve={await hasPermission(actingUser.role, "technicalProcedures.validation", "WRITE")}
     />
   );
 }

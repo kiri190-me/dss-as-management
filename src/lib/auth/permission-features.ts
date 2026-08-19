@@ -345,6 +345,7 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
   "customers",
   "productModels",
   "workflows",
+  "technicalProcedures",
 ]);
 
 /** 이 메뉴(또는 이 잎이 속한 메뉴)의 설정이 실제 판정을 지배하는가. */

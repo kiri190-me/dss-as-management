@@ -14,7 +14,10 @@ import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
 } from "@/lib/auth/procedure-template-authorization";
-import { canActorEditTemplateOfCategory, canActorCreateDraftVersionOfCategory } from "@/lib/auth/technical-procedure-template-authorization";
+import {
+  mayEditTemplateOfCategory,
+  mayCreateDraftVersionOfCategory,
+} from "@/lib/auth/technical-procedure-capabilities";
 
 export const metadata: Metadata = {
   title: "기술 절차 편집기 | DSS A/S 관리 시스템",
@@ -101,7 +104,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
               게시된 템플릿은 직접 편집할 수 없습니다. 편집하려면 새 DRAFT 버전을 만드세요 — 원본은 그대로 유지됩니다.
             </p>
           </div>
-          {canActorCreateDraftVersionOfCategory(actingUser.role, template.category) ? (
+          {(await mayCreateDraftVersionOfCategory(actingUser.role, template.category)) ? (
             <CreateDraftVersionButton templateId={template.id} />
           ) : (
             <span className="text-xs text-zinc-400 dark:text-zinc-600">새 버전 작성 권한이 없습니다.</span>
@@ -112,7 +115,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   }
 
   // status === "DRAFT" from here on.
-  const canEdit = canActorEditTemplateOfCategory(actingUser.role, template.category);
+  const canEdit = await mayEditTemplateOfCategory(actingUser.role, template.category);
   const [historyView, comparison] = await Promise.all([getProcedureTemplateHistoryView(template.id), compareDraftWithParent(template.id)]);
 
   return (

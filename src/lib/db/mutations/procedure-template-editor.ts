@@ -14,10 +14,10 @@ import {
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import {
-  canManageTechnicalTemplates,
-  canActorEditTemplateOfCategory,
-  canActorManageTechnicalTemplateGraph,
-} from "@/lib/auth/technical-procedure-template-authorization";
+  mayEditTemplateOfCategory,
+  mayManageTemplateGraph,
+  mayEnterTemplateEditor,
+} from "@/lib/auth/technical-procedure-capabilities";
 import {
   validateProcedureGraphStructure,
   countBySeverity,
@@ -190,7 +190,7 @@ class DetailedEditorFailure extends Error {
 async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
   const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!canActorEditTemplateOfCategory(actorRole, template.category)) {
+  if (!(await mayEditTemplateOfCategory(actorRole, template.category))) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
   }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
@@ -216,7 +216,7 @@ async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateU
 export async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
   const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!canActorManageTechnicalTemplateGraph(actorRole, template.category)) {
+  if (!(await mayManageTemplateGraph(actorRole, template.category))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
@@ -339,7 +339,7 @@ export async function requireEditor(tx: Tx, actorUserId: string) {
   // specific boundary is assertEditableDraft (or validateProcedureTemplate's
   // own inline equivalent), which runs after the template row — and
   // therefore its category — is known.
-  if (!canManageTechnicalTemplates(actor.role)) {
+  if (!(await mayEnterTemplateEditor(actor.role))) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
   }
   return actor;
@@ -893,7 +893,7 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
       // Same category-specific boundary as assertEditableDraft, duplicated
       // here because this function never calls it (validate intentionally
       // skips the expectedTemplateUpdatedAt/STALE_REVISION check).
-      if (!canActorEditTemplateOfCategory(actor.role, template.category)) {
+      if (!(await mayEditTemplateOfCategory(actor.role, template.category))) {
         fail("FORBIDDEN", "이 템플릿을 검증할 권한이 없습니다.");
       }
       if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 검증할 수 있습니다.");

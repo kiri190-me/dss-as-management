@@ -6,7 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listValidationIssuesForTemplate } from "@/lib/db/queries/procedure-validation-resolutions";
-import { canViewProcedureValidationManagement } from "@/lib/auth/procedure-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 
 export const metadata: Metadata = {
   title: "검증 문제 검토 | DSS A/S 관리 시스템",
@@ -29,7 +29,7 @@ export default async function ProcedureValidationListPage({ params }: { params: 
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewProcedureValidationManagement(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "technicalProcedures.validation", "READ"))) {
     return <PlaceholderPage title="검증 문제 검토" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
