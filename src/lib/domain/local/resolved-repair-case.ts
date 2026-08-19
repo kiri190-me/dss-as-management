@@ -153,7 +153,7 @@ export function toResolvedFromLocal(
     source: "LOCAL_DEMO",
     productId: null,
     intakeNumber: localCase.intakeNumber,
-    legacyReportNumber: null,
+    legacyReportNumber: localCase.legacyReportNumber,
     workflowType: localCase.workflowType,
     status: localCase.status,
     priority: localCase.priority,

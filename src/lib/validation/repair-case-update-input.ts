@@ -40,6 +40,10 @@ export const SECTION_FIELD_NAMES = {
     // 섹션이 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다).
     "internalTargetInspectionCompletionDate",
     "internalTargetShipmentDate",
+    // 보고서번호 — A/S 접수 폼에서 수기로 받는 값이며, 접수 이후에는 이
+    // 섹션이 유일한 수정 지점이다(자동 채번이 없으므로 오기입을 고칠 곳이
+    // 반드시 필요하다).
+    "legacyReportNumber",
     "contactName",
     "contactPhone",
     "contactEmail",
@@ -222,6 +226,12 @@ export type IntakeSectionUpdateFields = Partial<{
    */
   internalTargetInspectionCompletionDate: string | null;
   customerRequestedDueDate: string | null;
+  /**
+   * 보고서번호 — 자동 채번도, 형식 규칙도, 중복 검사도 없는 수기 입력값이다
+   * (인수번호와 다르다). 선택 입력이라 빈 문자열을 제출하면 null로 지워진다
+   * (연락처 필드들과 같은 원칙).
+   */
+  legacyReportNumber: string | null;
   contactName: string | null;
   contactPhone: string | null;
   contactEmail: string | null;
@@ -325,6 +335,9 @@ export function validateIntakeSectionFields(
   if (internalTargetInspectionCompletionDate !== undefined) {
     data.internalTargetInspectionCompletionDate = internalTargetInspectionCompletionDate;
   }
+
+  const legacyReportNumber = normalizeShortText(raw, "legacyReportNumber", "보고서번호", fieldErrors);
+  if (legacyReportNumber !== undefined) data.legacyReportNumber = legacyReportNumber;
 
   const contactName = normalizeShortText(raw, "contactName", "담당자 성함", fieldErrors);
   if (contactName !== undefined) data.contactName = contactName;

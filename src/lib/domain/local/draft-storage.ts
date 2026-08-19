@@ -17,6 +17,13 @@ export type IntakeDraftData = {
   // 채워줄 수 있지만, 사용자가 이미 선택한 값은 절대 덮어쓰지 않는다
   // (IntakeFormInner.tsx의 handleWorkflowTypeChange 참고).
   billingType: BillingType | "";
+  /**
+   * 보고서번호 — 자동 채번이 없는 순수 수기 입력값이다(인수번호와 다르다).
+   * 인수번호 override는 제출 시점에만 확정되므로 초안에 담지 않지만, 이
+   * 값은 다른 일반 입력 필드들과 똑같이 초안에 남는다 — "지우기"/작성 중
+   * 이탈 경고(isDraftEmpty)가 다른 필드와 동일하게 이 값도 본다.
+   */
+  legacyReportNumber: string;
   customerId: string;
   // 고객사 콤보박스에 실제로 입력된 문자열 — customerId는 이 값이 기존
   // 고객사 이름과 일치할 때만 채워지는 "해석된" 값이다(IntakeFormInner.tsx의
@@ -77,6 +84,7 @@ export function createDefaultDraft(): IntakeDraftData {
   return {
     workflowType: "PAID_MATCHER",
     billingType: "",
+    legacyReportNumber: "",
     customerId: "",
     customerName: "",
     customerCreateNew: false,
@@ -136,6 +144,7 @@ export function isDraftEmpty(draft: IntakeDraftData): boolean {
   const defaults = createDefaultDraft();
   return (
     draft.billingType === "" &&
+    draft.legacyReportNumber === "" &&
     draft.customerId === "" &&
     draft.customerName === "" &&
     draft.customerCreateNew === false &&

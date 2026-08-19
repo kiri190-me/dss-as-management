@@ -84,6 +84,9 @@ export default function IntakeInfoEditForm({
   // 저장된 값으로 항상 프리셀렉트되고, 편집 가능하면 제출 시 항상 값이
   // 함께 전송된다(값을 비워 다시 미정 상태로 되돌리는 개념 자체가 없다).
   const [priority, setPriority] = useState<Priority>(resolved.priority);
+  // 보고서번호 — 자동 채번이 없는 수기 값이라 접수 시 오기입/미기입을 여기서
+  // 고친다. 비워서 제출하면 null로 지워진다(연락처 필드들과 같은 원칙).
+  const [legacyReportNumber, setLegacyReportNumber] = useState(resolved.legacyReportNumber ?? "");
   const [contactName, setContactName] = useState(resolved.contactName ?? "");
   const [contactPhone, setContactPhone] = useState(resolved.contactPhone ?? "");
   const [contactEmail, setContactEmail] = useState(resolved.contactEmail ?? "");
@@ -190,6 +193,7 @@ export default function IntakeInfoEditForm({
       fields.internalTargetShipmentDate = internalTargetShipmentDate || null;
     }
     if (canEdit("priority")) fields.priority = priority;
+    if (canEdit("legacyReportNumber")) fields.legacyReportNumber = legacyReportNumber || null;
     if (canEdit("contactName")) fields.contactName = contactName || null;
     if (canEdit("contactPhone")) fields.contactPhone = contactPhone || null;
     if (canEdit("contactEmail")) fields.contactEmail = contactEmail || null;
@@ -407,6 +411,23 @@ export default function IntakeInfoEditForm({
         )}
 
         <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
+
+        {canEdit("legacyReportNumber") ? (
+          <div>
+            <label className={editLabelClass}>보고서번호</label>
+            <input
+              className={editInputClass}
+              value={legacyReportNumber}
+              disabled={disabled}
+              onChange={(e) => setLegacyReportNumber(e.target.value)}
+            />
+            {fieldErrors.legacyReportNumber && (
+              <p className={editErrorClass}>{fieldErrors.legacyReportNumber}</p>
+            )}
+          </div>
+        ) : (
+          <ReadOnlyField label="보고서번호" value={resolved.legacyReportNumber ?? "-"} />
+        )}
 
         {canEdit("contactName") && (
           <div>

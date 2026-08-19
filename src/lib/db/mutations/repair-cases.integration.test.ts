@@ -452,3 +452,44 @@ describe("createRepairCase persists internalTargetInspectionCompletionDate (A/S 
     assert.equal(row?.internalTargetInspectionCompletionDate, null);
   });
 });
+
+describe("createRepairCase persists 보고서번호 (수기 입력, 자동 채번 없음)", () => {
+  test("a typed 보고서번호 is persisted as-is", async () => {
+    const uniqueSuffix = Date.now().toString(36);
+    const input = baseInput({
+      modelName: `TG-CONC-REPNO-${uniqueSuffix}`,
+      lotNumber: `LOT-CONC-REPNO-${uniqueSuffix}`,
+      serialNumber: `SN-CONC-REPNO-${uniqueSuffix}`,
+      legacyReportNumber: `R-2026-${uniqueSuffix}`,
+    });
+
+    const result = await createRepairCase(input);
+    assert.equal(result.ok, true, `submission failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [row] = await db
+      .select({ legacyReportNumber: repairCases.legacyReportNumber })
+      .from(repairCases)
+      .where(eq(repairCases.id, result.id));
+    assert.equal(row?.legacyReportNumber, `R-2026-${uniqueSuffix}`);
+  });
+
+  test("omitted 보고서번호 leaves the column NULL (nothing is auto-numbered here)", async () => {
+    const uniqueSuffix = Date.now().toString(36);
+    const input = baseInput({
+      modelName: `TG-CONC-REPNO2-${uniqueSuffix}`,
+      lotNumber: `LOT-CONC-REPNO2-${uniqueSuffix}`,
+      serialNumber: `SN-CONC-REPNO2-${uniqueSuffix}`,
+    });
+
+    const result = await createRepairCase(input);
+    assert.equal(result.ok, true, `submission failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [row] = await db
+      .select({ legacyReportNumber: repairCases.legacyReportNumber })
+      .from(repairCases)
+      .where(eq(repairCases.id, result.id));
+    assert.equal(row?.legacyReportNumber, null);
+  });
+});

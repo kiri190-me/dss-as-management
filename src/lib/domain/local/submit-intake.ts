@@ -67,6 +67,13 @@ export type IntakeSubmissionInput = {
    * alone, same discipline as every other field here.
    */
   intakeNumber?: string | null;
+  /**
+   * 보고서번호 — 사람이 직접 적는 선택 입력값이다. 인수번호와 달리 자동
+   * 채번이 없고(형식 규칙도, 중복 검사도 없다), 비워두면 null로 저장된다.
+   * Optional인 이유는 intakeNumber와 같다 — 이 타입을 직접 만드는 기존
+   * 호출부(통합 테스트 등)가 영향을 받지 않게 하기 위함이다.
+   */
+  legacyReportNumber?: string | null;
   modelName: string;
   lotNumber: string;
   serialNumber: string;
@@ -202,6 +209,7 @@ export function submitNewLocalCase(input: IntakeSubmissionInput): SubmitIntakeRe
   const repairCase: LocalRepairCase = {
     id: generateLocalCaseId(),
     intakeNumber,
+    legacyReportNumber: input.legacyReportNumber?.trim() || null,
     workflowType: input.workflowType,
     billingType: input.billingType,
     status: "WAITING_INTAKE_INSPECTION",

@@ -63,7 +63,11 @@ function rollbackCreate(result: CreateRepairCaseFailure): never {
 export async function createRepairCase(
   input: ValidatedCreateRepairCaseInput,
   options: {
-    /** Excel-only legacy identifier; never populated by the interactive intake. */
+    /**
+     * Excel 이관 전용 경로로 넘어오던 레거시 식별자다. 대화형 접수는 이
+     * 옵션을 쓰지 않고 검증된 입력(input.legacyReportNumber)으로 같은
+     * 컬럼을 채운다 — 아래 INSERT의 우선순위 주석 참고.
+     */
     legacyReportNumber?: string | null;
     legacyImportState?: {
       targetStepKey: string;
@@ -262,7 +266,10 @@ export async function createRepairCase(
           .insert(repairCases)
           .values({
             intakeNumber,
-            legacyReportNumber: options.legacyReportNumber ?? null,
+            // 보고서번호 — 대화형 A/S 접수 폼이 수기로 받은 값이 우선이고,
+            // 값이 없을 때만 Excel 이관 경로의 옵션을 본다(두 경로가 같은
+            // 접수 건에서 동시에 값을 가지는 경우는 없다).
+            legacyReportNumber: input.legacyReportNumber ?? options.legacyReportNumber ?? null,
             customerId,
             endUserId,
             productId: productResult.productId,
@@ -739,6 +746,10 @@ export async function updateRepairCase(
       // 검증이 필요 없다. billingType처럼 워크플로/게이트에도 영향을 주지
       // 않는 순수 값 교체다.
       if ("priority" in fields) setValues.priority = fields.priority;
+
+      // 보고서번호 — 자동 채번/형식 규칙이 없는 수기 값이라 다른 값과의
+      // 정합성 검사가 없다(연락처 필드들과 같은 순수 값 교체다).
+      if ("legacyReportNumber" in fields) setValues.legacyReportNumber = fields.legacyReportNumber;
 
       if ("contactName" in fields) setValues.contactNameSnapshot = fields.contactName;
       if ("contactPhone" in fields) setValues.contactPhoneSnapshot = fields.contactPhone;

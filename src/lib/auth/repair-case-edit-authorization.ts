@@ -43,6 +43,10 @@ const AS_ENGINEER_FIELDS: readonly string[] = [
   "assignedEngineerId",
   "internalTargetInspectionCompletionDate",
   "internalTargetShipmentDate",
+  // 보고서번호 — A/S 접수 폼에서 이 역할이 직접 적어 넣는 값이므로(접수
+  // 등록 권한이 있다), 접수 후 자기 오기입을 고칠 수 있어야 한다. SALES에는
+  // 넣지 않았다(보고서를 작성하는 역할이 아니다).
+  "legacyReportNumber",
   "productModelId",
   "lotNumber",
   "serialNumber",

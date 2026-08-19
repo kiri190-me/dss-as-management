@@ -51,6 +51,13 @@ export type ValidatedCreateRepairCaseInput = {
   internalTargetInspectionCompletionDate?: string | null;
   /** Manual 인수번호 override, already format-validated here; omitted/null means "use the existing auto-generator." Optional so existing call sites that build this type directly (integration tests, etc.) are unaffected. */
   intakeNumber?: string | null;
+  /**
+   * 보고서번호 — 사람이 직접 적는 선택 입력값이며, 인수번호와 달리 자동
+   * 채번 규칙이 없다(형식 검사도, 중복 검사도 하지 않는다 — 길이만 본다).
+   * repair_cases.legacy_report_number 컬럼에 그대로 저장된다. Optional인
+   * 이유는 intakeNumber와 같다.
+   */
+  legacyReportNumber?: string | null;
   modelName: string;
   /**
    * Product Model Master 연결 체크포인트 — customerId/newCustomerName과
@@ -246,6 +253,14 @@ export function validateCreateRepairCaseInput(
     fieldErrors.intakeNumber = "인수번호 형식이 올바르지 않습니다. (예: D260601)";
   }
 
+  // 보고서번호는 인수번호와 달리 자동 채번 대상이 아니다 — 형식/중복 규칙이
+  // 존재하지 않으므로 여기서도 검사하지 않는다. 다른 짧은 자유 입력 필드들과
+  // 똑같이 길이만 확인하고, 빈 값은 null로 정규화한다.
+  const legacyReportNumber = trimToNull(input.legacyReportNumber);
+  if (legacyReportNumber && legacyReportNumber.length > MAX_SHORT_TEXT) {
+    fieldErrors.legacyReportNumber = "보고서번호가 너무 깁니다.";
+  }
+
   const customerRequestedDueDate = trimToNull(input.customerRequestedDueDate);
   if (customerRequestedDueDate) {
     if (!isValidDateString(customerRequestedDueDate)) {
@@ -337,6 +352,7 @@ export function validateCreateRepairCaseInput(
       internalTargetShipmentDate,
       internalTargetInspectionCompletionDate,
       intakeNumber,
+      legacyReportNumber,
       modelName: modelName!,
       productModelId,
       newProductModelName,

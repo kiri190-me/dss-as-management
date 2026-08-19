@@ -56,6 +56,9 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
       "billingType",
       "internalTargetInspectionCompletionDate",
       "internalTargetShipmentDate",
+      // 보고서번호 — 접수 폼에서 이 역할이 직접 적는 값이라 접수 후 수정
+      // 권한도 함께 준다(SALES에는 주지 않았다).
+      "legacyReportNumber",
     ]
   );
 });
@@ -219,4 +222,18 @@ test("authorizeSubmittedFields: SALES submitting notes + a technical field is re
 test("isBlockedByShipmentLock never blocks (shipment-lock removal policy) — a shipped case stays editable", () => {
   assert.equal(isBlockedByShipmentLock(true), false);
   assert.equal(isBlockedByShipmentLock(false), false);
+});
+
+test("보고서번호는 SUPER_ADMIN/ADMIN/AS_ENGINEER만 수정할 수 있다", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.equal(isFieldEditable(role, "legacyReportNumber"), true);
+  }
+  // 보고서를 작성하는 역할이 아니다 — 접수 폼에서 적을 수는 있어도(접수 등록
+  // 권한) 이후 수정 권한까지 자동으로 따라오지는 않는다.
+  assert.equal(isFieldEditable("SALES", "legacyReportNumber"), false);
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "legacyReportNumber"), false);
+  assert.deepEqual(authorizeSubmittedFields("SALES", "INTAKE", ["legacyReportNumber"]), {
+    ok: false,
+    unauthorizedFields: ["legacyReportNumber"],
+  });
 });

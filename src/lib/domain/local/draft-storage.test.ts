@@ -4,6 +4,7 @@ import { addCalendarDays } from "../date-only";
 import {
   createDefaultDraft,
   DEFAULT_TARGET_INSPECTION_COMPLETION_OFFSET_DAYS,
+  isDraftEmpty,
   nextTargetInspectionCompletionDate,
 } from "./draft-storage";
 
@@ -59,4 +60,10 @@ test("nextTargetInspectionCompletionDate: touched + manually cleared (empty stri
     currentValue: "",
   });
   assert.equal(result, "", "an explicit clear is itself an override — must not be silently refilled");
+});
+
+test("isDraftEmpty: 보고서번호만 입력해도 빈 초안이 아니다", () => {
+  const draft = createDefaultDraft();
+  assert.equal(isDraftEmpty(draft), true);
+  assert.equal(isDraftEmpty({ ...draft, legacyReportNumber: "R-2026-018" }), false);
 });

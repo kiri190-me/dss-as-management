@@ -351,3 +351,17 @@ test("FAULT_SERVICE: multiple submitted fields all validated together", () => {
     assert.equal(result.data.assignedEngineerId, "u-004");
   }
 });
+
+test("INTAKE: legacyReportNumber is trimmed, clearable to null, and length-capped", () => {
+  const trimmed = validateIntakeSectionFields({ legacyReportNumber: "  R-2026-018  " });
+  assert.equal(trimmed.ok, true);
+  if (trimmed.ok) assert.equal(trimmed.data.legacyReportNumber, "R-2026-018");
+
+  const cleared = validateIntakeSectionFields({ legacyReportNumber: "" });
+  assert.equal(cleared.ok, true);
+  if (cleared.ok) assert.equal(cleared.data.legacyReportNumber, null);
+
+  const tooLong = validateIntakeSectionFields({ legacyReportNumber: "x".repeat(201) });
+  assert.equal(tooLong.ok, false);
+  if (!tooLong.ok) assert.ok(tooLong.fieldErrors.legacyReportNumber);
+});

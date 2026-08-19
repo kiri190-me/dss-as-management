@@ -999,4 +999,19 @@ describe("updateRepairCase", () => {
       "internalTargetInspectionCompletionDate must be untouched when submitted through FAULT_SERVICE"
     );
   });
+
+  test("54. 보고서번호는 INTAKE 섹션에서 채우고 다시 비울 수 있다(자동 채번 없는 수기 값)", async () => {
+    const created = await createTestCase();
+    const before = await fetchRow(created.id);
+    assert.equal(before.legacyReportNumber, null, "신규 접수 건은 보고서번호가 비어 있어야 한다");
+
+    const set = await updateRepairCase(created.id, 1, "INTAKE", { legacyReportNumber: "R-2026-054" });
+    assert.equal(set.ok, true, `update failed: ${JSON.stringify(set)}`);
+    if (!set.ok) return;
+    assert.equal((await fetchRow(created.id)).legacyReportNumber, "R-2026-054");
+
+    const cleared = await updateRepairCase(created.id, set.version, "INTAKE", { legacyReportNumber: null });
+    assert.equal(cleared.ok, true, `clear failed: ${JSON.stringify(cleared)}`);
+    assert.equal((await fetchRow(created.id)).legacyReportNumber, null);
+  });
 });

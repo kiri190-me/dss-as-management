@@ -9,6 +9,12 @@ import { generateClientUuid } from "@/lib/client-uuid";
 export type LocalRepairCase = {
   id: string;
   intakeNumber: string;
+  /**
+   * 보고서번호 — A/S 접수 폼에서 사람이 직접 적는 선택 입력값이다(인수번호와
+   * 달리 자동 채번 규칙이 없고, 형식/중복 검사도 하지 않는다). 비워두면 null.
+   * DB 모드의 repair_cases.legacy_report_number와 같은 값을 담는다.
+   */
+  legacyReportNumber: string | null;
   workflowType: WorkflowType;
   /**
    * 유상/무상 — workflowType과 독립적으로 A/S 접수 폼에서 필수로 선택한다

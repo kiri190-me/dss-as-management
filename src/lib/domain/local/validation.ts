@@ -142,6 +142,18 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
   if (!isNonEmptyTrimmedString(r.lotNumber)) return null;
   if (!isNonEmptyTrimmedString(r.serialNumber)) return null;
 
+  // 보고서번호는 아래 nullableStringFields 루프에 넣지 않는다 — 그 루프는
+  // undefined를 "손상된 레코드"로 보고 레코드 전체를 버리는데, 보고서번호
+  // 입력칸이 생기기 전에 저장된 기존 로컬 접수 건에는 이 키 자체가 없다.
+  // 여기서만 undefined를 null과 동일하게 받아들여 기존 데이터를 보존한다.
+  if (
+    r.legacyReportNumber !== null &&
+    r.legacyReportNumber !== undefined &&
+    !isNonEmptyTrimmedString(r.legacyReportNumber)
+  ) {
+    return null;
+  }
+
   const nullableStringFields = [
     "partNumber",
     "accessoryList",
@@ -164,6 +176,7 @@ export function validateLocalRepairCase(raw: unknown): LocalRepairCase | null {
   return {
     id: r.id as string,
     intakeNumber: r.intakeNumber as string,
+    legacyReportNumber: (r.legacyReportNumber as string | null | undefined) ?? null,
     workflowType: r.workflowType as WorkflowType,
     billingType: r.billingType as BillingType,
     status: r.status as RepairStatus,

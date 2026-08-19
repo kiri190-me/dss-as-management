@@ -47,7 +47,8 @@ type FieldKey =
   | "modelName"
   | "lotNumber"
   | "serialNumber"
-  | "intakeNumber";
+  | "intakeNumber"
+  | "legacyReportNumber";
 
 const inputClass =
   "w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
@@ -133,6 +134,7 @@ const FIELD_ORDER: FieldKey[] = [
   "internalTargetShipmentDate",
   "customerRequestedDueDate",
   "intakeNumber",
+  "legacyReportNumber",
   "modelName",
   "lotNumber",
   "serialNumber",
@@ -418,6 +420,7 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
       internalTargetInspectionCompletionDate: draft.internalTargetInspectionCompletionDate || null,
       internalTargetShipmentDate: draft.internalTargetShipmentDate || null,
       intakeNumber: trimmedIntakeNumberOverride || null,
+      legacyReportNumber: draft.legacyReportNumber,
       modelName: draft.modelName,
       productModelId: draft.productModelCreateNew ? null : draft.productModelId || null,
       newProductModelName: draft.productModelCreateNew ? draft.modelName.trim() : null,
@@ -568,6 +571,27 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
             ) : (
               <p id="intakeNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                 비워두면 예상 인수번호({estimatedIntakeNumber ?? "-"})가 자동으로 채번됩니다. 직접 입력한 값은 제출 시 형식과 중복 여부를 다시 확인합니다.
+              </p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="legacyReportNumber" className={labelClass}>보고서번호</label>
+            <input
+              id="legacyReportNumber"
+              ref={(el) => {
+                fieldRefs.current.legacyReportNumber = el;
+              }}
+              className={inputClass}
+              value={draft.legacyReportNumber}
+              onChange={(e) => setField("legacyReportNumber", e.target.value)}
+              aria-invalid={Boolean(errors.legacyReportNumber)}
+              aria-describedby={errors.legacyReportNumber ? "legacyReportNumber-error" : "legacyReportNumber-help"}
+            />
+            {errors.legacyReportNumber ? (
+              <p id="legacyReportNumber-error" className={errorClass}>{errors.legacyReportNumber}</p>
+            ) : (
+              <p id="legacyReportNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                직접 입력하는 값입니다(자동 채번하지 않습니다). 비워두면 나중에 인수 정보에서 채울 수 있습니다.
               </p>
             )}
           </div>

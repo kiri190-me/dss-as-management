@@ -378,3 +378,30 @@ test("isValidIdempotencyKey rejects malformed or non-UUID values", () => {
   // Business-field-derived values must never accidentally validate.
   assert.equal(isValidIdempotencyKey("TG-CONC-msf0inak"), false);
 });
+
+// 보고서번호 — 인수번호와 달리 자동 채번/형식 규칙/중복 검사가 없다.
+// 검증이 하는 일은 길이 확인과 빈 값 정규화뿐이라는 것을 고정한다.
+
+test("omitted 보고서번호 is accepted and normalizes to null", () => {
+  const result = validateCreateRepairCaseInput(validInput());
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.legacyReportNumber, null);
+});
+
+test("보고서번호 is trimmed and kept exactly as typed (no format rule)", () => {
+  const result = validateCreateRepairCaseInput(validInput({ legacyReportNumber: "  R-2026-018  " }));
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.legacyReportNumber, "R-2026-018");
+});
+
+test("blank 보고서번호 normalizes to null", () => {
+  const result = validateCreateRepairCaseInput(validInput({ legacyReportNumber: "   " }));
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.legacyReportNumber, null);
+});
+
+test("overlong 보고서번호 fails with a field error", () => {
+  const result = validateCreateRepairCaseInput(validInput({ legacyReportNumber: "x".repeat(201) }));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.ok(result.fieldErrors.legacyReportNumber);
+});

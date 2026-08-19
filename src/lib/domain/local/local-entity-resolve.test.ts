@@ -15,6 +15,7 @@ function baseLocalCase(overrides: Partial<LocalRepairCase> = {}): LocalRepairCas
   return {
     id: "local-aaaa",
     intakeNumber: "D260601",
+    legacyReportNumber: null,
     workflowType: "PAID_MATCHER",
     billingType: "PAID",
     status: "WAITING_INTAKE_INSPECTION",
