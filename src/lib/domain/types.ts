@@ -82,6 +82,21 @@ export const productCategoryLabels: Record<WorkflowType, string> = {
 };
 
 /**
+ * 제품군 드롭다운이 늘어놓을 값 — 위 표의 문구를 중복 없이 모은 것이다.
+ *
+ * 코드 목록(PRODUCT_CATEGORY_CODES 같은 것)을 따로 만들지 않는다. 제품군은
+ * 아직 DB 컬럼이 아니라 workflowType에서 파생시킨 표시 문구이고(위 주석),
+ * 목록을 따로 두면 표의 문구가 바뀔 때 둘이 조용히 갈라진다. 여기서 파생하면
+ * 화면이 보여 주는 문구와 고를 수 있는 값이 언제나 같은 것이 된다.
+ *
+ * 그래서 비교도 코드가 아니라 이 문구로 한다 — 내 담당 제품 화면의 제품 구분
+ * 필터(my-active-work-filter.ts)가 이미 같은 방식이다.
+ */
+export const PRODUCT_CATEGORY_OPTIONS: readonly string[] = [
+  ...new Set(Object.values(productCategoryLabels)),
+].sort((a, b) => a.localeCompare(b));
+
+/**
  * 유상/무상 — migration 0021로 repair_cases.billing_type이 workflowType과
  * 독립된 실제 컬럼이 되었다(A/S INTAKE UX 체크포인트, 감사 승인). 더 이상
  * workflowType으로부터 유도하지 않는다. PAID/PARTIAL_PAID/WARRANTY는

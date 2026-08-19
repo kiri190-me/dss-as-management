@@ -16,11 +16,13 @@ type RepairCaseCardListProps = {
 };
 
 /**
- * Shown below the `lg` breakpoint (medium/narrow width and mobile) — an
- * intentional layout threshold for this screen, not overflow-measured, so
- * the card list appears before the compact table would feel cramped
- * rather than only once it would literally scroll. Mirrors RepairCaseTable's
- * own `hidden lg:block` wrapper.
+ * 표가 폭에 안 들어갈 때(그리고 사람이 카드를 골랐을 때) 대신 나오는 목록.
+ * 언제 나올지는 이 파일이 정하지 않는다 — 서비스의 모든 목록과 같이
+ * ResponsiveList(components/common/responsive-list.tsx)가 정한다.
+ *
+ * 유·무상은 표에서 독립 열이 되면서 여기에도 들어왔다(2026-08-19). 표가 안
+ * 들어가는 폭에서는 이쪽이 기본 화면이라, 표에만 넣으면 창 크기에 따라 보이는
+ * 사람과 안 보이는 사람이 갈린다.
  */
 export default function RepairCaseCardList({
   rows,
@@ -83,6 +85,10 @@ export default function RepairCaseCardList({
               <dd>
                 {row.modelName} / {row.serialNumber}
               </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">유·무상</dt>
+              <dd>{row.paidOrWarranty}</dd>
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">사내 목표 출하일</dt>

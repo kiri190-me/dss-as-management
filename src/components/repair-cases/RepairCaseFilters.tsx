@@ -5,12 +5,13 @@ import {
   type Filters,
 } from "@/lib/domain/repair-case-filters";
 import {
+  billingTypeLabels,
   priorityLabels,
   repairStatusLabels,
-  workflowTypeLabels,
+  BILLING_TYPE_CODES,
   PRIORITY_CODES,
+  PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
-  WORKFLOW_TYPE_CODES,
 } from "@/lib/domain/types";
 import type { Customer } from "@/lib/domain/types";
 import FilterDisclosure from "./FilterDisclosure";
@@ -20,7 +21,8 @@ type RepairCaseFiltersProps = {
   customers: Customer[];
   onQueryChange: (value: string) => void;
   onStatusChange: (value: Filters["status"]) => void;
-  onWorkflowTypeChange: (value: Filters["workflowType"]) => void;
+  onProductCategoryChange: (value: Filters["productCategory"]) => void;
+  onBillingTypeChange: (value: Filters["billingType"]) => void;
   onCustomerChange: (value: Filters["customerId"]) => void;
   onPriorityChange: (value: Filters["priority"]) => void;
   onOverdueOnlyChange: (value: boolean) => void;
@@ -34,7 +36,8 @@ type RepairCaseFiltersProps = {
 export function countHiddenActiveFilters(filters: Filters): number {
   let count = 0;
   if (filters.status !== "ALL") count += 1;
-  if (filters.workflowType !== "ALL") count += 1;
+  if (filters.productCategory !== "ALL") count += 1;
+  if (filters.billingType !== "ALL") count += 1;
   if (filters.customerId !== "ALL") count += 1;
   if (filters.priority !== "ALL") count += 1;
   if (filters.overdueOnly) count += 1;
@@ -50,7 +53,8 @@ export default function RepairCaseFilters({
   customers,
   onQueryChange,
   onStatusChange,
-  onWorkflowTypeChange,
+  onProductCategoryChange,
+  onBillingTypeChange,
   onCustomerChange,
   onPriorityChange,
   onOverdueOnlyChange,
@@ -73,7 +77,10 @@ export default function RepairCaseFilters({
       </div>
 
       <FilterDisclosure activeCount={countHiddenActiveFilters(filters)} onReset={onReset}>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* 칸 수는 선택 항목 수와 같게 둔다 — 다섯 개가 4칸 격자에 들어가면
+            마지막 하나만 다음 줄에 홀로 남아, 그 항목만 다른 종류인 것처럼
+            보인다. 항목을 더하거나 뺄 때 이 숫자도 같이 고쳐야 한다. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div className="flex flex-col gap-1">
             <label htmlFor="repair-case-status" className={labelClass}>
               현재 상태
@@ -96,23 +103,44 @@ export default function RepairCaseFilters({
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-workflow-type" className={labelClass}>
-              워크플로 유형
+            <label htmlFor="repair-case-product-category" className={labelClass}>
+              제품군
             </label>
             <select
-              id="repair-case-workflow-type"
+              id="repair-case-product-category"
               className={selectClass}
-              value={filters.workflowType}
+              value={filters.productCategory}
+              onChange={(event) => onProductCategoryChange(event.target.value)}
+            >
+              <option value="ALL">전체</option>
+              {PRODUCT_CATEGORY_OPTIONS.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="repair-case-billing-type" className={labelClass}>
+              유·무상
+            </label>
+            <select
+              id="repair-case-billing-type"
+              className={selectClass}
+              value={filters.billingType}
               onChange={(event) =>
-                onWorkflowTypeChange(event.target.value as Filters["workflowType"])
+                onBillingTypeChange(event.target.value as Filters["billingType"])
               }
             >
               <option value="ALL">전체</option>
-              {WORKFLOW_TYPE_CODES.map((type) => (
-                <option key={type} value={type}>
-                  {workflowTypeLabels[type]}
+              {BILLING_TYPE_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {billingTypeLabels[code]}
                 </option>
               ))}
+              {/* 표에 "-"로 나오는 건들. 아직 정해지지 않은 것을 따로 훑을 수 있어야 한다. */}
+              <option value="NONE">미지정</option>
             </select>
           </div>
 

@@ -1,17 +1,34 @@
 import {
+  BILLING_TYPE_CODES,
   PRIORITY_CODES,
+  PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
-  WORKFLOW_TYPE_CODES,
+  type BillingType,
   type Priority,
   type RepairStatus,
-  type WorkflowType,
 } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
+/**
+ * ── 워크플로 유형 대신 제품군 + 유·무상 ─────────────────────────────────
+ * 예전에는 workflowType 하나로 걸렀다. 그런데 그 값은 제품군과 유·무상을
+ * 붙여 놓은 것이라("유상 Generator"), 제품군만 보고 싶은 사람도 유·무상별로
+ * 두 번 골라야 했고 반대도 마찬가지였다. 게다가 유·무상은 migration 0021로
+ * workflowType과 무관한 독립 컬럼이 되었으므로(types.ts의 BILLING_TYPE_CODES
+ * 주석) 둘을 한 값으로 묶어 두는 것 자체가 더는 맞지 않는다.
+ *
+ * 그래서 둘로 나눴다. 표현력은 오히려 늘었다 — 예전의 "유상 Generator"는
+ * 제품군 Generator + 유상으로 그대로 되고, 예전에는 못 하던 "유상인 것 전부"와
+ * "Generator 전부"가 새로 된다. workflowType으로 들어오는 딥링크는 대시보드를
+ * 포함해 한 군데도 없어서(2026-08-19 확인) 끊어질 링크도 없다.
+ */
 export type Filters = {
   query: string;
   status: "ALL" | RepairStatus;
-  workflowType: "ALL" | WorkflowType;
+  /** productCategoryLabels가 만든 표시 문구("Generator" 등)와 그대로 비교한다. */
+  productCategory: "ALL" | string;
+  /** "NONE"은 유·무상이 아직 정해지지 않은 건만 — 표에 "-"로 나오는 그것이다. */
+  billingType: "ALL" | "NONE" | BillingType;
   customerId: "ALL" | string;
   priority: "ALL" | Priority;
   overdueOnly: boolean;
@@ -22,7 +39,8 @@ export type Filters = {
 export const DEFAULT_FILTERS: Filters = {
   query: "",
   status: "ALL",
-  workflowType: "ALL",
+  productCategory: "ALL",
+  billingType: "ALL",
   customerId: "ALL",
   priority: "ALL",
   overdueOnly: false,
@@ -47,7 +65,8 @@ export function formatShipmentMonthLabel(month: string): string {
  */
 export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   const status = searchParams.get("status");
-  const workflowType = searchParams.get("workflowType");
+  const productCategory = searchParams.get("productCategory");
+  const billingType = searchParams.get("billingType");
   const customerId = searchParams.get("customerId");
   const priority = searchParams.get("priority");
   const overdue = searchParams.get("overdue");
@@ -59,9 +78,11 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
       status && (REPAIR_STATUS_CODES as readonly string[]).includes(status)
         ? (status as RepairStatus)
         : "ALL",
-    workflowType:
-      workflowType && (WORKFLOW_TYPE_CODES as readonly string[]).includes(workflowType)
-        ? (workflowType as WorkflowType)
+    productCategory:
+      productCategory && PRODUCT_CATEGORY_OPTIONS.includes(productCategory) ? productCategory : "ALL",
+    billingType:
+      billingType === "NONE" || (billingType && (BILLING_TYPE_CODES as readonly string[]).includes(billingType))
+        ? (billingType as "NONE" | BillingType)
         : "ALL",
     customerId: customerId ?? "ALL",
     priority:
@@ -105,7 +126,13 @@ export function applyFilters(rows: EffectiveRepairCase[], filters: Filters): Eff
 
   return rows.filter((row) => {
     if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) return false;
-    if (filters.workflowType !== "ALL" && row.workflowType !== filters.workflowType) return false;
+    if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;
+    // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.
+    // 어느 한쪽으로 추측해 넣지 않는다 — 표에도 "-"로 그대로 적는 값이다.
+    if (filters.billingType === "NONE" && row.billingType !== null) return false;
+    if (filters.billingType !== "ALL" && filters.billingType !== "NONE" && row.billingType !== filters.billingType) {
+      return false;
+    }
     if (filters.customerId !== "ALL" && row.customerId !== filters.customerId) return false;
     if (filters.priority !== "ALL" && row.priority !== filters.priority) return false;
     if (filters.overdueOnly && !row.effectiveIsOverdue) return false;

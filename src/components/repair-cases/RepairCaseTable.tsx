@@ -102,12 +102,11 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
 }
 
 /**
- * Compact 7-column table for 전체 A/S 현황: 인수번호, 상태, 고객사, 제품,
- * 담당 엔지니어, 출하일, 상세 — the 7 fields explicitly called out as the
- * screen's prominent scan fields. Every other field from the original
- * 16-column table (인수일, End-User, 제품 구분, 유상/무상, L/N, 우선순위, 납기
+ * Compact 8-column table for 전체 A/S 현황: 인수번호, 상태, 고객사, 제품,
+ * 유·무상, 담당 엔지니어, 출하일, 상세. Every other field from the original
+ * 16-column table (인수일, End-User, 제품 구분, L/N, 우선순위, 납기
  * 지연 여부, 고객 요청 납기일) still renders, folded into a secondary line or
- * badge inside one of these 7 cells rather than getting its own column —
+ * badge inside one of these cells rather than getting its own column —
  * see the doc comments on each <td> below. All 6 SortColumn values
  * (intakeNumber, receivedAt, customerName, status, priority,
  * customerRequestedDueDate) remain independently clickable, via a
@@ -119,20 +118,26 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * "정상" state a filled blue pill instead of unstyled text, so it reads
  * consistently with its badge neighbors on the same line.
  *
- * 제품 cell: line 1 (stronger) is 제품 구분(제품명 역할)/모델/유·무상, line 2
+ * 제품 cell: line 1 (stronger) is 제품 구분(제품명 역할)/모델, line 2
  * (secondary, smaller/gray) is S/N·L/N.
+ *
+ * 유·무상 gets its own column (2026-08-19). It used to be the third slot of
+ * 제품's first line, but it is not a property of the product at all —
+ * migration 0021 made billing_type a column independent of workflowType, and
+ * it is now its own filter on this screen, so a value people filter on and
+ * scan down should be a column they can scan down. Null (아직 안 정해짐)
+ * renders "-" and is never guessed either way.
  *
  * 출하일 cell shows effectiveActualShipmentDate (실제 출하일), never
  * internalTargetShipmentDate — renders "-" when not yet shipped rather than
  * silently substituting the target date. 고객 요청 납기일 stays as secondary
  * context (still sortable via the header's secondary button).
  *
- * No wrapping div here — the responsive table/card switch for this screen
- * is an intentional `lg:` breakpoint (see RepairCaseListPage), not
- * overflow-measured, so the table itself just needs `hidden lg:block` on
- * its own wrapper, which lives here (self-contained), unlike the
- * diagnosis-flowcharts screen's JS-overflow-driven wrapper (which
- * deliberately lives in that screen's parent instead).
+ * No wrapping div here — the table/card switch is owned by ResponsiveList
+ * (components/common/responsive-list.tsx), which measures real overflow and
+ * therefore has to own the scroll wrapper itself. A wrapper here would
+ * absorb the overflow before ResponsiveList could see it, and that screen
+ * would then answer "fits" forever.
  */
 export default function RepairCaseTable({
   rows,
@@ -144,7 +149,7 @@ export default function RepairCaseTable({
   onToggleSelect,
 }: RepairCaseTableProps) {
   return (
-      <table className="w-full min-w-[960px] border-collapse text-sm">
+      <table className="w-full min-w-[1040px] border-collapse text-sm">
         <thead className="sticky top-0 z-10">
           <tr>
             {selectionMode && (
@@ -171,9 +176,11 @@ export default function RepairCaseTable({
               <PrimarySortButton column="customerName" label="고객사" sort={sort} onSortChange={onSortChange} />
             </th>
             <th scope="col" className={thBaseClass}>
-              {/* 제품명(=제품 구분)/모델/유·무상 (primary) + S/N·L/N (secondary) — none of these were sortable before */}
+              {/* 제품명(=제품 구분)/모델 (primary) + S/N·L/N (secondary) — none of these were sortable before */}
               제품
             </th>
+            {/* 유·무상 — 제품 셀에서 빼낸 독립 열. 정렬 대상은 아니다(SortColumn에 없다). */}
+            <th scope="col" className={thBaseClass}>유·무상</th>
             <th scope="col" className={thBaseClass}>담당 엔지니어</th>
             <th scope="col" className={thBaseClass}>
               {/* 실제 출하일(effectiveActualShipmentDate, primary — never substitutes 사내 목표 출하일 when null) + 고객 요청 납기일 (secondary, still sortable) */}
@@ -240,13 +247,14 @@ export default function RepairCaseTable({
               <td className="px-3 py-2">
                 <div className="flex flex-col gap-0.5">
                   <span className="whitespace-nowrap">
-                    {row.productCategory} / {row.modelName} / {row.paidOrWarranty}
+                    {row.productCategory} / {row.modelName}
                   </span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
                     S/N {row.serialNumber} / L/N {row.lotNumber}
                   </span>
                 </div>
               </td>
+              <td className="px-3 py-2 whitespace-nowrap">{row.paidOrWarranty}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.engineerName ?? "미배정"}</td>
               <td className="px-3 py-2">
                 <div className="flex flex-col gap-0.5">

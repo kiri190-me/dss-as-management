@@ -598,7 +598,8 @@ export default function RepairCaseListPage({
             customers={mockCustomers}
             onQueryChange={(value) => updateFilters({ query: value })}
             onStatusChange={(value) => updateFilters({ status: value })}
-            onWorkflowTypeChange={(value) => updateFilters({ workflowType: value })}
+            onProductCategoryChange={(value) => updateFilters({ productCategory: value })}
+            onBillingTypeChange={(value) => updateFilters({ billingType: value })}
             onCustomerChange={(value) => updateFilters({ customerId: value })}
             onPriorityChange={(value) => updateFilters({ priority: value })}
             onOverdueOnlyChange={(value) => updateFilters({ overdueOnly: value })}

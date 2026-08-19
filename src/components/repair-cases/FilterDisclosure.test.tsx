@@ -67,13 +67,20 @@ test("countHiddenActiveFilters는 감춰지는 조건만 하나씩 센다", () =
     countHiddenActiveFilters({
       ...DEFAULT_FILTERS,
       status: "IN_REPAIR",
-      workflowType: "PAID_GENERATOR",
+      productCategory: "Generator",
+      billingType: "PAID",
       customerId: "c-1",
       priority: "HIGH",
       overdueOnly: true,
     }),
-    5
+    6
   );
+});
+
+test("유·무상 '미지정'도 걸린 조건 하나로 센다", () => {
+  // "ALL이 아니면 걸린 것"이라는 규칙에서 NONE만 빠지면, 미지정만 훑는 동안
+  // 접힌 필터가 "0개 적용됨"이라고 말하게 된다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingType: "NONE" }), 1);
 });
 
 test("대시보드에서 넘어온 출하월 필터는 세지 않는다", () => {
