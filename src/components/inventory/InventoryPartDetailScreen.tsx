@@ -5,6 +5,7 @@ import TransactionHistoryList from "./TransactionHistoryList";
 import type { RepairCaseOption } from "./ConsumeStockDialog";
 import type { PartDetail, StockTransactionRow, ReturnableUseRow } from "@/lib/db/queries/inventory";
 import type { Role } from "@/lib/domain/types";
+import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
 export default function InventoryPartDetailScreen({
   part,
@@ -14,6 +15,7 @@ export default function InventoryPartDetailScreen({
   itemTypeSuggestions,
   repairCaseOptions,
   actingUser,
+  capabilities,
 }: {
   part: PartDetail;
   history: StockTransactionRow[];
@@ -22,6 +24,7 @@ export default function InventoryPartDetailScreen({
   itemTypeSuggestions: string[];
   repairCaseOptions: RepairCaseOption[];
   actingUser: { id: string; role: Role };
+  capabilities: InventoryCapabilities;
 }) {
   const totalQuantity = part.balances.reduce((sum, b) => sum + b.currentQuantity, 0);
 
@@ -36,7 +39,7 @@ export default function InventoryPartDetailScreen({
           <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{part.partName}</h1>
           {part.partSpec && <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{part.partSpec}</p>}
         </div>
-        <PartDetailHeaderActions part={part} categorySuggestions={categorySuggestions} itemTypeSuggestions={itemTypeSuggestions} actingUserRole={actingUser.role} />
+        <PartDetailHeaderActions part={part} categorySuggestions={categorySuggestions} itemTypeSuggestions={itemTypeSuggestions} capabilities={capabilities} />
       </div>
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -73,6 +76,7 @@ export default function InventoryPartDetailScreen({
             returnableByBalanceId={returnableByBalanceId}
             repairCaseOptions={repairCaseOptions}
             actingUserRole={actingUser.role}
+            capabilities={capabilities}
           />
         </div>
       </div>

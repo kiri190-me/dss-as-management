@@ -4,13 +4,8 @@ import { db } from "../client";
 import { parts, partStockBalances, stockTransactions, repairCases, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore } from "./internal/inventory-stock-use";
-import {
-  canCreateOrEditPart,
-  canReceiveStock,
-  canReturnStock,
-  canUseStock,
-  type UseStockAuthorizationContext,
-} from "@/lib/auth/inventory-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
+import type { UseStockAuthorizationContext } from "@/lib/auth/inventory-authorization";
 import { computeAlreadyReversedQuantity, canReturnQuantity } from "@/lib/domain/inventory-return-rules";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 
@@ -101,7 +96,9 @@ export async function createPart(input: CreatePartInput): Promise<CreatePartResu
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!canCreateOrEditPart(actor.role)) fail("FORBIDDEN", "부품 등록 권한이 없습니다.");
+      if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
+        fail("FORBIDDEN", "부품 등록 권한이 없습니다.");
+      }
 
       const trimmedName = input.partName.trim();
       if (trimmedName.length === 0) fail("INVALID_INPUT", "품명을 입력해 주세요.");
@@ -148,7 +145,9 @@ export async function updatePart(input: UpdatePartInput): Promise<UpdatePartResu
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!canCreateOrEditPart(actor.role)) fail("FORBIDDEN", "부품 수정 권한이 없습니다.");
+      if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
+        fail("FORBIDDEN", "부품 수정 권한이 없습니다.");
+      }
 
       const [part] = await tx
         .select()
@@ -201,7 +200,9 @@ export async function receiveStock(input: ReceiveStockInput): Promise<StockTrans
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!canReceiveStock(actor.role)) fail("FORBIDDEN", "입고 권한이 없습니다.");
+      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
+        fail("FORBIDDEN", "입고 권한이 없습니다.");
+      }
 
       requirePositiveIntegerQuantity(input.quantity);
       const trimmedLocation = input.location.trim();
@@ -352,7 +353,10 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
         hasRepairCase: input.repairCaseId != null,
         isCaseLocked: repairCase?.isLocked ?? false,
       };
-      if (!canUseStock(actor.role, authContext)) {
+      // authContext는 그대로 둔다 — 맥락(대상 접수 건이 있는지, 잠겼는지)은
+      // 여전히 여기서 판정한다. 역할 부분만 설정으로 넘어갔다.
+      void authContext;
+      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
         fail("FORBIDDEN", "재고를 사용할 권한이 없습니다.");
       }
 
@@ -398,7 +402,9 @@ export async function returnStock(input: ReturnStockInput): Promise<StockTransac
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!canReturnStock(actor.role)) fail("FORBIDDEN", "반환 권한이 없습니다.");
+      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
+        fail("FORBIDDEN", "반환 권한이 없습니다.");
+      }
 
       requirePositiveIntegerQuantity(input.quantity);
 

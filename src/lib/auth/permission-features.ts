@@ -327,6 +327,26 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
   }),
 };
 
+/**
+ * ============================================================================
+ * 설정이 실제 판정을 지배하는 메뉴 — 전환이 끝난 곳
+ * ============================================================================
+ * 권한 판정을 *-authorization.ts의 함수에서 이 설정으로 옮기는 작업은 메뉴
+ * 단위로 진행한다. 한 번에 다 바꾸면 어디서 회귀가 났는지 짚을 수 없기 때문이다.
+ *
+ * 여기 있는 메뉴는 mutation·페이지·화면이 모두 설정을 보므로, 넓힌 값이 실제로
+ * 그 조작을 연다. 여기 없는 메뉴는 아직 기존 함수가 최종 관문이라 **넓혀도
+ * 열리지 않을 수 있다** — 화면이 그 사실을 그대로 말해야 한다. 말하지 않으면
+ * 관리자는 열어 줬다고 믿고, 사용자는 여전히 막힌 채로 서로 다른 화면을 본다.
+ * ============================================================================
+ */
+const SETTINGS_ENFORCED_AREAS = new Set<string>(["inventory"]);
+
+/** 이 메뉴(또는 이 잎이 속한 메뉴)의 설정이 실제 판정을 지배하는가. */
+export function isSettingsEnforced(key: string): boolean {
+  return SETTINGS_ENFORCED_AREAS.has(key.includes(".") ? key.split(".")[0] : key);
+}
+
 /** 이 메뉴의 하위 기능. 없으면 빈 배열이고, 그때는 메뉴 자체가 잎이다. */
 export function featuresOfArea(areaKey: string): readonly PermissionFeature[] {
   return FEATURES_BY_AREA[areaKey] ?? [];

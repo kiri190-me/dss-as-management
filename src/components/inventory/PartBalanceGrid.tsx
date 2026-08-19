@@ -5,7 +5,7 @@ import ConsumeStockDialog, { type RepairCaseOption } from "./ConsumeStockDialog"
 import ReturnStockDialog from "./ReturnStockDialog";
 import type { PartBalanceRow, ReturnableUseRow } from "@/lib/db/queries/inventory";
 import { stockOwnerLabels } from "@/lib/domain/inventory-types";
-import { canReturnStock, canSeeUseStockButton } from "@/lib/auth/inventory-authorization";
+import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 import type { Role } from "@/lib/domain/types";
 
 type SelectedAction = { balanceId: string; action: "CONSUME" | "RETURN" } | null;
@@ -21,18 +21,23 @@ export default function PartBalanceGrid({
   returnableByBalanceId,
   repairCaseOptions,
   actingUserRole,
+  capabilities,
 }: {
   balances: PartBalanceRow[];
   returnableByBalanceId: Record<string, ReturnableUseRow[]>;
   repairCaseOptions: RepairCaseOption[];
+  /** ConsumeStockDialog의 '소비처 전용' 규칙에만 쓰인다 — 권한 판정용이 아니다. */
   actingUserRole: Role;
+  capabilities: InventoryCapabilities;
 }) {
   const [selected, setSelected] = useState<SelectedAction>(null);
 
   const selectedBalance = selected ? balances.find((b) => b.id === selected.balanceId) : null;
   const selectedReturnables = selected ? (returnableByBalanceId[selected.balanceId] ?? []) : [];
-  const showUseButton = canSeeUseStockButton(actingUserRole);
-  const showReturnButton = canReturnStock(actingUserRole);
+  // 사용과 반품은 같은 노드(inventory.stock)가 지배한다 — 지금 정책에서도 두
+  // 조작의 역할 집합이 같았고, 하위 기능 트리는 그 사실을 그대로 옮겼다.
+  const showUseButton = capabilities.stock;
+  const showReturnButton = capabilities.stock;
 
   return (
     <>

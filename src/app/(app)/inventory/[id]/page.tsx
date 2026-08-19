@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/queries/inventory";
 import { listRepairCases } from "@/lib/db/queries/repair-cases";
 import InventoryPartDetailScreen from "@/components/inventory/InventoryPartDetailScreen";
+import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
 export const metadata: Metadata = {
   title: "부품 상세 | DSS A/S 관리 시스템",
@@ -66,6 +67,7 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
 
   return (
     <InventoryPartDetailScreen
+      capabilities={await resolveInventoryCapabilities(actingUser.role)}
       part={part}
       history={history}
       returnableByBalanceId={returnableByBalanceId}

@@ -4,29 +4,25 @@ import { useState } from "react";
 import ReceiveStockDialog from "./ReceiveStockDialog";
 import PartEditDialog from "./PartEditDialog";
 import type { PartDetail } from "@/lib/db/queries/inventory";
+import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
-/** Same string-typed local mirrors used across the Phase 5B-2 client components — UX convenience only, the mutation layer re-checks role independently regardless (see InventoryListScreen.tsx's identical comment). */
-function canCreateOrEditPart(role: string): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-}
-function canReceiveStock(role: string): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-}
+/* 역할 규칙의 로컬 사본이 여기 있었다 — InventoryListScreen.tsx와 같은 이유로
+   제거하고, 서버가 해석한 capabilities를 받는다. */
 
 export default function PartDetailHeaderActions({
   part,
   categorySuggestions,
   itemTypeSuggestions,
-  actingUserRole,
+  capabilities,
 }: {
   part: PartDetail;
   categorySuggestions: string[];
   itemTypeSuggestions: string[];
-  actingUserRole: string;
+  capabilities: InventoryCapabilities;
 }) {
   const [dialog, setDialog] = useState<"RECEIVE" | "EDIT" | null>(null);
-  const canReceive = canReceiveStock(actingUserRole);
-  const canEdit = canCreateOrEditPart(actingUserRole);
+  const canReceive = capabilities.stock;
+  const canEdit = capabilities.parts;
 
   return (
     <div className="flex gap-2">

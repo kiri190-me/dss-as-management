@@ -6,16 +6,12 @@ import PartCreateDialog from "./PartCreateDialog";
 import InventoryTabs from "./InventoryTabs";
 import type { PartListRow } from "@/lib/db/queries/inventory";
 import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/domain/inventory-types";
+import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
-/** Same string-typed local mirror of canCreateOrEditPart's logic used throughout the Phase 5A client components (e.g. ExecutionNodeCard.tsx) — the server auth module's Role-typed functions aren't meant to be cast from a plain session-derived string prop; this is a UX convenience only, the mutation layer re-checks independently regardless. */
-function canCreateOrEditPart(role: string): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-}
+/* 역할 규칙의 로컬 사본이 여기 있었다. 서버가 설정까지 반영해 해석한 결과를
+   capabilities로 내려보내므로 더는 필요 없다 — 사본이 남아 있으면 관리자가
+   열어 준 권한이 버튼에는 반영되지 않는다. */
 
-/** Same three-role list as canProcessPartRequests — gates visibility of the 부품 요청 관리 tab link only (AS_ENGINEER manages their own requests from the repair-case page instead, never this manager screen; SALES has no request-screen access at all). */
-function canProcessPartRequests(role: string): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-}
 
 /**
  * Excel-like 부품 재고 list — client-side search/filter over the full
@@ -29,14 +25,14 @@ export default function InventoryListScreen({
   ownerAvailabilityByPartId,
   categories,
   itemTypes,
-  actingUserRole,
+  capabilities,
 }: {
   parts: PartListRow[];
   /** 소유구분별 재고 수량 checkpoint — grouped (part, owner) sum of part_stock_balances.current_quantity, same aggregate totalQuantity already uses. A missing (partId, owner) entry means 0, never "unknown". */
   ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
   categories: string[];
   itemTypes: string[];
-  actingUserRole: string;
+  capabilities: InventoryCapabilities;
 }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -56,11 +52,11 @@ export default function InventoryListScreen({
     });
   }, [parts, search, categoryFilter]);
 
-  const canCreate = canCreateOrEditPart(actingUserRole);
+  const canCreate = capabilities.parts;
 
   return (
     <div className="flex flex-col gap-4">
-      {canProcessPartRequests(actingUserRole) && <InventoryTabs active="LIST" />}
+      {capabilities.requestProcessing && <InventoryTabs active="LIST" />}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">재고 관리</h1>
         {canCreate && (

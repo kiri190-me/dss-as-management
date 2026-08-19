@@ -5,12 +5,12 @@ import { parts, partStockBalances, repairCases, inventoryPartRequests, inventory
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore, type PrelockedBalanceState } from "./internal/inventory-stock-use";
 import { claimOrReplayIdempotency, finalizeIdempotencySuccess } from "./internal/inventory-request-idempotency";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
-  canCreatePartRequest,
-  canCancelOwnRequest,
-  canIssuePartRequest,
-  canRejectPartRequest,
-  canPartiallyCloseRequest,
+  isRequestCancellable,
+  isRequestIssuable,
+  isRequestRejectable,
+  isRequestPartiallyClosable,
 } from "@/lib/auth/inventory-authorization";
 import { computeRequestFingerprint } from "@/lib/domain/inventory-part-request-fingerprint";
 import {
@@ -22,7 +22,6 @@ import {
   safeAddQuantity,
   normalizeNote,
   validateRequiredReason,
-  isIssuableStatus,
   computeStatusAfterIssue,
   type RawRequestItem,
   type RawIssueAllocation,
@@ -137,7 +136,10 @@ export async function createPartRequest(input: CreatePartRequestInput): Promise<
         fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 부품을 요청할 수 있습니다.");
       }
 
-      if (!canCreatePartRequest(actor.role, { isCaseLocked: rc.isLocked })) {
+      // 잠금 여부는 지금도 요청 생성을 막지 않는다(shipment-lock removal policy).
+      // 역할 판정만 설정으로 넘어갔다.
+      void rc.isLocked;
+      if (!(await hasPermission(actor.role, "inventory.requests", "WRITE"))) {
         fail("FORBIDDEN", "부품 요청 권한이 없습니다.");
       }
 
@@ -208,7 +210,10 @@ export async function cancelPartRequest(input: CancelPartRequestInput): Promise<
       const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
       if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
 
-      if (!canCancelOwnRequest(actor.role, { isOwnRequest: request.requestedByUserId === actor.id, status: request.status })) {
+      if (
+        !isRequestCancellable({ isOwnRequest: request.requestedByUserId === actor.id, status: request.status }) ||
+        !(await hasPermission(actor.role, "inventory.requests", "WRITE"))
+      ) {
         fail("FORBIDDEN", "요청을 취소할 권한이 없습니다.");
       }
 
@@ -269,7 +274,10 @@ export async function rejectPartRequest(input: RejectPartRequestInput): Promise<
         .where(eq(inventoryPartRequestItems.requestId, request.id));
       const totalIssued = items.reduce((sum, item) => sum + item.issuedQuantity, 0);
 
-      if (!canRejectPartRequest(actor.role, { status: request.status, issuedQuantityAcrossItems: totalIssued })) {
+      if (
+        !isRequestRejectable({ status: request.status, issuedQuantityAcrossItems: totalIssued }) ||
+        !(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))
+      ) {
         fail("FORBIDDEN", "요청을 거절할 권한이 없습니다.");
       }
 
@@ -332,11 +340,12 @@ export async function partiallyCloseRequest(input: PartiallyCloseRequestInput): 
       const totalRemaining = items.reduce((sum, item) => sum + Math.max(0, item.requestedQuantity - item.issuedQuantity), 0);
 
       if (
-        !canPartiallyCloseRequest(actor.role, {
+        !isRequestPartiallyClosable({
           status: request.status,
           issuedQuantityAcrossItems: totalIssued,
           remainingQuantityAcrossItems: totalRemaining,
-        })
+        }) ||
+        !(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))
       ) {
         fail("FORBIDDEN", "요청을 종료할 권한이 없습니다.");
       }
@@ -430,8 +439,14 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
       }
       const isCaseLocked = rc?.isLocked ?? false;
 
-      if (!canIssuePartRequest(actor.role, { isCaseLocked, status: request.status })) {
-        if (!isIssuableStatus(request.status)) fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
+      // 상태와 역할을 따로 판정한다. 전에는 한 함수가 둘을 함께 보고 실패
+      // 이유를 사후에 되짚었는데, 이제 어느 쪽에서 막혔는지가 코드에 그대로
+      // 드러난다.
+      void isCaseLocked;
+      if (!isRequestIssuable({ status: request.status })) {
+        fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
+      }
+      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
         fail("FORBIDDEN", "불출 권한이 없습니다.");
       }
 

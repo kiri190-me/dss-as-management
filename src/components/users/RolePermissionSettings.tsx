@@ -15,6 +15,7 @@ import {
   featuresOfArea,
   findPermissionFeature,
   hasFeatures,
+  isSettingsEnforced,
   levelHintOfLeaf,
   selectableLevelsOfLeaf,
 } from "@/lib/auth/permission-features";
@@ -586,7 +587,15 @@ function LeafTable({
       {data.canWiden && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           <span className="text-amber-600 dark:text-amber-400">▲</span> 표시는 기본 정책보다 넓게 주는
-          값입니다. 지금 코드가 막고 있는 동작이 실제로 열리는지는 기능마다 다릅니다.
+          값입니다.{" "}
+          {isSettingsEnforced(leafKey) ? (
+            <>이 메뉴는 <strong>설정이 최종 판정</strong>이라, 넓히면 실제로 그 조작이 열립니다.</>
+          ) : (
+            <>
+              이 메뉴는 <strong>아직 코드가 최종 판정</strong>이라, 넓혀도 실제로는 열리지 않을 수
+              있습니다. 좁히는 것은 지금도 그대로 적용됩니다.
+            </>
+          )}
         </p>
       )}
     </div>

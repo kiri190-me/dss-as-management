@@ -108,7 +108,7 @@ export function canCreatePartRequest(role: Role, ctx: { isCaseLocked: boolean })
 
 /** AS_ENGINEER only, and only their own request, and only while it is still PENDING (zero issued) — allowed even if the case has since become locked, because cancelling never deducts stock. */
 export function canCancelOwnRequest(role: Role, ctx: { isOwnRequest: boolean; status: InventoryPartRequestStatus }): boolean {
-  return role === "AS_ENGINEER" && ctx.isOwnRequest && ctx.status === "PENDING";
+  return role === "AS_ENGINEER" && isRequestCancellable(ctx);
 }
 
 /** Gates the manager request-list/management screen and "view all requests." SALES is deliberately excluded — no access to request screens in Phase 5B-3. */
@@ -124,7 +124,7 @@ export function canViewPartRequests(role: Role): boolean {
 /** Issue (the only action that ever deducts stock in this workflow): same three privileged roles, and only while the request is still in an issuable status — shipped or not, per the shipment-lock removal policy. */
 export function canIssuePartRequest(role: Role, ctx: { isCaseLocked: boolean; status: InventoryPartRequestStatus }): boolean {
   void ctx.isCaseLocked;
-  if (ctx.status !== "PENDING" && ctx.status !== "PARTIALLY_ISSUED") return false;
+  if (!isRequestIssuable(ctx)) return false;
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
 }
 
@@ -138,7 +138,7 @@ export function canIssuePartRequest(role: Role, ctx: { isCaseLocked: boolean; st
  * PARTIALLY_CLOSED instead.
  */
 export function canRejectPartRequest(role: Role, ctx: { status: InventoryPartRequestStatus; issuedQuantityAcrossItems: number }): boolean {
-  if (ctx.status !== "PENDING" || ctx.issuedQuantityAcrossItems !== 0) return false;
+  if (!isRequestRejectable(ctx)) return false;
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
 }
 
@@ -147,6 +147,54 @@ export function canPartiallyCloseRequest(
   role: Role,
   ctx: { status: InventoryPartRequestStatus; issuedQuantityAcrossItems: number; remainingQuantityAcrossItems: number }
 ): boolean {
-  if (ctx.status !== "PARTIALLY_ISSUED" || ctx.issuedQuantityAcrossItems <= 0 || ctx.remainingQuantityAcrossItems <= 0) return false;
+  if (!isRequestPartiallyClosable(ctx)) return false;
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
+}
+
+/**
+ * ============================================================================
+ * 맥락 조건만 따로 — "언제" 되는가
+ * ============================================================================
+ * 위의 can*() 함수들은 "언제"(요청이 아직 PENDING인가, 내 요청인가)와
+ * "누가"(역할)를 한 몸에 담고 있었다. 역할 판정이 role_permissions 설정으로
+ * 넘어가면서(permission-resolver.ts) 부르는 쪽은 둘을 따로 물어야 한다.
+ *
+ * 그래서 맥락 조건을 여기로 뽑고, 위의 can*() 함수들이 **이것을 불러서** 쓰도록
+ * 했다. 조건을 복사해 두 벌로 만들면 한쪽만 고쳐지는 날이 오고, 권한 검사에서
+ * 그런 어긋남은 조용히 뚫리는 쪽으로 기운다.
+ *
+ * can*() 함수들은 사라지지 않는다 — 이제 '지금 정책의 기본값'을 정하는
+ * 자리이고(permission-baseline.ts가 부른다), 설정이 없을 때의 답이 된다.
+ * ============================================================================
+ */
+
+/** 취소할 수 있는 상태인가 — 내 요청이고 아직 아무것도 나가지 않았을 때만. */
+export function isRequestCancellable(ctx: { isOwnRequest: boolean; status: InventoryPartRequestStatus }): boolean {
+  return ctx.isOwnRequest && ctx.status === "PENDING";
+}
+
+/** 출고할 수 있는 상태인가. 출고는 이 흐름에서 재고를 실제로 차감하는 유일한 조작이다. */
+export function isRequestIssuable(ctx: { status: InventoryPartRequestStatus }): boolean {
+  return ctx.status === "PENDING" || ctx.status === "PARTIALLY_ISSUED";
+}
+
+/** 거부할 수 있는 상태인가 — 아직 PENDING이고 나간 수량이 0일 때만. */
+export function isRequestRejectable(ctx: {
+  status: InventoryPartRequestStatus;
+  issuedQuantityAcrossItems: number;
+}): boolean {
+  return ctx.status === "PENDING" && ctx.issuedQuantityAcrossItems === 0;
+}
+
+/** 부분 마감할 수 있는 상태인가 — 일부는 나갔고 일부는 남아 있을 때만. */
+export function isRequestPartiallyClosable(ctx: {
+  status: InventoryPartRequestStatus;
+  issuedQuantityAcrossItems: number;
+  remainingQuantityAcrossItems: number;
+}): boolean {
+  return (
+    ctx.status === "PARTIALLY_ISSUED" &&
+    ctx.issuedQuantityAcrossItems > 0 &&
+    ctx.remainingQuantityAcrossItems > 0
+  );
 }

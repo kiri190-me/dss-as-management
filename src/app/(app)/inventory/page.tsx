@@ -5,6 +5,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability, getDistinctCategories, getDistinctItemTypes } from "@/lib/db/queries/inventory";
 import InventoryListScreen from "@/components/inventory/InventoryListScreen";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
+import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
 export const metadata: Metadata = {
   title: "재고 관리 | DSS A/S 관리 시스템",
@@ -46,7 +47,7 @@ export default async function InventoryPage() {
       ownerAvailabilityByPartId={ownerAvailabilityByPartId}
       categories={categories}
       itemTypes={itemTypes}
-      actingUserRole={actingUser.role}
+      capabilities={await resolveInventoryCapabilities(actingUser.role)}
     />
   );
 }
