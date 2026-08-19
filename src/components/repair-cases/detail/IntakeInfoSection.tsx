@@ -59,7 +59,6 @@ export default function IntakeInfoSection({
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
           <Field label="인수일" value={resolved.receivedAt} />
           <Field label="유상/무상" value={resolved.paidOrWarranty} />
-          <Field label="보고서번호" value={resolved.legacyReportNumber ?? "-"} />
           <Field label="고객사" value={resolved.customerName} />
           <Field label="End-User" value={resolved.endUserName ?? "-"} />
           <Field

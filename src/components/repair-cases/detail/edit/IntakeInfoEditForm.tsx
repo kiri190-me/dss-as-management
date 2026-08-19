@@ -42,6 +42,11 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
  * SALES_FIELDS에는 의도적으로 넣지 않았다 — repair-case-edit-
  * authorization.ts 참고) — 다른 역할은 항상 읽기 전용으로 본다.
  *
+ * 보고서번호(legacyReportNumber)는 INTAKE 섹션 필드지만 이 폼에는 없다 —
+ * 담당 엔지니어와 같은 이유로 상단 요약 카드의 ReportNumberEditCell이 유일한
+ * 편집 지점이다. 이 폼은 그 필드를 제출하지 않는다(섹션 권한 매트릭스에는
+ * 그대로 남아 있고, 그 카드가 이 섹션으로 제출한다).
+ *
  * 고객사/End-User는 A/S 접수 폼(IntakeFormInner.tsx)과 동일한 자유 입력
  * 콤보박스다 — 같은 entity-name-match.ts 매칭/순위 규칙을 그대로 재사용하고
  * (규칙을 여기서 다시 구현하지 않는다), 매칭되지 않는 이름은 "새로 등록"을
@@ -84,9 +89,6 @@ export default function IntakeInfoEditForm({
   // 저장된 값으로 항상 프리셀렉트되고, 편집 가능하면 제출 시 항상 값이
   // 함께 전송된다(값을 비워 다시 미정 상태로 되돌리는 개념 자체가 없다).
   const [priority, setPriority] = useState<Priority>(resolved.priority);
-  // 보고서번호 — 자동 채번이 없는 수기 값이라 접수 시 오기입/미기입을 여기서
-  // 고친다. 비워서 제출하면 null로 지워진다(연락처 필드들과 같은 원칙).
-  const [legacyReportNumber, setLegacyReportNumber] = useState(resolved.legacyReportNumber ?? "");
   const [contactName, setContactName] = useState(resolved.contactName ?? "");
   const [contactPhone, setContactPhone] = useState(resolved.contactPhone ?? "");
   const [contactEmail, setContactEmail] = useState(resolved.contactEmail ?? "");
@@ -193,7 +195,6 @@ export default function IntakeInfoEditForm({
       fields.internalTargetShipmentDate = internalTargetShipmentDate || null;
     }
     if (canEdit("priority")) fields.priority = priority;
-    if (canEdit("legacyReportNumber")) fields.legacyReportNumber = legacyReportNumber || null;
     if (canEdit("contactName")) fields.contactName = contactName || null;
     if (canEdit("contactPhone")) fields.contactPhone = contactPhone || null;
     if (canEdit("contactEmail")) fields.contactEmail = contactEmail || null;
@@ -411,23 +412,6 @@ export default function IntakeInfoEditForm({
         )}
 
         <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
-
-        {canEdit("legacyReportNumber") ? (
-          <div>
-            <label className={editLabelClass}>보고서번호</label>
-            <input
-              className={editInputClass}
-              value={legacyReportNumber}
-              disabled={disabled}
-              onChange={(e) => setLegacyReportNumber(e.target.value)}
-            />
-            {fieldErrors.legacyReportNumber && (
-              <p className={editErrorClass}>{fieldErrors.legacyReportNumber}</p>
-            )}
-          </div>
-        ) : (
-          <ReadOnlyField label="보고서번호" value={resolved.legacyReportNumber ?? "-"} />
-        )}
 
         {canEdit("contactName") && (
           <div>

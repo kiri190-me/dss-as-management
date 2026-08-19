@@ -40,9 +40,10 @@ export const SECTION_FIELD_NAMES = {
     // 섹션이 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다).
     "internalTargetInspectionCompletionDate",
     "internalTargetShipmentDate",
-    // 보고서번호 — A/S 접수 폼에서 수기로 받는 값이며, 접수 이후에는 이
-    // 섹션이 유일한 수정 지점이다(자동 채번이 없으므로 오기입을 고칠 곳이
-    // 반드시 필요하다).
+    // 보고서번호 — A/S 접수 폼에서 수기로 받는 값이며, 접수 이후에는 상단
+    // 요약 카드의 ReportNumberEditCell이 이 섹션으로 제출해 고친다(담당
+    // 엔지니어가 FAULT_SERVICE 섹션으로 제출하는 것과 같은 구조). 인수 정보
+    // 편집 폼에는 이 입력이 없다.
     "legacyReportNumber",
     "contactName",
     "contactPhone",

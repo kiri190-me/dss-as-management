@@ -87,6 +87,10 @@ export default function RepairCaseDetailView({
   const productFields = fieldsFor("PRODUCT");
   const faultServiceFields = fieldsFor("FAULT_SERVICE");
   const canEditEngineer = canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "assignedEngineerId");
+  // 보고서번호도 담당 엔지니어와 같은 방식이다 — 상단 카드가 유일한 편집
+  // 지점이고, 권한 판단은 인수 정보 섹션과 같은 필드 매트릭스를 그대로 쓴다.
+  const canEditReportNumber =
+    canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "legacyReportNumber");
 
   function handleDone() {
     setEditingSection(null);
@@ -94,7 +98,12 @@ export default function RepairCaseDetailView({
 
   return (
     <div className="flex flex-col gap-4">
-      <DetailHeader resolved={effective} canEditEngineer={canEditEngineer} referenceData={referenceData} />
+      <DetailHeader
+        resolved={effective}
+        canEditEngineer={canEditEngineer}
+        canEditReportNumber={canEditReportNumber}
+        referenceData={referenceData}
+      />
       <ExceptionStatusNotice exceptionStatus={effective.exceptionStatus} />
       {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
         <PendingBillingDecisionCard

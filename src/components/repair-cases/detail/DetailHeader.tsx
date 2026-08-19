@@ -8,6 +8,7 @@ import {
   WorkflowOverrideBadge,
 } from "@/components/repair-cases/badges";
 import EngineerEditCell from "@/components/repair-cases/detail/edit/EngineerEditCell";
+import ReportNumberEditCell from "@/components/repair-cases/detail/edit/ReportNumberEditCell";
 import { workflowTypeLabels } from "@/lib/domain/types";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -17,17 +18,20 @@ import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-reference
  * effectiveIsOverdue를 표시한다 — 워크플로 재정의가 있으면 그 결과를,
  * 없으면 원본과 동일한 값을 그대로 보여준다(effective-repair-case.ts 참고).
  *
- * 담당 엔지니어는 이 카드가 유일한 정상 편집 지점이다(고장 및 서비스 정보의
- * 편집 폼에는 더 이상 없다) — canEditEngineer/referenceData는
- * RepairCaseDetailView가 계산해 그대로 전달한다.
+ * 담당 엔지니어와 보고서번호는 이 카드가 유일한 정상 편집 지점이다(각각 고장
+ * 및 서비스 정보 / 인수 정보의 편집 폼에는 더 이상 없다) —
+ * canEditEngineer/canEditReportNumber/referenceData는 RepairCaseDetailView가
+ * 계산해 그대로 전달한다.
  */
 export default function DetailHeader({
   resolved,
   canEditEngineer,
+  canEditReportNumber,
   referenceData,
 }: {
   resolved: EffectiveRepairCase;
   canEditEngineer: boolean;
+  canEditReportNumber: boolean;
   referenceData: IntakeReferenceData | null;
 }) {
   return (
@@ -36,7 +40,17 @@ export default function DetailHeader({
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           {resolved.intakeNumber}
         </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">보고서번호 {resolved.legacyReportNumber ?? "—"}</p>
+        {/* 편집 중에는 이 자리에 form이 렌더링되므로 p가 아니라 div다
+            (p 안의 form/div는 브라우저가 다시 배치해 hydration이 깨진다). */}
+        <div className="text-sm text-zinc-500 dark:text-zinc-400">
+          보고서번호{" "}
+          <ReportNumberEditCell
+            repairCaseId={resolved.id}
+            version={resolved.version}
+            legacyReportNumber={resolved.legacyReportNumber}
+            canEdit={canEditReportNumber}
+          />
+        </div>
         <DemoReferenceNotice />
       </div>
       <div className="flex flex-wrap items-center gap-2">
