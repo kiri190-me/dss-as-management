@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { ListCard } from "@/components/common/list-card";
 import Link from "next/link";
 import { procedureEquipmentTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
 import type { TechnicalProcedureTemplateListRow } from "@/lib/db/queries/procedure-templates";
@@ -62,6 +64,9 @@ export default function TechnicalProcedureTemplateListScreen({
           표시할 기술 절차가 없습니다.
         </p>
       ) : (
+        <ResponsiveList
+          listId="technical-procedures"
+          table={
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -99,6 +104,32 @@ export default function TechnicalProcedureTemplateListScreen({
             </tbody>
           </table>
         </div>
+          }
+          cards={
+            <ul className={LIST_CARD_GRID}>
+              {templates.map((t) => (
+                <ListCard
+                  key={t.id}
+                  href={`/procedures/${t.id}`}
+                  title={t.name}
+                  badge={
+                    <span className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status]}`}>
+                      {procedureTemplateStatusLabels[t.status]}
+                    </span>
+                  }
+                  fields={[
+                    { label: "코드", value: <span className="font-mono">{t.code}</span> },
+                    { label: "설비", value: procedureEquipmentTypeLabels[t.equipmentType] },
+                    { label: "버전", value: `v${t.version}` },
+                    { label: "노드/분기", value: <span className="tabular-nums">{t.nodeCount} / {t.edgeCount}</span> },
+                    { label: "생성", value: formatDate(t.createdAt) },
+                    { label: "게시", value: formatDate(t.publishedAt) },
+                  ]}
+                />
+              ))}
+            </ul>
+          }
+        />
       )}
     </div>
   );

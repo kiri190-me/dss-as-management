@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { ListCard } from "@/components/common/list-card";
 import {
   procedureEquipmentTypeLabels,
   procedureTemplateStatusLabels,
@@ -32,6 +34,9 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
           표시할 템플릿이 없습니다.
         </p>
       ) : (
+        <ResponsiveList
+          listId="procedure-templates"
+          table={
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
@@ -96,6 +101,59 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
             </tbody>
           </table>
         </div>
+          }
+          cards={
+            <ul className={LIST_CARD_GRID}>
+              {templates.map((t) => (
+                <ListCard
+                  key={t.id}
+                  href={`/procedures/${t.id}`}
+                  title={t.name}
+                  badge={
+                    <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                      <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status]}`}>
+                        {procedureTemplateStatusLabels[t.status]}
+                      </span>
+                      {t.isReferenceOnly && (
+                        <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                          참고용
+                        </span>
+                      )}
+                    </span>
+                  }
+                  fields={[
+                    { label: "코드", value: <span className="font-mono">{t.code}</span> },
+                    { label: "설비", value: procedureEquipmentTypeLabels[t.equipmentType] },
+                    { label: "버전", value: `v${t.version}` },
+                    { label: "원본", value: `${t.sourceWorksheetCount}개 시트` },
+                    { label: "노드", value: <span className="tabular-nums">{t.nodeCount}</span> },
+                    { label: "체크리스트", value: <span className="tabular-nums">{t.checklistItemCount}</span> },
+                    {
+                      label: "검증",
+                      value:
+                        t.validationErrorCount === 0 && t.validationWarningCount === 0 ? null : (
+                          <span className="flex flex-wrap gap-1">
+                            {t.validationErrorCount > 0 && (
+                              <span className="inline-flex whitespace-nowrap rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
+                                오류 {t.validationErrorCount}
+                              </span>
+                            )}
+                            {t.validationWarningCount > 0 && (
+                              <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                                경고 {t.validationWarningCount}
+                              </span>
+                            )}
+                          </span>
+                        ),
+                    },
+                    { label: "생성", value: formatDate(t.createdAt) },
+                    { label: "게시", value: formatDate(t.publishedAt) },
+                  ]}
+                />
+              ))}
+            </ul>
+          }
+        />
       )}
     </div>
   );

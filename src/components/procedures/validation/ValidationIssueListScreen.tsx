@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { ListCard } from "@/components/common/list-card";
 import Link from "next/link";
 import {
   procedureValidationSeverityLabels,
@@ -123,6 +125,9 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
           조건에 맞는 이슈가 없습니다.
         </p>
       ) : (
+        <ResponsiveList
+          listId="procedure-validation-issues"
+          table={
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[960px] text-left text-xs">
             <thead>
@@ -197,6 +202,65 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
             </tbody>
           </table>
         </div>
+          }
+          cards={
+            <ul className={LIST_CARD_GRID}>
+              {filtered.map((issue) => {
+                const { shapeId, connectorId } = parseSourceReference(issue.sourceReference);
+                const workflowHref = buildWorkflowViewHref({
+                  templateId: template.id,
+                  issueId: issue.id,
+                  worksheet: issue.sourceWorksheet,
+                  shapeId,
+                  connectorId,
+                  errorFocus: true,
+                });
+                return (
+                  <ListCard
+                    key={issue.id}
+                    href={`/procedures/${template.id}/validation/${issue.id}`}
+                    title={procedureValidationIssueTypeLabels[issue.issueType] ?? issue.issueType}
+                    badge={
+                      <span className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_BADGE[issue.resolutionStatus]}`}>
+                        {procedureValidationResolutionStatusLabels[issue.resolutionStatus]}
+                      </span>
+                    }
+                    fields={[
+                      { label: "심각도", value: procedureValidationSeverityLabels[issue.severity] },
+                      { label: "워크시트", value: issue.sourceWorksheet },
+                      { label: "원본", value: <span className="font-mono">{issue.sourceReference}</span> },
+                      { label: "내용", value: issue.message },
+                      {
+                        label: "신뢰도",
+                        value: issue.classification
+                          ? procedureValidationConfidenceLabels[issue.classification.confidence]
+                          : null,
+                      },
+                      { label: "처리자", value: issue.resolvedByName },
+                      { label: "처리일", value: issue.resolvedAt ? formatDate(issue.resolvedAt) : null },
+                    ]}
+                    actions={
+                      <>
+                        <Link
+                          href={workflowHref}
+                          className="rounded-md border border-blue-300 px-2 py-1 text-[10px] font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                        >
+                          오류 위치 보기
+                        </Link>
+                        <Link
+                          href={`/procedures/${template.id}/validation/${issue.id}`}
+                          className="rounded-md border border-zinc-300 px-2 py-1 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          처리
+                        </Link>
+                      </>
+                    }
+                  />
+                );
+              })}
+            </ul>
+          }
+        />
       )}
     </div>
   );

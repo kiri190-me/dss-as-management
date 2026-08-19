@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { ListCard } from "@/components/common/list-card";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
@@ -73,6 +75,9 @@ function WorkflowTable({
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
         {description && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{description}</p>}
       </div>
+      <ResponsiveList
+        listId="workflows"
+        table={
       <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table className="w-full min-w-[36rem] text-sm">
           <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -111,6 +116,33 @@ function WorkflowTable({
           </tbody>
         </table>
       </div>
+        }
+        cards={
+          <ul className={LIST_CARD_GRID}>
+            {rows.map((row) => (
+              <ListCard
+                key={row.code}
+                href={`/workflows/${row.code}`}
+                title={workflowTypeLabels[row.code]}
+                badge={
+                  <span className="shrink-0 whitespace-nowrap rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {row.currentVersionNumber === null ? "버전 없음" : `v${row.currentVersionNumber}`}
+                  </span>
+                }
+                fields={[
+                  { label: "코드", value: <span className="font-mono">{row.code}</span> },
+                  { label: "단계", value: <span className="tabular-nums">{row.stepCount}</span> },
+                  { label: "이동 규칙", value: <span className="tabular-nums">{row.transitionCount}</span> },
+                  {
+                    label: "진행 중",
+                    value: <span className="tabular-nums">{row.activeCaseCount}건</span>,
+                  },
+                ]}
+              />
+            ))}
+          </ul>
+        }
+      />
     </section>
   );
 }
