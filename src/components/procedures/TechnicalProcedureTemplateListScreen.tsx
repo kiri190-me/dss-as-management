@@ -67,7 +67,6 @@ export default function TechnicalProcedureTemplateListScreen({
         <ResponsiveList
           listId="technical-procedures"
           table={
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -103,7 +102,7 @@ export default function TechnicalProcedureTemplateListScreen({
               ))}
             </tbody>
           </table>
-        </div>
+
           }
           cards={
             <ul className={LIST_CARD_GRID}>

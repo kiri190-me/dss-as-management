@@ -37,7 +37,6 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
         <ResponsiveList
           listId="procedure-templates"
           table={
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
               <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -100,7 +99,7 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
               ))}
             </tbody>
           </table>
-        </div>
+
           }
           cards={
             <ul className={LIST_CARD_GRID}>

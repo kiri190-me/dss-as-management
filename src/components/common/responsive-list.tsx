@@ -1,6 +1,7 @@
 "use client";
 
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOverflow";
 
 /**
  * ============================================================================
@@ -8,30 +9,34 @@ import { useSyncExternalStore, type ReactNode } from "react";
  * ============================================================================
  * 이 서비스의 목록은 전부 같은 규칙을 따른다:
  *
- *     좁으면 **카드**(표가 들어가지 않는다).
- *     넓으면 **토글로 고른 대로** — 기본은 표.
- *
- * 폭이 정하는 것과 사람이 정하는 것을 나눈 이유는, 좁은 자리에서는 고를 것이
- * 없기 때문이다. 열 여덟 개짜리 표를 폭 30rem에 밀어 넣으면 가로 스크롤만
- * 남는다. 반대로 넓은 자리에서는 둘 다 쓸 만하고, 그날 무엇을 찾느냐에 따라
- * 답이 다르다 — 그래서 그때만 고르게 한다.
+ *     표가 안 들어가면 → **카드**
+ *     들어가면        → **토글로 고른 대로** (기본 표)
  *
  * ── 왜 이 파일이 생겼나 ─────────────────────────────────────────────────
  * 규칙 자체는 전부터 있었지만 화면마다 기준이 달랐다 — 접수 건·고객사·제품
- * 모델은 lg에서, 첨부파일은 md에서 바뀌었다. 같은 창 크기에서 어떤 목록은
- * 표이고 어떤 목록은 카드인 상태가 되고, 그러면 "이 화면은 왜 카드지?"를
- * 화면마다 따로 기억해야 한다. 기준을 한 곳에 적어 두면 그 질문이 사라진다.
+ * 모델은 lg, 첨부파일은 md, 진단 Flowchart는 실제 넘침 측정. 같은 창 크기에서
+ * 어떤 목록은 표이고 어떤 목록은 카드인 상태가 되고, 그러면 "이 화면은 왜
+ * 카드지?"를 화면마다 따로 기억해야 한다.
  *
- * ── 화면 폭이 아니라 목록 폭이다 ────────────────────────────────────────
- * 컨테이너 쿼리(@container)를 쓴다. 이 앱은 사이드바를 접었다 폈다 하므로
- * **같은 창 크기에서도 목록에 주어지는 폭이 다르다.** 화면 폭으로 판단하면
- * 사이드바를 펼친 좁은 자리에 표를 밀어 넣게 되고, 접었을 때 남는 폭을 쓰지
- * 못한다. 목록 자신의 폭을 보면 둘 다 맞는다.
+ * ── "안 들어간다"를 어떻게 아는가 ───────────────────────────────────────
+ * 고정 브레이크포인트로 정하지 않는다. 표마다 필요한 폭이 다르고, 같은 표라도
+ * 열이 늘거나(권한에 따라 '관리' 열이 붙는다) 줄면 달라진다. 진단 Flowchart
+ * 화면이 이미 그 이유로 useTableFitsWithoutOverflow를 쓰고 있었고, 거기 적힌
+ * 근거가 옳다 — **표를 실제로 그려 놓고 넘치는지 재는 것**만이 정확하다.
+ * 그래서 이미 있던 그 방식을 서비스 전체의 기준으로 삼았다.
  *
- * ── 기준값 ──────────────────────────────────────────────────────────────
- * @4xl = 56rem(896px). 이 서비스의 목록은 대개 6~8열이라 그보다 좁아지면
- * 열이 짓눌리거나 가로 스크롤이 생긴다. 한 값으로 정한 이상 어떤 표에는 조금
- * 이르고 어떤 표에는 조금 늦지만, 목록마다 다른 값을 쓰는 쪽이 더 나쁘다.
+ * 창 크기가 아니라 이 목록이 실제로 차지한 폭을 재므로, 사이드바를 접었다
+ * 폈다 해도 알아서 맞는다.
+ *
+ * ── 표는 안 보일 때도 DOM에 남는다 ──────────────────────────────────────
+ * 재려면 진짜 레이아웃이 있어야 한다. 그래서 카드를 보여 주는 동안에도 표는
+ * 화면 밖에 둔 채 계속 잰다. 그 덕에 자리가 다시 넓어지면 표로 돌아온다 —
+ * 지워 버리면 잴 것이 없어져 영영 카드로 남는다.
+ *
+ * ── 표 껍데기는 여기가 소유한다 ─────────────────────────────────────────
+ * 부르는 쪽은 <table>만 넘긴다. 스크롤 래퍼를 각자 들고 있으면 넘침이 그
+ * 안쪽에서 흡수되어 바깥은 영원히 "들어간다"고 답한다. 테두리·모서리도 여기서
+ * 주므로 목록마다 테두리 모양이 달라지지도 않는다.
  * ============================================================================
  */
 
@@ -50,9 +55,9 @@ export const LIST_CARD_GRID = "grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-
 /**
  * 고른 보기 방식.
  *
- * TABLE은 "항상 표"가 아니라 "넓으면 표"다 — 좁은 자리에서는 어차피 카드로
- * 내려간다. 그래서 토글은 좁을 때 감춘다: 눌러도 아무 일이 없는 버튼을 보여
- * 주면 고장으로 읽힌다.
+ * TABLE은 "항상 표"가 아니라 "들어가면 표"다 — 안 들어가는 폭에서는 어차피
+ * 카드로 내려간다. 그래서 토글은 표가 안 들어갈 때 감춘다: 눌러도 아무 일이
+ * 없는 버튼을 보여 주면 고장으로 읽힌다.
  */
 type ViewMode = "TABLE" | "CARD";
 
@@ -85,11 +90,7 @@ function readServer(): ViewMode {
 }
 
 function useViewMode(listId: string): ViewMode {
-  return useSyncExternalStore(
-    subscribe,
-    () => read(listId),
-    readServer
-  );
+  return useSyncExternalStore(subscribe, () => read(listId), readServer);
 }
 
 function setViewMode(listId: string, next: ViewMode): void {
@@ -97,47 +98,53 @@ function setViewMode(listId: string, next: ViewMode): void {
   for (const listener of listeners) listener();
 }
 
-/**
- * 같은 목록의 표와 카드를 함께 받아 폭과 선택에 따라 하나만 보인다.
- *
- * 둘 다 DOM에는 남는다(CSS로 감춘다). 이 서비스의 목록은 한 화면에 담기는
- * 규모라 그 비용이 문제가 되지 않고, 대신 창을 줄이는 즉시 바뀌며 서버 렌더와
- * 어긋날 일이 없다.
- *
- * @param listId 선택을 기억할 이름. 목록마다 따로 기억한다 — 재고는 카드로,
- *               요청 관리는 표로 보고 싶을 수 있는데 하나로 묶으면 한쪽을 바꿀
- *               때 다른 쪽이 따라 바뀐다.
- * @param meta   토글 왼쪽에 놓을 것(건수 등). 없으면 토글만 오른쪽에 붙는다.
- */
 export function ResponsiveList({
   listId,
   table,
   cards,
   meta,
+  measureKey,
 }: {
+  /** 선택을 기억할 이름. 목록마다 따로 기억한다. */
   listId: string;
+  /** <table> 자체. 스크롤 래퍼로 감싸지 않는다 — 위 주석 참조. */
   table: ReactNode;
   cards: ReactNode;
+  /** 토글 왼쪽에 놓을 것(건수 등). */
   meta?: ReactNode;
+  /**
+   * 내용이 바뀌어 표의 필요 폭이 달라지는 조건(행 수, 열을 늘리는 권한 플래그
+   * 등). ResizeObserver는 래퍼의 **자기 폭** 변화만 잡으므로, 내용이 바뀌어
+   * 생기는 변화는 이것으로 다시 재게 한다.
+   */
+  measureKey?: readonly unknown[];
 }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const fits = useTableFitsWithoutOverflow(wrapperRef, measureKey ?? []);
   const mode = useViewMode(listId);
-
-  // 카드를 고르면 폭과 무관하게 카드다. 표를 고르면 넓을 때만 표이고 좁아지면
-  // 카드로 내려간다 — 이 두 줄이 위에 적은 규칙의 전부다.
-  const tableClass = mode === "CARD" ? "hidden" : "hidden @4xl:block";
-  const cardsClass = mode === "CARD" ? "block" : "@4xl:hidden";
+  const showTable = fits && mode === "TABLE";
 
   return (
-    <div className="@container flex flex-col gap-2">
+    <div className="@container relative flex flex-col gap-2">
       <div className="flex items-center justify-end gap-2">
         {meta}
-        {/* 좁은 자리에서는 고를 것이 없으므로 토글 자체를 감춘다. */}
-        <div className="hidden @4xl:block">
-          <ViewModeToggle value={mode} onChange={(next) => setViewMode(listId, next)} />
-        </div>
+        {/* 표가 안 들어가면 고를 것이 없다. */}
+        {fits && <ViewModeToggle value={mode} onChange={(next) => setViewMode(listId, next)} />}
       </div>
-      <div className={tableClass}>{table}</div>
-      <div className={cardsClass}>{cards}</div>
+
+      <div
+        ref={wrapperRef}
+        aria-hidden={!showTable}
+        className={
+          showTable
+            ? "overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+            : "invisible pointer-events-none absolute inset-x-0 bottom-0 overflow-x-hidden"
+        }
+      >
+        {table}
+      </div>
+
+      {!showTable && cards}
     </div>
   );
 }

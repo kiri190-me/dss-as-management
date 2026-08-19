@@ -35,14 +35,17 @@ test("empty state: no assigned cases at all shows the exact required copy", () =
   assert.ok(!html.includes("필터 초기화"), "the no-cases-at-all state must not offer a filter-reset button");
 });
 
-test("표와 카드를 함께 그리고, 공용 기준(@4xl)으로 하나만 보인다", () => {
-  // 끊는 지점은 화면마다 따로 정하지 않는다 — components/common/responsive-list.tsx
-  // 한 곳이 정하고 모든 목록이 그것을 쓴다. 여기서 검사하는 것은 이 화면이
-  // 그 공용 기준을 타고 있는가이지, 값 자체가 아니다.
+test("표와 카드를 공용 기준(ResponsiveList)으로 함께 그린다", () => {
+  // 끊는 지점은 화면마다 정하지 않는다 — components/common/responsive-list.tsx
+  // 한 곳이 표가 실제로 넘치는지 재서 정하고, 모든 목록이 그것을 쓴다. 여기서
+  // 검사하는 것은 이 화면이 그 공용 기준을 타고 있는가이지 값 자체가 아니다.
+  //
+  // 서버 렌더에서는 아직 잰 적이 없으므로 표가 먼저 나온다(fits 초기값 true).
+  // 카드는 브라우저에서 실제로 넘칠 때 나타나므로 여기서는 단정하지 않는다.
   const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
-  assert.ok(html.includes("@container"), "공용 기준은 컨테이너 폭을 본다 — 화면 폭이 아니다");
-  assert.ok(html.includes("@4xl:block"), "넓을 때 보일 표 래퍼가 있어야 한다");
-  assert.ok(html.includes("@4xl:hidden"), "좁을 때만 보일 카드 래퍼가 있어야 한다");
+  assert.ok(html.includes("@container"), "공용 기준 래퍼를 타고 있어야 한다");
+  assert.ok(html.includes("보기 방식"), "표가 들어가면 보기 전환 토글이 있어야 한다");
+  assert.ok(html.includes("<table"), "서버 렌더에서는 표가 먼저 그려진다");
 });
 
 test("row's intake number links to the existing repair-case detail route, not a new detail screen", () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ResponsiveList } from "@/components/common/responsive-list";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { RepairCaseFlowchartManagementRow, RepairCaseFlowchartTrashRow } from "@/lib/db/queries/repair-case-flowcharts";
@@ -12,7 +13,6 @@ import {
   permanentlyDeleteRepairCaseFlowchartAction,
 } from "@/lib/server/actions/repair-case-flowcharts";
 import { getFlowchartRetentionStatus } from "@/lib/domain/repair-case-flowchart-retention";
-import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOverflow";
 
 const STATUS_BADGE: Record<string, string> = {
   사용중: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
@@ -573,10 +573,10 @@ function DiagnosisFlowchartTrashCardList({
 /**
  * Overflow-triggered alternative to the <table> — rendered by the parent
  * only when the real table would overflow its container
- * (useTableFitsWithoutOverflow, shared with 전체 A/S 현황's RepairCaseTable/
- * RepairCaseCardList), never via a fixed `md:` breakpoint — a fixed
- * breakpoint can't track this table's real required width, which changes
- * with the 관리 column's presence.
+ * (ResponsiveList — 서비스의 모든 목록이 쓰는 공용 기준이고, 그 안에서
+ * useTableFitsWithoutOverflow로 실제 넘침을 잰다), never via a fixed `md:`
+ * breakpoint — a fixed breakpoint can't track this table's real required
+ * width, which changes with the 관리 column's presence.
  * Two distinct links per card, same rule as the table: 인수번호 -> case
  * detail, Flowchart 이름 -> the editor — the card itself is never one big
  * clickable link.
@@ -714,12 +714,6 @@ export default function DiagnosisFlowchartManagementScreen({
   const filteredRows = useMemo(() => rows.filter((row) => matchesSearch(row, searchQuery)), [rows, searchQuery]);
   const filteredTrashRows = useMemo(() => trashRows.filter((row) => matchesTrashSearch(row, searchQuery)), [trashRows, searchQuery]);
 
-  const tableWrapperRef = useRef<HTMLDivElement>(null);
-  const fitsTable = useTableFitsWithoutOverflow(tableWrapperRef, [filteredRows.length, canManage, view]);
-
-  const trashTableWrapperRef = useRef<HTMLDivElement>(null);
-  const fitsTrashTable = useTableFitsWithoutOverflow(trashTableWrapperRef, [filteredTrashRows.length, canManage, view]);
-
   function requestDelete(row: RepairCaseFlowchartManagementRow) {
     setDeleteError(null);
     setDeleteTarget(row);
@@ -854,16 +848,10 @@ export default function DiagnosisFlowchartManagementScreen({
             {trashRows.length === 0 ? "휴지통이 비어 있습니다." : "검색 조건에 맞는 항목이 없습니다."}
           </p>
         ) : (
-          <div className="relative">
-            <div
-              ref={trashTableWrapperRef}
-              aria-hidden={!fitsTrashTable}
-              className={
-                fitsTrashTable
-                  ? "overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
-                  : "invisible pointer-events-none absolute inset-x-0 top-0 overflow-x-hidden"
-              }
-            >
+          <ResponsiveList
+            listId="diagnosis-flowchart-trash"
+            measureKey={[filteredTrashRows.length, canManage, canPermanentlyDelete]}
+            table={
               <table className="w-full min-w-[880px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -903,9 +891,8 @@ export default function DiagnosisFlowchartManagementScreen({
                   ))}
                 </tbody>
               </table>
-            </div>
-
-            {!fitsTrashTable && (
+            }
+            cards={
               <DiagnosisFlowchartTrashCardList
                 rows={filteredTrashRows}
                 canManage={canManage}
@@ -914,24 +901,18 @@ export default function DiagnosisFlowchartManagementScreen({
                 onRestoreRequested={requestRestore}
                 onPermanentDeleteRequested={requestPermanentDelete}
               />
-            )}
-          </div>
+            }
+          />
         )
       ) : filteredRows.length === 0 ? (
         <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           {rows.length === 0 ? "표시할 진단 Flowchart가 없습니다." : "검색 조건에 맞는 진단 Flowchart가 없습니다."}
         </p>
       ) : (
-        <div className="relative">
-          <div
-            ref={tableWrapperRef}
-            aria-hidden={!fitsTable}
-            className={
-              fitsTable
-                ? "overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
-                : "invisible pointer-events-none absolute inset-x-0 top-0 overflow-x-hidden"
-            }
-          >
+        <ResponsiveList
+          listId="diagnosis-flowcharts"
+          measureKey={[filteredRows.length, canManage]}
+          table={
             <table className="w-full min-w-[960px] text-left text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -980,10 +961,11 @@ export default function DiagnosisFlowchartManagementScreen({
                 })}
               </tbody>
             </table>
-          </div>
-
-          {!fitsTable && <DiagnosisFlowchartCardList rows={filteredRows} canManage={canManage} onDeleteRequested={requestDelete} />}
-        </div>
+          }
+          cards={
+            <DiagnosisFlowchartCardList rows={filteredRows} canManage={canManage} onDeleteRequested={requestDelete} />
+          }
+        />
       )}
 
       {deleteTarget && (

@@ -69,7 +69,6 @@ export default function ProductModelListScreen({ rows }: { rows: ProductModelLis
         <ResponsiveList
           listId="product-models"
           table={
-            <div className="overflow-x-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 bg-white text-left text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
@@ -108,7 +107,7 @@ export default function ProductModelListScreen({ rows }: { rows: ProductModelLis
                 ))}
               </tbody>
             </table>
-            </div>
+
           }
           cards={
             <div className={LIST_CARD_GRID}>

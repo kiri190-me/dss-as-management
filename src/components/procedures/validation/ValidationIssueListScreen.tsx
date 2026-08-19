@@ -128,7 +128,6 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
         <ResponsiveList
           listId="procedure-validation-issues"
           table={
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[960px] text-left text-xs">
             <thead>
               <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -201,7 +200,7 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
               })}
             </tbody>
           </table>
-        </div>
+
           }
           cards={
             <ul className={LIST_CARD_GRID}>

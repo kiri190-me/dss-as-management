@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
 import { createShipmentDelegationAction, revokeShipmentDelegationAction } from "@/lib/server/actions/shipment-delegations";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
@@ -100,6 +102,50 @@ export default function DelegationSection({
     }
     setListMessage("위임을 철회했습니다.");
     router.refresh();
+  }
+
+  type DelegationRow = (typeof delegations)[number];
+
+  function periodText(delegation: DelegationRow): string {
+    return `${formatTimestamp(delegation.startsAt)} ~ ${formatTimestamp(delegation.endsAt)}`;
+  }
+
+  function renderStatus(delegation: DelegationRow) {
+    const displayStatus = deriveDelegationDisplayStatus(delegation);
+    return (
+      <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_TONE[displayStatus]}`}>
+        {STATUS_LABELS[displayStatus]}
+      </span>
+    );
+  }
+
+  /**
+   * 철회할 수 있는가는 상태와 보는 사람에 함께 달려 있다. 표와 카드가 각자
+   * 따지면 한쪽에만 버튼이 남는 날이 오므로 여기 한 번만 적는다.
+   */
+  function renderRevokeAction(delegation: DelegationRow) {
+    const displayStatus = deriveDelegationDisplayStatus(delegation);
+    const canRevoke =
+      (displayStatus === "ACTIVE" || displayStatus === "SCHEDULED") &&
+      (isSuperAdmin || actingUser.id === delegation.representativeUserId);
+
+    if (canRevoke) {
+      return (
+        <button
+          type="button"
+          disabled={revokingId === delegation.id}
+          onClick={() => void handleRevoke(delegation.id)}
+          className="rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+        >
+          {revokingId === delegation.id ? "처리 중..." : "철회"}
+        </button>
+      );
+    }
+    return (
+      <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+        {displayStatus === "REVOKED" || displayStatus === "EXPIRED" ? "-" : "권한 없음"}
+      </span>
+    );
   }
 
   return (
@@ -207,69 +253,63 @@ export default function DelegationSection({
         </p>
       )}
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-              <th className="py-2 pr-3 font-medium">대표</th>
-              <th className="py-2 pr-3 font-medium">대리 승인자</th>
-              <th className="py-2 pr-3 font-medium">기간</th>
-              <th className="py-2 pr-3 font-medium">상태</th>
-              <th className="py-2 pr-3 font-medium">지정자</th>
-              <th className="py-2 pr-3 font-medium">사유</th>
-              <th className="py-2 pr-3 font-medium">작업</th>
-            </tr>
-          </thead>
-          <tbody>
-            {delegations.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
-                  아직 위임 이력이 없습니다.
-                </td>
-              </tr>
-            ) : (
-              delegations.map((delegation) => {
-                const displayStatus = deriveDelegationDisplayStatus(delegation);
-                const canRevoke =
-                  (displayStatus === "ACTIVE" || displayStatus === "SCHEDULED") &&
-                  (isSuperAdmin || actingUser.id === delegation.representativeUserId);
-                return (
-                  <tr key={delegation.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                    <td className="py-2 pr-3 text-zinc-900 dark:text-zinc-50">{delegation.representativeName}</td>
-                    <td className="py-2 pr-3 text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
-                    <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">
-                      {formatTimestamp(delegation.startsAt)} ~ {formatTimestamp(delegation.endsAt)}
-                    </td>
-                    <td className="py-2 pr-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_TONE[displayStatus]}`}>
-                        {STATUS_LABELS[displayStatus]}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{delegation.assignedByName}</td>
-                    <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{delegation.reason ?? "-"}</td>
-                    <td className="py-2 pr-3">
-                      {canRevoke ? (
-                        <button
-                          type="button"
-                          disabled={revokingId === delegation.id}
-                          onClick={() => void handleRevoke(delegation.id)}
-                          className="rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-                        >
-                          {revokingId === delegation.id ? "처리 중..." : "철회"}
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                          {displayStatus === "REVOKED" || displayStatus === "EXPIRED" ? "-" : "권한 없음"}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+      {delegations.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-zinc-200 px-3 py-8 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          아직 위임 이력이 없습니다.
+        </p>
+      ) : (
+        <div className="mt-4">
+          <ResponsiveList
+            listId="shipment-delegations"
+            table={
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                      <th scope="col" className="py-2 pr-3 font-medium">대표</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">대리 승인자</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">기간</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">상태</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">지정자</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">사유</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">작업</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {delegations.map((delegation) => (
+                      <tr key={delegation.id} className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800">
+                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.representativeName}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
+                        <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                        <td className="py-2 pr-3">{renderStatus(delegation)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{delegation.assignedByName}</td>
+                        <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{delegation.reason ?? "-"}</td>
+                        <td className="py-2 pr-3">{renderRevokeAction(delegation)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+            }
+            cards={
+              <ul className={LIST_CARD_GRID}>
+                {delegations.map((delegation) => (
+                  <ListCard
+                    key={delegation.id}
+                    title={`${delegation.representativeName} → ${delegation.delegateName}`}
+                    badge={renderStatus(delegation)}
+                    fields={[
+                      { label: "기간", value: periodText(delegation) },
+                      { label: "지정자", value: delegation.assignedByName },
+                      { label: "사유", value: delegation.reason },
+                    ]}
+                    actions={renderRevokeAction(delegation)}
+                  />
+                ))}
+              </ul>
+            }
+          />
+        </div>
+      )}
     </section>
   );
 }

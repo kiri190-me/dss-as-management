@@ -244,7 +244,6 @@ function PartTable({
   ownerAvailabilityByPartId: OwnerAvailability;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table className="w-full min-w-[56rem] text-sm">
         <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
           <tr>
@@ -328,6 +327,5 @@ function PartTable({
           ))}
         </tbody>
       </table>
-    </div>
   );
 }

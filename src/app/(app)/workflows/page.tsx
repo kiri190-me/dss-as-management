@@ -78,7 +78,6 @@ function WorkflowTable({
       <ResponsiveList
         listId="workflows"
         table={
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table className="w-full min-w-[36rem] text-sm">
           <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <tr>
@@ -115,7 +114,7 @@ function WorkflowTable({
             ))}
           </tbody>
         </table>
-      </div>
+
         }
         cards={
           <ul className={LIST_CARD_GRID}>
