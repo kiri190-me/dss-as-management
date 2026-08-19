@@ -372,6 +372,26 @@ export function maxMeaningfulLevelOfLeaf(leafKey: string): PermissionLevel {
   return area?.maxMeaningfulLevel ?? "NONE";
 }
 
+/**
+ * 메뉴의 수준 = 하위 기능 중 가장 높은 값. 하위 기능이 없으면 메뉴 자신의 값.
+ *
+ * 이 계산은 세 곳에서 필요하다 — 실효 권한을 구하는 resolver, 저장 전에 잠금을
+ * 검사하는 mutation, 그리고 저장 전 초안을 보여 주는 화면. 세 곳에 각자 적어
+ * 두면 한 곳만 고쳐지는 날이 오고, 그러면 "화면에는 열려 보이는데 실제로는
+ * 막히는"(또는 그 반대의) 어긋남이 생긴다. 그래서 값을 인자로 받는 순수 함수로
+ * 한 번만 적는다 — 부르는 쪽이 저장된 값이든 초안이든 넘기면 된다.
+ */
+export function areaLevelFromLeaves(
+  areaKey: string,
+  levelOf: (leafKey: string) => PermissionLevel
+): PermissionLevel {
+  if (!hasFeatures(areaKey)) return levelOf(areaKey);
+  return featuresOfArea(areaKey).reduce<PermissionLevel>((acc, feature) => {
+    const level = levelOf(feature.key);
+    return permissionLevelRank(level) > permissionLevelRank(acc) ? level : acc;
+  }, "NONE");
+}
+
 /** 이 잎에서 의미가 있는 가장 낮은 수준(접근 불가 제외). 기본은 읽기다. */
 export function minMeaningfulLevelOfLeaf(leafKey: string): PermissionLevel {
   return FEATURE_BY_KEY.get(leafKey)?.minMeaningfulLevel ?? "READ";

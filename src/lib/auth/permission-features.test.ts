@@ -5,6 +5,7 @@ import { PERMISSION_AREAS, permissionLevelRank, type PermissionLevel } from "./p
 import {
   PERMISSION_LEAF_KEYS,
   areaKeyOfLeaf,
+  areaLevelFromLeaves,
   featuresOfArea,
   findPermissionFeature,
   hasFeatures,
@@ -162,6 +163,30 @@ test("절차 수행은 기술 작업 절차가 아니라 접수 건 아래에 �
   assert.equal(findPermissionFeature("technicalProcedures.execution"), undefined);
   assert.equal(baselineLeafLevel("technicalProcedures.view", "SALES"), "NONE");
   assert.notEqual(baselineLeafLevel("repairCases.procedureExecution", "SALES"), "NONE");
+});
+
+// ───────────────────────────────────── 메뉴 수준 계산 (resolver·저장·화면 공용)
+
+test("메뉴 수준은 하위 기능 중 가장 높은 값이다", () => {
+  const levels: Record<string, PermissionLevel> = {
+    "inventory.view": "READ",
+    "inventory.parts": "NONE",
+    "inventory.stock": "WRITE",
+    "inventory.history": "READ",
+    "inventory.requests": "NONE",
+    "inventory.requestProcessing": "NONE",
+  };
+  assert.equal(areaLevelFromLeaves("inventory", (key) => levels[key] ?? "NONE"), "WRITE");
+});
+
+test("하위 기능이 하나도 열려 있지 않으면 메뉴가 닫힌다", () => {
+  // 사이드바에서 감추고 페이지 가드가 막는 판단이 이 값 하나에 달려 있다.
+  assert.equal(areaLevelFromLeaves("inventory", () => "NONE"), "NONE");
+});
+
+test("하위 기능이 없는 메뉴는 자기 값이 그대로 메뉴 수준이다", () => {
+  assert.equal(areaLevelFromLeaves("dashboard", (key) => (key === "dashboard" ? "READ" : "NONE")), "READ");
+  assert.equal(areaLevelFromLeaves("dashboard", () => "NONE"), "NONE");
 });
 
 // ──────────────────────────────────────────────── 화면에 나가는 설명의 품질

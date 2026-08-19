@@ -8,8 +8,11 @@ import { saveRolePermissions } from "@/lib/db/mutations/role-permissions";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 export type SaveRolePermissionsActionInput = {
-  role: string;
-  levels: Record<string, string>;
+  /**
+   * 역할별로 바뀐 값. 화면이 여러 역할을 한 화면에서 편집하므로 한 번에 보낸다 —
+   * 역할마다 따로 보내면 세 번째에서 잠금이 걸렸을 때 앞의 둘만 저장된다.
+   */
+  changes: { role: string; levels: Record<string, string> }[];
 };
 
 export type SaveRolePermissionsActionResult =
@@ -45,17 +48,21 @@ export async function saveRolePermissionsAction(
     return { ok: false, message: "관리자 이상만 권한을 설정할 수 있습니다." };
   }
 
-  if (!(ROLE_CODES as readonly string[]).includes(input.role)) {
-    return { ok: false, message: "역할을 확인할 수 없습니다." };
-  }
-  if (typeof input.levels !== "object" || input.levels === null || Array.isArray(input.levels)) {
+  if (!Array.isArray(input.changes)) {
     return { ok: false, message: "권한 값을 확인할 수 없습니다." };
+  }
+  for (const change of input.changes) {
+    if (!change || !(ROLE_CODES as readonly string[]).includes(change.role)) {
+      return { ok: false, message: "역할을 확인할 수 없습니다." };
+    }
+    if (typeof change.levels !== "object" || change.levels === null || Array.isArray(change.levels)) {
+      return { ok: false, message: "권한 값을 확인할 수 없습니다." };
+    }
   }
 
   try {
     const result = await saveRolePermissions({
-      role: input.role as Role,
-      levels: input.levels,
+      changes: input.changes.map((change) => ({ role: change.role as Role, levels: change.levels })),
       actorUserId: actingUser.id,
     });
     if (!result.ok) return { ok: false, message: result.message };

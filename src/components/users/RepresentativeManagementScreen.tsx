@@ -3,8 +3,7 @@
 import { useState } from "react";
 import RepresentativeListSection from "./RepresentativeListSection";
 import DelegationSection from "./DelegationSection";
-import RolePermissionSettings, { type RolePermissionView } from "./RolePermissionSettings";
-import type { Role } from "@/lib/domain/types";
+import RolePermissionSettings, { type RolePermissionScreenData } from "./RolePermissionSettings";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
 
@@ -31,7 +30,7 @@ export default function RepresentativeManagementScreen({
   users: RepresentativeManagementUserRow[];
   delegations: ShipmentDelegationRow[];
   /** 관리자 이상일 때만 내려온다. null이면 권한 설정 탭이 없다. */
-  rolePermissions: Record<Role, RolePermissionView> | null;
+  rolePermissions: RolePermissionScreenData | null;
 }) {
   const isSuperAdmin = actingUser.role === "SUPER_ADMIN";
   const representatives = users.filter((u) => u.isShipmentRepresentative);
@@ -74,7 +73,7 @@ export default function RepresentativeManagementScreen({
       )}
 
       {rolePermissions && activeTab === "permissions" ? (
-        <RolePermissionSettings actingRole={actingUser.role} initial={rolePermissions} />
+        <RolePermissionSettings actingRole={actingUser.role} data={rolePermissions} />
       ) : (
         <>
           <RepresentativeListSection users={users} isSuperAdmin={isSuperAdmin} />

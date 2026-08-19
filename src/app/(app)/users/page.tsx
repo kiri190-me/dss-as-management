@@ -53,7 +53,9 @@ export default async function UsersPage() {
 
   // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
   // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다.
-  const rolePermissions = canManageRolePermissions(actingUser.role) ? await buildRolePermissionViews() : null;
+  const rolePermissions = canManageRolePermissions(actingUser.role)
+    ? await buildRolePermissionViews({ actorRole: actingUser.role })
+    : null;
 
   return (
     <RepresentativeManagementScreen
