@@ -514,7 +514,9 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">워크플로 / 예상 인수번호</h2>
-        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* 이 섹션의 입력 4개(종류/유상·무상/인수번호/보고서번호)는 넓은
+            화면에서 한 줄에 놓인다 — 좁아지면 2열, 모바일은 1열. */}
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label htmlFor="workflowKind" className={labelClass}>종류 *</label>
             <select
