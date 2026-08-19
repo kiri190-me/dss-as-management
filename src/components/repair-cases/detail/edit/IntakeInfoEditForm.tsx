@@ -105,9 +105,9 @@ export default function IntakeInfoEditForm({
   // 판단의 미리보기일 뿐이다 — ProductInfoEditForm.tsx의 종류 재배정 게이트와
   // 정확히 같은 원칙으로, currentWorkflowStepKey만 미리 확인하고
   // status_change_histories(STEP_RETURNED 등)까지 재확인하는 서버가 최종
-  // 권한자다. MATCHER는 원래부터 완전히 독립적이라 항상 통과한다.
+  // 권한자다.
   // 2026-08-18 원칙 변경: 유·무상은 언제든, 어느 단계에서든 바꿀 수 있다.
-  // 여기 있던 "MATCHER이거나 Generator가 인수점검에 있을 때만" 게이트를
+  // 여기 있던 "매쳐이거나 Generator가 인수점검에 있을 때만" 게이트를
   // 제거했다 — 서버에서 같은 제약을 걷어냈는데(billing-workflow-target.ts,
   // repair-cases.ts) 화면에만 남아 있어, 실제로는 거의 모든 접수 건에서
   // 선택 상자가 아예 렌더되지 않았다. 권한(역할) 검사만 남긴다.

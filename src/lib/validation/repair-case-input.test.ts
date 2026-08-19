@@ -74,13 +74,10 @@ test("invalid billingType fails with a field error", () => {
   if (!result.ok) assert.ok(result.fieldErrors.billingType);
 });
 
-test("legacy MATCHER cannot be used for a new intake", () => {
-  const result = validateCreateRepairCaseInput(
-    validInput({ workflowType: "MATCHER", billingType: "WARRANTY" })
-  );
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.ok(result.fieldErrors.workflowType);
-});
+// "레거시 MATCHER는 신규 접수에 쓸 수 없다"를 확인하던 테스트가 여기 있었다.
+// 2026-08-19에 그 workflowType 자체가 없어지면서 검증이 아니라 타입이 막는
+// 일이 되었다 — 남겨 두면 아래 "유·무상과 workflowType은 맞아야 한다"와 같은
+// 것을 이름만 다르게 두 번 확인하게 된다.
 
 test("billingType and workflowType must agree for new intake", () => {
   const result = validateCreateRepairCaseInput(

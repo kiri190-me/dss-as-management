@@ -11,8 +11,12 @@ import type {
  * itself is unchanged/still real and persisted — this is purely the
  * kind/billing-type → workflowType derivation, shared by the intake form and
  * by repair-case detail's 종류 reassignment so the mapping rule is defined
- * exactly once. MATCHER_PAID/MATCHER_WARRANTY are never created — MATCHER
- * stays a single workflowType, independent of billingType.
+ * exactly once.
+ *
+ * 2026-08-19: 유·무상이 붙지 않은 레거시 workflowType "MATCHER"(Matcher (기존
+ * 이력))가 없어지면서, 매쳐도 제너레이터·Total Controller와 완전히 같은 규칙이
+ * 되었다 — 종류에 유·무상을 붙여 workflowType을 만든다. 종류 축의 "MATCHER"는
+ * 그대로다(그것이 곧 "매쳐"라는 종류이며, 없어진 것은 workflowType 쪽이다).
  */
 export const WORKFLOW_KIND_CODES = ["MATCHER", "GENERATOR", "TOTAL_CONTROLLER"] as const;
 export type WorkflowKind = (typeof WORKFLOW_KIND_CODES)[number];
@@ -26,7 +30,7 @@ export const workflowKindLabels: Record<WorkflowKind, string> = {
 };
 
 export function workflowKindOf(workflowType: WorkflowType): WorkflowKind {
-  if (workflowType === "MATCHER" || workflowType.endsWith("_MATCHER")) return "MATCHER";
+  if (workflowType.endsWith("_MATCHER")) return "MATCHER";
   if (workflowType.endsWith("_TOTAL_CONTROLLER")) return "TOTAL_CONTROLLER";
   return "GENERATOR";
 }

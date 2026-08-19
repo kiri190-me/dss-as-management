@@ -232,28 +232,7 @@ export const mockProducts: Product[] = [
 // (waiting_kyosan_reply / waiting_kyosan_reply_followup)를 가진다 — 한글
 // 라벨이 같아도 개별 접수 건의 currentWorkflowStepKey는 둘을 구분한다.
 export const workflowSteps: WorkflowStep[] = [
-  // MATCHER
-  { workflowType: "MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
-  { workflowType: "MATCHER", order: 2, key: "intake_inspection", label: "인수점검" },
-  { workflowType: "MATCHER", order: 3, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
-  { workflowType: "MATCHER", order: 4, key: "waiting_kyosan_reply", label: "교산 회신 대기" },
-  { workflowType: "MATCHER", order: 5, key: "kyosan_instruction_confirmed", label: "교산 지시사항 확인" },
-  { workflowType: "MATCHER", order: 6, key: "instructed_parts_replacement_or_check", label: "지시된 부품 교체 또는 미비 점검 항목 확인" },
-  { workflowType: "MATCHER", order: 7, key: "kyosan_followup_report_sent", label: "교산 후속 연락/보고서 발송" },
-  { workflowType: "MATCHER", order: 8, key: "waiting_kyosan_reply_followup", label: "교산 회신 대기" },
-  { workflowType: "MATCHER", order: 9, key: "quote_drafted_per_kyosan_instruction", label: "교산 지시에 따른 견적 작성" },
-  { workflowType: "MATCHER", order: 10, key: "customer_quote_sent", label: "고객 견적 발송" },
-  { workflowType: "MATCHER", order: 11, key: "waiting_po", label: "PO 대기" },
-  { workflowType: "MATCHER", order: 12, key: "po_received", label: "PO 접수" },
-  { workflowType: "MATCHER", order: 13, key: "parts_supply", label: "부품 수급" },
-  { workflowType: "MATCHER", order: 14, key: "repair_in_progress", label: "수리" },
-  { workflowType: "MATCHER", order: 15, key: "power_on_test", label: "전원 인가 테스트" },
-  { workflowType: "MATCHER", order: 16, key: "waiting_kyosan_shipment_approval", label: "교산 출하 승인 대기" },
-  { workflowType: "MATCHER", order: 17, key: "shipment_approved", label: "출하 승인" },
-  { workflowType: "MATCHER", order: 18, key: "waiting_shipment", label: "출하 대기" },
-  { workflowType: "MATCHER", order: 19, key: "shipment_completed", label: "출하 완료" },
-
-  // PAID_MATCHER — independent initial snapshot of legacy MATCHER.
+  // PAID_MATCHER
   { workflowType: "PAID_MATCHER", order: 1, key: "product_intake", label: "제품 인수" },
   { workflowType: "PAID_MATCHER", order: 2, key: "intake_inspection", label: "인수점검" },
   { workflowType: "PAID_MATCHER", order: 3, key: "kyosan_contact_report_sent", label: "교산 연락/보고서 발송" },
@@ -367,7 +346,9 @@ export const workflowSteps: WorkflowStep[] = [
 /**
  * billingType은 아래 백필 규칙으로 mockRepairCases 내보내기 시 한 번만
  * 채워 넣는다(실제 DB migration 0021의 백필 규칙과 동일 — PAID_GENERATOR
- * -> PAID, WARRANTY_GENERATOR -> WARRANTY, MATCHER -> null/추측하지 않음).
+ * -> PAID, WARRANTY_GENERATOR -> WARRANTY). 그 규칙에서 null로 남던
+ * 레거시 MATCHER는 2026-08-19에 없어졌고, 그 워크플로에 있던 데모 7건은
+ * PAID_MATCHER/WARRANTY_MATCHER로 나눠 옮겼다.
  * 이 데모 픽스처는 "이미 존재하는 과거 데이터"를 흉내 내는 것이지,
  * workflowType으로부터 실시간으로 유도하는 로직이 아니다 — 신규 접수는
  * 항상 사용자가 직접 고른 실제 billingType 값을 갖는다
@@ -380,7 +361,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-001",
     endUserId: "eu-001",
     productId: "p-001",
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     status: "SHIPMENT_COMPLETED",
     priority: "NORMAL",
     assignedEngineerId: "u-004",
@@ -452,7 +433,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-004",
     endUserId: "eu-005",
     productId: "p-007",
-    workflowType: "MATCHER",
+    workflowType: "WARRANTY_MATCHER",
     status: "WAITING_SHIPMENT",
     priority: "HIGH",
     assignedEngineerId: "u-004",
@@ -524,7 +505,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-007",
     endUserId: "eu-008",
     productId: "p-006",
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     status: "IN_REPAIR",
     priority: "HIGH",
     assignedEngineerId: "u-004",
@@ -596,7 +577,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-003",
     endUserId: null,
     productId: "p-001",
-    workflowType: "MATCHER",
+    workflowType: "WARRANTY_MATCHER",
     status: "WAITING_INTAKE_INSPECTION",
     priority: "NORMAL",
     assignedEngineerId: null,
@@ -665,7 +646,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-006",
     endUserId: "eu-007",
     productId: "p-007",
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     status: "WAITING_KYOSAN_REPLY",
     priority: "HIGH",
     assignedEngineerId: "u-005",
@@ -741,7 +722,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     customerId: "c-002",
     endUserId: "eu-003",
     productId: "p-006",
-    workflowType: "MATCHER",
+    workflowType: "WARRANTY_MATCHER",
     status: "IN_REPAIR",
     priority: "URGENT",
     assignedEngineerId: "u-005",
@@ -791,7 +772,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     // 해당하는 단계가 없다(출하 승인 이후 바로 출하 완료로 이어짐). 이
     // 단계는 Matcher 워크플로에만 존재하므로 Stage C-1에서 Matcher로
     // 정정한다.
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     status: "WAITING_SHIPMENT",
     priority: "NORMAL",
     assignedEngineerId: "u-004",
@@ -811,7 +792,6 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
 ];
 
 const BILLING_TYPE_BACKFILL: Record<RepairCase["workflowType"], RepairCase["billingType"]> = {
-  MATCHER: null,
   PAID_MATCHER: "PAID",
   WARRANTY_MATCHER: "WARRANTY",
   PAID_GENERATOR: "PAID",

@@ -22,7 +22,6 @@ export const accountApprovalStatusLabels: Record<AccountApprovalStatus, string> 
 };
 
 export const WORKFLOW_TYPE_CODES = [
-  "MATCHER",
   "PAID_MATCHER",
   "WARRANTY_MATCHER",
   "PAID_GENERATOR",
@@ -50,7 +49,6 @@ export const PENDING_BILLING_WORKFLOW_TYPE_CODES = [
 ] as const satisfies readonly WorkflowType[];
 export type PendingBillingWorkflowType = (typeof PENDING_BILLING_WORKFLOW_TYPE_CODES)[number];
 export const workflowTypeLabels: Record<WorkflowType, string> = {
-  MATCHER: "Matcher (기존 이력)",
   PAID_MATCHER: "유상 Matcher",
   WARRANTY_MATCHER: "무상(보증) Matcher",
   PAID_GENERATOR: "유상 Generator",
@@ -69,7 +67,6 @@ export const workflowTypeLabels: Record<WorkflowType, string> = {
  * 결정이 아니다.
  */
 export const productCategoryLabels: Record<WorkflowType, string> = {
-  MATCHER: "Matcher (기존 이력)",
   PAID_MATCHER: "Matcher",
   WARRANTY_MATCHER: "Matcher",
   PAID_GENERATOR: "Generator",

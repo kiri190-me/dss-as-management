@@ -10,7 +10,7 @@ import {
   workflowTransitions,
   workflowVersions,
 } from "../schema";
-import type { RepairStatus, WorkflowType } from "@/lib/domain/types";
+import { WORKFLOW_TYPE_CODES, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 import {
   validateWorkflowDraft,
@@ -22,8 +22,8 @@ import {
  * 워크플로 기본 틀 조회(Phase 3). 읽기 전용이며, 목록/버전 이력 화면이 쓴다.
  *
  * 접수 건 수를 함께 세는 이유는 "이 워크플로를 실제로 쓰고 있는가"가 편집
- * 판단의 첫 정보이기 때문이다 — 쓰는 건이 없는 워크플로(예: 아카이브된 레거시
- * MATCHER)와 250건이 걸린 워크플로는 같은 무게로 다룰 수 없다.
+ * 판단의 첫 정보이기 때문이다 — 쓰는 건이 없는 워크플로와 250건이 걸린
+ * 워크플로는 같은 무게로 다룰 수 없다.
  */
 
 export type WorkflowTemplateSummary = {
@@ -38,11 +38,25 @@ export type WorkflowTemplateSummary = {
   isArchived: boolean;
 };
 
+/**
+ * DB에 남아 있지만 더 이상 이 서비스의 워크플로가 아닌 템플릿을 걸러 낸다.
+ *
+ * 지금 걸리는 것은 레거시 "MATCHER"(Matcher (기존 이력)) 하나다. 2026-08-19에
+ * 도메인에서 없앴지만 그 코드를 쓰는 행과 감사 이력이 남아 있어 DB에서는 지울
+ * 수 없다(db/schema/workflow.ts의 workflowTypeEnum 주석). 코드 목록으로 거르므로
+ * 나중에 또 이런 것이 생겨도 여기를 고칠 필요가 없다 — 이름표(workflowTypeLabels)
+ * 가 없는 것은 목록에도 나오지 않는다.
+ */
+function isKnownWorkflowType(code: string): code is WorkflowType {
+  return (WORKFLOW_TYPE_CODES as readonly string[]).includes(code);
+}
+
 export async function listWorkflowTemplateSummaries(): Promise<WorkflowTemplateSummary[]> {
-  const templates = await db
+  const allTemplates = await db
     .select({ id: workflowTemplates.id, code: workflowTemplates.code, name: workflowTemplates.name })
     .from(workflowTemplates)
     .orderBy(asc(workflowTemplates.code));
+  const templates = allTemplates.filter((t) => isKnownWorkflowType(t.code));
 
   const current = await db
     .select({
@@ -119,6 +133,9 @@ export type WorkflowTemplateDetail = {
 };
 
 export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowTemplateDetail | null> {
+  // 목록에서 감춘 것을 주소로 직접 열 수 있으면 감춘 것이 아니다.
+  if (!isKnownWorkflowType(code)) return null;
+
   const [template] = await db
     .select({ id: workflowTemplates.id, code: workflowTemplates.code, name: workflowTemplates.name })
     .from(workflowTemplates)

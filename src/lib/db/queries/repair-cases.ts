@@ -1,4 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
+import { workflowTypeCodeColumn } from "../workflow-type-column";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -47,7 +48,7 @@ function repairCaseBaseColumns() {
     partNumber: products.partNumber,
     assignedEngineerId: repairCases.assignedEngineerId,
     engineerName: users.name,
-    workflowTypeCode: workflowTemplates.code,
+    workflowTypeCode: workflowTypeCodeColumn(),
     billingType: repairCases.billingType,
     priority: repairCases.priority,
     currentWorkflowStepKey: workflowSteps.key,

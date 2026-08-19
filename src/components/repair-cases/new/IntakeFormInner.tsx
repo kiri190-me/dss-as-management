@@ -150,8 +150,7 @@ type IntakeFormInnerProps = {
 // + "유상/무상" 두 값의 조합으로부터 내부적으로 유도한다(workflow-kind.ts —
 // 접수/상세 편집 양쪽이 재사용하는 단일 매핑 규칙). workflowType 자체는
 // 워크플로 템플릿/버전/단계 선택을 위해 그대로 저장/사용된다(변경 없음) —
-// 조합으로 신규 생성 가능한 6종 중 하나를 결정한다. 레거시 MATCHER는
-// 기존 이력 조회에만 사용하며 이 화면에서는 생성하지 않는다.
+// 조합으로 신규 생성 가능한 6종 중 하나를 결정한다.
 
 // Server Action result codes → Korean message. Field-attributable codes
 // also populate `errors` via fieldErrors so the existing inline per-field

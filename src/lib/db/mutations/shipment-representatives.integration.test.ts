@@ -183,7 +183,7 @@ describe("setShipmentRepresentative", () => {
     assert.ok(customer);
     const suffix = randomUUID().slice(0, 8);
     const input: ValidatedCreateRepairCaseInput = {
-      workflowType: "MATCHER",
+      workflowType: "PAID_MATCHER",
       billingType: "PAID",
       customerId: customer.id,
       endUserId: null,

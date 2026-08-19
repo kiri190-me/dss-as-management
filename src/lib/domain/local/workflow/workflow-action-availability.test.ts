@@ -20,7 +20,7 @@ function user(role: ActingUser["role"], overrides: Partial<ActingUser> = {}): Ac
 function transition(overrides: Partial<TransitionDefinition> = {}): TransitionDefinition {
   return {
     id: "t-1",
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     actionCode: "STEP_ADVANCED",
     fromStepKey: "repair_in_progress",
     toStepKey: "power_on_test",
@@ -200,7 +200,7 @@ test("분류가 없는 단계(건별로 추가한 case_step_N 등)에서는 관�
 
 test("locked case: LOCKED explanation, takes priority over everything else", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "repair_in_progress",
     actingRole: "AS_ENGINEER",
     isCaseLocked: true,
@@ -211,7 +211,7 @@ test("locked case: LOCKED explanation, takes priority over everything else", () 
 
 test("on hold (not locked): no explanation — the per-button hold reason is already specific enough", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "waiting_po",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
@@ -222,7 +222,7 @@ test("on hold (not locked): no explanation — the per-button hold reason is alr
 
 test("AS_ENGINEER on a SALES-owned (BUSINESS) step: role-ownership explanation with the exact expected wording", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "waiting_po",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
@@ -237,7 +237,7 @@ test("AS_ENGINEER on a SALES-owned (BUSINESS) step: role-ownership explanation w
 
 test("AS_ENGINEER on an INVENTORY_MANAGER-owned (PARTS_SHIPMENT) step: role-ownership explanation with the exact expected wording", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "parts_supply",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
@@ -252,7 +252,7 @@ test("AS_ENGINEER on an INVENTORY_MANAGER-owned (PARTS_SHIPMENT) step: role-owne
 
 test("AS_ENGINEER on their own TECHNICAL step: no foreign-role message", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "repair_in_progress",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
@@ -263,7 +263,7 @@ test("AS_ENGINEER on their own TECHNICAL step: no foreign-role message", () => {
 
 test("SALES viewing a TECHNICAL (AS_ENGINEER-owned) step also gets a role-ownership message — not AS_ENGINEER-specific", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "repair_in_progress",
     actingRole: "SALES",
     isCaseLocked: false,
@@ -278,7 +278,7 @@ test("SALES viewing a TECHNICAL (AS_ENGINEER-owned) step also gets a role-owners
 
 test("ADMIN never sees a role-ownership message, even on a step normally owned by another role", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "waiting_po",
     actingRole: "ADMIN",
     isCaseLocked: false,
@@ -289,7 +289,7 @@ test("ADMIN never sees a role-ownership message, even on a step normally owned b
 
 test("SUPER_ADMIN never sees a role-ownership message, even on a step normally owned by another role", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "parts_supply",
     actingRole: "SUPER_ADMIN",
     isCaseLocked: false,
@@ -300,7 +300,7 @@ test("SUPER_ADMIN never sees a role-ownership message, even on a step normally o
 
 test("a step with no category entry (e.g. a terminal step): no explanation, never guessed", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     currentStepKey: "shipment_completed",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,

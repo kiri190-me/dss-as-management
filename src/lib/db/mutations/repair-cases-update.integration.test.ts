@@ -135,7 +135,7 @@ after(async () => {
 function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId: customerA,
     endUserId: null,
@@ -481,11 +481,19 @@ describe("updateRepairCase", () => {
     return row;
   }
 
+  async function stepKeyOf(workflowStepId: string): Promise<string | undefined> {
+    const [row] = await db
+      .select({ key: workflowSteps.key })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, workflowStepId));
+    return row?.key;
+  }
+
   test("30. 종류 change MATCHER→GENERATOR(PAID) right after intake (still at intake_inspection, no history) reassigns workflowVersionId/currentWorkflowStepId atomically", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
     const before1 = await fetchRow(created.id);
     const beforeTemplate = await templateCodeAndInitialStep(before1.workflowVersionId);
-    assert.equal(beforeTemplate?.code, "MATCHER");
+    assert.equal(beforeTemplate?.code, "PAID_MATCHER");
 
     const result = await updateRepairCase(created.id, 1, "PRODUCT", { workflowKind: "GENERATOR" });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -504,7 +512,7 @@ describe("updateRepairCase", () => {
   });
 
   test("31. 종류 change MATCHER→GENERATOR maps to WARRANTY_GENERATOR when billing_type=WARRANTY", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "WARRANTY" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "WARRANTY" });
 
     const result = await updateRepairCase(created.id, 1, "PRODUCT", { workflowKind: "GENERATOR" });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -515,7 +523,7 @@ describe("updateRepairCase", () => {
   });
 
   test("32. 종류 change is rejected once the case has moved past intake_inspection (real transition, via transitionWorkflow)", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER" });
     const before1 = await fetchRow(created.id);
 
     const advanced = await transitionWorkflow(created.id, 1, "STEP_ADVANCED", engineerId, null);
@@ -533,7 +541,7 @@ describe("updateRepairCase", () => {
   });
 
   test("32b. 종류 change is rejected when the case is back at intake_inspection but already has transition history (STEP_RETURNED) — step key alone is not trusted", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER" });
     const before1 = await fetchRow(created.id);
 
     const advanced = await transitionWorkflow(created.id, 1, "STEP_ADVANCED", engineerId, null);
@@ -557,7 +565,7 @@ describe("updateRepairCase", () => {
     // createRepairCase() always requires a billingType (never NULL) — a NULL
     // billing_type only occurs on legacy pre-migration-0021 rows, so it's
     // simulated here with a direct column update rather than via creation.
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
     await db.update(repairCases).set({ billingType: null }).where(eq(repairCases.id, created.id));
     const before1 = await fetchRow(created.id);
     assert.equal(before1.billingType, null);
@@ -574,21 +582,28 @@ describe("updateRepairCase", () => {
     assert.equal(after1.version, 1);
   });
 
-  test("34. billingType submitted via INTAKE (UI IA cleanup: 유상/무상 moved to 인수정보) is an independent correction that never touches workflowVersionId/currentWorkflowStepId", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+  test("34. billingType submitted via INTAKE (UI IA cleanup: 유상/무상 moved to 인수정보) is an independent correction that never touches workflowVersionId/currentWorkflowStepId when the workflow is the same", async () => {
+    // 유상 → 일부유상은 워크플로가 같다(일부유상은 전용 워크플로 없이 유상
+    // 워크플로를 쓴다 — billing-workflow-target.ts). 그래서 값만 바뀌고 워크플로
+    // 자리는 그대로여야 한다.
+    //
+    // 예전에는 이 자리에 레거시 MATCHER + PAID→WARRANTY를 두고 같은 것을 봤다.
+    // 그 워크플로가 유·무상과 무관했기 때문인데, 2026-08-19에 없어지면서 그
+    // 조합은 이제 워크플로가 **따라 움직이는** 경우가 되었다(48번이 그쪽을 본다).
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
     const before1 = await fetchRow(created.id);
 
-    const result = await updateRepairCase(created.id, 1, "INTAKE", { billingType: "WARRANTY" });
+    const result = await updateRepairCase(created.id, 1, "INTAKE", { billingType: "PARTIAL_PAID" });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
 
     const after1 = await fetchRow(created.id);
-    assert.equal(after1.billingType, "WARRANTY");
+    assert.equal(after1.billingType, "PARTIAL_PAID");
     assert.equal(after1.workflowVersionId, before1.workflowVersionId);
     assert.equal(after1.currentWorkflowStepId, before1.currentWorkflowStepId);
   });
 
   test("35. priority defaults to NORMAL on creation and is independently updatable via INTAKE (인수 정보 priority-editing checkpoint), never touching workflowVersionId/currentWorkflowStepId", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
     const before1 = await fetchRow(created.id);
     assert.equal(before1.priority, "NORMAL", "new repair_cases rows default to NORMAL priority");
 
@@ -618,7 +633,7 @@ describe("updateRepairCase", () => {
   });
 
   test("37. billingType submitted via PRODUCT (its old, now-relocated section) is silently ignored — not an error, just a no-op", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
 
     // The mutation layer itself doesn't reject unknown-for-section keys (that
     // allow-list gate lives in update-repair-case.ts's Server Action) — this
@@ -683,7 +698,7 @@ describe("updateRepairCase", () => {
   });
 
   test("35. a 종류 reassignment never inserts a status_change_histories row (only transitionWorkflow() ever writes that table)", async () => {
-    const created = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+    const created = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
 
     const result = await updateRepairCase(created.id, 1, "PRODUCT", { workflowKind: "GENERATOR" });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -869,27 +884,38 @@ describe("updateRepairCase", () => {
     assert.ok(true);
   });
 
-  test("48. MATCHER PAID↔WARRANTY changes billing only and remains MATCHER (both directions) — no inconsistent Generator state possible for MATCHER", async () => {
-    const paidCase = await createTestCase({ workflowType: "MATCHER", billingType: "PAID" });
+  test("48. Matcher PAID↔WARRANTY moves the workflow along with the billing type, keeping the same step (both directions)", async () => {
+    // 2026-08-19 규칙 변경: 레거시 workflowType "MATCHER"(Matcher (기존 이력))가
+    // 없어지면서, 매쳐도 다른 종류와 똑같이 유·무상을 따라 워크플로를 옮긴다.
+    // 예전에는 이 자리에서 "MATCHER는 절대 옮기지 않는다"를 고정했는데, 그
+    // 불변식은 유·무상 구분이 없던 그 워크플로에만 해당하는 것이었다.
+    //
+    // 매쳐는 유상/무상 단계 집합이 19개로 완전히 같으므로(billing-workflow-
+    // target.ts 주석), 옮겨 가도 **단계 key는 그대로**여야 한다 — 그것이 여기서
+    // 실제로 지켜야 할 것이다.
+    const paidCase = await createTestCase({ workflowType: "PAID_MATCHER", billingType: "PAID" });
     const paidBefore = await fetchRow(paidCase.id);
+    const paidBeforeStepKey = await stepKeyOf(paidBefore.currentWorkflowStepId);
 
     const toWarranty = await updateRepairCase(paidCase.id, 1, "INTAKE", { billingType: "WARRANTY" });
     assert.equal(toWarranty.ok, true, `update failed: ${JSON.stringify(toWarranty)}`);
     const paidAfter = await fetchRow(paidCase.id);
     assert.equal(paidAfter.billingType, "WARRANTY");
-    assert.equal(paidAfter.workflowVersionId, paidBefore.workflowVersionId, "MATCHER workflow must never switch");
-    assert.equal(paidAfter.currentWorkflowStepId, paidBefore.currentWorkflowStepId);
-    assert.equal((await templateCodeAndInitialStep(paidAfter.workflowVersionId))?.code, "MATCHER");
+    assert.notEqual(paidAfter.workflowVersionId, paidBefore.workflowVersionId, "유·무상을 따라 워크플로도 옮겨야 한다");
+    assert.equal((await templateCodeAndInitialStep(paidAfter.workflowVersionId))?.code, "WARRANTY_MATCHER");
+    assert.equal(await stepKeyOf(paidAfter.currentWorkflowStepId), paidBeforeStepKey, "단계는 그대로여야 한다");
 
-    const warrantyCase = await createTestCase({ workflowType: "MATCHER", billingType: "WARRANTY" });
+    const warrantyCase = await createTestCase({ workflowType: "WARRANTY_MATCHER", billingType: "WARRANTY" });
     const warrantyBefore = await fetchRow(warrantyCase.id);
+    const warrantyBeforeStepKey = await stepKeyOf(warrantyBefore.currentWorkflowStepId);
 
     const toPaid = await updateRepairCase(warrantyCase.id, 1, "INTAKE", { billingType: "PAID" });
     assert.equal(toPaid.ok, true, `update failed: ${JSON.stringify(toPaid)}`);
     const warrantyAfter = await fetchRow(warrantyCase.id);
     assert.equal(warrantyAfter.billingType, "PAID");
-    assert.equal(warrantyAfter.workflowVersionId, warrantyBefore.workflowVersionId, "MATCHER workflow must never switch");
-    assert.equal((await templateCodeAndInitialStep(warrantyAfter.workflowVersionId))?.code, "MATCHER");
+    assert.notEqual(warrantyAfter.workflowVersionId, warrantyBefore.workflowVersionId, "반대 방향도 같다");
+    assert.equal((await templateCodeAndInitialStep(warrantyAfter.workflowVersionId))?.code, "PAID_MATCHER");
+    assert.equal(await stepKeyOf(warrantyAfter.currentWorkflowStepId), warrantyBeforeStepKey, "단계는 그대로여야 한다");
   });
 
   test("49. no inconsistent Generator billing/workflow state can be created via direct server submission, across every path tried", async () => {

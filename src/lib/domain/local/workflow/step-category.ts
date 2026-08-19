@@ -31,25 +31,6 @@ const CATEGORY_ROLE: Record<StepCategory, Role> = {
 
 type CategoryEntry = { key: string; category: StepCategory };
 
-const MATCHER_CATEGORIES: readonly CategoryEntry[] = [
-  { key: "intake_inspection", category: "TECHNICAL" },
-  { key: "kyosan_contact_report_sent", category: "TECHNICAL" },
-  { key: "waiting_kyosan_reply", category: "BUSINESS" },
-  { key: "kyosan_instruction_confirmed", category: "TECHNICAL" },
-  { key: "instructed_parts_replacement_or_check", category: "TECHNICAL" },
-  { key: "kyosan_followup_report_sent", category: "TECHNICAL" },
-  { key: "waiting_kyosan_reply_followup", category: "BUSINESS" },
-  { key: "quote_drafted_per_kyosan_instruction", category: "BUSINESS" },
-  { key: "customer_quote_sent", category: "BUSINESS" },
-  { key: "waiting_po", category: "BUSINESS" },
-  { key: "po_received", category: "BUSINESS" },
-  { key: "parts_supply", category: "PARTS_SHIPMENT" },
-  { key: "repair_in_progress", category: "TECHNICAL" },
-  { key: "power_on_test", category: "TECHNICAL" },
-  { key: "waiting_kyosan_shipment_approval", category: "PARTS_SHIPMENT" },
-  { key: "shipment_approved", category: "PARTS_SHIPMENT" },
-  { key: "waiting_shipment", category: "PARTS_SHIPMENT" },
-];
 
 const PAID_GENERATOR_CATEGORIES: readonly CategoryEntry[] = [
   { key: "intake_inspection", category: "TECHNICAL" },
@@ -149,7 +130,6 @@ const WARRANTY_TOTAL_CONTROLLER_CATEGORIES: readonly CategoryEntry[] = [
 ];
 
 const CATEGORY_BY_WORKFLOW: Record<WorkflowType, readonly CategoryEntry[]> = {
-  MATCHER: MATCHER_CATEGORIES,
   PAID_MATCHER: PAID_MATCHER_CATEGORIES,
   WARRANTY_MATCHER: WARRANTY_MATCHER_CATEGORIES,
   PAID_GENERATOR: PAID_GENERATOR_CATEGORIES,

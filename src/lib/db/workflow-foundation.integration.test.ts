@@ -8,7 +8,6 @@ import { workflowSteps, workflowTemplates, workflowVersions } from "./schema";
 import type { WorkflowType } from "@/lib/domain/types";
 
 const expectedSteps: Record<WorkflowType, number> = {
-  MATCHER: 19,
   PAID_MATCHER: 19,
   WARRANTY_MATCHER: 19,
   PAID_GENERATOR: 16,

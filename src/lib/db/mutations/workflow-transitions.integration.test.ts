@@ -113,8 +113,8 @@ before(async () => {
     .select({ id: workflowVersions.id })
     .from(workflowVersions)
     .innerJoin(workflowTemplates, eq(workflowVersions.workflowTemplateId, workflowTemplates.id))
-    .where(and(eq(workflowTemplates.code, "MATCHER"), eq(workflowVersions.isCurrent, true)));
-  assert.ok(version, "expected a PUBLISHED/current MATCHER workflow_versions row");
+    .where(and(eq(workflowTemplates.code, "PAID_MATCHER"), eq(workflowVersions.isCurrent, true)));
+  assert.ok(version, "expected a PUBLISHED/current PAID_MATCHER workflow_versions row");
   matcherWorkflowVersionId = version.id;
 });
 
@@ -139,7 +139,7 @@ after(async () => {
 function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId,
     endUserId: null,
@@ -184,7 +184,7 @@ async function stepIdForKey(key: string): Promise<string> {
     .select({ id: workflowSteps.id })
     .from(workflowSteps)
     .where(and(eq(workflowSteps.workflowVersionId, matcherWorkflowVersionId), eq(workflowSteps.key, key)));
-  assert.ok(step, `expected workflow_steps row for MATCHER/${key}`);
+  assert.ok(step, `expected workflow_steps row for PAID_MATCHER/${key}`);
   return step!.id;
 }
 
@@ -221,7 +221,7 @@ describe("transitionWorkflow", () => {
 
   test("3. invalid transition (no such row) is rejected with INVALID_TRANSITION", async () => {
     const created = await createTestCase();
-    // intake_inspection is MATCHER's first step — no STEP_RETURNED row exists from it.
+    // intake_inspection is PAID_MATCHER의 first step — no STEP_RETURNED row exists from it.
     const result = await transitionWorkflow(created.id, 1, "STEP_RETURNED", adminId, "사유");
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "INVALID_TRANSITION");

@@ -10,7 +10,7 @@ import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition
 import { getStepCategory } from "@/lib/domain/local/workflow/step-category";
 import { getStepStatus } from "@/lib/domain/local/workflow/step-status-map";
 import { ACTION_CODES } from "@/lib/domain/local/workflow/workflow-types";
-import type { WorkflowType } from "@/lib/domain/types";
+import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -35,11 +35,14 @@ after(async () => {
 
 describe("loadWorkflowRules ↔ transition-definitions.ts 동등성", () => {
   test("모든 (워크플로, 단계, 액션) 조합에서 두 출처의 답이 완전히 같다", async () => {
-    const versions = await db
+    const allVersions = await db
       .select({ id: workflowVersions.id, workflowType: workflowTemplates.code })
       .from(workflowVersions)
       .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
       .where(eq(workflowVersions.isCurrent, true));
+    // 서비스가 더 이상 모르는 워크플로(레거시 MATCHER)는 TS 표에도 없으므로
+    // 비교 대상이 아니다 — workflow-rules-parity.integration.test.ts와 같은 기준.
+    const versions = allVersions.filter((v) => (WORKFLOW_TYPE_CODES as readonly string[]).includes(v.workflowType));
     assert.ok(versions.length > 0, "current 워크플로 버전이 있어야 한다");
 
     const problems: string[] = [];

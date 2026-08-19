@@ -4,9 +4,12 @@ import { workflowSteps } from "../../mock-data";
 import type { WorkflowType } from "../../types";
 import { TRANSITION_DEFINITIONS } from "./transition-definitions";
 
+// 2026-08-19: 원래 기준(source)은 레거시 "MATCHER"였고 유상/무상 Matcher가 그
+// 스냅샷과 같은지를 봤다. 그 워크플로가 없어지면서 기준을 PAID_MATCHER로 옮겼다
+// — 짝이 하나 줄었을 뿐, "둘은 같은 구성이되 서로 다른 행"이라는 검사 내용은
+// 그대로다.
 const pairs = [
-  ["MATCHER", "PAID_MATCHER"],
-  ["MATCHER", "WARRANTY_MATCHER"],
+  ["PAID_MATCHER", "WARRANTY_MATCHER"],
   ["PAID_GENERATOR", "PAID_TOTAL_CONTROLLER"],
   ["WARRANTY_GENERATOR", "WARRANTY_TOTAL_CONTROLLER"],
 ] as const satisfies readonly (readonly [WorkflowType, WorkflowType])[];

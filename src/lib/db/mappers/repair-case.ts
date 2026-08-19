@@ -144,7 +144,9 @@ export function mapRepairCaseRow(
       { status, internalTargetShipmentDate: row.internalTargetShipmentDate },
       referenceDate
     ),
-    productCategory: productCategoryLabels[row.workflowTypeCode],
+    // 라벨이 없으면 "-" — 도메인에서 없앤 레거시 코드가 만에 하나 조인되어도
+    // undefined가 화면에 새어 나가지 않게 한다(db/workflow-type-column.ts 주석).
+    productCategory: productCategoryLabels[row.workflowTypeCode] ?? "-",
     paidOrWarranty: row.billingType ? billingTypeLabels[row.billingType] : "-",
     billingType: row.billingType,
     modelName: row.modelName,

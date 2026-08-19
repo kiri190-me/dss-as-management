@@ -58,7 +58,7 @@ function uniqueSuffix(): string {
 function baseCreateInput(engineerId: string, overrides: Partial<ValidatedCreateRepairCaseInput> = {}): ValidatedCreateRepairCaseInput {
   const suffix = uniqueSuffix();
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId,
     endUserId: null,
@@ -103,7 +103,7 @@ async function setCurrentStepByKey(repairCaseId: string, stepKey: string) {
     .select({ id: workflowSteps.id })
     .from(workflowSteps)
     .where(and(eq(workflowSteps.workflowVersionId, workflowVersionId), eq(workflowSteps.key, stepKey)));
-  assert.ok(step, `expected a MATCHER step with key "${stepKey}"`);
+  assert.ok(step, `expected a PAID_MATCHER step with key "${stepKey}"`);
   await db.update(repairCases).set({ currentWorkflowStepId: step.id }).where(eq(repairCases.id, repairCaseId));
 }
 

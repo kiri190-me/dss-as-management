@@ -59,7 +59,7 @@ const createdFlowchartIds: string[] = [];
 function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId,
     endUserId: null,

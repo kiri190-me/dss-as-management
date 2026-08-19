@@ -8,7 +8,7 @@ import { workflowSteps, workflowTemplates, workflowTransitions, workflowVersions
 import { TRANSITION_DEFINITIONS } from "@/lib/domain/local/workflow/transition-definitions";
 import { getStepCategory } from "@/lib/domain/local/workflow/step-category";
 import { getStepStatus } from "@/lib/domain/local/workflow/step-status-map";
-import type { WorkflowType } from "@/lib/domain/types";
+import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -60,6 +60,15 @@ before(async () => {
       eq(workflowTemplates.id, workflowVersions.workflowTemplateId)
     )) as (StepRow & { isCurrent: boolean })[];
 
+  // 이 서비스가 더 이상 모르는 워크플로는 비교 대상이 아니다.
+  //
+  // 지금 걸리는 것은 레거시 "MATCHER"(Matcher (기존 이력)) 하나다. 2026-08-19에
+  // 도메인 표(transition-definitions.ts 등)에서 없앴지만 DB 행은 지울 수 없다
+  // — 그 단계를 가리키는 감사 이력이 남아 있다(db/schema/workflow.ts 주석).
+  // 그러니 "DB에는 있는데 표에는 없다"가 여기서는 갈라짐이 아니라 의도된 상태다.
+  // 앱의 조회 경로도 같은 기준으로 거른다(queries/workflow-templates.ts).
+  allSteps = allSteps.filter((s) => (WORKFLOW_TYPE_CODES as readonly string[]).includes(s.workflowType));
+
   currentSteps = allSteps.filter((s) => (s as StepRow & { isCurrent: boolean }).isCurrent);
   currentTypes = new Set(currentSteps.map((s) => s.workflowType));
   assert.ok(allSteps.length > 0, "workflow_steps가 비어 있으면 이 테스트는 의미가 없다");
@@ -103,7 +112,7 @@ describe("workflow rules parity (DB ↔ transition-definitions.ts)", () => {
   });
 
   test("current 버전의 전이가 표와 개수·내용 모두 1:1이다", async () => {
-    const dbRows = await db
+    const allDbRows = await db
       .select({
         workflowType: workflowTemplates.code,
         actionCode: workflowTransitions.actionCode,
@@ -118,7 +127,11 @@ describe("workflow rules parity (DB ↔ transition-definitions.ts)", () => {
       .innerJoin(workflowVersions, eq(workflowVersions.id, workflowTransitions.workflowVersionId))
       .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId));
 
-    // current 버전이 없는 워크플로(예: 아카이브된 레거시 MATCHER)의 표 행은
+    // 단계와 같은 기준으로 거른다(위 before 블록 주석) — 서비스가 더 이상
+    // 모르는 워크플로의 전이는 표에도 없는 것이 맞다.
+    const dbRows = allDbRows.filter((r) => (WORKFLOW_TYPE_CODES as readonly string[]).includes(r.workflowType));
+
+    // current 버전이 없는 워크플로의 표 행은
     // 애초에 이관 대상이 아니다 — 그쪽에는 신규 접수가 배정되지 않는다.
     const expected = TRANSITION_DEFINITIONS.filter((d) => currentTypes.has(d.workflowType));
     assert.equal(dbRows.length, expected.length, "행 수가 다르면 이관이 뒤처졌거나 DB에 군더더기가 있다");

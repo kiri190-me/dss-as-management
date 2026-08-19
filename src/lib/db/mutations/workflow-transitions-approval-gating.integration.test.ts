@@ -25,7 +25,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 /**
  * Real-DB integration test proving transitionWorkflow() actually enforces
  * (rather than unconditionally blocking) approval-gated transitions —
- * REPAIR_INSPECTION on MATCHER's power_on_test->waiting_kyosan_shipment_
+ * REPAIR_INSPECTION on PAID_MATCHER's power_on_test->waiting_kyosan_shipment_
  * approval advance, and FINAL_SHIPMENT on the terminal SHIPMENT_COMPLETED
  * action from waiting_shipment. This is the direct proof of the approval-
  * persistence task's core requirement: approval-gated transitions must work
@@ -34,7 +34,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * Arrange-only direct SQL is used to place a case at power_on_test/
  * waiting_shipment — same documented, no-legitimate-path-exists pattern
  * workflow-transitions.integration.test.ts's tests 12/13 already use (a
- * full legitimate MATCHER chain is 16+ transitions deep and not the
+ * full legitimate PAID_MATCHER chain is 16+ transitions deep and not the
  * behavior under test here).
  *
  * Self-cleaning and isolated to test month "9907" / product prefix
@@ -97,8 +97,8 @@ before(async () => {
     .select({ id: workflowVersions.id })
     .from(workflowVersions)
     .innerJoin(workflowTemplates, eq(workflowVersions.workflowTemplateId, workflowTemplates.id))
-    .where(and(eq(workflowTemplates.code, "MATCHER"), eq(workflowVersions.isCurrent, true)));
-  assert.ok(version, "expected a PUBLISHED/current MATCHER workflow_versions row");
+    .where(and(eq(workflowTemplates.code, "PAID_MATCHER"), eq(workflowVersions.isCurrent, true)));
+  assert.ok(version, "expected a PUBLISHED/current PAID_MATCHER workflow_versions row");
   matcherWorkflowVersionId = version.id;
 });
 
@@ -120,7 +120,7 @@ after(async () => {
 function baseCreateInput(): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId,
     endUserId: null,
@@ -158,7 +158,7 @@ async function stepIdForKey(key: string): Promise<string> {
     .select({ id: workflowSteps.id })
     .from(workflowSteps)
     .where(and(eq(workflowSteps.workflowVersionId, matcherWorkflowVersionId), eq(workflowSteps.key, key)));
-  assert.ok(step, `expected workflow_steps row for MATCHER/${key}`);
+  assert.ok(step, `expected workflow_steps row for PAID_MATCHER/${key}`);
   return step!.id;
 }
 

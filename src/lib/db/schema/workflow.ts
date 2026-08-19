@@ -16,6 +16,17 @@ import { roleEnum, users } from "./users";
 
 // Ten persisted workflow types: legacy MATCHER, six final-billing workflows,
 // and three Excel-only pending-billing workflows.
+/**
+ * DB enum은 도메인의 WORKFLOW_TYPE_CODES보다 값이 하나 많다 — 레거시
+ * "MATCHER"(Matcher (기존 이력))다. 2026-08-19에 도메인/화면에서는 없앴지만
+ * postgres는 enum 값 제거를 지원하지 않고, 그 값을 쓰는 workflow_templates
+ * 행과 그 단계를 가리키는 감사 이력(status_change_histories)이 남아 있어
+ * 지울 수도 없다. 그 워크플로 버전은 ARCHIVED로 내려 신규 배정에서 빠졌고,
+ * 조회 경로는 WORKFLOW_TYPE_CODES에 없는 코드를 걸러 낸다.
+ *
+ * 그러므로 여기서 "MATCHER"를 지우면 안 된다 — 지우면 남아 있는 행을 읽을 수
+ * 없게 된다. 새로 이 값을 쓰는 것도 안 된다.
+ */
 export const workflowTypeEnum = pgEnum("workflow_type", [
   "MATCHER",
   "PAID_MATCHER",

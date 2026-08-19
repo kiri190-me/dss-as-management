@@ -69,7 +69,7 @@ after(async () => {
 
 function baseInput(overrides: Partial<ValidatedCreateRepairCaseInput>): ValidatedCreateRepairCaseInput {
   return {
-    workflowType: "MATCHER",
+    workflowType: "PAID_MATCHER",
     billingType: "PAID",
     customerId,
     endUserId: null,
@@ -358,13 +358,13 @@ describe("createRepairCase customer/End-User free-entry lookup-or-create", () =>
 });
 
 describe("createRepairCase billingType independence from workflowType", () => {
-  test("MATCHER workflowType persists billingType WARRANTY as-is — never inferred/overwritten", async () => {
+  test("Matcher workflowType persists billingType WARRANTY as-is — never inferred/overwritten", async () => {
     const uniqueSuffix = Date.now().toString(36);
     const input = baseInput({
       modelName: `TG-CONC-BILL-${uniqueSuffix}`,
       lotNumber: `LOT-CONC-BILL-${uniqueSuffix}`,
       serialNumber: `SN-CONC-BILL-${uniqueSuffix}`,
-      workflowType: "MATCHER",
+      workflowType: "PAID_MATCHER",
       billingType: "WARRANTY",
     });
 

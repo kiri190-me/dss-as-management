@@ -123,12 +123,15 @@ export default function ProductInfoEditForm({
     });
 
   const disabled = isSubmitting || isConflict;
+  // 종류를 바꿀 수 있는 현재 워크플로 — 서버(repair-cases.ts의 REASSIGNABLE_FROM)와
+  // 같은 넷이다. 2026-08-19에 레거시 "MATCHER"가 없어지면서 그 자리를 유상/무상
+  // Matcher가 대신한다. 여기만 좁혀 두면 서버는 받아 주는데 버튼이 안 보이고,
+  // 여기만 넓히면 눌렀을 때 거절당한다 — 둘은 같이 움직여야 한다.
+  const REASSIGNABLE_FROM = ["PAID_MATCHER", "WARRANTY_MATCHER", "PAID_GENERATOR", "WARRANTY_GENERATOR"] as const;
   const canReassignKind =
     canEdit("workflowKind") &&
     resolved.currentWorkflowStepKey === "intake_inspection" &&
-    (["MATCHER", "PAID_GENERATOR", "WARRANTY_GENERATOR"] as const).includes(
-      resolved.workflowType as "MATCHER" | "PAID_GENERATOR" | "WARRANTY_GENERATOR"
-    );
+    (REASSIGNABLE_FROM as readonly string[]).includes(resolved.workflowType);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();

@@ -20,7 +20,7 @@ import { resolveBillingWorkflowTarget } from "./billing-workflow-target";
 import { purgeAllRepairCaseFlowchartsForCase } from "./repair-case-flowcharts";
 import { formatIntakeNumber, yearMonthFromDate } from "@/lib/domain/local/intake-number";
 import { isNotEarlierThan } from "@/lib/domain/local/validation";
-import { deriveWorkflowType, type WorkflowKind } from "@/lib/domain/workflow-kind";
+import { deriveWorkflowType, workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { BillingType, WorkflowType } from "@/lib/domain/types";
 import type {
   CreateRepairCaseResult,
@@ -752,7 +752,7 @@ export async function updateRepairCase(
       // 때만 workflowVersionId/currentWorkflowStepId를 같은 트랜잭션 안에서
       // 원자적으로 함께 갱신한다. 게이트를 통과하지 못하면 billing_type
       // 자체를 거부한다(PAID_GENERATOR+WARRANTY 같은 불일치 상태를 절대
-      // 만들지 않는다). MATCHER는 예전과 동일하게 완전히 독립적이다.
+      // 만들지 않는다).
       if ("billingType" in fields) {
         const newBillingType = fields.billingType as BillingType;
         const billingTypeIsChanging = newBillingType !== current.billingType;
@@ -949,8 +949,14 @@ export async function updateRepairCase(
       // "전이가 없었다"를 보장할 수 없는 경우까지 막기 위한 이중 방어다. 이
       // 시점 이후에는 템플릿마다 단계 구성이 달라 안전하게 대응시킬 방법이 없다
       // — 과거 이력 레코드를 다시 쓰거나 재해석하지 않는다.
+      // 종류를 바꿀 수 있는 현재 워크플로 — 매쳐와 제너레이터의 유·무상 조합
+      // 넷이다. 2026-08-19에 레거시 "MATCHER"(Matcher (기존 이력))가 없어지면서
+      // 그 자리를 PAID_MATCHER/WARRANTY_MATCHER가 대신한다. 둘을 넣지 않으면
+      // 제너레이터 → 매쳐로 바꾼 건이 다시는 되돌아오지 못하는 한쪽 문이 된다.
+      // Total Controller는 예전과 같이 아직 대상이 아니다(아래에서 따로 거절).
       if ("workflowKind" in fields) {
-        if (!["MATCHER", "PAID_GENERATOR", "WARRANTY_GENERATOR"].includes(current.workflowType)) {
+        const REASSIGNABLE_FROM = ["PAID_MATCHER", "WARRANTY_MATCHER", "PAID_GENERATOR", "WARRANTY_GENERATOR"];
+        if (!REASSIGNABLE_FROM.includes(current.workflowType)) {
           return {
             ok: false,
             code: "WORKFLOW_REASSIGNMENT_NOT_ALLOWED",
@@ -978,15 +984,17 @@ export async function updateRepairCase(
         // 인수정보 섹션의 단독 소관이다. 그래서 현재 저장된 값만 본다. 절대
         // 추측하지 않는다 — 비어 있으면(레거시 NULL 등) 사용자가 인수정보에서
         // 먼저 유상/무상을 선택해야 한다.
-        const targetWorkflowType = kind === "MATCHER"
-          ? "MATCHER"
-          : deriveWorkflowType("GENERATOR", current.billingType);
+        // 매쳐도 제너레이터와 같은 규칙으로 유·무상을 따라 간다. 예전에는
+        // 매쳐만 레거시 "MATCHER"로 보내 유·무상과 무관했는데, 그 워크플로가
+        // 없어졌으므로(2026-08-19) 이제 종류 세 개가 전부 같은 유도 규칙을 쓴다.
+        const targetWorkflowType = deriveWorkflowType(kind, current.billingType);
         if (!targetWorkflowType) {
+          const kindLabel = workflowKindLabels[kind];
           return {
             ok: false,
             code: "VALIDATION_ERROR",
-            fieldErrors: { billingType: "유상/무상이 설정되지 않아 제너레이터로 변경할 수 없습니다." },
-            message: "유상/무상이 설정되지 않아 제너레이터로 변경할 수 없습니다. 인수정보에서 유상/무상을 먼저 선택한 후 다시 시도해 주세요.",
+            fieldErrors: { billingType: `유상/무상이 설정되지 않아 ${kindLabel}로 변경할 수 없습니다.` },
+            message: `유상/무상이 설정되지 않아 ${kindLabel}로 변경할 수 없습니다. 인수정보에서 유상/무상을 먼저 선택한 후 다시 시도해 주세요.`,
           };
         }
 

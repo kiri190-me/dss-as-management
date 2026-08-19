@@ -2,11 +2,21 @@ import "server-only";
 
 import { and, asc, eq, lte } from "drizzle-orm";
 import { deriveWorkflowType, workflowKindOf } from "@/lib/domain/workflow-kind";
-import type { BillingType } from "@/lib/domain/types";
+import { WORKFLOW_TYPE_CODES, type BillingType, type WorkflowType } from "@/lib/domain/types";
 import type { db } from "../client";
 import { workflowSteps, workflowTemplates, workflowVersions } from "../schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * DB의 workflow_type enum에는 도메인에서 없앤 레거시 값이 남아 있다
+ * (schema/workflow.ts의 workflowTypeEnum 주석 참조). 그 값을 그대로 다루면
+ * workflowKindOf가 접미사를 못 찾아 조용히 "GENERATOR"로 읽으므로, 도메인이
+ * 아는 코드인지 먼저 좁힌다.
+ */
+function isActiveWorkflowType(code: string): code is WorkflowType {
+  return (WORKFLOW_TYPE_CODES as readonly string[]).includes(code);
+}
 
 export type BillingWorkflowTarget =
   | {
@@ -34,7 +44,9 @@ export type BillingWorkflowTarget =
  * 단계 매핑 규칙 — 실제 데이터로 확인한 구조에 기반한다(2026-08-18 측정):
  *   - 무상 워크플로의 단계 집합은 유상의 부분집합이다(Generator/Total
  *     Controller 기준 공통 10 + 유상 전용 6, 무상 전용 0). Matcher는 19단계가
- *     완전히 동일하다.
+ *     완전히 동일하다 — 그래서 유상 Matcher ↔ 무상 Matcher는 언제나 같은 key로
+ *     옮겨 간다(2026-08-19에 레거시 MATCHER가 없어진 뒤 매쳐도 다른 종류와
+ *     똑같이 유·무상을 따라 옮긴다).
  *   - 따라서 무상 → 유상/일부유상은 **항상** 같은 key가 대상에 존재한다.
  *   - 반대 방향(→ 무상)만, 유상 전용 단계(견적 작성/견적 발송/PO 대기/PO 접수/
  *     최종 전원인가 판단·수행)에 있을 때 갈 곳이 없다.
@@ -72,27 +84,20 @@ export async function resolveBillingWorkflowTarget(
     return { ok: false, code: "WORKFLOW_NOT_ALLOWED", message: "현재 워크플로 상태를 확인할 수 없습니다." };
   }
 
-  // 레거시 MATCHER는 유·무상과 워크플로가 완전히 독립이다 — 유상/무상을 바꿔도
-  // PAID_MATCHER/WARRANTY_MATCHER로 옮기지 않는다. 이 워크플로가 유·무상 구분이
-  // 생기기 전부터 쓰이던 것이라, 옮기면 과거 이력의 의미가 바뀐다
-  // (repair-cases-update.integration.test.ts의 48번이 이 불변식을 고정한다).
-  // 이 워크플로 자체를 정리하는 것은 별도 작업으로 다룬다 — 유·무상을 고치다가
-  // 슬그머니 이관되는 것은 그 작업이 아니다.
-  if (currentWorkflow.workflowType === "MATCHER") {
+  // 템플릿 코드가 아직 쓰이는 워크플로 유형인지 먼저 본다. 레거시 MATCHER를
+  // 정리하면서(2026-08-19) 아카이브된 템플릿이 DB에 남았고, 그런 코드가 여기까지
+  // 오면 workflowKindOf가 접미사를 못 찾아 조용히 "GENERATOR"로 읽는다 — 매쳐
+  // 건을 제너레이터로 옮겨 버리는 셈이다. 추측하느니 거절한다.
+  const currentWorkflowType = currentWorkflow.workflowType;
+  if (!isActiveWorkflowType(currentWorkflowType)) {
     return {
-      ok: true,
-      workflowVersionId: params.currentWorkflowVersionId,
-      workflowStepId: params.currentWorkflowStepId,
-      movedToFallbackStep: false,
-      targetStepKey: currentWorkflow.currentStepKey,
-      workflowUnchanged: true,
+      ok: false,
+      code: "WORKFLOW_NOT_ALLOWED",
+      message: "더 이상 사용하지 않는 워크플로의 접수 건은 유·무상을 변경할 수 없습니다.",
     };
   }
 
-  const targetWorkflowType = deriveWorkflowType(
-    workflowKindOf(currentWorkflow.workflowType),
-    params.nextBillingType
-  );
+  const targetWorkflowType = deriveWorkflowType(workflowKindOf(currentWorkflowType), params.nextBillingType);
   if (!targetWorkflowType) {
     return { ok: false, code: "WORKFLOW_NOT_ALLOWED", message: "대상 워크플로를 결정할 수 없습니다." };
   }

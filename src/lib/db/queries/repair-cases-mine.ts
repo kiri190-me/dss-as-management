@@ -1,4 +1,5 @@
 import "server-only";
+import { workflowTypeCodeColumn } from "../workflow-type-column";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
@@ -128,7 +129,9 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
     customerId: row.customerId,
     customerName: row.customerName,
     endUserName: row.endUserName,
-    productCategory: productCategoryLabels[row.workflowTypeCode],
+    // 라벨이 없으면 "-" — 도메인에서 없앤 레거시 코드가 만에 하나 조인되어도
+    // undefined가 화면에 새어 나가지 않게 한다(db/workflow-type-column.ts 주석).
+    productCategory: productCategoryLabels[row.workflowTypeCode] ?? "-",
     modelName: row.modelName,
     billingType: row.billingType,
     serialNumber: row.serialNumber ?? "-",
@@ -169,7 +172,7 @@ export async function listMyActiveRepairCases(actorId: string): Promise<MyActive
       customerName: customers.name,
       billingType: repairCases.billingType,
       endUserName: endUsers.name,
-      workflowTypeCode: workflowTemplates.code,
+      workflowTypeCode: workflowTypeCodeColumn(),
       currentWorkflowStepKey: workflowSteps.key,
       // Phase 2c: 상태를 TS 표가 아니라 이 컬럼에서 읽는다.
       currentWorkflowStepRepairStatus: workflowSteps.repairStatus,
