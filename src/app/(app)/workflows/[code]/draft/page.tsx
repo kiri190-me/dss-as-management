@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { canEditWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getWorkflowDraftDetail } from "@/lib/db/queries/workflow-templates";
 import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
 import { workflowTypeLabels } from "@/lib/domain/types";
@@ -26,7 +26,9 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !canEditWorkflowTemplates(actingUser.role)) redirect("/dashboard");
+  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.editDraft", "WRITE"))) {
+    redirect("/dashboard");
+  }
 
   const draftRef = await findWorkflowDraft(code);
   if (!draftRef) notFound();

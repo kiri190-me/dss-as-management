@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listWorkflowTemplateSummaries } from "@/lib/db/queries/workflow-templates";
 import { workflowTypeLabels } from "@/lib/domain/types";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -30,7 +30,7 @@ export default async function WorkflowsPage() {
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !canViewWorkflowTemplates(actingUser.role)) redirect("/dashboard");
+  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.view", "READ"))) redirect("/dashboard");
 
   const templates = await listWorkflowTemplateSummaries();
   const active = templates.filter((t) => !t.isArchived);

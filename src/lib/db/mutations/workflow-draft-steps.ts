@@ -4,7 +4,7 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import { users, workflowSteps, workflowTransitions, workflowVersions } from "../schema";
 import { insertAuditLog } from "./audit-logs";
-import { canEditWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { RepairStatus } from "@/lib/domain/types";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 
@@ -53,7 +53,7 @@ async function requireEditableDraft(
     .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
     .from(users)
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
-  if (!actor || actor.approvalStatus !== "APPROVED" || !canEditWorkflowTemplates(actor.role)) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
 

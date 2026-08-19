@@ -11,10 +11,7 @@ import {
   workflowVersions,
 } from "../schema";
 import { insertAuditLog } from "./audit-logs";
-import {
-  canEditWorkflowTemplates,
-  canPublishWorkflowTemplates,
-} from "@/lib/auth/workflow-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   validateWorkflowDraft,
   workflowExitsWithoutTerminalStep,
@@ -70,7 +67,7 @@ export async function createWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string; versionNumber: number }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !canEditWorkflowTemplates(actor.role)) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
 
@@ -202,7 +199,7 @@ export async function publishWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string; versionNumber: number; archivedVersionId: string | null }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !canPublishWorkflowTemplates(actor.role)) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.publish", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 발행할 권한이 없습니다." };
   }
 
@@ -319,7 +316,7 @@ export async function discardWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !canEditWorkflowTemplates(actor.role)) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
 

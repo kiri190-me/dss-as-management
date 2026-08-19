@@ -4,9 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import {
-  canEditWorkflowTemplates,
-  canViewWorkflowTemplates,
 } from "@/lib/auth/workflow-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
 import WorkflowDraftEntry from "@/components/workflows/WorkflowDraftEntry";
 import { getWorkflowTemplateDetail } from "@/lib/db/queries/workflow-templates";
@@ -68,14 +67,18 @@ export default async function WorkflowDetailPage({
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !canViewWorkflowTemplates(actingUser.role)) redirect("/dashboard");
+  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.view", "READ"))) redirect("/dashboard");
+
+  // 초안은 편집 권한이 있는 사람에게만 읽어 온다 — 아래에서 두 번 쓰이므로
+  // 한 번만 묻는다.
+  const mayEditDraft = await hasPermission(actingUser.role, "workflows.editDraft", "WRITE");
 
   const detail = await getWorkflowTemplateDetail(code);
   if (!detail) notFound();
 
   const currentVersion = detail.versions.find((v) => v.isCurrent && v.status === "PUBLISHED") ?? null;
   const rules = currentVersion ? await loadWorkflowRules(db, currentVersion.id) : null;
-  const draft = canEditWorkflowTemplates(actingUser.role) ? await findWorkflowDraft(code) : null;
+  const draft = mayEditDraft ? await findWorkflowDraft(code) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,7 +101,7 @@ export default async function WorkflowDetailPage({
         </p>
       )}
 
-      {canEditWorkflowTemplates(actingUser.role) && (
+      {mayEditDraft && (
         <WorkflowDraftEntry
           templateCode={detail.code}
           hasDraft={draft !== null}
