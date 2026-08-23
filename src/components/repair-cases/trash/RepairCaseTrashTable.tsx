@@ -1,6 +1,7 @@
 import type { TrashedRepairCase } from "@/lib/db/mappers/repair-case";
 import { StatusBadge } from "../badges";
 import RepairCaseTrashRetentionBadge from "./RepairCaseTrashRetentionBadge";
+import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 
 const thBaseClass =
   "border-b border-zinc-200 bg-white px-3 py-2 text-left text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
@@ -19,6 +20,7 @@ export default function RepairCaseTrashTable({
   rows,
   selectedIds,
   onToggleSelect,
+  onToggleSelectAll,
   onRestoreOne,
   canPermanentlyDelete,
   onPermanentlyDeleteOne,
@@ -26,6 +28,8 @@ export default function RepairCaseTrashTable({
   rows: TrashedRepairCase[];
   selectedIds: ReadonlySet<string>;
   onToggleSelect: (id: string) => void;
+  /** 체크박스 열 머리글의 전체 선택. 휴지통에는 고를 수 없는 행이 없으므로 대상은 늘 rows 전부다. */
+  onToggleSelectAll: (nextChecked: boolean) => void;
   onRestoreOne: (id: string) => void;
   /** Repair Case Permanent Delete checkpoint — SUPER_ADMIN/ADMIN only (canPermanentlyDeleteRepairCases), same role set as the trash tab itself today but checked as its own explicit prop. */
   canPermanentlyDelete: boolean;
@@ -36,7 +40,12 @@ export default function RepairCaseTrashTable({
         <thead className="sticky top-0 z-10">
           <tr>
             <th scope="col" className={`${thBaseClass} w-10`}>
-              <span className="sr-only">선택</span>
+              <SelectAllCheckbox
+                selectableCount={rows.length}
+                selectedCount={rows.filter((row) => selectedIds.has(row.id)).length}
+                onChange={onToggleSelectAll}
+                ariaLabel="휴지통 전체 선택"
+              />
             </th>
             <th scope="col" className={thBaseClass}>인수번호</th>
             <th scope="col" className={thBaseClass}>삭제일</th>

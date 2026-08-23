@@ -1,5 +1,7 @@
 "use client";
 
+import SelectAllCheckbox from "@/components/common/select-all-checkbox";
+
 /**
  * 전체 A/S 현황(/repair-cases)의 삭제 모드 토글 + 선택 상태 바 —
  * SUPER_ADMIN/ADMIN에게만 렌더링 여부가 결정된다(canBulkDelete, 부모인
@@ -12,6 +14,9 @@ export default function RepairCaseBulkDeleteBar({
   canBulkDelete,
   isDeleteMode,
   selectedCount,
+  selectablePageCount,
+  selectedPageCount,
+  onToggleSelectAllOnPage,
   onEnterDeleteMode,
   onCancel,
   onRequestDelete,
@@ -19,6 +24,15 @@ export default function RepairCaseBulkDeleteBar({
   canBulkDelete: boolean;
   isDeleteMode: boolean;
   selectedCount: number;
+  /**
+   * 지금 페이지에서 고를 수 있는 행 수와 그중 골라진 수 — 전체 선택 체크박스가
+   * 쓴다. 표 머리글에도 같은 체크박스가 있지만, 카드 보기에는 머리글이 없고
+   * 표/카드 중 무엇이 보이는지는 ResponsiveList가 안에서 정하므로 여기에도
+   * 있어야 카드에서도 닿는다.
+   */
+  selectablePageCount: number;
+  selectedPageCount: number;
+  onToggleSelectAllOnPage: (nextChecked: boolean) => void;
   onEnterDeleteMode: () => void;
   onCancel: () => void;
   onRequestDelete: () => void;
@@ -42,6 +56,12 @@ export default function RepairCaseBulkDeleteBar({
       <span className="text-sm font-medium text-red-800 dark:text-red-300">
         삭제 모드 — {selectedCount}건 선택됨
       </span>
+      <SelectAllCheckbox
+        selectableCount={selectablePageCount}
+        selectedCount={selectedPageCount}
+        onChange={onToggleSelectAllOnPage}
+        label="이 페이지 전체"
+      />
       <div className="ml-auto flex gap-2">
         <button
           type="button"

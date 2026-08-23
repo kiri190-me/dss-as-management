@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { mockCustomers, mockRepairCases } from "@/lib/domain/mock-data";
 import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import { useEffectiveRepairCasesFromBase } from "@/lib/domain/local/workflow/effective-repair-case";
@@ -30,6 +30,7 @@ import type { TrashedRepairCase } from "@/lib/db/mappers/repair-case";
 import RepairCaseTrashTable from "./trash/RepairCaseTrashTable";
 import RepairCaseTrashCardList from "./trash/RepairCaseTrashCardList";
 import RepairCaseTrashActionBar from "./trash/RepairCaseTrashActionBar";
+import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import RepairCaseRestoreDialog from "./trash/RepairCaseRestoreDialog";
 import { restoreRepairCasesAction } from "@/lib/server/actions/restore-repair-cases";
 import RepairCasePermanentDeleteDialog from "./trash/RepairCasePermanentDeleteDialog";
@@ -88,6 +89,7 @@ export default function RepairCaseListPage({
   canPermanentlyDelete = false,
 }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   // Only actually used when serverBaseCases is undefined (Mock mode) — kept
   // as a plain, unconditional useMemo (not a conditional hook call) so the
@@ -107,14 +109,36 @@ export default function RepairCaseListPage({
   const baseCases = useMemo(() => {
     const source = serverBaseCases ?? mockBaseCases;
     const active = deletedIds.size === 0 ? source : source.filter((c) => !deletedIds.has(c.id));
-    return restoredCases.length === 0 ? active : [...active, ...restoredCases];
+    if (restoredCases.length === 0) return active;
+    // 서버 목록에 이미 들어온 건은 여기서 다시 붙이지 않는다 — 복원 직후에는
+    // 화면에만 있던 이 사본이 유일한 근거지만, router.refresh()로 새 목록이
+    // 오면 같은 행이 양쪽에 있게 되어 목록에 두 번 보인다.
+    const known = new Set(active.map((c) => c.id));
+    return [...active, ...restoredCases.filter((c) => !known.has(c.id))];
   }, [serverBaseCases, mockBaseCases, deletedIds, restoredCases]);
 
   const { cases: rows, isHydrated } = useEffectiveRepairCasesFromBase(baseCases);
 
   // Trash tab state — only ever populated/rendered when canRestore is true.
   const [activeTab, setActiveTab] = useState<"active" | "trash">("active");
-  const [trashCases, setTrashCases] = useState<TrashedRepairCase[]>(() => serverTrashCases ?? []);
+  /**
+   * 휴지통 목록은 **서버 목록에서 파생**한다 — 사본을 따로 들고 있지 않는다.
+   *
+   * 예전에는 useState로 한 번 복사해 두고 화면에서만 고쳤다. 그래서 삭제한
+   * 건이 이 사본에 들어오지 못했고, **휴지통(N)이 새로고침 전까지 올라가지
+   * 않았다**. 지운 건이 어디로 갔는지(삭제 시각·삭제자·새 version)는 서버만
+   * 아는 값이라 화면이 지어낼 수도 없다.
+   *
+   * 그래서 방향을 뒤집었다. 조작이 성공하면 router.refresh()로 서버 목록을
+   * 다시 받고, 화면은 그 목록에서 "방금 여기서 처리한 것"만 덜어 낸다.
+   * 덜어 낸 id는 새 목록에는 애초에 없으므로 그대로 두어도 무해하다 —
+   * 되돌려 놓을 시점을 따로 관리하지 않아도 저절로 아물게 하려는 것이다.
+   */
+  const [resolvedTrashIds, setResolvedTrashIds] = useState<Set<string>>(new Set());
+  const trashCases = useMemo(() => {
+    const source = serverTrashCases ?? [];
+    return resolvedTrashIds.size === 0 ? source : source.filter((c) => !resolvedTrashIds.has(c.id));
+  }, [serverTrashCases, resolvedTrashIds]);
   const [trashSelectedIds, setTrashSelectedIds] = useState<Set<string>>(new Set());
   const [restoreTargetIds, setRestoreTargetIds] = useState<string[]>([]);
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
@@ -219,6 +243,34 @@ export default function RepairCaseListPage({
     });
   }
 
+  /**
+   * 전체 선택의 대상은 **지금 이 페이지에 그려진, 고를 수 있는 행**이다.
+   * 필터에 걸린 전부(sortedRows)가 아니라 pagedRows인 이유는, 눈에 보이지
+   * 않는 행까지 한 번에 담기면 확인 창에 뜨는 건수와 화면에서 센 건수가
+   * 달라지기 때문이다. 해제도 같은 범위만 푼다 — 다른 페이지에서 골라 둔
+   * 것은 그대로 남고, 그것을 한꺼번에 비우는 일은 '취소'가 따로 한다.
+   */
+  const selectablePagedIds = useMemo(
+    () => pagedRows.filter((row) => selectableIds.has(row.id)).map((row) => row.id),
+    [pagedRows, selectableIds]
+  );
+
+  function handleToggleSelectAllOnPage(nextChecked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of selectablePagedIds) {
+        if (nextChecked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function handleToggleSelectAllTrash(nextChecked: boolean) {
+    // 휴지통은 페이지를 나누지 않으므로 '보이는 것'이 곧 전부다.
+    setTrashSelectedIds(nextChecked ? new Set(trashCases.map((row) => row.id)) : new Set());
+  }
+
   function handleEnterDeleteMode() {
     setIsDeleteMode(true);
   }
@@ -272,6 +324,10 @@ export default function RepairCaseListPage({
           for (const id of succeededIds) next.delete(id);
           return next;
         });
+        // 사용중 목록에서 빼는 것만으로는 휴지통이 늘어나지 않는다 — 지운 건이
+        // 어디로 갔는지는 서버만 안다(삭제 시각·삭제자·새 version). 위 sync
+        // effect가 새 목록으로 갈아 끼운다.
+        router.refresh();
       }
       setDeleteItemErrors(failedErrors);
       setDeleteReason("");
@@ -357,12 +413,15 @@ export default function RepairCaseListPage({
       if (succeededIds.length > 0) {
         const succeededSet = new Set(succeededIds);
         setRestoredCases((prev) => [...prev, ...trashCases.filter((c) => succeededSet.has(c.id))]);
-        setTrashCases((prev) => prev.filter((c) => !succeededSet.has(c.id)));
+        setResolvedTrashIds((prev) => new Set([...prev, ...succeededIds]));
         setTrashSelectedIds((prev) => {
           const next = new Set(prev);
           for (const id of succeededIds) next.delete(id);
           return next;
         });
+        // 복원한 건의 새 version은 서버만 안다 — 다시 삭제하려 할 때 예전
+        // version으로 물으면 CONFLICT가 난다.
+        router.refresh();
       }
       setRestoreItemErrors(failedErrors);
       setIsRestoreConfirmOpen(false);
@@ -425,16 +484,16 @@ export default function RepairCaseListPage({
       }
 
       if (succeededIds.length > 0) {
-        const succeededSet = new Set(succeededIds);
         // Unlike restore, a permanently deleted row is gone for good — it's
-        // only ever removed from trashCases here, never merged back into
+        // only ever taken out of the 휴지통 list here, never merged back into
         // the active baseCases list.
-        setTrashCases((prev) => prev.filter((c) => !succeededSet.has(c.id)));
+        setResolvedTrashIds((prev) => new Set([...prev, ...succeededIds]));
         setTrashSelectedIds((prev) => {
           const next = new Set(prev);
           for (const id of succeededIds) next.delete(id);
           return next;
         });
+        router.refresh();
       }
       setPermanentDeleteItemErrors(failedErrors);
       setPermanentDeleteReason("");
@@ -463,6 +522,9 @@ export default function RepairCaseListPage({
               canBulkDelete={canBulkDelete}
               isDeleteMode={isDeleteMode}
               selectedCount={selectedIds.size}
+              selectablePageCount={selectablePagedIds.length}
+              selectedPageCount={selectablePagedIds.filter((id) => selectedIds.has(id)).length}
+              onToggleSelectAllOnPage={handleToggleSelectAllOnPage}
               onEnterDeleteMode={handleEnterDeleteMode}
               onCancel={handleCancelDeleteMode}
               onRequestDelete={handleRequestDelete}
@@ -537,6 +599,21 @@ export default function RepairCaseListPage({
             </div>
           )}
 
+          {/* 선택 바는 0건일 때 사라지므로, 카드 보기에서도 늘 닿을 수 있는
+              전체 선택은 여기(항상 보이는 줄)에 둔다. 표 머리글에도 같은
+              체크박스가 있지만 표/카드 중 무엇이 보이는지는 ResponsiveList가
+              안에서 정하므로 한쪽만으로는 카드에서 닿지 않는다. */}
+          {trashCases.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <SelectAllCheckbox
+                selectableCount={trashCases.length}
+                selectedCount={trashCases.filter((row) => trashSelectedIds.has(row.id)).length}
+                onChange={handleToggleSelectAllTrash}
+                label="전체 선택"
+              />
+            </div>
+          )}
+
           <RepairCaseTrashActionBar
             selectedCount={trashSelectedIds.size}
             onClearSelection={handleClearTrashSelection}
@@ -557,6 +634,7 @@ export default function RepairCaseListPage({
                   rows={trashCases}
                   selectedIds={trashSelectedIds}
                   onToggleSelect={handleToggleTrashSelect}
+                  onToggleSelectAll={handleToggleSelectAllTrash}
                   onRestoreOne={handleRequestRestoreOne}
                   canPermanentlyDelete={canPermanentlyDelete}
                   onPermanentlyDeleteOne={handleRequestPermanentDeleteOne}
@@ -643,6 +721,7 @@ export default function RepairCaseListPage({
                         selectedIds={selectedIds}
                         selectableIds={selectableIds}
                         onToggleSelect={handleToggleSelect}
+                        onToggleSelectAll={handleToggleSelectAllOnPage}
                       />
                     }
                     cards={

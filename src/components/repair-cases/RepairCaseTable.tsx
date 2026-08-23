@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 
 type RepairCaseTableProps = {
   rows: EffectiveRepairCase[];
@@ -23,6 +24,13 @@ type RepairCaseTableProps = {
   selectedIds?: ReadonlySet<string>;
   selectableIds?: ReadonlySet<string>;
   onToggleSelect?: (id: string) => void;
+  /**
+   * 체크박스 열 머리글의 전체 선택. 대상은 **지금 이 표에 그려진 행**(= 이
+   * 페이지)이고, 그중 고를 수 있는 것만이다 — 보이지 않는 페이지까지 딸려
+   * 가면 몇 건을 지우는지 눈으로 셀 수 없게 된다. 세는 일은 rows/selectableIds로
+   * 여기서 직접 하고, 실제 선택 변경만 부모에게 맡긴다.
+   */
+  onToggleSelectAll?: (nextChecked: boolean) => void;
 };
 
 const thBaseClass =
@@ -147,14 +155,27 @@ export default function RepairCaseTable({
   selectedIds,
   selectableIds,
   onToggleSelect,
+  onToggleSelectAll,
 }: RepairCaseTableProps) {
+  const selectableVisible = selectionMode ? rows.filter((row) => selectableIds?.has(row.id) ?? false) : [];
+  const selectedVisibleCount = selectableVisible.filter((row) => selectedIds?.has(row.id) ?? false).length;
+
   return (
       <table className="w-full min-w-[1040px] border-collapse text-sm">
         <thead className="sticky top-0 z-10">
           <tr>
             {selectionMode && (
               <th scope="col" className={`${thBaseClass} w-10`}>
-                <span className="sr-only">선택</span>
+                {onToggleSelectAll ? (
+                  <SelectAllCheckbox
+                    selectableCount={selectableVisible.length}
+                    selectedCount={selectedVisibleCount}
+                    onChange={onToggleSelectAll}
+                    ariaLabel="이 페이지 전체 선택"
+                  />
+                ) : (
+                  <span className="sr-only">선택</span>
+                )}
               </th>
             )}
             <th scope="col" className={thBaseClass}>
