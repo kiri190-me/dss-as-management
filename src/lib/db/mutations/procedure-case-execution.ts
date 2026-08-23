@@ -184,7 +184,7 @@ export async function startProcedureExecution(
           category: procedureTemplates.category,
         })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, procedureTemplateId));
+        .where(and(eq(procedureTemplates.id, procedureTemplateId), eq(procedureTemplates.isDeleted, false)));
       if (!template) fail("NOT_FOUND", "해당 절차 템플릿을 찾을 수 없습니다.");
       if (template.status !== "PUBLISHED" || template.isReferenceOnly) {
         fail("TEMPLATE_NOT_EXECUTABLE", "게시(PUBLISHED)된 실행 가능한 절차 템플릿만 실행을 시작할 수 있습니다.");

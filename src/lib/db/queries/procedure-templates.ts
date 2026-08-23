@@ -1,5 +1,6 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
   procedureTemplates,
@@ -10,6 +11,7 @@ import {
   procedureTroubleshootingEntries,
   procedureTemplateValidationIssues,
   procedureReferenceItems,
+  procedureCaseExecutions,
   users,
 } from "../schema";
 import type {
@@ -59,7 +61,14 @@ export async function listProcedureTemplates(
   const templates = await db
     .select()
     .from(procedureTemplates)
-    .where(includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED"))
+    .where(
+      and(
+        // 휴지통에 있는 절차는 어느 목록에도 나오지 않는다 — 기술 절차
+        // 휴지통 체크포인트. 이 한 줄이 빠지면 지운 절차가 계속 보인다.
+        eq(procedureTemplates.isDeleted, false),
+        includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED")
+      )
+    )
     .orderBy(desc(procedureTemplates.createdAt));
   if (templates.length === 0) return [];
 
@@ -170,7 +179,14 @@ export async function listTechnicalProcedureTemplates(includeAllStatuses: boolea
   const templates = await db
     .select()
     .from(procedureTemplates)
-    .where(and(eq(procedureTemplates.category, "TECHNICAL_TASK"), includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED")))
+    .where(
+      and(
+        eq(procedureTemplates.category, "TECHNICAL_TASK"),
+        // 휴지통에 있는 절차는 사용중 목록에 나오지 않는다.
+        eq(procedureTemplates.isDeleted, false),
+        includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED")
+      )
+    )
     .orderBy(desc(procedureTemplates.createdAt));
   if (templates.length === 0) return [];
 
@@ -364,7 +380,9 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
     })
     .from(procedureTemplates)
     .innerJoin(createdBy, eq(procedureTemplates.createdByUserId, createdBy.id))
-    .where(eq(procedureTemplates.id, id));
+    // 휴지통에 있는 절차는 상세도 열리지 않는다 — 목록에서만 감추면
+    // 주소를 직접 친 사람에게는 지워지지 않은 것처럼 보인다.
+    .where(and(eq(procedureTemplates.id, id), eq(procedureTemplates.isDeleted, false)));
   if (!row) return null;
 
   let publishedByName: string | null = null;
@@ -586,4 +604,112 @@ export async function getProcedureTemplateDetail(id: string): Promise<ProcedureT
     })),
     openIssuesByNodeId: [...openIssueByNodeId].map(([nodeId, v]) => ({ nodeId, issueId: v.issueId, severity: v.severity })),
   };
+}
+
+export type DeletedProcedureTemplateRow = {
+  id: string;
+  code: string;
+  name: string;
+  equipmentType: ProcedureEquipmentType;
+  version: number;
+  /** 삭제 당시의 상태. 초안이었는지 발행본이었는지가 복원 판단의 첫 정보다. */
+  status: ProcedureTemplateStatus;
+  nodeCount: number;
+  deletedAt: string;
+  deletedByUserName: string | null;
+  deleteReason: string | null;
+};
+
+/**
+ * 기술 작업 절차 휴지통 목록. 삭제 권한이 있는 세션에서만 호출된다 — 페이지가
+ * 그것을 판정하고, 이 함수는 권한을 보지 않는다(다른 휴지통 조회와 같은 역할
+ * 분담).
+ *
+ * TECHNICAL_TASK만 돌려준다. 전체 서비스·참고자료 절차는 애초에 삭제할 수
+ * 없으므로(canDeleteTechnicalTemplates가 분류로 막는다) 휴지통에 있을 수도
+ * 없지만, 조회에서도 분류를 걸어 두면 나중에 다른 경로로 들어온 행이 이
+ * 화면에 새어 나오지 않는다.
+ */
+export async function listDeletedTechnicalProcedureTemplates(): Promise<DeletedProcedureTemplateRow[]> {
+  const deletedBy = alias(users, "deleted_by_user");
+
+  const templates = await db
+    .select({
+      id: procedureTemplates.id,
+      code: procedureTemplates.code,
+      name: procedureTemplates.name,
+      equipmentType: procedureTemplates.equipmentType,
+      version: procedureTemplates.version,
+      status: procedureTemplates.status,
+      deletedAt: procedureTemplates.deletedAt,
+      deleteReason: procedureTemplates.deleteReason,
+      deletedByUserName: deletedBy.name,
+    })
+    .from(procedureTemplates)
+    // leftJoin이어야 한다 — deleted_by는 nullable이고, inner join이면 삭제자를
+    // 알 수 없는 행이 휴지통에서 통째로 사라진다.
+    .leftJoin(deletedBy, eq(procedureTemplates.deletedBy, deletedBy.id))
+    .where(and(eq(procedureTemplates.category, "TECHNICAL_TASK"), eq(procedureTemplates.isDeleted, true)))
+    .orderBy(desc(procedureTemplates.deletedAt));
+
+  if (templates.length === 0) return [];
+
+  const templateIds = templates.map((template) => template.id);
+  const nodeAgg = await db
+    .select({
+      templateId: procedureTemplateNodes.procedureTemplateId,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(procedureTemplateNodes)
+    .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
+    .groupBy(procedureTemplateNodes.procedureTemplateId);
+  const nodeCounts = new Map(nodeAgg.map((row) => [row.templateId, row.total]));
+
+  return templates.map((template) => ({
+    id: template.id,
+    code: template.code,
+    name: template.name,
+    equipmentType: template.equipmentType,
+    version: template.version,
+    status: template.status,
+    nodeCount: nodeCounts.get(template.id) ?? 0,
+    // is_deleted = true인 행만 여기 온다. softDeleteProcedureTemplate은 같은
+    // UPDATE에서 deleted_at을 반드시 채운다(다른 휴지통 조회와 같은 근거).
+    deletedAt: template.deletedAt!.toISOString(),
+    deletedByUserName: template.deletedByUserName,
+    deleteReason: template.deleteReason,
+  }));
+}
+
+/**
+ * 지금 삭제할 수 없는 기술 절차의 id — 수행 기록이 있거나 후속 버전이
+ * 이어받은 것.
+ *
+ * 목록에서 체크박스를 비활성으로 만드는 근거다. 서버도 같은 기준으로 다시
+ * 막지만(softDeleteProcedureTemplate), 고를 수 있게 해 놓고 나중에 거절하는
+ * 것은 "왜 안 되는지"를 한 번 더 눌러 봐야 알게 만드는 일이다.
+ *
+ * 두 질의 모두 절차 단위로 접어서 읽으므로, 수행 기록이 아무리 쌓여도 결과
+ * 크기가 절차 수를 넘지 않는다.
+ */
+export async function listUndeletableProcedureTemplateIds(): Promise<Set<string>> {
+  const successor = alias(procedureTemplates, "successor_template");
+
+  const [executed, superseded] = await Promise.all([
+    db
+      .select({ templateId: procedureCaseExecutions.procedureTemplateId })
+      .from(procedureCaseExecutions)
+      .groupBy(procedureCaseExecutions.procedureTemplateId),
+    db
+      .select({ templateId: successor.supersedesTemplateId })
+      .from(successor)
+      .where(isNotNull(successor.supersedesTemplateId))
+      .groupBy(successor.supersedesTemplateId),
+  ]);
+
+  return new Set(
+    [...executed, ...superseded]
+      .map((row) => row.templateId)
+      .filter((id): id is string => id !== null)
+  );
 }

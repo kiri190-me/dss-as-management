@@ -188,7 +188,11 @@ class DetailedEditorFailure extends Error {
  * FORBIDDEN, never the template's current status.
  */
 async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
-  const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
+  const [template] = await tx
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
+    .for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
   if (!(await mayEditTemplateOfCategory(actorRole, template.category))) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
@@ -214,7 +218,11 @@ async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateU
  */
 /** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo is a TECHNICAL_TASK-graph-editing capability and must share this exact gate, never a looser copy. */
 export async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
-  const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
+  const [template] = await tx
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
+    .for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
   if (!(await mayManageTemplateGraph(actorRole, template.category))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
@@ -888,7 +896,11 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
 
-      const [template] = await tx.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId)).for("update");
+      const [template] = await tx
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
+    .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       // Same category-specific boundary as assertEditableDraft, duplicated
       // here because this function never calls it (validate intentionally

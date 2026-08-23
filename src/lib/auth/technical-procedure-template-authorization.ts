@@ -132,3 +132,26 @@ export function canActorCreateDraftVersionOfCategory(role: Role, category: Proce
 export function canActorManageTechnicalTemplateGraph(role: Role, category: ProcedureTemplateCategory): boolean {
   return category === "TECHNICAL_TASK" && canManageTechnicalTemplates(role);
 }
+
+/**
+ * 기술 절차 휴지통 체크포인트 — 절차를 휴지통으로 보내고, 되살리고, 즉시
+ * 완전삭제하는 권한.
+ *
+ * **canActorManageTechnicalTemplateGraph와 같은 모양으로, 일부러
+ * TECHNICAL_TASK 전용이다.** canActorEditTemplateOfCategory처럼 분류별로
+ * 갈라 쓰지 않는 이유도 같다 — 그 함수의 FULL_SERVICE/REFERENCE 가지는
+ * 기존 canEditProcedureTemplateDraft(최고관리자 전용 속성 편집 정책)로
+ * 떨어지는데, 삭제는 그 정책이 한 번도 다룬 적 없는 새 능력이다. 분류로
+ * 먼저 막아 두면 나중에 누가 역할만 넓혀도 전체 서비스 절차에는 삭제가
+ * 열리지 않는다.
+ *
+ * 보관(canArchiveProcedureTemplates, 최고관리자 전용)과도 합치지 않는다.
+ * 보관은 발행된 절차를 내리는 다른 일이고 권한 계층도 다르다 — 한 함수로
+ * 접으면 둘 중 하나는 반드시 잘못된 계층을 갖게 된다.
+ *
+ * 삭제·복원·완전삭제를 하나로 묶은 것은 다른 화면과 같은 이유다: 셋을
+ * 나누면 "지울 수는 있는데 되돌릴 수는 없는" 역할이 만들어진다.
+ */
+export function canDeleteTechnicalTemplates(role: Role, category: ProcedureTemplateCategory): boolean {
+  return category === "TECHNICAL_TASK" && canManageTechnicalTemplates(role);
+}

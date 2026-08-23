@@ -4,7 +4,11 @@ import TechnicalProcedureTemplateListScreen from "@/components/procedures/Techni
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { listTechnicalProcedureTemplates } from "@/lib/db/queries/procedure-templates";
+import {
+  listDeletedTechnicalProcedureTemplates,
+  listTechnicalProcedureTemplates,
+  listUndeletableProcedureTemplateIds,
+} from "@/lib/db/queries/procedure-templates";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -44,7 +48,25 @@ export default async function TechnicalProceduresPage() {
   // 초안까지 보이는 것과 초안을 고칠 수 있는 것은 같은 권한이다 — 볼 수 없는
   // 초안을 고칠 수는 없고, 고칠 수 있는데 안 보이면 화면이 쓸모없다.
   const mayEditDraft = await hasPermission(actingUser.role, "technicalProcedures.editDraft", "WRITE");
-  const templates = await listTechnicalProcedureTemplates(mayEditDraft);
 
-  return <TechnicalProcedureTemplateListScreen templates={templates} canCreate={mayEditDraft} />;
+  // 삭제·복원 권한(기본값: 관리자 이상)이 있는 세션에만 휴지통과 "지금 지울 수
+  // 없는 절차" 목록을 읽는다 — 다른 마스터 화면과 같은 규칙이다. 화면에서
+  // 감추는 것은 편의일 뿐 경계가 아니므로, 삭제 mutation은 이 판정과 무관하게
+  // 트랜잭션 안에서 역할과 **분류**를 다시 본다.
+  const canDelete = await hasPermission(actingUser.role, "technicalProcedures.lifecycle", "MANAGE");
+  const [templates, trashTemplates, undeletableIds] = await Promise.all([
+    listTechnicalProcedureTemplates(mayEditDraft),
+    canDelete ? listDeletedTechnicalProcedureTemplates() : Promise.resolve([]),
+    canDelete ? listUndeletableProcedureTemplateIds() : Promise.resolve(new Set<string>()),
+  ]);
+
+  return (
+    <TechnicalProcedureTemplateListScreen
+      templates={templates}
+      canCreate={mayEditDraft}
+      canDelete={canDelete}
+      trashTemplates={trashTemplates}
+      undeletableIds={[...undeletableIds]}
+    />
+  );
 }

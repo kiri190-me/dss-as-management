@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../client";
 import {
@@ -12,6 +12,8 @@ import {
   procedureTemplateValidationIssues,
   procedureReferenceItems,
   procedureTemplateEditHistory,
+  procedureValidationResolutionHistory,
+  procedureCaseExecutions,
   users,
 } from "../schema";
 import { canImportProcedureTemplates, canArchiveProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
@@ -20,7 +22,9 @@ import {
   canActorPublishTemplateOfCategory,
   canActorCreateDraftVersionOfCategory,
   canActorManageTechnicalTemplateGraph,
+  canDeleteTechnicalTemplates,
 } from "@/lib/auth/technical-procedure-template-authorization";
+import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_EQUIPMENT_TYPE_CODES, type ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -136,6 +140,7 @@ export async function createDraftProcedureTemplateFromImport(
         .where(
           and(
             eq(procedureTemplates.code, extracted.code),
+            eq(procedureTemplates.isDeleted, false),
             eq(procedureTemplates.sourceFileHash, source.sourceFileHash)
           )
         )
@@ -298,7 +303,7 @@ export async function renameTechnicalProcedureTemplate(
           name: procedureTemplates.name,
         })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, templateId))
+        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (!canActorManageTechnicalTemplateGraph(actor.role, template.category)) {
@@ -498,7 +503,7 @@ export async function publishProcedureTemplate(
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status, category: procedureTemplates.category })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, templateId))
+        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
@@ -578,7 +583,7 @@ export async function archiveProcedureTemplate(
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, templateId))
+        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (template.status !== "PUBLISHED") {
@@ -623,7 +628,7 @@ export async function createNewDraftVersion(
       const [published] = await tx
         .select()
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, publishedTemplateId))
+        .where(and(eq(procedureTemplates.id, publishedTemplateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!published) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
@@ -640,7 +645,15 @@ export async function createNewDraftVersion(
       const [existingDraft] = await tx
         .select({ id: procedureTemplates.id })
         .from(procedureTemplates)
-        .where(and(eq(procedureTemplates.code, published.code), eq(procedureTemplates.status, "DRAFT")))
+        .where(
+          and(
+            eq(procedureTemplates.code, published.code),
+            eq(procedureTemplates.status, "DRAFT"),
+            // 휴지통에 있는 초안은 "이미 초안이 있다"로 세지 않는다 —
+            // 목록에 보이지 않는 행 때문에 새 초안 만들기가 막히면 안 된다.
+            eq(procedureTemplates.isDeleted, false)
+          )
+        )
         .limit(1);
       if (existingDraft) {
         fail("CONFLICT", "이미 진행 중인 초안 버전이 있습니다.");
@@ -885,7 +898,13 @@ export async function replaceDraftProcedureTemplates(
       const targets = await tx
         .select({ id: procedureTemplates.id, code: procedureTemplates.code })
         .from(procedureTemplates)
-        .where(and(inArray(procedureTemplates.code, codes), eq(procedureTemplates.status, "DRAFT")));
+        .where(
+          and(
+            inArray(procedureTemplates.code, codes),
+            eq(procedureTemplates.status, "DRAFT"),
+            eq(procedureTemplates.isDeleted, false)
+          )
+        );
 
       const deleted: (ReplaceDraftTemplatesResult & { ok: true })["deleted"] = [];
 
@@ -961,6 +980,288 @@ export async function replaceDraftProcedureTemplates(
       }
 
       return { ok: true, deleted };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 기술 절차 삭제 · 복원 · 완전삭제 (휴지통 → 15일 → 완전삭제) ----
+
+/**
+ * ============================================================================
+ * 기술 절차 휴지통
+ * ============================================================================
+ * 고객사·제품 모델·부품과 같은 3단계이고, 코드 모양은 이 파일의 규약을
+ * 따른다(resolveEligibleActor + fail + 행 잠금 + 상태 재검사).
+ *
+ * ── 보관과 겹치지 않는다 ────────────────────────────────────────────────
+ * archiveProcedureTemplate은 **발행된** 절차를 "이제 안 씀"으로 내린다.
+ * 여기 삭제는 **쓰인 적 없는** 절차를 목록에서 치운다. 대상이 겹치지 않으므로
+ * 두 기능은 서로를 대체하지 않는다 — 지금 이 시스템의 절차가 전부 DRAFT라
+ * 보관 대상이 0개이고, 그래서 잘못 만든 초안을 치울 방법이 없었다는 것이
+ * 이 기능을 넣은 이유다.
+ *
+ * ── 낙관적 동시성 토큰이 없다 ───────────────────────────────────────────
+ * archiveProcedureTemplate과 같다 — 행을 잠그고 상태를 다시 보는 것으로
+ * 충분하다. 두 사람이 동시에 지우면 나중 사람은 "찾을 수 없음"을 받는다.
+ * procedure_templates.version은 **발행 횟수**이지 행 버전이 아니라서
+ * 동시성 토큰으로 쓸 수 없다(발행하지 않으면 영원히 1이다).
+ *
+ * ── 지울 수 없는 절차 ───────────────────────────────────────────────────
+ * ① procedure_case_executions가 가리키는 절차 — 실제 수리 작업의 기록이다.
+ * ② 다른 버전이 supersedes_template_id로 이어받은 절차.
+ * 둘 다 RESTRICT라, 남겨 두면 15일 뒤 완전삭제가 DB에서 거부되고 그 절차는
+ * 휴지통에서 영영 사라지지 않는다. 그래서 휴지통에도 넣지 않는다.
+ *
+ * ── 분류로 먼저 막는다 ──────────────────────────────────────────────────
+ * canDeleteTechnicalTemplates는 TECHNICAL_TASK 전용이다. 전체 서비스·참고자료
+ * 절차는 어떤 역할로도 이 함수들을 통과하지 못한다.
+ * ============================================================================
+ */
+
+export type ProcedureTemplateTrashResult =
+  | { ok: true; id: string }
+  | { ok: false; code: ProcedureTemplateResultCode; message: string };
+
+/** 이 절차를 붙잡고 있는 것의 수 — 수행 기록과 이어받은 버전을 합쳐 센다. */
+async function countProcedureTemplateReferences(tx: Tx, templateId: string): Promise<number> {
+  const [executions] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(procedureCaseExecutions)
+    .where(eq(procedureCaseExecutions.procedureTemplateId, templateId));
+
+  const [successors] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(procedureTemplates)
+    .where(eq(procedureTemplates.supersedesTemplateId, templateId));
+
+  return executions.total + successors.total;
+}
+
+function templateReferencedMessage(count: number): string {
+  return `이 절차를 참조하는 수행 기록·후속 버전이 ${count}건 있어 삭제할 수 없습니다.`;
+}
+
+/** 삭제·복원·완전삭제가 공통으로 통과하는 관문. 분류까지 보고 판정한다. */
+async function requireDeletableTemplate(
+  tx: Tx,
+  templateId: string,
+  actorUserId: string,
+  expectDeleted: boolean
+) {
+  const actor = await resolveEligibleActor(tx, actorUserId);
+
+  const [template] = await tx
+    .select({
+      id: procedureTemplates.id,
+      code: procedureTemplates.code,
+      name: procedureTemplates.name,
+      category: procedureTemplates.category,
+      status: procedureTemplates.status,
+      version: procedureTemplates.version,
+      isDeleted: procedureTemplates.isDeleted,
+      deletedAt: procedureTemplates.deletedAt,
+      deletedBy: procedureTemplates.deletedBy,
+      deleteReason: procedureTemplates.deleteReason,
+    })
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, expectDeleted)))
+    .for("update");
+
+  if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+  if (!canDeleteTechnicalTemplates(actor.role, template.category)) {
+    fail("FORBIDDEN", "이 절차를 삭제하거나 복원할 권한이 없습니다.");
+  }
+
+  return { actor, template };
+}
+
+/** 절차를 휴지통으로 보낸다. 수행 기록이나 후속 버전이 있으면 아무것도 바꾸지 않는다. */
+export async function softDeleteProcedureTemplate(input: {
+  templateId: string;
+  actorUserId: string;
+  reason: string | null;
+}): Promise<ProcedureTemplateTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const { template } = await requireDeletableTemplate(tx, input.templateId, input.actorUserId, false);
+
+      const references = await countProcedureTemplateReferences(tx, input.templateId);
+      if (references > 0) fail("CONFLICT", templateReferencedMessage(references));
+
+      const deletedAt = new Date();
+      await tx
+        .update(procedureTemplates)
+        .set({
+          isDeleted: true,
+          deletedAt,
+          deletedBy: input.actorUserId,
+          deleteReason: input.reason,
+          updatedAt: deletedAt,
+        })
+        .where(and(eq(procedureTemplates.id, input.templateId), eq(procedureTemplates.isDeleted, false)));
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "SOFT_DELETE",
+        targetEntity: "procedure_templates",
+        targetRecordId: input.templateId,
+        previousValue: {
+          id: template.id,
+          code: template.code,
+          name: template.name,
+          category: template.category,
+          status: template.status,
+          version: template.version,
+        },
+        newValue: { isDeleted: true, deletedAt: deletedAt.toISOString(), deleteReason: input.reason },
+      });
+
+      return { ok: true, id: input.templateId };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 휴지통의 절차를 되살린다.
+ *
+ * 이름 충돌 검사가 없다 — procedure_templates_code_version_unique는 부분
+ * 인덱스가 아니라서 삭제된 행도 (code, version) 자리를 계속 지킨다. 즉
+ * 휴지통에 있는 동안 같은 code+version이 새로 생길 수 없고, 복원이 막힐
+ * 이유도 없다(고객사·제품 모델은 부분 인덱스라 그 검사가 필요했다).
+ */
+export async function restoreProcedureTemplate(input: {
+  templateId: string;
+  actorUserId: string;
+}): Promise<ProcedureTemplateTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const { template } = await requireDeletableTemplate(tx, input.templateId, input.actorUserId, true);
+
+      await tx
+        .update(procedureTemplates)
+        .set({
+          isDeleted: false,
+          deletedAt: null,
+          deletedBy: null,
+          deleteReason: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(procedureTemplates.id, input.templateId), eq(procedureTemplates.isDeleted, true)));
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "RESTORE",
+        targetEntity: "procedure_templates",
+        targetRecordId: input.templateId,
+        previousValue: null,
+        newValue: { id: template.id, code: template.code, name: template.name, isDeleted: false },
+      });
+
+      return { ok: true, id: input.templateId };
+    });
+  } catch (err) {
+    if (err instanceof ProcedureTemplateMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 절차와 그 부속물을 실제로 지운다. FK가 강제하는 순서다:
+ *
+ *   검증 해소 이력 → 검증 이슈 → 편집 이력 → 참고자료
+ *   → 체크리스트 항목 → 체크리스트 구역 → 문제 해결 항목
+ *   → 분기 → 노드 → 절차
+ *
+ * replaceDraftTemplates(가져오기 경로)의 순서와 대체로 같지만 **두 가지가
+ * 더 있다**: 검증 해소 이력과 편집 이력. 그쪽은 갓 가져온 초안만 지우므로
+ * 그 두 표에 행이 있을 수 없었지만, 사람이 손으로 만든 절차에는 있다.
+ * 여기서 빠뜨리면 완전삭제가 FK에서 막힌다.
+ *
+ * 자동 정리(master-data-purge.ts)와 이 함수가 같은 순서를 각자 적고 있다 —
+ * 그쪽은 "server-only" 밖에서 도는 CLI라 이 파일을 부를 수 없다(그 파일의
+ * 상단 주석 참조).
+ */
+export async function purgeProcedureTemplateContent(tx: Tx, templateId: string): Promise<void> {
+  const nodes = await tx
+    .select({ id: procedureTemplateNodes.id })
+    .from(procedureTemplateNodes)
+    .where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
+  const nodeIds = nodes.map((node) => node.id);
+
+  await tx
+    .delete(procedureValidationResolutionHistory)
+    .where(eq(procedureValidationResolutionHistory.procedureTemplateId, templateId));
+  await tx
+    .delete(procedureTemplateValidationIssues)
+    .where(eq(procedureTemplateValidationIssues.procedureTemplateId, templateId));
+  await tx
+    .delete(procedureTemplateEditHistory)
+    .where(eq(procedureTemplateEditHistory.procedureTemplateId, templateId));
+  await tx.delete(procedureReferenceItems).where(eq(procedureReferenceItems.procedureTemplateId, templateId));
+
+  if (nodeIds.length > 0) {
+    const sections = await tx
+      .select({ id: procedureChecklistSections.id })
+      .from(procedureChecklistSections)
+      .where(inArray(procedureChecklistSections.nodeId, nodeIds));
+    const sectionIds = sections.map((section) => section.id);
+    if (sectionIds.length > 0) {
+      await tx.delete(procedureChecklistItems).where(inArray(procedureChecklistItems.sectionId, sectionIds));
+    }
+    await tx.delete(procedureChecklistSections).where(inArray(procedureChecklistSections.nodeId, nodeIds));
+    await tx.delete(procedureTroubleshootingEntries).where(inArray(procedureTroubleshootingEntries.nodeId, nodeIds));
+  }
+
+  await tx.delete(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
+  await tx.delete(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
+  await tx.delete(procedureTemplates).where(eq(procedureTemplates.id, templateId));
+}
+
+/** 15일을 기다리지 않고 즉시 완전삭제한다. 사람이 행위자라는 점만 자동 정리와 다르다. */
+export async function permanentlyDeleteProcedureTemplate(input: {
+  templateId: string;
+  actorUserId: string;
+  reason: string;
+}): Promise<ProcedureTemplateTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const { template } = await requireDeletableTemplate(tx, input.templateId, input.actorUserId, true);
+      if (input.reason.trim().length === 0) fail("INVALID_INPUT", "완전 삭제 사유를 입력해 주세요.");
+
+      // 휴지통에 넣을 때 이미 막았지만 여기서 다시 센다 — 그 사이에 수행
+      // 기록이 생겼다면 DB 오류로 터지는 대신 이유를 말해야 한다.
+      const references = await countProcedureTemplateReferences(tx, input.templateId);
+      if (references > 0) fail("CONFLICT", templateReferencedMessage(references));
+
+      await purgeProcedureTemplateContent(tx, input.templateId);
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "PURGE",
+        targetEntity: "procedure_templates",
+        targetRecordId: input.templateId,
+        previousValue: {
+          id: template.id,
+          code: template.code,
+          name: template.name,
+          category: template.category,
+          status: template.status,
+          version: template.version,
+          deletedAt: template.deletedAt ? template.deletedAt.toISOString() : null,
+          deletedBy: template.deletedBy,
+          deleteReason: template.deleteReason,
+          purgeReason: input.reason.trim(),
+        },
+        newValue: null,
+      });
+
+      return { ok: true, id: input.templateId };
     });
   } catch (err) {
     if (err instanceof ProcedureTemplateMutationError) return err.result;

@@ -141,7 +141,11 @@ async function loadNodesWithContentMarkers(templateId: string): Promise<EditorNo
 }
 
 export async function getProcedureTemplateForEditor(templateId: string): Promise<ProcedureTemplateForEditor | null> {
-  const [template] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId));
+  // 휴지통에 있는 절차는 편집기에서도 열리지 않는다.
+  const [template] = await db
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)));
   if (!template) return null;
 
   const [creator] = await db.select({ name: users.name }).from(users).where(eq(users.id, template.createdByUserId));

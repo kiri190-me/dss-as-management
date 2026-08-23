@@ -316,6 +316,13 @@
       "when": 1787115394408,
       "tag": "0044_strong_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1787489238998,
+      "tag": "0045_red_psylocke",
+      "breakpoints": true
     }
   ]
 }

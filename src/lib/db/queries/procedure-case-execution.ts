@@ -51,7 +51,14 @@ export async function getExecutableTemplateOptions(): Promise<ExecutableTemplate
       equipmentType: procedureTemplates.equipmentType,
     })
     .from(procedureTemplates)
-    .where(and(eq(procedureTemplates.status, "PUBLISHED"), eq(procedureTemplates.isReferenceOnly, false)));
+    // 실행에 붙일 수 있는 절차 목록 — 휴지통에 있는 절차는 고를 수 없다.
+    .where(
+      and(
+        eq(procedureTemplates.status, "PUBLISHED"),
+        eq(procedureTemplates.isReferenceOnly, false),
+        eq(procedureTemplates.isDeleted, false)
+      )
+    );
 }
 
 export async function getActiveExecutionForCase(repairCaseId: string): Promise<{ id: string; procedureTemplateId: string } | null> {

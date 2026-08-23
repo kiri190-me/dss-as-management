@@ -70,7 +70,7 @@ export async function listValidationIssuesForTemplate(templateId: string): Promi
       status: procedureTemplates.status,
     })
     .from(procedureTemplates)
-    .where(eq(procedureTemplates.id, templateId));
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)));
   if (!template) return null;
 
   const rows = await db
@@ -204,7 +204,10 @@ export async function getValidationIssueDetail(issueId: string): Promise<Validat
   const [issue] = await db.select().from(procedureTemplateValidationIssues).where(eq(procedureTemplateValidationIssues.id, issueId));
   if (!issue) return null;
 
-  const [template] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, issue.procedureTemplateId));
+  const [template] = await db
+    .select()
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, issue.procedureTemplateId), eq(procedureTemplates.isDeleted, false)));
   if (!template) return null;
 
   let resolvedByName: string | null = null;

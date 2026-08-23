@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -147,8 +148,39 @@ export const procedureTemplates = pgTable(
       .defaultNow(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /**
+     * 소프트 삭제 4컬럼 (DATABASE_DESIGN.md #8) — 기술 절차 휴지통 체크포인트.
+     *
+     * ── 보관(status = ARCHIVED)과 다른 일이다 ─────────────────────────
+     * 보관은 **발행된** 절차를 "이제 안 씀"으로 내리는 수명주기의 다음
+     * 단계이고, 내용도 과거 수행 기록도 그대로 그 절차를 가리킨다. 삭제는
+     * **쓰인 적 없는** 절차를 목록에서 치우는 일이다. 둘은 대상이 겹치지
+     * 않는다 — 보관은 PUBLISHED만, 삭제는 procedure_case_executions가
+     * 가리키지 않는 행만.
+     *
+     * 이 컬럼들을 도입한 이유가 그 차이에 있다: 이 시스템의 절차는 지금
+     * 전부 DRAFT라 보관 대상이 하나도 없고, 그래서 **잘못 만든 초안을 치울
+     * 방법이 없었다.**
+     *
+     * 15일이 지나면 자동으로 완전삭제된다(master-data-purge.ts). 단
+     * procedure_case_executions나 다른 버전의 supersedes_template_id가
+     * 가리키는 행은 애초에 삭제되지 않으므로 그 지점까지 오지 않는다.
+     *
+     * procedure_templates_code_version_unique는 **부분 인덱스가 아니다** —
+     * 삭제된 행도 (code, version) 자리를 계속 차지한다. 일부러 그대로 둔다:
+     * 그 덕에 휴지통에 있는 동안 같은 code+version이 새로 생길 수 없고,
+     * 따라서 복원이 이름 충돌로 막히는 경우가 존재하지 않는다(고객사·제품
+     * 모델은 부분 인덱스라 그 검사가 필요했다).
+     */
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "restrict" }),
+    deleteReason: text("delete_reason"),
   },
   (table) => [
+    index("procedure_templates_not_deleted_idx")
+      .on(table.isDeleted)
+      .where(sql`is_deleted = false`),
     // "code" identifies a template lineage (e.g. "rfg-safety-inspection")
     // across versions, so it is unique per *version row*, not globally —
     // the (code, version) pair is the real identity; see the version-chain

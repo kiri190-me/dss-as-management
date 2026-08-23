@@ -132,7 +132,7 @@ export async function bindValidationIssueEdge(
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, issue.procedureTemplateId))
+        .where(and(eq(procedureTemplates.id, issue.procedureTemplateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (template.status !== "DRAFT") {
@@ -274,7 +274,7 @@ export async function resolveValidationIssueWithoutGraphChange(
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, issue.procedureTemplateId))
+        .where(and(eq(procedureTemplates.id, issue.procedureTemplateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (template.status !== "DRAFT") {
@@ -346,7 +346,7 @@ export async function reopenValidationIssue(issueId: string, actorUserId: string
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, issue.procedureTemplateId))
+        .where(and(eq(procedureTemplates.id, issue.procedureTemplateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (template.status !== "DRAFT") {
@@ -416,7 +416,7 @@ export async function rollbackValidationIssueEdge(issueId: string, actorUserId: 
       const [template] = await tx
         .select({ id: procedureTemplates.id, status: procedureTemplates.status })
         .from(procedureTemplates)
-        .where(eq(procedureTemplates.id, issue.procedureTemplateId))
+        .where(and(eq(procedureTemplates.id, issue.procedureTemplateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       if (template.status !== "DRAFT") {
