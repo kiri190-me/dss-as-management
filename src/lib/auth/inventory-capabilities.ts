@@ -29,13 +29,22 @@ export type InventoryCapabilities = {
   stock: boolean;
   /** 올라온 부품 요청을 출고·거부·부분 마감할 수 있는가. */
   requestProcessing: boolean;
+  /**
+   * 부품 마스터를 휴지통으로 보내고 되살릴 수 있는가.
+   *
+   * parts(등록·수정)와 따로 내려보낸다 — 기본값은 더 좁고(관리자 이상),
+   * 설정으로도 따로 여닫히기 때문이다. 하나로 접으면 재고 담당자에게 삭제가
+   * 함께 열린다.
+   */
+  lifecycle: boolean;
 };
 
 export async function resolveInventoryCapabilities(role: Role): Promise<InventoryCapabilities> {
-  const [parts, stock, requestProcessing] = await Promise.all([
+  const [parts, stock, requestProcessing, lifecycle] = await Promise.all([
     hasPermission(role, "inventory.parts", "WRITE"),
     hasPermission(role, "inventory.stock", "WRITE"),
     hasPermission(role, "inventory.requestProcessing", "MANAGE"),
+    hasPermission(role, "inventory.lifecycle", "MANAGE"),
   ]);
-  return { parts, stock, requestProcessing };
+  return { parts, stock, requestProcessing, lifecycle };
 }

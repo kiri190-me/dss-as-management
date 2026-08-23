@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "../client";
-import { parts, partStockBalances, stockTransactions, repairCases, users } from "../schema";
+import { parts, partStockBalances, stockTransactions, inventoryPartRequestItems, repairCases, users } from "../schema";
 import { computeReturnableQuantity } from "@/lib/domain/inventory-return-rules";
 import { groupPartOwnerAvailability, type StockOwner, type StockTransactionType } from "@/lib/domain/inventory-types";
 
@@ -25,6 +25,8 @@ export type PartListRow = {
   itemType: string | null;
   version: number;
   totalQuantity: number;
+  /** 입출고 이력이나 부품 요청이 걸려 있는가 — 그러면 삭제할 수 없다(listPartIdsWithLedgerHistory 참조). */
+  hasLedgerHistory: boolean;
 };
 
 export type PartListFilters = {
@@ -78,7 +80,95 @@ export async function getPartList(filters: PartListFilters = {}): Promise<PartLi
     .groupBy(parts.id)
     .orderBy(parts.partName);
 
-  return rows;
+  const withHistory = await listPartIdsWithLedgerHistory();
+  return rows.map((row) => ({ ...row, hasLedgerHistory: withHistory.has(row.id) }));
+}
+
+/**
+ * 입출고 이력이나 부품 요청이 한 번이라도 걸린 부품 id.
+ *
+ * 삭제 가능 여부의 근거다. 부품을 실제로 지우려면 FK 사슬 전체가 비어 있어야
+ * 한다:
+ *
+ *     parts ← part_stock_balances.part_id ← stock_transactions.part_stock_balance_id
+ *     parts ← inventory_part_request_items.part_id
+ *
+ * 셋 다 ON DELETE RESTRICT다. **stock_transactions는 parts를 직접 가리키지
+ * 않는다** — 잔량 버킷(part_stock_balances)을 거쳐 이어져 있어서, 이력 여부를
+ * 물으려면 그 조인을 타야 한다. 이 사슬에 걸린 부품은 15일 뒤 완전삭제가
+ * DB에서 거부되므로, 목록에서 아예 고를 수 없게 하고(체크박스 비활성) 서버도
+ * 같은 기준으로 다시 막는다(mutations/inventory.ts의 softDeletePart).
+ *
+ * 두 질의 모두 부품 단위로 접어서 읽는다 — 행 수가 아니라 **부품 수**만큼만
+ * 돌아오므로 이력이 아무리 쌓여도 결과 크기가 부품 목록을 넘지 않는다.
+ */
+export async function listPartIdsWithLedgerHistory(): Promise<Set<string>> {
+  const [transactionRows, requestItemRows] = await Promise.all([
+    db
+      .select({ partId: partStockBalances.partId })
+      .from(stockTransactions)
+      .innerJoin(partStockBalances, eq(stockTransactions.partStockBalanceId, partStockBalances.id))
+      .groupBy(partStockBalances.partId),
+    db
+      .select({ partId: inventoryPartRequestItems.partId })
+      .from(inventoryPartRequestItems)
+      .groupBy(inventoryPartRequestItems.partId),
+  ]);
+
+  return new Set([...transactionRows, ...requestItemRows].map((row) => row.partId));
+}
+
+export type DeletedPartRow = {
+  id: string;
+  partName: string;
+  partSpec: string | null;
+  kyosanPartNo: string | null;
+  drawingNo: string | null;
+  category: string | null;
+  /** 복원·완전삭제의 낙관적 동시성 검사값. parts에는 version 컬럼이 있어 그것을 쓴다(다른 휴지통의 updatedAt 자리). */
+  version: number;
+  deletedAt: string;
+  deletedByUserName: string | null;
+  deleteReason: string | null;
+};
+
+/**
+ * 재고 관리 휴지통 목록. 삭제 권한이 있는 세션에서만 호출된다 — 페이지가
+ * 그것을 판정하고, 이 함수는 권한을 보지 않는다(listDeletedCustomers와 같은
+ * 역할 분담).
+ *
+ * 수량은 싣지 않는다. 지울 수 있는 부품은 입출고 이력이 없는 부품이고,
+ * 잔량 행(part_stock_balances)은 입고로만 생기므로 여기 오는 부품의 재고는
+ * 언제나 0이다 — 0만 나오는 열을 만들어 두면 "재고가 있는데 지워졌나"를
+ * 잠깐이라도 의심하게 된다.
+ */
+export async function listDeletedParts(): Promise<DeletedPartRow[]> {
+  const rows = await db
+    .select({
+      id: parts.id,
+      partName: parts.partName,
+      partSpec: parts.partSpec,
+      kyosanPartNo: parts.kyosanPartNo,
+      drawingNo: parts.drawingNo,
+      category: parts.category,
+      version: parts.version,
+      deletedAt: parts.deletedAt,
+      deleteReason: parts.deleteReason,
+      deletedByUserName: users.name,
+    })
+    .from(parts)
+    // leftJoin이어야 한다 — deleted_by는 nullable이고, inner join이면 삭제자를
+    // 알 수 없는 행이 휴지통에서 통째로 사라진다.
+    .leftJoin(users, eq(parts.deletedBy, users.id))
+    .where(eq(parts.isDeleted, true))
+    .orderBy(desc(parts.deletedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    // is_deleted = true인 행만 여기 온다. softDeletePart는 같은 UPDATE에서
+    // deleted_at을 반드시 채운다(다른 휴지통 조회와 같은 근거).
+    deletedAt: row.deletedAt!.toISOString(),
+  }));
 }
 
 export type PartOwnerAvailabilityRow = { partId: string; owner: StockOwner; quantity: number };

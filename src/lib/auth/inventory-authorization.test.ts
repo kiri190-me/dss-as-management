@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canViewInventory,
   canCreateOrEditPart,
+  canDeleteParts,
   canReceiveStock,
   canReturnStock,
   canSeeUseStockButton,
@@ -174,4 +175,16 @@ test("해제하면 나간 수량에 따라 돌아갈 상태가 정해진다", ()
   // 되돌리는 것이 오히려 틀린 답이 된다.
   assert.equal(statusAfterHoldRelease({ issuedQuantityAcrossItems: 0 }), "PENDING");
   assert.equal(statusAfterHoldRelease({ issuedQuantityAcrossItems: 3 }), "PARTIALLY_ISSUED");
+});
+
+test("canDeleteParts: SUPER_ADMIN/ADMIN only — 등록·수정이 되는 재고 담당자도 삭제는 안 된다", () => {
+  assert.equal(canDeleteParts("SUPER_ADMIN"), true);
+  assert.equal(canDeleteParts("ADMIN"), true);
+  // 이 한 줄이 정책의 핵심이다 — 부품을 만들고 고치는 것은 재고 담당자까지지만,
+  // 지우는 것은 관리자 이상이다("되돌리는 권한은 더 좁다"는 이 저장소의 규칙).
+  assert.equal(canDeleteParts("INVENTORY_MANAGER"), false);
+  assert.equal(canCreateOrEditPart("INVENTORY_MANAGER"), true);
+  for (const role of ["AS_ENGINEER", "SALES"] as const) {
+    assert.equal(canDeleteParts(role), false, `expected ${role} not to delete parts`);
+  }
 });

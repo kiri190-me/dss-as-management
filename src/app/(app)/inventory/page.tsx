@@ -2,7 +2,14 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability, getDistinctCategories, getDistinctItemTypes } from "@/lib/db/queries/inventory";
+import {
+  getPartList,
+  getPartOwnerAvailability,
+  groupPartOwnerAvailability,
+  getDistinctCategories,
+  getDistinctItemTypes,
+  listDeletedParts,
+} from "@/lib/db/queries/inventory";
 import InventoryListScreen from "@/components/inventory/InventoryListScreen";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
@@ -33,11 +40,16 @@ export default async function InventoryPage() {
     );
   }
 
-  const [parts, ownerAvailabilityRows, categories, itemTypes] = await Promise.all([
+  // 삭제·복원 권한(기본값: 관리자 이상)이 있는 세션에만 휴지통을 읽는다 —
+  // 다른 마스터 화면과 같은 규칙이다. 화면에서 감추는 것은 편의일 뿐 경계가
+  // 아니므로, 삭제 mutation은 이 판정과 무관하게 트랜잭션 안에서 다시 검사한다.
+  const capabilities = await resolveInventoryCapabilities(actingUser.role);
+  const [parts, ownerAvailabilityRows, categories, itemTypes, trashParts] = await Promise.all([
     getPartList(),
     getPartOwnerAvailability(),
     getDistinctCategories(),
     getDistinctItemTypes(),
+    capabilities.lifecycle ? listDeletedParts() : Promise.resolve([]),
   ]);
   const ownerAvailabilityByPartId = groupPartOwnerAvailability(ownerAvailabilityRows);
 
@@ -47,7 +59,8 @@ export default async function InventoryPage() {
       ownerAvailabilityByPartId={ownerAvailabilityByPartId}
       categories={categories}
       itemTypes={itemTypes}
-      capabilities={await resolveInventoryCapabilities(actingUser.role)}
+      capabilities={capabilities}
+      trashParts={trashParts}
     />
   );
 }

@@ -1,7 +1,8 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
-import { parts, partStockBalances, stockTransactions, repairCases, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
+import { parts, partStockBalances, stockTransactions, inventoryPartRequestItems, repairCases, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
+import { insertAuditLog } from "./audit-logs";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore } from "./internal/inventory-stock-use";
 import { hasPermission } from "@/lib/auth/permission-resolver";
@@ -457,6 +458,239 @@ export async function returnStock(input: ReturnStockInput): Promise<StockTransac
         .where(eq(partStockBalances.id, balance.id));
 
       return { ok: true, version: balance.version + 1, resultingQuantity, partStockBalanceId: balance.id };
+    });
+  } catch (err) {
+    if (err instanceof InventoryMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 부품 마스터 삭제 · 복원 · 완전삭제 (휴지통 → 15일 → 완전삭제) ----
+
+/**
+ * ============================================================================
+ * 부품 삭제 — 다른 마스터 화면과 같은 3단계, 이 모듈의 규약으로
+ * ============================================================================
+ * 고객사·제품 모델과 같은 결정에서 나온 같은 규칙이다: 휴지통에 넣고, 15일이
+ * 지나면 자동으로 완전삭제하고, 그 전에는 언제든 되살린다.
+ *
+ * 다만 코드 모양은 customers-trash.ts가 아니라 이 파일을 따른다 — 권한을
+ * 트랜잭션 안에서 다시 확인하고(requireActor + hasPermission), 낙관적 동시성은
+ * updated_at이 아니라 parts.version으로 보고, 실패는 fail()로 던져
+ * InventoryMutationError로 받는다. 재고 mutation이 전부 그 규약이라, 여기만
+ * 다른 모양이면 이 파일을 읽는 사람이 두 규약을 함께 기억해야 한다.
+ *
+ * ── 이력이 있으면 지우지 않는다 ─────────────────────────────────────────
+ * 지우려면 FK 사슬이 전부 비어 있어야 한다:
+ *
+ *     parts <- part_stock_balances.part_id <- stock_transactions.part_stock_balance_id
+ *     parts <- inventory_part_request_items.part_id
+ *
+ * 셋 다 RESTRICT다. 참조가 남은 채로 휴지통에 넣으면 15일 뒤 완전삭제가
+ * DB에서 거부되고, 그 부품은 "지운 줄 알았는데 영원히 휴지통에 남아 있는"
+ * 상태가 된다. 그래서 지울 수 없는 것은 처음부터 휴지통에도 넣지 않는다.
+ *
+ * ── 잔량 버킷은 완전삭제 때 함께 지운다 ─────────────────────────────────
+ * part_stock_balances에는 소프트 삭제 컬럼이 없다(수량 캐시일 뿐 이력이
+ * 아니다). 그래서 휴지통 단계에서는 건드리지 않고, 완전삭제 시점에 부품보다
+ * 먼저 지운다 — FK가 강제하는 순서다. 이력이 없는 부품에만 도달하므로 여기
+ * 딸려 가는 버킷은 실제로는 거의 없다(잔량 행은 입고로만 생기고, 입고는 곧
+ * 이력이다). 그래도 지운다 — 남아 있으면 부품 삭제가 막힌다.
+ *
+ * ── 이름 충돌은 없다 ────────────────────────────────────────────────────
+ * parts에는 유니크 인덱스가 없다(이 파일 위쪽 스키마 주석 참조 — 실데이터에
+ * 믿을 만한 식별 키가 없어 일부러 두지 않았다). 그래서 고객사·제품 모델과
+ * 달리 복원이 이름 충돌로 막히는 경우가 없다.
+ * ============================================================================
+ */
+
+export type PartTrashInput = {
+  partId: string;
+  actorUserId: string;
+  expectedVersion: number;
+};
+
+export type PartTrashResult = { ok: true; version: number } | Failure;
+
+/** 이 부품을 붙잡고 있는 이력 수 — 입출고 이력(잔량 버킷 경유)과 부품 요청을 합쳐 센다. */
+async function countPartLedgerReferences(tx: Tx, partId: string): Promise<number> {
+  const [transactions] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(stockTransactions)
+    .innerJoin(partStockBalances, eq(stockTransactions.partStockBalanceId, partStockBalances.id))
+    .where(eq(partStockBalances.partId, partId));
+
+  const [requestItems] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(inventoryPartRequestItems)
+    .where(eq(inventoryPartRequestItems.partId, partId));
+
+  return transactions.total + requestItems.total;
+}
+
+function partReferencedMessage(count: number): string {
+  return `이 부품에 연결된 입출고 이력·부품 요청이 ${count}건 있어 삭제할 수 없습니다.`;
+}
+
+/** 부품을 휴지통으로 보낸다. 이력이 하나라도 있으면 아무것도 바꾸지 않는다. */
+export async function softDeletePart(input: PartTrashInput & { reason: string | null }): Promise<PartTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+        fail("FORBIDDEN", "부품 삭제 권한이 없습니다.");
+      }
+
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(and(eq(parts.id, input.partId), eq(parts.isDeleted, false)))
+        .for("update");
+      if (!part) fail("NOT_FOUND", "해당 부품을 찾을 수 없습니다.");
+      if (part.version !== input.expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 부품을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+
+      const references = await countPartLedgerReferences(tx, input.partId);
+      if (references > 0) fail("INVALID_INPUT", partReferencedMessage(references));
+
+      const deletedAt = new Date();
+      await tx
+        .update(parts)
+        .set({
+          isDeleted: true,
+          deletedAt,
+          deletedBy: input.actorUserId,
+          deleteReason: input.reason,
+          version: part.version + 1,
+          updatedAt: deletedAt,
+        })
+        .where(eq(parts.id, input.partId));
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "SOFT_DELETE",
+        targetEntity: "parts",
+        targetRecordId: input.partId,
+        previousValue: {
+          id: part.id,
+          partName: part.partName,
+          partSpec: part.partSpec,
+          kyosanPartNo: part.kyosanPartNo,
+          drawingNo: part.drawingNo,
+          category: part.category,
+        },
+        newValue: { isDeleted: true, deletedAt: deletedAt.toISOString(), deleteReason: input.reason },
+      });
+
+      return { ok: true, version: part.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof InventoryMutationError) return err.result;
+    throw err;
+  }
+}
+
+/** 휴지통의 부품을 되살린다. parts에는 유니크 인덱스가 없어 이름 충돌로 막히는 일이 없다. */
+export async function restorePart(input: PartTrashInput): Promise<PartTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+        fail("FORBIDDEN", "부품 복원 권한이 없습니다.");
+      }
+
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(and(eq(parts.id, input.partId), eq(parts.isDeleted, true)))
+        .for("update");
+      if (!part) fail("NOT_FOUND", "해당 부품을 찾을 수 없습니다.");
+      if (part.version !== input.expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 부품을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+
+      await tx
+        .update(parts)
+        .set({
+          isDeleted: false,
+          deletedAt: null,
+          deletedBy: null,
+          deleteReason: null,
+          version: part.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(parts.id, input.partId));
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "RESTORE",
+        targetEntity: "parts",
+        targetRecordId: input.partId,
+        previousValue: null,
+        newValue: { id: part.id, partName: part.partName, isDeleted: false },
+      });
+
+      return { ok: true, version: part.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof InventoryMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 15일을 기다리지 않고 즉시 완전삭제한다. 자동 정리(master-data-purge.ts)와
+ * 같은 일을 하되 사람이 행위자다. 삭제 순서는 FK가 강제한다: 잔량 버킷 → 부품.
+ */
+export async function permanentlyDeletePart(input: PartTrashInput & { reason: string }): Promise<PartTrashResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+        fail("FORBIDDEN", "부품 완전 삭제 권한이 없습니다.");
+      }
+      if (input.reason.trim().length === 0) fail("INVALID_INPUT", "완전 삭제 사유를 입력해 주세요.");
+
+      const [part] = await tx
+        .select()
+        .from(parts)
+        .where(and(eq(parts.id, input.partId), eq(parts.isDeleted, true)))
+        .for("update");
+      if (!part) fail("NOT_FOUND", "해당 부품을 찾을 수 없습니다.");
+      if (part.version !== input.expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 부품을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+
+      // 휴지통에 넣을 때 이미 막았지만 여기서 다시 센다 — 그 사이에 이력이
+      // 생겼다면 DB 오류로 터지는 대신 이유를 말해야 한다.
+      const references = await countPartLedgerReferences(tx, input.partId);
+      if (references > 0) fail("INVALID_INPUT", partReferencedMessage(references));
+
+      await tx.delete(partStockBalances).where(eq(partStockBalances.partId, input.partId));
+      await tx.delete(parts).where(eq(parts.id, input.partId));
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "PURGE",
+        targetEntity: "parts",
+        targetRecordId: input.partId,
+        previousValue: {
+          id: part.id,
+          partName: part.partName,
+          partSpec: part.partSpec,
+          kyosanPartNo: part.kyosanPartNo,
+          drawingNo: part.drawingNo,
+          category: part.category,
+          deletedAt: part.deletedAt ? part.deletedAt.toISOString() : null,
+          deletedBy: part.deletedBy,
+          deleteReason: part.deleteReason,
+          purgeReason: input.reason.trim(),
+        },
+        newValue: null,
+      });
+
+      return { ok: true, version: part.version };
     });
   } catch (err) {
     if (err instanceof InventoryMutationError) return err.result;

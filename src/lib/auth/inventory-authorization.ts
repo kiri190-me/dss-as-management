@@ -224,3 +224,23 @@ export function isRequestPartiallyClosable(ctx: {
     ctx.remainingQuantityAcrossItems > 0
   );
 }
+
+/**
+ * 부품 마스터를 휴지통으로 보내고, 되살리고, 즉시 완전삭제하는 권한.
+ *
+ * **등록·수정보다 좁다** — 만들고 고치는 것은 재고 담당자까지지만, 지우는
+ * 것은 관리자 이상이다. 이 프로젝트가 이미 여러 번 같은 결론을 냈다:
+ * End-User는 영업도 만들지만 이름 변경은 관리자만이고(customer-authorization.ts),
+ * 담당자는 영업도 추가하지만 삭제는 관리자만이다. "한 일을 되돌리는 권한은
+ * 그 일을 하는 권한보다 좁다"가 그 규칙이고, 여기서도 같다.
+ *
+ * 재고 담당자에게 열어 줘야 한다면 코드를 고치지 않아도 된다 — 최고관리자가
+ * 사용자 관리 > 역할별 접근 권한에서 '부품 삭제·복원'을 열 수 있다
+ * (inventory는 설정이 최종 판정인 메뉴다).
+ *
+ * 삭제·복원·완전삭제를 한 함수로 묶은 것도 다른 화면과 같은 이유다 — 셋을
+ * 나누면 "지울 수는 있는데 되돌릴 수는 없는" 역할이 만들어진다.
+ */
+export function canDeleteParts(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}
