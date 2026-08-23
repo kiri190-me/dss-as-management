@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   auditLogs,
@@ -48,8 +48,20 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 let engineerId: string;
 let actorId: string;
 
-/** 감사 로그 정리를 위해 이 파일이 만든 고객사·End-User id를 모아 둔다. */
-const touchedRecordIds: string[] = [];
+/**
+ * 감사 로그 정리를 위해 이 파일이 만든 id를 엔티티별로 나눠 모아 둔다.
+ * target_record_id만으로 범위를 잡으면 같은 id를 가진 다른 엔티티의 감사
+ * 기록까지 함께 걸릴 수 있다 — 감사 로그는 3년 보존 대상이므로
+ * (엔티티, 대상 id) 쌍으로만 지운다.
+ */
+const touchedCustomerIds: string[] = [];
+const touchedEndUserIds: string[] = [];
+/**
+ * createRepairCase는 감사 행을 남기지 않는다 — 이 파일에서 repair_cases 감사
+ * 행이 생기는 곳은 softDeleteRepairCase를 부르는 테스트 하나뿐이므로 거기서만
+ * 담는다.
+ */
+const touchedRepairCaseIds: string[] = [];
 
 before(async () => {
   const [engineer] = await db
@@ -71,8 +83,19 @@ before(async () => {
 });
 
 after(async () => {
-  if (touchedRecordIds.length > 0) {
-    await db.delete(auditLogs).where(inArray(auditLogs.targetRecordId, touchedRecordIds));
+  // 이 파일이 만든 감사 행만 (엔티티, 대상 id) 쌍으로 지운다. 담긴 id가 없는
+  // 엔티티는 아예 범위에 넣지 않아, 어느 경우에도 조건 없는 삭제가 되지 않는다.
+  const customerScope = touchedCustomerIds.length > 0
+    ? and(eq(auditLogs.targetEntity, "customers"), inArray(auditLogs.targetRecordId, touchedCustomerIds))
+    : undefined;
+  const endUserScope = touchedEndUserIds.length > 0
+    ? and(eq(auditLogs.targetEntity, "end_users"), inArray(auditLogs.targetRecordId, touchedEndUserIds))
+    : undefined;
+  const repairCaseScope = touchedRepairCaseIds.length > 0
+    ? and(eq(auditLogs.targetEntity, "repair_cases"), inArray(auditLogs.targetRecordId, touchedRepairCaseIds))
+    : undefined;
+  if (customerScope || endUserScope || repairCaseScope) {
+    await db.delete(auditLogs).where(or(customerScope, endUserScope, repairCaseScope));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
@@ -104,13 +127,13 @@ async function createTestCustomer(suffix: string) {
     .insert(customers)
     .values({ name: `${TEST_CUSTOMER_PREFIX}${suffix}` })
     .returning();
-  touchedRecordIds.push(row.id);
+  touchedCustomerIds.push(row.id);
   return row;
 }
 
 async function createTestEndUser(customerId: string, name: string) {
   const [row] = await db.insert(endUsers).values({ customerId, name }).returning();
-  touchedRecordIds.push(row.id);
+  touchedEndUserIds.push(row.id);
   return row;
 }
 
@@ -255,6 +278,9 @@ describe("softDeleteCustomer", () => {
     const customer = await createTestCustomer("REF-TRASHED");
     const created = await createTestRepairCase(customer.id);
     const [caseRow] = await db.select().from(repairCases).where(eq(repairCases.id, created.id));
+    // 아래 소프트 삭제가 repair_cases 감사 행을 하나 남긴다 — 정리 범위에
+    // 넣어 두지 않으면 실행할 때마다 한 행씩 쌓인다.
+    touchedRepairCaseIds.push(created.id);
     const softDeleted = await softDeleteRepairCase({
       id: created.id,
       expectedVersion: caseRow.version,

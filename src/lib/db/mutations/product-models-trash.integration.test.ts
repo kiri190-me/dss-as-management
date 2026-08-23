@@ -50,7 +50,16 @@ let engineerId: string;
 let actorId: string;
 let customerId: string;
 
-const touchedRecordIds: string[] = [];
+/**
+ * 감사 로그 정리를 위해 이 파일이 만든 id를 엔티티별로 나눠 모아 둔다 —
+ * 모델·등록 장비·접수 건 셋 다 자기 엔티티로 감사 행을 남긴다.
+ * target_record_id만으로 범위를 잡으면 같은 id를 가진 다른 엔티티의 감사
+ * 기록까지 함께 걸린다. 감사 로그는 3년 보존 대상이므로 (엔티티, 대상 id)
+ * 쌍으로 이 파일이 만든 감사 행만 골라 그 행의 PK로 지운다.
+ */
+const touchedProductModelIds: string[] = [];
+const touchedProductIds: string[] = [];
+const touchedRepairCaseIds: string[] = [];
 
 before(async () => {
   const [engineer] = await db
@@ -76,8 +85,22 @@ before(async () => {
 });
 
 after(async () => {
-  if (touchedRecordIds.length > 0) {
-    await db.delete(auditLogs).where(inArray(auditLogs.targetRecordId, touchedRecordIds));
+  const auditScopes: { entity: string; ids: string[] }[] = [
+    { entity: "product_models", ids: touchedProductModelIds },
+    { entity: "products", ids: touchedProductIds },
+    { entity: "repair_cases", ids: touchedRepairCaseIds },
+  ];
+  const createdAuditIds: string[] = [];
+  for (const scope of auditScopes) {
+    if (scope.ids.length === 0) continue;
+    const rows = await db
+      .select({ id: auditLogs.id })
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, scope.entity), inArray(auditLogs.targetRecordId, scope.ids)));
+    createdAuditIds.push(...rows.map((row) => row.id));
+  }
+  if (createdAuditIds.length > 0) {
+    await db.delete(auditLogs).where(inArray(auditLogs.id, createdAuditIds));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
@@ -92,7 +115,7 @@ async function createTestModel(suffix: string) {
     .insert(productModels)
     .values({ modelName: `${TEST_MODEL_PREFIX}${suffix}`, kind: "MATCHER" })
     .returning();
-  touchedRecordIds.push(row.id);
+  touchedProductModelIds.push(row.id);
   return row;
 }
 
@@ -108,7 +131,7 @@ async function createTestUnit(model: { id: string; modelName: string }) {
       serialNumber: `SN-${suffix}`,
     })
     .returning();
-  touchedRecordIds.push(row.id);
+  touchedProductIds.push(row.id);
   return row;
 }
 
@@ -188,7 +211,7 @@ describe("softDeleteProductModel", () => {
   test("등록 장비의 A/S 접수 건이 있으면 REFERENCED로 막고 아무것도 바꾸지 않는다", async () => {
     const model = await createTestModel("REFERENCED");
     const created = await createTestRepairCase(model);
-    touchedRecordIds.push(created.id);
+    touchedRepairCaseIds.push(created.id);
 
     const result = await softDeleteProductModel({
       productModelId: model.id,
@@ -209,7 +232,7 @@ describe("softDeleteProductModel", () => {
   test("휴지통에 있는 접수 건도 삭제를 막는다 — FK는 is_deleted를 보지 않는다", async () => {
     const model = await createTestModel("REF-TRASHED");
     const created = await createTestRepairCase(model);
-    touchedRecordIds.push(created.id);
+    touchedRepairCaseIds.push(created.id);
 
     const [caseRow] = await db.select().from(repairCases).where(eq(repairCases.id, created.id));
     const softDeleted = await softDeleteRepairCase({
@@ -432,7 +455,7 @@ describe("purgeExpiredProductModel", () => {
   test("접수 건이 걸린 채 휴지통에 들어가 있으면 지우지 않고 이유 있는 건너뜀으로 보고한다", async () => {
     const model = await createTestModel("PURGE-REFERENCED");
     const created = await createTestRepairCase(model);
-    touchedRecordIds.push(created.id);
+    touchedRepairCaseIds.push(created.id);
 
     // 정상 경로로는 만들 수 없는 상태다 — softDeleteProductModel이 접수 건을
     // 보고 막는다. 그 관문을 우회해 직접 만들어, 자동 정리가 DB 오류로 터지는

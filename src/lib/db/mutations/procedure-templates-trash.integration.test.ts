@@ -49,7 +49,13 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 let adminId: string;
 let engineerId: string;
 
-const touchedRecordIds: string[] = [];
+/**
+ * 감사 로그 정리를 위해 이 파일이 만든 절차 id를 모아 둔다. 이 파일이 만드는
+ * 감사 행은 전부 procedure_templates 엔티티다(노드·엣지는 감사 행을 따로
+ * 남기지 않는다) — target_record_id만으로 범위를 잡으면 같은 id를 가진 다른
+ * 엔티티의 감사 기록까지 걸리므로 (엔티티, 대상 id) 쌍으로만 지운다.
+ */
+const touchedTemplateIds: string[] = [];
 
 before(async () => {
   const [admin] = await db
@@ -84,8 +90,11 @@ before(async () => {
 });
 
 after(async () => {
-  if (touchedRecordIds.length > 0) {
-    await db.delete(auditLogs).where(inArray(auditLogs.targetRecordId, touchedRecordIds));
+  if (touchedTemplateIds.length > 0) {
+    await db.delete(auditLogs).where(and(
+      eq(auditLogs.targetEntity, "procedure_templates"),
+      inArray(auditLogs.targetRecordId, touchedTemplateIds)
+    ));
   }
   const leftovers = await db
     .select({ id: procedureTemplates.id })
@@ -116,7 +125,7 @@ async function createTestTemplate(
       createdByUserId: adminId,
     })
     .returning();
-  touchedRecordIds.push(row.id);
+  touchedTemplateIds.push(row.id);
 
   for (let i = 0; i < (overrides.nodeCount ?? 0); i += 1) {
     await db.insert(procedureTemplateNodes).values({

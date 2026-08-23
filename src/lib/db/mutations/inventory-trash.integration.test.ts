@@ -31,7 +31,13 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 let adminId: string;
 let inventoryManagerId: string;
 
-const touchedRecordIds: string[] = [];
+/**
+ * 감사 로그 정리를 위해 이 파일이 만든 부품 id를 모아 둔다. 이 파일이 만드는
+ * 감사 행은 전부 parts 엔티티다 — target_record_id만으로 범위를 잡으면 같은
+ * id를 가진 다른 엔티티의 감사 기록까지 걸리므로 (엔티티, 대상 id) 쌍으로만
+ * 지운다.
+ */
+const touchedPartIds: string[] = [];
 
 before(async () => {
   const [admin] = await db
@@ -66,8 +72,11 @@ before(async () => {
 });
 
 after(async () => {
-  if (touchedRecordIds.length > 0) {
-    await db.delete(auditLogs).where(inArray(auditLogs.targetRecordId, touchedRecordIds));
+  if (touchedPartIds.length > 0) {
+    await db.delete(auditLogs).where(and(
+      eq(auditLogs.targetEntity, "parts"),
+      inArray(auditLogs.targetRecordId, touchedPartIds)
+    ));
   }
   const leftovers = await db
     .select({ id: parts.id })
@@ -94,7 +103,7 @@ async function createTestPart(suffix: string) {
     .insert(parts)
     .values({ partName: `${TEST_PART_PREFIX}${suffix}`, category: "TEST" })
     .returning();
-  touchedRecordIds.push(row.id);
+  touchedPartIds.push(row.id);
   return row;
 }
 
