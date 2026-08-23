@@ -24,6 +24,7 @@ import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-in
 import CaseWorkflowStepDialog from "./CaseWorkflowStepDialog";
 import HoldDialog from "./HoldDialog";
 import ReleaseHoldDialog from "./ReleaseHoldDialog";
+import ShipmentApprovalChecklist from "./ShipmentApprovalChecklist";
 import ShipmentCompletionDialog from "./ShipmentCompletionDialog";
 import TransitionDialog from "./TransitionDialog";
 import WorkflowActionList, { type WorkflowActionItem } from "./WorkflowActionList";
@@ -296,6 +297,18 @@ export default function DatabaseWorkflowControlPanel({
         holdReason={holdState.reason}
         holdStartedByName={holdState.startedByName}
       />
+
+      {/* 출하 완료를 할 수 있는 단계에 서 있을 때만, 그때 필요한 결재 두 개의
+          상태를 미리 보여 준다. 버튼이 막힌 이유("최종 출하 승인이 완료되어야
+          합니다")만으로는 어디서 받는지도, 그 앞에 수리 검수 승인이 먼저
+          필요하다는 것도 알 수 없어 승인 화면에서 다시 막혔다. */}
+      {shipmentTransition?.requiredApprovalType && !isCaseLocked && (
+        <ShipmentApprovalChecklist
+          repairCaseId={resolved.id}
+          approvals={currentApprovals}
+          currentVersion={resolved.version}
+        />
+      )}
 
       {statusMessage && (
         <p

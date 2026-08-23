@@ -6,6 +6,7 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { ApprovalRecordRow, CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
+import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 
 /**
  * Database-mode counterpart to ApprovalScreen.tsx (local-demo). Rendered by
@@ -36,20 +37,29 @@ export default function DatabaseApprovalScreen({
 
   const inspectionState = currentApprovals.find((a) => a.approvalType === "REPAIR_INSPECTION")?.latest ?? null;
   const shipmentState = currentApprovals.find((a) => a.approvalType === "FINAL_SHIPMENT")?.latest ?? null;
-  const inspectionApproved = inspectionState?.status === "APPROVED";
+  // status만 보면 안 된다 — 승인 이후 version이 바뀌면(단계 진행 포함) 서버는
+  // 그 승인을 없는 것으로 본다. 화면이 status만 보고 요청 버튼을 열면 눌러도
+  // 서버가 거절한다.
+  const inspectionApproved = resolveApprovalState(inspectionState, resolved.version) === "APPROVED";
 
   return (
     <div className="flex flex-col gap-4">
       <DatabaseApprovalHeaderSummary resolved={resolved} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <DatabaseRepairInspectionCard repairCaseId={resolved.id} record={inspectionState} actingUser={actingUser} />
+        <DatabaseRepairInspectionCard
+          repairCaseId={resolved.id}
+          record={inspectionState}
+          actingUser={actingUser}
+          currentVersion={resolved.version}
+        />
         <DatabaseFinalShipmentCard
           repairCaseId={resolved.id}
           record={shipmentState}
           actingUser={actingUser}
           decideAuthorization={decideAuthorization}
           inspectionApproved={inspectionApproved}
+          currentVersion={resolved.version}
         />
       </div>
 

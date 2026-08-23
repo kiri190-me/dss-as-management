@@ -8,6 +8,7 @@ import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from 
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
+import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 
 const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
 const DECIDE_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
@@ -20,8 +21,14 @@ const DIALOG_TITLES: Record<Exclude<DialogState, null>, string> = {
   REJECTED: "검수 반려",
 };
 
-function displayStatusOf(record: ApprovalRecordRow | null): DatabaseDisplayApprovalStatus {
-  return record?.status ?? "NOT_REQUESTED";
+/**
+ * 상태 판정은 도메인 함수 하나만 쓴다 — 전에는 여기서 record.status만 봤고,
+ * 그래서 version이 바뀌어 서버가 무효로 보는 승인도 "승인 완료"로 보였다.
+ * 그 상태에서는 재요청 버튼이 없어 화면에서 빠져나갈 길이 없었다.
+ */
+function displayStatusOf(record: ApprovalRecordRow | null, currentVersion: number): DatabaseDisplayApprovalStatus {
+  const state = resolveApprovalState(record, currentVersion);
+  return state === "PENDING" ? "REQUESTED" : state;
 }
 
 /**
@@ -35,30 +42,38 @@ export default function DatabaseRepairInspectionCard({
   repairCaseId,
   record,
   actingUser,
+  currentVersion,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
   actingUser: ActingUser;
+  /** 지금 접수 건의 version — 이 값과 다른 승인은 서버가 무효로 본다. */
+  currentVersion: number;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const displayStatus = displayStatusOf(record);
+  const displayStatus = displayStatusOf(record, currentVersion);
   const requestEligible = (REQUEST_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
   const decideEligible = (DECIDE_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
 
   const actions: DatabaseApprovalActionButton[] = [];
   let disabledReason: string | null = null;
 
-  if (displayStatus === "NOT_REQUESTED" || displayStatus === "REJECTED") {
+  // STALE도 요청을 다시 열어야 하는 상태다. 서버는 이미 재요청을 받아 준다
+  // (대기 중인 요청이 있을 때만 막는다) — 막고 있던 것은 화면뿐이었다.
+  if (displayStatus === "NOT_REQUESTED" || displayStatus === "REJECTED" || displayStatus === "STALE") {
     if (requestEligible) {
       actions.push({
         key: "request",
         label: displayStatus === "NOT_REQUESTED" ? "검수 승인 요청" : "재요청",
         onClick: () => setDialogState("REQUEST"),
       });
+      if (displayStatus === "STALE") {
+        disabledReason = "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
+      }
     } else {
       disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
     }
