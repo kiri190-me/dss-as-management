@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Nightly maintenance wrapper — runs both purge CLIs (repair cases, then
-    flowcharts) sequentially, logs each to its own timestamped file, and
-    exits nonzero if either job failed.
+    Nightly maintenance wrapper — runs every purge CLI (repair cases, then
+    flowcharts, then master data) sequentially, logs each to its own
+    timestamped file, and exits nonzero if any job failed.
 
 .DESCRIPTION
     Design approved in the "production purge scheduler design" checkpoint:
-    one Task Scheduler task runs this one script, which in turn runs both
+    one Task Scheduler task runs this one script, which in turn runs the
     `npm run purge:*` commands one after another (never in parallel). A
-    failure in the first job must never prevent the second from running —
+    failure in one job must never prevent the next from running —
     each job's outcome is captured independently via Start-Process's own
     $process.ExitCode (not $LASTEXITCODE after a pipeline, and not PowerShell
     2>&1 redirection, which in Windows PowerShell 5.1 wraps a native
@@ -101,21 +101,29 @@ function Invoke-PurgeJob {
 
 $RepairCasesLog = Join-Path $LogDir "purge-repair-cases-$RunTimestamp.log"
 $FlowchartsLog = Join-Path $LogDir "purge-flowcharts-$RunTimestamp.log"
+$MasterDataLog = Join-Path $LogDir "purge-master-data-$RunTimestamp.log"
 
 # Sequential, never parallel — repair-cases first (it force-purges its own
-# attached flowcharts as part of that job), flowcharts second. Order is not
+# attached flowcharts as part of that job), flowcharts second, master data
+# (customers and everything cascading from them) last. Order is not
 # safety-critical either way (each job independently re-verifies live state
-# under its own row lock), just tidier logs. The second call always runs
-# regardless of the first job's outcome — nothing above this point can
-# abort the script before both Invoke-PurgeJob calls have run.
+# under its own row lock), just tidier logs — though master-data last is
+# also the tidiest reading of the same day's logs: a customer can only ever
+# be purged once no repair case references it, so whatever the earlier jobs
+# removed is already reflected in the reference count this job sees. Every
+# call always runs regardless of an earlier job's outcome — nothing above
+# this point can abort the script before all three Invoke-PurgeJob calls
+# have run.
 $RepairCasesExitCode = Invoke-PurgeJob -Name "purge:repair-cases" -NpmScript "purge:repair-cases" -LogFile $RepairCasesLog
 $FlowchartsExitCode = Invoke-PurgeJob -Name "purge:flowcharts" -NpmScript "purge:flowcharts" -LogFile $FlowchartsLog
+$MasterDataExitCode = Invoke-PurgeJob -Name "purge:master-data" -NpmScript "purge:master-data" -LogFile $MasterDataLog
 
 Write-Host "purge:repair-cases exit code: $RepairCasesExitCode (log: $RepairCasesLog)"
 Write-Host "purge:flowcharts exit code: $FlowchartsExitCode (log: $FlowchartsLog)"
+Write-Host "purge:master-data exit code: $MasterDataExitCode (log: $MasterDataLog)"
 
-if ($RepairCasesExitCode -ne 0 -or $FlowchartsExitCode -ne 0) {
-    Write-Error "Nightly purge had failures: purge:repair-cases=$RepairCasesExitCode purge:flowcharts=$FlowchartsExitCode"
+if ($RepairCasesExitCode -ne 0 -or $FlowchartsExitCode -ne 0 -or $MasterDataExitCode -ne 0) {
+    Write-Error "Nightly purge had failures: purge:repair-cases=$RepairCasesExitCode purge:flowcharts=$FlowchartsExitCode purge:master-data=$MasterDataExitCode"
     exit 1
 }
 

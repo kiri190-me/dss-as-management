@@ -6,7 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { listCustomersWithCounts } from "@/lib/db/queries/customers";
+import { listCustomersWithCounts, listDeletedCustomers } from "@/lib/db/queries/customers";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -51,7 +51,15 @@ export default async function CustomersPage() {
     return <PlaceholderPage title="고객사 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
-  const rows = await listCustomersWithCounts();
+  // 삭제·복원 권한(기본값: 관리자 이상)이 있는 세션에만 휴지통을 읽는다.
+  // 볼 수 없는 사람에게는 질의 자체가 일어나지 않는다 — 접수 건 휴지통이
+  // serverTrashCases를 다루는 방식과 같다. 화면에서 감추는 것은 편의일 뿐
+  // 경계가 아니므로, 삭제 서버 액션은 이 판정과 무관하게 다시 검사한다.
+  const canDelete = await hasPermission(actingUser.role, "customers.lifecycle", "MANAGE");
+  const [rows, trashRows] = await Promise.all([
+    listCustomersWithCounts(),
+    canDelete ? listDeletedCustomers() : Promise.resolve([]),
+  ]);
 
-  return <CustomerListScreen rows={rows} />;
+  return <CustomerListScreen rows={rows} trashRows={trashRows} canDelete={canDelete} />;
 }

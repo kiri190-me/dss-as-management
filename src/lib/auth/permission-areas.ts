@@ -143,8 +143,11 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   {
     key: "productModels",
     label: "제품 모델 관리",
-    description: "제품 모델 마스터",
-    maxMeaningfulLevel: "WRITE",
+    // 관리 수준이 생긴 이유: 모델 삭제·복원이 수정과 갈린다
+    // (permission-features.ts의 productModels.lifecycle). 고객사 쪽이
+    // End-User 이름 변경 때문에 관리를 갖게 된 것과 같은 구조다.
+    description: "제품 모델 마스터. 관리는 모델 삭제·복원",
+    maxMeaningfulLevel: "MANAGE",
   },
   {
     key: "technicalProcedures",

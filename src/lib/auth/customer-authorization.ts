@@ -30,6 +30,14 @@ import type { Role } from "@/lib/domain/types";
  *    create-level trust as creating the End-User itself.
  *  - Remove (soft-delete) a contact: SUPER_ADMIN/ADMIN only — same
  *    "undo a past decision is narrower" rule as renaming.
+ *
+ * 고객사 삭제(휴지통 → 15일 → 완전삭제, 승인된 체크포인트):
+ *  - 삭제·복원·완전삭제: SUPER_ADMIN/ADMIN only — 하나의 함수로 묶는다.
+ *    셋을 따로 나누면 "지울 수는 있는데 되돌릴 수는 없는" 역할이 만들어지고,
+ *    그건 삭제를 더 안전하게 만드는 것이 아니라 되돌릴 방법만 없애는 것이다.
+ *    접수 건 쪽 canBulkDeleteRepairCases/canRestoreRepairCases/
+ *    canPermanentlyDeleteRepairCases가 결국 전부 같은 역할 집합인 것과
+ *    같은 결론이며, 여기서는 처음부터 하나로 적는다.
  */
 
 export function canViewCustomers(role: Role): boolean {
@@ -57,5 +65,17 @@ export function canEditEndUserContact(role: Role): boolean {
 }
 
 export function canRemoveEndUserContact(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
+/**
+ * 고객사를 휴지통으로 보내고, 되살리고, 즉시 완전삭제하는 권한.
+ *
+ * canEditCustomers와 같은 역할 집합이지만 별도 함수다 — 권한 트리에서
+ * '고객사 정보 수정'과 '삭제·복원'은 따로 여닫히는 노드이고
+ * (permission-features.ts의 customers.edit / customers.lifecycle),
+ * 한 함수를 둘이 나눠 쓰면 한쪽만 좁히려는 순간 다른 쪽까지 함께 좁아진다.
+ */
+export function canDeleteCustomers(role: Role): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN";
 }

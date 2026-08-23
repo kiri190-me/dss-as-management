@@ -8,6 +8,7 @@ import {
   canRemoveEndUserContact,
   canRenameEndUser,
   canViewCustomers,
+  canDeleteCustomers,
 } from "./customer-authorization";
 
 test("canViewCustomers: SUPER_ADMIN/ADMIN/AS_ENGINEER/SALES can view; INVENTORY_MANAGER cannot", () => {
@@ -54,5 +55,21 @@ test("canRemoveEndUserContact: SUPER_ADMIN/ADMIN only — AS_ENGINEER/SALES may 
   assert.equal(canRemoveEndUserContact("ADMIN"), true);
   for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     assert.equal(canRemoveEndUserContact(role), false, `expected ${role} not to remove contacts`);
+  }
+});
+
+test("canDeleteCustomers: SUPER_ADMIN/ADMIN only — 조회·등록이 되는 역할도 삭제는 안 된다", () => {
+  assert.equal(canDeleteCustomers("SUPER_ADMIN"), true);
+  assert.equal(canDeleteCustomers("ADMIN"), true);
+  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canDeleteCustomers(role), false, `expected ${role} not to delete customers`);
+  }
+});
+
+test("canDeleteCustomers는 삭제·복원·완전삭제를 한 판정으로 묶는다", () => {
+  // 셋을 따로 두면 "지울 수는 있는데 되돌릴 수는 없는" 역할이 만들어진다.
+  // 이 테스트는 그 결정을 고정한다 — 나중에 셋을 쪼개려면 여기부터 고쳐야 한다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canDeleteCustomers(role), canEditCustomers(role), `${role}`);
   }
 });

@@ -9,6 +9,7 @@ import {
 import {
   canViewCustomers,
   canEditCustomers,
+  canDeleteCustomers,
   canCreateEndUser,
   canRenameEndUser,
   canAddEndUserContact,
@@ -18,6 +19,7 @@ import {
 import {
   canViewInventory,
   canCreateOrEditPart,
+  canDeleteParts,
   canProcessPartRequests,
   canReceiveStock,
   canReturnStock,
@@ -27,7 +29,11 @@ import {
   canCreatePartRequest,
 } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
-import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
+import {
+  canViewProductModels,
+  canEditProductModels,
+  canDeleteProductModels,
+} from "./product-model-authorization";
 import {
   canBulkDeleteRepairCases,
   canRestoreRepairCases,
@@ -65,6 +71,7 @@ import {
   canEditTechnicalTemplateDraft,
   canPublishTechnicalTemplates,
   canManageTechnicalTemplates,
+  canDeleteTechnicalTemplates,
 } from "./technical-procedure-template-authorization";
 import {
   canViewWorkflowTemplates,
@@ -167,10 +174,10 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       });
 
     case "customers":
-      return ladder({ write: canEditCustomers(role), read: canViewCustomers(role) });
+      return ladder({ manage: canDeleteCustomers(role), write: canEditCustomers(role), read: canViewCustomers(role) });
 
     case "productModels":
-      return ladder({ write: canEditProductModels(role), read: canViewProductModels(role) });
+      return ladder({ manage: canDeleteProductModels(role), write: canEditProductModels(role), read: canViewProductModels(role) });
 
     case "technicalProcedures":
       return ladder({
@@ -181,7 +188,7 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
 
     case "inventory":
       return ladder({
-        manage: canProcessPartRequests(role),
+        manage: canProcessPartRequests(role) || canDeleteParts(role),
         write: canCreateOrEditPart(role),
         read: canViewInventory(role),
       });
@@ -320,11 +327,20 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
         read: canViewCustomers(role),
       });
 
+    case "customers.lifecycle":
+      // 삭제·복원·완전삭제가 한 함수다(customer-authorization.ts) — 셋을
+      // 따로 두면 되돌릴 수 없는 역할이 만들어진다.
+      return ladder({ manage: canDeleteCustomers(role), read: false });
+
     // ── 제품 모델 관리 ────────────────────────────────────────────────────
     case "productModels.view":
       return canViewProductModels(role) ? "READ" : "NONE";
     case "productModels.edit":
       return ladder({ write: canEditProductModels(role), read: canViewProductModels(role) });
+
+    case "productModels.lifecycle":
+      // 고객사 쪽과 같은 판단 — 삭제·복원·완전삭제가 한 함수다.
+      return ladder({ manage: canDeleteProductModels(role), read: false });
 
     // ── 기술 작업 절차 ────────────────────────────────────────────────────
     case "technicalProcedures.view":
@@ -345,6 +361,13 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
         read: canViewProcedureValidationManagement(role),
       });
 
+    case "technicalProcedures.lifecycle":
+      // 실제 판정은 분류까지 본다(canDeleteTechnicalTemplates는 TECHNICAL_TASK
+      // 전용). 상한은 "역할이 최선의 경우 무엇까지 되는가"이므로 그 분류를
+      // 넣어 역할 부분만 뽑는다 — 이 파일 위쪽 '맥락 인자를 받는 함수' 주석과
+      // 같은 규칙이다.
+      return ladder({ manage: canDeleteTechnicalTemplates(role, "TECHNICAL_TASK"), read: false });
+
     // ── 재고 관리 ─────────────────────────────────────────────────────────
     case "inventory.view":
       return canViewInventory(role) ? "READ" : "NONE";
@@ -364,6 +387,9 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
       });
     case "inventory.requestProcessing":
       return ladder({ manage: canProcessPartRequests(role), read: false });
+    case "inventory.lifecycle":
+      // 등록·수정(재고 담당자까지)보다 좁다 — 삭제는 관리자 이상이다.
+      return ladder({ manage: canDeleteParts(role), read: false });
 
     default:
       // 트리에 없는 키는 열어 주지 않는다. 노드를 permission-features.ts에만

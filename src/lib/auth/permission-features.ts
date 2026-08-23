@@ -247,6 +247,15 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       },
       maxMeaningfulLevel: "MANAGE",
     },
+    lifecycle: {
+      // 접수 건 쪽 repairCases.lifecycle과 같은 모양이다 — 조작 하나뿐이라
+      // 읽기·쓰기를 골라도 달라지는 것이 없으므로 '접근 불가 아니면 관리'만 둔다.
+      label: "삭제·복원",
+      minMeaningfulLevel: "MANAGE",
+      description: "고객사 자체를 지우거나 되살립니다. 아래 End-User·담당자도 함께 딸려 갑니다.",
+      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
+      maxMeaningfulLevel: "MANAGE",
+    },
   }),
 
   productModels: features("productModels", {
@@ -261,6 +270,15 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       description: "제품 모델을 만들고 고칩니다.",
       levelHints: { WRITE: "모델을 만들고 고칩니다" },
       maxMeaningfulLevel: "WRITE",
+    },
+    lifecycle: {
+      // 고객사 쪽 customers.lifecycle과 같은 모양 — 조작 하나뿐이라
+      // '접근 불가 아니면 관리'만 둔다.
+      label: "삭제·복원",
+      minMeaningfulLevel: "MANAGE",
+      description: "제품 모델 자체를 지우거나 되살립니다. 그 모델로 등록된 장비도 함께 딸려 갑니다.",
+      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
+      maxMeaningfulLevel: "MANAGE",
     },
   }),
 
@@ -289,6 +307,16 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       description: "절차 검증에서 걸린 항목을 다룹니다.",
       levelHints: { READ: "걸린 항목을 보기만 합니다", WRITE: "해소 처리합니다" },
       maxMeaningfulLevel: "WRITE",
+    },
+    lifecycle: {
+      // 보관(publish 노드)과 다른 일이다 — 보관은 발행된 절차를 내리는 것이고,
+      // 삭제는 쓰인 적 없는 절차를 치우는 것이다. 권한 계층도 달라서(보관은
+      // 전체 서비스 분류에서 최고관리자 전용) 한 칸에 접을 수 없다.
+      label: "삭제·복원",
+      minMeaningfulLevel: "MANAGE",
+      description: "기술 작업 절차를 지우거나 되살립니다. 접수 건에서 수행된 적 있는 절차는 지울 수 없습니다.",
+      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
+      maxMeaningfulLevel: "MANAGE",
     },
   }),
 
@@ -328,6 +356,15 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       minMeaningfulLevel: "MANAGE",
       description: "올라온 요청에 답하는 쪽입니다.",
       levelHints: { MANAGE: "요청을 출고·거부·부분 마감합니다" },
+      maxMeaningfulLevel: "MANAGE",
+    },
+    lifecycle: {
+      // 고객사·제품 모델의 '삭제·복원'과 같은 모양. 조작 하나뿐이라
+      // '접근 불가 아니면 관리'만 둔다.
+      label: "부품 삭제·복원",
+      minMeaningfulLevel: "MANAGE",
+      description: "부품 마스터 자체를 지우거나 되살립니다. 입출고 이력이 있는 부품은 지울 수 없습니다.",
+      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
       maxMeaningfulLevel: "MANAGE",
     },
   }),
