@@ -23,6 +23,9 @@
     DB는 그날치가 남고, 서버와 DB는 켜진 채여서 그 자리에서 바로 커밋하면
     된다. 알고도 그대로 끄려면 -Force.
 
+    다만 HANDOFF.md가 낡은 것은 알리기만 하고 지나간다 — 문서는 잃어버릴 수
+    있는 자산이 아니라서 문을 잠글 이유가 없다.
+
 .PARAMETER BackupOnly
     백업만 뜨고 서버와 컨테이너는 그대로 둔다. 작업 중간에 한 번 떠 두고 싶을 때.
 
@@ -58,6 +61,10 @@ $Database   = 'dss_as_dev'
 $DataRoot   = if ($env:DSS_AS_DATA_ROOT) { $env:DSS_AS_DATA_ROOT } else { 'C:\DSS-AS-DATA' }
 $BackupDir  = Join-Path $DataRoot 'backups\postgres'
 $WarnAfter  = 20   # 백업 파일이 이보다 많아지면 알린다(지우지는 않는다)
+# HANDOFF.md를 손대지 않은 채 이보다 많이 커밋했으면 낡은 것으로 본다. 10개는
+# 하루 이틀치 작업량이다 — 그보다 오래 방치되면 다음 세션이 읽는 맥락이 지금
+# 코드와 어긋나기 시작한다.
+$HandoffStaleAfter = 10
 
 function Invoke-Native([string]$CommandLine) {
     $out = & cmd.exe /c "$CommandLine 2>&1"
@@ -98,6 +105,35 @@ if ($unpushed -match '^\d+$') {
 }
 if ($dirtyLines.Count -eq 0 -and $unpushed -eq '0') {
     Write-Ok "전부 깃허브에 올라가 있습니다"
+}
+
+# HANDOFF.md는 gitignore 대상이라 위의 `git status --porcelain`에 아예 잡히지
+# 않는다. 그래서 여기까지 전부 초록불이어도 다음 세션이 이어받을 문서만 몇 주째
+# 옛날 그대로일 수 있다 — 실제로 6일, 커밋 수십 개 동안 아무 말도 없었다.
+#
+# 커밋 이력 대신 파일 수정 시각을 기준으로 센다: untracked라
+# `git log -- HANDOFF.md`가 아무것도 돌려주지 않기 때문이다. 고친 시각 이후로
+# 커밋이 몇 개 쌓였는지가 곧 "문서가 얼마나 뒤처졌는가"다.
+$handoffFile = Join-Path $RepoRoot 'HANDOFF.md'
+if (Test-Path $handoffFile) {
+    $handoffTime  = (Get-Item $handoffFile).LastWriteTime
+    $sinceHandoff = (Invoke-Native "git rev-list --count --since=`"$($handoffTime.ToString('yyyy-MM-ddTHH:mm:ss'))`" HEAD").Output
+
+    # 숫자가 아니면(저장소가 아니거나 git이 투덜댔거나) 조용히 넘어간다. 셀 수
+    # 없는 것을 경고로 만들면 헛경보만 늘고, 그러다 진짜 경고까지 같이 흘린다.
+    # 0개일 때도 마찬가지 — 그 뒤로 커밋이 없으면 뒤처질 일 자체가 없다.
+    if ($sinceHandoff -match '^\d+$' -and [int]$sinceHandoff -gt 0) {
+        if ([int]$sinceHandoff -gt $HandoffStaleAfter) {
+            # 일부러 $blockers에 넣지 않는다. 낡은 문서는 되돌릴 수 없는 손실이
+            # 아니다 — 코드도 DB도 멀쩡하고, 문서는 내일 고쳐도 늦지 않다.
+            # 게다가 이런 걸로 문을 잠그면 -Force가 손버릇이 되어, 정작 코드를
+            # 못 올린 날의 경고까지 같은 손짓으로 넘겨 버리게 된다.
+            Write-Warn2 "HANDOFF.md를 고친 뒤로 커밋이 $($sinceHandoff)개 — 다음 세션이 옛날 맥락을 읽게 됩니다"
+            Write-Info "마지막 수정: $($handoffTime.ToString('yyyy-MM-dd HH:mm'))"
+        } else {
+            Write-Ok "HANDOFF.md는 최근 것입니다 (그 뒤 커밋 $($sinceHandoff)개)"
+        }
+    }
 }
 
 # ── 2. DB 백업 ────────────────────────────────────────────────────────────
