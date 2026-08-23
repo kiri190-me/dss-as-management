@@ -1,7 +1,7 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
-import { productModels, products, repairCases } from "../schema";
+import { productModels, products, repairCases, users } from "../schema";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,6 +14,8 @@ export type ProductModelListRow = {
   unitCount: number;
   repairCaseCount: number;
   lastReceivedAt: string | null;
+  /** 삭제 시 낙관적 동시성 검사에 쓴다(product_models에는 version 컬럼이 없다). */
+  updatedAt: string;
 };
 
 /**
@@ -35,6 +37,7 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
         modelName: productModels.modelName,
         kind: productModels.kind,
         manufacturer: productModels.manufacturer,
+        updatedAt: productModels.updatedAt,
       })
       .from(productModels)
       .where(eq(productModels.isDeleted, false))
@@ -80,6 +83,7 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
     unitCount: unitCounts.get(m.id) ?? 0,
     repairCaseCount: repairCaseCounts.get(m.id) ?? 0,
     lastReceivedAt: lastReceivedAt.get(m.id) ?? null,
+    updatedAt: m.updatedAt.toISOString(),
   }));
 }
 
@@ -200,4 +204,73 @@ export async function getProductModelDetailById(id: string): Promise<ProductMode
     averageRepairDurationDays,
     units,
   };
+}
+
+export type DeletedProductModelRow = {
+  id: string;
+  modelName: string;
+  kind: ProductModelKind | null;
+  manufacturer: string | null;
+  /** 복원·완전삭제의 낙관적 동시성 검사값(고객사 휴지통과 같은 방식). */
+  updatedAt: string;
+  deletedAt: string;
+  deletedByUserName: string | null;
+  deleteReason: string | null;
+  /** 이 모델과 함께 딸려 간 등록 장비 수. 복원하면 이만큼이 같이 돌아온다. */
+  unitCount: number;
+};
+
+/**
+ * 제품 모델 관리 휴지통 목록. 삭제 권한이 있는 세션에서만 호출된다 —
+ * 페이지가 그것을 판정하고, 이 함수는 권한을 보지 않는다
+ * (listDeletedCustomers와 같은 역할 분담).
+ *
+ * unitCount는 "이 모델에 딸린, 삭제된 장비 수"다. 고객사 휴지통의
+ * endUserCount와 같은 셈법이고, 같은 한계를 갖는다 — 모델 삭제 이전에 따로
+ * 지워져 있던 장비도 함께 세어지지만 복원은 그런 행을 되살리지 않는다.
+ */
+export async function listDeletedProductModels(): Promise<DeletedProductModelRow[]> {
+  const [modelRows, deletedProductRows] = await Promise.all([
+    db
+      .select({
+        id: productModels.id,
+        modelName: productModels.modelName,
+        kind: productModels.kind,
+        manufacturer: productModels.manufacturer,
+        updatedAt: productModels.updatedAt,
+        deletedAt: productModels.deletedAt,
+        deleteReason: productModels.deleteReason,
+        deletedByUserName: users.name,
+      })
+      .from(productModels)
+      // leftJoin이어야 한다 — deleted_by는 nullable이고, inner join이면
+      // 삭제자를 알 수 없는 행이 휴지통에서 통째로 사라진다.
+      .leftJoin(users, eq(productModels.deletedBy, users.id))
+      .where(eq(productModels.isDeleted, true))
+      .orderBy(desc(productModels.deletedAt)),
+    db
+      .select({ productModelId: products.productModelId })
+      .from(products)
+      .where(eq(products.isDeleted, true)),
+  ]);
+
+  const unitCounts = new Map<string, number>();
+  for (const row of deletedProductRows) {
+    if (!row.productModelId) continue;
+    unitCounts.set(row.productModelId, (unitCounts.get(row.productModelId) ?? 0) + 1);
+  }
+
+  return modelRows.map((row) => ({
+    id: row.id,
+    modelName: row.modelName,
+    kind: row.kind,
+    manufacturer: row.manufacturer,
+    updatedAt: row.updatedAt.toISOString(),
+    // is_deleted = true인 행만 여기 온다. softDeleteProductModel은 같은
+    // UPDATE에서 deleted_at을 반드시 채운다(listDeletedCustomers와 같은 근거).
+    deletedAt: row.deletedAt!.toISOString(),
+    deletedByUserName: row.deletedByUserName,
+    deleteReason: row.deleteReason,
+    unitCount: unitCounts.get(row.id) ?? 0,
+  }));
 }

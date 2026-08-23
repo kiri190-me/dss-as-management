@@ -6,7 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { listProductModels } from "@/lib/db/queries/product-models";
+import { listDeletedProductModels, listProductModels } from "@/lib/db/queries/product-models";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -52,7 +52,14 @@ export default async function ProductModelsPage() {
     return <PlaceholderPage title="제품 모델 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
-  const rows = await listProductModels();
+  // 삭제·복원 권한(기본값: 관리자 이상)이 있는 세션에만 휴지통을 읽는다 —
+  // /customers와 같은 규칙이다. 화면에서 감추는 것은 편의일 뿐 경계가
+  // 아니므로, 삭제 서버 액션은 이 판정과 무관하게 다시 검사한다.
+  const canDelete = await hasPermission(actingUser.role, "productModels.lifecycle", "MANAGE");
+  const [rows, trashRows] = await Promise.all([
+    listProductModels(),
+    canDelete ? listDeletedProductModels() : Promise.resolve([]),
+  ]);
 
-  return <ProductModelListScreen rows={rows} />;
+  return <ProductModelListScreen rows={rows} trashRows={trashRows} canDelete={canDelete} />;
 }
