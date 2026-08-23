@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOverflow";
 
 /**
@@ -177,7 +177,14 @@ export function ResponsiveList({
         {table}
       </div>
 
-      {!showTable && cards}
+      {/* 카드만 Fragment로 감싸는 이유 — cards를 **서버 컴포넌트**에서 만들어 넘기면
+          (워크플로 관리가 그렇다) RSC 경계를 건너오며 lazy로 감싸이고, 그러면 React가
+          "이 자식은 key 검사 끝났다"는 표시를 붙이지 못한다. 이 자리는 형제가 여럿이라
+          배열로 재조정되므로, 표시 없는 자식을 보고 없는 key를 찾는 경고가 뜬다.
+          실제로는 위치가 고정된 한 자리라 key가 필요 없다 — 그래서 키를 가진
+          Fragment로 그 자리를 대신 채운다. Fragment는 DOM을 만들지 않으므로 화면은
+          그대로다. */}
+      {!showTable && <Fragment key="cards">{cards}</Fragment>}
     </div>
   );
 }
