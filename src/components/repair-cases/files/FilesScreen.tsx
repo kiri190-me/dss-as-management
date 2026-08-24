@@ -594,6 +594,25 @@ function DatabaseFilesScreen({
                 onUnavailable={setCameraUnavailableReason}
               />
 
+              {/*
+                앱 안 카메라는 미리보기 스트림이라 폰 기본 카메라 앱보다 해상도가
+                낮다(InAppCamera.tsx 헤더 "두 가지 대가"). 화면에서는 그 차이가
+                보이지 않아 각인·파형처럼 화질이 필요한 사진까지 여기서 찍게 되고,
+                작게 저장된 것은 현장을 떠난 뒤에야 드러난다. 그래서 카메라가
+                멀쩡할 때도 대체 경로를 늘 옆에 적어 둔다.
+
+                경고가 아니라 안내이므로 다른 설명문과 같은 회색을 쓴다 — 노란색은
+                아래 "카메라를 못 쓴다" 쪽이 쓰고 있어, 같은 색이면 무언가 잘못된
+                것으로 읽힌다. 그 안내가 떠 있을 때는 이 문구를 내지 않는다.
+                거기에 이미 같은 말이 들어 있어 화면에 두 번 뜨기 때문이다.
+              */}
+              {!cameraUnavailableReason && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  각인·파형처럼 화질이 중요한 사진은 폰 기본 카메라로 찍어 위 <strong>파일</strong> 칸에서 올려 주세요 —
+                  앱 안 카메라는 미리보기 화질이라 원본보다 작게 저장됩니다.
+                </p>
+              )}
+
               {cameraUnavailableReason && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   {cameraUnavailableReason} 폰 기본 카메라로 찍은 뒤 위의 <strong>파일</strong> 칸에서 여러 장을 골라
@@ -759,49 +778,73 @@ function DatabaseFilesScreen({
       )}
 
       {trashedAttachments.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            휴지통 <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">({trashedAttachments.length}건)</span>
-          </h2>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            지운 파일은 실물이 그대로 남아 있어 언제든 되살릴 수 있습니다.
-          </p>
-          <ul className="flex flex-col gap-2">
-            {trashedAttachments.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <div className="min-w-0">
-                  <span className="block truncate text-sm text-zinc-700 line-through dark:text-zinc-400">
-                    {item.originalFileName}
-                  </span>
-                  <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                    {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)} ·{" "}
-                    {formatTimestamp(item.deletedAt)}
-                    {item.deletedByName ? ` · ${item.deletedByName}` : ""}
-                    {item.deleteReason ? ` · ${item.deleteReason}` : ""}
-                  </span>
-                </div>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => setPendingRestore(item)}
-                    disabled={isMutating}
-                    className="shrink-0 rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                  >
-                    되살리기
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
+        /*
+          기본 접힘 상태다(<details>에 open 속성을 주지 않는다). 되살릴 때만
+          필요한 목록이라 평소에는 자리를 차지하지 않는 편이 맞다. 잘못 올려
+          지운 파일이 쌓이면 이 구역이 화면을 길게 밀어냈다.
+
+          useState 토글 대신 네이티브 <details>를 쓴 것은 이 앱의 기존 관례를
+          따른 것이다(ManualStepSetPanel, 작업 이력 화면의 "워크플로 변경
+          이력"이 같은 방식). 상태를 늘리지 않고 키보드 조작·접근성은 브라우저가
+          처리한다. 접힘 여부는 어디에도 저장하지 않는다.
+
+          접혀 있어도 몇 건이 들어 있는지는 <summary>에 그대로 보인다 — 펼치지
+          않고도 되살릴 것이 있는지 알 수 있어야 한다.
+        */
+        <details className="group">
+          {/* 손가락이 닿는 자리다. 목록 화면의 고르기 동그라미와 같은 기준(44px)으로 키워 둔다. */}
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 py-2">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              휴지통 <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">({trashedAttachments.length}건)</span>
+            </h2>
+            {/* 네이티브 삼각형 마커를 list-none으로 숨겼으므로 이 문구가 유일한 상태 표시가 된다. */}
+            <span className="shrink-0 text-xs font-normal text-zinc-600 dark:text-zinc-400">
+              <span className="group-open:hidden">더보기</span>
+              <span className="hidden group-open:inline">접기</span>
+            </span>
+          </summary>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              지운 파일은 실물이 그대로 남아 있어 언제든 되살릴 수 있습니다.
+            </p>
+            <ul className="flex flex-col gap-2">
+              {trashedAttachments.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <div className="min-w-0">
+                    <span className="block truncate text-sm text-zinc-700 line-through dark:text-zinc-400">
+                      {item.originalFileName}
+                    </span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                      {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)} ·{" "}
+                      {formatTimestamp(item.deletedAt)}
+                      {item.deletedByName ? ` · ${item.deletedByName}` : ""}
+                      {item.deleteReason ? ` · ${item.deleteReason}` : ""}
+                    </span>
+                  </div>
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => setPendingRestore(item)}
+                      disabled={isMutating}
+                      className="shrink-0 rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                    >
+                      되살리기
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
       )}
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        미리보기 이미지 생성은 아직 연결되지 않았습니다. 악성코드 검사기도 아직 없어 모든 파일은 &ldquo;미검사&rdquo;로
-        남습니다 — 그 상태에서도 내려받을 수 있습니다.
+        악성코드 검사기는 아직 없어 모든 파일은 &ldquo;미검사&rdquo;로 남습니다 — 그 상태에서도 내려받을 수
+        있습니다.
       </p>
 
       <DeleteAttachmentDialog
