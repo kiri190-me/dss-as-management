@@ -3,12 +3,17 @@ import assert from "node:assert/strict";
 
 import {
   DIGITAL_ZOOM_RANGE,
+  aspectRequestSize,
   clampZoom,
   digitalCropRect,
+  formatAspect,
   formatZoom,
+  frameCropRect,
   isZoomAtPreset,
+  orientedAspect,
   zoomFromPinch,
   zoomPresets,
+  type AspectChoice,
   type ZoomRange,
 } from "./camera-zoom";
 
@@ -183,4 +188,194 @@ test("핀치로 온 값도 가까운 버튼을 눌린 것으로 보여 준다", 
   assert.ok(isZoomAtPreset(2, 2));
   assert.ok(!isZoomAtPreset(2.4, 2));
   assert.ok(!isZoomAtPreset(1, 2));
+});
+
+/**
+ * ============================================================================
+ * 화면비 — "화면에는 4:3인데 저장은 16:9"
+ * ============================================================================
+ * 배율과 같은 종류의 고장이다. 미리보기 상자는 고른 비율로 만들어지고 촬영은
+ * 원본 프레임 그대로 담기면, 화면 밖이라고 믿고 비워 둔 자리에 엉뚱한 것이 들어와
+ * 있다. 그 사실은 파일을 열어 봐야 안다.
+ *
+ * 그래서 여기서 못박는 것은 세 가지다.
+ *  1. **아무것도 안 했는데 잘리지 않는가** — 프레임이 이미 목표 비율이고 배율이
+ *     1이면 원본 전체여야 한다.
+ *  2. **방향이 프레임을 따라가는가** — 폰을 기준으로 삼으면 영상을 안 돌려 주는
+ *     기기에서 미리보기는 세로인데 사진은 가로가 된다.
+ *  3. **비율 자르기와 배율 자르기를 겹쳐도 목표 비율인가** — 두 번 반올림하면
+ *     상자와 어긋난다.
+ * ============================================================================
+ */
+
+const ASPECT_CHOICES: AspectChoice[] = ["SENSOR", "WIDE"];
+
+// ─────────────────────────────────────────── 방향 판정
+
+test("★ 방향은 폰이 아니라 프레임을 따른다 — 가로 프레임은 4:3, 세로 프레임은 3:4", () => {
+  assert.equal(orientedAspect("SENSOR", 2560, 1920), 4 / 3);
+  assert.equal(orientedAspect("SENSOR", 1080, 1920), 3 / 4);
+  assert.equal(orientedAspect("WIDE", 2560, 1440), 16 / 9);
+  assert.equal(orientedAspect("WIDE", 1080, 1920), 9 / 16);
+});
+
+test("정사각형 프레임처럼 방향이 모호해도 값이 나온다 — 여기서 멈추면 상자를 못 만든다", () => {
+  assert.equal(orientedAspect("SENSOR", 1000, 1000), 4 / 3);
+  assert.equal(orientedAspect("WIDE", 1000, 1000), 16 / 9);
+  assert.equal(orientedAspect("SENSOR", 0, 0), 4 / 3);
+});
+
+test("화면 라벨도 프레임 방향을 따른다 — 세로로 쥐고 4:3이라 적으면 거짓말이다", () => {
+  assert.equal(formatAspect("SENSOR", 2560, 1920), "4:3");
+  assert.equal(formatAspect("SENSOR", 1080, 1920), "3:4");
+  assert.equal(formatAspect("WIDE", 2560, 1440), "16:9");
+  assert.equal(formatAspect("WIDE", 1080, 1920), "9:16");
+});
+
+// ─────────────────────────────────────────── 화면비 잘라내기
+
+test("★ 프레임이 이미 목표 비율이고 배율 1이면 원본 전체다 — 안 건드렸는데 잘리면 안 된다", () => {
+  assert.deepEqual(frameCropRect(2560, 1920, "SENSOR", 1), { sx: 0, sy: 0, sw: 2560, sh: 1920 });
+  assert.deepEqual(frameCropRect(2560, 1440, "WIDE", 1), { sx: 0, sy: 0, sw: 2560, sh: 1440 });
+  // 세로로 돌아온 프레임도 마찬가지다.
+  assert.deepEqual(frameCropRect(1920, 2560, "SENSOR", 1), { sx: 0, sy: 0, sw: 1920, sh: 2560 });
+  assert.deepEqual(frameCropRect(1080, 1920, "WIDE", 1), { sx: 0, sy: 0, sw: 1080, sh: 1920 });
+});
+
+test("가로로 긴 16:9 프레임에서 센서(4:3)를 고르면 좌우가 잘리고 세로는 그대로다", () => {
+  assert.deepEqual(frameCropRect(2560, 1440, "SENSOR", 1), { sx: 320, sy: 0, sw: 1920, sh: 1440 });
+});
+
+test("가로로 긴 4:3 프레임에서 와이드(16:9)를 고르면 위아래가 잘리고 가로는 그대로다", () => {
+  assert.deepEqual(frameCropRect(2560, 1920, "WIDE", 1), { sx: 0, sy: 240, sw: 2560, sh: 1440 });
+});
+
+test("★ 세로로 긴 프레임에서 센서를 고르면 3:4가 된다", () => {
+  // 1080×1920은 이미 9:16이다. 3:4는 그보다 통통한 비율이라 **위아래**가 잘린다 —
+  // 세로 프레임에서 무엇이 잘리는지는 프레임과 목표 중 어느 쪽이 더 홀쭉한지로
+  // 정해지지, 방향만으로 정해지지 않는다.
+  const crop = frameCropRect(1080, 1920, "SENSOR", 1);
+  assert.deepEqual(crop, { sx: 0, sy: 240, sw: 1080, sh: 1440 });
+  assert.equal(crop.sw / crop.sh, 3 / 4);
+});
+
+test("세로로 긴 3:4 프레임에서 와이드를 고르면 가로가 잘린다", () => {
+  const crop = frameCropRect(1440, 1920, "WIDE", 1);
+  assert.deepEqual(crop, { sx: 180, sy: 0, sw: 1080, sh: 1920 });
+  assert.equal(crop.sw / crop.sh, 9 / 16);
+});
+
+// ─────────────────────────────────────────── 화면비 + 배율
+
+test("★ 화면비와 배율을 함께 걸어도 결과는 목표 비율이다 — 두 번 자르면 여기서 어긋난다", () => {
+  const frames: Array<[number, number]> = [
+    [2560, 1440],
+    [2560, 1920],
+    [1920, 1080],
+    [1080, 1920],
+    [1440, 1920],
+    [1281, 721],
+    [640, 480],
+  ];
+  for (const [width, height] of frames) {
+    for (const choice of ASPECT_CHOICES) {
+      for (const zoom of [1, 1.5, 2, 3, 4]) {
+        const { sw, sh } = frameCropRect(width, height, choice, zoom);
+        const target = orientedAspect(choice, width, height);
+        // 반올림 때문에 딱 떨어지지 않을 수 있다. 1픽셀 안이면 상자와 같은 것으로 본다.
+        assert.ok(
+          Math.abs(sw - sh * target) <= 1,
+          `${width}x${height} ${choice} @${zoom} → ${sw}x${sh} (목표 ${target})`
+        );
+      }
+    }
+  }
+});
+
+test("2배는 화면비로 자른 상자의 가운데 절반이다", () => {
+  // 2560×1440에서 센서를 고르면 1920×1440이고, 2배는 그 절반인 960×720이다.
+  assert.deepEqual(frameCropRect(2560, 1440, "SENSOR", 2), {
+    sx: 800,
+    sy: 360,
+    sw: 960,
+    sh: 720,
+  });
+});
+
+test("배율이 1보다 작아도 화면비만 자르고 더 넓히지 않는다", () => {
+  // 하드웨어가 넓게 담아 준 프레임은 이미 넓다. 여기서 더 넓힐 것은 없다.
+  assert.deepEqual(frameCropRect(2560, 1440, "SENSOR", 0.5), {
+    sx: 320,
+    sy: 0,
+    sw: 1920,
+    sh: 1440,
+  });
+});
+
+// ─────────────────────────────────────────── 안전
+
+test("★ 잘라낸 사각형은 언제나 프레임 안에 들어온다", () => {
+  const frames: Array<[number, number]> = [
+    [2560, 1440],
+    [2560, 1920],
+    [1920, 1080],
+    [1080, 1920],
+    [1000, 1000],
+    [1281, 721],
+    [640, 480],
+    [3, 5],
+  ];
+  const zooms = [1, 1.3, 2, 2.7, 4, 10, 1000];
+  for (const [width, height] of frames) {
+    for (const choice of ASPECT_CHOICES) {
+      for (const zoom of zooms) {
+        const { sx, sy, sw, sh } = frameCropRect(width, height, choice, zoom);
+        const where = `${width}x${height} ${choice} @${zoom}`;
+        assert.ok(sx >= 0, `sx=${sx} (${where})`);
+        assert.ok(sy >= 0, `sy=${sy} (${where})`);
+        assert.ok(sw > 0 && sh > 0, `빈 사각형 (${where})`);
+        assert.ok(sx + sw <= width, `가로로 넘쳤다 (${where})`);
+        assert.ok(sy + sh <= height, `세로로 넘쳤다 (${where})`);
+      }
+    }
+  }
+});
+
+test("프레임 크기가 0일 때 터지지 않는다 — 카메라 준비 전에 셔터를 누를 수 있다", () => {
+  assert.deepEqual(frameCropRect(0, 0, "SENSOR", 2), { sx: 0, sy: 0, sw: 0, sh: 0 });
+  assert.deepEqual(frameCropRect(1920, 0, "WIDE", 1), { sx: 0, sy: 0, sw: 0, sh: 0 });
+  assert.deepEqual(frameCropRect(0, 1080, "SENSOR", 1), { sx: 0, sy: 0, sw: 0, sh: 0 });
+});
+
+test("배율이 NaN이어도 화면비만 자른다 — 사진이 사라지지 않는다", () => {
+  assert.deepEqual(frameCropRect(2560, 1440, "SENSOR", Number.NaN), {
+    sx: 320,
+    sy: 0,
+    sw: 1920,
+    sh: 1440,
+  });
+});
+
+test("정사각형 프레임에서도 값이 나온다 — 방향이 모호해도 멈추지 않는다", () => {
+  assert.deepEqual(frameCropRect(1000, 1000, "SENSOR", 1), {
+    sx: 0,
+    sy: 125,
+    sw: 1000,
+    sh: 750,
+  });
+});
+
+// ─────────────────────────────────────────── 카메라에 요청할 해상도
+
+test("센서 그대로는 4:3, 와이드는 16:9를 요청한다 — 4:3에 16:9 세로를 요청하면 화소만 잃는다", () => {
+  for (const choice of ASPECT_CHOICES) {
+    const size = aspectRequestSize(choice);
+    const expected = orientedAspect(choice, size.width, size.height);
+    assert.ok(
+      Math.abs(size.width / size.height - expected) < 1e-9,
+      `${choice} 요청 ${size.width}x${size.height}가 목표 비율이 아니다`
+    );
+  }
+  // 센서 모드가 센서를 다 쓰려면 세로가 더 커야 한다.
+  assert.ok(aspectRequestSize("SENSOR").height > aspectRequestSize("WIDE").height);
 });

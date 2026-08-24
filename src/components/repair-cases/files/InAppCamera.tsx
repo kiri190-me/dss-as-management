@@ -4,12 +4,16 @@ import { useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouch
 
 import {
   DIGITAL_ZOOM_RANGE,
+  aspectRequestSize,
   clampZoom,
-  digitalCropRect,
+  formatAspect,
   formatZoom,
+  frameCropRect,
   isZoomAtPreset,
+  orientedAspect,
   zoomFromPinch,
   zoomPresets,
+  type AspectChoice,
   type ZoomRange,
 } from "@/lib/domain/camera-zoom";
 
@@ -46,6 +50,21 @@ import {
  * 잘라내지 않으면 화면에는 크게 보이는데 저장된 사진만 광각으로 남고, 그것은
  * 현장을 떠난 뒤에야 드러난다. 둘을 동시에 걸지 않는 이유는 그러면 두 배로
  * 확대되기 때문이다. 배율 계산은 @/lib/domain/camera-zoom에 있다.
+ *
+ * ── 화면비 ───────────────────────────────────────────────────────────────
+ * **센서 그대로**(4:3)와 **와이드**(16:9) 둘 중에 고른다. 세로로 쥐면 라벨도
+ * 3:4 / 9:16으로 바뀐다 — 방향은 폰이 아니라 **들어오는 프레임**을 따른다.
+ * 영상을 안 돌려 주는 기기에서 폰 방향을 믿으면 미리보기와 사진이 어긋난다.
+ *
+ * 고르면 켜져 있는 트랙에 applyConstraints로 새 해상도를 **요청**한다. 카메라를
+ * 껐다 켜지 않는 이유는 깜빡임이 생기고 권한 창이 다시 뜰 여지가 있기 때문이다.
+ * 기기가 그 해상도를 주지 못하면 받은 프레임의 가운데를 잘라 맞춘다 — **저장된
+ * 사진은 언제나 고른 비율**이어야 한다.
+ *
+ * 여기에 조용한 함정이 하나 있다. applyConstraints로 해상도가 바뀌어도
+ * **onLoadedMetadata는 다시 불리지 않는다**(스트림이 새로 시작된 것이 아니라
+ * 크기만 바뀐 것이다). 그것을 놓치면 상자와 잘라내기가 바뀌기 전 크기를 계속
+ * 쓴다. 그래서 video 요소의 **resize 이벤트**를 따로 듣는다.
  *
  * ── 두 가지 대가 ─────────────────────────────────────────────────────────
  *  1. **보안 컨텍스트가 필요하다.** getUserMedia는 HTTPS나 localhost에서만
@@ -152,7 +171,7 @@ function readViewportSize(): PixelSize {
 }
 
 /**
- * 미리보기를 자를 상자의 크기 — **프레임과 종횡비가 같아야 한다.**
+ * 미리보기를 자를 상자의 크기 — **고른 화면비와 종횡비가 같아야 한다.**
  *
  * 여기가 이 파일에서 가장 조용히 틀리기 쉬운 곳이다. 자르는 상자가 화면 전체이면
  * (object-contain이 만드는 검은 여백이 상자 안에 들어 있으면) scale은 꽉 찬 축만
@@ -161,18 +180,32 @@ function readViewportSize(): PixelSize {
  * 화면에서 확인한 위아래가 사진에서 사라진다.
  *
  * 그래서 object-contain이 만들던 그 콘텐츠 상자를 직접 재서 값으로 들고 있는다.
- * 상자와 프레임의 종횡비가 같으면 scale(Z)는 가로·세로를 똑같이 1/Z로 자른다 —
- * digitalCropRect가 담는 것과 정확히 같은 영역이다.
+ * 종횡비는 프레임이 아니라 **고른 화면비**다 — video가 object-cover라 상자를 목표
+ * 비율로 만들면 영상이 그 비율에 맞게 가운데가 잘려 채워진다. 그것이 곧 화면비
+ * 자르기다. 그 위에 scale(Z)가 걸리면 상자와 그 안의 내용이 같은 모양이므로
+ * 가로·세로가 똑같이 1/Z로 잘린다 — frameCropRect가 담는 것과 정확히 같은
+ * 영역이다(가운데를 목표 비율로 자른 뒤 다시 1/Z).
  *
- * 프레임 크기를 아직 모르면(메타데이터 도착 전) null이다.
+ * 프레임 크기를 아직 모르면(메타데이터 도착 전) null이다. 목표 비율의 방향이
+ * 프레임에서 나오기 때문에 프레임을 알기 전에는 상자를 만들 수 없다.
  */
-function fitBoxSize(frame: PixelSize | null, viewport: PixelSize): PixelSize | null {
+function fitBoxSize(
+  frame: PixelSize | null,
+  viewport: PixelSize,
+  targetAspect: number
+): PixelSize | null {
   if (!frame || !(frame.width > 0) || !(frame.height > 0)) return null;
   if (!(viewport.width > 0) || !(viewport.height > 0)) return null;
-  const fit = Math.min(viewport.width / frame.width, viewport.height / frame.height);
-  if (!Number.isFinite(fit) || fit <= 0) return null;
-  return { width: frame.width * fit, height: frame.height * fit };
+  if (!Number.isFinite(targetAspect) || targetAspect <= 0) return null;
+  // 목표 비율을 지키면서 화면 안에 들어가는 가장 큰 상자.
+  const width = Math.min(viewport.width, viewport.height * targetAspect);
+  const height = width / targetAspect;
+  if (!(width > 0) || !(height > 0)) return null;
+  return { width, height };
 }
+
+/** 화면비 버튼에 나가는 차례. 왼쪽이 기본(센서 그대로)이다. */
+const ASPECT_CHOICES: readonly AspectChoice[] = ["SENSOR", "WIDE"];
 
 const UNAVAILABLE_NO_API =
   "이 브라우저에서는 앱 안 카메라를 쓸 수 없습니다. 사내망 주소(http)로 접속했다면 폰 Chrome의 chrome://flags에서 그 주소를 보안 예외로 등록해야 합니다.";
@@ -225,6 +258,17 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
   const [viewportSize, setViewportSize] = useState<PixelSize>(readViewportSize);
 
   /**
+   * 고른 화면비. 기본은 센서 그대로(4:3)다 — 폰 센서가 원래 그 모양이라 그것이
+   * 화소를 다 쓰는 모드다.
+   *
+   * **카메라를 껐다 켜도 남는다.** 배율은 그때그때의 상태라 1로 돌아가지만
+   * 화면비는 취향이라, 매번 다시 고르게 하면 그것이 성가심이 된다. 대신
+   * localStorage 같은 곳에 저장하지는 않는다 — 페이지를 새로 열면 기본으로
+   * 돌아가는 편이, 왜 이 비율인지 모르는 채 찍는 것보다 낫다.
+   */
+  const [aspect, setAspect] = useState<AspectChoice>("SENSOR");
+
+  /**
    * 가로로 쥐고 있는가.
    *
    * Tailwind의 portrait:/landscape: 변형에 기대지 않고 직접 잰다. 그 변형이
@@ -246,6 +290,21 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
     return () => query.removeEventListener("change", onChange);
   }, []);
 
+  /**
+   * 프레임 크기를 지금 값으로 맞춘다. 이 값이 있어야 미리보기 상자를 목표 비율로
+   * 만들 수 있고, 그래야 화면에서 본 영역과 촬영이 담는 영역이 일치한다.
+   * 촬영이 쓰는 videoWidth/Height와 같은 출처다.
+   *
+   * 부르는 곳이 셋이다 — 메타데이터 도착(onLoadedMetadata), 화면 회전(resize),
+   * 그리고 **영상 크기가 바뀌는 순간**(video의 resize). 마지막 것이 화면비를
+   * 바꿀 때 필요하다.
+   */
+  const readFrameSize = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
+    setFrameSize({ width: video.videoWidth, height: video.videoHeight });
+  }, []);
+
   // 화면이 바뀌면 미리보기 상자를 다시 잰다 — 회전, 주소창이 접히고 펴지는 것,
   // PC 창 크기 조절이 모두 여기로 온다. 다시 재지 않으면 상자가 옛 화면 크기로
   // 남아 확대한 미리보기와 촬영이 어긋난다.
@@ -253,15 +312,33 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
     const onResize = () => {
       setViewportSize(readViewportSize());
       // 회전할 때 프레임의 가로·세로를 바꿔 주는 기기가 있다. 그 경우 상자만
-      // 다시 재면 종횡비가 어긋나므로 프레임 크기도 함께 다시 읽는다.
-      const video = videoRef.current;
-      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
-        setFrameSize({ width: video.videoWidth, height: video.videoHeight });
-      }
+      // 다시 재면 방향 판정이 어긋나므로 프레임 크기도 함께 다시 읽는다.
+      readFrameSize();
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [readFrameSize]);
+
+  /**
+   * 영상 크기가 바뀌는 순간을 붙잡는다 — **여기가 화면비 기능의 함정이다.**
+   *
+   * applyConstraints로 해상도가 바뀌어도 onLoadedMetadata는 다시 불리지 않는다.
+   * 스트림이 새로 시작된 것이 아니라 크기만 바뀐 것이기 때문이다. 이것을 놓치면
+   * 상자와 잘라내기가 **바뀌기 전 크기**를 계속 쓰고, 화면비를 바꾼 직후부터
+   * 사진이 조용히 어긋난다 — 파일을 열어 봐야 아는 종류의 고장이다.
+   *
+   * React의 onResize 대신 addEventListener를 쓰는 이유는, video의 resize가
+   * 합성 이벤트로 전달되는지가 React 버전에 따라 달라질 수 있기 때문이다. DOM에
+   * 직접 붙이면 그 판단에 기대지 않는다. video 요소는 isOpen일 때만 그려지므로
+   * 이 효과의 의존성도 isOpen이다.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const video = videoRef.current;
+    if (!video) return;
+    video.addEventListener("resize", readFrameSize);
+    return () => video.removeEventListener("resize", readFrameSize);
+  }, [isOpen, readFrameSize]);
 
   const stopStream = useCallback(() => {
     // 트랙을 멈추지 않으면 카메라 표시등이 계속 켜져 있고 배터리를 먹는다.
@@ -307,11 +384,17 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
   }, [isOpen]);
 
   /**
-   * 미리보기를 자를 상자. 이 상자가 프레임과 종횡비가 같기 때문에 화면에서 본
-   * 영역과 촬영이 담는 영역이 일치한다. 아직 모를 때는 null이고, 그동안은 예전처럼
-   * 화면 전체 object-contain으로 두고 확대도 걸지 않는다.
+   * 지금 목표로 하는 종횡비(가로/세로). 방향은 폰이 아니라 프레임을 따른다.
+   * 프레임을 아직 모르면 상자를 만들지 않으므로 이 값도 쓰이지 않는다.
    */
-  const previewBox = fitBoxSize(frameSize, viewportSize);
+  const targetAspect = frameSize ? orientedAspect(aspect, frameSize.width, frameSize.height) : 1;
+
+  /**
+   * 미리보기를 자를 상자. 이 상자가 **고른 화면비와** 종횡비가 같기 때문에 화면에서
+   * 본 영역과 촬영이 담는 영역이 일치한다. 아직 모를 때는 null이고, 그동안은
+   * 예전처럼 화면 전체 object-contain으로 두고 확대도 걸지 않는다.
+   */
+  const previewBox = fitBoxSize(frameSize, viewportSize, targetAspect);
 
   async function openCamera() {
     if (!cameraApiAvailable()) {
@@ -321,14 +404,17 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
 
     setIsStarting(true);
     try {
+      // 처음 열 때도 **지금 고른 화면비로** 요청한다. 기본이 센서 그대로(4:3)라
+      // 기본 요청값이 2560×1920이다.
+      const request = aspectRequestSize(aspect);
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           // 후면 카메라를 요청한다. ideal이라 없으면 있는 것으로 대체된다.
           facingMode: { ideal: "environment" },
           // 기기가 줄 수 있는 만큼 큰 것을 요청한다. 실제로 무엇을 받았는지는
           // 찍을 때 videoWidth/Height로 다시 읽는다.
-          width: { ideal: 2560 },
-          height: { ideal: 1440 },
+          width: { ideal: request.width },
+          height: { ideal: request.height },
         },
         audio: false,
       });
@@ -419,6 +505,39 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
   }
 
   /**
+   * 화면비를 바꾼다.
+   *
+   * 배율과 반대로 **표시를 먼저 옮긴다.** 배율은 카메라가 거절하면 낼 방법이 없어
+   * 표시도 따라가지 않아야 하지만, 화면비는 요청이 실패해도 우리가 잘라서 맞출 수
+   * 있다. 그래서 상자와 잘라내기가 곧바로 새 비율로 움직이고, 요청은 "이왕이면
+   * 화소를 더 받자"는 부탁일 뿐이다.
+   *
+   * 카메라를 껐다 켜지 않는다 — 깜빡임이 생기고 권한 창이 다시 뜰 여지가 있다.
+   * 켜져 있는 트랙에 새 해상도만 부탁한다.
+   */
+  async function applyAspect(next: AspectChoice) {
+    if (next === aspect) return;
+    setAspect(next);
+
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const request = aspectRequestSize(next);
+    try {
+      await track.applyConstraints({
+        width: { ideal: request.width },
+        height: { ideal: request.height },
+      });
+    } catch {
+      // 이 기기가 그 해상도를 거절했다. 들어오는 프레임 그대로 두고 가운데를 잘라
+      // 목표 비율을 맞춘다 — 버튼 한 번 눌렀다가 촬영 자체를 못 하게 되면 안 된다.
+    }
+    // 실제로 무엇을 받았는지 확인한다. 보통은 video의 resize 이벤트가 먼저
+    // 알려 주지만, 그 이벤트를 내지 않는 기기가 있을 수 있어 여기서도 읽는다.
+    // 크기가 그대로면 같은 값을 다시 넣는 것이라 화면에 아무 일도 일어나지 않는다.
+    readFrameSize();
+  }
+
+  /**
    * 핀치. 두 손가락일 때만 움직이고, 기준은 시작한 순간의 거리와 배율이다.
    *
    * preventDefault를 부르지 않는다 — React는 touchmove를 passive로 붙여 막을 수
@@ -443,17 +562,6 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
     pinchRef.current = null;
   }
 
-  /**
-   * 프레임 크기가 도착했다. 이 값이 있어야 미리보기 상자를 프레임과 같은 모양으로
-   * 만들 수 있고, 그래야 화면에서 본 영역과 촬영이 담는 영역이 일치한다.
-   * 촬영이 쓰는 videoWidth/Height와 같은 출처다.
-   */
-  function readFrameSize() {
-    const video = videoRef.current;
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
-    setFrameSize({ width: video.videoWidth, height: video.videoHeight });
-  }
-
   /** 지금 화면에 보이는 한 프레임을 사진으로 만든다. 카메라는 계속 켜져 있다. */
   async function takeShot() {
     const video = videoRef.current;
@@ -469,13 +577,17 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
     }
 
     /**
-     * 디지털 줌으로 당겨 놓았다면 화면에 보이는 만큼만 잘라 담는다. 이것을
-     * 빼먹으면 화면에는 크게 보였는데 저장된 사진은 광각이 된다.
+     * 화면에 보이는 만큼만 잘라 담는다 — **고른 화면비로 한 번, 디지털 줌으로 한
+     * 번**이고 그 둘을 한 함수에서 낸다. 이것을 빼먹으면 화면에는 4:3으로 크게
+     * 보였는데 저장된 사진은 16:9 광각이 된다.
      *
-     * 하드웨어 줌은 프레임 자체가 이미 확대돼 들어오므로 1을 넘긴다 — 그러면
-     * 원본 전체이고, 두 번 확대되지 않는다.
+     * 화면비 자르기는 하드웨어든 디지털이든 언제나 걸린다. 배율은 하드웨어 줌일
+     * 때 1을 넘긴다 — 프레임 자체가 이미 확대돼 들어오므로 또 자르면 두 배가 된다.
+     *
+     * 상자가 같은 비율이고 미리보기 확대도 같은 배율이라, 여기서 나온 사각형이
+     * 화면에서 본 영역과 일치한다.
      */
-    const crop = digitalCropRect(width, height, isHardwareZoom ? 1 : zoom);
+    const crop = frameCropRect(width, height, aspect, isHardwareZoom ? 1 : zoom);
 
     const canvas = document.createElement("canvas");
     // 저장 크기는 잘라낸 실제 크기 그대로다. 원래 크기로 다시 늘리면 없는 화질을
@@ -556,10 +668,15 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
         onTouchCancel={endPinch}
       >
         {/*
-          자르는 상자. **프레임과 종횡비가 같은 상자**를 화면 가운데 놓고 그 안에서
-          확대한다. 화면 전체를 자르는 상자 안에서 확대하면 여백이 남는 축은 여백만
-          줄어들 뿐 잘리지 않아서, 화면에는 세로가 다 보이는데 사진은 위아래가
+          자르는 상자. **고른 화면비와 종횡비가 같은 상자**를 화면 가운데 놓고 그
+          안에서 확대한다. 화면 전체를 자르는 상자 안에서 확대하면 여백이 남는 축은
+          여백만 줄어들 뿐 잘리지 않아서, 화면에는 세로가 다 보이는데 사진은 위아래가
           잘려 나간다.
+
+          상자를 목표 비율로 두는 것이 곧 화면비 자르기다 — 안의 video가
+          object-cover라 영상이 그 비율에 맞게 가운데가 잘려 채워진다. 그 위에
+          scale(Z)가 걸리면 다시 1/Z만 남는다. 촬영의 frameCropRect가 하는 일과
+          순서까지 같다.
 
           프레임 크기를 아직 모르는 동안(메타데이터 도착 전)에는 예전처럼 화면 전체
           object-contain이다. 그때는 배율이 1이라 보이는 것이 같다. video 요소를
@@ -585,13 +702,15 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
             playsInline
             muted
             autoPlay
-            // 상자가 프레임과 종횡비가 같으므로 object-cover여도 잘리는 것이 없다.
+            // object-cover가 프레임을 상자 비율로 가운데 잘라 채운다 — 그것이
+            // 화면비 자르기다. 프레임이 이미 그 비율이면 잘리는 것이 없다.
             className={previewBox ? "h-full w-full object-cover" : "h-full w-full object-contain"}
             onLoadedMetadata={readFrameSize}
             /*
               디지털 줌일 때만 화면을 확대한다. 하드웨어 줌 위에 이것까지 걸면 두
               배로 확대된다. 가운데 기준이라 잘라내기와 보이는 것이 같다 —
-              상자가 프레임과 같은 모양이므로 scale(Z)는 가로도 세로도 1/Z만 남긴다.
+              상자와 그 안을 채운 영상이 같은 모양이므로 scale(Z)는 가로도 세로도
+              1/Z만 남긴다.
             */
             style={
               previewBox && !isHardwareZoom && zoom !== 1
@@ -620,6 +739,41 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
       >
         ×
       </button>
+
+      {/*
+        화면비. 순정 카메라 앱과 같은 **위쪽 가운데**다 — 왼쪽에 장수, 오른쪽에
+        닫기(×)가 있어 가운데가 비어 있고, 배율 버튼(세로는 아래쪽, 가로는 오른쪽
+        가운데)과도 겹치지 않는다. 세로·가로 어느 배치에서도 같은 자리다.
+
+        프레임 크기를 알기 전에는 그리지 않는다. 라벨의 방향이 프레임에서 나오기
+        때문에, 모르는 채로 적으면 세로로 쥐고 있는데 "4:3"이라고 적히는 일이
+        생긴다. 모양은 배율 버튼과 같게 두어 같은 종류의 조작으로 읽히게 한다.
+      */}
+      {frameSize && (
+        <div className="absolute left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] flex -translate-x-1/2 flex-row gap-2">
+          {ASPECT_CHOICES.map((choice) => {
+            const active = choice === aspect;
+            const label = formatAspect(choice, frameSize.width, frameSize.height);
+            return (
+              <button
+                key={choice}
+                type="button"
+                onClick={() => void applyAspect(choice)}
+                disabled={disabled}
+                aria-pressed={active}
+                aria-label={`화면비 ${label}`}
+                className={
+                  active
+                    ? "h-10 rounded-full bg-white px-3 text-sm font-semibold text-black tabular-nums disabled:opacity-50"
+                    : "h-10 rounded-full bg-black/60 px-3 text-sm font-medium text-white tabular-nums disabled:opacity-50"
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {runtimeError && (
         <p
