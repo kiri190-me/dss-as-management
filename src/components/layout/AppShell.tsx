@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { navItems } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
+import type { NotificationItem } from "@/lib/domain/notifications";
 import TopBar from "./TopBar";
 import Sidebar from "./Sidebar";
 
@@ -30,9 +31,15 @@ type AppShellProps = {
    * 화면/서버 액션이 각자 다시 확인한다. 0이면 배지가 없다.
    */
   myPendingApprovalCount?: number;
+  /**
+   * 헤더 종 알림에 그릴 건별 목록(layout.tsx가 서버에서 계산해 넘긴다).
+   * 위 배지 숫자와 **같은 한 번의 조회**에서 나온다 — 화면마다 같은 조회를 두
+   * 번 돌리지 않기 위한 것이다(db/queries/notifications.ts 주석 참조).
+   */
+  notifications?: readonly NotificationItem[];
 };
 
-export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0 }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0, notifications = [] }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar narrow/icon-only mode — owned here (not inside Sidebar)
@@ -53,7 +60,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
     // internally rather than inflating the whole page.
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="print:hidden">
-        <TopBar title={title} onMenuClick={() => setMobileNavOpen(true)} />
+        <TopBar title={title} onMenuClick={() => setMobileNavOpen(true)} notifications={notifications} />
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden print:overflow-visible">
         <aside

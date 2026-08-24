@@ -1,8 +1,16 @@
 "use client";
 
+import NotificationBell from "./NotificationBell";
+import type { NotificationItem } from "@/lib/domain/notifications";
+
 type TopBarProps = {
   title: string;
   onMenuClick: () => void;
+  /**
+   * 지금 로그인한 사람이 처리해야 할 일(layout.tsx가 서버에서 계산해 넘긴다).
+   * 종 버튼은 0건이어도 남아 있고, 배지만 사라진다.
+   */
+  notifications?: readonly NotificationItem[];
 };
 
 /**
@@ -19,8 +27,15 @@ type TopBarProps = {
  * just hiding it, is the actual fix: this header is now only ever the
  * hamburger + app title, comfortably under any real phone's width, with
  * no `user` prop needed anymore.
+ *
+ * 그 뒤 오른쪽에 다시 들어온 것은 **아이콘 버튼 하나(NotificationBell)**뿐이다.
+ * 위 사고를 되풀이하지 않기 위한 선: 오른쪽에 놓이는 것은 햄버거와 같은
+ * h-9 w-9 하나를 넘지 않고, 글자 묶음(사용자명/역할/버튼 라벨)은 여전히
+ * SidebarFooter에만 둔다. 폰(360px)에서 햄버거 36 + 제목 + 종 36 + 좌우
+ * 여백이라 넘칠 여지가 없고, 종의 펼침 패널은 자기 폭을 뷰포트 안으로 제한한다
+ * (NotificationBell.tsx 주석 참조).
  */
-export default function TopBar({ title, onMenuClick }: TopBarProps) {
+export default function TopBar({ title, onMenuClick, notifications = [] }: TopBarProps) {
   return (
     // `h-14`가 `min-h-14`로 바뀐 것은 뒤의 pt 인셋 때문이다: 고정 높이
     // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
@@ -63,6 +78,9 @@ export default function TopBar({ title, onMenuClick }: TopBarProps) {
           </span>
         </>
       )}
+      {/* ml-auto는 NotificationBell 자신이 갖는다 — 여기 래퍼를 하나 더 두면
+          펼침 패널의 기준(position: relative)이 두 겹이 된다. */}
+      <NotificationBell items={notifications} />
     </header>
   );
 }

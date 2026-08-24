@@ -30,13 +30,19 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * listRepairCasesPendingMyApproval / countRepairCasesPendingMyApproval —
  * "내게 온 결재 요청"이 파생 계산이라는 것을 실제 DB에서 확인한다.
  *
- * 확인하는 것은 네 축이다: (1) 지금 단계가 그 결재를 요구하는가,
- * (2) 그 종류의 결재 요청이 들어와 아직 결정되지 않았는가 — 요청조차 없음
- * (NOT_REQUESTED)·승인(APPROVED)·반려(REJECTED)·version 불일치(STALE)는 모두
- * 빠진다, (3) 이 사용자가 그 종류를 결재할 수 있는가(위임 포함),
- * (4) 휴지통으로 지운 건은 빠지는가.
+ * 확인하는 것은 세 축이다: (1) 그 종류의 결재 요청이 들어와 아직 결정되지
+ * 않았는가 — 요청조차 없음(NOT_REQUESTED)·승인(APPROVED)·반려(REJECTED)·
+ * version 불일치(STALE)는 모두 빠진다, (2) 이 사용자가 그 종류를 결재할 수
+ * 있는가(위임 포함), (3) 휴지통·출하 완료 잠김·유무상 미확정 건은 빠지는가.
  *
- * (2)가 좁혀져 있으므로, "**다른 이유로** 빠진다"를 보이려는 테스트는 대상
+ * **워크플로 단계는 축이 아니다.** 요청이 들어와 있으면 그 건이 어느 단계에
+ * 서 있든 나온다 — 실제 결재를 처리하는 decideRepairCaseApproval도 단계를
+ * 보지 않기 때문이다. 예전에는 조회만 단계를 함께 요구했고, 그래서 승인이
+ * 걸린 전이가 없는 단계(인수점검·출하 대기)에서 들어온 진짜 요청이 결재자
+ * 알림에서 통째로 사라졌다. 그 회귀를 "단계와 무관하게 나온다" 테스트들이
+ * 막는다.
+ *
+ * (1)이 좁혀져 있으므로, "**다른 이유로** 빠진다"를 보이려는 테스트는 대상
  * 건에 반드시 REQUESTED 기록을 넣어 둔다. 넣지 않으면 그 "다른 이유"와 상관
  * 없이 어차피 빠져서, 검사를 통째로 지워도 초록색인 테스트가 된다 — 각 테스트
  * 안의 "대조가 성립한다" 단언이 그 함정에 빠지지 않았다는 증거다.
@@ -227,7 +233,7 @@ after(async () => {
   await pgClient.end({ timeout: 5 });
 });
 
-describe("listRepairCasesPendingMyApproval: 결재 필요 단계 + 결정되지 않은 결재 요청", () => {
+describe("listRepairCasesPendingMyApproval: 결정되지 않은 결재 요청 (워크플로 단계와 무관)", () => {
   test("1. 결재 필요 단계 + 결재 요청이 들어옴 + 결재 권한 있음 → 목록에 나온다", async () => {
     const caseId = await createTestCase();
     await setStepRequiringApproval(caseId, "REPAIR_INSPECTION");
@@ -253,17 +259,53 @@ describe("listRepairCasesPendingMyApproval: 결재 필요 단계 + 결정되지 
     assert.ok((await idsFor(engineerId)).includes(caseId), "요청이 들어오면 잡힌다 — 대조가 성립한다");
   });
 
-  test("결재를 요구하지 않는 단계(접수 직후)는 요청이 있어도 나오지 않는다", async () => {
+  test("결재를 요구하지 않는 단계(접수 직후)에 서 있어도 요청이 들어오면 나온다 — 단계는 결과를 바꾸지 않는다", async () => {
     const caseId = await createTestCase();
-    // 요청 기록을 먼저 넣어 둔다 — 넣지 않으면 단계와 무관하게 어차피 빠져서
-    // 이 테스트가 아무것도 지키지 못한다.
+    // 접수 직후 단계에는 승인이 걸린 전이가 하나도 없다. 그래도 요청이
+    // 들어와 있으면 결재자가 지금 눌러서 처리할 수 있는 건이다 —
+    // decideRepairCaseApproval도 단계를 보지 않는다.
     const current = await getCase(caseId);
     await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
 
-    assert.equal((await idsFor(engineerId)).includes(caseId), false, "지금 단계가 그 결재를 요구하지 않는다");
+    assert.ok((await idsFor(engineerId)).includes(caseId), "요청이 들어와 있으면 단계와 무관하게 나온다");
 
+    // 대조 — 그 결재를 요구하는 단계로 옮겨도 결과가 달라지지 않는다.
     await setStepRequiringApproval(caseId, "REPAIR_INSPECTION");
-    assert.ok((await idsFor(engineerId)).includes(caseId), "그 결재를 요구하는 단계로 옮기면 보인다 — 대조가 성립한다");
+    assert.ok((await idsFor(engineerId)).includes(caseId), "단계를 옮겨도 여전히 나온다 — 단계가 결과를 바꾸지 않는다");
+  });
+
+  test("승인이 걸린 전이가 하나도 없는 단계 + 검수 승인 요청 → 목록·건수 양쪽에 잡힌다 (사용자 신고 재현)", async () => {
+    // 실제로 터진 상황: 엔지니어가 "인수점검"·"출하 대기"처럼 검수 승인이
+    // 앞을 막지 않는 단계에서 검수 승인을 요청했는데(요청 버튼은 결재 상태만
+    // 본다), 조회만 단계를 함께 요구해서 결재자 알림에 전혀 뜨지 않았다.
+    const countBefore = await countRepairCasesPendingMyApproval(engineerId);
+    const caseId = await createTestCase(); // 접수 직후 = 승인이 걸린 전이가 없는 단계
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+
+    const item = (await listRepairCasesPendingMyApproval(engineerId)).find((row) => row.repairCaseId === caseId);
+    assert.ok(item, "목록에 잡혀야 한다 — 지금 눌러서 승인·반려할 수 있는 진짜 요청이다");
+    assert.equal(item!.approvalType, "REPAIR_INSPECTION");
+    assert.equal(item!.state, "PENDING");
+    assert.equal(
+      await countRepairCasesPendingMyApproval(engineerId),
+      countBefore + 1,
+      "건수(배지·종 알림)에도 세어져야 한다"
+    );
+  });
+
+  test("다른 종류의 결재가 걸린 단계에 서 있어도 요청한 종류가 잡힌다", async () => {
+    // D260701처럼 출하 승인이 앞을 막는 단계에 서 있는 건에 검수 승인 요청이
+    // 들어온 경우 — 잡히는 종류는 단계에 걸린 종류가 아니라 요청된 종류다.
+    const caseId = await createTestCase();
+    await setStepRequiringApproval(caseId, "FINAL_SHIPMENT");
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+
+    const item = (await listRepairCasesPendingMyApproval(engineerId)).find((row) => row.repairCaseId === caseId);
+    assert.ok(item, "단계에 걸린 종류가 아니라 요청이 들어온 종류로 잡힌다");
+    assert.equal(item!.approvalType, "REPAIR_INSPECTION");
+    assert.equal(item!.state, "PENDING");
   });
 
   test("다른 종류의 요청은 이 종류를 열지 않는다 — (건, 종류)별로 따로 본다", async () => {

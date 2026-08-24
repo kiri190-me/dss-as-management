@@ -6,6 +6,7 @@ import {
   type ShipmentApprovalChecklistItem,
   type ShipmentApprovalState,
 } from "@/lib/domain/local/workflow/shipment-approval-checklist";
+import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 
 const STATE_LABEL: Record<ShipmentApprovalState, string> = {
   NOT_REQUESTED: "미요청",
@@ -64,7 +65,7 @@ export default function ShipmentApprovalChecklist({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">출하까지 남은 결재</h3>
         <Link
-          href={`/repair-cases/${repairCaseId}/approval`}
+          href={repairCaseDetailHrefs(repairCaseId).approval}
           className="ml-auto text-xs font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400"
         >
           승인 화면에서 처리 →

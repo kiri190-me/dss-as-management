@@ -59,7 +59,7 @@ type ApprovalInput = {
   latest: ApprovalRecordForState;
 };
 
-const LABELS: Record<ShipmentApprovalType, string> = {
+export const LABELS: Record<ShipmentApprovalType, string> = {
   REPAIR_INSPECTION: "수리 검수 승인",
   FINAL_SHIPMENT: "최종 출하 승인",
 };

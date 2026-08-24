@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { resolveActiveTabHref } from "@/lib/domain/repair-case-detail-tabs";
+import { repairCaseDetailHrefs, resolveActiveTabHref } from "@/lib/domain/repair-case-detail-tabs";
 
 type DetailTabsProps = {
   id: string;
@@ -11,14 +11,16 @@ type DetailTabsProps = {
 export default function DetailTabs({ id }: DetailTabsProps) {
   const pathname = usePathname();
 
+  // 주소는 도메인 헬퍼가 만들고, 라벨과 순서만 여기(화면)에서 정한다.
+  const hrefs = repairCaseDetailHrefs(id);
   const tabs = [
-    { label: "기본 정보", href: `/repair-cases/${id}` },
-    { label: "작업내용", href: `/repair-cases/${id}/execution` },
-    { label: "진단 Flowchart", href: `/repair-cases/${id}/diagnosis` },
-    { label: "작업 이력", href: `/repair-cases/${id}/work-history` },
-    { label: "파일 관리", href: `/repair-cases/${id}/files` },
-    { label: "검수/승인", href: `/repair-cases/${id}/approval` },
-    { label: "보고서", href: `/repair-cases/${id}/report` },
+    { label: "기본 정보", href: hrefs.root },
+    { label: "작업내용", href: hrefs.execution },
+    { label: "진단 Flowchart", href: hrefs.diagnosis },
+    { label: "작업 이력", href: hrefs.workHistory },
+    { label: "파일 관리", href: hrefs.files },
+    { label: "검수/승인", href: hrefs.approval },
+    { label: "보고서", href: hrefs.report },
   ];
 
   const activeHref = resolveActiveTabHref(pathname, tabs.map((t) => t.href));
