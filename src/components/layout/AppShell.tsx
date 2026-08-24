@@ -24,9 +24,15 @@ type AppShellProps = {
    * requireAreaAccess가 서버에서 한다.
    */
   accessibleAreaKeys: readonly string[] | null;
+  /**
+   * 로그인한 사용자가 결재해야 할 A/S 건수(layout.tsx가 서버에서 계산해
+   * 넘긴다). 사이드바 배지를 그릴지에만 쓴다 — 실제 결재 권한은 승인
+   * 화면/서버 액션이 각자 다시 확인한다. 0이면 배지가 없다.
+   */
+  myPendingApprovalCount?: number;
 };
 
-export default function AppShell({ children, user, accessibleAreaKeys }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0 }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar narrow/icon-only mode — owned here (not inside Sidebar)
@@ -53,7 +59,7 @@ export default function AppShell({ children, user, accessibleAreaKeys }: AppShel
         <aside
           className={`hidden min-h-0 border-r border-zinc-200 transition-[width] duration-150 md:flex md:flex-col print:hidden dark:border-zinc-800 ${isSidebarCollapsed ? "md:w-14" : "md:w-52"}`}
         >
-          <Sidebar activeHref={pathname} role={user.role} user={user} accessibleAreaKeys={accessibleAreaKeys} isCollapsed={isSidebarCollapsed} onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)} />
+          <Sidebar activeHref={pathname} role={user.role} user={user} accessibleAreaKeys={accessibleAreaKeys} isCollapsed={isSidebarCollapsed} onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)} myPendingApprovalCount={myPendingApprovalCount} />
         </aside>
 
         {mobileNavOpen && (
@@ -76,6 +82,7 @@ export default function AppShell({ children, user, accessibleAreaKeys }: AppShel
                 role={user.role}
                 user={user}
                 onNavigate={() => setMobileNavOpen(false)}
+                myPendingApprovalCount={myPendingApprovalCount}
               />
             </aside>
           </div>

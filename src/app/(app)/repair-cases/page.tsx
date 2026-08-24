@@ -7,6 +7,10 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listDeletedRepairCases, listRepairCases } from "@/lib/db/queries/repair-cases";
+import {
+  canDecideAnyRepairCaseApproval,
+  listRepairCasesPendingMyApproval,
+} from "@/lib/db/queries/repair-case-approvals-pending";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -73,6 +77,21 @@ export default async function RepairCasesPage() {
   // independently re-checks role/write-source).
   const canPermanentlyDelete = mayManageLifecycle;
 
+  // "내게 온 결재 요청" 필터의 근거. 세션에서 푼 사용자 id만 넘긴다 — 이 조회에는
+  // 다른 사람의 목록을 요구할 수 있는 인자가 없고, 결재 권한 판정도 조회
+  // 함수가 서버에서 스스로 한다(화면이 보낸 값은 아무것도 신뢰하지 않는다).
+  // 결재 권한이 아예 없는 세션은 빈 배열을 받으므로, 필터는 보이되 0건이 되는
+  // 대신 아래에서 undefined로 접어 조건 자체를 감춘다.
+  const pendingApprovalItems = await listRepairCasesPendingMyApproval(session.userId);
+  // 0건일 때 "결재할 게 없다"와 "애초에 결재자가 아니다"는 다르다 — 전자는
+  // 조건을 보여 주고(딥링크로 들어와도 그대로 동작한다), 후자는 눌러도 늘
+  // 0건인 조건을 아예 감춘다.
+  const canFilterMyPendingApproval =
+    pendingApprovalItems.length > 0 || (await canDecideAnyRepairCaseApproval(session.userId));
+  const myPendingApprovalCaseIds = canFilterMyPendingApproval
+    ? [...new Set(pendingApprovalItems.map((item) => item.repairCaseId))]
+    : undefined;
+
   return (
     <Suspense>
       <RepairCaseListPage
@@ -81,6 +100,7 @@ export default async function RepairCasesPage() {
         serverTrashCases={serverTrashCases}
         canRestore={canRestore}
         canPermanentlyDelete={canPermanentlyDelete}
+        myPendingApprovalCaseIds={myPendingApprovalCaseIds}
       />
     </Suspense>
   );

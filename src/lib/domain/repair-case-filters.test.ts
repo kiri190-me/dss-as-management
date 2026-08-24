@@ -152,6 +152,28 @@ test("주소창으로도 '미지정'을 걸 수 있다", () => {
   assert.equal(parseInitialFilters(new URLSearchParams("billingType=NONE")).billingType, "NONE");
 });
 
+// ─────────────────────────────────────────────── 내게 온 결재 요청
+
+test("내게 온 결재 요청은 서버가 내려준 id 집합으로만 거른다", () => {
+  const rows = [row({ id: "mine" }), row({ id: "other" })];
+  const pending = new Set(["mine"]);
+
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ myPendingApprovalOnly: true }), pending)), ["mine"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters(), pending)), ["mine", "other"], "끄면 아무것도 걸리지 않는다");
+});
+
+test("근거가 되는 집합이 없으면 내게 온 결재 요청은 아무것도 남기지 않는다", () => {
+  // 근거 없이 전부 통과시키면 "내게 온 결재 요청"이라는 이름이 거짓이 된다.
+  const rows = [row({ id: "mine" }), row({ id: "other" })];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ myPendingApprovalOnly: true }))), []);
+});
+
+test("사이드바 배지의 딥링크(?myApproval=1)가 조건을 켠다", () => {
+  assert.equal(parseInitialFilters(new URLSearchParams("myApproval=1")).myPendingApprovalOnly, true);
+  assert.equal(parseInitialFilters(new URLSearchParams("myApproval=0")).myPendingApprovalOnly, false);
+  assert.equal(parseInitialFilters(new URLSearchParams("")).myPendingApprovalOnly, false);
+});
+
 test("사라진 workflowType 파라미터는 아무 것도 걸지 않는다", () => {
   // 딥링크가 한 군데도 없어서 끊어질 링크는 없지만, 남아 있는 주소가 있어도
   // 조용히 무시될 뿐 엉뚱한 필터가 걸리지는 않아야 한다.

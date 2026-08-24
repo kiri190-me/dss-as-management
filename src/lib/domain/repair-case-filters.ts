@@ -34,6 +34,16 @@ export type Filters = {
   overdueOnly: boolean;
   /** "YYYY-MM" 형식. 유효하지 않으면 null로 취급한다. */
   shipmentMonth: string | null;
+  /**
+   * 내게 결재 요청이 들어온 건만 보기. 다른 조건과 달리 **행 자체에는 판정
+   * 근거가 없다** — "내게 온 결재 요청"은 워크플로 전이의 승인 요건 + 아직
+   * 결정되지 않은 결재 요청 기록 + 로그인한 사용자의 결재 권한으로 서버가
+   * 계산하는 값이라(queries/repair-case-approvals-pending.ts), 화면은 서버가
+   * 내려준 접수 건 id 집합과 대조만 한다. 그 집합이 없으면(mock 모드 등) 이
+   * 조건은 아무것도 남기지 않는다 — 근거 없이 전부 통과시키면 "내게 온 결재
+   * 요청"이라는 이름이 거짓이 된다.
+   */
+  myPendingApprovalOnly: boolean;
 };
 
 export const DEFAULT_FILTERS: Filters = {
@@ -45,6 +55,7 @@ export const DEFAULT_FILTERS: Filters = {
   priority: "ALL",
   overdueOnly: false,
   shipmentMonth: null,
+  myPendingApprovalOnly: false,
 };
 
 const SHIPMENT_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -71,6 +82,8 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   const priority = searchParams.get("priority");
   const overdue = searchParams.get("overdue");
   const shipmentMonth = searchParams.get("shipmentMonth");
+  // 사이드바 배지가 거는 딥링크(/repair-cases?myApproval=1)가 들어오는 자리다.
+  const myApproval = searchParams.get("myApproval");
 
   return {
     query: "",
@@ -91,6 +104,7 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
         : "ALL",
     overdueOnly: overdue === "1" || overdue === "true",
     shipmentMonth: isValidShipmentMonth(shipmentMonth) ? shipmentMonth : null,
+    myPendingApprovalOnly: myApproval === "1" || myApproval === "true",
   };
 }
 
@@ -121,10 +135,20 @@ function matchesShipmentMonth(row: EffectiveRepairCase, month: string): boolean 
  * effectiveStatus/effectiveIsOverdue/effectiveActualShipmentDate로 필터링한다
  * — 워크플로 재정의가 있으면 그 결과가, 없으면 원본과 동일한 값이 반영된다.
  */
-export function applyFilters(rows: EffectiveRepairCase[], filters: Filters): EffectiveRepairCase[] {
+export function applyFilters(
+  rows: EffectiveRepairCase[],
+  filters: Filters,
+  /**
+   * 서버가 계산해 내려준 "내게 결재 요청이 들어온" 접수 건 id 집합
+   * (queries/repair-case-approvals-pending.ts). 없으면 undefined —
+   * myPendingApprovalOnly가 켜져 있어도 아무 행도 남기지 않는다.
+   */
+  myPendingApprovalCaseIds?: ReadonlySet<string>
+): EffectiveRepairCase[] {
   const query = filters.query.trim().toLowerCase();
 
   return rows.filter((row) => {
+    if (filters.myPendingApprovalOnly && !myPendingApprovalCaseIds?.has(row.id)) return false;
     if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) return false;
     if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;
     // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.

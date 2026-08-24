@@ -26,6 +26,14 @@ type RepairCaseFiltersProps = {
   onCustomerChange: (value: Filters["customerId"]) => void;
   onPriorityChange: (value: Filters["priority"]) => void;
   onOverdueOnlyChange: (value: boolean) => void;
+  /**
+   * "내게 온 결재 요청"을 쓸 수 있는가. 서버가 내게 결재 요청이 들어와 있는
+   * 건들의 집합을 계산해 준 경우(DATABASE 모드 + 로그인 세션)에만 true다 —
+   * false면 이 조건은 아예 그리지 않는다. 근거 없이 체크박스만 보이면 눌러도
+   * 0건이 되어 고장처럼 보인다.
+   */
+  canFilterMyPendingApproval?: boolean;
+  onMyPendingApprovalOnlyChange?: (value: boolean) => void;
   onReset: () => void;
 };
 
@@ -41,6 +49,7 @@ export function countHiddenActiveFilters(filters: Filters): number {
   if (filters.customerId !== "ALL") count += 1;
   if (filters.priority !== "ALL") count += 1;
   if (filters.overdueOnly) count += 1;
+  if (filters.myPendingApprovalOnly) count += 1;
   return count;
 }
 
@@ -58,6 +67,8 @@ export default function RepairCaseFilters({
   onCustomerChange,
   onPriorityChange,
   onOverdueOnlyChange,
+  canFilterMyPendingApproval = false,
+  onMyPendingApprovalOnlyChange,
   onReset,
 }: RepairCaseFiltersProps) {
   return (
@@ -186,14 +197,27 @@ export default function RepairCaseFilters({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={filters.overdueOnly}
-              onChange={(event) => onOverdueOnlyChange(event.target.checked)}
-            />
-            납기 지연 건만 보기
-          </label>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                checked={filters.overdueOnly}
+                onChange={(event) => onOverdueOnlyChange(event.target.checked)}
+              />
+              납기 지연 건만 보기
+            </label>
+
+            {canFilterMyPendingApproval && (
+              <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={filters.myPendingApprovalOnly}
+                  onChange={(event) => onMyPendingApprovalOnlyChange?.(event.target.checked)}
+                />
+                내게 온 결재 요청만 보기
+              </label>
+            )}
+          </div>
 
           <button
             type="button"

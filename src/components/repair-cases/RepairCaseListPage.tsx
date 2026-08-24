@@ -79,6 +79,17 @@ type RepairCaseListPageProps = {
    * 휴지통 tab at all.
    */
   canPermanentlyDelete?: boolean;
+  /**
+   * 로그인한 사용자에게 결재 요청이 들어와 있는 접수 건 id — 서버가 계산해
+   * 내려준다(queries/repair-case-approvals-pending.ts). "내게 온 결재 요청"은
+   * 행에 저장된 값이 아니라 워크플로 전이의 승인 요건 + 아직 결정되지 않은
+   * 결재 요청 기록 + 그 사용자의 결재 권한으로 나오는 파생값이라, 화면이
+   * 스스로 판정할 수 없다.
+   *
+   * undefined(mock 모드, 또는 결재 권한이 없는 세션)이면 "내게 온 결재 요청"
+   * 조건 자체를 그리지 않는다.
+   */
+  myPendingApprovalCaseIds?: string[];
 };
 
 export default function RepairCaseListPage({
@@ -87,6 +98,7 @@ export default function RepairCaseListPage({
   serverTrashCases,
   canRestore = false,
   canPermanentlyDelete = false,
+  myPendingApprovalCaseIds,
 }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -155,9 +167,19 @@ export default function RepairCaseListPage({
   const [permanentDeleteSubmitError, setPermanentDeleteSubmitError] = useState<string | null>(null);
   const [permanentDeleteItemErrors, setPermanentDeleteItemErrors] = useState<Record<string, string>>({});
 
-  const [filters, setFilters] = useState<Filters>(() =>
-    parseInitialFilters(searchParams)
+  // 서버가 내게 온 결재 요청 집합을 내려준 세션에서만 이 조건을 쓸 수 있다. 근거가
+  // 없는데 딥링크(?myApproval=1)만 들어오면 조건을 켜지 않는다 — 켜면 목록이
+  // 통째로 비어 고장처럼 보인다.
+  const canFilterMyPendingApproval = myPendingApprovalCaseIds !== undefined;
+  const myPendingApprovalIdSet = useMemo(
+    () => (myPendingApprovalCaseIds ? new Set(myPendingApprovalCaseIds) : undefined),
+    [myPendingApprovalCaseIds]
   );
+
+  const [filters, setFilters] = useState<Filters>(() => {
+    const parsed = parseInitialFilters(searchParams);
+    return canFilterMyPendingApproval ? parsed : { ...parsed, myPendingApprovalOnly: false };
+  });
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pagination, setPagination] = useState<PaginationState>(DEFAULT_PAGINATION);
 
@@ -192,7 +214,10 @@ export default function RepairCaseListPage({
   const [deleteSubmitError, setDeleteSubmitError] = useState<string | null>(null);
   const [deleteItemErrors, setDeleteItemErrors] = useState<Record<string, string>>({});
 
-  const filteredRows = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  const filteredRows = useMemo(
+    () => applyFilters(rows, filters, myPendingApprovalIdSet),
+    [rows, filters, myPendingApprovalIdSet]
+  );
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pagination.pageSize));
@@ -681,6 +706,8 @@ export default function RepairCaseListPage({
             onCustomerChange={(value) => updateFilters({ customerId: value })}
             onPriorityChange={(value) => updateFilters({ priority: value })}
             onOverdueOnlyChange={(value) => updateFilters({ overdueOnly: value })}
+            canFilterMyPendingApproval={canFilterMyPendingApproval}
+            onMyPendingApprovalOnlyChange={(value) => updateFilters({ myPendingApprovalOnly: value })}
             onReset={handleReset}
           />
 

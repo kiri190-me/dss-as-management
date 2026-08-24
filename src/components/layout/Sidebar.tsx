@@ -17,9 +17,18 @@ type SidebarProps = {
   accessibleAreaKeys?: readonly string[] | null;
   /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
   onToggleCollapsed?: () => void;
+  /**
+   * 로그인한 사용자가 결재해야 할 A/S 건수 — 서버가 세션에서 푼 사용자 id로
+   * 계산해 내려준다(queries/repair-case-approvals-pending.ts). 0이면 배지를
+   * 그리지 않는다: "0"이라고 적힌 배지는 할 일이 있는 것처럼 눈에 띄기만 한다.
+   */
+  myPendingApprovalCount?: number;
 };
 
 const DASHBOARD_KEY = "dashboard";
+const REPAIR_CASES_KEY = "repairCases";
+/** 배지를 누르면 그 건들만 걸러진 목록으로 간다 — 필터 파싱은 repair-case-filters.ts. */
+const MY_PENDING_APPROVAL_HREF = "/repair-cases?myApproval=1";
 
 function navLinkClassName(isActive: boolean): string {
   return isActive
@@ -55,7 +64,7 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null }: SidebarProps) {
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0 }: SidebarProps) {
   const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
@@ -73,10 +82,31 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
 
   function renderItem(item: NavItem) {
     const isActive = item.href === activeHref;
-    return (
-      <Link key={item.href} href={item.href} onClick={onNavigate} aria-current={isActive ? "page" : undefined} className={navLinkClassName(isActive)}>
+    const link = (
+      <Link href={item.href} onClick={onNavigate} aria-current={isActive ? "page" : undefined} className={`${navLinkClassName(isActive)} min-w-0 flex-1`}>
         {item.label}
       </Link>
+    );
+
+    // 배지는 메뉴 링크 **옆의 별도 링크**다. 목적지가 다르기 때문에(메뉴는
+    // 전체 목록, 배지는 걸러진 목록) 하나의 <a> 안에 넣을 수 없다.
+    const showBadge = item.key === REPAIR_CASES_KEY && myPendingApprovalCount > 0;
+
+    return (
+      <div key={item.href} className="flex items-center gap-1">
+        {link}
+        {showBadge && (
+          <Link
+            href={MY_PENDING_APPROVAL_HREF}
+            onClick={onNavigate}
+            title="내게 온 결재 요청만 보기"
+            aria-label={`내게 온 결재 요청 ${myPendingApprovalCount}건 보기`}
+            className="shrink-0 rounded-full bg-amber-500 px-2 py-0.5 text-xs font-semibold text-white tabular-nums hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
+          >
+            {myPendingApprovalCount}
+          </Link>
+        )}
+      </div>
     );
   }
 
