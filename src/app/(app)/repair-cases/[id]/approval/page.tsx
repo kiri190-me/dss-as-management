@@ -2,12 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import ApprovalScreen from "@/components/repair-cases/approval/ApprovalScreen";
 import DatabaseApprovalScreen from "@/components/repair-cases/approval/DatabaseApprovalScreen";
-import LocalApprovalContent from "@/components/repair-cases/approval/LocalApprovalContent";
 import { getCurrentApprovalsForCase, getApprovalHistoryForCase } from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 
@@ -35,10 +33,6 @@ export default async function RepairCaseApprovalPage({
   // 클라이언트에는 최소한의 검증된 정보만 넘긴다(id/name/role/approvalStatus).
   // 세션 쿠키 자체나 원본 세션 payload를 내려보내지 않는다.
   const actingUser: ActingUser | null = await resolveActingUserForSession(session);
-
-  if (isLocalId(id)) {
-    return <LocalApprovalContent id={id} actingUser={actingUser} />;
-  }
 
   const resolved = await resolveRepairCaseForServer(id);
   // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는

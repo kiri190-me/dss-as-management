@@ -2,11 +2,9 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import ReportScreen from "@/components/repair-cases/report/ReportScreen";
-import LocalReportContent from "@/components/repair-cases/report/LocalReportContent";
 
 export const metadata: Metadata = {
   title: "보고서 | DSS A/S 관리 시스템",
@@ -34,10 +32,6 @@ export default async function RepairCaseReportPage({
   // 클라이언트에는 최소한의 검증된 정보만 넘긴다(id/name/role/approvalStatus).
   // 세션 쿠키 자체나 원본 세션 payload를 내려보내지 않는다.
   const generatedByUser: ActingUser | null = await resolveActingUserForSession(session);
-
-  if (isLocalId(id)) {
-    return <LocalReportContent repairCaseId={id} generatedByUser={generatedByUser} />;
-  }
 
   const resolved = await resolveRepairCaseForServer(id);
   // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는

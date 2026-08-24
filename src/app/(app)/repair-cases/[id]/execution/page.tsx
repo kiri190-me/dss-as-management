@@ -2,12 +2,9 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import LocalRepairCaseExecutionContent, {
-  NonDatabaseWorkContent,
-} from "@/components/repair-cases/detail/LocalRepairCaseExecutionContent";
+import { NonDatabaseWorkContent } from "@/components/repair-cases/detail/LocalRepairCaseExecutionContent";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
 import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
@@ -63,10 +60,6 @@ export default async function RepairCaseExecutionPage({
   }
 
   const actingUser: ActingUser | null = await resolveActingUserForSession(session);
-
-  if (isLocalId(id)) {
-    return <LocalRepairCaseExecutionContent id={id} actingUser={actingUser} />;
-  }
 
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) {

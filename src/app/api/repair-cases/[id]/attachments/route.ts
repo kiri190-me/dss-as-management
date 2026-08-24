@@ -15,7 +15,6 @@ import {
 } from "@/lib/domain/attachment-allowlist";
 import { isAttachmentCategory } from "@/lib/domain/attachment-category";
 import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getAttachmentUploadTarget } from "@/lib/db/queries/attachments";
 import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
@@ -64,7 +63,6 @@ type FailureCode =
   | "UNAUTHENTICATED"
   | "ACCOUNT_NOT_APPROVED"
   | "FORBIDDEN"
-  | "DEMO_CASE"
   | "CASE_NOT_FOUND"
   | "CASE_LOCKED"
   | "INVALID_CATEGORY"
@@ -111,11 +109,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const { id: repairCaseId } = await context.params;
-
-  if (isLocalId(repairCaseId)) {
-    // 데모 접수 건은 브라우저 안에만 있다 — 붙일 DB 행도 실제 파일 자리도 없다.
-    return fail(400, "DEMO_CASE", "데모 접수 건에는 실제 파일을 올릴 수 없습니다.");
-  }
 
   const target = await getAttachmentUploadTarget(repairCaseId);
   if (!target) {

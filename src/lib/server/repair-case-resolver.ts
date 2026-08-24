@@ -5,8 +5,8 @@ import { resolveMockRepairCaseById, type ResolvedRepairCase } from "@/lib/domain
 import { getRepairCaseById } from "@/lib/db/queries/repair-cases";
 
 /**
- * Single, read-source-aware, non-local repair-case resolver for server
- * code. [id]/layout.tsx, [id]/page.tsx, and the other detail tabs (work-
+ * Single, read-source-aware repair-case resolver for server code.
+ * [id]/layout.tsx, [id]/page.tsx, and the other detail tabs (work-
  * history/files/approval/report) all resolve the *same* id during one
  * request — wrapped in React's cache(), so the underlying resolution
  * (a real SQL query in database mode) runs at most once per request, no
@@ -16,8 +16,11 @@ import { getRepairCaseById } from "@/lib/db/queries/repair-cases";
  * unstable_cache, not ISR, and not a module-level map that could leak state
  * across requests or go stale.
  *
- * Never resolves local- ids — callers must branch on isLocalId() themselves
- * before calling this, exactly as they already do today.
+ * A `local-` id (the removed browser-storage demo prefix) resolves to null
+ * like any other unknown id: mock mode finds no matching mockRepairCases
+ * entry, and database mode rejects it at getRepairCaseById's UUID guard
+ * before any query runs. Callers get the same "not found" they already
+ * handle — no separate demo branch exists any more.
  *
  * A genuine database failure (e.g. connection refused) is NOT caught here —
  * it propagates so the nearest repair-cases/error.tsx boundary renders it,

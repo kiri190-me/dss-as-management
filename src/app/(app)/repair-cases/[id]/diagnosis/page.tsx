@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
@@ -16,17 +15,17 @@ export const dynamic = "force-dynamic";
 
 /**
  * Phase 5C-6D — minimal list/create access point for case-owned diagnostic
- * flowcharts. Database-mode only (case-flowchart storage has no mock/local
- * equivalent) — a local- id or a non-database read source shows a plain
- * "지원되지 않음" notice rather than attempting to resolve non-existent
- * mock data. canEdit is derived server-side from session role + repair-
+ * flowcharts. Database-mode only (case-flowchart storage has no mock
+ * equivalent) — a non-database read source shows a plain "지원되지 않음"
+ * notice rather than attempting to resolve non-existent mock data.
+ * canEdit is derived server-side from session role + repair-
  * case assignment/lock and passed down as a UX hint only — every mutation
  * the client calls independently re-verifies authority.
  */
 export default async function CaseFlowchartListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  if (isLocalId(id) || getAuthSource() !== "database") {
+  if (getAuthSource() !== "database") {
     return <p className="p-6 text-sm text-zinc-500 dark:text-zinc-400">진단 Flowchart는 데이터베이스 저장 모드에서만 사용할 수 있습니다.</p>;
   }
 

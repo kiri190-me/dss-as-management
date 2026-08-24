@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import ActivityTimelineScreen from "@/components/repair-cases/work-history/ActivityTimelineScreen";
-import LocalActivityContent from "@/components/repair-cases/work-history/LocalActivityContent";
 import DatabaseWorkHistoryScreen from "@/components/repair-cases/work-history/DatabaseWorkHistoryScreen";
 import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
@@ -17,10 +15,7 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 /**
- * Stage E-2: 이 화면은 mockWorkHistories뿐 아니라 로컬 워크플로/승인/첨부파일
- * 이벤트까지 하나의 타임라인으로 병합해야 하므로(3개 모두 클라이언트 전용
- * localStorage 소스) approval/files 페이지와 동일한 서버 분기 패턴을 따른다.
- * 이 스테이지는 쓰기 동작을 추가하지 않으므로 readSession()은 필요 없다.
+ * Stage E-2: 이 화면은 쓰기 동작을 추가하지 않으므로 readSession()은 필요 없다.
  *
  * Stage G-2 Batch 3: resolveMockRepairCaseById → resolveRepairCaseForServer로
  * 교체해 database 모드의 UUID도 이 탭에 도달할 수 있게 한다. mockWorkHistories/
@@ -41,10 +36,6 @@ export default async function WorkHistoryPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const { id } = await params;
-
-  if (isLocalId(id)) {
-    return <LocalActivityContent id={id} />;
-  }
 
   const resolved = await resolveRepairCaseForServer(id);
   // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는

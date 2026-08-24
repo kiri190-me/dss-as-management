@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
@@ -13,7 +12,6 @@ import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queri
 import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
-import LocalRepairCaseDetailContent from "@/components/repair-cases/detail/LocalRepairCaseDetailContent";
 
 export const metadata: Metadata = {
   title: "A/S 상세 | DSS A/S 관리 시스템",
@@ -38,10 +36,6 @@ export default async function RepairCaseDetailPage({
   }
 
   const actingUser: ActingUser | null = await resolveActingUserForSession(session);
-
-  if (isLocalId(id)) {
-    return <LocalRepairCaseDetailContent id={id} actingUser={actingUser} />;
-  }
 
   const resolved = await resolveRepairCaseForServer(id);
 

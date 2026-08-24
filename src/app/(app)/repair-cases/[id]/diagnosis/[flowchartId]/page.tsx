@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
@@ -27,7 +26,7 @@ export const dynamic = "force-dynamic";
 export default async function CaseFlowchartEditorPage({ params }: { params: Promise<{ id: string; flowchartId: string }> }) {
   const { id, flowchartId } = await params;
 
-  if (isLocalId(id) || getAuthSource() !== "database") {
+  if (getAuthSource() !== "database") {
     return <p className="p-6 text-sm text-zinc-500 dark:text-zinc-400">진단 Flowchart는 데이터베이스 저장 모드에서만 사용할 수 있습니다.</p>;
   }
 
