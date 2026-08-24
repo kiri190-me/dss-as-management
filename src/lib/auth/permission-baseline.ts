@@ -269,6 +269,17 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
           canPermanentlyDeleteRepairCases(role),
         read: false,
       });
+    case "repairCases.files":
+      // 첨부에는 아직 아무 역할 검사도 없다 — 지금 화면은 데모라서 로그인한
+      // 사람이면 누구나 목록을 보고 메타데이터를 등록한다. 그런 영역의 상한은
+      // "그 잎에서 의미 있는 가장 높은 수준"이다(이 파일 맨 위 주석). 낮춰
+      // 적으면 표를 만들었을 뿐인데 지금 되던 일이 막히는 셈이 된다.
+      //
+      // 실제 저장을 붙이는 다음 단계에서 attachment-authorization.ts 가 생기면
+      // 다른 잎들처럼 그 함수를 **호출해서** 구하도록 바꾼다. 이 노드를
+      // SETTINGS_ENFORCED_LEAVES 에 넣지 않은 것도 같은 이유다 — 아직 이
+      // 설정을 최종 관문으로 읽는 코드가 없어서, 넣으면 화면이 거짓말을 한다.
+      return ladder({ write: true, read: true });
     case "repairCases.procedureExecution":
       return ladder({
         manage: canReopenCompletedOrSkippedNode(role),

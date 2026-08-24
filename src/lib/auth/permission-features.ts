@@ -125,6 +125,19 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       levelHints: { MANAGE: "일괄 삭제, 휴지통 복원, 영구 삭제" },
       maxMeaningfulLevel: "MANAGE",
     },
+    files: {
+      // 접수 건에 붙는 사진·문서다. 분류(인수 사진 / 회로도 / 펌웨어 …)에 따라
+      // 열람을 나누지 않는다 — 분류별로 가르면 "회로도는 못 보는데 그 회로도가
+      // 들어 있는 점검 보고서는 보는" 조합이 만들어지고, 그 경계를 사람이
+      // 설명할 수도 지킬 수도 없다.
+      label: "파일 관리",
+      description: "접수 건에 붙은 사진·문서를 봅니다. 쓰기는 올리고 지우는 쪽입니다.",
+      levelHints: {
+        READ: "목록을 보고 내려받습니다",
+        WRITE: "올리고, 설명을 고치고, 휴지통으로 보내고 되살립니다",
+      },
+      maxMeaningfulLevel: "WRITE",
+    },
     procedureExecution: {
       // 절차 '문서'를 고치는 것은 기술 작업 절차 메뉴지만, 절차를 실제로 밟는
       // 일은 접수 건 화면에서 일어난다. 문서 쪽에 달아 두면 절차를 볼 수 없는

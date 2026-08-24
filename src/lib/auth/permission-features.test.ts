@@ -198,6 +198,38 @@ test("출하 대표자 지정은 최고관리자만이다", () => {
   }
 });
 
+test("파일 관리는 접수 건 아래의 잎이고, 분류별로 갈리지 않는다", () => {
+  // 첨부는 A/S 접수 건에만 붙는다(작업기록·결재 첨부는 만들지 않는다). 그래서
+  // 노드도 접수 건 아래 하나뿐이다.
+  assert.ok(isPermissionLeafKey("repairCases.files"));
+  assert.equal(areaKeyOfLeaf("repairCases.files"), "repairCases");
+
+  // 분류(회로도·펌웨어 …)별 차등 열람을 두지 않기로 한 승인된 결정이 여기
+  // 드러난다 — 분류마다 노드를 만들면 그 순간 정책이 갈라진다.
+  const files = featuresOfArea("repairCases").filter((feature) =>
+    feature.key.startsWith("repairCases.files")
+  );
+  assert.deepEqual(
+    files.map((feature) => feature.key),
+    ["repairCases.files"]
+  );
+
+  // 읽기는 보기·내려받기, 쓰기는 올리기·설명 수정·휴지통 삭제·복원까지다.
+  // 관리는 만들지 않는다 — 쓰기 위에 따로 열 조작이 없다.
+  assert.deepEqual(selectableLevelsOfLeaf("repairCases.files"), ["NONE", "READ", "WRITE"]);
+});
+
+test("파일 관리 상한은 아직 아무 역할도 막지 않는다 — 그리고 그 사실을 화면이 말한다", () => {
+  // 지금 첨부 화면에는 역할 검사가 하나도 없다. 상한을 낮춰 적으면 표를
+  // 만들었을 뿐인데 지금 되던 일이 막힌다.
+  for (const role of ROLE_CODES) {
+    assert.equal(baselineLeafLevel("repairCases.files", role), "WRITE", role);
+  }
+  // 실제 저장·인가가 붙기 전까지 이 설정은 최종 판정이 아니다. 전환됐다고
+  // 표시하면 관리자는 닫았다고 믿는데 실제로는 열려 있는 상태가 된다.
+  assert.equal(isSettingsEnforced("repairCases.files"), false);
+});
+
 test("절차 수행은 기술 작업 절차가 아니라 접수 건 아래에 있다", () => {
   // 절차 '문서'를 못 보는 역할도 접수 건에서는 절차를 밟는다. 문서 쪽에 달면
   // 그 역할에게 기술 작업 절차 메뉴가 통째로 열린다.
