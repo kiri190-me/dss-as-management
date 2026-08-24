@@ -5,7 +5,10 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isLocalId } from "@/lib/domain/local/local-types";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import { listAttachmentsForRepairCase } from "@/lib/db/queries/attachments";
+import {
+  listAttachmentsForRepairCase,
+  listTrashedAttachmentsForRepairCase,
+} from "@/lib/db/queries/attachments";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import FilesScreen from "@/components/repair-cases/files/FilesScreen";
 import LocalFilesContent from "@/components/repair-cases/files/LocalFilesContent";
@@ -53,10 +56,15 @@ export default async function RepairCaseFilesPage({
     return <FilesScreen resolved={resolved} actingUser={actingUser} />;
   }
 
-  const attachments = await listAttachmentsForRepairCase(resolved.id);
-  // 화면이 올리기 칸을 보일지 말지. 실제 판정은 업로드 라우트가 자기 쪽에서
-  // 다시 한다 — 여기서 숨기는 것은 눌러도 막히는 버튼을 내밀지 않기 위해서다.
-  const canUpload = actingUser
+  const [attachments, trashedAttachments] = await Promise.all([
+    listAttachmentsForRepairCase(resolved.id),
+    listTrashedAttachmentsForRepairCase(resolved.id),
+  ]);
+
+  // 화면이 올리기 칸과 지우기·되살리기 버튼을 보일지 말지. 실제 판정은 업로드
+  // 라우트와 서버 액션이 각자 다시 한다 — 여기서 숨기는 것은 눌러도 막히는
+  // 버튼을 내밀지 않기 위해서다.
+  const canManageFiles = actingUser
     ? await hasPermission(actingUser.role, "repairCases.files", "WRITE")
     : false;
 
@@ -65,7 +73,9 @@ export default async function RepairCaseFilesPage({
       resolved={resolved}
       actingUser={actingUser}
       attachments={attachments}
-      canUpload={canUpload}
+      trashedAttachments={trashedAttachments}
+      canUpload={canManageFiles}
+      canManage={canManageFiles}
     />
   );
 }

@@ -36,7 +36,16 @@ import {
   isExtensionAllowedForCategory,
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
-import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
+import type {
+  RepairCaseAttachmentListItem,
+  TrashedAttachmentListItem,
+} from "@/lib/db/queries/attachments";
+// 데모 계층에도 같은 이름의 함수가 있어 별칭을 붙인다 — 이름이 같지만 하는 일이
+// 다르다(한쪽은 브라우저 저장소, 한쪽은 실제 DB).
+import {
+  restoreAttachmentAction,
+  softDeleteAttachmentAction,
+} from "@/lib/server/actions/attachments";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import AttachmentCardList from "./AttachmentCardList";
 import AttachmentEventTimeline from "./AttachmentEventTimeline";
@@ -79,7 +88,11 @@ export default function FilesScreen(props: {
   actingUser: ActingUser | null;
   /** 서버가 attachments 표에서 조회한 목록. 이 값이 있으면 실제 저장 화면이다. */
   attachments?: RepairCaseAttachmentListItem[];
+  /** 휴지통에 든 첨부. 별도 조회다(queries/attachments.ts — 부분 인덱스). */
+  trashedAttachments?: TrashedAttachmentListItem[];
   canUpload?: boolean;
+  /** 지우기·되살리기를 보일지. 실제 차단은 서버 액션이 다시 한다. */
+  canManage?: boolean;
 }) {
   if (props.attachments) {
     return (
@@ -87,7 +100,9 @@ export default function FilesScreen(props: {
         resolved={props.resolved}
         actingUser={props.actingUser}
         attachments={props.attachments}
+        trashedAttachments={props.trashedAttachments ?? []}
         canUpload={props.canUpload ?? false}
+        canManage={props.canManage ?? false}
       />
     );
   }
@@ -120,12 +135,16 @@ function DatabaseFilesScreen({
   resolved,
   actingUser,
   attachments,
+  trashedAttachments,
   canUpload,
+  canManage,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
   attachments: RepairCaseAttachmentListItem[];
+  trashedAttachments: TrashedAttachmentListItem[];
   canUpload: boolean;
+  canManage: boolean;
 }) {
   const router = useRouter();
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
@@ -135,6 +154,59 @@ function DatabaseFilesScreen({
   const [description, setDescription] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+
+  // 지우기·되살리기 다이얼로그. 데모 화면이 쓰던 컴포넌트를 그대로 재사용한다.
+  const [pendingDelete, setPendingDelete] = useState<RepairCaseAttachmentListItem | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<TrashedAttachmentListItem | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
+
+  async function handleDeleteConfirm(reason: string) {
+    if (!pendingDelete) return;
+    setIsMutating(true);
+    setStatusMessage(null);
+    try {
+      const result = await softDeleteAttachmentAction({
+        attachmentId: pendingDelete.id,
+        repairCaseId: resolved.id,
+        reason,
+      });
+      if (!result.ok) {
+        setStatusMessage({ type: "error", text: result.message });
+        return;
+      }
+      setStatusMessage({
+        type: "success",
+        // 실물이 남는다는 사실을 그때 알려 준다 — 되살릴 수 있다는 뜻이고,
+        // 완전히 사라진 줄 알고 다시 올리는 일을 막는다.
+        text: `${pendingDelete.originalFileName} 을(를) 휴지통으로 옮겼습니다. 되살릴 수 있습니다.`,
+      });
+      setPendingDelete(null);
+      router.refresh();
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function handleRestoreConfirm() {
+    if (!pendingRestore) return;
+    setIsMutating(true);
+    setStatusMessage(null);
+    try {
+      const result = await restoreAttachmentAction({
+        attachmentId: pendingRestore.id,
+        repairCaseId: resolved.id,
+      });
+      if (!result.ok) {
+        setStatusMessage({ type: "error", text: result.message });
+        return;
+      }
+      setStatusMessage({ type: "success", text: `${pendingRestore.originalFileName} 을(를) 되살렸습니다.` });
+      setPendingRestore(null);
+      router.refresh();
+    } finally {
+      setIsMutating(false);
+    }
+  }
 
   const allowedExtensions = useMemo(() => allowedExtensionsFor(category), [category]);
   const acceptAttribute = useMemo(
@@ -326,6 +398,7 @@ function DatabaseFilesScreen({
                 <th scope="col" className="px-3 py-2 font-medium">검사</th>
                 <th scope="col" className="px-3 py-2 font-medium">올린 사람</th>
                 <th scope="col" className="px-3 py-2 font-medium">올린 시각</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">작업</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -350,6 +423,32 @@ function DatabaseFilesScreen({
                   <td className="px-3 py-2 whitespace-nowrap text-zinc-700 dark:text-zinc-300">
                     {formatTimestamp(item.uploadedAt)}
                   </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {/*
+                        평범한 링크다. fetch로 받아 Blob을 만들면 파일 전체가
+                        브라우저 메모리에 올라가고, 서버가 붙여 준
+                        Content-Disposition의 원본 파일명도 잃는다. 링크는
+                        브라우저가 스트림 그대로 디스크에 흘려 준다.
+                      */}
+                      <a
+                        href={`/api/attachments/${item.id}/download`}
+                        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        내려받기
+                      </a>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingDelete(item)}
+                          disabled={isMutating}
+                          className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
+                        >
+                          지우기
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -357,10 +456,66 @@ function DatabaseFilesScreen({
         </div>
       )}
 
+      {trashedAttachments.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            휴지통 <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">({trashedAttachments.length}건)</span>
+          </h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            지운 파일은 실물이 그대로 남아 있어 언제든 되살릴 수 있습니다.
+          </p>
+          <ul className="flex flex-col gap-2">
+            {trashedAttachments.map((item) => (
+              <li
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <div className="min-w-0">
+                  <span className="block truncate text-sm text-zinc-700 line-through dark:text-zinc-400">
+                    {item.originalFileName}
+                  </span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                    {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)} ·{" "}
+                    {formatTimestamp(item.deletedAt)}
+                    {item.deletedByName ? ` · ${item.deletedByName}` : ""}
+                    {item.deleteReason ? ` · ${item.deleteReason}` : ""}
+                  </span>
+                </div>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingRestore(item)}
+                    disabled={isMutating}
+                    className="shrink-0 rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  >
+                    되살리기
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        내려받기와 미리보기는 아직 연결되지 않았습니다. 악성코드 검사기도 아직 없어 모든 파일은 &ldquo;미검사&rdquo;로
-        남습니다.
+        미리보기 이미지 생성은 아직 연결되지 않았습니다. 악성코드 검사기도 아직 없어 모든 파일은 &ldquo;미검사&rdquo;로
+        남습니다 — 그 상태에서도 내려받을 수 있습니다.
       </p>
+
+      <DeleteAttachmentDialog
+        isOpen={pendingDelete !== null}
+        displayName={pendingDelete?.originalFileName ?? ""}
+        isSubmitting={isMutating}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setPendingDelete(null)}
+      />
+      <RestoreAttachmentDialog
+        isOpen={pendingRestore !== null}
+        displayName={pendingRestore?.originalFileName ?? ""}
+        isSubmitting={isMutating}
+        onConfirm={handleRestoreConfirm}
+        onCancel={() => setPendingRestore(null)}
+      />
     </div>
   );
 }

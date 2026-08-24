@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, desc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { attachments, repairCases, users } from "../schema";
 import type { AttachmentCategory, MalwareScanStatus } from "@/lib/domain/attachment-category";
@@ -15,9 +16,12 @@ import type { AttachmentCategory, MalwareScanStatus } from "@/lib/domain/attachm
  * 탄다 — 조건에서 is_deleted를 빼거나 다른 식으로 적으면 인덱스가 빠지고,
  * 휴지통 행까지 훑는 조회가 된다.
  *
- * 휴지통(is_deleted = true) 목록은 이번 단계에서 만들지 않는다. 삭제·복원
- * 통로 자체가 아직 없어서(이번 단계는 업로드와 목록까지다), 보여 줄 수는
- * 있지만 되돌릴 수 없는 화면이 된다.
+ * 휴지통(is_deleted = true) 목록은 **별도 함수**다
+ * (listTrashedAttachmentsForRepairCase). 위 조회에 플래그를 받아 조건을
+ * 분기시키지 않는 이유는 부분 인덱스다 — `is_deleted = false`를 변수로 바꾸면
+ * 그 인덱스를 탈 수 없게 되고, 매번 쓰이는 목록 조회가 휴지통 행까지 훑는
+ * 조회로 바뀐다. 자주 쓰이는 길과 드물게 쓰이는 길을 한 함수에 합치면 드문
+ * 쪽의 비용이 자주 쓰이는 쪽에 얹힌다.
  *
  * ── 업로더 이름은 스냅샷이 아니라 조인이다 ──────────────────────────────
  * attachments 행에는 uploaded_by(UUID)만 있고 이름은 없다. 이름을 행에 복사해
@@ -74,6 +78,63 @@ export async function listAttachmentsForRepairCase(
   return rows.map((row) => ({
     ...row,
     uploadedAt: row.uploadedAt.toISOString(),
+  }));
+}
+
+export type TrashedAttachmentListItem = RepairCaseAttachmentListItem & {
+  /** 휴지통에 넣은 시각. 복원 화면이 "언제 지웠는지"를 보여 주기 위한 것이다. */
+  deletedAt: string;
+  /** 지운 사람 이름. 지운 계정이 사라지지 않도록 deleted_by는 ON DELETE RESTRICT다. */
+  deletedByName: string | null;
+  deleteReason: string | null;
+};
+
+/**
+ * 휴지통에 든 첨부. 위 목록 조회와 **일부러 분리했다**(파일 상단 주석 — 부분
+ * 인덱스).
+ *
+ * `deleted_by`는 nullable이라 LEFT JOIN이다. 정상 경로로는 항상 채워지지만,
+ * 옛 데이터나 손으로 넣은 행에 비어 있을 수 있고 그 경우 이름 없이라도
+ * 목록에 나와야 한다 — 복원할 수 없는 행이 화면에서 사라지면 되살릴 방법이 없다.
+ */
+export async function listTrashedAttachmentsForRepairCase(
+  repairCaseId: string
+): Promise<TrashedAttachmentListItem[]> {
+  if (!UUID_PATTERN.test(repairCaseId)) return [];
+
+  const deleter = alias(users, "deleter");
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      category: attachments.category,
+      originalFileName: attachments.originalFileName,
+      storedPath: attachments.storedPath,
+      mimeType: attachments.mimeType,
+      fileSize: attachments.fileSize,
+      checksumSha256: attachments.checksumSha256,
+      malwareScanStatus: attachments.malwareScanStatus,
+      description: attachments.description,
+      uploadedById: attachments.uploadedBy,
+      uploadedByName: users.name,
+      uploadedAt: attachments.uploadedAt,
+      deletedAt: attachments.deletedAt,
+      deletedByName: deleter.name,
+      deleteReason: attachments.deleteReason,
+    })
+    .from(attachments)
+    .innerJoin(users, eq(users.id, attachments.uploadedBy))
+    .leftJoin(deleter, eq(deleter.id, attachments.deletedBy))
+    .where(and(eq(attachments.repairCaseId, repairCaseId), eq(attachments.isDeleted, true)))
+    .orderBy(desc(attachments.deletedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    uploadedAt: row.uploadedAt.toISOString(),
+    // is_deleted = true 인 행이므로 deleted_at 은 채워져 있다. 만약 비어 있다면
+    // 그건 데이터가 어긋난 것이고, 화면이 빈 값으로 깨지지 않게 올린 시각으로
+    // 대신한다(복원은 여전히 가능해야 한다).
+    deletedAt: (row.deletedAt ?? row.uploadedAt).toISOString(),
   }));
 }
 
