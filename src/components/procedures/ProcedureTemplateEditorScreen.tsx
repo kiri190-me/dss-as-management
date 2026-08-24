@@ -302,7 +302,18 @@ export default function ProcedureTemplateEditorScreen({
     for (const [id, points] of pendingEdgeRouteMoves) map.set(id, points);
     return map;
   }, [savedEdgeRoutes, pendingEdgeRouteMoves]);
-  const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
+  /**
+   * A waypoint selection only ever makes sense for the currently-selected
+   * edge, so the edge it belongs to is stored *with* the index and the index
+   * itself is derived at render time. Nothing has to clear it after the fact:
+   * the instant the selected edge changes (or is cleared) the stored edgeId
+   * stops matching and the derived index is already null, so a stale index
+   * can never point at the wrong edge's route array — not even for the one
+   * render an after-the-fact reset would have left it wrong.
+   */
+  const [selectedWaypoint, setSelectedWaypoint] = useState<{ edgeId: string; index: number } | null>(null);
+  const selectedWaypointIndex: number | null =
+    selectedWaypoint && selectedWaypoint.edgeId === selectedEdgeId ? selectedWaypoint.index : null;
 
   // ---- 5C-6D-1C: node/edge SAFE-FIELD pending drafts ----
   const [pendingNodeFieldDraftsById, setPendingNodeFieldDraftsById] = useState<Map<string, ProcedureNodeFieldDraft>>(new Map());
@@ -509,13 +520,6 @@ export default function ProcedureTemplateEditorScreen({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasAnyPendingChanges]);
 
-  // A waypoint selection only ever makes sense for the currently-selected
-  // edge — switching (or clearing) the selected edge always clears it, so
-  // a stale index can never point at the wrong edge's route array.
-  useEffect(() => {
-    setSelectedWaypointIndex(null);
-  }, [selectedEdgeId]);
-
   function handleSaved(newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) {
     setCurrentUpdatedAt(newUpdatedAt);
     if (structuralValidation) setLastStructuralValidation(structuralValidation);
@@ -638,7 +642,7 @@ export default function ProcedureTemplateEditorScreen({
       });
     }
     setSelectedEdgeId(null);
-    setSelectedWaypointIndex(null);
+    setSelectedWaypoint(null);
     handleSaved(newUpdatedAt);
   }
 
@@ -834,7 +838,7 @@ export default function ProcedureTemplateEditorScreen({
     // justSaved shadows built above become redundant the instant this
     // refresh lands and are cleared by the adjust-state-during-render
     // block at the top of this component.
-    setSelectedWaypointIndex(null);
+    setSelectedWaypoint(null);
     setGlobalSaveStatus("saved");
     // 저장에 성공한 변경은 이제 서버 이력의 몫이다 — 클라이언트 스택을 비워
     // 같은 변경이 두 체계에 중복으로 남지 않게 한다([이전]을 누르면 서버
@@ -856,7 +860,7 @@ export default function ProcedureTemplateEditorScreen({
     setPendingEdgeSaveNoteById(new Map());
     setPendingLayoutMoves(new Map());
     setPendingEdgeRouteMoves(new Map());
-    setSelectedWaypointIndex(null);
+    setSelectedWaypoint(null);
     setGlobalSaveStatus("idle");
     setGlobalSaveError(null);
   }
@@ -969,9 +973,11 @@ export default function ProcedureTemplateEditorScreen({
       // 했다면 상태가 그대로라, 그 단계는 [이전]을 누를 때 조용히 버려진다
       // (undo-stack.ts의 "헛도는 단계는 건너뛴다" 규칙).
       if (index !== null) pushPendingUndoStep();
-      setSelectedWaypointIndex(index);
+      // The selection is stored with the edge it belongs to (see selectedWaypoint
+      // above) — with no selected edge there is no edge for it to belong to.
+      setSelectedWaypoint(index === null || !selectedEdgeId ? null : { edgeId: selectedEdgeId, index });
     },
-    [pushPendingUndoStep]
+    [pushPendingUndoStep, selectedEdgeId]
   );
 
   const handleWaypointMove = useCallback(
@@ -1074,7 +1080,7 @@ export default function ProcedureTemplateEditorScreen({
       next.set(selectedEdgeId, removeWaypoint(currentWorkingRoutePoints(prev, selectedEdgeId), selectedWaypointIndex));
       return next;
     });
-    setSelectedWaypointIndex(null);
+    setSelectedWaypoint(null);
   }, [selectedEdgeId, selectedWaypointIndex, savedEdgeRoutes, pushPendingUndoStep]);
 
   /** "자동 경로로 초기화" — explicit restore, discoverable beyond deleting every point one at a time. Unchanged from before 1C. */
@@ -1085,7 +1091,7 @@ export default function ProcedureTemplateEditorScreen({
       next.set(edgeId, null);
       return next;
     });
-    setSelectedWaypointIndex(null);
+    setSelectedWaypoint(null);
   }, [pushPendingUndoStep]);
 
   // Delete/Backspace removes the selected waypoint — only when a waypoint
