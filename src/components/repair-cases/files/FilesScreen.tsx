@@ -47,6 +47,7 @@ import {
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
 import LoadingNotice from "@/components/domain/LoadingNotice";
+import InAppCamera from "./InAppCamera";
 import AttachmentCardList from "./AttachmentCardList";
 import AttachmentEventTimeline from "./AttachmentEventTimeline";
 import AttachmentFilters from "./AttachmentFilters";
@@ -155,6 +156,28 @@ function DatabaseFilesScreen({
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
 
+  /**
+   * 찍었지만 아직 올리지 않은 사진들.
+   *
+   * 현장에서는 파형·외관을 여러 장 연달아 찍고 나서 **그중 잘 나온 것만**
+   * 올린다. 찍는 즉시 올라가면 흔들린 사진까지 서버에 남고, 지우려면 휴지통을
+   * 거쳐야 한다. 그래서 찍은 것을 여기 모아 두고, 사용자가 고른 것만 보낸다.
+   *
+   * previewUrl은 objectURL이다. 브라우저 메모리를 잡고 있으므로 버릴 때
+   * revokeObjectURL로 반드시 놓아 준다 — 안 놓으면 여러 장 찍고 버리기를
+   * 반복하는 동안 계속 쌓인다.
+   */
+  type StagedPhoto = { id: string; file: File; previewUrl: string; selected: boolean };
+  const [stagedPhotos, setStagedPhotos] = useState<StagedPhoto[]>([]);
+
+  /**
+   * 앱 안 카메라를 쓸 수 없다고 판정됐을 때의 이유. 그때는 파일 입력으로
+   * 안내한다 — 카메라가 안 열려도 사진을 올릴 길은 남아 있어야 한다.
+   */
+  const [cameraUnavailableReason, setCameraUnavailableReason] = useState<string | null>(null);
+  /** 여러 장을 차례로 올릴 때 몇 장째인지. 한 장일 때는 null이라 표시하지 않는다. */
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+
   // 지우기·되살리기 다이얼로그. 데모 화면이 쓰던 컴포넌트를 그대로 재사용한다.
   const [pendingDelete, setPendingDelete] = useState<RepairCaseAttachmentListItem | null>(null);
   const [pendingRestore, setPendingRestore] = useState<TrashedAttachmentListItem | null>(null);
@@ -213,49 +236,104 @@ function DatabaseFilesScreen({
     () => allowedExtensions.map((extension) => `.${extension}`).join(","),
     [allowedExtensions]
   );
+  /**
+   * 이 분류가 사진을 받는가 — 받을 때만 촬영 입력을 내민다.
+   *
+   * 촬영으로 들어오는 파일은 브라우저가 정하고(보통 jpg), 확장자를 고를 수
+   * 없다. 그래서 사진을 아예 안 받는 분류(펌웨어·로그 등)에 촬영 버튼을 두면
+   * 찍는 순간까지 갔다가 거절당한다 — 그 앞에서 감춘다.
+   */
+  const cameraSupported = useMemo(
+    () => allowedExtensions.includes("jpg") || allowedExtensions.includes("jpeg"),
+    [allowedExtensions]
+  );
   const totalBytes = useMemo(
     () => attachments.reduce((sum, item) => sum + item.fileSize, 0),
     [attachments]
   );
+  const selectedPhotoCount = useMemo(
+    () => stagedPhotos.filter((photo) => photo.selected).length,
+    [stagedPhotos]
+  );
+
+  /**
+   * 한 장 찍을 때마다 여기로 들어온다.
+   *
+   * 입력을 곧바로 비우는 것이 핵심이다. 파일 입력은 같은 값이 다시 들어오면
+   * change가 울리지 않으므로, 비우지 않으면 **같은 장면을 두 번째로 찍었을 때
+   * 아무 일도 일어나지 않는다.**
+   */
+  /** 카메라가 한 장 찍을 때마다, 또는 파일 입력으로 사진이 들어올 때마다. */
+  function stagePhoto(file: File) {
+    // 앨범에서 고른 파일과 섞이지 않게 한다 — 무엇을 올리는지 화면만 보고
+    // 알 수 없게 되는 것을 막는다.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    setStagedPhotos((previous) => [
+      ...previous,
+      {
+        id: `${Date.now()}-${previous.length}-${file.size}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        // 찍었다면 올릴 뜻이 있었다고 본다. 뺄 사람이 빼는 편이 낫다.
+        selected: true,
+      },
+    ]);
+    setStatusMessage(null);
+  }
+
+  function togglePhotoSelected(id: string) {
+    setStagedPhotos((previous) =>
+      previous.map((photo) => (photo.id === id ? { ...photo, selected: !photo.selected } : photo))
+    );
+  }
+
+  function setAllPhotosSelected(selected: boolean) {
+    setStagedPhotos((previous) => previous.map((photo) => ({ ...photo, selected })));
+  }
+
+  /** 목록에서 없앤다. 서버에 올라간 것과는 무관하다. */
+  function discardPhoto(id: string) {
+    setStagedPhotos((previous) => {
+      const target = previous.find((photo) => photo.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return previous.filter((photo) => photo.id !== id);
+    });
+  }
+
+  function discardAllPhotos() {
+    setStagedPhotos((previous) => {
+      for (const photo of previous) URL.revokeObjectURL(photo.previewUrl);
+      return [];
+    });
+  }
 
   if (!isHydrated || !effective) {
     return <LoadingNotice />;
   }
 
-  async function handleUpload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
-      setStatusMessage({ type: "error", text: "올릴 파일을 선택해 주세요." });
-      return;
-    }
-
-    // 화면에서도 한 번 걸러 준다. 진짜 판정은 서버가 다시 하지만, 20MB짜리를
-    // 다 보내고 나서 거절당하는 것보다는 보내기 전에 아는 편이 낫다.
+  /**
+   * 한 장을 보내기 전에 화면에서 걸러 낸다. 진짜 판정은 서버가 다시 하지만,
+   * 20MB짜리를 다 보내고 나서 거절당하는 것보다는 보내기 전에 아는 편이 낫다.
+   *
+   * 여러 장을 올릴 때는 이 판정이 **한 장씩** 따로 돌아야 한다. 미리 전체를
+   * 검사해서 한 장이라도 틀리면 묶음 전체를 거절하면, 열 장 중 한 장이
+   * 안 되는 형식일 때 나머지 아홉 장까지 못 올린다.
+   */
+  function rejectionReasonFor(file: File): string | null {
     const extension = normalizeFileExtension(file.name);
     if (!extension || !isExtensionAllowedForCategory(extension, category)) {
-      setStatusMessage({
-        type: "error",
-        text: `'${attachmentCategoryLabels[category]}' 분류에는 ${allowedExtensions
-          .map((value) => `.${value}`)
-          .join(", ")} 만 올릴 수 있습니다.`,
-      });
-      return;
+      return `'${attachmentCategoryLabels[category]}' 분류가 받지 않는 형식`;
     }
-    if (file.size === 0) {
-      setStatusMessage({ type: "error", text: "빈 파일은 올릴 수 없습니다." });
-      return;
-    }
+    if (file.size === 0) return "빈 파일";
     if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
-      setStatusMessage({
-        type: "error",
-        text: `파일이 ${formatBytes(MAX_ATTACHMENT_SIZE_BYTES)}를 넘습니다. (선택한 파일 ${formatBytes(file.size)})`,
-      });
-      return;
+      return `${formatBytes(MAX_ATTACHMENT_SIZE_BYTES)} 초과 (${formatBytes(file.size)})`;
     }
+    return null;
+  }
 
-    setIsUploading(true);
-    setStatusMessage(null);
+  /** 한 장을 실제로 보낸다. 실패하면 사람이 읽을 수 있는 이유를 돌려준다. */
+  async function uploadOne(file: File): Promise<{ ok: true } | { ok: false; reason: string }> {
     try {
       // 본문은 파일 바이트 그 자체이고 메타데이터는 쿼리 문자열이다 —
       // multipart로 보내면 서버가 파일 전체를 메모리에 올려야 한다
@@ -270,22 +348,125 @@ function DatabaseFilesScreen({
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        setStatusMessage({
-          type: "error",
-          text: payload?.error ?? "파일을 올리지 못했습니다. 잠시 후 다시 시도해 주세요.",
-        });
-        return;
+        return { ok: false, reason: payload?.error ?? "서버가 거절했습니다" };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: "네트워크 문제" };
+    }
+  }
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    // 찍어 모아 둔 사진이 있으면 그중 **고른 것만** 보낸다. 앨범에서 고른
+    // 파일은 그것이 없을 때만 쓴다 — 두 경로를 한 번에 섞어 보내면 사용자가
+    // 무엇을 올렸는지 화면만 보고 알 수 없다.
+    const chosenPhotos = stagedPhotos.filter((photo) => photo.selected);
+    const fromCamera = stagedPhotos.length > 0;
+    const files = fromCamera
+      ? chosenPhotos.map((photo) => photo.file)
+      : Array.from(fileInputRef.current?.files ?? []);
+
+    if (files.length === 0) {
+      setStatusMessage({
+        type: "error",
+        text: fromCamera
+          ? "올릴 사진을 하나 이상 골라 주세요."
+          : "올릴 파일을 선택하거나 사진을 촬영해 주세요.",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    setStatusMessage(null);
+    setUploadProgress(null);
+
+    // 한 장씩 차례로 보낸다. 동시에 쏘면 서버가 같은 접수 건에 여러 파일을
+    // 나란히 쓰게 되고, 어디까지 됐는지 사용자에게 보여 줄 방법도 없어진다.
+    const failures: { name: string; reason: string }[] = [];
+    // 실제로 올라간 사진의 id — 이것만 모아 둔 목록에서 뺀다. 실패한 것은
+    // 남겨서 다시 시도할 수 있게 한다.
+    const uploadedPhotoIds: string[] = [];
+    let uploaded = 0;
+
+    try {
+      for (const [index, file] of files.entries()) {
+        if (files.length > 1) {
+          setUploadProgress({ current: index + 1, total: files.length });
+        }
+
+        const rejection = rejectionReasonFor(file);
+        if (rejection) {
+          failures.push({ name: file.name, reason: rejection });
+          continue;
+        }
+
+        const result = await uploadOne(file);
+        if (result.ok) {
+          uploaded += 1;
+          if (fromCamera) uploadedPhotoIds.push(chosenPhotos[index].id);
+        } else {
+          failures.push({ name: file.name, reason: result.reason });
+        }
       }
 
-      setStatusMessage({ type: "success", text: `"${file.name}"을(를) 올렸습니다.` });
-      setDescription("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      // 목록은 서버가 만든다 — 화면에서 지어내지 않고 다시 받아 온다.
-      router.refresh();
+      // 이미 올라간 것은 되돌리지 않는다 — 실제로 저장된 파일이고, 지우고
+      // 싶으면 휴지통이 있다. 몇 장이 왜 빠졌는지는 그대로 말해 준다.
+      if (uploadedPhotoIds.length > 0) {
+        setStagedPhotos((previous) => {
+          for (const photo of previous) {
+            if (uploadedPhotoIds.includes(photo.id)) URL.revokeObjectURL(photo.previewUrl);
+          }
+          return previous.filter((photo) => !uploadedPhotoIds.includes(photo.id));
+        });
+      }
+
+      if (uploaded > 0 && failures.length === 0) {
+        const remaining = stagedPhotos.length - uploadedPhotoIds.length;
+        setStatusMessage({
+          type: "success",
+          text: fromCamera
+            ? `사진 ${uploaded}장을 올렸습니다.${remaining > 0 ? ` 고르지 않은 ${remaining}장은 그대로 있습니다.` : ""}`
+            : files.length === 1
+              ? `"${files[0].name}"을(를) 올렸습니다.`
+              : `${uploaded}장을 모두 올렸습니다.`,
+        });
+      } else if (uploaded > 0) {
+        setStatusMessage({
+          type: "error",
+          text: `${uploaded}장을 올렸고 ${failures.length}장은 빠졌습니다 — ${failures
+            .map((item) => `${item.name}(${item.reason})`)
+            .join(", ")}`,
+        });
+      } else {
+        setStatusMessage({
+          type: "error",
+          text:
+            failures.length === 1
+              ? `${failures[0].name}: ${failures[0].reason}`
+              : `${failures.length}장 모두 올리지 못했습니다 — ${failures
+                  .map((item) => `${item.name}(${item.reason})`)
+                  .join(", ")}`,
+        });
+      }
+
+      if (uploaded > 0) {
+        // 설명은 비운다 — 사진마다 다른 내용을 적는 칸이다. 분류는 그대로 두어
+        // 연달아 올릴 때 매번 다시 고르지 않게 한다(state가 따로라 유지된다).
+        setDescription("");
+        // 앨범에서 고른 파일은 비운다. 안 비우면 다음 업로드가 방금 올린 파일을
+        // 다시 집어 같은 파일이 두 번 올라간다. (촬영 쪽은 위에서 올라간 것만
+        // 골라 뺐고, 입력 자체는 촬영 때마다 이미 비워진다.)
+        if (!fromCamera && fileInputRef.current) fileInputRef.current.value = "";
+        // 목록은 서버가 만든다 — 화면에서 지어내지 않고 다시 받아 온다.
+        router.refresh();
+      }
     } catch {
-      setStatusMessage({ type: "error", text: "네트워크 문제로 파일을 올리지 못했습니다." });
+      setStatusMessage({ type: "error", text: "파일을 올리는 중 문제가 생겼습니다." });
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -332,16 +513,146 @@ function DatabaseFilesScreen({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">파일</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">파일 (여러 개 선택 가능)</span>
+              {/*
+                multiple은 앨범에서 여러 장을 한 번에 고르는 경로다. 폰 기본
+                카메라로 여러 장 찍어 둔 뒤 앨범에서 골라 올리는 것이 현장에서
+                가장 흔한 방식이라, 촬영 입력(한 장씩)과 함께 둔다.
+              */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept={acceptAttribute}
+                multiple
                 disabled={isUploading}
+                onChange={() => {
+                  // 찍어 모아 둔 사진이 있으면 그쪽이 우선이라(handleUpload),
+                  // 앨범에서 고른 파일이 조용히 무시된다. 그 사실을 미리 알린다.
+                  if (stagedPhotos.length > 0) {
+                    setStatusMessage({
+                      type: "error",
+                      text: "찍어 둔 사진이 있어 그쪽이 먼저 올라갑니다. 앨범에서 고른 파일을 올리려면 찍은 사진을 먼저 올리거나 버려 주세요.",
+                    });
+                  }
+                }}
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
           </div>
+
+          {cameraSupported && (
+            <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">휴대폰으로 바로 촬영</span>
+              {/*
+                파일 입력(capture)이 아니라 앱 안에서 도는 카메라다. 그 이유는
+                InAppCamera.tsx 헤더에 적었다 — 요약하면 파일 입력 방식은
+                확인을 누를 때마다 카메라가 닫혀서 두 장에서 멈춘다.
+              */}
+              <InAppCamera
+                onCapture={stagePhoto}
+                disabled={isUploading}
+                onUnavailable={setCameraUnavailableReason}
+              />
+
+              {cameraUnavailableReason && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  {cameraUnavailableReason} 폰 기본 카메라로 찍은 뒤 위의 <strong>파일</strong> 칸에서 여러 장을 골라
+                  올리셔도 됩니다.
+                </p>
+              )}
+
+              {stagedPhotos.length > 0 && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                      찍은 사진 {stagedPhotos.length}장 · 올릴 것 {selectedPhotoCount}장
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAllPhotosSelected(true)}
+                        disabled={isUploading}
+                        className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
+                      >
+                        전체 선택
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAllPhotosSelected(false)}
+                        disabled={isUploading}
+                        className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
+                      >
+                        전체 해제
+                      </button>
+                      <button
+                        type="button"
+                        onClick={discardAllPhotos}
+                        disabled={isUploading}
+                        className="text-xs text-red-700 underline disabled:opacity-50 dark:text-red-400"
+                      >
+                        전부 버리기
+                      </button>
+                    </div>
+                  </div>
+
+                  <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                    {stagedPhotos.map((photo, index) => (
+                      <li key={photo.id} className="relative">
+                        {/*
+                          라벨 전체가 누를 수 있는 영역이다 — 폰에서 작은
+                          체크박스만 겨냥하게 하면 장갑 낀 손으로 못 누른다.
+                        */}
+                        <label
+                          className={`block cursor-pointer overflow-hidden rounded-md border-2 ${
+                            photo.selected
+                              ? "border-zinc-900 dark:border-zinc-50"
+                              : "border-zinc-200 opacity-60 dark:border-zinc-800"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={photo.selected}
+                            disabled={isUploading}
+                            onChange={() => togglePhotoSelected(photo.id)}
+                            className="sr-only"
+                          />
+                          {/*
+                            objectURL 미리보기다. next/image를 쓰지 않는 이유는
+                            이 주소가 서버에 없는 블롭이라 최적화 대상이 아니고,
+                            버릴 때 revokeObjectURL로 직접 놓아 줘야 하기 때문이다.
+                          */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={photo.previewUrl}
+                            alt={`찍은 사진 ${index + 1}장째`}
+                            className="aspect-square w-full bg-zinc-100 object-cover dark:bg-zinc-800"
+                          />
+                          <span className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-zinc-600 dark:text-zinc-400">
+                            <span>{photo.selected ? "올림" : "제외"}</span>
+                            <span className="tabular-nums">{formatBytes(photo.file.size)}</span>
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => discardPhoto(photo.id)}
+                          disabled={isUploading}
+                          aria-label={`${index + 1}장째 사진 버리기`}
+                          className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
+                        >
+                          버리기
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    누르면 올릴 사진에서 넣고 뺄 수 있습니다. <strong>버리기</strong>는 이 자리에서만 없애는 것이고,
+                    이미 올라간 파일과는 무관합니다.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">설명 (선택)</span>
@@ -357,6 +668,11 @@ function DatabaseFilesScreen({
           </label>
 
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            여러 장을 한 번에 고르면 <strong>분류와 설명이 모두에 똑같이</strong> 붙습니다. 장마다 다르게 적으려면
+            나눠 올리세요.
+          </p>
+
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
             최대 {formatBytes(MAX_ATTACHMENT_SIZE_BYTES)} · 허용 형식{" "}
             {allowedExtensions.map((extension) => `.${extension}`).join(", ")}
           </p>
@@ -367,7 +683,13 @@ function DatabaseFilesScreen({
               disabled={isUploading}
               className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
             >
-              {isUploading ? "올리는 중…" : "올리기"}
+              {isUploading
+                ? uploadProgress
+                  ? `올리는 중… ${uploadProgress.total}장 중 ${uploadProgress.current}장째`
+                  : "올리는 중…"
+                : stagedPhotos.length > 0
+                  ? `고른 ${selectedPhotoCount}장 올리기`
+                  : "올리기"}
             </button>
           </div>
         </form>
