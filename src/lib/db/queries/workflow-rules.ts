@@ -171,15 +171,17 @@ export function findTransitionInRules(
 }
 
 /**
- * manual-step-options.ts(TS 표 기반)의 DB판. 규칙은 그 파일과 동일하다:
+ * 단계를 직접 변경할 때 고를 수 있는 후보 목록. 규칙은 둘이다:
  *   - 승인 게이트가 걸린 단계는 제외한다. 열어두면 최종 출하 승인·수리 검수
  *     승인을 건너뛰고 도달할 수 있어 승인 절차가 무력화된다. 제외 대상은
  *     하드코딩하지 않고 전이의 required_approval_type에서 매번 산출하므로,
  *     승인 요건이 바뀌면 후보 목록도 자동으로 따라간다.
  *   - 상태가 없는 단계는 애초에 rules.steps에 들어오지 않는다(loadWorkflowRules).
  *
- * 두 구현이 존재하는 동안(로컬 데모 모드는 TS판을 계속 쓴다) 규칙이 갈라지지
- * 않도록, 어느 쪽을 고치든 다른 쪽도 함께 고쳐야 한다.
+ * 예전에는 같은 규칙을 TS 표로 들고 있는 구현이 하나 더 있었고 둘이 갈라질
+ * 위험이 있었지만, 지금은 이 함수가 유일한 실체다 — UI 목록도(execution
+ * page -> ManualStepSetPanel), 서버 재검증도(isManuallySelectableStepInRules)
+ * 모두 여기를 거친다.
  */
 export function listManuallySelectableStepsFromRules(rules: WorkflowRules): WorkflowRuleStep[] {
   const approvalGatedStepKeys = new Set(

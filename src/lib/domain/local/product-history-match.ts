@@ -73,23 +73,3 @@ function toRelatedMatch(c: ResolvedRepairCase): RelatedMatch {
     actualShipmentDate: c.actualShipmentDate,
   };
 }
-
-/**
- * 접수 폼 작성 중(아직 저장되지 않은 초안) 실시간 안내에 쓰는 조회다.
- * 초안은 productId가 없으므로 항상 정규화된 Model+L/N+S/N으로만 비교한다.
- * 저장된 건이 아니므로 제외할 "자기 자신"이 없다.
- */
-export function findProductHistoryMatchesForDraft(
-  all: ResolvedRepairCase[],
-  draft: { modelName: string; lotNumber: string; serialNumber: string }
-): RelatedMatch[] {
-  const model = normalize(draft.modelName);
-  const lot = normalize(draft.lotNumber);
-  const serial = normalize(draft.serialNumber);
-  if (!model || !lot || !serial) return [];
-
-  return all
-    .filter((candidate) => matchesNormalizedTriple(candidate, draft))
-    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
-    .map(toRelatedMatch);
-}

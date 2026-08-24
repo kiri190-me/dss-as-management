@@ -33,7 +33,8 @@ export default function ManualStepSetPanel({
   repairCaseId: string;
   version: number;
   currentStepKey: string;
-  /** 승인 게이트 단계가 제외된 후보 목록 — manual-step-options.ts가 산출한다. */
+  /** 승인 게이트 단계가 제외된 후보 목록 — db/queries/workflow-rules.ts의
+   *  listManuallySelectableStepsFromRules가 산출한다. */
   options: WorkflowRuleStep[];
   actingUser: ActingUser | null;
   /** 접수 건의 담당 엔지니어(없으면 null). AS_ENGINEER 본인 확인용 UI 힌트이며,

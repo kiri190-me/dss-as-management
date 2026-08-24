@@ -17,7 +17,7 @@ import {
   type RepairStatus,
   type WorkflowType,
 } from "../types";
-import { isLocalId, type LocalRepairCase } from "./local-types";
+import { type LocalRepairCase } from "./local-types";
 
 /**
  * mock(FK 기반)과 local(임베디드 스냅샷) 두 소스를 화면에서 동일하게 다룰 수
@@ -214,17 +214,4 @@ export function resolveMockRepairCaseById(
 ): ResolvedRepairCase | null {
   const repairCase = mockRepairCases.find((c) => c.id === id);
   return repairCase ? toResolvedFromMock(repairCase, referenceDate) : null;
-}
-
-/** 클라이언트 전용: local- id는 localCases에서, 그 외에는 mock에서 찾는다. */
-export function resolveRepairCaseById(
-  id: string,
-  localCases: LocalRepairCase[],
-  referenceDate: Date = DEMO_REFERENCE_DATE
-): ResolvedRepairCase | null {
-  if (isLocalId(id)) {
-    const localCase = localCases.find((c) => c.id === id);
-    return localCase ? toResolvedFromLocal(localCase, referenceDate) : null;
-  }
-  return resolveMockRepairCaseById(id, referenceDate);
 }

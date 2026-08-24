@@ -4,7 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import { NonDatabaseWorkContent } from "@/components/repair-cases/detail/LocalRepairCaseExecutionContent";
+import { NonDatabaseWorkContent } from "@/components/repair-cases/detail/NonDatabaseWorkContent";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
 import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
@@ -141,9 +141,9 @@ export default async function RepairCaseExecutionPage({
   const createDisabledReason = !canCreate ? "담당 엔지니어 또는 관리자만 작업 기록을 작성할 수 있습니다." : null;
   /**
    * Phase 2d: 이 화면의 워크플로 관련 표시는 전부 DB에서 읽은 규칙을 쓴다.
-   * 예전에는 mock-data의 단계 표와 manual-step-options.ts(TS)를 봤는데, 서버
-   * 판정이 DB로 옮겨간 뒤에도 화면만 옛 표를 보면 "버튼은 눌리는데 서버가
-   * 거부한다"가 된다 — 유·무상 작업에서 실제로 겪은 증상이다.
+   * 예전에는 mock-data의 단계 표와 manual-step-options.ts(TS, 지금은 삭제됨)를
+   * 봤는데, 서버 판정이 DB로 옮겨간 뒤에도 화면만 옛 표를 보면 "버튼은 눌리는데
+   * 서버가 거부한다"가 된다 — 유·무상 작업에서 실제로 겪은 증상이다.
    */
   const workflowRules = await loadWorkflowRulesForCase(db, resolved.id);
   if (!workflowRules) notFound();

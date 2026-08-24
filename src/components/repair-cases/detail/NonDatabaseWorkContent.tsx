@@ -1,65 +1,32 @@
 "use client";
 
 import LoadingNotice from "@/components/domain/LoadingNotice";
-import RepairCaseNotFound from "@/components/repair-cases/detail/RepairCaseNotFound";
 import WorkflowControlPanel from "@/components/repair-cases/workflow/WorkflowControlPanel";
 import WorkflowEventTimeline from "@/components/repair-cases/workflow/WorkflowEventTimeline";
 import DatabaseModeOnlyNotice from "@/components/procedures/execution/DatabaseModeOnlyNotice";
-import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
-import { resolveRepairCaseById, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import { type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import { useWorkflowStore } from "@/lib/domain/local/workflow/use-workflow-data";
 import { useApprovalStore } from "@/lib/domain/local/approval/use-approval-data";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 
 /**
- * Phase 5C-1 — local/mock counterpart of the "작업내용" (/execution) screen,
- * mirroring the existing LocalRepairCaseDetailContent -> RepairCaseDetailView
- * split (existence gate here, effective-case computation in the inner
- * component, same as that pair does for 기본 정보).
+ * "작업내용"(/execution) 화면에서 DB가 아닌 소스로 해석된 접수 건을 그리는
+ * 본문이다. 유일한 호출자는 execution/page.tsx의
+ * `resolved.source !== "DATABASE"` 분기이며(REPAIR_CASE_READ_SOURCE=mock
+ * 읽기 모드), 그 분기는 서버에서 resolveRepairCaseForServer로 이미 얻은
+ * `resolved`를 그대로 넘겨준다 — 이 컴포넌트는 존재 확인을 다시 하지 않는다.
+ * 소스별 차이는 useEffectiveRepairCase 어댑터가 흡수한다(RepairCaseDetailView
+ * .tsx가 기본 정보에서 MOCK과 LOCAL_DEMO를 같은 방식으로 다루는 것과 동일).
  *
- * Local ids never reach procedure_case_executions (DB-only, Phase 5A —
- * unchanged: the "기술 절차" subsection still just shows
- * DatabaseModeOnlyNotice, no mock execution implementation is invented
- * here). The workflow-transition action list (WorkflowControlPanel, local
- * mode) previously lived on 기본 정보 and would otherwise be stranded with
- * nowhere to render once removed from there — this screen is its new home,
- * matching where DB-mode users now find the same actions.
+ * Phase 5A/5C-2 제약은 그대로다: procedure_case_executions와
+ * repair_case_work_records는 둘 다 repair_cases.id에 실제 FK가 걸린 DB 전용
+ * 테이블이라, 비-DB 소스에서는 모의 구현을 만들지 않고 DatabaseModeOnlyNotice
+ * 만 보여 준다("작업 기록"은 featureLabel로 같은 컴포넌트를 재사용한다).
  *
- * Phase 5C-2: repair_case_work_records has a real FK to repair_cases.id,
- * same DB-only limitation as procedure_case_executions — local/mock cases
- * show the same DatabaseModeOnlyNotice (reused with featureLabel="작업 기록")
- * instead of a mock work-record system.
- */
-export default function LocalRepairCaseExecutionContent({
-  id,
-  actingUser,
-}: {
-  id: string;
-  actingUser: ActingUser | null;
-}) {
-  const { cases: localCases, isHydrated } = useLocalRepairCases();
-
-  if (!isHydrated) {
-    return <LoadingNotice />;
-  }
-
-  const resolved = resolveRepairCaseById(id, localCases);
-  if (!resolved) {
-    return <RepairCaseNotFound />;
-  }
-
-  return <NonDatabaseWorkContent resolved={resolved} actingUser={actingUser} />;
-}
-
-/**
- * Shared by both non-database sources: the local- id branch above (which
- * resolves `resolved` from localStorage after a hydration gate) and
- * execution/page.tsx's MOCK-source branch (which already has `resolved`
- * from resolveRepairCaseForServer server-side and can skip straight here,
- * exactly mirroring how RepairCaseDetailView.tsx already treats MOCK and
- * LOCAL_DEMO identically on 기본 정보 via the same useEffectiveRepairCase
- * adapter).
+ * 워크플로 전이 액션 목록(WorkflowControlPanel)은 Phase 5C-1에서 기본 정보
+ * 화면에서 이곳으로 옮겨 왔다 — DB 모드 사용자가 같은 액션을 찾는 위치와
+ * 맞추기 위해서다.
  */
 export function NonDatabaseWorkContent({
   resolved,

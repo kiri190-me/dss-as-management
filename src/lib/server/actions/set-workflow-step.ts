@@ -61,7 +61,8 @@ export async function setWorkflowStepAction(
     return { ok: false, code: "VALIDATION_ERROR", message: "버전 정보를 확인할 수 없습니다." };
   }
   // 형식만 본다 — 이 키가 실제로 선택 가능한 단계인지는 mutation이
-  // manual-step-options.ts로 다시 판정한다(UI 목록과 같은 규칙).
+  // isManuallySelectableStepInRules(db/queries/workflow-rules.ts)로 다시
+  // 판정한다(UI 목록과 같은 규칙).
   if (typeof input.toStepKey !== "string" || input.toStepKey.trim() === "") {
     return { ok: false, code: "VALIDATION_ERROR", message: "변경할 단계를 선택해 주세요." };
   }

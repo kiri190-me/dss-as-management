@@ -1,6 +1,5 @@
 import { normalizeEntityName } from "../entity-name-match";
 import type { BillingType, Priority, RepairStatus, WorkflowType } from "../types";
-import { generateClientUuid } from "@/lib/client-uuid";
 
 // 브라우저 localStorage에만 저장되는 데모 전용 로컬 접수 건이다. 실제 DB 스키마
 // 결정이 아니며, 모의(mock) RepairCase와 달리 고객/제품 FK 대신 스냅샷 값을
@@ -83,15 +82,11 @@ export function isLocalId(id: string): boolean {
   return id.startsWith(LOCAL_ID_PREFIX);
 }
 
-export function generateLocalCaseId(): string {
-  return `${LOCAL_ID_PREFIX}${generateClientUuid()}`;
-}
-
-// 새로 등록되는 로컬 고객사/End-User의 결정적(deterministic) ID 스킴 —
-// 정규화된 이름(끝에는 customerId까지)으로부터 유도되므로, 실제 저장소
-// 없이도 "같은 이름을 다시 입력하면 같은 레코드로 재사용된다"가 자동으로
-// 성립한다(local-entity-resolve.ts가 그래도 mock/기존 로컬 건과의 매칭을
-// 먼저 시도한 뒤에만 이 함수로 새 ID를 만든다).
+// 로컬 고객사/End-User의 결정적(deterministic) ID 스킴 — 정규화된 이름
+// (End-User는 customerId까지)으로부터 유도되므로, 실제 저장소 없이도 "같은
+// 이름은 항상 같은 ID"가 자동으로 성립한다. 이 ID를 새로 만들던 쓰기 경로는
+// 사라졌고, 지금 이 두 함수는 이미 저장된 값이 그 규칙과 맞는지 확인하는
+// 용도로만 쓰인다(validation.ts).
 export const LOCAL_CUSTOMER_ID_PREFIX = "local-customer-";
 export const LOCAL_END_USER_ID_PREFIX = "local-enduser-";
 

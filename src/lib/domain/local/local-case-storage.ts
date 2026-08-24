@@ -1,7 +1,11 @@
 import { mockRepairCases } from "../mock-data";
 import { dedupeLocalRepairCases, validateLocalRepairCase } from "./validation";
-import { LOCAL_CASE_STORAGE_KEY, type LocalCaseEnvelope, type LocalRepairCase } from "./local-types";
+import { LOCAL_CASE_STORAGE_KEY, type LocalRepairCase } from "./local-types";
 
+// 같은 탭 안의 쓰기는 storage 이벤트를 발생시키지 않기 때문에 함께 듣던
+// 커스텀 이벤트다. 이 저장소에 쓰던 경로(로컬 데모 접수)가 사라져 지금은
+// 발생시키는 쪽이 없지만, 구독은 그대로 둔다 — 읽기 경로의 동작을 바꾸지
+// 않기 위해서다.
 const CHANGE_EVENT = "dss-as-local-case-storage-changed";
 
 function isBrowser(): boolean {
@@ -76,47 +80,4 @@ export function subscribeLocalCases(onStoreChange: () => void): () => void {
     window.removeEventListener("storage", onStoreChange);
     window.removeEventListener(CHANGE_EVENT, onStoreChange);
   };
-}
-
-function notifyChange() {
-  window.dispatchEvent(new Event(CHANGE_EVENT));
-}
-
-/**
- * 검증을 통과한 최신 로컬 접수 목록을 그대로 덮어쓴다. 쓰기 직후 캐시를
- * 무효화하고 구독자에게 알린다(같은 탭 내 변경은 storage 이벤트가 발생하지
- * 않으므로 커스텀 이벤트를 함께 사용한다).
- */
-function writeLocalCases(cases: LocalRepairCase[]): void {
-  const envelope: LocalCaseEnvelope = { version: 1, cases };
-  window.localStorage.setItem(LOCAL_CASE_STORAGE_KEY, JSON.stringify(envelope));
-  cachedRaw = undefined;
-  notifyChange();
-}
-
-export type AppendLocalCaseResult =
-  | { ok: true; cases: LocalRepairCase[] }
-  | { ok: false; reason: "DUPLICATE_ID" | "DUPLICATE_INTAKE_NUMBER" };
-
-/**
- * 최신 localStorage 상태를 다시 읽은 뒤(re-read) 새 레코드를 추가한다.
- * 추가 직전에 다시 한번 ID/인수번호 중복을 확인한다 — 동시성 안전을
- * 완전히 보장하지는 못하지만(같은 브라우저의 여러 탭이 동시에 쓰는 경우
- * 경쟁 상태가 이론적으로 남는다), 쓰기 시점 기준 최신 데이터로 재검증한다.
- * 실제 운영에서는 이 채번/중복확인/저장 절차가 DB 트랜잭션으로 수행되어야 한다.
- */
-export function appendLocalCase(newCase: LocalRepairCase): AppendLocalCaseResult {
-  const current = getLocalCasesSnapshot();
-  if (current.some((c) => c.id === newCase.id)) {
-    return { ok: false, reason: "DUPLICATE_ID" };
-  }
-  if (
-    current.some((c) => c.intakeNumber === newCase.intakeNumber) ||
-    getMockIntakeNumbers().has(newCase.intakeNumber)
-  ) {
-    return { ok: false, reason: "DUPLICATE_INTAKE_NUMBER" };
-  }
-  const next = [...current, newCase];
-  writeLocalCases(next);
-  return { ok: true, cases: next };
 }

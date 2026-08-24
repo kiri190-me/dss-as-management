@@ -213,8 +213,8 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
   // repair_case_intake_sequences로 수행하며(0001 마이그레이션), 브라우저는 그
   // 시퀀스를 조회할 수 없다 — 데모 경로가 사라진 뒤로는 그달 내내 같은 고정값만
   // 내놓아 서버가 실제로 주는 번호와 어긋났다. 사용자에게 틀린 번호를 단언하느니
-  // 아무 번호도 보이지 않는 편이 낫다. (estimateIntakeNumber 자체는 데모 계층
-  // 정리에서 함께 다룬다.)
+  // 아무 번호도 보이지 않는 편이 낫다. 미리보기를 계산하던 함수도 함께
+  // 삭제했으므로, 되살리려면 서버가 후보 번호를 내려주는 방식이어야 한다.
 
   function setField<K extends keyof IntakeDraftData>(key: K, value: IntakeDraftData[K]) {
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);

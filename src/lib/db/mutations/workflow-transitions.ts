@@ -292,7 +292,8 @@ export async function transitionWorkflow(
 
         // 클라이언트가 보낸 단계 키를 신뢰하지 않는다. UI가 그리는 목록과
         // 정확히 같은 규칙(승인 게이트 단계 제외 + 상태 매핑 존재)을 서버가
-        // 다시 평가한다 — manual-step-options.ts 참고.
+        // 다시 평가한다 — 규칙의 실체는 db/queries/workflow-rules.ts의
+        // listManuallySelectableStepsFromRules 하나다.
         if (!isManuallySelectableStepInRules(rules, requestedStepKey)) {
           return {
             ok: false,
