@@ -164,11 +164,82 @@ export async function shrinkImageBlob(source: Blob, targetBytes: number): Promis
   }
 }
 
-/** 저장된 첨부 한 장을 받아 온다. 미리보기와 같은 주소라 캐시를 그대로 쓴다. */
+/**
+ * 목록에 쓸 썸네일을 만든다.
+ *
+ * 긴 변을 480px으로 맞춘다 — 격자에서 가장 크게 보이는 칸(PC 4열)이 그보다
+ * 작고, 고해상도 화면에서 두 배로 그려도 흐릿하지 않은 크기다. 보통 30~60KB가
+ * 되므로 3MB 원본과 견주면 오십분의 일이다.
+ *
+ * 사진이 아니면 null이다 — 압축 파일에 붙일 그림이 없다.
+ */
+export async function createPreviewBlob(source: Blob): Promise<Blob | null> {
+  if (source.type !== "image/jpeg" && source.type !== "image/png") return null;
+
+  const header = new Uint8Array(await source.slice(0, 256 * 1024).arrayBuffer());
+  const size = readImageSize(header);
+
+  // 크기를 알면 처음부터 작게 푼다(shrinkImageBlob과 같은 이유). 모르면
+  // 통째로 푼 뒤 줄인다 — 느릴 뿐 결과는 같다.
+  const longest = size ? Math.max(size.width, size.height) : 0;
+  const scale = longest > PREVIEW_LONGEST_EDGE ? PREVIEW_LONGEST_EDGE / longest : 1;
+
+  const bitmap =
+    size && scale < 1
+      ? await createImageBitmap(source, {
+          resizeWidth: Math.max(1, Math.round(size.width * scale)),
+          resizeHeight: Math.max(1, Math.round(size.height * scale)),
+          resizeQuality: "medium",
+        })
+      : await createImageBitmap(source);
+
+  try {
+    // 이미 작게 풀었으면 그대로 그린다. 못 풀었으면 여기서 줄인다.
+    const drawScale = size && scale < 1 ? 1 : Math.min(1, PREVIEW_LONGEST_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = drawTo(bitmap, drawScale);
+    if (!canvas) return null;
+    return await encode(canvas, 0.72);
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** 목록에 쓰기 충분한 크기. 서버의 상한(512KB)보다 한참 작게 나온다. */
+const PREVIEW_LONGEST_EDGE = 480;
+
+/**
+ * 만든 썸네일을 올린다. **실패해도 조용히 넘어간다.**
+ *
+ * 미리보기는 없어도 되는 것이다 — 없으면 목록이 원본으로 보여 준다. 그래서
+ * 이것 때문에 업로드가 실패한 것처럼 보이면 안 된다. 사용자가 한 일(사진
+ * 올리기)은 이미 끝났다.
+ */
+export async function uploadPreview(attachmentId: string, source: Blob): Promise<void> {
+  try {
+    const preview = await createPreviewBlob(source);
+    if (!preview) return;
+    await fetch(`/api/attachments/${encodeURIComponent(attachmentId)}/preview`, {
+      method: "PUT",
+      body: preview,
+    });
+  } catch {
+    // 조용히 넘어간다(위 주석).
+  }
+}
+
+/**
+ * 저장된 첨부의 **원본**을 받아 온다.
+ *
+ * `?view=thumb`을 붙이지 않는 것이 중요하다. 그 주소는 미리보기가 있으면
+ * 미리보기를 주므로, 줄여서 받기나 미리보기 채우기가 그 값을 쓰면 **480px짜리
+ * 썸네일을 원본이라 여기고 다시 줄이게 된다.** 화질이 두 번 깎이고, 채우기는
+ * 미리보기로 미리보기를 만드는 꼴이 된다.
+ *
+ * 이 경로는 감사 로그에 FILE_DOWNLOAD를 남긴다 — 실제로 원본을 가져가는
+ * 행위이기 때문이다.
+ */
 export async function fetchAttachmentBlob(attachmentId: string): Promise<Blob> {
-  const response = await fetch(
-    `/api/attachments/${encodeURIComponent(attachmentId)}/download?inline=1`
-  );
+  const response = await fetch(`/api/attachments/${encodeURIComponent(attachmentId)}/download`);
   if (!response.ok) {
     throw new Error(`파일을 받지 못했습니다 (${response.status})`);
   }

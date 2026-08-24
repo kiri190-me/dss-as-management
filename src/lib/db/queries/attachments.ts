@@ -39,6 +39,8 @@ export type RepairCaseAttachmentListItem = {
   originalFileName: string;
   /** 저장 루트 기준 상대 경로. 화면에 그대로 내보이지 않는다(내부 구조가 드러난다). */
   storedPath: string;
+  /** 미리보기(썸네일)의 상대 경로. 없으면 null 이고 목록은 원본으로 보여 준다. */
+  previewPath: string | null;
   mimeType: string;
   fileSize: number;
   checksumSha256: string;
@@ -61,6 +63,7 @@ export async function listAttachmentsForRepairCase(
       category: attachments.category,
       originalFileName: attachments.originalFileName,
       storedPath: attachments.storedPath,
+      previewPath: attachments.previewPath,
       mimeType: attachments.mimeType,
       fileSize: attachments.fileSize,
       checksumSha256: attachments.checksumSha256,
@@ -110,6 +113,7 @@ export async function listTrashedAttachmentsForRepairCase(
       category: attachments.category,
       originalFileName: attachments.originalFileName,
       storedPath: attachments.storedPath,
+      previewPath: attachments.previewPath,
       mimeType: attachments.mimeType,
       fileSize: attachments.fileSize,
       checksumSha256: attachments.checksumSha256,

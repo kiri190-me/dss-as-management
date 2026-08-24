@@ -47,6 +47,7 @@ import {
 } from "@/lib/server/actions/attachments";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import InAppCamera from "./InAppCamera";
+import { uploadPreview } from "./shrink-image";
 import StoredAttachmentList from "./StoredAttachmentList";
 import AttachmentCardList from "./AttachmentCardList";
 import AttachmentEventTimeline from "./AttachmentEventTimeline";
@@ -379,6 +380,16 @@ function DatabaseFilesScreen({
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
         return { ok: false, reason: payload?.error ?? "서버가 거절했습니다" };
       }
+
+      // 썸네일을 이어서 보낸다. 원본을 이미 손에 들고 있으므로 다시 받을 필요가
+      // 없고, 서버는 이미지 처리를 전혀 하지 않는다(라우트 주석 참조).
+      //
+      // await 하지 않는다 — 사용자가 한 일(사진 올리기)은 이미 끝났고, 썸네일은
+      // 없어도 목록이 원본으로 보여 준다. 여기서 기다리면 여러 장 올릴 때
+      // 장마다 썸네일 만드는 시간이 그대로 얹힌다.
+      const created = (await response.json().catch(() => null)) as { id?: string } | null;
+      if (created?.id) void uploadPreview(created.id, file);
+
       return { ok: true };
     } catch {
       return { ok: false, reason: "네트워크 문제" };

@@ -10,10 +10,13 @@ import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments"
  * 썸네일로는 파형의 눈금도, 외관의 흠집도 확인할 수 없다. 확인하려고 찍은
  * 사진이므로 **크게 볼 수 있어야 찍은 뜻이 산다.**
  *
- * ── 받아 보지 않고 화면에서 본다 ─────────────────────────────────────────
- * 주소는 목록의 썸네일과 같은 `?inline=1`이다. 브라우저가 이미 그 파일을
- * 받아 두었으면 다시 받지 않는다(썸네일과 같은 주소라 캐시가 그대로 쓰인다).
- * 그리고 그 경로는 **감사 로그를 남기지 않는다** — 화면에서 보는 것과 파일을
+ * ── 받아 보지 않고 화면에서 본다. 다만 **원본**이다 ──────────────────────
+ * 주소는 `?view=full`이다. 목록의 썸네일이 쓰는 `?view=thumb`과 갈라 둔 이유가
+ * 실제로 겪은 사고다 — 미리보기를 도입하자 크게 보기까지 480px 썸네일을 보여
+ * 주게 되었다. 파형의 눈금을 확인하려고 여는 화면인데 확인할 수 없는 해상도가
+ * 된 것이다.
+ *
+ * 두 주소 모두 **감사 로그를 남기지 않는다** — 화면에서 보는 것과 파일을
  * 가져가는 것은 다른 일이고, 기록해야 하는 것은 뒤쪽이다(라우트 주석 참조).
  *
  * ── 앞뒤로 넘긴다 ────────────────────────────────────────────────────────
@@ -130,7 +133,7 @@ export default function AttachmentViewer({
           // key를 주어 넘길 때마다 새로 그리게 한다 — 안 그러면 앞 사진이
           // 남아 있다가 바뀌어 무엇을 보고 있는지 잠깐 헷갈린다.
           key={current.id}
-          src={`/api/attachments/${encodeURIComponent(current.id)}/download?inline=1`}
+          src={`/api/attachments/${encodeURIComponent(current.id)}/download?view=full`}
           alt={current.originalFileName}
           className="max-h-full max-w-full object-contain"
         />
@@ -163,7 +166,7 @@ export default function AttachmentViewer({
           {current.description ?? ""}
         </p>
         {/*
-          평범한 링크다(inline=1이 없다). 이쪽이 실제로 파일을 가져가는
+          평범한 링크다(view 값이 없다). 이쪽이 실제로 파일을 가져가는
           행위이고, 그래서 이 경로만 감사 로그를 남긴다.
         */}
         <div className="flex shrink-0 items-center gap-2">

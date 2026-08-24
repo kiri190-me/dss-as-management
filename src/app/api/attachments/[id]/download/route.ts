@@ -118,11 +118,26 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
   }
 
-  // 화면 안에서 그대로 보여 달라는 요청인가. 형식이 안전 목록에 없으면
-  // 요청과 무관하게 첨부로 내린다 — 클라이언트가 정하게 두지 않는다.
+  /**
+   * 무엇을 어떻게 내줄지 — 세 가지다.
+   *
+   *  - (없음)      원본을 **첨부로** 내린다. 실제로 가져가는 행위라 감사 기록이 남는다.
+   *  - `view=thumb` 미리보기가 있으면 그것을, 없으면 원본을 **화면 안에** 보여 준다.
+   *  - `view=full`  원본을 **화면 안에** 보여 준다. 크게 보기가 쓴다.
+   *
+   * thumb과 full을 가른 이유가 실제로 겪은 사고다. 처음에는 화면용 주소가
+   * 하나뿐이었는데, 미리보기를 도입하자 **크게 보기까지 480px 썸네일을 보여
+   * 주게 되었다.** 파형의 눈금을 확인하려고 여는 화면인데 확인할 수 없는
+   * 해상도가 된 것이다. 화면에 보여 주는 것과 어떤 크기를 보여 주는 것은
+   * 다른 결정이라 주소에서 갈라 둔다.
+   *
+   * 형식이 안전 목록에 없으면 요청과 무관하게 첨부로 내린다 — 무엇을 화면에서
+   * 열어도 되는지는 클라이언트가 정하게 두지 않는다.
+   */
+  const view = request.nextUrl.searchParams.get("view");
   const inline =
-    request.nextUrl.searchParams.get("inline") === "1" &&
-    INLINE_SAFE_MIME_TYPES.has(attachment.mimeType);
+    (view === "thumb" || view === "full") && INLINE_SAFE_MIME_TYPES.has(attachment.mimeType);
+  const preferPreview = view === "thumb";
 
   // ── 4) 허용 판정 ───────────────────────────────────────────────────────
   const decision = decideAttachmentDownload({
@@ -141,11 +156,21 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   // ── 5) 경로 검증 — DB 값이라도 그대로 믿지 않는다 ──────────────────────
   const storage = getAttachmentStorage();
+
+  // 썸네일을 달라고 했고 실제로 있을 때만 미리보기를 준다. 목록의 썸네일
+  // 스무 개가 원본 스무 장이 되는 것을 막는 것이 이 한 줄의 목적이다.
+  // 미리보기는 없어도 되는 것이라(옛 사진에는 없다) 없으면 원본으로 돌아간다.
+  //
+  // 크게 보기(view=full)와 내려받기는 언제나 원본이다.
+  const servedPath =
+    preferPreview && attachment.previewPath ? attachment.previewPath : attachment.storedPath;
+  const servingPreview = servedPath !== attachment.storedPath;
+
   let stream: ReadableStream<Uint8Array>;
   try {
     // 루트 밖을 가리키면 여기서 던진다. 존재 여부는 read가 알려 준다.
-    resolveAttachmentAbsolutePath(resolveUploadsRoot(), attachment.storedPath);
-    stream = await storage.read(attachment.storedPath);
+    resolveAttachmentAbsolutePath(resolveUploadsRoot(), servedPath);
+    stream = await storage.read(servedPath);
   } catch (error) {
     if (error instanceof AttachmentPathError) {
       // DB의 경로가 저장 루트를 벗어난다 — 정상 경로로는 생길 수 없는 값이다.
@@ -193,8 +218,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   return new NextResponse(stream, {
     status: 200,
     headers: {
-      "Content-Type": attachment.mimeType,
-      "Content-Length": String(attachment.fileSize),
+      // 미리보기는 언제나 JPEG이고 크기도 원본과 다르다. 원본 값을 그대로
+      // 붙이면 브라우저가 파일이 잘렸다고 보고 그리다 만다.
+      "Content-Type": servingPreview ? "image/jpeg" : attachment.mimeType,
+      ...(servingPreview ? {} : { "Content-Length": String(attachment.fileSize) }),
       "Content-Disposition": contentDispositionFor(attachment.originalFileName, inline),
       // 브라우저가 내용을 보고 형식을 다시 추측하지 않게 한다. 추측을 허용하면
       // mime_type 검증을 통과한 파일이 다른 형식으로 실행될 수 있다.

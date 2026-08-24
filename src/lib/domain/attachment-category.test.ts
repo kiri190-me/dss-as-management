@@ -74,9 +74,29 @@ test("검사 상태 기본값은 DB enum에 실재하는 값이다", () => {
 
 // ───────────────────────────────────────────────────── 목록 자체의 무결성
 
-test("분류 코드는 11종이고 중복이 없다", () => {
-  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 11);
-  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 11);
+test("분류 코드는 14종이고 중복이 없다", () => {
+  // 개수를 적어 두는 이유는 **DB enum과 함께 움직이기 때문**이다. 코드에만
+  // 더하고 마이그레이션을 잊으면 화면에서는 고를 수 있는데 저장할 때 서버가
+  // 거절한다 — 그 어긋남이 이 줄에서 먼저 걸린다.
+  //
+  // 11 → 14: 수리 중·수리 후·출하 사진을 더했다(마이그레이션 0047).
+  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 14);
+  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 14);
+});
+
+test("업무 순서대로 늘어놓는다 — 화면의 고르는 차례가 이 순서다", () => {
+  // 인수 → 외관 → 수리 중 → 수리 후 → 출하. 현장에서 사진을 찍는 순서와 같아야
+  // 목록에서 찾을 때 헤매지 않는다.
+  const photos = ATTACHMENT_CATEGORY_CODES.filter((code) =>
+    ["INTAKE_PHOTO", "EXTERNAL_CONDITION", "IN_REPAIR", "AFTER_REPAIR", "SHIPMENT_PHOTO"].includes(code)
+  );
+  assert.deepEqual(photos, [
+    "INTAKE_PHOTO",
+    "EXTERNAL_CONDITION",
+    "IN_REPAIR",
+    "AFTER_REPAIR",
+    "SHIPMENT_PHOTO",
+  ]);
 });
 
 test("모든 분류에 한국어 라벨이 있다", () => {

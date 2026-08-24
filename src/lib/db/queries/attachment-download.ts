@@ -41,6 +41,8 @@ export type AttachmentForDownload = {
   fileSize: number;
   checksumSha256: string;
   malwareScanStatus: MalwareScanStatus;
+  /** 미리보기가 있으면 그 상대 경로. 없으면 null이고 원본으로 보여 준다. */
+  previewPath: string | null;
   /** 조건이 아니라 값으로 읽는다 — 위 주석 참조. */
   isDeleted: boolean;
 };
@@ -60,6 +62,7 @@ export async function getAttachmentForDownload(
       fileSize: attachments.fileSize,
       checksumSha256: attachments.checksumSha256,
       malwareScanStatus: attachments.malwareScanStatus,
+      previewPath: attachments.previewPath,
       isDeleted: attachments.isDeleted,
     })
     .from(attachments)

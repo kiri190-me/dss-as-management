@@ -72,6 +72,9 @@ import { users } from "./users";
 export const attachmentCategoryEnum = pgEnum("attachment_category", [
   "INTAKE_PHOTO",
   "EXTERNAL_CONDITION",
+  "IN_REPAIR",
+  "AFTER_REPAIR",
+  "SHIPMENT_PHOTO",
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
   "KYOSAN_DOCUMENT",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import {
   ATTACHMENT_CATEGORY_CODES,
@@ -20,24 +21,28 @@ import {
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
 import AttachmentViewer from "./AttachmentViewer";
 import ShrinkDownloadDialog from "./ShrinkDownloadDialog";
-import { saveBlobAs } from "./shrink-image";
+import { fetchAttachmentBlob, saveBlobAs, uploadPreview } from "./shrink-image";
 import { createStoredZip, uniqueEntryNames } from "./zip-store";
 
 /**
  * ============================================================================
  * 저장된 첨부 목록 — 보는 방식 두 가지와, 여러 개를 한 번에
  * ============================================================================
- * **미리보기 주소는 `?inline=1`이다.** 같은 라우트지만 그 값이 붙으면 서버가
+ * **썸네일 주소는 `?view=thumb`이다.** 같은 라우트지만 그 값이 붙으면 서버가
  * 사진 형식일 때만 화면 안에 그대로 보여 주고, **감사 로그를 남기지 않는다.**
  * 썸네일 하나마다 FILE_DOWNLOAD가 쌓이면 목록을 한 번 여는 것만으로 감사
  * 기록이 열 줄 늘고, 그렇게 되면 "누가 무엇을 가져갔는가"를 그 안에서 찾을 수
  * 없다. 기록하는 것은 실제로 가져가는 행위뿐이다(라우트 주석 참조).
  *
- * ── 아직 썸네일이 원본이다 ───────────────────────────────────────────────
- * 미리보기 이미지 생성이 아직 없어서(5D 4단계에서 미뤘다) 썸네일도 원본 파일을
- * 그대로 받아 CSS로 줄인 것이다. 사진 스무 장이면 스무 장을 다 받는다.
- * `loading="lazy"`로 화면에 보이는 것만 받게 해 두었지만, 근본 해법은 작은
- * 미리보기 파일을 따로 만드는 것이다(preview_path 칸이 이미 있다).
+ * ── 썸네일은 따로 만든 작은 파일이다 ────────────────────────────────────
+ * 예전에는 썸네일도 원본을 그대로 받아 CSS로 줄인 것이라, 사진 스무 장짜리
+ * 접수 건을 열면 스무 장을 통째로 받았다. 이제는 **올릴 때 브라우저가 480px
+ * 짜리 미리보기를 함께 만들어 보낸다**(preview_path). 서버는 이미지 처리를
+ * 전혀 하지 않는다 — 네이티브 라이브러리를 들이면 NAS 컨테이너로 옮길 때
+ * 짐이 되기 때문이다.
+ *
+ * 미리보기가 없는 옛 사진은 원본으로 보여 준다(없어도 되는 것이다). 위쪽의
+ * "미리보기 만들기"로 한 번에 채울 수 있고, 그때도 만드는 쪽은 브라우저다.
  *
  * ── 표와 카드를 직접 고르지 않는다 ───────────────────────────────────────
  * ResponsiveList가 "표가 들어가면 표, 안 들어가면 카드"를 재서 정하고 사용자가
@@ -76,7 +81,7 @@ function isViewableImage(mimeType: string): boolean {
 }
 
 function previewUrlOf(id: string): string {
-  return `/api/attachments/${encodeURIComponent(id)}/download?inline=1`;
+  return `/api/attachments/${encodeURIComponent(id)}/download?view=thumb`;
 }
 
 function downloadUrlOf(id: string): string {
@@ -137,8 +142,8 @@ function Thumbnail({
     <img
       src={previewUrlOf(item.id)}
       alt={item.originalFileName}
-      // 화면에 들어온 것만 받는다 — 아직 썸네일이 원본이라 이게 없으면 목록을
-      // 여는 순간 모든 사진을 통째로 내려받는다.
+      // 화면에 들어온 것만 받는다. 미리보기가 없는 옛 사진은 원본이 오므로
+      // 이 한 줄이 그때 특히 값이 크다.
       loading="lazy"
       decoding="async"
       className={`${box} bg-zinc-100 object-cover dark:bg-zinc-800`}
@@ -165,6 +170,7 @@ export default function StoredAttachmentList({
   onDeleteMany,
   isBusy,
 }: StoredAttachmentListProps) {
+  const router = useRouter();
   const [view, setView] = useState<ViewKind>("list");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /** 크게 보고 있는 사진의 자리. 사진 목록(viewable) 기준이다. */
@@ -176,6 +182,31 @@ export default function StoredAttachmentList({
   const [bundleError, setBundleError] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<AttachmentListFilters>(DEFAULT_ATTACHMENT_LIST_FILTERS);
+  /** 옛 사진의 미리보기를 채우는 중. */
+  const [previewProgress, setPreviewProgress] = useState<{ current: number; total: number } | null>(null);
+
+  /** 사진인데 미리보기가 없는 것들 — 목록이 원본을 그대로 받아 오는 대상이다. */
+  const missingPreview = useMemo(
+    () => attachments.filter((item) => isViewableImage(item.mimeType) && !item.previewPath),
+    [attachments]
+  );
+
+  async function buildMissingPreviews() {
+    setPreviewProgress({ current: 0, total: missingPreview.length });
+    try {
+      for (const [index, item] of missingPreview.entries()) {
+        setPreviewProgress({ current: index + 1, total: missingPreview.length });
+        // 원본을 받아 브라우저에서 줄여 올린다. 한 장씩 하는 이유는 폰에서
+        // 여러 장을 동시에 풀면 메모리가 모자라 탭이 죽기 때문이다.
+        const source = await fetchAttachmentBlob(item.id);
+        await uploadPreview(item.id, source);
+      }
+      // 목록은 서버가 만든다 — 새 previewPath를 받아 오려면 다시 그려야 한다.
+      router.refresh();
+    } finally {
+      setPreviewProgress(null);
+    }
+  }
 
   /**
    * 조건에 맞아 지금 화면에 있는 것들.
@@ -665,6 +696,29 @@ export default function StoredAttachmentList({
     <div className="flex flex-col gap-2">
       {filterBar}
       {selectionBar}
+
+      {/*
+        옛 사진 채우기. 미리보기가 생기기 전에 올라온 것들은 목록에서 원본을
+        그대로 받아 오므로 느리다. 한 번 눌러 두면 그 뒤로는 빨라진다.
+        만드는 쪽은 여기서도 브라우저다 — 서버는 이미지 처리를 하지 않는다.
+      */}
+      {missingPreview.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs dark:border-amber-900 dark:bg-amber-950">
+          <span className="text-amber-800 dark:text-amber-300">
+            사진 {missingPreview.length}장에 미리보기가 없어 목록이 원본을 그대로 받아 옵니다.
+          </span>
+          <button
+            type="button"
+            onClick={buildMissingPreviews}
+            disabled={isBusy || previewProgress !== null}
+            className="rounded-md border border-amber-300 px-2.5 py-1.5 font-medium text-amber-900 disabled:opacity-50 dark:border-amber-800 dark:text-amber-200"
+          >
+            {previewProgress
+              ? `만드는 중… ${previewProgress.current}/${previewProgress.total}`
+              : "미리보기 만들기"}
+          </button>
+        </div>
+      )}
 
       {bundleError && (
         <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">

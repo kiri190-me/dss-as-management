@@ -87,6 +87,25 @@ export function buildAttachmentStoredPath(params: {
 }
 
 /**
+ * 미리보기(썸네일) 파일의 상대 경로.
+ *
+ * 원본과 **같은 폴더에 나란히** 둔다. 접수 건 폴더 하나만 보면 그 건의 파일이
+ * 다 있는 셈이고, 백업이나 NAS 이전 때 원본과 미리보기가 갈라지지 않는다.
+ *
+ * 확장자는 언제나 jpg다 — 미리보기는 브라우저가 JPEG로 만들어 올리기 때문이다
+ * (PNG 원본이어도 미리보기는 JPEG). `.preview.jpg`로 끝나므로 원본 파일과
+ * 이름이 겹치지 않는다.
+ */
+export function buildAttachmentPreviewPath(params: {
+  repairCaseId: string;
+  attachmentId: string;
+}): string {
+  const repairCaseId = requireUuid("접수 건 ID", params.repairCaseId);
+  const attachmentId = requireUuid("첨부 ID", params.attachmentId);
+  return `${ATTACHMENT_STORED_PATH_PREFIX}/${repairCaseId}/${attachmentId}.preview.jpg`;
+}
+
+/**
  * 원본 파일명에서 바로 stored_path를 만드는 편의 함수. 확장자를 뽑는 규칙이
  * 부르는 쪽마다 다시 적히지 않게 한다. 확장자를 뽑을 수 없으면 던진다.
  */

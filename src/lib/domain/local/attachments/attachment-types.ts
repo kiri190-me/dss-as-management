@@ -7,6 +7,9 @@
 export const ATTACHMENT_CATEGORY_CODES = [
   "INTAKE_PHOTO",
   "EXTERNAL_CONDITION",
+  "IN_REPAIR",
+  "AFTER_REPAIR",
+  "SHIPMENT_PHOTO",
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
   "KYOSAN_DOCUMENT",
@@ -21,6 +24,9 @@ export type AttachmentCategory = (typeof ATTACHMENT_CATEGORY_CODES)[number];
 export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   INTAKE_PHOTO: "인수 사진",
   EXTERNAL_CONDITION: "외관 상태",
+  IN_REPAIR: "수리 중",
+  AFTER_REPAIR: "수리 후",
+  SHIPMENT_PHOTO: "출하 사진",
   INSPECTION_REPORT: "점검 보고서",
   REPAIR_REPORT: "수리 보고서",
   KYOSAN_DOCUMENT: "교산 문서",
