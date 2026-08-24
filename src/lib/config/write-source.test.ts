@@ -15,21 +15,26 @@ function withEnv(value: string | undefined, run: () => void) {
   }
 }
 
-test("defaults to local when unset", () => {
+test("defaults to database when unset", () => {
   withEnv(undefined, () => {
-    assert.equal(getRepairCaseWriteSource(), "local");
+    assert.equal(getRepairCaseWriteSource(), "database");
   });
 });
 
-test("defaults to local when empty string", () => {
+test("defaults to database when empty string", () => {
   withEnv("", () => {
-    assert.equal(getRepairCaseWriteSource(), "local");
+    assert.equal(getRepairCaseWriteSource(), "database");
   });
 });
 
-test('accepts "local"', () => {
+// The localStorage demo write path is gone. "local" must be rejected the same
+// way any other invalid value is — never accepted-but-ignored, which would
+// leave a misconfigured environment silently writing to the database while the
+// setting claims otherwise.
+test('rejects "local" — the removed demo write path', () => {
   withEnv("local", () => {
-    assert.equal(getRepairCaseWriteSource(), "local");
+    assert.throws(() => getRepairCaseWriteSource(), /REPAIR_CASE_WRITE_SOURCE must be one of/);
+    assert.throws(() => getRepairCaseWriteSource(), /got: "local"/);
   });
 });
 

@@ -17,21 +17,16 @@ import {
   workflowKindOf,
   type WorkflowKind,
 } from "@/lib/domain/workflow-kind";
-import { mockCustomers, mockEndUsers, mockUsers } from "@/lib/domain/mock-data";
-import { useLocalRepairCases } from "@/lib/domain/local/use-local-repair-cases";
 import { useIntakeDraft } from "@/lib/domain/local/use-intake-draft";
 import type { IntakeDraftData } from "@/lib/domain/local/draft-storage";
 import { estimateIntakeNumber, isValidIntakeNumberFormat } from "@/lib/domain/local/intake-number";
-import { submitNewLocalCase, type IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
-import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
-import { findProductHistoryMatchesForDraft } from "@/lib/domain/local/product-history-match";
+import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import DerivedProductFields from "./DerivedProductFields";
-import ProductHistoryNotice from "./ProductHistoryNotice";
 import ClearDraftDialog from "./ClearDraftDialog";
 import DraftStatusLine from "./DraftStatusLine";
 
@@ -57,7 +52,7 @@ const errorClass = "mt-1 text-xs text-red-600 dark:text-red-400";
 
 function validateDraft(
   draft: IntakeDraftData,
-  ctx: { requireProductModelSelection: boolean; canRegisterProductModel: boolean }
+  ctx: { canRegisterProductModel: boolean }
 ): Partial<Record<FieldKey, string>> {
   const errors: Partial<Record<FieldKey, string>> = {};
 
@@ -113,7 +108,7 @@ function validateDraft(
 
   if (!draft.modelName.trim()) {
     errors.modelName = "Model을 입력해 주세요.";
-  } else if (ctx.requireProductModelSelection && !draft.productModelId && !draft.productModelCreateNew) {
+  } else if (!draft.productModelId && !draft.productModelCreateNew) {
     errors.modelName = ctx.canRegisterProductModel
       ? "등록된 Model을 선택하거나 '새 모델로 등록'을 눌러주세요."
       : "등록된 Model을 선택해 주세요.";
@@ -141,10 +136,10 @@ const FIELD_ORDER: FieldKey[] = [
 ];
 
 type IntakeFormInnerProps = {
-  writeSource: "local" | "database";
-  referenceData: IntakeReferenceData | null;
-  /** Product Model Master 연결 체크포인트 — SUPER_ADMIN/ADMIN만 true. DB
-   * 모드에서만 의미 있다(로컬 모드는 애초에 콤보박스를 렌더링하지 않는다). */
+  /** 실제 데이터베이스의 고객사/End-User/엔지니어/Product Model 목록. 접수는
+   * 데이터베이스에만 등록되므로 항상 존재한다(new/page.tsx가 매 요청 조회). */
+  referenceData: IntakeReferenceData;
+  /** Product Model Master 연결 체크포인트 — SUPER_ADMIN/ADMIN만 true. */
   canRegisterProductModel: boolean;
 };
 
@@ -174,9 +169,8 @@ const RESULT_CODE_MESSAGES: Record<CreateRepairCaseResultCode, string> = {
   SUBMISSION_IN_PROGRESS: "이전 제출이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.",
 };
 
-export default function IntakeFormInner({ writeSource, referenceData, canRegisterProductModel }: IntakeFormInnerProps) {
+export default function IntakeFormInner({ referenceData, canRegisterProductModel }: IntakeFormInnerProps) {
   const router = useRouter();
-  const { cases: localCases } = useLocalRepairCases();
   const { draft, updateDraft, isEmpty, clear, idempotencyKey } = useIntakeDraft();
 
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
@@ -188,51 +182,12 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
   const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
   const fieldRefs = useRef<Partial<Record<FieldKey, HTMLElement | null>>>({});
 
-  // Database mode must offer real database rows (UUID-keyed) — the mock
-  // string IDs (mockCustomers/mockEndUsers/mockUsers, e.g. "c-001") do not
-  // exist in Postgres at all. Local mode keeps the exact original data
-  // source (referenceData is always null in that mode), plus any customer/
-  // End-User previously created by an earlier LOCAL intake (free-entry
-  // "새로 등록" — local mode has no separate customers table, so these are
-  // only discoverable by scanning existing local cases' own snapshots; see
-  // local-entity-resolve.ts for the matching submission-time counterpart).
-  const localCustomerOptions = useMemo(() => {
-    if (referenceData) return [];
-    const mockIds = new Set(mockCustomers.map((c) => c.id));
-    const seen = new Map<string, { id: string; name: string }>();
-    for (const c of localCases) {
-      if (mockIds.has(c.customerId) || seen.has(c.customerId)) continue;
-      seen.set(c.customerId, { id: c.customerId, name: c.customerNameSnapshot });
-    }
-    return [...seen.values()];
-  }, [referenceData, localCases]);
-  const localEndUserOptions = useMemo(() => {
-    if (referenceData) return [];
-    const mockIds = new Set(mockEndUsers.map((e) => e.id));
-    const seen = new Map<string, { id: string; customerId: string; name: string }>();
-    for (const c of localCases) {
-      if (!c.endUserId || !c.endUserNameSnapshot) continue;
-      if (mockIds.has(c.endUserId) || seen.has(c.endUserId)) continue;
-      seen.set(c.endUserId, { id: c.endUserId, customerId: c.customerId, name: c.endUserNameSnapshot });
-    }
-    return [...seen.values()];
-  }, [referenceData, localCases]);
-  const customerOptions = useMemo(
-    () => (referenceData ? referenceData.customers : [...mockCustomers, ...localCustomerOptions]),
-    [referenceData, localCustomerOptions]
-  );
-  const allEndUserOptions = useMemo(
-    () => (referenceData ? referenceData.endUsers : [...mockEndUsers, ...localEndUserOptions]),
-    [referenceData, localEndUserOptions]
-  );
-
-  const eligibleEngineers = useMemo(
-    () =>
-      referenceData
-        ? referenceData.engineers
-        : mockUsers.filter((u) => u.role === "AS_ENGINEER" && u.approvalStatus === "APPROVED"),
-    [referenceData]
-  );
+  // 접수는 데이터베이스에만 등록되므로 선택 후보도 실제 데이터베이스 행
+  // (UUID 키)만 쓴다 — mock 문자열 ID("c-001" 같은 값)는 Postgres에 아예
+  // 존재하지 않는다.
+  const customerOptions = useMemo(() => referenceData.customers, [referenceData]);
+  const allEndUserOptions = useMemo(() => referenceData.endUsers, [referenceData]);
+  const eligibleEngineers = useMemo(() => referenceData.engineers, [referenceData]);
   const availableEndUsers = useMemo(
     () => allEndUserOptions.filter((e) => e.customerId === draft.customerId),
     [allEndUserOptions, draft.customerId]
@@ -247,25 +202,22 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
     [draft.endUserName, availableEndUsers]
   );
 
-  // Product Model Master — DB 모드에서만 존재한다(referenceData가 null이면
-  // 로컬 모드이고, 아래 JSX가 그 경우 기존 자유 입력 필드를 그대로 렌더링해
-  // 이 목록/제안을 아예 쓰지 않는다).
-  const productModelOptions = useMemo(() => referenceData?.productModels ?? [], [referenceData]);
+  // Product Model Master — 접수 폼은 항상 이 목록에서 고른다.
+  const productModelOptions = useMemo(() => referenceData.productModels, [referenceData]);
   const productModelSuggestions = useMemo(
     () => rankSimilarNames(draft.modelName, productModelOptions).slice(0, MAX_SUGGESTIONS),
     [draft.modelName, productModelOptions]
   );
 
+  // 화면 표시용 "예상 인수번호"다. 실제 채번은 제출 시점에 서버가
+  // repair_case_intake_sequences로 수행하며(0001 마이그레이션), 이 미리보기는
+  // 그 시퀀스를 조회하지 않는다 — 브라우저에서 계산할 수 있는 근사치일 뿐이다.
+  // (브라우저 저장소의 데모 접수 건 목록을 넘기던 인자는 데모 경로 제거와 함께
+  // 빈 배열이 되었다.)
   const estimatedIntakeNumber = useMemo(
-    () => (isValidDateString(draft.receivedAt) ? estimateIntakeNumber(draft.receivedAt, localCases) : null),
-    [draft.receivedAt, localCases]
+    () => (isValidDateString(draft.receivedAt) ? estimateIntakeNumber(draft.receivedAt, []) : null),
+    [draft.receivedAt]
   );
-
-  const productHistoryMatches = useMemo(() => {
-    if (!draft.modelName.trim() || !draft.lotNumber.trim() || !draft.serialNumber.trim()) return [];
-    const all = resolveAllRepairCases(localCases);
-    return findProductHistoryMatchesForDraft(all, draft);
-  }, [draft, localCases]);
 
   function setField<K extends keyof IntakeDraftData>(key: K, value: IntakeDraftData[K]) {
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);
@@ -312,10 +264,9 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
     updateDraft({ endUserCreateNew: true });
   }
 
-  // 고객사/End-User와 같은 원칙 — DB 모드에서만 쓰인다(referenceData가 null인
-  // 로컬 모드에서는 이 핸들러들이 호출될 UI 자체가 없다). 텍스트가 기존
-  // Model과 정확히(정규화 기준) 일치할 때만 productModelId가 채워지고, 그
-  // 외에는 SUPER_ADMIN/ADMIN만 "새 모델로 등록"을 눌러 명시적으로 확정한다.
+  // 고객사/End-User와 같은 원칙 — 텍스트가 기존 Model과 정확히(정규화 기준)
+  // 일치할 때만 productModelId가 채워지고, 그 외에는 SUPER_ADMIN/ADMIN만
+  // "새 모델로 등록"을 눌러 명시적으로 확정한다.
   function handleModelNameChange(text: string) {
     const match = productModelOptions.find((m) => normalizeEntityName(m.name) === normalizeEntityName(text));
     updateDraft({ modelName: text, productModelId: match?.id ?? "", productModelCreateNew: false });
@@ -389,10 +340,7 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
     // even if a click somehow lands before the disabled attribute commits.
     if (isSubmitting) return;
 
-    const fieldErrors = validateDraft(draft, {
-      requireProductModelSelection: writeSource === "database",
-      canRegisterProductModel,
-    });
+    const fieldErrors = validateDraft(draft, { canRegisterProductModel });
     const trimmedIntakeNumberOverride = intakeNumberOverride.trim();
     if (trimmedIntakeNumberOverride && !isValidIntakeNumberFormat(trimmedIntakeNumberOverride)) {
       fieldErrors.intakeNumber = "인수번호 형식이 올바르지 않습니다. (예: D260601)";
@@ -437,49 +385,22 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
       contactEmail: draft.contactEmail,
     };
 
-    if (writeSource === "database") {
-      setIsSubmitting(true);
-      try {
-        const result = await createRepairCaseAction(input, idempotencyKey);
-        if (!result.ok) {
-          if (result.fieldErrors) {
-            setErrors((prev) => ({ ...prev, ...result.fieldErrors }));
-            focusFirstInvalid(result.fieldErrors as Partial<Record<FieldKey, string>>);
-          }
-          setSubmitError(result.message || RESULT_CODE_MESSAGES[result.code]);
-          return;
+    setIsSubmitting(true);
+    try {
+      const result = await createRepairCaseAction(input, idempotencyKey);
+      if (!result.ok) {
+        if (result.fieldErrors) {
+          setErrors((prev) => ({ ...prev, ...result.fieldErrors }));
+          focusFirstInvalid(result.fieldErrors as Partial<Record<FieldKey, string>>);
         }
-        clear();
-        router.push(`/repair-cases/${result.id}?registered=1`);
-      } finally {
-        setIsSubmitting(false);
+        setSubmitError(result.message || RESULT_CODE_MESSAGES[result.code]);
+        return;
       }
-      return;
+      clear();
+      router.push(`/repair-cases/${result.id}?registered=1`);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const result = submitNewLocalCase(input);
-    if (!result.ok) {
-      const messages: Record<typeof result.reason, string> = {
-        INVALID_CUSTOMER: "선택한 고객사를 확인할 수 없습니다. 다시 선택해 주세요.",
-        INVALID_END_USER: "선택한 End-User가 고객사와 일치하지 않습니다. 다시 선택해 주세요.",
-        INVALID_ENGINEER: "선택한 담당 엔지니어를 확인할 수 없습니다. 다시 선택해 주세요.",
-        SEQUENCE_EXHAUSTED:
-          "선택한 달의 인수번호를 모두 사용했습니다(99건 초과). 다른 인수일을 선택해 주세요.",
-        STORAGE_CONFLICT: "저장 중 충돌이 발생했습니다. 다시 시도해 주세요.",
-        INTAKE_NUMBER_INVALID_FORMAT: "인수번호 형식이 올바르지 않습니다. (예: D260601)",
-        INTAKE_NUMBER_DUPLICATE: "이미 사용 중인 인수번호입니다. 다른 번호를 입력해 주세요.",
-      };
-      if (result.reason === "INTAKE_NUMBER_INVALID_FORMAT" || result.reason === "INTAKE_NUMBER_DUPLICATE") {
-        const intakeNumberFieldErrors = { intakeNumber: messages[result.reason] };
-        setErrors((prev) => ({ ...prev, ...intakeNumberFieldErrors }));
-        focusFirstInvalid(intakeNumberFieldErrors);
-      }
-      setSubmitError(messages[result.reason]);
-      return;
-    }
-
-    clear();
-    router.push(`/repair-cases/${result.repairCase.id}?registered=1`);
   }
 
   function handleClearClick() {
@@ -843,70 +764,53 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="modelName" className={labelClass}>Model *</label>
-            {referenceData ? (
-              <>
-                <input
-                  id="modelName"
-                  list="modelName-suggestions"
-                  autoComplete="off"
-                  ref={(el) => {
-                    fieldRefs.current.modelName = el;
-                  }}
-                  className={inputClass}
-                  placeholder="Model명을 입력하세요"
-                  value={draft.modelName}
-                  onChange={(e) => handleModelNameChange(e.target.value)}
-                  aria-invalid={Boolean(errors.modelName)}
-                  aria-describedby={errors.modelName ? "modelName-error" : "modelName-help"}
-                />
-                <datalist id="modelName-suggestions">
-                  {productModelSuggestions.map((m) => (
-                    <option key={m.id} value={m.name} />
-                  ))}
-                </datalist>
-                {errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
-                {!draft.productModelId && draft.modelName.trim() && (
-                  draft.productModelCreateNew ? (
-                    <p id="modelName-help" className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
-                      ✓ 새 Model &apos;{draft.modelName.trim()}&apos;로 등록됩니다.{" "}
-                      <button
-                        type="button"
-                        onClick={() => updateDraft({ productModelCreateNew: false })}
-                        className="underline"
-                      >
-                        취소
-                      </button>
-                    </p>
-                  ) : canRegisterProductModel ? (
-                    <button
-                      type="button"
-                      id="modelName-help"
-                      onClick={handleCreateNewProductModel}
-                      className="mt-1 text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                    >
-                      새 모델로 등록: &apos;{draft.modelName.trim()}&apos;
-                    </button>
-                  ) : (
-                    <p id="modelName-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      등록된 Model 중에서 선택해 주세요. 목록에 없다면 관리자에게 등록을 요청해 주세요.
-                    </p>
-                  )
-                )}
-              </>
-            ) : (
-              <input
-                id="modelName"
-                ref={(el) => {
-                  fieldRefs.current.modelName = el;
-                }}
-                className={inputClass}
-                value={draft.modelName}
-                onChange={(e) => setField("modelName", e.target.value)}
-                aria-invalid={Boolean(errors.modelName)}
-                aria-describedby={errors.modelName ? "modelName-error" : undefined}
-              />
+            <input
+              id="modelName"
+              list="modelName-suggestions"
+              autoComplete="off"
+              ref={(el) => {
+                fieldRefs.current.modelName = el;
+              }}
+              className={inputClass}
+              placeholder="Model명을 입력하세요"
+              value={draft.modelName}
+              onChange={(e) => handleModelNameChange(e.target.value)}
+              aria-invalid={Boolean(errors.modelName)}
+              aria-describedby={errors.modelName ? "modelName-error" : "modelName-help"}
+            />
+            <datalist id="modelName-suggestions">
+              {productModelSuggestions.map((m) => (
+                <option key={m.id} value={m.name} />
+              ))}
+            </datalist>
+            {errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
+            {!draft.productModelId && draft.modelName.trim() && (
+              draft.productModelCreateNew ? (
+                <p id="modelName-help" className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  ✓ 새 Model &apos;{draft.modelName.trim()}&apos;로 등록됩니다.{" "}
+                  <button
+                    type="button"
+                    onClick={() => updateDraft({ productModelCreateNew: false })}
+                    className="underline"
+                  >
+                    취소
+                  </button>
+                </p>
+              ) : canRegisterProductModel ? (
+                <button
+                  type="button"
+                  id="modelName-help"
+                  onClick={handleCreateNewProductModel}
+                  className="mt-1 text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                >
+                  새 모델로 등록: &apos;{draft.modelName.trim()}&apos;
+                </button>
+              ) : (
+                <p id="modelName-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  등록된 Model 중에서 선택해 주세요. 목록에 없다면 관리자에게 등록을 요청해 주세요.
+                </p>
+              )
             )}
-            {!referenceData && errors.modelName && <p id="modelName-error" className={errorClass}>{errors.modelName}</p>}
           </div>
           <div>
             <label htmlFor="lotNumber" className={labelClass}>L/N *</label>
@@ -966,10 +870,6 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
               onChange={(e) => setField("reasonForRemoval", e.target.value)}
             />
           </div>
-        </div>
-
-        <div className="mt-3">
-          <ProductHistoryNotice matches={productHistoryMatches} />
         </div>
       </section>
 
@@ -1046,11 +946,7 @@ export default function IntakeFormInner({ writeSource, referenceData, canRegiste
           aria-busy={isSubmitting}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
-          {isSubmitting
-            ? "저장 중..."
-            : writeSource === "database"
-              ? "A/S 접수 등록"
-              : "A/S 접수 등록 (로컬 데모)"}
+          {isSubmitting ? "저장 중..." : "A/S 접수 등록"}
         </button>
       </div>
     </form>
