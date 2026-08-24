@@ -19,7 +19,7 @@ import {
 } from "@/lib/domain/workflow-kind";
 import { useIntakeDraft } from "@/lib/domain/local/use-intake-draft";
 import type { IntakeDraftData } from "@/lib/domain/local/draft-storage";
-import { estimateIntakeNumber, isValidIntakeNumberFormat } from "@/lib/domain/local/intake-number";
+import { isValidIntakeNumberFormat } from "@/lib/domain/local/intake-number";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
@@ -209,15 +209,12 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
     [draft.modelName, productModelOptions]
   );
 
-  // 화면 표시용 "예상 인수번호"다. 실제 채번은 제출 시점에 서버가
-  // repair_case_intake_sequences로 수행하며(0001 마이그레이션), 이 미리보기는
-  // 그 시퀀스를 조회하지 않는다 — 브라우저에서 계산할 수 있는 근사치일 뿐이다.
-  // (브라우저 저장소의 데모 접수 건 목록을 넘기던 인자는 데모 경로 제거와 함께
-  // 빈 배열이 되었다.)
-  const estimatedIntakeNumber = useMemo(
-    () => (isValidDateString(draft.receivedAt) ? estimateIntakeNumber(draft.receivedAt, []) : null),
-    [draft.receivedAt]
-  );
+  // "예상 인수번호" 미리보기는 화면에서 뺐다. 실제 채번은 제출 시점에 서버가
+  // repair_case_intake_sequences로 수행하며(0001 마이그레이션), 브라우저는 그
+  // 시퀀스를 조회할 수 없다 — 데모 경로가 사라진 뒤로는 그달 내내 같은 고정값만
+  // 내놓아 서버가 실제로 주는 번호와 어긋났다. 사용자에게 틀린 번호를 단언하느니
+  // 아무 번호도 보이지 않는 편이 낫다. (estimateIntakeNumber 자체는 데모 계층
+  // 정리에서 함께 다룬다.)
 
   function setField<K extends keyof IntakeDraftData>(key: K, value: IntakeDraftData[K]) {
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);
@@ -434,7 +431,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">워크플로 / 예상 인수번호</h2>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">워크플로 / 인수번호</h2>
         {/* 이 섹션의 입력 4개(종류/유상·무상/인수번호/보고서번호)는 넓은
             화면에서 한 줄에 놓인다 — 좁아지면 2열, 모바일은 1열. */}
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -483,7 +480,6 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
                 fieldRefs.current.intakeNumber = el;
               }}
               className={inputClass}
-              placeholder={estimatedIntakeNumber ?? undefined}
               value={intakeNumberOverride}
               onChange={(e) => setIntakeNumberOverride(e.target.value)}
               aria-invalid={Boolean(errors.intakeNumber)}
@@ -493,7 +489,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               <p id="intakeNumber-error" className={errorClass}>{errors.intakeNumber}</p>
             ) : (
               <p id="intakeNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                비워두면 예상 인수번호({estimatedIntakeNumber ?? "-"})가 자동으로 채번됩니다. 직접 입력한 값은 제출 시 형식과 중복 여부를 다시 확인합니다.
+                비워두면 제출 시 서버가 인수일 기준으로 자동 채번합니다. 직접 입력한 값은 제출 시 형식과 중복 여부를 다시 확인합니다.
               </p>
             )}
           </div>
