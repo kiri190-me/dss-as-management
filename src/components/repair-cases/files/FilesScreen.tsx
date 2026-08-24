@@ -27,7 +27,6 @@ import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case
 import {
   ATTACHMENT_CATEGORY_CODES,
   attachmentCategoryLabels,
-  malwareScanStatusLabels,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import {
@@ -48,6 +47,7 @@ import {
 } from "@/lib/server/actions/attachments";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import InAppCamera from "./InAppCamera";
+import StoredAttachmentList from "./StoredAttachmentList";
 import AttachmentCardList from "./AttachmentCardList";
 import AttachmentEventTimeline from "./AttachmentEventTimeline";
 import AttachmentFilters from "./AttachmentFilters";
@@ -179,31 +179,60 @@ function DatabaseFilesScreen({
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   // 지우기·되살리기 다이얼로그. 데모 화면이 쓰던 컴포넌트를 그대로 재사용한다.
-  const [pendingDelete, setPendingDelete] = useState<RepairCaseAttachmentListItem | null>(null);
+  // 지우기는 **여러 건을 함께** 받는다 — 목록에서 여러 개를 골라 한 번에
+  // 지울 수 있고, 한 건짜리는 길이 1인 목록일 뿐이다. 확인 창을 한 번만 띄우려면
+  // 사유도 한 번만 받아야 하므로 이 모양이 자연스럽다.
+  const [pendingDeletes, setPendingDeletes] = useState<RepairCaseAttachmentListItem[]>([]);
   const [pendingRestore, setPendingRestore] = useState<TrashedAttachmentListItem | null>(null);
   const [isMutating, setIsMutating] = useState(false);
 
   async function handleDeleteConfirm(reason: string) {
-    if (!pendingDelete) return;
+    if (pendingDeletes.length === 0) return;
     setIsMutating(true);
     setStatusMessage(null);
     try {
-      const result = await softDeleteAttachmentAction({
-        attachmentId: pendingDelete.id,
-        repairCaseId: resolved.id,
-        reason,
-      });
-      if (!result.ok) {
-        setStatusMessage({ type: "error", text: result.message });
+      // 한 건씩 차례로 보낸다. 한 건이 막혀도(잠긴 건 등) 나머지는 지운다 —
+      // 여러 개를 고른 사람에게 "하나가 안 되니 전부 취소"는 도움이 안 된다.
+      const failures: { name: string; reason: string }[] = [];
+      let deleted = 0;
+      for (const target of pendingDeletes) {
+        const result = await softDeleteAttachmentAction({
+          attachmentId: target.id,
+          repairCaseId: resolved.id,
+          reason,
+        });
+        if (result.ok) deleted += 1;
+        else failures.push({ name: target.originalFileName, reason: result.message });
+      }
+
+      if (deleted === 0) {
+        setStatusMessage({
+          type: "error",
+          text: failures.map((item) => `${item.name}: ${item.reason}`).join(" / "),
+        });
+        return;
+      }
+      if (failures.length > 0) {
+        setStatusMessage({
+          type: "error",
+          text: `${deleted}건을 휴지통으로 옮겼고 ${failures.length}건은 빠졌습니다 — ${failures
+            .map((item) => `${item.name}(${item.reason})`)
+            .join(", ")}`,
+        });
+        setPendingDeletes([]);
+        router.refresh();
         return;
       }
       setStatusMessage({
         type: "success",
         // 실물이 남는다는 사실을 그때 알려 준다 — 되살릴 수 있다는 뜻이고,
         // 완전히 사라진 줄 알고 다시 올리는 일을 막는다.
-        text: `${pendingDelete.originalFileName} 을(를) 휴지통으로 옮겼습니다. 되살릴 수 있습니다.`,
+        text:
+          deleted === 1
+            ? `${pendingDeletes[0].originalFileName} 을(를) 휴지통으로 옮겼습니다. 되살릴 수 있습니다.`
+            : `${deleted}건을 휴지통으로 옮겼습니다. 되살릴 수 있습니다.`,
       });
-      setPendingDelete(null);
+      setPendingDeletes([]);
       router.refresh();
     } finally {
       setIsMutating(false);
@@ -710,72 +739,12 @@ function DatabaseFilesScreen({
           아직 이 접수 건에 올라온 파일이 없습니다.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-              <tr>
-                <th scope="col" className="px-3 py-2 font-medium">파일명</th>
-                <th scope="col" className="px-3 py-2 font-medium">분류</th>
-                <th scope="col" className="px-3 py-2 font-medium">크기</th>
-                <th scope="col" className="px-3 py-2 font-medium">검사</th>
-                <th scope="col" className="px-3 py-2 font-medium">올린 사람</th>
-                <th scope="col" className="px-3 py-2 font-medium">올린 시각</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">작업</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {attachments.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-3 py-2">
-                    <span className="text-zinc-900 dark:text-zinc-50">{item.originalFileName}</span>
-                    {item.description && (
-                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">{item.description}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">
-                    {attachmentCategoryLabels[item.category]}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-700 dark:text-zinc-300">
-                    {formatBytes(item.fileSize)}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-700 dark:text-zinc-300">
-                    {malwareScanStatusLabels[item.malwareScanStatus]}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-700 dark:text-zinc-300">{item.uploadedByName}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-700 dark:text-zinc-300">
-                    {formatTimestamp(item.uploadedAt)}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {/*
-                        평범한 링크다. fetch로 받아 Blob을 만들면 파일 전체가
-                        브라우저 메모리에 올라가고, 서버가 붙여 준
-                        Content-Disposition의 원본 파일명도 잃는다. 링크는
-                        브라우저가 스트림 그대로 디스크에 흘려 준다.
-                      */}
-                      <a
-                        href={`/api/attachments/${item.id}/download`}
-                        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                      >
-                        내려받기
-                      </a>
-                      {canManage && (
-                        <button
-                          type="button"
-                          onClick={() => setPendingDelete(item)}
-                          disabled={isMutating}
-                          className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
-                        >
-                          지우기
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <StoredAttachmentList
+          attachments={attachments}
+          canManage={canManage}
+          onDeleteMany={setPendingDeletes}
+          isBusy={isMutating}
+        />
       )}
 
       {trashedAttachments.length > 0 && (
@@ -825,11 +794,15 @@ function DatabaseFilesScreen({
       </p>
 
       <DeleteAttachmentDialog
-        isOpen={pendingDelete !== null}
-        displayName={pendingDelete?.originalFileName ?? ""}
+        isOpen={pendingDeletes.length > 0}
+        displayName={
+          pendingDeletes.length === 1
+            ? pendingDeletes[0].originalFileName
+            : `${pendingDeletes.length}건`
+        }
         isSubmitting={isMutating}
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setPendingDelete(null)}
+        onCancel={() => setPendingDeletes([])}
       />
       <RestoreAttachmentDialog
         isOpen={pendingRestore !== null}

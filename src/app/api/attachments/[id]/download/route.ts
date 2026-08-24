@@ -73,13 +73,25 @@ function fail(status: number, code: FailureCode, message: string): NextResponse 
  * 호환을 위해 둘 다 보내되, 옛 형식에는 ASCII 로 접을 수 없는 글자를 `_`로
  * 바꾼 값을 넣는다(그 값을 읽는 브라우저는 어차피 한글을 못 쓴다).
  */
-function contentDispositionFor(originalFileName: string): string {
+function contentDispositionFor(originalFileName: string, inline: boolean): string {
   const asciiFallback = originalFileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "_");
   const encoded = encodeURIComponent(originalFileName);
-  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+  const kind = inline ? "inline" : "attachment";
+  return `${kind}; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+/**
+ * 화면 안에서 그대로 보여 줘도 되는 형식인가.
+ *
+ * `inline`은 브라우저에게 "내려받지 말고 열어라"라고 말하는 것이라, 여는
+ * 순간 그 내용이 이 사이트의 것으로 실행될 수 있는 형식은 절대 넣으면 안
+ * 된다 — 특히 SVG와 HTML이 그렇다(그 안의 스크립트가 우리 도메인에서 돈다).
+ * 지금 허용목록에 SVG는 없지만, 나중에 누가 더할 때를 대비해 **여기서도
+ * 따로** 좁혀 둔다. 목록에 없는 형식은 전부 첨부로 내려간다.
+ */
+const INLINE_SAFE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   // ── 1) 로그인 ──────────────────────────────────────────────────────────
   const session = await readSession();
   if (!session) {
@@ -105,6 +117,12 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   if (!(await hasPermission(actingUser.role, "repairCases.files", "READ"))) {
     return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
   }
+
+  // 화면 안에서 그대로 보여 달라는 요청인가. 형식이 안전 목록에 없으면
+  // 요청과 무관하게 첨부로 내린다 — 클라이언트가 정하게 두지 않는다.
+  const inline =
+    request.nextUrl.searchParams.get("inline") === "1" &&
+    INLINE_SAFE_MIME_TYPES.has(attachment.mimeType);
 
   // ── 4) 허용 판정 ───────────────────────────────────────────────────────
   const decision = decideAttachmentDownload({
@@ -149,16 +167,27 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   }
 
   // ── 6) 감사 기록 — 스트림을 돌려주기 전에 남긴다 ───────────────────────
-  // 응답을 먼저 반환하면 스트림이 끝나는 시점을 이 함수가 알 수 없어 기록이
-  // 누락될 수 있다. 누가 무엇을 받아 갔는지는 파일 자체보다 오래 남아야 한다
-  // (감사 로그 3년 보관).
-  await recordAttachmentDownload({
-    attachmentId: attachment.id,
-    actorUserId: actingUser.id,
-    repairCaseId: attachment.repairCaseId,
-    originalFileName: attachment.originalFileName,
-    fileSize: attachment.fileSize,
-  });
+  //
+  // ⚠️ **미리보기(inline)는 기록하지 않는다.** 목록에 썸네일이 열 개 있으면
+  // 화면을 한 번 여는 것만으로 FILE_DOWNLOAD가 열 줄 쌓인다. 감사 로그는 3년
+  // 보관 대상이고, 그렇게 쌓인 기록은 "누가 무엇을 가져갔는가"를 찾을 수 없게
+  // 만든다 — 남기는 것이 목적이 아니라 **찾을 수 있게 하는 것**이 목적이다.
+  //
+  // 그래서 기록하는 것은 **파일을 실제로 가져가는 행위**(attachment)뿐이다.
+  // 화면 안에서 보는 것은 목록을 여는 일의 일부로 본다. 이 구분을 바꾸려면
+  // SECURITY_POLICY.md의 감사 정책과 함께 정해야 한다.
+  //
+  // 응답을 먼저 반환하지 않는 이유는 따로 있다. 스트림이 끝나는 시점을 이
+  // 함수가 알 수 없어 기록이 누락될 수 있다.
+  if (!inline) {
+    await recordAttachmentDownload({
+      attachmentId: attachment.id,
+      actorUserId: actingUser.id,
+      repairCaseId: attachment.repairCaseId,
+      originalFileName: attachment.originalFileName,
+      fileSize: attachment.fileSize,
+    });
+  }
 
   // ── 7) 전송 ────────────────────────────────────────────────────────────
   return new NextResponse(stream, {
@@ -166,7 +195,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     headers: {
       "Content-Type": attachment.mimeType,
       "Content-Length": String(attachment.fileSize),
-      "Content-Disposition": contentDispositionFor(attachment.originalFileName),
+      "Content-Disposition": contentDispositionFor(attachment.originalFileName, inline),
       // 브라우저가 내용을 보고 형식을 다시 추측하지 않게 한다. 추측을 허용하면
       // mime_type 검증을 통과한 파일이 다른 형식으로 실행될 수 있다.
       "X-Content-Type-Options": "nosniff",
