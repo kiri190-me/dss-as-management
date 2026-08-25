@@ -29,7 +29,7 @@ export async function seedRealisticDemoDataset() {
   if (!actors.length) throw new Error("DEV demo seed requires at least one active user");
 
   const workflowRows = await db
-    .select({ code: workflowTemplates.code, versionId: workflowVersions.id, stepId: workflowSteps.id, order: workflowSteps.stepOrder })
+    .select({ code: workflowTemplates.code, versionId: workflowVersions.id, stepId: workflowSteps.id, order: workflowSteps.stepOrder, key: workflowSteps.key })
     .from(workflowTemplates)
     .innerJoin(workflowVersions, and(eq(workflowVersions.workflowTemplateId, workflowTemplates.id), eq(workflowVersions.isCurrent, true)))
     .innerJoin(workflowSteps, and(eq(workflowSteps.workflowVersionId, workflowVersions.id), eq(workflowSteps.isActive, true)));
@@ -93,7 +93,8 @@ export async function seedRealisticDemoDataset() {
       customerRequestedDueDate: new Date(received.getTime() + 14 * 86400000).toISOString().slice(0, 10),
       internalTargetInspectionCompletionDate: new Date(received.getTime() + 3 * 86400000).toISOString().slice(0, 10),
       internalTargetShipmentDate: new Date(received.getTime() + 10 * 86400000).toISOString().slice(0, 10),
-      actualShipmentDate: i % 5 === 0 ? new Date(received.getTime() + 9 * 86400000).toISOString().slice(0, 10) : null,
+      // 출하일은 단계가 실제로 출하 완료일 때만 찍는다 — 앱 본체가 만들지 않는 조합(출하일은 있는데 단계는 인수점검)을 시드가 만들지 않게 한다.
+      actualShipmentDate: step.key === "shipment_completed" ? new Date(received.getTime() + 9 * 86400000).toISOString().slice(0, 10) : null,
       legacyReportNumber: null, delayReason: i % 11 === 0 ? "DEMO 부품 입고 대기" : null, isLocked: false,
       reportedSymptom: ["출력 불안정", "매칭 불량", "전원 인가 불가", "간헐 알람"][i % 4],
       intakeInspectionResult: "DEMO 외관 및 기본 동작 점검", currentDiagnosisSummary: "DEMO 원인 분석 및 수리 진행",

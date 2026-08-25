@@ -42,8 +42,17 @@ export function applyWorkflowOverride(
   }
 
   const effectiveStatus = override.currentStatus;
+  // 지연 판정에 넘기는 출하일은 반드시 재정의가 반영된 값이어야 한다 —
+  // 원본 resolved.actualShipmentDate를 넘기면 워크플로 재정의로 출하 완료된
+  // 건이 화면에는 출하일이 찍힌 채 여전히 "납기 지연"으로 남는다.
+  const effectiveActualShipmentDate =
+    override.shipmentCompletedAt?.slice(0, 10) ?? resolved.actualShipmentDate;
   const effectiveIsOverdue = isRepairCaseOverdue(
-    { status: effectiveStatus, internalTargetShipmentDate: resolved.internalTargetShipmentDate },
+    {
+      status: effectiveStatus,
+      internalTargetShipmentDate: resolved.internalTargetShipmentDate,
+      actualShipmentDate: effectiveActualShipmentDate,
+    },
     referenceDate
   );
 
@@ -51,7 +60,7 @@ export function applyWorkflowOverride(
     ...resolved,
     effectiveStatus,
     effectiveWorkflowStepKey: override.currentWorkflowStepKey,
-    effectiveActualShipmentDate: override.shipmentCompletedAt?.slice(0, 10) ?? resolved.actualShipmentDate,
+    effectiveActualShipmentDate,
     effectiveIsOverdue,
     holdState: override.holdState,
     hasWorkflowOverride: true,

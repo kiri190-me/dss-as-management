@@ -363,6 +363,15 @@ export type WorkflowStep = {
  * 지났고 아직 출하 완료되지 않은 경우). RepairStatus/exception status에
  * 포함하지 않는다.
  *
+ * "출하 완료"는 두 가지 사실 중 하나로 확인한다 — 워크플로 상태
+ * (SHIPMENT_COMPLETED)와 실제 출하일(actualShipmentDate)이다. 상태값 하나에만
+ * 기대면, 출하일은 찍혀 있는데 워크플로 단계가 따라가지 못한 건이 "출하일이
+ * 적혀 있는데 그 옆에 납기 지연 배지가 붙는" 모순된 화면이 된다. 출하일이
+ * 찍혀 있으면 그 물건은 이미 나간 것이고, 목표일보다 늦게 나갔더라도 지금
+ * 조치가 필요한 건은 아니다 — 이 판정은 역사적 기록이 아니라 살아 있는
+ * 경보이므로 경보에서 빠지는 것이 맞다. actualShipmentDate는 여기서
+ * 목표일 대용이 아니라 오직 *빼는 조건*으로만 쓴다.
+ *
  * 비교는 반드시 한국 달력 날짜("YYYY-MM-DD" 문자열)끼리 한다.
  * internalTargetShipmentDate는 PostgreSQL `date` 컬럼에서 온 날짜 문자열이라
  * new Date()로 파싱하면 UTC 자정이 되는데, 여기에 실제 시각을 그대로 비교하면
@@ -374,10 +383,13 @@ export type WorkflowStep = {
  * `now`는 테스트 주입용이다(기본값은 실제 현재 시각).
  */
 export function isRepairCaseOverdue(
-  repairCase: Pick<RepairCase, "status" | "internalTargetShipmentDate">,
+  repairCase: Pick<RepairCase, "status" | "internalTargetShipmentDate" | "actualShipmentDate">,
   now: Date = new Date()
 ): boolean {
   if (repairCase.status === "SHIPMENT_COMPLETED") {
+    return false;
+  }
+  if (repairCase.actualShipmentDate) {
     return false;
   }
   if (!repairCase.internalTargetShipmentDate) {

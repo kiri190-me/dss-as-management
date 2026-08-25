@@ -10,12 +10,13 @@ import { isRepairCaseOverdue, type RepairCase } from "./types";
  * 지연으로 뒤집힌다. 아래 KST 경계 두 케이스가 그 회귀를 막는 자물쇠다.
  */
 
-type OverdueInput = Pick<RepairCase, "status" | "internalTargetShipmentDate">;
+type OverdueInput = Pick<RepairCase, "status" | "internalTargetShipmentDate" | "actualShipmentDate">;
 
 function subject(overrides: Partial<OverdueInput> = {}): OverdueInput {
   return {
     status: "IN_REPAIR",
     internalTargetShipmentDate: "2026-08-25",
+    actualShipmentDate: null,
     ...overrides,
   };
 }
@@ -77,5 +78,53 @@ test("KST 경계: 한국 08-26 00:30(UTC 08-25 15:30)에 목표일 08-25는 지�
   assert.equal(
     isRepairCaseOverdue(subject({ internalTargetShipmentDate: "2026-08-25" }), alreadyNextDayKst),
     true
+  );
+});
+
+/**
+ * 아래 세 케이스가 "출하일이 찍힌 건은 지연이 아니다" 규칙의 자물쇠다.
+ * 출하일이 있으면 그 물건은 이미 나간 것이므로, 워크플로 단계가 아직
+ * SHIPMENT_COMPLETED에 닿지 않았어도 살아 있는 경보에서는 빠진다.
+ */
+
+test("목표일이 지났어도 실제 출하일이 찍혀 있으면 납기 지연이 아니다", () => {
+  assert.equal(
+    isRepairCaseOverdue(
+      subject({
+        status: "IN_REPAIR",
+        internalTargetShipmentDate: "2026-08-10",
+        actualShipmentDate: "2026-08-09",
+      }),
+      MIDDAY_KST
+    ),
+    false
+  );
+});
+
+test("목표일이 지났고 실제 출하일이 없으면(null) 여전히 납기 지연이다", () => {
+  assert.equal(
+    isRepairCaseOverdue(
+      subject({
+        status: "IN_REPAIR",
+        internalTargetShipmentDate: "2026-08-10",
+        actualShipmentDate: null,
+      }),
+      MIDDAY_KST
+    ),
+    true
+  );
+});
+
+test("실제 출하일이 목표일보다 늦어도(늦게 나갔어도) 이미 출하됐으므로 납기 지연이 아니다", () => {
+  assert.equal(
+    isRepairCaseOverdue(
+      subject({
+        status: "IN_REPAIR",
+        internalTargetShipmentDate: "2026-08-10",
+        actualShipmentDate: "2026-08-20",
+      }),
+      MIDDAY_KST
+    ),
+    false
   );
 });

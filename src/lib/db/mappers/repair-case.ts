@@ -140,7 +140,11 @@ export function mapRepairCaseRow(
     actualShipmentDate: row.actualShipmentDate,
     createdAt: createdAtIso,
     isOverdue: isRepairCaseOverdue(
-      { status, internalTargetShipmentDate: row.internalTargetShipmentDate },
+      {
+        status,
+        internalTargetShipmentDate: row.internalTargetShipmentDate,
+        actualShipmentDate: row.actualShipmentDate,
+      },
       referenceDate
     ),
     // 라벨이 없으면 "-" — 도메인에서 없앤 레거시 코드가 만에 하나 조인되어도
