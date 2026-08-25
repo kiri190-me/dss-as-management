@@ -427,6 +427,11 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   // 역할 검사가 없어 페이지 가드(= 설정)가 이미 유일한 관문이었고, 나머지 둘은
   // 이번에 옮겼다.
   "dashboard",
+  // 주간보고도 대시보드와 같다 — 역할 검사가 하나도 없고 페이지 가드
+  // (requireAreaAccessForCurrentUser)가 유일한 관문이다. 여기 넣지 않으면
+  // 권한 설정 화면이 "아직 설정이 최종 판정이 아니다"라고 표시하는데, 그건
+  // 사실이 아니다.
+  "weeklyReport",
   "myActiveWork",
   "repairCaseNew",
   "excelKyosanIntakeList",

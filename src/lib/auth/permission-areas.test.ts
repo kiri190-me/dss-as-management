@@ -149,6 +149,26 @@ test("상한은 그 영역에서 의미 있는 최고 수준을 넘지 않는다
   }
 });
 
+test("주간보고는 조회 전용이다 — 모든 역할의 상한이 읽기다", () => {
+  // 볼 것밖에 없는 화면이다(입력칸도 저장 버튼도 없다). 상한이 쓰기 이상으로
+  // 열리면 고른 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지
+  // 않고, 반대로 접근 불가로 떨어지면 permission-baseline.ts 의 case 를 빠뜨린
+  // 것이라 최고관리자까지 화면에서 튕긴다.
+  for (const role of ROLE_CODES) {
+    assert.equal(baselinePermissionLevel("weeklyReport", role), "READ", role);
+  }
+});
+
+test("주간보고는 대시보드와 똑같은 상한을 갖는다 — 하위메뉴를 따로 좁히지 않는다", () => {
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      baselinePermissionLevel("weeklyReport", role),
+      baselinePermissionLevel("dashboard", role),
+      `${role}: 주간보고 상한이 대시보드와 갈렸다`
+    );
+  }
+});
+
 test("최고관리자는 사용자 관리를 관리 수준으로 갖는다 — 설정을 되돌릴 사람이 남아야 한다", () => {
   assert.equal(baselinePermissionLevel("users", "SUPER_ADMIN"), "MANAGE");
 });

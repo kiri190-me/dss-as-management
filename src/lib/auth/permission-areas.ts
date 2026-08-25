@@ -91,6 +91,15 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "READ",
   },
   {
+    key: "weeklyReport",
+    label: "주간보고",
+    // 대시보드의 하위메뉴다(navigation.ts 의 parentKey). 상한이 읽기인 것도
+    // 대시보드와 같은 이유다 — 볼 것밖에 없는 화면이라 '쓰기'를 내밀면 고른
+    // 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지 않는다.
+    description: "고객사에 보내는 주간 현황판(고객사·종류별 상태 집계와 상세)",
+    maxMeaningfulLevel: "READ",
+  },
+  {
     key: "repairCases",
     label: "전체 A/S 현황",
     description: "접수 건 목록·상세. 쓰기는 내용 수정, 관리는 삭제·복원",

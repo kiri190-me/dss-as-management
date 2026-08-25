@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { navItems, navGroups, filterNavItemsForAccess, type NavItem } from "@/lib/navigation";
+import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
 import SidebarFooter from "./SidebarFooter";
 
@@ -38,9 +38,14 @@ function navLinkClassName(isActive: boolean): string {
 
 /**
  * Checkpoint 2A (grouped sidebar) + refinement passes. 대시보드 renders
- * standalone (never inside a group, per the approved IA); every other item
- * is partitioned into navigation.ts's navGroups. Role-based visibility is
- * still decided ONLY by filterNavItemsForAccess (unchanged) — grouping is a
+ * standalone (never inside a group, per the approved IA), now with its own
+ * 하위메뉴 indented directly beneath it (NavItem.parentKey — 주간보고,
+ * 2026-08-25). 하위메뉴는 그룹이 아니다: 접었다 펴는 구획을 만들지 않고 부모
+ * 링크 바로 아래에 한 단 들여쓴 링크로만 그린다 — 대시보드가 단독으로 서 있는
+ * 모양은 그대로 두면서 "이 화면에 딸린 화면"이라는 관계만 보이게 하는 방법이다.
+ * Every other item is partitioned into navigation.ts's navGroups. Role-based
+ * visibility is still decided ONLY by filterNavItemsForAccess (unchanged) —
+ * the submenu is filtered through that same list, never a second gate; grouping is a
  * pure display concern layered on top, never a second gate: a group whose
  * every child is filtered out for this role renders nothing at all (no
  * empty header).
@@ -70,6 +75,8 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
 
   const dashboardItem = visibleByKey.get(DASHBOARD_KEY);
+  // 대시보드의 하위메뉴 — 볼 수 있는 것만 남긴다(권한 필터를 거친 목록에서 고른다).
+  const dashboardChildren = childNavItems(visibleItems, DASHBOARD_KEY);
 
   function toggleGroup(key: string) {
     setCollapsedGroupKeys((prev) => {
@@ -116,6 +123,15 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
         {!isCollapsed && (
           <>
             {dashboardItem && renderItem(dashboardItem)}
+            {/* 대시보드에 딸린 화면들. 부모가 보이지 않는 사람에게는 하위메뉴도
+                그리지 않는다 — 부모 없이 떠 있는 들여쓴 링크는 어디에 딸린
+                것인지 알 수 없다. 각 항목의 표시 여부는 여전히
+                filterNavItemsForAccess 가 정한다(visibleByKey 에 없으면 없다). */}
+            {dashboardItem && dashboardChildren.length > 0 && (
+              <div className="ml-3 flex flex-col gap-0.5 border-l border-zinc-200 py-0.5 pl-2 dark:border-zinc-800">
+                {dashboardChildren.map(renderItem)}
+              </div>
+            )}
 
             {navGroups.map((group) => {
               const groupItems = group.itemKeys.map((key) => visibleByKey.get(key)).filter((item): item is NavItem => !!item);

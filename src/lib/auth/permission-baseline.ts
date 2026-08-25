@@ -129,6 +129,13 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       // 역할 검사 없음 — 볼 것밖에 없는 화면이다.
       return "READ";
 
+    case "weeklyReport":
+      // 대시보드의 하위메뉴이고, **볼 수 있는 역할도 대시보드와 같게** 둔다
+      // (승인된 결정). 여기를 빠뜨리면 default 로 떨어져 NONE 이 되고, 그러면
+      // 최고관리자까지 화면에서 튕긴다 — 이 저장소가 실제로 겪은 함정이라
+      // 이 파일 아래 default 주석이 그 경위를 적어 두고 있다.
+      return "READ";
+
     case "repairCases":
       return ladder({
         manage: canBulkDeleteRepairCases(role) || canRestoreRepairCases(role),

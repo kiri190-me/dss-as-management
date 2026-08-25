@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navItems, navGroups, filterNavItemsForRole } from "./navigation";
+import { navItems, navGroups, childNavItems, filterNavItemsForRole } from "./navigation";
 
 /**
  * Regression test for nav-visibility gating. This is a UX check only;
@@ -44,6 +44,11 @@ import { navItems, navGroups, filterNavItemsForRole } from "./navigation";
  * (canViewDomesticOrders)는 SUPER_ADMIN/ADMIN/SALES 로, 이 목록에서 처음
  * 나오는 모양이다. 금액과 입금 정보가 있는 화면이라 고객사·제품 모델과 달리
  * AS_ENGINEER 까지 빠진다(domestic-order-authorization.ts).
+ *
+ * 주간보고(2026-08-25)는 "weeklyReport"를 더한다 — **역할 술어가 없는** 항목이다.
+ * 대시보드의 하위메뉴이고, 볼 수 있는 역할을 대시보드와 같게 두기로 승인됐다.
+ * 대시보드에 isVisibleForRole 이 없으므로 여기에도 없다 — 따로 좁히면 부모는
+ * 보이는데 자식만 사라지는 사이드바가 된다.
  */
 
 test("navigation: the approved feature entries are the only role-gated items", () => {
@@ -133,18 +138,82 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / SALES see the domesticOrders 
   }
 });
 
+test("filterNavItemsForRole: 주간보고는 대시보드와 정확히 같은 역할에게 보인다", () => {
+  // 승인된 결정이다 — 하위메뉴를 부모보다 좁히면 부모는 보이는데 그 아래
+  // 들여쓴 링크만 사라지는 사이드바가 되고, 넓히면 대시보드를 못 보는 사람에게
+  // 대시보드 자료가 열린다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    const visible = filterNavItemsForRole(navItems, role);
+    assert.equal(
+      visible.some((i) => i.key === "weeklyReport"),
+      visible.some((i) => i.key === "dashboard"),
+      `${role}: 주간보고와 대시보드의 표시 여부가 갈렸다`
+    );
+  }
+});
+
 /**
  * Checkpoint 2A — navGroups is a pure presentation grouping over navItems
  * (Sidebar's collapsible sections). "dashboard" is deliberately excluded
  * (rendered standalone) — every other navItems key must appear in exactly
  * one group, so a future new nav item can't silently end up ungrouped or
  * double-grouped, and no group can reference a key that doesn't exist.
+ *
+ * 2026-08-25 (주간보고) — 대시보드는 **여전히 단독이다.** 그 아래 붙은 주간보고는
+ * 그룹이 아니라 하위메뉴(NavItem.parentKey)이고, Sidebar 가 부모 링크 바로
+ * 아래에 들여써서 그린다. 그래서 그룹에 들어가지 않는 키가 이제 둘이다 —
+ * 단독인 "dashboard" 와 그 하위메뉴. 아래 테스트는 그 둘을 뺀 나머지가 여전히
+ * 정확히 한 그룹에 있음을 단언하고, 하위메뉴 쪽은 **그룹에 들어가면 안 된다**를
+ * 따로 단언한다(들어가면 사이드바에 같은 링크가 두 번 나온다).
  */
 
-test("navGroups: every non-dashboard navItem key appears in exactly one group", () => {
-  const nonDashboardKeys = navItems.map((i) => i.key).filter((key) => key !== "dashboard");
+/** 사이드바에서 그룹 밖에 그려지는 키 — 단독인 대시보드와 그 하위메뉴들. */
+function ungroupedKeys(): string[] {
+  return navItems.filter((i) => i.key === "dashboard" || i.parentKey !== undefined).map((i) => i.key);
+}
+
+test("navGroups: every navItem key except the standalone dashboard and its submenu appears in exactly one group", () => {
+  const outsideGroups = new Set(ungroupedKeys());
+  const groupableKeys = navItems.map((i) => i.key).filter((key) => !outsideGroups.has(key));
   const groupedKeys = navGroups.flatMap((g) => g.itemKeys);
-  assert.deepEqual([...groupedKeys].sort(), [...nonDashboardKeys].sort(), "every non-dashboard item must be grouped exactly once, no orphans or duplicates");
+  assert.deepEqual([...groupedKeys].sort(), [...groupableKeys].sort(), "every groupable item must be grouped exactly once, no orphans or duplicates");
+});
+
+test("navGroups: 그룹 밖에 그려지는 것은 대시보드와 그 하위메뉴뿐이다", () => {
+  // 이 목록이 늘어나는 것은 IA 변경이므로, 늘어난 사실이 여기서 먼저 드러나야
+  // 한다. 조용히 늘면 위 '정확히 한 그룹' 단언이 그만큼 약해진다.
+  assert.deepEqual(ungroupedKeys().sort(), ["dashboard", "weeklyReport"]);
+});
+
+test("하위메뉴는 어느 그룹에도 들어가지 않는다 — 들어가면 사이드바에 두 번 나온다", () => {
+  const groupedKeys = new Set(navGroups.flatMap((g) => g.itemKeys));
+  for (const item of navItems.filter((i) => i.parentKey !== undefined)) {
+    assert.equal(groupedKeys.has(item.key), false, `${item.key} 가 그룹에도 들어가 있다`);
+  }
+});
+
+test("하위메뉴의 부모는 실재하는 navItems 키다", () => {
+  const validKeys = new Set(navItems.map((i) => i.key));
+  for (const item of navItems.filter((i) => i.parentKey !== undefined)) {
+    assert.ok(validKeys.has(item.parentKey!), `${item.key} 의 부모 "${item.parentKey}" 를 찾을 수 없다`);
+    assert.notEqual(item.parentKey, item.key, `${item.key} 가 자기 자신의 하위메뉴다`);
+  }
+});
+
+test("childNavItems: 대시보드의 하위메뉴는 주간보고 하나다", () => {
+  assert.deepEqual(
+    childNavItems(navItems, "dashboard").map((i) => i.key),
+    ["weeklyReport"]
+  );
+  // 하위메뉴가 없는 항목은 빈 배열이다 — Sidebar 가 빈 들여쓰기 칸을 그리지 않는 근거다.
+  assert.deepEqual(childNavItems(navItems, "repairCases"), []);
+});
+
+test("주간보고는 대시보드 아래 주소를 쓴다 — 부모와 자식의 경로가 어긋나면 활성 표시가 엇갈린다", () => {
+  const dashboard = navItems.find((i) => i.key === "dashboard");
+  const weekly = navItems.find((i) => i.key === "weeklyReport");
+  assert.equal(dashboard?.href, "/dashboard");
+  assert.equal(weekly?.href, "/dashboard/weekly-report");
 });
 
 test("navGroups: every itemKey references a real navItems key", () => {
