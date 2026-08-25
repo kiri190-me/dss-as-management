@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import WeeklyReportDeliveryDeleteDialog from "./WeeklyReportDeliveryDeleteDialog";
@@ -408,13 +408,27 @@ function DeliveryBox({
  *
  * 차례(display_order)는 칸을 두지 않는다. 적지 않으면 null 이고 그 줄은 뒤로
  * 가는데, 매주 새로 적는 표라 적은 차례가 곧 사람이 뜻한 차례다.
+ *
+ * ── 평소에는 접혀 있다 ─────────────────────────────────────────────────
+ * 금주 목표 상자와 **같은 모양 · 같은 이유**다(GoalAddForm 헤더). 이 화면은 매주
+ * 넘겨 보는 문서라 평소에는 표만 보이면 된다. 여닫는 상태는 부르는 쪽이 들고 있고
+ * (이 폼은 열려 있을 때만 그려진다), 여기서는 접는 버튼 하나를 더 그릴 뿐이다.
+ *
+ * **추가에 성공해도 닫지 않는다** — 한 번에 여러 줄을 넣는 일이 흔하다. 성공하면
+ * 입력만 비운다(아래 submit).
  */
 function DeliveryAddForm({
+  formId,
   weekStart,
   repairCaseOptions,
+  onClose,
 }: {
+  /** 여는 버튼의 aria-controls 가 가리키는 id. useId 로 만든 값이다(부르는 쪽). */
+  formId: string;
   weekStart: string;
   repairCaseOptions: RepairCaseLinkOption[];
+  /** 접기. 사람이 `취소` 를 누를 때만 불린다 — 저장에 성공해도 부르지 않는다. */
+  onClose: () => void;
 }) {
   const router = useRouter();
   const [repairCaseId, setRepairCaseId] = useState("");
@@ -465,6 +479,7 @@ function DeliveryAddForm({
 
   return (
     <form
+      id={formId}
       className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-950"
       onSubmit={(event) => {
         event.preventDefault();
@@ -538,14 +553,27 @@ function DeliveryAddForm({
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
           RFG · MB 는 고르지 않습니다 — 고른 수리 건의 종류가 정합니다. 비고는 비워 두어도 됩니다.
         </p>
-        <button
-          type="submit"
-          className={primaryButtonClass}
-          disabled={isSubmitting}
-          aria-busy={isSubmitting}
-        >
-          {isSubmitting ? "추가 중..." : "줄 추가"}
-        </button>
+        <span className="flex flex-wrap items-center gap-1">
+          {/* 여는 버튼을 다시 누르는 것과 같은 일을 한다 — 폼 안에서도 닫을 수
+              있어야 한다. 폼은 접히면서 사라지므로 입력하던 값도 함께 없어진다
+              (다시 열면 빈 폼이다). 사람이 누를 때만 일어나는 일이다. */}
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={isSubmitting}
+            onClick={onClose}
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            className={primaryButtonClass}
+            disabled={isSubmitting}
+            aria-busy={isSubmitting}
+          >
+            {isSubmitting ? "추가 중..." : "줄 추가"}
+          </button>
+        </span>
       </div>
 
       {errorMessage && (
@@ -587,6 +615,20 @@ export default function WeeklyReportDeliveriesPanel({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteConflict, setIsDeleteConflict] = useState(false);
+  /**
+   * 줄 추가 폼이 펼쳐져 있는가. 기본은 접힘 — 금주 목표 상자와 같다
+   * (DeliveryAddForm 헤더).
+   *
+   * ⚠️ <details>/<summary> 를 쓰지 않는다. 이 저장소가 그것을 못 쓰는 자리에서
+   * 왜 평범한 상태 하나로 푸는지는 FilterDisclosure 헤더에 적혀 있다.
+   */
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  /**
+   * 여는 버튼이 aria-controls 로 가리킬 id. **고정 문자열을 쓰면 안 된다** —
+   * 이 화면에는 같은 모양의 접기가 금주 목표 쪽에도 하나 있어, 박아 두면 한
+   * 문서에 같은 id 가 둘 생긴다.
+   */
+  const addFormId = useId();
 
   // 종류별로 가른다. 어느 상자로 갈지는 조회가 이미 접어 준 kind 가 정한다 —
   // 여기서 워크플로 종류를 다시 접지 않는다(queries 헤더).
@@ -651,8 +693,30 @@ export default function WeeklyReportDeliveriesPanel({
         </p>
       </div>
 
+      {/* 줄 추가는 접혀 있다 — 못 고치는 사람에게는 여는 버튼도 보이지 않는다
+          (폼이 안 보이던 것과 같은 조건). 금주 목표 상자와 같은 모양이다. */}
       {canEdit && (
-        <DeliveryAddForm weekStart={weekStart} repairCaseOptions={repairCaseOptions} />
+        <div className="flex flex-col gap-2">
+          <div>
+            <button
+              type="button"
+              className={smallButtonClass}
+              aria-expanded={isAddOpen}
+              aria-controls={addFormId}
+              onClick={() => setIsAddOpen((prev) => !prev)}
+            >
+              {isAddOpen ? "－ 줄 추가 닫기" : "＋ 줄 추가"}
+            </button>
+          </div>
+          {isAddOpen && (
+            <DeliveryAddForm
+              formId={addFormId}
+              weekStart={weekStart}
+              repairCaseOptions={repairCaseOptions}
+              onClose={() => setIsAddOpen(false)}
+            />
+          )}
+        </div>
       )}
 
       <div className={gridClass}>

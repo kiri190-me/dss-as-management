@@ -27,9 +27,15 @@ import {
  * 주간보고 — 손으로 만들던 엑셀 현황판을 그대로 옮긴 화면
  * ============================================================================
  * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황에는 입력칸도, 저장·삭제
- * 버튼도 없다. 누를 것이 있는 자리는 위쪽 두 구역 — `금주 목표` 와 `납입 예정 건`
- * — 뿐이고, 각각 통째로 WeeklyReportGoalsPanel · WeeklyReportDeliveriesPanel
+ * 버튼도 없다. 누를 것이 있는 자리는 두 구역 — `금주 목표` 와 `납입 예정 건` —
+ * 뿐이고, 각각 통째로 WeeklyReportGoalsPanel · WeeklyReportDeliveriesPanel
  * (클라이언트 컴포넌트)에 들어 있다. 이 파일은 그 둘을 **놓을 자리만** 준다.
+ *
+ * 그 둘이 화면의 어디에 오는지는 이 헤더에 적지 않는다 — 자리는 아래 반환 트리가
+ * 정하고 한 번 바뀐 적이 있다(원래는 집계 위였다). 자리를 말이 아니라 코드로만
+ * 두면 다음에 옮길 때 고칠 곳이 한 곳이다. 같은 이유로 WeeklyReportGoalsPanel 의
+ * 노란 안내문에서도 `아래 집계`의 `아래` 를 뺐다 — 이 둘이 내려가면서 거짓이 된
+ * 말이었다(그 파일 헤더).
  *
  * ── 무엇을 어느 칸에 넣을지는 여기서 정하지 않는다 ──────────────────────
  * 6칸으로 가르고, PO 발행 완료를 겹쳐 세고, RFG/MB 로 접고, 고객사별로 묶어
@@ -565,36 +571,6 @@ export default function WeeklyReportScreen({
         </p>
       </section>
 
-      {/* 금주 목표 — 원본 엑셀에서도 집계 위에 있던 상자다. 매주 사람이 손으로
-          적던 계획이라 "무엇을 하려 했는가"가 먼저 오고, 그 아래에 "지금 어디까지
-          왔는가"(고객사 블록)가 온다.
-
-          좌우 배치는 이 화면의 다른 줄과 **같은 상수**를 쓴다 — 같은 폭에서 같이
-          갈리지 않으면 목표 상자만 위아래로 쌓인 채 아래 블록은 좌우로 남는다
-          (SIDE_BY_SIDE_GRID 주석). 값을 상자 쪽에 따로 적지 않고 넘기는 것이
-          그래서다. */}
-      <WeeklyReportGoalsPanel
-        weekStart={goals.weekStart}
-        currentWeekStart={goals.currentWeekStart}
-        goals={goals.rows}
-        canEdit={goals.canEdit}
-        repairCaseOptions={goals.repairCaseOptions}
-        gridClass={SIDE_BY_SIDE_GRID}
-      />
-
-      {/* 납입 예정 건 — 원본 엑셀에서도 금주 목표 바로 아래에 있던 표다. "이번 주에
-          무엇을 내보내는가"는 계획의 일부라 집계보다 앞에 온다.
-
-          주 이동 줄을 여기 또 두지 않는다 — 위 상자의 그것 하나가 두 구역의 주를
-          함께 정한다(그 파일 헤더). 좌우 배치도 같은 상수를 그대로 넘긴다. */}
-      <WeeklyReportDeliveriesPanel
-        weekStart={goals.weekStart}
-        deliveries={deliveries}
-        canEdit={goals.canEdit}
-        repairCaseOptions={goals.repairCaseOptions}
-        gridClass={SIDE_BY_SIDE_GRID}
-      />
-
       {report.total.unclassified > 0 && (
         <p
           role="status"
@@ -690,6 +666,39 @@ export default function WeeklyReportScreen({
           ))}
         </div>
       </section>
+
+      {/* 금주 목표 — 화면의 **맨 아래**다. 원본 엑셀은 이 상자를 집계 위에 두었지만
+          사용자가 아래로 내리기로 정했다: 매주 넘겨 보는 문서라 위쪽은 "지금 어디까지
+          왔는가"(집계)로 시작하고, 손으로 적는 일은 다 보고 난 뒤 아래에서 한다.
+
+          ⚠️ 주 이동 줄(`◀ 지난주 | 다음주 ▶`)이 이 상자 안에 있어 함께 내려와 있다 —
+          그게 맞다. 그 줄은 이 두 구역에만 걸리고 집계와는 무관하다(집계는
+          언제나 '지금 이 순간'이다). 화면 위쪽으로 따로 빼지 말 것.
+
+          좌우 배치는 이 화면의 다른 줄과 **같은 상수**를 쓴다 — 같은 폭에서 같이
+          갈리지 않으면 목표 상자만 위아래로 쌓인 채 위 블록은 좌우로 남는다
+          (SIDE_BY_SIDE_GRID 주석). 값을 상자 쪽에 따로 적지 않고 넘기는 것이
+          그래서다. */}
+      <WeeklyReportGoalsPanel
+        weekStart={goals.weekStart}
+        currentWeekStart={goals.currentWeekStart}
+        goals={goals.rows}
+        canEdit={goals.canEdit}
+        repairCaseOptions={goals.repairCaseOptions}
+        gridClass={SIDE_BY_SIDE_GRID}
+      />
+
+      {/* 납입 예정 건 — 금주 목표 바로 아래, 화면의 마지막이다. 두 구역은 **붙어
+          있어야 한다**: 한 주의 계획과 그 주에 내보낼 것이 한 덩어리고, 주 고르개도
+          위 상자의 그것 하나가 둘의 주를 함께 정한다(그 파일 헤더). 여기 주 이동
+          줄을 또 두지 않는 이유가 그것이다. 좌우 배치도 같은 상수를 그대로 넘긴다. */}
+      <WeeklyReportDeliveriesPanel
+        weekStart={goals.weekStart}
+        deliveries={deliveries}
+        canEdit={goals.canEdit}
+        repairCaseOptions={goals.repairCaseOptions}
+        gridClass={SIDE_BY_SIDE_GRID}
+      />
     </div>
   );
 }

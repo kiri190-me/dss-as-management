@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import WeeklyReportGoalDeleteDialog from "./WeeklyReportGoalDeleteDialog";
@@ -49,9 +49,14 @@ import {
  * 와도 page.tsx 의 normalizeWeekStart 가 월요일로 접거나 이번 주로 떨어뜨린다.
  *
  * ── '지금 이 순간'을 말해 준다 ──────────────────────────────────────────
- * 아래 집계(고객사 블록·총합)는 **언제나 지금의 진행 상황**이다. 과거를 남기지
- * 않는다. 그런데 목표 상자만 지난주를 보고 있으면, 사람은 아래 표도 그 주의
+ * 집계(고객사 블록·총합)는 **언제나 지금의 진행 상황**이다. 과거를 남기지
+ * 않는다. 그런데 목표 상자만 지난주를 보고 있으면, 사람은 집계도 그 주의
  * 상태라고 읽는다. 그래서 이번 주가 아닐 때는 그 사실을 상자 안에 한 줄 적는다.
+ *
+ * ⚠️ **그 안내문에 `아래`·`위` 를 붙이지 말 것.** 한때 "아래 집계는…"이라고 적혀
+ * 있었는데, 이 상자가 화면 맨 아래로 내려가면서 집계가 위로 올라가 그 문장이
+ * 거짓이 됐다. 자리를 정하는 것은 이 파일이 아니라 WeeklyReportScreen 이고 또
+ * 바뀔 수 있다 — 자리를 말하지 않고 뜻만 남기면 어디로 옮겨도 맞는 문장이 된다.
  *
  * ── 적을 수 있는 사람에게만 입력칸이 보인다 ─────────────────────────────
  * canEdit 은 **그리기 위한 값일 뿐 관문이 아니다.** 저장은 서버 액션이 세션부터
@@ -366,13 +371,28 @@ function GoalBox({
  * 차례(display_order)는 칸을 두지 않는다. 적지 않으면 null 이고 그 줄은 뒤로
  * 가는데(domain 의 sortWeeklyReportGoals), 매주 새로 적는 메모라 적은 차례가 곧
  * 사람이 뜻한 차례다.
+ *
+ * ── 평소에는 접혀 있다 ─────────────────────────────────────────────────
+ * 이 화면은 매주 넘겨 보는 **문서**라 평소에는 표만 보이면 된다. 여닫는 것은
+ * 부르는 쪽이고(이 폼은 열려 있을 때만 그려진다), 여기서는 접는 버튼 하나를
+ * 더 그릴 뿐이다 — 상태를 이 안에 두면 부르는 쪽의 토글 버튼이 자기가 여는 것이
+ * 지금 열려 있는지 알 수 없다(aria-expanded 를 적을 수가 없다).
+ *
+ * **추가에 성공해도 닫지 않는다.** 한 번에 여러 줄을 넣는 일이 흔해서, 성공할
+ * 때마다 접히면 매번 다시 열어야 한다. 성공하면 입력만 비운다(아래 submit).
  */
 function GoalAddForm({
+  formId,
   weekStart,
   repairCaseOptions,
+  onClose,
 }: {
+  /** 여는 버튼의 aria-controls 가 가리키는 id. useId 로 만든 값이다(부르는 쪽). */
+  formId: string;
   weekStart: string;
   repairCaseOptions: RepairCaseLinkOption[];
+  /** 접기. 사람이 `취소` 를 누를 때만 불린다 — 저장에 성공해도 부르지 않는다. */
+  onClose: () => void;
 }) {
   const router = useRouter();
   const [repairCaseId, setRepairCaseId] = useState("");
@@ -423,6 +443,7 @@ function GoalAddForm({
 
   return (
     <form
+      id={formId}
       className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-950"
       onSubmit={(event) => {
         event.preventDefault();
@@ -496,14 +517,27 @@ function GoalAddForm({
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
           RFG · MB 는 고르지 않습니다 — 고른 수리 건의 종류가 정합니다.
         </p>
-        <button
-          type="submit"
-          className={primaryButtonClass}
-          disabled={isSubmitting}
-          aria-busy={isSubmitting}
-        >
-          {isSubmitting ? "추가 중..." : "줄 추가"}
-        </button>
+        <span className="flex flex-wrap items-center gap-1">
+          {/* 여는 버튼을 다시 누르는 것과 같은 일을 한다 — 폼 안에서도 닫을 수
+              있어야 한다. 폼은 접히면서 사라지므로 입력하던 값도 함께 없어진다
+              (다시 열면 빈 폼이다). 사람이 누를 때만 일어나는 일이다. */}
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={isSubmitting}
+            onClick={onClose}
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            className={primaryButtonClass}
+            disabled={isSubmitting}
+            aria-busy={isSubmitting}
+          >
+            {isSubmitting ? "추가 중..." : "줄 추가"}
+          </button>
+        </span>
       </div>
 
       {errorMessage && (
@@ -552,6 +586,20 @@ export default function WeeklyReportGoalsPanel({
   const [isDeleteConflict, setIsDeleteConflict] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
   const [copyMessage, setCopyMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  /**
+   * 줄 추가 폼이 펼쳐져 있는가. 기본은 접힘 — 이 화면은 매주 넘겨 보는 문서라
+   * 평소에는 표만 보이는 편이 낫다(GoalAddForm 헤더).
+   *
+   * ⚠️ <details>/<summary> 를 쓰지 않는다. 이 저장소가 그것을 못 쓰는 자리에서
+   * 왜 평범한 상태 하나로 푸는지는 FilterDisclosure 헤더에 적혀 있다.
+   */
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  /**
+   * 여는 버튼이 aria-controls 로 가리킬 id. **고정 문자열을 쓰면 안 된다** —
+   * 이 화면에는 같은 모양의 접기가 납입 예정 건 쪽에도 하나 있어, 박아 두면 한
+   * 문서에 같은 id 가 둘 생긴다.
+   */
+  const addFormId = useId();
 
   const isCurrentWeek = weekStart === currentWeekStart;
   const previousWeekStart = addCalendarDays(weekStart, -7);
@@ -666,12 +714,15 @@ export default function WeeklyReportGoalsPanel({
         )}
       </div>
 
-      {/* ⚠️ 아래 집계는 언제나 '지금'이다(파일 헤더). 이번 주가 아닐 때 이 한 줄이
-          없으면, 사람은 아래 표도 그 주의 상태라고 읽는다. */}
+      {/* ⚠️ 집계는 언제나 '지금'이다(파일 헤더). 이번 주가 아닐 때 이 한 줄이
+          없으면, 사람은 집계도 그 주의 상태라고 읽는다.
+
+          이 문장에 `아래`·`위` 를 다시 붙이지 말 것 — 자리는 WeeklyReportScreen 이
+          정하고 한 번 바뀌어 이 말이 거짓이 된 적이 있다(파일 헤더). */}
       {!isCurrentWeek && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
           이번 주가 아닌 {weekLabel(weekStart)}를 보고 있습니다. 목표만 그 주의 것이고,{" "}
-          <strong className="font-semibold">아래 집계는 지금 이 순간의 상태입니다</strong> — 그 주의
+          <strong className="font-semibold">집계는 지금 이 순간의 상태입니다</strong> — 그 주의
           진행 상황이 아닙니다.{" "}
           <Link
             href={weekHref(currentWeekStart)}
@@ -695,7 +746,32 @@ export default function WeeklyReportGoalsPanel({
         </p>
       )}
 
-      {canEdit && <GoalAddForm weekStart={weekStart} repairCaseOptions={repairCaseOptions} />}
+      {/* 줄 추가는 접혀 있다 — 못 고치는 사람에게는 여는 버튼도 보이지 않는다
+          (폼이 안 보이던 것과 같은 조건). 주 이동 줄은 이 접기에 들어가지 않는다:
+          그 줄은 보기만 하는 사람에게도 필요하다. */}
+      {canEdit && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <button
+              type="button"
+              className={smallButtonClass}
+              aria-expanded={isAddOpen}
+              aria-controls={addFormId}
+              onClick={() => setIsAddOpen((prev) => !prev)}
+            >
+              {isAddOpen ? "－ 줄 추가 닫기" : "＋ 줄 추가"}
+            </button>
+          </div>
+          {isAddOpen && (
+            <GoalAddForm
+              formId={addFormId}
+              weekStart={weekStart}
+              repairCaseOptions={repairCaseOptions}
+              onClose={() => setIsAddOpen(false)}
+            />
+          )}
+        </div>
+      )}
 
       <div className={gridClass}>
         {WEEKLY_REPORT_KINDS.map((kind) => (
