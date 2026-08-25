@@ -44,6 +44,18 @@ export type Filters = {
    * 요청"이라는 이름이 거짓이 된다.
    */
   myPendingApprovalOnly: boolean;
+  /**
+   * 장기 PO 미발행 건만 보기 — 견적서를 낸 지 두 달이 지나도록 발주가 나지
+   * 않은 건이다(domain/long-pending-po.ts 가 규칙의 유일한 자리).
+   *
+   * myPendingApprovalOnly 와 같은 종류의 조건이다: **행 자체에는 판정 근거가
+   * 없다.** 견적일·발주일은 접수 건이 아니라 그 건에 붙은 내자 줄(여럿일 수
+   * 있다)에 있고, "오늘"도 서버가 정하는 한국 날짜라(화면이 new Date() 로
+   * 만들면 서버가 그린 것과 어긋난다) 화면은 서버가 내려준 접수 건 id 집합과
+   * 대조만 한다. 그 집합이 없으면(mock 모드 등) 이 조건은 아무것도 남기지
+   * 않는다 — 근거 없이 전부 통과시키면 필터 이름이 거짓이 된다.
+   */
+  longPendingPoOnly: boolean;
 };
 
 export const DEFAULT_FILTERS: Filters = {
@@ -56,6 +68,7 @@ export const DEFAULT_FILTERS: Filters = {
   overdueOnly: false,
   shipmentMonth: null,
   myPendingApprovalOnly: false,
+  longPendingPoOnly: false,
 };
 
 const SHIPMENT_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -84,6 +97,7 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   const shipmentMonth = searchParams.get("shipmentMonth");
   // 사이드바 배지가 거는 딥링크(/repair-cases?myApproval=1)가 들어오는 자리다.
   const myApproval = searchParams.get("myApproval");
+  const longPendingPo = searchParams.get("longPendingPo");
 
   return {
     query: "",
@@ -105,6 +119,7 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
     overdueOnly: overdue === "1" || overdue === "true",
     shipmentMonth: isValidShipmentMonth(shipmentMonth) ? shipmentMonth : null,
     myPendingApprovalOnly: myApproval === "1" || myApproval === "true",
+    longPendingPoOnly: longPendingPo === "1" || longPendingPo === "true",
   };
 }
 
@@ -143,12 +158,19 @@ export function applyFilters(
    * (queries/repair-case-approvals-pending.ts). 없으면 undefined —
    * myPendingApprovalOnly가 켜져 있어도 아무 행도 남기지 않는다.
    */
-  myPendingApprovalCaseIds?: ReadonlySet<string>
+  myPendingApprovalCaseIds?: ReadonlySet<string>,
+  /**
+   * 서버가 계산해 내려준 "장기 PO 미발행" 접수 건 id 집합
+   * (queries/long-pending-po.ts). 없으면 undefined —
+   * longPendingPoOnly가 켜져 있어도 아무 행도 남기지 않는다.
+   */
+  longPendingPoCaseIds?: ReadonlySet<string>
 ): EffectiveRepairCase[] {
   const query = filters.query.trim().toLowerCase();
 
   return rows.filter((row) => {
     if (filters.myPendingApprovalOnly && !myPendingApprovalCaseIds?.has(row.id)) return false;
+    if (filters.longPendingPoOnly && !longPendingPoCaseIds?.has(row.id)) return false;
     if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) return false;
     if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;
     // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.

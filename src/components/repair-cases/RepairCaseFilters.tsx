@@ -34,6 +34,14 @@ type RepairCaseFiltersProps = {
    */
   canFilterMyPendingApproval?: boolean;
   onMyPendingApprovalOnlyChange?: (value: boolean) => void;
+  /**
+   * "장기 PO 미발행"을 쓸 수 있는가. 서버가 그 접수 건들의 집합을 계산해 준
+   * 경우(DATABASE 모드)에만 true다 — false면 이 조건은 아예 그리지 않는다.
+   * 위 결재 요청 조건과 같은 판단이다: 근거 없이 체크박스만 보이면 눌러도
+   * 0건이 되어 고장처럼 보인다.
+   */
+  canFilterLongPendingPo?: boolean;
+  onLongPendingPoOnlyChange?: (value: boolean) => void;
   onReset: () => void;
 };
 
@@ -50,6 +58,7 @@ export function countHiddenActiveFilters(filters: Filters): number {
   if (filters.priority !== "ALL") count += 1;
   if (filters.overdueOnly) count += 1;
   if (filters.myPendingApprovalOnly) count += 1;
+  if (filters.longPendingPoOnly) count += 1;
   return count;
 }
 
@@ -69,6 +78,8 @@ export default function RepairCaseFilters({
   onOverdueOnlyChange,
   canFilterMyPendingApproval = false,
   onMyPendingApprovalOnlyChange,
+  canFilterLongPendingPo = false,
+  onLongPendingPoOnlyChange,
   onReset,
 }: RepairCaseFiltersProps) {
   return (
@@ -215,6 +226,20 @@ export default function RepairCaseFilters({
                   onChange={(event) => onMyPendingApprovalOnlyChange?.(event.target.checked)}
                 />
                 내게 온 결재 요청만 보기
+              </label>
+            )}
+
+            {canFilterLongPendingPo && (
+              <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={filters.longPendingPoOnly}
+                  onChange={(event) => onLongPendingPoOnlyChange?.(event.target.checked)}
+                />
+                {/* 견적서를 낸 지 두 달이 지나도록 발주가 안 난 건. 판정은
+                    domain/long-pending-po.ts 하나가 하고, 여기는 서버가 내려준
+                    묶음과 대조할 뿐이다. */}
+                장기 PO 미발행만 보기
               </label>
             )}
           </div>

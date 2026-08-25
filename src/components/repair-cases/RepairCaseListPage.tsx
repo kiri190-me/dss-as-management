@@ -89,6 +89,16 @@ type RepairCaseListPageProps = {
    * 조건 자체를 그리지 않는다.
    */
   myPendingApprovalCaseIds?: string[];
+  /**
+   * 지금 **장기 PO 미발행**인 접수 건 id — 서버가 계산해 내려준다
+   * (queries/long-pending-po.ts). 견적일·발주일은 접수 건이 아니라 그 건에
+   * 붙은 내자 줄(여럿일 수 있다)에 있고, "오늘"도 한국 날짜로 서버가 정해야
+   * 한다 — 화면이 new Date()로 만들면 서버가 그린 것과 달라져 hydration이
+   * 어긋난다. 그래서 화면이 스스로 판정할 수 없다.
+   *
+   * undefined(mock 모드)이면 "장기 PO 미발행" 조건 자체를 그리지 않는다.
+   */
+  longPendingPoCaseIds?: string[];
 };
 
 export default function RepairCaseListPage({
@@ -98,6 +108,7 @@ export default function RepairCaseListPage({
   canRestore = false,
   canPermanentlyDelete = false,
   myPendingApprovalCaseIds,
+  longPendingPoCaseIds,
 }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -175,9 +186,21 @@ export default function RepairCaseListPage({
     [myPendingApprovalCaseIds]
   );
 
+  // 장기 PO 미발행도 같은 모양이다 — 근거(서버가 내려준 묶음)가 있는 세션에서만
+  // 쓸 수 있고, 근거 없이 딥링크(?longPendingPo=1)만 들어오면 켜지 않는다.
+  const canFilterLongPendingPo = longPendingPoCaseIds !== undefined;
+  const longPendingPoIdSet = useMemo(
+    () => (longPendingPoCaseIds ? new Set(longPendingPoCaseIds) : undefined),
+    [longPendingPoCaseIds]
+  );
+
   const [filters, setFilters] = useState<Filters>(() => {
     const parsed = parseInitialFilters(searchParams);
-    return canFilterMyPendingApproval ? parsed : { ...parsed, myPendingApprovalOnly: false };
+    return {
+      ...parsed,
+      myPendingApprovalOnly: canFilterMyPendingApproval ? parsed.myPendingApprovalOnly : false,
+      longPendingPoOnly: canFilterLongPendingPo ? parsed.longPendingPoOnly : false,
+    };
   });
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pagination, setPagination] = useState<PaginationState>(DEFAULT_PAGINATION);
@@ -214,8 +237,8 @@ export default function RepairCaseListPage({
   const [deleteItemErrors, setDeleteItemErrors] = useState<Record<string, string>>({});
 
   const filteredRows = useMemo(
-    () => applyFilters(rows, filters, myPendingApprovalIdSet),
-    [rows, filters, myPendingApprovalIdSet]
+    () => applyFilters(rows, filters, myPendingApprovalIdSet, longPendingPoIdSet),
+    [rows, filters, myPendingApprovalIdSet, longPendingPoIdSet]
   );
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
 
@@ -706,6 +729,8 @@ export default function RepairCaseListPage({
             onOverdueOnlyChange={(value) => updateFilters({ overdueOnly: value })}
             canFilterMyPendingApproval={canFilterMyPendingApproval}
             onMyPendingApprovalOnlyChange={(value) => updateFilters({ myPendingApprovalOnly: value })}
+            canFilterLongPendingPo={canFilterLongPendingPo}
+            onLongPendingPoOnlyChange={(value) => updateFilters({ longPendingPoOnly: value })}
             onReset={handleReset}
           />
 

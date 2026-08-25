@@ -11,6 +11,7 @@ import {
   canDecideAnyRepairCaseApproval,
   listRepairCasesPendingMyApproval,
 } from "@/lib/db/queries/repair-case-approvals-pending";
+import { listLongPendingPoCaseIds } from "@/lib/db/queries/long-pending-po";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -92,6 +93,13 @@ export default async function RepairCasesPage() {
     ? [...new Set(pendingApprovalItems.map((item) => item.repairCaseId))]
     : undefined;
 
+  // "장기 PO 미발행" 필터의 근거. 견적일·발주일은 접수 건이 아니라 그 건에 붙은
+  // 내자 줄에 있고(한 건에 여러 줄), "오늘"도 한국 날짜로 서버가 정해야 한다 —
+  // 화면이 new Date()로 만들면 서버가 그린 것과 달라져 hydration이 어긋난다.
+  // 결재 요청 묶음과 달리 감추는 조건이 없다: 누구에게나 같은 판정이라 0건은
+  // "지금 그런 건이 없다"는 사실 그대로다.
+  const longPendingPoCaseIds = await listLongPendingPoCaseIds();
+
   return (
     <Suspense>
       <RepairCaseListPage
@@ -101,6 +109,7 @@ export default async function RepairCasesPage() {
         canRestore={canRestore}
         canPermanentlyDelete={canPermanentlyDelete}
         myPendingApprovalCaseIds={myPendingApprovalCaseIds}
+        longPendingPoCaseIds={longPendingPoCaseIds}
       />
     </Suspense>
   );

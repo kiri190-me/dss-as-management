@@ -174,6 +174,54 @@ test("사이드바 배지의 딥링크(?myApproval=1)가 조건을 켠다", () =
   assert.equal(parseInitialFilters(new URLSearchParams("")).myPendingApprovalOnly, false);
 });
 
+// ─────────────────────────────────────────────── 장기 PO 미발행
+
+test("장기 PO 미발행은 서버가 내려준 id 집합으로만 거른다", () => {
+  const rows = [row({ id: "stale" }), row({ id: "fresh" })];
+  const longPending = new Set(["stale"]);
+
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ longPendingPoOnly: true }), undefined, longPending)),
+    ["stale"]
+  );
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters(), undefined, longPending)),
+    ["stale", "fresh"],
+    "끄면 아무것도 걸리지 않는다"
+  );
+});
+
+test("근거가 되는 집합이 없으면 장기 PO 미발행은 아무것도 남기지 않는다", () => {
+  // 견적일·발주일은 행이 아니라 내자 줄에 있고 "오늘"도 서버가 정한다 —
+  // 근거 없이 전부 통과시키면 필터 이름이 거짓이 된다.
+  const rows = [row({ id: "stale" }), row({ id: "fresh" })];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ longPendingPoOnly: true }))), []);
+});
+
+test("두 체크박스는 서로 독립적으로 겹쳐 걸린다", () => {
+  const rows = [row({ id: "both" }), row({ id: "approval-only" }), row({ id: "po-only" })];
+  const pending = new Set(["both", "approval-only"]);
+  const longPending = new Set(["both", "po-only"]);
+
+  assert.deepEqual(
+    idsOf(
+      applyFilters(
+        rows,
+        filters({ myPendingApprovalOnly: true, longPendingPoOnly: true }),
+        pending,
+        longPending
+      )
+    ),
+    ["both"]
+  );
+});
+
+test("주소창으로도 장기 PO 미발행을 걸 수 있다(?longPendingPo=1)", () => {
+  assert.equal(parseInitialFilters(new URLSearchParams("longPendingPo=1")).longPendingPoOnly, true);
+  assert.equal(parseInitialFilters(new URLSearchParams("longPendingPo=0")).longPendingPoOnly, false);
+  assert.equal(parseInitialFilters(new URLSearchParams("")).longPendingPoOnly, false);
+});
+
 test("사라진 workflowType 파라미터는 아무 것도 걸지 않는다", () => {
   // 딥링크가 한 군데도 없어서 끊어질 링크는 없지만, 남아 있는 주소가 있어도
   // 조용히 무시될 뿐 엉뚱한 필터가 걸리지는 않아야 한다.
