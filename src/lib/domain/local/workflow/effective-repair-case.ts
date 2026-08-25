@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { DEMO_REFERENCE_DATE } from "../../demo-clock";
 import { mockRepairCases } from "../../mock-data";
 import { isRepairCaseOverdue, type RepairStatus } from "../../types";
 import { toResolvedFromLocal, toResolvedFromMock, type ResolvedRepairCase } from "../resolved-repair-case";
@@ -28,7 +27,7 @@ export type EffectiveRepairCase = ResolvedRepairCase & {
 export function applyWorkflowOverride(
   resolved: ResolvedRepairCase,
   override: LocalWorkflowState | undefined,
-  referenceDate: Date = DEMO_REFERENCE_DATE
+  referenceDate: Date = new Date()
 ): EffectiveRepairCase {
   if (!override) {
     return {

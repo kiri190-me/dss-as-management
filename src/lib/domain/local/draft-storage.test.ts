@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addCalendarDays } from "../date-only";
+import { addCalendarDays, toKstDateOnly } from "../date-only";
 import {
   createDefaultDraft,
   DEFAULT_TARGET_INSPECTION_COMPLETION_OFFSET_DAYS,
   isDraftEmpty,
   nextTargetInspectionCompletionDate,
 } from "./draft-storage";
+
+test("createDefaultDraft: 인수일 기본값은 한국 기준 오늘이다(고정 데모 기준일이 아니다)", () => {
+  const draft = createDefaultDraft();
+  assert.equal(draft.receivedAt, toKstDateOnly(new Date()));
+});
 
 test("createDefaultDraft: 사내 목표 검수 완료일 defaults to 인수일 + 14 days, untouched", () => {
   const draft = createDefaultDraft();

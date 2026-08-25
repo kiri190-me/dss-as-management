@@ -1,4 +1,3 @@
-import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import {
   HoldBadge,
   OverdueBadge,
@@ -51,7 +50,6 @@ export default function DetailHeader({
             canEdit={canEditReportNumber}
           />
         </div>
-        <DemoReferenceNotice />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={resolved.effectiveStatus} />

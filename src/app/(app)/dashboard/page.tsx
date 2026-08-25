@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { listRepairCases } from "@/lib/db/queries/repair-cases";
 import DashboardContent from "@/components/dashboard/DashboardContent";
-import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -45,12 +44,9 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          대시보드
-        </h1>
-        <DemoReferenceNotice />
-      </div>
+      <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        대시보드
+      </h1>
       <DashboardContent serverBaseCases={serverBaseCases} />
     </div>
   );

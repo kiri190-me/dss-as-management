@@ -16,7 +16,6 @@ import {
   type SortColumn,
   type SortState,
 } from "@/lib/domain/repair-case-filters";
-import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import RepairCaseFilters from "./RepairCaseFilters";
 import RepairCaseTable from "./RepairCaseTable";
@@ -555,7 +554,6 @@ export default function RepairCaseListPage({
               onRequestDelete={handleRequestDelete}
             />
           )}
-          <DemoReferenceNotice />
         </div>
       </div>
 

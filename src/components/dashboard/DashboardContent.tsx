@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import SummaryCard from "@/components/dashboard/SummaryCard";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import { computeDashboardSummary } from "@/lib/domain/dashboard-metrics";
-import { DEMO_REFERENCE_DATE, formatYearMonth } from "@/lib/domain/demo-clock";
+import { toKstYearMonth } from "@/lib/domain/date-only";
 import { mockRepairCases } from "@/lib/domain/mock-data";
 import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import { useEffectiveRepairCasesFromBase } from "@/lib/domain/local/workflow/effective-repair-case";
@@ -31,9 +31,11 @@ export default function DashboardContent({ serverBaseCases }: DashboardContentPr
 
   const { cases, isHydrated } = useEffectiveRepairCasesFromBase(baseCases);
 
-  const summary = useMemo(() => computeDashboardSummary(cases, DEMO_REFERENCE_DATE), [cases]);
+  const summary = useMemo(() => computeDashboardSummary(cases), [cases]);
 
-  const shipmentMonth = formatYearMonth(DEMO_REFERENCE_DATE);
+  // 한국 기준 이번 달("YYYY-MM"). 카드는 isHydrated 이후에만 렌더되므로
+  // 서버 HTML에는 이 값이 들어가지 않는다 — hydration 불일치가 생길 수 없다.
+  const shipmentMonth = toKstYearMonth(new Date());
 
   if (!isHydrated) {
     return <LoadingNotice />;

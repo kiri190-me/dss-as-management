@@ -1,3 +1,5 @@
+import { toKstDateOnly } from "./date-only";
+
 export const ROLE_CODES = [
   "SUPER_ADMIN",
   "ADMIN",
@@ -360,10 +362,20 @@ export type WorkflowStep = {
  * "납기 지연"은 저장된 상태값이 아니라 계산된 조건이다(내부 목표 출하일이
  * 지났고 아직 출하 완료되지 않은 경우). RepairStatus/exception status에
  * 포함하지 않는다.
+ *
+ * 비교는 반드시 한국 달력 날짜("YYYY-MM-DD" 문자열)끼리 한다.
+ * internalTargetShipmentDate는 PostgreSQL `date` 컬럼에서 온 날짜 문자열이라
+ * new Date()로 파싱하면 UTC 자정이 되는데, 여기에 실제 시각을 그대로 비교하면
+ * 한국시간 오전 9시(=UTC 0시)부터 "목표일이 바로 오늘"인 건이 지연으로
+ * 뒤집힌다. "지연"은 목표일이 *지난* 것이지 목표일 *당일*이 아니므로,
+ * 목표일 == 오늘(한국)은 지연이 아니다. "YYYY-MM-DD"는 사전순 비교가 곧
+ * 날짜순 비교이므로 문자열 비교로 충분하다.
+ *
+ * `now`는 테스트 주입용이다(기본값은 실제 현재 시각).
  */
 export function isRepairCaseOverdue(
   repairCase: Pick<RepairCase, "status" | "internalTargetShipmentDate">,
-  today: Date = new Date()
+  now: Date = new Date()
 ): boolean {
   if (repairCase.status === "SHIPMENT_COMPLETED") {
     return false;
@@ -371,5 +383,5 @@ export function isRepairCaseOverdue(
   if (!repairCase.internalTargetShipmentDate) {
     return false;
   }
-  return new Date(repairCase.internalTargetShipmentDate) < today;
+  return repairCase.internalTargetShipmentDate.slice(0, 10) < toKstDateOnly(now);
 }

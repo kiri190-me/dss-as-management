@@ -1,20 +1,16 @@
 /**
- * 데모 전용 고정 기준일이다. 대시보드/전체 현황의 "이번 달", "납기 지연" 계산이
- * 실제 벽시계 시각(new Date())을 따르면, 모의 데이터가 고정된 시점(2026-08)을
- * 기준으로 작성되어 있어 실제 날짜가 지날수록 결과가 의도치 않게 달라진다.
- * 이 상수는 그 드리프트를 막기 위한 데모 한정 장치이며, 실제 운영 로직에서는
- * 사용하지 않는다(운영 전환 시 반드시 제거/대체할 것).
+ * 모의(mock) 데이터 전용 고정 기준일이다. mock-data.ts의 접수 건들이 고정된
+ * 시점(2026-08)을 기준으로 작성되어 있어, 그 데이터의 "납기 지연" 계산이
+ * 실제 벽시계 시각을 따르면 날짜가 지날수록 결과가 의도치 않게 달라진다.
+ * 이 상수는 그 드리프트를 막기 위한 mock 한정 장치다.
+ *
+ * 현재 유일한 사용처는 local/resolved-repair-case.ts의 mock 해석 경로다.
+ * 실제 운영 경로(DB 매퍼, 대시보드 집계, 접수 폼 기본값, 워크플로 재정의)는
+ * 전부 실제 현재 시각을 쓰며, 한국 달력 날짜 비교는 date-only.ts의
+ * toKstDateOnly/toKstYearMonth를 통한다 — 여기에 새 헬퍼를 추가하지 말 것.
+ * mock 계층이 사라지면 이 파일도 함께 사라진다.
  */
 export const DEMO_REFERENCE_DATE = new Date("2026-08-04T00:00:00.000Z");
-
-export function formatDemoReferenceDateLabel(date: Date = DEMO_REFERENCE_DATE): string {
-  return date.toISOString().slice(0, 10);
-}
-
-/** "YYYY-MM" 형식으로 변환한다(월별 출하 완료 필터 딥링크용). */
-export function formatYearMonth(date: Date = DEMO_REFERENCE_DATE): string {
-  return date.toISOString().slice(0, 7);
-}
 
 /**
  * WorkHistory.workedAt("YYYY-MM-DDTHH:mm:00+09:00")을 "YYYY-MM-DD HH:mm"으로

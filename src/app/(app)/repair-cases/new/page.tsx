@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import DemoReferenceNotice from "@/components/domain/DemoReferenceNotice";
 import IntakeForm from "@/components/repair-cases/new/IntakeForm";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { readSession } from "@/lib/auth/session";
@@ -35,10 +34,7 @@ export default async function RepairCaseNewPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">A/S 접수</h1>
-        <DemoReferenceNotice />
-      </div>
+      <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">A/S 접수</h1>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         이 화면에서 등록한 접수 건은 데이터베이스에 저장됩니다.
       </p>

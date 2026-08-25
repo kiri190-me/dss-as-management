@@ -1,4 +1,4 @@
-import { DEMO_REFERENCE_DATE } from "./demo-clock";
+import { toKstYearMonth } from "./date-only";
 import type { RepairStatus } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
@@ -15,12 +15,14 @@ export type DashboardSummary = {
   overdueCount: number;
 };
 
+/**
+ * dateStr은 출하일("YYYY-MM-DD" 날짜 문자열)이고 reference는 실제 시각이다.
+ * 두 값을 한국 기준 "YYYY-MM"으로 맞춰 비교한다 — getUTCMonth()로 비교하면
+ * 매달 1일 한국시간 0~9시 사이(그 시각의 UTC는 아직 지난달)에 "금월"이
+ * 지난달로 새어 나간다.
+ */
 function isSameYearMonth(dateStr: string, reference: Date): boolean {
-  const date = new Date(dateStr);
-  return (
-    date.getUTCFullYear() === reference.getUTCFullYear() &&
-    date.getUTCMonth() === reference.getUTCMonth()
-  );
+  return dateStr.slice(0, 7) === toKstYearMonth(reference);
 }
 
 /**
@@ -33,7 +35,7 @@ function isSameYearMonth(dateStr: string, reference: Date): boolean {
  */
 export function computeDashboardSummary(
   cases: EffectiveRepairCase[],
-  referenceDate: Date = DEMO_REFERENCE_DATE
+  referenceDate: Date = new Date()
 ): DashboardSummary {
   const countByStatus = (status: RepairStatus) =>
     cases.filter((c) => c.effectiveStatus === status).length;

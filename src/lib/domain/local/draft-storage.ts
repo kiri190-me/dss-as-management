@@ -1,6 +1,5 @@
 import type { BillingType, Priority, WorkflowType } from "../types";
-import { formatDemoReferenceDateLabel } from "../demo-clock";
-import { addCalendarDays } from "../date-only";
+import { addCalendarDays, toKstDateOnly } from "../date-only";
 import { isValidDateString } from "./validation";
 
 /** 사내 목표 검수 완료일의 기본값 오프셋(A/S 접수 일정 체크포인트) — 인수일 + 14일. */
@@ -80,7 +79,9 @@ export type IntakeDraftData = {
 };
 
 export function createDefaultDraft(): IntakeDraftData {
-  const receivedAt = formatDemoReferenceDateLabel();
+  // 인수일 기본값은 한국 기준 오늘이다. 폼은 useIsHydrated() 게이트 뒤에서만
+  // 마운트되므로 이 new Date()는 브라우저에서만 실행된다.
+  const receivedAt = toKstDateOnly(new Date());
   return {
     workflowType: "PAID_MATCHER",
     billingType: "",

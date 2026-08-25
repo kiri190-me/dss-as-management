@@ -24,6 +24,18 @@ export function toKstDateOnly(instant: Date): string {
   return KST_FORMATTER.format(instant);
 }
 
+/**
+ * "YYYY-MM" for the given instant, as a KST calendar month — the month a
+ * 대시보드 "금월 출하 완료" card means. Deliberately derived from
+ * toKstDateOnly rather than getUTCFullYear/getUTCMonth: between 00:00 and
+ * 09:00 KST on the 1st of a month, UTC is still in the previous month, and
+ * a UTC-based implementation would silently count that window against the
+ * wrong month.
+ */
+export function toKstYearMonth(instant: Date): string {
+  return toKstDateOnly(instant).slice(0, 7);
+}
+
 /** Parses a "YYYY-MM-DD" (or any date-only prefix) string into a UTC-midnight synthetic instant, purely for calendar-day arithmetic — never a real point in time. */
 function parseDateOnlyToUtcMidnight(dateOnly: string): number {
   const [year, month, day] = dateOnly.slice(0, 10).split("-").map(Number);

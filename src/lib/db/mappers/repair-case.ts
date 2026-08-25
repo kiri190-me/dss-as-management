@@ -1,4 +1,3 @@
-import { DEMO_REFERENCE_DATE } from "@/lib/domain/demo-clock";
 import {
   billingTypeLabels,
   isRepairCaseOverdue,
@@ -111,7 +110,7 @@ export type TrashedRepairCase = ResolvedRepairCase & {
  */
 export function mapRepairCaseRow(
   row: RepairCaseJoinRow,
-  referenceDate: Date = DEMO_REFERENCE_DATE
+  referenceDate: Date = new Date()
 ): ResolvedRepairCase {
   const status = resolveRepairStatusFromStep({
     repairCaseId: row.id,
@@ -176,7 +175,7 @@ export function mapRepairCaseRow(
 /** Maps one joined trash-list DB row (see RepairCaseTrashJoinRow) to TrashedRepairCase. */
 export function mapRepairCaseTrashRow(
   row: RepairCaseTrashJoinRow,
-  referenceDate: Date = DEMO_REFERENCE_DATE
+  referenceDate: Date = new Date()
 ): TrashedRepairCase {
   return {
     ...mapRepairCaseRow(row, referenceDate),
