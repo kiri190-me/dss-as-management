@@ -6,6 +6,8 @@ import {
   countDomesticOrdersWithoutOrderYear,
   filterDomesticOrdersByYear,
   foldBlankToNull,
+  formatDomesticOrderDueDates,
+  formatDomesticOrderDueDateSummary,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   orderIssuedYearOf,
@@ -351,5 +353,73 @@ test("고객사가 어느 쪽에도 없으면 색도 없다", () => {
       repairCaseCustomerRowColor: null,
     }),
     null
+  );
+});
+
+// ─────────────────────────────────────────────── 납기요청일을 화면 글자로 접기
+
+/**
+ * 한 발주에 납기일이 여럿일 수 있게 된 뒤, 22칼럼짜리 표의 좁은 칸에 그 목록을
+ * 어떻게 적는가. 지키는 것은 셋이다.
+ *  1. 없으면 null 이다 — "-"로 바꾸는 일은 화면이 한다.
+ *  2. 여럿이면 **첫 날짜 + 외 N건**이고, 나머지는 전체 한 줄로 되찾는다.
+ *  3. **순서를 다시 정하지 않는다** — 1차분·2차분처럼 차례가 곧 뜻이다.
+ */
+
+test("납기일이 없으면 요약도 전체도 null이다", () => {
+  assert.equal(formatDomesticOrderDueDateSummary([]), null);
+  assert.equal(formatDomesticOrderDueDates([]), null);
+});
+
+test("납기일이 하나면 그 날짜 그대로다 — '외 0건'이 붙지 않는다", () => {
+  assert.equal(
+    formatDomesticOrderDueDateSummary([{ dueDate: "2026-01-20", note: null }]),
+    "2026-01-20"
+  );
+});
+
+test("메모가 있으면 괄호로 함께 보인다 — 날짜만으로는 어느 분량인지 알 수 없다", () => {
+  assert.equal(
+    formatDomesticOrderDueDateSummary([{ dueDate: "2026-01-20", note: "1차분" }]),
+    "2026-01-20 (1차분)"
+  );
+  // 공백만 적힌 메모는 없는 것이다 — 이 파일의 다른 값들과 같은 규칙이다.
+  assert.equal(
+    formatDomesticOrderDueDateSummary([{ dueDate: "2026-01-20", note: "   " }]),
+    "2026-01-20"
+  );
+});
+
+test("여럿이면 첫 날짜 + '외 N건'이다", () => {
+  assert.equal(
+    formatDomesticOrderDueDateSummary([
+      { dueDate: "2026-01-20", note: "1차분" },
+      { dueDate: "2026-02-15", note: "2차분" },
+      { dueDate: "2026-03-10", note: null },
+    ]),
+    "2026-01-20 (1차분) 외 2건"
+  );
+});
+
+test("요약은 받은 차례의 첫 번째다 — 날짜순으로 다시 세우지 않는다", () => {
+  // 2차분이 앞에 놓인 목록. 여기서 몰래 날짜순으로 세우면, 사람이 폼에
+  // 늘어놓은 차례와 표에 보이는 첫 날짜가 어긋난다.
+  assert.equal(
+    formatDomesticOrderDueDateSummary([
+      { dueDate: "2026-03-10", note: "먼저 적은 줄" },
+      { dueDate: "2026-01-20", note: null },
+    ]),
+    "2026-03-10 (먼저 적은 줄) 외 1건"
+  );
+});
+
+test("전체 한 줄은 받은 차례 그대로 전부를 적는다", () => {
+  assert.equal(
+    formatDomesticOrderDueDates([
+      { dueDate: "2026-03-10", note: "2차분" },
+      { dueDate: "2026-01-20", note: null },
+      { dueDate: "2026-02-15", note: "  " },
+    ]),
+    "2026-03-10 (2차분), 2026-01-20, 2026-02-15"
   );
 });

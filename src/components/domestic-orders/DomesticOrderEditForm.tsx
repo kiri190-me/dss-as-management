@@ -1,6 +1,14 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import EditSectionActions, {
   editErrorClass,
@@ -9,7 +17,11 @@ import EditSectionActions, {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { buildDraftText } from "@/lib/domain/edit-draft-text";
-import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
+import { generateClientUuid } from "@/lib/client-uuid";
+import {
+  foldBlankToNull,
+  formatDomesticOrderDueDates,
+} from "@/lib/domain/domestic-order-list";
 import {
   filterRepairCaseLinkOptions,
   keepSelectedRepairCaseOption,
@@ -28,7 +40,8 @@ import {
  * ============================================================================
  * 내자 정리 — 한 줄을 통째로 고치는 폼
  * ============================================================================
- * 칸 하나씩 고치는 방식이 아니다. 한 줄의 값 23개를 한 화면에서 고치고 한 번에
+ * 칸 하나씩 고치는 방식이 아니다. 한 줄의 값 전부(칸 22개 + 납기요청일
+ * 목록)를 한 화면에서 고치고 한 번에
  * 저장한다 — 이 시트는 원래 한 줄이 한 건의 이야기(발주 → 견적 → 납품 →
  * 세금계산서 → 입금)라서, 칸 단위로 저장하면 "견적은 들어갔는데 현황은 아직
  * 옛날 값"인 중간 상태가 표에 남는다.
@@ -61,6 +74,16 @@ import {
  *
  * 흐린 글씨는 **지금 고른 건**을 따라간다(아래 linkedRepairCase). 고르개가 그
  * 건의 형식·L/N·S/N·납기일을 함께 들고 있어서 고르는 즉시 바뀐다.
+ *
+ * ── 납기요청일만 칸이 아니라 묶음이다 ───────────────────────────────────
+ * 한 발주를 나눠 납품하면 납기일이 여럿이라, 그 자리는 칸 하나가 아니라
+ * **더하고 뺄 수 있는 줄들**이다(schema/domestic-order-due-dates.ts). 줄마다
+ * 날짜와 짧은 메모("1차분")가 있고, 저장되는 것은 화면에 늘어놓은 차례
+ * 그대로다.
+ *
+ * 연결된 수리 건의 고객 요청 납기일은 여기서도 **힌트일 뿐**이다. 다른 칸들이
+ * placeholder 로 보여 주는 것을 이 묶음은 아래 한 줄로 보여 주는데
+ * (requestedDueDateHint), 성질은 똑같다 — 어떤 경로로도 입력값이 되지 않는다.
  *
  * ── 수리 건은 검색해서 고른다 ───────────────────────────────────────────
  * 접수 건이 수백 건이라 `<select>` 하나로는 원하는 건을 찾을 수 없다. 검색 칸을
@@ -95,6 +118,16 @@ import {
  * 건과 다르게 적은 값**이라 다시 불러온 화면 어디에도 남아 있지 않다.
  */
 const DRAFT_LABELS: Readonly<Record<string, string>> = {
+  /**
+   * 납기요청일 목록. **collectFields 가 만드는 값이 아니다** — 그쪽은 배열이라
+   * buildDraftText 가 통째로 걸러 낸다(그 함수의 '문자열이 아닌 것은 전부').
+   * 충돌한 순간에만 한 줄 글자로 만들어 함께 넘긴다(handleSubmit).
+   *
+   * 다른 날짜 다섯과 달리 붙잡는 이유는 **메모가 손으로 친 글**이기 때문이다.
+   * 날짜만이면 다시 고르면 그만이지만, "2차분(김 과장 확인)" 같은 메모는 다시
+   * 불러온 화면 어디에도 남아 있지 않다.
+   */
+  dueDatesText: "납기요청일",
   intakeNumberText: "인수번호(직접 입력)",
   modelNameText: "형식",
   lotNumberText: "L/N",
@@ -114,6 +147,24 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
 const textAreaClass = `${editInputClass} min-h-20 resize-y`;
 
 const hintClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
+
+/**
+ * 폼이 편집하는 납기 요청일 한 줄.
+ *
+ * `key` 는 저장된 행의 id 이거나, 방금 추가한 줄에 붙인 임시 UUID 다. **배열
+ * index 를 React key 로 쓰지 않기 위해서** 있다 — 가운데 줄을 지우면 그 뒤
+ * 줄들의 index 가 하나씩 당겨지고, index 를 key 로 쓰면 React 는 "지워진 것은
+ * 마지막 줄"이라고 읽어 남은 입력칸에 엉뚱한 값이 남는다.
+ *
+ * 값은 둘 다 문자열이다(빈 문자열 = 안 적음). 검증이 그 빈 값을 접는다
+ * (validation/domestic-order-input.ts 의 '완전히 빈 줄은 거절하지 않고 뺀다').
+ */
+type DueDateDraft = { key: string; dueDate: string; note: string };
+
+/** 납기일 한 줄의 date 입력칸 id. 추가한 뒤 그리로 포커스를 옮기는 데 쓴다. */
+function dueDateInputId(key: string): string {
+  return `domestic-order-dueDate-${key}`;
+}
 
 export default function DomesticOrderEditForm({
   row,
@@ -155,7 +206,23 @@ export default function DomesticOrderEditForm({
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState(row?.purchaseOrderNumber ?? "");
   const [projectName, setProjectName] = useState(row?.projectName ?? "");
   const [orderIssuedDate, setOrderIssuedDate] = useState(row?.orderIssuedDate ?? "");
-  const [requestedDueDate, setRequestedDueDate] = useState(row?.requestedDueDate ?? "");
+  /**
+   * 납기 요청일 **목록**. 저장된 차례 그대로 시작하고, 빈 목록이 정상이다 —
+   * 납기일이 아직 없는 줄이 실제로 있다.
+   *
+   * 다른 칸들과 달리 여기에는 수리 건의 값이 어떤 경로로도 들어오지 않는다.
+   * 연결된 건의 고객 요청 납기일은 **아래 힌트 한 줄로만** 보여 준다 —
+   * 내자의 납기 요청일은 발주서에 적힌 날짜라 뜻이 다르고(queries 주석), 여기
+   * 미리 채워 넣으면 아무것도 안 고치고 저장만 해도 그 날짜가 이 줄에
+   * 박제된다(파일 헤더의 'placeholder 다. value 가 아니다').
+   */
+  const [dueDates, setDueDates] = useState<DueDateDraft[]>(() =>
+    (row?.dueDates ?? []).map((dueDate) => ({
+      key: dueDate.id,
+      dueDate: dueDate.dueDate,
+      note: dueDate.note ?? "",
+    }))
+  );
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
   const [quoteNumber, setQuoteNumber] = useState(row?.quoteNumber ?? "");
   const [progressNote, setProgressNote] = useState(row?.progressNote ?? "");
@@ -174,6 +241,48 @@ export default function DomesticOrderEditForm({
   const [isConflict, setIsConflict] = useState(false);
 
   const disabled = isSubmitting || isConflict;
+
+  /**
+   * 방금 추가한 줄로 포커스를 옮기기 위한 자리. **키보드만으로 쓸 수 있어야
+   * 하기 때문**이다 — '추가'를 누르면 새 줄이 폼 중간에 생기는데, 포커스가
+   * 버튼에 남아 있으면 그 줄까지 Tab 을 거꾸로 세어 가야 한다.
+   *
+   * state 가 아니라 ref 인 것은 일부러다. 이 값은 **그리는 데 쓰이지 않으므로**
+   * 바뀐다고 다시 그릴 이유가 없고, state 로 두면 effect 안에서 그것을 비우는
+   * setState 가 필요해져 렌더가 한 번 더 돈다. 아래 effect 는 목록이 바뀔 때만
+   * 돌면서, 옮길 곳이 적혀 있으면 옮기고 그 자리를 비운다.
+   */
+  const pendingDueDateFocusRef = useRef<string | null>(null);
+  const addDueDateButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const key = pendingDueDateFocusRef.current;
+    if (key === null) return;
+    pendingDueDateFocusRef.current = null;
+    document.getElementById(dueDateInputId(key))?.focus();
+  }, [dueDates]);
+
+  function addDueDate() {
+    // 저장된 행의 id 와 섞이지 않는 임시 key 다. LAN 평문 HTTP 에서도
+    // 만들어져야 해서 crypto.randomUUID 를 직접 부르지 않는다(client-uuid.ts).
+    const key = generateClientUuid();
+    pendingDueDateFocusRef.current = key;
+    setDueDates((previous) => [...previous, { key, dueDate: "", note: "" }]);
+  }
+
+  function updateDueDate(key: string, patch: Partial<Omit<DueDateDraft, "key">>) {
+    setDueDates((previous) =>
+      previous.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry))
+    );
+  }
+
+  function removeDueDate(key: string) {
+    setDueDates((previous) => previous.filter((entry) => entry.key !== key));
+    // 지운 줄과 함께 포커스가 사라지면 키보드 사용자는 갈 곳을 잃는다.
+    // 남은 줄의 번호가 당겨지므로 어느 줄로 보내도 어색하고, '추가' 버튼은
+    // 이 묶음에 늘 있는 자리라 그리로 돌려보낸다.
+    addDueDateButtonRef.current?.focus();
+  }
 
   /**
    * 저장돼 있는 연결. 지금 고른 것과 다를 수 있다.
@@ -267,15 +376,17 @@ export default function DomesticOrderEditForm({
   const linkedCustomerName = repairCasePlaceholder(linkedRepairCase?.customerName) ?? null;
 
   /**
-   * 납기요청일 칸 아래 한 줄. **이 한 칸만 흐린 글씨로는 안 된다** —
-   * `<input type="date">` 에는 placeholder 를 넘겨도 브라우저가 그리지 않는다
-   * (칸 안이 이미 `연도-월-일` 같은 자기 글자로 차 있다). 그래서 다른 넷과
-   * 달리 아래 한 줄로 보여 준다. placeholder 도 함께 넘겨 두는데, date 를
-   * 모르는 브라우저가 text 로 되돌릴 때는 그쪽이 그려지기 때문이다.
+   * 납기요청일 묶음 아래 한 줄. **흐린 글씨로는 안 된다** — `<input
+   * type="date">` 에는 placeholder 를 넘겨도 브라우저가 그리지 않고(칸 안이
+   * 이미 `연도-월-일` 같은 자기 글자로 차 있다), 이제는 칸이 여럿이라 어느
+   * 칸에 넣어야 할지도 말할 수 없다. 그래서 묶음 밑에 한 줄로 둔다.
    *
-   * 내자의 납기요청일은 발주서에 적힌 날짜라 수리 건의 고객 요청 납기일과
-   * 같아야 할 이유가 없다(조회 쪽 주석). 비워 둔다고 이 날짜가 표에 뜨지도
-   * 않는다 — 그래서 "그대로 보입니다"가 아니라 "적혀 있습니다"라고 적는다.
+   * ⚠️ **이 값은 저장되지 않는다.** 내자의 납기 요청일은 발주서에 적힌
+   * 날짜라 수리 건의 고객 요청 납기일과 같아야 할 이유가 없고(조회 쪽 주석),
+   * 목록의 값을 대신하지도 않는다. 그래서 여기서 나온 글자가 닿는 곳은 이
+   * 안내 문장 하나뿐이다 — 위 dueDates state 에는 어떤 경로로도 들어가지
+   * 않는다. 비워 둔다고 이 날짜가 표에 뜨지 않으므로 "그대로 보입니다"가
+   * 아니라 "적혀 있습니다"라고 적는다.
    */
   function requestedDueDateHint(): ReactNode {
     const hint = repairCasePlaceholder(linkedRepairCase?.requestedDueDate);
@@ -301,6 +412,28 @@ export default function DomesticOrderEditForm({
     );
   }
 
+  /**
+   * 충돌 상자에 넣을 납기일 한 줄 — "2026-01-20 (1차분), 2026-02-15".
+   *
+   * 아무것도 안 적은 줄은 뺀다(붙잡을 글이 없다). 날짜 없이 메모만 친 줄은
+   * 남긴다 — 그 메모가 바로 다시 불러온 화면에서 사라지는 글이다. 목록을
+   * 글자로 만드는 규칙은 표와 같은 함수를 쓴다.
+   */
+  function dueDatesDraftText(): string {
+    const written = dueDates.filter(
+      (entry) => entry.dueDate.trim() !== "" || entry.note.trim() !== ""
+    );
+    if (written.length === 0) return "";
+    return (
+      formatDomesticOrderDueDates(
+        written.map((entry) => ({
+          dueDate: entry.dueDate.trim() === "" ? "(날짜 없음)" : entry.dueDate.trim(),
+          note: entry.note,
+        }))
+      ) ?? ""
+    );
+  }
+
   function collectFields(): Record<string, unknown> {
     return {
       repairCaseId: repairCaseId || null,
@@ -314,7 +447,11 @@ export default function DomesticOrderEditForm({
       purchaseOrderNumber,
       projectName,
       orderIssuedDate,
-      requestedDueDate,
+      // 폼에 늘어놓은 **차례 그대로** 보낸다 — 차례는 저장하는 쪽이 이 배열의
+      // index 로 매긴다(validation 의 DomesticOrderDueDateInput 주석). 여기서
+      // 빈 줄을 걸러 내지 않는 것은 일부러다: 무엇이 빈 줄인지 정하는 규칙은
+      // 검증 한 곳에 있어야 하고, 화면이 미리 걸러 내면 두 곳이 어긋난다.
+      dueDates: dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note })),
       quoteIssuedDate,
       quoteNumber,
       progressNote,
@@ -345,7 +482,16 @@ export default function DomesticOrderEditForm({
         if (result.code === "CONFLICT") {
           // 얼리기 **전에** 적어 둔 글을 붙잡는다 — 곧 폼이 사라지기 때문이다.
           setIsConflict(true);
-          setSubmitError({ message: result.message, draftText: buildDraftText(fields, DRAFT_LABELS) });
+          setSubmitError({
+            message: result.message,
+            // 납기일 목록은 배열이라 buildDraftText 가 걸러 낸다. 손으로 친
+            // 메모를 잃지 않도록 여기서만 한 줄 글자로 만들어 얹는다
+            // (DRAFT_LABELS 의 dueDatesText). 서버로 가는 fields 는 그대로다.
+            draftText: buildDraftText(
+              { ...fields, dueDatesText: dueDatesDraftText() },
+              DRAFT_LABELS
+            ),
+          });
           return;
         }
         setFieldErrors(result.fieldErrors ?? {});
@@ -542,11 +688,91 @@ export default function DomesticOrderEditForm({
         {renderText("purchaseOrderNumber", "발주서번호", purchaseOrderNumber, setPurchaseOrderNumber)}
         {renderText("projectName", "PJT", projectName, setProjectName)}
         {renderText("orderIssuedDate", "발주발행일", orderIssuedDate, setOrderIssuedDate, { type: "date" })}
-        {renderText("requestedDueDate", "납기요청일", requestedDueDate, setRequestedDueDate, {
-          type: "date",
-          placeholder: repairCasePlaceholder(linkedRepairCase?.requestedDueDate),
-          hint: requestedDueDateHint(),
-        })}
+        {/* 납기요청일은 **여러 개**다 — 분할 납품이면 같은 발주에 날짜가
+            각각 붙는다(schema/domestic-order-due-dates.ts). 다른 칸들과 달리
+            한 칸이 아니라 묶음이라 표 너비를 다 쓴다.
+
+            추가·삭제 버튼과 각 줄의 입력칸이 전부 진짜 <button>/<input> 이라
+            마우스 없이도 다룰 수 있다. */}
+        <fieldset className="sm:col-span-2 lg:col-span-3">
+          <legend className={editLabelClass}>납기요청일</legend>
+
+          {dueDates.length === 0 ? (
+            // 빈 목록이 정상이라는 사실을 적어 둔다 — 아무것도 없는 자리는
+            // "고장 났나?"로 읽힌다.
+            <p className={hintClass}>납기요청일이 없습니다. 필요하면 아래에서 추가하세요.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {dueDates.map((entry, index) => {
+                const errorKey = `dueDates.${index}`;
+                return (
+                  // key 는 index 가 아니다 — 가운데 줄을 지웠을 때 남은 칸에
+                  // 엉뚱한 값이 남지 않게 한다(DueDateDraft 주석).
+                  <li key={entry.key} className="flex flex-col gap-1">
+                    {/* 폭은 감싸는 칸이 정한다 — editInputClass 에 이미
+                        w-full 이 있어서, 같은 문자열에 w-auto 를 덧붙여도
+                        어느 쪽이 이길지는 클래스 이름의 순서가 아니라
+                        만들어진 CSS 의 순서가 정한다(목록 화면이 배경색을
+                        겹쳐 쓰지 않는 것과 같은 이유). */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="w-44 flex-none">
+                        <input
+                          id={dueDateInputId(entry.key)}
+                          type="date"
+                          className={editInputClass}
+                          value={entry.dueDate}
+                          disabled={disabled}
+                          // 한 화면에 여러 개라 "납기요청일"만으로는 화면
+                          // 낭독기가 어느 줄인지 말할 수 없다.
+                          aria-label={`납기요청일 ${index + 1}`}
+                          onChange={(e) => updateDueDate(entry.key, { dueDate: e.target.value })}
+                        />
+                      </div>
+                      <div className="min-w-40 flex-1">
+                        <input
+                          type="text"
+                          className={editInputClass}
+                          value={entry.note}
+                          disabled={disabled}
+                          placeholder="메모 (예: 1차분)"
+                          aria-label={`납기요청일 ${index + 1} 메모`}
+                          onChange={(e) => updateDueDate(entry.key, { note: e.target.value })}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="flex-none rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                        disabled={disabled}
+                        onClick={() => removeDueDate(entry.key)}
+                      >
+                        삭제
+                        <span className="sr-only"> — 납기요청일 {index + 1}</span>
+                      </button>
+                    </div>
+                    {fieldErrors[errorKey] && (
+                      <p className={editErrorClass}>{fieldErrors[errorKey]}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <button
+            type="button"
+            ref={addDueDateButtonRef}
+            className="mt-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            disabled={disabled}
+            onClick={addDueDate}
+          >
+            납기요청일 추가
+          </button>
+
+          {/* 목록 전체가 잘못된 경우(개수 상한 초과 등)의 자리. 줄마다의
+              오류는 위에서 그 줄 밑에 붙는다. */}
+          {fieldErrors.dueDates && <p className={editErrorClass}>{fieldErrors.dueDates}</p>}
+          {requestedDueDateHint()}
+        </fieldset>
         {renderText("quoteIssuedDate", "견적발행일", quoteIssuedDate, setQuoteIssuedDate, { type: "date" })}
         {renderText("quoteNumber", "견적서번호", quoteNumber, setQuoteNumber)}
         {renderText("deliveredDate", "납품일", deliveredDate, setDeliveredDate, { type: "date" })}

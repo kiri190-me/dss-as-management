@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
-import { customers, domesticOrders, repairCases } from "../schema";
+import { customers, domesticOrderDueDates, domesticOrders, repairCases } from "../schema";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -32,6 +32,16 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * 잠금을 먼저 잡는 이유: 읽고 나서 쓰기까지 사이에 남이 끼어들면 "둘 다
  * 성공했는데 한쪽 내용이 사라진" 상태가 만들어진다. 이 표에는 세금계산서
  * 발행일과 입금 사실이 들어 있어서 조용히 덮이면 안 되는 종류의 값이다.
+ *
+ * ── 납기 요청일은 딸린 표에 있다 ────────────────────────────────────────
+ * 한 줄에 날짜가 여럿일 수 있어서 domestic_order_due_dates 로 나갔다
+ * (그 스키마 파일 헤더). 저장은 **그 줄의 날짜를 전부 지우고 받은 목록으로
+ * 다시 넣는 것**이고(replaceDueDates), 그 일은 위 4단계에서 **version 대조를
+ * 통과한 뒤에만** 일어난다 — 같은 트랜잭션 안이므로 CONFLICT 로 끝난 저장은
+ * 날짜를 한 건도 건드리지 않는다.
+ *
+ * domestic_orders.requested_due_date 는 **이제 쓰지 않는다.** 칸은 아직
+ * 남아 있지만 toColumnValues 에 없다 — 그 이유는 그 자리의 주석에 있다.
  *
  * ── 지워진 행은 고칠 수 없다 ────────────────────────────────────────────
  * is_deleted = true 인 행은 조회 목록에 없다(queries/domestic-orders.ts).
@@ -90,7 +100,11 @@ function toColumnValues(fields: DomesticOrderFields) {
     purchaseOrderNumber: fields.purchaseOrderNumber,
     projectName: fields.projectName,
     orderIssuedDate: fields.orderIssuedDate,
-    requestedDueDate: fields.requestedDueDate,
+    // requested_due_date 는 **일부러 여기 없다.** 납기 요청일은 이제
+    // domestic_order_due_dates 에 산다(아래 replaceDueDates). 그 칸을 여기 두면
+    // 새 폼이 보내지 않는 값이 저장할 때마다 NULL 로 덮여, 아직 남겨 둔 원본이
+    // 지워진다 — 칸을 남겨 두기로 한 이유가 바로 그 원본이다
+    // (schema/domestic-orders.ts 의 requested_due_date 주석).
     quoteIssuedDate: fields.quoteIssuedDate,
     quoteNumber: fields.quoteNumber,
     progressNote: fields.progressNote,
@@ -173,6 +187,45 @@ async function checkReferences(
   return null;
 }
 
+/**
+ * 이 줄의 납기 요청일을 **받은 목록 그대로** 만든다 — 전부 지우고 다시 넣는다.
+ *
+ * ── 왜 지우고 다시 넣는가 ───────────────────────────────────────────────
+ * 폼은 목록을 통째로 편집한다(줄을 더하고, 빼고, 순서대로 늘어놓는다). 그러니
+ * 저장이 받는 것은 "이 줄의 납기일은 지금부터 이것이 전부"라는 말이고, 그
+ * 말을 그대로 옮기는 방법이 이것이다. 하나씩 대조해 넣고 빼는 방식은 같은
+ * 결과를 훨씬 어렵게 만들 뿐이고, 그 어려움은 "폼에서 지웠는데 남아 있는 날짜"
+ * 같은 모양으로 드러난다.
+ *
+ * ⚠️ **반드시 domestic_order_id 로 좁힌다.** 조건 없는 delete 는 이 표를
+ * 통째로 비운다 — 이 줄의 날짜를 고치는 일이 다른 모든 줄의 날짜를 지우는
+ * 일이 되어서는 안 된다.
+ *
+ * ⚠️ **반드시 부르는 쪽의 트랜잭션 안에서만** 부른다(tx 를 받는 이유). 부모
+ * 저장이 CONFLICT 로 끝나는 길에서는 아예 불리지 않아야 하고, 그 순서는 부르는
+ * 쪽이 지킨다.
+ *
+ * 차례(display_order)는 배열 index + 1 이다. 폼에 늘어놓은 순서가 곧 차례라서
+ * (validation 의 DomesticOrderDueDateInput 주석), 조회가 그 차례로 다시 읽으면
+ * 사람이 보던 순서가 그대로 돌아온다.
+ */
+async function replaceDueDates(tx: Tx, domesticOrderId: string, fields: DomesticOrderFields) {
+  await tx
+    .delete(domesticOrderDueDates)
+    .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId));
+
+  if (fields.dueDates.length === 0) return;
+
+  await tx.insert(domesticOrderDueDates).values(
+    fields.dueDates.map((dueDate, index) => ({
+      domesticOrderId,
+      dueDate: dueDate.dueDate,
+      note: dueDate.note,
+      displayOrder: index + 1,
+    }))
+  );
+}
+
 /** 새 줄 하나. version 은 스키마 기본값 1로 시작한다. */
 export async function createDomesticOrder(params: {
   fields: DomesticOrderFields;
@@ -192,6 +245,11 @@ export async function createDomesticOrder(params: {
         updatedBy: params.actorUserId,
       })
       .returning({ id: domesticOrders.id, version: domesticOrders.version });
+
+    // 같은 트랜잭션 안이다 — 날짜를 넣다 실패하면 방금 만든 줄도 함께 없던
+    // 일이 된다. 날짜만 빠진 줄이 남는 편이 더 나쁘다: 화면에는 정상으로
+    // 보이는데 사람이 적은 납기일만 사라진 상태다.
+    await replaceDueDates(tx, inserted.id, params.fields);
 
     return { ok: true, id: inserted.id, version: inserted.version };
   });
@@ -241,6 +299,12 @@ export async function updateDomesticOrder(params: {
     if (!updated) {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
     }
+
+    // **여기까지 와야 날짜를 손댄다.** 위의 NOT_FOUND · CONFLICT ·
+    // VALIDATION_ERROR 는 전부 이 줄 앞에서 돌아가므로, 그 길로 끝난 저장은
+    // 날짜를 한 건도 바꾸지 않는다. 순서가 곧 그 보장이다 — 먼저 지워 놓고
+    // version 을 보면, 충돌한 저장이 남의 날짜를 지운 채로 실패한다.
+    await replaceDueDates(tx, params.id, params.fields);
 
     return { ok: true, id: updated.id, version: updated.version };
   });

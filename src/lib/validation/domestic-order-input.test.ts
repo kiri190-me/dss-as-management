@@ -53,7 +53,9 @@ test("빈 입력도 통과한다 — 이 표에는 필수 칸이 없다", () => 
     purchaseOrderNumber: null,
     projectName: null,
     orderIssuedDate: null,
-    requestedDueDate: null,
+    // 납기요청일은 이제 목록이다 — 빈 배열이 "없음"이고, null 이라는 두 번째
+    // 모양을 만들지 않는다.
+    dueDates: [],
     quoteIssuedDate: null,
     quoteNumber: null,
     progressNote: null,
@@ -102,12 +104,11 @@ test("글자 칸은 앞뒤 공백을 떼고 저장한다", () => {
   assert.equal(result.data.etcNote, "두 줄\n메모");
 });
 
-// ─────────────────────────────────────────────────────────────── 날짜 5종
+// ─────────────────────────────────────────────────────────── 칸 하나짜리 날짜
 
-test("날짜 5종은 YYYY-MM-DD 형식을 받는다", () => {
+test("칸 하나짜리 날짜 넷은 YYYY-MM-DD 형식을 받는다", () => {
   const result = validateDomesticOrderFields({
     orderIssuedDate: "2026-01-05",
-    requestedDueDate: "2026-02-28",
     quoteIssuedDate: "2026-03-01",
     deliveredDate: "2026-04-30",
     taxInvoiceDate: "2026-12-31",
@@ -115,10 +116,20 @@ test("날짜 5종은 YYYY-MM-DD 형식을 받는다", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.data.orderIssuedDate, "2026-01-05");
-  assert.equal(result.data.requestedDueDate, "2026-02-28");
   assert.equal(result.data.quoteIssuedDate, "2026-03-01");
   assert.equal(result.data.deliveredDate, "2026-04-30");
   assert.equal(result.data.taxInvoiceDate, "2026-12-31");
+});
+
+test("requestedDueDate 라는 이름으로 온 값은 조용히 무시된다", () => {
+  // 납기요청일은 딸린 표로 나갔고(schema/domestic-order-due-dates.ts), 이
+  // 검증은 더 이상 그 이름을 받지 않는다. 받아 두면 새 폼이 보내지 않는 그
+  // 칸이 저장할 때마다 NULL 로 덮여, 아직 남겨 둔 원본이 지워진다.
+  const result = validateDomesticOrderFields({ requestedDueDate: "2026-02-28" });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal("requestedDueDate" in result.data, false);
+  assert.deepEqual(result.data.dueDates, []);
 });
 
 test("형식은 맞지만 존재하지 않는 날짜는 거부한다", () => {
@@ -384,4 +395,131 @@ test("이 표의 칸 이름으로 온 것만 받는다 — 수리 건 쪽 이름
   assert.equal("lotNumber" in result.data, false);
   assert.equal("serialNumber" in result.data, false);
   assert.equal("reportedSymptom" in result.data, false);
+});
+
+// ────────────────────────────────────────────────── 납기요청일 목록 (dueDates)
+
+/**
+ * 한 발주에 납기일이 여럿일 수 있게 된 뒤의 규칙. 지키는 것은 넷이다.
+ *  1. **빈 목록이 정상이다** — 납기일이 아직 없는 줄이 실제로 있다.
+ *  2. 잘못된 날짜는 그 줄 번호와 함께 거절된다(폼이 그 줄 밑에 문장을 붙인다).
+ *  3. 개수 상한이 있다 — 상한이 없으면 요청 하나가 한 줄에 수천 행을 넣는다.
+ *  4. 메모에도 길이 상한이 있다.
+ */
+
+test("dueDates가 없거나 빈 배열이면 빈 목록이다 — 정상이다", () => {
+  for (const value of [undefined, null, []]) {
+    const result = validateDomesticOrderFields(value === undefined ? {} : { dueDates: value });
+    assert.equal(result.ok, true, String(value));
+    if (!result.ok) continue;
+    assert.deepEqual(result.data.dueDates, []);
+  }
+});
+
+test("납기요청일 여러 개가 적은 순서 그대로 들어간다", () => {
+  const result = validateDomesticOrderFields({
+    dueDates: [
+      { dueDate: "2026-02-28", note: "1차분" },
+      { dueDate: "2026-01-20", note: null },
+      { dueDate: "2026-03-15" },
+    ],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  // 날짜순으로 다시 세우지 않는다 — 1차분·2차분처럼 순서가 곧 뜻이다.
+  assert.deepEqual(result.data.dueDates, [
+    { dueDate: "2026-02-28", note: "1차분" },
+    { dueDate: "2026-01-20", note: null },
+    { dueDate: "2026-03-15", note: null },
+  ]);
+});
+
+test("납기요청일도 앞뒤 공백을 떼고, 공백만 적힌 메모는 null이 된다", () => {
+  const result = validateDomesticOrderFields({
+    dueDates: [{ dueDate: " 2026-02-28 ", note: "  1차분  " }, { dueDate: "2026-03-01", note: "   " }],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.data.dueDates, [
+    { dueDate: "2026-02-28", note: "1차분" },
+    { dueDate: "2026-03-01", note: null },
+  ]);
+});
+
+test("날짜도 메모도 없는 줄은 거절이 아니라 빠진다 — 폼의 '추가'가 만든 빈 줄이다", () => {
+  const result = validateDomesticOrderFields({
+    dueDates: [{ dueDate: "2026-02-28", note: "1차분" }, { dueDate: "", note: "" }, {}],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.dueDates.length, 1);
+  assert.equal(result.data.dueDates[0].dueDate, "2026-02-28");
+});
+
+test("메모만 적고 날짜를 비운 줄은 그 줄의 오류다 — 적은 글을 조용히 버리지 않는다", () => {
+  const result = validateDomesticOrderFields({
+    dueDates: [{ dueDate: "", note: "2차분인데 날짜를 안 적었다" }],
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(result.fieldErrors["dueDates.0"]);
+});
+
+test("존재하지 않는 날짜와 형식이 틀린 날짜는 그 줄 번호로 거절된다", () => {
+  const result = validateDomesticOrderFields({
+    dueDates: [
+      { dueDate: "2026-01-20" },
+      { dueDate: "2026-02-31" }, // 형식은 맞지만 없는 날
+      { dueDate: "2026/03/01" }, // 형식이 다르다
+    ],
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.fieldErrors["dueDates.0"], undefined, "멀쩡한 줄까지 걸리면 안 된다");
+  assert.ok(result.fieldErrors["dueDates.1"]);
+  assert.ok(result.fieldErrors["dueDates.2"]);
+});
+
+test("납기요청일이 20개를 넘으면 거절된다", () => {
+  const twenty = Array.from({ length: 20 }, (_, index) => ({
+    dueDate: `2026-01-${String(index + 1).padStart(2, "0")}`,
+  }));
+  const ok = validateDomesticOrderFields({ dueDates: twenty });
+  assert.equal(ok.ok, true, "20개까지는 통과한다");
+  if (ok.ok) assert.equal(ok.data.dueDates.length, 20);
+
+  const tooMany = validateDomesticOrderFields({
+    dueDates: [...twenty, { dueDate: "2026-02-01" }],
+  });
+  assert.equal(tooMany.ok, false);
+  if (tooMany.ok) return;
+  assert.ok(tooMany.fieldErrors.dueDates);
+});
+
+test("납기요청일 메모는 200자를 넘을 수 없다", () => {
+  const ok = validateDomesticOrderFields({
+    dueDates: [{ dueDate: "2026-01-20", note: "가".repeat(200) }],
+  });
+  assert.equal(ok.ok, true);
+
+  const tooLong = validateDomesticOrderFields({
+    dueDates: [{ dueDate: "2026-01-20", note: "가".repeat(201) }],
+  });
+  assert.equal(tooLong.ok, false);
+  if (tooLong.ok) return;
+  assert.ok(tooLong.fieldErrors["dueDates.0"]);
+});
+
+test("dueDates가 배열이 아니거나 줄이 객체가 아니면 그 자리의 오류다", () => {
+  const notArray = validateDomesticOrderFields({ dueDates: "2026-01-20" });
+  assert.equal(notArray.ok, false);
+  if (!notArray.ok) assert.ok(notArray.fieldErrors.dueDates);
+
+  const notObject = validateDomesticOrderFields({ dueDates: ["2026-01-20"] });
+  assert.equal(notObject.ok, false);
+  if (!notObject.ok) assert.ok(notObject.fieldErrors["dueDates.0"]);
+
+  const badDateType = validateDomesticOrderFields({ dueDates: [{ dueDate: 20260120 }] });
+  assert.equal(badDateType.ok, false);
+  if (!badDateType.ok) assert.ok(badDateType.fieldErrors["dueDates.0"]);
 });

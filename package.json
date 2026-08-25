@@ -18,6 +18,7 @@
     "db:test:migrate": "drizzle-kit migrate --config drizzle.test.config.ts",
     "db:test:seed": "node --require ./scripts/node-windows-test-preload.cjs --import tsx scripts/seed-test-db.ts",
     "db:test:prepare": "node --require ./scripts/node-windows-test-preload.cjs --import tsx scripts/prepare-test-db.ts",
+    "migrate:due-dates": "tsx scripts/migrate-domestic-order-due-dates.ts",
     "purge:flowcharts": "tsx scripts/purge-expired-flowcharts.ts",
     "purge:repair-cases": "tsx scripts/purge-expired-repair-cases.ts",
     "purge:master-data": "tsx scripts/purge-expired-master-data.ts",

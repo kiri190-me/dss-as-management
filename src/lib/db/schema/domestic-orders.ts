@@ -140,7 +140,19 @@ export const domesticOrders = pgTable(
      * 아래 domestic_orders_order_issued_date_idx 가 그것을 위한 인덱스다.
      */
     orderIssuedDate: date("order_issued_date"),
-    requestedDueDate: date("requested_due_date"), // 납기요청일
+    /**
+     * 납기요청일 — **더 이상 읽지 않는 칸이다.**
+     *
+     * 한 줄에 날짜가 하나뿐이라는 전제가 실제와 달랐다(분할 납품). 값은
+     * domestic_order_due_dates 로 옮겨졌고, 조회·저장·화면은 전부 그 표만 본다
+     * (그 파일 헤더 참조).
+     *
+     * 그래도 **지금 지우지 않는다.** 옮기기가 끝난 직후에 원본을 없애면,
+     * 옮기는 중에 놓친 줄이 있어도 대조할 곳이 사라진다. 새 표를 실제로 써 보고
+     * 이상이 없음이 확인되면 그때 별도 단계에서 이 칸을 지운다 — 그때까지는
+     * 옮겨진 값의 원본으로 그대로 남겨 둔다.
+     */
+    requestedDueDate: date("requested_due_date"),
     /** 견적발행일. 발주발행일과 함께 주간보고가 쓰는 두 날짜 중 하나다. */
     quoteIssuedDate: date("quote_issued_date"),
     quoteNumber: text("quote_number"), // 견적서번호

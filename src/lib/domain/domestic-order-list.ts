@@ -1,6 +1,7 @@
 /**
  * ============================================================================
- * 내자 정리 목록의 계산 — 값 고르기 · 년도 고르기 · 고객사 묶기 · 완료 판정
+ * 내자 정리 목록의 계산 — 값 고르기 · 년도 고르기 · 고객사 묶기 · 완료 판정 ·
+ * 납기일 접기
  * ============================================================================
  * DB 도 React 도 여기 들어오지 않는다. repair-case-filters.ts 와 같은 자리의
  * 파일이고, 같은 이유로 순수 함수만 둔다 — 목록 화면이 무엇을 감추고 무엇을
@@ -101,6 +102,63 @@ export function resolveDomesticOrderCustomerRowColor(row: {
   return foldBlankToNull(row.ownCustomerName) !== null
     ? row.ownCustomerRowColor
     : row.repairCaseCustomerRowColor;
+}
+
+/**
+ * 이 파일의 납기일 함수들이 실제로 보는 칸만 요구한다 — 조회 쪽의
+ * DomesticOrderDueDate 를 끌어오지 않는다(id · display_order 는 그리는 데
+ * 쓰이지 않는다).
+ */
+type DueDateLike = { dueDate: string; note: string | null };
+
+/**
+ * 날짜 하나를 사람이 읽는 한 조각으로. 메모가 있으면 괄호로 붙인다 —
+ * "2026-01-20 (1차분)".
+ *
+ * 메모가 유일한 단서인 경우가 있다: 같은 발주를 나눠 납품하면 날짜만으로는
+ * 어느 분량인지 알 수 없다. 공백만 적힌 메모는 없는 것으로 접는다(이 파일의
+ * 다른 값들과 같은 규칙).
+ */
+function describeDueDate(dueDate: DueDateLike): string {
+  const note = foldBlankToNull(dueDate.note);
+  return note === null ? dueDate.dueDate : `${dueDate.dueDate} (${note})`;
+}
+
+/**
+ * 목록의 `납기요청일` 칸에 적을 한 줄. 없으면 null 이고, 화면이 "-"로 바꾼다
+ * (자료를 "-"로 바꾸는 일은 화면에서만 한다 — queries 파일의 같은 규칙).
+ *
+ * ── 왜 첫 날짜 + "외 N건" 인가 ──────────────────────────────────────────
+ * 이 표는 22칼럼이라 칸 하나에 쓸 수 있는 폭이 좁다. **칼럼을 늘리지 않는다는
+ * 것이 이 화면의 규칙**이고(DomesticOrderListScreen 헤더), 날짜를 전부 늘어
+ * 놓으면 그 줄만 옆으로 길어져 표가 읽히지 않는다. 그래서 칸에는 첫 날짜와
+ * "몇 건 더 있다"만 적고, 전부는 formatDomesticOrderDueDates 가 만드는 한 줄로
+ * 따라붙는다.
+ *
+ * **순서를 여기서 다시 정하지 않는다.** 받은 차례의 첫 번째가 곧 첫 날짜다 —
+ * 1차분·2차분처럼 순서가 뜻인 값이라, 날짜순으로 몰래 다시 세우면 사람이 폼에
+ * 늘어놓은 차례와 표에 보이는 차례가 어긋난다. 차례를 정하는 일은 조회가
+ * 한다(queries 의 loadDueDatesByOrderId).
+ */
+export function formatDomesticOrderDueDateSummary(
+  dueDates: readonly DueDateLike[]
+): string | null {
+  if (dueDates.length === 0) return null;
+  const first = describeDueDate(dueDates[0]);
+  if (dueDates.length === 1) return first;
+  return `${first} 외 ${dueDates.length - 1}건`;
+}
+
+/**
+ * 그 줄의 납기일 **전부**를 한 줄로. 없으면 null 이다.
+ *
+ * 위 요약이 감춘 나머지를 되찾는 자리다 — 표에서는 칸의 title 로, 카드에서는
+ * 요약 아래 한 줄로 붙는다. 요약만 있으면 "외 2건"이 무엇인지 알려면 폼을 열어
+ * 보는 수밖에 없다.
+ */
+export function formatDomesticOrderDueDates(dueDates: readonly DueDateLike[]): string | null {
+  if (dueDates.length === 0) return null;
+  return dueDates.map(describeDueDate).join(", ");
 }
 
 /**

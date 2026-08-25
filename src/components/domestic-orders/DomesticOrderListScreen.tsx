@@ -13,6 +13,8 @@ import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
   filterDomesticOrdersByYear,
+  formatDomesticOrderDueDates,
+  formatDomesticOrderDueDateSummary,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   resolveInitialDomesticOrderYear,
@@ -194,6 +196,29 @@ function paymentLabel(completed: boolean): string {
 }
 
 /**
+ * 표의 `납기요청일` 칸. **칼럼은 여전히 22개다** — 날짜가 여럿이 될 수 있게
+ * 됐다고 칸을 늘리지 않는다(파일 헤더의 '표 22칼럼').
+ *
+ * 칸에는 첫 날짜와 "외 N건"만 적고(무엇을 접을지는 도메인 함수가 정한다),
+ * 나머지는 두 곳으로 되찾는다 — 마우스에는 title, 화면 낭독기에는 sr-only 한
+ * 줄. 요약만 있으면 "외 2건"이 무엇인지 알려면 폼을 열어 보는 수밖에 없다.
+ *
+ * 날짜가 없으면 다른 칸과 똑같이 "-"다.
+ */
+function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
+  const summary = formatDomesticOrderDueDateSummary(row.dueDates);
+  if (summary === null) return <>-</>;
+  const full = formatDomesticOrderDueDates(row.dueDates);
+  if (row.dueDates.length <= 1) return <>{summary}</>;
+  return (
+    <>
+      <span title={full ?? undefined}>{summary}</span>
+      <span className="sr-only"> — 전체: {full}</span>
+    </>
+  );
+}
+
+/**
  * 시트 머리말. 원본 2~8행을 그대로 옮긴다.
  *
  * 이 화면은 목록이기 전에 **고객사에 보내는 문서**다. 인사문과 연락 안내가
@@ -238,7 +263,12 @@ const CARD_FIELD_GROUPS: { label: string; fields: { label: string; of: (row: Dom
         label: "발주발행일",
         of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
       },
-      { label: "납기요청일", of: (row) => dash(row.requestedDueDate) },
+      // 표와 같은 규칙이다 — 첫 날짜 + "외 N건". 좁은 화면이라고 다르게
+      // 접으면 같은 자료가 화면마다 다른 값으로 읽힌다(파일 헤더).
+      {
+        label: "납기요청일",
+        of: (row) => dash(formatDomesticOrderDueDateSummary(row.dueDates)),
+      },
     ],
   },
   {
@@ -692,7 +722,11 @@ export default function DomesticOrderListScreen({
                             row.orderIssuedDate
                           )}
                         </td>
-                        <td className="px-3 py-2 tabular-nums">{dash(row.requestedDueDate)}</td>
+                        {/* 날짜가 여럿이면 첫 날짜 + "외 N건"이다 — 칼럼을
+                            늘리지 않는다(DueDateCellContent). */}
+                        <td className="px-3 py-2 tabular-nums">
+                          <DueDateCellContent row={row} />
+                        </td>
                         {/* 연결이 없는 줄은 시트에 적혀 있던 글자를 그대로 보여 준다
                             (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
                             단서가 화면에서 사라진다. */}

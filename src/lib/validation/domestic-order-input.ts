@@ -29,7 +29,7 @@ import { isValidDateString } from "@/lib/domain/local/validation";
  *
  * ── 오류는 칸 단위 한국어다 ─────────────────────────────────────────────
  * fieldErrors 의 키는 필드명 그대로이고, 화면은 그 키로 입력칸 밑에 문장을
- * 붙인다. "입력값을 확인해 주세요" 한 줄만 돌려주면 사용자는 23칸 중 어디가
+ * 붙인다. "입력값을 확인해 주세요" 한 줄만 돌려주면 사용자는 스무 칸 남짓 중 어디가
  * 틀렸는지 찾지 못한다.
  * ============================================================================
  */
@@ -67,6 +67,30 @@ const MAX_DISPLAY_ORDER = 2_147_483_647;
  */
 const AMOUNT_PATTERN = /^\d{1,13}(?:\.\d{1,2})?$/;
 
+/**
+ * 한 줄에 담을 수 있는 납기 요청일의 개수 상한.
+ *
+ * 분할 납품이라도 스무 번을 넘게 나눠 보내는 발주는 없다. 상한이 없으면 잘못
+ * 만들어진 요청 하나가 한 줄에 수천 행을 밀어 넣을 수 있고, 그때 목록 조회는
+ * 그 줄 하나 때문에 느려진다 — 이 칸에는 상한이 곧 안전장치다.
+ */
+const MAX_DUE_DATES = 20;
+
+/** 납기일 메모("1차분")는 사람이 문장을 적는 칸이 아니라 짧은 한 줄이다. */
+const MAX_DUE_DATE_NOTE = MAX_SHORT_TEXT;
+
+/**
+ * 납기 요청일 한 개. 차례(display_order)는 여기 없다 — **폼에 늘어놓은 순서가
+ * 곧 차례**라서, 저장하는 쪽이 배열 index 로 1부터 매긴다
+ * (mutations/domestic-orders.ts). 따로 받으면 화면의 차례와 저장된 차례가
+ * 어긋날 수 있고, 그때 어느 쪽이 맞는지 답할 방법이 없다.
+ */
+export type DomesticOrderDueDateInput = {
+  /** "YYYY-MM-DD". 실제 달력에 있는 날이어야 한다. */
+  dueDate: string;
+  note: string | null;
+};
+
 export type DomesticOrderFields = {
   /** 연결된 수리 건. 없는 줄이 정상이다(schema 헤더의 '비어 있어도 된다'). */
   repairCaseId: string | null;
@@ -86,7 +110,16 @@ export type DomesticOrderFields = {
   purchaseOrderNumber: string | null;
   projectName: string | null;
   orderIssuedDate: string | null;
-  requestedDueDate: string | null;
+  /**
+   * 납기 요청일 **목록**. 빈 배열이 정상이다(납기일이 아직 없는 줄).
+   *
+   * 예전에는 `requestedDueDate` 칸 하나였다. 분할 납품이면 한 건에 날짜가
+   * 여럿이라 칸 하나로는 담을 수 없어서 딸린 표로 옮겼다
+   * (schema/domestic-order-due-dates.ts). **그래서 이 검증은 더 이상
+   * requestedDueDate 를 받지 않는다** — 받아 두면 새 폼이 보내지 않는 그 칸이
+   * 저장할 때마다 NULL 로 덮여, 아직 남겨 둔 원본이 지워진다.
+   */
+  dueDates: DomesticOrderDueDateInput[];
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   progressNote: string | null;
@@ -129,9 +162,12 @@ const LONG_TEXT_FIELDS = {
   faultDescriptionText: "고장내역",
 } as const;
 
+/**
+ * 칸 하나로 오는 날짜들. **납기요청일은 여기 없다** — 목록이라 아래
+ * normalizeDueDates 가 따로 본다(위 dueDates 주석).
+ */
 const DATE_FIELDS = {
   orderIssuedDate: "발주발행일",
-  requestedDueDate: "납기요청일",
   quoteIssuedDate: "견적발행일",
   deliveredDate: "납품일",
   taxInvoiceDate: "세금계산서발행일",
@@ -182,6 +218,84 @@ export function validateDomesticOrderFields(
     return trimmed;
   }
 
+  /**
+   * 납기 요청일 목록.
+   *
+   * ── 빈 목록은 정상이다 ────────────────────────────────────────────────
+   * 납기일이 아직 없는 줄이 실제로 있다(발주는 받았는데 일정이 안 잡힌 줄).
+   * 키가 아예 없어도 같은 뜻이라 빈 배열로 접는다.
+   *
+   * ── 완전히 빈 줄은 거절하지 않고 뺀다 ─────────────────────────────────
+   * 폼의 '추가' 버튼은 빈 줄을 하나 만든다. 사람이 그 줄을 채우지 않고
+   * 저장했다면 뜻은 "안 쓰겠다"이지 "틀렸다"가 아니다. 날짜도 메모도 없는 줄만
+   * 조용히 뺀다 — 메모만 적힌 줄은 뺄 수 없다(날짜 없는 납기일은 저장할 자리
+   * 자체가 없고, 조용히 버리면 적은 글이 말없이 사라진다).
+   *
+   * ── 오류는 줄 번호까지 말한다 ─────────────────────────────────────────
+   * 키가 `dueDates.0` 처럼 index 를 달고 나가서, 폼이 **그 줄 밑에** 문장을
+   * 붙일 수 있다. 목록 전체가 잘못된 경우(배열이 아니다 · 개수 상한 초과)만
+   * `dueDates` 키를 쓴다.
+   */
+  function normalizeDueDates(): DomesticOrderDueDateInput[] {
+    const value = raw.dueDates;
+    if (value === null || value === undefined) return [];
+    if (!Array.isArray(value)) {
+      fieldErrors.dueDates = "납기요청일 목록을 확인할 수 없습니다.";
+      return [];
+    }
+    if (value.length > MAX_DUE_DATES) {
+      fieldErrors.dueDates = `납기요청일은 ${MAX_DUE_DATES}개까지 넣을 수 있습니다.`;
+      return [];
+    }
+
+    const parsed: DomesticOrderDueDateInput[] = [];
+    value.forEach((entry, index) => {
+      const key = `dueDates.${index}`;
+      if (entry === null || entry === undefined) return;
+      if (typeof entry !== "object" || Array.isArray(entry)) {
+        fieldErrors[key] = "납기요청일 값을 확인할 수 없습니다.";
+        return;
+      }
+      const record = entry as Record<string, unknown>;
+
+      let dueDate = "";
+      if (typeof record.dueDate === "string") {
+        dueDate = record.dueDate.trim();
+      } else if (record.dueDate !== null && record.dueDate !== undefined) {
+        fieldErrors[key] = "납기요청일 값을 확인할 수 없습니다.";
+        return;
+      }
+
+      let note: string | null = null;
+      if (typeof record.note === "string") {
+        const trimmed = record.note.trim();
+        note = trimmed === "" ? null : trimmed;
+      } else if (record.note !== null && record.note !== undefined) {
+        fieldErrors[key] = "납기요청일 메모 값을 확인할 수 없습니다.";
+        return;
+      }
+
+      // 아무것도 안 적은 줄 — 위 '완전히 빈 줄은 거절하지 않고 뺀다'.
+      if (dueDate === "" && note === null) return;
+
+      if (dueDate === "") {
+        fieldErrors[key] = "납기요청일을 입력하거나 그 줄을 지워 주세요.";
+        return;
+      }
+      if (!isValidDateString(dueDate)) {
+        fieldErrors[key] = "납기요청일은 YYYY-MM-DD 형식의 실제 날짜여야 합니다.";
+        return;
+      }
+      if (note !== null && note.length > MAX_DUE_DATE_NOTE) {
+        fieldErrors[key] = `납기요청일 메모는 ${MAX_DUE_DATE_NOTE}자를 넘을 수 없습니다.`;
+        return;
+      }
+
+      parsed.push({ dueDate, note });
+    });
+    return parsed;
+  }
+
   const text: Record<string, string | null> = {};
   for (const [key, label] of Object.entries(SHORT_TEXT_FIELDS)) {
     text[key] = normalizeText(key, label, MAX_SHORT_TEXT);
@@ -194,6 +308,8 @@ export function validateDomesticOrderFields(
   for (const [key, label] of Object.entries(DATE_FIELDS)) {
     dates[key] = normalizeDate(key, label);
   }
+
+  const dueDates = normalizeDueDates();
 
   // ── 수리 건 연결 ─────────────────────────────────────────────────────
   // 화면에서 고르는 값이라 사람이 손으로 치지 않는다. 그래도 UUID 인지 보는
@@ -298,7 +414,7 @@ export function validateDomesticOrderFields(
       purchaseOrderNumber: text.purchaseOrderNumber,
       projectName: text.projectName,
       orderIssuedDate: dates.orderIssuedDate,
-      requestedDueDate: dates.requestedDueDate,
+      dueDates,
       quoteIssuedDate: dates.quoteIssuedDate,
       quoteNumber: text.quoteNumber,
       progressNote: text.progressNote,

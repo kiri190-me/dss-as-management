@@ -3,11 +3,12 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, asc, eq, inArray, like } from "drizzle-orm";
 
 import { db, pgClient } from "../connection";
 import {
   customers,
+  domesticOrderDueDates,
   domesticOrders,
   products,
   repairCaseIntakeSequences,
@@ -39,6 +40,8 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *     지운 기록이 조용히 돌아온다.
  *  4. **저장마다 version 이 1씩 오른다** — 오르지 않으면 두 번째 사람의 저장이
  *     첫 번째 사람의 것을 조용히 덮는다.
+ *  5. **납기요청일 목록이 딸린 표에 그대로 옮겨진다** — 그리고 version 이
+ *     어긋난 저장은 그 날짜를 한 건도 건드리지 않는다(맨 아래 묶음).
  *
  * 인가는 여기서 시험하지 않는다. 세션·역할 판정은 서버 액션의 몫이고
  * (mutations 파일 헤더의 계층 구분), 역할 정책은
@@ -82,7 +85,8 @@ function emptyFields(): DomesticOrderFields {
     purchaseOrderNumber: null,
     projectName: null,
     orderIssuedDate: null,
-    requestedDueDate: null,
+    // 납기요청일은 딸린 표에 있다 — 빈 목록이 "없음"이다.
+    dueDates: [],
     quoteIssuedDate: null,
     quoteNumber: null,
     progressNote: null,
@@ -111,6 +115,22 @@ async function createOrder(overrides: Partial<DomesticOrderFields> = {}) {
 async function readOrder(id: string) {
   const [row] = await db.select().from(domesticOrders).where(eq(domesticOrders.id, id));
   return row;
+}
+
+/**
+ * 그 줄의 납기 요청일을 **차례대로**. 조회(queries/domestic-orders.ts)가 쓰는
+ * 것과 같은 순서라, 여기서 본 차례가 곧 화면에 보이는 차례다.
+ */
+async function readDueDates(orderId: string) {
+  return db
+    .select({
+      dueDate: domesticOrderDueDates.dueDate,
+      note: domesticOrderDueDates.note,
+      displayOrder: domesticOrderDueDates.displayOrder,
+    })
+    .from(domesticOrderDueDates)
+    .where(eq(domesticOrderDueDates.domesticOrderId, orderId))
+    .orderBy(asc(domesticOrderDueDates.displayOrder), asc(domesticOrderDueDates.dueDate));
 }
 
 function baseCreateRepairCaseInput(): ValidatedCreateRepairCaseInput {
@@ -198,7 +218,7 @@ describe("createDomesticOrder", () => {
     assert.equal(row.isDeleted, false);
   });
 
-  test("23칸이 전부 그대로 들어간다", async () => {
+  test("칸 하나짜리 값 22개가 전부 그대로 들어간다 — 납기요청일만 딸린 표다", async () => {
     const result = await createOrder({
       repairCaseId: linkedRepairCaseId,
       intakeNumberText: "손으로 적은 인수번호",
@@ -211,7 +231,6 @@ describe("createDomesticOrder", () => {
       purchaseOrderNumber: "PO-ALL",
       projectName: "PJT-ALL",
       orderIssuedDate: "2096-01-05",
-      requestedDueDate: "2096-01-20",
       quoteIssuedDate: "2096-01-07",
       quoteNumber: "Q-ALL",
       progressNote: "견적 발행 완료",
@@ -239,7 +258,10 @@ describe("createDomesticOrder", () => {
     assert.equal(row.purchaseOrderNumber, "PO-ALL");
     assert.equal(row.projectName, "PJT-ALL");
     assert.equal(row.orderIssuedDate, "2096-01-05");
-    assert.equal(row.requestedDueDate, "2096-01-20");
+    // 납기요청일은 이 칸이 아니라 딸린 표에 들어간다(아래 '납기요청일 목록').
+    // 저장 경로가 이 칸을 **건드리지 않는다**는 것이 여기서 지키는 것이다 —
+    // 건드리면 아직 옮기지 않은 줄의 원본이 지워진다.
+    assert.equal(row.requestedDueDate, null);
     assert.equal(row.quoteIssuedDate, "2096-01-07");
     assert.equal(row.quoteNumber, "Q-ALL");
     assert.equal(row.progressNote, "견적 발행 완료");
@@ -798,5 +820,279 @@ describe("setDomesticOrderCompletion", () => {
     // 수정은 완료 표시를 건드리지 않는다 — 둘은 서로 다른 조작이다.
     assert.ok(row.completedAt instanceof Date, "수정이 완료 표시를 지워서는 안 된다");
     assert.equal(row.completedBy, actorUserId);
+  });
+});
+
+/**
+ * ── 납기요청일 목록 ──────────────────────────────────────────────────────
+ * 한 발주에 납기일이 여럿일 수 있게 된 뒤(분할 납품), 저장이 지켜야 하는 것은
+ * 다섯이다.
+ *
+ *  1. 여러 개가 들어가고 **적은 차례 그대로** 다시 읽힌다.
+ *  2. 줄이면 없어지고 늘리면 생긴다 — 저장은 "지금부터 이것이 전부"라는 말이다.
+ *  3. **version 이 어긋나면 날짜가 한 건도 바뀌지 않는다.** 이 항목이 이 묶음의
+ *     핵심이다: 날짜를 먼저 지워 놓고 version 을 보면, 충돌해 실패한 저장이
+ *     남의 날짜를 지운 채로 끝난다.
+ *  4. **다른 줄의 날짜는 건드리지 않는다.** 지우는 문장이 domestic_order_id 로
+ *     좁혀져 있지 않으면 한 줄을 고치는 일이 이 표를 통째로 비우는 일이 된다.
+ *  5. 빈 목록으로 되돌릴 수 있다 — 잘못 넣은 날짜에서 빠져나올 길이 있어야 한다.
+ *
+ * 뒷정리는 따로 하지 않는다. domestic_order_due_dates 는 부모를 ON DELETE
+ * CASCADE 로 가리키므로, after() 가 domestic_orders 를 지울 때 함께 사라진다.
+ */
+describe("납기요청일 목록 (domestic_order_due_dates)", () => {
+  test("여러 개를 적은 차례 그대로 만들 수 있다", async () => {
+    const created = await createOrder({
+      dueDates: [
+        { dueDate: "2096-03-10", note: "1차분" },
+        { dueDate: "2096-01-20", note: null },
+        { dueDate: "2096-02-15", note: "3차분" },
+      ],
+    });
+    if (!created.ok) return;
+
+    const dueDates = await readDueDates(created.id);
+    // 날짜순으로 다시 세우지 않는다 — 차례가 곧 뜻이다.
+    assert.deepEqual(
+      dueDates.map((row) => [row.dueDate, row.note, row.displayOrder]),
+      [
+        ["2096-03-10", "1차분", 1],
+        ["2096-01-20", null, 2],
+        ["2096-02-15", "3차분", 3],
+      ]
+    );
+  });
+
+  test("날짜 없는 줄이 기본이다 — 빈 목록으로 만들면 딸린 행이 하나도 없다", async () => {
+    const created = await createOrder();
+    if (!created.ok) return;
+    assert.deepEqual(await readDueDates(created.id), []);
+  });
+
+  test("수정으로 날짜를 늘리면 생기고 줄이면 없어진다", async () => {
+    const created = await createOrder({
+      dueDates: [{ dueDate: "2096-01-20", note: "1차분" }],
+    });
+    if (!created.ok) return;
+
+    const grown = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({
+        dueDates: [
+          { dueDate: "2096-01-20", note: "1차분" },
+          { dueDate: "2096-02-15", note: "2차분" },
+          { dueDate: "2096-03-10", note: "3차분" },
+        ],
+      }),
+      actorUserId,
+    });
+    assert.equal(grown.ok, true, `늘리기 실패: ${JSON.stringify(grown)}`);
+    if (!grown.ok) return;
+    assert.equal((await readDueDates(created.id)).length, 3);
+
+    const shrunk = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: grown.version,
+      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "이것만 남는다" }] }),
+      actorUserId,
+    });
+    assert.equal(shrunk.ok, true, `줄이기 실패: ${JSON.stringify(shrunk)}`);
+
+    const remaining = await readDueDates(created.id);
+    assert.deepEqual(
+      remaining.map((row) => [row.dueDate, row.note, row.displayOrder]),
+      [["2096-02-15", "이것만 남는다", 1]],
+      "폼에서 지운 날짜가 남아 있으면 안 된다"
+    );
+  });
+
+  test("빈 목록으로 되돌릴 수 있다", async () => {
+    const created = await createOrder({
+      dueDates: [
+        { dueDate: "2096-01-20", note: "잘못 넣은 날짜" },
+        { dueDate: "2096-02-15", note: null },
+      ],
+    });
+    if (!created.ok) return;
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ dueDates: [] }),
+      actorUserId,
+    });
+    assert.equal(result.ok, true, `되돌리기 실패: ${JSON.stringify(result)}`);
+    assert.deepEqual(await readDueDates(created.id), []);
+  });
+
+  test("낡은 version으로 온 저장은 CONFLICT이고 날짜가 한 건도 바뀌지 않는다", async () => {
+    const created = await createOrder({
+      dueDates: [
+        { dueDate: "2096-01-20", note: "1차분" },
+        { dueDate: "2096-02-15", note: "2차분" },
+      ],
+    });
+    if (!created.ok) return;
+    const staleVersion = created.version;
+
+    const first = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: staleVersion,
+      fields: fields({ dueDates: [{ dueDate: "2096-03-10", note: "먼저 저장된 날짜" }] }),
+      actorUserId,
+    });
+    assert.equal(first.ok, true);
+
+    // 낡은 화면에서 온 저장. **날짜를 통째로 비우려는 저장**이라, 지우기가
+    // version 대조보다 먼저 일어나면 여기서 자료가 사라진다.
+    const second = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: staleVersion,
+      fields: fields({ dueDates: [] }),
+      actorUserId,
+    });
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.equal(second.code, "CONFLICT");
+
+    const dueDates = await readDueDates(created.id);
+    assert.deepEqual(
+      dueDates.map((row) => [row.dueDate, row.note]),
+      [["2096-03-10", "먼저 저장된 날짜"]],
+      "충돌한 저장이 날짜를 한 건이라도 건드려서는 안 된다"
+    );
+    assert.equal((await readOrder(created.id)).version, 2, "충돌한 저장은 version 도 올리지 않는다");
+  });
+
+  test("지워진 행에 저장하려 해도 NOT_FOUND이고 날짜는 그대로다", async () => {
+    const created = await createOrder({
+      dueDates: [{ dueDate: "2096-01-20", note: "지우기 전" }],
+    });
+    if (!created.ok) return;
+    await db
+      .update(domesticOrders)
+      .set({ isDeleted: true, deletedAt: new Date() })
+      .where(eq(domesticOrders.id, created.id));
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ dueDates: [] }),
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+
+    const dueDates = await readDueDates(created.id);
+    assert.equal(dueDates.length, 1, "지워진 행의 날짜도 한 건도 바뀌지 않는다");
+    assert.equal(dueDates[0].note, "지우기 전");
+  });
+
+  test("없는 고객사로 고치려 하면 날짜도 그대로다 — VALIDATION_ERROR가 먼저다", async () => {
+    const created = await createOrder({
+      customerId,
+      dueDates: [{ dueDate: "2096-01-20", note: "그대로 남아야 한다" }],
+    });
+    if (!created.ok) return;
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ customerId: randomUUID(), dueDates: [] }),
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "VALIDATION_ERROR");
+
+    const dueDates = await readDueDates(created.id);
+    assert.equal(dueDates.length, 1, "검증에 걸린 저장이 날짜를 지워서는 안 된다");
+  });
+
+  test("한 줄의 날짜를 고쳐도 다른 줄의 날짜는 그대로다", async () => {
+    const other = await createOrder({
+      purchaseOrderNumber: "PO-OTHER-ROW",
+      dueDates: [
+        { dueDate: "2096-05-01", note: "남의 줄 1차분" },
+        { dueDate: "2096-06-01", note: "남의 줄 2차분" },
+      ],
+    });
+    if (!other.ok) return;
+
+    const target = await createOrder({
+      dueDates: [{ dueDate: "2096-01-20", note: "내 줄" }],
+    });
+    if (!target.ok) return;
+
+    // 대상 줄의 날짜를 통째로 비운다 — 지우기가 domestic_order_id 로 좁혀져
+    // 있지 않으면 이 한 번으로 표 전체가 빈다.
+    const cleared = await updateDomesticOrder({
+      id: target.id,
+      expectedVersion: target.version,
+      fields: fields({ dueDates: [] }),
+      actorUserId,
+    });
+    assert.equal(cleared.ok, true, `비우기 실패: ${JSON.stringify(cleared)}`);
+
+    assert.deepEqual(await readDueDates(target.id), []);
+    const otherDueDates = await readDueDates(other.id);
+    assert.deepEqual(
+      otherDueDates.map((row) => [row.dueDate, row.note]),
+      [
+        ["2096-05-01", "남의 줄 1차분"],
+        ["2096-06-01", "남의 줄 2차분"],
+      ],
+      "다른 줄의 날짜를 건드려서는 안 된다"
+    );
+  });
+
+  test("저장은 requested_due_date 칸을 건드리지 않는다 — 아직 남겨 둔 원본이다", async () => {
+    const created = await createOrder({ progressNote: "원본 보존 확인" });
+    if (!created.ok) return;
+
+    // 옮기기 전의 줄을 흉내 낸다 — 그 칸에 값이 남아 있는 상태.
+    await db
+      .update(domesticOrders)
+      .set({ requestedDueDate: "2096-01-20" })
+      .where(eq(domesticOrders.id, created.id));
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "새 표에 적은 날짜" }] }),
+      actorUserId,
+    });
+    assert.equal(result.ok, true, `저장 실패: ${JSON.stringify(result)}`);
+
+    const row = await readOrder(created.id);
+    assert.equal(
+      row.requestedDueDate,
+      "2096-01-20",
+      "새 폼이 보내지 않는 칸이 NULL 로 덮이면 옮기지 않은 원본이 사라진다"
+    );
+    assert.equal((await readDueDates(created.id)).length, 1);
+  });
+
+  test("완료 처리는 날짜를 건드리지 않는다 — 표시일 뿐 값을 고치는 조작이 아니다", async () => {
+    const created = await createOrder({
+      dueDates: [{ dueDate: "2096-01-20", note: "완료 전에 적은 날짜" }],
+    });
+    if (!created.ok) return;
+
+    const completed = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: created.version,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(completed.ok, true);
+
+    const dueDates = await readDueDates(created.id);
+    assert.deepEqual(
+      dueDates.map((row) => [row.dueDate, row.note]),
+      [["2096-01-20", "완료 전에 적은 날짜"]]
+    );
   });
 });

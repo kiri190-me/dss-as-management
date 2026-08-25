@@ -1,9 +1,15 @@
 import "server-only";
 
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { customers, domesticOrders, products, repairCases } from "../schema";
+import {
+  customers,
+  domesticOrderDueDates,
+  domesticOrders,
+  products,
+  repairCases,
+} from "../schema";
 import {
   resolveDomesticOrderCustomerRowColor,
   resolveDomesticOrderValue,
@@ -42,12 +48,36 @@ import {
  * 수리 건에서 따라오는 값은 원본이 바뀌면 다음 조회에서 바로 따라간다 — 이
  * 행의 칸을 비워 두는 것이 기본인 이유가 그것이다.
  *
+ * ── 납기 요청일만 질의가 하나 더 있다 ───────────────────────────────────
+ * 한 줄에 날짜가 여럿일 수 있어 딸린 표에 있다(schema/domestic-order-due-dates.ts).
+ * 위 조인에 끼워 넣지 않는 이유는 **줄이 복제되기 때문**이다 — 날짜가 세 개면
+ * 그 발주 줄이 세 번 나오고, 목록의 건수도 금액 합계도 전부 어긋난다. 그래서
+ * 보이는 줄의 id 를 모아 **한 번 더 읽고**(loadDueDatesByOrderId) 줄마다
+ * 묶는다. 줄마다 읽는 N+1 이 아니다.
+ *
  * ── PII ────────────────────────────────────────────────────────────────
  * progress_note · history_note · etc_note · delivered_by 는 사람이 자유롭게
  * 적는 값이라 담당자 이름이 섞일 수 있다. 부르는 쪽은 이 행을 그대로 로그에
  * 남기지 않는다(스키마 파일 헤더의 PII 항목).
  * ============================================================================
  */
+
+/**
+ * 한 줄에 달린 납기 요청일 하나.
+ *
+ * `requested_due_date` 칸 하나를 대신하는 값이다 — 분할 납품이면 한 건에
+ * 날짜가 여럿이라 칸으로는 담을 수 없었다(schema/domestic-order-due-dates.ts).
+ * 화면과 폼이 그대로 쓰는 모양이므로 전부 직렬화 가능한 값이다.
+ */
+export type DomesticOrderDueDate = {
+  id: string;
+  /** "YYYY-MM-DD". date 컬럼이라 문자열로 온다. */
+  dueDate: string;
+  /** "1차분" 같은 짧은 메모. 여러 날짜를 구분하는 유일한 단서다. */
+  note: string | null;
+  /** 사람이 정한 차례. 아래 조회가 이 순서로 내려보낸다. */
+  displayOrder: number | null;
+};
 
 /**
  * customers 를 두 번 조인한다 — 이 행이 가리키는 고객사와, 연결된 수리 건이
@@ -110,17 +140,22 @@ export type DomesticOrderJoinRow = {
    * 연결된 수리 건의 고객 요청 납기일. **위 다섯과 성질이 다르다** — 이 값은
    * 어디에도 접히지 않는다(아래 매퍼가 resolve 하지 않는다).
    *
-   * 내자의 납기요청일(requested_due_date)은 **발주서에 적힌 날짜**라서 수리 건의
-   * 고객 요청 납기일과 같아야 할 이유가 없다. 그래서 목록의 값을 대신하지
-   * 않고, 폼이 "연결된 건에는 이 날짜가 적혀 있다"를 흐린 글씨로 보여 주는
-   * 데에만 쓴다.
+   * 내자의 납기 요청일(domestic_order_due_dates)은 **발주서에 적힌 날짜**라서
+   * 수리 건의 고객 요청 납기일과 같아야 할 이유가 없다. 그래서 목록의 값을
+   * 대신하지 않고, 폼이 "연결된 건에는 이 날짜가 적혀 있다"를 힌트로 보여 주는
+   * 데에만 쓴다 — 날짜가 여럿이 될 수 있게 된 뒤에도 이 관계는 그대로다.
    */
   repairCaseCustomerRequestedDueDate: string | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
   orderIssuedDate: string | null;
-  requestedDueDate: string | null;
+  /**
+   * `requested_due_date` 는 **여기 없다.** 납기 요청일은 이제 딸린 표에 있고
+   * (아래 DomesticOrderListItem 의 dueDates), 그 칸은 옮긴 값의 원본으로만
+   * 남아 있다(schema/domestic-orders.ts 의 그 칸 주석). 함께 실어 내리면
+   * 화면이 어느 쪽을 그려야 하는지 두 가지 답을 갖게 된다.
+   */
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   progressNote: string | null;
@@ -179,6 +214,15 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
    * domain/customer-row-color.ts 로 한다.
    */
   customerRowColor: string | null;
+  /**
+   * 이 줄의 납기 요청일 전부. **차례대로**다(display_order → due_date).
+   * 비어 있는 것이 정상이다 — 납기일이 아직 없는 줄이 실제로 있다.
+   *
+   * 화면 글자로 접는 일은 여기서 하지 않는다("첫 날짜 외 N건"은 보여 주는
+   * 방식이지 자료가 아니다) — domain/domestic-order-list.ts 의 순수 함수가
+   * 하고, 폼은 이 목록을 그대로 편집한다.
+   */
+  dueDates: DomesticOrderDueDate[];
 };
 
 /**
@@ -188,9 +232,18 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
  * 자료가 아니라서, 여기서 섞어 두면 다음 단계에서 이 함수를 수정 폼의 초기값에
  * 쓰는 순간 "-"라는 글자가 그대로 저장된다. 화면 쪽이 그릴 때만 바꾼다.
  */
-export function mapDomesticOrderRow(row: DomesticOrderJoinRow): DomesticOrderListItem {
+export function mapDomesticOrderRow(
+  row: DomesticOrderJoinRow,
+  /**
+   * 이 줄의 납기 요청일. 조인이 아니라 **따로 한 번 읽어** 넘긴다 — 조인하면
+   * 날짜 수만큼 같은 줄이 복제돼 나오고, 그러면 이 매퍼가 접는 일까지
+   * 떠맡아야 한다(그리고 금액 합계처럼 줄 수를 세는 쪽이 전부 어긋난다).
+   */
+  dueDates: DomesticOrderDueDate[]
+): DomesticOrderListItem {
   return {
     ...row,
+    dueDates,
     completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null,
     displayIntakeNumber: row.intakeNumber ?? row.intakeNumberText,
     // 다섯 칸 모두 같은 규칙으로 정한다 — 이 행의 값이 먼저, 없으면 수리 건의
@@ -257,7 +310,8 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
       projectName: domesticOrders.projectName,
       orderIssuedDate: domesticOrders.orderIssuedDate,
-      requestedDueDate: domesticOrders.requestedDueDate,
+      // requested_due_date 는 고르지 않는다 — 납기 요청일은 아래에서 딸린
+      // 표를 따로 읽어 온다(위 타입 주석).
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
       quoteNumber: domesticOrders.quoteNumber,
       progressNote: domesticOrders.progressNote,
@@ -290,7 +344,56 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     .where(eq(domesticOrders.isDeleted, false))
     .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
 
-  return rows.map(mapDomesticOrderRow);
+  const dueDatesByOrderId = await loadDueDatesByOrderId(rows.map((row) => row.id));
+
+  return rows.map((row) => mapDomesticOrderRow(row, dueDatesByOrderId.get(row.id) ?? []));
+}
+
+/**
+ * 여러 줄의 납기 요청일을 **질의 한 번으로** 걷어 와 줄마다 묶는다.
+ *
+ * ⚠️ 줄마다 한 번씩 읽으면(N+1) 열두 줄짜리 표에 열세 번의 왕복이 생기고, 그
+ * 값은 줄이 늘어나는 만큼 그대로 늘어난다. 목록은 한 화면에 전부 그리는
+ * 조회라 그 비용이 곧바로 보인다.
+ *
+ * 정렬은 차례(display_order) → 날짜다. 차례가 첫 기준인 것은 1차분·2차분처럼
+ * **순서가 곧 뜻**이기 때문이고(schema/domestic-order-due-dates.ts), 비어 있는
+ * 차례는 Postgres 의 ASC 기본값대로 뒤로 밀린다(NULLS LAST). 차례가 겹치거나
+ * 비어 있을 때 순서가 매번 달라지지 않도록 날짜를 두 번째 기준으로 둔다 —
+ * domestic_orders 목록이 created_at 을 두 번째로 두는 것과 같은 이유다.
+ */
+async function loadDueDatesByOrderId(
+  orderIds: string[]
+): Promise<Map<string, DomesticOrderDueDate[]>> {
+  const grouped = new Map<string, DomesticOrderDueDate[]>();
+  // inArray 에 빈 배열을 넘기면 뜻 없는 SQL 이 만들어진다. 읽을 줄이 없으면
+  // 질의 자체를 하지 않는 것이 맞다.
+  if (orderIds.length === 0) return grouped;
+
+  const rows = await db
+    .select({
+      id: domesticOrderDueDates.id,
+      domesticOrderId: domesticOrderDueDates.domesticOrderId,
+      dueDate: domesticOrderDueDates.dueDate,
+      note: domesticOrderDueDates.note,
+      displayOrder: domesticOrderDueDates.displayOrder,
+    })
+    .from(domesticOrderDueDates)
+    .where(inArray(domesticOrderDueDates.domesticOrderId, orderIds))
+    .orderBy(asc(domesticOrderDueDates.displayOrder), asc(domesticOrderDueDates.dueDate));
+
+  for (const row of rows) {
+    const bucket = grouped.get(row.domesticOrderId);
+    const item: DomesticOrderDueDate = {
+      id: row.id,
+      dueDate: row.dueDate,
+      note: row.note,
+      displayOrder: row.displayOrder,
+    };
+    if (bucket) bucket.push(item);
+    else grouped.set(row.domesticOrderId, [item]);
+  }
+  return grouped;
 }
 
 /** 수정 폼의 '수리 건 연결' 목록에 들어갈 한 줄. */
