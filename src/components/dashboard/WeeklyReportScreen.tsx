@@ -1,5 +1,7 @@
+import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
+import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
 import { customerRowColorClass } from "@/lib/domain/customer-row-color";
 import {
@@ -25,9 +27,9 @@ import {
  * 주간보고 — 손으로 만들던 엑셀 현황판을 그대로 옮긴 화면
  * ============================================================================
  * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황에는 입력칸도, 저장·삭제
- * 버튼도 없다. 누를 것이 있는 자리는 맨 위 `금주 목표` 상자 하나뿐이고, 그것은
- * 통째로 WeeklyReportGoalsPanel(클라이언트 컴포넌트)에 들어 있다 — 이 파일은
- * 그 상자를 **놓을 자리만** 준다.
+ * 버튼도 없다. 누를 것이 있는 자리는 위쪽 두 구역 — `금주 목표` 와 `납입 예정 건`
+ * — 뿐이고, 각각 통째로 WeeklyReportGoalsPanel · WeeklyReportDeliveriesPanel
+ * (클라이언트 컴포넌트)에 들어 있다. 이 파일은 그 둘을 **놓을 자리만** 준다.
  *
  * ── 무엇을 어느 칸에 넣을지는 여기서 정하지 않는다 ──────────────────────
  * 6칸으로 가르고, PO 발행 완료를 겹쳐 세고, RFG/MB 로 접고, 고객사별로 묶어
@@ -40,8 +42,8 @@ import {
  * 집계 쪽에는 클라이언트로 내려보낼 상태가 없다. 250줄이 넘는 자료를 브라우저까지
  * 실어 나를 이유도 없다.
  *
- * 금주 목표 상자가 생겼다고 이 파일이 클라이언트가 되지는 **않는다** — 그 상자만
- * "use client" 이고, 여기서는 그것을 한 자리에 놓을 뿐이다. 이 파일에
+ * 금주 목표·납입 예정 상자가 생겼다고 이 파일이 클라이언트가 되지는 **않는다** —
+ * 그 두 상자만 "use client" 이고, 여기서는 그것을 한 자리씩 놓을 뿐이다. 이 파일에
  * "use client" 를 붙이면 고객사 블록 58개와 상세표 250여 줄이 통째로 브라우저로
  * 실려 간다.
  *
@@ -520,11 +522,22 @@ export default function WeeklyReportScreen({
   report,
   asOfDate,
   goals,
+  deliveries,
 }: {
   report: WeeklyReport;
   /** 서버가 한국 표준시로 정한 "오늘". 클라이언트에서 만들지 않는다(파일 헤더). */
   asOfDate: string;
   goals: WeeklyReportGoalsPanelData;
+  /**
+   * 그 주의 납입 예정 줄 전부. 이 파일은 한 줄도 읽지 않는다 — 무엇을 그릴지는
+   * WeeklyReportDeliveriesPanel 이 정한다(그 파일 헤더).
+   *
+   * **주·권한·수리 건 고르개 목록을 따로 받지 않는 것은 일부러다.** 두 상자가
+   * 한 주를 함께 보고(승인된 결정), 한 권한(weeklyReport WRITE)으로 열리며,
+   * 고르개 목록도 page.tsx 가 한 번만 읽는다. 값을 두 벌 내려보내면 언젠가 한쪽만
+   * 고쳐져, 위 상자가 지난주를 보는데 아래 표는 이번 주를 그리는 날이 온다.
+   */
+  deliveries: WeeklyReportDeliveryRow[];
 }) {
   // 짝짓기도, PO 발행 현황도 도메인이 한다 — 여기서는 그 결과를 좌우로 놓을 뿐이다.
   const customerRows = pairWeeklyReportBlocksByCustomer(report.blocks);
@@ -564,6 +577,19 @@ export default function WeeklyReportScreen({
         weekStart={goals.weekStart}
         currentWeekStart={goals.currentWeekStart}
         goals={goals.rows}
+        canEdit={goals.canEdit}
+        repairCaseOptions={goals.repairCaseOptions}
+        gridClass={SIDE_BY_SIDE_GRID}
+      />
+
+      {/* 납입 예정 건 — 원본 엑셀에서도 금주 목표 바로 아래에 있던 표다. "이번 주에
+          무엇을 내보내는가"는 계획의 일부라 집계보다 앞에 온다.
+
+          주 이동 줄을 여기 또 두지 않는다 — 위 상자의 그것 하나가 두 구역의 주를
+          함께 정한다(그 파일 헤더). 좌우 배치도 같은 상수를 그대로 넘긴다. */}
+      <WeeklyReportDeliveriesPanel
+        weekStart={goals.weekStart}
+        deliveries={deliveries}
         canEdit={goals.canEdit}
         repairCaseOptions={goals.repairCaseOptions}
         gridClass={SIDE_BY_SIDE_GRID}

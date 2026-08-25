@@ -10,6 +10,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { listRepairCaseLinkOptions } from "@/lib/db/queries/domestic-orders";
 import { listWeeklyReportCases } from "@/lib/db/queries/weekly-report";
+import { listWeeklyReportDeliveries } from "@/lib/db/queries/weekly-report-deliveries";
 import { listWeeklyReportGoals } from "@/lib/db/queries/weekly-report-goals";
 import { buildWeeklyReport } from "@/lib/domain/weekly-report";
 import { weekStartOfKst } from "@/lib/domain/weekly-report-goal";
@@ -30,10 +31,11 @@ export const dynamic = "force-dynamic";
  * 블록마다 상태 집계 8칸과 상세표를 그린다. 무엇을 어느 칸에 넣을지는 전부
  * domain/weekly-report.ts 가 정한다 — 이 파일은 읽어서 넘기기만 한다.
  *
- * ── 어느 주를 보는가는 주소가 정한다 ────────────────────────────────────
- * `?week=2026-08-24` 다. 클라이언트 상태가 아니라 주소인 이유: 그 주의 목표를
- * 조회하는 것은 **서버**라서, 화면이 혼자 주를 바꾸면 표시만 바뀌고 자료는
- * 그대로 남는다. 값이 없거나 날짜가 아니면 이번 주로 떨어뜨리고, 날짜이긴 한데
+ * ── 어느 주를 보는가는 주소가 정한다. 그 한 값이 두 구역을 함께 움직인다 ──
+ * `?week=2026-08-24` 다. 클라이언트 상태가 아니라 주소인 이유: 그 주의 목표와
+ * 납입 예정 줄을 조회하는 것은 **서버**라서, 화면이 혼자 주를 바꾸면 표시만
+ * 바뀌고 자료는 그대로 남는다. 주 이동 링크가 금주 목표 상자에만 있는 것도
+ * 그래서다 — 고르개가 둘이면 두 구역이 다른 주를 가리킬 수 있다. 값이 없거나 날짜가 아니면 이번 주로 떨어뜨리고, 날짜이긴 한데
  * 월요일이 아니면 그 주 월요일로 접는다 — 접는 규칙은 여기 적지 않고 저장 쪽과
  * **같은 함수**를 부른다(validation 의 normalizeWeekStart). 저장과 조회가 서로
  * 다른 규칙으로 주를 정하면 방금 적은 줄이 보이지 않는 화면이 만들어진다.
@@ -84,11 +86,16 @@ export default async function WeeklyReportPage({
     canEditWeeklyReportGoals(actingUser.role) &&
     (await hasPermission(actingUser.role, "weeklyReport", "WRITE"));
 
-  const [cases, goalRows, repairCaseOptions] = await Promise.all([
+  const [cases, goalRows, deliveryRows, repairCaseOptions] = await Promise.all([
     listWeeklyReportCases(),
     listWeeklyReportGoals(weekStart),
+    // 납입 예정 건도 **같은 weekStart** 를 본다 — 두 구역이 한 주 고르개를
+    // 공유하기 때문이다(승인된 결정, domain/weekly-report-delivery.ts 헤더).
+    // 여기서 주를 따로 정하면 위 상자와 아래 표가 다른 주를 가리킬 수 있다.
+    listWeeklyReportDeliveries(weekStart),
     // 적을 수 없는 사람에게는 고르개 목록을 **아예 읽지 않는다** — 쓰지 않을
     // 값을 클라이언트로 내려보내지 않는다(내자 정리 page.tsx 와 같은 규칙).
+    // 두 구역이 **이 한 벌을 나눠 쓴다** — 같은 목록을 두 번 읽지 않는다.
     canEditGoals ? listRepairCaseLinkOptions() : Promise.resolve([]),
   ]);
 
@@ -125,6 +132,9 @@ export default async function WeeklyReportPage({
         canEdit: canEditGoals,
         repairCaseOptions,
       }}
+      // 주·권한·고르개 목록은 goals 가 실어 간 것을 그대로 나눠 쓴다 — 두 구역이
+      // 한 주를 함께 보고 한 권한으로 열린다(WeeklyReportScreen 의 deliveries 주석).
+      deliveries={deliveryRows}
     />
   );
 }
