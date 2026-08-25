@@ -87,7 +87,7 @@ export type DomesticOrderJoinRow = {
   faultDescriptionText: string | null;
   /**
    * 연결된 수리 건에서 따라온 값 다섯. 연결이 없으면 전부 null 이다.
-   * 화면은 이 값을 그리지 않는다 — 폼이 회색 힌트로 보여 주고, 아래 매퍼가
+   * 화면은 이 값을 그리지 않는다 — 폼이 흐린 글씨로 보여 주고, 아래 매퍼가
    * 이 행의 값이 비었을 때 대신 쓴다.
    */
   repairCaseCustomerName: string | null;
@@ -95,6 +95,16 @@ export type DomesticOrderJoinRow = {
   repairCaseLotNumber: string | null;
   repairCaseSerialNumber: string | null;
   repairCaseReportedSymptom: string | null;
+  /**
+   * 연결된 수리 건의 고객 요청 납기일. **위 다섯과 성질이 다르다** — 이 값은
+   * 어디에도 접히지 않는다(아래 매퍼가 resolve 하지 않는다).
+   *
+   * 내자의 납기요청일(requested_due_date)은 **발주서에 적힌 날짜**라서 수리 건의
+   * 고객 요청 납기일과 같아야 할 이유가 없다. 그래서 목록의 값을 대신하지
+   * 않고, 폼이 "연결된 건에는 이 날짜가 적혀 있다"를 흐린 글씨로 보여 주는
+   * 데에만 쓴다.
+   */
+  repairCaseCustomerRequestedDueDate: string | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
@@ -215,6 +225,8 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       repairCaseLotNumber: products.lotNumber,
       repairCaseSerialNumber: products.serialNumber,
       repairCaseReportedSymptom: repairCases.reportedSymptom,
+      // 접히지 않는 여섯 번째 값. 폼의 흐린 글씨용이다(위 타입 주석).
+      repairCaseCustomerRequestedDueDate: repairCases.customerRequestedDueDate,
       displayOrder: domesticOrders.displayOrder,
       purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
       projectName: domesticOrders.projectName,
@@ -261,6 +273,19 @@ export type RepairCaseLinkOption = {
   intakeNumber: string;
   customerName: string | null;
   modelName: string | null;
+  /**
+   * L/N · S/N · 고객 요청 납기일. 목록에 글자로 그리는 값이 아니다 —
+   * **고르는 순간 폼이 그 건의 값을 흐린 글씨로 보여 주기 위한** 값이다.
+   *
+   * 목록 조회(listDomesticOrders)가 실어 오는 repairCase* 는 **저장돼 있는**
+   * 연결의 값뿐이라, 드롭다운에서 다른 건을 고른 순간 화면에는 그 건에 대해
+   * 아무 정보도 없다. 그때 옛 힌트를 그대로 두면 방금 고른 건의 값으로 읽히고,
+   * 지우면 아무것도 안 보인다. 여기 함께 실어 오면 고르는 즉시 그 건의 값으로
+   * 바뀐다.
+   */
+  lotNumber: string | null;
+  serialNumber: string | null;
+  customerRequestedDueDate: string | null;
 };
 
 /**
@@ -268,7 +293,11 @@ export type RepairCaseLinkOption = {
  *
  * 폼에서 UUID 를 손으로 치게 할 수는 없다 — 사람이 아는 것은 인수번호이고,
  * 그 번호와 id 를 이어 주는 곳이 여기다. 고객사·형식을 함께 싣는 이유는 같은
- * 달에 비슷한 번호가 여럿이라 번호만으로는 어느 건인지 고르기 어렵기 때문이다.
+ * 달에 비슷한 번호가 여럿이라 번호만으로는 어느 건인지 고르기 어렵기 때문이고,
+ * 그 둘은 폼의 검색 칸이 걸러 내는 대상이기도 하다
+ * (domain/repair-case-link-search.ts).
+ *
+ * L/N · S/N · 고객 요청 납기일은 **고른 뒤에** 쓰인다 — 위 타입 주석 참고.
  *
  * ── 휴지통에 있는 건은 뺀다 ─────────────────────────────────────────────
  * 이미 연결된 줄은 그 건이 지워져도 연결을 유지하지만(목록 조회의 LEFT JOIN
@@ -285,6 +314,9 @@ export async function listRepairCaseLinkOptions(): Promise<RepairCaseLinkOption[
       intakeNumber: repairCases.intakeNumber,
       customerName: customers.name,
       modelName: products.modelName,
+      lotNumber: products.lotNumber,
+      serialNumber: products.serialNumber,
+      customerRequestedDueDate: repairCases.customerRequestedDueDate,
     })
     .from(repairCases)
     .leftJoin(customers, eq(customers.id, repairCases.customerId))

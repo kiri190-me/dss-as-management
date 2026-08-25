@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import EditSectionActions, {
   editErrorClass,
@@ -10,6 +10,10 @@ import EditSectionActions, {
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { buildDraftText } from "@/lib/domain/edit-draft-text";
 import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
+import {
+  filterRepairCaseLinkOptions,
+  keepSelectedRepairCaseOption,
+} from "@/lib/domain/repair-case-link-search";
 import type {
   CustomerOption,
   DomesticOrderListItem,
@@ -33,7 +37,7 @@ import {
  * 그 다섯에는 입력칸이 있다. **수리 건 연결이 없는 줄**에는 그 칸이 값을 적을
  * 유일한 자리이기 때문이다(schema/domestic-orders.ts 의 '여기에도 있다').
  *
- * 연결이 있는 줄에서는 **수리 건의 값을 회색 힌트로 보여만 주고 입력칸은
+ * 연결이 있는 줄에서는 **수리 건의 값을 흐린 글씨로 보여만 주고 입력칸은
  * 비워 둔다.** 미리 채워 넣지 않는 것이 이 폼에서 가장 중요한 규칙이다:
  * 채워 넣으면 사용자가 아무것도 고치지 않고 저장만 해도 그 값이 이 행에
  * 복사되고, 그때부터 "일부러 다르게 적었다"와 "그냥 안 건드렸다"를 구분할 수
@@ -43,6 +47,27 @@ import {
  * 그래서 비어 있음이 곧 "수리 건을 따른다"는 뜻이고, 적는 것은 **일부러 다르게
  * 적을 때뿐**이다(발주서의 형식이 수리 건의 형식과 다른 경우 — 그때 청구 근거는
  * 발주서 쪽이다).
+ *
+ * ── 흐린 글씨는 placeholder 다. value 가 아니다 ─────────────────────────
+ * 예전에는 그 힌트를 칸 **아래** 회색 한 줄로 그렸다. 지금은 칸 **안**의 흐린
+ * 글씨로 옮겼다 — 빈칸 옆에 놓인 회색 줄보다, 그 칸에 무엇이 보이게 되는지를
+ * 훨씬 곧바로 읽히게 한다.
+ *
+ * **위 규칙은 그대로다.** placeholder 는 브라우저가 그리는 표시일 뿐 입력값이
+ * 아니라서, 사용자가 직접 치지 않는 한 state 에 들어가지 않고 collectFields 에도
+ * 실리지 않는다. 이 파일에서 수리 건 값이 닿는 곳은 `placeholder=` 하나뿐이고
+ * `value=` 에는 어떤 경로로도 닿지 않는다 — 그 성질이 깨지는 순간 "안 건드렸다"와
+ * "일부러 다르게 적었다"의 구분이 사라진다.
+ *
+ * 흐린 글씨는 **지금 고른 건**을 따라간다(아래 linkedRepairCase). 고르개가 그
+ * 건의 형식·L/N·S/N·납기일을 함께 들고 있어서 고르는 즉시 바뀐다.
+ *
+ * ── 수리 건은 검색해서 고른다 ───────────────────────────────────────────
+ * 접수 건이 수백 건이라 `<select>` 하나로는 원하는 건을 찾을 수 없다. 검색 칸을
+ * 앞에 두고 목록을 걸러 내되, **고르는 것은 여전히 `<select>`** 다 — 직접 만든
+ * 드롭다운과 달리 키보드·스크린리더 동작을 브라우저가 이미 맞게 해 주고,
+ * 지금 무엇이 골라져 있는지도 늘 보인다. 무엇이 남는지 정하는 규칙은 화면이
+ * 아니라 domain/repair-case-link-search.ts 에 있다(시험할 수 있어야 해서).
  *
  * ── 충돌하면 얼린다 ─────────────────────────────────────────────────────
  * 저장이 CONFLICT 로 돌아오면 이 폼은 더 이상 저장하지 않는다. 낡은 값을 그대로
@@ -105,6 +130,11 @@ export default function DomesticOrderEditForm({
   const router = useRouter();
 
   const [repairCaseId, setRepairCaseId] = useState(row?.repairCaseId ?? "");
+  /**
+   * 수리 건 검색어. **저장되는 값이 아니다** — 목록에서 무엇을 보여 줄지만
+   * 정한다. 그래서 collectFields 에도 DRAFT_LABELS 에도 없다.
+   */
+  const [repairCaseQuery, setRepairCaseQuery] = useState("");
   const [intakeNumberText, setIntakeNumberText] = useState(row?.intakeNumberText ?? "");
   /**
    * 이 다섯은 **이 행에 적힌 값만** 담는다(row.customerId · row.modelNameText …).
@@ -146,21 +176,121 @@ export default function DomesticOrderEditForm({
   const disabled = isSubmitting || isConflict;
 
   /**
-   * 회색 힌트를 보여 줄 수 있는가. **저장돼 있는 연결을 그대로 두고 있을
-   * 때만**이다.
+   * 저장돼 있는 연결. 지금 고른 것과 다를 수 있다.
    *
-   * 드롭다운에서 다른 수리 건을 고르면 이 화면에는 그 건의 형식·L/N·S/N·
-   * 고장내역이 없다(목록 조회가 실어 온 것은 지금 연결된 건의 값뿐이다).
-   * 그때도 옛 힌트를 계속 띄우면, 사용자는 방금 고른 건의 값이라고 읽는다 —
-   * 틀린 값을 보여 주느니 아무것도 보여 주지 않는 편이 낫다.
+   * 고장내역 힌트는 **이 값을 그대로 두고 있을 때만** 그린다 — 고르개가 실어
+   * 오는 항목에는 고장내역이 없어서(조회 쪽 RepairCaseLinkOption), 다른 건을
+   * 고르면 그 건의 고장내역을 알 길이 없다. 그때도 옛 힌트를 띄우면 사용자는
+   * 방금 고른 건의 값이라고 읽는다 — 틀린 값을 보여 주느니 아무것도 보여 주지
+   * 않는 편이 낫다.
    */
   const savedRepairCaseId = row?.repairCaseId ?? "";
-  const showRepairCaseHints = repairCaseId !== "" && repairCaseId === savedRepairCaseId;
+  const showSavedFaultHint = repairCaseId !== "" && repairCaseId === savedRepairCaseId;
 
-  /** 힌트 한 줄. 연결이 바뀌었거나 수리 건 쪽도 비어 있으면 아무것도 그리지 않는다. */
-  function repairCaseHint(value: string | null | undefined) {
-    if (!showRepairCaseHints) return null;
-    const hint = foldBlankToNull(value);
+  /**
+   * 검색어로 걸러 낸 목록과, 실제로 `<select>` 에 그릴 목록.
+   *
+   * 둘을 나눠 두는 이유: 지금 고른 건은 검색어에 걸리지 않아도 목록에 남아야
+   * 하는데(안 남기면 select 가 '연결 없음'을 보여 주면서 state 에는 연결이
+   * 남는다), 그 붙잡아 둔 항목까지 세면 "맞는 수리 건이 없습니다"를 낼 수
+   * 없게 된다.
+   */
+  const matchedRepairCases = useMemo(
+    () => filterRepairCaseLinkOptions(repairCaseOptions, repairCaseQuery),
+    [repairCaseOptions, repairCaseQuery]
+  );
+  const visibleRepairCases = useMemo(
+    () => keepSelectedRepairCaseOption(repairCaseOptions, matchedRepairCases, repairCaseId),
+    [repairCaseOptions, matchedRepairCases, repairCaseId]
+  );
+
+  /**
+   * 흐린 글씨의 출처 — **지금 고른 수리 건**이다.
+   *
+   * 고르개 목록에서 먼저 찾는다(고르는 즉시 그 건의 값으로 바뀐다). 목록에
+   * 없는데 저장돼 있는 연결이면 목록 조회가 실어 온 값으로 내려온다 — 휴지통에
+   * 들어간 수리 건이 그렇다. 그런 줄도 연결은 살아 있고(조회의 LEFT JOIN),
+   * 힌트가 사라질 이유는 없다.
+   *
+   * 여기서 나온 값이 닿는 곳은 placeholder 뿐이다(파일 헤더).
+   */
+  const linkedRepairCase = useMemo(() => {
+    if (repairCaseId === "") return null;
+    const picked = repairCaseOptions.find((option) => option.id === repairCaseId);
+    if (picked) {
+      return {
+        intakeNumber: picked.intakeNumber,
+        customerName: picked.customerName,
+        modelName: picked.modelName,
+        lotNumber: picked.lotNumber,
+        serialNumber: picked.serialNumber,
+        requestedDueDate: picked.customerRequestedDueDate,
+      };
+    }
+    if (!row || repairCaseId !== savedRepairCaseId) return null;
+    return {
+      intakeNumber: row.intakeNumber,
+      customerName: row.repairCaseCustomerName,
+      modelName: row.repairCaseModelName,
+      lotNumber: row.repairCaseLotNumber,
+      serialNumber: row.repairCaseSerialNumber,
+      requestedDueDate: row.repairCaseCustomerRequestedDueDate,
+    };
+  }, [repairCaseId, repairCaseOptions, row, savedRepairCaseId]);
+
+  /**
+   * 흐린 글씨 한 줄. 값이 없으면 undefined 를 돌려준다 — 빈 문자열을 넘기면
+   * placeholder 속성이 붙은 채로 아무것도 안 보여서, 나중에 이 칸을 읽는 쪽이
+   * "힌트가 있다"고 잘못 읽는다.
+   */
+  function repairCasePlaceholder(value: string | null | undefined): string | undefined {
+    return foldBlankToNull(value) ?? undefined;
+  }
+
+  /**
+   * 검색 칸에서 Enter 를 눌렀을 때.
+   *
+   * **먼저 폼 저장을 막는다.** 입력칸 하나에서 Enter 를 누르면 브라우저가 폼을
+   * 제출한다 — 검색어를 치다 습관적으로 Enter 를 누른 사람이 아직 고르지도
+   * 않은 상태의 줄을 저장하게 된다.
+   *
+   * 그 자리를 놀리지 않고, 걸린 건이 **딱 하나면** 그것을 고른다. 인수번호를
+   * 끝까지 치면 늘 하나만 남으므로, 마우스는 물론 Tab 도 없이 고를 수 있다.
+   */
+  function handleRepairCaseSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (matchedRepairCases.length === 1) setRepairCaseId(matchedRepairCases[0].id);
+  }
+
+  /** 고객사 드롭다운의 '연결 없음'에 덧붙일 이름. 연결이 없으면 null 이다. */
+  const linkedCustomerName = repairCasePlaceholder(linkedRepairCase?.customerName) ?? null;
+
+  /**
+   * 납기요청일 칸 아래 한 줄. **이 한 칸만 흐린 글씨로는 안 된다** —
+   * `<input type="date">` 에는 placeholder 를 넘겨도 브라우저가 그리지 않는다
+   * (칸 안이 이미 `연도-월-일` 같은 자기 글자로 차 있다). 그래서 다른 넷과
+   * 달리 아래 한 줄로 보여 준다. placeholder 도 함께 넘겨 두는데, date 를
+   * 모르는 브라우저가 text 로 되돌릴 때는 그쪽이 그려지기 때문이다.
+   *
+   * 내자의 납기요청일은 발주서에 적힌 날짜라 수리 건의 고객 요청 납기일과
+   * 같아야 할 이유가 없다(조회 쪽 주석). 비워 둔다고 이 날짜가 표에 뜨지도
+   * 않는다 — 그래서 "그대로 보입니다"가 아니라 "적혀 있습니다"라고 적는다.
+   */
+  function requestedDueDateHint(): ReactNode {
+    const hint = repairCasePlaceholder(linkedRepairCase?.requestedDueDate);
+    if (hint === undefined) return null;
+    return <p className={hintClass}>연결된 수리 건의 고객 요청 납기일: {hint}</p>;
+  }
+
+  /**
+   * 고장내역 칸 아래 한 줄. 이 칸만 흐린 글씨를 못 쓰는 이유는 자료가 없어서다
+   * — 고르개 항목에는 고장내역이 없어서 **저장돼 있는 연결을 그대로 둘 때만**
+   * 값을 안다(위 showSavedFaultHint).
+   */
+  function faultDescriptionHint(): ReactNode {
+    if (!showSavedFaultHint) return null;
+    const hint = foldBlankToNull(row?.repairCaseReportedSymptom);
     if (hint === null) return null;
     return (
       <p className={hintClass}>
@@ -246,6 +376,12 @@ export default function DomesticOrderEditForm({
       inputMode?: "numeric" | "decimal";
       /** 입력칸 아래 회색으로 붙는 안내. 값은 건드리지 않는다(파일 헤더). */
       hint?: ReactNode;
+      /**
+       * 칸 안의 흐린 글씨. **value 와 섞이지 않는다** — 브라우저가 그리는
+       * 표시일 뿐이라 사용자가 직접 치지 않으면 state 에 들어가지 않는다
+       * (파일 헤더의 'placeholder 다. value 가 아니다').
+       */
+      placeholder?: string;
     } = {}
   ) {
     return (
@@ -258,6 +394,7 @@ export default function DomesticOrderEditForm({
             id={`domestic-order-${key}`}
             className={textAreaClass}
             value={value}
+            placeholder={options.placeholder}
             disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -268,6 +405,7 @@ export default function DomesticOrderEditForm({
             inputMode={options.inputMode}
             className={editInputClass}
             value={value}
+            placeholder={options.placeholder}
             disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -290,10 +428,17 @@ export default function DomesticOrderEditForm({
 
       {/* 비워 두는 것이 기본이라는 사실을 폼 맨 위에 적는다 — 입력칸만 보면
           "채워야 하는 칸"으로 읽히고, 그렇게 채운 값은 수리 건 쪽이 바뀌어도
-          따라가지 않는다(파일 헤더). */}
+          따라가지 않는다(파일 헤더).
+
+          흐린 글씨가 무엇인지도 여기서 한 번 말한다. placeholder 만 보면
+          "왜 안 채워지지?"로 읽혀서, 사용자가 굳이 그대로 옮겨 적게 된다 —
+          그 순간 그 값은 이 줄에 박제되어 수리 건을 따라가지 않는다. */}
       <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
         고객사 · 형식 · L/N · S/N · 고장내역은 <strong className="font-semibold">비워 두면</strong>{" "}
         연결된 수리 건의 값을 그대로 따라갑니다. 발주서에 다르게 적힌 경우에만 직접 입력하세요.
+        <br />
+        칸 안의 <strong className="font-semibold">흐린 글씨</strong>는 연결된 수리 건에 적혀 있는
+        값입니다. 그대로 두면(비워 두면) 목록에 그 값이 보이며, 저장되지는 않습니다.
       </p>
 
       <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -303,6 +448,20 @@ export default function DomesticOrderEditForm({
           <label className={editLabelClass} htmlFor="domestic-order-repairCaseId">
             수리 건 연결
           </label>
+          {/* 검색 칸이 먼저다. 여기서 무엇을 치든 저장되는 값은 아니고,
+              아래 select 에 무엇이 남는지만 정한다. */}
+          <input
+            type="search"
+            className={`${editInputClass} mb-1`}
+            value={repairCaseQuery}
+            disabled={disabled}
+            placeholder="인수번호로 검색 (고객사 · 형식도 됩니다)"
+            aria-label="수리 건 검색"
+            aria-controls="domestic-order-repairCaseId"
+            autoComplete="off"
+            onChange={(e) => setRepairCaseQuery(e.target.value)}
+            onKeyDown={handleRepairCaseSearchKeyDown}
+          />
           <select
             id="domestic-order-repairCaseId"
             className={editInputClass}
@@ -311,9 +470,11 @@ export default function DomesticOrderEditForm({
             onChange={(e) => setRepairCaseId(e.target.value)}
           >
             {/* 연결 없는 줄이 정상이다 — 수리 없이 납품만 있는 줄, 발주는
-                받았지만 아직 접수 전인 줄이 실제로 있다(schema 헤더). */}
+                받았지만 아직 접수 전인 줄이 실제로 있다(schema 헤더).
+                검색어가 무엇이든 이 항목은 **절대 걸러지지 않는다.** 연결을
+                끊을 길이 검색어에 따라 사라지면 안 된다. */}
             <option value="">연결 없음</option>
-            {repairCaseOptions.map((option) => (
+            {visibleRepairCases.map((option) => (
               <option key={option.id} value={option.id}>
                 {[option.intakeNumber, option.customerName, option.modelName]
                   .filter((part): part is string => Boolean(part))
@@ -321,6 +482,14 @@ export default function DomesticOrderEditForm({
               </option>
             ))}
           </select>
+          {/* 아무것도 안 걸렸다는 사실을 말해 준다. 이 말이 없으면 '연결 없음'
+              하나만 남은 목록이 "연결할 수 있는 건이 없다"로 읽힌다. */}
+          {matchedRepairCases.length === 0 && repairCaseOptions.length > 0 && (
+            <p className={hintClass} role="status">
+              맞는 수리 건이 없습니다. 검색어를 지우면 전체 {repairCaseOptions.length}건이 다시
+              보입니다.
+            </p>
+          )}
           {fieldErrors.repairCaseId && <p className={editErrorClass}>{fieldErrors.repairCaseId}</p>}
         </div>
 
@@ -338,8 +507,17 @@ export default function DomesticOrderEditForm({
             {/* '연결 없음'이 기본값이다 — 고르지 않으면 연결된 수리 건의
                 고객사를 따르고, 연결도 없으면 목록에서 '(고객사 미지정)'
                 묶음에 들어간다. 값을 지울 길이 없으면 한 번 잘못 고른 고객사를
-                되돌릴 방법이 없어진다. */}
-            <option value="">연결 없음</option>
+                되돌릴 방법이 없어진다.
+
+                여기만은 흐린 글씨를 쓸 수 없다(select 에는 placeholder 가
+                없다). 그래서 **고르지 않았을 때 무엇이 보이게 되는지를 그
+                항목 이름에 적는다** — 이 말이 없으면 '연결 없음'이 "고객사가
+                비어 있는 줄"로 읽힌다. */}
+            <option value="">
+              {linkedCustomerName === null
+                ? "연결 없음"
+                : `연결 없음 (수리 건: ${linkedCustomerName})`}
+            </option>
             {customerOptions.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -347,23 +525,28 @@ export default function DomesticOrderEditForm({
             ))}
           </select>
           {fieldErrors.customerId && <p className={editErrorClass}>{fieldErrors.customerId}</p>}
-          {repairCaseHint(row?.repairCaseCustomerName)}
         </div>
 
-        {renderText("intakeNumberText", "인수번호(직접 입력)", intakeNumberText, setIntakeNumberText)}
+        {renderText("intakeNumberText", "인수번호(직접 입력)", intakeNumberText, setIntakeNumberText, {
+          placeholder: repairCasePlaceholder(linkedRepairCase?.intakeNumber),
+        })}
         {renderText("modelNameText", "형식", modelNameText, setModelNameText, {
-          hint: repairCaseHint(row?.repairCaseModelName),
+          placeholder: repairCasePlaceholder(linkedRepairCase?.modelName),
         })}
         {renderText("lotNumberText", "L/N", lotNumberText, setLotNumberText, {
-          hint: repairCaseHint(row?.repairCaseLotNumber),
+          placeholder: repairCasePlaceholder(linkedRepairCase?.lotNumber),
         })}
         {renderText("serialNumberText", "S/N", serialNumberText, setSerialNumberText, {
-          hint: repairCaseHint(row?.repairCaseSerialNumber),
+          placeholder: repairCasePlaceholder(linkedRepairCase?.serialNumber),
         })}
         {renderText("purchaseOrderNumber", "발주서번호", purchaseOrderNumber, setPurchaseOrderNumber)}
         {renderText("projectName", "PJT", projectName, setProjectName)}
         {renderText("orderIssuedDate", "발주발행일", orderIssuedDate, setOrderIssuedDate, { type: "date" })}
-        {renderText("requestedDueDate", "납기요청일", requestedDueDate, setRequestedDueDate, { type: "date" })}
+        {renderText("requestedDueDate", "납기요청일", requestedDueDate, setRequestedDueDate, {
+          type: "date",
+          placeholder: repairCasePlaceholder(linkedRepairCase?.requestedDueDate),
+          hint: requestedDueDateHint(),
+        })}
         {renderText("quoteIssuedDate", "견적발행일", quoteIssuedDate, setQuoteIssuedDate, { type: "date" })}
         {renderText("quoteNumber", "견적서번호", quoteNumber, setQuoteNumber)}
         {renderText("deliveredDate", "납품일", deliveredDate, setDeliveredDate, { type: "date" })}
@@ -397,7 +580,7 @@ export default function DomesticOrderEditForm({
           "고장내역",
           faultDescriptionText,
           setFaultDescriptionText,
-          { long: true, hint: repairCaseHint(row?.repairCaseReportedSymptom) }
+          { long: true, hint: faultDescriptionHint() }
         )}
         {renderText("progressNote", "현황", progressNote, setProgressNote, { long: true })}
         {renderText("historyNote", "이력", historyNote, setHistoryNote, { long: true })}
