@@ -93,11 +93,19 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   {
     key: "weeklyReport",
     label: "주간보고",
-    // 대시보드의 하위메뉴다(navigation.ts 의 parentKey). 상한이 읽기인 것도
-    // 대시보드와 같은 이유다 — 볼 것밖에 없는 화면이라 '쓰기'를 내밀면 고른
-    // 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지 않는다.
-    description: "고객사에 보내는 주간 현황판(고객사·종류별 상태 집계와 상세)",
-    maxMeaningfulLevel: "READ",
+    // 대시보드의 하위메뉴다(navigation.ts 의 parentKey). 상한은 **대시보드와
+    // 갈린다** — 이 화면에는 `금주 목표` 상자가 있고, 사람이 거기에 한 줄씩
+    // 적는다(weekly_report_goals). 실제로 저장되는 조작이 생겼으므로 상한을
+    // 쓰기까지 올린다. 읽기에 머물러 두면 "화면에서는 저장되는데 설정으로는
+    // 줄 수 없는 권한"이 된다.
+    //
+    // 관리는 올리지 않는다. 줄 삭제는 있지만 휴지통도 복원도 없이 바로 지우고,
+    // 지워지는 것은 사람이 한 문장 적은 메모라 되돌릴 수 없는 자료가 사라지는
+    // 조작이 아니다(weekly-report-authorization.ts 의 '삭제도 같은 집합이다').
+    // 쓰기와 갈릴 것이 없는데 '관리'를 내밀면 고른 사람은 무언가 달라졌다고
+    // 믿지만 실제로는 아무것도 달라지지 않는다.
+    description: "고객사에 보내는 주간 현황판(상태 집계·상세, 그리고 금주 목표)",
+    maxMeaningfulLevel: "WRITE",
   },
   {
     key: "repairCases",

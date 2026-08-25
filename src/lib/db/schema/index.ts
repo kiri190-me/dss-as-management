@@ -33,3 +33,4 @@ export * from "./role-permissions";
 export * from "./attachments";
 export * from "./domestic-orders";
 export * from "./domestic-order-due-dates";
+export * from "./weekly-report-goals";

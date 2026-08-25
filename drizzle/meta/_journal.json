@@ -372,6 +372,13 @@
       "when": 1787636338515,
       "tag": "0052_perpetual_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787660350053,
+      "tag": "0053_clear_sir_ram",
+      "breakpoints": true
     }
   ]
 }

@@ -74,6 +74,7 @@ import {
   canManageTechnicalTemplates,
   canDeleteTechnicalTemplates,
 } from "./technical-procedure-template-authorization";
+import { canEditWeeklyReportGoals } from "./weekly-report-authorization";
 import {
   canViewWorkflowTemplates,
   canEditWorkflowTemplates,
@@ -130,11 +131,18 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       return "READ";
 
     case "weeklyReport":
-      // 대시보드의 하위메뉴이고, **볼 수 있는 역할도 대시보드와 같게** 둔다
-      // (승인된 결정). 여기를 빠뜨리면 default 로 떨어져 NONE 이 되고, 그러면
-      // 최고관리자까지 화면에서 튕긴다 — 이 저장소가 실제로 겪은 함정이라
-      // 이 파일 아래 default 주석이 그 경위를 적어 두고 있다.
-      return "READ";
+      // **보는 쪽은 여전히 전원이다**(read: true) — 대시보드의 하위메뉴이고,
+      // 볼 수 있는 역할을 대시보드와 같게 둔다는 승인된 결정은 그대로다.
+      // 여기를 빠뜨리면 default 로 떨어져 NONE 이 되고, 그러면 최고관리자까지
+      // 화면에서 튕긴다 — 이 저장소가 실제로 겪은 함정이라 이 파일 아래
+      // default 주석이 그 경위를 적어 두고 있다.
+      //
+      // 달라진 것은 **적을 수 있는가** 하나다. `금주 목표`가 생기면서 실제로
+      // 저장하는 조작이 붙었으므로 다른 영역들처럼 사다리로 접는다. 여기서도
+      // 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서** 구한다(이 파일
+      // 맨 위 주석) — 영업이 목표를 적을 수 있는지 없는지는 저쪽 한 곳에만
+      // 적혀 있어야 한다.
+      return ladder({ write: canEditWeeklyReportGoals(role), read: true });
 
     case "repairCases":
       return ladder({

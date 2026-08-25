@@ -18,6 +18,7 @@ import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-a
 import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
+import { canEditWeeklyReportGoals } from "./weekly-report-authorization";
 import { canViewWorkflowTemplates, canPublishWorkflowTemplates } from "./workflow-template-authorization";
 
 /**
@@ -149,24 +150,39 @@ test("상한은 그 영역에서 의미 있는 최고 수준을 넘지 않는다
   }
 });
 
-test("주간보고는 조회 전용이다 — 모든 역할의 상한이 읽기다", () => {
-  // 볼 것밖에 없는 화면이다(입력칸도 저장 버튼도 없다). 상한이 쓰기 이상으로
-  // 열리면 고른 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지
-  // 않고, 반대로 접근 불가로 떨어지면 permission-baseline.ts 의 case 를 빠뜨린
-  // 것이라 최고관리자까지 화면에서 튕긴다.
+test("주간보고는 어느 역할에게도 닫히지 않는다 — 보는 쪽은 여전히 전원이다", () => {
+  // `금주 목표`가 생겨 적을 수 있는 역할이 갈렸지만, **보는 쪽은 달라지지
+  // 않았다**(승인된 결정). 접근 불가로 떨어지면 permission-baseline.ts 의
+  // case 를 빠뜨린 것이라 최고관리자까지 화면에서 튕긴다.
   for (const role of ROLE_CODES) {
-    assert.equal(baselinePermissionLevel("weeklyReport", role), "READ", role);
+    assert.ok(
+      meetsPermissionLevel(baselinePermissionLevel("weeklyReport", role), "READ"),
+      `${role}: 주간보고를 볼 수 없게 됐다`
+    );
   }
 });
 
-test("주간보고는 대시보드와 똑같은 상한을 갖는다 — 하위메뉴를 따로 좁히지 않는다", () => {
+test("주간보고 금주 목표를 적을 수 있는 역할만 상한이 쓰기다", () => {
+  // 한쪽만 어긋나도 사고다. 상한이 낮으면 화면에서는 저장되는데 설정으로는
+  // 줄 수 없는 권한이 되고, 높으면 설정으로 영업에게 목표 입력을 열어 줄 수
+  // 있게 된다 — canEditWeeklyReportGoals 가 막고 있어 실제로는 열리지 않으므로,
+  // 관리자는 열어 줬다고 믿는데 사용자는 계속 막힌 화면을 본다.
   for (const role of ROLE_CODES) {
     assert.equal(
       baselinePermissionLevel("weeklyReport", role),
-      baselinePermissionLevel("dashboard", role),
-      `${role}: 주간보고 상한이 대시보드와 갈렸다`
+      canEditWeeklyReportGoals(role) ? "WRITE" : "READ",
+      role
     );
   }
+});
+
+test("영업은 주간보고를 보지만 목표는 적지 못한다 — 승인된 결정이다", () => {
+  // 내자 정리에서 영업이 쓰기를 갖는 것과 갈리는 지점이라, 한 줄로 못 박아
+  // 둔다(weekly-report-authorization.ts 의 정책 주석).
+  assert.equal(canEditWeeklyReportGoals("SALES"), false);
+  assert.equal(baselinePermissionLevel("weeklyReport", "SALES"), "READ");
+  assert.equal(canEditWeeklyReportGoals("AS_ENGINEER"), true);
+  assert.equal(baselinePermissionLevel("weeklyReport", "AS_ENGINEER"), "WRITE");
 });
 
 test("최고관리자는 사용자 관리를 관리 수준으로 갖는다 — 설정을 되돌릴 사람이 남아야 한다", () => {
