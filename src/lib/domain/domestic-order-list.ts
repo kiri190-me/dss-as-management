@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * 내자 정리 목록의 계산 — 년도 고르기 · 고객사 묶기 · 완료 판정
+ * 내자 정리 목록의 계산 — 값 고르기 · 년도 고르기 · 고객사 묶기 · 완료 판정
  * ============================================================================
  * DB 도 React 도 여기 들어오지 않는다. repair-case-filters.ts 와 같은 자리의
  * 파일이고, 같은 이유로 순수 함수만 둔다 — 목록 화면이 무엇을 감추고 무엇을
@@ -23,6 +23,16 @@
  * 형식이 깨진 값(년도 네 자리를 읽을 수 없는 값)도 같은 쪽으로 보낸다.
  * 어느 해로 추측해 넣는 것보다 늘 보이게 두는 편이 안전하다 — 추측한 해에
  * 넣으면 그 줄은 다른 해에서 영영 보이지 않는다.
+ *
+ * ── 고객사·형식·L/N·S/N·고장내역은 이 행의 값이 먼저다 ──────────────────
+ * 그 다섯은 두 곳에서 알 수 있다 — 이 행에 적힌 값과, 연결된 수리 건에서
+ * 따라오는 값. 이 행에 적힌 쪽을 먼저 본다(schema/domestic-orders.ts 의
+ * '여기에도 있다'). 판정을 SQL 의 coalesce 에 맡기지 않고 여기 두는 이유는
+ * 그래야 시험할 수 있어서이고, 그 시험이 실제로 잡아 주는 것이 아래 규칙이다:
+ *
+ * **빈 문자열과 공백만 적힌 값은 "없음"이다.** 이 구분이 없으면 실수로 스페이스
+ * 한 칸이 들어간 줄이 수리 건의 값을 영영 가린다 — 화면에는 빈칸으로 보이는데
+ * 원본에는 값이 있는 상태라, 왜 안 보이는지 화면만 봐서는 알 길이 없다.
  * ============================================================================
  */
 
@@ -35,6 +45,37 @@ type CustomerNamed = { customerName: string | null };
 type Completable = { completedAt: string | null };
 
 const YEAR_PATTERN = /^\d{4}$/;
+
+/**
+ * 비어 있음을 한 가지 모양으로 접는다 — null · undefined · 빈 문자열 ·
+ * 공백만 적힌 값은 전부 null 이다.
+ *
+ * 검증(validation/domestic-order-input.ts)이 저장 전에 같은 일을 하지만, 이
+ * 함수가 따로 있어야 한다: 조회는 저장을 거치지 않은 값도 읽는다 — 연결된
+ * 수리 건에서 따라온 값, 그리고 이 기능이 생기기 전에 들어간 행이 그렇다.
+ * 앞뒤 공백을 떼고 돌려주므로 화면과 묶기가 같은 글자를 본다.
+ */
+export function foldBlankToNull(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * 고객사·형식·L/N·S/N·고장내역을 정한다 — **이 행에 적힌 값이 먼저, 없으면
+ * 연결된 수리 건의 값**(파일 헤더).
+ *
+ * 두 값을 다 받아야 하는 이유가 이 서명에 그대로 드러난다. 부르는 쪽은
+ * 어느 하나를 미리 고르지 않고 둘 다 넘긴다 — 조회가 coalesce 로 하나만
+ * 실어 오면, 화면은 그 값이 어느 쪽에서 왔는지 영영 알 수 없고 폼도
+ * "연결된 수리 건에는 이렇게 적혀 있습니다"를 보여 줄 수 없다.
+ */
+export function resolveDomesticOrderValue(
+  ownValue: string | null | undefined,
+  repairCaseValue: string | null | undefined
+): string | null {
+  return foldBlankToNull(ownValue) ?? foldBlankToNull(repairCaseValue);
+}
 
 /**
  * 이 줄의 발주 년도. 날짜가 없거나 년도를 읽을 수 없으면 null 이고, null 은
@@ -117,9 +158,7 @@ export type DomesticOrderCustomerGroup<T> = {
 
 /** 이름이 비어 있는 것과 없는 것은 같은 뜻이다 — 묶음이 둘로 갈라지지 않게 한다. */
 function customerKeyOf(row: CustomerNamed): string | null {
-  if (row.customerName === null) return null;
-  const trimmed = row.customerName.trim();
-  return trimmed === "" ? null : trimmed;
+  return foldBlankToNull(row.customerName);
 }
 
 /**

@@ -1,9 +1,14 @@
 "use client";
 
 import { useMemo, useState, type MouseEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
-import type { DomesticOrderListItem, RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
+import type {
+  CustomerOption,
+  DomesticOrderListItem,
+  RepairCaseLinkOption,
+} from "@/lib/db/queries/domestic-orders";
 import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
@@ -35,6 +40,18 @@ import DomesticOrderEditForm from "./DomesticOrderEditForm";
  * 감추면 어느 해를 골라도 나오지 않아 잊힌다. 그래서 년도 칸 옆에 몇 건인지
  * 적고, 그 줄의 **발주발행일 칸에 `발주일 미정`을 띄운다** — "-"로만 두면
  * 왜 2026년을 골랐는데 이 줄이 함께 있는지 알 길이 없다.
+ *
+ * ── 인수번호는 링크, 수정은 버튼 ───────────────────────────────────────
+ * 연결된 줄의 인수번호를 누르면 그 수리 건 상세로 넘어간다. 그 링크에는
+ * stopPropagation 을 건다 — 줄 전체가 '수정 폼 열기'라서 그대로 두면 이동과
+ * 폼 열기가 함께 일어난다. 연결이 없는 줄은 시트에 적혀 있던 글자뿐이라
+ * 링크가 아니다(갈 곳이 없다).
+ *
+ * 그 대신 **수정 버튼을 순번 칸으로 옮겼다.** 예전에는 인수번호 칸이 폼을 여는
+ * <button> 이었다 — <tr> 은 키보드 포커스를 받지 못해서, 22칼럼을 늘리지 않고
+ * 포커스 가능한 조작을 줄 유일한 자리였기 때문이다. 인수번호를 링크로 바꾸면
+ * 그 자리가 사라지므로, 키보드로 폼을 여는 길이 없어지지 않도록 완료 버튼 옆에
+ * 나란히 둔다. 칼럼은 여전히 22개다.
  *
  * ── 완료는 감추는 것이 아니라 회색으로 두는 것이다 ──────────────────────
  * 완료된 줄도 자리를 지킨다. 아래로 내리거나 접지 않는다 — 이 표에는 사람이
@@ -256,6 +273,71 @@ function CompletedBadge() {
 }
 
 /**
+ * 순번 칸에 나란히 서는 작은 버튼들의 모양. 수정과 완료가 같은 자리에 붙어
+ * 있으므로 둘의 크기와 색이 어긋나면 한쪽이 다른 성격의 조작처럼 보인다.
+ */
+const rowActionButtonClass =
+  "rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700";
+
+/**
+ * 수정 폼을 여는 버튼. **키보드로 이 표를 고칠 수 있는 유일한 길**이다 —
+ * <tr> 은 포커스를 받지 못하고, 인수번호는 이제 수리 건으로 가는 링크다
+ * (파일 헤더의 '인수번호는 링크, 수정은 버튼').
+ *
+ * 줄 전체가 같은 일을 하는 클릭 대상이라 stopPropagation 을 한다. 없어도 결과는
+ * 같지만(같은 줄의 폼이 열린다), 눌린 것이 무엇인지 화면과 코드가 같은 말을
+ * 하도록 명시해 둔다.
+ *
+ * 이름표에 인수번호를 함께 읽히는 이유: 이 버튼은 한 화면에 열두 개가 있고,
+ * "수정" 한 마디만으로는 화면 낭독기가 어느 줄의 것인지 말할 수 없다.
+ */
+function EditRowButton({
+  row,
+  onOpen,
+}: {
+  row: DomesticOrderListItem;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={rowActionButtonClass}
+      onClick={(event: MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        onOpen(row.id);
+      }}
+    >
+      수정
+      <span className="sr-only"> — {dash(row.displayIntakeNumber)}</span>
+    </button>
+  );
+}
+
+/**
+ * 인수번호 칸. 연결이 있으면 그 수리 건 상세로 가는 링크이고, 없으면 시트에
+ * 적혀 있던 글자 그대로다(파일 헤더).
+ *
+ * 연결 없는 줄을 링크로 만들지 않는 것은 갈 곳이 없어서다. 링크처럼 보이는데
+ * 눌러도 아무 일이 없으면, 사람은 그 줄이 고장 났다고 읽는다.
+ */
+function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
+  const label = dash(row.displayIntakeNumber);
+  if (row.repairCaseId === null) return <>{label}</>;
+  return (
+    <Link
+      href={`/repair-cases/${row.repairCaseId}`}
+      // 줄 아무 데나 누르면 수정 폼이 열린다 — 여기서 막지 않으면 수리 건으로
+      // 넘어가면서 폼도 함께 열린다.
+      onClick={(event) => event.stopPropagation()}
+      className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+    >
+      {label}
+      <span className="sr-only"> 수리 건 상세로 이동</span>
+    </Link>
+  );
+}
+
+/**
  * 완료 처리 · 완료 해제 버튼. 고칠 수 있는 사람에게만 그려지지만, 그것은
  * 편의일 뿐 경계가 아니다 — 서버 액션이 매번 다시 검사한다.
  *
@@ -304,7 +386,7 @@ function CompletionToggle({
       type="button"
       onClick={toggle}
       disabled={isPending}
-      className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
+      className={rowActionButtonClass}
     >
       {completed ? "완료 해제" : "완료 처리"}
     </button>
@@ -326,6 +408,7 @@ export default function DomesticOrderListScreen({
   currentYear,
   canEdit,
   repairCaseOptions,
+  customerOptions,
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
@@ -339,6 +422,8 @@ export default function DomesticOrderListScreen({
   canEdit: boolean;
   /** 수정 폼의 '수리 건 연결' 목록. 고칠 수 없는 역할에게는 빈 배열이다. */
   repairCaseOptions: RepairCaseLinkOption[];
+  /** 수정 폼의 '고객사' 목록. 같은 이유로 고칠 수 없는 역할에게는 빈 배열이다. */
+  customerOptions: CustomerOption[];
 }) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
@@ -389,6 +474,7 @@ export default function DomesticOrderListScreen({
           key={editTarget?.kind === "new" ? "new" : editingRow?.id}
           row={editingRow}
           repairCaseOptions={repairCaseOptions}
+          customerOptions={customerOptions}
           onDone={() => setEditTarget(null)}
         />
       )}
@@ -533,10 +619,10 @@ export default function DomesticOrderListScreen({
                       <tr
                         key={row.id}
                         // 줄 아무 데나 눌러도 열린다. 다만 이것만으로는 키보드로
-                        // 닿을 수 없으므로, 인수번호 칸에 진짜 <button>을 둔다
-                        // (아래) — 칼럼을 하나 더 만들지 않고 22칼럼을 지키면서
-                        // 포커스 가능한 조작을 주는 방법이다. 완료 버튼도 같은
-                        // 이유로 순번 칸 안에 있다.
+                        // 닿을 수 없으므로, 순번 칸에 진짜 <button>을 둔다
+                        // (EditRowButton) — 칼럼을 하나 더 만들지 않고 22칼럼을
+                        // 지키면서 포커스 가능한 조작을 주는 방법이다. 완료
+                        // 버튼도 같은 이유로 같은 칸에 있다.
                         onClick={canEdit ? () => openRow(row.id) : undefined}
                         className={`border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800 ${
                           // 완료된 줄은 회색이지만 **글자를 흐리게 하지 않는다** —
@@ -551,6 +637,7 @@ export default function DomesticOrderListScreen({
                           <span className="flex items-center gap-2">
                             <span className="tabular-nums">{dash(row.displayOrder)}</span>
                             {completed && <CompletedBadge />}
+                            {canEdit && <EditRowButton row={row} onOpen={openRow} />}
                             {canEdit && <CompletionToggle row={row} onError={setCompletionError} />}
                           </span>
                         </td>
@@ -573,18 +660,7 @@ export default function DomesticOrderListScreen({
                             (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
                             단서가 화면에서 사라진다. */}
                         <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-50">
-                          {canEdit ? (
-                            <button
-                              type="button"
-                              onClick={() => openRow(row.id)}
-                              className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                            >
-                              {dash(row.displayIntakeNumber)}
-                              <span className="sr-only"> 줄 수정</span>
-                            </button>
-                          ) : (
-                            dash(row.displayIntakeNumber)
-                          )}
+                          <IntakeNumberLink row={row} />
                         </td>
                         <td className="px-3 py-2">{dash(row.modelName)}</td>
                         <td className="px-3 py-2">{dash(row.lotNumber)}</td>
@@ -635,24 +711,18 @@ export default function DomesticOrderListScreen({
                               : "bg-white dark:bg-zinc-900"
                           } ${canEdit ? "cursor-pointer" : ""}`}
                         >
+                          {/* 표와 같은 원칙이다 — 인수번호는 수리 건으로 가는
+                              링크, 폼을 여는 것은 순번 옆의 수정 버튼. 좁은
+                              화면이라고 조작이 달라지면 같은 자료가 다른
+                              화면처럼 읽힌다. */}
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            {canEdit ? (
-                              <button
-                                type="button"
-                                onClick={() => openRow(row.id)}
-                                className="font-semibold text-zinc-900 underline decoration-dotted underline-offset-2 hover:decoration-solid dark:text-zinc-50"
-                              >
-                                {dash(row.displayIntakeNumber)}
-                                <span className="sr-only"> 줄 수정</span>
-                              </button>
-                            ) : (
-                              <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-                                {dash(row.displayIntakeNumber)}
-                              </span>
-                            )}
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                              <IntakeNumberLink row={row} />
+                            </span>
                             <span className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                               순번 {dash(row.displayOrder)}
                               {completed && <CompletedBadge />}
+                              {canEdit && <EditRowButton row={row} onOpen={openRow} />}
                               {canEdit && (
                                 <CompletionToggle row={row} onError={setCompletionError} />
                               )}

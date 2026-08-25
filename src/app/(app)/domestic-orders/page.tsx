@@ -7,7 +7,11 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { canEditDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { listDomesticOrders, listRepairCaseLinkOptions } from "@/lib/db/queries/domestic-orders";
+import {
+  listCustomerOptions,
+  listDomesticOrders,
+  listRepairCaseLinkOptions,
+} from "@/lib/db/queries/domestic-orders";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 
 export const metadata: Metadata = {
@@ -49,11 +53,14 @@ export default async function DomesticOrdersPage() {
     canEditDomesticOrders(actingUser.role) &&
     (await hasPermission(actingUser.role, "domesticOrders", "WRITE"));
 
-  // 고칠 수 없는 사람에게는 수리 건 목록을 읽지 않는다 — 쓰지 않을 값을
+  // 고칠 수 없는 사람에게는 폼의 드롭다운 목록을 읽지 않는다 — 쓰지 않을 값을
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).
-  const [rows, repairCaseOptions] = await Promise.all([
+  // 고객사 목록도 같은 규칙이다: 이 화면을 볼 수만 있는 사람에게 전체 고객사
+  // 명단을 실어 보낼 이유가 없다.
+  const [rows, repairCaseOptions, customerOptions] = await Promise.all([
     listDomesticOrders(),
     canEdit ? listRepairCaseLinkOptions() : Promise.resolve([]),
+    canEdit ? listCustomerOptions() : Promise.resolve([]),
   ]);
 
   // 머리말의 "{날짜}자 진행 상황입니다"에 들어갈 날짜. 클라이언트에서 만들면
@@ -81,6 +88,7 @@ export default async function DomesticOrdersPage() {
       currentYear={currentYear}
       canEdit={canEdit}
       repairCaseOptions={repairCaseOptions}
+      customerOptions={customerOptions}
     />
   );
 }

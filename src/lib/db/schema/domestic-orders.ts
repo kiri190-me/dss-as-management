@@ -28,13 +28,32 @@ import { users } from "./users";
  * 따라간다. 두 흐름은 실제로 어긋난다 — 수리가 끝나도 입금은 두 달 뒤일 수 있고,
  * 수리 없이 납품만 있는 줄도 있다.
  *
- * ── 고객사·형식·L/N·S/N·고장내역은 여기 없다 ────────────────────────────
- * 원본 시트에는 그 다섯 칼럼이 있지만 이 표에는 두지 않는다. 전부 이미
- * repair_cases + products + customers 에 있는 값이고, 여기 한 번 더 적으면
- * 그 순간부터 두 벌이 서로 어긋나기 시작한다(모델명 오타를 고쳐도 이 표에는
- * 반영되지 않는 식이다). 화면에는 조인해서 따라오게 한다
- * (queries/domestic-orders.ts). 시트의 `순번`은 사람이 정한 표시 순서라서
- * display_order 로 남기고, 나머지 22칼럼 중 저장하지 않는 것은 그 다섯뿐이다.
+ * ── 고객사·형식·L/N·S/N·고장내역은 여기에도 있다 ────────────────────────
+ * 처음에는 그 다섯을 이 표에 두지 않았다. 전부 이미 repair_cases + products +
+ * customers 에 있는 값이니 조인해 따라오게 하면 두 벌이 어긋날 일이 없다는
+ * 이유였다. 그 판단이 통하지 않는 줄이 실제로 있다 — **수리 건 연결이 없는
+ * 줄**이다(바로 아래 항목). 그런 줄은 조인해 올 곳 자체가 없어서 다섯 칸이
+ * 영영 비어 있고, 사람은 그 값을 적을 자리를 찾다가 다시 Excel 로 돌아간다.
+ * 그래서 customer_id 와 함께 model_name_text · lot_number_text ·
+ * serial_number_text · fault_description_text 를 둔다.
+ *
+ * 이름 끝의 `_text` 는 intake_number_text 와 같은 뜻이다 — 원본을 가리키는
+ * 참조가 아니라 **이 표에 사람이 손으로 적은 글자**라는 표시다.
+ *
+ * 규칙은 다섯 칸이 모두 같다: **이 행에 적힌 값이 먼저, 없으면 연결된 수리
+ * 건의 값.** 발주서에 적힌 형식이 수리 건의 형식과 다를 수 있고, 그때 청구
+ * 근거는 발주서 쪽이다. customer_id 가 이미 그 규칙으로 움직이고 있었고
+ * (queries/domestic-orders.ts 의 '고객사는 이 행의 것이 먼저다'), 나머지 넷도
+ * 같은 이유로 같게 둔다. 비워 두면 수리 건 쪽을 그대로 따라가므로 **적지 않는
+ * 것이 기본**이다 — 폼도 그래서 수리 건의 값을 입력칸에 미리 채워 넣지 않고
+ * 회색 힌트로만 보여 준다. 어느 쪽 값을 쓸지 고르는 일은 SQL 의 coalesce 가
+ * 아니라 domain/domestic-order-list.ts 의 순수 함수가 한다(공백만 적힌 값을
+ * "없음"으로 접는 규칙까지 포함해서, 시험할 수 있는 자리에 둔다).
+ *
+ * 이 넷에는 인덱스를 만들지 않는다. 이 값으로 찾거나 정렬하는 조회가 없다 —
+ * 목록은 순번과 등록순으로만 정렬하고, 걸러 내는 것은 발주 년도뿐이다.
+ *
+ * 시트의 `순번`은 사람이 정한 표시 순서라서 display_order 로 남긴다.
  *
  * ── 수리 건 연결은 비어 있어도 된다 ─────────────────────────────────────
  * repair_case_id 는 NULL 을 허용한다. 시트에는 (1) 수리 없이 납품만 있는 줄,
@@ -96,6 +115,21 @@ export const domesticOrders = pgTable(
     customerId: uuid("customer_id").references(() => customers.id, {
       onDelete: "restrict",
     }),
+    /**
+     * 형식 · L/N · S/N · 고장내역을 이 표에 적은 값. 전부 NULL 을 허용하고,
+     * **비어 있는 것이 기본**이다 — 비어 있으면 연결된 수리 건의 값을 그대로
+     * 따라간다(파일 헤더의 '여기에도 있다'). 수리 건 연결이 없는 줄에서는
+     * 이 넷이 그 값의 유일한 자리다.
+     *
+     * 형식/L/N/S/N 은 products 의 같은 값을, 고장내역은 repair_cases 의
+     * reported_symptom 을 마주 보는 칸이다. 이름을 그대로 베끼지 않고
+     * `_text` 를 붙인 것은 **원본이 아니라 이 표에 적힌 글자**임을 컬럼
+     * 이름에서부터 구분하기 위해서다.
+     */
+    modelNameText: text("model_name_text"), // 형식
+    lotNumberText: text("lot_number_text"), // L/N
+    serialNumberText: text("serial_number_text"), // S/N
+    faultDescriptionText: text("fault_description_text"), // 고장내역
     // 시트의 `순번`. 사람이 정한 표시 순서이고, 정렬의 첫 기준이다.
     // 비어 있는 줄이 있을 수 있어 NULL 을 허용한다.
     displayOrder: integer("display_order"),

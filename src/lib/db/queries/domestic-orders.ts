@@ -1,8 +1,10 @@
 import "server-only";
 
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { customers, domesticOrders, products, repairCases } from "../schema";
+import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
 
 /**
  * ============================================================================
@@ -19,16 +21,23 @@ import { customers, domesticOrders, products, repairCases } from "../schema";
  * 화면에 나오지 않으면 이어 붙일 수 없다는 사실조차 알 수 없다. 수리 건을
  * 거쳐 가는 products 도 같은 이유로 LEFT JOIN 이다.
  *
- * ── 고객사는 이 행의 것이 먼저다 ────────────────────────────────────────
- * 고객사를 두 곳에서 알 수 있다 — 이 행의 customer_id, 그리고 연결된 수리 건의
- * customer_id. 이 행에 적힌 쪽을 먼저 본다(coalesce). 수리 건 없는 줄에도
- * 청구 상대는 있어야 하고, 둘이 다르다면 그건 "이 발주는 이 고객사 앞으로
- * 나갔다"는 이 표의 기록이 더 정확하다는 뜻이다.
+ * ── 고객사·형식·L/N·S/N·고장내역은 두 벌을 다 실어 온다 ─────────────────
+ * 그 다섯은 두 곳에서 알 수 있다 — 이 행에 적힌 값(customer_id ·
+ * model_name_text · lot_number_text · serial_number_text ·
+ * fault_description_text), 그리고 연결된 수리 건에서 따라오는 값. 이 행에 적힌
+ * 쪽이 먼저다: 수리 건 없는 줄에도 청구 상대와 제품은 있어야 하고, 둘이
+ * 다르다면 그건 "이 발주는 이렇게 나갔다"는 이 표의 기록이 더 정확하다는
+ * 뜻이다(스키마 파일 헤더의 '여기에도 있다').
  *
- * ── 고객사명·형식·L/N·S/N·고장내역은 조인해서 따라온다 ──────────────────
- * 이 다섯은 domestic_orders 에 컬럼이 없다(스키마 파일 헤더 참조). 여기서
- * 조인해 읽는 것이 그 값들의 유일한 출처이며, 원본에서 이름이 바뀌면 이 목록도
- * 다음 조회에서 바로 따라간다.
+ * **어느 쪽을 쓸지는 SQL 이 정하지 않는다.** 예전에는 고객사만 coalesce 로
+ * 접어 왔지만, 그렇게 하면 (1) 그 규칙을 시험할 자리가 없고, (2) 공백 한 칸이
+ * 적힌 줄이 수리 건의 값을 조용히 가리며, (3) 화면이 그 값의 출처를 알 수
+ * 없어 폼이 "연결된 수리 건에는 이렇게 적혀 있습니다"를 보여 줄 수 없다.
+ * 그래서 이 질의는 **두 벌을 다 골라 오고**, 고르는 일은 아래 매퍼가
+ * domain/domestic-order-list.ts 의 순수 함수로 한다.
+ *
+ * 수리 건에서 따라오는 값은 원본이 바뀌면 다음 조회에서 바로 따라간다 — 이
+ * 행의 칸을 비워 두는 것이 기본인 이유가 그것이다.
  *
  * ── PII ────────────────────────────────────────────────────────────────
  * progress_note · history_note · etc_note · delivered_by 는 사람이 자유롭게
@@ -36,6 +45,15 @@ import { customers, domesticOrders, products, repairCases } from "../schema";
  * 남기지 않는다(스키마 파일 헤더의 PII 항목).
  * ============================================================================
  */
+
+/**
+ * customers 를 두 번 조인한다 — 이 행이 가리키는 고객사와, 연결된 수리 건이
+ * 가리키는 고객사. 예전에는 coalesce 한 번으로 한쪽만 데려왔지만, 그러면 그
+ * 이름이 어느 쪽에서 왔는지가 사라진다(파일 헤더의 '두 벌을 다 실어 온다').
+ * 같은 표를 한 질의에서 두 번 조인하려면 별칭이 있어야 한다.
+ */
+const orderCustomers = alias(customers, "order_customers");
+const repairCaseCustomers = alias(customers, "repair_case_customers");
 
 /**
  * 아래 단 하나의 조인 질의가 내놓는 납작한 행. mappers/repair-case.ts 의
@@ -56,11 +74,27 @@ export type DomesticOrderJoinRow = {
   intakeNumber: string | null;
   /** 연결을 못 찾은 줄에 글자로 남아 있는 인수번호. */
   intakeNumberText: string | null;
-  customerName: string | null;
-  modelName: string | null;
-  lotNumber: string | null;
-  serialNumber: string | null;
-  reportedSymptom: string | null;
+  /**
+   * 이 행에 적힌 값 다섯. 폼이 입력칸에 그대로 담는 값이고, 비어 있는 것이
+   * 기본이다 — 비어 있으면 아래 repairCase* 를 따라간다.
+   */
+  customerId: string | null;
+  /** 이 행의 customer_id 가 가리키는 고객사 이름. customerId 가 없으면 null. */
+  ownCustomerName: string | null;
+  modelNameText: string | null;
+  lotNumberText: string | null;
+  serialNumberText: string | null;
+  faultDescriptionText: string | null;
+  /**
+   * 연결된 수리 건에서 따라온 값 다섯. 연결이 없으면 전부 null 이다.
+   * 화면은 이 값을 그리지 않는다 — 폼이 회색 힌트로 보여 주고, 아래 매퍼가
+   * 이 행의 값이 비었을 때 대신 쓴다.
+   */
+  repairCaseCustomerName: string | null;
+  repairCaseModelName: string | null;
+  repairCaseLotNumber: string | null;
+  repairCaseSerialNumber: string | null;
+  repairCaseReportedSymptom: string | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
@@ -106,6 +140,16 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
    * 남겨 둔다 — 연결이 있는 줄인지 아닌지는 여전히 구분되어야 한다.
    */
   displayIntakeNumber: string | null;
+  /**
+   * 정해진 값 다섯 — 이 행에 적힌 것이 먼저고, 없으면 연결된 수리 건의 것이다
+   * (resolveDomesticOrderValue). 화면의 표와 카드가 그리는 것은 이 값이고,
+   * 원본 두 벌도 위에 그대로 남아 있어 폼이 힌트를 그릴 수 있다.
+   */
+  customerName: string | null;
+  modelName: string | null;
+  lotNumber: string | null;
+  serialNumber: string | null;
+  reportedSymptom: string | null;
 };
 
 /**
@@ -120,6 +164,16 @@ export function mapDomesticOrderRow(row: DomesticOrderJoinRow): DomesticOrderLis
     ...row,
     completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null,
     displayIntakeNumber: row.intakeNumber ?? row.intakeNumberText,
+    // 다섯 칸 모두 같은 규칙으로 정한다 — 이 행의 값이 먼저, 없으면 수리 건의
+    // 값(파일 헤더). 그 판단은 여기서 다시 적지 않고 도메인 함수를 부른다.
+    customerName: resolveDomesticOrderValue(row.ownCustomerName, row.repairCaseCustomerName),
+    modelName: resolveDomesticOrderValue(row.modelNameText, row.repairCaseModelName),
+    lotNumber: resolveDomesticOrderValue(row.lotNumberText, row.repairCaseLotNumber),
+    serialNumber: resolveDomesticOrderValue(row.serialNumberText, row.repairCaseSerialNumber),
+    reportedSymptom: resolveDomesticOrderValue(
+      row.faultDescriptionText,
+      row.repairCaseReportedSymptom
+    ),
   };
 }
 
@@ -147,11 +201,20 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       repairCaseId: domesticOrders.repairCaseId,
       intakeNumber: repairCases.intakeNumber,
       intakeNumberText: domesticOrders.intakeNumberText,
-      customerName: customers.name,
-      modelName: products.modelName,
-      lotNumber: products.lotNumber,
-      serialNumber: products.serialNumber,
-      reportedSymptom: repairCases.reportedSymptom,
+      // 이 행에 적힌 다섯. 폼이 입력칸에 담을 값이라 이름까지 함께 골라야
+      // 한다 — id 만 내려보내면 화면이 고객사 이름을 그릴 수 없다.
+      customerId: domesticOrders.customerId,
+      ownCustomerName: orderCustomers.name,
+      modelNameText: domesticOrders.modelNameText,
+      lotNumberText: domesticOrders.lotNumberText,
+      serialNumberText: domesticOrders.serialNumberText,
+      faultDescriptionText: domesticOrders.faultDescriptionText,
+      // 연결된 수리 건에서 따라오는 다섯.
+      repairCaseCustomerName: repairCaseCustomers.name,
+      repairCaseModelName: products.modelName,
+      repairCaseLotNumber: products.lotNumber,
+      repairCaseSerialNumber: products.serialNumber,
+      repairCaseReportedSymptom: repairCases.reportedSymptom,
       displayOrder: domesticOrders.displayOrder,
       purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
       projectName: domesticOrders.projectName,
@@ -182,11 +245,10 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     // 안 된다.
     .leftJoin(repairCases, eq(repairCases.id, domesticOrders.repairCaseId))
     .leftJoin(products, eq(products.id, repairCases.productId))
-    // 이 행의 고객사가 먼저, 없으면 수리 건의 고객사(파일 헤더 참조).
-    .leftJoin(
-      customers,
-      sql`${customers.id} = coalesce(${domesticOrders.customerId}, ${repairCases.customerId})`
-    )
+    // 두 고객사를 각각 데려온다. 어느 쪽을 쓸지는 아래 매퍼가 정한다
+    // (파일 헤더의 '어느 쪽을 쓸지는 SQL 이 정하지 않는다').
+    .leftJoin(orderCustomers, eq(orderCustomers.id, domesticOrders.customerId))
+    .leftJoin(repairCaseCustomers, eq(repairCaseCustomers.id, repairCases.customerId))
     .where(eq(domesticOrders.isDeleted, false))
     .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
 
@@ -229,4 +291,33 @@ export async function listRepairCaseLinkOptions(): Promise<RepairCaseLinkOption[
     .leftJoin(products, eq(products.id, repairCases.productId))
     .where(eq(repairCases.isDeleted, false))
     .orderBy(desc(repairCases.intakeNumber));
+}
+
+/** 수정 폼의 '고객사' 목록에 들어갈 한 줄. */
+export type CustomerOption = {
+  id: string;
+  name: string;
+};
+
+/**
+ * 고를 수 있는 고객사 목록.
+ *
+ * 수리 건 목록(위)과 같은 모양이고 같은 이유로 있다 — 사람이 아는 것은 고객사
+ * 이름이지 UUID 가 아니다.
+ *
+ * ── 휴지통에 있는 고객사는 뺀다 ─────────────────────────────────────────
+ * 이미 그 고객사가 적혀 있는 줄은 그대로 두지만(목록 조회는 is_deleted 를 보지
+ * 않고 이름을 그대로 데려온다), **새로 고르는** 목록에 지워진 고객사를 내밀
+ * 이유는 없다. listRepairCaseLinkOptions 가 지워진 수리 건을 빼는 것과 같은
+ * 판단이다.
+ *
+ * 이름순이다. 수리 건과 달리 "방금 들어온 것"이라는 순서가 없고, 사람은 아는
+ * 이름을 목록에서 눈으로 찾는다.
+ */
+export async function listCustomerOptions(): Promise<CustomerOption[]> {
+  return db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.isDeleted, false))
+    .orderBy(asc(customers.name));
 }

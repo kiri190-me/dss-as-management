@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
-import { domesticOrders, repairCases } from "../schema";
+import { customers, domesticOrders, repairCases } from "../schema";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -46,6 +46,9 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * ============================================================================
  */
 
+/** 트랜잭션 핸들. 아래 도우미들이 같은 트랜잭션 안에서 읽도록 못 박는다. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type DomesticOrderMutationResultCode = "NOT_FOUND" | "CONFLICT" | "VALIDATION_ERROR";
 
 export type DomesticOrderMutationResult =
@@ -62,20 +65,27 @@ const VERSION_CONFLICT_MESSAGE =
 
 const NOT_FOUND_MESSAGE = "해당 내자 정리 항목을 찾을 수 없습니다.";
 
-const UNKNOWN_REPAIR_CASE_MESSAGE = "입력값을 확인해 주세요.";
+const UNKNOWN_REFERENCE_MESSAGE = "입력값을 확인해 주세요.";
 
 /**
  * domestic_orders 에 실제로 쓰는 컬럼 묶음. 추가와 수정이 **같은 표**를 쓰도록
  * 한 함수로 뽑아 둔다 — 두 곳에 나눠 적으면 칸이 하나 늘어날 때 한쪽만 고쳐지고,
  * 그때 생기는 증상은 "추가하면 들어가는데 수정하면 안 들어가는 칸"이다.
  *
- * customer_id 는 여기 없다. 고객사는 이 폼의 편집 대상이 아니고(수리 건에서
- * 조인해 따라온다), 여기 섞으면 수정할 때마다 null 로 덮어써 버린다.
+ * customer_id 와 형식·L/N·S/N·고장내역도 여기 있다. 폼이 그 다섯을 직접 받기
+ * 시작했고(schema/domestic-orders.ts 의 '여기에도 있다'), 빈 값은 null 로
+ * 들어와 "연결된 수리 건의 값을 따른다"는 뜻이 된다 — 그러니 이 표에 빠지면
+ * 사용자가 고객사를 골라도 저장되지 않는 칸이 된다.
  */
 function toColumnValues(fields: DomesticOrderFields) {
   return {
     repairCaseId: fields.repairCaseId,
     intakeNumberText: fields.intakeNumberText,
+    customerId: fields.customerId,
+    modelNameText: fields.modelNameText,
+    lotNumberText: fields.lotNumberText,
+    serialNumberText: fields.serialNumberText,
+    faultDescriptionText: fields.faultDescriptionText,
     displayOrder: fields.displayOrder,
     purchaseOrderNumber: fields.purchaseOrderNumber,
     projectName: fields.projectName,
@@ -104,10 +114,7 @@ function toColumnValues(fields: DomesticOrderFields) {
  * 조회 목록도 그런 줄을 그대로 보여 준다. 여기서 막으면 화면에 보이는 연결을
  * 저장할 수 없는 상태가 만들어진다.
  */
-async function repairCaseExists(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  repairCaseId: string
-): Promise<boolean> {
+async function repairCaseExists(tx: Tx, repairCaseId: string): Promise<boolean> {
   const [row] = await tx
     .select({ id: repairCases.id })
     .from(repairCases)
@@ -116,20 +123,64 @@ async function repairCaseExists(
   return Boolean(row);
 }
 
+/**
+ * 고르려는 고객사가 실제로 있는가. 수리 건과 같은 이유로 미리 본다 —
+ * customer_id 는 customers 를 RESTRICT 로 가리키므로 없는 id 를 넣으면 23503 이
+ * 나고, 그 오류는 사용자에게 아무것도 설명하지 못한다.
+ *
+ * 여기서도 is_deleted 를 보지 않는다. 휴지통에 있는 고객사가 이미 적혀 있는
+ * 줄은 목록에 그대로 보이는데, 그 줄의 다른 칸을 고치려 할 때 고객사 때문에
+ * 저장이 막히면 화면에 보이는 값을 저장할 수 없는 상태가 된다. 새로 고르는
+ * 목록에서 빼는 일은 조회 쪽이 한다(queries 의 listCustomerOptions).
+ */
+async function customerExists(tx: Tx, customerId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: customers.id })
+    .from(customers)
+    .where(eq(customers.id, customerId))
+    .limit(1);
+  return Boolean(row);
+}
+
+/**
+ * 이 행이 가리키는 두 곳(수리 건 · 고객사)이 실제로 있는지 한 번에 본다.
+ * 문제가 없으면 null 이다.
+ *
+ * 추가와 수정이 같은 검사를 쓰게 묶어 둔다 — toColumnValues 를 한 곳에 둔 것과
+ * 같은 이유다. 나눠 적으면 "추가할 때는 걸러지는데 수정할 때는 FK 오류가 나는"
+ * 차이가 생긴다.
+ */
+async function checkReferences(
+  tx: Tx,
+  fields: DomesticOrderFields
+): Promise<DomesticOrderMutationResult | null> {
+  if (fields.repairCaseId && !(await repairCaseExists(tx, fields.repairCaseId))) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { repairCaseId: "선택한 수리 건을 찾을 수 없습니다." },
+      message: UNKNOWN_REFERENCE_MESSAGE,
+    };
+  }
+  if (fields.customerId && !(await customerExists(tx, fields.customerId))) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { customerId: "선택한 고객사를 찾을 수 없습니다." },
+      message: UNKNOWN_REFERENCE_MESSAGE,
+    };
+  }
+  return null;
+}
+
 /** 새 줄 하나. version 은 스키마 기본값 1로 시작한다. */
 export async function createDomesticOrder(params: {
   fields: DomesticOrderFields;
   actorUserId: string;
 }): Promise<DomesticOrderMutationResult> {
   return db.transaction(async (tx): Promise<DomesticOrderMutationResult> => {
-    if (params.fields.repairCaseId && !(await repairCaseExists(tx, params.fields.repairCaseId))) {
-      return {
-        ok: false,
-        code: "VALIDATION_ERROR",
-        fieldErrors: { repairCaseId: "선택한 수리 건을 찾을 수 없습니다." },
-        message: UNKNOWN_REPAIR_CASE_MESSAGE,
-      };
-    }
+    const badReference = await checkReferences(tx, params.fields);
+    if (badReference) return badReference;
 
     const [inserted] = await tx
       .insert(domesticOrders)
@@ -170,14 +221,8 @@ export async function updateDomesticOrder(params: {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
     }
 
-    if (params.fields.repairCaseId && !(await repairCaseExists(tx, params.fields.repairCaseId))) {
-      return {
-        ok: false,
-        code: "VALIDATION_ERROR",
-        fieldErrors: { repairCaseId: "선택한 수리 건을 찾을 수 없습니다." },
-        message: UNKNOWN_REPAIR_CASE_MESSAGE,
-      };
-    }
+    const badReference = await checkReferences(tx, params.fields);
+    if (badReference) return badReference;
 
     const [updated] = await tx
       .update(domesticOrders)

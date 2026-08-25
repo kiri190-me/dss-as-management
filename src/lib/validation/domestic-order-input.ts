@@ -17,14 +17,19 @@ import { isValidDateString } from "@/lib/domain/local/validation";
  * 보냈는가"를 따질 이유가 없다. customer-update-input.ts 와 같은 이유로 전체
  * 제출이고, 빠진 키는 "비웠다"로 읽는다.
  *
- * ── 고객사·형식·L/N·S/N·고장내역은 여기 없다 ────────────────────────────
- * 그 다섯은 domestic_orders 의 칸이 아니라 수리 건에서 조인해 따라오는 값이다
- * (schema/domestic-orders.ts 헤더). 여기서 받아 주면 저장할 자리가 없거나,
- * 있더라도 원본과 어긋난 두 벌이 생긴다. 폼에도 없고 이 검증에도 없다.
+ * ── 고객사·형식·L/N·S/N·고장내역도 여기서 받는다 ────────────────────────
+ * 그 다섯은 원래 이 검증에 없었다 — 수리 건에서 조인해 따라오는 값이라 저장할
+ * 자리가 없었기 때문이다. 지금은 domestic_orders 에 자기 칸이 있고
+ * (schema/domestic-orders.ts 의 '여기에도 있다'), **수리 건 연결이 없는 줄에는
+ * 그 칸이 유일한 자리**다.
+ *
+ * 비워 두는 것이 기본이다. 빈 값은 여기서 null 로 접히고, 그러면 조회가 연결된
+ * 수리 건의 값을 대신 쓴다. 그래서 이 검증은 "적지 않았다"와 "일부러 지웠다"를
+ * 구분하지 않는다 — 둘 다 "수리 건 쪽을 따른다"는 같은 뜻이다.
  *
  * ── 오류는 칸 단위 한국어다 ─────────────────────────────────────────────
  * fieldErrors 의 키는 필드명 그대로이고, 화면은 그 키로 입력칸 밑에 문장을
- * 붙인다. "입력값을 확인해 주세요" 한 줄만 돌려주면 사용자는 18칸 중 어디가
+ * 붙인다. "입력값을 확인해 주세요" 한 줄만 돌려주면 사용자는 23칸 중 어디가
  * 틀렸는지 찾지 못한다.
  * ============================================================================
  */
@@ -66,6 +71,17 @@ export type DomesticOrderFields = {
   /** 연결된 수리 건. 없는 줄이 정상이다(schema 헤더의 '비어 있어도 된다'). */
   repairCaseId: string | null;
   intakeNumberText: string | null;
+  /**
+   * 청구 상대. null 은 "정하지 않았다"이지 오류가 아니다 — 연결된 수리 건이
+   * 있으면 그쪽 고객사를 따르고, 없으면 목록에서 '(고객사 미지정)' 묶음에
+   * 들어간다.
+   */
+  customerId: string | null;
+  /** 형식 · L/N · S/N · 고장내역. 비어 있으면 수리 건의 값을 따른다(파일 헤더). */
+  modelNameText: string | null;
+  lotNumberText: string | null;
+  serialNumberText: string | null;
+  faultDescriptionText: string | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
@@ -97,12 +113,20 @@ const SHORT_TEXT_FIELDS = {
   quoteNumber: "견적서번호",
   deliveredBy: "납품자",
   japanRemittanceNote: "일본 송금",
+  // 형식·L/N·S/N 은 제품에 찍혀 있는 짧은 식별자다. 사람이 문장을 적는 칸이
+  // 아니라 다른 한 줄짜리 칸들과 같은 상한을 쓴다.
+  modelNameText: "형식",
+  lotNumberText: "L/N",
+  serialNumberText: "S/N",
 } as const;
 
 const LONG_TEXT_FIELDS = {
   progressNote: "현황",
   historyNote: "이력",
   etcNote: "기타",
+  // 고장내역은 "전원 안 들어옴" 한 줄일 때도 있지만 증상을 길게 적는 칸이다 —
+  // 접수 건의 reported_symptom 을 마주 보는 값이라 긴 쪽으로 둔다.
+  faultDescriptionText: "고장내역",
 } as const;
 
 const DATE_FIELDS = {
@@ -185,6 +209,19 @@ export function validateDomesticOrderFields(
     repairCaseId = repairCaseIdRaw;
   }
 
+  // ── 고객사 ───────────────────────────────────────────────────────────
+  // 수리 건 연결과 같은 모양이다 — 드롭다운에서 고르는 UUID 이고, 비워 두는
+  // 것("연결 없음")이 정상이다. 그 고객사가 실제로 있는지는 mutation 이 본다.
+  let customerId: string | null = null;
+  const customerIdRaw = raw.customerId;
+  if (customerIdRaw === null || customerIdRaw === undefined || customerIdRaw === "") {
+    customerId = null;
+  } else if (!isValidDomesticOrderId(customerIdRaw)) {
+    fieldErrors.customerId = "고객사를 확인할 수 없습니다.";
+  } else {
+    customerId = customerIdRaw;
+  }
+
   // ── 순번 ─────────────────────────────────────────────────────────────
   // 사람이 시트에 적던 표시 순서다. 문자열로 오는 것은 <input> 에서 온
   // 값이기 때문이고, 숫자로 오는 것은 이미 파싱된 값이 다시 들어오는 경우다.
@@ -252,6 +289,11 @@ export function validateDomesticOrderFields(
     data: {
       repairCaseId,
       intakeNumberText: text.intakeNumberText,
+      customerId,
+      modelNameText: text.modelNameText,
+      lotNumberText: text.lotNumberText,
+      serialNumberText: text.serialNumberText,
+      faultDescriptionText: text.faultDescriptionText,
       displayOrder,
       purchaseOrderNumber: text.purchaseOrderNumber,
       projectName: text.projectName,

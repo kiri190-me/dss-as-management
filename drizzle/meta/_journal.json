@@ -351,6 +351,13 @@
       "when": 1787628667081,
       "tag": "0049_cultured_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787631594989,
+      "tag": "0050_curly_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

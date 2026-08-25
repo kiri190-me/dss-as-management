@@ -44,6 +44,11 @@ test("빈 입력도 통과한다 — 이 표에는 필수 칸이 없다", () => 
   assert.deepEqual(result.data, {
     repairCaseId: null,
     intakeNumberText: null,
+    customerId: null,
+    modelNameText: null,
+    lotNumberText: null,
+    serialNumberText: null,
+    faultDescriptionText: null,
     displayOrder: null,
     purchaseOrderNumber: null,
     projectName: null,
@@ -233,6 +238,10 @@ test("짧은 칸은 200자를 넘으면 거부한다", () => {
     "quoteNumber",
     "deliveredBy",
     "japanRemittanceNote",
+    // 형식·L/N·S/N 은 제품에 찍힌 짧은 식별자라 다른 한 줄짜리 칸과 같은 상한이다.
+    "modelNameText",
+    "lotNumberText",
+    "serialNumberText",
   ]) {
     const ok = validateDomesticOrderFields({ [key]: "가".repeat(200) });
     assert.equal(ok.ok, true, key);
@@ -244,8 +253,8 @@ test("짧은 칸은 200자를 넘으면 거부한다", () => {
   }
 });
 
-test("긴 칸(현황·이력·기타)은 4000자까지 받는다", () => {
-  for (const key of ["progressNote", "historyNote", "etcNote"]) {
+test("긴 칸(현황·이력·기타·고장내역)은 4000자까지 받는다", () => {
+  for (const key of ["progressNote", "historyNote", "etcNote", "faultDescriptionText"]) {
     const ok = validateDomesticOrderFields({ [key]: "가".repeat(4000) });
     assert.equal(ok.ok, true, key);
 
@@ -269,6 +278,41 @@ test("수리 건 연결은 UUID이거나 비어 있어야 한다", () => {
   assert.equal(broken.ok, false);
   if (broken.ok) return;
   assert.ok(broken.fieldErrors.repairCaseId);
+});
+
+test("고객사도 UUID이거나 비어 있어야 한다", () => {
+  const chosen = validateDomesticOrderFields({
+    customerId: "22222222-2222-4222-8222-222222222222",
+  });
+  assert.equal(chosen.ok, true);
+  if (chosen.ok) assert.equal(chosen.data.customerId, "22222222-2222-4222-8222-222222222222");
+
+  // 비워 두는 것이 정상이다 — 연결된 수리 건의 고객사를 따른다는 뜻이다.
+  const empty = validateDomesticOrderFields({ customerId: "" });
+  assert.equal(empty.ok, true);
+  if (empty.ok) assert.equal(empty.data.customerId, null);
+
+  const broken = validateDomesticOrderFields({ customerId: "한국항공우주" });
+  assert.equal(broken.ok, false);
+  if (broken.ok) return;
+  assert.ok(broken.fieldErrors.customerId);
+});
+
+test("형식·L/N·S/N·고장내역의 빈 값도 null 한 가지 모양이 된다", () => {
+  // 공백만 남은 값이 그대로 저장되면 조회가 그것을 "적힌 값"으로 읽어
+  // 수리 건의 값을 영영 가린다(domain/domestic-order-list.ts).
+  const result = validateDomesticOrderFields({
+    modelNameText: "",
+    lotNumberText: "   ",
+    serialNumberText: "\t",
+    faultDescriptionText: "\n ",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.modelNameText, null);
+  assert.equal(result.data.lotNumberText, null);
+  assert.equal(result.data.serialNumberText, null);
+  assert.equal(result.data.faultDescriptionText, null);
 });
 
 test("입금완료 여부는 값이 없으면 false다 — 시트의 빈칸은 '아직 안 들어왔다'는 뜻이다", () => {
@@ -316,9 +360,15 @@ test("오류 문구는 한국어다", () => {
   }
 });
 
-test("고객사·형식·L/N·S/N·고장내역은 받지 않는다 — 수리 건에서 따라오는 값이다", () => {
+test("이 표의 칸 이름으로 온 것만 받는다 — 수리 건 쪽 이름은 조용히 무시된다", () => {
+  // customer_id 와 *_text 넷은 이 표의 칸이라 받는다. 반면 customerName ·
+  // modelName · lotNumber · serialNumber · reportedSymptom 은 **수리 건과
+  // products 의 칸 이름**이다. 그 이름으로 값을 밀어 넣어도 저장될 자리가
+  // 없으므로 data 에 실리지 않는다 — 실리면 mutation 이 없는 컬럼에 쓰려다
+  // 터진다.
   const result = validateDomesticOrderFields({
     customerId: "11111111-1111-4111-8111-111111111111",
+    modelNameText: "발주서 형식",
     customerName: "몰래 넣은 고객사",
     modelName: "몰래 넣은 형식",
     lotNumber: "L1",
@@ -327,8 +377,8 @@ test("고객사·형식·L/N·S/N·고장내역은 받지 않는다 — 수리 �
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  // 조용히 무시된다 — data 에 그 키가 아예 없으므로 mutation 이 쓸 수도 없다.
-  assert.equal("customerId" in result.data, false);
+  assert.equal(result.data.customerId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(result.data.modelNameText, "발주서 형식");
   assert.equal("customerName" in result.data, false);
   assert.equal("modelName" in result.data, false);
   assert.equal("lotNumber" in result.data, false);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import EditSectionActions, {
   editErrorClass,
@@ -9,7 +9,12 @@ import EditSectionActions, {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { buildDraftText } from "@/lib/domain/edit-draft-text";
-import type { DomesticOrderListItem, RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
+import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
+import type {
+  CustomerOption,
+  DomesticOrderListItem,
+  RepairCaseLinkOption,
+} from "@/lib/db/queries/domestic-orders";
 import {
   createDomesticOrderAction,
   updateDomesticOrderAction,
@@ -17,17 +22,27 @@ import {
 
 /**
  * ============================================================================
- * 내자 정리 — 한 줄을 통째로 고치는 폼 (2단계)
+ * 내자 정리 — 한 줄을 통째로 고치는 폼
  * ============================================================================
- * 칸 하나씩 고치는 방식이 아니다. 한 줄의 값 18개를 한 화면에서 고치고 한 번에
+ * 칸 하나씩 고치는 방식이 아니다. 한 줄의 값 23개를 한 화면에서 고치고 한 번에
  * 저장한다 — 이 시트는 원래 한 줄이 한 건의 이야기(발주 → 견적 → 납품 →
  * 세금계산서 → 입금)라서, 칸 단위로 저장하면 "견적은 들어갔는데 현황은 아직
  * 옛날 값"인 중간 상태가 표에 남는다.
  *
- * ── 고객사·형식·L/N·S/N·고장내역은 이 폼에 없다 ─────────────────────────
- * 그 다섯은 domestic_orders 의 칸이 아니라 수리 건에서 조인해 따라오는 값이다
- * (schema/domestic-orders.ts 헤더). 여기에 입력칸을 두면 같은 값이 두 곳에
- * 생기고, 그 순간부터 둘이 어긋나기 시작한다. 고치려면 수리 건 쪽에서 고친다.
+ * ── 고객사·형식·L/N·S/N·고장내역은 비워 두는 것이 기본이다 ──────────────
+ * 그 다섯에는 입력칸이 있다. **수리 건 연결이 없는 줄**에는 그 칸이 값을 적을
+ * 유일한 자리이기 때문이다(schema/domestic-orders.ts 의 '여기에도 있다').
+ *
+ * 연결이 있는 줄에서는 **수리 건의 값을 회색 힌트로 보여만 주고 입력칸은
+ * 비워 둔다.** 미리 채워 넣지 않는 것이 이 폼에서 가장 중요한 규칙이다:
+ * 채워 넣으면 사용자가 아무것도 고치지 않고 저장만 해도 그 값이 이 행에
+ * 복사되고, 그때부터 "일부러 다르게 적었다"와 "그냥 안 건드렸다"를 구분할 수
+ * 없게 된다. 그 뒤로 수리 건 쪽에서 모델명 오타를 고쳐도 이 줄은 따라가지
+ * 않는다 — 화면에는 아무 흔적도 남지 않은 채로.
+ *
+ * 그래서 비어 있음이 곧 "수리 건을 따른다"는 뜻이고, 적는 것은 **일부러 다르게
+ * 적을 때뿐**이다(발주서의 형식이 수리 건의 형식과 다른 경우 — 그때 청구 근거는
+ * 발주서 쪽이다).
  *
  * ── 충돌하면 얼린다 ─────────────────────────────────────────────────────
  * 저장이 CONFLICT 로 돌아오면 이 폼은 더 이상 저장하지 않는다. 낡은 값을 그대로
@@ -47,13 +62,19 @@ import {
 /**
  * 충돌 상자에 보여 줄 항목과 이름표. **여기 없는 항목은 보여 주지 않는다.**
  *
- * 날짜 다섯과 수리 건 연결(UUID), 입금완료 체크는 뺐다 — 다시 고르는 데 몇 초면
- * 되고, UUID 는 사람이 읽을 수 없어 보여 주면 오히려 방해다(edit-draft-text.ts
- * 의 '왜 자유 입력만인가'). 금액은 뺄 수 없다: 손으로 친 값이고, 잘못 다시
- * 적으면 합계가 세금계산서와 어긋난다.
+ * 날짜 다섯과 고르는 값 둘(수리 건 연결 · 고객사 — 둘 다 UUID), 입금완료 체크는
+ * 뺐다 — 다시 고르는 데 몇 초면 되고, UUID 는 사람이 읽을 수 없어 보여 주면
+ * 오히려 방해다(edit-draft-text.ts 의 '왜 자유 입력만인가'). 금액은 뺄 수 없다:
+ * 손으로 친 값이고, 잘못 다시 적으면 합계가 세금계산서와 어긋난다. 형식·L/N·
+ * S/N·고장내역도 손으로 친 값이라 함께 붙잡는다 — 특히 이 넷은 **일부러 수리
+ * 건과 다르게 적은 값**이라 다시 불러온 화면 어디에도 남아 있지 않다.
  */
 const DRAFT_LABELS: Readonly<Record<string, string>> = {
   intakeNumberText: "인수번호(직접 입력)",
+  modelNameText: "형식",
+  lotNumberText: "L/N",
+  serialNumberText: "S/N",
+  faultDescriptionText: "고장내역",
   purchaseOrderNumber: "발주서번호",
   projectName: "PJT",
   quoteNumber: "견적서번호",
@@ -67,20 +88,37 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
 
 const textAreaClass = `${editInputClass} min-h-20 resize-y`;
 
+const hintClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
+
 export default function DomesticOrderEditForm({
   row,
   repairCaseOptions,
+  customerOptions,
   onDone,
 }: {
   /** 고칠 줄. null 이면 새 줄을 추가하는 중이다. */
   row: DomesticOrderListItem | null;
   repairCaseOptions: RepairCaseLinkOption[];
+  customerOptions: CustomerOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
 
   const [repairCaseId, setRepairCaseId] = useState(row?.repairCaseId ?? "");
   const [intakeNumberText, setIntakeNumberText] = useState(row?.intakeNumberText ?? "");
+  /**
+   * 이 다섯은 **이 행에 적힌 값만** 담는다(row.customerId · row.modelNameText …).
+   * 화면 표가 그리는 row.customerName · row.modelName 은 이미 수리 건 값이 섞여
+   * 정해진 값이라, 그것을 초기값으로 쓰면 저장하는 순간 수리 건의 값이 이 행에
+   * 복사된다(파일 헤더).
+   */
+  const [customerId, setCustomerId] = useState(row?.customerId ?? "");
+  const [modelNameText, setModelNameText] = useState(row?.modelNameText ?? "");
+  const [lotNumberText, setLotNumberText] = useState(row?.lotNumberText ?? "");
+  const [serialNumberText, setSerialNumberText] = useState(row?.serialNumberText ?? "");
+  const [faultDescriptionText, setFaultDescriptionText] = useState(
+    row?.faultDescriptionText ?? ""
+  );
   const [displayOrder, setDisplayOrder] = useState(
     row?.displayOrder === null || row?.displayOrder === undefined ? "" : String(row.displayOrder)
   );
@@ -107,10 +145,41 @@ export default function DomesticOrderEditForm({
 
   const disabled = isSubmitting || isConflict;
 
+  /**
+   * 회색 힌트를 보여 줄 수 있는가. **저장돼 있는 연결을 그대로 두고 있을
+   * 때만**이다.
+   *
+   * 드롭다운에서 다른 수리 건을 고르면 이 화면에는 그 건의 형식·L/N·S/N·
+   * 고장내역이 없다(목록 조회가 실어 온 것은 지금 연결된 건의 값뿐이다).
+   * 그때도 옛 힌트를 계속 띄우면, 사용자는 방금 고른 건의 값이라고 읽는다 —
+   * 틀린 값을 보여 주느니 아무것도 보여 주지 않는 편이 낫다.
+   */
+  const savedRepairCaseId = row?.repairCaseId ?? "";
+  const showRepairCaseHints = repairCaseId !== "" && repairCaseId === savedRepairCaseId;
+
+  /** 힌트 한 줄. 연결이 바뀌었거나 수리 건 쪽도 비어 있으면 아무것도 그리지 않는다. */
+  function repairCaseHint(value: string | null | undefined) {
+    if (!showRepairCaseHints) return null;
+    const hint = foldBlankToNull(value);
+    if (hint === null) return null;
+    return (
+      <p className={hintClass}>
+        연결된 수리 건{row?.intakeNumber ? ` ${row.intakeNumber}` : ""}: {hint}
+        <br />
+        비워 두면 이 값이 그대로 보입니다.
+      </p>
+    );
+  }
+
   function collectFields(): Record<string, unknown> {
     return {
       repairCaseId: repairCaseId || null,
       intakeNumberText,
+      customerId: customerId || null,
+      modelNameText,
+      lotNumberText,
+      serialNumberText,
+      faultDescriptionText,
       displayOrder,
       purchaseOrderNumber,
       projectName,
@@ -171,7 +240,13 @@ export default function DomesticOrderEditForm({
     label: string,
     value: string,
     onChange: (next: string) => void,
-    options: { type?: string; long?: boolean; inputMode?: "numeric" | "decimal" } = {}
+    options: {
+      type?: string;
+      long?: boolean;
+      inputMode?: "numeric" | "decimal";
+      /** 입력칸 아래 회색으로 붙는 안내. 값은 건드리지 않는다(파일 헤더). */
+      hint?: ReactNode;
+    } = {}
   ) {
     return (
       <div className={options.long ? "sm:col-span-2 lg:col-span-3" : undefined}>
@@ -198,6 +273,7 @@ export default function DomesticOrderEditForm({
           />
         )}
         {fieldErrors[key] && <p className={editErrorClass}>{fieldErrors[key]}</p>}
+        {options.hint}
       </div>
     );
   }
@@ -212,11 +288,12 @@ export default function DomesticOrderEditForm({
         {row ? "줄 수정" : "행 추가"}
       </h2>
 
-      {/* 고객사·형식·L/N·S/N·고장내역이 없는 것은 빠뜨린 것이 아니다 —
-          수리 건에서 따라오는 값이라 여기서 고치지 않는다(파일 헤더). */}
+      {/* 비워 두는 것이 기본이라는 사실을 폼 맨 위에 적는다 — 입력칸만 보면
+          "채워야 하는 칸"으로 읽히고, 그렇게 채운 값은 수리 건 쪽이 바뀌어도
+          따라가지 않는다(파일 헤더). */}
       <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-        고객사 · 형식 · L/N · S/N · 고장내역은 연결된 수리 건에서 따라오는 값이라 이 폼에서 고치지
-        않습니다.
+        고객사 · 형식 · L/N · S/N · 고장내역은 <strong className="font-semibold">비워 두면</strong>{" "}
+        연결된 수리 건의 값을 그대로 따라갑니다. 발주서에 다르게 적힌 경우에만 직접 입력하세요.
       </p>
 
       <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -247,7 +324,42 @@ export default function DomesticOrderEditForm({
           {fieldErrors.repairCaseId && <p className={editErrorClass}>{fieldErrors.repairCaseId}</p>}
         </div>
 
+        <div>
+          <label className={editLabelClass} htmlFor="domestic-order-customerId">
+            고객사
+          </label>
+          <select
+            id="domestic-order-customerId"
+            className={editInputClass}
+            value={customerId}
+            disabled={disabled}
+            onChange={(e) => setCustomerId(e.target.value)}
+          >
+            {/* '연결 없음'이 기본값이다 — 고르지 않으면 연결된 수리 건의
+                고객사를 따르고, 연결도 없으면 목록에서 '(고객사 미지정)'
+                묶음에 들어간다. 값을 지울 길이 없으면 한 번 잘못 고른 고객사를
+                되돌릴 방법이 없어진다. */}
+            <option value="">연결 없음</option>
+            {customerOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          {fieldErrors.customerId && <p className={editErrorClass}>{fieldErrors.customerId}</p>}
+          {repairCaseHint(row?.repairCaseCustomerName)}
+        </div>
+
         {renderText("intakeNumberText", "인수번호(직접 입력)", intakeNumberText, setIntakeNumberText)}
+        {renderText("modelNameText", "형식", modelNameText, setModelNameText, {
+          hint: repairCaseHint(row?.repairCaseModelName),
+        })}
+        {renderText("lotNumberText", "L/N", lotNumberText, setLotNumberText, {
+          hint: repairCaseHint(row?.repairCaseLotNumber),
+        })}
+        {renderText("serialNumberText", "S/N", serialNumberText, setSerialNumberText, {
+          hint: repairCaseHint(row?.repairCaseSerialNumber),
+        })}
         {renderText("purchaseOrderNumber", "발주서번호", purchaseOrderNumber, setPurchaseOrderNumber)}
         {renderText("projectName", "PJT", projectName, setProjectName)}
         {renderText("orderIssuedDate", "발주발행일", orderIssuedDate, setOrderIssuedDate, { type: "date" })}
@@ -280,6 +392,13 @@ export default function DomesticOrderEditForm({
           )}
         </div>
 
+        {renderText(
+          "faultDescriptionText",
+          "고장내역",
+          faultDescriptionText,
+          setFaultDescriptionText,
+          { long: true, hint: repairCaseHint(row?.repairCaseReportedSymptom) }
+        )}
         {renderText("progressNote", "현황", progressNote, setProgressNote, { long: true })}
         {renderText("historyNote", "이력", historyNote, setHistoryNote, { long: true })}
         {renderText("etcNote", "기타", etcNote, setEtcNote, { long: true })}

@@ -27,8 +27,10 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * ============================================================================
  * 내자 정리 — 행이 실제로 들어가고, 동시 수정이 막히는가
  * ============================================================================
- * 확인하는 것은 네 가지다.
+ * 확인하는 것은 다섯 가지다.
  *
+ *  0. **수리 건 없이도 한 줄이 완성된다** — 고객사·형식·L/N·S/N·고장내역을
+ *     직접 적을 수 있어야 한다(아래 '손으로 적는 다섯 칸').
  *  1. **추가와 수정이 같은 칸들을 쓴다** — 추가하면 들어가는데 수정하면 안
  *     들어가는 칸이 없어야 한다.
  *  2. **version 이 낙관적 잠금으로 실제로 동작한다** — 낡은 version 으로 온
@@ -71,6 +73,11 @@ function emptyFields(): DomesticOrderFields {
   return {
     repairCaseId: null,
     intakeNumberText: null,
+    customerId: null,
+    modelNameText: null,
+    lotNumberText: null,
+    serialNumberText: null,
+    faultDescriptionText: null,
     displayOrder: null,
     purchaseOrderNumber: null,
     projectName: null,
@@ -191,10 +198,15 @@ describe("createDomesticOrder", () => {
     assert.equal(row.isDeleted, false);
   });
 
-  test("18칸이 전부 그대로 들어간다", async () => {
+  test("23칸이 전부 그대로 들어간다", async () => {
     const result = await createOrder({
       repairCaseId: linkedRepairCaseId,
       intakeNumberText: "손으로 적은 인수번호",
+      customerId,
+      modelNameText: "발주서에 적힌 형식",
+      lotNumberText: "발주서에 적힌 L/N",
+      serialNumberText: "발주서에 적힌 S/N",
+      faultDescriptionText: "발주서에 적힌 고장내역",
       displayOrder: 7,
       purchaseOrderNumber: "PO-ALL",
       projectName: "PJT-ALL",
@@ -218,6 +230,11 @@ describe("createDomesticOrder", () => {
     const row = await readOrder(result.id);
     assert.equal(row.repairCaseId, linkedRepairCaseId);
     assert.equal(row.intakeNumberText, "손으로 적은 인수번호");
+    assert.equal(row.customerId, customerId);
+    assert.equal(row.modelNameText, "발주서에 적힌 형식");
+    assert.equal(row.lotNumberText, "발주서에 적힌 L/N");
+    assert.equal(row.serialNumberText, "발주서에 적힌 S/N");
+    assert.equal(row.faultDescriptionText, "발주서에 적힌 고장내역");
     assert.equal(row.displayOrder, 7);
     assert.equal(row.purchaseOrderNumber, "PO-ALL");
     assert.equal(row.projectName, "PJT-ALL");
@@ -256,6 +273,132 @@ describe("createDomesticOrder", () => {
     if (result.ok) return;
     assert.equal(result.code, "VALIDATION_ERROR");
     assert.ok(result.fieldErrors?.repairCaseId);
+  });
+
+  test("없는 고객사를 가리켜도 FK 오류가 아니라 VALIDATION_ERROR다", async () => {
+    const result = await createDomesticOrder({
+      fields: fields({ customerId: randomUUID() }),
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "VALIDATION_ERROR");
+    assert.ok(result.fieldErrors?.customerId);
+  });
+});
+
+/**
+ * ── 손으로 적는 다섯 칸 ──────────────────────────────────────────────────
+ * 고객사 · 형식 · L/N · S/N · 고장내역. 이 다섯이 이 표에 생긴 이유는 하나다 —
+ * **수리 건 연결이 없는 줄**에는 그 값을 적을 자리가 달리 없다. 여기서 지키는
+ * 것은 셋이다.
+ *
+ *  1. 다섯 칸이 저장되고 그대로 다시 읽힌다(추가에서도, 수정에서도).
+ *  2. **수리 건 없이 그 다섯만으로 줄을 만들 수 있다** — 그러지 못하면 이
+ *     기능은 있으나 마나다.
+ *  3. 빈 값으로 되돌릴 수 있다. 비운다는 것은 "연결된 수리 건의 값을 따른다"는
+ *     뜻이라, 되돌릴 길이 없으면 한 번 적은 값에서 빠져나올 수 없다.
+ *
+ * 어느 쪽 값을 화면에 쓸지 고르는 일은 여기서 시험하지 않는다 — 순수 함수라
+ * domain/domestic-order-list.test.ts 가 본다.
+ */
+describe("직접 입력하는 다섯 칸 (고객사·형식·L/N·S/N·고장내역)", () => {
+  test("수리 건 연결 없이 다섯 칸만으로 줄을 만들 수 있다", async () => {
+    const created = await createOrder({
+      repairCaseId: null,
+      intakeNumberText: "D9601-없는건",
+      customerId,
+      modelNameText: "ARC-200",
+      lotNumberText: "LN-2096-01",
+      serialNumberText: "SN-000123",
+      faultDescriptionText: "전원 인가 시 보호 회로 동작",
+    });
+    if (!created.ok) return;
+
+    const row = await readOrder(created.id);
+    assert.equal(row.repairCaseId, null, "연결이 없어도 줄이 만들어져야 한다");
+    assert.equal(row.customerId, customerId);
+    assert.equal(row.modelNameText, "ARC-200");
+    assert.equal(row.lotNumberText, "LN-2096-01");
+    assert.equal(row.serialNumberText, "SN-000123");
+    assert.equal(row.faultDescriptionText, "전원 인가 시 보호 회로 동작");
+  });
+
+  test("수정으로도 다섯 칸이 들어간다 — 추가에서만 되는 칸이 없어야 한다", async () => {
+    const created = await createOrder({ repairCaseId: linkedRepairCaseId });
+    if (!created.ok) return;
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({
+        repairCaseId: linkedRepairCaseId,
+        customerId,
+        modelNameText: "발주서 형식",
+        lotNumberText: "발주서 L/N",
+        serialNumberText: "발주서 S/N",
+        faultDescriptionText: "발주서 고장내역",
+      }),
+      actorUserId,
+    });
+    assert.equal(result.ok, true, `수정 실패: ${JSON.stringify(result)}`);
+
+    const row = await readOrder(created.id);
+    // 수리 건이 연결돼 있어도 이 행에 적은 값은 그대로 남는다 — 연결이
+    // 이 칸들을 덮어쓰지 않는다.
+    assert.equal(row.repairCaseId, linkedRepairCaseId);
+    assert.equal(row.customerId, customerId);
+    assert.equal(row.modelNameText, "발주서 형식");
+    assert.equal(row.lotNumberText, "발주서 L/N");
+    assert.equal(row.serialNumberText, "발주서 S/N");
+    assert.equal(row.faultDescriptionText, "발주서 고장내역");
+  });
+
+  test("다섯 칸을 빈 값으로 되돌릴 수 있다 — 다시 수리 건을 따르게 하는 유일한 길이다", async () => {
+    const created = await createOrder({
+      customerId,
+      modelNameText: "잘못 적은 형식",
+      lotNumberText: "잘못 적은 L/N",
+      serialNumberText: "잘못 적은 S/N",
+      faultDescriptionText: "잘못 적은 고장내역",
+    });
+    if (!created.ok) return;
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields(),
+      actorUserId,
+    });
+    assert.equal(result.ok, true, `되돌리기 실패: ${JSON.stringify(result)}`);
+
+    const row = await readOrder(created.id);
+    assert.equal(row.customerId, null);
+    assert.equal(row.modelNameText, null);
+    assert.equal(row.lotNumberText, null);
+    assert.equal(row.serialNumberText, null);
+    assert.equal(row.faultDescriptionText, null);
+  });
+
+  test("없는 고객사로 고치려 하면 VALIDATION_ERROR이고 행은 그대로다", async () => {
+    const created = await createOrder({ customerId, modelNameText: "그대로 남아야 한다" });
+    if (!created.ok) return;
+
+    const result = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ customerId: randomUUID(), modelNameText: "적용되면 안 된다" }),
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "VALIDATION_ERROR");
+    assert.ok(result.fieldErrors?.customerId);
+
+    const row = await readOrder(created.id);
+    assert.equal(row.customerId, customerId);
+    assert.equal(row.modelNameText, "그대로 남아야 한다");
+    assert.equal(row.version, 1);
   });
 });
 

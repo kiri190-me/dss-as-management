@@ -5,20 +5,24 @@ import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
   filterDomesticOrdersByYear,
+  foldBlankToNull,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   orderIssuedYearOf,
+  resolveDomesticOrderValue,
   resolveInitialDomesticOrderYear,
   UNASSIGNED_CUSTOMER_LABEL,
 } from "./domestic-order-list";
 
 /**
- * 이 시험이 지키는 것 넷.
+ * 이 시험이 지키는 것 다섯.
  *  1. 년도 후보는 자료에 있는 해만이다.
  *  2. **발주일 없는 줄은 어느 년도에서도 살아남는다** — 이 파일이 존재하는
  *     가장 큰 이유다. 그 줄은 아직 발주가 나지 않았다는 뜻이라 잊히면 안 된다.
  *  3. 고객사 묶음의 순서는 원본 순서를 따르고, 미지정은 맨 뒤 하나다.
  *  4. 완료 판정은 completed_at 하나로만 한다.
+ *  5. **이 행에 적힌 값이 먼저이고, 공백만 적힌 값은 "없음"이다** — 이 규칙이
+ *     SQL 의 coalesce 안에 있었다면 시험할 자리가 없었다.
  */
 
 type Row = {
@@ -228,4 +232,65 @@ test("어느 줄도 잃어버리지 않는다", () => {
 test("완료 판정은 completed_at 하나로 한다", () => {
   assert.equal(isDomesticOrderCompleted(row({ completedAt: "2026-08-25T01:00:00.000Z" })), true);
   assert.equal(isDomesticOrderCompleted(row({ completedAt: null })), false);
+});
+
+// ── 값 고르기 (이 행의 값이 먼저) ──────────────────────────────────────
+
+test("빈 값은 한 가지 모양으로 접힌다 — null·undefined·빈 문자열·공백", () => {
+  assert.equal(foldBlankToNull(null), null);
+  assert.equal(foldBlankToNull(undefined), null);
+  assert.equal(foldBlankToNull(""), null);
+  assert.equal(foldBlankToNull("   "), null);
+  assert.equal(foldBlankToNull("\n\t "), null);
+});
+
+test("값이 있으면 앞뒤 공백을 떼고 돌려준다 — 화면과 묶기가 같은 글자를 본다", () => {
+  assert.equal(foldBlankToNull("  ARC-200  "), "ARC-200");
+  assert.equal(foldBlankToNull("ARC-200"), "ARC-200");
+});
+
+test("이 행에 적힌 값이 있으면 그것을 쓴다 — 수리 건 값이 있어도 가리지 않는다", () => {
+  // 발주서의 형식이 수리 건의 형식과 다를 수 있고, 그때 청구 근거는 발주서다.
+  assert.equal(resolveDomesticOrderValue("발주서 형식", "수리 건 형식"), "발주서 형식");
+});
+
+test("이 행이 비어 있으면 연결된 수리 건의 값을 쓴다", () => {
+  assert.equal(resolveDomesticOrderValue(null, "수리 건 형식"), "수리 건 형식");
+  assert.equal(resolveDomesticOrderValue(undefined, "수리 건 형식"), "수리 건 형식");
+});
+
+test("둘 다 없으면 없음이다 — 수리 건 연결이 없는 줄이 그렇다", () => {
+  assert.equal(resolveDomesticOrderValue(null, null), null);
+  assert.equal(resolveDomesticOrderValue(undefined, undefined), null);
+});
+
+test("빈 문자열·공백만 적힌 값은 '적힌 값'으로 치지 않는다", () => {
+  // 실수로 스페이스 한 칸이 들어간 줄이 수리 건의 값을 영영 가리면, 화면에는
+  // 빈칸으로 보이는데 원본에는 값이 있는 상태가 되고 이유를 알 길이 없다.
+  assert.equal(resolveDomesticOrderValue("", "수리 건 형식"), "수리 건 형식");
+  assert.equal(resolveDomesticOrderValue("   ", "수리 건 형식"), "수리 건 형식");
+  assert.equal(resolveDomesticOrderValue("\t\n", "수리 건 형식"), "수리 건 형식");
+});
+
+test("수리 건 쪽이 공백뿐이어도 없음으로 접힌다 — 공백이 값처럼 보이지 않는다", () => {
+  assert.equal(resolveDomesticOrderValue(null, "   "), null);
+  assert.equal(resolveDomesticOrderValue("   ", "   "), null);
+});
+
+test("이 행의 값이 우선이라는 규칙은 다섯 칸 모두에 같게 쓴다", () => {
+  // 고객사 · 형식 · L/N · S/N · 고장내역이 같은 함수를 부른다 — 칸마다 다른
+  // 규칙을 두면 "왜 형식만 수리 건을 따라가는가" 같은 질문이 생긴다.
+  const own = { customer: "한빛전자", model: "ARC-200", lot: null, serial: "  ", fault: null };
+  const fromCase = {
+    customer: "동해정밀",
+    model: "ARC-100",
+    lot: "LN-9",
+    serial: "SN-9",
+    fault: "전원 안 들어옴",
+  };
+  assert.equal(resolveDomesticOrderValue(own.customer, fromCase.customer), "한빛전자");
+  assert.equal(resolveDomesticOrderValue(own.model, fromCase.model), "ARC-200");
+  assert.equal(resolveDomesticOrderValue(own.lot, fromCase.lot), "LN-9");
+  assert.equal(resolveDomesticOrderValue(own.serial, fromCase.serial), "SN-9");
+  assert.equal(resolveDomesticOrderValue(own.fault, fromCase.fault), "전원 안 들어옴");
 });
