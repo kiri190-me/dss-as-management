@@ -23,6 +23,12 @@ type RepairCaseCardListProps = {
  * 유·무상은 표에서 독립 열이 되면서 여기에도 들어왔다(2026-08-19). 표가 안
  * 들어가는 폭에서는 이쪽이 기본 화면이라, 표에만 넣으면 창 크기에 따라 보이는
  * 사람과 안 보이는 사람이 갈린다.
+ *
+ * 날짜도 같은 이유로 표에 맞췄다(2026-08-25). 표는 이미 실제 출하일
+ * (effectiveActualShipmentDate)과 고객 요청 납기일을 보여 주는데 카드만 사내
+ * 목표 출하일이라, 같은 접수 건이 창 크기에 따라 다른 날짜를 보여 주고 있었다.
+ * 표와 똑같이 실제 출하일이 비어 있어도 사내 목표 출하일로 대신 채우지 않는다
+ * — 아직 출하되지 않은 건이 출하된 것처럼 보이면 안 된다.
  */
 export default function RepairCaseCardList({
   rows,
@@ -91,8 +97,12 @@ export default function RepairCaseCardList({
               <dd>{row.paidOrWarranty}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500 dark:text-zinc-500">사내 목표 출하일</dt>
-              <dd>{row.internalTargetShipmentDate ?? "-"}</dd>
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객 요청 납기일</dt>
+              <dd>{row.customerRequestedDueDate ?? "-"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">실제 출하일</dt>
+              <dd>{row.effectiveActualShipmentDate ?? "-"}</dd>
             </div>
           </dl>
         </Link>
