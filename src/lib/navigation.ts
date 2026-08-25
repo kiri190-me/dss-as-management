@@ -4,6 +4,7 @@ import { canViewInventory } from "@/lib/auth/inventory-authorization";
 import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
 import { canViewRepairCaseFlowcharts } from "@/lib/auth/repair-case-flowchart-authorization";
 import { canViewCustomers } from "@/lib/auth/customer-authorization";
+import { canViewDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { canViewProductModels } from "@/lib/auth/product-model-authorization";
 import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 
@@ -38,6 +39,7 @@ export const navItems: NavItem[] = [
   { key: "productModels", href: "/product-models", label: "제품 모델 관리", isVisibleForRole: canViewProductModels },
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차", isVisibleForRole: canViewPublishedTechnicalTemplates },
   { key: "inventory", href: "/inventory", label: "재고 관리", isVisibleForRole: canViewInventory },
+  { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리", isVisibleForRole: canViewDomesticOrders },
   { key: "settings", href: "/settings", label: "시스템 설정" },
 ];
 
@@ -86,5 +88,10 @@ export type NavGroup = {
 export const navGroups: NavGroup[] = [
   { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
   { key: "techResources", label: "기술 / 자원", itemKeys: ["technicalProcedures", "inventory"] },
+  // 수주·정산 쪽 화면들이 모이는 자리. 지금은 '내자 정리' 하나뿐이지만 A/S
+  // 업무 그룹에 얹지 않았다 — 그 그룹은 장비가 들어와서 나가기까지의 흐름이고,
+  // 이쪽은 발주에서 입금까지의 흐름이라 같이 놓으면 두 흐름이 한 목록에서
+  // 섞여 읽힌다.
+  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders"] },
   { key: "admin", label: "관리", itemKeys: ["users", "customers", "productModels", "settings"] },
 ];

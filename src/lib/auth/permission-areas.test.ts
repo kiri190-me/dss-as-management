@@ -14,6 +14,7 @@ import { navItems } from "@/lib/navigation";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 import { canViewCustomers, canEditCustomers } from "./customer-authorization";
+import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-authorization";
 import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
@@ -91,6 +92,7 @@ test("지금 볼 수 있는 화면은 상한이 최소 읽기다", () => {
     if (canViewProductModels(role)) assertCeilingAllows("productModels", role, "READ", "제품 모델 보기");
     if (canViewMyActiveWork(role)) assertCeilingAllows("myActiveWork", role, "READ", "내 담당 제품 보기");
     if (canViewWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "READ", "워크플로 보기");
+    if (canViewDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "READ", "내자 정리 보기");
   }
 });
 
@@ -99,8 +101,15 @@ test("지금 고칠 수 있는 것은 상한이 최소 쓰기다", () => {
     if (canEditCustomers(role)) assertCeilingAllows("customers", role, "WRITE", "고객사 수정");
     if (canEditProductModels(role)) assertCeilingAllows("productModels", role, "WRITE", "제품 모델 수정");
     if (canCreateOrEditPart(role)) assertCeilingAllows("inventory", role, "WRITE", "부품 등록/수정");
+    // 2단계에서 행 추가·수정이 생겼다. 상한이 읽기에 머물면 그 순간
+    // "화면에서는 저장되는데 설정으로는 줄 수 없는 권한"이 된다.
+    if (canEditDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "WRITE", "내자 정리 추가/수정");
   }
 });
+
+// 내자 정리는 아래 '되돌리기 어려운 조작' 테스트에 일부러 없다 — 삭제·휴지통은
+// 아직 만들지 않았고, 그러므로 관리 수준으로 열려야 할 조작이 하나도 없다.
+// 삭제를 붙이는 단계에서 그때 생기는 함수로 여기 줄이 늘어난다.
 
 test("지금 되돌리기 어려운 조작을 할 수 있으면 상한이 관리다", () => {
   for (const role of ROLE_CODES) {
@@ -117,6 +126,11 @@ test("지금 못 보는 화면은 상한이 접근 불가다", () => {
     }
     if (!canViewMyActiveWork(role)) {
       assert.equal(baselinePermissionLevel("myActiveWork", role), "NONE", `${role} 내 담당 제품`);
+    }
+    // 금액·입금 정보가 있는 화면이라 엔지니어·재고 담당자에게 닫혀 있다.
+    // 상한이 열려 있으면 설정으로 그 둘에게 금액을 열어 줄 수 있게 된다.
+    if (!canViewDomesticOrders(role)) {
+      assert.equal(baselinePermissionLevel("domesticOrders", role), "NONE", `${role} 내자 정리`);
     }
   }
 });

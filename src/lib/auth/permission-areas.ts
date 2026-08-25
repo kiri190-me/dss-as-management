@@ -162,6 +162,16 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "MANAGE",
   },
   {
+    key: "domesticOrders",
+    label: "내자 정리",
+    // 2단계에서 행 추가·수정이 생겨 상한을 쓰기까지 올렸다(1단계 주석이 예고한
+    // 그 시점이다). 관리는 아직 올리지 않는다 — 삭제·휴지통이 없는데 '관리'를
+    // 내밀면 고른 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지
+    // 않는다. 삭제를 붙이는 다음 단계에서 함께 올린다.
+    description: "국내 수주 진행 상황표(발주·견적·납품·입금). 금액과 입금 정보가 있습니다",
+    maxMeaningfulLevel: "WRITE",
+  },
+  {
     key: "settings",
     label: "시스템 설정",
     description: "시스템 전반 설정",

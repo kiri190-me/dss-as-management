@@ -28,6 +28,7 @@ import {
   canViewPartRequests,
   canCreatePartRequest,
 } from "./inventory-authorization";
+import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import {
   canViewProductModels,
@@ -192,6 +193,15 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
         write: canCreateOrEditPart(role),
         read: canViewInventory(role),
       });
+
+    case "domesticOrders":
+      // 2단계에서 행 추가·수정이 생겼다 — 서버 액션(actions/domestic-orders.ts)이
+      // 실제로 저장하므로 다른 영역들처럼 사다리로 접는다. 관리는 없다:
+      // 삭제·휴지통은 아직 만들지 않았고, 없는 조작을 상한에 올려 두면 고른
+      // 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지 않는다.
+      // 여기서도 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서**
+      // 구한다(이 파일 맨 위 주석).
+      return ladder({ write: canEditDomesticOrders(role), read: canViewDomesticOrders(role) });
 
     case "settings":
       // 아직 안내 문구만 있는 화면이다.

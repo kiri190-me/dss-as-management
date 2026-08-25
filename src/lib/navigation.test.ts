@@ -39,13 +39,18 @@ import { navItems, navGroups, filterNavItemsForRole } from "./navigation";
  * Product Model Management phase 1 adds "productModels" — its predicate
  * (canViewProductModels) is the exact same SUPER_ADMIN/ADMIN/AS_ENGINEER/
  * SALES shape as canViewCustomers (see product-model-authorization.ts).
+ *
+ * 내자 정리 1단계는 "domesticOrders"를 더한다 — 그 술어
+ * (canViewDomesticOrders)는 SUPER_ADMIN/ADMIN/SALES 로, 이 목록에서 처음
+ * 나오는 모양이다. 금액과 입금 정보가 있는 화면이라 고객사·제품 모델과 달리
+ * AS_ENGINEER 까지 빠진다(domestic-order-authorization.ts).
  */
 
 test("navigation: the approved feature entries are the only role-gated items", () => {
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["customers", "diagnosisFlowcharts", "inventory", "myActiveWork", "productModels", "technicalProcedures", "workflows"]
+    ["customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "technicalProcedures", "workflows"]
   );
 });
 
@@ -117,6 +122,17 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER / SALES see the p
   assert.equal(filterNavItemsForRole(navItems, "INVENTORY_MANAGER").some((i) => i.key === "productModels"), false);
 });
 
+test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / SALES see the domesticOrders entry; AS_ENGINEER / INVENTORY_MANAGER do not", () => {
+  // 금액(VAT별도)과 입금완료 여부가 있는 화면이다 — 고객사·제품 모델과 달리
+  // 엔지니어까지 빠지는 유일한 항목이라 여기서 못 박아 둔다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "SALES"] as const) {
+    assert.ok(filterNavItemsForRole(navItems, role).some((i) => i.key === "domesticOrders"), `expected domesticOrders visible for ${role}`);
+  }
+  for (const role of ["AS_ENGINEER", "INVENTORY_MANAGER"] as const) {
+    assert.equal(filterNavItemsForRole(navItems, role).some((i) => i.key === "domesticOrders"), false, `expected domesticOrders hidden for ${role}`);
+  }
+});
+
 /**
  * Checkpoint 2A — navGroups is a pure presentation grouping over navItems
  * (Sidebar's collapsible sections). "dashboard" is deliberately excluded
@@ -140,10 +156,12 @@ test("navGroups: every itemKey references a real navItems key", () => {
   }
 });
 
-test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / 관리 structure", () => {
+test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자 / 관리 structure", () => {
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
   assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
+  // 내자 정리 1단계 — 수주·정산 흐름은 A/S 업무 그룹과 섞지 않는다(navigation.ts 주석).
+  assert.deepEqual(byKey.get("poDomestic")?.itemKeys, ["domesticOrders"]);
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["users", "customers", "productModels", "settings"]);
 });
 
@@ -151,10 +169,11 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
   const hiddenCountByRole: Record<string, number> = {
     SUPER_ADMIN: 1, // myActiveWork
     ADMIN: 1, // myActiveWork
-    // Excel 이관 메뉴가 사라지면서 역할별로 감춰지는 항목이 하나씩 줄었다.
-    AS_ENGINEER: 0,
+    // Excel 이관 메뉴가 사라지면서 역할별로 감춰지는 항목이 하나씩 줄었고,
+    // 내자 정리가 생기면서 엔지니어에게 감춰지는 항목이 처음으로 하나 생겼다.
+    AS_ENGINEER: 1, // domesticOrders
     SALES: 3, // myActiveWork + technicalProcedures + workflows
-    INVENTORY_MANAGER: 5, // myActiveWork + technicalProcedures + customers + productModels + workflows
+    INVENTORY_MANAGER: 6, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);
