@@ -337,6 +337,13 @@
       "when": 1787560709761,
       "tag": "0047_chemical_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787622761762,
+      "tag": "0048_lying_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

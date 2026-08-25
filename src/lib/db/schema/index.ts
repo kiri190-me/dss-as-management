@@ -31,3 +31,4 @@ export * from "./repair-case-flowchart-edit-history";
 export * from "./audit-logs";
 export * from "./role-permissions";
 export * from "./attachments";
+export * from "./domestic-orders";
