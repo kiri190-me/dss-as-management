@@ -1,3 +1,6 @@
+import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
+import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
+import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
 import { customerRowColorClass } from "@/lib/domain/customer-row-color";
 import {
   WEEKLY_REPORT_PO_ISSUED_LABEL,
@@ -21,7 +24,10 @@ import {
  * ============================================================================
  * 주간보고 — 손으로 만들던 엑셀 현황판을 그대로 옮긴 화면
  * ============================================================================
- * **조회 전용이다.** 입력칸도, 저장·삭제 버튼도 없다.
+ * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황에는 입력칸도, 저장·삭제
+ * 버튼도 없다. 누를 것이 있는 자리는 맨 위 `금주 목표` 상자 하나뿐이고, 그것은
+ * 통째로 WeeklyReportGoalsPanel(클라이언트 컴포넌트)에 들어 있다 — 이 파일은
+ * 그 상자를 **놓을 자리만** 준다.
  *
  * ── 무엇을 어느 칸에 넣을지는 여기서 정하지 않는다 ──────────────────────
  * 6칸으로 가르고, PO 발행 완료를 겹쳐 세고, RFG/MB 로 접고, 고객사별로 묶어
@@ -31,8 +37,13 @@ import {
  * 같은 규칙).
  *
  * ── 서버 컴포넌트다 ────────────────────────────────────────────────────
- * 누를 것이 하나도 없는 화면이라 클라이언트로 내려보낼 상태가 없다. 250줄이
- * 넘는 자료를 브라우저까지 실어 나를 이유도 없다.
+ * 집계 쪽에는 클라이언트로 내려보낼 상태가 없다. 250줄이 넘는 자료를 브라우저까지
+ * 실어 나를 이유도 없다.
+ *
+ * 금주 목표 상자가 생겼다고 이 파일이 클라이언트가 되지는 **않는다** — 그 상자만
+ * "use client" 이고, 여기서는 그것을 한 자리에 놓을 뿐이다. 이 파일에
+ * "use client" 를 붙이면 고객사 블록 58개와 상세표 250여 줄이 통째로 브라우저로
+ * 실려 간다.
  *
  * ── 갱신 일은 서버가 정한다 ────────────────────────────────────────────
  * 머리말의 날짜를 클라이언트에서 new Date() 로 만들면 서버가 그린 것과 달라져
@@ -457,13 +468,32 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
   );
 }
 
+/**
+ * 금주 목표 상자에 그대로 넘어가는 값 묶음. 이 파일은 이 값들을 하나도 읽지
+ * 않는다 — 상자를 놓을 자리만 주고, 무엇을 그릴지는 WeeklyReportGoalsPanel 이
+ * 정한다(그 파일 헤더).
+ */
+export type WeeklyReportGoalsPanelData = {
+  /** 지금 보고 있는 주의 월요일 — page.tsx 가 `?week=` 을 접어 정한 값. */
+  weekStart: string;
+  /** 서버가 한국 표준시로 정한 이번 주 월요일. 클라이언트에서 만들지 않는다. */
+  currentWeekStart: string;
+  rows: WeeklyReportGoalRow[];
+  /** 적을 수 있는가. 화면을 그리기 위한 값일 뿐 관문이 아니다(page.tsx 주석). */
+  canEdit: boolean;
+  /** '줄 추가'의 수리 건 고르개 목록. 못 고치는 사람에게는 빈 배열이다. */
+  repairCaseOptions: RepairCaseLinkOption[];
+};
+
 export default function WeeklyReportScreen({
   report,
   asOfDate,
+  goals,
 }: {
   report: WeeklyReport;
   /** 서버가 한국 표준시로 정한 "오늘". 클라이언트에서 만들지 않는다(파일 헤더). */
   asOfDate: string;
+  goals: WeeklyReportGoalsPanelData;
 }) {
   // 짝짓기도, PO 발행 현황도 도메인이 한다 — 여기서는 그 결과를 좌우로 놓을 뿐이다.
   const customerRows = pairWeeklyReportBlocksByCustomer(report.blocks);
@@ -483,6 +513,23 @@ export default function WeeklyReportScreen({
           총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행 일시가 있으면 세어집니다.
         </p>
       </section>
+
+      {/* 금주 목표 — 원본 엑셀에서도 집계 위에 있던 상자다. 매주 사람이 손으로
+          적던 계획이라 "무엇을 하려 했는가"가 먼저 오고, 그 아래에 "지금 어디까지
+          왔는가"(고객사 블록)가 온다.
+
+          좌우 배치는 이 화면의 다른 줄과 **같은 상수**를 쓴다 — 같은 폭에서 같이
+          갈리지 않으면 목표 상자만 위아래로 쌓인 채 아래 블록은 좌우로 남는다
+          (SIDE_BY_SIDE_GRID 주석). 값을 상자 쪽에 따로 적지 않고 넘기는 것이
+          그래서다. */}
+      <WeeklyReportGoalsPanel
+        weekStart={goals.weekStart}
+        currentWeekStart={goals.currentWeekStart}
+        goals={goals.rows}
+        canEdit={goals.canEdit}
+        repairCaseOptions={goals.repairCaseOptions}
+        gridClass={SIDE_BY_SIDE_GRID}
+      />
 
       {report.total.unclassified > 0 && (
         <p
