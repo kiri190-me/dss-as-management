@@ -189,6 +189,56 @@ if ($running -ne $Container) {
     }
 }
 
+# ── 2.1 사진 백업 ─────────────────────────────────────────────────────────
+# 사진은 DB와 **한 쌍이라야** 쓸모가 있다. 디스크에 놓인 파일 이름은 첨부
+# ID(UUID)라 그 자체로는 어느 건의 무슨 사진인지 말해 주지 않는다 — 원본
+# 파일명·분류·설명·올린 사람은 전부 attachments 표에만 있다. 그래서 DB를 뜬
+# 날에만 사진을 뜬다. 한쪽만 있는 백업은 되살릴 때 쓸 수가 없다.
+#
+# 순서가 DB 먼저인 것도 같은 이유다. 업로드는 파일을 **먼저** 최종 자리에
+# 놓고 DB 기록을 나중에 남긴다. 그래서 먼저 뜬 덤프에 적힌 사진은 이미
+# 디스크에 있어 반드시 복사된다. 반대로 하면 "목록에는 있는데 파일이 없는"
+# 사진이 생긴다.
+#
+# 실제 일은 scripts/backup-attachments.ts가 한다 — run-nightly-purge.ps1과
+# 같은 구조다. 이 시스템은 사내 NAS(컨테이너 안은 Linux)로 옮기는 것을 전제로
+# 설계돼 있어서, 옮긴 뒤에도 그대로 도는 쪽에 판단을 둔다.
+Write-Step "사진 백업"
+Write-Warn2 "같은 디스크(C:)에 둡니다 — 실수로 지운 것은 되살리지만, 디스크가 고장 나면 사진도 함께 잃습니다."
+
+# 연습 모드에서는 위에서 덤프를 실제로 뜨지 않으므로 $backupMade가 늘 거짓이다.
+# 그것을 "DB 백업 실패"로 읽으면 연습 모드에서는 이 단계가 영영 화면에 나타나지
+# 않아 무엇이 도는지 확인할 수가 없다 — DB가 켜져 있었는지로 대신 가른다.
+$photosPaired = $backupMade -or ($DryRun -and $running -eq $Container)
+
+if (-not $photosPaired) {
+    Write-Warn2 "DB 백업을 건너뛰어 사진도 건너뜁니다 — DB 없이 뜬 사진은 되살릴 수 없습니다."
+} else {
+    $photoCmd = 'npm run backup:attachments'
+    if ($DryRun) { $photoCmd = 'npm run backup:attachments -- --dry-run' }
+
+    $photo = Invoke-Native $photoCmd
+    if ($photo.Output) {
+        # npm과 dotenv가 앞에 붙이는 머리말은 걷어 낸다. 걷어 내는 것은 그 두
+        # 줄뿐이라, 실패했을 때의 어긋난 목록은 그대로 흘러나온다.
+        $photo.Output -split "`n" |
+            Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*>' -and $_ -notmatch 'injected env' } |
+            ForEach-Object { Write-Info $_.TrimEnd() }
+    }
+
+    if ($photo.ExitCode -eq 0) {
+        if ($DryRun) {
+            Write-Ok "연습 모드 — 복사 계획만 확인했고 아무것도 쓰지 않았습니다"
+        } else {
+            Write-Ok "사진 백업 완료 — DB에 적힌 첨부가 전부 있고 지문도 맞습니다"
+        }
+    } else {
+        # DB 백업 실패와 똑같이 다룬다: 알리고, 아무것도 끄지 않고, 멈춘다.
+        Write-Warn2 "사진 백업에 실패했습니다 — 컨테이너를 끄지 않고 멈춥니다."
+        exit 1
+    }
+}
+
 if ($BackupOnly) {
     Write-Host ""
     Write-Host "백업만 했습니다 — 서버와 DB는 켜져 있습니다." -ForegroundColor White
