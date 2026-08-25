@@ -1,17 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
+import { useRouter } from "next/navigation";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import type { DomesticOrderListItem, RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
+import {
+  collectDomesticOrderYears,
+  countDomesticOrdersWithoutOrderYear,
+  filterDomesticOrdersByYear,
+  groupDomesticOrdersByCustomer,
+  isDomesticOrderCompleted,
+  resolveInitialDomesticOrderYear,
+} from "@/lib/domain/domestic-order-list";
+import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
 import DomesticOrderEditForm from "./DomesticOrderEditForm";
 
 /**
  * ============================================================================
- * 내자 정리 — 목록과 한 줄 편집 (2단계)
+ * 내자 정리 — 목록과 한 줄 편집 (2단계) + 년도 · 완료 · 고객사 묶기 (3단계)
  * ============================================================================
  * 손으로 관리하던 `내자 시트`를 그대로 옮겨 놓은 화면이다. 표의 22칼럼·머리말·
- * 합계는 1단계 그대로이고, 그 위에 **행 추가**와 **줄 수정**만 얹었다.
- * 삭제·휴지통은 아직 없다(다음 단계).
+ * 합계는 1단계 그대로이고, 그 위에 **행 추가**와 **줄 수정**(2단계),
+ * **발주 년도 고르기 · 완료 처리 · 고객사 묶기**(3단계)를 얹었다.
+ * 삭제·휴지통은 아직 없다.
+ *
+ * ── 무엇을 보여 줄지 정하는 규칙은 여기 없다 ────────────────────────────
+ * 년도 후보를 뽑고, 년도로 거르고, 고객사로 묶고, 완료인지 판정하는 일은
+ * domain/domestic-order-list.ts 가 한다. 이 파일은 그 결과를 그릴 뿐이다 —
+ * 규칙을 화면 안에 두면 "발주일 없는 줄이 왜 안 사라지는가" 같은 것을 시험할
+ * 방법이 브라우저를 띄우는 것밖에 없어진다.
+ *
+ * ── 발주일 없는 줄은 어느 년도에서도 함께 보인다 ────────────────────────
+ * 그 줄은 아직 발주가 나지 않았다는 뜻이라 가장 챙겨야 하는 줄이다. 년도로
+ * 감추면 어느 해를 골라도 나오지 않아 잊힌다. 그래서 년도 칸 옆에 몇 건인지
+ * 적고, 그 줄의 **발주발행일 칸에 `발주일 미정`을 띄운다** — "-"로만 두면
+ * 왜 2026년을 골랐는데 이 줄이 함께 있는지 알 길이 없다.
+ *
+ * ── 완료는 감추는 것이 아니라 회색으로 두는 것이다 ──────────────────────
+ * 완료된 줄도 자리를 지킨다. 아래로 내리거나 접지 않는다 — 이 표에는 사람이
+ * 매긴 순번이 있어서, 순서를 흔들면 순번 칸과 눈에 보이는 차례가 어긋난다.
+ * 회색이지만 글자는 흐리게 하지 않고 여전히 눌러서 고칠 수 있다. 회색이
+ * "못 누른다"로 읽히면 완료된 줄의 입금 사실을 나중에 적을 수 없게 된다.
  *
  * ── 고칠 수 없는 사람에게는 1단계와 똑같이 보인다 ───────────────────────
  * canEdit 이 거짓이면 추가 버튼도, 누를 수 있는 줄도 없다. 그것은 편의일 뿐
@@ -43,6 +72,15 @@ import DomesticOrderEditForm from "./DomesticOrderEditForm";
  * 읽는 값이다.
  * ============================================================================
  */
+
+/**
+ * 발주일이 아직 없는 줄의 발주발행일 칸에 적는 말. "-"(그냥 빈 값)와 구분한다 —
+ * 이 줄이 년도와 상관없이 늘 보이는 이유가 바로 이 칸이기 때문이다.
+ */
+const NO_ORDER_DATE_LABEL = "발주일 미정";
+
+/** 표의 칼럼 수. 고객사 소제목 줄이 표 전체 폭을 덮는 데 쓴다. */
+const TABLE_COLUMN_COUNT = 22;
 
 /** 빈 값의 표시. 이 화면의 모든 칸이 같은 글자를 쓴다. */
 function dash(value: string | number | null | undefined): string {
@@ -159,7 +197,12 @@ const CARD_FIELD_GROUPS: { label: string; fields: { label: string; of: (row: Dom
     fields: [
       { label: "발주서번호", of: (row) => dash(row.purchaseOrderNumber) },
       { label: "PJT", of: (row) => dash(row.projectName) },
-      { label: "발주발행일", of: (row) => dash(row.orderIssuedDate) },
+      // 표와 같은 말을 쓴다 — 카드로 보고 있어도 이 줄이 왜 늘 보이는지 알 수
+      // 있어야 한다.
+      {
+        label: "발주발행일",
+        of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
+      },
       { label: "납기요청일", of: (row) => dash(row.requestedDueDate) },
     ],
   },
@@ -201,6 +244,74 @@ const CARD_FIELD_GROUPS: { label: string; fields: { label: string; of: (row: Dom
 ];
 
 /**
+ * 완료된 줄에 붙는 표. 회색 배경만으로는 "왜 회색인지"를 말하지 못한다 —
+ * 색을 구분하기 어려운 사람에게는 이 글자가 유일한 단서다.
+ */
+function CompletedBadge() {
+  return (
+    <span className="rounded bg-zinc-700 px-1.5 py-0.5 text-[11px] leading-none font-medium text-white dark:bg-zinc-300 dark:text-zinc-900">
+      완료
+    </span>
+  );
+}
+
+/**
+ * 완료 처리 · 완료 해제 버튼. 고칠 수 있는 사람에게만 그려지지만, 그것은
+ * 편의일 뿐 경계가 아니다 — 서버 액션이 매번 다시 검사한다.
+ *
+ * 줄 전체가 '수정 폼 열기' 버튼이라 여기서 stopPropagation 을 한다. 하지
+ * 않으면 완료를 누르는 순간 폼이 함께 열려, 방금 바뀐 값이 아니라 낡은 값을
+ * 담은 폼이 뜬다.
+ *
+ * 실패는 조용히 넘기지 않고 부르는 쪽에 올린다. 특히 CONFLICT 는 그 사이 남이
+ * 이 줄을 고쳤다는 뜻이라, 아무 일도 없었던 것처럼 두면 사람은 완료가 된 줄
+ * 안다.
+ */
+function CompletionToggle({
+  row,
+  onError,
+}: {
+  row: DomesticOrderListItem;
+  onError: (message: string | null) => void;
+}) {
+  const router = useRouter();
+  const [isPending, setIsPending] = useState(false);
+  const completed = isDomesticOrderCompleted(row);
+
+  async function toggle(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (isPending) return;
+    setIsPending(true);
+    onError(null);
+    try {
+      const result = await setDomesticOrderCompletionAction({
+        id: row.id,
+        expectedVersion: row.version,
+        completed: !completed,
+      });
+      if (!result.ok) {
+        onError(result.message);
+        return;
+      }
+      router.refresh();
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={isPending}
+      className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
+    >
+      {completed ? "완료 해제" : "완료 처리"}
+    </button>
+  );
+}
+
+/**
  * 지금 무엇을 편집하고 있는가. null 이면 편집 중이 아니고, "new" 는 행 추가,
  * 그 밖의 값은 그 id 의 줄을 고치는 중이다.
  *
@@ -212,19 +323,49 @@ type EditTarget = { kind: "new" } | { kind: "row"; id: string } | null;
 export default function DomesticOrderListScreen({
   rows,
   asOfDate,
+  currentYear,
   canEdit,
   repairCaseOptions,
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
   asOfDate: string;
+  /**
+   * 서버가 한국 표준시로 정한 "올해"("YYYY"). 발주 년도 칸의 기본값이다 —
+   * 클라이언트에서 정하면 서버가 그린 것과 달라진다(page.tsx 주석).
+   */
+  currentYear: string;
   /** 행을 추가·수정할 수 있는가. 거짓이면 1단계와 똑같이 보인다. */
   canEdit: boolean;
   /** 수정 폼의 '수리 건 연결' 목록. 고칠 수 없는 역할에게는 빈 배열이다. */
   repairCaseOptions: RepairCaseLinkOption[];
 }) {
-  const { total, skipped } = sumAmounts(rows);
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
+  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+
+  const years = useMemo(() => collectDomesticOrderYears(rows), [rows]);
+  /**
+   * 아직 고른 적이 없으면(selectedYear === null) 올해가 기본값이고, 골라 둔
+   * 해가 목록에서 사라졌으면(그 해의 마지막 줄에서 발주일을 지운 경우) 다시
+   * 기본값으로 내려온다. effect 로 되돌리지 않고 매번 계산하는 이유는, 그 사이
+   * 한 프레임 동안 없는 해가 골라진 화면이 스쳐 지나가지 않게 하기 위해서다.
+   */
+  const activeYear =
+    selectedYear !== null && years.includes(selectedYear)
+      ? selectedYear
+      : resolveInitialDomesticOrderYear(years, currentYear);
+
+  const visibleRows = useMemo(
+    () => filterDomesticOrdersByYear(rows, activeYear),
+    [rows, activeYear]
+  );
+  const groups = useMemo(() => groupDomesticOrdersByCustomer(visibleRows), [visibleRows]);
+  const alwaysVisibleCount = useMemo(() => countDomesticOrdersWithoutOrderYear(rows), [rows]);
+
+  // 합계는 1단계와 같은 함수다. 다만 **지금 보이는 줄**을 더한다 — 화면에 없는
+  // 해의 금액이 합계에 섞이면, 표를 세로로 훑어 더한 값과 맞지 않는다.
+  const { total, skipped } = sumAmounts(visibleRows);
 
   const editingRow =
     editTarget?.kind === "row" ? (rows.find((row) => row.id === editTarget.id) ?? null) : null;
@@ -252,10 +393,55 @@ export default function DomesticOrderListScreen({
         />
       )}
 
+      {years.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <label
+            className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            htmlFor="domestic-order-year"
+          >
+            발주 년도
+          </label>
+          <select
+            id="domestic-order-year"
+            value={activeYear ?? ""}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          >
+            {/* 자료에 있는 해만 낸다 — 없는 해를 고르면 빈 표가 나오고, 그것이
+                자료가 없다는 뜻인지 해가 없다는 뜻인지 구분되지 않는다. */}
+            {years.map((year) => (
+              <option key={year} value={year}>
+                {year}년
+              </option>
+            ))}
+          </select>
+          {alwaysVisibleCount > 0 && (
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              {NO_ORDER_DATE_LABEL} {alwaysVisibleCount}건은 어느 년도를 골라도 함께 보입니다.
+            </p>
+          )}
+        </div>
+      )}
+
+      {completionError && (
+        <p
+          role="status"
+          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+        >
+          {completionError}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
           <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
-            전체 {rows.length}건
+            {activeYear !== null && `${activeYear}년 `}
+            {visibleRows.length}건
+            {visibleRows.length !== rows.length && (
+              <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-500">
+                (전체 {rows.length}건)
+              </span>
+            )}
           </p>
           {canEdit && !isFormOpen && (
             <button
@@ -285,7 +471,9 @@ export default function DomesticOrderListScreen({
       ) : (
         <ResponsiveList
           listId="domestic-orders"
-          measureKey={[rows.length]}
+          // 년도를 바꾸면 줄 수가, 완료 버튼이 붙고 떨어지면 순번 칸의 폭이
+          // 달라진다 — 표가 지금 폭에 들어가는지 다시 재야 하는 조건들이다.
+          measureKey={[visibleRows.length, groups.length, canEdit]}
           table={
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -314,108 +502,187 @@ export default function DomesticOrderListScreen({
                   <th className="px-3 py-2">기타</th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    // 줄 아무 데나 눌러도 열린다. 다만 이것만으로는 키보드로
-                    // 닿을 수 없으므로, 인수번호 칸에 진짜 <button>을 둔다
-                    // (아래) — 칼럼을 하나 더 만들지 않고 22칼럼을 지키면서
-                    // 포커스 가능한 조작을 주는 방법이다.
-                    onClick={canEdit ? () => openRow(row.id) : undefined}
-                    className={`border-b border-zinc-100 whitespace-nowrap last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60 ${
-                      canEdit ? "cursor-pointer" : ""
-                    }`}
-                  >
-                    <td className="px-3 py-2 tabular-nums">{dash(row.displayOrder)}</td>
-                    <td className="px-3 py-2">{dash(row.customerName)}</td>
-                    <td className="px-3 py-2">{dash(row.purchaseOrderNumber)}</td>
-                    <td className="px-3 py-2">{dash(row.projectName)}</td>
-                    <td className="px-3 py-2 tabular-nums">{dash(row.orderIssuedDate)}</td>
-                    <td className="px-3 py-2 tabular-nums">{dash(row.requestedDueDate)}</td>
-                    {/* 연결이 없는 줄은 시트에 적혀 있던 글자를 그대로 보여 준다
-                        (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
-                        단서가 화면에서 사라진다. */}
-                    <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-50">
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          onClick={() => openRow(row.id)}
-                          className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-                        >
-                          {dash(row.displayIntakeNumber)}
-                          <span className="sr-only"> 줄 수정</span>
-                        </button>
-                      ) : (
-                        dash(row.displayIntakeNumber)
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{dash(row.modelName)}</td>
-                    <td className="px-3 py-2">{dash(row.lotNumber)}</td>
-                    <td className="px-3 py-2">{dash(row.serialNumber)}</td>
-                    <td className="px-3 py-2">{dash(row.reportedSymptom)}</td>
-                    <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
-                    <td className="px-3 py-2">{dash(row.quoteNumber)}</td>
-                    <td className="px-3 py-2">{dash(row.progressNote)}</td>
-                    <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
-                    <td className="px-3 py-2">{dash(row.deliveredBy)}</td>
-                    <td className="px-3 py-2 tabular-nums">{dash(row.taxInvoiceDate)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {formatAmount(row.amountExcludingVat)}
-                    </td>
-                    <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
-                    <td className="px-3 py-2">{dash(row.japanRemittanceNote)}</td>
-                    <td className="px-3 py-2">{dash(row.historyNote)}</td>
-                    <td className="px-3 py-2">{dash(row.etcNote)}</td>
+              {/* 고객사마다 <tbody> 를 하나씩 둔다. 한 표 안에 tbody 가 여럿인
+                  것은 표준 그대로이고, 소제목 줄이 그 묶음에 속한다는 사실이
+                  구조로 드러난다. */}
+              {groups.map((group) => (
+                <tbody key={group.customerName ?? "__unassigned__"}>
+                  <tr className="border-y border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/60">
+                    <th
+                      colSpan={TABLE_COLUMN_COUNT}
+                      // 이 머리글은 뒤따르는 줄 묶음 전체에 걸린다 — colgroup 이
+                      // 아니라 rowgroup 이다. 화면 낭독기가 각 줄을 읽을 때
+                      // 어느 고객사의 줄인지 함께 말해 준다.
+                      scope="rowgroup"
+                      className="px-3 py-1.5 text-left text-xs font-semibold whitespace-nowrap text-zinc-700 dark:text-zinc-200"
+                    >
+                      {/* 22칼럼짜리 표라 옆으로 밀어 보는 일이 많다. 소제목만
+                          왼쪽에 붙여 두면 어느 고객사의 줄을 보고 있는지
+                          스크롤 중에도 놓치지 않는다. */}
+                      <span className="sticky left-0 inline-flex items-baseline gap-2">
+                        {group.label}
+                        <span className="font-normal text-zinc-500 dark:text-zinc-400">
+                          {group.rows.length}건
+                        </span>
+                      </span>
+                    </th>
                   </tr>
-                ))}
-              </tbody>
+                  {group.rows.map((row) => {
+                    const completed = isDomesticOrderCompleted(row);
+                    return (
+                      <tr
+                        key={row.id}
+                        // 줄 아무 데나 눌러도 열린다. 다만 이것만으로는 키보드로
+                        // 닿을 수 없으므로, 인수번호 칸에 진짜 <button>을 둔다
+                        // (아래) — 칼럼을 하나 더 만들지 않고 22칼럼을 지키면서
+                        // 포커스 가능한 조작을 주는 방법이다. 완료 버튼도 같은
+                        // 이유로 순번 칸 안에 있다.
+                        onClick={canEdit ? () => openRow(row.id) : undefined}
+                        className={`border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800 ${
+                          // 완료된 줄은 회색이지만 **글자를 흐리게 하지 않는다** —
+                          // 흐리게 하면 못 누르는 줄로 읽힌다. hover 도 그대로
+                          // 살아 있어서 여전히 누를 수 있다는 것이 보인다.
+                          completed
+                            ? "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                        } ${canEdit ? "cursor-pointer" : ""}`}
+                      >
+                        <td className="px-3 py-2">
+                          <span className="flex items-center gap-2">
+                            <span className="tabular-nums">{dash(row.displayOrder)}</span>
+                            {completed && <CompletedBadge />}
+                            {canEdit && <CompletionToggle row={row} onError={setCompletionError} />}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{dash(row.customerName)}</td>
+                        <td className="px-3 py-2">{dash(row.purchaseOrderNumber)}</td>
+                        <td className="px-3 py-2">{dash(row.projectName)}</td>
+                        {/* 발주일이 없는 줄은 "-" 대신 이유를 적는다 — 이 줄이
+                            년도와 상관없이 늘 보이는 근거가 이 칸이다. */}
+                        <td className="px-3 py-2 tabular-nums">
+                          {row.orderIssuedDate === null ? (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] leading-none text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                              {NO_ORDER_DATE_LABEL}
+                            </span>
+                          ) : (
+                            row.orderIssuedDate
+                          )}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">{dash(row.requestedDueDate)}</td>
+                        {/* 연결이 없는 줄은 시트에 적혀 있던 글자를 그대로 보여 준다
+                            (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
+                            단서가 화면에서 사라진다. */}
+                        <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-50">
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => openRow(row.id)}
+                              className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                            >
+                              {dash(row.displayIntakeNumber)}
+                              <span className="sr-only"> 줄 수정</span>
+                            </button>
+                          ) : (
+                            dash(row.displayIntakeNumber)
+                          )}
+                        </td>
+                        <td className="px-3 py-2">{dash(row.modelName)}</td>
+                        <td className="px-3 py-2">{dash(row.lotNumber)}</td>
+                        <td className="px-3 py-2">{dash(row.serialNumber)}</td>
+                        <td className="px-3 py-2">{dash(row.reportedSymptom)}</td>
+                        <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
+                        <td className="px-3 py-2">{dash(row.quoteNumber)}</td>
+                        <td className="px-3 py-2">{dash(row.progressNote)}</td>
+                        <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
+                        <td className="px-3 py-2">{dash(row.deliveredBy)}</td>
+                        <td className="px-3 py-2 tabular-nums">{dash(row.taxInvoiceDate)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatAmount(row.amountExcludingVat)}
+                        </td>
+                        <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
+                        <td className="px-3 py-2">{dash(row.japanRemittanceNote)}</td>
+                        <td className="px-3 py-2">{dash(row.historyNote)}</td>
+                        <td className="px-3 py-2">{dash(row.etcNote)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              ))}
             </table>
           }
           cards={
-            <div className={LIST_CARD_GRID}>
-              {rows.map((row) => (
-                <div
-                  key={row.id}
-                  onClick={canEdit ? () => openRow(row.id) : undefined}
-                  className={`flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 ${
-                    canEdit ? "cursor-pointer" : ""
-                  }`}
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    {canEdit ? (
-                      <button
-                        type="button"
-                        onClick={() => openRow(row.id)}
-                        className="font-semibold text-zinc-900 underline decoration-dotted underline-offset-2 hover:decoration-solid dark:text-zinc-50"
-                      >
-                        {dash(row.displayIntakeNumber)}
-                        <span className="sr-only"> 줄 수정</span>
-                      </button>
-                    ) : (
-                      <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-                        {dash(row.displayIntakeNumber)}
-                      </span>
-                    )}
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      순번 {dash(row.displayOrder)}
+            // 카드에서도 같은 묶음이 보여야 한다 — 표에서 보던 것과 다른 순서로
+            // 읽히면 좁은 화면으로 옮긴 순간 다른 자료처럼 보인다.
+            <div className="flex flex-col gap-5">
+              {groups.map((group) => (
+                <section key={group.customerName ?? "__unassigned__"} className="flex flex-col gap-2">
+                  <h2 className="flex items-baseline gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    {group.label}
+                    <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                      {group.rows.length}건
                     </span>
-                  </div>
-                  <p className="text-sm text-zinc-700 dark:text-zinc-300">{dash(row.customerName)}</p>
-                  {CARD_FIELD_GROUPS.map((group) => (
-                    <div key={group.label} className="flex flex-col gap-1">
-                      <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-500">{group.label}</p>
-                      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
-                        {group.fields.map((field) => (
-                          <div key={field.label}>
-                            <dt className="text-xs text-zinc-500 dark:text-zinc-500">{field.label}</dt>
-                            <dd className="break-words">{field.of(row)}</dd>
+                  </h2>
+                  <div className={LIST_CARD_GRID}>
+                    {group.rows.map((row) => {
+                      const completed = isDomesticOrderCompleted(row);
+                      return (
+                        <div
+                          key={row.id}
+                          onClick={canEdit ? () => openRow(row.id) : undefined}
+                          className={`flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800 ${
+                            completed
+                              ? "bg-zinc-200 dark:bg-zinc-800"
+                              : "bg-white dark:bg-zinc-900"
+                          } ${canEdit ? "cursor-pointer" : ""}`}
+                        >
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            {canEdit ? (
+                              <button
+                                type="button"
+                                onClick={() => openRow(row.id)}
+                                className="font-semibold text-zinc-900 underline decoration-dotted underline-offset-2 hover:decoration-solid dark:text-zinc-50"
+                              >
+                                {dash(row.displayIntakeNumber)}
+                                <span className="sr-only"> 줄 수정</span>
+                              </button>
+                            ) : (
+                              <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                                {dash(row.displayIntakeNumber)}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                              순번 {dash(row.displayOrder)}
+                              {completed && <CompletedBadge />}
+                              {canEdit && (
+                                <CompletionToggle row={row} onError={setCompletionError} />
+                              )}
+                            </span>
                           </div>
-                        ))}
-                      </dl>
-                    </div>
-                  ))}
-                </div>
+                          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                            {dash(row.customerName)}
+                          </p>
+                          {CARD_FIELD_GROUPS.map((fieldGroup) => (
+                            <div key={fieldGroup.label} className="flex flex-col gap-1">
+                              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-500">
+                                {fieldGroup.label}
+                              </p>
+                              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                                {fieldGroup.fields.map((field) => (
+                                  <div key={field.label}>
+                                    <dt className="text-xs text-zinc-500 dark:text-zinc-500">
+                                      {field.label}
+                                    </dt>
+                                    <dd className="break-words">{field.of(row)}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               ))}
             </div>
           }

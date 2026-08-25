@@ -8,6 +8,7 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { canEditDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listDomesticOrders, listRepairCaseLinkOptions } from "@/lib/db/queries/domestic-orders";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 
 export const metadata: Metadata = {
   title: "내자 정리 | DSS A/S 관리 시스템",
@@ -66,10 +67,18 @@ export default async function DomesticOrdersPage() {
     day: "2-digit",
   }).format(new Date());
 
+  // 발주 년도 칸의 기본값이 되는 "올해". 이것도 서버가 정한다 — 클라이언트에서
+  // new Date().getFullYear() 를 부르면 서버가 그린 것과 달라져 hydration 이
+  // 어긋나고, 한국 표준시 대신 브라우저의 시간대로 해가 정해진다(연초·연말
+  // 하루가 실제로 다르게 나온다). toKstDateOnly 는 그 판단이 이미 적혀 있는
+  // 곳이다(domain/date-only.ts).
+  const currentYear = toKstDateOnly(new Date()).slice(0, 4);
+
   return (
     <DomesticOrderListScreen
       rows={rows}
       asOfDate={asOfDate}
+      currentYear={currentYear}
       canEdit={canEdit}
       repairCaseOptions={repairCaseOptions}
     />

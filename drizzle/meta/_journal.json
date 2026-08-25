@@ -344,6 +344,13 @@
       "when": 1787622761762,
       "tag": "0048_lying_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787628667081,
+      "tag": "0049_cultured_dragon_man",
+      "breakpoints": true
     }
   ]
 }

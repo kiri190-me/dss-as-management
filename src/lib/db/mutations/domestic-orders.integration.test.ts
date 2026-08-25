@@ -15,7 +15,11 @@ import {
   users,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
-import { createDomesticOrder, updateDomesticOrder } from "./domestic-orders";
+import {
+  createDomesticOrder,
+  setDomesticOrderCompletion,
+  updateDomesticOrder,
+} from "./domestic-orders";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -469,5 +473,187 @@ describe("updateDomesticOrder", () => {
     const row = await readOrder(created.id);
     assert.equal(row.progressNote, "그대로 남아야 한다");
     assert.equal(row.version, 1);
+  });
+});
+
+/**
+ * ── 완료 처리 ────────────────────────────────────────────────────────────
+ * 완료는 감추는 조작이 아니라 회색으로 표시하는 조작이지만, 지키는 규칙은
+ * 수정과 똑같다 — 잠금 · version 대조 · 지워진 행 거절. 여기서 따로 확인하는
+ * 것은 **두 칸(completed_at · completed_by)이 언제나 함께 움직이는가**다.
+ * 한쪽만 남으면 그 행이 완료인지 아닌지 답할 방법이 없어진다.
+ */
+describe("setDomesticOrderCompletion", () => {
+  test("완료 처리하면 시각과 사람이 함께 남고 version이 오른다", async () => {
+    const created = await createOrder({ progressNote: "완료 전" });
+    if (!created.ok) return;
+
+    const result = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: created.version,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(result.ok, true, `완료 처리 실패: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+    assert.equal(result.version, 2);
+
+    const row = await readOrder(created.id);
+    assert.ok(row.completedAt instanceof Date, "완료 시각이 남아야 한다");
+    assert.equal(row.completedBy, actorUserId, "완료 처리한 사람이 남아야 한다");
+    assert.equal(row.version, 2);
+    assert.equal(row.updatedBy, actorUserId);
+    // 다른 칸은 건드리지 않는다 — 완료는 표시일 뿐 값을 고치는 조작이 아니다.
+    assert.equal(row.progressNote, "완료 전");
+  });
+
+  test("완료 해제하면 두 칸이 함께 NULL이 된다", async () => {
+    const created = await createOrder();
+    if (!created.ok) return;
+
+    const completed = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: created.version,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(completed.ok, true);
+    if (!completed.ok) return;
+
+    const released = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: completed.version,
+      completed: false,
+      actorUserId,
+    });
+    assert.equal(released.ok, true, `완료 해제 실패: ${JSON.stringify(released)}`);
+    if (!released.ok) return;
+    assert.equal(released.version, 3);
+
+    const row = await readOrder(created.id);
+    assert.equal(row.completedAt, null, "완료 시각이 남아 있으면 안 된다");
+    assert.equal(row.completedBy, null, "완료한 사람만 남으면 상태가 어긋난다");
+  });
+
+  test("완료 해제는 두 칸 중 하나만 지우지 않는다 — 다시 완료해도 짝이 맞는다", async () => {
+    const created = await createOrder();
+    if (!created.ok) return;
+
+    let version = created.version;
+    for (const completed of [true, false, true]) {
+      const result = await setDomesticOrderCompletion({
+        id: created.id,
+        expectedVersion: version,
+        completed,
+        actorUserId,
+      });
+      assert.equal(result.ok, true, `전환 실패(${completed}): ${JSON.stringify(result)}`);
+      if (!result.ok) return;
+      version = result.version;
+
+      const row = await readOrder(created.id);
+      // 두 칸이 언제나 같은 상태여야 한다 — 하나는 있고 하나는 없는 중간
+      // 상태가 존재하면 완료 여부를 말할 수 없다.
+      assert.equal(
+        row.completedAt !== null,
+        row.completedBy !== null,
+        "completed_at 과 completed_by 는 언제나 함께 있거나 함께 없어야 한다"
+      );
+      assert.equal(row.completedAt !== null, completed);
+    }
+  });
+
+  test("낡은 version으로 온 완료 처리는 CONFLICT이고 행은 그대로다", async () => {
+    const created = await createOrder({ progressNote: "처음" });
+    if (!created.ok) return;
+    const staleVersion = created.version;
+
+    const first = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: staleVersion,
+      fields: fields({ progressNote: "먼저 저장된 값" }),
+      actorUserId,
+    });
+    assert.equal(first.ok, true);
+
+    const second = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: staleVersion,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.equal(second.code, "CONFLICT");
+
+    const row = await readOrder(created.id);
+    assert.equal(row.completedAt, null, "충돌한 완료 처리가 적용되어서는 안 된다");
+    assert.equal(row.completedBy, null);
+    assert.equal(row.progressNote, "먼저 저장된 값", "행은 한 글자도 바뀌지 않는다");
+    assert.equal(row.version, 2, "충돌한 저장은 version 도 올리지 않는다");
+  });
+
+  test("지워진 행은 완료 처리할 수 없다 — NOT_FOUND다", async () => {
+    const created = await createOrder();
+    if (!created.ok) return;
+    await db
+      .update(domesticOrders)
+      .set({ isDeleted: true, deletedAt: new Date() })
+      .where(eq(domesticOrders.id, created.id));
+
+    const result = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: created.version,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+
+    const row = await readOrder(created.id);
+    assert.equal(row.completedAt, null, "지워진 행은 한 글자도 바뀌지 않는다");
+    assert.equal(row.version, 1);
+    assert.equal(row.isDeleted, true, "완료 처리가 되살리기를 겸해서는 안 된다");
+  });
+
+  test("없는 id는 NOT_FOUND다", async () => {
+    const result = await setDomesticOrderCompletion({
+      id: randomUUID(),
+      expectedVersion: 1,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다", async () => {
+    const created = await createOrder({ progressNote: "완료 전" });
+    if (!created.ok) return;
+
+    const completed = await setDomesticOrderCompletion({
+      id: created.id,
+      expectedVersion: created.version,
+      completed: true,
+      actorUserId,
+    });
+    assert.equal(completed.ok, true);
+    if (!completed.ok) return;
+
+    const updated = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: completed.version,
+      fields: fields({ progressNote: "완료 후에 적은 입금 사실" }),
+      actorUserId,
+    });
+    assert.equal(updated.ok, true, `완료된 줄 수정 실패: ${JSON.stringify(updated)}`);
+
+    const row = await readOrder(created.id);
+    assert.equal(row.progressNote, "완료 후에 적은 입금 사실");
+    // 수정은 완료 표시를 건드리지 않는다 — 둘은 서로 다른 조작이다.
+    assert.ok(row.completedAt instanceof Date, "수정이 완료 표시를 지워서는 안 된다");
+    assert.equal(row.completedBy, actorUserId);
   });
 });

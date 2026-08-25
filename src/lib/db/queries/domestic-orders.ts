@@ -78,10 +78,25 @@ export type DomesticOrderJoinRow = {
   japanRemittanceNote: string | null;
   historyNote: string | null;
   etcNote: string | null;
+  /**
+   * 완료 처리한 시각. 조회 결과에서는 Date 로 오지만 화면으로는 문자열로
+   * 넘긴다(아래 DomesticOrderListItem) — repair-cases-mine.ts 의
+   * lastActivityAt 이 같은 이유로 같은 모양이다.
+   */
+  completedAt: Date | string | null;
 };
 
 /** 화면이 받는 한 줄. 클라이언트 컴포넌트로 넘어가므로 전부 직렬화 가능한 값이다. */
-export type DomesticOrderListItem = DomesticOrderJoinRow & {
+export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & {
+  /**
+   * 완료 처리한 시각(ISO 문자열). null 이면 진행 중이다 — 완료 여부의 판정은
+   * 이 한 칸이 전부이고, 그 규칙은 domain/domestic-order-list.ts 가 갖는다.
+   *
+   * 화면은 이 값을 **날짜로 그리지 않는다.** 클라이언트에서 형식을 맞추면
+   * 서버가 그린 것과 달라져 hydration 이 어긋나므로, 지금은 "완료인가 아닌가"로만
+   * 쓴다.
+   */
+  completedAt: string | null;
   /**
    * 화면에 보여 줄 인수번호 — 연결된 수리 건의 것이 먼저고, 없으면 시트에
    * 적혀 있던 글자다. 둘 다 없으면 null 이고 화면이 "-"로 보여 준다.
@@ -103,6 +118,7 @@ export type DomesticOrderListItem = DomesticOrderJoinRow & {
 export function mapDomesticOrderRow(row: DomesticOrderJoinRow): DomesticOrderListItem {
   return {
     ...row,
+    completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null,
     displayIntakeNumber: row.intakeNumber ?? row.intakeNumberText,
   };
 }
@@ -152,6 +168,10 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       japanRemittanceNote: domesticOrders.japanRemittanceNote,
       historyNote: domesticOrders.historyNote,
       etcNote: domesticOrders.etcNote,
+      // 완료된 줄을 회색으로 그리기 위한 값이다. completed_by 는 고르지
+      // 않는다 — 화면에 그리지 않는 값이고, 사람 이름을 클라이언트로 더
+      // 내려보낼 이유가 없다(스키마 헤더의 PII 항목).
+      completedAt: domesticOrders.completedAt,
       // created_at 은 **고르지 않는다.** 정렬 기준으로만 쓰이고 화면에는
       // 나가지 않으므로, 골라 두면 클라이언트로 넘어가는 값만 늘어난다.
       // Drizzle 의 orderBy 는 select 목록에 없는 컬럼도 그대로 쓴다.

@@ -200,3 +200,69 @@ export async function updateDomesticOrder(params: {
     return { ok: true, id: updated.id, version: updated.version };
   });
 }
+
+/**
+ * 한 줄을 완료로 표시하거나 그 표시를 거둔다.
+ *
+ * ── 완료와 해제가 한 함수인 이유 ────────────────────────────────────────
+ * 둘로 나누면 잠금·version 대조·updated_by 기록이 두 벌이 되고, 나중에 한쪽만
+ * 고쳐지는 날이 온다. 실제로 다른 것은 두 칸에 무엇을 쓰느냐뿐이라
+ * 불리언 하나로 가른다.
+ *
+ * ── 두 칸은 언제나 함께 움직인다 ────────────────────────────────────────
+ * 완료면 completed_at 과 completed_by 를 함께 쓰고, 해제면 **둘 다 NULL** 이다.
+ * 한쪽만 남기면 "완료 시각은 없는데 완료한 사람은 있는" 행이 생기고, 그때
+ * 그 행이 완료인지 아닌지 답할 방법이 없다. 판정은 completed_at 하나로만 한다
+ * (schema/domestic-orders.ts 의 completed_at 주석).
+ *
+ * 그 밖은 updateDomesticOrder 와 같다 — 트랜잭션 + 행 잠금 + version 대조.
+ * 완료는 되돌릴 수 있는 조작이지만 그렇다고 남의 저장을 덮어써도 되는 것은
+ * 아니다. 낡은 화면에서 누른 '완료'가 그 사이 바뀐 금액·입금 사실과 같은
+ * version 을 들고 들어오면, 그 화면은 이미 사실과 다른 것을 보고 있다.
+ */
+export async function setDomesticOrderCompletion(params: {
+  id: string;
+  expectedVersion: number;
+  /** true 면 완료 처리, false 면 완료 해제. */
+  completed: boolean;
+  actorUserId: string;
+}): Promise<DomesticOrderMutationResult> {
+  return db.transaction(async (tx): Promise<DomesticOrderMutationResult> => {
+    const [current] = await tx
+      .select({ id: domesticOrders.id, version: domesticOrders.version })
+      .from(domesticOrders)
+      .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
+      .for("update");
+
+    if (!current) {
+      return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
+    }
+
+    if (current.version !== params.expectedVersion) {
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // 완료 시각과 수정 시각이 같은 한 순간을 가리키게 한다 — 두 번 읽으면
+    // 같은 저장인데 두 시각이 미세하게 어긋난다.
+    const now = new Date();
+    const [updated] = await tx
+      .update(domesticOrders)
+      .set({
+        completedAt: params.completed ? now : null,
+        completedBy: params.completed ? params.actorUserId : null,
+        version: sql`${domesticOrders.version} + 1`,
+        updatedAt: now,
+        updatedBy: params.actorUserId,
+      })
+      .where(
+        and(eq(domesticOrders.id, params.id), eq(domesticOrders.version, params.expectedVersion))
+      )
+      .returning({ id: domesticOrders.id, version: domesticOrders.version });
+
+    if (!updated) {
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    return { ok: true, id: updated.id, version: updated.version };
+  });
+}

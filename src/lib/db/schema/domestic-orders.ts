@@ -125,6 +125,22 @@ export const domesticOrders = pgTable(
     japanRemittanceNote: text("japan_remittance_note"), // 일본 송금
     historyNote: text("history_note"), // 이력
     etcNote: text("etc_note"), // 기타
+    /**
+     * 완료 처리한 시각. NULL 이면 아직 진행 중이다.
+     *
+     * **is_completed 불리언을 따로 두지 않는다.** 휴지통(is_deleted)이 불리언인
+     * 이유는 위 부분 인덱스가 그 조건을 타야 하기 때문인데, 완료는 **감추는 것이
+     * 아니라 회색으로 함께 보여 주는 것**이라 조회가 이 칸으로 거르지 않는다 —
+     * 인덱스가 필요 없으니 불리언을 둘 이유도 없다. 상태를 두 칸에 나눠 두면
+     * "완료라고 적혀 있는데 완료 시각은 비어 있는" 행이 언젠가 생기고, 그때
+     * 어느 쪽이 맞는지 답할 방법이 없다. 상태는 한 곳에만 둔다.
+     */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    // 완료 처리한 사람. 지운 계정이 사라지지 않도록 RESTRICT — deleted_by ·
+    // created_by · updated_by 와 같은 규칙이다.
+    completedBy: uuid("completed_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     // 낙관적 잠금 토큰. 이번 단계에서는 쓰지 않는다(파일 헤더 참조).
     version: integer("version").notNull().default(1),
     // 소프트 삭제 4컬럼 (DATABASE_DESIGN.md #8). 이번 단계에서는 쓰지 않지만,

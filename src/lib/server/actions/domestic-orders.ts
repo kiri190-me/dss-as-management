@@ -10,7 +10,11 @@ import {
   isValidExpectedVersion,
   validateDomesticOrderFields,
 } from "@/lib/validation/domestic-order-input";
-import { createDomesticOrder, updateDomesticOrder } from "@/lib/db/mutations/domestic-orders";
+import {
+  createDomesticOrder,
+  setDomesticOrderCompletion,
+  updateDomesticOrder,
+} from "@/lib/db/mutations/domestic-orders";
 
 /**
  * ============================================================================
@@ -154,6 +158,61 @@ export async function updateDomesticOrderAction(input: {
     });
   } catch (err) {
     console.error("updateDomesticOrderAction: unexpected DB error", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * 완료 처리 · 완료 해제.
+ *
+ * 관문은 위 둘과 **똑같다** — canEditDomesticOrders AND
+ * hasPermission("domesticOrders", "WRITE"). 권한 상한을 따로 올리지 않는다:
+ * 완료는 누른 그 자리에서 다시 눌러 되돌릴 수 있는 조작이고, 값이 사라지지도
+ * 않는다. 되돌릴 수 없는 조작(삭제 등)이 생기면 그때 별도의 수준을 논한다.
+ */
+export async function setDomesticOrderCompletionAction(input: {
+  id: string;
+  expectedVersion: number;
+  completed: boolean;
+}): Promise<DomesticOrderActionResult> {
+  const auth = await resolveAuthorizedActingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  if (!isValidDomesticOrderId(input.id)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { id: "항목을 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  if (!isValidExpectedVersion(input.expectedVersion)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { expectedVersion: "수정 시점 정보를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // 불리언이 아닌 값을 받아 두면 undefined 가 "해제"로 조용히 읽힌다.
+  if (typeof input.completed !== "boolean") {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { completed: "완료 여부를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+
+  try {
+    return await setDomesticOrderCompletion({
+      id: input.id,
+      expectedVersion: input.expectedVersion,
+      completed: input.completed,
+      actorUserId: auth.actingUser.id,
+    });
+  } catch (err) {
+    console.error("setDomesticOrderCompletionAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }
