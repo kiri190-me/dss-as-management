@@ -13,8 +13,7 @@ import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
   filterDomesticOrdersByYear,
-  formatDomesticOrderDueDates,
-  formatDomesticOrderDueDateSummary,
+  formatDomesticOrderDueDateLines,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   resolveInitialDomesticOrderYear,
@@ -197,23 +196,31 @@ function paymentLabel(completed: boolean): string {
 
 /**
  * 표의 `납기요청일` 칸. **칼럼은 여전히 22개다** — 날짜가 여럿이 될 수 있게
- * 됐다고 칸을 늘리지 않는다(파일 헤더의 '표 22칼럼').
+ * 됐다고 칸을 늘리지 않는다(파일 헤더의 '표 22칼럼'). 늘어나는 것은 옆이 아니라
+ * 아래, 그 줄의 높이뿐이다.
  *
- * 칸에는 첫 날짜와 "외 N건"만 적고(무엇을 접을지는 도메인 함수가 정한다),
- * 나머지는 두 곳으로 되찾는다 — 마우스에는 title, 화면 낭독기에는 sr-only 한
- * 줄. 요약만 있으면 "외 2건"이 무엇인지 알려면 폼을 열어 보는 수밖에 없다.
+ * **한 줄에 날짜 하나씩 전부 적는다.** 무엇을 어떤 글자로 적을지는 도메인 함수가
+ * 정하고(formatDomesticOrderDueDateLines, 접지 않는 이유도 거기 적혀 있다), 여기는
+ * 그 줄들을 <div> 로 쌓기만 한다 — 줄바꿈 문자와 CSS 에 맡기지 않는 이유는, 그러면
+ * 무엇이 한 줄인지가 이 칸의 whitespace 설정(줄 전체에 걸린 whitespace-nowrap)에
+ * 달리기 때문이다.
+ *
+ * title 과 sr-only 보조 한 줄은 두지 않는다. 접힌 것이 없으니 되찾을 것도 없고,
+ * 보이는 글자를 sr-only 로 한 번 더 적으면 화면 낭독기에는 같은 날짜가 두 번
+ * 읽힌다.
  *
  * 날짜가 없으면 다른 칸과 똑같이 "-"다.
  */
 function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
-  const summary = formatDomesticOrderDueDateSummary(row.dueDates);
-  if (summary === null) return <>-</>;
-  const full = formatDomesticOrderDueDates(row.dueDates);
-  if (row.dueDates.length <= 1) return <>{summary}</>;
+  const lines = formatDomesticOrderDueDateLines(row.dueDates);
+  if (lines.length === 0) return <>-</>;
   return (
     <>
-      <span title={full ?? undefined}>{summary}</span>
-      <span className="sr-only"> — 전체: {full}</span>
+      {lines.map((line, index) => (
+        // 같은 날짜에 같은 메모가 두 번 적힐 수 있어(사람이 적는 값이다) 글자를
+        // key 로 쓰지 않는다. 이 목록은 다시 정렬되지 않으므로 차례가 곧 신원이다.
+        <div key={index}>{line}</div>
+      ))}
     </>
   );
 }
@@ -251,7 +258,19 @@ function SheetHeading({ asOfDate }: { asOfDate: string }) {
   );
 }
 
-const CARD_FIELD_GROUPS: { label: string; fields: { label: string; of: (row: DomesticOrderListItem) => string }[] }[] = [
+const CARD_FIELD_GROUPS: {
+  label: string;
+  fields: {
+    label: string;
+    of: (row: DomesticOrderListItem) => string;
+    /**
+     * 값에 든 줄바꿈을 진짜 줄바꿈으로 그릴 칸인가. 켠 칸만 whitespace-pre-line
+     * 이 붙는다 — 모든 칸에 걸면 현황·이력·기타처럼 사람이 줄바꿈을 섞어 적는
+     * 칸의 생김새까지 함께 바뀐다.
+     */
+    multiline?: boolean;
+  }[];
+}[] = [
   {
     label: "발주",
     fields: [
@@ -263,11 +282,12 @@ const CARD_FIELD_GROUPS: { label: string; fields: { label: string; of: (row: Dom
         label: "발주발행일",
         of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
       },
-      // 표와 같은 규칙이다 — 첫 날짜 + "외 N건". 좁은 화면이라고 다르게
-      // 접으면 같은 자료가 화면마다 다른 값으로 읽힌다(파일 헤더).
+      // 표와 같은 규칙이다 — 한 줄에 날짜 하나씩 전부. 좁은 화면이라고 접으면
+      // 같은 자료가 화면마다 다른 값으로 읽힌다(파일 헤더).
       {
         label: "납기요청일",
-        of: (row) => dash(formatDomesticOrderDueDateSummary(row.dueDates)),
+        of: (row) => dash(formatDomesticOrderDueDateLines(row.dueDates).join("\n")),
+        multiline: true,
       },
     ],
   },
@@ -722,8 +742,8 @@ export default function DomesticOrderListScreen({
                             row.orderIssuedDate
                           )}
                         </td>
-                        {/* 날짜가 여럿이면 첫 날짜 + "외 N건"이다 — 칼럼을
-                            늘리지 않는다(DueDateCellContent). */}
+                        {/* 날짜가 여럿이면 한 줄에 하나씩 전부 — 칼럼은 늘리지
+                            않고 줄 높이만 늘어난다(DueDateCellContent). */}
                         <td className="px-3 py-2 tabular-nums">
                           <DueDateCellContent row={row} />
                         </td>
@@ -830,7 +850,15 @@ export default function DomesticOrderListScreen({
                                     <dt className="text-xs text-zinc-500 dark:text-zinc-500">
                                       {field.label}
                                     </dt>
-                                    <dd className="break-words">{field.of(row)}</dd>
+                                    <dd
+                                      className={
+                                        field.multiline
+                                          ? "break-words whitespace-pre-line"
+                                          : "break-words"
+                                      }
+                                    >
+                                      {field.of(row)}
+                                    </dd>
                                   </div>
                                 ))}
                               </dl>
