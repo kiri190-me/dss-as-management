@@ -1,3 +1,4 @@
+import { isLongPendingPo } from "./long-pending-po";
 import type { RepairStatus, WorkflowType } from "./types";
 
 /**
@@ -51,6 +52,25 @@ import type { RepairStatus, WorkflowType } from "./types";
  * 이 보고서는 **진행 중인 것**만 본다. 그래서 출하 완료 건은 분류 안 됨으로도
  * 세지 않고 목록에서 통째로 빠진다 — 위의 '조용히 사라지지 않는다'와 모순이
  * 아니다: 저쪽은 "규칙이 모르는 건", 이쪽은 "규칙이 알고 있는, 뺀다고 정한 건"이다.
+ *
+ * ── 장기 PO 미발행은 여기서 판정하고, 화면은 색만 입힌다 ─────────────────
+ * 상세표의 `견적서 발행일` 을 빨간 볼드로 그리는 줄이 그것이다. 규칙을 여기
+ * 옮겨 적지 않고 **long-pending-po.ts 의 isLongPendingPo 를 그대로 부른다** —
+ * `전체 A/S 현황` 의 `장기 PO 미발행만 보기` 체크박스와 **같은 함수**라야 두
+ * 화면이 같은 건을 가리킨다. 따로 적으면 언젠가 어긋나고, 그때 어느 쪽이
+ * 맞는지 말할 수 없다.
+ *
+ * 그 파일이 이 파일을 부르고(pickWeeklyReportOrderDates · isExcludedFrom…) 이
+ * 파일이 다시 그 파일을 부르므로 **import 가 순환한다.** 안전한 순환이다:
+ * 양쪽 모두 모듈이 평가되는 동안에는 서로를 부르지 않고(둘 다 hoisting 되는
+ * function 선언이며, 최상위에서 실행되는 것은 상수뿐이다) 실제 호출은 전부
+ * 함수가 불릴 때 일어난다.
+ *
+ * ── "오늘"은 부르는 쪽이 정한다 ─────────────────────────────────────────
+ * buildWeeklyReport 가 `now` 를 **받는다**. 여기서 new Date() 를 부르면 (1) 서버가
+ * 그린 화면과 클라이언트가 다시 그린 화면이 어긋나고, (2) 시험 결과가 실제
+ * 오늘 날짜에 따라 달라져 두 달 뒤에 아무 고친 것 없이 깨진다. page.tsx 가
+ * 머리말의 '갱신 일' 과 **같은 순간**을 넘긴다.
  * ============================================================================
  */
 
@@ -317,11 +337,19 @@ export type WeeklyReportCase = WeeklyReportClassifiable &
     notes: string | null;
   };
 
-/** 상세표 한 줄 — 위 값에 이 파일이 정한 두 가지(종류·칸)를 얹은 것이다. */
+/** 상세표 한 줄 — 위 값에 이 파일이 정한 세 가지(종류·칸·장기 PO 미발행)를 얹은 것이다. */
 export type WeeklyReportRow = WeeklyReportCase & {
   kind: WeeklyReportKind;
   /** 6칸 중 어디인가. null 이면 분류 안 됨이고, 화면이 그 사실을 그대로 보여 준다. */
   reportStatus: WeeklyReportStatus | null;
+  /**
+   * 견적서를 낸 지 두 달이 지나도록 발주가 안 난 건인가(파일 헤더). 화면은 이
+   * 값으로 `견적서 발행일` 칸에 **색과 굵기만** 입히고, 판정을 다시 하지 않는다.
+   *
+   * **세는 값이 아니다** — 집계 6칸에도, PO 발행 완료에도, 총 대수에도 들어가지
+   * 않는다. 어느 칸에 놓인 줄에나 붙을 수 있다.
+   */
+  isLongPendingPo: boolean;
 };
 
 /** 고객사 × 종류 블록 하나 — 엑셀의 한 덩어리(집계 칸 + 상세표)에 해당한다. */
@@ -366,8 +394,15 @@ function addToCounts(
  *     차례가 매주 뒤바뀌어, 지난주 종이와 나란히 놓고 볼 수 없다.
  *   - 블록 안의 줄은 **인수번호 오름차순**. 인수번호는 D + 연월 + 일련번호라
  *     사전순이 곧 접수순이다.
+ *
+ * `now` 는 **장기 PO 미발행**을 가르는 "오늘"이다. 기본값을 두지 않는다 —
+ * 두면 부르는 쪽이 잊었을 때 조용히 실제 오늘이 섞여 들어와, 서버가 그린 화면과
+ * 시험 결과가 부르는 시각에 따라 달라진다(파일 헤더).
  */
-export function buildWeeklyReport(cases: readonly WeeklyReportCase[]): WeeklyReport {
+export function buildWeeklyReport(
+  cases: readonly WeeklyReportCase[],
+  now: Date
+): WeeklyReport {
   const blocks = new Map<string, WeeklyReportBlock>();
   const totalsByKind = new Map<WeeklyReportKind, WeeklyReportCounts>(
     WEEKLY_REPORT_KINDS.map((kind) => [kind, emptyCounts()])
@@ -381,7 +416,18 @@ export function buildWeeklyReport(cases: readonly WeeklyReportCase[]): WeeklyRep
     const kind = foldWeeklyReportKind(item.workflowType);
     const reportStatus = classifyWeeklyReportStatus(item);
     const poIssued = hasWeeklyReportPoIssued(item);
-    const row: WeeklyReportRow = { ...item, kind, reportStatus };
+    // 규칙은 전부 저 함수 안에 있다(파일 헤더). 여기서 넘기는 orderRows 가 한
+    // 줄뿐인 것은, 조회가 이미 pickWeeklyReportOrderDates 로 **고른 줄**을 실어
+    // 보내기 때문이다(queries/weekly-report.ts). 고른 줄 하나를 다시 고르면 그
+    // 줄이 그대로 나온다 — 그 함수는 발주일 있는 줄을 먼저 걸러 그 안에서
+    // 고르므로 한 줄짜리 입력에는 손댈 것이 없다(시험이 못 박는다). 그래서
+    // 상세표에 실제로 적히는 두 날짜와 이 판정이 **언제나 같은 것을 본다**.
+    const row: WeeklyReportRow = {
+      ...item,
+      kind,
+      reportStatus,
+      isLongPendingPo: isLongPendingPo({ status: item.status, orderRows: [item] }, now),
+    };
 
     const key = `${item.customerName} ${kind}`;
     let block = blocks.get(key);

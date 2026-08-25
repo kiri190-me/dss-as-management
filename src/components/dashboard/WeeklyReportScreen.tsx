@@ -138,6 +138,20 @@ import {
  * min-width 는 auto 라, 이것이 없으면 표가 칸을 밀어 넓혀 화면 전체(body)가
  * 좌우로 밀린다).
  *
+ * ── 장기 PO 미발행은 빨간 볼드로 드러난다 ───────────────────────────────
+ * 견적서를 낸 지 두 달이 지나도록 발주가 안 난 줄은 `견적서 발행일` 칸이 빨간
+ * 볼드다. **판정은 여기서 하지 않는다** — 도메인이 줄마다 실어 준 값
+ * (row.isLongPendingPo)을 읽어 색과 굵기만 입힌다. 그 값은 `전체 A/S 현황` 의
+ * `장기 PO 미발행만 보기` 체크박스와 **같은 함수**에서 나온다(도메인 파일 헤더).
+ *
+ * 색은 분류 안 됨 경고와 같은 빨강이다 — 이 화면에서 빨강은 "손이 필요하다"
+ * 하나의 뜻이어야 하고, 색을 하나 더 들이면 그 뜻이 흐려진다.
+ *
+ * **무슨 뜻인지는 맨 위 머리말에 한 번만 적는다.** 블록이 58개라 상자마다 적으면
+ * 그 문장이 화면의 절반을 차지하고, 결국 아무도 읽지 않는다. 색만으로 뜻이
+ * 전해지지 않는 자리(색을 못 보는 사람·흑백 인쇄)를 위해 그 칸에 title 을 붙인다 —
+ * sr-only 를 새로 넣지 않는 이유는 파일 아래 relative 주석에 있다.
+ *
  * ── 분류 안 된 건은 감추지 않는다 ──────────────────────────────────────
  * 6칸 어디에도 안 맞는 건이 있으면 맨 위에 몇 건인지 적고, 그 블록의 집계에도
  * 빨간 칸이 하나 더 생기며, 상세표의 `현 상태`에도 그대로 적힌다. 조용히
@@ -178,6 +192,15 @@ function dash(value: string | null | undefined): string {
 
 /** 어느 칸에도 안 맞는 건의 `현 상태`에 적는 말. 화면과 시험이 같은 글자를 쓴다. */
 const UNCLASSIFIED_LABEL = "분류 안 됨";
+
+/** 빨간 볼드가 뜻하는 것. 머리말과 그 칸의 title 이 같은 글자를 쓴다. */
+const LONG_PENDING_PO_LABEL = "장기 PO 미발행";
+
+/**
+ * 장기 PO 미발행인 줄의 `견적서 발행일` 옷. 분류 안 됨 경고와 **같은 빨강**이라
+ * 밝은 화면·어두운 화면 양쪽에서 이미 읽히는 것이 확인된 짝이다(파일 헤더).
+ */
+const LONG_PENDING_PO_TONE = "font-bold text-red-700 dark:text-red-300";
 
 /** 상세표의 `현 상태` 한 칸. 분류 안 된 건은 빨갛게 드러난다. */
 function StatusCell({ row }: { row: WeeklyReportRow }) {
@@ -410,7 +433,15 @@ function ReportBlock({ block }: { block: WeeklyReportBlock }) {
                   <td className="px-1.5 py-1">{dash(row.modelName)}</td>
                   <td className="px-1.5 py-1">{dash(row.serialNumber)}</td>
                   <td className="px-1.5 py-1">{dash(row.lotNumber)}</td>
-                  <td className="px-1.5 py-1 tabular-nums">{dash(row.quoteIssuedDate)}</td>
+                  {/* 장기 PO 미발행인 줄만 빨간 볼드다. 판정은 도메인이 이미
+                      해서 실어 보냈고(row.isLongPendingPo), 여기서는 옷만 입힌다
+                      (파일 헤더). 무슨 뜻인지는 맨 위 머리말에 한 번 적혀 있다. */}
+                  <td
+                    className={`px-1.5 py-1 tabular-nums ${row.isLongPendingPo ? LONG_PENDING_PO_TONE : ""}`}
+                    title={row.isLongPendingPo ? LONG_PENDING_PO_LABEL : undefined}
+                  >
+                    {dash(row.quoteIssuedDate)}
+                  </td>
                   <td className="px-1.5 py-1">
                     <StatusCell row={row} />
                   </td>
@@ -511,6 +542,13 @@ export default function WeeklyReportScreen({
           출하 완료된 건은 빠지고, 진행 중인 {report.total.total}대만 고객사·종류별로 묶여 있습니다.
           총 대수는 상태 6칸의 합이며, {WEEKLY_REPORT_PO_ISSUED_LABEL}는 그 위에 겹쳐 세는 값이라
           총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행 일시가 있으면 세어집니다.
+        </p>
+        {/* 빨간 볼드가 무슨 뜻인지 적는 **한 곳**이다. 블록마다 적지 않는 이유는
+            파일 헤더에 있다(블록이 58개다). */}
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          상세표에서 <span className={LONG_PENDING_PO_TONE}>견적서 발행일</span>이 빨간 글씨인 줄은{" "}
+          {LONG_PENDING_PO_LABEL}입니다 — 견적서를 낸 지 두 달이 지나도록 발주가 나지 않은 건이며,
+          전체 A/S 현황의 `{LONG_PENDING_PO_LABEL}만 보기` 와 같은 판정입니다.
         </p>
       </section>
 

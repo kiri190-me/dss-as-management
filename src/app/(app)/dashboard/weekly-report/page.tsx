@@ -92,7 +92,16 @@ export default async function WeeklyReportPage({
     canEditGoals ? listRepairCaseLinkOptions() : Promise.resolve([]),
   ]);
 
-  const report = buildWeeklyReport(cases);
+  // 이 화면이 말하는 "지금"은 **한 순간**이다. 아래 두 곳이 그것을 나눠 쓴다:
+  // 머리말의 갱신 일, 그리고 상세표에서 `견적서 발행일` 을 빨갛게 만드는 장기
+  // PO 미발행 판정(견적일 + 2개월 ≤ 오늘). 따로 new Date() 를 부르면 자정을
+  // 걸친 요청에서 머리말의 날짜와 빨간 줄의 근거가 하루 어긋난다.
+  const now = new Date();
+
+  // 판정에 쓰는 "오늘"은 **여기서 정해 넘긴다.** 도메인 안에서 만들면 (1) 서버가
+  // 그린 화면과 어긋나고, (2) 시험이 실제 오늘 날짜에 따라 달라진다
+  // (domain/weekly-report.ts 헤더). 한국 날짜로 접는 일은 도메인이 한다.
+  const report = buildWeeklyReport(cases, now);
 
   // 머리말의 "갱신 일". 클라이언트에서 new Date() 를 부르면 서버가 그린 것과
   // 달라져 hydration 이 어긋나므로 여기서 정해 내려보낸다. 표준시를 못 박는
@@ -103,7 +112,7 @@ export default async function WeeklyReportPage({
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).format(now);
 
   return (
     <WeeklyReportScreen

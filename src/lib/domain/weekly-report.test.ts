@@ -15,6 +15,7 @@ import {
   weeklyReportStatusLabels,
   type WeeklyReportCase,
 } from "./weekly-report";
+import { isLongPendingPo } from "./long-pending-po";
 import { WORKFLOW_TYPE_CODES, type RepairStatus, type WorkflowType } from "./types";
 
 /**
@@ -26,6 +27,24 @@ import { WORKFLOW_TYPE_CODES, type RepairStatus, type WorkflowType } from "./typ
  * 두 가지가 조용히 뒤집히면 화면의 숫자는 여전히 그럴듯해 보이는데 뜻이
  * 달라지므로, 칸마다 한 건씩 못 박아 둔다.
  */
+
+/**
+ * 이 시험이 말하는 "오늘" — 2026-08-25 14:00 KST. 한국 날짜와 UTC 날짜가 둘 다
+ * 08-25 라 경계가 아니다(long-pending-po.test.ts 와 같은 값·같은 이유).
+ *
+ * buildWeeklyReport 가 `now` 를 **받는** 까닭이 이것이다: 도메인 안에서
+ * new Date() 를 부르면 아래 시험들의 결과가 **돌리는 날**에 따라 달라져,
+ * 아무것도 고치지 않은 두 달 뒤에 갑자기 깨진다.
+ */
+const MIDDAY_KST = new Date("2026-08-25T05:00:00.000Z");
+
+/**
+ * 아래 시험이 부르는 buildWeeklyReport — "오늘"을 못 박아 결정적으로 만든다.
+ * 다른 날을 봐야 하는 시험만 두 번째 인자를 넘긴다.
+ */
+function buildAsOf(cases: readonly WeeklyReportCase[], now: Date = MIDDAY_KST) {
+  return buildWeeklyReport(cases, now);
+}
 
 let sequence = 0;
 
@@ -182,7 +201,7 @@ test("PO 발행 완료는 발주발행일 유무로만 갈린다 — 상태와 �
     "WAITING_SHIPMENT",
     "WAITING_SHIPMENT_APPROVAL",
   ] as const) {
-    const report = buildWeeklyReport([
+    const report = buildAsOf([
       makeCase({ status, orderIssuedDate: "2026-07-28" }),
       makeCase({ status, orderIssuedDate: null }),
     ]);
@@ -192,7 +211,7 @@ test("PO 발행 완료는 발주발행일 유무로만 갈린다 — 상태와 �
 });
 
 test("총 대수는 6칸의 합이고, PO 발행 완료는 거기 들어가지 않는다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ status: "WAITING_INTAKE_INSPECTION", currentWorkflowStepKey: "intake_inspection" }),
     makeCase({
       status: "WAITING_INTAKE_INSPECTION",
@@ -239,7 +258,7 @@ test("총 대수는 6칸의 합이고, PO 발행 완료는 거기 들어가지 �
 
 test("출하 대기인데 발주발행일이 있는 건은 출하 대기이면서 PO 발행 완료다", () => {
   // 원본의 D260602: 현 상태는 출하 대기, PO 발행 일시는 2026-07-28.
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({
       intakeNumber: "D260602",
       status: "WAITING_SHIPMENT",
@@ -255,7 +274,7 @@ test("출하 대기인데 발주발행일이 있는 건은 출하 대기이면�
 });
 
 test("PO 발행 완료는 각 블록·종류별 총합·전체에서 같은 규칙으로 세어진다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER", orderIssuedDate: "2026-07-28" }),
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER", orderIssuedDate: null }),
     makeCase({
@@ -338,7 +357,7 @@ test("출하 완료 건은 보고서에 아예 나오지 않는다 — 분류 �
   assert.equal(isExcludedFromWeeklyReport({ status: "SHIPMENT_COMPLETED" }), true);
   assert.equal(isExcludedFromWeeklyReport({ status: "IN_REPAIR" }), false);
 
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ status: "IN_REPAIR" }),
     makeCase({ status: "SHIPMENT_COMPLETED", currentWorkflowStepKey: "shipment_completed" }),
   ]);
@@ -349,7 +368,7 @@ test("출하 완료 건은 보고서에 아예 나오지 않는다 — 분류 �
 });
 
 test("어느 칸에도 안 맞는 건은 조용히 사라지지 않는다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ status: "IN_REPAIR" }),
     // 워크플로에 단계가 새로 생겨 상태가 아직 비어 있는 건.
     makeCase({ status: null, currentWorkflowStepKey: "some_new_step" }),
@@ -369,7 +388,7 @@ test("어느 칸에도 안 맞는 건은 조용히 사라지지 않는다", () =
 });
 
 test("분류 안 된 건이 있어도 총 대수 = 6칸의 합 + 분류 안 됨 이다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ status: "IN_REPAIR" }),
     makeCase({ status: "IN_REPAIR", orderIssuedDate: "2026-05-05" }),
     makeCase({ status: null, currentWorkflowStepKey: "some_new_step", orderIssuedDate: "2026-05-06" }),
@@ -386,7 +405,7 @@ test("분류 안 된 건이 있어도 총 대수 = 6칸의 합 + 분류 안 됨 
 // ─────────────────────────────────────────────────────────── 묶기와 세기
 
 test("블록은 건수 많은 순으로 늘어선다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "JUSUNG", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "JUSUNG", workflowType: "PAID_MATCHER" }),
@@ -406,7 +425,7 @@ test("블록은 건수 많은 순으로 늘어선다", () => {
 });
 
 test("같은 고객사라도 종류가 다르면 블록이 갈린다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "INVENIA", workflowType: "PAID_GENERATOR" }),
     makeCase({ customerName: "INVENIA", workflowType: "PAID_TOTAL_CONTROLLER" }),
     makeCase({ customerName: "INVENIA", workflowType: "PAID_MATCHER" }),
@@ -423,7 +442,7 @@ test("같은 고객사라도 종류가 다르면 블록이 갈린다", () => {
 });
 
 test("종류별 총합은 RFG·MB 두 줄 모두 있고, 둘을 더하면 전체다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ workflowType: "PAID_GENERATOR" }),
     makeCase({ workflowType: "WARRANTY_TOTAL_CONTROLLER" }),
     makeCase({ workflowType: "PAID_MATCHER" }),
@@ -443,7 +462,7 @@ test("종류별 총합은 RFG·MB 두 줄 모두 있고, 둘을 더하면 전체
 });
 
 test("건이 하나도 없으면 블록도 없고 총합은 0이다 — 종류별 두 줄은 그대로 남는다", () => {
-  const report = buildWeeklyReport([]);
+  const report = buildAsOf([]);
   assert.deepEqual(report.blocks, []);
   assert.equal(report.total.total, 0);
   assert.equal(report.total.poIssued, 0);
@@ -454,7 +473,7 @@ test("건이 하나도 없으면 블록도 없고 총합은 0이다 — 종류�
 });
 
 test("블록 안의 줄은 인수번호 오름차순이다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ intakeNumber: "D260703" }),
     makeCase({ intakeNumber: "D260701" }),
     makeCase({ intakeNumber: "D260702" }),
@@ -533,7 +552,7 @@ test("발주일이 있는 줄이 하나라도 있으면 고른 줄에도 발주�
 });
 
 test("내자 날짜는 접수 건에 그대로 실려 상세표까지 간다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ quoteIssuedDate: "2026-02-01", orderIssuedDate: "2026-02-15" }),
   ]);
   const row = report.blocks[0].rows[0];
@@ -545,7 +564,7 @@ test("내자 날짜는 접수 건에 그대로 실려 상세표까지 간다", (
 
 test("고객사마다 RFG 와 MB 가 한 쌍으로 나온다", () => {
   const pairs = pairWeeklyReportBlocksByCustomer(
-    buildWeeklyReport([
+    buildAsOf([
       makeCase({ customerName: "INVENIA", workflowType: "PAID_GENERATOR" }),
       makeCase({ customerName: "INVENIA", workflowType: "PAID_MATCHER" }),
       makeCase({ customerName: "ICD", workflowType: "PAID_TOTAL_CONTROLLER" }),
@@ -566,7 +585,7 @@ test("고객사마다 RFG 와 MB 가 한 쌍으로 나온다", () => {
 
 test("한쪽이 0건이어도 빈 블록이 자리를 지킨다 — 엑셀의 ETC(RFG)가 그렇다", () => {
   const pairs = pairWeeklyReportBlocksByCustomer(
-    buildWeeklyReport([
+    buildAsOf([
       // MB 만 있는 고객사.
       makeCase({ customerName: "ETC", workflowType: "PAID_MATCHER" }),
       makeCase({ customerName: "ETC", workflowType: "PAID_MATCHER" }),
@@ -595,7 +614,7 @@ test("한쪽이 0건이어도 빈 블록이 자리를 지킨다 — 엑셀의 ET
 });
 
 test("줄 차례는 건수 많은 고객사 순 그대로다 — 짝을 지으면서 바꾸지 않는다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "JUSUNG", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "JUSUNG", workflowType: "PAID_MATCHER" }),
@@ -621,7 +640,7 @@ test("줄 차례는 건수 많은 고객사 순 그대로다 — 짝을 지으�
 });
 
 test("짝을 지어도 블록을 하나도 잃지 않는다 — 늘어나는 것은 채워 넣은 빈 블록뿐이다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "INVENIA", workflowType: "PAID_GENERATOR" }),
     makeCase({ customerName: "INVENIA", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER" }),
@@ -648,13 +667,13 @@ test("짝을 지어도 블록을 하나도 잃지 않는다 — 늘어나는 것
 });
 
 test("건이 하나도 없으면 줄도 없다", () => {
-  assert.deepEqual(pairWeeklyReportBlocksByCustomer(buildWeeklyReport([]).blocks), []);
+  assert.deepEqual(pairWeeklyReportBlocksByCustomer(buildAsOf([]).blocks), []);
 });
 
 // ────────────────────────────────────────────────────────── 고객사 색
 
 test("고객사 색은 블록에 그대로 실리고, 채워 넣은 빈 블록에도 같은 색이 간다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", customerRowColor: "sky", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "ETC", customerRowColor: null, workflowType: "PAID_MATCHER" }),
   ]);
@@ -674,7 +693,7 @@ test("고객사 색은 블록에 그대로 실리고, 채워 넣은 빈 블록�
 // ────────────────────────────────────────────────────────── PO 발행 현황
 
 test("PO 발행 현황의 고객사별 합은 그 종류의 블록별 PO 발행 완료 합과 같다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER", orderIssuedDate: "2026-07-28" }),
     makeCase({ customerName: "ICD", workflowType: "PAID_MATCHER", orderIssuedDate: null }),
     makeCase({
@@ -722,7 +741,7 @@ test("PO 발행 현황의 고객사별 합은 그 종류의 블록별 PO 발행 
 });
 
 test("PO 발행 현황은 두 종류에 같은 고객사 차례로 나오고, 0 인 고객사도 자리를 지킨다", () => {
-  const report = buildWeeklyReport([
+  const report = buildAsOf([
     makeCase({ customerName: "ICD", customerRowColor: "sky", workflowType: "PAID_MATCHER" }),
     makeCase({ customerName: "ICD", customerRowColor: "sky", workflowType: "PAID_MATCHER" }),
     makeCase({
@@ -755,7 +774,7 @@ test("PO 발행 현황은 두 종류에 같은 고객사 차례로 나오고, 0 
 });
 
 test("건이 하나도 없으면 PO 발행 현황도 두 줄만 남고 전부 비어 있다", () => {
-  const issuance = summarizeWeeklyReportPoIssuance(buildWeeklyReport([]).blocks);
+  const issuance = summarizeWeeklyReportPoIssuance(buildAsOf([]).blocks);
   assert.deepEqual(
     issuance.map((entry) => [entry.kind, entry.customers.length, entry.total]),
     [
@@ -763,4 +782,138 @@ test("건이 하나도 없으면 PO 발행 현황도 두 줄만 남고 전부 �
       ["MB", 0, 0],
     ]
   );
+});
+
+// ───────────────────────────────────── 장기 PO 미발행 (상세표의 빨간 볼드)
+
+/**
+ * 상세표의 `견적서 발행일` 을 빨갛게 만드는 표시다. 규칙 자체를 다시 시험하는
+ * 것이 아니라(그 일은 long-pending-po.test.ts 가 한다) **이 파일이 그 판정을
+ * 줄마다 제대로 실어 보내는가**를 못 박는다. 네 경계는 화면에서 눈으로 확인할
+ * 방법이 사실상 없어서(두 달 전 견적을 만들어야 한다) 여기서 잡아야 한다.
+ *
+ * "오늘"은 MIDDAY_KST(2026-08-25)다.
+ */
+
+/** 그 줄 하나를 골라 표시를 읽는다 — 블록이 하나뿐인 시험들이 쓴다. */
+function onlyRow(cases: readonly WeeklyReportCase[], now: Date = MIDDAY_KST) {
+  const report = buildAsOf(cases, now);
+  assert.equal(report.blocks.length, 1, "이 시험은 블록 하나를 전제한다");
+  assert.equal(report.blocks[0].rows.length, 1, "이 시험은 줄 하나를 전제한다");
+  return report.blocks[0].rows[0];
+}
+
+test("견적일 + 2개월이 오늘이면 그 줄에 장기 PO 미발행 표시가 켜진다", () => {
+  // 2026-06-25 + 2개월 = 2026-08-25 = 오늘. 딱 되는 날 **당일부터** 걸린다.
+  const row = onlyRow([
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-25", orderIssuedDate: null }),
+  ]);
+  assert.equal(row.isLongPendingPo, true);
+});
+
+test("두 달이 하루 모자란 줄은 켜지지 않는다", () => {
+  // 2026-06-26 + 2개월 = 2026-08-26 > 오늘(08-25).
+  const row = onlyRow([
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-26", orderIssuedDate: null }),
+  ]);
+  assert.equal(row.isLongPendingPo, false);
+});
+
+test("PO 발행일이 있으면 견적일이 아무리 오래돼도 켜지지 않는다", () => {
+  const report = buildAsOf([
+    makeCase({
+      status: "WAITING_SHIPMENT",
+      // 2년도 더 지난 견적이지만 발주가 났다 — 기다릴 PO 가 없다.
+      quoteIssuedDate: "2024-01-02",
+      orderIssuedDate: "2024-03-15",
+    }),
+  ]);
+  assert.equal(report.blocks[0].rows[0].isLongPendingPo, false);
+  // 그러면서 PO 발행 완료로는 세어진다 — 둘은 서로 다른 값이다.
+  assert.equal(report.total.poIssued, 1);
+});
+
+test("견적일이 없는 줄은 켜지지 않는다 — 기다릴 것이 시작되지 않았다", () => {
+  const row = onlyRow([
+    makeCase({ status: "IN_REPAIR", quoteIssuedDate: null, orderIssuedDate: null }),
+  ]);
+  assert.equal(row.isLongPendingPo, false);
+});
+
+test("표시는 전체 A/S 현황과 **같은 함수**가 정한다 — 두 화면이 같은 건을 가리킨다", () => {
+  // 규칙을 여기 옮겨 적으면 언젠가 어긋나고, 그때 어느 쪽이 맞는지 말할 수 없다.
+  const cases = [
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-25" }),
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-26" }),
+    makeCase({ status: "IN_REPAIR", quoteIssuedDate: "2026-01-01", orderIssuedDate: "2026-02-01" }),
+    makeCase({ status: "WAITING_PARTS_SUPPLY", quoteIssuedDate: null }),
+    makeCase({ status: null, currentWorkflowStepKey: "some_new_step", quoteIssuedDate: "2026-05-01" }),
+  ];
+
+  for (const row of buildAsOf(cases).blocks.flatMap((block) => block.rows)) {
+    assert.equal(
+      row.isLongPendingPo,
+      isLongPendingPo({ status: row.status, orderRows: [row] }, MIDDAY_KST),
+      `${row.intakeNumber} 의 표시가 판정 함수와 다르다`
+    );
+  }
+});
+
+test("'오늘'은 부르는 쪽이 정한다 — 같은 자료도 날짜가 다르면 표시가 갈린다", () => {
+  // 도메인이 new Date() 를 부르면 이 시험을 쓸 수 없다(파일 위 MIDDAY_KST 주석).
+  const cases = [makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-25" })];
+  assert.equal(
+    onlyRow(cases, new Date("2026-08-24T05:00:00.000Z")).isLongPendingPo,
+    false,
+    "하루 전에는 아직 아니다"
+  );
+  assert.equal(onlyRow(cases, MIDDAY_KST).isLongPendingPo, true, "당일부터 걸린다");
+});
+
+test("빨간 글씨는 세는 값이 아니다 — 집계 6칸·PO 발행 완료·총 대수가 그대로다", () => {
+  const cases = [
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-25" }),
+    makeCase({ status: "WAITING_PO", quoteIssuedDate: "2026-06-26" }),
+  ];
+  const report = buildAsOf(cases);
+
+  assert.deepEqual(
+    report.blocks[0].rows.map((row) => row.isLongPendingPo),
+    [true, false],
+    "한 줄만 켜진다"
+  );
+  assert.equal(report.total.total, 2);
+  assert.equal(report.total.byStatus.PO_WAITING, 2, "표시가 켜져도 PO 대기 중 칸에 그대로 남는다");
+  assert.equal(report.total.poIssued, 0);
+  assert.equal(sumWeeklyReportStatusCounts(report.total), report.total.total);
+});
+
+test("출하 완료 건은 켜질 자리조차 없다 — 보고서에서 통째로 빠진다", () => {
+  const report = buildAsOf([
+    makeCase({
+      status: "SHIPMENT_COMPLETED",
+      currentWorkflowStepKey: "shipment_completed",
+      quoteIssuedDate: "2026-01-02",
+    }),
+  ]);
+  assert.deepEqual(report.blocks, []);
+  assert.equal(report.total.total, 0);
+});
+
+test("고른 줄을 다시 고르면 그대로다 — 표시가 상세표의 두 날짜와 같은 것을 본다", () => {
+  // buildWeeklyReport 는 조회가 이미 고른 줄 하나를 isLongPendingPo 에 넘긴다.
+  // 그 한 줄을 다시 골라도 값이 바뀌지 않아야 판정과 상세표가 갈라지지 않는다.
+  const pickedShapes = [
+    { quoteIssuedDate: null, orderIssuedDate: null },
+    { quoteIssuedDate: "2026-06-25", orderIssuedDate: null },
+    { quoteIssuedDate: null, orderIssuedDate: "2026-02-20" },
+    { quoteIssuedDate: "2026-01-05", orderIssuedDate: "2026-02-20" },
+  ];
+  for (const picked of pickedShapes) {
+    assert.deepEqual(
+      pickWeeklyReportOrderDates([picked]),
+      picked,
+      `${JSON.stringify(picked)} 를 다시 고르니 값이 바뀌었다`
+    );
+  }
 });
