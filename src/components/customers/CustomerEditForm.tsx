@@ -9,6 +9,7 @@ import EditSectionActions, {
   editInputClass,
   editLabelClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
+import { CustomerRowColorPicker } from "./CustomerRowColorField";
 
 /**
  * Customer master edit (SUPER_ADMIN/ADMIN only — canEditCustomers already
@@ -35,6 +36,12 @@ export default function CustomerEditForm({
   const [contactName, setContactName] = useState(customer.contactName ?? "");
   const [contactEmail, setContactEmail] = useState(customer.contactEmail ?? "");
   const [contactPhone, setContactPhone] = useState(customer.contactPhone ?? "");
+  /**
+   * 팔레트 키다(색 코드가 아니다). null 은 "안 고름"이고 폼 안에서는 빈
+   * 문자열로 다룬다 — 라디오의 value 는 문자열뿐이라서다. 저장할 때 다시
+   * null 로 돌아간다.
+   */
+  const [rowColor, setRowColor] = useState(customer.rowColor ?? "");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -58,6 +65,7 @@ export default function CustomerEditForm({
           contactName: contactName || null,
           contactEmail: contactEmail || null,
           contactPhone: contactPhone || null,
+          rowColor: rowColor || null,
         },
       });
 
@@ -130,6 +138,13 @@ export default function CustomerEditForm({
             onChange={(e) => setContactPhone(e.target.value)}
           />
           {fieldErrors.contactPhone && <p className={editErrorClass}>{fieldErrors.contactPhone}</p>}
+        </div>
+
+        {/* 색 고르개는 칸이 열한 개라 한 칸 폭에 들어가지 않는다 — 두 칸을
+            가로질러 아래에 둔다. */}
+        <div className="sm:col-span-2">
+          <CustomerRowColorPicker value={rowColor} disabled={disabled} onChange={setRowColor} />
+          {fieldErrors.rowColor && <p className={editErrorClass}>{fieldErrors.rowColor}</p>}
         </div>
       </dl>
 

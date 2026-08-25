@@ -78,6 +78,32 @@ export function resolveDomesticOrderValue(
 }
 
 /**
+ * 이 줄에 칠할 고객사 배경색(팔레트 키). 색이 없거나 고객사를 알 수 없으면
+ * null 이다.
+ *
+ * **정해진 고객사의 색이어야 한다.** 고객사는 두 곳에서 온다 — 이 행에 적힌
+ * 고객사와 연결된 수리 건의 고객사 — 그리고 화면이 그리는 이름은
+ * resolveDomesticOrderValue 가 고른 쪽이다. 색만 따로
+ * `resolveDomesticOrderValue(이 행의 색, 수리 건의 색)` 으로 접으면, 이 행의
+ * 고객사에 색이 없을 때 **다른 고객사(수리 건 쪽)의 색이 칠해진다** — 화면에는
+ * A 라고 적혀 있는데 줄은 B 의 색인 상태다. 그래서 "어느 쪽 고객사인가"를 먼저
+ * 정하고(이름을 고르는 그 판단 그대로), 그쪽의 색을 그대로 가져온다.
+ *
+ * 색이 팔레트에 있는 값인지는 여기서 보지 않는다 — 그 판단은
+ * domain/customer-row-color.ts 한 곳에 있고, 모르는 키는 거기서 "없음"으로
+ * 떨어진다.
+ */
+export function resolveDomesticOrderCustomerRowColor(row: {
+  ownCustomerName: string | null;
+  ownCustomerRowColor: string | null;
+  repairCaseCustomerRowColor: string | null;
+}): string | null {
+  return foldBlankToNull(row.ownCustomerName) !== null
+    ? row.ownCustomerRowColor
+    : row.repairCaseCustomerRowColor;
+}
+
+/**
  * 이 줄의 발주 년도. 날짜가 없거나 년도를 읽을 수 없으면 null 이고, null 은
  * "년도로 가릴 수 없는 줄"이라는 뜻이다(파일 헤더).
  */

@@ -19,6 +19,8 @@ import {
 import Link from "next/link";
 import type { CustomerListRow, DeletedCustomerRow } from "@/lib/db/queries/customers";
 import { rankSimilarNames } from "@/lib/domain/entity-name-match";
+import { resolveCustomerRowColor } from "@/lib/domain/customer-row-color";
+import { CustomerRowColorSwatch } from "./CustomerRowColorField";
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -310,7 +312,7 @@ export default function CustomerListScreen({
                           </td>
                         )}
                         <td className="px-3 py-2 font-medium whitespace-nowrap text-zinc-900 dark:text-zinc-50">
-                          {row.name}
+                          <CustomerName row={row} />
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.endUserCount}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.repairCaseCount}</td>
@@ -355,7 +357,9 @@ export default function CustomerListScreen({
                             onChange={() => toggleSelected(row.id)}
                             className="disabled:cursor-not-allowed"
                           />
-                          <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.name}</span>
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                            <CustomerName row={row} />
+                          </span>
                         </span>
                         <CustomerCardFields row={row} />
                       </label>
@@ -365,7 +369,9 @@ export default function CustomerListScreen({
                         href={`/customers/${row.id}`}
                         className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800/60"
                       >
-                        <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.name}</span>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                          <CustomerName row={row} />
+                        </span>
                         <CustomerCardFields row={row} />
                       </Link>
                     )
@@ -434,6 +440,23 @@ export default function CustomerListScreen({
         onCancel={trash.close}
       />
     </div>
+  );
+}
+
+/**
+ * 고객사명과 그 앞의 색 견본. 견본은 **색을 정해 둔 고객사에만** 붙는다 —
+ * 39행 전부에 빈 칸을 세워 두면 정작 색이 있는 줄이 눈에 띄지 않는다.
+ *
+ * 목록에 이것이 있어야 어느 고객사에 무슨 색을 줬는지 한눈에 보인다. 없으면
+ * 색을 확인하려고 고객사를 하나씩 열어 봐야 한다.
+ */
+function CustomerName({ row }: { row: CustomerListRow }) {
+  const hasColor = resolveCustomerRowColor(row.rowColor) !== null;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {hasColor && <CustomerRowColorSwatch colorKey={row.rowColor} />}
+      {row.name}
+    </span>
   );
 }
 

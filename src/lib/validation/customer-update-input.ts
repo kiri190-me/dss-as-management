@@ -1,3 +1,5 @@
+import { isCustomerRowColorKey } from "@/lib/domain/customer-row-color";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isValidCustomerId(value: unknown): value is string {
@@ -16,6 +18,11 @@ export type CustomerUpdateFields = {
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  /**
+   * 내자 정리 목록에서 이 고객사의 줄에 칠할 색 — **팔레트 키**이거나 null 이다
+   * (domain/customer-row-color.ts). 색 코드는 여기까지 오지 못한다.
+   */
+  rowColor: string | null;
 };
 
 export type ValidateCustomerUpdateResult =
@@ -82,6 +89,22 @@ export function validateCustomerUpdateFields(
     }
   }
 
+  /**
+   * 색은 **고르는 값**이지 적는 값이 아니다. 그래서 길이를 재거나 다듬지 않고
+   * 팔레트에 있는 키인지만 본다 — 비어 있으면(고르지 않음) null 이고, 팔레트
+   * 밖의 값은 거절한다. 화면이 무엇을 그렸든 서버 액션은 이 검증을 다시
+   * 거치므로, 색 코드를 직접 보내는 요청은 여기서 멈춘다.
+   */
+  let rowColor: string | null = null;
+  const rowColorRaw = raw.rowColor;
+  if (rowColorRaw === null || rowColorRaw === undefined || rowColorRaw === "") {
+    rowColor = null;
+  } else if (isCustomerRowColorKey(rowColorRaw)) {
+    rowColor = rowColorRaw;
+  } else {
+    fieldErrors.rowColor = "고를 수 없는 색입니다.";
+  }
+
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
-  return { ok: true, data: { name, contactName, contactEmail, contactPhone } };
+  return { ok: true, data: { name, contactName, contactEmail, contactPhone, rowColor } };
 }

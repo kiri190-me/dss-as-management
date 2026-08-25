@@ -4,7 +4,10 @@ import { asc, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { customers, domesticOrders, products, repairCases } from "../schema";
-import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
+import {
+  resolveDomesticOrderCustomerRowColor,
+  resolveDomesticOrderValue,
+} from "@/lib/domain/domestic-order-list";
 
 /**
  * ============================================================================
@@ -81,6 +84,12 @@ export type DomesticOrderJoinRow = {
   customerId: string | null;
   /** 이 행의 customer_id 가 가리키는 고객사 이름. customerId 가 없으면 null. */
   ownCustomerName: string | null;
+  /**
+   * 이 행의 고객사에 정해 둔 줄 배경색(팔레트 키, customers.row_color).
+   * 이름과 **짝을 이뤄** 실려 온다 — 어느 쪽 고객사를 쓸지는 아래 매퍼가
+   * 정하고, 색은 그때 정해진 고객사를 그대로 따라가야 한다.
+   */
+  ownCustomerRowColor: string | null;
   modelNameText: string | null;
   lotNumberText: string | null;
   serialNumberText: string | null;
@@ -91,6 +100,8 @@ export type DomesticOrderJoinRow = {
    * 이 행의 값이 비었을 때 대신 쓴다.
    */
   repairCaseCustomerName: string | null;
+  /** 수리 건의 고객사에 정해 둔 줄 배경색. 위 ownCustomerRowColor 와 같은 짝이다. */
+  repairCaseCustomerRowColor: string | null;
   repairCaseModelName: string | null;
   repairCaseLotNumber: string | null;
   repairCaseSerialNumber: string | null;
@@ -160,6 +171,14 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
   lotNumber: string | null;
   serialNumber: string | null;
   reportedSymptom: string | null;
+  /**
+   * 위 customerName 으로 **정해진 바로 그 고객사**의 줄 배경색(팔레트 키).
+   * 색이 없으면 null 이고, 화면은 그때 아무 색도 칠하지 않는다.
+   *
+   * 색 코드가 아니라 키다 — 클래스로 바꾸는 일은 화면 쪽이
+   * domain/customer-row-color.ts 로 한다.
+   */
+  customerRowColor: string | null;
 };
 
 /**
@@ -184,6 +203,10 @@ export function mapDomesticOrderRow(row: DomesticOrderJoinRow): DomesticOrderLis
       row.faultDescriptionText,
       row.repairCaseReportedSymptom
     ),
+    // 색은 위 다섯과 같은 규칙으로 **접지 않는다** — 이름을 고른 쪽의 고객사를
+    // 그대로 따라간다(그 함수의 주석). 두 벌을 coalesce 하면 화면의 이름과 줄
+    // 색이 서로 다른 고객사를 가리킬 수 있다.
+    customerRowColor: resolveDomesticOrderCustomerRowColor(row),
   };
 }
 
@@ -215,12 +238,15 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       // 한다 — id 만 내려보내면 화면이 고객사 이름을 그릴 수 없다.
       customerId: domesticOrders.customerId,
       ownCustomerName: orderCustomers.name,
+      // 이름과 색은 늘 같은 고객사에서 함께 온다 — 별칭이 다르면 다른 고객사다.
+      ownCustomerRowColor: orderCustomers.rowColor,
       modelNameText: domesticOrders.modelNameText,
       lotNumberText: domesticOrders.lotNumberText,
       serialNumberText: domesticOrders.serialNumberText,
       faultDescriptionText: domesticOrders.faultDescriptionText,
       // 연결된 수리 건에서 따라오는 다섯.
       repairCaseCustomerName: repairCaseCustomers.name,
+      repairCaseCustomerRowColor: repairCaseCustomers.rowColor,
       repairCaseModelName: products.modelName,
       repairCaseLotNumber: products.lotNumber,
       repairCaseSerialNumber: products.serialNumber,

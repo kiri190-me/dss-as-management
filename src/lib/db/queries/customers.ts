@@ -16,6 +16,12 @@ export type CustomerListRow = {
   createdAt: string;
   /** 삭제 시 낙관적 동시성 검사에 쓴다(customers에는 version 컬럼이 없다). */
   updatedAt: string;
+  /**
+   * 내자 정리 목록에서 이 고객사의 줄에 칠하는 색(팔레트 키). 목록에 작은
+   * 견본으로 보여 준다 — 없으면 어느 고객사에 무슨 색을 줬는지 39개를 하나씩
+   * 열어 봐야 알 수 있다.
+   */
+  rowColor: string | null;
 };
 
 /**
@@ -29,7 +35,13 @@ export type CustomerListRow = {
 export async function listCustomersWithCounts(): Promise<CustomerListRow[]> {
   const [customerRows, endUserRows, repairCaseRows] = await Promise.all([
     db
-      .select({ id: customers.id, name: customers.name, createdAt: customers.createdAt, updatedAt: customers.updatedAt })
+      .select({
+        id: customers.id,
+        name: customers.name,
+        createdAt: customers.createdAt,
+        updatedAt: customers.updatedAt,
+        rowColor: customers.rowColor,
+      })
       .from(customers)
       .where(eq(customers.isDeleted, false))
       .orderBy(customers.name),
@@ -59,6 +71,7 @@ export async function listCustomersWithCounts(): Promise<CustomerListRow[]> {
     repairCaseCount: repairCaseCounts.get(c.id) ?? 0,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+    rowColor: c.rowColor,
   }));
 }
 
@@ -70,6 +83,8 @@ export type CustomerDetail = {
   contactPhone: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 내자 정리 목록의 줄 배경색(팔레트 키). 편집 폼의 색 고르개 초기값이다. */
+  rowColor: string | null;
 };
 
 export async function getCustomerDetailById(id: string): Promise<CustomerDetail | null> {
@@ -82,6 +97,7 @@ export async function getCustomerDetailById(id: string): Promise<CustomerDetail 
       contactName: customers.contactName,
       contactEmail: customers.contactEmail,
       contactPhone: customers.contactPhone,
+      rowColor: customers.rowColor,
       createdAt: customers.createdAt,
       updatedAt: customers.updatedAt,
     })

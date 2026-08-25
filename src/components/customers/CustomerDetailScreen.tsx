@@ -4,7 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import type { CustomerDetail, CustomerEndUserRow, EndUserContactRow } from "@/lib/db/queries/customers";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import {
+  NO_CUSTOMER_ROW_COLOR_LABEL,
+  resolveCustomerRowColor,
+} from "@/lib/domain/customer-row-color";
 import CustomerEditForm from "./CustomerEditForm";
+import { CustomerRowColorSwatch } from "./CustomerRowColorField";
 import CustomerRepairCaseHistory from "./CustomerRepairCaseHistory";
 import EndUserManagementSection from "./EndUserManagementSection";
 
@@ -102,6 +107,18 @@ export default function CustomerDetailScreen({
               <InfoField label="담당자 성함" value={customer.contactName ?? "-"} />
               <InfoField label="연락처(이메일)" value={customer.contactEmail ?? "-"} />
               <InfoField label="연락처(전화)" value={customer.contactPhone ?? "-"} />
+              {/* 수정 폼에서 고른 색을 읽기 화면에서도 그대로 볼 수 있어야 한다 —
+                  안 그러면 색을 확인하려고 매번 수정 버튼을 눌러야 한다. */}
+              <div>
+                <dt className="text-xs text-zinc-500 dark:text-zinc-400">목록 배경색</dt>
+                <dd className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-50">
+                  <CustomerRowColorSwatch colorKey={customer.rowColor} />
+                  <span>
+                    {resolveCustomerRowColor(customer.rowColor)?.label ??
+                      NO_CUSTOMER_ROW_COLOR_LABEL}
+                  </span>
+                </dd>
+              </div>
             </dl>
           )}
         </div>

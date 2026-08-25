@@ -60,6 +60,12 @@ export async function updateCustomer(params: {
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  /**
+   * 내자 정리 목록의 줄 배경색 — 팔레트 키이거나 null 이다
+   * (domain/customer-row-color.ts). 저장할 칸이 하나 늘었을 뿐이라서
+   * expectedUpdatedAt 대조와 이름 중복 검사는 그대로다.
+   */
+  rowColor: string | null;
 }): Promise<UpdateCustomerResult> {
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -102,6 +108,7 @@ export async function updateCustomer(params: {
           contactName: params.contactName,
           contactEmail: params.contactEmail,
           contactPhone: params.contactPhone,
+          rowColor: params.rowColor,
           updatedAt: new Date(),
         })
         .where(eq(customers.id, params.customerId))

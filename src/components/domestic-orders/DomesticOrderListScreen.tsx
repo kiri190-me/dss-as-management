@@ -17,6 +17,10 @@ import {
   isDomesticOrderCompleted,
   resolveInitialDomesticOrderYear,
 } from "@/lib/domain/domestic-order-list";
+import {
+  customerRowColorClass,
+  customerRowColorInteractiveClass,
+} from "@/lib/domain/customer-row-color";
 import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
 import DomesticOrderEditForm from "./DomesticOrderEditForm";
 
@@ -52,6 +56,20 @@ import DomesticOrderEditForm from "./DomesticOrderEditForm";
  * 포커스 가능한 조작을 줄 유일한 자리였기 때문이다. 인수번호를 링크로 바꾸면
  * 그 자리가 사라지므로, 키보드로 폼을 여는 길이 없어지지 않도록 완료 버튼 옆에
  * 나란히 둔다. 칼럼은 여전히 22개다.
+ *
+ * ── 고객사마다 줄 배경색, 완료 회색이 그 위에 있다 ──────────────────────
+ * 고객사 관리에서 정해 둔 색(customers.row_color)으로 그 고객사의 줄과 묶음
+ * 소제목을 함께 칠한다. 22칼럼을 옆으로 밀어 보는 표라, 색이 있어야 스크롤
+ * 도중에도 어느 고객사의 줄인지 놓치지 않는다. 소제목까지 같은 색인 이유는
+ * 소제목과 그 아래 줄들이 한 덩어리로 읽혀야 해서다.
+ *
+ * **완료된 줄에는 고객사 색을 칠하지 않는다.** 완료의 회색이 이긴다 — 색을
+ * 겹쳐 칠하면 "끝난 건인가"라는, 이 표에서 제일 자주 보는 판단이 고객사마다
+ * 다른 모양이 된다. 색은 어디까지나 묶음을 알아보는 표시이고, 완료는 그 줄의
+ * 상태다.
+ *
+ * 색 → 클래스는 domain/customer-row-color.ts 가 정한다. 여기서 색 코드를 직접
+ * 적지 않는 이유는 그 파일 머리에 적혀 있다.
  *
  * ── 완료는 감추는 것이 아니라 회색으로 두는 것이다 ──────────────────────
  * 완료된 줄도 자리를 지킨다. 아래로 내리거나 접지 않는다 — 이 표에는 사람이
@@ -591,9 +609,23 @@ export default function DomesticOrderListScreen({
               {/* 고객사마다 <tbody> 를 하나씩 둔다. 한 표 안에 tbody 가 여럿인
                   것은 표준 그대로이고, 소제목 줄이 그 묶음에 속한다는 사실이
                   구조로 드러난다. */}
-              {groups.map((group) => (
+              {groups.map((group) => {
+                // 묶음의 색은 그 묶음에 든 줄의 색이다 — 고객사 이름으로 묶었고
+                // 이름은 고객사마다 유일하므로, 한 묶음의 줄들은 같은 색이다.
+                // 소제목과 줄이 같은 색이라야 한 덩어리로 읽힌다(파일 헤더).
+                const groupColorClass = customerRowColorClass(group.rows[0]?.customerRowColor);
+                return (
                 <tbody key={group.customerName ?? "__unassigned__"}>
-                  <tr className="border-y border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/60">
+                  {/* 색이 있으면 기본 회색 소제목 배경을 **대신한다.** 두 배경
+                      클래스를 함께 두면 어느 쪽이 이길지는 클래스 이름의 순서가
+                      아니라 만들어진 CSS 의 순서가 정하므로, 겹쳐 쓰지 않는다. */}
+                  <tr
+                    className={`border-y border-zinc-200 dark:border-zinc-800 ${
+                      groupColorClass === ""
+                        ? "bg-zinc-50 dark:bg-zinc-800/60"
+                        : groupColorClass
+                    }`}
+                  >
                     <th
                       colSpan={TABLE_COLUMN_COUNT}
                       // 이 머리글은 뒤따르는 줄 묶음 전체에 걸린다 — colgroup 이
@@ -615,6 +647,9 @@ export default function DomesticOrderListScreen({
                   </tr>
                   {group.rows.map((row) => {
                     const completed = isDomesticOrderCompleted(row);
+                    // 완료가 아닌 줄에만 고객사 색이 붙는다 — 아래 세 갈래의
+                    // 순서가 곧 "완료 회색이 이긴다"는 규칙이다(파일 헤더).
+                    const rowColorClass = customerRowColorInteractiveClass(row.customerRowColor);
                     return (
                       <tr
                         key={row.id}
@@ -630,7 +665,9 @@ export default function DomesticOrderListScreen({
                           // 살아 있어서 여전히 누를 수 있다는 것이 보인다.
                           completed
                             ? "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
-                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                            : rowColorClass === ""
+                              ? "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                              : rowColorClass
                         } ${canEdit ? "cursor-pointer" : ""}`}
                       >
                         <td className="px-3 py-2">
@@ -683,16 +720,28 @@ export default function DomesticOrderListScreen({
                     );
                   })}
                 </tbody>
-              ))}
+                );
+              })}
             </table>
           }
           cards={
             // 카드에서도 같은 묶음이 보여야 한다 — 표에서 보던 것과 다른 순서로
             // 읽히면 좁은 화면으로 옮긴 순간 다른 자료처럼 보인다.
             <div className="flex flex-col gap-5">
-              {groups.map((group) => (
+              {groups.map((group) => {
+                // 표와 같은 규칙이다 — 좁은 화면이라고 색이 달라지면 같은 자료가
+                // 다른 화면처럼 읽힌다(파일 헤더).
+                const groupColorClass = customerRowColorClass(group.rows[0]?.customerRowColor);
+                return (
                 <section key={group.customerName ?? "__unassigned__"} className="flex flex-col gap-2">
-                  <h2 className="flex items-baseline gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                  {/* 카드 보기의 소제목에는 원래 배경이 없다. 색이 있을 때만
+                      배경을 주므로, 색을 안 쓰는 고객사의 화면은 이 변경 전과
+                      완전히 같다. */}
+                  <h2
+                    className={`flex items-baseline gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 ${
+                      groupColorClass === "" ? "" : `rounded-md px-2 py-1 ${groupColorClass}`
+                    }`}
+                  >
                     {group.label}
                     <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
                       {group.rows.length}건
@@ -701,6 +750,9 @@ export default function DomesticOrderListScreen({
                   <div className={LIST_CARD_GRID}>
                     {group.rows.map((row) => {
                       const completed = isDomesticOrderCompleted(row);
+                      // 표의 줄과 같은 세 갈래 — 완료 회색이 고객사 색을 이긴다.
+                      // 카드에는 원래 hover 색이 없으므로 배경만 칠한다.
+                      const rowColorClass = customerRowColorClass(row.customerRowColor);
                       return (
                         <div
                           key={row.id}
@@ -708,7 +760,9 @@ export default function DomesticOrderListScreen({
                           className={`flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800 ${
                             completed
                               ? "bg-zinc-200 dark:bg-zinc-800"
-                              : "bg-white dark:bg-zinc-900"
+                              : rowColorClass === ""
+                                ? "bg-white dark:bg-zinc-900"
+                                : rowColorClass
                           } ${canEdit ? "cursor-pointer" : ""}`}
                         >
                           {/* 표와 같은 원칙이다 — 인수번호는 수리 건으로 가는
@@ -753,7 +807,8 @@ export default function DomesticOrderListScreen({
                     })}
                   </div>
                 </section>
-              ))}
+                );
+              })}
             </div>
           }
         />

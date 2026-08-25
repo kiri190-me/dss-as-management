@@ -22,6 +22,20 @@ export const customers = pgTable(
     contactName: text("contact_name"),
     contactEmail: text("contact_email"),
     contactPhone: text("contact_phone"),
+    // 내자 정리 목록에서 이 고객사의 줄에 칠할 배경색. 비어 있으면 색을 칠하지
+    // 않는다(대부분의 고객사가 그렇다).
+    //
+    // 여기 들어가는 값은 "amber" 같은 **팔레트 키**이지 "#FFE4B5" 같은 색
+    // 코드가 아니다(domain/customer-row-color.ts). 색 코드를 담아 두면 (1) 나중에
+    // "색이 너무 진하다"고 느껴질 때 39개 고객사의 값을 데이터 마이그레이션으로
+    // 고쳐야 하고, (2) 밝은 화면과 어두운 화면에 서로 다른 색조를 줄 방법이
+    // 없다 — 한 칸에 색이 하나뿐이라서다. 키만 담아 두면 그 두 가지가 전부 코드
+    // 수정으로 끝난다.
+    //
+    // 팔레트에 없는 값이 남아도(색 하나를 나중에 뺀 경우) 화면은 "색 없음"으로
+    // 조용히 떨어진다. 그래서 이 컬럼에는 CHECK 제약도, 인덱스도 두지 않는다 —
+    // 거르는 조건이 아니라 그리는 값이고, 39행짜리 표다.
+    rowColor: text("row_color"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

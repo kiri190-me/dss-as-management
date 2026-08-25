@@ -35,6 +35,7 @@ test("validateCustomerUpdateFields: valid full submission trims and normalizes e
       contactName: null,
       contactEmail: "ops@acme.example",
       contactPhone: null,
+      rowColor: null,
     });
   }
 });
@@ -83,4 +84,55 @@ test("validateCustomerUpdateFields: non-string contactName fails", () => {
   const result = validateCustomerUpdateFields({ name: "Acme", contactName: 123, contactEmail: null, contactPhone: null });
   assert.equal(result.ok, false);
   if (!result.ok) assert.ok(result.fieldErrors.contactName);
+});
+
+test("validateCustomerUpdateFields: 팔레트에 있는 색 키는 그대로 통과한다", () => {
+  const result = validateCustomerUpdateFields({
+    name: "Acme",
+    contactName: null,
+    contactEmail: null,
+    contactPhone: null,
+    rowColor: "amber",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.rowColor, "amber");
+});
+
+test("validateCustomerUpdateFields: 빈 색(없음)은 통과하고 null 이 된다", () => {
+  for (const empty of ["", null, undefined]) {
+    const result = validateCustomerUpdateFields({
+      name: "Acme",
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: empty,
+    });
+    assert.equal(result.ok, true, `rowColor=${String(empty)} 는 통과해야 한다`);
+    if (result.ok) assert.equal(result.data.rowColor, null);
+  }
+});
+
+test("validateCustomerUpdateFields: rowColor 칸이 아예 없으면 색 없음으로 읽는다", () => {
+  const result = validateCustomerUpdateFields({
+    name: "Acme",
+    contactName: null,
+    contactEmail: null,
+    contactPhone: null,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.rowColor, null);
+});
+
+test("validateCustomerUpdateFields: 팔레트 밖의 값은 거절한다 — 색 코드도 마찬가지다", () => {
+  for (const bad of ["#FFE4B5", "zinc", "AMBER", "rgb(255,0,0)", 123, {}, true]) {
+    const result = validateCustomerUpdateFields({
+      name: "Acme",
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: bad,
+    });
+    assert.equal(result.ok, false, `rowColor=${JSON.stringify(bad)} 는 거절해야 한다`);
+    if (!result.ok) assert.ok(result.fieldErrors.rowColor);
+  }
 });

@@ -102,6 +102,7 @@ describe("updateCustomer", () => {
       contactName: "담당자",
       contactEmail: "contact@example.com",
       contactPhone: "010-1234-5678",
+      rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
@@ -124,6 +125,7 @@ describe("updateCustomer", () => {
       contactName: "temp",
       contactEmail: "temp@example.com",
       contactPhone: "010-0000-0000",
+      rowColor: null,
     });
     assert.equal(first.ok, true);
     if (!first.ok) return;
@@ -135,6 +137,7 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(result.ok, true);
 
@@ -155,6 +158,7 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
@@ -174,6 +178,7 @@ describe("updateCustomer", () => {
       contactName: "unchanged-update",
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
   });
@@ -188,6 +193,7 @@ describe("updateCustomer", () => {
       contactName: "v1",
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(first.ok, true);
 
@@ -198,6 +204,7 @@ describe("updateCustomer", () => {
       contactName: "v2-should-not-apply",
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
@@ -215,6 +222,7 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(missing.ok, false);
     if (!missing.ok) assert.equal(missing.code, "NOT_FOUND");
@@ -228,6 +236,7 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      rowColor: null,
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_FOUND");
@@ -246,6 +255,7 @@ describe("updateCustomer", () => {
         contactName: null,
         contactEmail: null,
         contactPhone: null,
+        rowColor: null,
       }),
       updateCustomer({
         customerId: customerB.id,
@@ -254,6 +264,7 @@ describe("updateCustomer", () => {
         contactName: null,
         contactEmail: null,
         contactPhone: null,
+        rowColor: null,
       }),
     ]);
 
@@ -279,6 +290,7 @@ describe("updateCustomer", () => {
       contactName: "새 마스터 담당자",
       contactEmail: "new-master@example.com",
       contactPhone: "010-9999-8888",
+      rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
 
@@ -286,5 +298,132 @@ describe("updateCustomer", () => {
     assert.equal(caseRow.contactNameSnapshot, "인수 시점 담당자", "per-case snapshot must survive a customer-master contact edit unchanged");
     assert.equal(caseRow.contactPhoneSnapshot, "010-1111-2222");
     assert.equal(caseRow.contactEmailSnapshot, "intake-snapshot@example.com");
+  });
+
+  test("rowColor: 팔레트 키가 그대로 저장된다 — 색 코드가 아니라 키다", async () => {
+    const customer = await createTestCustomer("ROW-COLOR-SET");
+    assert.equal(customer.rowColor, null, "새 고객사는 색이 없는 것이 기본이다");
+
+    const result = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: "amber",
+    });
+    assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.rowColor, "amber");
+  });
+
+  test("rowColor: 다른 색으로 바꿀 수 있고, 비우면 null 로 돌아간다", async () => {
+    const customer = await createTestCustomer("ROW-COLOR-EDIT");
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: "sky",
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const second = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: first.updatedAt,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: "violet",
+    });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+
+    const [changed] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(changed.rowColor, "violet");
+
+    const cleared = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: second.updatedAt,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: null,
+    });
+    assert.equal(cleared.ok, true);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.rowColor, null, "비운 색은 빈 문자열이 아니라 null 이어야 한다");
+  });
+
+  test("rowColor: 색만 바꿔도 이름·연락처는 그대로 남는다", async () => {
+    const customer = await createTestCustomer("ROW-COLOR-KEEPS");
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: "담당자",
+      contactEmail: "keep@example.com",
+      contactPhone: "010-5555-6666",
+      rowColor: null,
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const result = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: first.updatedAt,
+      name: customer.name,
+      contactName: "담당자",
+      contactEmail: "keep@example.com",
+      contactPhone: "010-5555-6666",
+      rowColor: "emerald",
+    });
+    assert.equal(result.ok, true);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.rowColor, "emerald");
+    assert.equal(row.name, customer.name);
+    assert.equal(row.contactName, "담당자");
+    assert.equal(row.contactEmail, "keep@example.com");
+    assert.equal(row.contactPhone, "010-5555-6666");
+  });
+
+  test("rowColor: 낡은 expectedUpdatedAt 이면 색도 바뀌지 않는다", async () => {
+    const customer = await createTestCustomer("ROW-COLOR-CONFLICT");
+    const staleTimestamp = customer.updatedAt.toISOString();
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: staleTimestamp,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: "teal",
+    });
+    assert.equal(first.ok, true);
+
+    const result = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: staleTimestamp,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: "rose",
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "CONFLICT");
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.rowColor, "teal", "충돌한 두 번째 수정은 색도 적용하지 않는다");
   });
 });

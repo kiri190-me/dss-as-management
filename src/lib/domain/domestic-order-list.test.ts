@@ -9,6 +9,7 @@ import {
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   orderIssuedYearOf,
+  resolveDomesticOrderCustomerRowColor,
   resolveDomesticOrderValue,
   resolveInitialDomesticOrderYear,
   UNASSIGNED_CUSTOMER_LABEL,
@@ -293,4 +294,62 @@ test("이 행의 값이 우선이라는 규칙은 다섯 칸 모두에 같게 �
   assert.equal(resolveDomesticOrderValue(own.lot, fromCase.lot), "LN-9");
   assert.equal(resolveDomesticOrderValue(own.serial, fromCase.serial), "SN-9");
   assert.equal(resolveDomesticOrderValue(own.fault, fromCase.fault), "전원 안 들어옴");
+});
+
+test("줄 색은 이름을 고른 쪽 고객사의 색이다 — 이 행에 고객사가 있으면 그쪽", () => {
+  assert.equal(
+    resolveDomesticOrderCustomerRowColor({
+      ownCustomerName: "한빛전자",
+      ownCustomerRowColor: "amber",
+      repairCaseCustomerRowColor: "sky",
+    }),
+    "amber"
+  );
+});
+
+test("이 행에 고객사가 있는데 색이 없으면 색도 없다 — 수리 건 고객사의 색을 빌려 오지 않는다", () => {
+  // 이것이 이 함수가 따로 있는 이유다. resolveDomesticOrderValue 처럼 두 값을
+  // 접으면, 화면에는 "한빛전자"라고 적힌 줄에 동해정밀의 색이 칠해진다.
+  assert.equal(
+    resolveDomesticOrderCustomerRowColor({
+      ownCustomerName: "한빛전자",
+      ownCustomerRowColor: null,
+      repairCaseCustomerRowColor: "sky",
+    }),
+    null
+  );
+});
+
+test("이 행에 고객사가 없으면 수리 건 고객사의 색을 쓴다", () => {
+  assert.equal(
+    resolveDomesticOrderCustomerRowColor({
+      ownCustomerName: null,
+      ownCustomerRowColor: null,
+      repairCaseCustomerRowColor: "sky",
+    }),
+    "sky"
+  );
+});
+
+test("공백만 적힌 고객사 이름은 없는 것과 같다 — 이름과 색이 같은 판단을 쓴다", () => {
+  assert.equal(
+    resolveDomesticOrderCustomerRowColor({
+      ownCustomerName: "   ",
+      ownCustomerRowColor: "amber",
+      repairCaseCustomerRowColor: "sky",
+    }),
+    "sky",
+    "이름이 수리 건을 따라갔으면 색도 따라가야 한다"
+  );
+});
+
+test("고객사가 어느 쪽에도 없으면 색도 없다", () => {
+  assert.equal(
+    resolveDomesticOrderCustomerRowColor({
+      ownCustomerName: null,
+      ownCustomerRowColor: null,
+      repairCaseCustomerRowColor: null,
+    }),
+    null
+  );
 });
