@@ -46,6 +46,44 @@ import { useSectionEditSubmit } from "@/components/repair-cases/detail/edit/useS
  *
  * 그 판정은 **화면을 그리기 위한 값일 뿐 관문이 아니다** — 실제 관문은 서버
  * 액션이고, 이 칸을 억지로 띄워 저장을 보내도 거기서 다시 막힌다.
+ *
+ * ── `수정` 버튼 없이 칸을 눌러 연다 ────────────────────────────────────
+ * 본보기인 두 칸은 글자 옆에 `수정` 을 하나 달아 두지만 이 칸은 그러지 않는다.
+ * 이유는 바로 위와 같다 — 저 둘은 상세화면에 한 번씩만 나오고 이 칸은 **줄마다**
+ * 나오는데, 이 표가 250줄이 넘는다. 같은 버튼을 달면 표의 오른쪽 끝이 `수정`
+ * 250개로 뒤덮여 정작 읽어야 할 비고가 묻힌다. 그래서 **안 고칠 때 보여 주는
+ * 글자 자체를 `<button>` 으로** 만들고, 칸을 누르면 곧바로 편집으로 들어간다.
+ *
+ * 글자에 onClick 만 얹지 않은 것은 그것이 **키보드로 닿지 않고** 낭독기가 누를
+ * 수 있는 것으로 읽지도 않기 때문이다. 진짜 `<button>` 이면 Enter·Space·포커스
+ * 이동이 전부 브라우저 기본으로 딸려 온다 — role="button" + tabIndex + 키 처리를
+ * 손으로 짜는 것보다 이쪽이 틀릴 자리가 없다. 대신 겉모습은 **평범한 글자 그대로**
+ * 둔다(테두리도 배경도 없다). 버튼처럼 보이게 하면 버튼을 없앤 뜻이 사라진다.
+ *
+ * `w-full` + `text-left` 인 것은 비고가 비면 화면에 `-` **한 글자뿐**이라,
+ * 글자에만 걸면 누를 곳이 점 하나가 되기 때문이다. 칸의 폭은 채우되 글자는 표의
+ * 다른 칸과 같은 자리에서 시작해야 한다. whitespace-pre-line 을 버튼에 다시 적는
+ * 것은 `<td>` 의 그것이 폼 컨트롤 안까지 내려온다는 보장이 없어서다 — 여러 줄
+ * 비고의 줄바꿈이 이 칸에서만 사라지면 안 된다.
+ *
+ * ── hover·title·focus 는 장식이 아니다 ────────────────────────────────
+ * `수정` 이라는 글자가 사라졌으므로, 단서가 없으면 **여기를 고칠 수 있다는 사실을
+ * 아무도 모른다.** 그것이 이 방식의 유일한 실질적 손실이고, 아래 셋이 그 자리를
+ * 메운다. 하나라도 장식으로 오해해 걷어내면 그만큼 못 찾는 사람이 생긴다.
+ *   - hover 배경(이 화면이 이미 쓰는 zinc 톤, 밝은 화면·어두운 화면 각각) 과
+ *     손가락 커서 — 마우스로 쓰는 사람의 단서다
+ *   - focus-visible 테두리 — 키보드로 훑는 사람에게는 **이것이 유일한 단서다**
+ *   - title — 올려 두면 무엇을 할 수 있는 칸인지 글자로 알려 준다
+ *
+ * 낭독기용 이름은 **내용 + 용도**로 합성한다 — 버튼 안에 sr-only 조각을 하나
+ * 더 두는 방식이고, 인수번호 링크가 이미 같은 모양이다(WeeklyReportGoalsPanel 의
+ * GoalPrefix). aria-label 로 `비고 수정` 을 주면 **그것이 자식 내용을 덮어써서**
+ * 정작 비고 값이 낭독기에서 사라진다 — 표를 읽어 내려가는 사람에게는 그 칸의
+ * 값이 먼저 와야 하므로 순서도 내용이 앞이다. 이름을 내용에만 맡기지 않는 것은
+ * 비고가 비면 이름이 `-` 한 글자가 되어 무엇을 하는 버튼인지 알 길이 없어서다.
+ *
+ * ⚠️ 그 sr-only 를 담는 버튼에는 **relative 가 반드시 함께 붙는다.** 까닭은 그
+ * 자리의 주석에 적어 두었다 — 떼면 표 전체가 창 스크롤을 하나 더 만든다.
  * ============================================================================
  */
 export default function WeeklyReportNotesCell({
@@ -78,25 +116,38 @@ export default function WeeklyReportNotesCell({
     });
 
   if (!isEditing) {
-    // 안 고칠 때는 지금까지와 똑같이 보인다 — 글자 옆에 `수정` 이 하나 붙을 뿐이다.
-    // items-start 인 것은 비고가 여러 줄일 수 있어서다: 가운데 정렬이면 버튼이
-    // 문단 한가운데로 내려간다.
+    // 안 고칠 때 보이는 글자는 지금까지와 한 글자도 다르지 않다 — 다만 그 글자
+    // 자체가 누를 수 있는 것이 되었을 뿐이다(파일 헤더).
     return (
-      <span className="inline-flex items-start gap-2">
-        <span>{displayText}</span>
-        <button
-          type="button"
-          onClick={() => {
-            // 열 때마다 서버가 방금 그려 준 값에서 다시 시작한다 — 취소하고
-            // 다시 여는 사이에 화면이 새로 그려졌을 수 있다.
-            setValue(notes ?? "");
-            setIsEditing(true);
-          }}
-          className="text-xs font-medium whitespace-nowrap text-zinc-600 hover:underline dark:text-zinc-400"
-        >
-          수정
-        </button>
-      </span>
+      <button
+        type="button"
+        onClick={() => {
+          // 열 때마다 서버가 방금 그려 준 값에서 다시 시작한다 — 취소하고
+          // 다시 여는 사이에 화면이 새로 그려졌을 수 있다.
+          setValue(notes ?? "");
+          setIsEditing(true);
+        }}
+        // `수정` 글자가 사라진 자리를 메우는 단서 셋 중 하나다 — 지우지 말 것.
+        title="클릭하면 비고를 고칠 수 있습니다"
+        // -mx-1 px-1 은 짝이다: hover 배경만 글자 밖으로 조금 넓히고 글자가
+        // 서는 자리는 그대로 둔다(넓히기만 하면 이 칸의 글자만 오른쪽으로
+        // 밀려 표의 세로줄이 어긋난다).
+        //
+        // ⚠️ relative 를 떼지 말 것 — 아래 sr-only 는 position:absolute 다
+        // (Tailwind 의 sr-only 가 그렇다). 기준이 되는 조상이 없으면 그 span 이
+        // AppShell <main> 의 자르기를 빠져나가 문서 바닥에 자리를 주장하고,
+        // 세로 스크롤바가 둘로 보인다 — 이 저장소가 실제로 겪은 고장이다
+        // (WeeklyReportGoalsPanel 의 GoalPrefix 주석). 이 표는 250줄이 넘으니
+        // 같은 고장을 250배로 되살릴 수 있는 자리다. relative 는 좌표를 주지
+        // 않으면 아무것도 옮기지 않고 z-index:auto 라 쌓임 맥락도 만들지 않는다.
+        className="relative -mx-1 block w-full cursor-pointer rounded px-1 text-left whitespace-pre-line hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500"
+      >
+        {displayText}
+        {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다(파일 헤더). 순서가
+            내용 먼저인 것은 표를 읽어 내려가는 사람에게 그 칸의 값이 먼저
+            와야 해서다 — 인수번호 링크와 같은 방식이다(GoalPrefix). */}
+        <span className="sr-only"> 비고 수정</span>
+      </button>
     );
   }
 

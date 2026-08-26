@@ -689,9 +689,31 @@ export default function WeeklyReportGoalsPanel({
     <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {/* 주 이동은 링크다 — 서버 컴포넌트가 그 주의 목표를 다시 조회해야
-            한다(파일 헤더). 버튼으로 두면 화면만 바뀌고 자료는 그대로다. */}
+            한다(파일 헤더). 버튼으로 두면 화면만 바뀌고 자료는 그대로다.
+
+            ⚠️ **scroll={false} 를 떼지 말 것.** 없어도 되는 것처럼 보이지만
+            아니다. App Router 의 <Link> 는 이동할 때마다 화면을 맨 위로 올린다.
+            그런데 이 구역은 화면 **맨 아래**에 있어서(위쪽이 고객사 블록과
+            상세표다) 주를 한 번 넘길 때마다 맨 위로 튀었고, 보던 자리로
+            돌아오려면 매번 다시 한참 내려와야 했다. 매주 여러 번 넘겨 보는
+            자리다. 그래서 **이동은 지금 그대로 두고 스크롤만 건드리지 않는다** —
+            주소(`?week=...`)는 여전히 바뀌므로 그 주의 목표와 납입 예정 건을
+            서버가 다시 조회하고, 제목(weekLabel)도 아래 노란 안내문도 새 주에
+            맞게 다시 그려진다.
+
+            알려진 한계: 주마다 목표 줄 수가 달라 문서 길이가 바뀐다. 그래서
+            줄이 훨씬 적은 주로 가면 스크롤 위치가 그대로인 만큼 보이는 자리가
+            어긋날 수 있다. 맨 위로 튀는 것보다는 낫다고 사용자가 정했다 —
+            고장이 아니다.
+
+            GoalPrefix 의 인수번호 링크에는 **일부러 넣지 않았다.** 그쪽은 다른
+            화면(/repair-cases/...)으로 떠나는 링크라 맨 위에서 시작하는 게 맞다. */}
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={weekHref(previousWeekStart)} className={smallButtonClass}>
+          <Link
+            href={weekHref(previousWeekStart)}
+            scroll={false}
+            className={smallButtonClass}
+          >
             ◀ 지난주
           </Link>
           {/* 이 구역의 제목이다 — 화면의 다른 구역(종류별 총합 · PO 발행 현황)과
@@ -699,7 +721,7 @@ export default function WeeklyReportGoalsPanel({
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
             {weekLabel(weekStart)}
           </h2>
-          <Link href={weekHref(nextWeekStart)} className={smallButtonClass}>
+          <Link href={weekHref(nextWeekStart)} scroll={false} className={smallButtonClass}>
             다음주 ▶
           </Link>
         </div>
@@ -727,8 +749,11 @@ export default function WeeklyReportGoalsPanel({
           이번 주가 아닌 {weekLabel(weekStart)}를 보고 있습니다. 목표만 그 주의 것이고,{" "}
           <strong className="font-semibold">집계는 지금 이 순간의 상태입니다</strong> — 그 주의
           진행 상황이 아닙니다.{" "}
+          {/* 이 링크도 주 이동이라 scroll={false} 다 — 위 주 고르개와 같은 이유이고,
+              셋 중 하나만 다르게 움직이면 오히려 더 헷갈린다. */}
           <Link
             href={weekHref(currentWeekStart)}
+            scroll={false}
             className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200"
           >
             이번 주로
