@@ -176,16 +176,39 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 알 수 없게 된다. 그래서 `<thead>` 를 sticky top-0 으로 붙여 둔다. 다만 그
  * 선언만으로는 아무 일도 일어나지 않는다 — sticky 는 가장 가까운 **굴러가는**
  * 스크롤 상자를 기준으로 붙는데 표 껍데기에는 높이 제한이 없어 표 높이만큼
- * 자랄 뿐이었다. 그래서 ResponsiveList 에 stickyHeader 를 켜 그 껍데기에 높이
- * 상한을 주고, 상자가 자기 안에서 실제로 굴러가게 만든다. 상한 값과 그 근거는
- * responsive-list.tsx 의 같은 이름 항목에 있다.
+ * 자랄 뿐이었다. 그래서 ResponsiveList 에 stickyHeader 를 켜 그 껍데기가 표
+ * 높이와 무관한 높이를 갖게 하고, 상자가 자기 안에서 실제로 굴러가게 만든다.
  *
- * ⚠️ 그 대가로 **세로 스크롤바가 둘이 된다**(페이지 하나 + 표 하나). 주간보고
- * 화면 헤더가 같은 모양을 **고장**으로 적어 두었는데 종류가 다르다 — 거기서는
- * 스크롤 상자가 의도치 않게 생겼고, 여기서는 높이를 명시해 일부러 만들었다.
- * 다른 선택지(표의 가로 스크롤 상자를 없애 페이지 전체를 굴리는 것)는 옆으로
- * 밀 때 제목·검색칸·합계까지 함께 밀려나가서 버렸다. **stickyHeader 를 떼면
- * 머리글 고정이 다시 헛돈다** — 스크롤바가 둘이라는 이유로 걷어내지 말 것.
+ * ⚠️ **그 높이는 이 파일이 준다.** 맨 바깥 상자가 h-full 이라 이 화면은 <main>
+ * 의 남는 높이를 꼭 채우고, 표는 그 세로 배치의 마지막 칸이라 **위 요소들이
+ * 쓰고 남은 높이**를 그대로 받는다. 처음에는 70dvh 라는 어림값이었는데, 어림이라
+ * 표 아래에 남는 공간이 생기고 페이지가 표와 따로 굴러갔다 — 표를 다 보려면
+ * 페이지를 먼저 내려야 하고 페이지는 표 아래로 더 내려갔다(사용자 지적). 지금은
+ * 스크롤이 실질적으로 표 하나다. **h-full 을 지우면 이 계산이 통째로 무너진다.**
+ *
+ * ⚠️ **h-full 만으로는 모자란다 — 받는 쪽도 있어야 한다.** h-full 은 이 바깥
+ * 상자의 높이를 807px(=<main> 안쪽) 로 못 박을 뿐이고, 그 안의 항목이 줄어들지
+ * 못하면 상자는 그냥 넘친다. 실제로 그렇게 넘쳤다: flex 항목의 min-height 기본값
+ * auto 는 **제 내용의 최소 높이**로 계산되는데(css-flexbox-1 §4.5), 목록의 루트는
+ * overflow 가 visible 이라 그 규칙을 그대로 받아 표 높이 아래로 한 픽셀도 줄지
+ * 않았다. 실측: <main> clientHeight 855 / scrollHeight 1322 — 위 요소 340px 에
+ * 목록이 제 높이 934px 을 그대로 얹어 467px 이 밖으로 나갔고, 껍데기 안쪽에는
+ * 스크롤이 아예 없어 sticky 머리글도 함께 화면 밖으로 밀려났다. 지금은
+ * ResponsiveList 의 루트가 min-h 로 그 자동 최소 높이를 걷고 flex-1 로 남는
+ * 높이를 받는다 — 값과 실측은 responsive-list.tsx 의 같은 항목에 있다.
+ *
+ * 다만 `줄 수정` 폼이 열리면 위쪽이 화면 절반을 먹어서 남는 높이가 거의 없어진다.
+ * 그때는 표가 바닥(min-h-[18rem])에 걸리고 **페이지가 다시 굴러간다** — 폼을
+ * 보려면 어차피 위로 올라가야 하니 그게 맞다. 값과 근거는 responsive-list.tsx
+ * 의 '높이는 값이 아니라 자리로 정해진다' 항목에 있다.
+ *
+ * ⚠️ 그 대가로 표에 **세로 스크롤바가 생긴다**(그리고 폼이 열려 바닥에 걸릴
+ * 때만 페이지 것이 하나 더 붙는다). 주간보고 화면 헤더가 같은 모양을 **고장**
+ * 으로 적어 두었는데 종류가 다르다 — 거기서는 스크롤 상자가 의도치 않게 생겼고,
+ * 여기서는 머리글을 붙여 두려고 알고 만들었다. 다른 선택지(표의 가로 스크롤
+ * 상자를 없애 페이지 전체를 굴리는 것)는 옆으로 밀 때 제목·검색칸·합계까지 함께
+ * 밀려나가서 버렸다. **stickyHeader 를 떼면 머리글 고정이 다시 헛돈다** —
+ * 스크롤바가 보인다는 이유로 걷어내지 말 것.
  *
  * 머리글이 지나가는 줄을 가리게 하는 것은 z-10 하나뿐이다. 배경은 이미 그 줄에
  * 있었다(bg-white dark:bg-zinc-900) — 밝은 화면·어두운 화면 모두 아래 줄이
@@ -779,9 +802,25 @@ function EditRowButton({
   onOpen: (id: string) => void;
 }) {
   return (
+    // ⚠️ **relative 를 떼지 말 것 — 떼면 페이지가 표 아래로 계속 굴러간다.**
+    // 아래 sr-only 는 position:absolute 다(Tailwind 의 sr-only 가 그렇다). 이
+    // 버튼에 relative 가 없으면 그 span 의 컨테이닝 블록을 만들어 주는 조상이
+    // 표 껍데기 **바깥**(ResponsiveList 루트)이 되고, overflow 는 자기보다
+    // 바깥에 컨테이닝 블록을 둔 절대위치 자손을 자르지 못하므로 span 이 껍데기의
+    // 세로 스크롤을 그대로 빠져나가 **줄이 원래 있었을 자리**에 자리를 주장한다.
+    // 줄마다 하나씩이라 표가 길수록 그만큼 아래로 뻗는다. 실측: 23줄에서
+    // <main> clientHeight 917 / scrollHeight 1322 — 405px 이 전부 sr-only 였고,
+    // 그 405px 만큼 페이지가 굴러가면 sticky 머리글도 함께 화면 밖으로 나간다.
+    // 같은 고장의 경위는 WeeklyReportScreen 의 고객사 <section> 주석에 있다.
+    //
+    // relative 는 좌표를 주지 않으면 아무것도 옮기지 않고 z-index:auto 라 쌓임
+    // 맥락도 만들지 않는다 — 기준점만 준다. rowActionButtonClass 에 넣지 않는
+    // 것은 그 값이 "수정과 완료가 같은 크기·색으로 보인다"만 뜻하고, 같이 쓰는
+    // 완료 버튼에는 sr-only 가 없어서다(주간보고가 SIDE_BY_SIDE_GRID 에 넣지
+    // 않은 것과 같은 이유).
     <button
       type="button"
-      className={rowActionButtonClass}
+      className={`${rowActionButtonClass} relative`}
       onClick={(event: MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         onOpen(row.id);
@@ -809,7 +848,13 @@ function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
       // 줄 아무 데나 누르면 수정 폼이 열린다 — 여기서 막지 않으면 수리 건으로
       // 넘어가면서 폼도 함께 열린다.
       onClick={(event) => event.stopPropagation()}
-      className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+      // ⚠️ **relative 를 떼지 말 것.** 아래 sr-only 는 position:absolute 라,
+      // 기준이 되는 조상이 없으면 표 껍데기의 세로 스크롤을 빠져나가 문서에
+      // 자리를 주장한다 — 줄마다 하나씩이라 페이지가 그만큼 아래로 굴러가고
+      // sticky 머리글이 화면 밖으로 나간다(바로 위 EditRowButton 주석에 실측이
+      // 있다). 주간보고의 같은 링크(GoalPrefix)와 **한 글자도 다르지 않은**
+      // 문자열이다 — 같은 경로·같은 모양이니 한쪽만 고쳐지지 않게 맞춰 둔다.
+      className="relative text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
     >
       {label}
       <span className="sr-only"> 수리 건 상세로 이동</span>
@@ -963,7 +1008,27 @@ export default function DomesticOrderListScreen({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    /*
+      h-full — 이 화면은 <main> 의 남는 높이를 **꼭 채우고 끝난다.** 표가 그
+      마지막 칸이라, 위 요소들이 쓰고 남은 높이가 그대로 표 껍데기의 높이가 된다
+      (파일 헤더 '열 제목은 화면에 붙어 있다'). 이 한 줄이 없으면 이 상자는 제
+      내용만큼 자라고, 표는 다시 제 높이만큼 자라 페이지가 표와 따로 굴러간다.
+
+      min-h-full 이 아니라 h-full 인 것이 중요하다 — min-height 로 주면 내용이
+      길어질 때 상자가 내용만큼 자라 **줄어들 자리가 사라지고**, 표가 통째로
+      늘어나 머리글 고정이 헛돈다. h-full 은 높이를 못 박아 두므로 모자랄 때
+      줄어드는 쪽은 언제나 표다(글 상자들은 자기 내용보다 작아지지 않는다).
+
+      ⚠️ 다만 **못을 박는 것만으로는 아무것도 줄지 않는다.** 줄어드는 쪽인 표
+      목록이 자기 자동 최소 높이(= 제 내용 높이)를 걷어내고 남는 높이를 받아야
+      비로소 이 계산이 성립한다 — 그 일은 ResponsiveList 의 stickyHeader 가
+      한다(파일 헤더의 ⚠️ 두 번째 항목). **둘은 한 짝이고, 한쪽만 있으면
+      페이지가 다시 굴러간다.**
+
+      print:h-auto — 인쇄에서는 못을 뺀다. 화면 높이에 맞춰 두면 표가 한 장에서
+      잘린다(responsive-list.tsx 의 같은 항목).
+    */
+    <div className="flex h-full flex-col gap-4 print:h-auto">
       <SheetHeading asOfDate={asOfDate} />
 
       {isFormOpen && (
@@ -1149,9 +1214,11 @@ export default function DomesticOrderListScreen({
           // 년도를 바꾸면 줄 수가, 완료 버튼이 붙고 떨어지면 순번 칸의 폭이
           // 달라진다 — 표가 지금 폭에 들어가는지 다시 재야 하는 조건들이다.
           measureKey={[visibleRows.length, groups.length, canEdit]}
-          // 표 껍데기에 높이 상한을 줘 그 안에서 굴러가게 한다 — 아래
-          // <thead> 의 sticky top-0 이 붙을 자리를 만드는 유일한 장치다
-          // (파일 헤더 '열 제목은 화면에 붙어 있다'). 이 서비스에서 이것을 켠
+          // 목록이 위 요소들이 쓰고 **남은 높이**를 받고, 표 껍데기가 그 안에서
+          // 굴러가게 한다 — 아래 <thead> 의 sticky top-0 이 붙을 자리를 만드는
+          // 유일한 장치다(파일 헤더 '열 제목은 화면에 붙어 있다'). 남는 높이를
+          // 셀 수 있는 것은 맨 바깥 상자의 h-full 덕이므로 **둘은 한 짝이고,
+          // 한쪽만 있으면 페이지가 다시 굴러간다.** 이 서비스에서 이것을 켠
           // 목록은 여기 하나뿐이다.
           stickyHeader
           table={

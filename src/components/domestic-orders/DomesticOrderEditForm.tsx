@@ -802,9 +802,32 @@ export default function DomesticOrderEditForm({
                           onChange={(e) => updateDueDate(entry.key, { note: e.target.value })}
                         />
                       </div>
+                      {/* ⚠️ **relative 를 떼지 말 것 — 떼면 창 스크롤이 하나 더
+                          생긴다.** 아래 sr-only 는 position:absolute 다(Tailwind
+                          의 sr-only 가 그렇다). 이 버튼에 relative 가 없으면 그
+                          span 의 컨테이닝 블록을 만들어 주는 조상이 이 폼에도
+                          목록 화면에도 하나가 없어 기준이 문서가 되고, overflow
+                          는 자기보다 바깥에 컨테이닝 블록을 둔 절대위치 자손을
+                          자르지 못하므로 span 이 AppShell <main> 의 자르기를
+                          그대로 빠져나가 문서 바닥에 자리를 주장한다.
+
+                          **이 자리는 폼이 열렸을 때만 걸린다** — 그래서 눈에 잘
+                          안 띈다. 폼이 열리면 위쪽이 화면 절반을 먹어 이 줄들이
+                          <main> 의 접힌 자리 아래로 내려가는데, 그때 새어 나간
+                          span 이 그 깊이만큼 문서를 늘린다. 같은 표의 `수정`
+                          버튼·인수번호 링크가 방금 같은 고장으로 405px 을
+                          굴렸다(DomesticOrderListScreen 의 EditRowButton 주석에
+                          실측이 있다). 규모가 작다는 것은 안 고쳐도 된다는 뜻이
+                          아니라, 남겨 두면 다음에 같은 증상을 처음부터 다시
+                          진단하게 된다는 뜻이다.
+
+                          relative 는 좌표를 주지 않으면 아무것도 옮기지 않고
+                          z-index:auto 라 쌓임 맥락도 만들지 않는다 — 기준점만
+                          준다. 아래 `납기요청일 추가` 버튼에 없는 것은 그쪽에
+                          sr-only 가 없어서다. */}
                       <button
                         type="button"
-                        className="flex-none rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                        className="relative flex-none rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
                         disabled={disabled}
                         onClick={() => removeDueDate(entry.key)}
                       >
