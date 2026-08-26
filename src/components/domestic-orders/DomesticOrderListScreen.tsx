@@ -265,8 +265,20 @@ const CARD_FIELD_GROUPS: {
     of: (row: DomesticOrderListItem) => string;
     /**
      * 값에 든 줄바꿈을 진짜 줄바꿈으로 그릴 칸인가. 켠 칸만 whitespace-pre-line
-     * 이 붙는다 — 모든 칸에 걸면 현황·이력·기타처럼 사람이 줄바꿈을 섞어 적는
-     * 칸의 생김새까지 함께 바뀐다.
+     * 이 붙는다 — 줄 단위로 만들어 내는 칸(납기요청일)과 사람이 줄바꿈을 섞어
+     * 적는 칸(현황·이력·기타)만 켠다. 모든 칸에 걸면 날짜·번호·금액·이름처럼
+     * 한 줄로 나란히 서야 할 값의 생김새까지 함께 바뀐다.
+     *
+     * 켜고 끄는 것은 줄바꿈뿐이다 — 긴 낱말을 접는 break-words 는 카드의 모든
+     * 칸이 이미 함께 쓴다(아래 <dd>). pre-line 은 사람이 넣은 줄바꿈만 살릴 뿐
+     * 줄바꿈 없이 길게 이어 적은 한 덩어리는 접어 주지 못하므로, 둘은 늘 짝이다.
+     *
+     * 카드는 표와 **일부러 다르다.** 표의 세 칸은 pre 로 바꿔 폭이 모자라도
+     * 접지 않게 했지만(noteCellContentClass), 카드가 나오는 좁은 화면에서
+     * 좌우 스크롤은 사실상 못 쓰는 조작이라 접지 않으면 글자가 화면 밖으로
+     * 나가 아예 안 보인다. 그래서 카드는 break-words + pre-line 을 유지한다.
+     * 사람이 친 줄바꿈이 살아나는 것은 표와 카드가 똑같고, **폭이 모자랄 때만**
+     * 다르게 군다.
      */
     multiline?: boolean;
   }[];
@@ -305,7 +317,9 @@ const CARD_FIELD_GROUPS: {
     fields: [
       { label: "견적발행일", of: (row) => dash(row.quoteIssuedDate) },
       { label: "견적서번호", of: (row) => dash(row.quoteNumber) },
-      { label: "현황", of: (row) => dash(row.progressNote) },
+      // 사람이 <textarea> 에 줄바꿈을 섞어 적는 칸이다 — 표와 마찬가지로
+      // 적은 그대로 여러 줄로 그린다(표 쪽은 noteCellContentClass).
+      { label: "현황", of: (row) => dash(row.progressNote), multiline: true },
       { label: "납품일", of: (row) => dash(row.deliveredDate) },
       { label: "납품자", of: (row) => dash(row.deliveredBy) },
     ],
@@ -322,8 +336,9 @@ const CARD_FIELD_GROUPS: {
   {
     label: "기타",
     fields: [
-      { label: "이력", of: (row) => dash(row.historyNote) },
-      { label: "기타", of: (row) => dash(row.etcNote) },
+      // 현황과 같다 — 사람이 줄바꿈을 섞어 적는 칸이라 적은 그대로 여러 줄로.
+      { label: "이력", of: (row) => dash(row.historyNote), multiline: true },
+      { label: "기타", of: (row) => dash(row.etcNote), multiline: true },
     ],
   },
 ];
@@ -346,6 +361,57 @@ function CompletedBadge() {
  */
 const rowActionButtonClass =
   "rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700";
+
+/**
+ * 표의 현황·이력·기타 칸 **안쪽 블록**의 모양.
+ *
+ * ── 왜 이 세 칸만인가 ───────────────────────────────────────────────────
+ * 편집 폼에서 <textarea> 로 받는 칸이고(DomesticOrderEditForm 의 long 칸),
+ * 사람이 넣은 줄바꿈이 자료에 그대로 들어 있다. 그런데 줄 전체에 걸린
+ * whitespace-nowrap 이 그것을 공백 하나로 뭉개 한 줄로 그리고 있었다 — 자료는
+ * 멀쩡한데 화면만 못 보여 주던 셈이다. 나머지 칸(날짜·번호·금액·이름)은
+ * 지금처럼 한 줄이라야 22칼럼을 세로로 훑어 읽는다.
+ *
+ * 같은 <textarea> 칸인 고장내역은 아직 켜지 않았다. 표시 규칙을 한 번에
+ * 넓히지 않고, 실제로 줄바꿈을 섞어 적고 있는 칸부터 맞춘 것이다.
+ *
+ * ── 왜 pre-line 이 아니라 pre 인가 ──────────────────────────────────────
+ * 처음에는 whitespace-pre-line 이었다. pre-line 은 사람이 넣은 줄바꿈을
+ * 살리기는 하는데 **폭이 모자라면 거기서 또 접는다.** 그래서 화면에 보이는
+ * 줄바꿈이 두 종류로 섞인다 — 사람이 친 것과 칸 폭이 만든 것. 읽는 사람은
+ * 둘을 구별할 수 없고, 창 폭이 바뀌면 같은 메모가 다른 모양으로 읽힌다.
+ * 이 칸에서 줄이 바뀌는 근거는 **사람이 친 줄바꿈 하나뿐**이어야 한다.
+ * white-space: pre 가 정확히 그것이다 — 사람이 친 곳에서만 바꾸고, 폭이
+ * 모자라도 접지 않는다.
+ *
+ * pre 는 pre-line 과 달리 연이은 공백도 그대로 남긴다. 손으로 칸을 맞춰
+ * 적는 메모라 적은 대로 보이는 편이 맞으므로, 이것은 부작용이 아니라 덤이다.
+ *
+ * ── 최대 폭과 break-words 는 일부러 뺐다. 다시 넣지 말 것 ───────────────
+ * 예전에는 max-w-[280px] 와 break-words 가 함께 걸려 있었다. 표가 옆으로
+ * 길어지는 것을 막으려던 것인데, 그 둘이 남아 있으면 pre 로 바꿔도 아무
+ * 소용이 없다 — 폭에서 접히지 않으려고 pre 를 쓰는데 폭을 끊어 두면 결국
+ * 같은 자리에서 접힌다. 그래서 둘 다 뺐고, 남은 것은 whitespace-pre 하나다.
+ *
+ * 대가는 분명하다: 줄바꿈 없이 길게 이어 적은 메모가 하나라도 있으면 그
+ * 칼럼이 그만큼 늘어나 표가 옆으로 길어진다. 이것은 고장이 아니라 맞바꾼
+ * 것이다 — "친 대로 보인다"를 얻고 "칼럼 폭이 일정하다"를 내주기로 사용자가
+ * 정했다. **max-w 나 break-words 를 되돌려 넣지 말 것.** 넣는 순간 이 칸은
+ * 원래 문제로 돌아간다.
+ *
+ * 표가 넓어져도 화면 전체가 밀리지는 않는다. 가로 스크롤은 ResponsiveList 가
+ * 두른 overflow-x-auto 래퍼 안에서만 일어난다(파일 헤더의 '스크롤 래퍼를
+ * 여기서 따로 두르지 않는다'). 그 래퍼를 없애거나 여기서 한 겹 더 감싸면
+ * 표가 파란 헤더와 사이드바까지 밀어낸다.
+ *
+ * ── 카드 쪽은 왜 여전히 접히는가 ────────────────────────────────────────
+ * 좁은 화면에서 그려지는 카드(CARD_FIELD_GROUPS 의 multiline)는 지금도
+ * break-words + pre-line 이고, 그대로 둔다. 폰에서 좌우 스크롤은 사실상 못
+ * 쓰는 조작이라, 접지 않으면 글자가 화면 밖으로 나가 아예 안 보이기 때문이다.
+ * 사람이 친 줄바꿈이 살아나는 것은 표와 카드가 똑같고, **폭이 모자랄 때만**
+ * 다르게 군다.
+ */
+const noteCellContentClass = "whitespace-pre";
 
 /**
  * 수정 폼을 여는 버튼. **키보드로 이 표를 고칠 수 있는 유일한 길**이다 —
@@ -759,7 +825,11 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2">{dash(row.reportedSymptom)}</td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
                         <td className="px-3 py-2">{dash(row.quoteNumber)}</td>
-                        <td className="px-3 py-2">{dash(row.progressNote)}</td>
+                        {/* 사람이 줄바꿈을 섞어 적는 칸 — 적은 그대로 여러 줄로
+                            그린다(noteCellContentClass). */}
+                        <td className="px-3 py-2">
+                          <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
+                        </td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
                         <td className="px-3 py-2">{dash(row.deliveredBy)}</td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.taxInvoiceDate)}</td>
@@ -768,8 +838,14 @@ export default function DomesticOrderListScreen({
                         </td>
                         <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
                         <td className="px-3 py-2">{dash(row.japanRemittanceNote)}</td>
-                        <td className="px-3 py-2">{dash(row.historyNote)}</td>
-                        <td className="px-3 py-2">{dash(row.etcNote)}</td>
+                        {/* 현황과 같은 칸이다 — 사람이 친 줄바꿈만 살리고,
+                            폭이 모자라도 접지 않는다. */}
+                        <td className="px-3 py-2">
+                          <div className={noteCellContentClass}>{dash(row.historyNote)}</div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className={noteCellContentClass}>{dash(row.etcNote)}</div>
+                        </td>
                       </tr>
                     );
                   })}
