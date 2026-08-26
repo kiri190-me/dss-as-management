@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   DOMESTIC_ORDER_INLINE_EDIT_LABELS,
+  DOMESTIC_ORDER_INLINE_EDIT_MULTILINE,
   buildDomesticOrderCellUpdateFields,
+  domesticOrderFaultDescriptionHint,
   type DomesticOrderCellEditRow,
   type DomesticOrderInlineEditableField,
 } from "./domestic-order-cell-edit";
@@ -250,10 +252,14 @@ test("다섯 칸 각각이 자기 칸만 바꾼다", () => {
   }
 });
 
-test("칸 이름표는 다섯 칸 전부에 있다 — 이름 없는 칸은 낭독기에서 무엇인지 알 수 없다", () => {
+test("칸 이름표는 아홉 칸 전부에 있다 — 이름 없는 칸은 낭독기에서 무엇인지 알 수 없다", () => {
   assert.deepEqual(Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS).sort(), [
     "deliveredBy",
+    "etcNote",
+    "faultDescriptionText",
+    "historyNote",
     "japanRemittanceNote",
+    "progressNote",
     "projectName",
     "purchaseOrderNumber",
     "quoteNumber",
@@ -264,4 +270,193 @@ test("칸 이름표는 다섯 칸 전부에 있다 — 이름 없는 칸은 낭�
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.quoteNumber, "견적서번호");
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.deliveredBy, "납품자");
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.japanRemittanceNote, "일본 송금");
+  // 여러 줄 칸 넷. 이름은 표 머리말(고장내역 · 현황 · 이력 · 기타) 그대로다 —
+  // 칸 이름이 원본 칸 이름(faultDescriptionText)으로 새어 나오면 안 된다.
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.faultDescriptionText, "고장내역");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.progressNote, "현황");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.historyNote, "이력");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.etcNote, "기타");
+});
+
+/**
+ * ── 여기부터: 여러 줄짜리 글자 칸 넷 ───────────────────────────────────────
+ *
+ * 고장내역 · 현황 · 이력 · 기타. 위 다섯과 저장 규칙은 똑같고, 아래 셋이 더
+ * 걸린다:
+ *
+ *  4. 편집칸이 `<textarea>` 여야 한다 — `<input>` 으로 열면 브라우저가 값의
+ *     줄바꿈을 말없이 지운 채 넘겨준다. 그 판정은 화면이 아니라
+ *     DOMESTIC_ORDER_INLINE_EDIT_MULTILINE 이 한다.
+ *  5. 줄바꿈이 든 값이 **한 글자도 깎이지 않고** 실려야 한다 — 고치는 칸도,
+ *     함께 실려 가는 나머지 칸도.
+ *  6. **고장내역은 원본 칸이 실린다.** 화면이 그리는 것은 계산된
+ *     값(reportedSymptom)이라, 이 칸 하나만 "보이는 것"과 "저장되는 것"이 다르다.
+ */
+
+/** 이 화면에서 눌러 고칠 수 있는 칸 아홉. 시험이 도는 기준 목록이다. */
+const ALL_INLINE_FIELDS: DomesticOrderInlineEditableField[] = [
+  "purchaseOrderNumber",
+  "projectName",
+  "quoteNumber",
+  "deliveredBy",
+  "japanRemittanceNote",
+  "faultDescriptionText",
+  "progressNote",
+  "historyNote",
+  "etcNote",
+];
+
+/** 여러 줄이 실제로 들어 있는 칸 넷. 값에 줄바꿈이 들어 있다. */
+const MULTILINE_FIELDS: DomesticOrderInlineEditableField[] = [
+  "faultDescriptionText",
+  "progressNote",
+  "historyNote",
+  "etcNote",
+];
+
+test("여러 줄 칸 넷을 각각 고쳐도 나머지 여덟 칸이 원래 값 그대로 실린다", () => {
+  const original = row();
+  for (const field of MULTILINE_FIELDS) {
+    const built = buildDomesticOrderCellUpdateFields(original, field, "새 값\n둘째 줄");
+    assert.equal(built[field], "새 값\n둘째 줄");
+    for (const other of ALL_INLINE_FIELDS) {
+      if (other === field) continue;
+      assert.equal(
+        built[other],
+        original[other],
+        `${field} 을(를) 고치는데 ${other} 가 바뀌었다`
+      );
+    }
+    // 글자 칸 말고도 조용히 지워지는 것들이 함께 실려야 한다.
+    assert.equal(built.displayOrder, 3);
+    assert.equal(built.paymentCompleted, true);
+    assert.deepEqual(built.dueDates, [
+      { dueDate: "2026-01-20", note: "1차분" },
+      { dueDate: "2026-02-15", note: null },
+    ]);
+    assert.equal(Object.keys(built).length, 23);
+  }
+});
+
+test("줄바꿈이 든 값은 한 글자도 깎이지 않고 실린다 — input 으로 열면 조용히 사라지는 그것이다", () => {
+  const written = "1차 확인: 전원부 이상\n2차 확인: 부품 대기\n\n메모  칸맞춤";
+  for (const field of MULTILINE_FIELDS) {
+    const built = buildDomesticOrderCellUpdateFields(row(), field, written);
+    assert.equal(built[field], written, `${field} 의 줄바꿈이 깎였다`);
+  }
+});
+
+test("고치지 않은 여러 줄 칸의 줄바꿈도 그대로 실려 나간다", () => {
+  // 현황 하나만 고치는 상황. 이력·기타·고장내역에 들어 있던 줄바꿈이 이 저장에
+  // 휩쓸려 뭉개지면, 사람이 제일 길게 적어 둔 칸이 조용히 한 줄이 된다.
+  const subject = row({
+    faultDescriptionText: "증상 1\n증상 2",
+    historyNote: "2026-01-05 접수\n2026-01-20 발주",
+    etcNote: "비고 1\n비고 2",
+  });
+  const built = buildDomesticOrderCellUpdateFields(subject, "progressNote", "수리 완료");
+
+  assert.equal(built.progressNote, "수리 완료");
+  assert.equal(built.faultDescriptionText, "증상 1\n증상 2");
+  assert.equal(built.historyNote, "2026-01-05 접수\n2026-01-20 발주");
+  assert.equal(built.etcNote, "비고 1\n비고 2");
+});
+
+test("고장내역은 원본 칸으로 실린다 — 계산된 reportedSymptom 이 끼어들면 안 된다", () => {
+  /**
+   * ⚠️ **이 시험이 이 칸의 전부다.**
+   *
+   * 이 줄은 원본 칸이 비어 있어 연결된 수리 건의 증상을 빌려 쓰는 중이고, 화면에는
+   * 그 빌려 온 글이 보인다. 사람이 그 칸을 눌러 자기 글을 적으면 **원본 칸**이
+   * 그 글로 바뀌어야 한다 — 계산된 값이 실려 나가면, 아무도 건드리지 않은 다른
+   * 줄에서까지 수리 건의 증상이 자기 값으로 굳는다.
+   */
+  const listItem = {
+    ...row({ faultDescriptionText: null }),
+    displayIntakeNumber: "2026-0099",
+    customerName: "주식회사 가나다",
+    modelName: "RF-999",
+    lotNumber: "LN-999",
+    serialNumber: "SN-999",
+    // 화면이 그리고 있는 글자. 편집칸에 채우지도, 저장에 싣지도 않는다.
+    reportedSymptom: "수리 건에 적힌 증상",
+  };
+
+  const built = buildDomesticOrderCellUpdateFields(
+    listItem,
+    "faultDescriptionText",
+    "발주서에 적힌 증상\n(수리 건과 다름)"
+  );
+
+  assert.equal(built.faultDescriptionText, "발주서에 적힌 증상\n(수리 건과 다름)");
+  assert.equal("reportedSymptom" in built, false, "계산된 값이 함께 실려 나갔다");
+
+  // 고장내역을 고쳤다고 다른 원본 칸이 수리 건 값으로 채워지지도 않는다.
+  assert.equal(built.modelNameText, "RF-100");
+  assert.equal(built.lotNumberText, "LN-7");
+  assert.equal(built.serialNumberText, "SN-9");
+});
+
+test("고장내역을 빈 문자열로 지우면 다시 수리 건 값을 빌려 쓰게 된다 — 계산된 값이 굳지 않는다", () => {
+  // 빈 문자열을 null 로 접는 일은 검증 한 곳이 한다(파일 헤더). 여기서 계산된
+  // 값을 대신 채워 넣으면 "지웠다"가 "수리 건 값을 내 값으로 박았다"가 된다.
+  const built = buildDomesticOrderCellUpdateFields(row(), "faultDescriptionText", "");
+  assert.equal(built.faultDescriptionText, "");
+  assert.equal(built.progressNote, "수리중\n부품 대기");
+});
+
+test("여러 줄 칸인지는 값의 성질이 정한다 — 넷만 textarea, 다섯은 input", () => {
+  // 이 표가 틀리면 화면이 <input> 을 열고, 그 순간 값의 줄바꿈이 말없이 사라진다.
+  assert.deepEqual(
+    Object.keys(DOMESTIC_ORDER_INLINE_EDIT_MULTILINE).sort(),
+    Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS).sort(),
+    "이름표가 있는 칸과 여러 줄 판정이 있는 칸이 어긋난다"
+  );
+  for (const field of MULTILINE_FIELDS) {
+    assert.equal(DOMESTIC_ORDER_INLINE_EDIT_MULTILINE[field], true, `${field} 는 여러 줄 칸이다`);
+  }
+  for (const field of ALL_INLINE_FIELDS) {
+    if (MULTILINE_FIELDS.includes(field)) continue;
+    assert.equal(DOMESTIC_ORDER_INLINE_EDIT_MULTILINE[field], false, `${field} 는 한 줄짜리다`);
+  }
+});
+
+test("고장내역 안내는 연결된 수리 건에 증상이 적혀 있을 때만 나온다", () => {
+  const linked = {
+    repairCaseId: "11111111-1111-4111-8111-111111111111",
+    intakeNumber: "2026-0001",
+    repairCaseReportedSymptom: "전원 안 들어옴",
+  };
+
+  assert.deepEqual(domesticOrderFaultDescriptionHint(linked), {
+    intakeNumber: "2026-0001",
+    symptom: "전원 안 들어옴",
+  });
+
+  // 연결이 없으면 빌려 올 값 자체가 없다.
+  assert.equal(
+    domesticOrderFaultDescriptionHint({ ...linked, repairCaseId: null }),
+    null
+  );
+
+  // 연결은 있지만 그 건에 증상이 안 적혀 있으면, 비워 두어도 아무것도 안 보인다.
+  // 그때 "비워 두면 이 값이 그대로 보입니다"는 거짓말이 된다.
+  assert.equal(
+    domesticOrderFaultDescriptionHint({ ...linked, repairCaseReportedSymptom: null }),
+    null
+  );
+  assert.equal(
+    domesticOrderFaultDescriptionHint({ ...linked, repairCaseReportedSymptom: "   " }),
+    null
+  );
+
+  // 인수번호가 없어도 안내는 나온다 — 없는 것은 번호이지 증상이 아니다.
+  assert.deepEqual(domesticOrderFaultDescriptionHint({ ...linked, intakeNumber: null }), {
+    intakeNumber: null,
+    symptom: "전원 안 들어옴",
+  });
+  assert.deepEqual(domesticOrderFaultDescriptionHint({ ...linked, intakeNumber: "  " }), {
+    intakeNumber: null,
+    symptom: "전원 안 들어옴",
+  });
 });

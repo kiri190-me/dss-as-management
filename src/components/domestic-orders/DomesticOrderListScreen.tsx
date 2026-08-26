@@ -24,6 +24,7 @@ import {
   customerRowColorClass,
   customerRowColorInteractiveClass,
 } from "@/lib/domain/customer-row-color";
+import type { InlineEditCellWrapping } from "@/components/common/inline-edit-cell-button";
 import type { DomesticOrderInlineEditableField } from "@/lib/domain/domestic-order-cell-edit";
 import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
 import DomesticOrderEditForm from "./DomesticOrderEditForm";
@@ -82,14 +83,19 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 그 자리가 사라지므로, 키보드로 폼을 여는 길이 없어지지 않도록 완료 버튼 옆에
  * 나란히 둔다. 칼럼은 여전히 22개다.
  *
- * ── 한 줄짜리 글자 칸 다섯은 칸을 눌러 그 자리에서 고친다 ────────────────
- * 발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금. 이 다섯은 `줄 수정` 폼을
- * 열지 않고 **그 칸을 눌러 바로** 고친다(DomesticOrderTextCell) — 번호 하나를
- * 고치려고 칸 22개짜리 폼을 여는 것은 실제로 가장 자주 하는 일에 가장 긴 길을
- * 내주는 셈이다. 주간보고의 비고 칸이 같은 방식이고, 겉모습도 셋이 나눠 쓴다
+ * ── 글자 칸 아홉은 칸을 눌러 그 자리에서 고친다 ─────────────────────────
+ * 한 줄짜리 다섯(발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금)과 여러
+ * 줄짜리 넷(고장내역 · 현황 · 이력 · 기타). 이 아홉은 `줄 수정` 폼을 열지 않고
+ * **그 칸을 눌러 바로** 고친다(DomesticOrderTextCell) — 번호 하나를 고치려고 칸
+ * 22개짜리 폼을 여는 것은 실제로 가장 자주 하는 일에 가장 긴 길을 내주는 셈이다.
+ * 주간보고의 비고 칸이 같은 방식이고, 겉모습도 셋이 나눠 쓴다
  * (components/common/inline-edit-cell-button.ts).
  *
- * **다섯뿐인 것은 일부러다.** 날짜·금액·체크·고르기 칸은 다루는 방식이 제각각이라
+ * 여러 줄 칸의 편집칸은 `<textarea>` 다. `<input>` 으로 열면 기존 값의 줄바꿈이
+ * 말없이 사라진 채 저장되고, 무엇보다 Enter 로 줄을 바꿀 수가 없다 — 그래서 이
+ * 넷은 Enter 가 아니라 버튼으로 저장한다(그 파일 헤더).
+ *
+ * **아홉뿐인 것은 일부러다.** 날짜·금액·체크·고르기 칸은 다루는 방식이 제각각이라
  * (달력 입력, 쉼표가 섞인 숫자, 체크상자, UUID 를 고르는 드롭다운) 같은 방식으로
  * 묶을 수 없다. 그 칸들은 지금도 `줄 수정` 폼에서 고친다 — **`행 추가` 와
  * `줄 수정` 은 그대로 남고**, 줄의 나머지를 누르면 폼이 열리는 동작도 그대로다.
@@ -98,9 +104,17 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 전체를 실어 보내야 하고, 그러지 않으면 나머지 칸이 지워진다. 그 규칙과 까닭은
  * domain/domestic-order-cell-edit.ts 와 DomesticOrderTextCell 헤더에 있다.
  *
- * 표와 카드가 **같은 다섯 칸**을 고칠 수 있다. 한쪽만 되면 같은 자료가 화면
- * 크기에 따라 다르게 다뤄진다 — 카드 쪽은 아래 CARD_FIELD_GROUPS 의 editField 가
- * 그 짝을 맞춘다.
+ * ⚠️ **고장내역만은 보이는 값과 고치는 칸이 다르다.** 표·카드가 그리는 것은
+ * 계산된 값(reportedSymptom — 그 줄에 적힌 것이 먼저, 없으면 연결된 수리 건의
+ * 것)이고, 저장되는 것은 원본 칸(faultDescriptionText)이다. 편집칸은 **원본
+ * 칸으로** 열리고, 비어 있는 채로 열릴 때 무엇이 보이게 되는지는 편집칸 아래
+ * 한 줄이 말해 준다 — `줄 수정` 폼과 같은 규칙이다.
+ *
+ * 표와 카드가 **같은 아홉 칸**을 고칠 수 있다. 한쪽만 되면 같은 자료가 화면
+ * 크기에 따라 다르게 다뤄진다 — 카드 쪽은 아래 CARD_FIELD_GROUPS 의 edit 이
+ * 그 짝을 맞춘다. **안 고칠 때 보이는 글자는 아홉 칸 모두 이 변경 전과 똑같다**:
+ * 접는 방식을 컴포넌트가 정하지 않고 그 자리가 쓰던 값을 그대로 넘기기 때문이다
+ * (wrapping).
  *
  * ── 고객사마다 줄 배경색, 완료 회색이 그 위에 있다 ──────────────────────
  * 고객사 관리에서 정해 둔 색(customers.row_color)으로 그 고객사의 줄과 묶음
@@ -349,15 +363,24 @@ const CARD_FIELD_GROUPS: {
      */
     multiline?: boolean;
     /**
-     * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 다섯 칸과
+     * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 아홉 칸과
      * 정확히 같아야 한다** — 좁은 화면으로 옮겼다고 고칠 수 있던 칸이 사라지면
      * 같은 자료가 화면 크기에 따라 다르게 다뤄진다(파일 헤더).
      *
      * 켠 칸의 `<dd>` 는 글자 대신 DomesticOrderTextCell 을 그린다. 안 고칠 때
      * 보이는 글자는 위 `of` 가 그대로 정하므로, 켜고 끄는 것으로 값의 생김새가
      * 달라지지는 않는다.
+     *
+     * ⚠️ **칸 이름과 접는 방식이 한 덩어리인 것은 일부러다.** 둘을 따로 둘 수
+     * 있게 하면 한쪽만 적힌 칸이 생기고, 그때 이 칸은 눌러서 고칠 수는 있는데
+     * 안 고칠 때의 생김새가 옆 칸과 달라진다. 접는 방식은 **바로 아래 `<dd>` 가
+     * 쓰는 것과 결과가 같아야 한다**(위 multiline 이 정하는 그것) — 눌러서 고칠
+     * 수 있게 되었다는 이유로 카드의 생김새가 함께 바뀌면 안 된다.
      */
-    editField?: DomesticOrderInlineEditableField;
+    edit?: {
+      field: DomesticOrderInlineEditableField;
+      wrapping: InlineEditCellWrapping;
+    };
   }[];
 }[] = [
   {
@@ -366,9 +389,13 @@ const CARD_FIELD_GROUPS: {
       {
         label: "발주서번호",
         of: (row) => dash(row.purchaseOrderNumber),
-        editField: "purchaseOrderNumber",
+        edit: { field: "purchaseOrderNumber", wrapping: "whitespace-nowrap" },
       },
-      { label: "PJT", of: (row) => dash(row.projectName), editField: "projectName" },
+      {
+        label: "PJT",
+        of: (row) => dash(row.projectName),
+        edit: { field: "projectName", wrapping: "whitespace-nowrap" },
+      },
       // 표와 같은 말을 쓴다 — 카드로 보고 있어도 이 줄이 왜 늘 보이는지 알 수
       // 있어야 한다.
       {
@@ -390,19 +417,42 @@ const CARD_FIELD_GROUPS: {
       { label: "형식", of: (row) => dash(row.modelName) },
       { label: "L/N", of: (row) => dash(row.lotNumber) },
       { label: "S/N", of: (row) => dash(row.serialNumber) },
-      { label: "고장내역", of: (row) => dash(row.reportedSymptom) },
+      // ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom)이고 고쳐 보내는 것은
+      // **원본 칸**(faultDescriptionText)이다 — 이 아홉 중 둘이 다른 칸은 여기
+      // 하나뿐이다. multiline 을 켜지 않은 것도 일부러다: 이 칸의 표시 규칙은
+      // 아직 줄바꿈을 살리지 않고 있고(표 쪽 noteCellContentClass 의 '고장내역은
+      // 아직 켜지 않았다'), 눌러서 고칠 수 있게 되었다는 이유로 안 고칠 때의
+      // 생김새까지 함께 바꾸지는 않는다. wrapping 이 그 지금 모습 그대로다.
+      {
+        label: "고장내역",
+        of: (row) => dash(row.reportedSymptom),
+        edit: { field: "faultDescriptionText", wrapping: "break-words whitespace-normal" },
+      },
     ],
   },
   {
     label: "견적 · 납품",
     fields: [
       { label: "견적발행일", of: (row) => dash(row.quoteIssuedDate) },
-      { label: "견적서번호", of: (row) => dash(row.quoteNumber), editField: "quoteNumber" },
+      {
+        label: "견적서번호",
+        of: (row) => dash(row.quoteNumber),
+        edit: { field: "quoteNumber", wrapping: "whitespace-nowrap" },
+      },
       // 사람이 <textarea> 에 줄바꿈을 섞어 적는 칸이다 — 표와 마찬가지로
       // 적은 그대로 여러 줄로 그린다(표 쪽은 noteCellContentClass).
-      { label: "현황", of: (row) => dash(row.progressNote), multiline: true },
+      {
+        label: "현황",
+        of: (row) => dash(row.progressNote),
+        multiline: true,
+        edit: { field: "progressNote", wrapping: "break-words whitespace-pre-line" },
+      },
       { label: "납품일", of: (row) => dash(row.deliveredDate) },
-      { label: "납품자", of: (row) => dash(row.deliveredBy), editField: "deliveredBy" },
+      {
+        label: "납품자",
+        of: (row) => dash(row.deliveredBy),
+        edit: { field: "deliveredBy", wrapping: "whitespace-nowrap" },
+      },
     ],
   },
   {
@@ -414,7 +464,7 @@ const CARD_FIELD_GROUPS: {
       {
         label: "일본 송금",
         of: (row) => dash(row.japanRemittanceNote),
-        editField: "japanRemittanceNote",
+        edit: { field: "japanRemittanceNote", wrapping: "whitespace-nowrap" },
       },
     ],
   },
@@ -422,8 +472,18 @@ const CARD_FIELD_GROUPS: {
     label: "기타",
     fields: [
       // 현황과 같다 — 사람이 줄바꿈을 섞어 적는 칸이라 적은 그대로 여러 줄로.
-      { label: "이력", of: (row) => dash(row.historyNote), multiline: true },
-      { label: "기타", of: (row) => dash(row.etcNote), multiline: true },
+      {
+        label: "이력",
+        of: (row) => dash(row.historyNote),
+        multiline: true,
+        edit: { field: "historyNote", wrapping: "break-words whitespace-pre-line" },
+      },
+      {
+        label: "기타",
+        of: (row) => dash(row.etcNote),
+        multiline: true,
+        edit: { field: "etcNote", wrapping: "break-words whitespace-pre-line" },
+      },
     ],
   },
 ];
@@ -458,7 +518,19 @@ const rowActionButtonClass =
  * 지금처럼 한 줄이라야 22칼럼을 세로로 훑어 읽는다.
  *
  * 같은 <textarea> 칸인 고장내역은 아직 켜지 않았다. 표시 규칙을 한 번에
- * 넓히지 않고, 실제로 줄바꿈을 섞어 적고 있는 칸부터 맞춘 것이다.
+ * 넓히지 않고, 실제로 줄바꿈을 섞어 적고 있는 칸부터 맞춘 것이다. **그 칸이
+ * 눌러서 고칠 수 있게 된 뒤에도 그대로다** — 고칠 수 있게 되었다는 것과 어떻게
+ * 보이는가는 다른 결정이라, 한쪽을 바꾸면서 다른 쪽을 함께 바꾸지 않는다.
+ *
+ * ── 이 값은 버튼에도 그대로 넘어간다 ────────────────────────────────────
+ * 이 세 칸은 이제 글자 자체가 `<button>` 이고(DomesticOrderTextCell), 그 버튼이
+ * 접는 방식을 **자기 것으로 다시 선언한다** — 바깥의 것이 폼 컨트롤 안까지
+ * 내려온다는 보장이 없어서다(inline-edit-cell-button.ts). 그래서 이 상수를
+ * wrapping 인자로 그대로 넘긴다: 두 자리에 같은 글자를 따로 적으면 언젠가
+ * 한쪽만 고쳐져, 같은 칸이 고칠 수 있을 때와 없을 때 다르게 보인다.
+ *
+ * ⚠️ 그래서 이 값은 **InlineEditCellWrapping 에 있는 것이어야 한다.** 다른
+ * 문자열로 바꾸려면 그 타입에도 함께 늘려야 한다(타입이 막아 준다).
  *
  * ── 왜 pre-line 이 아니라 pre 인가 ──────────────────────────────────────
  * 처음에는 whitespace-pre-line 이었다. pre-line 은 사람이 넣은 줄바꿈을
@@ -975,17 +1047,25 @@ export default function DomesticOrderListScreen({
                           </span>
                         </td>
                         <td className="px-3 py-2">{dash(row.customerName)}</td>
-                        {/* 여기부터 다섯 칸(발주서번호 · PJT · 견적서번호 ·
-                            납품자 · 일본 송금)은 **칸을 눌러 그 자리에서**
-                            고친다(파일 헤더). 못 고치는 사람에게는 누를 것이
-                            아예 없어야 하므로, 버튼을 그려 놓고 막지 않고
-                            글자만 그린다 — 보이는 글자는 양쪽이 똑같다. */}
+                        {/* 여기부터 아홉 칸(발주서번호 · PJT · 고장내역 ·
+                            견적서번호 · 현황 · 납품자 · 일본 송금 · 이력 ·
+                            기타)은 **칸을 눌러 그 자리에서** 고친다(파일 헤더).
+                            못 고치는 사람에게는 누를 것이 아예 없어야 하므로,
+                            버튼을 그려 놓고 막지 않고 글자만 그린다 — 보이는
+                            글자는 양쪽이 똑같다.
+
+                            wrapping 은 그 칸이 지금 쓰고 있는 것을 그대로
+                            넘긴다: 한 줄짜리 값은 nowrap(`<tr>` 이 이미 그렇다),
+                            현황·이력·기타는 whitespace-pre(noteCellContentClass
+                            와 같은 값). 눌러서 고칠 수 있게 되었다는 이유로 표의
+                            생김새가 바뀌면 안 된다. */}
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="purchaseOrderNumber"
                               displayText={dash(row.purchaseOrderNumber)}
+                              wrapping="whitespace-nowrap"
                             />
                           ) : (
                             dash(row.purchaseOrderNumber)
@@ -997,6 +1077,7 @@ export default function DomesticOrderListScreen({
                               row={row}
                               field="projectName"
                               displayText={dash(row.projectName)}
+                              wrapping="whitespace-nowrap"
                             />
                           ) : (
                             dash(row.projectName)
@@ -1027,7 +1108,27 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2">{dash(row.modelName)}</td>
                         <td className="px-3 py-2">{dash(row.lotNumber)}</td>
                         <td className="px-3 py-2">{dash(row.serialNumber)}</td>
-                        <td className="px-3 py-2">{dash(row.reportedSymptom)}</td>
+                        {/* ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom),
+                            고쳐 보내는 것은 **원본 칸**(faultDescriptionText)
+                            이다 — 아홉 칸 중 둘이 다른 칸은 여기 하나뿐이고,
+                            그 어긋남은 편집칸 아래 한 줄이 설명한다
+                            (DomesticOrderTextCell 의 FaultDescriptionHint).
+                            wrapping 이 nowrap 인 것은 이 칸의 표시 규칙이 아직
+                            줄바꿈을 살리지 않기 때문이다(noteCellContentClass
+                            의 '고장내역은 아직 켜지 않았다') — 지금 보이는
+                            그대로다. */}
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="faultDescriptionText"
+                              displayText={dash(row.reportedSymptom)}
+                              wrapping="whitespace-nowrap"
+                            />
+                          ) : (
+                            dash(row.reportedSymptom)
+                          )}
+                        </td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
                         <td className="px-3 py-2">
                           {canEdit ? (
@@ -1035,15 +1136,27 @@ export default function DomesticOrderListScreen({
                               row={row}
                               field="quoteNumber"
                               displayText={dash(row.quoteNumber)}
+                              wrapping="whitespace-nowrap"
                             />
                           ) : (
                             dash(row.quoteNumber)
                           )}
                         </td>
                         {/* 사람이 줄바꿈을 섞어 적는 칸 — 적은 그대로 여러 줄로
-                            그린다(noteCellContentClass). */}
+                            그린다(noteCellContentClass). 고칠 수 있으면 그 글자
+                            자체가 버튼이고, 버튼이 같은 값을 자기 것으로 다시
+                            선언한다(상속을 믿지 않는 이유는 그 파일 주석). */}
                         <td className="px-3 py-2">
-                          <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="progressNote"
+                              displayText={dash(row.progressNote)}
+                              wrapping={noteCellContentClass}
+                            />
+                          ) : (
+                            <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
+                          )}
                         </td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
                         <td className="px-3 py-2">
@@ -1052,6 +1165,7 @@ export default function DomesticOrderListScreen({
                               row={row}
                               field="deliveredBy"
                               displayText={dash(row.deliveredBy)}
+                              wrapping="whitespace-nowrap"
                             />
                           ) : (
                             dash(row.deliveredBy)
@@ -1068,6 +1182,7 @@ export default function DomesticOrderListScreen({
                               row={row}
                               field="japanRemittanceNote"
                               displayText={dash(row.japanRemittanceNote)}
+                              wrapping="whitespace-nowrap"
                             />
                           ) : (
                             dash(row.japanRemittanceNote)
@@ -1076,10 +1191,28 @@ export default function DomesticOrderListScreen({
                         {/* 현황과 같은 칸이다 — 사람이 친 줄바꿈만 살리고,
                             폭이 모자라도 접지 않는다. */}
                         <td className="px-3 py-2">
-                          <div className={noteCellContentClass}>{dash(row.historyNote)}</div>
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="historyNote"
+                              displayText={dash(row.historyNote)}
+                              wrapping={noteCellContentClass}
+                            />
+                          ) : (
+                            <div className={noteCellContentClass}>{dash(row.historyNote)}</div>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          <div className={noteCellContentClass}>{dash(row.etcNote)}</div>
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="etcNote"
+                              displayText={dash(row.etcNote)}
+                              wrapping={noteCellContentClass}
+                            />
+                          ) : (
+                            <div className={noteCellContentClass}>{dash(row.etcNote)}</div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1168,15 +1301,18 @@ export default function DomesticOrderListScreen({
                                           : "break-words"
                                       }
                                     >
-                                      {/* 표에서 눌러 고치는 다섯 칸은 카드에서도
+                                      {/* 표에서 눌러 고치는 아홉 칸은 카드에서도
                                           똑같이 눌러 고친다(파일 헤더). 못 고치는
                                           사람에게는 표와 마찬가지로 누를 것이
-                                          없고, 보이는 글자는 양쪽이 똑같다. */}
-                                      {canEdit && field.editField ? (
+                                          없고, 보이는 글자는 양쪽이 똑같다.
+                                          접는 방식은 바로 위 <dd> 가 쓰는 것과
+                                          결과가 같은 값을 넘긴다(edit.wrapping). */}
+                                      {canEdit && field.edit ? (
                                         <DomesticOrderTextCell
                                           row={row}
-                                          field={field.editField}
+                                          field={field.edit.field}
                                           displayText={field.of(row)}
+                                          wrapping={field.edit.wrapping}
                                         />
                                       ) : (
                                         field.of(row)

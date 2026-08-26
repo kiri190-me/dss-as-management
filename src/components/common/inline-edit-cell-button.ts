@@ -52,13 +52,37 @@
  *   `<td>` 의 같은 성질이 폼 컨트롤 안까지 내려온다는 보장이 없어 버튼에 다시
  *   적는다 — 여러 줄 비고의 줄바꿈이 이 칸에서만 사라지면 안 된다.
  * - `whitespace-nowrap` — 한 줄짜리 값이라 접히면 안 되는 칸(내자 정리 다섯).
+ * - `whitespace-pre` — 사람이 친 줄바꿈에서**만** 끊고 폭이 모자라도 접지 않는
+ *   칸(내자 정리 **표**의 현황·이력·기타). 왜 pre-line 이 아닌지는
+ *   DomesticOrderListScreen 의 noteCellContentClass 에 적혀 있다 — 요약하면
+ *   화면에 보이는 줄바꿈의 근거가 "사람이 친 것" 하나뿐이어야 해서다.
+ * - `break-words whitespace-pre-line` — 같은 값을 **카드**에서 그릴 때. 폰에서
+ *   좌우 스크롤은 사실상 못 쓰는 조작이라 폭이 모자라면 접어야 한다. 표와
+ *   카드가 일부러 다른 자리이고, 그 까닭도 같은 파일에 있다.
+ * - `break-words whitespace-normal` — 카드에서 **아직 줄바꿈을 살리지 않는**
+ *   여러 줄 칸(내자 정리 카드의 고장내역). 눌러서 고칠 수 있게 되었어도 안 고칠
+ *   때 보이는 글자는 지금까지와 한 글자도 달라지면 안 된다.
  *
- * 값 두 개짜리 타입인 것은 일부러다. **고르지 않고 부를 수 없어야** 아래 함수
- * 주석이 말하는 규칙이 말로만 남지 않는다. 셋째 성질이 필요한 칸이 생기면 그때
+ * ⚠️ 뒤 두 가지에 `break-words` 가 **함께** 들어 있는 것은 일부러다. 카드의
+ * `<dd>` 가 이미 break-words 를 걸고 있지만, 위 pre-line 을 버튼에 다시 적는
+ * 것과 같은 이유로 — 그 성질이 폼 컨트롤 안까지 내려온다는 보장이 없다 — 이
+ * 버튼이 자기 것을 선언한다. 접는 방식은 한 자리에서 통째로 정해져야, 어느 쪽이
+ * 상속되고 어느 쪽이 선언인지 나중에 읽는 사람이 헷갈리지 않는다.
+ *
+ * 값을 세는 타입인 것은 일부러다. **고르지 않고 부를 수 없어야** 아래 함수
+ * 주석이 말하는 규칙이 말로만 남지 않는다. 다른 성질이 필요한 칸이 생기면 그때
  * 여기에 한 줄 늘리면 된다 — 그것도 "이 칸의 값은 어떤 성질인가"를 한 번 생각하고
  * 지나가는 자리다.
+ *
+ * 이름이 `…Whitespace` 가 아니라 `…Wrapping` 인 것은 값 두 개가 white-space 만으로
+ * 이루어져 있지 않기 때문이다. 이 인자가 정하는 것은 처음부터 **접는 방식**이었다.
  */
-export type InlineEditCellWhitespace = "whitespace-pre-line" | "whitespace-nowrap";
+export type InlineEditCellWrapping =
+  | "whitespace-pre-line"
+  | "whitespace-nowrap"
+  | "whitespace-pre"
+  | "break-words whitespace-pre-line"
+  | "break-words whitespace-normal";
 
 /**
  * 안 고칠 때 보여 주는 글자 자체를 감싸는 `<button type="button">` 의 겉모습.
@@ -91,7 +115,7 @@ export type InlineEditCellWhitespace = "whitespace-pre-line" | "whitespace-nowra
  * 유틸리티 순서가 바뀌는 날 조용히 뒤집힌다. 지금 없으니 다툴 일 자체가 없다.
  *
  * **이 값을 새로 쓰는 곳은 줄바꿈 처리를 반드시 자기가 정해야 한다.** 인자를
- * 빼먹을 수 없게 타입으로 막아 두었다(위 InlineEditCellWhitespace).
+ * 빼먹을 수 없게 타입으로 막아 두었다(위 InlineEditCellWrapping).
  *
  * ⚠️ **relative 를 빼지 말 것.** 이 버튼 안에는 낭독기용 sr-only 조각이 하나
  * 들어가는데 Tailwind 의 sr-only 는 `position: absolute` 다. 기준이 되는 위치
@@ -108,8 +132,8 @@ export type InlineEditCellWhitespace = "whitespace-pre-line" | "whitespace-nowra
  * 다르지 않아야, 주간보고 두 칸의 마크업이 이 변경으로 흔들리지 않았다는 것을
  * 문자열 대조만으로 말할 수 있다.
  */
-export function inlineEditCellButtonClass(whitespace: InlineEditCellWhitespace): string {
-  return `relative -mx-1 block w-full cursor-pointer rounded px-1 text-left ${whitespace} hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500`;
+export function inlineEditCellButtonClass(wrapping: InlineEditCellWrapping): string {
+  return `relative -mx-1 block w-full cursor-pointer rounded px-1 text-left ${wrapping} hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500`;
 }
 
 /**

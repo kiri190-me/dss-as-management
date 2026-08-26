@@ -8,10 +8,13 @@ import EditSectionActions, {
 import {
   inlineEditCellButtonClass,
   inlineEditCellButtonTitle,
+  type InlineEditCellWrapping,
 } from "@/components/common/inline-edit-cell-button";
 import {
   DOMESTIC_ORDER_INLINE_EDIT_LABELS,
+  DOMESTIC_ORDER_INLINE_EDIT_MULTILINE,
   buildDomesticOrderCellUpdateFields,
+  domesticOrderFaultDescriptionHint,
   type DomesticOrderInlineEditableField,
 } from "@/lib/domain/domestic-order-cell-edit";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
@@ -19,7 +22,7 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
 
 /**
  * ============================================================================
- * 내자 정리 — 한 줄짜리 글자 칸 하나를 **그 자리에서** 고치는 칸
+ * 내자 정리 — 글자 칸 하나를 **그 자리에서** 고치는 칸
  * ============================================================================
  * 주간보고의 `비고` 칸(WeeklyReportNotesCell · WeeklyReportDeliveriesPanel 의
  * DeliveryLine)이 본보기다. `수정` 버튼 없이 **안 고칠 때 보이는 글자 자체가
@@ -63,6 +66,33 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * 방식이다(DomesticOrderListScreen). **줄의 나머지 부분을 눌렀을 때 `줄 수정`
  * 이 열리는 동작은 그대로다.**
  *
+ * ── 한 줄짜리 칸과 여러 줄짜리 칸을 **한 컴포넌트가** 맡는다 ────────────
+ * 아홉 칸 중 넷(고장내역 · 현황 · 이력 · 기타)은 사람이 줄바꿈을 섞어 적는
+ * 칸이다. 그 넷을 위해 파일을 하나 더 만들지 않은 것은 **다른 것이 편집칸의
+ * 생김새 하나뿐**이기 때문이다 — 위 ①②③ 은 아홉 칸에 똑같이 걸리고, 그것들이
+ * 이 파일에서 가장 위험한 부분이다. 나누면 "줄 전체를 실어 보낸다 ·
+ * expectedVersion 을 건다 · 계산된 값을 만지지 않는다 · 위로 퍼지지 않게
+ * 막는다"가 **두 벌**이 되고, 언젠가 한쪽만 고쳐진다. 그때 조용히 지워지는 것은
+ * 사람이 제일 길게 적어 둔 칸(현황·이력)이다.
+ *
+ * 어느 칸이 여러 줄인지는 화면이 정하지 않는다(도메인의
+ * DOMESTIC_ORDER_INLINE_EDIT_MULTILINE) — 표와 카드가 각각 고르면 한쪽만 틀릴 수
+ * 있고, 틀리면 `<input>` 이 값의 줄바꿈을 말없이 지운다. 그 파일에 까닭이 있다.
+ *
+ * **여러 줄 칸은 `Enter` 로 저장하지 않는다.** 한 줄짜리 다섯은 입력칸 하나뿐인
+ * 폼이라 브라우저가 Enter 를 저장으로 받아 주고(묵시적 제출) 그것이 자연스럽다.
+ * 여러 줄 칸에서 그러면 줄바꿈을 칠 수가 없다 — `<textarea>` 는 Enter 를 묵시적
+ * 제출로 삼지 않으므로, 이 성질은 손으로 막을 것 없이 편집칸을 고르는 것만으로
+ * 갈린다. 저장은 아래 EditSectionActions 의 버튼 몫이다.
+ *
+ * ── ⚠️ 고장내역은 편집칸을 **원본 칸으로** 채운다 ───────────────────────
+ * 이 아홉 중 고장내역만은 화면에 보이는 글자(계산된 reportedSymptom)와 저장되는
+ * 칸(원본 faultDescriptionText)이 다르다. 편집칸에는 **원본 칸**을 채운다 —
+ * 보이던 글자를 채우면 아무것도 안 고치고 저장만 눌러도 수리 건의 증상이 이 줄에
+ * 굳는다. 그 대신 비어 있는 채로 열리는 순간이 생기므로, 무엇이 보이게 되는지를
+ * 편집칸 아래 한 줄로 적는다(domesticOrderFaultDescriptionHint). 규칙도 문구도
+ * `줄 수정` 폼의 faultDescriptionHint 와 같다.
+ *
  * ── 못 고치는 사람에게는 아예 그리지 않는다 ─────────────────────────────
  * canEdit 을 받아 안에서 막지 않고, **부르는 쪽이 이 칸을 그릴지 말지 정한다**
  * (WeeklyReportNotesCell 과 같은 방식). 버튼을 그려 놓고 누르면 거절하는 것은
@@ -71,10 +101,44 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * 띄워 저장을 보내도 거기서 다시 막힌다.
  * ============================================================================
  */
+
+/**
+ * 고장내역 편집칸 아래 한 줄. 다른 여덟 칸에는 붙지 않는다 — 계산된 짝이 있는
+ * 칸이 이 하나뿐이라, 다른 칸에 같은 말을 적으면 있지도 않은 규칙을 설명하는
+ * 문장이 된다.
+ *
+ * 무엇을 적을지·언제 적을지는 도메인이 정한다
+ * (domesticOrderFaultDescriptionHint) — `줄 수정` 폼과 **같은 조건, 같은 문구**여야
+ * 하고, 그 규칙은 브라우저를 띄우지 않고 시험할 수 있어야 한다.
+ *
+ * `줄 수정` 폼의 hintClass 에 있는 `mt-1` 은 뺐다. 이 폼은 `flex flex-col gap-1`
+ * 이라 간격을 이미 gap 이 만들고 있어서, 그대로 가져오면 이 한 줄만 아래로 더
+ * 떨어져 어느 칸의 안내인지 흐려진다.
+ */
+function FaultDescriptionHint({
+  row,
+  field,
+}: {
+  row: DomesticOrderListItem;
+  field: DomesticOrderInlineEditableField;
+}) {
+  if (field !== "faultDescriptionText") return null;
+  const hint = domesticOrderFaultDescriptionHint(row);
+  if (hint === null) return null;
+  return (
+    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      연결된 수리 건{hint.intakeNumber === null ? "" : ` ${hint.intakeNumber}`}: {hint.symptom}
+      <br />
+      비워 두면 이 값이 그대로 보입니다.
+    </p>
+  );
+}
+
 export default function DomesticOrderTextCell({
   row,
   field,
   displayText,
+  wrapping,
 }: {
   /**
    * 고칠 줄 **통째로**. 칸 하나를 고쳐도 줄 전체를 실어 보내야 하므로(위 ①)
@@ -89,9 +153,22 @@ export default function DomesticOrderTextCell({
    * 같은 글자를 넘기므로 화면 폭이 달라져도 같은 값으로 보인다.
    */
   displayText: string;
+  /**
+   * 그 글자를 **어떻게 접을 것인가.** 여기서 정하지 않고 받는 것은, 같은 칸이라도
+   * 표와 카드가 서로 다르게 골라야 하기 때문이다 — 표의 현황·이력·기타는 폭이
+   * 모자라도 접지 않고(whitespace-pre), 카드에서는 접는다. 폰에서 좌우 스크롤은
+   * 사실상 못 쓰는 조작이라 접지 않으면 글자가 화면 밖으로 나간다. 그 갈림은
+   * **일부러**이고 까닭은 DomesticOrderListScreen 의 noteCellContentClass 에 있다.
+   *
+   * ⚠️ **안 고칠 때 보이는 글자가 지금까지와 똑같아야 한다.** 부르는 쪽은 그
+   * 자리의 `<td>`·`<dd>` 가 쓰던 것과 결과가 같은 값을 넘긴다 — 눌러서 고칠 수
+   * 있게 되었다는 이유로 표의 생김새가 함께 바뀌면 안 된다.
+   */
+  wrapping: InlineEditCellWrapping;
 }) {
   const router = useRouter();
   const label = DOMESTIC_ORDER_INLINE_EDIT_LABELS[field];
+  const isMultiline = DOMESTIC_ORDER_INLINE_EDIT_MULTILINE[field];
 
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(row[field] ?? "");
@@ -170,18 +247,16 @@ export default function DomesticOrderTextCell({
         // 겉모습과 title 은 이 파일에 적지 않는다 — 주간보고의 두 비고 칸도
         // **똑같이** 눌러서 열리므로, 여러 곳에 각각 적으면 언젠가 한쪽만
         // 고쳐진다. 값과 그 까닭은 inline-edit-cell-button.ts 한 곳에 있다.
-        // title 이 칸 이름을 받는 것은 한 줄에 누를 수 있는 칸이 다섯이라,
+        // title 이 칸 이름을 받는 것은 한 줄에 누를 수 있는 칸이 아홉이라,
         // "고칠 수 있습니다"만으로는 어느 칸인지 말할 수 없어서다.
         //
-        // 줄바꿈 처리만은 **여기서 고른다.** 이 다섯은 한 줄짜리 값이라
-        // nowrap 이다 — 표의 다른 칸과 같이 굴어야 한다(`<tr>` 이 이미
-        // whitespace-nowrap 이다). 버튼이 자기 것을 선언하지 않으면 그 상속을
-        // 받으면 될 것 같지만, 반대로 **자기 선언이 상속을 이기므로** 공용 값에
-        // 여러 줄용 pre-line 이 박혀 있던 동안 이 다섯 칸만 칸 너비에 갇혀
-        // 접혔다. 여러 줄이 실제로 들어 있는 주간보고 비고는 pre-line 을
-        // 고른다(그 파일 주석).
+        // 줄바꿈 처리는 **부르는 쪽이 넘긴 것을 그대로 쓴다**(위 wrapping).
+        // 같은 칸이라도 표와 카드가 다르게 골라야 해서 이 파일이 정할 수 없다.
+        // 버튼이 자기 것을 선언하지 않으면 바깥 것을 물려받으면 될 것 같지만,
+        // 반대로 **자기 선언이 상속을 이기므로** 공용 값에 여러 줄용 pre-line 이
+        // 박혀 있던 동안 한 줄짜리 다섯 칸이 칸 너비에 갇혀 접혔다.
         title={inlineEditCellButtonTitle(label)}
-        className={inlineEditCellButtonClass("whitespace-nowrap")}
+        className={inlineEditCellButtonClass(wrapping)}
       >
         {displayText}
         {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다. aria-label 로
@@ -208,19 +283,41 @@ export default function DomesticOrderTextCell({
       noValidate
       className="flex w-64 max-w-full flex-col gap-1 whitespace-normal"
     >
-      {/* 다섯 칸 모두 한 줄짜리 글자라 input 이다 — 여러 줄이 들어 있는
-          주간보고 비고가 textarea 인 것과 다른 점이 이것 하나다. 자동완성을
-          끄는 것은 발주서번호·견적서번호처럼 브라우저가 엉뚱하게 기억해 둘
-          값이라서다. */}
-      <input
-        type="text"
-        className={editInputClass}
-        value={value}
-        disabled={disabled}
-        aria-label={label}
-        autoComplete="off"
-        onChange={(event) => setValue(event.target.value)}
-      />
+      {/* 편집칸의 생김새는 **값의 성질이 정한다**(도메인의 …_MULTILINE). 여러 줄이
+          들어 있는 칸을 input 으로 열면 브라우저가 값의 줄바꿈을 말없이 지운 채
+          넘겨주고, 아무것도 고치지 않고 저장만 눌러도 그 메모가 한 줄로 뭉개진다.
+          여기서 갈리는 것이 하나 더 있다 — textarea 는 Enter 를 묵시적 제출로
+          삼지 않으므로, 저장이 버튼 몫이 되고 Enter 는 줄바꿈이 된다(파일 헤더).
+
+          resize-y 로 세로만 늘릴 수 있게 둔다. 가로로도 늘릴 수 있으면 표 안에서
+          이 칸 하나가 22칼럼을 옆으로 밀어낸다. rows 가 3 인 것은 표 안이라 좁아서다
+          — `줄 수정` 폼의 min-h-20 과 비슷한 높이에서 시작해 필요하면 늘린다. */}
+      {isMultiline ? (
+        <textarea
+          rows={3}
+          className={`${editInputClass} resize-y`}
+          value={value}
+          disabled={disabled}
+          aria-label={label}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      ) : (
+        // 자동완성을 끄는 것은 발주서번호·견적서번호처럼 브라우저가 엉뚱하게
+        // 기억해 둘 값이라서다.
+        <input
+          type="text"
+          className={editInputClass}
+          value={value}
+          disabled={disabled}
+          aria-label={label}
+          autoComplete="off"
+          onChange={(event) => setValue(event.target.value)}
+        />
+      )}
+      {/* ⚠️ 고장내역만 편집칸이 **비어 있는 채로 열릴 수 있다** — 화면에 보이던
+          글이 이 줄 자신의 값이 아니라 연결된 수리 건에서 빌려 온 것일 때다.
+          그것을 설명하지 않으면 값이 사라진 것으로 읽힌다(파일 헤더). */}
+      <FaultDescriptionHint row={row} field={field} />
       {/* 오류 문구도 충돌 안내도 이 상자가 그린다 — 충돌이면 저장·취소를 지우고
           `최신 정보 다시 불러오기` 하나만 남긴다(그 파일 헤더). 낡은 화면에서
           누른 저장이 방금 바뀐 값을 덮어쓰는 길이 여기에도 없다. */}
