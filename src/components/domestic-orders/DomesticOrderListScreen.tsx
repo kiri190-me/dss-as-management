@@ -152,6 +152,25 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 표/카드 전환을 여기서 분기하지 않는 것도 같은 이유다 — 서비스 전체에서
  * 목록의 기준은 responsive-list.tsx 하나뿐이다.
  *
+ * ── ⚠️ 납품일은 수리 건의 실제 출하일이다. 여기서 적는 값이 아니다 ──────
+ * 이 칸이 그리는 것은 연결된 수리 건의 `actual_shipment_date` 이고
+ * (queries 의 displayDeliveredDate), 그 줄의 `delivered_date` 는 화면에 나오지
+ * 않는다. 실제 출하일은 워크플로가 출하 완료 때 자동으로 찍는 값이라 사람이 손을
+ * 댈 수 없고, "언제 나갔는가"에 대해 이 시스템이 가진 유일한 사실이다.
+ *
+ * **그래서 이 칸은 지금까지 날짜가 보이던 줄에서 빈칸이 될 수 있다** — 연결이
+ * 없는 줄, 연결은 있어도 아직 안 나간 줄이 그렇다. 아무 말 없이 비워 두면
+ * **자료가 사라진 것으로 읽히므로**, 표 위에 한 줄(DELIVERED_DATE_NOTE)을 적고
+ * 표 머리말과 카드 이름표에도 같은 말을 title 로 붙인다. 22칼럼을 옆으로 밀어
+ * 보는 표라, 표 위의 한 줄만으로는 그 칸에 닿았을 때 설명이 화면 밖에 있다.
+ *
+ * 이 칸에는 **칸 편집을 붙이지 않는다.** 눌러서 고칠 수 있는 아홉 칸에 이것이
+ * 없는 것은 빠뜨린 것이 아니라 못 적는 값이기 때문이다 — `줄 수정` 폼에서도
+ * 입력칸이 아니라 읽기 전용이다(DomesticOrderEditForm).
+ *
+ * ⚠️ **`납품자`(deliveredBy)는 이름만 비슷한 다른 칸이다.** 그쪽은 지금도 눌러서
+ * 고치는 아홉 칸 중 하나다.
+ *
  * ── 빈 값은 "-" ────────────────────────────────────────────────────────
  * 시트에는 아직 안 정해진 칸이 많다(견적은 냈는데 납품 전, 납품은 했는데 입금
  * 전). 빈 칸을 그냥 비워 두면 표가 어디까지가 한 줄인지 읽히지 않아서, 이
@@ -198,6 +217,17 @@ const SEARCH_PLACEHOLDER = "고객사 · 인수번호 · 발주서번호 · 견�
  */
 const SEARCH_FIELDS_HINT =
   "고객사 · 인수번호 · 발주서번호 · 견적서번호 · PJT · 형식 · S/N · L/N 에서 찾습니다";
+
+/**
+ * `납품일` 칸이 무엇이고 왜 비어 있을 수 있는지. **한 글자를 세 곳이 나눠
+ * 쓴다** — 표 위의 한 줄, 표 머리말의 title, 카드 이름표의 title. 따로 적으면
+ * 언젠가 한쪽만 고쳐져 같은 칸이 화면마다 다른 규칙으로 설명된다
+ * (SEARCH_FIELDS_HINT 가 도메인의 검색 칸 목록과 같아야 하는 것과 같은 이유).
+ *
+ * 말투는 이 화면의 다른 안내(`발주일 미정 N건은 … 함께 보입니다`)와 맞춘다.
+ */
+const DELIVERED_DATE_NOTE =
+  "납품일은 연결된 수리 건의 실제 출하일입니다. 수리 건 연결이 없거나 아직 출하되지 않은 줄은 비어 있습니다.";
 
 /** 빈 값의 표시. 이 화면의 모든 칸이 같은 글자를 쓴다. */
 function dash(value: string | number | null | undefined): string {
@@ -363,6 +393,15 @@ const CARD_FIELD_GROUPS: {
      */
     multiline?: boolean;
     /**
+     * 이름표에 마우스를 올렸을 때 뜨는 설명. **표 머리말의 title 과 같은 글자를
+     * 넘긴다** — 좁은 화면으로 옮겼다고 설명이 사라지면, 같은 칸이 화면 크기에
+     * 따라 다른 규칙으로 읽힌다(파일 헤더의 표/카드 원칙).
+     *
+     * 지금 이것이 붙은 칸은 납품일 하나다. 다른 칸에 같은 자리를 만들어 두는
+     * 것은, 설명이 필요한 칸이 또 생겼을 때 카드 쪽만 빠뜨리지 않기 위해서다.
+     */
+    hint?: string;
+    /**
      * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 아홉 칸과
      * 정확히 같아야 한다** — 좁은 화면으로 옮겼다고 고칠 수 있던 칸이 사라지면
      * 같은 자료가 화면 크기에 따라 다르게 다뤄진다(파일 헤더).
@@ -447,7 +486,15 @@ const CARD_FIELD_GROUPS: {
         multiline: true,
         edit: { field: "progressNote", wrapping: "break-words whitespace-pre-line" },
       },
-      { label: "납품일", of: (row) => dash(row.deliveredDate) },
+      // ⚠️ 표와 **같은 값**이다 — 그 줄의 deliveredDate 가 아니라 연결된 수리
+      // 건의 실제 출하일(displayDeliveredDate). 한쪽만 고치면 같은 자료가 화면
+      // 크기에 따라 다른 날짜로 읽힌다(파일 헤더). 눌러서 고칠 수 없는 칸이라
+      // edit 도 없다.
+      {
+        label: "납품일",
+        of: (row) => dash(row.displayDeliveredDate),
+        hint: DELIVERED_DATE_NOTE,
+      },
       {
         label: "납품자",
         of: (row) => dash(row.deliveredBy),
@@ -924,6 +971,20 @@ export default function DomesticOrderListScreen({
         </p>
       </div>
 
+      {/* ⚠️ 납품일이 왜 빈칸일 수 있는지 **늘 보이게** 적어 둔다. 이 칸은 손으로
+          적던 값에서 연결된 수리 건의 실제 출하일로 바뀌었고, 그래서 지금까지
+          날짜가 보이던 줄이 비어 보일 수 있다 — 아무 말이 없으면 자료가 사라진
+          것으로 읽힌다(파일 헤더).
+
+          같은 글자가 표 머리말과 카드 이름표의 title 로도 간다. 22칼럼을 옆으로
+          밀어 보는 표라, 이 한 줄만으로는 그 칸에 닿았을 때 설명이 화면 밖이다.
+
+          줄이 하나도 없을 때는 적지 않는다 — 그때 화면에 있는 것은 "등록된 …이
+          없습니다" 한 줄뿐이라, 없는 표의 없는 칸을 설명하는 문장이 된다. */}
+      {rows.length > 0 && (
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{DELIVERED_DATE_NOTE}</p>
+      )}
+
       {rows.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           등록된 내자 정리 항목이 없습니다.
@@ -964,7 +1025,13 @@ export default function DomesticOrderListScreen({
                   <th className="px-3 py-2">견적발행일</th>
                   <th className="px-3 py-2">견적서번호</th>
                   <th className="px-3 py-2">현황</th>
-                  <th className="px-3 py-2">납품일</th>
+                  {/* 이 칸만 머리말에 설명이 붙는다 — 여기 보이는 날짜의 출처가
+                      그 줄이 아니라 연결된 수리 건이고, 그래서 빈칸이 될 수
+                      있다는 사실을 칸에 닿았을 때 알 수 있어야 한다. 표 위의 한
+                      줄만으로는 22칼럼을 옆으로 밀어 본 뒤에는 화면 밖이다. */}
+                  <th className="px-3 py-2" title={DELIVERED_DATE_NOTE}>
+                    납품일
+                  </th>
                   <th className="px-3 py-2">납품자</th>
                   <th className="px-3 py-2">세금계산서발행일</th>
                   <th className="px-3 py-2 text-right">금액(VAT별도)</th>
@@ -1158,7 +1225,12 @@ export default function DomesticOrderListScreen({
                             <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
                           )}
                         </td>
-                        <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
+                        {/* ⚠️ 그 줄의 deliveredDate 가 아니다 — 연결된 수리
+                            건의 실제 출하일이다(파일 헤더). 눌러서 고칠 수 없는
+                            칸이라 DomesticOrderTextCell 이 붙지 않는다. */}
+                        <td className="px-3 py-2 tabular-nums">
+                          {dash(row.displayDeliveredDate)}
+                        </td>
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <DomesticOrderTextCell
@@ -1291,7 +1363,14 @@ export default function DomesticOrderListScreen({
                               <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
                                 {fieldGroup.fields.map((field) => (
                                   <div key={field.label}>
-                                    <dt className="text-xs text-zinc-500 dark:text-zinc-500">
+                                    {/* 설명이 있는 칸은 표 머리말과 **같은
+                                        글자**를 title 로 받는다(field.hint) —
+                                        좁은 화면으로 옮겼다고 설명이 사라지면
+                                        안 된다. */}
+                                    <dt
+                                      className="text-xs text-zinc-500 dark:text-zinc-500"
+                                      title={field.hint}
+                                    >
                                       {field.label}
                                     </dt>
                                     <dd

@@ -85,6 +85,20 @@ import {
  * placeholder 로 보여 주는 것을 이 묶음은 아래 한 줄로 보여 주는데
  * (requestedDueDateHint), 성질은 똑같다 — 어떤 경로로도 입력값이 되지 않는다.
  *
+ * ── ⚠️ 납품일은 입력칸이 아니다. 그래도 저장에는 실린다 ─────────────────
+ * 목록의 `납품일` 은 연결된 수리 건의 **실제 출하일**이고, 그 값은 워크플로가
+ * 출하 완료 시점에 자동으로 찍는다(mutations/workflow-transitions.ts). 사람이
+ * 적을 수 있는 값이 아니라서 이 폼에서도 받지 않는다 — 그 자리에는 지금 값과
+ * "왜 못 적는지"를 읽기 전용 한 줄로 적어 둔다(deliveredDateText).
+ *
+ * ⚠️ **그런데 collectFields 에서는 빼면 안 된다.** 이 화면의 저장은 보낸 칸만
+ * 고치지 않는다: 검증이 키 없음(undefined)을 null 로 접고
+ * (validation/domestic-order-input.ts) mutation 이 모든 칼럼을 SET 한다
+ * (mutations/domestic-orders.ts). 즉 payload 에서 `deliveredDate` 를 빼면 DB 에
+ * 남아 있는 옛 납품일이 **저장 한 번에 지워진다** — 화면에서 안 보여 주기로 한
+ * 것이 자료를 버리는 것으로 바뀐다. 그래서 읽어 온 값을 손대지 않고 그대로
+ * 되돌려 보낸다(state 가 아니라 상수인 이유도 그 선언 주석에 있다).
+ *
  * ── 수리 건은 검색해서 고른다 ───────────────────────────────────────────
  * 접수 건이 수백 건이라 `<select>` 하나로는 원하는 건을 찾을 수 없다. 검색 칸을
  * 앞에 두고 목록을 걸러 내되, **고르는 것은 여전히 `<select>`** 다 — 직접 만든
@@ -226,7 +240,24 @@ export default function DomesticOrderEditForm({
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
   const [quoteNumber, setQuoteNumber] = useState(row?.quoteNumber ?? "");
   const [progressNote, setProgressNote] = useState(row?.progressNote ?? "");
-  const [deliveredDate, setDeliveredDate] = useState(row?.deliveredDate ?? "");
+  /**
+   * ⚠️ **state 가 아니라 상수다. 고칠 길이 없어야 한다.**
+   *
+   * 납품일은 이제 이 폼에서 적는 값이 아니다 — 화면에 보이는 것은 연결된 수리
+   * 건의 실제 출하일이고(아래 deliveredDateText), 이 칼럼은 손으로 적던 시절의
+   * 값으로 DB 에 남아 있다.
+   *
+   * 그런데도 이 줄이 필요한 이유는 하나다: **이 화면의 저장은 모든 칼럼을
+   * SET 한다.** collectFields 에서 `deliveredDate` 키가 빠지면 검증이 undefined 를
+   * null 로 접고(validation/domestic-order-input.ts) mutation 이 그 칼럼을
+   * 비운다 — 화면에서 안 보여 주기로 한 것이 **저장 한 번에 지워지는** 것으로
+   * 바뀐다. 그래서 읽어 온 값을 그대로 붙잡아 두었다가 그대로 되돌려 보낸다.
+   *
+   * setState 를 두지 않은 것이 그 규약을 코드로 못 박는 자리다. 입력칸이 없으니
+   * 값이 바뀔 일도 없고, 바꿀 함수 자체가 없으니 나중에 누가 이 칸에 입력칸을
+   * 되살리려면 이 주석을 지나가야 한다.
+   */
+  const deliveredDate = row?.deliveredDate ?? "";
   const [deliveredBy, setDeliveredBy] = useState(row?.deliveredBy ?? "");
   const [taxInvoiceDate, setTaxInvoiceDate] = useState(row?.taxInvoiceDate ?? "");
   const [amountExcludingVat, setAmountExcludingVat] = useState(row?.amountExcludingVat ?? "");
@@ -413,6 +444,29 @@ export default function DomesticOrderEditForm({
   }
 
   /**
+   * 납품일 자리에 **글자로** 적을 값. 입력칸이 아니라 읽기 전용 한 줄이다.
+   *
+   * 세 가지 경우를 서로 다른 말로 적는다 — 셋 다 화면에는 "날짜가 없다"로
+   * 똑같이 보이지만, 사람이 다음에 해야 할 일이 전부 다르기 때문이다:
+   *
+   *  - 연결이 없다 → 수리 건을 이어 붙여야 한다.
+   *  - 방금 **다른** 건을 골랐다 → 저장하기 전에는 그 건의 출하일을 알 수 없다.
+   *    고르개가 실어 오는 항목에 실제 출하일이 없어서다(조회 쪽
+   *    RepairCaseLinkOption) — 그때 저장돼 있던 옛 날짜를 그대로 두면 사용자는
+   *    방금 고른 건의 값이라고 읽는다. 고장내역 힌트가 같은 이유로 같은 조건을
+   *    쓴다(위 showSavedFaultHint).
+   *  - 연결은 그대로인데 날짜가 없다 → 그 건이 아직 안 나갔다. 기다리는 것 말고
+   *    이 폼에서 할 수 있는 일이 없다.
+   */
+  function deliveredDateText(): string {
+    if (repairCaseId === "") return "연결된 수리 건이 없습니다";
+    if (repairCaseId !== savedRepairCaseId) {
+      return "저장하면 지금 고른 수리 건의 실제 출하일이 보입니다";
+    }
+    return foldBlankToNull(row?.repairCaseActualShipmentDate) ?? "아직 출하 기록이 없습니다";
+  }
+
+  /**
    * 충돌 상자에 넣을 납기일 한 줄 — "2026-01-20 (1차분), 2026-02-15".
    *
    * 아무것도 안 적은 줄은 뺀다(붙잡을 글이 없다). 날짜 없이 메모만 친 줄은
@@ -455,6 +509,9 @@ export default function DomesticOrderEditForm({
       quoteIssuedDate,
       quoteNumber,
       progressNote,
+      // ⚠️ **입력칸이 없어진 뒤에도 반드시 실어 보낸다.** 이 저장은 모든 칼럼을
+      // SET 하므로, 여기서 빼면 DB 에 남아 있는 옛 납품일이 저장 한 번에
+      // 지워진다(위 deliveredDate 선언의 주석). 값은 읽어 온 그대로다.
       deliveredDate,
       deliveredBy,
       taxInvoiceDate,
@@ -775,7 +832,29 @@ export default function DomesticOrderEditForm({
         </fieldset>
         {renderText("quoteIssuedDate", "견적발행일", quoteIssuedDate, setQuoteIssuedDate, { type: "date" })}
         {renderText("quoteNumber", "견적서번호", quoteNumber, setQuoteNumber)}
-        {renderText("deliveredDate", "납품일", deliveredDate, setDeliveredDate, { type: "date" })}
+        {/* ⚠️ **납품일에는 입력칸이 없다.** 빈 자리로 두지 않고 지금 값과 까닭을
+            함께 적는 이유는, 있던 칸이 그냥 사라지면 "고장 났다"로 읽히기
+            때문이다 — 이 폼의 납기요청일 빈 묶음에도 같은 이유로 한 줄이 붙어
+            있다.
+
+            값은 손으로 적는 것이 아니라 워크플로가 출하 완료 때 자동으로 찍는다
+            (mutations/workflow-transitions.ts). 여기서 받을 방법이 없으므로 받는
+            척도 하지 않는다.
+
+            ⚠️ 그래도 **저장에는 옛 값이 그대로 실린다**(collectFields 의
+            deliveredDate) — 이 저장은 모든 칼럼을 SET 하므로, 안 보여 주는 것과
+            지우는 것은 다르게 다뤄야 한다. */}
+        <div>
+          <span className={editLabelClass}>납품일</span>
+          <p className={`${editInputClass} text-zinc-600 dark:text-zinc-300`}>
+            {deliveredDateText()}
+          </p>
+          <p className={hintClass}>
+            납품일은 연결된 수리 건의{" "}
+            <strong className="font-semibold">실제 출하일</strong>이라 여기서 직접 적을 수
+            없습니다. 출하 완료 처리를 하면 그 날짜가 자동으로 적힙니다.
+          </p>
+        </div>
         {renderText("deliveredBy", "납품자", deliveredBy, setDeliveredBy)}
         {renderText("taxInvoiceDate", "세금계산서발행일", taxInvoiceDate, setTaxInvoiceDate, { type: "date" })}
         {/* type="number" 를 쓰지 않는다 — 목록이 1,234,567 처럼 끊어 보여 주므로

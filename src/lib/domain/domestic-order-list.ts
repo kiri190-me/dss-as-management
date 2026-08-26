@@ -54,6 +54,23 @@ import { normalizeEntityName } from "./entity-name-match";
  * **빈 문자열과 공백만 적힌 값은 "없음"이다.** 이 구분이 없으면 실수로 스페이스
  * 한 칸이 들어간 줄이 수리 건의 값을 영영 가린다 — 화면에는 빈칸으로 보이는데
  * 원본에는 값이 있는 상태라, 왜 안 보이는지 화면만 봐서는 알 길이 없다.
+ *
+ * ── ⚠️ 납품일만은 "이 행이 먼저"가 아니다 ───────────────────────────────
+ * 위 다섯과 정반대다. 납품일은 **연결된 수리 건의 실제 출하일
+ * (repair_cases.actual_shipment_date) 하나뿐**이고, 그 줄에 적혀 있던 값
+ * (domestic_orders.delivered_date)은 화면에 나오지 않는다
+ * (resolveDomesticOrderDeliveredDate).
+ *
+ * 까닭은 그 값의 출처다. 실제 출하일은 **워크플로가 출하 완료 시점에 자동으로
+ * 찍는 값**이라(mutations/workflow-transitions.ts) 사람이 손으로 고칠 수 없고,
+ * 그래서 "언제 나갔는가"에 대해 이 시스템이 가진 유일한 사실이다. 손으로 적는
+ * 칸을 그 옆에 나란히 두면 둘이 어긋나는 줄이 생기고, 그때 어느 쪽이 맞는지
+ * 화면만 봐서는 알 길이 없다 — 그래서 아예 한쪽만 보여 준다.
+ *
+ * **`delivered_date` 칼럼은 지우지 않았다.** 손으로 적던 시절의 값이 그대로
+ * 남아 있고, 저장할 때도 읽어 온 값을 그대로 되실어 보낸다
+ * (domestic-order-cell-edit.ts 의 그 칸 주석). 화면에서 안 보여 주고 안 받을 뿐
+ * 자료를 버린 것이 아니다.
  * ============================================================================
  */
 
@@ -96,6 +113,31 @@ export function resolveDomesticOrderValue(
   repairCaseValue: string | null | undefined
 ): string | null {
   return foldBlankToNull(ownValue) ?? foldBlankToNull(repairCaseValue);
+}
+
+/**
+ * 목록의 `납품일` 칸에 그릴 날짜 — **연결된 수리 건의 실제 출하일뿐이다.**
+ * 연결이 없거나 그 건이 아직 안 나갔으면 null 이고, 화면이 "-"로 그린다.
+ *
+ * ⚠️ **위 resolveDomesticOrderValue 와 규칙이 다르다.** 저쪽은 "이 행에 적힌
+ * 값이 먼저, 없으면 수리 건"이지만 여기는 **수리 건 하나뿐**이다 — 그 줄의
+ * `deliveredDate` 에 값이 적혀 있어도 보지 않는다(파일 헤더의 '납품일만은').
+ * 그래서 이 함수는 두 값을 받지 않는다: 받을 자리가 있으면 언젠가 거기에
+ * `row.deliveredDate` 가 들어가고, 그 순간 이 규칙은 조용히 사라진다.
+ *
+ * 받는 것이 값 하나가 아니라 **이름 붙은 칸**인 것도 같은 이유다. 날짜 문자열을
+ * 그대로 받으면 부르는 쪽이 `resolveDomesticOrderDeliveredDate(row.deliveredDate)`
+ * 라고 적어도 타입이 통과한다 — 화면에는 옛날 손으로 적은 값이 그대로 나오는데
+ * 시험은 전부 초록색인 상태가 된다.
+ *
+ * 공백을 접는 것은 이 파일의 다른 값들과 같은 규칙이다. date 칼럼이라 공백이
+ * 들어올 일은 없지만, "비어 있음"의 모양이 칸마다 다르면 화면이 어느 칸은
+ * "-"로 어느 칸은 빈칸으로 그리게 된다.
+ */
+export function resolveDomesticOrderDeliveredDate(row: {
+  repairCaseActualShipmentDate: string | null;
+}): string | null {
+  return foldBlankToNull(row.repairCaseActualShipmentDate);
 }
 
 /**

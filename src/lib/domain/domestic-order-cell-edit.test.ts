@@ -15,12 +15,14 @@ import {
  *
  * 이 화면의 저장은 보낸 칸만 고치지 않고 **줄 전체를 SET 한다**(그 파일 헤더).
  * 그래서 아래 시험이 막는 것은 화면의 생김새가 아니라 **자료가 조용히 지워지는
- * 일**이다. 자물쇠는 셋이다:
+ * 일**이다. 자물쇠는 넷이다:
  *
  *  1. 한 칸을 고쳐도 나머지 칸이 **원래 값 그대로** 실린다(빠지면 그 칸이 지워진다).
  *  2. 실리는 것은 **원본 칸**이다 — 계산된 값(modelName · customerName …)이 섞이면
  *     수리 건에서 빌려 쓰던 값이 이 줄에 복사되어 굳는다.
  *  3. 키 목록이 `줄 수정` 폼의 collectFields 와 **한 칸도 다르지 않다.**
+ *  4. **납품일(deliveredDate)이 실린다.** 이제 화면 어디에도 안 나오는 값이라
+ *     빠져도 눈으로는 알아챌 수 없다 — 파일 맨 아래 묶음이 그 자리를 지킨다.
  */
 
 /**
@@ -459,4 +461,69 @@ test("고장내역 안내는 연결된 수리 건에 증상이 적혀 있을 때
     intakeNumber: null,
     symptom: "전원 안 들어옴",
   });
+});
+
+/**
+ * ── ⚠️ 여기부터: 납품일 — 화면에 없는데 반드시 실려야 하는 칸 ──────────────
+ *
+ * 목록의 `납품일` 은 이제 이 칼럼이 아니라 **연결된 수리 건의 실제 출하일**이고
+ * (queries 의 displayDeliveredDate), `줄 수정` 폼에도 입력칸이 없다. 그래서 이
+ * 칸은 **화면 어디를 봐도 확인할 수 없는 값**이 되었다 — payload 에서 빠져도
+ * 눈으로는 아무도 못 알아채고, 알아챘을 때는 이미 여러 줄에서 지워진 뒤다.
+ * 위 아홉 칸과 달리 "고쳐 보고 값이 맞나" 볼 자리조차 없으므로, 이 셋이 그
+ * 칼럼을 지키는 **유일한** 장치다.
+ *
+ * 손으로 적던 시절의 값은 되돌릴 수 있도록 DB 에 남겨 두기로 한 것이지, 버리기로
+ * 한 것이 아니다 — 화면에서 안 보여 주는 것과 자료를 지우는 것은 다른 결정이다.
+ */
+
+test("⚠️ 납품일은 화면에 없어도 원래 값 그대로 실린다 — 빠지면 저장 한 번에 지워진다", () => {
+  const subject = row();
+  const built = buildDomesticOrderCellUpdateFields(subject, "quoteNumber", "Q-9");
+
+  // 키가 있어야 하고(없으면 검증이 undefined 를 null 로 접는다),
+  assert.equal("deliveredDate" in built, true, "deliveredDate 키가 빠졌다 — 그 칼럼이 지워진다");
+  // 값이 읽어 온 그대로여야 한다(다른 값으로 바뀌어도 자료가 어긋난다).
+  assert.equal(built.deliveredDate, "2026-02-20");
+  assert.equal(built.deliveredDate, subject.deliveredDate);
+});
+
+test("⚠️ 아홉 칸 중 무엇을 고쳐도 납품일은 그대로다 — 한 경로만 새도 자료가 샌다", () => {
+  const subject = row();
+  for (const field of ALL_INLINE_FIELDS) {
+    const built = buildDomesticOrderCellUpdateFields(subject, field, "새 값");
+    assert.equal(built.deliveredDate, "2026-02-20", `${field} 을(를) 고치는데 납품일이 바뀌었다`);
+  }
+  // 비어 있던 줄은 비어 있는 채로 남는다 — 없던 날짜가 생기는 것도 곤란하다.
+  const empty = buildDomesticOrderCellUpdateFields(
+    row({ deliveredDate: null }),
+    "progressNote",
+    "수리 완료"
+  );
+  assert.equal(empty.deliveredDate, null);
+});
+
+test("⚠️ 계산된 납품일(displayDeliveredDate)은 실리지 않는다 — 담길 칼럼조차 없다", () => {
+  /**
+   * 목록 한 줄에는 원본 칸(deliveredDate)과 계산된 값(displayDeliveredDate)이
+   * 함께 들어 있다. 화면이 그리는 것은 계산된 쪽이라 실수로 집어 오기 쉽고,
+   * 그것이 원본 칸에 담기면 자동으로 따라오던 실제 출하일이 이 줄에 박제된다 —
+   * 고장내역과 같은 함정이다(파일 헤더의 함정 ②).
+   */
+  const listItem = {
+    ...row({ deliveredDate: "2026-03-31" }),
+    // 화면이 지금 그리고 있는 날짜. 연결된 수리 건의 실제 출하일이다.
+    displayDeliveredDate: "2025-11-14",
+    repairCaseActualShipmentDate: "2025-11-14",
+  };
+
+  const built = buildDomesticOrderCellUpdateFields(listItem, "deliveredBy", "김유진");
+
+  // 실리는 것은 원본 칸이고, 값은 손으로 적던 그 값 그대로다.
+  assert.equal(built.deliveredDate, "2026-03-31");
+  // 계산된 값도, 조인해 온 수리 건의 칸도 키 자체가 없어야 한다.
+  assert.equal("displayDeliveredDate" in built, false, "계산된 값이 함께 실려 나갔다");
+  assert.equal("repairCaseActualShipmentDate" in built, false, "수리 건의 칸이 실려 나갔다");
+  // 키 개수는 그대로 23개다 — 늘었다면 무언가가 몰래 끼어든 것이다.
+  assert.equal(Object.keys(built).length, 23);
 });

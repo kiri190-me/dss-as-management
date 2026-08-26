@@ -37,10 +37,15 @@
  *   - **원본 칸** — modelNameText · lotNumberText · serialNumberText ·
  *     intakeNumberText · customerId · faultDescriptionText
  *   - **계산된 값** — modelName · lotNumber · serialNumber ·
- *     displayIntakeNumber · customerName · reportedSymptom
+ *     displayIntakeNumber · customerName · reportedSymptom ·
+ *     **displayDeliveredDate**
  *
  * 계산된 값은 *"그 줄에 적힌 것이 먼저, 없으면 연결된 수리 건의 것"* 이다
- * (resolveDomesticOrderValue). 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
+ * (resolveDomesticOrderValue). 마지막 하나만 규칙이 더 세다 —
+ * displayDeliveredDate 는 **연결된 수리 건의 실제 출하일뿐**이고 그 줄의
+ * deliveredDate 는 보지 않는다(resolveDomesticOrderDeliveredDate). 그 값이 실려
+ * 나가면 담길 칼럼조차 없거니와, 원본 칸(deliveredDate)에 옮겨 담으면 자동으로
+ * 따라오던 날짜가 이 줄에 박제된다. 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
  * 계산된 값을 보내면, 그 줄이 원래 비워 두고 수리 건 값을 빌려 쓰던 칸에 수리
  * 건의 값이 자기 값으로 복사되어 굳는다 — 그때부터 "일부러 다르게 적었다"와
  * "그냥 안 건드렸다"를 구분할 수 없고, 나중에 수리 건 쪽이 고쳐져도 이 줄만 옛
@@ -182,7 +187,25 @@ export type DomesticOrderCellEditRow = {
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   progressNote: string | null;
+  /**
+   * ⚠️ **화면 어디에도 안 나오는 값인데 반드시 여기 있어야 한다.**
+   *
+   * 목록의 `납품일` 은 이제 이 칼럼이 아니라 연결된 수리 건의 실제 출하일이다
+   * (queries 의 displayDeliveredDate). `줄 수정` 폼에도 입력칸이 없다. 그래도
+   * 이 칸을 뺄 수 없는 이유는 파일 헤더의 규칙 하나 때문이다 — **이 저장은 모든
+   * 칼럼을 SET 한다.** 아래 builder 가 이 키를 안 실으면 검증이 undefined 를
+   * null 로 접고, 손으로 적던 시절의 납품일이 **칸 하나 고치는 저장 한 번에**
+   * DB 에서 사라진다.
+   *
+   * 화면에서 안 보여 주기로 한 것과 자료를 버리는 것은 다른 결정이다. 되돌릴 수
+   * 있게 두려고 칼럼을 남긴 것이므로, 이 경로로 지워지면 그 결정이 무의미해진다.
+   *
+   * ⚠️ 계산된 짝(displayDeliveredDate)은 **이 타입에 없다.** 고장내역과 같은
+   * 함정이고(파일 헤더의 함정 ②), 여기 없다는 것이 그 함정에 빠질 자리를 없애는
+   * 장치다 — 그 이름으로 SET 을 만들 칼럼은 아예 없다.
+   */
   deliveredDate: string | null;
+  /** `납품일` 과 이름만 비슷한 다른 칸이다. 이쪽은 눌러서 고치는 아홉 칸에 든다. */
   deliveredBy: string | null;
   taxInvoiceDate: string | null;
   amountExcludingVat: string | null;
@@ -223,6 +246,8 @@ export function buildDomesticOrderCellUpdateFields(
     quoteIssuedDate: row.quoteIssuedDate,
     quoteNumber: row.quoteNumber,
     progressNote: row.progressNote,
+    // ⚠️ 화면에 안 보이는 값이지만 **빼면 지워진다**(위 타입의 그 칸 주석).
+    // 안 보여 주기로 한 것이지 버리기로 한 것이 아니다.
     deliveredDate: row.deliveredDate,
     deliveredBy: row.deliveredBy,
     taxInvoiceDate: row.taxInvoiceDate,

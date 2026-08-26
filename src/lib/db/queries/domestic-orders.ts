@@ -12,6 +12,7 @@ import {
 } from "../schema";
 import {
   resolveDomesticOrderCustomerRowColor,
+  resolveDomesticOrderDeliveredDate,
   resolveDomesticOrderValue,
 } from "@/lib/domain/domestic-order-list";
 
@@ -47,6 +48,19 @@ import {
  *
  * 수리 건에서 따라오는 값은 원본이 바뀌면 다음 조회에서 바로 따라간다 — 이
  * 행의 칸을 비워 두는 것이 기본인 이유가 그것이다.
+ *
+ * ── ⚠️ 납품일은 수리 건의 실제 출하일 하나뿐이다 ────────────────────────
+ * 위 다섯과 **규칙이 다르다.** 화면의 `납품일` 은 연결된 수리 건의
+ * `actual_shipment_date` 이고, 그 줄의 `delivered_date` 는 화면에 나오지 않는다.
+ * 실제 출하일은 워크플로가 출하 완료 시점에 자동으로 찍는 값이라
+ * (mutations/workflow-transitions.ts) 사람이 손으로 고칠 수 없고, "언제 나갔는가"에
+ * 대해 이 시스템이 가진 유일한 사실이다. 고르는 규칙은 여기가 아니라 도메인
+ * 함수가 갖는다(resolveDomesticOrderDeliveredDate — 그 함수 주석에 까닭이 있다).
+ *
+ * ⚠️ 그래도 `delivered_date` 는 **그대로 골라 온다.** 화면에 그리기 위해서가
+ * 아니라 **되실어 보내기 위해서**다 — 이 화면의 저장은 모든 칼럼을 SET 하므로,
+ * 목록이 이 값을 안 실어 오면 칸 하나를 고치는 저장 한 번에 그 칼럼이 지워진다
+ * (domain/domestic-order-cell-edit.ts 의 파일 헤더).
  *
  * ── 납기 요청일만 질의가 하나 더 있다 ───────────────────────────────────
  * 한 줄에 날짜가 여럿일 수 있어 딸린 표에 있다(schema/domestic-order-due-dates.ts).
@@ -146,6 +160,17 @@ export type DomesticOrderJoinRow = {
    * 데에만 쓴다 — 날짜가 여럿이 될 수 있게 된 뒤에도 이 관계는 그대로다.
    */
   repairCaseCustomerRequestedDueDate: string | null;
+  /**
+   * 연결된 수리 건의 **실제 출하일**. 화면의 `납품일` 이 이 값이다.
+   *
+   * 위 다섯과도, 바로 위 고객 요청 납기일과도 성질이 다르다 — 다섯은 이 행의
+   * 값이 먼저이고, 고객 요청 납기일은 폼의 힌트일 뿐이며, 이것은 **목록이 그리는
+   * 값 그 자체**다. 아래 매퍼가 displayDeliveredDate 로 접는다.
+   *
+   * 사람이 손으로 찍을 수 없는 값이라 여기 실려 오는 것 말고 다른 출처가 없다
+   * (mutations/workflow-transitions.ts 가 출하 완료 때 자동으로 적는다).
+   */
+  repairCaseActualShipmentDate: string | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
@@ -159,7 +184,17 @@ export type DomesticOrderJoinRow = {
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   progressNote: string | null;
+  /**
+   * ⚠️ **화면에 그리지 않는다.** 손으로 적던 시절의 값이고, 지금 `납품일` 로
+   * 보이는 것은 위 repairCaseActualShipmentDate 다(파일 헤더).
+   *
+   * 그런데도 실어 오는 이유는 하나뿐이다 — **저장할 때 그대로 되돌려 보내기
+   * 위해서.** 이 화면의 저장은 모든 칼럼을 SET 하므로 payload 에서 빠지면 그
+   * 칼럼이 지워진다. 이 값을 지우는 것은 되돌릴 수 없는 일이라, 안 보여 주는
+   * 것과 버리는 것은 다르게 다룬다.
+   */
   deliveredDate: string | null;
+  /** `납품일` 과 이름만 비슷한 다른 칸이다. 이쪽은 그대로 손으로 적는다. */
   deliveredBy: string | null;
   taxInvoiceDate: string | null;
   /** numeric 컬럼 — 문자열로 읽는다(스키마 파일의 '금액은 numeric 이다'). */
@@ -215,6 +250,21 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
    */
   customerRowColor: string | null;
   /**
+   * 화면의 `납품일` 에 그릴 날짜 — **연결된 수리 건의 실제 출하일**이다. 연결이
+   * 없거나 아직 출하 기록이 없으면 null 이고, 화면이 "-"로 그린다.
+   *
+   * ⚠️ 위 다섯(customerName · modelName …)과 **이름은 비슷해도 규칙이 다르다.**
+   * 저쪽은 이 행의 값이 먼저지만 이것은 수리 건 하나뿐이라, 원본 칸
+   * (deliveredDate)에 값이 적혀 있어도 여기에는 섞이지 않는다
+   * (resolveDomesticOrderDeliveredDate).
+   *
+   * ⚠️ **저장에 실으면 안 되는 계산된 값이다.** 이 이름으로 SET 을 만들 칼럼은
+   * 없고, 원본 칸에 옮겨 담으면 자동으로 따라오던 값이 이 줄에 박제된다 —
+   * domain/domestic-order-cell-edit.ts 의 DomesticOrderCellEditRow 에 이 칸이
+   * 없는 것이 그 장치다(그 파일 헤더의 함정 ②와 같은 이유).
+   */
+  displayDeliveredDate: string | null;
+  /**
    * 이 줄의 납기 요청일 전부. **차례대로**다(display_order → due_date).
    * 비어 있는 것이 정상이다 — 납기일이 아직 없는 줄이 실제로 있다.
    *
@@ -256,6 +306,12 @@ export function mapDomesticOrderRow(
       row.faultDescriptionText,
       row.repairCaseReportedSymptom
     ),
+    // 납품일도 위 다섯과 같은 규칙으로 **접지 않는다** — 이 행의
+    // deliveredDate 는 보지 않고 수리 건의 실제 출하일만 본다(그 함수 주석).
+    // row 를 통째로 넘기지 않는 것이 그 규칙을 코드로 못 박는 자리다.
+    displayDeliveredDate: resolveDomesticOrderDeliveredDate({
+      repairCaseActualShipmentDate: row.repairCaseActualShipmentDate,
+    }),
     // 색은 위 다섯과 같은 규칙으로 **접지 않는다** — 이름을 고른 쪽의 고객사를
     // 그대로 따라간다(그 함수의 주석). 두 벌을 coalesce 하면 화면의 이름과 줄
     // 색이 서로 다른 고객사를 가리킬 수 있다.
@@ -306,6 +362,9 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       repairCaseReportedSymptom: repairCases.reportedSymptom,
       // 접히지 않는 여섯 번째 값. 폼의 흐린 글씨용이다(위 타입 주석).
       repairCaseCustomerRequestedDueDate: repairCases.customerRequestedDueDate,
+      // 화면의 `납품일` 이 되는 값. 아래 delivered_date 와 **짝이 아니라
+      // 대신**이다(파일 헤더의 '납품일은 수리 건의 실제 출하일 하나뿐이다').
+      repairCaseActualShipmentDate: repairCases.actualShipmentDate,
       displayOrder: domesticOrders.displayOrder,
       purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
       projectName: domesticOrders.projectName,
@@ -315,6 +374,8 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
       quoteNumber: domesticOrders.quoteNumber,
       progressNote: domesticOrders.progressNote,
+      // ⚠️ 화면에 그리지 않는 값인데도 고른다 — **저장이 되실어 보내야** 해서다.
+      // 빼는 순간 칸 하나를 고치는 저장 한 번에 이 칼럼이 지워진다(위 타입 주석).
       deliveredDate: domesticOrders.deliveredDate,
       deliveredBy: domesticOrders.deliveredBy,
       taxInvoiceDate: domesticOrders.taxInvoiceDate,

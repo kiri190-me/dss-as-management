@@ -14,6 +14,7 @@ import {
   isDomesticOrderCompleted,
   orderIssuedYearOf,
   resolveDomesticOrderCustomerRowColor,
+  resolveDomesticOrderDeliveredDate,
   resolveDomesticOrderValue,
   resolveInitialDomesticOrderYear,
   UNASSIGNED_CUSTOMER_LABEL,
@@ -31,6 +32,9 @@ import {
  *  6. **검색은 여덟 칸을 함께 보고, 빈 검색어는 아무것도 거르지 않는다** —
  *     한 칸이라도 빠지면 그 칸으로는 조용히 못 찾게 되고, 그 사실은 화면
  *     어디에도 드러나지 않는다.
+ *  7. **납품일만은 그 규칙이 정반대다** — 그 줄에 적힌 값이 있어도 연결된 수리
+ *     건의 실제 출하일을 쓴다. 5번과 헷갈리기 딱 좋은 자리라, 두 규칙을 같은
+ *     파일에서 나란히 시험해 둔다.
  */
 
 type Row = {
@@ -301,6 +305,48 @@ test("이 행의 값이 우선이라는 규칙은 다섯 칸 모두에 같게 �
   assert.equal(resolveDomesticOrderValue(own.lot, fromCase.lot), "LN-9");
   assert.equal(resolveDomesticOrderValue(own.serial, fromCase.serial), "SN-9");
   assert.equal(resolveDomesticOrderValue(own.fault, fromCase.fault), "전원 안 들어옴");
+});
+
+// ── 납품일: 다섯 칸과 규칙이 정반대인 칸 ──────────────────────────────
+
+test("납품일은 연결된 수리 건의 실제 출하일이다", () => {
+  assert.equal(
+    resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "2025-11-14" }),
+    "2025-11-14"
+  );
+});
+
+test("⚠️ 그 줄에 납품일이 적혀 있어도 실제 출하일이 이긴다 — 다섯 칸과 정반대다", () => {
+  /**
+   * 이 시험이 이 칸의 전부다. 다섯 칸(resolveDomesticOrderValue)은 "이 행에 적힌
+   * 값이 먼저"지만 납품일은 **수리 건 하나뿐**이다 — 실제 출하일은 워크플로가
+   * 출하 완료 때 자동으로 찍는 값이라, "언제 나갔는가"에 대해 이 시스템이 가진
+   * 유일한 사실이기 때문이다.
+   *
+   * 함수가 그 줄의 값을 **받지도 않는다**는 것으로 규칙을 못 박는다. 여기서
+   * deliveredDate 를 함께 넘겨 보아도 결과는 실제 출하일 그대로다.
+   */
+  const row = {
+    // 손으로 적어 DB 에 남아 있는 옛 값. 화면에 나오면 안 된다.
+    deliveredDate: "2026-03-31",
+    repairCaseActualShipmentDate: "2025-11-14",
+  };
+  assert.equal(resolveDomesticOrderDeliveredDate(row), "2025-11-14");
+});
+
+test("수리 건 연결이 없으면 납품일도 없다 — 그 줄에 적힌 값으로 메우지 않는다", () => {
+  // 실 자료에서 지금까지 날짜가 보이던 줄이 빈칸이 되는 경우가 바로 이것이다.
+  // 화면은 이때 "-"로 그리고, 왜 비었는지는 화면의 한 줄이 설명한다.
+  const row = { deliveredDate: "2026-03-31", repairCaseActualShipmentDate: null };
+  assert.equal(resolveDomesticOrderDeliveredDate(row), null);
+});
+
+test("연결은 있어도 아직 안 나갔으면 납품일은 없다", () => {
+  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: null }), null);
+  // 공백은 이 파일의 다른 값들과 같은 규칙으로 접는다 — 비어 있음의 모양이
+  // 칸마다 다르면 화면이 어느 칸은 "-"로 어느 칸은 빈칸으로 그린다.
+  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "" }), null);
+  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "   " }), null);
 });
 
 test("줄 색은 이름을 고른 쪽 고객사의 색이다 — 이 행에 고객사가 있으면 그쪽", () => {
