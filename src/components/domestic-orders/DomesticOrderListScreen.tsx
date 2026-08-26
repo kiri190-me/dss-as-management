@@ -1,9 +1,14 @@
 "use client";
 
-import { useMemo, useState, type MouseEvent } from "react";
+import { useId, useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import {
+  LIST_CARD_GRID,
+  ResponsiveList,
+  setStoredChoice,
+  useStoredChoice,
+} from "@/components/common/responsive-list";
 import type {
   CustomerOption,
   DomesticOrderListItem,
@@ -217,6 +222,35 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 따라 달라지고, 묶음이 여럿이라 소제목끼리도 겹쳐 쌓인다. 소제목이 이미 가진
  * sticky left-0(가로로만 붙는다)은 그대로 살아 있고, z-index 가 없어 z-10 인
  * 머리글 **아래로** 지나간다 — 둘이 부딪히지 않는다.
+ *
+ * ── 표 위쪽은 자리를 적게 쓴다 — 머리말 접기 · 한 줄 합치기 ─────────────
+ * 위가 남는 높이를 다 받는 구조라, **표 위에 있는 것은 전부 표에서 빼 온
+ * 높이다.** 그런데 위가 화면의 절반 가까이를 먹고 있었다(사용자 지적).
+ *
+ * 실측(<main> 안쪽 869px):
+ *
+ *     머리말 상자 202 · 검색 줄 30 · 건수/`행 추가`/합계 줄 28 ·
+ *     납품일 안내 16 · gap-4 넷 64  →  표에 남는 것 **529**
+ *
+ * 둘을 했다. **머리말 상자를 접고**(SheetHeading — 기본 접힘, 제목과 기준일은
+ * 남는다), **검색 줄 · 건수 줄 · 납품일 안내를 한 상자로 합쳤다**(아래 그 줄의
+ * 주석 — 조작 한 줄과 안내 한 줄, 사이는 gap-4 가 아니라 gap-y-2). 어느 쪽도
+ * 글자를 지우지 않는다 — 펼치면 그대로 나오고, 안내 셋(발주일 미정 N건 · 검색
+ * 중 년도 안내 · 납품일 안내)은 조건도 문구도 그대로다.
+ *
+ * 같은 화면에서 다시 재면:
+ *
+ *     머리말 46(접힘) · 조작+안내 54 · gap-4 둘 32  →  표에 남는 것 **737**
+ *     펼쳐 두어도 202 · 54 · 32               →  표에 남는 것 **581**
+ *
+ * 펼친 채로도 예전보다 52px 넓은 것은 줄 합치기 몫이다. 좁은 화면에서는 조작이
+ * 여러 줄로 접혀 그만큼 줄지만(1024px 에서 표 681, 480px 에서 557), 그 폭에서는
+ * 애초에 표가 아니라 카드가 나온다.
+ *
+ * ⚠️ **자리를 줄이는 방법으로 sr-only 를 쓰지 말 것.** Tailwind 의 sr-only 는
+ * position:absolute 라, 기준이 되는 조상 없이 쓰면 표 껍데기의 스크롤을 빠져
+ * 나가 문서 바닥에 자리를 주장한다 — 이 화면이 바로 그것으로 405px 을 흘렸다
+ * (EditRowButton 주석의 실측). 자리를 줄이려다 자리를 새로 만드는 셈이 된다.
  *
  * ── ⚠️ 납품일은 수리 건의 실제 출하일이다. 여기서 적는 값이 아니다 ──────
  * 이 칸이 그리는 것은 연결된 수리 건의 `actual_shipment_date` 이고
@@ -472,34 +506,123 @@ function OrderIssuedDateContent({ row }: { row: DomesticOrderListItem }) {
 }
 
 /**
+ * 머리말을 펼쳐 두었는지를 브라우저에 적어 두는 이름. **표/카드 토글이 쓰는
+ * 장치와 같은 것을 같은 규약으로 쓴다**(responsive-list.tsx 의 useStoredChoice ·
+ * setStoredChoice, 키는 `무엇:어디` 꼴). 접기를 새로 만들면서 저장 장치까지 새로
+ * 만들면, 저장값과 첫 그림이 어긋나 화면이 한 번 깜빡이는 함정을 여기서 다시
+ * 밟는다 — 그 파일이 이미 풀어 둔 문제다.
+ *
+ * 값이 "COLLAPSED"·"EXPANDED" 인 것은 표/카드가 "TABLE"·"CARD" 를 적는 것과
+ * 같은 이유다. true/false 로 적으면 나중에 세 번째 상태(예: 인사문만 보기)가
+ * 생겼을 때 적어 둔 값을 읽는 규칙부터 바뀐다.
+ */
+const SHEET_HEADING_STORAGE_KEY = "sheet-heading:domestic-orders";
+const SHEET_HEADING_EXPANDED = "EXPANDED";
+const SHEET_HEADING_COLLAPSED = "COLLAPSED";
+
+/**
  * 시트 머리말. 원본 2~8행을 그대로 옮긴다.
  *
  * 이 화면은 목록이기 전에 **고객사에 보내는 문서**다. 인사문과 연락 안내가
  * 빠지면 표만 남고, 그러면 이 자료가 무엇을 위한 것인지가 사라진다. 날짜는
  * 서버가 정해 내려보낸다 — 클라이언트에서 new Date() 를 부르면 서버가 그린
  * 것과 달라져 hydration 이 어긋난다.
+ *
+ * ── ⚠️ 기본은 접힘이다. 내용은 하나도 지우지 않았다 ─────────────────────
+ * 이 상자는 펼쳐 두면 **202px**, 접으면 **46px** 다(실측). 그 차이는 그대로
+ * 표로 간다 — 이 화면은 <main> 의 남는 높이를 표가 받는 구조라(파일 헤더 '열
+ * 제목은 화면에 붙어 있다'), 위가 줄면 표가 정확히 그만큼 커진다. 인사문은
+ * 매일 볼 글이 아니고 표는 매일 훑는 장부라, 기본을 접힘으로 두었다(사용자
+ * 결정).
+ *
+ * **접혀도 제목과 기준일은 남는다.** 이 화면이 무엇이고 언제 기준인지는 늘
+ * 보여야 한다 — 그 둘까지 접으면 접힌 상자가 무엇을 접어 둔 것인지 알 수 없다.
+ * 펼치면 인사문 네 줄과 내부 메모가 **접기 전과 한 글자도 다르지 않게** 나온다.
+ *
+ * ── 접었는지 펼쳤는지는 브라우저가 기억한다 ─────────────────────────────
+ * 매번 다시 접어야 하면 안 고친 것과 같다. 이 화면이 이미 쓰고 있는 장치를
+ * 그대로 쓴다(위 SHEET_HEADING_STORAGE_KEY).
+ *
+ * ── 접기 버튼은 진짜 <button> 이다 ──────────────────────────────────────
+ * 키보드로 닿고 Enter·Space 로 열린다. 지금 어느 쪽인지는 aria-expanded 가
+ * 말한다. <details>/<summary> 를 쓰지 않는 까닭은 FilterDisclosure 헤더에
+ * 있고, 그 파일과 같은 모양(이름 + ▸)을 쓴다 — 한 서비스 안에서 접는 것이
+ * 화면마다 다르게 생기면 접힌다는 사실 자체가 안 읽힌다.
+ *
+ * ⚠️ **버튼에 sr-only 를 쓰지 않았다.** 보이는 글자("머리말 접기"/"머리말
+ * 펼치기")가 이미 무슨 버튼인지 다 말하고, 이 화면에 하나뿐이라 어느 줄의
+ * 것인지 밝힐 일도 없다. Tailwind 의 sr-only 는 position:absolute 라 기준이
+ * 되는 조상이 없으면 문서 바닥에 자리를 주장하고, 바로 앞 커밋이 이 화면에서
+ * 그것 때문에 405px 이 새던 것을 고쳤다(EditRowButton 주석의 실측). 자리를
+ * 줄이려는 변경에서 같은 종류를 새로 만들지 않는다 — **여기에 sr-only 를
+ * 새로 넣게 되면 그 버튼에 relative 를 함께 붙일 것.**
+ *
+ * ⚠️ 접힌 몸통은 지우지 않고 **hidden 으로 둔다**(FilterDisclosure 와 같다).
+ * 조건부로 아예 안 그리면 aria-controls 가 없는 id 를 가리키게 된다. display:
+ * none 인 자식은 flex 항목이 아니라 gap 도 함께 사라지므로, 접었을 때 이 상자는
+ * 제목 줄 하나 높이 그대로다.
  */
 function SheetHeading({ asOfDate }: { asOfDate: string }) {
+  const stored = useStoredChoice(SHEET_HEADING_STORAGE_KEY);
+  // 적어 둔 적이 없으면(서버가 그릴 때도 그렇다) 접힘이다 — 기본이 접힘이라
+  // 서버가 그린 화면과 저장값이 없는 첫 그림이 같다.
+  const isExpanded = stored === SHEET_HEADING_EXPANDED;
+  const panelId = useId();
+
   return (
-    <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">내자 정리</h1>
+    <section
+      className={`flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 ${
+        // 접었을 때는 위아래 여백도 함께 줄인다. 제목 한 줄짜리 띠에 p-4 를
+        // 그대로 두면 접어서 번 자리의 3분의 1을 여백이 도로 가져간다.
+        isExpanded ? "p-4" : "px-4 py-2"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">내자 정리</h1>
+          <button
+            type="button"
+            onClick={() =>
+              setStoredChoice(
+                SHEET_HEADING_STORAGE_KEY,
+                isExpanded ? SHEET_HEADING_COLLAPSED : SHEET_HEADING_EXPANDED
+              )
+            }
+            aria-expanded={isExpanded}
+            aria-controls={panelId}
+            className="flex items-center gap-1 rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {isExpanded ? "머리말 접기" : "머리말 펼치기"}
+            {/* 화면 낭독기에는 aria-expanded 가 이미 같은 사실을 말한다 —
+                이 표시는 눈으로 보는 사람 몫이라 읽히지 않게 둔다. */}
+            <span
+              aria-hidden="true"
+              className={`text-zinc-400 transition-transform dark:text-zinc-500 ${
+                isExpanded ? "rotate-90" : ""
+              }`}
+            >
+              ▸
+            </span>
+          </button>
+        </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{asOfDate} 기준</p>
       </div>
-      <ol className="flex list-none flex-col gap-1">
-        <li>1. 귀사의 일익 번창하심을 기원합니다.</li>
-        <li>2. 납품 및 수리 관련하여 {asOfDate}자 진행 상황입니다.</li>
-        <li className="pl-4">
-          2) 수리품 반입/반출 및 기타 변동이 있을 경우 김유진 과장에게 전달해 주세요.
-        </li>
-        <li className="pl-4">3) 본 내용 변경을 요하거나 의견 있으면 주세요.</li>
-      </ol>
-      {/* 시트 머리말에 함께 적혀 있던 내부 메모다. 고객사에 보내는 문장이
-          아니라 우리 쪽 확인 사항이라 따로 떼어 둔다 — 위 인사문과 같은 줄에
-          두면 문서에 그대로 실려 나갈 말처럼 읽힌다. */}
-      <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-        내부 메모 — 발주 받으면 인사회신 잊지말기 (회신 前 수리소완성일 확인 必!) · 2023.08.23
-      </p>
+      <div id={panelId} className={isExpanded ? "flex flex-col gap-2" : "hidden"}>
+        <ol className="flex list-none flex-col gap-1">
+          <li>1. 귀사의 일익 번창하심을 기원합니다.</li>
+          <li>2. 납품 및 수리 관련하여 {asOfDate}자 진행 상황입니다.</li>
+          <li className="pl-4">
+            2) 수리품 반입/반출 및 기타 변동이 있을 경우 김유진 과장에게 전달해 주세요.
+          </li>
+          <li className="pl-4">3) 본 내용 변경을 요하거나 의견 있으면 주세요.</li>
+        </ol>
+        {/* 시트 머리말에 함께 적혀 있던 내부 메모다. 고객사에 보내는 문장이
+            아니라 우리 쪽 확인 사항이라 따로 떼어 둔다 — 위 인사문과 같은 줄에
+            두면 문서에 그대로 실려 나갈 말처럼 읽힌다. */}
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          내부 메모 — 발주 받으면 인사회신 잊지말기 (회신 前 수리소완성일 확인 必!) · 2023.08.23
+        </p>
+      </div>
     </section>
   );
 }
@@ -996,6 +1119,17 @@ export default function DomesticOrderListScreen({
   // 해의 금액이 합계에 섞이면, 표를 세로로 훑어 더한 값과 맞지 않는다.
   const { total, skipped } = sumAmounts(visibleRows);
 
+  /**
+   * 안내 두 줄을 지금 적는가. **조건은 예전 그대로다** — 각각 있던 자리에서
+   * 그대로 옮겨 왔고(아래 안내 묶음), 이름만 붙였다.
+   *
+   * 이름을 붙인 이유는 하나뿐이다: 둘 다 안 적을 때는 그 둘을 담는 상자까지
+   * 그리지 말아야 한다. 빈 상자를 남기면 한 줄을 통째로 차지하는 자리(w-full)에
+   * 높이 0짜리 항목이 남아 그 위 여백만 덩그러니 생긴다.
+   */
+  const showAlwaysVisibleNote = alwaysVisibleCount > 0 && years.length > 0 && !isSearching;
+  const showDeliveredDateNote = rows.length > 0;
+
   const editingRow =
     editTarget?.kind === "row" ? (rows.find((row) => row.id === editTarget.id) ?? null) : null;
   // 고치려던 줄이 목록에서 사라졌으면(남이 지웠다) 폼을 열지 않는다 — 없는
@@ -1045,7 +1179,25 @@ export default function DomesticOrderListScreen({
 
       {/* 검색칸은 년도와 달리 **늘 있다** — 고를 년도가 하나도 없는 자료
           (발주일이 전부 비어 있는 경우)에서도 번호로 찾는 일은 그대로 필요하다.
-          그래서 이 줄 전체를 years 로 감싸지 않고, 년도 부분만 감싼다. */}
+          그래서 이 줄 전체를 years 로 감싸지 않고, 년도 부분만 감싼다.
+
+          ── ⚠️ 이 한 상자가 예전의 세 덩어리다 ─────────────────────────
+          검색·년도 고르개가 한 줄, 건수·`행 추가`·합계가 또 한 줄, 납품일 안내가
+          또 한 줄이었다. 30 + 28 + 16 에 사이 여백 16 이 둘이면 106px 이고, 그
+          높이는 그대로 표에서 빠진다(파일 헤더의 '표 위쪽은 자리를 적게 쓴다').
+          한 상자에 넣으면 **조작 한 줄(30) + 안내 한 줄(16)** 에 사이 여백 8 로
+          54px 다 — 바깥 상자의 gap-4 를 안쪽 gap-y-2 로 바꿔 치는 셈이라, 줄
+          수를 줄이지 않고도 여백이 준다.
+
+          **넣는 순서가 곧 접히는 순서다.** 조작 다섯이 먼저, 그다음 건수 묶음,
+          안내 묶음이 맨 뒤다. 안내 묶음은 w-full 이라 **언제나 제 줄에서
+          시작한다** — 폭에 따라 어떤 때는 합계 옆에 붙고 어떤 때는 아래로
+          내려가면, 같은 화면이 창 크기마다 다른 모양이 된다.
+
+          **좁아지면 저절로 여러 줄이 된다**(flex-wrap · gap-y-2). 억지로 한 줄에
+          밀어 넣지 않는 이유는 이 줄에 든 것이 이미 여럿이어서다 — 접히지 않으면
+          검색칸이 줄을 밀어내 body 가 좌우로 흔들린다(검색칸의 max-w-full ·
+          min-w-0 주석, 파일 헤더의 가로 스크롤 규칙). */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <label
           className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
@@ -1110,13 +1262,88 @@ export default function DomesticOrderListScreen({
           </>
         )}
 
-        {/* 년도로 거르는 중일 때만 하는 말이다 — 검색 중에는 어느 줄도 년도로
-            가려지지 않으므로, 그대로 두면 지금 걸려 있지도 않은 조건을 설명하는
-            문장이 된다. */}
-        {alwaysVisibleCount > 0 && years.length > 0 && !isSearching && (
-          <p className="text-xs text-amber-800 dark:text-amber-300">
-            {NO_ORDER_DATE_LABEL} {alwaysVisibleCount}건은 어느 년도를 골라도 함께 보입니다.
+        {/* 건수 · `행 추가` · 합계. 셋을 한 덩어리로 묶어 **줄의 오른쪽 끝**에
+            둔다(ml-auto) — 예전 줄이 justify-between 으로 합계를 오른쪽에 두던
+            자리를 그대로 지킨다. 묶지 않고 낱개로 늘어놓으면 좁아졌을 때 셋이
+            제각기 다른 줄로 흩어져, 지금 보고 있는 건수와 그 합계가 서로 다른
+            줄에 적힌다.
+
+            ml-auto 는 **이 묶음이 놓인 줄에서만** 민다. 넓으면 검색칸과 한 줄에
+            서서 오른쪽 끝으로 가고, 좁아 줄이 접히면 제 줄에서 오른쪽에 붙는다
+            — 어느 쪽이든 합계가 오른쪽이라는 사실은 변하지 않는다.
+
+            안쪽 gap-y 가 바깥(2)보다 작은 것은 이 셋이 한 덩어리라서다. 덩어리
+            안에서 접힐 때는 덩어리 사이보다 좁게 벌어져야 한 묶음으로 읽힌다. */}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
+            {/* 검색 중에는 년도를 앞에 적지 않는다 — 모든 해에서 찾는 중이라
+                "2026년 3건"은 사실이 아니다. */}
+            {isSearching ? "검색 결과 " : activeYear !== null ? `${activeYear}년 ` : null}
+            {visibleRows.length}건
+            {visibleRows.length !== rows.length && (
+              <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-500">
+                (전체 {rows.length}건)
+              </span>
+            )}
           </p>
+          {canEdit && !isFormOpen && (
+            <button
+              type="button"
+              onClick={() => setEditTarget({ kind: "new" })}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              행 추가
+            </button>
+          )}
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            합계 <span className="font-semibold tabular-nums">{total}</span>{" "}
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">(부가세미포함)</span>
+            {skipped > 0 && (
+              <span className="ml-2 text-xs text-red-600 dark:text-red-400">
+                금액을 읽을 수 없는 {skipped}건은 합계에서 빠졌습니다
+              </span>
+            )}
+          </p>
+        </div>
+
+        {/* ── 안내 두 줄. **w-full 이라 언제나 제 줄에서 시작한다** ────────
+            둘 다 "지금 보이는 것이 왜 이런가"를 말하는 참고 문장이라 한 자리에
+            모았다. 조작 사이에 끼워 두면 폭에 따라 어떤 때는 고르개 옆에, 어떤
+            때는 합계 아래에 붙어 같은 화면이 창 크기마다 달리 읽힌다.
+
+            바깥 상자 안에 있으므로 이 줄과 조작 줄 사이는 gap-y-2(8px)다 —
+            예전처럼 바깥 gap-4(16px)로 벌어지지 않는다. 표에 8px 이 더 간다.
+
+            **조건도 문구도 예전 그대로다**(위 showAlwaysVisibleNote ·
+            showDeliveredDateNote). 둘 다 안 적을 때는 이 상자 자체를 그리지
+            않는다 — w-full 짜리 빈 항목은 제 줄을 차지하고 위 여백만 남긴다. */}
+        {(showAlwaysVisibleNote || showDeliveredDateNote) && (
+          <div className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1">
+            {/* 년도로 거르는 중일 때만 하는 말이다 — 검색 중에는 어느 줄도
+                년도로 가려지지 않으므로, 그대로 두면 지금 걸려 있지도 않은
+                조건을 설명하는 문장이 된다. */}
+            {showAlwaysVisibleNote && (
+              <p className="text-xs text-amber-800 dark:text-amber-300">
+                {NO_ORDER_DATE_LABEL} {alwaysVisibleCount}건은 어느 년도를 골라도 함께
+                보입니다.
+              </p>
+            )}
+            {/* ⚠️ 납품일이 왜 빈칸일 수 있는지 **늘 보이게** 적어 둔다. 이 칸은
+                손으로 적던 값에서 연결된 수리 건의 실제 출하일로 바뀌었고,
+                그래서 지금까지 날짜가 보이던 줄이 비어 보일 수 있다 — 아무 말이
+                없으면 자료가 사라진 것으로 읽힌다(파일 헤더).
+
+                같은 글자가 표 머리말과 카드 이름표의 title 로도 간다. 22칼럼을
+                옆으로 밀어 보는 표라, 이 한 줄만으로는 그 칸에 닿았을 때 설명이
+                화면 밖이다.
+
+                줄이 하나도 없을 때는 적지 않는다 — 그때 화면에 있는 것은
+                "등록된 …이 없습니다" 한 줄뿐이라, 없는 표의 없는 칸을 설명하는
+                문장이 된다. */}
+            {showDeliveredDateNote && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">{DELIVERED_DATE_NOTE}</p>
+            )}
+          </div>
         )}
       </div>
 
@@ -1142,54 +1369,6 @@ export default function DomesticOrderListScreen({
         >
           {completionError}
         </p>
-      )}
-
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
-            {/* 검색 중에는 년도를 앞에 적지 않는다 — 모든 해에서 찾는 중이라
-                "2026년 3건"은 사실이 아니다. */}
-            {isSearching ? "검색 결과 " : activeYear !== null ? `${activeYear}년 ` : null}
-            {visibleRows.length}건
-            {visibleRows.length !== rows.length && (
-              <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-500">
-                (전체 {rows.length}건)
-              </span>
-            )}
-          </p>
-          {canEdit && !isFormOpen && (
-            <button
-              type="button"
-              onClick={() => setEditTarget({ kind: "new" })}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              행 추가
-            </button>
-          )}
-        </div>
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">
-          합계 <span className="font-semibold tabular-nums">{total}</span>{" "}
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">(부가세미포함)</span>
-          {skipped > 0 && (
-            <span className="ml-2 text-xs text-red-600 dark:text-red-400">
-              금액을 읽을 수 없는 {skipped}건은 합계에서 빠졌습니다
-            </span>
-          )}
-        </p>
-      </div>
-
-      {/* ⚠️ 납품일이 왜 빈칸일 수 있는지 **늘 보이게** 적어 둔다. 이 칸은 손으로
-          적던 값에서 연결된 수리 건의 실제 출하일로 바뀌었고, 그래서 지금까지
-          날짜가 보이던 줄이 비어 보일 수 있다 — 아무 말이 없으면 자료가 사라진
-          것으로 읽힌다(파일 헤더).
-
-          같은 글자가 표 머리말과 카드 이름표의 title 로도 간다. 22칼럼을 옆으로
-          밀어 보는 표라, 이 한 줄만으로는 그 칸에 닿았을 때 설명이 화면 밖이다.
-
-          줄이 하나도 없을 때는 적지 않는다 — 그때 화면에 있는 것은 "등록된 …이
-          없습니다" 한 줄뿐이라, 없는 표의 없는 칸을 설명하는 문장이 된다. */}
-      {rows.length > 0 && (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{DELIVERED_DATE_NOTE}</p>
       )}
 
       {rows.length === 0 ? (

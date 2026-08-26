@@ -204,11 +204,6 @@ function storageKeyOf(listId: string): string {
   return `list-view-mode:${listId}`;
 }
 
-function read(listId: string): ViewMode | null {
-  const stored = window.localStorage.getItem(storageKeyOf(listId));
-  return stored === "CARD" || stored === "TABLE" ? stored : null;
-}
-
 /**
  * 서버에는 localStorage가 없다. 저장해 둔 값이 없는 사람과 같은 화면을 준다.
  *
@@ -216,17 +211,53 @@ function read(listId: string): ViewMode | null {
  * effect에서 읽어 setState하면 한 프레임 동안 잘못된 화면이 스쳐 지나간다.
  * useSyncExternalStore가 정확히 이 상황을 위한 것이다.
  */
-function readServer(): ViewMode | null {
+function readServer(): string | null {
   return null;
 }
 
+/**
+ * 브라우저에 적어 둔 **사람이 고른 값 하나**를 읽는다. 아래 useViewMode 가
+ * 이것으로 만들어져 있고, 목록이 아닌 화면도 같은 장치를 쓸 수 있게 내보낸다
+ * (`내자 정리` 의 머리말 접기가 첫 사용처다).
+ *
+ * ⚠️ **각자 useSyncExternalStore 를 다시 쓰지 말고 이것을 쓸 것.** 저장한 값을
+ * 첫 렌더에서 그냥 읽으면 서버가 그린 화면과 달라져 hydration 이 어긋나고,
+ * effect 에서 읽어 setState 하면 저장값과 다른 화면이 한 프레임 스쳐 지나간다.
+ * 위 readServer 주석이 그 함정과 답을 그대로 담고 있다 — 여기 한 벌만 두면
+ * 새로 쓰는 곳이 그 함정을 다시 밟을 일이 없다.
+ *
+ * 돌려주는 것은 **적혀 있는 글자 그대로**다. 그 글자가 뜻이 있는 값인지는 부르는
+ * 쪽이 판정한다(아래 useViewMode 가 "CARD"·"TABLE" 만 인정하는 것처럼) — 남이
+ * 넣어 둔 엉뚱한 글자가 곧바로 화면의 상태가 되어서는 안 된다.
+ *
+ * 저장 키는 `무엇:어디` 꼴로 짓는다 — 위 storageKeyOf 의
+ * `list-view-mode:<목록 이름>` 이 그 본이다. 화면마다 따로 기억하되, 무엇을
+ * 기억한 값인지 키만 보고 알 수 있다.
+ */
+export function useStoredChoice(storageKey: string): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => window.localStorage.getItem(storageKey),
+    readServer
+  );
+}
+
+/**
+ * 고른 값을 적어 두고, 이 장치를 쓰는 화면 전부에 알린다. 알리지 않으면 같은
+ * 값을 보고 있는 다른 자리가 낡은 채로 남는다.
+ */
+export function setStoredChoice(storageKey: string, value: string): void {
+  window.localStorage.setItem(storageKey, value);
+  for (const listener of listeners) listener();
+}
+
 function useViewMode(listId: string): ViewMode | null {
-  return useSyncExternalStore(subscribe, () => read(listId), readServer);
+  const stored = useStoredChoice(storageKeyOf(listId));
+  return stored === "CARD" || stored === "TABLE" ? stored : null;
 }
 
 function setViewMode(listId: string, next: ViewMode): void {
-  window.localStorage.setItem(storageKeyOf(listId), next);
-  for (const listener of listeners) listener();
+  setStoredChoice(storageKeyOf(listId), next);
 }
 
 export function ResponsiveList({
