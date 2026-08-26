@@ -171,6 +171,30 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 표/카드 전환을 여기서 분기하지 않는 것도 같은 이유다 — 서비스 전체에서
  * 목록의 기준은 responsive-list.tsx 하나뿐이다.
  *
+ * ── ⚠️ 열 제목은 화면에 붙어 있다. 그래서 세로 스크롤바가 둘이다 ─────────
+ * 22칼럼 장부라 줄을 내리다 보면 지금 보는 칸이 발주발행일인지 견적발행일인지
+ * 알 수 없게 된다. 그래서 `<thead>` 를 sticky top-0 으로 붙여 둔다. 다만 그
+ * 선언만으로는 아무 일도 일어나지 않는다 — sticky 는 가장 가까운 **굴러가는**
+ * 스크롤 상자를 기준으로 붙는데 표 껍데기에는 높이 제한이 없어 표 높이만큼
+ * 자랄 뿐이었다. 그래서 ResponsiveList 에 stickyHeader 를 켜 그 껍데기에 높이
+ * 상한을 주고, 상자가 자기 안에서 실제로 굴러가게 만든다. 상한 값과 그 근거는
+ * responsive-list.tsx 의 같은 이름 항목에 있다.
+ *
+ * ⚠️ 그 대가로 **세로 스크롤바가 둘이 된다**(페이지 하나 + 표 하나). 주간보고
+ * 화면 헤더가 같은 모양을 **고장**으로 적어 두었는데 종류가 다르다 — 거기서는
+ * 스크롤 상자가 의도치 않게 생겼고, 여기서는 높이를 명시해 일부러 만들었다.
+ * 다른 선택지(표의 가로 스크롤 상자를 없애 페이지 전체를 굴리는 것)는 옆으로
+ * 밀 때 제목·검색칸·합계까지 함께 밀려나가서 버렸다. **stickyHeader 를 떼면
+ * 머리글 고정이 다시 헛돈다** — 스크롤바가 둘이라는 이유로 걷어내지 말 것.
+ *
+ * 머리글이 지나가는 줄을 가리게 하는 것은 z-10 하나뿐이다. 배경은 이미 그 줄에
+ * 있었다(bg-white dark:bg-zinc-900) — 밝은 화면·어두운 화면 모두 아래 줄이
+ * 비치지 않는다. **고객사 묶음 소제목은 붙이지 않았다**: 둘을 함께 붙이려면
+ * 소제목의 top 값을 머리글 높이에 맞춰 손으로 적어야 하는데 그 높이는 글꼴에
+ * 따라 달라지고, 묶음이 여럿이라 소제목끼리도 겹쳐 쌓인다. 소제목이 이미 가진
+ * sticky left-0(가로로만 붙는다)은 그대로 살아 있고, z-index 가 없어 z-10 인
+ * 머리글 **아래로** 지나간다 — 둘이 부딪히지 않는다.
+ *
  * ── ⚠️ 납품일은 수리 건의 실제 출하일이다. 여기서 적는 값이 아니다 ──────
  * 이 칸이 그리는 것은 연결된 수리 건의 `actual_shipment_date` 이고
  * (queries 의 displayDeliveredDate), 그 줄의 `delivered_date` 는 화면에 나오지
@@ -1125,9 +1149,17 @@ export default function DomesticOrderListScreen({
           // 년도를 바꾸면 줄 수가, 완료 버튼이 붙고 떨어지면 순번 칸의 폭이
           // 달라진다 — 표가 지금 폭에 들어가는지 다시 재야 하는 조건들이다.
           measureKey={[visibleRows.length, groups.length, canEdit]}
+          // 표 껍데기에 높이 상한을 줘 그 안에서 굴러가게 한다 — 아래
+          // <thead> 의 sticky top-0 이 붙을 자리를 만드는 유일한 장치다
+          // (파일 헤더 '열 제목은 화면에 붙어 있다'). 이 서비스에서 이것을 켠
+          // 목록은 여기 하나뿐이다.
+          stickyHeader
           table={
             <table className="w-full border-collapse text-sm">
-              <thead>
+              {/* z-10 은 머리글이 지나가는 줄 **위**에 그려지게 한다. 배경은
+                  아래 <tr> 이 이미 갖고 있어(bg-white dark:bg-zinc-900) 밝은
+                  화면·어두운 화면 모두 글자가 겹쳐 보이지 않는다. */}
+              <thead className="sticky top-0 z-10">
                 <tr className="border-b border-zinc-200 bg-white text-left text-xs font-semibold whitespace-nowrap text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
                   <th className="px-3 py-2">순번</th>
                   <th className="px-3 py-2">고객사</th>

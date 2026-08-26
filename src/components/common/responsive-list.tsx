@@ -51,6 +51,51 @@ import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOver
  * 부르는 쪽은 <table>만 넘긴다. 스크롤 래퍼를 각자 들고 있으면 넘침이 그
  * 안쪽에서 흡수되어 바깥은 영원히 "들어간다"고 답한다. 테두리·모서리도 여기서
  * 주므로 목록마다 테두리 모양이 달라지지도 않는다.
+ *
+ * ── 열 제목을 붙여 두는 목록만 켠다 — stickyHeader ──────────────────────
+ * **기본은 꺼짐이다.** 켜면 표 껍데기에 높이 상한(max-height)이 붙고, 그 상자가
+ * 비로소 **스스로 굴러가는** 세로 스크롤 상자가 된다.
+ *
+ * 왜 그것이 필요한가 — 표 껍데기에는 이미 overflow-x-auto 가 있고, 한 축이
+ * visible 이 아니면 나머지 축의 visible 도 auto 로 계산된다(CSS 규칙). 즉 이
+ * 래퍼는 진작부터 세로로도 스크롤 상자였다. 다만 높이가 자유라 표 높이만큼
+ * 자라고 자기 안에서는 한 번도 굴러가지 않았다. position: sticky 는 **가장
+ * 가까운 스크롤 상자**를 기준으로 붙으므로, 표 안의 <thead className="sticky
+ * top-0"> 은 굴러가지 않는 그 상자에 붙어 아무 일도 하지 않는다 — 저장소의
+ * sticky top-0 <thead> 셋이 지금 전부 그 상태다(`전체 A/S 현황`에서 확인했다).
+ * 높이 상한을 주는 순간 그 상자가 진짜로 굴러가고, 그제서야 top-0 이 붙을
+ * 자리가 생긴다.
+ *
+ * ⚠️ **세로 스크롤바가 둘이 되는 것은 이번만은 고장이 아니다.** 이 앱의 세로
+ * 스크롤 자리는 AppShell 의 <main> 하나뿐이고, 주간보고 화면 헤더에 그 하나를
+ * 어긴 고장 둘이 길게 적혀 있다. 거기서는 스크롤 상자가 **의도치 않게** 생겼다
+ * — overflow-x 가 세로 축까지 바꿔 놓은 래퍼에 flex-1 이 확정 높이를 얹었고,
+ * 아무도 그걸 바라지 않았다. 여기서는 반대로 **높이를 명시해 일부러 만든다.**
+ * 22칼럼짜리 장부는 열 제목이 안 보이면 지금 보는 칸이 무엇인지 알 길이 없어서,
+ * 스크롤바 하나를 더 보는 대가를 치르고 제목을 붙여 두기로 한 것이다(사용자
+ * 결정). **이 상한을 걷어내면 머리글 고정이 다시 헛돈다** — 걷어내기 전에 이
+ * 문단을 읽을 것.
+ *
+ * 값이 70dvh 인 까닭 셋.
+ *   1. **max-height 라서** 줄이 몇 개뿐인 표는 그 높이만 차지한다. height 로
+ *      주면 짧은 목록이 빈 상자를 끌고 다닌다.
+ *   2. 뷰포트 기준이라 노트북과 큰 모니터가 각자 알아서 맞는다. 고정 픽셀은
+ *      한쪽에서 반드시 답답하거나 헐렁하다.
+ *   3. 남는 30% 가 표 위의 제목·검색칸·합계 몫이라 **페이지 자체는 거의
+ *      굴러가지 않는다.** 이게 중요한 이유는, 페이지가 크게 굴러가면 상자의
+ *      윗변이 화면 위로 빠져나가고 거기 붙어 있는 머리글도 함께 화면 밖이 되기
+ *      때문이다. 상한이 (main 높이 − 표 아래 여백)보다 작으면 그런 일이 생길 수
+ *      없는데, 70dvh 는 그 조건을 어느 화면 높이에서도 만족한다.
+ * vh 가 아니라 dvh 인 것은 이 앱의 높이 기준이 dvh 라서다(globals.css 의 body
+ * 100dvh) — 모바일에서 툴바가 펼쳐져 실제 높이가 줄면 상한도 같이 줄어야 3번
+ * 계산이 유지된다.
+ *
+ * ⚠️ 상한은 **화면 밖에서 재는 쪽에도 똑같이 붙인다.** 세로 스크롤바가 생기면
+ * 그만큼 clientWidth 가 줄고, 표가 들어가는지는 바로 그 값으로 판정한다
+ * (useTableFitsWithoutOverflow 의 scrollWidth <= clientWidth). 보이는 쪽에만
+ * 붙이면 카드일 때와 표일 때의 잣대가 스크롤바 폭만큼 어긋나서, 딱 그 폭에서
+ * 카드↔표가 서로를 되부르며 끝없이 뒤집힌다. 재는 상자는 실제로 그려질 때와
+ * 같은 모양이어야 한다.
  * ============================================================================
  */
 
@@ -130,6 +175,7 @@ export function ResponsiveList({
   cards,
   meta,
   measureKey,
+  stickyHeader = false,
 }: {
   /** 선택을 기억할 이름. 목록마다 따로 기억한다. */
   listId: string;
@@ -144,11 +190,26 @@ export function ResponsiveList({
    * 생기는 변화는 이것으로 다시 재게 한다.
    */
   measureKey?: readonly unknown[];
+  /**
+   * 표 껍데기에 높이 상한을 주어 그 상자를 진짜 세로 스크롤 상자로 만든다.
+   * <table> 안에 `<thead className="sticky top-0">` 을 둔 목록만 켠다 — 위
+   * '열 제목을 붙여 두는 목록만 켠다' 항목에 까닭과 대가가 전부 적혀 있다.
+   *
+   * **기본은 꺼짐이고, 넘기지 않은 목록은 이 인자가 생기기 전과 한 픽셀도
+   * 다르지 않다**(아래 heightCapClass 가 빈 문자열이라 클래스 문자열 자체가
+   * 글자 하나까지 같다).
+   */
+  stickyHeader?: boolean;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fits = useTableFitsWithoutOverflow(wrapperRef, measureKey ?? []);
   const mode = useViewMode(listId);
   const showTable = resolveShowTable(mode, fits);
+
+  // 켠 목록에만 붙는다. 보이는 래퍼와 화면 밖에서 재는 래퍼에 **똑같이** 붙어야
+  // 하는 이유는 파일 헤더의 마지막 ⚠️ 에 있다(잣대가 어긋나면 카드↔표가 무한히
+  // 뒤집힌다). 끈 목록에서는 빈 문자열이라 아래 두 문자열이 예전 그대로다.
+  const heightCapClass = stickyHeader ? " max-h-[70dvh]" : "";
 
   return (
     <div className="@container relative flex flex-col gap-2">
@@ -170,8 +231,10 @@ export function ResponsiveList({
           showTable
             ? // 안 들어가는 폭에서 표를 고른 경우에만 실제로 스크롤이 생긴다.
               // 들어갈 때는 넘칠 것이 없으므로 hidden이던 때와 화면이 같다.
-              "overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800"
-            : "invisible pointer-events-none absolute inset-x-0 bottom-0 overflow-x-hidden"
+              "overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800" +
+              heightCapClass
+            : "invisible pointer-events-none absolute inset-x-0 bottom-0 overflow-x-hidden" +
+              heightCapClass
         }
       >
         {table}
