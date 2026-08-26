@@ -5,6 +5,7 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import { canEditWeeklyReportGoals } from "@/lib/auth/weekly-report-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
@@ -86,6 +87,20 @@ export default async function WeeklyReportPage({
     canEditWeeklyReportGoals(actingUser.role) &&
     (await hasPermission(actingUser.role, "weeklyReport", "WRITE"));
 
+  // 상세표의 `비고` 는 위 두 구역과 **다른 권한**으로 열린다. 그 값은 주간보고가
+  // 가진 자료가 아니라 **수리 건의 컬럼**(repair_cases.notes)이고, 저장도 수리 건
+  // 상세와 같은 서버 액션으로 나간다. 그래서 판정도 수리 건 상세가 쓰는 그 식을
+  // 그대로 베낀다(RepairCaseDetailView 의 canEditReportNumber) — 여기에 주간보고
+  // 전용 권한 함수를 새로 만들면 같은 컬럼에 관문이 둘 생긴다.
+  //
+  // 'DB 읽기/쓰기 모드인가'는 이 함수 맨 위의 조기 반환이 이미 답했다
+  // (getRepairCaseReadSource() !== "database" 이면 여기까지 오지 않는다).
+  //
+  // canEditGoals 와 마찬가지로 **화면을 그리기 위한 값일 뿐 관문이 아니다** —
+  // 실제 저장은 server/actions/update-repair-case.ts 가 세션·역할·필드를 처음부터
+  // 다시 확인한다.
+  const canEditNotes = actingUser !== null && isFieldEditable(actingUser.role, "notes");
+
   const [cases, goalRows, deliveryRows, repairCaseOptions] = await Promise.all([
     listWeeklyReportCases(),
     listWeeklyReportGoals(weekStart),
@@ -125,6 +140,7 @@ export default async function WeeklyReportPage({
     <WeeklyReportScreen
       report={report}
       asOfDate={asOfDate}
+      canEditNotes={canEditNotes}
       goals={{
         weekStart,
         currentWeekStart,

@@ -15,8 +15,9 @@ import {
   users,
   workflowSteps,
 } from "../schema";
-import { createRepairCase } from "../mutations/repair-cases";
+import { createRepairCase, updateRepairCase } from "../mutations/repair-cases";
 import { listLongPendingPoCaseIds } from "./long-pending-po";
+import { listWeeklyReportCases } from "./weekly-report";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -36,6 +37,10 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * "**다른 이유로** 빠진다"를 보이려는 시험에는 반드시 **대조**를 함께 둔다 —
  * 조건 하나만 되돌리면 묶음에 들어오는 건이라는 확인이 없으면, 검사를 통째로
  * 지워도 초록색인 시험이 된다.
+ *
+ * 파일 끝에 **주간보고 조회(listWeeklyReportCases)** 시험 둘이 붙어 있다. 다른
+ * 함수지만 같은 상세표의 다른 칸을 보는 일이고, 접수 건을 만들어 두는 준비와
+ * 뒷정리가 여기와 똑같아서 스위트를 나눠 쓴다 — 그 두 시험 앞의 주석을 볼 것.
  *
  * ── 격리 규약 ────────────────────────────────────────────────────────────
  * 이 디렉터리의 다른 통합 테스트와 같다 — 이 스위트만 쓰는 접수 월 "9604",
@@ -282,4 +287,65 @@ test("같은 접수 건이 두 번 나오지 않는다 (내자 줄로 복제되�
   const ids = await flaggedIds();
   assert.equal(ids.filter((id) => id === caseId).length, 1);
   assert.equal(new Set(ids).size, ids.length, "묶음 전체에 중복이 없다");
+});
+
+// ─────────────────────────────── 주간보고 상세표 — 비고를 고치는 데 필요한 값
+/**
+ * listWeeklyReportCases 가 **낙관적 잠금 값(version)** 을 줄마다 실어 오는가.
+ *
+ * 주간보고 상세표의 `비고` 는 화면에서 바로 고칠 수 있고, 그 저장은 이 값을
+ * expectedVersion 으로 실어 보낸다(WeeklyReportNotesCell). 값이 없거나 낡으면
+ * 낙관적 잠금이 통째로 무력해져 **남이 방금 고친 비고를 조용히 덮어쓴다** —
+ * 타입은 통과하고 화면도 멀쩡해 보이므로, 그것을 잡는 자리는 여기뿐이다.
+ *
+ * 이 스위트에 붙인 이유: 같은 디렉터리에서 **접수 건을 실제로 만들어 두는**
+ * 통합 시험이 여기고, 위 시험들이 보는 `견적서 발행일` 도 같은 상세표의 칸이다.
+ * 격리 규약(접수 월 9604 · 모델 접두사)과 뒷정리를 그대로 나눠 쓴다.
+ *
+ * 시드 자료의 건도 함께 나오므로 단언은 언제나 **포함 여부**로 한다.
+ */
+test("주간보고 조회가 낙관적 잠금 값(version)을 실어 오고, 저장하면 그 값이 올라간다", async () => {
+  const caseId = await createTestCase();
+
+  const before = (await listWeeklyReportCases()).find((row) => row.id === caseId);
+  assert.ok(before, "대조: 방금 만든 건은 주간보고 목록에 들어 있다");
+  assert.equal(before.version, 1, "새로 만든 접수 건의 version 은 1이다");
+
+  // 상수 1을 돌려주기만 해도 위 단언은 통과한다. 그래서 실제로 한 번 고쳐 보고
+  // **따라 올라가는지**까지 본다 — 화면이 낡은 값을 들고 있으면 저장이 CONFLICT
+  // 로 막혀야 하는데, 조회가 늘 같은 숫자를 주면 그 문이 열린 채로 남는다.
+  //
+  // 보내는 것은 `notes` 키 **하나**다 — 주간보고 화면이 보내는 모양 그대로이고,
+  // 같은 구간의 신고 증상·담당 엔지니어는 손대지 않은 채 남는다.
+  const updated = await updateRepairCase(
+    caseId,
+    before.version,
+    "FAULT_SERVICE",
+    { notes: "주간보고 비고 시험" },
+    engineerId
+  );
+  assert.equal(updated.ok, true, `update failed: ${JSON.stringify(updated)}`);
+
+  const after = (await listWeeklyReportCases()).find((row) => row.id === caseId);
+  assert.ok(after, "고친 뒤에도 같은 건이 목록에 있다");
+  assert.equal(after.version, before.version + 1);
+  assert.equal(after.notes, "주간보고 비고 시험", "고친 비고가 그대로 따라온다");
+});
+
+test("주간보고 조회의 모든 줄에 version 이 있다", async () => {
+  // 한 줄이라도 비면 그 줄의 `수정` 은 저장할 수 없거나(값 없음) 아무 버전으로나
+  // 저장하게 된다. 대조를 함께 둔다 — 목록이 통째로 비어 있으면 이 시험은 아무
+  // 것도 확인하지 못한 채 초록색이 된다.
+  await createTestCase();
+
+  const rows = await listWeeklyReportCases();
+  assert.ok(rows.length > 0, "대조: 주간보고에 나올 건이 하나 이상 있다");
+  for (const row of rows) {
+    assert.equal(
+      typeof row.version,
+      "number",
+      `${row.intakeNumber} 의 version 이 실려 오지 않았다`
+    );
+    assert.ok(row.version >= 1, `${row.intakeNumber} 의 version 이 1보다 작다`);
+  }
 });

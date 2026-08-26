@@ -52,6 +52,11 @@ function makeCase(overrides: Partial<WeeklyReportCase> = {}): WeeklyReportCase {
   sequence += 1;
   return {
     id: `case-${sequence}`,
+    // 낙관적 잠금 값. 이 파일의 시험은 하나도 이 값을 보지 않지만(순수 함수의
+    // 셈에는 들어오지 않는다), 타입에 **반드시 있는 값**이라 여기서도 채운다 —
+    // 선택 값으로 두면 화면에 version 없는 줄이 생길 수 있고, 그 줄에서 누른
+    // 저장은 남이 방금 고친 비고를 덮어쓴다(도메인 타입의 주석).
+    version: 1,
     intakeNumber: `D2601${String(sequence).padStart(2, "0")}`,
     customerName: "INVENIA",
     customerRowColor: null,

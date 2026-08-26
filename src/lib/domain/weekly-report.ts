@@ -317,6 +317,15 @@ export function hasWeeklyReportPoIssued(row: WeeklyReportOrderDates): boolean {
 export type WeeklyReportCase = WeeklyReportClassifiable &
   WeeklyReportOrderDates & {
     id: string;
+    /**
+     * repair_cases.version — 낙관적 잠금 값.
+     *
+     * **선택 값으로 두지 않는다.** 상세표의 `비고` 는 화면에서 바로 고칠 수 있고
+     * (WeeklyReportNotesCell), 그 저장은 이 값을 expectedVersion 으로 실어
+     * 보낸다. `version?:` 로 두면 값이 빠진 줄이 조용히 생기고, 그 줄에서 누른
+     * 저장은 남이 방금 고친 값을 덮어쓴다 — 그러니 없는 줄이 아예 없어야 한다.
+     */
+    version: number;
     /** 상세표의 `인수 번호`. */
     intakeNumber: string;
     /** 블록을 묶는 기준. */
@@ -333,7 +342,11 @@ export type WeeklyReportCase = WeeklyReportClassifiable &
     modelName: string;
     serialNumber: string | null;
     lotNumber: string | null;
-    /** 상세표의 `비고` — repair_cases.notes. */
+    /**
+     * 상세표의 `비고` — repair_cases.notes. 이 표에서 **유일하게 고칠 수 있는
+     * 칸**이다(권한이 있을 때만). 여러 줄이 들어 있을 수 있어 화면이
+     * whitespace-pre-line 으로 그리고, 편집칸도 textarea 다.
+     */
     notes: string | null;
   };
 

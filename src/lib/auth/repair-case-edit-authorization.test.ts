@@ -224,6 +224,37 @@ test("isBlockedByShipmentLock never blocks (shipment-lock removal policy) — a 
   assert.equal(isBlockedByShipmentLock(false), false);
 });
 
+// ------------------------------------------------------ 주간보고 상세표의 비고
+
+/**
+ * 주간보고 화면의 `비고` 칸(WeeklyReportNotesCell)이 누구에게 열리는가.
+ *
+ * 그 화면은 새 권한 함수를 만들지 않고 **이 표를 그대로 본다** — page.tsx 가
+ * `isFieldEditable(role, "notes")` 를 부르고, 서버 액션도 같은 표로 다시 막는다.
+ * 그래서 여기 한 줄이 두 화면(수리 건 상세 · 주간보고)의 답을 함께 정한다.
+ *
+ * 다섯 역할을 전부 적는 이유: 넷이 참이고 하나가 거짓이라, 표가 통째로 넓어지는
+ * 실수(예: INVENTORY_MANAGER 에 필드를 하나 넣는 것)는 참만 세는 시험으로는
+ * 잡히지 않는다.
+ */
+test("주간보고 비고는 INVENTORY_MANAGER 만 수정할 수 없다", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES"] as const) {
+    assert.equal(isFieldEditable(role, "notes"), true, `${role} 은 비고를 고칠 수 있다`);
+  }
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "notes"), false);
+
+  // 화면이 실제로 보내는 모양 그대로 — FAULT_SERVICE 구간에 `notes` 키 하나다.
+  // 이 한 칸만 보내는 부분 저장이 네 역할 모두에게 통과해야, 주간보고에서 누른
+  // 저장이 신고 증상·담당 엔지니어를 건드리지 않고 끝난다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES"] as const) {
+    assert.deepEqual(authorizeSubmittedFields(role, "FAULT_SERVICE", ["notes"]), { ok: true });
+  }
+  assert.deepEqual(authorizeSubmittedFields("INVENTORY_MANAGER", "FAULT_SERVICE", ["notes"]), {
+    ok: false,
+    unauthorizedFields: ["notes"],
+  });
+});
+
 test("보고서번호는 SUPER_ADMIN/ADMIN/AS_ENGINEER만 수정할 수 있다", () => {
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
     assert.equal(isFieldEditable(role, "legacyReportNumber"), true);

@@ -324,8 +324,11 @@ function GoalBox({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
+      {/* 이 줄은 접지 않는다 — 집계 화면의 블록 소제목과 같은 규칙이다(사용자
+          결정: 창을 줄여도 줄바꿈하지 않는다). 폭은 이미 맞다: 이 줄과 아래 표
+          상자가 둘 다 부모 폭을 그대로 쓴다. */}
       <div
-        className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${GOAL_HEADING_TONE}`}
+        className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${GOAL_HEADING_TONE}`}
       >
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{kind} 금주 목표</h3>
         <p className="text-[11px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">

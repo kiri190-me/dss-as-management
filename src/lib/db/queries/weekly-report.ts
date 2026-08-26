@@ -23,7 +23,10 @@ import {
  * ============================================================================
  * 주간보고 — 읽는 쪽
  * ============================================================================
- * **SELECT 만 있다.** 이 화면은 조회 전용이라 mutation 이 아예 없다.
+ * **SELECT 만 있다.** 상세표의 `비고` 를 화면에서 바로 고칠 수 있게 됐지만, 그
+ * 저장은 여기로 오지 않는다 — 수리 건 상세와 **같은 길**(FAULT_SERVICE 구간의
+ * updateRepairCaseAction)로 나간다. 주간보고 전용 저장 경로를 이 파일에 만들면
+ * 같은 컬럼에 규칙이 둘 생기고, 두 화면이 다른 뜻으로 갈린다.
  *
  * ── 여기서는 판정하지 않는다 ────────────────────────────────────────────
  * 어느 건이 '점검 중'인지, 어느 고객사 블록에 들어가는지는 **읽어서 넘기고**
@@ -75,6 +78,11 @@ export async function listWeeklyReportCases(): Promise<WeeklyReportCase[]> {
   const rows = await db
     .select({
       id: repairCases.id,
+      // 낙관적 잠금 값이다. 상세표의 `비고` 를 이 화면에서 고칠 수 있게 되면서
+      // 필요해졌다 — 저장은 updateRepairCaseAction 의 expectedVersion 으로
+      // 나가고, 그동안 남이 먼저 고쳤으면 CONFLICT 로 되돌아온다. 줄마다 이
+      // 값이 실려 있지 않으면 낡은 화면에서 누른 저장이 방금 바뀐 값을 덮어쓴다.
+      version: repairCases.version,
       intakeNumber: repairCases.intakeNumber,
       customerName: customers.name,
       // 고객사 색은 화면이 블록을 칠하는 데 쓴다 — 내자 정리와 **같은 색**이라야

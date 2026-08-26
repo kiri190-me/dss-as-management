@@ -1,5 +1,6 @@
 import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
+import WeeklyReportNotesCell from "./WeeklyReportNotesCell";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
@@ -26,10 +27,12 @@ import {
  * ============================================================================
  * 주간보고 — 손으로 만들던 엑셀 현황판을 그대로 옮긴 화면
  * ============================================================================
- * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황에는 입력칸도, 저장·삭제
- * 버튼도 없다. 누를 것이 있는 자리는 두 구역 — `금주 목표` 와 `납입 예정 건` —
- * 뿐이고, 각각 통째로 WeeklyReportGoalsPanel · WeeklyReportDeliveriesPanel
- * (클라이언트 컴포넌트)에 들어 있다. 이 파일은 그 둘을 **놓을 자리만** 준다.
+ * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황의 숫자는 어디서도 고칠
+ * 수 없다 — 세어서 나오는 값이라 고칠 것이 없다. 누를 것이 있는 자리는 셋이다:
+ * `금주 목표` 와 `납입 예정 건` 은 각각 통째로 WeeklyReportGoalsPanel ·
+ * WeeklyReportDeliveriesPanel(클라이언트 컴포넌트)에 들어 있고 이 파일은 그 둘을
+ * **놓을 자리만** 준다. 셋째가 상세표의 `비고` 칸이다(아래 '비고 한 칸만 고칠 수
+ * 있다').
  *
  * 그 둘이 화면의 어디에 오는지는 이 헤더에 적지 않는다 — 자리는 아래 반환 트리가
  * 정하고 한 번 바뀐 적이 있다(원래는 집계 위였다). 자리를 말이 아니라 코드로만
@@ -51,7 +54,23 @@ import {
  * 금주 목표·납입 예정 상자가 생겼다고 이 파일이 클라이언트가 되지는 **않는다** —
  * 그 두 상자만 "use client" 이고, 여기서는 그것을 한 자리씩 놓을 뿐이다. 이 파일에
  * "use client" 를 붙이면 고객사 블록 58개와 상세표 250여 줄이 통째로 브라우저로
- * 실려 간다.
+ * 실려 간다. 비고 칸도 같은 뜻에서 **줄마다 붙지 않는다** — 아래를 볼 것.
+ *
+ * ── 비고 한 칸만 고칠 수 있다 ──────────────────────────────────────────
+ * 상세표 맨 오른쪽 `비고`(repair_cases.notes)는 화면에서 바로 고칠 수 있다 —
+ * `수정` 을 누르면 그 자리가 입력칸이 되고, 저장하면 수리 건 상세와 **같은 길**
+ * (FAULT_SERVICE 구간의 updateRepairCaseAction)로 나간다. 규칙과 근거는 전부
+ * WeeklyReportNotesCell 에 적혀 있고, 이 파일이 정하는 것은 **어디에 놓는가**와
+ * **누구에게 그리는가** 둘뿐이다.
+ *
+ * 그 둘째가 이 파일에 남은 이유: 이 표는 250줄이 넘는다. 못 고치는 사람에게까지
+ * 줄마다 클라이언트 컴포넌트를 붙이면 접수 건의 id 와 version 이 통째로 브라우저로
+ * 실려 간다. 그래서 canEditNotes 가 거짓이면 지금까지와 **똑같이** dash(row.notes)
+ * 만 그린다 — 칸을 회색으로 만들거나 눌리지 않는 버튼을 두지 않는다.
+ *
+ * canEditNotes 는 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 실제 저장은
+ * server/actions/update-repair-case.ts 가 세션·역할·필드를 처음부터 다시 확인한다
+ * (page.tsx 의 canEditGoals 와 같은 규칙).
  *
  * ── 갱신 일은 서버가 정한다 ────────────────────────────────────────────
  * 머리말의 날짜를 클라이언트에서 new Date() 로 만들면 서버가 그린 것과 달라져
@@ -114,9 +133,12 @@ import {
  *
  * 72rem 인 근거는 집계 8칸이다. 한 칸이 라벨(최장 "PO 발행 완료")·숫자·좌우
  * 여백까지 약 120px 이라, 4열이 한 줄에 들어가려면 약 480px 이 필요하다.
- * 72rem(1152px)을 둘로 가르면 한 칸이 약 568px 이므로 4×2 배치가 접히지 않고
- * 살아남는다. 그보다 좁은 폭에서 좌우로 놓으면 집계가 2×4 로 접혀 매주 보던
- * 칸 자리가 무너지므로, 그때는 차라리 위아래로 쌓는 편이 원본에 가깝다.
+ * 72rem(1152px)을 둘로 가르면 한 칸이 약 568px 이므로 4×2 배치가 **스크롤 없이**
+ * 다 보인다. 한때는 "그보다 좁으면 집계가 2×4 로 접힌다"가 근거였는데 그 말은
+ * 이제 맞지 않는다 — 집계는 어느 폭에서도 접히지 않고, 안 들어가면 그 줄만
+ * 좌우로 스크롤된다(CountsSummary). 그래도 갈림길은 그대로 둔다: 그보다 좁은
+ * 폭에서 좌우로 놓으면 좌우 두 칸이 **둘 다 밀어서 봐야 하는 상자**가 되어
+ * 나란히 견준다는 뜻 자체가 사라지므로, 그때는 위아래로 쌓는 편이 원본에 가깝다.
  *
  * ── 좌우 두 칸의 높이는 격자가 맞춘다. 표 래퍼가 아니다 ────────────────
  * 한쪽만 길면 견주기 어렵다. 그런데 그 일은 **격자가 이미 하고 있다**: 격자 칸은
@@ -140,11 +162,16 @@ import {
  * 않고(내용이 그보다 길면 상자가 함께 자란다), 줄이 한둘뿐인 블록이 납작하게
  * 짜부라지는 것만 막는다.
  *
- * ── 가로 스크롤은 표 안에서만 ───────────────────────────────────────────
+ * ── 가로 스크롤은 넘치는 그 줄 안에서만 ─────────────────────────────────
  * 8칼럼짜리 표 둘이 나란히 서면 반드시 좁다. 그래서 표마다 자기
  * overflow-x-auto 래퍼를 두고, 격자 칸에는 min-w-0 을 준다(격자 칸의 기본
  * min-width 는 auto 라, 이것이 없으면 표가 칸을 밀어 넓혀 화면 전체(body)가
  * 좌우로 밀린다).
+ *
+ * 표만 그런 것이 아니다 — 접지 않기로 한 줄(블록 소제목 · 집계 8칸 · PO 발행
+ * 현황의 이름표)도 저마다 같은 래퍼를 하나씩 갖는다. 넘치는 줄이 스스로 스크롤
+ * 상자를 갖지 않으면 그 넘침이 바깥으로 새어 결국 화면 전체가 좌우로 밀린다.
+ * 다만 그 래퍼에 **확정 높이를 함께 주지 말 것** — 바로 위 항목이 그 고장이다.
  *
  * ── 장기 PO 미발행은 빨간 볼드로 드러난다 ───────────────────────────────
  * 견적서를 낸 지 두 달이 지나도록 발주가 안 난 줄은 `견적서 발행일` 칸이 빨간
@@ -284,10 +311,22 @@ const BOTTOM_ROW_STATUSES = SUMMARY_CELL_ORDER.filter((status) => SUMMARY_CELL_P
  * 집계 8칸 — 윗줄 네 칸, 아랫줄 네 칸(마지막이 총 대수).
  * 분류 안 된 건이 있을 때만 아홉 번째 칸이 붙는다.
  *
- * 자기 자신이 @container 다. 이 덩어리는 고객사 블록 안(좁을 수 있다)에도,
- * 아래 총합 안(넓다)에도 놓이므로, 뷰포트가 아니라 **제가 받은 폭**으로 4열과
- * 2열을 가른다. sm: 같은 뷰포트 기준을 쓰면 넓은 창의 좁은 칸에서 4열이
- * 우겨넣어져 라벨과 숫자가 겹친다.
+ * **폭은 위 소제목에 맞추고, 어느 폭에서도 접지 않는다(사용자 결정).** 예전에는
+ * max-w-3xl 로 768px 에서 끊고, 자기 자신이 @container 가 되어 좁아지면 4열을
+ * 2열 × 4줄로 접었다 — 좁은 칸에 4열을 우겨넣으면 라벨과 숫자가 겹친다는 이유
+ * 였다. 그런데 그렇게 두니 소제목과 상세표는 블록 폭을 꽉 채우는데 **가운데
+ * 집계만 짧게 끝나** 오른쪽이 비었고, 접히는 순간 매주 눈으로 찾던 칸 자리도
+ * 무너졌다.
+ *
+ * 그래서 뒤집었다. 상한을 없애 부모(=소제목과 같은 폭)를 그대로 쓰고, 열은 늘
+ * 4개다. 칸은 minmax(min-content, 1fr) 이라 **글자보다 작아지지 않는다** —
+ * Tailwind 의 grid-cols-4 는 minmax(0, 1fr) 이라 칸이 글자보다 작게 찌그러지고,
+ * 그러면 스크롤이 아니라 칸 안에서 글자가 넘친다. 넓으면 4칸이 남는 폭을 고르게
+ * 나눠 가져 소제목 오른쪽 끝까지 닿고, 좁으면 바깥 래퍼 안에서 **이 줄만** 좌우로
+ * 스크롤된다. 대가는 분명하다 — 좁은 화면에서는 옆으로 밀어서 봐야 한다.
+ *
+ * @container 는 그 갈림길과 함께 없앴다. 여기 남은 @ 변형이 하나도 없으므로,
+ * 두면 "폭에 따라 무언가 달라진다"는 거짓 신호만 남는다.
  *
  * **고객사 블록과 총합 블록이 같은 칸을 쓴다.** 예전에는 총합에서 PO 발행 완료를
  * 빼려고 `showPoIssued` 를 받아 네 번째 자리를 빈 칸으로 남겼는데, 그 칸을 총합에도
@@ -302,8 +341,11 @@ function CountsSummary({
   toneClass?: string;
 }) {
   return (
-    <div className="@container max-w-3xl">
-      <div className="grid grid-cols-2 gap-1 @lg:grid-cols-4">
+    // 넘치면 이 래퍼 안에서만 좌우로 밀린다. **flex-1 이나 높이를 붙이지 말 것** —
+    // overflow-x 는 세로 축의 visible 까지 auto 로 바꾸므로 확정 높이가 함께
+    // 붙는 순간 여기서 세로 스크롤이 생겨 스크롤바가 둘로 보인다(파일 헤더).
+    <div className="overflow-x-auto">
+      <div className="grid gap-1 [grid-template-columns:repeat(4,minmax(min-content,1fr))]">
         {TOP_ROW_STATUSES.map((status) => (
           <CountCell
             key={status}
@@ -354,10 +396,16 @@ function BlockHeading({
   toneClass?: string;
 }) {
   return (
+    // 이 줄은 접지 않는다 — 아래 집계와 상세표가 **이 줄의 폭에 맞추므로**, 제목이
+    // 두 줄로 접히면 기준 자체가 흔들린다(사용자 결정: 줄바꿈 대신 좌우 스크롤).
+    // h3 의 shrink-0 이 그 짝이다: flex 항목은 기본이 shrink 라, 두지 않으면
+    // justify-between 이 좁아질 때 왼쪽 이름 묶음을 min-content 까지 눌러 **글자가
+    // 스스로 접힌다**(오른쪽 총 대수는 이미 whitespace-nowrap 이라 안 눌린다).
+    // shrink-0 이면 대신 넘치고, 넘친 만큼만 이 상자 안에서 좌우로 스크롤된다.
     <div
-      className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${toneClass}`}
+      className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 overflow-x-auto rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${toneClass}`}
     >
-      <h3 className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+      <h3 className="inline-flex shrink-0 items-baseline gap-x-2 gap-y-0.5 text-sm">
         <span className="font-semibold text-zinc-900 dark:text-zinc-50">{name}</span>
         <span className="rounded bg-zinc-800 px-1 py-0.5 text-[10px] leading-none font-medium text-white dark:bg-zinc-200 dark:text-zinc-900">
           {kind}
@@ -385,7 +433,14 @@ function BlockHeading({
  * min-w-0 은 장식이 아니다: 격자 칸의 기본 min-width 는 auto 라, 이것이 없으면
  * 안쪽 표의 필요 폭이 칸을 밀어 넓혀 화면 전체가 좌우로 밀린다(파일 헤더).
  */
-function ReportBlock({ block }: { block: WeeklyReportBlock }) {
+function ReportBlock({
+  block,
+  canEditNotes,
+}: {
+  block: WeeklyReportBlock;
+  /** `비고` 칸에 `수정` 을 그릴 것인가. 관문이 아니다(파일 헤더). */
+  canEditNotes: boolean;
+}) {
   const toneClass = customerRowColorClass(block.customerRowColor);
   return (
     <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
@@ -454,7 +509,22 @@ function ReportBlock({ block }: { block: WeeklyReportBlock }) {
                     <StatusCell row={row} />
                   </td>
                   <td className="px-1.5 py-1 tabular-nums">{dash(row.orderIssuedDate)}</td>
-                  <td className="px-1.5 py-1 whitespace-pre-line">{dash(row.notes)}</td>
+                  {/* 이 표에서 유일하게 고칠 수 있는 칸이다(파일 헤더).
+                      whitespace-pre-line 은 그대로 둔다 — 이 값에는 여러 줄이
+                      들어 있고, 못 고치는 사람에게 보이는 모양이 지금까지와
+                      한 글자도 달라지면 안 된다. */}
+                  <td className="px-1.5 py-1 whitespace-pre-line">
+                    {canEditNotes ? (
+                      <WeeklyReportNotesCell
+                        repairCaseId={row.id}
+                        version={row.version}
+                        notes={row.notes}
+                        displayText={dash(row.notes)}
+                      />
+                    ) : (
+                      dash(row.notes)
+                    )}
+                  </td>
                 </tr>
               ))
             )}
@@ -487,11 +557,16 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
       {issuance.customers.length === 0 ? (
         <p className="px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400">해당 없음</p>
       ) : (
-        <ul className="flex flex-wrap gap-1">
+        // 고객사가 29곳이라 이름표는 어차피 한 줄에 다 안 들어간다. 그래도 접지
+        // 않고 이 줄만 좌우로 민다 — 이 화면의 다른 줄과 같은 규칙이고, 접으면
+        // 줄 수가 폭에 따라 달라져 좌우 두 칸의 높이가 매번 어긋난다.
+        // <li> 의 shrink-0 이 없으면 flex 항목의 기본값(shrink: 1)대로 이름표가
+        // 눌려 글자가 잘린다 — 스크롤이 아니라 손실이다.
+        <ul className="flex flex-nowrap gap-1 overflow-x-auto">
           {issuance.customers.map((entry) => (
             <li
               key={entry.key}
-              className={`inline-flex items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
+              className={`inline-flex shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
             >
               <span className="text-[10px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">
                 {entry.customerName}
@@ -527,12 +602,22 @@ export type WeeklyReportGoalsPanelData = {
 export default function WeeklyReportScreen({
   report,
   asOfDate,
+  canEditNotes,
   goals,
   deliveries,
 }: {
   report: WeeklyReport;
   /** 서버가 한국 표준시로 정한 "오늘". 클라이언트에서 만들지 않는다(파일 헤더). */
   asOfDate: string;
+  /**
+   * 상세표의 `비고` 를 고칠 수 있는가. 거짓이면 그 칸은 지금까지와 똑같은
+   * 글자만 그린다 — 화면을 그리기 위한 값일 뿐 관문이 아니다(파일 헤더).
+   *
+   * **goals.canEdit 과 같은 값이 아니다.** 저쪽은 주간보고 메뉴의 쓰기 권한이고
+   * 이쪽은 수리 건의 필드 권한(isFieldEditable "notes")이라, 두 값을 하나로
+   * 합치면 목표는 못 적는데 남의 수리 건 비고는 고치는 사람이 생긴다.
+   */
+  canEditNotes: boolean;
   goals: WeeklyReportGoalsPanelData;
   /**
    * 그 주의 납입 예정 줄 전부. 이 파일은 한 줄도 읽지 않는다 — 무엇을 그릴지는
@@ -613,8 +698,8 @@ export default function WeeklyReportScreen({
                   낭독기에는 29개 고객사를 건너뛸 발판이 필요하다 — 없으면 블록
                   58개를 한 줄씩 지나야 다음 고객사에 닿는다. */}
               <h2 className="sr-only">{row.customerName}</h2>
-              <ReportBlock block={row.rfg} />
-              <ReportBlock block={row.mb} />
+              <ReportBlock block={row.rfg} canEditNotes={canEditNotes} />
+              <ReportBlock block={row.mb} canEditNotes={canEditNotes} />
             </section>
           ))}
         </div>
