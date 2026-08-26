@@ -83,22 +83,35 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 그 자리가 사라지므로, 키보드로 폼을 여는 길이 없어지지 않도록 완료 버튼 옆에
  * 나란히 둔다. 칼럼은 여전히 22개다.
  *
- * ── 글자 칸 아홉은 칸을 눌러 그 자리에서 고친다 ─────────────────────────
- * 한 줄짜리 다섯(발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금)과 여러
- * 줄짜리 넷(고장내역 · 현황 · 이력 · 기타). 이 아홉은 `줄 수정` 폼을 열지 않고
- * **그 칸을 눌러 바로** 고친다(DomesticOrderTextCell) — 번호 하나를 고치려고 칸
- * 22개짜리 폼을 여는 것은 실제로 가장 자주 하는 일에 가장 긴 길을 내주는 셈이다.
- * 주간보고의 비고 칸이 같은 방식이고, 겉모습도 셋이 나눠 쓴다
+ * ── 열두 칸은 칸을 눌러 그 자리에서 고친다 ──────────────────────────────
+ * 한 줄짜리 다섯(발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금), 여러
+ * 줄짜리 넷(고장내역 · 현황 · 이력 · 기타), 날짜 셋(발주발행일 · 견적발행일 ·
+ * 세금계산서발행일). 이 열둘은 `줄 수정` 폼을 열지 않고 **그 칸을 눌러 바로**
+ * 고친다(DomesticOrderTextCell) — 번호 하나를 고치려고 칸 22개짜리 폼을 여는 것은
+ * 실제로 가장 자주 하는 일에 가장 긴 길을 내주는 셈이다. 주간보고의 비고 칸이
+ * 같은 방식이고, 겉모습도 셋이 나눠 쓴다
  * (components/common/inline-edit-cell-button.ts).
  *
  * 여러 줄 칸의 편집칸은 `<textarea>` 다. `<input>` 으로 열면 기존 값의 줄바꿈이
  * 말없이 사라진 채 저장되고, 무엇보다 Enter 로 줄을 바꿀 수가 없다 — 그래서 이
- * 넷은 Enter 가 아니라 버튼으로 저장한다(그 파일 헤더).
+ * 넷은 Enter 가 아니라 버튼으로 저장한다(그 파일 헤더). 날짜 셋은
+ * `<input type="date">` 다 — 글자로 받으면 사람이 `2026.5.11` 처럼 쳐서 저장할
+ * 때마다 검증에 걸린다. 무엇으로 열지는 화면이 아니라 도메인이 정한다
+ * (domesticOrderInlineEditControl).
  *
- * **아홉뿐인 것은 일부러다.** 날짜·금액·체크·고르기 칸은 다루는 방식이 제각각이라
- * (달력 입력, 쉼표가 섞인 숫자, 체크상자, UUID 를 고르는 드롭다운) 같은 방식으로
- * 묶을 수 없다. 그 칸들은 지금도 `줄 수정` 폼에서 고친다 — **`행 추가` 와
- * `줄 수정` 은 그대로 남고**, 줄의 나머지를 누르면 폼이 열리는 동작도 그대로다.
+ * ⚠️ **발주발행일을 고치면 그 줄이 지금 고른 년도에서 사라질 수 있다.** 이
+ * 목록이 그 칸의 년도로 줄을 가르기 때문이고(filterDomesticOrdersByYear), 고장이
+ * 아니라 규칙대로 움직인 결과다. 그래도 미리 말해 두지 않으면 "저장했더니 줄이
+ * 없어졌다"로 읽히므로, 그 칸의 편집칸 아래에 두 줄이 붙는다(도메인의
+ * domesticOrderInlineEditYearNotice). 년도 거르기 규칙 자체는 그대로다.
+ *
+ * **열둘뿐인 것은 일부러다.** 금액·입금완료·고르기 칸은 다루는 방식이 제각각이라
+ * (쉼표가 섞인 숫자, 체크상자, UUID 를 고르는 드롭다운) 아직 같은 방식으로 묶지
+ * 않았다. 날짜 중에서도 **납품일과 납기요청일은 들어오지 않는다** — 납품일은
+ * 사람이 적는 값이 아니고(아래 '납품일은 수리 건의 실제 출하일이다'),
+ * 납기요청일은 한 칸에 날짜가 여럿인 별도 표다. 그 칸들은 지금도 `줄 수정`
+ * 폼에서 고친다 — **`행 추가` 와 `줄 수정` 은 그대로 남고**, 줄의 나머지를 누르면
+ * 폼이 열리는 동작도 그대로다.
  *
  * ⚠️ 이 화면의 저장은 **보낸 칸만 고치지 않는다.** 칸 하나를 고쳐도 그 줄의 값
  * 전체를 실어 보내야 하고, 그러지 않으면 나머지 칸이 지워진다. 그 규칙과 까닭은
@@ -110,11 +123,13 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 칸으로** 열리고, 비어 있는 채로 열릴 때 무엇이 보이게 되는지는 편집칸 아래
  * 한 줄이 말해 준다 — `줄 수정` 폼과 같은 규칙이다.
  *
- * 표와 카드가 **같은 아홉 칸**을 고칠 수 있다. 한쪽만 되면 같은 자료가 화면
+ * 표와 카드가 **같은 열두 칸**을 고칠 수 있다. 한쪽만 되면 같은 자료가 화면
  * 크기에 따라 다르게 다뤄진다 — 카드 쪽은 아래 CARD_FIELD_GROUPS 의 edit 이
- * 그 짝을 맞춘다. **안 고칠 때 보이는 글자는 아홉 칸 모두 이 변경 전과 똑같다**:
- * 접는 방식을 컴포넌트가 정하지 않고 그 자리가 쓰던 값을 그대로 넘기기 때문이다
- * (wrapping).
+ * 그 짝을 맞춘다. **안 고칠 때 보이는 것은 열두 칸 모두 이 변경 전과 똑같다**:
+ * 접는 방식을 컴포넌트가 정하지 않고 그 자리가 쓰던 값을 그대로 넘기기 때문이고
+ * (wrapping), 표의 날짜 칸은 자릿수 폭까지 그대로 넘긴다(numeric — `<td>` 의
+ * tabular-nums 는 버튼 안까지 내려오지 않는다). 발주발행일의 `발주일 미정`
+ * 배지도 글자가 아니라 마디째 넘겨 그대로 남는다(OrderIssuedDateContent).
  *
  * ── 고객사마다 줄 배경색, 완료 회색이 그 위에 있다 ──────────────────────
  * 고객사 관리에서 정해 둔 색(customers.row_color)으로 그 고객사의 줄과 묶음
@@ -164,12 +179,14 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 표 머리말과 카드 이름표에도 같은 말을 title 로 붙인다. 22칼럼을 옆으로 밀어
  * 보는 표라, 표 위의 한 줄만으로는 그 칸에 닿았을 때 설명이 화면 밖에 있다.
  *
- * 이 칸에는 **칸 편집을 붙이지 않는다.** 눌러서 고칠 수 있는 아홉 칸에 이것이
+ * 이 칸에는 **칸 편집을 붙이지 않는다.** 눌러서 고칠 수 있는 열두 칸에 이것이
  * 없는 것은 빠뜨린 것이 아니라 못 적는 값이기 때문이다 — `줄 수정` 폼에서도
- * 입력칸이 아니라 읽기 전용이다(DomesticOrderEditForm).
+ * 입력칸이 아니라 읽기 전용이다(DomesticOrderEditForm). **날짜 셋에 칸 편집이
+ * 붙은 뒤에도 그대로다** — 옆 칸들이 눌러서 고쳐진다는 이유로 이 칸까지 열면,
+ * 자동으로 따라오던 출하일이 이 줄에 박제된다.
  *
  * ⚠️ **`납품자`(deliveredBy)는 이름만 비슷한 다른 칸이다.** 그쪽은 지금도 눌러서
- * 고치는 아홉 칸 중 하나다.
+ * 고치는 열두 칸 중 하나다.
  *
  * ── 빈 값은 "-" ────────────────────────────────────────────────────────
  * 시트에는 아직 안 정해진 칸이 많다(견적은 냈는데 납품 전, 납품은 했는데 입금
@@ -337,6 +354,29 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
 }
 
 /**
+ * 표의 `발주발행일` 칸에 그릴 것. **이 칸만 빈 값이 "-" 가 아니다** — 날짜가
+ * 없으면 `발주일 미정` 배지를 그린다(파일 헤더의 '발주일 없는 줄은 어느
+ * 년도에서도 함께 보인다').
+ *
+ * 함수로 떼어 둔 이유는 **같은 자리를 두 갈래가 그리기 때문이다.** 고칠 수 있는
+ * 사람에게는 이것이 눌러서 여는 버튼의 내용이 되고, 못 고치는 사람에게는 칸에
+ * 그대로 그려진다. 두 곳에 각각 적으면 언젠가 한쪽만 고쳐져, 같은 줄이 사람에
+ * 따라 다른 모양으로 보인다 — 하필 이 칸은 "왜 이 줄이 어느 해에서도 보이는가"를
+ * 설명하는 유일한 자리다.
+ *
+ * ⚠️ 그래서 이 칸에 넘기는 것은 글자가 아니라 마디다(DomesticOrderTextCell 의
+ * displayText). 글자만 넘기면 눌러서 고칠 수 있게 되는 순간 배지가 사라진다.
+ */
+function OrderIssuedDateContent({ row }: { row: DomesticOrderListItem }) {
+  if (row.orderIssuedDate !== null) return <>{row.orderIssuedDate}</>;
+  return (
+    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] leading-none text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      {NO_ORDER_DATE_LABEL}
+    </span>
+  );
+}
+
+/**
  * 시트 머리말. 원본 2~8행을 그대로 옮긴다.
  *
  * 이 화면은 목록이기 전에 **고객사에 보내는 문서**다. 인사문과 연락 안내가
@@ -402,9 +442,13 @@ const CARD_FIELD_GROUPS: {
      */
     hint?: string;
     /**
-     * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 아홉 칸과
+     * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 열두 칸과
      * 정확히 같아야 한다** — 좁은 화면으로 옮겼다고 고칠 수 있던 칸이 사라지면
      * 같은 자료가 화면 크기에 따라 다르게 다뤄진다(파일 헤더).
+     *
+     * ⚠️ 여기에는 표가 날짜 칸에 넘기는 numeric 이 없다. 카드의 `<dd>` 에는
+     * 원래 tabular-nums 가 없어서, 켜면 **없던 생김새가 생긴다** — 표와 카드는
+     * 일부러 다른 자리이고 양쪽 다 기준은 "지금 보이는 그대로"다.
      *
      * 켠 칸의 `<dd>` 는 글자 대신 DomesticOrderTextCell 을 그린다. 안 고칠 때
      * 보이는 글자는 위 `of` 가 그대로 정하므로, 켜고 끄는 것으로 값의 생김새가
@@ -437,9 +481,15 @@ const CARD_FIELD_GROUPS: {
       },
       // 표와 같은 말을 쓴다 — 카드로 보고 있어도 이 줄이 왜 늘 보이는지 알 수
       // 있어야 한다.
+      //
+      // ⚠️ 표는 이 자리에 배지를 그리고 카드는 글자만 적는다. 원래부터 다른
+      // 자리이고(카드에는 배지가 없었다), 눌러서 고칠 수 있게 되었다는 이유로
+      // 한쪽 생김새를 다른 쪽에 맞추지 않는다. 카드에서 눌렀을 때도 편집칸 아래
+      // 두 줄은 똑같이 붙는다 — 그 판정은 칸 이름이 하지 화면이 하지 않는다.
       {
         label: "발주발행일",
         of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
+        edit: { field: "orderIssuedDate", wrapping: "whitespace-nowrap" },
       },
       // 표와 같은 규칙이다 — 한 줄에 날짜 하나씩 전부. 좁은 화면이라고 접으면
       // 같은 자료가 화면마다 다른 값으로 읽힌다(파일 헤더).
@@ -457,7 +507,7 @@ const CARD_FIELD_GROUPS: {
       { label: "L/N", of: (row) => dash(row.lotNumber) },
       { label: "S/N", of: (row) => dash(row.serialNumber) },
       // ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom)이고 고쳐 보내는 것은
-      // **원본 칸**(faultDescriptionText)이다 — 이 아홉 중 둘이 다른 칸은 여기
+      // **원본 칸**(faultDescriptionText)이다 — 이 열둘 중 둘이 다른 칸은 여기
       // 하나뿐이다. multiline 을 켜지 않은 것도 일부러다: 이 칸의 표시 규칙은
       // 아직 줄바꿈을 살리지 않고 있고(표 쪽 noteCellContentClass 의 '고장내역은
       // 아직 켜지 않았다'), 눌러서 고칠 수 있게 되었다는 이유로 안 고칠 때의
@@ -472,7 +522,11 @@ const CARD_FIELD_GROUPS: {
   {
     label: "견적 · 납품",
     fields: [
-      { label: "견적발행일", of: (row) => dash(row.quoteIssuedDate) },
+      {
+        label: "견적발행일",
+        of: (row) => dash(row.quoteIssuedDate),
+        edit: { field: "quoteIssuedDate", wrapping: "whitespace-nowrap" },
+      },
       {
         label: "견적서번호",
         of: (row) => dash(row.quoteNumber),
@@ -505,7 +559,11 @@ const CARD_FIELD_GROUPS: {
   {
     label: "정산",
     fields: [
-      { label: "세금계산서발행일", of: (row) => dash(row.taxInvoiceDate) },
+      {
+        label: "세금계산서발행일",
+        of: (row) => dash(row.taxInvoiceDate),
+        edit: { field: "taxInvoiceDate", wrapping: "whitespace-nowrap" },
+      },
       { label: "금액(VAT별도)", of: (row) => formatAmount(row.amountExcludingVat) },
       { label: "입금완료 여부", of: (row) => paymentLabel(row.paymentCompleted) },
       {
@@ -1114,18 +1172,21 @@ export default function DomesticOrderListScreen({
                           </span>
                         </td>
                         <td className="px-3 py-2">{dash(row.customerName)}</td>
-                        {/* 여기부터 아홉 칸(발주서번호 · PJT · 고장내역 ·
-                            견적서번호 · 현황 · 납품자 · 일본 송금 · 이력 ·
-                            기타)은 **칸을 눌러 그 자리에서** 고친다(파일 헤더).
+                        {/* 여기부터 열두 칸(발주서번호 · PJT · 발주발행일 ·
+                            고장내역 · 견적발행일 · 견적서번호 · 현황 · 납품자 ·
+                            세금계산서발행일 · 일본 송금 · 이력 · 기타)은 **칸을
+                            눌러 그 자리에서** 고친다(파일 헤더).
                             못 고치는 사람에게는 누를 것이 아예 없어야 하므로,
                             버튼을 그려 놓고 막지 않고 글자만 그린다 — 보이는
                             글자는 양쪽이 똑같다.
 
                             wrapping 은 그 칸이 지금 쓰고 있는 것을 그대로
-                            넘긴다: 한 줄짜리 값은 nowrap(`<tr>` 이 이미 그렇다),
-                            현황·이력·기타는 whitespace-pre(noteCellContentClass
-                            와 같은 값). 눌러서 고칠 수 있게 되었다는 이유로 표의
-                            생김새가 바뀌면 안 된다. */}
+                            넘긴다: 한 줄짜리 값과 날짜는 nowrap(`<tr>` 이 이미
+                            그렇다), 현황·이력·기타는
+                            whitespace-pre(noteCellContentClass 와 같은 값).
+                            날짜 셋은 numeric 도 함께 넘긴다(`<td>` 의
+                            tabular-nums 가 버튼 안까지 안 내려온다). 눌러서 고칠
+                            수 있게 되었다는 이유로 표의 생김새가 바뀌면 안 된다. */}
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <DomesticOrderTextCell
@@ -1151,14 +1212,28 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         {/* 발주일이 없는 줄은 "-" 대신 이유를 적는다 — 이 줄이
-                            년도와 상관없이 늘 보이는 근거가 이 칸이다. */}
+                            년도와 상관없이 늘 보이는 근거가 이 칸이다
+                            (OrderIssuedDateContent).
+
+                            ⚠️ 날짜 칸 셋은 numeric 을 함께 넘긴다. `<td>` 의
+                            tabular-nums 는 버튼 안까지 안 내려오므로
+                            (inline-edit-cell-button.ts), 넘기지 않으면 고칠 수
+                            있는 사람의 화면에서만 날짜 자릿수가 어긋난다.
+
+                            ⚠️ 이 칸을 고치면 **그 줄이 지금 고른 년도에서 사라질
+                            수 있다.** 그 사실은 편집칸 아래 두 줄이 미리 말해
+                            준다(도메인의 domesticOrderInlineEditYearNotice). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {row.orderIssuedDate === null ? (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] leading-none text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                              {NO_ORDER_DATE_LABEL}
-                            </span>
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="orderIssuedDate"
+                              displayText={<OrderIssuedDateContent row={row} />}
+                              wrapping="whitespace-nowrap"
+                              numeric="tabular-nums"
+                            />
                           ) : (
-                            row.orderIssuedDate
+                            <OrderIssuedDateContent row={row} />
                           )}
                         </td>
                         {/* 날짜가 여럿이면 한 줄에 하나씩 전부 — 칼럼은 늘리지
@@ -1177,7 +1252,7 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2">{dash(row.serialNumber)}</td>
                         {/* ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom),
                             고쳐 보내는 것은 **원본 칸**(faultDescriptionText)
-                            이다 — 아홉 칸 중 둘이 다른 칸은 여기 하나뿐이고,
+                            이다 — 열두 칸 중 둘이 다른 칸은 여기 하나뿐이고,
                             그 어긋남은 편집칸 아래 한 줄이 설명한다
                             (DomesticOrderTextCell 의 FaultDescriptionHint).
                             wrapping 이 nowrap 인 것은 이 칸의 표시 규칙이 아직
@@ -1196,7 +1271,22 @@ export default function DomesticOrderListScreen({
                             dash(row.reportedSymptom)
                           )}
                         </td>
-                        <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
+                        {/* 견적발행일 — 발주발행일과 달리 **년도 거르기와 아무
+                            상관이 없다.** 고쳐도 줄이 사라지지 않으므로 그
+                            안내도 붙지 않는다(도메인이 칸별로 정한다). */}
+                        <td className="px-3 py-2 tabular-nums">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="quoteIssuedDate"
+                              displayText={dash(row.quoteIssuedDate)}
+                              wrapping="whitespace-nowrap"
+                              numeric="tabular-nums"
+                            />
+                          ) : (
+                            dash(row.quoteIssuedDate)
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <DomesticOrderTextCell
@@ -1243,7 +1333,19 @@ export default function DomesticOrderListScreen({
                             dash(row.deliveredBy)
                           )}
                         </td>
-                        <td className="px-3 py-2 tabular-nums">{dash(row.taxInvoiceDate)}</td>
+                        <td className="px-3 py-2 tabular-nums">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="taxInvoiceDate"
+                              displayText={dash(row.taxInvoiceDate)}
+                              wrapping="whitespace-nowrap"
+                              numeric="tabular-nums"
+                            />
+                          ) : (
+                            dash(row.taxInvoiceDate)
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {formatAmount(row.amountExcludingVat)}
                         </td>
@@ -1380,7 +1482,7 @@ export default function DomesticOrderListScreen({
                                           : "break-words"
                                       }
                                     >
-                                      {/* 표에서 눌러 고치는 아홉 칸은 카드에서도
+                                      {/* 표에서 눌러 고치는 열두 칸은 카드에서도
                                           똑같이 눌러 고친다(파일 헤더). 못 고치는
                                           사람에게는 표와 마찬가지로 누를 것이
                                           없고, 보이는 글자는 양쪽이 똑같다.

@@ -2,10 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DOMESTIC_ORDER_INLINE_EDIT_DATE,
   DOMESTIC_ORDER_INLINE_EDIT_LABELS,
   DOMESTIC_ORDER_INLINE_EDIT_MULTILINE,
   buildDomesticOrderCellUpdateFields,
   domesticOrderFaultDescriptionHint,
+  domesticOrderInlineEditControl,
+  domesticOrderInlineEditYearNotice,
   type DomesticOrderCellEditRow,
   type DomesticOrderInlineEditableField,
 } from "./domestic-order-cell-edit";
@@ -254,17 +257,20 @@ test("다섯 칸 각각이 자기 칸만 바꾼다", () => {
   }
 });
 
-test("칸 이름표는 아홉 칸 전부에 있다 — 이름 없는 칸은 낭독기에서 무엇인지 알 수 없다", () => {
+test("칸 이름표는 열두 칸 전부에 있다 — 이름 없는 칸은 낭독기에서 무엇인지 알 수 없다", () => {
   assert.deepEqual(Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS).sort(), [
     "deliveredBy",
     "etcNote",
     "faultDescriptionText",
     "historyNote",
     "japanRemittanceNote",
+    "orderIssuedDate",
     "progressNote",
     "projectName",
     "purchaseOrderNumber",
+    "quoteIssuedDate",
     "quoteNumber",
+    "taxInvoiceDate",
   ]);
   // 표 머리말·카드 이름표와 같은 글자여야 한다.
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.purchaseOrderNumber, "발주서번호");
@@ -278,6 +284,34 @@ test("칸 이름표는 아홉 칸 전부에 있다 — 이름 없는 칸은 낭�
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.progressNote, "현황");
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.historyNote, "이력");
   assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.etcNote, "기타");
+  // 날짜 셋. 표 머리말·카드 이름표와 같은 글자이면서, **검증의 DATE_FIELDS
+  // 이름표와도 같아야 한다**(validation/domestic-order-input.ts) — 저장이 거절될
+  // 때 그 이름으로 만든 문장이 이 칸 아래에 그대로 뜬다.
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.orderIssuedDate, "발주발행일");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.quoteIssuedDate, "견적발행일");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.taxInvoiceDate, "세금계산서발행일");
+});
+
+test("⚠️ 납품일과 납기요청일에는 칸 편집이 없다 — 붙이면 앞선 결정이 뒤집힌다", () => {
+  /**
+   * 날짜 칸 셋이 합류하면서 "남은 날짜도 마저"가 자연스러워 보이게 되었는데,
+   * 이 둘은 **일부러** 빠져 있다:
+   *
+   *  - 납품일(deliveredDate) — 목록이 그리는 것은 이 칼럼이 아니라 연결된 수리
+   *    건의 실제 출하일이고, 사람이 적는 값이 아니라서 `줄 수정` 폼에서도
+   *    입력칸을 없앴다. 칸 편집을 붙이면 자동으로 따라오던 날짜가 이 줄에
+   *    박제된다(파일 아래 납품일 묶음).
+   *  - 납기요청일(dueDates) — 한 칸에 날짜가 **여럿**이고 메모가 딸린 별도
+   *    표다. 칸 하나에 값 하나라는 이 파일의 전제 자체가 다르다.
+   *
+   * 이름표 목록에 이름이 오르는 순간 화면이 그 칸을 눌러 고칠 수 있게 그리므로,
+   * 여기가 그 둘을 막는 자리다.
+   */
+  const labelled = Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS);
+  assert.equal(labelled.includes("deliveredDate"), false, "납품일은 눌러 고치는 칸이 아니다");
+  assert.equal(labelled.includes("dueDates"), false, "납기요청일은 눌러 고치는 칸이 아니다");
+  // 계산된 짝도 마찬가지다 — 이름이 오르면 그 이름으로 SET 이 만들어진다.
+  assert.equal(labelled.includes("displayDeliveredDate"), false);
 });
 
 /**
@@ -295,7 +329,7 @@ test("칸 이름표는 아홉 칸 전부에 있다 — 이름 없는 칸은 낭�
  *     값(reportedSymptom)이라, 이 칸 하나만 "보이는 것"과 "저장되는 것"이 다르다.
  */
 
-/** 이 화면에서 눌러 고칠 수 있는 칸 아홉. 시험이 도는 기준 목록이다. */
+/** 이 화면에서 눌러 고칠 수 있는 칸 열둘. 시험이 도는 기준 목록이다. */
 const ALL_INLINE_FIELDS: DomesticOrderInlineEditableField[] = [
   "purchaseOrderNumber",
   "projectName",
@@ -306,6 +340,9 @@ const ALL_INLINE_FIELDS: DomesticOrderInlineEditableField[] = [
   "progressNote",
   "historyNote",
   "etcNote",
+  "orderIssuedDate",
+  "quoteIssuedDate",
+  "taxInvoiceDate",
 ];
 
 /** 여러 줄이 실제로 들어 있는 칸 넷. 값에 줄바꿈이 들어 있다. */
@@ -316,7 +353,14 @@ const MULTILINE_FIELDS: DomesticOrderInlineEditableField[] = [
   "etcNote",
 ];
 
-test("여러 줄 칸 넷을 각각 고쳐도 나머지 여덟 칸이 원래 값 그대로 실린다", () => {
+/** 달력으로 고르는 칸 셋. 값은 `"YYYY-MM-DD"` 문자열 하나다. */
+const DATE_INLINE_FIELDS: DomesticOrderInlineEditableField[] = [
+  "orderIssuedDate",
+  "quoteIssuedDate",
+  "taxInvoiceDate",
+];
+
+test("여러 줄 칸 넷을 각각 고쳐도 나머지 열한 칸이 원래 값 그대로 실린다", () => {
   const original = row();
   for (const field of MULTILINE_FIELDS) {
     const built = buildDomesticOrderCellUpdateFields(original, field, "새 값\n둘째 줄");
@@ -407,7 +451,7 @@ test("고장내역을 빈 문자열로 지우면 다시 수리 건 값을 빌려
   assert.equal(built.progressNote, "수리중\n부품 대기");
 });
 
-test("여러 줄 칸인지는 값의 성질이 정한다 — 넷만 textarea, 다섯은 input", () => {
+test("여러 줄 칸인지는 값의 성질이 정한다 — 넷만 textarea, 나머지 여덟은 아니다", () => {
   // 이 표가 틀리면 화면이 <input> 을 열고, 그 순간 값의 줄바꿈이 말없이 사라진다.
   assert.deepEqual(
     Object.keys(DOMESTIC_ORDER_INLINE_EDIT_MULTILINE).sort(),
@@ -470,8 +514,12 @@ test("고장내역 안내는 연결된 수리 건에 증상이 적혀 있을 때
  * (queries 의 displayDeliveredDate), `줄 수정` 폼에도 입력칸이 없다. 그래서 이
  * 칸은 **화면 어디를 봐도 확인할 수 없는 값**이 되었다 — payload 에서 빠져도
  * 눈으로는 아무도 못 알아채고, 알아챘을 때는 이미 여러 줄에서 지워진 뒤다.
- * 위 아홉 칸과 달리 "고쳐 보고 값이 맞나" 볼 자리조차 없으므로, 이 셋이 그
+ * 위 열두 칸과 달리 "고쳐 보고 값이 맞나" 볼 자리조차 없으므로, 이 셋이 그
  * 칼럼을 지키는 **유일한** 장치다.
+ *
+ * ⚠️ 날짜 칸 셋이 눌러 고칠 수 있게 되면서 이 칼럼은 **더 위험해졌다** — 같은
+ * 줄의 다른 날짜를 고치는 저장이 이 칸을 함께 실어 나르기 때문이다. 아래 둘째
+ * 시험이 열두 칸을 모두 돌므로 날짜 셋도 그 자리에서 함께 막힌다.
  *
  * 손으로 적던 시절의 값은 되돌릴 수 있도록 DB 에 남겨 두기로 한 것이지, 버리기로
  * 한 것이 아니다 — 화면에서 안 보여 주는 것과 자료를 지우는 것은 다른 결정이다.
@@ -488,7 +536,7 @@ test("⚠️ 납품일은 화면에 없어도 원래 값 그대로 실린다 —
   assert.equal(built.deliveredDate, subject.deliveredDate);
 });
 
-test("⚠️ 아홉 칸 중 무엇을 고쳐도 납품일은 그대로다 — 한 경로만 새도 자료가 샌다", () => {
+test("⚠️ 열두 칸 중 무엇을 고쳐도 납품일은 그대로다 — 한 경로만 새도 자료가 샌다", () => {
   const subject = row();
   for (const field of ALL_INLINE_FIELDS) {
     const built = buildDomesticOrderCellUpdateFields(subject, field, "새 값");
@@ -526,4 +574,186 @@ test("⚠️ 계산된 납품일(displayDeliveredDate)은 실리지 않는다 �
   assert.equal("repairCaseActualShipmentDate" in built, false, "수리 건의 칸이 실려 나갔다");
   // 키 개수는 그대로 23개다 — 늘었다면 무언가가 몰래 끼어든 것이다.
   assert.equal(Object.keys(built).length, 23);
+});
+
+/**
+ * ── 여기부터: 날짜 칸 셋 ───────────────────────────────────────────────────
+ *
+ * 발주발행일 · 견적발행일 · 세금계산서발행일. 보내는 값을 만드는 규칙은 위
+ * 아홉과 똑같고(`"YYYY-MM-DD"` 문자열 하나다), 아래 넷이 더 걸린다:
+ *
+ *  7. 이 셋을 고치는 저장에서도 **납품일이 살아남아야 한다.** 바로 위 묶음이
+ *     지키던 그 칼럼인데, 이제 그것을 실어 나르는 경로가 셋 늘었다.
+ *  8. **빈 값으로 지울 수 있어야 한다.** 세 칸 다 비어 있는 것이 정상이라
+ *     (발주가 아직 안 난 줄, 견적만 나간 줄), 지우는 길이 막히면 한 번 잘못
+ *     적은 날짜를 되돌릴 방법이 없다. 빈 문자열을 null 로 접는 일은 검증
+ *     한 곳이 하므로, 여기서는 **손대지 않고 그대로** 나가야 한다.
+ *  9. **편집칸이 `<input type="date">` 여야 한다.** 글자 칸으로 열리면 사람이
+ *     `2026.5.11` 처럼 쳐서 저장할 때마다 검증에 걸린다. 그 판정은 화면이
+ *     아니라 …_INLINE_EDIT_DATE 와 domesticOrderInlineEditControl 이 한다.
+ * 10. **발주발행일에만 년도 안내가 붙는다.** 이 목록은 그 칸의 년도로 줄을
+ *     가르므로, 다른 해로 고치면 그 줄이 지금 보고 있는 해에서 사라진다.
+ *     년도와 상관없는 다른 칸에까지 그 말이 붙으면 있지도 않은 규칙을 설명하는
+ *     문장이 된다.
+ */
+
+test("날짜 칸 셋을 각각 고쳐도 나머지 22칸이 원래 값 그대로 실린다 — 납품일 포함", () => {
+  const original = row();
+  for (const field of DATE_INLINE_FIELDS) {
+    const built = buildDomesticOrderCellUpdateFields(original, field, "2027-03-09");
+
+    // 고친 칸만 새 값이다.
+    assert.equal(built[field], "2027-03-09");
+
+    // ⚠️ 화면 어디에도 안 보이는 칸이라, 여기서 새면 눈으로는 아무도 못
+    // 알아챈다(위 납품일 묶음).
+    assert.equal(built.deliveredDate, "2026-02-20", `${field} 을(를) 고치는데 납품일이 바뀌었다`);
+
+    // 나머지 22칸은 읽어 온 값 그대로여야 한다. 목록을 손으로 늘어놓지 않고
+    // 기준 키 목록을 도는 것은, 칸이 하나 늘어난 날 이 시험이 함께 자라게
+    // 하기 위해서다.
+    for (const key of COLLECT_FIELDS_KEYS) {
+      if (key === field) continue;
+      if (key === "dueDates") {
+        assert.deepEqual(built.dueDates, [
+          { dueDate: "2026-01-20", note: "1차분" },
+          { dueDate: "2026-02-15", note: null },
+        ]);
+        continue;
+      }
+      assert.equal(built[key], original[key], `${field} 을(를) 고치는데 ${key} 가 바뀌었다`);
+    }
+
+    // 키 개수는 그대로 23개다 — 날짜 칸이 자기 이름으로 키를 하나 더 만들면
+    // (예: orderIssuedDate 를 안 지우고 덧붙이면) 여기서 걸린다.
+    assert.equal(Object.keys(built).length, 23);
+  }
+});
+
+test("날짜 칸을 고쳐도 다른 두 날짜는 그대로다 — 세 칸이 한 칸처럼 움직이면 안 된다", () => {
+  const built = buildDomesticOrderCellUpdateFields(row(), "quoteIssuedDate", "2026-05-11");
+  assert.equal(built.quoteIssuedDate, "2026-05-11");
+  assert.equal(built.orderIssuedDate, "2026-01-05");
+  assert.equal(built.taxInvoiceDate, "2026-02-25");
+});
+
+test("날짜를 빈 값으로 지우면 빈 문자열 그대로 나간다 — null 로 접는 일은 검증 한 곳이 한다", () => {
+  /**
+   * `<input type="date">` 를 비우면 빈 문자열이 온다. 그것을 여기서 null 로
+   * 미리 접으면 규칙이 두 곳에 생기고, `줄 수정` 폼으로 지웠을 때와 결과가
+   * 달라질 여지가 생긴다(파일 헤더의 '값은 손대지 않고').
+   */
+  const original = row();
+  for (const field of DATE_INLINE_FIELDS) {
+    const built = buildDomesticOrderCellUpdateFields(original, field, "");
+    assert.equal(built[field], "", `${field} 을(를) 지운 값이 다듬어졌다`);
+    // 지우는 저장에서도 나머지는 그대로다 — 특히 화면에 없는 납품일.
+    assert.equal(built.deliveredDate, "2026-02-20");
+    assert.deepEqual(built.dueDates, [
+      { dueDate: "2026-01-20", note: "1차분" },
+      { dueDate: "2026-02-15", note: null },
+    ]);
+    assert.equal(Object.keys(built).length, 23);
+  }
+});
+
+test("원래 비어 있던 날짜 칸도 적을 수 있다 — 빈 칸을 눌러 채우는 길이 막히면 안 된다", () => {
+  // 발주발행일이 없는 줄(`발주일 미정`)이 실제로 있고, 그 줄이야말로 이 칸을
+  // 눌러 적게 되는 줄이다.
+  const built = buildDomesticOrderCellUpdateFields(
+    row({ orderIssuedDate: null, taxInvoiceDate: null }),
+    "orderIssuedDate",
+    "2026-04-01"
+  );
+  assert.equal(built.orderIssuedDate, "2026-04-01");
+  // 함께 비어 있던 칸은 비어 있는 채로 남는다.
+  assert.equal(built.taxInvoiceDate, null);
+});
+
+test("날짜 칸은 형식을 여기서 검사하지 않는다 — 관문은 검증 한 곳뿐이다", () => {
+  /**
+   * `2026-02-31` 은 형식은 맞지만 없는 날이고, `2026.5.11` 은 형식부터 다르다.
+   * 둘 다 **검증의 normalizeDate 가** 막는다(validation/domestic-order-input.ts).
+   * 여기서 미리 거르면 규칙이 두 벌이 되어, 한쪽만 고쳐지는 날 화면과 서버가
+   * 서로 다른 날짜를 받아 준다. 그래서 이 함수는 받은 글자를 그대로 넘긴다.
+   */
+  for (const written of ["2026-02-31", "2026.5.11", "  "]) {
+    const built = buildDomesticOrderCellUpdateFields(row(), "orderIssuedDate", written);
+    assert.equal(built.orderIssuedDate, written);
+  }
+});
+
+test("날짜 판정 표는 이름표가 있는 칸과 어긋나지 않는다", () => {
+  assert.deepEqual(
+    Object.keys(DOMESTIC_ORDER_INLINE_EDIT_DATE).sort(),
+    Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS).sort(),
+    "이름표가 있는 칸과 날짜 판정이 있는 칸이 어긋난다"
+  );
+  for (const field of DATE_INLINE_FIELDS) {
+    assert.equal(DOMESTIC_ORDER_INLINE_EDIT_DATE[field], true, `${field} 는 날짜 칸이다`);
+  }
+  for (const field of ALL_INLINE_FIELDS) {
+    if (DATE_INLINE_FIELDS.includes(field)) continue;
+    assert.equal(DOMESTIC_ORDER_INLINE_EDIT_DATE[field], false, `${field} 는 날짜 칸이 아니다`);
+  }
+});
+
+test("⚠️ 날짜이면서 여러 줄인 칸은 없다 — 있으면 여러 줄 판정이 말없이 무시된다", () => {
+  // 편집칸을 고를 때 날짜를 먼저 보므로(domesticOrderInlineEditControl), 둘 다
+  // true 인 칸이 생기면 textarea 로 열리기를 기대한 칸이 date 로 열린다.
+  for (const field of ALL_INLINE_FIELDS) {
+    assert.equal(
+      DOMESTIC_ORDER_INLINE_EDIT_DATE[field] && DOMESTIC_ORDER_INLINE_EDIT_MULTILINE[field],
+      false,
+      `${field} 가 날짜이면서 여러 줄로 적혀 있다`
+    );
+  }
+});
+
+test("편집칸 종류는 칸마다 하나로 정해진다 — 날짜 셋 · textarea 넷 · 나머지 다섯", () => {
+  // 화면이 물어보는 것은 이 함수 하나뿐이다. 표와 카드가 각각 갈래를 만들면
+  // 한쪽만 틀릴 수 있고, 틀리면 값이 조용히 깎이거나 저장이 매번 거절된다.
+  assert.equal(domesticOrderInlineEditControl("orderIssuedDate"), "date");
+  assert.equal(domesticOrderInlineEditControl("quoteIssuedDate"), "date");
+  assert.equal(domesticOrderInlineEditControl("taxInvoiceDate"), "date");
+  assert.equal(domesticOrderInlineEditControl("faultDescriptionText"), "textarea");
+  assert.equal(domesticOrderInlineEditControl("progressNote"), "textarea");
+  assert.equal(domesticOrderInlineEditControl("historyNote"), "textarea");
+  assert.equal(domesticOrderInlineEditControl("etcNote"), "textarea");
+  assert.equal(domesticOrderInlineEditControl("purchaseOrderNumber"), "text");
+  assert.equal(domesticOrderInlineEditControl("projectName"), "text");
+  assert.equal(domesticOrderInlineEditControl("quoteNumber"), "text");
+  assert.equal(domesticOrderInlineEditControl("deliveredBy"), "text");
+  assert.equal(domesticOrderInlineEditControl("japanRemittanceNote"), "text");
+
+  // 열두 칸 전부가 셋 중 하나로 정해진다 — 판정이 없는 칸이 생기면 화면이 무엇을
+  // 열어야 할지 모른다.
+  for (const field of ALL_INLINE_FIELDS) {
+    assert.ok(
+      ["date", "textarea", "text"].includes(domesticOrderInlineEditControl(field)),
+      `${field} 의 편집칸 종류가 없다`
+    );
+  }
+});
+
+test("년도 안내는 발주발행일에만 붙는다 — 그 칸만 목록에서 줄을 사라지게 한다", () => {
+  const notice = domesticOrderInlineEditYearNotice("orderIssuedDate");
+  assert.notEqual(notice, null);
+  // 두 줄이다. 다른 해로 바꾸는 쪽과 비우는 쪽은 결과가 정반대라(사라진다 /
+  // 어느 해에서도 보인다) 한 문장으로 뭉뚱그릴 수 없다.
+  assert.equal(notice?.length, 2);
+  assert.ok(notice?.[0].includes("발주발행일"));
+  assert.ok(notice?.[0].includes("사라집니다"));
+  assert.ok(notice?.[1].includes("비워 두면"));
+
+  // 나머지 열한 칸에는 붙지 않는다. 특히 다른 날짜 둘 — 년도 거르기와 아무
+  // 상관이 없는데 같은 말이 붙으면, 있지도 않은 규칙을 설명하는 문장이 된다.
+  for (const field of ALL_INLINE_FIELDS) {
+    if (field === "orderIssuedDate") continue;
+    assert.equal(
+      domesticOrderInlineEditYearNotice(field),
+      null,
+      `${field} 에 년도 안내가 붙었다`
+    );
+  }
 });

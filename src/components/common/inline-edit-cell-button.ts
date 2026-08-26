@@ -7,7 +7,7 @@
  *   - 주간보고 고객사 상세표의 `비고`(WeeklyReportNotesCell)
  *   - 주간보고 맨 아래 납입 예정 건 표의 `비고`(WeeklyReportDeliveriesPanel 의
  *     DeliveryLine)
- *   - 내자 정리 표·카드의 한 줄짜리 글자 칸 다섯(DomesticOrderTextCell)
+ *   - 내자 정리 표·카드의 열두 칸(DomesticOrderTextCell — 글자 아홉과 날짜 셋)
  *
  * 주간보고 두 칸이 그렇게 정해진 이유는 "한 화면에 비고가 둘인데 하나만 눌러서
  * 열리면 오히려 더 헷갈린다"였다(사용자 결정). 내자 정리가 셋째로 합류하면서
@@ -51,7 +51,8 @@
  * - `whitespace-pre-line` — 값에 실제로 줄바꿈이 들어 있는 칸(주간보고 두 비고).
  *   `<td>` 의 같은 성질이 폼 컨트롤 안까지 내려온다는 보장이 없어 버튼에 다시
  *   적는다 — 여러 줄 비고의 줄바꿈이 이 칸에서만 사라지면 안 된다.
- * - `whitespace-nowrap` — 한 줄짜리 값이라 접히면 안 되는 칸(내자 정리 다섯).
+ * - `whitespace-nowrap` — 한 줄짜리 값이라 접히면 안 되는 칸(내자 정리의 한
+ *   줄짜리 글자 칸 다섯과 날짜 칸 셋).
  * - `whitespace-pre` — 사람이 친 줄바꿈에서**만** 끊고 폭이 모자라도 접지 않는
  *   칸(내자 정리 **표**의 현황·이력·기타). 왜 pre-line 이 아닌지는
  *   DomesticOrderListScreen 의 noteCellContentClass 에 적혀 있다 — 요약하면
@@ -83,6 +84,31 @@ export type InlineEditCellWrapping =
   | "whitespace-pre"
   | "break-words whitespace-pre-line"
   | "break-words whitespace-normal";
+
+/**
+ * 숫자의 **자릿수 폭을 맞춰** 그리는 칸인가. 맞출 필요가 없으면 넘기지 않는다.
+ *
+ * ── ⚠️ 왜 칸(`<td>`)의 tabular-nums 가 버튼 안까지 안 내려오는가 ────────
+ * `font-variant-numeric` 은 상속되는 성질이라 그냥 내려올 것 같지만, **버튼에는
+ * 안 내려온다.** Tailwind 의 preflight 가 `button, input, select, …` 에
+ * `font: inherit` 를 걸어 두는데, `font` 는 **단축 속성**이라 자기가 안 갖고 있는
+ * `font-variant-numeric` 을 initial(normal)로 되돌린다. 그래서 바깥 칸에 아무리
+ * `tabular-nums` 가 걸려 있어도, 그 안의 버튼은 일반 숫자로 그려진다.
+ *
+ * 접는 방식이 버튼에 다시 선언돼야 하는 것과 **정확히 같은 종류의 함정**이고
+ * (아래 함수의 '줄바꿈 처리만은'), 그래서 이 값도 부르는 쪽이 인자로 넘긴다.
+ *
+ * 내자 정리 표의 날짜 칸 셋이 이것을 쓴다 — 그 칼럼들은 `<td>` 에 tabular-nums
+ * 가 걸려 있어서, 넘기지 않으면 **눌러 고칠 수 있게 된 칸만** 옆 날짜 칼럼과
+ * 자릿수가 어긋난다. 눌러서 고칠 수 있게 되었다는 이유로 표의 생김새가 바뀌면
+ * 안 된다.
+ *
+ * ⚠️ 접는 방식과 달리 **안 넘겨도 된다.** 그쪽은 안 고르면 조용히 틀리는 값이라
+ * 타입으로 막았지만(그 주석), 이쪽의 기본값은 지금까지 이 버튼을 쓰던 모든
+ * 자리가 실제로 쓰고 있던 값 그대로다 — 넘기지 않으면 만들어지는 문자열이 한
+ * 글자도 달라지지 않는다.
+ */
+export type InlineEditCellNumeric = "tabular-nums";
 
 /**
  * 안 고칠 때 보여 주는 글자 자체를 감싸는 `<button type="button">` 의 겉모습.
@@ -131,9 +157,24 @@ export type InlineEditCellWrapping =
  * `inlineEditCellButtonClass("whitespace-pre-line")` 이 예전 문자열과 한 글자도
  * 다르지 않아야, 주간보고 두 칸의 마크업이 이 변경으로 흔들리지 않았다는 것을
  * 문자열 대조만으로 말할 수 있다.
+ *
+ * ── 둘째 인자(numeric)는 **없으면 아무것도 붙지 않는다** ────────────────
+ * 자릿수 폭을 맞출 칸에서만 넘긴다(위 InlineEditCellNumeric — 왜 상속에 맡길 수
+ * 없는지도 거기 있다). 안 넘기면 위 ⚠️ 의 '한 글자도 다르지 않아야'가 그대로
+ * 성립한다: 넘기지 않은 모든 자리의 문자열은 이 인자가 생기기 전과 같다.
+ *
+ * 뒤에 덧붙이지 않고 접는 방식 **바로 뒤**에 끼우는 것도 일부러다. 같은 그룹의
+ * 유틸리티끼리는 덧붙여 봐야 이기는 것이 아니라 만들어진 CSS 의 차례가 정하지만
+ * (위 문단), `tabular-nums` 는 `font-variant-numeric` 이라 다투는 상대가 이
+ * 문자열에 없다 — 다툴 일이 없으니 자리는 읽기 좋은 곳이면 된다. 접는 방식과
+ * 나란히 두면 "이 칸의 값이 어떻게 생겼는가"가 한자리에 모인다.
  */
-export function inlineEditCellButtonClass(wrapping: InlineEditCellWrapping): string {
-  return `relative -mx-1 block w-full cursor-pointer rounded px-1 text-left ${wrapping} hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500`;
+export function inlineEditCellButtonClass(
+  wrapping: InlineEditCellWrapping,
+  numeric?: InlineEditCellNumeric
+): string {
+  const numericClass = numeric === undefined ? "" : ` ${numeric}`;
+  return `relative -mx-1 block w-full cursor-pointer rounded px-1 text-left ${wrapping}${numericClass} hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500`;
 }
 
 /**
