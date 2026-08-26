@@ -31,9 +31,12 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (.env.example is a safe placeholder template and is tracked)
-.env
-.env.local
-.env.*.local
+#
+# .env* 로 통째로 막는 이유: 예전에는 .env / .env.local / .env.*.local 세
+# 가지만 적혀 있었는데, 그러면 .env.local.bak / .env.old / .env.backup 같은
+# 파일이 그물을 빠져나간다. 실제로 작업 중 만들어진 .env.local.bak이 추적
+# 대상으로 잡히는 것을 확인했다 — 비밀값이 그대로 든 파일이다.
+.env*
 !.env.example
 
 # Local database safety backups contain database data and must never be

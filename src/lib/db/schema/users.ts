@@ -33,7 +33,18 @@ export const users = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     email: text("email").notNull(),
     // Nullable for seeded/demo accounts that have no real credential yet.
+    // Never read: SSO (dss-auth) proves identity instead, and a repo-wide
+    // grep confirms zero references outside this definition. Left in place
+    // rather than dropped — a column removal is awkward to reverse and buys
+    // nothing here.
     passwordHash: text("password_hash"),
+    // dss-auth users.id, delivered as the ID token's subject claim. This is
+    // the only join key between this system and the login portal. Email is
+    // deliberately not used for that: a Kakao account holder can change
+    // their email, so it cannot anchor an identity.
+    // Nullable — rows created before SSO are not linked yet.
+    ssoSubject: text("sso_subject"),
+    ssoLinkedAt: timestamp("sso_linked_at", { withTimezone: true }),
     name: text("name").notNull(),
     role: roleEnum("role").notNull(),
     approvalStatus: accountApprovalStatusEnum("approval_status")
@@ -76,6 +87,11 @@ export const users = pgTable(
   },
   (table) => [
     uniqueIndex("users_email_unique").on(table.email),
+    // Partial unique — unlinked (null) rows never collide with each other,
+    // but one DSS subject can never map to two accounts.
+    uniqueIndex("users_sso_subject_unique")
+      .on(table.ssoSubject)
+      .where(sql`sso_subject is not null`),
     index("users_not_deleted_idx")
       .on(table.isDeleted)
       .where(sql`is_deleted = false`),

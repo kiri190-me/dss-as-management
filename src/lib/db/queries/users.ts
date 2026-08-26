@@ -94,3 +94,55 @@ export async function listUsersForLoginPicker(): Promise<LoginPickerUserRow[]> {
     .orderBy(users.name);
 }
 
+
+/**
+ * Used only by sso-login.ts. Resolves a DSS subject (the ID token's `sub`,
+ * which is dss-auth's own users.id) back to a local account.
+ *
+ * Deliberately keyed on sso_subject and never on email: a Kakao account
+ * holder can change their email at any time, so it cannot anchor an
+ * identity. Excludes soft-deleted rows — a deleted account behaves like a
+ * nonexistent one at login, exactly as getUserForLoginByEmail does.
+ */
+export async function getUserBySsoSubject(subject: string): Promise<UserRow | null> {
+  if (!subject) {
+    return null;
+  }
+  const [row] = await db
+    .select(SELECT_COLUMNS)
+    .from(users)
+    .where(and(eq(users.ssoSubject, subject), eq(users.isDeleted, false)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * One-time link of an existing local account to a DSS subject, used on a
+ * user's first SSO login when their account predates SSO.
+ *
+ * The `sso_subject IS NULL` guard is the security-relevant part, not an
+ * optimization: without it, anyone whose DSS profile carried a matching
+ * email could re-point an account that is already linked to someone else,
+ * taking it over. Conditional UPDATE makes that impossible at the database
+ * level rather than relying on the caller to check first (which would race).
+ *
+ * Returns true only when this call performed the link.
+ */
+export async function linkUserToSsoSubject(userId: string, subject: string): Promise<boolean> {
+  if (!UUID_PATTERN.test(userId) || !subject) {
+    return false;
+  }
+  const linked = await db
+    .update(users)
+    .set({ ssoSubject: subject, ssoLinkedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(users.id, userId),
+        isNull(users.ssoSubject),
+        eq(users.isDeleted, false),
+        eq(users.isActive, true)
+      )
+    )
+    .returning({ id: users.id });
+  return linked.length > 0;
+}

@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/session";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { getLoginMode } from "@/lib/config/login-mode";
 import { resolveDbLogin } from "@/lib/auth/db-login";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
 
@@ -38,6 +39,16 @@ function redirectTo(path: string): NextResponse {
 }
 
 export async function POST(request: NextRequest) {
+  // SSO 모드에서는 이 라우트가 살아 있으면 안 된다. DEMO_LOGIN_ENABLED가
+  // 실수로 true로 남아 있어도 여기서 먼저 막힌다 — 통합 로그인을 우회하는
+  // 경로를 설정이 아니라 코드로 봉인한다.
+  if (getLoginMode() === "sso") {
+    return NextResponse.json(
+      { error: "통합 로그인만 사용할 수 있습니다." },
+      { status: 403 }
+    );
+  }
+
   if (!isDemoLoginEnabled()) {
     return NextResponse.json(
       { error: "데모 로그인이 비활성화되어 있습니다." },

@@ -1,4 +1,5 @@
 import type { AuthSource } from "@/lib/config/auth-source";
+import type { LoginMode } from "@/lib/config/login-mode";
 
 /**
  * Pure derivation of /login's mode-dependent copy — split out from the page
@@ -28,6 +29,29 @@ const MOCK_VIEW_MODEL: LoginViewModel = {
   sourceBadgeLabel: "데모 사용자",
 };
 
-export function getLoginViewModel(authSource: AuthSource): LoginViewModel {
+const SSO_VIEW_MODEL: LoginViewModel = {
+  heading: "로그인",
+  description:
+    "DSS 통합 로그인으로 접속합니다. 이 시스템은 계정과 비밀번호를 따로 두지 않습니다.",
+  sourceBadgeLabel: "통합 로그인",
+};
+
+/**
+ * `loginMode` is optional and defaults to "demo" so every existing caller
+ * and test keeps its exact behavior — SSO is opt-in, and nothing changes
+ * until LOGIN_MODE is set.
+ *
+ * SSO takes precedence over authSource because in SSO mode the account
+ * source is no longer visible to the user: they never pick an account, so
+ * a "DB 사용자" / "데모 사용자" badge would describe an interaction that is
+ * not on screen.
+ */
+export function getLoginViewModel(
+  authSource: AuthSource,
+  loginMode: LoginMode = "demo"
+): LoginViewModel {
+  if (loginMode === "sso") {
+    return SSO_VIEW_MODEL;
+  }
   return authSource === "database" ? DATABASE_VIEW_MODEL : MOCK_VIEW_MODEL;
 }

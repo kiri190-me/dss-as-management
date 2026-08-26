@@ -26,3 +26,24 @@ test("the two modes never produce the same heading or badge label (visual ambigu
   assert.notEqual(db.sourceBadgeLabel, mock.sourceBadgeLabel);
   assert.notEqual(db.description, mock.description);
 });
+
+test("sso mode: heading has no parenthetical mode label and the badge says 통합 로그인", () => {
+  const model = getLoginViewModel("database", "sso");
+  assert.equal(model.heading, "로그인");
+  assert.equal(model.sourceBadgeLabel, "통합 로그인");
+});
+
+test("sso mode ignores authSource — the user never picks an account, so the source is not shown", () => {
+  assert.deepEqual(getLoginViewModel("database", "sso"), getLoginViewModel("mock", "sso"));
+});
+
+test("omitting loginMode preserves the pre-SSO behavior exactly", () => {
+  assert.deepEqual(getLoginViewModel("database"), getLoginViewModel("database", "demo"));
+  assert.deepEqual(getLoginViewModel("mock"), getLoginViewModel("mock", "demo"));
+});
+
+test("sso copy never repeats the demo/DB wording that invites picking an account", () => {
+  const model = getLoginViewModel("database", "sso");
+  assert.doesNotMatch(model.description, /선택합니다/);
+  assert.doesNotMatch(model.heading, /데모|DB/);
+});
