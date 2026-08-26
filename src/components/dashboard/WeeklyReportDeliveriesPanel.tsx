@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import WeeklyReportDeliveryDeleteDialog from "./WeeklyReportDeliveryDeleteDialog";
+import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-button";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import {
@@ -134,6 +135,21 @@ function IntakeNumberLink({ row }: { row: WeeklyReportDeliveryRow }) {
  * 수정은 **제자리에서** 비고만 바꾼다 — 고칠 값이 하나뿐이라 폼을 따로 띄우지
  * 않고, 그래서 이 상태(열림 · 입력값 · 오류 · 충돌)는 전부 줄 안에 산다. 위로
  * 올리면 상자 하나가 모든 줄의 편집 상태를 들고 있게 된다.
+ *
+ * ── `수정` 버튼 없이 비고 칸을 눌러 연다 ────────────────────────────────
+ * 이 화면에는 `비고` 칸이 둘이다 — 위 고객사 상세표의 칸(WeeklyReportNotesCell)과
+ * 이 표의 칸. 저 위가 먼저 `수정` 버튼을 떼고 칸을 눌러 열게 바뀌었는데, 한
+ * 화면에서 **하나만 눌러서 열리면 오히려 더 헷갈린다**는 이유로 이쪽도 같게
+ * 한다(사용자 결정). 그래서 안 고칠 때 보여 주는 글자 자체가 `<button>` 이고,
+ * 오른쪽 버튼 칸에는 `삭제` 하나만 남는다.
+ *
+ * 겉모습과 title 은 저 위 칸과 **같은 값을 나눠 쓴다**(weekly-report-note-button.ts).
+ * 두 곳에 각각 적으면 언젠가 한쪽만 고쳐지고, 그 순간 같은 화면의 두 비고가
+ * 다르게 보여 버튼을 없앤 뜻이 사라진다.
+ *
+ * 편집칸은 `<input type="text">` 그대로다 — 상세표 비고가 textarea 인 것은 그
+ * 값에 실제로 여러 줄이 들어 있어서고(그 파일 헤더), 이 표의 비고는 줄 추가
+ * 폼에서도 한 줄로 받는다. Enter 로 저장되는 것도 그대로다.
  */
 function DeliveryLine({
   row,
@@ -240,6 +256,30 @@ function DeliveryLine({
               </p>
             )}
           </div>
+        ) : canEdit ? (
+          // 고칠 수 있는 사람에게는 **글자 자체가 누를 수 있는 것**이다 —
+          // 보이는 글자는 아래 dash(row.note) 와 한 글자도 다르지 않다.
+          // 겉모습과 title 은 상세표의 비고 칸과 같은 값을 나눠 쓴다
+          // (weekly-report-note-button.ts — ⚠️ relative 가 왜 그 안에 들어
+          // 있는지도 거기 적혀 있다. 빼면 창 스크롤이 하나 더 생긴다).
+          //
+          // 글자에 onClick 만 얹지 않은 것은 그것이 키보드로 닿지 않고 낭독기가
+          // 누를 수 있는 것으로 읽지도 않기 때문이다. 진짜 <button> 이면
+          // Enter · Space · 포커스 이동이 전부 브라우저 기본으로 딸려 온다.
+          <button
+            type="button"
+            onClick={openEditor}
+            title={noteCellButtonTitle}
+            className={noteCellButtonClass}
+          >
+            {dash(row.note)}
+            {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다. aria-label 로
+                `비고 수정` 을 주면 그것이 자식 내용을 덮어써서 정작 비고 값이
+                낭독기에서 사라진다. 순서가 내용 먼저인 것은 표를 읽어 내려가는
+                사람에게 그 칸의 값이 먼저 와야 해서다 — 이 표의 인수번호 링크와
+                같은 방식이다(IntakeNumberLink). */}
+            <span className="sr-only"> 비고 수정</span>
+          </button>
         ) : (
           dash(row.note)
         )}
@@ -278,10 +318,10 @@ function DeliveryLine({
               )}
             </span>
           ) : (
+            // `수정` 은 여기 없다 — 비고 칸을 누르면 곧바로 편집으로 들어간다
+            // (위 비고 칸). 삭제는 되돌릴 수 없는 일이라 누를 것이 눈에 보여야
+            // 하므로 버튼으로 남는다.
             <span className="inline-flex gap-1">
-              <button type="button" className={smallButtonClass} onClick={openEditor}>
-                수정
-              </button>
               <button
                 type="button"
                 className={smallButtonClass}

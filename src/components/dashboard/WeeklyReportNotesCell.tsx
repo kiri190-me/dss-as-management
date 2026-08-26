@@ -6,6 +6,7 @@ import EditSectionActions, {
   editInputClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import { useSectionEditSubmit } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
+import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-button";
 
 /**
  * ============================================================================
@@ -82,8 +83,15 @@ import { useSectionEditSubmit } from "@/components/repair-cases/detail/edit/useS
  * 값이 먼저 와야 하므로 순서도 내용이 앞이다. 이름을 내용에만 맡기지 않는 것은
  * 비고가 비면 이름이 `-` 한 글자가 되어 무엇을 하는 버튼인지 알 길이 없어서다.
  *
- * ⚠️ 그 sr-only 를 담는 버튼에는 **relative 가 반드시 함께 붙는다.** 까닭은 그
- * 자리의 주석에 적어 두었다 — 떼면 표 전체가 창 스크롤을 하나 더 만든다.
+ * ⚠️ 그 sr-only 를 담는 버튼에는 **relative 가 반드시 함께 붙는다.** 까닭은
+ * weekly-report-note-button.ts 의 주석에 적어 두었다 — 떼면 표 전체가 창
+ * 스크롤을 하나 더 만든다.
+ *
+ * ── 겉모습은 이 파일에 적지 않는다 ─────────────────────────────────────
+ * 위 세 문단이 말한 겉모습(hover · 커서 · focus-visible · title)은 **맨 아래 납입
+ * 예정 건 표의 비고 칸도 똑같이** 쓴다 — 한 화면에 비고가 둘인데 하나만 눌러서
+ * 열리거나 서로 다르게 보이면 버튼을 없앤 뜻이 사라진다. 그래서 그 값은
+ * weekly-report-note-button.ts 한 곳에 두고 둘이 나눠 쓴다.
  * ============================================================================
  */
 export default function WeeklyReportNotesCell({
@@ -127,20 +135,13 @@ export default function WeeklyReportNotesCell({
           setValue(notes ?? "");
           setIsEditing(true);
         }}
-        // `수정` 글자가 사라진 자리를 메우는 단서 셋 중 하나다 — 지우지 말 것.
-        title="클릭하면 비고를 고칠 수 있습니다"
-        // -mx-1 px-1 은 짝이다: hover 배경만 글자 밖으로 조금 넓히고 글자가
-        // 서는 자리는 그대로 둔다(넓히기만 하면 이 칸의 글자만 오른쪽으로
-        // 밀려 표의 세로줄이 어긋난다).
-        //
-        // ⚠️ relative 를 떼지 말 것 — 아래 sr-only 는 position:absolute 다
-        // (Tailwind 의 sr-only 가 그렇다). 기준이 되는 조상이 없으면 그 span 이
-        // AppShell <main> 의 자르기를 빠져나가 문서 바닥에 자리를 주장하고,
-        // 세로 스크롤바가 둘로 보인다 — 이 저장소가 실제로 겪은 고장이다
-        // (WeeklyReportGoalsPanel 의 GoalPrefix 주석). 이 표는 250줄이 넘으니
-        // 같은 고장을 250배로 되살릴 수 있는 자리다. relative 는 좌표를 주지
-        // 않으면 아무것도 옮기지 않고 z-index:auto 라 쌓임 맥락도 만들지 않는다.
-        className="relative -mx-1 block w-full cursor-pointer rounded px-1 text-left whitespace-pre-line hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:outline-none dark:hover:bg-zinc-800 dark:focus-visible:ring-zinc-500"
+        // 겉모습과 title 은 이 파일에 적지 않는다 — 맨 아래 납입 예정 건 표의
+        // 비고도 **똑같이** 눌러서 열리므로, 두 곳에 각각 적으면 언젠가 한쪽만
+        // 고쳐진다. 값과 그 까닭(-mx-1 px-1 의 짝, w-full·text-left,
+        // whitespace-pre-line, 그리고 ⚠️ relative 를 빼면 안 되는 이유)은
+        // weekly-report-note-button.ts 한 곳에 있다.
+        title={noteCellButtonTitle}
+        className={noteCellButtonClass}
       >
         {displayText}
         {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다(파일 헤더). 순서가
