@@ -36,6 +36,12 @@
 .PARAMETER DryRun
     무엇을 할지 보여 주기만 하고 실제로는 아무것도 끄거나 만들지 않는다.
 
+.PARAMETER NoFooter
+    마지막 "정리 끝" 인사를 찍지 않는다. 바탕화면 '작업 종료'는 이 스크립트
+    다음에 로그인 포털 종료를 이어 부르는데, 그 사이에 "정리 끝"이 나오면
+    아직 끌 것이 남았는데도 거기서 다 끝난 줄 알게 된다. 마지막 인사는
+    ..\..\end-all.ps1이 한 번만 한다. 혼자 돌릴 때는 붙이지 않는다.
+
 .EXAMPLE
     .\scripts\end-work.ps1 -DryRun
     .\scripts\end-work.ps1
@@ -45,7 +51,8 @@
 param(
     [switch]$BackupOnly,
     [switch]$Force,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoFooter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -305,7 +312,9 @@ if ($running -ne $Container) {
     }
 }
 
-Write-Host ""
-Write-Host "════ 정리 끝 ════" -ForegroundColor White
-Write-Host "  다시 시작할 때: 바탕화면의 '작업 시작'" -ForegroundColor DarkGray
-Write-Host ""
+if (-not $NoFooter) {
+    Write-Host ""
+    Write-Host "════ 정리 끝 ════" -ForegroundColor White
+    Write-Host "  다시 시작할 때: 바탕화면의 '작업 시작'" -ForegroundColor DarkGray
+    Write-Host ""
+}
