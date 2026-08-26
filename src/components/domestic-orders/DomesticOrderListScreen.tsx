@@ -14,12 +14,16 @@ import {
   countDomesticOrdersWithoutOrderYear,
   filterDomesticOrdersBySearch,
   filterDomesticOrdersByYear,
-  formatDomesticOrderDueDateLines,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   isDomesticOrderSearchActive,
   resolveInitialDomesticOrderYear,
 } from "@/lib/domain/domestic-order-list";
+import {
+  DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
+  DUE_DATE_FROM_REPAIR_CASE_LABEL,
+  resolveDomesticOrderDueDateDisplay,
+} from "@/lib/domain/requested-due-date-link";
 import {
   customerRowColorClass,
   customerRowColorInteractiveClass,
@@ -188,6 +192,23 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * ⚠️ **`납품자`(deliveredBy)는 이름만 비슷한 다른 칸이다.** 그쪽은 지금도 눌러서
  * 고치는 열두 칸 중 하나다.
  *
+ * ── 납기요청일이 비어 있으면 수리 건의 고객 요청 납기일이 대신 보인다 ────
+ * 그 줄의 딸린 표에 날짜가 하나라도 있으면 **그것이 전부**이고, 하나도 없을
+ * 때만 연결된 수리 건의 `고객 요청 납기일` 을 빌려 온다. 고르는 규칙은 여기
+ * 없다 — domain/requested-due-date-link.ts 가 갖는다(이 파일의 '규칙은 여기
+ * 없다'와 같은 이유). 양쪽 다 없으면 지금처럼 "-"다.
+ *
+ * ⚠️ **빌려 온 날짜에는 `수리 건 요청일` 꼬리표가 붙는다.** 두 값은 뜻이 다르고
+ * (발주서에 적힌 날짜 / 고객이 접수 때 말한 날짜) 각자 자기 자리에 그대로
+ * 저장되므로, 표시 없이 날짜만 그리면 "이 줄에 적어 둔 값"으로 읽힌다. 그
+ * 판단이 고객사·형식 다섯 칸과 왜 다른지는 그 도메인 파일 헤더에 있다.
+ *
+ * ⚠️ **이 칸은 여전히 저장에 실리지 않는 계산된 값이다.** 빌려 온 날짜가 그 줄의
+ * 딸린 표에 들어가는 일은 없다 — 목록 한 줄(DomesticOrderListItem)에는 이
+ * 계산 결과를 담는 칸조차 없고, 그릴 때 그 자리에서 계산한다. 고장내역·납품일이
+ * 겪은 함정과 같은 종류라 같은 방식으로 막는다
+ * (domain/domestic-order-cell-edit.ts 헤더의 함정 ②).
+ *
  * ── 빈 값은 "-" ────────────────────────────────────────────────────────
  * 시트에는 아직 안 정해진 칸이 많다(견적은 냈는데 납품 전, 납품은 했는데 입금
  * 전). 빈 칸을 그냥 비워 두면 표가 어디까지가 한 줄인지 읽히지 않아서, 이
@@ -323,31 +344,58 @@ function paymentLabel(completed: boolean): string {
 }
 
 /**
+ * 빌려 온 값 옆에 붙는 작은 표시의 모양. `발주일 미정` 배지와 **일부러 다른
+ * 색**이다 — 저쪽은 "챙겨야 하는 줄"이라는 주의 표시(amber)이고, 이것은 값의
+ * 출처를 알리는 중립적인 꼬리표다. 같은 색으로 두면 빌려 온 날짜가 전부 경고로
+ * 읽힌다.
+ */
+const borrowedBadgeClass =
+  "ml-1.5 rounded border border-zinc-300 px-1 py-0.5 text-[11px] leading-none font-normal text-zinc-500 dark:border-zinc-600 dark:text-zinc-400";
+
+/**
  * 표의 `납기요청일` 칸. **칼럼은 여전히 22개다** — 날짜가 여럿이 될 수 있게
  * 됐다고 칸을 늘리지 않는다(파일 헤더의 '표 22칼럼'). 늘어나는 것은 옆이 아니라
  * 아래, 그 줄의 높이뿐이다.
  *
- * **한 줄에 날짜 하나씩 전부 적는다.** 무엇을 어떤 글자로 적을지는 도메인 함수가
- * 정하고(formatDomesticOrderDueDateLines, 접지 않는 이유도 거기 적혀 있다), 여기는
- * 그 줄들을 <div> 로 쌓기만 한다 — 줄바꿈 문자와 CSS 에 맡기지 않는 이유는, 그러면
- * 무엇이 한 줄인지가 이 칸의 whitespace 설정(줄 전체에 걸린 whitespace-nowrap)에
- * 달리기 때문이다.
+ * **한 줄에 날짜 하나씩 전부 적는다.** 무엇을 어떤 글자로 적을지, 그리고 그
+ * 날짜가 **이 줄의 것인지 빌려 온 것인지**는 도메인 함수가 정하고
+ * (resolveDomesticOrderDueDateDisplay), 여기는 그 줄들을 <div> 로 쌓기만 한다 —
+ * 줄바꿈 문자와 CSS 에 맡기지 않는 이유는, 그러면 무엇이 한 줄인지가 이 칸의
+ * whitespace 설정(줄 전체에 걸린 whitespace-nowrap)에 달리기 때문이다.
+ *
+ * ── ⚠️ 빌려 온 날짜에는 표시가 붙는다 ───────────────────────────────────
+ * 이 줄에 납기요청일이 하나도 없으면 연결된 수리 건의 고객 요청 납기일이 대신
+ * 보인다. 그냥 날짜만 그리면 "이 줄에 내가 적어 둔 값"으로 읽히고, 나중에 수리
+ * 건 쪽이 바뀌면 영문 모를 변화가 된다 — 그래서 `수리 건 요청일` 꼬리표를 함께
+ * 그린다. 왜 이 칸만 표시가 붙고 고객사·형식 다섯 칸은 안 붙는지는 도메인 파일
+ * 헤더에 적혀 있다(같은 사실의 두 이름이 아니라 뜻이 다른 두 날짜다).
+ *
+ * 빌려 온 값은 언제나 **한 줄**이다(수리 건의 그 칸은 날짜 하나다). 그래서
+ * 꼬리표가 두 번 그려질 일이 없다.
  *
  * title 과 sr-only 보조 한 줄은 두지 않는다. 접힌 것이 없으니 되찾을 것도 없고,
  * 보이는 글자를 sr-only 로 한 번 더 적으면 화면 낭독기에는 같은 날짜가 두 번
- * 읽힌다.
+ * 읽힌다. 꼬리표에만 title 이 붙는다 — 그 표시가 무슨 뜻인지는 보이는 글자만으로
+ * 다 말할 수 없다.
  *
- * 날짜가 없으면 다른 칸과 똑같이 "-"다.
+ * 날짜가 양쪽 다 없으면 다른 칸과 똑같이 "-"다.
  */
 function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
-  const lines = formatDomesticOrderDueDateLines(row.dueDates);
-  if (lines.length === 0) return <>-</>;
+  const display = resolveDomesticOrderDueDateDisplay(row);
+  if (display.lines.length === 0) return <>-</>;
   return (
     <>
-      {lines.map((line, index) => (
+      {display.lines.map((line, index) => (
         // 같은 날짜에 같은 메모가 두 번 적힐 수 있어(사람이 적는 값이다) 글자를
         // key 로 쓰지 않는다. 이 목록은 다시 정렬되지 않으므로 차례가 곧 신원이다.
-        <div key={index}>{line}</div>
+        <div key={index}>
+          {line}
+          {display.borrowed && (
+            <span className={borrowedBadgeClass} title={DOMESTIC_ORDER_DUE_DATE_LINK_NOTE}>
+              {DUE_DATE_FROM_REPAIR_CASE_LABEL}
+            </span>
+          )}
+        </div>
       ))}
     </>
   );
@@ -491,12 +539,24 @@ const CARD_FIELD_GROUPS: {
         of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
         edit: { field: "orderIssuedDate", wrapping: "whitespace-nowrap" },
       },
-      // 표와 같은 규칙이다 — 한 줄에 날짜 하나씩 전부. 좁은 화면이라고 접으면
-      // 같은 자료가 화면마다 다른 값으로 읽힌다(파일 헤더).
+      // 표와 같은 규칙이다 — 한 줄에 날짜 하나씩 전부, 어느 쪽 날짜인지도 같은
+      // 도메인 함수가 정한다. 좁은 화면이라고 접거나 표시를 빼면 같은 자료가
+      // 화면마다 다른 값으로 읽힌다(파일 헤더).
+      //
+      // ⚠️ 표는 이 자리에 배지를 그리고 카드는 **글자를 한 줄 더** 적는다 —
+      // 발주발행일의 `발주일 미정` 과 똑같은 나눔이다(위 그 칸의 주석). 카드에는
+      // 원래 배지가 없고, 여기 새로 들이면 눌러서 고칠 수 없는 이 칸만 옆 칸들과
+      // 다른 생김새가 된다. 말하는 내용은 양쪽이 같은 상수 하나에서 나온다.
       {
         label: "납기요청일",
-        of: (row) => dash(formatDomesticOrderDueDateLines(row.dueDates).join("\n")),
+        of: (row) => {
+          const display = resolveDomesticOrderDueDateDisplay(row);
+          if (display.lines.length === 0) return "-";
+          const body = display.lines.join("\n");
+          return display.borrowed ? `${body}\n${DUE_DATE_FROM_REPAIR_CASE_LABEL}` : body;
+        },
         multiline: true,
+        hint: DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
       },
     ],
   },
@@ -1074,7 +1134,14 @@ export default function DomesticOrderListScreen({
                   <th className="px-3 py-2">발주서번호</th>
                   <th className="px-3 py-2">PJT</th>
                   <th className="px-3 py-2">발주발행일</th>
-                  <th className="px-3 py-2">납기요청일</th>
+                  {/* 이 칸에도 머리말 설명이 붙는다 — 비어 있는 줄에는 연결된
+                      수리 건의 고객 요청 납기일이 대신 보이고, 그 값에는 꼬리표가
+                      붙는다는 사실을 칸에 닿았을 때 알 수 있어야 한다. 카드
+                      이름표도 **같은 글자**를 title 로 받는다(CARD_FIELD_GROUPS
+                      의 hint) — 납품일 칸이 쓰는 것과 같은 나눔이다. */}
+                  <th className="px-3 py-2" title={DOMESTIC_ORDER_DUE_DATE_LINK_NOTE}>
+                    납기요청일
+                  </th>
                   <th className="px-3 py-2">인수번호</th>
                   <th className="px-3 py-2">형식</th>
                   <th className="px-3 py-2">L/N</th>

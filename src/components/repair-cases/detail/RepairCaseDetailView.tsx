@@ -53,6 +53,7 @@ export default function RepairCaseDetailView({
   referenceData,
   partRequestData,
   derivedServiceSummary,
+  domesticOrderDueDates,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -67,6 +68,18 @@ export default function RepairCaseDetailView({
   } | null;
   /** record_kind 분류 체크포인트 — DATABASE 소스 건에만 존재, see [id]/page.tsx. */
   derivedServiceSummary: DerivedServiceSummary | null;
+  /**
+   * 이 건에 연결된 **내자 정리 줄들의 납기요청일 전부**(지워지지 않은 줄만).
+   * 인수 정보의 `고객 요청 납기일`이 비어 있을 때 대신 그릴 날짜의 재료이고,
+   * 없는 것이 정상이라 빈 배열이 기본이다(MOCK/LOCAL_DEMO 건은 언제나 빈
+   * 배열 — domestic_orders 자체가 DATABASE 쪽 표다).
+   *
+   * ⚠️ **여기서 하나로 접지 않는다.** 여럿 중 무엇을 보여 줄지는
+   * domain/requested-due-date-link.ts가 주간보고와 같은 함수로 정한다 — 화면이
+   * 미리 고르면 그 규칙이 두 벌이 되고, 그날 두 화면이 같은 자료를 다른 날짜로
+   * 보여 준다.
+   */
+  domesticOrderDueDates: readonly string[];
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -118,6 +131,7 @@ export default function RepairCaseDetailView({
           editableFields={intakeFields}
           editingSection={editingSection}
           referenceData={referenceData}
+          domesticOrderDueDates={domesticOrderDueDates}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />

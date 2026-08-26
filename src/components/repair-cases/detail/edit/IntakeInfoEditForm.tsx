@@ -5,16 +5,33 @@ import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-
 import { BILLING_TYPE_CODES, billingTypeLabels, PRIORITY_CODES, priorityLabels, type BillingType, type Priority } from "@/lib/domain/types";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
 import { useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass, editLabelClass } from "./EditSectionActions";
 
 const MAX_SUGGESTIONS = 8;
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+function ReadOnlyField({
+  label,
+  value,
+  borrowedLabel,
+}: {
+  label: string;
+  value: string;
+  /**
+   * 그 값이 이 건에 적힌 것이 아니라 **빌려 온 것**일 때만 적는다. 지금 이것을
+   * 쓰는 칸은 `고객 요청 납기일` 하나다(아래 그 칸 주석) — 보기 모드가 붙이는
+   * 표시와 같은 글자라야 수정 버튼을 눌렀다고 값의 출처가 달라 보이지 않는다.
+   */
+  borrowedLabel?: string;
+}) {
   return (
     <div>
       <dt className={editLabelClass}>{label}</dt>
       <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value}</dd>
+      {borrowedLabel && (
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{borrowedLabel}</p>
+      )}
     </div>
   );
 }
@@ -56,11 +73,26 @@ export default function IntakeInfoEditForm({
   resolved,
   editableFields,
   referenceData,
+  borrowedRequestedDueDate,
   onDone,
 }: {
   resolved: EffectiveRepairCase;
   editableFields: readonly string[];
   referenceData: IntakeReferenceData | null;
+  /**
+   * 보기 모드의 `고객 요청 납기일`에 **빌려 온 날짜**가 보이고 있을 때 그
+   * 날짜다. 이 건에 값이 적혀 있으면 null 이다(고르는 판단은 부모가 이미
+   * 끝냈다 — IntakeInfoSection).
+   *
+   * ⚠️ **이 값은 저장되지 않는다. placeholder 도 아니고 초기값은 더더욱
+   * 아니다.** 아래 입력칸은 언제나 이 건에 적힌 값(resolved)으로만 열리고, 이
+   * 값은 그 아래 안내 한 줄에만 쓰인다 — 입력칸에 채우면 아무것도 고치지 않고
+   * 저장만 눌러도 내자 쪽 날짜가 이 건 자기 값으로 굳고, 그 뒤로는 "일부러
+   * 같게 적었다"와 "그냥 안 건드렸다"를 구분할 수 없다(내자 정리 `줄 수정`
+   * 폼이 같은 함정을 같은 방식으로 피한다 — DomesticOrderEditForm 의
+   * 'placeholder 다. value 가 아니다').
+   */
+  borrowedRequestedDueDate: string | null;
   onDone: () => void;
 }) {
   const canEdit = (field: string) => editableFields.includes(field);
@@ -333,6 +365,17 @@ export default function IntakeInfoEditForm({
           <ReadOnlyField label="End-User" value={resolved.endUserName ?? "-"} />
         )}
 
+        {/* ⚠️ 이 칸만 보기 모드에서 **빌려 온 날짜**가 보일 수 있다 — 이 건에
+            값이 없을 때 연결된 내자 정리의 납기요청일 중 가장 이른 하루가
+            대신 보인다(domain/requested-due-date-link.ts). 그래서 편집칸이
+            비어 있는 채로 열리는 순간이 생기고, 아무 말이 없으면 "방금 값이
+            사라졌다"로 읽힌다. 그것을 설명하는 것이 입력칸 아래 한 줄이다.
+
+            흐린 글씨(placeholder)로 두지 않는 것은 <input type="date"> 가
+            placeholder 를 그리지 않기 때문이기도 하지만, 무엇보다 그 자리에
+            날짜를 넣으면 저장 한 번에 그 값이 이 건에 굳기 때문이다(위 prop
+            주석). 내자 정리 `줄 수정` 폼의 납기요청일 묶음이 같은 이유로 같은
+            모양을 쓴다. */}
         {canEdit("customerRequestedDueDate") ? (
           <div>
             <label className={editLabelClass}>고객 요청 납기일</label>
@@ -346,9 +389,23 @@ export default function IntakeInfoEditForm({
             {fieldErrors.customerRequestedDueDate && (
               <p className={editErrorClass}>{fieldErrors.customerRequestedDueDate}</p>
             )}
+            {borrowedRequestedDueDate !== null && (
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                {DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}: {borrowedRequestedDueDate}
+              </p>
+            )}
           </div>
         ) : (
-          <ReadOnlyField label="고객 요청 납기일" value={resolved.customerRequestedDueDate ?? "-"} />
+          <ReadOnlyField
+            label="고객 요청 납기일"
+            // 보기 모드와 **같은 날짜**를 보여 준다 — 수정 버튼을 눌렀다고 이
+            // 칸만 "-"로 비어 보이면, 고칠 수 없는 사람에게는 값이 사라진
+            // 것으로 읽힌다.
+            value={resolved.customerRequestedDueDate ?? borrowedRequestedDueDate ?? "-"}
+            borrowedLabel={
+              borrowedRequestedDueDate !== null ? DUE_DATE_FROM_DOMESTIC_ORDER_LABEL : undefined
+            }
+          />
         )}
 
         {canEdit("internalTargetInspectionCompletionDate") ? (

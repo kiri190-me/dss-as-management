@@ -10,6 +10,7 @@ import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references"
 import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability } from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
 import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
+import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 
@@ -85,7 +86,21 @@ export default async function RepairCaseDetailPage({
   // repair_case_work_records.record_kind에서 결정론적으로 도출한다
   // (record_kind 분류 체크포인트). MOCK/LOCAL_DEMO는 이 테이블 자체가
   // 없으므로 조회하지 않는다.
-  const derivedServiceSummary = resolved.source === "DATABASE" ? await getDerivedServiceSummaryForCase(resolved.id) : null;
+  //
+  // 내자 정리 납기요청일 — 인수 정보의 `고객 요청 납기일`이 비어 있을 때 대신
+  // 그릴 날짜의 재료다(domain/requested-due-date-link.ts). domestic_orders는
+  // DATABASE 소스에만 존재하므로 위 요약과 같은 조건으로 가져오고, **왕복을
+  // 하나 더 만들지 않도록 Promise.all로 나란히 태운다** — 둘 다 이 건 하나만
+  // 보는 작은 인덱스 조회다.
+  //
+  // 여기서 "가장 이른 하루"로 접지 않고 날짜를 그대로 넘기는 이유: 고르는
+  // 규칙은 주간보고 `입고 요청일`과 **같은 도메인 함수**가 가져야 하고
+  // (pickEarliestDueDate), 그래야 두 화면이 같은 자료를 다른 날짜로 보여 줄 수
+  // 없다.
+  const [derivedServiceSummary, domesticOrderDueDates] = await Promise.all([
+    resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
+    resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
+  ]);
 
   return (
     <RepairCaseDetailView
@@ -95,6 +110,7 @@ export default async function RepairCaseDetailPage({
       referenceData={referenceData}
       partRequestData={partRequestData}
       derivedServiceSummary={derivedServiceSummary}
+      domesticOrderDueDates={domesticOrderDueDates}
     />
   );
 }

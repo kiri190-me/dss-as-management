@@ -1,6 +1,6 @@
 import "server-only";
 
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -68,6 +68,14 @@ import {
  * 그 발주 줄이 세 번 나오고, 목록의 건수도 금액 합계도 전부 어긋난다. 그래서
  * 보이는 줄의 id 를 모아 **한 번 더 읽고**(loadDueDatesByOrderId) 줄마다
  * 묶는다. 줄마다 읽는 N+1 이 아니다.
+ *
+ * ── 납기 요청일은 수리 건 상세정보에서도 읽는다 ─────────────────────────
+ * 이 파일에 조회가 하나 더 있다(listDomesticOrderDueDatesForRepairCase). 내자
+ * 정리 화면이 아니라 **수리 건 상세정보**가 부르는 조회인데, 여기 두는 이유는
+ * 읽는 표가 내자 정리의 것이기 때문이다 — 그 표를 어떤 조건으로 읽어야 하는지
+ * (지운 발주 줄은 세지 않는다)를 이 파일이 한 곳에서 갖는다. 저쪽 화면의
+ * 조회 파일에 같은 SQL 을 한 벌 더 적으면, 언젠가 한쪽만 고쳐져 같은 자료가
+ * 화면마다 다른 날짜로 보인다.
  *
  * ── PII ────────────────────────────────────────────────────────────────
  * progress_note · history_note · etc_note · delivered_by 는 사람이 자유롭게
@@ -151,13 +159,20 @@ export type DomesticOrderJoinRow = {
   repairCaseSerialNumber: string | null;
   repairCaseReportedSymptom: string | null;
   /**
-   * 연결된 수리 건의 고객 요청 납기일. **위 다섯과 성질이 다르다** — 이 값은
-   * 어디에도 접히지 않는다(아래 매퍼가 resolve 하지 않는다).
+   * 연결된 수리 건의 고객 요청 납기일.
    *
-   * 내자의 납기 요청일(domestic_order_due_dates)은 **발주서에 적힌 날짜**라서
-   * 수리 건의 고객 요청 납기일과 같아야 할 이유가 없다. 그래서 목록의 값을
-   * 대신하지 않고, 폼이 "연결된 건에는 이 날짜가 적혀 있다"를 힌트로 보여 주는
-   * 데에만 쓴다 — 날짜가 여럿이 될 수 있게 된 뒤에도 이 관계는 그대로다.
+   * ⚠️ **아래 매퍼가 이 값을 접지 않는다.** 위 다섯과 달리 화면용 칸을 따로
+   * 만들어 두지 않는다는 뜻이고, 그것이 일부러다 — 목록의 `납기요청일` 칸은
+   * **딸린 표(dueDates)와 이 값 둘을 함께 보고** 그릴 때 정해지므로
+   * (domain/requested-due-date-link.ts 의 resolveDomesticOrderDueDateDisplay),
+   * 여기서 미리 하나로 접으면 화면은 그 날짜가 어느 쪽에서 왔는지 영영 알 수
+   * 없고 "빌려 온 값"이라는 표시를 붙일 수 없게 된다.
+   *
+   * 내자의 납기 요청일(domestic_order_due_dates)은 **발주서에 적힌 날짜**이고
+   * 이쪽은 **고객이 접수 때 말한 날짜**다 — 뜻이 다른 두 값이라, 이 줄에 날짜가
+   * 하나라도 적혀 있으면 그쪽이 이긴다. 빌려 오는 것은 그 표가 통째로 비어
+   * 있을 때뿐이다. 폼이 흐린 글씨 대신 안내 한 줄로 이 값을 보여 주는 것도
+   * 같은 이유다(DomesticOrderEditForm).
    */
   repairCaseCustomerRequestedDueDate: string | null;
   /**
@@ -360,7 +375,8 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       repairCaseLotNumber: products.lotNumber,
       repairCaseSerialNumber: products.serialNumber,
       repairCaseReportedSymptom: repairCases.reportedSymptom,
-      // 접히지 않는 여섯 번째 값. 폼의 흐린 글씨용이다(위 타입 주석).
+      // 접히지 않는 여섯 번째 값 — 목록의 `납기요청일` 칸이 딸린 표와 **함께**
+      // 보고 정한다(위 타입 주석). 폼의 안내 한 줄도 이 값을 쓴다.
       repairCaseCustomerRequestedDueDate: repairCases.customerRequestedDueDate,
       // 화면의 `납품일` 이 되는 값. 아래 delivered_date 와 **짝이 아니라
       // 대신**이다(파일 헤더의 '납품일은 수리 건의 실제 출하일 하나뿐이다').
@@ -455,6 +471,46 @@ async function loadDueDatesByOrderId(
     else grouped.set(row.domesticOrderId, [item]);
   }
   return grouped;
+}
+
+/**
+ * 그 수리 건에 붙어 있는 **내자 납기요청일 전부**. 없으면 빈 배열이다.
+ *
+ * 수리 건 상세정보의 `고객 요청 납기일` 이 비어 있을 때 대신 그릴 날짜를
+ * 만드는 재료다. **고르는 일은 여기서 하지 않는다** — 여럿 중 하나를 고르는
+ * 규칙은 domain/requested-due-date-link.ts 의
+ * resolveRepairCaseRequestedDueDate 가 갖고, 그 함수는 다시 주간보고와 같은
+ * pickEarliestDueDate 를 부른다. SQL 의 min() 으로 접으면 "지난 날짜라도 가장
+ * 이르면 그것"이라는 승인된 결정을 시험할 자리가 사라지고, 주간보고
+ * `입고 요청일` 과 조용히 어긋날 수 있다(queries/weekly-report-deliveries.ts 의
+ * 같은 판단).
+ *
+ * ── 줄이 복제되지만 여기서는 그래도 된다 ────────────────────────────────
+ * 한 수리 건에 내자 줄이 여럿이고(분할 발주 — repair_case_id 에 유일 제약이
+ * 없다) 줄 하나에 날짜가 또 여럿이다(분할 납품). 이 조인은 그만큼 줄을
+ * 복제하지만, **세는 질의가 아니라 날짜를 모으는 질의**라 복제된 줄은 같은
+ * 묶음에 들어갈 뿐이다. 복제가 문제가 되는 것은 목록 쪽이고, 그래서 목록은
+ * 조인 대신 따로 읽는다(위 loadDueDatesByOrderId).
+ *
+ * `is_deleted = false` 인 발주 줄의 날짜만 센다 — 화면에서 지운 줄에 붙어
+ * 있던 날짜가 수리 건의 납기일을 만들어 내면, 어디에도 안 보이는 줄이 다른
+ * 화면의 값을 정하는 셈이 된다(주간보고와 같은 규칙).
+ *
+ * 차례는 정하지 않는다. 부르는 쪽이 하는 일은 가장 이른 하루를 고르는 것뿐이고,
+ * 그 판단은 받은 차례와 상관이 없다(pickEarliestDueDate 는 문자 그대로 min 이다).
+ */
+export async function listDomesticOrderDueDatesForRepairCase(
+  repairCaseId: string
+): Promise<string[]> {
+  const rows = await db
+    .select({ dueDate: domesticOrderDueDates.dueDate })
+    .from(domesticOrderDueDates)
+    .innerJoin(domesticOrders, eq(domesticOrderDueDates.domesticOrderId, domesticOrders.id))
+    .where(
+      and(eq(domesticOrders.isDeleted, false), eq(domesticOrders.repairCaseId, repairCaseId))
+    );
+
+  return rows.map((row) => row.dueDate);
 }
 
 /** 수정 폼의 '수리 건 연결' 목록에 들어갈 한 줄. */
