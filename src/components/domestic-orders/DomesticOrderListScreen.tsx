@@ -24,8 +24,10 @@ import {
   customerRowColorClass,
   customerRowColorInteractiveClass,
 } from "@/lib/domain/customer-row-color";
+import type { DomesticOrderInlineEditableField } from "@/lib/domain/domestic-order-cell-edit";
 import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
 import DomesticOrderEditForm from "./DomesticOrderEditForm";
+import DomesticOrderTextCell from "./DomesticOrderTextCell";
 
 /**
  * ============================================================================
@@ -79,6 +81,26 @@ import DomesticOrderEditForm from "./DomesticOrderEditForm";
  * 포커스 가능한 조작을 줄 유일한 자리였기 때문이다. 인수번호를 링크로 바꾸면
  * 그 자리가 사라지므로, 키보드로 폼을 여는 길이 없어지지 않도록 완료 버튼 옆에
  * 나란히 둔다. 칼럼은 여전히 22개다.
+ *
+ * ── 한 줄짜리 글자 칸 다섯은 칸을 눌러 그 자리에서 고친다 ────────────────
+ * 발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금. 이 다섯은 `줄 수정` 폼을
+ * 열지 않고 **그 칸을 눌러 바로** 고친다(DomesticOrderTextCell) — 번호 하나를
+ * 고치려고 칸 22개짜리 폼을 여는 것은 실제로 가장 자주 하는 일에 가장 긴 길을
+ * 내주는 셈이다. 주간보고의 비고 칸이 같은 방식이고, 겉모습도 셋이 나눠 쓴다
+ * (components/common/inline-edit-cell-button.ts).
+ *
+ * **다섯뿐인 것은 일부러다.** 날짜·금액·체크·고르기 칸은 다루는 방식이 제각각이라
+ * (달력 입력, 쉼표가 섞인 숫자, 체크상자, UUID 를 고르는 드롭다운) 같은 방식으로
+ * 묶을 수 없다. 그 칸들은 지금도 `줄 수정` 폼에서 고친다 — **`행 추가` 와
+ * `줄 수정` 은 그대로 남고**, 줄의 나머지를 누르면 폼이 열리는 동작도 그대로다.
+ *
+ * ⚠️ 이 화면의 저장은 **보낸 칸만 고치지 않는다.** 칸 하나를 고쳐도 그 줄의 값
+ * 전체를 실어 보내야 하고, 그러지 않으면 나머지 칸이 지워진다. 그 규칙과 까닭은
+ * domain/domestic-order-cell-edit.ts 와 DomesticOrderTextCell 헤더에 있다.
+ *
+ * 표와 카드가 **같은 다섯 칸**을 고칠 수 있다. 한쪽만 되면 같은 자료가 화면
+ * 크기에 따라 다르게 다뤄진다 — 카드 쪽은 아래 CARD_FIELD_GROUPS 의 editField 가
+ * 그 짝을 맞춘다.
  *
  * ── 고객사마다 줄 배경색, 완료 회색이 그 위에 있다 ──────────────────────
  * 고객사 관리에서 정해 둔 색(customers.row_color)으로 그 고객사의 줄과 묶음
@@ -326,13 +348,27 @@ const CARD_FIELD_GROUPS: {
      * 다르게 군다.
      */
     multiline?: boolean;
+    /**
+     * 칸을 눌러 그 자리에서 고칠 수 있는 칸인가. **표에서 고칠 수 있는 다섯 칸과
+     * 정확히 같아야 한다** — 좁은 화면으로 옮겼다고 고칠 수 있던 칸이 사라지면
+     * 같은 자료가 화면 크기에 따라 다르게 다뤄진다(파일 헤더).
+     *
+     * 켠 칸의 `<dd>` 는 글자 대신 DomesticOrderTextCell 을 그린다. 안 고칠 때
+     * 보이는 글자는 위 `of` 가 그대로 정하므로, 켜고 끄는 것으로 값의 생김새가
+     * 달라지지는 않는다.
+     */
+    editField?: DomesticOrderInlineEditableField;
   }[];
 }[] = [
   {
     label: "발주",
     fields: [
-      { label: "발주서번호", of: (row) => dash(row.purchaseOrderNumber) },
-      { label: "PJT", of: (row) => dash(row.projectName) },
+      {
+        label: "발주서번호",
+        of: (row) => dash(row.purchaseOrderNumber),
+        editField: "purchaseOrderNumber",
+      },
+      { label: "PJT", of: (row) => dash(row.projectName), editField: "projectName" },
       // 표와 같은 말을 쓴다 — 카드로 보고 있어도 이 줄이 왜 늘 보이는지 알 수
       // 있어야 한다.
       {
@@ -361,12 +397,12 @@ const CARD_FIELD_GROUPS: {
     label: "견적 · 납품",
     fields: [
       { label: "견적발행일", of: (row) => dash(row.quoteIssuedDate) },
-      { label: "견적서번호", of: (row) => dash(row.quoteNumber) },
+      { label: "견적서번호", of: (row) => dash(row.quoteNumber), editField: "quoteNumber" },
       // 사람이 <textarea> 에 줄바꿈을 섞어 적는 칸이다 — 표와 마찬가지로
       // 적은 그대로 여러 줄로 그린다(표 쪽은 noteCellContentClass).
       { label: "현황", of: (row) => dash(row.progressNote), multiline: true },
       { label: "납품일", of: (row) => dash(row.deliveredDate) },
-      { label: "납품자", of: (row) => dash(row.deliveredBy) },
+      { label: "납품자", of: (row) => dash(row.deliveredBy), editField: "deliveredBy" },
     ],
   },
   {
@@ -375,7 +411,11 @@ const CARD_FIELD_GROUPS: {
       { label: "세금계산서발행일", of: (row) => dash(row.taxInvoiceDate) },
       { label: "금액(VAT별도)", of: (row) => formatAmount(row.amountExcludingVat) },
       { label: "입금완료 여부", of: (row) => paymentLabel(row.paymentCompleted) },
-      { label: "일본 송금", of: (row) => dash(row.japanRemittanceNote) },
+      {
+        label: "일본 송금",
+        of: (row) => dash(row.japanRemittanceNote),
+        editField: "japanRemittanceNote",
+      },
     ],
   },
   {
@@ -935,8 +975,33 @@ export default function DomesticOrderListScreen({
                           </span>
                         </td>
                         <td className="px-3 py-2">{dash(row.customerName)}</td>
-                        <td className="px-3 py-2">{dash(row.purchaseOrderNumber)}</td>
-                        <td className="px-3 py-2">{dash(row.projectName)}</td>
+                        {/* 여기부터 다섯 칸(발주서번호 · PJT · 견적서번호 ·
+                            납품자 · 일본 송금)은 **칸을 눌러 그 자리에서**
+                            고친다(파일 헤더). 못 고치는 사람에게는 누를 것이
+                            아예 없어야 하므로, 버튼을 그려 놓고 막지 않고
+                            글자만 그린다 — 보이는 글자는 양쪽이 똑같다. */}
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="purchaseOrderNumber"
+                              displayText={dash(row.purchaseOrderNumber)}
+                            />
+                          ) : (
+                            dash(row.purchaseOrderNumber)
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="projectName"
+                              displayText={dash(row.projectName)}
+                            />
+                          ) : (
+                            dash(row.projectName)
+                          )}
+                        </td>
                         {/* 발주일이 없는 줄은 "-" 대신 이유를 적는다 — 이 줄이
                             년도와 상관없이 늘 보이는 근거가 이 칸이다. */}
                         <td className="px-3 py-2 tabular-nums">
@@ -964,20 +1029,50 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2">{dash(row.serialNumber)}</td>
                         <td className="px-3 py-2">{dash(row.reportedSymptom)}</td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.quoteIssuedDate)}</td>
-                        <td className="px-3 py-2">{dash(row.quoteNumber)}</td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="quoteNumber"
+                              displayText={dash(row.quoteNumber)}
+                            />
+                          ) : (
+                            dash(row.quoteNumber)
+                          )}
+                        </td>
                         {/* 사람이 줄바꿈을 섞어 적는 칸 — 적은 그대로 여러 줄로
                             그린다(noteCellContentClass). */}
                         <td className="px-3 py-2">
                           <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
                         </td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.deliveredDate)}</td>
-                        <td className="px-3 py-2">{dash(row.deliveredBy)}</td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="deliveredBy"
+                              displayText={dash(row.deliveredBy)}
+                            />
+                          ) : (
+                            dash(row.deliveredBy)
+                          )}
+                        </td>
                         <td className="px-3 py-2 tabular-nums">{dash(row.taxInvoiceDate)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {formatAmount(row.amountExcludingVat)}
                         </td>
                         <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
-                        <td className="px-3 py-2">{dash(row.japanRemittanceNote)}</td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <DomesticOrderTextCell
+                              row={row}
+                              field="japanRemittanceNote"
+                              displayText={dash(row.japanRemittanceNote)}
+                            />
+                          ) : (
+                            dash(row.japanRemittanceNote)
+                          )}
+                        </td>
                         {/* 현황과 같은 칸이다 — 사람이 친 줄바꿈만 살리고,
                             폭이 모자라도 접지 않는다. */}
                         <td className="px-3 py-2">
@@ -1073,7 +1168,19 @@ export default function DomesticOrderListScreen({
                                           : "break-words"
                                       }
                                     >
-                                      {field.of(row)}
+                                      {/* 표에서 눌러 고치는 다섯 칸은 카드에서도
+                                          똑같이 눌러 고친다(파일 헤더). 못 고치는
+                                          사람에게는 표와 마찬가지로 누를 것이
+                                          없고, 보이는 글자는 양쪽이 똑같다. */}
+                                      {canEdit && field.editField ? (
+                                        <DomesticOrderTextCell
+                                          row={row}
+                                          field={field.editField}
+                                          displayText={field.of(row)}
+                                        />
+                                      ) : (
+                                        field.of(row)
+                                      )}
                                     </dd>
                                   </div>
                                 ))}

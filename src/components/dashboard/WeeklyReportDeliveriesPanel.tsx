@@ -4,7 +4,10 @@ import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import WeeklyReportDeliveryDeleteDialog from "./WeeklyReportDeliveryDeleteDialog";
-import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-button";
+import {
+  inlineEditCellButtonClass,
+  inlineEditCellButtonTitle,
+} from "@/components/common/inline-edit-cell-button";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import {
@@ -143,7 +146,7 @@ function IntakeNumberLink({ row }: { row: WeeklyReportDeliveryRow }) {
  * 한다(사용자 결정). 그래서 안 고칠 때 보여 주는 글자 자체가 `<button>` 이고,
  * 오른쪽 버튼 칸에는 `삭제` 하나만 남는다.
  *
- * 겉모습과 title 은 저 위 칸과 **같은 값을 나눠 쓴다**(weekly-report-note-button.ts).
+ * 겉모습과 title 은 저 위 칸과 **같은 값을 나눠 쓴다**(inline-edit-cell-button.ts).
  * 두 곳에 각각 적으면 언젠가 한쪽만 고쳐지고, 그 순간 같은 화면의 두 비고가
  * 다르게 보여 버튼을 없앤 뜻이 사라진다.
  *
@@ -260,8 +263,14 @@ function DeliveryLine({
           // 고칠 수 있는 사람에게는 **글자 자체가 누를 수 있는 것**이다 —
           // 보이는 글자는 아래 dash(row.note) 와 한 글자도 다르지 않다.
           // 겉모습과 title 은 상세표의 비고 칸과 같은 값을 나눠 쓴다
-          // (weekly-report-note-button.ts — ⚠️ relative 가 왜 그 안에 들어
+          // (inline-edit-cell-button.ts — ⚠️ relative 가 왜 그 안에 들어
           // 있는지도 거기 적혀 있다. 빼면 창 스크롤이 하나 더 생긴다).
+          //
+          // 줄바꿈 처리만은 **여기서 고른다.** 이 비고도 여러 줄이 들어가는
+          // 값이라 위 `<td>` 와 같은 pre-line 이다 — 공용 값이 정해 주던 것을
+          // 그대로 옮겨 적은 것이고, 보이는 결과는 달라지지 않는다. 같은
+          // 겉모습을 나눠 쓰는 내자 정리 다섯 칸은 한 줄짜리 값이라 nowrap 을
+          // 고른다(그 파일 주석).
           //
           // 글자에 onClick 만 얹지 않은 것은 그것이 키보드로 닿지 않고 낭독기가
           // 누를 수 있는 것으로 읽지도 않기 때문이다. 진짜 <button> 이면
@@ -269,8 +278,8 @@ function DeliveryLine({
           <button
             type="button"
             onClick={openEditor}
-            title={noteCellButtonTitle}
-            className={noteCellButtonClass}
+            title={inlineEditCellButtonTitle("비고")}
+            className={inlineEditCellButtonClass("whitespace-pre-line")}
           >
             {dash(row.note)}
             {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다. aria-label 로

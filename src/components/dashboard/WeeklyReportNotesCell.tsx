@@ -6,7 +6,10 @@ import EditSectionActions, {
   editInputClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import { useSectionEditSubmit } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
-import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-button";
+import {
+  inlineEditCellButtonClass,
+  inlineEditCellButtonTitle,
+} from "@/components/common/inline-edit-cell-button";
 
 /**
  * ============================================================================
@@ -65,7 +68,9 @@ import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-b
  * 글자에만 걸면 누를 곳이 점 하나가 되기 때문이다. 칸의 폭은 채우되 글자는 표의
  * 다른 칸과 같은 자리에서 시작해야 한다. whitespace-pre-line 을 버튼에 다시 적는
  * 것은 `<td>` 의 그것이 폼 컨트롤 안까지 내려온다는 보장이 없어서다 — 여러 줄
- * 비고의 줄바꿈이 이 칸에서만 사라지면 안 된다.
+ * 비고의 줄바꿈이 이 칸에서만 사라지면 안 된다. 그 한 가지는 **이 파일이 인자로
+ * 고른다**(아래 className) — 공용 값에 박아 두면 한 줄짜리 값을 쓰는 칸까지
+ * 물려받는다.
  *
  * ── hover·title·focus 는 장식이 아니다 ────────────────────────────────
  * `수정` 이라는 글자가 사라졌으므로, 단서가 없으면 **여기를 고칠 수 있다는 사실을
@@ -84,14 +89,14 @@ import { noteCellButtonClass, noteCellButtonTitle } from "./weekly-report-note-b
  * 비고가 비면 이름이 `-` 한 글자가 되어 무엇을 하는 버튼인지 알 길이 없어서다.
  *
  * ⚠️ 그 sr-only 를 담는 버튼에는 **relative 가 반드시 함께 붙는다.** 까닭은
- * weekly-report-note-button.ts 의 주석에 적어 두었다 — 떼면 표 전체가 창
+ * inline-edit-cell-button.ts 의 주석에 적어 두었다 — 떼면 표 전체가 창
  * 스크롤을 하나 더 만든다.
  *
  * ── 겉모습은 이 파일에 적지 않는다 ─────────────────────────────────────
  * 위 세 문단이 말한 겉모습(hover · 커서 · focus-visible · title)은 **맨 아래 납입
  * 예정 건 표의 비고 칸도 똑같이** 쓴다 — 한 화면에 비고가 둘인데 하나만 눌러서
  * 열리거나 서로 다르게 보이면 버튼을 없앤 뜻이 사라진다. 그래서 그 값은
- * weekly-report-note-button.ts 한 곳에 두고 둘이 나눠 쓴다.
+ * inline-edit-cell-button.ts 한 곳에 두고 둘이 나눠 쓴다.
  * ============================================================================
  */
 export default function WeeklyReportNotesCell({
@@ -137,11 +142,16 @@ export default function WeeklyReportNotesCell({
         }}
         // 겉모습과 title 은 이 파일에 적지 않는다 — 맨 아래 납입 예정 건 표의
         // 비고도 **똑같이** 눌러서 열리므로, 두 곳에 각각 적으면 언젠가 한쪽만
-        // 고쳐진다. 값과 그 까닭(-mx-1 px-1 의 짝, w-full·text-left,
-        // whitespace-pre-line, 그리고 ⚠️ relative 를 빼면 안 되는 이유)은
-        // weekly-report-note-button.ts 한 곳에 있다.
-        title={noteCellButtonTitle}
-        className={noteCellButtonClass}
+        // 고쳐진다. 값과 그 까닭(-mx-1 px-1 의 짝, w-full·text-left, 그리고
+        // ⚠️ relative 를 빼면 안 되는 이유)은 inline-edit-cell-button.ts 한
+        // 곳에 있다.
+        //
+        // 줄바꿈 처리만은 **여기서 정한다.** 이 비고에는 실제로 여러 줄이 들어
+        // 있어 pre-line 이어야 하지만, 같은 겉모습을 나눠 쓰는 내자 정리 다섯
+        // 칸은 한 줄짜리 값이라 nowrap 이어야 한다 — 한쪽 성질을 공용 값에 박아
+        // 두면 다른 쪽이 그것을 물려받아 엉뚱하게 접힌다(그 파일 주석).
+        title={inlineEditCellButtonTitle("비고")}
+        className={inlineEditCellButtonClass("whitespace-pre-line")}
       >
         {displayText}
         {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다(파일 헤더). 순서가

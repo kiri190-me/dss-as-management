@@ -1,0 +1,267 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  DOMESTIC_ORDER_INLINE_EDIT_LABELS,
+  buildDomesticOrderCellUpdateFields,
+  type DomesticOrderCellEditRow,
+  type DomesticOrderInlineEditableField,
+} from "./domestic-order-cell-edit";
+
+/**
+ * 내자 정리의 칸 편집이 **보낼 값**을 만드는 규칙.
+ *
+ * 이 화면의 저장은 보낸 칸만 고치지 않고 **줄 전체를 SET 한다**(그 파일 헤더).
+ * 그래서 아래 시험이 막는 것은 화면의 생김새가 아니라 **자료가 조용히 지워지는
+ * 일**이다. 자물쇠는 셋이다:
+ *
+ *  1. 한 칸을 고쳐도 나머지 칸이 **원래 값 그대로** 실린다(빠지면 그 칸이 지워진다).
+ *  2. 실리는 것은 **원본 칸**이다 — 계산된 값(modelName · customerName …)이 섞이면
+ *     수리 건에서 빌려 쓰던 값이 이 줄에 복사되어 굳는다.
+ *  3. 키 목록이 `줄 수정` 폼의 collectFields 와 **한 칸도 다르지 않다.**
+ */
+
+/**
+ * `줄 수정` 폼의 collectFields 가 보내는 키 전부. **여기가 기준이다** —
+ * 두 저장 경로가 서로 다른 목록을 보내면, 칸 편집으로 저장한 줄에서만 어떤 칸이
+ * 말없이 비워진다.
+ */
+const COLLECT_FIELDS_KEYS = [
+  "repairCaseId",
+  "intakeNumberText",
+  "customerId",
+  "modelNameText",
+  "lotNumberText",
+  "serialNumberText",
+  "faultDescriptionText",
+  "displayOrder",
+  "purchaseOrderNumber",
+  "projectName",
+  "orderIssuedDate",
+  "dueDates",
+  "quoteIssuedDate",
+  "quoteNumber",
+  "progressNote",
+  "deliveredDate",
+  "deliveredBy",
+  "taxInvoiceDate",
+  "amountExcludingVat",
+  "paymentCompleted",
+  "japanRemittanceNote",
+  "historyNote",
+  "etcNote",
+] as const;
+
+/** 모든 칸이 채워진 줄. 하나라도 빠지면 그것이 지워진 것인지 이 시험이 말해 준다. */
+function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCellEditRow {
+  return {
+    repairCaseId: "11111111-1111-4111-8111-111111111111",
+    intakeNumberText: "2026-0001",
+    customerId: "22222222-2222-4222-8222-222222222222",
+    modelNameText: "RF-100",
+    lotNumberText: "LN-7",
+    serialNumberText: "SN-9",
+    faultDescriptionText: "전원 안 들어옴",
+    displayOrder: 3,
+    purchaseOrderNumber: "PO-1",
+    projectName: "PJT-A",
+    orderIssuedDate: "2026-01-05",
+    dueDates: [
+      { dueDate: "2026-01-20", note: "1차분" },
+      { dueDate: "2026-02-15", note: null },
+    ],
+    quoteIssuedDate: "2026-01-07",
+    quoteNumber: "Q-1",
+    progressNote: "수리중\n부품 대기",
+    deliveredDate: "2026-02-20",
+    deliveredBy: "김유진",
+    taxInvoiceDate: "2026-02-25",
+    amountExcludingVat: "1234567.00",
+    paymentCompleted: true,
+    japanRemittanceNote: "송금 완료",
+    historyNote: "이력",
+    etcNote: "기타",
+    ...overrides,
+  };
+}
+
+test("한 칸을 고쳐도 나머지 칸이 원래 값 그대로 실린다 — 이 저장은 줄 전체를 SET 한다", () => {
+  const subject = row();
+  const fields = buildDomesticOrderCellUpdateFields(subject, "quoteNumber", "Q-2");
+
+  // 고친 칸만 새 값이다.
+  assert.equal(fields.quoteNumber, "Q-2");
+
+  // 나머지는 전부 읽어 온 값 그대로여야 한다. 하나라도 빠지면(undefined) 검증이
+  // null 로 접고 mutation 이 그 칼럼을 지운다.
+  assert.equal(fields.repairCaseId, subject.repairCaseId);
+  assert.equal(fields.intakeNumberText, "2026-0001");
+  assert.equal(fields.customerId, subject.customerId);
+  assert.equal(fields.modelNameText, "RF-100");
+  assert.equal(fields.lotNumberText, "LN-7");
+  assert.equal(fields.serialNumberText, "SN-9");
+  assert.equal(fields.faultDescriptionText, "전원 안 들어옴");
+  assert.equal(fields.purchaseOrderNumber, "PO-1");
+  assert.equal(fields.projectName, "PJT-A");
+  assert.equal(fields.orderIssuedDate, "2026-01-05");
+  assert.equal(fields.quoteIssuedDate, "2026-01-07");
+  assert.equal(fields.progressNote, "수리중\n부품 대기");
+  assert.equal(fields.deliveredDate, "2026-02-20");
+  assert.equal(fields.deliveredBy, "김유진");
+  assert.equal(fields.taxInvoiceDate, "2026-02-25");
+  assert.equal(fields.amountExcludingVat, "1234567.00");
+  assert.equal(fields.japanRemittanceNote, "송금 완료");
+  assert.equal(fields.historyNote, "이력");
+  assert.equal(fields.etcNote, "기타");
+});
+
+test("보내는 키는 `줄 수정` 폼의 collectFields 와 한 칸도 다르지 않다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(row(), "projectName", "PJT-B");
+  assert.deepEqual(Object.keys(fields).sort(), [...COLLECT_FIELDS_KEYS].sort());
+  // 빠진 키가 없다는 것을 한 번 더 못 박는다 — 위 비교는 목록 자체가 함께
+  // 줄어들면 통과해 버린다.
+  assert.equal(Object.keys(fields).length, 23);
+});
+
+test("dueDates · displayOrder · paymentCompleted 는 빠지지 않는다 — 셋 다 조용히 지워지는 칸이다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(row(), "deliveredBy", "박");
+
+  // 납기요청일은 차례가 곧 저장되는 차례다. id · displayOrder 는 저장에 쓰이지
+  // 않으므로 두 칸만 골라 보낸다.
+  assert.deepEqual(fields.dueDates, [
+    { dueDate: "2026-01-20", note: "1차분" },
+    { dueDate: "2026-02-15", note: null },
+  ]);
+
+  // 순번은 숫자 그대로 보낸다(검증이 number 도 읽는다). 0 이나 문자열로 바꿔
+  // 보내면 "순번은 1 이상의 정수여야 합니다"로 막힌다.
+  assert.equal(fields.displayOrder, 3);
+
+  // 입금완료는 boolean 이다. 빠지면 검증이 false 로 접어, 아무도 안 건드린
+  // 줄의 입금 사실이 사라진다.
+  assert.equal(fields.paymentCompleted, true);
+});
+
+test("납기요청일이 없는 줄은 빈 배열로 보낸다 — 빈 목록이 정상이다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(
+    row({ dueDates: [] }),
+    "purchaseOrderNumber",
+    "PO-2"
+  );
+  assert.deepEqual(fields.dueDates, []);
+});
+
+test("납기요청일 목록은 새로 만든다 — 원본 배열을 그대로 넘기지 않는다", () => {
+  const subject = row();
+  const fields = buildDomesticOrderCellUpdateFields(subject, "quoteNumber", "Q-3");
+  assert.notEqual(fields.dueDates, subject.dueDates);
+  assert.notEqual((fields.dueDates as unknown[])[0], subject.dueDates[0]);
+});
+
+test("계산된 값은 실리지 않는다 — 수리 건의 값이 이 줄에 복사되어 굳으면 안 된다", () => {
+  /**
+   * 실제 목록 한 줄(DomesticOrderListItem)에는 원본 칸과 계산된 값이 **두 벌**
+   * 들어 있다. 이 줄은 원본 칸이 비어 있어 수리 건의 값을 빌려 쓰는 중이다 —
+   * 계산된 값이 실려 나가면 그 순간 빌려 쓰던 값이 자기 값으로 굳어, 나중에
+   * 수리 건 쪽이 고쳐져도 이 줄만 옛 값으로 남는다.
+   */
+  const listItem = {
+    ...row({
+      intakeNumberText: null,
+      customerId: null,
+      modelNameText: null,
+      lotNumberText: null,
+      serialNumberText: null,
+      faultDescriptionText: null,
+    }),
+    // 계산된 값 — 화면이 그리는 것이 이쪽이라 실수로 집어 오기 쉽다.
+    displayIntakeNumber: "2026-0099",
+    customerName: "주식회사 가나다",
+    modelName: "RF-999",
+    lotNumber: "LN-999",
+    serialNumber: "SN-999",
+    reportedSymptom: "수리 건에 적힌 증상",
+  };
+
+  const fields = buildDomesticOrderCellUpdateFields(listItem, "japanRemittanceNote", "송금 예정");
+
+  // 원본 칸은 비어 있던 그대로 나간다.
+  assert.equal(fields.intakeNumberText, null);
+  assert.equal(fields.customerId, null);
+  assert.equal(fields.modelNameText, null);
+  assert.equal(fields.lotNumberText, null);
+  assert.equal(fields.serialNumberText, null);
+  assert.equal(fields.faultDescriptionText, null);
+
+  // 계산된 값은 키 자체가 없어야 한다.
+  for (const key of [
+    "displayIntakeNumber",
+    "customerName",
+    "modelName",
+    "lotNumber",
+    "serialNumber",
+    "reportedSymptom",
+    "intakeNumber",
+  ]) {
+    assert.equal(key in fields, false, `${key} 는 보내면 안 되는 계산된 값이다`);
+  }
+});
+
+test("빈 문자열로 지우면 빈 문자열 그대로 나간다 — null 로 접는 일은 검증 한 곳이 한다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(row(), "japanRemittanceNote", "");
+  assert.equal(fields.japanRemittanceNote, "");
+  // 다른 칸까지 함께 비워지지 않는다.
+  assert.equal(fields.deliveredBy, "김유진");
+  assert.equal(fields.quoteNumber, "Q-1");
+});
+
+test("공백만 남겨도 그대로 나간다 — 앞뒤 공백을 떼는 규칙도 검증 한 곳이 갖는다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(row(), "deliveredBy", "  ");
+  assert.equal(fields.deliveredBy, "  ");
+});
+
+test("원래 비어 있던 칸도 적을 수 있다 — 빈 칸을 눌러 채우는 길이 막히면 안 된다", () => {
+  const fields = buildDomesticOrderCellUpdateFields(
+    row({ purchaseOrderNumber: null, projectName: null }),
+    "purchaseOrderNumber",
+    "PO-새로"
+  );
+  assert.equal(fields.purchaseOrderNumber, "PO-새로");
+  // 함께 비어 있던 칸은 비어 있는 채로 남는다.
+  assert.equal(fields.projectName, null);
+});
+
+test("다섯 칸 각각이 자기 칸만 바꾼다", () => {
+  const fields: DomesticOrderInlineEditableField[] = [
+    "purchaseOrderNumber",
+    "projectName",
+    "quoteNumber",
+    "deliveredBy",
+    "japanRemittanceNote",
+  ];
+  const original = row();
+  for (const field of fields) {
+    const built = buildDomesticOrderCellUpdateFields(original, field, "새 값");
+    assert.equal(built[field], "새 값");
+    for (const other of fields) {
+      if (other === field) continue;
+      assert.equal(built[other], original[other], `${field} 을(를) 고치는데 ${other} 가 바뀌었다`);
+    }
+  }
+});
+
+test("칸 이름표는 다섯 칸 전부에 있다 — 이름 없는 칸은 낭독기에서 무엇인지 알 수 없다", () => {
+  assert.deepEqual(Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS).sort(), [
+    "deliveredBy",
+    "japanRemittanceNote",
+    "projectName",
+    "purchaseOrderNumber",
+    "quoteNumber",
+  ]);
+  // 표 머리말·카드 이름표와 같은 글자여야 한다.
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.purchaseOrderNumber, "발주서번호");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.projectName, "PJT");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.quoteNumber, "견적서번호");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.deliveredBy, "납품자");
+  assert.equal(DOMESTIC_ORDER_INLINE_EDIT_LABELS.japanRemittanceNote, "일본 송금");
+});
