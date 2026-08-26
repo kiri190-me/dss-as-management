@@ -1,7 +1,9 @@
+import { normalizeEntityName } from "./entity-name-match";
+
 /**
  * ============================================================================
- * 내자 정리 목록의 계산 — 값 고르기 · 년도 고르기 · 고객사 묶기 · 완료 판정 ·
- * 납기일 줄 나누기
+ * 내자 정리 목록의 계산 — 값 고르기 · 년도 고르기 · 글자로 찾기 · 고객사 묶기 ·
+ * 완료 판정 · 납기일 줄 나누기
  * ============================================================================
  * DB 도 React 도 여기 들어오지 않는다. repair-case-filters.ts 와 같은 자리의
  * 파일이고, 같은 이유로 순수 함수만 둔다 — 목록 화면이 무엇을 감추고 무엇을
@@ -24,6 +26,24 @@
  * 형식이 깨진 값(년도 네 자리를 읽을 수 없는 값)도 같은 쪽으로 보낸다.
  * 어느 해로 추측해 넣는 것보다 늘 보이게 두는 편이 안전하다 — 추측한 해에
  * 넣으면 그 줄은 다른 해에서 영영 보이지 않는다.
+ *
+ * ── 검색은 한 칸이고, 여덟 칸 중 어디든 걸리면 남는다 ───────────────────
+ * 사람이 아는 것은 자기가 손에 쥔 번호 하나다 — 그것이 발주서번호인지
+ * 견적서번호인지 인수번호인지를 먼저 골라 달라고 하면, 고르는 일부터
+ * 틀린다. 그래서 칸마다 검색칸을 두지 않고 하나로 받아 여덟 칸을 함께 본다
+ * (filterDomesticOrdersBySearch).
+ *
+ * 맞추는 방식은 이 저장소가 이미 쓰던 것 그대로다 — normalizeEntityName
+ * (entity-name-match.ts). 앞뒤 공백을 떼고, 사이 공백을 한 칸으로 줄이고,
+ * 대소문자를 무시한다. repair-case-link-search.ts 가 같은 이유로 같은 함수를
+ * 부른다: 여기서 규칙을 새로 적으면 같은 글자가 화면마다 다르게 걸린다.
+ *
+ * ── 검색어가 있으면 년도를 보지 않는다 ──────────────────────────────────
+ * 그 판단은 화면이 한다(DomesticOrderListScreen). 견적서번호를 칠 때 그게 몇
+ * 년도 건인지 기억하는 사람은 없어서, 년도 안에서만 찾으면 **있는 건을
+ * "없다"고 보게 된다.** 이 파일의 두 함수(년도 거르기 · 검색)는 서로를 부르지
+ * 않는다 — 어느 쪽을 쓸지 정하는 것은 화면의 상태(검색어가 있는가)이고,
+ * 규칙 둘을 하나로 붙여 두면 각각을 따로 시험할 수 없다.
  *
  * ── 고객사·형식·L/N·S/N·고장내역은 이 행의 값이 먼저다 ──────────────────
  * 그 다섯은 두 곳에서 알 수 있다 — 이 행에 적힌 값과, 연결된 수리 건에서
@@ -214,6 +234,85 @@ export function filterDomesticOrdersByYear<T extends OrderIssued>(
     const rowYear = orderIssuedYearOf(row);
     return rowYear === null || rowYear === year;
   });
+}
+
+/**
+ * 검색이 실제로 들여다보는 칸만 요구한다 — 조회의 전체 행 타입을 끌어오지
+ * 않는다(이 파일의 다른 타입들과 같은 이유).
+ *
+ * **여기 적힌 다섯 칸(고객사·형식·S/N·L/N·인수번호)은 이미 정해진 값이다.**
+ * 원본 두 벌(이 행의 값 / 연결된 수리 건의 값)이 아니라 resolveDomesticOrderValue
+ * 가 고른 쪽, 곧 **화면에 그려지는 그 글자**를 본다(queries 의
+ * DomesticOrderListItem 에서 이미 접혀 온다). 원본 두 벌을 따로 뒤지면 화면이
+ * 보여 주는 값과 검색이 보는 값이 어긋나, 눈에 보이는 글자를 그대로 쳤는데
+ * 안 걸리는(혹은 화면에 없는 글자로 걸리는) 일이 생긴다.
+ */
+export type DomesticOrderSearchable = {
+  customerName: string | null;
+  displayIntakeNumber: string | null;
+  purchaseOrderNumber: string | null;
+  quoteNumber: string | null;
+  projectName: string | null;
+  modelName: string | null;
+  serialNumber: string | null;
+  lotNumber: string | null;
+};
+
+/**
+ * 검색이 보는 칸 여덟. 목록으로 두는 이유는 칸을 늘리거나 줄이는 일이 이 한
+ * 줄에서 끝나게 하기 위해서다 — 조건문을 여덟 개 늘어놓으면 하나를 빠뜨려도
+ * 아무 데서도 티가 나지 않는다(그 칸으로만 조용히 못 찾게 된다).
+ */
+const DOMESTIC_ORDER_SEARCH_FIELDS: readonly (keyof DomesticOrderSearchable)[] = [
+  "customerName",
+  "displayIntakeNumber",
+  "purchaseOrderNumber",
+  "quoteNumber",
+  "projectName",
+  "modelName",
+  "serialNumber",
+  "lotNumber",
+];
+
+/**
+ * 지금 검색 중인가. **화면이 "년도를 무시할지"를 이 함수로 묻는다** — 화면에서
+ * `query.trim() !== ""` 로 따로 판정하면 정규화 규칙이 두 곳에 생기고, 그러면
+ * 스페이스 한 칸만 친 순간 "검색 중"이라 표시되면서 정작 거르기는 아무것도
+ * 하지 않는 어긋난 상태가 만들어진다.
+ */
+export function isDomesticOrderSearchActive(query: string): boolean {
+  return normalizeEntityName(query) !== "";
+}
+
+/**
+ * 검색어에 걸리는 줄만 남긴다. 여덟 칸(DOMESTIC_ORDER_SEARCH_FIELDS) 중
+ * **하나라도** 검색어를 품고 있으면 남는다 — 부분 일치이고, 대소문자와 공백
+ * 모양은 normalizeEntityName 이 접는다.
+ *
+ * **검색어가 비었거나 공백뿐이면 아무것도 거르지 않는다.** 스페이스 한 칸이
+ * 목록을 통째로 지우면 사람은 "자료가 없다"고 읽는다(파일 헤더 ·
+ * repair-case-link-search.ts 의 같은 규칙).
+ *
+ * 값이 없는 칸(null)은 그냥 걸리지 않는 칸이다 — 이 표에는 빈 칸이 흔하다
+ * (견적은 냈는데 발주 전, 발주는 받았는데 접수 전).
+ *
+ * **입력 순서를 그대로 지킨다.** 이 표에는 사람이 매긴 순번이 있어서, 검색이
+ * 줄을 다시 세우면 순번 칸과 눈에 보이는 차례가 검색할 때만 어긋난다
+ * (filterDomesticOrdersByYear 와 같은 이유).
+ */
+export function filterDomesticOrdersBySearch<T extends DomesticOrderSearchable>(
+  rows: readonly T[],
+  query: string
+): T[] {
+  const q = normalizeEntityName(query);
+  if (q === "") return [...rows];
+
+  return rows.filter((row) =>
+    DOMESTIC_ORDER_SEARCH_FIELDS.some((field) => {
+      const value = row[field];
+      return typeof value === "string" && normalizeEntityName(value).includes(q);
+    })
+  );
 }
 
 /**

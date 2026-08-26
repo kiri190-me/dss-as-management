@@ -12,10 +12,12 @@ import type {
 import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
+  filterDomesticOrdersBySearch,
   filterDomesticOrdersByYear,
   formatDomesticOrderDueDateLines,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
+  isDomesticOrderSearchActive,
   resolveInitialDomesticOrderYear,
 } from "@/lib/domain/domestic-order-list";
 import {
@@ -45,6 +47,26 @@ import DomesticOrderEditForm from "./DomesticOrderEditForm";
  * 감추면 어느 해를 골라도 나오지 않아 잊힌다. 그래서 년도 칸 옆에 몇 건인지
  * 적고, 그 줄의 **발주발행일 칸에 `발주일 미정`을 띄운다** — "-"로만 두면
  * 왜 2026년을 골랐는데 이 줄이 함께 있는지 알 길이 없다.
+ *
+ * ── 검색칸은 하나이고, 그 하나가 여덟 칸을 함께 본다 ────────────────────
+ * 고객사 · 인수번호 · 발주서번호 · 견적서번호 · PJT · 형식 · S/N · L/N.
+ * 칸마다 검색칸을 두지 않는 이유는 사람이 손에 쥔 것이 번호 하나뿐이어서다 —
+ * 그것이 무슨 번호인지 먼저 골라 달라고 하면 고르는 일부터 틀린다.
+ *
+ * 무엇이 걸리는지 정하는 일은 여기서 하지 않는다(domain 의
+ * filterDomesticOrdersBySearch · 위 '규칙은 여기 없다'와 같은 이유). 화면은
+ * 친 글자를 그 함수에 넘기고 돌아온 줄을 그릴 뿐이다.
+ *
+ * **검색어가 있으면 년도를 보지 않는다.** 견적서번호를 칠 때 그게 몇 년도
+ * 건인지 기억하는 사람은 없어서, 고른 해 안에서만 찾으면 **있는 건을 "없다"고
+ * 보게 된다.** 그래서 검색 중에는 filterDomesticOrdersByYear 를 아예 부르지
+ * 않고, **그 사실을 화면에 한 줄로 적는다** — 다른 해의 줄이 말없이 섞여
+ * 나오면 사람은 년도 고르개가 고장 났다고 읽는다.
+ *
+ * 그동안 년도 고르개는 **없애지 않고 disabled 로 둔다.** 없애면 검색어를 지운
+ * 뒤에야 어느 해를 보고 있었는지 알 수 있고, 그대로 열어 두면 골라도 화면이
+ * 바뀌지 않는 조작이 되어 그쪽이 고장으로 읽힌다. 고른 값(selectedYear)은
+ * 상태에 그대로 남아 있어, 검색어를 지우면 보던 해로 그대로 돌아온다.
  *
  * ── 인수번호는 링크, 수정은 버튼 ───────────────────────────────────────
  * 연결된 줄의 인수번호를 누르면 그 수리 건 상세로 넘어간다. 그 링크에는
@@ -117,6 +139,29 @@ const NO_ORDER_DATE_LABEL = "발주일 미정";
 
 /** 표의 칼럼 수. 고객사 소제목 줄이 표 전체 폭을 덮는 데 쓴다. */
 const TABLE_COLUMN_COUNT = 22;
+
+/**
+ * 검색칸과 년도 고르개가 함께 쓰는 모양. 둘은 한 줄에 나란히 서므로 높이나
+ * 테두리가 어긋나면 한쪽이 다른 성격의 조작처럼 보인다.
+ */
+const filterControlClass =
+  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
+
+/**
+ * 검색칸에 적는 예시. 사람이 실제로 손에 쥐고 오는 것 넷만 적는다 — 여덟 칸을
+ * 다 늘어놓으면 칸 폭을 넘겨 뒤가 잘리고, 잘린 예시는 없는 것과 같다.
+ * 나머지 넷은 아래 SEARCH_FIELDS_HINT 가 말해 준다.
+ */
+const SEARCH_PLACEHOLDER = "고객사 · 인수번호 · 발주서번호 · 견적서번호 등";
+
+/**
+ * 실제로 무엇을 뒤지는지. **여기 적힌 칸이 도메인 함수가 보는 칸과 같아야
+ * 한다**(domain 의 DOMESTIC_ORDER_SEARCH_FIELDS) — 적어 놓고 안 걸리면 그것은
+ * 고장으로 읽힌다. 칸 옆에 늘어놓지 않고 마우스를 올렸을 때 뜨게 두는 것은,
+ * 이 줄에 이미 년도 고르개와 안내가 함께 서 있어서다.
+ */
+const SEARCH_FIELDS_HINT =
+  "고객사 · 인수번호 · 발주서번호 · 견적서번호 · PJT · 형식 · S/N · L/N 에서 찾습니다";
 
 /** 빈 값의 표시. 이 화면의 모든 칸이 같은 글자를 쓴다. */
 function dash(value: string | number | null | undefined): string {
@@ -561,6 +606,7 @@ export default function DomesticOrderListScreen({
 }) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState("");
   const [completionError, setCompletionError] = useState<string | null>(null);
 
   const years = useMemo(() => collectDomesticOrderYears(rows), [rows]);
@@ -575,9 +621,27 @@ export default function DomesticOrderListScreen({
       ? selectedYear
       : resolveInitialDomesticOrderYear(years, currentYear);
 
+  /**
+   * 검색 중인가. 이 판정을 화면에서 직접 하지 않는 이유는 도메인 쪽 주석에
+   * 적혀 있다 — 공백 한 칸을 "검색 중"으로 세면, 아무것도 걸러지지 않은 목록
+   * 위에 "모든 해에서 찾는 중"이라고 적히는 어긋난 상태가 만들어진다.
+   */
+  const isSearching = isDomesticOrderSearchActive(searchText);
+
+  /**
+   * **검색 중에는 년도로 거르지 않는다**(파일 헤더). 두 거르기를 겹쳐 쓰지
+   * 않고 한쪽만 쓴다 — 겹치면 다른 해의 건은 검색해도 끝내 나오지 않고, 그
+   * 건이 없는 것인지 해가 달라 가려진 것인지 화면에서 구분할 길이 없다.
+   *
+   * 거르는 일은 표/카드보다 **앞 단계**에 있다. 아래 groups 하나를 표와 카드가
+   * 함께 쓰므로, 어느 폭에서 보든 같은 줄이 남는다.
+   */
   const visibleRows = useMemo(
-    () => filterDomesticOrdersByYear(rows, activeYear),
-    [rows, activeYear]
+    () =>
+      isSearching
+        ? filterDomesticOrdersBySearch(rows, searchText)
+        : filterDomesticOrdersByYear(rows, activeYear),
+    [rows, activeYear, isSearching, searchText]
   );
   const groups = useMemo(() => groupDomesticOrdersByCustomer(visibleRows), [visibleRows]);
   const alwaysVisibleCount = useMemo(() => countDomesticOrdersWithoutOrderYear(rows), [rows]);
@@ -613,34 +677,96 @@ export default function DomesticOrderListScreen({
         />
       )}
 
-      {years.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <label
-            className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
-            htmlFor="domestic-order-year"
+      {/* 검색칸은 년도와 달리 **늘 있다** — 고를 년도가 하나도 없는 자료
+          (발주일이 전부 비어 있는 경우)에서도 번호로 찾는 일은 그대로 필요하다.
+          그래서 이 줄 전체를 years 로 감싸지 않고, 년도 부분만 감싼다. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <label
+          className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          htmlFor="domestic-order-search"
+        >
+          검색
+        </label>
+        <input
+          id="domestic-order-search"
+          type="search"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          placeholder={SEARCH_PLACEHOLDER}
+          title={SEARCH_FIELDS_HINT}
+          aria-label={`내자 정리 검색 — ${SEARCH_FIELDS_HINT}`}
+          autoComplete="off"
+          // 예시가 들어갈 만큼 넓게 두되, **폭은 화면 폭을 넘지 않는다** —
+          // max-w-full · min-w-0 이 없으면 좁은 화면에서 이 칸 하나가 줄을
+          // 밀어내 body 가 좌우로 흔들린다(파일 헤더의 가로 스크롤 규칙).
+          className={`w-80 max-w-full min-w-0 ${filterControlClass}`}
+        />
+        {isSearching && (
+          // 지우는 길을 눈에 보이게 둔다. type="search" 의 X 는 브라우저마다
+          // 있기도 없기도 하고, 검색 중에는 년도가 잠겨 있어 "원래대로"가
+          // 이 버튼 하나뿐이다.
+          <button
+            type="button"
+            onClick={() => setSearchText("")}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
-            발주 년도
-          </label>
-          <select
-            id="domestic-order-year"
-            value={activeYear ?? ""}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-          >
-            {/* 자료에 있는 해만 낸다 — 없는 해를 고르면 빈 표가 나오고, 그것이
-                자료가 없다는 뜻인지 해가 없다는 뜻인지 구분되지 않는다. */}
-            {years.map((year) => (
-              <option key={year} value={year}>
-                {year}년
-              </option>
-            ))}
-          </select>
-          {alwaysVisibleCount > 0 && (
-            <p className="text-xs text-amber-800 dark:text-amber-300">
-              {NO_ORDER_DATE_LABEL} {alwaysVisibleCount}건은 어느 년도를 골라도 함께 보입니다.
-            </p>
-          )}
-        </div>
+            검색 지우기
+          </button>
+        )}
+
+        {years.length > 0 && (
+          <>
+            <label
+              className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              htmlFor="domestic-order-year"
+            >
+              발주 년도
+            </label>
+            {/* 검색 중에는 잠근다 — 지금 이 고르개는 아무것도 정하지 않는다
+                (모든 해에서 찾는 중이다). 열어 두면 골라도 화면이 바뀌지 않아
+                고장으로 읽히고, 아예 없애면 검색어를 지우기 전까지 어느 해로
+                돌아갈지 알 수 없다. 고른 값은 그대로 남는다(파일 헤더). */}
+            <select
+              id="domestic-order-year"
+              value={activeYear ?? ""}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              disabled={isSearching}
+              className={`${filterControlClass} disabled:opacity-50`}
+            >
+              {/* 자료에 있는 해만 낸다 — 없는 해를 고르면 빈 표가 나오고, 그것이
+                  자료가 없다는 뜻인지 해가 없다는 뜻인지 구분되지 않는다. */}
+              {years.map((year) => (
+                <option key={year} value={year}>
+                  {year}년
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {/* 년도로 거르는 중일 때만 하는 말이다 — 검색 중에는 어느 줄도 년도로
+            가려지지 않으므로, 그대로 두면 지금 걸려 있지도 않은 조건을 설명하는
+            문장이 된다. */}
+        {alwaysVisibleCount > 0 && years.length > 0 && !isSearching && (
+          <p className="text-xs text-amber-800 dark:text-amber-300">
+            {NO_ORDER_DATE_LABEL} {alwaysVisibleCount}건은 어느 년도를 골라도 함께 보입니다.
+          </p>
+        )}
+      </div>
+
+      {/* 검색 중에 다른 해의 줄이 말없이 섞여 나오면 년도 고르개가 고장 난
+          것으로 읽힌다. 그 한 줄을 여기서 적는다(파일 헤더). role="status" 로
+          두어 화면 낭독기에도 같은 사실이 전해지게 한다. */}
+      {isSearching && (
+        <p
+          role="status"
+          className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200"
+        >
+          검색 중에는 발주 년도를 가리지 않고 모든 해에서 찾습니다.
+          {activeYear !== null
+            ? ` 검색어를 지우면 ${activeYear}년으로 돌아갑니다.`
+            : " 검색어를 지우면 원래 목록으로 돌아갑니다."}
+        </p>
       )}
 
       {completionError && (
@@ -655,7 +781,9 @@ export default function DomesticOrderListScreen({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
           <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
-            {activeYear !== null && `${activeYear}년 `}
+            {/* 검색 중에는 년도를 앞에 적지 않는다 — 모든 해에서 찾는 중이라
+                "2026년 3건"은 사실이 아니다. */}
+            {isSearching ? "검색 결과 " : activeYear !== null ? `${activeYear}년 ` : null}
             {visibleRows.length}건
             {visibleRows.length !== rows.length && (
               <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-500">
@@ -687,6 +815,18 @@ export default function DomesticOrderListScreen({
       {rows.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           등록된 내자 정리 항목이 없습니다.
+        </div>
+      ) : isSearching && visibleRows.length === 0 ? (
+        // 아무것도 안 걸렸다는 사실을 말해 준다. 머리말만 남은 빈 표를 두면
+        // 자료가 없는 것인지 화면이 덜 그려진 것인지 구분할 길이 없다.
+        // 위의 "등록된 …이 없습니다"와 같은 말투를 쓴다 — 같은 자리에 나오는
+        // 두 문장이 서로 다른 투로 적히면 다른 화면처럼 읽힌다.
+        <div
+          role="status"
+          className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+        >
+          검색어에 맞는 내자 정리 항목이 없습니다. 검색어를 지우면 전체 {rows.length}건이 다시
+          보입니다.
         </div>
       ) : (
         <ResponsiveList

@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
+  filterDomesticOrdersBySearch,
   filterDomesticOrdersByYear,
   foldBlankToNull,
+  isDomesticOrderSearchActive,
   formatDomesticOrderDueDateLines,
   formatDomesticOrderDueDates,
   groupDomesticOrdersByCustomer,
@@ -18,7 +20,7 @@ import {
 } from "./domestic-order-list";
 
 /**
- * 이 시험이 지키는 것 다섯.
+ * 이 시험이 지키는 것 여섯.
  *  1. 년도 후보는 자료에 있는 해만이다.
  *  2. **발주일 없는 줄은 어느 년도에서도 살아남는다** — 이 파일이 존재하는
  *     가장 큰 이유다. 그 줄은 아직 발주가 나지 않았다는 뜻이라 잊히면 안 된다.
@@ -26,6 +28,9 @@ import {
  *  4. 완료 판정은 completed_at 하나로만 한다.
  *  5. **이 행에 적힌 값이 먼저이고, 공백만 적힌 값은 "없음"이다** — 이 규칙이
  *     SQL 의 coalesce 안에 있었다면 시험할 자리가 없었다.
+ *  6. **검색은 여덟 칸을 함께 보고, 빈 검색어는 아무것도 거르지 않는다** —
+ *     한 칸이라도 빠지면 그 칸으로는 조용히 못 찾게 되고, 그 사실은 화면
+ *     어디에도 드러나지 않는다.
  */
 
 type Row = {
@@ -435,4 +440,192 @@ test("전체 한 줄은 받은 차례 그대로 전부를 적는다 — 수정 �
     ]),
     "2026-03-10 (2차분), 2026-01-20, 2026-02-15"
   );
+});
+
+// ─────────────────────────────────────────────────────────── 글자로 찾기 (검색)
+
+/**
+ * 검색칸은 하나이고, 그 한 칸이 여덟 칸을 함께 본다. 지키는 것은 넷이다.
+ *  1. **여덟 칸 어디에 있어도 걸린다** — 사람은 자기가 쥔 번호 하나를 칠 뿐,
+ *     그것이 무슨 번호인지 골라 주지 않는다. 한 칸이 빠지면 그 칸으로만
+ *     조용히 못 찾게 되고, 화면에는 "없습니다"라고만 보인다.
+ *  2. **대소문자·공백 모양을 무시하고 부분 일치로 본다** — 그 판단은 여기서
+ *     새로 적지 않고 normalizeEntityName 을 부른다(접수 폼과 DB 유니크 인덱스가
+ *     쓰는 바로 그 규칙).
+ *  3. **빈 검색어·공백만 친 검색어는 아무것도 거르지 않는다** — 스페이스 한
+ *     칸이 목록을 통째로 지우면 사람은 자료가 없다고 읽는다.
+ *  4. **줄 차례가 그대로다** — 이 표에는 사람이 매긴 순번이 있다.
+ */
+
+type SearchRow = {
+  id: string;
+  customerName: string | null;
+  displayIntakeNumber: string | null;
+  purchaseOrderNumber: string | null;
+  quoteNumber: string | null;
+  projectName: string | null;
+  modelName: string | null;
+  serialNumber: string | null;
+  lotNumber: string | null;
+};
+
+/** 기본은 전부 비어 있다 — 이 표에는 빈 칸이 흔하다는 사실이 시험의 기본값이다. */
+function searchRow(overrides: Partial<SearchRow> = {}): SearchRow {
+  return {
+    id: "id",
+    customerName: null,
+    displayIntakeNumber: null,
+    purchaseOrderNumber: null,
+    quoteNumber: null,
+    projectName: null,
+    modelName: null,
+    serialNumber: null,
+    lotNumber: null,
+    ...overrides,
+  };
+}
+
+test("여덟 칸 어디에 값이 있어도 그 칸으로 찾을 수 있다", () => {
+  // 칸을 하나씩 세워 놓고 각각으로 찾아 본다. 하나라도 빠뜨리면 이 시험이
+  // 그 칸의 이름을 대며 실패한다 — 화면에서는 "안 걸린다"는 것 말고는 아무
+  // 단서도 얻을 수 없는 고장이다.
+  const cases: {
+    field: Exclude<keyof SearchRow, "id">;
+    label: string;
+    value: string;
+    query: string;
+  }[] = [
+    { field: "customerName", label: "고객사", value: "한빛전자", query: "한빛" },
+    { field: "displayIntakeNumber", label: "인수번호", value: "RFG-2026-0007", query: "0007" },
+    { field: "purchaseOrderNumber", label: "발주서번호", value: "PO-88231", query: "88231" },
+    { field: "quoteNumber", label: "견적서번호", value: "QT-2024-115", query: "2024-115" },
+    { field: "projectName", label: "PJT", value: "성층권 통신 시험", query: "성층권" },
+    { field: "modelName", label: "형식", value: "ARC-200", query: "arc-200" },
+    { field: "serialNumber", label: "S/N", value: "SN-9912", query: "9912" },
+    { field: "lotNumber", label: "L/N", value: "LN-4417", query: "4417" },
+  ];
+
+  for (const c of cases) {
+    const hit = searchRow({ id: "hit" });
+    hit[c.field] = c.value;
+    const rows = [hit, searchRow({ id: "miss", customerName: "동해정밀" })];
+    assert.deepEqual(
+      filterDomesticOrdersBySearch(rows, c.query).map((r) => r.id),
+      ["hit"],
+      `${c.label} 칸으로 찾을 수 없다`
+    );
+  }
+});
+
+test("대소문자는 무시한다 — 화면에 적힌 그대로 치지 않아도 걸린다", () => {
+  const rows = [searchRow({ id: "hit", modelName: "ARC-200" })];
+  assert.equal(filterDomesticOrdersBySearch(rows, "arc-200").length, 1);
+  assert.equal(filterDomesticOrdersBySearch(rows, "Arc").length, 1);
+  assert.equal(
+    filterDomesticOrdersBySearch([searchRow({ id: "hit", quoteNumber: "qt-2026-9" })], "QT").length,
+    1
+  );
+});
+
+test("번호 일부만 쳐도 걸린다 — 앞자리를 외우고 있는 사람은 없다", () => {
+  const rows = [searchRow({ id: "hit", purchaseOrderNumber: "20260115-DSS-0042" })];
+  assert.equal(filterDomesticOrdersBySearch(rows, "0042").length, 1, "뒷자리");
+  assert.equal(filterDomesticOrdersBySearch(rows, "DSS").length, 1, "가운데");
+  assert.equal(filterDomesticOrdersBySearch(rows, "2026").length, 1, "앞자리");
+});
+
+test("앞뒤 공백과 사이 공백은 접힌다 — 붙여넣기한 글자도 걸려야 한다", () => {
+  const rows = [searchRow({ id: "hit", customerName: "한빛  전자" })];
+  assert.equal(filterDomesticOrdersBySearch(rows, "  한빛 전자  ").length, 1, "검색어 쪽 공백");
+  assert.equal(
+    filterDomesticOrdersBySearch([searchRow({ id: "hit", customerName: " 한빛 전자 " })], "한빛  전자")
+      .length,
+    1,
+    "자료 쪽 공백"
+  );
+});
+
+test("빈 검색어와 공백뿐인 검색어는 아무것도 거르지 않는다", () => {
+  const rows = [
+    searchRow({ id: "1", customerName: "한빛전자" }),
+    searchRow({ id: "2", customerName: "동해정밀" }),
+    searchRow({ id: "3" }),
+  ];
+  for (const query of ["", " ", "   ", "\t\n"]) {
+    assert.deepEqual(
+      filterDomesticOrdersBySearch(rows, query).map((r) => r.id),
+      ["1", "2", "3"],
+      `검색어 ${JSON.stringify(query)} 가 목록을 지웠다`
+    );
+  }
+});
+
+test("여덟 칸이 모두 비어 있어도 터지지 않는다 — 그냥 안 걸리는 줄이다", () => {
+  const rows = [searchRow({ id: "empty" }), searchRow({ id: "hit", quoteNumber: "QT-1" })];
+  assert.deepEqual(
+    filterDomesticOrdersBySearch(rows, "QT-1").map((r) => r.id),
+    ["hit"]
+  );
+  assert.deepEqual(filterDomesticOrdersBySearch(rows, "없는번호"), []);
+});
+
+test("칸 하나만 걸려도 남는다 — 나머지가 비어 있어도 상관없다", () => {
+  const rows = [
+    searchRow({ id: "sn만", serialNumber: "SN-9912" }),
+    searchRow({ id: "고객사만", customerName: "한빛전자" }),
+  ];
+  assert.deepEqual(
+    filterDomesticOrdersBySearch(rows, "9912").map((r) => r.id),
+    ["sn만"]
+  );
+});
+
+test("검색이 줄 차례를 흔들지 않는다 — 표에 사람이 매긴 순번이 있다", () => {
+  const rows = [
+    searchRow({ id: "1", customerName: "한빛전자" }),
+    searchRow({ id: "2", customerName: "동해정밀" }),
+    searchRow({ id: "3", customerName: "한빛전자" }),
+    searchRow({ id: "4", customerName: "한빛전자" }),
+  ];
+  assert.deepEqual(
+    filterDomesticOrdersBySearch(rows, "한빛").map((r) => r.id),
+    ["1", "3", "4"],
+    "걸린 줄은 원본 차례 그대로여야 한다"
+  );
+});
+
+test("빈 목록을 검색해도 빈 목록이다", () => {
+  assert.deepEqual(filterDomesticOrdersBySearch([], "한빛"), []);
+  assert.deepEqual(filterDomesticOrdersBySearch([], ""), []);
+});
+
+// ── 검색 중인가 (화면이 년도를 무시할지 정하는 판단) ───────────────────
+
+test("공백만 친 것은 검색 중이 아니다 — 거르지 않는데 '검색 중'이라 적으면 안 된다", () => {
+  assert.equal(isDomesticOrderSearchActive(""), false);
+  assert.equal(isDomesticOrderSearchActive("   "), false);
+  assert.equal(isDomesticOrderSearchActive("\t\n "), false);
+});
+
+test("글자가 한 자라도 있으면 검색 중이다", () => {
+  assert.equal(isDomesticOrderSearchActive("한"), true);
+  assert.equal(isDomesticOrderSearchActive("  QT-1  "), true);
+});
+
+test("검색 중이 아닌 검색어는 거르지도 않는다 — 한쪽만 참인 상태가 없다", () => {
+  // 두 판단이 어긋나면 화면이 "모든 해에서 찾는 중"이라 적어 놓고 정작 년도
+  // 거르기만 꺼진 목록(=전체)을 보여 주게 된다. 그 반대도 마찬가지로,
+  // 걸러 놓고 아무 말도 하지 않으면 다른 해의 줄이 이유 없이 섞여 보인다.
+  const rows = [searchRow({ id: "1", customerName: "한빛전자" }), searchRow({ id: "2" })];
+  for (const query of ["", "   ", "\t\n"]) {
+    assert.equal(isDomesticOrderSearchActive(query), false);
+    assert.deepEqual(
+      filterDomesticOrdersBySearch(rows, query).map((r) => r.id),
+      ["1", "2"],
+      `검색 중이 아닌 ${JSON.stringify(query)} 가 줄을 걸렀다`
+    );
+  }
+  for (const query of ["한빛", " 한빛 ", "HANBIT"]) {
+    assert.equal(isDomesticOrderSearchActive(query), true);
+  }
 });
