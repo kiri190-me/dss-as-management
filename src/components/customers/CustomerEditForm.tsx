@@ -9,6 +9,8 @@ import EditSectionActions, {
   editInputClass,
   editLabelClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
+import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
+import { CUSTOMER_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
 import { CustomerRowColorPicker } from "./CustomerRowColorField";
 
 /**
@@ -23,6 +25,20 @@ import { CustomerRowColorPicker } from "./CustomerRowColorField";
  * page, including the new updatedAt) and onDone() — same division of labor
  * as useSectionEditSubmit, just inlined here since this screen has only one
  * form and doesn't need a shared hook extracted for a single caller.
+ *
+ * ── 충돌하면 얼리되, 적어 둔 글은 잃지 않는다 ───────────────────────────
+ * 저장이 CONFLICT 로 돌아오면 이 폼은 얼고 `최신 정보 다시 불러오기` 하나만
+ * 남는다(EditSectionActions). 그것을 누르면 폼이 언마운트되어 방금 손으로 친 글이
+ * 통째로 사라지므로, **얼리기 직전에** 저장하려던 값에서 자유 입력만 뽑아 붙잡아
+ * 둔다(buildDraftText + CUSTOMER_DRAFT_LABELS).
+ *
+ * ⚠️ 충돌하면 입력칸이 전부 `disabled` 가 되는데, **disabled 입력칸의 글자는
+ * 브라우저에서 선택도 복사도 되지 않는다.** 눈에 보여도 챙길 방법이 없다는 뜻이라
+ * 상자가 유일한 길이다(그 상자는 읽기 전용 `<textarea>` 다).
+ *
+ * 무엇을 담고 무엇을 빼는지는 화면이 아니라 domain/edit-draft-text.ts 가 정한다 —
+ * 행 색은 팔레트에서 고르는 값이라 그 맵에 없다. 얼리는 규칙 자체는 하나도 바뀌지
+ * 않았다.
  */
 export default function CustomerEditForm({
   customer,
@@ -45,7 +61,12 @@ export default function CustomerEditForm({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * 평상시 오류는 지금까지처럼 문장 하나다. 충돌일 때만 그 문장에 **방금 적어 둔
+   * 글**을 얹어 보낸다 — 그 모양을 EditSectionActions 가 이미 알고 있어서, 여기서
+   * 넓히는 것만으로 상자가 화면까지 닿는다(그 파일의 ConflictDraftBox).
+   */
+  const [submitError, setSubmitError] = useState<string | SectionEditConflictError | null>(null);
   const [isConflict, setIsConflict] = useState(false);
 
   const disabled = isSubmitting || isConflict;
@@ -56,23 +77,31 @@ export default function CustomerEditForm({
     setIsSubmitting(true);
     setSubmitError(null);
     setFieldErrors({});
+    // 충돌했을 때 이 값에서 자유 입력만 뽑아 붙잡는다(아래 CONFLICT 분기).
+    // 서버로 가는 것은 지금까지와 똑같은 이 묶음 그대로다 — rowColor 도 그대로
+    // 실려 나가고, 상자에만 안 들어간다.
+    const fields = {
+      name,
+      contactName: contactName || null,
+      contactEmail: contactEmail || null,
+      contactPhone: contactPhone || null,
+      rowColor: rowColor || null,
+    };
     try {
       const result = await updateCustomerAction({
         customerId: customer.id,
         expectedUpdatedAt: customer.updatedAt,
-        fields: {
-          name,
-          contactName: contactName || null,
-          contactEmail: contactEmail || null,
-          contactPhone: contactPhone || null,
-          rowColor: rowColor || null,
-        },
+        fields,
       });
 
       if (!result.ok) {
         if (result.code === "CONFLICT") {
+          // 얼리기 **전에** 붙잡는다 — 곧 폼이 사라진다(파일 헤더).
           setIsConflict(true);
-          setSubmitError(result.message);
+          setSubmitError({
+            message: result.message,
+            draftText: buildDraftText(fields, CUSTOMER_DRAFT_LABELS),
+          });
           return;
         }
         setFieldErrors(result.fieldErrors ?? {});

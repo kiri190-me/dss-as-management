@@ -5,13 +5,16 @@ import { useRouter } from "next/navigation";
 import EditSectionActions, {
   editInputClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
+import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import {
   inlineEditCellButtonClass,
   inlineEditCellButtonTitle,
   type InlineEditCellNumeric,
   type InlineEditCellWrapping,
 } from "@/components/common/inline-edit-cell-button";
+import { buildDraftText } from "@/lib/domain/edit-draft-text";
 import {
+  DOMESTIC_ORDER_INLINE_EDIT_DATE,
   DOMESTIC_ORDER_INLINE_EDIT_LABELS,
   buildDomesticOrderCellUpdateFields,
   domesticOrderFaultDescriptionHint,
@@ -134,8 +137,40 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * 고칠 수 있는 것처럼 보이게 해 놓고 아니라고 말하는 셈이다. 그 판정은 화면을
  * 그리기 위한 값일 뿐 관문이 아니다 — 실제 관문은 서버 액션이고, 이 칸을 억지로
  * 띄워 저장을 보내도 거기서 다시 막힌다.
+ *
+ * ── ⚠️ 충돌 상자에는 **고치던 그 칸 하나만** 담는다 ─────────────────────
+ * 충돌하면 얼리고 `최신 정보 다시 불러오기` 하나만 남는데, 그것을 누르면 방금 친
+ * 글이 사라진다. 그래서 얼리기 직전에 그 글을 붙잡아 상자에 담는다
+ * (buildDraftText — `줄 수정` 폼이 이미 같은 방식이다).
+ *
+ * ⚠️ **위 ① 때문에 서버로 보내는 fields 를 그대로 담으면 안 된다.** 그쪽은 줄
+ * 전체를 덮어쓰는 값이라, 사람이 방금 고친 것은 칸 하나뿐인데 스물세 칸이 쏟아져
+ * 나온다 — 정작 잃은 글이 그 사이에 묻힌다. 그래서 상자에 담는 것은
+ * `{ [field]: value }` 하나뿐이다.
+ *
+ * 담을 글이 없으면(칸을 비워 저장한 경우) buildDraftText 가 빈 문자열을 돌려주고
+ * 상자는 아예 그려지지 않는다 — 여기서 따로 가려낼 것이 없다.
  * ============================================================================
  */
+
+/**
+ * 충돌 상자에 담을 칸과 이름표. **날짜 칸 셋이 빠진 아홉 칸**이다.
+ *
+ * 날짜는 달력에서 다시 고르는 데 몇 초면 되고, 잃어서 아픈 것은 손으로 친
+ * 글뿐이다(domain/edit-draft-text.ts 의 '왜 자유 입력만인가'). 이름표를 여기 다시
+ * 적지 않고 **이미 있는 두 표에서 만들어 내는** 것이 이 상수의 요점이다:
+ *
+ *  - 이름표는 DOMESTIC_ORDER_INLINE_EDIT_LABELS 그대로다. 여기 손으로 옮겨 적으면
+ *    한 칸이 화면과 상자에서 서로 다른 이름으로 불리는 날이 온다.
+ *  - 무엇이 날짜인지는 DOMESTIC_ORDER_INLINE_EDIT_DATE 가 정한다. 그래서 나중에
+ *    날짜 칸이 하나 더 늘어도 **이 상수는 저절로 따라간다** — 새 날짜가 상자로
+ *    새어 나갈 자리가 없다.
+ */
+const DRAFT_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(DOMESTIC_ORDER_INLINE_EDIT_LABELS).filter(
+    ([field]) => !DOMESTIC_ORDER_INLINE_EDIT_DATE[field as DomesticOrderInlineEditableField]
+  )
+);
 
 /**
  * 편집칸 아래에 붙는 회색 안내 한 줄의 모양. 지금 이 자리에 붙는 안내는 둘이고
@@ -268,7 +303,12 @@ export default function DomesticOrderTextCell({
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(row[field] ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  /**
+   * 평상시 오류는 지금까지처럼 문장 하나다(칸별 오류도 그 문장으로 온다). 충돌일
+   * 때만 그 문장에 **방금 적어 둔 글**을 얹어 보낸다 — 그 모양을
+   * EditSectionActions 가 이미 알고 있다(그 파일의 ConflictDraftBox).
+   */
+  const [errorMessage, setErrorMessage] = useState<string | SectionEditConflictError | null>(null);
   const [isConflict, setIsConflict] = useState(false);
 
   const disabled = isSubmitting || isConflict;
@@ -306,8 +346,15 @@ export default function DomesticOrderTextCell({
           // 불러오게 한다. 아래 EditSectionActions 가 저장·취소를 지우고
           // `최신 정보 다시 불러오기` 하나만 남긴다(이 저장소의 충돌은 늘 같은
           // 모양이어야 한다).
+          //
+          // 얼리기 **전에** 방금 친 글을 붙잡는다. 담는 것은 위 fields 가 아니라
+          // 고치던 칸 하나뿐이다 — 저쪽은 줄 전체를 덮어쓰는 값이라 그대로 담으면
+          // 스물세 칸이 쏟아진다(파일 헤더의 '그 칸 하나만').
           setIsConflict(true);
-          setErrorMessage(result.message);
+          setErrorMessage({
+            message: result.message,
+            draftText: buildDraftText({ [field]: value }, DRAFT_LABELS),
+          });
           return;
         }
         // 이 칸의 오류가 있으면 그것을 먼저 보여 준다(길이 초과 등). 없으면

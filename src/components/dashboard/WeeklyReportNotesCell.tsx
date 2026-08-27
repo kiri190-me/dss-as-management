@@ -189,7 +189,15 @@ export default function WeeklyReportNotesCell({
       {fieldErrors.notes && <p className={editErrorClass}>{fieldErrors.notes}</p>}
       {/* 충돌이 나면 이 상자가 저장·취소를 지우고 `최신 정보 다시 불러오기` 하나만
           남긴다(그 파일 헤더) — 낡은 화면에서 누른 저장이 방금 바뀐 값을 덮어쓰는
-          길이 여기에도 없다. */}
+          길이 여기에도 없다.
+
+          ⚠️ **`지금 적어 두신 내용` 상자도 여기서 이미 뜬다 — 따로 붙일 것이 없다.**
+          위 useSectionEditSubmit 이 충돌할 때 보낸 fields 에서 자유 입력을 뽑아
+          submitError 에 얹어 주는데(그 훅의 CONFLICT 분기), 이 칸이 보내는 것은
+          `{ notes }` 하나이고 `notes` 는 기본 이름표 맵에 `비고` 로 들어 있다
+          (domain/edit-draft-text.ts 의 EDIT_DRAFT_LABELS). 비워서 지운 저장이면
+          담을 글이 없어 상자가 그려지지 않는 것까지 그대로다. 여기에 같은 일을
+          다시 적으면 규칙이 두 벌이 된다. */}
       <EditSectionActions
         isSubmitting={isSubmitting}
         isConflict={isConflict}

@@ -63,6 +63,46 @@ export const EDIT_DRAFT_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * 고객사 편집 화면(CustomerEditForm)의 이름표. **기본 맵을 쓰지 않는다.**
+ *
+ * 세 이름(contactName · contactEmail · contactPhone)이 위 EDIT_DRAFT_LABELS 에도
+ * 같은 이름으로 있지만, 그것을 그대로 쓸 수는 없다:
+ *  - `name`(고객사명)이 위 맵에 **없다.** 수리 건 인수 정보에서 고객사는 콤보박스라
+ *    UUID 로 남고, 손으로 친 이름이 남는 것은 "새로 등록"일 때뿐이다
+ *    (newCustomerName). 이 화면은 고객사 자체를 고치는 자리라 그 칸이 자유 입력이다.
+ *  - 화면에 놓인 차례가 다르다(이 화면은 이메일이 전화보다 위다). 상자에 나오는
+ *    차례는 사람이 방금 보고 있던 폼의 차례여야 다시 옮겨 적기 쉽다.
+ *
+ * **rowColor 는 없다** — 팔레트에서 고르는 값이라 다시 고르는 데 몇 초면 되고,
+ * 저장되는 것은 `blue` 같은 팔레트 키라 보여 줘 봐야 사람에게 뜻이 없다
+ * (파일 헤더의 '왜 자유 입력만인가'). updatedAt·id 도 마찬가지로 없다.
+ */
+export const CUSTOMER_DRAFT_LABELS: Readonly<Record<string, string>> = {
+  name: "고객사명",
+  contactName: "담당자 성함",
+  contactEmail: "연락처(이메일)",
+  contactPhone: "연락처(전화)",
+};
+
+/**
+ * 제품모델 편집 화면(ProductModelEditForm)의 이름표.
+ *
+ * **kind(제품 종류)는 없다.** 화면에서 `<select>` 로 고르는 값이고(Generator ·
+ * Matcher · Total Controller · 미지정), 저장되는 것은 `GENERATOR` 같은 내부
+ * 값이다 — 상자에 넣으면 사람이 읽을 수 없는 글자가 정작 잃은 글을 밀어낸다.
+ * 파일 헤더가 '고르는 값(… 종류)은 다시 고르는 데 몇 초면 된다'고 적은 그 칸이
+ * 바로 이것이다.
+ *
+ * 나머지 셋은 전부 손으로 친 글이다(설명은 `<textarea>` 라 여러 줄이 들어간다).
+ * 차례는 화면에 놓인 차례 그대로다.
+ */
+export const PRODUCT_MODEL_DRAFT_LABELS: Readonly<Record<string, string>> = {
+  modelName: "모델명",
+  manufacturer: "제조사",
+  description: "설명",
+};
+
+/**
  * 저장하려던 값에서 보여 줄 글을 만든다. **보여 줄 것이 없으면 빈 문자열**이다
  * (화면은 그때 상자를 아예 그리지 않는다 — 빈 상자는 무언가 잘못된 것처럼
  * 보인다).

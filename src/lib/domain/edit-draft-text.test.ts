@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { EDIT_DRAFT_LABELS, buildDraftText } from "./edit-draft-text";
+import {
+  CUSTOMER_DRAFT_LABELS,
+  EDIT_DRAFT_LABELS,
+  PRODUCT_MODEL_DRAFT_LABELS,
+  buildDraftText,
+} from "./edit-draft-text";
 
 /**
  * ============================================================================
@@ -134,4 +139,84 @@ test("이름표 맵에 사람이 읽을 수 없는 항목이 들어 있지 않�
   for (const key of forbidden) {
     assert.ok(!(key in EDIT_DRAFT_LABELS), `${key}는 사람이 읽을 수 있는 자유 입력이 아니다`);
   }
+});
+
+// ─────────────────────────────── 화면 전용 이름표 맵 (고객사 · 제품모델)
+
+test("고객사 맵에는 자유 입력 넷만 있다 — 고르는 색(rowColor)과 id·시각은 없다", () => {
+  assert.deepEqual(Object.keys(CUSTOMER_DRAFT_LABELS), [
+    // 차례가 곧 상자에 나오는 차례다 — 화면(CustomerEditForm)에 놓인 그대로.
+    "name",
+    "contactName",
+    "contactEmail",
+    "contactPhone",
+  ]);
+  // rowColor 는 팔레트에서 고르는 값이고 저장되는 것은 `blue` 같은 키다.
+  // id·updatedAt 은 사람이 읽을 수 없다. 셋 다 새어 나가면 안 된다.
+  for (const key of ["rowColor", "id", "updatedAt"]) {
+    assert.ok(!(key in CUSTOMER_DRAFT_LABELS), `${key}는 자유 입력이 아니다`);
+  }
+});
+
+test("제품모델 맵에는 자유 입력 셋만 있다 — 고르는 값(kind)은 없다", () => {
+  assert.deepEqual(Object.keys(PRODUCT_MODEL_DRAFT_LABELS), [
+    // 화면(ProductModelEditForm)에 놓인 차례 그대로.
+    "modelName",
+    "manufacturer",
+    "description",
+  ]);
+  // kind 는 <select> 로 고르고 저장되는 값은 `GENERATOR` 같은 내부 값이다.
+  for (const key of ["kind", "id", "updatedAt"]) {
+    assert.ok(!(key in PRODUCT_MODEL_DRAFT_LABELS), `${key}는 자유 입력이 아니다`);
+  }
+});
+
+test("화면 전용 맵은 그 화면이 보내는 값만 골라 담는다 — 나머지는 그냥 빠진다", () => {
+  // 고객사 저장이 실제로 보내는 모양(CustomerEditForm 의 fields) 그대로 넣는다.
+  assert.equal(
+    buildDraftText(
+      {
+        name: "㈜한빛전자",
+        contactName: "홍길동",
+        contactEmail: "hong@example.com",
+        contactPhone: "010-1234-5678",
+        rowColor: "blue",
+      },
+      CUSTOMER_DRAFT_LABELS
+    ),
+    "고객사명\n㈜한빛전자\n\n담당자 성함\n홍길동\n\n연락처(이메일)\nhong@example.com\n\n연락처(전화)\n010-1234-5678"
+  );
+  assert.ok(
+    !buildDraftText({ name: "㈜한빛전자", rowColor: "blue" }, CUSTOMER_DRAFT_LABELS).includes(
+      "blue"
+    ),
+    "고르는 색이 상자에 섞여 나오면 안 된다"
+  );
+
+  // 제품모델 저장이 실제로 보내는 모양(ProductModelEditForm 의 fields) 그대로.
+  const productModel = buildDraftText(
+    {
+      modelName: "RFG-3000",
+      kind: "GENERATOR",
+      manufacturer: "DSS",
+      description: "13.56MHz\n3kW",
+    },
+    PRODUCT_MODEL_DRAFT_LABELS
+  );
+  assert.equal(productModel, "모델명\nRFG-3000\n\n제조사\nDSS\n\n설명\n13.56MHz\n3kW");
+  assert.ok(!productModel.includes("GENERATOR"), "고르는 값이 상자에 섞여 나오면 안 된다");
+});
+
+test("두 맵 모두 담을 글이 하나도 없으면 빈 문자열이다 — 상자를 그리지 않는 근거", () => {
+  // 색만 바꾼 저장, 종류만 바꾼 저장에는 잃을 글이 없다.
+  assert.equal(buildDraftText({ rowColor: "blue" }, CUSTOMER_DRAFT_LABELS), "");
+  assert.equal(buildDraftText({ kind: "MATCHER" }, PRODUCT_MODEL_DRAFT_LABELS), "");
+  // 빈 값으로 지우기만 한 저장도 마찬가지다(폼은 빈 문자열을 null 로 접어 보낸다).
+  assert.equal(
+    buildDraftText(
+      { name: "", contactName: null, contactEmail: null, contactPhone: null },
+      CUSTOMER_DRAFT_LABELS
+    ),
+    ""
+  );
 });
