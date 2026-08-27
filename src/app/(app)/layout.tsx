@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import AppShell from "@/components/layout/AppShell";
+import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { roleLabels } from "@/lib/domain/types";
@@ -62,14 +63,26 @@ export default async function AppLayout({
   const portalUrl = getLoginMode() === "sso" ? getSsoPortalUrl() : null;
 
   return (
-    <AppShell
-      user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
-      accessibleAreaKeys={accessibleAreaKeys}
-      myPendingApprovalCount={myPendingApprovalCount}
-      notifications={notifications}
-      portalUrl={portalUrl}
-    >
-      {children}
-    </AppShell>
+    <>
+      <AppShell
+        user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
+        accessibleAreaKeys={accessibleAreaKeys}
+        myPendingApprovalCount={myPendingApprovalCount}
+        notifications={notifications}
+        portalUrl={portalUrl}
+      >
+        {children}
+      </AppShell>
+      {/*
+        화면을 하나도 그리지 않는다(return null) — 위 종에 뜬 것과 **같은 목록**을
+        받아, 새로 생긴 것만 컴퓨터·폰 알림창에 띄우는 일만 한다. 조회는 여전히
+        위의 한 번뿐이다.
+
+        AppShell 안이 아니라 여기 있는 이유는 사용자 id 때문이다: 이미 띄운
+        알림은 사람마다 갈라 적어 둬야 하는데(공용 PC), 종까지 내려보내려면
+        AppShell과 TopBar가 쓰지도 않을 값을 날라야 한다.
+      */}
+      <BrowserNotifications userKey={user.id} items={notifications} />
+    </>
   );
 }

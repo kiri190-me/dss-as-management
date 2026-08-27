@@ -54,14 +54,33 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
 }
 
-test("등록된 종류마다 사람이 읽는 이름과 한 줄 설명이 있다", () => {
+test("등록된 종류마다 사람이 읽는 이름과 한 줄 설명과 글자색이 있다", () => {
   // 종류가 늘면 화면은 안 고치지만 이 표는 채워야 한다 — 이름 없는 줄이
-  // 화면에 그려지면 관리자가 무엇을 끄는지 알 수 없다.
+  // 화면에 그려지면 관리자가 무엇을 끄는지 알 수 없다. 색도 같다: 화면은 이
+  // 값을 읽기만 하므로, 여기가 비면 종 패널에 색 없는 줄이 그려진다.
   for (const kind of NOTIFICATION_KINDS) {
     const meta = NOTIFICATION_KIND_META[kind];
-    assert.ok(meta, `${kind}의 이름·설명이 없다`);
+    assert.ok(meta, `${kind}의 이름·설명·색이 없다`);
     assert.ok(meta.label.length > 0, `${kind}의 이름이 비어 있다`);
     assert.ok(meta.description.length > 0, `${kind}의 설명이 비어 있다`);
+    assert.ok(meta.toneClassName.length > 0, `${kind}의 글자색이 비어 있다`);
+  }
+});
+
+test("🔴 종류마다 색이 서로 다르다 — 같은 색이면 갈라 보이지 않는다", () => {
+  const tones = NOTIFICATION_KINDS.map((kind) => NOTIFICATION_KIND_META[kind].toneClassName);
+  assert.equal(new Set(tones).size, tones.length, `색이 겹친다: ${tones.join(" / ")}`);
+});
+
+test("🔴 색은 밝은 화면과 어두운 화면 두 벌이고, 조립하지 않은 온전한 클래스 이름이다", () => {
+  // Tailwind는 소스에 **글자 그대로** 적힌 클래스만 CSS로 만든다. 조각을 붙여
+  // 만들면 빌드 결과에 그 클래스가 없어 화면에서 색이 아예 나오지 않는다
+  // (customer-row-color.ts가 같은 이유로 같은 규칙을 지킨다). 어두운 화면 값이
+  // 빠지면 한쪽 화면에서만 읽히는 색이 된다.
+  for (const kind of NOTIFICATION_KINDS) {
+    const tone = NOTIFICATION_KIND_META[kind].toneClassName;
+    assert.match(tone, /^text-[a-z]+-\d{2,3} dark:text-[a-z]+-\d{2,3}$/, `${kind}: ${tone}`);
+    assert.ok(!tone.includes("${"), `${kind}의 색을 조립하면 Tailwind가 만들지 않는다`);
   }
 });
 
