@@ -2,10 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import type {
+  ProductModelAttachmentListItem,
+  TrashedProductModelAttachmentListItem,
+} from "@/lib/db/queries/attachments";
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import ProductModelEditForm from "./ProductModelEditForm";
+import ProductModelFilesSection from "./ProductModelFilesSection";
 import ProductModelHistoryBreakdown from "./ProductModelHistoryBreakdown";
 
 const KIND_LABELS: Record<string, string> = {
@@ -16,13 +21,6 @@ const KIND_LABELS: Record<string, string> = {
 
 function kindLabel(kind: string | null): string {
   return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "-";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {
@@ -39,10 +37,27 @@ function InfoField({ label, value }: { label: string; value: string }) {
  * (view/edit toggle, canEdit-gated — ProductModelEditForm only ever mounts
  * for SUPER_ADMIN/ADMIN, re-verified server-side by updateProductModelAction
  * regardless), 모델 통계 (aggregate figures, all derived via product_model_id
- * linkage — see product-models.ts), 등록 장비 (per-unit S/N/L/N/repair
- * count/latest intake), A/S 이력 (ProductModelHistoryBreakdown — 골라 켜는
- * 원형 그래프 네 종과, 기본으로 접혀 있는 접수 건 목록. 목록 자체는 그대로
- * ProductModelRepairCaseHistory 가 그린다).
+ * linkage — see product-models.ts), 사진·도면 (ProductModelFilesSection —
+ * 실제 파일이 올라가고 내려오는 자리), A/S 이력
+ * (ProductModelHistoryBreakdown — 골라 켜는 원형 그래프 네 종과, 기본으로
+ * 접혀 있는 접수 건 목록. 목록 자체는 그대로 ProductModelRepairCaseHistory 가
+ * 그린다).
+ *
+ * ── `등록 장비` 구역과 `등록 장비 수` 카드를 없앴다 (사용자 결정) ────────
+ * 장비 한 대씩의 S/N·L/N 표가 있던 자리다. 없앤 근거는 **같은 값이 아래
+ * `A/S 이력` 의 접수 건 목록에 줄마다 이미 나온다**는 것이다(RepairCaseTable).
+ *
+ * ⚠️ 알고 없앴다: 접수 건이 하나도 없는 장비(실측 188대 중 73대)는 이 화면
+ * 어디에도 나오지 않게 된다. 그 사실을 사용자에게 알렸고 그래도 없애기로
+ * 정했다 — 되살릴 일이 생기면 여기가 그 자리다.
+ *
+ * `모델 통계` 의 `재입고(반복 수리) 장비 수` 는 그대로 둔다. 그 값은 접수 건
+ * 수로 세는 것이라 표가 사라지는 것과 무관하다(조회가 계속 계산한다).
+ *
+ * ── detail 에 units 가 없다 ──────────────────────────────────────────────
+ * 위 표가 사라지면서 units 배열을 읽는 화면이 없어졌다. 이 컴포넌트는
+ * "use client" 라 받은 값이 그대로 브라우저까지 실려 가므로, 페이지가 넘기기
+ * 전에 덜어 낸다(queries/product-models.ts 의 ProductModelDetail 주석).
  *
  * Product kind (Generator/Matcher) IS now a real model-master field
  * (product_models.kind), shown in 모델 기본정보 — but it is never derived
@@ -58,12 +73,19 @@ export default function ProductModelDetailScreen({
   repairCases,
   requestedParts,
   canEdit,
+  attachments,
+  trashedAttachments,
+  canManageFiles,
 }: {
   detail: ProductModelDetail;
   repairCases: ResolvedRepairCase[];
   /** 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다. */
   requestedParts: RequestedPartRow[];
   canEdit: boolean;
+  attachments: ProductModelAttachmentListItem[];
+  trashedAttachments: TrashedProductModelAttachmentListItem[];
+  /** productModels.files WRITE. 서버 컴포넌트가 판정해 내려보낸 값이다. */
+  canManageFiles: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -110,7 +132,6 @@ export default function ProductModelDetailScreen({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">모델 통계</h2>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
-          <InfoField label="등록 장비 수" value={String(detail.unitCount)} />
           <InfoField label="A/S 접수 건수" value={String(detail.repairCaseCount)} />
           <InfoField label="재입고(반복 수리) 장비 수" value={String(detail.repeatRepairUnitCount)} />
           <InfoField label="현재 수리 중 건수" value={String(detail.currentlyInRepairCount)} />
@@ -121,31 +142,12 @@ export default function ProductModelDetailScreen({
         </dl>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">등록 장비</h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                <th className="px-3 py-2 font-medium">S/N</th>
-                <th className="px-3 py-2 font-medium">L/N</th>
-                <th className="px-3 py-2 font-medium">관련 A/S 접수 건수</th>
-                <th className="px-3 py-2 font-medium">최신 입고일</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.units.map((unit) => (
-                <tr key={unit.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                  <td className="px-3 py-2 whitespace-nowrap">{unit.serialNumber ?? "-"}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{unit.lotNumber ?? "-"}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{unit.repairCaseCount}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{formatDate(unit.latestReceivedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <ProductModelFilesSection
+        productModelId={detail.id}
+        attachments={attachments}
+        trashedAttachments={trashedAttachments}
+        canManageFiles={canManageFiles}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>

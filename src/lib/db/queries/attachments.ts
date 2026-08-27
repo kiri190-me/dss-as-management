@@ -142,6 +142,110 @@ export async function listTrashedAttachmentsForRepairCase(
   }));
 }
 
+/**
+ * ============================================================================
+ * 제품 모델의 첨부 목록 — 모델 상세의 `사진·도면` 구역이 쓰는 조회
+ * ============================================================================
+ * 위 접수 건 조회 둘과 **같은 모양으로 나란히 둔다.** 조건절이
+ * `WHERE product_model_id = ? AND is_deleted = false` 그대로여야
+ * attachments_product_model_id_not_deleted_idx(부분 인덱스, `WHERE is_deleted =
+ * false`)를 탄다 — 접수 건 쪽과 똑같은 이유이고, 그래서 휴지통 목록도 똑같이
+ * **별도 함수**다. 한 함수에 플래그를 받아 조건을 분기시키면 두 인덱스 중 어느
+ * 쪽도 타지 못한다.
+ *
+ * ── 왜 접수 건 조회에 컬럼만 바꿔 끼우지 않는가 ─────────────────────────
+ * 그 함수는 실기에서 매번 쓰이는 길이다. 주인을 인자로 받게 고치는 순간, 이
+ * 조회를 손보는 다음 사람이 **아무도 의도하지 않은 채** 접수 건 파일 탭까지
+ * 흔들게 된다(업로드 라우트를 두 벌로 나란히 둔 것과 같은 판단).
+ *
+ * ── 돌려주는 모양은 접수 건 쪽과 같다 ────────────────────────────────────
+ * 필드를 복제하지 않고 타입 별칭으로 둔다. 복제해 두면 한쪽만 바뀌는 날 두
+ * 화면이 다른 것을 보여 주게 되고, 같은 타입이어야 사진 크게 보기
+ * (AttachmentViewer)를 고치지 않고 그대로 쓸 수 있다.
+ * ============================================================================
+ */
+export type ProductModelAttachmentListItem = RepairCaseAttachmentListItem;
+
+export async function listAttachmentsForProductModel(
+  productModelId: string
+): Promise<ProductModelAttachmentListItem[]> {
+  if (!UUID_PATTERN.test(productModelId)) return [];
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      category: attachments.category,
+      originalFileName: attachments.originalFileName,
+      storedPath: attachments.storedPath,
+      previewPath: attachments.previewPath,
+      mimeType: attachments.mimeType,
+      fileSize: attachments.fileSize,
+      checksumSha256: attachments.checksumSha256,
+      malwareScanStatus: attachments.malwareScanStatus,
+      description: attachments.description,
+      uploadedById: attachments.uploadedBy,
+      uploadedByName: users.name,
+      uploadedAt: attachments.uploadedAt,
+    })
+    .from(attachments)
+    .innerJoin(users, eq(users.id, attachments.uploadedBy))
+    .where(and(eq(attachments.productModelId, productModelId), eq(attachments.isDeleted, false)))
+    .orderBy(desc(attachments.uploadedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    uploadedAt: row.uploadedAt.toISOString(),
+  }));
+}
+
+export type TrashedProductModelAttachmentListItem = TrashedAttachmentListItem;
+
+/**
+ * 휴지통에 든 모델 첨부. 접수 건 쪽(listTrashedAttachmentsForRepairCase)과 같은
+ * 이유로 목록 조회와 분리했고, `deleted_by`가 nullable이라 LEFT JOIN인 것도
+ * 같다 — 지운 사람을 알 수 없는 행이 화면에서 사라지면 되살릴 방법이 없다.
+ */
+export async function listTrashedAttachmentsForProductModel(
+  productModelId: string
+): Promise<TrashedProductModelAttachmentListItem[]> {
+  if (!UUID_PATTERN.test(productModelId)) return [];
+
+  const deleter = alias(users, "deleter");
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      category: attachments.category,
+      originalFileName: attachments.originalFileName,
+      storedPath: attachments.storedPath,
+      previewPath: attachments.previewPath,
+      mimeType: attachments.mimeType,
+      fileSize: attachments.fileSize,
+      checksumSha256: attachments.checksumSha256,
+      malwareScanStatus: attachments.malwareScanStatus,
+      description: attachments.description,
+      uploadedById: attachments.uploadedBy,
+      uploadedByName: users.name,
+      uploadedAt: attachments.uploadedAt,
+      deletedAt: attachments.deletedAt,
+      deletedByName: deleter.name,
+      deleteReason: attachments.deleteReason,
+    })
+    .from(attachments)
+    .innerJoin(users, eq(users.id, attachments.uploadedBy))
+    .leftJoin(deleter, eq(deleter.id, attachments.deletedBy))
+    .where(and(eq(attachments.productModelId, productModelId), eq(attachments.isDeleted, true)))
+    .orderBy(desc(attachments.deletedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    uploadedAt: row.uploadedAt.toISOString(),
+    // 접수 건 쪽과 같은 방어다 — is_deleted = true 인 행이므로 deleted_at 은
+    // 채워져 있지만, 비어 있어도 화면이 깨지지 않아야 복원할 수 있다.
+    deletedAt: (row.deletedAt ?? row.uploadedAt).toISOString(),
+  }));
+}
+
 export type AttachmentUploadTarget = {
   id: string;
   /** 출하 완료로 잠긴 건. 잠긴 건에는 파일을 붙이지 않는다. */

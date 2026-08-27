@@ -96,6 +96,18 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
   }));
 }
 
+/**
+ * ── 화면으로 넘어가는 몫. **units 가 없다.** ─────────────────────────────
+ * 모델 상세의 `등록 장비` 표가 사라지면서(S/N·L/N 은 아래 `A/S 이력` 의 접수 건
+ * 목록에 줄마다 이미 나온다) 이 배열을 읽는 화면이 하나도 없어졌다. 그런데
+ * 상세 화면은 "use client" 라, 넘긴 값은 읽지 않아도 **브라우저까지 그대로
+ * 실려 간다** — 장비가 수백 대인 모델이면 그만큼의 죽은 짐이다.
+ *
+ * 그래서 화면이 받는 타입에서 뺐다. 계산까지 없앤 것은 아니다 —
+ * repeatRepairUnitCount(재입고 장비 수)가 아래 units 배열로부터 나오므로
+ * 조회는 여전히 그것을 만든다(ProductModelDetailWithUnits). 밖으로 내보내는
+ * 자리만 좁힌 것이다.
+ */
 export type ProductModelDetail = {
   id: string;
   modelName: string;
@@ -110,8 +122,43 @@ export type ProductModelDetail = {
   currentlyInRepairCount: number;
   /** null when zero completed (shipped) cases exist yet — never fabricated as 0. */
   averageRepairDurationDays: number | null;
+};
+
+/**
+ * 조회가 실제로 돌려주는 모양. 장비 한 대씩의 줄까지 들어 있고, 그 줄들이
+ * repeatRepairUnitCount 의 재료다. 화면은 이 타입을 받지 않는다 — 페이지가
+ * units 를 덜어 낸 뒤 ProductModelDetail 로 넘긴다.
+ */
+export type ProductModelDetailWithUnits = ProductModelDetail & {
   units: ProductModelUnitRow[];
 };
+
+/**
+ * 화면으로 넘길 몫만 남긴다.
+ *
+ * 필드를 하나씩 적는 것이 일부러다 — `const { units, ...rest }` 로 덜어 내면
+ * 나중에 이 타입에 필드가 하나 붙었을 때 아무 신호 없이 함께 실려 나가지만,
+ * 이렇게 적어 두면 그때 컴파일이 멈춰 "이것도 브라우저로 보낼 값인가"를
+ * 묻게 된다.
+ */
+export function toProductModelDetailForScreen(
+  detail: ProductModelDetailWithUnits
+): ProductModelDetail {
+  return {
+    id: detail.id,
+    modelName: detail.modelName,
+    kind: detail.kind,
+    manufacturer: detail.manufacturer,
+    description: detail.description,
+    createdAt: detail.createdAt,
+    updatedAt: detail.updatedAt,
+    unitCount: detail.unitCount,
+    repairCaseCount: detail.repairCaseCount,
+    repeatRepairUnitCount: detail.repeatRepairUnitCount,
+    currentlyInRepairCount: detail.currentlyInRepairCount,
+    averageRepairDurationDays: detail.averageRepairDurationDays,
+  };
+}
 
 export type ProductModelUnitRow = {
   id: string;
@@ -127,7 +174,9 @@ export type ProductModelUnitRow = {
  * string comparison — a later master rename (updateProductModelAction)
  * never breaks this linkage.
  */
-export async function getProductModelDetailById(id: string): Promise<ProductModelDetail | null> {
+export async function getProductModelDetailById(
+  id: string
+): Promise<ProductModelDetailWithUnits | null> {
   if (!UUID_PATTERN.test(id)) return null;
 
   const [model] = await db
