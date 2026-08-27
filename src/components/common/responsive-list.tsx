@@ -12,6 +12,9 @@ import { useTableFitsWithoutOverflow } from "@/lib/hooks/useTableFitsWithoutOver
  *     아직 고른 적 없으면 → 표가 들어가면 **표**, 안 들어가면 **카드**
  *     한 번이라도 골랐으면 → **고른 대로**
  *
+ * (첫 줄만 목록별로 덮을 수 있다 — defaultMode. 둘째 줄은 덮을 수 없다:
+ *  사람이 고른 값은 무엇보다 먼저다. resolveShowTable 참조.)
+ *
  * ── 왜 이 파일이 생겼나 ─────────────────────────────────────────────────
  * 규칙 자체는 전부터 있었지만 화면마다 기준이 달랐다 — 접수 건·고객사·제품
  * 모델은 lg, 첨부파일은 md, 진단 Flowchart는 실제 넘침 측정. 같은 창 크기에서
@@ -185,10 +188,30 @@ export type ViewMode = "TABLE" | "CARD";
  * 화면 밖에서 계속 재는 fits는 그래도 계속 유효하다: 자동으로 두는 사람에게는
  * 이것이 곧 답이고, 골라 둔 사람에게도 폭이 다시 넓어졌을 때 스크롤이 저절로
  * 사라지게 하는 것은 CSS(overflow-x-auto) 쪽이라 따로 되돌릴 것이 없다.
+ *
+ * ── defaultMode — 폭이 정하게 두면 안 되는 목록만 ────────────────────────
+ * **넘기지 않으면 위 규칙 그대로다.** 넘긴 목록에서만, 고른 적이 없을 때 폭 대신
+ * 이 값이 답이 된다. 사진 격자처럼 **무엇을 보러 온 자리인지가 이미 정해진**
+ * 목록을 위한 것이다 — 제품 모델의 `사진·도면` 은 넓은 화면에서 표가 들어간다는
+ * 이유로 처음부터 글자 표를 내밀면, 사진을 보러 들어온 사람에게 사진이 아닌 것을
+ * 먼저 보이게 된다.
+ *
+ * ⚠️ **고른 값이 언제나 먼저다.** stored 판정이 이 함수의 첫 줄에 있는 것이 그
+ * 성질의 전부다 — defaultMode 를 stored 보다 앞에 두면 "골라 놨는데 새로고침하면
+ * 되돌아간다"가 된다. 순서를 바꾸지 말 것.
+ *
+ * ⚠️ defaultMode 를 준 목록에서도 **폭 재기는 그대로 필요하다.** 그 사람이 `표`를
+ * 고르는 순간부터는 다른 목록과 똑같이 fits 가 잣대다(안 들어가면 가로 스크롤이
+ * 된다고 토글이 미리 알린다).
  */
-export function resolveShowTable(stored: ViewMode | null, fits: boolean): boolean {
-  if (stored === null) return fits;
-  return stored === "TABLE";
+export function resolveShowTable(
+  stored: ViewMode | null,
+  fits: boolean,
+  defaultMode?: ViewMode
+): boolean {
+  if (stored !== null) return stored === "TABLE";
+  if (defaultMode !== undefined) return defaultMode === "TABLE";
+  return fits;
 }
 
 const listeners = new Set<() => void>();
@@ -267,6 +290,8 @@ export function ResponsiveList({
   meta,
   measureKey,
   stickyHeader = false,
+  cardLabel,
+  defaultMode,
 }: {
   /** 선택을 기억할 이름. 목록마다 따로 기억한다. */
   listId: string;
@@ -299,11 +324,25 @@ export function ResponsiveList({
    * 하나까지 같다).
    */
   stickyHeader?: boolean;
+  /**
+   * 오른쪽 단추의 글자. **넘기지 않으면 `카드`** 로, 이 인자가 생기기 전과 같다.
+   * 카드가 아닌 것을 그리는 목록만 넘긴다 — 제품 모델 `사진·도면` 의 썸네일
+   * 격자는 사람이 `미리보기` 라고 부르는 것이지 카드가 아니다.
+   */
+  cardLabel?: string;
+  /**
+   * **아직 고른 적이 없는 사람**에게 무엇을 보일지. 넘기지 않으면 지금까지처럼
+   * 폭이 정한다(들어가면 표, 안 들어가면 카드). 고른 값은 이것을 언제나 이긴다 —
+   * 위 resolveShowTable 참조.
+   */
+  defaultMode?: ViewMode;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // defaultMode 를 준 목록에서도 계속 잰다 — 그 사람이 `표`를 고른 뒤에는 이것이
+  // 그대로 잣대다(resolveShowTable 의 마지막 ⚠️).
   const fits = useTableFitsWithoutOverflow(wrapperRef, measureKey ?? []);
   const mode = useViewMode(listId);
-  const showTable = resolveShowTable(mode, fits);
+  const showTable = resolveShowTable(mode, fits, defaultMode);
 
   // 켠 목록에만 붙는다. 보이는 래퍼와 화면 밖에서 재는 래퍼에 **똑같이** 붙어야
   // 하는 이유는 파일 헤더의 마지막 ⚠️ 에 있다(잣대가 어긋나면 카드↔표가 무한히
@@ -332,6 +371,7 @@ export function ResponsiveList({
         <ViewModeToggle
           value={showTable ? "TABLE" : "CARD"}
           fits={fits}
+          cardLabel={cardLabel}
           onChange={(next) => setViewMode(listId, next)}
         />
       </div>
@@ -375,17 +415,20 @@ export function ResponsiveList({
 function ViewModeToggle({
   value,
   fits,
+  cardLabel = "카드",
   onChange,
 }: {
   /** 지금 화면에 실제로 있는 것. */
   value: ViewMode;
   /** 표가 지금 폭에 들어가는지. 안 들어가면 "표"는 가로 스크롤이 된다고 미리 알린다. */
   fits: boolean;
+  /** 오른쪽 단추의 글자. 기본값이 예전 그대로라 안 넘긴 목록은 글자가 같다. */
+  cardLabel?: string;
   onChange: (next: ViewMode) => void;
 }) {
   const options: { mode: ViewMode; label: string; title?: string }[] = [
     { mode: "TABLE", label: "표", title: fits ? undefined : "지금 폭에는 표가 다 들어가지 않아 옆으로 밀어 봐야 합니다" },
-    { mode: "CARD", label: "카드" },
+    { mode: "CARD", label: cardLabel },
   ];
   return (
     <div

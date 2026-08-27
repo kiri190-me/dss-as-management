@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ResponsiveList } from "@/components/common/responsive-list";
 import AttachmentViewer from "@/components/repair-cases/files/AttachmentViewer";
 import DeleteAttachmentDialog from "@/components/repair-cases/files/DeleteAttachmentDialog";
 import RestoreAttachmentDialog from "@/components/repair-cases/files/RestoreAttachmentDialog";
@@ -19,6 +20,7 @@ import {
   attachmentCategoryLabels,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
+import { ATTACHMENT_KIND_LABELS, attachmentKindOf } from "@/lib/domain/attachment-list-filters";
 import {
   restoreAttachmentAction,
   softDeleteAttachmentAction,
@@ -52,6 +54,27 @@ import {
  * StoredAttachmentList)에는 카메라·묶어 받기·줄여서 받기·거르기·타임라인·데모
  * 저장소가 함께 들어 있어 인자만으로는 떼어 낼 수 없고, 떼어 내려고 그 파일을
  * 손대는 순간 실기에서 쓰이는 화면이 함께 흔들린다.
+ *
+ * ── `표` / `미리보기` — 전환 장치는 새로 만들지 않는다 ────────────────────
+ * 서비스의 모든 목록이 쓰는 ResponsiveList 를 그대로 쓴다. 단추 두 개도, 고른
+ * 것을 목록마다 따로 기억하는 것도, 표가 지금 폭에 들어가는지 실제로 재는 것도
+ * 전부 그쪽에 이미 있다.
+ *
+ * 다만 두 가지를 인자로 덮는다:
+ *   cardLabel="미리보기"  — 여기 격자는 사람이 `미리보기` 라고 부르는 것이지
+ *                           카드가 아니다.
+ *   defaultMode="CARD"    — **고른 적이 없으면 미리보기부터.** 기본값(폭이 정함)
+ *                           그대로 두면 넓은 화면에서 처음 여는 사람에게 표가
+ *                           먼저 뜬다 — 사진을 보러 들어온 자리에서 사진이 아닌
+ *                           것을 먼저 보이는 셈이다. 한 번이라도 `표`를 고른
+ *                           사람에게는 그 선택이 이긴다(resolveShowTable).
+ *
+ * 표에는 **썸네일을 넣지 않는다.** 넣으면 두 보기가 같아져 전환할 까닭이
+ * 없어진다 — 표는 이름·분류·크기를 **글자로 훑는 자리**이고, 사진인지 문서인지는
+ * 종류 배지가 알린다. 사진을 보는 자리는 미리보기 격자다.
+ *
+ * 올리기 폼과 휴지통은 전환 장치 **밖**에 둔다 — 보기 방식과 상관없이 늘 같은
+ * 자리에 있어야 한다.
  *
  * ── 권한 ─────────────────────────────────────────────────────────────────
  * `canManageFiles`(productModels.files WRITE)가 없으면 올리기 칸도 지우기 단추도
@@ -162,6 +185,113 @@ function Thumbnail({
     >
       {image}
     </button>
+  );
+}
+
+/** 사진인지 문서인지 한눈에. 표에는 썸네일이 없으므로 이것이 그 자리를 대신한다. */
+function KindBadge({ mimeType }: { mimeType: string }) {
+  const kind = attachmentKindOf(mimeType);
+  return (
+    <span
+      className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        kind === "image"
+          ? "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"
+          : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+      }`}
+    >
+      {ATTACHMENT_KIND_LABELS[kind]}
+    </span>
+  );
+}
+
+/**
+ * 표 보기 — 파일이 늘었을 때 이름·분류·크기를 **글자로** 훑는 자리.
+ *
+ * 🔴 **썸네일을 넣지 말 것.** 넣는 순간 미리보기 격자와 같은 것이 되어 전환할
+ * 까닭이 사라진다(파일 상단 참조). 사진인지 문서인지는 KindBadge 가 알린다.
+ *
+ * 스크롤 껍데기(overflow-x-auto)와 테두리는 **여기서 두르지 않는다** —
+ * ResponsiveList 가 소유한다. 여기서 한 겹 더 두르면 넘침이 그 안에서 흡수되어
+ * 바깥은 영영 "들어간다"고 답하고, 표/미리보기 자동 판정이 망가진다
+ * (responsive-list.tsx 의 '표 껍데기는 여기가 소유한다').
+ */
+function FilesTable({
+  attachments,
+  canManageFiles,
+  isBusy,
+  onDelete,
+}: {
+  attachments: ProductModelAttachmentListItem[];
+  canManageFiles: boolean;
+  isBusy: boolean;
+  onDelete: (item: ProductModelAttachmentListItem) => void;
+}) {
+  return (
+    <table className="min-w-full text-left text-sm">
+      <thead className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        <tr>
+          <th scope="col" className="px-3 py-2 font-medium">파일명</th>
+          <th scope="col" className="px-3 py-2 font-medium">분류</th>
+          <th scope="col" className="px-3 py-2 text-right font-medium">크기</th>
+          <th scope="col" className="px-3 py-2 font-medium">올린 사람</th>
+          <th scope="col" className="px-3 py-2 font-medium">올린 날짜</th>
+          <th scope="col" className="px-3 py-2 font-medium">내려받기</th>
+          {canManageFiles && <th scope="col" className="px-3 py-2 font-medium">지우기</th>}
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {attachments.map((item) => (
+          <tr key={item.id}>
+            <td className="px-3 py-2">
+              <div className="flex items-center gap-2">
+                <KindBadge mimeType={item.mimeType} />
+                <span className="truncate text-zinc-900 dark:text-zinc-50" title={item.originalFileName}>
+                  {item.originalFileName}
+                </span>
+              </div>
+            </td>
+            <td className="whitespace-nowrap px-3 py-2 text-zinc-700 dark:text-zinc-300">
+              {attachmentCategoryLabels[item.category]}
+            </td>
+            {/* 줄지어 서는 숫자는 자릿수를 맞춘다 — 이 저장소의 다른 표와 같다. */}
+            <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
+              {formatBytes(item.fileSize)}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2 text-zinc-700 dark:text-zinc-300">
+              {item.uploadedByName}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-700 dark:text-zinc-300">
+              {formatTimestamp(item.uploadedAt)}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2">
+              <a
+                href={downloadUrlOf(item.id)}
+                // 한 줄에 같은 말이 여럿이라 무엇을 받는지 이름으로 밝힌다.
+                // (sr-only 로 숨긴 글자는 이 저장소에서 페이지를 굴린 전력이 있어
+                //  쓰지 않는다 — aria-label 로 붙인다.)
+                aria-label={`${item.originalFileName} 내려받기`}
+                className="text-xs font-medium text-zinc-700 underline dark:text-zinc-300"
+              >
+                내려받기
+              </a>
+            </td>
+            {canManageFiles && (
+              <td className="whitespace-nowrap px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => onDelete(item)}
+                  disabled={isBusy}
+                  aria-label={`${item.originalFileName} 지우기`}
+                  className="text-xs font-medium text-red-700 underline disabled:opacity-50 dark:text-red-400"
+                >
+                  지우기
+                </button>
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -347,13 +477,13 @@ export default function ProductModelFilesSection({
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      {/*
+        건수는 아래 ResponsiveList 의 meta 자리(단추 왼쪽)에 있다 — 다른 목록들이
+        전부 그 자리에 적고, 여기와 두 곳에 적으면 같은 수가 한 화면에 두 번
+        보인다. 목록이 비었을 때는 어차피 둘 다 없다(아래 빈 상태 문장).
+      */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">사진·도면</h2>
-        {attachments.length > 0 && (
-          <span className="text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
-            {attachments.length}건
-          </span>
-        )}
       </div>
 
       {canManageFiles && (
@@ -429,53 +559,80 @@ export default function ProductModelFilesSection({
           아직 올라온 사진·도면이 없습니다.
         </p>
       ) : (
-        <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {attachments.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-            >
-              <Thumbnail item={item} onOpen={openViewer} />
-              <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
-                <span
-                  title={item.originalFileName}
-                  className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-50"
-                >
-                  {item.originalFileName}
-                </span>
-                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)}
-                </span>
-                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {item.uploadedByName} · {formatTimestamp(item.uploadedAt)}
-                </span>
-                {item.description && (
-                  <span className="truncate text-[11px] text-zinc-600 dark:text-zinc-300">
-                    {item.description}
-                  </span>
-                )}
-                <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                  <a
-                    href={downloadUrlOf(item.id)}
-                    className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+        <div className="mt-3">
+          <ResponsiveList
+            listId="product-model-attachments"
+            /* 사진을 보러 온 자리다 — 고른 적이 없으면 미리보기부터(파일 상단). */
+            defaultMode="CARD"
+            cardLabel="미리보기"
+            meta={
+              <span className="mr-auto text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
+                {attachments.length}건
+              </span>
+            }
+            /* 줄 수와 `지우기` 열의 유무가 표의 필요 폭을 바꾼다. */
+            measureKey={[attachments.length, canManageFiles]}
+            table={
+              <FilesTable
+                attachments={attachments}
+                canManageFiles={canManageFiles}
+                isBusy={isBusy}
+                onDelete={setPendingDelete}
+              />
+            }
+            /* 미리보기는 예전 격자 그대로다 — 자리만 이 안으로 옮겼다(mt-3 은
+               위 감싸개가 가져갔다). */
+            cards={
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {attachments.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
                   >
-                    내려받기
-                  </a>
-                  {canManageFiles && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingDelete(item)}
-                      disabled={isBusy}
-                      className="text-[11px] font-medium text-red-700 underline disabled:opacity-50 dark:text-red-400"
-                    >
-                      지우기
-                    </button>
-                  )}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+                    <Thumbnail item={item} onOpen={openViewer} />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
+                      <span
+                        title={item.originalFileName}
+                        className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-50"
+                      >
+                        {item.originalFileName}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {item.uploadedByName} · {formatTimestamp(item.uploadedAt)}
+                      </span>
+                      {item.description && (
+                        <span className="truncate text-[11px] text-zinc-600 dark:text-zinc-300">
+                          {item.description}
+                        </span>
+                      )}
+                      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                        <a
+                          href={downloadUrlOf(item.id)}
+                          className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+                        >
+                          내려받기
+                        </a>
+                        {canManageFiles && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingDelete(item)}
+                            disabled={isBusy}
+                            className="text-[11px] font-medium text-red-700 underline disabled:opacity-50 dark:text-red-400"
+                          >
+                            지우기
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            }
+          />
+        </div>
       )}
 
       {/*
