@@ -6,7 +6,10 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { getProductModelDetailById } from "@/lib/db/queries/product-models";
+import {
+  getProductModelDetailById,
+  listRequestedPartsByProductModelId,
+} from "@/lib/db/queries/product-models";
 import { listRepairCasesByProductModelId } from "@/lib/db/queries/repair-cases";
 
 export const metadata: Metadata = {
@@ -59,12 +62,18 @@ export default async function ProductModelDetailPage({
     notFound();
   }
 
-  const repairCases = await listRepairCasesByProductModelId(detail.id);
+  // A/S 이력 구역이 쓰는 두 재료. 서로 기다릴 이유가 없어 함께 띄운다.
+  // 둘 다 읽기 전용이고, 같은 product_models.id 로 좁힌 같은 접수 건 집합이다.
+  const [repairCases, requestedParts] = await Promise.all([
+    listRepairCasesByProductModelId(detail.id),
+    listRequestedPartsByProductModelId(detail.id),
+  ]);
 
   return (
     <ProductModelDetailScreen
       detail={detail}
       repairCases={repairCases}
+      requestedParts={requestedParts}
       canEdit={await hasPermission(actingUser.role, "productModels.edit", "WRITE")}
     />
   );

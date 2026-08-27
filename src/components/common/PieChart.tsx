@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  formatFaultSymptomSliceLabel,
-  type FaultSymptomSlice,
-} from "@/lib/domain/fault-symptom-breakdown";
+import type { PieChartSlice } from "@/lib/domain/pie-slices";
 
 /**
  * 원 하나를 SVG 로 직접 그린다.
@@ -17,6 +14,19 @@ import {
  * 그래서 <svg> 는 role="img" + aria-label 로 통째로 하나의 그림이고, 조각 하나하나에
  * 숨은 글자(sr-only)를 붙이지 않는다 — 이 저장소는 position:absolute 인 sr-only 가
  * 부모의 자르기를 빠져나가 페이지를 아래로 굴리는 고장을 이미 세 번 겪었다.
+ *
+ * ── 왜 common 에 있나 ────────────────────────────────────────────────────
+ * 처음에는 대시보드 안(FaultSymptomPieChart)에 있었지만 이제 두 화면이 쓴다 —
+ * 대시보드의 신고 증상 RFG · MB 두 장과 제품 모델 상세의 네 장. 한쪽 화면 폴더에
+ * 두면 다른 화면이 남의 기능 폴더로 손을 뻗어야 하고, 그것은 이 저장소가 피해 온
+ * 모양이다(ProductModelRepairCaseHistory 의 주석에 같은 판단이 적혀 있다).
+ * 그래서 조각을 그리는 일만 여기로 옮기고, **무엇을 세는가**는 도메인이
+ * (pie-slices.ts) 그대로 갖는다.
+ *
+ * ── 이름표는 밖에서 받는다 ──────────────────────────────────────────────
+ * `기타(12종)`처럼 조각 이름에 덧붙는 말이 그래프마다 다를 수 있어 formatLabel 을
+ * 부르는 쪽이 넘긴다. 여기서 정해 버리면 그 순간 이 컴포넌트가 특정 도메인의
+ * 것이 된다.
  */
 
 const CENTER = 50;
@@ -26,7 +36,7 @@ const RADIUS = 46;
 type SliceColor = { fill: string; swatch: string };
 
 /**
- * 실제 증상 조각의 색 — 색상환을 고르게 도는 여덟 가지.
+ * 실제 값 조각의 색 — 색상환을 고르게 도는 여덟 가지.
  *
  * 밝은 화면은 -500, 어두운 화면은 -400 이다. 어두운 배경 위에서는 같은 -500 이
  * 가라앉아 옆 조각과 구별되지 않는다. 이웃한 두 색(로즈/핑크, 에메랄드/틸)은
@@ -35,7 +45,7 @@ type SliceColor = { fill: string; swatch: string };
  * Tailwind v4 는 소스에 **글자 그대로 적힌** 클래스만 만들어 내므로, 이 배열은
  * 조립한 문자열이 아니라 통짜 문자열이어야 한다.
  */
-const SYMPTOM_COLORS: SliceColor[] = [
+const VALUE_COLORS: SliceColor[] = [
   { fill: "fill-sky-500 dark:fill-sky-400", swatch: "bg-sky-500 dark:bg-sky-400" },
   { fill: "fill-amber-500 dark:fill-amber-400", swatch: "bg-amber-500 dark:bg-amber-400" },
   { fill: "fill-emerald-500 dark:fill-emerald-400", swatch: "bg-emerald-500 dark:bg-emerald-400" },
@@ -47,7 +57,7 @@ const SYMPTOM_COLORS: SliceColor[] = [
 ];
 
 /**
- * 미입력과 기타는 **무채색**이다. 그 둘은 증상이 아니라 "센 방식"에 대한 칸이라,
+ * 미입력과 기타는 **무채색**이다. 그 둘은 값이 아니라 "센 방식"에 대한 칸이라,
  * 색이 있는 조각들과 나란한 무게로 보이면 안 된다.
  */
 const UNSPECIFIED_COLOR: SliceColor = {
@@ -61,15 +71,20 @@ const OTHER_COLOR: SliceColor = {
 
 /**
  * 색은 조각의 **성격**과 **차례**로 정한다. 라벨 글자로 고르면 `기타`라고 적힌
- * 진짜 증상이 들어왔을 때 무채색이 되어 접힌 조각으로 읽힌다.
+ * 진짜 값이 들어왔을 때 무채색이 되어 접힌 조각으로 읽힌다.
  *
- * 증상 조각은 여덟 가지를 넘지 않지만(도메인이 상위 8개만 남긴다) 나머지 연산을
+ * 값 조각은 여덟 가지를 넘지 않지만(도메인이 상위 8개만 남긴다) 나머지 연산을
  * 두는 것은 그 상한이 바뀌어도 색이 없는 조각이 생기지 않게 하기 위해서다.
  */
-function colorOf(slice: FaultSymptomSlice, symptomIndex: number): SliceColor {
+function colorOf(slice: PieChartSlice, valueIndex: number): SliceColor {
   if (slice.sliceKind === "UNSPECIFIED") return UNSPECIFIED_COLOR;
   if (slice.sliceKind === "OTHER") return OTHER_COLOR;
-  return SYMPTOM_COLORS[symptomIndex % SYMPTOM_COLORS.length];
+  return VALUE_COLORS[valueIndex % VALUE_COLORS.length];
+}
+
+/** 값 조각인가 — 무채색 두 글자가 아니면 전부 값이다(PieChartSlice.sliceKind 주석). */
+function isValueSlice(slice: PieChartSlice): boolean {
+  return slice.sliceKind !== "UNSPECIFIED" && slice.sliceKind !== "OTHER";
 }
 
 /** 12시 방향이 0도. 시계 방향으로 돈다. */
@@ -90,29 +105,37 @@ function arcPath(startAngle: number, sweepAngle: number): string {
   ].join(" ");
 }
 
-type FaultSymptomPieChartProps = {
-  slices: FaultSymptomSlice[];
+type PieChartProps<TSlice extends PieChartSlice> = {
+  slices: readonly TSlice[];
   /** <svg> 전체를 한 장의 그림으로 읽어 줄 말. */
   ariaLabel: string;
+  /** 범례에 적는 이름 — `기타(12종)` 같은 덧말은 그래프마다 다르다. */
+  formatLabel: (slice: TSlice) => string;
+  /**
+   * 범례의 건수 뒤에 붙는 단위. 기본은 `건`이다.
+   *
+   * 고장 부품 그래프만 `개`를 쓴다 — 거기서 한 조각은 접수 건이 아니라 **요청된
+   * 부품 줄**이라서, `건`이라고 적으면 그 위에 적힌 접수 건수와 더해 읽게 된다.
+   */
+  countUnit?: string;
   selectedKey: string | null;
   onSelectSlice: (key: string) => void;
 };
 
-export default function FaultSymptomPieChart({
+export default function PieChart<TSlice extends PieChartSlice>({
   slices,
   ariaLabel,
+  formatLabel,
+  countUnit = "건",
   selectedKey,
   onSelectSlice,
-}: FaultSymptomPieChartProps) {
-  // 색은 '증상 조각만의 차례'로 고른다 — 미입력·기타가 끼어도 색이 건너뛰지
-  // 않도록 앞에 놓인 증상 조각의 수를 센다. 조각은 많아야 열 개라 이 셈의
+}: PieChartProps<TSlice>) {
+  // 색은 '값 조각만의 차례'로 고른다 — 미입력·기타가 끼어도 색이 건너뛰지
+  // 않도록 앞에 놓인 값 조각의 수를 센다. 조각은 많아야 열 개라 이 셈의
   // 비용은 없는 것과 같고, 그리는 동안 바뀌는 변수를 두지 않는 편이 안전하다.
   const drawn = slices.map((slice, index) => ({
     slice,
-    color: colorOf(
-      slice,
-      slices.slice(0, index).filter((earlier) => earlier.sliceKind === "SYMPTOM").length
-    ),
+    color: colorOf(slice, slices.slice(0, index).filter(isValueSlice).length),
   }));
 
   return (
@@ -178,10 +201,11 @@ export default function FaultSymptomPieChart({
                 }`}
               >
                 <span className={`size-3 shrink-0 rounded-sm ${color.swatch}`} />
-                <span className="min-w-0 flex-1 truncate">
-                  {formatFaultSymptomSliceLabel(slice)}
+                <span className="min-w-0 flex-1 truncate">{formatLabel(slice)}</span>
+                <span className="shrink-0 tabular-nums">
+                  {slice.count}
+                  {countUnit}
                 </span>
-                <span className="shrink-0 tabular-nums">{slice.count}건</span>
                 <span className="w-12 shrink-0 text-right tabular-nums text-zinc-500 dark:text-zinc-400">
                   {slice.percentage}%
                 </span>

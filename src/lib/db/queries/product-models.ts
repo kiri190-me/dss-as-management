@@ -1,7 +1,16 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../client";
-import { productModels, products, repairCases, users } from "../schema";
+import {
+  inventoryPartRequestItems,
+  inventoryPartRequests,
+  parts,
+  productModels,
+  products,
+  repairCases,
+  users,
+} from "../schema";
+import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -204,6 +213,79 @@ export async function getProductModelDetailById(id: string): Promise<ProductMode
     averageRepairDurationDays,
     units,
   };
+}
+
+/**
+ * 이 요청 상태의 줄은 **세지 않는다** — 물건이 나가지 않은(그리고 앞으로도 나가지
+ * 않을) 요청이라, 고장 부품 그래프에 넣으면 "이 모델에서 이 부품이 문제였다"는
+ * 읽음이 거짓이 된다.
+ *
+ * 나머지 다섯(PENDING · PARTIALLY_ISSUED · FULLY_ISSUED · PARTIALLY_CLOSED ·
+ * ON_HOLD)은 센다. PENDING·ON_HOLD 는 아직 안 나갔지만 **엔지니어가 그 부품을
+ * 지목했다**는 사실 자체가 이 그래프가 묻는 것이고, ON_HOLD 는 종료 상태도 아니다
+ * (inventory-part-requests.ts 의 enum 주석).
+ */
+const UNCOUNTED_PART_REQUEST_STATUSES = ["REJECTED", "CANCELLED"] as const;
+
+/**
+ * 이 모델의 접수 건들에 대해 **요청된 부품** 줄. 제품 모델 상세의 `고장 부품`
+ * 원형 그래프가 쓰는 유일한 재료다.
+ *
+ * ── 왜 부품 요청인가 ────────────────────────────────────────────────────
+ * 이 시스템에는 "이 건에서 뭐가 고장났나"를 적는 칸이 **없다**. 가장 가까운 것이
+ * 수리하며 요청한 부품이라 그것을 쓴다. 그래서 이 목록은 접수 건마다 한 줄이
+ * 아니고 — 한 건이 여러 줄일 수도, 아예 없을 수도 있다. 화면이 그 사실을 원 밑에
+ * 한 줄로 적는다(product-model-breakdown.ts 헤더).
+ *
+ * ── 무엇을 한 줄로 세는가 ───────────────────────────────────────────────
+ * **요청 줄(inventory_part_request_items) 하나가 한 개**다. 수량(requested_quantity)
+ * 은 보지 않는다 — 이 그래프가 묻는 것은 "어느 부품이 몇 번 지목되었나"이지 "몇
+ * 개가 나갔나"가 아니고, 후자는 재고 원장(stock_transactions)이 답할 질문이다.
+ *
+ * 접수 건 id 를 함께 돌려주는 이유는 화면이 **요청 기록이 있는 건 수**를 셀 수
+ * 있어야 하기 때문이다(부품 개수와 다른 것이 정상이고, 화면은 둘을 나란히 적는다).
+ *
+ * 삭제된 부품(parts.is_deleted)도 그대로 센다 — 부품 대장에서 지운 것은 "앞으로 쓸
+ * 수 있는 목록"에서 뺀 것이지 **그때 그 부품을 요청했다는 과거**가 없어진 것이
+ * 아니다.
+ *
+ * 읽기 전용이다. 이 파일의 다른 함수들과 같이 권한을 보지 않는다 — 페이지가
+ * 판정한다.
+ */
+export async function listRequestedPartsByProductModelId(
+  productModelId: string
+): Promise<RequestedPartRow[]> {
+  if (!UUID_PATTERN.test(productModelId)) return [];
+
+  const rows = await db
+    .select({
+      repairCaseId: repairCases.id,
+      partName: parts.partName,
+    })
+    .from(inventoryPartRequestItems)
+    .innerJoin(
+      inventoryPartRequests,
+      eq(inventoryPartRequestItems.requestId, inventoryPartRequests.id)
+    )
+    // repair_case_id 는 nullable 이다(접수 건 완전삭제 대비 ON DELETE SET NULL).
+    // inner join 이라 끊긴 요청은 저절로 빠진다 — 어느 모델의 것인지 알 수 없는
+    // 줄을 이 모델의 그래프에 넣을 수는 없다.
+    .innerJoin(repairCases, eq(inventoryPartRequests.repairCaseId, repairCases.id))
+    .innerJoin(products, eq(repairCases.productId, products.id))
+    .innerJoin(parts, eq(inventoryPartRequestItems.partId, parts.id))
+    .where(
+      and(
+        eq(products.productModelId, productModelId),
+        eq(products.isDeleted, false),
+        eq(repairCases.isDeleted, false),
+        notInArray(inventoryPartRequests.status, [...UNCOUNTED_PART_REQUEST_STATUSES])
+      )
+    )
+    // 조각 차례는 도메인이 정하지만, 같은 입력에 같은 배열이 나오도록 여기서도
+    // 한 번 못 박아 둔다 — 정렬 없는 조회는 계획이 바뀌면 순서가 바뀐다.
+    .orderBy(parts.partName, repairCases.id);
+
+  return rows;
 }
 
 export type DeletedProductModelRow = {

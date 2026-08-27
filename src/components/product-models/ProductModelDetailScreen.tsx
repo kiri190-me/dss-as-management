@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
+import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import ProductModelEditForm from "./ProductModelEditForm";
-import ProductModelRepairCaseHistory from "./ProductModelRepairCaseHistory";
+import ProductModelHistoryBreakdown from "./ProductModelHistoryBreakdown";
 
 const KIND_LABELS: Record<string, string> = {
   GENERATOR: "Generator",
@@ -39,8 +40,9 @@ function InfoField({ label, value }: { label: string; value: string }) {
  * for SUPER_ADMIN/ADMIN, re-verified server-side by updateProductModelAction
  * regardless), 모델 통계 (aggregate figures, all derived via product_model_id
  * linkage — see product-models.ts), 등록 장비 (per-unit S/N/L/N/repair
- * count/latest intake), A/S 이력 (ProductModelRepairCaseHistory, reusing the
- * existing repair-case list components).
+ * count/latest intake), A/S 이력 (ProductModelHistoryBreakdown — 골라 켜는
+ * 원형 그래프 네 종과, 기본으로 접혀 있는 접수 건 목록. 목록 자체는 그대로
+ * ProductModelRepairCaseHistory 가 그린다).
  *
  * Product kind (Generator/Matcher) IS now a real model-master field
  * (product_models.kind), shown in 모델 기본정보 — but it is never derived
@@ -54,10 +56,13 @@ function InfoField({ label, value }: { label: string; value: string }) {
 export default function ProductModelDetailScreen({
   detail,
   repairCases,
+  requestedParts,
   canEdit,
 }: {
   detail: ProductModelDetail;
   repairCases: ResolvedRepairCase[];
+  /** 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다. */
+  requestedParts: RequestedPartRow[];
   canEdit: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -144,7 +149,7 @@ export default function ProductModelDetailScreen({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>
-        <ProductModelRepairCaseHistory resolved={repairCases} />
+        <ProductModelHistoryBreakdown resolved={repairCases} requestedParts={requestedParts} />
       </section>
     </div>
   );

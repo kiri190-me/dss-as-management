@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import FaultSymptomPieChart from "@/components/dashboard/FaultSymptomPieChart";
+import PieChart from "@/components/common/PieChart";
 import {
   buildFaultSymptomBreakdowns,
   formatFaultSymptomSliceLabel,
@@ -96,9 +96,10 @@ function FaultSymptomKindCard({
       ) : (
         <>
           <div className="mt-4">
-            <FaultSymptomPieChart
+            <PieChart
               slices={slices}
               ariaLabel={`${kind}(${description}) 신고 증상별 건수 비율, 총 ${total}건`}
+              formatLabel={formatFaultSymptomSliceLabel}
               selectedKey={selectedKey}
               onSelectSlice={onSelectSlice}
             />

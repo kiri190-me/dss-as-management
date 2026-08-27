@@ -1,3 +1,9 @@
+import {
+  buildPieSlices,
+  formatPieSliceLabel,
+  type PieDetailHandlers,
+  type PieSliceKind,
+} from "./pie-slices";
 import type { WorkflowType } from "./types";
 import {
   WEEKLY_REPORT_KINDS,
@@ -14,6 +20,13 @@ import {
  * 않는다 — dashboard-metrics.ts 와 같은 자리의 순수 함수다. "왜 이 조각이 이만큼
  * 인가"는 규칙이지 그리기가 아니라서, 화면 안에 두면 시험할 방법이 브라우저를
  * 띄우는 것밖에 남지 않는다.
+ *
+ * ── 조각 나누는 규칙은 pie-slices.ts 가 갖는다 ──────────────────────────
+ * 미입력·기타 접기·차례·각도·%·React key 는 이 파일이 정하지 않는다. 원형
+ * 그래프가 여럿(제품 모델 상세에 네 장이 더 있다)이라 각자 세면 언젠가 규칙이
+ * 갈라지고, 그때 어느 화면이 맞는지 말할 수 없다. **여기는 그 규칙에 무엇을
+ * 넣을지만 정한다** — 무엇으로 묶을지(신고 증상), 미입력의 이름, 상위 몇 개까지
+ * 남길지, 조각에 무엇을 달고 다닐지(인수점검 결과).
  *
  * ── RFG / MB 를 여기서 새로 정하지 않는다 ───────────────────────────────
  * 종류를 접는 규칙은 주간보고가 이미 정해 두었고(weekly-report.ts), 여기서는
@@ -63,12 +76,86 @@ export const FAULT_SYMPTOM_TOP_SLICE_LIMIT = 8;
  */
 export type FaultSymptomSliceKind = "SYMPTOM" | "UNSPECIFIED" | "OTHER";
 
+/**
+ * 공용 조각의 성격(pie-slices.ts) → 이 화면이 쓰는 이름.
+ *
+ * 값 조각을 `SYMPTOM` 이라 부르는 이름이 이미 밖으로 나가 있어(FaultSymptomSlice
+ * 와 그 React key) 공용 이름 `VALUE` 로 갈아 끼우지 않는다 — 화면이 보고 있는
+ * 조각의 key 가 바뀌면 리팩터링이 눈에 보이는 변화를 만든다.
+ */
+const SLICE_KIND_BY_PIE_KIND: Record<PieSliceKind, FaultSymptomSliceKind> = {
+  VALUE: "SYMPTOM",
+  UNSPECIFIED: "UNSPECIFIED",
+  OTHER: "OTHER",
+};
+
 /** 한 조각 안의 인수점검 결과 한 묶음. */
 export type IntakeInspectionResultGroup = {
   /** 앞뒤 공백을 걷어낸 원문 그대로. 여러 줄일 수 있어 화면은 줄바꿈을 살려 그린다. */
   result: string;
   count: number;
 };
+
+/**
+ * 조각이 달고 다니는 인수점검 결과 누적기 — 밖으로 나가기 전에
+ * toIntakeInspectionResultGroups 로 편다.
+ *
+ * 세는 동안 Map 인 이유는 접힐 때 합치기(merge) 때문이다. 정렬한 배열끼리 합치려면
+ * 매번 다시 정렬해야 한다.
+ */
+export type IntakeInspectionAccumulator = {
+  /** 인수점검 결과 원문 → 건수. */
+  resultCounts: Map<string, number>;
+  /**
+   * 인수점검 결과가 아직 없는 건수. 묶음에 섞지 않는 이유: "결과가 비어 있다"는
+   * 결과의 한 종류가 아니라 **아직 점검 전**이라는 뜻이라서, 섞으면 그 조각에서
+   * 가장 흔한 결과가 빈칸이 되는 일이 생긴다.
+   */
+  pendingCount: number;
+};
+
+/**
+ * 조각에 인수점검 결과를 달아 주는 처리기.
+ *
+ * **제품 모델 상세의 고장 증상 그래프가 이것을 그대로 쓴다**(product-model-
+ * breakdown.ts). 옮겨 적으면 한쪽만 빈 결과를 묶음에 섞는 식으로 갈라진다.
+ */
+export const intakeInspectionDetail: PieDetailHandlers<
+  { intakeInspectionResult: string | null },
+  IntakeInspectionAccumulator
+> = {
+  create: () => ({ resultCounts: new Map(), pendingCount: 0 }),
+  add: (acc, row) => {
+    const result = row.intakeInspectionResult?.trim() ?? "";
+    if (result === "") {
+      acc.pendingCount += 1;
+      return;
+    }
+    acc.resultCounts.set(result, (acc.resultCounts.get(result) ?? 0) + 1);
+  },
+  merge: (accs) => {
+    const merged: IntakeInspectionAccumulator = { resultCounts: new Map(), pendingCount: 0 };
+    for (const acc of accs) {
+      merged.pendingCount += acc.pendingCount;
+      for (const [result, count] of acc.resultCounts) {
+        merged.resultCounts.set(result, (merged.resultCounts.get(result) ?? 0) + count);
+      }
+    }
+    return merged;
+  },
+};
+
+/** 건수 많은 순 → 이름 오름차순. 조각과 같은 규칙이다. 접지 않는다. */
+export function toIntakeInspectionResultGroups(
+  acc: IntakeInspectionAccumulator
+): IntakeInspectionResultGroup[] {
+  return [...acc.resultCounts.entries()]
+    .map(([result, count]) => ({ result, count }))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.result.localeCompare(b.result, "ko");
+    });
+}
 
 export type FaultSymptomSlice = {
   /**
@@ -131,151 +218,54 @@ export type FaultSymptomCase = {
   intakeInspectionResult: string | null;
 };
 
-/** 집계 도중의 한 묶음. 밖으로 나가지 않는다. */
-type Bucket = {
-  label: string;
-  count: number;
-  /** 인수점검 결과 원문 → 건수. */
-  resultCounts: Map<string, number>;
-  pendingCount: number;
-};
-
-function newBucket(label: string): Bucket {
-  return { label, count: 0, resultCounts: new Map(), pendingCount: 0 };
-}
-
-/** null · 빈 문자열 · 공백뿐인 값을 하나로 본다. 두 칸 모두 자유 입력이라 셋이 다 온다. */
-function normalizeFreeText(value: string | null): string {
-  return value?.trim() ?? "";
-}
-
-function addCase(bucket: Bucket, intakeInspectionResult: string | null): void {
-  bucket.count += 1;
-  const result = normalizeFreeText(intakeInspectionResult);
-  if (result === "") {
-    bucket.pendingCount += 1;
-    return;
-  }
-  bucket.resultCounts.set(result, (bucket.resultCounts.get(result) ?? 0) + 1);
-}
-
-/**
- * 건수 많은 순, 같으면 이름 오름차순.
- *
- * 기준을 하나만 두면 건수가 같은 두 조각의 차례가 부를 때마다 뒤바뀌어, 어제 본
- * 그래프와 나란히 놓고 볼 수 없다.
- */
-function compareByCountThenLabel(
-  a: { label: string; count: number },
-  b: { label: string; count: number }
-): number {
-  if (b.count !== a.count) return b.count - a.count;
-  return a.label.localeCompare(b.label, "ko");
-}
-
-function toResultGroups(bucket: Bucket): IntakeInspectionResultGroup[] {
-  return [...bucket.resultCounts.entries()]
-    .map(([result, count]) => ({ result, count }))
-    .sort((a, b) => {
-      if (b.count !== a.count) return b.count - a.count;
-      return a.result.localeCompare(b.result, "ko");
-    });
-}
-
-/** 접힌 증상들을 기타 한 묶음으로 합친다 — 인수점검 결과도 함께 합쳐진다. */
-function mergeBuckets(label: string, buckets: readonly Bucket[]): Bucket {
-  const merged = newBucket(label);
-  for (const bucket of buckets) {
-    merged.count += bucket.count;
-    merged.pendingCount += bucket.pendingCount;
-    for (const [result, count] of bucket.resultCounts) {
-      merged.resultCounts.set(result, (merged.resultCounts.get(result) ?? 0) + count);
-    }
-  }
-  return merged;
-}
-
 function buildKindBreakdown(
   kind: WeeklyReportKind,
   rows: readonly FaultSymptomCase[]
 ): FaultSymptomKindBreakdown {
-  const symptomBuckets = new Map<string, Bucket>();
-  const unspecified = newBucket(FAULT_SYMPTOM_UNSPECIFIED_LABEL);
-  let total = 0;
+  const pieSlices = buildPieSlices(rows, {
+    labelOf: (row) => row.reportedSymptom,
+    unspecifiedLabel: FAULT_SYMPTOM_UNSPECIFIED_LABEL,
+    fold: { topLimit: FAULT_SYMPTOM_TOP_SLICE_LIMIT, otherLabel: FAULT_SYMPTOM_OTHER_LABEL },
+    detail: intakeInspectionDetail,
+  });
 
-  for (const row of rows) {
-    total += 1;
-    const label = normalizeFreeText(row.reportedSymptom);
-    if (label === "") {
-      addCase(unspecified, row.intakeInspectionResult);
-      continue;
-    }
-    let bucket = symptomBuckets.get(label);
-    if (!bucket) {
-      bucket = newBucket(label);
-      symptomBuckets.set(label, bucket);
-    }
-    addCase(bucket, row.intakeInspectionResult);
-  }
-
-  const sortedSymptoms = [...symptomBuckets.values()].sort(compareByCountThenLabel);
-  const top = sortedSymptoms.slice(0, FAULT_SYMPTOM_TOP_SLICE_LIMIT);
-  const folded = sortedSymptoms.slice(FAULT_SYMPTOM_TOP_SLICE_LIMIT);
-
-  /**
-   * 차례: 상위 증상 → 미입력 → 기타.
-   *
-   * 미입력과 기타를 건수 순서에 끼워 넣지 않고 뒤로 모으는 이유는, 그 둘이 증상이
-   * 아니라 "센 방식"에 대한 칸이기 때문이다. 무채색 두 조각이 원의 한쪽에 붙어
-   * 있어야 색이 있는 조각들끼리 크기를 견줄 수 있다.
-   */
-  const entries: { bucket: Bucket; sliceKind: FaultSymptomSliceKind; foldedSymptomCount: number }[] =
-    top.map((bucket) => ({ bucket, sliceKind: "SYMPTOM" as const, foldedSymptomCount: 1 }));
-  if (unspecified.count > 0) {
-    entries.push({ bucket: unspecified, sliceKind: "UNSPECIFIED", foldedSymptomCount: 1 });
-  }
-  if (folded.length > 0) {
-    entries.push({
-      bucket: mergeBuckets(FAULT_SYMPTOM_OTHER_LABEL, folded),
-      sliceKind: "OTHER",
-      foldedSymptomCount: folded.length,
-    });
-  }
-
-  // 각도는 누적 건수에서 바로 뽑는다. 조각마다 (건수/총) × 360 을 따로 반올림해
-  // 이어 붙이면 오차가 쌓여 마지막 조각과 첫 조각 사이에 틈이 벌어진다.
-  let cumulative = 0;
-  const slices: FaultSymptomSlice[] = entries.map((entry) => {
-    const startAngle = (cumulative / total) * 360;
-    cumulative += entry.bucket.count;
-    const endAngle = (cumulative / total) * 360;
+  const slices: FaultSymptomSlice[] = pieSlices.map((slice) => {
+    const sliceKind = SLICE_KIND_BY_PIE_KIND[slice.sliceKind];
     return {
-      key: `${entry.sliceKind}:${entry.bucket.label}`,
-      label: entry.bucket.label,
-      sliceKind: entry.sliceKind,
-      count: entry.bucket.count,
-      percentage: Math.round((entry.bucket.count / total) * 1000) / 10,
-      startAngle,
-      sweepAngle: endAngle - startAngle,
-      foldedSymptomCount: entry.foldedSymptomCount,
-      intakeInspectionResults: toResultGroups(entry.bucket),
-      intakeInspectionPendingCount: entry.bucket.pendingCount,
+      key: `${sliceKind}:${slice.label}`,
+      label: slice.label,
+      sliceKind,
+      count: slice.count,
+      percentage: slice.percentage,
+      startAngle: slice.startAngle,
+      sweepAngle: slice.sweepAngle,
+      foldedSymptomCount: slice.foldedGroupCount,
+      intakeInspectionResults: toIntakeInspectionResultGroups(slice.detail),
+      intakeInspectionPendingCount: slice.detail.pendingCount,
     };
   });
 
-  return { kind, total, slices, otherDistinctCount: folded.length };
+  return {
+    kind,
+    total: rows.length,
+    slices,
+    otherDistinctCount: slices.find((slice) => slice.sliceKind === "OTHER")?.foldedSymptomCount ?? 0,
+  };
 }
 
 /**
  * 범례와 펼친 자리의 제목이 함께 쓰는 이름표.
  *
  * 기타 조각만 몇 가지를 접었는지 덧붙인다 — 그냥 `기타`라고만 두면 "이게 전부"로
- * 읽힌다. 화면 두 자리가 같은 글자를 쓰도록 여기 한 곳에 둔다(weekly-report.ts 가
- * 라벨 표를 도메인에 두는 것과 같은 이유다).
+ * 읽힌다. 규칙 자체는 pie-slices.ts 가 갖고, 이 함수는 이 화면의 필드 이름
+ * (foldedSymptomCount)을 거기 맞춰 주는 얇은 껍데기다.
  */
 export function formatFaultSymptomSliceLabel(slice: FaultSymptomSlice): string {
-  if (slice.sliceKind === "OTHER") return `${slice.label}(${slice.foldedSymptomCount}종)`;
-  return slice.label;
+  return formatPieSliceLabel({
+    sliceKind: slice.sliceKind,
+    label: slice.label,
+    foldedGroupCount: slice.foldedSymptomCount,
+  });
 }
 
 /**
