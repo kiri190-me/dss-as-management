@@ -1,0 +1,4 @@
+ALTER TABLE "attachments" ADD COLUMN "product_model_id" uuid;--> statement-breakpoint
+ALTER TABLE "attachments" ADD CONSTRAINT "attachments_product_model_id_product_models_id_fk" FOREIGN KEY ("product_model_id") REFERENCES "public"."product_models"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "attachments_product_model_id_not_deleted_idx" ON "attachments" USING btree ("product_model_id") WHERE is_deleted = false;--> statement-breakpoint
+ALTER TABLE "attachments" ADD CONSTRAINT "attachments_owner_not_both" CHECK (NOT ("attachments"."repair_case_id" IS NOT NULL AND "attachments"."product_model_id" IS NOT NULL));

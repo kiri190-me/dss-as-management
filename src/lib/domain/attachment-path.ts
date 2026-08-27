@@ -9,6 +9,14 @@ import { isAllowedExtension, normalizeFileExtension } from "./attachment-allowli
  *
  *   저장 루트 (UPLOADS_DIR)  →  C:\DSS-AS-DATA\uploads      ← 설정값, DB에 안 들어감
  *   DB stored_path           →  repair-cases/{접수건id}/{첨부id}.{확장자}
+ *                            →  product-models/{모델id}/{첨부id}.{확장자}
+ *
+ * ── 첫 마디가 주인을 말한다 ──────────────────────────────────────────────
+ * 첨부의 주인은 접수 건 아니면 제품 모델이고(schema/attachments.ts의
+ * attachments_owner_not_both 참조), stored_path의 **첫 마디가 그 둘을 가른다.**
+ * 그래서 폴더 하나만 보면 그것이 어느 쪽의 파일인지 알 수 있고, 백업이 DB 없이
+ * 디스크만 훑어도 구조가 읽힌다. 두 접두어는 아래 두 상수가 정본이며,
+ * assertPortableStoredPath가 그 둘 **말고는 아무것도 받지 않는다.**
  *
  * ── 왜 이 계산이 파일 하나로 떨어져 있는가 ───────────────────────────────
  * 이 시스템은 나중에 사내 NAS로 옮긴다. NAS는 Docker로 돌고 **컨테이너 안은
@@ -42,6 +50,19 @@ import { isAllowedExtension, normalizeFileExtension } from "./attachment-allowli
 
 /** stored_path의 첫 마디. 소문자·하이픈 — 규칙 2를 파일 이름 수준에서 지킨다. */
 export const ATTACHMENT_STORED_PATH_PREFIX = "repair-cases";
+
+/** 제품 모델에 붙는 첨부(외형 사진·회로도)의 첫 마디. 위와 같은 규칙이다. */
+export const ATTACHMENT_MODEL_STORED_PATH_PREFIX = "product-models";
+
+/**
+ * 저장 경로로 인정하는 첫 마디의 **전부**. 여기 없는 접두어는 거부된다 —
+ * "옮길 수 있는 경로"의 정의를 한 자리에 모아 두어, 주인이 늘어날 때 검사
+ * 함수를 고치지 않고 이 목록만 늘리게 한다.
+ */
+const ALLOWED_STORED_PATH_PREFIXES: readonly string[] = [
+  ATTACHMENT_STORED_PATH_PREFIX,
+  ATTACHMENT_MODEL_STORED_PATH_PREFIX,
+];
 
 /** UUID(소문자 hex). 대문자가 섞인 값은 눕혀서 받고, 형태가 아니면 던진다. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -126,6 +147,76 @@ export function buildAttachmentStoredPathFromFileName(params: {
 }
 
 /**
+ * ============================================================================
+ * 제품 모델 첨부 — 접수 건과 나란히 놓인 두 번째 벌
+ * ============================================================================
+ * 위 세 함수와 **한 벌로 겹쳐 쓰지 않고 나란히 새로 둔다.** 위쪽은 이미 실기에서
+ * 파일을 다루고 있는 코드라 서명을 바꾸면 업로드 통로까지 함께 흔들린다. 두 벌을
+ * 하나로 합칠지는 모델 첨부의 실제 쓰임을 본 다음에 판단할 일이다.
+ *
+ * 검사 규칙은 위쪽과 **글자 하나까지 같다** — UUID 형식 확인, 확장자 허용목록,
+ * 소문자 눕히기, path.join 금지. 다른 것은 첫 마디뿐이다.
+ * ============================================================================
+ */
+
+/**
+ * 제품 모델 첨부의 stored_path. `product-models/{모델id}/{첨부id}.{확장자}`
+ *
+ * buildAttachmentStoredPath와 같은 규칙을 따른다 — 확장자는 허용목록에서
+ * 정규화한 소문자만 붙고, 목록 밖 확장자는 던진다.
+ */
+export function buildProductModelAttachmentStoredPath(params: {
+  productModelId: string;
+  attachmentId: string;
+  /** 원본 파일명이 아니라 정규화된 확장자(점 없음). normalizeFileExtension의 결과. */
+  extension: string;
+}): string {
+  const productModelId = requireUuid("제품 모델 ID", params.productModelId);
+  const attachmentId = requireUuid("첨부 ID", params.attachmentId);
+
+  const extension = params.extension.trim().toLowerCase();
+  if (!isAllowedExtension(extension)) {
+    throw new AttachmentPathError(`허용되지 않은 확장자입니다: ${extension || "(없음)"}`);
+  }
+
+  // 접수 건 쪽과 같은 이유로 path.join을 쓰지 않는다(파일 헤더 규칙 1).
+  return `${ATTACHMENT_MODEL_STORED_PATH_PREFIX}/${productModelId}/${attachmentId}.${extension}`;
+}
+
+/**
+ * 제품 모델 첨부의 미리보기(썸네일) 경로. 원본과 같은 폴더에 나란히 두고,
+ * 확장자는 언제나 jpg다 — buildAttachmentPreviewPath의 주석과 같은 이유다.
+ */
+export function buildProductModelAttachmentPreviewPath(params: {
+  productModelId: string;
+  attachmentId: string;
+}): string {
+  const productModelId = requireUuid("제품 모델 ID", params.productModelId);
+  const attachmentId = requireUuid("첨부 ID", params.attachmentId);
+  return `${ATTACHMENT_MODEL_STORED_PATH_PREFIX}/${productModelId}/${attachmentId}.preview.jpg`;
+}
+
+/**
+ * 원본 파일명에서 바로 모델 첨부의 stored_path를 만드는 편의 함수.
+ * buildAttachmentStoredPathFromFileName과 짝이며, 확장자를 뽑을 수 없으면 던진다.
+ */
+export function buildProductModelAttachmentStoredPathFromFileName(params: {
+  productModelId: string;
+  attachmentId: string;
+  originalFileName: string;
+}): string {
+  const extension = normalizeFileExtension(params.originalFileName);
+  if (!extension) {
+    throw new AttachmentPathError("파일 확장자를 확인할 수 없습니다.");
+  }
+  return buildProductModelAttachmentStoredPath({
+    productModelId: params.productModelId,
+    attachmentId: params.attachmentId,
+    extension,
+  });
+}
+
+/**
  * DB에서 읽어 온 stored_path가 옮겨도 되는 값인가 — 규칙 1·2·3을 그대로 검사한다.
  *
  * **DB 값이라고 그대로 믿지 않는다.** 이 표의 행은 옛 버전 코드나 손으로 넣은
@@ -157,9 +248,16 @@ export function assertPortableStoredPath(storedPath: string): void {
       throw new AttachmentPathError("저장 경로에 빈 마디나 상위 이동(..)이 들어 있습니다.");
     }
   }
-  if (segments[0] !== ATTACHMENT_STORED_PATH_PREFIX) {
+  // 첫 마디는 **알려진 접두어 둘 중 하나여야 한다.** 넓힌 것은 이 한 줄뿐이고,
+  // "아무 접두어나 받는다"가 아니다 — 목록 밖의 첫 마디(customers/... 등)는
+  // 여전히 던진다. 백업 스크립트(scripts/backup-attachments.ts)가 이 함수로 DB의
+  // 전 행을 검사하므로, 여기가 모델 경로를 안 받으면 나중에 백업이 그 파일에서
+  // 멈춘다.
+  if (!ALLOWED_STORED_PATH_PREFIXES.includes(segments[0])) {
     throw new AttachmentPathError(
-      `저장 경로는 '${ATTACHMENT_STORED_PATH_PREFIX}/'로 시작해야 합니다.`
+      `저장 경로는 ${ALLOWED_STORED_PATH_PREFIXES.map((prefix) => `'${prefix}/'`).join(
+        " 또는 "
+      )}로 시작해야 합니다.`
     );
   }
 }
