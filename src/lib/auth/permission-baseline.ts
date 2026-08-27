@@ -34,6 +34,7 @@ import {
   canViewProductModels,
   canEditProductModels,
   canDeleteProductModels,
+  canManageProductModelFiles,
 } from "./product-model-authorization";
 import {
   canBulkDeleteRepairCases,
@@ -373,6 +374,17 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
       return canViewProductModels(role) ? "READ" : "NONE";
     case "productModels.edit":
       return ladder({ write: canEditProductModels(role), read: canViewProductModels(role) });
+
+    case "productModels.files":
+      // 수정(위 edit)보다 넓다 — 사진·도면은 엔지니어까지 올린다. 두 함수를
+      // 한 칸에 접으면 엔지니어에게 모델명·제조사 수정이 함께 열린다.
+      //
+      // read를 false로 둔다. 이 잎에서 '보기'는 뜻이 없다 — 사진·도면을 보는
+      // 일은 productModels.view가 이미 맡고 있어서, 여기에 읽기를 주면 조회
+      // 노드와 구분되지 않는다(minMeaningfulLevel이 WRITE라 어차피 NONE으로
+      // 접히지만, 접히는 값을 적어 두면 이 노드가 열람도 준다고 읽힌다).
+      // productModels.lifecycle과 같은 모양이다.
+      return ladder({ write: canManageProductModelFiles(role), read: false });
 
     case "productModels.lifecycle":
       // 고객사 쪽과 같은 판단 — 삭제·복원·완전삭제가 한 함수다.

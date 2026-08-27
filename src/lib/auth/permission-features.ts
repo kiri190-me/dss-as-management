@@ -284,6 +284,20 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       levelHints: { WRITE: "모델을 만들고 고칩니다" },
       maxMeaningfulLevel: "WRITE",
     },
+    files: {
+      // 제품 모델 수정(위 edit)과 일부러 갈라 둔다 — edit은 관리자 전용이라
+      // 엔지니어에게 파일을 열어 주려고 그것을 넓히면 모델명·제조사까지 함께
+      // 열린다. 접수 건 쪽 repairCases.files와 같은 모양으로, 올리기·지우기·
+      // 되살리기를 쓰기 한 칸에 담는다(나누면 잘못 올린 파일을 못 지우는
+      // 역할이 생긴다).
+      label: "사진·도면",
+      minMeaningfulLevel: "WRITE",
+      description: "제품 모델의 외형 사진과 회로도를 올리고, 지우고, 되살립니다.",
+      // 보는 것은 위 '제품 모델 조회'가 이미 맡는다 — 여기에 읽기를 두면 조회
+      // 노드와 구분되지 않으므로 쓰기 하나만 남긴다.
+      levelHints: { WRITE: "사진·도면을 올리고, 휴지통으로 보내고, 되살립니다" },
+      maxMeaningfulLevel: "WRITE",
+    },
     lifecycle: {
       // 고객사 쪽 customers.lifecycle과 같은 모양 — 조작 하나뿐이라
       // '접근 불가 아니면 관리'만 둔다.

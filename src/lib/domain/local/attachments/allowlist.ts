@@ -57,14 +57,21 @@ export const PREVIEW_CAPABLE_EXTENSIONS = new Set(
 
 /**
  * 4개 카테고리는 승인된 확장자만 허용한다(오실로스코프: csv/txt, 로그: log/txt,
- * 펌웨어: bin/hex/zip, 회로도: pdf만). 나머지 카테고리는 여기 목록에 없으므로
+ * 펌웨어: bin/hex/zip, 회로도: pdf + 사진). 나머지 카테고리는 여기 목록에 없으므로
  * 전체 허용목록 중 아무 확장자나 쓸 수 있다.
+ *
+ * 이 목록은 실제 저장의 정본(src/lib/domain/attachment-allowlist.ts)과 순서까지
+ * 같아야 하고, attachment-allowlist.test.ts가 그것을 검사한다. 한쪽만 고치면
+ * 화면과 서버가 서로 다른 파일을 받는다.
  */
 export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, readonly string[]>> = {
   OSCILLOSCOPE_DATA: ["csv", "txt"],
   LOG_FILE: ["log", "txt"],
   FIRMWARE: ["bin", "hex", "zip"],
-  CIRCUIT_DIAGRAM: ["pdf"],
+  // 종이 회로도를 현장에서 폰으로 찍어 올리는 길을 연다. 나중에 넓히면 그
+  // 전보다 앞서 올라온 파일들과 규칙이 어긋나므로 지금 함께 넓힌다.
+  // (정본 쪽 같은 자리의 주석이 더 자세하다.)
+  CIRCUIT_DIAGRAM: ["pdf", "jpg", "jpeg", "png"],
 };
 
 export function isAllowedExtension(extension: string): boolean {

@@ -98,11 +98,40 @@ test("제한이 없는 분류는 허용목록 전체를 쓸 수 있다", () => {
 
 test("제한이 있는 분류는 그 목록 밖 확장자를 거부한다", () => {
   assert.equal(isExtensionAllowedForCategory("pdf", "CIRCUIT_DIAGRAM"), true);
-  assert.equal(isExtensionAllowedForCategory("jpg", "CIRCUIT_DIAGRAM"), false);
+  // 회로도의 부정 예시는 zip이다. 예전에는 jpg가 이 자리에 있었는데, 종이
+  // 회로도를 폰으로 찍어 올리는 길을 열면서 사진 확장자가 허용목록에 들어갔다
+  // (아래 전용 테스트 참조). zip은 전체 허용목록에는 있지만 회로도는 아니다 —
+  // 넓힌 것이 "아무거나 받는다"가 되지 않았음을 여기서 못 박는다.
+  assert.equal(isExtensionAllowedForCategory("zip", "CIRCUIT_DIAGRAM"), false);
   assert.equal(isExtensionAllowedForCategory("bin", "FIRMWARE"), true);
   assert.equal(isExtensionAllowedForCategory("pdf", "FIRMWARE"), false);
   assert.equal(isExtensionAllowedForCategory("csv", "OSCILLOSCOPE_DATA"), true);
   assert.equal(isExtensionAllowedForCategory("log", "LOG_FILE"), true);
+});
+
+test("회로도는 PDF와 사진(jpg/jpeg/png)을 받는다 — 종이 회로도를 폰으로 찍어 올린다", () => {
+  for (const extension of ["pdf", "jpg", "jpeg", "png"]) {
+    assert.equal(
+      isExtensionAllowedForCategory(extension, "CIRCUIT_DIAGRAM"),
+      true,
+      `회로도에 .${extension}이 막혔다`
+    );
+  }
+});
+
+test("회로도를 넓힌 것이 '아무거나 받는다'가 되지는 않았다", () => {
+  // 허용목록 안에 있으면서 회로도에는 뜻이 없는 확장자들. 하나라도 통과하면
+  // 분류 제한이 사실상 사라진 것이다.
+  for (const extension of ["zip", "xlsx", "xls", "doc", "docx", "csv", "txt", "log", "bin", "hex"]) {
+    assert.equal(
+      isExtensionAllowedForCategory(extension, "CIRCUIT_DIAGRAM"),
+      false,
+      `회로도에 .${extension}이 통과했다`
+    );
+  }
+  // 허용목록 밖은 당연히 막힌다.
+  assert.equal(isExtensionAllowedForCategory("exe", "CIRCUIT_DIAGRAM"), false);
+  assert.equal(isExtensionAllowedForCategory("svg", "CIRCUIT_DIAGRAM"), false);
 });
 
 // ────────────────────────────────────────────────── 확장자 정규화
@@ -194,6 +223,16 @@ test("형식이 다른 파일에 확장자만 붙여도 거부된다", () => {
   assert.equal(isContentCompatibleWithExtension("pdf", ZIP_HEADER), false);
   assert.equal(isContentCompatibleWithExtension("txt", PNG_HEADER), false);
   assert.equal(isContentCompatibleWithExtension("csv", ZIP_HEADER), false);
+});
+
+test("회로도로 올린 사진도 앞머리 바이트 대조를 그대로 받는다", () => {
+  // 분류 허용목록은 "이 확장자를 이 분류에 쓸 수 있는가"만 본다. 이름만 .jpg로
+  // 바꾼 파일을 막는 것은 여전히 내용 대조 쪽이고, 회로도를 넓히면서 그 관문이
+  // 헐거워지지 않았음을 여기서 함께 못 박는다.
+  assert.equal(isContentCompatibleWithExtension("jpg", JPEG_HEADER), true);
+  assert.equal(isContentCompatibleWithExtension("png", PNG_HEADER), true);
+  assert.equal(isContentCompatibleWithExtension("jpg", WINDOWS_EXE_HEADER), false);
+  assert.equal(isContentCompatibleWithExtension("png", PDF_HEADER), false);
 });
 
 test("허용목록 밖 확장자는 내용이 무엇이든 통과하지 못한다", () => {

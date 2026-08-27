@@ -104,7 +104,16 @@ export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, re
   OSCILLOSCOPE_DATA: ["csv", "txt"],
   LOG_FILE: ["log", "txt"],
   FIRMWARE: ["bin", "hex", "zip"],
-  CIRCUIT_DIAGRAM: ["pdf"],
+  // 회로도에 사진 확장자를 함께 둔다. 현장의 회로도는 상당수가 종이라, PDF만
+  // 받으면 폰으로 찍어 바로 올리는 길이 막히고 결국 스캔해 줄 사람을 기다리게
+  // 된다. 지금 넓혀 두는 이유는 나중에 넓히면 그 전에 올린 파일들과 규칙이
+  // 어긋나서다 — 같은 분류 안에 "그때는 되던 것"과 "지금 되는 것"이 섞이면
+  // 무엇이 규칙인지 아무도 말할 수 없다.
+  //
+  // 넓힌 것은 이 셋뿐이다. jpg/jpeg/png는 이미 전체 허용목록에 있고
+  // previewCapable이며, 앞머리 바이트 대조(isContentCompatibleWithExtension)가
+  // 그대로 걸린다 — 이름만 .jpg로 바꾼 파일은 여전히 들어오지 못한다.
+  CIRCUIT_DIAGRAM: ["pdf", "jpg", "jpeg", "png"],
 };
 
 /**
