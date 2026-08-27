@@ -71,7 +71,11 @@ import {
  *
  * 표에는 **썸네일을 넣지 않는다.** 넣으면 두 보기가 같아져 전환할 까닭이
  * 없어진다 — 표는 이름·분류·크기를 **글자로 훑는 자리**이고, 사진인지 문서인지는
- * 종류 배지가 알린다. 사진을 보는 자리는 미리보기 격자다.
+ * 종류 배지가 알린다. 사진을 **늘어놓는** 자리는 미리보기 격자다.
+ *
+ * 대신 표에는 `미리보기` 열이 있다. 누르면 사진은 격자에서 썸네일을 누른 것과
+ * 똑같이 뷰어가 열리고, PDF 는 새 탭에서 열린다 — 자세한 사정은 isPreviewable
+ * 머리말에 있다.
  *
  * 올리기 폼과 휴지통은 전환 장치 **밖**에 둔다 — 보기 방식과 상관없이 늘 같은
  * 자리에 있어야 한다.
@@ -125,8 +129,54 @@ function isViewableImage(mimeType: string): boolean {
   return mimeType === "image/jpeg" || mimeType === "image/png";
 }
 
+/**
+ * 브라우저에서 그대로 열어 볼 수 있는 문서인가 — 지금은 PDF 뿐이다.
+ *
+ * **파일명 확장자로 판단하지 않는다.** 이 저장소는 브라우저가 보낸 형식을 믿지
+ * 않고, 서버가 확장자에서 정본 MIME 을 골라 저장한다(attachment-allowlist.ts).
+ * 화면이 이름을 다시 읽어 판단하면 이름만 바꾼 파일에 속는 자리가 하나 더 생긴다.
+ *
+ * 이것이 참이어도 **여는 것을 결정하는 쪽은 서버다** — 화면은 `?view=full` 을
+ * 물을 뿐이고, 열어도 되는 형식인지는 download 라우트의 목록 하나가 정한다.
+ * 여기서 참으로 만든다고 서버가 열어 주지는 않는다.
+ */
+function isViewablePdf(mimeType: string): boolean {
+  return mimeType === "application/pdf";
+}
+
+/**
+ * 표에서 `미리보기` 를 그릴 형식인가.
+ *
+ * ⚠️ **누르면 벌어지는 일이 형식마다 다르다** — 그리고 그것은 의도한 것이다.
+ *
+ *   사진(jpeg·png)  화면 위에 AttachmentViewer 가 열린다. 좌우로 넘어간다.
+ *   PDF             새 탭에서 열린다.
+ *
+ * 사용자에게는 "이 파일을 본다" 하나이므로 글자도 **둘 다 `미리보기`** 로 같다.
+ * 갈리는 까닭은 우리 사정이다: 뷰어는 `<img>` 로 그리므로 PDF 를 못 받고,
+ * PDF 를 이 페이지 안에 끼워 넣는 길은 전역 `X-Frame-Options: DENY` 와
+ * `frame-ancestors 'none'` 이 막아 새 탭밖에 남지 않는다. 그 사정을 단추 글자로
+ * 내보이면 사용자는 자기가 고를 수 있는 두 가지가 있는 줄 안다.
+ */
+function isPreviewable(mimeType: string): boolean {
+  return isViewableImage(mimeType) || isViewablePdf(mimeType);
+}
+
 function downloadUrlOf(id: string): string {
   return `/api/attachments/${encodeURIComponent(id)}/download`;
+}
+
+/**
+ * 화면에서 원본을 그대로 여는 주소. `?view=full` 은 썸네일이 아니라 **원본**을,
+ * 첨부가 아니라 **inline** 으로 준다(형식이 서버 목록에 있을 때만).
+ *
+ * 새 탭에서 연다 — `<iframe>`·`<embed>`·`<object>` 로 이 페이지 안에 끼워 넣는
+ * 길은 막혀 있다. next.config.ts 가 모든 응답에 `X-Frame-Options: DENY` 와
+ * `frame-ancestors 'none'` 을 걸기 때문이고, 그 헤더는 이것 때문에 풀 만한
+ * 것이 아니다(결재·출하 승인 화면이 클릭 가로채기의 표적이다).
+ */
+function inlineViewUrlOf(id: string): string {
+  return `/api/attachments/${encodeURIComponent(id)}/download?view=full`;
 }
 
 /**
@@ -210,6 +260,11 @@ function KindBadge({ mimeType }: { mimeType: string }) {
  * 🔴 **썸네일을 넣지 말 것.** 넣는 순간 미리보기 격자와 같은 것이 되어 전환할
  * 까닭이 사라진다(파일 상단 참조). 사진인지 문서인지는 KindBadge 가 알린다.
  *
+ * 다만 **볼 수는 있어야 한다.** 그림을 늘어놓지 않는 것과 볼 길이 없는 것은
+ * 다른 이야기인데, 예전 표에는 `내려받기` 밖에 없어서 사진 한 장을 확인하려면
+ * 파일로 받아 여는 수밖에 없었다. 그래서 `미리보기` 열을 둔다 — 표는 여전히
+ * 글자만 늘어놓고, 보고 싶을 때 한 번 누르는 길만 열어 둔다.
+ *
  * 스크롤 껍데기(overflow-x-auto)와 테두리는 **여기서 두르지 않는다** —
  * ResponsiveList 가 소유한다. 여기서 한 겹 더 두르면 넘침이 그 안에서 흡수되어
  * 바깥은 영영 "들어간다"고 답하고, 표/미리보기 자동 판정이 망가진다
@@ -218,13 +273,31 @@ function KindBadge({ mimeType }: { mimeType: string }) {
 function FilesTable({
   attachments,
   canManageFiles,
+  hasPreviewable,
   isBusy,
   onDelete,
+  onOpenImage,
 }: {
   attachments: ProductModelAttachmentListItem[];
   canManageFiles: boolean;
+  /**
+   * 볼 수 있는 파일(사진 또는 PDF)이 목록에 하나라도 있는가.
+   *
+   * 하나도 없으면 열 자체를 그리지 않는다 — 전부 빈 칸인 열은 표를 넓히기만
+   * 하고, 그 폭이 ResponsiveList 의 "표가 지금 폭에 들어가는가" 판정을 밀어
+   * 엑셀·zip 뿐인 모델에서 표가 미리보기로 튕기게 만든다. 그래서 이 값은 아래
+   * measureKey 에도 함께 들어간다.
+   */
+  hasPreviewable: boolean;
   isBusy: boolean;
   onDelete: (item: ProductModelAttachmentListItem) => void;
+  /**
+   * 사진을 크게 여는 길. **격자에서 썸네일을 눌렀을 때와 같은 함수다**
+   * (아래 openViewer 하나를 둘이 나눠 쓴다). 사진만 모은 목록도 시작 위치도
+   * 그 안에서 한 번만 계산되므로, 격자와 표에서 좌우로 넘기는 순서가 갈릴 수
+   * 없다.
+   */
+  onOpenImage: (item: ProductModelAttachmentListItem) => void;
 }) {
   return (
     <table className="min-w-full text-left text-sm">
@@ -235,6 +308,7 @@ function FilesTable({
           <th scope="col" className="px-3 py-2 text-right font-medium">크기</th>
           <th scope="col" className="px-3 py-2 font-medium">올린 사람</th>
           <th scope="col" className="px-3 py-2 font-medium">올린 날짜</th>
+          {hasPreviewable && <th scope="col" className="px-3 py-2 font-medium">미리보기</th>}
           <th scope="col" className="px-3 py-2 font-medium">내려받기</th>
           {canManageFiles && <th scope="col" className="px-3 py-2 font-medium">지우기</th>}
         </tr>
@@ -263,6 +337,37 @@ function FilesTable({
             <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-700 dark:text-zinc-300">
               {formatTimestamp(item.uploadedAt)}
             </td>
+            {hasPreviewable && (
+              // 단추가 셋(미리보기·내려받기·지우기)까지 늘어난 줄이다. 좁은
+              // 화면에서 글자가 반으로 접히지 않게 칸마다 nowrap 을 둔다.
+              <td className="whitespace-nowrap px-3 py-2">
+                {isViewableImage(item.mimeType) ? (
+                  // 사진은 격자에서 썸네일을 누른 것과 **똑같이** 화면 위 뷰어로
+                  // 연다 — 새 탭이 아니다. 표에는 썸네일이 없어(그것이 두 보기를
+                  // 가르는 선이다) 이 단추가 그 자리를 대신한다.
+                  <button
+                    type="button"
+                    onClick={() => onOpenImage(item)}
+                    aria-label={`${item.originalFileName} 미리보기`}
+                    className="text-xs font-medium text-sky-700 underline dark:text-sky-400"
+                  >
+                    미리보기
+                  </button>
+                ) : isViewablePdf(item.mimeType) ? (
+                  <a
+                    href={inlineViewUrlOf(item.id)}
+                    // 새 탭에서 연다(iframe 은 전역 헤더가 막는다).
+                    // rel 은 새 탭이 window.opener 로 이 창을 건드리지 못하게 한다.
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${item.originalFileName} 미리보기`}
+                    className="text-xs font-medium text-sky-700 underline dark:text-sky-400"
+                  >
+                    미리보기
+                  </a>
+                ) : null}
+              </td>
+            )}
             <td className="whitespace-nowrap px-3 py-2">
               <a
                 href={downloadUrlOf(item.id)}
@@ -329,6 +434,12 @@ export default function ProductModelFilesSection({
    */
   const viewable = useMemo(
     () => attachments.filter((item) => isViewableImage(item.mimeType)),
+    [attachments]
+  );
+
+  /** 표에 `미리보기` 열을 그릴지 — 볼 수 있는 파일이 하나라도 있을 때만이다(FilesTable 주석). */
+  const hasPreviewable = useMemo(
+    () => attachments.some((item) => isPreviewable(item.mimeType)),
     [attachments]
   );
 
@@ -570,14 +681,17 @@ export default function ProductModelFilesSection({
                 {attachments.length}건
               </span>
             }
-            /* 줄 수와 `지우기` 열의 유무가 표의 필요 폭을 바꾼다. */
-            measureKey={[attachments.length, canManageFiles]}
+            /* 줄 수와 `지우기`·`미리보기` 열의 유무가 표의 필요 폭을 바꾼다. */
+            measureKey={[attachments.length, canManageFiles, hasPreviewable]}
             table={
               <FilesTable
                 attachments={attachments}
                 canManageFiles={canManageFiles}
+                hasPreviewable={hasPreviewable}
                 isBusy={isBusy}
                 onDelete={setPendingDelete}
+                /* 격자의 썸네일이 부르는 것과 **같은 함수**다 — 두 벌로 만들지 않는다. */
+                onOpenImage={openViewer}
               />
             }
             /* 미리보기는 예전 격자 그대로다 — 자리만 이 안으로 옮겼다(mt-3 은
@@ -609,12 +723,32 @@ export default function ProductModelFilesSection({
                         </span>
                       )}
                       <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                        <a
-                          href={downloadUrlOf(item.id)}
-                          className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
-                        >
-                          내려받기
-                        </a>
+                        {/*
+                          `미리보기` 는 `내려받기` 를 **대신하지 않는다.** 회로도를
+                          훑어보는 것과 손에 들고 나가는 것은 다른 일이라 둘 다 둔다.
+                        */}
+                        <div className="flex min-w-0 items-center gap-2">
+                          {isViewablePdf(item.mimeType) && (
+                            <a
+                              href={inlineViewUrlOf(item.id)}
+                              // 새 탭에서 연다(iframe 은 전역 헤더가 막는다).
+                              // rel 은 새 탭이 window.opener 로 이 창을 건드리지 못하게 한다.
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`${item.originalFileName} 미리보기`}
+                              className="text-[11px] font-medium text-sky-700 underline dark:text-sky-400"
+                            >
+                              미리보기
+                            </a>
+                          )}
+                          <a
+                            href={downloadUrlOf(item.id)}
+                            aria-label={`${item.originalFileName} 내려받기`}
+                            className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+                          >
+                            내려받기
+                          </a>
+                        </div>
                         {canManageFiles && (
                           <button
                             type="button"

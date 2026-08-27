@@ -88,6 +88,42 @@ function downloadUrlOf(id: string): string {
   return `/api/attachments/${encodeURIComponent(id)}/download`;
 }
 
+/**
+ * 브라우저에서 그대로 열어 볼 수 있는 문서인가 — 지금은 PDF 뿐이다.
+ *
+ * **파일명 확장자로 판단하지 않는다.** 이 저장소는 브라우저가 보낸 형식을 믿지
+ * 않고 서버가 확장자에서 정본 MIME 을 골라 저장한다(attachment-allowlist.ts).
+ * 화면이 이름을 다시 읽어 판단하면 이름만 바꾼 파일에 속는 자리가 하나 더 생긴다.
+ *
+ * ⚠️ **isViewableImage 와 일부러 갈라 둔다 — PDF 를 "사진"으로 만들지 않는다.**
+ *    위쪽 뷰어(AttachmentViewer)는 `<img>` 로 그리므로 PDF 를 받지 못하고,
+ *    viewable 목록에 끼워 넣으면 좌우로 넘기다 빈 화면을 만난다. PDF 는 새
+ *    탭에서 연다. 거르기(종류 배지)의 사진/문서 구분도 그대로 둔다.
+ *
+ * 이것이 참이어도 **여는 것을 결정하는 쪽은 서버다** — 화면은 `?view=full` 을
+ * 물을 뿐이고, 열어도 되는 형식인지는 download 라우트의 목록 하나가 정한다.
+ */
+function isViewablePdf(mimeType: string): boolean {
+  return mimeType === "application/pdf";
+}
+
+/**
+ * 화면에서 원본을 그대로 여는 주소. `?view=full` 은 썸네일이 아니라 **원본**을,
+ * 첨부가 아니라 **inline** 으로 준다(형식이 서버 목록에 있을 때만).
+ *
+ * 새 탭에서 연다 — `<iframe>`·`<embed>`·`<object>` 로 이 페이지 안에 끼워 넣는
+ * 길은 막혀 있다. next.config.ts 가 모든 응답에 `X-Frame-Options: DENY` 와
+ * `frame-ancestors 'none'` 을 걸기 때문이고, 그 헤더는 이것 때문에 풀 만한
+ * 것이 아니다(결재·출하 승인 화면이 클릭 가로채기의 표적이다).
+ *
+ * 이 주소는 감사 로그를 남기지 않는다(inline 이므로). 그래서 `미리보기` 는
+ * `내려받기` 를 **대신하지 않는다** — 훑어보는 것과 손에 들고 나가는 것은 다른
+ * 일이고, 기록이 남아야 하는 쪽은 뒤엣것이다. 둘을 나란히 둔다.
+ */
+function inlineViewUrlOf(id: string): string {
+  return `/api/attachments/${encodeURIComponent(id)}/download?view=full`;
+}
+
 /** 사진인지 문서인지 한눈에. 거르기 칸의 이름과 같은 말을 쓴다. */
 function KindBadge({ mimeType }: { mimeType: string }) {
   const kind = attachmentKindOf(mimeType);
@@ -534,6 +570,27 @@ export default function StoredAttachmentList({
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-right">
                 <div className="flex items-center justify-end gap-2">
+                  {/*
+                    PDF 는 새 탭에서 그대로 열어 본다. 사진은 여기 없다 — 사진은
+                    왼쪽 썸네일을 누르면 화면 위 뷰어가 열리므로 같은 일을 하는
+                    단추가 한 줄에 둘이 되지 않게 한다.
+                  */}
+                  {isViewablePdf(item.mimeType) && (
+                    <a
+                      href={inlineViewUrlOf(item.id)}
+                      // 새 탭에서 연다(iframe 은 전역 헤더가 막는다).
+                      // rel 은 새 탭이 window.opener 로 이 창을 건드리지 못하게 한다.
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      // 한 화면에 같은 말이 여럿이라 무엇을 여는지 이름으로 밝힌다.
+                      // (sr-only 로 숨긴 글자는 이 저장소에서 페이지를 굴린 전력이
+                      //  있어 쓰지 않는다 — aria-label 로 붙인다.)
+                      aria-label={`${item.originalFileName} 미리보기`}
+                      className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      미리보기
+                    </a>
+                  )}
                   <a
                     href={downloadUrlOf(item.id)}
                     className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
@@ -597,6 +654,18 @@ export default function StoredAttachmentList({
             </div>
           </div>
           <div className="mt-2 flex justify-end gap-2">
+            {/* 표 보기와 같은 규칙이다 — PDF 만, 새 탭에서(위 표의 주석 참조). */}
+            {isViewablePdf(item.mimeType) && (
+              <a
+                href={inlineViewUrlOf(item.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`${item.originalFileName} 미리보기`}
+                className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                미리보기
+              </a>
+            )}
             <a
               href={downloadUrlOf(item.id)}
               className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
@@ -668,12 +737,31 @@ export default function StoredAttachmentList({
                 <KindBadge mimeType={item.mimeType} /> {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)}
               </span>
               <div className="mt-1 flex justify-between gap-2">
-                <a
-                  href={downloadUrlOf(item.id)}
-                  className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
-                >
-                  내려받기
-                </a>
+                {/*
+                  왼쪽 한 덩어리로 묶는다 — 이 줄은 justify-between 이라
+                  묶지 않으면 단추가 셋일 때 `내려받기` 가 가운데로 흩어지고
+                  `지우기` 만 오른쪽에 남는다. 표 보기와 같은 규칙으로 PDF 에만
+                  `미리보기` 가 붙는다(위 표의 주석 참조).
+                */}
+                <div className="flex min-w-0 items-center gap-2">
+                  {isViewablePdf(item.mimeType) && (
+                    <a
+                      href={inlineViewUrlOf(item.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${item.originalFileName} 미리보기`}
+                      className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+                    >
+                      미리보기
+                    </a>
+                  )}
+                  <a
+                    href={downloadUrlOf(item.id)}
+                    className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+                  >
+                    내려받기
+                  </a>
+                </div>
                 {canManage && (
                   <button
                     type="button"
