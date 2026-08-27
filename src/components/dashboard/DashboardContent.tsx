@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import FaultSymptomBreakdownPanel from "@/components/dashboard/FaultSymptomBreakdownPanel";
 import SummaryCard from "@/components/dashboard/SummaryCard";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import { computeDashboardSummary } from "@/lib/domain/dashboard-metrics";
@@ -90,10 +91,15 @@ export default function DashboardContent({ serverBaseCases }: DashboardContentPr
   ];
 
   return (
-    <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      {cards.map((card) => (
-        <SummaryCard key={card.label} {...card} />
-      ))}
-    </div>
+    <>
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {cards.map((card) => (
+          <SummaryCard key={card.label} {...card} />
+        ))}
+      </div>
+      {/* 카드와 같은 cases 배열을 그대로 넘긴다 — 원형 그래프 전용으로 걸러
+          만든 다른 배열을 넘기면 카드와 그래프의 숫자가 갈라진다. */}
+      <FaultSymptomBreakdownPanel cases={cases} />
+    </>
   );
 }
