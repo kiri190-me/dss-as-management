@@ -1,0 +1,41 @@
+# 이미지에 절대 들어가면 안 되는 것들.
+#
+# Dockerfile을 아직 쓰지 않았지만 이 파일을 먼저 둔다. 배포 단계에서
+# COPY . . 한 줄이면 아래 것들이 이미지 안으로 따라 들어가고, 이미지는
+# 복사되어 돌아다닌다.
+
+# ── 비밀이 담긴 설정 ──
+#
+# SSO_CLIENT_SECRET, AUTH_SESSION_SECRET, DB 접속 문자열이 여기 있다.
+# 클라이언트 시크릿이 새면 이 시스템 행세를 하며 통합 로그인에서 통행증을
+# 받아갈 수 있다.
+.env*
+!.env.example
+
+# ── 업무 자료 ──
+#
+# UPLOADS_DIR/BACKUPS_DIR/LOGS_DIR가 저장소 안을 가리키도록 설정된 적이
+# 있다면(개발 편의로 흔히 그렇게 한다) 첨부파일과 백업이 통째로 이미지에
+# 실린다. 경로가 바깥이더라도 이름만으로 막아 둔다.
+uploads/
+backups/
+logs/
+*.pem
+
+# ── 빌드 산출물·개발 부산물 ──
+node_modules/
+.next/
+out/
+build/
+coverage/
+tsconfig.tsbuildinfo
+npm-debug.log*
+
+# ── 저장소 살림 ──
+.git/
+.gitignore
+.dockerignore
+AGENTS.md
+CLAUDE.md
+HANDOFF.md
+docs/

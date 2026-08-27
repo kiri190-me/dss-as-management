@@ -7,16 +7,17 @@ import {
 } from "@/lib/auth/session";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { isDemoLoginEnabled } from "@/lib/config/demo-login";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { resolveDbLogin } from "@/lib/auth/db-login";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
 
-// 데모 전용 로그인 라우트다. DEMO_LOGIN_ENABLED가 정확히 "true"일 때만
-// 동작한다. 운영 환경에서는 절대 활성화해서는 안 되며, Kakao OAuth/회사
-// 이메일 인증이 도입되면 이 라우트는 폐기된다.
-function isDemoLoginEnabled(): boolean {
-  return process.env.DEMO_LOGIN_ENABLED === "true";
-}
+// 데모 전용 로그인 라우트다. 운영 환경에서는 절대 활성화해서는 안 되며,
+// 통합 로그인이 자리를 잡으면 이 라우트는 폐기된다.
+//
+// 판정은 config/demo-login.ts가 한다 — SSO 모드에서는 DEMO_LOGIN_ENABLED가
+// 무엇이든 닫힌다. 아래 POST 첫머리의 SSO 가드는 그대로 둔다: 통합 로그인을
+// 우회하는 유일한 길이라 두 겹으로 막는 편이 낫다.
 
 /**
  * Mobile-LAN redirect fix — `NextResponse.redirect(new URL(path,

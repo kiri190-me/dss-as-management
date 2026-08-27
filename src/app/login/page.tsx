@@ -5,6 +5,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { mockUsers } from "@/lib/domain/mock-data";
 import { roleLabels } from "@/lib/domain/types";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { isDemoLoginEnabled } from "@/lib/config/demo-login";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { listUsersForLoginPicker } from "@/lib/db/queries/users";
 import { getLoginViewModel } from "./login-view-model";
@@ -65,7 +66,7 @@ export default async function LoginPage({
     redirect("/api/auth/sso/start");
   }
 
-  const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
+  const demoLoginEnabled = isDemoLoginEnabled();
   const authSource = getAuthSource();
   // In SSO mode nobody picks an account, so the picker query is skipped
   // entirely rather than fetched and hidden.

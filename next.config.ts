@@ -1,6 +1,48 @@
 import type { NextConfig } from "next";
 
+/**
+ * 모든 응답에 붙는 보안 헤더. dss-auth의 같은 목록과 맞춰 둔다 — 두 시스템이
+ * 한 브라우저 안에서 오가므로 한쪽만 잠그면 의미가 반으로 준다.
+ *
+ * 리버스 프록시가 아니라 여기 두는 이유: 프록시 설정은 저장소 밖에 있어
+ * 배포마다 다시 맞춰야 하고, 개발 서버에는 아예 없어서 개발 중에 확인할 수
+ * 없다. 프록시에서 한 번 더 붙어도 해롭지 않다.
+ *
+ * CSP는 frame-ancestors 하나만 둔다. 전체 CSP는 Next의 인라인 스크립트·
+ * 스타일과 부딪혀 화면이 조용히 깨지기 쉬운데, 검증 없이 넣는 것은
+ * 안전장치가 아니라 시한폭탄이다.
+ */
+const SECURITY_HEADERS = [
+  // 이 시스템의 화면이 남의 페이지 안에 실려 클릭을 가로채이는 것을 막는다.
+  // 결재·출하 승인처럼 되돌리기 어려운 버튼이 있는 화면이 특히 그렇다.
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  // 통합 로그인으로 나갈 때 우리 주소를 넘기지 않는다.
+  { key: "Referrer-Policy", value: "same-origin" },
+  // ⚠️ camera=(self) — 닫으면 안 된다. InAppCamera.tsx가 getUserMedia로 이
+  // 화면 안에서 직접 촬영한다(수리 사진). ()로 두면 촬영이 통째로 막히고,
+  // 증상은 "카메라가 안 켜진다"뿐이라 헤더를 의심하기까지 오래 걸린다.
+  // 마이크와 위치는 쓰지 않으므로 닫아 둔다 — 쓰게 되면 여기서 막히고,
+  // 그때 왜 열어야 하는지 한 번 생각하게 된다.
+  {
+    key: "Permissions-Policy",
+    value: "camera=(self), microphone=(), geolocation=()",
+  },
+  // http 응답에서는 브라우저가 무시하므로 지금 붙여도 해롭지 않고, HTTPS로
+  // 옮기는 날 따로 기억해 낼 필요가 없어진다. preload는 넣지 않는다 —
+  // 사내망 도메인을 브라우저 내장 목록에 올리면 되돌리는 데 몇 달이 걸린다.
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains",
+  },
+];
+
 const nextConfig: NextConfig = {
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
+
   // DEVELOPMENT ONLY — allows the current LAN dev machine's address to
   // reach Next.js's own dev resources (HMR/webpack-hmr, RSC dev assets).
   // Unrelated to src/lib/auth/request-guards.ts's isTrustedOrigin (a
