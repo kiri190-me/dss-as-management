@@ -136,75 +136,83 @@ export default function ProductModelHistoryBreakdown({
       </div>
 
       {/* 켠 그래프가 하나도 없으면 이 자리가 통째로 빈다 — 단추 줄이 남아 있으므로
-          무엇을 눌러야 하는지는 보인다. */}
-      {openCharts.map((id) => {
-        const selectedKey = selection[id] ?? null;
-        const onSelectSlice = (key: string) => selectSlice(id, key);
+          무엇을 눌러야 하는지는 보인다(그때는 empty:hidden 이 이 상자를 통째로
+          지워서, 단추 줄과 접수 건 목록 사이에 빈 칸이 두 번 들어가지 않는다).
 
-        if (id === "SYMPTOM") {
+          폭 규칙은 대시보드의 같은 그래프(FaultSymptomBreakdownPanel)에서 그대로
+          가져왔다 — grid-cols-1 / lg:grid-cols-2, 카드에 폭 상한 없음. 두 화면이
+          같은 원형 그래프를 서로 다른 크기로 보여 주면 같은 것을 보고 있다는
+          느낌이 깨진다. 여기서 전환점이나 상한을 따로 정하지 않는 까닭이다. */}
+      <div className="grid grid-cols-1 gap-4 empty:hidden lg:grid-cols-2">
+        {openCharts.map((id) => {
+          const selectedKey = selection[id] ?? null;
+          const onSelectSlice = (key: string) => selectSlice(id, key);
+
+          if (id === "SYMPTOM") {
+            return (
+              <ChartCard
+                key={id}
+                title={CHART_LABELS.SYMPTOM}
+                meta={`총 ${symptom.total}건`}
+                note="조각을 누르면 그 증상으로 접수된 건들의 인수점검 결과가 펼쳐집니다."
+                emptyMessage="접수 건이 없습니다."
+                slices={symptom.slices}
+                ariaLabel={`고장 증상별 건수 비율, 총 ${symptom.total}건`}
+                selectedKey={selectedKey}
+                onSelectSlice={onSelectSlice}
+                detail={(slice) => <IntakeInspectionDetailPanel slice={slice} />}
+              />
+            );
+          }
+
+          if (id === "PART") {
+            return (
+              <ChartCard
+                key={id}
+                title={CHART_LABELS.PART}
+                // 이 두 숫자를 나란히 적지 않으면 "10건인데 왜 부품이 12개지"에서
+                // 사람이 그래프 전체를 안 믿게 된다.
+                meta={`부품 ${faultPart.total}개 · 요청 기록이 있는 ${faultPart.caseWithRequestCount}건`}
+                note="한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 취소·반려된 요청은 세지 않습니다."
+                emptyMessage="부품 요청 기록이 없습니다."
+                countUnit="개"
+                slices={faultPart.slices}
+                ariaLabel={`고장 부품별 요청 비율, 부품 ${faultPart.total}개`}
+                selectedKey={selectedKey}
+                onSelectSlice={onSelectSlice}
+              />
+            );
+          }
+
+          if (id === "END_USER") {
+            return (
+              <ChartCard
+                key={id}
+                title={CHART_LABELS.END_USER}
+                meta={`총 ${endUser.total}건`}
+                emptyMessage="접수 건이 없습니다."
+                slices={endUser.slices}
+                ariaLabel={`End-User 별 건수 비율, 총 ${endUser.total}건`}
+                selectedKey={selectedKey}
+                onSelectSlice={onSelectSlice}
+              />
+            );
+          }
+
           return (
             <ChartCard
               key={id}
-              title={CHART_LABELS.SYMPTOM}
-              meta={`총 ${symptom.total}건`}
-              note="조각을 누르면 그 증상으로 접수된 건들의 인수점검 결과가 펼쳐집니다."
+              title={CHART_LABELS.BILLING}
+              meta={`총 ${billing.total}건`}
               emptyMessage="접수 건이 없습니다."
-              slices={symptom.slices}
-              ariaLabel={`고장 증상별 건수 비율, 총 ${symptom.total}건`}
-              selectedKey={selectedKey}
-              onSelectSlice={onSelectSlice}
-              detail={(slice) => <IntakeInspectionDetailPanel slice={slice} />}
-            />
-          );
-        }
-
-        if (id === "PART") {
-          return (
-            <ChartCard
-              key={id}
-              title={CHART_LABELS.PART}
-              // 이 두 숫자를 나란히 적지 않으면 "10건인데 왜 부품이 12개지"에서
-              // 사람이 그래프 전체를 안 믿게 된다.
-              meta={`부품 ${faultPart.total}개 · 요청 기록이 있는 ${faultPart.caseWithRequestCount}건`}
-              note="한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 취소·반려된 요청은 세지 않습니다."
-              emptyMessage="부품 요청 기록이 없습니다."
-              countUnit="개"
-              slices={faultPart.slices}
-              ariaLabel={`고장 부품별 요청 비율, 부품 ${faultPart.total}개`}
+              slices={billing.slices}
+              ariaLabel={`유/무상 별 건수 비율, 총 ${billing.total}건`}
               selectedKey={selectedKey}
               onSelectSlice={onSelectSlice}
             />
           );
-        }
-
-        if (id === "END_USER") {
-          return (
-            <ChartCard
-              key={id}
-              title={CHART_LABELS.END_USER}
-              meta={`총 ${endUser.total}건`}
-              emptyMessage="접수 건이 없습니다."
-              slices={endUser.slices}
-              ariaLabel={`End-User 별 건수 비율, 총 ${endUser.total}건`}
-              selectedKey={selectedKey}
-              onSelectSlice={onSelectSlice}
-            />
-          );
-        }
-
-        return (
-          <ChartCard
-            key={id}
-            title={CHART_LABELS.BILLING}
-            meta={`총 ${billing.total}건`}
-            emptyMessage="접수 건이 없습니다."
-            slices={billing.slices}
-            ariaLabel={`유/무상 별 건수 비율, 총 ${billing.total}건`}
-            selectedKey={selectedKey}
-            onSelectSlice={onSelectSlice}
-          />
-        );
-      })}
+        })}
+      </div>
 
       {isListOpen ? <ProductModelRepairCaseHistory resolved={resolved} /> : null}
     </div>
@@ -244,6 +252,8 @@ function ChartCard<TDetail>({
   const selected = slices.find((slice) => slice.key === selectedKey) ?? null;
 
   return (
+    // 폭 상한(max-w-*)을 두지 않는다 — 대시보드의 같은 그래프 카드에도 없다.
+    // 폭은 이 카드를 담은 격자 한 칸이 정한다(위 openCharts 격자 참조).
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">{title}</h3>
