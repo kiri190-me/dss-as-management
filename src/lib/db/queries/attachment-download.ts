@@ -30,10 +30,20 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export type AttachmentForDownload = {
   id: string;
   /**
-   * NULL 이면 접수 건이 영구 삭제되어 연결이 끊긴 첨부다. 그 경우 접수 건 기준
-   * 권한을 물을 대상이 없으므로 판정 함수가 DETACHED 로 막는다.
+   * 접수 건 주인. NULL 이면 이 첨부의 주인은 접수 건이 아니다 — 모델 첨부이거나,
+   * 접수 건이 영구 삭제되어 연결이 끊긴 첨부다.
    */
   repairCaseId: string | null;
+  /**
+   * 제품 모델 주인. 위 컬럼과 **동시에 채워지지 않는다**
+   * (attachments_owner_not_both CHECK). 둘 다 NULL 이면 주인이 아무도 없는
+   * 첨부이고, 그때는 물을 권한 자체가 없으므로 판정 함수가 DETACHED 로 막는다.
+   *
+   * 라우트가 **물을 권한을 고르는 근거**가 이 값이다 — 모델 첨부는
+   * productModels.view(보기) / productModels.files(쓰기)를 묻고, 접수 건 첨부는
+   * repairCases.files 를 묻는다. 그래서 조회에서 함께 읽지 않으면 안 된다.
+   */
+  productModelId: string | null;
   originalFileName: string;
   /** 저장 루트 기준 상대 경로. 라우트가 resolveAttachmentAbsolutePath로 반드시 다시 검증한다. */
   storedPath: string;
@@ -56,6 +66,7 @@ export async function getAttachmentForDownload(
     .select({
       id: attachments.id,
       repairCaseId: attachments.repairCaseId,
+      productModelId: attachments.productModelId,
       originalFileName: attachments.originalFileName,
       storedPath: attachments.storedPath,
       mimeType: attachments.mimeType,

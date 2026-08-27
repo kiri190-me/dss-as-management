@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { attachments, repairCases, users } from "../schema";
+import { attachments, productModels, repairCases, users } from "../schema";
 import type { AttachmentCategory, MalwareScanStatus } from "@/lib/domain/attachment-category";
 
 /**
@@ -165,6 +165,36 @@ export async function getAttachmentUploadTarget(
     .select({ id: repairCases.id, isLocked: repairCases.isLocked })
     .from(repairCases)
     .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * 업로드가 향할 제품 모델. **isLocked에 해당하는 것이 없다.**
+ *
+ * 접수 건 쪽(getAttachmentUploadTarget)은 출하 완료로 잠긴 건을 막아야 해서
+ * is_locked를 함께 읽지만, product_models에는 그런 개념이 없다. 없는 개념을
+ * `isLocked: false`로 흉내 내지 않는다 — 그렇게 두면 부르는 쪽이 "언젠가 참이
+ * 될 수 있는 값"으로 읽고, 모델에 잠금이 생기지 않는 한 영영 죽어 있는 분기가
+ * 남는다. 필드가 없으면 라우트에도 그 확인이 없다는 것이 한눈에 보인다.
+ *
+ * 휴지통에 있는 모델(is_deleted = true)은 없는 것으로 본다 — 지워진 모델에
+ * 새 회로도를 붙일 수는 없다. 접수 건 쪽과 같은 판단이다.
+ */
+export type ProductModelAttachmentUploadTarget = {
+  id: string;
+};
+
+export async function getProductModelAttachmentUploadTarget(
+  productModelId: string
+): Promise<ProductModelAttachmentUploadTarget | null> {
+  if (!UUID_PATTERN.test(productModelId)) return null;
+
+  const [row] = await db
+    .select({ id: productModels.id })
+    .from(productModels)
+    .where(and(eq(productModels.id, productModelId), eq(productModels.isDeleted, false)))
     .limit(1);
 
   return row ?? null;

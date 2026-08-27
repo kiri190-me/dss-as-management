@@ -138,7 +138,7 @@ async function storedAttachment(repairCaseId: string): Promise<{
 
   const created = await createAttachmentRecord({
     id: attachmentId,
-    repairCaseId,
+    owner: { kind: "REPAIR_CASE", repairCaseId },
     category: "INTAKE_PHOTO",
     originalFileName: "인수 사진.txt",
     storedPath,

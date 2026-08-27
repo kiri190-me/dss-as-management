@@ -9,11 +9,27 @@ import path from "node:path";
 import { and, eq, inArray, like } from "drizzle-orm";
 
 import { db, pgClient } from "../connection";
-import { attachments, auditLogs, customers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
+import {
+  attachments,
+  auditLogs,
+  customers,
+  productModels,
+  products,
+  repairCaseIntakeSequences,
+  repairCases,
+  users,
+} from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { createAttachmentRecord } from "./attachments";
-import { getAttachmentUploadTarget, listAttachmentsForRepairCase } from "../queries/attachments";
-import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
+import {
+  getAttachmentUploadTarget,
+  getProductModelAttachmentUploadTarget,
+  listAttachmentsForRepairCase,
+} from "../queries/attachments";
+import {
+  buildAttachmentStoredPath,
+  buildProductModelAttachmentStoredPath,
+} from "@/lib/domain/attachment-path";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/lib/domain/attachment-allowlist";
 import { createLocalFileSystemStorageAdapter } from "@/lib/storage/local-fs-adapter";
 import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/storage-adapter";
@@ -53,6 +69,12 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 const TEST_RECEIVED_AT = "2097-06-10";
 const TEST_SHIPMENT_DATE = "2097-06-20";
 const TEST_MODEL_PREFIX = "ATTACH-TEST-";
+/**
+ * product_models 행의 이름 접두사. 위 TEST_MODEL_PREFIX(products 표의 model_name)
+ * 와 **다른 표**를 가리키므로 접두사도 따로 둔다 — 같은 값을 쓰면 after()의
+ * 두 삭제가 서로의 범위를 읽는 것처럼 보여 나중에 읽는 사람을 헷갈리게 한다.
+ */
+const TEST_PRODUCT_MODEL_PREFIX = "ATTACH-TEST-PMODEL-";
 const TEST_YEAR_MONTH = "9706";
 
 let customerId: string;
@@ -99,6 +121,15 @@ async function createTestCase(): Promise<string> {
   return created.id;
 }
 
+/** 모델 첨부가 붙을 제품 모델 마스터 행. after()가 접두사로 지운다. */
+async function createTestProductModel(): Promise<string> {
+  const [row] = await db
+    .insert(productModels)
+    .values({ modelName: `${TEST_PRODUCT_MODEL_PREFIX}${randomUUID().slice(0, 8)}` })
+    .returning({ id: productModels.id });
+  return row.id;
+}
+
 function streamOf(bytes: Uint8Array, chunkSize = 8): ReadableStream<Uint8Array> {
   let offset = 0;
   return new ReadableStream<Uint8Array>({
@@ -140,7 +171,7 @@ async function insertRecord(params: {
 }) {
   const result = await createAttachmentRecord({
     id: params.attachmentId,
-    repairCaseId: params.repairCaseId,
+    owner: { kind: "REPAIR_CASE", repairCaseId: params.repairCaseId },
     category: "INTAKE_PHOTO",
     originalFileName: params.originalFileName ?? "인수 사진.txt",
     storedPath: params.storedPath,
@@ -184,6 +215,9 @@ after(async () => {
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
+  // 첨부 행을 먼저 지운 뒤다 — 남아 있으면 ON DELETE SET NULL 로 주인만 끊긴
+  // 채 이 스위트의 행이 표에 남는다.
+  await db.delete(productModels).where(like(productModels.modelName, `${TEST_PRODUCT_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
 
   if (storageRoot) {
@@ -351,7 +385,7 @@ describe("createAttachmentRecord: 행과 감사 로그가 함께 남는다", () 
         () =>
           createAttachmentRecord({
             id: randomUUID().toLowerCase(),
-            repairCaseId,
+            owner: { kind: "REPAIR_CASE", repairCaseId },
             category: "OTHER",
             originalFileName: "x.txt",
             storedPath: evil,
@@ -369,6 +403,210 @@ describe("createAttachmentRecord: 행과 감사 로그가 함께 남는다", () 
     // 대조 — 거부된 이유가 경로였다는 증거. 같은 조건에서 정상 경로는 들어간다.
     const rows = await db.select({ id: attachments.id }).from(attachments).where(eq(attachments.repairCaseId, repairCaseId));
     assert.equal(rows.length, 0, "거부된 시도는 행을 남기지 않는다");
+  });
+});
+
+// ─────────────────────────── 2·3(모델). 주인이 제품 모델인 첨부
+
+describe("createAttachmentRecord: 주인이 제품 모델일 때", () => {
+  test("product_model_id 가 채워지고 repair_case_id 는 NULL 이다", async () => {
+    const productModelId = await createTestProductModel();
+    const bytes = new Uint8Array(Buffer.from("model-owned", "utf8"));
+    const written = await storage.writeTemp(streamOf(bytes), { maxBytes: MAX_ATTACHMENT_SIZE_BYTES });
+    const attachmentId = randomUUID().toLowerCase();
+    const storedPath = buildProductModelAttachmentStoredPath({
+      productModelId,
+      attachmentId,
+      extension: "txt",
+    });
+    await storage.commit(written.tempPath, storedPath);
+
+    const created = await createAttachmentRecord({
+      id: attachmentId,
+      owner: { kind: "PRODUCT_MODEL", productModelId },
+      category: "CIRCUIT_DIAGRAM",
+      originalFileName: "회로도.txt",
+      storedPath,
+      mimeType: "text/plain",
+      fileSize: written.size,
+      checksumSha256: written.sha256,
+      description: "모델 회로도",
+      uploadedBy: engineerId,
+    });
+    createdAttachmentIds.push(created.id);
+
+    const [row] = await db.select().from(attachments).where(eq(attachments.id, created.id));
+    assert.ok(row, "첨부 행이 있어야 한다");
+    assert.equal(row.productModelId, productModelId);
+    // 🔴 주인이 아닌 쪽은 NULL 이어야 한다. 여기에 값이 들어가면 그 행은 어느
+    // 폴더에 사는 파일인지가 정해지지 않는다.
+    assert.equal(row.repairCaseId, null, "모델 첨부에 접수 건이 함께 실리면 안 된다");
+    assert.equal(row.category, "CIRCUIT_DIAGRAM");
+    assert.equal(row.checksumSha256, written.sha256);
+    assert.equal(row.malwareScanStatus, "NOT_SCANNED");
+    assert.equal(row.isDeleted, false);
+    // 접수 건 쪽과 같은 NAS 이식 3규칙 — 다른 것은 첫 마디뿐이다.
+    assert.equal(row.storedPath, `product-models/${productModelId}/${created.id}.txt`);
+    assert.equal(row.storedPath.includes("\\"), false);
+    assert.equal(row.storedPath, row.storedPath.toLowerCase());
+  });
+
+  test("감사 로그가 함께 남고, 어느 주인인지가 그 기록만으로 읽힌다", async () => {
+    const productModelId = await createTestProductModel();
+    const bytes = new Uint8Array(Buffer.from("model-audit", "utf8"));
+    const written = await storage.writeTemp(streamOf(bytes), { maxBytes: MAX_ATTACHMENT_SIZE_BYTES });
+    const attachmentId = randomUUID().toLowerCase();
+    const storedPath = buildProductModelAttachmentStoredPath({
+      productModelId,
+      attachmentId,
+      extension: "txt",
+    });
+    await storage.commit(written.tempPath, storedPath);
+
+    const created = await createAttachmentRecord({
+      id: attachmentId,
+      owner: { kind: "PRODUCT_MODEL", productModelId },
+      category: "CIRCUIT_DIAGRAM",
+      originalFileName: "회로도-감사.txt",
+      storedPath,
+      mimeType: "text/plain",
+      fileSize: written.size,
+      checksumSha256: written.sha256,
+      description: null,
+      uploadedBy: engineerId,
+    });
+    createdAttachmentIds.push(created.id);
+
+    const auditRows = await db
+      .select({ actionType: auditLogs.actionType, actorUserId: auditLogs.actorUserId, newValue: auditLogs.newValue })
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetRecordId, created.id), eq(auditLogs.actionType, "FILE_UPLOAD")));
+    assert.equal(auditRows.length, 1, "FILE_UPLOAD 감사 로그가 정확히 하나 남아야 한다");
+    assert.equal(auditRows[0].actorUserId, engineerId);
+
+    const newValue = auditRows[0].newValue as Record<string, unknown>;
+    // 이 줄만 읽고도 무슨 파일인지 알 수 있어야 한다. 예전처럼 repairCaseId 만
+    // 싣던 모양이면 모델 첨부의 기록에 `repairCaseId: null` 만 남는다.
+    assert.equal(newValue.ownerType, "PRODUCT_MODEL");
+    assert.equal(newValue.productModelId, productModelId);
+    assert.equal("repairCaseId" in newValue, false, "주인이 아닌 쪽 키는 아예 싣지 않는다");
+    assert.equal(newValue.originalFileName, "회로도-감사.txt");
+  });
+
+  test("접수 건 첨부의 감사 기록에도 주인이 드러난다 — 예전 키는 그대로 남는다", async () => {
+    const repairCaseId = await createTestCase();
+    const bytes = new Uint8Array(Buffer.from("case-audit-owner", "utf8"));
+    const stored = await storeFile({ repairCaseId, bytes, extension: "txt" });
+    const created = await insertRecord({ repairCaseId, ...stored });
+
+    const [auditRow] = await db
+      .select({ newValue: auditLogs.newValue })
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetRecordId, created.id), eq(auditLogs.actionType, "FILE_UPLOAD")));
+
+    const newValue = auditRow.newValue as Record<string, unknown>;
+    assert.equal(newValue.ownerType, "REPAIR_CASE");
+    // 예전부터 실리던 키다. 이것이 사라지면 옛 감사 기록과 새 기록의 모양이
+    // 달라져 한 질의로 함께 읽을 수 없게 된다.
+    assert.equal(newValue.repairCaseId, repairCaseId);
+    assert.equal("productModelId" in newValue, false);
+  });
+
+  test("🔴 두 주인을 동시에 채운 INSERT 는 DB 가 거부한다", async () => {
+    // 타입으로 막아 둔 것은 **앱 안에서만**이다. 손으로 쓴 SQL, 이관 스크립트,
+    // 나중에 생길 다른 경로는 그 타입을 지나지 않는다. 그것까지 막는 것은
+    // attachments_owner_not_both CHECK 하나뿐이고, 이 시험이 그 제약이 실제로
+    // 살아 있다는 유일한 증거다. 그래서 일부러 createAttachmentRecord 를
+    // 거치지 않고 표에 직접 넣는다.
+    const repairCaseId = await createTestCase();
+    const productModelId = await createTestProductModel();
+    const attachmentId = randomUUID().toLowerCase();
+
+    await assert.rejects(
+      () =>
+        db.insert(attachments).values({
+          id: attachmentId,
+          repairCaseId,
+          productModelId,
+          category: "OTHER",
+          originalFileName: "두-주인.txt",
+          storedPath: `repair-cases/${repairCaseId}/${attachmentId}.txt`,
+          mimeType: "text/plain",
+          fileSize: 1,
+          checksumSha256: "0".repeat(64),
+          uploadedBy: engineerId,
+        }),
+      // Drizzle 이 "Failed query: ..." 로 한 겹 감싸므로 제약 이름은 cause 에
+      // 들어 있다. 겉 message 만 보면 어떤 오류든 통과해 버려서 — 예를 들어
+      // 오타로 컬럼 이름이 틀려도 "거부됐다"가 되어 — 이 시험이 증거 구실을
+      // 못 한다. **23514(check_violation)와 제약 이름을 둘 다** 확인한다.
+      (error: unknown) => {
+        const cause = (error as { cause?: unknown }).cause;
+        assert.ok(cause instanceof Error, "PostgresError 가 cause 로 실려 있어야 한다");
+        assert.equal(
+          (cause as { code?: string }).code,
+          "23514",
+          "CHECK 위반(23514)이 아니라 다른 이유로 거부됐다"
+        );
+        assert.match(
+          cause.message,
+          /attachments_owner_not_both/,
+          "CHECK 제약이 사라졌거나 마이그레이션 0056 이 적용되지 않았다"
+        );
+        return true;
+      }
+    );
+
+    // 대조 — 거부된 이유가 '두 주인'이었다는 증거. 같은 조건에서 한쪽만 채우면
+    // 들어간다.
+    const [okRow] = await db
+      .insert(attachments)
+      .values({
+        id: attachmentId,
+        productModelId,
+        category: "OTHER",
+        originalFileName: "한-주인.txt",
+        storedPath: `product-models/${productModelId}/${attachmentId}.txt`,
+        mimeType: "text/plain",
+        fileSize: 1,
+        checksumSha256: "0".repeat(64),
+        uploadedBy: engineerId,
+      })
+      .returning({ id: attachments.id });
+    createdAttachmentIds.push(okRow.id);
+    assert.equal(okRow.id, attachmentId);
+  });
+});
+
+// ─────────────────────────────────── 업로드가 향할 제품 모델
+
+describe("getProductModelAttachmentUploadTarget", () => {
+  test("살아 있는 모델은 찾아진다 — 잠금 개념은 없다", async () => {
+    const productModelId = await createTestProductModel();
+    const target = await getProductModelAttachmentUploadTarget(productModelId);
+    assert.ok(target);
+    assert.equal(target!.id, productModelId);
+    // 접수 건 쪽과 달리 isLocked 가 **없다.** 없는 개념을 false 로 흉내 내면
+    // 라우트에 영영 죽어 있는 분기가 생긴다.
+    assert.equal("isLocked" in target!, false);
+  });
+
+  test("휴지통에 있는 모델은 없는 것으로 본다", async () => {
+    const productModelId = await createTestProductModel();
+    assert.ok(await getProductModelAttachmentUploadTarget(productModelId), "삭제 전에는 찾아져야 대조가 성립한다");
+
+    await db
+      .update(productModels)
+      .set({ isDeleted: true, deletedAt: new Date(), deletedBy: engineerId, deleteReason: "테스트 삭제" })
+      .where(eq(productModels.id, productModelId));
+
+    assert.equal(await getProductModelAttachmentUploadTarget(productModelId), null);
+  });
+
+  test("UUID가 아닌 값은 DB를 읽지 않고 null이다", async () => {
+    assert.equal(await getProductModelAttachmentUploadTarget("local-demo-1"), null);
+    assert.equal(await getProductModelAttachmentUploadTarget(""), null);
+    assert.equal(await getProductModelAttachmentUploadTarget("'; drop table attachments; --"), null);
   });
 });
 

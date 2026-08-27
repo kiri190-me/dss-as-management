@@ -25,10 +25,34 @@ import {
  * ============================================================================
  */
 
-/** 판정에 걸리지 않는, 아무 문제 없는 첨부. 각 테스트가 여기서 한 칸만 바꾼다. */
+const CASE_ID = "d1f5c0a2-0000-4000-8000-000000000001";
+const MODEL_ID = "b7c93e14-0000-4000-8000-000000000002";
+
+/** 판정에 걸리지 않는, 아무 문제 없는 **접수 건** 첨부. 각 테스트가 한 칸만 바꾼다. */
 function healthySubject(overrides: Partial<AttachmentDownloadSubject> = {}): AttachmentDownloadSubject {
   return {
-    repairCaseId: "d1f5c0a2-0000-4000-8000-000000000001",
+    repairCaseId: CASE_ID,
+    productModelId: null,
+    isDeleted: false,
+    malwareScanStatus: "CLEAN",
+    ...overrides,
+  };
+}
+
+/**
+ * 판정에 걸리지 않는, 아무 문제 없는 **제품 모델** 첨부.
+ *
+ * 접수 건 쪽과 대칭으로 둔다 — 두 벌이 있어야 "모델 첨부에만 다르게 적용되는
+ * 규칙"이 생기는 순간 그 자리에서 드러난다. 실제로 이 판정 함수에 그런 규칙은
+ * 하나도 없어야 한다(주인에 따라 갈리는 것은 물을 권한뿐이고, 그것은 라우트의
+ * 일이다).
+ */
+function healthyModelSubject(
+  overrides: Partial<AttachmentDownloadSubject> = {}
+): AttachmentDownloadSubject {
+  return {
+    repairCaseId: null,
+    productModelId: MODEL_ID,
     isDeleted: false,
     malwareScanStatus: "CLEAN",
     ...overrides,
@@ -87,18 +111,59 @@ test("휴지통에 있으면 막고, 복원하면 받을 수 있다고 알려 �
   assert.equal(decision.allowed === false && decision.reason, "DELETED");
 });
 
-test("접수 건 연결이 끊긴 첨부는 막는다 — 권한을 물을 대상 자체가 없다", () => {
-  const decision = decideAttachmentDownload(healthySubject({ repairCaseId: null }));
+test("주인이 아무도 없는 첨부는 막는다 — 권한을 물을 대상 자체가 없다", () => {
+  const decision = decideAttachmentDownload(
+    healthySubject({ repairCaseId: null, productModelId: null })
+  );
   assert.equal(decision.allowed, false);
   assert.equal(decision.allowed === false && decision.reason, "DETACHED");
 });
 
-test("isDetachedAttachment 는 repair_case_id 가 NULL 인 경우만 참이다", () => {
-  assert.equal(isDetachedAttachment(null), true);
-  assert.equal(isDetachedAttachment("d1f5c0a2-0000-4000-8000-000000000001"), false);
+test("isDetachedAttachment 는 두 주인이 모두 NULL 인 경우만 참이다", () => {
+  assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: null }), true);
+  assert.equal(isDetachedAttachment({ repairCaseId: CASE_ID, productModelId: null }), false);
+  // 🔴 모델 첨부는 repair_case_id 가 원래 NULL 이다. 여기서 참이 되면 정상적인
+  // 모델 회로도가 전부 DETACHED 로 막힌다.
+  assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: MODEL_ID }), false);
   // 빈 문자열은 NULL 이 아니다 — DB 제약상 나올 수 없는 값이지만, 판정이
   // "NULL 인가"만 본다는 성질을 고정한다.
-  assert.equal(isDetachedAttachment(""), false);
+  assert.equal(isDetachedAttachment({ repairCaseId: "", productModelId: null }), false);
+  assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: "" }), false);
+});
+
+// ─────────────────────────────────────────── 제품 모델이 주인인 첨부
+
+test("모델이 주인이면 통과한다 — 접수 건이 없다는 이유로 막히지 않는다", () => {
+  // 이 단언이 이 파일에서 가장 중요한 한 줄이다. 판정이 예전처럼 repair_case_id
+  // 하나만 본다면 모델 회로도는 **단 한 장도** 내려받히지 않는다.
+  assert.equal(decideAttachmentDownload(healthyModelSubject()).allowed, true);
+});
+
+test("휴지통 규칙이 모델 첨부에도 그대로 적용된다", () => {
+  const decision = decideAttachmentDownload(healthyModelSubject({ isDeleted: true }));
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.allowed === false && decision.reason, "DELETED");
+});
+
+test("악성코드 검사 규칙이 모델 첨부에도 그대로 적용된다 — 다섯 상태가 같은 답을 낸다", () => {
+  // 주인이 달라도 판정 표는 하나여야 한다. 한쪽에만 예외를 두는 순간 그 종류의
+  // 파일만 조용히 다르게 동작하고, 그 사실은 어느 화면에도 드러나지 않는다.
+  for (const status of MALWARE_SCAN_STATUS_CODES) {
+    const caseDecision = decideAttachmentDownload(healthySubject({ malwareScanStatus: status }));
+    const modelDecision = decideAttachmentDownload(healthyModelSubject({ malwareScanStatus: status }));
+    assert.equal(modelDecision.allowed, caseDecision.allowed, `${status} 의 답이 주인에 따라 갈렸다`);
+  }
+});
+
+test("모델 첨부도 세 조건이 겹치면 DETACHED 가 먼저다", () => {
+  const decision = decideAttachmentDownload({
+    repairCaseId: null,
+    productModelId: null,
+    isDeleted: true,
+    malwareScanStatus: "INFECTED",
+  });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.allowed === false && decision.reason, "DETACHED");
 });
 
 // ─────────────────────────────────────────── 판정 순서
@@ -106,6 +171,7 @@ test("isDetachedAttachment 는 repair_case_id 가 NULL 인 경우만 참이다",
 test("세 조건이 겹치면 DETACHED 가 먼저다 — 권한을 물을 수 없는 것이 가장 앞선 사실이다", () => {
   const decision = decideAttachmentDownload({
     repairCaseId: null,
+    productModelId: null,
     isDeleted: true,
     malwareScanStatus: "INFECTED",
   });
@@ -125,11 +191,13 @@ test("휴지통과 검사 차단이 겹치면 DELETED 가 먼저다", () => {
 
 test("막을 때는 이유 문장이 항상 비어 있지 않다 — 빈 오류는 고장으로 읽힌다", () => {
   const blocked: AttachmentDownloadSubject[] = [
-    healthySubject({ repairCaseId: null }),
+    healthySubject({ repairCaseId: null, productModelId: null }),
     healthySubject({ isDeleted: true }),
     healthySubject({ malwareScanStatus: "PENDING" }),
     healthySubject({ malwareScanStatus: "INFECTED" }),
     healthySubject({ malwareScanStatus: "FAILED" }),
+    healthyModelSubject({ isDeleted: true }),
+    healthyModelSubject({ malwareScanStatus: "INFECTED" }),
   ];
   for (const subject of blocked) {
     const decision = decideAttachmentDownload(subject);

@@ -19,12 +19,36 @@ import { getAttachmentStorage, resolveUploadsRoot } from "@/lib/storage/local-fs
  * 아는 사람은 누구나 받아 가고, 누가 무엇을 받았는지 알 수 없게 된다.
  *
  * ── 순서 ────────────────────────────────────────────────────────────────
- *  1) 세션 → 2) 계정 승인 → 3) 첨부 행 → 4) 접수 건 기준 권한(READ)
- *  → 5) 허용 판정 → 6) 경로 검증 → 7) 스트리밍 → 8) 감사(FILE_DOWNLOAD)
+ *  1) 세션 → 2) 계정 승인 → 3) **넓은 권한 문턱** → 4) 첨부 행
+ *  → 5) 주인별 권한(READ) → 6) 허용 판정 → 7) 경로 검증 → 8) 스트리밍
+ *  → 9) 감사(FILE_DOWNLOAD)
  *
- * 4번이 5번보다 앞인 이유: 권한이 없는 사람에게는 "그 파일이 휴지통에 있다"
+ * 5번이 6번보다 앞인 이유: 권한이 없는 사람에게는 "그 파일이 휴지통에 있다"
  * 같은 사실조차 알려 주지 않는다. 판정 결과 문장은 그 첨부의 상태를 설명하므로,
  * 볼 자격을 먼저 확인한 뒤에 꺼낸다.
+ *
+ * ── 권한이 주인에 따라 갈린다 — 그래서 조회가 앞으로 왔다 ────────────────
+ * 첨부의 주인은 접수 건 아니면 제품 모델이다(schema/attachments.ts).
+ *
+ *   접수 건 첨부  →  repairCases.files READ    (예전 그대로)
+ *   모델 첨부     →  **productModels.view READ**
+ *
+ * 모델 파일을 보는 데 productModels.files가 아니라 **view**를 쓰는 까닭:
+ * 회로도를 **보는 것**은 모델 상세를 보는 일의 일부다. 영업도 모델을 볼 수
+ * 있고, 볼 수 있으면 그 모델의 자료도 볼 수 있어야 한다 — 도면만 따로 잠그면
+ * 화면에 목록은 뜨는데 아무것도 열리지 않는 상태가 된다. 좁히는 것은 **올리고
+ * 지우는 쪽**뿐이고 그것은 productModels.files가 맡는다.
+ *
+ * 물을 권한이 주인에 따라 정해지므로 **조회가 권한보다 앞에 와야 한다.** 예전
+ * 순서(권한 → 조회)에서는 권한 없는 사람이 "그 ID의 첨부가 있는지"조차 알 수
+ * 없었고, 그 성질을 잃지 않으려고 두 겹으로 나눴다.
+ *
+ *   3번(넓은 문턱)  둘 중 **어느 파일도** 볼 수 없는 사람은 조회 전에 403이다.
+ *                   예전에 repairCases.files 하나로 막던 자리와 같은 자리다.
+ *   5번(주인별)     문턱은 넘었지만 이 주인의 파일은 못 보는 사람에게는
+ *                   **"없음"과 똑같은 응답**(404 NOT_FOUND)을 준다. 403으로
+ *                   갈라 답하면 "그 ID는 실재하는 모델 첨부"라는 사실이 새고,
+ *                   그건 조회를 앞으로 옮기면서 생긴 새 구멍이 된다.
  *
  * ── 판정을 여기서 하지 않는다 ────────────────────────────────────────────
  * 허용 여부는 attachment-download-policy.ts의 decideAttachmentDownload 하나가
@@ -106,16 +130,40 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return fail(403, "ACCOUNT_NOT_APPROVED", "승인 대기 중인 계정은 파일을 받을 수 없습니다.");
   }
 
-  // ── 2) 첨부 행 ─────────────────────────────────────────────────────────
+  // ── 2) 넓은 권한 문턱 — 조회보다 앞이다 ────────────────────────────────
+  //
+  // 두 권한을 여기서 한 번에 읽어 둔다. 어느 쪽도 없는 사람은 어떤 첨부도 볼
+  // 수 없으므로 **첨부를 조회하기 전에** 막는다 — 예전에 repairCases.files
+  // 하나로 막던 그 자리이고, 그때와 마찬가지로 존재 여부가 드러나지 않는다.
+  //
+  // 두 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
+  const canReadRepairCaseFiles = await hasPermission(actingUser.role, "repairCases.files", "READ");
+  // 모델 파일을 **보는** 권한은 productModels.files가 아니라 view다 — 파일
+  // 헤더의 '권한이 주인에 따라 갈린다' 참조.
+  const canReadProductModelFiles = await hasPermission(actingUser.role, "productModels.view", "READ");
+  if (!canReadRepairCaseFiles && !canReadProductModelFiles) {
+    return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
+  }
+
+  // ── 3) 첨부 행 ─────────────────────────────────────────────────────────
   const { id: attachmentId } = await context.params;
   const attachment = await getAttachmentForDownload(attachmentId);
   if (!attachment) {
     return fail(404, "NOT_FOUND", "파일을 찾을 수 없습니다.");
   }
 
-  // ── 3) 권한 — 판정 결과를 꺼내기 전에 확인한다 ─────────────────────────
-  if (!(await hasPermission(actingUser.role, "repairCases.files", "READ"))) {
-    return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
+  // ── 4) 주인별 권한 — 판정 결과를 꺼내기 전에 확인한다 ──────────────────
+  //
+  // 주인이 아무도 없는 첨부(둘 다 NULL)는 여기서 갈라 봐야 물을 대상이 없다.
+  // 아래 허용 판정이 DETACHED로 막으므로 그쪽에 맡긴다.
+  const allowedForOwner = attachment.productModelId
+    ? canReadProductModelFiles
+    : canReadRepairCaseFiles;
+  if (!allowedForOwner) {
+    // 🔴 403이 아니라 **404다.** 여기까지 온 사람은 문턱을 넘었으므로, 403으로
+    // 갈라 답하면 "그 ID는 실재하고 이런 종류의 첨부다"가 새어 나간다. 없는
+    // 것과 못 보는 것을 응답에서 구분하지 않는다.
+    return fail(404, "NOT_FOUND", "파일을 찾을 수 없습니다.");
   }
 
   /**
@@ -139,9 +187,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     (view === "thumb" || view === "full") && INLINE_SAFE_MIME_TYPES.has(attachment.mimeType);
   const preferPreview = view === "thumb";
 
-  // ── 4) 허용 판정 ───────────────────────────────────────────────────────
+  // ── 5) 허용 판정 ───────────────────────────────────────────────────────
   const decision = decideAttachmentDownload({
     repairCaseId: attachment.repairCaseId,
+    productModelId: attachment.productModelId,
     isDeleted: attachment.isDeleted,
     malwareScanStatus: attachment.malwareScanStatus,
   });
@@ -154,7 +203,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return fail(status, decision.reason, decision.message);
   }
 
-  // ── 5) 경로 검증 — DB 값이라도 그대로 믿지 않는다 ──────────────────────
+  // ── 6) 경로 검증 — DB 값이라도 그대로 믿지 않는다 ──────────────────────
   const storage = getAttachmentStorage();
 
   // 썸네일을 달라고 했고 실제로 있을 때만 미리보기를 준다. 목록의 썸네일
@@ -191,7 +240,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return fail(404, "NOT_FOUND", "저장된 파일을 찾을 수 없습니다. 관리자에게 문의해 주세요.");
   }
 
-  // ── 6) 감사 기록 — 스트림을 돌려주기 전에 남긴다 ───────────────────────
+  // ── 7) 감사 기록 — 스트림을 돌려주기 전에 남긴다 ───────────────────────
   //
   // ⚠️ **미리보기(inline)는 기록하지 않는다.** 목록에 썸네일이 열 개 있으면
   // 화면을 한 번 여는 것만으로 FILE_DOWNLOAD가 열 줄 쌓인다. 감사 로그는 3년
@@ -214,7 +263,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     });
   }
 
-  // ── 7) 전송 ────────────────────────────────────────────────────────────
+  // ── 8) 전송 ────────────────────────────────────────────────────────────
   return new NextResponse(stream, {
     status: 200,
     headers: {

@@ -29,12 +29,19 @@ import type { MalwareScanStatus } from "./attachment-category";
  *     값만 뒤집으면 이미 올라와 있는 파일이 전부 잠긴다.
  *
  * ── 판정 순서 ────────────────────────────────────────────────────────────
- *  1. 접수 건에서 떨어져 나온 첨부(repair_case_id IS NULL) → 거부
+ *  1. 주인이 아무도 없는 첨부(repair_case_id · product_model_id 둘 다 NULL) → 거부
  *  2. 휴지통에 있는 첨부(is_deleted) → 거부
  *  3. 검사 상태 → 표대로
  *
  * 1번이 맨 앞인 이유는 그것만이 **권한을 물을 대상 자체가 없는** 경우이기
  * 때문이다. 자세한 근거는 isDetachedAttachment 주석에 적었다.
+ *
+ * ── 주인이 둘로 늘어도 판정 지점은 하나다 ────────────────────────────────
+ * 첨부의 주인은 접수 건 아니면 제품 모델이다(schema/attachments.ts의
+ * attachments_owner_not_both). 주인마다 판정 함수를 따로 두지 않는다 — 그러면
+ * 검사기를 붙이는 날, 휴지통 규칙을 바꾸는 날 고칠 자리가 둘이 되고 한쪽을
+ * 빠뜨리면 그 종류의 파일만 조용히 다르게 동작한다. 주인에 따라 갈리는 것은
+ * **물을 권한**뿐이고 그것은 라우트가 정한다. 여기서는 "주인이 있는가"만 본다.
  * ============================================================================
  */
 
@@ -56,7 +63,11 @@ const SCAN_STATUS_ALLOWS_DOWNLOAD: Record<MalwareScanStatus, boolean> = {
 };
 
 export type AttachmentDownloadDenialReason =
-  /** repair_case_id 가 NULL — 접수 건이 영구 삭제되어 연결이 끊긴 첨부. */
+  /**
+   * 주인이 아무도 없다 — repair_case_id 와 product_model_id 가 둘 다 NULL.
+   * 접수 건이나 모델이 영구 삭제되어 연결만 끊긴 첨부가 이 상태가 된다
+   * (두 FK 모두 ON DELETE SET NULL).
+   */
   | "DETACHED"
   /** 휴지통에 있다. 복원하면 다시 받을 수 있다. */
   | "DELETED"
@@ -72,24 +83,38 @@ export type AttachmentDownloadDecision =
       message: string;
     };
 
-export type AttachmentDownloadSubject = {
-  /** NULL 이면 접수 건에서 떨어져 나온 첨부다. */
+/**
+ * 판정에 쓰이는 첨부의 주인. 두 값이 동시에 채워진 첨부는 DB가 막고 있으므로
+ * (attachments_owner_not_both) 여기서는 그 경우를 따로 다루지 않는다.
+ */
+export type AttachmentOwnerRef = {
+  /** 접수 건 주인. NULL 이면 접수 건이 주인이 아니다. */
   repairCaseId: string | null;
+  /** 제품 모델 주인. NULL 이면 모델이 주인이 아니다. */
+  productModelId: string | null;
+};
+
+export type AttachmentDownloadSubject = AttachmentOwnerRef & {
   isDeleted: boolean;
   malwareScanStatus: MalwareScanStatus;
 };
 
 /**
- * 접수 건과의 연결이 끊긴 첨부인가.
+ * 주인이 아무도 없는 첨부인가 — 접수 건도 모델도 가리키지 않는가.
  *
- * 판정 함수와 따로 뽑아 둔 이유는 **부르는 순서** 때문이다. 라우트는 접수 건
- * 기준으로 권한(repairCases.files READ)을 묻는데, repair_case_id 가 NULL 이면
- * 물을 대상이 없다 — 권한 확인 자체가 성립하지 않으므로 그 앞에서 답이 나야
- * 한다. decideAttachmentDownload 도 같은 조건을 맨 앞에서 다시 보므로, 이
- * 함수를 부르는 것을 잊어도 파일이 새어 나가지는 않는다(닫히는 쪽으로 실패).
+ * 판정 함수와 따로 뽑아 둔 이유는 **부르는 순서** 때문이다. 라우트는 주인을
+ * 보고 물을 권한을 고른다(접수 건이면 repairCases.files, 모델이면
+ * productModels.view). 주인이 아무도 없으면 고를 것이 없다 — 권한 확인 자체가
+ * 성립하지 않으므로 그 앞에서 답이 나야 한다. decideAttachmentDownload 도 같은
+ * 조건을 맨 앞에서 다시 보므로, 이 함수를 부르는 것을 잊어도 파일이 새어
+ * 나가지는 않는다(닫히는 쪽으로 실패).
+ *
+ * ⚠️ **"접수 건이 없다"가 아니라 "주인이 아무도 없다"이다.** 모델 첨부는
+ * repair_case_id 가 원래 NULL 이므로, 접수 건만 보면 정상적인 모델 회로도가
+ * 전부 DETACHED 로 막힌다.
  */
-export function isDetachedAttachment(repairCaseId: string | null): boolean {
-  return repairCaseId === null;
+export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
+  return owner.repairCaseId === null && owner.productModelId === null;
 }
 
 const DETACHED_MESSAGE =
@@ -113,7 +138,7 @@ const SCAN_BLOCKED_MESSAGES: Record<MalwareScanStatus, string> = {
 export function decideAttachmentDownload(
   subject: AttachmentDownloadSubject
 ): AttachmentDownloadDecision {
-  if (isDetachedAttachment(subject.repairCaseId)) {
+  if (isDetachedAttachment(subject)) {
     return { allowed: false, reason: "DETACHED", message: DETACHED_MESSAGE };
   }
   if (subject.isDeleted) {

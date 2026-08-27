@@ -14,43 +14,49 @@ import {
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
 import { isAttachmentCategory } from "@/lib/domain/attachment-category";
-import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
+import { buildProductModelAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
-import { getAttachmentUploadTarget } from "@/lib/db/queries/attachments";
+import { getProductModelAttachmentUploadTarget } from "@/lib/db/queries/attachments";
 import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
 import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
 
 /**
  * ============================================================================
- * POST /api/repair-cases/{id}/attachments — 파일이 실제로 들어오는 통로
+ * POST /api/product-models/{id}/attachments — 모델 사진·회로도가 들어오는 통로
  * ============================================================================
- * 서버 액션이 아니라 Route Handler다. 이유는 두 가지다.
- *  1. 서버 액션은 본문을 통째로 메모리에 올린다. 20MB 파일 몇 개가 동시에
- *     올라오는 순간 그대로 프로세스에 부담이 되고, 상한을 올리는 날 사고가 된다.
- *     여기서는 `request.body`를 스트림 그대로 저장소에 흘려보낸다.
- *  2. 3단계의 다운로드도 어차피 이 통로가 필요하다.
+ * 접수 건 통로(api/repair-cases/[id]/attachments/route.ts)와 **한 벌**이다.
+ * 그 파일의 헤더에 이 구조를 고른 까닭이 전부 적혀 있다 — 서버 액션이 아니라
+ * Route Handler인 이유, multipart/form-data를 쓰지 않는 이유, 그리고 아래
+ * 다섯 단계의 순서. 여기서는 반복하지 않고 **다른 점만** 적는다.
  *
- * ── multipart/form-data를 쓰지 않는다 ────────────────────────────────────
- * `request.formData()`는 파일 전체를 메모리에 담고 나서야 돌려준다 — 위 1번을
- * 정면으로 어긴다. 그래서 **본문은 파일 바이트 그 자체**이고, 메타데이터
- * (분류·원본 파일명·설명)는 쿼리 문자열로 받는다. 클라이언트는
- * `fetch(url, { method: "POST", body: file })` 한 줄이면 된다.
+ * ── 왜 공통 함수로 뽑지 않고 나란히 두는가 ───────────────────────────────
+ * 접수 건 통로는 이미 실기에서 파일을 다루고 있다. 두 통로를 한 함수로 접으면
+ * 그 함수의 다음 수정이 **아무도 의도하지 않은 채** 실기 경로까지 흔든다.
+ * 지금 두 통로가 실제로 다른 곳은 네 군데(권한 · 대상 조회 · 잠금 확인 ·
+ * 경로 함수)이고, 그 넷을 인자로 받는 함수는 결국 "무엇이 같아야 하는지"를
+ * 읽기 어렵게 만든다. 접는 것은 모델 첨부의 실제 쓰임을 본 다음에 판단할 일이다
+ * (attachment-path.ts가 경로 함수를 두 벌로 나란히 둔 것과 같은 판단).
  *
- * ── 순서가 이 파일의 핵심이다 ────────────────────────────────────────────
- *  1) 본문을 **받기 전에** 세션·권한·접수 건 존재·잠금을 확인한다. 막히면 한
- *     바이트도 받지 않는다.
- *  2) 임시 파일로 흘려보내며 크기·SHA-256을 동시에 계산한다. 20MB를 넘으면
- *     그 자리에서 끊고 임시 파일을 버린다.
- *  3) 확장자 허용목록 + 실제 앞머리 바이트 대조. 브라우저가 보낸 MIME은 믿지
- *     않는다.
+ * 🔴 **그러므로 이 파일과 접수 건 통로는 함께 고쳐야 한다.** 상한·검사 순서·
+ * 실패 응답 규칙을 한쪽만 바꾸면 두 통로의 동작이 갈라진다.
+ *
+ * ── 접수 건 통로와 다른 점 ───────────────────────────────────────────────
+ *   권한      repairCases.files WRITE   →  **productModels.files WRITE**
+ *   대상 조회  getAttachmentUploadTarget →  getProductModelAttachmentUploadTarget
+ *   잠금 확인  is_locked 확인            →  **없다** (모델에 잠금 개념이 없다)
+ *   경로      buildAttachmentStoredPath →  buildProductModelAttachmentStoredPath
+ *   실패 코드  CASE_NOT_FOUND/CASE_LOCKED → **MODEL_NOT_FOUND** (잠금 코드 없음)
+ *
+ * ── 순서는 그대로다 ──────────────────────────────────────────────────────
+ *  1) 본문을 **받기 전에** 출처·세션·승인상태·권한·모델 존재를 확인한다.
+ *  2) 임시 파일로 흘려보내며 크기·SHA-256을 함께 센다.
+ *  3) 확장자 허용목록 + 실제 앞머리 바이트 대조.
  *  4) 임시 파일을 최종 자리로 **이동(commit)**.
  *  5) **그 다음에** 한 트랜잭션 안에서 attachments 행 + audit_logs(FILE_UPLOAD).
  *
- * ⚠️ **4번과 5번을 뒤집지 않는다.** 파일 이동이 먼저, DB가 나중이다. 반대로
- * 하면 DB에는 있는데 디스크에 없는 파일이 생기고, 그건 화면에서 눌러도 아무것도
- * 나오지 않는 **깨진 기록**이다. 지금 순서에서 최악의 경우는 주인 없는 파일이
- * 하나 남는 것인데, 그건 나중에 훑어서 치울 수 있는 문제다. 되돌릴 수 없는
- * 고장과 치울 수 있는 찌꺼기 중에서 후자를 고른 것이다.
+ * ⚠️ **4번과 5번을 뒤집지 않는다.** 반대로 하면 DB에는 있는데 디스크에 없는
+ * 파일이 생기고, 그건 눌러도 아무것도 나오지 않는 깨진 기록이다. 지금 순서의
+ * 최악은 주인 없는 파일 하나가 남는 것이고 그건 나중에 훑어 치울 수 있다.
  * ============================================================================
  */
 
@@ -63,8 +69,9 @@ type FailureCode =
   | "UNAUTHENTICATED"
   | "ACCOUNT_NOT_APPROVED"
   | "FORBIDDEN"
-  | "CASE_NOT_FOUND"
-  | "CASE_LOCKED"
+  // 접수 건 쪽의 CASE_NOT_FOUND에 해당한다. CASE_LOCKED에 해당하는 코드는
+  // 두지 않는다 — 제품 모델에는 잠금이 없다.
+  | "MODEL_NOT_FOUND"
   | "INVALID_CATEGORY"
   | "INVALID_FILE_NAME"
   | "EXTENSION_NOT_ALLOWED"
@@ -104,18 +111,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return fail(403, "ACCOUNT_NOT_APPROVED", "승인 대기 중인 계정은 파일을 올릴 수 없습니다.");
   }
 
-  if (!(await hasPermission(actingUser.role, "repairCases.files", "WRITE"))) {
-    return fail(403, "FORBIDDEN", "이 접수 건에 파일을 올릴 권한이 없습니다.");
+  // 올리는 것은 productModels.files WRITE다 — productModels.view가 아니다.
+  // 모델을 **보는** 사람(영업 포함)과 사진·도면을 **바꾸는** 사람은 다르다.
+  if (!(await hasPermission(actingUser.role, "productModels.files", "WRITE"))) {
+    return fail(403, "FORBIDDEN", "이 제품 모델에 파일을 올릴 권한이 없습니다.");
   }
 
-  const { id: repairCaseId } = await context.params;
+  const { id: productModelId } = await context.params;
 
-  const target = await getAttachmentUploadTarget(repairCaseId);
+  // 접수 건 쪽과 달리 잠금 확인이 없다. 모델에는 is_locked가 없고, 없는 개념을
+  // 흉내 내지 않는다(queries/attachments.ts의 조회 함수 주석 참조).
+  const target = await getProductModelAttachmentUploadTarget(productModelId);
   if (!target) {
-    return fail(404, "CASE_NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
-  }
-  if (target.isLocked) {
-    return fail(409, "CASE_LOCKED", "출하 완료로 잠긴 접수 건에는 파일을 올릴 수 없습니다.");
+    return fail(404, "MODEL_NOT_FOUND", "해당 제품 모델을 찾을 수 없습니다.");
   }
 
   // ── 메타데이터(쿼리 문자열) 검증 — 아직 본문은 건드리지 않았다 ────────
@@ -170,7 +178,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       // 임시 파일은 writeTemp가 던지기 전에 이미 지웠다.
       return fail(413, "FILE_TOO_LARGE", "파일이 20MB를 넘습니다.");
     }
-    console.error("첨부 임시 저장 실패", error);
+    console.error("모델 첨부 임시 저장 실패", error);
     return fail(500, "STORAGE_FAILED", "파일을 저장하는 중 문제가 발생했습니다.");
   }
 
@@ -189,14 +197,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const attachmentId = randomUUID().toLowerCase();
-  const storedPath = buildAttachmentStoredPath({ repairCaseId, attachmentId, extension });
+  const storedPath = buildProductModelAttachmentStoredPath({
+    productModelId: target.id,
+    attachmentId,
+    extension,
+  });
 
   // ── 4) 파일을 최종 자리로 옮긴다 (DB보다 먼저 — 파일 상단 ⚠️ 참조) ────
   try {
     await storage.commit(written.tempPath, storedPath);
   } catch (error) {
     await storage.discard(written.tempPath);
-    console.error("첨부 파일 이동 실패", error);
+    console.error("모델 첨부 파일 이동 실패", error);
     return fail(500, "STORAGE_FAILED", "파일을 저장하는 중 문제가 발생했습니다.");
   }
 
@@ -205,7 +217,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   try {
     created = await createAttachmentRecord({
       id: attachmentId,
-      owner: { kind: "REPAIR_CASE", repairCaseId: target.id },
+      // 주인은 제품 모델이다. 갈래 타입이라 repair_case_id 를 함께 채우는 것은
+      // 타입 단계에서 불가능하다(mutations/attachments.ts).
+      owner: { kind: "PRODUCT_MODEL", productModelId: target.id },
       category,
       originalFileName,
       storedPath,
@@ -221,14 +235,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     // 실패해도 여기서 더 하지 않는다 — 주인 없는 파일은 나중에 훑어 치울 수
     // 있지만, 이 시점에 DB를 억지로 채우면 그게 깨진 기록이 된다.
     await storage.delete(storedPath).catch(() => undefined);
-    console.error("첨부 기록 생성 실패", error);
+    console.error("모델 첨부 기록 생성 실패", error);
     return fail(500, "RECORD_FAILED", "파일 기록을 저장하는 중 문제가 발생했습니다.");
   }
 
   return NextResponse.json(
     {
       id: created.id,
-      repairCaseId: target.id,
+      productModelId: target.id,
       category,
       originalFileName,
       fileSize: written.size,
