@@ -1,11 +1,13 @@
 import "server-only";
 import { listRepairCasesPendingMyApproval } from "./repair-case-approvals-pending";
 import { getPendingPartRequestsForNotification } from "./inventory-part-requests";
+import { listPartsBelowMinimumQuantity } from "./part-minimum-quantities";
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { loadNotificationSettings } from "./notification-settings";
-import { deliversNotification } from "@/lib/domain/notification-settings";
+import { canReceiveLowStockNotifications, deliversNotification } from "@/lib/domain/notification-settings";
 import {
   buildApprovalNotification,
+  buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   type NotificationItem,
   type NotificationKind,
@@ -105,6 +107,30 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           requestId: row.id,
           intakeNumber: row.intakeNumber,
           requestedByName: row.requestedByName,
+        })
+      );
+    },
+  },
+  {
+    kind: "PART_STOCK_BELOW_MINIMUM",
+    load: async (_actorUserId, actorRole) => {
+      // 부품 요청 알림과 같은 모양 (나) — 대상이 사람이 아니라 역할이고, 조회
+      // 자체는 "지금 한계 밑으로 떨어진 것 전부"라 누가 봐도 같은 결과다.
+      // 그래서 조회를 부르기 **전에** 역할을 본다. 판정 함수를 따로 둔 이유는
+      // domain/notification-settings.ts 머리말에 있다(부품 요청과 명단은 같지만
+      // 같은 질문이 아니다).
+      if (!canReceiveLowStockNotifications(actorRole)) return [];
+
+      // 한계수량이 정해진 짝만 돌아온다 — 아무도 한계수량을 정하지 않았다면 이
+      // 조회는 빈 목록이고, 이 종류는 한 줄도 뜨지 않는다.
+      const shortages = await listPartsBelowMinimumQuantity();
+      return shortages.map((row) =>
+        buildPartStockBelowMinimumNotification({
+          partId: row.partId,
+          partName: row.partName,
+          owner: row.owner,
+          currentQuantity: row.currentQuantity,
+          minimumQuantity: row.minimumQuantity,
         })
       );
     },

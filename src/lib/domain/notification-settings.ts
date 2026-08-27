@@ -39,6 +39,22 @@ import { ROLE_CODES, type Role } from "./types";
  * auth/inventory-authorization.ts의 canReceivePartRequestNotifications를
  * **호출해서** 구한다(permission-baseline.ts 머리말의 그 규칙이다). 저쪽
  * 명단이 바뀌면 기본값도 저절로 따라 바뀐다.
+ *
+ * ── 그런데 새로 태어나는 종류는 가리킬 "지금"이 없다 ────────────────────
+ * 3단계에서 붙인 PART_STOCK_BELOW_MINIMUM은 반대로 **명단을 여기 적는다**
+ * (canReceiveLowStockNotifications). 지금 명단이 부품 요청 알림과 우연히 같은
+ * 셋인데도 그 함수를 부르지 않는 이유는 두 가지다.
+ *
+ *  1) **재현할 옛 동작이 없다.** 위의 규칙("기본값은 지금과 같음")은 이미
+ *     돌고 있던 알림을 옮겨 담을 때의 규칙이다. 새 종류에는 지금 통하는 동작이
+ *     없으므로 가리킬 대상 자체가 없다 — 대상을 정하는 결정이 바로 여기서 처음
+ *     내려진다.
+ *  2) **두 질문이 다르다.** 저쪽은 "밀린 **요청**을 처리할 사람이 누구인가"이고
+ *     이쪽은 "**재고를 채울** 사람이 누구인가"다. 엔지니어에게 요청 알림을 열어
+ *     주기로 하는 날이 와도, 그 결정이 재고 부족 알림까지 조용히 함께 열어서는
+ *     안 된다. auth/inventory-authorization.ts가 canProcessPartRequests와
+ *     canReceivePartRequestNotifications를 명단이 같은데도 일부러 따로 둔 것과
+ *     같은 판단이다.
  * ============================================================================
  */
 
@@ -61,7 +77,29 @@ export const NOTIFICATION_KIND_META: Record<NotificationKind, { label: string; d
     label: "부품 요청 대기",
     description: "엔지니어가 올린 부품 요청 중 아직 처리되지 않은 것입니다. 처리하는 쪽이 받습니다.",
   },
+  PART_STOCK_BELOW_MINIMUM: {
+    label: "재고 부족",
+    description:
+      "품목 상세에서 소유 구분마다 정해 둔 한계수량보다 재고가 적어진 것입니다. 한계수량을 정하지 않은 품목은 이 알림에 잡히지 않습니다.",
+  },
 };
+
+/**
+ * 재고가 한계수량 아래로 떨어졌을 때 종 알림을 받는 역할.
+ *
+ * 왜 이 셋인가 — 부품을 실제로 채워 넣는 사람(INVENTORY_MANAGER)과, 그것이 밀려
+ * 있을 때 나서야 하는 사람(ADMIN·SUPER_ADMIN)이다. AS_ENGINEER는 부품을 쓰는
+ * 쪽이고 필요한 것은 부품 요청으로 올린다 — 재고를 채우는 일에 손댈 수단이 없는
+ * 사람에게 보내는 알림은 끌 수도 없는 소음이 된다. SALES는 재고를 읽기만 한다
+ * (canViewInventory).
+ *
+ * **명단으로 적는 이유**는 이 시스템의 역할에 순서가 없기 때문이다 —
+ * canReceivePartRequestNotifications가 같은 이유로 명단을 쓴다. 그 함수를 부르지
+ * 않고 따로 두는 이유는 이 파일 머리말에 있다.
+ */
+export function canReceiveLowStockNotifications(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
+}
 
 /** 화면·서버가 나눠 갖지 않도록, 종류 순서는 언제나 NOTIFICATION_KINDS 그대로다. */
 export function isNotificationKind(value: string): value is NotificationKind {
@@ -91,6 +129,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
   switch (kind) {
     case "REPAIR_CASE_APPROVAL":
     case "PART_REQUEST_PENDING":
+    case "PART_STOCK_BELOW_MINIMUM":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
       // 넣는 순간부터 계산이 돌기 시작한다). 꺼진 채로 태어나는 종류가 있으면,
       // 등록해 두고 아무 일도 일어나지 않는 상태를 화면에서 설명할 수 없다.
@@ -122,6 +161,11 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
     case "PART_REQUEST_PENDING":
       // 명단을 옮겨 적지 않고 저쪽 함수를 부른다 — 이 파일 머리말 참조.
       return canReceivePartRequestNotifications(role);
+
+    case "PART_STOCK_BELOW_MINIMUM":
+      // 반대로 이쪽은 명단을 이 파일에 적었다 — 재현할 옛 동작이 없고, 부품
+      // 요청과는 다른 질문이기 때문이다(이 파일 머리말).
+      return canReceiveLowStockNotifications(role);
 
     default:
       // 종류를 NOTIFICATION_KINDS에만 추가하고 여기를 빠뜨리면, 조용히 전원

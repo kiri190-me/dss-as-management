@@ -5,6 +5,7 @@ import {
   NOTIFICATION_KIND_META,
   NO_NOTIFICATION_SETTINGS,
   buildNotificationSettingsScreenData,
+  canReceiveLowStockNotifications,
   defaultNotificationKindEnabled,
   defaultRoleReceivesNotification,
   deliversNotification,
@@ -29,18 +30,28 @@ import { ROLE_CODES, type Role } from "./types";
  */
 
 /**
- * 알림 설정을 만들기 **전**의 규칙을 이 파일 안에 손으로 다시 적은 것.
+ * 각 종류가 **누구에게 가야 하는가**를 이 파일 안에 손으로 다시 적은 것.
  *
  * 일부러 defaultRoleReceivesNotification을 부르지 않는다 — 그 함수를 그대로
- * 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다. 1단계 코드가 실제로 하던 일은
- * 이 두 줄이 전부였다:
+ * 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다. 앞의 두 종류는 알림 설정을
+ * 만들기 **전**의 코드가 실제로 하던 일이 전부였다:
  *   · 결재 대기      — 역할로 막는 코드가 한 줄도 없었다(전원 통과)
  *   · 부품 요청 대기 — queries/notifications.ts가 canReceivePartRequestNotifications로 걸렀다
+ *
+ * 3단계에서 붙인 재고 부족은 그 이전에 존재하지 않았으므로 재현할 옛 동작이
+ * 없다. 대신 **그때 내린 결정**을 여기 손으로 적는다 — 재고를 채우는 사람
+ * 셋(재고관리자·관리자·최고관리자). 여전히 저쪽 함수를 부르지 않는 것이 요점이다.
+ *
+ * 모르는 종류는 계속 throw 한다. 종류만 늘리고 이 규칙을 적지 않으면, 아무도
+ * 판정하지 않은 알림이 조용히 태어난다.
  */
 function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   if (kind === "REPAIR_CASE_APPROVAL") return true;
   if (kind === "PART_REQUEST_PENDING") return canReceivePartRequestNotifications(role);
-  throw new Error(`1단계에 없던 종류다: ${kind}`);
+  if (kind === "PART_STOCK_BELOW_MINIMUM") {
+    return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
+  }
+  throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
 }
 
 test("등록된 종류마다 사람이 읽는 이름과 한 줄 설명이 있다", () => {
@@ -69,14 +80,15 @@ test("종류 자체는 켜져 있는 것이 기본이다", () => {
   }
 });
 
-test("🔴 설정이 하나도 없으면 다섯 역할의 알림이 1단계와 똑같다", () => {
-  // 이 시험이 이번 작업의 성공 조건이다.
+test("🔴 설정이 하나도 없으면 다섯 역할의 알림이 손으로 적은 규칙 그대로다", () => {
+  // 이 시험이 이번 작업의 성공 조건이다. 앞의 두 종류에서는 "1단계와 똑같다"가,
+  // 재고 부족에서는 "정한 대로 간다"가 그 뜻이다.
   for (const kind of NOTIFICATION_KINDS) {
     for (const role of ROLE_CODES) {
       assert.equal(
         deliversNotification(kind, role, NO_NOTIFICATION_SETTINGS),
         ruleBeforeNotificationSettings(kind, role),
-        `${kind} × ${role} 이 1단계와 달라졌다`
+        `${kind} × ${role} 이 손으로 적은 규칙과 달라졌다`
       );
     }
   }
@@ -104,6 +116,28 @@ test("부품 요청 대기의 기본값은 명단을 옮겨 적지 않고 저쪽
   );
 });
 
+test("🔴 재고 부족의 기본값은 재고를 채우는 셋뿐이다 — 엔지니어·영업은 받지 않는다", () => {
+  assert.deepEqual(
+    ROLE_CODES.filter((role) => defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", role)),
+    ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER"]
+  );
+  assert.equal(defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", "AS_ENGINEER"), false);
+  assert.equal(defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", "SALES"), false);
+});
+
+test("재고 부족의 판정 함수는 부품 요청의 것과 별개다 — 지금 답이 같을 뿐이다", () => {
+  // 두 함수가 같은 셋을 내는 것은 지금의 사실이지 규칙이 아니다. 여기서 못 박는
+  // 것은 재고 부족 쪽이 **자기 함수**로 답한다는 것이다 — 저쪽 명단이 바뀌어도
+  // 이쪽이 따라 움직이면 안 된다.
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", role),
+      canReceiveLowStockNotifications(role),
+      role
+    );
+  }
+});
+
 test("🔴 최고관리자가 받는 것은 끌 수 없다 — 저장된 false도 무시한다", () => {
   assert.equal(isRoleEditableInNotificationSettings("SUPER_ADMIN"), false);
   for (const role of ROLE_CODES.filter((candidate) => candidate !== "SUPER_ADMIN")) {
@@ -116,6 +150,7 @@ test("🔴 최고관리자가 받는 것은 끌 수 없다 — 저장된 false�
     roleReceives: {
       REPAIR_CASE_APPROVAL: { SUPER_ADMIN: false },
       PART_REQUEST_PENDING: { SUPER_ADMIN: false },
+      PART_STOCK_BELOW_MINIMUM: { SUPER_ADMIN: false },
     },
   };
   for (const kind of NOTIFICATION_KINDS) {

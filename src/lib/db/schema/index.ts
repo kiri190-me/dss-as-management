@@ -23,6 +23,7 @@ export * from "./procedure-template-edit-history";
 export * from "./procedure-case-execution";
 export * from "./inventory";
 export * from "./inventory-part-requests";
+export * from "./part-minimum-quantities";
 export * from "./repair-case-work-records";
 export * from "./repair-case-flowcharts";
 export * from "./repair-case-flowchart-nodes";

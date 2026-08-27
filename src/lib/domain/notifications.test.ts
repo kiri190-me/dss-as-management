@@ -4,12 +4,13 @@ import {
   DELETED_REPAIR_CASE_SUBJECT,
   NOTIFICATION_KINDS,
   buildApprovalNotification,
+  buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
   type NotificationItem,
 } from "./notifications";
-import { inventoryPartRequestStatusLabels } from "./inventory-types";
+import { inventoryPartRequestStatusLabels, stockOwnerLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 
@@ -93,7 +94,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청과 부품 요청 대기 둘이다", () => {
+test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족 셋이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -101,7 +102,15 @@ test("등록된 알림 종류는 결재 요청과 부품 요청 대기 둘이다
   // PART_REQUEST_PENDING은 그 판정을 세운 뒤 등록했다:
   // auth/inventory-authorization.ts의 canReceivePartRequestNotifications
   // (재고관리자·관리자·최고관리자).
-  assert.deepEqual([...NOTIFICATION_KINDS], ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING"]);
+  //
+  // PART_STOCK_BELOW_MINIMUM도 마찬가지다:
+  // domain/notification-settings.ts의 canReceiveLowStockNotifications
+  // (같은 셋이지만 "재고를 채울 사람"이라는 다른 질문이라 따로 세웠다 —
+  // 그 파일 머리말 참조).
+  assert.deepEqual(
+    [...NOTIFICATION_KINDS],
+    ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING", "PART_STOCK_BELOW_MINIMUM"]
+  );
 });
 
 // ────────────────────────────────────── 처리 대기 중인 부품 요청 알림
@@ -188,4 +197,91 @@ test("결재 배지는 부품 요청을 세지 않는다 — 종류별로 갈라
     ]),
     5
   );
+});
+
+// ────────────────────────────────────────────── 한계수량 미만 재고 알림
+
+test("재고 부족 알림은 품명을 굵게, 소유자와 두 숫자를 detail에 내고, 품목 상세로 링크한다", () => {
+  const item = buildPartStockBelowMinimumNotification({
+    partId: "part-1",
+    partName: "RF 증폭기 모듈",
+    owner: "SERVICE_SPARE",
+    currentQuantity: 15,
+    minimumQuantity: 30,
+  });
+
+  assert.equal(item.kind, "PART_STOCK_BELOW_MINIMUM");
+  assert.equal(item.subject, "RF 증폭기 모듈");
+  // 소유자를 빼면 같은 부품의 네 줄을 구별할 수 없고, 숫자를 빼면 상세를 열기
+  // 전에는 급한지 아닌지를 알 수 없다.
+  assert.equal(item.detail, "보수부재 · 15 / 한계 30");
+  assert.equal(item.href, "/inventory/part-1");
+});
+
+test("재고 부족 알림의 소유자 이름은 새로 쓴 것이 아니라 소유 라벨 표의 그 문자열이어야 한다", () => {
+  // 결재·부품 요청 알림에 걸어 둔 것과 같은 단정이다 — 복사해 두면 재고 보유
+  // 표와 종 알림이 같은 소유자를 서로 다른 이름으로 부르게 된다.
+  const item = buildPartStockBelowMinimumNotification({
+    partId: "part-1",
+    partName: "RF 증폭기 모듈",
+    owner: "KYOSAN",
+    currentQuantity: 0,
+    minimumQuantity: 5,
+  });
+  assert.ok(
+    item.detail.startsWith(stockOwnerLabels.KYOSAN),
+    `detail이 소유 라벨로 시작해야 한다: ${item.detail}`
+  );
+});
+
+test("재고가 0이어도 숫자 0이 그대로 보인다 — 빈 칸이 되면 안 된다", () => {
+  // 재고 행이 아예 없는 소유자가 바로 이 경우다(조회가 0으로 만들어 준다).
+  const item = buildPartStockBelowMinimumNotification({
+    partId: "part-1",
+    partName: "RF 증폭기 모듈",
+    owner: "DSS",
+    currentQuantity: 0,
+    minimumQuantity: 3,
+  });
+  assert.equal(item.detail, "DSS · 0 / 한계 3");
+});
+
+test("🔴 부품 하나가 소유자 넷에서 부족하면 배지에 4로 센다 — 결재 알림과 반대 판단이다", () => {
+  // 가르는 기준은 "한 번의 조치로 함께 사라지는가"다. DSS 재고를 채워도 교산
+  // 부족은 그대로 남으므로, 넷은 실제로 해야 할 일 넷이다.
+  const items = (["DSS", "KYOSAN", "SERVICE_SPARE", "TEST"] as const).map((owner) =>
+    buildPartStockBelowMinimumNotification({
+      partId: "part-1",
+      partName: "RF 증폭기 모듈",
+      owner,
+      currentQuantity: 0,
+      minimumQuantity: 1,
+    })
+  );
+
+  // React key도 서로 달라야 한 줄도 사라지지 않는다.
+  assert.equal(new Set(items.map((item) => item.id)).size, 4);
+  assert.equal(countNotificationTargetsByKind(items).PART_STOCK_BELOW_MINIMUM, 4);
+
+  // 대조 — 결재 알림은 같은 접수 건의 두 결재를 1로 센다(위쪽 시험과 같은 규칙).
+  const approvals = [approvalItem("case-1", "REPAIR_INSPECTION"), approvalItem("case-1", "FINAL_SHIPMENT")];
+  assert.equal(countNotificationTargetsByKind(approvals).REPAIR_CASE_APPROVAL, 1);
+});
+
+test("재고 부족은 다른 종류의 배지를 건드리지 않는다", () => {
+  const counts = countNotificationTargetsByKind([
+    approvalItem("case-1", "REPAIR_INSPECTION"),
+    buildPendingPartRequestNotification({ requestId: "req-1", intakeNumber: "D9705-012", requestedByName: "김엔지니어" }),
+    buildPartStockBelowMinimumNotification({
+      partId: "part-1",
+      partName: "RF 증폭기 모듈",
+      owner: "DSS",
+      currentQuantity: 1,
+      minimumQuantity: 2,
+    }),
+  ]);
+
+  assert.equal(counts.REPAIR_CASE_APPROVAL, 1);
+  assert.equal(counts.PART_REQUEST_PENDING, 1);
+  assert.equal(counts.PART_STOCK_BELOW_MINIMUM, 1);
 });

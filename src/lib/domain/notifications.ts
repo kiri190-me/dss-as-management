@@ -18,7 +18,7 @@
  * ============================================================================
  */
 
-import { inventoryPartRequestStatusLabels } from "./inventory-types";
+import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 
@@ -27,7 +27,11 @@ import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
  * `db/queries/notifications.ts`의 소스 목록 둘뿐이고, 화면은 고치지 않는다 —
  * NotificationItem 한 모양만 그리기 때문이다.
  */
-export const NOTIFICATION_KINDS = ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING"] as const;
+export const NOTIFICATION_KINDS = [
+  "REPAIR_CASE_APPROVAL",
+  "PART_REQUEST_PENDING",
+  "PART_STOCK_BELOW_MINIMUM",
+] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -153,5 +157,43 @@ export function buildPendingPartRequestNotification(input: {
     subject: input.intakeNumber ?? DELETED_REPAIR_CASE_SUBJECT,
     detail: `${inventoryPartRequestStatusLabels.PENDING} · ${input.requestedByName}`,
     href: "/inventory/requests",
+  };
+}
+
+/**
+ * "재고가 한계수량 아래로 떨어졌다" 알림 한 줄.
+ *
+ * subject 는 품명이다 — 이 알림에서 사람이 먼저 찾는 것은 "어느 부품인가"다.
+ *
+ * detail 에는 **소유자 이름과 두 숫자가 모두** 드러난다("DSS · 15 / 한계 30").
+ * 소유자를 빼면 같은 부품의 네 줄을 구별할 수 없고, 숫자를 빼면 상세를 열기 전에는
+ * 급한지 아닌지를 알 수 없다 — 15/30 과 29/30 은 같은 알림이 아니다. 소유자 라벨은
+ * 새로 쓰지 않고 inventory-types.ts 의 stockOwnerLabels 를 그대로 가져온다(재고
+ * 보유 표·부품 요청 화면이 이미 그 문자열로 이 소유자를 부른다).
+ *
+ * href 는 그 품목 상세다. 한계수량 구역이 거기 있고, 지금 수량을 보면서 기준을
+ * 고치거나 입고를 잡는 일이 전부 그 화면에서 일어난다.
+ *
+ * ── targetKey 는 (부품, 소유자)다 — 부품 하나가 넷으로 셀 수 있다 ────────
+ * 결재 알림은 한 접수 건에 결재가 둘 걸려 있어도 targetKey 가 접수 건 id 라
+ * 배지에 1 로 센다. 여기서는 반대로 정했다. 가르는 기준은 **한 번의 조치로 함께
+ * 사라지는가**다 — 결재는 한 화면에서 둘 다 처리하면 함께 사라지지만, DSS 재고를
+ * 채워도 교산 부족은 그대로 남는다. 소유자마다 채우는 경로도 상대도 다르다. 넷이
+ * 동시에 부족하면 실제로 해야 할 일이 넷이므로 배지도 4 로 센다.
+ */
+export function buildPartStockBelowMinimumNotification(input: {
+  partId: string;
+  partName: string;
+  owner: StockOwner;
+  currentQuantity: number;
+  minimumQuantity: number;
+}): NotificationItem {
+  return {
+    id: `PART_STOCK_BELOW_MINIMUM:${input.partId}:${input.owner}`,
+    kind: "PART_STOCK_BELOW_MINIMUM",
+    targetKey: `${input.partId}:${input.owner}`,
+    subject: input.partName,
+    detail: `${stockOwnerLabels[input.owner]} · ${input.currentQuantity} / 한계 ${input.minimumQuantity}`,
+    href: `/inventory/${input.partId}`,
   };
 }
