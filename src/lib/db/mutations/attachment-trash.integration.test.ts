@@ -13,6 +13,7 @@ import {
   attachments,
   auditLogs,
   customers,
+  productModels,
   products,
   repairCaseIntakeSequences,
   repairCases,
@@ -23,7 +24,11 @@ import { createAttachmentRecord } from "./attachments";
 import { restoreAttachment, softDeleteAttachment } from "./attachment-trash";
 import { getAttachmentForDownload } from "../queries/attachment-download";
 import { listAttachmentsForRepairCase } from "../queries/attachments";
-import { buildAttachmentStoredPath, resolveAttachmentAbsolutePath } from "@/lib/domain/attachment-path";
+import {
+  buildAttachmentStoredPath,
+  buildProductModelAttachmentStoredPath,
+  resolveAttachmentAbsolutePath,
+} from "@/lib/domain/attachment-path";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/lib/domain/attachment-allowlist";
 import { decideAttachmentDownload } from "@/lib/domain/attachment-download-policy";
 import { createLocalFileSystemStorageAdapter } from "@/lib/storage/local-fs-adapter";
@@ -47,6 +52,9 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *     (없는 것과 휴지통에 있는 것을 구분해야 한다)
  *  5. 두 번 지우기·두 번 복원하기를 조용히 성공시키지 않는가
  *  6. 잠긴 접수 건의 첨부는 지우지도 되살리지도 못하는가
+ *  7. **감사 기록에 파일의 주인이 남는가** — 접수 건이든 모델이든, 주인이
+ *     아무도 없든. 감사 기록은 나중에 소급해서 채울 수 없으므로 이것이 빠진
+ *     기간은 영영 불완전해진다.
  *
  * ── 디스크는 임시 폴더에 쓴다 ────────────────────────────────────────────
  * 실제 저장 루트(UPLOADS_DIR)를 건드리지 않는다. 어댑터를 임시 루트로 직접
@@ -63,6 +71,12 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 const TEST_RECEIVED_AT = "2097-07-10";
 const TEST_SHIPMENT_DATE = "2097-07-20";
 const TEST_MODEL_PREFIX = "ATTRASH-TEST-";
+/**
+ * product_models 행의 이름 접두사. 위 TEST_MODEL_PREFIX(products 표의 model_name)
+ * 와 **다른 표**를 가리키므로 접두사도 따로 둔다 — attachments.integration.test
+ * 와 같은 규약이다.
+ */
+const TEST_PRODUCT_MODEL_PREFIX = "ATTRASH-TEST-PMODEL-";
 const TEST_YEAR_MONTH = "9707";
 
 let customerId: string;
@@ -157,6 +171,64 @@ async function storedAttachment(repairCaseId: string): Promise<{
   };
 }
 
+/** 모델 첨부가 붙을 제품 모델 마스터 행. after()가 접두사로 지운다. */
+async function createTestProductModel(): Promise<{ id: string; modelName: string }> {
+  const modelName = `${TEST_PRODUCT_MODEL_PREFIX}${randomUUID().slice(0, 8)}`;
+  const [row] = await db
+    .insert(productModels)
+    .values({ modelName })
+    .returning({ id: productModels.id });
+  return { id: row.id, modelName };
+}
+
+/** 실제 파일을 놓고 **제품 모델이 주인인** 첨부 기록을 만든다. */
+async function storedModelAttachment(productModelId: string): Promise<{ attachmentId: string }> {
+  const bytes = new Uint8Array(Buffer.from(`모델 회로도 시험 ${randomUUID()}\n`, "utf8"));
+  const written = await storage.writeTemp(streamOf(bytes), { maxBytes: MAX_ATTACHMENT_SIZE_BYTES });
+  const attachmentId = randomUUID().toLowerCase();
+  const storedPath = buildProductModelAttachmentStoredPath({
+    productModelId,
+    attachmentId,
+    extension: "txt",
+  });
+  await storage.commit(written.tempPath, storedPath);
+
+  const created = await createAttachmentRecord({
+    id: attachmentId,
+    owner: { kind: "PRODUCT_MODEL", productModelId },
+    category: "CIRCUIT_DIAGRAM",
+    originalFileName: "회로도.txt",
+    storedPath,
+    mimeType: "text/plain",
+    fileSize: written.size,
+    checksumSha256: written.sha256,
+    description: null,
+    uploadedBy: engineerId,
+  });
+  createdAttachmentIds.push(created.id);
+
+  return { attachmentId };
+}
+
+/** 이 첨부의 해당 종류 감사 행 하나를 꺼내 newValue를 돌려준다. */
+async function auditNewValue(
+  attachmentId: string,
+  actionType: "FILE_DELETE" | "RESTORE"
+): Promise<Record<string, unknown>> {
+  const rows = await db
+    .select({ newValue: auditLogs.newValue })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.targetEntity, "attachments"),
+        eq(auditLogs.targetRecordId, attachmentId),
+        eq(auditLogs.actionType, actionType)
+      )
+    );
+  assert.equal(rows.length, 1, `${actionType} 감사 행이 정확히 하나여야 한다`);
+  return rows[0].newValue as Record<string, unknown>;
+}
+
 /** 이 첨부에 대해 남은 감사 행을 종류별로 센다. */
 async function auditCounts(attachmentId: string): Promise<Record<string, number>> {
   const rows = await db
@@ -221,6 +293,9 @@ after(async () => {
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
+  // 첨부 행을 먼저 지운 뒤다 — 남아 있으면 ON DELETE SET NULL 로 주인만 끊긴
+  // 채 이 스위트의 행이 표에 남는다.
+  await db.delete(productModels).where(like(productModels.modelName, `${TEST_PRODUCT_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
 
   if (storageRoot) {
@@ -442,5 +517,112 @@ describe("attachment 휴지통: 출하 완료로 잠긴 건", () => {
     await db.update(repairCases).set({ isLocked: false }).where(eq(repairCases.id, caseId));
     const retry = await restoreAttachment({ attachmentId, actorUserId: adminId });
     assert.equal(retry.ok, true);
+  });
+});
+
+// ─────────────────────────── 5. 감사 기록에 파일의 주인이 남는가
+
+/**
+ * 감사 기록은 **나중에 소급해서 채울 수 없다.** 여기서 빠지면 그 기간의 기록이
+ * 영영 불완전해지고, 3년 보관하는 로그에서 그 줄들만 "무슨 파일이었는지 알 수
+ * 없는 줄"로 남는다. 그래서 세 가지를 나란히 못박는다 — 모델일 때, 접수 건일 때,
+ * 주인이 아무도 없을 때.
+ */
+describe("attachment 휴지통: 감사 기록만 읽어도 어느 파일이었는지 안다", () => {
+  test("모델 첨부를 지우면 모델 ID와 모델 이름이 남고, 접수 건 키는 실리지 않는다", async () => {
+    const model = await createTestProductModel();
+    const { attachmentId } = await storedModelAttachment(model.id);
+
+    const result = await softDeleteAttachment({
+      attachmentId,
+      actorUserId: adminId,
+      reason: "잘못 올린 회로도",
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const newValue = await auditNewValue(attachmentId, "FILE_DELETE");
+    assert.equal(newValue.ownerType, "PRODUCT_MODEL");
+    assert.equal(newValue.productModelId, model.id);
+    // 🔴 UUID 만 있으면 이 줄을 읽는 사람이 무슨 모델인지 알 수 없다. 접수 건이
+    // 접수번호를 함께 남기는 것과 같은 대접이다.
+    assert.equal(newValue.modelName, model.modelName);
+    // 🔴 주인이 아닌 쪽 키는 아예 싣지 않는다. `repairCaseId: null` 이 남으면
+    // 그 줄만 읽는 사람은 접수 건이 지워진 첨부와 구분할 수 없다.
+    assert.equal("repairCaseId" in newValue, false, "주인이 아닌 쪽 키가 실렸다");
+    assert.equal("intakeNumber" in newValue, false, "주인이 아닌 쪽 이름이 실렸다");
+    // 주인과 무관하게 남던 값은 그대로다.
+    assert.equal(newValue.category, "CIRCUIT_DIAGRAM");
+    assert.equal(newValue.storedFileRetained, true);
+    assert.equal(newValue.deleteReason, "잘못 올린 회로도");
+  });
+
+  test("모델 첨부를 되살려도 같은 모양으로 남는다", async () => {
+    const model = await createTestProductModel();
+    const { attachmentId } = await storedModelAttachment(model.id);
+
+    await softDeleteAttachment({ attachmentId, actorUserId: adminId, reason: null });
+    const restored = await restoreAttachment({ attachmentId, actorUserId: adminId });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+
+    const newValue = await auditNewValue(attachmentId, "RESTORE");
+    assert.equal(newValue.ownerType, "PRODUCT_MODEL");
+    assert.equal(newValue.productModelId, model.id);
+    assert.equal(newValue.modelName, model.modelName);
+    assert.equal("repairCaseId" in newValue, false);
+    assert.equal(newValue.category, "CIRCUIT_DIAGRAM");
+  });
+
+  test("접수 건 첨부에는 예전 키가 그대로 남는다 — 옛 기록과 모양이 갈라지지 않았다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId } = await storedAttachment(caseId);
+
+    const [caseRow] = await db
+      .select({ intakeNumber: repairCases.intakeNumber })
+      .from(repairCases)
+      .where(eq(repairCases.id, caseId));
+
+    await softDeleteAttachment({ attachmentId, actorUserId: adminId, reason: null });
+    const deleted = await auditNewValue(attachmentId, "FILE_DELETE");
+    assert.equal(deleted.ownerType, "REPAIR_CASE");
+    // 🔴 이 두 키가 사라지면 옛 감사 기록과 새 기록을 한 질의로 읽을 수 없다.
+    // 이번 변경은 **더하기만** 한다.
+    assert.equal(deleted.repairCaseId, caseId);
+    assert.equal(deleted.intakeNumber, caseRow.intakeNumber);
+    assert.equal(deleted.category, "INTAKE_PHOTO");
+    assert.equal(deleted.storedFileRetained, true);
+    assert.equal("productModelId" in deleted, false, "주인이 아닌 쪽 키가 실렸다");
+    assert.equal("modelName" in deleted, false);
+
+    await restoreAttachment({ attachmentId, actorUserId: adminId });
+    const restored = await auditNewValue(attachmentId, "RESTORE");
+    assert.equal(restored.ownerType, "REPAIR_CASE");
+    assert.equal(restored.repairCaseId, caseId);
+    assert.equal(restored.intakeNumber, caseRow.intakeNumber);
+    assert.equal(restored.category, "INTAKE_PHOTO");
+    assert.equal("productModelId" in restored, false);
+  });
+
+  test("주인이 아무도 없는 첨부를 지워도 터지지 않고 NONE 이 남는다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId, absolutePath } = await storedAttachment(caseId);
+
+    // 접수 건이 영구 삭제된 뒤의 모습을 그대로 만든다(FK가 ON DELETE SET NULL
+    // 이라 두 컬럼이 함께 NULL 이 된다). CHECK 가 막는 것은 "둘 다 찬" 행이지
+    // "둘 다 빈" 행이 아니므로 이것은 정상 상태다.
+    await db.update(attachments).set({ repairCaseId: null }).where(eq(attachments.id, attachmentId));
+
+    const result = await softDeleteAttachment({ attachmentId, actorUserId: adminId, reason: null });
+    assert.equal(result.ok, true, `주인 없는 첨부를 지우지 못했다: ${JSON.stringify(result)}`);
+
+    const newValue = await auditNewValue(attachmentId, "FILE_DELETE");
+    // 🔴 "주인이 없었다"와 "기록이 빠졌다"는 다른 사실이다. 키를 아예 빼면 이
+    // 코드가 생기기 전의 옛 기록과 구분되지 않는다.
+    assert.equal(newValue.ownerType, "NONE");
+    assert.equal("repairCaseId" in newValue, false);
+    assert.equal("productModelId" in newValue, false);
+    assert.equal(newValue.category, "INTAKE_PHOTO");
+
+    // 이 파일의 가장 중요한 성질은 여기서도 그대로다.
+    assert.equal(await existsOnDisk(absolutePath), true);
   });
 });

@@ -117,8 +117,15 @@ export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
   return owner.repairCaseId === null && owner.productModelId === null;
 }
 
+/**
+ * 🔴 **주인이 접수 건인지 모델인지 말하지 않는다.** 이 문장이 나가는 때는 두
+ * FK 가 모두 NULL 인 때이고, 그때는 이 파일이 접수 건에 붙어 있었는지 모델에
+ * 붙어 있었는지를 **알 방법이 남아 있지 않다**(둘 다 ON DELETE SET NULL 이라
+ * 지워진 쪽의 흔적이 없다). "접수 건이 없어져"라고 적으면 모델 회로도를 열려던
+ * 사람에게 사실이 아닌 안내가 나간다.
+ */
 const DETACHED_MESSAGE =
-  "이 파일이 붙어 있던 접수 건이 없어져 열람 권한을 확인할 수 없습니다. 관리자에게 문의해 주세요.";
+  "이 파일이 붙어 있던 대상이 없어져 열람 권한을 확인할 수 없습니다. 관리자에게 문의해 주세요.";
 const DELETED_MESSAGE = "휴지통에 있는 파일은 내려받을 수 없습니다. 복원한 뒤 다시 시도해 주세요.";
 
 const SCAN_BLOCKED_MESSAGES: Record<MalwareScanStatus, string> = {

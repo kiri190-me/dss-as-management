@@ -257,7 +257,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     await recordAttachmentDownload({
       attachmentId: attachment.id,
       actorUserId: actingUser.id,
-      repairCaseId: attachment.repairCaseId,
+      // 주인을 그대로 넘긴다 — 기록하는 쪽이 어느 주인인지 갈라 적는다. 예전처럼
+      // repairCaseId 하나만 넘기면 모델 첨부의 기록에 `repairCaseId: null` 만
+      // 남아, 그 줄을 읽는 사람이 무슨 파일이었는지 알 수 없다.
+      owner: {
+        repairCaseId: attachment.repairCaseId,
+        productModelId: attachment.productModelId,
+      },
       originalFileName: attachment.originalFileName,
       fileSize: attachment.fileSize,
     });

@@ -208,6 +208,24 @@ test("막을 때는 이유 문장이 항상 비어 있지 않다 — 빈 오류�
   }
 });
 
+test("DETACHED 문장이 주인의 종류를 단정하지 않는다 — 접수 건인지 모델인지 알 수 없는 상태다", () => {
+  // 이 문장이 나가는 때는 두 FK 가 모두 NULL 인 때다. 그때는 이 파일이 접수 건에
+  // 붙어 있었는지 모델에 붙어 있었는지를 알 방법이 남아 있지 않다(둘 다 ON DELETE
+  // SET NULL). "접수 건이 없어져"라고 적으면 모델 회로도를 열려던 사람에게 사실이
+  // 아닌 안내가 나간다.
+  const decision = decideAttachmentDownload(
+    healthySubject({ repairCaseId: null, productModelId: null })
+  );
+  assert.equal(decision.allowed, false);
+  if (decision.allowed === false) {
+    assert.equal(decision.reason, "DETACHED");
+    assert.ok(!decision.message.includes("접수 건"), "주인이 접수 건이라고 단정하고 있다");
+    assert.ok(!decision.message.includes("모델"), "주인이 모델이라고 단정하고 있다");
+    // 무엇을 해야 하는지는 그대로 알려 준다 — 사실만 고치고 안내는 남긴다.
+    assert.ok(decision.message.includes("관리자에게 문의"), "안내가 사라졌다");
+  }
+});
+
 test("이유 문장에 내부 저장 경로가 담기지 않는다", () => {
   // 화면에 그대로 보여 주는 문장이다. 저장 구조를 흘릴 이유가 없다.
   const decision = decideAttachmentDownload(healthySubject({ malwareScanStatus: "INFECTED" }));
