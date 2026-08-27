@@ -45,6 +45,23 @@ export const users = pgTable(
     // Nullable — rows created before SSO are not linked yet.
     ssoSubject: text("sso_subject"),
     ssoLinkedAt: timestamp("sso_linked_at", { withTimezone: true }),
+    /**
+     * Sessions issued before this instant are no longer valid.
+     *
+     * This system's sessions are not stored server-side — they are signed
+     * tokens, valid on their own once issued. So "revoke that one session"
+     * has nothing to point at here. Raising this line invalidates every
+     * token issued before it instead.
+     *
+     * Set to now() when the login portal reports a logout or a suspension
+     * (api/auth/sso/backchannel-logout). Null means this account has never
+     * been cut off, and nothing is invalidated.
+     *
+     * This cuts *all* of that person's sessions, not one. A revocation list
+     * would be precise, but it adds a table that grows and needs its own
+     * sweep — and on a shared PC "I left" usually does mean everywhere.
+     */
+    sessionsValidFrom: timestamp("sessions_valid_from", { withTimezone: true }),
     name: text("name").notNull(),
     role: roleEnum("role").notNull(),
     approvalStatus: accountApprovalStatusEnum("approval_status")

@@ -12,6 +12,8 @@ export type UserRow = {
   approvalStatus: AccountApprovalStatus;
   isActive: boolean;
   lockedAt: Date | null;
+  /** 이 시각보다 먼저 발급된 세션은 무효다. null이면 끊긴 적이 없다. */
+  sessionsValidFrom: Date | null;
 };
 
 const SELECT_COLUMNS = {
@@ -22,6 +24,7 @@ const SELECT_COLUMNS = {
   approvalStatus: users.approvalStatus,
   isActive: users.isActive,
   lockedAt: users.lockedAt,
+  sessionsValidFrom: users.sessionsValidFrom,
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,6 +182,31 @@ export async function applySsoIdentity(
         eq(users.isDeleted, false)
       )
     )
+    .returning({ id: users.id });
+  return updated.length > 0;
+}
+
+/**
+ * Cuts every session this person currently holds, by raising the line that
+ * sessions must have been issued after.
+ *
+ * Keyed on sso_subject, not the local id: the login portal knows people by
+ * its own user id and has no idea what this system calls them. The guard is
+ * also the security-relevant part — only an account the portal actually owns
+ * can be cut this way.
+ *
+ * Returns false when nothing matched. That is not an error: the portal may
+ * report a logout for someone who was never linked here, and "no session to
+ * cut" is already the state the caller wanted.
+ */
+export async function invalidateSessionsForSsoSubject(subject: string): Promise<boolean> {
+  if (!subject) {
+    return false;
+  }
+  const updated = await db
+    .update(users)
+    .set({ sessionsValidFrom: new Date(), updatedAt: new Date() })
+    .where(and(eq(users.ssoSubject, subject), eq(users.isDeleted, false)))
     .returning({ id: users.id });
   return updated.length > 0;
 }
