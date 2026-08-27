@@ -51,7 +51,7 @@ export default async function AppLayout({
   //
   // 조회는 여기 한 번뿐이다 — 배지 숫자는 그 결과에서 뽑는다. 배지가 따로 count
   // 조회를 부르면 모든 페이지 로드마다 같은 조회가 두 번 돈다.
-  const notifications = getRepairCaseReadSource() === "database" ? await listMyNotifications(user.id) : [];
+  const notifications = getRepairCaseReadSource() === "database" ? await listMyNotifications(user.id, user.role) : [];
   const myPendingApprovalCount = countNotificationTargetsByKind(notifications).REPAIR_CASE_APPROVAL;
 
   // 통합 로그인으로 들어온 경우에만 포털로 돌아가는 길을 보여준다. 데모

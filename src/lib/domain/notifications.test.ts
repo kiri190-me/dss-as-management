@@ -1,12 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DELETED_REPAIR_CASE_SUBJECT,
   NOTIFICATION_KINDS,
   buildApprovalNotification,
+  buildPendingPartRequestNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
   type NotificationItem,
 } from "./notifications";
+import { inventoryPartRequestStatusLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 
@@ -90,8 +93,99 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("이번에 등록된 알림 종류는 결재 요청 하나뿐이다", () => {
+test("등록된 알림 종류는 결재 요청과 부품 요청 대기 둘이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
-  // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다.
-  assert.deepEqual([...NOTIFICATION_KINDS], ["REPAIR_CASE_APPROVAL"]);
+  // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
+  // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
+  //
+  // PART_REQUEST_PENDING은 그 판정을 세운 뒤 등록했다:
+  // auth/inventory-authorization.ts의 canReceivePartRequestNotifications
+  // (재고관리자·관리자·최고관리자).
+  assert.deepEqual([...NOTIFICATION_KINDS], ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING"]);
+});
+
+// ────────────────────────────────────── 처리 대기 중인 부품 요청 알림
+
+test("부품 요청 알림은 인수번호와 상태 라벨·요청자를 내고, 부품 요청 관리 화면으로 링크한다", () => {
+  const item = buildPendingPartRequestNotification({
+    requestId: "req-1",
+    intakeNumber: "D9705-012",
+    requestedByName: "김엔지니어",
+  });
+
+  assert.equal(item.kind, "PART_REQUEST_PENDING");
+  assert.equal(item.subject, "D9705-012");
+  assert.equal(item.detail, "요청 대기 · 김엔지니어");
+  // 요청에는 자기만의 상세 화면이 없다 — 실제로 불출/거절/보류를 누르는 자리가
+  // 이 목록이다.
+  assert.equal(item.href, "/inventory/requests");
+  // 요청 하나가 사람에게도 한 건이다. 부품이 여러 개 들어 있어도 배지에 여러
+  // 건으로 세면 안 된다.
+  assert.equal(item.targetKey, "req-1");
+});
+
+test("부품 요청 알림의 라벨은 새로 쓴 것이 아니라 상태 라벨 표의 그 문자열이어야 한다", () => {
+  // 결재 알림에 걸어 둔 것과 같은 단정이다 — 복사해 두면 부품 요청 관리
+  // 목록과 종 알림이 같은 상태를 서로 다른 이름으로 부르게 되고, 한쪽만
+  // 고쳐지는 순간 여기서 깨져야 한다.
+  const item = buildPendingPartRequestNotification({
+    requestId: "req-1",
+    intakeNumber: "D9705-012",
+    requestedByName: "김엔지니어",
+  });
+  assert.ok(
+    item.detail.startsWith(inventoryPartRequestStatusLabels.PENDING),
+    `detail이 상태 라벨로 시작해야 한다: ${item.detail}`
+  );
+});
+
+test("접수 건이 영구 삭제된 요청도 알림에서 사라지지 않고 '삭제된 접수 건'으로 나온다", () => {
+  // repair_case_id는 NULL이 될 수 있다(ON DELETE SET NULL). 굵은 글씨 자리가
+  // 통째로 비면 무엇에 대한 알림인지 알 수 없다.
+  const item = buildPendingPartRequestNotification({
+    requestId: "req-2",
+    intakeNumber: null,
+    requestedByName: "김엔지니어",
+  });
+  assert.equal(item.subject, DELETED_REPAIR_CASE_SUBJECT);
+  assert.equal(item.subject, "삭제된 접수 건", "부품 요청 관리 목록이 쓰는 문구와 같아야 한다");
+  assert.equal(item.href, "/inventory/requests", "접수 건이 없어도 갈 곳은 그대로다");
+});
+
+test("요청이 여러 건이면 id가 서로 달라 한 줄도 사라지지 않는다", () => {
+  const first = buildPendingPartRequestNotification({ requestId: "req-1", intakeNumber: "D9705-012", requestedByName: "김엔지니어" });
+  const second = buildPendingPartRequestNotification({ requestId: "req-2", intakeNumber: "D9705-012", requestedByName: "김엔지니어" });
+
+  // 같은 접수 건에 요청을 두 번 올릴 수 있다 — 인수번호가 같아도 React key가
+  // 겹치면 안 되고, 세는 단위도 요청별로 둘이어야 한다.
+  assert.notEqual(first.id, second.id);
+  assert.equal(countNotificationTargetsByKind([first, second]).PART_REQUEST_PENDING, 2);
+});
+
+test("결재 배지는 부품 요청을 세지 않는다 — 종류별로 갈라 센다", () => {
+  // 사이드바 배지는 countNotificationTargetsByKind(...).REPAIR_CASE_APPROVAL
+  // 하나만 읽는다((app)/layout.tsx). 종류가 늘어난 지금 그 숫자가 조용히
+  // 부품 요청까지 세기 시작하면 "결재 배지"가 거짓말을 하게 된다.
+  const counts = countNotificationTargetsByKind([
+    approvalItem("case-1", "REPAIR_INSPECTION"),
+    approvalItem("case-2", "FINAL_SHIPMENT"),
+    buildPendingPartRequestNotification({ requestId: "req-1", intakeNumber: "D9705-012", requestedByName: "김엔지니어" }),
+    buildPendingPartRequestNotification({ requestId: "req-2", intakeNumber: null, requestedByName: "김엔지니어" }),
+    buildPendingPartRequestNotification({ requestId: "req-3", intakeNumber: "D9705-013", requestedByName: "박엔지니어" }),
+  ]);
+
+  assert.equal(counts.REPAIR_CASE_APPROVAL, 2, "결재 배지는 결재 2건만 센다");
+  assert.equal(counts.PART_REQUEST_PENDING, 3);
+
+  // 종 배지는 반대로 전부 센다 — 두 숫자가 서로 다른 것이 정상이다.
+  assert.equal(
+    countNotificationTargets([
+      "case-1",
+      "case-2",
+      "req-1",
+      "req-2",
+      "req-3",
+    ]),
+    5
+  );
 });

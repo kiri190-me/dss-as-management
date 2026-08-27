@@ -244,3 +244,30 @@ export function isRequestPartiallyClosable(ctx: {
 export function canDeleteParts(role: Role): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN";
 }
+
+// ---- 알림 (종 알림 1단계 — 처리 대기 중인 부품 요청) ----
+
+/**
+ * 처리 대기 중인 부품 요청을 종 알림으로 받는 역할.
+ *
+ * 왜 이 셋인가 — 부품을 실제로 불출하는 사람(INVENTORY_MANAGER)과, 그것이
+ * 밀려 있을 때 나서야 하는 사람(ADMIN·SUPER_ADMIN)이다. 요청을 올리는 쪽인
+ * AS_ENGINEER는 자기 요청의 진행을 접수 건 상세에서 이미 보고 있고(내 요청
+ * 목록), 남이 올린 요청까지 종으로 받을 이유가 없다. SALES는 부품 요청 화면
+ * 자체에 접근하지 않는다(canProcessPartRequests / canViewPartRequests와 같은
+ * 판단).
+ *
+ * **명단으로 적는 이유**는 이 시스템의 역할에 순서가 없기 때문이다. 요청은
+ * "재고 관리자 이상"이었지만 다섯 역할(SUPER_ADMIN·ADMIN·AS_ENGINEER·SALES·
+ * INVENTORY_MANAGER)은 평평해서 "이상"을 계산할 기준선이 없다 — 등급으로
+ * 적으면 AS_ENGINEER·SALES가 어느 쪽에 붙는지가 코드에 안 남는다.
+ *
+ * canProcessPartRequests와 지금은 같은 세 역할이지만 **일부러 따로 둔다** —
+ * 저쪽은 "처리해도 되는가"(인가 경계)이고 이쪽은 "끼어들어 알려도 되는가"
+ * (알림 대상)다. 알림 설정 화면이 붙는 다음 단계에서 이 함수의 답이 설정의
+ * **기본값**이 되고, 그때 설정으로 알림을 끈 사람이 처리 권한까지 잃으면 안
+ * 된다.
+ */
+export function canReceivePartRequestNotifications(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
+}

@@ -1,15 +1,32 @@
 import "server-only";
 import { listRepairCasesPendingMyApproval } from "./repair-case-approvals-pending";
-import { buildApprovalNotification, type NotificationItem, type NotificationKind } from "@/lib/domain/notifications";
+import { getPendingPartRequestsForNotification } from "./inventory-part-requests";
+import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
+import {
+  buildApprovalNotification,
+  buildPendingPartRequestNotification,
+  type NotificationItem,
+  type NotificationKind,
+} from "@/lib/domain/notifications";
+import type { Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
  * 종 알림 레지스트리 — 알림 "종류"를 등록해 두는 곳
  * ============================================================================
  * 이 파일에는 SQL이 없다. 각 종류는 **이미 있는 조회**를 부르고, 그 결과를
- * 화면이 아는 단 하나의 모양(NotificationItem)으로 바꿔 놓기만 한다. 인가
- * 판정도 여기서 하지 않는다 — 부르는 조회가 서버에서 스스로 한다
- * (repair-case-approvals-pending.ts의 역할/대표 자격·위임 판정).
+ * 화면이 아는 단 하나의 모양(NotificationItem)으로 바꿔 놓기만 한다.
+ *
+ * ── 인가 판정은 두 가지 모양 중 하나다 ─────────────────────────────────
+ *  (가) 부르는 조회가 스스로 판정한다 — 결재 알림이 그렇다. 누가 결재자인지가
+ *       사람 단위(대표 자격·위임)라 SQL 안에서 정해지고, 사용자 id 하나면
+ *       충분하다(repair-case-approvals-pending.ts).
+ *  (나) load가 **역할로** 먼저 거른다 — 부품 요청 알림이 그렇다. 대상이 사람이
+ *       아니라 역할이고, 조회 자체는 "지금 처리 대기 중인 요청 전부"라 누가
+ *       봐도 같은 결과다. 그래서 조회를 부르기 **전에** 역할을 보고, 아니면
+ *       빈 배열로 끝낸다 — 권한 없는 사람 앞에서 그 조회는 아예 돌지 않는다.
+ * 판정 자체는 이 파일이 쓰지 않는다. auth/inventory-authorization.ts의 순수
+ * 함수를 부른다(화면·mutation이 쓰는 그 파일).
  *
  * ── 종류를 하나 더 붙이려면 ────────────────────────────────────────────
  *  1. domain/notifications.ts의 NOTIFICATION_KINDS에 키를 추가하고
@@ -32,7 +49,7 @@ import { buildApprovalNotification, type NotificationItem, type NotificationKind
 type NotificationSource = {
   kind: NotificationKind;
   /** 이 사용자에게 지금 보여야 할 그 종류의 알림 전부. */
-  load: (actorUserId: string) => Promise<NotificationItem[]>;
+  load: (actorUserId: string, actorRole: Role) => Promise<NotificationItem[]>;
 };
 
 const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
@@ -51,15 +68,39 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       );
     },
   },
+  {
+    kind: "PART_REQUEST_PENDING",
+    load: async (_actorUserId, actorRole) => {
+      // 역할 판정이 먼저다. 이 조회는 사용자별로 결과가 달라지지 않으므로
+      // (처리 대기 중인 요청 전부), 자격이 없으면 부르지 않고 끝낸다 —
+      // 걸러내는 것이 아니라 아예 읽지 않는 쪽이 인가 경계로도 맞고, 요청
+      // 화면에 못 들어가는 사람 앞에서 DB를 건드리지도 않는다.
+      //
+      // 누가 받는지는 이번 단계에서 **코드에 적혀 있다**. 알림 설정 화면이
+      // 붙는 다음 단계에서 이 답이 설정의 기본값이 된다.
+      if (!canReceivePartRequestNotifications(actorRole)) return [];
+
+      const pending = await getPendingPartRequestsForNotification();
+      return pending.map((row) =>
+        buildPendingPartRequestNotification({
+          requestId: row.id,
+          intakeNumber: row.intakeNumber,
+          requestedByName: row.requestedByName,
+        })
+      );
+    },
+  },
 ];
 
 /**
  * 지금 로그인한 사람이 처리해야 할 일 전부. 등록된 종류를 모두 돌며 모은다.
  *
- * 인자는 서버가 세션에서 푼 사용자 id 하나뿐이다 — 다른 사람의 알림을 요구할
- * 수 있는 입구가 없다.
+ * 인자는 서버가 세션에서 푼 사용자 id와 역할뿐이다 — 다른 사람의 알림을
+ * 요구할 수 있는 입구가 없다. 역할도 부르는 쪽이 넘겨 주지만, 그 값은
+ * (app)/layout.tsx가 세션 토큰이 아니라 **살아 있는 계정**에서 다시 푼
+ * 것이다(resolveActingUserForSession) — 토큰에 박힌 옛 역할이 아니다.
  */
-export async function listMyNotifications(actorUserId: string): Promise<NotificationItem[]> {
-  const perKind = await Promise.all(NOTIFICATION_SOURCES.map((source) => source.load(actorUserId)));
+export async function listMyNotifications(actorUserId: string, actorRole: Role): Promise<NotificationItem[]> {
+  const perKind = await Promise.all(NOTIFICATION_SOURCES.map((source) => source.load(actorUserId, actorRole)));
   return perKind.flat();
 }

@@ -225,6 +225,76 @@ export async function getPartRequestsForManager(): Promise<ManagerPartRequestRow
   }));
 }
 
+// ---- 종 알림 (처리 대기 중인 부품 요청) ----
+
+/**
+ * 알림 한 줄을 그리는 데 필요한 값만. 부품 목록·재고 가용량·보류 이력은
+ * 들어 있지 않다.
+ */
+export type PendingPartRequestNotificationRow = {
+  id: string;
+  /**
+   * NULL이면 접수 건이 영구 삭제된 요청이다(repair_case_id ON DELETE SET NULL).
+   * 화면 문구로 바꾸는 것은 domain/notifications.ts가 한다 — 여기서는 데이터를
+   * 있는 그대로 돌려준다.
+   */
+  intakeNumber: string | null;
+  requestedByName: string;
+  createdAt: string;
+};
+
+/**
+ * 종 알림용 — 아직 아무도 손대지 않은 부품 요청.
+ *
+ * ── 왜 PENDING 하나뿐인가 ──────────────────────────────────────────────
+ *  - REJECTED · CANCELLED · FULLY_ISSUED · PARTIALLY_CLOSED 는 끝난 것이다.
+ *    알림은 "지금 내가 처리할 일"이고, 끝난 것에는 할 일이 없다.
+ *  - ON_HOLD 는 관리자가 **일부러 세워 둔 것**이다. 보류해 둔 것을 계속
+ *    알리면 보류가 알림을 끄는 방법이 되지 못해 소음만 남는다.
+ *  - PARTIALLY_ISSUED 는 이미 손을 댄 것이라 "새로 온 요청"이 아니다. 남은
+ *    수량은 부품 요청 관리 목록에서 이어서 처리한다.
+ *
+ * ── 왜 getPartRequestsForManager를 쓰지 않는가 ─────────────────────────
+ * 그쪽은 상태를 거르지 않고 모든 요청 + 부품 목록 + 재고 가용량 + 보류 이력
+ * 까지 끌어온다(attachItemsWithAvailability · loadLatestHoldByRequest, 조회
+ * 세 번 이상). 알림은 **모든 페이지 로드마다** 돌기 때문에 그 비용을 낼 수
+ * 없다. 여기는 조회 한 번, 컬럼 네 개다.
+ *
+ * ── 접수 건 연결이 끊긴 요청 ──────────────────────────────────────────
+ * leftJoin이다. innerJoin이면 접수 건이 영구 삭제된 요청이 알림에서 통째로
+ * 사라진다 — 그 요청은 여전히 처리 대기 중이고 재고 회계 기록이기도 하다.
+ * (getPartRequestsForManager가 같은 이유로 leftJoin을 쓴다.)
+ *
+ * ── 차례 ───────────────────────────────────────────────────────────────
+ * 최신순. 종 패널에는 결재 알림(listRepairCasesPendingMyApproval, 요청 시각
+ * 내림차순)과 섞여 그려지므로 두 종류의 방향이 같아야 한다 — 한쪽만 오래된
+ * 순이면 같은 목록 안에서 시간이 위아래로 뒤집힌다.
+ *
+ * 읽기 전용이다. 상태를 바꾸는 일은 mutations/inventory-part-requests.ts만
+ * 한다.
+ */
+export async function getPendingPartRequestsForNotification(): Promise<PendingPartRequestNotificationRow[]> {
+  const rows = await db
+    .select({
+      id: inventoryPartRequests.id,
+      createdAt: inventoryPartRequests.createdAt,
+      intakeNumber: repairCases.intakeNumber,
+      requestedByName: users.name,
+    })
+    .from(inventoryPartRequests)
+    .leftJoin(repairCases, eq(inventoryPartRequests.repairCaseId, repairCases.id))
+    .innerJoin(users, eq(inventoryPartRequests.requestedByUserId, users.id))
+    .where(eq(inventoryPartRequests.status, "PENDING"))
+    .orderBy(desc(inventoryPartRequests.createdAt));
+
+  return rows.map((r) => ({
+    id: r.id,
+    intakeNumber: r.intakeNumber,
+    requestedByName: r.requestedByName,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
 // ---- 내 요청 (AS_ENGINEER's own requests for one repair case) ----
 
 export type OwnPartRequestRow = {

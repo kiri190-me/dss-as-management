@@ -15,6 +15,7 @@ import {
   canIssuePartRequest,
   canRejectPartRequest,
   canPartiallyCloseRequest,
+  canReceivePartRequestNotifications,
   isRequestHoldable,
   isRequestHoldReleasable,
   statusAfterHoldRelease,
@@ -186,5 +187,33 @@ test("canDeleteParts: SUPER_ADMIN/ADMIN only — 등록·수정이 되는 재고
   assert.equal(canCreateOrEditPart("INVENTORY_MANAGER"), true);
   for (const role of ["AS_ENGINEER", "SALES"] as const) {
     assert.equal(canDeleteParts(role), false, `expected ${role} not to delete parts`);
+  }
+});
+
+// ──────────────────────────────────────────── 알림 (부품 요청 대기 종 알림)
+
+test("canReceivePartRequestNotifications: 다섯 역할 각각의 답을 못 박는다", () => {
+  // 역할에 순서가 없어서("재고 관리자 이상"을 계산할 기준선이 없다) 명단으로
+  // 적은 함수다 — 그래서 다섯 개를 하나씩 적어 둔다. 역할이 늘거나 명단이
+  // 바뀌면 여기서 먼저 깨져야 한다.
+  assert.equal(canReceivePartRequestNotifications("SUPER_ADMIN"), true);
+  assert.equal(canReceivePartRequestNotifications("ADMIN"), true);
+  assert.equal(canReceivePartRequestNotifications("INVENTORY_MANAGER"), true);
+
+  // 이 두 줄이 정책의 핵심이다 — 이 둘은 부품을 **요청하는** 쪽이지 처리하는
+  // 쪽이 아니다. 남이 올린 요청까지 종으로 받으면 소음이 된다.
+  assert.equal(canReceivePartRequestNotifications("AS_ENGINEER"), false);
+  assert.equal(canReceivePartRequestNotifications("SALES"), false);
+
+  assert.deepEqual(ALL_ROLES.filter(canReceivePartRequestNotifications).sort(), ["ADMIN", "INVENTORY_MANAGER", "SUPER_ADMIN"]);
+});
+
+test("알림 대상과 처리 권한은 지금 같은 세 역할이지만 서로 다른 질문이다", () => {
+  // 같은 답이라는 사실 자체를 고정해 둔다 — "처리할 수 있는 사람만 알림을
+  // 받는다"가 지금의 정책이고, 한쪽만 조용히 넓어지면(예: 알림만 영업에게)
+  // 여기서 걸린다. 다음 단계에서 설정으로 갈라지는 것은 이 기본값이 아니라
+  // 사용자별 on/off다.
+  for (const role of ALL_ROLES) {
+    assert.equal(canReceivePartRequestNotifications(role), canProcessPartRequests(role), role);
   }
 });

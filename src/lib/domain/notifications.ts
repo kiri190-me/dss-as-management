@@ -18,6 +18,7 @@
  * ============================================================================
  */
 
+import { inventoryPartRequestStatusLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 
@@ -26,7 +27,7 @@ import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
  * `db/queries/notifications.ts`의 소스 목록 둘뿐이고, 화면은 고치지 않는다 —
  * NotificationItem 한 모양만 그리기 때문이다.
  */
-export const NOTIFICATION_KINDS = ["REPAIR_CASE_APPROVAL"] as const;
+export const NOTIFICATION_KINDS = ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING"] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -109,5 +110,48 @@ export function buildApprovalNotification(input: {
     subject: input.intakeNumber,
     detail: APPROVAL_TYPE_LABELS[input.approvalType],
     href: repairCaseDetailHrefs(input.repairCaseId).approval,
+  };
+}
+
+/**
+ * 접수 건이 사라진 부품 요청의 subject.
+ *
+ * repair_case_id는 NULL이 될 수 있다(접수 건 영구 삭제 시 ON DELETE SET NULL).
+ * 요청 행 자체는 재고 회계 기록이라 남고, 알림에도 계속 나와야 한다 — 인수번호
+ * 자리가 비면 굵은 글씨가 통째로 사라져 무엇에 대한 알림인지 알 수 없다.
+ *
+ * 문구는 부품 요청 관리 목록(getPartRequestsForManager)이 같은 상황에 이미
+ * 쓰고 있는 것을 그대로 따른다 — 같은 것을 두 가지 말로 부르지 않는다.
+ */
+export const DELETED_REPAIR_CASE_SUBJECT = "삭제된 접수 건";
+
+/**
+ * "처리 대기 중인 부품 요청" 알림 한 줄.
+ *
+ * detail 라벨은 새로 쓰지 않고 inventory-types.ts의
+ * inventoryPartRequestStatusLabels를 그대로 가져온다 — 부품 요청 관리 목록과
+ * 내 작업 화면이 이미 그 문자열("요청 대기")로 이 상태를 부르고 있다. 뒤에
+ * 요청자를 붙이는 것은 목록을 열기 전에 "누구 요청인지"까지 보이게 하기
+ * 위한 것이다(관리자가 처리 순서를 정할 때 먼저 보는 값).
+ *
+ * href는 건별 상세가 아니라 부품 요청 관리 목록이다 — 요청에는 자기만의 상세
+ * 화면이 없고, 실제로 불출/거절/보류를 누르는 자리가 그 목록이다.
+ *
+ * targetKey는 요청 id다. 요청 하나가 사람에게도 한 건이고, 한 요청에 부품이
+ * 여러 개 들어 있어도 배지에 여러 건으로 세면 안 된다.
+ */
+export function buildPendingPartRequestNotification(input: {
+  requestId: string;
+  /** NULL이면 접수 건이 영구 삭제된 요청이다 — DELETED_REPAIR_CASE_SUBJECT로 대신한다. */
+  intakeNumber: string | null;
+  requestedByName: string;
+}): NotificationItem {
+  return {
+    id: `PART_REQUEST_PENDING:${input.requestId}`,
+    kind: "PART_REQUEST_PENDING",
+    targetKey: input.requestId,
+    subject: input.intakeNumber ?? DELETED_REPAIR_CASE_SUBJECT,
+    detail: `${inventoryPartRequestStatusLabels.PENDING} · ${input.requestedByName}`,
+    href: "/inventory/requests",
   };
 }
