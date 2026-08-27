@@ -160,6 +160,11 @@ export async function GET(request: NextRequest) {
   // ── Verify the ID token ──
 
   let subject: string;
+  // Read from the same verified payload as `sub`, so they carry the same
+  // signature / issuer / audience guarantees. Kept as unknown on purpose —
+  // sso-role.ts and sso-profile.ts are the only places allowed to decide what
+  // these values mean.
+  let profileClaims: { role?: unknown; email?: unknown; name?: unknown } = {};
   try {
     const { payload } = await jwtVerify(body.id_token, jwks(), {
       issuer: getSsoIssuer(),
@@ -180,6 +185,11 @@ export async function GET(request: NextRequest) {
       return fail("sso");
     }
     subject = payload.sub;
+    profileClaims = {
+      role: payload.role,
+      email: payload.email,
+      name: payload.name,
+    };
   } catch (error) {
     console.error("[sso] id_token 검증 실패:", error);
     return fail("sso");
@@ -187,8 +197,13 @@ export async function GET(request: NextRequest) {
 
   // ── Resolve to a local account ──
 
-  const result = await resolveSsoLogin(subject);
+  const result = await resolveSsoLogin(subject, profileClaims);
   if (result.outcome !== "SESSION") {
+    if (result.code === "UNKNOWN_ROLE") {
+      // Its own message: nothing the user can do, and the fix is a one-line
+      // change in the portal. resolveSsoLogin already logged the value.
+      return fail("unknown_role");
+    }
     if (result.code === "NOT_PROVISIONED") {
       // Distinguished from a generic failure on purpose: this one has a
       // clear next step for the user, and the subject is logged so an admin

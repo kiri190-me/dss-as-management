@@ -146,3 +146,39 @@ export async function linkUserToSsoSubject(userId: string, subject: string): Pro
     .returning({ id: users.id });
   return linked.length > 0;
 }
+
+/**
+ * Writes what the login portal decided onto a linked account — 역할, 실명,
+ * 이메일 — in one statement.
+ *
+ * Guarded on `sso_subject = :subject` rather than on the id alone: this only
+ * ever touches an account the portal actually owns, so a bug elsewhere that
+ * passed the wrong id cannot rewrite an unlinked account.
+ *
+ * Returns true only when a row actually changed, so the caller never reports
+ * a value the database does not hold.
+ */
+export async function applySsoIdentity(
+  subject: string,
+  userId: string,
+  patch: { role?: Role; email?: string; name?: string }
+): Promise<boolean> {
+  if (!UUID_PATTERN.test(userId) || !subject) {
+    return false;
+  }
+  if (patch.role === undefined && patch.email === undefined && patch.name === undefined) {
+    return false;
+  }
+  const updated = await db
+    .update(users)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.ssoSubject, subject),
+        eq(users.isDeleted, false)
+      )
+    )
+    .returning({ id: users.id });
+  return updated.length > 0;
+}

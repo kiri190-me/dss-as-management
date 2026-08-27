@@ -5,7 +5,7 @@ import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-l
 import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
 import { setShipmentRepresentativeAction } from "@/lib/server/actions/shipment-representatives";
-import { roleLabels, accountApprovalStatusLabels } from "@/lib/domain/types";
+import { roleLabels } from "@/lib/domain/types";
 import type { RepresentativeManagementUserRow } from "@/lib/db/queries/shipment-delegations";
 
 type PendingAction = { userId: string; nextFlag: boolean } | null;
@@ -61,11 +61,27 @@ export default function RepresentativeListSection({
     return roleLabels[user.role as keyof typeof roleLabels] ?? user.role;
   }
 
-  function accountStatusText(user: RepresentativeManagementUserRow): string {
-    const base =
-      accountApprovalStatusLabels[user.approvalStatus as keyof typeof accountApprovalStatusLabels] ??
-      user.approvalStatus;
-    return `${base}${user.isActive ? "" : " · 비활성"}${user.isLocked ? " · 잠김" : ""}`;
+  /**
+   * 통합 로그인이 정한 역할임을 알린다.
+   *
+   * 표시가 없으면 이 표의 역할이 이 시스템에서 정해진 값처럼 보인다. 실제로는
+   * 그 사람이 로그인할 때마다 포털의 값으로 덮어써지므로, 여기서 바꾸려는
+   * 시도는 다음 로그인에 되돌아간다. 어디서 바꿔야 하는지를 값 옆에 적어
+   * 둔다.
+   */
+  function renderRoleCell(user: RepresentativeManagementUserRow) {
+    if (!user.isSsoManaged) return roleText(user);
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {roleText(user)}
+        <span
+          title="DSS 통합 로그인에서 지정된 역할입니다. 로그인할 때마다 포털의 값으로 갱신됩니다."
+          className="rounded border border-zinc-300 px-1 py-px text-[11px] leading-tight font-normal text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+        >
+          통합 로그인
+        </span>
+      </span>
+    );
   }
 
   function renderRepresentativeMark(user: RepresentativeManagementUserRow) {
@@ -160,7 +176,6 @@ export default function RepresentativeListSection({
                   <th scope="col" className="py-2 pr-3 font-medium">이름</th>
                   <th scope="col" className="py-2 pr-3 font-medium">이메일</th>
                   <th scope="col" className="py-2 pr-3 font-medium">역할</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">계정 상태</th>
                   <th scope="col" className="py-2 pr-3 font-medium">대표 여부</th>
                   <th scope="col" className="py-2 pr-3 font-medium">작업</th>
                 </tr>
@@ -170,8 +185,7 @@ export default function RepresentativeListSection({
                   <tr key={user.id} className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800">
                     <td className="py-2 pr-3 text-zinc-900 dark:text-zinc-50">{user.name}</td>
                     <td className="py-2 pr-3 break-all text-zinc-600 dark:text-zinc-400">{user.email}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{roleText(user)}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{accountStatusText(user)}</td>
+                    <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{renderRoleCell(user)}</td>
                     <td className="py-2 pr-3">{renderRepresentativeMark(user)}</td>
                     <td className="py-2 pr-3">{renderActions(user)}</td>
                   </tr>
@@ -189,8 +203,7 @@ export default function RepresentativeListSection({
                 badge={renderRepresentativeMark(user)}
                 fields={[
                   { label: "이메일", value: user.email },
-                  { label: "역할", value: roleText(user) },
-                  { label: "계정 상태", value: accountStatusText(user) },
+                  { label: "역할", value: renderRoleCell(user) },
                 ]}
                 actions={renderActions(user)}
               />

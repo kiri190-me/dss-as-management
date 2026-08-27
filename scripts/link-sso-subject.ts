@@ -3,6 +3,7 @@ import "./load-env";
 import { eq } from "drizzle-orm";
 import { db, pgClient } from "../src/lib/db/connection";
 import { users } from "../src/lib/db/schema";
+import { ROLE_CODES, type Role } from "../src/lib/domain/types";
 
 /**
  * ============================================================================
@@ -22,6 +23,10 @@ import { users } from "../src/lib/db/schema";
  *
  *   npm run sso:link -- --email hong@example.com --subject <dss 사용자 id>
  *     → 그 계정을 해당 DSS 사용자와 잇는다
+ *
+ *   npm run sso:link -- --email hong@example.com --create --name "홍길동" \
+ *       --role AS_ENGINEER --subject <dss 사용자 id>
+ *     → 이 시스템에 계정이 아직 없을 때, 만들면서 잇는다
  *
  *   npm run sso:link -- --email hong@example.com --unlink
  *     → 연결을 끊는다(사람이 바뀌었을 때)
@@ -84,22 +89,70 @@ async function main() {
     return;
   }
 
-  const [target] = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      role: users.role,
-      ssoSubject: users.ssoSubject,
-    })
+  const SELECT = {
+    id: users.id,
+    email: users.email,
+    name: users.name,
+    role: users.role,
+    ssoSubject: users.ssoSubject,
+  };
+
+  let [target] = await db
+    .select(SELECT)
     .from(users)
     .where(eq(users.email, email.trim().toLowerCase()))
     .limit(1);
 
   if (!target) {
-    console.error(`"${email}" 계정을 찾을 수 없습니다.`);
-    process.exitCode = 1;
-    return;
+    // 계정이 없는 것은 연결이 실패하는 가장 흔한 이유다. 이 시스템에는 계정을
+    // 만드는 화면이 따로 없으므로, 연결을 맡은 이 스크립트가 그 반쪽도 맡는다.
+    //
+    // 다만 조용히 만들지는 않는다 — 역할을 정하는 일은 이 시스템의 권한을
+    // 정하는 일이라, 이름과 역할을 명시적으로 받는다. (통합 로그인이 역할을
+    // 실어 보내면 첫 로그인에 그 값으로 덮어써진다. 여기서 정하는 값은
+    // 그때까지의 초기값이다.)
+    if (!hasFlag("create")) {
+      console.error(`"${email}" 계정을 찾을 수 없습니다.`);
+      console.error("");
+      console.error("새로 만들면서 연결하려면:");
+      console.error(
+        `  npm run sso:link -- --email ${email} --create --name "이름" --role <역할> --subject <dss 사용자 id>`
+      );
+      console.error(`  역할: ${ROLE_CODES.join(" · ")}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const name = arg("name");
+    const role = arg("role");
+
+    if (!name) {
+      console.error("--create 에는 --name 이 필요합니다.");
+      process.exitCode = 1;
+      return;
+    }
+    if (!role || !(ROLE_CODES as readonly string[]).includes(role)) {
+      console.error(`--role 은 다음 중 하나여야 합니다: ${ROLE_CODES.join(" · ")}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const [created] = await db
+      .insert(users)
+      .values({
+        email: email.trim().toLowerCase(),
+        name,
+        role: role as Role,
+        // 통합 로그인을 거쳐 들어올 계정이다. 승인 대기로 두면 포털에서
+        // 이미 승인받은 사람이 여기서 또 막혀 승인이 두 겹이 된다.
+        approvalStatus: "APPROVED",
+        isActive: true,
+      })
+      .returning(SELECT);
+
+    console.log(`계정을 만들었습니다: ${created.name} <${created.email}> · ${created.role}`);
+    console.log("");
+    target = created;
   }
 
   // ── 연결 해제 ──

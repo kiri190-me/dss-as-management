@@ -97,6 +97,12 @@ export type RepresentativeManagementUserRow = {
   isActive: boolean;
   isLocked: boolean;
   isShipmentRepresentative: boolean;
+  /**
+   * Linked to a DSS 통합 로그인 account. When true, `role` is decided by the
+   * login portal and rewritten on every sign-in, so the screen shows where
+   * the value comes from rather than presenting it as locally editable.
+   */
+  isSsoManaged: boolean;
 };
 
 /**
@@ -116,6 +122,7 @@ export async function listUsersForRepresentativeManagement(): Promise<Representa
       isActive: users.isActive,
       lockedAt: users.lockedAt,
       isShipmentRepresentative: users.isShipmentRepresentative,
+      ssoSubject: users.ssoSubject,
     })
     .from(users)
     .where(eq(users.isDeleted, false))
@@ -130,6 +137,9 @@ export async function listUsersForRepresentativeManagement(): Promise<Representa
     isActive: row.isActive,
     isLocked: row.lockedAt !== null,
     isShipmentRepresentative: row.isShipmentRepresentative,
+    // The subject itself never leaves the server — the screen only needs to
+    // know that one exists.
+    isSsoManaged: row.ssoSubject !== null,
   }));
 }
 

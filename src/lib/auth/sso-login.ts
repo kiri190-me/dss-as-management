@@ -1,12 +1,17 @@
 import "server-only";
-import { getUserBySsoSubject } from "@/lib/db/queries/users";
+import { applySsoIdentity, getUserBySsoSubject } from "@/lib/db/queries/users";
+import type { Role } from "@/lib/domain/types";
 import type { DbLoginResult } from "./db-login";
+import { decideSsoProfile } from "./sso-profile";
+import { decideSsoRole } from "./sso-role";
 
 export type SsoLoginResultCode =
   | "NOT_PROVISIONED"
   | "ACCOUNT_LOCKED"
   | "ACCOUNT_DISABLED"
-  | "DATABASE_UNAVAILABLE";
+  | "DATABASE_UNAVAILABLE"
+  /** The portal sent a role this system does not recognize — see sso-role.ts. */
+  | "UNKNOWN_ROLE";
 
 /**
  * Reuses db-login.ts's SESSION shape verbatim so the login route can hand
@@ -42,7 +47,15 @@ export type SsoLoginResult =
  * A caller must have verified the ID token's signature, issuer, audience,
  * expiry, and nonce before calling this. The subject is trusted here.
  */
-export async function resolveSsoLogin(subject: string): Promise<SsoLoginResult> {
+export async function resolveSsoLogin(
+  subject: string,
+  /**
+   * The ID token's claims, verbatim and unvalidated. Typed unknown on
+   * purpose — they arrive from a JWT payload, and the only places allowed to
+   * decide what they mean are decideSsoRole and decideSsoProfile.
+   */
+  claims: { role?: unknown; email?: unknown; name?: unknown } = {}
+): Promise<SsoLoginResult> {
   if (!subject) {
     return { outcome: "REJECTED", code: "NOT_PROVISIONED" };
   }
@@ -64,6 +77,64 @@ export async function resolveSsoLogin(subject: string): Promise<SsoLoginResult> 
     return { outcome: "REJECTED", code: "ACCOUNT_DISABLED" };
   }
 
+  // ── What the portal decided ──
+  //
+  // Applied before the session is built, because the session token carries
+  // the role and the name: resolving them afterwards would hand out a session
+  // stamped with the previous values and only take effect one login later.
+  const roleDecision = decideSsoRole(claims.role);
+
+  if (roleDecision.kind === "REJECT") {
+    console.error(
+      `[sso] 알 수 없는 역할이 왔습니다: ${JSON.stringify(roleDecision.received)} (subject ${subject})`
+    );
+    return { outcome: "REJECTED", code: "UNKNOWN_ROLE" };
+  }
+
+  const profile = decideSsoProfile(claims, { email: row.email, name: row.name });
+  const patch: { role?: Role; email?: string; name?: string } = { ...profile };
+  if (roleDecision.kind === "APPLY" && roleDecision.role !== row.role) {
+    patch.role = roleDecision.role;
+  }
+
+  let applied = { role: row.role, name: row.name };
+  if (patch.role !== undefined || patch.email !== undefined || patch.name !== undefined) {
+    try {
+      if (await applySsoIdentity(subject, row.id, patch)) {
+        // Deliberately visible. A role change grants real permissions here,
+        // and a name/email change is what the user management screen shows.
+        console.info(`[sso] 포털 값을 반영합니다: ${row.name} ${JSON.stringify(patch)}`);
+        applied = {
+          role: patch.role ?? row.role,
+          name: patch.name ?? row.name,
+        };
+      }
+      // false means the row stopped matching between the read and the write
+      // (deleted or unlinked mid-login). Falling through with what we read is
+      // right: never report values the database does not hold.
+    } catch (error) {
+      // The likely cause is the unique index on email — the portal handed us
+      // an address another local account already uses. That is a
+      // configuration mistake, not a reason to lock someone out of the
+      // system, so the login continues with the values already stored.
+      console.error(
+        `[sso] 포털 값을 반영하지 못했습니다(기존 값으로 계속합니다): ${JSON.stringify(patch)}`,
+        error
+      );
+      if (patch.role !== undefined) {
+        // Role is the half that matters for permissions — retry it alone, in
+        // case only the email collided.
+        try {
+          if (await applySsoIdentity(subject, row.id, { role: patch.role })) {
+            applied = { role: patch.role, name: row.name };
+          }
+        } catch {
+          return { outcome: "REJECTED", code: "DATABASE_UNAVAILABLE" };
+        }
+      }
+    }
+  }
+
   // ACCOUNT_PENDING is deliberately not a rejection, matching db-login.ts: a
   // pending account still gets a session and is routed to /pending-approval
   // by the caller based on approvalStatus.
@@ -71,9 +142,9 @@ export async function resolveSsoLogin(subject: string): Promise<SsoLoginResult> 
     outcome: "SESSION",
     user: {
       id: row.id,
-      role: row.role,
+      role: applied.role,
       approvalStatus: row.approvalStatus,
-      name: row.name,
+      name: applied.name,
     },
   };
 }
