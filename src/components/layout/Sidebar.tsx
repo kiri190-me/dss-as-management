@@ -15,6 +15,8 @@ type SidebarProps = {
   isCollapsed?: boolean;
   /** 관리자가 설정한 접근 가능 영역. null이면 역할 기준만으로 거른다(navigation.ts 참조). */
   accessibleAreaKeys?: readonly string[] | null;
+  /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
+  portalUrl?: string | null;
   /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
   onToggleCollapsed?: () => void;
   /**
@@ -69,7 +71,7 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0 }: SidebarProps) {
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
   const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
@@ -162,7 +164,7 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
         )}
       </nav>
 
-      <SidebarFooter user={user} isCollapsed={isCollapsed} onToggleCollapsed={onToggleCollapsed} />
+      <SidebarFooter user={user} isCollapsed={isCollapsed} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
     </div>
   );
 }

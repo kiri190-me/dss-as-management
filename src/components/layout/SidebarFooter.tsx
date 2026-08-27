@@ -8,6 +8,12 @@ type SidebarFooterProps = {
   isCollapsed: boolean;
   /** Omitted for the mobile drawer (which has no collapse concept of its own — it's already always "expanded" and closes via its own backdrop/close button) — the ☰ toggle row only renders when this is provided. */
   onToggleCollapsed?: () => void;
+  /**
+   * 통합 로그인 앱 목록 주소. null이면(데모 모드) 링크를 아예 그리지 않는다.
+   *
+   * 이 시스템 밖으로 나가는 링크라 next/link가 아니라 평범한 <a>다.
+   */
+  portalUrl?: string | null;
 };
 
 /** First character of a label — kept for the user avatar badge only (unchanged from the prior pass); logout/theme now use FooterIcons.tsx's real icons instead of this same convention. */
@@ -46,7 +52,7 @@ function glyph(label: string): string {
  * control group (`justify-center` wrapper) with 로그아웃 directly below
  * it.
  */
-export default function SidebarFooter({ user, isCollapsed, onToggleCollapsed }: SidebarFooterProps) {
+export default function SidebarFooter({ user, isCollapsed, onToggleCollapsed, portalUrl = null }: SidebarFooterProps) {
   return (
     <div className={`flex flex-col gap-2 border-t border-zinc-200 dark:border-zinc-800 ${isCollapsed ? "p-2" : "p-3"}`}>
       {isCollapsed ? (
@@ -58,6 +64,18 @@ export default function SidebarFooter({ user, isCollapsed, onToggleCollapsed }: 
             {glyph(user.name)}
           </span>
           <ThemeToggle compact />
+          {portalUrl && (
+            <a
+              href={portalUrl}
+              title="통합 로그인으로"
+              aria-label="통합 로그인으로"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <span aria-hidden="true" className="text-sm">
+                ⌂
+              </span>
+            </a>
+          )}
           <form action="/api/auth/logout" method="post">
             <button
               type="submit"
@@ -77,6 +95,14 @@ export default function SidebarFooter({ user, isCollapsed, onToggleCollapsed }: 
           <div className="flex justify-center">
             <ThemeToggle />
           </div>
+          {portalUrl && (
+            <a
+              href={portalUrl}
+              className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-center text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              통합 로그인으로
+            </a>
+          )}
           <form action="/api/auth/logout" method="post">
             <button
               type="submit"

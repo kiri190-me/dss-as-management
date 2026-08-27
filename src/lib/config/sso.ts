@@ -52,3 +52,25 @@ export function getSsoClientSecret(): string {
 export function getSsoRedirectUri(): string {
   return required("SSO_REDIRECT_URI");
 }
+
+/**
+ * Where to send the browser so the portal ends its own session too
+ * (`end_session_endpoint` in dss-auth's discovery document).
+ *
+ * Built from the issuer rather than fetched from discovery, matching how the
+ * callback route already builds the JWKS URL. Discovery is the right answer
+ * for a team integrating from outside; inside this repo one more network
+ * round trip on the logout path buys nothing, and a wrong path here fails
+ * loudly and immediately rather than subtly.
+ */
+export function getSsoEndSessionUrl(): string {
+  return `${getSsoIssuer()}/api/oidc/logout`;
+}
+
+/**
+ * The portal's app launcher — where a person goes to reach the other
+ * systems they have access to. Not a protocol endpoint.
+ */
+export function getSsoPortalUrl(): string {
+  return `${getSsoIssuer()}/apps`;
+}

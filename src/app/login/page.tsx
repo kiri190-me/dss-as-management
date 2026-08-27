@@ -25,6 +25,8 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
   expired: "로그인 시간이 초과되었습니다. 다시 시도해 주세요.",
   not_provisioned:
     "통합 로그인은 되었지만 이 시스템에 사용할 계정이 연결되어 있지 않습니다. 관리자에게 문의하세요.",
+  unknown_role:
+    "통합 로그인에 지정된 역할을 이 시스템이 알지 못합니다. 관리자에게 문의하세요.",
 };
 
 export default async function LoginPage({
@@ -48,6 +50,21 @@ export default async function LoginPage({
 
   const loginMode = getLoginMode();
   const ssoMode = loginMode === "sso";
+  const { error } = await searchParams;
+
+  // SSO 모드에서 이 화면이 할 수 있는 일은 버튼 하나뿐이다 — 그 버튼을
+  // 사람이 누르게 하는 대신 곧바로 통합 로그인으로 보낸다. 포털에 이미
+  // 로그인해 있다면 아무 화면도 보이지 않고 바로 들어오고, 아니면 포털의
+  // 로그인 화면이 뜬다. 어느 쪽이든 "통합 로그인으로 계속"이라고 적힌 문을
+  // 한 번 더 여는 일은 없다.
+  //
+  // ⚠️ 오류가 실려 왔을 때는 절대 자동으로 보내지 않는다. 연결되지 않은
+  // 계정(not_provisioned)처럼 다시 시도해도 같은 결과인 오류가 대부분이라,
+  // 자동 전송은 사람이 이유를 읽을 기회를 빼앗고 왕복만 반복시킨다.
+  if (ssoMode && !error) {
+    redirect("/api/auth/sso/start");
+  }
+
   const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
   const authSource = getAuthSource();
   // In SSO mode nobody picks an account, so the picker query is skipped
@@ -57,7 +74,6 @@ export default async function LoginPage({
       ? await listUsersForLoginPicker()
       : null;
   const viewModel = getLoginViewModel(authSource, loginMode);
-  const { error } = await searchParams;
   const ssoError = ssoMode && error ? (SSO_ERROR_MESSAGES[error] ?? SSO_ERROR_MESSAGES.sso) : null;
 
   return (

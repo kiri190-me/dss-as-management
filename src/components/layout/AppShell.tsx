@@ -19,6 +19,8 @@ type AppShellProps = {
   // re-checks the same predicate server-side regardless of what this
   // shell renders).
   user: { name: string; roleLabel: string; role: Role };
+  /** 통합 로그인(dss-auth) 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
+  portalUrl?: string | null;
   /**
    * 관리자가 설정한 접근 가능 영역(layout.tsx가 서버에서 풀어 넘긴다).
    * 사이드바에서 무엇을 감출지에만 쓴다 — 실제 차단은 각 페이지의
@@ -39,7 +41,7 @@ type AppShellProps = {
   notifications?: readonly NotificationItem[];
 };
 
-export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0, notifications = [] }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0, notifications = [], portalUrl = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar narrow/icon-only mode — owned here (not inside Sidebar)
@@ -66,7 +68,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
         <aside
           className={`hidden min-h-0 border-r border-zinc-200 transition-[width] duration-150 md:flex md:flex-col print:hidden dark:border-zinc-800 ${isSidebarCollapsed ? "md:w-14" : "md:w-52"}`}
         >
-          <Sidebar activeHref={pathname} role={user.role} user={user} accessibleAreaKeys={accessibleAreaKeys} isCollapsed={isSidebarCollapsed} onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)} myPendingApprovalCount={myPendingApprovalCount} />
+          <Sidebar activeHref={pathname} role={user.role} user={user} accessibleAreaKeys={accessibleAreaKeys} isCollapsed={isSidebarCollapsed} onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)} myPendingApprovalCount={myPendingApprovalCount} portalUrl={portalUrl} />
         </aside>
 
         {mobileNavOpen && (
@@ -90,6 +92,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
                 user={user}
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
+                portalUrl={portalUrl}
               />
             </aside>
           </div>

@@ -4,7 +4,9 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { roleLabels } from "@/lib/domain/types";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
+import { getLoginMode } from "@/lib/config/login-mode";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
+import { getSsoPortalUrl } from "@/lib/config/sso";
 import { listMyNotifications } from "@/lib/db/queries/notifications";
 import { countNotificationTargetsByKind } from "@/lib/domain/notifications";
 
@@ -52,12 +54,18 @@ export default async function AppLayout({
   const notifications = getRepairCaseReadSource() === "database" ? await listMyNotifications(user.id) : [];
   const myPendingApprovalCount = countNotificationTargetsByKind(notifications).REPAIR_CASE_APPROVAL;
 
+  // 통합 로그인으로 들어온 경우에만 포털로 돌아가는 길을 보여준다. 데모
+  // 모드에는 갈 곳이 없고, 그 상태에서 링크만 떠 있으면 눌러도 아무 일이
+  // 없거나 설정이 없다며 터진다.
+  const portalUrl = getLoginMode() === "sso" ? getSsoPortalUrl() : null;
+
   return (
     <AppShell
       user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
       accessibleAreaKeys={accessibleAreaKeys}
       myPendingApprovalCount={myPendingApprovalCount}
       notifications={notifications}
+      portalUrl={portalUrl}
     >
       {children}
     </AppShell>
