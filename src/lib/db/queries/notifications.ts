@@ -2,6 +2,8 @@ import "server-only";
 import { listRepairCasesPendingMyApproval } from "./repair-case-approvals-pending";
 import { getPendingPartRequestsForNotification } from "./inventory-part-requests";
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
+import { loadNotificationSettings } from "./notification-settings";
+import { deliversNotification } from "@/lib/domain/notification-settings";
 import {
   buildApprovalNotification,
   buildPendingPartRequestNotification,
@@ -43,6 +45,20 @@ import type { Role } from "@/lib/domain/types";
  * 원본으로 쓴다. 그래서 (app)/layout.tsx는 이 함수를 **한 번만** 부르고,
  * 배지 숫자는 그 결과에서 countNotificationTargetsByKind로 뽑아 쓴다. 배지가
  * 따로 count 조회를 부르면 모든 페이지 로드마다 같은 조회가 두 번 돈다.
+ *
+ * 알림 설정 조회도 같은 규율을 따른다 — listMyNotifications가 **한 번 읽어**
+ * 모든 종류에 쓴다. 종류마다 부르면 종류가 늘어날수록 같은 조회가 그만큼 는다.
+ *
+ * ── 설정은 윗단 필터다 ─────────────────────────────────────────────────
+ * `사용자 관리 › 알림 설정`이 정한 값(종류 켜기·끄기, 역할별 받기·안 받기)은
+ * 아래 load를 부를지 말지만 정한다. 각 종류의 원래 판정 — 결재 알림이라면
+ * "그 사람이 그 건의 결재자인가" — 은 종전 그대로 그 조회 안에 남아 있고,
+ * **둘 다 참이어야** 알림이 간다. 설정을 넓게 열어도 남의 결재 건이 보이지
+ * 않는다는 뜻이다. 자세한 근거는 domain/notification-settings.ts 머리말에 있다.
+ *
+ * 저장된 설정이 하나도 없으면 코드의 기본값이 답하고, 그 기본값은 이 화면을
+ * 만들기 전의 규칙 그대로다 — 아무도 설정을 만지지 않은 상태에서는 동작이
+ * 한 줄도 달라지지 않는다.
  * ============================================================================
  */
 
@@ -76,8 +92,11 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       // 걸러내는 것이 아니라 아예 읽지 않는 쪽이 인가 경계로도 맞고, 요청
       // 화면에 못 들어가는 사람 앞에서 DB를 건드리지도 않는다.
       //
-      // 누가 받는지는 이번 단계에서 **코드에 적혀 있다**. 알림 설정 화면이
-      // 붙는 다음 단계에서 이 답이 설정의 기본값이 된다.
+      // 이 함수의 답이 알림 설정의 **기본값**이다
+      // (domain/notification-settings.ts의 defaultRoleReceivesNotification).
+      // 설정이 앞에서 이미 같은 판정을 했더라도 여기를 지우지 않는다 — 이
+      // 조회를 부르는 자리가 나중에 늘었을 때 인가 경계가 설정 한 곳에만
+      // 남아 있으면 안 된다.
       if (!canReceivePartRequestNotifications(actorRole)) return [];
 
       const pending = await getPendingPartRequestsForNotification();
@@ -101,6 +120,16 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
  * 것이다(resolveActingUserForSession) — 토큰에 박힌 옛 역할이 아니다.
  */
 export async function listMyNotifications(actorUserId: string, actorRole: Role): Promise<NotificationItem[]> {
-  const perKind = await Promise.all(NOTIFICATION_SOURCES.map((source) => source.load(actorUserId, actorRole)));
+  // 설정은 여기서 딱 한 번 읽는다 — 종류마다 읽으면 종류 수만큼 같은 조회가
+  // 돈다(이 파일 머리말). 표가 아직 없는 DB에서는 기본값이 답한다.
+  const settings = await loadNotificationSettings();
+
+  // 걸러진 종류는 load를 **부르지 않는다**. 결과를 받아 버리는 것이 아니라
+  // 아예 읽지 않는 쪽이 맞다 — 알림에서 뺀 사람 앞에서 그 조회가 DB를
+  // 건드리지도 않는다(PART_REQUEST_PENDING이 원래 쓰던 방식과 같다).
+  const delivered = NOTIFICATION_SOURCES.filter((source) =>
+    deliversNotification(source.kind, actorRole, settings)
+  );
+  const perKind = await Promise.all(delivered.map((source) => source.load(actorUserId, actorRole)));
   return perKind.flat();
 }

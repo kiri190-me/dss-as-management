@@ -7,8 +7,10 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@/lib/db/queries/shipment-delegations";
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
+import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
 import { requireAreaAccess } from "@/lib/auth/area-guard";
 import { buildRolePermissionViews } from "@/lib/auth/role-permission-views";
+import { buildNotificationSettingsView } from "@/lib/db/queries/notification-settings";
 
 export const metadata: Metadata = {
   title: "사용자 관리 | DSS A/S 관리 시스템",
@@ -52,10 +54,16 @@ export default async function UsersPage() {
   ]);
 
   // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
-  // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다.
-  const rolePermissions = canManageRolePermissions(actingUser.role)
-    ? await buildRolePermissionViews({ actorRole: actingUser.role })
-    : null;
+  // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다. 알림 설정도
+  // 같다 — 어느 역할이 무엇을 받는지는 그 자체가 조직 구성 정보다.
+  const [rolePermissions, notificationSettings] = await Promise.all([
+    canManageRolePermissions(actingUser.role)
+      ? buildRolePermissionViews({ actorRole: actingUser.role })
+      : Promise.resolve(null),
+    canManageNotificationSettings(actingUser.role)
+      ? buildNotificationSettingsView()
+      : Promise.resolve(null),
+  ]);
 
   return (
     <RepresentativeManagementScreen
@@ -63,6 +71,7 @@ export default async function UsersPage() {
       users={users}
       delegations={delegations}
       rolePermissions={rolePermissions}
+      notificationSettings={notificationSettings}
     />
   );
 }
