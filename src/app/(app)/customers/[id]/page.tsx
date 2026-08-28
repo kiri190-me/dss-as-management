@@ -8,6 +8,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveCustomerCapabilities } from "@/lib/auth/customer-capabilities";
 import { getCustomerDetailById, listEndUserContactsByCustomerId, listEndUsersByCustomerId } from "@/lib/db/queries/customers";
+import { listProductModelsForCustomer } from "@/lib/db/queries/product-model-customers";
 import { listRepairCasesByCustomerId } from "@/lib/db/queries/repair-cases";
 
 export const metadata: Metadata = {
@@ -17,7 +18,8 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 /**
- * Customer Management detail (고객사 정보 + 관련 End-User 목록 + A/S 이력).
+ * Customer Management detail (고객사 정보 + 관련 End-User 목록 + 연결된 제품
+ * 모델 + A/S 이력).
  * canViewCustomers gates the whole page; every End-User/contact capability
  * flag below (canCreateEndUser/canRenameEndUser/canAddEndUserContact/
  * canEditEndUserContact/canRemoveEndUserContact) is a server-derived UX
@@ -59,9 +61,17 @@ export default async function CustomerDetailPage({
     notFound();
   }
 
-  const [endUsers, endUserContacts, repairCases] = await Promise.all([
+  const [endUsers, endUserContacts, productModels, repairCases] = await Promise.all([
     listEndUsersByCustomerId(customer.id),
     listEndUserContactsByCustomerId(customer.id),
+    // 🔴 이 목록으로 /product-models/{id} 링크를 걸지만 권한 판정을 하나 더 두지
+    // 않는다. canViewCustomers 와 canViewProductModels 가 **같은 역할 집합**
+    // (SUPER_ADMIN/ADMIN/AS_ENGINEER/SALES, INVENTORY_MANAGER 는 둘 다 못 본다)
+    // 이라, 위 customers.view 문을 통과한 사람은 반드시 모델 상세도 볼 수 있다.
+    // product-model-authorization.ts 가 그 사실을 "same role set as
+    // canViewCustomers" 라고 명시한다. 🔴 언젠가 어느 한쪽 역할 집합이 바뀌면 이
+    // 가정이 깨지고 링크가 막다른 길이 된다 — 그때 여기를 고쳐야 한다.
+    listProductModelsForCustomer(customer.id),
     listRepairCasesByCustomerId(customer.id),
   ]);
 
@@ -72,6 +82,7 @@ export default async function CustomerDetailPage({
       customer={customer}
       endUsers={endUsers}
       endUserContacts={endUserContacts}
+      productModels={productModels}
       repairCases={repairCases}
       canEdit={capabilities.edit}
       canCreateEndUser={capabilities.createEndUser}
