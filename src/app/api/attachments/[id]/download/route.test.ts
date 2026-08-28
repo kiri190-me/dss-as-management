@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { ATTACHMENT_EXTENSION_RULES } from "@/lib/domain/attachment-allowlist";
+import { shouldServeInline } from "./inline-view";
 
 /**
  * ============================================================================
@@ -19,11 +20,16 @@ import { ATTACHMENT_EXTENSION_RULES } from "@/lib/domain/attachment-allowlist";
  * 반대 방향도 마찬가지로 조용하다 — 목록이 좁아지면 회로도가 새 탭에서 열리는
  * 대신 파일로 떨어지고, 사용자는 그것을 "원래 그런 것"으로 여긴다.
  *
- * ── 왜 라우트 파일을 직접 부르는가 ───────────────────────────────────────
- * 판정 함수는 download/route.ts 안에 산다. 밖으로 옮기지 않았다 — 이 판정과
- * 그 위의 두 목록(무엇을 왜 열어 주는지, PDF 를 여는 대가로 무엇을 감수했는지)은
- * 같이 읽혀야 뜻이 통하고, 파일이 밖으로 나가는 통로는 그 라우트 하나뿐이다.
- * 테스트가 부를 수 있게 export 만 해 두었다.
+ * ── 판정 함수는 라우트 폴더 안의 형제 파일에 있다 ────────────────────────
+ * `download/inline-view.ts`. 예전에는 route.ts 안에 있었고 테스트가 부를 수
+ * 있게 export 해 두었는데, **Next.js 는 route.ts 에서 정해진 이름 말고 다른
+ * 것을 export 하는 것을 금지한다** — 그 export 하나 때문에 `next build` 가
+ * 타입 검사에서 실패한 채 여덟 커밋이 지나갔다.
+ *
+ * 그래서 lib/ 로 보내지 않고 **같은 폴더로만** 옮겼다. 이 판정과 그 위의 두
+ * 목록(무엇을 왜 열어 주는지, PDF 를 여는 대가로 무엇을 감수했는지)은 같이
+ * 읽혀야 뜻이 통하고, 파일이 밖으로 나가는 통로는 그 라우트 하나뿐이라는
+ * 원래 판단은 그대로다.
  *
  * ── 격리 헤더(sandbox) 시험이 없는 것은 빠뜨린 것이 아니다 ───────────────
  * 예전에는 `Content-Security-Policy: sandbox` 를 붙이는 inlineIsolationHeaders
@@ -34,16 +40,12 @@ import { ATTACHMENT_EXTENSION_RULES } from "@/lib/domain/attachment-allowlist";
  * ============================================================================
  */
 
-// route.ts 는 DB 클라이언트를 정적으로 import 하고, 그 모듈은 DATABASE_URL 이
-// 아예 없으면 **import 시점에** 던진다 — 어느 분기가 실제로 도는지와 무관하다.
-// 이 파일은 순수 함수 두 개만 부르므로 질의가 나갈 일이 없다. 닿지 않는
-// 자리표시자를 넣어 그 import 검사만 통과시킨다(login/route.test.ts 와 같은 수법).
-process.env.DATABASE_URL = "postgres://unused:unused@localhost:5432/unused_never_connected";
-
-// 정적 `import` 는 위 대입보다 위로 끌어올려져(ESM hoisting) 먼저 던진다.
-// CJS require 는 끌어올려지지 않아 이 자리에서 실제로 실행된다.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { shouldServeInline } = require("./route") as typeof import("./route");
+// 예전에는 여기서 DATABASE_URL 자리표시자를 넣고 CJS require 로 route.ts 를
+// 불러왔다. route.ts 가 DB 클라이언트를 정적으로 import 해서, 정적 import 로는
+// 끌어올려진 그 모듈이 먼저 던졌기 때문이다.
+//
+// 판정 함수가 inline-view.ts 로 나오면서 **그 수법이 통째로 필요 없어졌다** —
+// 그 파일은 DB 를 건드리지 않는다. 평범한 import 로 되돌린다.
 
 /** 스크립트를 품을 수 있어 **영영 inline 이면 안 되는** 형식들. */
 const NEVER_INLINE_MIME_TYPES = [
