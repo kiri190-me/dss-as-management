@@ -29,8 +29,6 @@ const DEFAULT_SORT: SortState = { column: "receivedAt", direction: "desc" };
  * `stickyHeader` 는 넘기지 않는다(기본 꺼짐). 켜려면 부르는 쪽이 확정 높이를 가진
  * 세로 flex 상자여야 하는데 이 화면은 아니다 — responsive-list.tsx 헤더 참조.
  *
- * 같은 고장이 CustomerRepairCaseHistory 에도 남아 있다. 이번 범위가 아니다.
- *
  * `resolved` comes straight from the server (listRepairCasesByProductModelId
  * — scoped by the real FK, never by model_name string — DATABASE source
  * only), converted via applyWorkflowOverride(resolved, undefined) — the
