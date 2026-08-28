@@ -51,6 +51,22 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   if (kind === "PART_STOCK_BELOW_MINIMUM") {
     return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
   }
+  if (kind === "CUSTOMER_REPAIR_REQUEST_NEW") {
+    // 재고 부족과 같이 재현할 옛 동작이 없어 **그때 내린 결정**을 손으로
+    // 적는다 — 접수를 만들 수 있는 넷(최고관리자·관리자·A/S 엔지니어·영업).
+    // 재고관리자만 빠지는 이유: 이 알림은 "고객이 기다리고 있다"는 신호인데
+    // 그 사람에게는 접수를 만들 수단이 없다. 손댈 수 없는 사람에게 보내는
+    // 알림은 끌 수도 없는 소음이 된다.
+    //
+    // 여전히 canReceiveCustomerRepairRequestNotifications를 부르지 않는 것이
+    // 요점이다 — 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다.
+    return (
+      role === "SUPER_ADMIN" ||
+      role === "ADMIN" ||
+      role === "AS_ENGINEER" ||
+      role === "SALES"
+    );
+  }
   throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
 }
 

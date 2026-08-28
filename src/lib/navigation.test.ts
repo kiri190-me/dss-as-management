@@ -55,7 +55,7 @@ test("navigation: the approved feature entries are the only role-gated items", (
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "quotes", "technicalProcedures", "workflows"]
+    ["customerPortal", "customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "quotes", "technicalProcedures", "workflows"]
   );
 });
 
@@ -242,7 +242,7 @@ test("navGroups: every itemKey references a real navItems key", () => {
 
 test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자 / 관리 / 설정 structure", () => {
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
-  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
+  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
   // 내자 정리 1단계 — 수주·정산 흐름은 A/S 업무 그룹과 섞지 않는다(navigation.ts 주석).
   // 견적서가 둘째 항목으로 붙었다(2026-08-28). 내자 정리의 하위메뉴가 아니라
@@ -295,7 +295,10 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 항목이 엔지니어·재고 담당자 양쪽에서 하나씩 늘었다.
     AS_ENGINEER: 2, // domesticOrders + quotes
     SALES: 3, // myActiveWork + technicalProcedures + workflows
-    INVENTORY_MANAGER: 7, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes
+    // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
+    // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
+    // 나갈 안내를 정하는 화면인데 그 역할에는 접수를 만들 수단이 없다.
+    INVENTORY_MANAGER: 8, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + customerPortal
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);

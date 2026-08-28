@@ -24,6 +24,14 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  * ============================================================================
  */
 
+/**
+ * 아직 접수로 만들지 않은 의뢰가 고객 화면에서 갖는 상태.
+ *
+ * 상태 목록에 넣지 않고 여기 상수로 둔다 — 관리자가 고칠 값이 아니라
+ * 시스템이 아는 사실이기 때문이다(자세한 이유는 쓰는 자리 주석에 있다).
+ */
+export const PENDING_INTAKE_LABEL = "접수 대기 중";
+
 /** 고객에게 보여줄 한 줄. 화면과 스냅샷이 그대로 쓴다. */
 export type CustomerPortalItem = {
   /** 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지. */
@@ -132,7 +140,17 @@ export async function listPortalItemsForCustomer(
     serialNumber: row.serialNumber,
     // 접수일이 아직 없다. 고객이 보낸 날을 그 자리에 둔다.
     receivedAt: row.submittedAt.toISOString().slice(0, 10),
-    statusLabel: null,
+    /**
+     * 접수 전 의뢰의 상태는 정해진 한 가지뿐이다 — 아직 담당자가 보지 않았거나
+     * 보는 중이다. 여기를 비워 `-`로 내보내면 고객은 "보냈는데 아무 일도
+     * 일어나지 않았다"로 읽는다. 그러면 다시 넣거나 전화한다.
+     *
+     * 상태 목록(customer_status_options)에서 고르지 않고 글자를 박아 두는
+     * 이유: 이건 담당자가 정하는 값이 아니라 **사실**이다. 목록에 두면
+     * 관리자가 지우거나 이름을 바꿀 수 있게 되는데, 그러면 접수 전 의뢰의
+     * 상태가 사라지거나 엉뚱한 말이 된다.
+     */
+    statusLabel: PENDING_INTAKE_LABEL,
     statusNote: null,
     quoteNumber: null,
     quoteIssuedDate: null,
@@ -261,5 +279,34 @@ export async function listNewCustomerRepairRequests(): Promise<
     .from(customerRepairRequests)
     .innerJoin(customers, eq(customerRepairRequests.customerId, customers.id))
     .where(eq(customerRepairRequests.status, "NEW"))
+    .orderBy(desc(customerRepairRequests.submittedAt));
+}
+
+/**
+ * 수리 의뢰 전부 — 목록 화면이 쓴다.
+ *
+ * 처리 대기와 처리됨을 한 번에 읽는다. 나눠 읽으면 화면이 조회를 두 번 하고,
+ * 그 사이에 한 건이 처리되면 양쪽에 동시에 보이거나 양쪽에서 사라진다.
+ */
+export async function listAllCustomerRepairRequests() {
+  return db
+    .select({
+      id: customerRepairRequests.id,
+      customerName: customers.name,
+      companyName: customerRepairRequests.companyName,
+      contactName: customerRepairRequests.contactName,
+      contactPhone: customerRepairRequests.contactPhone,
+      productModelName: customerRepairRequests.productModelName,
+      lotNumber: customerRepairRequests.lotNumber,
+      serialNumber: customerRepairRequests.serialNumber,
+      endUser: customerRepairRequests.endUser,
+      symptomDescription: customerRepairRequests.symptomDescription,
+      alarmName: customerRepairRequests.alarmName,
+      submittedAt: customerRepairRequests.submittedAt,
+      status: customerRepairRequests.status,
+      convertedRepairCaseId: customerRepairRequests.convertedRepairCaseId,
+    })
+    .from(customerRepairRequests)
+    .innerJoin(customers, eq(customerRepairRequests.customerId, customers.id))
     .orderBy(desc(customerRepairRequests.submittedAt));
 }

@@ -24,6 +24,7 @@ import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
+import { linkRequestToRepairCaseAction } from "@/lib/server/actions/customer-portal-requests";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import DerivedProductFields from "./DerivedProductFields";
@@ -141,6 +142,10 @@ type IntakeFormInnerProps = {
   referenceData: IntakeReferenceData;
   /** Product Model Master 연결 체크포인트 — SUPER_ADMIN/ADMIN만 true. */
   canRegisterProductModel: boolean;
+  /** 고객 수리 의뢰에서 옮겨 온 초기값. 없으면 종전과 같다. */
+  initialDraft?: Partial<IntakeDraftData>;
+  /** 그 의뢰의 id. 접수가 만들어지면 이 의뢰를 접수에 묶는다. */
+  fromRequestId?: string;
 };
 
 // 사용자는 workflowType을 직접 고르지 않는다 — "종류"와 유상/무상
@@ -169,12 +174,23 @@ const RESULT_CODE_MESSAGES: Record<CreateRepairCaseResultCode, string> = {
   SUBMISSION_IN_PROGRESS: "이전 제출이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.",
 };
 
-export default function IntakeFormInner({ referenceData, canRegisterProductModel }: IntakeFormInnerProps) {
+export default function IntakeFormInner({ referenceData, canRegisterProductModel, initialDraft, fromRequestId }: IntakeFormInnerProps) {
   const router = useRouter();
-  const { draft, updateDraft, isEmpty, clear, idempotencyKey } = useIntakeDraft();
+  const { draft, updateDraft, isEmpty, clear, idempotencyKey } = useIntakeDraft(initialDraft);
 
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * 접수는 만들어졌는데 수리 의뢰를 거기 붙이지 못한 상태.
+   *
+   * 성공도 실패도 아니라 따로 둔다 — 오류로 그리면 담당자가 접수가 안 된 줄
+   * 알고 다시 만들고, 성공으로 그리면 의뢰가 목록에 남은 것을 아무도 모른다.
+   */
+  const [partialSuccess, setPartialSuccess] = useState<{
+    repairCaseId: string;
+    intakeNumber: string;
+    message: string;
+  } | null>(null);
   // 인수번호는 제출 시점에만 최종 확정되므로 초안(useIntakeDraft)에는 절대
   // 저장하지 않는다 — 이 override는 컴포넌트 로컬 state로만 존재한다.
   const [intakeNumberOverride, setIntakeNumberOverride] = useState("");
@@ -393,6 +409,39 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
         setSubmitError(result.message || RESULT_CODE_MESSAGES[result.code]);
         return;
       }
+      /*
+       * 고객 수리 의뢰에서 넘어온 것이면 그 의뢰를 이 접수에 묶는다.
+       *
+       * 접수 만들기와 한 트랜잭션으로 묶지 않았다 — 그러려면 이 저장소에서 가장
+       * 조심스러운 경로(액션 → 서비스 → idempotency → mutation)를 관통해야 한다.
+       * 대신 실패해도 접수는 남고 의뢰만 「처리 대기」로 남으므로, 담당자가
+       * 목록에서 보고 다시 처리할 수 있다 — 조용히 사라지는 실패가 아니다.
+       * 그래서 여기서 실패해도 접수 화면으로는 넘어간다.
+       */
+      if (fromRequestId) {
+        const linked = await linkRequestToRepairCaseAction({
+          requestId: fromRequestId,
+          repairCaseId: result.id,
+        });
+        if (!linked.ok) {
+          /*
+           * 접수는 이미 만들어졌는데 의뢰만 안 붙었다. 여기서 넘어가 버리면
+           * 그 사실이 사라진다 — 담당자는 잘 끝난 줄 알고, 의뢰는 목록에
+           * 남아 다음 사람이 같은 물건을 또 접수한다.
+           *
+           * 그래서 넘어가지 않고 화면에 세운다. 브라우저 알림창을 쓰지
+           * 않는 이유는 반려 대화상자와 같다 — 이 앱의 다른 알림과 생김새가
+           * 다르고, 접수번호 같은 것을 함께 보여줄 수 없다.
+           */
+          setPartialSuccess({
+            repairCaseId: result.id,
+            intakeNumber: result.intakeNumber,
+            message: linked.message,
+          });
+          return;
+        }
+      }
+
       clear();
       router.push(`/repair-cases/${result.id}?registered=1`);
     } finally {
@@ -928,6 +977,46 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
           </div>
         </div>
       </section>
+
+      {partialSuccess && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <p className="font-semibold">
+            접수 {partialSuccess.intakeNumber} 는 등록되었습니다.
+          </p>
+          <p className="mt-1">
+            다만 이 접수를 수리 의뢰와 연결하지 못했습니다 — {partialSuccess.message}
+          </p>
+          <p className="mt-1">
+            의뢰가 「수리 의뢰」 목록에 그대로 남아 있습니다. 같은 물건을 두 번
+            접수하지 않도록 그 목록에서 정리해 주세요.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                router.push(`/repair-cases/${partialSuccess.repairCaseId}?registered=1`);
+              }}
+              className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800"
+            >
+              접수 건으로 이동
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                router.push("/customer-portal/requests");
+              }}
+              className="rounded-md border border-amber-400 px-3 py-1.5 text-xs text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900"
+            >
+              수리 의뢰 목록으로
+            </button>
+          </div>
+        </div>
+      )}
 
       {submitError && (
         <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">

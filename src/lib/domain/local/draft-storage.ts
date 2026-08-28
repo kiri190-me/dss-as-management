@@ -78,7 +78,19 @@ export type IntakeDraftData = {
   contactEmail: string;
 };
 
-export function createDefaultDraft(): IntakeDraftData {
+/**
+ * @param overrides 미리 채워 둘 값. 고객이 보낸 수리 의뢰를 접수로 옮길 때
+ *   쓴다(`/repair-cases/new?fromRequestId=…`).
+ *
+ *   **덮어쓰기는 맨 마지막에 한 번만 일어난다** — 기본값을 다 만들고 그 위에
+ *   얹는다. 그래야 `internalTargetInspectionCompletionDate` 처럼 `receivedAt`
+ *   에서 파생되는 값이 정상적으로 계산된 뒤에 필요한 것만 갈아치운다.
+ *
+ *   인자를 주지 않으면 종전과 한 글자도 다르지 않다 — 기존 호출부는 그대로다.
+ */
+export function createDefaultDraft(
+  overrides?: Partial<IntakeDraftData>
+): IntakeDraftData {
   // 인수일 기본값은 한국 기준 오늘이다. 폼은 useIsHydrated() 게이트 뒤에서만
   // 마운트되므로 이 new Date()는 브라우저에서만 실행된다.
   const receivedAt = toKstDateOnly(new Date());
@@ -117,6 +129,9 @@ export function createDefaultDraft(): IntakeDraftData {
     contactName: "",
     contactPhone: "",
     contactEmail: "",
+    // 미리 채울 값은 맨 마지막에 얹는다 — 위에서 파생 계산이 끝난 뒤라야
+    // 필요한 칸만 정확히 갈아치운다.
+    ...overrides,
   };
 }
 

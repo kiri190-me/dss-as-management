@@ -6,6 +6,7 @@ import NotificationBell, { BrowserNotificationNotice, NotificationList } from ".
 import {
   NOTIFICATION_KINDS,
   buildApprovalNotification,
+  buildCustomerRepairRequestNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
 } from "@/lib/domain/notifications";
@@ -22,7 +23,11 @@ function approval(repairCaseId: string, intakeNumber: string, approvalType: "REP
   return buildApprovalNotification({ repairCaseId, intakeNumber, approvalType });
 }
 
-/** 종류가 서로 다른 세 줄 — 색과 이름이 실제로 갈라지는지 보려면 셋이 함께 있어야 한다. */
+/**
+ * 종류마다 한 줄씩 — 색과 이름이 실제로 갈라지는지 보려면 전부 함께 있어야
+ * 한다. 종류를 늘리면 여기에도 한 줄을 더해야 하고, 빠뜨리면 아래 두 시험이
+ * 곧바로 잡는다("이름이 글자로 보이지 않는다").
+ */
 function oneOfEachKind() {
   return [
     approval("case-1", "D9705-012", "REPAIR_INSPECTION"),
@@ -33,6 +38,12 @@ function oneOfEachKind() {
       owner: "DSS",
       currentQuantity: 15,
       minimumQuantity: 30,
+    }),
+    buildCustomerRepairRequestNotification({
+      requestId: "req-c1",
+      customerName: "주성 엔지니어링",
+      productModelName: "MBK200-JS3",
+      serialNumber: "1708075",
     }),
   ];
 }

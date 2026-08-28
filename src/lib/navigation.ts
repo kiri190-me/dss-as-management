@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/domain/types";
 import { canViewPublishedTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
+import { canViewCustomerPortal } from "@/lib/auth/customer-portal-authorization";
 import { canViewInventory } from "@/lib/auth/inventory-authorization";
 import { canViewMyActiveWork } from "@/lib/auth/my-active-work-authorization";
 import { canViewRepairCaseFlowcharts } from "@/lib/auth/repair-case-flowchart-authorization";
@@ -44,6 +45,7 @@ export const navItems: NavItem[] = [
   { key: "repairCases", href: "/repair-cases", label: "전체 A/S 현황" },
   { key: "myActiveWork", href: "/repair-cases/mine", label: "내 담당 제품", isVisibleForRole: canViewMyActiveWork },
   { key: "repairCaseNew", href: "/repair-cases/new", label: "A/S 접수" },
+  { key: "customerPortal", href: "/customer-portal", label: "고객 안내 현황", isVisibleForRole: canViewCustomerPortal },
   { key: "diagnosisFlowcharts", href: "/diagnosis-flowcharts", label: "진단 Flowchart 관리", isVisibleForRole: canViewRepairCaseFlowcharts },
   { key: "workflows", href: "/workflows", label: "워크플로 관리", isVisibleForRole: canViewWorkflowTemplates },
   {
@@ -115,7 +117,7 @@ export function childNavItems(items: NavItem[], parentKey: string): NavItem[] {
  * groups — a group with zero visible children simply renders nothing.
  */
 export const navGroups: NavGroup[] = [
-  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
+  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
   { key: "techResources", label: "기술 / 자원", itemKeys: ["technicalProcedures", "inventory"] },
   // 수주·정산 쪽 화면들이 모이는 자리. 지금은 '내자 정리' 하나뿐이지만 A/S
   // 업무 그룹에 얹지 않았다 — 그 그룹은 장비가 들어와서 나가기까지의 흐름이고,

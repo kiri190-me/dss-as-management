@@ -58,6 +58,7 @@ import {
   canResolveProcedureValidationIssues,
 } from "./procedure-template-authorization";
 import { canManageRolePermissions } from "./role-permission-authorization";
+import { canViewCustomerPortal } from "./customer-portal-authorization";
 import {
   maxMeaningfulLevelOfLeaf,
   minMeaningfulLevelOfLeaf,
@@ -159,6 +160,13 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
     case "repairCaseNew":
       // 접수 생성에는 역할 검사가 없다(로그인+승인만 본다).
       return "WRITE";
+
+    case "customerPortal":
+      // 볼 수 있는 역할은 안내 문구도 정할 수 있다 — 담당 엔지니어가 물건을
+      // 보고 적는 것이 가장 정확하고, 그 사람이 못 적으면 결국 아무도 안 적어
+      // 고객 화면이 로 남는다. 주소 발급·회수는 이 상한과 별개로
+      // 관리자 이상만 가능하다.
+      return canViewCustomerPortal(role) ? "WRITE" : "NONE";
 
     case "diagnosisFlowcharts":
       return ladder({

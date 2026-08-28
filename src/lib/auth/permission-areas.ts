@@ -126,6 +126,17 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "WRITE",
   },
   {
+    key: "customerPortal",
+    label: "고객 안내 현황",
+    description: "고객사 전용 화면에 나갈 상태·비고와 전용 주소 관리",
+    // 관리는 올리지 않는다 — 이 화면에는 지우는 조작이 없다. 주소 발급·회수는
+    // 되돌리기 어려운 조작이지만 수준으로 나누지 않고 역할로만 판정한다
+    // (customer-portal-authorization.ts의 canManageCustomerLinks). 수준을
+    // 하나 더 두면 "쓰기는 있는데 주소는 못 만든다"를 설정에서 표현할 수 있는
+    // 것처럼 보이지만 실제 판정은 역할이 하므로, 고른 사람이 속는다.
+    maxMeaningfulLevel: "WRITE",
+  },
+  {
     key: "diagnosisFlowcharts",
     label: "진단 Flowchart 관리",
     description: "접수 건별 진단 흐름도. 관리는 영구 삭제 포함",

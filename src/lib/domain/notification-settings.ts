@@ -1,4 +1,5 @@
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
+import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
 import { NOTIFICATION_KINDS, type NotificationKind } from "./notifications";
 import { ROLE_CODES, type Role } from "./types";
 
@@ -120,6 +121,12 @@ export const NOTIFICATION_KIND_META: Record<
       "품목 상세에서 소유 구분마다 정해 둔 한계수량보다 재고가 적어진 것입니다. 한계수량을 정하지 않은 품목은 이 알림에 잡히지 않습니다.",
     toneClassName: "text-red-700 dark:text-red-400",
   },
+  CUSTOMER_REPAIR_REQUEST_NEW: {
+    label: "새 수리 의뢰",
+    description:
+      "고객사가 전용 주소에서 보낸 수리 의뢰 중 아직 접수로 만들지도, 반려하지도 않은 것입니다. 접수를 만들 수 있는 쪽이 받습니다.",
+    toneClassName: "text-emerald-700 dark:text-emerald-400",
+  },
 };
 
 /**
@@ -168,6 +175,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "REPAIR_CASE_APPROVAL":
     case "PART_REQUEST_PENDING":
     case "PART_STOCK_BELOW_MINIMUM":
+    case "CUSTOMER_REPAIR_REQUEST_NEW":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
       // 넣는 순간부터 계산이 돌기 시작한다). 꺼진 채로 태어나는 종류가 있으면,
       // 등록해 두고 아무 일도 일어나지 않는 상태를 화면에서 설명할 수 없다.
@@ -204,6 +212,11 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 반대로 이쪽은 명단을 이 파일에 적었다 — 재현할 옛 동작이 없고, 부품
       // 요청과는 다른 질문이기 때문이다(이 파일 머리말).
       return canReceiveLowStockNotifications(role);
+
+    case "CUSTOMER_REPAIR_REQUEST_NEW":
+      // 명단을 옮겨 적지 않고 저쪽 함수를 부른다 — 고객 안내 창구를 볼 수
+      // 있는 사람이 곧 그 의뢰를 접수로 만들 사람이다.
+      return canReceiveCustomerRepairRequestNotifications(role);
 
     default:
       // 종류를 NOTIFICATION_KINDS에만 추가하고 여기를 빠뜨리면, 조용히 전원

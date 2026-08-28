@@ -94,7 +94,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족 셋이다", () => {
+test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·새 수리 의뢰 넷이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -107,9 +107,21 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
   // domain/notification-settings.ts의 canReceiveLowStockNotifications
   // (같은 셋이지만 "재고를 채울 사람"이라는 다른 질문이라 따로 세웠다 —
   // 그 파일 머리말 참조).
+  //
+  // CUSTOMER_REPAIR_REQUEST_NEW도 판정을 세운 뒤 등록했다:
+  // auth/customer-portal-authorization.ts의
+  // canReceiveCustomerRepairRequestNotifications(최고관리자·관리자·A/S
+  // 엔지니어·영업). 앞의 둘과 달리 명단이 넓은 이유는, 이 알림이 "고객이
+  // 기다리고 있다"는 신호라 접수를 만들 수 있는 쪽이 모두 봐야 하기
+  // 때문이다 — 재고관리자만 빠진다(접수를 만들지 않는다).
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
-    ["REPAIR_CASE_APPROVAL", "PART_REQUEST_PENDING", "PART_STOCK_BELOW_MINIMUM"]
+    [
+      "REPAIR_CASE_APPROVAL",
+      "PART_REQUEST_PENDING",
+      "PART_STOCK_BELOW_MINIMUM",
+      "CUSTOMER_REPAIR_REQUEST_NEW",
+    ]
   );
 });
 

@@ -31,6 +31,7 @@ export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
   "PART_REQUEST_PENDING",
   "PART_STOCK_BELOW_MINIMUM",
+  "CUSTOMER_REPAIR_REQUEST_NEW",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -195,5 +196,34 @@ export function buildPartStockBelowMinimumNotification(input: {
     subject: input.partName,
     detail: `${stockOwnerLabels[input.owner]} · ${input.currentQuantity} / 한계 ${input.minimumQuantity}`,
     href: `/inventory/${input.partId}`,
+  };
+}
+
+/**
+ * "고객사가 새 수리 의뢰를 보냈다" 알림 한 줄.
+ *
+ * subject 는 고객사 이름이다 — 이 알림에서 사람이 먼저 찾는 것은 "어디서
+ * 왔나"다. 접수번호는 아직 없다(접수로 만들기 전이라 존재하지 않는다).
+ *
+ * detail 에 모델명과 S/N 을 함께 둔다. 같은 고객사가 여러 건을 보냈을 때
+ * 목록에서 구별되어야 하고, 담당자가 상세를 열기 전에 "내가 아는 그 물건"
+ * 인지 알아볼 수 있어야 한다.
+ *
+ * targetKey 는 의뢰 id 다. 의뢰 하나가 곧 처리해야 할 일 하나이므로 배지도
+ * 그렇게 센다.
+ */
+export function buildCustomerRepairRequestNotification(input: {
+  requestId: string;
+  customerName: string;
+  productModelName: string;
+  serialNumber: string;
+}): NotificationItem {
+  return {
+    id: `CUSTOMER_REPAIR_REQUEST_NEW:${input.requestId}`,
+    kind: "CUSTOMER_REPAIR_REQUEST_NEW",
+    targetKey: input.requestId,
+    subject: input.customerName,
+    detail: `${input.productModelName} · S/N ${input.serialNumber}`,
+    href: "/customer-portal/requests",
   };
 }

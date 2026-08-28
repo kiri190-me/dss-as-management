@@ -67,14 +67,20 @@ export async function claimRequestForConversion(
   return { ok: false, code: "ALREADY_TAKEN", message };
 }
 
-/** 접수가 만들어졌다. 의뢰를 그 접수에 묶고 끝낸다. */
+/**
+ * 접수가 만들어졌다. 의뢰를 그 접수에 묶고 끝낸다.
+ *
+ * **아직 처리되지 않은 의뢰만 바꾼다.** 그사이 다른 사람이 접수로 만들었거나
+ * 반려했다면 그 결정이 이긴다 — 덮어쓰면 먼저 만든 접수와의 연결이 조용히
+ * 끊기고, 그 접수는 어느 의뢰에서 왔는지 알 수 없게 된다.
+ */
 export async function markRequestConverted(params: {
   requestId: string;
   repairCaseId: string;
   actorUserId: string;
-}): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx
+}): Promise<{ ok: boolean; message?: string }> {
+  return db.transaction(async (tx) => {
+    const updated = await tx
       .update(customerRepairRequests)
       .set({
         status: "CONVERTED",
@@ -82,7 +88,30 @@ export async function markRequestConverted(params: {
         convertedAt: sql`now()`,
         convertedBy: params.actorUserId,
       })
-      .where(eq(customerRepairRequests.id, params.requestId));
+      .where(
+        and(
+          eq(customerRepairRequests.id, params.requestId),
+          // CONVERTING 도 받는다 — 자리를 잡아 둔 뒤 접수를 만든 정상 흐름이다.
+          sql`${customerRepairRequests.status} IN ('NEW', 'CONVERTING')`
+        )
+      )
+      .returning({ id: customerRepairRequests.id });
+
+    if (updated.length === 0) {
+      const [existing] = await tx
+        .select({ status: customerRepairRequests.status })
+        .from(customerRepairRequests)
+        .where(eq(customerRepairRequests.id, params.requestId));
+
+      return {
+        ok: false,
+        message: !existing
+          ? "해당 의뢰를 찾을 수 없습니다."
+          : existing.status === "CONVERTED"
+            ? "이미 다른 접수로 연결된 의뢰입니다."
+            : "이미 반려된 의뢰입니다.",
+      };
+    }
 
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
@@ -91,6 +120,8 @@ export async function markRequestConverted(params: {
       targetRecordId: params.requestId,
       newValue: { status: "CONVERTED", repairCaseId: params.repairCaseId },
     });
+
+    return { ok: true };
   });
 }
 

@@ -11,8 +11,11 @@ import {
   buildPendingPartRequestNotification,
   type NotificationItem,
   type NotificationKind,
+  buildCustomerRepairRequestNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
+import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
+import { listNewCustomerRepairRequests } from "./customer-portal";
 
 /**
  * ============================================================================
@@ -131,6 +134,25 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           owner: row.owner,
           currentQuantity: row.currentQuantity,
           minimumQuantity: row.minimumQuantity,
+        })
+      );
+    },
+  },
+  {
+    kind: "CUSTOMER_REPAIR_REQUEST_NEW",
+    load: async (_actorUserId, actorRole) => {
+      // 부품 요청·재고 부족과 같은 모양 — 대상이 사람이 아니라 역할이고,
+      // 조회 자체는 "아직 처리 안 한 의뢰 전부"라 누가 봐도 결과가 같다.
+      // 그래서 조회를 부르기 **전에** 역할을 본다.
+      if (!canReceiveCustomerRepairRequestNotifications(actorRole)) return [];
+
+      const pending = await listNewCustomerRepairRequests();
+      return pending.map((row) =>
+        buildCustomerRepairRequestNotification({
+          requestId: row.id,
+          customerName: row.customerName,
+          productModelName: row.productModelName,
+          serialNumber: row.serialNumber,
         })
       );
     },
