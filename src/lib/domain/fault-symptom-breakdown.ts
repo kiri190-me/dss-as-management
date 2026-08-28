@@ -288,3 +288,144 @@ export function buildFaultSymptomBreakdowns(
   }
   return WEEKLY_REPORT_KINDS.map((kind) => buildKindBreakdown(kind, rowsByKind.get(kind)!));
 }
+
+/**
+ * ============================================================================
+ * 기간 고르기 — 연도·월로 거른 뒤에 센다
+ * ============================================================================
+ * 대시보드의 이 그래프를 "2026년 3월에 인수된 건"처럼 좁혀 볼 수 있게 하는 순수
+ * 함수들이다. **거르기는 세기 앞에 온다** — buildFaultSymptomBreakdowns 는 손대지
+ * 않고 이미 걸러진 배열을 넘겨받기만 한다. 그 함수는 제품 모델 상세의 원형 그래프
+ * 넷과 규칙(pie-slices.ts)을 공유하고 있어서, 거기에 기간을 끌어들이면 이 화면과
+ * 무관한 쪽까지 따라 바뀐다.
+ *
+ * ── 왜 이 계산이 이 파일에 있나 ─────────────────────────────────────────
+ * 새 모듈 파일을 만들면 짝이 되는 새 시험 파일이 생기고, 시험 파일을 등록하는
+ * package.json 의 test 스크립트가 **한 줄**이라 같은 저장소에서 병행 중인 다른
+ * 작업과 그 줄에서 충돌한다. 그래서 이 계산을 fault-symptom-breakdown.ts 안에
+ * 두고 시험도 fault-symptom-breakdown.test.ts 에 이어 붙였다. 취향이 아니라
+ * 그 제약 때문이다 — 옮길 이유가 생기면 코드와 시험을 함께 옮기면 된다.
+ *
+ * ── 인수일(receivedAt)로 묶는다 ─────────────────────────────────────────
+ * 신고 증상은 접수될 때 적히는 값이라 인수일로 묶는 것이 뜻이 맞다. 출하일로
+ * 묶으면 아직 나가지 않은 건이 통째로 빠진다.
+ *
+ * ── 문자열을 그대로 읽는다 — new Date(문자열) 을 쓰지 않는다 ────────────
+ * receivedAt 은 "YYYY-MM-DD" 꼴의 날짜 문자열이다(resolved-repair-case.ts).
+ * new Date("2026-01-01") 은 UTC 자정으로 읽히고, 거기서 getFullYear() 를 부르면
+ * 실행 시간대에 따라 2025-12-31 이 되어 **1월 1일 접수 건이 전 해로 잡힌다.**
+ * 그래서 시간대가 끼어들 자리가 없도록 문자열 앞머리를 정규식으로 읽는다.
+ *
+ * date-only.ts 를 쓰지 않은 까닭: 그 파일이 내보내는 것은 Date 인스턴트를 KST
+ * 달력 날짜로 바꾸거나(toKstDateOnly · toKstYearMonth) 날짜 문자열에 날·달을
+ * 더하는(addCalendarDays · addCalendarMonths) 함수들이고, **날짜 문자열에서
+ * 연·월을 읽어 내는 함수는 없다.** 문자열을 잘라 쓴다는 방식 자체는 그 파일과
+ * 같다 — 규칙을 옮겨 적은 것이 아니라 가져다 쓸 것이 없었다.
+ *
+ * ── 인수일을 읽을 수 없는 건 ────────────────────────────────────────────
+ * 값이 비었거나 꼴이 어긋난 건(예: "", "2026/03/01", "2026-13-05")은 **전체에는
+ * 남고, 특정 연도·월에는 들어가지 않는다.** 어느 달의 건인지 말할 수 없는 것을
+ * 어느 달에 끼워 넣으면 그 달의 숫자가 거짓이 된다.
+ *
+ * 파일 헤더의 `안 적힌 건을 버리지 않는다`와 어긋나지 않는다 — 그 규칙이 지키는
+ * 것은 **조각 건수의 합 = 그 종류의 총 대수**이고, 그 등식은 여기서도 그대로
+ * 성립한다(거르고 남은 배열을 세기 때문이다). 대신 연도별 건수를 모두 더한 값이
+ * 전체보다 작을 수 있고, 그 차이가 곧 "인수일을 읽을 수 없는 건이 있다"는 뜻이다.
+ *
+ * ── 연도 없이 월만 고를 수는 없다 ───────────────────────────────────────
+ * 사용자가 "연도를 먼저 고르고 그 안에서 월"을 골랐다(모든 해의 3월을 한꺼번에
+ * 보는 방식은 쓰지 않는다). 그래서 FaultSymptomPeriod 를 유니온으로 두어
+ * `{ year: null, month: 3 }` 이 **타입 단계에서 만들어지지 않게** 막았다.
+ * selectFaultSymptomPeriodCases 도 year 가 null 이면 month 를 아예 보지 않는다.
+ * 화면이 월 칸을 잠그는 것은 그 결과를 사람에게 보여 주는 일일 뿐이다.
+ * ============================================================================
+ */
+
+/**
+ * 월 고르는 칸에 나가는 값 — 자료에 한 건도 없는 달도 보여 준다. 있는 달만
+ * 보여 주면 "그 달에 0건"과 "고를 수조차 없음"이 구별되지 않는다.
+ */
+export const FAULT_SYMPTOM_PERIOD_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+/**
+ * 그래프에 걸린 기간.
+ *
+ * `{ year: null, month: null }` 이 **전체**다. 유니온으로 갈라 둔 덕에 "연도는
+ * 전체인데 월만 3월" 이라는 조합은 타입이 거부한다 — 사용자가 고른 방식이
+ * "연도 먼저"라서, 그 조합에는 뜻이 없다.
+ */
+export type FaultSymptomPeriod =
+  | { year: null; month: null }
+  | { year: number; month: number | null };
+
+/** 처음 상태이자 "거르지 않음". 화면과 시험이 같은 값을 쓴다. */
+export const FAULT_SYMPTOM_ALL_PERIOD: FaultSymptomPeriod = { year: null, month: null };
+
+/**
+ * 기간 계산이 읽는 접수 건 한 조각 — FaultSymptomCase 와 일부러 따로 둔다.
+ * 세는 쪽은 인수일을 보지 않고, 거르는 쪽은 종류·증상을 보지 않는다. 한 타입에
+ * 합쳐 두면 어느 쪽 시험이든 쓰지도 않는 칸을 채워야 한다.
+ */
+export type FaultSymptomPeriodCase = {
+  /** "YYYY-MM-DD". 비었거나 꼴이 어긋난 값이 들어올 수 있다(위 헤더 참조). */
+  receivedAt: string | null;
+};
+
+/** "YYYY-MM-DD" 앞머리만 읽는다. 뒤에 시각이 붙어 있어도 상관없다. */
+const RECEIVED_AT_YEAR_MONTH = /^(\d{4})-(\d{2})-\d{2}/;
+
+/** 읽을 수 없으면 null — 부르는 쪽이 "어느 해인지 말할 수 없다"로 다룬다. */
+function readReceivedYearMonth(
+  receivedAt: string | null | undefined
+): { year: number; month: number } | null {
+  const matched = RECEIVED_AT_YEAR_MONTH.exec(receivedAt?.trim() ?? "");
+  if (!matched) return null;
+  const month = Number(matched[2]);
+  if (month < 1 || month > 12) return null;
+  return { year: Number(matched[1]), month };
+}
+
+/**
+ * 접수 건이 실제로 있는 연도만, 최근 해가 위로 오게(내림차순) 중복 없이.
+ *
+ * 연도 목록을 고정하지 않고 자료에서 뽑는 이유: 자료가 없는 해를 고르게 해 봐야
+ * 언제나 0건이고, 해가 바뀔 때마다 목록을 손봐야 한다.
+ */
+export function listFaultSymptomYears(cases: readonly FaultSymptomPeriodCase[]): number[] {
+  const years = new Set<number>();
+  for (const row of cases) {
+    const yearMonth = readReceivedYearMonth(row.receivedAt);
+    if (yearMonth) years.add(yearMonth.year);
+  }
+  return [...years].sort((a, b) => b - a);
+}
+
+/**
+ * 고른 기간에 인수된 건만 남긴다. **전체(year === null)면 한 건도 걸러지지
+ * 않는다** — 기간을 고르기 전 화면이 예전 그대로여야 한다는 뜻이다.
+ *
+ * 넘겨받은 원소 타입을 그대로 돌려주는 제네릭이라, 화면은 걸러진 배열을
+ * buildFaultSymptomBreakdowns 에 그냥 넘길 수 있다(새 조회를 하지 않는다).
+ */
+export function selectFaultSymptomPeriodCases<T extends FaultSymptomPeriodCase>(
+  cases: readonly T[],
+  period: FaultSymptomPeriod
+): T[] {
+  if (period.year === null) return cases.slice();
+  return cases.filter((row) => {
+    const yearMonth = readReceivedYearMonth(row.receivedAt);
+    if (!yearMonth) return false;
+    if (yearMonth.year !== period.year) return false;
+    return period.month === null || yearMonth.month === period.month;
+  });
+}
+
+/**
+ * 걸린 기간을 사람이 읽는 한 마디로. 그래프만 바뀌고 아무 말이 없으면 무엇을
+ * 보고 있는지 알 수 없어서, 화면이 원 위에 이 글자를 적는다.
+ */
+export function formatFaultSymptomPeriodLabel(period: FaultSymptomPeriod): string {
+  if (period.year === null) return "전체 기간";
+  if (period.month === null) return `${period.year}년`;
+  return `${period.year}년 ${period.month}월`;
+}
