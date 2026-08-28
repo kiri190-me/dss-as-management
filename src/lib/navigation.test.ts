@@ -225,13 +225,47 @@ test("navGroups: every itemKey references a real navItems key", () => {
   }
 });
 
-test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자 / 관리 structure", () => {
+test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자 / 관리 / 설정 structure", () => {
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
   assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
   // 내자 정리 1단계 — 수주·정산 흐름은 A/S 업무 그룹과 섞지 않는다(navigation.ts 주석).
   assert.deepEqual(byKey.get("poDomestic")?.itemKeys, ["domesticOrders"]);
-  assert.deepEqual(byKey.get("admin")?.itemKeys, ["users", "customers", "productModels", "settings"]);
+  // 사용자 관리·시스템 설정은 2026-08-28 에 '설정' 그룹으로 내려갔다 — '관리'에는
+  // 업무용 마스터 자료만 남는다(navigation.ts 주석).
+  assert.deepEqual(byKey.get("admin")?.itemKeys, ["customers", "productModels"]);
+  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings"]);
+});
+
+test("navGroups: 그룹의 key·이름·차례 — '설정'은 '관리' 다음, 맨 끝이다", () => {
+  // 사이드바에 구획이 나오는 차례가 곧 이 배열의 차례다. 값으로 못 박아 둔다:
+  // 포함 검사로 두면 그룹이 하나 끼어들거나 순서가 뒤집혀도 조용히 지나간다.
+  assert.deepEqual(
+    navGroups.map((g) => [g.key, g.label]),
+    [
+      ["asOperations", "A/S 업무"],
+      ["techResources", "기술 / 자원"],
+      ["poDomestic", "PO / 내자"],
+      ["admin", "관리"],
+      ["systemSettings", "설정"],
+    ]
+  );
+});
+
+test("navGroups: 사용자 관리와 시스템 설정은 '관리'가 아니라 '설정' 그룹에 있다", () => {
+  // 이번 변경의 요점이다(2026-08-28). 위 구조 단언과 겹쳐 보이지만 이쪽은 **두 항목이
+  // 어느 구획에 있는가**만 말한다 — 그룹에 항목이 더 붙어 구조 단언이 갱신되더라도
+  // 이 사실은 그대로 남아야 한다.
+  const byKey = new Map(navGroups.map((g) => [g.key, g]));
+  for (const key of ["users", "settings"]) {
+    assert.ok(byKey.get("systemSettings")?.itemKeys.includes(key), `${key} 가 '설정' 그룹에 없다`);
+    assert.equal(byKey.get("admin")?.itemKeys.includes(key), false, `${key} 가 아직 '관리' 그룹에 남아 있다`);
+  }
+  // 그룹 key 와 항목 key 는 이름 공간이 다르다 — navGroups 쪽은 "systemSettings",
+  // navItems 쪽은 "settings" 로 갈라 두었다(navigation.ts 주석). 섞여 쓰이면
+  // 여기서 걸린다.
+  assert.equal(navGroups.some((g) => g.key === "settings"), false);
+  assert.ok(navItems.some((i) => i.key === "settings"));
 });
 
 test("filterNavItemsForRole: unrestricted items remain visible to every role", () => {

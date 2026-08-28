@@ -120,5 +120,19 @@ export const navGroups: NavGroup[] = [
   // 이쪽은 발주에서 입금까지의 흐름이라 같이 놓으면 두 흐름이 한 목록에서
   // 섞여 읽힌다.
   { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders"] },
-  { key: "admin", label: "관리", itemKeys: ["users", "customers", "productModels", "settings"] },
+  { key: "admin", label: "관리", itemKeys: ["customers", "productModels"] },
+  // 사용자 관리와 시스템 설정이 '관리'에서 여기로 내려왔다(2026-08-28, 사용자 요청).
+  // '관리'는 업무를 하면서 들여다보는 **마스터 자료**(고객사·제품 모델)를 다루는
+  // 자리이고, 이쪽은 **시스템을 운영하는 자리**다 — 누가 쓰는가(사용자 관리)와
+  // 시스템이 어떻게 도는가(시스템 설정)라서 성격이 다르다. 한 그룹에 같이 두면
+  // 접수 건을 처리하다 고객사를 고치러 들어간 사람과 권한을 손보러 들어간 사람이
+  // 같은 목록을 읽게 된다. 차례상 맨 끝인 것도 그 때문이다 — 매일 쓰는 메뉴가 아니다.
+  //
+  // 🔴 그룹 key 를 "settings" 가 아니라 "systemSettings" 로 둔 이유: 항목 쪽에 이미
+  // key "settings"(시스템 설정)가 있다. 두 이름 공간은 서로 다르고(navGroups 의
+  // key 는 Sidebar 의 펼침 상태와 React key 로만 쓰이며, itemKeys 하고만 대조되는
+  // navItems 의 key 와 섞이는 자리가 없다) 그대로 둬도 동작은 같지만, 한 파일 안에서
+  // key: "settings" 가 뜻이 다르게 두 번 나오면 읽는 사람이 매번 그 사실을 다시
+  // 확인해야 한다. 이름을 갈라 두는 편이 공짜다. 라벨은 요청대로 "설정" 이다.
+  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings"] },
 ];
