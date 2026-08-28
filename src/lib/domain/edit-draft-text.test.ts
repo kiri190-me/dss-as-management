@@ -158,17 +158,50 @@ test("고객사 맵에는 자유 입력 넷만 있다 — 고르는 색(rowColor
   }
 });
 
-test("제품모델 맵에는 자유 입력 셋만 있다 — 고르는 값(kind)은 없다", () => {
+test("제품모델 맵에는 자유 입력 둘만 있다 — 고르는 값(kind)은 없다", () => {
   assert.deepEqual(Object.keys(PRODUCT_MODEL_DRAFT_LABELS), [
     // 화면(ProductModelEditForm)에 놓인 차례 그대로.
     "modelName",
-    "manufacturer",
     "description",
   ]);
   // kind 는 <select> 로 고르고 저장되는 값은 `GENERATOR` 같은 내부 값이다.
   for (const key of ["kind", "id", "updatedAt"]) {
     assert.ok(!(key in PRODUCT_MODEL_DRAFT_LABELS), `${key}는 자유 입력이 아니다`);
   }
+});
+
+test("★ 제조사(manufacturer)는 제품모델 맵에 없다 — 사람이 치는 값이 아니다", () => {
+  // 화면에서 제조사 입력칸이 사라지고 그 자리가 `고객사`가 됐다. 그런데 폼은
+  // 값이 지워지지 않게 manufacturer 를 그대로 다시 실어 보내므로, 저장하려던
+  // 묶음에는 여전히 그 값이 들어 있다 — 이름표를 되살리면 충돌 상자가 사용자가
+  // 적지도 않은 값을 "당신이 적어 둔 글"로 되돌려 준다.
+  assert.ok(
+    !("manufacturer" in PRODUCT_MODEL_DRAFT_LABELS),
+    "제조사는 이제 화면에서 치는 값이 아니다 — 이름표를 되살리지 말 것"
+  );
+  // 폼이 실제로 보내는 모양 그대로 넣어도 제조사 값이 상자에 새지 않는다.
+  const text = buildDraftText(
+    { modelName: "RFG-3000", manufacturer: "DEMO 제조사", description: "13.56MHz" },
+    PRODUCT_MODEL_DRAFT_LABELS
+  );
+  assert.equal(text, "모델명\nRFG-3000\n\n설명\n13.56MHz");
+  assert.ok(!text.includes("DEMO 제조사"), "제조사가 상자에 섞여 나오면 안 된다");
+});
+
+test("★ 고객사(customerIds)도 제품모델 맵에 없다 — 고른 값이고 uuid 배열이다", () => {
+  assert.ok(
+    !("customerIds" in PRODUCT_MODEL_DRAFT_LABELS),
+    "고객사는 목록에서 고르는 값이고 저장되는 것은 uuid 다"
+  );
+  const text = buildDraftText(
+    {
+      modelName: "RFG-3000",
+      customerIds: ["3f2504e0-4f89-11d3-9a0c-0305e82c3301", "8a1b2c3d-4e5f-6789-abcd-ef0123456789"],
+    },
+    PRODUCT_MODEL_DRAFT_LABELS
+  );
+  assert.equal(text, "모델명\nRFG-3000");
+  assert.ok(!text.includes("3f2504e0"), "UUID가 섞여 나오면 안 된다");
 });
 
 test("화면 전용 맵은 그 화면이 보내는 값만 골라 담는다 — 나머지는 그냥 빠진다", () => {
@@ -193,18 +226,23 @@ test("화면 전용 맵은 그 화면이 보내는 값만 골라 담는다 — �
     "고르는 색이 상자에 섞여 나오면 안 된다"
   );
 
-  // 제품모델 저장이 실제로 보내는 모양(ProductModelEditForm 의 fields) 그대로.
+  // 제품모델 저장이 실제로 보내는 모양(ProductModelEditForm 의 fields) 그대로 —
+  // 화면에 입력칸이 없는 manufacturer 와, 목록에서 고르는 customerIds 까지 함께
+  // 실려 온다. 상자에 나오는 것은 여전히 손으로 친 둘뿐이다.
   const productModel = buildDraftText(
     {
       modelName: "RFG-3000",
       kind: "GENERATOR",
       manufacturer: "DSS",
+      customerIds: ["3f2504e0-4f89-11d3-9a0c-0305e82c3301"],
       description: "13.56MHz\n3kW",
     },
     PRODUCT_MODEL_DRAFT_LABELS
   );
-  assert.equal(productModel, "모델명\nRFG-3000\n\n제조사\nDSS\n\n설명\n13.56MHz\n3kW");
+  assert.equal(productModel, "모델명\nRFG-3000\n\n설명\n13.56MHz\n3kW");
   assert.ok(!productModel.includes("GENERATOR"), "고르는 값이 상자에 섞여 나오면 안 된다");
+  assert.ok(!productModel.includes("DSS"), "화면에 없는 칸의 값이 상자에 섞여 나오면 안 된다");
+  assert.ok(!productModel.includes("3f2504e0"), "UUID가 상자에 섞여 나오면 안 된다");
 });
 
 test("두 맵 모두 담을 글이 하나도 없으면 빈 문자열이다 — 상자를 그리지 않는 근거", () => {

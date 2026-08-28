@@ -10,6 +10,7 @@ import {
   listAttachmentsForProductModel,
   listTrashedAttachmentsForProductModel,
 } from "@/lib/db/queries/attachments";
+import { listCustomerOptions } from "@/lib/db/queries/customers";
 import {
   getProductModelDetailById,
   listRequestedPartsByProductModelId,
@@ -69,23 +70,37 @@ export default async function ProductModelDetailPage({
     notFound();
   }
 
-  // A/S 이력 구역이 쓰는 두 재료와, 사진·도면 구역이 쓰는 두 목록. 서로 기다릴
-  // 이유가 없어 함께 띄운다. 넷 다 읽기 전용이고 같은 product_models.id 로 좁힌다.
-  const [repairCases, requestedParts, attachments, trashedAttachments] = await Promise.all([
-    listRepairCasesByProductModelId(detail.id),
-    listRequestedPartsByProductModelId(detail.id),
-    listAttachmentsForProductModel(detail.id),
-    listTrashedAttachmentsForProductModel(detail.id),
-  ]);
-
   // 사진·도면을 **올리고 지우는** 권한. 보는 것은 위 productModels.view 로 이미
   // 판정했다(다운로드 라우트도 보기에는 view 를 묻는다) — 좁히는 것은 바꾸는
   // 쪽뿐이다. 화면은 이 boolean 만 받고 역할을 스스로 보지 않는다. 실제 차단은
   // 업로드 라우트와 서버 액션이 각자 다시 한다.
+  //
+  // 아래 자료 조회보다 **먼저** 묻는다 — 고객사 후보 목록을 내려보낼지 말지가
+  // canEdit 에 달려 있기 때문이다(다음 묶음의 마지막 줄).
   const [canEdit, canManageFiles] = await Promise.all([
     hasPermission(actingUser.role, "productModels.edit", "WRITE"),
     hasPermission(actingUser.role, "productModels.files", "WRITE"),
   ]);
+
+  // A/S 이력 구역이 쓰는 두 재료와, 사진·도면 구역이 쓰는 두 목록, 그리고 수정
+  // 폼의 고객사 콤보박스가 고를 목록. 서로 기다릴 이유가 없어 함께 띄운다.
+  // 다섯 다 읽기 전용이다.
+  //
+  // 🔴 고객사 후보는 **수정할 수 있는 세션에만** 내려보낸다. 상세 화면은
+  // "use client" 라 여기서 넘긴 값이 그대로 브라우저까지 실려 가는데, 그 목록을
+  // 읽는 것은 ProductModelEditForm 하나뿐이고 그 폼은 canEdit 일 때만 뜬다 —
+  // 아무도 열 수 없는 폼을 위해 고객사 대장 전체를 모든 열람자의 브라우저로
+  // 보낼 이유가 없다(이 파일이 units 를 덜어 낸 것과 같은 판단이다). 권한 자체를
+  // 새로 만들지는 않았다: productModels.edit 하나로 폼도 후보 목록도 함께
+  // 열린다. 최종 차단은 언제나처럼 updateProductModelAction 이 다시 한다.
+  const [repairCases, requestedParts, attachments, trashedAttachments, customerOptions] =
+    await Promise.all([
+      listRepairCasesByProductModelId(detail.id),
+      listRequestedPartsByProductModelId(detail.id),
+      listAttachmentsForProductModel(detail.id),
+      listTrashedAttachmentsForProductModel(detail.id),
+      canEdit ? listCustomerOptions() : Promise.resolve([]),
+    ]);
 
   // `등록 장비` 표가 사라져 units 를 읽는 화면이 없다. 상세 화면은 "use client"
   // 라 여기서 넘긴 값이 그대로 브라우저까지 실려 가므로, 아무도 읽지 않는 배열은
@@ -97,6 +112,7 @@ export default async function ProductModelDetailPage({
       repairCases={repairCases}
       requestedParts={requestedParts}
       canEdit={canEdit}
+      customerOptions={customerOptions}
       attachments={attachments}
       trashedAttachments={trashedAttachments}
       canManageFiles={canManageFiles}

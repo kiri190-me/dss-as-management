@@ -29,6 +29,15 @@ function kindLabel(kind: string | null): string {
   return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
 }
 
+/**
+ * 이 모델에 붙은 고객사를 한 줄로. 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다.
+ * (같은 함수가 ProductModelDetailScreen 에도 있다. kindLabel 처럼 한 줄짜리라
+ * 두 화면이 각자 들고 있는 것이 이 저장소의 모양이다.)
+ */
+function customerNames(list: readonly { name: string }[]): string {
+  return list.length === 0 ? "-" : list.map((c) => c.name).join(", ");
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "-";
   const date = new Date(iso);
@@ -277,7 +286,7 @@ export default function ProductModelListScreen({
                       )}
                       <th className="px-3 py-2">모델명</th>
                       <th className="px-3 py-2">제품 종류</th>
-                      <th className="px-3 py-2">제조사</th>
+                      <th className="px-3 py-2">고객사</th>
                       <th className="px-3 py-2">등록 장비 수</th>
                       <th className="px-3 py-2">A/S 접수 건수</th>
                       <th className="px-3 py-2">최근 입고일</th>
@@ -311,7 +320,20 @@ export default function ProductModelListScreen({
                           {row.modelName}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{kindLabel(row.kind)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">{row.manufacturer ?? "-"}</td>
+                        {/* 🔴 이 칸만 whitespace-nowrap 이 없다. 고객사는 한
+                            모델에 여럿 붙고(실측 최대 4곳) 이름도 짧지 않아,
+                            다른 칸처럼 한 줄로 묶으면 이 한 칸이 표 전체를 옆으로
+                            늘린다. 이 목록은 ResponsiveList 로 감싸여 있어 표가
+                            넘치면 카드로 바뀌므로, 그대로 두면 화면이 넓어도 늘
+                            카드로 떨어진다 — 그것도 고장이다.
+                            그래서 줄바꿈을 허용하고 폭 상한을 둔다. 상한을 <td>
+                            가 아니라 안쪽 블록에 거는 것은 table-layout:auto 에서
+                            브라우저가 셀의 max-width 를 지키지 않기 때문이다. */}
+                        <td className="px-3 py-2">
+                          <span className="block max-w-[14rem] break-words">
+                            {customerNames(row.customers)}
+                          </span>
+                        </td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.unitCount}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.repairCaseCount}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.lastReceivedAt)}</td>
@@ -440,8 +462,9 @@ function ProductModelCardFields({ row }: { row: ProductModelListRow }) {
         <dd>{kindLabel(row.kind)}</dd>
       </div>
       <div>
-        <dt className="text-xs text-zinc-500 dark:text-zinc-500">제조사</dt>
-        <dd>{row.manufacturer ?? "-"}</dd>
+        <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객사</dt>
+        {/* 카드는 폭이 정해져 있어 늘어날 데가 없다 — 줄바꿈만 허용하면 된다. */}
+        <dd className="break-words">{customerNames(row.customers)}</dd>
       </div>
       <div>
         <dt className="text-xs text-zinc-500 dark:text-zinc-500">등록 장비 수</dt>

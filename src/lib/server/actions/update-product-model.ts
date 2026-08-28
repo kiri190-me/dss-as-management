@@ -90,6 +90,11 @@ export async function updateProductModelAction(
   }
 
   try {
+    // validation.data 에는 고객사 연결 목록(customerIds)도 들어 있다 — 모델
+    // 기본정보 한 구역을 한 번에 저장하는 값이라 별도 액션·별도 권한 항목을 만들지
+    // 않는다. 권한은 위 productModels.edit WRITE 하나뿐이고, 목록이 실제로 있는
+    // 고객사인지(휴지통에 든 것은 아닌지)는 mutation 이 트랜잭션 안에서 다시
+    // 판정한다 — 이 함수는 모양만 통과시킨 것이다.
     return await updateProductModel({
       id: input.id,
       expectedUpdatedAt: input.expectedUpdatedAt,

@@ -1,6 +1,7 @@
 export * from "./users";
 export * from "./customers";
 export * from "./product-models";
+export * from "./product-model-customers";
 export * from "./products";
 export * from "./workflow";
 export * from "./repair-cases";
@@ -37,3 +38,4 @@ export * from "./domestic-orders";
 export * from "./domestic-order-due-dates";
 export * from "./weekly-report-goals";
 export * from "./weekly-report-deliveries";
+export * from "./quotes";

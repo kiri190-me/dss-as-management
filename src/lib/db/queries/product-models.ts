@@ -10,6 +10,11 @@ import {
   repairCases,
   users,
 } from "../schema";
+import {
+  listCustomersForProductModel,
+  listCustomersForProductModels,
+  type ProductModelCustomerOption,
+} from "./product-model-customers";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
@@ -19,7 +24,11 @@ export type ProductModelListRow = {
   id: string;
   modelName: string;
   kind: ProductModelKind | null;
+  /** 화면에서 이 칸을 `고객사`로 바꾸는 것은 3단계다. 칼럼도 이 필드도 그대로 둔다. */
   manufacturer: string | null;
+  /** 이 모델에 붙은 고객사. 휴지통에 든 고객사는 빠져 있다
+   * (queries/product-model-customers.ts). 없으면 빈 배열이다. */
+  customers: ProductModelCustomerOption[];
   unitCount: number;
   repairCaseCount: number;
   lastReceivedAt: string | null;
@@ -84,11 +93,17 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
     }
   }
 
+  // 모델 104개분의 고객사를 **한 번의 조회**로 가져온다. 위 Promise.all 에 넣지
+  // 않은 것은 모델 id 목록이 나와야 물어볼 수 있기 때문이고, 그래도 조회 횟수는
+  // 모델 수와 무관하게 하나다(N+1 아님).
+  const customersByModelId = await listCustomersForProductModels(modelRows.map((m) => m.id));
+
   return modelRows.map((m) => ({
     id: m.id,
     modelName: m.modelName,
     kind: m.kind,
     manufacturer: m.manufacturer,
+    customers: customersByModelId.get(m.id) ?? [],
     unitCount: unitCounts.get(m.id) ?? 0,
     repairCaseCount: repairCaseCounts.get(m.id) ?? 0,
     lastReceivedAt: lastReceivedAt.get(m.id) ?? null,
@@ -112,7 +127,11 @@ export type ProductModelDetail = {
   id: string;
   modelName: string;
   kind: ProductModelKind | null;
+  /** 화면에서 이 칸을 `고객사`로 바꾸는 것은 3단계다. 칼럼도 이 필드도 그대로 둔다. */
   manufacturer: string | null;
+  /** 이 모델에 붙은 고객사. 휴지통에 든 고객사는 빠져 있다
+   * (queries/product-model-customers.ts). 없으면 빈 배열이다. */
+  customers: ProductModelCustomerOption[];
   description: string | null;
   createdAt: string;
   updatedAt: string;
@@ -149,6 +168,9 @@ export function toProductModelDetailForScreen(
     modelName: detail.modelName,
     kind: detail.kind,
     manufacturer: detail.manufacturer,
+    // 화면이 실제로 읽는 값이다(3단계의 `고객사` 칸). 모델 하나에 많아야 몇 줄이라
+    // units 배열 같은 죽은 짐이 아니다.
+    customers: detail.customers,
     description: detail.description,
     createdAt: detail.createdAt,
     updatedAt: detail.updatedAt,
@@ -185,10 +207,15 @@ export async function getProductModelDetailById(
     .where(and(eq(productModels.id, id), eq(productModels.isDeleted, false)));
   if (!model) return null;
 
-  const productRows = await db
-    .select({ id: products.id, serialNumber: products.serialNumber, lotNumber: products.lotNumber })
-    .from(products)
-    .where(and(eq(products.productModelId, id), eq(products.isDeleted, false)));
+  // 서로 기다릴 이유가 없다. 고객사 목록은 휴지통에 든 고객사를 스스로 걸러서
+  // 돌려준다(queries/product-model-customers.ts).
+  const [productRows, modelCustomers] = await Promise.all([
+    db
+      .select({ id: products.id, serialNumber: products.serialNumber, lotNumber: products.lotNumber })
+      .from(products)
+      .where(and(eq(products.productModelId, id), eq(products.isDeleted, false))),
+    listCustomersForProductModel(id),
+  ]);
 
   const productIds = productRows.map((p) => p.id);
   const caseRows =
@@ -252,6 +279,7 @@ export async function getProductModelDetailById(
     modelName: model.modelName,
     kind: model.kind,
     manufacturer: model.manufacturer,
+    customers: modelCustomers,
     description: model.description,
     createdAt: model.createdAt.toISOString(),
     updatedAt: model.updatedAt.toISOString(),

@@ -6,6 +6,7 @@ import type {
   ProductModelAttachmentListItem,
   TrashedProductModelAttachmentListItem,
 } from "@/lib/db/queries/attachments";
+import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-customers";
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
@@ -21,6 +22,14 @@ const KIND_LABELS: Record<string, string> = {
 
 function kindLabel(kind: string | null): string {
   return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
+}
+
+/**
+ * 이 모델에 붙은 고객사를 한 줄로. 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다
+ * (없는 것과 빈 것을 다르게 보이게 할 이유가 없다).
+ */
+function customerNames(list: readonly ProductModelCustomerOption[]): string {
+  return list.length === 0 ? "-" : list.map((c) => c.name).join(", ");
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {
@@ -67,12 +76,24 @@ function InfoField({ label, value }: { label: string; value: string }) {
  * distinct, case-scoped fact that intentionally may or may not agree with
  * this model's assigned kind (see the canonicalization audit: some real
  * models here already have cases spanning both kinds).
+ *
+ * ── `모델 기본정보` 의 셋째 칸은 `고객사` 다 (예전 `제조사` 자리) ────────
+ * 제조사 칸은 실제로 쓰인 적이 없었고(104개 중 25개, 전부 데모 자료), 그 자리를
+ * 고객사로 바꾸기로 했다 — 한 모델에 **여러 곳**이 붙는다(실측 TG-100 은 4곳).
+ * 값은 detail.customers 에서 오고, 그 목록은 조회가 휴지통에 든 고객사를 이미
+ * 걸러 낸 것이다(queries/product-model-customers.ts).
+ *
+ * ⚠️ `product_models.manufacturer` 칼럼과 detail.manufacturer 필드는 **그대로
+ * 살아 있다.** 화면에서만 뺐고, 수정 폼이 그 값을 손대지 않은 채 다시 저장한다
+ * (ProductModelEditForm 헤더) — 되돌릴 수 있게 남겨 둔 것이라 값이 지워지면 안
+ * 된다. 이 화면에 제조사를 다시 그리지 말 것(사용자 결정).
  */
 export default function ProductModelDetailScreen({
   detail,
   repairCases,
   requestedParts,
   canEdit,
+  customerOptions,
   attachments,
   trashedAttachments,
   canManageFiles,
@@ -82,6 +103,9 @@ export default function ProductModelDetailScreen({
   /** 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다. */
   requestedParts: RequestedPartRow[];
   canEdit: boolean;
+  /** 수정 폼의 고객사 콤보박스가 고를 수 있는 목록. canEdit 이 아닌 세션에는
+   * 서버가 빈 배열을 넘긴다 — 폼 자체가 뜨지 않는 자리라 실어 보낼 이유가 없다. */
+  customerOptions: ProductModelCustomerOption[];
   attachments: ProductModelAttachmentListItem[];
   trashedAttachments: TrashedProductModelAttachmentListItem[];
   /** productModels.files WRITE. 서버 컴포넌트가 판정해 내려보낸 값이다. */
@@ -117,12 +141,16 @@ export default function ProductModelDetailScreen({
 
         <div className="mt-3">
           {isEditing ? (
-            <ProductModelEditForm productModel={detail} onDone={() => setIsEditing(false)} />
+            <ProductModelEditForm
+              productModel={detail}
+              customerOptions={customerOptions}
+              onDone={() => setIsEditing(false)}
+            />
           ) : (
             <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <InfoField label="모델명" value={detail.modelName} />
               <InfoField label="제품 종류" value={kindLabel(detail.kind)} />
-              <InfoField label="제조사" value={detail.manufacturer ?? "-"} />
+              <InfoField label="고객사" value={customerNames(detail.customers)} />
               <InfoField label="설명" value={detail.description ?? "-"} />
             </dl>
           )}

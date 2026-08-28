@@ -75,6 +75,35 @@ export async function listCustomersWithCounts(): Promise<CustomerListRow[]> {
   }));
 }
 
+/**
+ * 고르는 목록에 쓰는 최소 모양. `{ id, name }` 은
+ * queries/product-model-customers.ts 의 ProductModelCustomerOption ·
+ * queries/repair-case-references.ts 의 IntakeCustomerOption 과 같다 — 제품 모델
+ * 상세의 `고객사` 칸은 **이미 고른 것**(앞의 타입)과 **고를 수 있는 것**(이 타입)을
+ * 한 화면에서 나란히 다루므로 모양이 어긋나면 안 된다.
+ */
+export type CustomerOption = { id: string; name: string };
+
+/**
+ * 고를 수 있는 고객사 전부. 지금 쓰는 곳은 제품 모델 상세의 `고객사` 콤보박스다.
+ *
+ * 🔴 **휴지통에 든 고객사는 나오지 않는다**(is_deleted = false). 고르게 해 봐야
+ * 저장할 때 mutation 이 거부하고(2단계), 무엇보다 지운 고객사가 후보로 되살아나
+ * 보이면 안 된다. 같은 규칙을 getIntakeReferenceData 도 지킨다.
+ *
+ * 이름·id 두 칸만 고른다. 이 값은 "use client" 화면까지 그대로 실려 가므로 연락처
+ * 같은 필요 없는 칸을 브라우저로 흘려보내지 않는다.
+ */
+export async function listCustomerOptions(): Promise<CustomerOption[]> {
+  return db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.isDeleted, false))
+    // 이름순. 콤보박스가 빈 검색어일 때 전체를 훑어보는 자리라 차례가 있어야 한다
+    // (rankSimilarNames 도 빈 질의에는 이름순을 돌려준다).
+    .orderBy(customers.name, customers.id);
+}
+
 export type CustomerDetail = {
   id: string;
   name: string;
