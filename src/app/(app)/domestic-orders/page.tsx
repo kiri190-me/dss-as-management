@@ -12,6 +12,7 @@ import {
   listDomesticOrders,
   listRepairCaseLinkOptions,
 } from "@/lib/db/queries/domestic-orders";
+import { listQuoteOptions } from "@/lib/db/queries/quotes";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 
 export const metadata: Metadata = {
@@ -57,10 +58,12 @@ export default async function DomesticOrdersPage() {
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).
   // 고객사 목록도 같은 규칙이다: 이 화면을 볼 수만 있는 사람에게 전체 고객사
   // 명단을 실어 보낼 이유가 없다.
-  const [rows, repairCaseOptions, customerOptions] = await Promise.all([
+  const [rows, repairCaseOptions, customerOptions, quoteOptions] = await Promise.all([
     listDomesticOrders(),
     canEdit ? listRepairCaseLinkOptions() : Promise.resolve([]),
     canEdit ? listCustomerOptions() : Promise.resolve([]),
+    // 견적서 목록도 폼에서만 쓴다 — 고칠 수 없는 사람에게 실어 보내지 않는다.
+    canEdit ? listQuoteOptions() : Promise.resolve([]),
   ]);
 
   // 머리말의 "{날짜}자 진행 상황입니다"에 들어갈 날짜. 클라이언트에서 만들면
@@ -89,6 +92,7 @@ export default async function DomesticOrdersPage() {
       canEdit={canEdit}
       repairCaseOptions={repairCaseOptions}
       customerOptions={customerOptions}
+      quoteOptions={quoteOptions}
     />
   );
 }

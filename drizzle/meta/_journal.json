@@ -428,6 +428,55 @@
       "when": 1787877890043,
       "tag": "0060_lowly_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787878463222,
+      "tag": "0061_bumpy_zarda",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787883085395,
+      "tag": "0062_mysterious_oracle",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787887708881,
+      "tag": "0063_sloppy_stark_industries",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787891024591,
+      "tag": "0064_mushy_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787893453982,
+      "tag": "0065_common_namora",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787895680023,
+      "tag": "0066_colorful_darkhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787895872873,
+      "tag": "0067_dry_husk",
+      "breakpoints": true
     }
   ]
 }

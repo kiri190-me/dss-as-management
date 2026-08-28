@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /** Sub-navigation within the existing 재고 관리 area — deliberately not a new top-level sidebar item. */
-export default function InventoryTabs({ active }: { active: "LIST" | "REQUESTS" }) {
+export default function InventoryTabs({ active }: { active: "LIST" | "REQUESTS" | "OH_TEMPLATES" }) {
   const tabClass = (isActive: boolean) =>
     isActive
       ? "rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
@@ -14,6 +14,9 @@ export default function InventoryTabs({ active }: { active: "LIST" | "REQUESTS" 
       </Link>
       <Link href="/inventory/requests" className={tabClass(active === "REQUESTS")}>
         부품 요청 관리
+      </Link>
+      <Link href="/inventory/oh-templates" className={tabClass(active === "OH_TEMPLATES")}>
+        O/H 부품 템플릿
       </Link>
     </div>
   );

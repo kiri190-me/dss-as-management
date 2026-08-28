@@ -164,6 +164,13 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
   etcNote: "기타",
 };
 
+/**
+ * 연결할 수 있는 견적서 하나. `summaryLine` 은 목록 한 줄 그대로다
+ * (domain/quote-list.ts) — 번호만 보여 주면 같은 모델의 여러 장 중 어느
+ * 것인지 가릴 수 없다.
+ */
+export type QuoteOption = { id: string; summaryLine: string; quoteDate: string };
+
 const textAreaClass = `${editInputClass} min-h-20 resize-y`;
 
 const hintClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
@@ -190,12 +197,14 @@ export default function DomesticOrderEditForm({
   row,
   repairCaseOptions,
   customerOptions,
+  quoteOptions,
   onDone,
 }: {
   /** 고칠 줄. null 이면 새 줄을 추가하는 중이다. */
   row: DomesticOrderListItem | null;
   repairCaseOptions: RepairCaseLinkOption[];
   customerOptions: CustomerOption[];
+  quoteOptions: QuoteOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -245,6 +254,7 @@ export default function DomesticOrderEditForm({
   );
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
   const [quoteNumber, setQuoteNumber] = useState(row?.quoteNumber ?? "");
+  const [quoteId, setQuoteId] = useState<string | null>(row?.quoteId ?? null);
   const [progressNote, setProgressNote] = useState(row?.progressNote ?? "");
   /**
    * ⚠️ **state 가 아니라 상수다. 고칠 길이 없어야 한다.**
@@ -514,6 +524,7 @@ export default function DomesticOrderEditForm({
       dueDates: dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note })),
       quoteIssuedDate,
       quoteNumber,
+      quoteId,
       progressNote,
       // ⚠️ **입력칸이 없어진 뒤에도 반드시 실어 보낸다.** 이 저장은 모든 칼럼을
       // SET 하므로, 여기서 빼면 DB 에 남아 있는 옛 납품일이 저장 한 번에
@@ -860,6 +871,35 @@ export default function DomesticOrderEditForm({
           {requestedDueDateHint()}
         </fieldset>
         {renderText("quoteIssuedDate", "견적발행일", quoteIssuedDate, setQuoteIssuedDate, { type: "date" })}
+        <div className="flex flex-col gap-1">
+          <label className={editLabelClass} htmlFor="domestic-order-quoteId">
+            견적서 연결
+          </label>
+          <select
+            id="domestic-order-quoteId"
+            className={editInputClass}
+            value={quoteId ?? ""}
+            onChange={(event) => setQuoteId(event.target.value === "" ? null : event.target.value)}
+            disabled={disabled}
+          >
+            {/* 고르면 아래 견적서번호·견적발행일과 금액이 **그 견적서를 따른다**.
+                손으로 적어 둔 값은 지우지 않으므로, 연결을 풀면 다시 보인다
+                (schema/domestic-orders.ts 의 quote_id 주석). */}
+            <option value="">연결 없음 (아래 칸에 직접 적습니다)</option>
+            {quoteOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.summaryLine}
+              </option>
+            ))}
+          </select>
+          {fieldErrors.quoteId && <p className={editErrorClass}>{fieldErrors.quoteId}</p>}
+          {quoteId && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              견적서번호 · 견적발행일 · 금액은 연결된 견적서를 따릅니다. 아래 칸에 적은 값은 지워지지 않고, 연결을 풀면 다시 보입니다.
+            </p>
+          )}
+        </div>
+
         {renderText("quoteNumber", "견적서번호", quoteNumber, setQuoteNumber)}
         {/* ⚠️ **납품일에는 입력칸이 없다.** 빈 자리로 두지 않고 지금 값과 까닭을
             함께 적는 이유는, 있던 칸이 그냥 사라지면 "고장 났다"로 읽히기

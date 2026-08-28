@@ -6,6 +6,7 @@ import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { workflowKindLabels, workflowKindOf } from "@/lib/domain/workflow-kind";
 import ProductInfoEditForm from "./edit/ProductInfoEditForm";
+import OverhaulBadge from "@/components/common/OverhaulBadge";
 
 function Field({ label, value }: { label: string; value: string | null }) {
   return (
@@ -66,6 +67,13 @@ export default function ProductInfoSection({
           <Field label="Model" value={resolved.modelName} />
           <Field label="L/N" value={resolved.lotNumber} />
           <Field label="S/N" value={resolved.serialNumber} />
+          {/* O/H 대상 표시. S/N 에 생산 연월이 들어 있어 4년 기준을 볼 수 있다
+              (domain/overhaul.ts). **알려 주기만 한다** — O/H 대상이어도 일반
+              견적서와 OH 견적서를 모두 발행하므로, 이 표시로 무엇이 갈라지지
+              않는다. 형식이 다른 S/N 이면 아무것도 그리지 않는다. */}
+          <div className="col-span-2">
+            <OverhaulBadge serialNumber={resolved.serialNumber} referenceDate={new Date()} />
+          </div>
           <Field label="동봉 액세서리" value={resolved.accessoryList} />
           <Field label="외관 상태 요약" value={resolved.externalConditionSummary} />
           <Field label="탈거 사유" value={resolved.reasonForRemoval} />

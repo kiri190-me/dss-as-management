@@ -75,6 +75,8 @@ const createdOrderIds: string[] = [];
 function emptyFields(): DomesticOrderFields {
   return {
     repairCaseId: null,
+    // 견적서 연결(2026-08-28). 비어 있는 것이 기본이다.
+    quoteId: null,
     intakeNumberText: null,
     customerId: null,
     modelNameText: null,

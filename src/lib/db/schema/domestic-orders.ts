@@ -11,6 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { customers } from "./customers";
+import { quotes } from "./quotes";
 import { repairCases } from "./repair-cases";
 import { users } from "./users";
 
@@ -156,6 +157,23 @@ export const domesticOrders = pgTable(
     /** 견적발행일. 발주발행일과 함께 주간보고가 쓰는 두 날짜 중 하나다. */
     quoteIssuedDate: date("quote_issued_date"),
     quoteNumber: text("quote_number"), // 견적서번호
+    /**
+     * 연결된 견적서(2026-08-28). **NULL 이 정상이다** — 견적서 없이 발주만 들어온
+     * 줄이 있고, 예전 줄은 전부 NULL 이다.
+     *
+     * 연결하면 위 quote_number · quote_issued_date 와 아래 amount_excluding_vat 가
+     * **견적서를 따른다**(queries/domestic-orders.ts). 손으로 적은 값은 지우지
+     * 않고 그대로 둔다 — 연결을 풀면 그 값이 다시 보인다. 이 표의 다른 칸들이
+     * "이 행의 값이 먼저, 없으면 연결된 쪽" 규칙인 것과 **방향이 반대**인데,
+     * 이유는 견적서 쪽이 더 정확하기 때문이다: 금액은 부품 줄에서 계산되고
+     * 번호·발행일은 실제로 발행된 문서의 값이다. 손으로 적은 값은 그 문서가
+     * 없던 시절의 기록이다.
+     *
+     * ON DELETE SET NULL — 견적서를 휴지통이 아니라 정말로 지우는 경로는 아직
+     * 없지만(mutations/quote-trash.ts 에 영구 삭제가 없다), 생기더라도 이 줄은
+     * 남아야 한다. 세금계산서와 입금 사실이 견적서보다 오래 사는 자료다.
+     */
+    quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
     // 시트의 `현황`. 정해진 목록이 아니라 **자유롭게 적는 메모**다(사용자 확인).
     // enum 으로 만들지 않는다 — 실제로 적히는 말이 매번 다르고, 목록으로
     // 가두면 적을 수 없는 상황이 생겨 사람이 다른 칸에 우회해서 적게 된다.
@@ -217,5 +235,10 @@ export const domesticOrders = pgTable(
     // 지난 기간을 다시 집계할 때 그 사이에 지워진 행까지 세어야 "그때 무슨 일이
     // 있었는가"를 답할 수 있다.
     index("domestic_orders_order_issued_date_idx").on(table.orderIssuedDate),
+    // 견적서 한 장이 어느 내자 줄에 걸려 있는지 되짚는 길. 부분 인덱스인 것은
+    // 이 저장소의 휴지통 관례다.
+    index("domestic_orders_quote_id_not_deleted_idx")
+      .on(table.quoteId)
+      .where(sql`is_deleted = false`),
   ]
 );

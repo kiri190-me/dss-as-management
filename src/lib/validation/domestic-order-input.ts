@@ -122,6 +122,13 @@ export type DomesticOrderFields = {
   dueDates: DomesticOrderDueDateInput[];
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
+  /**
+   * 연결된 견적서. null 이 정상이다 — 견적서 없이 발주만 들어온 줄이 있다.
+   * 연결하면 견적서번호·견적발행일·금액이 견적서를 따른다
+   * (schema/domestic-orders.ts 의 quote_id 주석). 손으로 적은 값은 지우지
+   * 않으므로, 연결을 풀면 그 값이 다시 보인다.
+   */
+  quoteId: string | null;
   progressNote: string | null;
   deliveredDate: string | null;
   deliveredBy: string | null;
@@ -325,6 +332,18 @@ export function validateDomesticOrderFields(
     repairCaseId = repairCaseIdRaw;
   }
 
+  // ── 견적서 연결 ──────────────────────────────────────────────────────
+  // 수리 건 연결과 같은 모양이다. 그 견적서가 실제로 있는지는 mutation 이 본다.
+  let quoteId: string | null = null;
+  const quoteIdRaw = raw.quoteId;
+  if (quoteIdRaw === null || quoteIdRaw === undefined || quoteIdRaw === "") {
+    quoteId = null;
+  } else if (!isValidDomesticOrderId(quoteIdRaw)) {
+    fieldErrors.quoteId = "견적서를 확인할 수 없습니다.";
+  } else {
+    quoteId = quoteIdRaw;
+  }
+
   // ── 고객사 ───────────────────────────────────────────────────────────
   // 수리 건 연결과 같은 모양이다 — 드롭다운에서 고르는 UUID 이고, 비워 두는
   // 것("연결 없음")이 정상이다. 그 고객사가 실제로 있는지는 mutation 이 본다.
@@ -404,6 +423,7 @@ export function validateDomesticOrderFields(
     ok: true,
     data: {
       repairCaseId,
+      quoteId,
       intakeNumberText: text.intakeNumberText,
       customerId,
       modelNameText: text.modelNameText,

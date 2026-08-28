@@ -36,7 +36,7 @@ import {
 import type { InlineEditCellWrapping } from "@/components/common/inline-edit-cell-button";
 import type { DomesticOrderInlineEditableField } from "@/lib/domain/domestic-order-cell-edit";
 import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
-import DomesticOrderEditForm from "./DomesticOrderEditForm";
+import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
 
 /**
@@ -1057,6 +1057,7 @@ export default function DomesticOrderListScreen({
   canEdit,
   repairCaseOptions,
   customerOptions,
+  quoteOptions,
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
@@ -1072,6 +1073,8 @@ export default function DomesticOrderListScreen({
   repairCaseOptions: RepairCaseLinkOption[];
   /** 수정 폼의 '고객사' 목록. 같은 이유로 고칠 수 없는 역할에게는 빈 배열이다. */
   customerOptions: CustomerOption[];
+  /** 견적서 연결 드롭다운. 고칠 수 없는 세션에는 빈 배열이 온다. */
+  quoteOptions: QuoteOption[];
 }) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
@@ -1173,6 +1176,7 @@ export default function DomesticOrderListScreen({
           row={editingRow}
           repairCaseOptions={repairCaseOptions}
           customerOptions={customerOptions}
+          quoteOptions={quoteOptions}
           onDone={() => setEditTarget(null)}
         />
       )}

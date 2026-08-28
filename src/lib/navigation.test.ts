@@ -55,7 +55,7 @@ test("navigation: the approved feature entries are the only role-gated items", (
   const restricted = navItems.filter((item) => item.isVisibleForRole);
   assert.deepEqual(
     restricted.map((i) => i.key).sort(),
-    ["customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "technicalProcedures", "workflows"]
+    ["customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "quotes", "technicalProcedures", "workflows"]
   );
 });
 
@@ -135,6 +135,21 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / SALES see the domesticOrders 
   }
   for (const role of ["AS_ENGINEER", "INVENTORY_MANAGER"] as const) {
     assert.equal(filterNavItemsForRole(navItems, role).some((i) => i.key === "domesticOrders"), false, `expected domesticOrders hidden for ${role}`);
+  }
+});
+
+test("filterNavItemsForRole: 견적서는 내자 정리와 정확히 같은 역할에게 보인다", () => {
+  // 견적서에는 부품 단가·작업비·합계가 그대로 들어 있다. 금액이 이유가 되어
+  // 엔지니어·재고 담당자가 빠지는 것은 내자 정리와 같은 판단이라, 술어도
+  // canViewDomesticOrders 를 그대로 부른다(quote-authorization.ts). 두 항목이
+  // 갈라지면 그쪽에서 판단이 바뀐 것이므로 여기서 걸린다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    const visible = filterNavItemsForRole(navItems, role);
+    assert.equal(
+      visible.some((i) => i.key === "quotes"),
+      visible.some((i) => i.key === "domesticOrders"),
+      `quotes 와 domesticOrders 의 노출이 ${role} 에서 갈렸다`
+    );
   }
 });
 
@@ -230,7 +245,9 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자
   assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
   // 내자 정리 1단계 — 수주·정산 흐름은 A/S 업무 그룹과 섞지 않는다(navigation.ts 주석).
-  assert.deepEqual(byKey.get("poDomestic")?.itemKeys, ["domesticOrders"]);
+  // 견적서가 둘째 항목으로 붙었다(2026-08-28). 내자 정리의 하위메뉴가 아니라
+  // 나란한 항목이다 — 내자 줄 없이 견적서만 내는 경우가 있다(navigation.ts 주석).
+  assert.deepEqual(byKey.get("poDomestic")?.itemKeys, ["domesticOrders", "quotes"]);
   // 사용자 관리·시스템 설정은 2026-08-28 에 '설정' 그룹으로 내려갔다 — '관리'에는
   // 업무용 마스터 자료만 남는다(navigation.ts 주석).
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["customers", "productModels"]);
@@ -274,9 +291,11 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     ADMIN: 1, // myActiveWork
     // Excel 이관 메뉴가 사라지면서 역할별로 감춰지는 항목이 하나씩 줄었고,
     // 내자 정리가 생기면서 엔지니어에게 감춰지는 항목이 처음으로 하나 생겼다.
-    AS_ENGINEER: 1, // domesticOrders
+    // 견적서(2026-08-28)가 내자 정리와 똑같은 세 역할에게만 보이므로, 감춰지는
+    // 항목이 엔지니어·재고 담당자 양쪽에서 하나씩 늘었다.
+    AS_ENGINEER: 2, // domesticOrders + quotes
     SALES: 3, // myActiveWork + technicalProcedures + workflows
-    INVENTORY_MANAGER: 6, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders
+    INVENTORY_MANAGER: 7, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);

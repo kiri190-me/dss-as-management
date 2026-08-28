@@ -3,7 +3,7 @@
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
-  savePartMinimumQuantities,
+  savePartOwnerSettings,
   type SavePartMinimumQuantitiesResult,
 } from "@/lib/db/mutations/part-minimum-quantities";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
@@ -55,15 +55,25 @@ async function withErrorRedaction<T extends { ok: boolean }>(label: string, run:
 export async function savePartMinimumQuantitiesAction(input: {
   partId: string;
   entries: unknown;
+  /**
+   * 소유구분별 단가. 화면이 한계수량과 **한 표에서** 편집하고 저장 단추도 하나라
+   * 같은 요청에 실어 보낸다 — 따로 보내면 한쪽만 저장되는 상태가 만들어진다
+   * (mutations/part-minimum-quantities.ts 의 savePartOwnerSettings).
+   *
+   * 넘기지 않으면 단가는 건드리지 않는다. 이 인자가 생기기 전에 이 액션을 부르던
+   * 코드가 그대로 동작한다.
+   */
+  unitPriceEntries?: unknown;
 }): Promise<SavePartMinimumQuantitiesResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.partId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
 
   return withErrorRedaction("savePartMinimumQuantitiesAction", () =>
-    savePartMinimumQuantities({
+    savePartOwnerSettings({
       partId: input.partId,
       entries: input.entries,
+      unitPriceEntries: input.unitPriceEntries,
       actorUserId: actorCheck.userId,
     })
   );

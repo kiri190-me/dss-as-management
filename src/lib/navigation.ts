@@ -6,6 +6,7 @@ import { canViewRepairCaseFlowcharts } from "@/lib/auth/repair-case-flowchart-au
 import { canViewCustomers } from "@/lib/auth/customer-authorization";
 import { canViewDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { canViewProductModels } from "@/lib/auth/product-model-authorization";
+import { canViewQuotes } from "@/lib/auth/quote-authorization";
 import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 
 export type NavItem = {
@@ -56,6 +57,7 @@ export const navItems: NavItem[] = [
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차", isVisibleForRole: canViewPublishedTechnicalTemplates },
   { key: "inventory", href: "/inventory", label: "재고 관리", isVisibleForRole: canViewInventory },
   { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리", isVisibleForRole: canViewDomesticOrders },
+  { key: "quotes", href: "/quotes", label: "견적서", isVisibleForRole: canViewQuotes },
   { key: "settings", href: "/settings", label: "시스템 설정" },
 ];
 
@@ -119,7 +121,11 @@ export const navGroups: NavGroup[] = [
   // 업무 그룹에 얹지 않았다 — 그 그룹은 장비가 들어와서 나가기까지의 흐름이고,
   // 이쪽은 발주에서 입금까지의 흐름이라 같이 놓으면 두 흐름이 한 목록에서
   // 섞여 읽힌다.
-  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders"] },
+  // 견적서가 이 그룹의 둘째 항목이다(2026-08-28). 발주에서 입금까지의 흐름
+  // 안에서 견적은 내자 진행 상황표 바로 앞에 오는 일이고, 두 화면을 오가는
+  // 사람이 같다. `내자 정리`의 하위메뉴로 두지 않은 것은 딸린 화면이 아니라
+  // 나란한 화면이기 때문이다 — 내자 줄 없이 견적서만 내는 경우가 있다.
+  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders", "quotes"] },
   { key: "admin", label: "관리", itemKeys: ["customers", "productModels"] },
   // 사용자 관리와 시스템 설정이 '관리'에서 여기로 내려왔다(2026-08-28, 사용자 요청).
   // '관리'는 업무를 하면서 들여다보는 **마스터 자료**(고객사·제품 모델)를 다루는

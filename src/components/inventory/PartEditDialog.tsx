@@ -27,6 +27,9 @@ export default function PartEditDialog({
   const [category, setCategory] = useState(part.category ?? "");
   const [itemType, setItemType] = useState(part.itemType ?? "");
   const [notes, setNotes] = useState(part.notes ?? "");
+  // 작업비. 빈 칸은 '정하지 않음'(null)이고 "0" 은 '작업비 없는 부품'이다
+  // — 견적서가 그 둘을 다르게 다룬다(schema/inventory.ts 의 laborCost).
+  const [laborCost, setLaborCost] = useState(part.laborCost ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -41,6 +44,7 @@ export default function PartEditDialog({
       setCategory(part.category ?? "");
       setItemType(part.itemType ?? "");
       setNotes(part.notes ?? "");
+      setLaborCost(part.laborCost ?? "");
       setErrorMessage(null);
       dialog.showModal();
     } else if (!isOpen && dialog.open) {
@@ -63,6 +67,8 @@ export default function PartEditDialog({
         category: category || null,
         itemType: itemType || null,
         notes: notes || null,
+        // 쉼표를 지우고 보낸다 — 사람이 금액을 그렇게 친다.
+        laborCost: laborCost.trim() === "" ? null : laborCost.trim().replace(/,/g, ""),
       },
     });
     setIsSubmitting(false);
@@ -154,6 +160,22 @@ export default function PartEditDialog({
               <option key={t} value={t} />
             ))}
           </datalist>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+          작업비 (원, 부품 1개당)
+          <input
+            type="text"
+            inputMode="decimal"
+            value={laborCost}
+            onChange={(event) => setLaborCost(event.target.value)}
+            placeholder="정하지 않음"
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+          />
+          {/* 견적서의 `2) 작업비` 는 이 값들의 합이다. 비우면 "정하지 않음"이라
+              그 부품 몫이 셈에 들어가지 않고, 0 은 "작업비 없는 부품"이다. */}
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+            비우면 미정 · 0 은 작업비 없음. 견적서 작업비가 이 값들의 합입니다.
+          </span>
         </label>
         <label className="col-span-full flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
           비고

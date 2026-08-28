@@ -148,6 +148,7 @@ export function MasterDataDeleteDialog({
   entityLabel,
   names,
   cascadeNote,
+  retentionNote,
   reason,
   isSubmitting,
   submitError,
@@ -159,8 +160,20 @@ export function MasterDataDeleteDialog({
   /** "고객사" / "제품 모델" — 문장 안에 그대로 들어간다. */
   entityLabel: string;
   names: string[];
-  /** 이 삭제로 함께 딸려 가는 것에 대한 설명. 화면마다 다른 유일한 부분이다. */
+  /** 이 삭제로 함께 딸려 가는 것에 대한 설명. */
   cascadeNote?: ReactNode;
+  /**
+   * 휴지통에 들어간 뒤 어떻게 되는지. **넘기지 않으면 기본 문장**(15일 뒤 자동
+   * 완전 삭제)이라, 이 인자가 생기기 전과 한 글자도 다르지 않다.
+   *
+   * 파일 머리말은 "규칙이 하나이므로 창도 하나"라고 적어 두었고 그 말은 지금도
+   * 맞다 — 다만 **모든 휴지통이 같은 보관 규칙을 갖지는 않는다**는 것이 나중에
+   * 드러났다. 견적서는 자동 만료도 영구 삭제도 없다(mutations/quote-trash.ts).
+   * 그 화면에서 기본 문장을 그대로 쓰면 창이 **사실이 아닌 말**을 하게 되고,
+   * 그건 화면마다 문구가 다른 것보다 나쁘다. 그래서 규칙이 실제로 다른 곳만
+   * 자기 문장을 넘긴다.
+   */
+  retentionNote?: ReactNode;
   reason: string;
   isSubmitting: boolean;
   submitError: string | null;
@@ -177,9 +190,16 @@ export function MasterDataDeleteDialog({
         선택한 {names.length}개의 {entityLabel}을(를) 휴지통으로 보내시겠습니까?
       </h2>
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        휴지통에 있는 동안에는 목록에서 보이지 않지만 언제든 복원할 수 있습니다.
-        <strong className="font-medium text-zinc-800 dark:text-zinc-200"> 15일이 지나면 자동으로 완전히 삭제</strong>
-        되며, 그 뒤에는 되돌릴 수 없습니다.
+        {retentionNote ?? (
+          <>
+            휴지통에 있는 동안에는 목록에서 보이지 않지만 언제든 복원할 수 있습니다.
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+              {" "}
+              15일이 지나면 자동으로 완전히 삭제
+            </strong>
+            되며, 그 뒤에는 되돌릴 수 없습니다.
+          </>
+        )}
       </p>
       {cascadeNote && <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{cascadeNote}</div>}
 

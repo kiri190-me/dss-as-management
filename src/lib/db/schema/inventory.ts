@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  numeric,
   check,
   index,
   integer,
@@ -55,6 +56,27 @@ export const parts = pgTable(
     category: text("category"), // 분류 — RFG/MB/호환 observed, kept free text (not proven to need enforcement)
     itemType: text("item_type"), // 항목 — free text per approved decision, no enum
     notes: text("notes"), // 비고
+    /**
+     * 이 부품 한 개를 갈 때 드는 **작업비 금액**(원, VAT 별도).
+     *
+     * 견적서의 `2) 작업비` 는 고정 금액이 아니라 **이 값들의 합**이다
+     * (사용자 확인 2026-08-28). 예전 OH 양식에 240만원이 상수로 박혀 있었지만
+     * 그건 그 파일에 남아 있던 한 건의 값일 뿐 규칙이 아니었다.
+     *
+     * ── 🔴 NULL 과 0 은 다른 뜻이다 ──────────────────────────────────────
+     *   · NULL = **정하지 않았다.** 견적서가 이 부품 몫의 작업비를 셈에 넣지
+     *     못하고, 화면이 "작업비 미정"이라고 알린다.
+     *   · 0    = **작업비가 없는 부품이다**(끼우기만 하면 되는 것). 셈에 0으로 들어간다.
+     *
+     * 0 으로 뭉개면 "정하지 않음"을 표현할 방법이 사라지고, 견적서가 작업비를
+     * 실제보다 적게 부른다 — part_unit_prices 가 같은 구분을 두는 것과 같은 이유다.
+     *
+     * 소유구분별로 나누지 않는다. 단가는 누구 물건이냐에 따라 다르지만
+     * (part_unit_prices), 갈아 끼우는 **손이 드는 시간은 같다.**
+     *
+     * numeric 인 이유는 이 저장소의 다른 금액들과 같다 — 십진 그대로 저장한다.
+     */
+    laborCost: numeric("labor_cost", { precision: 15, scale: 2 }),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

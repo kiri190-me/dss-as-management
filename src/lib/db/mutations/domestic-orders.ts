@@ -107,6 +107,8 @@ function toColumnValues(fields: DomesticOrderFields) {
     // (schema/domestic-orders.ts 의 requested_due_date 주석).
     quoteIssuedDate: fields.quoteIssuedDate,
     quoteNumber: fields.quoteNumber,
+    // 연결된 견적서. 여기 빠지면 사용자가 골라도 저장되지 않는 칸이 된다.
+    quoteId: fields.quoteId,
     progressNote: fields.progressNote,
     deliveredDate: fields.deliveredDate,
     deliveredBy: fields.deliveredBy,

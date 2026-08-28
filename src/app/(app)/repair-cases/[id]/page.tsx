@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { findOhTemplateForRepairCase } from "@/lib/db/queries/oh-part-templates";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
@@ -73,6 +74,9 @@ export default async function RepairCaseDetailPage({
       ? {
           caseContext: await getRequestCaseContext(resolved.id),
           availableParts: await getPartList(),
+          // 이 장비 모델에 이어진 O/H 템플릿. 없으면 null 이고, 그때는 화면이
+          // 일괄 담기 단추를 그리지 않는다.
+          ohTemplate: await findOhTemplateForRepairCase(id),
           // 소유구분-scoped 가용 수량 checkpoint — grouped by (part, owner);
           // a missing (partId, owner) entry means 0, never "unknown" (see
           // getPartOwnerAvailability's doc comment).

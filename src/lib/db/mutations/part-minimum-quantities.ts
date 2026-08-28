@@ -9,6 +9,12 @@ import {
   validatePartMinimumQuantityEntries,
   type PartMinimumQuantityEntry,
 } from "@/lib/validation/part-minimum-quantity-input";
+import {
+  UNIT_PRICE_FIELD_ERROR_PREFIX,
+  validatePartUnitPriceEntries,
+  type PartUnitPriceEntry,
+} from "@/lib/validation/part-unit-price-input";
+import { applyOneUnitPrice } from "./part-unit-prices";
 import { stockOwnerLabels } from "@/lib/domain/inventory-types";
 
 /**
@@ -93,6 +99,59 @@ export type SavePartMinimumQuantitiesInput = {
 export async function savePartMinimumQuantities(
   input: SavePartMinimumQuantitiesInput
 ): Promise<SavePartMinimumQuantitiesResult> {
+  // 단가를 함께 받지 않는 옛 진입점. 아래 savePartOwnerSettings 를 그대로 부른다 —
+  // 규칙을 두 벌로 두지 않기 위해서다.
+  return savePartOwnerSettings({
+    partId: input.partId,
+    entries: input.entries,
+    unitPriceEntries: undefined,
+    actorUserId: input.actorUserId,
+  });
+}
+
+function prefixPriceFieldErrors(fieldErrors: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors).map(([key, message]) => [
+      `${UNIT_PRICE_FIELD_ERROR_PREFIX}${key}`,
+      message,
+    ])
+  );
+}
+
+export type SavePartOwnerSettingsInput = {
+  partId: string;
+  /** 한계수량. 보내지 않은 소유자는 건드리지 않는다(= 지금 값 그대로). */
+  entries: unknown;
+  /**
+   * 소유구분별 단가. **undefined 면 단가를 아예 건드리지 않는다** — 빈 배열과
+   * 다른 뜻이다(빈 배열도 "고칠 칸이 없다"이긴 하지만, undefined 는 "이 저장은
+   * 단가와 무관하다"는 신호다). 옛 진입점이 이 값을 주지 않는다.
+   */
+  unitPriceEntries?: unknown;
+  actorUserId: string;
+};
+
+/**
+ * ============================================================================
+ * 한계수량과 단가를 **한 트랜잭션에** 저장한다
+ * ============================================================================
+ * 화면(부품 상세의 소유구분 표)이 둘을 한 표에서 편집하고 저장 단추도 하나다.
+ * 트랜잭션을 따로 열면 "한계수량은 저장됐는데 단가는 안 된" 반쪽 상태가
+ * 만들어지고, 그때 화면과 DB 는 서로 다른 말을 한다 — 이 파일 머리말의 1번이
+ * 소유자 넷에 대해 말한 것과 같은 이유다.
+ *
+ * 행위자 판정 · 권한(`inventory.parts` WRITE) · 부품 잠금은 여기서 **한 번만**
+ * 한다. 단가에 다른 권한을 두지 않는 이유는 한계수량과 같다 — 둘 다 그 부품을
+ * 어떻게 다룰지 정하는 값이라, 품명·도번을 고칠 수 있는 사람과 같은 판정이 맞다.
+ *
+ * 검증은 **쓰기 전에 둘 다** 끝낸다. 한계수량을 저장하다가 단가에서 형식 오류를
+ * 만나면 트랜잭션이 되돌려지긴 하지만, 그 전에 감사 로그까지 썼다가 되돌리는
+ * 것보다 아예 시작하지 않는 편이 낫다.
+ * ============================================================================
+ */
+export async function savePartOwnerSettings(
+  input: SavePartOwnerSettingsInput
+): Promise<SavePartMinimumQuantitiesResult> {
   const validated = validatePartMinimumQuantityEntries(input.entries);
   if (!validated.ok) {
     return {
@@ -102,14 +161,35 @@ export async function savePartMinimumQuantities(
       fieldErrors: validated.fieldErrors,
     };
   }
-  if (validated.data.length === 0) return { ok: true, changedCount: 0 };
+
+  let priceEntries: PartUnitPriceEntry[] = [];
+  if (input.unitPriceEntries !== undefined) {
+    const validatedPrices = validatePartUnitPriceEntries(input.unitPriceEntries);
+    if (!validatedPrices.ok) {
+      return {
+        ok: false,
+        code: "INVALID_INPUT",
+        message: "단가 입력을 확인해 주세요.",
+        // 🔴 키에 접두사를 붙인다. 두 검증 모두 **소유자 코드**를 키로 쓰기
+        // 때문에(한 표에서 편집하기 전에는 겹칠 일이 없었다), 그대로 두면 단가가
+        // 틀렸는데 빨간 글씨가 한계수량 칸 밑에 붙는다. 화면은 이 접두사로
+        // 어느 칸인지 가른다.
+        fieldErrors: prefixPriceFieldErrors(validatedPrices.fieldErrors),
+      };
+    }
+    priceEntries = validatedPrices.data;
+  }
+
+  if (validated.data.length === 0 && priceEntries.length === 0) {
+    return { ok: true, changedCount: 0 };
+  }
 
   try {
     return await db.transaction(async (tx): Promise<SavePartMinimumQuantitiesResult> => {
       const actor = await requireActor(tx, input.actorUserId);
 
       if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
-        throw new SaveRejected({ ok: false, code: "FORBIDDEN", message: "한계수량 수정 권한이 없습니다." });
+        throw new SaveRejected({ ok: false, code: "FORBIDDEN", message: "수정 권한이 없습니다." });
       }
 
       // 부품 행을 잡아 둔다 — 저장하는 동안 휴지통으로 넘어가지 않게(softDeletePart
@@ -126,6 +206,14 @@ export async function savePartMinimumQuantities(
       let changedCount = 0;
       for (const entry of validated.data) {
         changedCount += await applyOneOwner(tx, {
+          partId: part.id,
+          partName: part.partName,
+          entry,
+          actorUserId: actor.id,
+        });
+      }
+      for (const entry of priceEntries) {
+        changedCount += await applyOneUnitPrice(tx, {
           partId: part.id,
           partName: part.partName,
           entry,

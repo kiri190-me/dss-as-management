@@ -10,6 +10,7 @@ import {
   getReturnableUseTransactions,
 } from "@/lib/db/queries/inventory";
 import { getPartMinimumQuantities } from "@/lib/db/queries/part-minimum-quantities";
+import { getPartUnitPrices } from "@/lib/db/queries/part-unit-prices";
 import { listRepairCases } from "@/lib/db/queries/repair-cases";
 import InventoryPartDetailScreen from "@/components/inventory/InventoryPartDetailScreen";
 import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
@@ -42,9 +43,10 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
     notFound();
   }
 
-  const [history, minimumQuantities, categories, itemTypes, repairCases] = await Promise.all([
+  const [history, minimumQuantities, unitPrices, categories, itemTypes, repairCases] = await Promise.all([
     getPartTransactionHistory(id),
     getPartMinimumQuantities(id),
+    getPartUnitPrices(id),
     getDistinctCategories(),
     getDistinctItemTypes(),
     listRepairCases(),
@@ -73,6 +75,7 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
       part={part}
       history={history}
       minimumQuantities={minimumQuantities}
+      unitPrices={unitPrices}
       returnableByBalanceId={returnableByBalanceId}
       categorySuggestions={categories}
       itemTypeSuggestions={itemTypes}

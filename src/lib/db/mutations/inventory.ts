@@ -137,6 +137,12 @@ export type UpdatePartInput = {
     category?: string | null;
     itemType?: string | null;
     notes?: string | null;
+    /**
+     * 부품 한 개당 작업비(원). **null 은 "정하지 않음"이고 0 과 다르다**
+     * (schema/inventory.ts 의 laborCost 주석). 문자열로 오간다 — numeric
+     * 컬럼이라 Number 를 거치면 오차가 쌓인다.
+     */
+    laborCost?: string | null;
   };
 };
 
@@ -160,6 +166,14 @@ export async function updatePart(input: UpdatePartInput): Promise<UpdatePartResu
         fail("CONFLICT", "다른 사용자가 이 부품을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
       }
 
+      // 작업비는 numeric(15,2) 다. 여기서 걸러야 사용자가 이유를 안다 —
+      // 그냥 넘기면 Postgres 가 22003 으로 거절하고 그 오류는 아무것도
+      // 설명하지 못한다(part_unit_prices 와 같은 폭·같은 판단).
+      if (input.patch.laborCost !== undefined && input.patch.laborCost !== null) {
+        if (!/^\d{1,13}(?:\.\d{1,2})?$/.test(input.patch.laborCost)) {
+          fail("INVALID_INPUT", "작업비는 0 이상의 금액(소수점 두 자리까지)이어야 합니다.");
+        }
+      }
       if (input.patch.partName !== undefined && input.patch.partName.trim().length === 0) {
         fail("INVALID_INPUT", "품명을 입력해 주세요.");
       }

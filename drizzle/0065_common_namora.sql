@@ -1,0 +1,1 @@
+ALTER TABLE "quote_items" ADD COLUMN "is_overhaul_part" boolean DEFAULT false NOT NULL;

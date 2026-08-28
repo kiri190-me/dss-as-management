@@ -1,0 +1,3 @@
+ALTER TABLE "domestic_orders" ADD COLUMN "quote_id" uuid;--> statement-breakpoint
+ALTER TABLE "domestic_orders" ADD CONSTRAINT "domestic_orders_quote_id_quotes_id_fk" FOREIGN KEY ("quote_id") REFERENCES "public"."quotes"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "domestic_orders_quote_id_not_deleted_idx" ON "domestic_orders" USING btree ("quote_id") WHERE is_deleted = false;

@@ -1,0 +1,1 @@
+ALTER TABLE "parts" ADD COLUMN "labor_cost" numeric(15, 2);

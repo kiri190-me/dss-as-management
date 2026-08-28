@@ -14,6 +14,7 @@ import {
   type StockOwner,
 } from "@/lib/domain/inventory-types";
 import { applyCartLinePatch, type CartLine } from "@/lib/domain/inventory-part-request-cart";
+import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
 import { generateClientUuid } from "@/lib/client-uuid";
 
 /**
@@ -35,11 +36,18 @@ import { generateClientUuid } from "@/lib/client-uuid";
  */
 export default function PartRequestSection({
   repairCaseId,
+  ohTemplate,
   availableParts,
   ownerAvailabilityByPartId,
   ownRequests,
 }: {
   repairCaseId: string;
+  /**
+   * 이 장비의 제품 모델에 이어진 O/H 부품 템플릿. **null 이 정상이다** —
+   * 모델을 이어 두지 않았거나 O/H 템플릿이 없는 기종이면 없다
+   * (queries/oh-part-templates.ts 의 findOhTemplateForRepairCase).
+   */
+  ohTemplate: OhTemplateRow | null;
   availableParts: PartListRow[];
   /** 소유구분-scoped 가용 수량 checkpoint — a missing (partId, owner) entry means 0, never "unknown". */
   ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
@@ -48,6 +56,7 @@ export default function PartRequestSection({
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [ohMessage, setOhMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
@@ -68,6 +77,56 @@ export default function PartRequestSection({
   function addToCart(part: PartListRow) {
     if (cart.some((line) => line.partId === part.id)) return;
     setCart((prev) => [...prev, { partId: part.id, partName: part.partName, quantity: "1", owner: "", note: "" }]);
+  }
+
+  /**
+   * O/H 템플릿의 부품을 **한 번에** 장바구니에 담는다.
+   *
+   * ── 🔴 재고에 연결되지 않은 줄은 담기지 않는다 ──────────────────────
+   * 부품 요청은 재고 마스터의 부품(part_id)에만 걸 수 있다. 템플릿에는
+   * 마스터에 없는 이름이 섞여 있어서(양식에서 옮겨 온 그대로), 그런 줄은
+   * 담기지 않는다. **조용히 빼면 안 된다** — 담은 줄만 보고 다 담겼다고
+   * 믿으면 정작 필요한 부품을 빠뜨린 채 요청이 나간다. 그래서 무엇이 빠졌는지
+   * 이름을 그대로 알려 준다.
+   *
+   * 이미 담긴 부품은 건너뛴다(장바구니가 part_id 하나당 한 줄이다).
+   * 수량은 템플릿의 값을 그대로 쓰고, 사람이 담긴 뒤 고칠 수 있다.
+   */
+  function addOhTemplateToCart() {
+    if (!ohTemplate) return;
+
+    const availableIds = new Set(availableParts.map((part) => part.id));
+    const added: CartLine[] = [];
+    const skippedNoPart: string[] = [];
+    const skippedAlready: string[] = [];
+
+    for (const item of ohTemplate.items) {
+      if (item.partId === null || !availableIds.has(item.partId)) {
+        skippedNoPart.push(item.partNameText);
+        continue;
+      }
+      if (cart.some((line) => line.partId === item.partId)) {
+        skippedAlready.push(item.partNameText);
+        continue;
+      }
+      const part = availableParts.find((candidate) => candidate.id === item.partId);
+      added.push({
+        partId: item.partId,
+        partName: part?.partName ?? item.partNameText,
+        quantity: String(item.quantity),
+        owner: "",
+        note: "",
+      });
+    }
+
+    if (added.length > 0) setCart((prev) => [...prev, ...added]);
+
+    const notes: string[] = [`${added.length}종을 담았습니다.`];
+    if (skippedAlready.length > 0) notes.push(`이미 담겨 있음: ${skippedAlready.join(', ')}`);
+    if (skippedNoPart.length > 0) {
+      notes.push(`재고에 없어 담지 못함(직접 찾아 담아 주세요): ${skippedNoPart.join(', ')}`);
+    }
+    setOhMessage(notes.join(" · "));
   }
 
   function removeFromCart(partId: string) {
@@ -142,6 +201,30 @@ export default function PartRequestSection({
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">부품 요청</h2>
+
+      {/* O/H 템플릿 일괄 담기. 제품 모델에 템플릿이 이어져 있을 때만 그린다 —
+          이을 것이 없으면 담을 것도 없다(queries 의 findOhTemplateForRepairCase).
+          O/H 대상 여부로 감추지 **않는다**: 대상이 아니어도 부품을 담아야 할
+          때가 있고, 대상 판정은 알려 주는 것이지 막는 것이 아니다. */}
+      {ohTemplate && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-zinc-700 dark:text-zinc-300">
+              이 장비의 <b>O/H 부품 템플릿</b> — 기종 {ohTemplate.code} · 부품 {ohTemplate.items.length}종
+            </p>
+            <button
+              type="button"
+              onClick={addOhTemplateToCart}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              O/H 부품 한 번에 담기
+            </button>
+          </div>
+          {ohMessage && (
+            <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">{ohMessage}</p>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-col gap-2">
           <input

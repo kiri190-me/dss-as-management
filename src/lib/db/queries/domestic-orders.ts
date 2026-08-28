@@ -8,8 +8,11 @@ import {
   domesticOrderDueDates,
   domesticOrders,
   products,
+  quoteItems,
+  quotes,
   repairCases,
 } from "../schema";
+import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import {
   resolveDomesticOrderCustomerRowColor,
   resolveDomesticOrderDeliveredDate,
@@ -107,6 +110,12 @@ export type DomesticOrderDueDate = {
  * 이름이 어느 쪽에서 왔는지가 사라진다(파일 헤더의 '두 벌을 다 실어 온다').
  * 같은 표를 한 질의에서 두 번 조인하려면 별칭이 있어야 한다.
  */
+/**
+ * 연결된 견적서. 지워진 견적서는 조인하지 않는다 — 휴지통에 있는 문서의
+ * 번호·금액이 내자 표에 계속 보이면, 그 값이 어디서 왔는지 설명할 수 없다.
+ */
+const linkedQuotes = alias(quotes, "linked_quotes");
+
 const orderCustomers = alias(customers, "order_customers");
 const repairCaseCustomers = alias(customers, "repair_case_customers");
 
@@ -198,6 +207,14 @@ export type DomesticOrderJoinRow = {
    */
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
+  /**
+   * 연결된 견적서(2026-08-28). 아래 두 칸은 그 견적서에서 온 값이고, 매퍼가
+   * 위 quoteNumber · quoteIssuedDate 를 이걸로 덮는다(mapDomesticOrderRow 의
+   * 머리말). 연결이 없거나 그 견적서가 휴지통에 있으면 셋 다 null 이다.
+   */
+  quoteId: string | null;
+  linkedQuoteNumber: string | null;
+  linkedQuoteDate: string | null;
   progressNote: string | null;
   /**
    * ⚠️ **화면에 그리지 않는다.** 손으로 적던 시절의 값이고, 지금 `납품일` 로
@@ -297,6 +314,15 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
  * 자료가 아니라서, 여기서 섞어 두면 다음 단계에서 이 함수를 수정 폼의 초기값에
  * 쓰는 순간 "-"라는 글자가 그대로 저장된다. 화면 쪽이 그릴 때만 바꾼다.
  */
+/**
+ * 연결된 견적서가 있으면 **그쪽이 이긴다.**
+ *
+ * 이 표의 다른 칸들은 '이 행의 값이 먼저, 없으면 연결된 쪽'인데 이 셋만
+ * 방향이 반대다. 이유는 견적서 쪽이 더 정확하기 때문이다 — 금액은 부품 줄에서
+ * 계산되고, 번호·발행일은 실제로 발행된 문서의 값이다. 손으로 적은 값은 그
+ * 문서가 없던 시절의 기록이고, **지우지 않으므로 연결을 풀면 다시 보인다**
+ * (schema/domestic-orders.ts 의 quote_id 주석).
+ */
 export function mapDomesticOrderRow(
   row: DomesticOrderJoinRow,
   /**
@@ -304,7 +330,12 @@ export function mapDomesticOrderRow(
    * 날짜 수만큼 같은 줄이 복제돼 나오고, 그러면 이 매퍼가 접는 일까지
    * 떠맡아야 한다(그리고 금액 합계처럼 줄 수를 세는 쪽이 전부 어긋난다).
    */
-  dueDates: DomesticOrderDueDate[]
+  dueDates: DomesticOrderDueDate[],
+  /**
+   * 연결된 견적서의 공급가(부품 줄 합 + 작업비). 연결이 없거나 그 견적서가
+   * 휴지통에 있으면 null 이고, 그때는 이 행에 손으로 적은 금액을 쓴다.
+   */
+  linkedQuoteAmount: string | null = null
 ): DomesticOrderListItem {
   return {
     ...row,
@@ -331,6 +362,11 @@ export function mapDomesticOrderRow(
     // 그대로 따라간다(그 함수의 주석). 두 벌을 coalesce 하면 화면의 이름과 줄
     // 색이 서로 다른 고객사를 가리킬 수 있다.
     customerRowColor: resolveDomesticOrderCustomerRowColor(row),
+    // 위 '연결된 견적서가 있으면 그쪽이 이긴다'. ...row 로 들어온 손입력값을
+    // 여기서 덮는다 — 덮어쓸 값이 없으면(연결 없음) 그대로 남는다.
+    quoteNumber: row.linkedQuoteNumber ?? row.quoteNumber,
+    quoteIssuedDate: row.linkedQuoteDate ?? row.quoteIssuedDate,
+    amountExcludingVat: linkedQuoteAmount ?? row.amountExcludingVat,
   };
 }
 
@@ -389,6 +425,12 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       // 표를 따로 읽어 온다(위 타입 주석).
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
       quoteNumber: domesticOrders.quoteNumber,
+      // 연결된 견적서. 있으면 아래 세 칸이 손으로 적은 값 대신 쓰인다
+      // (schema/domestic-orders.ts 의 quote_id 주석 — 이 표에서 방향이
+      // 반대인 유일한 칸들이다).
+      quoteId: domesticOrders.quoteId,
+      linkedQuoteNumber: linkedQuotes.quoteNumber,
+      linkedQuoteDate: linkedQuotes.quoteDate,
       progressNote: domesticOrders.progressNote,
       // ⚠️ 화면에 그리지 않는 값인데도 고른다 — **저장이 되실어 보내야** 해서다.
       // 빼는 순간 칸 하나를 고치는 저장 한 번에 이 칼럼이 지워진다(위 타입 주석).
@@ -418,14 +460,67 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     // (파일 헤더의 '어느 쪽을 쓸지는 SQL 이 정하지 않는다').
     .leftJoin(orderCustomers, eq(orderCustomers.id, domesticOrders.customerId))
     .leftJoin(repairCaseCustomers, eq(repairCaseCustomers.id, repairCases.customerId))
+    .leftJoin(
+      linkedQuotes,
+      and(eq(linkedQuotes.id, domesticOrders.quoteId), eq(linkedQuotes.isDeleted, false))
+    )
     .where(eq(domesticOrders.isDeleted, false))
     .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
 
   const dueDatesByOrderId = await loadDueDatesByOrderId(rows.map((row) => row.id));
+  // 연결된 견적서의 금액도 **질의 한 번으로** 걷어 온다 — 줄마다 읽으면 N+1 이다.
+  const quoteAmounts = await loadQuoteAmounts(
+    rows.map((row) => row.quoteId).filter((id): id is string => id !== null)
+  );
 
-  return rows.map((row) => mapDomesticOrderRow(row, dueDatesByOrderId.get(row.id) ?? []));
+  return rows.map((row) =>
+    mapDomesticOrderRow(
+      row,
+      dueDatesByOrderId.get(row.id) ?? [],
+      row.quoteId ? quoteAmounts.get(row.quoteId) ?? null : null
+    )
+  );
 }
 
+/**
+ * 연결된 견적서들의 공급가(부품 줄 합 + 작업비)를 **질의 한 번으로** 구한다.
+ *
+ * 견적서 목록이 쓰는 것과 같은 셈법이라(queries/quotes.ts 의 sumQuoteSupplyAmount)
+ * 두 화면의 금액이 갈라지지 않는다. 금액은 numeric 이라 문자열로 다루고, 마지막에
+ * 소수 두 자리로 고정해 이 표의 다른 금액과 같은 모양으로 만든다.
+ */
+async function loadQuoteAmounts(quoteIds: string[]): Promise<Map<string, string>> {
+  const amounts = new Map<string, string>();
+  if (quoteIds.length === 0) return amounts;
+
+  const quoteRows = await db
+    .select({ id: quotes.id, workCost: quotes.workCost })
+    .from(quotes)
+    .where(and(inArray(quotes.id, quoteIds), eq(quotes.isDeleted, false)));
+  if (quoteRows.length === 0) return amounts;
+
+  const itemRows = await db
+    .select({
+      quoteId: quoteItems.quoteId,
+      quantity: quoteItems.quantity,
+      unitPrice: quoteItems.unitPrice,
+    })
+    .from(quoteItems)
+    .where(inArray(quoteItems.quoteId, quoteRows.map((row) => row.id)));
+
+  const itemsByQuoteId = new Map<string, { quantity: number; unitPrice: string }[]>();
+  for (const item of itemRows) {
+    const bucket = itemsByQuoteId.get(item.quoteId);
+    if (bucket) bucket.push(item);
+    else itemsByQuoteId.set(item.quoteId, [item]);
+  }
+
+  for (const quote of quoteRows) {
+    const total = sumQuoteSupplyAmount(itemsByQuoteId.get(quote.id) ?? [], quote.workCost);
+    amounts.set(quote.id, total.toFixed(2));
+  }
+  return amounts;
+}
 /**
  * 여러 줄의 납기 요청일을 **질의 한 번으로** 걷어 와 줄마다 묶는다.
  *
@@ -598,4 +693,92 @@ export async function listCustomerOptions(): Promise<CustomerOption[]> {
     .from(customers)
     .where(eq(customers.isDeleted, false))
     .orderBy(asc(customers.name));
+}
+
+/**
+ * 접수 건들의 **견적서번호 · 견적발행일** — 고객 안내 현황판이 쓴다.
+ *
+ * 이 파일에 두는 이유는 위 listDomesticOrderDueDatesForRepairCase 와 같다:
+ * 읽는 표가 내자 정리의 것이고, **그 표를 어떤 조건으로 읽어야 하는지를 이
+ * 파일이 한 곳에서 갖는다.** 저쪽 화면의 조회 파일에 같은 SQL 을 한 벌 더
+ * 적으면 언젠가 한쪽만 고쳐져 같은 자료가 화면마다 다른 번호로 보인다.
+ *
+ * ── 연결된 견적서가 이긴다 ──────────────────────────────────────────────
+ * 손으로 적은 quote_number · quote_issued_date 와 연결된 견적서의 값이 다르면
+ * **견적서 쪽을 쓴다.** 이 표의 다른 칸들이 "이 행의 값이 먼저"인 것과 방향이
+ * 반대인데, 이유는 번호와 발행일이 실제로 발행된 문서의 값이기 때문이다
+ * (schema/domestic-orders.ts 의 quote_id 주석). 목록 조회가 이미 같은 규칙으로
+ * 해소하고 있어(mapDomesticOrderRow) 그 규칙을 여기서 다시 정의하지 않고
+ * 같은 모양으로 적는다.
+ *
+ * ── 한 접수에 내자 줄이 여럿일 수 있다 ──────────────────────────────────
+ * 분할 발주가 그렇다. 고객 화면에는 칸이 하나뿐이라 **견적발행일이 가장 늦은
+ * 줄**을 고른다 — 재견적이 나갔다면 마지막 것이 지금 유효한 값이다.
+ * 발행일이 없는 줄은 후보에서 빠진다(번호만 있고 날짜가 없으면 어느 것이
+ * 최신인지 판단할 근거가 없다).
+ *
+ * 접수 하나씩 부르지 않고 목록을 받는 이유: 현황판은 한 고객사의 접수를 한꺼번에
+ * 그린다. 건마다 조회를 돌면 줄 수만큼 왕복이 생긴다.
+ */
+export type RepairCaseQuoteInfo = {
+  repairCaseId: string;
+  quoteNumber: string | null;
+  quoteIssuedDate: string | null;
+};
+
+export async function listQuoteInfoForRepairCases(
+  repairCaseIds: string[]
+): Promise<Map<string, RepairCaseQuoteInfo>> {
+  const result = new Map<string, RepairCaseQuoteInfo>();
+  if (repairCaseIds.length === 0) return result;
+
+  const linkedQuotes = alias(quotes, "customer_portal_linked_quotes");
+
+  const rows = await db
+    .select({
+      repairCaseId: domesticOrders.repairCaseId,
+      quoteNumber: domesticOrders.quoteNumber,
+      quoteIssuedDate: domesticOrders.quoteIssuedDate,
+      linkedQuoteNumber: linkedQuotes.quoteNumber,
+      linkedQuoteDate: linkedQuotes.quoteDate,
+    })
+    .from(domesticOrders)
+    .leftJoin(
+      linkedQuotes,
+      and(eq(domesticOrders.quoteId, linkedQuotes.id), eq(linkedQuotes.isDeleted, false))
+    )
+    .where(
+      and(
+        eq(domesticOrders.isDeleted, false),
+        inArray(domesticOrders.repairCaseId, repairCaseIds)
+      )
+    );
+
+  for (const row of rows) {
+    if (!row.repairCaseId) continue;
+
+    // 연결된 견적서가 이긴다. 위 목록 조회(mapDomesticOrderRow)와 같은 규칙이다.
+    const quoteNumber = row.linkedQuoteNumber ?? row.quoteNumber;
+    const quoteIssuedDate = row.linkedQuoteDate ?? row.quoteIssuedDate;
+
+    const previous = result.get(row.repairCaseId);
+
+    // 발행일이 가장 늦은 줄이 이긴다. 날짜가 없는 줄은 이미 자리를 잡은 것을
+    // 밀어내지 못한다 — 최신인지 판단할 근거가 없기 때문이다.
+    const isNewer =
+      !previous ||
+      (quoteIssuedDate !== null &&
+        (previous.quoteIssuedDate === null ||
+          quoteIssuedDate > previous.quoteIssuedDate));
+
+    if (isNewer) {
+      result.set(row.repairCaseId, {
+        repairCaseId: row.repairCaseId,
+        quoteNumber,
+        quoteIssuedDate,
+      });
+    }
+  }
+
+  return result;
 }

@@ -189,6 +189,15 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "WRITE",
   },
   {
+    key: "quotes",
+    label: "견적서",
+    // 삭제·휴지통이 생기면서 상한을 관리까지 올렸다 — 위 주석이 예고했던 그
+    // 시점이다. 쓰기와 갈리는 조작이 실제로 생겼다: 만들기·고치기는 영업까지고,
+    // 지우고 되살리는 것은 관리자 이상이다(quote-authorization.ts).
+    description: "고객사에 보내는 견적서(부품비·작업비·합계). 관리는 삭제·복원",
+    maxMeaningfulLevel: "MANAGE",
+  },
+  {
     key: "settings",
     label: "시스템 설정",
     description: "시스템 전반 설정",

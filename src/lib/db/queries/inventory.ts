@@ -214,6 +214,12 @@ export type PartDetail = {
   category: string | null;
   itemType: string | null;
   notes: string | null;
+  /**
+   * 부품 한 개당 작업비(원). **null 은 "정하지 않음"이고 "0"(작업비 없는 부품)과
+   * 다르다**(schema/inventory.ts 의 laborCost). 견적서의 작업비가 이 값들의
+   * 합이라, 정하지 않은 것을 0 으로 뭉개면 작업비를 실제보다 적게 부르게 된다.
+   */
+  laborCost: string | null;
   version: number;
   balances: PartBalanceRow[];
 };
@@ -243,6 +249,7 @@ export async function getPartDetail(partId: string): Promise<PartDetail | null> 
     category: part.category,
     itemType: part.itemType,
     notes: part.notes,
+    laborCost: part.laborCost,
     version: part.version,
     balances,
   };

@@ -29,6 +29,7 @@ import {
   canCreatePartRequest,
 } from "./inventory-authorization";
 import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-authorization";
+import { canDeleteQuotes, canEditQuotes, canViewQuotes } from "./quote-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import {
   canViewProductModels,
@@ -218,6 +219,12 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       // 여기서도 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서**
       // 구한다(이 파일 맨 위 주석).
       return ladder({ write: canEditDomesticOrders(role), read: canViewDomesticOrders(role) });
+
+    case "quotes":
+      // 내자 정리와 같은 모양이다 — 만들기·고치기는 서버 액션이 실제로 저장하고
+      // (4단계), 삭제·복원은 관리자 이상이다. 여기서도 역할 목록을 옮겨 적지 않고
+      // *-authorization.ts 를 **호출해서** 구한다(이 파일 맨 위 주석).
+      return ladder({ manage: canDeleteQuotes(role), write: canEditQuotes(role), read: canViewQuotes(role) });
 
     case "settings":
       // 아직 안내 문구만 있는 화면이다.

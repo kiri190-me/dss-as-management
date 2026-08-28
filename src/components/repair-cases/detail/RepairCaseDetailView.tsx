@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
 import ExceptionStatusNotice from "@/components/repair-cases/detail/ExceptionStatusNotice";
@@ -63,6 +64,8 @@ export default function RepairCaseDetailView({
   partRequestData: {
     caseContext: RequestCaseContext | null;
     availableParts: PartListRow[];
+    /** 이 장비 모델에 이어진 O/H 부품 템플릿. 없으면 null 이다. */
+    ohTemplate: OhTemplateRow | null;
     ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
     ownRequests: OwnPartRequestRow[];
   } | null;
@@ -158,6 +161,7 @@ export default function RepairCaseDetailView({
         <PartRequestSection
           repairCaseId={partRequestData.caseContext.id}
           availableParts={partRequestData.availableParts}
+          ohTemplate={partRequestData.ohTemplate}
           ownerAvailabilityByPartId={partRequestData.ownerAvailabilityByPartId}
           ownRequests={partRequestData.ownRequests}
         />

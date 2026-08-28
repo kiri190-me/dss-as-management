@@ -43,6 +43,8 @@ test("빈 입력도 통과한다 — 이 표에는 필수 칸이 없다", () => 
   if (!result.ok) return;
   assert.deepEqual(result.data, {
     repairCaseId: null,
+    // 견적서 연결(2026-08-28) — 비어 있는 것이 기본이다.
+    quoteId: null,
     intakeNumberText: null,
     customerId: null,
     modelNameText: null,
