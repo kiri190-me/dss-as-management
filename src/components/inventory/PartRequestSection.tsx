@@ -18,11 +18,12 @@ import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
 import { generateClientUuid } from "@/lib/client-uuid";
 
 /**
- * AS_ENGINEER's 부품 요청 section, embedded in a repair-case detail page —
- * Parts Request permission checkpoint: any AS_ENGINEER may submit a request
- * for any repair case, not only their own assigned ones (this component is
- * only ever rendered for an AS_ENGINEER at all — see [id]/page.tsx's
- * partRequestData gate, which is role-only). Submitting never reserves or
+ * 부품 요청 칸. 수리 건 상세에 들어간다 —
+ * Parts Request permission checkpoint: 담당자가 아니어도 그 건에 요청을 올릴
+ * 수 있다. **누구에게 그려지는가는 역할이 아니라 설정이 정한다** — [id]/page.tsx
+ * 의 partRequestData 게이트가 부품 요청 쓰기 권한(inventory.requests WRITE)을
+ * 본다. 기본값으로는 AS_ENGINEER 와 최고관리자가 갖고, 나머지 역할은 역할별
+ * 접근 권한 화면에서 열어 준다. Submitting never reserves or
  * deducts stock (plan §12) — availability shown here is informational only.
  * The server independently re-checks role/authorization regardless of what
  * this section renders — a disabled/hidden form here is a UX convenience

@@ -138,7 +138,7 @@ export type UpdatePartInput = {
     itemType?: string | null;
     notes?: string | null;
     /**
-     * 부품 한 개당 작업비(원). **null 은 "정하지 않음"이고 0 과 다르다**
+     * 이 부품의 작업비(원, 수량과 무관). **null 은 "정하지 않음"이고 0 과 다르다**
      * (schema/inventory.ts 의 laborCost 주석). 문자열로 오간다 — numeric
      * 컬럼이라 Number 를 거치면 오차가 쌓인다.
      */

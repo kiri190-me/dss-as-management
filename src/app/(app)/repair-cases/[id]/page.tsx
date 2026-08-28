@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { findOhTemplateForRepairCase } from "@/lib/db/queries/oh-part-templates";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
@@ -64,13 +65,21 @@ export default async function RepairCaseDetailPage({
   const isDatabaseBacked = resolved.source === "DATABASE" && writeSource === "database";
   const referenceData = isDatabaseBacked ? await getIntakeReferenceData() : null;
 
-  // Phase 5B-3 부품 요청 section — AS_ENGINEER only, DATABASE-backed cases
-  // only (the request tables have no local/mock equivalent). Fetched here
-  // (not inside the section itself) so an unauthorized/ineligible role
-  // never even receives the query results — a UX convenience only, the
-  // mutation layer re-checks assignment/lock independently regardless.
+  // 부품 요청 칸 — DATABASE 소스 건에만 뜬다(요청 표에는 mock 대응물이 없다).
+  // 조회를 칸 안이 아니라 여기서 하는 이유는, 권한 없는 역할이 결과를 아예
+  // 받지 못하게 하기 위해서다. 그래도 편의일 뿐이고 저장은 mutation 이 다시
+  // 처음부터 확인한다.
+  //
+  // ── 🔴 역할 이름이 아니라 설정을 본다 ────────────────────────────────
+  // 예전에는 역할 이름을 그대로 비교했다. inventory 는 설정이 최종 판정인
+  // 메뉴인데(permission-features.ts 의 SETTINGS_ENFORCED_AREAS) 이 한 줄만
+  // 그 약속에서 빠져 있었다 — 저장하는 쪽은 이미 hasPermission 을 보고
+  // 있어서, 역할별 접근 권한에서 '부품 요청'을 쓰기로 올려도 **칸 자체가
+  // 그려지지 않아** 올릴 방법이 없었다(2026-08-28).
   const partRequestData =
-    isDatabaseBacked && actingUser?.role === "AS_ENGINEER"
+    isDatabaseBacked &&
+    actingUser !== null &&
+    (await hasPermission(actingUser.role, "inventory.requests", "WRITE"))
       ? {
           caseContext: await getRequestCaseContext(resolved.id),
           availableParts: await getPartList(),

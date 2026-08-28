@@ -27,7 +27,7 @@ export default function PartEditDialog({
   const [category, setCategory] = useState(part.category ?? "");
   const [itemType, setItemType] = useState(part.itemType ?? "");
   const [notes, setNotes] = useState(part.notes ?? "");
-  // 작업비. 빈 칸은 '정하지 않음'(null)이고 "0" 은 '작업비 없는 부품'이다
+  // 이 부품 한 품목의 작업비. 빈 칸은 '정하지 않음'(null)이고 "0" 은 '작업비 없는 부품'이다
   // — 견적서가 그 둘을 다르게 다룬다(schema/inventory.ts 의 laborCost).
   const [laborCost, setLaborCost] = useState(part.laborCost ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -162,7 +162,7 @@ export default function PartEditDialog({
           </datalist>
         </label>
         <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-          작업비 (원, 부품 1개당)
+          작업비 (원, 품목당)
           <input
             type="text"
             inputMode="decimal"
@@ -174,7 +174,7 @@ export default function PartEditDialog({
           {/* 견적서의 `2) 작업비` 는 이 값들의 합이다. 비우면 "정하지 않음"이라
               그 부품 몫이 셈에 들어가지 않고, 0 은 "작업비 없는 부품"이다. */}
           <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-            비우면 미정 · 0 은 작업비 없음. 견적서 작업비가 이 값들의 합입니다.
+            비우면 미정 · 0 은 작업비 없음. 견적서 작업비가 이 값들의 합입니다. 출하 수량이 몇 개든 품목당 한 번 붙습니다.
           </span>
         </label>
         <label className="col-span-full flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">

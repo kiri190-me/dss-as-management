@@ -81,7 +81,7 @@ export async function updatePartAction(input: {
     category?: string | null;
     itemType?: string | null;
     notes?: string | null;
-    /** 부품 한 개당 작업비(원). null 은 "정하지 않음"이고 0 과 다르다(schema/inventory.ts). */
+    /** 이 부품의 작업비(원, 수량과 무관). null 은 "정하지 않음"이고 0 과 다르다(schema/inventory.ts). */
     laborCost?: string | null;
   };
 }): Promise<UpdatePartResult | Forbidden> {

@@ -10,6 +10,8 @@ import {
 import { generateClientUuid } from "@/lib/client-uuid";
 import { stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
 import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
+import { buildQuoteSubject } from "@/lib/domain/quote-subject";
 import {
   MAX_QUOTE_ITEMS,
   QUOTE_KINDS,
@@ -67,11 +69,18 @@ import {
 const VAT_RATE = 0.1;
 const AMOUNT_FORMAT = new Intl.NumberFormat("ko-KR");
 
+/**
+ * 서버 액션 자체가 끊긴 경우. 액션이 돌려주는 오류(권한·검증·충돌)는 각자
+ * 제 문장을 갖고 있고, 이 문구는 **대답이 아예 오지 않은** 자리에만 쓴다.
+ */
+const SAVE_FAILED_MESSAGE =
+  "저장 요청이 끝나지 못했습니다. 잠시 후 다시 시도해 주세요. 계속 그러면 화면을 새로고침해 주세요.";
+
 type ItemRow = {
   key: string;
   partId: string | null;
   /**
-   * 이 줄의 부품 한 개당 작업비(원). 재고에서 담아 온 줄에만 있다 —
+   * 이 줄에 붙는 작업비(원) — 수량과 무관하다. 재고에서 담아 온 줄에만 있다 —
    * 손으로 적은 줄은 어느 부품인지 알 수 없어 null 이다. 저장되지 않고
    * **작업비 합계를 제안하는 데만** 쓴다.
    */
@@ -167,26 +176,30 @@ export default function QuoteEditForm({
   const vat = supplyAmount * VAT_RATE;
 
   /**
-   * 담긴 부품들의 작업비 합계. **작업비는 이 값들의 합이다**(사용자 확인
-   * 2026-08-28 — 고정 금액이 아니다).
+   * 모델명·신고증상·종류로 지은 품명. 지금 적힌 것과 같으면 아래 단추를
+   * 그리지 않는다 — 눌러도 아무 일도 일어나지 않는 단추는 두지 않는다.
+   *
+   * 작업비와 같은 방식이다: **자동으로 덮지 않고 제안만 한다.** 글자를 칠
+   * 때마다 덮으면 손으로 다듬어 둔 품명이 사라진다.
+   */
+  const suggestedSubject = useMemo(
+    () =>
+      buildQuoteSubject({
+        modelName: modelNameText,
+        faultDescription: faultDescriptionText,
+        kind,
+      }),
+    [modelNameText, faultDescriptionText, kind]
+  );
+
+  /**
+   * 담긴 부품들의 작업비 합계. 규칙과 그 이유는 domain/quote-labor-cost.ts 에
+   * 있다 — **수량을 곱하지 않는다.**
    *
    * 자동으로 채우지 않고 **제안만 한다.** 사람이 적어 둔 값을 글자를 칠
    * 때마다 덮으면 손으로 조정한 금액이 사라진다. 누르면 그때 들어간다.
    */
-  const laborSuggestion = useMemo(() => {
-    let total = 0;
-    const unknown: string[] = [];
-    for (const row of items) {
-      const quantity = Number(row.quantity) || 0;
-      if (row.partNameText.trim() === "") continue;
-      if (row.laborCost === null) {
-        if (row.partId !== null) unknown.push(row.partNameText);
-        continue;
-      }
-      total += Number(row.laborCost) * quantity;
-    }
-    return { total, unknown };
-  }, [items]);
+  const laborSuggestion = useMemo(() => sumQuoteLaborCost(items), [items]);
 
   async function handleLookup() {
     const intakeNumber = intakeNumberText.trim();
@@ -217,6 +230,19 @@ export default function QuoteEditForm({
       setLotNumberText(found.lotNumber ?? "");
       setSerialNumberText(found.serialNumber ?? "");
       setFaultDescriptionText(found.faultDescription ?? "");
+
+      // 품명은 **비어 있을 때만** 지어 준다. 인수번호를 고쳐 다시 불러올
+      // 때마다 손으로 다듬어 둔 품명이 사라지면 안 된다 — 다시 짓고 싶으면
+      // 품명 칸 아래의 단추를 누른다.
+      if (subject.trim() === "") {
+        setSubject(
+          buildQuoteSubject({
+            modelName: found.modelName,
+            faultDescription: found.faultDescription,
+            kind,
+          })
+        );
+      }
       setUsedParts(found.usedParts);
       setLookupMessage(
         found.usedParts.length > 0
@@ -300,6 +326,11 @@ export default function QuoteEditForm({
     setIsSubmitting(true);
     setSubmitError(null);
     setFieldErrors({});
+
+    // 새 장을 만든 뒤에는 화면을 옮기는 중이다. 그 사이에 단추를 되살리면
+    // 사람이 한 번 더 눌러 같은 견적서가 두 장 만들어진다 — 아래 finally 가
+    // 이 깃발을 보고 `저장 중…` 그대로 둔다.
+    let leaving = false;
     try {
       const fields = collectFields();
       const result = quote
@@ -318,10 +349,37 @@ export default function QuoteEditForm({
         return;
       }
 
+      if (quote) {
+        // 고치기는 이미 이 주소에 있다. 옮길 곳이 없으니 다시 읽기만 한다.
+        router.refresh();
+        return;
+      }
+
+      /**
+       * 🔴 만들기는 **옮기기만 한다 — 뒤에 refresh 를 붙이지 않는다.**
+       *
+       * `router.push()` 바로 뒤에 `router.refresh()` 를 부르면, 아직 끝나지
+       * 않은 이동을 새로고침이 덮어쓴다. 새로고침이 다시 그리는 것은 **지금
+       * 있는 주소**(/quotes/new)라서, 서버는 새 견적서 화면을 통째로 다시
+       * 그리느라 시간을 쓰고 화면은 폼에 그대로 남는다 — 저장은 됐는데 아무
+       * 일도 일어나지 않은 것처럼 보인다(2026-08-28 사용자 신고 — "시간이 많이
+       * 걸리면서 넘어가지 않는다". 근거는 next/dist 의 refresh-reducer.js 다:
+       * "A refresh is modeled as a navigation to the current URL", navigateType
+       * = 'replace').
+       *
+       * 옮겨 간 곳은 force-dynamic 이라 어차피 서버가 새로 그린다 —
+       * 새로고침이 할 일이 애초에 없다. 접수 등록(IntakeFormInner)도 저장 뒤
+       * push 하나뿐이고, 이 화면만 달랐다.
+       */
+      leaving = true;
       router.push(`/quotes/${result.id}`);
-      router.refresh();
+    } catch (err) {
+      // 액션이 대답을 못 하고 끊긴 자리(서버 재시작·네트워크 끊김). 아무 말도
+      // 없이 단추만 되살아나면, 저장이 된 건지 만 건지 알 수 없다.
+      console.error("견적서 저장 실패", err);
+      setSubmitError(SAVE_FAILED_MESSAGE);
     } finally {
-      setIsSubmitting(false);
+      if (!leaving) setIsSubmitting(false);
     }
   }
 
@@ -479,10 +537,25 @@ export default function QuoteEditForm({
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
-            placeholder="CFK300FH-IC2 Bias Fwd Drop 수리 견적"
+            placeholder="RFK300FH-AD1 Bias Fwd Drop 수리 件"
             className={editInputClass}
             disabled={disabled}
           />
+          {/* 종류를 OH 로 바꾸거나 모델명·신고증상을 고친 뒤 다시 지을 수
+              있다. 불러오기 때 지어 준 값은 그 시점의 종류 기준이다. */}
+          {suggestedSubject !== "" && suggestedSubject !== subject && (
+            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+              <button
+                type="button"
+                onClick={() => setSubject(suggestedSubject)}
+                disabled={disabled}
+                className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
+              >
+                자동으로 채우기
+              </button>{" "}
+              <span className="break-all">{suggestedSubject}</span>
+            </div>
+          )}
         </Field>
         <Field label="모델명" error={fieldErrors.modelNameText}>
           <input value={modelNameText} onChange={(e) => setModelNameText(e.target.value)} className={editInputClass} disabled={disabled} />

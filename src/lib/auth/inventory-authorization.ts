@@ -28,6 +28,10 @@ import type { InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
  *    never deduct stock), so they are unaffected by this change. See
  *    isBlockedByShipmentLock (repair-case-edit-authorization.ts) for the
  *    full policy-change rationale.
+ *  - Create/cancel a part request: AS_ENGINEER, and SUPER_ADMIN
+ *    (2026-08-28). 다른 역할은 코드가 아니라 역할별 접근 권한 화면에서 연다 —
+ *    최고관리자만 그 화면에서 고칠 수 없어서 여기 적혀 있다
+ *    (canCreatePartRequest 주석 참조).
  *  - SALES has zero access to the request screens/actions in Phase 5B-3 —
  *    confirmed, not an oversight: read-only inventory access only (part
  *    list, balances, transaction history), same as before.
@@ -93,22 +97,41 @@ export function canUseStock(role: Role, ctx: UseStockAuthorizationContext): bool
 // ---- Phase 5B-3: Parts Request & Issue Workflow ----
 
 /**
- * AS_ENGINEER only — a repair case is required (there is no destination-only
- * request in Phase 5B-3), but assignment to that specific case is NOT
- * required (Parts Request permission checkpoint — any AS_ENGINEER may
- * submit a request for any repair case, not just their own assigned ones,
- * shipped or not per the shipment-lock removal policy). No on-behalf
- * creation (ADMIN/SUPER_ADMIN do not create a request for an engineer) —
- * deferred, out of scope.
+ * AS_ENGINEER, 그리고 최고관리자. 수리 건이 반드시 있어야 하고(목적지만 적는
+ * 요청은 없다), 그 건의 담당자일 필요는 없다(Parts Request permission
+ * checkpoint — 출하된 건도 막지 않는다: shipment-lock removal policy).
+ * **대리 작성은 여전히 없다** — 최고관리자가 올려도 자기 이름으로 올라간다.
+ *
+ * ── 🔴 최고관리자가 왜 코드에 적혀 있는가 ──────────────────────────────
+ * inventory 는 설정이 최종 판정인 메뉴다(permission-features.ts 의
+ * SETTINGS_ENFORCED_AREAS). 그래서 다른 역할에게 부품 요청을 열어 주는 일은
+ * 코드를 고치지 않고 사용자 관리 > 역할별 접근 권한 > 재고 관리 > 부품 요청
+ * 에서 한다 — 여기에 역할을 더 적지 말 것.
+ *
+ * **최고관리자 줄은 설정 화면에서 고칠 수 없다**(permission-areas.ts 의
+ * isRoleEditableInPermissionSettings, 저장 액션도 거절한다 — 모두를 잠그면
+ * 되돌릴 사람이 남지 않기 때문이다). 최고관리자에게는 이 기본 정책이 곧
+ * 실효 권한이라, 열어 줄 자리가 여기밖에 없다(2026-08-28 사용자 요청).
+ *
+ * ── 자기가 올리고 자기가 출고하게 되지 않는가 ──────────────────────────
+ * 된다. 다만 **새로 생기는 힘이 아니다** — 최고관리자는 이미 canUseStock 으로
+ * 재고를 바로 뺄 수 있다. 요청서를 거치면 오히려 누가 무엇을 왜 가져갔는지
+ * 기록이 남는 쪽이다.
  */
 export function canCreatePartRequest(role: Role, ctx: { isCaseLocked: boolean }): boolean {
   void ctx.isCaseLocked;
-  return role === "AS_ENGINEER";
+  return role === "AS_ENGINEER" || role === "SUPER_ADMIN";
 }
 
-/** AS_ENGINEER only, and only their own request, and only while it is still PENDING (zero issued) — allowed even if the case has since become locked, because cancelling never deducts stock. */
+/**
+ * 올린 사람만, 자기 요청만, 아직 아무것도 나가지 않았을 때만 — 잠긴 건이어도
+ * 된다(취소는 재고를 차감하지 않는다).
+ *
+ * 역할 명단은 canCreatePartRequest 와 **같이 움직인다.** 올릴 수는 있는데 무를
+ * 수는 없는 역할을 만들면, 잘못 올린 요청을 남에게 거부해 달라고 부탁해야 한다.
+ */
 export function canCancelOwnRequest(role: Role, ctx: { isOwnRequest: boolean; status: InventoryPartRequestStatus }): boolean {
-  return role === "AS_ENGINEER" && isRequestCancellable(ctx);
+  return (role === "AS_ENGINEER" || role === "SUPER_ADMIN") && isRequestCancellable(ctx);
 }
 
 /** Gates the manager request-list/management screen and "view all requests." SALES is deliberately excluded — no access to request screens in Phase 5B-3. */

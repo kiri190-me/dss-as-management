@@ -288,7 +288,14 @@ describe("createPartRequest", () => {
     const unassigned = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: engineer2Id, idempotencyKey: randomUUID() });
     assert.equal(unassigned.ok, true, `unassigned AS_ENGINEER should be allowed to request: ${JSON.stringify(unassigned)}`);
 
-    for (const actorUserId of [superAdminId, adminId, inventoryManagerId, salesId]) {
+    // 최고관리자도 올릴 수 있다(2026-08-28). 역할별 접근 권한 화면이 최고관리자
+    // 줄을 고칠 수 없어서, 기본 정책이 그 역할의 실효 권한이다
+    // (auth/inventory-authorization.ts 의 canCreatePartRequest).
+    const bySuperAdmin = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId: superAdminId, idempotencyKey: randomUUID() });
+    assert.equal(bySuperAdmin.ok, true, `SUPER_ADMIN should be allowed to request: ${JSON.stringify(bySuperAdmin)}`);
+
+    // 나머지는 여전히 막힌다 — 필요하면 코드가 아니라 역할별 접근 권한에서 연다.
+    for (const actorUserId of [adminId, inventoryManagerId, salesId]) {
       const result = await createPartRequest({ repairCaseId: created.id, items: [{ partId, quantity: 1, owner: "DSS" }], actorUserId, idempotencyKey: randomUUID() });
       assert.equal(result.ok, false, `${actorUserId} should be forbidden`);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");

@@ -344,7 +344,7 @@ export type QuoteIntakeLookup = {
      */
     unitPrice: string | null;
     /**
-     * 이 부품 한 개당 작업비(원). **null 이면 정하지 않은 것**이고,
+     * 이 부품의 작업비(원, 수량과 무관). **null 이면 정하지 않은 것**이고,
      * 견적서 화면이 작업비 합계를 낼 때 그 부품 몫을 빼고 그 사실을 알린다
      * (schema/inventory.ts 의 laborCost — 0 으로 뭉개면 작업비를 실제보다
      * 적게 부르게 된다).

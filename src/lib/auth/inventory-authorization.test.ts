@@ -75,11 +75,18 @@ test("canUseStock: SALES is never authorized to USE, with or without a case — 
 
 // ---- Phase 5B-3: Parts Request & Issue Workflow ----
 
-test("canCreatePartRequest: AS_ENGINEER only, assignment NOT required (Parts Request permission checkpoint); shipment-lock removal policy — a shipped case no longer blocks", () => {
+test("canCreatePartRequest: AS_ENGINEER 와 최고관리자, 담당자가 아니어도 된다; 출하된 건도 막지 않는다", () => {
   assert.equal(canCreatePartRequest("AS_ENGINEER", { isCaseLocked: false }), true, "any AS_ENGINEER may request, not only the assigned one");
   assert.equal(canCreatePartRequest("AS_ENGINEER", { isCaseLocked: true }), true, "a shipped case no longer blocks an AS_ENGINEER");
-  for (const role of ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER", "SALES"] as const) {
-    assert.equal(canCreatePartRequest(role, { isCaseLocked: false }), false, `${role} cannot create a request (no on-behalf creation)`);
+
+  // 최고관리자도 올릴 수 있다 — 역할별 접근 권한 화면이 최고관리자 줄을 고칠
+  // 수 없어서, 이 기본 정책이 그 역할의 실효 권한이다(2026-08-28).
+  assert.equal(canCreatePartRequest("SUPER_ADMIN", { isCaseLocked: false }), true);
+  assert.equal(canCreatePartRequest("SUPER_ADMIN", { isCaseLocked: true }), true);
+
+  // 나머지는 기본값으로 못 한다. 필요하면 코드가 아니라 설정에서 연다.
+  for (const role of ["ADMIN", "INVENTORY_MANAGER", "SALES"] as const) {
+    assert.equal(canCreatePartRequest(role, { isCaseLocked: false }), false, `${role} 은 기본값으로는 요청을 올리지 못한다`);
   }
 });
 
@@ -87,7 +94,12 @@ test("canCancelOwnRequest: AS_ENGINEER only, own request only, PENDING only", ()
   assert.equal(canCancelOwnRequest("AS_ENGINEER", { isOwnRequest: true, status: "PENDING" }), true);
   assert.equal(canCancelOwnRequest("AS_ENGINEER", { isOwnRequest: false, status: "PENDING" }), false, "not their own request");
   assert.equal(canCancelOwnRequest("AS_ENGINEER", { isOwnRequest: true, status: "PARTIALLY_ISSUED" }), false, "cannot cancel once anything has been issued");
-  assert.equal(canCancelOwnRequest("SUPER_ADMIN", { isOwnRequest: true, status: "PENDING" }), false, "only AS_ENGINEER, never a privileged role, even for their own");
+  // 올릴 수 있는 역할은 무를 수도 있어야 한다 — 둘은 같이 움직인다.
+  assert.equal(canCancelOwnRequest("SUPER_ADMIN", { isOwnRequest: true, status: "PENDING" }), true, "자기가 올린 요청은 무를 수 있다");
+  assert.equal(canCancelOwnRequest("SUPER_ADMIN", { isOwnRequest: false, status: "PENDING" }), false, "남의 요청은 무를 수 없다 — 그쪽은 거부다");
+  for (const role of ["ADMIN", "INVENTORY_MANAGER", "SALES"] as const) {
+    assert.equal(canCancelOwnRequest(role, { isOwnRequest: true, status: "PENDING" }), false, role);
+  }
 });
 
 test("canProcessPartRequests / canViewPartRequests: SALES has zero access, AS_ENGINEER may view (own) but not process", () => {

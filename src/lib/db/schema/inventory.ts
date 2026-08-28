@@ -57,7 +57,8 @@ export const parts = pgTable(
     itemType: text("item_type"), // 항목 — free text per approved decision, no enum
     notes: text("notes"), // 비고
     /**
-     * 이 부품 한 개를 갈 때 드는 **작업비 금액**(원, VAT 별도).
+     * 이 부품을 갈 때 드는 **작업비 금액**(원, VAT 별도). **수량과 무관하다** —
+     * 몇 개를 갈든 품목당 한 번 붙는다(사용자 정정 2026-08-28).
      *
      * 견적서의 `2) 작업비` 는 고정 금액이 아니라 **이 값들의 합**이다
      * (사용자 확인 2026-08-28). 예전 OH 양식에 240만원이 상수로 박혀 있었지만
