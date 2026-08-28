@@ -13,6 +13,20 @@ type SidebarProps = {
   onNavigate?: () => void;
   /** Whole-sidebar narrow/icon-only mode (distinct from per-group collapse below). Omitted (mobile drawer) means "always expanded" — the mobile drawer has no narrow/icon-only mode of its own. */
   isCollapsed?: boolean;
+  /**
+   * 하단 유틸 영역(SidebarFooter)만 좁은 모양으로 그릴지. 기본값은
+   * `isCollapsed` 와 같아서, 이 prop 을 넘기지 않는 호출부(모바일 드로어)는
+   * 예전과 완전히 동일하게 동작한다.
+   *
+   * 데스크톱에서만 둘이 갈린다. 마우스를 올려 **떠서 덮는** 동안은 메뉴를
+   * 펼쳐 그리지만(`isCollapsed === false`) 아직 ☰ 로 **고정**한 것은 아니다.
+   * SidebarFooter 의 ☰ 는 바로 그 "고정"을 뒤집는 단추이므로 라벨과
+   * `aria-expanded` 가 가리켜야 하는 것은 고정 여부다 — 그래서 footer 에는
+   * 고정 여부를 따로 넘긴다. 이 둘을 하나로 합치면, 마우스를 올린 동안 ☰ 가
+   * "사이드바 접기"라고 적힌 채로 눌리면 오히려 펼쳐 고정되는 모순이 생긴다
+   * (☰ 는 마우스로 다가가야 눌리므로 그 상태가 오히려 기본이 된다).
+   */
+  isFooterCollapsed?: boolean;
   /** 관리자가 설정한 접근 가능 영역. null이면 역할 기준만으로 거른다(navigation.ts 참조). */
   accessibleAreaKeys?: readonly string[] | null;
   /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
@@ -67,11 +81,16 @@ function navLinkClassName(isActive: boolean): string {
  *    every group's header/chevron reflecting whatever that set already
  *    held, unchanged the entire time the sidebar was narrow.
  *
+ * AppShell 은 이제 `isCollapsed` 를 "☰ 고정 펼침 OR 마우스/초점 머무름"의
+ * 부정으로 계산해 넘긴다. 이 파일에서 달라지는 것은 없다 — 여기서는 여전히
+ * "지금 메뉴를 그릴지"만 뜻한다. 갈라진 것은 `isFooterCollapsed` 뿐이고
+ * (그 prop 의 주석 참조), `collapsedGroupKeys` 는 여기에 전혀 엮이지 않는다.
+ *
  * Both persist across client-side navigation within this component's
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, isFooterCollapsed = isCollapsed, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
   const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
@@ -164,7 +183,7 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
         )}
       </nav>
 
-      <SidebarFooter user={user} isCollapsed={isCollapsed} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
+      <SidebarFooter user={user} isCollapsed={isFooterCollapsed} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
     </div>
   );
 }
