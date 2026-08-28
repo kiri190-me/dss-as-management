@@ -11,22 +11,32 @@ type SidebarProps = {
   role: Role;
   user: { name: string; roleLabel: string };
   onNavigate?: () => void;
-  /** Whole-sidebar narrow/icon-only mode (distinct from per-group collapse below). Omitted (mobile drawer) means "always expanded" — the mobile drawer has no narrow/icon-only mode of its own. */
+  /**
+   * Whole-sidebar narrow/icon-only mode (distinct from per-group collapse
+   * below). Omitted (mobile drawer) means "always expanded" — the mobile
+   * drawer has no narrow/icon-only mode of its own.
+   *
+   * 🔴 **넘겼는지 여부 자체가** "여기는 hover 가 있는 데스크톱 <aside> 인가"를
+   * 뜻한다(`supportsHoverExpand`). 좁은 모양이 존재하는 곳은 데스크톱뿐이라
+   * 이 prop 을 넘기는 호출부도 데스크톱뿐이다 — 그래서 모바일 드로어에
+   * 새 prop 을 더하지 않고 이 차이를 그대로 빌려 쓴다.
+   */
   isCollapsed?: boolean;
   /**
-   * 하단 유틸 영역(SidebarFooter)만 좁은 모양으로 그릴지. 기본값은
-   * `isCollapsed` 와 같아서, 이 prop 을 넘기지 않는 호출부(모바일 드로어)는
-   * 예전과 완전히 동일하게 동작한다.
+   * ☰ 로 **고정 펼침**이 켜져 있는지. 하단 유틸의 *모양*과는 상관없고
+   * (모양은 위 `isCollapsed` 를 그대로 따른다), SidebarFooter 의 ☰ 단추가
+   * 뭐라고 적히는지 · `aria-expanded` 가 무엇인지만 정한다.
    *
-   * 데스크톱에서만 둘이 갈린다. 마우스를 올려 **떠서 덮는** 동안은 메뉴를
-   * 펼쳐 그리지만(`isCollapsed === false`) 아직 ☰ 로 **고정**한 것은 아니다.
-   * SidebarFooter 의 ☰ 는 바로 그 "고정"을 뒤집는 단추이므로 라벨과
-   * `aria-expanded` 가 가리켜야 하는 것은 고정 여부다 — 그래서 footer 에는
-   * 고정 여부를 따로 넘긴다. 이 둘을 하나로 합치면, 마우스를 올린 동안 ☰ 가
-   * "사이드바 접기"라고 적힌 채로 눌리면 오히려 펼쳐 고정되는 모순이 생긴다
-   * (☰ 는 마우스로 다가가야 눌리므로 그 상태가 오히려 기본이 된다).
+   * 데스크톱에서만 `isCollapsed` 와 갈린다. 마우스를 올려 **머무름으로
+   * 펼쳐진** 동안은 메뉴도 하단 유틸도 펼쳐 그리지만(`isCollapsed === false`)
+   * 아직 ☰ 로 **고정**한 것은 아니라 이 값은 false 다. ☰ 는 바로 그 "고정"을
+   * 뒤집는 단추이므로 그 말과 `aria-expanded` 가 가리켜야 하는 것은 고정
+   * 여부다 — 자세한 근거는 SidebarFooter.tsx 의 파일 주석 참조.
+   *
+   * 기본값 true = "펼쳐져 고정됨". 이 prop 을 넘기지 않는 호출부(모바일
+   * 드로어)는 늘 펼쳐져 있고 접는 개념이 없다.
    */
-  isFooterCollapsed?: boolean;
+  isPinnedOpen?: boolean;
   /** 관리자가 설정한 접근 가능 영역. null이면 역할 기준만으로 거른다(navigation.ts 참조). */
   accessibleAreaKeys?: readonly string[] | null;
   /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
@@ -68,39 +78,68 @@ function navLinkClassName(isActive: boolean): string {
  *
  * Two INDEPENDENT collapse concepts live in this file, deliberately never
  * merged into one state:
- *  - `collapsedGroupKeys` (per-group, local state) — which GROUPS show
- *    their children at all when the sidebar itself is expanded. Starts
- *    empty (every group open by default), driven only by this set, never
- *    re-derived from `activeHref`.
+ *  - per-group open state (local state) — which GROUPS show their children
+ *    at all when the sidebar itself is expanded, driven only by this
+ *    component's own state, never re-derived from `activeHref`. 사이드바
+ *    자신과 **같은 규칙**으로 둘로 갈라져 있다: 눌러서 펼쳐 둔
+ *    `expandedGroupKeys`(명시적 선택)와 지금 마우스가 올라와 있는
+ *    `hoveredGroupKey`(머무름). 둘 중 하나라도 참이면 그 그룹이 펼쳐진다.
+ *    🔴 기본은 **전부 접힘**이다 — 예전 `collapsedGroupKeys`(= 접힌 것들을
+ *    담고 빈 집합으로 시작)에서 **담는 뜻을 뒤집어** "펼쳐 둔 것들"을 담게
+ *    바꾼 결과다. 단, hover 가 없는 모바일 드로어만은 전 그룹을 담아
+ *    시작한다(아래 `supportsHoverExpand` 참조).
  *  - `isCollapsed` (whole-sidebar, owned by AppShell — a prop here, not
  *    local state, since it also drives the <aside>'s own width). While
  *    true, this checkpoint hides the ENTIRE nav area outright (no items,
  *    no group headers, not even glyphs) — only SidebarFooter's toggle
  *    control and account/theme/logout controls remain visible. Collapsing
- *    never touches `collapsedGroupKeys`: re-expanding the sidebar shows
- *    every group's header/chevron reflecting whatever that set already
+ *    never touches the per-group state: re-expanding the sidebar shows
+ *    every group's header/chevron reflecting whatever that state already
  *    held, unchanged the entire time the sidebar was narrow.
  *
  * AppShell 은 이제 `isCollapsed` 를 "☰ 고정 펼침 OR 마우스/초점 머무름"의
  * 부정으로 계산해 넘긴다. 이 파일에서 달라지는 것은 없다 — 여기서는 여전히
- * "지금 메뉴를 그릴지"만 뜻한다. 갈라진 것은 `isFooterCollapsed` 뿐이고
- * (그 prop 의 주석 참조), `collapsedGroupKeys` 는 여기에 전혀 엮이지 않는다.
+ * "지금 메뉴를 그릴지"만 뜻하고, **하단 유틸의 모양도 같은 값을 따른다**
+ * (메뉴가 보이면 하단도 넓게). 따로 갈라 넘기는 것은 `isPinnedOpen` 뿐인데
+ * 그것은 모양이 아니라 ☰ 의 말만 정한다(그 prop 의 주석 참조). 그룹별
+ * 상태는 여기에 전혀 엮이지 않는다 — 규칙만 닮았을 뿐 서로 다른 상태다.
  *
  * Both persist across client-side navigation within this component's
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed = false, isFooterCollapsed = isCollapsed, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
+export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
   const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
-  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
+  /** 좁은 모양으로 그릴지. prop 을 넘기지 않는 모바일 드로어는 늘 넓다. */
+  const isNarrow = isCollapsed ?? false;
+  /**
+   * 그룹을 마우스로 펼칠 수 있는가 = 여기가 데스크톱 <aside> 인가.
+   * 🔴 폰에는 hover 가 없어서, 모바일 드로어까지 접힌 채 시작하면 메뉴를
+   * 펼칠 방법이 머리글을 하나하나 누르는 것뿐이 된다. 그래서 접힌 채 시작하는
+   * 것도, 마우스 핸들러를 다는 것도 **데스크톱에서만** 한다(터치는 탭에도
+   * mouseenter 를 흘려서, 핸들러를 달아 두면 머리글을 눌러 접는 동작이
+   * 머무름에 곧바로 되펼쳐져 먹히지 않는다).
+   */
+  const supportsHoverExpand = isCollapsed !== undefined;
+  /**
+   * 눌러서 **펼쳐 둔** 그룹들. 이름 그대로 "펼쳐 둔 것들"만 담으므로
+   * 데스크톱은 빈 집합 = **전부 접힘**으로 시작하고, hover 가 없는 모바일
+   * 드로어만 전 그룹을 담아 **전부 펼침**으로 시작한다(파일 주석 참조).
+   */
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(() =>
+    supportsHoverExpand ? new Set<string>() : new Set(navGroups.map((group) => group.key)),
+  );
+  /** 지금 마우스가 올라와 있는 그룹. 커서는 하나뿐이라 집합이 아니라 하나다. */
+  const [hoveredGroupKey, setHoveredGroupKey] = useState<string | null>(null);
 
   const dashboardItem = visibleByKey.get(DASHBOARD_KEY);
   // 대시보드의 하위메뉴 — 볼 수 있는 것만 남긴다(권한 필터를 거친 목록에서 고른다).
   const dashboardChildren = childNavItems(visibleItems, DASHBOARD_KEY);
 
+  /** 머리글을 누르면 "펼쳐 둠"을 뒤집는다 — 켜 두면 마우스를 떼도 남는다. */
   function toggleGroup(key: string) {
-    setCollapsedGroupKeys((prev) => {
+    setExpandedGroupKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -141,7 +180,7 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
-        {!isCollapsed && (
+        {!isNarrow && (
           <>
             {dashboardItem && renderItem(dashboardItem)}
             {/* 대시보드에 딸린 화면들. 부모가 보이지 않는 사람에게는 하위메뉴도
@@ -158,10 +197,20 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
               const groupItems = group.itemKeys.map((key) => visibleByKey.get(key)).filter((item): item is NavItem => !!item);
               if (groupItems.length === 0) return null;
 
-              const isExpanded = !collapsedGroupKeys.has(group.key);
+              // 눌러서 펼쳐 뒀거나(고정) 지금 마우스가 올라와 있으면(머무름)
+              // 펼친다 — 사이드바 자신과 같은 규칙이다. aria-expanded 와 ▸
+              // 회전은 둘의 합, 곧 **지금 실제로 펼쳐져 있는지**를 가리킨다.
+              const isExpanded = expandedGroupKeys.has(group.key) || hoveredGroupKey === group.key;
 
               return (
-                <div key={group.key} className="mt-3 flex flex-col gap-0.5 border-t border-zinc-100 pt-2 first:mt-1 first:border-0 first:pt-0 dark:border-zinc-800">
+                <div
+                  key={group.key}
+                  onMouseEnter={supportsHoverExpand ? () => setHoveredGroupKey(group.key) : undefined}
+                  // 떠날 때는 "내가 마지막에 들어온 그룹일 때만" 지운다 —
+                  // 옆 그룹의 mouseenter 가 먼저 오면 그것을 덮어쓰게 된다.
+                  onMouseLeave={supportsHoverExpand ? () => setHoveredGroupKey((prev) => (prev === group.key ? null : prev)) : undefined}
+                  className="mt-3 flex flex-col gap-0.5 border-t border-zinc-100 pt-2 first:mt-1 first:border-0 first:pt-0 dark:border-zinc-800"
+                >
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.key)}
@@ -183,7 +232,9 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
         )}
       </nav>
 
-      <SidebarFooter user={user} isCollapsed={isFooterCollapsed} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
+      {/* 하단 유틸의 모양은 메뉴와 같은 값(isNarrow)을 따르고, ☰ 의 말만
+          고정 여부(isPinnedOpen)를 따른다 — 두 prop 의 주석 참조. */}
+      <SidebarFooter user={user} isCompact={isNarrow} isPinnedOpen={isPinnedOpen} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
     </div>
   );
 }

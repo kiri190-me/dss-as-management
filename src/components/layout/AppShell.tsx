@@ -44,8 +44,8 @@ type AppShellProps = {
 /**
  * 이 초점이 **키보드로 옮겨온 것**인지. 마우스로 눌러서 생긴 초점까지
  * 사이드바 펼침으로 치면, 메뉴 링크나 그룹 머리글을 클릭한 뒤 마우스를
- * 치워도 눌린 요소가 초점을 계속 쥐고 있어서 떠 있는 판이 본문 위에 그대로
- * 남아 가린다. :focus-visible 은 브라우저가 이미 그 구분을 하고 있는 것을
+ * 치워도 눌린 요소가 초점을 계속 쥐고 있어서 사이드바가 넓어진 채 그대로
+ * 남는다. :focus-visible 은 브라우저가 이미 그 구분을 하고 있는 것을
  * 그대로 빌려 쓰는 것이다.
  *
  * 이 선택자를 모르는 엔진에서는 던지므로 false 로 떨어뜨린다 — 그래도
@@ -66,8 +66,8 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
   // because the <aside>'s own width class must react to it too. Toggling
   // this never touches router state, so it can never change the current
-  // route; it's also entirely separate from Sidebar's own per-group
-  // collapsedGroupKeys state (see Sidebar.tsx's doc comment).
+  // route; it's also entirely separate from Sidebar's own per-group open
+  // state (see Sidebar.tsx's doc comment).
   //
   // 예전에는 이것이 `isSidebarCollapsed`(기본값 false = 펼침) 하나였다. 이제
   // 기본값이 "접힘"으로 뒤집히면서 `collapsed`라는 이름은 읽는 사람을
@@ -75,22 +75,21 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
   // 두 가지로 갈랐다:
   //
   //  - isSidebarPinnedOpen — ☰ 로 켜 두는 사용자의 **명시적 선택**.
-  //    기본값 false 라서 첫 화면은 접혀 있다. **이것만이 <aside> 의 자리
-  //    폭(md:w-52)을 늘려 본문을 민다.**
+  //    기본값 false 라서 첫 화면은 접혀 있다.
   //  - isSidebarHovered / isSidebarFocused — 마우스가 올라와 있거나 초점이
   //    사이드바 안에 있는 동안만 참인 **머무름**. 개념은 하나("머무름
   //    펼침")지만 상태를 둘로 나눈 이유는, 하나로 합치면 마우스를 뗄 때
   //    (mouseleave) 키보드 초점으로 열어 둔 것까지 같이 닫히기 때문이다.
   //
-  // 셋 중 하나라도 참이면 메뉴를 그린다. 다만 고정이 아닌 채로 열린 것은
-  // 자리를 차지하지 않고 본문 **위에 떠서 덮는다**(isSidebarOverlay) —
-  // 그러지 않으면 마우스가 화면 왼쪽을 스쳐 지나갈 때마다 본문 전체가
-  // 좌우로 출렁여 읽던 자리가 튄다.
+  // 셋 중 하나라도 참이면(isSidebarOpen) 메뉴를 그리고 **자리 폭도 함께
+  // 늘어난다** — 고정이든 머무름이든 본문이 그만큼 자연스럽게 줄어든다.
+  // 한때 머무름으로 열린 판만 본문 위에 띄워 덮은 적이 있으나(출렁임을
+  // 막으려던 것), 사용자가 실제 화면을 보고 **본문을 미는 쪽**을 골랐다.
+  // 셋의 차이는 이제 "마우스를 떼면 되돌아가는가" 하나뿐이다.
   const [isSidebarPinnedOpen, setIsSidebarPinnedOpen] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isSidebarFocused, setIsSidebarFocused] = useState(false);
   const isSidebarOpen = isSidebarPinnedOpen || isSidebarHovered || isSidebarFocused;
-  const isSidebarOverlay = isSidebarOpen && !isSidebarPinnedOpen;
 
   const activeItem = navItems.find((item) => item.href === pathname);
   const title = activeItem?.label ?? "";
@@ -107,9 +106,10 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden print:overflow-visible">
         {/*
-          자리를 차지하는 폭은 **고정 펼침(☰)일 때만** 늘어난다. 머무름으로
-          열린 동안 이 <aside> 는 md:w-14 그대로여서 <main> 은 1px 도 움직이지
-          않고, 펼쳐진 판은 아래 래퍼가 absolute 로 그 위에 뜬다.
+          자리를 차지하는 폭은 **펼쳐지면 늘 늘어난다**(isSidebarOpen) — ☰ 로
+          고정했든 마우스를 올려 둔 동안이든 똑같이 md:w-52 가 되고, <main> 은
+          그만큼 줄어든다. transition-[width] 가 걸려 있어 부드럽게 줄어들며,
+          본문이 밀리는 것은 사용자가 화면을 보고 고른 **의도된 동작**이다.
 
           tabIndex={0} 은 **키보드로 메뉴에 닿기 위한 것**이다. 접힌 동안
           사이드바 안의 첫 초점 대상은 하단 유틸(테마/로그아웃/☰)이라,
@@ -143,34 +143,26 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget)) setIsSidebarFocused(false);
           }}
-          className={`relative hidden min-h-0 border-r border-zinc-200 transition-[width] duration-150 motion-reduce:transition-none md:flex md:flex-col print:hidden dark:border-zinc-800 ${isSidebarPinnedOpen ? "md:w-52" : "md:w-14"}`}
+          className={`hidden min-h-0 border-r border-zinc-200 transition-[width] duration-150 motion-reduce:transition-none md:flex md:flex-col print:hidden dark:border-zinc-800 ${isSidebarOpen ? "md:w-52" : "md:w-14"}`}
         >
-          {/*
-            떠 있는 판: 자기 배경(bg-white / dark:bg-zinc-900 — 모바일 드로어가
-            쓰는 것과 같은 토큰)이 반드시 있어야 한다. <aside> 에는 배경색이
-            없어서 그냥 띄우면 본문 글자가 비쳐 보인다. z-20 은 본문(z-auto)
-            위, 헤더 종 알림 패널(z-30)과 모바일 드로어(z-40/z-50) 아래다 —
-            폰에서 드로어가 열렸을 때 이 판이 그 위로 올라오면 안 된다.
-          */}
-          <div
-            className={
-              isSidebarOverlay
-                ? "absolute inset-y-0 left-0 z-20 flex min-h-0 w-52 flex-col border-r border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
-                : "flex min-h-0 flex-1 flex-col"
-            }
-          >
-            <Sidebar
-              activeHref={pathname}
-              role={user.role}
-              user={user}
-              accessibleAreaKeys={accessibleAreaKeys}
-              isCollapsed={!isSidebarOpen}
-              isFooterCollapsed={!isSidebarPinnedOpen}
-              onToggleCollapsed={() => setIsSidebarPinnedOpen((prev) => !prev)}
-              myPendingApprovalCount={myPendingApprovalCount}
-              portalUrl={portalUrl}
-            />
-          </div>
+          <Sidebar
+            activeHref={pathname}
+            role={user.role}
+            user={user}
+            accessibleAreaKeys={accessibleAreaKeys}
+            // 메뉴와 하단 유틸의 **모양**은 둘 다 "지금 보이는가"를 따른다
+            // — 머무름으로 펼쳐진 동안에도 하단이 넓은 모양이다.
+            isCollapsed={!isSidebarOpen}
+            // ☰ 의 말·aria-expanded 만 "고정인가"를 따른다. ☰ 는 마우스를
+            // 사이드바로 가져가야 눌리므로 누를 때는 이미 머무름으로
+            // 펼쳐져 있다 — 여기에 "보이는가"를 넘기면 단추가 늘
+            // "사이드바 접기"라고 적힌 채 반대로 동작한다
+            // (SidebarFooter.tsx 파일 주석 참조).
+            isPinnedOpen={isSidebarPinnedOpen}
+            onToggleCollapsed={() => setIsSidebarPinnedOpen((prev) => !prev)}
+            myPendingApprovalCount={myPendingApprovalCount}
+            portalUrl={portalUrl}
+          />
         </aside>
 
         {mobileNavOpen && (
