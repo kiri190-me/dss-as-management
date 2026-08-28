@@ -4,6 +4,7 @@ import {
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
   type BillingType,
+  type Customer,
   type Priority,
   type RepairStatus,
 } from "./types";
@@ -186,6 +187,52 @@ export function applyFilters(
     if (query && !matchesQuery(row, query)) return false;
     return true;
   });
+}
+
+/**
+ * 고객사 필터의 선택지를 **지금 이 화면에 올라와 있는 접수 건에서** 뽑는다.
+ *
+ * 예전에는 mock-data.ts의 mockCustomers(데모 7곳)를 그대로 넘겼다. 실제 DB에는
+ * 고객사가 그보다 훨씬 많아서, 목록에는 멀쩡히 보이는 접수 건의 고객사를 필터에서는
+ * 고를 수 없었다. 목록과 별개인 고객사 명단을 들고 있는 한 언젠가는 다시 어긋난다 —
+ * 그래서 내 담당 제품 화면(my-active-work-filter.ts의 collectMyWorkFilterOptions)과
+ * 같은 결로, 목록 자체에서 뽑아 "목록에 있으면 필터에도 있다"를 구조로 보장한다.
+ *
+ * 넘길 배열은 **필터를 걸기 전의 전체 목록**이어야 한다. 거른 뒤(또는 페이지를 나눈
+ * 뒤)의 배열에서 뽑으면 고객사를 하나 고르는 순간 나머지가 선택지에서 사라져
+ * 되돌아갈 수 없고, 검색어를 함께 걸면 지금 골라 둔 고객사마저 사라진다. 전체
+ * 목록에서 뽑으면 선택지가 필터 상태와 무관해지므로 그 두 문제가 아예 생기지 않는다.
+ *
+ * 반환 타입이 Customer인 것은 RepairCaseFilters의 customers prop에 맞춘 것이다.
+ * 접수 건 행에는 고객사 연락처가 없으므로(행의 contact*는 그 **접수 건**의 연락
+ * 담당자이지 고객사 마스터가 아니다) 연락처 세 칸은 빈 문자열로 둔다 — 필터
+ * <select>는 id와 name만 읽는다. 여기서 나온 객체를 연락처 용도로 쓰면 안 된다.
+ *
+ * 빈 값 규칙:
+ * - customerId가 비어 있는 행은 건너뛴다. <option value="">는 "고르지 않음"과
+ *   구분되지 않고, applyFilters가 ===로 맞출 값도 되지 못한다. 타입상으로는
+ *   customerId가 반드시 있는 string이지만, 이 함수는 화면에 실제로 떠 있는 값을
+ *   그대로 받으므로 방어한다.
+ * - 이름이 비어 있으면 id를 대신 적는다. 그 행을 버리지 않는 이유는, 그 고객사의
+ *   접수 건이 목록에는 그대로 보이기 때문이다 — 필터에서만 빠지면 방금 고친 이
+ *   고장(목록 ≠ 필터)이 그대로 되풀이된다. 이름 없는 한 줄이라도 있어야 고르고
+ *   되돌릴 수 있다.
+ */
+export function collectCustomerFilterOptions(rows: EffectiveRepairCase[]): Customer[] {
+  const nameById = new Map<string, string>();
+
+  for (const row of rows) {
+    const id = row.customerId.trim();
+    if (!id) continue;
+    const name = row.customerName.trim();
+    // 같은 고객사가 여러 행에 나오면 이름이 적혀 있는 쪽을 남긴다.
+    if (name) nameById.set(id, name);
+    else if (!nameById.has(id)) nameById.set(id, id);
+  }
+
+  return [...nameById.entries()]
+    .map(([id, name]) => ({ id, name, contactName: "", contactEmail: "", contactPhone: "" }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type SortColumn =

@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { mockCustomers, mockRepairCases } from "@/lib/domain/mock-data";
+import { mockRepairCases } from "@/lib/domain/mock-data";
 import { toResolvedFromMock, type ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import { useEffectiveRepairCasesFromBase } from "@/lib/domain/local/workflow/effective-repair-case";
 import {
   applyFilters,
+  collectCustomerFilterOptions,
   DEFAULT_FILTERS,
   paginate,
   parseInitialFilters,
@@ -140,6 +141,18 @@ export default function RepairCaseListPage({
   }, [serverBaseCases, mockBaseCases, deletedIds, restoredCases]);
 
   const { cases: rows, isHydrated } = useEffectiveRepairCasesFromBase(baseCases);
+
+  /**
+   * 고객사 필터의 선택지. **필터를 걸기 전의 rows**에서 뽑는다 — filteredRows나
+   * pagedRows에서 뽑으면 고객사를 하나 고르는 순간 나머지 고객사가 목록에서
+   * 사라져 되돌아갈 수 없고, 검색어를 함께 걸면 지금 골라 둔 고객사까지 사라져
+   * <select>가 빈칸으로 보인다. rows에서 뽑으면 선택지가 필터 상태와 아예
+   * 무관해지므로 두 문제가 생기지 않는다(repair-case-filters.ts의 주석 참조).
+   *
+   * rows는 서버(또는 mock) 기본 목록에 이 브라우저의 로컬 임시 접수 건까지
+   * 합친, 이 화면이 그리는 전부다 — 표에 보이는 행은 모두 여기서 나온다.
+   */
+  const customerOptions = useMemo(() => collectCustomerFilterOptions(rows), [rows]);
 
   // Trash tab state — only ever populated/rendered when canRestore is true.
   const [activeTab, setActiveTab] = useState<"active" | "trash">("active");
@@ -719,7 +732,7 @@ export default function RepairCaseListPage({
 
           <RepairCaseFilters
             filters={filters}
-            customers={mockCustomers}
+            customers={customerOptions}
             onQueryChange={(value) => updateFilters({ query: value })}
             onStatusChange={(value) => updateFilters({ status: value })}
             onProductCategoryChange={(value) => updateFilters({ productCategory: value })}
