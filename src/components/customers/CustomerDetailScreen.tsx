@@ -68,6 +68,10 @@ export default function CustomerDetailScreen({
   canRemoveEndUserContact: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
+  // 접수 건 목록은 기본으로 접혀 있다 — 형제 화면(제품 모델 상세)의
+  // ProductModelHistoryBreakdown 과 같은 이름·같은 초기값이다. 건수는 단추 글자에
+  // 들어 있어서 접힌 채로도 몇 건인지 보인다.
+  const [isListOpen, setIsListOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-6">
@@ -139,8 +143,21 @@ export default function CustomerDetailScreen({
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>
-        <CustomerRepairCaseHistory resolved={repairCases} />
+        {/* 제목과 단추가 한 줄에서 마주 본다 — 위 `고객사 정보` 구역의 제목+수정
+            단추 줄과 같은 짜임이다. 형제 화면의 `ml-auto` 는 그쪽에서 그래프 선택
+            단추들과 한 줄에 놓이기 때문이라 여기에는 맞지 않는다. */}
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>
+          <button
+            type="button"
+            aria-expanded={isListOpen}
+            onClick={() => setIsListOpen((prev) => !prev)}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {isListOpen ? "접수 건 목록 숨기기" : `접수 건 목록 보기 (${repairCases.length}건)`}
+          </button>
+        </div>
+        {isListOpen && <CustomerRepairCaseHistory resolved={repairCases} />}
       </section>
     </div>
   );
