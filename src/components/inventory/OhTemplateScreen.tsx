@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   editErrorClass,
@@ -8,6 +8,7 @@ import {
   editLabelClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import { generateClientUuid } from "@/lib/client-uuid";
+import { isExactNormalizedMatch, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { MAX_OH_TEMPLATE_ITEMS } from "@/lib/validation/oh-part-template-input";
 import {
   linkProductModelAction,
@@ -33,6 +34,16 @@ import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
  * ── 13줄이 상한이다 ────────────────────────────────────────────────────
  * OH 견적서 양식의 부품 칸이 34~46행이다. 더 담아 두면 견적서를 만들 때 넘치는
  * 줄이 갈 곳이 없고, 그때 조용히 자르면 청구할 부품이 문서에서 사라진다.
+ *
+ * ── 재고 연결은 품명 칸에서 만든다 ───────────────────────────────────────
+ * 편집 폼의 품명 칸은 `<input list>` + `<datalist>` 다 — 고객사·End-User·제품
+ * 모델 칸이 쓰는 그 방식이고, 후보 순위와 일치 판정도 그 칸들과 같은 함수를
+ * 쓴다(rankSimilarNames · isExactNormalizedMatch). 여기만의 규칙을 만들지 않는다.
+ *
+ * 다른 점은 **친 글자가 곧 저장되는 값**이라는 것이다. 고객사 칸은 고르기 위한
+ * 글자와 저장되는 값이 따로였지만, 여기서는 `partNameText` 가 그대로 견적서에
+ * 찍힌다. 그래서 후보의 `value` 는 언제나 품명 그대로여야 하고, 규격 같은 곁가지
+ * 정보는 `<option>` 의 본문(브라우저가 부제로 보여 준다)에만 실린다.
  * ============================================================================
  */
 
@@ -43,14 +54,125 @@ type ItemRow = {
   quantity: string;
 };
 
+/**
+ * 품명 칸이 검색할 재고 부품. **페이지가 `{id, partName, partSpec}` 만 넘긴다** —
+ * 이 파일은 "use client" 라 넘긴 값이 그대로 브라우저까지 실려 간다(PartListRow
+ * 의 재고 수량·삭제 가능 여부 따위를 실어 보낼 이유가 없다).
+ *
+ * `partSpec`(품명2)만 예외로 함께 온다. `parts` 에는 **품명 유니크 제약이 없다**
+ * (schema/inventory.ts: "no reliable identity key" — 품명이 같은 부품이 여럿일 수
+ * 있다). 같은 이름이 둘 나왔을 때 사람이 어느 재고인지 고르려면 단서가 하나는
+ * 있어야 하고, 그 스키마 주석이 품명2를 "closest thing to a real identifier" 라고
+ * 짚는다. 도번·교산 품번까지 늘리지 않은 것은 셋 다 "independently,
+ * inconsistently populated" 라 칸만 늘고 판별력은 그만큼 안 늘기 때문이다.
+ */
+export type OhTemplatePartOption = {
+  id: string;
+  partName: string;
+  partSpec: string | null;
+};
+
+/** 고객사 콤보박스(ProductModelEditForm)와 같은 수. 같은 부품이라 같게 둔다. */
+const MAX_PART_SUGGESTIONS = 8;
+
+/**
+ * ============================================================================
+ * 🔴 품명을 고치면 재고 연결이 풀린다 — 이 파일의 판단
+ * ============================================================================
+ * 연결해 둔 줄의 품명을 손으로 고쳤을 때 무엇을 할지의 답이다. 이 함수가 연결을
+ * **만드는 쪽과 푸는 쪽 둘 다**를 맡는다 — 품명이 재고 부품과 정확히 일치하면
+ * 그 부품에 잇고, 어긋나면 `null` 로 되돌린다.
+ *
+ * 왜 "연결은 두고 어긋났다고 표시" 가 아니라 자동으로 푸는가:
+ *
+ *  1. **연결을 만드는 유일한 몸짓이 이름 일치다.** `<input list>` 에는 "골랐다"
+ *     는 사건이 없고 글자만 온다 — 그래서 잇는 규칙이 곧 이름 일치다. 그렇다면
+ *     유지하는 규칙도 같아야 한다. 만들 때와 지킬 때가 다른 잣대를 쓰면 사람은
+ *     지금 무엇이 연결돼 있는지 화면만 보고 알 수 없다.
+ *  2. **어긋난 값이 견적서로 나간다.** `partNameText` 는 문서에 찍히고 `partId`
+ *     는 부품 요청이 재고에서 꺼내는 값이다. 둘이 다르면 서류와 창고가 다른 것을
+ *     말한다. 저장 쪽(mutations/oh-part-templates.ts 의 checkParts)은 그 id 가
+ *     **있는지**만 보지 이름이 맞는지는 보지 않는다 — 막을 곳이 여기뿐이다.
+ *  3. **풀린 자리가 이미 정상이다.** `재고 미연결` 은 예외가 아니라 지금 들어 있는
+ *     37줄 전부의 상태다(파일 머리말). 어긋난 채 이어 두는 것보다 훨씬 덜 위험한
+ *     곳으로 떨어진다.
+ *  4. **되돌리는 데 아무것도 잃지 않는다.** 이름을 다시 고르면 연결이 그대로
+ *     돌아온다. 반대로 "연결된 줄은 이름을 못 고치게" 하면 오타 하나 고치자고
+ *     연결부터 풀어야 한다.
+ *
+ * 자동으로 풀리는 것이 조용하지 않도록, 줄마다 지금 상태를 글로 보여 준다
+ * (describePartLink → 아래 화면). 규칙은 여기 하나뿐이라 "만들 때"와 "고칠 때"가
+ * 갈라질 자리가 없다.
+ * ============================================================================
+ */
+export function resolvePartLinkId(
+  partNameText: string,
+  currentPartId: string | null,
+  options: readonly OhTemplatePartOption[]
+): string | null {
+  const matches = options.filter((option) => isExactNormalizedMatch(option.partName, partNameText));
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0].id;
+  // 같은 품명이 여럿이다. 지금 연결이 그중 하나면 그대로 둔다 — 같은 이름을 다시
+  // 쳤다는 이유만으로 사람이 이미 고른 것을 빼앗지 않는다. 그렇지 않으면 어느
+  // 것인지 찍지 않고 사람에게 고르게 한다(화면의 재고 고르기 select).
+  if (currentPartId !== null && matches.some((option) => option.id === currentPartId)) {
+    return currentPartId;
+  }
+  return null;
+}
+
+/**
+ * 줄 하나가 지금 어떤 연결 상태인지. 화면이 이 값 하나로 무엇을 보여 줄지 정한다.
+ *
+ * `MISMATCHED` 는 이 화면에서는 만들어지지 않는다(resolvePartLinkId 가 곧바로
+ * 푼다). DB 에서 온다 — 이어 둔 뒤 재고 마스터에서 그 부품 이름을 바꾸면 저장된
+ * 두 값이 어긋난 채 남는다. 그 줄을 조용히 지나치지 않으려고 상태를 따로 둔다.
+ */
+export type PartLinkState =
+  | { kind: "EMPTY" }
+  | { kind: "UNLINKED"; ambiguous: OhTemplatePartOption[] }
+  | { kind: "LINKED"; part: OhTemplatePartOption }
+  | { kind: "MISMATCHED"; part: OhTemplatePartOption }
+  | { kind: "MISSING" };
+
+export function describePartLink(
+  row: { partId: string | null; partNameText: string },
+  options: readonly OhTemplatePartOption[]
+): PartLinkState {
+  // 빈 줄은 저장할 때 걸러진다(save 의 filter). 아직 아무것도 아니다.
+  if (row.partNameText.trim() === "") return { kind: "EMPTY" };
+  if (row.partId === null) {
+    const matches = options.filter((option) => isExactNormalizedMatch(option.partName, row.partNameText));
+    // 같은 품명이 여럿이라 연결을 못 정한 경우에만 고를 것을 들려 보낸다.
+    return { kind: "UNLINKED", ambiguous: matches.length > 1 ? matches : [] };
+  }
+  const part = options.find((option) => option.id === row.partId);
+  if (!part) return { kind: "MISSING" };
+  if (!isExactNormalizedMatch(part.partName, row.partNameText)) return { kind: "MISMATCHED", part };
+  return { kind: "LINKED", part };
+}
+
+/**
+ * 같은 품명이 여럿일 때 고르는 줄. 품명2가 유일한 단서다(OhTemplatePartOption).
+ * 품명도 품명2도 똑같은 부품이 둘이면 여기서 더 해 줄 것이 없다 — 그것은 이
+ * 화면이 아니라 재고 부품 목록에서 정리할 일이다.
+ */
+function partOptionLabel(option: OhTemplatePartOption): string {
+  return option.partSpec ? `${option.partName} — ${option.partSpec}` : `${option.partName} (규격 미입력)`;
+}
+
 export default function OhTemplateScreen({
   templates,
   unlinkedModels,
+  partOptions,
   canEdit,
 }: {
   templates: OhTemplateRow[];
   /** 아직 어느 템플릿에도 안 붙은 제품 모델. 고칠 수 없는 세션에는 빈 배열이 온다. */
   unlinkedModels: { id: string; modelName: string }[];
+  /** 품명 칸이 검색할 재고 부품. 고칠 수 없는 세션에는 빈 배열이 온다(모델 목록과 같은 결). */
+  partOptions: OhTemplatePartOption[];
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -122,6 +244,7 @@ export default function OhTemplateScreen({
               {openId === template.id ? (
                 <TemplateEditor
                   template={template}
+                  partOptions={partOptions}
                   onMessage={setMessage}
                   onDone={() => {
                     setOpenId(null);
@@ -256,10 +379,12 @@ function ModelLinks({
 
 function TemplateEditor({
   template,
+  partOptions,
   onMessage,
   onDone,
 }: {
   template: OhTemplateRow;
+  partOptions: OhTemplatePartOption[];
   onMessage: (message: string | null) => void;
   onDone: () => void;
 }) {
@@ -275,6 +400,45 @@ function TemplateEditor({
   );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+
+  // rankSimilarNames 는 `name` 을 본다(고객사·End-User 칸과 같은 함수라 그렇다).
+  // 부품은 그 칸이 `partName` 이라 한 번만 이름을 붙여 둔다.
+  const nameableParts = useMemo(
+    () => partOptions.map((option) => ({ ...option, name: option.partName })),
+    [partOptions]
+  );
+
+  /**
+   * 줄마다의 후보. 줄이 여럿이라 훅을 줄 안에서 부를 수 없어 한 번에 만든다.
+   * 후보의 `value` 는 언제나 품명 그대로다 — 고르면 그 글자가 곧 저장되는
+   * `partNameText` 이기 때문이다(파일 머리말). 규격은 `<option>` 본문으로만
+   * 실어 브라우저가 부제로 보여 주게 한다. 품명이 같은 부품이 둘이면 후보도 둘
+   * 나오는데, 그것을 접지 않는 것이 낫다 — "같은 이름이 둘 있다" 를 그 자리에서
+   * 보여 주는 것이 곧 아래 재고 고르기 select 가 왜 뜨는지의 설명이다.
+   */
+  const suggestionsByKey = useMemo(() => {
+    const map = new Map<string, typeof nameableParts>();
+    for (const row of items) {
+      map.set(row.key, rankSimilarNames(row.partNameText, nameableParts).slice(0, MAX_PART_SUGGESTIONS));
+    }
+    return map;
+  }, [items, nameableParts]);
+
+  /** 품명을 고칠 때마다 연결을 다시 정한다 — 만드는 쪽과 푸는 쪽이 같은 규칙이다. */
+  function changePartName(key: string, text: string) {
+    setItems((prev) =>
+      prev.map((row) =>
+        row.key === key
+          ? { ...row, partNameText: text, partId: resolvePartLinkId(text, row.partId, partOptions) }
+          : row
+      )
+    );
+  }
+
+  /** 잘못 이어 둔 줄을 되돌린다. 품명은 건드리지 않는다 — 적어 둔 글자는 사람 것이다. */
+  function unlinkPart(key: string) {
+    setItems((prev) => prev.map((row) => (row.key === key ? { ...row, partId: null } : row)));
+  }
 
   async function save() {
     if (busy) return;
@@ -339,23 +503,134 @@ function TemplateEditor({
       </div>
       {fieldErrors.items && <p className={editErrorClass}>{fieldErrors.items}</p>}
 
-      <div className="mt-2 flex flex-col gap-1.5">
-        {items.map((row, index) => (
+      <div className="mt-2 flex flex-col gap-2.5">
+        {items.map((row, index) => {
+          const link = describePartLink(row, partOptions);
+          const listId = `oh-part-suggestions-${row.key}`;
+          return (
           <div key={row.key} className="grid grid-cols-[1fr_5rem_auto] gap-2">
             <div>
               <input
                 value={row.partNameText}
-                onChange={(e) =>
-                  setItems((prev) =>
-                    prev.map((r) => (r.key === row.key ? { ...r, partNameText: e.target.value } : r))
-                  )
-                }
+                onChange={(e) => changePartName(row.key, e.target.value)}
+                list={listId}
+                autoComplete="off"
                 placeholder={`${index + 1}번째 부품 품명`}
+                aria-label={`${index + 1}번째 부품 품명`}
                 className={editInputClass}
                 disabled={busy}
               />
+              <datalist id={listId}>
+                {(suggestionsByKey.get(row.key) ?? []).map((option) => (
+                  // value 는 품명 그대로, 규격은 본문으로만(파일 머리말).
+                  <option key={option.id} value={option.partName}>
+                    {option.partSpec ?? ""}
+                  </option>
+                ))}
+              </datalist>
+
+              {/* 이 줄이 지금 재고와 이어져 있는지. 말은 목록 화면과 맞춘다
+                  (`재고 미연결` — 새 용어를 만들지 않는다). */}
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                {link.kind === "LINKED" && (
+                  <>
+                    <span className="rounded border border-emerald-300 px-1 text-emerald-800 dark:border-emerald-800 dark:text-emerald-300">
+                      재고 연결됨
+                    </span>
+                    {link.part.partSpec && (
+                      <span className="text-zinc-500 dark:text-zinc-400">{link.part.partSpec}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => unlinkPart(row.key)}
+                      disabled={busy}
+                      aria-label={`${index + 1}번째 부품 재고 연결 풀기`}
+                      className="text-zinc-500 underline underline-offset-2 hover:text-red-600 disabled:opacity-50 dark:text-zinc-400"
+                    >
+                      연결 풀기
+                    </button>
+                  </>
+                )}
+
+                {link.kind === "UNLINKED" && (
+                  <span className="rounded border border-amber-300 px-1 text-amber-800 dark:border-amber-800 dark:text-amber-300">
+                    재고 미연결
+                  </span>
+                )}
+
+                {/* DB 에서 온 어긋남이다 — 이 화면은 이 상태를 만들지 않는다
+                    (resolvePartLinkId 머리말). 조용히 두면 견적서와 창고가
+                    다른 것을 말하므로 무엇에 이어져 있는지 그대로 보여 준다. */}
+                {link.kind === "MISMATCHED" && (
+                  <>
+                    <span className="rounded border border-red-300 px-1 text-red-700 dark:border-red-800 dark:text-red-300">
+                      연결된 재고와 품명이 다름
+                    </span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      연결: {partOptionLabel(link.part)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => unlinkPart(row.key)}
+                      disabled={busy}
+                      aria-label={`${index + 1}번째 부품 재고 연결 풀기`}
+                      className="text-zinc-500 underline underline-offset-2 hover:text-red-600 disabled:opacity-50 dark:text-zinc-400"
+                    >
+                      연결 풀기
+                    </button>
+                  </>
+                )}
+
+                {link.kind === "MISSING" && (
+                  <>
+                    <span className="rounded border border-red-300 px-1 text-red-700 dark:border-red-800 dark:text-red-300">
+                      연결된 재고를 찾을 수 없음
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => unlinkPart(row.key)}
+                      disabled={busy}
+                      aria-label={`${index + 1}번째 부품 재고 연결 풀기`}
+                      className="text-zinc-500 underline underline-offset-2 hover:text-red-600 disabled:opacity-50 dark:text-zinc-400"
+                    >
+                      연결 풀기
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* 품명이 같은 부품이 여럿이라 이름만으로는 정할 수 없다. 찍지 않고
+                  사람에게 고르게 한다(OhTemplatePartOption 의 품명2 판단). */}
+              {link.kind === "UNLINKED" && link.ambiguous.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const picked = e.target.value;
+                    if (picked === "") return;
+                    setItems((prev) =>
+                      prev.map((r) => (r.key === row.key ? { ...r, partId: picked } : r))
+                    );
+                  }}
+                  disabled={busy}
+                  aria-label={`${index + 1}번째 부품 재고 고르기`}
+                  className={`${editInputClass} mt-1`}
+                >
+                  <option value="">
+                    같은 품명이 {link.ambiguous.length}개입니다 — 어느 재고인지 고르세요…
+                  </option>
+                  {link.ambiguous.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {partOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              )}
+
               {fieldErrors[`items.${index}.partNameText`] && (
                 <p className={editErrorClass}>{fieldErrors[`items.${index}.partNameText`]}</p>
+              )}
+              {fieldErrors[`items.${index}.partId`] && (
+                <p className={editErrorClass}>{fieldErrors[`items.${index}.partId`]}</p>
               )}
             </div>
             <div>
@@ -385,7 +660,8 @@ function TemplateEditor({
               ×
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mt-3 flex justify-end">
