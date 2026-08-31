@@ -26,7 +26,11 @@ type AppShellProps = {
    * 사이드바에서 무엇을 감출지에만 쓴다 — 실제 차단은 각 페이지의
    * requireAreaAccess가 서버에서 한다.
    */
-  accessibleAreaKeys: readonly string[] | null;
+  /**
+   * 관리자가 설정한 접근 가능 영역. **null 을 허용하지 않는다** — 메뉴 노출을
+   * 정하는 유일한 값이라, 빠지면 전 메뉴가 열린다(Sidebar 주석 참조).
+   */
+  accessibleAreaKeys: readonly string[];
   /**
    * 로그인한 사용자가 결재해야 할 A/S 건수(layout.tsx가 서버에서 계산해
    * 넘긴다). 사이드바 배지를 그릴지에만 쓴다 — 실제 결재 권한은 승인
@@ -147,7 +151,6 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
         >
           <Sidebar
             activeHref={pathname}
-            role={user.role}
             user={user}
             accessibleAreaKeys={accessibleAreaKeys}
             // 메뉴와 하단 유틸의 **모양**은 둘 다 "지금 보이는가"를 따른다
@@ -180,10 +183,13 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
               않는다. 인셋이 없는 기기에서는 0이므로 기존과 동일하다.
             */}
             <aside className="relative z-50 flex min-h-0 w-64 flex-col border-r border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-zinc-800 dark:bg-zinc-900">
+              {/* 🔴 accessibleAreaKeys 를 여기에도 넘긴다. 빠뜨렸던 동안 모바일
+                  드로어만 **역할별 접근 권한 설정을 통째로 무시**했다 —
+                  관리자가 좁혀도 폰에서는 메뉴가 그대로 보였다(2026-08-31). */}
               <Sidebar
                 activeHref={pathname}
-                role={user.role}
                 user={user}
+                accessibleAreaKeys={accessibleAreaKeys}
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
                 portalUrl={portalUrl}

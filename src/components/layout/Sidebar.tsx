@@ -3,12 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "@/lib/navigation";
-import type { Role } from "@/lib/domain/types";
+
 import SidebarFooter from "./SidebarFooter";
 
 type SidebarProps = {
   activeHref: string;
-  role: Role;
   user: { name: string; roleLabel: string };
   onNavigate?: () => void;
   /**
@@ -37,8 +36,14 @@ type SidebarProps = {
    * 드로어)는 늘 펼쳐져 있고 접는 개념이 없다.
    */
   isPinnedOpen?: boolean;
-  /** 관리자가 설정한 접근 가능 영역. null이면 역할 기준만으로 거른다(navigation.ts 참조). */
-  accessibleAreaKeys?: readonly string[] | null;
+  /**
+   * 관리자가 설정한 접근 가능 영역 — **메뉴 노출을 정하는 유일한 값이다.**
+   *
+   * 🔴 필수다. 예전에는 없으면 역할 기준으로 물러났는데, 역할 술어가 사라진
+   * 지금 그 자리를 남겨 두면 **안 넘긴 호출부에서 전 메뉴가 열린다.** 실제로
+   * 모바일 드로어가 안 넘기고 있었다(2026-08-31, AppShell 에서 고침).
+   */
+  accessibleAreaKeys: readonly string[];
   /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
   portalUrl?: string | null;
   /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
@@ -126,8 +131,8 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, role, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys = null, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
-  const visibleItems = filterNavItemsForAccess(navItems, role, accessibleAreaKeys);
+export default function Sidebar({ activeHref, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
+  const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   /** 좁은 모양으로 그릴지. prop 을 넘기지 않는 모바일 드로어는 늘 넓다. */
   const isNarrow = isCollapsed ?? false;

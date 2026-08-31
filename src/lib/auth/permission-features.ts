@@ -459,6 +459,10 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCaseNew",
   "excelKyosanIntakeList",
   "settings",
+  // 페이지 가드·서버 액션·이미지 라우트가 모두 이 설정을 본다(2026-08-31).
+  // 역할 함수(canManageIntakeMailSettings)는 이제 permission-baseline 의
+  // 기본값을 계산할 때만 쓰인다 — 최종 관문이 아니다.
+  "mailSettings",
 ]);
 
 /** 이 노드의 설정이 실제 판정을 지배하는가. */

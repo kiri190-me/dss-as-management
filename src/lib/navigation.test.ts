@@ -1,6 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navItems, navGroups, childNavItems, filterNavItemsForRole } from "./navigation";
+import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "./navigation";
+import { baselinePermissionLevel } from "./auth/permission-baseline";
+import type { Role } from "./domain/types";
+
+/**
+ * ============================================================================
+ * 사이드바 노출 — 이제 **관리자가 정한 접근 권한 하나로만** 정해진다
+ * ============================================================================
+ * 예전에는 항목마다 역할 술어(isVisibleForRole)가 있었고 그 위에 설정이
+ * 겹쳤다. 그래서 권한을 넓혀도 메뉴가 뜨지 않았다(2026-08-31 제거).
+ *
+ * 아래 시험들은 그때의 단언을 **그대로** 유지하되, 판정 경로만 지금 것으로
+ * 바꿨다 — 기본 정책(설정을 아무도 건드리지 않은 상태)으로 어느 역할이 무엇을
+ * 보는가. 통과한다는 것은 역할 술어를 떼면서 **기본 노출이 한 칸도 바뀌지
+ * 않았다**는 뜻이다. 그게 이 변경의 안전 근거다.
+ */
+
+/**
+ * 설정을 건드리지 않았을 때 이 역할에게 보이는 항목.
+ *
+ * 앱이 실제로 쓰는 경로와 같다 — listAccessibleAreaKeys 가 DB(없으면 기본
+ * 정책)에서 키 목록을 만들고, filterNavItemsForAccess 가 그것으로 거른다.
+ * 여기서는 DB 를 타지 않으려고 기본 정책을 직접 쓴다.
+ */
+function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
+  const accessibleAreaKeys = items
+    .map((item) => item.key)
+    .filter((key) => baselinePermissionLevel(key, role) !== "NONE");
+  return filterNavItemsForAccess(items, accessibleAreaKeys);
+}
+
 
 /**
  * Regression test for nav-visibility gating. This is a UX check only;
@@ -51,17 +81,55 @@ import { navItems, navGroups, childNavItems, filterNavItemsForRole } from "./nav
  * 보이는데 자식만 사라지는 사이드바가 된다.
  */
 
-test("navigation: the approved feature entries are the only role-gated items", () => {
-  const restricted = navItems.filter((item) => item.isVisibleForRole);
-  assert.deepEqual(
-    restricted.map((i) => i.key).sort(),
-    // 수리 작업 비용(2026-08-31)이 견적서와 **같은 판정**으로 붙었다 — 견적서의
-    // 작업비가 나오는 근거라, 견적서를 못 보는 사람에게 보일 이유가 없다.
-    // 메일 설정(2026-08-31)도 역할로 가린다 — 여기서 정한 문구가 전사원
-    // 메일로 나가고 수신자 목록이 곧 "누가 고객사·S/N·증상을 받는가"라,
-    // 고객사 전용 주소 발급과 같은 선(관리자 이상)에 뒀다.
-    ["customerPortal", "customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "mailSettings", "myActiveWork", "productModels", "quotes", "repairLabor", "technicalProcedures", "workflows"]
+/**
+ * 🔴 항목에 역할 술어를 다시 붙이지 못하게 막는다.
+ *
+ * 하나라도 되살아나면 "권한을 넓혔는데 메뉴가 안 뜬다"가 그대로 돌아온다.
+ * 노출을 좁혀야 하면 그 자리는 permission-baseline.ts 의 기본 정책이고,
+ * 그러면 관리자가 설정으로 되돌릴 수 있다.
+ */
+test("navigation: 항목별 역할 술어가 없다 — 노출은 접근 권한 설정 하나로만 정해진다", () => {
+  const withPredicate = navItems.filter(
+    (item) => "isVisibleForRole" in item && typeof (item as Record<string, unknown>).isVisibleForRole === "function"
   );
+  assert.deepEqual(withPredicate.map((i) => i.key), []);
+});
+
+/**
+ * 🔴 역할 술어를 떼면서 **기본 노출이 바뀌지 않았는가.**
+ *
+ * 이 표가 이 변경의 안전 근거다. 예전 역할 술어가 내던 답과 기본 정책이 내는
+ * 답이 모든 메뉴 × 모든 역할에서 같았기 때문에 뗄 수 있었다. 값이 바뀌면
+ * 여기서 걸린다.
+ */
+test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노출", () => {
+  const expected: Record<string, string[]> = {
+    SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => k !== "myActiveWork"),
+    ADMIN: navItems.map((i) => i.key).filter((k) => k !== "myActiveWork"),
+    AS_ENGINEER: navItems
+      .map((i) => i.key)
+      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings"].includes(k)),
+    SALES: navItems
+      .map((i) => i.key)
+      .filter((k) => !["myActiveWork", "technicalProcedures", "workflows", "mailSettings"].includes(k)),
+    INVENTORY_MANAGER: navItems
+      .map((i) => i.key)
+      .filter(
+        (k) =>
+          ![
+            "myActiveWork", "technicalProcedures", "customers", "productModels", "workflows",
+            "domesticOrders", "quotes", "repairLabor", "customerPortal", "mailSettings",
+          ].includes(k)
+      ),
+  };
+
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.deepEqual(
+      filterNavItemsForRole(navItems, role).map((i) => i.key),
+      expected[role],
+      `${role} 의 기본 노출이 바뀌었다`
+    );
+  }
 });
 
 // 워크플로 관리는 규칙 자체를 바꾸는 화면이라 엔지니어 이상만 본다
