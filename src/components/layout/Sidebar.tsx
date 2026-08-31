@@ -56,6 +56,24 @@ const REPAIR_CASES_KEY = "repairCases";
 /** 배지를 누르면 그 건들만 걸러진 목록으로 간다 — 필터 파싱은 repair-case-filters.ts. */
 const MY_PENDING_APPROVAL_HREF = "/repair-cases?myApproval=1";
 
+/**
+ * ============================================================================
+ * 하위메뉴가 펼쳐지고 닫히는 속도 — **고치려면 이 한 줄만 고친다**
+ * ============================================================================
+ * 예전에는 `{isExpanded && …}` 로 붙였다 뗐다 해서 아무 움직임이 없었다.
+ * 툭 하고 나타나는 것이 "너무 빠르다"로 느껴져 부드럽게 바꾼 것이다.
+ *
+ * 200ms 를 고른 이유: 사이드바 폭 전환이 150ms 인데(AppShell.tsx) 그보다
+ * 눈에 띄게 느리되, 그룹을 마우스로 훑을 때 끈적하지 않은 선이다. 머무름
+ * 만으로도 펼쳐지므로 300ms 를 넘기면 커서를 옆으로 옮기는 동안 메뉴가
+ * 계속 따라 열려 어지럽다.
+ *
+ * ▸ 화살표도 같은 값을 쓴다 — 따로 두면 화살표가 먼저 돌고 메뉴가 나중에
+ * 따라오는 것이 보인다.
+ * ============================================================================
+ */
+const SUBMENU_TRANSITION = "duration-200 ease-out motion-reduce:transition-none";
+
 function navLinkClassName(isActive: boolean): string {
   return isActive
     ? "rounded-md border-l-2 border-zinc-900 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-50 dark:bg-zinc-800 dark:text-zinc-50"
@@ -209,7 +227,10 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
                   // 떠날 때는 "내가 마지막에 들어온 그룹일 때만" 지운다 —
                   // 옆 그룹의 mouseenter 가 먼저 오면 그것을 덮어쓰게 된다.
                   onMouseLeave={supportsHoverExpand ? () => setHoveredGroupKey((prev) => (prev === group.key ? null : prev)) : undefined}
-                  className="mt-3 flex flex-col gap-0.5 border-t border-zinc-100 pt-2 first:mt-1 first:border-0 first:pt-0 dark:border-zinc-800"
+                  /* gap 을 여기서 빼고 아래 애니메이션 칸 안으로 옮겼다 — 하위메뉴가 접혀
+                     있어도 DOM 에 남으므로, gap 을 여기 두면 **접힌 그룹마다 2px 씩
+                     늘어난다.** 안으로 옮기면 높이와 함께 접혀 예전과 같아진다. */
+                  className="mt-3 flex flex-col border-t border-zinc-100 pt-2 first:mt-1 first:border-0 first:pt-0 dark:border-zinc-800"
                 >
                   <button
                     type="button"
@@ -218,13 +239,38 @@ export default function Sidebar({ activeHref, role, user, onNavigate, isCollapse
                     className="flex items-center justify-between rounded-md bg-zinc-50 px-3 py-2 text-xs font-bold tracking-wide text-zinc-600 uppercase hover:bg-zinc-100 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   >
                     <span>{group.label}</span>
-                    <span className={`text-zinc-400 transition-transform dark:text-zinc-500 ${isExpanded ? "rotate-90" : ""}`} aria-hidden="true">
+                    <span className={`text-zinc-400 transition-transform ${SUBMENU_TRANSITION} dark:text-zinc-500 ${isExpanded ? "rotate-90" : ""}`} aria-hidden="true">
                       ▸
                     </span>
                   </button>
-                  {isExpanded && (
-                    <div className="ml-3 flex flex-col gap-0.5 border-l border-zinc-200 py-1 pl-2 dark:border-zinc-800">{groupItems.map(renderItem)}</div>
-                  )}
+                  {/*
+                   * 접혀 있어도 **DOM 에는 남겨 둔다** — 붙였다 떼면 전환할
+                   * 것이 없어 움직임이 생기지 않는다. 대신 두 가지를 챙긴다:
+                   *
+                   *  행 높이 0fr → 1fr    그룹마다 항목 수가 달라도 높이를
+                   *                       재지 않아도 된다. max-height 에 큰
+                   *                       값을 박는 방식은 그룹마다 속도가
+                   *                       달라 보인다(빈 공간을 지나는 시간이
+                   *                       항목 수에 따라 다르므로).
+                   *  inert + aria-hidden  🔴 붙였다 떼던 때는 공짜로 되던 것.
+                   *                       남겨 두면 **안 보이는 링크에 Tab 이
+                   *                       걸리고 스크린리더가 읽는다.**
+                   */}
+                  <div
+                    className={`grid transition-[grid-template-rows,opacity] ${SUBMENU_TRANSITION} ${
+                      isExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                    }`}
+                    inert={!isExpanded}
+                    aria-hidden={!isExpanded}
+                  >
+                    {/* 높이가 0fr 인 동안 내용이 삐져나오지 않게 가둔다 —
+                        이 칸이 없으면 접힌 그룹의 글자가 그대로 겹쳐 보인다. */}
+                    <div className="overflow-hidden pt-0.5">
+                      <div className="ml-3 flex flex-col gap-0.5 border-l border-zinc-200 py-1 pl-2 dark:border-zinc-800">
+                        {groupItems.map(renderItem)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
