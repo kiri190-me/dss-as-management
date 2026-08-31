@@ -17,9 +17,12 @@ import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
 import {
   MAX_QUOTE_ITEMS,
+  QUOTE_WORK_SCOPE_SECTIONS,
+  quoteWorkScopeSectionLabels,
   QUOTE_KINDS,
   quoteKindLabels,
   type QuoteKind,
+  type QuoteWorkScopeSection,
 } from "@/lib/validation/quote-input";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 import QuotePrintView from "@/components/quotes/QuotePrintView";
@@ -181,6 +184,13 @@ function ohTemplatePartToItem(
   };
 }
 
+/** 작업 내역 한 줄. `key` 는 화면에서만 쓰는 값이고 저장되지 않는다. */
+type ScopeRow = { key: string; text: string };
+
+function toScopeRows(texts: readonly string[]): ScopeRow[] {
+  return texts.map((text) => ({ key: generateClientUuid(), text }));
+}
+
 function formatAmount(value: number): string {
   return `₩${AMOUNT_FORMAT.format(Math.round(value))}`;
 }
@@ -195,6 +205,7 @@ export default function QuoteEditForm({
   defaultQuoteDate,
   repairLabor,
   printHeaders,
+  workScopeDefaults,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -213,6 +224,11 @@ export default function QuoteEditForm({
    * null 이고, 그래도 미리보기는 뜬다.
    */
   printHeaders: Record<string, QuoteTemplateHeader>;
+  /**
+   * 양식 넷의 작업 내역 기본 목록(조사/수리/통전). 새 견적서를 열 때 조사·통전을
+   * 이것으로 채운다. 그 구역이 없는 양식(제너레이터)은 셋 다 빈 배열이다.
+   */
+  workScopeDefaults: Record<string, Record<string, string[]>>;
 }) {
   const router = useRouter();
 
@@ -302,6 +318,38 @@ export default function QuoteEditForm({
    * 보내면 저장하지 않은 값을 들고 갈 방법이 없다.
    */
   const [showPreview, setShowPreview] = useState(false);
+
+  /**
+   * 견적서에 적히는 작업 내역. 묶음마다 줄 목록을 들고 있다.
+   *
+   * 저장된 견적서는 그때 적힌 글자를 그대로 편다. 새 견적서는 빈 채로 시작하고,
+   * 장비 종류를 고르는 순간 양식의 기본 목록이 들어온다(아래 fillScopeFrom...).
+   */
+  const [scopeLines, setScopeLines] = useState<Record<QuoteWorkScopeSection, ScopeRow[]>>(() => {
+    const initial: Record<QuoteWorkScopeSection, ScopeRow[]> = {
+      INVESTIGATION: [],
+      REPAIR: [],
+      POWER_TEST: [],
+    };
+    for (const line of quote?.workScopeLines ?? []) {
+      initial[line.section].push({ key: generateClientUuid(), text: line.text });
+    }
+    return initial;
+  });
+
+  /**
+   * 사람이 그 묶음을 손댔는가.
+   *
+   * 🔴 **손댄 묶음은 자동으로 다시 채우지 않는다.** 종류를 바꿀 때마다 양식 기본값이
+   * 덮어쓰면 적어 둔 문장이 소리 없이 사라지고, 사람은 자기가 지운 줄 안다.
+   * 처음 열었을 때 이미 적혀 있던 견적서도 손댄 것으로 본다 — 그 글자가 곧
+   * 사람이 정한 내용이다.
+   */
+  const [scopeTouched, setScopeTouched] = useState<Record<QuoteWorkScopeSection, boolean>>(() => ({
+    INVESTIGATION: (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION"),
+    REPAIR: (quote?.workScopeLines ?? []).some((l) => l.section === "REPAIR"),
+    POWER_TEST: (quote?.workScopeLines ?? []).some((l) => l.section === "POWER_TEST"),
+  }));
   const [isConflict, setIsConflict] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -379,6 +427,44 @@ export default function QuoteEditForm({
    * 이 규칙이 도는 자리는 "사람이 종류를 고른 순간" 하나뿐이다. 그래서 두 select
    * 의 onChange 에서만 부른다.
    */
+  /**
+   * 조사작업·통전작업을 그 양식의 기본 목록으로 채운다. **손대지 않은 묶음만**
+   * 건드린다(scopeTouched 주석).
+   *
+   * 종류를 고르는 순간에만 돈다 — effect 로 두면 화면이 그려진 뒤 상태를 또
+   * 바꾸는 모양이 되고, 처음 열 때 저장돼 있던 글자를 덮는다.
+   */
+  function fillScopeFromTemplate(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
+    const defaults = workScopeDefaults[quoteTemplateKey(nextLaborKind, nextQuoteKind)];
+    if (!defaults) return;
+    setScopeLines((prev) => {
+      const next = { ...prev };
+      for (const section of ["INVESTIGATION", "POWER_TEST"] as const) {
+        if (scopeTouched[section]) continue;
+        next[section] = toScopeRows(defaults[section] ?? []);
+      }
+      return next;
+    });
+  }
+
+  /**
+   * 수리작업을 **고른 수리 작업**으로 채운다. 손대지 않았을 때만.
+   *
+   * 청구하는 작업과 문서에 적는 문장이 늘 1:1은 아니라서(한 작업을 두 줄로
+   * 설명하거나, 청구하지 않는 부수 작업을 적기도 한다) 한번 고친 뒤로는
+   * 따로 산다 — 사람이 다시 맞추고 싶으면 그 자리의 단추를 누른다.
+   */
+  function fillRepairScopeFrom(taskNames: readonly string[], force = false) {
+    if (!force && scopeTouched.REPAIR) return;
+    setScopeLines((prev) => ({ ...prev, REPAIR: toScopeRows(taskNames) }));
+    if (force) setScopeTouched((prev) => ({ ...prev, REPAIR: false }));
+  }
+
+  function editScope(section: QuoteWorkScopeSection, rows: ScopeRow[]) {
+    setScopeLines((prev) => ({ ...prev, [section]: rows }));
+    setScopeTouched((prev) => ({ ...prev, [section]: true }));
+  }
+
   function applyOverhaulRule(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
     const labor = repairLabor.find((row) => row.equipmentKind === nextLaborKind);
     if (!labor) return;
@@ -388,14 +474,19 @@ export default function QuoteEditForm({
     if (overhaulIds.length === 0) return;
 
     const shouldCheck = nextQuoteKind === "OVERHAUL";
-    setCheckedTaskIds((prev) => {
-      const next = new Set(prev);
-      for (const id of overhaulIds) {
-        if (shouldCheck) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
+    const next = new Set(checkedTaskIds);
+    for (const id of overhaulIds) {
+      if (shouldCheck) next.add(id);
+      else next.delete(id);
+    }
+    setCheckedTaskIds(next);
+    // 고른 작업이 바뀌었으니 수리작업 목록도 따라간다(손대지 않았을 때만).
+    fillRepairScopeFrom(taskNamesOf(labor, next));
+  }
+
+  /** 고른 작업의 건명들. 목록 차례를 그대로 따른다 — 문서에 적히는 순서다. */
+  function taskNamesOf(labor: RepairLaborKindRow, ids: Set<string>): string[] {
+    return labor.tasks.filter((task) => ids.has(task.id)).map((task) => task.taskName);
   }
 
   /**
@@ -543,6 +634,16 @@ export default function QuoteEditForm({
       laborEquipmentKind: laborKind,
       laborBaseCost: activeLabor?.baseCost ?? null,
       repairTasks: selectedTasks,
+      /**
+       * 문서에 적히는 작업 내역. 빈 줄은 검증이 걸러 낸다 — 적힐 것이 없는
+       * 문장이라 버려도 잃는 것이 없다.
+       *
+       * 묶음 차례는 배열 순서가 그대로다: 조사 → 수리 → 통전, 양식에 적히는
+       * 순서와 같게 보낸다.
+       */
+      workScopeLines: QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) =>
+        scopeLines[section].map((row) => ({ section, text: row.text }))
+      ),
       // 통째로 빈 줄은 보내지 않는다 — 사람이 `+ 부품 추가`를 눌러 두고 안 채운
       // 줄이 저장을 막으면, 어디가 문제인지 찾느라 폼을 다시 훑게 된다.
       items: items
@@ -791,6 +892,8 @@ export default function QuoteEditForm({
               // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
               // 풀린다(applyOverhaulRule 머리말).
               applyOverhaulRule(next, laborKind);
+              // 양식이 바뀌면 조사·통전 기본 목록도 그 양식 것으로 간다.
+              fillScopeFromTemplate(next, laborKind);
             }}
             className={editInputClass}
             disabled={disabled}
@@ -1159,6 +1262,7 @@ export default function QuoteEditForm({
                 const next = (e.target.value || null) as WorkflowKind | null;
                 setLaborKind(next);
                 applyOverhaulRule(kind, next);
+                fillScopeFromTemplate(kind, next);
               }}
               disabled={disabled}
               aria-label="작업 목록의 장비 종류"
@@ -1198,6 +1302,9 @@ export default function QuoteEditForm({
                             if (e.target.checked) next.add(task.id);
                             else next.delete(task.id);
                             setCheckedTaskIds(next);
+                            // 고른 작업이 곧 문서의 「2) 수리작업」이다
+                            // (손대지 않았을 때만 따라간다).
+                            fillRepairScopeFrom(taskNamesOf(activeLabor, next));
                           }}
                           disabled={disabled}
                           className="h-4 w-4"
@@ -1249,6 +1356,115 @@ export default function QuoteEditForm({
               )}
             </>
           )}
+        </div>
+
+        {/* ── 작업 내역 ───────────────────────────────────────────────────
+            매쳐 견적서의 `2. 작업 비용` 아래에 세 묶음으로 적히는 글이다.
+            조사·통전은 양식의 기본 목록에서, 수리는 위에서 고른 작업에서
+            채워지고, 셋 다 사람이 고치거나 줄을 더할 수 있다.
+
+            제너레이터 양식에는 이 구역이 없어 기본 목록이 비어 있다 — 그래도
+            칸은 보여 준다. 적어 두면 나중에 양식이 생겼을 때 그대로 쓰인다. */}
+        <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">작업 내역</span>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              견적서의 <b>2. 작업 비용</b> 아래에 적힙니다
+            </span>
+          </div>
+
+          <div className="mt-3 grid gap-4 lg:grid-cols-3">
+            {QUOTE_WORK_SCOPE_SECTIONS.map((section) => {
+              const rows = scopeLines[section];
+              const templateDefaults =
+                workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section] ?? [];
+              return (
+                <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className={editLabelClass}>
+                      {QUOTE_WORK_SCOPE_SECTIONS.indexOf(section) + 1}){" "}
+                      {quoteWorkScopeSectionLabels[section]}
+                    </span>
+                    {/* 다시 맞추는 길을 열어 둔다 — 손댄 뒤로는 자동으로 따라가지
+                        않으므로, 되돌리고 싶을 때 누를 곳이 없으면 사람이 손으로
+                        지우고 다시 적게 된다. */}
+                    {section === "REPAIR" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          fillRepairScopeFrom(
+                            activeLabor ? taskNamesOf(activeLabor, checkedTaskIds) : [],
+                            true
+                          )
+                        }
+                        disabled={disabled || activeLabor === null}
+                        className="rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] disabled:opacity-50 dark:border-zinc-700"
+                      >
+                        고른 작업으로
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScopeLines((prev) => ({ ...prev, [section]: toScopeRows(templateDefaults) }));
+                          setScopeTouched((prev) => ({ ...prev, [section]: false }));
+                        }}
+                        disabled={disabled || templateDefaults.length === 0}
+                        className="rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] disabled:opacity-50 dark:border-zinc-700"
+                      >
+                        양식 기본값으로
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {rows.map((row, index) => (
+                      <div key={row.key} className="flex items-center gap-1.5">
+                        <span className="text-xs text-zinc-400">-</span>
+                        <input
+                          value={row.text}
+                          onChange={(e) =>
+                            editScope(
+                              section,
+                              rows.map((r) => (r.key === row.key ? { ...r, text: e.target.value } : r))
+                            )
+                          }
+                          aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄`}
+                          className={editInputClass}
+                          disabled={disabled}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => editScope(section, rows.filter((r) => r.key !== row.key))}
+                          disabled={disabled}
+                          aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄 지우기`}
+                          className="rounded border border-zinc-300 px-1.5 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {rows.length === 0 && (
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        아직 없습니다. 아래에서 줄을 더하세요.
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      editScope(section, [...rows, { key: generateClientUuid(), text: "" }])
+                    }
+                    disabled={disabled}
+                    className="mt-2 rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+                  >
+                    + 줄 추가
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mt-4 max-w-md">

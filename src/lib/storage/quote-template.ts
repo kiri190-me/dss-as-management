@@ -2,6 +2,7 @@ import "server-only";
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { quoteWorkScopeSectionLabels } from "@/lib/validation/quote-input";
 
 /**
  * ============================================================================
@@ -299,4 +300,103 @@ export async function readQuoteTemplateHeaderOrEmpty(): Promise<QuoteTemplateHea
     if (!(err instanceof QuoteTemplateError)) throw err;
     return emptyQuoteTemplateHeader();
   }
+}
+
+/**
+ * ============================================================================
+ * 양식에 적힌 작업 내역 기본 목록 — 조사작업 · 수리작업 · 통전작업
+ * ============================================================================
+ * 매쳐 견적서의 `2. 작업 비용` 아래에 세 묶음으로 적혀 있다. 새 견적서를 열 때
+ * 조사작업·통전작업을 이 목록으로 채워 준다(수리작업은 고른 수리 작업에서 온다).
+ *
+ * ── 🔴 행 번호를 박지 않는다 ────────────────────────────────────────────
+ * 같은 매쳐 양식인데도 내자와 OH 의 행이 다르다 — 부품 줄 수가 달라서 아래가
+ * 통째로 밀려 있다(내자는 조사작업이 34행, OH 는 39행). 행을 박아 두면 양식을
+ * 한 줄만 고쳐도 엉뚱한 글자를 읽어 온다.
+ *
+ * 그래서 **머리글을 찾아 훑는다**: D열에 `조사작업` 같은 이름이 나오면 그 묶음이
+ * 시작된 것이고, 이어지는 줄 중 C열이 `-` 인 것들이 그 묶음의 항목이다. 다음
+ * 머리글이 나오면 묶음이 바뀐다.
+ *
+ * 부품 줄도 C열이 `-` 라 같아 보이지만, **머리글보다 위에 있어서** 걸리지 않는다
+ * (묶음이 시작되기 전에는 아무것도 담지 않는다).
+ *
+ * ── 못 읽으면 빈 목록이다 ───────────────────────────────────────────────
+ * 양식이 없거나 그 구역이 없는 양식(제너레이터)이면 셋 다 빈 배열이다. 화면은
+ * 사람이 직접 적을 수 있게 빈 목록으로 그린다 — 여기서 던지면 양식 하나 때문에
+ * 견적서를 못 쓰게 된다.
+ * ============================================================================
+ */
+
+/** 양식에 적힌 머리글 → 묶음. validation 쪽 이름표를 뒤집어 쓴다(두 벌로 두지 않는다). */
+const SECTION_BY_LABEL = new Map(
+  Object.entries(quoteWorkScopeSectionLabels).map(([section, label]) => [label, section])
+);
+
+/** 훑는 범위. 양식의 작업 내역은 20행대에서 시작해 60행대에서 끝난다. */
+const WORK_SCOPE_SCAN_ROWS = { from: 20, to: 90 } as const;
+
+export async function readQuoteWorkScopeDefaults(
+  templateKey: string
+): Promise<Record<string, string[]>> {
+  const empty: Record<string, string[]> = {
+    INVESTIGATION: [],
+    REPAIR: [],
+    POWER_TEST: [],
+  };
+
+  const variant = TEMPLATE_VARIANTS[templateKey];
+  if (!variant) return empty;
+
+  const configured = process.env[variant.envVar];
+  if (!configured || configured.trim().length === 0) return empty;
+
+  const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
+  const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");
+
+  let archive;
+  try {
+    archive = ZipArchive.fromBuffer(await readTemplateAt(path.resolve(configured.trim())));
+  } catch (err) {
+    if (!(err instanceof QuoteTemplateError)) throw err;
+    return empty;
+  }
+
+  const refs: string[] = [];
+  for (let row = WORK_SCOPE_SCAN_ROWS.from; row <= WORK_SCOPE_SCAN_ROWS.to; row += 1) {
+    refs.push(`C${row}`, `D${row}`);
+  }
+  const values = resolveSheetTextCells(archive, variant.sheetName, refs);
+
+  let current: string | null = null;
+  for (let row = WORK_SCOPE_SCAN_ROWS.from; row <= WORK_SCOPE_SCAN_ROWS.to; row += 1) {
+    const label = (values.get(`D${row}`) ?? "").trim();
+    const bullet = (values.get(`C${row}`) ?? "").trim();
+
+    const section = SECTION_BY_LABEL.get(label);
+    if (section) {
+      current = section;
+      continue;
+    }
+    // 묶음이 시작되기 전이거나, 글머리표가 아닌 줄(고정 안내 문구는 `*` 다)은 건너뛴다.
+    if (current === null || bullet !== "-" || label === "") continue;
+    empty[current].push(label);
+  }
+
+  return empty;
+}
+
+/**
+ * 양식 넷의 작업 내역 기본 목록. 머리말과 같은 이유로 **넷을 한 번에** 준다 —
+ * 화면이 들고 있다가 사람이 종류를 바꾸는 순간 갈아 끼운다.
+ */
+export async function readAllQuoteWorkScopeDefaults(): Promise<
+  Record<string, Record<string, string[]>>
+> {
+  const entries = await Promise.all(
+    Object.keys(TEMPLATE_VARIANTS).map(
+      async (key) => [key, await readQuoteWorkScopeDefaults(key)] as const
+    )
+  );
+  return Object.fromEntries(entries);
 }

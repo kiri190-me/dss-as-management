@@ -285,3 +285,59 @@ export const quoteItems = pgTable(
     check("quote_items_unit_price_not_negative", sql`${table.unitPrice} >= 0`),
   ]
 );
+
+/**
+ * ============================================================================
+ * 견적서에 적히는 작업 내역 — 무엇을 했는가(할 것인가)
+ * ============================================================================
+ * 매쳐 견적서의 `2. 작업 비용` 아래에 세 묶음으로 적힌다:
+ *
+ *   1) 조사작업   외관 및 내부 검사 · 파라메타 체크 · …
+ *   2) 수리작업   바리콘 교환 · 고정 콘덴서 추가 · …
+ *   3) 통전작업   정격 출력 시험 · 에이징시험 · …
+ *
+ * ── 왜 견적서마다 저장하나 ──────────────────────────────────────────────
+ * 조사·통전은 대체로 늘 같지만 **줄을 더하거나 고칠 수 있어야 한다**(2026-08-31
+ * 사용자 요구). 고칠 수 있는 값을 양식에서만 읽으면 그 장의 사정을 담을 곳이
+ * 없고, 다시 열었을 때 사람이 적어 둔 줄이 사라진다.
+ *
+ * 수리작업은 견적서가 고른 수리 작업(quote_repair_tasks)에서 처음 채워지지만,
+ * **그 뒤로는 따로 산다** — 청구하는 작업과 문서에 적는 문장이 늘 1:1은 아니고
+ * (한 작업을 두 줄로 설명하거나, 청구하지 않는 부수 작업을 적기도 한다),
+ * 사람이 고친 문장을 고른 작업이 다시 덮으면 안 된다.
+ *
+ * ── 스냅샷이다 ──────────────────────────────────────────────────────────
+ * 글자를 그대로 담는다. 나중에 작업 목록의 건명이 바뀌어도 **이미 보낸 견적서는
+ * 그대로여야 한다** — 이 파일 머리말의 그 규칙과 같다.
+ * ============================================================================
+ */
+export const quoteWorkScopeSectionEnum = pgEnum("quote_work_scope_section", [
+  "INVESTIGATION",
+  "REPAIR",
+  "POWER_TEST",
+]);
+
+export const quoteWorkScopeLines = pgTable(
+  "quote_work_scope_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    quoteId: uuid("quote_id")
+      .notNull()
+      .references(() => quotes.id, { onDelete: "cascade" }),
+    /** 세 묶음 중 어디에 적히는가. 양식의 `1) 2) 3)` 이 그대로 이 축이다. */
+    section: quoteWorkScopeSectionEnum("section").notNull(),
+    /** 묶음 안에서의 차례. 저장할 때 1부터 다시 매긴다. */
+    lineNo: integer("line_no").notNull(),
+    /** 문서에 찍히는 글자 그대로. */
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("quote_work_scope_lines_quote_section_line_unique").on(
+      table.quoteId,
+      table.section,
+      table.lineNo
+    ),
+    index("quote_work_scope_lines_quote_id_idx").on(table.quoteId),
+  ]
+);

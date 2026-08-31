@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
-import { readAllQuoteTemplateHeaders } from "@/lib/storage/quote-template";
+import {
+  readAllQuoteTemplateHeaders,
+  readAllQuoteWorkScopeDefaults,
+} from "@/lib/storage/quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -69,9 +72,10 @@ export default async function QuoteDetailPage({
   // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
   // 양식 머리말은 미리보기가 쓴다 — **지금 폼에 적힌 값으로** 그리므로, 아직
   // 저장하지 않은 수정분도 그대로 보인다.
-  const [repairLabor, printHeaders] = await Promise.all([
+  const [repairLabor, printHeaders, workScopeDefaults] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
+    readAllQuoteWorkScopeDefaults(),
   ]);
 
   return (
@@ -80,6 +84,7 @@ export default async function QuoteDetailPage({
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
       printHeaders={printHeaders}
+      workScopeDefaults={workScopeDefaults}
     />
   );
 }

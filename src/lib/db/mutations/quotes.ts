@@ -2,7 +2,15 @@ import "server-only";
 
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../client";
-import { customers, parts, quoteItems, quoteRepairTasks, quotes, repairCases } from "../schema";
+import {
+  customers,
+  parts,
+  quoteItems,
+  quoteRepairTasks,
+  quoteWorkScopeLines,
+  quotes,
+  repairCases,
+} from "../schema";
 import type { QuoteFields } from "@/lib/validation/quote-input";
 
 /**
@@ -233,6 +241,27 @@ async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
  * 카탈로그를 보지 않고 **넘어온 사본을 그대로 넣는다.** 지금 카탈로그 값으로 다시
  * 읽으면, 단가가 오른 뒤 옛 견적서를 고칠 때 손대지도 않은 작업의 금액이 바뀐다.
  */
+/**
+ * 견적서에 적히는 작업 내역을 통째로 갈아 끼운다. 부품 줄·수리 작업과 같은 방식.
+ *
+ * 차례(line_no)는 **묶음 안에서** 1부터 매긴다 — 문서의 `1) 조사작업` 아래
+ * 몇 번째 줄인가가 그 뜻이고, 세 묶음이 하나의 번호를 나눠 쓰면 한 묶음의 줄을
+ * 지웠을 때 다른 묶음의 번호까지 흔들린다.
+ */
+async function replaceWorkScopeLines(tx: Tx, quoteId: string, fields: QuoteFields) {
+  await tx.delete(quoteWorkScopeLines).where(eq(quoteWorkScopeLines.quoteId, quoteId));
+  if (fields.workScopeLines.length === 0) return;
+
+  const nextLineNo = new Map<string, number>();
+  await tx.insert(quoteWorkScopeLines).values(
+    fields.workScopeLines.map((line) => {
+      const lineNo = (nextLineNo.get(line.section) ?? 0) + 1;
+      nextLineNo.set(line.section, lineNo);
+      return { quoteId, section: line.section, lineNo, text: line.text };
+    })
+  );
+}
+
 async function replaceRepairTasks(tx: Tx, quoteId: string, fields: QuoteFields) {
   await tx.delete(quoteRepairTasks).where(eq(quoteRepairTasks.quoteId, quoteId));
   if (fields.repairTasks.length === 0) return;
@@ -276,6 +305,7 @@ export async function createQuote(params: {
       // 보이는데 금액이 작업비뿐인 장이 된다.
       await replaceItems(tx, inserted.id, params.fields);
       await replaceRepairTasks(tx, inserted.id, params.fields);
+      await replaceWorkScopeLines(tx, inserted.id, params.fields);
 
       return { ok: true, id: inserted.id, version: inserted.version };
     });
@@ -333,6 +363,7 @@ export async function updateQuote(params: {
       // 부품을 한 줄도 지우지 않는다(같은 트랜잭션이므로 위에서 이미 반환됐다).
       await replaceItems(tx, params.id, params.fields);
       await replaceRepairTasks(tx, params.id, params.fields);
+      await replaceWorkScopeLines(tx, params.id, params.fields);
 
       return { ok: true, id: updated.id, version: updated.version };
     });

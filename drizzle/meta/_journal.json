@@ -526,6 +526,13 @@
       "when": 1788151078638,
       "tag": "0074_minor_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1788158474136,
+      "tag": "0076_plain_snowbird",
+      "breakpoints": true
     }
   ]
 }

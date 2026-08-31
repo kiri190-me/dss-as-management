@@ -15,13 +15,14 @@ import {
   products,
   quoteItems,
   quoteRepairTasks,
+  quoteWorkScopeLines,
   quotes,
   repairCases,
 } from "../schema";
 import { buildQuoteSummaryLine, sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
-import type { QuoteKind } from "@/lib/validation/quote-input";
+import type { QuoteKind, QuoteWorkScopeSection } from "@/lib/validation/quote-input";
 
 /**
  * ============================================================================
@@ -269,6 +270,13 @@ export type QuoteEditData = {
     /** 그때의 시간당 작업비. 지금 값으로 다시 셈하지 않는다. */
     hourlyRate: string;
   }[];
+  /**
+   * 견적서에 적히는 작업 내역(조사/수리/통전). 묶음 안의 차례대로 온다.
+   *
+   * 이 기능이 생기기 전에 만든 견적서는 빈 배열이다 — 그때는 적을 방법이
+   * 없었다. 화면은 그때 양식의 기본 목록으로 채워 준다.
+   */
+  workScopeLines: { section: QuoteWorkScopeSection; text: string }[];
   items: {
     partId: string | null;
     partNameText: string;
@@ -341,7 +349,14 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     .where(eq(quoteRepairTasks.quoteId, id))
     .orderBy(asc(quoteRepairTasks.lineNo));
 
-  return { ...row, items, repairTasks };
+  // 작업 내역. 묶음 안의 차례대로 — 문서에 적히는 순서 그대로다.
+  const workScopeLines = await db
+    .select({ section: quoteWorkScopeLines.section, text: quoteWorkScopeLines.text })
+    .from(quoteWorkScopeLines)
+    .where(eq(quoteWorkScopeLines.quoteId, id))
+    .orderBy(asc(quoteWorkScopeLines.section), asc(quoteWorkScopeLines.lineNo));
+
+  return { ...row, items, repairTasks, workScopeLines };
 }
 
 export type QuoteIntakeLookup = {

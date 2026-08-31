@@ -137,7 +137,30 @@ export type QuoteFields = {
   laborEquipmentKind: WorkflowKind | null;
   laborBaseCost: string | null;
   repairTasks: QuoteRepairTaskInput[];
+  /**
+   * 견적서에 적히는 작업 내역(조사/수리/통전). 묶음 안의 **차례가 곧 배열
+   * 순서**다 — 문서에 적히는 순서 그대로다.
+   *
+   * 빈 배열은 "작업 내역을 안 적는다"이고, 그것도 뜻이다(제너레이터 양식에는
+   * 이 구역이 없다).
+   */
+  workScopeLines: QuoteWorkScopeLineInput[];
   items: QuoteItemInput[];
+};
+
+/** 작업 내역 묶음. 매쳐 양식의 `1) 2) 3)` 이 그대로 이 축이다. */
+export const QUOTE_WORK_SCOPE_SECTIONS = ["INVESTIGATION", "REPAIR", "POWER_TEST"] as const;
+export type QuoteWorkScopeSection = (typeof QUOTE_WORK_SCOPE_SECTIONS)[number];
+
+export const quoteWorkScopeSectionLabels: Record<QuoteWorkScopeSection, string> = {
+  INVESTIGATION: "조사작업",
+  REPAIR: "수리작업",
+  POWER_TEST: "통전작업",
+};
+
+export type QuoteWorkScopeLineInput = {
+  section: QuoteWorkScopeSection;
+  text: string;
 };
 
 /** 견적서가 고른 수리 작업 한 줄. 카탈로그의 줄이 아니라 그때 값의 사본이다. */
@@ -254,6 +277,7 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
   const laborEquipmentKind = isWorkflowKind(raw.laborEquipmentKind) ? raw.laborEquipmentKind : null;
   const laborBaseCost = normalizeAmount("laborBaseCost", "기본 작업비", raw.laborBaseCost, fieldErrors);
   const repairTasks = normalizeRepairTasks(raw.repairTasks, fieldErrors);
+  const workScopeLines = normalizeWorkScopeLines(raw.workScopeLines, fieldErrors);
 
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
 
@@ -279,9 +303,61 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       laborEquipmentKind,
       laborBaseCost,
       repairTasks,
+      workScopeLines,
       items,
     },
   };
+}
+
+/**
+ * 작업 내역 줄들.
+ *
+ * **빈 줄은 조용히 버린다** — 부품 줄과 같은 판단이다(사람이 `+ 줄 추가`를
+ * 눌러 두고 안 채운 자리가 저장을 막으면, 어디가 문제인지 찾느라 폼을 다시
+ * 훑게 된다). 부품 줄과 다른 점은 **버려도 잃는 것이 없다**는 것이다: 빈
+ * 문장은 문서에 적힐 것이 아무것도 없다.
+ */
+function normalizeWorkScopeLines(
+  raw: unknown,
+  fieldErrors: Record<string, string>
+): QuoteWorkScopeLineInput[] {
+  if (raw === null || raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    fieldErrors.workScopeLines = "작업 내역을 확인할 수 없습니다.";
+    return [];
+  }
+
+  const lines: QuoteWorkScopeLineInput[] = [];
+  raw.forEach((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      fieldErrors[`workScopeLines.${index}`] = `${index + 1}번째 작업 내역을 확인할 수 없습니다.`;
+      return;
+    }
+    const row = entry as Record<string, unknown>;
+
+    const section = row.section;
+    if (
+      typeof section !== "string" ||
+      !(QUOTE_WORK_SCOPE_SECTIONS as readonly string[]).includes(section)
+    ) {
+      // 어느 묶음인지 모르면 문서의 어디에 적을지 알 수 없다. 조용히 버리면
+      // 사람은 그 줄까지 적힌 줄 안다.
+      fieldErrors[`workScopeLines.${index}`] = `${index + 1}번째 작업 내역의 구분을 확인할 수 없습니다.`;
+      return;
+    }
+
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    if (text === "") return;
+    if (text.length > MAX_SHORT_TEXT) {
+      fieldErrors[`workScopeLines.${index}`] =
+        `${index + 1}번째 작업 내역은 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
+      return;
+    }
+
+    lines.push({ section: section as QuoteWorkScopeSection, text });
+  });
+
+  return lines;
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   customers,
   products,
   quoteItems,
+  quoteWorkScopeLines,
   quotes,
   repairCaseIntakeSequences,
   repairCases,
@@ -91,6 +92,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     laborEquipmentKind: null,
     laborBaseCost: null,
     repairTasks: [],
+    // 작업 내역(2026-08-31). 기본은 "안 적음" — 제너레이터 양식에는 이 구역이 없다.
+    workScopeLines: [],
     items: [],
     ...overrides,
   };
@@ -461,5 +464,101 @@ describe("updateQuote", () => {
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.code, "NOT_FOUND");
+  });
+});
+
+/**
+ * ============================================================================
+ * 작업 내역 — 견적서에 적히는 조사/수리/통전
+ * ============================================================================
+ * 매쳐 견적서의 `2. 작업 비용` 아래에 세 묶음으로 적힌다. 여기서 못 박는 것은
+ * 셋이다:
+ *
+ *  1. 저장하고 다시 읽으면 **묶음과 차례가 그대로**다 — 문서에 적히는 순서가
+ *     곧 그 차례라, 뒤섞이면 받아 본 쪽이 다른 문서로 읽는다.
+ *  2. 차례는 **묶음 안에서** 매겨진다. 셋이 하나의 번호를 나눠 쓰면 한 묶음의
+ *     줄을 지웠을 때 다른 묶음의 번호까지 흔들린다.
+ *  3. 고쳐 저장하면 **통째로 갈아 끼워진다** — 폼에서 지운 줄이 남아 있으면
+ *     안 된다(부품 줄의 replaceItems 와 같은 규칙).
+ * ============================================================================
+ */
+describe("견적서 작업 내역", () => {
+  const scope = (section: "INVESTIGATION" | "REPAIR" | "POWER_TEST", ...texts: string[]) =>
+    texts.map((text) => ({ section, text }));
+
+  async function readScope(quoteId: string) {
+    return db
+      .select({
+        section: quoteWorkScopeLines.section,
+        lineNo: quoteWorkScopeLines.lineNo,
+        text: quoteWorkScopeLines.text,
+      })
+      .from(quoteWorkScopeLines)
+      .where(eq(quoteWorkScopeLines.quoteId, quoteId))
+      .orderBy(asc(quoteWorkScopeLines.section), asc(quoteWorkScopeLines.lineNo));
+  }
+
+  test("세 묶음이 저장되고, 차례는 묶음 안에서 1부터 매겨진다", async () => {
+    const created = await create({
+      workScopeLines: [
+        ...scope("INVESTIGATION", "외관 및 내부 검사", "파라메타 체크"),
+        ...scope("REPAIR", "바리콘 교환"),
+        ...scope("POWER_TEST", "정격 출력 시험", "에이징시험"),
+      ],
+    });
+    assert.ok(created.ok, JSON.stringify(created));
+
+    const rows = await readScope(created.id);
+    assert.equal(rows.length, 5);
+
+    // 🔴 묶음마다 1부터. 셋이 번호를 나눠 쓰면 한 묶음을 지울 때 다른 묶음이 흔들린다.
+    const bySection = (s: string) => rows.filter((r) => r.section === s).map((r) => r.lineNo);
+    assert.deepEqual(bySection("INVESTIGATION"), [1, 2]);
+    assert.deepEqual(bySection("REPAIR"), [1]);
+    assert.deepEqual(bySection("POWER_TEST"), [1, 2]);
+
+    // 적은 순서가 그대로 차례다 — 문서에 적히는 순서다.
+    assert.deepEqual(
+      rows.filter((r) => r.section === "INVESTIGATION").map((r) => r.text),
+      ["외관 및 내부 검사", "파라메타 체크"]
+    );
+  });
+
+  test("고쳐 저장하면 통째로 갈아 끼워진다 — 지운 줄이 남지 않는다", async () => {
+    const created = await create({
+      workScopeLines: scope("REPAIR", "지울 줄 A", "지울 줄 B", "지울 줄 C"),
+    });
+    assert.ok(created.ok);
+
+    const updated = await updateQuote({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ workScopeLines: scope("REPAIR", "남길 줄 하나") }),
+      actorUserId,
+    });
+    assert.ok(updated.ok, JSON.stringify(updated));
+
+    const rows = await readScope(created.id);
+    assert.deepEqual(
+      rows.map((r) => r.text),
+      ["남길 줄 하나"],
+      "폼에서 지운 줄이 남아 있으면 문서에 그대로 나간다"
+    );
+    assert.deepEqual(rows.map((r) => r.lineNo), [1], "차례도 1부터 다시 매겨진다");
+  });
+
+  test("작업 내역이 없는 견적서도 저장된다 — 그 구역이 없는 양식이 있다", async () => {
+    const created = await create({ workScopeLines: [] });
+    assert.ok(created.ok);
+    assert.deepEqual(await readScope(created.id), []);
+  });
+
+  test("🔴 견적서를 지우면 작업 내역도 함께 사라진다 — CASCADE", async () => {
+    const created = await create({ workScopeLines: scope("REPAIR", "딸린 줄") });
+    assert.ok(created.ok);
+    assert.equal((await readScope(created.id)).length, 1);
+
+    await db.delete(quotes).where(eq(quotes.id, created.id));
+    assert.deepEqual(await readScope(created.id), [], "부모가 사라지면 딸린 줄도 사라진다");
   });
 });

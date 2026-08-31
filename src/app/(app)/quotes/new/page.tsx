@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
-import { readAllQuoteTemplateHeaders } from "@/lib/storage/quote-template";
+import {
+  readAllQuoteTemplateHeaders,
+  readAllQuoteWorkScopeDefaults,
+} from "@/lib/storage/quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -53,9 +56,10 @@ export default async function NewQuotePage() {
   // 시간대로 날짜가 정해진다(자정 전후 하루가 실제로 다르게 나온다).
   // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
   // 양식 머리말은 **저장 전 미리보기**가 쓴다(회사 정보·기본 문구·계좌).
-  const [repairLabor, printHeaders] = await Promise.all([
+  const [repairLabor, printHeaders, workScopeDefaults] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
+    readAllQuoteWorkScopeDefaults(),
   ]);
 
   return (
@@ -64,6 +68,7 @@ export default async function NewQuotePage() {
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
       printHeaders={printHeaders}
+      workScopeDefaults={workScopeDefaults}
     />
   );
 }
