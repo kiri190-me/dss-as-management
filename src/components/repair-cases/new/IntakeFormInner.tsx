@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   PRIORITY_CODES,
@@ -24,6 +24,7 @@ import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validation";
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
+import { previewNextIntakeNumberAction } from "@/lib/server/actions/intake-number-preview";
 import { linkRequestToRepairCaseAction } from "@/lib/server/actions/customer-portal-requests";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -225,12 +226,47 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
     [draft.modelName, productModelOptions]
   );
 
-  // "예상 인수번호" 미리보기는 화면에서 뺐다. 실제 채번은 제출 시점에 서버가
-  // repair_case_intake_sequences로 수행하며(0001 마이그레이션), 브라우저는 그
-  // 시퀀스를 조회할 수 없다 — 데모 경로가 사라진 뒤로는 그달 내내 같은 고정값만
-  // 내놓아 서버가 실제로 주는 번호와 어긋났다. 사용자에게 틀린 번호를 단언하느니
-  // 아무 번호도 보이지 않는 편이 낫다. 미리보기를 계산하던 함수도 함께
-  // 삭제했으므로, 되살리려면 서버가 후보 번호를 내려주는 방식이어야 한다.
+  /**
+   * "예상 인수번호" — 서버가 읽어 준 값만 흐리게 보여 준다.
+   *
+   * 예전에는 이 미리보기를 아예 뺐었다. 브라우저가 채번 시퀀스를 볼 수 없어
+   * 그달 내내 같은 고정값만 내놓았고, 서버가 실제로 주는 번호와 어긋났기
+   * 때문이다. 지금은 서버가 repair_case_intake_sequences 를 **읽어서만**
+   * 후보를 내려준다(queries/intake-number-preview.ts) — 되살리려면 그래야
+   * 한다고 적어 둔 방식 그대로다.
+   *
+   * 그래도 이 값은 단언이 아니다. 읽은 뒤 다른 사람이 먼저 접수하면 한 칸
+   * 뒤가 되므로, 칸에도 도움말에도 "(예상)"이라고 적는다. 실제 확정은 지금도
+   * 제출 시점의 서버 채번뿐이다.
+   *
+   * 받아 온 값에 **어느 인수일의 답인지를 함께 담는다.** 인수일을 바꾸면 새
+   * 답이 오기 전까지 이전 달 번호가 남는데, 그 짧은 순간에 담당자가 보는 것은
+   * 지금 고른 달의 번호가 아니다 — 날짜가 어긋나면 아예 감춘다(아래 파생값).
+   */
+  const [intakeNumberPreview, setIntakeNumberPreview] = useState<{
+    receivedAt: string;
+    value: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    // 날짜를 타이핑하는 중간 상태(2026-0 같은 값)까지 서버에 묻지 않는다.
+    const receivedAt = draft.receivedAt;
+    if (!isValidDateString(receivedAt)) return;
+    // 응답이 보낸 순서대로 오지 않을 수 있고, 폼을 떠난 뒤 도착할 수도 있다.
+    let cancelled = false;
+    void previewNextIntakeNumberAction(receivedAt).then((value) => {
+      if (!cancelled) setIntakeNumberPreview({ receivedAt, value });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.receivedAt]);
+
+  /** 지금 고른 인수일에 대한 답일 때만 쓴다 — 그 외에는 칸을 비워 둔다. */
+  const previewedIntakeNumber =
+    intakeNumberPreview && intakeNumberPreview.receivedAt === draft.receivedAt
+      ? intakeNumberPreview.value
+      : null;
 
   function setField<K extends keyof IntakeDraftData>(key: K, value: IntakeDraftData[K]) {
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);
@@ -528,9 +564,15 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               ref={(el) => {
                 fieldRefs.current.intakeNumber = el;
               }}
-              className={inputClass}
+              /* placeholder 는 흐린 회색이어야 한다 — 직접 친 값과 같은 진하기면
+                 담당자가 이미 입력된 줄 알고 그대로 제출한다. */
+              className={`${inputClass} placeholder:text-zinc-400 dark:placeholder:text-zinc-500`}
               value={intakeNumberOverride}
               onChange={(e) => setIntakeNumberOverride(e.target.value)}
+              /* 값이 아니라 placeholder 다 — 비워 둔 칸은 그대로 "자동 채번"으로
+                 제출된다. 여기에 미리 채워 넣으면 예상값이 사용자가 직접 지정한
+                 번호로 굳어, 다른 사람이 먼저 접수한 순간 중복 오류가 난다. */
+              placeholder={previewedIntakeNumber ? `${previewedIntakeNumber} (예상)` : undefined}
               aria-invalid={Boolean(errors.intakeNumber)}
               aria-describedby={errors.intakeNumber ? "intakeNumber-error" : "intakeNumber-help"}
             />
@@ -539,6 +581,9 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             ) : (
               <p id="intakeNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                 비워두면 제출 시 서버가 인수일 기준으로 자동 채번합니다. 직접 입력한 값은 제출 시 형식과 중복 여부를 다시 확인합니다.
+                {previewedIntakeNumber && (
+                  <> ※ 칸에 흐리게 보이는 {previewedIntakeNumber} 는 예상값입니다 — 다른 접수가 먼저 등록되면 실제 번호는 달라질 수 있습니다.</>
+                )}
               </p>
             )}
           </div>
