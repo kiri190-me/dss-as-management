@@ -1,40 +1,72 @@
 import { ZipArchive } from "./zip-reader";
 import { writeZip, type ZipEntryInput } from "./zip-writer";
-import { clearCell, setDate, setFormula, setInlineString, setNumber } from "./sheet-patch";
+import { setDate, setFormula, setInlineString, setNumber } from "./sheet-patch";
+import { createCellTextReader } from "./sheet-text";
+import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from "./sheet-rows";
+import {
+  assertAscending,
+  clearCellIfPresent,
+  findItemBlock,
+  findLabelRow,
+  findSpacedLabelRow,
+  dropErrorValueCaches,
+  ITEM_MARKER,
+  LAYOUT_COLUMNS as COLUMNS,
+} from "./quote-sheet-layout";
+import {
+  CALC_CHAIN_PART,
+  CONTENT_TYPES_PART,
+  enableFullCalcOnLoad,
+  removeCalcChainOverride,
+  removeCalcChainRelationship,
+  resolveSheetPart,
+  SHARED_STRINGS_PART,
+  shiftPrintArea,
+  WORKBOOK_PART,
+  WORKBOOK_RELS_PART,
+} from "./workbook-parts";
 
 /**
  * ============================================================================
- * 내자견적서 — 원본 양식의 칸만 채운다
+ * 내자견적서 — 원본 양식을 채운다
  * ============================================================================
- * 원본 `내자견적서.xlsx` 를 읽어 값이 들어간 새 버퍼를 돌려준다. 원본 파일은
- * 절대 쓰지 않는다(읽기 전용). 로고·직인 이미지, styles.xml, 인쇄설정,
- * 36~52행의 작업 항목 문구, 20행 표머리, 3~7행 회사 정보는 **손대지 않는다** —
- * 그것들은 다른 파트에 있거나 우리가 건드릴 칸 목록에 없다.
+ * 원본을 읽어 값이 들어간 새 버퍼를 돌려준다. 원본 파일은 절대 쓰지 않는다.
+ * 로고·직인 이미지, styles.xml, 인쇄설정, 작업 내역 문구(인수 조사·수리 작업·
+ * 통전검사·서류작업), 회사 정보는 **손대지 않는다.**
  *
- * 아래 셀 주소와 스타일 승계 규칙은 **원본 파일을 실측해서 정한 값**이다.
- * 추측으로 늘리지 말 것. 새 칸이 필요하면 원본을 다시 열어보고 확인한 뒤 더한다.
+ * ── 🔴 행을 코드에 박지 않는다 ──────────────────────────────────────────
+ * 예전에는 부품 칸을 27~31행으로 박아 두었다. 그런데 이 양식들은 사람이 건마다
+ * 줄을 넣어 저장하는 문서다 — 실제로 하루 사이에 제너레이터 O/H 의 부품 칸이
+ * 5줄에서 8줄로 바뀐 판이 들어왔다. 박아 두면 그때마다 조용히 엉뚱한 칸에 값이
+ * 앉는다(quote-sheet-layout.ts 의 머리말).
+ *
+ * 이제 D열 머리글로 자리를 찾고, **담을 만큼 줄을 늘리고 줄인다.**
+ *
+ * ── 부품을 한 줄로 합치던 규칙을 없앴다 ────────────────────────────────
+ * 예전에는 부품이 다섯을 넘으면 「부품 비용 일괄」 한 줄로 합쳐 적었다. 양식이
+ * 1페이지에 맞춰져 있고 행을 늘릴 수 없어서였다. 이제 늘릴 수 있으므로
+ * **부품을 있는 그대로 적는다**(2026-08-31 사용자 승인). 부품이 많으면 문서가
+ * 2페이지가 된다 — 청구 내역을 뭉뚱그리는 것보다 낫다.
+ *
+ * 화면 미리보기(components/quotes/QuotePrintView.tsx)도 같이 바뀌었다. 둘이
+ * 다르면 받아 본 쪽이 다른 문서라고 여긴다.
  *
  * ── 양식의 공급가 수식은 고장나 있었다 ──────────────────────────────────
- * 원본 `I55`(공 급 가)가 `=M45` 인데 `M45` 는 값이 없는 빈 칸이다. 부가세
- * (`I56=I55*0.1`)와 합계(`I57=I55+I56`)가 전부 이 칸을 물고 있어서, 부품 단가를
- * 채워 넣어도 `I27:I31` 만 계산되고 **아래 합계 세 칸은 늘 0** 이었다. 손으로
- * 쓸 때는 합계를 직접 타이핑해 덮었을 것이다. 자동으로 만드는 문서에서는 그럴
- * 사람이 없으므로 `I55` 를 실제 합계로 바꾼다. 부가세·합계 수식은 그대로 둔다.
+ * 원본의 공급가 칸이 `=M45` 인데 `M45` 는 빈 칸이다. 부가세와 합계가 전부 이
+ * 칸을 물고 있어서, 부품 단가를 채워도 **아래 합계 세 칸은 늘 0** 이었다. 손으로
+ * 쓸 때는 합계를 직접 타이핑해 덮었을 것이다. 자동으로 만드는 문서에는 그럴
+ * 사람이 없으므로 실제 합계로 바꾼다.
  *
  * ── 재계산을 Excel 에 맡긴다 ────────────────────────────────────────────
- * `D10`(발행일자)의 `TODAY()` 를 없애면 `xl/calcChain.xml` 이 시트와 어긋난다
- * (그 파일이 D10 을 수식 셀로 적어 두고 있다). calcChain 은 Excel 이 언제든
- * 다시 만들 수 있는 캐시라서 **파트째 들어낸다** — 참조 세 곳(Content_Types,
- * workbook.xml.rels, 파트 자체)을 함께 지우고, workbook 에 `fullCalcOnLoad` 를
- * 켜서 열 때 전부 다시 계산하게 한다. 낡은 캐시값이 화면에 먼저 보이는 일이
- * 없어야 한다.
+ * 발행일자의 `TODAY()` 를 없애고 줄까지 밀리므로 `calcChain.xml` 이 시트와
+ * 어긋난다. 파트째 들어내고 `fullCalcOnLoad` 를 켠다(workbook-parts.ts).
  *
  * `TODAY()` 를 남기지 않는 이유: 그것은 '오늘'이지 '발행일자'가 아니다. 남겨
  * 두면 3개월 뒤에 그 파일을 여는 사람에게 3개월 뒤 날짜가 찍힌 견적서가 보인다.
  * ============================================================================
  */
 
-/** 값을 채우는 시트. 통합문서의 첫 번째 탭이다. */
+/** 값을 채우는 시트. 이 통합문서에는 `OH견적서`·`Sheet1` 도 들어 있다. */
 export const QUOTE_SHEET_NAME = "내자견적서";
 
 export const QUOTE_CELLS = {
@@ -44,36 +76,27 @@ export const QUOTE_CELLS = {
   customerName: "D12",
   /** D23 이 `=D13` 으로 따라오므로 여기만 채우면 본문 제목도 함께 바뀐다. */
   subject: "D13",
+  /** 표 위의 요약 금액. 양식이 공급가를 받아 쓴다. */
+  amount: "D14",
   validity: "D15",
   delivery: "D16",
   payment: "D17",
   /** `MODEL: …, S/N:…, L/N:…` 한 줄. 원본에 예시가 박혀 있다. */
   productInfo: "D24",
-  /** 2) 작업비의 단가. 수량(G33=1)과 금액 수식(I33)은 원본 그대로 둔다. */
-  workCost: "H33",
-  /** 공 급 가. 위 '고장나 있었다' 참조. */
-  supplyTotal: "I55",
 } as const;
 
-/** 1) 부품 비용 칸. 양식이 다섯 줄로 고정돼 있고, 인쇄영역이 A1:I57 딱 1페이지다. */
-export const PART_ROWS = [27, 28, 29, 30, 31] as const;
-export const PART_COLUMNS = { name: "D", quantity: "G", unitPrice: "H" } as const;
+/** D열에서 찾는 머리글. 양식의 글자 그대로다. */
+const BLOCK_LABELS = {
+  parts: "부품 비용",
+  /**
+   * 양식에는 `작업비 (조사,수리,개조,통전,출하검사)` 라고 길게 적혀 있다. 괄호
+   * 안은 언제든 손볼 수 있는 설명이라 **앞부분만** 본다.
+   */
+  labor: "작업비",
+} as const;
 
-/** 공급가 = 부품비 다섯 줄 + 작업비. 품목 영역(26~53행)을 통째로 더해 둔다. */
-export const SUPPLY_TOTAL_FORMULA = "SUM(I26:I53)";
-
-/**
- * 부품이 다섯 줄을 넘을 때 27행에 대신 적는 말(승인된 규칙). 행을 늘리지 않는
- * 이유는 인쇄 레이아웃이다 — 이 양식은 1페이지에 맞춰져 있고, 행을 밀면 아래
- * 병합셀·직인 앵커·인쇄영역이 전부 따라 틀어진다. 상세 목록은 이 함수가 버리지
- * 않는다. 부르는 쪽이 그대로 갖고 있다.
- */
-export const PARTS_ROLLUP_LABEL = "부품 비용 일괄";
-
-const CALC_CHAIN_PART = "xl/calcChain.xml";
-const CONTENT_TYPES_PART = "[Content_Types].xml";
-const WORKBOOK_PART = "xl/workbook.xml";
-const WORKBOOK_RELS_PART = "xl/_rels/workbook.xml.rels";
+/** H열에서 찾는 합계 머리글. 양식은 `공 급 가` 처럼 띄워 두었다 — 공백을 지우고 견준다. */
+const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
 
 export type QuotePartInput = {
   name: string;
@@ -100,7 +123,7 @@ export type QuoteInput = {
 /**
  * 원본 양식 버퍼 + 입력 → 채워진 xlsx 버퍼.
  *
- * 은행계좌(D18)는 인자로 받지 않는다. 계좌번호를 코드나 DB 에 두지 않기 위해서고,
+ * 은행계좌는 인자로 받지 않는다. 계좌번호를 코드나 DB 에 두지 않기 위해서고,
  * 양식에 이미 적혀 있으므로 그대로 나간다.
  */
 export function fillQuoteWorkbook(templateXlsx: Buffer, input: QuoteInput): Buffer {
@@ -110,18 +133,28 @@ export function fillQuoteWorkbook(templateXlsx: Buffer, input: QuoteInput): Buff
   const sheetPart = resolveSheetPart(archive, QUOTE_SHEET_NAME);
   const hasCalcChain = archive.has(CALC_CHAIN_PART);
 
+  const filled = fillSheet(
+    archive.readText(sheetPart),
+    archive.readTextOrNull(SHARED_STRINGS_PART),
+    input
+  );
+
   const entries: ZipEntryInput[] = [];
   for (const name of archive.list()) {
-    // 위 '재계산을 Excel 에 맡긴다' 참조.
     if (name === CALC_CHAIN_PART) continue;
 
     const bytes = archive.readEntry(name);
     if (!bytes) throw new Error(`양식에서 파트를 읽지 못했습니다: "${name}"`);
 
     if (name === sheetPart) {
-      entries.push({ name, data: toUtf8(fillSheet(bytes.toString("utf8"), input)) });
+      entries.push({ name, data: toUtf8(filled.xml) });
     } else if (name === WORKBOOK_PART) {
-      entries.push({ name, data: toUtf8(enableFullCalcOnLoad(bytes.toString("utf8"))) });
+      const workbook = shiftPrintArea(
+        enableFullCalcOnLoad(bytes.toString("utf8")),
+        QUOTE_SHEET_NAME,
+        filled.rowShift
+      );
+      entries.push({ name, data: toUtf8(workbook) });
     } else if (hasCalcChain && name === CONTENT_TYPES_PART) {
       entries.push({ name, data: toUtf8(removeCalcChainOverride(bytes.toString("utf8"))) });
     } else if (hasCalcChain && name === WORKBOOK_RELS_PART) {
@@ -138,9 +171,48 @@ function toUtf8(value: string): Buffer {
   return Buffer.from(value, "utf8");
 }
 
-function fillSheet(sheetXml: string, input: QuoteInput): string {
-  let xml = sheetXml;
+function fillSheet(
+  sheetXml: string,
+  sharedStringsXml: string | null,
+  input: QuoteInput
+): { xml: string; rowShift: number } {
+  const read = createCellTextReader(sheetXml, sharedStringsXml);
+  const templateRows = parseSheetRows(sheetXml);
 
+  // ── 1) 자리를 찾는다 ──────────────────────────────────────────────
+  const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
+  const laborRow = findLabelRow(templateRows, read, COLUMNS.name, BLOCK_LABELS.labor, "prefix");
+  const supplyRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.supply);
+  const vatRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.vat);
+  const totalRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.total);
+
+  assertAscending([
+    [BLOCK_LABELS.parts, parts.headerRow],
+    [BLOCK_LABELS.labor, laborRow],
+    [TOTAL_LABELS.supply, supplyRow],
+    [TOTAL_LABELS.vat, vatRow],
+    [TOTAL_LABELS.total, totalRow],
+  ]);
+
+  // ── 2) 부품 줄 수를 맞춘다 ────────────────────────────────────────
+  const resized = resizeRowBlock(templateRows, {
+    firstRow: parts.firstRow,
+    currentCount: parts.count,
+    targetCount: input.parts.length,
+  });
+  const rowShift = resized.delta;
+
+  const at = {
+    partsFirst: parts.firstRow,
+    labor: laborRow + rowShift,
+    supply: supplyRow + rowShift,
+    vat: vatRow + rowShift,
+    total: totalRow + rowShift,
+  };
+
+  let xml = syncDimension(writeSheetRows(sheetXml, resized.rows), resized.rows);
+
+  // ── 3) 값을 채운다 ────────────────────────────────────────────────
   xml = setDate(xml, QUOTE_CELLS.quoteDate, input.quoteDate);
   xml = setInlineString(xml, QUOTE_CELLS.quoteNumber, input.quoteNumber.trim());
   xml = setInlineString(xml, QUOTE_CELLS.customerName, input.customerName.trim());
@@ -148,44 +220,74 @@ function fillSheet(sheetXml: string, input: QuoteInput): string {
   xml = setInlineString(xml, QUOTE_CELLS.productInfo, buildProductInfoLine(input));
 
   // 값을 준 것만 바꾼다. 안 주면 양식의 기본 문구가 그대로 남는다.
-  const optional = [
+  for (const [value, cell] of [
     [input.validity, QUOTE_CELLS.validity],
     [input.delivery, QUOTE_CELLS.delivery],
     [input.payment, QUOTE_CELLS.payment],
-  ] as const;
-  for (const [value, cell] of optional) {
+  ] as const) {
     if (value !== undefined) xml = setInlineString(xml, cell, value.trim());
   }
 
-  xml = fillPartRows(xml, input.parts);
-  xml = setNumber(xml, QUOTE_CELLS.workCost, input.workCost);
-  xml = setFormula(xml, QUOTE_CELLS.supplyTotal, SUPPLY_TOTAL_FORMULA);
+  xml = fillPartRows(xml, at.partsFirst, input.parts);
 
-  return xml;
+  xml = setNumber(xml, `${COLUMNS.quantity}${at.labor}`, 1);
+  xml = setNumber(xml, `${COLUMNS.unitPrice}${at.labor}`, input.workCost);
+  xml = setFormula(
+    xml,
+    `${COLUMNS.amount}${at.labor}`,
+    `${COLUMNS.unitPrice}${at.labor}*${COLUMNS.quantity}${at.labor}`
+  );
+
+  /**
+   * 작업비 아래부터 공급가 바로 위까지의 금액 칸을 비운다. 그 사이는 작업 내역
+   * 문구가 적히는 자리라 금액이 없어야 하는데, 양식에는 빈 칸을 가리키는 낡은
+   * 수식(`=N45`)이 하나 남아 있다. 합계 범위 안이라 치워 둔다.
+   */
+  for (let row = at.labor + 1; row < at.supply; row += 1) {
+    xml = clearCellIfPresent(xml, `${COLUMNS.amount}${row}`);
+  }
+
+  // ── 4) 옮겨진 자리로 수식을 다시 쓴다 ────────────────────────────
+  xml = setFormula(xml, QUOTE_CELLS.amount, `${COLUMNS.amount}${at.supply}`);
+  xml = setFormula(
+    xml,
+    `${COLUMNS.amount}${at.supply}`,
+    `SUM(${COLUMNS.amount}${parts.headerRow}:${COLUMNS.amount}${at.supply - 1})`
+  );
+  xml = setFormula(xml, `${COLUMNS.amount}${at.vat}`, `${COLUMNS.amount}${at.supply}*0.1`);
+  xml = setFormula(
+    xml,
+    `${COLUMNS.amount}${at.total}`,
+    `${COLUMNS.amount}${at.supply}+${COLUMNS.amount}${at.vat}`
+  );
+
+  return { xml: dropErrorValueCaches(xml), rowShift };
 }
 
 /**
- * 다섯 줄을 채우고 **남는 줄은 반드시 비운다.** 원본에는 "1번 부품"~"5번 부품"
- * 이라는 예시 문구가 박혀 있어서, 안 지우면 쓰지도 않은 부품이 견적서에 남는다.
+ * 부품 줄. 복제된 줄은 줄임표(`-`)까지 비워져 있어 줄마다 다시 쓴다.
+ *
+ * ⚠️ 금액 칸을 **보통 수식으로** 쓴다. 양식은 이 자리를 공유 수식
+ * (`<f t="shared" ref="I27:I31">`)으로 두는데, 줄 수가 바뀌면 그 `ref` 가 실제와
+ * 어긋나고 어긋난 공유 수식은 Excel 이 파일 열기를 거부하는 사유다.
  */
-function fillPartRows(sheetXml: string, parts: readonly QuotePartInput[]): string {
-  const rows: readonly QuotePartInput[] =
-    parts.length > PART_ROWS.length
-      ? [{ name: PARTS_ROLLUP_LABEL, quantity: 1, unitPrice: totalPartsCost(parts) }]
-      : parts;
-
+export function fillPartRows(
+  sheetXml: string,
+  firstRow: number,
+  parts: readonly QuotePartInput[]
+): string {
   let xml = sheetXml;
-  PART_ROWS.forEach((row, index) => {
-    const part = rows[index];
-    if (!part) {
-      xml = clearCell(xml, `${PART_COLUMNS.name}${row}`);
-      xml = clearCell(xml, `${PART_COLUMNS.quantity}${row}`);
-      xml = clearCell(xml, `${PART_COLUMNS.unitPrice}${row}`);
-      return;
-    }
-    xml = setInlineString(xml, `${PART_COLUMNS.name}${row}`, part.name.trim());
-    xml = setNumber(xml, `${PART_COLUMNS.quantity}${row}`, part.quantity);
-    xml = setNumber(xml, `${PART_COLUMNS.unitPrice}${row}`, part.unitPrice);
+  parts.forEach((part, index) => {
+    const row = firstRow + index;
+    xml = setInlineString(xml, `${COLUMNS.marker}${row}`, ITEM_MARKER);
+    xml = setInlineString(xml, `${COLUMNS.name}${row}`, part.name.trim());
+    xml = setNumber(xml, `${COLUMNS.quantity}${row}`, part.quantity);
+    xml = setNumber(xml, `${COLUMNS.unitPrice}${row}`, part.unitPrice);
+    xml = setFormula(
+      xml,
+      `${COLUMNS.amount}${row}`,
+      `${COLUMNS.unitPrice}${row}*${COLUMNS.quantity}${row}`
+    );
   });
   return xml;
 }
@@ -208,57 +310,8 @@ export function buildProductInfoLine(input: {
 }
 
 /**
- * 시트 이름 → 파트 경로. `sheet1.xml` 로 못 박지 않는 이유는, 탭 순서가 바뀌면
- * 아무 말 없이 **다른 시트(OH견적서)를 채우게** 되기 때문이다.
- */
-function resolveSheetPart(archive: ZipArchive, sheetName: string): string {
-  const workbook = archive.readText(WORKBOOK_PART);
-  const sheetTag = new RegExp(`<sheet[^>]*name="${escapeRegExp(sheetName)}"[^>]*>`).exec(workbook);
-  if (!sheetTag) throw new Error(`양식에 "${sheetName}" 시트가 없습니다.`);
-
-  const relId = /r:id="([^"]+)"/.exec(sheetTag[0])?.[1];
-  if (!relId) throw new Error(`"${sheetName}" 시트에 관계 ID 가 없습니다.`);
-
-  const rels = archive.readText(WORKBOOK_RELS_PART);
-  const relTag = new RegExp(`<Relationship[^>]*Id="${escapeRegExp(relId)}"[^>]*>`).exec(rels);
-  const target = relTag ? /Target="([^"]+)"/.exec(relTag[0])?.[1] : undefined;
-  if (!target) throw new Error(`관계 ${relId} 의 대상을 찾지 못했습니다.`);
-
-  const part = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
-  if (!archive.has(part)) throw new Error(`양식에 시트 파트가 없습니다: "${part}"`);
-  return part;
-}
-
-function enableFullCalcOnLoad(workbookXml: string): string {
-  if (/<calcPr[^>]*fullCalcOnLoad="1"/.test(workbookXml)) return workbookXml;
-  if (/<calcPr[^>]*\/>/.test(workbookXml)) {
-    return workbookXml.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
-  }
-  if (workbookXml.includes("</workbook>")) {
-    return workbookXml.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>');
-  }
-  throw new Error("workbook.xml 에 calcPr 을 넣을 자리를 찾지 못했습니다.");
-}
-
-function removeCalcChainOverride(contentTypesXml: string): string {
-  const next = contentTypesXml.replace(/<Override[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/, "");
-  if (next === contentTypesXml) {
-    throw new Error("[Content_Types].xml 에서 calcChain 항목을 찾지 못했습니다.");
-  }
-  return next;
-}
-
-function removeCalcChainRelationship(relsXml: string): string {
-  const next = relsXml.replace(/<Relationship[^>]*Target="calcChain\.xml"[^>]*\/>/, "");
-  if (next === relsXml) {
-    throw new Error("workbook.xml.rels 에서 calcChain 관계를 찾지 못했습니다.");
-  }
-  return next;
-}
-
-/**
- * 입력이 문서로 나가도 되는 값인가. 매쳐 채우개도 같은 규칙을 쓴다
- * (matcher-quote-template.ts) — 규칙이 두 벌이면 한쪽만 고쳐진 채로 남는다.
+ * 입력이 문서로 나가도 되는 값인가. O/H·매쳐 채우개도 같은 규칙을 쓴다 —
+ * 규칙이 여러 벌이면 한쪽만 고쳐진 채로 남는다.
  */
 export function validateQuoteInput(input: QuoteInput): void {
   const problems: string[] = [];
@@ -280,8 +333,4 @@ export function validateQuoteInput(input: QuoteInput): void {
     }
   });
   if (problems.length > 0) throw new Error(problems.join("\n"));
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

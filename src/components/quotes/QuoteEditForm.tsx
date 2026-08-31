@@ -62,11 +62,10 @@ import {
  * 정해 두지 않은 부품은 **빈칸**으로 들어온다: 0 으로 채우면 정하지 않은 것을
  * 0원으로 청구하게 된다(schema/part-unit-prices.ts 의 그 구분).
  *
- * ── 다섯 줄을 넘으면 알려 준다 ──────────────────────────────────────────
- * 막지 않는다. 상세는 시스템에 다 남고, xlsx 로 나갈 때만 한 줄로 합산된다
- * (quote-template.ts 의 PARTS_ROLLUP_LABEL). 다만 그 사실을 화면에서 미리
- * 말해 주지 않으면, 받아 본 견적서에 줄이 하나뿐인 것을 보고 저장이 실패한 줄
- * 안다.
+ * ── 부품 줄 수에 상한이 없다 ────────────────────────────────────────────
+ * 예전에는 다섯 줄이 넘으면 파일에서 한 줄로 합산돼 나갔고, 화면이 그 사실을
+ * 미리 알려 주었다. 이제 양식이 담을 만큼 줄을 늘리므로(xlsx/quote-sheet-layout.ts)
+ * 합산도 경고도 없다.
  *
  * ── 합계는 미리 보여 주기만 한다 ────────────────────────────────────────
  * 여기서 셈한 값을 저장하지 않는다. 저장되는 것은 수량과 단가뿐이고, 합계는
@@ -761,8 +760,7 @@ export default function QuoteEditForm({
           lotNumberText: orNull(lotNumberText),
           workCost,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
-          // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다(다섯 줄이 넘으면
-          // 파일에서 한 줄로 합쳐지므로 그 경계가 어긋난다).
+          // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
           items: items
             .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
             .map((row) => ({
@@ -1170,15 +1168,8 @@ export default function QuoteEditForm({
 
         {kind === "OVERHAUL" && (
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-            <b>OH</b> 를 체크한 줄은 양식의 <b>2) OH 부품 비용</b> 칸(13줄)으로 갑니다. 체크하지 않은 줄은
-            <b> 1) 부품 비용</b> 칸(5줄)입니다.
-          </p>
-        )}
-        {items.length > 5 && (
-          <p className="mt-2 rounded-md bg-amber-100 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-            부품이 {items.length}줄입니다. 양식의 부품 칸은 다섯 줄이라, 견적서 파일에는{" "}
-            <b>&ldquo;부품 비용 일괄&rdquo; 한 줄로 합산되어</b> 나갑니다. 상세 목록은 이 화면에 그대로
-            남습니다.
+            <b>OH</b> 를 체크한 줄은 양식의 <b>2) OH 부품 비용</b> 칸으로, 체크하지 않은 줄은
+            <b> 1) 부품 비용</b> 칸으로 갑니다. 두 칸 모두 담을 만큼 줄이 늘어납니다.
           </p>
         )}
 

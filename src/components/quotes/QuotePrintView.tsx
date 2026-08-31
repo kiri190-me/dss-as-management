@@ -56,9 +56,6 @@ const SHEET_WIDTH_PT = COLUMNS.reduce((sum, chars) => sum + colPt(chars), 0);
 
 const AMOUNT = new Intl.NumberFormat("ko-KR");
 const VAT_RATE = 0.1;
-/** 양식의 부품 칸이 다섯 줄이라, 여섯째부터는 파일에서 한 줄로 합쳐진다. */
-const PART_ROW_LIMIT = 5;
-const PARTS_ROLLUP_LABEL = "부품 비용 일괄";
 
 function won(value: number): string {
   return `₩${AMOUNT.format(Math.round(value))}`;
@@ -127,18 +124,16 @@ export default function QuotePrintView({
     unitPrice: Number(item.unitPrice),
   }));
 
-  // 파일과 **같은 규칙으로** 합친다 — 미리보기에서 다섯 줄로 보이는데 파일에는
-  // 한 줄로 나가면, 받아 본 쪽이 다른 문서라고 여긴다(xlsx/quote-template.ts).
-  const printed =
-    items.length > PART_ROW_LIMIT
-      ? [
-          {
-            name: PARTS_ROLLUP_LABEL,
-            quantity: 1,
-            unitPrice: items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
-          },
-        ]
-      : items;
+  /**
+   * 부품은 **있는 그대로** 적는다.
+   *
+   * 예전에는 다섯 줄이 넘으면 「부품 비용 일괄」 한 줄로 합쳤다. 양식의 부품 칸이
+   * 다섯 줄로 고정이라 파일이 그렇게밖에 못 나갔기 때문이고, 미리보기도 파일과
+   * 같아 보여야 해서 같은 규칙을 따랐다. 이제 파일이 담을 만큼 줄을 늘리므로
+   * (xlsx/quote-sheet-layout.ts) 여기서도 합치지 않는다 — 합치면 미리보기에
+   * 한 줄로 보이는데 파일에는 전부 적혀 나가서, 둘이 다른 문서가 된다.
+   */
+  const printed = items;
 
   const supply = sumQuoteSupplyAmount(
     quote.items.map((item) => ({ quantity: item.quantity, unitPrice: item.unitPrice })),

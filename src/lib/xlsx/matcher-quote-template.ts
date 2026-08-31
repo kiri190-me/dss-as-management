@@ -1,15 +1,31 @@
 import { ZipArchive } from "./zip-reader";
 import { writeZip, type ZipEntryInput } from "./zip-writer";
-import { clearCell, setDate, setFormula, setInlineString, setNumber } from "./sheet-patch";
+import { setDate, setFormula, setInlineString, setNumber } from "./sheet-patch";
 import { createCellTextReader } from "./sheet-text";
+import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows, type SheetRow } from "./sheet-rows";
 import {
-  findRowByCellText,
-  parseSheetRows,
-  resizeRowBlock,
-  syncDimension,
-  writeSheetRows,
-  type SheetRow,
-} from "./sheet-rows";
+  assertAscending,
+  clearCellIfPresent,
+  dropErrorValueCaches,
+  findItemBlock,
+  findSpacedLabelRow,
+  findLabelRow,
+  ITEM_MARKER,
+  LAYOUT_COLUMNS as COLUMNS,
+
+} from "./quote-sheet-layout";
+import {
+  CALC_CHAIN_PART,
+  CONTENT_TYPES_PART,
+  enableFullCalcOnLoad,
+  removeCalcChainOverride,
+  removeCalcChainRelationship,
+  resolveSheetPart,
+  SHARED_STRINGS_PART,
+  shiftPrintArea,
+  WORKBOOK_PART,
+  WORKBOOK_RELS_PART,
+} from "./workbook-parts";
 import { validateQuoteInput, type QuoteInput } from "./quote-template";
 
 /**
@@ -89,17 +105,6 @@ export const MATCHER_QUOTE_CELLS = {
   payment: "D19",
 } as const;
 
-const COLUMNS = {
-  /** 항목 줄임표. 이 열이 `-` 인 동안이 한 묶음이다. */
-  marker: "C",
-  name: "D",
-  quantity: "G",
-  unitPrice: "H",
-  amount: "I",
-} as const;
-
-const ITEM_MARKER = "-";
-
 /** D열에서 찾는 머리글. 양식의 글자 그대로다. */
 const BLOCK_LABELS = {
   parts: "부품 비용",
@@ -114,12 +119,6 @@ const BLOCK_LABELS = {
  * 띄워 모양을 맞춰 두었다 — 공백을 지우고 견준다.
  */
 const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
-
-const CALC_CHAIN_PART = "xl/calcChain.xml";
-const CONTENT_TYPES_PART = "[Content_Types].xml";
-const WORKBOOK_PART = "xl/workbook.xml";
-const WORKBOOK_RELS_PART = "xl/_rels/workbook.xml.rels";
-const SHARED_STRINGS_PART = "xl/sharedStrings.xml";
 
 /**
  * `2. 작업 비용` 아래에 적히는 세 묶음. 키는 저장 쪽 구분과 같다
@@ -142,8 +141,6 @@ export type MatcherWorkScope = {
  * 품명(D14)에 들어 있다(domain/quote-subject.ts).
  */
 export type MatcherQuoteInput = QuoteInput & { workScope: MatcherWorkScope };
-
-type ItemBlock = { headerRow: number; firstRow: number; count: number };
 
 export function fillMatcherQuoteWorkbook(templateXlsx: Buffer, input: MatcherQuoteInput): Buffer {
   validateQuoteInput(input);
@@ -172,6 +169,7 @@ export function fillMatcherQuoteWorkbook(templateXlsx: Buffer, input: MatcherQuo
     } else if (name === WORKBOOK_PART) {
       const workbook = shiftPrintArea(
         enableFullCalcOnLoad(bytes.toString("utf8")),
+        MATCHER_QUOTE_SHEET_NAME,
         filled.rowShift
       );
       entries.push({ name, data: toUtf8(workbook) });
@@ -206,9 +204,9 @@ function fillSheet(
   const investigation = findItemBlock(templateRows, read, BLOCK_LABELS.INVESTIGATION);
   const repair = findItemBlock(templateRows, read, BLOCK_LABELS.REPAIR);
   const powerTest = findItemBlock(templateRows, read, BLOCK_LABELS.POWER_TEST);
-  const supplyRow = findTotalRow(templateRows, read, TOTAL_LABELS.supply);
-  const vatRow = findTotalRow(templateRows, read, TOTAL_LABELS.vat);
-  const totalRow = findTotalRow(templateRows, read, TOTAL_LABELS.total);
+  const supplyRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.supply);
+  const vatRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.vat);
+  const totalRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.total);
 
   // 아래 자리 셈은 이 차례를 전제로 한다. 양식이 뒤바뀌면 조용히 어긋난 문서를
   // 만드는 대신 여기서 멈춘다.
@@ -323,7 +321,7 @@ function fillSheet(
    * 조정액(-6,000)이 남아 있었다. 우리 문서에는 우리 자료에 있는 것만 적힌다.
    */
   for (let row = at.powerTestFirst + powerTestCount; row < at.supply; row += 1) {
-    xml = clearAmountIfPresent(xml, `${COLUMNS.amount}${row}`);
+    xml = clearCellIfPresent(xml, `${COLUMNS.amount}${row}`);
   }
 
   // ── 5) 옮겨진 자리로 수식을 다시 쓴다 ─────────────────────────────
@@ -340,7 +338,7 @@ function fillSheet(
     `SUM(${COLUMNS.amount}${at.supply}:${COLUMNS.amount}${at.vat})`
   );
 
-  return { xml, rowShift };
+  return { xml: dropErrorValueCaches(xml), rowShift };
 }
 
 function fillScopeSection(sheetXml: string, firstRow: number, lines: readonly string[]): string {
@@ -351,155 +349,4 @@ function fillScopeSection(sheetXml: string, firstRow: number, lines: readonly st
     xml = setInlineString(xml, `${COLUMNS.name}${row}`, line.trim());
   });
   return xml;
-}
-
-/**
- * 그 칸이 있으면 비우고, 없으면 그냥 둔다.
- *
- * 쓰는 쪽은 원래 못 찾으면 던진다 — 값이 안 들어간 견적서가 나가는 것보다
- * 낫기 때문이다. 여기는 반대다: **양식이 남겨 둔 여유 줄을 치우는 일**이라
- * 그 칸이 없다는 것은 치울 것이 없다는 뜻이지 사고가 아니다.
- */
-function clearAmountIfPresent(sheetXml: string, ref: string): string {
-  try {
-    return clearCell(sheetXml, ref);
-  } catch {
-    return sheetXml;
-  }
-}
-
-/**
- * D열 머리글 아래로 C열이 `-` 인 줄이 이어지는 만큼이 한 묶음이다.
- *
- * 행 번호가 끊기면(양식에 빠진 행이 있으면) 거기서 멈춘다 — 떨어져 있는 줄을
- * 한 묶음으로 묶어 늘리면 사이의 줄이 통째로 밀려난다.
- */
-function findItemBlock(
-  rows: readonly SheetRow[],
-  read: (ref: string) => string | null,
-  label: string
-): ItemBlock {
-  const headerRow = findRowByCellText(rows, COLUMNS.name, label, read);
-  if (headerRow === null) throw new Error(`양식에서 "${label}" 줄을 찾지 못했습니다.`);
-
-  const start = rows.findIndex((row) => row.rowNumber === headerRow);
-  let count = 0;
-  for (let index = start + 1; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (row.rowNumber !== headerRow + 1 + count) break;
-    if (read(`${COLUMNS.marker}${row.rowNumber}`) !== ITEM_MARKER) break;
-    count += 1;
-  }
-
-  return { headerRow, firstRow: headerRow + 1, count };
-}
-
-function findLabelRow(
-  rows: readonly SheetRow[],
-  read: (ref: string) => string | null,
-  column: string,
-  label: string
-): number {
-  const row = findRowByCellText(rows, column, label, read);
-  if (row === null) throw new Error(`양식에서 "${label}" 줄을 찾지 못했습니다.`);
-  return row;
-}
-
-/** 합계 머리글은 글자 사이가 띄워져 있다(`공 급 가`). 공백을 지우고 견준다. */
-function findTotalRow(
-  rows: readonly SheetRow[],
-  read: (ref: string) => string | null,
-  label: string
-): number {
-  for (const row of rows) {
-    const value = read(`${COLUMNS.unitPrice}${row.rowNumber}`);
-    if (value !== null && value.replace(/\s+/g, "") === label) return row.rowNumber;
-  }
-  throw new Error(`양식에서 "${label}" 줄을 찾지 못했습니다.`);
-}
-
-function assertAscending(labelled: ReadonlyArray<readonly [string, number]>): void {
-  for (let index = 1; index < labelled.length; index += 1) {
-    const previous = labelled[index - 1];
-    const current = labelled[index];
-    if (current[1] <= previous[1]) {
-      throw new Error(
-        `양식의 차례가 예상과 다릅니다: "${previous[0]}"(${previous[1]}행) 아래에 ` +
-          `"${current[0]}"(${current[1]}행) 이 와야 합니다.`
-      );
-    }
-  }
-}
-
-/**
- * 인쇄 영역의 마지막 행을 밀린 만큼 민다. 위 '인쇄 영역도 함께 민다' 참조.
- *
- * 못 찾으면 던진다 — 이 양식에는 반드시 있고, 없는 채로 넘어가면 합계가 잘린
- * 문서가 조용히 나간다.
- */
-function shiftPrintArea(workbookXml: string, rowShift: number): string {
-  if (rowShift === 0) return workbookXml;
-
-  const pattern =
-    /(<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>[^<]*\$[A-Z]+\$)(\d+)(<\/definedName>)/;
-  if (!pattern.test(workbookXml)) {
-    throw new Error("workbook.xml 에서 인쇄 영역(_xlnm.Print_Area)을 찾지 못했습니다.");
-  }
-  return workbookXml.replace(
-    pattern,
-    (_all, head: string, row: string, tail: string) => `${head}${Number(row) + rowShift}${tail}`
-  );
-}
-
-/**
- * 시트 이름 → 파트 경로. `sheet1.xml` 로 못 박지 않는 이유는 quote-template.ts
- * 와 같다 — 탭 순서가 바뀌면 아무 말 없이 다른 시트를 채우게 된다.
- */
-function resolveSheetPart(archive: ZipArchive, sheetName: string): string {
-  const workbook = archive.readText(WORKBOOK_PART);
-  const sheetTag = new RegExp(`<sheet[^>]*name="${escapeRegExp(sheetName)}"[^>]*>`).exec(workbook);
-  if (!sheetTag) throw new Error(`양식에 "${sheetName}" 시트가 없습니다.`);
-
-  const relId = /r:id="([^"]+)"/.exec(sheetTag[0])?.[1];
-  if (!relId) throw new Error(`"${sheetName}" 시트에 관계 ID 가 없습니다.`);
-
-  const rels = archive.readText(WORKBOOK_RELS_PART);
-  const relTag = new RegExp(`<Relationship[^>]*Id="${escapeRegExp(relId)}"[^>]*>`).exec(rels);
-  const target = relTag ? /Target="([^"]+)"/.exec(relTag[0])?.[1] : undefined;
-  if (!target) throw new Error(`관계 ${relId} 의 대상을 찾지 못했습니다.`);
-
-  const part = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
-  if (!archive.has(part)) throw new Error(`양식에 시트 파트가 없습니다: "${part}"`);
-  return part;
-}
-
-function enableFullCalcOnLoad(workbookXml: string): string {
-  if (/<calcPr[^>]*fullCalcOnLoad="1"/.test(workbookXml)) return workbookXml;
-  if (/<calcPr[^>]*\/>/.test(workbookXml)) {
-    return workbookXml.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
-  }
-  if (workbookXml.includes("</workbook>")) {
-    return workbookXml.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>');
-  }
-  throw new Error("workbook.xml 에 calcPr 을 넣을 자리를 찾지 못했습니다.");
-}
-
-function removeCalcChainOverride(contentTypesXml: string): string {
-  const next = contentTypesXml.replace(/<Override[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/, "");
-  if (next === contentTypesXml) {
-    throw new Error("[Content_Types].xml 에서 calcChain 항목을 찾지 못했습니다.");
-  }
-  return next;
-}
-
-function removeCalcChainRelationship(relsXml: string): string {
-  const next = relsXml.replace(/<Relationship[^>]*Target="calcChain\.xml"[^>]*\/>/, "");
-  if (next === relsXml) {
-    throw new Error("workbook.xml.rels 에서 calcChain 관계를 찾지 못했습니다.");
-  }
-  return next;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

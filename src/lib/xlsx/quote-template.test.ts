@@ -3,16 +3,29 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { ZipArchive } from "./zip-reader";
-import { findCell, readCellInner } from "./sheet-patch";
+import { findCell } from "./sheet-patch";
+import { resolveSheetTextCells } from "./sheet-text";
+import { resolveSheetPart } from "./workbook-parts";
 import {
   buildProductInfoLine,
   fillQuoteWorkbook,
-  PARTS_ROLLUP_LABEL,
   QUOTE_CELLS,
-  SUPPLY_TOTAL_FORMULA,
+  QUOTE_SHEET_NAME,
   totalPartsCost,
   type QuoteInput,
 } from "./quote-template";
+
+/**
+ * ============================================================================
+ * 내자견적서 채우개
+ * ============================================================================
+ * 양식은 저장소에 두지 않는다(직인·계좌번호가 들어 있다). 경로가 설정돼 있을
+ * 때만 도는 시험이 대부분이고, 순수 함수 몇 개만 양식 없이 돈다.
+ *
+ * 자리를 **머리글로 찾기** 때문에, 시험이 견주는 행 번호는 '코드가 그렇게 정해서'가
+ * 아니라 '양식이 그래서'다 — 양식을 바꾸면 이 숫자들도 함께 바뀌어야 한다.
+ * ============================================================================
+ */
 
 const templatePath = process.env.QUOTE_TEMPLATE_PATH;
 const skip = templatePath ? false : "QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
@@ -29,7 +42,84 @@ const BASE: QuoteInput = {
   workCost: 1_200_000,
 };
 
-// ── 순수 함수 (양식 없이도 돈다) ─────────────────────────────────────────
+function parts(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `부품 ${index + 1}`,
+    quantity: index + 1,
+    unitPrice: (index + 1) * 10_000,
+  }));
+}
+
+type Filled = {
+  text: (ref: string) => string | undefined;
+  formula: (ref: string) => string | undefined;
+  sheetXml: string;
+  workbookXml: string;
+  archive: ZipArchive;
+  buffer: Buffer;
+};
+
+function fill(input: QuoteInput): Filled {
+  const buffer = fillQuoteWorkbook(readFileSync(templatePath as string), input);
+  const archive = ZipArchive.fromBuffer(buffer);
+  // 🔴 시트 파트를 이름으로 찾는다. 이 통합문서에는 시트가 셋이라, 파일 이름을
+  // 박아 두면 엉뚱한 시트를 들여다보며 "값이 안 들어갔다"고 오판하게 된다.
+  const sheetXml = archive.readText(resolveSheetPart(archive, QUOTE_SHEET_NAME));
+
+  const refs: string[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    for (const column of ["B", "C", "D", "G", "H", "I"]) refs.push(`${column}${row}`);
+  }
+  const values = resolveSheetTextCells(archive, QUOTE_SHEET_NAME, refs);
+
+  const formulas = new Map<string, string>();
+  for (const cell of sheetXml.matchAll(/<c\s+r="([A-Z]+\d+)"[^>]*?(\/>|>(?:(?!<c\s)[\s\S])*?<\/c>)/g)) {
+    const found = /<f[^>]*>([\s\S]*?)<\/f>/.exec(cell[2]);
+    if (found && found[1]) formulas.set(cell[1], found[1]);
+  }
+
+  return {
+    text: (ref) => values.get(ref),
+    formula: (ref) => formulas.get(ref),
+    sheetXml,
+    workbookXml: archive.readText("xl/workbook.xml"),
+    archive,
+    buffer,
+  };
+}
+
+/** 행 번호와 셀 주소가 어긋나거나 겹치면 Excel 이 파일 열기를 거부한다. */
+function assertSheetIsSound(filled: Filled): void {
+  const mismatches: string[] = [];
+  for (const row of filled.sheetXml.matchAll(/<row\s[^>]*?r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)) {
+    for (const cell of row[0].matchAll(/<c r="([A-Z]+)(\d+)"/g)) {
+      if (cell[2] !== row[1]) mismatches.push(`${row[1]}행에 ${cell[1]}${cell[2]}`);
+    }
+  }
+  assert.deepEqual(mismatches, [], "행 번호와 셀 주소가 어긋났다");
+
+  const refs = [...filled.sheetXml.matchAll(/<c r="([A-Z]+\d+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(refs).size, refs.length, "같은 주소의 셀이 여러 개다");
+
+  // 줄 수가 바뀌면 공유 수식의 ref 가 실제와 어긋난다. 남아 있으면 안 된다.
+  assert.ok(!filled.sheetXml.includes('t="shared"'), "공유 수식이 남았다");
+  assert.ok(!filled.archive.has("xl/calcChain.xml"), "calcChain 이 남았다");
+  assert.ok(/fullCalcOnLoad="1"/.test(filled.workbookXml), "fullCalcOnLoad 가 꺼져 있다");
+}
+
+/** 그 시트의 인쇄 영역 마지막 행. 다른 시트 것을 잘못 읽지 않도록 이름으로 고른다. */
+function printAreaLastRow(workbookXml: string, sheetName: string): number | null {
+  for (const found of workbookXml.matchAll(
+    /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>([^<]*)<\/definedName>/g
+  )) {
+    const reference = found[1];
+    if (!reference.startsWith(`${sheetName}!`)) continue;
+    return Number(/\$([A-Z]+)\$(\d+)\s*$/.exec(reference)?.[2]);
+  }
+  return null;
+}
+
+// ── 양식 없이 도는 순수 함수 ────────────────────────────────────────────
 
 test("buildProductInfoLine: 원본에 박혀 있던 형식 그대로", () => {
   assert.equal(
@@ -47,163 +137,138 @@ test("buildProductInfoLine: 없는 조각은 빈 껍데기를 남기지 않고 �
 test("totalPartsCost: 수량 × 단가의 합", () => {
   assert.equal(
     totalPartsCost([
-      { name: "a", quantity: 2, unitPrice: 30_000 },
-      { name: "b", quantity: 1, unitPrice: 5_500 },
+      { name: "가", quantity: 2, unitPrice: 1_000 },
+      { name: "나", quantity: 3, unitPrice: 500 },
     ]),
-    65_500
+    3_500
   );
 });
 
-// ── 원본 양식이 있어야 도는 것들 ─────────────────────────────────────────
-
-function generate(overrides: Partial<QuoteInput> = {}): ZipArchive {
-  assert.ok(templatePath);
-  return ZipArchive.fromBuffer(
-    fillQuoteWorkbook(readFileSync(templatePath), { ...BASE, ...overrides })
-  );
-}
-
-/** 시트 파트는 이름으로 찾는다(구현과 같은 이유 — 탭 순서에 기대지 않는다). */
-function sheetXml(archive: ZipArchive): string {
-  const workbook = archive.readText("xl/workbook.xml");
-  const relId = /<sheet[^>]*name="내자견적서"[^>]*r:id="([^"]+)"/.exec(workbook)?.[1];
-  assert.ok(relId, "내자견적서 시트를 찾지 못했습니다");
-  const rels = archive.readText("xl/_rels/workbook.xml.rels");
-  const target = new RegExp(`<Relationship[^>]*Id="${relId}"[^>]*Target="([^"]+)"`).exec(rels)?.[1];
-  assert.ok(target);
-  return archive.readText(`xl/${target}`);
-}
-
-function inlineText(xml: string, ref: string): string {
-  const inner = readCellInner(xml, ref);
-  return /<t[^>]*>([\s\S]*?)<\/t>/.exec(inner)?.[1] ?? "";
-}
+// ── 실제 양식 ───────────────────────────────────────────────────────────
 
 test("상단 정보가 입력대로 들어간다", { skip }, () => {
-  const xml = sheetXml(generate());
-  assert.equal(inlineText(xml, QUOTE_CELLS.quoteNumber), "DSS 2026-077");
-  assert.equal(inlineText(xml, QUOTE_CELLS.customerName), "ICD Co.,Ltd");
-  assert.equal(inlineText(xml, QUOTE_CELLS.subject), "RFK300FH-IC2 수리 견적");
-  assert.equal(inlineText(xml, QUOTE_CELLS.productInfo), "MODEL: CFK300FH-IC2, S/N:WU8042, L/N:1612027");
-  assert.equal(readCellInner(xml, QUOTE_CELLS.workCost), "<v>1200000</v>");
+  const filled = fill({ ...BASE, parts: parts(3) });
+
+  assert.equal(filled.text(QUOTE_CELLS.quoteNumber), "DSS 2026-077");
+  assert.equal(filled.text(QUOTE_CELLS.customerName), "ICD Co.,Ltd");
+  assert.equal(filled.text(QUOTE_CELLS.subject), "RFK300FH-IC2 수리 견적");
+  assert.equal(filled.text(QUOTE_CELLS.productInfo), "MODEL: CFK300FH-IC2, S/N:WU8042, L/N:1612027");
 });
 
 test("발행일자: TODAY() 가 사라지고 날짜값이 박힌다", { skip }, () => {
-  const xml = sheetXml(generate());
-  assert.equal(readCellInner(xml, QUOTE_CELLS.quoteDate), "<v>46262</v>");
-  assert.ok(!findCell(xml, QUOTE_CELLS.quoteDate).raw.includes("TODAY"));
-  // 스타일(날짜 서식)은 원본 것을 승계한다.
-  assert.equal(findCell(xml, QUOTE_CELLS.quoteDate).style, "65");
+  const filled = fill({ ...BASE, parts: parts(1) });
+  const cell = findCell(filled.sheetXml, QUOTE_CELLS.quoteDate);
+
+  assert.ok(!cell.raw.includes("TODAY"), "TODAY() 가 남았다");
+  assert.equal(filled.text(QUOTE_CELLS.quoteDate), "46262"); // 2026-08-28
+  // 서식(날짜 표시)은 승계해야 한다.
+  assert.equal(cell.style, "65");
 });
 
-test("고장난 공급가 수식을 실제 합계로 바꾼다", { skip }, () => {
-  const xml = sheetXml(generate());
-  assert.equal(readCellInner(xml, QUOTE_CELLS.supplyTotal), `<f>${SUPPLY_TOTAL_FORMULA}</f>`);
-  // 부가세·합계는 손대지 않는다.
-  assert.equal(readCellInner(xml, "I56"), "<f>I55*0.1</f><v>0</v>");
-  assert.equal(readCellInner(xml, "I57"), "<f>I55+I56</f><v>0</v>");
+/**
+ * 🔴 예전에는 부품 칸이 다섯 줄로 고정이라 여섯째부터 한 줄로 합쳐 내보냈다.
+ * 이제 담을 만큼 늘어나고, **아래가 그만큼 밀린다.**
+ */
+test("부품 8개: 다섯 줄짜리 칸이 여덟 줄로 늘고 아래가 밀린다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(8) });
+  assertSheetIsSound(filled);
+
+  assert.equal(filled.text("D27"), "부품 1");
+  assert.equal(filled.text("D34"), "부품 8");
+  assert.equal(filled.text("C34"), "-", "늘어난 줄에도 줄임표가 있어야 한다");
+  assert.equal(filled.text("G34"), "8");
+  assert.equal(filled.text("H34"), "80000");
+  assert.equal(filled.formula("I34"), "H34*G34");
+  // 아홉 번째 줄은 없다.
+  assert.equal(filled.text("D35"), undefined);
+
+  // 작업비와 합계가 세 줄 아래로.
+  assert.equal(filled.text("H36"), "1200000");
+  assert.equal(filled.formula("I36"), "H36*G36");
+  assert.equal(filled.text("H58"), "공 급 가");
+  assert.equal(filled.formula("I58"), "SUM(I26:I57)");
+  assert.equal(filled.formula("I59"), "I58*0.1");
+  assert.equal(filled.formula("I60"), "I58+I59");
+  assert.equal(filled.formula(QUOTE_CELLS.amount), "I58");
+
+  // 🔴 인쇄 영역도 함께. 안 밀면 합계 세 줄이 인쇄에서 잘린다.
+  assert.equal(printAreaLastRow(filled.workbookXml, QUOTE_SHEET_NAME), 60);
 });
 
-test("부품 3개: 채워진 줄과 비워진 줄", { skip }, () => {
-  const xml = sheetXml(
-    generate({
-      parts: [
-        { name: "MB 보드", quantity: 1, unitPrice: 850_000 },
-        { name: "RF AMP 모듈", quantity: 2, unitPrice: 1_100_000 },
-        { name: "냉각 팬", quantity: 1, unitPrice: 45_000 },
-      ],
-    })
-  );
+test("부품 3개: 줄이 줄고 아래가 당겨 올라온다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(3) });
+  assertSheetIsSound(filled);
 
-  assert.equal(inlineText(xml, "D27"), "MB 보드");
-  assert.equal(readCellInner(xml, "G28"), "<v>2</v>");
-  assert.equal(readCellInner(xml, "H29"), "<v>45000</v>");
-
-  // 원본의 "4번 부품"·"5번 부품" 예시 문구가 남으면 안 된다.
-  for (const row of [30, 31]) {
-    for (const col of ["D", "G", "H"]) {
-      assert.equal(readCellInner(xml, `${col}${row}`), "", `${col}${row} 가 비어 있어야 한다`);
-    }
-  }
+  assert.equal(filled.text("D29"), "부품 3");
+  assert.equal(filled.text("D30"), undefined, "네 번째 줄이 남았다");
+  assert.equal(filled.text("H31"), "1200000", "작업비가 두 줄 올라와야 한다");
+  assert.equal(filled.text("H53"), "공 급 가");
+  assert.equal(filled.formula("I53"), "SUM(I26:I52)");
+  assert.equal(printAreaLastRow(filled.workbookXml, QUOTE_SHEET_NAME), 55);
 });
 
-test("부품 7개: 한 줄로 합산하고 나머지를 비운다", { skip }, () => {
-  const parts = Array.from({ length: 7 }, (_, i) => ({
-    name: `부품 ${i + 1}`,
-    quantity: 2,
-    unitPrice: 10_000,
-  }));
-  const xml = sheetXml(generate({ parts }));
+/**
+ * 양식의 공급가 수식은 빈 칸(`=M45`)을 물고 있어 늘 0 이었다. 실제 합계로 바꾼다.
+ * 그 사이에 남아 있던 낡은 수식(`=N45`)도 치운다 — 합계 범위 안이라서다.
+ */
+test("고장난 공급가 수식이 실제 합계로 바뀌고, 사이의 낡은 수식은 치워진다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(5) });
 
-  assert.equal(inlineText(xml, "D27"), PARTS_ROLLUP_LABEL);
-  assert.equal(readCellInner(xml, "G27"), "<v>1</v>");
-  assert.equal(readCellInner(xml, "H27"), `<v>${totalPartsCost(parts)}</v>`);
-  for (const row of [28, 29, 30, 31]) {
-    assert.equal(readCellInner(xml, `D${row}`), "", `D${row} 가 비어 있어야 한다`);
+  const supply = filled.formula("I55");
+  assert.ok(supply?.startsWith("SUM(I26:"), `공급가가 합계 수식이 아니다: ${supply}`);
+
+  // 작업비 아래부터 공급가 위까지 금액 칸에 남은 수식이 없어야 한다.
+  for (let row = 34; row < 55; row += 1) {
+    assert.equal(filled.formula(`I${row}`), undefined, `${row}행에 낡은 수식이 남았다`);
   }
 });
 
 test("유효기간·납기·결재조건: 안 주면 양식의 기본 문구가 남는다", { skip }, () => {
-  const untouched = sheetXml(generate());
-  assert.equal(inlineText(untouched, QUOTE_CELLS.validity), "");
-  assert.ok(findCell(untouched, QUOTE_CELLS.validity).raw.includes('t="s"'), "원본 공유문자열 그대로여야 한다");
+  const untouched = fill({ ...BASE, parts: parts(1) });
+  assert.equal(untouched.text(QUOTE_CELLS.validity), "발행일로부터 4주");
+  assert.equal(untouched.text(QUOTE_CELLS.delivery), "발주일로부터 3주 이내");
 
-  const replaced = sheetXml(generate({ validity: "발행일로부터 8주" }));
-  assert.equal(inlineText(replaced, QUOTE_CELLS.validity), "발행일로부터 8주");
+  const replaced = fill({ ...BASE, parts: parts(1), validity: "발행일로부터 8주" });
+  assert.equal(replaced.text(QUOTE_CELLS.validity), "발행일로부터 8주");
 });
 
-test("직인·로고·서식·기타 시트는 원본과 바이트 동일하다", { skip }, () => {
-  assert.ok(templatePath);
-  const source = ZipArchive.fromBuffer(readFileSync(templatePath));
-  const result = generate();
+test("직인·로고·서식은 원본과 바이트 동일하다", { skip }, () => {
+  const source = ZipArchive.fromBuffer(readFileSync(templatePath as string));
+  const filled = fill({ ...BASE, parts: parts(8) });
+  const sheetPart = resolveSheetPart(filled.archive, QUOTE_SHEET_NAME);
 
-  const untouched = source
-    .list()
-    .filter(
-      (name) =>
-        name.startsWith("xl/media/") ||
-        name.startsWith("xl/drawings/") ||
-        name.startsWith("xl/theme/") ||
-        name.startsWith("xl/printerSettings/") ||
-        name === "xl/styles.xml" ||
-        name === "xl/sharedStrings.xml" ||
-        name === "xl/worksheets/sheet2.xml" ||
-        name === "xl/worksheets/sheet3.xml"
-    );
-  assert.ok(untouched.length >= 8, "확인할 파트가 너무 적습니다");
+  /**
+   * 우리가 손대는 파트만 뺀다. calcChain 을 들어내면 그 참조를 담은 두 파트도
+   * 함께 바뀐다 — 안 바꾸면 Excel 이 "복구할 수 없는 내용" 대화상자를 띄운다.
+   */
+  const ours = new Set([
+    sheetPart,
+    "xl/workbook.xml",
+    "[Content_Types].xml",
+    "xl/_rels/workbook.xml.rels",
+  ]);
+  const untouched = filled.archive.list().filter((name) => !ours.has(name));
 
   for (const name of untouched) {
-    assert.deepEqual(result.readEntry(name), source.readEntry(name), `파트가 바뀌었습니다: ${name}`);
+    assert.deepEqual(
+      filled.archive.readEntry(name),
+      source.readEntry(name),
+      `${name} 이 바뀌었다`
+    );
   }
 });
 
-test("calcChain 을 들어내고 참조도 함께 지운다", { skip }, () => {
-  const archive = generate();
-  assert.equal(archive.has("xl/calcChain.xml"), false);
-  assert.ok(!archive.readText("[Content_Types].xml").includes("calcChain"));
-  assert.ok(!archive.readText("xl/_rels/workbook.xml.rels").includes("calcChain"));
-});
-
-test("workbook 에 fullCalcOnLoad 가 켜진다", { skip }, () => {
-  const workbook = generate().readText("xl/workbook.xml");
-  assert.match(workbook, /<calcPr[^>]*fullCalcOnLoad="1"/);
-  // 시트 목록은 그대로여야 한다.
-  assert.ok(workbook.includes('name="내자견적서"'));
-  assert.ok(workbook.includes('name="OH견적서"'));
+test("같은 입력이면 같은 바이트가 나온다", { skip }, () => {
+  const first = fillQuoteWorkbook(readFileSync(templatePath as string), { ...BASE, parts: parts(4) });
+  const second = fillQuoteWorkbook(readFileSync(templatePath as string), { ...BASE, parts: parts(4) });
+  assert.deepEqual(first, second);
 });
 
 test("잘못된 입력은 파일을 만들기 전에 던진다", { skip }, () => {
-  assert.throws(() => generate({ quoteNumber: "  " }), /발행번호/);
-  assert.throws(() => generate({ customerName: "" }), /공급처/);
-  assert.throws(() => generate({ workCost: -1 }), /작업비/);
+  assert.throws(() => fill({ ...BASE, subject: "  ", parts: parts(1) }), /품명이 비어 있습니다/);
+  assert.throws(() => fill({ ...BASE, workCost: -1, parts: parts(1) }), /작업비는 0 이상/);
   assert.throws(
-    () => generate({ parts: [{ name: "MB 보드", quantity: 0, unitPrice: 100 }] }),
-    /수량/
+    () => fill({ ...BASE, parts: [{ name: "가", quantity: 0, unitPrice: 1 }] }),
+    /수량은 0보다 커야 합니다/
   );
-});
-
-test("같은 입력이면 같은 바이트가 나온다", { skip }, () => {
-  assert.ok(templatePath);
-  const template = readFileSync(templatePath);
-  assert.deepEqual(fillQuoteWorkbook(template, BASE), fillQuoteWorkbook(template, BASE));
 });
