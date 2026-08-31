@@ -8,14 +8,20 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { recordQuoteExport } from "@/lib/db/mutations/quote-exports";
 import { buildQuoteFileName, quoteContentDisposition } from "@/lib/domain/quote-file-name";
+import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import {
   QuoteTemplateError,
   readOhQuoteTemplate,
   readQuoteTemplate,
+  readQuoteTemplateFor,
 } from "@/lib/storage/quote-template";
 import { fillQuoteWorkbook } from "@/lib/xlsx/quote-template";
 import { fillOhQuoteWorkbook } from "@/lib/xlsx/oh-quote-template";
+import {
+  fillMatcherQuoteWorkbook,
+  type MatcherWorkScope,
+} from "@/lib/xlsx/matcher-quote-template";
 
 /**
  * ============================================================================
@@ -103,8 +109,9 @@ export async function GET(
   // ── 6~7) 양식을 읽어 채운다 ──────────────────────────────────────────
   let workbook: Buffer;
   try {
-    // 종류에 따라 **다른 양식 파일**을 쓴다. 셀 자리가 겹치지 않아 한 엔진으로
-    // 처리할 수 없다(xlsx/oh-quote-template.ts 의 표).
+    // 양식은 넷이고 셀 자리가 서로 겹치지 않는다. 장비 종류 × 견적서 종류로
+    // 고른다(domain/quote-template-variant.ts).
+    const templateKey = quoteTemplateKey(quote.laborEquipmentKind, quote.kind);
     const isOverhaul = quote.kind === "OVERHAUL";
     const common = {
       quoteNumber: quote.quoteNumber,
@@ -136,19 +143,36 @@ export async function GET(
       workCost: Number(quote.workCost),
     };
 
-    workbook = isOverhaul
-      ? fillOhQuoteWorkbook(await readOhQuoteTemplate(), {
-          ...common,
-          // `2) OH 부품 비용` 칸(34~46행). OH 표시가 붙은 줄만 여기로 간다.
-          overhaulParts: quote.items
-            .filter((item) => item.isOverhaulPart)
-            .map((item) => ({
-              name: item.partNameText,
-              quantity: item.quantity,
-              unitPrice: Number(item.unitPrice),
-            })),
-        })
-      : fillQuoteWorkbook(await readQuoteTemplate(), common);
+    if (templateKey.startsWith("MATCHER:")) {
+      /**
+       * 매쳐 양식에는 O/H 부품 칸이 따로 없다 — **부품이 한 목록**이라 나눈
+       * 것을 다시 합쳐 넘긴다. 대신 줄 수가 고정이 아니어서 담을 만큼 늘어난다
+       * (xlsx/matcher-quote-template.ts).
+       */
+      workbook = fillMatcherQuoteWorkbook(await readQuoteTemplateFor(templateKey), {
+        ...common,
+        parts: quote.items.map((item) => ({
+          name: item.partNameText,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+        })),
+        workScope: groupWorkScope(quote.workScopeLines),
+      });
+    } else {
+      workbook = isOverhaul
+        ? fillOhQuoteWorkbook(await readOhQuoteTemplate(), {
+            ...common,
+            // `2) OH 부품 비용` 칸(34~46행). OH 표시가 붙은 줄만 여기로 간다.
+            overhaulParts: quote.items
+              .filter((item) => item.isOverhaulPart)
+              .map((item) => ({
+                name: item.partNameText,
+                quantity: item.quantity,
+                unitPrice: Number(item.unitPrice),
+              })),
+          })
+        : fillQuoteWorkbook(await readQuoteTemplate(), common);
+    }
   } catch (err) {
     if (err instanceof QuoteTemplateError) {
       return fail(503, "TEMPLATE_UNAVAILABLE", err.message);
@@ -187,6 +211,22 @@ export async function GET(
       "Cache-Control": "no-store, must-revalidate",
     },
   });
+}
+
+/**
+ * 작업 내역 줄을 세 묶음으로 나눈다. 차례는 조회가 이미 묶음별로 매겨 준다
+ * (db/queries/quotes.ts).
+ */
+function groupWorkScope(
+  lines: readonly { section: keyof MatcherWorkScope; text: string }[]
+): MatcherWorkScope {
+  const grouped: Record<keyof MatcherWorkScope, string[]> = {
+    INVESTIGATION: [],
+    REPAIR: [],
+    POWER_TEST: [],
+  };
+  for (const line of lines) grouped[line.section].push(line.text);
+  return grouped;
 }
 
 /** "YYYY-MM-DD" → 그 날짜의 로컬 Date. `new Date(문자열)` 은 UTC 로 읽혀 하루가 밀린다. */

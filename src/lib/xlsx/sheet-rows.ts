@@ -76,10 +76,17 @@ export function renumberRow(row: SheetRow, nextRowNumber: number): SheetRow {
   return { rowNumber: nextRowNumber, xml };
 }
 
-/** 그 행의 값들을 비운다. 서식(`s=`)과 높이는 그대로 남는다. */
+/**
+ * 그 행의 값들을 비운다. 서식(`s=`)과 높이는 그대로 남는다.
+ *
+ * 🔴 **여는 태그의 마지막 글자가 `/` 이면 안 된다.** 그것은 이미 빈 칸
+ * (`<c r="A29" s="80"/>`)이라 비울 것이 없는데, 여는 태그로 잘못 읽으면 그 뒤의
+ * `</c>` 까지를 '내용'으로 삼아 **사이에 있던 셀들을 통째로 먹는다.** 실제
+ * 양식은 빈 칸이 절반이라 이 실수는 반드시 터진다.
+ */
 export function blankRow(row: SheetRow): SheetRow {
-  // `<c …>…</c>` → `<c …/>` : 속성은 남기고 내용만 없앤다. 자기 닫힘 셀은 그대로.
-  const xml = row.xml.replace(/<c(\s[^>]*?)>[\s\S]*?<\/c>/g, "<c$1/>");
+  // `<c …>…</c>` → `<c …/>` : 속성은 남기고 내용만 없앤다.
+  const xml = row.xml.replace(/<c(\s[^>]*?[^/])>[\s\S]*?<\/c>/g, "<c$1/>");
   return { ...row, xml };
 }
 
@@ -155,7 +162,11 @@ export function resizeRowBlock(
     }
     nextInside = [...inside];
     for (let i = 0; i < delta; i += 1) {
-      nextInside.push(blankRow({ ...model, rowNumber: lastRow + 1 + i }));
+      // 🔴 복제본은 **본의 행 번호를 그대로 달고 나온다.** 여기서 미리 번호만
+      // 갈아 끼우면 메타의 번호와 XML 의 `r=` 이 어긋나고, 바로 아래 renumberRow
+      // 의 '이미 그 번호다' 지름길이 그 거짓말을 믿어 XML 을 안 고친다 — 같은
+      // 주소의 셀이 여러 개인 시트가 만들어진다.
+      nextInside.push(blankRow(model));
     }
   } else {
     nextInside = inside.slice(0, targetCount);

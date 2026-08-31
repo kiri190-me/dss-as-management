@@ -104,7 +104,7 @@ export type QuoteInput = {
  * 양식에 이미 적혀 있으므로 그대로 나간다.
  */
 export function fillQuoteWorkbook(templateXlsx: Buffer, input: QuoteInput): Buffer {
-  validate(input);
+  validateQuoteInput(input);
 
   const archive = ZipArchive.fromBuffer(templateXlsx);
   const sheetPart = resolveSheetPart(archive, QUOTE_SHEET_NAME);
@@ -256,7 +256,11 @@ function removeCalcChainRelationship(relsXml: string): string {
   return next;
 }
 
-function validate(input: QuoteInput): void {
+/**
+ * 입력이 문서로 나가도 되는 값인가. 매쳐 채우개도 같은 규칙을 쓴다
+ * (matcher-quote-template.ts) — 규칙이 두 벌이면 한쪽만 고쳐진 채로 남는다.
+ */
+export function validateQuoteInput(input: QuoteInput): void {
   const problems: string[] = [];
   if (!input.quoteNumber.trim()) problems.push("발행번호가 비어 있습니다.");
   if (!input.customerName.trim()) problems.push("공급처가 비어 있습니다.");

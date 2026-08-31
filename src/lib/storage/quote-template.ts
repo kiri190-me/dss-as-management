@@ -3,6 +3,7 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { quoteWorkScopeSectionLabels } from "@/lib/validation/quote-input";
+import type { QuoteTemplateKey } from "@/lib/domain/quote-template-variant";
 
 /**
  * ============================================================================
@@ -223,18 +224,35 @@ const TEMPLATE_VARIANTS: Record<string, TemplateVariant> = {
 };
 
 
-async function readVariantHeader(variant: TemplateVariant): Promise<QuoteTemplateHeader> {
-  const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
-  const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");
-
+/** 그 변형의 설정 경로. 설정이 빠졌으면 어느 양식인지 말해 주고 던진다. */
+function resolveVariantPath(variant: TemplateVariant): string {
   const configured = process.env[variant.envVar];
   if (!configured || configured.trim().length === 0) {
     throw new QuoteTemplateError(
       `${variant.envVar} 가 설정되지 않았습니다. ${variant.label} 양식 경로를 .env.local 에 지정해야 합니다.`
     );
   }
+  return path.resolve(configured.trim());
+}
 
-  const archive = ZipArchive.fromBuffer(await readTemplateAt(path.resolve(configured.trim())));
+/**
+ * 기종·종류에 맞는 양식 바이트.
+ *
+ * 위 `readQuoteTemplate`·`readOhQuoteTemplate` 는 제너레이터 둘만 읽는 예전
+ * 길이고 그대로 남겨 둔다 — 이미 돌아가는 통로라 건드릴 이유가 없다. 넷 중
+ * 하나를 골라야 하는 쪽(견적서 xlsx 라우트)이 이 길을 쓴다.
+ */
+export async function readQuoteTemplateFor(templateKey: QuoteTemplateKey): Promise<Buffer> {
+  const variant = TEMPLATE_VARIANTS[templateKey];
+  if (!variant) throw new QuoteTemplateError(`알 수 없는 양식 구분입니다: ${templateKey}`);
+  return readTemplateAt(resolveVariantPath(variant));
+}
+
+async function readVariantHeader(variant: TemplateVariant): Promise<QuoteTemplateHeader> {
+  const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
+  const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");
+
+  const archive = ZipArchive.fromBuffer(await readTemplateAt(resolveVariantPath(variant)));
   const values = resolveSheetTextCells(archive, variant.sheetName, Object.values(variant.headerCells));
 
   const header = {} as QuoteTemplateHeader;

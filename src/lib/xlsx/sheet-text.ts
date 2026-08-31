@@ -62,8 +62,53 @@ function resolveSheetPart(archive: ZipArchive, sheetName: string): string | null
 }
 
 /**
- * 셀 주소들의 글자. 못 읽은 주소는 결과에 아예 없다(위 '조용히 건너뛴다').
+ * 시트 하나에서 **주소 → 글자** 를 읽는 함수를 만든다.
+ *
+ * 아카이브가 아니라 **XML 문자열**을 받는다. 우리가 시트를 고친 뒤 그 결과를
+ * 다시 읽어야 할 때가 있기 때문이다 — 매쳐 견적서는 행을 늘리고 줄인 다음
+ * 옮겨진 자리를 머리글로 다시 찾는다. 아카이브만 읽을 수 있으면 고치기 전의
+ * 낡은 시트밖에 못 본다.
+ *
  * 공유문자열(`t="s"`)·인라인문자열(`t="inlineStr"`)·그냥 값(`<v>`) 셋 다 푼다.
+ * 못 읽은 칸은 `null` — 위 '조용히 건너뛴다'.
+ */
+export function createCellTextReader(
+  sheetXml: string,
+  sharedStringsXml: string | null
+): (ref: string) => string | null {
+  const shared = sharedStringsXml ? parseSharedStrings(sharedStringsXml) : [];
+
+  return (ref: string): string | null => {
+    let raw: string;
+    try {
+      raw = findCell(sheetXml, ref).raw;
+    } catch {
+      return null; // 그 칸이 없다 — 양식이 바뀐 것이다. 한 줄 비우고 넘어간다.
+    }
+    if (raw.endsWith("/>")) return null; // 빈 칸
+
+    const inner = raw.slice(raw.indexOf(">") + 1, raw.lastIndexOf("</c>"));
+    const type = /\st="([^"]*)"/.exec(raw.slice(0, raw.indexOf(">") + 1))?.[1];
+
+    if (type === "inlineStr") {
+      let text = "";
+      for (const t of inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) text += t[1];
+      return text === "" ? null : unescapeXml(text);
+    }
+
+    const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
+    if (v === undefined) return null;
+
+    if (type === "s") {
+      const text = shared[Number(v)];
+      return text === undefined || text === "" ? null : text;
+    }
+    return unescapeXml(v);
+  };
+}
+
+/**
+ * 셀 주소들의 글자. 못 읽은 주소는 결과에 아예 없다(위 '조용히 건너뛴다').
  */
 export function resolveSheetTextCells(
   archive: ZipArchive,
@@ -77,37 +122,10 @@ export function resolveSheetTextCells(
   const sheetXml = archive.readTextOrNull(part);
   if (!sheetXml) return values;
 
-  const sharedXml = archive.readTextOrNull("xl/sharedStrings.xml");
-  const shared = sharedXml ? parseSharedStrings(sharedXml) : [];
-
+  const read = createCellTextReader(sheetXml, archive.readTextOrNull("xl/sharedStrings.xml"));
   for (const ref of refs) {
-    let raw: string;
-    try {
-      raw = findCell(sheetXml, ref).raw;
-    } catch {
-      continue; // 그 칸이 없다 — 양식이 바뀐 것이다. 한 줄 비우고 넘어간다.
-    }
-    if (raw.endsWith("/>")) continue; // 빈 칸
-
-    const inner = raw.slice(raw.indexOf(">") + 1, raw.lastIndexOf("</c>"));
-    const type = /\st="([^"]*)"/.exec(raw.slice(0, raw.indexOf(">") + 1))?.[1];
-
-    if (type === "inlineStr") {
-      let text = "";
-      for (const t of inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) text += t[1];
-      if (text !== "") values.set(ref, unescapeXml(text));
-      continue;
-    }
-
-    const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
-    if (v === undefined) continue;
-
-    if (type === "s") {
-      const text = shared[Number(v)];
-      if (text !== undefined && text !== "") values.set(ref, text);
-      continue;
-    }
-    values.set(ref, unescapeXml(v));
+    const text = read(ref);
+    if (text !== null) values.set(ref, text);
   }
 
   return values;
