@@ -142,3 +142,35 @@ export async function readQuoteTemplateHeader(): Promise<QuoteTemplateHeader> {
   }
   return header;
 }
+
+/**
+ * 미리보기용 머리말. **양식을 못 읽어도 던지지 않는다** — 값만 빈 채로 돌려준다.
+ *
+ * 미리보기는 양식이 없어도 떠야 한다. 회사 정보·기본 문구·계좌가 비어 보일 뿐,
+ * 사람이 적은 값(금액·품목·공급처)은 그대로 확인할 수 있다. 정본이 필요하면
+ * Excel 을 받으면 되고 그쪽은 자기 오류를 따로 알려 준다.
+ *
+ * 세 곳이 같은 되돌림 값을 쓴다(미리보기 페이지 · 새 견적서 · 견적서 수정).
+ * 각자 적어 두면 한 곳만 고쳐지는 날이 오고, 그때 증상은 "어느 화면에서는
+ * 회사명이 뜨는데 어느 화면에서는 안 뜨는" 것이다.
+ */
+export async function readQuoteTemplateHeaderOrEmpty(): Promise<QuoteTemplateHeader> {
+  try {
+    return await readQuoteTemplateHeader();
+  } catch (err) {
+    if (!(err instanceof QuoteTemplateError)) throw err;
+    return {
+      companyName: null,
+      ceoLine: null,
+      address: null,
+      tel: null,
+      fax: null,
+      email: null,
+      homepage: null,
+      defaultValidity: null,
+      defaultDelivery: null,
+      defaultPayment: null,
+      bankAccount: null,
+    };
+  }
+}

@@ -70,7 +70,31 @@ function formatDate(isoDate: string): string {
   return `${y}년 ${Number(m)}월 ${Number(d)}일`;
 }
 
-function productLine(quote: QuoteEditData): string {
+/**
+ * 미리보기가 실제로 읽는 값만.
+ *
+ * 🔴 **`id` 와 `version` 을 요구하지 않는다.** 아직 저장하지 않은 견적서도 이
+ * 화면으로 그려야 하기 때문이다 — 저장하기 전에 어떻게 나갈지 보고 싶은 것이
+ * 미리보기의 본래 쓸모다. id 가 있어야만 볼 수 있게 두면, 새로 만드는 사람은
+ * 일단 저장해 놓고 열어 본 뒤 다시 고치는 길밖에 없다.
+ */
+export type QuotePrintData = Pick<
+  QuoteEditData,
+  | "quoteNumber"
+  | "quoteDate"
+  | "customerNameText"
+  | "subject"
+  | "validity"
+  | "delivery"
+  | "payment"
+  | "modelNameText"
+  | "serialNumberText"
+  | "lotNumberText"
+  | "workCost"
+  | "items"
+>;
+
+function productLine(quote: QuotePrintData): string {
   const pieces: string[] = [];
   if (quote.modelNameText?.trim()) pieces.push(`MODEL: ${quote.modelNameText.trim()}`);
   if (quote.serialNumberText?.trim()) pieces.push(`S/N:${quote.serialNumberText.trim()}`);
@@ -81,10 +105,21 @@ function productLine(quote: QuoteEditData): string {
 export default function QuotePrintView({
   quote,
   header,
+  quoteId,
+  onClose,
 }: {
-  quote: QuoteEditData;
+  quote: QuotePrintData;
   /** 양식에서 읽어 온 회사 정보·기본 문구·계좌. 못 읽은 칸은 null 이고 그 줄은 비운다. */
   header: QuoteTemplateHeader;
+  /**
+   * 저장된 견적서면 그 id, **아직 저장하지 않았으면 null**.
+   *
+   * 이 값이 갈라 놓는 것은 둘이다 — 돌아가는 길(주소인가 닫기인가)과 Excel
+   * 받기(저장된 장에만 있다). 값 자체는 미리보기에 쓰이지 않는다.
+   */
+  quoteId: string | null;
+  /** 저장 전 미리보기를 닫는다. quoteId 가 null 일 때만 쓰인다. */
+  onClose?: () => void;
 }) {
   const items = quote.items.map((item) => ({
     name: item.partNameText,
@@ -129,13 +164,28 @@ export default function QuotePrintView({
       <style>{STYLES}</style>
 
       <div className="qp-toolbar">
-        <Link href={`/quotes/${quote.id}`} className="qp-btn">
-          ← 견적서로 돌아가기
-        </Link>
+        {quoteId === null ? (
+          // 아직 저장 전이다. 주소로 돌아갈 곳이 없으므로 폼을 다시 보여 준다 —
+          // 적어 둔 값이 그대로 살아 있다(폼은 그 자리에 그대로 있고 화면만 바뀐다).
+          <button type="button" onClick={onClose} className="qp-btn">
+            ← 편집으로 돌아가기
+          </button>
+        ) : (
+          <Link href={`/quotes/${quoteId}`} className="qp-btn">
+            ← 견적서로 돌아가기
+          </Link>
+        )}
         <div className="qp-toolbar-actions">
-          <a href={`/api/quotes/${quote.id}/xlsx`} className="qp-btn">
-            Excel 받기
-          </a>
+          {quoteId === null ? (
+            // 🔴 Excel 은 저장된 장에서만 받을 수 있다 — 파일을 만드는 라우트가
+            // DB 의 그 줄을 읽기 때문이다. 단추를 회색으로 두기만 하면 "왜 안
+            // 눌리지"가 되므로, 왜인지를 그 자리에 적는다.
+            <span className="qp-toolbar-note">Excel 은 저장한 뒤에 받을 수 있습니다</span>
+          ) : (
+            <a href={`/api/quotes/${quoteId}/xlsx`} className="qp-btn">
+              Excel 받기
+            </a>
+          )}
           <button type="button" onClick={() => window.print()} className="qp-btn qp-btn-primary">
             인쇄 · PDF로 저장
           </button>
@@ -357,6 +407,7 @@ const STYLES = `
 .qp-toolbar-actions { display: flex; gap: .5rem; }
 .qp-btn { border: 1px solid #d4d4d8; border-radius: .375rem; padding: .375rem .75rem; font-size: .875rem; text-decoration: none; color: #3f3f46; background: #fff; cursor: pointer; }
 .qp-btn-primary { border-color: #18181b; background: #18181b; color: #fff; }
+.qp-toolbar-note { align-self: center; font-size: .75rem; color: #71717a; }
 .qp-note { margin-bottom: 1rem; font-size: .75rem; line-height: 1.7; color: #71717a; }
 
 .qp-page { background: #fff; border: 1px solid #e4e4e7; padding: 15pt 10pt; width: fit-content; margin: 0 auto; }

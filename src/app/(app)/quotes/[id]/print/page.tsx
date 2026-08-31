@@ -64,5 +64,5 @@ export default async function QuotePrintPage({
     };
   }
 
-  return <QuotePrintView quote={quote} header={header} />;
+  return <QuotePrintView quote={quote} header={header} quoteId={quote.id} />;
 }

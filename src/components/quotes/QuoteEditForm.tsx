@@ -22,6 +22,8 @@ import {
   type QuoteKind,
 } from "@/lib/validation/quote-input";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
+import QuotePrintView from "@/components/quotes/QuotePrintView";
+import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
 import type { QuoteEditData, QuoteIntakeLookup } from "@/lib/db/queries/quotes";
 import {
   createQuoteAction,
@@ -191,6 +193,7 @@ export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
   repairLabor,
+  printHeader,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -201,6 +204,11 @@ export default function QuoteEditForm({
    * 셋 다 온다 — 사람이 장비 종류를 골라 그 목록에서 체크한다.
    */
   repairLabor: RepairLaborKindRow[];
+  /**
+   * 양식에서 읽어 온 회사 정보·기본 문구·계좌. **저장 전 미리보기**가 쓴다.
+   * 양식을 못 읽었으면 칸이 전부 null 이고, 그래도 미리보기는 뜬다.
+   */
+  printHeader: QuoteTemplateHeader;
 }) {
   const router = useRouter();
 
@@ -282,6 +290,14 @@ export default function QuoteEditForm({
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * 미리보기를 펴 두었는가.
+   *
+   * 폼을 **떠나지 않는다** — 이 컴포넌트가 그대로 살아 있고 그리는 것만 바뀐다.
+   * 그래서 돌아왔을 때 적어 둔 값이 하나도 사라지지 않는다. 새 창이나 새 주소로
+   * 보내면 저장하지 않은 값을 들고 갈 방법이 없다.
+   */
+  const [showPreview, setShowPreview] = useState(false);
   const [isConflict, setIsConflict] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -603,6 +619,50 @@ export default function QuoteEditForm({
 
   const disabled = isSubmitting || isConflict;
 
+  if (showPreview) {
+    /**
+     * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
+     *
+     * ── 빈 칸은 null 로 넘긴다 ────────────────────────────────────────
+     * 미리보기는 유효기간·납기·결재조건을 `?? 양식의 기본 문구` 로 채우는데,
+     * 빈 문자열은 null 이 아니라서 그 기본값이 안 뜬다. 그러면 실제로 나갈
+     * 문서에는 "발행일로부터 4주"가 찍히는데 미리보기만 비어 보인다.
+     */
+    const orNull = (value: string) => (value.trim() === "" ? null : value);
+    return (
+      <QuotePrintView
+        quoteId={quote?.id ?? null}
+        onClose={() => setShowPreview(false)}
+        header={printHeader}
+        quote={{
+          quoteNumber,
+          quoteDate,
+          customerNameText,
+          subject,
+          validity: orNull(validity),
+          delivery: orNull(delivery),
+          payment: orNull(payment),
+          modelNameText: orNull(modelNameText),
+          serialNumberText: orNull(serialNumberText),
+          lotNumberText: orNull(lotNumberText),
+          workCost,
+          // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
+          // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다(다섯 줄이 넘으면
+          // 파일에서 한 줄로 합쳐지므로 그 경계가 어긋난다).
+          items: items
+            .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
+            .map((row) => ({
+              partId: row.partId,
+              partNameText: row.partNameText,
+              isOverhaulPart: kind === "OVERHAUL" ? row.isOverhaulPart : false,
+              quantity: Number(row.quantity) || 0,
+              unitPrice: row.unitPrice.trim() === "" ? "0" : row.unitPrice,
+            })),
+        }}
+      />
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -610,17 +670,21 @@ export default function QuoteEditForm({
           {quote ? "견적서 수정" : "새 견적서"}
         </h1>
         <div className="flex gap-2">
-          {/* 저장된 장에서만 보인다 — 아직 없는 견적서를 받을 수는 없다.
-              고친 뒤 저장하지 않고 누르면 **저장된 값**이 나간다. 화면의 값이
-              아니라 DB 의 값을 그리는 것이 이 통로의 일이다. */}
-          {quote && (
-            <a
-              href={`/quotes/${quote.id}/print`}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
-            >
-              미리보기 · PDF
-            </a>
-          )}
+          {/* 🔴 **지금 화면의 값으로** 그린다 — 저장 여부와 무관하다.
+              새 견적서도 저장하기 전에 어떻게 나갈지 볼 수 있어야 하고(그게
+              미리보기의 본래 쓸모다), 수정 중일 때도 DB 의 옛 값이 아니라
+              방금 고친 값이 보여야 한다. 예전에는 `/quotes/{id}/print` 로
+              보냈는데, 그 통로는 저장된 값을 그려서 고치는 중에 누르면 화면과
+              다른 문서가 나왔다. */}
+          <button
+            type="button"
+            onClick={() => setShowPreview(true)}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
+          >
+            미리보기 · PDF
+          </button>
+          {/* 파일은 저장된 장에서만 받을 수 있다 — 만드는 라우트가 DB 의 그 줄을
+              읽기 때문이다. 그래서 이 단추만 저장 뒤에 나타난다. */}
           {quote && (
             <a
               href={`/api/quotes/${quote.id}/xlsx`}
