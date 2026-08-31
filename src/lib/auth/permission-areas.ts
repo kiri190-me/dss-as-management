@@ -219,6 +219,15 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "MANAGE",
   },
   {
+    key: "mailSettings",
+    label: "메일 설정",
+    // 여기서 정한 문구가 전사원 메일로 그대로 나가고, 수신자 목록이 곧 "누가
+    // 고객사·S/N·증상을 받아 보는가"다. 보기만 해서 할 일이 없는 화면이라
+    // 중간 단계를 두지 않고 관리로만 연다(intake-mail-authorization.ts).
+    description: "A/S 접수 알림 메일 — 자동 발송 여부, 수신자, 문구",
+    maxMeaningfulLevel: "MANAGE",
+  },
+  {
     key: "settings",
     label: "시스템 설정",
     description: "시스템 전반 설정",

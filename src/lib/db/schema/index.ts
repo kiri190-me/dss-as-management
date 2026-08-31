@@ -44,3 +44,4 @@ export * from "./weekly-report-goals";
 export * from "./weekly-report-deliveries";
 export * from "./quotes";
 export * from "./customer-portal";
+export * from "./intake-mail";

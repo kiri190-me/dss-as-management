@@ -57,7 +57,10 @@ test("navigation: the approved feature entries are the only role-gated items", (
     restricted.map((i) => i.key).sort(),
     // 수리 작업 비용(2026-08-31)이 견적서와 **같은 판정**으로 붙었다 — 견적서의
     // 작업비가 나오는 근거라, 견적서를 못 보는 사람에게 보일 이유가 없다.
-    ["customerPortal", "customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "myActiveWork", "productModels", "quotes", "repairLabor", "technicalProcedures", "workflows"]
+    // 메일 설정(2026-08-31)도 역할로 가린다 — 여기서 정한 문구가 전사원
+    // 메일로 나가고 수신자 목록이 곧 "누가 고객사·S/N·증상을 받는가"라,
+    // 고객사 전용 주소 발급과 같은 선(관리자 이상)에 뒀다.
+    ["customerPortal", "customers", "diagnosisFlowcharts", "domesticOrders", "inventory", "mailSettings", "myActiveWork", "productModels", "quotes", "repairLabor", "technicalProcedures", "workflows"]
   );
 });
 
@@ -255,7 +258,9 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자
   // 사용자 관리·시스템 설정은 2026-08-28 에 '설정' 그룹으로 내려갔다 — '관리'에는
   // 업무용 마스터 자료만 남는다(navigation.ts 주석).
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["customers", "productModels"]);
-  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings"]);
+  // 메일 설정이 「설정」 그룹 세 번째로 붙었다(2026-08-31) — 사용자 관리와
+  // 나란히 "누가 무엇을 받는가"를 정하는 자리다.
+  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings", "mailSettings"]);
 });
 
 test("navGroups: 그룹의 key·이름·차례 — '설정'은 '관리' 다음, 맨 끝이다", () => {
@@ -299,12 +304,13 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 항목이 엔지니어·재고 담당자 양쪽에서 하나씩 늘었다.
     // 수리 작업 비용(2026-08-31)이 견적서와 같은 판정이라, 견적서가 감춰지는
     // 두 역할에서 감춰지는 항목이 하나씩 더 늘었다.
-    AS_ENGINEER: 3, // domesticOrders + quotes + repairLabor
-    SALES: 3, // myActiveWork + technicalProcedures + workflows
+    // 메일 설정(2026-08-31)은 관리자 이상만 본다 — 아래 세 역할에서 하나씩 늘었다.
+    AS_ENGINEER: 4, // domesticOrders + quotes + repairLabor + mailSettings
+    SALES: 4, // myActiveWork + technicalProcedures + workflows + mailSettings
     // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
     // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
     // 나갈 안내를 정하는 화면인데 그 역할에는 접수를 만들 수단이 없다.
-    INVENTORY_MANAGER: 9, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal
+    INVENTORY_MANAGER: 10, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings
   };
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);

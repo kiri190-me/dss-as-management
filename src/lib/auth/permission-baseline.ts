@@ -1,3 +1,4 @@
+import { canManageIntakeMailSettings } from "./intake-mail-authorization";
 import type { Role } from "@/lib/domain/types";
 import {
   PERMISSION_AREAS,
@@ -243,6 +244,14 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       // 무게가 다르다. write 를 따로 두지 않는 이유는 그 중간이 뜻을 갖지 않기
       // 때문이다(permission-areas.ts 의 같은 항목).
       return ladder({ manage: canDeleteQuotes(role), read: canViewQuotes(role) });
+
+    case "mailSettings":
+      // 🔴 여기를 빠뜨리면 아래 default 로 떨어져 NONE 이 되고, 최고관리자까지
+      // 화면에서 튕긴다 — 이 파일이 겪었다고 적어 둔 함정이 정확히 그것이다.
+      //
+      // 표로 옮겨 적지 않고 *-authorization.ts 를 **호출해서** 구한다(이 파일
+      // 맨 위 주석). 누가 이 설정을 만질 수 있는지는 저쪽 한 곳에만 있어야 한다.
+      return ladder({ manage: canManageIntakeMailSettings(role), read: canManageIntakeMailSettings(role) });
 
     case "settings":
       // 아직 안내 문구만 있는 화면이다.

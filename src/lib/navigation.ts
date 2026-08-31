@@ -8,6 +8,7 @@ import { canViewCustomers } from "@/lib/auth/customer-authorization";
 import { canViewDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { canViewProductModels } from "@/lib/auth/product-model-authorization";
 import { canViewQuotes } from "@/lib/auth/quote-authorization";
+import { canManageIntakeMailSettings } from "@/lib/auth/intake-mail-authorization";
 import { canViewWorkflowTemplates } from "@/lib/auth/workflow-template-authorization";
 
 export type NavItem = {
@@ -65,6 +66,9 @@ export const navItems: NavItem[] = [
   // 견적서와 같고, 고치는 권한만 더 좁다(actions/repair-labor.ts).
   { key: "repairLabor", href: "/repair-labor", label: "수리 작업 비용", isVisibleForRole: canViewQuotes },
   { key: "settings", href: "/settings", label: "시스템 설정" },
+  // A/S 접수 알림 메일의 자동 발송 여부·수신자·문구. 「설정」 그룹에 두는 것은
+  // 사용자 관리와 나란히 "누가 무엇을 받는가"를 정하는 자리이기 때문이다.
+  { key: "mailSettings", href: "/settings/mail", label: "메일 설정", isVisibleForRole: canManageIntakeMailSettings },
 ];
 
 export function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
@@ -146,5 +150,5 @@ export const navGroups: NavGroup[] = [
   // navItems 의 key 와 섞이는 자리가 없다) 그대로 둬도 동작은 같지만, 한 파일 안에서
   // key: "settings" 가 뜻이 다르게 두 번 나오면 읽는 사람이 매번 그 사실을 다시
   // 확인해야 한다. 이름을 갈라 두는 편이 공짜다. 라벨은 요청대로 "설정" 이다.
-  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings"] },
+  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings", "mailSettings"] },
 ];
