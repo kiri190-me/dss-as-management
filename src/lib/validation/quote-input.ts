@@ -1,4 +1,9 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
+import { WORKFLOW_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
+
+function isWorkflowKind(value: unknown): value is WorkflowKind {
+  return typeof value === "string" && (WORKFLOW_KIND_CODES as readonly string[]).includes(value);
+}
 
 /**
  * ============================================================================
@@ -119,7 +124,29 @@ export type QuoteFields = {
   delivery: string | null;
   payment: string | null;
   workCost: string;
+  /**
+   * 작업비를 만든 근거. **양식으로 나가지 않는다** — 견적서에 찍히는 것은 합계
+   * 하나이고, 이 셋은 "그 합계가 어떻게 나왔나"에 답하기 위해 저장한다.
+   *
+   * 셋 다 **그때 값의 사본**이다. 카탈로그를 보게 하면 나중에 단가가 오르는 순간
+   * 이미 보낸 견적서의 근거가 소리 없이 달라진다(schema/repair-labor.ts).
+   *
+   * `laborEquipmentKind` 가 null 이면 **작업을 골라 본 적이 없는 견적서**다 —
+   * 이 기능이 생기기 전에 만든 것들이 전부 그렇다.
+   */
+  laborEquipmentKind: WorkflowKind | null;
+  laborBaseCost: string | null;
+  repairTasks: QuoteRepairTaskInput[];
   items: QuoteItemInput[];
+};
+
+/** 견적서가 고른 수리 작업 한 줄. 카탈로그의 줄이 아니라 그때 값의 사본이다. */
+export type QuoteRepairTaskInput = {
+  /** 카탈로그의 그 줄. 참고용이고 금액 계산에는 쓰지 않는다. */
+  taskId: string | null;
+  taskName: string;
+  hours: number;
+  hourlyRate: string;
 };
 
 export type ValidateQuoteResult =
@@ -219,6 +246,15 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
   const workCost = normalizeAmount("workCost", "작업비", raw.workCost, fieldErrors) ?? "0";
   const items = normalizeItems(raw.items, fieldErrors);
 
+  /**
+   * 작업비의 근거. **형식만 본다** — 그 작업이 카탈로그에 실제로 있는지는 여기서
+   * 확인하지 않는다(DB 를 만지지 않는 자리다). 어차피 값의 사본이라, 카탈로그에서
+   * 지워진 뒤에도 이미 보낸 견적서는 그대로 남아야 한다.
+   */
+  const laborEquipmentKind = isWorkflowKind(raw.laborEquipmentKind) ? raw.laborEquipmentKind : null;
+  const laborBaseCost = normalizeAmount("laborBaseCost", "기본 작업비", raw.laborBaseCost, fieldErrors);
+  const repairTasks = normalizeRepairTasks(raw.repairTasks, fieldErrors);
+
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
 
   return {
@@ -240,9 +276,69 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       delivery: shortTexts.delivery,
       payment: shortTexts.payment,
       workCost,
+      laborEquipmentKind,
+      laborBaseCost,
+      repairTasks,
       items,
     },
   };
+}
+
+/**
+ * 고른 수리 작업 줄들. 화면이 카탈로그에서 골라 보내지만, 화면을 거치지 않고
+ * 부를 수 있으므로 여기서 한 번 더 형식을 본다.
+ *
+ * 잘못된 줄은 **조용히 버리지 않고 오류로 세운다** — 버리면 사람은 그 작업까지
+ * 청구된 줄 알고, 견적서에는 빠진 채로 나간다.
+ */
+function normalizeRepairTasks(
+  raw: unknown,
+  fieldErrors: Record<string, string>
+): QuoteRepairTaskInput[] {
+  if (raw === null || raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    fieldErrors.repairTasks = "고른 수리 작업을 확인할 수 없습니다.";
+    return [];
+  }
+
+  const tasks: QuoteRepairTaskInput[] = [];
+  raw.forEach((entry, index) => {
+    const line = index + 1;
+    if (typeof entry !== "object" || entry === null) {
+      fieldErrors[`repairTasks.${index}`] = `${line}번째 작업을 확인할 수 없습니다.`;
+      return;
+    }
+    const row = entry as Record<string, unknown>;
+
+    const taskName = typeof row.taskName === "string" ? row.taskName.trim() : "";
+    if (taskName === "") {
+      fieldErrors[`repairTasks.${index}.taskName`] = `${line}번째 작업의 건명이 비어 있습니다.`;
+      return;
+    }
+
+    const hours = typeof row.hours === "number" ? row.hours : Number(row.hours);
+    if (!Number.isInteger(hours) || hours <= 0) {
+      fieldErrors[`repairTasks.${index}.hours`] = `${line}번째 작업의 공수시간을 확인할 수 없습니다.`;
+      return;
+    }
+
+    const hourlyRate = normalizeAmount(
+      `repairTasks.${index}.hourlyRate`,
+      `${line}번째 작업의 시간당 작업비`,
+      row.hourlyRate,
+      fieldErrors
+    );
+    if (hourlyRate === null) {
+      fieldErrors[`repairTasks.${index}.hourlyRate`] =
+        `${line}번째 작업의 시간당 작업비가 비어 있습니다.`;
+      return;
+    }
+
+    const taskId = typeof row.taskId === "string" && row.taskId !== "" ? row.taskId : null;
+    tasks.push({ taskId, taskName, hours, hourlyRate });
+  });
+
+  return tasks;
 }
 
 /**

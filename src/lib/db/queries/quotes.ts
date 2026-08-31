@@ -6,15 +6,21 @@ import {
   customers,
   inventoryPartRequestItems,
   inventoryPartRequests,
+  ohPartTemplateItems,
+  ohPartTemplateModels,
+  ohPartTemplates,
+  partOverhaulUnitPrices,
   partUnitPrices,
   parts,
   products,
   quoteItems,
+  quoteRepairTasks,
   quotes,
   repairCases,
 } from "../schema";
 import { buildQuoteSummaryLine, sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import type { StockOwner } from "@/lib/domain/inventory-types";
+import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { QuoteKind } from "@/lib/validation/quote-input";
 
 /**
@@ -246,6 +252,23 @@ export type QuoteEditData = {
   delivery: string | null;
   payment: string | null;
   workCost: string;
+  /**
+   * 위 workCost 를 만든 근거. **다시 열었을 때 금액만 남고 무엇을 골랐는지
+   * 사라지지 않게** 함께 싣는다(schema/quotes.ts 의 labor_* 주석).
+   *
+   * 이 기능이 생기기 전에 만든 견적서는 셋 다 비어 있다 — 그때는 작업을 고르는
+   * 방법 자체가 없었다. 화면은 그 상태를 "아직 고른 적 없음"으로 그린다.
+   */
+  laborEquipmentKind: WorkflowKind | null;
+  laborBaseCost: string | null;
+  repairTasks: {
+    /** 카탈로그의 그 줄. 지워졌으면 null 일 수 있다(참고용). */
+    taskId: string | null;
+    taskNameText: string;
+    hours: number;
+    /** 그때의 시간당 작업비. 지금 값으로 다시 셈하지 않는다. */
+    hourlyRate: string;
+  }[];
   items: {
     partId: string | null;
     partNameText: string;
@@ -284,6 +307,8 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       delivery: quotes.delivery,
       payment: quotes.payment,
       workCost: quotes.workCost,
+      laborEquipmentKind: quotes.laborEquipmentKind,
+      laborBaseCost: quotes.laborBaseCost,
     })
     .from(quotes)
     .where(and(eq(quotes.id, id), eq(quotes.isDeleted, false)))
@@ -303,7 +328,20 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     .where(eq(quoteItems.quoteId, id))
     .orderBy(asc(quoteItems.lineNo));
 
-  return { ...row, items };
+  // 고른 수리 작업. **그때 값의 사본**이라 카탈로그를 조인하지 않는다 —
+  // 조인하면 단가가 오른 뒤 옛 견적서의 근거가 소리 없이 바뀐다.
+  const repairTasks = await db
+    .select({
+      taskId: quoteRepairTasks.taskId,
+      taskNameText: quoteRepairTasks.taskNameText,
+      hours: quoteRepairTasks.hours,
+      hourlyRate: quoteRepairTasks.hourlyRate,
+    })
+    .from(quoteRepairTasks)
+    .where(eq(quoteRepairTasks.quoteId, id))
+    .orderBy(asc(quoteRepairTasks.lineNo));
+
+  return { ...row, items, repairTasks };
 }
 
 export type QuoteIntakeLookup = {
@@ -351,6 +389,33 @@ export type QuoteIntakeLookup = {
      */
     laborCost: string | null;
   }[];
+  /** 이 장비에 이어진 O/H 부품 템플릿의 기종 코드. 안 이어져 있으면 null. */
+  ohTemplateCode: string | null;
+  /**
+   * 그 기종의 **O/H 부품 목록**. 위 usedParts 와 성격이 전혀 다르다.
+   *
+   * ── 왜 출고 기록만으로는 안 되는가 ────────────────────────────────────
+   * **O/H 견적은 부품을 출고하기 전에 낸다**(2026-08-31 사용자 확인). 얼마에
+   * 할지를 먼저 알려 주고 승인을 받은 뒤에 뜯기 시작하므로, 그 시점에 출고
+   * 기록은 비어 있다. 그래서 "무엇을 쓸 예정인가"는 템플릿이 답한다.
+   *
+   * ── 단가는 O/H 단가다 ────────────────────────────────────────────────
+   * 여기서 온 줄은 O/H 템플릿에 적어 둔 단가를 따른다. 출고 기록에서 온 줄이
+   * 부품 상세의 일반 단가를 따르는 것과 짝이다 — **어느 견적서인지가 아니라
+   * 그 줄이 어디서 왔는지가 단가를 정한다**(2026-08-31 사용자 결정).
+   *
+   * 재고와 이어지지 않은 줄(part_id 가 NULL)도 그대로 준다. 이름과 수량은
+   * 쓸모가 있고, 단가만 붙일 곳이 없어 null 이다.
+   */
+  ohTemplateParts: {
+    /** 재고 마스터 연결. **null 이 정상이다**(schema/oh-part-templates.ts). */
+    partId: string | null;
+    /** 템플릿에 적힌 품명 그대로. part_id 가 있어도 이 글자를 쓴다. */
+    partNameText: string;
+    quantity: number;
+    /** 그 부품의 O/H 단가. **null 이면 정하지 않은 것**이고 빈칸으로 둔다. */
+    overhaulUnitPrice: string | null;
+  }[];
 };
 
 /**
@@ -381,10 +446,22 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
       lotNumber: products.lotNumber,
       serialNumber: products.serialNumber,
       faultDescription: repairCases.reportedSymptom,
+      // 이 장비에 이어진 O/H 부품 템플릿의 기종 코드. 안 이어져 있으면 null 이고,
+      // 그때 화면은 "모델을 이어 주세요"를 그린다.
+      ohTemplateCode: ohPartTemplates.code,
+      ohTemplateId: ohPartTemplates.id,
     })
     .from(repairCases)
     .leftJoin(customers, eq(customers.id, repairCases.customerId))
     .leftJoin(products, eq(products.id, repairCases.productId))
+    // 제품 모델 → O/H 부품 템플릿. **모델 하나는 템플릿 하나에만 붙으므로**
+    // (schema/oh-part-templates.ts 의 unique) 이 조인이 행을 늘리지 않는다.
+    // 지운 템플릿은 붙이지 않는다 — 휴지통에 있는 설정으로 청구하면 안 된다.
+    .leftJoin(ohPartTemplateModels, eq(ohPartTemplateModels.productModelId, products.productModelId))
+    .leftJoin(
+      ohPartTemplates,
+      and(eq(ohPartTemplates.id, ohPartTemplateModels.templateId), eq(ohPartTemplates.isDeleted, false))
+    )
     .where(eq(repairCases.intakeNumber, intakeNumber))
     .limit(1);
 
@@ -447,7 +524,50 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
       });
   }
 
-  return { ...row, usedParts: [...byPartAndOwner.values()] };
+  /**
+   * 그 기종의 O/H 부품과 각각의 O/H 단가.
+   *
+   * 템플릿이 안 이어져 있으면 질의를 열지 않는다 — 없는 id 로 조회하는 것보다
+   * 아예 묻지 않는 편이 낫고, 그때 화면은 "모델을 이어 주세요"를 그린다.
+   *
+   * 차례는 템플릿에 늘어놓은 순서 그대로다. **양식의 부품 순서가 뜻을 갖는다**
+   * (휴즈 22개가 셋째 줄인 데는 이유가 있다 — schema/oh-part-templates.ts).
+   */
+  const ohTemplateParts = row.ohTemplateId
+    ? await db
+        .select({
+          partId: ohPartTemplateItems.partId,
+          partNameText: ohPartTemplateItems.partNameText,
+          quantity: ohPartTemplateItems.quantity,
+          // 재고와 이어지지 않은 줄은 붙일 단가가 없어 null 이 온다. 그 줄도
+          // 버리지 않는다 — 이름과 수량은 그대로 쓸모가 있다.
+          overhaulUnitPrice: partOverhaulUnitPrices.unitPrice,
+        })
+        .from(ohPartTemplateItems)
+        .leftJoin(
+          partOverhaulUnitPrices,
+          eq(partOverhaulUnitPrices.partId, ohPartTemplateItems.partId)
+        )
+        .where(eq(ohPartTemplateItems.templateId, row.ohTemplateId))
+        .orderBy(asc(ohPartTemplateItems.displayOrder))
+    : [];
+
+  // 칸을 하나씩 적는다. `...row` 로 펼치면 **ohTemplateId 까지 딸려 나가는데**,
+  // 그 값은 여기서 부품을 걷어 오는 데만 쓴 내부 id 이고 화면은 쓰지 않는다.
+  // 이 저장소는 "넘기는 값을 줄인다"를 지켜 왔다(oh-templates 페이지의 같은 판단).
+  return {
+    repairCaseId: row.repairCaseId,
+    intakeNumber: row.intakeNumber,
+    customerId: row.customerId,
+    customerName: row.customerName,
+    modelName: row.modelName,
+    lotNumber: row.lotNumber,
+    serialNumber: row.serialNumber,
+    faultDescription: row.faultDescription,
+    ohTemplateCode: row.ohTemplateCode,
+    usedParts: [...byPartAndOwner.values()],
+    ohTemplateParts,
+  };
 }
 
 /**

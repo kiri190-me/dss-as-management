@@ -1,76 +1,85 @@
 /**
  * ============================================================================
- * 견적서 작업비 — 담긴 부품들로 제안할 금액
+ * 견적서 작업비 — 고른 수리 작업으로 셈한다
  * ============================================================================
- * 작업비는 고정 금액이 아니라 **부품별로 정해 둔 작업비의 합**이다(사용자 확인
- * 2026-08-28). 그 금액은 재고의 부품 마스터에 적혀 있다(parts.labor_cost).
+ * `작업비 = 기본 작업비 + Σ(고른 작업의 공수시간 × 시간당 작업비)`
  *
- * ── 🔴 수량을 곱하지 않는다 ────────────────────────────────────────────
- * 처음에는 `부품 작업비 × 출하 수량` 으로 셌다. **틀렸다**(사용자 정정
- * 2026-08-28). 같은 부품을 두 개 갈아도 손이 두 배로 드는 것이 아니라서,
- * 그 품목이 견적에 들어 있으면 그 부품의 작업비가 **있는 그대로 한 번** 붙는다.
+ * ── 🔴 작업비는 부품이 아니라 '작업'에 붙는다 ───────────────────────────
+ * 이 파일은 원래 **부품마다의 작업비를 합산**했다. 그 전제가 틀렸다는 것이
+ * 사용자 정정으로 드러나(2026-08-31) 규칙을 통째로 바꿨다. 같은 부품을 갈아도
+ * 어떤 작업으로 처리하느냐에 따라 값이 다르고, 부품을 하나도 안 갈아도 작업비만
+ * 나가는 일이 있다. 옛 규칙은 남겨 두지 않는다 — 쓰지 않는 계산식이 옆에 있으면
+ * 언젠가 누군가 그것을 부른다.
  *
- * 그래서 이 함수는 **수량을 아예 받지 않는다.** 인자에 없으면 실수로 곱할
- * 수도 없다 — 규칙을 주석이 아니라 함수 모양으로 못 박아 둔다.
+ * 오버홀도 목록의 한 줄일 뿐이다(제너레이터 `OH` 24시간 = 240만원). 따로 사는
+ * 값이 아니라서 O/H 작업비만을 위한 자리를 두지 않는다.
  *
- * 세는 단위는 **줄(품목)** 이다. 같은 부품이 두 줄로 담겨 있으면 두 번 붙는다 —
- * 화면에서 한 줄이 한 품목이고, 두 줄로 나눠 적었다면 그렇게 청구하겠다는 뜻이다.
+ * ── 시간당 단가를 줄마다 들고 다닌다 ────────────────────────────────────
+ * 견적서에 저장된 줄은 **그때의 단가를 베껴 둔 스냅샷**이다(quote_repair_tasks).
+ * 지금 카탈로그의 단가로 다시 셈하면, 단가가 오른 뒤 옛 견적서를 열었을 때
+ * 화면의 합계가 실제로 보낸 금액과 달라진다.
  *
- * ── 정하지 않은 작업비는 0 이 아니다 ───────────────────────────────────
- * `laborCost` 가 null 이면 **아직 정하지 않았다**는 뜻이고, 0 은 "작업비 없음"
- * 이라는 실제 값이다. null 을 0 으로 접으면 정하지 않은 부품이 조용히 무료가
- * 되어 견적이 덜 나간다. 그래서 합계에서 빼고, **무엇이 빠졌는지 이름을 돌려준다**
- * — 화면이 그것을 그대로 보여 주고 사람이 재고에서 채운다.
- *
- * 손으로 적은 줄(partId 가 null)은 어느 부품인지 알 수 없어 작업비도 없다.
- * 이것은 빠뜨린 것이 아니라 알 수 없는 것이므로 `unknown` 에 넣지 않는다 —
- * 넣으면 재고에 없는 이름까지 "작업비를 채우라"고 재촉하게 된다.
- *
- * ── 제안일 뿐이다 ──────────────────────────────────────────────────────
- * 이 값은 작업비 칸을 **자동으로 덮지 않는다.** 화면이 단추로 보여 주고, 사람이
- * 누를 때만 들어간다(QuoteEditForm 의 `작업비에 적용`).
+ * ── 기본 작업비의 null 은 0 이 아니다 ──────────────────────────────────
+ * null 은 "그 장비의 기본 작업비를 아직 정하지 않았다"이고 `"0"` 은 "기본
+ * 작업비가 없다"는 실제 값이다. null 을 0 으로 접으면 정하지 않았다는 사실이
+ * 사라지고 화면이 그것을 알릴 수 없다.
  * ============================================================================
  */
 
-export type QuoteLaborRow = {
-  /** 재고의 부품과 이어져 있는가. null 이면 손으로 적은 줄이다. */
-  partId: string | null;
-  partNameText: string;
-  /** 부품 마스터의 작업비(원). null = 정하지 않음, "0" = 실제 0원. */
-  laborCost: string | null;
+/** 견적서가 고른 작업 한 줄. 카탈로그의 줄이 아니라 **그때 값의 사본**이다. */
+export type SelectedRepairTask = {
+  taskName: string;
+  /** 공수시간. */
+  hours: number;
+  /** 그때의 시간당 작업비(원). numeric 이라 문자열로 오간다. */
+  hourlyRate: string;
 };
 
 export type QuoteLaborSuggestion = {
-  /** 제안할 작업비 합계(원). */
+  /** 제안할 작업비 합계(원). 기본 작업비 + 고른 작업의 합. */
   total: number;
-  /** 재고에 이어져 있는데 작업비를 정하지 않아 합계에서 빠진 부품들의 품명. */
+  /** 그중 고른 작업의 합만. 화면이 내역을 갈라 보여 줄 때 쓴다. */
+  tasksTotal: number;
+  /** 합계에 더해진 기본 작업비(원). **null 이면 더하지 않았다.** */
+  baseCost: number | null;
+  /** 시간당 단가나 공수시간을 숫자로 읽지 못해 합계에서 빠진 작업들의 건명. */
   unknown: string[];
 };
 
-export function sumQuoteLaborCost(rows: QuoteLaborRow[]): QuoteLaborSuggestion {
-  let total = 0;
+/**
+ * @param baseCost 이 장비 종류의 기본 작업비.
+ *   · `null` — 아직 정하지 않았다. **0 으로 접지 않고** 더하지 않는다.
+ *   · `"3500000"` — 더한다. `"0"` 은 실제 0원이라 더해도 합계가 그대로다.
+ */
+export function sumQuoteLaborCost(
+  tasks: readonly SelectedRepairTask[],
+  baseCost: string | null
+): QuoteLaborSuggestion {
+  let tasksTotal = 0;
   const unknown: string[] = [];
 
-  for (const row of rows) {
-    // 품명이 비어 있는 줄은 아직 아무것도 아니다. 사람이 `+ 부품 추가`를 눌러
-    // 두고 채우지 않은 자리다.
-    if (row.partNameText.trim() === "") continue;
-
-    if (row.laborCost === null) {
-      if (row.partId !== null) unknown.push(row.partNameText);
-      continue;
-    }
-
-    const cost = Number(row.laborCost);
+  for (const task of tasks) {
+    const rate = Number(task.hourlyRate);
     // 숫자로 읽히지 않는 값은 더하지 않는다 — NaN 하나가 합계 전체를 NaN 으로
-    // 만들고, 화면에는 금액 대신 이상한 글자가 뜬다.
-    if (!Number.isFinite(cost)) {
-      if (row.partId !== null) unknown.push(row.partNameText);
+    // 만들고, 화면에는 금액 대신 이상한 글자가 뜬다. 대신 **무엇이 빠졌는지
+    // 이름을 돌려준다** — 조용히 빼면 사람은 합계가 맞는 줄 안다.
+    if (!Number.isFinite(rate) || !Number.isFinite(task.hours)) {
+      unknown.push(task.taskName);
       continue;
     }
-
-    total += cost;
+    tasksTotal += task.hours * rate;
   }
 
-  return { total, unknown };
+  let addedBase: number | null = null;
+  if (baseCost !== null) {
+    const parsed = Number(baseCost);
+    if (Number.isFinite(parsed)) addedBase = parsed;
+  }
+
+  return {
+    total: tasksTotal + (addedBase ?? 0),
+    tasksTotal,
+    baseCost: addedBase,
+    unknown,
+  };
 }

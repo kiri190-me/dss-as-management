@@ -21,7 +21,11 @@ import {
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { createAttachmentRecord } from "./attachments";
-import { restoreAttachment, softDeleteAttachment } from "./attachment-trash";
+import {
+  recordAttachmentDownload,
+  restoreAttachment,
+  softDeleteAttachment,
+} from "./attachment-trash";
 import { getAttachmentForDownload } from "../queries/attachment-download";
 import { listAttachmentsForRepairCase } from "../queries/attachments";
 import {
@@ -55,6 +59,8 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  7. **감사 기록에 파일의 주인이 남는가** — 접수 건이든 모델이든, 주인이
  *     아무도 없든. 감사 기록은 나중에 소급해서 채울 수 없으므로 이것이 빠진
  *     기간은 영영 불완전해진다.
+ *  8. **내려받기 기록(FILE_DOWNLOAD)의 모양** — 이 파일에 함께 사는
+ *     recordAttachmentDownload가 남기는 줄. 같은 이유로 여기서 붙잡는다.
  *
  * ── 디스크는 임시 폴더에 쓴다 ────────────────────────────────────────────
  * 실제 저장 루트(UPLOADS_DIR)를 건드리지 않는다. 어댑터를 임시 루트로 직접
@@ -240,6 +246,63 @@ async function auditCounts(attachmentId: string): Promise<Record<string, number>
     counts[row.actionType] = (counts[row.actionType] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * 이 첨부의 **내려받기** 감사 행을 통째로 꺼낸다.
+ *
+ * auditNewValue와 달리 actionType·targetEntity로 거르지 않고 targetRecordId로만
+ * 찾는다 — 걸러 낸 값을 다시 단언하면 아무것도 지키지 못한다. 업로드가 남긴
+ * FILE_UPLOAD가 같은 ID로 함께 있으므로, 그중 내려받기 줄이 정확히 하나인지도
+ * 여기서 함께 본다.
+ */
+async function downloadAuditRow(attachmentId: string): Promise<{
+  actorUserId: string | null;
+  actionType: string;
+  targetEntity: string;
+  targetRecordId: string;
+  previousValue: unknown;
+  newValue: Record<string, unknown>;
+}> {
+  const rows = await db
+    .select({
+      actorUserId: auditLogs.actorUserId,
+      actionType: auditLogs.actionType,
+      targetEntity: auditLogs.targetEntity,
+      targetRecordId: auditLogs.targetRecordId,
+      previousValue: auditLogs.previousValue,
+      newValue: auditLogs.newValue,
+    })
+    .from(auditLogs)
+    .where(eq(auditLogs.targetRecordId, attachmentId));
+
+  const downloads = rows.filter((row) => row.actionType === "FILE_DOWNLOAD");
+  assert.equal(downloads.length, 1, "FILE_DOWNLOAD 감사 행이 정확히 하나여야 한다");
+  return { ...downloads[0], newValue: downloads[0].newValue as Record<string, unknown> };
+}
+
+/**
+ * 다운로드 라우트가 하는 것과 같은 자리에서 내려받기 기록을 남긴다.
+ *
+ * 라우트(api/attachments/[id]/download)는 getAttachmentForDownload가 읽어 둔
+ * 값을 그대로 넘긴다 — 여기서도 같은 조회를 쓴다. 시험이 손으로 지어낸 값을
+ * 넘기면 실제로 실리는 값이 무엇인지는 지켜지지 않는다.
+ * 넘긴 값을 그대로 단언할 수 있도록 그 조회 결과를 돌려준다.
+ */
+async function recordDownloadOf(attachmentId: string, actorUserId: string) {
+  const attachment = await getAttachmentForDownload(attachmentId);
+  assert.ok(attachment, "시험 준비 단계에서 첨부를 찾지 못했다");
+  await recordAttachmentDownload({
+    attachmentId: attachment!.id,
+    actorUserId,
+    owner: {
+      repairCaseId: attachment!.repairCaseId,
+      productModelId: attachment!.productModelId,
+    },
+    originalFileName: attachment!.originalFileName,
+    fileSize: attachment!.fileSize,
+  });
+  return attachment!;
 }
 
 async function existsOnDisk(absolutePath: string): Promise<boolean> {
@@ -623,6 +686,117 @@ describe("attachment 휴지통: 감사 기록만 읽어도 어느 파일이었�
     assert.equal(newValue.category, "INTAKE_PHOTO");
 
     // 이 파일의 가장 중요한 성질은 여기서도 그대로다.
+    assert.equal(await existsOnDisk(absolutePath), true);
+  });
+});
+
+// ───────────────────── 6. 내려받기 기록 — 누가 무엇을 받아 갔는가
+
+/**
+ * FILE_DOWNLOAD는 **파일 자체보다 오래 남아야 하는 기록**이다(감사 로그 3년
+ * 보관). 그런데 이 줄의 모양을 붙잡는 시험이 지금까지 하나도 없었다 — 누가
+ * 깨뜨려도 알려 줄 것이 없는 상태였다.
+ *
+ * 여기서 못박는 것:
+ *  1. 한 번 받아 가면 FILE_DOWNLOAD가 attachments · 그 첨부 ID로 **한 줄**
+ *  2. 무엇을 받아 갔는지(originalFileName · fileSize)가 넘긴 그대로 남는가
+ *  3. 주인이 갈라 적히는가 — 모델 첨부의 기록에 접수 건 칸이 실리면 그 줄은
+ *     거짓말을 한다(ownerAuditFields)
+ *  4. previousValue가 비어 있는가 — 내려받기는 상태를 바꾸지 않는다
+ */
+describe("attachment 내려받기: 감사 기록만 읽어도 누가 무엇을 받아 갔는지 안다", () => {
+  test("수리 건 첨부를 받아 가면 FILE_DOWNLOAD가 attachments · 그 첨부 ID로 한 줄 남는다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId } = await storedAttachment(caseId);
+
+    await recordDownloadOf(attachmentId, adminId);
+
+    const row = await downloadAuditRow(attachmentId);
+    assert.equal(row.actionType, "FILE_DOWNLOAD");
+    // 🔴 이 두 칸이 어긋나면 나중에 "이 파일을 누가 받아 갔나"를 물을 때
+    // 그 줄을 찾을 수 없다 — 감사 로그는 targetEntity + targetRecordId로 찾는다.
+    assert.equal(row.targetEntity, "attachments");
+    assert.equal(row.targetRecordId, attachmentId);
+    assert.equal(row.actorUserId, adminId, "받아 간 사람이 남지 않으면 기록의 뜻이 없다");
+
+    // 업로드가 남긴 FILE_UPLOAD와 섞이지 않는다 — 내려받기 한 번은 한 줄이다.
+    const counts = await auditCounts(attachmentId);
+    assert.equal(counts.FILE_DOWNLOAD, 1);
+    assert.equal(counts.FILE_UPLOAD, 1, "업로드 기록까지 함께 늘었다");
+  });
+
+  test("내려받기 기록에 원본 파일명과 파일 크기가 넘긴 그대로 남는다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId } = await storedAttachment(caseId);
+
+    const attachment = await recordDownloadOf(attachmentId, adminId);
+
+    const { newValue } = await downloadAuditRow(attachmentId);
+    // 🔴 무엇을 받아 갔는지 알 수 없으면 기록의 뜻이 없다. 파일이 3년 뒤
+    // 사라져도 이 두 값이 남아 있으면 그 줄은 여전히 답을 한다.
+    assert.equal(newValue.originalFileName, attachment.originalFileName);
+    assert.equal(newValue.originalFileName, "인수 사진.txt", "저장 경로 같은 다른 값이 실렸다");
+    assert.equal(newValue.fileSize, attachment.fileSize);
+    assert.equal(typeof newValue.fileSize, "number", "크기가 숫자로 남지 않으면 나중에 합계를 낼 수 없다");
+  });
+
+  test("모델 첨부의 내려받기 기록은 모델 쪽에 적힌다 — 접수 건 칸에 값이 실리지 않는다", async () => {
+    const model = await createTestProductModel();
+    const { attachmentId } = await storedModelAttachment(model.id);
+
+    await recordDownloadOf(attachmentId, adminId);
+
+    const { newValue } = await downloadAuditRow(attachmentId);
+    assert.equal(newValue.ownerType, "PRODUCT_MODEL");
+    assert.equal(newValue.productModelId, model.id);
+    // 🔴 주인이 아닌 쪽 키는 아예 싣지 않는다. `repairCaseId: null`이 남으면
+    // 그 줄만 읽는 사람은 접수 건이 지워진 첨부와 구분할 수 없다.
+    assert.equal("repairCaseId" in newValue, false, "모델 첨부의 기록에 접수 건 칸이 실렸다");
+    assert.equal(newValue.originalFileName, "회로도.txt");
+  });
+
+  test("수리 건 첨부의 내려받기 기록에는 접수 건 키만 실린다 — 모델 칸이 섞이지 않는다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId } = await storedAttachment(caseId);
+
+    await recordDownloadOf(attachmentId, adminId);
+
+    const { newValue } = await downloadAuditRow(attachmentId);
+    assert.equal(newValue.ownerType, "REPAIR_CASE");
+    assert.equal(newValue.repairCaseId, caseId);
+    assert.equal("productModelId" in newValue, false, "주인이 아닌 쪽 키가 실렸다");
+    // 사람이 읽는 이름(접수번호 · 모델명)은 내려받기 기록에만 **일부러** 싣지
+    // 않는다 — 그 값을 위해 모든 내려받기가 조인 둘을 더 치를 수는 없다
+    // (recordAttachmentDownload 주석). 삭제·복원 기록과 다른 점이라 여기 못박는다.
+    assert.equal("intakeNumber" in newValue, false);
+    assert.equal("modelName" in newValue, false);
+  });
+
+  test("내려받기는 상태를 바꾸지 않으므로 previousValue가 비어 있고 첨부 행도 그대로다", async () => {
+    const caseId = await createTestCase();
+    const { attachmentId, absolutePath } = await storedAttachment(caseId);
+
+    await recordDownloadOf(attachmentId, adminId);
+
+    const { previousValue } = await downloadAuditRow(attachmentId);
+    // 🔴 바꾼 상태가 없는데 이전 값이 실리면, 그 줄을 읽는 사람은 내려받기가
+    // 무언가를 바꾼 줄로 읽는다.
+    assert.equal(previousValue, null);
+
+    const [row] = await db
+      .select({
+        isDeleted: attachments.isDeleted,
+        deletedAt: attachments.deletedAt,
+        deletedBy: attachments.deletedBy,
+        deleteReason: attachments.deleteReason,
+      })
+      .from(attachments)
+      .where(eq(attachments.id, attachmentId));
+    assert.equal(row.isDeleted, false, "받아 갔을 뿐인데 첨부의 상태가 바뀌었다");
+    assert.equal(row.deletedAt, null);
+    assert.equal(row.deletedBy, null);
+    assert.equal(row.deleteReason, null);
+
     assert.equal(await existsOnDisk(absolutePath), true);
   });
 });

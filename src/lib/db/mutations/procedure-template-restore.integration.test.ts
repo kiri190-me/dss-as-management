@@ -32,7 +32,6 @@ import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 const TEST_CODE_PREFIX = "test-restore-";
 
 let superAdminId: string;
-let adminId: string;
 let asEngineerId: string;
 let salesId: string;
 let inventoryManagerId: string;
@@ -130,7 +129,6 @@ before(async () => {
 
   const [admin] = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "ADMIN"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true))).limit(1);
   assert.ok(admin, "expected an approved ADMIN in the dev DB");
-  adminId = admin.id;
 
   const [engineer] = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "AS_ENGINEER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false), eq(users.isActive, true))).limit(1);
   assert.ok(engineer, "expected an approved AS_ENGINEER in the dev DB");
@@ -522,7 +520,7 @@ describe("L. unauthorized/full-service/published rejection", () => {
 
   test("a PUBLISHED TECHNICAL_TASK template is denied", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("published"));
-    const seed = await seedGraph(templateId);
+    await seedGraph(templateId);
     const targetGroupId = await lastGroupId(templateId);
     const published = await publishProcedureTemplate(templateId, superAdminId);
     assert.equal(published.ok, true, JSON.stringify(published));

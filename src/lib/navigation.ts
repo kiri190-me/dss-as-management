@@ -60,6 +60,10 @@ export const navItems: NavItem[] = [
   { key: "inventory", href: "/inventory", label: "재고 관리", isVisibleForRole: canViewInventory },
   { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리", isVisibleForRole: canViewDomesticOrders },
   { key: "quotes", href: "/quotes", label: "견적서", isVisibleForRole: canViewQuotes },
+  // 견적서의 **작업비가 나오는 근거**다. 견적서 바로 옆에 두는 것은 견적을 내다가
+  // "이 작업이 몇 시간이었지"를 확인하러 가는 일이 잦기 때문이다. 보는 권한은
+  // 견적서와 같고, 고치는 권한만 더 좁다(actions/repair-labor.ts).
+  { key: "repairLabor", href: "/repair-labor", label: "수리 작업 비용", isVisibleForRole: canViewQuotes },
   { key: "settings", href: "/settings", label: "시스템 설정" },
 ];
 
@@ -127,7 +131,7 @@ export const navGroups: NavGroup[] = [
   // 안에서 견적은 내자 진행 상황표 바로 앞에 오는 일이고, 두 화면을 오가는
   // 사람이 같다. `내자 정리`의 하위메뉴로 두지 않은 것은 딸린 화면이 아니라
   // 나란한 화면이기 때문이다 — 내자 줄 없이 견적서만 내는 경우가 있다.
-  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders", "quotes"] },
+  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders", "quotes", "repairLabor"] },
   { key: "admin", label: "관리", itemKeys: ["customers", "productModels"] },
   // 사용자 관리와 시스템 설정이 '관리'에서 여기로 내려왔다(2026-08-28, 사용자 요청).
   // '관리'는 업무를 하면서 들여다보는 **마스터 자료**(고객사·제품 모델)를 다루는

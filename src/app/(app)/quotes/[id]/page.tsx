@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
+import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -64,5 +65,14 @@ export default async function QuoteDetailPage({
   const quote = await getQuoteForEdit(id);
   if (!quote) notFound();
 
-  return <QuoteEditForm quote={quote} defaultQuoteDate={toKstDateOnly(new Date())} />;
+  // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
+  const repairLabor = await listRepairLabor();
+
+  return (
+    <QuoteEditForm
+      quote={quote}
+      defaultQuoteDate={toKstDateOnly(new Date())}
+      repairLabor={repairLabor}
+    />
+  );
 }

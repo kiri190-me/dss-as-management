@@ -10,7 +10,9 @@ import {
   productModels,
 } from "../schema";
 import { insertAuditLog } from "./audit-logs";
+import { applyOverhaulUnitPricesInTx } from "./part-overhaul-unit-prices";
 import type { OhTemplateFields } from "@/lib/validation/oh-part-template-input";
+import type { PartOverhaulUnitPriceEntry } from "@/lib/validation/part-overhaul-unit-price-input";
 
 /**
  * ============================================================================
@@ -33,6 +35,17 @@ import type { OhTemplateFields } from "@/lib/validation/oh-part-template-input";
  * 모델 하나는 템플릿 하나에만 붙는다(스키마의 unique). 이미 다른 템플릿에
  * 붙어 있으면 **거절하고 어디 붙어 있는지 알려 준다** — 조용히 옮기면 그
  * 템플릿을 쓰던 사람이 이유를 모른 채 다른 부품을 받게 된다.
+ *
+ * ── 🔴 부품별 O/H 단가도 **같은 트랜잭션에서** 저장한다 ──────────────────
+ * 화면이 부품 목록 · 이 기종의 O/H 작업비 · 부품별 O/H 단가를 한 표에서 한
+ * 단추로 저장한다. 앞의 둘은 이 표에, 단가는 part_overhaul_unit_prices 에 사는데,
+ * 트랜잭션을 따로 열면 "부품 목록은 저장됐는데 단가는 안 된" 반쪽 상태가 생긴다.
+ * 게다가 이 저장은 version 을 올리므로 **실패한 저장이 버전만 올려놓고 끝난다** —
+ * 그러면 화면은 다음 저장에서 이유 없이 CONFLICT 를 만난다.
+ *
+ * 그래서 단가 쪽의 applyOverhaulUnitPricesInTx 를 이 트랜잭션 안에서 부른다.
+ * 잠금 순서와 "없는 부품이 섞이면 통째로 거절" 규칙은 그 함수 한 곳에만 있다.
+ * 권한이 같아서(`inventory.parts` WRITE) 여기서 따로 판정할 것도 없다.
  * ============================================================================
  */
 
@@ -47,6 +60,29 @@ export type OhTemplateResult =
 const CONFLICT_MESSAGE =
   "다른 사용자가 이 템플릿을 먼저 수정했습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.";
 const NOT_FOUND_MESSAGE = "해당 템플릿을 찾을 수 없습니다.";
+
+/**
+ * 🔴 거절을 **트랜잭션 밖으로 던지기** 위한 신호.
+ *
+ * 콜백에서 그냥 `return` 하면 트랜잭션이 **커밋된다.** 이 파일의 옛 거절들은
+ * 전부 아무것도 쓰기 전에 반환하므로 빈 트랜잭션이 커밋될 뿐 무해했다. 그러나
+ * 단가 저장은 템플릿을 이미 고친 뒤에 돌기 때문에, 거기서 반환하면 **템플릿만
+ * 저장되고 단가는 빠진 채 커밋된다** — 한 트랜잭션으로 묶은 이유가 통째로
+ * 무너진다. 그래서 그 자리에서는 던진다.
+ * (part-overhaul-unit-prices.ts 의 SaveRejected 와 같은 장치다.)
+ */
+class TemplateRejected extends Error {
+  constructor(readonly result: Extract<OhTemplateResult, { ok: false }>) {
+    super(result.message);
+    this.name = "TemplateRejected";
+  }
+}
+
+/** 트랜잭션 밖에서 거절 신호를 결과로 되돌린다. 다른 오류는 그대로 올려보낸다. */
+function unwrapRejection(err: unknown): OhTemplateResult {
+  if (err instanceof TemplateRejected) return err.result;
+  throw err;
+}
 
 function duplicateCode(code: string): OhTemplateResult {
   const message = `기종 코드 ${code} 를 쓰는 템플릿이 이미 있습니다.`;
@@ -94,6 +130,12 @@ async function replaceItems(tx: Tx, templateId: string, fields: OhTemplateFields
 
 export async function createOhTemplate(params: {
   fields: OhTemplateFields;
+  /**
+   * 부품별 O/H 단가. 이 트랜잭션 안에서 함께 저장된다(파일 머리말).
+   * **보내지 않으면 단가를 아예 건드리지 않는다** — 빈 배열과 같은 결과지만,
+   * 뜻이 다르므로 부르는 쪽이 구분해서 보낼 수 있게 둔다.
+   */
+  overhaulUnitPriceEntries?: PartOverhaulUnitPriceEntry[];
   actorUserId: string;
 }): Promise<OhTemplateResult> {
   return db.transaction(async (tx): Promise<OhTemplateResult> => {
@@ -113,27 +155,52 @@ export async function createOhTemplate(params: {
       .returning({ id: ohPartTemplates.id, version: ohPartTemplates.version });
 
     await replaceItems(tx, created.id, params.fields);
+
+    // 단가는 부품에 붙는 값이라 템플릿을 만든 뒤에 넣어도 순서가 어긋나지 않는다.
+    // 감사 기록은 그 함수가 부품마다 따로 남긴다 — 여기서 겹쳐 남기지 않는다.
+    const prices = await applyOverhaulUnitPricesInTx(tx, {
+      entries: params.overhaulUnitPriceEntries ?? [],
+      actorUserId: params.actorUserId,
+    });
+    // 🔴 반환이 아니라 **던진다** — 여기서 반환하면 위의 쓰기가 커밋된다
+    // (TemplateRejected 주석).
+    if (!prices.ok) throw new TemplateRejected({ ok: false, code: "NOT_FOUND", message: prices.message });
+
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
       actionType: "CREATE",
       targetEntity: "oh_part_templates",
       targetRecordId: created.id,
-      newValue: { code: params.fields.code, name: params.fields.name, itemCount: params.fields.items.length },
+      newValue: {
+        code: params.fields.code,
+        name: params.fields.name,
+        itemCount: params.fields.items.length,
+      },
     });
 
     return { ok: true, id: created.id, version: created.version };
-  });
+  }).catch(unwrapRejection);
 }
 
 export async function updateOhTemplate(params: {
   id: string;
   expectedVersion: number;
   fields: OhTemplateFields;
+  /** 부품별 O/H 단가. createOhTemplate 의 같은 인자와 규칙이 같다. */
+  overhaulUnitPriceEntries?: PartOverhaulUnitPriceEntry[];
   actorUserId: string;
 }): Promise<OhTemplateResult> {
   return db.transaction(async (tx): Promise<OhTemplateResult> => {
     const [existing] = await tx
-      .select({ id: ohPartTemplates.id, version: ohPartTemplates.version, isDeleted: ohPartTemplates.isDeleted })
+      .select({
+        id: ohPartTemplates.id,
+        version: ohPartTemplates.version,
+        isDeleted: ohPartTemplates.isDeleted,
+        // 감사의 previousValue 에 실을 값들. 어차피 이 줄을 잠그려고 읽으므로
+        // 질의를 새로 열지 않는다.
+        code: ohPartTemplates.code,
+        name: ohPartTemplates.name,
+      })
       .from(ohPartTemplates)
       .where(eq(ohPartTemplates.id, params.id))
       .limit(1)
@@ -164,16 +231,39 @@ export async function updateOhTemplate(params: {
     // version 대조를 통과한 뒤에만 부품을 건드린다 — CONFLICT 로 끝난 저장이
     // 부품을 먼저 지워 버리면, 실패한 저장이 자료를 지우고 간 셈이 된다.
     await replaceItems(tx, params.id, params.fields);
+
+    // 부품별 O/H 단가도 이 트랜잭션 안에서(파일 머리말). 여기서 거절되면 위의
+    // version 증가와 부품 교체까지 함께 되돌아간다 — 그것이 이 자리에 있는 이유다.
+    const prices = await applyOverhaulUnitPricesInTx(tx, {
+      entries: params.overhaulUnitPriceEntries ?? [],
+      actorUserId: params.actorUserId,
+    });
+    // 🔴 반환이 아니라 **던진다** — 여기서 반환하면 위의 쓰기가 커밋된다
+    // (TemplateRejected 주석).
+    if (!prices.ok) throw new TemplateRejected({ ok: false, code: "NOT_FOUND", message: prices.message });
+
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
       actionType: "UPDATE",
       targetEntity: "oh_part_templates",
       targetRecordId: params.id,
-      newValue: { code: params.fields.code, name: params.fields.name, itemCount: params.fields.items.length },
+      // previousValue 는 **템플릿 자신의 칸만** 싣는다. 부품 줄은 통째로 갈아
+      // 끼우는 방식이라 이전 목록을 남기려면 줄 전체를 실어야 하는데, 그것은
+      // 이 기록이 답하려는 질문("누가 이 작업비를 얼마에서 얼마로 바꿨나")과
+      // 다른 일이다.
+      previousValue: {
+        code: existing.code,
+        name: existing.name,
+      },
+      newValue: {
+        code: params.fields.code,
+        name: params.fields.name,
+        itemCount: params.fields.items.length,
+      },
     });
 
     return { ok: true, id: updated.id, version: updated.version };
-  });
+  }).catch(unwrapRejection);
 }
 
 export type OhLinkResult =

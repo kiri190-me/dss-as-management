@@ -95,11 +95,6 @@ async function loadTemplateRow(templateId: string) {
   return row;
 }
 
-async function currentUpdatedAt(templateId: string): Promise<string> {
-  const row = await loadTemplateRow(templateId);
-  return row.updatedAt.toISOString();
-}
-
 async function loadNode(nodeId: string) {
   const [row] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId));
   return row;
@@ -108,11 +103,6 @@ async function loadNode(nodeId: string) {
 async function loadEdge(edgeId: string) {
   const [row] = await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId));
   return row;
-}
-
-async function loadNodesByCode(templateId: string) {
-  const rows = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
-  return new Map(rows.map((n) => [n.nodeCode, n]));
 }
 
 async function loadEdges(templateId: string) {

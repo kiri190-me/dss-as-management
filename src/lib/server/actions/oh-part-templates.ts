@@ -10,6 +10,11 @@ import {
   validateOhTemplateFields,
 } from "@/lib/validation/oh-part-template-input";
 import {
+  OVERHAUL_UNIT_PRICE_FIELD_ERROR_PREFIX,
+  validatePartOverhaulUnitPriceEntries,
+  type PartOverhaulUnitPriceEntry,
+} from "@/lib/validation/part-overhaul-unit-price-input";
+import {
   createOhTemplate,
   linkProductModel,
   unlinkProductModel,
@@ -56,6 +61,11 @@ export async function saveOhTemplateAction(input: {
   id: string | null;
   expectedVersion: number | null;
   fields: Record<string, unknown>;
+  /**
+   * 부품별 O/H 단가. 같은 저장 단추에서 함께 온다. **보내지 않으면 단가를 아예
+   * 건드리지 않는다** — 빈 배열("고칠 칸이 없다")과 뜻이 다르다.
+   */
+  overhaulUnitPrices?: unknown;
 }): Promise<OhTemplateResult | Forbidden> {
   const actor = await resolveActor();
   if (!actor.ok) return actor.result;
@@ -70,9 +80,37 @@ export async function saveOhTemplateAction(input: {
     };
   }
 
+  // 🔴 단가 검증도 **쓰기 전에** 끝낸다. 저장하다가 단가에서 형식 오류를 만나면
+  // 트랜잭션이 되돌려지긴 하지만, 감사 로그까지 썼다가 되돌리는 것보다 아예
+  // 시작하지 않는 편이 낫다(part-minimum-quantities.ts 의 같은 판단).
+  let overhaulUnitPriceEntries: PartOverhaulUnitPriceEntry[] | undefined;
+  if (input.overhaulUnitPrices !== undefined) {
+    const prices = validatePartOverhaulUnitPriceEntries(input.overhaulUnitPrices);
+    if (!prices.ok) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        // 🔴 키에 접두사를 붙인다. 단가 오류는 **부품 id** 를 키로 쓰는데, 템플릿
+        // 오류(칸 이름)와 한 자루에 담기면 화면이 어느 칸에 붙일지 가릴 수 없다.
+        fieldErrors: Object.fromEntries(
+          Object.entries(prices.fieldErrors).map(([key, message]) => [
+            `${OVERHAUL_UNIT_PRICE_FIELD_ERROR_PREFIX}${key}`,
+            message,
+          ])
+        ),
+        message: "O/H 단가 입력을 확인해 주세요.",
+      };
+    }
+    overhaulUnitPriceEntries = prices.data;
+  }
+
   try {
     if (input.id === null) {
-      return await createOhTemplate({ fields: validation.data, actorUserId: actor.userId });
+      return await createOhTemplate({
+        fields: validation.data,
+        overhaulUnitPriceEntries,
+        actorUserId: actor.userId,
+      });
     }
     if (!isValidOhTemplateId(input.id)) {
       return { ok: false, code: "NOT_FOUND", message: "해당 템플릿을 찾을 수 없습니다." };
@@ -84,6 +122,7 @@ export async function saveOhTemplateAction(input: {
       id: input.id,
       expectedVersion: input.expectedVersion,
       fields: validation.data,
+      overhaulUnitPriceEntries,
       actorUserId: actor.userId,
     });
   } catch (err) {

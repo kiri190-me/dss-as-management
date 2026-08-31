@@ -2,7 +2,7 @@ import "../../../../scripts/load-env";
 
 import { after, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import { users, workflowSteps, workflowTemplates, workflowTransitions, workflowVersions } from "../schema";
 import { createWorkflowDraft, discardWorkflowDraft, findWorkflowDraft } from "./workflow-drafts";

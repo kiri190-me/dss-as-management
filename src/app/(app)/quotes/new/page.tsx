@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
+import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -49,5 +50,14 @@ export default async function NewQuotePage() {
   // 발행일자의 기본값이 되는 "오늘". 서버가 정한다 — 클라이언트에서 만들면
   // 서버가 그린 것과 달라져 hydration 이 어긋나고, 한국 표준시 대신 브라우저
   // 시간대로 날짜가 정해진다(자정 전후 하루가 실제로 다르게 나온다).
-  return <QuoteEditForm quote={null} defaultQuoteDate={toKstDateOnly(new Date())} />;
+  // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
+  const repairLabor = await listRepairLabor();
+
+  return (
+    <QuoteEditForm
+      quote={null}
+      defaultQuoteDate={toKstDateOnly(new Date())}
+      repairLabor={repairLabor}
+    />
+  );
 }

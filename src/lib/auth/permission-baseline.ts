@@ -234,6 +234,16 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       // *-authorization.ts 를 **호출해서** 구한다(이 파일 맨 위 주석).
       return ladder({ manage: canDeleteQuotes(role), write: canEditQuotes(role), read: canViewQuotes(role) });
 
+    case "repairLabor":
+      // 보는 것은 견적서와 같다 — 견적을 내려면 어떤 작업이 얼마인지 알아야 하고,
+      // 못 보게 하면 사람은 다시 Excel 을 연다.
+      //
+      // 고치는 것은 **견적서를 지울 수 있는 사람과 같은 집합**이다. 여기 값을
+      // 바꾸면 앞으로의 모든 견적 금액이 바뀌므로 개별 견적서를 고치는 것과
+      // 무게가 다르다. write 를 따로 두지 않는 이유는 그 중간이 뜻을 갖지 않기
+      // 때문이다(permission-areas.ts 의 같은 항목).
+      return ladder({ manage: canDeleteQuotes(role), read: canViewQuotes(role) });
+
     case "settings":
       // 아직 안내 문구만 있는 화면이다.
       return "READ";

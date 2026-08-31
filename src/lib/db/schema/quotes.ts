@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { customers } from "./customers";
 import { parts } from "./inventory";
+import { productModelKindEnum } from "./product-models";
 import { repairCases } from "./repair-cases";
 import { users } from "./users";
 
@@ -151,6 +152,24 @@ export const quotes = pgTable(
 
     /** 작업비(조사·수리·개조·통전·출하검사) 단가 → H33. 수량은 양식이 1 로 고정한다. */
     workCost: numeric("work_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+
+    /**
+     * 위 work_cost 를 만든 근거 둘. **양식으로 나가지 않는다** — 견적서에 찍히는
+     * 것은 합계 하나이고, 이 둘은 "그 합계가 어떻게 나왔나"에 답하기 위해 남긴다.
+     * 고른 작업 줄들은 quote_repair_tasks 에 있다(schema/repair-labor.ts).
+     *
+     * ── 어느 장비의 작업 목록으로 골랐나 ──────────────────────────────
+     * 목록이 장비 종류마다 통째로 다르다. 안 남기면 다시 열었을 때 어느 목록을
+     * 펴야 할지 알 수 없다. NULL 은 **작업을 골라 본 적이 없는 견적서**다 —
+     * 이 기능이 생기기 전에 만든 것들이 전부 그렇다.
+     *
+     * ── 기본 작업비도 그때 값으로 베껴 둔다 ────────────────────────────
+     * repair_labor_settings 를 보게 하면 나중에 그 값이 바뀌는 순간 **이미 보낸
+     * 견적서의 근거가 소리 없이 달라진다.** 이 표가 고객사·모델명을 `_text` 로
+     * 베껴 두는 것과 같은 이유다(이 파일 머리말의 '스냅샷이다').
+     */
+    laborEquipmentKind: productModelKindEnum("labor_equipment_kind"),
+    laborBaseCost: numeric("labor_base_cost", { precision: 15, scale: 2 }),
 
     // 낙관적 잠금. 목록에서 열어 고치는 화면이 있으므로 처음부터 쓴다.
     version: integer("version").notNull().default(1),

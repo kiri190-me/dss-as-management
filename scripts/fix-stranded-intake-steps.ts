@@ -2,7 +2,7 @@ import "./load-env";
 
 import { and, eq, sql } from "drizzle-orm";
 import { db, pgClient } from "../src/lib/db/connection";
-import { repairCases, users, workflowSteps, workflowVersions } from "../src/lib/db/schema";
+import { repairCases, users, workflowSteps } from "../src/lib/db/schema";
 import { permanentlyDeleteRepairCase } from "../src/lib/db/mutations/repair-cases";
 import { insertAuditLog } from "../src/lib/db/mutations/audit-logs";
 

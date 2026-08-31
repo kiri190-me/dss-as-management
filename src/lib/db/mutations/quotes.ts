@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../client";
-import { customers, parts, quoteItems, quotes, repairCases } from "../schema";
+import { customers, parts, quoteItems, quoteRepairTasks, quotes, repairCases } from "../schema";
 import type { QuoteFields } from "@/lib/validation/quote-input";
 
 /**
@@ -97,6 +97,10 @@ function toColumnValues(fields: QuoteFields) {
     delivery: fields.delivery,
     payment: fields.payment,
     workCost: fields.workCost,
+    // 작업비의 근거. 여기 빠지면 사람이 작업을 골라도 다시 열었을 때 사라진다
+    // (이 함수 머리말의 "새로 만들면 들어가는데 고치면 안 들어가는 칸").
+    laborEquipmentKind: fields.laborEquipmentKind,
+    laborBaseCost: fields.laborBaseCost,
   };
 }
 
@@ -221,6 +225,30 @@ async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
   );
 }
 
+/**
+ * 고른 수리 작업을 통째로 갈아 끼운다. 부품 줄(replaceItems)과 같은 방식이다 —
+ * 폼이 목록을 통째로 편집하므로, 저장이 받는 것은 "이 견적서가 고른 작업은
+ * 지금부터 이것이 전부"라는 말이다.
+ *
+ * 카탈로그를 보지 않고 **넘어온 사본을 그대로 넣는다.** 지금 카탈로그 값으로 다시
+ * 읽으면, 단가가 오른 뒤 옛 견적서를 고칠 때 손대지도 않은 작업의 금액이 바뀐다.
+ */
+async function replaceRepairTasks(tx: Tx, quoteId: string, fields: QuoteFields) {
+  await tx.delete(quoteRepairTasks).where(eq(quoteRepairTasks.quoteId, quoteId));
+  if (fields.repairTasks.length === 0) return;
+
+  await tx.insert(quoteRepairTasks).values(
+    fields.repairTasks.map((task, index) => ({
+      quoteId,
+      lineNo: index + 1,
+      taskId: task.taskId,
+      taskNameText: task.taskName,
+      hours: task.hours,
+      hourlyRate: task.hourlyRate,
+    }))
+  );
+}
+
 /** 새 견적서 한 장. version 은 스키마 기본값 1로 시작한다. */
 export async function createQuote(params: {
   fields: QuoteFields;
@@ -247,6 +275,7 @@ export async function createQuote(params: {
       // 일이 된다. 부품만 빠진 견적서가 남는 편이 더 나쁘다: 화면에는 정상으로
       // 보이는데 금액이 작업비뿐인 장이 된다.
       await replaceItems(tx, inserted.id, params.fields);
+      await replaceRepairTasks(tx, inserted.id, params.fields);
 
       return { ok: true, id: inserted.id, version: inserted.version };
     });
@@ -303,6 +332,7 @@ export async function updateQuote(params: {
       // version 대조를 통과한 뒤에만 부품을 건드린다 — CONFLICT 로 끝난 저장은
       // 부품을 한 줄도 지우지 않는다(같은 트랜잭션이므로 위에서 이미 반환됐다).
       await replaceItems(tx, params.id, params.fields);
+      await replaceRepairTasks(tx, params.id, params.fields);
 
       return { ok: true, id: updated.id, version: updated.version };
     });

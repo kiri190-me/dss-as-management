@@ -42,6 +42,39 @@ import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/doma
  */
 const AMOUNT_PATTERN = /^\d{1,13}(?:\.\d{1,2})?$/;
 
+/**
+ * ── 🔴 금액 한 칸의 규칙은 여기 한 벌만 있다 ────────────────────────────
+ * 단가(이 파일)와 O/H 단가(part-overhaul-unit-price-input.ts)가 **이 함수를 함께
+ * 쓴다.** 쉼표 처리·자릿수·지수 표기 거절 같은 규칙이 두 파일에 갈라져 있으면,
+ * 한쪽만 고쳐지는 날 견적서 금액이 조용히 어긋난다 — 두 값이 같은 견적서의 같은
+ * 칸으로 흘러가기 때문에 어긋나도 눈에 띄지 않는다.
+ *
+ * 소유구분·부품 id 같은 **줄을 가리키는 값은 여기서 보지 않는다.** 이 함수가 아는
+ * 것은 금액 한 칸뿐이고, 그래서 축이 다른 두 표가 그대로 나눠 쓸 수 있다.
+ *
+ * 받아들이는 값은 이 파일 머리말의 "받아들이는 값"과 같다. 쉼표를 지우는 것은
+ * 사람이 금액을 그렇게 치기 때문이고, 지수 표기를 막는 것은 Number() 에 맡기면
+ * "1e3" 이 1000 으로 조용히 통과하기 때문이다.
+ */
+export function parseAmountValue(
+  raw: unknown
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+
+  const text = typeof raw === "number" ? (Number.isFinite(raw) ? String(raw) : "") : raw;
+  if (typeof text !== "string") return { ok: false, message: "단가 값을 확인할 수 없습니다." };
+
+  // 사람이 금액을 "1,250,000" 으로 친다. 쉼표만 지우고 나머지는 그대로 본다.
+  const trimmed = text.trim().replace(/,/g, "");
+  // 비운 칸 — 정하지 않음. 이 줄은 저장되지 않고 지워진다.
+  if (trimmed === "") return { ok: true, value: null };
+
+  if (!AMOUNT_PATTERN.test(trimmed)) {
+    return { ok: false, message: "단가는 0 이상의 금액(소수점 두 자리까지)이어야 합니다." };
+  }
+  return { ok: true, value: trimmed };
+}
+
 /** 단가 한 칸. `unitPrice: null` 은 "정하지 않음" — 저장 쪽이 그 줄을 지운다. */
 export type PartUnitPriceEntry = {
   owner: StockOwner;
@@ -73,24 +106,14 @@ export function isStockOwner(value: unknown): value is StockOwner {
 /**
  * 칸 하나분의 값. 화면도 이 함수를 그대로 불러 저장 단추를 잠그므로, 화면에서
  * 통과한 값이 서버에서 거절당하는 일이 없다.
+ *
+ * 규칙 자체는 위 parseAmountValue 한 곳에 있다 — 이 이름은 단가 화면·저장이
+ * 부르는 자리로 남겨 둔다(부르는 곳이 여럿이라 이름을 옮기면 그만큼 흔들린다).
  */
 export function parseUnitPriceValue(
   raw: unknown
 ): { ok: true; value: string | null } | { ok: false; message: string } {
-  if (raw === null || raw === undefined) return { ok: true, value: null };
-
-  const text = typeof raw === "number" ? (Number.isFinite(raw) ? String(raw) : "") : raw;
-  if (typeof text !== "string") return { ok: false, message: "단가 값을 확인할 수 없습니다." };
-
-  // 사람이 금액을 "1,250,000" 으로 친다. 쉼표만 지우고 나머지는 그대로 본다.
-  const trimmed = text.trim().replace(/,/g, "");
-  // 비운 칸 — 정하지 않음. 이 줄은 저장되지 않고 지워진다.
-  if (trimmed === "") return { ok: true, value: null };
-
-  if (!AMOUNT_PATTERN.test(trimmed)) {
-    return { ok: false, message: "단가는 0 이상의 금액(소수점 두 자리까지)이어야 합니다." };
-  }
-  return { ok: true, value: trimmed };
+  return parseAmountValue(raw);
 }
 
 /**

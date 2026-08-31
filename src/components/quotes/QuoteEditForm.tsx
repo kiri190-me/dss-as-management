@@ -11,6 +11,9 @@ import { generateClientUuid } from "@/lib/client-uuid";
 import { stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
 import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
+import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
+import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
+import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
 import {
   MAX_QUOTE_ITEMS,
@@ -79,28 +82,99 @@ const SAVE_FAILED_MESSAGE =
 type ItemRow = {
   key: string;
   partId: string | null;
-  /**
-   * 이 줄에 붙는 작업비(원) — 수량과 무관하다. 재고에서 담아 온 줄에만 있다 —
-   * 손으로 적은 줄은 어느 부품인지 알 수 없어 null 이다. 저장되지 않고
-   * **작업비 합계를 제안하는 데만** 쓴다.
-   */
-  laborCost: string | null;
   /** `2) OH 부품 비용` 칸으로 갈 줄인가. OH 견적서에만 그 칸이 있다. */
   isOverhaulPart: boolean;
   partNameText: string;
   quantity: string;
   unitPrice: string;
+  /**
+   * 위 「출고된 부품」 목록의 어느 줄에서 담아 온 것인가. 손으로 적은 줄과
+   * 저장돼 있던 줄은 null 이다.
+   *
+   * 이것이 있어야 **같은 것을 두 번 담지 않는다** — 일괄 담기가 이미 담은 것을
+   * 건너뛰고, 목록 쪽도 담긴 줄을 「담김」으로 보여 줄 수 있다. 저장되지 않는
+   * 화면 전용 값이다.
+   */
+  sourceKey: string | null;
 };
 
 function emptyItem(): ItemRow {
   return {
     key: generateClientUuid(),
     partId: null,
-    laborCost: null,
     isOverhaulPart: false,
     partNameText: "",
     quantity: "1",
     unitPrice: "",
+    sourceKey: null,
+  };
+}
+
+/**
+ * 출고 부품 목록의 한 줄을 가리키는 키. **부품 하나가 아니라 (부품, 소유구분)**
+ * 이다 — 같은 부품이 DSS 것과 교산 것으로 따로 나갔으면 단가가 달라 두 줄이고,
+ * 그 둘은 따로 담기고 따로 세어야 한다(queries/quotes.ts 의 같은 판단).
+ */
+function usedPartKey(part: QuoteIntakeLookup["usedParts"][number]): string {
+  return `issued:${part.partId}|${part.owner ?? ""}`;
+}
+
+/**
+ * O/H 템플릿 목록의 한 줄을 가리키는 키. 출고 줄과 **접두사로 갈라 둔다** —
+ * 같은 부품이 양쪽에 다 있을 수 있고, 그 둘은 단가가 다른 별개의 줄이다.
+ * 차례(index)로 세는 것은 템플릿 줄에 재고 연결이 없을 수 있어(part_id 가 NULL)
+ * 부품 id 만으로는 줄을 가릴 수 없기 때문이다.
+ */
+function ohTemplatePartKey(index: number): string {
+  return `ohtpl:${index}`;
+}
+
+/**
+ * 출고 부품 한 줄 → 견적서 부품 줄.
+ *
+ * 단가는 **부품 상세에 적어 둔 일반 단가**다. 실제로 나간 물건이라 그 소유구분의
+ * 값으로 청구한다(domain/quote-part-price.ts 의 '출처가 정한다').
+ *
+ * `isOverhaulPart` 는 false — 양식의 `1) 부품 비용` 칸으로 간다.
+ */
+function usedPartToItem(part: QuoteIntakeLookup["usedParts"][number]): ItemRow {
+  return {
+    key: generateClientUuid(),
+    partId: part.partId,
+    isOverhaulPart: false,
+    partNameText: part.partSpec ? `${part.partName} (${part.partSpec})` : part.partName,
+    quantity: String(part.quantity),
+    unitPrice: toPriceFieldValue(part.unitPrice),
+    sourceKey: usedPartKey(part),
+  };
+}
+
+/**
+ * O/H 템플릿 한 줄 → 견적서 부품 줄.
+ *
+ * 단가는 **템플릿 쪽에 적어 둔 O/H 단가**다. 아직 출고되지 않은 "쓸 예정인"
+ * 부품이라 일반 단가와 다른 값으로 청구한다.
+ *
+ * 🔴 `isOverhaulPart` 가 **true** 인 것이 핵심이다 — O/H 견적서 양식에는 부품
+ * 칸이 둘이고(`1) 부품 비용` 27~31행 · `2) OH 부품 비용` 34~46행), 템플릿에서
+ * 온 줄은 뒤쪽으로 가야 한다. 템플릿 담을 수 있는 부품이 13종으로 막혀 있는 것도
+ * 그 칸이 13줄이기 때문이다(validation/oh-part-template-input.ts).
+ *
+ * 작업비는 이 줄에 붙지 않는다. 작업비는 부품이 아니라 **수리 작업**에 붙고,
+ * 아래 「수리 작업 목록」에서 고른 것들로 따로 셈한다(2026-08-31 사용자 정정).
+ */
+function ohTemplatePartToItem(
+  part: QuoteIntakeLookup["ohTemplateParts"][number],
+  index: number
+): ItemRow {
+  return {
+    key: generateClientUuid(),
+    partId: part.partId,
+    isOverhaulPart: true,
+    partNameText: part.partNameText,
+    quantity: String(part.quantity),
+    unitPrice: toPriceFieldValue(part.overhaulUnitPrice),
+    sourceKey: ohTemplatePartKey(index),
   };
 }
 
@@ -116,11 +190,17 @@ function todayInSeoul(): string {
 export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
+  repairLabor,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
   /** 서버가 정한 오늘 날짜. 클라이언트에서 만들면 hydration 이 어긋난다. */
   defaultQuoteDate: string;
+  /**
+   * 장비 종류별 수리 작업 목록과 단가(`수리 작업 비용` 화면이 정하는 값).
+   * 셋 다 온다 — 사람이 장비 종류를 골라 그 목록에서 체크한다.
+   */
+  repairLabor: RepairLaborKindRow[];
 }) {
   const router = useRouter();
 
@@ -147,16 +227,56 @@ export default function QuoteEditForm({
           partId: item.partId,
           // 저장된 줄에는 작업비를 싣지 않는다 — 그 값은 부품 마스터의 지금 값이고,
           // 이미 정해진 작업비를 다시 제안할 이유가 없다.
-          laborCost: null,
           isOverhaulPart: item.isOverhaulPart,
           partNameText: item.partNameText,
           quantity: String(item.quantity),
           unitPrice: item.unitPrice,
+          // 저장돼 있던 줄이 어느 출고 기록에서 왔는지는 남지 않는다. 그래서
+          // 이미 담긴 것으로 세지 않는다 — 사람이 지웠다가 다시 담을 수 있어야 한다.
+          sourceKey: null,
         }))
       : [emptyItem()]
   );
 
   const [usedParts, setUsedParts] = useState<QuoteIntakeLookup["usedParts"]>([]);
+  /**
+   * 이 장비의 기종에 정해 둔 O/H 작업비와 그 기종 코드. 인수번호를 불러올 때
+   * 함께 온다.
+   *
+   * `ohTemplateCode` 가 null 이면 **이 모델에 O/H 부품 템플릿이 안 이어져 있다**는
+   * 뜻이고, 코드는 있는데 작업비가 null 이면 **이어져 있는데 값을 안 정했다**는
+   * 뜻이다. 사람이 고쳐야 할 자리가 서로 달라서 화면이 둘을 다르게 말한다.
+   */
+  const [ohTemplateCode, setOhTemplateCode] = useState<string | null>(null);
+  /**
+   * 그 기종의 O/H 부품 목록. **O/H 견적은 부품을 출고하기 전에 내므로** 위
+   * usedParts 가 비어 있는 것이 정상이고, 청구할 부품은 여기서 온다.
+   */
+  const [ohTemplateParts, setOhTemplateParts] = useState<QuoteIntakeLookup["ohTemplateParts"]>([]);
+
+  /**
+   * 어느 장비의 작업 목록으로 작업비를 셈하는가. 목록이 장비 종류마다 통째로
+   * 다르다. 저장된 견적서는 **그때 고른 종류를 그대로 다시 편다** — 안 그러면
+   * 열 때마다 다른 목록이 뜬다.
+   */
+  const [laborKind, setLaborKind] = useState<WorkflowKind | null>(
+    quote?.laborEquipmentKind ?? null
+  );
+  /**
+   * 체크한 작업의 카탈로그 id.
+   *
+   * 저장된 견적서는 `task_id` 로 되살린다. 카탈로그에서 지워진 작업은 id 가
+   * 없거나 목록에 없어 체크가 살아나지 않는데, **그 줄의 금액은 이미 work_cost 에
+   * 들어 있다** — 화면이 그 사실을 아래에서 알린다.
+   */
+  const [checkedTaskIds, setCheckedTaskIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (quote?.repairTasks ?? [])
+          .map((task) => task.taskId)
+          .filter((id): id is string => id !== null)
+      )
+  );
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
@@ -199,7 +319,89 @@ export default function QuoteEditForm({
    * 자동으로 채우지 않고 **제안만 한다.** 사람이 적어 둔 값을 글자를 칠
    * 때마다 덮으면 손으로 조정한 금액이 사라진다. 누르면 그때 들어간다.
    */
-  const laborSuggestion = useMemo(() => sumQuoteLaborCost(items), [items]);
+  /** 고른 장비의 작업 목록과 단가. 아직 안 골랐으면 null. */
+  const activeLabor = useMemo(
+    () => repairLabor.find((row) => row.equipmentKind === laborKind) ?? null,
+    [repairLabor, laborKind]
+  );
+
+  /**
+   * 체크한 작업들을 **그때 단가와 함께** 넘긴다. 저장할 때도 이 모양 그대로
+   * 베껴 둔다 — 나중에 단가가 올라도 이미 보낸 견적서의 근거는 그대로여야 한다
+   * (schema/repair-labor.ts 의 quote_repair_tasks).
+   */
+  const selectedTasks = useMemo(() => {
+    if (!activeLabor) return [];
+    return activeLabor.tasks
+      .filter((task) => checkedTaskIds.has(task.id))
+      .map((task) => ({
+        taskId: task.id,
+        taskName: task.taskName,
+        hours: task.hours,
+        hourlyRate: activeLabor.hourlyRate,
+      }));
+  }, [activeLabor, checkedTaskIds]);
+
+  const laborSuggestion = useMemo(
+    () => sumQuoteLaborCost(selectedTasks, activeLabor?.baseCost ?? null),
+    [selectedTasks, activeLabor]
+  );
+
+  /**
+   * 견적서 종류를 바꾸면 **오버홀 작업이 따라 체크·해제된다**(2026-08-31 요구).
+   * 장비 종류를 고를 때도 같은 규칙을 한 번 적용한다.
+   *
+   * 🔴 **effect 로 하지 않는다.** effect 에 두면 화면이 그려진 뒤 상태를 또 바꾸는
+   * 모양이 되고(react-hooks/set-state-in-effect 가 오류로 잡는다), 무엇보다
+   * **처음 열 때 저장돼 있던 선택까지 덮어쓴다** — 사람이 고쳐 둔 것이 소리 없이
+   * 사라지고 다음 저장에서 그 상태가 굳는다.
+   *
+   * 이 규칙이 도는 자리는 "사람이 종류를 고른 순간" 하나뿐이다. 그래서 두 select
+   * 의 onChange 에서만 부른다.
+   */
+  function applyOverhaulRule(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
+    const labor = repairLabor.find((row) => row.equipmentKind === nextLaborKind);
+    if (!labor) return;
+    const overhaulIds = labor.tasks.filter((task) => task.isOverhaul).map((task) => task.id);
+    // 오버홀 작업이 표시돼 있지 않은 장비면 따라 움직일 줄이 없다. 이름으로
+    // 맞히지 않는다(schema/repair-labor.ts 의 is_overhaul).
+    if (overhaulIds.length === 0) return;
+
+    const shouldCheck = nextQuoteKind === "OVERHAUL";
+    setCheckedTaskIds((prev) => {
+      const next = new Set(prev);
+      for (const id of overhaulIds) {
+        if (shouldCheck) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  /**
+   * 이미 담은 출고 부품과 아직 안 담은 것.
+   *
+   * 일괄 담기가 이것으로 "몇 종이 남았는지"를 말하고, 목록 쪽은 담긴 줄의 단추를
+   * 「담김」으로 바꾼다. **두 번 담기는 것을 막는 것이 요점이다** — 두 번 담기면
+   * 같은 부품이 두 줄이 되어 청구가 두 배가 되는데, 화면만 보고는 그게 실수인지
+   * (두 줄로 나눠 적으려는) 뜻인지 구별되지 않는다.
+   */
+  const addedSourceKeys = useMemo(
+    () => new Set(items.map((row) => row.sourceKey).filter((key): key is string => key !== null)),
+    [items]
+  );
+  const unaddedUsedParts = useMemo(
+    () => usedParts.filter((part) => !addedSourceKeys.has(usedPartKey(part))),
+    [usedParts, addedSourceKeys]
+  );
+  /** 아직 안 담은 템플릿 줄. 차례(index)를 함께 들고 다녀야 키를 만들 수 있다. */
+  const unaddedOhTemplateParts = useMemo(
+    () =>
+      ohTemplateParts
+        .map((part, index) => ({ part, index }))
+        .filter(({ index }) => !addedSourceKeys.has(ohTemplatePartKey(index))),
+    [ohTemplateParts, addedSourceKeys]
+  );
 
   async function handleLookup() {
     const intakeNumber = intakeNumberText.trim();
@@ -244,6 +446,8 @@ export default function QuoteEditForm({
         );
       }
       setUsedParts(found.usedParts);
+      setOhTemplateCode(found.ohTemplateCode);
+      setOhTemplateParts(found.ohTemplateParts);
       setLookupMessage(
         found.usedParts.length > 0
           ? `불러왔습니다. 이 건에 출고된 부품 ${found.usedParts.length}종이 아래 참고 목록에 있습니다.`
@@ -254,28 +458,34 @@ export default function QuoteEditForm({
     }
   }
 
-  function addUsedPart(part: QuoteIntakeLookup["usedParts"][number]) {
+  /**
+   * 출고 부품을 부품 줄에 담는다. 하나든 여럿이든 이 함수 하나를 쓴다 —
+   * 일괄 담기가 하나씩 담기를 여러 번 부르면 setItems 가 여러 번 돌아 "빈 첫 줄"
+   * 처리가 중간 상태에 걸린다.
+   */
+  function addUsedParts(list: readonly QuoteIntakeLookup["usedParts"][number][]) {
+    if (list.length === 0) return;
     setItems((prev) => {
       // 빈 첫 줄이 남아 있으면 그 자리를 쓴다 — 담을 때마다 빈 줄이 밀려
       // 내려가면 저장할 때 "품명을 입력해 주세요"가 뜬다.
       const next = prev.filter(
         (row) => !(row.partNameText.trim() === "" && row.unitPrice.trim() === "")
       );
-      return [
-        ...next,
-        {
-          key: generateClientUuid(),
-          partId: part.partId,
-          laborCost: part.laborCost,
-          isOverhaulPart: false,
-          partNameText: part.partSpec ? `${part.partName} (${part.partSpec})` : part.partName,
-          quantity: String(part.quantity),
-          // 재고에 정해 둔 그 소유구분의 단가. **null 이면 빈칸으로 둔다** —
-          // 0 으로 채우면 정하지 않은 부품을 0원으로 청구하게 된다. "0"은
-          // 무상 부품이라는 뜻이라 그대로 채운다(schema/part-unit-prices.ts).
-          unitPrice: part.unitPrice === null ? "" : String(Number(part.unitPrice)),
-        },
-      ];
+      return [...next, ...list.map(usedPartToItem)];
+    });
+  }
+
+  /**
+   * O/H 템플릿의 부품을 담는다. 출고 줄과 **다른 함수인 것이 요점이다** —
+   * 단가가 오는 곳도(O/H 단가) 양식에서 갈 자리도(`2) OH 부품 비용`) 다르다.
+   */
+  function addOhTemplateParts(list: readonly { part: QuoteIntakeLookup["ohTemplateParts"][number]; index: number }[]) {
+    if (list.length === 0) return;
+    setItems((prev) => {
+      const next = prev.filter(
+        (row) => !(row.partNameText.trim() === "" && row.unitPrice.trim() === "")
+      );
+      return [...next, ...list.map(({ part, index }) => ohTemplatePartToItem(part, index))];
     });
   }
 
@@ -305,6 +515,14 @@ export default function QuoteEditForm({
       delivery,
       payment,
       workCost,
+      /**
+       * 작업비의 근거. **그때 값의 사본을 보낸다** — 나중에 시간당 단가가 오르거나
+       * 공수시간이 고쳐져도 이미 보낸 견적서의 근거는 그대로여야 한다
+       * (schema/repair-labor.ts 의 quote_repair_tasks 머리말).
+       */
+      laborEquipmentKind: laborKind,
+      laborBaseCost: activeLabor?.baseCost ?? null,
+      repairTasks: selectedTasks,
       // 통째로 빈 줄은 보내지 않는다 — 사람이 `+ 부품 추가`를 눌러 두고 안 채운
       // 줄이 저장을 막으면, 어디가 문제인지 찾느라 폼을 다시 훑게 된다.
       items: items
@@ -490,7 +708,13 @@ export default function QuoteEditForm({
         <Field label="견적서 종류" error={fieldErrors.kind} required>
           <select
             value={kind}
-            onChange={(e) => setKind(e.target.value as QuoteKind)}
+            onChange={(e) => {
+              const next = e.target.value as QuoteKind;
+              setKind(next);
+              // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
+              // 풀린다(applyOverhaulRule 머리말).
+              applyOverhaulRule(next, laborKind);
+            }}
             className={editInputClass}
             disabled={disabled}
           >
@@ -594,6 +818,93 @@ export default function QuoteEditForm({
         </Field>
       </section>
 
+      {/* ── O/H 템플릿 부품 ──────────────────────────────────────────────
+          🔴 **O/H 견적은 부품을 출고하기 전에 낸다**(2026-08-31 사용자 확인).
+          얼마에 할지를 먼저 알려 주고 승인을 받은 뒤에 뜯기 시작하므로, 그 시점에
+          아래 「출고된 부품」은 비어 있는 것이 정상이다. 청구할 부품은 이 기종의
+          O/H 템플릿이 답한다.
+
+          O/H 견적서일 때만 그린다. 내자 견적서에는 이 칸 자체가 없다. */}
+      {kind === "OVERHAUL" && (
+        <section className="rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/40">
+          <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            O/H 부품 템플릿
+            {ohTemplateCode && (
+              <span className="ml-2 font-normal text-zinc-500 dark:text-zinc-400">
+                기종 {ohTemplateCode}
+              </span>
+            )}
+          </h2>
+          {ohTemplateParts.length === 0 ? (
+            // 못 담는 이유가 셋이고 **고쳐야 할 자리가 다 다르다.** 한 문장으로
+            // 뭉치면 사람이 어디로 가야 하는지 알 수 없다.
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {repairCaseId === null
+                ? "인수번호를 먼저 불러오면 그 장비의 기종에 맞는 O/H 부품을 여기서 담을 수 있습니다."
+                : ohTemplateCode === null
+                  ? "이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 › O/H 부품 템플릿에서 모델을 이어 주세요."
+                  : `기종 ${ohTemplateCode} 템플릿에 담긴 부품이 없습니다 — 재고 관리 › O/H 부품 템플릿에서 부품을 넣어 주세요.`}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                단가는 <b>O/H 템플릿에 적어 둔 값</b>이 따라옵니다 — 출고된 부품이 부품 상세의 단가를 쓰는
+                것과 다릅니다. 담은 줄은 견적서의 <b>2) OH 부품 비용</b> 칸으로 갑니다.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => addOhTemplateParts(unaddedOhTemplateParts)}
+                  disabled={disabled || unaddedOhTemplateParts.length === 0}
+                  className="rounded border border-sky-500 bg-white px-2 py-1 text-xs font-medium text-sky-900 disabled:opacity-50 dark:border-sky-600 dark:bg-zinc-900 dark:text-sky-200"
+                >
+                  {unaddedOhTemplateParts.length === 0
+                    ? "전부 담았습니다"
+                    : `O/H 템플릿에서 불러오기 (${unaddedOhTemplateParts.length}종)`}
+                </button>
+                <span className="text-xs text-zinc-600 dark:text-zinc-300">
+                  이미 담은 것은 건너뜁니다. 담은 뒤에도 줄마다 고치거나 지울 수 있습니다.
+                </span>
+              </div>
+              <ul className="mt-2 flex flex-col gap-1">
+                {ohTemplateParts.map((part, index) => {
+                  const added = addedSourceKeys.has(ohTemplatePartKey(index));
+                  return (
+                    <li key={ohTemplatePartKey(index)} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-zinc-800 dark:text-zinc-200">{part.partNameText}</span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{part.quantity}개</span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {isPriceUnset(part.overhaulUnitPrice) ? (
+                          <span className="text-amber-700 dark:text-amber-400">
+                            {part.partId === null
+                              ? "재고 미연결 — O/H 단가 없음"
+                              : "O/H 단가 미정"}
+                          </span>
+                        ) : (
+                          `O/H 단가 ₩${AMOUNT_FORMAT.format(Number(part.overhaulUnitPrice))}`
+                        )}
+                      </span>
+                      {added ? (
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">담김 ✓</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => addOhTemplateParts([{ part, index }])}
+                          disabled={disabled}
+                          className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
+                        >
+                          부품 줄에 담기
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       {/* ── 사용한 부품 (참고) ──────────────────────────────────────────── */}
       {usedParts.length > 0 && (
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
@@ -604,9 +915,30 @@ export default function QuoteEditForm({
             재고에서 나간 것과 청구하는 것이 늘 같지는 않습니다. 담을 것만 골라 주세요. 단가는 재고 관리에
             소유구분별로 적어 둔 값이 따라오고, 정해 두지 않았으면 빈칸으로 들어옵니다.
           </p>
-          <ul className="mt-3 flex flex-col gap-1">
-            {usedParts.map((part) => (
-              <li key={`${part.partId}|${part.owner ?? ""}`} className="flex flex-wrap items-center gap-2 text-sm">
+          {/* 일괄 담기. 출고된 부품이 열 종을 넘는 일이 흔한데 하나씩 누르게
+              두면 사람이 중간에 하나를 빠뜨리고, 빠뜨린 것은 청구에서 통째로
+              사라진다. **이미 담은 것은 건너뛴다** — 두 번 담기면 청구가 두 배가
+              되고 화면만 봐서는 실수인지 뜻인지 구별되지 않는다. */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => addUsedParts(unaddedUsedParts)}
+              disabled={disabled || unaddedUsedParts.length === 0}
+              className="rounded border border-zinc-400 bg-white px-2 py-1 text-xs font-medium text-zinc-800 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+            >
+              {unaddedUsedParts.length === 0
+                ? "전부 담았습니다"
+                : `출고된 부품 ${unaddedUsedParts.length}종 전부 담기`}
+            </button>
+            <span className="text-xs text-zinc-600 dark:text-zinc-300">
+              담은 뒤에도 줄마다 고치거나 지울 수 있습니다.
+            </span>
+          </div>
+          <ul className="mt-2 flex flex-col gap-1">
+            {usedParts.map((part) => {
+              const added = addedSourceKeys.has(usedPartKey(part));
+              return (
+              <li key={usedPartKey(part)} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-zinc-800 dark:text-zinc-200">{part.partName}</span>
                 {part.partSpec && (
                   <span className="text-xs text-zinc-500 dark:text-zinc-400">{part.partSpec}</span>
@@ -615,22 +947,29 @@ export default function QuoteEditForm({
                   {stockOwnerLabelOrUnspecified(part.owner)} · {part.quantity}개 출고
                 </span>
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {part.unitPrice === null ? (
+                  {isPriceUnset(part.unitPrice) ? (
                     <span className="text-amber-700 dark:text-amber-400">단가 미정</span>
                   ) : (
                     `단가 ₩${AMOUNT_FORMAT.format(Number(part.unitPrice))}`
                   )}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => addUsedPart(part)}
-                  disabled={disabled}
-                  className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
-                >
-                  부품 줄에 담기
-                </button>
+                {added ? (
+                  // 담긴 줄은 단추를 없앤다. 회색으로 잠가 두기만 하면 "왜 안
+                  // 눌리지" 가 되고, 그건 이 저장소가 이미 한 번 겪은 고장 신고다.
+                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">담김 ✓</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => addUsedParts([part])}
+                    disabled={disabled}
+                    className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
+                  >
+                    부품 줄에 담기
+                  </button>
+                )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       )}
@@ -730,8 +1069,117 @@ export default function QuoteEditForm({
         </div>
         {fieldErrors.items && <p className={editErrorClass}>{fieldErrors.items}</p>}
 
+        {/* ── 수리 작업 목록 ─────────────────────────────────────────────
+            🔴 **작업비는 부품이 아니라 '작업'에 붙는다**(2026-08-31 사용자 정정).
+            여기서 고른 작업들이 `기본 작업비 + Σ(공수시간 × 시간당 단가)` 로
+            작업비를 만든다. 오버홀도 이 목록의 한 줄이다. */}
+        <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">수리 작업 목록</span>
+            <select
+              value={laborKind ?? ""}
+              onChange={(e) => {
+                const next = (e.target.value || null) as WorkflowKind | null;
+                setLaborKind(next);
+                applyOverhaulRule(kind, next);
+              }}
+              disabled={disabled}
+              aria-label="작업 목록의 장비 종류"
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              <option value="">장비 종류를 고르세요…</option>
+              {repairLabor.map((row) => (
+                <option key={row.equipmentKind} value={row.equipmentKind}>
+                  {workflowKindLabels[row.equipmentKind]} ({row.tasks.length}건)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {activeLabor === null ? (
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              장비 종류를 고르면 그 장비의 수리 작업 목록이 나옵니다. 고른 작업으로 작업비가 계산됩니다.
+            </p>
+          ) : activeLabor.tasks.length === 0 ? (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              {workflowKindLabels[activeLabor.equipmentKind]}의 작업 목록이 아직 없습니다 — [PO/내자] ›
+              수리 작업 비용에서 넣어 주세요.
+            </p>
+          ) : (
+            <>
+              <ul className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                {activeLabor.tasks.map((task) => {
+                  const checked = checkedTaskIds.has(task.id);
+                  return (
+                    <li key={task.id}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = new Set(checkedTaskIds);
+                            if (e.target.checked) next.add(task.id);
+                            else next.delete(task.id);
+                            setCheckedTaskIds(next);
+                          }}
+                          disabled={disabled}
+                          className="h-4 w-4"
+                        />
+                        <span className="text-zinc-800 dark:text-zinc-200">{task.taskName}</span>
+                        {/* 오버홀 줄임을 표시한다 — 견적서 종류를 바꾸면 이 줄이
+                            저절로 움직이는데, 어느 줄인지 안 보이면 사람은 자기가
+                            체크한 것이 왜 풀렸는지 알 수 없다. */}
+                        {task.isOverhaul && (
+                          <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-800 dark:bg-sky-900 dark:text-sky-200">
+                            O/H
+                          </span>
+                        )}
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {task.hours}시간 ·{" "}
+                          {formatAmount(task.hours * Number(activeLabor.hourlyRate))}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* 🔴 식을 그대로 보여 준다. 합계 하나만 보이면 "왜 이 숫자지"에
+                  답할 것이 없고, 기본 작업비가 더해진 것도 드러나지 않는다. */}
+              <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
+                기본 작업비{" "}
+                {laborSuggestion.baseCost === null ? (
+                  <b className="text-amber-700 dark:text-amber-400">정하지 않음</b>
+                ) : (
+                  <b className="tabular-nums">{formatAmount(laborSuggestion.baseCost)}</b>
+                )}{" "}
+                + 고른 작업 {selectedTasks.length}건{" "}
+                <b className="tabular-nums">{formatAmount(laborSuggestion.tasksTotal)}</b> ={" "}
+                <b className="tabular-nums text-zinc-900 dark:text-zinc-50">
+                  {formatAmount(laborSuggestion.total)}
+                </b>
+              </p>
+              {laborSuggestion.baseCost === null && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 기본 작업비를 정하지 않아 합계에
+                  더해지지 않았습니다 — [PO/내자] › 수리 작업 비용에서 적어 주세요.
+                </p>
+              )}
+              {laborSuggestion.unknown.length > 0 && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  값을 읽지 못해 합계에서 빠진 작업이 있습니다: {laborSuggestion.unknown.join(", ")}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="mt-4 max-w-md">
-          <Field label="작업비" error={fieldErrors.workCost} hint="부품 작업비의 합">
+          <Field
+            label="작업비"
+            error={fieldErrors.workCost}
+            hint="기본 작업비 + 고른 작업(공수시간 × 시간당 단가)"
+          >
             <input
               value={workCost}
               onChange={(e) => setWorkCost(e.target.value)}
@@ -740,25 +1188,15 @@ export default function QuoteEditForm({
               disabled={disabled}
             />
           </Field>
-          {(laborSuggestion.total > 0 || laborSuggestion.unknown.length > 0) && (
-            <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              부품 작업비 합계{" "}
-              <b className="tabular-nums">{formatAmount(laborSuggestion.total)}</b>
-              <button
-                type="button"
-                onClick={() => setWorkCost(String(laborSuggestion.total))}
-                disabled={disabled}
-                className="ml-2 rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
-              >
-                작업비에 적용
-              </button>
-              {laborSuggestion.unknown.length > 0 && (
-                <p className="mt-1 text-amber-700 dark:text-amber-400">
-                  작업비를 정하지 않은 부품이 있어 합계에서 빠졌습니다:{" "}
-                  {laborSuggestion.unknown.join(", ")} — 재고 관리에서 그 부품의 작업비를 적어 주세요.
-                </p>
-              )}
-            </div>
+          {activeLabor !== null && activeLabor.tasks.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setWorkCost(String(laborSuggestion.total))}
+              disabled={disabled}
+              className="mt-2 rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-zinc-700"
+            >
+              계산한 작업비 적용 ({formatAmount(laborSuggestion.total)})
+            </button>
           )}
         </div>
       </section>

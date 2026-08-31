@@ -479,10 +479,45 @@
       "breakpoints": true
     },
     {
+      "idx": 68,
+      "version": "7",
+      "when": 1788139276232,
+      "tag": "0068_sturdy_red_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1788141290698,
+      "tag": "0069_cold_kat_farrell",
+      "breakpoints": true
+    },
+    {
       "idx": 70,
       "version": "7",
       "when": 1788142591478,
       "tag": "0070_strong_speed_demon",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788148679036,
+      "tag": "0071_abnormal_goliath",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788149678155,
+      "tag": "0072_sad_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788151078638,
+      "tag": "0074_minor_wendigo",
       "breakpoints": true
     }
   ]

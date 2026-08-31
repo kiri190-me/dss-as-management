@@ -10,6 +10,7 @@ import {
 import { generateClientUuid } from "@/lib/client-uuid";
 import { isExactNormalizedMatch, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { MAX_OH_TEMPLATE_ITEMS } from "@/lib/validation/oh-part-template-input";
+import { OVERHAUL_UNIT_PRICE_FIELD_ERROR_PREFIX } from "@/lib/validation/part-overhaul-unit-price-input";
 import {
   linkProductModelAction,
   saveOhTemplateAction,
@@ -166,6 +167,7 @@ export default function OhTemplateScreen({
   templates,
   unlinkedModels,
   partOptions,
+  ohUnitPrices,
   canEdit,
 }: {
   templates: OhTemplateRow[];
@@ -173,6 +175,11 @@ export default function OhTemplateScreen({
   unlinkedModels: { id: string; modelName: string }[];
   /** 품명 칸이 검색할 재고 부품. 고칠 수 없는 세션에는 빈 배열이 온다(모델 목록과 같은 결). */
   partOptions: OhTemplatePartOption[];
+  /**
+   * 부품 id → 지금 정해 둔 O/H 단가. **정해진 것만 들어 있다** — 키가 없으면
+   * "정하지 않음"이고, 그것이 0원과 다른 뜻이다.
+   */
+  ohUnitPrices: Record<string, string>;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -245,6 +252,7 @@ export default function OhTemplateScreen({
                 <TemplateEditor
                   template={template}
                   partOptions={partOptions}
+                  ohUnitPrices={ohUnitPrices}
                   onMessage={setMessage}
                   onDone={() => {
                     setOpenId(null);
@@ -380,16 +388,31 @@ function ModelLinks({
 function TemplateEditor({
   template,
   partOptions,
+  ohUnitPrices,
   onMessage,
   onDone,
 }: {
   template: OhTemplateRow;
   partOptions: OhTemplatePartOption[];
+  ohUnitPrices: Record<string, string>;
   onMessage: (message: string | null) => void;
   onDone: () => void;
 }) {
   const [code, setCode] = useState(template.code);
   const [name, setName] = useState(template.name);
+  /**
+   * 부품별 O/H 단가. **줄(key)이 아니라 부품 id 로 담는다** — 단가는 그 부품의
+   * 값이지 이 줄의 값이 아니다. 그래서 같은 부품이 두 줄에 있으면 두 칸이 같은
+   * 값을 보여 주고 함께 움직인다(그게 사실이다. 부품 하나에 O/H 단가는 하나다).
+   *
+   * 여기 **없는 키가 "정하지 않음"**이다. numeric 이 `"125000.00"` 으로 오므로
+   * 작업비 칸과 같은 방법으로 소수점을 지워 채운다.
+   */
+  const [ohPrices, setOhPrices] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      Object.entries(ohUnitPrices).map(([partId, price]) => [partId, String(Number(price))])
+    )
+  );
   const [items, setItems] = useState<ItemRow[]>(
     template.items.map((item) => ({
       key: generateClientUuid(),
@@ -435,6 +458,17 @@ function TemplateEditor({
     );
   }
 
+  /**
+   * 줄이 상한까지 찼다. `+ 부품 추가` 가 잠기는 조건이자, 왜 잠겼는지 적어 주는
+   * 조건이다 — 한 값에서 갈라져 나오므로 단추와 안내가 어긋날 자리가 없다.
+   *
+   * 숫자만으로는 사람이 상한을 고장과 구별하지 못한다. 실제로 `부품 (13 / 13)` 을
+   * 보고도 "부품 추가가 안 된다" 는 고장 신고가 올라왔다. 잠긴 것이 안전장치라면
+   * 그 이유(견적서 양식의 칸 수)를 그 자리에서 말해야 한다.
+   */
+  const atItemLimit = items.length >= MAX_OH_TEMPLATE_ITEMS;
+  const itemLimitHintId = `oh-template-item-limit-${template.id}`;
+
   /** 잘못 이어 둔 줄을 되돌린다. 품명은 건드리지 않는다 — 적어 둔 글자는 사람 것이다. */
   function unlinkPart(key: string) {
     setItems((prev) => prev.map((row) => (row.key === key ? { ...row, partId: null } : row)));
@@ -445,9 +479,30 @@ function TemplateEditor({
     setBusy(true);
     setFieldErrors({});
     onMessage(null);
+    /**
+     * 보낼 단가 줄. **재고와 이어진 줄만** 담는다 — 단가는 부품에 붙는 값이라
+     * 이어지지 않은 줄에는 붙일 곳이 없다.
+     *
+     * 부품 id 로 한 번 접는다: 같은 부품이 두 줄에 있으면 검증이 "같은 부품이
+     * 두 번 들어왔습니다"로 거절하는데, 화면에서는 두 칸이 애초에 같은 값을
+     * 보여 주고 있으므로 그건 사람의 잘못이 아니다. 접어서 보내면 사실도
+     * 그대로다 — 부품 하나에 O/H 단가는 하나다.
+     *
+     * 칸을 비운 부품은 `""` 로 간다. 그것이 "정하지 않음"이고, 저장 쪽이 그 줄을
+     * 지운다(0 으로 저장하지 않는다).
+     */
+    const overhaulUnitPrices = [
+      ...new Map(
+        items
+          .filter((row) => row.partId !== null && row.partNameText.trim() !== "")
+          .map((row) => [row.partId as string, ohPrices[row.partId as string] ?? ""] as const)
+      ),
+    ].map(([partId, unitPrice]) => ({ partId, unitPrice }));
+
     const result = await saveOhTemplateAction({
       id: template.id,
       expectedVersion: template.version,
+      overhaulUnitPrices,
       fields: {
         code,
         name,
@@ -495,20 +550,41 @@ function TemplateEditor({
               { key: generateClientUuid(), partId: null, partNameText: "", quantity: "1" },
             ])
           }
-          disabled={busy || items.length >= MAX_OH_TEMPLATE_ITEMS}
+          disabled={busy || atItemLimit}
+          aria-describedby={atItemLimit ? itemLimitHintId : undefined}
           className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
         >
           + 부품 추가
         </button>
       </div>
+      {/* 꽉 찼을 때만 뜬다. 늘 떠 있으면 잔소리가 되고, 정작 단추가 잠긴 순간에
+          눈에 띄지 않는다. 오류가 아니라 안전장치라서 빨강(editErrorClass)이
+          아닌 호박색을 쓴다 — 이 파일이 `재고 미연결` 에 쓰는 그 색이다. */}
+      {atItemLimit && (
+        <p id={itemLimitHintId} className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+          견적서 양식의 O/H 부품 칸이 {MAX_OH_TEMPLATE_ITEMS}줄이라 {MAX_OH_TEMPLATE_ITEMS}종까지만
+          담을 수 있습니다 — 다른 부품을 넣으려면 아래에서 필요 없는 줄을 먼저 지워 주세요.
+        </p>
+      )}
       {fieldErrors.items && <p className={editErrorClass}>{fieldErrors.items}</p>}
 
       <div className="mt-2 flex flex-col gap-2.5">
+        {/* 칸 이름. 값이 차면 placeholder 가 사라지므로 머리글이 없으면 셋째 칸이
+            무엇인지 알 길이 없다. 지우기 칸은 이름을 붙일 것이 없어 비워 둔다. */}
+        {items.length > 0 && (
+          <div className="grid grid-cols-[1fr_4.5rem_7rem_2rem] gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+            <span>품명</span>
+            <span>수량</span>
+            <span>O/H 단가 (원)</span>
+            <span aria-hidden />
+          </div>
+        )}
         {items.map((row, index) => {
           const link = describePartLink(row, partOptions);
           const listId = `oh-part-suggestions-${row.key}`;
+          const priceErrorKey = `${OVERHAUL_UNIT_PRICE_FIELD_ERROR_PREFIX}${row.partId ?? ""}`;
           return (
-          <div key={row.key} className="grid grid-cols-[1fr_5rem_auto] gap-2">
+          <div key={row.key} className="grid grid-cols-[1fr_4.5rem_7rem_2rem] gap-2">
             <div>
               <input
                 value={row.partNameText}
@@ -650,12 +726,41 @@ function TemplateEditor({
                 <p className={editErrorClass}>{fieldErrors[`items.${index}.quantity`]}</p>
               )}
             </div>
+            {/* ── 부품별 O/H 단가 ─────────────────────────────────────────────
+                재고와 이어진 줄에만 적을 수 있다 — 단가는 부품에 붙는 값이라
+                이어지지 않은 줄에는 붙일 곳이 없다. **잠그기만 하고 이유를 안
+                적으면 안 된다**: 설명 없이 회색인 단추를 두었다가 "추가가 안
+                된다"는 고장 신고를 받은 적이 있다(위 부품 상한 안내). */}
+            <div>
+              <input
+                value={row.partId === null ? "" : ohPrices[row.partId] ?? ""}
+                onChange={(e) => {
+                  const partId = row.partId;
+                  if (partId === null) return;
+                  const next = e.target.value;
+                  setOhPrices((prev) => ({ ...prev, [partId]: next }));
+                }}
+                inputMode="numeric"
+                disabled={busy || row.partId === null}
+                placeholder={row.partId === null ? "재고 연결 필요" : "미정"}
+                title={
+                  row.partId === null
+                    ? "재고와 이어야 O/H 단가를 정할 수 있습니다."
+                    : "비워 두면 정하지 않음. 0 은 무상이라는 뜻입니다."
+                }
+                aria-label={`${index + 1}번째 부품 O/H 단가`}
+                className={`${editInputClass} disabled:opacity-50`}
+              />
+              {row.partId !== null && fieldErrors[priceErrorKey] && (
+                <p className={editErrorClass}>{fieldErrors[priceErrorKey]}</p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setItems((prev) => prev.filter((r) => r.key !== row.key))}
               disabled={busy}
               aria-label={`${index + 1}번째 줄 지우기`}
-              className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
+              className="rounded-md border border-zinc-300 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
             >
               ×
             </button>

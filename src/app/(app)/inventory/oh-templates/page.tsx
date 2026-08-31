@@ -11,6 +11,7 @@ import {
   listOhPartTemplates,
   listUnlinkedProductModels,
 } from "@/lib/db/queries/oh-part-templates";
+import { getPartOverhaulUnitPrices } from "@/lib/db/queries/part-overhaul-unit-prices";
 
 export const metadata: Metadata = {
   title: "O/H 부품 템플릿 | DSS A/S 관리 시스템",
@@ -56,6 +57,24 @@ export default async function OhTemplatesPage() {
       : Promise.resolve([]),
   ]);
 
+  /**
+   * 지금 정해져 있는 부품별 O/H 단가. 화면의 편집 폼이 그 값을 칸에 채운다.
+   *
+   * **정해진 것만 온다** — 없는 부품은 키 자체가 없고, 그것이 "정하지 않음"이다
+   * (queries/part-overhaul-unit-prices.ts). `0` 으로 채워 보내면 실제 0원과
+   * 구별되지 않는다.
+   *
+   * Map 이 아니라 평범한 객체로 바꿔 넘긴다 — 서버에서 클라이언트로 건너가는 값이라
+   * 직렬화가 단순한 편이 안전하다. 못 고치는 세션에는 빈 객체면 충분하다(위 주석의
+   * partOptions 와 같은 판단 — 넘기는 값을 줄인다).
+   */
+  const linkedPartIds = templates.flatMap((template) =>
+    template.items.map((item) => item.partId).filter((id): id is string => id !== null)
+  );
+  const ohUnitPrices = canEdit
+    ? Object.fromEntries(await getPartOverhaulUnitPrices(linkedPartIds))
+    : {};
+
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">재고 관리</h1>
@@ -64,6 +83,7 @@ export default async function OhTemplatesPage() {
         templates={templates}
         unlinkedModels={unlinkedModels}
         partOptions={partOptions}
+        ohUnitPrices={ohUnitPrices}
         canEdit={canEdit}
       />
     </div>

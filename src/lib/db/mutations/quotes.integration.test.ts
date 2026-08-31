@@ -86,6 +86,11 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     delivery: null,
     payment: null,
     workCost: "0",
+    // 작업비의 근거(2026-08-31). 기본은 "작업을 골라 본 적 없음" — 이 기능이
+    // 생기기 전에 만든 견적서와 같은 상태다.
+    laborEquipmentKind: null,
+    laborBaseCost: null,
+    repairTasks: [],
     items: [],
     ...overrides,
   };

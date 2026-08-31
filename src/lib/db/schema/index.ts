@@ -26,6 +26,8 @@ export * from "./inventory";
 export * from "./inventory-part-requests";
 export * from "./part-minimum-quantities";
 export * from "./part-unit-prices";
+export * from "./part-overhaul-unit-prices";
+export * from "./repair-labor";
 export * from "./oh-part-templates";
 export * from "./repair-case-work-records";
 export * from "./repair-case-flowcharts";

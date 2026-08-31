@@ -1,0 +1,2 @@
+ALTER TABLE "oh_part_templates" ADD COLUMN "overhaul_labor_cost" numeric(15, 2);--> statement-breakpoint
+ALTER TABLE "oh_part_templates" ADD CONSTRAINT "oh_part_templates_overhaul_labor_cost_not_negative" CHECK ("oh_part_templates"."overhaul_labor_cost" >= 0);
