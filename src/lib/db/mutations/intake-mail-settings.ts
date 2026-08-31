@@ -1,8 +1,14 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
-import { intakeMailRecipients, intakeMailSettings, users } from "../schema";
+import {
+  intakeMailRecipients,
+  intakeMailSettings,
+  intakeMailSignatureImages,
+  users,
+} from "../schema";
 import { insertAuditLog } from "./audit-logs";
+import { sanitizeSignatureHtml } from "@/lib/domain/mail-signature-html";
 import type { IntakeMailSettingsInput } from "@/lib/validation/intake-mail-settings-input";
 
 /**
@@ -60,6 +66,10 @@ export async function saveIntakeMailSettings(params: {
     const values = {
       isEnabled: input.isEnabled,
       subjectTemplate: input.subjectTemplate,
+      // 🔴 정화는 여기서 한 번. 화면에서 오는 값은 붙여넣은 원문이고, 저장된
+      // 값은 언제나 걸러진 것이어야 한다 — 그리는 자리마다 거르게 하면
+      // 언젠가 한 곳을 빠뜨린다(domain/mail-signature-html.ts 주석).
+      signatureHtml: sanitizeSignatureHtml(input.signatureHtml),
       introText: input.introText,
       outroText: input.outroText,
       updatedBy: actorUserId,
@@ -137,4 +147,83 @@ export async function recordTestMailAttempt(params: {
   } catch {
     // 무시한다(위 주석).
   }
+}
+
+/**
+ * 서명 이미지 한 장을 넣는다.
+ *
+ * 같은 이름(cid)이 이미 있으면 **덮어쓴다.** 로고를 새 파일로 바꾸는 것이
+ * 흔한 일인데, 그때마다 서명 HTML 의 `<img src="cid:...">` 를 같이 고치게
+ * 하면 십중팔구 한쪽만 고쳐 그림이 깨진다.
+ */
+export async function upsertSignatureImage(params: {
+  cid: string;
+  fileName: string;
+  mimeType: string;
+  content: Buffer;
+  actorUserId: string;
+}): Promise<{ id: string }> {
+  return db.transaction(async (tx) => {
+    const values = {
+      cid: params.cid,
+      fileName: params.fileName,
+      mimeType: params.mimeType,
+      content: params.content,
+      sizeBytes: params.content.length,
+      uploadedBy: params.actorUserId,
+    };
+
+    const [row] = await tx
+      .insert(intakeMailSignatureImages)
+      .values(values)
+      .onConflictDoUpdate({
+        target: intakeMailSignatureImages.cid,
+        set: {
+          fileName: values.fileName,
+          mimeType: values.mimeType,
+          content: values.content,
+          sizeBytes: values.sizeBytes,
+          uploadedBy: values.uploadedBy,
+        },
+      })
+      .returning({ id: intakeMailSignatureImages.id });
+
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "FILE_UPLOAD",
+      targetEntity: "intake_mail_signature_images",
+      targetRecordId: row.id,
+      // 바이트는 남기지 않는다 — 감사 로그가 그림 저장소가 되면 안 된다.
+      newValue: { cid: values.cid, fileName: values.fileName, sizeBytes: values.sizeBytes },
+      previousValue: null,
+    });
+
+    return { id: row.id };
+  });
+}
+
+/** 서명 이미지를 지운다. 서명 HTML 이 아직 그 cid 를 가리키면 그림만 깨진다 — 화면이 미리 경고한다. */
+export async function deleteSignatureImage(params: {
+  id: string;
+  actorUserId: string;
+}): Promise<{ ok: boolean }> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .delete(intakeMailSignatureImages)
+      .where(eq(intakeMailSignatureImages.id, params.id))
+      .returning({ id: intakeMailSignatureImages.id, cid: intakeMailSignatureImages.cid });
+
+    if (!row) return { ok: false };
+
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "FILE_DELETE",
+      targetEntity: "intake_mail_signature_images",
+      targetRecordId: row.id,
+      newValue: null,
+      previousValue: { cid: row.cid },
+    });
+
+    return { ok: true };
+  });
 }

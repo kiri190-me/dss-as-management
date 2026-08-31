@@ -191,3 +191,86 @@ describe("접수 알림 메일 본문", () => {
     assert.match(body, /\(예시\)/);
   });
 });
+
+/**
+ * ============================================================================
+ * HTML 판 — 맑은 고딕과 서명
+ * ============================================================================
+ * 평문 판(위)과 **같은 값**이 들어가야 한다. 둘이 갈리면 HTML 을 보는 사람과
+ * 평문을 보는 사람이 다른 내용을 읽게 되고, 아무도 그 사실을 모른다.
+ * ============================================================================
+ */
+describe("접수 알림 메일 HTML 판", () => {
+  test("맑은 고딕을 인라인 style 로 박는다 — Outlook 은 <style> 블록을 버린다", () => {
+    const { html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      ...INTAKE_MAIL_PREVIEW_SAMPLE,
+    });
+    assert.match(html, /맑은 고딕/);
+    assert.match(html, /Malgun Gothic/);
+    // 스타일시트가 아니라 태그마다 style 속성이어야 한다.
+    assert.doesNotMatch(html, /<style/i);
+    assert.match(html, /style="font-family:/);
+  });
+
+  test("평문 판과 같은 값이 들어간다", () => {
+    const { body, html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      ...INTAKE_MAIL_PREVIEW_SAMPLE,
+    });
+    for (const value of ["D260901", "MFC-3000", "1904097", "Bias Fwd Drop 발생", "유상", "D250312"]) {
+      assert.ok(body.includes(value), `평문에 ${value} 가 없다`);
+      assert.ok(html.includes(value), `HTML 에 ${value} 가 없다`);
+    }
+    // O/H 의 단서도 양쪽에 똑같이 들어가야 한다.
+    assert.ok(body.includes("OP TIME 미확인"));
+    assert.ok(html.includes("OP TIME 미확인"));
+  });
+
+  test("🔴 사람이 친 값은 HTML 로 새어 나가지 않는다", () => {
+    const { html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      intake: {
+        ...INTAKE_MAIL_PREVIEW_SAMPLE.intake,
+        // 증상 칸은 사람이 자유롭게 친다. 태그가 살아 나가면 메일이 깨지고,
+        // 미리보기 화면에서는 그게 곧 스크립트 실행 경로가 된다.
+        reportedSymptom: '<script>alert(1)</script> & "따옴표"',
+      },
+      history: [],
+    });
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;script&gt;/);
+    assert.match(html, /&amp;/);
+  });
+
+  test("서명은 HTML 판에만 붙는다 — 평문에 태그가 보이면 안 된다", () => {
+    const signature = '<p><b>DSS Co.,Ltd.</b></p><img src="cid:logo1">';
+    const { body, html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      ...INTAKE_MAIL_PREVIEW_SAMPLE,
+      signature,
+    });
+    assert.match(html, /DSS Co\.,Ltd\./);
+    assert.match(html, /cid:logo1/);
+    assert.doesNotMatch(body, /<b>/);
+    assert.doesNotMatch(body, /cid:logo1/);
+  });
+
+  test("서명이 없으면 구분선도 붙지 않는다", () => {
+    const { html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      ...INTAKE_MAIL_PREVIEW_SAMPLE,
+      signature: "   ",
+    });
+    assert.doesNotMatch(html, /border-top/);
+  });
+
+  test("과거 이력이 없으면 HTML 에도 그 사실을 적는다", () => {
+    const { html } = composeIntakeMail({
+      template: DEFAULT_INTAKE_MAIL_TEMPLATE,
+      intake: INTAKE_MAIL_PREVIEW_SAMPLE.intake,
+      history: [],
+    });
+    assert.match(html, /없습니다 — 이 시스템에 남은 접수 기록 기준입니다\./);
+  });
+});

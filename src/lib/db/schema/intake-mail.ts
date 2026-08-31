@@ -1,4 +1,13 @@
-import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  customType,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 /**
@@ -55,6 +64,15 @@ export const intakeMailSettings = pgTable(
     /** 자료 아래 맺음말. 빈 문자열이면 그 줄이 아예 빠진다. */
     outroText: text("outro_text").notNull(),
 
+    /**
+     * 메일 맨 아래에 붙는 서명(HTML). 관리자가 Outlook 등에서 복사해 붙여넣고,
+     * **저장 시점에 정화된 것만** 들어온다(domain/mail-signature-html.ts).
+     *
+     * 이미지는 여기 담기지 않는다 — `<img src="cid:로고">` 처럼 참조만 있고
+     * 실물은 아래 intake_mail_signature_images 에 있다.
+     */
+    signatureHtml: text("signature_html").notNull().default(""),
+
     /** 누가 마지막으로 바꿨는지. 되돌릴 사람을 찾을 때 감사 로그보다 먼저 본다. */
     updatedBy: uuid("updated_by")
       .notNull()
@@ -91,4 +109,54 @@ export const intakeMailRecipients = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("intake_mail_recipients_user_unique").on(table.userId)]
+);
+
+/**
+ * 서명에 넣는 이미지(로고 등).
+ *
+ * ── 왜 DB 에 바이트를 넣는가 — 첨부파일과 다르게 ────────────────────────
+ * 이 저장소의 첨부(attachments)는 일부러 디스크(UPLOADS_DIR)에 두고 bytea 를
+ * 쓰지 않는다. 그건 **한 건에 여러 장, 장당 20MB** 짜리 얘기다. 서명 이미지는
+ * 로고 몇 장, 장당 수십 KB 이고 전 시스템에 몇 개뿐이라 성격이 다르다.
+ *
+ * DB 에 두면 얻는 것: NAS 로 옮길 때 경로를 맞출 일이 없고, 백업이 DB 하나로
+ * 끝나며, 파일은 남았는데 행이 없거나 그 반대인 상태가 생기지 않는다.
+ * 크기는 저장 전에 막는다(validation/intake-mail-settings-input.ts).
+ *
+ * ── cid 가 열쇠다 ───────────────────────────────────────────────────────
+ * 메일에 이미지를 동봉하고 본문이 `<img src="cid:이것">` 으로 가리킨다. 외부
+ * URL 은 NAS 가 인터넷에서 안 보이고, data: URI 는 Gmail·Outlook 이 막는다.
+ * 그래서 cid 가 사실상 유일한 방법이다.
+ */
+export const intakeMailSignatureImages = pgTable(
+  "intake_mail_signature_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /**
+     * 본문이 가리키는 이름. `<img src="cid:...">` 의 그 값이다.
+     * 사람이 서명 HTML 에 직접 적으므로 읽을 수 있는 짧은 이름을 쓴다.
+     */
+    cid: text("cid").notNull(),
+
+    /** 올릴 때의 파일 이름. 화면 목록에서 어느 그림인지 알아보는 용도다. */
+    fileName: text("file_name").notNull(),
+    /** image/png · image/jpeg · image/gif 만 받는다(입력 검증에서 막는다). */
+    mimeType: text("mime_type").notNull(),
+    /** 실제 바이트. */
+    content: customType<{ data: Buffer; driverData: Buffer }>({
+      dataType: () => "bytea",
+    })("content").notNull(),
+    /** 바이트 수. 목록에서 크기를 보여 주고 합계를 막을 때 쓴다. */
+    sizeBytes: integer("size_bytes").notNull(),
+
+    uploadedBy: uuid("uploaded_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // 같은 cid 가 둘이면 어느 그림이 붙을지 아무도 답할 수 없다.
+    uniqueIndex("intake_mail_signature_images_cid_unique").on(table.cid),
+  ]
 );

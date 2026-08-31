@@ -1,4 +1,7 @@
 import { DEFAULT_INTAKE_MAIL_TEMPLATE } from "@/lib/domain/intake-mail-body";
+import { SIGNATURE_HTML_MAX } from "@/lib/domain/mail-signature-html";
+
+export { SIGNATURE_HTML_MAX };
 
 /**
  * 접수 알림 메일 설정 입력 검증 — 순수 함수. 화면과 서버 액션이 같은 것을 쓴다.
@@ -13,6 +16,8 @@ export const SUBJECT_MAX = 200;
 export const TEXT_MAX = 2000;
 
 export type IntakeMailSettingsInput = {
+  /** 메일 아래에 붙는 서명 HTML. 정화 전 원문이 들어오고, 저장 직전에 걸러진다. */
+  signatureHtml: string;
   isEnabled: boolean;
   subjectTemplate: string;
   introText: string;
@@ -56,6 +61,10 @@ export function validateIntakeMailSettingsInput(
     fieldErrors.introText = `머리말은 ${TEXT_MAX}자까지 입력할 수 있습니다.`;
   }
   const outroText = typeof input.outroText === "string" ? input.outroText : "";
+  // 서명은 여기서 길이만 본다. 정화는 저장 직전에 한 번(mutations) — 자르는
+  // 자리와 거르는 자리를 갈라 두면 어느 쪽이 방어선인지 흐려진다.
+  const signatureHtml =
+    typeof input.signatureHtml === "string" ? input.signatureHtml.slice(0, SIGNATURE_HTML_MAX) : "";
   if (outroText.length > TEXT_MAX) {
     fieldErrors.outroText = `꼬리말은 ${TEXT_MAX}자까지 입력할 수 있습니다.`;
   }
@@ -84,14 +93,79 @@ export function validateIntakeMailSettingsInput(
 
   return {
     ok: true,
-    data: { isEnabled, subjectTemplate, introText, outroText, recipientUserIds },
+    data: { isEnabled, subjectTemplate, introText, outroText, signatureHtml, recipientUserIds },
   };
 }
 
 /** 저장된 설정이 없을 때 화면과 발송이 함께 쓰는 초기값. */
 export const INTAKE_MAIL_SETTINGS_FALLBACK: Omit<IntakeMailSettingsInput, "recipientUserIds"> = {
+  signatureHtml: "",
   isEnabled: false,
   subjectTemplate: DEFAULT_INTAKE_MAIL_TEMPLATE.subject,
   introText: DEFAULT_INTAKE_MAIL_TEMPLATE.intro,
   outroText: DEFAULT_INTAKE_MAIL_TEMPLATE.outro,
 };
+
+/**
+ * ============================================================================
+ * 서명 이미지 — 크기와 개수를 여기서 막는다
+ * ============================================================================
+ * 바이트를 DB 에 넣으므로(schema/intake-mail.ts 주석) 상한이 곧 안전장치다.
+ * 그리고 메일에 동봉되는 값이라, 큰 그림 하나가 전 직원 메일함에 그대로
+ * 스무 번 복사된다 — 로고에 3MB 를 쓸 이유가 없다.
+ * ============================================================================
+ */
+
+/** 장당 상한. 로고·도장 이미지는 보통 수십 KB 다. */
+export const SIGNATURE_IMAGE_MAX_BYTES = 300 * 1024;
+/** 전체 장수 상한. */
+export const SIGNATURE_IMAGE_MAX_COUNT = 5;
+
+/**
+ * 받는 형식. SVG 는 일부러 뺐다 — 그 안에 스크립트를 넣을 수 있고, 메일
+ * 클라이언트 지원도 들쭉날쭉하다.
+ */
+export const SIGNATURE_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif"] as const;
+
+/** cid 는 사람이 서명 HTML 에 직접 적는다 — 헷갈리지 않게 좁게 받는다. */
+const CID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$/;
+
+export type ValidateSignatureImageResult =
+  | { ok: true; cid: string; mimeType: string }
+  | { ok: false; message: string };
+
+export function validateSignatureImage(input: {
+  cid: string;
+  mimeType: string;
+  sizeBytes: number;
+  currentCount: number;
+}): ValidateSignatureImageResult {
+  const cid = input.cid.trim();
+  if (!CID_PATTERN.test(cid)) {
+    return {
+      ok: false,
+      message: "이름은 영문·숫자·- 와 _ 만 쓸 수 있고 40자까지입니다(예: logo1).",
+    };
+  }
+
+  if (!(SIGNATURE_IMAGE_MIME_TYPES as readonly string[]).includes(input.mimeType)) {
+    return { ok: false, message: "PNG · JPG · GIF 만 올릴 수 있습니다." };
+  }
+
+  if (input.sizeBytes <= 0) {
+    return { ok: false, message: "빈 파일입니다." };
+  }
+  if (input.sizeBytes > SIGNATURE_IMAGE_MAX_BYTES) {
+    const kb = Math.round(SIGNATURE_IMAGE_MAX_BYTES / 1024);
+    return { ok: false, message: `이미지는 ${kb}KB 까지 올릴 수 있습니다. 줄여서 다시 올려 주세요.` };
+  }
+
+  if (input.currentCount >= SIGNATURE_IMAGE_MAX_COUNT) {
+    return {
+      ok: false,
+      message: `이미지는 ${SIGNATURE_IMAGE_MAX_COUNT}장까지 둘 수 있습니다. 쓰지 않는 것을 지우고 다시 올려 주세요.`,
+    };
+  }
+
+  return { ok: true, cid, mimeType: input.mimeType };
+}

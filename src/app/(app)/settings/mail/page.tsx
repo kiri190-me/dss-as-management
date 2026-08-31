@@ -4,7 +4,7 @@ import IntakeMailSettingsScreen from "@/components/settings/IntakeMailSettingsSc
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { canManageIntakeMailSettings } from "@/lib/auth/intake-mail-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getIntakeMailSettings } from "@/lib/db/queries/intake-mail-settings";
@@ -42,7 +42,7 @@ export default async function MailSettingsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canManageIntakeMailSettings(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
     return (
       <PlaceholderPage
         title="메일 설정"

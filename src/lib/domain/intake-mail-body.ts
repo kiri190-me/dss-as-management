@@ -162,14 +162,147 @@ function historySection(history: IntakeMailHistoryRow[]): string[] {
   return lines;
 }
 
-export type ComposedIntakeMail = { subject: string; body: string };
+/**
+ * ============================================================================
+ * HTML 판
+ * ============================================================================
+ * 맑은 고딕으로 보이게 하려면 HTML 이어야 한다. 평문에서 쓰던 **공백 정렬은
+ * 여기서 쓸 수 없다** — 비례 글꼴에서는 칸이 맞지 않으므로 표로 바꾼다.
+ *
+ * ── 글꼴과 색을 태그마다 인라인으로 박는 이유 ───────────────────────────
+ * Outlook 은 `<style>` 블록을 통째로 버리는 경우가 많다. 메일 HTML 에서
+ * 스타일시트는 없는 셈 치고, 각 태그에 style 속성을 직접 적는 것이 관례다.
+ * 보기 흉하지만 이게 실제로 도착하는 방법이다.
+ *
+ * ── 평문 판을 함께 보내는 이유 ──────────────────────────────────────────
+ * HTML 을 못 읽거나 끄고 쓰는 환경이 있다. 한 통에 두 벌을 담으면(multipart)
+ * 받는 쪽이 알아서 고른다. 평문 판은 예전 코드 그대로라 시험도 그대로 산다.
+ * ============================================================================
+ */
+
+/** 맑은 고딕 우선, 없으면 순서대로 물러난다. 메일은 어떤 PC 에서 열릴지 모른다. */
+const FONT_STACK = "'맑은 고딕','Malgun Gothic','Apple SD Gothic Neo',AppleGothic,sans-serif";
+const BODY_STYLE = `font-family:${FONT_STACK};font-size:14px;line-height:1.7;color:#18181b;`;
+const LABEL_STYLE =
+  `font-family:${FONT_STACK};font-size:13px;color:#71717a;padding:4px 14px 4px 0;vertical-align:top;white-space:nowrap;`;
+const VALUE_STYLE = `font-family:${FONT_STACK};font-size:14px;color:#18181b;padding:4px 0;vertical-align:top;`;
+const HEADING_STYLE =
+  `font-family:${FONT_STACK};font-size:14px;font-weight:bold;color:#18181b;margin:22px 0 8px;`;
+const TH_STYLE =
+  `font-family:${FONT_STACK};font-size:12px;color:#71717a;text-align:left;padding:5px 12px 5px 0;border-bottom:1px solid #e4e4e7;white-space:nowrap;`;
+const TD_STYLE =
+  `font-family:${FONT_STACK};font-size:13px;color:#18181b;padding:6px 12px 6px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;`;
+
+/** HTML 에 넣을 수 없는 글자를 막는다. 사람이 친 증상·고객사명이 그대로 들어간다. */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** 사람이 친 여러 줄 글(머리말·꼬리말)을 문단으로 옮긴다. */
+function paragraphs(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return trimmed
+    .split(/\n{2,}/)
+    .map((block) => `<p style="${BODY_STYLE}margin:0 0 12px;">${esc(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function fieldRow(label: string, value: string): string {
+  return `<tr><td style="${LABEL_STYLE}">${esc(label)}</td><td style="${VALUE_STYLE}">${esc(value)}</td></tr>`;
+}
+
+function historyHtml(history: IntakeMailHistoryRow[]): string {
+  if (history.length === 0) {
+    return (
+      `<p style="${HEADING_STYLE}">이 제품의 과거 접수</p>` +
+      `<p style="${BODY_STYLE}margin:0;color:#71717a;">없습니다 — 이 시스템에 남은 접수 기록 기준입니다.</p>`
+    );
+  }
+  const rows = history
+    .map(
+      (row) =>
+        `<tr>` +
+        `<td style="${TD_STYLE}white-space:nowrap;">${esc(row.intakeNumber)}</td>` +
+        `<td style="${TD_STYLE}white-space:nowrap;">${esc(row.receivedAt)}</td>` +
+        `<td style="${TD_STYLE}">${esc(orDash(row.reportedSymptom))}</td>` +
+        `<td style="${TD_STYLE}white-space:nowrap;color:#71717a;">${
+          row.actualShipmentDate ? `출하 ${esc(row.actualShipmentDate)}` : "미출하"
+        }</td>` +
+        `</tr>`
+    )
+    .join("");
+  return (
+    `<p style="${HEADING_STYLE}">이 제품의 과거 접수 (${history.length}건)</p>` +
+    `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
+    `<tr><th style="${TH_STYLE}">인수번호</th><th style="${TH_STYLE}">접수일</th>` +
+    `<th style="${TH_STYLE}">증상</th><th style="${TH_STYLE}">출하</th></tr>` +
+    rows +
+    `</table>`
+  );
+}
+
+/**
+ * 서명은 **이미 정화된 HTML** 을 받는다(domain/mail-signature-html.ts).
+ * 여기서 다시 거르지 않는 이유: 거르는 자리가 둘이면 어느 쪽이 진짜 방어선인지
+ * 흐려지고, 언젠가 한쪽만 고치게 된다. 저장할 때 한 번 거른다.
+ */
+function signatureHtml(signature: string): string {
+  const trimmed = signature.trim();
+  if (!trimmed) return "";
+  return (
+    `<div style="margin-top:28px;padding-top:16px;border-top:1px solid #e4e4e7;${BODY_STYLE}">` +
+    trimmed +
+    `</div>`
+  );
+}
+
+function buildHtml(input: {
+  template: IntakeMailTemplate;
+  intake: IntakeMailCase;
+  history: IntakeMailHistoryRow[];
+  signature: string;
+}): string {
+  const { template, intake, history, signature } = input;
+
+  const fields =
+    `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
+    fieldRow("인수번호", intake.intakeNumber) +
+    fieldRow("접수일", intake.receivedAt) +
+    fieldRow("고객사", customerLine(intake)) +
+    fieldRow("제품", productLine(intake)) +
+    fieldRow("증상", orDash(intake.reportedSymptom)) +
+    fieldRow("유/무상", intake.billingType ? billingTypeLabels[intake.billingType] : EMPTY) +
+    fieldRow("O/H", formatOverhaulLine(intake.overhaul)) +
+    `</table>`;
+
+  return (
+    `<div style="${BODY_STYLE}">` +
+    paragraphs(template.intro) +
+    `<p style="${HEADING_STYLE}margin-top:0;">이번 접수</p>` +
+    fields +
+    historyHtml(history) +
+    paragraphs(template.outro) +
+    signatureHtml(signature) +
+    `</div>`
+  );
+}
+
+export type ComposedIntakeMail = { subject: string; body: string; html: string };
 
 export function composeIntakeMail(input: {
   template: IntakeMailTemplate;
   intake: IntakeMailCase;
+  /** 이미 정화된 서명 HTML. 평문 판에는 들어가지 않는다 — 태그가 그대로 보인다. */
+  signature?: string;
   history: IntakeMailHistoryRow[];
 }): ComposedIntakeMail {
   const { template, intake, history } = input;
+  const signature = input.signature ?? "";
 
   const blocks: string[] = [];
 
@@ -199,6 +332,7 @@ export function composeIntakeMail(input: {
   return {
     subject: fillPlaceholders(template.subject, intake),
     body: blocks.join("\n\n"),
+    html: buildHtml({ template, intake, history, signature }),
   };
 }
 

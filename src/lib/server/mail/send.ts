@@ -32,8 +32,19 @@ export async function sendMail(input: {
   /** 받는 사람 주소들. 비어 있으면 부르는 쪽의 실수다 — 보내지 않고 알린다. */
   to: string[];
   subject: string;
-  /** 평문 본문. HTML 은 쓰지 않는다 — 자료가 고정폭으로 줄 맞춰 읽혀야 한다. */
+  /**
+   * 평문 판. HTML 을 못 읽거나 꺼 둔 환경이 본다 — 한 통에 두 벌을 담으면
+   * 받는 쪽이 알아서 고른다.
+   */
   text: string;
+  /** HTML 판. 맑은 고딕과 서명이 여기 들어간다. */
+  html?: string;
+  /**
+   * 서명 이미지. `<img src="cid:이름">` 이 가리키는 실물을 **메일에 동봉**한다.
+   * 외부 URL 은 NAS 가 인터넷에서 안 보이고 data: 는 Gmail·Outlook 이 막으므로,
+   * 이 방식이 사실상 유일하다.
+   */
+  attachments?: { cid: string; fileName: string; mimeType: string; content: Buffer }[];
 }): Promise<SendMailResult> {
   if (input.to.length === 0) {
     return { ok: false, reason: "SEND_FAILED", message: "받는 사람이 없습니다." };
@@ -54,6 +65,14 @@ export async function sendMail(input: {
       bcc: input.to,
       subject: input.subject,
       text: input.text,
+      html: input.html,
+      attachments: input.attachments?.map((a) => ({
+        // cid 를 그대로 Content-ID 로 쓴다 — 본문의 `cid:이름` 과 짝이 맞아야 한다.
+        cid: a.cid,
+        filename: a.fileName,
+        contentType: a.mimeType,
+        content: a.content,
+      })),
     });
     return { ok: true, accepted: info.accepted?.length ?? input.to.length };
   } catch (error) {

@@ -1,20 +1,27 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { roleLabels, type Role } from "@/lib/domain/types";
 import {
   composeIntakeMail,
   INTAKE_MAIL_PLACEHOLDERS,
   INTAKE_MAIL_PREVIEW_SAMPLE,
 } from "@/lib/domain/intake-mail-body";
+import { sanitizeSignatureHtml } from "@/lib/domain/mail-signature-html";
 import type { IntakeMailSettingsView } from "@/lib/db/queries/intake-mail-settings";
 import {
+  SIGNATURE_HTML_MAX,
+  SIGNATURE_IMAGE_MAX_BYTES,
+  SIGNATURE_IMAGE_MAX_COUNT,
   SUBJECT_MAX,
   TEXT_MAX,
   type IntakeMailSettingsFieldErrors,
 } from "@/lib/validation/intake-mail-settings-input";
 import {
+  deleteSignatureImageAction,
   saveIntakeMailSettingsAction,
+  uploadSignatureImageAction,
   sendTestIntakeMailAction,
 } from "@/lib/server/actions/intake-mail-settings";
 
@@ -50,6 +57,7 @@ export default function IntakeMailSettingsScreen({
   const [subjectTemplate, setSubjectTemplate] = useState(initial.subjectTemplate);
   const [introText, setIntroText] = useState(initial.introText);
   const [outroText, setOutroText] = useState(initial.outroText);
+  const [signatureHtml, setSignatureHtml] = useState(initial.signatureHtml);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initial.recipientOptions.filter((o) => o.isSelected).map((o) => o.userId))
   );
@@ -58,16 +66,61 @@ export default function IntakeMailSettingsScreen({
   const [fieldErrors, setFieldErrors] = useState<IntakeMailSettingsFieldErrors>({});
   const [pending, startTransition] = useTransition();
   const [testPending, startTestTransition] = useTransition();
+  const router = useRouter();
+
+  const [uploadPending, startUploadTransition] = useTransition();
+
+  function uploadImage(file: File) {
+    startUploadTransition(async () => {
+      const form = new FormData();
+      form.set("file", file);
+      // 이름은 파일명에서 만든다 — 확장자를 떼고 허용 글자만 남긴다.
+      const base = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "") || "image";
+      form.set("cid", base.slice(0, 40));
+      const result = await uploadSignatureImageAction(form);
+      setMessage({ ok: result.ok, text: result.message });
+      if (result.ok) router.refresh();
+    });
+  }
+
+  function removeImage(id: string, used: boolean) {
+    // 쓰이는 중인 그림을 지우면 메일에서 그 자리가 깨진 그림으로 남는다.
+    // 되돌릴 수 없는 조작은 아니지만(다시 올리면 된다) 모르고 지나가면 안 된다.
+    if (used && !window.confirm("이 이미지는 서명에서 쓰이고 있습니다. 지우면 서명의 그 자리가 깨집니다. 계속할까요?")) {
+      return;
+    }
+    startUploadTransition(async () => {
+      const result = await deleteSignatureImageAction({ id });
+      setMessage({ ok: result.ok, text: result.message });
+      if (result.ok) router.refresh();
+    });
+  }
 
   // 실제 발송과 같은 함수. 문구를 한 글자 고칠 때마다 다시 그린다.
-  const preview = useMemo(
-    () =>
-      composeIntakeMail({
-        template: { subject: subjectTemplate, intro: introText, outro: outroText },
-        ...INTAKE_MAIL_PREVIEW_SAMPLE,
-      }),
-    [subjectTemplate, introText, outroText]
-  );
+  const preview = useMemo(() => {
+    /*
+     * 미리보기의 서명도 **저장 경로와 같은 함수로 정화한다.**
+     *
+     * 이 값은 아래에서 dangerouslySetInnerHTML 로 그려지므로, 거르지 않으면
+     * 붙여넣은 글이 곧 우리 화면의 스크립트가 된다. 저장 전 값을 그리는
+     * 자리라 서버의 정화를 거치지 않았고, 그래서 여기서 한 번 거른다.
+     */
+    const signature = sanitizeSignatureHtml(signatureHtml);
+    const composed = composeIntakeMail({
+      template: { subject: subjectTemplate, intro: introText, outro: outroText },
+      signature,
+      ...INTAKE_MAIL_PREVIEW_SAMPLE,
+    });
+    /*
+     * 메일에서는 `cid:` 가 동봉된 이미지를 가리키지만 브라우저는 그걸 모른다.
+     * 미리보기에서만 실제 주소로 바꿔 끼운다 — 보내는 값은 건드리지 않는다.
+     */
+    let html = composed.html;
+    for (const image of initial.signatureImages) {
+      html = html.replaceAll(`cid:${image.cid}`, `/api/mail-signature-images/${image.id}`);
+    }
+    return { ...composed, previewHtml: html };
+  }, [subjectTemplate, introText, outroText, signatureHtml, initial.signatureImages]);
 
   function toggleRecipient(userId: string) {
     setSelectedIds((prev) => {
@@ -85,6 +138,7 @@ export default function IntakeMailSettingsScreen({
         subjectTemplate,
         introText,
         outroText,
+        signatureHtml,
         recipientUserIds: [...selectedIds],
       });
       setMessage({ ok: result.ok, text: result.message });
@@ -99,7 +153,12 @@ export default function IntakeMailSettingsScreen({
   function sendTest() {
     startTestTransition(async () => {
       // 받는 사람은 넘기지 않는다 — 서버가 세션에서 내 주소를 구한다.
-      const result = await sendTestIntakeMailAction({ subjectTemplate, introText, outroText });
+      const result = await sendTestIntakeMailAction({
+        subjectTemplate,
+        introText,
+        outroText,
+        signatureHtml,
+      });
       setMessage({ ok: result.ok, text: result.message });
     });
   }
@@ -215,11 +274,16 @@ export default function IntakeMailSettingsScreen({
                 {preview.subject}
               </p>
             </div>
-            {/* 메일은 고정폭으로 읽히므로 미리보기도 고정폭이어야 한다 —
-                비례 글꼴로 그리면 여기서는 맞아 보이던 칸이 메일에서 어긋난다. */}
-            <pre className="overflow-x-auto px-3 py-3 font-mono text-xs leading-relaxed whitespace-pre text-zinc-800 dark:text-zinc-200">
-              {preview.body}
-            </pre>
+            {/*
+              실제로 나갈 HTML 을 그대로 그린다 — 맑은 고딕과 서명까지 보인다.
+              값은 위 useMemo 에서 sanitizeSignatureHtml 로 이미 걸러졌다.
+              그리기 직전에 또 거르지 않는 이유는 거르는 자리를 한 곳으로
+              모으기 위해서다(domain/mail-signature-html.ts 주석).
+            */}
+            <div
+              className="overflow-x-auto bg-white px-3 py-3"
+              dangerouslySetInnerHTML={{ __html: preview.previewHtml }}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
@@ -240,6 +304,117 @@ export default function IntakeMailSettingsScreen({
           </div>
         </section>
       </div>
+      {/* ───── 서명 ───── */}
+      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div>
+            <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">서명</h2>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              메일 맨 아래에 붙습니다. Outlook 서명을 HTML 로 복사해 붙여넣으면
+              됩니다 — 안전하지 않은 태그(<code className="font-mono">script</code>,{" "}
+              <code className="font-mono">onclick</code> 등)와 Outlook 이 딸려
+              보내는 잡동사니는 저장할 때 자동으로 걸러집니다.
+            </p>
+          </div>
+
+          <Field label="서명 HTML" count={`${signatureHtml.length}/${SIGNATURE_HTML_MAX}`}>
+            <textarea
+              value={signatureHtml}
+              onChange={(e) => setSignatureHtml(e.target.value)}
+              maxLength={SIGNATURE_HTML_MAX}
+              rows={8}
+              spellCheck={false}
+              placeholder='<p><b>DSS Co.,Ltd.</b></p><p>Tel : 070-5227-3024</p>'
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+          </Field>
+
+          {/* ── 이미지 ── */}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                서명 이미지 ({initial.signatureImages.length}/{SIGNATURE_IMAGE_MAX_COUNT}장 ·
+                장당 {Math.round(SIGNATURE_IMAGE_MAX_BYTES / 1024)}KB 까지)
+              </span>
+              <label className="cursor-pointer rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:border-zinc-900 dark:border-zinc-700 dark:text-zinc-300">
+                {uploadPending ? "올리는 중…" : "이미지 올리기"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif"
+                  disabled={uploadPending}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    // 같은 파일을 다시 고를 수 있게 값을 비운다.
+                    e.target.value = "";
+                    if (file) uploadImage(file);
+                  }}
+                />
+              </label>
+            </div>
+
+            {initial.signatureImages.length === 0 ? (
+              <p className="rounded-md bg-zinc-50 px-3 py-4 text-center text-xs text-zinc-500 dark:bg-zinc-800/60">
+                올린 이미지가 없습니다. 글자만으로 된 서명이면 필요 없습니다.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {initial.signatureImages.map((image) => {
+                  const used = signatureHtml.includes(`cid:${image.cid}`);
+                  return (
+                    <li
+                      key={image.id}
+                      className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/mail-signature-images/${image.id}`}
+                        alt={image.fileName}
+                        className="h-8 w-8 shrink-0 object-contain"
+                      />
+                      <code className="font-mono text-xs text-zinc-900 dark:text-zinc-50">
+                        cid:{image.cid}
+                      </code>
+                      <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                        {image.fileName} · {Math.round(image.sizeBytes / 1024)}KB
+                      </span>
+                      {/* 서명에서 쓰이는지 바로 보여 준다 — 안 쓰는 그림은 메일에
+                          동봉되지 않으므로, 넣었다고 믿는 상태를 막는다. */}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${
+                          used
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {used ? "서명에서 사용 중" : "서명에 없음"}
+                      </span>
+                      <div className="ml-auto flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSignatureHtml((prev) => `${prev}<img src="cid:${image.cid}">`)
+                          }
+                          className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:border-zinc-900 dark:border-zinc-700 dark:text-zinc-300"
+                        >
+                          서명에 넣기
+                        </button>
+                        <button
+                          type="button"
+                          disabled={uploadPending}
+                          onClick={() => removeImage(image.id, used)}
+                          className="rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:border-red-600 disabled:opacity-50"
+                        >
+                          지우기
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
+
       {/* ───── 수신자 ───── */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -330,9 +505,9 @@ export default function IntakeMailSettingsScreen({
       </div>
 
       <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-        메일 서버 연결과 「시험 메일 보내기」는 동작합니다. 다만 <strong>접수 때
-        자동으로 나가는 부분은 아직 붙이지 않았습니다</strong> — 자동 발송을 켜고
-        저장해도 지금은 접수 시 메일이 나가지 않습니다.
+        자동 발송을 켜고 수신자를 고르면, 이제 <strong>접수가 등록될 때마다 실제로
+        메일이 나갑니다.</strong> 켜기 전에 「시험 메일 보내기」로 문구를 한 번
+        확인해 주세요. Excel 대량 이관으로 들어온 접수는 켜져 있어도 보내지 않습니다.
       </p>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   markIdempotencyKeySucceeded,
 } from "@/lib/db/mutations/idempotency-keys";
 import { createRepairCase } from "@/lib/db/mutations/repair-cases";
+import { sendIntakeNotificationMail } from "./send-intake-mail";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import type { Role } from "@/lib/domain/types";
 import {
@@ -144,6 +145,45 @@ export async function createRepairCaseWithIdempotency(input: {
     });
     if (result.ok) {
       await markIdempotencyKeySucceeded(idempotencyKey, result.id, result.intakeNumber);
+
+      /*
+       * 접수 알림 메일 — **접수가 확정된 뒤에, 대화형에서만.**
+       *
+       * ■ EXCEL_IMPORT 를 제외하는 이유
+       *   과거 자료를 옮기는 경로다. 여기서 보내면 이관 한 번에 수백 통이
+       *   전사원에게 나간다.
+       *
+       * ■ 실패해도 접수는 그대로다
+       *   sendIntakeNotificationMail 은 던지지 않고 값을 돌려준다. 그래도
+       *   여기서 한 번 더 감싸는 이유는, 그 약속이 깨져도 접수 응답이
+       *   실패로 뒤집히지 않게 하기 위해서다 — 물건은 이미 들어와 있고
+       *   접수 번호도 나갔다.
+       *
+       * ■ 기다렸다가 응답한다(뒤로 미루지 않는다)
+       *   접수 등록은 사람이 버튼을 누르고 기다리는 조작이고, 메일 발송은
+       *   보통 1~2초다. 응답 뒤에 보내려면 그 작업을 살려 둘 장치가 따로
+       *   필요한데(서버리스에서는 응답과 함께 죽는다) 이 시스템에는 그런
+       *   것이 없다. 늦어지는 만큼은 transport 의 타임아웃이 막는다.
+       */
+      if (input.logContext === "INTERACTIVE") {
+        try {
+          const mail = await sendIntakeNotificationMail({ repairCaseId: result.id });
+          if (!mail.sent && mail.reason !== "DISABLED" && mail.reason !== "NO_RECIPIENTS") {
+            // 껐거나 아무도 안 고른 것은 정상 상태라 시끄럽게 굴지 않는다.
+            // 나머지는 아무도 모르게 지나가면 안 된다.
+            console.error("접수 알림 메일을 보내지 못했습니다", {
+              intakeNumber: result.intakeNumber,
+              reason: mail.reason,
+              detail: mail.detail,
+            });
+          }
+        } catch (mailError) {
+          console.error("접수 알림 메일에서 예상치 못한 오류", {
+            intakeNumber: result.intakeNumber,
+            message: mailError instanceof Error ? mailError.message : String(mailError),
+          });
+        }
+      }
     } else {
       await markIdempotencyKeyFailed(idempotencyKey);
     }

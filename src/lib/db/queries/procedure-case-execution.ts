@@ -317,6 +317,11 @@ export type RelatedRepairHistoryRow = {
   intakeNumber: string;
   receivedAt: string;
   actualShipmentDate: string | null;
+  /**
+   * 그때는 무슨 문제로 들어왔는가. 접수 알림 메일이 과거 이력을 적을 때
+   * 쓴다 — 인수번호와 날짜만으로는 "전에도 왔던 물건" 이상을 알 수 없다.
+   */
+  reportedSymptom: string | null;
 };
 
 export type RelatedRepairHistory = {
@@ -346,6 +351,7 @@ export async function getRelatedRepairHistory(currentRepairCaseId: string, curre
       intakeNumber: repairCases.intakeNumber,
       receivedAt: repairCases.receivedAt,
       actualShipmentDate: repairCases.actualShipmentDate,
+      reportedSymptom: repairCases.reportedSymptom,
       modelName: products.modelName,
       serialNumber: products.serialNumber,
       lotNumber: products.lotNumber,
@@ -365,6 +371,7 @@ export async function getRelatedRepairHistory(currentRepairCaseId: string, curre
       intakeNumber: candidate.intakeNumber,
       receivedAt: candidate.receivedAt,
       actualShipmentDate: candidate.actualShipmentDate,
+      reportedSymptom: candidate.reportedSymptom,
     };
     if (relation === "SAME_PRODUCT") sameProduct.push(row);
     else sameModelReference.push(row);
