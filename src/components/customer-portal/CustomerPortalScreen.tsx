@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CustomerLinkInfo, CustomerPortalItem } from "@/lib/db/queries/customer-portal";
+import CustomerLinkAddress from "./CustomerLinkAddress";
 import {
   issueCustomerLinkAction,
   revokeCustomerLinkAction,
@@ -41,14 +42,24 @@ export default function CustomerPortalScreen({
   canManageLinks: boolean;
   canEdit: boolean;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(links[0]?.id ?? null);
+  /**
+   * 고른 고객사를 **링크 id 가 아니라 고객사 id 로** 기억한다.
+   *
+   * 재발급은 옛 링크를 회수하고 새 행을 만든다 — 링크 id 로 기억하면 재발급
+   * 직후 그 id 가 살아 있는 목록에서 사라져 방금 발급한 고객사의 화면이 통째로
+   * 닫힌다. 주소를 확인하러 재발급한 사람 눈앞에서 그 주소가 사라지는 셈이다.
+   */
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(
+    links[0]?.customerId ?? null
+  );
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  /** 발급 직후 한 번만 보이는 주소. 새로고침하면 사라진다 — 저장하지 않으므로. */
+  /** 방금 발급한 주소. 전달까지가 한 흐름이라 그 자리에서 바로 보여 준다 —
+   *  나중에도 아래 CustomerLinkAddress 로 다시 볼 수 있다. */
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const selected = links.find((l) => l.id === selectedId) ?? null;
+  const selected = links.find((l) => l.customerId === selectedCustomerId) ?? null;
   const items = selected ? (itemsByCustomer[selected.customerId] ?? []) : [];
 
   function run(action: () => Promise<{ ok: boolean; message: string; url?: string }>) {
@@ -97,14 +108,14 @@ export default function CustomerPortalScreen({
       {issuedUrl ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-sm font-semibold text-amber-900">
-            이 주소는 지금 한 번만 보입니다. 복사해서 고객사에 전달하세요.
+            새 주소를 발급했습니다. 복사해서 고객사에 전달하세요.
           </p>
           <p className="mt-2 rounded border border-amber-200 bg-white px-3 py-2 font-mono text-xs break-all text-zinc-800">
             {issuedUrl}
           </p>
           <p className="mt-2 text-xs text-amber-800">
-            저장해 두지 않으므로 새로고침하면 사라집니다. 잃어버리면 다시
-            발급해야 하고, 그때 옛 주소는 자동으로 회수됩니다.
+            옛 주소는 자동으로 회수됐습니다. 이 알림을 닫아도 아래
+            「전용 주소」에서 언제든 다시 볼 수 있습니다.
           </p>
           <button
             type="button"
@@ -125,9 +136,9 @@ export default function CustomerPortalScreen({
             <button
               key={link.id}
               type="button"
-              onClick={() => setSelectedId(link.id)}
+              onClick={() => setSelectedCustomerId(link.customerId)}
               className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
-                link.id === selectedId
+                link.customerId === selectedCustomerId
                   ? "border-zinc-900 bg-zinc-900 text-white"
                   : "border-zinc-300 text-zinc-700 hover:border-zinc-500"
               }`}
@@ -172,6 +183,11 @@ export default function CustomerPortalScreen({
 
       {selected ? (
         <>
+          {/* ───── 지금 접속 가능한 전용 주소 ─────
+              고객사를 고르면 그 주소를 보여 준다. 관리자 이상만 보이고
+              (액션이 판정한다), 볼 수 없으면 아무것도 그리지 않는다. */}
+          <CustomerLinkAddress linkId={selected.id} customerName={selected.customerName} />
+
           {/* ───── 고른 고객사의 링크 살림 ───── */}
           <section className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-sm">
             <span className="font-semibold text-zinc-900">{selected.customerName}</span>

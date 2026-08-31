@@ -1,0 +1,1 @@
+ALTER TABLE "customer_repair_links" ADD COLUMN "token_cipher" text;

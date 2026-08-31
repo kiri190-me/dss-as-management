@@ -289,7 +289,9 @@ export async function pushSnapshotForLink(linkId: string): Promise<number> {
 /**
  * 링크를 밖에 심는다. 발급·재발급 직후에 부른다.
  *
- * 평문 토큰이 이 함수를 지나가는 유일한 순간이다 — 어디에도 저장하지 않는다.
+ * 평문 토큰을 밖으로 넘기는 유일한 자리다. 이쪽 DB 에 남는 것은 sha256 과
+ * 키로 암호화한 사본뿐이고(customer_repair_links.token_cipher), 저쪽도
+ * token_hash 만 남긴다 — 평문은 양쪽 어디에도 저장되지 않는다.
  */
 export async function pushCustomerLink(params: {
   nasLinkId: string;

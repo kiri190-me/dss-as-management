@@ -160,6 +160,8 @@ export async function setCustomerStatus(params: {
 export async function issueCustomerLink(params: {
   customerId: string;
   tokenHash: string;
+  /** 주소를 다시 보여 주기 위한 암호화 사본. 키가 없는 환경이면 null 이고, 그래도 발급은 그대로 된다. */
+  tokenCipher: string | null;
   label: string | null;
   actorUserId: string;
 }): Promise<{ linkId: string; revokedPreviousId: string | null }> {
@@ -180,6 +182,7 @@ export async function issueCustomerLink(params: {
       .values({
         customerId: params.customerId,
         tokenHash: params.tokenHash,
+        tokenCipher: params.tokenCipher,
         label: params.label,
         createdBy: params.actorUserId,
       })

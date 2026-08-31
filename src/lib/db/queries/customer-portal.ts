@@ -175,8 +175,10 @@ export type CustomerLinkInfo = {
 /**
  * 살아 있는 링크 목록.
  *
- * 평문 토큰은 어디에도 없으므로 여기서 낼 수 없다 — 발급 순간에만 존재한다.
- * 화면은 "발급됨 / 없음"만 알 수 있고, 주소를 다시 보려면 재발급뿐이다.
+ * 주소 자체는 여기서 내지 않는다. 이 목록은 페이지가 통째로 브라우저에
+ * 내려보내는 값이라, 여기에 주소를 담으면 **화면을 연 것만으로 모든 고객사의
+ * 주소가 HTML 에 실려 나간다.** 주소는 고객사를 고른 순간 그 하나만
+ * revealCustomerLinkUrlAction 으로 따로 가져온다.
  */
 export async function listActiveLinks(): Promise<CustomerLinkInfo[]> {
   const links = await db
@@ -230,6 +232,33 @@ export async function listActiveLinks(): Promise<CustomerLinkInfo[]> {
       lastSyncedCount: log?.itemCount ?? null,
     };
   });
+}
+
+
+/**
+ * 살아 있는 링크 하나의 **보관된 주소 사본**을 꺼낸다(암호문 그대로).
+ *
+ * 복호화는 여기서 하지 않는다 — 키를 쓰는 곳을 한 군데
+ * (server/customer-link-token-cipher.ts)로 모아 두면 "어디서 풀리는가"를
+ * grep 한 번으로 다 볼 수 있다. 조회 계층은 암호문을 나르기만 한다.
+ *
+ * 회수된 링크는 내주지 않는다. 회수한 주소를 다시 보여 주면 "끊었다"는 말이
+ * 무색해지고, 실수로 그 주소를 다시 전달하는 길이 생긴다.
+ */
+export async function getActiveLinkCipher(
+  linkId: string
+): Promise<{ customerId: string; tokenCipher: string | null } | null> {
+  const [row] = await db
+    .select({
+      customerId: customerRepairLinks.customerId,
+      tokenCipher: customerRepairLinks.tokenCipher,
+    })
+    .from(customerRepairLinks)
+    .where(
+      and(eq(customerRepairLinks.id, linkId), isNull(customerRepairLinks.revokedAt))
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /** 드롭다운에 뜨는 상태 목록. 비활성은 빠진다. */
