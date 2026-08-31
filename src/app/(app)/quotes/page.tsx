@@ -5,7 +5,6 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canDeleteQuotes, canEditQuotes } from "@/lib/auth/quote-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listDeletedQuotes, listQuotes } from "@/lib/db/queries/quotes";
 
@@ -47,12 +46,10 @@ export default async function QuotesPage() {
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEdit =
     actingUser !== null &&
-    canEditQuotes(actingUser.role) &&
     (await hasPermission(actingUser.role, "quotes", "WRITE"));
 
   const canDelete =
     actingUser !== null &&
-    canDeleteQuotes(actingUser.role) &&
     (await hasPermission(actingUser.role, "quotes", "MANAGE"));
 
   // 휴지통을 못 여는 사람에게는 그 내용을 읽지도 내려보내지도 않는다 — 쓰지 않을

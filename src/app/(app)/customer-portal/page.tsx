@@ -4,11 +4,7 @@ import CustomerPortalScreen from "@/components/customer-portal/CustomerPortalScr
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import {
-  canEditCustomerStatus,
-  canManageCustomerLinks,
-  canViewCustomerPortal,
-} from "@/lib/auth/customer-portal-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
@@ -53,7 +49,7 @@ export default async function CustomerPortalPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewCustomerPortal(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customerPortal", "READ"))) {
     return (
       <PlaceholderPage
         title="고객 안내 현황"
@@ -89,8 +85,8 @@ export default async function CustomerPortalPage() {
       itemsByCustomer={itemsByCustomer}
       statusOptions={statusOptions}
       customersWithoutLink={customersWithoutLink}
-      canManageLinks={canManageCustomerLinks(actingUser.role)}
-      canEdit={canEditCustomerStatus(actingUser.role)}
+      canManageLinks={await hasPermission(actingUser.role, "customerPortal", "MANAGE")}
+      canEdit={await hasPermission(actingUser.role, "customerPortal", "WRITE")}
     />
   );
 }

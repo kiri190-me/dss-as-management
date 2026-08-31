@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
-import { canViewQuotes } from "@/lib/auth/quote-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { QuoteTemplateError, readQuoteTemplate } from "@/lib/storage/quote-template";
 import { ZipArchive } from "@/lib/xlsx/zip-reader";
@@ -56,7 +55,7 @@ export async function GET(
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
-  if (!canViewQuotes(actingUser.role) || !(await hasPermission(actingUser.role, "quotes", "READ"))) {
+  if (!(await hasPermission(actingUser.role, "quotes", "READ"))) {
     return NextResponse.json({ error: "이 작업을 수행할 권한이 없습니다." }, { status: 403 });
   }
 

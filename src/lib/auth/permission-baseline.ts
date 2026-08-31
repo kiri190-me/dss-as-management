@@ -59,7 +59,11 @@ import {
   canResolveProcedureValidationIssues,
 } from "./procedure-template-authorization";
 import { canManageRolePermissions } from "./role-permission-authorization";
-import { canViewCustomerPortal } from "./customer-portal-authorization";
+import {
+  canEditCustomerStatus,
+  canManageCustomerLinks,
+  canViewCustomerPortal,
+} from "./customer-portal-authorization";
 import {
   maxMeaningfulLevelOfLeaf,
   minMeaningfulLevelOfLeaf,
@@ -163,11 +167,14 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       return "WRITE";
 
     case "customerPortal":
-      // 볼 수 있는 역할은 안내 문구도 정할 수 있다 — 담당 엔지니어가 물건을
-      // 보고 적는 것이 가장 정확하고, 그 사람이 못 적으면 결국 아무도 안 적어
-      // 고객 화면이 로 남는다. 주소 발급·회수는 이 상한과 별개로
-      // 관리자 이상만 가능하다.
-      return canViewCustomerPortal(role) ? "WRITE" : "NONE";
+      // 세 단계가 실제 조작과 짝이 맞는다(permission-areas.ts 의 같은 항목).
+      // 표로 옮겨 적지 않고 *-authorization.ts 를 **불러서** 구한다 — 기본값이
+      // 바뀌면 저쪽 한 곳만 고치면 된다.
+      return ladder({
+        manage: canManageCustomerLinks(role),
+        write: canEditCustomerStatus(role),
+        read: canViewCustomerPortal(role),
+      });
 
     case "diagnosisFlowcharts":
       return ladder({

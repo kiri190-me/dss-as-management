@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
-import { canViewQuotes } from "@/lib/auth/quote-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { recordQuoteExport } from "@/lib/db/mutations/quote-exports";
@@ -89,9 +88,6 @@ export async function GET(
   if (!actingUser) return fail(401, "UNAUTHENTICATED", "로그인이 필요합니다.");
 
   // ── 4) 권한 — 조회보다 앞이다 ────────────────────────────────────────
-  if (!canViewQuotes(actingUser.role)) {
-    return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
-  }
   if (!(await hasPermission(actingUser.role, "quotes", "READ"))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }

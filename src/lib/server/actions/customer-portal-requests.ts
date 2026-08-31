@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { canViewCustomerPortal } from "@/lib/auth/customer-portal-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
@@ -47,7 +47,7 @@ export async function linkRequestToRepairCaseAction(input: {
   if (!session) return { ok: false, message: "로그인이 필요합니다." };
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return { ok: false, message: "로그인이 필요합니다." };
-  if (!canViewCustomerPortal(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customerPortal", "WRITE"))) {
     return { ok: false, message: "수리 의뢰를 처리할 권한이 없습니다." };
   }
 
@@ -80,7 +80,7 @@ export async function rejectRequestAction(input: {
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canViewCustomerPortal(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customerPortal", "WRITE"))) {
     return { ok: false, message: "수리 의뢰를 처리할 권한이 없습니다." };
   }
 

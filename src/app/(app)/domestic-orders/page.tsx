@@ -5,7 +5,6 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canEditDomesticOrders } from "@/lib/auth/domestic-order-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   listCustomerOptions,
@@ -49,10 +48,10 @@ export default async function DomesticOrdersPage() {
   // 로그인으로 보냈으므로 여기서는 못 고치는 것으로만 취급한다.
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
+  // 고치는 권한은 관리자가 정한 수준 하나로 정해진다(2026-08-31 전환) —
+  // 예전에는 canEditDomesticOrders(역할)를 AND 로 겹쳐 넓혀도 열리지 않았다.
   const canEdit =
-    actingUser !== null &&
-    canEditDomesticOrders(actingUser.role) &&
-    (await hasPermission(actingUser.role, "domesticOrders", "WRITE"));
+    actingUser !== null && (await hasPermission(actingUser.role, "domesticOrders", "WRITE"));
 
   // 고칠 수 없는 사람에게는 폼의 드롭다운 목록을 읽지 않는다 — 쓰지 않을 값을
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).

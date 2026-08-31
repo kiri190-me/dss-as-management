@@ -1,10 +1,10 @@
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import CustomerStatusOptionSettings from "@/components/customer-portal/CustomerStatusOptionSettings";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { canManageCustomerStatusOptions } from "@/lib/auth/customer-portal-authorization";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listAllStatusOptions } from "@/lib/db/queries/customer-portal";
@@ -51,7 +51,7 @@ export default async function SettingsPage() {
       */}
       <CustomerStatusOptionSettings
         options={options}
-        canManage={canManageCustomerStatusOptions(actingUser.role)}
+        canManage={await hasPermission(actingUser.role, "customerPortal", "MANAGE")}
       />
     </div>
   );

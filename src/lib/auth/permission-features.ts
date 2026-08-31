@@ -435,6 +435,10 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCases.workRecords",
   "repairCases.lifecycle",
   "repairCases.procedureExecution",
+  // 첨부는 처음부터 설정만 봤다 — 올리기·내려받기·미리보기·지우기 라우트가
+  // 전부 hasPermission("repairCases.files") 하나를 쓴다. 목록에 올리지 않아
+  // 화면이 괜히 "아직 코드가 최종 판정"이라고 말하고 있었다(2026-08-31 확인).
+  "repairCases.files",
   "users.view",
   "users.shipmentRepresentatives",
   // 하위 기능이 없는 메뉴들. 대시보드·A/S 접수·Excel 생성·시스템 설정은 원래
@@ -459,6 +463,23 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCaseNew",
   "excelKyosanIntakeList",
   "settings",
+  // 액션·페이지가 모두 이 설정만 본다(2026-08-31 전환). 예전에는 역할 함수와
+  // AND 였다 — 자세한 경위는 actions/repair-labor.ts 주석에 있다.
+  "repairLabor",
+  // 세 단계(보기·안내문구·주소관리)를 모두 설정으로 옮겼다(2026-08-31).
+  // 주소 발급·회수까지 설정이 정한다 — permission-areas.ts 의 경고 참조.
+  "customerPortal",
+  // 액션·페이지가 설정만 본다(2026-08-31 전환). 예전에는 canEditDomesticOrders
+  // 와 AND 였다.
+  "domesticOrders",
+  // 목표·납품 액션과 화면이 설정만 본다(2026-08-31 전환). 예전에는
+  // canEditWeeklyReportGoals 와 AND 였다. 상세표의 `비고` 는 수리 건의
+  // 컬럼이라 여전히 수리 건 상세의 판정을 따른다 — 이 영역의 값이 아니다.
+  "weeklyReport",
+  // 액션·페이지·xlsx 라우트가 모두 설정만 본다(2026-08-31 전환). 세 단계가
+  // 조작과 짝이 맞는다 — 읽기(보기·내려받기) · 쓰기(만들기·고치기) ·
+  // 관리(지우기·되살리기).
+  "quotes",
   // 페이지 가드·서버 액션·이미지 라우트가 모두 이 설정을 본다(2026-08-31).
   // 역할 함수(canManageIntakeMailSettings)는 이제 permission-baseline 의
   // 기본값을 계산할 때만 쓰인다 — 최종 관문이 아니다.

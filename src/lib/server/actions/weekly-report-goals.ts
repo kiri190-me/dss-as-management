@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canEditWeeklyReportGoals } from "@/lib/auth/weekly-report-authorization";
 import {
   isValidExpectedVersion,
   isValidWeeklyReportGoalId,
@@ -101,13 +100,10 @@ async function resolveAuthorizedActingUser() {
   if (!actingUser) {
     return { ok: false as const, code: "UNAUTHORIZED" as const, message: "로그인이 필요합니다." };
   }
-  if (!canEditWeeklyReportGoals(actingUser.role)) {
-    return {
-      ok: false as const,
-      code: "FORBIDDEN" as const,
-      message: "이 작업을 수행할 권한이 없습니다.",
-    };
-  }
+  // 관문은 하나다 — 관리자가 설정한 수준(2026-08-31 전환). 예전에는
+  // canEditWeeklyReportGoals(역할)와 AND 여서, 넓혀 줘도 열리지 않았다.
+  // 기본값은 그대로다 — permission-baseline.ts 의 weeklyReport WRITE 기본값이
+  // 바로 그 역할 함수다.
   if (!(await hasPermission(actingUser.role, "weeklyReport", "WRITE"))) {
     return {
       ok: false as const,

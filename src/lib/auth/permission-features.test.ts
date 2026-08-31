@@ -219,15 +219,29 @@ test("파일 관리는 접수 건 아래의 잎이고, 분류별로 갈리지 �
   assert.deepEqual(selectableLevelsOfLeaf("repairCases.files"), ["NONE", "READ", "WRITE"]);
 });
 
-test("파일 관리 상한은 아직 아무 역할도 막지 않는다 — 그리고 그 사실을 화면이 말한다", () => {
-  // 지금 첨부 화면에는 역할 검사가 하나도 없다. 상한을 낮춰 적으면 표를
-  // 만들었을 뿐인데 지금 되던 일이 막힌다.
+test("파일 관리 상한은 아무 역할도 막지 않는다 — 좁히는 것은 설정으로 한다", () => {
+  // 첨부 화면에는 역할 검사가 하나도 없다. 상한을 낮춰 적으면 표를 만들었을
+  // 뿐인데 지금 되던 일이 막힌다.
   for (const role of ROLE_CODES) {
     assert.equal(baselineLeafLevel("repairCases.files", role), "WRITE", role);
   }
-  // 실제 저장·인가가 붙기 전까지 이 설정은 최종 판정이 아니다. 전환됐다고
-  // 표시하면 관리자는 닫았다고 믿는데 실제로는 열려 있는 상태가 된다.
-  assert.equal(isSettingsEnforced("repairCases.files"), false);
+  /*
+   * 설정이 최종 판정이다(2026-08-31 확인).
+   *
+   * 예전에는 여기서 false 를 단언하며 "실제 저장·인가가 붙기 전까지"라고
+   * 적어 두었는데, 그 사이에 인가가 다 붙었다. 지금 이 잎을 보는 자리는
+   * 다섯 곳이고 **전부 hasPermission 하나만** 쓴다:
+   *
+   *   actions/attachments.ts                       올리기·지우기
+   *   api/repair-cases/[id]/attachments/route.ts   올리기
+   *   api/attachments/[id]/download/route.ts       내려받기
+   *   api/attachments/[id]/preview/route.ts        미리보기
+   *   (app)/repair-cases/[id]/files/page.tsx       화면의 쓰기 버튼
+   *
+   * 목록에 올리지 않은 동안 권한 화면이 "아직 코드가 최종 판정"이라고
+   * **사실과 다른 말**을 하고 있었다 — 좁혀도 안 막히는 줄 알게 된다.
+   */
+  assert.equal(isSettingsEnforced("repairCases.files"), true);
 });
 
 test("절차 수행은 기술 작업 절차가 아니라 접수 건 아래에 있다", () => {

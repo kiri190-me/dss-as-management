@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canDeleteQuotes, canEditQuotes, canViewQuotes } from "@/lib/auth/quote-authorization";
 import {
   isValidExpectedVersion,
   isValidQuoteId,
@@ -22,11 +21,15 @@ import { lookupIntakeForQuote, type QuoteIntakeLookup } from "@/lib/db/queries/q
  * 입력 검증 → mutation 호출. **순서가 곧 규칙이다** — 검증을 먼저 하면
  * 로그인하지 않은 요청이 어떤 값이 유효한지를 알아낼 수 있게 된다.
  *
- * ── 관문이 둘인 이유 ────────────────────────────────────────────────────
- * canEditQuotes(역할 정책)와 hasPermission("quotes", "WRITE")(관리자가 설정한
- * 수준)를 **둘 다** 통과해야 저장된다. 견적서는 permission-features.ts 의
- * '설정이 최종 판정' 목록에 없으므로 역할 함수가 여전히 최종 관문이고, 설정으로는
- * 좁힐 수만 있다 — 여기 두 검사를 AND 로 두는 것이 정확히 그 뜻이다.
+ * ── 관문은 하나다 ───────────────────────────────────────────────────────
+ * 관리자가 설정한 수준(hasPermission)만 본다. 예전에는 canEditQuotes(역할
+ * 정책)와 AND 였고, 그래서 **넓혀 줘도 열리지 않았다** — 권한 화면은 "넓히면
+ * 열립니다"라고 말하는데 실제로는 막혀 있는 상태였다(2026-08-31 전환).
+ *
+ * 기본값은 그대로다. permission-baseline.ts 의 quotes 사다리가 바로 그
+ * canViewQuotes/canEditQuotes/canDeleteQuotes 를 불러 만들어지므로, 설정을
+ * 건드리지 않은 상태에서는 예전과 **정확히 같은 답**을 낸다(모든 역할로
+ * 대조해 확인). 달라지는 것은 관리자가 넓혔을 때뿐이다.
  *
  * ── 화면이 감춘 것은 경계가 아니다 ──────────────────────────────────────
  * 목록은 고칠 수 없는 역할에게 `새 견적서` 단추를 그리지 않는다. 그것은 편의일
@@ -82,10 +85,9 @@ async function resolveActingUser(required: "READ" | "WRITE") {
     return { ok: false as const, code: "UNAUTHORIZED" as const, message: "로그인이 필요합니다." };
   }
 
-  const rolePolicy = required === "WRITE" ? canEditQuotes : canViewQuotes;
-  if (!rolePolicy(actingUser.role)) {
-    return { ok: false as const, code: "FORBIDDEN" as const, message: "이 작업을 수행할 권한이 없습니다." };
-  }
+  // 관문은 하나다 — 관리자가 설정한 수준(2026-08-31 전환). 예전에는 역할 정책
+  // (canEditQuotes/canViewQuotes)과 AND 여서, 넓혀 줘도 열리지 않았다. 기본값은
+  // 그대로다 — permission-baseline.ts 의 quotes 사다리가 바로 그 함수들이다.
   if (!(await hasPermission(actingUser.role, "quotes", required))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "이 작업을 수행할 권한이 없습니다." };
   }
@@ -185,8 +187,8 @@ export async function lookupIntakeForQuoteAction(input: {
  * ============================================================================
  * 휴지통 — 지우기와 되살리기
  * ============================================================================
- * 관문이 하나 더 좁다. 만들기·고치기는 `canEditQuotes` + `quotes` WRITE 지만,
- * 지우고 되살리는 것은 `canDeleteQuotes` + `quotes` MANAGE 다 — 견적서는
+ * 관문이 하나 더 좁다. 만들기·고치기는 `quotes` WRITE 지만, 지우고 되살리는
+ * 것은 `quotes` MANAGE 다 — 견적서는
  * 고객사에 나간 문서라 지우는 판단을 담당자 각자에게 맡기지 않는다
  * (quote-authorization.ts 의 '삭제는 관리자 이상이다').
  * ============================================================================
@@ -206,9 +208,6 @@ async function resolveDeletingUser() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) {
     return { ok: false as const, code: "UNAUTHORIZED" as const, message: "로그인이 필요합니다." };
-  }
-  if (!canDeleteQuotes(actingUser.role)) {
-    return { ok: false as const, code: "FORBIDDEN" as const, message: "견적서를 지울 권한이 없습니다." };
   }
   if (!(await hasPermission(actingUser.role, "quotes", "MANAGE"))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "견적서를 지울 권한이 없습니다." };

@@ -5,7 +5,6 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canDeleteQuotes } from "@/lib/auth/quote-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 
@@ -40,12 +39,11 @@ export default async function RepairLaborPage() {
 
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
-  // 고치는 권한이 견적서를 고치는 것보다 좁다 — 여기 값을 바꾸면 앞으로 나갈
-  // 모든 견적서의 금액이 바뀐다(actions/repair-labor.ts 의 같은 판단).
+  // 고치는 권한은 관리자가 설정한 수준 하나로 정해진다(2026-08-31 전환) —
+  // 예전에는 canDeleteQuotes(역할)를 AND 로 겹쳐서, 넓혀 줘도 화면의 편집이
+  // 열리지 않았다. 기본값은 그대로다(actions/repair-labor.ts 의 같은 주석).
   const canEdit =
-    actingUser !== null &&
-    canDeleteQuotes(actingUser.role) &&
-    (await hasPermission(actingUser.role, "repairLabor", "MANAGE"));
+    actingUser !== null && (await hasPermission(actingUser.role, "repairLabor", "MANAGE"));
 
   const kinds = await listRepairLabor();
 

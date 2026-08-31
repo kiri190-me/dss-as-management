@@ -6,7 +6,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
-import { canEditWeeklyReportGoals } from "@/lib/auth/weekly-report-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { listRepairCaseLinkOptions } from "@/lib/db/queries/domestic-orders";
@@ -84,7 +83,6 @@ export default async function WeeklyReportPage({
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEditGoals =
     actingUser !== null &&
-    canEditWeeklyReportGoals(actingUser.role) &&
     (await hasPermission(actingUser.role, "weeklyReport", "WRITE"));
 
   // 상세표의 `비고` 는 위 두 구역과 **다른 권한**으로 열린다. 그 값은 주간보고가

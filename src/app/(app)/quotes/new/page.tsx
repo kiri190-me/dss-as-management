@@ -11,7 +11,6 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canEditQuotes } from "@/lib/auth/quote-authorization";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 
@@ -46,7 +45,6 @@ export default async function NewQuotePage() {
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEdit =
     actingUser !== null &&
-    canEditQuotes(actingUser.role) &&
     (await hasPermission(actingUser.role, "quotes", "WRITE"));
 
   if (!canEdit) redirect("/quotes");

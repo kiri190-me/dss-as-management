@@ -1,3 +1,4 @@
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import CustomerRequestListScreen, {
@@ -6,7 +7,6 @@ import CustomerRequestListScreen, {
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { canViewCustomerPortal } from "@/lib/auth/customer-portal-authorization";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listAllCustomerRepairRequests } from "@/lib/db/queries/customer-portal";
@@ -42,7 +42,7 @@ export default async function CustomerRequestsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewCustomerPortal(actingUser.role)) {
+  if (!(await hasPermission(actingUser.role, "customerPortal", "READ"))) {
     return (
       <PlaceholderPage
         title="수리 의뢰"
@@ -63,7 +63,7 @@ export default async function CustomerRequestsPage() {
   return (
     <CustomerRequestListScreen
       requests={requests}
-      canConvert={canViewCustomerPortal(actingUser.role)}
+      canConvert={await hasPermission(actingUser.role, "customerPortal", "WRITE")}
     />
   );
 }

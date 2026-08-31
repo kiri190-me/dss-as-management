@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { canDeleteQuotes } from "@/lib/auth/quote-authorization";
 import { validateRepairLaborFields } from "@/lib/validation/repair-task-input";
 import { saveRepairLabor, type SaveRepairLaborResult } from "@/lib/db/mutations/repair-labor";
 
@@ -50,10 +49,18 @@ async function resolveActor(): Promise<{ ok: true; userId: string } | { ok: fals
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return deny("로그인이 필요합니다.");
 
-  // 두 관문을 다 통과해야 한다 — 역할 정책과 관리자가 설정한 수준.
-  if (!canDeleteQuotes(actingUser.role)) {
-    return deny("수리 작업 비용을 고칠 권한이 없습니다. 관리자에게 문의해 주세요.");
-  }
+  /*
+   * 관문은 하나다 — 관리자가 설정한 수준(2026-08-31 전환).
+   *
+   * 예전에는 canDeleteQuotes(역할)와 이 설정을 **둘 다** 봤다. 그러면 설정을
+   * 넓혀 줘도 역할 함수가 막아 실제로는 열리지 않았고, 권한 화면이 "넓히면
+   * 열립니다"라고 말할 수 없는 상태였다.
+   *
+   * 역할 함수를 떼도 기본 동작은 그대로다 — permission-baseline.ts 의
+   * repairLabor 기본값이 `ladder({ manage: canDeleteQuotes(role) })` 라, 설정을
+   * 건드리지 않은 상태에서 이 검사는 예전 검사와 **정확히 같은 답**을 낸다
+   * (모든 역할로 대조해 확인). 달라지는 것은 관리자가 넓혔을 때뿐이다.
+   */
   if (!(await hasPermission(actingUser.role, "repairLabor", "MANAGE"))) {
     return deny("수리 작업 비용을 고칠 권한이 없습니다. 관리자에게 문의해 주세요.");
   }
