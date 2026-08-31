@@ -6,7 +6,8 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
-import { QuoteTemplateError, readQuoteTemplateHeader } from "@/lib/storage/quote-template";
+import { readAllQuoteTemplateHeaders } from "@/lib/storage/quote-template";
+import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 
 export const metadata: Metadata = {
   title: "견적서 미리보기 | DSS A/S 관리 시스템",
@@ -52,17 +53,12 @@ export default async function QuotePrintPage({
   // 회사 정보·기본 문구·계좌는 **양식에서** 읽는다(코드에 두지 않는다).
   // 양식을 못 읽어도 미리보기는 떠야 한다 — 값만 빈 채로 그린다. 정본이
   // 필요하면 Excel 을 받으면 되고, 그쪽은 자기 오류를 따로 알려 준다.
-  let header;
-  try {
-    header = await readQuoteTemplateHeader();
-  } catch (err) {
-    if (!(err instanceof QuoteTemplateError)) throw err;
-    header = {
-      companyName: null, ceoLine: null, address: null, tel: null, fax: null,
-      email: null, homepage: null, defaultValidity: null, defaultDelivery: null,
-      defaultPayment: null, bankAccount: null,
-    };
-  }
+  //
+  // 🔴 **이 견적서에 맞는 양식**의 문구를 쓴다(장비 종류 × 견적서 종류).
+  // 넷의 기본 문구가 다르고, 특히 납기가 전부 갈린다
+  // (domain/quote-template-variant.ts).
+  const headers = await readAllQuoteTemplateHeaders();
+  const header = headers[quoteTemplateKey(quote.laborEquipmentKind, quote.kind)];
 
   return <QuotePrintView quote={quote} header={header} quoteId={quote.id} />;
 }

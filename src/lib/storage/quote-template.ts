@@ -130,17 +130,155 @@ const HEADER_CELLS = {
 } as const;
 
 export async function readQuoteTemplateHeader(): Promise<QuoteTemplateHeader> {
+  return readVariantHeader(TEMPLATE_VARIANTS["GENERATOR:DOMESTIC"]);
+}
+
+/**
+ * ============================================================================
+ * 🔴 양식은 넷이다 — 장비 종류 × 견적서 종류
+ * ============================================================================
+ * 처음에는 `내자 1 + OH 1` 두 벌이라고 보고 만들었는데, 실제로는 넷이고
+ * **기본 문구가 넷 다 다르다**(2026-08-31 실측):
+ *
+ *   제너레이터 내자  납기 `발주일로부터 3주 이내`
+ *   제너레이터 OH    납기 `발주일로부터 4주 이내`
+ *   매쳐 내자        납기 `발행일로 부터 약 3개월 이내`
+ *   매쳐 OH          납기 `발행일로 부터 6주`
+ *
+ * 그동안 시스템은 **제너레이터 내자 것 하나만** 읽었다. 그래서 O/H 견적서
+ * 미리보기에 3주가 뜨는데 실제로 나가는 파일에는 4주가 찍히는, 화면과 문서가
+ * 다른 말을 하는 상태였다.
+ *
+ * ── 🔴 매쳐는 셀 자리도 다르다 ─────────────────────────────────────────
+ * 같은 주소로 읽으면 엉뚱한 값이 나온다 — 매쳐 D15 에는 유효기간이 아니라
+ * **금액(숫자)** 이 들어 있다. 빈 줄이 더 있어 아래로 밀렸다:
+ *
+ *   구분        제너레이터   매쳐
+ *   시트 이름   내자견적서/OH견적서   둘 다 `견적서`
+ *   유효기간    D15          D17
+ *   납기        D16          D18
+ *   결재조건    D17          D19
+ *   은행계좌    D18          D20
+ *
+ * 회사 정보(B3~B7 · E6 · E7)는 넷이 같다.
+ *
+ * ── 여기서 하는 것은 **문구까지**다 ────────────────────────────────────
+ * 실제 xlsx 를 만드는 쪽(xlsx/quote-template.ts · oh-quote-template.ts)은 아직
+ * 제너레이터 배치만 안다. 매쳐 양식으로 파일을 만들려면 채워 넣는 코드가 한 벌
+ * 더 필요하고, 그것은 별도 작업이다.
+ * ============================================================================
+ */
+
+/** 매쳐 양식의 기본 문구 자리. 회사 정보는 제너레이터와 같다. */
+const MATCHER_HEADER_CELLS = {
+  ...HEADER_CELLS,
+  defaultValidity: "D17",
+  defaultDelivery: "D18",
+  defaultPayment: "D19",
+  bankAccount: "D20",
+} as const;
+
+type TemplateVariant = {
+  /** 이 양식 경로를 담은 환경변수 이름. */
+  envVar: string;
+  /** 사람이 읽는 이름. 설정이 빠졌을 때 어느 양식인지 말해 주려고 둔다. */
+  label: string;
+  sheetName: string;
+  headerCells: Record<string, string>;
+};
+
+/**
+ * 넷의 설정.
+ *
+ * 제너레이터 둘은 **예전 이름을 그대로 쓴다** — 이미 `.env.local` 에 설정돼
+ * 돌아가고 있는 값이라, 이름을 바꾸면 이 변경만으로 견적서가 안 나가게 된다.
+ * 새로 생기는 매쳐 둘만 접두사를 붙인다.
+ */
+const TEMPLATE_VARIANTS: Record<string, TemplateVariant> = {
+  "GENERATOR:DOMESTIC": {
+    envVar: "QUOTE_TEMPLATE_PATH",
+    label: "제너레이터 내자 견적서",
+    sheetName: "내자견적서",
+    headerCells: HEADER_CELLS,
+  },
+  "GENERATOR:OVERHAUL": {
+    envVar: "OH_QUOTE_TEMPLATE_PATH",
+    label: "제너레이터 O/H 견적서",
+    sheetName: "OH견적서",
+    headerCells: HEADER_CELLS,
+  },
+  "MATCHER:DOMESTIC": {
+    envVar: "MATCHER_QUOTE_TEMPLATE_PATH",
+    label: "매쳐 내자 견적서",
+    sheetName: "견적서",
+    headerCells: MATCHER_HEADER_CELLS,
+  },
+  "MATCHER:OVERHAUL": {
+    envVar: "MATCHER_OH_QUOTE_TEMPLATE_PATH",
+    label: "매쳐 O/H 견적서",
+    sheetName: "견적서",
+    headerCells: MATCHER_HEADER_CELLS,
+  },
+};
+
+
+async function readVariantHeader(variant: TemplateVariant): Promise<QuoteTemplateHeader> {
   const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
   const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");
 
-  const archive = ZipArchive.fromBuffer(await readQuoteTemplate());
-  const values = resolveSheetTextCells(archive, "내자견적서", Object.values(HEADER_CELLS));
+  const configured = process.env[variant.envVar];
+  if (!configured || configured.trim().length === 0) {
+    throw new QuoteTemplateError(
+      `${variant.envVar} 가 설정되지 않았습니다. ${variant.label} 양식 경로를 .env.local 에 지정해야 합니다.`
+    );
+  }
+
+  const archive = ZipArchive.fromBuffer(await readTemplateAt(path.resolve(configured.trim())));
+  const values = resolveSheetTextCells(archive, variant.sheetName, Object.values(variant.headerCells));
 
   const header = {} as QuoteTemplateHeader;
-  for (const [key, cell] of Object.entries(HEADER_CELLS)) {
+  for (const [key, cell] of Object.entries(variant.headerCells)) {
     (header as Record<string, string | null>)[key] = values.get(cell) ?? null;
   }
   return header;
+}
+
+/**
+ * 넷의 머리말을 한 번에. **못 읽은 것은 빈 값으로 채운다** — 매쳐 양식 경로를
+ * 아직 설정하지 않았다고 해서 제너레이터 견적서까지 못 쓰게 되면 안 된다.
+ *
+ * 화면(견적서 폼)이 넷을 다 들고 있다가 사람이 종류를 바꾸는 순간 그에 맞는
+ * 것으로 갈아 끼운다. 서버에 다시 묻지 않으므로 기다리는 시간이 없고, 넷을
+ * 합쳐도 짧은 글자 마흔 남짓이라 실어 보내는 값이 늘어난 티가 나지 않는다.
+ */
+export async function readAllQuoteTemplateHeaders(): Promise<Record<string, QuoteTemplateHeader>> {
+  const entries = await Promise.all(
+    Object.entries(TEMPLATE_VARIANTS).map(async ([key, variant]) => {
+      try {
+        return [key, await readVariantHeader(variant)] as const;
+      } catch (err) {
+        if (!(err instanceof QuoteTemplateError)) throw err;
+        return [key, emptyQuoteTemplateHeader()] as const;
+      }
+    })
+  );
+  return Object.fromEntries(entries);
+}
+
+function emptyQuoteTemplateHeader(): QuoteTemplateHeader {
+  return {
+    companyName: null,
+    ceoLine: null,
+    address: null,
+    tel: null,
+    fax: null,
+    email: null,
+    homepage: null,
+    defaultValidity: null,
+    defaultDelivery: null,
+    defaultPayment: null,
+    bankAccount: null,
+  };
 }
 
 /**
@@ -159,18 +297,6 @@ export async function readQuoteTemplateHeaderOrEmpty(): Promise<QuoteTemplateHea
     return await readQuoteTemplateHeader();
   } catch (err) {
     if (!(err instanceof QuoteTemplateError)) throw err;
-    return {
-      companyName: null,
-      ceoLine: null,
-      address: null,
-      tel: null,
-      fax: null,
-      email: null,
-      homepage: null,
-      defaultValidity: null,
-      defaultDelivery: null,
-      defaultPayment: null,
-      bankAccount: null,
-    };
+    return emptyQuoteTemplateHeader();
   }
 }

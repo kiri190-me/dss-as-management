@@ -24,6 +24,7 @@ import {
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 import QuotePrintView from "@/components/quotes/QuotePrintView";
 import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
+import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import type { QuoteEditData, QuoteIntakeLookup } from "@/lib/db/queries/quotes";
 import {
   createQuoteAction,
@@ -193,7 +194,7 @@ export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
   repairLabor,
-  printHeader,
+  printHeaders,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -205,10 +206,13 @@ export default function QuoteEditForm({
    */
   repairLabor: RepairLaborKindRow[];
   /**
-   * 양식에서 읽어 온 회사 정보·기본 문구·계좌. **저장 전 미리보기**가 쓴다.
-   * 양식을 못 읽었으면 칸이 전부 null 이고, 그래도 미리보기는 뜬다.
+   * 양식 **넷**의 회사 정보·기본 문구·계좌(장비 종류 × 견적서 종류).
+   *
+   * 넷을 다 들고 있다가 사람이 종류를 바꾸는 순간 그에 맞는 것으로 갈아 끼운다 —
+   * 서버에 다시 묻지 않으니 기다리는 시간이 없다. 못 읽은 양식은 칸이 전부
+   * null 이고, 그래도 미리보기는 뜬다.
    */
-  printHeader: QuoteTemplateHeader;
+  printHeaders: Record<string, QuoteTemplateHeader>;
 }) {
   const router = useRouter();
 
@@ -619,6 +623,15 @@ export default function QuoteEditForm({
 
   const disabled = isSubmitting || isConflict;
 
+  /**
+   * 지금 고른 장비 종류·견적서 종류에 맞는 양식의 문구.
+   *
+   * 넷 중 하나를 고르는 규칙은 domain/quote-template-variant.ts 한 곳에만 있다 —
+   * 화면과 서버가 같은 규칙을 봐야 "화면에 뜨는 납기와 실제로 나가는 납기가
+   * 다른" 일이 생기지 않는다.
+   */
+  const activePrintHeader = printHeaders[quoteTemplateKey(laborKind, kind)];
+
   if (showPreview) {
     /**
      * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
@@ -633,7 +646,7 @@ export default function QuoteEditForm({
       <QuotePrintView
         quoteId={quote?.id ?? null}
         onClose={() => setShowPreview(false)}
-        header={printHeader}
+        header={activePrintHeader}
         quote={{
           quoteNumber,
           quoteDate,
