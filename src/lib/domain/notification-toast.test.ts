@@ -3,13 +3,22 @@ import assert from "node:assert/strict";
 
 import {
   NOTIFICATION_REFRESH_INTERVAL_MS,
+  NOTIFICATION_REFRESH_MIN_GAP_MS,
+  NOTIFICATION_TOAST_ICON,
+  buildNotificationSelfTestToast,
+  buildNotificationToast,
   decideNotificationToasts,
   describeBrowserNotificationStatus,
+  describeNotificationToastFailure,
+  describeNotificationToastOutcome,
   notificationSeenStorageKey,
   readSeenNotificationKeys,
   resolveBrowserNotificationStatus,
+  resolveNotificationToastChannel,
   shouldRefreshNotifications,
+  shouldRefreshNotificationsNow,
   writeSeenNotificationKeys,
+  type NotificationRefreshTrigger,
   type SeenKeyStore,
 } from "./notification-toast";
 import {
@@ -279,6 +288,181 @@ test("허락받았거나 아직 물어보기 전이면 화면에 할 말이 없�
   }
 });
 
+// ───────────────────────────────────────────── 어느 통로로 띄우는가
+
+/**
+ * 신고 ①("폰에서 알림이 안 뜬다")의 정체. 안드로이드 Chrome은 페이지에서 직접
+ * 만드는 알림을 금지하고 `Illegal constructor`를 던진다 — 서비스워커가 없으면
+ * 폰에서는 무엇을 해도 안 뜬다.
+ */
+test("🔴 서비스워커 등록이 있으면 그 통로로 띄운다 — 안드로이드에서 되는 유일한 길이다", () => {
+  assert.equal(
+    resolveNotificationToastChannel({
+      hasServiceWorkerRegistration: true,
+      hasNotificationConstructor: true,
+    }),
+    "SERVICE_WORKER"
+  );
+  // 생성자가 아예 없는 안드로이드에서도 서비스워커만 있으면 뜬다.
+  assert.equal(
+    resolveNotificationToastChannel({
+      hasServiceWorkerRegistration: true,
+      hasNotificationConstructor: false,
+    }),
+    "SERVICE_WORKER"
+  );
+});
+
+test("🔴 서비스워커가 없고 생성자만 있으면 페이지 통로로 넘어간다", () => {
+  // 등록이 실패하는 환경(보안 접속이 아닌 곳, 서비스워커를 끈 브라우저)에서도
+  // 데스크톱이라면 종전 방식으로 뜬다 — 서비스워커를 붙이면서 되던 것이
+  // 안 되게 만들지 않는다.
+  assert.equal(
+    resolveNotificationToastChannel({
+      hasServiceWorkerRegistration: false,
+      hasNotificationConstructor: true,
+    }),
+    "PAGE"
+  );
+});
+
+test("🔴 둘 다 없으면 '불가'다 — 조용히 아무 일도 안 한 척하지 않는다", () => {
+  assert.equal(
+    resolveNotificationToastChannel({
+      hasServiceWorkerRegistration: false,
+      hasNotificationConstructor: false,
+    }),
+    "UNAVAILABLE"
+  );
+});
+
+// ────────────────────────────────────── 브라우저에 무엇을 넘기는가
+
+function toastFor(item: NotificationItem) {
+  return buildNotificationToast({
+    title: `알림 · ${item.subject}`,
+    body: item.detail,
+    tag: item.id,
+    href: item.href,
+  });
+}
+
+test("🔴 renotify가 켜져 있고 tag가 함께 있다 — 신고 ②의 처방이다", () => {
+  // 같은 tag의 알림이 오면 브라우저는 기존 것을 **조용히 대체**한다(renotify
+  // 기본값 false). 소리도 팝업도 없다. 그리고 renotify는 tag 없이 주면 브라우저가
+  // 던지므로 둘은 반드시 함께 간다.
+  const toast = toastFor(lowStock("part-1", 15));
+
+  assert.equal(toast.options.renotify, true, "다시 알리지 않으면 알림창에 아무 일도 안 일어난다");
+  assert.equal(typeof toast.options.tag, "string");
+  assert.ok(toast.options.tag.length > 0, "renotify를 빈 tag와 함께 주면 브라우저가 던진다");
+});
+
+test("🔴 사라졌다 다시 생긴 재고 부족은 tag가 같다 — 그래서 renotify가 있어야 한다", () => {
+  // 판정 쪽은 멀쩡하다: 사라진 것은 기억에서 지워지고 다시 생기면 새것으로
+  // 골라낸다. 문제는 브라우저에 넘기는 순간에만 있었다.
+  const shortage = [lowStock("part-1", 15)];
+  const first = decideNotificationToasts(shortage, null);
+  const refilled = decideNotificationToasts([], first.nextSeenKeys);
+  const again = decideNotificationToasts(shortage, refilled.nextSeenKeys);
+
+  assert.equal(again.toShow.length, 1, "판정은 다시 알릴 것으로 골라낸다");
+
+  const before = toastFor(shortage[0]);
+  const after = toastFor(again.toShow[0]);
+  assert.equal(after.options.tag, before.options.tag, "재고 부족의 id는 사라졌다 생겨도 그대로다");
+  assert.equal(after.options.renotify, true, "그래도 다시 울려야 한다 — 이것이 없으면 조용히 덮어쓴다");
+});
+
+test("아이콘과 클릭 주소를 함께 실어 보낸다", () => {
+  const item = approval("case-1", "D9705-012", "REPAIR_INSPECTION");
+  const toast = toastFor(item);
+
+  assert.equal(toast.options.icon, NOTIFICATION_TOAST_ICON, "폰 알림창은 아이콘 자리가 비면 볼품이 없다");
+  // 서비스워커로 띄우면 클릭이 페이지가 아니라 서비스워커에 닿는다 — 갈 곳을
+  // 알림에 실어 보내지 않으면 눌러도 아무 데도 못 간다.
+  assert.equal(toast.options.data.href, item.href);
+});
+
+test("제목과 본문은 받은 그대로 넘어간다", () => {
+  const toast = buildNotificationToast({ title: "제목", body: "본문", tag: "t", href: "/x" });
+
+  assert.equal(toast.title, "제목");
+  assert.equal(toast.options.body, "본문");
+});
+
+test("🔴 시험 알림도 같은 규칙을 따른다 — 두 번 눌러도 두 번 울린다", () => {
+  const toast = buildNotificationSelfTestToast();
+
+  assert.equal(toast.options.renotify, true);
+  assert.ok(toast.options.tag.length > 0);
+  assert.ok(toast.title.length > 0);
+  assert.ok(toast.options.body.length > 0, "무엇을 확인하는 알림인지 알림창에도 적혀야 한다");
+});
+
+// ──────────────────────────────────── 못 띄웠을 때 뭐라고 말하는가
+
+test("🔴 안드로이드의 `Illegal constructor`를 사람이 읽을 말로 바꾼다", () => {
+  // 이 예외를 빈 catch가 삼킨 것이 이 문제가 몇 세션째 진단되지 않은 원인이다.
+  const message = describeNotificationToastFailure(
+    new TypeError(
+      "Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead."
+    )
+  );
+
+  assert.ok(!message.includes("Illegal constructor"), "영어 예외 원문만 보여 주면 그냥 고장으로 읽힌다");
+  assert.ok(message.includes("서비스워커"), "무엇이 있어야 되는지까지 말해야 한다");
+});
+
+test("권한이 없어서 못 띄운 것은 되돌리는 법을 알려 준다", () => {
+  const message = describeNotificationToastFailure(new Error("NotAllowedError: permission denied"));
+  assert.ok(message.includes("브라우저 설정"));
+});
+
+test("renotify를 tag 없이 준 실수도 알아볼 수 있게 바꾼다", () => {
+  const message = describeNotificationToastFailure(
+    new TypeError("Notifications which set the renotify flag must specify a non-empty tag")
+  );
+  assert.ok(message.includes("태그"));
+  assert.ok(!message.includes("renotify flag"), "원문만으로는 무슨 말인지 알기 어렵다");
+});
+
+test("모르는 까닭은 원문을 붙여 둔다 — 숨기는 것보다 낫다", () => {
+  const message = describeNotificationToastFailure(new Error("무언가 알 수 없는 실패"));
+  assert.ok(message.includes("무언가 알 수 없는 실패"));
+});
+
+test("🔴 무엇을 던져도 던지지 않고 글자 하나를 돌려준다", () => {
+  // 브라우저가 던지는 것이 Error라는 보장이 없다. 여기서 터지면 알림 하나
+  // 때문에 화면이 죽는다.
+  const thrown: unknown[] = [new Error(""), "", null, undefined, 0, {}, [], Object.create(null)];
+
+  for (const value of thrown) {
+    const message = describeNotificationToastFailure(value);
+    assert.equal(typeof message, "string", `${String(typeof value)} 에서 글자가 안 나왔다`);
+    assert.ok(message.length > 0);
+  }
+});
+
+test("띄웠을 때도 다음에 볼 곳을 함께 알려 준다", () => {
+  // 브라우저는 "띄웠다"까지만 안다. 그 뒤에 기기의 알림 설정이나 방해 금지가
+  // 가로막으면 **아무 오류 없이** 안 보인다.
+  const message = describeNotificationToastOutcome({ ok: true, channel: "SERVICE_WORKER" });
+
+  assert.ok(message.includes("서비스워커"), "어느 통로로 떴는지가 다음 진단의 출발점이다");
+  assert.ok(message.includes("알림 설정"));
+});
+
+test("페이지 통로로 떴으면 그렇게 적는다", () => {
+  const message = describeNotificationToastOutcome({ ok: true, channel: "PAGE" });
+  assert.ok(message.includes("페이지"));
+});
+
+test("🔴 못 띄웠으면 까닭을 그대로 내보인다 — 삼키지 않는다", () => {
+  const message = describeNotificationToastOutcome({ ok: false, reason: "이러이러해서 못 띄웠습니다." });
+  assert.equal(message, "이러이러해서 못 띄웠습니다.");
+});
+
 // ─────────────────────────────────────────────────────────────── 다시 세기
 
 test("🔴 다시 세는 주기는 1분보다 짧지 않다", () => {
@@ -334,4 +518,202 @@ test("고르개(SELECT)와 단추는 막지 않는다 — 다시 그려도 잃�
       focusedTagName
     );
   }
+});
+
+// ──────────────────────────────── 주기를 기다리지 않고 즉시 다시 세기
+
+/**
+ * 아무것도 막지 않는 평범한 화면 — 보이고, 아무 데도 커서가 없다.
+ * 여기서 갈라지는 것은 계기와 시각뿐이라 그 둘만 시험에 적는다.
+ */
+const IDLE_SCREEN = {
+  visibilityState: "visible",
+  focusedTagName: null,
+  focusedIsContentEditable: false,
+} as const;
+
+/** 저절로 도는 계기 둘 — 사람이 누른 것이 아니다. */
+const AUTOMATIC_TRIGGERS: readonly NotificationRefreshTrigger[] = ["INTERVAL", "VISIBLE"];
+
+test("🔴 화면으로 돌아오면 다음 주기를 기다리지 않고 즉시 다시 센다", () => {
+  // 폰은 다른 앱으로 수시로 나갔다 들어온다. 돌아와서 최대 1분을 더 기다리는
+  // 것이 "새로고침해야만 알림이 바뀐다"의 정체였다.
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "VISIBLE",
+      env: IDLE_SCREEN,
+      lastRefreshedAt: null,
+      now: 1_000_000,
+    }),
+    true
+  );
+});
+
+test("🔴 종을 열면 즉시 다시 센다", () => {
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "BELL_OPENED",
+      env: IDLE_SCREEN,
+      lastRefreshedAt: null,
+      now: 1_000_000,
+    }),
+    true
+  );
+});
+
+test("🔴 최소 간격 안에 다시 오면 건너뛴다 — 앱을 여러 번 오가도 서버를 안 두드린다", () => {
+  const lastRefreshedAt = 1_000_000;
+  for (const trigger of ["VISIBLE", "BELL_OPENED", "INTERVAL"] as const) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger,
+        env: IDLE_SCREEN,
+        lastRefreshedAt,
+        // 방금 셌다. 1초 만에 또 셀 이유가 없다.
+        now: lastRefreshedAt + 1_000,
+      }),
+      false,
+      trigger
+    );
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger,
+        env: IDLE_SCREEN,
+        lastRefreshedAt,
+        // 간격이 딱 차기 1ms 전까지는 막힌다.
+        now: lastRefreshedAt + NOTIFICATION_REFRESH_MIN_GAP_MS - 1,
+      }),
+      false,
+      `${trigger} — 경계 직전`
+    );
+  }
+});
+
+test("최소 간격이 지나면 다시 센다", () => {
+  const lastRefreshedAt = 1_000_000;
+  for (const trigger of ["VISIBLE", "BELL_OPENED", "INTERVAL"] as const) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger,
+        env: IDLE_SCREEN,
+        lastRefreshedAt,
+        now: lastRefreshedAt + NOTIFICATION_REFRESH_MIN_GAP_MS,
+      }),
+      true,
+      trigger
+    );
+  }
+});
+
+test("🔴 최소 간격은 0보다 크고 주기보다 짧다", () => {
+  // 0이면 연타를 막지 못해 안전장치가 없는 것과 같고, 주기보다 길면 1분 주기가
+  // 제 시각에 못 돈다.
+  assert.ok(NOTIFICATION_REFRESH_MIN_GAP_MS > 0, "최소 간격이 없으면 연타가 그대로 서버로 간다");
+  assert.ok(
+    NOTIFICATION_REFRESH_MIN_GAP_MS < NOTIFICATION_REFRESH_INTERVAL_MS,
+    `${NOTIFICATION_REFRESH_MIN_GAP_MS}ms 는 주기(${NOTIFICATION_REFRESH_INTERVAL_MS}ms)를 막는다`
+  );
+});
+
+test("한 사람이 1분에 다시 세는 횟수는 최소 간격이 정한 만큼을 넘지 못한다", () => {
+  // 서버 부하의 최악을 이 한 줄로 셀 수 있어야 한다 — 즉시 다시 세는 계기를
+  // 늘리면서 이 값이 이번 변경의 안전장치다.
+  const worstCasePerMinute = Math.floor(60_000 / NOTIFICATION_REFRESH_MIN_GAP_MS);
+  assert.ok(worstCasePerMinute <= 6, `1분에 최대 ${worstCasePerMinute}번은 너무 잦다`);
+});
+
+test("아직 한 번도 안 셌으면(첫 화면) 최소 간격이 막을 것이 없다", () => {
+  for (const trigger of ["VISIBLE", "BELL_OPENED", "INTERVAL"] as const) {
+    assert.equal(
+      shouldRefreshNotificationsNow({ trigger, env: IDLE_SCREEN, lastRefreshedAt: null, now: 0 }),
+      true,
+      trigger
+    );
+  }
+});
+
+test("🔴 시계가 뒤로 가도 영영 막히지 않는다", () => {
+  // 사람이 시간을 고치거나 절전에서 깨어난 기기에서 지금 시각이 마지막으로 센
+  // 시각보다 앞설 수 있다. 그때 막아 버리면 시계가 따라잡을 때까지 안 세는
+  // 화면이 된다.
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "VISIBLE",
+      env: IDLE_SCREEN,
+      lastRefreshedAt: 1_000_000,
+      now: 1_000_000 - 60_000,
+    }),
+    true
+  );
+});
+
+test("🔴 화면이 안 보이면 어떤 계기로도 다시 세지 않는다", () => {
+  for (const trigger of ["INTERVAL", "VISIBLE", "BELL_OPENED"] as const) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger,
+        env: { ...IDLE_SCREEN, visibilityState: "hidden" },
+        lastRefreshedAt: null,
+        now: 1_000_000,
+      }),
+      false,
+      trigger
+    );
+  }
+});
+
+test("🔴 저절로 도는 갱신은 글자를 치는 중이면 그대로 쉰다", () => {
+  // 기존 규칙이다. 즉시 다시 세는 계기가 늘어도 이쪽은 달라지지 않는다.
+  for (const trigger of AUTOMATIC_TRIGGERS) {
+    for (const focusedTagName of ["INPUT", "TEXTAREA"]) {
+      assert.equal(
+        shouldRefreshNotificationsNow({
+          trigger,
+          env: { ...IDLE_SCREEN, focusedTagName },
+          lastRefreshedAt: null,
+          now: 1_000_000,
+        }),
+        false,
+        `${trigger} / ${focusedTagName}`
+      );
+    }
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger,
+        env: { ...IDLE_SCREEN, focusedTagName: "DIV", focusedIsContentEditable: true },
+        lastRefreshedAt: null,
+        now: 1_000_000,
+      }),
+      false,
+      `${trigger} / contenteditable`
+    );
+  }
+});
+
+test("🔴 종을 여는 것만은 입력 중이어도 다시 센다 — 사람이 지금 보려는 것이 그 목록이다", () => {
+  // 저절로 도는 갱신을 입력 중에 미루는 것은 사람을 방해하지 않으려는 것이다.
+  // 종은 반대다 — 그 사람이 직접 열었고, 여기서 건너뛰면 방금 연 패널이 낡은 채로
+  // 남아 "새로고침해야만 바뀐다"가 그 자리에서 되풀이된다.
+  for (const focusedTagName of ["INPUT", "TEXTAREA"]) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger: "BELL_OPENED",
+        env: { ...IDLE_SCREEN, focusedTagName },
+        lastRefreshedAt: null,
+        now: 1_000_000,
+      }),
+      true,
+      focusedTagName
+    );
+  }
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "BELL_OPENED",
+      env: { ...IDLE_SCREEN, focusedTagName: "DIV", focusedIsContentEditable: true },
+      lastRefreshedAt: null,
+      now: 1_000_000,
+    }),
+    true,
+    "contenteditable"
+  );
 });

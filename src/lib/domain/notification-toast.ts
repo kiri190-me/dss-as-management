@@ -9,11 +9,16 @@ import type { NotificationItem } from "./notifications";
  * 브라우저 API를 부르는 자리는 components/layout/BrowserNotifications.tsx
  * 하나뿐이고, 그래서 이 규칙들이 Node 단위 테스트로 그대로 돌아간다.
  *
- * ── 서비스워커·웹 푸시가 아니다 ─────────────────────────────────────────
+ * ── 웹 푸시가 아니다 ────────────────────────────────────────────────────
  * 여기서 만드는 것은 "화면을 열어 둔 동안" 오는 알림이다. 앱을 닫아도 오는
  * 알림(웹 푸시)은 HTTPS와 인터넷과 바깥 푸시 서비스가 필요한데, 이 시스템은
  * 사내망에서 http로 접속하고 나중에 인터넷 없는 NAS에서 도는 것이 전제라
- * 그 갈래는 보류돼 있다. `public/`에 서비스워커가 없는 이유가 그것이다.
+ * 그 갈래는 보류돼 있다 — `PushManager`도 VAPID 키도 이 저장소에 없다.
+ *
+ * `public/sw.js`는 그것과 **다른 것**이다. 안드로이드 Chrome이 페이지에서
+ * 만드는 알림을 금지하기 때문에, 폰에서 알림을 띄우려면 서비스워커를 통로로
+ * 써야만 한다. 그 파일은 알림을 띄우고 클릭을 받는 일만 하고 요청을 하나도
+ * 가로채지 않는다(자세한 까닭은 그 파일의 머리 주석).
  *
  * ── 같은 알림이 반복해서 뜨지 않게 하는 방법 ────────────────────────────
  * 개수만 비교하면 안 된다 — 하나가 사라지고 하나가 생기면 개수가 같아서 못
@@ -262,6 +267,209 @@ export function describeBrowserNotificationStatus(
   }
 }
 
+// ──────────────────────────────────── 어느 통로로 알림창에 넘길 것인가
+
+/**
+ * 알림창을 띄우는 통로.
+ *
+ * ── 왜 통로가 둘인가 ────────────────────────────────────────────────────
+ * 🔴 안드로이드 Chrome은 페이지에서 직접 만드는 알림을 **금지**한다.
+ * `new Notification(...)`을 부르면 그 자리에서 던진다:
+ *
+ *     TypeError: Failed to construct 'Notification': Illegal constructor.
+ *                Use ServiceWorkerRegistration.showNotification() instead.
+ *
+ * 그래서 폰에서는 서비스워커(`public/sw.js`)를 통로로 써야 하고, 서비스워커가
+ * 없거나 등록에 실패한 곳에서는 종전대로 페이지에서 만든다. 데스크톱 Chrome·
+ * Firefox·Edge는 둘 다 되므로 서비스워커 쪽을 쓴다 — 통로가 하나로 모이면
+ * 클릭 처리도 한 군데(`sw.js`의 notificationclick)로 모인다.
+ */
+export type NotificationToastChannel =
+  /** `registration.showNotification(...)`. 안드로이드에서 되는 유일한 길이다. */
+  | "SERVICE_WORKER"
+  /** `new Notification(...)`. 서비스워커가 없는 환경의 예비 통로. */
+  | "PAGE"
+  /** 둘 다 없다. 띄울 수 없다. */
+  | "UNAVAILABLE";
+
+/**
+ * 지금 이 환경에서 어느 통로를 쓸 것인가.
+ *
+ * 입력은 **사실 두 개**뿐이고 브라우저 전역을 만지지 않는다 — 그래서 이 판정이
+ * Node 시험으로 그대로 돈다. 실제로 `navigator.serviceWorker`를 두드리고
+ * `window.Notification`이 있는지 보는 일은
+ * components/layout/BrowserNotifications.tsx가 한다.
+ */
+export function resolveNotificationToastChannel(env: {
+  /** `/sw.js` 등록에 성공했는가. 실패했거나 서비스워커가 없는 브라우저면 false. */
+  hasServiceWorkerRegistration: boolean;
+  /** `new Notification(...)`을 만들 수 있는가(있다는 뜻이지 되는 뜻은 아니다). */
+  hasNotificationConstructor: boolean;
+}): NotificationToastChannel {
+  if (env.hasServiceWorkerRegistration) return "SERVICE_WORKER";
+  if (env.hasNotificationConstructor) return "PAGE";
+  return "UNAVAILABLE";
+}
+
+// ────────────────────────────────────────── 브라우저에 넘길 알림 한 건
+
+/** 폰 알림창은 아이콘 자리가 비면 볼품이 없다. PWA 아이콘을 그대로 쓴다. */
+export const NOTIFICATION_TOAST_ICON = "/icons/icon-192.png";
+
+/**
+ * 브라우저에 그대로 넘길 설정.
+ *
+ * DOM의 `NotificationOptions`를 쓰지 않고 이 모양을 따로 두는 이유가 둘이다 —
+ * 이 파일이 브라우저 타입에 기대지 않아야 Node에서 돌고, `renotify`가 표준에는
+ * 있는데 TypeScript의 `NotificationOptions`에는 아직 없어서 그 쪽 타입으로는
+ * 이 값을 담을 수도 없다.
+ */
+export type NotificationToastOptions = {
+  body: string;
+  /**
+   * 같은 알림이 두 번 만들어져도 알림창에 하나만 남게 하는 열쇠.
+   *
+   * 🔴 `renotify`는 `tag` 없이 주면 브라우저가 던진다. 둘은 반드시 함께 간다.
+   */
+  tag: string;
+  /**
+   * 🔴 같은 `tag`로 다시 와도 **다시 알린다**(소리/진동/팝업).
+   *
+   * 기본값은 false이고, 그때 브라우저는 같은 tag의 알림을 **조용히 대체**한다.
+   * 재고 부족 알림의 id는 `PART_STOCK_BELOW_MINIMUM:{품번}:{소유자}`라 재고를
+   * 채워 사라졌다가 다시 부족해져도 **똑같다** — 그래서 종에는 새로 뜨는데
+   * 알림창에서는 아무 소리도 안 나는 일이 실제로 있었다. 이 한 줄이 그 처방이다.
+   */
+  renotify: true;
+  icon: string;
+  /**
+   * 누르면 갈 곳.
+   *
+   * 서비스워커로 띄우면 클릭이 **페이지가 아니라 서비스워커에** 닿는다 —
+   * 페이지의 `notification.onclick`은 불리지 않는다. 그래서 주소를 알림에
+   * 실어 보내고 `sw.js`의 notificationclick이 그것을 연다.
+   */
+  data: { href: string };
+};
+
+export type NotificationToast = {
+  title: string;
+  options: NotificationToastOptions;
+};
+
+/**
+ * 알림 한 건을 브라우저에 넘길 모양으로 접는다.
+ *
+ * 순수 함수라서 **브라우저 없이** 시험할 수 있다 — `renotify`가 켜져 있는지,
+ * `tag`가 함께 있는지 같은 계약이 여기서 붙잡힌다. 실제로 넘기는 일만
+ * BrowserNotifications.tsx가 한다.
+ */
+export function buildNotificationToast(input: {
+  title: string;
+  body: string;
+  tag: string;
+  href: string;
+}): NotificationToast {
+  return {
+    title: input.title,
+    options: {
+      body: input.body,
+      tag: input.tag,
+      renotify: true,
+      icon: NOTIFICATION_TOAST_ICON,
+      data: { href: input.href },
+    },
+  };
+}
+
+/** 시험 알림의 `tag`. 늘 같은 값이라 두 번 눌러도 `renotify` 덕에 두 번 울린다. */
+export const NOTIFICATION_SELF_TEST_TAG = "dss.notification.self-test";
+
+/**
+ * 종 패널의 `시험 알림` 단추가 띄우는 알림.
+ *
+ * 이 단추가 이번 작업의 **진단 장치**다. 다음에 또 "폰에 알림이 안 뜬다"가
+ * 올라왔을 때 코드를 뒤지지 않고 이것을 눌러 보면 된다 — 뜨면 알림 통로는
+ * 멀쩡하고 판정 쪽 문제이고, 안 뜨면 그 자리에 까닭이 적힌다.
+ */
+export function buildNotificationSelfTestToast(): NotificationToast {
+  return buildNotificationToast({
+    title: "시험 알림",
+    body: "이 알림창이 보이면 이 기기에서 알림이 정상으로 뜹니다.",
+    tag: NOTIFICATION_SELF_TEST_TAG,
+    href: "/",
+  });
+}
+
+// ──────────────────────────────────────────── 못 띄웠을 때 뭐라고 말할 것인가
+
+/**
+ * 알림창에 넘긴 결과.
+ *
+ * 🔴 실패를 **삼키지 않는다.** 이 문제가 몇 세션째 진단되지 않은 원인이 정확히
+ * 그것이었다 — 안드로이드에서 던지는 `Illegal constructor`를 빈 catch가 조용히
+ * 먹어 버려서, 폰에서는 아무 일도 안 일어나고 아무 흔적도 안 남았다.
+ */
+export type NotificationToastOutcome =
+  | { ok: true; channel: "SERVICE_WORKER" | "PAGE" }
+  | { ok: false; reason: string };
+
+/** 통로가 아예 없을 때. */
+export const NOTIFICATION_TOAST_UNAVAILABLE_REASON =
+  "이 브라우저에서는 알림창을 띄울 수 없습니다 — 서비스워커도, 페이지에서 만드는 알림도 쓸 수 없습니다.";
+
+function notificationToastErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message !== "") return error.message;
+  if (typeof error === "string" && error !== "") return error;
+  try {
+    const text = String(error);
+    return text === "" ? "알 수 없는 까닭" : text;
+  } catch {
+    // 문자열로 바꾸는 것조차 던지는 값이 있다(toString이 깨진 객체).
+    return "알 수 없는 까닭";
+  }
+}
+
+/**
+ * 브라우저가 던진 것을 **사람이 읽을 한 줄**로 바꾼다.
+ *
+ * 원문은 영어 한 줄짜리 예외 메시지라 사무실에서 그대로 보여 줘 봐야 "고장"으로
+ * 읽힌다. 아는 까닭은 무엇을 해야 하는지까지 적고, 모르는 까닭은 원문을 그대로
+ * 붙여 둔다 — 숨기는 것보다 낫다.
+ */
+export function describeNotificationToastFailure(error: unknown): string {
+  const raw = notificationToastErrorMessage(error);
+
+  // 🔴 안드로이드 Chrome. 페이지에서 `new Notification(...)`을 만들면 이것을
+  // 던진다. 신고 ①("폰에서 알림이 안 뜬다")의 정체가 이 한 줄이었다.
+  if (raw.includes("Illegal constructor")) {
+    return "이 브라우저는 페이지에서 직접 알림을 못 만듭니다 — 서비스워커로 띄워야 합니다(안드로이드 Chrome). 서비스워커 등록이 안 된 상태입니다.";
+  }
+  // `renotify`를 `tag` 없이 준 경우. 지금 코드로는 날 수 없지만, 누가 tag를
+  // 떼면 여기로 온다 — 그때 원문만 보면 무슨 말인지 알기 어렵다.
+  if (raw.includes("renotify")) {
+    return "알림 설정이 잘못됐습니다 — 다시 알리기(renotify)를 켰는데 태그가 비어 있습니다.";
+  }
+  if (/permission|not\s*allowed/i.test(raw)) {
+    return "알림 권한이 없습니다 — 브라우저 설정에서 이 사이트의 알림을 허용해 주세요.";
+  }
+  return `알림창을 띄우지 못했습니다 — ${raw}`;
+}
+
+/**
+ * 결과를 종 패널에 적을 한 줄로.
+ *
+ * 성공했을 때도 할 말이 있다. 브라우저는 "띄웠다"까지만 알고, 그 뒤에 기기의
+ * 알림 설정(안드로이드의 앱 알림 스위치, 윈도우의 집중 지원/방해 금지)이
+ * 가로막으면 **아무 오류 없이** 안 보인다. 그때 다음에 볼 곳을 함께 적어 둔다.
+ */
+export function describeNotificationToastOutcome(outcome: NotificationToastOutcome): string {
+  if (!outcome.ok) return outcome.reason;
+
+  const channel = outcome.channel === "SERVICE_WORKER" ? "서비스워커" : "페이지";
+  return `알림을 띄웠습니다(${channel} 통로). 알림창이 보이지 않으면 기기의 알림 설정에서 이 브라우저의 알림이 꺼져 있거나 방해 금지가 켜져 있는지 확인해 주세요.`;
+}
+
 // ─────────────────────────────────────────────────────────────── 다시 세기
 
 /**
@@ -306,3 +514,99 @@ export function shouldRefreshNotifications(env: NotificationRefreshEnvironment):
   if (env.focusedTagName === "INPUT" || env.focusedTagName === "TEXTAREA") return false;
   return true;
 }
+
+// ──────────────────────────────────────── 주기를 기다리지 않고 즉시 다시 세기
+
+/**
+ * 무엇 때문에 다시 세는가.
+ *
+ * 1분 주기만으로는 폰에서 "새로고침을 해야만 알림이 바뀐다"가 된다. 다른 앱에
+ * 나가 있는 동안은 화면이 안 보여 쉬고, 돌아와도 **다음 주기까지 최대 1분**을 더
+ * 기다리기 때문이다. 그 사이에 사람이 보는 숫자는 낡은 값이다.
+ *
+ * 처방은 주기를 짧게 하는 것이 아니라(한 번 세는 데 조회가 여러 개 돈다)
+ * **사람의 행동에 맞춰** 그 자리에서 한 번 더 세는 것이다.
+ */
+export type NotificationRefreshTrigger =
+  /** 1분 주기가 돌아왔다. */
+  | "INTERVAL"
+  /** 다른 앱·다른 탭에 있다가 이 화면으로 돌아왔다. */
+  | "VISIBLE"
+  /** 사람이 종을 열었다 — 지금 알림을 보겠다는 뜻이다. */
+  | "BELL_OPENED";
+
+/**
+ * 다시 센 지 이만큼 안 됐으면 건너뛴다.
+ *
+ * 즉시 다시 세는 계기가 둘 늘었으므로(화면 복귀·종 열기) 이 값이 이번 변경의
+ * **안전장치**다. 폰에서 앱을 빠르게 오가거나 종을 연달아 열고 닫는 것은 몇 초
+ * 안에 일어나는 일이라, 그것을 그대로 서버에 흘리면 한 사람이 1분에 수십 번까지
+ * 두드릴 수 있다.
+ *
+ * 10초로 잡은 까닭:
+ * - **연타를 접기에 충분하다.** 앱을 오가거나 종을 여닫는 연속 동작은 대개 몇 초
+ *   안에 끝난다. 그 묶음이 한 번으로 접힌다.
+ * - **사람이 낡았다고 느낄 만큼 길지 않다.** 잠깐 다른 앱을 보고 오는 데 보통
+ *   10초는 넘게 걸리고, 그런 복귀에는 언제나 새로 센 값이 나온다. 10초 안에 돌아온
+ *   사람에게 건너뛴 값은 10초도 안 된 값이라 사실상 지금 값이다.
+ * - **최악을 셀 수 있다.** 한 사람이 아무리 연타해도 1분에 6번을 넘지 못한다
+ *   (60초 ÷ 10초). 주기 1번도 같은 문을 지나므로 그 6번 안에 든다.
+ */
+export const NOTIFICATION_REFRESH_MIN_GAP_MS = 10_000;
+
+/**
+ * 지금 다시 세도 되는가 — 계기와 마지막으로 센 시각까지 함께 보고 정한다.
+ *
+ * 🔴 지금 시각을 **인자로 받는다.** 안에서 `Date.now()`를 부르면 이 판정을
+ * 시험할 수 없다(이 파일이 브라우저 전역에도 시계에도 손대지 않는다는 규칙이
+ * 그래서 있다).
+ *
+ * ── 종만 입력 여부를 묻지 않는다 ────────────────────────────────────────
+ * 저절로 도는 것들(주기·화면 복귀)은 글자를 치는 중이면 쉰다 —
+ * shouldRefreshNotifications 그대로다. 종은 다르다. **사람이 직접 누른 것**이고
+ * 그 사람이 지금 보려는 것이 바로 그 목록이라, 여기서 건너뛰면 방금 연 패널이
+ * 낡은 채로 남는다("새로고침을 해야만 바뀐다"가 되는 그 자리다). 대신 화면이
+ * 보이는가는 종에도 그대로 따진다.
+ *
+ * ── 마지막으로 센 적이 없으면 통과 ──────────────────────────────────────
+ * `lastRefreshedAt`이 null이면 이 화면에서 아직 한 번도 다시 센 적이 없다는
+ * 뜻이라 최소 간격이 걸릴 것이 없다.
+ */
+export function shouldRefreshNotificationsNow(input: {
+  trigger: NotificationRefreshTrigger;
+  env: NotificationRefreshEnvironment;
+  /** 마지막으로 다시 센 시각. 아직 없으면 null. */
+  lastRefreshedAt: number | null;
+  /** 지금 시각(`Date.now()`). 부르는 쪽이 넘긴다. */
+  now: number;
+}): boolean {
+  const env =
+    input.trigger === "BELL_OPENED"
+      ? { ...input.env, focusedTagName: null, focusedIsContentEditable: false }
+      : input.env;
+  if (!shouldRefreshNotifications(env)) return false;
+
+  if (input.lastRefreshedAt !== null) {
+    const elapsed = input.now - input.lastRefreshedAt;
+    // 시계가 뒤로 간 경우(음수)에는 막지 않는다. 막아 버리면 시계가 다시 따라잡을
+    // 때까지 영영 안 세는 화면이 된다 — 사람이 시간을 고치거나 절전에서 깨어난
+    // 기기에서 실제로 일어날 수 있는 일이다.
+    if (elapsed >= 0 && elapsed < NOTIFICATION_REFRESH_MIN_GAP_MS) return false;
+  }
+
+  return true;
+}
+
+/**
+ * 종을 열었으니 지금 다시 세라고 창 전체에 알리는 신호.
+ *
+ * 종(NotificationBell)과 다시 세는 쪽(BrowserNotifications)은 화면의 서로 다른
+ * 가지에 있어 한쪽의 state가 다른 쪽에 닿지 않는다 —
+ * NOTIFICATION_PERMISSION_CHANGED_EVENT와 똑같은 사정이고, 그래서 같은 방법을
+ * 쓴다. 이름을 두 파일에 각각 적어 두면 한쪽만 고쳐졌을 때 조용히 끊기므로
+ * 여기 한 번만 적는다.
+ *
+ * 🔴 이 신호는 **알림 권한과 무관하다.** 브라우저 알림을 안 받는 사람도 종은
+ * 본다. 사람이 직접 누른 것이므로 서버를 한 번 두드릴 이유가 충분하다.
+ */
+export const NOTIFICATION_PANEL_OPENED_EVENT = "dss:notification-panel-opened";

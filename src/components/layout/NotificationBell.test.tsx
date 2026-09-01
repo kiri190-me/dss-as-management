@@ -2,7 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import NotificationBell, { BrowserNotificationNotice, NotificationList } from "./NotificationBell";
+import NotificationBell, {
+  BrowserNotificationNotice,
+  NotificationList,
+  NotificationSelfTest,
+} from "./NotificationBell";
 import {
   NOTIFICATION_KINDS,
   buildApprovalNotification,
@@ -11,6 +15,10 @@ import {
   buildPendingPartRequestNotification,
 } from "@/lib/domain/notifications";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
+import {
+  NOTIFICATION_PANEL_OPENED_EVENT,
+  describeNotificationToastFailure,
+} from "@/lib/domain/notification-toast";
 
 /**
  * 정적 렌더로 볼 수 있는 것은 **첫 화면**(닫힌 종)과, 따로 떼어 둔 목록
@@ -201,4 +209,98 @@ test("서버 렌더에서 종이 알림 기능을 만지다 터지지 않는다"
   // Notification·localStorage를 렌더 중에 직접 만지면 서버에서 터진다.
   // useSyncExternalStore의 서버 스냅샷이 그것을 막는다.
   assert.doesNotThrow(() => renderToStaticMarkup(<NotificationBell items={oneOfEachKind()} />));
+});
+
+// ───────────────────────────────── 시험 알림 — 왜 안 뜨는지 화면이 말한다
+
+test("🔴 띄울 수 있는 상태에서는 `시험 알림` 단추를 그린다", () => {
+  // 알림이 안 뜬다는 신고는 원인이 화면 밖에 있어 코드로 좇기 어렵다. 이
+  // 단추가 그 자리에서 실제로 한 번 띄워 보는 진단 장치다.
+  const html = renderToStaticMarkup(<NotificationSelfTest status="GRANTED" onTest={() => {}} result={null} />);
+
+  assert.ok(html.includes("<button"));
+  assert.ok(html.includes("시험 알림"));
+});
+
+test("아직 띄울 수 없는 상태에서는 시험 단추를 그리지 않는다", () => {
+  // 권한이 없다는 안내는 바로 위 BrowserNotificationNotice가 이미 한다.
+  // 눌러도 같은 말만 반복하는 단추를 하나 더 두면 그것이 더 헷갈린다.
+  for (const status of ["UNKNOWN", "INSECURE_CONTEXT", "UNSUPPORTED", "ASKABLE", "DENIED"] as const) {
+    assert.equal(
+      renderToStaticMarkup(<NotificationSelfTest status={status} onTest={() => {}} result={null} />),
+      "",
+      status
+    );
+  }
+});
+
+test("아직 안 눌렀으면 무엇을 하는 단추인지 알려 준다", () => {
+  const html = renderToStaticMarkup(<NotificationSelfTest status="GRANTED" onTest={() => {}} result={null} />);
+  assert.ok(html.includes("왜 안 뜨는지"));
+});
+
+// ─────────────────────────── 종을 열면 그 자리에서 다시 센다
+
+/**
+ * 펼침은 브라우저 이벤트라 정적 렌더로는 볼 수 없다. 대신 **두 파일 사이의
+ * 계약**을 소스로 붙잡는다 — 신호 하나로 이어져 있고, 그 신호가 권한으로 막히지
+ * 않는다는 것. 한쪽만 고쳐지면 조용히 끊기는 자리라서 시험이 필요하다.
+ */
+function readLayoutSource(fileName: "NotificationBell.tsx" | "BrowserNotifications.tsx") {
+  return readFileSync(new URL(`./${fileName}`, import.meta.url), "utf8");
+}
+
+test("🔴 종을 열면 다시 세라는 신호를 보낸다 — 닫을 때는 보내지 않는다", () => {
+  // 여기 그려지는 목록은 서버 렌더 때 한 번 계산돼 내려온 값이라, 종을 열어도
+  // 다시 세지 않으면 마지막으로 센 뒤에 생긴 알림이 안 보인다.
+  const source = readLayoutSource("NotificationBell.tsx");
+
+  const dispatchIndex = source.indexOf(`dispatchEvent(new Event(NOTIFICATION_PANEL_OPENED_EVENT))`);
+  assert.ok(dispatchIndex > 0, "종이 여는 신호를 보내지 않는다");
+
+  const effectStart = source.lastIndexOf("useEffect(", dispatchIndex);
+  assert.ok(effectStart > 0, "신호를 보내는 자리가 효과 안에 있어야 한다");
+  assert.ok(
+    source.slice(effectStart, dispatchIndex).includes("if (!isOpen) return;"),
+    "닫을 때는 보내지 않는다 — 다 봤다는 행동이라 서버를 두드릴 이유가 없다"
+  );
+});
+
+test("🔴 종 열기 신호는 알림 권한과 무관하게 받는다 — 알림을 안 받는 사람도 종은 본다", () => {
+  // 이 조건이 붙는 순간 알림을 안 받는 사람의 종은 다시 "새로고침해야 바뀌는"
+  // 종으로 되돌아간다. 그 사람에게는 종이 새것을 아는 유일한 창구다.
+  const source = readLayoutSource("BrowserNotifications.tsx");
+
+  const listenIndex = source.indexOf("addEventListener(NOTIFICATION_PANEL_OPENED_EVENT");
+  assert.ok(listenIndex > 0, "종에서 오는 신호를 듣는 자리가 없다");
+
+  const effectStart = source.lastIndexOf("useEffect(", listenIndex);
+  assert.ok(effectStart > 0, "듣는 자리가 효과 안에 있어야 한다");
+  assert.ok(
+    !source.slice(effectStart, listenIndex).includes("canNotify"),
+    "종에서 오는 신호를 권한으로 막고 있다"
+  );
+});
+
+test("🔴 신호 이름은 도메인에 한 번만 적힌다 — 두 파일에 각각 적으면 조용히 끊긴다", () => {
+  for (const fileName of ["NotificationBell.tsx", "BrowserNotifications.tsx"] as const) {
+    const source = readLayoutSource(fileName);
+    assert.ok(source.includes("NOTIFICATION_PANEL_OPENED_EVENT"), `${fileName} 가 신호를 쓰지 않는다`);
+    assert.ok(
+      !source.includes(NOTIFICATION_PANEL_OPENED_EVENT),
+      `${fileName} 에 신호 이름이 직접 적혀 있다 — 한쪽만 고치면 이어지지 않는다`
+    );
+  }
+});
+
+test("🔴 눌러 본 결과를 그 자리에 적는다 — 못 떴으면 왜 못 떴는지", () => {
+  // 안드로이드 Chrome이 던지는 그 예외. 예전에는 빈 catch가 이것을 삼켜서
+  // 폰에서는 아무 일도 안 일어나고 아무 흔적도 안 남았다.
+  const reason = describeNotificationToastFailure(
+    new TypeError("Failed to construct 'Notification': Illegal constructor.")
+  );
+  const html = renderToStaticMarkup(<NotificationSelfTest status="GRANTED" onTest={() => {}} result={reason} />);
+
+  assert.ok(html.includes("서비스워커"), "왜 못 떴는지가 화면에 보여야 한다");
+  assert.ok(!html.includes("왜 안 뜨는지"), "결과가 나왔으면 안내 문구 자리를 결과가 차지한다");
 });

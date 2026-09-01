@@ -5,11 +5,15 @@ import Link from "next/link";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
 import {
+  NOTIFICATION_PANEL_OPENED_EVENT,
   NOTIFICATION_PERMISSION_CHANGED_EVENT,
+  buildNotificationSelfTestToast,
   describeBrowserNotificationStatus,
+  describeNotificationToastOutcome,
   resolveBrowserNotificationStatus,
   type BrowserNotificationStatus,
 } from "@/lib/domain/notification-toast";
+import { showBrowserNotificationToast } from "./BrowserNotifications";
 
 /**
  * ============================================================================
@@ -140,6 +144,53 @@ export function BrowserNotificationNotice({
 }
 
 /**
+ * 🔴 `시험 알림` — 왜 안 뜨는지 화면이 말해 주는 자리.
+ *
+ * 알림이 안 뜬다는 신고는 원인이 화면 밖에 있어서 코드로 좇기가 어렵다. 실제로
+ * 여러 세션 동안 못 잡은 것이 하나 있었다 — 안드로이드 Chrome은 페이지에서
+ * 직접 만드는 알림을 금지하고 `Illegal constructor`를 던지는데, 그것을 빈
+ * catch가 삼켜서 폰에서는 아무 일도 안 일어나고 아무 흔적도 안 남았다.
+ *
+ * 이 단추가 그 침묵을 없앤다. 누르면 알림을 실제로 한 번 띄우고 **그 자리에**
+ * 결과를 적는다 — 떴으면 어느 통로로 떴는지, 못 떴으면 왜 못 떴는지. 다음에
+ * 같은 신고가 오면 코드를 뒤지지 말고 이것부터 눌러 보면 된다.
+ *
+ * 띄울 수 있는 상태(GRANTED)에서만 그린다. 허락도 안 받은 상태에서 그리면
+ * "권한이 없습니다"만 반복해서 알려 주는 단추가 되는데, 그 안내는 이미 바로
+ * 위 BrowserNotificationNotice가 하고 있다.
+ *
+ * 뜬 결과를 판정하는 말(문구)은 도메인이 정한다 — 여기는 받은 글자를 그릴 뿐이라
+ * 정적 렌더로 검사할 수 있다.
+ */
+export function NotificationSelfTest({
+  status,
+  onTest,
+  result,
+}: {
+  status: BrowserNotificationStatus;
+  onTest: () => void;
+  /** 방금 눌러 본 결과. 아직 안 눌렀으면 null. */
+  result: string | null;
+}) {
+  if (status !== "GRANTED") return null;
+
+  return (
+    <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <button
+        type="button"
+        onClick={onTest}
+        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        시험 알림
+      </button>
+      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+        {result ?? "눌러 보면 이 기기에서 알림이 뜨는지, 안 뜨면 왜 안 뜨는지 여기에 적습니다."}
+      </p>
+    </div>
+  );
+}
+
+/**
  * 이 브라우저가 지금 알림을 띄울 수 있는가 — 서버 렌더와 어긋나지 않게 알아내는 방법.
  *
  * 렌더 중에 `Notification`을 직접 만지면 서버에서 터진다(이 파일은 클라이언트
@@ -184,6 +235,8 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
    */
   const [statusAfterAsking, setStatusAfterAsking] = useState<BrowserNotificationStatus | null>(null);
   const notificationStatus = statusAfterAsking ?? detectedStatus;
+  /** `시험 알림`을 눌러 본 결과. 아직 안 눌렀으면 null. */
+  const [selfTestResult, setSelfTestResult] = useState<string | null>(null);
 
   // 세는 규칙은 여기서 정하지 않는다 — 사이드바 배지와 같은 순수 헬퍼를 쓴다.
   const count = countNotificationTargets(items.map((item) => item.targetKey));
@@ -210,6 +263,31 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
+  }, [isOpen]);
+
+  /**
+   * 🔴 종을 여는 순간 "지금 다시 세라"고 알린다.
+   *
+   * 여기 그려지는 목록은 서버 렌더 때 한 번 계산돼 내려온 값이라, 그대로 두면
+   * 마지막으로 센 뒤에 생긴 알림이 안 보인다. 종을 여는 것은 **사람이 지금 알림을
+   * 보겠다는 행동**이므로 그 자리에서 한 번 다시 세게 한다.
+   *
+   * 실제로 다시 세는 일은 BrowserNotifications가 한다 — 화면의 다른 가지에 있어
+   * 이 state가 닿지 않으므로 창 전체 신호로 잇는다(권한 신호와 같은 방법이고,
+   * 이름은 도메인에 한 번만 적혀 있다). 그쪽은 이 신호를 **권한과 무관하게**
+   * 듣는다: 브라우저 알림을 안 받는 사람도 종은 보기 때문이다.
+   *
+   * 닫을 때는 보내지 않는다(`isOpen`일 때만). 닫는 것은 보겠다는 행동이 아니라
+   * 다 봤다는 행동이라 서버를 두드릴 이유가 없다. 여닫기를 연달아 해도 저쪽의
+   * 최소 간격이 막는다.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      window.dispatchEvent(new Event(NOTIFICATION_PANEL_OPENED_EVENT));
+    } catch {
+      // 신호를 못 보내도 지금 있는 목록은 그대로 보인다 — 다음 주기에 따라잡는다.
+    }
   }, [isOpen]);
 
   /**
@@ -241,6 +319,19 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
         // 신호를 못 보내도 저쪽이 다음 주기에 스스로 알아챈다.
       }
     }
+  }
+
+  /**
+   * 🔴 알림을 실제로 한 번 띄워 보고 결과를 화면에 적는다.
+   *
+   * 실제로 띄우는 일은 BrowserNotifications.tsx가 한다 — 브라우저 알림 API를
+   * 부르는 자리는 그 파일 하나라는 규칙을 여기서도 지킨다. 그쪽은 던지지 않고
+   * **까닭을 돌려주므로**, 이 화면이 그것을 그대로 적을 수 있다.
+   */
+  async function handleNotificationSelfTest() {
+    setSelfTestResult("알림을 띄우는 중…");
+    const outcome = await showBrowserNotificationToast(buildNotificationSelfTestToast());
+    setSelfTestResult(describeNotificationToastOutcome(outcome));
   }
 
   return (
@@ -290,6 +381,11 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
           <BrowserNotificationNotice
             status={notificationStatus}
             onAsk={() => void handleAskForNotificationPermission()}
+          />
+          <NotificationSelfTest
+            status={notificationStatus}
+            onTest={() => void handleNotificationSelfTest()}
+            result={selfTestResult}
           />
         </div>
       )}
