@@ -126,11 +126,31 @@ export function findRowByCellText(
  * 🔴 **여러 구간을 고칠 때는 아래에서부터 부른다.** 위를 먼저 고치면 아래 구간의
  * firstRow 가 이미 밀려 있어 엉뚱한 줄을 잡는다. 부르는 쪽이 지켜야 하는 규칙이라
  * 여기서 강제하지 못한다 — 대신 이 함수는 **몇 줄이 밀렸는지 돌려준다.**
+ *
+ * ── 🔴 줄이 0개인 구간도 늘릴 수 있다 — `modelRow` ─────────────────────
+ * 제너레이터 양식의 「② 수리 작업」 은 머리글만 있고 그 아래에 줄이 하나도 없다.
+ * 구간 안에 복제할 본이 없으니 예전에는 여기서 던졌고, 그래서 그 구역은 통째로
+ * 비어 나갔다.
+ *
+ * 양식에 손으로 빈 줄을 넣어 푸는 길은 택하지 않는다 — 이 양식들은 사람이 건마다
+ * 다시 저장하는 문서라 다음 판에서 그대로 다시 깨지고, 그때 증상은 견적서
+ * 내려받기가 통째로 실패하는 것이다. 대신 **부르는 쪽이 "이 행을 본으로 써라"고
+ * 건네준다**(같은 서식의 다른 묶음 줄). 그래도 본이 하나도 없으면 던진다 —
+ * 서식 없는 줄을 조용히 만들면 문서에서 그 줄만 모양이 다르다.
  * ============================================================================
  */
 export function resizeRowBlock(
   rows: readonly SheetRow[],
-  params: { firstRow: number; currentCount: number; targetCount: number }
+  params: {
+    firstRow: number;
+    currentCount: number;
+    targetCount: number;
+    /**
+     * 구간이 비어 있을 때 복제할 본의 행 번호. 구간 안에 줄이 하나라도 있으면
+     * **그쪽이 이긴다** — 그 묶음의 제 서식을 지키는 편이 맞다.
+     */
+    modelRow?: number;
+  }
 ): { rows: SheetRow[]; delta: number } {
   const { firstRow, currentCount, targetCount } = params;
   if (currentCount < 0 || targetCount < 0) {
@@ -151,13 +171,18 @@ export function resizeRowBlock(
 
   let nextInside: SheetRow[];
   if (delta > 0) {
-    // 복제할 본이 필요하다. 구간이 비어 있으면(currentCount 0) 복제할 것이 없다 —
-    // 그때는 부르는 쪽이 양식에 최소 한 줄은 두어야 한다. 조용히 서식 없는 줄을
-    // 만들면 문서에서 그 줄만 모양이 다르다.
-    const model = inside[inside.length - 1];
+    // 복제할 본이 필요하다. 구간 안의 마지막 줄이 1순위고, 구간이 비어 있으면
+    // (currentCount 0) 부르는 쪽이 건네준 `modelRow` 를 쓴다. 둘 다 없으면
+    // 던진다 — 조용히 서식 없는 줄을 만들면 문서에서 그 줄만 모양이 다르다.
+    const model =
+      inside[inside.length - 1] ??
+      (params.modelRow === undefined
+        ? undefined
+        : rows.find((row) => row.rowNumber === params.modelRow));
     if (!model) {
       throw new SheetRowError(
-        `${firstRow}행 구간이 비어 있어 늘릴 본이 없습니다. 양식에 줄을 하나 이상 두어야 합니다.`
+        `${firstRow}행 구간이 비어 있어 늘릴 본이 없습니다. 양식에 줄을 하나 이상 두거나 ` +
+          `복제할 본(modelRow)을 건네주어야 합니다.`
       );
     }
     nextInside = [...inside];

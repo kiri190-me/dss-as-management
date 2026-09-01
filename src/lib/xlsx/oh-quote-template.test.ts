@@ -212,6 +212,109 @@ test("🔴 #REF! 가 한 칸도 남지 않는다", { skip }, () => {
   );
 });
 
+// ── 작업 내역 세 묶음 ───────────────────────────────────────────────────
+
+/** 양식의 「③ 통전검사[출하검사]」 아래 일곱 줄. 실측값이다. */
+const TEMPLATE_POWER_TEST = [
+  "절연저항치・내압시험",
+  "각 AMP기판의 전압・전류치 확인",
+  "정격출력시험",
+  "스크리닝시험",
+  "오픈・쇼트시험",
+  "출력의 직선성 확인",
+  "에이징 시험 (정격연속출력:1시간)",
+];
+
+/**
+ * 🔴 이 양식의 ② 는 `OH 및 수리 작업` 이고, 내자와 마찬가지로 **줄이 0개**다.
+ * 그리고 여기서는 줄 수가 바뀌면 **합계 범위의 끝도 따라 움직여야 한다** —
+ * ③ 의 마지막 항목이 그 끝이기 때문이다.
+ */
+test("작업 내역: 준 대로 채워지고, 0줄짜리 ② 에도 줄이 들어간다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    workScope: {
+      INVESTIGATION: ["조사 하나", "조사 둘"],
+      REPAIR: ["수리 하나", "수리 둘", "수리 셋"],
+      POWER_TEST: ["통전 하나"],
+    },
+  });
+  assertSheetIsSound(filled);
+
+  assert.equal(filled.text("D37"), "인수 조사", "머리글이 항목으로 덮어써졌다");
+  assert.equal(filled.text("D38"), "조사 하나");
+  assert.equal(filled.text("D39"), "조사 둘");
+  assert.equal(filled.text("D40"), undefined, "세 번째 조사 줄이 남았다");
+
+  // ② 0줄 → 세 줄. 복제된 줄에 줄임표까지.
+  assert.equal(filled.text("D41"), "OH 및 수리 작업", "머리글이 항목으로 덮어써졌다");
+  assert.equal(filled.text("C42"), "-", "복제한 줄에 줄임표가 없다");
+  assert.equal(filled.text("D42"), "수리 하나");
+  assert.equal(filled.text("D43"), "수리 둘");
+  assert.equal(filled.text("D44"), "수리 셋");
+
+  assert.equal(filled.text("D46"), "통전검사[출하검사]");
+  assert.equal(filled.text("D47"), "통전 하나");
+  assert.equal(filled.text("D48"), undefined, "두 번째 통전 줄이 남았다");
+  assert.equal(filled.text("D49"), "서류작업", "④ 는 손대지 않는다");
+
+  // 🔴 합계 범위의 끝이 **통전검사 묶음의 마지막 항목**(47)까지다.
+  assert.equal(filled.formula("G58"), "SUM(I26:I47)");
+  assert.equal(filled.formula("H58"), "G58/10000");
+  assert.equal(filled.formula("H59"), "ROUNDDOWN(H58,0)*10000");
+  assert.equal(filled.formula("I59"), "H59-G58");
+
+  // 절사 줄(51)이 그 범위 밖이어야 순환 참조가 안 된다.
+  assert.equal(filled.formula("I51"), "I59", "절사 줄이 내림 결과를 받아야 한다");
+  assert.equal(filled.text("H52"), "공 급 가");
+  assert.equal(filled.formula("I52"), "H59");
+  const range = /SUM\(I\d+:I(\d+)\)/.exec(filled.formula("G58") ?? "");
+  assert.ok(range, "합계 수식을 찾지 못했다");
+  assert.ok(Number(range[1]) < 51, `합계 범위가 절사 줄까지 삼켰다 (끝: ${range[1]}행)`);
+
+  // 🔴 인쇄 영역도 함께. 안 밀면 합계 세 줄이 인쇄에서 잘린다.
+  assert.equal(printAreaLastRow(filled.workbookXml, OH_QUOTE_SHEET_NAME), 54);
+});
+
+/**
+ * 🔴 지금까지 저장된 제너레이터 견적서는 작업 내역이 **전부 비어 있다.** 빈
+ * 배열을 "0줄로 줄여라"로 읽으면 예전 견적서를 다시 내려받는 순간 표준 통전검사
+ * 7줄이 사라진 문서가 나간다.
+ */
+test("🔴 빈 묶음은 양식 그대로 남는다 — 합계 범위의 끝도 양식의 줄 수로 잡는다", { skip }, () => {
+  const empty = fill({
+    ...BASE,
+    parts: parts(3, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    workScope: { INVESTIGATION: [], REPAIR: [], POWER_TEST: [] },
+  });
+  assertSheetIsSound(empty);
+
+  assert.equal(empty.text("D38"), "인수 조사");
+  assert.equal(empty.text("D39"), "외관검사");
+  assert.equal(empty.text("D41"), "내부확인(각 보드 별 상태 확인 및 기타)");
+
+  // ② 는 양식대로 0줄. 억지로 빈 줄을 만들지 않는다.
+  assert.equal(empty.text("D43"), "OH 및 수리 작업");
+  assert.equal(empty.text("C44"), undefined, "빈 ② 에 줄이 생겼다");
+
+  // ③ 표준 일곱 줄이 한 줄도 빠짐없이.
+  assert.equal(empty.text("D45"), "통전검사[출하검사]");
+  TEMPLATE_POWER_TEST.forEach((line, index) => {
+    assert.equal(empty.text(`D${46 + index}`), line, `통전검사 ${index + 1}번째 줄이 사라졌다`);
+  });
+
+  // 합계 범위의 끝이 그 일곱 줄의 마지막(52)이다. 사슬 자체는 부품이 줄어든
+  // 만큼만(-15) 올라가 63행에 있다.
+  assert.equal(empty.formula("G63"), "SUM(I26:I52)");
+
+  // 통째로 안 주는 것과 셋 다 빈 배열로 주는 것이 같은 뜻이다.
+  const omitted = fill({ ...BASE, parts: parts(3, "부품"), overhaulParts: parts(2, "OH부품") });
+  assert.equal(omitted.sheetXml, empty.sheetXml);
+});
+
 test("부품이 없어도 무너지지 않는다 — 작업비만 받는 O/H 견적", { skip }, () => {
   const filled = fill({ ...BASE, parts: [], overhaulParts: [] });
   assertSheetIsSound(filled);

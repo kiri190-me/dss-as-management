@@ -2,8 +2,15 @@ import "server-only";
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { quoteWorkScopeSectionLabels } from "@/lib/validation/quote-input";
+import {
+  QUOTE_WORK_SCOPE_SECTIONS,
+  type QuoteWorkScopeSection,
+} from "@/lib/validation/quote-input";
 import type { QuoteTemplateKey } from "@/lib/domain/quote-template-variant";
+import type { WorkScopeLabels } from "@/lib/xlsx/quote-sheet-layout";
+import { QUOTE_WORK_SCOPE_LABELS } from "@/lib/xlsx/quote-template";
+import { OH_QUOTE_WORK_SCOPE_LABELS } from "@/lib/xlsx/oh-quote-template";
+import { MATCHER_WORK_SCOPE_LABELS } from "@/lib/xlsx/matcher-quote-template";
 
 /**
  * ============================================================================
@@ -187,6 +194,15 @@ type TemplateVariant = {
   label: string;
   sheetName: string;
   headerCells: Record<string, string>;
+  /**
+   * 작업 내역 세 묶음의 D열 머리글. **양식마다 다르다** — 제너레이터는
+   * `인수 조사`, 매쳐는 `조사작업`, O/H 의 ② 는 `OH 및 수리 작업`.
+   *
+   * 🔴 글자를 여기 적지 않고 **xlsx 채우개가 들고 있는 것을 가져다 쓴다.** 두
+   * 곳에 따로 적으면 한쪽만 고쳐지는 날이 오고, 그때 증상은 "화면에 뜨는 작업
+   * 내역과 파일에 적히는 작업 내역이 다른" 것이다.
+   */
+  workScopeLabels: WorkScopeLabels;
 };
 
 /**
@@ -202,24 +218,28 @@ const TEMPLATE_VARIANTS: Record<string, TemplateVariant> = {
     label: "제너레이터 내자 견적서",
     sheetName: "내자견적서",
     headerCells: HEADER_CELLS,
+    workScopeLabels: QUOTE_WORK_SCOPE_LABELS,
   },
   "GENERATOR:OVERHAUL": {
     envVar: "OH_QUOTE_TEMPLATE_PATH",
     label: "제너레이터 O/H 견적서",
     sheetName: "OH견적서",
     headerCells: HEADER_CELLS,
+    workScopeLabels: OH_QUOTE_WORK_SCOPE_LABELS,
   },
   "MATCHER:DOMESTIC": {
     envVar: "MATCHER_QUOTE_TEMPLATE_PATH",
     label: "매쳐 내자 견적서",
     sheetName: "견적서",
     headerCells: MATCHER_HEADER_CELLS,
+    workScopeLabels: MATCHER_WORK_SCOPE_LABELS,
   },
   "MATCHER:OVERHAUL": {
     envVar: "MATCHER_OH_QUOTE_TEMPLATE_PATH",
     label: "매쳐 O/H 견적서",
     sheetName: "견적서",
     headerCells: MATCHER_HEADER_CELLS,
+    workScopeLabels: MATCHER_WORK_SCOPE_LABELS,
   },
 };
 
@@ -339,35 +359,69 @@ export async function readQuoteTemplateHeaderOrEmpty(): Promise<QuoteTemplateHea
  * 부품 줄도 C열이 `-` 라 같아 보이지만, **머리글보다 위에 있어서** 걸리지 않는다
  * (묶음이 시작되기 전에는 아무것도 담지 않는다).
  *
+ * ── 🔴 머리글이 양식마다 다르다 ────────────────────────────────────────
+ * 예전에는 매쳐 표기(`조사작업`·`수리작업`·`통전작업`) 하나만 알아서, 제너레이터
+ * 양식은 **셋 다 0줄로 읽혔다.** 제너레이터는 `인수 조사` · `수리 작업` /
+ * `OH 및 수리 작업` · `통전검사[출하검사]` 다.
+ *
+ * 그 글자는 여기 적지 않고 **xlsx 채우개가 들고 있는 것을 가져다 쓴다**
+ * (TemplateVariant 의 workScopeLabels). 화면에 뜨는 목록과 파일에 적히는 목록이
+ * 같은 글자를 봐야 한다.
+ *
  * ── 못 읽으면 빈 목록이다 ───────────────────────────────────────────────
- * 양식이 없거나 그 구역이 없는 양식(제너레이터)이면 셋 다 빈 배열이다. 화면은
- * 사람이 직접 적을 수 있게 빈 목록으로 그린다 — 여기서 던지면 양식 하나 때문에
- * 견적서를 못 쓰게 된다.
+ * 양식이 없거나 그 구역이 없는 양식이면 셋 다 빈 배열이다. 화면은 사람이 직접
+ * 적을 수 있게 빈 목록으로 그린다 — 여기서 던지면 양식 하나 때문에 견적서를
+ * 못 쓰게 된다.
  * ============================================================================
  */
-
-/** 양식에 적힌 머리글 → 묶음. validation 쪽 이름표를 뒤집어 쓴다(두 벌로 두지 않는다). */
-const SECTION_BY_LABEL = new Map(
-  Object.entries(quoteWorkScopeSectionLabels).map(([section, label]) => [label, section])
-);
 
 /** 훑는 범위. 양식의 작업 내역은 20행대에서 시작해 60행대에서 끝난다. */
 const WORK_SCOPE_SCAN_ROWS = { from: 20, to: 90 } as const;
 
-export async function readQuoteWorkScopeDefaults(
-  templateKey: string
-): Promise<Record<string, string[]>> {
-  const empty: Record<string, string[]> = {
-    INVESTIGATION: [],
-    REPAIR: [],
-    POWER_TEST: [],
-  };
+/** 그 줄의 D열 글자가 어느 묶음의 머리글인가. 아니면 null. */
+function sectionOfLabel(
+  labels: WorkScopeLabels,
+  text: string
+): QuoteWorkScopeSection | null {
+  for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+    const { label, match } = labels[section];
+    // `통전검사[출하검사]` 처럼 뒤에 덧붙은 글자가 있는 머리글은 앞부분만 본다
+    // (xlsx 채우개의 findItemBlock 과 같은 규칙이다).
+    if (match === "prefix" ? text.startsWith(label) : text === label) return section;
+  }
+  return null;
+}
 
+/**
+ * 미리보기가 그리는 묶음 하나 — 문서에 적힌 **머리글 그대로**와 그 아래 줄들.
+ *
+ * `label` 이 찾을 때 쓰는 글자와 다를 수 있다: `통전검사[출하검사]` 는 앞부분만
+ * 보고 찾지만 화면에는 통째로 보여야 한다.
+ */
+export type QuoteWorkScopeSectionView = { label: string; items: string[] };
+
+function emptyWorkScopeView(labels: WorkScopeLabels): Record<
+  QuoteWorkScopeSection,
+  QuoteWorkScopeSectionView
+> {
+  return {
+    INVESTIGATION: { label: labels.INVESTIGATION.label, items: [] },
+    REPAIR: { label: labels.REPAIR.label, items: [] },
+    POWER_TEST: { label: labels.POWER_TEST.label, items: [] },
+  };
+}
+
+/** 양식을 훑어 묶음별 머리글과 기본 목록을 모은다. 못 읽으면 빈 목록이다. */
+async function scanWorkScope(
+  templateKey: string
+): Promise<Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>> {
   const variant = TEMPLATE_VARIANTS[templateKey];
-  if (!variant) return empty;
+  if (!variant) return emptyWorkScopeView(MATCHER_WORK_SCOPE_LABELS);
+
+  const found = emptyWorkScopeView(variant.workScopeLabels);
 
   const configured = process.env[variant.envVar];
-  if (!configured || configured.trim().length === 0) return empty;
+  if (!configured || configured.trim().length === 0) return found;
 
   const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
   const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");
@@ -377,7 +431,7 @@ export async function readQuoteWorkScopeDefaults(
     archive = ZipArchive.fromBuffer(await readTemplateAt(path.resolve(configured.trim())));
   } catch (err) {
     if (!(err instanceof QuoteTemplateError)) throw err;
-    return empty;
+    return found;
   }
 
   const refs: string[] = [];
@@ -386,35 +440,65 @@ export async function readQuoteWorkScopeDefaults(
   }
   const values = resolveSheetTextCells(archive, variant.sheetName, refs);
 
-  let current: string | null = null;
+  let current: QuoteWorkScopeSection | null = null;
   for (let row = WORK_SCOPE_SCAN_ROWS.from; row <= WORK_SCOPE_SCAN_ROWS.to; row += 1) {
     const label = (values.get(`D${row}`) ?? "").trim();
     const bullet = (values.get(`C${row}`) ?? "").trim();
 
-    const section = SECTION_BY_LABEL.get(label);
+    const section = label === "" ? null : sectionOfLabel(variant.workScopeLabels, label);
     if (section) {
       current = section;
+      // 화면에는 양식에 적힌 그대로 보여 준다(`통전검사[출하검사]`).
+      found[section].label = label;
       continue;
     }
     // 묶음이 시작되기 전이거나, 글머리표가 아닌 줄(고정 안내 문구는 `*` 다)은 건너뛴다.
     if (current === null || bullet !== "-" || label === "") continue;
-    empty[current].push(label);
+    found[current].items.push(label);
   }
 
-  return empty;
+  return found;
 }
 
 /**
- * 양식 넷의 작업 내역 기본 목록. 머리말과 같은 이유로 **넷을 한 번에** 준다 —
- * 화면이 들고 있다가 사람이 종류를 바꾸는 순간 갈아 끼운다.
+ * 미리보기가 그릴 작업 내역 세 묶음.
+ *
+ * 🔴 **빈 묶음은 양식의 기본 목록으로 그린다** — 파일도 정확히 그 규칙으로
+ * 나가기 때문이다(xlsx/quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+ * 여기서 빈 채로 그리면 지금까지 저장된 제너레이터 견적서(작업 내역이 전부
+ * 비어 있다)가 **화면에는 아무것도 없고 파일에는 표준 7줄이 적힌** 서로 다른
+ * 문서가 된다.
  */
-export async function readAllQuoteWorkScopeDefaults(): Promise<
-  Record<string, Record<string, string[]>>
+export async function readQuoteWorkSections(
+  templateKey: string,
+  lines: readonly { section: QuoteWorkScopeSection; text: string }[]
+): Promise<Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>> {
+  const sections = await scanWorkScope(templateKey);
+
+  for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+    const chosen = lines.filter((line) => line.section === section).map((line) => line.text);
+    if (chosen.length > 0) sections[section].items = chosen;
+  }
+  return sections;
+}
+
+/**
+ * 양식 넷의 작업 내역 기본값 — **머리글까지**. 머리말과 같은 이유로 **넷을 한
+ * 번에** 준다: 화면이 들고 있다가 사람이 종류를 바꾸는 순간 갈아 끼운다.
+ *
+ * 🔴 줄 목록만이 아니라 머리글도 주는 것은 **편집 중 미리보기** 때문이다. 그
+ * 화면(components/quotes/QuoteEditForm.tsx)은 서버에 다시 묻지 않고 지금 적혀
+ * 있는 값으로 작업 내역을 그리는데, 머리글이 없으면 매쳐 견적서에 제너레이터
+ * 문구(`인수 조사`)가 붙는다 — 저장하기 전과 후가 다른 문서로 보인다.
+ *
+ * 여기 담긴 것은 **양식의 기본값**이다. 견적서에 적어 둔 줄을 얹은 것이
+ * 필요하면 readQuoteWorkSections 를 쓴다(빈 묶음은 이 기본값 그대로 남는다).
+ */
+export async function readAllQuoteWorkSectionDefaults(): Promise<
+  Record<string, Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>>
 > {
   const entries = await Promise.all(
-    Object.keys(TEMPLATE_VARIANTS).map(
-      async (key) => [key, await readQuoteWorkScopeDefaults(key)] as const
-    )
+    Object.keys(TEMPLATE_VARIANTS).map(async (key) => [key, await scanWorkScope(key)] as const)
   );
   return Object.fromEntries(entries);
 }

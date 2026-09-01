@@ -12,7 +12,7 @@ import {
   QUOTE_CELLS,
   QUOTE_SHEET_NAME,
   totalPartsCost,
-  type QuoteInput,
+  type GeneratorQuoteInput,
 } from "./quote-template";
 
 /**
@@ -30,7 +30,7 @@ import {
 const templatePath = process.env.QUOTE_TEMPLATE_PATH;
 const skip = templatePath ? false : "QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
 
-const BASE: QuoteInput = {
+const BASE: GeneratorQuoteInput = {
   quoteNumber: "DSS 2026-077",
   quoteDate: new Date(2026, 7, 28),
   customerName: "ICD Co.,Ltd",
@@ -59,7 +59,7 @@ type Filled = {
   buffer: Buffer;
 };
 
-function fill(input: QuoteInput): Filled {
+function fill(input: GeneratorQuoteInput): Filled {
   const buffer = fillQuoteWorkbook(readFileSync(templatePath as string), input);
   const archive = ZipArchive.fromBuffer(buffer);
   // 🔴 시트 파트를 이름으로 찾는다. 이 통합문서에는 시트가 셋이라, 파일 이름을
@@ -221,6 +221,102 @@ test("고장난 공급가 수식이 실제 합계로 바뀌고, 사이의 낡은
   for (let row = 34; row < 55; row += 1) {
     assert.equal(filled.formula(`I${row}`), undefined, `${row}행에 낡은 수식이 남았다`);
   }
+});
+
+// ── 작업 내역 세 묶음 ───────────────────────────────────────────────────
+
+/** 양식의 「③ 통전검사[출하검사]」 아래 일곱 줄. 실측값이다. */
+const TEMPLATE_POWER_TEST = [
+  "절연저항치・내압시험",
+  "각 AMP기판의 전압・전류치 확인",
+  "정격출력시험",
+  "스크리닝시험",
+  "오픈・쇼트시험",
+  "출력의 직선성 확인",
+  "에이징 시험 (정격연속출력:1시간)",
+];
+
+/**
+ * 🔴 「② 수리 작업」 은 양식에 **줄이 0개**다. 복제할 본이 그 구간 안에 없어서
+ * 예전에는 이 구역이 통째로 비어 나갔다 — 화면에는 편집 가능한 세 칸이 떠 있는데
+ * 파일에는 무슨 수리를 했는지가 한 줄도 안 적혔다.
+ */
+test("작업 내역: 준 대로 채워지고, 0줄짜리 ② 에도 줄이 들어간다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(3),
+    workScope: {
+      INVESTIGATION: ["조사 하나", "조사 둘"],
+      REPAIR: ["수리 하나", "수리 둘", "수리 셋"],
+      POWER_TEST: ["통전 하나"],
+    },
+  });
+  assertSheetIsSound(filled);
+
+  // ① 세 줄 → 두 줄.
+  assert.equal(filled.text("D34"), "인수 조사", "머리글이 항목으로 덮어써졌다");
+  assert.equal(filled.text("D35"), "조사 하나");
+  assert.equal(filled.text("D36"), "조사 둘");
+  assert.equal(filled.text("D37"), undefined, "세 번째 조사 줄이 남았다");
+
+  // ② 0줄 → 세 줄. 복제된 줄에 줄임표까지 들어가야 한다.
+  assert.equal(filled.text("D38"), "수리 작업", "머리글이 항목으로 덮어써졌다");
+  assert.equal(filled.text("C39"), "-", "복제한 줄에 줄임표가 없다");
+  assert.equal(filled.text("D39"), "수리 하나");
+  assert.equal(filled.text("D40"), "수리 둘");
+  assert.equal(filled.text("D41"), "수리 셋");
+
+  // ③ 일곱 줄 → 한 줄.
+  assert.equal(filled.text("D43"), "통전검사[출하검사]");
+  assert.equal(filled.text("D44"), "통전 하나");
+  assert.equal(filled.text("D45"), undefined, "두 번째 통전 줄이 남았다");
+
+  // ④ 서류작업은 손대지 않는다.
+  assert.equal(filled.text("D46"), "서류작업");
+
+  // 아래 묶음과 합계가 늘고 준 만큼 따라 움직인다(부품 -2, ① -1, ② +3, ③ -6).
+  assert.equal(filled.text("H49"), "공 급 가");
+  assert.equal(filled.formula("I49"), "SUM(I26:I48)");
+  assert.equal(filled.formula("I50"), "I49*0.1");
+  assert.equal(filled.formula("I51"), "I49+I50");
+  assert.equal(printAreaLastRow(filled.workbookXml, QUOTE_SHEET_NAME), 51);
+});
+
+/**
+ * 🔴 이 파일에서 가장 조용히 망가지는 자리.
+ *
+ * 지금까지 저장된 제너레이터 견적서는 작업 내역이 **전부 비어 있다.** 빈 배열을
+ * "0줄로 줄여라"로 읽으면, 예전 견적서를 다시 내려받는 순간 표준 통전검사 7줄이
+ * 통째로 사라진 문서가 고객사로 나간다.
+ */
+test("🔴 빈 묶음은 양식 그대로 남는다 — 표준 문구가 사라지지 않는다", { skip }, () => {
+  const empty = fill({
+    ...BASE,
+    parts: parts(3),
+    workScope: { INVESTIGATION: [], REPAIR: [], POWER_TEST: [] },
+  });
+  assertSheetIsSound(empty);
+
+  // ① 양식의 세 줄 그대로.
+  assert.equal(empty.text("D34"), "인수 조사");
+  assert.equal(empty.text("D35"), "외관검사");
+  assert.equal(empty.text("D36"), "파라메타 체크");
+  assert.equal(empty.text("D37"), "내부확인(각 보드 별 상태 확인 및 기타)");
+
+  // ② 양식대로 0줄. 억지로 빈 줄을 만들지 않는다.
+  assert.equal(empty.text("D39"), "수리 작업");
+  assert.equal(empty.text("C40"), undefined, "빈 ② 에 줄이 생겼다");
+
+  // ③ 표준 일곱 줄이 한 줄도 빠짐없이.
+  assert.equal(empty.text("D41"), "통전검사[출하검사]");
+  TEMPLATE_POWER_TEST.forEach((line, index) => {
+    assert.equal(empty.text(`D${42 + index}`), line, `통전검사 ${index + 1}번째 줄이 사라졌다`);
+  });
+  assert.equal(empty.text("D50"), "서류작업");
+
+  // 통째로 안 주는 것과 셋 다 빈 배열로 주는 것이 같은 뜻이다.
+  const omitted = fill({ ...BASE, parts: parts(3) });
+  assert.deepEqual(omitted.buffer, empty.buffer);
 });
 
 test("유효기간·납기·결재조건: 안 주면 양식의 기본 문구가 남는다", { skip }, () => {

@@ -137,6 +137,16 @@ export async function GET(
           unitPrice: Number(item.unitPrice),
         })),
       workCost: Number(quote.workCost),
+      /**
+       * 견적서에 적히는 작업 내역 세 묶음. **양식 넷 모두** 이 구역을 갖는다 —
+       * 예전에는 매쳐에만 넘겨서, 제너레이터 견적서는 화면에 세 칸이 떠 있는데
+       * 파일에는 무슨 수리를 했는지가 한 줄도 안 나갔다.
+       *
+       * 🔴 빈 묶음은 양식의 기본 문구를 그대로 둔다는 뜻이다(채우개 쪽 규칙).
+       * 그래서 이 기능이 생기기 전에 저장된 견적서(작업 내역이 전부 비어 있다)를
+       * 다시 내려받아도 표준 문구가 사라지지 않는다.
+       */
+      workScope: groupWorkScope(quote.workScopeLines),
     };
 
     if (templateKey.startsWith("MATCHER:")) {
@@ -152,7 +162,6 @@ export async function GET(
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice),
         })),
-        workScope: groupWorkScope(quote.workScopeLines),
       });
     } else {
       workbook = isOverhaul

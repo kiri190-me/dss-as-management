@@ -6,12 +6,18 @@ import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from ".
 import {
   assertAscending,
   clearCellIfPresent,
+  EMPTY_WORK_SCOPE_LINES,
+  fillWorkScopeRows,
   findItemBlock,
   findLabelRow,
   findSpacedLabelRow,
+  findWorkScopeBlocks,
   dropErrorValueCaches,
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
+  resizeWorkScopeBlocks,
+  type WorkScopeLabels,
+  type WorkScopeLines,
 } from "./quote-sheet-layout";
 import {
   CALC_CHAIN_PART,
@@ -31,8 +37,16 @@ import {
  * 내자견적서 — 원본 양식을 채운다
  * ============================================================================
  * 원본을 읽어 값이 들어간 새 버퍼를 돌려준다. 원본 파일은 절대 쓰지 않는다.
- * 로고·직인 이미지, styles.xml, 인쇄설정, 작업 내역 문구(인수 조사·수리 작업·
- * 통전검사·서류작업), 회사 정보는 **손대지 않는다.**
+ * 로고·직인 이미지, styles.xml, 인쇄설정, 회사 정보, 「④ 서류작업」 구역은
+ * **손대지 않는다.**
+ *
+ * ── 작업 내역 세 묶음은 채운다 ──────────────────────────────────────────
+ * 「① 인수 조사 · ② 수리 작업 · ③ 통전검사」 는 화면에서 정한 값으로 적는다.
+ * 예전에는 이 구역을 통째로 안 건드려서, 화면에는 편집 가능한 세 칸이 떠 있는데
+ * **파일에는 무슨 수리를 했는지가 한 줄도 안 나갔다.**
+ *
+ * 🔴 **빈 묶음은 양식 그대로 둔다.** ② 는 양식에 줄이 0개라 ① 의 줄을 본으로
+ * 삼아 복제한다(quote-sheet-layout.ts · sheet-rows.ts 의 `modelRow`).
  *
  * ── 🔴 행을 코드에 박지 않는다 ──────────────────────────────────────────
  * 예전에는 부품 칸을 27~31행으로 박아 두었다. 그런데 이 양식들은 사람이 건마다
@@ -93,7 +107,26 @@ const BLOCK_LABELS = {
    * 안은 언제든 손볼 수 있는 설명이라 **앞부분만** 본다.
    */
   labor: "작업비",
+  /** 「② 수리 작업」 아래에 적히는 세 묶음의 머리글. 아래 export 를 볼 것. */
+  workScope: {
+    INVESTIGATION: { label: "인수 조사", match: "exact" },
+    REPAIR: { label: "수리 작업", match: "exact" },
+    /** 양식에는 `통전검사[출하검사]` 로 적혀 있다 — 앞부분만 본다. */
+    POWER_TEST: { label: "통전검사", match: "prefix" },
+  } satisfies WorkScopeLabels,
 } as const;
+
+/**
+ * 🔴 **제너레이터 내자 양식의 작업 내역 머리글은 여기 한 곳에만 적는다.**
+ *
+ * 화면이 쓸 기본 목록을 읽는 쪽(`storage/quote-template.ts`)이 이 값을 가져다
+ * 쓴다. 두 곳에 따로 적으면 한쪽만 고쳐지는 날이 오고, 그때 증상은 "화면에 뜨는
+ * 작업 내역과 파일에 적히는 작업 내역이 다른" 것이다.
+ *
+ * (storage 층이 xlsx 층을 부르는 것은 이미 하고 있다. 반대 방향은 안 된다 —
+ * xlsx 층은 앱 층을 몰라야 이 파일들을 떼어 쓸 수 있다.)
+ */
+export const QUOTE_WORK_SCOPE_LABELS: WorkScopeLabels = BLOCK_LABELS.workScope;
 
 /** H열에서 찾는 합계 머리글. 양식은 `공 급 가` 처럼 띄워 두었다 — 공백을 지우고 견준다. */
 const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
@@ -121,12 +154,23 @@ export type QuoteInput = {
 };
 
 /**
+ * 제너레이터 양식(내자·O/H)이 받는 입력. 매쳐와 갈리는 것은 **작업 내역이
+ * 있어도 되고 없어도 된다**는 점이다.
+ *
+ * 🔴 **빈 묶음은 양식 그대로 나간다.** 통째로 안 주는 것과 셋 다 빈 배열로 주는
+ * 것이 같은 뜻이다 — 지금까지 저장된 제너레이터 견적서는 작업 내역이 전부 비어
+ * 있고, 그것들을 다시 내려받았을 때 양식의 표준 문구가 사라지면 안 된다
+ * (quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+ */
+export type GeneratorQuoteInput = QuoteInput & { workScope?: WorkScopeLines };
+
+/**
  * 원본 양식 버퍼 + 입력 → 채워진 xlsx 버퍼.
  *
  * 은행계좌는 인자로 받지 않는다. 계좌번호를 코드나 DB 에 두지 않기 위해서고,
  * 양식에 이미 적혀 있으므로 그대로 나간다.
  */
-export function fillQuoteWorkbook(templateXlsx: Buffer, input: QuoteInput): Buffer {
+export function fillQuoteWorkbook(templateXlsx: Buffer, input: GeneratorQuoteInput): Buffer {
   validateQuoteInput(input);
 
   const archive = ZipArchive.fromBuffer(templateXlsx);
@@ -174,14 +218,16 @@ function toUtf8(value: string): Buffer {
 function fillSheet(
   sheetXml: string,
   sharedStringsXml: string | null,
-  input: QuoteInput
+  input: GeneratorQuoteInput
 ): { xml: string; rowShift: number } {
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
+  const workScope = input.workScope ?? EMPTY_WORK_SCOPE_LINES;
 
   // ── 1) 자리를 찾는다 ──────────────────────────────────────────────
   const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
   const laborRow = findLabelRow(templateRows, read, COLUMNS.name, BLOCK_LABELS.labor, "prefix");
+  const scope = findWorkScopeBlocks(templateRows, read, BLOCK_LABELS.workScope);
   const supplyRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.supply);
   const vatRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.vat);
   const totalRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.total);
@@ -189,30 +235,46 @@ function fillSheet(
   assertAscending([
     [BLOCK_LABELS.parts, parts.headerRow],
     [BLOCK_LABELS.labor, laborRow],
+    [BLOCK_LABELS.workScope.INVESTIGATION.label, scope.INVESTIGATION.headerRow],
+    [BLOCK_LABELS.workScope.REPAIR.label, scope.REPAIR.headerRow],
+    [BLOCK_LABELS.workScope.POWER_TEST.label, scope.POWER_TEST.headerRow],
     [TOTAL_LABELS.supply, supplyRow],
     [TOTAL_LABELS.vat, vatRow],
     [TOTAL_LABELS.total, totalRow],
   ]);
 
-  // ── 2) 부품 줄 수를 맞춘다 ────────────────────────────────────────
-  const resized = resizeRowBlock(templateRows, {
+  // ── 2) 줄 수를 맞춘다 — 반드시 아래에서부터 ──────────────────────
+  // 작업 내역 셋(③→②→①)을 먼저, 그 위의 부품 칸을 마지막에.
+  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope);
+  const resizedParts = resizeRowBlock(resizedScope.rows, {
     firstRow: parts.firstRow,
     currentCount: parts.count,
     targetCount: input.parts.length,
   });
-  const rowShift = resized.delta;
+  const rows = resizedParts.rows;
+
+  // ── 3) 옮겨진 자리를 셈한다 ──────────────────────────────────────
+  // 부품이 밀면 그 아래 전부가, ① 이 밀면 ② 아래가 밀린다. 다시 훑지 않는다 —
+  // 복제된 줄은 아직 `-` 가 비어 있어 머리글 훑기로는 세어지지 않는다.
+  const afterParts = resizedParts.delta;
+  const afterInvestigation = afterParts + resizedScope.deltas.INVESTIGATION;
+  const afterRepair = afterInvestigation + resizedScope.deltas.REPAIR;
+  const rowShift = afterRepair + resizedScope.deltas.POWER_TEST;
 
   const at = {
     partsFirst: parts.firstRow,
-    labor: laborRow + rowShift,
+    labor: laborRow + afterParts,
+    investigationFirst: scope.INVESTIGATION.firstRow + afterParts,
+    repairFirst: scope.REPAIR.firstRow + afterInvestigation,
+    powerTestFirst: scope.POWER_TEST.firstRow + afterRepair,
     supply: supplyRow + rowShift,
     vat: vatRow + rowShift,
     total: totalRow + rowShift,
   };
 
-  let xml = syncDimension(writeSheetRows(sheetXml, resized.rows), resized.rows);
+  let xml = syncDimension(writeSheetRows(sheetXml, rows), rows);
 
-  // ── 3) 값을 채운다 ────────────────────────────────────────────────
+  // ── 4) 값을 채운다 ────────────────────────────────────────────────
   xml = setDate(xml, QUOTE_CELLS.quoteDate, input.quoteDate);
   xml = setInlineString(xml, QUOTE_CELLS.quoteNumber, input.quoteNumber.trim());
   xml = setInlineString(xml, QUOTE_CELLS.customerName, input.customerName.trim());
@@ -238,16 +300,26 @@ function fillSheet(
     `${COLUMNS.unitPrice}${at.labor}*${COLUMNS.quantity}${at.labor}`
   );
 
+  // 작업 내역 세 묶음. 빈 묶음은 아무것도 하지 않는다 — 양식의 기본 목록이
+  // 그대로 나간다(quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+  xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
+  xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
+  xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
+
   /**
    * 작업비 아래부터 공급가 바로 위까지의 금액 칸을 비운다. 그 사이는 작업 내역
    * 문구가 적히는 자리라 금액이 없어야 하는데, 양식에는 빈 칸을 가리키는 낡은
    * 수식(`=N45`)이 하나 남아 있다. 합계 범위 안이라 치워 둔다.
+   *
+   * ⚠️ 작업 내역 줄이 이 사이에서 늘고 준다. 부딪히지 않는 이유는 그 줄들이
+   * **금액 칸을 쓰지 않기 때문**이다 — 복제된 줄은 비어 있고(blankRow), 우리도
+   * C·D 열만 적는다. 위 fillWorkScopeRows 뒤에 두어도 지울 것이 없다.
    */
   for (let row = at.labor + 1; row < at.supply; row += 1) {
     xml = clearCellIfPresent(xml, `${COLUMNS.amount}${row}`);
   }
 
-  // ── 4) 옮겨진 자리로 수식을 다시 쓴다 ────────────────────────────
+  // ── 5) 옮겨진 자리로 수식을 다시 쓴다 ────────────────────────────
   xml = setFormula(xml, QUOTE_CELLS.amount, `${COLUMNS.amount}${at.supply}`);
   xml = setFormula(
     xml,

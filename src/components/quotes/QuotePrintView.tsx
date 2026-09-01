@@ -41,6 +41,12 @@ import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
  * 양식만 고치면 따라온다(storage/quote-template.ts 의 readQuoteTemplateHeader).
  *
  * 로고와 직인도 같은 이유로 양식에서 꺼낸다(api/quotes/template-image).
+ *
+ * ── 작업 내역도 코드에 박지 않는다 ──────────────────────────────────────
+ * 예전에는 ①②③④ 의 문구가 이 파일의 상수 하나에 박혀 있었고, **양식 넷 모두에
+ * 똑같이** 그려졌다(매쳐 견적서 미리보기에도 제너레이터 문구가 나갔다). 이제
+ * 실제 작업 내역을 받아 그린다 — 빈 묶음이면 그 양식의 기본 목록이다. 파일이
+ * 정확히 그 규칙으로 나가고, 둘이 다르면 받아 본 쪽이 다른 문서라고 여긴다.
  * ============================================================================
  */
 
@@ -102,6 +108,7 @@ function productLine(quote: QuotePrintData): string {
 export default function QuotePrintView({
   quote,
   header,
+  workSections,
   quoteId,
   onClose,
 }: {
@@ -109,13 +116,32 @@ export default function QuotePrintView({
   /** 양식에서 읽어 온 회사 정보·기본 문구·계좌. 못 읽은 칸은 null 이고 그 줄은 비운다. */
   header: QuoteTemplateHeader;
   /**
+   * 작업 내역 세 묶음 — 머리글과 그 아래 줄들.
+   *
+   * 🔴 **부르는 쪽이 이미 정리해서 준다**: 견적서에 적어 둔 줄이 있으면 그것,
+   * 빈 묶음이면 **양식의 기본 목록**(storage/quote-template.ts 의
+   * readQuoteWorkSections). 파일이 정확히 그 규칙으로 나가기 때문이다 — 둘이
+   * 다르면 받아 본 쪽이 다른 문서라고 여긴다.
+   *
+   * 안 주면 제너레이터 내자 양식의 문구를 그린다(예전 그대로).
+   */
+  workSections?: QuoteWorkSections;
+  /**
    * 저장된 견적서면 그 id, **아직 저장하지 않았으면 null**.
    *
-   * 이 값이 갈라 놓는 것은 둘이다 — 돌아가는 길(주소인가 닫기인가)과 Excel
-   * 받기(저장된 장에만 있다). 값 자체는 미리보기에 쓰이지 않는다.
+   * 이 값이 갈라 놓는 것은 **Excel 받기 하나**다 — 파일을 만드는 라우트가 DB 의
+   * 그 줄을 읽으므로 저장된 장에만 있다. 값 자체는 미리보기에 쓰이지 않는다.
+   *
+   * 🔴 **돌아가는 길은 이 값으로 갈리지 않는다**(아래 onClose). 저장된 견적서를
+   * 고치는 중에도 미리보기는 폼 위에 겹쳐 뜨므로, 저장 여부로 가르면 지금 있는
+   * 자리로 가라는 링크가 그려져 단추가 죽는다.
    */
   quoteId: string | null;
-  /** 저장 전 미리보기를 닫는다. quoteId 가 null 일 때만 쓰인다. */
+  /**
+   * 겹쳐 뜬 미리보기를 닫고 폼으로 돌아간다 — **이 값을 받았는가가 곧 "어떻게
+   * 열렸는가"**다. QuoteEditForm 은 주고(저장 여부와 무관하게), 독립 페이지
+   * `/quotes/{id}/print` 는 주지 않는다.
+   */
   onClose?: () => void;
 }) {
   const items = quote.items.map((item) => ({
@@ -159,13 +185,19 @@ export default function QuotePrintView({
       <style>{STYLES}</style>
 
       <div className="qp-toolbar">
-        {quoteId === null ? (
-          // 아직 저장 전이다. 주소로 돌아갈 곳이 없으므로 폼을 다시 보여 준다 —
-          // 적어 둔 값이 그대로 살아 있다(폼은 그 자리에 그대로 있고 화면만 바뀐다).
+        {onClose ? (
+          // 🔴 갈리는 기준은 **저장 여부가 아니라 어떻게 열렸나**다. `onClose` 를
+          // 받았다는 것은 폼 위에 겹쳐 뜬 미리보기라는 뜻이고, 그때 주소는
+          // `/quotes/{id}`(또는 `/quotes/new`) **그대로**다. 저장됐다는 이유로
+          // `/quotes/{id}` 링크를 그리면 지금 있는 자리로 가라는 말이라, 눌러도
+          // 주소가 안 바뀌고 미리보기가 그대로 떠 있다 — 죽은 단추가 된다.
+          // 닫아서 폼으로 돌아가면 적어 둔 값도 그대로 살아 있다.
           <button type="button" onClick={onClose} className="qp-btn">
             ← 편집으로 돌아가기
           </button>
         ) : (
+          // 독립된 미리보기 페이지(`/quotes/{id}/print`)다. 닫을 폼이 없으므로
+          // 돌아갈 곳은 주소로만 있다.
           <Link href={`/quotes/${quoteId}`} className="qp-btn">
             ← 견적서로 돌아가기
           </Link>
@@ -320,7 +352,7 @@ export default function QuotePrintView({
                 </td>
               </tr>
 
-              {WORK_SECTIONS.map((section) => (
+              {buildWorkSections(workSections).map((section) => (
                 <SectionRows key={section.mark} section={section} />
               ))}
             </tbody>
@@ -348,7 +380,18 @@ export default function QuotePrintView({
   );
 }
 
-type WorkSection = { mark: string; label: string; items: string[] };
+type WorkSection = { mark: string; label: string; items: readonly string[] };
+
+/**
+ * 작업 내역 세 묶음. 키는 저장 쪽 구분과 같다(validation/quote-input.ts 의
+ * `QUOTE_WORK_SCOPE_SECTIONS`). `label` 은 양식에 적힌 머리글 그대로다 —
+ * 제너레이터 O/H 의 ② 는 `OH 및 수리 작업`, 매쳐는 `조사작업`… 으로 갈린다.
+ */
+export type QuoteWorkSections = {
+  INVESTIGATION: { label: string; items: readonly string[] };
+  REPAIR: { label: string; items: readonly string[] };
+  POWER_TEST: { label: string; items: readonly string[] };
+};
 
 function SectionRows({ section }: { section: WorkSection }) {
   return (
@@ -359,8 +402,8 @@ function SectionRows({ section }: { section: WorkSection }) {
           {section.mark}　{section.label}
         </td>
       </tr>
-      {section.items.map((line) => (
-        <tr key={line}>
+      {section.items.map((line, index) => (
+        <tr key={`${line}-${index}`}>
           <td colSpan={2} />
           <td className="qp-c-dash">-</td>
           <td className="qp-c-item" colSpan={6}>
@@ -372,16 +415,36 @@ function SectionRows({ section }: { section: WorkSection }) {
   );
 }
 
-/** 양식 36~52행의 고정 문구. 견적서마다 달라지는 값이 아니라 그대로 옮긴다. */
-const WORK_SECTIONS: WorkSection[] = [
-  {
-    mark: "①",
+/**
+ * 그려야 하는 네 묶음.
+ *
+ * ①②③ 은 실제 작업 내역이고, **④ 서류작업만 고정 문구**다 — 양식에도 그 아래
+ * 줄이 없고 견적서마다 달라지는 값이 아니다.
+ */
+function buildWorkSections(sections: QuoteWorkSections | undefined): WorkSection[] {
+  const resolved = sections ?? FALLBACK_WORK_SECTIONS;
+  return [
+    { mark: "①", ...resolved.INVESTIGATION },
+    { mark: "②", ...resolved.REPAIR },
+    { mark: "③", ...resolved.POWER_TEST },
+    { mark: "④", label: "서류작업", items: [] },
+  ];
+}
+
+/**
+ * 작업 내역을 못 받았을 때 그리는 것 — 제너레이터 내자 양식의 문구다.
+ *
+ * ⚠️ 여기 적힌 글자는 **최후의 되돌림 값**이다. 실제로 나가는 문서의 근거는
+ * 양식 파일이고, 그 값은 서버가 읽어 `workSections` 로 건네준다
+ * (storage/quote-template.ts 의 readQuoteWorkSections).
+ */
+const FALLBACK_WORK_SECTIONS: QuoteWorkSections = {
+  INVESTIGATION: {
     label: "인수 조사",
     items: ["외관검사", "파라메타 체크", "내부확인(각 보드 별 상태 확인 및 기타)"],
   },
-  { mark: "②", label: "수리 작업", items: [] },
-  {
-    mark: "③",
+  REPAIR: { label: "수리 작업", items: [] },
+  POWER_TEST: {
     label: "통전검사[출하검사]",
     items: [
       "절연저항치・내압시험",
@@ -393,8 +456,7 @@ const WORK_SECTIONS: WorkSection[] = [
       "에이징 시험 (정격연속출력:1시간)",
     ],
   },
-  { mark: "④", label: "서류작업", items: [] },
-];
+};
 
 const STYLES = `
 .qp-root { background: #fff; color: #000; }

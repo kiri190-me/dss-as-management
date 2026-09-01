@@ -12,7 +12,7 @@ import {
   findLabelRow,
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
-
+  type WorkScopeLabels,
 } from "./quote-sheet-layout";
 import {
   CALC_CHAIN_PART,
@@ -113,6 +113,22 @@ const BLOCK_LABELS = {
   REPAIR: "수리작업",
   POWER_TEST: "통전작업",
 } as const;
+
+/**
+ * 🔴 **매쳐 양식의 작업 내역 머리글은 위 BLOCK_LABELS 한 곳에만 적혀 있다.**
+ *
+ * 화면이 쓸 기본 목록을 읽는 쪽(`storage/quote-template.ts`)이 이 값을 가져다
+ * 쓴다 — 거기에 글자를 다시 적으면 한쪽만 고쳐지는 날이 오고, 그때 증상은
+ * "화면에 뜨는 작업 내역과 파일에 적히는 작업 내역이 다른" 것이다.
+ *
+ * 매쳐 양식은 셋 다 머리글이 짧아 통째로 견준다(제너레이터의 `통전검사[출하검사]`
+ * 처럼 뒤에 덧붙은 글자가 없다).
+ */
+export const MATCHER_WORK_SCOPE_LABELS: WorkScopeLabels = {
+  INVESTIGATION: { label: BLOCK_LABELS.INVESTIGATION, match: "exact" },
+  REPAIR: { label: BLOCK_LABELS.REPAIR, match: "exact" },
+  POWER_TEST: { label: BLOCK_LABELS.POWER_TEST, match: "exact" },
+};
 
 /**
  * H열에서 찾는 합계 머리글. 양식은 `공 급 가`·`합     계` 처럼 글자 사이를

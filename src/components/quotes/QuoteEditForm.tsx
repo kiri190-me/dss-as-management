@@ -25,8 +25,11 @@ import {
   type QuoteWorkScopeSection,
 } from "@/lib/validation/quote-input";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
-import QuotePrintView from "@/components/quotes/QuotePrintView";
-import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
+import QuotePrintView, { type QuoteWorkSections } from "@/components/quotes/QuotePrintView";
+import type {
+  QuoteTemplateHeader,
+  QuoteWorkScopeSectionView,
+} from "@/lib/storage/quote-template";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import type { QuoteEditData, QuoteIntakeLookup } from "@/lib/db/queries/quotes";
 import {
@@ -190,6 +193,41 @@ function toScopeRows(texts: readonly string[]): ScopeRow[] {
   return texts.map((text) => ({ key: generateClientUuid(), text }));
 }
 
+/**
+ * 미리보기에 그릴 작업 내역 세 묶음 — **지금 화면에 적혀 있는 값**으로 만든다.
+ *
+ * 🔴 저장된 견적서를 그릴 때와 **같은 답이 나와야 한다**
+ * (storage/quote-template.ts 의 readQuoteWorkSections). 세 가지가 같아야 한다:
+ *
+ *   · **빈 묶음은 양식의 기본 목록**으로 그린다. 파일도 정확히 그 규칙으로
+ *     나가기 때문이다(xlsx/quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로
+ *     둔다'). 여기서 빈 채로 그리면 화면에는 아무것도 없는데 파일에는 표준
+ *     통전검사 7줄이 적힌, 서로 다른 문서가 된다.
+ *   · **빈 줄과 앞뒤 공백은 버린다.** 저장할 때 그렇게 걸러지므로
+ *     (validation/quote-input.ts 의 normalizeWorkScopeLines), 여기서 남겨 두면
+ *     저장 전 미리보기와 저장 뒤 미리보기의 줄 수가 달라진다.
+ *   · **머리글은 그 양식에 적힌 그대로**다 — 매쳐는 `조사작업`, 제너레이터 O/H
+ *     의 ② 는 `OH 및 수리 작업` 이다. 그래서 사람이 장비 종류·견적서 종류를
+ *     바꾸면 미리보기의 머리글도 따라 바뀐다.
+ */
+function previewWorkSections(
+  templateDefaults: Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView> | undefined,
+  scopeLines: Record<QuoteWorkScopeSection, readonly ScopeRow[]>
+): QuoteWorkSections {
+  const sections = {} as Record<QuoteWorkScopeSection, { label: string; items: string[] }>;
+  for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+    const written = scopeLines[section].map((row) => row.text.trim()).filter((text) => text !== "");
+    const fromTemplate = templateDefaults?.[section];
+    sections[section] = {
+      // 양식을 아예 못 읽었을 때만 화면 표기로 물러선다 — 머리글 자리가 빈 채로
+      // 그려지는 것보다는 낫다.
+      label: fromTemplate?.label ?? quoteWorkScopeSectionLabels[section],
+      items: written.length > 0 ? written : (fromTemplate?.items ?? []),
+    };
+  }
+  return sections;
+}
+
 function formatAmount(value: number): string {
   return `₩${AMOUNT_FORMAT.format(Math.round(value))}`;
 }
@@ -224,10 +262,15 @@ export default function QuoteEditForm({
    */
   printHeaders: Record<string, QuoteTemplateHeader>;
   /**
-   * 양식 넷의 작업 내역 기본 목록(조사/수리/통전). 새 견적서를 열 때 조사·통전을
-   * 이것으로 채운다. 그 구역이 없는 양식(제너레이터)은 셋 다 빈 배열이다.
+   * 양식 넷의 작업 내역 기본값(조사/수리/통전) — **머리글과 줄 목록**.
+   *
+   * 줄 목록은 새 견적서를 열 때 조사·통전 칸을 채우는 데 쓰고, 머리글은
+   * 미리보기가 쓴다: 양식마다 머리글이 달라서(매쳐 `조사작업`, 제너레이터
+   * `인수 조사`), 없으면 매쳐 견적서에 제너레이터 문구가 붙는다.
+   *
+   * 양식을 못 읽으면 줄 목록만 빈 배열이고 머리글은 그대로 온다.
    */
-  workScopeDefaults: Record<string, Record<string, string[]>>;
+  workScopeDefaults: Record<string, Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>>;
 }) {
   const router = useRouter();
 
@@ -440,7 +483,7 @@ export default function QuoteEditForm({
       const next = { ...prev };
       for (const section of ["INVESTIGATION", "POWER_TEST"] as const) {
         if (scopeTouched[section]) continue;
-        next[section] = toScopeRows(defaults[section] ?? []);
+        next[section] = toScopeRows(defaults[section]?.items ?? []);
       }
       return next;
     });
@@ -732,6 +775,16 @@ export default function QuoteEditForm({
    */
   const activePrintHeader = printHeaders[quoteTemplateKey(laborKind, kind)];
 
+  /**
+   * 미리보기에 그릴 작업 내역 — **지금 적혀 있는 값**이다(저장된 값이 아니다).
+   * 규칙은 previewWorkSections 주석에 있고, 저장된 견적서를 그리는 쪽
+   * (`/quotes/{id}/print`)과 같은 답이 나와야 한다.
+   */
+  const activeWorkSections = previewWorkSections(
+    workScopeDefaults[quoteTemplateKey(laborKind, kind)],
+    scopeLines
+  );
+
   if (showPreview) {
     /**
      * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
@@ -747,6 +800,7 @@ export default function QuoteEditForm({
         quoteId={quote?.id ?? null}
         onClose={() => setShowPreview(false)}
         header={activePrintHeader}
+        workSections={activeWorkSections}
         quote={{
           quoteNumber,
           quoteDate,
@@ -1350,12 +1404,13 @@ export default function QuoteEditForm({
         </div>
 
         {/* ── 작업 내역 ───────────────────────────────────────────────────
-            매쳐 견적서의 `2. 작업 비용` 아래에 세 묶음으로 적히는 글이다.
+            견적서의 `2. 작업 비용` 아래에 세 묶음으로 적히는 글이다.
             조사·통전은 양식의 기본 목록에서, 수리는 위에서 고른 작업에서
             채워지고, 셋 다 사람이 고치거나 줄을 더할 수 있다.
 
-            제너레이터 양식에는 이 구역이 없어 기본 목록이 비어 있다 — 그래도
-            칸은 보여 준다. 적어 두면 나중에 양식이 생겼을 때 그대로 쓰인다. */}
+            양식 넷 모두 이 구역이 있다 — 머리글만 다르다(매쳐는 `조사작업`,
+            제너레이터는 `인수 조사`·`통전검사[출하검사]`). 비워 두면 그 양식의
+            기본 목록이 그대로 문서에 적혀 나간다. */}
         <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">작업 내역</span>
@@ -1368,7 +1423,7 @@ export default function QuoteEditForm({
             {QUOTE_WORK_SCOPE_SECTIONS.map((section) => {
               const rows = scopeLines[section];
               const templateDefaults =
-                workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section] ?? [];
+                workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section]?.items ?? [];
               return (
                 <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                   <div className="flex items-baseline justify-between gap-2">

@@ -1,5 +1,5 @@
-import { clearCell } from "./sheet-patch";
-import { findRowByCellText, type SheetRow } from "./sheet-rows";
+import { clearCell, setInlineString } from "./sheet-patch";
+import { findRowByCellText, resizeRowBlock, type SheetRow } from "./sheet-rows";
 
 /**
  * ============================================================================
@@ -128,6 +128,136 @@ export function assertAscending(labelled: ReadonlyArray<readonly [string, number
       );
     }
   }
+}
+
+/**
+ * ============================================================================
+ * 작업 내역 세 묶음 — 「① 인수 조사 · ② 수리 작업 · ③ 통전검사」
+ * ============================================================================
+ * 양식 넷이 모두 이 세 묶음을 갖는데 **머리글 글자가 다르다**(제너레이터는
+ * `인수 조사`, 매쳐는 `조사작업`, O/H 의 ② 는 `OH 및 수리 작업`). 그래서 글자는
+ * 각 채우개가 들고 있고, 여기는 **자리를 찾고 줄 수를 맞추는 방법**만 안다.
+ *
+ * ── 🔴 빈 묶음은 양식 그대로 둔다 ───────────────────────────────────────
+ * 준 목록이 빈 배열이면 그 묶음은 **손대지 않는다.** 줄을 0개로 줄이지 않는다.
+ * 유효기간·납기가 이미 쓰는 규칙과 같다("비워 두면 양식의 기본 문구를 그대로
+ * 쓴다"). 지금까지 저장된 제너레이터 견적서는 작업 내역이 전부 비어 있어서, 이
+ * 규칙이 없으면 예전 견적서를 다시 내려받을 때 **표준 통전검사 7줄이 통째로
+ * 사라진 문서**가 나간다.
+ * ============================================================================
+ */
+
+/**
+ * 묶음 구분. 저장 쪽(`validation/quote-input.ts` 의 `QUOTE_WORK_SCOPE_SECTIONS`)과
+ * 같은 키다. 그 모듈을 여기서 가져오지 않는 이유는, xlsx 층이 앱 층을 모르는 채로
+ * 남아 있어야 이 파일들을 다른 곳에 떼어 쓸 수 있기 때문이다.
+ */
+export const WORK_SCOPE_SECTIONS = ["INVESTIGATION", "REPAIR", "POWER_TEST"] as const;
+export type WorkScopeSection = (typeof WORK_SCOPE_SECTIONS)[number];
+
+/** 묶음별 D열 머리글과 견주는 방식. 양식마다 다르다 — 각 채우개가 제 것을 들고 있다. */
+export type WorkScopeLabels = Record<WorkScopeSection, { label: string; match: LabelMatch }>;
+
+/** 묶음별로 문서에 적을 줄. **빈 배열은 "양식 그대로 둔다"** 는 뜻이다. */
+export type WorkScopeLines = Record<WorkScopeSection, readonly string[]>;
+
+export type WorkScopeBlocks = Record<WorkScopeSection, ItemBlock>;
+
+/** 아무것도 주지 않았을 때. 셋 다 양식 그대로 나간다. */
+export const EMPTY_WORK_SCOPE_LINES: WorkScopeLines = {
+  INVESTIGATION: [],
+  REPAIR: [],
+  POWER_TEST: [],
+};
+
+/** 세 묶음의 자리. 못 찾으면 던진다(findLabelRow 와 같은 판단). */
+export function findWorkScopeBlocks(
+  rows: readonly SheetRow[],
+  read: (ref: string) => string | null,
+  labels: WorkScopeLabels
+): WorkScopeBlocks {
+  return {
+    INVESTIGATION: findItemBlock(rows, read, labels.INVESTIGATION.label, labels.INVESTIGATION.match),
+    REPAIR: findItemBlock(rows, read, labels.REPAIR.label, labels.REPAIR.match),
+    POWER_TEST: findItemBlock(rows, read, labels.POWER_TEST.label, labels.POWER_TEST.match),
+  };
+}
+
+/**
+ * 그 묶음이 실제로 갖게 될 줄 수. 빈 목록이면 **양식의 줄 수 그대로**다.
+ * 자리를 셈하는 쪽(합계 범위의 끝 따위)이 이 값을 봐야 한다.
+ */
+export function workScopeRowCount(block: ItemBlock, lines: readonly string[]): number {
+  return lines.length === 0 ? block.count : lines.length;
+}
+
+/**
+ * 세 묶음의 줄 수를 맞춘다 — 🔴 **아래에서부터**(③ → ② → ①).
+ *
+ * 위를 먼저 늘리면 아래 묶음의 시작 행이 이미 밀려 있어 엉뚱한 줄을 잡는다.
+ * 고친 뒤에 다시 훑지도 않는다 — 복제된 줄은 아직 C열이 비어 있어 머리글
+ * 훑기로는 안 세어진다. 그래서 **이동량(delta)을 돌려주고** 부르는 쪽이 셈한다.
+ *
+ * ── 🔴 ② 는 양식에 줄이 0개다 ──────────────────────────────────────────
+ * 제너레이터 양식 둘 다 「수리 작업」 아래에 줄이 하나도 없다. 복제할 본이 그
+ * 구간 안에 없으므로 **① 의 마지막 줄을 본으로 건네준다** — 같은 서식이라 그대로
+ * 복제하면 그 줄만 모양이 다른 일이 없다. ① 을 아직 안 건드린 시점이라(아래에서
+ * 부터 고친다) 그 행 번호는 양식 그대로다.
+ */
+export function resizeWorkScopeBlocks(
+  rows: readonly SheetRow[],
+  blocks: WorkScopeBlocks,
+  lines: WorkScopeLines
+): { rows: SheetRow[]; deltas: Record<WorkScopeSection, number> } {
+  const modelRow =
+    blocks.INVESTIGATION.count > 0
+      ? blocks.INVESTIGATION.firstRow + blocks.INVESTIGATION.count - 1
+      : undefined;
+
+  let next: SheetRow[] = [...rows];
+  const deltas: Record<WorkScopeSection, number> = {
+    INVESTIGATION: 0,
+    REPAIR: 0,
+    POWER_TEST: 0,
+  };
+
+  // 아래에서부터. 순서를 뒤집으면 조용히 어긋난 문서가 나간다.
+  for (const section of ["POWER_TEST", "REPAIR", "INVESTIGATION"] as const) {
+    const block = blocks[section];
+    // 빈 묶음은 양식 그대로 둔다(위 머리말).
+    if (lines[section].length === 0) continue;
+
+    const resized = resizeRowBlock(next, {
+      firstRow: block.firstRow,
+      currentCount: block.count,
+      targetCount: lines[section].length,
+      modelRow,
+    });
+    next = resized.rows;
+    deltas[section] = resized.delta;
+  }
+
+  return { rows: next, deltas };
+}
+
+/**
+ * 한 묶음의 줄들을 적는다. 복제된 줄은 줄임표(`-`)까지 비워져 있어 줄마다 다시
+ * 쓴다(sheet-rows.ts 의 blankRow).
+ *
+ * 빈 목록이면 아무것도 하지 않는다 — 양식의 기본 문구가 그대로 남는다.
+ */
+export function fillWorkScopeRows(
+  sheetXml: string,
+  firstRow: number,
+  lines: readonly string[]
+): string {
+  let xml = sheetXml;
+  lines.forEach((line, index) => {
+    const row = firstRow + index;
+    xml = setInlineString(xml, `${LAYOUT_COLUMNS.marker}${row}`, ITEM_MARKER);
+    xml = setInlineString(xml, `${LAYOUT_COLUMNS.name}${row}`, line.trim());
+  });
+  return xml;
 }
 
 /**

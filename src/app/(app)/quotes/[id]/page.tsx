@@ -4,7 +4,7 @@ import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 import {
   readAllQuoteTemplateHeaders,
-  readAllQuoteWorkScopeDefaults,
+  readAllQuoteWorkSectionDefaults,
 } from "@/lib/storage/quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -70,10 +70,12 @@ export default async function QuoteDetailPage({
   // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
   // 양식 머리말은 미리보기가 쓴다 — **지금 폼에 적힌 값으로** 그리므로, 아직
   // 저장하지 않은 수정분도 그대로 보인다.
+  // 작업 내역 기본값은 **머리글까지** 받는다 — 미리보기가 그 양식의 머리글로
+  // 작업 내역을 그려야 저장 전과 후가 같은 문서로 보인다.
   const [repairLabor, printHeaders, workScopeDefaults] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
-    readAllQuoteWorkScopeDefaults(),
+    readAllQuoteWorkSectionDefaults(),
   ]);
 
   return (

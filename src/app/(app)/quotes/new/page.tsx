@@ -4,7 +4,7 @@ import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 import {
   readAllQuoteTemplateHeaders,
-  readAllQuoteWorkScopeDefaults,
+  readAllQuoteWorkSectionDefaults,
 } from "@/lib/storage/quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -54,10 +54,12 @@ export default async function NewQuotePage() {
   // 시간대로 날짜가 정해진다(자정 전후 하루가 실제로 다르게 나온다).
   // 장비 종류별 수리 작업 목록과 단가 — 견적서의 작업비가 여기서 나온다.
   // 양식 머리말은 **저장 전 미리보기**가 쓴다(회사 정보·기본 문구·계좌).
+  // 작업 내역 기본값은 **머리글까지** 받는다 — 폼이 칸을 채우는 데는 줄 목록이면
+  // 되지만, 저장 전 미리보기가 그 양식의 머리글로 작업 내역을 그려야 한다.
   const [repairLabor, printHeaders, workScopeDefaults] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
-    readAllQuoteWorkScopeDefaults(),
+    readAllQuoteWorkSectionDefaults(),
   ]);
 
   return (

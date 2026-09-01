@@ -6,7 +6,7 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
-import { readAllQuoteTemplateHeaders } from "@/lib/storage/quote-template";
+import { readAllQuoteTemplateHeaders, readQuoteWorkSections } from "@/lib/storage/quote-template";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 
 export const metadata: Metadata = {
@@ -57,8 +57,27 @@ export default async function QuotePrintPage({
   // 🔴 **이 견적서에 맞는 양식**의 문구를 쓴다(장비 종류 × 견적서 종류).
   // 넷의 기본 문구가 다르고, 특히 납기가 전부 갈린다
   // (domain/quote-template-variant.ts).
-  const headers = await readAllQuoteTemplateHeaders();
-  const header = headers[quoteTemplateKey(quote.laborEquipmentKind, quote.kind)];
+  const templateKey = quoteTemplateKey(quote.laborEquipmentKind, quote.kind);
 
-  return <QuotePrintView quote={quote} header={header} quoteId={quote.id} />;
+  /**
+   * 작업 내역 세 묶음. **빈 묶음은 양식의 기본 목록으로 그린다** — 파일도 정확히
+   * 그 규칙으로 나간다(xlsx/quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로
+   * 둔다'). 이 기능이 생기기 전에 저장된 견적서는 작업 내역이 전부 비어 있어서,
+   * 규칙을 안 맞추면 화면에는 아무것도 없고 파일에는 표준 7줄이 적힌 서로 다른
+   * 문서가 된다.
+   */
+  const [headers, workSections] = await Promise.all([
+    readAllQuoteTemplateHeaders(),
+    readQuoteWorkSections(templateKey, quote.workScopeLines),
+  ]);
+  const header = headers[templateKey];
+
+  return (
+    <QuotePrintView
+      quote={quote}
+      header={header}
+      workSections={workSections}
+      quoteId={quote.id}
+    />
+  );
 }

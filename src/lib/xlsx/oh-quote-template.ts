@@ -6,11 +6,17 @@ import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from ".
 import {
   assertAscending,
   clearCellIfPresent,
+  EMPTY_WORK_SCOPE_LINES,
+  fillWorkScopeRows,
   findItemBlock,
   findLabelRow,
   findSpacedLabelRow,
+  findWorkScopeBlocks,
   dropErrorValueCaches,
   LAYOUT_COLUMNS as COLUMNS,
+  resizeWorkScopeBlocks,
+  workScopeRowCount,
+  type WorkScopeLabels,
 } from "./quote-sheet-layout";
 import {
   CALC_CHAIN_PART,
@@ -24,7 +30,7 @@ import {
   WORKBOOK_PART,
   WORKBOOK_RELS_PART,
 } from "./workbook-parts";
-import { fillPartRows, validateQuoteInput, type QuoteInput } from "./quote-template";
+import { fillPartRows, validateQuoteInput, type GeneratorQuoteInput } from "./quote-template";
 
 /**
  * ============================================================================
@@ -55,6 +61,13 @@ import { fillPartRows, validateQuoteInput, type QuoteInput } from "./quote-templ
  * 절사 줄은 공급가 **바로 위**에 있어서, 합계 범위를 '공급가 바로 윗줄까지'로
  * 잡으면 자기 자신을 더하게 된다. 그래서 범위의 끝은 **통전검사 묶음의 마지막
  * 항목**이다 — 양식이 원래 그렇게 잡아 두었고, 그것이 옳다.
+ *
+ * ⚠️ 그 자리는 **통전검사 줄 수가 바뀌면 따라 움직인다.** 빈 목록을 받아 양식
+ * 그대로 두었을 때는 양식의 줄 수를 써야 한다(`workScopeRowCount`).
+ *
+ * ── 작업 내역 세 묶음을 채운다 ──────────────────────────────────────────
+ * 「① 인수 조사 · ② OH 및 수리 작업 · ③ 통전검사」. ② 는 양식에 줄이 0개라
+ * ① 의 줄을 본으로 복제한다. **빈 묶음은 양식 그대로 둔다.**
  *
  * 내림 규칙 자체는 손대지 않는다. 우리가 셈해 적어 넣으면 Excel 이 다시 계산한
  * 값과 어긋날 수 있고, 어긋난 쪽이 화면에 먼저 보인다.
@@ -89,9 +102,24 @@ const BLOCK_LABELS = {
   parts: "부품 비용",
   overhaulParts: "OH 부품 비용",
   labor: "작업비",
-  /** 양식에는 `통전검사[출하검사]` 로 적혀 있다. 합계 범위의 끝을 정하는 자리다. */
-  powerTest: "통전검사",
+  /**
+   * 작업 내역 세 묶음. **② 가 내자와 다르다** — 이 양식은 `OH 및 수리 작업` 이다.
+   * ③ 은 양식에 `통전검사[출하검사]` 로 적혀 있어 앞부분만 보고, **합계 범위의
+   * 끝을 정하는 자리**이기도 하다(아래 순환 참조 머리말).
+   */
+  workScope: {
+    INVESTIGATION: { label: "인수 조사", match: "exact" },
+    REPAIR: { label: "OH 및 수리 작업", match: "exact" },
+    POWER_TEST: { label: "통전검사", match: "prefix" },
+  } satisfies WorkScopeLabels,
 } as const;
+
+/**
+ * 🔴 **제너레이터 O/H 양식의 작업 내역 머리글은 여기 한 곳에만 적는다.**
+ * 화면이 쓸 기본 목록을 읽는 쪽(`storage/quote-template.ts`)이 가져다 쓴다 —
+ * 두 곳에 따로 적으면 화면과 파일이 다른 말을 하는 날이 온다.
+ */
+export const OH_QUOTE_WORK_SCOPE_LABELS: WorkScopeLabels = BLOCK_LABELS.workScope;
 
 const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
 
@@ -100,7 +128,7 @@ const CALC_LABEL = "계산";
 
 const EXTERNAL_LINK_PREFIX = "xl/externalLinks/";
 
-export type OhQuoteInput = QuoteInput & {
+export type OhQuoteInput = GeneratorQuoteInput & {
   /**
    * `2) OH 부품 비용` 칸에 들어갈 부품들. 재고 관리의 O/H 템플릿에서 담아 온
    * 것이고, 비어 있어도 된다(부품 없이 작업비만 받는 O/H 견적이 있다).
@@ -162,12 +190,13 @@ function fillSheet(
 ): { xml: string; rowShift: number } {
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
+  const workScope = input.workScope ?? EMPTY_WORK_SCOPE_LINES;
 
   // ── 1) 자리를 찾는다 ──────────────────────────────────────────────
   const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
   const overhaul = findItemBlock(templateRows, read, BLOCK_LABELS.overhaulParts);
   const laborRow = findLabelRow(templateRows, read, COLUMNS.name, BLOCK_LABELS.labor, "prefix");
-  const powerTest = findItemBlock(templateRows, read, BLOCK_LABELS.powerTest, "prefix");
+  const scope = findWorkScopeBlocks(templateRows, read, BLOCK_LABELS.workScope);
   const supplyRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.supply);
   const vatRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.vat);
   const totalRow = findSpacedLabelRow(templateRows, read, COLUMNS.unitPrice, TOTAL_LABELS.total);
@@ -177,7 +206,9 @@ function fillSheet(
     [BLOCK_LABELS.parts, parts.headerRow],
     [BLOCK_LABELS.overhaulParts, overhaul.headerRow],
     [BLOCK_LABELS.labor, laborRow],
-    [BLOCK_LABELS.powerTest, powerTest.headerRow],
+    [BLOCK_LABELS.workScope.INVESTIGATION.label, scope.INVESTIGATION.headerRow],
+    [BLOCK_LABELS.workScope.REPAIR.label, scope.REPAIR.headerRow],
+    [BLOCK_LABELS.workScope.POWER_TEST.label, scope.POWER_TEST.headerRow],
     [TOTAL_LABELS.supply, supplyRow],
     [TOTAL_LABELS.vat, vatRow],
     [TOTAL_LABELS.total, totalRow],
@@ -186,14 +217,18 @@ function fillSheet(
 
   // 절사 줄은 통전검사 마지막 항목과 공급가 사이에 있는, 금액 칸에 수식이 든
   // 유일한 줄이다. 자리를 박지 않고 **수식이 있는 줄을 찾아** 정한다.
+  // (양식의 원본 자리에서 찾는다 — 줄을 밀기 전이라 아래 rowShift 로 옮긴다.)
   const writeOffRow = findWriteOffRow(
     sheetXml,
-    powerTest.firstRow + powerTest.count,
+    scope.POWER_TEST.firstRow + scope.POWER_TEST.count,
     supplyRow
   );
 
   // ── 2) 줄 수를 맞춘다 — 아래에서부터 ─────────────────────────────
-  const resizedOverhaul = resizeRowBlock(templateRows, {
+  // 작업 내역 셋(③→②→①) → O/H 부품 → 부품. 위를 먼저 고치면 아래 묶음의
+  // 시작 행이 이미 밀려 있어 엉뚱한 줄을 잡는다.
+  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope);
+  const resizedOverhaul = resizeRowBlock(resizedScope.rows, {
     firstRow: overhaul.firstRow,
     currentCount: overhaul.count,
     targetCount: input.overhaulParts.length,
@@ -206,13 +241,25 @@ function fillSheet(
   const rows = resizedParts.rows;
 
   const afterParts = resizedParts.delta;
-  const rowShift = afterParts + resizedOverhaul.delta;
+  const afterOverhaul = afterParts + resizedOverhaul.delta;
+  const afterInvestigation = afterOverhaul + resizedScope.deltas.INVESTIGATION;
+  const afterRepair = afterInvestigation + resizedScope.deltas.REPAIR;
+  const rowShift = afterRepair + resizedScope.deltas.POWER_TEST;
+
+  /**
+   * 통전검사 묶음이 갖게 될 줄 수. **빈 목록이면 양식의 줄 수 그대로**다 —
+   * 합계 범위의 끝이 이 값으로 정해지므로 여기서 틀리면 순환 참조가 된다.
+   */
+  const powerTestCount = workScopeRowCount(scope.POWER_TEST, workScope.POWER_TEST);
 
   const at = {
     partsFirst: parts.firstRow,
     overhaulFirst: overhaul.firstRow + afterParts,
-    labor: laborRow + rowShift,
-    powerTestLast: powerTest.firstRow + powerTest.count - 1 + rowShift,
+    labor: laborRow + afterOverhaul,
+    investigationFirst: scope.INVESTIGATION.firstRow + afterOverhaul,
+    repairFirst: scope.REPAIR.firstRow + afterInvestigation,
+    powerTestFirst: scope.POWER_TEST.firstRow + afterRepair,
+    powerTestLast: scope.POWER_TEST.firstRow + powerTestCount - 1 + afterRepair,
     writeOff: writeOffRow === null ? null : writeOffRow + rowShift,
     supply: supplyRow + rowShift,
     vat: vatRow + rowShift,
@@ -250,7 +297,14 @@ function fillSheet(
     `${COLUMNS.unitPrice}${at.labor}*${COLUMNS.quantity}${at.labor}`
   );
 
+  // 작업 내역 세 묶음. 빈 묶음은 아무것도 하지 않는다 — 양식의 기본 목록이
+  // 그대로 나간다(quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+  xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
+  xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
+  xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
+
   // 작업 내역 문구가 적히는 자리에는 금액이 없어야 한다. 합계 범위 안이라 치운다.
+  // (작업 내역 줄은 C·D 열만 쓰므로 방금 적은 값이 지워지지 않는다.)
   for (let row = at.labor + 1; row <= at.powerTestLast; row += 1) {
     xml = clearCellIfPresent(xml, `${COLUMNS.amount}${row}`);
   }
