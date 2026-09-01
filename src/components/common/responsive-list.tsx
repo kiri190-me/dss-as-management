@@ -238,6 +238,104 @@ function readServer(): string | null {
   return null;
 }
 
+// ──────────────────────────────────────────── 저장소가 막혀 있어도 죽지 않게
+
+/**
+ * `localStorage` 처럼 생긴 것. 실물을 직접 부르지 않고 이 모양으로 받는 이유는
+ * 시험에서 **던지는 저장소**를 그대로 흉내 낼 수 있기 때문이다
+ * (notification-toast.ts 의 SeenKeyStore, attachment-gallery-zoom.ts 의
+ * GalleryZoomStore 와 같은 장치다).
+ */
+export type StoredChoiceStore = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+
+/**
+ * 🔴 **적어 두지 못한 선택을 이번 방문 동안 들고 있는 자리.**
+ *
+ * 읽기·쓰기만 감싸고 이것이 없으면, 저장이 막힌 브라우저에서 사람이 `표`를 눌러도
+ * **곧바로 원래대로 되돌아간다** — 적히지 않았으니 다시 읽으면 없다. 죽지는 않지만
+ * 고장으로 보인다. 못 적은 대가는 다음에 열 때 되돌아가는 것 하나면 족하다.
+ *
+ * ⚠️ **적어 두는 데 성공한 키는 여기 들어오지 않는다**(성공하면 지운다). 그래서
+ * 저장소가 멀쩡한 브라우저에서는 이 자리가 언제나 비어 있고, 읽기는 예전 그대로
+ * 저장소만 본다 — 이 변경으로 달라지는 것이 한 글자도 없다는 근거가 그것이다.
+ */
+export type StoredChoiceFallback = Map<string, string>;
+
+/**
+ * 적어 둔 글자를 읽는다. **어떤 경우에도 던지지 않는다.**
+ *
+ * 사생활 보호 창이나 「사이트 데이터 차단」을 켠 브라우저에서는 저장소에 손대는 것
+ * 자체가 터진다. 렌더 도중에 던지면 이 파일을 쓰는 목록 화면이 통째로 죽는다 —
+ * 보기 방식 하나 때문에 목록을 못 보게 되는 것이다. 못 읽으면 **고른 적 없음**
+ * (`null`)과 같이 다룬다: 그때는 폭이 정하던 예전 규칙으로 돌아갈 뿐이다.
+ *
+ * 돌려주는 것은 `string | null` 이다 — 부를 때마다 새 객체를 만들지 않는다. 이
+ * 함수의 값이 곧 useSyncExternalStore 의 스냅샷이라, 참조가 흔들리면 React 가
+ * "계속 바뀐다"고 보고 무한히 다시 그린다.
+ *
+ * 적어 두지 못한 선택(fallback)이 저장소보다 **먼저다.** 거기 남아 있는 키는
+ * 애초에 저장소에 못 적힌 것이라, 저장소에는 낡은 값이나 아무것도 없다.
+ */
+export function readStoredChoice(
+  store: StoredChoiceStore | null,
+  fallback: StoredChoiceFallback,
+  storageKey: string
+): string | null {
+  const kept = fallback.get(storageKey);
+  if (kept !== undefined) return kept;
+  if (!store) return null;
+  try {
+    return store.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 적어 둔다. 읽기와 같은 이유로 **어떤 경우에도 던지지 않는다**(저장 공간이 꽉 찬
+ * 경우 포함).
+ *
+ * 적어 두지 못했으면 위 fallback 에 들고 있는다 — 그래야 그 방문 동안은 고른 값이
+ * 먹는다. 적어 두는 데 성공하면 반대로 **지운다**: 그때부터는 저장소가 그 값의
+ * 주인이고, 들고 있던 것이 남아 있으면 다른 곳에서 바꾼 값을 가리게 된다.
+ */
+export function writeStoredChoice(
+  store: StoredChoiceStore | null,
+  fallback: StoredChoiceFallback,
+  storageKey: string,
+  value: string
+): void {
+  if (store) {
+    try {
+      store.setItem(storageKey, value);
+      fallback.delete(storageKey);
+      return;
+    } catch {
+      // 아래에서 들고 있는다.
+    }
+  }
+  fallback.set(storageKey, value);
+}
+
+/**
+ * 저장소를 집는다. **속성을 읽는 것 자체가 던진다**(사생활 보호 창, 저장을 막아
+ * 둔 브라우저). 그래서 꺼내 오는 것부터 감싼다 — 이 한 겹이 없으면 위 두 함수의
+ * try/catch 가 아무 소용이 없다.
+ */
+function choiceStore(): StoredChoiceStore | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 이 창에서 적어 두지 못한 선택들. 위 StoredChoiceFallback 주석 참조. */
+const unwritableChoices: StoredChoiceFallback = new Map();
+
 /**
  * 브라우저에 적어 둔 **사람이 고른 값 하나**를 읽는다. 아래 useViewMode 가
  * 이것으로 만들어져 있고, 목록이 아닌 화면도 같은 장치를 쓸 수 있게 내보낸다
@@ -260,7 +358,9 @@ function readServer(): string | null {
 export function useStoredChoice(storageKey: string): string | null {
   return useSyncExternalStore(
     subscribe,
-    () => window.localStorage.getItem(storageKey),
+    // 돌려주는 것은 언제나 `string | null` 이다(readStoredChoice 참조) — 값이
+    // 안 바뀌었으면 같은 것이 나오므로 무한 렌더에 빠질 여지가 없다.
+    () => readStoredChoice(choiceStore(), unwritableChoices, storageKey),
     readServer
   );
 }
@@ -268,9 +368,12 @@ export function useStoredChoice(storageKey: string): string | null {
 /**
  * 고른 값을 적어 두고, 이 장치를 쓰는 화면 전부에 알린다. 알리지 않으면 같은
  * 값을 보고 있는 다른 자리가 낡은 채로 남는다.
+ *
+ * 적어 두지 못하는 브라우저에서도 **알리는 일은 그대로 한다** — 그 방문 동안의
+ * 값을 들고 있으므로(writeStoredChoice), 알려야 화면이 따라온다.
  */
 export function setStoredChoice(storageKey: string, value: string): void {
-  window.localStorage.setItem(storageKey, value);
+  writeStoredChoice(choiceStore(), unwritableChoices, storageKey, value);
   for (const listener of listeners) listener();
 }
 
