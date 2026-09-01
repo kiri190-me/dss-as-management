@@ -138,6 +138,38 @@ export function setDate(sheetXml: string, ref: string, value: Date): string {
   return setNumber(sheetXml, ref, toExcelSerialDate(value));
 }
 
+/** 달력 날짜 → `2026-09-01`. 시각은 버린다(setDate 와 같은 이유). */
+export function toIsoDateText(date: Date): string {
+  if (Number.isNaN(date.getTime())) throw new Error("유효하지 않은 날짜입니다.");
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * ISO 8601 날짜(`t="d"`). **엄격(strict) OOXML 통합문서에서만 쓴다.**
+ *
+ * `setDate` 는 1900 기준의 일련번호를 적는다. 그런데 통합문서가
+ * `<workbookPr dateCompatibility="0">` 이면 그 통합문서는 **일련번호 체계를
+ * 쓰지 않겠다고 선언한 것**이고, 그런 파일에 숫자를 적으면 Excel 은 그것을
+ * 날짜가 아니라 그냥 숫자로 읽는다 — 발행일 칸에 `45728` 이 찍힌 보고서가
+ * 고객사로 나간다.
+ *
+ * 검사·수리 보고서 양식이 그 부류다(`conformance="strict"`). 그 양식의 날짜
+ * 칸들은 Excel 자신이 `<c r="AO8" s="358" t="d"><v>2025-03-12</v></c>` 로
+ * 적어 두었고, 여기서 하는 일은 **양식이 이미 쓰고 있는 모양 그대로** 값만
+ * 갈아 끼우는 것이다. 어느 쪽을 쓸지는 부르는 쪽이 workbook.xml 을 보고
+ * 정한다(service-report-template.ts 의 `usesIsoDates`).
+ */
+export function setIsoDate(sheetXml: string, ref: string, value: Date): string {
+  return replaceCell(
+    sheetXml,
+    ref,
+    (style) => `<c r="${ref}"${styleAttr(style)} t="d"><v>${toIsoDateText(value)}</v></c>`
+  );
+}
+
 /**
  * 수식. 캐시값(`<v>`)을 일부러 쓰지 않는다 — 우리가 계산한 값을 적어 넣으면
  * Excel 이 다시 계산한 값과 어긋날 수 있고, 어긋난 쪽이 화면에 먼저 보인다.
@@ -150,6 +182,37 @@ export function setFormula(sheetXml: string, ref: string, formula: string): stri
     ref,
     (style) => `<c r="${ref}"${styleAttr(style)}><f>${escapeXmlText(formula)}</f></c>`
   );
+}
+
+/**
+ * 셀의 **서식 번호(`s`)만** 바꾼다. 값·자료형·자식 요소는 글자 하나 안 건드린다.
+ *
+ * 파일 머리말의 "스타일 인덱스는 언제나 원본 것을 승계한다" 는 여전히 기본
+ * 규칙이다. 이것은 그 예외를 위한 도구다 — **양식의 서식으로는 안 되는 것이
+ * 딱 하나 있을 때**(검사·수리 보고서의 본문 칸이 `horizontal="center"` 라
+ * 보고서 본문이 가운데 찍히는 것) 쓴다. 새 서식은 `addAlignedCellXfs` 가
+ * 원본을 **복제해서** 만든 것이므로, 원본 `xf` 는 그대로 남고 그것을 쓰는 다른
+ * 칸들도 그대로다.
+ */
+export function setCellStyle(sheetXml: string, ref: string, styleIndex: number): string {
+  if (!Number.isInteger(styleIndex) || styleIndex < 0) {
+    throw new Error(`서식 번호가 잘못됐습니다: ${String(styleIndex)}`);
+  }
+  const cell = findCell(sheetXml, ref);
+  // 여는 태그는 첫 `>` 에서 끝난다 — 자체닫힘(`…/>`)이면 그것이 셀 전체다.
+  const openEnd = cell.raw.indexOf(">") + 1;
+  const open = cell.raw.slice(0, openEnd);
+  const rest = cell.raw.slice(openEnd);
+
+  const next = /\ss="[^"]*"/.test(open)
+    ? open.replace(/\ss="[^"]*"/, ` s="${styleIndex}"`)
+    : open.replace(/^<c(\s[^>]*?)?(\/?)>$/, (_all, attrs: string | undefined, slash: string) =>
+        `<c${attrs ?? ""} s="${styleIndex}"${slash}>`
+      );
+  if (next === open && !new RegExp(`\\ss="${styleIndex}"`).test(open)) {
+    throw new Error(`셀 ${ref} 에 서식 번호를 넣지 못했습니다: ${open}`);
+  }
+  return sheetXml.slice(0, cell.start) + next + rest + sheetXml.slice(cell.end);
 }
 
 /** 값을 지우고 서식만 남긴다. 양식에 박혀 있던 예시 문구를 없앨 때 쓴다. */

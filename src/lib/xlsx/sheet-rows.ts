@@ -22,9 +22,17 @@
  * 양식의 수식은 일곱 개뿐이고 어디를 가리키는지 우리가 안다 — 부르는 쪽이
  * 옮겨진 자리를 알고 **필요한 수식만 다시 써 넣는** 편이 안전하다.
  *
- * 병합 칸(mergeCells)도 마찬가지다. 매쳐 양식의 병합은 A1:I1 과 D22:F22 둘뿐이고
- * 둘 다 우리가 늘리는 구간보다 **위**에 있어 영향을 받지 않는다. 아래쪽에 병합이
- * 있는 양식을 다루게 되는 날 이 파일이 그것도 맡아야 한다.
+ * ── 병합 칸·범위는 **부르는 쪽이 골라서** 민다 ─────────────────────────
+ * 매쳐 견적서의 병합은 A1:I1 과 D22:F22 둘뿐이고 둘 다 늘리는 구간보다 **위**라
+ * 영향을 받지 않는다. 그래서 세 견적서 채우개는 병합을 밀지 않는다.
+ *
+ * 검사·수리 보고서 양식은 다르다 — 병합이 221개고 본문 아래에 비고·담당·승인·
+ * 문서번호가 병합으로 들어 있다. 그것들을 안 밀면 문서가 통째로 어긋난다.
+ *
+ * 🔴 그래서 미는 일을 `resizeRowBlock` **안에 넣지 않았다.** 넣었다면 견적서
+ * 채우개 셋의 동작이 함께 바뀐다. 아래의 `shiftMergeCellRows`·
+ * `cloneRowMergeCells`·`shiftSqrefRows` 는 **부르는 쪽이 필요할 때만 부르는**
+ * 별도 함수다. 부르지 않으면 예전과 한 글자도 다르지 않다.
  * ============================================================================
  */
 
@@ -202,6 +210,129 @@ export function resizeRowBlock(
   const renumberedAfter = after.map((row) => renumberRow(row, row.rowNumber + delta));
 
   return { rows: [...before, ...renumberedInside, ...renumberedAfter], delta };
+}
+
+/**
+ * ============================================================================
+ * 행이 밀리면 함께 밀려야 하는 것들 — **부르는 쪽이 골라서** 부른다
+ * ============================================================================
+ * `resizeRowBlock` 은 `<sheetData>` 안의 행만 다시 번호 매긴다. 시트에는 행
+ * 번호를 들고 있는 곳이 그것 말고도 여럿이고, 하나라도 빠뜨리면 문서가 조용히
+ * 어긋난다. 아래 함수들은 그 나머지를 맡되 **따로 부르게** 두었다 — 견적서
+ * 채우개 셋은 이것들을 부르지 않으므로 동작이 바뀌지 않는다.
+ * ============================================================================
+ */
+
+/** `A1:B2` 또는 `$A$1:$B$2`, 그리고 한 칸짜리 `A1` 을 행 번호만 민다. */
+function shiftRangeRows(reference: string, fromRow: number, delta: number): string {
+  return reference.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (whole, d1, column, d2, row) => {
+    const rowNumber = Number(row);
+    return rowNumber >= fromRow ? `${d1}${column}${d2}${rowNumber + delta}` : whole;
+  });
+}
+
+const MERGE_CELLS = /<mergeCells[^>]*>([\s\S]*?)<\/mergeCells>/;
+
+function readMergeRefs(sheetXml: string): string[] | null {
+  const block = MERGE_CELLS.exec(sheetXml);
+  if (!block) return null;
+  return [...block[1].matchAll(/<mergeCell[^>]*\sref="([^"]+)"/g)].map((match) => match[1]);
+}
+
+/**
+ * `<mergeCells>` 를 통째로 다시 쓴다. `count` 는 **셈해서** 넣는다 — 실제
+ * 개수와 어긋난 `count` 는 Excel 이 파일 열기를 거부하는 사유다.
+ */
+function writeMergeRefs(sheetXml: string, refs: readonly string[]): string {
+  const body = refs.map((ref) => `<mergeCell ref="${ref}"/>`).join("");
+  // 바꿔 넣을 글자를 함수로 돌려준다 — 문자열로 주면 `$&` 같은 것이 해석된다.
+  return sheetXml.replace(
+    MERGE_CELLS,
+    () => `<mergeCells count="${refs.length}">${body}</mergeCells>`
+  );
+}
+
+/**
+ * 삽입 지점(`fromRow`) 이상의 병합 칸을 `delta` 만큼 민다.
+ *
+ * 삽입 지점을 **걸치는** 병합(위에서 시작해 아래에서 끝나는 것)은 밀리지 않고
+ * **늘어난다** — 시작 행은 그대로, 끝 행만 밀리기 때문이다. 그것이 엑셀에서
+ * 사람이 행을 끼워 넣었을 때와 같은 결과다.
+ */
+export function shiftMergeCellRows(sheetXml: string, fromRow: number, delta: number): string {
+  if (delta === 0) return sheetXml;
+  const refs = readMergeRefs(sheetXml);
+  if (refs === null) return sheetXml;
+  return writeMergeRefs(
+    sheetXml,
+    refs.map((ref) => shiftRangeRows(ref, fromRow, delta))
+  );
+}
+
+/**
+ * 새로 생긴 줄에도 병합을 만들어 준다.
+ *
+ * 어떤 병합이 필요한지는 **양식이 알려 준다** — 본으로 삼은 줄(`modelRow`)에
+ * 걸려 있는 한 줄짜리 병합(`C58:G58`·`H58:AU58`)을 그대로 새 줄 번호로 복제한다.
+ * 행을 코드에 박지 않는 것과 같은 이유로 병합 범위도 박지 않는다.
+ *
+ * 여러 줄에 걸친 병합은 복제하지 않는다 — 그런 것(`C60:G63` 같은 라벨 칸)은
+ * 한 줄만 떼어 복제하면 뜻이 달라진다.
+ */
+export function cloneRowMergeCells(
+  sheetXml: string,
+  modelRow: number,
+  newRows: readonly number[]
+): string {
+  if (newRows.length === 0) return sheetXml;
+  const refs = readMergeRefs(sheetXml);
+  if (refs === null) return sheetXml;
+
+  const models: { startColumn: string; endColumn: string }[] = [];
+  for (const ref of refs) {
+    const found = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(ref);
+    if (!found) continue;
+    if (Number(found[2]) !== modelRow || Number(found[4]) !== modelRow) continue;
+    models.push({ startColumn: found[1], endColumn: found[3] });
+  }
+  if (models.length === 0) {
+    throw new SheetRowError(
+      `${modelRow}행에 한 줄짜리 병합이 없어 새 줄의 병합을 만들 수 없습니다.`
+    );
+  }
+
+  const added: string[] = [];
+  const existing = new Set(refs);
+  for (const row of newRows) {
+    for (const model of models) {
+      const ref = `${model.startColumn}${row}:${model.endColumn}${row}`;
+      // 🔴 같은 범위를 두 번 담지 않는다 — 중복된 병합은 Excel 이 거부한다.
+      if (existing.has(ref)) continue;
+      existing.add(ref);
+      added.push(ref);
+    }
+  }
+  return writeMergeRefs(sheetXml, [...refs, ...added]);
+}
+
+/**
+ * 조건부 서식(`conditionalFormatting sqref=`)과 데이터 유효성 검사
+ * (`dataValidation sqref=`)의 범위를 민다. 안 밀면 삽입 지점 아래에 걸려 있던
+ * 서식·드롭다운이 **엉뚱한 줄에 남는다.**
+ *
+ * ⚠️ `sqref` 는 공백으로 나뉜 여러 범위를 담을 수 있다
+ * (`P29:Q30 AF29:AG30 X27:Y30`). 통째로 정규식을 돌리면 될 것 같지만, 범위마다
+ * 따로 밀어야 한 칸짜리 범위(`AY30`)도 함께 맞는다.
+ */
+export function shiftSqrefRows(sheetXml: string, fromRow: number, delta: number): string {
+  if (delta === 0) return sheetXml;
+  return sheetXml.replace(/sqref="([^"]+)"/g, (_whole, value: string) => {
+    const shifted = value
+      .split(/\s+/)
+      .map((range) => shiftRangeRows(range, fromRow, delta))
+      .join(" ");
+    return `sqref="${shifted}"`;
+  });
 }
 
 /**
