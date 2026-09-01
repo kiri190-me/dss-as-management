@@ -7,7 +7,6 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { NonDatabaseWorkContent } from "@/components/repair-cases/detail/NonDatabaseWorkContent";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
-import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
 import WorkRecordsSection from "@/components/repair-cases/work-records/WorkRecordsSection";
 import { deriveCurrentHoldState, getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
@@ -19,7 +18,7 @@ import {
   getExecutableTemplateOptions,
   getRelatedRepairHistory,
 } from "@/lib/db/queries/procedure-case-execution";
-import { getRecentWorkRecordsForCase, getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
+import { getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
 import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
@@ -78,11 +77,13 @@ export default async function RepairCaseExecutionPage({
     );
   }
 
-  const [workflowHistory, currentApprovals, activeExecution, recentWorkRecords, workRecordCaseContext] = await Promise.all([
+  // workflowHistory는 화면에 그리지 않는다(워크플로 변경 이력 구역은 이 탭에서
+  // 없앴고, 작업 이력 탭이 그린다) — 여기서는 아래 deriveCurrentHoldState의
+  // 입력으로만 쓴다. 그 결과(holdState)는 패널 둘이 함께 본다.
+  const [workflowHistory, currentApprovals, activeExecution, workRecordCaseContext] = await Promise.all([
     getWorkflowHistoryForCase(resolved.id),
     getCurrentApprovalsForCase(resolved.id),
     getActiveExecutionForCase(resolved.id),
-    getRecentWorkRecordsForCase(resolved.id, 5),
     getWorkRecordCaseContext(resolved.id),
   ]);
   const holdState = deriveCurrentHoldState(workflowHistory);
@@ -131,7 +132,8 @@ export default async function RepairCaseExecutionPage({
   const canCreate =
     (!workRecordRequiresOwnAssignment(actingUser.role) || isAssignedToCase) &&
     (await hasPermission(actingUser.role, "repairCases.workRecords", "WRITE"));
-  const canInvalidate = await hasPermission(actingUser.role, "repairCases.workRecords", "MANAGE");
+  // 무효화 권한 판정은 이 화면에 없다 — 무효화가 작업 이력 탭으로 옮겨 갔고,
+  // 같은 판정을 work-history/page.tsx가 그대로 한다.
   void isCaseLocked;
   // Shipment-lock removal policy: isCaseLocked is still fed into
   // DatabaseWorkflowControlPanel below (workflow-transition gating is
@@ -189,20 +191,9 @@ export default async function RepairCaseExecutionPage({
         currentStepOrder={currentStep?.order ?? null}
         inProgressNodes={inProgressNodes}
         createDisabledReason={createDisabledReason}
-        canInvalidate={canInvalidate}
-        recentRecords={recentWorkRecords}
       />
 
       {procedureScreen}
-
-      <details>
-        <summary className="cursor-pointer text-sm font-medium text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-50">
-          워크플로 변경 이력
-        </summary>
-        <div className="mt-2">
-          <DatabaseWorkflowHistoryList entries={workflowHistory} />
-        </div>
-      </details>
     </div>
   );
 }
