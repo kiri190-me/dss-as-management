@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import {
@@ -9,6 +9,21 @@ import {
   malwareScanStatusLabels,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
+import {
+  ATTACHMENT_GALLERY_ZOOM_STORAGE_KEY,
+  DEFAULT_GALLERY_ZOOM_PERCENT,
+  GALLERY_ZOOM_PERCENT_RANGE,
+  GALLERY_ZOOM_STEP_PERCENT,
+  canZoomInGallery,
+  canZoomOutGallery,
+  clampGalleryZoom,
+  formatGalleryZoom,
+  galleryGridTemplate,
+  readGalleryZoom,
+  stepGalleryZoom,
+  writeGalleryZoom,
+  type GalleryZoomStore,
+} from "@/lib/domain/attachment-gallery-zoom";
 import {
   ATTACHMENT_KIND_LABELS,
   DEFAULT_ATTACHMENT_LIST_FILTERS,
@@ -200,6 +215,74 @@ function Thumbnail({
   );
 }
 
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 미리보기 크기 — 이 브라우저에 적어 두는 자리
+ * ────────────────────────────────────────────────────────────────────────────
+ * 판정은 전부 lib/domain/attachment-gallery-zoom.ts 가 한다. 여기 있는 것은
+ * `window.localStorage` 를 실제로 두드리는 일과, 그 값이 바뀌었음을 화면에
+ * 알리는 일뿐이다.
+ *
+ * ⚠️ **responsive-list 의 useStoredChoice 를 쓰지 않는다.** 저장한 값을 화면에
+ * 들이는 방법(useSyncExternalStore)은 그쪽을 그대로 따랐다 — 첫 렌더에서 그냥
+ * 읽으면 서버가 그린 것과 달라져 hydration 이 어긋나고, effect 에서 읽어
+ * setState 하면 기본 크기가 한 프레임 스쳐 지나간다. 다만 그 함수는
+ * `window.localStorage` 를 try/catch 없이 만져서, 사생활 보호 창처럼 **읽는
+ * 것만으로 던지는** 브라우저에서는 첨부 목록 전체가 죽는다(BrowserNotifications
+ * 의 getSeenKeyStore 주석이 그 사정을 적어 두었다). 미리보기 크기 하나 때문에
+ * 파일을 못 받게 될 수는 없으므로 여기서는 감싼 것을 쓴다.
+ */
+const galleryZoomListeners = new Set<() => void>();
+
+/**
+ * 저장을 막아 둔 브라우저에서도 **이번 방문 동안은** 조절이 먹히게 하는 자리.
+ *
+ * 화면이 저장소만 보고 그리면, 적히지 않는 브라우저에서는 슬라이더를 아무리
+ * 움직여도 값이 되돌아온다 — 고장으로 보인다. 적어 두기와 별개로 여기에 들고
+ * 있으면 화면은 따라오고, 못 적은 대가는 다음에 열 때 기본값으로 돌아가는
+ * 것뿐이다.
+ */
+let galleryZoomInMemory: number | null = null;
+
+/**
+ * 저장소를 집는다. **속성을 읽는 것 자체가 던진다**(사생활 보호 창, 저장을 막아
+ * 둔 브라우저). 그래서 접근을 통째로 감싼다.
+ */
+function galleryZoomStore(): GalleryZoomStore | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function subscribeGalleryZoom(listener: () => void): () => void {
+  galleryZoomListeners.add(listener);
+  return () => {
+    galleryZoomListeners.delete(listener);
+  };
+}
+
+/**
+ * 지금 배율. 숫자라 값으로 비교되므로 useSyncExternalStore 가 매번 같은 것으로
+ * 본다(참조가 흔들려 무한히 다시 그리는 일이 없다).
+ */
+function readGalleryZoomSnapshot(): number {
+  if (galleryZoomInMemory !== null) return galleryZoomInMemory;
+  return readGalleryZoom(galleryZoomStore(), ATTACHMENT_GALLERY_ZOOM_STORAGE_KEY);
+}
+
+/** 서버에는 저장소가 없다. 아직 아무것도 안 고른 사람과 같은 화면을 준다. */
+function readGalleryZoomServerSnapshot(): number {
+  return DEFAULT_GALLERY_ZOOM_PERCENT;
+}
+
+function setGalleryZoom(percent: number): void {
+  galleryZoomInMemory = clampGalleryZoom(percent);
+  writeGalleryZoom(galleryZoomStore(), ATTACHMENT_GALLERY_ZOOM_STORAGE_KEY, galleryZoomInMemory);
+  for (const listener of galleryZoomListeners) listener();
+}
+
 export default function StoredAttachmentList({
   attachments,
   canManage,
@@ -208,6 +291,15 @@ export default function StoredAttachmentList({
 }: StoredAttachmentListProps) {
   const router = useRouter();
   const [view, setView] = useState<ViewKind>("list");
+  /**
+   * 미리보기 타일 크기(%). 이 사람 브라우저에 남고 다음에 열어도 그대로다 —
+   * 서버에도 DB 에도 보내지 않는다(내 화면을 어떻게 보느냐는 내 사정이다).
+   */
+  const zoomPercent = useSyncExternalStore(
+    subscribeGalleryZoom,
+    readGalleryZoomSnapshot,
+    readGalleryZoomServerSnapshot
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /** 크게 보고 있는 사진의 자리. 사진 목록(viewable) 기준이다. */
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -688,9 +780,72 @@ export default function StoredAttachmentList({
     </ul>
   );
 
+  // ── 미리보기: 크기 조절 바 ────────────────────────────────────────────
+  /**
+   * `−` 슬라이더 `+` 배율. 윈도우 사진 앱·탐색기의 확대 바와 같은 모양이다
+   * (사용자가 그 화면을 그대로 가리켜 요청했다).
+   *
+   * 🔴 **미리보기 보기에서만 나온다.** 목록(표·카드) 보기의 썸네일은 40px 고정이라
+   * 이 조절과 상관이 없고, 안 듣는 조절 바가 화면에 남아 있으면 그것이 고장이다.
+   *
+   * 키보드로도 조절된다 — `<input type="range">` 는 방향키를 저절로 받고, 단추와
+   * 슬라이더에는 무엇을 조절하는 것인지 이름을 붙였다. 지금 몇 %인지는
+   * aria-valuetext 로 낭독기에 전해진다(오른쪽 글자는 그래서 aria-hidden 이다 —
+   * 안 그러면 같은 값을 두 번 읽는다).
+   */
+  const zoomBar = (
+    <div className="flex items-center justify-end gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <span className="text-xs text-zinc-500 dark:text-zinc-400">미리보기 크기</span>
+      <button
+        type="button"
+        onClick={() => setGalleryZoom(stepGalleryZoom(zoomPercent, -1))}
+        disabled={!canZoomOutGallery(zoomPercent)}
+        aria-label="미리보기 크기 줄이기"
+        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium leading-none text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        −
+      </button>
+      <input
+        type="range"
+        min={GALLERY_ZOOM_PERCENT_RANGE.min}
+        max={GALLERY_ZOOM_PERCENT_RANGE.max}
+        step={GALLERY_ZOOM_STEP_PERCENT}
+        value={zoomPercent}
+        onChange={(event) => setGalleryZoom(Number(event.target.value))}
+        aria-label="미리보기 크기"
+        aria-valuetext={formatGalleryZoom(zoomPercent)}
+        className="w-24 cursor-pointer accent-zinc-900 sm:w-40 dark:accent-zinc-100"
+      />
+      <button
+        type="button"
+        onClick={() => setGalleryZoom(stepGalleryZoom(zoomPercent, 1))}
+        disabled={!canZoomInGallery(zoomPercent)}
+        aria-label="미리보기 크기 키우기"
+        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium leading-none text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        +
+      </button>
+      <span
+        aria-hidden="true"
+        className="w-10 text-right text-xs tabular-nums text-zinc-600 dark:text-zinc-400"
+      >
+        {formatGalleryZoom(zoomPercent)}
+      </span>
+    </div>
+  );
+
   // ── 미리보기: 격자 ────────────────────────────────────────────────────
+  /**
+   * 칸 수를 못 박지 않는다. **타일 너비만 정하고 칸 수는 브라우저가 센다**
+   * (auto-fill) — 그래야 사람이 고른 크기가 그대로 나오고, 자리가 좁아지면
+   * 칸이 저절로 줄어든다. 예전에는 화면 너비만 보고 2·3·4칸으로 못 박혀 있어서
+   * 사람이 정할 여지가 없었다(그 결과가 "크게만 나온다"였다).
+   *
+   * Tailwind 로는 못 쓴다 — 클래스 이름을 값에서 만들어 내면 빌드 때 그 클래스가
+   * 없다. 그래서 style 로 준다(값 계산은 attachment-gallery-zoom.ts).
+   */
   const gallery = (
-    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <ul className="grid gap-3" style={{ gridTemplateColumns: galleryGridTemplate(zoomPercent) }}>
       {visible.map((item) => {
         const isSelected = selectedIds.includes(item.id);
         return (
@@ -825,7 +980,12 @@ export default function StoredAttachmentList({
           </button>
         </div>
       ) : view === "gallery" ? (
-        gallery
+        // 조절 바는 격자 바로 위에 둔다 — 여기가 그 조절이 실제로 듣는 유일한
+        // 자리이고, 위 도구 줄에 얹으면 목록 보기에서도 보여 안 듣는 조절이 된다.
+        <>
+          {zoomBar}
+          {gallery}
+        </>
       ) : (
         <ResponsiveList listId="repair-case-stored-attachments" table={table} cards={cards} />
       )}
