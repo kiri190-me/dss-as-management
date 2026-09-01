@@ -8,6 +8,7 @@ import ProcedureTroubleshootingViewer from "./ProcedureTroubleshootingViewer";
 import ProcedureReferenceItemsViewer from "./ProcedureReferenceItemsViewer";
 import ProcedureValidationIssuePanel from "./ProcedureValidationIssuePanel";
 import CreateDraftVersionButton from "./editor/CreateDraftVersionButton";
+import PublishTemplateButton from "./editor/PublishTemplateButton";
 import {
   procedureEquipmentTypeLabels,
   procedureTemplateSourceTypeLabels,
@@ -41,6 +42,7 @@ export default function ProcedureTemplateDetailScreen({
   canManageValidation,
   canCreateDraftVersion = false,
   canEditDraft = false,
+  canPublish = false,
 }: {
   template: ProcedureTemplateDetail;
   canManageValidation: boolean;
@@ -48,6 +50,14 @@ export default function ProcedureTemplateDetailScreen({
   canCreateDraftVersion?: boolean;
   /** Phase 4A — "편집 시작" straight into the controlled editor for an already-editable DRAFT. */
   canEditDraft?: boolean;
+  /**
+   * "게시" — DRAFT 를 게시해 A/S 접수 건의 "기술 절차 불러오기" 목록에 올린다.
+   *
+   * 이 값은 페이지가 **서버가 실제로 보는 관문 그대로** 계산해서 넘긴다
+   * (page.tsx 의 canPublish 주석 참조). 여기서 상태만 다시 본다 — 이미
+   * 게시된(PUBLISHED) 것이나 보관된(ARCHIVED) 것에 또 뜨면 안 되기 때문이다.
+   */
+  canPublish?: boolean;
 }) {
   const hasGraph = template.edges.length > 0 || template.nodes.some((n) => n.nodeType !== "CHECKLIST" && n.nodeType !== "TROUBLESHOOTING");
   const hasChecklist = template.checklistSections.length > 0;
@@ -139,6 +149,13 @@ export default function ProcedureTemplateDetailScreen({
               >
                 검증 문제 검토
               </Link>
+            )}
+            {template.status === "DRAFT" && canPublish && (
+              <PublishTemplateButton
+                templateId={template.id}
+                templateName={template.name}
+                isReferenceOnly={template.isReferenceOnly}
+              />
             )}
             {!template.isReferenceOnly && template.status === "PUBLISHED" && canCreateDraftVersion && <CreateDraftVersionButton templateId={template.id} />}
             {!template.isReferenceOnly && template.status === "DRAFT" && canEditDraft && (
