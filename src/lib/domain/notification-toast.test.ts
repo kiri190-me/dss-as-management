@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS,
   NOTIFICATION_REFRESH_INTERVAL_MS,
   NOTIFICATION_REFRESH_MIN_GAP_MS,
   NOTIFICATION_TOAST_ICON,
@@ -481,7 +482,15 @@ test("화면이 보이고 입력 중이 아니면 다시 센다", () => {
   );
 });
 
-test("🔴 화면이 안 보이는 동안은 서버를 두드리지 않는다", () => {
+test("이 판정은 **보고 있는 화면**의 규칙이다 — 안 보이면 여기서는 닫힌다", () => {
+  // 🔴 이름이 바뀐 시험이다. 예전 이름은 "화면이 안 보이는 동안은 서버를 두드리지
+  // 않는다"였는데 그것은 이제 사실이 아니다 — 창을 최소화해 두어도 새 알림이
+  // 뜨게 하려고 숨은 상태의 주기(INTERVAL)를 열었다. 그 길은
+  // shouldRefreshNotificationsNow가 따로 내고 이 문을 지나지 않는다(아래
+  // "🔴 화면이 안 보여도 주기는 돈다" 시험).
+  //
+  // 이 함수 자체는 종전 그대로다: 보고 있는 사람을 방해하지 않는가만 본다.
+  // 그러니 안 보이는 화면에는 여전히 false다 — 물을 사람이 없으니 물을 것도 없다.
   for (const visibilityState of ["hidden", "prerender"]) {
     assert.equal(
       shouldRefreshNotifications({ visibilityState, focusedTagName: null, focusedIsContentEditable: false }),
@@ -647,19 +656,166 @@ test("🔴 시계가 뒤로 가도 영영 막히지 않는다", () => {
   );
 });
 
-test("🔴 화면이 안 보이면 어떤 계기로도 다시 세지 않는다", () => {
-  for (const trigger of ["INTERVAL", "VISIBLE", "BELL_OPENED"] as const) {
+test("🔴 화면이 안 보이면 사람이 보고 있다는 뜻의 계기(화면 복귀·종 열기)는 돌지 않는다", () => {
+  // 🔴 규칙이 바뀌어 고친 시험이다. 예전에는 "어떤 계기로도 다시 세지 않는다"였고
+  // INTERVAL까지 여기 들어 있었다 — 그것 때문에 창을 최소화해 두면 새 알림이
+  // 생겨도 영영 알아채지 못했다. INTERVAL은 이제 아래 시험이 "돈다"로 못 박는다.
+  //
+  // 나머지 둘은 그대로 막힌다. 화면 복귀도 종 열기도 **사람이 지금 화면을 보고
+  // 있다**는 뜻이라, 안 보이는 화면에서 도는 것 자체가 말이 안 된다.
+  for (const trigger of ["VISIBLE", "BELL_OPENED"] as const) {
+    for (const visibilityState of ["hidden", "prerender"]) {
+      assert.equal(
+        shouldRefreshNotificationsNow({
+          trigger,
+          env: { ...IDLE_SCREEN, visibilityState },
+          lastRefreshedAt: null,
+          now: 1_000_000,
+        }),
+        false,
+        `${trigger} / ${visibilityState}`
+      );
+    }
+  }
+});
+
+test("🔴 화면이 안 보여도 주기는 돈다 — 창을 최소화해 두어도 새 알림이 알림창에 뜬다", () => {
+  // 알림창을 띄우는 것 자체는 화면이 보이는지와 상관없다(숨은 탭에서도 잘 뜬다).
+  // 막고 있던 것은 오직 "안 보이면 다시 세지 않는다"였고, 셀 것이 없으니 띄울
+  // 것도 없었다. 여기가 그 문을 여는 자리다.
+  for (const visibilityState of ["hidden", "prerender"]) {
     assert.equal(
       shouldRefreshNotificationsNow({
-        trigger,
-        env: { ...IDLE_SCREEN, visibilityState: "hidden" },
+        trigger: "INTERVAL",
+        env: { ...IDLE_SCREEN, visibilityState },
+        lastRefreshedAt: null,
+        now: 1_000_000,
+      }),
+      true,
+      visibilityState
+    );
+  }
+});
+
+test("🔴 숨어 있으면 입력칸에 커서가 있어도 주기는 돈다 — 최소화된 창에서는 아무도 안 치고 있다", () => {
+  // 🔴 이번 변경의 함정이다. 「입력칸에 커서가 있으면 쉰다」의 까닭은 한창 글자를
+  // 치는 중에 화면이 다시 그려지면 불쾌하다는 것인데, 창이 최소화돼 있으면 치는
+  // 사람이 없다. 커서는 최소화해도 그 자리에 남으므로, 이 규칙을 숨은 상태에까지
+  // 적용하면 **검색칸에 커서를 둔 채 최소화한 사람은 알림을 영영 못 받는다.**
+  for (const focusedTagName of ["INPUT", "TEXTAREA"]) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger: "INTERVAL",
+        env: { ...IDLE_SCREEN, visibilityState: "hidden", focusedTagName },
+        lastRefreshedAt: null,
+        now: 1_000_000,
+      }),
+      true,
+      focusedTagName
+    );
+  }
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "INTERVAL",
+      env: {
+        visibilityState: "hidden",
+        focusedTagName: "DIV",
+        focusedIsContentEditable: true,
+      },
+      lastRefreshedAt: null,
+      now: 1_000_000,
+    }),
+    true,
+    "contenteditable"
+  );
+});
+
+test("🔴 보이는 화면에서는 입력칸에 커서가 있으면 주기가 쉰다 — 기존 규칙 그대로다", () => {
+  // 위 시험과 짝이다. 숨었을 때 입력 규칙을 안 보는 것이 "그 규칙을 없앴다"로
+  // 새어 나가지 않게 여기서 못 박는다.
+  for (const focusedTagName of ["INPUT", "TEXTAREA"]) {
+    assert.equal(
+      shouldRefreshNotificationsNow({
+        trigger: "INTERVAL",
+        env: { ...IDLE_SCREEN, focusedTagName },
         lastRefreshedAt: null,
         now: 1_000_000,
       }),
       false,
-      trigger
+      focusedTagName
     );
   }
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "INTERVAL",
+      env: { ...IDLE_SCREEN, focusedTagName: "DIV", focusedIsContentEditable: true },
+      lastRefreshedAt: null,
+      now: 1_000_000,
+    }),
+    false,
+    "contenteditable"
+  );
+});
+
+test("🔴 숨어 있는 동안의 최소 간격이 보이는 동안보다 길다", () => {
+  // 숨은 탭이 서버를 두드리게 된 대가로 둔 안전장치다. 이 부등호가 뒤집히면
+  // 아무도 안 보는 화면이 보고 있는 화면보다 자주 두드리게 된다.
+  assert.ok(
+    NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS > NOTIFICATION_REFRESH_MIN_GAP_MS,
+    `숨은 간격 ${NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS}ms 는 보이는 간격 ${NOTIFICATION_REFRESH_MIN_GAP_MS}ms 보다 길어야 한다`
+  );
+  // 주기보다도 길다 — 숨어 있는 동안은 1분 주기가 매번 통과하지 못한다는 뜻이고,
+  // 그것이 의도다(브라우저가 조이지 않는 곳에서도 상한이 걸린다).
+  assert.ok(
+    NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS > NOTIFICATION_REFRESH_INTERVAL_MS,
+    `${NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS}ms 는 주기(${NOTIFICATION_REFRESH_INTERVAL_MS}ms)를 못 조인다`
+  );
+});
+
+test("숨은 탭 하나가 한 시간에 다시 세는 횟수는 숨은 간격이 정한 만큼을 넘지 못한다", () => {
+  // 서버 부하의 최악을 이 한 줄로 셀 수 있어야 한다 — 안 보는 탭을 열어 둔 사람
+  // 수만큼 부담이 느는 것을 막는 값이다.
+  const worstCasePerHour = Math.floor(3_600_000 / NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS);
+  assert.ok(worstCasePerHour <= 20, `숨은 탭 하나가 시간당 ${worstCasePerHour}번은 너무 잦다`);
+});
+
+test("🔴 숨어 있는 동안 최소 간격 안에 주기가 또 오면 건너뛴다", () => {
+  const lastRefreshedAt = 1_000_000;
+  const hidden = { ...IDLE_SCREEN, visibilityState: "hidden" };
+
+  // 보이는 간격(10초)은 지났지만 숨은 간격(3분)은 아직 안 찼다 — 숨었을 때는
+  // 이 순간이 막혀야 한다. 보이는 화면이었다면 통과할 시각이라 두 값이 정말로
+  // 갈라지는지가 여기서 붙잡힌다.
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "INTERVAL",
+      env: hidden,
+      lastRefreshedAt,
+      now: lastRefreshedAt + NOTIFICATION_REFRESH_MIN_GAP_MS,
+    }),
+    false,
+    "보이는 간격만 지난 시각"
+  );
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "INTERVAL",
+      env: hidden,
+      lastRefreshedAt,
+      now: lastRefreshedAt + NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS - 1,
+    }),
+    false,
+    "경계 직전"
+  );
+  assert.equal(
+    shouldRefreshNotificationsNow({
+      trigger: "INTERVAL",
+      env: hidden,
+      lastRefreshedAt,
+      now: lastRefreshedAt + NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS,
+    }),
+    true,
+    "간격이 차면 센다"
+  );
 });
 
 test("🔴 저절로 도는 갱신은 글자를 치는 중이면 그대로 쉰다", () => {

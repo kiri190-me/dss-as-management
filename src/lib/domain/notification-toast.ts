@@ -491,11 +491,17 @@ export type NotificationRefreshEnvironment = {
 };
 
 /**
- * 지금 다시 세도 되는가.
+ * 지금 다시 세도 되는가 — **화면을 보고 있는 동안**의 규칙.
  *
- * ── 화면이 안 보이면 쉰다 ───────────────────────────────────────────────
- * 탭을 열어만 두고 안 보는 동안 서버를 계속 두드릴 이유가 없다. 다시 보게 되면
- * 다음 주기에 저절로 재개된다.
+ * 🔴 숨은 화면은 이 문을 지나지 않는다. 최소화해 둔 창에도 새 알림이 뜨게 하려고
+ * 숨은 상태의 주기(INTERVAL)를 따로 열어 두었고, 그 길은
+ * shouldRefreshNotificationsNow가 낸다. 그러니 여기서 안 보이는 화면에 false를
+ * 주는 것은 "아무것도 세지 않는다"가 아니라, **아래 규칙들이 보고 있는 사람을
+ * 위한 것**이라 볼 사람이 없으면 물을 것도 없다는 뜻이다.
+ *
+ * ── 화면이 안 보이면 여기서는 쉰다 ──────────────────────────────────────
+ * 사람이 보고 있다는 뜻의 계기(화면 복귀·종 열기)는 안 보이는 화면에서 돌 이유가
+ * 없다. 그 둘을 여기서 한 번에 막는다.
  *
  * ── 글자를 치는 중이면 쉰다 ─────────────────────────────────────────────
  * 다시 세는 방법은 `router.refresh()`다 — 서버 구간을 다시 받아 화면을 다시
@@ -536,7 +542,8 @@ export type NotificationRefreshTrigger =
   | "BELL_OPENED";
 
 /**
- * 다시 센 지 이만큼 안 됐으면 건너뛴다.
+ * 다시 센 지 이만큼 안 됐으면 건너뛴다 — **화면이 보이는 동안**의 값이다.
+ * (안 보이는 동안은 NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS로 더 길게 잡는다.)
  *
  * 즉시 다시 세는 계기가 둘 늘었으므로(화면 복귀·종 열기) 이 값이 이번 변경의
  * **안전장치**다. 폰에서 앱을 빠르게 오가거나 종을 연달아 열고 닫는 것은 몇 초
@@ -555,6 +562,29 @@ export type NotificationRefreshTrigger =
 export const NOTIFICATION_REFRESH_MIN_GAP_MS = 10_000;
 
 /**
+ * 🔴 **화면이 안 보이는 동안**의 최소 간격 — 보이는 동안보다 길다.
+ *
+ * 숨은 탭에서도 주기가 돌게 되면서(최소화해 두어도 알림이 뜨게 하려는 것이 그
+ * 변경이다) 새로 필요해진 안전장치다. 안 보는 탭을 열어 둔 채 퇴근하는 사람이
+ * 사무실에 여럿이면 **아무도 안 보는 화면의 수만큼** 서버 부담이 는다. 우리 쪽에
+ * 상한이 없으면 그 값을 셀 수조차 없다.
+ *
+ * 3분으로 잡은 까닭:
+ * - **브라우저의 조임에 맞춰 세지 않는다.** Chrome은 숨은 탭의 타이머를 스스로
+ *   1분에 한 번으로 조이고, 5분 넘게 숨어 있고 손을 안 대면 5분에 한 번까지
+ *   조인다. 우리 값을 그 5분에 맞춰 버리면 두 주기가 서로 어긋나는 순간(간격이
+ *   1ms 모자라는 순간)에 한 번을 통째로 건너뛰어 실제 지연이 10분으로 뛴다.
+ *   브라우저가 조인 간격보다 **짧게** 잡아야 그쪽 박자가 늘 이 문을 통과한다.
+ * - **최악을 셀 수 있다.** 스스로 조이지 않는 브라우저에서도 숨은 탭 하나가
+ *   시간당 20번(3600초 ÷ 180초)을 넘지 못한다 — 보이는 탭의 주기(시간당 60번)의
+ *   3분의 1이다.
+ * - **사람이 기다릴 만하다.** 최소화해 둔 창에 새 알림이 늦어도 3분 안에 뜬다.
+ *   Chrome에서는 어차피 브라우저가 조이는 만큼(대개 1~5분) 걸리므로, 이 값이
+ *   체감을 더 늦추는 일은 거의 없다.
+ */
+export const NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS = 180_000;
+
+/**
  * 지금 다시 세도 되는가 — 계기와 마지막으로 센 시각까지 함께 보고 정한다.
  *
  * 🔴 지금 시각을 **인자로 받는다.** 안에서 `Date.now()`를 부르면 이 판정을
@@ -565,8 +595,26 @@ export const NOTIFICATION_REFRESH_MIN_GAP_MS = 10_000;
  * 저절로 도는 것들(주기·화면 복귀)은 글자를 치는 중이면 쉰다 —
  * shouldRefreshNotifications 그대로다. 종은 다르다. **사람이 직접 누른 것**이고
  * 그 사람이 지금 보려는 것이 바로 그 목록이라, 여기서 건너뛰면 방금 연 패널이
- * 낡은 채로 남는다("새로고침을 해야만 바뀐다"가 되는 그 자리다). 대신 화면이
- * 보이는가는 종에도 그대로 따진다.
+ * 낡은 채로 남는다("새로고침을 해야만 바뀐다"가 되는 그 자리다).
+ *
+ * ── 🔴 화면이 안 보여도 주기는 돈다 ─────────────────────────────────────
+ * 창을 최소화해 두어도 새 알림이 알림창에 떠야 한다. 알림창을 띄우는 것 자체는
+ * 화면이 보이는지와 상관없고 — 숨은 탭에서도 잘 뜬다 — 막고 있던 것은 오직
+ * "안 보이면 다시 세지 않는다"였다. 셀 것이 없으니 띄울 것도 없었던 것이다.
+ *
+ * 그래서 숨은 화면에서는 **주기(INTERVAL)만** 연다. 나머지 둘은 그대로 막는다:
+ * 화면 복귀도 종 열기도 **사람이 화면을 보고 있다**는 뜻의 계기라, 안 보이는
+ * 화면에서 도는 것 자체가 말이 안 된다.
+ *
+ * 🔴 숨어 있을 때는 「입력칸에 커서가 있으면 쉰다」를 **적용하지 않는다.** 그
+ * 규칙의 까닭은 한창 글자를 치는 중에 화면이 다시 그려지면 불쾌하다는 것인데,
+ * 창이 최소화돼 있으면 아무도 안 치고 있다. 그대로 두면 **검색칸에 커서를 둔 채
+ * 최소화한 사람은 알림을 영영 못 받는다** — 커서는 최소화해도 그 자리에 남는다.
+ *
+ * 대신 숨어 있을 때의 최소 간격은 더 길다
+ * (NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS). Chrome은 숨은 탭의 타이머를 알아서
+ * 조이지만 모든 브라우저가 그러지는 않으므로, 아무도 안 보는 화면이 서버를 얼마나
+ * 두드릴 수 있는지는 우리 쪽에서도 정해 두어야 한다.
  *
  * ── 마지막으로 센 적이 없으면 통과 ──────────────────────────────────────
  * `lastRefreshedAt`이 null이면 이 화면에서 아직 한 번도 다시 센 적이 없다는
@@ -580,18 +628,30 @@ export function shouldRefreshNotificationsNow(input: {
   /** 지금 시각(`Date.now()`). 부르는 쪽이 넘긴다. */
   now: number;
 }): boolean {
-  const env =
-    input.trigger === "BELL_OPENED"
-      ? { ...input.env, focusedTagName: null, focusedIsContentEditable: false }
-      : input.env;
-  if (!shouldRefreshNotifications(env)) return false;
+  const hidden = input.env.visibilityState !== "visible";
+
+  if (hidden) {
+    // 사람이 보고 있다는 뜻의 계기는 안 보이는 화면에서 돌지 않는다.
+    if (input.trigger !== "INTERVAL") return false;
+    // 입력 여부는 묻지 않는다 — 최소화된 창에서는 아무도 글자를 치고 있지 않다.
+  } else {
+    const env =
+      input.trigger === "BELL_OPENED"
+        ? { ...input.env, focusedTagName: null, focusedIsContentEditable: false }
+        : input.env;
+    if (!shouldRefreshNotifications(env)) return false;
+  }
+
+  const minGapMs = hidden
+    ? NOTIFICATION_REFRESH_HIDDEN_MIN_GAP_MS
+    : NOTIFICATION_REFRESH_MIN_GAP_MS;
 
   if (input.lastRefreshedAt !== null) {
     const elapsed = input.now - input.lastRefreshedAt;
     // 시계가 뒤로 간 경우(음수)에는 막지 않는다. 막아 버리면 시계가 다시 따라잡을
     // 때까지 영영 안 세는 화면이 된다 — 사람이 시간을 고치거나 절전에서 깨어난
     // 기기에서 실제로 일어날 수 있는 일이다.
-    if (elapsed >= 0 && elapsed < NOTIFICATION_REFRESH_MIN_GAP_MS) return false;
+    if (elapsed >= 0 && elapsed < minGapMs) return false;
   }
 
   return true;
