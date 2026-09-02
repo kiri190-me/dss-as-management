@@ -24,6 +24,14 @@ import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
  * 검증조차 "그 key가 없다"고만 말할 수 있다. 이름을 바꾸고 싶으면 label을
  * 바꾸면 된다 — 화면에 보이는 것은 label이다.
  *
+ * 그래서 **새 단계의 key는 화면에서 묻지 않고 step_N으로 자동 생성한다.**
+ * 뜻이 있는 key는 intake_inspection·shipment_completed 처럼 이미 정해져
+ * 있고, 초안은 언제나 발행본의 복제로 시작하므로 그 둘은 항상 이미 들어
+ * 있다 — 사용자가 그것을 직접 칠 일이 없다. 반대로 손으로 치게 두면 뜻이
+ * 있는 key를 실수로 가로챌 수 있다. 건 전용 단계(case-workflow-steps.ts의
+ * case_step_N)가 같은 이유로 이미 그렇게 하고 있고, 여기만 남아 있었다.
+ * key를 넘기는 길은 남겨 둔다 — 표준 워크플로를 코드로 심는 자리가 쓴다.
+ *
  * 순서 변경은 개별 수정이 아니라 전체 목록을 받는 reorder로만 한다. (버전,
  * 순서) 유니크 인덱스 때문에 두 단계를 맞바꾸는 개별 UPDATE는 중간 상태에서
  * 충돌한다.
@@ -72,15 +80,16 @@ async function requireEditableDraft(
 /** 단계를 맨 뒤에 추가한다. 중간에 끼워 넣으려면 추가 후 reorder를 부른다. */
 export async function addWorkflowDraftStep(params: {
   versionId: string;
-  key: string;
+  /** 생략하면 step_N으로 자동 생성한다(머리말). 화면은 넘기지 않는다. */
+  key?: string;
   label: string;
   status: RepairStatus;
   category: StepCategory | null;
   actorUserId: string;
 }): Promise<DraftStepResult<{ stepId: string; order: number }>> {
-  const key = params.key.trim();
+  const requestedKey = params.key?.trim() ?? "";
   const label = params.label.trim();
-  if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+  if (requestedKey && !/^[a-z][a-z0-9_]*$/.test(requestedKey)) {
     return {
       ok: false,
       code: "INVALID_INPUT",
@@ -93,11 +102,23 @@ export async function addWorkflowDraftStep(params: {
     const guard = await requireEditableDraft(tx, params.versionId, params.actorUserId);
     if (!guard.ok) return guard;
 
-    const [duplicate] = await tx
-      .select({ id: workflowSteps.id })
-      .from(workflowSteps)
-      .where(and(eq(workflowSteps.workflowVersionId, params.versionId), eq(workflowSteps.key, key)));
-    if (duplicate) return { ok: false as const, code: "DUPLICATE_KEY" as const, message: `이미 같은 키의 단계가 있습니다: ${key}` };
+    // 자동 생성이든 지정이든 같은 목록으로 판정한다 — 한 번만 읽는다.
+    const existingKeys = new Set(
+      (
+        await tx
+          .select({ key: workflowSteps.key })
+          .from(workflowSteps)
+          .where(eq(workflowSteps.workflowVersionId, params.versionId))
+      ).map((s) => s.key)
+    );
+    let key = requestedKey;
+    if (!key) {
+      let n = 1;
+      while (existingKeys.has(`step_${n}`)) n += 1;
+      key = `step_${n}`;
+    } else if (existingKeys.has(key)) {
+      return { ok: false as const, code: "DUPLICATE_KEY" as const, message: `이미 같은 키의 단계가 있습니다: ${key}` };
+    }
 
     const [{ max }] = await tx
       .select({ max: sql<number>`coalesce(max(${workflowSteps.stepOrder}), 0)` })

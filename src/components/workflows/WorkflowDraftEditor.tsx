@@ -55,7 +55,6 @@ export default function WorkflowDraftEditor({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
-  const [newKey, setNewKey] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [newStatus, setNewStatus] = useState<string>(REPAIR_STATUS_CODES[0]);
   const [newCategory, setNewCategory] = useState<string>("");
@@ -288,16 +287,10 @@ export default function WorkflowDraftEditor({
       <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">단계 추가</h2>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          맨 뒤에 추가됩니다. 키는 만든 뒤 바꿀 수 없습니다 — 앱이 일부 키를 의미로 사용하기 때문입니다.
+          맨 뒤에 추가됩니다. 키는 자동으로 붙습니다 — 앱이 의미로 읽는 키는 이미 정해져 있어,
+          새 단계가 그것을 실수로 가로채지 않도록 직접 묻지 않습니다.
         </p>
         <div className="flex flex-wrap gap-2">
-          <input
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
-            placeholder="키 (예: final_check)"
-            disabled={isPending}
-            className="w-48 rounded-md border border-zinc-300 bg-white px-2 py-1 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          />
           <input
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
@@ -332,17 +325,15 @@ export default function WorkflowDraftEditor({
           </select>
           <button
             type="button"
-            disabled={isPending || !newKey.trim() || !newLabel.trim()}
+            disabled={isPending || !newLabel.trim()}
             onClick={() =>
               run(() => {
                 const promise = addWorkflowDraftStepAction({
                   versionId,
-                  key: newKey,
                   label: newLabel,
                   status: newStatus,
                   category: newCategory === "" ? null : newCategory,
                 });
-                setNewKey("");
                 setNewLabel("");
                 return promise;
               })

@@ -100,6 +100,33 @@ describe("workflow draft steps", () => {
     assert.equal(added.isActive, true);
   });
 
+  test("키를 넘기지 않으면 step_N으로 자동 붙는다 — 화면은 키를 묻지 않는다", async () => {
+    const first = await addWorkflowDraftStep({
+      versionId: draftId,
+      label: "자동 키 하나",
+      status: "IN_REPAIR",
+      category: null,
+      actorUserId: adminId,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    const second = await addWorkflowDraftStep({
+      versionId: draftId,
+      label: "자동 키 둘",
+      status: "IN_REPAIR",
+      category: null,
+      actorUserId: adminId,
+    });
+    assert.equal(second.ok, true, JSON.stringify(second));
+    if (!first.ok || !second.ok) return;
+
+    const steps = await stepsOf(draftId);
+    const one = steps.find((s) => s.label === "자동 키 하나");
+    const two = steps.find((s) => s.label === "자동 키 둘");
+    assert.ok(one && two);
+    assert.equal(one.key, "step_1");
+    assert.equal(two.key, "step_2", "이미 쓴 번호는 건너뛴다");
+  });
+
   test("같은 키의 단계는 두 번 만들 수 없다", async () => {
     const existing = (await stepsOf(draftId))[0];
     const result = await addWorkflowDraftStep({
@@ -115,7 +142,8 @@ describe("workflow draft steps", () => {
   });
 
   test("단계 키 형식을 검사한다", async () => {
-    for (const key of ["Extra", "1step", "has space", "has-dash", ""]) {
+    // 빈 값은 여기 없다 — 이제 '자동으로 붙여 달라'는 뜻이다(아래 시험).
+    for (const key of ["Extra", "1step", "has space", "has-dash"]) {
       const result = await addWorkflowDraftStep({
         versionId: draftId,
         key,

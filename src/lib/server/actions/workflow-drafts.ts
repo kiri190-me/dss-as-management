@@ -69,7 +69,6 @@ export async function discardWorkflowDraftAction(versionId: string): Promise<Wor
 
 export async function addWorkflowDraftStepAction(input: {
   versionId: string;
-  key: string;
   label: string;
   status: string;
   category: string | null;
@@ -80,9 +79,9 @@ export async function addWorkflowDraftStepAction(input: {
   if (input.category !== null && !isStepCategory(input.category)) {
     return { ok: false, message: "담당 구분 값을 확인할 수 없습니다." };
   }
+  // key는 넘기지 않는다 — mutation이 step_N으로 붙인다(그 파일 머리말).
   const result = await addWorkflowDraftStep({
     versionId: input.versionId,
-    key: input.key,
     label: input.label,
     status: input.status,
     category: input.category,
