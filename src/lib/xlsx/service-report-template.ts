@@ -15,7 +15,9 @@ import {
 import {
   cloneRowMergeCells,
   parseSheetRows,
+  readRowHeightAttribute,
   resizeRowBlock,
+  setRowHeightAttribute,
   shiftMergeCellRows,
   shiftSqrefRows,
   syncDimension,
@@ -92,6 +94,43 @@ import {
  *   · **나머지 머리·체크 칸** — 주소를 못 박는다. 대신 **쓰기 전에 그 옆의
  *     라벨 칸이 우리가 아는 글자인지 확인하고, 아니면 던진다**(`assertLayout`).
  *     양식이 바뀌면 엉뚱한 칸에 `○` 를 찍는 대신 멈춘다.
+ *
+ * ── 🔴 세 구역은 **각자 정해진 자리에서** 시작한다 ──────────────────────
+ * 발행본은 「확인내용」·「조치」·「정리」가 본문 안에서 서로 떨어진 자리에
+ * 앉는다. 구역을 줄줄이 이어 붙이면 세 구역이 문서 위쪽에 몰리고 아래 20여
+ * 줄이 통째로 빈다 — 같은 양식으로 만든 문서인데 우리 것만 모양이 다르다.
+ *
+ * 🔴 **그 자리도 코드에 박지 않는다.** 원본의 배치가 양식 안에 남아 있다:
+ * 라벨 글상자(`Text Box 9`)의 문단이 그것이다. 「확　내」가 1번째, 「조  치」가
+ * 14번째, 「정  리」가 27번째 문단이고, 사이는 빈 문단이다. 문단마다
+ * `<a:lnSpc><a:spcPts val="1100"/></a:lnSpc>`(=11.00pt) 로 줄간격이 정확히
+ * 박혀 있고, `<a:bodyPr … tIns="18288">` 가 위쪽 안쪽여백을, 앵커의
+ * `<xdr:from>` 이 상자가 어느 행 어디쯤에서 시작하는지를 알려 준다. 그래서
+ *
+ *     N번째 문단의 세로 위치 = rowOff + tIns + (앞 문단들의 줄간격 합)
+ *
+ * 를 본문 행 높이를 따라 훑어 내려가면 **몇 행에 해당하는지** 나온다
+ * (`readSectionStartRows`). 단위는 EMU 이고 `1pt = 12700 EMU` 다.
+ *
+ * ⚠️ 줄간격은 **문단마다 따로** 읽는다. 두 양식이 같은 통합문서인데도 검사
+ * 양식은 앞 14문단이 13pt(라벨 글꼴이 12pt)이고 수리 양식은 11pt(10pt)다.
+ * 하나로 뭉뚱그리면 한쪽이 두 행 어긋난다.
+ *
+ * 양식이 바뀌어 라벨 글상자를 못 찾거나 줄간격을 못 읽으면 **짐작하지 않고
+ * 던진다** — `assertLayout` 과 같은 판단이다. 엉뚱한 자리에 그린 문서를
+ * 고객사로 내보내는 것보다 멈추는 편이 낫다.
+ *
+ * ── 🔴 46행의 높이는 **실수다** — 먼저 고르게 편다 ─────────────────────
+ * 본문 행은 전부 14.1pt 인데 **수리 양식의 46행만 75.6pt** 다. 같은 통합문서인
+ * 검사 양식의 46행은 13.9pt 다. 즉 설계가 아니라, 그 발행본을 만든 사람이 46행을
+ * 손으로 잡아 늘린 것이 사본에 그대로 굳은 **손자국**이다.
+ *
+ * 그대로 두면 두 가지가 함께 깨진다. 본문이 그 행에 닿는 순간 문서 한가운데
+ * 손가락만 한 구멍이 뚫리고, 위의 구역 자리 계산이 그 행에서 통째로 뒤틀린다
+ * (실측: 「정리」가 51행이 아니라 47행으로 나온다). 그래서 **구역 자리를 셈하기
+ * 전에** 본문 행 높이를 그 블록의 **최빈값**으로 통일한다
+ * (`normalizeBodyRowHeights`). 🔴 값을 코드에 박지 않고 **세어서** 고른다 —
+ * 사람이 양식의 본문 행 높이를 바꾸는 날 코드가 따라가야 한다.
  *
  * ── 🔴 체크칸은 라벨의 **왼쪽**이다 ─────────────────────────────────────
  * 눈으로는 헷갈리는 자리인데, 양식이 스스로 답을 갖고 있다. `○` 드롭다운이
@@ -534,10 +573,16 @@ export function fillServiceReportWorkbook(
     throw new Error(`양식에 ${STYLES_PART} 가 없습니다. 본문 서식을 정할 수 없습니다.`);
   }
 
+  /**
+   * 🔴 구역이 어느 행에서 시작하는지는 **그림 파트의 라벨 글상자**가 알고 있다
+   * (머리말 '세 구역은 각자 정해진 자리에서'). 글자를 비우기 **전의** 그림을
+   * 넘긴다 — 비운 뒤에는 문단이 사라져 자리를 물어볼 곳이 없다.
+   */
   const filled = fillSheet(
     archive.readText(sheetPart),
     archive.readTextOrNull(SHARED_STRINGS_PART),
     stylesXml,
+    drawingPart === null ? null : archive.readText(drawingPart),
     input,
     usesIsoDates(workbookXml)
   );
@@ -703,6 +748,274 @@ function sectionRowCount(section: BodySection): number {
   return Math.max(section.lines.length, section.labelLines.length);
 }
 
+// ── 구역이 어느 행에서 시작하는가 ────────────────────────────────────────
+
+/** OOXML 의 길이 단위. `1pt = 12700 EMU`. */
+const EMU_PER_POINT = 12700;
+
+/**
+ * `<a:bodyPr>` 에 `tIns` 가 없을 때 쓰는 **규격 기본값**(0.05인치 = 45720 EMU).
+ * 두 양식은 둘 다 적어 두었지만, 안 적힌 판이 와도 규격대로 셈한다.
+ */
+const DEFAULT_TEXT_TOP_INSET = 45720;
+
+/** 한 구역이 실제로 앉는 자리. */
+type SectionPlacement = { section: BodySection; startRow: number; rowCount: number };
+
+/** 본문 배치 한 벌. `closingRow` 에 「～이　상～」 이 앉는다. */
+type BodyLayout = { placements: SectionPlacement[]; closingRow: number };
+
+/**
+ * 🔴 본문 블록의 행 높이를 그 블록의 **최빈값**으로 통일한다.
+ *
+ * 수리 양식의 46행만 75.6pt 다(나머지 14.1pt, 검사 양식의 같은 행은 13.9pt).
+ * 두 양식은 같은 통합문서이므로 이 한 행은 설계가 아니라 **그 발행본을 만든
+ * 사람이 손으로 잡아 늘린 자국**이다. 그대로 두면 본문이 그 행에 닿는 순간
+ * 문서 한가운데 손가락만 한 구멍이 뚫리고, 구역 자리 계산도 그 행에서 뒤틀린다
+ * (실측: 「정리」가 51행이 아니라 47행이 된다).
+ *
+ * 🔴 **값을 코드에 박지 않는다.** 그 블록에서 가장 많이 쓰인 높이를 세어서
+ * 고른다 — 사람이 양식의 본문 행 높이를 바꾸는 날 코드가 따라가야 한다.
+ */
+export function normalizeBodyRowHeights(
+  sheetXml: string,
+  block: { firstRow: number; lastRow: number }
+): string {
+  const rows = parseSheetRows(sheetXml);
+  const inBody = (row: number): boolean => row >= block.firstRow && row <= block.lastRow;
+
+  // 높이는 **글자 그대로** 센다 — 숫자로 바꾸면 `75.599999999999994` 같은 값이
+  // 반올림되어 원본과 미묘하게 달라진다(sheet-rows.ts 의 같은 판단).
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!inBody(row.rowNumber)) continue;
+    const height = readRowHeightAttribute(row);
+    if (height === null) continue;
+    counts.set(height, (counts.get(height) ?? 0) + 1);
+  }
+  if (counts.size === 0) {
+    throw new Error(
+      `양식의 본문(${block.firstRow}~${block.lastRow}행)에 행 높이가 적혀 있지 않습니다.`
+    );
+  }
+
+  // 같은 수면 양식에서 먼저 나온 쪽. Map 은 넣은 순서를 지킨다.
+  let mode = "";
+  let most = -1;
+  for (const [height, count] of counts) {
+    if (count > most) {
+      mode = height;
+      most = count;
+    }
+  }
+
+  return writeSheetRows(
+    sheetXml,
+    rows.map((row) => (inBody(row.rowNumber) ? setRowHeightAttribute(row, mode) : row))
+  );
+}
+
+/**
+ * 🔴 구역마다 **시작 행**을 라벨 글상자에서 계산한다 — 코드에 박지 않는다.
+ *
+ * 머리말 '세 구역은 각자 정해진 자리에서' 참조. 라벨 글상자의 N번째 문단이
+ * 몇 행에 앉는지를 앵커(`<xdr:from>`)·안쪽여백(`tIns`)·줄간격(`lnSpc`)과 본문
+ * 행 높이로 훑어 내려가 구한다. 라벨 글자가 든 문단만 구역의 시작이고 빈 문단은
+ * 건너뛴다.
+ *
+ * ⚠️ **행 높이를 고르게 편 시트를 넘겨야 한다**(`normalizeBodyRowHeights`).
+ * 75.6pt 짜리 손자국이 살아 있으면 그 아래 구역이 통째로 어긋난다.
+ */
+export function readSectionStartRows(
+  drawingXml: string | null,
+  sheetXml: string,
+  block: { firstRow: number; lastRow: number },
+  sections: readonly BodySection[]
+): number[] {
+  if (drawingXml === null) {
+    throw new Error("양식에 그림 파트가 없어 본문 구역의 자리를 읽지 못했습니다.");
+  }
+
+  const shape = findBodyLabelShape(drawingXml);
+  const anchor = readShapeAnchorTop(shape);
+  const paragraphs = readParagraphTops(shape);
+  const heightOf = createRowHeightReader(sheetXml);
+
+  /** 앵커 행의 위쪽에서 `offset` EMU 만큼 내려간 자리가 어느 행인가. */
+  const rowAt = (offset: number, label: string): number => {
+    let row = anchor.row;
+    let rest = offset;
+    while (row <= block.lastRow) {
+      const height = Math.round(heightOf(row) * EMU_PER_POINT);
+      if (rest < height) return row;
+      rest -= height;
+      row += 1;
+    }
+    throw new Error(
+      `양식의 라벨 「${label}」 이(가) 본문(${block.firstRow}~${block.lastRow}행) 밖을 가리킵니다.`
+    );
+  };
+
+  const startRows: number[] = [];
+  for (const section of sections) {
+    const label = section.labelLines[0];
+    const index = paragraphs.findIndex((paragraph) => paragraph.text.includes(label));
+    if (index < 0) {
+      throw new Error(
+        `양식의 라벨 글상자에 「${label}」 이(가) 없습니다. 그 구역의 자리를 정할 수 없습니다.`
+      );
+    }
+
+    const row = rowAt(anchor.rowOff + paragraphs[index].topEmu, label);
+    if (row < block.firstRow) {
+      throw new Error(`양식의 라벨 「${label}」 이(가) 본문 첫 줄(${block.firstRow}행) 위에 있습니다.`);
+    }
+    const previous = startRows[startRows.length - 1];
+    if (previous !== undefined && row <= previous) {
+      throw new Error(`양식의 구역 순서가 뒤집혀 있습니다: 「${label}」 이(가) ${row}행입니다.`);
+    }
+    startRows.push(row);
+  }
+  return startRows;
+}
+
+/**
+ * 라벨 글상자. **이름으로 고르지 않는다** — 이름은 사람이 양식을 다시 저장할
+ * 때마다 바뀔 수 있다. 라벨 글자가 든 도형이 대상이고, 하나가 아니면 던진다.
+ */
+function findBodyLabelShape(drawingXml: string): string {
+  const labels = Object.values(SERVICE_REPORT_BODY_LABELS).map((lines) => lines[0]);
+
+  const found: string[] = [];
+  for (const anchor of drawingXml.matchAll(
+    /<xdr:(twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:\1>/g
+  )) {
+    const xml = anchor[0];
+    if (!xml.includes("<xdr:txBody>")) continue;
+    const text = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((match) => match[1]).join("\n");
+    if (labels.some((label) => text.includes(label))) found.push(xml);
+  }
+  if (found.length !== 1) {
+    throw new Error(
+      `양식에서 본문 라벨 글상자를 ${found.length}개 찾았습니다. 하나여야 합니다.`
+    );
+  }
+  return found[0];
+}
+
+/** 도형이 어느 행 어디쯤에서 시작하는가. 앵커의 행은 0부터 센다. */
+function readShapeAnchorTop(shapeXml: string): { row: number; rowOff: number } {
+  const from = /<xdr:from>([\s\S]*?)<\/xdr:from>/.exec(shapeXml)?.[1];
+  const row = from === undefined ? undefined : /<xdr:row>(\d+)<\/xdr:row>/.exec(from)?.[1];
+  const rowOff = from === undefined ? undefined : /<xdr:rowOff>(-?\d+)<\/xdr:rowOff>/.exec(from)?.[1];
+  if (row === undefined || rowOff === undefined) {
+    throw new Error("라벨 글상자의 앵커(<xdr:from> 의 row·rowOff)를 읽지 못했습니다.");
+  }
+  return { row: Number(row) + 1, rowOff: Number(rowOff) };
+}
+
+/**
+ * 문단마다 **상자 위쪽에서 얼마나 내려온 자리인가**(EMU)와 그 글자.
+ *
+ * 🔴 줄간격은 **문단마다 따로** 읽는다. 검사 양식은 앞 14문단이 13pt 이고 수리
+ * 양식은 11pt 라, 하나로 뭉뚱그리면 한쪽이 두 행 어긋난다.
+ *
+ * `<a:spcPts val="1100"/>` 는 **11.00pt** 다(100분의 1 포인트 단위). 비율
+ * 줄간격(`<a:spcPct>`)은 글꼴 치수를 알아야 재므로 **짐작하지 않고 던진다** —
+ * 엉뚱한 자리에 그린 문서를 내보내는 것보다 멈추는 편이 낫다.
+ */
+function readParagraphTops(shapeXml: string): { text: string; topEmu: number }[] {
+  const txBody = /<xdr:txBody>[\s\S]*?<\/xdr:txBody>/.exec(shapeXml)?.[0];
+  if (txBody === undefined) throw new Error("라벨 글상자의 글자(<xdr:txBody>)를 읽지 못했습니다.");
+
+  const inset = /<a:bodyPr[^>]*\stIns="(-?\d+)"/.exec(txBody)?.[1];
+  let top = inset === undefined ? DEFAULT_TEXT_TOP_INSET : Number(inset);
+
+  const paragraphs = [...txBody.matchAll(/<a:p\s*\/>|<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/g)];
+  if (paragraphs.length === 0) throw new Error("라벨 글상자에 문단이 하나도 없습니다.");
+
+  const tops: { text: string; topEmu: number }[] = [];
+  for (const [index, match] of paragraphs.entries()) {
+    const paragraph = match[0];
+    const spacing = /<a:lnSpc>\s*<a:spcPts\s+val="(\d+)"\s*\/>\s*<\/a:lnSpc>/.exec(paragraph)?.[1];
+    if (spacing === undefined) {
+      throw new Error(
+        `라벨 글상자의 ${index + 1}번째 문단에서 줄간격(<a:lnSpc><a:spcPts>)을 읽지 못했습니다.`
+      );
+    }
+
+    const text = [...paragraph.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)]
+      .map((run) => run[1])
+      .join("");
+    tops.push({ text, topEmu: top });
+    top += Math.round((Number(spacing) / 100) * EMU_PER_POINT);
+  }
+  return tops;
+}
+
+/** 행 높이(pt)를 읽어 주는 함수. 안 적힌 행은 시트의 기본 높이를 쓴다. */
+function createRowHeightReader(sheetXml: string): (row: number) => number {
+  const heights = new Map<number, number>();
+  for (const row of parseSheetRows(sheetXml)) {
+    const height = Number(readRowHeightAttribute(row));
+    if (Number.isFinite(height) && height > 0) heights.set(row.rowNumber, height);
+  }
+
+  const declared = Number(/<sheetFormatPr[^>]*\sdefaultRowHeight="([\d.]+)"/.exec(sheetXml)?.[1]);
+  const fallback = Number.isFinite(declared) && declared > 0 ? declared : 15;
+  return (row) => heights.get(row) ?? fallback;
+}
+
+/**
+ * 🔴 구역을 **각자 정해진 자리에서** 시작시킨다 — 이 작업의 본체.
+ *
+ *   · 한 구역이 차지하는 줄 수 = `max(배정된 줄 수, 실제 내용 줄 수)`.
+ *     배정된 줄 수는 **다음 구역의 시작 행**에서 나온다. 내용이 짧아도 다음
+ *     구역은 제자리에서 시작한다.
+ *   · 내용이 배정된 자리보다 길면 그 구역이 늘어나고 **아래가 그만큼 밀린다.**
+ *   · 🔴 **마지막으로 내용이 있는 구역은 늘리지 않는다.** 그 구역은 제 줄 수만
+ *     쓰고 맺음 표시가 바로 다음 줄에 온다 — 안 그러면 두 줄짜리 보고서에서도
+ *     블록이 꽉 차 맺음 표시가 블록 밖으로 밀린다.
+ *   · 내용이 없는 구역은 라벨을 그리지 않되 **아래 구역의 자리는 그대로 둔다.**
+ */
+function planBodyLayout(
+  sections: readonly BodySection[],
+  startRows: readonly number[],
+  block: { firstRow: number; lastRow: number }
+): BodyLayout {
+  let lastWithLines = -1;
+  sections.forEach((section, index) => {
+    if (section.lines.length > 0) lastWithLines = index;
+  });
+  // 입력 검사가 이미 막지만, 타입이 없는 곳에서 불릴 수 있다.
+  if (lastWithLines < 0) throw new Error("본문이 한 줄도 없습니다.");
+
+  const placements: SectionPlacement[] = [];
+  let cursor = block.firstRow;
+
+  for (const [index, section] of sections.entries()) {
+    const startRow = Math.max(startRows[index], cursor);
+    if (section.lines.length === 0) {
+      // 🔴 마지막 내용 구역 **뒤의** 빈 구역은 자리도 차지하지 않는다 —
+      //    차지하면 맺음 표시가 쓰이지도 않은 구역 아래로 밀려 내려간다.
+      if (index < lastWithLines) cursor = startRow;
+      continue;
+    }
+
+    const lines = sectionRowCount(section);
+    const allotted =
+      index + 1 < startRows.length
+        ? startRows[index + 1] - startRows[index]
+        : block.lastRow - startRows[index] + 1;
+
+    const rowCount = index === lastWithLines ? lines : Math.max(allotted, lines);
+    placements.push({ section, startRow, rowCount });
+    cursor = startRow + rowCount;
+  }
+
+  return { placements, closingRow: cursor };
+}
+
 function assertDate(value: Date, what: string): void {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new Error(`${what}이(가) 유효한 날짜가 아닙니다.`);
@@ -740,6 +1053,7 @@ function fillSheet(
   sheetXml: string,
   sharedStringsXml: string | null,
   stylesXml: string,
+  drawingXml: string | null,
   input: ServiceReportInput,
   isoDates: boolean
 ): FilledSheet {
@@ -750,18 +1064,29 @@ function fillSheet(
   const remarkBlock = findLabelledBlock(sheetXml, REMARK_LABEL_CELL);
 
   /**
+   * 🔴 **구역 자리를 셈하기 전에** 본문 행 높이를 고르게 편다. 수리 양식의
+   * 46행에는 발행본을 만든 사람의 손자국(75.6pt)이 남아 있어서, 그대로 두면
+   * 「정리」가 51행이 아니라 47행으로 나온다(머리말 '46행의 높이는 실수다').
+   */
+  const evened = normalizeBodyRowHeights(sheetXml, block);
+
+  /**
    * 🔴 한 줄이 칸의 가로폭을 넘지 않게 먼저 나눈다. **줄 수를 셈하기 전에**
    * 해야 한다 — 나눈 뒤의 줄 수가 곧 필요한 행 수다.
    */
-  const lineWidth = readColumnRangeWidth(sheetXml, block.contentColumn, block.contentEndColumn);
+  const lineWidth = readColumnRangeWidth(evened, block.contentColumn, block.contentEndColumn);
   const sections = bodySections(input).map((section) => ({
     labelLines: section.labelLines,
     lines: section.lines.flatMap((line) => splitBodyLine(line, lineWidth)),
   }));
 
-  const usedRows = sections.reduce((total, section) => total + sectionRowCount(section), 0);
+  const layout = planBodyLayout(
+    sections,
+    readSectionStartRows(drawingXml, evened, block, sections),
+    block
+  );
   // 본문 마지막 줄 다음에 「～이　상～」 한 줄이 더 든다.
-  const neededRows = usedRows + 1;
+  const neededRows = layout.closingRow - block.firstRow + 1;
   if (neededRows > SERVICE_REPORT_MAX_BODY_ROWS) {
     throw new Error(
       `본문이 ${neededRows}줄입니다. 한 보고서에 ${SERVICE_REPORT_MAX_BODY_ROWS}줄까지만 담을 수 있습니다.`
@@ -770,7 +1095,7 @@ function fillSheet(
   const capacity = block.lastRow - block.firstRow + 1;
   const rowShift = Math.max(0, neededRows - capacity);
 
-  let xml = rowShift === 0 ? sheetXml : growBodyBlock(sheetXml, block, rowShift);
+  let xml = rowShift === 0 ? evened : growBodyBlock(evened, block, rowShift);
 
   const insertRow = block.lastRow;
   const shifted = (row: number): number => (row >= insertRow ? row + rowShift : row);
@@ -854,17 +1179,18 @@ function fillSheet(
   }
 
   // ── 본문 ──────────────────────────────────────────────────────────
-  xml = fillBody(xml, { ...block, lastRow: block.lastRow + rowShift }, sections);
+  xml = fillBody(xml, { ...block, lastRow: block.lastRow + rowShift }, layout);
 
   /**
-   * 🔴 본문 **내용 줄만** 왼쪽으로. `usedRows` 가 곧 내용이 차지한 줄 수이고,
-   * 그 다음 줄이 맺음 표시다 — 맺음 표시는 원본 서식 그대로 둔다(가운데 맞춤
-   * 이고, 마지막 줄이면 상자의 아래 테두리가 그 서식에 걸려 있다).
+   * 🔴 본문 **내용 줄만** 왼쪽으로. 맺음 표시가 앉는 줄 바로 위까지가 내용
+   * 자리다(구역 사이의 빈 줄도 여기 든다 — 언제 글자가 들어와도 모양이 같아야
+   * 한다). 맺음 표시는 원본 서식 그대로 둔다(가운데 맞춤이고, 마지막 줄이면
+   * 상자의 아래 테두리가 그 서식에 걸려 있다).
    */
   const aligned = alignBodyContentLeft(xml, stylesXml, {
     column: block.contentColumn,
     firstRow: block.firstRow,
-    lastRow: block.firstRow + usedRows - 1,
+    lastRow: layout.closingRow - 1,
   });
   xml = aligned.sheetXml;
 
@@ -942,13 +1268,9 @@ function splitBodyLine(line: string, width: number): string[] {
   return line.split(/\r\n?|\n/u).flatMap((piece) => wrapTextToWidth(piece, width));
 }
 
-function fillBody(
-  sheetXml: string,
-  block: BodyBlock,
-  sections: readonly BodySection[]
-): string {
+function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): string {
   const capacity = block.lastRow - block.firstRow + 1;
-  const used = sections.reduce((total, section) => total + sectionRowCount(section), 0);
+  const used = layout.closingRow - block.firstRow;
   if (used + 1 > capacity) {
     /**
      * 🔴 여기까지 오면 줄을 늘리는 쪽(`growBodyBlock`)이 셈을 틀린 것이다.
@@ -967,26 +1289,26 @@ function fillBody(
     xml = clearCell(xml, `${block.contentColumn}${row}`);
   }
 
-  let row = block.firstRow;
-  for (const section of sections) {
-    if (section.lines.length === 0) continue;
-
+  for (const placement of layout.placements) {
     /**
      * 라벨과 내용은 **다른 열**이라 서로 밀지 않는다. 둘 다 구역이 시작하는
      * 줄부터 각자 내려간다 — 「확인내용」의 라벨 둘째 줄(`인　용`)은 내용
      * 둘째 줄과 같은 행에 앉는다.
      */
-    section.labelLines.forEach((text, index) => {
-      xml = setInlineString(xml, `${block.labelColumn}${row + index}`, text);
+    placement.section.labelLines.forEach((text, index) => {
+      xml = setInlineString(xml, `${block.labelColumn}${placement.startRow + index}`, text);
     });
-    section.lines.forEach((line, index) => {
-      xml = writeText(xml, `${block.contentColumn}${row + index}`, line);
+    placement.section.lines.forEach((line, index) => {
+      xml = writeText(xml, `${block.contentColumn}${placement.startRow + index}`, line);
     });
-    row += sectionRowCount(section);
   }
 
-  // 🔴 맺음 표시는 **언제나 본문 마지막 줄의 다음 줄**이다.
-  xml = setInlineString(xml, `${block.contentColumn}${row}`, SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 맺음 표시는 **언제나 마지막 내용 줄의 다음 줄**이다.
+  xml = setInlineString(
+    xml,
+    `${block.contentColumn}${layout.closingRow}`,
+    SERVICE_REPORT_CLOSING_MARK
+  );
   return xml;
 }
 

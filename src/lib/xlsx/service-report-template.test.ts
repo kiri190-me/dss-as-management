@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { ZipArchive } from "./zip-reader";
 import { writeZip } from "./zip-writer";
 import { createCellTextReader } from "./sheet-text";
+import { parseSheetRows, readRowHeightAttribute } from "./sheet-rows";
 import {
   resolveSheetPart,
   SHARED_STRINGS_PART,
@@ -17,7 +18,9 @@ import {
   fillServiceReportWorkbook,
   findBodyBlock,
   findLabelledBlock,
+  normalizeBodyRowHeights,
   readColumnRangeWidth,
+  readSectionStartRows,
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CELLS,
   SERVICE_REPORT_CHECK_MARK,
@@ -146,6 +149,181 @@ test("본문과 안 겹치는 도형의 글자는 건드리지 않는다", () =>
   // 본문이 70~80행이라면 31~59행의 글상자는 우리 것이 아니다.
   const untouched = clearDrawingTextInRows(SYNTHETIC_DRAWING, 70, 80);
   assert.equal(untouched, SYNTHETIC_DRAWING);
+});
+
+// ── 양식 없이 — 구역이 시작하는 자리와 행 높이 ──────────────────────────
+
+/**
+ * 본문 31~59행짜리 시트. 행 높이를 바꿔 가며 계산이 그것을 **읽는지** 본다.
+ */
+function bodyHeightSheet(overrides: Record<number, string> = {}): string {
+  const rows: string[] = [];
+  for (let row = 31; row <= 59; row += 1) {
+    const height = overrides[row] ?? "14.1";
+    rows.push(`<row r="${row}" s="1" customFormat="1" ht="${height}" customHeight="1">` +
+      `<c r="H${row}" s="2"/></row>`);
+  }
+  return (
+    '<worksheet><sheetFormatPr defaultRowHeight="12"/>' +
+    `<sheetData>${rows.join("")}</sheetData></worksheet>`
+  );
+}
+
+/**
+ * 라벨 글상자 하나. 실제 양식과 같은 모양이다 — 1번째 `확　내`, 2번째 `인　용`,
+ * 14번째 `조  치`, 27번째 `정  리`, 나머지는 빈 문단.
+ */
+function labelDrawing(
+  options: { spacing?: string; tIns?: string; rowOff?: string; dropSpacing?: boolean } = {}
+): string {
+  const spacing = options.spacing ?? "1100";
+  const paragraph = (text: string): string => {
+    const lnSpc = options.dropSpacing ? "" : `<a:lnSpc><a:spcPts val="${spacing}"/></a:lnSpc>`;
+    const body = text === "" ? "<a:endParaRPr/>" : `<a:r><a:t>${text}</a:t></a:r>`;
+    return `<a:p><a:pPr algn="ctr">${lnSpc}</a:pPr>${body}</a:p>`;
+  };
+
+  const texts = new Map([[1, "확　내"], [2, "인　용"], [14, "조  치"], [27, "정  리"]]);
+  const paragraphs = Array.from({ length: 27 }, (_value, index) =>
+    paragraph(texts.get(index + 1) ?? "")
+  );
+
+  return (
+    '<xdr:wsDr xmlns:xdr="x" xmlns:a="y"><xdr:twoCellAnchor>' +
+    "<xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff>" +
+    `<xdr:row>30</xdr:row><xdr:rowOff>${options.rowOff ?? "76201"}</xdr:rowOff></xdr:from>` +
+    "<xdr:to><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff>" +
+    "<xdr:row>58</xdr:row><xdr:rowOff>133351</xdr:rowOff></xdr:to>" +
+    '<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="3" name="Text Box 9"/></xdr:nvSpPr>' +
+    `<xdr:txBody><a:bodyPr tIns="${options.tIns ?? "18288"}"/><a:lstStyle/>` +
+    `${paragraphs.join("")}</xdr:txBody></xdr:sp></xdr:twoCellAnchor></xdr:wsDr>`
+  );
+}
+
+const THREE_SECTIONS = [
+  { labelLines: SERVICE_REPORT_BODY_LABELS.findings, lines: ["가"] },
+  { labelLines: SERVICE_REPORT_BODY_LABELS.actions, lines: ["나"] },
+  { labelLines: SERVICE_REPORT_BODY_LABELS.summary, lines: ["다"] },
+];
+const BODY_BLOCK = { firstRow: 31, lastRow: 59 };
+
+/**
+ * 🔴 이 시험이 "구역 시작 행을 코드에 박지 않았다"는 증거다.
+ *
+ * 같은 입력에 **글상자만 바꾸면** 구역의 시작 행이 따라 움직인다 — 줄간격·
+ * 안쪽여백·앵커·행 높이 넷 모두가 계산에 실제로 쓰인다는 뜻이다. 어느 하나라도
+ * 코드에 박혀 있다면 그 항목을 바꾼 아래 단언이 깨진다.
+ */
+test("🔴 구역 시작 행은 글상자에서 나온다 — 코드에 박은 값이 아니다", () => {
+  // 실제 양식과 같은 모양: 줄간격 11pt · tIns 18288 · 앵커 31행 76201.
+  assert.deepEqual(
+    readSectionStartRows(labelDrawing(), bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    [31, 41, 51]
+  );
+
+  // 1) 줄간격을 행 높이와 같은 14.1pt 로 바꾸면 문단 번호가 곧 행 번호가 된다.
+  assert.deepEqual(
+    readSectionStartRows(labelDrawing({ spacing: "1410" }), bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    [31, 44, 57]
+  );
+
+  // 2) 위쪽 안쪽여백(tIns)이 늘면 통째로 한 줄 내려간다.
+  assert.deepEqual(
+    readSectionStartRows(labelDrawing({ tIns: "200000" }), bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    [32, 42, 52]
+  );
+
+  // 3) 앵커가 첫 행 안에서 더 내려가 붙으면(rowOff) 아래 구역이 한 줄씩 밀린다.
+  assert.deepEqual(
+    readSectionStartRows(labelDrawing({ rowOff: "150000" }), bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    [31, 42, 52]
+  );
+
+  // 4) 🔴 행 높이도 읽는다 — 46행이 75.6pt 로 남아 있으면 「정리」가 47행이 된다.
+  //    (그래서 구역을 셈하기 **전에** 행 높이를 고르게 편다.)
+  assert.deepEqual(
+    readSectionStartRows(
+      labelDrawing(),
+      bodyHeightSheet({ 46: "75.599999999999994" }),
+      BODY_BLOCK,
+      THREE_SECTIONS
+    ),
+    [31, 41, 47]
+  );
+});
+
+test("양식이 바뀌어 자리를 못 읽으면 짐작하지 않고 던진다", () => {
+  // 그림 파트가 없다.
+  assert.throws(
+    () => readSectionStartRows(null, bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    /그림 파트가 없어/
+  );
+  // 라벨 글상자가 없다.
+  assert.throws(
+    () => readSectionStartRows("<xdr:wsDr/>", bodyHeightSheet(), BODY_BLOCK, THREE_SECTIONS),
+    /본문 라벨 글상자를 0개/
+  );
+  // 라벨 글상자가 둘이다.
+  assert.throws(
+    () =>
+      readSectionStartRows(
+        labelDrawing() + labelDrawing(),
+        bodyHeightSheet(),
+        BODY_BLOCK,
+        THREE_SECTIONS
+      ),
+    /본문 라벨 글상자를 2개/
+  );
+  // 줄간격이 없다 — 짐작하면 엉뚱한 자리에 그린 문서가 나간다.
+  assert.throws(
+    () =>
+      readSectionStartRows(
+        labelDrawing({ dropSpacing: true }),
+        bodyHeightSheet(),
+        BODY_BLOCK,
+        THREE_SECTIONS
+      ),
+    /줄간격\(<a:lnSpc><a:spcPts>\)/
+  );
+  // 라벨 글자가 없는 구역.
+  assert.throws(
+    () =>
+      readSectionStartRows(labelDrawing(), bodyHeightSheet(), BODY_BLOCK, [
+        { labelLines: ["없는라벨"], lines: ["가"] },
+      ]),
+    /「없는라벨」 이\(가\) 없습니다/
+  );
+});
+
+/**
+ * 🔴 본문 행 높이를 **최빈값**으로 통일한다 — 값을 코드에 박지 않는다.
+ *
+ * 수리 양식의 46행만 75.6pt 인데, 그것은 그 발행본을 만든 사람이 손으로 잡아
+ * 늘린 자국이다(검사 양식의 같은 행은 13.9pt). 그대로 두면 문서 한가운데 구멍이
+ * 뚫리고 아래 구역 계산이 뒤틀린다.
+ */
+test("🔴 본문 행 높이는 그 블록의 최빈값으로 고르게 편다", () => {
+  const evened = normalizeBodyRowHeights(
+    bodyHeightSheet({ 46: "75.599999999999994" }),
+    BODY_BLOCK
+  );
+  assert.ok(!evened.includes("75.5"), "75.6pt 행이 남았다");
+  assert.equal((evened.match(/ ht="14\.1"/g) ?? []).length, 29, "본문 29줄이 다 고르지 않다");
+  assert.equal((evened.match(/customHeight="1"/g) ?? []).length, 29);
+
+  // 🔴 값을 박지 않았다 — 양식이 다른 높이를 쓰면 그쪽으로 통일된다.
+  const other = normalizeBodyRowHeights(
+    bodyHeightSheet(Object.fromEntries(
+      Array.from({ length: 29 }, (_value, index) => [31 + index, index === 5 ? "9.9" : "20.4"])
+    )),
+    BODY_BLOCK
+  );
+  assert.equal((other.match(/ ht="20\.4"/g) ?? []).length, 29);
+  assert.ok(!other.includes('ht="9.9"'), "최빈값이 아닌 높이가 남았다");
+
+  // 본문 밖은 손대지 않는다.
+  const outside = normalizeBodyRowHeights(bodyHeightSheet({ 59: "30" }), { firstRow: 31, lastRow: 58 });
+  assert.ok(outside.includes('ht="30"'), "본문 밖 행의 높이가 바뀌었다");
 });
 
 test("날짜를 ISO 로 담는 통합문서인지 workbook.xml 이 정한다", () => {
@@ -283,6 +461,26 @@ const TEMPLATE_BODY_FIRST_ROW = 31;
 const TEMPLATE_BODY_LAST_ROW = 59;
 const TEMPLATE_BODY_CAPACITY = TEMPLATE_BODY_LAST_ROW - TEMPLATE_BODY_FIRST_ROW + 1;
 const TEMPLATE_DRAWING_PART = "xl/drawings/drawing2.xml";
+
+/**
+ * ============================================================================
+ * 🔴 세 구역이 시작하는 행 — **양식의 라벨 글상자가 정한 값**이다
+ * ============================================================================
+ * 코드에 박아 둔 것이 아니라 `Text Box 9` 의 문단 자리에서 계산된다(아래
+ * 「구역 시작 행은 글상자에서 나온다」 시험이 그것을 증명한다). 여기 적는 것은
+ * **그 계산이 실제 양식에서 내놓는 값**이고, 아래 시험들은 이 행 번호를 그대로
+ * 단언한다 — "어딘가에 있다" 로 물러서면 자리가 밀려도 시험이 안 잡는다.
+ *
+ * ⚠️ 검사와 수리가 다르다. 두 양식은 같은 통합문서지만 검사 양식의 라벨
+ * 글상자는 앞 14문단이 13pt(라벨 글꼴 12pt)이고 수리는 11pt(10pt)라, 같은
+ * 14번째 문단인 「조  치」가 검사에서는 두 행 아래에서 시작한다.
+ * ============================================================================
+ */
+const INSPECTION_FINDINGS_ROW = 31;
+const INSPECTION_ACTIONS_ROW = 43;
+const REPAIR_FINDINGS_ROW = 31;
+const REPAIR_ACTIONS_ROW = 41;
+const REPAIR_SUMMARY_ROW = 51;
 
 type Filled = {
   text: (ref: string) => string | undefined;
@@ -562,15 +760,24 @@ test("검사 보고서: 머리·체크·본문이 준 대로 들어간다", { sk
   assert.equal(filled.text("C32"), SERVICE_REPORT_BODY_LABELS.findings[1]);
   assert.equal(filled.text("H31"), "외관 손상 없음");
   assert.equal(filled.text("H32"), "전원부 퓨즈 단선 확인");
-  assert.equal(filled.text("C33"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("C34"), undefined, "「조치」 라벨이 두 줄에 찍혔다");
-  assert.equal(filled.text("H33"), "퓨즈 교체");
-  assert.equal(filled.text("H34"), "정격 출력 시험 통과");
-  // 맺음 표시는 본문 마지막 줄의 바로 다음 줄.
-  assert.equal(filled.text("H35"), SERVICE_REPORT_CLOSING_MARK);
+
+  /**
+   * 🔴 「조치」는 **제자리(43행)에서** 시작한다 — 확인내용이 두 줄뿐이어도
+   * 이어 붙지 않는다. 사이(33~42행)는 원본 발행본처럼 비어 있다.
+   */
+  assert.equal(filled.text("C43"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(INSPECTION_ACTIONS_ROW, 43, "검사 양식의 「조치」 자리가 바뀌었다");
+  assert.equal(filled.text("C44"), undefined, "「조치」 라벨이 두 줄에 찍혔다");
+  assert.equal(filled.text("H43"), "퓨즈 교체");
+  assert.equal(filled.text("H44"), "정격 출력 시험 통과");
+  assert.equal(filled.text("C33"), undefined, "두 구역 사이에 라벨이 찍혔다");
+  assert.equal(filled.text("H33"), undefined, "두 구역이 이어 붙었다");
+  assert.equal(filled.text("H42"), undefined, "두 구역이 이어 붙었다");
+  // 맺음 표시는 마지막 내용 줄의 바로 다음 줄.
+  assert.equal(filled.text("H45"), SERVICE_REPORT_CLOSING_MARK);
   // 🔴 정리는 검사 보고서에 없다.
-  assert.equal(filled.text("C35"), undefined);
-  assert.equal(filled.text("H36"), undefined);
+  assert.equal(filled.text("C45"), undefined);
+  assert.equal(filled.text("H46"), undefined);
   assert.equal(filled.text("H59"), undefined);
 
   // 비고.
@@ -592,14 +799,24 @@ test("수리 보고서: 제목·조치 완료·정리가 이 종류에만 들어
   assert.equal(filled.text("X28"), SERVICE_REPORT_CHECK_MARK, "조치 완료가 안 찍혔다");
   assert.equal(filled.text(SERVICE_REPORT_CELLS.completedOn), "2026-09-01");
 
-  // 「정리」가 「조치」 다음 줄에.
+  /**
+   * 🔴 세 구역이 **각자 제자리에서** 시작한다 — 31 / 41 / 51행. 확인내용이 두
+   * 줄, 조치가 두 줄뿐이어도 아래 구역이 위로 딸려 올라오지 않는다.
+   */
   assert.equal(filled.text("C31"), SERVICE_REPORT_BODY_LABELS.findings[0]);
   assert.equal(filled.text("C32"), SERVICE_REPORT_BODY_LABELS.findings[1]);
-  assert.equal(filled.text("C33"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("C35"), SERVICE_REPORT_BODY_LABELS.summary[0]);
-  assert.equal(filled.text("H35"), "같은 증상 재발 시 전원부 전체 점검을 권합니다.");
-  assert.equal(filled.text("H36"), SERVICE_REPORT_CLOSING_MARK);
-  assert.equal(filled.text("H37"), undefined);
+  assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H41"), "퓨즈 교체");
+  assert.equal(filled.text("C51"), SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(filled.text("H51"), "같은 증상 재발 시 전원부 전체 점검을 권합니다.");
+  assert.equal([REPAIR_ACTIONS_ROW, REPAIR_SUMMARY_ROW].join(), "41,51", "수리 양식의 구역 자리가 바뀌었다");
+  // 구역 사이는 비어 있다.
+  assert.equal(filled.text("C33"), undefined, "두 구역 사이에 라벨이 찍혔다");
+  assert.equal(filled.text("H33"), undefined, "「조치」가 「확인내용」에 이어 붙었다");
+  assert.equal(filled.text("H43"), undefined, "「정리」가 「조치」에 이어 붙었다");
+  // 맺음 표시는 마지막 내용 줄의 바로 다음 줄.
+  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H53"), undefined);
 
   assertUntouchedParts(repairPath as string, filled);
 });
@@ -629,11 +846,12 @@ test("🔴 양식의 글상자에 남아 있던 견본 글자가 사라진다", 
     assert.ok(filled.drawingXml.includes(`name="${name}"`), `${name} 도형이 사라졌다`);
   }
   // 라벨과 맺음 표시는 이제 셀에 있다 — 그리고 **글자가 원본과 똑같다.**
+  // 자리도 원본 글상자가 문단으로 적어 둔 그대로다(31 / 41 / 51행).
   assert.equal(filled.text("C31"), "확　내");
   assert.equal(filled.text("C32"), "인　용");
-  assert.equal(filled.text("C33"), "조  치");
-  assert.equal(filled.text("C35"), "정  리");
-  assert.equal(filled.text("H36"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("C41"), "조  치");
+  assert.equal(filled.text("C51"), "정  리");
+  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 /**
@@ -681,13 +899,196 @@ test("🔴 확인내용이 한 줄뿐이어도 라벨은 두 줄을 지킨다", 
   assert.equal(filled.text("H31"), "외관 손상 없음");
   assert.equal(filled.text("H32"), undefined, "내용이 라벨을 따라 밀렸다");
 
-  // 🔴 다음 구역은 라벨이 끝난 **다음** 줄에서 시작한다 — 안 그러면
-  //    「조치」 라벨이 `인　용` 을 덮어 「확인내용」이 반쪽으로 찍힌다.
-  assert.equal(filled.text("C33"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("H33"), "퓨즈 교체");
-  assert.equal(filled.text("C34"), SERVICE_REPORT_BODY_LABELS.summary[0]);
-  assert.equal(filled.text("H34"), "재발 시 연락 바랍니다.");
-  assert.equal(filled.text("H35"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 라벨 두 줄 규칙은 다음 구역의 자리와 **따로** 산다. 구역은 제자리
+  //    (41 / 51행)에서 시작하고, 「조치」 라벨이 `인　용` 을 덮는 일은 없다.
+  assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H41"), "퓨즈 교체");
+  assert.equal(filled.text("C51"), SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(filled.text("H51"), "재발 시 연락 바랍니다.");
+  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
+});
+
+/**
+ * 🔴 이 시험이 이번 작업의 본체다 — **확인내용이 두 줄뿐이어도 조치는 41행**,
+ * **정리는 51행**에서 시작한다. 예전에는 33행·35행에 이어 붙어 세 구역이 문서
+ * 위쪽에 몰렸다.
+ */
+test("🔴 짧은 본문이라도 세 구역은 제자리(31·41·51행)에서 시작한다", { skip: skipRepair }, () => {
+  const filled = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: {
+      findings: ["확인 1", "확인 2"],
+      findingsIntro: "",
+      actions: ["조치 1", "조치 2"],
+      summary: ["정리 1"],
+    },
+  });
+  assertSheetIsSound(filled, 0);
+
+  assert.equal(filled.text(`C${REPAIR_FINDINGS_ROW}`), SERVICE_REPORT_BODY_LABELS.findings[0]);
+  assert.equal(filled.text("H31"), "확인 1");
+  assert.equal(filled.text("H32"), "확인 2");
+
+  // 확인내용이 두 줄뿐인데도 조치는 41행이다.
+  assert.equal(filled.text(`C${REPAIR_ACTIONS_ROW}`), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H41"), "조치 1");
+  assert.equal(filled.text("H42"), "조치 2");
+
+  // 정리는 51행이다.
+  assert.equal(filled.text(`C${REPAIR_SUMMARY_ROW}`), SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(filled.text("C51"), SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(filled.text("H51"), "정리 1");
+
+  // 🔴 맺음 표시는 **마지막 내용 줄의 바로 다음 줄**이다 — 마지막 구역은
+  //    자리를 늘리지 않으므로 블록 끝(59행)까지 밀려 내려가지 않는다.
+  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H53"), undefined);
+  assert.equal(filled.text("H59"), undefined);
+
+  // 구역 사이는 라벨도 내용도 없다.
+  for (const row of [33, 34, 40, 43, 50]) {
+    assert.equal(filled.text(`C${row}`), undefined, `${row}행에 라벨이 찍혔다`);
+    assert.equal(filled.text(`H${row}`), undefined, `${row}행에 내용이 찍혔다`);
+  }
+});
+
+test("🔴 검사 보고서도 두 구역이 제자리(31·43행)에서 시작한다", { skip: skipInspection }, () => {
+  const filled = fill(inspectionPath as string, {
+    ...INSPECTION_INPUT,
+    body: { findings: ["확인 1"], findingsIntro: "", actions: ["조치 1"] },
+  });
+  assertSheetIsSound(filled, 0);
+
+  assert.equal(filled.text(`C${INSPECTION_FINDINGS_ROW}`), SERVICE_REPORT_BODY_LABELS.findings[0]);
+  assert.equal(filled.text("C32"), SERVICE_REPORT_BODY_LABELS.findings[1], "라벨 두 줄이 깨졌다");
+  assert.equal(filled.text("H31"), "확인 1");
+
+  assert.equal(filled.text("C43"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H43"), "조치 1");
+  assert.equal(filled.text("H44"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H33"), undefined, "두 구역이 이어 붙었다");
+});
+
+/**
+ * 🔴 확인내용이 **배정된 자리보다 길면** 조치가 그만큼 밀려 내려간다. 조용히
+ * 잘리거나 겹쳐 찍히면 우리가 적은 줄이 문서에서 사라진 채 나간다.
+ */
+test("🔴 확인내용이 배정된 자리보다 길면 조치가 그만큼 밀린다", { skip: skipRepair }, () => {
+  // 확인내용에 배정된 자리는 41 - 31 = 10줄. 13줄을 넣으면 3줄이 밀린다.
+  const filled = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: {
+      findings: bodyLines(13, "확인"),
+      findingsIntro: "",
+      actions: ["조치 1", "조치 2"],
+      summary: ["정리 1"],
+    },
+  });
+  assertSheetIsSound(filled, 0);
+
+  assert.equal(filled.text("H31"), "확인 1");
+  assert.equal(filled.text("H43"), "확인 13");
+
+  // 조치는 41행이 아니라 44행에서 시작한다(41 + 넘친 3줄).
+  assert.equal(filled.text("C44"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("C41"), undefined, "「조치」가 밀리지 않았다");
+  assert.equal(filled.text("H44"), "조치 1");
+
+  // 🔴 그 아래 「정리」도 같은 만큼 밀린다(51 + 3).
+  assert.equal(filled.text("C54"), SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(filled.text("C51"), undefined, "「정리」가 밀리지 않았다");
+  assert.equal(filled.text("H54"), "정리 1");
+  assert.equal(filled.text("H55"), SERVICE_REPORT_CLOSING_MARK);
+});
+
+/** 본문 줄들의 높이 — 채워진 문서에서 그대로 읽는다. */
+function bodyRowHeights(sheetXml: string, lastRow: number): string[] {
+  return parseSheetRows(sheetXml)
+    .filter((row) => row.rowNumber >= TEMPLATE_BODY_FIRST_ROW && row.rowNumber <= lastRow)
+    .map((row) => readRowHeightAttribute(row) ?? "(없음)");
+}
+
+/**
+ * 🔴 수리 양식의 46행만 75.6pt 다 — 그 발행본을 만든 사람이 손으로 잡아 늘린
+ * 자국이고, 같은 통합문서인 검사 양식의 같은 행은 13.9pt 다. 그대로 두면 문서
+ * 한가운데 손가락만 한 구멍이 뚫리고 아래 구역 계산도 뒤틀린다.
+ */
+test("🔴 채워진 문서의 본문에 75.6pt 짜리 손자국 행이 남지 않는다", { skip: skipRepair }, () => {
+  const original = ZipArchive.fromBuffer(readFileSync(repairPath as string));
+  const templateHeights = bodyRowHeights(
+    original.readText(resolveSheetPart(original, SERVICE_REPORT_SHEET_NAME)),
+    TEMPLATE_BODY_LAST_ROW
+  );
+  // 시험 준비 확인 — 양식에는 실제로 그 행이 있다.
+  assert.ok(
+    templateHeights.some((height) => Number(height) > 70),
+    "양식의 본문에 늘어난 행이 없다(시험 준비 실패)"
+  );
+
+  const filled = fill(repairPath as string, REPAIR_INPUT);
+  assert.deepEqual(
+    [...new Set(bodyRowHeights(filled.sheetXml, TEMPLATE_BODY_LAST_ROW))],
+    ["14.1"],
+    "본문 행 높이가 고르지 않다 — 최빈값으로 통일되어야 한다"
+  );
+
+  // 줄을 끼워 넣어도 마찬가지다. 새로 복제된 줄까지 같은 높이여야 한다.
+  const grown = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: {
+      findings: bodyLines(40, "확인"),
+      findingsIntro: "",
+      actions: bodyLines(10, "조치"),
+      summary: bodyLines(10, "정리"),
+    },
+  });
+  assert.deepEqual(
+    [...new Set(bodyRowHeights(grown.sheetXml, TEMPLATE_BODY_LAST_ROW + 32))],
+    ["14.1"],
+    "늘린 줄의 높이가 다르다"
+  );
+});
+
+/**
+ * 🔴 실제 양식으로 보는 "코드에 박지 않았다" — **글상자만 고치면** 구역 자리가
+ * 따라 움직인다. 라벨 글상자의 줄간격을 본문 행 높이(14.1pt)와 같게 만들면
+ * 문단 번호가 곧 행 번호가 되므로, 14번째 문단인 「조치」는 44행, 27번째인
+ * 「정리」는 57행에서 시작해야 한다.
+ */
+test("🔴 구역 자리는 양식의 글상자를 따라간다 — 실제 양식으로", { skip: skipRepair }, () => {
+  const archive = ZipArchive.fromBuffer(readFileSync(repairPath as string));
+  const drawing = archive.readText(TEMPLATE_DRAWING_PART);
+
+  const anchors = [...drawing.matchAll(/<xdr:(twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:\1>/g)].map(
+    (match) => match[0]
+  );
+  const label = anchors.find((anchor) => anchor.includes(SERVICE_REPORT_BODY_LABELS.findings[0]));
+  assert.ok(label !== undefined, "양식에서 라벨 글상자를 찾지 못했다(시험 준비 실패)");
+  assert.ok(label.includes('<a:spcPts val="1100"/>'), "라벨 글상자의 줄간격이 11pt가 아니다(시험 준비 실패)");
+
+  const widened = label.split('<a:spcPts val="1100"/>').join('<a:spcPts val="1410"/>');
+  const entries = archive.list().map((name) => ({
+    name,
+    data:
+      name === TEMPLATE_DRAWING_PART
+        ? Buffer.from(drawing.replace(label, () => widened), "utf8")
+        : (archive.readEntry(name) as Buffer),
+  }));
+
+  const changed = ZipArchive.fromBuffer(
+    fillServiceReportWorkbook(writeZip(entries), REPAIR_INPUT)
+  );
+  const sheetXml = changed.readText(resolveSheetPart(changed, SERVICE_REPORT_SHEET_NAME));
+  const read = createCellTextReader(sheetXml, changed.readTextOrNull(SHARED_STRINGS_PART));
+
+  assert.equal(read("C31"), SERVICE_REPORT_BODY_LABELS.findings[0]);
+  assert.equal(read("C44"), SERVICE_REPORT_BODY_LABELS.actions[0], "「조치」가 글상자를 안 따라갔다");
+  assert.equal(read("C57"), SERVICE_REPORT_BODY_LABELS.summary[0], "「정리」가 글상자를 안 따라갔다");
+  assert.equal(read("H58"), SERVICE_REPORT_CLOSING_MARK);
+  // 원래 양식이었다면 41행·51행이었다 — 그 자리는 이제 비어 있다.
+  assert.equal(read("C41"), null);
+  assert.equal(read("C51"), null);
 });
 
 test("🔴 양식에 남아 있던 발행본 자료가 새 문서로 새지 않는다", { skip: skipRepair }, () => {
@@ -931,9 +1332,10 @@ test("확인내용 첫 줄 — 안 주면 정형 문구가 들어간다", { skip
   assert.equal(filled.text("C32"), SERVICE_REPORT_BODY_LABELS.findings[1]);
   assert.equal(filled.text("H32"), "외관 손상 없음");
   assert.equal(filled.text("H33"), "전원부 퓨즈 단선 확인");
-  assert.equal(filled.text("C34"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("H34"), "퓨즈 교체");
-  assert.equal(filled.text("H35"), SERVICE_REPORT_CLOSING_MARK);
+  // 「조치」는 제자리(43행). 정형 문구가 한 줄 늘어도 자리는 안 흔들린다.
+  assert.equal(filled.text("C43"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H43"), "퓨즈 교체");
+  assert.equal(filled.text("H44"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 test("확인내용 첫 줄 — 다른 문장을 주면 그것이 들어간다", { skip: skipRepair }, () => {
@@ -952,9 +1354,10 @@ test("확인내용 첫 줄 — 다른 문장을 주면 그것이 들어간다", 
   assert.equal(filled.text("H31"), other);
   assert.notEqual(filled.text("H31"), SERVICE_REPORT_FINDINGS_INTRO);
   assert.equal(filled.text("H32"), "외관 손상 없음");
-  assert.equal(filled.text("C33"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("H33"), "퓨즈 교체");
-  assert.equal(filled.text("H34"), SERVICE_REPORT_CLOSING_MARK);
+  // 「조치」는 제자리(41행). 「정리」가 비었으므로 맺음 표시가 바로 다음 줄.
+  assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H41"), "퓨즈 교체");
+  assert.equal(filled.text("H42"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 test("🔴 확인내용 첫 줄 — 명시적으로 비우면 안 들어간다", { skip: skipRepair }, () => {
@@ -983,8 +1386,12 @@ test("확인내용이 비어 있으면 정형 문구만 남지 않는다", { ski
   });
 
   // 소개할 항목이 없으므로 「확인내용」 구역 자체가 없다 — 라벨도 문구도 없다.
-  assert.equal(filled.text("C31"), SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(filled.text("H31"), "퓨즈 교체");
+  assert.equal(filled.text("C31"), undefined, "빈 구역에 라벨이 찍혔다");
+  assert.equal(filled.text("H31"), undefined, "빈 구역에 내용이 찍혔다");
+  // 🔴 그래도 「조치」의 자리는 그대로다 — 위 구역이 비었다고 끌어올리지 않는다.
+  assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(filled.text("H41"), "퓨즈 교체");
+  assert.equal(filled.text("H42"), SERVICE_REPORT_CLOSING_MARK);
   assert.ok(!filled.sheetXml.includes(SERVICE_REPORT_FINDINGS_INTRO), "정형 문구만 남았다");
 });
 
@@ -1033,8 +1440,11 @@ test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 �
  * "내용만 왼쪽으로" 는 새 서식을 더해야만 되고, 잘못하면 라벨까지 따라간다.
  */
 for (const kind of [
-  { name: "검사", path: () => inspectionPath, skip: () => skipInspection, input: INSPECTION_INPUT, closingRow: 34 },
-  { name: "수리", path: () => repairPath, skip: () => skipRepair, input: REPAIR_INPUT, closingRow: 35 },
+  // closingRow — 구역이 제자리에서 시작하므로 맺음 표시도 그만큼 아래다.
+  //   검사: 확인내용 31~42(배정 12줄) · 조치 43 · 맺음 44
+  //   수리: 확인내용 31~40(배정 10줄) · 조치 41~50 · 정리 51 · 맺음 52
+  { name: "검사", path: () => inspectionPath, skip: () => skipInspection, input: INSPECTION_INPUT, closingRow: 44 },
+  { name: "수리", path: () => repairPath, skip: () => skipRepair, input: REPAIR_INPUT, closingRow: 52 },
 ] as const) {
   test(`🔴 ${kind.name} 보고서 — 본문 내용 줄만 왼쪽 맞춤이 된다`, { skip: kind.skip() }, () => {
     const templatePath = kind.path() as string;

@@ -99,6 +99,49 @@ export function blankRow(row: SheetRow): SheetRow {
 }
 
 /**
+ * ── 행 높이 — **글자 그대로** 읽고 쓴다 ────────────────────────────────
+ *
+ * `ht` 는 포인트 값이지만 여기서는 **숫자로 바꾸지 않는다.** 양식에 적힌 글자가
+ * `75.599999999999994` 같은 꼴이라(Excel 이 그렇게 저장한다) 숫자로 읽었다가 다시
+ * 적으면 값이 미묘하게 달라지고, 그 차이는 "어떤 줄만 한 픽셀 다르다" 로 나타나
+ * 아무도 못 잡는다. 최빈값을 셀 때도 글자로 세면 같은 높이가 두 갈래로 갈리는 일이
+ * 없다.
+ *
+ * 🔴 **부르는 쪽이 필요할 때만 부른다.** 견적서 채우개 셋은 이것들을 부르지
+ * 않으므로 동작이 한 글자도 바뀌지 않는다.
+ */
+
+/** 여는 태그 하나. 자기 닫힘 행(`<row r="9"/>`)도 통째로 잡는다. */
+const ROW_OPEN_TAG = /^<row\b[^>]*?\/?>/;
+
+/** `<row … ht="14.1">` 의 높이 **글자**. 안 적혀 있으면 null(시트 기본 높이를 따른다). */
+export function readRowHeightAttribute(row: SheetRow): string | null {
+  const open = ROW_OPEN_TAG.exec(row.xml)?.[0];
+  if (open === undefined) return null;
+  return /\sht="([^"]*)"/.exec(open)?.[1] ?? null;
+}
+
+/**
+ * 그 행의 높이를 정한다. `customHeight="1"` 도 함께 켠다 — 안 켜면 Excel 이
+ * "자동 높이" 로 보고 글꼴에 맞춰 제멋대로 다시 잰다.
+ */
+export function setRowHeightAttribute(row: SheetRow, height: string): SheetRow {
+  const open = ROW_OPEN_TAG.exec(row.xml)?.[0];
+  if (open === undefined) {
+    throw new SheetRowError(`${row.rowNumber}행의 여는 태그를 읽지 못했습니다.`);
+  }
+
+  let tag = /\sht="[^"]*"/.test(open)
+    ? open.replace(/\sht="[^"]*"/, ` ht="${height}"`)
+    : open.replace(/(\/?>)$/, ` ht="${height}"$1`);
+  tag = /\scustomHeight="[^"]*"/.test(tag)
+    ? tag.replace(/\scustomHeight="[^"]*"/, ' customHeight="1"')
+    : tag.replace(/(\/?>)$/, ' customHeight="1"$1');
+
+  return { ...row, xml: tag + row.xml.slice(open.length) };
+}
+
+/**
  * 어느 줄에 그 글자가 있는가. 행 번호를 코드에 박지 않기 위한 것이다.
  *
  * 매쳐 양식은 같은 양식이라도 내자와 OH 의 행이 다르다(부품 줄 수가 달라 아래가
