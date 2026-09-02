@@ -19,12 +19,16 @@ const expectedSteps: Record<WorkflowType, number> = {
   PENDING_TOTAL_CONTROLLER: 2,
 };
 
+// 서식 개수는 위 표에서 세어 온다 — 종류를 지웠는데 숫자만 남아
+// 테스트가 깨진 적이 있다 (레거시 MATCHER 철거, db90ac3).
+const expectedTemplateCount = Object.keys(expectedSteps).length;
+
 after(async () => {
   await pgClient.end({ timeout: 5 });
 });
 
 describe("partial-paid and pending workflow database foundation", () => {
-  test("keeps ten persisted templates with an independent current published version", async () => {
+  test("keeps one persisted template per workflow type with an independent current published version", async () => {
     const rows = await db
       .select({ code: workflowTemplates.code, templateId: workflowTemplates.id, versionId: workflowVersions.id })
       .from(workflowTemplates)
@@ -36,9 +40,9 @@ describe("partial-paid and pending workflow database foundation", () => {
           eq(workflowVersions.isCurrent, true)
         )
       );
-    assert.equal(rows.length, 10);
-    assert.equal(new Set(rows.map((row) => row.templateId)).size, 10);
-    assert.equal(new Set(rows.map((row) => row.versionId)).size, 10);
+    assert.equal(rows.length, expectedTemplateCount);
+    assert.equal(new Set(rows.map((row) => row.templateId)).size, expectedTemplateCount);
+    assert.equal(new Set(rows.map((row) => row.versionId)).size, expectedTemplateCount);
   });
 
   test("materializes the approved independent step snapshots", async () => {
