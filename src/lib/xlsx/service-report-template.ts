@@ -120,6 +120,21 @@ import {
  * 던진다** — `assertLayout` 과 같은 판단이다. 엉뚱한 자리에 그린 문서를
  * 고객사로 내보내는 것보다 멈추는 편이 낫다.
  *
+ * ── 🔴 「확인내용」만 글상자보다 **한 줄 아래**다 ───────────────────────
+ * 위 계산은 「확인내용」에 31행을 준다. 양식의 두 글상자(본문 상자·라벨 상자)가
+ * 둘 다 31행을 가리키기 때문이고, 실측으로 확인한 것이다. **그런데 실제
+ * 발행본은 32행에서 시작한다** — 2026-09-02 사용자 결정이다.
+ *
+ * 🔴 그러니 나중에 이 자리를 보고 "글상자 계산이 31을 주는데 왜 32지? 버그인가?"
+ * 하고 되돌리지 말 것. **계산은 옳고, 그 위에 규칙이 하나 얹혀 있는 것**이다
+ * (`SERVICE_REPORT_FINDINGS_ROW_OFFSET`·`shiftFindingsSectionDown`). 계산을
+ * 왜곡해 32를 내놓게 만들지 않은 이유도 같다 — 그렇게 하면 양식의 글상자를
+ * 따라간다는 성질이 죽고, 「조치」·「정리」까지 함께 밀린다.
+ *
+ * 결과적으로 31행은 비고, 「확인내용」 구역은 32~40행이다(수리 기준. 「조치」
+ * 41행 · 「정리」 51행은 그대로다). 내용이 그보다 길면 여느 때처럼 아래 구역을
+ * 밀어낸다.
+ *
  * ── 🔴 46행의 높이는 **실수다** — 먼저 고르게 편다 ─────────────────────
  * 본문 행은 전부 14.1pt 인데 **수리 양식의 46행만 75.6pt** 다. 같은 통합문서인
  * 검사 양식의 46행은 13.9pt 다. 즉 설계가 아니라, 그 발행본을 만든 사람이 46행을
@@ -395,6 +410,24 @@ const CAUSE_CELLS: Record<
   NOT_REPRODUCED: { label: "재현 안됨", labelCell: "AH30", checkCell: "AF30" },
   OTHER: { label: "기타", labelCell: "AP30", checkCell: "AN30" },
 };
+
+/**
+ * 원인 열 가지의 한글 이름 — **화면이 체크박스에 쓰는 것도 이것 하나뿐이다.**
+ *
+ * 🔴 `CAUSE_CELLS` 에서 **뽑아낸다.** 베껴 적지 않는다. 위의 표는 문서에 찍히고
+ * 양식 확인(`assertLayout`)에 쓰이는 글자이고, 화면 체크박스는 그것과 같은
+ * 이름을 불러야 한다. 두 곳에 따로 적어 두면 양식의 라벨이 바뀐 날 채우개만
+ * 고쳐지고, 그때 증상은 **화면과 문서가 서로 다른 이름을 부르는 것**이다 —
+ * 아무 오류도 나지 않아서 아무도 모른다.
+ *
+ * ⚠️ 이 모듈은 브라우저 번들에 들어갈 수 없다(`zip-reader.ts` → `node:fs`).
+ * 그래서 화면은 이것을 직접 가져오지 못하고 **서버 페이지가 읽어 props 로**
+ * 넘긴다 — 정형 문구·줄 수 상한·드롭다운 목록이 이미 가는 길이다.
+ */
+export const SERVICE_REPORT_CAUSE_LABELS: Record<ServiceReportCause, string> =
+  Object.fromEntries(
+    SERVICE_REPORT_CAUSES.map((cause) => [cause, CAUSE_CELLS[cause].label])
+  ) as Record<ServiceReportCause, string>;
 
 /**
  * 「비　고」 라벨 칸. 이 칸의 병합 범위(`C60:G63`)가 비고가 몇 줄이고 내용이
@@ -967,6 +1000,40 @@ function createRowHeightReader(sheetXml: string): (row: number) => number {
 }
 
 /**
+ * 🔴 「확인내용」 구역만 글상자가 가리키는 자리보다 **한 줄 아래**에서 시작한다.
+ *
+ * ⚠️ **이 한 줄은 양식에서 나오는 값이 아니다.** 양식의 두 글상자(본문 상자와
+ * 라벨 상자)는 **둘 다 31행**을 가리킨다 — 실측으로 확인했다. 그런데 실제
+ * 발행본의 「확인내용」은 32행에서 시작한다. **2026-09-02 사용자 결정**이다.
+ *
+ * 🔴 그래서 나중에 이 값을 보고 "글상자 계산이 31을 주는데 왜 32지? 버그인가?"
+ * 하고 0 으로 되돌리지 말 것. `readSectionStartRows` 는 **옳은 값을 내놓고
+ * 있고**, 그 위에 발행본의 관례가 한 줄 얹혀 있는 것이다.
+ *
+ * 「조치」·「정리」는 그대로 둔다 — 그쪽은 발행본과 글상자가 같은 자리다.
+ */
+export const SERVICE_REPORT_FINDINGS_ROW_OFFSET = 1;
+
+/**
+ * 위 규칙을 **시작 행 목록에만** 얹는다. 계산(`readSectionStartRows`)은 손대지
+ * 않는다 — 왜곡하면 양식의 글상자를 따라간다는 성질이 통째로 죽는다.
+ *
+ * 구역은 라벨 글자로 가린다. 자리(index)로 가리면 「확인내용」이 없는 문서에서
+ * 엉뚱한 구역이 밀린다.
+ */
+export function shiftFindingsSectionDown(
+  sections: readonly { labelLines: readonly string[] }[],
+  startRows: readonly number[]
+): number[] {
+  const findingsLabel = SERVICE_REPORT_BODY_LABELS.findings[0];
+  return startRows.map((row, index) =>
+    sections[index]?.labelLines[0] === findingsLabel
+      ? row + SERVICE_REPORT_FINDINGS_ROW_OFFSET
+      : row
+  );
+}
+
+/**
  * 🔴 구역을 **각자 정해진 자리에서** 시작시킨다 — 이 작업의 본체.
  *
  *   · 한 구역이 차지하는 줄 수 = `max(배정된 줄 수, 실제 내용 줄 수)`.
@@ -1082,7 +1149,9 @@ function fillSheet(
 
   const layout = planBodyLayout(
     sections,
-    readSectionStartRows(drawingXml, evened, block, sections),
+    // 🔴 「확인내용」만 한 줄 아래에서 시작한다 — 발행본이 그렇다.
+    //    계산은 그대로 두고 규칙만 얹는다(`SERVICE_REPORT_FINDINGS_ROW_OFFSET`).
+    shiftFindingsSectionDown(sections, readSectionStartRows(drawingXml, evened, block, sections)),
     block
   );
   // 본문 마지막 줄 다음에 「～이　상～」 한 줄이 더 든다.
