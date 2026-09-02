@@ -540,6 +540,13 @@
       "when": 1788158474136,
       "tag": "0076_plain_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1788327023073,
+      "tag": "0077_hard_rhino",
+      "breakpoints": true
     }
   ]
 }

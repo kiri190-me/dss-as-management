@@ -45,3 +45,4 @@ export * from "./weekly-report-deliveries";
 export * from "./quotes";
 export * from "./customer-portal";
 export * from "./intake-mail";
+export * from "./service-reports";
