@@ -116,6 +116,57 @@ export const PRODUCT_MODEL_DRAFT_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * 검사·수리 보고서 폼(ServiceReportForm)의 이름표.
+ *
+ * 이 화면도 낙관적 잠금이라 두 사람이 같은 보고서를 열어 두면 나중 사람이
+ * CONFLICT 를 받는다. 그리고 이 화면이 **가장 많이 잃는다** — 확인내용·조치·정리는
+ * 한 장에 수백 줄까지 간다(`SERVICE_REPORT_MAX_BODY_ROWS`). 파일 헤더의 '오래
+ * 적을수록 부딪힐 확률이 높고, 오래 적었을수록 많이 잃는다'가 그대로다.
+ *
+ * 차례는 화면에 놓인 차례다 — 머리(문서번호 → 고객사 → 발생 장소 → 제품) →
+ * 상황 → 조치 → 본문 → 비고. 다시 옮겨 적을 때 위에서부터 훑을 수 있어야 한다.
+ *
+ * ── 없는 것과 그 까닭 ───────────────────────────────────────────────────
+ * · **날짜 칸 전부**(발행일·접수일·발생 년월일·현품 인수일·조치 완료일) — 파일
+ *   헤더의 '날짜는 다시 고르는 데 몇 초면 된다'.
+ * · **고르는 값**(종류·품명·상황 요청·원인 체크·현장수리/대품출고 체크) — 같은
+ *   이유이고, 저장되는 값이 `PART_DEFECT` 같은 내부 코드라 보여 줘도 뜻이 없다.
+ * · **숫자 칸**(제조 년·월, 사용 년수·개월수) — 대부분 S/N 에서 자동으로 채워지고,
+ *   폼을 다시 열면 같은 규칙으로 다시 채워진다.
+ * · 🔴 **findingsIntro(정형 문구)** — 화면이 미리 채워 둔 문장이지 사람이 친 글이
+ *   아니다. 여기 이름표를 두면 충돌 상자가 **사용자가 적지도 않은 문장**을
+ *   "당신이 적어 둔 글"로 되돌려 준다(위 PRODUCT_MODEL_DRAFT_LABELS 의
+ *   manufacturer 와 똑같은 함정이다).
+ * · 🔴 **occurredOnText** — 양식의 견본이 `―――` 인 칸이라 사람이 적는 글이라기보다
+ *   자리 표시다.
+ */
+export const SERVICE_REPORT_DRAFT_LABELS: Readonly<Record<string, string>> = {
+  // ── 머리
+  reportNumberPrefix: "보고서번호(앞)",
+  reportNumberMiddle: "보고서번호(중간)",
+  reportNumberTail: "보고서번호(뒤)",
+  customerName: "고객사명",
+  customer: "고객사(제출처)",
+  occurrencePlace: "발생 장소",
+  occurrencePlaceDetail: "발생 장소(상세)",
+  productCategory: "품명(둘째 줄)",
+  modelName: "형식",
+  lotNumber: "L/N",
+  serialNumber: "S/N",
+  situationDetail: "상황(상세)",
+
+  // ── 조치
+  goodsReceiptNumber: "현품 인수 번호",
+  repairNumber: "수리 번호",
+
+  // ── 본문 · 비고
+  findings: "확인내용",
+  actions: "조치",
+  summary: "정리",
+  remark: "비고",
+};
+
+/**
  * 저장하려던 값에서 보여 줄 글을 만든다. **보여 줄 것이 없으면 빈 문자열**이다
  * (화면은 그때 상자를 아예 그리지 않는다 — 빈 상자는 무언가 잘못된 것처럼
  * 보인다).

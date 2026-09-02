@@ -3,7 +3,14 @@ import { notFound, redirect } from "next/navigation";
 
 import ServiceReportForm from "@/components/repair-cases/report/service-report/ServiceReportForm";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { getPermissionLevel } from "@/lib/auth/permission-resolver";
+import {
+  SERVICE_REPORT_PERMISSION_AREA,
+  canDeleteServiceReports,
+  canEditServiceReports,
+} from "@/lib/auth/service-report-authorization";
 import { readSession } from "@/lib/auth/session";
+import { getServiceReportForEdit } from "@/lib/db/queries/service-reports";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { createServiceReportFormValues } from "@/lib/domain/service-report-form";
@@ -11,6 +18,7 @@ import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-par
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readServiceReportTemplate } from "@/lib/storage/service-report-template";
 import { SERVICE_REPORT_MAX_REMARK_ROWS } from "@/lib/validation/service-report-input";
+import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
 import {
   readServiceReportChoices,
   type ServiceReportChoices,
@@ -47,6 +55,30 @@ import {
  * 창구가 되면 안 된다(`storage/service-report-template.ts` 의 같은 판단).
  * 경로는 그쪽이 서버 로그에만 남긴다.
  *
+ * ── 이 화면이 열리는 두 가지 ────────────────────────────────────────────
+ *   · **새로 만들기** — `?kind=` 로 온다. 저장하면 새 장이 생긴다.
+ *   · **고치기**     — `?id=` 로 온다. 저장하면 그 장이 갱신된다.
+ *
+ * ── 🔴 왜 자식 경로가 아니라 `?id=` 인가 ────────────────────────────────
+ * `.../service-report/{보고서id}` 라는 자식 경로를 만들면 **거의 같은 서버
+ * 컴포넌트가 두 벌**이 된다 — 양식 읽기, 드롭다운 목록, 상한, 원인 라벨, 인가,
+ * 폼에 넘길 것들이 전부 같고 다른 것은 «초기값을 어디서 얻는가» 하나뿐이다. 두
+ * 벌이 되면 한쪽만 고쳐지는 날이 오고, 그 증상은 오류가 아니라 **한쪽 길로 연
+ * 폼만 상한이 낡은 것** 같은 조용한 어긋남이다(이 기능이 계속 경계하는 그
+ * 실패다 — `validation/service-report-save-input.ts` 의 '왜 두 방향이 한 파일에
+ * 있나').
+ *
+ * 게다가 「보고서」 탭에는 **이미 `?kind=` 라는 시작 조건**이 실려 온다. 「무엇을
+ * 열 것인가」를 정하는 값 둘을 같은 자리에 두는 편이, 하나는 질의문자열이고
+ * 하나는 경로 조각인 것보다 읽기 쉽다.
+ *
+ * 탭 강조는 어느 쪽이든 같다 — `resolveActiveTabHref` 는 **경로**의 최장 일치라
+ * 질의문자열을 보지 않는다. 그러니 강조는 이 판단의 근거가 아니다.
+ *
+ * 🔴 `?id=` 와 `?kind=` 가 함께 오면 **`?id=` 가 이긴다.** 저장된 장의 종류는 그
+ * 장에 적혀 있고, 주소의 값이 그것을 덮으면 다시 열 때마다 종류가 바뀐 폼이
+ * 열린다.
+ *
  * ── `?kind=` 는 **시작값만** 정한다 ─────────────────────────────────────
  * 「보고서」 탭의 갈림길 화면이 `?kind=INSPECTION` · `?kind=REPAIR` 를 붙여
  * 보낸다. 세 가지를 지킨다:
@@ -70,16 +102,32 @@ export const dynamic = "force-dynamic";
 const TEMPLATE_UNAVAILABLE_MESSAGE =
   "양식을 읽을 수 없어 목록을 불러오지 못했습니다. 관리자에게 문의해 주세요.";
 
+/**
+ * 🔴 주소에 실려 온 보고서 id 를 **조회에 넣기 전에** 걸러 낸다. uuid 가 아닌
+ * 글자가 그대로 조회로 들어가면 Postgres 가 22P02 로 던져 화면이 통째로 오류
+ * 페이지가 된다 — 손으로 고칠 수 있는 자리라 실제로 일어난다.
+ *
+ * 같은 이름이 두 번 오면(`?id=a&id=b`) 어느 쪽을 열어야 하는지 알 수 없다. 하나를
+ * 골라 여는 대신 **없는 것으로 본다** — 엉뚱한 장을 열어 그 위에 저장하게 하는
+ * 것보다 낫다.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+function serviceReportIdFromParam(value: string | string[] | undefined): string | null {
+  if (typeof value !== "string") return null;
+  return UUID_PATTERN.test(value) ? value : null;
+}
+
 export default async function ServiceReportPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
   /** 같은 이름이 두 번 올 수 있는 자리라 배열도 받는다 — 판단은 도메인 함수가 한다. */
-  searchParams: Promise<{ kind?: string | string[] }>;
+  searchParams: Promise<{ kind?: string | string[]; id?: string | string[] }>;
 }) {
   const { id } = await params;
-  const { kind: kindParam } = await searchParams;
+  const { kind: kindParam, id: serviceReportIdParam } = await searchParams;
 
   // 상위 (app) 레이아웃이 이미 세션을 확인하지만, 이 화면은 고객사로 나가는
   // 문서를 짓는 자리라 방어적으로 한 번 더 본다. 살아 있는 계정을 다시 읽는
@@ -92,6 +140,27 @@ export default async function ServiceReportPage({
 
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) notFound();
+
+  /**
+   * 저장된 장을 여는 길. 🔴 **주소에 `id` 가 있는데 읽을 수 없으면 404 다** —
+   * 새 보고서 화면으로 슬쩍 떨어뜨리지 않는다. 고치러 온 사람에게 빈 폼을 주면
+   * 그것을 저장하는 순간 **한 장 더 생긴다.**
+   */
+  const hasServiceReportIdParam = serviceReportIdParam !== undefined;
+  const serviceReportId = serviceReportIdFromParam(serviceReportIdParam);
+  if (hasServiceReportIdParam && serviceReportId === null) notFound();
+
+  const saved = serviceReportId === null ? null : await getServiceReportForEdit(serviceReportId);
+  // 지워진 장은 조회가 이미 `null` 로 답한다(`queries/service-reports.ts`).
+  if (serviceReportId !== null && !saved) notFound();
+  /**
+   * 🔴 **이 접수 건의 보고서가 맞는가.** 아니면 남의 건의 보고서를 이 건의 주소로
+   * 열어 고치는 길이 된다 — 저장은 접수 건을 옮기지 않으므로 겉보기에는 이 건에
+   * 딸린 것처럼 보이는데 실제로는 다른 건의 문서가 고쳐진다.
+   */
+  if (saved && saved.repairCaseId !== resolved.id) notFound();
+
+  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
 
   let choices: ServiceReportChoices | null = null;
   let templateError: string | null = null;
@@ -108,22 +177,39 @@ export default async function ServiceReportPage({
     templateError = TEMPLATE_UNAVAILABLE_MESSAGE;
   }
 
-  const initialValues = createServiceReportFormValues({
-    repairCase: resolved,
-    // 발행일의 기본값. 서버에서 만들어 넘겨야 서버 렌더와 브라우저가 어긋나지 않는다.
-    today: toKstDateOnly(new Date()),
-    findingsIntro: SERVICE_REPORT_FINDINGS_INTRO,
-    // 🔴 형식에서 뽑은 품명은 **이 목록 안에 있을 때만** 골라진다. 양식을 못
-    //    읽었으면 빈 목록이 가고, 그러면 아무것도 안 고른다(사람이 고른다).
-    productNames: choices?.productNames ?? [],
-    // 🔴 갈림길 화면이 고른 종류. 못 고른 값은 `null` 로 오고, 그때는 키를 안 준
-    //    것과 같아 씨앗의 기본값이 그대로 쓰인다 — 기본값의 사본을 만들지 않는다.
-    kind: serviceReportKindFromParam(kindParam) ?? undefined,
-  });
+  /**
+   * 폼에 부을 값.
+   *
+   * 🔴 저장된 장을 열 때는 **이미 있는 변환 함수 하나로만** 푼다
+   * (`serviceReportFormValues`). 그 함수가 `findingsIntro` 의 「안 줌(null)」과
+   * 「일부러 비움('')」을 가르는 단 하나의 자리다 — 여기서 `?? ""` 같은 것을 새로
+   * 적으면 사람이 지운 문장이 다음 문서에 되살아난다.
+   */
+  const initialValues = saved
+    ? serviceReportFormValues(saved.values, SERVICE_REPORT_FINDINGS_INTRO)
+    : createServiceReportFormValues({
+        repairCase: resolved,
+        // 발행일의 기본값. 서버에서 만들어 넘겨야 서버 렌더와 브라우저가 어긋나지 않는다.
+        today: toKstDateOnly(new Date()),
+        findingsIntro: SERVICE_REPORT_FINDINGS_INTRO,
+        // 🔴 형식에서 뽑은 품명은 **이 목록 안에 있을 때만** 골라진다. 양식을 못
+        //    읽었으면 빈 목록이 가고, 그러면 아무것도 안 고른다(사람이 고른다).
+        productNames: choices?.productNames ?? [],
+        // 🔴 갈림길 화면이 고른 종류. 못 고른 값은 `null` 로 오고, 그때는 키를 안 준
+        //    것과 같아 씨앗의 기본값이 그대로 쓰인다 — 기본값의 사본을 만들지 않는다.
+        kind: serviceReportKindFromParam(kindParam) ?? undefined,
+      });
 
   return (
     <ServiceReportForm
       repairCaseId={resolved.id}
+      // 🔴 저장된 장이면 그 id 와 낙관적 잠금 토큰. 새로 만드는 중이면 null 이다 —
+      //    폼은 이 하나로 「만들기」와 「고치기」를 가른다.
+      savedReport={saved ? { id: saved.id, version: saved.version } : null}
+      // 🔴 화면에서 단추를 감추는 것은 편의일 뿐이다. 실제 경계는 서버 액션 안에
+      //    다시 있다(`server/actions/service-reports.ts`).
+      canEdit={canEditServiceReports(level)}
+      canDelete={canDeleteServiceReports(level)}
       // 🔴 임시보관 열쇠에 쓸 **id 하나만** 넘긴다. 사무실 공용 PC 를 여럿이
       //    나눠 쓰므로 사람마다 갈라 적어야 하는데, 그러자고 이름·역할·이메일까지
       //    클라이언트로 내려보낼 이유는 없다(위 '오류 메시지에 경로를 담지

@@ -7,8 +7,10 @@ import {
   SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS,
   clearServiceReportDraft,
   formatServiceReportDraftSavedAt,
+  legacyServiceReportDraftStorageKey,
   readServiceReportDraft,
   serviceReportDraftStorageKey,
+  serviceReportDraftStorageKeys,
   writeServiceReportDraft,
   type ServiceReportDraftStore,
 } from "./service-report-draft";
@@ -28,8 +30,12 @@ import {
  * 3. 🔴 **적혀 있던 것이 그대로 화면 상태가 되지 않는다.** 특히 **칸이 빠진 옛
  *    임시보관**에서 `undefined` 가 나오면 그 입력 칸이 통제 불능이 되어 React 가
  *    경고를 뱉고 값이 사라진다.
- * 4. **사람이 다르면, 접수 건이 다르면 섞이지 않는다.** 공용 PC 를 여럿이 쓰고,
- *    한 사람이 탭을 여럿 띄워 둔다.
+ * 4. **사람이 다르면, 접수 건이 다르면, 보고서 장이 다르면 섞이지 않는다.** 공용
+ *    PC 를 여럿이 쓰고, 한 사람이 탭을 여럿 띄워 두며, 한 접수 건에 검사 한 장 +
+ *    수리 한 장이 함께 붙는다.
+ * 5. 🔴 **옛 열쇠로 적어 둔 것을 말없이 버리지 않는다.** 보고서가 한 장뿐이던
+ *    때의 임시보관이 실제 브라우저에 남아 있다 — 새 장을 열 때 그것을 함께
+ *    본다. 다만 **저장된 장에는 붓지 않는다**(남의 보고서를 덮는 길이다).
  *
  * 인정할 원인 코드는 `SERVICE_REPORT_CAUSES` 에서 가져온다 — 목록을 여기 베끼면
  * 양식에 원인이 하나 늘어난 날 이 시험만 통과한다.
@@ -38,7 +44,14 @@ import {
 
 const CAUSE_CODES: readonly string[] = SERVICE_REPORT_CAUSES;
 
-const KEY = serviceReportDraftStorageKey("user-1", "case-1");
+/** 「아직 저장하지 않은 새 장」의 열쇠 — 지금까지의 시험이 다루던 자리다. */
+const KEY = serviceReportDraftStorageKey("user-1", "case-1", null);
+
+/** 저장된 장 하나의 열쇠. */
+const SAVED_KEY = serviceReportDraftStorageKey("user-1", "case-1", "report-1");
+
+/** 보고서가 한 장뿐이던 때의 열쇠. */
+const LEGACY_KEY = legacyServiceReportDraftStorageKey("user-1", "case-1");
 
 /** 화면이 처음 열릴 때 만드는 자동 채움 값 — 되살리기의 기준선이다. */
 function autofilled(): ServiceReportFormValues {
@@ -108,13 +121,13 @@ function storeWith(raw: string): ServiceReportDraftStore & { readonly data: Map<
 }
 
 function read(store: ServiceReportDraftStore | null, fallback = autofilled()) {
-  return readServiceReportDraft(store, KEY, fallback, CAUSE_CODES);
+  return readServiceReportDraft(store, [KEY], fallback, CAUSE_CODES);
 }
 
 // ───────────────────────────────────────────────────────────────── 열쇠
 
 test("열쇠에 판 번호 · 사람 · 접수 건이 모두 들어간다", () => {
-  const key = serviceReportDraftStorageKey("user-1", "case-1");
+  const key = serviceReportDraftStorageKey("user-1", "case-1", null);
   assert.ok(key.includes("v1"), "판 번호가 있어야 모양이 바뀐 날 옛 값을 버릴 수 있다");
   assert.ok(key.includes("user-1"));
   assert.ok(key.includes("case-1"));
@@ -122,16 +135,34 @@ test("열쇠에 판 번호 · 사람 · 접수 건이 모두 들어간다", () =
 
 test("사람이 다르면 열쇠가 다르다 — 공용 PC 에서 남의 보고서가 되살아나지 않는다", () => {
   assert.notEqual(
-    serviceReportDraftStorageKey("user-1", "case-1"),
-    serviceReportDraftStorageKey("user-2", "case-1")
+    serviceReportDraftStorageKey("user-1", "case-1", null),
+    serviceReportDraftStorageKey("user-2", "case-1", null)
   );
 });
 
 test("접수 건이 다르면 열쇠가 다르다 — 탭을 여럿 띄워도 서로 덮지 않는다", () => {
   assert.notEqual(
-    serviceReportDraftStorageKey("user-1", "case-1"),
-    serviceReportDraftStorageKey("user-1", "case-2")
+    serviceReportDraftStorageKey("user-1", "case-1", null),
+    serviceReportDraftStorageKey("user-1", "case-2", null)
   );
+});
+
+test("🔴 보고서 장이 다르면 열쇠가 다르다 — 검사 보고서의 글이 수리 보고서에 되살아나지 않는다", () => {
+  const inspection = serviceReportDraftStorageKey("user-1", "case-1", "report-1");
+  const repair = serviceReportDraftStorageKey("user-1", "case-1", "report-2");
+  assert.notEqual(inspection, repair);
+  // 새로 만드는 장도 저장된 장과 갈린다 — 같으면 "한 장 더 만들기"가 방금 저장한
+  // 장의 글로 시작한다.
+  assert.notEqual(inspection, serviceReportDraftStorageKey("user-1", "case-1", null));
+});
+
+test("🔴 저장된 장의 열쇠 목록에는 옛 열쇠가 없다 — 남이 저장해 둔 보고서를 덮지 않는다", () => {
+  assert.deepEqual(serviceReportDraftStorageKeys("user-1", "case-1", "report-1"), [SAVED_KEY]);
+});
+
+test("새 장의 열쇠 목록은 새 열쇠가 먼저, 옛 열쇠가 뒤다", () => {
+  // 적는 것은 언제나 맨 앞 열쇠다. 옛 열쇠는 읽고 지울 때만 따라온다.
+  assert.deepEqual(serviceReportDraftStorageKeys("user-1", "case-1", null), [KEY, LEGACY_KEY]);
 });
 
 // ─────────────────────────────────────────────────── 적기 · 읽기 · 지우기
@@ -169,19 +200,112 @@ test("지우면 없어진다 — 「새로 시작」", () => {
   writeServiceReportDraft(store, KEY, autofilled(), "2026-09-02T05:33:00.000Z");
   assert.notEqual(read(store), null);
 
-  clearServiceReportDraft(store, KEY);
+  clearServiceReportDraft(store, [KEY]);
   assert.equal(read(store), null);
   assert.equal(store.data.size, 0, "저장소에서 실제로 사라진다");
 });
 
 test("지우기는 남의 열쇠를 건드리지 않는다", () => {
   const store = healthyStore();
-  const otherKey = serviceReportDraftStorageKey("user-1", "case-2");
+  const otherKey = serviceReportDraftStorageKey("user-1", "case-2", null);
   writeServiceReportDraft(store, KEY, autofilled(), "2026-09-02T05:33:00.000Z");
   writeServiceReportDraft(store, otherKey, autofilled(), "2026-09-02T05:33:00.000Z");
 
-  clearServiceReportDraft(store, KEY);
+  clearServiceReportDraft(store, [KEY]);
   assert.equal(store.data.has(otherKey), true, "다른 접수 건의 임시보관은 그대로다");
+});
+
+// ────────────────────────────────────────────── 옛 열쇠로 적힌 임시보관
+
+test("🔴 옛 열쇠로 적어 둔 것을 새 장에서 되살린다 — 말없이 버리지 않는다", () => {
+  const store = healthyStore();
+  store.data.set(
+    LEGACY_KEY,
+    JSON.stringify({
+      savedAt: "2026-09-02T05:33:00.000Z",
+      values: { findings: "한 장뿐이던 때 적어 둔 확인내용" },
+    })
+  );
+
+  const draft = readServiceReportDraft(
+    store,
+    serviceReportDraftStorageKeys("user-1", "case-1", null),
+    autofilled(),
+    CAUSE_CODES
+  );
+  assert.equal(draft?.values.findings, "한 장뿐이던 때 적어 둔 확인내용");
+  assert.equal(draft?.savedAt, "2026-09-02T05:33:00.000Z");
+});
+
+test("🔴 옛 열쇠로 적어 둔 것이 저장된 장에는 부어지지 않는다", () => {
+  const store = healthyStore();
+  store.data.set(
+    LEGACY_KEY,
+    JSON.stringify({ savedAt: "2026-09-02T05:33:00.000Z", values: { findings: "남의 글" } })
+  );
+
+  const draft = readServiceReportDraft(
+    store,
+    serviceReportDraftStorageKeys("user-1", "case-1", "report-1"),
+    autofilled(),
+    CAUSE_CODES
+  );
+  assert.equal(draft, null, "저장된 장은 자기 열쇠만 본다");
+});
+
+test("새 열쇠에 적어 둔 것이 옛 열쇠보다 이긴다", () => {
+  const store = healthyStore();
+  store.data.set(
+    LEGACY_KEY,
+    JSON.stringify({ savedAt: "2026-09-01T05:33:00.000Z", values: { findings: "옛 글" } })
+  );
+  writeServiceReportDraft(
+    store,
+    KEY,
+    { ...autofilled(), findings: "지금 적던 글" },
+    "2026-09-02T05:33:00.000Z"
+  );
+
+  const draft = readServiceReportDraft(
+    store,
+    serviceReportDraftStorageKeys("user-1", "case-1", null),
+    autofilled(),
+    CAUSE_CODES
+  );
+  assert.equal(draft?.values.findings, "지금 적던 글");
+});
+
+test("🔴 옛 열쇠에 깨진 값이 적혀 있어도 안 터진다", () => {
+  // 손으로 고친 값, 판이 어긋난 값이 그대로 남아 있을 수 있다.
+  for (const raw of ["{", "[1,2,3]", "null", "", "   "]) {
+    const store = healthyStore();
+    store.data.set(LEGACY_KEY, raw);
+
+    let draft: ReturnType<typeof readServiceReportDraft> | undefined;
+    assert.doesNotThrow(() => {
+      draft = readServiceReportDraft(
+        store,
+        serviceReportDraftStorageKeys("user-1", "case-1", null),
+        autofilled(),
+        CAUSE_CODES
+      );
+    }, `적혀 있던 것: ${JSON.stringify(raw)}`);
+    assert.equal(draft, null);
+  }
+});
+
+test("🔴 「새로 시작」은 옛 열쇠까지 지운다 — 버린 글이 다음에 되살아나지 않는다", () => {
+  const store = healthyStore();
+  store.data.set(
+    LEGACY_KEY,
+    JSON.stringify({ savedAt: "2026-09-01T05:33:00.000Z", values: { findings: "옛 글" } })
+  );
+  writeServiceReportDraft(store, KEY, autofilled(), "2026-09-02T05:33:00.000Z");
+
+  clearServiceReportDraft(store, serviceReportDraftStorageKeys("user-1", "case-1", null));
+
+  assert.equal(store.data.has(KEY), false);
+  assert.equal(store.data.has(LEGACY_KEY), false, "옛 열쇠가 남아 있으면 버린 글이 되살아난다");
 });
 
 // ────────────────────────────────────── 저장소가 막혀 있어도 죽지 않는다
@@ -204,7 +328,7 @@ test("🔴 적을 때 던지는 저장소 — 안 터진다(용량 초과 · 저
 });
 
 test("지우기가 던지는 저장소 — 안 터진다", () => {
-  assert.doesNotThrow(() => clearServiceReportDraft(throwingStore, KEY));
+  assert.doesNotThrow(() => clearServiceReportDraft(throwingStore, [KEY, LEGACY_KEY]));
 });
 
 test("저장소가 아예 없어도(null) 전부 무사하다", () => {
@@ -213,7 +337,7 @@ test("저장소가 아예 없어도(null) 전부 무사하다", () => {
   assert.doesNotThrow(() =>
     writeServiceReportDraft(null, KEY, autofilled(), "2026-09-02T05:33:00.000Z")
   );
-  assert.doesNotThrow(() => clearServiceReportDraft(null, KEY));
+  assert.doesNotThrow(() => clearServiceReportDraft(null, [KEY]));
 });
 
 // ──────────────────────────────── 적혀 있던 것을 그대로 믿지 않는다
