@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import { users, workflowSteps, workflowTransitions, workflowVersions } from "../schema";
 import { insertAuditLog } from "./audit-logs";
@@ -77,11 +77,26 @@ async function requireEditableDraft(
   return { ok: true, actorId: actor.id };
 }
 
-/** 단계를 맨 뒤에 추가한다. 중간에 끼워 넣으려면 추가 후 reorder를 부른다. */
+/**
+ * 단계를 추가한다. afterStepId를 주면 **그 단계 바로 뒤**에, 없으면 맨 뒤에 붙는다.
+ *
+ * 끼워 넣기를 '추가 후 reorder'로 하지 않는 이유는 둘이다. 두 번의 쓰기 사이에
+ * 실패하면 단계가 맨 뒤에 남고, 그 중간 상태를 사람이 보고 고쳐야 한다. 그리고
+ * reorder는 전체 목록을 받으므로 화면이 알고 있는 목록이 서버와 어긋나 있으면
+ * 통째로 거부된다. 한 트랜잭션에서 자리만 밀면 둘 다 생기지 않는다.
+ *
+ * **전이(이동 규칙)는 건드리지 않는다.** 맨 뒤에 붙인 단계와 똑같이 연결이 없는
+ * 채로 시작하고, 발행 검증이 '도달 불가'로 잡아 준다. 건 전용 단계 추가는 전이를
+ * 자동으로 재배선하지만(case-workflow-steps.ts) 그쪽은 진행 중인 한 건을 옮기는
+ * 일이라 경로가 하나로 정해져 있다. 초안 편집기는 정방향 전이가 여럿일 수도,
+ * 되돌리기 경로가 걸려 있을 수도 있어 어느 것을 옮길지 기계가 정할 수 없다.
+ */
 export async function addWorkflowDraftStep(params: {
   versionId: string;
   /** 생략하면 step_N으로 자동 생성한다(머리말). 화면은 넘기지 않는다. */
   key?: string;
+  /** 이 단계 바로 뒤에 넣는다. 생략하면 맨 뒤. 같은 버전의 단계여야 한다. */
+  afterStepId?: string;
   label: string;
   status: RepairStatus;
   category: StepCategory | null;
@@ -120,11 +135,51 @@ export async function addWorkflowDraftStep(params: {
       return { ok: false as const, code: "DUPLICATE_KEY" as const, message: `이미 같은 키의 단계가 있습니다: ${key}` };
     }
 
-    const [{ max }] = await tx
-      .select({ max: sql<number>`coalesce(max(${workflowSteps.stepOrder}), 0)` })
-      .from(workflowSteps)
-      .where(eq(workflowSteps.workflowVersionId, params.versionId));
-    const order = Number(max) + 1;
+    let order: number;
+    if (params.afterStepId) {
+      const [anchor] = await tx
+        .select({ order: workflowSteps.stepOrder })
+        .from(workflowSteps)
+        .where(
+          and(
+            eq(workflowSteps.id, params.afterStepId),
+            eq(workflowSteps.workflowVersionId, params.versionId)
+          )
+        );
+      // 버전까지 함께 본다 — 남의 버전 단계를 기준으로 삼으면 순서가 뒤엉킨다.
+      if (!anchor) {
+        return {
+          ok: false as const,
+          code: "INVALID_INPUT" as const,
+          message: "기준이 될 단계를 이 버전에서 찾을 수 없습니다.",
+        };
+      }
+      // 뒤 단계들을 한 칸씩 민다. (버전, 순서) 유니크 인덱스 때문에 큰 번호부터
+      // 내림차순으로 옮겨야 중간 상태에서 충돌하지 않는다.
+      const following = await tx
+        .select({ id: workflowSteps.id, order: workflowSteps.stepOrder })
+        .from(workflowSteps)
+        .where(
+          and(
+            eq(workflowSteps.workflowVersionId, params.versionId),
+            gt(workflowSteps.stepOrder, anchor.order)
+          )
+        )
+        .orderBy(desc(workflowSteps.stepOrder));
+      for (const step of following) {
+        await tx
+          .update(workflowSteps)
+          .set({ stepOrder: step.order + 1 })
+          .where(eq(workflowSteps.id, step.id));
+      }
+      order = anchor.order + 1;
+    } else {
+      const [{ max }] = await tx
+        .select({ max: sql<number>`coalesce(max(${workflowSteps.stepOrder}), 0)` })
+        .from(workflowSteps)
+        .where(eq(workflowSteps.workflowVersionId, params.versionId));
+      order = Number(max) + 1;
+    }
 
     const [created] = await tx
       .insert(workflowSteps)

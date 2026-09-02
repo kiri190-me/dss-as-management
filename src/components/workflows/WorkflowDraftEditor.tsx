@@ -59,6 +59,14 @@ export default function WorkflowDraftEditor({
   const [newStatus, setNewStatus] = useState<string>(REPAIR_STATUS_CODES[0]);
   const [newCategory, setNewCategory] = useState<string>("");
   /**
+   * 어느 단계 아래에 끼워 넣는 줄이 열려 있는가. 한 번에 하나만 연다 —
+   * 여러 줄이 동시에 열려 있으면 어느 자리로 들어가는지 헷갈린다.
+   */
+  const [insertUnderId, setInsertUnderId] = useState<string | null>(null);
+  const [insertLabel, setInsertLabel] = useState("");
+  const [insertStatus, setInsertStatus] = useState<string>(REPAIR_STATUS_CODES[0]);
+  const [insertCategory, setInsertCategory] = useState<string>("");
+  /**
    * 브라우저 기본 confirm() 대신 앱의 다이얼로그를 쓴다. 열려 있는 확인 창의
    * 종류를 상태로 들고 있고, 실제 실행은 다이얼로그의 onConfirm에서 한다.
    */
@@ -90,6 +98,15 @@ export default function WorkflowDraftEditor({
       if (result.message) setMessage({ type: "success", text: result.message });
       router.refresh();
     });
+  }
+
+  function openInsertUnder(step: WorkflowDraftStepView) {
+    setInsertUnderId(step.id);
+    setInsertLabel("");
+    // 앞 단계와 같은 언저리의 값인 경우가 대부분이라 물려준다. 틀리면 바꾸면
+    // 되지만, 매번 처음부터 고르게 하면 매번 고르게 된다.
+    setInsertStatus(step.status ?? REPAIR_STATUS_CODES[0]);
+    setInsertCategory(step.category ?? "");
   }
 
   function move(index: number, direction: -1 | 1) {
@@ -250,6 +267,17 @@ export default function WorkflowDraftEditor({
                   <button
                     type="button"
                     disabled={isPending}
+                    onClick={() =>
+                      insertUnderId === step.id ? setInsertUnderId(null) : openInsertUnder(step)
+                    }
+                    className="rounded-md border border-zinc-300 px-2 py-1 disabled:opacity-30 dark:border-zinc-700"
+                    aria-label={`${step.label} 아래에 단계 추가`}
+                  >
+                    + 아래 추가
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isPending}
                     onClick={() => run(() => removeWorkflowDraftStepAction(step.id))}
                     className="rounded-md border border-red-300 px-2 py-1 text-red-700 disabled:opacity-40 dark:border-red-900 dark:text-red-400"
                   >
@@ -279,6 +307,83 @@ export default function WorkflowDraftEditor({
                 }
                 onRemove={(transitionId) => run(() => removeWorkflowDraftTransitionAction(transitionId))}
               />
+
+              {insertUnderId === step.id && (
+                <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-2 text-xs dark:border-zinc-700 dark:bg-zinc-800/50">
+                  <p className="text-zinc-500 dark:text-zinc-400">
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">{step.label}</span> 바로 아래에
+                    넣습니다. 이동 규칙은 이어지지 않으니 추가한 뒤 직접 이어 주세요 — 잇지 않으면 발행할 때
+                    도달 불가로 걸립니다.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={insertLabel}
+                      onChange={(e) => setInsertLabel(e.target.value)}
+                      placeholder="이름 (예: 최종 확인)"
+                      disabled={isPending}
+                      autoFocus
+                      className="w-40 rounded-md border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                      aria-label="새 단계 이름"
+                    />
+                    <select
+                      value={insertStatus}
+                      onChange={(e) => setInsertStatus(e.target.value)}
+                      disabled={isPending}
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                      aria-label="새 단계 상태"
+                    >
+                      {REPAIR_STATUS_CODES.map((code) => (
+                        <option key={code} value={code}>
+                          {repairStatusLabels[code]}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={insertCategory}
+                      onChange={(e) => setInsertCategory(e.target.value)}
+                      disabled={isPending}
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                      aria-label="새 단계 담당"
+                    >
+                      <option value="">담당 없음</option>
+                      {STEP_CATEGORY_CODES.map((code) => (
+                        <option key={code} value={code}>
+                          {CATEGORY_LABELS[code]}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={isPending || !insertLabel.trim()}
+                      onClick={() =>
+                        run(() => {
+                          const promise = addWorkflowDraftStepAction({
+                            versionId,
+                            afterStepId: step.id,
+                            label: insertLabel,
+                            status: insertStatus,
+                            category: insertCategory === "" ? null : insertCategory,
+                          });
+                          setInsertUnderId(null);
+                          setInsertLabel("");
+                          return promise;
+                        })
+                      }
+                      className="rounded-md bg-zinc-900 px-3 py-1 font-medium text-white disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900"
+                    >
+                      추가
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => setInsertUnderId(null)}
+                      className="rounded-md border border-zinc-300 px-3 py-1 text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

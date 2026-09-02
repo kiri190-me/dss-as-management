@@ -69,6 +69,8 @@ export async function discardWorkflowDraftAction(versionId: string): Promise<Wor
 
 export async function addWorkflowDraftStepAction(input: {
   versionId: string;
+  /** 이 단계 바로 뒤에 넣는다. 생략하면 맨 뒤. */
+  afterStepId?: string;
   label: string;
   status: string;
   category: string | null;
@@ -82,6 +84,7 @@ export async function addWorkflowDraftStepAction(input: {
   // key는 넘기지 않는다 — mutation이 step_N으로 붙인다(그 파일 머리말).
   const result = await addWorkflowDraftStep({
     versionId: input.versionId,
+    afterStepId: input.afterStepId,
     label: input.label,
     status: input.status,
     category: input.category,

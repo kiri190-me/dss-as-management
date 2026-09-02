@@ -127,6 +127,69 @@ describe("workflow draft steps", () => {
     assert.equal(two.key, "step_2", "이미 쓴 번호는 건너뛴다");
   });
 
+  test("afterStepId를 주면 그 단계 바로 뒤에 들어가고 뒤 단계들이 한 칸씩 밀린다", async () => {
+    const before = await stepsOf(draftId);
+    const anchor = before[0];
+    const following = before.filter((s) => s.order > anchor.order);
+
+    const result = await addWorkflowDraftStep({
+      versionId: draftId,
+      afterStepId: anchor.id,
+      label: "끼워 넣은 단계",
+      status: "IN_REPAIR",
+      category: null,
+      actorUserId: adminId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const after = await stepsOf(draftId);
+    assert.equal(after.length, before.length + 1);
+
+    const inserted = after.find((s) => s.label === "끼워 넣은 단계");
+    assert.ok(inserted);
+    assert.equal(inserted.order, anchor.order + 1, "기준 단계 바로 뒤여야 한다");
+    assert.equal(
+      after.find((s) => s.id === anchor.id)?.order,
+      anchor.order,
+      "기준 단계는 제자리에 있어야 한다"
+    );
+
+    // 뒤 단계들은 전부 한 칸씩 밀렸고, 서로의 순서는 그대로다.
+    for (const step of following) {
+      assert.equal(
+        after.find((s) => s.id === step.id)?.order,
+        step.order + 1,
+        `${step.key} 는 한 칸 밀려야 한다`
+      );
+    }
+    // 순서에 구멍도 겹침도 없다 — (버전, 순서) 유니크 인덱스가 지키는 값이다.
+    assert.deepEqual(
+      after.map((s) => s.order),
+      after.map((_, i) => i + 1)
+    );
+  });
+
+  test("다른 버전의 단계를 기준으로 주면 거부한다 — 순서가 뒤엉킨다", async () => {
+    const [current] = await db
+      .select({ id: workflowVersions.id })
+      .from(workflowVersions)
+      .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
+      .where(and(eq(workflowTemplates.code, TEMPLATE_CODE), eq(workflowVersions.isCurrent, true)));
+    const foreignStep = (await stepsOf(current.id))[0];
+
+    const result = await addWorkflowDraftStep({
+      versionId: draftId,
+      afterStepId: foreignStep.id,
+      label: "남의 버전 기준",
+      status: "IN_REPAIR",
+      category: null,
+      actorUserId: adminId,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
   test("같은 키의 단계는 두 번 만들 수 없다", async () => {
     const existing = (await stepsOf(draftId))[0];
     const result = await addWorkflowDraftStep({
