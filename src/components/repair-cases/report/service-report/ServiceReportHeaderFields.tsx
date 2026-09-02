@@ -3,6 +3,7 @@
 import {
   serviceReportFieldError,
   serviceReportManufacturedPatch,
+  serviceReportUsedPeriodPatch,
   type ServiceReportFormValues,
   type ServiceReportOccurredOnMode,
 } from "@/lib/domain/service-report-form";
@@ -40,6 +41,20 @@ export default function ServiceReportHeaderFields({
   disabled: boolean;
 }) {
   const error = (key: string) => serviceReportFieldError(fieldErrors, key);
+
+  /**
+   * 🔴 사슬을 잇는 자리 — S/N → 제조년월 → 사용 기간.
+   *
+   * 고친 값을 **먼저 얹은 폼**으로 사용 기간을 다시 센다. 방금 채워진 제조년월로
+   * 세야 하므로 `values` 그대로 부르면 한 박자 늦는다 — 사람은 S/N 을 한 번
+   * 적었는데 사용 기간은 다음 입력에야 채워지는 것으로 보인다.
+   *
+   * 사용 기간이 달라지는 입력은 넷이다: S/N · 제조 년 · 제조 월 · 접수일.
+   */
+  const withUsedPeriod = (patch: Partial<ServiceReportFormValues>) => ({
+    ...patch,
+    ...serviceReportUsedPeriodPatch({ ...values, ...patch }),
+  });
 
   return (
     <ServiceReportSection
@@ -119,10 +134,11 @@ export default function ServiceReportHeaderFields({
           error={error("customer")}
           disabled={disabled}
         />
+        {/* 🔴 접수일이 사용 기간의 기준일이다 — 고치면 사용 기간을 다시 센다. */}
         <DateField
           label="접수일"
           value={values.receivedOn}
-          onChange={(receivedOn) => onChange({ receivedOn })}
+          onChange={(receivedOn) => onChange(withUsedPeriod({ receivedOn }))}
           error={error("receivedOn")}
           disabled={disabled}
         />
@@ -181,7 +197,9 @@ export default function ServiceReportHeaderFields({
           <div className="flex items-center gap-1">
             <input
               value={values.manufacturedYear}
-              onChange={(event) => onChange({ manufacturedYear: event.target.value })}
+              onChange={(event) =>
+                onChange(withUsedPeriod({ manufacturedYear: event.target.value }))
+              }
               disabled={disabled}
               inputMode="numeric"
               placeholder="2019"
@@ -191,7 +209,9 @@ export default function ServiceReportHeaderFields({
             <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">년</span>
             <input
               value={values.manufacturedMonth}
-              onChange={(event) => onChange({ manufacturedMonth: event.target.value })}
+              onChange={(event) =>
+                onChange(withUsedPeriod({ manufacturedMonth: event.target.value }))
+              }
               disabled={disabled}
               inputMode="numeric"
               placeholder="7"
@@ -217,9 +237,17 @@ export default function ServiceReportHeaderFields({
              * 🔴 S/N 을 고치면 제조년월도 따라 채워진다 — **빈 칸일 때만**.
              * 처음 화면을 열 때만 채우면, 접수 때 S/N 을 안 적었다가 여기서
              * 적는 흔한 경우에 제조년월이 끝까지 빈 채로 나간다.
+             *
+             * 🔴 그리고 **한 번의 입력으로 사용 기간까지 이어진다** — 제조년월
+             * 조각을 먼저 얹고, 그것이 든 폼으로 사용 기간을 센다.
              */
             onChange={(serialNumber) =>
-              onChange({ serialNumber, ...serviceReportManufacturedPatch(serialNumber, values) })
+              onChange(
+                withUsedPeriod({
+                  serialNumber,
+                  ...serviceReportManufacturedPatch(serialNumber, values),
+                })
+              )
             }
             error={error("serialNumber")}
             disabled={disabled}
@@ -233,7 +261,20 @@ export default function ServiceReportHeaderFields({
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{serialNumberWarning}</p>
           )}
         </div>
-        <FieldGroup label="사용 기간" error={error("usedYears") ?? error("usedMonths")} hint="숫자만">
+        {/*
+          🔴 제조 년월과 접수일이 있으면 사용 기간이 저절로 채워진다 — 다만
+          **빈 칸일 때만**. 기준일은 발행일이 아니라 **접수일**이고(원본 발행본에서
+          실측했다), 개월이 0이면 비워 둔다. 규칙과 그 근거는
+          `domain/service-report-form.ts` 의 `serviceReportUsedPeriod`.
+
+          저절로 채워지는 칸인데 안내가 없으면, 사람은 자기가 적은 값이 지워질까
+          봐 불안해한다 — 위 「제조 년월」과 같은 말투로 적어 둔다.
+        */}
+        <FieldGroup
+          label="사용 기간"
+          error={error("usedYears") ?? error("usedMonths")}
+          hint="숫자만 · 제조 년월과 접수일이 있으면 저절로 채워집니다"
+        >
           <div className="flex items-center gap-1">
             <input
               value={values.usedYears}

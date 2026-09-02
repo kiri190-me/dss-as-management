@@ -26,6 +26,8 @@ import {
   serviceReportProductNameFromModel,
   serviceReportRowLimitErrors,
   serviceReportSerialNumberWarning,
+  serviceReportUsedPeriod,
+  serviceReportUsedPeriodPatch,
   type ServiceReportFormValues,
 } from "./service-report-form";
 
@@ -651,6 +653,226 @@ test("🔴 S/N 을 고치면 제조년월이 따라 채워지되 적어 둔 값�
   assert.ok(result.ok);
   assert.equal(result.data.manufacturedYear, 2015);
   assert.equal(result.data.manufacturedMonth, 2);
+});
+
+// ── 제조년월 + 접수일 → 사용 년수·개월 ──────────────────────────────────
+
+/**
+ * 🔴 **원본 발행본과 같은 값이 나오는지**가 이 규칙의 기준선이다. 양식 파일에
+ * 남아 있는 실제 발행본은 제조 2021년 3월 · 접수 2024-03-21 에 사용 기간을
+ * `3` / `-` 로 적었다 — 기준일이 발행일이 아니라 **접수일**이라는 증거이고,
+ * 0개월을 비워 두는 근거다(2026-09-02 사용자 결정).
+ */
+test("🔴 원본 발행본과 같은 값이 나온다 — 2021년 3월 제조, 2024-03-21 접수는 3년 0개월", () => {
+  assert.deepEqual(serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-03-21"), {
+    years: "3",
+    // 🔴 0개월은 `0` 이 아니라 빈 값이다 — 원본은 그 자리에 `-` 를 적었다.
+    months: "",
+  });
+});
+
+test("개월이 남으면 년과 개월로 나눠 적는다", () => {
+  assert.deepEqual(serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-09-10"), {
+    years: "3",
+    months: "6",
+  });
+  // 년이 0이어도 개월은 적는다.
+  assert.deepEqual(serviceReportUsedPeriod({ year: "2024", month: "5" }, "2024-08-01"), {
+    years: "0",
+    months: "3",
+  });
+  // 해를 넘겨도 달 수의 뺄셈이다(2015-02 → 2024-03 = 109개월 = 9년 1개월).
+  assert.deepEqual(serviceReportUsedPeriod({ year: "2015", month: "2" }, "2024-03-21"), {
+    years: "9",
+    months: "1",
+  });
+});
+
+test("일(day)은 보지 않는다 — 같은 달이면 1일이든 말일이든 같은 값이다", () => {
+  const first = serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-09-01");
+  const last = serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-09-30");
+  assert.deepEqual(first, last);
+  assert.deepEqual(first, { years: "3", months: "6" });
+});
+
+/**
+ * 🔴 셀 수 없으면 아무것도 하지 않는다. 특히 **제조가 접수보다 미래**인 것은
+ * 사용 기간이 아니라 자료가 틀린 것이다 — 음수를 문서에 찍으면 안 된다.
+ */
+test("🔴 셀 수 없으면 null 이다 — 미래 제조 · 빈 칸 · 숫자가 아닌 값", () => {
+  // 제조가 접수보다 미래.
+  assert.equal(serviceReportUsedPeriod({ year: "2025", month: "1" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2024", month: "4" }, "2024-03-21"), null);
+  // 제조년월이 없다.
+  assert.equal(serviceReportUsedPeriod({ year: "", month: "3" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "  ", month: "  " }, "2024-03-21"), null);
+  // 접수일이 없거나 모양이 아니다.
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "3" }, ""), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-03"), null);
+  // 숫자가 아니거나 월이 말이 안 된다.
+  assert.equal(serviceReportUsedPeriod({ year: "이천이십일", month: "3" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "13" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "0" }, "2024-03-21"), null);
+  assert.equal(serviceReportUsedPeriod({ year: "2021", month: "3" }, "2024-13-21"), null);
+});
+
+/** 🔴 `serviceReportManufacturedPatch` 와 같은 규칙 — 빈 칸에만 채운다. */
+test("🔴 사용 기간은 빈 칸에만 채운다 — 사람이 적어 둔 값을 덮지 않는다", () => {
+  const empty = {
+    manufacturedYear: "2021",
+    manufacturedMonth: "3",
+    receivedOn: "2024-09-10",
+    usedYears: "",
+    usedMonths: "",
+  };
+  assert.deepEqual(serviceReportUsedPeriodPatch(empty), { usedYears: "3", usedMonths: "6" });
+
+  // 🔴 이미 적어 둔 값은 그대로 둔다.
+  assert.deepEqual(
+    serviceReportUsedPeriodPatch({ ...empty, usedYears: "5", usedMonths: "2" }),
+    {}
+  );
+  // 한쪽만 비어 있으면 그쪽만 채운다.
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, usedYears: "5" }), {
+    usedMonths: "6",
+  });
+  // 공백만 남은 칸은 빈 칸이다.
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, usedYears: "  ", usedMonths: "  " }), {
+    usedYears: "3",
+    usedMonths: "6",
+  });
+
+  // 셀 수 없으면 아무것도 하지 않는다 — 제조년월이 없거나, 접수일이 없거나, 미래 제조.
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, manufacturedYear: "" }), {});
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, manufacturedMonth: "" }), {});
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, receivedOn: "" }), {});
+  assert.deepEqual(serviceReportUsedPeriodPatch({ ...empty, manufacturedYear: "2025" }), {});
+});
+
+test("처음 화면을 열 때도 접수 건의 S/N 과 접수일로 사용 기간이 채워진다", () => {
+  const values = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "ICD",
+      modelName: null,
+      lotNumber: null,
+      serialNumber: "1502021",
+      receivedAt: "2024-03-21",
+      productCategory: null,
+      reportedSymptom: null,
+    },
+  });
+
+  // S/N → 제조년월 → 사용 기간. 사슬이 통째로 이어진다.
+  assert.equal(values.manufacturedYear, "2015");
+  assert.equal(values.manufacturedMonth, "2");
+  assert.equal(values.usedYears, "9");
+  assert.equal(values.usedMonths, "1");
+});
+
+test("접수일이 없으면 사용 기간은 빈 채로 열린다 — 제조년월만 채워진다", () => {
+  const values = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "ICD",
+      modelName: null,
+      lotNumber: null,
+      serialNumber: "1502021",
+      receivedAt: null,
+      productCategory: null,
+      reportedSymptom: null,
+    },
+  });
+
+  assert.equal(values.manufacturedYear, "2015");
+  assert.equal(values.usedYears, "");
+  assert.equal(values.usedMonths, "");
+});
+
+/**
+ * 🔴 **한 번의 입력으로 두 단계가 이어진다는 증거.** 화면의 S/N 칸이 하는 그대로
+ * — 제조년월 조각을 먼저 얹고, 그것이 든 폼으로 사용 기간을 센다. 순서가
+ * 뒤바뀌거나 `values` 그대로 세면 사용 기간이 한 박자 늦게 채워지는데, 사람 눈에는
+ * "안 채워졌다"로 보인다.
+ */
+test("🔴 S/N 하나를 적으면 제조년월과 사용 기간이 한 번에 채워진다", () => {
+  const values = filledForm({ receivedOn: "2024-03-21" });
+  assert.equal(values.manufacturedYear, "", "이 시험의 출발점은 빈 제조년월이다");
+  assert.equal(values.usedYears, "");
+
+  // 화면의 S/N `onChange` 와 같은 차례 — 제조년월을 **먼저 얹은 폼**으로 센다.
+  const manufactured = serviceReportManufacturedPatch("1502021", values);
+  const afterManufactured: ServiceReportFormValues = {
+    ...values,
+    serialNumber: "1502021",
+    ...manufactured,
+  };
+  const patch = {
+    serialNumber: "1502021",
+    ...manufactured,
+    ...serviceReportUsedPeriodPatch(afterManufactured),
+  };
+
+  assert.deepEqual(patch, {
+    serialNumber: "1502021",
+    manufacturedYear: "2015",
+    manufacturedMonth: "2",
+    usedYears: "9",
+    usedMonths: "1",
+  });
+
+  // 🔴 저절로 채운 값이 서버 검증을 그대로 통과한다 — 숫자 칸이라 모양이
+  //    어긋나면 400 이다.
+  const result = validateServiceReportFields(
+    JSON.parse(JSON.stringify(buildServiceReportRequestBody({ ...values, ...patch })))
+  );
+  assert.ok(result.ok, JSON.stringify(!result.ok ? result.fieldErrors : {}));
+  assert.equal(result.data.manufacturedYear, 2015);
+  assert.equal(result.data.manufacturedMonth, 2);
+  assert.equal(result.data.usedYears, 9);
+  assert.equal(result.data.usedMonths, 1);
+});
+
+test("🔴 0개월과 0년도 서버 검증을 통과한다 — 빈 개월은 「안 적음」으로 나간다", () => {
+  // 원본 발행본과 같은 경우: 3년 0개월.
+  const threeYears = filledForm({
+    manufacturedYear: "2021",
+    manufacturedMonth: "3",
+    receivedOn: "2024-03-21",
+    ...serviceReportUsedPeriodPatch({
+      manufacturedYear: "2021",
+      manufacturedMonth: "3",
+      receivedOn: "2024-03-21",
+      usedYears: "",
+      usedMonths: "",
+    }),
+  });
+  assert.equal(threeYears.usedYears, "3");
+  assert.equal(threeYears.usedMonths, "");
+
+  const result = validateServiceReportFields(
+    JSON.parse(JSON.stringify(buildServiceReportRequestBody(threeYears)))
+  );
+  assert.ok(result.ok, JSON.stringify(!result.ok ? result.fieldErrors : {}));
+  assert.equal(result.data.usedYears, 3);
+  // 빈 칸은 「안 적음」이다 — 0 이 찍히지 않는다.
+  assert.equal(result.data.usedMonths, undefined);
+
+  // 년이 0인 경우: 0 은 그대로 나간다.
+  const months = filledForm({
+    manufacturedYear: "2024",
+    manufacturedMonth: "5",
+    receivedOn: "2024-08-01",
+    usedYears: "0",
+    usedMonths: "3",
+  });
+  const zeroYears = validateServiceReportFields(
+    JSON.parse(JSON.stringify(buildServiceReportRequestBody(months)))
+  );
+  assert.ok(zeroYears.ok, JSON.stringify(!zeroYears.ok ? zeroYears.fieldErrors : {}));
+  assert.equal(zeroYears.data.usedYears, 0);
+  assert.equal(zeroYears.data.usedMonths, 3);
 });
 
 // ── S/N 경고 ─────────────────────────────────────────────────────────────

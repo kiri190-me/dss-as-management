@@ -302,6 +302,93 @@ export function serviceReportManufacturedPatch(
   return patch;
 }
 
+// ── 제조년월 + 접수일 → 사용 년수·개월 ──────────────────────────────────
+
+/** 숫자만 든 칸을 수로. 공백만 남았거나 글자가 섞였으면 `null` 이다. */
+function positiveInteger(value: string): number | null {
+  const digits = value.trim();
+  return /^\d+$/u.test(digits) ? Number(digits) : null;
+}
+
+/**
+ * 「사용 년수 / 개월」 — 제조년월부터 **접수일**까지.
+ *
+ * ── 🔴 기준일이 접수일인 근거 ──────────────────────────────────────────
+ * 양식 파일은 실제로 발행된 보고서의 사본이고, 그 값이 남아 있다:
+ *
+ *   `AK19`/`AP19` 제조 년월일 = 2021년 3월
+ *   `AK14`        접수일      = 2024-03-21
+ *   `AK25`/`AP25` 사용 년수   = 3 / `-`
+ *
+ * 2021년 3월에서 2024년 3월이 딱 3년이다. **발행일로 셌다면 3년이 아니었다** —
+ * 그러니 이 기준을 발행일로 바꾸지 말 것.
+ *
+ * ── 날의 일(day)은 보지 않는다 ─────────────────────────────────────────
+ * 제조는 년·월까지만 알고, 원본도 그렇게 셌다(2021-03 → 2024-03-21 을 3년 0개월).
+ * 그래서 셈은 **달 수의 뺄셈**이다.
+ *
+ * ── 🔴 개월이 0이면 빈 값 ──────────────────────────────────────────────
+ * 원본은 그 자리에 `-` 를 적었다. `0` 이라고 찍는 것보다 비워 두는 편이 발행본에
+ * 가깝다(**2026-09-02 사용자 결정**).
+ *
+ * 셀 수 없으면 `null` 이다 — 제조년월이나 접수일이 없거나, 숫자가 아니거나,
+ * **제조가 접수보다 미래**일 때. 마지막 것은 사용 기간이 아니라 자료가 틀린
+ * 것이므로, 음수를 문서에 찍는 대신 아무것도 채우지 않는다.
+ */
+export function serviceReportUsedPeriod(
+  manufactured: { year: string; month: string },
+  receivedOn: string
+): { years: string; months: string } | null {
+  const year = positiveInteger(manufactured.year);
+  const month = positiveInteger(manufactured.month);
+  if (year === null || month === null || month < 1 || month > 12) return null;
+
+  const received = /^(\d{4})-(\d{2})-\d{2}$/u.exec(receivedOn.trim());
+  if (received === null) return null;
+  const receivedMonth = Number(received[2]);
+  if (receivedMonth < 1 || receivedMonth > 12) return null;
+
+  const months = Number(received[1]) * 12 + receivedMonth - (year * 12 + month);
+  if (months < 0) return null;
+
+  const remainder = months % 12;
+  return {
+    years: String(Math.floor(months / 12)),
+    // 🔴 0개월은 빈 칸이다 — 위 '개월이 0이면 빈 값' 참조.
+    months: remainder === 0 ? "" : String(remainder),
+  };
+}
+
+/**
+ * 센 사용 기간을 **빈 칸에만** 채워 넣을 조각.
+ *
+ * 🔴 `serviceReportManufacturedPatch` 와 **같은 규칙**이다 — 사람이 적어 둔 값은
+ * 덮지 않는다. 제조년월을 명판에서 고쳐 적었는데 사용 기간까지 덮이면, 사람은
+ * 자기가 적은 값이 왜 사라졌는지 알 수 없다.
+ *
+ * 화면을 처음 열 때(`createServiceReportFormValues`)와, 사람이 **S/N · 제조 년 ·
+ * 제조 월 · 접수일** 중 하나를 고쳤을 때 부른다. S/N 을 고치면 제조년월 조각을
+ * 먼저 얹은 폼으로 이것을 불러 **한 번의 입력으로 두 단계가 이어진다**.
+ */
+export function serviceReportUsedPeriodPatch(current: {
+  manufacturedYear: string;
+  manufacturedMonth: string;
+  receivedOn: string;
+  usedYears: string;
+  usedMonths: string;
+}): { usedYears?: string; usedMonths?: string } {
+  const period = serviceReportUsedPeriod(
+    { year: current.manufacturedYear, month: current.manufacturedMonth },
+    current.receivedOn
+  );
+  if (period === null) return {};
+
+  const patch: { usedYears?: string; usedMonths?: string } = {};
+  if (current.usedYears.trim() === "") patch.usedYears = period.years;
+  if (current.usedMonths.trim() === "") patch.usedMonths = period.months;
+  return patch;
+}
+
 /** `"2026-09-02"` 도 `"2026-09-02T00:00:00.000Z"` 도 `<input type="date">` 가 받는 모양으로. */
 function seedDate(value: string | null | undefined): string {
   if (!value) return "";
@@ -324,6 +411,12 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
   const serialNumber = seedText(repairCase?.serialNumber);
   const manufactured = serviceReportManufacturedFromSerialNumber(serialNumber);
 
+  // 🔴 사슬의 셋째 고리다: S/N → 제조년월 → 사용 기간. 앞 고리가 끊기면
+  //    (S/N 이 7자리가 아니거나 접수일이 없으면) 여기도 빈 칸으로 남는다.
+  const receivedOn = seedDate(repairCase?.receivedAt);
+  const used =
+    manufactured === null ? null : serviceReportUsedPeriod(manufactured, receivedOn);
+
   return {
     kind: seed.kind ?? "REPAIR",
 
@@ -333,7 +426,7 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
     reportNumberMiddle: "",
     reportNumberTail: "",
     customer: "",
-    receivedOn: seedDate(repairCase?.receivedAt),
+    receivedOn,
     occurrencePlace: "",
     occurrencePlaceDetail: "",
     occurredOnMode: "DATE",
@@ -346,8 +439,8 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
     manufacturedMonth: manufactured?.month ?? "",
     lotNumber: seedText(repairCase?.lotNumber),
     serialNumber,
-    usedYears: "",
-    usedMonths: "",
+    usedYears: used?.years ?? "",
+    usedMonths: used?.months ?? "",
     situationRequest: "",
     situationDetail: seedText(repairCase?.reportedSymptom),
 
