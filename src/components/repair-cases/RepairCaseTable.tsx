@@ -93,8 +93,8 @@ function SecondarySortButton({
  * Table-local badge for the non-overdue ("정상") state — deliberately NOT
  * the shared badges.tsx OverdueBadge for this case, so this column's
  * badge-consistency treatment (blue pill instead of unstyled text) doesn't
- * bleed into OverdueBadge's other callers (DetailHeader, ReportSections,
- * ReportHeaderSummary), which keep their existing plain-text "정상"
+ * bleed into OverdueBadge's other callers (DetailHeader,
+ * RepairCaseCardList), which keep their existing plain-text "정상"
  * rendering unchanged. The overdue (true) case still reuses OverdueBadge
  * as-is — its red badge already has a background and needs no change.
  */

@@ -1,17 +1,55 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
+
+import ReportKindChoice from "@/components/repair-cases/report/ReportKindChoice";
 import { readSession } from "@/lib/auth/session";
-import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import ReportScreen from "@/components/repair-cases/report/ReportScreen";
+import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
+import { SERVICE_REPORT_TITLES } from "@/lib/xlsx/service-report-template";
+
+/**
+ * ============================================================================
+ * /repair-cases/{id}/report — 「보고서」 탭은 갈림길이다
+ * ============================================================================
+ * 검사냐 수리냐를 고르면 곧바로 작성 화면(`.../report/service-report`)으로
+ * 넘어간다. 고른 종류는 주소에 실려 가고(`?kind=`), 작성 화면은 그것을
+ * **시작값으로만** 쓴다 — 거기서 다시 바꿀 수 있다.
+ *
+ * 작성 화면은 이 탭의 **자식 주소**라 그 화면에서도 「보고서」 탭이 강조된 채로
+ * 남는다(`domain/repair-case-detail-tabs.ts` 의 `resolveActiveTabHref` — 최장
+ * 일치).
+ *
+ * ── 🔴 두 이름을 여기 새로 적지 않는다 ──────────────────────────────────
+ * 이름은 양식의 제목 하나에서 온다(`SERVICE_REPORT_TITLES`). 화면이 사본을 들고
+ * 있으면 양식의 제목이 바뀐 날 화면과 문서가 서로 다른 이름을 부르는데, 아무
+ * 오류도 안 나서 아무도 모른다 — 원인 라벨·드롭다운 목록을 채우개에서 받아 오는
+ * 것과 같은 판단이다.
+ *
+ * ⚠️ **이 파일은 서버 컴포넌트라 `@/lib/xlsx/*` 를 값으로 가져와도 된다.**
+ * 클라이언트 컴포넌트는 안 된다 — 채우개가 `node:fs`·`node:zlib` 를 끌고 온다.
+ * 그래서 아래 `ReportKindChoice` 에는 **다 만들어진 글자**만 넘긴다.
+ * ============================================================================
+ */
 
 export const metadata: Metadata = {
   title: "보고서 | DSS A/S 관리 시스템",
 };
 
 export const dynamic = "force-dynamic";
+
+/**
+ * 양식의 제목 → 화면에 쓸 이름.
+ *
+ * 🔴 양식의 제목은 **전각 공백(U+3000)으로 자간을 벌려 놓은 것**이다
+ * (`검　사　보　고　서` — `SERVICE_REPORT_TITLES` 주석). 문서에는 그 모양 그대로
+ * 찍혀야 하지만, 화면에 그대로 옮기면 그 두 줄만 자간이 벌어져 다른 글자들과
+ * 어긋난다. 그래서 **화면에서만** 전각 공백을 걷어낸다 — 이름을 새로 적는 것이
+ * 아니므로 양식의 제목이 바뀌면 이 화면도 따라간다.
+ */
+const IDEOGRAPHIC_SPACE = "　";
+
+function screenTitle(templateTitle: string): string {
+  return templateTitle.split(IDEOGRAPHIC_SPACE).join("");
+}
 
 export default async function RepairCaseReportPage({
   params,
@@ -20,51 +58,34 @@ export default async function RepairCaseReportPage({
 }) {
   const { id } = await params;
 
-  // approval/files/work-history page.tsx와 동일한 기존 인증 로직(readSession)을
-  // 그대로 재사용한다. 상위 (app) 레이아웃이 이미 세션을 확인했으므로 여기
-  // 도달했다면 정상적으로는 항상 세션이 존재하지만, 방어적으로 한 번 더
-  // 확인한다. 이 스테이지는 새 쓰기 동작을 추가하지 않는다 — 보고서 생성자
-  // 표시용으로만 최소 검증된 사용자 정보를 클라이언트에 넘긴다.
+  // 상위 (app) 레이아웃이 이미 세션을 확인했으므로 여기 도달했다면 정상적으로는
+  // 항상 세션이 있다. 형제 탭들(approval/files/work-history)과 같은 모양으로
+  // 방어적으로 한 번 더 본다. 접수 건이 실제로 있는지는 `[id]/layout.tsx` 가
+  // 이미 확인하고 없으면 404 를 낸다 — 여기서 또 조회하지 않는다.
   const session = await readSession();
   if (!session) {
     redirect("/login");
   }
 
-  // 클라이언트에는 최소한의 검증된 정보만 넘긴다(id/name/role/approvalStatus).
-  // 세션 쿠키 자체나 원본 세션 payload를 내려보내지 않는다.
-  const generatedByUser: ActingUser | null = await resolveActingUserForSession(session);
-
-  const resolved = await resolveRepairCaseForServer(id);
-  // 이 지점에 도달했다면 상위 layout.tsx가 이미 존재를 확인했으므로 resolved는
-  // 항상 존재해야 한다. 방어적으로만 남겨둔다(실제 HTTP 404를 그대로 보존한다).
-  if (!resolved) {
-    notFound();
-  }
+  const serviceReportHref = `${repairCaseDetailHrefs(id).report}/service-report`;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/*
-        검사·수리 보고서로 들어가는 문. 자식 주소(`.../report/service-report`)라
-        여기서도 「보고서」 탭이 강조된 채로 남는다(resolveActiveTabHref 의 최장
-        일치). 아래 ReportScreen 은 데모 자료 계층 위의 옛 화면이라 건드리지
-        않는다 — 나중에 통째로 걷어낼 것이다.
-      */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div>
-          <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">검사 · 수리 보고서</h2>
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            원본 양식 그대로 채워 Excel 파일로 내려받습니다.
-          </p>
-        </div>
-        <Link
-          href={`/repair-cases/${id}/report/service-report`}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          보고서 만들기
-        </Link>
-      </div>
-
-      <ReportScreen resolved={resolved} generatedByUser={generatedByUser} />
-    </div>
+    <ReportKindChoice
+      options={[
+        {
+          kind: "INSPECTION",
+          title: screenTitle(SERVICE_REPORT_TITLES.INSPECTION),
+          // 두 양식의 실제 차이는 이것 하나다 — 채우개 머리말에 실측이 적혀 있다.
+          description: "확인내용과 조치를 적습니다. 「정리」 구역과 「조치 완료」 칸이 없습니다.",
+          href: `${serviceReportHref}?kind=INSPECTION`,
+        },
+        {
+          kind: "REPAIR",
+          title: screenTitle(SERVICE_REPORT_TITLES.REPAIR),
+          description: "검사 보고서에 「정리」 구역과 「조치 완료」 칸이 더해집니다.",
+          href: `${serviceReportHref}?kind=REPAIR`,
+        },
+      ]}
+    />
   );
 }

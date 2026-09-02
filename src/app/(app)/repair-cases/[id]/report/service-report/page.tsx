@@ -7,6 +7,7 @@ import { readSession } from "@/lib/auth/session";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { createServiceReportFormValues } from "@/lib/domain/service-report-form";
+import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readServiceReportTemplate } from "@/lib/storage/service-report-template";
 import { SERVICE_REPORT_MAX_REMARK_ROWS } from "@/lib/validation/service-report-input";
@@ -45,6 +46,18 @@ import {
  * 🔴 **오류 메시지에 경로를 담지 않는다.** 오류가 디스크 구조를 알려 주는
  * 창구가 되면 안 된다(`storage/service-report-template.ts` 의 같은 판단).
  * 경로는 그쪽이 서버 로그에만 남긴다.
+ *
+ * ── `?kind=` 는 **시작값만** 정한다 ─────────────────────────────────────
+ * 「보고서」 탭의 갈림길 화면이 `?kind=INSPECTION` · `?kind=REPAIR` 를 붙여
+ * 보낸다. 세 가지를 지킨다:
+ *
+ *   · 🔴 **주소를 그대로 믿지 않는다.** 손으로 고칠 수 있는 자리라 두 값 중
+ *     하나일 때만 쓴다(`serviceReportKindFromParam`). 아니면 폼 씨앗의 기본값이다.
+ *   · **화면 안에서 바꾸는 길은 그대로다.** 여기서 정하는 것은 처음 고를 값뿐이다.
+ *   · ⚠️ **브라우저 임시보관이 이긴다.** 임시보관에 든 종류는 사람이 고른
+ *     것이므로, 주소의 값은 임시보관이 없을 때만 쓰인다 — 폼이
+ *     `edited ?? restoredDraft?.values ?? initialValues` 로 갈라 두었고, 주소는
+ *     그중 **맨 마지막 칸**인 `initialValues` 에만 얹힌다.
  * ============================================================================
  */
 
@@ -59,10 +72,14 @@ const TEMPLATE_UNAVAILABLE_MESSAGE =
 
 export default async function ServiceReportPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** 같은 이름이 두 번 올 수 있는 자리라 배열도 받는다 — 판단은 도메인 함수가 한다. */
+  searchParams: Promise<{ kind?: string | string[] }>;
 }) {
   const { id } = await params;
+  const { kind: kindParam } = await searchParams;
 
   // 상위 (app) 레이아웃이 이미 세션을 확인하지만, 이 화면은 고객사로 나가는
   // 문서를 짓는 자리라 방어적으로 한 번 더 본다. 살아 있는 계정을 다시 읽는
@@ -99,6 +116,9 @@ export default async function ServiceReportPage({
     // 🔴 형식에서 뽑은 품명은 **이 목록 안에 있을 때만** 골라진다. 양식을 못
     //    읽었으면 빈 목록이 가고, 그러면 아무것도 안 고른다(사람이 고른다).
     productNames: choices?.productNames ?? [],
+    // 🔴 갈림길 화면이 고른 종류. 못 고른 값은 `null` 로 오고, 그때는 키를 안 준
+    //    것과 같아 씨앗의 기본값이 그대로 쓰인다 — 기본값의 사본을 만들지 않는다.
+    kind: serviceReportKindFromParam(kindParam) ?? undefined,
   });
 
   return (
