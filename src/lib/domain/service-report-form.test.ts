@@ -6,10 +6,16 @@ import {
   validateServiceReportFields,
 } from "@/lib/validation/service-report-input";
 import {
+  serviceReportFormValues,
+  type ServiceReportSaveValues,
+} from "@/lib/validation/service-report-save-input";
+import {
+  SERVICE_REPORT_ACTIONS_INTRO,
   SERVICE_REPORT_CAUSE_LABELS,
   SERVICE_REPORT_CAUSES,
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_MAX_BODY_ROWS,
+  SERVICE_REPORT_SUMMARY_INTRO,
 } from "@/lib/xlsx/service-report-template";
 
 import {
@@ -20,6 +26,7 @@ import {
   isServiceReportBodyEmpty,
   serviceReportCauseOptions,
   serviceReportFieldError,
+  serviceReportKindChangePatch,
   serviceReportLines,
   serviceReportManufacturedFromSerialNumber,
   serviceReportManufacturedPatch,
@@ -48,6 +55,8 @@ import {
 const SEED = {
   today: "2026-09-02",
   findingsIntro: SERVICE_REPORT_FINDINGS_INTRO,
+  actionsIntro: SERVICE_REPORT_ACTIONS_INTRO,
+  summaryIntro: SERVICE_REPORT_SUMMARY_INTRO,
 } as const;
 
 const LIMITS = {
@@ -55,7 +64,13 @@ const LIMITS = {
   maxRemarkRows: SERVICE_REPORT_MAX_REMARK_ROWS,
 } as const;
 
-/** 발행할 수 있는 최소한을 채운 폼. 각 시험은 여기서 필요한 칸만 고친다. */
+/**
+ * 발행할 수 있는 최소한을 채운 폼. 각 시험은 여기서 필요한 칸만 고친다.
+ *
+ * 🔴 「조치」·「정리」는 **사람이 적은 글자로 덮어 둔다.** 새 폼은 정형 문구가
+ * 미리 들어 있지만(바로 아래 시험이 그것을 본다), 줄 수·검증 시험이 보려는 것은
+ * 그 문구가 아니라 사람이 적은 본문이다.
+ */
 function filledForm(overrides: Partial<ServiceReportFormValues> = {}): ServiceReportFormValues {
   return {
     ...createServiceReportFormValues(SEED),
@@ -65,6 +80,7 @@ function filledForm(overrides: Partial<ServiceReportFormValues> = {}): ServiceRe
     reportNumberTail: "4013",
     findings: "출력 이상 확인",
     actions: "전원부 교체",
+    summary: "",
     ...overrides,
   };
 }
@@ -105,6 +121,158 @@ test("접수 건이 없어도 빈 폼이 만들어진다 — 발행일과 정형
   assert.equal(values.issuedOn, "2026-09-02");
   assert.equal(values.findingsIntro, SERVICE_REPORT_FINDINGS_INTRO);
   assert.equal(values.kind, "REPAIR");
+});
+
+// ── 🔴 「조치」·「정리」의 정형 문구는 **본문의 첫 줄**로 미리 채워진다 ──
+
+/**
+ * 🔴 확인내용의 정형 문구와 **자리가 다르다.** 그쪽은 양식의 글상자에 실제로
+ * 들어 있어서 채우개가 따로 다루지만, 조치·정리는 그냥 본문 한 줄이다 — 그래서
+ * 서버도 채우개도 모르고, 이 파일에서 폼의 초기값으로 끝난다.
+ */
+test("🔴 새 수리 보고서는 조치·정리가 정형 문구로 시작한다 — 조치는 「했다」", () => {
+  const values = createServiceReportFormValues(SEED);
+
+  // 🔴 수리 보고서는 **이미 한 일**을 적는다.
+  assert.equal(values.actions, "수리로써 이하의 작업을 실시하였습니다.");
+  assert.equal(values.actions, SERVICE_REPORT_ACTIONS_INTRO.REPAIR);
+  assert.equal(values.summary, SERVICE_REPORT_SUMMARY_INTRO);
+  // 본문의 첫 줄일 뿐이다 — 사람이 아래로 이어 적는다.
+  assert.deepEqual(serviceReportLines(`${values.actions}\n• 퓨즈 교환 : 8개`), [
+    SERVICE_REPORT_ACTIONS_INTRO.REPAIR,
+    "• 퓨즈 교환 : 8개",
+  ]);
+  // 그래서 요청 본문에도 여느 줄과 똑같이 실린다.
+  const sent = buildServiceReportRequestBody(values).body as Record<string, unknown>;
+  assert.deepEqual(sent.actions, [SERVICE_REPORT_ACTIONS_INTRO.REPAIR]);
+  assert.deepEqual(sent.summary, [SERVICE_REPORT_SUMMARY_INTRO]);
+});
+
+test("🔴 새 검사 보고서의 조치 문구는 「한다」 — 앞으로 할 일을 적는다", () => {
+  const values = createServiceReportFormValues({ ...SEED, kind: "INSPECTION" });
+
+  assert.equal(values.kind, "INSPECTION");
+  // 🔴 시제가 다르다(2026-09-02 사용자 결정) — 검사는 **앞으로 할 일**이다.
+  assert.equal(values.actions, "수리로써 이하의 작업을 실시합니다.");
+  assert.equal(values.actions, SERVICE_REPORT_ACTIONS_INTRO.INSPECTION);
+  assert.notEqual(values.actions, SERVICE_REPORT_ACTIONS_INTRO.REPAIR);
+});
+
+test("🔴 검사 보고서에는 「정리」 기본값이 안 들어간다 — 그 구역이 없다", () => {
+  const values = createServiceReportFormValues({ ...SEED, kind: "INSPECTION" });
+
+  assert.equal(values.summary, "", "검사 보고서에 정리 문구가 들어갔다");
+});
+
+// ── 🔴 화면에서 종류를 바꿨을 때 ────────────────────────────────────────
+
+/**
+ * 규칙은 하나다 — **사람이 적어 둔 글을 말없이 버리지 않는다.** 손대지 않은 기본
+ * 문구는 잃을 것이 없으니 새 종류의 것으로 바꿔 주고, 한 글자라도 고쳤으면 그것은
+ * 사람의 글이라 그대로 둔다(제조년월이 「빈 칸에만 채운다」인 것과 같은 뿌리).
+ */
+test("🔴 손대지 않은 기본 문구는 종류를 바꾸면 따라 바뀐다", () => {
+  const repair = createServiceReportFormValues(SEED);
+
+  const toInspection = serviceReportKindChangePatch(
+    repair,
+    "INSPECTION",
+    SERVICE_REPORT_ACTIONS_INTRO
+  );
+  assert.deepEqual(toInspection, {
+    kind: "INSPECTION",
+    actions: SERVICE_REPORT_ACTIONS_INTRO.INSPECTION,
+  });
+
+  // 되돌리면 다시 수리의 문구로 돌아온다.
+  const inspection = { ...repair, ...toInspection };
+  assert.deepEqual(serviceReportKindChangePatch(inspection, "REPAIR", SERVICE_REPORT_ACTIONS_INTRO), {
+    kind: "REPAIR",
+    actions: SERVICE_REPORT_ACTIONS_INTRO.REPAIR,
+  });
+});
+
+test("🔴 사람이 고친 조치 칸은 종류를 바꿔도 그대로다", () => {
+  const written = filledForm({ actions: "예방교환으로써 이하의 작업을 실시하였습니다." });
+
+  const patch = serviceReportKindChangePatch(written, "INSPECTION", SERVICE_REPORT_ACTIONS_INTRO);
+
+  assert.deepEqual(patch, { kind: "INSPECTION" }, "사람이 적은 조치가 기본 문구로 덮였다");
+  assert.equal({ ...written, ...patch }.actions, written.actions);
+});
+
+/**
+ * 🔴 **이것이 이 화면의 보통 모습이다** — 첫 줄은 미리 채워진 기본 문구 그대로고
+ * 그 아래로 사람이 항목을 이어 적는다. 첫 줄만 보고 갈아 끼우면 이 글이 통째로
+ * 흔들린다. 칸 전체를 견주므로 「고친 것」이고, 그래서 손대지 않는다.
+ */
+test("🔴 기본 문구 아래에 줄을 더한 조치 칸도 「고친 것」이다 — 종류를 바꿔도 그대로", () => {
+  const written = filledForm({
+    actions: `${SERVICE_REPORT_ACTIONS_INTRO.REPAIR}\n• 종단 AMP 입력 보호 휴즈 교환 : 8개`,
+  });
+
+  const patch = serviceReportKindChangePatch(written, "INSPECTION", SERVICE_REPORT_ACTIONS_INTRO);
+
+  assert.deepEqual(patch, { kind: "INSPECTION" });
+  assert.equal({ ...written, ...patch }.actions, written.actions, "사람이 이어 적은 줄이 사라졌다");
+});
+
+test("사람이 지운 조치 칸은 종류를 바꿔도 빈 채로 남는다", () => {
+  const erased = filledForm({ actions: "" });
+
+  const patch = serviceReportKindChangePatch(erased, "INSPECTION", SERVICE_REPORT_ACTIONS_INTRO);
+
+  assert.deepEqual(patch, { kind: "INSPECTION" }, "지운 칸에 기본 문구가 되살아났다");
+});
+
+/**
+ * ⚠️ 「정리」는 이 조각이 건드리지 않는다. 검사로 바꿔도 적어 둔 글은 남고, 다시
+ * 수리로 돌렸을 때 그대로 있어야 한다 — 보낼 때 종류에 따라 키를 빼는 것으로
+ * 충분하다(`buildServiceReportRequestBody`).
+ */
+test("종류를 바꿔도 「정리」에 적어 둔 글은 남는다", () => {
+  const written = filledForm({ summary: "조치후, 출력 정상 확인" });
+
+  const patch = serviceReportKindChangePatch(written, "INSPECTION", SERVICE_REPORT_ACTIONS_INTRO);
+
+  assert.equal(patch.summary, undefined);
+  const inspection = { ...written, ...patch };
+  assert.equal(inspection.summary, "조치후, 출력 정상 확인");
+  // 검사로는 나가지 않지만(키가 빠진다), 수리로 돌리면 그대로 실린다.
+  const sent = buildServiceReportRequestBody(inspection).body as Record<string, unknown>;
+  assert.equal(sent.summary, undefined);
+});
+
+test("사람이 지우거나 고칠 수 있다 — 그냥 본문 글자다", () => {
+  const erased = filledForm({ actions: "", summary: "" });
+  assert.equal(erased.actions, "");
+  const sent = buildServiceReportRequestBody(erased).body as Record<string, unknown>;
+  assert.deepEqual(sent.actions, []);
+  assert.deepEqual(sent.summary, []);
+});
+
+/**
+ * 🔴 **저장된 장을 열 때는 미리 채우지 않는다.** 서버 페이지는 그때
+ * `createServiceReportFormValues` 를 아예 부르지 않고 저장된 값을 그대로 붓는다
+ * (`serviceReportFormValues`) — 그 길을 여기서 그대로 밟는다. 기본값이 끼어들면
+ * **사람이 지운 문장이 되살아나** 다음 발행본에 찍힌다.
+ */
+test("🔴 저장된 보고서를 불러오면 저장된 값이 그대로다 — 지운 문구가 안 되살아난다", () => {
+  const saved: ServiceReportSaveValues = {
+    ...filledForm(),
+    findingsIntro: "",
+    // 사람이 정형 문구를 지우고 자기 말로 적어 둔 장.
+    actions: "예방교환으로써 이하의 작업을 실시하였습니다.\n• 스플릿터 기판 교환 : 1매",
+    summary: "",
+  };
+
+  const poured = serviceReportFormValues(saved, SERVICE_REPORT_FINDINGS_INTRO);
+
+  assert.equal(poured.actions, saved.actions, "저장된 조치가 기본 문구로 덮였다");
+  assert.equal(poured.summary, "", "지운 정리 문구가 되살아났다");
+  assert.notEqual(poured.actions, SERVICE_REPORT_ACTIONS_INTRO.REPAIR);
+  assert.notEqual(poured.actions, SERVICE_REPORT_ACTIONS_INTRO.INSPECTION);
+  assert.equal(poured.findingsIntro, "", "지운 확인내용 머리글이 되살아났다");
 });
 
 test("목록 화면의 빈 값 표시 `-` 는 문서로 옮기지 않는다", () => {

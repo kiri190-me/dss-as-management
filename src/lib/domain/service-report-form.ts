@@ -17,7 +17,8 @@ import type { ServiceReportCause, ServiceReportKind } from "@/lib/xlsx/service-r
  * 들어가면 빌드가 깨진다. 타입만 가져오는 것은 안전하다(컴파일에서 지워진다).
  *
  * 그럼 상수는 어디서 오는가 — **서버 페이지가 넘겨준다**(`ServiceReportFormLimits`
- * 와 `findingsIntro`, 드롭다운 목록, 그리고 **원인 열 가지의 한글 이름**).
+ * 와 정형 문구 셋(`findingsIntro`·`actionsIntro`·`summaryIntro`), 드롭다운 목록,
+ * 그리고 **원인 열 가지의 한글 이름**).
  * 300 과 4 를 여기 베껴 두면 양식이 늘어난 날 화면만 뒤처지고, 그 증상은
  * "왜 안 되는지 모르겠는 400"이다.
  *
@@ -117,6 +118,18 @@ export type ServiceReportFormLimits = {
 };
 
 /**
+ * 「조치」 첫 줄의 정형 문구 — **보고서 종류마다 하나씩.**
+ *
+ * 🔴 문장은 여기 없다. 채우개 옆의 `SERVICE_REPORT_ACTIONS_INTRO` 하나뿐이고
+ * (`xlsx/service-report-template.ts`), 서버 페이지가 그것을 읽어 씨앗과 폼에
+ * props 로 넘긴다 — 위 '이 파일은 브라우저에서도 돈다' 참조. 여기 베껴 두면 두
+ * 벌이 되고, 문구가 바뀐 날 한쪽만 고쳐진다.
+ *
+ * `Record<ServiceReportKind, string>` 이라 종류가 늘면 tsc 가 빠진 칸을 잡는다.
+ */
+export type ServiceReportActionsIntro = Record<ServiceReportKind, string>;
+
+/**
  * 접수 건에서 옮겨 오는 값만 추린 모양. `ResolvedRepairCase` 를 통째로 받지
  * 않는 것은, 그 타입이 mock 자료를 끌고 오는 모듈에 살아서다(타입만 쓰면
  * 지워지지만, 무엇을 옮기는지 이 자리에서 보이는 편이 낫다).
@@ -140,6 +153,24 @@ export type ServiceReportFormSeed = {
   today: string;
   /** `SERVICE_REPORT_FINDINGS_INTRO`. 미리 채워 두고 사람이 지울 수 있다. */
   findingsIntro: string;
+  /**
+   * `SERVICE_REPORT_ACTIONS_INTRO` — 「조치」 칸의 **첫 줄**로 미리 채운다.
+   *
+   * 🔴 `findingsIntro` 와 달리 **그냥 본문 글자**다. 서버에도 채우개에도 이런
+   * 이름의 칸이 없고, 「안 줌」과 「비움」을 가를 것도 없다 — 사람이 지우면
+   * 지워진 채로 나가고, 두 번 쓰고 싶으면 두 번 쓴다(실제 발행본이 그렇다).
+   *
+   * 🔴 **종류마다 다르다**(시제 — 검사는 앞으로 할 일, 수리는 이미 한 일). 한
+   * 문장이 아니라 두 벌을 통째로 받는 까닭은, 화면 안에서 종류를 바꿀 때
+   * **바뀌기 전 종류의 기본 문구**와 견줘야 하기 때문이다
+   * (`serviceReportKindChangePatch`).
+   */
+  actionsIntro: ServiceReportActionsIntro;
+  /**
+   * `SERVICE_REPORT_SUMMARY_INTRO` — 「정리」 칸의 첫 줄.
+   * ⚠️ **수리 보고서에만** 쓴다. 검사 보고서에는 「정리」 구역 자체가 없다.
+   */
+  summaryIntro: string;
   /**
    * 「품명」 드롭다운의 목록(`choices.productNames`). 형식에서 뽑은 값을 **이
    * 목록 안에서만** 고르므로, 목록을 못 읽었으면 빈 배열로 두면 된다 — 그러면
@@ -417,8 +448,10 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
   const used =
     manufactured === null ? null : serviceReportUsedPeriod(manufactured, receivedOn);
 
+  const kind = seed.kind ?? "REPAIR";
+
   return {
-    kind: seed.kind ?? "REPAIR",
+    kind,
 
     customerName: seedText(repairCase?.customerName),
     issuedOn: seed.today,
@@ -456,11 +489,57 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
 
     findingsIntro: seed.findingsIntro,
     findings: "",
-    actions: "",
-    summary: "",
+    /**
+     * 🔴 정형 문구를 **본문의 첫 줄로** 미리 적어 둔다. 사람이 그 아래에 항목을
+     * 이어 적고, 필요 없으면 지운다 — 여느 본문 글자와 똑같다.
+     *
+     * 🔴 **새 폼일 때만이다.** 저장된 장을 열 때는 이 함수를 부르지 않고
+     * `serviceReportFormValues(saved.values, …)` 로 저장된 값을 그대로 붓는다
+     * (서버 페이지 참조). 그래야 사람이 지운 문구가 되살아나지 않는다.
+     */
+    // 🔴 종류에 맞는 문구다 — 검사는 「…실시합니다.」, 수리는 「…실시하였습니다.」
+    //    (시제. `SERVICE_REPORT_ACTIONS_INTRO` 참조).
+    actions: seed.actionsIntro[kind],
+    // ⚠️ 검사 보고서에는 「정리」 구역이 없다 — 그때는 미리 채우지 않는다.
+    summary: kind === "REPAIR" ? seed.summaryIntro : "",
 
     remark: "",
   };
+}
+
+/**
+ * 화면에서 **보고서 종류를 바꿀 때** 함께 얹을 조각.
+ *
+ * ── 🔴 손대지 않은 기본 문구만 따라 바꾼다 ─────────────────────────────
+ * 조치 문구는 종류마다 시제가 다르다(검사 「…실시합니다.」 / 수리
+ * 「…실시하였습니다.」). 그런데 화면 안에서 종류를 바꿀 수 있으므로, 이미 조치
+ * 칸에 들어 있는 글을 어떻게 할지 정해야 한다:
+ *
+ *   · 칸의 내용이 **바뀌기 전 종류의 기본 문구 그대로**이면 → 새 종류의 것으로 바꾼다
+ *   · 한 글자라도 다르면 → **그대로 둔다**
+ *
+ * 🔴 까닭은 이 화면의 규칙 하나다 — **사람이 적어 둔 글을 말없이 버리지
+ * 않는다.** 제조년월·사용 기간을 「빈 칸에만 채운다」로 정한 것과 같은 뿌리다
+ * (`serviceReportManufacturedPatch`). 손대지 않은 기본 문구는 잃을 것이 없으니
+ * 바꿔 주는 편이 낫고, 한 글자라도 고쳤으면 그것은 사람의 글이다.
+ *
+ * ⚠️ **칸 전체를 견준다**(첫 줄만 보지 않는다). 첫 줄이 기본 문구인 채로 아래에
+ * 사람이 항목을 이어 적은 것이 이 화면의 보통 모습인데, 첫 줄만 보고 갈아 끼우면
+ * 그 아래 줄들과 시제가 어긋나거나 — 더 나쁘게는 — 통째로 덮을 길이 열린다.
+ * 여기서는 «한 글자라도 다르면 사람의 글»이므로 그런 칸은 손대지 않는다.
+ *
+ * ⚠️ 「정리」는 건드리지 않는다. 그 구역은 수리 보고서에만 있고, 검사로 바꿔도
+ * 적어 둔 글은 남는다 — 다시 수리로 돌렸을 때 그대로 있어야 한다
+ * (`buildServiceReportRequestBody` 의 같은 판단).
+ */
+export function serviceReportKindChangePatch(
+  values: ServiceReportFormValues,
+  nextKind: ServiceReportKind,
+  actionsIntro: ServiceReportActionsIntro
+): Partial<ServiceReportFormValues> {
+  const patch: Partial<ServiceReportFormValues> = { kind: nextKind };
+  if (values.actions === actionsIntro[values.kind]) patch.actions = actionsIntro[nextKind];
+  return patch;
 }
 
 /**

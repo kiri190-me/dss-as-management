@@ -58,6 +58,9 @@ function autofilled(): ServiceReportFormValues {
   return createServiceReportFormValues({
     today: "2026-09-02",
     findingsIntro: "아래와 같이 확인하였습니다.",
+    // 이 시험은 「되살리기」를 본다 — 미리 채우는 문구는 form 시험이 본다.
+    actionsIntro: { INSPECTION: "", REPAIR: "" },
+    summaryIntro: "",
     productNames: ["13.56MHz 30kW"],
     repairCase: {
       customerName: "OO전자",

@@ -120,6 +120,14 @@ import {
  * 던진다** — `assertLayout` 과 같은 판단이다. 엉뚱한 자리에 그린 문서를
  * 고객사로 내보내는 것보다 멈추는 편이 낫다.
  *
+ * ── 🔴 구역과 구역 사이에는 빈 줄이 한 줄 있다 ─────────────────────────
+ * 내용이 배정된 자리 안에 들어가면 남는 줄이 저절로 사이를 벌린다. 그런데
+ * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
+ * 붙어** 구분이 사라진다. 그래서 밀어낼 때는 한 줄을 더 띄운다
+ * (`SERVICE_REPORT_SECTION_GAP_ROWS`·`planBodyLayout`). 맺음 표시는 그대로
+ * 마지막 내용 줄의 바로 다음이고, 내용이 없는 구역은 건너뛰면서 빈 줄도 안
+ * 만든다 — 안 그러면 쓰이지도 않은 구역 때문에 두 줄이 빈다.
+ *
  * ── 🔴 「확인내용」만 글상자보다 **한 줄 아래**다 ───────────────────────
  * 위 계산은 「확인내용」에 31행을 준다. 양식의 두 글상자(본문 상자·라벨 상자)가
  * 둘 다 31행을 가리키기 때문이고, 실측으로 확인한 것이다. **그런데 실제
@@ -322,6 +330,49 @@ export const SERVICE_REPORT_CLOSING_MARK = "～이　상～";
  * `ServiceReportBody.findingsIntro` 를 보라.
  */
 export const SERVICE_REPORT_FINDINGS_INTRO = "인수품에 대하여 이하의 항목을 확인하였습니다.";
+
+/**
+ * 「조치」·「정리」의 첫 줄에 **화면이 미리 채워 두는** 정형 문구.
+ *
+ * ── 🔴 채우개는 이 둘을 쓰지 않는다 ────────────────────────────────────
+ * 위의 `SERVICE_REPORT_FINDINGS_INTRO` 와 생김새는 같지만 **자리가 다르다.**
+ * 확인내용의 문구는 **양식의 글상자에 실제로 들어 있던 글자**라, 글상자를 비우면서
+ * 사라지는 것을 채우개가 셀로 되돌려 놓는 것이다(`findingsLines`). 조치·정리에는
+ * 양식에 그런 것이 없다.
+ *
+ * 그리고 실제 발행본을 보면 **같은 모양의 문장이 한 구역 안에 두 번 나온다**:
+ *
+ *   조 치 | 수리로써 이하의 작업을 실시하였습니다.
+ *         | • 종단 AMP 입력 보호 휴즈 교환 : 8개
+ *         | 예방교환으로써 이하의 작업을 실시하였습니다.   ← 가운데에 또 하나
+ *         | • 스플릿터 기판 교환 : 1매
+ *
+ * 즉 이것은 **구조가 아니라 본문의 한 줄**이고, 사람이 필요하면 여러 번 쓴다.
+ * 그래서 채우개도 검증도 저장도 이 상수를 모른다 — 그냥 본문 줄로 들어온다.
+ * 여기 두는 것은 **문구가 사는 자리를 하나로 모으기 위해서**다: 화면은 브라우저
+ * 번들이라 이 모듈을 가져올 수 없고(`zip-reader.ts` → `node:fs`), 그래서 서버
+ * 페이지가 읽어 props 로 넘긴다 — 정형 문구·줄 수 상한·원인 라벨이 이미 가는
+ * 길이다. 화면 컴포넌트에 문장을 적어 두면 두 벌이 되고, 문구가 바뀐 날 한쪽만
+ * 고쳐진다.
+ *
+ * ── 🔴 조치 문구는 **보고서 종류에 따라 시제가 다르다** ─────────────────
+ * 2026-09-02 사용자 결정이다. 까닭은 **시제**다:
+ *
+ *   · **검사** 보고서는 «앞으로 할 일»을 적는다 → `…실시합니다.`
+ *   · **수리** 보고서는 «이미 한 일»을 적는다   → `…실시하였습니다.`
+ *
+ * 그래서 위의 `SERVICE_REPORT_TITLES` 와 같은 모양(`Record<ServiceReportKind,
+ * string>`)으로 갈라 둔다 — 종류가 늘면 tsc 가 빠진 칸을 잡아 준다.
+ *
+ * ⚠️ 「정리」는 갈리지 않는다. 그 구역 자체가 **수리 보고서에만** 있다.
+ */
+export const SERVICE_REPORT_ACTIONS_INTRO: Record<ServiceReportKind, string> = {
+  INSPECTION: "수리로써 이하의 작업을 실시합니다.",
+  REPAIR: "수리로써 이하의 작업을 실시하였습니다.",
+};
+
+/** 🔴 「정리」는 **수리 보고서에만** 있다 — 검사에서는 이 문구를 쓰지 않는다. */
+export const SERVICE_REPORT_SUMMARY_INTRO = "조치후, 이하의 항목을 확인하였습니다.";
 
 /**
  * 본문이 차지할 수 있는 줄 수의 마지막 방어선.
@@ -792,6 +843,23 @@ const EMU_PER_POINT = 12700;
  */
 const DEFAULT_TEXT_TOP_INSET = 45720;
 
+/**
+ * 🔴 구역과 구역 **사이에 반드시 들어가는 빈 줄**의 수.
+ *
+ * 내용이 배정된 자리 안에 들어갈 때는 남는 줄이 저절로 사이를 벌려 주지만,
+ * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
+ * 붙는다.** 실측으로 그 자리가 이렇게 나왔다:
+ *
+ *   42        | -종단 AMP 압착금구 고장 확인   ← 확인내용 마지막 줄
+ *   43 조  치 | • 종단 AMP 입력 보호 휴즈 교환  ← 붙어서 구분이 안 된다
+ *
+ * 그래서 밀어낼 때는 **한 줄을 더 띄운다**(2026-09-02 사용자 결정).
+ *
+ * ⚠️ 이 한 줄도 본문 용량을 먹는다 — 전체가 블록을 넘으면 `growBodyBlock` 이
+ * 여느 때처럼 줄을 끼워 넣는다. 여기서 따로 할 일은 없다.
+ */
+export const SERVICE_REPORT_SECTION_GAP_ROWS = 1;
+
 /** 한 구역이 실제로 앉는 자리. */
 type SectionPlacement = { section: BodySection; startRow: number; rowCount: number };
 
@@ -1065,6 +1133,8 @@ function planBodyLayout(
     if (section.lines.length === 0) {
       // 🔴 마지막 내용 구역 **뒤의** 빈 구역은 자리도 차지하지 않는다 —
       //    차지하면 맺음 표시가 쓰이지도 않은 구역 아래로 밀려 내려간다.
+      //    🔴 빈 줄도 붙이지 않는다. 그리지도 않은 구역이 사이를 한 줄 더
+      //    벌리면, 건너뛴 자리에 빈 줄이 두 줄로 보인다.
       if (index < lastWithLines) cursor = startRow;
       continue;
     }
@@ -1077,7 +1147,23 @@ function planBodyLayout(
 
     const rowCount = index === lastWithLines ? lines : Math.max(allotted, lines);
     placements.push({ section, startRow, rowCount });
-    cursor = startRow + rowCount;
+
+    /**
+     * 🔴 다음 구역이 앉을 수 있는 가장 이른 줄.
+     *
+     *   · `startRow + rowCount` — 배정된 자리를 다 쓴 다음. 내용이 짧으면
+     *     이것이 곧 다음 구역의 제자리이고, 밀렸을 때는 밀린 만큼 함께 내려간다.
+     *   · `startRow + lines + 빈 줄` — **내용이 끝난 다음 한 줄을 띄운 자리.**
+     *     내용이 배정된 자리를 꽉 채우거나 넘칠 때 이쪽이 이겨서 사이가 벌어진다
+     *     (`SERVICE_REPORT_SECTION_GAP_ROWS`).
+     *
+     * 🔴 **마지막 내용 구역에는 안 붙인다.** 맺음 표시(`～이　상～`)는 지금처럼
+     * 마지막 내용 줄의 바로 다음 줄이다 — 사용자가 요청한 것은 구역 사이다.
+     */
+    cursor =
+      index === lastWithLines
+        ? startRow + rowCount
+        : Math.max(startRow + rowCount, startRow + lines + SERVICE_REPORT_SECTION_GAP_ROWS);
   }
 
   return { placements, closingRow: cursor };

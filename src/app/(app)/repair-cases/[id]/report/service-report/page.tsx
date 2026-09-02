@@ -24,9 +24,11 @@ import {
   type ServiceReportChoices,
 } from "@/lib/xlsx/service-report-choices";
 import {
+  SERVICE_REPORT_ACTIONS_INTRO,
   SERVICE_REPORT_CAUSE_LABELS,
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_MAX_BODY_ROWS,
+  SERVICE_REPORT_SUMMARY_INTRO,
 } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -191,7 +193,16 @@ export default async function ServiceReportPage({
         repairCase: resolved,
         // 발행일의 기본값. 서버에서 만들어 넘겨야 서버 렌더와 브라우저가 어긋나지 않는다.
         today: toKstDateOnly(new Date()),
+        // 🔴 정형 문구 셋은 전부 채우개 옆의 상수에서 온다. 화면 컴포넌트에
+        //    문장을 적어 두면 두 벌이 되고, 문구가 바뀐 날 한쪽만 고쳐진다.
+        //    ⚠️ 조치·정리의 문구는 **본문의 첫 줄**일 뿐이라 서버는 모른다 —
+        //    저장된 장을 열 때는 위의 `serviceReportFormValues` 로 저장된 값이
+        //    그대로 오고, 사람이 지운 문구가 되살아나지 않는다.
         findingsIntro: SERVICE_REPORT_FINDINGS_INTRO,
+        // 🔴 조치 문구는 **종류마다 다르다**(시제). 두 벌을 통째로 넘기고
+        //    씨앗이 그중 하나를 고른다 — 고르는 규칙이 한 자리에만 있다.
+        actionsIntro: SERVICE_REPORT_ACTIONS_INTRO,
+        summaryIntro: SERVICE_REPORT_SUMMARY_INTRO,
         // 🔴 형식에서 뽑은 품명은 **이 목록 안에 있을 때만** 골라진다. 양식을 못
         //    읽었으면 빈 목록이 가고, 그러면 아무것도 안 고른다(사람이 고른다).
         productNames: choices?.productNames ?? [],
@@ -218,6 +229,12 @@ export default async function ServiceReportPage({
       intakeNumber={resolved.intakeNumber}
       reportHref={repairCaseDetailHrefs(resolved.id).report}
       initialValues={initialValues}
+      // 🔴 두 벌을 그대로 넘긴다 — 화면 안에서 종류를 바꿀 때, **바뀌기 전
+      //    종류의 기본 문구**와 견줘 손대지 않은 것만 갈아 끼우기 위해서다
+      //    (`serviceReportKindChangePatch`). 저장된 장을 열 때도 넘긴다:
+      //    초기값은 저장된 값 그대로이므로 기본 문구와 다르고, 그래서 그 칸은
+      //    종류를 바꿔도 그대로 남는다.
+      actionsIntro={SERVICE_REPORT_ACTIONS_INTRO}
       // 🔴 상한은 상수에서 온다. 화면이 숫자를 들고 있으면 양식이 늘어난 날
       // 화면만 뒤처지고, 증상은 "왜 안 되는지 모르겠는 400"이 된다.
       limits={{

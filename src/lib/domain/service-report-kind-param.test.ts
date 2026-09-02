@@ -9,6 +9,9 @@ function kindOf(param: string | string[] | undefined | null): string {
   return createServiceReportFormValues({
     today: "2026-09-02",
     findingsIntro: "인수품에 대하여",
+    // 이 시험의 관심사가 아니다 — 미리 채우는 문구는 form 시험이 본다.
+    actionsIntro: { INSPECTION: "", REPAIR: "" },
+    summaryIntro: "",
     kind: serviceReportKindFromParam(param) ?? undefined,
   }).kind;
 }

@@ -40,7 +40,13 @@ const INTRO = "아래와 같이 확인하였습니다.";
 /** 화면이 보내는 온전한 폼 값 한 벌. */
 function formValues(patch: Partial<ServiceReportFormValues> = {}): ServiceReportFormValues {
   return {
-    ...createServiceReportFormValues({ today: "2026-09-02", findingsIntro: INTRO }),
+    // 미리 채우는 조치·정리 문구는 이 시험의 관심사가 아니다(form 시험이 본다).
+    ...createServiceReportFormValues({
+      today: "2026-09-02",
+      findingsIntro: INTRO,
+      actionsIntro: { INSPECTION: "", REPAIR: "" },
+      summaryIntro: "",
+    }),
     ...patch,
   };
 }

@@ -16,8 +16,10 @@ import {
 import {
   buildServiceReportRequestBody,
   isServiceReportBodyEmpty,
+  serviceReportKindChangePatch,
   serviceReportRowLimitErrors,
   serviceReportSerialNumberWarning,
+  type ServiceReportActionsIntro,
   type ServiceReportCauseLabels,
   type ServiceReportFormLimits,
   type ServiceReportFormValues,
@@ -222,6 +224,7 @@ export default function ServiceReportForm({
   intakeNumber,
   reportHref,
   initialValues,
+  actionsIntro,
   savedReport,
   canEdit,
   canDelete,
@@ -240,6 +243,15 @@ export default function ServiceReportForm({
   /** 돌아갈 자리 — 「보고서」 탭. 지운 뒤에도 여기로 온다. */
   reportHref: string;
   initialValues: ServiceReportFormValues;
+  /**
+   * 🔴 「조치」 첫 줄의 정형 문구 **두 벌**(검사·수리). 채우개 옆의
+   * `SERVICE_REPORT_ACTIONS_INTRO` 에서 서버 페이지가 읽어 넘긴다 — 화면이
+   * 문장을 들고 있으면 두 벌이 되고, 문구가 바뀐 날 한쪽만 고쳐진다.
+   *
+   * 쓰는 자리는 하나다: **종류를 바꿀 때** 조치 칸이 «바뀌기 전 종류의 기본
+   * 문구 그대로»인지 견주는 것(`serviceReportKindChangePatch`).
+   */
+  actionsIntro: ServiceReportActionsIntro;
   /**
    * 🔴 저장된 장을 열었으면 그 id 와 낙관적 잠금 토큰, 새로 적는 중이면 `null`.
    * **이 하나가 「만들기」와 「고치기」를 가른다** — 저장 단추가 어느 액션을
@@ -774,8 +786,20 @@ export default function ServiceReportForm({
           <Field label="종류" required>
             <select
               value={values.kind}
+              /**
+               * 🔴 종류만 바꾸는 것이 아니다 — 「조치」의 정형 문구가 종류마다
+               * 시제가 다르므로, **손대지 않은 기본 문구면** 새 종류의 것으로
+               * 함께 갈아 끼운다. 한 글자라도 고쳤으면 사람의 글이라 그대로 둔다.
+               * 판단은 전부 도메인 함수에 있다(시험이 붙는 자리다).
+               */
               onChange={(event) =>
-                update({ kind: event.target.value === "INSPECTION" ? "INSPECTION" : "REPAIR" })
+                update(
+                  serviceReportKindChangePatch(
+                    values,
+                    event.target.value === "INSPECTION" ? "INSPECTION" : "REPAIR",
+                    actionsIntro
+                  )
+                )
               }
               disabled={disabled}
               className={editInputClass}
