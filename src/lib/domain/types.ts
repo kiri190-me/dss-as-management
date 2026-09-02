@@ -126,9 +126,12 @@ export const billingTypeLabels: Record<BillingType, string> = {
 // 이 평탄화된 상태는 Phase 2/3의 정규 모델로 대체될 예정이다.
 export const REPAIR_STATUS_CODES = [
   "WAITING_INTAKE_INSPECTION",
+  "INTAKE_INSPECTION_IN_PROGRESS",
+  "INTAKE_INSPECTION_COMPLETED",
   "WAITING_KYOSAN_REPLY",
   "WAITING_PO",
   "WAITING_PARTS_SUPPLY",
+  "WAITING_REPAIR",
   "IN_REPAIR",
   "WAITING_SHIPMENT_APPROVAL",
   "WAITING_SHIPMENT",
@@ -137,9 +140,12 @@ export const REPAIR_STATUS_CODES = [
 export type RepairStatus = (typeof REPAIR_STATUS_CODES)[number];
 export const repairStatusLabels: Record<RepairStatus, string> = {
   WAITING_INTAKE_INSPECTION: "인수점검 대기",
+  INTAKE_INSPECTION_IN_PROGRESS: "인수점검 중",
+  INTAKE_INSPECTION_COMPLETED: "인수점검 완료",
   WAITING_KYOSAN_REPLY: "교산 회신 대기",
   WAITING_PO: "PO 대기",
   WAITING_PARTS_SUPPLY: "부품 수급 대기",
+  WAITING_REPAIR: "수리 대기",
   IN_REPAIR: "수리 중",
   WAITING_SHIPMENT_APPROVAL: "출하 승인 대기",
   WAITING_SHIPMENT: "출하 대기",

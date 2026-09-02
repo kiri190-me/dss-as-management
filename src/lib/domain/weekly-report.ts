@@ -185,8 +185,10 @@ export function isExcludedFromWeeklyReport(row: { status: RepairStatus | null })
  *
  * 매핑표(승인된 그대로):
  *   점검 대기      WAITING_INTAKE_INSPECTION 이고 점검 기록 없음
- *   점검 중        WAITING_INTAKE_INSPECTION 이고 점검 기록 있음 + WAITING_KYOSAN_REPLY 전부
- *   수리 대기      WAITING_PARTS_SUPPLY
+ *   점검 중        WAITING_INTAKE_INSPECTION 이고 점검 기록 있음
+ *                  + INTAKE_INSPECTION_IN_PROGRESS + INTAKE_INSPECTION_COMPLETED
+ *                  + WAITING_KYOSAN_REPLY 전부
+ *   수리 대기      WAITING_PARTS_SUPPLY + WAITING_REPAIR
  *   수리 중        IN_REPAIR
  *   PO 대기 중     WAITING_PO 전부 (단계 키를 보지 않는다)
  *   출하 대기      WAITING_SHIPMENT + WAITING_SHIPMENT_APPROVAL
@@ -202,10 +204,18 @@ export function classifyWeeklyReportStatus(
       // 점검 기록이 하나라도 남았으면 점검이 시작된 것이다. 상태는 아직
       // 인수점검 단계에 머물러 있어도, 사람이 보는 사실은 '점검 중'이다.
       return row.hasIntakeInspectionRecord ? "INSPECTION_IN_PROGRESS" : "INSPECTION_WAITING";
+    case "INTAKE_INSPECTION_IN_PROGRESS":
+    case "INTAKE_INSPECTION_COMPLETED":
+      // 점검이 끝나 다음 지시를 기다리는 자리도 여기다 — 아래 교산 회신
+      // 대기와 같은 이유로, 그 장비는 아직 점검대 앞에 있다.
+      return "INSPECTION_IN_PROGRESS";
     case "WAITING_KYOSAN_REPLY":
       // 교산 회신을 기다리는 동안에도 그 장비는 점검대에 올라가 있다.
       return "INSPECTION_IN_PROGRESS";
     case "WAITING_PARTS_SUPPLY":
+    case "WAITING_REPAIR":
+      // 부품을 기다리는 건과 부품이 다 모여 수리 순서를 기다리는 건은 상태가
+      // 서로 다르지만, 엑셀의 '수리 대기' 한 칸이 원래 그 둘을 함께 세던 자리다.
       return "REPAIR_WAITING";
     case "IN_REPAIR":
       return "IN_REPAIR";

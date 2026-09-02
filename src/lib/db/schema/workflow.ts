@@ -73,9 +73,12 @@ export const workflowTransitionActionEnum = pgEnum("workflow_transition_action",
  */
 export const repairStatusEnum = pgEnum("repair_status", [
   "WAITING_INTAKE_INSPECTION",
+  "INTAKE_INSPECTION_IN_PROGRESS",
+  "INTAKE_INSPECTION_COMPLETED",
   "WAITING_KYOSAN_REPLY",
   "WAITING_PO",
   "WAITING_PARTS_SUPPLY",
+  "WAITING_REPAIR",
   "IN_REPAIR",
   "WAITING_SHIPMENT_APPROVAL",
   "WAITING_SHIPMENT",

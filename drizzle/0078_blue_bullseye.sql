@@ -1,0 +1,1 @@
+ALTER TYPE "public"."repair_status" ADD VALUE 'WAITING_REPAIR' BEFORE 'IN_REPAIR';

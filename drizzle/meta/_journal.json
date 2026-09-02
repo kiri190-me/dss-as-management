@@ -547,6 +547,20 @@
       "when": 1788327023073,
       "tag": "0077_hard_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788332886688,
+      "tag": "0078_blue_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1788333774695,
+      "tag": "0079_uneven_human_torch",
+      "breakpoints": true
     }
   ]
 }

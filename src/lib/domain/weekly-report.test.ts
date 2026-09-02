@@ -162,6 +162,37 @@ test("waiting_po 와 po_received 는 둘 다 PO 대기 중이다 — 단계 키�
   }
 });
 
+test("부품 수급 대기와 수리 대기는 둘 다 수리 대기 칸으로 간다", () => {
+  // 상태가 하나 늘었을 때 이 칸에 넣기로 정한 것이다(파일 헤더의 매핑표).
+  // 여기가 없으면 수리 대기 건이 조용히 사라지지는 않아도 분류 안 됨으로 떨어진다.
+  for (const status of ["WAITING_PARTS_SUPPLY", "WAITING_REPAIR"] as const) {
+    assert.equal(
+      classifyWeeklyReportStatus({
+        status,
+        currentWorkflowStepKey: "parts_supply",
+        hasIntakeInspectionRecord: true,
+      }),
+      "REPAIR_WAITING",
+      `${status} 는 수리 대기 칸이어야 한다`
+    );
+  }
+});
+
+test("인수점검 중·인수점검 완료는 둘 다 점검 중 칸으로 간다", () => {
+  // 점검이 끝나 다음 지시를 기다리는 자리도 점검 중에 접기로 정했다(매핑표).
+  for (const status of ["INTAKE_INSPECTION_IN_PROGRESS", "INTAKE_INSPECTION_COMPLETED"] as const) {
+    assert.equal(
+      classifyWeeklyReportStatus({
+        status,
+        currentWorkflowStepKey: "intake_inspection",
+        hasIntakeInspectionRecord: false,
+      }),
+      "INSPECTION_IN_PROGRESS",
+      `${status} 는 점검 중 칸이어야 한다 — 점검 기록이 아직 없어도 그렇다`
+    );
+  }
+});
+
 test("교산 회신 대기는 점검 중, 출하 승인 대기는 출하 대기로 함께 접힌다", () => {
   assert.equal(
     classifyWeeklyReportStatus({
