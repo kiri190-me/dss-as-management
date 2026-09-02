@@ -39,6 +39,23 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  /**
+   * 배포용 빌드가 `.next/standalone` 아래에 자립 실행 가능한 형태로 나온다.
+   * 실제로 쓰이는 파일만 추려 담고 `server.js`를 함께 만들어 주므로,
+   * 컨테이너에 `node_modules` 전체를 실을 필요가 없다 — 이미지가 몇 배 작아진다.
+   *
+   * **`next dev`에는 아무 영향이 없다.** `next build`만 이 값을 본다.
+   *
+   * ⚠️ standalone은 `public`과 `.next/static`을 자동으로 담지 않는다.
+   *    Dockerfile에서 손으로 복사해야 하고, 빠뜨리면 화면은 뜨는데 이미지와
+   *    CSS가 전부 깨져 보인다. 이 저장소는 특히 `src/app/layout.tsx`가 런타임에
+   *    `public/theme-init.js`를 읽으므로 public이 없으면 첫 화면부터 죽는다.
+   *
+   * 나머지 세 저장소(dss-auth·njlee·dss-home)에는 이미 들어가 있다.
+   * 자세한 것은 ../dss-deploy/runbook/02-이미지-빌드.md
+   */
+  output: "standalone",
+
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
