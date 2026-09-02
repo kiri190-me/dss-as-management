@@ -1,3 +1,4 @@
+import { productCategoryLabels, type WorkflowType } from "@/lib/domain/types";
 import type { ServiceReportCause, ServiceReportKind } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -15,6 +16,10 @@ import type { ServiceReportCause, ServiceReportKind } from "@/lib/xlsx/service-r
  * 가져오지 않는다.** 채우개는 `zip-reader.ts` 를 거쳐 `node:fs`·`node:zlib` 를
  * 끌고 오고, 검증 모듈은 그 채우개를 끌고 온다. 클라이언트 번들에 그것이
  * 들어가면 빌드가 깨진다. 타입만 가져오는 것은 안전하다(컴파일에서 지워진다).
+ *
+ * ⚠️ `@/lib/domain/types` 는 **값으로 가져와도 된다.** 그 파일이 끌고 오는 것은
+ * `date-only.ts` 하나뿐이고 그것도 순수 계산이라, 클라이언트 번들에 들어가도
+ * 되는 도메인 상수다(화면 컴포넌트들이 이미 그것을 그대로 쓰고 있다).
  *
  * 그럼 상수는 어디서 오는가 — **서버 페이지가 넘겨준다**(`ServiceReportFormLimits`
  * 와 정형 문구 셋(`findingsIntro`·`actionsIntro`·`summaryIntro`), 드롭다운 목록,
@@ -158,7 +163,11 @@ export type ServiceReportRepairCaseSeed = {
   serialNumber: string | null;
   /** "YYYY-MM-DD" 또는 그것으로 시작하는 글자. */
   receivedAt: string | null;
-  /** 품명 둘째 줄(`H20`). */
+  /**
+   * 품명 둘째 줄(`H20`). 화면 표기(`productCategoryLabels` 의 「Generator」 …)가
+   * 그대로 오고, 문서 표기로 옮기는 것은 이 파일이 한다
+   * (`serviceReportProductCategoryText`).
+   */
   productCategory: string | null;
   /** 「상황」 아랫칸(`H23`). */
   reportedSymptom: string | null;
@@ -304,6 +313,82 @@ export function serviceReportProductNameFromModel(
   const wanted = normalizeProductName(`${frequency} ${power}`);
   // 고르는 값은 **목록에 있던 글자 그대로**다 — 우리가 만든 글자가 아니다.
   return productNames.find((name) => normalizeProductName(name) === wanted) ?? "";
+}
+
+// ── 접수 건의 제품 구분 → 품명 둘째 줄 ──────────────────────────────────
+
+/**
+ * 품명 둘째 줄(`H20`)에 적을 **문서 표기**. 화면에서 쓰는 영어 표기를 고객사로
+ * 나가는 문서에서는 한글로 옮겨 적는다(**2026-09-02 사용자 결정**).
+ *
+ * ── 🔴 `productCategoryLabels` 를 고치지 않는다 ─────────────────────────
+ * 그 표(`domain/types.ts`)의 값은 목록·필터·대시보드가 **그 글자 그대로 비교**해
+ * 쓴다(`repair-case-filters.ts` · `my-active-work-filter.ts` 의 주석 참조). 거기서
+ * 「Generator」를 「RF제너레이터」로 바꾸면 화면 여러 곳이 함께 바뀌고, 그것은
+ * 이번 요청 밖의 변화다. 그래서 **옮겨 적는 표를 보고서 쪽에만** 둔다.
+ *
+ * ── 🔴 표의 열쇠는 워크플로 유형이다 ────────────────────────────────────
+ * `Record<WorkflowType, …>` 이라 **제품 종류가 하나 늘면 tsc 가 여기를 잡는다**
+ * (원인 라벨의 `Record<ServiceReportCause, string>` 과 같은 장치다). 영어 표기를
+ * 열쇠로 삼으면 종류가 늘어도 아무도 모르는 채로 영어가 문서에 찍힌다.
+ *
+ * 영어 표기는 여기 **한 글자도 베끼지 않는다** — 아래 `PRODUCT_CATEGORY_TEXTS`
+ * 가 `productCategoryLabels` 에서 짝을 지어 만든다. 그래서 화면 표기가 바뀌어도
+ * 이 옮겨 적기가 따라간다(품명 첫째 줄이 목록을 인자로 받는 것과 같은 판단).
+ *
+ * ── 🔴 `Total Controller` 도 「RF제너레이터」다 — 베낀 것이 아니다 ───────
+ * 제품 종류는 셋인데 문서 표기는 둘뿐이다. **셋 중 둘이 같은 글자로 가는 것은
+ * 우연도 복사 실수도 아니라 사용자 결정이다(2026-09-02).** 「Total Controller 인데
+ * 왜 제너레이터냐」 싶어도 **고치지 말 것** — 고객사로 나가는 문서에 그렇게 적기로
+ * 정해진 것이다.
+ *
+ * ⚠️ 철자는 **`RF제너레이터`** 다. 양식의 견본에는 `RF제네레이터` 로 적혀 있지만,
+ * 사용자가 적어 준 쪽(`제너`)을 쓴다(2026-09-02).
+ */
+const PRODUCT_CATEGORY_DOCUMENT_TEXTS: Record<WorkflowType, string> = {
+  PAID_MATCHER: "M-BOX",
+  WARRANTY_MATCHER: "M-BOX",
+  PENDING_MATCHER: "M-BOX",
+  PAID_GENERATOR: "RF제너레이터",
+  WARRANTY_GENERATOR: "RF제너레이터",
+  PENDING_GENERATOR: "RF제너레이터",
+  // 🔴 제너레이터와 같은 글자다 — 위 주석 참조. 고치지 말 것.
+  PAID_TOTAL_CONTROLLER: "RF제너레이터",
+  WARRANTY_TOTAL_CONTROLLER: "RF제너레이터",
+  PENDING_TOTAL_CONTROLLER: "RF제너레이터",
+};
+
+/**
+ * 「화면 표기 → 문서 표기」. 위 표와 `productCategoryLabels` 를 짝지어 만든다 —
+ * 영어 글자가 이 파일에 한 벌 더 생기지 않게. 두 표가 같은 열쇠(`WorkflowType`)를
+ * 쓰므로 화면 표기가 바뀌어도 짝이 어긋나지 않는다.
+ *
+ * ⚠️ 여러 워크플로 유형이 같은 화면 표기를 나눠 쓴다(유상·무상·추후결정 셋이 다
+ * 「Generator」다). 그래서 같은 열쇠가 세 번씩 들어온다 — 셋의 문서 표기가 같으면
+ * 뒤엣것이 앞엣것을 **같은 값으로** 덮을 뿐이라 아무 일도 없지만, 서로 다르게
+ * 적어 두면 조용히 한쪽이 이긴다. tsc 는 그것을 못 잡으므로 **시험이 잡는다**
+ * (`service-report-form.test.ts` — 「같은 화면 표기는 같은 문서 표기로 간다」).
+ */
+const PRODUCT_CATEGORY_TEXTS = new Map<string, string>(
+  (Object.keys(PRODUCT_CATEGORY_DOCUMENT_TEXTS) as WorkflowType[]).map((code) => [
+    productCategoryLabels[code],
+    PRODUCT_CATEGORY_DOCUMENT_TEXTS[code],
+  ])
+);
+
+/**
+ * 접수 건에서 온 제품 구분을 **문서에 적을 글자**로 옮긴다.
+ *
+ * 🔴 **모르는 글자는 그대로 돌려준다.** 옮길 짝이 없는 것(사람이 손으로 적어 둔
+ * 글자, 매퍼가 라벨을 못 찾아 넣은 `-`, 옛 접수 자료에 남은 표기)을 여기서
+ * 손대면, 화면에 보이던 글자가 문서에서 말없이 사라진다.
+ *
+ * 🔴 **새 폼을 만들 때만 지나간다.** 저장된 장을 열 때는 서버 페이지가 이 함수를
+ * 부르지 않고 저장된 값을 그대로 붓는다(`serviceReportFormValues`) — 그래야 사람이
+ * 고쳐 둔 표기가 다음에 열 때 되돌려지지 않는다.
+ */
+export function serviceReportProductCategoryText(productCategory: string): string {
+  return PRODUCT_CATEGORY_TEXTS.get(productCategory) ?? productCategory;
 }
 
 // ── S/N → 제조년월 ───────────────────────────────────────────────────────
@@ -550,7 +635,9 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
     occurredOnDate: "",
     occurredOnText: "",
     productName: serviceReportProductNameFromModel(modelName, seed.productNames ?? []),
-    productCategory: seedText(repairCase?.productCategory),
+    // 🔴 `seedText` 를 먼저 지난다 — 빈 값 표시 `-` 는 옮겨 적을 것이 아니라
+    //    문서에서 비워야 할 값이다(`PLACEHOLDER_TEXT`). 그다음 한글 표기로 옮긴다.
+    productCategory: serviceReportProductCategoryText(seedText(repairCase?.productCategory)),
     modelName,
     manufacturedYear: manufactured?.year ?? "",
     manufacturedMonth: manufactured?.month ?? "",

@@ -12,6 +12,7 @@ import {
 import {
   fillServiceReportWorkbook,
   SERVICE_REPORT_BODY_LABELS,
+  SERVICE_REPORT_CELLS,
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_SHEET_NAME,
   type ServiceReportInput,
@@ -221,8 +222,74 @@ test("🔴 후리가나(rPh)가 글자에 섞이지 않는다", () => {
   assert.equal(cellAt(buildSynthetic(), 2, 2).text, "비　고");
 });
 
-test("ISO 날짜 칸은 사람이 읽는 날짜가 된다", () => {
-  assert.equal(cellAt(buildSynthetic(), 4, 2).text, "2026년 9월 2일");
+/**
+ * 🔴 양식의 날짜 서식은 `[$-F800]`(시스템 긴 날짜)이고, 사용자가 실제로 쓰는
+ * 한국어 Windows 의 Excel 은 그것을 **요일까지** 그린다. 미리보기가 요일을 빼면
+ * 같은 칸이 화면과 파일에서 다르게 보인다(2026-09-02 사용자 결정).
+ */
+test("🔴 ISO 날짜 칸은 요일까지 붙은 한국어 긴 날짜가 된다", () => {
+  assert.equal(cellAt(buildSynthetic(), 4, 2).text, "2026년 9월 2일 수요일");
+});
+
+/** 시트 하나를 지어내 날짜 한 칸만 갈아 끼운다. */
+function dateCellText(isoDate: string): string {
+  const grid = buildSheetPrintGrid({
+    sheetName: SHEET_NAME,
+    workbookXml: workbookXml("$B$4:$B$4"),
+    sheetXml: SHEET_XML.replace("2026-09-02", isoDate),
+    sharedStringsXml: SHARED_STRINGS_XML,
+    stylesXml: STYLES_XML,
+    drawingXml: null,
+    drawingRelsXml: null,
+  });
+  return cellAt(grid, 4, 2).text;
+}
+
+/**
+ * 🔴 요일이 **실제로 맞는가.** 모양만 보면 늘 「일요일」을 붙여도 통과한다.
+ * 알려진 날짜 일곱을 못 박아 이레가 한 바퀴 도는 것까지 본다.
+ */
+test("🔴 요일이 실제로 맞다 — 알려진 날짜로 못 박는다", () => {
+  assert.equal(dateCellText("2026-09-02"), "2026년 9월 2일 수요일");
+  assert.equal(dateCellText("2026-09-03"), "2026년 9월 3일 목요일");
+  assert.equal(dateCellText("2026-09-04"), "2026년 9월 4일 금요일");
+  assert.equal(dateCellText("2026-09-05"), "2026년 9월 5일 토요일");
+  assert.equal(dateCellText("2026-09-06"), "2026년 9월 6일 일요일");
+  assert.equal(dateCellText("2026-09-07"), "2026년 9월 7일 월요일");
+  assert.equal(dateCellText("2026-09-08"), "2026년 9월 8일 화요일");
+
+  // 달·해가 바뀌는 자리도 — 문자열을 잘라 셈하면 여기서 틀어진다.
+  assert.equal(dateCellText("2026-02-28"), "2026년 2월 28일 토요일");
+  assert.equal(dateCellText("2024-02-29"), "2024년 2월 29일 목요일");
+  assert.equal(dateCellText("2027-01-01"), "2027년 1월 1일 금요일");
+});
+
+/**
+ * 🔴 **요일 이름을 기기에 맡기지 않는다.** `toLocaleDateString()` 이나 기기 시간대를
+ * 보는 `getDay()` 로 만들면, 같은 문서가 서버 설정에 따라 다른 요일로 인쇄된다 —
+ * 고객사로 나가는 문서에서 그것은 사고이고, 오류가 안 나서 아무도 모른다.
+ * (`date-only.ts` · `service-report-draft.ts` 가 KST 로 못 박은 것과 같은 판단.)
+ *
+ * ⚠️ 아래의 -11 시간대에서 `new Date("2026-09-02").getDay()` 는 **화요일**을
+ * 돌려준다(실측). 그것이 이 시험이 막는 바로 그 어긋남이다.
+ */
+test("🔴 요일이 기기 시간대에 휘둘리지 않는다 — 같은 날짜면 늘 같은 요일", () => {
+  /**
+   * 🔴 **`delete process.env.TZ` 로는 안 돌아온다**(실측). 지우면 Node 는 시스템
+   * 시간대로 되돌아가는 것이 아니라 **마지막에 설정된 시간대를 그대로 붙들고
+   * 있는다.** 그대로 두면 이 파일의 **뒤에 오는 시험들이 딴 시간대에서 돌고**,
+   * 실제로 그렇게 「실제 양식」 시험의 발행일이 하루 밀렸다. 그래서 지금 실제로
+   * 쓰이는 시간대를 이름으로 받아 두었다가 그것으로 되돌린다.
+   */
+  const original = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try {
+    for (const timeZone of ["UTC", "Asia/Seoul", "Pacific/Kiritimati", "Pacific/Niue"]) {
+      process.env.TZ = timeZone;
+      assert.equal(dateCellText("2026-09-02"), "2026년 9월 2일 수요일", `${timeZone} 에서 어긋났다`);
+    }
+  } finally {
+    process.env.TZ = original;
+  }
 });
 
 test("🔴 병합 칸의 테두리를 가장자리 칸들에서 모은다", () => {
@@ -330,12 +397,48 @@ const SAMPLE: ServiceReportInput = {
   },
 };
 
-function filledGrid(): { grid: SheetPrintGrid; archive: ZipArchive } {
-  const workbook = fillServiceReportWorkbook(readFileSync(repairPath as string), SAMPLE);
+function filledGrid(input: ServiceReportInput = SAMPLE): {
+  grid: SheetPrintGrid;
+  archive: ZipArchive;
+} {
+  const workbook = fillServiceReportWorkbook(readFileSync(repairPath as string), input);
   return {
     grid: readSheetPrintGrid(workbook, SERVICE_REPORT_SHEET_NAME),
     archive: ZipArchive.fromBuffer(workbook),
   };
+}
+
+/** `A`=1 … `AA`=27. 시험이 셀 주소를 자리로 옮길 때 쓴다. */
+function columnOf(letters: string): number {
+  let value = 0;
+  for (const letter of letters) value = value * 26 + (letter.charCodeAt(0) - 64);
+  return value;
+}
+
+/**
+ * 그 **주소를 덮고 있는 칸**의 글자. 양식의 날짜 칸은 전부 병합이라 왼쪽 위가
+ * 라벨의 주소와 다를 수 있다 — `cellAt` 처럼 앵커를 정확히 맞히려 하면 병합 범위가
+ * 한 칸 바뀌는 날 시험이 «값이 틀렸다»가 아니라 «칸이 없다»로 죽는다.
+ */
+function textCovering(grid: SheetPrintGrid, address: string): string {
+  const parsed = /^([A-Z]+)(\d+)$/.exec(address);
+  assert.ok(parsed, `셀 주소가 아닙니다: ${address}`);
+  const column = columnOf(parsed[1]);
+  const row = Number(parsed[2]);
+
+  for (const gridRow of grid.rows) {
+    for (const cell of gridRow.cells) {
+      if (
+        row >= cell.row &&
+        row < cell.row + cell.rowSpan &&
+        column >= cell.column &&
+        column < cell.column + cell.colSpan
+      ) {
+        return cell.text;
+      }
+    }
+  }
+  assert.fail(`${address} 를 덮는 칸이 없습니다`);
 }
 
 /** 시험이 스스로 양식을 읽어 «인쇄 영역이 무엇인가» 를 따로 구한다. */
@@ -518,6 +621,34 @@ test("🔴 실제 양식: 그림은 도장 둘뿐이고 ActiveX 의 EMF 는 안 
     assert.ok(picture.topPt >= 0 && picture.topPt < grid.heightPt, `${picture.name} 의 세로 자리가 밖입니다`);
     assert.ok(picture.widthPt > 0 && picture.heightPt > 0, `${picture.name} 의 크기가 0 입니다`);
   }
+});
+
+/**
+ * 🔴 **날짜 칸 넷이 전부 요일까지 붙는다.**
+ *
+ * 양식의 `AO8`(발행) · `AK14`(접수) · `AF27`(현품 인수) · `AF28`(조치 완료)은
+ * **같은 서식**(`[$-F800]` 시스템 긴 날짜)을 쓴다. 사용자가 짚은 것은 접수 하나
+ * 였지만 넷이 같은 서식이므로 하나만 다르면 그것이 더 이상하다 — 그래서 넷을 다
+ * 본다.
+ *
+ * 자리를 코드에 적는 대신 **채우개가 쓰는 주소표(`SERVICE_REPORT_CELLS`)에서
+ * 가져온다.** 양식이 바뀌어 칸이 옮겨 가면 채우개와 이 시험이 함께 따라간다.
+ */
+test("🔴 실제 양식: 날짜 칸 넷이 전부 요일까지 그려진다", { skip: skipRepair }, () => {
+  const { grid } = filledGrid({
+    ...SAMPLE,
+    disposition: {
+      onSiteRepair: false,
+      replacementDelivery: false,
+      goodsReceipt: { on: new Date(Date.UTC(2026, 7, 21)), number: "IN-001" },
+      completion: { on: new Date(Date.UTC(2026, 8, 1)) },
+    },
+  });
+
+  assert.equal(textCovering(grid, SERVICE_REPORT_CELLS.issuedOn), "2026년 9월 2일 수요일");
+  assert.equal(textCovering(grid, SERVICE_REPORT_CELLS.receivedOn), "2026년 8월 20일 목요일");
+  assert.equal(textCovering(grid, SERVICE_REPORT_CELLS.goodsReceivedOn), "2026년 8월 21일 금요일");
+  assert.equal(textCovering(grid, SERVICE_REPORT_CELLS.completedOn), "2026년 9월 1일 화요일");
 });
 
 test("🔴 실제 양식: 인쇄 설정이 양식 그대로다", { skip: skipRepair }, () => {

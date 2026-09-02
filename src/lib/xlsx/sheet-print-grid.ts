@@ -548,16 +548,65 @@ function readSheetCells(
 }
 
 /**
+ * 요일 이름. **코드에 못 박는다.**
+ *
+ * 🔴 `toLocaleDateString()` 도 `Intl.DateTimeFormat("ko-KR", { weekday })` 도 쓰지
+ * 않는다. 앞의 것은 **읽는 컴퓨터의 로케일**을 따라가고(같은 문서가 기기마다 다른
+ * 글자로 보인다), 뒤의 것은 로케일을 못 박아도 **그 컴퓨터의 Node 에 한국어 ICU 가
+ * 들어 있어야** 한다 — small-icu 로 빌드된 Node 는 조용히 「Wednesday」를 돌려준다.
+ * 그 어긋남은 오류를 내지 않아서 아무도 모른 채 문서에 찍힌다.
+ *
+ * `date-only.ts` 와 `service-report-draft.ts` 가 시간대를 KST 로 못 박은 것과 같은
+ * 판단이다 — **보이는 글자를 기기에 맡기지 않는다.** 여기는 그보다 한 걸음 더
+ * 간단하다: 다루는 값이 이미 날짜뿐(`YYYY-MM-DD`)이라 시간대 문제 자체가 없다.
+ */
+const KOREAN_WEEKDAY_NAMES = [
+  "일요일",
+  "월요일",
+  "화요일",
+  "수요일",
+  "목요일",
+  "금요일",
+  "토요일",
+] as const;
+
+/**
+ * 「2026년 9월 2일 수요일」 — 양식의 `[$-F800]`(시스템 긴 날짜)을 한국어 Windows 의
+ * Excel 이 그리는 모양 그대로.
+ *
+ * 🔴 요일은 **UTC 자정으로 만든 날짜에서** 뽑는다(`date-only.ts` 의
+ * `parseDateOnlyToUtcMidnight` 과 같은 수법). 그 값은 실제 시각이 아니라 달력 셈을
+ * 위한 것이고, `getUTCDay()` 는 기기 시간대를 보지 않으므로 **같은 날짜면 어느
+ * 컴퓨터에서도 늘 같은 요일**이다. `new Date("2026-09-02").getDay()` 로 하면 그
+ * 보증이 사라진다.
+ */
+function koreanLongDate(year: number, month: number, day: number): string {
+  const weekday = KOREAN_WEEKDAY_NAMES[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  return `${year}년 ${month}월 ${day}일 ${weekday}`;
+}
+
+/**
  * 셀에 찍히는 글자.
  *
  * 🔴 **숫자 서식 코드를 읽지 않는다.** 손보는 것은 날짜 하나뿐이다: 이 통합문서는
  * `dateCompatibility="0"` 이라 날짜가 일련번호가 아니라 ISO 8601(`t="d"`)로 들어
  * 있고(채우개의 `setIsoDate`), 그대로 두면 「2026-09-02」로 나온다.
  *
- * ⚠️ 양식이 쓰는 날짜 서식은 `[$-F800]`(시스템 긴 날짜) 하나인데, 그것이 무엇으로
- * 보이는지는 **파일을 여는 사람의 OS 설정**을 따른다 — 한국어 Windows 에서는
- * 요일까지 붙는다. 여기서는 알 수 없으므로 요일을 지어내지 않고 「2026년 9월 2일」
- * 까지만 적는다. 값은 같고 꾸밈만 다르다.
+ * ── 🔴 요일까지 그린다 (2026-09-02 사용자 결정) ─────────────────────────
+ * 양식이 쓰는 날짜 서식은 `[$-F800]`(**시스템 긴 날짜**) 하나이고, 날짜 칸 넷
+ * (`AO8` 발행 · `AK14` 접수 · `AF27` 현품 인수 · `AF28` 조치 완료)이 전부 그것이다.
+ * 그것이 무엇으로 보이는지는 파일을 여는 사람의 OS 설정을 따르는데, **사용자가
+ * 실제로 쓰는 한국어 Windows 의 Excel 은 요일까지 그린다.** 예전에는 "읽는 사람의
+ * OS 를 알 수 없으니 지어내지 않는다"며 「2026년 9월 2일」까지만 적었지만, 그러면
+ * 미리보기와 내려받은 파일이 **같은 칸을 다르게 보여 준다** — 이 미리보기가 애초에
+ * 없애려던 어긋남이 바로 그것이다.
+ *
+ * 칸 넷이 같은 서식이라 여기 한 자리만 고치면 넷이 함께 따라온다. 하나만 요일이
+ * 붙으면 그것이 더 이상하다.
+ *
+ * ⚠️ **미리보기에만 걸리는 손질이다.** 내려받는 xlsx 는 이 함수를 지나가지 않고
+ * Excel 이 스스로 서식을 그리므로, 채우개(`service-report-template.ts`)에는 고칠
+ * 것이 없다. 값(`2026-09-02`)은 양쪽이 한 글자도 다르지 않고 꾸밈만 맞춘 것이다.
  *
  * ⚠️ 양식이 언젠가 보통(transitional) 통합문서로 다시 저장되면 날짜가 일련번호로
  * 바뀐다(`usesIsoDates` 참조). 그때 이 칸은 「46265」처럼 보인다 — 그때 고칠 일이고,
@@ -570,7 +619,7 @@ function displayText(raw: string | null, type: string | null): string {
 
   const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
   if (!date) return text;
-  return `${date[1]}년 ${Number(date[2])}월 ${Number(date[3])}일`;
+  return koreanLongDate(Number(date[1]), Number(date[2]), Number(date[3]));
 }
 
 /**

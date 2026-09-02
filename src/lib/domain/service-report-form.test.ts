@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { productCategoryLabels, WORKFLOW_TYPE_CODES } from "@/lib/domain/types";
 import {
   SERVICE_REPORT_MAX_REMARK_ROWS,
   validateServiceReportFields,
@@ -31,6 +32,7 @@ import {
   serviceReportLines,
   serviceReportManufacturedFromSerialNumber,
   serviceReportManufacturedPatch,
+  serviceReportProductCategoryText,
   serviceReportProductNameFromModel,
   serviceReportRowLimitErrors,
   serviceReportSerialNumberWarning,
@@ -294,6 +296,133 @@ test("목록 화면의 빈 값 표시 `-` 는 문서로 옮기지 않는다", ()
   assert.equal(values.lotNumber, "");
   assert.equal(values.serialNumber, "");
   assert.equal(values.situationDetail, "");
+});
+
+// ── 🔴 품명 둘째 줄 — 화면의 영어 표기를 문서에서는 한글로 ────────────────
+
+/**
+ * 🔴 **글자를 그대로 못 박는다.** 고객사로 나가는 문서에 찍히는 글자라, 상수에서
+ * 가져오면 "상수가 바뀌어도 시험은 통과하는" 상태가 된다 — 그때 바뀌는 것은 발행본
+ * 이다. 철자도 함께 못 박힌다(`제너`이지 `제네`가 아니다 — 2026-09-02 사용자 결정).
+ */
+test("🔴 화면의 영어 표기가 문서에서는 한글이 된다 — Generator · Matcher · Total Controller", () => {
+  assert.equal(serviceReportProductCategoryText("Generator"), "RF제너레이터");
+  assert.equal(serviceReportProductCategoryText("Matcher"), "M-BOX");
+  assert.equal(serviceReportProductCategoryText("Total Controller"), "RF제너레이터");
+});
+
+/**
+ * 🔴 제품 종류는 셋인데 문서 표기는 둘뿐이다. 「Total Controller 인데 왜
+ * 제너레이터냐」는 복사 실수처럼 보이지만 **사용자 결정이다(2026-09-02).** 이
+ * 단언이 그것을 못 박아, 다음 사람이 "고쳐 주는" 것을 막는다.
+ */
+test("🔴 Total Controller 는 Generator 와 같은 글자로 간다 — 복사 실수가 아니라 결정이다", () => {
+  assert.equal(
+    serviceReportProductCategoryText("Total Controller"),
+    serviceReportProductCategoryText("Generator")
+  );
+});
+
+test("접수 건의 제품 구분이 문서 표기로 옮겨져 폼에 들어간다", () => {
+  const values = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "ICD",
+      modelName: null,
+      lotNumber: null,
+      serialNumber: null,
+      receivedAt: null,
+      // 접수 건 매퍼가 넣는 값 그대로 — `productCategoryLabels[...]` 의 결과다.
+      productCategory: productCategoryLabels.WARRANTY_GENERATOR,
+      reportedSymptom: null,
+    },
+  });
+
+  assert.equal(values.productCategory, "RF제너레이터");
+});
+
+/**
+ * 🔴 옮겨 적는 표가 **화면의 표를 덮지 않는다.** 목록·필터·대시보드는
+ * `productCategoryLabels` 의 영어 글자를 그대로 비교해 쓰므로
+ * (`repair-case-filters.ts` 의 주석), 그 표가 바뀌면 이번 요청 밖의 화면들이 함께
+ * 바뀐다.
+ */
+test("🔴 화면이 쓰는 productCategoryLabels 는 영어 그대로다 — 문서 표기가 화면을 덮지 않는다", () => {
+  assert.equal(productCategoryLabels.PAID_GENERATOR, "Generator");
+  assert.equal(productCategoryLabels.PAID_MATCHER, "Matcher");
+  assert.equal(productCategoryLabels.PAID_TOTAL_CONTROLLER, "Total Controller");
+});
+
+/**
+ * 🔴 유상·무상·추후결정 셋이 같은 화면 표기를 나눠 쓴다. 옮겨 적는 표는 워크플로
+ * 유형마다 한 줄씩이라 **한 줄만 다르게 적어도 tsc 가 아무 말을 안 한다** — 그때는
+ * 어느 한쪽이 조용히 이기고, 같은 제품이 접수 유형에 따라 다른 이름으로 발행된다.
+ * 그 어긋남을 여기서 잡는다.
+ */
+test("🔴 같은 화면 표기는 같은 문서 표기로 간다 — 유상·무상·추후결정이 갈리지 않는다", () => {
+  const byLabel = new Map<string, string>();
+
+  for (const code of WORKFLOW_TYPE_CODES) {
+    const label = productCategoryLabels[code];
+    const text = serviceReportProductCategoryText(label);
+
+    // 🔴 옮길 짝이 없어 영어가 그대로 나오는 종류가 있으면 안 된다 — 고객사로
+    //    나가는 문서에 영어가 찍힌다. 종류가 늘면 tsc 가 표를 잡고, 여기가 두 번째
+    //    그물이다.
+    assert.notEqual(text, label, `${code}(${label}) 의 문서 표기가 없습니다`);
+
+    const seen = byLabel.get(label);
+    if (seen === undefined) byLabel.set(label, text);
+    else assert.equal(text, seen, `${label} 의 문서 표기가 워크플로 유형마다 다릅니다`);
+  }
+
+  assert.deepEqual([...byLabel.values()].sort(), ["M-BOX", "RF제너레이터", "RF제너레이터"]);
+});
+
+/**
+ * 🔴 **저장된 장은 옮겨 적지 않는다.** 이 표는 `createServiceReportFormValues`
+ * 안에서만 지나가고, 저장된 장을 열 때 서버 페이지는 그 함수를 아예 부르지 않는다
+ * (`serviceReportFormValues`) — 사람이 화면에서 고쳐 둔 표기가 다음에 열 때
+ * 되돌려지면 안 된다.
+ */
+test("🔴 저장된 보고서의 품명 둘째 줄은 저장된 값 그대로다 — 표기 표가 덮지 않는다", () => {
+  const saved: ServiceReportSaveValues = {
+    ...filledForm(),
+    // 사람이 손으로 고쳐 저장해 둔 표기. 영어로 되돌리지도, 한글로 옮기지도 않는다.
+    productCategory: "Generator",
+  };
+
+  const poured = serviceReportFormValues(saved, SERVICE_REPORT_FINDINGS_INTRO);
+  assert.equal(poured.productCategory, "Generator");
+
+  const korean = serviceReportFormValues(
+    { ...filledForm(), productCategory: "총괄 제어기" },
+    SERVICE_REPORT_FINDINGS_INTRO
+  );
+  assert.equal(korean.productCategory, "총괄 제어기");
+});
+
+test("🔴 빈 값 표시 `-` 는 옮겨 적기 전에 걸러진다 — 문서의 품명 둘째 줄이 비워진다", () => {
+  const values = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "ICD",
+      modelName: null,
+      lotNumber: null,
+      serialNumber: null,
+      receivedAt: null,
+      // 라벨을 못 찾았을 때 매퍼가 넣는 값(`db/mappers/repair-case.ts`).
+      productCategory: "-",
+      reportedSymptom: null,
+    },
+  });
+
+  assert.equal(values.productCategory, "");
+});
+
+test("표에 없는 글자는 그대로 둔다 — 사람이 적어 둔 표기가 사라지지 않는다", () => {
+  assert.equal(serviceReportProductCategoryText("RF 제네레이터"), "RF 제네레이터");
+  assert.equal(serviceReportProductCategoryText(""), "");
 });
 
 test("접수일이 시각까지 붙어 와도 날짜 칸이 받는 모양으로 자른다", () => {
