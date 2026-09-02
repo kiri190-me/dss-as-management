@@ -3,6 +3,7 @@
 import {
   serviceReportCauseOptions,
   serviceReportFieldError,
+  serviceReportGoodsReceiptPatch,
   type ServiceReportCauseLabels,
   type ServiceReportFormValues,
 } from "@/lib/domain/service-report-form";
@@ -28,12 +29,18 @@ import {
  * ⚠️ 「조치 완료」는 **수리 보고서에만 있다.** 검사로 고르면 이 칸이 사라지고,
  * 요청에서도 빠진다(서버가 검사에 그것을 보내면 거절한다). 적어 둔 값은 화면
  * 상태에 그대로 남는다 — 종류를 잘못 골랐다가 되돌리는 일이 실제로 있다.
+ *
+ * 🔴 「현품 인수」를 체크하면 날짜와 번호가 따라 채워진다. **판정은 여기 없다** —
+ * `serviceReportGoodsReceiptPatch` 하나가 «빈 칸에만 채운다»와 «체크를 풀 때는
+ * 손대지 않는다»를 전부 정하고, 시험도 거기 붙는다. 화면은 체크 상태를 넘겨
+ * 그 결과를 그대로 얹을 뿐이다.
  */
 export default function ServiceReportDispositionFields({
   values,
   onChange,
   fieldErrors,
   causeLabels,
+  intakeNumber,
   disabled,
 }: {
   values: ServiceReportFormValues;
@@ -41,6 +48,15 @@ export default function ServiceReportDispositionFields({
   fieldErrors: Record<string, string> | null;
   /** 🔴 채우개의 표에서 온다 — 화면에 사본을 두지 않는다. */
   causeLabels: ServiceReportCauseLabels;
+  /**
+   * 그 접수 건의 인수번호. 「현품 인수」 번호의 자동 채움에 쓴다.
+   *
+   * 🔴 폼 값(`ServiceReportFormValues`)이 아니라 **prop** 으로 온다 — 문서에
+   * 저장되는 값이 아니라 «접수 건이 무엇인가»라는 바깥 사실이고, 저장된 장을
+   * 다시 열 때도 같은 길로 와야 하기 때문이다(`domain/service-report-form.ts`
+   * 의 `ServiceReportRepairCaseSeed` 머리말에 까닭을 적어 두었다).
+   */
+  intakeNumber: string;
   disabled: boolean;
 }) {
   const error = (key: string) => serviceReportFieldError(fieldErrors, key);
@@ -56,7 +72,7 @@ export default function ServiceReportDispositionFields({
   return (
     <ServiceReportSection
       title="조치 · 원인"
-      description="체크한 칸에만 표시가 찍힙니다. 「현품 인수」와 「조치 완료」는 날짜를 몰라도 체크만으로 표시됩니다."
+      description="체크한 칸에만 표시가 찍힙니다. 「현품 인수」를 체크하면 접수일과 인수번호가 빈 칸에만 채워집니다 — 적어 둔 값은 그대로 둡니다. 「현품 인수」와 「조치 완료」는 날짜를 몰라도 체크만으로 표시됩니다."
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <FieldGroup label="조치" error={error("disposition")}>
@@ -76,7 +92,11 @@ export default function ServiceReportDispositionFields({
             <CheckboxField
               label="현품 인수"
               checked={values.goodsReceiptChecked}
-              onChange={(goodsReceiptChecked) => onChange({ goodsReceiptChecked })}
+              // 🔴 체크할 때 접수일·인수번호가 **빈 칸에만** 들어간다. 판정은
+              //    전부 도메인 함수 안이다 — 위 머리말 참조.
+              onChange={(checked) =>
+                onChange(serviceReportGoodsReceiptPatch(checked, values, intakeNumber))
+              }
               disabled={disabled}
             />
             {values.goodsReceiptChecked && (

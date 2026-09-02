@@ -124,9 +124,16 @@ import {
  * 내용이 배정된 자리 안에 들어가면 남는 줄이 저절로 사이를 벌린다. 그런데
  * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
  * 붙어** 구분이 사라진다. 그래서 밀어낼 때는 한 줄을 더 띄운다
- * (`SERVICE_REPORT_SECTION_GAP_ROWS`·`planBodyLayout`). 맺음 표시는 그대로
- * 마지막 내용 줄의 바로 다음이고, 내용이 없는 구역은 건너뛰면서 빈 줄도 안
- * 만든다 — 안 그러면 쓰이지도 않은 구역 때문에 두 줄이 빈다.
+ * (`SERVICE_REPORT_SECTION_GAP_ROWS`·`planBodyLayout`). 내용이 없는 구역은
+ * 건너뛰면서 빈 줄도 안 만든다 — 안 그러면 쓰이지도 않은 구역 때문에 두 줄이
+ * 빈다.
+ *
+ * ── 🔴 맺음 표시의 위·아래에도 여백이 있다 ─────────────────────────────
+ * 맺음 표시(`～이　상～`)는 **마지막 내용 줄에서 한 줄 띄운 자리**에 앉고, 그
+ * 아래로 **두 줄**이 본문 블록 안에 남는다
+ * (`SERVICE_REPORT_CLOSING_GAP_ROWS`·`SERVICE_REPORT_CLOSING_TRAILING_ROWS`,
+ * 2026-09-02 사용자 결정). 셋 다 본문 용량을 먹으므로 자리가 모자라면 여느
+ * 때처럼 `growBodyBlock` 이 줄을 끼워 넣는다.
  *
  * ── 🔴 「확인내용」만 글상자보다 **한 줄 아래**다 ───────────────────────
  * 위 계산은 「확인내용」에 31행을 준다. 양식의 두 글상자(본문 상자·라벨 상자)가
@@ -304,10 +311,11 @@ export const SERVICE_REPORT_BODY_LABELS = {
  * `～` 이고 사이의 공백은 전각(U+3000)이다. 보통 글자로 적으면 자간이 달라져
  * 다른 문서처럼 보인다(제목의 전각 공백과 같은 이유).
  *
- * 자리는 **본문 마지막 줄의 바로 다음 줄**, 본문 내용 열이다. 양식의 글상자는
- * 이 글자를 상자 밑바닥에 두었지만 상자는 크기가 고정이라 본문이 길어지면
- * 어긋난다. 셀에 두면 본문이 몇 줄이든 늘 끝에 붙는다. 가운데 맞춤은 양식이
- * 이미 해 준다 — 본문 내용 칸의 서식이 `horizontal="center"` 다.
+ * 자리는 **마지막 내용 줄에서 한 줄 띄운 줄**, 본문 내용 열이다
+ * (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 양식의 글상자는 이 글자를 상자 밑바닥에
+ * 두었지만 상자는 크기가 고정이라 본문이 길어지면 어긋난다. 셀에 두면 본문이 몇
+ * 줄이든 늘 끝에 붙는다. 가운데 맞춤은 양식이 이미 해 준다 — 본문 내용 칸의
+ * 서식이 `horizontal="center"` 다(왼쪽 맞춤은 맺음 표시 **앞줄까지**만 얹는다).
  */
 export const SERVICE_REPORT_CLOSING_MARK = "～이　상～";
 
@@ -510,9 +518,17 @@ const LAYOUT_GUARDS: readonly (readonly [ref: string, expected: string])[] = [
 
 /** 「현품 인수」 — 값이 있으면 체크된 것이다(없으면 체크칸이 빈다). */
 export type ServiceReportGoodsReceipt = {
-  /** `AF27`. 양식에는 접수일을 받아 오는 `=AK14` 수식이 들어 있었다. */
+  /**
+   * `AF27`. 🔴 양식에는 **접수일을 받아 오는 `=AK14` 수식**이 들어 있었다
+   * (`AK14` = `SERVICE_REPORT_CELLS.receivedOn`). 즉 «현품 인수 날짜 = 접수일»이
+   * 원본 설계다 — 화면이 「현품 인수」를 체크할 때 접수일을 미리 채우는 근거가
+   * 여기다(`domain/service-report-form.ts` 의 `serviceReportGoodsReceiptPatch`).
+   *
+   * ⚠️ 그렇다고 채우개가 수식을 되살리지는 않는다. 이 문서는 발행본 사본이라
+   * 「값을 안 주면 양식 그대로」가 통하지 않는다 — 받은 날짜를 값으로 적는다.
+   */
   on?: Date;
-  /** `AQ27`. */
+  /** `AQ27`. 접수 건의 **인수번호**가 들어가는 자리다(위와 같은 자동 채움). */
   number?: string;
 };
 
@@ -860,6 +876,35 @@ const DEFAULT_TEXT_TOP_INSET = 45720;
  */
 export const SERVICE_REPORT_SECTION_GAP_ROWS = 1;
 
+/**
+ * 🔴 맺음 표시(`～이　상～`) **위**에 비워 두는 줄 수.
+ *
+ * 예전에는 맺음 표시가 마지막 내용 줄에 딱 붙어 있었다. 실기에서 쓰던 사람이
+ * 발행본과 견주어 짚은 자리다(2026-09-02 사용자 결정):
+ *
+ *   55        | 정리 마지막 줄
+ *   56        |                 ← 이 한 줄
+ *   57        | ～이　상～
+ *
+ * ⚠️ 구역 사이의 빈 줄(`SERVICE_REPORT_SECTION_GAP_ROWS`)과 **따로** 산다.
+ * 그쪽은 구역과 구역 사이이고, 이쪽은 본문 전체가 끝난 다음이다. 숫자가 우연히
+ * 같다고 하나로 합치지 말 것 — 한쪽만 바꾸고 싶은 날이 온다.
+ */
+export const SERVICE_REPORT_CLOSING_GAP_ROWS = 1;
+
+/**
+ * 🔴 맺음 표시 **아래**로 본문 블록 안에 남겨 두는 줄 수.
+ *
+ * 같은 자리에서 함께 결정된 것이다(2026-09-02). 맺음 표시가 상자 밑변에 딱
+ * 붙으면 답답해 보인다 — 발행본은 그 아래에 두 줄이 비어 있다.
+ *
+ * 🔴 **이것도 본문 용량이다.** 자리가 모자라면 `growBodyBlock` 이 여느 때처럼
+ * 줄을 끼워 넣는다(`fillSheet` 의 `neededRows`). 그러니 맺음 표시가 블록의
+ * 마지막 줄에 앉는 일은 이제 없다 — 상자의 아래 테두리가 걸린 그 줄은 늘
+ * 맺음 표시 **아래 두 줄째**다.
+ */
+export const SERVICE_REPORT_CLOSING_TRAILING_ROWS = 2;
+
 /** 한 구역이 실제로 앉는 자리. */
 type SectionPlacement = { section: BodySection; startRow: number; rowCount: number };
 
@@ -1157,8 +1202,9 @@ function planBodyLayout(
      *     내용이 배정된 자리를 꽉 채우거나 넘칠 때 이쪽이 이겨서 사이가 벌어진다
      *     (`SERVICE_REPORT_SECTION_GAP_ROWS`).
      *
-     * 🔴 **마지막 내용 구역에는 안 붙인다.** 맺음 표시(`～이　상～`)는 지금처럼
-     * 마지막 내용 줄의 바로 다음 줄이다 — 사용자가 요청한 것은 구역 사이다.
+     * 🔴 **마지막 내용 구역에는 안 붙인다.** 그 뒤의 여백은 구역 사이가 아니라
+     * 맺음 표시의 것이고(`SERVICE_REPORT_CLOSING_GAP_ROWS`), 아래에서 따로
+     * 더한다 — 두 규칙을 한 자리에서 뭉뚱그리면 한쪽만 바꿀 수 없게 된다.
      */
     cursor =
       index === lastWithLines
@@ -1166,7 +1212,15 @@ function planBodyLayout(
         : Math.max(startRow + rowCount, startRow + lines + SERVICE_REPORT_SECTION_GAP_ROWS);
   }
 
-  return { placements, closingRow: cursor };
+  /**
+   * 🔴 맺음 표시는 마지막 내용 줄에서 **한 줄 띄운** 자리다. `cursor` 는 마지막
+   * 내용 줄의 바로 다음이므로 거기에 여백을 더한 줄이 맺음 표시의 자리다.
+   *
+   * ⚠️ 아래로 남겨 둘 두 줄(`SERVICE_REPORT_CLOSING_TRAILING_ROWS`)은 여기서
+   * 세지 않는다. 그것은 «무엇을 어디에 그리는가»가 아니라 «블록이 얼마나 커야
+   * 하는가»의 문제라, 자리를 셈하는 `fillSheet` 가 맡는다.
+   */
+  return { placements, closingRow: cursor + SERVICE_REPORT_CLOSING_GAP_ROWS };
 }
 
 function assertDate(value: Date, what: string): void {
@@ -1240,8 +1294,13 @@ function fillSheet(
     shiftFindingsSectionDown(sections, readSectionStartRows(drawingXml, evened, block, sections)),
     block
   );
-  // 본문 마지막 줄 다음에 「～이　상～」 한 줄이 더 든다.
-  const neededRows = layout.closingRow - block.firstRow + 1;
+  /**
+   * 블록이 얼마나 커야 하는가. `closingRow` 에는 맺음 표시 **위**의 여백이 이미
+   * 들어 있고(`planBodyLayout`), 여기에 맺음 표시 **아래** 두 줄을 더한다 —
+   * 그 두 줄이 블록 밖으로 밀려나면 여백이 아니라 잘린 문서가 된다.
+   */
+  const neededRows =
+    layout.closingRow + SERVICE_REPORT_CLOSING_TRAILING_ROWS - block.firstRow + 1;
   if (neededRows > SERVICE_REPORT_MAX_BODY_ROWS) {
     throw new Error(
       `본문이 ${neededRows}줄입니다. 한 보고서에 ${SERVICE_REPORT_MAX_BODY_ROWS}줄까지만 담을 수 있습니다.`
@@ -1338,9 +1397,10 @@ function fillSheet(
 
   /**
    * 🔴 본문 **내용 줄만** 왼쪽으로. 맺음 표시가 앉는 줄 바로 위까지가 내용
-   * 자리다(구역 사이의 빈 줄도 여기 든다 — 언제 글자가 들어와도 모양이 같아야
-   * 한다). 맺음 표시는 원본 서식 그대로 둔다(가운데 맞춤이고, 마지막 줄이면
-   * 상자의 아래 테두리가 그 서식에 걸려 있다).
+   * 자리다(구역 사이의 빈 줄도, 맺음 표시 **위**의 빈 줄도 여기 든다 — 언제
+   * 글자가 들어와도 모양이 같아야 한다). 맺음 표시와 그 **아래** 두 줄은 원본
+   * 서식 그대로 둔다 — 가운데 맞춤이고, 블록의 마지막 줄에는 상자의 아래
+   * 테두리가 그 서식에 걸려 있다.
    */
   const aligned = alignBodyContentLeft(xml, stylesXml, {
     column: block.contentColumn,
@@ -1425,15 +1485,17 @@ function splitBodyLine(line: string, width: number): string[] {
 
 function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): string {
   const capacity = block.lastRow - block.firstRow + 1;
-  const used = layout.closingRow - block.firstRow;
-  if (used + 1 > capacity) {
+  // 🔴 맺음 표시 **아래 두 줄까지** 블록 안이어야 한다 — 위의 여백은 이미
+  //    `closingRow` 에 들어 있다.
+  const needed = layout.closingRow + SERVICE_REPORT_CLOSING_TRAILING_ROWS - block.firstRow + 1;
+  if (needed > capacity) {
     /**
      * 🔴 여기까지 오면 줄을 늘리는 쪽(`growBodyBlock`)이 셈을 틀린 것이다.
      * 조용히 자르지 않는다 — 잘린 줄은 아무 표시 없이 사라지고, 그것이
      * 「조치」의 마지막 줄이면 우리가 한 일이 문서에서 사라진 채 나간다.
      */
     throw new Error(
-      `본문이 ${used}줄인데 양식에는 ${capacity - 1}줄만 들어갑니다(${block.firstRow}~${block.lastRow}행).`
+      `본문이 맺음 표시와 여백까지 ${needed}줄인데 양식에는 ${capacity}줄만 들어갑니다(${block.firstRow}~${block.lastRow}행).`
     );
   }
 
@@ -1458,7 +1520,8 @@ function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): strin
     });
   }
 
-  // 🔴 맺음 표시는 **언제나 마지막 내용 줄의 다음 줄**이다.
+  // 🔴 맺음 표시는 **언제나 마지막 내용 줄에서 한 줄 띄운 줄**이다. 그 아래
+  //    두 줄은 위에서 통째로 비워 둔 그대로 남는다 — 따로 쓸 것이 없다.
   xml = setInlineString(
     xml,
     `${block.contentColumn}${layout.closingRow}`,

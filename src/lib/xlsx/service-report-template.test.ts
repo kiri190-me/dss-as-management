@@ -27,7 +27,9 @@ import {
   SERVICE_REPORT_CHECK_MARK,
   SERVICE_REPORT_CAUSE_LABELS,
   SERVICE_REPORT_CAUSES,
+  SERVICE_REPORT_CLOSING_GAP_ROWS,
   SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_TRAILING_ROWS,
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_FINDINGS_ROW_OFFSET,
   SERVICE_REPORT_MAX_BODY_ROWS,
@@ -859,11 +861,15 @@ test("검사 보고서: 머리·체크·본문이 준 대로 들어간다", { sk
   assert.equal(filled.text("C34"), undefined, "두 구역 사이에 라벨이 찍혔다");
   assert.equal(filled.text("H34"), undefined, "두 구역이 이어 붙었다");
   assert.equal(filled.text("H42"), undefined, "두 구역이 이어 붙었다");
-  // 맺음 표시는 마지막 내용 줄의 바로 다음 줄.
-  assert.equal(filled.text("H45"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 맺음 표시는 마지막 내용 줄(44)에서 **한 줄 띄운** 46행이고, 그 아래로
+  //    두 줄(47·48)이 본문 블록(~59) 안에 남는다.
+  assert.equal(filled.text("H45"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H46"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H47"), undefined);
+  assert.equal(filled.text("H48"), undefined);
   // 🔴 정리는 검사 보고서에 없다.
   assert.equal(filled.text("C45"), undefined);
-  assert.equal(filled.text("H46"), undefined);
+  assert.equal(filled.text("C46"), undefined);
   assert.equal(filled.text("H59"), undefined);
 
   // 비고.
@@ -909,9 +915,11 @@ test("수리 보고서: 제목·조치 완료·정리가 이 종류에만 들어
   assert.equal(filled.text("C34"), undefined, "두 구역 사이에 라벨이 찍혔다");
   assert.equal(filled.text("H34"), undefined, "「조치」가 「확인내용」에 이어 붙었다");
   assert.equal(filled.text("H43"), undefined, "「정리」가 「조치」에 이어 붙었다");
-  // 맺음 표시는 마지막 내용 줄의 바로 다음 줄.
-  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
-  assert.equal(filled.text("H53"), undefined);
+  // 🔴 맺음 표시는 마지막 내용 줄(51)에서 **한 줄 띄운** 53행. 아래 두 줄도 빈다.
+  assert.equal(filled.text("H52"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H53"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H54"), undefined);
+  assert.equal(filled.text("H55"), undefined);
 
   assertUntouchedParts(repairPath as string, filled);
 });
@@ -947,7 +955,7 @@ test("🔴 양식의 글상자에 남아 있던 견본 글자가 사라진다", 
   assert.equal(filled.text("C33"), "인　용");
   assert.equal(filled.text("C41"), "조  치");
   assert.equal(filled.text("C51"), "정  리");
-  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H53"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 /**
@@ -1001,7 +1009,8 @@ test("🔴 확인내용이 한 줄뿐이어도 라벨은 두 줄을 지킨다", 
   assert.equal(filled.text("H41"), "퓨즈 교체");
   assert.equal(filled.text("C51"), SERVICE_REPORT_BODY_LABELS.summary[0]);
   assert.equal(filled.text("H51"), "재발 시 연락 바랍니다.");
-  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H52"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H53"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 /**
@@ -1042,10 +1051,24 @@ test("🔴 짧은 본문이라도 세 구역은 제자리(32·41·51행)에서 �
   assert.equal(filled.text("C51"), SERVICE_REPORT_BODY_LABELS.summary[0]);
   assert.equal(filled.text("H51"), "정리 1");
 
-  // 🔴 맺음 표시는 **마지막 내용 줄의 바로 다음 줄**이다 — 마지막 구역은
-  //    자리를 늘리지 않으므로 블록 끝(59행)까지 밀려 내려가지 않는다.
-  assert.equal(filled.text("H52"), SERVICE_REPORT_CLOSING_MARK);
-  assert.equal(filled.text("H53"), undefined);
+  /**
+   * 🔴 **정리 마지막 줄(51) → 빈 줄(52) → 맺음 표시(53)** — 2026-09-02 사용자
+   * 결정. 마지막 구역은 자리를 늘리지 않으므로 블록 끝(59행)까지 밀려 내려가지
+   * 않고, 여백 한 줄만큼만 아래로 간다.
+   */
+  assert.equal(filled.text("H51"), "정리 1");
+  assert.equal(filled.text("H52"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("C52"), undefined, "맺음 표시 위의 빈 줄에 라벨이 찍혔다");
+  assert.equal(filled.text("H53"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(51 + SERVICE_REPORT_CLOSING_GAP_ROWS + 1, 53, "맺음 표시의 여백이 한 줄이 아니다");
+
+  // 🔴 맺음 표시 아래로 두 줄(54·55)이 **본문 블록(~59행) 안에** 남는다.
+  for (let index = 1; index <= SERVICE_REPORT_CLOSING_TRAILING_ROWS; index += 1) {
+    assert.ok(53 + index <= TEMPLATE_BODY_LAST_ROW, `맺음 표시 아래 ${index}번째 줄이 블록 밖이다`);
+    assert.equal(filled.text(`H${53 + index}`), undefined, `H${53 + index} 에 글자가 찍혔다`);
+  }
+  assert.equal(filled.text("H54"), undefined);
+  assert.equal(filled.text("H55"), undefined);
   assert.equal(filled.text("H59"), undefined);
 
   // 구역 사이는 라벨도 내용도 없다.
@@ -1070,8 +1093,18 @@ test("🔴 검사 보고서도 두 구역이 제자리(32·43행)에서 시작�
 
   assert.equal(filled.text("C43"), SERVICE_REPORT_BODY_LABELS.actions[0]);
   assert.equal(filled.text("H43"), "조치 1");
-  assert.equal(filled.text("H44"), SERVICE_REPORT_CLOSING_MARK);
   assert.equal(filled.text("H34"), undefined, "두 구역이 이어 붙었다");
+
+  /**
+   * 🔴 「정리」가 없는 검사 보고서에서도 여백 규칙은 같다 —
+   * **조치 마지막 줄(43) → 빈 줄(44) → 맺음 표시(45) → 빈 줄 둘(46·47)**.
+   */
+  assert.equal(filled.text("H44"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H45"), SERVICE_REPORT_CLOSING_MARK);
+  for (let index = 1; index <= SERVICE_REPORT_CLOSING_TRAILING_ROWS; index += 1) {
+    assert.ok(45 + index <= TEMPLATE_BODY_LAST_ROW, `맺음 표시 아래 ${index}번째 줄이 블록 밖이다`);
+    assert.equal(filled.text(`H${45 + index}`), undefined, `H${45 + index} 에 글자가 찍혔다`);
+  }
 });
 
 /**
@@ -1090,7 +1123,12 @@ test("🔴 확인내용이 배정된 자리보다 길면 조치가 그만큼 밀
       summary: ["정리 1"],
     },
   });
-  assertSheetIsSound(filled, 0);
+  /**
+   * 🔴 줄이 **한 줄** 끼워 넣어진다. 맺음 표시가 58행이라 그 아래 두 줄(59·60)
+   * 중 하나가 양식의 블록(~59행) 밖으로 나가기 때문이다 — 여백이 잘리는 대신
+   * 블록이 커진다(`SERVICE_REPORT_CLOSING_TRAILING_ROWS`·`growBodyBlock`).
+   */
+  assertSheetIsSound(filled, 1);
 
   assert.equal(filled.text("H32"), "확인 1");
   assert.equal(filled.text("H44"), "확인 13");
@@ -1109,8 +1147,15 @@ test("🔴 확인내용이 배정된 자리보다 길면 조치가 그만큼 밀
   assert.equal(filled.text("C56"), SERVICE_REPORT_BODY_LABELS.summary[0]);
   assert.equal(filled.text("C51"), undefined, "「정리」가 밀리지 않았다");
   assert.equal(filled.text("H56"), "정리 1");
-  // 맺음 표시는 여전히 마지막 내용 줄의 **바로 다음**이다 — 그 앞은 안 띄운다.
-  assert.equal(filled.text("H57"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 구역 사이가 벌어져도 맺음 표시의 여백 규칙은 그대로다 — 56 → 빈 57 → 58.
+  assert.equal(filled.text("H57"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H58"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 아래 두 줄(59·60)이 **커진 블록 안에** 있고 둘 다 비어 있다.
+  assert.equal(filled.text("H59"), undefined, "맺음 표시 아래 첫 줄에 글자가 찍혔다");
+  assert.equal(filled.text("H60"), undefined, "맺음 표시 아래 둘째 줄에 글자가 찍혔다");
+  assert.ok(filled.merges.includes("H59:AU59"), "끼워 넣은 줄에 내용 병합이 없다");
+  // 비고는 한 줄 내려갔다 — 블록이 커진 만큼 아래가 통째로 따라간다.
+  assert.ok(filled.text("C61")?.startsWith("비　고"), "비고 라벨이 안 내려갔다");
 });
 
 /**
@@ -1155,7 +1200,11 @@ test("🔴 구역이 밀릴 때 사이에 빈 줄이 한 줄 있다 — 실측 �
   // 「정리」는 위가 밀린 만큼(넘친 2줄 + 빈 줄 1) 따라 내려간다 — 51 + 3.
   assert.equal(filled.text("C54"), SERVICE_REPORT_BODY_LABELS.summary[0]);
   assert.equal(filled.text("H54"), "정리 1");
-  assert.equal(filled.text("H55"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 정리 마지막 줄(54) → 빈 줄(55) → 맺음 표시(56) → 빈 줄 둘(57·58).
+  assert.equal(filled.text("H55"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H56"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H57"), undefined);
+  assert.equal(filled.text("H58"), undefined);
 });
 
 /**
@@ -1182,7 +1231,9 @@ test("🔴 배정된 자리를 딱 채워도 다음 구역과 한 줄 벌어진�
   // 밀린 것은 빈 줄 한 줄뿐이다 — 「정리」도 딱 한 줄만 따라 내려간다(51 + 1).
   assert.equal(filled.text("C52"), SERVICE_REPORT_BODY_LABELS.summary[0]);
   assert.equal(filled.text("H52"), "정리 1");
-  assert.equal(filled.text("H53"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 구역 사이의 빈 줄 규칙은 그대로이고, 맺음 표시 여백이 그 위에 얹힌다.
+  assert.equal(filled.text("H53"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H54"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 /**
@@ -1200,7 +1251,9 @@ test("🔴 내용 없는 구역을 건너뛸 때 빈 줄이 두 줄이 되지 �
       summary: ["정리 1"],
     },
   });
-  assertSheetIsSound(filled, 0);
+  // 🔴 맺음 표시(60)와 그 아래 두 줄(61·62)이 양식의 블록(~59행)을 넘으므로
+  //    세 줄이 끼워 넣어진다 — 여백을 잘라 내지 않는다.
+  assertSheetIsSound(filled, 3);
 
   assert.equal(filled.text("H56"), "확인 25");
   // 빈 줄은 57행 하나뿐이고, 건너뛴 「조치」가 한 줄을 더 먹지 않는다.
@@ -1208,7 +1261,14 @@ test("🔴 내용 없는 구역을 건너뛸 때 빈 줄이 두 줄이 되지 �
   assert.equal(filled.text("H57"), undefined, "빈 줄이 없다");
   assert.equal(filled.text("C58"), SERVICE_REPORT_BODY_LABELS.summary[0], "빈 줄이 두 줄이 됐다");
   assert.equal(filled.text("H58"), "정리 1");
-  assert.equal(filled.text("H59"), SERVICE_REPORT_CLOSING_MARK);
+  // 정리 마지막 줄(58) → 빈 줄(59) → 맺음 표시(60) → 빈 줄 둘(61·62).
+  assert.equal(filled.text("H59"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H60"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H61"), undefined);
+  assert.equal(filled.text("H62"), undefined);
+  // 아래 구역은 통째로 세 줄 내려갔다.
+  assert.ok(filled.text("C63")?.startsWith("비　고"), "비고 라벨이 안 내려갔다");
+  assert.equal(filled.printArea, `'${SERVICE_REPORT_SHEET_NAME}'!$B$8:$AV$67`);
 });
 
 /** 본문 줄들의 높이 — 채워진 문서에서 그대로 읽는다. */
@@ -1297,7 +1357,9 @@ test("🔴 구역 자리는 양식의 글상자를 따라간다 — 실제 양�
   assert.equal(read("C32"), SERVICE_REPORT_BODY_LABELS.findings[0]);
   assert.equal(read("C44"), SERVICE_REPORT_BODY_LABELS.actions[0], "「조치」가 글상자를 안 따라갔다");
   assert.equal(read("C57"), SERVICE_REPORT_BODY_LABELS.summary[0], "「정리」가 글상자를 안 따라갔다");
-  assert.equal(read("H58"), SERVICE_REPORT_CLOSING_MARK);
+  // 정리 마지막 줄(57) → 빈 줄(58) → 맺음 표시(59).
+  assert.equal(read("H58"), null);
+  assert.equal(read("H59"), SERVICE_REPORT_CLOSING_MARK);
   // 원래 양식이었다면 41행·51행이었다 — 그 자리는 이제 비어 있다.
   assert.equal(read("C41"), null);
   assert.equal(read("C51"), null);
@@ -1345,8 +1407,9 @@ const bodyLines = (count: number, prefix: string): string[] =>
   Array.from({ length: count }, (_value, index) => `${prefix} ${index + 1}`);
 
 test("줄을 안 늘려도 되는 본문은 양식의 줄 수 그대로 나온다", { skip: skipRepair }, () => {
-  // 빈 31행 + 확인내용 9(32~40) + 🔴 빈 줄(41) + 조치 8(42~49) + 정리 7(52~58)
-  // + 맺음 59 = 양식의 29줄에 딱 찬다.
+  // 빈 31행 + 확인내용 9(32~40) + 🔴 빈 줄(41) + 조치 8(42~49) + 정리 4(52~55)
+  // + 🔴 맺음 표시 위의 빈 줄(56) + 맺음 57 + 🔴 아래 빈 줄 둘(58·59)
+  // = 양식의 29줄에 딱 찬다.
   //
   // 🔴 확인내용이 배정된 9줄을 꽉 채우므로 그 아래 한 줄이 비고, 「조치」가
   //    42행으로 한 줄 밀린다. 「정리」는 조치에 배정된 10줄만큼 따라 밀려 52행.
@@ -1356,7 +1419,7 @@ test("줄을 안 늘려도 되는 본문은 양식의 줄 수 그대로 나온�
       findings: bodyLines(9, "확인"),
       findingsIntro: "",
       actions: bodyLines(8, "조치"),
-      summary: bodyLines(7, "정리"),
+      summary: bodyLines(4, "정리"),
     },
   });
   assertSheetIsSound(filled, 0);
@@ -1367,14 +1430,47 @@ test("줄을 안 늘려도 되는 본문은 양식의 줄 수 그대로 나온�
   assert.equal(filled.text("C42"), SERVICE_REPORT_BODY_LABELS.actions[0]);
   assert.equal(filled.text("H49"), "조치 8");
   assert.equal(filled.text("C52"), SERVICE_REPORT_BODY_LABELS.summary[0]);
-  assert.equal(filled.text("H58"), "정리 7");
-  assert.equal(filled.text("H59"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H55"), "정리 4");
+  assert.equal(filled.text("H56"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H57"), SERVICE_REPORT_CLOSING_MARK);
+  // 🔴 아래 두 줄이 블록의 마지막 두 줄이다 — 딱 맞아서 줄이 안 끼워졌다.
+  assert.equal(filled.text("H58"), undefined);
+  assert.equal(filled.text("H59"), undefined);
 
   // 아래 구역이 제자리에 있다. (라벨 뒤에는 양식의 후리가나가 딸려 온다.)
   assert.ok(filled.text("C60")?.startsWith("비　고"), "비고 라벨이 움직였다");
   assert.ok(filled.merges.includes("C60:G63"), "비고 병합이 움직였다");
   assert.equal(filled.printArea, `'${SERVICE_REPORT_SHEET_NAME}'!$B$8:$AV$64`);
   assert.ok(/<dimension ref="B2:DD117"\/>/.test(filled.sheetXml), "dimension 이 움직였다");
+});
+
+/**
+ * 🔴 바로 위 시험에서 **정리를 딱 한 줄 늘린 것**이다. 맺음 표시가 58행으로
+ * 내려가면 그 아래 두 줄 중 하나(60행)가 양식의 블록(~59행) 밖으로 나간다 —
+ * 그때 여백을 잘라 내는 대신 **줄을 끼워 넣는다**.
+ */
+test("🔴 맺음 표시 아래 두 줄이 안 남으면 줄이 끼워진다 — 딱 한 줄 차이로", { skip: skipRepair }, () => {
+  const filled = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: {
+      findings: bodyLines(9, "확인"),
+      findingsIntro: "",
+      actions: bodyLines(8, "조치"),
+      summary: bodyLines(5, "정리"),
+    },
+  });
+  assertSheetIsSound(filled, 1);
+
+  assert.equal(filled.text("H56"), "정리 5");
+  assert.equal(filled.text("H57"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H58"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H59"), undefined);
+  assert.equal(filled.text("H60"), undefined);
+
+  // 블록이 한 줄 커졌고, 아래 구역이 통째로 따라 내려갔다.
+  assert.ok(filled.merges.includes("H59:AU59"), "끼워 넣은 줄에 내용 병합이 없다");
+  assert.ok(filled.merges.includes("C61:G64"), "비고 병합이 안 내려갔다");
+  assert.equal(filled.printArea, `'${SERVICE_REPORT_SHEET_NAME}'!$B$8:$AV$65`);
 });
 
 /**
@@ -1395,8 +1491,15 @@ for (const total of [40, 60]) {
       },
     });
 
-    // 빈 31행 + 본문 total 줄 + 🔴 구역 사이의 빈 줄 둘 + 맺음 표시 한 줄.
-    const shift = total + 2 + 2 * SERVICE_REPORT_SECTION_GAP_ROWS - TEMPLATE_BODY_CAPACITY;
+    // 빈 31행 + 본문 total 줄 + 🔴 구역 사이의 빈 줄 둘 + 🔴 맺음 표시 위의
+    // 빈 줄 + 맺음 표시 한 줄 + 🔴 그 아래 두 줄.
+    const shift =
+      total +
+      2 +
+      2 * SERVICE_REPORT_SECTION_GAP_ROWS +
+      SERVICE_REPORT_CLOSING_GAP_ROWS +
+      SERVICE_REPORT_CLOSING_TRAILING_ROWS -
+      TEMPLATE_BODY_CAPACITY;
     assertSheetIsSound(filled, shift);
 
     // 1) 본문 — 첫 줄·구역 라벨·마지막 줄·맺음 표시.
@@ -1409,7 +1512,18 @@ for (const total of [40, 60]) {
     assert.equal(filled.text(`C${33 + findings.length}`), SERVICE_REPORT_BODY_LABELS.actions[0]);
     assert.equal(filled.text(`C${44 + findings.length}`), SERVICE_REPORT_BODY_LABELS.summary[0]);
     assert.equal(filled.text(`H${33 + total}`), "정리 10");
-    assert.equal(filled.text(`H${34 + total}`), SERVICE_REPORT_CLOSING_MARK);
+    // 🔴 정리 마지막 줄 → 빈 줄 → 맺음 표시 → 빈 줄 둘. 아래 두 줄은 늘어난
+    //    블록(~59+shift행) 안에 있어야 한다.
+    assert.equal(filled.text(`H${34 + total}`), undefined, "맺음 표시 위의 빈 줄이 없다");
+    const closingRow = 34 + total + SERVICE_REPORT_CLOSING_GAP_ROWS;
+    assert.equal(filled.text(`H${closingRow}`), SERVICE_REPORT_CLOSING_MARK);
+    for (let index = 1; index <= SERVICE_REPORT_CLOSING_TRAILING_ROWS; index += 1) {
+      assert.ok(
+        closingRow + index <= TEMPLATE_BODY_LAST_ROW + shift,
+        `맺음 표시 아래 ${index}번째 줄이 블록 밖이다`
+      );
+      assert.equal(filled.text(`H${closingRow + index}`), undefined);
+    }
 
     // 2) 병합 — 새 줄에는 생기고, 아래 구역은 통째로 내려간다.
     for (let row = TEMPLATE_BODY_LAST_ROW; row < TEMPLATE_BODY_LAST_ROW + shift; row += 1) {
@@ -1608,7 +1722,8 @@ test("확인내용 첫 줄 — 안 주면 정형 문구가 들어간다", { skip
   // 「조치」는 제자리(43행). 정형 문구가 한 줄 늘어도 자리는 안 흔들린다.
   assert.equal(filled.text("C43"), SERVICE_REPORT_BODY_LABELS.actions[0]);
   assert.equal(filled.text("H43"), "퓨즈 교체");
-  assert.equal(filled.text("H44"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H44"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H45"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 test("확인내용 첫 줄 — 다른 문장을 주면 그것이 들어간다", { skip: skipRepair }, () => {
@@ -1627,10 +1742,11 @@ test("확인내용 첫 줄 — 다른 문장을 주면 그것이 들어간다", 
   assert.equal(filled.text("H32"), other);
   assert.notEqual(filled.text("H32"), SERVICE_REPORT_FINDINGS_INTRO);
   assert.equal(filled.text("H33"), "외관 손상 없음");
-  // 「조치」는 제자리(41행). 「정리」가 비었으므로 맺음 표시가 바로 다음 줄.
+  // 「조치」는 제자리(41행). 「정리」가 비었으므로 맺음 표시가 41 → 빈 42 → 43.
   assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
   assert.equal(filled.text("H41"), "퓨즈 교체");
-  assert.equal(filled.text("H42"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H42"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H43"), SERVICE_REPORT_CLOSING_MARK);
 });
 
 test("🔴 확인내용 첫 줄 — 명시적으로 비우면 안 들어간다", { skip: skipRepair }, () => {
@@ -1666,7 +1782,8 @@ test("확인내용이 비어 있으면 정형 문구만 남지 않는다", { ski
   // 🔴 그래도 「조치」의 자리는 그대로다 — 위 구역이 비었다고 끌어올리지 않는다.
   assert.equal(filled.text("C41"), SERVICE_REPORT_BODY_LABELS.actions[0]);
   assert.equal(filled.text("H41"), "퓨즈 교체");
-  assert.equal(filled.text("H42"), SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(filled.text("H42"), undefined, "맺음 표시 위의 빈 줄이 없다");
+  assert.equal(filled.text("H43"), SERVICE_REPORT_CLOSING_MARK);
   assert.ok(!filled.sheetXml.includes(SERVICE_REPORT_FINDINGS_INTRO), "정형 문구만 남았다");
 });
 
@@ -1718,10 +1835,12 @@ test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 �
  */
 for (const kind of [
   // closingRow — 구역이 제자리에서 시작하므로 맺음 표시도 그만큼 아래다.
-  //   검사: (31행 빈 줄) 확인내용 32~42(배정 11줄) · 조치 43 · 맺음 44
-  //   수리: (31행 빈 줄) 확인내용 32~40(배정 9줄) · 조치 41~50 · 정리 51 · 맺음 52
-  { name: "검사", path: () => inspectionPath, skip: () => skipInspection, input: INSPECTION_INPUT, closingRow: 44 },
-  { name: "수리", path: () => repairPath, skip: () => skipRepair, input: REPAIR_INPUT, closingRow: 52 },
+  // 🔴 마지막 내용 줄과 맺음 표시 사이에 빈 줄이 한 줄 있다.
+  //   검사: (31행 빈 줄) 확인내용 32~42(배정 11줄) · 조치 43 · 빈 줄 44 · 맺음 45
+  //   수리: (31행 빈 줄) 확인내용 32~40(배정 9줄) · 조치 41~50 · 정리 51 ·
+  //         빈 줄 52 · 맺음 53
+  { name: "검사", path: () => inspectionPath, skip: () => skipInspection, input: INSPECTION_INPUT, closingRow: 45 },
+  { name: "수리", path: () => repairPath, skip: () => skipRepair, input: REPAIR_INPUT, closingRow: 53 },
 ] as const) {
   test(`🔴 ${kind.name} 보고서 — 본문 내용 줄만 왼쪽 맞춤이 된다`, { skip: kind.skip() }, () => {
     const templatePath = kind.path() as string;
@@ -1795,10 +1914,16 @@ test("🔴 줄을 늘려도 새 줄이 왼쪽이고 마지막 줄의 아래 테�
   const beforeStyles = before.readText(STYLES_PART);
   const beforeSheet = templateSheetXml(templatePath);
 
-  // 빈 31행 + 60줄 + 구역 사이의 빈 줄 둘 + 맺음 표시 = 64줄.
-  // 양식은 29줄이라 35줄이 끼워 넣어진다.
+  // 빈 31행 + 60줄 + 구역 사이의 빈 줄 둘 + 맺음 표시 위의 빈 줄 + 맺음 표시
+  // + 아래 빈 줄 둘 = 67줄. 양식은 29줄이라 38줄이 끼워 넣어진다.
   const total = 60;
-  const shift = total + 2 + 2 * SERVICE_REPORT_SECTION_GAP_ROWS - TEMPLATE_BODY_CAPACITY;
+  const shift =
+    total +
+    2 +
+    2 * SERVICE_REPORT_SECTION_GAP_ROWS +
+    SERVICE_REPORT_CLOSING_GAP_ROWS +
+    SERVICE_REPORT_CLOSING_TRAILING_ROWS -
+    TEMPLATE_BODY_CAPACITY;
   const filled = fill(templatePath, {
     ...REPAIR_INPUT,
     body: {
@@ -1812,8 +1937,10 @@ test("🔴 줄을 늘려도 새 줄이 왼쪽이고 마지막 줄의 아래 테�
   assertStylesOnlyGrew(before, filled);
 
   const afterStyles = filled.archive.readText(STYLES_PART);
-  // 94 — 31행이 비고, 구역 사이의 빈 줄 둘이 더 든다.
-  const closingRow = 32 + total + 2 * SERVICE_REPORT_SECTION_GAP_ROWS;
+  // 95 — 31행이 비고, 구역 사이의 빈 줄 둘과 맺음 표시 위의 빈 줄이 더 든다.
+  const closingRow =
+    32 + total + 2 * SERVICE_REPORT_SECTION_GAP_ROWS + SERVICE_REPORT_CLOSING_GAP_ROWS;
+  assert.equal(closingRow, 95, "맺음 표시 자리가 셈과 다르다");
   assert.equal(filled.text(`H${closingRow}`), SERVICE_REPORT_CLOSING_MARK);
 
   // 1) 복제된 새 줄도 왼쪽이고, 가운뎃줄의 테두리를 그대로 물려받았다.
@@ -1828,15 +1955,37 @@ test("🔴 줄을 늘려도 새 줄이 왼쪽이고 마지막 줄의 아래 테�
     "복제된 줄의 테두리가 가운뎃줄과 다르다"
   );
 
-  // 2) 🔴 마지막 줄(= 맺음 표시 줄)은 양식의 마지막 줄 서식 그대로다 —
-  //    상자의 **아래 테두리**가 거기 걸려 있다.
+  /**
+   * 2) 🔴 블록의 **마지막 줄**은 양식의 마지막 줄 서식 그대로다 — 상자의
+   *    **아래 테두리**가 거기 걸려 있다.
+   *
+   *    ⚠️ 예전에는 그 줄이 곧 맺음 표시 줄이었다. 이제는 맺음 표시 아래로 두
+   *    줄이 더 있으므로 **마지막 줄 ≠ 맺음 표시 줄**이다(맺음 표시 아래 두
+   *    줄째가 마지막 줄이다). 맺음 표시 쪽은 복제된 가운뎃줄 서식을 쓰되
+   *    **가운데 맞춤**이어야 한다 — 왼쪽 맞춤은 그 앞줄까지만 얹힌다.
+   */
   const lastSource = styleIndexOf(beforeSheet, `H${TEMPLATE_BODY_LAST_ROW}`);
+  const lastRow = TEMPLATE_BODY_LAST_ROW + shift;
   assert.equal(
-    styleIndexOf(filled.sheetXml, `H${closingRow}`),
+    lastRow,
+    closingRow + SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+    "맺음 표시 아래 두 줄이 블록 끝과 안 맞는다"
+  );
+  assert.equal(
+    styleIndexOf(filled.sheetXml, `H${lastRow}`),
     lastSource,
     "마지막 줄의 서식이 바뀌었다 — 상자 밑변이 사라진다"
   );
-  assert.equal(horizontalOf(afterStyles, lastSource), "center", "맺음 표시가 왼쪽으로 갔다");
+  assert.equal(
+    horizontalOf(afterStyles, styleIndexOf(filled.sheetXml, `H${closingRow}`)),
+    "center",
+    "맺음 표시가 왼쪽으로 갔다"
+  );
+  assert.equal(
+    borderIdOf(afterStyles, styleIndexOf(filled.sheetXml, `H${closingRow}`)),
+    borderIdOf(beforeStyles, middleSource),
+    "맺음 표시 줄이 가운뎃줄 테두리를 안 물려받았다"
+  );
   assert.notEqual(
     borderIdOf(beforeStyles, lastSource),
     borderIdOf(beforeStyles, middleSource),

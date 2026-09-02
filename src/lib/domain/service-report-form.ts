@@ -133,6 +133,23 @@ export type ServiceReportActionsIntro = Record<ServiceReportKind, string>;
  * 접수 건에서 옮겨 오는 값만 추린 모양. `ResolvedRepairCase` 를 통째로 받지
  * 않는 것은, 그 타입이 mock 자료를 끌고 오는 모듈에 살아서다(타입만 쓰면
  * 지워지지만, 무엇을 옮기는지 이 자리에서 보이는 편이 낫다).
+ *
+ * ── 🔴 인수번호는 **여기 없다** ────────────────────────────────────────
+ * 「현품 인수」 번호로 들어갈 값이지만 씨앗에 두지 않았다. 까닭이 둘이다:
+ *
+ *   · 이 씨앗은 **폼을 처음 만들 때만** 쓰인다
+ *     (`createServiceReportFormValues`). 그런데 인수번호가 필요한 순간은
+ *     «사람이 「현품 인수」를 체크할 때»라 폼이 이미 만들어진 뒤다. 저장된 장을
+ *     열 때는 이 함수가 아예 불리지도 않는다(서버 페이지가
+ *     `serviceReportFormValues` 로 저장값을 붓는다) — 씨앗에 넣으면 **저장된
+ *     장에서는 자동 채움이 안 되는** 반쪽이 된다.
+ *   · 담아 둘 자리도 없다. `ServiceReportFormValues` 는 저장·요청·임시보관에
+ *     그대로 실려 나가는 모양이라, 문서에 안 쓰이는 칸을 하나 더하면 세 곳이
+ *     함께 흔들린다.
+ *
+ * 그래서 인수번호는 **서버 페이지 → `ServiceReportForm` prop** 이라는 이미 있는
+ * 길로 온다(그 prop 은 화면 위쪽 안내에 이미 쓰이고 있었다). 판정은 그래도
+ * 화면이 아니라 여기 있다 — `serviceReportGoodsReceiptPatch`.
  */
 export type ServiceReportRepairCaseSeed = {
   customerName: string | null;
@@ -330,6 +347,73 @@ export function serviceReportManufacturedPatch(
   const patch: { manufacturedYear?: string; manufacturedMonth?: string } = {};
   if (current.manufacturedYear.trim() === "") patch.manufacturedYear = manufactured.year;
   if (current.manufacturedMonth.trim() === "") patch.manufacturedMonth = manufactured.month;
+  return patch;
+}
+
+// ── 「현품 인수」를 체크하면 날짜와 번호가 따라온다 ──────────────────────
+
+/**
+ * 「현품 인수」 체크를 켜고 끌 때 함께 얹을 조각.
+ *
+ * ── 🔴 근거는 양식에 있다 ──────────────────────────────────────────────
+ * 「현품 인수」 날짜 칸(`AF27`)에는 원래 **접수일을 받아 오는 수식 `=AK14`** 이
+ * 들어 있었다(`xlsx/service-report-template.ts` 의 `ServiceReportGoodsReceipt`).
+ * `AK14` 는 접수일 칸이다. 즉 «현품 인수 날짜 = 접수일»은 우리가 지어낸 규칙이
+ * 아니라 **양식을 만든 사람의 설계**다. 번호도 같은 줄의 짝(`AQ27`)이고, 그
+ * 자리에 적히는 것은 그 접수 건의 **인수번호**다.
+ *
+ * ── 🔴 빈 칸에만 채운다 ────────────────────────────────────────────────
+ * `serviceReportManufacturedPatch`·`serviceReportUsedPeriodPatch` 와 **같은
+ * 규칙, 같은 뿌리**다 — 사람이 적어 둔 값을 말없이 덮지 않는다. 현품을 접수일과
+ * 다른 날 받는 일이 실제로 있고(대품납입 뒤에 회수하는 건), 그때 사람이 적은
+ * 날짜가 옳다.
+ *
+ * ── 🔴 체크를 풀었다 다시 체크하면? ────────────────────────────────────
+ * **아무 일도 안 일어난다.** 체크를 풀 때 날짜·번호를 지우지 않기 때문이다
+ * (아래 `checked === false` 갈래가 체크 상태만 바꾼다). 그래서 다시 체크할 때는
+ * 칸이 이미 차 있고, 위의 「빈 칸에만」 규칙에 걸려 그대로 남는다.
+ *
+ * 그렇게 정한 까닭은 하나다 — **사람이 적어 둔 글을 말없이 버리지 않는다.**
+ * 체크를 풀 때 지우는 길을 택하면, 실수로 한 번 껐다 켜는 것만으로 손으로 적은
+ * 날짜가 사라지고 접수일이 대신 들어앉는다. 그 편이 «자동 채움이 다시 도는»
+ * 것보다 훨씬 나쁘다. 자동 채움을 다시 받고 싶으면 칸을 비우고 다시 체크하면
+ * 된다 — 그때는 빈 칸이므로 규칙대로 채워진다.
+ *
+ * ⚠️ 체크만 되어 있고 날짜가 비어도 문서에는 체크가 찍힌다(기존 동작). 그래서
+ * 접수일이나 인수번호가 없으면 **아무것도 안 채우고 체크만 켠다** — "날짜는
+ * 모르지만 현품은 받았다"가 실제로 있다(`buildServiceReportRequestBody`).
+ *
+ * 🔴 인수번호에도 `-` 규칙(`PLACEHOLDER_TEXT`)을 건다. 지금 접수 건 매퍼는
+ * 인수번호에 `-` 를 넣지 않지만(`db/mappers/repair-case.ts` 는 `row.intakeNumber`
+ * 를 그대로 쓴다), 목록 화면의 표시값이 이 길로 흘러들면 고객사로 나가는 문서의
+ * 「현품 인수 No.」 에 `-` 가 찍힌다. 씨앗의 다른 칸들과 같은 문(`seedText`)을
+ * 지나가게 두는 편이 싸고 안전하다.
+ */
+export function serviceReportGoodsReceiptPatch(
+  checked: boolean,
+  current: {
+    /** 폼의 접수일 칸. 씨앗이 접수 건에서 옮겨 오지만 사람이 고칠 수 있다. */
+    receivedOn: string;
+    goodsReceiptOn: string;
+    goodsReceiptNumber: string;
+  },
+  /** 그 접수 건의 인수번호. 없으면 빈 글자를 준다. */
+  intakeNumber: string | null | undefined
+): Partial<ServiceReportFormValues> {
+  const patch: Partial<ServiceReportFormValues> = { goodsReceiptChecked: checked };
+  // 체크를 풀 때는 손대지 않는다 — 위 '체크를 풀었다 다시 체크하면?' 참조.
+  if (!checked) return patch;
+
+  const receivedOn = current.receivedOn.trim();
+  if (current.goodsReceiptOn.trim() === "" && receivedOn !== "") {
+    patch.goodsReceiptOn = receivedOn;
+  }
+
+  const number = seedText(intakeNumber).trim();
+  if (current.goodsReceiptNumber.trim() === "" && number !== "") {
+    patch.goodsReceiptNumber = number;
+  }
+
   return patch;
 }
 

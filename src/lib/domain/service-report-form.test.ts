@@ -26,6 +26,7 @@ import {
   isServiceReportBodyEmpty,
   serviceReportCauseOptions,
   serviceReportFieldError,
+  serviceReportGoodsReceiptPatch,
   serviceReportKindChangePatch,
   serviceReportLines,
   serviceReportManufacturedFromSerialNumber,
@@ -821,6 +822,162 @@ test("🔴 S/N 을 고치면 제조년월이 따라 채워지되 적어 둔 값�
   assert.ok(result.ok);
   assert.equal(result.data.manufacturedYear, 2015);
   assert.equal(result.data.manufacturedMonth, 2);
+});
+
+// ── 「현품 인수」를 체크하면 날짜와 번호가 따라온다 ──────────────────────
+
+/**
+ * 🔴 근거는 양식에 있다 — 「현품 인수」 날짜 칸(`AF27`)에는 원래 **접수일을
+ * 받아 오는 수식 `=AK14`** 이 들어 있었다. 번호는 그 옆 칸(`AQ27`)이고 접수
+ * 건의 인수번호가 그 자리다.
+ */
+const RECEIPT_EMPTY = {
+  receivedOn: "2026-08-20",
+  goodsReceiptOn: "",
+  goodsReceiptNumber: "",
+} as const;
+
+test("🔴 「현품 인수」를 체크하면 접수일과 인수번호가 채워진다", () => {
+  assert.deepEqual(serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, "2608-013"), {
+    goodsReceiptChecked: true,
+    goodsReceiptOn: "2026-08-20",
+    goodsReceiptNumber: "2608-013",
+  });
+});
+
+/** 🔴 `serviceReportManufacturedPatch` 와 같은 규칙 — 빈 칸에만 채운다. */
+test("🔴 「현품 인수」 자동 채움은 이미 적힌 값을 덮지 않는다", () => {
+  // 둘 다 적혀 있으면 체크만 켠다.
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(
+      true,
+      { ...RECEIPT_EMPTY, goodsReceiptOn: "2026-08-25", goodsReceiptNumber: "손으로 적은 번호" },
+      "2608-013"
+    ),
+    { goodsReceiptChecked: true }
+  );
+
+  // 한쪽만 비어 있으면 그쪽만 채운다.
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(
+      true,
+      { ...RECEIPT_EMPTY, goodsReceiptOn: "2026-08-25" },
+      "2608-013"
+    ),
+    { goodsReceiptChecked: true, goodsReceiptNumber: "2608-013" }
+  );
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(
+      true,
+      { ...RECEIPT_EMPTY, goodsReceiptNumber: "N-1" },
+      "2608-013"
+    ),
+    { goodsReceiptChecked: true, goodsReceiptOn: "2026-08-20" }
+  );
+
+  // 공백만 남은 칸은 빈 칸이다(제조년월 규칙과 같다).
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(
+      true,
+      { ...RECEIPT_EMPTY, goodsReceiptOn: "  ", goodsReceiptNumber: "  " },
+      "2608-013"
+    ),
+    { goodsReceiptChecked: true, goodsReceiptOn: "2026-08-20", goodsReceiptNumber: "2608-013" }
+  );
+});
+
+test("🔴 접수일이나 인수번호가 없으면 그 칸은 안 채운다 — 체크는 켠다", () => {
+  // 접수일이 없다 — 번호만 채운다.
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(true, { ...RECEIPT_EMPTY, receivedOn: "" }, "2608-013"),
+    { goodsReceiptChecked: true, goodsReceiptNumber: "2608-013" }
+  );
+  // 인수번호가 없다 — 날짜만 채운다.
+  assert.deepEqual(serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, ""), {
+    goodsReceiptChecked: true,
+    goodsReceiptOn: "2026-08-20",
+  });
+  assert.deepEqual(serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, null), {
+    goodsReceiptChecked: true,
+    goodsReceiptOn: "2026-08-20",
+  });
+
+  // 🔴 둘 다 없으면 아무것도 안 한다 — 그래도 체크는 켠다.
+  assert.deepEqual(
+    serviceReportGoodsReceiptPatch(true, { ...RECEIPT_EMPTY, receivedOn: "  " }, undefined),
+    { goodsReceiptChecked: true }
+  );
+
+  /**
+   * 🔴 목록 화면의 빈 값 표시(`-`)를 문서로 옮기지 않는다 — 접수 자료의 다른
+   * 칸들과 같은 문(`PLACEHOLDER_TEXT`)을 지난다. 안 그러면 고객사로 나가는
+   * 「현품 인수 No.」 에 `-` 가 찍힌다.
+   */
+  assert.deepEqual(serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, "-"), {
+    goodsReceiptChecked: true,
+    goodsReceiptOn: "2026-08-20",
+  });
+});
+
+/**
+ * 🔴 체크를 풀 때는 **날짜도 번호도 손대지 않는다.** 그래서 다시 체크해도 사람이
+ * 적어 둔 글이 살아 있고, 자동 채움이 그 위를 덮지 않는다 — 이 화면의 규칙
+ * 「사람이 적어 둔 글을 말없이 버리지 않는다」가 여기서도 그대로다.
+ */
+test("🔴 체크를 풀었다 다시 체크해도 적어 둔 값이 살아 있다", () => {
+  const written = {
+    ...RECEIPT_EMPTY,
+    goodsReceiptOn: "2026-08-25",
+    goodsReceiptNumber: "손으로 적은 번호",
+  };
+
+  // 1) 체크를 푼다 — 체크 상태만 바뀐다.
+  const off = serviceReportGoodsReceiptPatch(false, written, "2608-013");
+  assert.deepEqual(off, { goodsReceiptChecked: false });
+
+  // 2) 다시 체크한다 — 칸이 차 있으므로 그대로 둔다.
+  const on = serviceReportGoodsReceiptPatch(true, { ...written, ...off }, "2608-013");
+  assert.deepEqual(on, { goodsReceiptChecked: true });
+
+  // 3) 사람이 칸을 비우고 다시 체크하면 그때는 자동 채움을 다시 받는다.
+  assert.deepEqual(serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, "2608-013"), {
+    goodsReceiptChecked: true,
+    goodsReceiptOn: "2026-08-20",
+    goodsReceiptNumber: "2608-013",
+  });
+});
+
+/**
+ * ⚠️ **체크만 되어 있고 날짜가 비어도 문서에는 체크가 찍힌다** — 기존 동작이다
+ * ("날짜는 모르지만 현품은 받았다"가 실제로 있다). 자동 채움을 붙였다고 이것이
+ * 깨지면 안 된다.
+ */
+test("⚠️ 체크만 하고 날짜가 비어도 요청에는 「현품 인수」가 실린다", () => {
+  const values = filledForm({
+    receivedOn: "",
+    ...serviceReportGoodsReceiptPatch(
+      true,
+      { receivedOn: "", goodsReceiptOn: "", goodsReceiptNumber: "" },
+      ""
+    ),
+  });
+  assert.equal(values.goodsReceiptChecked, true);
+  assert.equal(values.goodsReceiptOn, "");
+  assert.equal(values.goodsReceiptNumber, "");
+
+  const body = buildServiceReportRequestBody(values) as {
+    disposition: { goodsReceipt?: { on: string; number: string } };
+  };
+  assert.deepEqual(body.disposition.goodsReceipt, { on: "", number: "" });
+
+  // 자동 채움을 받은 폼도 서버 검증을 통과한다.
+  const filled = filledForm(
+    serviceReportGoodsReceiptPatch(true, RECEIPT_EMPTY, "2608-013")
+  );
+  const result = validateServiceReportFields(
+    JSON.parse(JSON.stringify(buildServiceReportRequestBody(filled)))
+  );
+  assert.ok(result.ok, `검증이 거부했다: ${JSON.stringify(result)}`);
 });
 
 // ── 제조년월 + 접수일 → 사용 년수·개월 ──────────────────────────────────
