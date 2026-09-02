@@ -825,6 +825,10 @@ export default function ServiceReportForm({
         onChange={update}
         fieldErrors={fieldErrors}
         causeLabels={causeLabels}
+        // 🔴 「현품 인수」를 체크할 때 번호 칸에 들어갈 값이다. 폼 값이 아니라
+        //    prop 으로 내려보내는 까닭은 `ServiceReportRepairCaseSeed` 머리말에
+        //    적어 두었다 — 저장된 장을 열 때도 같은 길로 와야 한다.
+        intakeNumber={intakeNumber}
         disabled={disabled}
       />
 
@@ -845,6 +849,11 @@ export default function ServiceReportForm({
         isDownloading={isSubmitting}
         canSave={canSave}
         canDownload={canDownload}
+        // 🔴 저장된 장에만 붙는다 — 미리보기 화면은 DB 에 저장된 값을 그린다.
+        //    주소는 지금 보고 있는 화면(`usePathname`)이 아니라 「보고서」 탭에서
+        //    만든다. 두 화면은 형제라 같은 부모에서 갈라져 나오고, 그래야
+        //    질의문자열이 붙은 주소에서도 자리가 흔들리지 않는다.
+        previewHref={saved === null ? null : `${reportHref}/service-report/print?id=${saved.id}`}
         // 내려받기만 막는 조건이다 — 저장은 적다 만 보고서도 받는다.
         hint={
           bodyEmpty && !blocked
