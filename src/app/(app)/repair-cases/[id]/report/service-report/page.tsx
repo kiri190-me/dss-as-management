@@ -104,6 +104,11 @@ export default async function ServiceReportPage({
   return (
     <ServiceReportForm
       repairCaseId={resolved.id}
+      // 🔴 임시보관 열쇠에 쓸 **id 하나만** 넘긴다. 사무실 공용 PC 를 여럿이
+      //    나눠 쓰므로 사람마다 갈라 적어야 하는데, 그러자고 이름·역할·이메일까지
+      //    클라이언트로 내려보낼 이유는 없다(위 '오류 메시지에 경로를 담지
+      //    않는다'와 같은 판단 — 필요 없는 것은 안 보낸다).
+      actingUserId={actingUser.id}
       intakeNumber={resolved.intakeNumber}
       reportHref={repairCaseDetailHrefs(resolved.id).report}
       initialValues={initialValues}

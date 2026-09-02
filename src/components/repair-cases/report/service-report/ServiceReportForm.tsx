@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS,
+  clearServiceReportDraft,
+  readServiceReportDraft,
+  serviceReportDraftStorageKey,
+  writeServiceReportDraft,
+  type ServiceReportDraft,
+  type ServiceReportDraftStore,
+} from "@/lib/domain/service-report-draft";
 import {
   buildServiceReportRequestBody,
   isServiceReportBodyEmpty,
@@ -12,6 +21,7 @@ import {
   type ServiceReportFormValues,
 } from "@/lib/domain/service-report-form";
 import ServiceReportBodyFields from "./ServiceReportBodyFields";
+import ServiceReportDraftNotice from "./ServiceReportDraftNotice";
 import ServiceReportDispositionFields from "./ServiceReportDispositionFields";
 import ServiceReportHeaderFields from "./ServiceReportHeaderFields";
 import { editInputClass, Field, ServiceReportSection } from "./ServiceReportField";
@@ -39,6 +49,12 @@ import { editInputClass, Field, ServiceReportSection } from "./ServiceReportFiel
  * 라우트는 실패마다 코드를 붙여 준다. 코드를 그대로 보여 주면(`RENDER_FAILED`)
  * 화면에 영어 개발자 메시지가 뜨는 것과 같다(UI_GUIDELINE 11). 코드마다 무엇을
  * 하면 되는지를 적어 준다.
+ *
+ * ── 적던 내용을 이 브라우저에 임시로 보관한다 ───────────────────────────
+ * 아직 DB 에 저장하는 표가 없어서, 예전에는 새로고침 한 번에 본문 스무 줄이
+ * 통째로 날아갔다. 판단과 모양은 전부 `domain/service-report-draft.ts` 에 있고,
+ * 여기 있는 것은 `window.localStorage` 를 실제로 두드리는 일과 언제 읽고 언제
+ * 적을지 정하는 일뿐이다.
  * ============================================================================
  */
 
@@ -87,8 +103,84 @@ type FailurePayload = {
   fieldErrors?: unknown;
 };
 
+/**
+ * 저장소를 집는다. 🔴 **속성을 읽는 것 자체가 던진다**(사생활 보호 창, 「사이트
+ * 데이터 차단」). 그래서 꺼내 오는 것부터 감싼다 — 이 한 겹이 없으면
+ * `service-report-draft.ts` 안의 try/catch 가 아무 소용이 없다. 이 저장소가 실제로
+ * 겪은 사고다(커밋 8454a2a).
+ */
+function serviceReportDraftStore(): ServiceReportDraftStore | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+const draftListeners = new Set<() => void>();
+
+/**
+ * 🔴 이 화면이 **처음 본** 임시보관을 열쇠마다 들고 있는 자리. 두 가지를 한꺼번에
+ * 푼다:
+ *
+ *   1. **useSyncExternalStore 의 스냅샷은 값이 안 바뀌었으면 같은 것이어야 한다.**
+ *      부를 때마다 저장소를 읽어 JSON 을 새로 풀면 매번 새 객체가 나와 React 가
+ *      "계속 바뀐다"고 보고 무한히 다시 그린다(커밋 8454a2a 가 목록 26개에서 막은
+ *      바로 그 함정이다).
+ *   2. **되살리기는 화면에 들어온 그 순간의 사실이다.** 이 화면은 0.5초마다
+ *      스스로 저장소에 적으므로, 계속 다시 읽으면 사람이 글을 치는 도중에
+ *      「되살렸습니다」 안내가 튀어나온다 — 되살린 적이 없는데도.
+ */
+const seenDrafts = new Map<string, ServiceReportDraft | null>();
+
+function subscribeDraft(listener: () => void): () => void {
+  draftListeners.add(listener);
+  return () => {
+    draftListeners.delete(listener);
+    // 이 화면을 떠나면 들고 있던 것을 놓는다. 다시 들어왔을 때 **방금 적어 둔
+    // 것까지** 되살리려면 그때 저장소를 새로 읽어야 한다.
+    if (draftListeners.size === 0) seenDrafts.clear();
+  };
+}
+
+/**
+ * 되살릴 임시보관. 저장소를 읽는 일은 `service-report-draft.ts` 가 하고(던지지
+ * 않는다), 여기서는 그 결과를 **한 번만** 받아 들고 있는다 — 위 seenDrafts 참조.
+ */
+function draftSnapshot(
+  storageKey: string,
+  fallback: ServiceReportFormValues,
+  causeCodes: readonly string[]
+): ServiceReportDraft | null {
+  const seen = seenDrafts.get(storageKey);
+  if (seen !== undefined) return seen;
+
+  const draft = readServiceReportDraft(
+    serviceReportDraftStore(),
+    storageKey,
+    // 없거나 모양이 틀린 칸이 떨어질 자리 — 지금 화면이 만든 자동 채움 값이다.
+    fallback,
+    causeCodes
+  );
+  seenDrafts.set(storageKey, draft);
+  return draft;
+}
+
+/**
+ * 서버에는 저장소가 없다. **되살릴 것이 없는 사람과 같은 화면**을 준다.
+ *
+ * 이 한 줄이 hydration 을 맞추는 자리다 — 첫 렌더에서 그냥 읽으면 서버가 그린
+ * 것과 달라지고, effect 에서 읽어 setState 하면 자동 채움 값이 한 프레임 스쳐
+ * 지나간다. useSyncExternalStore 가 정확히 이 상황을 위한 것이다
+ * (`common/responsive-list.tsx` 의 readServer 와 같은 판단).
+ */
+function draftServerSnapshot(): ServiceReportDraft | null {
+  return null;
+}
+
 export default function ServiceReportForm({
   repairCaseId,
+  actingUserId,
   intakeNumber,
   reportHref,
   initialValues,
@@ -98,6 +190,11 @@ export default function ServiceReportForm({
   templateError,
 }: {
   repairCaseId: string;
+  /**
+   * 🔴 임시보관 열쇠에 쓸 **사람 id 하나뿐**이다. 이름·역할·이메일은 받지
+   * 않는다 — 화면이 안 쓰는 것을 클라이언트로 내려보내지 않는다.
+   */
+  actingUserId: string;
   intakeNumber: string;
   /** 돌아갈 자리 — 「보고서」 탭. */
   reportHref: string;
@@ -113,14 +210,87 @@ export default function ServiceReportForm({
   /** 양식을 못 읽었을 때 사람에게 보여 줄 말. 경로는 담기지 않는다. */
   templateError: string | null;
 }) {
-  const [values, setValues] = useState<ServiceReportFormValues>(initialValues);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string> | null>(null);
 
+  const draftKey = useMemo(
+    () => serviceReportDraftStorageKey(actingUserId, repairCaseId),
+    [actingUserId, repairCaseId]
+  );
+
+  /**
+   * 되살릴 때 인정할 원인 코드. 🔴 **채우개의 표에서 온 것**을 그대로 쓴다
+   * (`causeLabels`) — 목록을 여기 베끼면 양식에 원인이 하나 늘어난 날 체크가
+   * 조용히 풀린다.
+   */
+  const causeCodes = useMemo(() => Object.keys(causeLabels), [causeLabels]);
+
+  /** 들어올 때 되살린 임시보관. 없으면 null. 위 seenDrafts 주석 참조. */
+  const restoredDraft = useSyncExternalStore(
+    subscribeDraft,
+    () => draftSnapshot(draftKey, initialValues, causeCodes),
+    draftServerSnapshot
+  );
+
+  /**
+   * 🔴 **사람이 이번에 고친 값.** 아직 한 칸도 안 고쳤으면 null 이다.
+   *
+   * 「지금 화면의 값」을 state 하나에 담지 않고 이렇게 갈라 두는 까닭이 둘이다:
+   *
+   *   · **hydration.** 되살린 값은 브라우저에만 있으므로 서버가 그린 첫 화면은
+   *     언제나 자동 채움 값이어야 한다. 위 useSyncExternalStore 가 그 자리를
+   *     맡고(서버 스냅샷은 null), 이 state 는 그 위에 얹힌다.
+   *   · **열어만 보고 나간 화면은 적지 않는다.** 이 값이 null 인 동안은 적어 둘
+   *     것이 없다 — 그렇지 않으면 보고서 화면을 열어 본 접수 건마다 임시보관이
+   *     하나씩 쌓여 저장소가 이유 없이 찬다.
+   */
+  const [edited, setEdited] = useState<ServiceReportFormValues | null>(null);
+
+  /** 지금 화면의 값 — 고친 것 > 되살린 것 > 자동 채움. 이 순서를 바꾸지 말 것. */
+  const values = edited ?? restoredDraft?.values ?? initialValues;
+
   function update(patch: Partial<ServiceReportFormValues>) {
-    setValues((previous) => ({ ...previous, ...patch }));
+    setEdited((previous) => ({ ...(previous ?? values), ...patch }));
+  }
+
+  /**
+   * ── 적는 대로 보관한다 — 다만 묶어서 ─────────────────────────────────
+   * 글자마다 적으면 한 글자에 한 번씩 폼 전체를 JSON 으로 만들어 저장소를
+   * 때린다(`localStorage` 쓰기는 동기라 그대로 입력의 끊김이 된다). 그래서
+   * 0.5초 묶어서 적는다 — 그 값을 고른 까닭은
+   * `SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS` 주석에 있다.
+   *
+   * 값이 바뀔 때마다 앞의 시계를 버리고 새로 건다(cleanup) — 글자를 치는 동안은
+   * 아무것도 안 적히고, 손을 떼고 0.5초가 지나야 한 번 적힌다.
+   */
+  useEffect(() => {
+    if (edited === null) return;
+
+    const timer = window.setTimeout(() => {
+      writeServiceReportDraft(
+        serviceReportDraftStore(),
+        draftKey,
+        edited,
+        new Date().toISOString()
+      );
+    }, SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [edited, draftKey]);
+
+  /** 「새로 시작」 — 임시보관을 지우고 자동 채움된 처음 상태로 돌아간다. */
+  function handleDiscardDraft() {
+    clearServiceReportDraft(serviceReportDraftStore(), draftKey);
+    // 들고 있던 것도 놓고 알린다 — 그래야 안내가 그 자리에서 사라진다.
+    seenDrafts.set(draftKey, null);
+    for (const listener of draftListeners) listener();
+    setEdited(null);
+    // 버린 글에 붙어 있던 지적이라 함께 지운다 — 안 그러면 없는 글에 대한
+    // 오류가 칸 밑에 남는다.
+    setFieldErrors(null);
+    setFormError(null);
+    setStatusMessage(null);
   }
 
   const rowLimitErrors = serviceReportRowLimitErrors(values, limits);
@@ -177,6 +347,12 @@ export default function ServiceReportForm({
       // 🔴 놓아 준다. 위 'OBJECT_URL_RELEASE_MS' 참조.
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), OBJECT_URL_RELEASE_MS);
 
+      // 🔴 **내려받았다고 임시보관을 지우지 않는다**(2026-09-02 사용자 결정).
+      // 아직 DB 에 저장하는 표가 없어서 그 임시보관이 **유일한 사본**이다. 여기서
+      // 지우면, 받은 파일을 열어 보고 고칠 것을 발견한 사람이 처음부터 다시
+      // 적어야 한다 — 한 장을 두세 번 뽑는 것이 이 화면의 보통 쓰임이다.
+      // ⏳ DB 저장이 생기는 날 이 판단을 다시 본다(그때는 저장이 곧 사본이라,
+      //    내려받기 뒤에 임시보관을 정리하는 편이 맞을 수 있다).
       setStatusMessage(`${fileName} 을(를) 내려받았습니다.`);
     } catch {
       setFormError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
@@ -193,7 +369,7 @@ export default function ServiceReportForm({
             검사 · 수리 보고서
           </h1>
           <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            인수번호 {intakeNumber} — 적은 내용은 저장되지 않습니다. 지금은 파일로만 내려받습니다.
+            인수번호 {intakeNumber} — 지금은 파일로만 내려받습니다.
           </p>
         </div>
         <Link
@@ -203,6 +379,14 @@ export default function ServiceReportForm({
           보고서 탭으로
         </Link>
       </div>
+
+      {/* 지금 적는 것이 어디에 남는지, 되살린 것이 있으면 그 사실과 버리는 길. */}
+      <ServiceReportDraftNotice
+        restored={restoredDraft !== null}
+        savedAt={restoredDraft?.savedAt ?? null}
+        onDiscard={handleDiscardDraft}
+        disabled={isSubmitting}
+      />
 
       {/* 🔴 경로는 담지 않는다 — 오류 메시지가 디스크 구조를 알려 주는 창구가 되면 안 된다. */}
       {templateError && (
