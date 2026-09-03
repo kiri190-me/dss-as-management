@@ -209,6 +209,17 @@ export type ServiceReportRepairCaseSeed = {
   productCategory: string | null;
   /** 「상황」 아랫칸(`H23`). */
   reportedSymptom: string | null;
+  /**
+   * 접수 건에 적혀 있는 **「보고서번호」**(`repair_cases.legacy_report_number`) —
+   * 문서번호 **마지막 칸**의 초기값이다. 접수 폼과 접수 건 상세 상단 카드에서
+   * 사람이 적는 그 값이다(`ReportNumberEditCell`).
+   *
+   * ⚠️ **없어도 된다.** 서버 페이지는 `ResolvedRepairCase` 를 통째로 넘기므로
+   * 늘 들어 있지만, 씨앗을 손으로 짓는 자리(시험·형제 화면)에서는 이 칸이 없어도
+   * 뜻이 통한다 — 안 준 것과 비어 있는 것이 같은 뜻이기 때문이다: 둘 다 **빈
+   * 칸**이 된다(아래 `createServiceReportFormValues` 의 '지어내지 않는다').
+   */
+  legacyReportNumber?: string | null;
 };
 
 export type ServiceReportFormSeed = {
@@ -635,10 +646,32 @@ function seedDate(value: string | null | undefined): string {
 }
 
 /**
+ * 문서번호 앞 두 칸의 기본값 — `No. Z494 - P33A7 - [접수 건의 보고서번호]`.
+ *
+ * ── 🔴 검사든 수리든 **늘 같다** ───────────────────────────────────────
+ * 종류에 따라 갈리지 않는다(**2026-09-03 사용자 확인**). 그래서
+ * `Record<ServiceReportKind, …>` 가 아니라 값 하나다 — 다음 사람이 "종류별로
+ * 갈라야 하나" 하고 다시 묻지 않도록 여기 적어 둔다.
+ *
+ * ── 마지막 칸은 여기 없다 ──────────────────────────────────────────────
+ * 그 자리에는 **접수 건에 적혀 있는 「보고서번호」**가 온다
+ * (`ServiceReportRepairCaseSeed.legacyReportNumber`). 건마다 다른 값이라 상수가
+ * 될 수 없고, 접수 건에 안 적혀 있으면 **빈 채로 둔다** — 지어내지 않는다.
+ *
+ * 🔴 두 글자를 화면·시험에 흩어 적지 않는다. 한 자리에 두고 여기서만 읽는다
+ * (정형 문구·상한을 한 벌로 두는 것과 같은 규칙 — 머리말 참조).
+ */
+const SERVICE_REPORT_NUMBER_DEFAULTS = {
+  prefix: "Z494",
+  middle: "P33A7",
+} as const;
+
+/**
  * 빈 폼 + 접수 건 자료.
  *
  * 🔴 옮겨 넣은 값은 **초기값일 뿐 잠그지 않는다.** 접수 때 적은 모델명이 정정될
- * 수 있고, 문서에 적을 고객사 이름이 접수 건의 이름과 다를 수도 있다.
+ * 수 있고, 문서에 적을 고객사 이름이 접수 건의 이름과 다를 수도 있다. 문서번호
+ * 세 칸도 마찬가지다 — **미리 채워 줄 뿐 읽기 전용이 아니다.**
  */
 export function createServiceReportFormValues(seed: ServiceReportFormSeed): ServiceReportFormValues {
   const repairCase = seed.repairCase ?? null;
@@ -662,9 +695,13 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
 
     customerName: seedText(repairCase?.customerName),
     issuedOn: seed.today,
-    reportNumberPrefix: "",
-    reportNumberMiddle: "",
-    reportNumberTail: "",
+    // 🔴 앞 두 칸은 종류와 상관없이 늘 같고, 마지막 칸은 접수 건이 준다 —
+    //    위 `SERVICE_REPORT_NUMBER_DEFAULTS` 참조. 셋 다 사람이 고칠 수 있다.
+    reportNumberPrefix: SERVICE_REPORT_NUMBER_DEFAULTS.prefix,
+    reportNumberMiddle: SERVICE_REPORT_NUMBER_DEFAULTS.middle,
+    // 🔴 접수 건에 안 적혀 있으면 빈 칸이다. 다른 씨앗 칸들과 같은 문을 지난다
+    //    (`seedText` — 목록의 빈 값 표시 `-` 는 문서에 옮길 값이 아니다).
+    reportNumberTail: seedText(repairCase?.legacyReportNumber).trim(),
     customer: "",
     receivedOn,
     occurrencePlace: "",

@@ -216,6 +216,35 @@ describe("listServiceReportsForRepairCase", () => {
     assert.equal(withoutPrefix[0].reportNumber, "Z494-002");
   });
 
+  /**
+   * 🔴 이름은 **보고서에 저장된 글자 스냅샷**에서 온다(`model_name_text` ·
+   * `lot_number_text` · `serial_number_text`) — 접수 건의 지금 값이 아니다. 그래서
+   * 여기서 접수 건과 **다른 값**을 저장해 두고 그것이 이름에 나오는지 본다.
+   * 규칙 자체는 `domain/service-report-list.test.ts` 가 본다.
+   */
+  test("🔴 이름이 `모델명_L/N_S/N` 로 온다 — 보고서에 저장된 값에서", async () => {
+    const repairCaseId = await newRepairCase();
+    await create(repairCaseId, {
+      modelName: "RFK300FH-AD1",
+      lotNumber: "WU8042",
+      serialNumber: "1612027",
+    });
+
+    const [row] = await listServiceReportsForRepairCase(repairCaseId);
+    assert.equal(row.name, "RFK300FH-AD1_WU8042_1612027");
+    // 문서번호는 이름 자리에서 물러났을 뿐 함께 온다 — 목록이 발행일 옆에 그린다.
+    assert.equal(row.reportNumber, "DSS-Z494-001");
+  });
+
+  test("장비 칸이 비어 있으면 이름이 문서번호로 되돌아간다", async () => {
+    const repairCaseId = await newRepairCase();
+    // `values()` 의 기본값은 형식·L/N·S/N 이 다 비어 있다.
+    await create(repairCaseId, { modelName: "", lotNumber: "", serialNumber: "" });
+
+    const [row] = await listServiceReportsForRepairCase(repairCaseId);
+    assert.equal(row.name, "DSS-Z494-001");
+  });
+
   test("만든 사람과 낙관적 잠금 토큰이 함께 온다 — 목록에서 열어 고치는 화면이 쓴다", async () => {
     const repairCaseId = await newRepairCase();
     await create(repairCaseId);
@@ -233,7 +262,10 @@ describe("listServiceReportsForRepairCase", () => {
     const [row] = await listServiceReportsForRepairCase(repairCaseId);
     assert.deepEqual(
       Object.keys(row).sort(),
-      ["createdByName", "id", "issuedOn", "kind", "reportNumber", "updatedAt", "version"]
+      // 🔴 `name` 은 형식·L/N·S/N 을 이은 것이다 — 장비 식별자라 담아도 되지만,
+      //    칸이 하나 더 늘면 이 목록도 함께 늘어야 한다(그래야 새 칸이 아무도
+      //    모르게 목록에 실리지 않는다).
+      ["createdByName", "id", "issuedOn", "kind", "name", "reportNumber", "updatedAt", "version"]
     );
     const serialized = JSON.stringify(row);
     assert.ok(!serialized.includes("목록에 새면 안 되는"), "본문이 목록에 새어 나갔다");
@@ -387,6 +419,25 @@ describe("listDeletedServiceReportsForRepairCase", () => {
     assert.equal(rows[0].deletedAt, "2096-12-20T03:00:00.000Z");
   });
 
+  /**
+   * 🔴 되살릴 장을 고르는 화면도 **같은 이름**을 봐야 한다. 두 탭이 한 장을 서로
+   * 다른 이름으로 부르면 방금 지운 것을 못 찾는다.
+   */
+  test("🔴 휴지통 줄에도 `모델명_L/N_S/N` 이름이 온다 — 사용중 목록과 같은 규칙", async () => {
+    const repairCaseId = await newRepairCase();
+    const doomed = await create(repairCaseId, {
+      modelName: "CFK300FH-IC2",
+      lotNumber: "WU8042",
+      serialNumber: "",
+    });
+    await softDelete(doomed);
+
+    const [row] = await listDeletedServiceReportsForRepairCase(repairCaseId);
+    // S/N 이 비었으니 자리를 남기지 않고 빠진다 — 밑줄이 겹치지 않는다.
+    assert.equal(row.name, "CFK300FH-IC2_WU8042");
+    assert.equal(row.reportNumber, "DSS-Z494-001");
+  });
+
   test("사유와 지운 사람이 함께 온다 — 되살릴지 판단하는 단서다", async () => {
     const repairCaseId = await newRepairCase();
     const doomed = await create(repairCaseId);
@@ -423,6 +474,8 @@ describe("listDeletedServiceReportsForRepairCase", () => {
         "id",
         "issuedOn",
         "kind",
+        // 사용중 목록과 같은 칸, 같은 까닭 — 그쪽 주석 참조.
+        "name",
         "reportNumber",
         "version",
       ]

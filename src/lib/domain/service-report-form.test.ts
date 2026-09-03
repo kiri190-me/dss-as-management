@@ -125,7 +125,7 @@ test("접수 건 자료가 폼 초기값으로 옮겨진다", () => {
   assert.equal(values.issuedOn, "2026-09-02");
 });
 
-test("접수 건이 없어도 빈 폼이 만들어진다 — 발행일과 정형 문구만 채워진다", () => {
+test("접수 건이 없어도 빈 폼이 만들어진다 — 발행일·정형 문구·문서번호 앞 두 칸이 채워진다", () => {
   const values = createServiceReportFormValues(SEED);
 
   assert.equal(values.customerName, "");
@@ -134,6 +134,114 @@ test("접수 건이 없어도 빈 폼이 만들어진다 — 발행일과 정형
   assert.equal(values.issuedOn, "2026-09-02");
   assert.equal(values.findingsIntro, SERVICE_REPORT_FINDINGS_INTRO);
   assert.equal(values.kind, "REPAIR");
+  // 앞 두 칸은 접수 건과 상관없는 값이라 씨앗이 비어도 채워진다(바로 아래 절).
+  assert.equal(values.reportNumberPrefix, "Z494");
+  assert.equal(values.reportNumberMiddle, "P33A7");
+  // 마지막 칸은 접수 건이 주는 값이다 — 없으면 빈 칸이다.
+  assert.equal(values.reportNumberTail, "");
+});
+
+// ── 🔴 문서번호는 미리 채워진다 ─────────────────────────────────────────
+
+/**
+ * `No. Z494 - P33A7 - [접수 건의 보고서번호]` (**2026-09-03 사용자 결정**).
+ *
+ * 🔴 여기 두 글자를 **일부러 적어 둔다.** 상수를 가져다 견주면 «상수가 무엇이든
+ * 상수와 같다»만 증명될 뿐, 사용자가 정한 값이 바뀌어도 시험이 아무 말도 하지
+ * 않는다. 이 둘은 양식에서 읽히는 값이 아니라 **사람이 정한 값**이므로 시험이
+ * 글자로 못 박는 편이 맞다(정형 문구·상한을 상수에서 가져오는 것과 반대쪽
+ * 판단이고, 까닭도 정확히 반대다).
+ */
+test("🔴 새 보고서는 문서번호 앞 두 칸이 채워진다 — 검사든 수리든 같다", () => {
+  const repair = createServiceReportFormValues(SEED);
+  assert.equal(repair.reportNumberPrefix, "Z494");
+  assert.equal(repair.reportNumberMiddle, "P33A7");
+
+  // 종류로 갈리지 않는다 — 다음 사람이 종류별로 가르려 들지 않도록 못 박는다.
+  const inspection = createServiceReportFormValues({ ...SEED, kind: "INSPECTION" });
+  assert.equal(inspection.reportNumberPrefix, repair.reportNumberPrefix);
+  assert.equal(inspection.reportNumberMiddle, repair.reportNumberMiddle);
+});
+
+test("🔴 접수 건의 「보고서번호」가 마지막 칸에 온다", () => {
+  const values = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "㈜한국반도체",
+      modelName: "RFK300FH-AD1",
+      lotNumber: "WU8042",
+      serialNumber: "1612027",
+      receivedAt: "2026-08-20",
+      productCategory: "Generator",
+      reportedSymptom: null,
+      legacyReportNumber: "4013",
+    },
+  });
+
+  assert.equal(values.reportNumberTail, "4013");
+  // 세 칸이 이어지면 사용자가 정한 그 번호다.
+  assert.equal(
+    [values.reportNumberPrefix, values.reportNumberMiddle, values.reportNumberTail].join("-"),
+    "Z494-P33A7-4013"
+  );
+});
+
+test("접수 건에 보고서번호가 없으면 마지막 칸은 빈 글자다 — 지어내지 않는다", () => {
+  const missing = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: "㈜한국반도체",
+      modelName: "RFK300FH-AD1",
+      lotNumber: null,
+      serialNumber: null,
+      receivedAt: null,
+      productCategory: null,
+      reportedSymptom: null,
+      legacyReportNumber: null,
+    },
+  });
+  assert.equal(missing.reportNumberTail, "");
+  // 앞 두 칸은 그대로 채워진다 — 마지막 칸이 비었다고 번호를 통째로 비우지 않는다.
+  assert.equal(missing.reportNumberPrefix, "Z494");
+  assert.equal(missing.reportNumberMiddle, "P33A7");
+
+  // 목록의 빈 값 표시(`-`)도 옮겨 적지 않는다 — 다른 씨앗 칸들과 같은 규칙이다.
+  const placeholder = createServiceReportFormValues({
+    ...SEED,
+    repairCase: {
+      customerName: null,
+      modelName: null,
+      lotNumber: null,
+      serialNumber: null,
+      receivedAt: null,
+      productCategory: null,
+      reportedSymptom: null,
+      legacyReportNumber: "-",
+    },
+  });
+  assert.equal(placeholder.reportNumberTail, "");
+});
+
+/**
+ * 🔴 **저장된 장은 이 길로 오지 않는다.** 옛 장의 번호가 새 규칙으로 덮이면 이미
+ * 고객사로 나간 문서의 번호가 화면에서 달라 보인다. 저장된 값을 푸는 자리는
+ * `serviceReportFormValues` 하나뿐이고(서버 페이지가 그것을 부른다), 그 함수는
+ * 미리 채우기를 모른다.
+ */
+test("🔴 저장된 장을 여는 길은 저장된 번호를 그대로 준다", () => {
+  const saved: ServiceReportSaveValues = {
+    ...filledForm({
+      reportNumberPrefix: "DSS",
+      reportNumberMiddle: "",
+      reportNumberTail: "",
+    }),
+    findingsIntro: null,
+  };
+
+  const reopened = serviceReportFormValues(saved, SERVICE_REPORT_FINDINGS_INTRO);
+  assert.equal(reopened.reportNumberPrefix, "DSS");
+  assert.equal(reopened.reportNumberMiddle, "", "저장된 빈 칸이 기본값으로 되살아났다");
+  assert.equal(reopened.reportNumberTail, "", "저장된 빈 칸이 기본값으로 되살아났다");
 });
 
 // ── 🔴 「조치」·「정리」의 정형 문구는 **본문의 첫 줄**로 미리 채워진다 ──

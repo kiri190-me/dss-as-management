@@ -49,7 +49,16 @@ export type DeletedServiceReportListRow = {
   version: number;
   /** 「검사보고서」·「수리보고서」 — 양식의 제목에서 온다. 페이지가 만들어 넘긴다. */
   kindLabel: string;
-  /** `No. [앞]-[중간]-[뒤]` 를 이은 것. 세 칸을 다 비워 두고도 저장되므로 빈 글자일 수 있다. */
+  /**
+   * 줄의 이름 — `모델명_L/N_S/N`. 🔴 **「사용중」 목록과 같은 규칙, 같은
+   * 함수**다(`domain/service-report-list.ts`) — 두 탭이 한 장을 다른 이름으로
+   * 부르면 방금 지운 것을 못 찾는다. 빈 글자로 오지 않는다.
+   */
+  name: string;
+  /**
+   * `No. [앞]-[중간]-[뒤]` 를 이은 것. 세 칸을 다 비워 두고도 저장되므로 빈
+   * 글자일 수 있고, 그때는 그리지 않는다.
+   */
   reportNumber: string;
   /** "YYYY-MM-DD" */
   issuedOn: string;
@@ -60,11 +69,6 @@ export type DeletedServiceReportListRow = {
   /** 지울 때 적어 둔 사유. 안 적었으면 null. */
   deleteReason: string | null;
 };
-
-/** 목록 조각과 같은 자리, 같은 문구 — 번호 세 칸을 다 비운 채로도 저장된다. */
-function rowTitle(row: DeletedServiceReportListRow): string {
-  return row.reportNumber === "" ? "문서번호 없음" : row.reportNumber;
-}
 
 export default function ServiceReportTabs({
   savedCount,
@@ -138,7 +142,9 @@ export default function ServiceReportTabs({
       <MasterDataRestoreDialog
         isOpen={restoreTarget !== null}
         entityLabel="보고서"
-        names={restoreTarget ? [`${restoreTarget.kindLabel} ${rowTitle(restoreTarget)}`] : []}
+        // 창에 적는 이름도 목록에 보이던 그 이름이다 — 되살릴 것을 고른 사람이
+        // 창에서 다른 글자를 보면 같은 장인지 확신할 수 없다.
+        names={restoreTarget ? [`${restoreTarget.kindLabel} ${restoreTarget.name}`] : []}
         // cascadeNote 를 넘기지 않는다 — 딸려 오는 것도, 되살리기를 막는 겹침도
         // 없다(문서번호에 유일성을 걸지 않았다 — mutation 머리말).
         isSubmitting={busyId !== null}
@@ -202,7 +208,6 @@ function ServiceReportTrashList({
   return (
     <ul className="flex flex-col gap-2">
       {rows.map((row) => {
-        const title = rowTitle(row);
         return (
           <li
             key={row.id}
@@ -213,10 +218,18 @@ function ServiceReportTrashList({
                 <span className="rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">
                   {row.kindLabel}
                 </span>
-                <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{title}</span>
+                <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                  {row.name}
+                </span>
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
                   발행일 {row.issuedOn}
                 </span>
+                {/* 목록 조각과 같은 자리, 같은 규칙 — 적혀 있을 때만 그린다. */}
+                {row.reportNumber !== "" && (
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    No. {row.reportNumber}
+                  </span>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                 {/* 시각도 사람도 못 읽을 수 있다(옛 자료·지워진 계정). 그때는

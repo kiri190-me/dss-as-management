@@ -13,6 +13,7 @@ import { getPermissionLevel } from "@/lib/auth/permission-resolver";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
   canDeleteServiceReports,
+  canEditServiceReports,
   canViewServiceReports,
 } from "@/lib/auth/service-report-authorization";
 import { readSession } from "@/lib/auth/session";
@@ -129,6 +130,20 @@ export default async function RepairCaseReportPage({
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) notFound();
 
+  /**
+   * 🔴 **내려받기는 고치기와 같은 문턱이다**(`SERVICE_REPORT_REQUIRED_LEVELS.edit`
+   * — 그 파일의 '만들기·고치기가 WRITE 인 근거'). 그 판단을 화면이 여기서 한 번
+   * 하고, 못 받는 사람에게는 **단추를 아예 그리지 않는다** — 눌러도 403 이 나는
+   * 단추를 두지 않는다. 라우트는 화면이 감추든 말든 스스로 다시 확인한다.
+   */
+  const canDownload = canEditServiceReports(level);
+  /**
+   * 내려받기 라우트의 주소. 🔴 **여기서만 조립한다** — 목록 조각이 만들면 같은
+   * 규칙이 두 곳에 산다(`href`·`printHref` 와 같은 판단). 보고서는 형제 화면들과
+   * 같은 자리에 `?id=` 로 싣는다(그 라우트의 GET 머리말).
+   */
+  const xlsxHref = `/api/repair-cases/${resolved.id}/service-report/xlsx`;
+
   const rows: ServiceReportListRow[] = canViewServiceReports(level)
     ? (await listServiceReportsForRepairCase(resolved.id)).map((item) => ({
         id: item.id,
@@ -137,7 +152,13 @@ export default async function RepairCaseReportPage({
         //    곳에 살고, 한쪽만 고쳐지는 날이 온다(`href` 와 같은 판단).
         //    형제 화면과 같은 자리에 `?id=` 를 싣는다(print/page.tsx 머리말).
         printHref: `${serviceReportHref}/print?id=${item.id}`,
+        // 🔴 못 받는 사람에게는 주소를 아예 내려보내지 않는다 — 위 `canDownload`.
+        xlsxHref: canDownload ? `${xlsxHref}?id=${item.id}` : null,
         kindLabel: KIND_LABELS[item.kind],
+        // 🔴 이름은 **조회가 만들어** 온다(`domain/service-report-list.ts`).
+        //    여기서 잇지 않는 까닭은 휴지통 쪽과 규칙이 갈라지지 않게 하려는
+        //    것이다 — 주소를 여기서만 조립하는 것과 정확히 반대쪽 판단이다.
+        name: item.name,
         reportNumber: item.reportNumber,
         issuedOn: item.issuedOn,
         // 시각을 못 읽으면 지어내지 않고 뺀다 — 목록의 다른 값은 그대로 쓸모가 있다.
@@ -157,6 +178,8 @@ export default async function RepairCaseReportPage({
         id: item.id,
         version: item.version,
         kindLabel: KIND_LABELS[item.kind],
+        // 사용중 목록과 **같은 길로 온 같은 이름**이다 — 위 주석 참조.
+        name: item.name,
         reportNumber: item.reportNumber,
         issuedOn: item.issuedOn,
         // 시각을 못 읽으면 지어내지 않고 뺀다 — 목록 쪽과 같은 판단.

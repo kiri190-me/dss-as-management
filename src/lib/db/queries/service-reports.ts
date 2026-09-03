@@ -9,6 +9,7 @@ import {
   users,
 } from "../schema";
 import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
+import { buildServiceReportListName } from "@/lib/domain/service-report-list";
 import {
   toServiceReportSaveValues,
   type ServiceReportSaveValues,
@@ -42,6 +43,11 @@ import type { ServiceReportKind } from "@/lib/xlsx/service-report-template";
  * 고객사명·발생 장소·「상황」·본문 줄은 고객사 사정이 섞이는 값이다
  * (`schema/service-reports.ts`). **목록에는 하나도 담지 않는다** — 목록을 그리는
  * 데 필요하지 않고, 담으면 로그와 오류 보고에 딸려 나갈 자리가 늘어난다.
+ *
+ * ⚠️ 형식·L/N·S/N 은 그 줄에 **들어간다.** 고객사 사정이 아니라 장비 식별자이고,
+ * 목록에서 어느 장인지 알아보려면 그것이 있어야 한다(견적서 목록이 이미 같은 값을
+ * 담는다 — `domain/quote-list.ts`). 셋을 이어 만든 이름만 내보내므로 칸이 따로
+ * 새어 나가지도 않는다.
  * ============================================================================
  */
 
@@ -50,7 +56,17 @@ export type ServiceReportListItem = {
   /** 수정 폼이 저장할 때 되돌려 보낼 낙관적 잠금 토큰. 목록에 그리지는 않는다. */
   version: number;
   kind: ServiceReportKind;
-  /** `No. [앞] - [중간] - [뒤]` 를 한 줄로 이은 것. 빈 조각은 빠진다. */
+  /**
+   * 목록에 그릴 이름 — `모델명_L/N_S/N`. 규칙과 되돌아가는 순서는
+   * `domain/service-report-list.ts` 하나에 있다. **빈 글자로 오지 않는다.**
+   */
+  name: string;
+  /**
+   * `No. [앞] - [중간] - [뒤]` 를 한 줄로 이은 것. 빈 조각은 빠진다.
+   *
+   * 🔴 이름 자리에서 물러났을 뿐 **없애지 않는다** — 목록 조각이 발행일 옆에
+   * 작은 글씨로 남긴다. 세 칸을 다 비운 채로도 저장되므로 빈 글자일 수 있다.
+   */
   reportNumber: string;
   /** "YYYY-MM-DD" */
   issuedOn: string;
@@ -81,6 +97,11 @@ export async function listServiceReportsForRepairCase(
       reportNumberPrefix: serviceReports.reportNumberPrefix,
       reportNumberMiddle: serviceReports.reportNumberMiddle,
       reportNumberTail: serviceReports.reportNumberTail,
+      // 🔴 **보고서에 저장된 글자 스냅샷**이다 — 접수 건의 지금 값이 아니다.
+      //    이미 낸 문서는 원본이 정정돼도 그대로여야 한다(스키마 머리말).
+      modelNameText: serviceReports.modelNameText,
+      lotNumberText: serviceReports.lotNumberText,
+      serialNumberText: serviceReports.serialNumberText,
       issuedOn: serviceReports.issuedOn,
       createdByName: users.name,
       updatedAt: serviceReports.updatedAt,
@@ -92,19 +113,33 @@ export async function listServiceReportsForRepairCase(
     .where(and(eq(serviceReports.repairCaseId, repairCaseId), eq(serviceReports.isDeleted, false)))
     .orderBy(desc(serviceReports.issuedOn), desc(serviceReports.createdAt));
 
-  return rows.map((row) => ({
-    id: row.id,
-    version: row.version,
-    kind: row.kind,
-    reportNumber: formatServiceReportNumber({
+  return rows.map((row) => {
+    // 이름이 장비 셋으로 만들어지지 않을 때 되돌아갈 자리다 — 한 번만 만들어
+    // 두 곳에 쓴다(`domain/service-report-list.ts` 의 '되돌아가는 순서').
+    const reportNumber = formatServiceReportNumber({
       prefix: row.reportNumberPrefix ?? undefined,
       middle: row.reportNumberMiddle,
       tail: row.reportNumberTail,
-    }),
-    issuedOn: row.issuedOn,
-    createdByName: row.createdByName,
-    updatedAt: row.updatedAt.toISOString(),
-  }));
+    });
+
+    return {
+      id: row.id,
+      version: row.version,
+      kind: row.kind,
+      // 🔴 칸 이름을 그대로 믿는다 — **WU 접두가 L/N, 숫자만인 쪽이 S/N** 이다
+      //    (스키마 주석). 값 모양으로 짐작해 자리를 바꾸지 말 것.
+      name: buildServiceReportListName({
+        modelName: row.modelNameText,
+        lotNumber: row.lotNumberText,
+        serialNumber: row.serialNumberText,
+        reportNumber,
+      }),
+      reportNumber,
+      issuedOn: row.issuedOn,
+      createdByName: row.createdByName,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  });
 }
 
 export type DeletedServiceReportRow = {
@@ -112,6 +147,12 @@ export type DeletedServiceReportRow = {
   /** 되살릴 때 되돌려 보낼 낙관적 잠금 토큰. 화면에 그리지는 않는다. */
   version: number;
   kind: ServiceReportKind;
+  /**
+   * 되살릴 장을 알아볼 이름 — `모델명_L/N_S/N`. 🔴 **사용중 목록과 같은
+   * 규칙**이다(`domain/service-report-list.ts`). 두 탭이 한 장을 서로 다른
+   * 이름으로 부르면 방금 지운 것을 못 찾는다.
+   */
+  name: string;
   /** `No. [앞] - [중간] - [뒤]` 를 한 줄로 이은 것. 세 칸이 다 비면 빈 글자다. */
   reportNumber: string;
   /** "YYYY-MM-DD" */
@@ -146,6 +187,10 @@ export async function listDeletedServiceReportsForRepairCase(
       reportNumberPrefix: serviceReports.reportNumberPrefix,
       reportNumberMiddle: serviceReports.reportNumberMiddle,
       reportNumberTail: serviceReports.reportNumberTail,
+      // 위 목록과 같은 셋, 같은 뜻이다 — 보고서에 저장된 글자 스냅샷.
+      modelNameText: serviceReports.modelNameText,
+      lotNumberText: serviceReports.lotNumberText,
+      serialNumberText: serviceReports.serialNumberText,
       issuedOn: serviceReports.issuedOn,
       deletedAt: serviceReports.deletedAt,
       deleteReason: serviceReports.deleteReason,
@@ -158,20 +203,31 @@ export async function listDeletedServiceReportsForRepairCase(
     .where(and(eq(serviceReports.repairCaseId, repairCaseId), eq(serviceReports.isDeleted, true)))
     .orderBy(desc(serviceReports.deletedAt));
 
-  return rows.map((row) => ({
-    id: row.id,
-    version: row.version,
-    kind: row.kind,
-    reportNumber: formatServiceReportNumber({
+  return rows.map((row) => {
+    const reportNumber = formatServiceReportNumber({
       prefix: row.reportNumberPrefix ?? undefined,
       middle: row.reportNumberMiddle,
       tail: row.reportNumberTail,
-    }),
-    issuedOn: row.issuedOn,
-    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
-    deleteReason: row.deleteReason,
-    deletedByName: row.deletedByName,
-  }));
+    });
+
+    return {
+      id: row.id,
+      version: row.version,
+      kind: row.kind,
+      // 사용중 목록과 **같은 함수, 같은 순서**다 — 위 타입의 주석 참조.
+      name: buildServiceReportListName({
+        modelName: row.modelNameText,
+        lotNumber: row.lotNumberText,
+        serialNumber: row.serialNumberText,
+        reportNumber,
+      }),
+      reportNumber,
+      issuedOn: row.issuedOn,
+      deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+      deleteReason: row.deleteReason,
+      deletedByName: row.deletedByName,
+    };
+  });
 }
 
 export type ServiceReportDetail = {
