@@ -3,6 +3,7 @@
 import {
   countServiceReportBodyRows,
   countServiceReportRemarkRows,
+  serviceReportBodyLines,
   serviceReportFieldError,
   type ServiceReportFormLimits,
   type ServiceReportFormValues,
@@ -16,9 +17,13 @@ import { RowCounter, ServiceReportSection, TextAreaField } from "./ServiceReport
  * 🔴 본문 상한과 비고 상한은 **서버 페이지가 상수에서 읽어 넘긴 값**이다
  * (`limits`). 화면에 숫자를 적어 두면 양식이 늘어난 날 화면만 뒤처진다.
  *
- * 본문 줄 수에는 눈에 안 보이는 두 줄이 든다 — 정형 문구 한 줄과 문서 끝의
- * 맺음 표시(`～이　상～`) 한 줄. 그래서 세어 놓은 수가 적은 줄 수보다 크다.
- * 그것을 감춰 두면 "298줄밖에 안 적었는데 왜 넘었다고 하나"가 된다.
+ * 본문 줄 수에는 눈에 안 보이는 줄들이 든다 — 정형 문구 한 줄, 구역과 구역
+ * 사이의 빈 줄, 문서 끝의 맺음 표시(`～이　상～`)와 그 위아래 여백. 그래서
+ * 세어 놓은 수가 적은 줄 수보다 크다. 그것을 감춰 두면 "298줄밖에 안 적었는데
+ * 왜 넘었다고 하나"가 된다.
+ *
+ * ⚠️ 그래도 **어림값**이다(`countServiceReportBodyRows` 머리말). 문서가 실제로
+ * 쓰는 줄 수는 이 값보다 크거나 같다.
  *
  * ── 정형 문구 칸 ────────────────────────────────────────────────────────
  * 🔴 기본 문구가 미리 채워져 있고 **지울 수 있다.** 지우면 문서의 확인내용
@@ -41,7 +46,7 @@ export default function ServiceReportBodyFields({
   disabled: boolean;
 }) {
   const error = (key: string) => serviceReportFieldError(fieldErrors, key);
-  const bodyRows = countServiceReportBodyRows(values);
+  const bodyRows = countServiceReportBodyRows(serviceReportBodyLines(values), limits.bodyLayout);
   const remarkRows = countServiceReportRemarkRows(values);
 
   return (
@@ -91,8 +96,8 @@ export default function ServiceReportBodyFields({
 
         <RowCounter used={bodyRows} limit={limits.maxBodyRows} />
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          정형 문구 한 줄과 문서 끝의 「～이　상～」 한 줄이 함께 셈에 듭니다. 칸의 가로폭을 넘는 긴
-          줄은 문서에서 다시 나뉘므로 실제 줄 수는 조금 더 늘 수 있습니다.
+          정형 문구 한 줄, 구역 사이의 빈 줄, 문서 끝의 「～이　상～」과 그 위아래 여백이 함께 셈에
+          듭니다. 칸의 가로폭을 넘는 긴 줄은 문서에서 다시 나뉘므로 실제 줄 수는 조금 더 늘 수 있습니다.
         </p>
         {rowLimitErrors.body && (
           <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">

@@ -6,6 +6,7 @@ import {
   validateServiceReportInput as assertFillerAccepts,
 } from "@/lib/xlsx/service-report-template";
 import {
+  SERVICE_REPORT_BODY_ROW_LAYOUT,
   SERVICE_REPORT_MAX_REMARK_ROWS,
   validateServiceReportFields,
 } from "./service-report-input";
@@ -170,13 +171,79 @@ test(`🔴 본문이 ${SERVICE_REPORT_MAX_BODY_ROWS}줄을 넘으면 채우개�
   assert.match(errors.body, new RegExp(`${SERVICE_REPORT_MAX_BODY_ROWS}줄까지만`));
 });
 
+/**
+ * 확인내용 한 구역만 쓸 때 **내용 밖에서** 드는 줄 — 정형 문구 1 + 맺음 표시 위
+ * 여백 + 맺음 표시 1 + 맺음 표시 아래 여백.
+ *
+ * 🔴 숫자를 적지 않고 **상수에서 만든다.** 양식의 여백이 바뀌면 이 시험도 따라가야
+ * 한다(`SERVICE_REPORT_BODY_ROW_LAYOUT`).
+ */
+const BODY_OVERHEAD_ROWS =
+  1 +
+  SERVICE_REPORT_BODY_ROW_LAYOUT.closingGapRows +
+  1 +
+  SERVICE_REPORT_BODY_ROW_LAYOUT.closingTrailingRows;
+
 test("상한 바로 아래는 통과한다 — 확인내용·조치·정리를 합쳐 센다", () => {
-  // 정형 문구 1줄 + 「～이　상～」 1줄이 더 든다.
-  const lines = SERVICE_REPORT_MAX_BODY_ROWS - 2;
+  const lines = SERVICE_REPORT_MAX_BODY_ROWS - BODY_OVERHEAD_ROWS;
   const data = expectOk(
     baseRequest({ body: { findings: Array.from({ length: lines }, (_, i) => `줄 ${i}`), actions: [] } })
   );
   assert.equal(data.body.findings.length, lines);
+
+  // 한 줄만 더 붙으면 상한을 넘는다 — 경계가 실제로 여기다.
+  assert.ok(
+    expectErrors(
+      baseRequest({ body: { findings: Array.from({ length: lines + 1 }, (_, i) => `줄 ${i}`), actions: [] } })
+    ).body
+  );
+});
+
+test("🔴 문서의 여백도 셈에 든다 — 맺음 표시 위아래와 구역 사이 빈 줄", () => {
+  /**
+   * 예전에는 「확인내용 + 정형 문구 + 조치 + 정리 + 맺음 표시 한 줄」만 셌다.
+   * 그 셈으로는 딱 상한이던 본문이 실제로는 채우개에서 넘쳐 **저장은 되고
+   * 내려받기가 실패**했다. 이제 여백까지 세므로 여기서 거부된다
+   * (2026-09-03 사용자 결정 — 실제 보고서는 50줄 안팎이라 실사용 영향이 없다).
+   */
+  const oldCountReachedTheLimit = SERVICE_REPORT_MAX_BODY_ROWS - 2;
+  const errors = expectErrors(
+    baseRequest({
+      body: {
+        findings: Array.from({ length: oldCountReachedTheLimit }, (_, i) => `줄 ${i}`),
+        actions: [],
+      },
+    })
+  );
+  // 새 셈은 여백 몫만큼 더 크다 — 문구의 N 이 그것을 그대로 보여 준다.
+  assert.match(
+    errors.body,
+    new RegExp(`^본문이 ${oldCountReachedTheLimit + BODY_OVERHEAD_ROWS}줄입니다\\.`)
+  );
+});
+
+test("🔴 구역 사이 빈 줄은 **마지막 구역 뒤에는** 안 붙는다", () => {
+  // 구역 하나(확인내용)만 쓰면 빈 줄이 없다.
+  const one = expectErrors(
+    baseRequest({
+      body: {
+        findings: Array.from({ length: SERVICE_REPORT_MAX_BODY_ROWS }, (_, i) => `줄 ${i}`),
+        actions: [],
+      },
+    })
+  ).body;
+  // 조치를 한 줄 더하면 그 한 줄과 **구역 사이 빈 줄 하나**가 함께 는다.
+  const two = expectErrors(
+    baseRequest({
+      body: {
+        findings: Array.from({ length: SERVICE_REPORT_MAX_BODY_ROWS }, (_, i) => `줄 ${i}`),
+        actions: ["조치 한 줄"],
+      },
+    })
+  ).body;
+
+  const rowsOf = (message: string): number => Number(/^본문이 (\d+)줄입니다\./u.exec(message)?.[1]);
+  assert.equal(rowsOf(two), rowsOf(one) + 1 + SERVICE_REPORT_BODY_ROW_LAYOUT.sectionGapRows);
 });
 
 test("본문이 한 줄도 없으면 거부한다", () => {

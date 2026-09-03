@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { productCategoryLabels, WORKFLOW_TYPE_CODES } from "@/lib/domain/types";
 import {
+  SERVICE_REPORT_BODY_ROW_LAYOUT,
   SERVICE_REPORT_MAX_REMARK_ROWS,
   validateServiceReportFields,
 } from "@/lib/validation/service-report-input";
@@ -25,6 +26,7 @@ import {
   countServiceReportRemarkRows,
   createServiceReportFormValues,
   isServiceReportBodyEmpty,
+  serviceReportBodyLines,
   serviceReportCauseOptions,
   serviceReportFieldError,
   serviceReportGoodsReceiptPatch,
@@ -65,7 +67,15 @@ const SEED = {
 const LIMITS = {
   maxBodyRows: SERVICE_REPORT_MAX_BODY_ROWS,
   maxRemarkRows: SERVICE_REPORT_MAX_REMARK_ROWS,
+  // 🔴 서버 페이지가 화면에 넘기는 것과 **같은 한 벌**이다. 여기서 숫자를
+  //    지어내면 이 시험만 통과하고 화면이 뒤처진다.
+  bodyLayout: SERVICE_REPORT_BODY_ROW_LAYOUT,
 } as const;
+
+/** 화면의 셈. 시험마다 폼 값에서 줄 목록을 뽑아 같은 함수에 넣는다. */
+function bodyRowsOf(values: ServiceReportFormValues): number {
+  return countServiceReportBodyRows(serviceReportBodyLines(values), SERVICE_REPORT_BODY_ROW_LAYOUT);
+}
 
 /**
  * 발행할 수 있는 최소한을 채운 폼. 각 시험은 여기서 필요한 칸만 고친다.
@@ -490,39 +500,95 @@ test("줄 안의 들여쓰기는 다듬지 않는다 — 사람이 뜻을 담아
 
 // ── 줄 수 세기 (상수에서 가져온 값으로) ──────────────────────────────────
 
-test("본문 줄 수를 검증 모듈과 같은 셈으로 센다 — 정형 문구 한 줄과 맺음 표시 한 줄이 든다", () => {
+test("본문 줄 수 — 정형 문구·구역 사이 빈 줄·맺음 표시와 그 위아래 여백이 함께 든다", () => {
   const values = filledForm({ findings: "가\n나", actions: "다", summary: "라" });
-  // 확인내용 2 + 정형 문구 1 + 조치 1 + 정리 1 + 맺음 1
-  assert.equal(countServiceReportBodyRows(values), 6);
+  // 확인내용 (2 + 정형 문구 1) + 조치 1 + 정리 1
+  //   + 구역 사이 빈 줄 2 + 맺음 표시 위 1 + 맺음 표시 1 + 맺음 표시 아래 2
+  assert.equal(bodyRowsOf(values), 11);
 
   // 정형 문구를 지우면 그 한 줄이 빠진다.
-  assert.equal(countServiceReportBodyRows({ ...values, findingsIntro: "" }), 5);
+  assert.equal(bodyRowsOf({ ...values, findingsIntro: "" }), 10);
 
-  // 확인내용이 없으면 정형 문구도 안 들어간다.
-  assert.equal(countServiceReportBodyRows({ ...values, findings: "" }), 3);
+  // 확인내용이 없으면 정형 문구도 안 들어가고, 그 구역이 통째로 빠지면서
+  // 구역 사이 빈 줄도 하나 준다(2 → 1).
+  assert.equal(bodyRowsOf({ ...values, findings: "" }), 7);
 
-  // 검사 보고서에는 「정리」 구역이 없다.
-  assert.equal(countServiceReportBodyRows({ ...values, kind: "INSPECTION" }), 5);
+  // 검사 보고서에는 「정리」 구역이 없다 — 여기서도 빈 줄이 하나 준다.
+  assert.equal(bodyRowsOf({ ...values, kind: "INSPECTION" }), 9);
+});
+
+test("🔴 「확인내용」 라벨이 두 줄이라 한 줄짜리 확인내용도 문서에서는 두 줄이다", () => {
+  // 라벨은 `확　내`/`인　용` 두 줄이고, 조치·정리는 한 줄이다
+  // (`SERVICE_REPORT_BODY_LABELS` — 채우개의 `sectionRowCount` 가 라벨 쪽을 고른다).
+  assert.equal(SERVICE_REPORT_BODY_ROW_LAYOUT.labelRows.findings, 2);
+
+  // 확인내용 한 줄 + 정형 문구 없음 = 내용 1줄인데 라벨이 2줄이라 2줄을 먹는다.
+  const one = filledForm({ findings: "가", findingsIntro: "", actions: "", summary: "" });
+  assert.equal(
+    bodyRowsOf(one),
+    SERVICE_REPORT_BODY_ROW_LAYOUT.labelRows.findings +
+      SERVICE_REPORT_BODY_ROW_LAYOUT.closingGapRows +
+      1 +
+      SERVICE_REPORT_BODY_ROW_LAYOUT.closingTrailingRows
+  );
+
+  // 라벨 줄 수까지는 내용이 늘어도 줄 수가 그대로다.
+  assert.equal(bodyRowsOf({ ...one, findings: "가\n나" }), bodyRowsOf(one));
+  // 그다음부터 내용 쪽이 이긴다.
+  assert.equal(bodyRowsOf({ ...one, findings: "가\n나\n다" }), bodyRowsOf(one) + 1);
 });
 
 test(`본문 ${SERVICE_REPORT_MAX_BODY_ROWS}줄까지는 통과하고 한 줄만 넘어도 서버가 막는다`, () => {
-  // 확인내용 N + 정형 문구 1 + 맺음 1 = 상한
+  /**
+   * 확인내용 한 구역만 쓸 때 내용 밖에서 드는 줄 — 정형 문구 1 + 맺음 표시 위
+   * 여백 + 맺음 표시 1 + 맺음 표시 아래 여백. 🔴 숫자를 적지 않고 **상수에서
+   * 만든다**(양식이 바뀌면 이 시험도 따라가야 한다).
+   */
+  const overhead =
+    1 +
+    SERVICE_REPORT_BODY_ROW_LAYOUT.closingGapRows +
+    1 +
+    SERVICE_REPORT_BODY_ROW_LAYOUT.closingTrailingRows;
+
   const atLimit = filledForm({
-    findings: Array.from({ length: SERVICE_REPORT_MAX_BODY_ROWS - 2 }, (_, i) => `확인 ${i + 1}`).join("\n"),
+    findings: Array.from({ length: SERVICE_REPORT_MAX_BODY_ROWS - overhead }, (_, i) => `확인 ${i + 1}`).join("\n"),
     actions: "",
     summary: "",
   });
-  assert.equal(countServiceReportBodyRows(atLimit), SERVICE_REPORT_MAX_BODY_ROWS);
+  assert.equal(bodyRowsOf(atLimit), SERVICE_REPORT_MAX_BODY_ROWS);
   assert.deepEqual(serviceReportRowLimitErrors(atLimit, LIMITS), {});
   assert.equal(validateServiceReportFields(buildServiceReportRequestBody(atLimit)).ok, true);
 
   const overLimit = { ...atLimit, findings: `${atLimit.findings}\n한 줄 더` };
-  assert.equal(countServiceReportBodyRows(overLimit), SERVICE_REPORT_MAX_BODY_ROWS + 1);
+  assert.equal(bodyRowsOf(overLimit), SERVICE_REPORT_MAX_BODY_ROWS + 1);
   assert.ok(serviceReportRowLimitErrors(overLimit, LIMITS).body);
 
   const rejected = validateServiceReportFields(buildServiceReportRequestBody(overLimit));
   assert.equal(rejected.ok, false);
   assert.ok(!rejected.ok && rejected.fieldErrors.body);
+});
+
+test("🔴 화면과 서버가 같은 답을 낸다 — 오류 문구가 글자까지 같다", () => {
+  /**
+   * 두 쪽이 갈라지는 것이 이 셈을 한 벌로 모은 이유다. 화면이 "아직 여유가
+   * 있다"고 말하는데 서버가 400 을 돌려주면, 그것을 받는 사람은 자기가 뭘
+   * 잘못 적었는지 알 수 없다.
+   */
+  const overLimit = filledForm({
+    findings: Array.from({ length: SERVICE_REPORT_MAX_BODY_ROWS }, (_, i) => `확인 ${i + 1}`).join("\n"),
+    actions: "조치 한 줄",
+    summary: "정리 한 줄",
+  });
+
+  const screen = serviceReportRowLimitErrors(overLimit, LIMITS).body;
+  assert.ok(screen);
+  assert.match(screen, new RegExp(`^본문이 ${bodyRowsOf(overLimit)}줄입니다\\.`));
+
+  // 화면 → JSON → 서버. 서버가 센 줄 수가 다르면 문장이 달라진다.
+  const payload = JSON.parse(JSON.stringify(buildServiceReportRequestBody(overLimit)));
+  const rejected = validateServiceReportFields(payload);
+  assert.equal(rejected.ok, false);
+  assert.equal(!rejected.ok ? rejected.fieldErrors.body : "", screen);
 });
 
 test(`비고 ${SERVICE_REPORT_MAX_REMARK_ROWS}줄까지는 통과하고 한 줄만 넘어도 서버가 막는다`, () => {

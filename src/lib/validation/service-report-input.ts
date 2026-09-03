@@ -1,6 +1,14 @@
 import {
+  countServiceReportBodyRows,
+  type ServiceReportBodyRowLayout,
+} from "@/lib/domain/service-report-form";
+import {
+  SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CAUSES,
+  SERVICE_REPORT_CLOSING_GAP_ROWS,
+  SERVICE_REPORT_CLOSING_TRAILING_ROWS,
   SERVICE_REPORT_MAX_BODY_ROWS,
+  SERVICE_REPORT_SECTION_GAP_ROWS,
   type ServiceReportCause,
   type ServiceReportInput,
   type ServiceReportKind,
@@ -72,6 +80,33 @@ const MAX_BODY_LINE = 1000;
  * 늘어나면 채우개는 따라가고 이 값만 뒤처진다 — 그때는 이 값을 고친다.
  */
 export const SERVICE_REPORT_MAX_REMARK_ROWS = 4;
+
+/**
+ * 본문 줄 수를 세는 데 드는 **문서 쪽 상수 한 벌.**
+ *
+ * 🔴 셈 자체는 `domain/service-report-form.ts` 의 `countServiceReportBodyRows`
+ * 하나뿐이고(화면도 그것을 부른다), 그 함수는 **브라우저에서도 도는 파일**에
+ * 살아서 채우개를 값으로 가져올 수 없다. 그래서 상수는 인자로 받는다 — 여기가
+ * 그 인자를 만드는 유일한 자리다.
+ *
+ * 이 모듈은 서버 전용이라 채우개에서 **직접** 읽는다(위의
+ * `SERVICE_REPORT_MAX_BODY_ROWS` 와 같은 길). 화면에는 서버 페이지가 이 값을
+ * props 로 넘긴다(`ServiceReportFormLimits.bodyLayout`) — 숫자를 화면 코드에
+ * 베끼면 양식이 바뀐 날 화면만 뒤처지고, 증상은 "왜 안 되는지 모르겠는 400"이다.
+ *
+ * ⚠️ 라벨 줄 수는 **세어서** 넣는다. 「확인내용」이 두 줄이라고 2를 적어 두면,
+ * 양식의 라벨이 한 줄로 바뀐 날 이 값만 남는다.
+ */
+export const SERVICE_REPORT_BODY_ROW_LAYOUT: ServiceReportBodyRowLayout = {
+  sectionGapRows: SERVICE_REPORT_SECTION_GAP_ROWS,
+  closingGapRows: SERVICE_REPORT_CLOSING_GAP_ROWS,
+  closingTrailingRows: SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+  labelRows: {
+    findings: SERVICE_REPORT_BODY_LABELS.findings.length,
+    actions: SERVICE_REPORT_BODY_LABELS.actions.length,
+    summary: SERVICE_REPORT_BODY_LABELS.summary.length,
+  },
+};
 
 const KIND_LABELS: Record<ServiceReportKind, string> = {
   INSPECTION: "검사 보고서",
@@ -378,14 +413,20 @@ export function validateServiceReportFields(raw: unknown): ValidateServiceReport
   /**
    * 채우개가 던지기 전에 사람이 알아들을 말로 막는다.
    *
-   * ⚠️ **여기 셈은 나누기 전의 줄 수**다. 채우개는 칸의 가로폭에 맞춰 줄을 나눈
-   * 뒤 다시 세므로 그쪽이 더 클 수 있고, 마지막 방어선은 여전히 채우개다.
-   * 여기서 막는 것은 화면이나 API 가 실수로 수만 줄을 보낸 경우 — 그때 통합문서를
-   * 만들다 멎는 대신 400 으로 돌려준다.
+   * 🔴 **셈은 화면과 한 벌이다** — `countServiceReportBodyRows` 하나를 양쪽이
+   * 부른다. 예전에는 같은 식을 두 벌로 들고 있었고, 그러면 한쪽만 고쳐지는 날
+   * 화면은 "아직 여유가 있다"고 말하는데 서버가 400 을 돌려준다.
+   *
+   * ⚠️ **여기 셈도 어림값이다.** 구역이 양식의 어느 행에서 시작하는지는 양식
+   * 파일이 갖고 있고, 채우개는 그것까지 읽어 자리를 잡는다(`planBodyLayout`) —
+   * 그쪽 줄 수는 늘 이 값보다 크거나 같다. 게다가 여기 셈은 **나누기 전의** 줄
+   * 수라, 칸의 가로폭을 넘는 줄을 채우개가 나누면 또 커진다. 마지막 방어선은
+   * 여전히 채우개다(자세한 것은 `countServiceReportBodyRows` 머리말).
    */
-  const introRows = findings.length === 0 || findingsIntro === "" ? 0 : 1;
-  // 본문 마지막 줄 다음의 「～이　상～」 한 줄이 더 든다(채우개와 같은 셈).
-  const bodyRows = findings.length + introRows + actions.length + summary.length + 1;
+  const bodyRows = countServiceReportBodyRows(
+    { findings, findingsIntro, actions, summary },
+    SERVICE_REPORT_BODY_ROW_LAYOUT
+  );
   if (bodyRows > SERVICE_REPORT_MAX_BODY_ROWS) {
     fieldErrors.body =
       `본문이 ${bodyRows}줄입니다. 한 보고서에 ${SERVICE_REPORT_MAX_BODY_ROWS}줄까지만 담을 수 있습니다. 줄을 줄이거나 보고서를 나눠 주세요.`;

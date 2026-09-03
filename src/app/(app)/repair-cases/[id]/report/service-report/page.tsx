@@ -17,7 +17,10 @@ import { createServiceReportFormValues } from "@/lib/domain/service-report-form"
 import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readServiceReportTemplate } from "@/lib/storage/service-report-template";
-import { SERVICE_REPORT_MAX_REMARK_ROWS } from "@/lib/validation/service-report-input";
+import {
+  SERVICE_REPORT_BODY_ROW_LAYOUT,
+  SERVICE_REPORT_MAX_REMARK_ROWS,
+} from "@/lib/validation/service-report-input";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
 import {
   readServiceReportChoices,
@@ -240,6 +243,10 @@ export default async function ServiceReportPage({
       limits={{
         maxBodyRows: SERVICE_REPORT_MAX_BODY_ROWS,
         maxRemarkRows: SERVICE_REPORT_MAX_REMARK_ROWS,
+        // 🔴 여백·라벨 줄 수도 **같은 길**로 간다. 화면의 남은 줄 수 셈이
+        //    문서와 어긋나면 "아직 여유가 있다"고 말해 놓고 내려받기가 실패한다.
+        //    셈은 한 벌이고(`countServiceReportBodyRows`), 상수만 여기서 붙인다.
+        bodyLayout: SERVICE_REPORT_BODY_ROW_LAYOUT,
       }}
       choices={choices}
       // 🔴 원인 라벨도 채우개에서 온다. 화면이 사본을 들고 있으면 양식의 라벨이

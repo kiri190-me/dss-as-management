@@ -120,6 +120,44 @@ export type ServiceReportFormLimits = {
   maxBodyRows: number;
   /** `SERVICE_REPORT_MAX_REMARK_ROWS` */
   maxRemarkRows: number;
+  /**
+   * 본문 줄 수를 세는 데 드는 문서 쪽 상수들. 상한과 **같은 길로** 온다 —
+   * `ServiceReportBodyRowLayout` 참조.
+   */
+  bodyLayout: ServiceReportBodyRowLayout;
+};
+
+/**
+ * 본문이 문서에서 먹는 줄을 세는 데 필요한 **문서 쪽 상수들.**
+ *
+ * 전부 채우개(`xlsx/service-report-template.ts`)의 값이고, 여기서는
+ * **받아서만** 쓴다 — 이 파일은 브라우저에서도 돌아서 그 모듈을 값으로 가져올
+ * 수 없다(머리말의 '이 파일은 브라우저에서도 돈다'). 상한 300·4 를 여기 베끼지
+ * 않는 것과 똑같은 이유다.
+ *
+ * 한 벌뿐이다: 서버는 `validation/service-report-input.ts` 의
+ * `SERVICE_REPORT_BODY_ROW_LAYOUT` 을 쓰고, 화면은 서버 페이지가 그것을 props 로
+ * 넘겨 준다.
+ */
+export type ServiceReportBodyRowLayout = {
+  /** `SERVICE_REPORT_SECTION_GAP_ROWS` — 구역과 구역 **사이**의 빈 줄. */
+  sectionGapRows: number;
+  /** `SERVICE_REPORT_CLOSING_GAP_ROWS` — 맺음 표시 **위**의 여백. */
+  closingGapRows: number;
+  /** `SERVICE_REPORT_CLOSING_TRAILING_ROWS` — 맺음 표시 **아래**로 남는 줄. */
+  closingTrailingRows: number;
+  /**
+   * `SERVICE_REPORT_BODY_LABELS` 의 구역별 라벨 줄 수.
+   *
+   * 🔴 「확인내용」 라벨만 두 줄(`확　내`/`인　용`)이라, 확인내용이 한 줄뿐이어도
+   * 문서에서는 **두 줄**을 먹는다(채우개의 `sectionRowCount` — 라벨이 반쪽으로
+   * 찍히지 않게 라벨 쪽이 이긴다).
+   */
+  labelRows: {
+    findings: number;
+    actions: number;
+    summary: number;
+  };
 };
 
 /**
@@ -734,21 +772,112 @@ export function serviceReportLines(text: string): string[] {
 }
 
 /**
+ * 셈에 필요한 만큼만 좁힌 본문.
+ *
+ * 🔴 **화면과 서버가 같은 함수를 부를 수 있는 유일한 모양**이다. 화면은
+ * `<textarea>` 의 글자를 들고 있고 서버는 이미 나뉜 줄 목록을 들고 있어서, 폼
+ * 값(`ServiceReportFormValues`)을 받는 함수로는 서버가 쓸 수 없다.
+ */
+export type ServiceReportBodyLines = {
+  findings: readonly string[];
+  /**
+   * 🔴 「안 줌(`undefined`)」과 「비움(`""`)」은 다른 뜻이다 — 안 주면 채우개가
+   * 정형 문구를 넣으므로 **한 줄이 들고**, 비우면 안 든다
+   * (`xlsx/service-report-template.ts` 의 `findingsLines`).
+   */
+  findingsIntro: string | undefined;
+  actions: readonly string[];
+  /** 「정리」는 수리 보고서에만 있다 — 검사 보고서에서는 빈 목록이다. */
+  summary: readonly string[];
+};
+
+/**
+ * 폼 값 → 셈에 쓸 줄 목록.
+ *
+ * ⚠️ 「정리」는 **수리 보고서일 때만** 센다. 검사로 바꿔도 화면은 적어 둔 글을
+ * 지우지 않으므로(다시 수리로 돌렸을 때 그대로 있어야 한다) 값은 남아 있는데,
+ * 그 글은 검사 보고서의 문서에 들어가지 않는다
+ * (`buildServiceReportRequestBody` 의 같은 판단).
+ */
+export function serviceReportBodyLines(values: ServiceReportFormValues): ServiceReportBodyLines {
+  return {
+    findings: serviceReportLines(values.findings),
+    findingsIntro: values.findingsIntro,
+    actions: serviceReportLines(values.actions),
+    summary: values.kind === "REPAIR" ? serviceReportLines(values.summary) : [],
+  };
+}
+
+/**
+ * 한 구역이 먹는 줄 수. 채우개의 `sectionRowCount` 를 그대로 옮긴 것이다 —
+ * 줄이 없는 구역은 통째로 건너뛰므로 0이고, **라벨이 내용보다 길면 라벨이
+ * 이긴다.**
+ */
+function sectionRowCount(lineCount: number, labelRows: number): number {
+  return lineCount === 0 ? 0 : Math.max(lineCount, labelRows);
+}
+
+/**
  * 본문이 문서에서 차지할 줄 수.
  *
- * 🔴 **검증 모듈과 같은 셈이어야 한다**(`service-report-input.ts` 의 `bodyRows`):
- * 확인내용 + 정형 문구 한 줄 + 조치 + 정리 + 맺음 표시(`～이　상～`) 한 줄.
- * 어긋나면 화면은 "아직 여유가 있다"고 말하는데 서버가 400 을 돌려준다.
+ * ── 🔴 이것은 여전히 **어림값**이다 ─────────────────────────────────────
+ * 문서의 진짜 줄 수는 **양식 파일의 행 배치**에 달려 있다. 채우개의
+ * `planBodyLayout` 은 구역마다 «양식이 정해 둔 시작 행»(`startRows`)과 그
+ * 사이의 배정 칸수(`allotted`)를 읽어, 내용이 짧아도 다음 구역을 제자리에
+ * 앉힌다. 그 값은 양식 파일 안에 있고 **파일은 서버에만 있다** — 브라우저에서는
+ * 셀 수 없다.
  *
- * ⚠️ 이것은 **나누기 전의** 줄 수다. 한 줄이 칸의 가로폭을 넘으면 채우개가 다시
- * 나누므로 문서의 실제 줄 수는 더 클 수 있다. 마지막 방어선은 채우개다.
+ * 그래서 여기 셈은 구역을 위에서부터 **붙여 쌓은** 모양이고, 채우개가 실제로
+ * 쓰는 줄 수는 **늘 이 값보다 크거나 같다**(`startRow = max(startRows, cursor)`
+ * 와 `rowCount = max(allotted, lines)` 둘 다 늘리기만 한다). 즉 이 함수는
+ * **밑에서 받치는 값**이지 문서와 일치하는 값이 아니다.
+ *
+ * 🔴 그러니 나중에 이 자리를 보고 "채우개와 안 맞네, 버그다" 하며 맞추려 들지
+ * 말 것. **일부러 어림값이고, 어림값을 진짜 값 쪽으로 당겨 둔 것**이다
+ * (예전에는 구역 사이 빈 줄·맺음 표시 위아래 여백·두 줄짜리 라벨을 아예 세지
+ * 않아, 화면이 "아직 여유가 있다"고 말하는데 내려받기가 실패했다).
+ * 마지막 방어선은 여전히 채우개다.
+ *
+ * ⚠️ **나누기 전의** 줄 수이기도 하다. 한 줄이 칸의 가로폭을 넘으면 채우개가
+ * 다시 나누므로 그쪽이 또 커진다.
+ *
+ * ── 셈 (전부 채우개에서 옮겨 온 것이다) ─────────────────────────────────
+ *   구역별 줄 수                 `sectionRowCount`
+ *     · 확인내용에는 정형 문구 한 줄이 포함된다   `findingsLines`
+ *   + 구역 사이 빈 줄 × (내용이 있는 구역 수 - 1) `planBodyLayout` 의 `cursor`
+ *     🔴 **마지막 구역 뒤에는 안 붙는다** — 그 뒤의 여백은 맺음 표시의 것이다.
+ *   + 맺음 표시 위의 여백                          `closingRow`
+ *   + 맺음 표시(`～이　상～`) 한 줄
+ *   + 맺음 표시 아래로 남기는 줄                   `fillSheet` 의 `neededRows`
+ *
+ * 🔴 **검증 모듈이 이 함수를 그대로 가져다 쓴다**(`service-report-input.ts`).
+ * 예전에는 같은 식을 두 벌로 들고 있었고, 그러면 한쪽만 고쳐지는 날 화면은
+ * "여유가 있다"고 말하는데 서버가 400 을 돌려준다.
  */
-export function countServiceReportBodyRows(values: ServiceReportFormValues): number {
-  const findings = serviceReportLines(values.findings);
-  const actions = serviceReportLines(values.actions);
-  const summary = values.kind === "REPAIR" ? serviceReportLines(values.summary) : [];
-  const introRows = findings.length === 0 || values.findingsIntro === "" ? 0 : 1;
-  return findings.length + introRows + actions.length + summary.length + 1;
+export function countServiceReportBodyRows(
+  body: ServiceReportBodyLines,
+  layout: ServiceReportBodyRowLayout
+): number {
+  /**
+   * 채우개의 `findingsLines` — 확인내용이 비면 정형 문구도 안 들어가고(구역이
+   * 통째로 빈다), 머리글을 비우면 본문만 들어간다.
+   */
+  const findings =
+    body.findings.length === 0
+      ? 0
+      : body.findings.length + (body.findingsIntro === "" ? 0 : 1);
+
+  const sections = [
+    sectionRowCount(findings, layout.labelRows.findings),
+    sectionRowCount(body.actions.length, layout.labelRows.actions),
+    sectionRowCount(body.summary.length, layout.labelRows.summary),
+  ].filter((rows) => rows > 0);
+
+  const content = sections.reduce((sum, rows) => sum + rows, 0);
+  // 🔴 마지막으로 내용이 있는 구역 뒤에는 빈 줄이 없다(`planBodyLayout`).
+  const gaps = layout.sectionGapRows * Math.max(0, sections.length - 1);
+
+  return content + gaps + layout.closingGapRows + 1 + layout.closingTrailingRows;
 }
 
 export function countServiceReportRemarkRows(values: ServiceReportFormValues): number {
@@ -765,7 +894,7 @@ export function serviceReportRowLimitErrors(
 ): { body?: string; remark?: string } {
   const errors: { body?: string; remark?: string } = {};
 
-  const bodyRows = countServiceReportBodyRows(values);
+  const bodyRows = countServiceReportBodyRows(serviceReportBodyLines(values), limits.bodyLayout);
   if (bodyRows > limits.maxBodyRows) {
     errors.body = `본문이 ${bodyRows}줄입니다. 한 보고서에 ${limits.maxBodyRows}줄까지만 담을 수 있습니다. 줄을 줄이거나 보고서를 나눠 주세요.`;
   }
@@ -780,12 +909,8 @@ export function serviceReportRowLimitErrors(
 
 /** 본문이 한 줄도 없으면 서버가 거부한다(맺음 표시만 남은 문서를 내보내지 않는다). */
 export function isServiceReportBodyEmpty(values: ServiceReportFormValues): boolean {
-  const summary = values.kind === "REPAIR" ? serviceReportLines(values.summary) : [];
-  return (
-    serviceReportLines(values.findings).length === 0 &&
-    serviceReportLines(values.actions).length === 0 &&
-    summary.length === 0
-  );
+  const body = serviceReportBodyLines(values);
+  return body.findings.length === 0 && body.actions.length === 0 && body.summary.length === 0;
 }
 
 /**
