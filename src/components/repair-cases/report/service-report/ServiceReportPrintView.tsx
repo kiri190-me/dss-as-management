@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import PrintFitFrame from "@/components/common/print-fit-frame";
 import type {
   PrintGridBorderStyle,
   PrintGridCell,
@@ -54,6 +55,9 @@ const PRINT_SAFETY = 0.997;
 
 const MM_PER_POINT = 25.4 / 72;
 const MM_PER_INCH = 25.4;
+
+/** CSS 의 1in = 96px 이다. 종이 폭(mm)을 «화면에서 몇 픽셀인가»로 옮길 때 쓴다. */
+const PX_PER_MM = 96 / 25.4;
 
 /**
  * `<pageSetup paperSize>` → 종이 크기(mm, 세로 기준).
@@ -226,45 +230,53 @@ export default function ServiceReportPrintView({
         <b>&ldquo;머리글 및 바닥글&rdquo;</b> 체크를 해제하면 사라집니다.
       </p>
 
-      <div className="srp-page">
-        <div className="srp-sheet" style={{ width: `${sheetWidthPt.toFixed(3)}pt` }}>
-          <table className="srp-table">
-            <colgroup>
-              {grid.columnWidthsPt.map((width, index) => (
-                <col key={index} style={{ width: pt(width, scale) }} />
-              ))}
-            </colgroup>
-            <tbody>
-              {grid.rows.map((row) => (
-                <tr key={row.row} style={{ height: pt(row.heightPt, scale) }}>
-                  {row.cells.map((cell) => (
-                    <Cell key={`${cell.row}:${cell.column}`} cell={cell} scale={scale} />
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* 좁은 화면에서 종이를 폭에 맞춰 줄여 «보여 주는» 상자. 인쇄에는 닿지
+          않는다 — `print-fit-frame.tsx` 머리말과 아래 `@media screen` 블록. */}
+      <PrintFitFrame
+        naturalWidthPx={plan.paperWidthMm * PX_PER_MM}
+        cssVariable="--srp-fit"
+        className="srp-viewport"
+      >
+        <div className="srp-page">
+          <div className="srp-sheet" style={{ width: `${sheetWidthPt.toFixed(3)}pt` }}>
+            <table className="srp-table">
+              <colgroup>
+                {grid.columnWidthsPt.map((width, index) => (
+                  <col key={index} style={{ width: pt(width, scale) }} />
+                ))}
+              </colgroup>
+              <tbody>
+                {grid.rows.map((row) => (
+                  <tr key={row.row} style={{ height: pt(row.heightPt, scale) }}>
+                    {row.cells.map((cell) => (
+                      <Cell key={`${cell.row}:${cell.column}`} cell={cell} scale={scale} />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
-          {/* 양식 안에 박힌 도장. next/image 를 쓰지 않는다: 인쇄 화면이라 지연
-              로딩이 오히려 방해가 되고(아직 안 뜬 그림이 빈칸으로 나간다),
-              인증이 걸린 API 라우트에서 온다. 못 꺼내도 화면은 살아 있다. */}
-          {grid.pictures.map((picture, index) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={`${picture.name}-${index}`}
-              className="srp-picture"
-              src={`${templateImageBase}${encodeURIComponent(picture.name)}`}
-              alt=""
-              style={{
-                left: pt(picture.leftPt, scale),
-                top: pt(picture.topPt, scale),
-                width: pt(picture.widthPt, scale),
-                height: pt(picture.heightPt, scale),
-              }}
-            />
-          ))}
+            {/* 양식 안에 박힌 도장. next/image 를 쓰지 않는다: 인쇄 화면이라 지연
+                로딩이 오히려 방해가 되고(아직 안 뜬 그림이 빈칸으로 나간다),
+                인증이 걸린 API 라우트에서 온다. 못 꺼내도 화면은 살아 있다. */}
+            {grid.pictures.map((picture, index) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={`${picture.name}-${index}`}
+                className="srp-picture"
+                src={`${templateImageBase}${encodeURIComponent(picture.name)}`}
+                alt=""
+                style={{
+                  left: pt(picture.leftPt, scale),
+                  top: pt(picture.topPt, scale),
+                  width: pt(picture.widthPt, scale),
+                  height: pt(picture.heightPt, scale),
+                }}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      </PrintFitFrame>
     </div>
   );
 }
@@ -339,6 +351,19 @@ function styleSheet(plan: PaperPlan, sheetWidthPt: number): string {
 .srp-table td { padding: 0 1px; overflow: visible; word-break: keep-all; }
 
 .srp-picture { position: absolute; object-fit: contain; }
+
+/* ── 좁은 화면: 종이를 폭에 맞춰 줄여 «보여 준다» ──────────────────────────
+   🔴 이 블록은 통째로 @media screen 안에 있다 — 인쇄에는 규칙 자체가 적용되지
+   않으므로 나가는 문서는 한 픽셀도 달라지지 않는다. 까닭과 원리는
+   components/common/print-fit-frame.tsx 머리말에 있다.
+   ⚠️ 이 글은 템플릿 리터럴 안이다 — 백틱을 쓰면 문자열이 거기서 끊긴다. */
+@media screen {
+  /* 스크롤 상자의 최소 너비는 0 이라, 210mm 짜리 종이가 앱 껍데기를 옆으로
+     밀어내지 못한다. 배율이 1 로 남더라도 문서는 «이 상자 안에서만» 밀린다. */
+  .srp-viewport { overflow-x: auto; }
+  /* 배율은 상자가 재어 변수로 내려 준다. 다 들어가는 화면에서는 1 이다. */
+  .srp-page { zoom: var(--srp-fit, 1); }
+}
 
 @media print {
   @page { size: ${plan.paperWidthMm.toFixed(2)}mm ${plan.paperHeightMm.toFixed(2)}mm; margin: ${margins}; }

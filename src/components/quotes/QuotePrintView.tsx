@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import PrintFitFrame from "@/components/common/print-fit-frame";
 import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import type { QuoteEditData } from "@/lib/db/queries/quotes";
 import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
@@ -59,6 +60,16 @@ function colPt(chars: number): number {
 
 const COLUMNS = [4.25, 8.25, 1.5, 15.125, 8.25, 17.875, 7.125, 13.75, 15.25];
 const SHEET_WIDTH_PT = COLUMNS.reduce((sum, chars) => sum + colPt(chars), 0);
+
+/**
+ * `.qp-page` 의 실물 폭(px) — 좁은 화면에서 얼마나 줄일지 재는 데만 쓴다
+ * (`components/common/print-fit-frame.tsx`).
+ *
+ * 종이 = 시트 + 좌우 안쪽 여백 10pt 씩 + 테두리 1px 씩. 아래 STYLES 의
+ * `.qp-page { padding: 15pt 10pt; border: 1px … }` 와 **짝이다** — 그 값을 고치면
+ * 여기도 같이 고쳐야 한다. CSS 의 1in = 96px, 1pt = 96/72px.
+ */
+const PAGE_NATURAL_WIDTH_PX = (SHEET_WIDTH_PT + 20) * (96 / 72) + 2;
 
 const AMOUNT = new Intl.NumberFormat("ko-KR");
 const VAT_RATE = 0.1;
@@ -225,157 +236,165 @@ export default function QuotePrintView({
         사라집니다.
       </p>
 
-      <div className="qp-page">
-        <div className="qp-sheet" style={{ width: `${SHEET_WIDTH_PT}pt` }}>
-          <header className="qp-top">
-            <h1 className="qp-title">견 적 서</h1>
-            {/* next/image 를 쓰지 않는다: 인쇄 화면이라 지연 로딩이 오히려
-                방해가 되고(아직 안 뜬 그림이 빈칸으로 나간다), 인증이 걸린 API
-                라우트에서 온다. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="qp-logo" src="/api/quotes/template-image/logo" alt="" />
-          </header>
-
-          <section className="qp-company">
-            <p className="qp-company-name">{header.companyName ?? ""}</p>
-            <p className="qp-ceo">
-              <span className="qp-ceo-text">{header.ceoLine ?? ""}</span>
-              {/* 직인 — drawing1.xml 앵커가 대표자 이름 끝에 겹치도록 되어 있다. */}
+      {/* 좁은 화면에서 종이를 폭에 맞춰 줄여 «보여 주는» 상자. 인쇄에는 닿지
+          않는다 — `print-fit-frame.tsx` 머리말과 아래 STYLES 의 `@media screen`. */}
+      <PrintFitFrame
+        naturalWidthPx={PAGE_NATURAL_WIDTH_PX}
+        cssVariable="--qp-fit"
+        className="qp-viewport"
+      >
+        <div className="qp-page">
+          <div className="qp-sheet" style={{ width: `${SHEET_WIDTH_PT}pt` }}>
+            <header className="qp-top">
+              <h1 className="qp-title">견 적 서</h1>
+              {/* next/image 를 쓰지 않는다: 인쇄 화면이라 지연 로딩이 오히려
+                  방해가 되고(아직 안 뜬 그림이 빈칸으로 나간다), 인증이 걸린 API
+                  라우트에서 온다. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="qp-seal" src="/api/quotes/template-image/seal" alt="" />
-            </p>
-            <p>{header.address ?? ""}</p>
-            <p>
-              <span className="qp-col1">{header.tel ?? ""}</span>
-              <span>{header.fax ?? ""}</span>
-            </p>
-            <p>
-              <span className="qp-col1">{header.email ?? ""}</span>
-              <span>{header.homepage ?? ""}</span>
-            </p>
-          </section>
+              <img className="qp-logo" src="/api/quotes/template-image/logo" alt="" />
+            </header>
 
-          <div className="qp-rule-thick" />
+            <section className="qp-company">
+              <p className="qp-company-name">{header.companyName ?? ""}</p>
+              <p className="qp-ceo">
+                <span className="qp-ceo-text">{header.ceoLine ?? ""}</span>
+                {/* 직인 — drawing1.xml 앵커가 대표자 이름 끝에 겹치도록 되어 있다. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="qp-seal" src="/api/quotes/template-image/seal" alt="" />
+              </p>
+              <p>{header.address ?? ""}</p>
+              <p>
+                <span className="qp-col1">{header.tel ?? ""}</span>
+                <span>{header.fax ?? ""}</span>
+              </p>
+              <p>
+                <span className="qp-col1">{header.email ?? ""}</span>
+                <span>{header.homepage ?? ""}</span>
+              </p>
+            </section>
 
-          <dl className="qp-info">
-            {infoRows.map(([label, value], index) => (
-              <div className="qp-info-row" key={label}>
-                <dt>
-                  <span className="qp-info-n">{index + 1}.</span>
-                  <span className="qp-info-label">{label}</span>
-                  <span className="qp-info-colon">:</span>
-                </dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
+            <div className="qp-rule-thick" />
 
-          <table className="qp-items">
-            <colgroup>
-              {COLUMNS.map((chars, index) => (
-                <col key={index} style={{ width: `${colPt(chars)}pt` }} />
+            <dl className="qp-info">
+              {infoRows.map(([label, value], index) => (
+                <div className="qp-info-row" key={label}>
+                  <dt>
+                    <span className="qp-info-n">{index + 1}.</span>
+                    <span className="qp-info-label">{label}</span>
+                    <span className="qp-info-colon">:</span>
+                  </dt>
+                  <dd>{value}</dd>
+                </div>
               ))}
-            </colgroup>
-            <thead>
-              <tr>
-                <th colSpan={2}>번 호</th>
-                <th colSpan={4}>품 명</th>
-                <th>수 량</th>
-                <th>단 가</th>
-                <th>합 계</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="qp-spacer-row">
-                <td colSpan={9} />
-              </tr>
-              <tr>
-                <td className="qp-c-no" colSpan={2}>
-                  1.
-                </td>
-                <td className="qp-c-title" colSpan={7}>
-                  {quote.subject}
-                </td>
-              </tr>
-              {productLine(quote) && (
-                <tr>
-                  <td colSpan={2} />
-                  <td className="qp-c-model" colSpan={7}>
-                    {productLine(quote)}
-                  </td>
-                </tr>
-              )}
+            </dl>
 
-              <tr className="qp-group-row">
-                <td colSpan={2} />
-                <td className="qp-c-group" colSpan={7}>
-                  1)　부품 비용
-                </td>
-              </tr>
-              {printed.length === 0 ? (
+            <table className="qp-items">
+              <colgroup>
+                {COLUMNS.map((chars, index) => (
+                  <col key={index} style={{ width: `${colPt(chars)}pt` }} />
+                ))}
+              </colgroup>
+              <thead>
                 <tr>
-                  <td colSpan={2} />
-                  <td className="qp-c-item qp-muted" colSpan={7}>
-                    (부품 없음)
+                  <th colSpan={2}>번 호</th>
+                  <th colSpan={4}>품 명</th>
+                  <th>수 량</th>
+                  <th>단 가</th>
+                  <th>합 계</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="qp-spacer-row">
+                  <td colSpan={9} />
+                </tr>
+                <tr>
+                  <td className="qp-c-no" colSpan={2}>
+                    1.
+                  </td>
+                  <td className="qp-c-title" colSpan={7}>
+                    {quote.subject}
                   </td>
                 </tr>
-              ) : (
-                printed.map((part, index) => (
-                  <tr key={`${part.name}-${index}`}>
+                {productLine(quote) && (
+                  <tr>
                     <td colSpan={2} />
-                    <td className="qp-c-dash">-</td>
-                    <td className="qp-c-item" colSpan={3}>
-                      {part.name}
+                    <td className="qp-c-model" colSpan={7}>
+                      {productLine(quote)}
                     </td>
-                    <td className="qp-c-qty">{part.quantity}</td>
-                    <td className="qp-c-money">{won(part.unitPrice)}</td>
-                    <td className="qp-c-money">{won(part.quantity * part.unitPrice)}</td>
                   </tr>
-                ))
-              )}
+                )}
 
-              <tr className="qp-group-row">
-                <td colSpan={2} />
-                <td className="qp-c-group" colSpan={4}>
-                  2)　작업비 (조사,수리,개조,통전,출하검사)
-                </td>
-                <td className="qp-c-qty">1</td>
-                <td className="qp-c-money">{won(workCost)}</td>
-                <td className="qp-c-money">{won(workCost)}</td>
-              </tr>
-              <tr>
-                <td colSpan={2} />
-                <td className="qp-c-dash">*</td>
-                <td className="qp-c-fine" colSpan={6}>
-                  수리에 필요한 인건비, 유지관리비(계측기 유지관리, 전기 및 수도세등), 소모품등이
-                  포함되어 책정된 가격입니다.
-                </td>
-              </tr>
+                <tr className="qp-group-row">
+                  <td colSpan={2} />
+                  <td className="qp-c-group" colSpan={7}>
+                    1)　부품 비용
+                  </td>
+                </tr>
+                {printed.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} />
+                    <td className="qp-c-item qp-muted" colSpan={7}>
+                      (부품 없음)
+                    </td>
+                  </tr>
+                ) : (
+                  printed.map((part, index) => (
+                    <tr key={`${part.name}-${index}`}>
+                      <td colSpan={2} />
+                      <td className="qp-c-dash">-</td>
+                      <td className="qp-c-item" colSpan={3}>
+                        {part.name}
+                      </td>
+                      <td className="qp-c-qty">{part.quantity}</td>
+                      <td className="qp-c-money">{won(part.unitPrice)}</td>
+                      <td className="qp-c-money">{won(part.quantity * part.unitPrice)}</td>
+                    </tr>
+                  ))
+                )}
 
-              {buildWorkSections(workSections).map((section) => (
-                <SectionRows key={section.mark} section={section} />
-              ))}
-            </tbody>
-          </table>
+                <tr className="qp-group-row">
+                  <td colSpan={2} />
+                  <td className="qp-c-group" colSpan={4}>
+                    2)　작업비 (조사,수리,개조,통전,출하검사)
+                  </td>
+                  <td className="qp-c-qty">1</td>
+                  <td className="qp-c-money">{won(workCost)}</td>
+                  <td className="qp-c-money">{won(workCost)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={2} />
+                  <td className="qp-c-dash">*</td>
+                  <td className="qp-c-fine" colSpan={6}>
+                    수리에 필요한 인건비, 유지관리비(계측기 유지관리, 전기 및 수도세등), 소모품등이
+                    포함되어 책정된 가격입니다.
+                  </td>
+                </tr>
 
-          <div className="qp-rule-thick qp-rule-totals" />
-          <div className="qp-totals">
-            <div className="qp-total-row">
-              <span className="qp-total-label">공 급 가</span>
-              <span className="qp-total-value">{won(supply)}</span>
+                {buildWorkSections(workSections).map((section) => (
+                  <SectionRows key={section.mark} section={section} />
+                ))}
+              </tbody>
+            </table>
+
+            <div className="qp-rule-thick qp-rule-totals" />
+            <div className="qp-totals">
+              <div className="qp-total-row">
+                <span className="qp-total-label">공 급 가</span>
+                <span className="qp-total-value">{won(supply)}</span>
+              </div>
+              <div className="qp-total-row">
+                <span className="qp-total-label">부 가 세</span>
+                <span className="qp-total-value">{won(vat)}</span>
+              </div>
+              <div className="qp-total-row qp-total-grand">
+                <span className="qp-total-label">합　　계</span>
+                <span className="qp-total-value">{won(supply + vat)}</span>
+              </div>
             </div>
-            <div className="qp-total-row">
-              <span className="qp-total-label">부 가 세</span>
-              <span className="qp-total-value">{won(vat)}</span>
-            </div>
-            <div className="qp-total-row qp-total-grand">
-              <span className="qp-total-label">합　　계</span>
-              <span className="qp-total-value">{won(supply + vat)}</span>
-            </div>
+            <div className="qp-rule-thick" />
           </div>
-          <div className="qp-rule-thick" />
         </div>
-      </div>
+      </PrintFitFrame>
     </div>
   );
 }
@@ -519,6 +538,19 @@ const STYLES = `
 .qp-total-label { width: 70pt; text-align: center; letter-spacing: .1em; }
 .qp-total-value { width: 110pt; text-align: right; font-variant-numeric: tabular-nums; }
 .qp-total-grand .qp-total-label, .qp-total-grand .qp-total-value { font-weight: 700; }
+
+/* ── 좁은 화면: 종이를 폭에 맞춰 줄여 «보여 준다» ──────────────────────────
+   🔴 이 블록은 통째로 @media screen 안에 있다 — 인쇄에는 규칙 자체가 적용되지
+   않으므로 나가는 문서는 한 픽셀도 달라지지 않는다. 까닭과 원리는
+   components/common/print-fit-frame.tsx 머리말에 있다.
+   ⚠️ 이 글은 템플릿 리터럴 안이다 — 백틱을 쓰면 문자열이 거기서 끊긴다. */
+@media screen {
+  /* 스크롤 상자의 최소 너비는 0 이라, 713px 짜리 종이가 앱 껍데기를 옆으로
+     밀어내지 못한다. 배율이 1 로 남더라도 문서는 «이 상자 안에서만» 밀린다. */
+  .qp-viewport { overflow-x: auto; }
+  /* 배율은 상자가 재어 변수로 내려 준다. 다 들어가는 화면에서는 1 이다. */
+  .qp-page { zoom: var(--qp-fit, 1); }
+}
 
 @media print {
   @page { size: A4 portrait; margin: 15mm 10mm; }
