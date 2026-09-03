@@ -5,14 +5,21 @@ import ReportKindChoice from "@/components/repair-cases/report/ReportKindChoice"
 import ServiceReportList, {
   type ServiceReportListRow,
 } from "@/components/repair-cases/report/ServiceReportList";
+import ServiceReportTabs, {
+  type DeletedServiceReportListRow,
+} from "@/components/repair-cases/report/ServiceReportTabs";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
+  canDeleteServiceReports,
   canViewServiceReports,
 } from "@/lib/auth/service-report-authorization";
 import { readSession } from "@/lib/auth/session";
-import { listServiceReportsForRepairCase } from "@/lib/db/queries/service-reports";
+import {
+  listDeletedServiceReportsForRepairCase,
+  listServiceReportsForRepairCase,
+} from "@/lib/db/queries/service-reports";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { formatServiceReportKstDateTime } from "@/lib/domain/service-report-draft";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
@@ -43,6 +50,13 @@ import { SERVICE_REPORT_TITLES } from "@/lib/xlsx/service-report-template";
  * ⚠️ **이 파일은 서버 컴포넌트라 `@/lib/xlsx/*` 를 값으로 가져와도 된다.**
  * 클라이언트 컴포넌트는 안 된다 — 채우개가 `node:fs`·`node:zlib` 를 끌고 온다.
  * 그래서 아래 `ReportKindChoice` 에는 **다 만들어진 글자**만 넘긴다.
+ * `ServiceReportTabs` 도 같은 이유로 종류 이름을 글자로 받는다.
+ *
+ * ── 휴지통 탭 ───────────────────────────────────────────────────────────
+ * 지운 장은 목록에서 사라지지만 없어지지는 않는다(소프트 삭제). 되살릴 자리가
+ * 없으면 그 사실이 아무 쓸모가 없어서, **지울 수 있는 사람에게만** 「사용중 /
+ * 휴지통」 탭을 그린다. 권한이 없으면 휴지통을 **읽지도 내려보내지도 않는다** —
+ * 견적서 화면과 같은 규칙이다(`quotes/page.tsx`).
  * ============================================================================
  */
 
@@ -119,6 +133,10 @@ export default async function RepairCaseReportPage({
     ? (await listServiceReportsForRepairCase(resolved.id)).map((item) => ({
         id: item.id,
         href: `${serviceReportHref}?id=${item.id}`,
+        // 🔴 주소는 **여기서만** 조립한다 — 목록 조각이 만들면 같은 규칙이 두
+        //    곳에 살고, 한쪽만 고쳐지는 날이 온다(`href` 와 같은 판단).
+        //    형제 화면과 같은 자리에 `?id=` 를 싣는다(print/page.tsx 머리말).
+        printHref: `${serviceReportHref}/print?id=${item.id}`,
         kindLabel: KIND_LABELS[item.kind],
         reportNumber: item.reportNumber,
         issuedOn: item.issuedOn,
@@ -127,10 +145,50 @@ export default async function RepairCaseReportPage({
       }))
     : [];
 
+  /**
+   * 🔴 **휴지통은 지울 수 있는 사람만 읽는다.** 못 여는 탭의 내용을 클라이언트로
+   * 실어 보내지 않는다(`quotes/page.tsx` 의 그 규칙). 문턱이 지우기와 같은 것은
+   * `auth/service-report-authorization.ts` 가 정한 것이다 — "지울 수는 있는데
+   * 되돌릴 수는 없는" 역할을 만들지 않는다.
+   */
+  const canDelete = canDeleteServiceReports(level);
+  const trashRows: DeletedServiceReportListRow[] = canDelete
+    ? (await listDeletedServiceReportsForRepairCase(resolved.id)).map((item) => ({
+        id: item.id,
+        version: item.version,
+        kindLabel: KIND_LABELS[item.kind],
+        reportNumber: item.reportNumber,
+        issuedOn: item.issuedOn,
+        // 시각을 못 읽으면 지어내지 않고 뺀다 — 목록 쪽과 같은 판단.
+        deletedAtLabel: item.deletedAt
+          ? formatServiceReportKstDateTime(new Date(item.deletedAt))
+          : null,
+        deletedByName: item.deletedByName,
+        deleteReason: item.deleteReason,
+      }))
+    : [];
+
+  // 한 장도 없으면 목록을 그리지 않는다 — 빈 상자를 억지로 그리지 않는다.
+  const savedList = rows.length > 0 ? <ServiceReportList rows={rows} /> : null;
+
+  /**
+   * 탭 막대는 **지울 권한이 있고, 보여 줄 것이 하나라도 있을 때만** 그린다.
+   * 저장된 것도 지운 것도 없는 건에서는 「사용중 (0) / 휴지통 (0)」 두 칸이
+   * 갈림길 위에 앉아 아무것도 알려 주지 않는다.
+   */
+  const showTabs = canDelete && (rows.length > 0 || trashRows.length > 0);
+
   return (
     <div className="flex flex-col gap-6">
-      {/* 한 장도 없으면 갈림길만 보인다 — 빈 상자를 억지로 그리지 않는다. */}
-      {rows.length > 0 && <ServiceReportList rows={rows} />}
+      {showTabs ? (
+        // 「사용중」 목록은 **서버가 그려서** 넘긴다 — 그 조각을 클라이언트로
+        // 끌어들이지 않기 위해서다(ServiceReportTabs 머리말).
+        <ServiceReportTabs savedCount={rows.length} trashRows={trashRows}>
+          {savedList}
+        </ServiceReportTabs>
+      ) : (
+        savedList
+      )}
 
       <ReportKindChoice
         options={[

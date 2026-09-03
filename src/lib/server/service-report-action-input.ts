@@ -190,3 +190,46 @@ function readCauses(
   }
   return picked;
 }
+
+/**
+ * ============================================================================
+ * 삭제 사유 — 지우기 확인 창의 「삭제 사유 (선택)」 칸
+ * ============================================================================
+ * 폼 값과 같은 파일에 두는 까닭은 이 모듈이 **액션에 들어오는 값을 읽는 일**을
+ * 맡고 있기 때문이고, 액션 파일에 두지 못하는 까닭은 그쪽이 `"use server"` 라
+ * **내보내는 것이 전부 async 함수여야** 하기 때문이다(그 파일의
+ * `validateReportIdentity` 주석). 순수 함수라 시험이 붙는다.
+ *
+ * 🔴 **여기서는 다듬는다** — 이 파일 머리말의 '다듬지 않는다'와 어긋나 보이지만
+ * 다른 종류의 값이다. 폼 값은 고객사로 나가는 문서의 본문이라 앞 공백이
+ * 글머리표이고 빈 줄이 문단 나누기지만, 삭제 사유는 **왜 지웠는지를 표에 남기는
+ * 한 줄 메모**다. 공백만 두들긴 사유를 «사유가 있다»고 기록하면, 나중에 그 행을
+ * 보는 사람이 이유가 적혀 있는 줄 알고 열어 본다. 견적서가 같은 자리에서 같은
+ * 판단을 한다(`actions/quotes.ts` 의 `deleteQuoteAction`).
+ * ============================================================================
+ */
+
+/**
+ * 길이 상한. 이 저장소의 다른 휴지통 액션(고객사·제품 모델·재고·작업지시 서식)이
+ * 전부 2000자에서 거절하므로 같은 값을 쓴다 — **같은 확인 창을 쓰는 화면들**이
+ * 사유 길이만 서로 다르면 어느 쪽이 규칙인지 알 수 없게 된다.
+ */
+export const SERVICE_REPORT_DELETE_REASON_MAX_LENGTH = 2000;
+
+const DELETE_REASON_TOO_LONG_MESSAGE = "삭제 사유가 너무 깁니다.";
+
+export type ServiceReportDeleteReasonResult =
+  | { ok: true; reason: string | null }
+  | { ok: false; message: string };
+
+/**
+ * 받은 삭제 사유를 표에 담을 값으로. **글자가 아니거나 다듬어서 빈 글자면
+ * `null`** — 「사유 없음」과 「공백만 적어 보냄」을 표에서 가르지 않는다.
+ */
+export function readServiceReportDeleteReason(raw: unknown): ServiceReportDeleteReasonResult {
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  if (trimmed.length > SERVICE_REPORT_DELETE_REASON_MAX_LENGTH) {
+    return { ok: false, message: DELETE_REASON_TOO_LONG_MESSAGE };
+  }
+  return { ok: true, reason: trimmed === "" ? null : trimmed };
+}

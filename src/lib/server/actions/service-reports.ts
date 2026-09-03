@@ -11,11 +11,15 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   createServiceReport,
+  restoreServiceReport,
   softDeleteServiceReport,
   updateServiceReport,
 } from "@/lib/db/mutations/service-reports";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import { readServiceReportActionValues } from "@/lib/server/service-report-action-input";
+import {
+  readServiceReportActionValues,
+  readServiceReportDeleteReason,
+} from "@/lib/server/service-report-action-input";
 import { SERVICE_REPORT_CAUSES } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -229,11 +233,64 @@ export async function updateServiceReportAction(input: {
  * 확인했고 원인이 무엇이었다고 알렸는가"의 기록이 목록에서 사라진다
  * (`auth/service-report-authorization.ts` 의 '지우기·되살리기는 MANAGE').
  *
- * 사유는 받지 않는다(`null`). 화면에 그 칸이 없어서인데, 없는 채로 둔 까닭은
- * 지우기가 되돌릴 수 있는 조작이고 감사 로그에 **누가 언제 지웠는지**가 이미
- * 남기 때문이다. 사유 칸이 필요해지면 그때 화면과 함께 더한다.
+ * 🔴 **사유를 받는다(선택).** 확인 창(`MasterDataDeleteDialog`)에 「삭제 사유
+ * (선택)」 칸이 있고, 적을 수 있게 해 놓고 버리는 것이 가장 나쁘다 — 표에는 담을
+ * 칸이 이미 있다(`service_reports.delete_reason`). 다듬는 규칙과 길이 상한은
+ * `service-report-action-input.ts` 가 정한다(순수 함수라 시험이 붙는다).
  */
 export async function deleteServiceReportAction(input: {
+  serviceReportId: string;
+  expectedVersion: number;
+  /** 다듬어서 빈 글자면 「사유 없음」과 같게 다룬다. */
+  reason: string | null;
+}): Promise<ServiceReportActionResult> {
+  const auth = await resolveAuthorizedActor("delete");
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  const identity = validateReportIdentity(input?.serviceReportId, input?.expectedVersion);
+  if (identity) return identity;
+
+  const reason = readServiceReportDeleteReason(input?.reason);
+  if (!reason.ok) {
+    // 🔴 이 실패는 **확인 창 안에** 그대로 뜬다(`submitError`). 창에는 칸별 오류를
+    //    놓을 자리가 없으므로 `message` 에도 같은 문장을 담는다.
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { reason: reason.message },
+      message: reason.message,
+    };
+  }
+
+  try {
+    return await softDeleteServiceReport({
+      serviceReportId: input.serviceReportId,
+      expectedVersion: input.expectedVersion,
+      actorUserId: auth.actorUserId,
+      reason: reason.reason,
+    });
+  } catch (err) {
+    console.error("deleteServiceReportAction: unexpected DB error", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * 휴지통에서 되살린다.
+ *
+ * 문턱이 지우기와 **같다**(MANAGE) — `auth/service-report-authorization.ts` 가
+ * "지울 수는 있는데 되돌릴 수는 없는" 역할을 만들지 않으려고 둘을 한 함수로
+ * 묶어 두었다. 그래서 여기서도 `"delete"` 를 그대로 쓴다.
+ *
+ * 🔴 **사유를 받지 않는다.** 되돌리는 일에는 이유를 묻지 않는다 — 공용 복원
+ * 창(`MasterDataRestoreDialog`)에도 사유 칸이 없고, mutation 이 남기는 감사
+ * 기록(`RESTORE`)에 누가 언제 되살렸는지가 이미 있다.
+ *
+ * 되살리기를 막는 겹침은 없다(mutation 머리말 — 문서번호에 유일성을 걸지
+ * 않았다). 그래서 실패는 `NOT_FOUND`(이미 되살려졌거나 없는 장)와
+ * `CONFLICT`(그 사이에 누가 손댔다) 둘뿐이다.
+ */
+export async function restoreServiceReportAction(input: {
   serviceReportId: string;
   expectedVersion: number;
 }): Promise<ServiceReportActionResult> {
@@ -244,14 +301,13 @@ export async function deleteServiceReportAction(input: {
   if (identity) return identity;
 
   try {
-    return await softDeleteServiceReport({
+    return await restoreServiceReport({
       serviceReportId: input.serviceReportId,
       expectedVersion: input.expectedVersion,
       actorUserId: auth.actorUserId,
-      reason: null,
     });
   } catch (err) {
-    console.error("deleteServiceReportAction: unexpected DB error", err);
+    console.error("restoreServiceReportAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

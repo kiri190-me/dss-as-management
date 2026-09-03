@@ -28,6 +28,10 @@ import type { ServiceReportKind } from "@/lib/xlsx/service-report-template";
  * 있으면 휴지통이 뜻을 잃는다 — `getQuoteForEdit` 과 같은 판단이고, 내려받기
  * 라우트가 지워진 접수 건을 없는 것으로 보는 것과도 같은 자리다.
  *
+ * 지워진 장을 읽는 길은 **`listDeletedServiceReportsForRepairCase` 하나뿐**이고,
+ * 그것은 되살리기 화면을 그리는 데 필요한 몇 칸만 돌려준다. 그 함수를 늘려
+ * 본문까지 담게 만들면 위 규칙이 조용히 무너진다.
+ *
  * ── 목록은 본문 줄을 끌어오지 않는다 ────────────────────────────────────
  * 한 접수 건에 붙는 보고서는 많아야 몇 장이지만, 본문은 한 장에 수백 줄까지
  * 간다. 목록이 답해야 하는 물음은 "이 건으로 어떤 보고서가 나갔나"이고 거기에는
@@ -100,6 +104,73 @@ export async function listServiceReportsForRepairCase(
     issuedOn: row.issuedOn,
     createdByName: row.createdByName,
     updatedAt: row.updatedAt.toISOString(),
+  }));
+}
+
+export type DeletedServiceReportRow = {
+  id: string;
+  /** 되살릴 때 되돌려 보낼 낙관적 잠금 토큰. 화면에 그리지는 않는다. */
+  version: number;
+  kind: ServiceReportKind;
+  /** `No. [앞] - [중간] - [뒤]` 를 한 줄로 이은 것. 세 칸이 다 비면 빈 글자다. */
+  reportNumber: string;
+  /** "YYYY-MM-DD" */
+  issuedOn: string;
+  /** 지운 때(ISO 8601). */
+  deletedAt: string | null;
+  /** 지울 때 적어 둔 사유. 안 적었으면 null. */
+  deleteReason: string | null;
+  /** 지운 사람의 이름. 계정이 지워졌으면 null. */
+  deletedByName: string | null;
+};
+
+/**
+ * 이 접수 건의 휴지통. **지운 시각 내림차순** — 방금 지운 것을 되살리려고 여는
+ * 화면이다(`listDeletedQuotes` 와 같은 판단). 위 목록이 발행일 순인 것과 기준이
+ * 다른 까닭이 그것이다.
+ *
+ * 🔴 **고객사명·발생 장소·본문은 여기에도 담지 않는다** — 위 머리말의 PII 항목
+ * 그대로다. 되살릴 장을 알아보는 데는 종류·문서번호·발행일이면 충분하다.
+ *
+ * 영구 삭제는 없다(`mutations/service-reports.ts`). 그래서 이 조회가 답하는 것은
+ * "무엇을 지웠고 되살릴 수 있는가" 하나뿐이고, 보관 기한 같은 값은 없다.
+ */
+export async function listDeletedServiceReportsForRepairCase(
+  repairCaseId: string
+): Promise<DeletedServiceReportRow[]> {
+  const rows = await db
+    .select({
+      id: serviceReports.id,
+      version: serviceReports.version,
+      kind: serviceReports.kind,
+      reportNumberPrefix: serviceReports.reportNumberPrefix,
+      reportNumberMiddle: serviceReports.reportNumberMiddle,
+      reportNumberTail: serviceReports.reportNumberTail,
+      issuedOn: serviceReports.issuedOn,
+      deletedAt: serviceReports.deletedAt,
+      deleteReason: serviceReports.deleteReason,
+      deletedByName: users.name,
+    })
+    .from(serviceReports)
+    // 지운 사람이 그 뒤에 지워진 계정일 수 있다 — 그렇다고 보고서가 휴지통에서
+    // 사라지면 되살릴 길이 없어지므로 왼쪽 조인이다(위 목록의 `createdBy` 와 같은 이유).
+    .leftJoin(users, eq(users.id, serviceReports.deletedBy))
+    .where(and(eq(serviceReports.repairCaseId, repairCaseId), eq(serviceReports.isDeleted, true)))
+    .orderBy(desc(serviceReports.deletedAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    version: row.version,
+    kind: row.kind,
+    reportNumber: formatServiceReportNumber({
+      prefix: row.reportNumberPrefix ?? undefined,
+      middle: row.reportNumberMiddle,
+      tail: row.reportNumberTail,
+    }),
+    issuedOn: row.issuedOn,
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    deleteReason: row.deleteReason,
+    deletedByName: row.deletedByName,
   }));
 }
 

@@ -11,7 +11,11 @@ import {
 } from "@/lib/validation/service-report-save-input";
 import { SERVICE_REPORT_CAUSES } from "@/lib/xlsx/service-report-template";
 
-import { readServiceReportActionValues } from "./service-report-action-input";
+import {
+  SERVICE_REPORT_DELETE_REASON_MAX_LENGTH,
+  readServiceReportActionValues,
+  readServiceReportDeleteReason,
+} from "./service-report-action-input";
 
 /**
  * ============================================================================
@@ -27,6 +31,8 @@ import { readServiceReportActionValues } from "./service-report-action-input";
  *    이 관문을 그대로 통과해야 한다.
  * 4. 🔴 **저장해 둔 것을 다시 폼에 부어도 같은 값이다** — 특히 `findingsIntro` 의
  *    「안 줌(null)」과 「일부러 비움('')」이 뭉개지지 않는다.
+ * 5. 🔴 **적은 삭제 사유가 버려지지 않는다.** 확인 창에 「삭제 사유 (선택)」 칸을
+ *    두고 그 글을 흘리면, 사람은 남겼다고 믿는데 표에는 아무것도 없다.
  *
  * 인정할 원인 코드는 `SERVICE_REPORT_CAUSES` 에서 가져온다 — 목록을 여기 베끼면
  * 양식에 원인이 하나 늘어난 날 이 시험만 통과한다.
@@ -205,4 +211,55 @@ test("저장해 둔 값을 폼에 부었다가 그대로 되보내면 한 칸도
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.ok && result.values, poured);
+});
+
+// ─────────────────────────────────────────────────── 삭제 사유
+
+/**
+ * 확인 창의 「삭제 사유 (선택)」 칸이 실제로 표에 담기는지를 지키는 자리다.
+ * 적을 수 있게 해 놓고 버리는 것이 가장 나쁘고, 그 사고는 조용해서 시험 없이는
+ * 아무도 모른다.
+ */
+
+test("사유를 적지 않았으면 null 이다 — 「사유 없음」과 「공백만 적음」을 가르지 않는다", () => {
+  assert.deepEqual(readServiceReportDeleteReason(null), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason(undefined), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason(""), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason("   \n\t "), { ok: true, reason: null });
+});
+
+test("글자가 아닌 것은 사유가 아니다 — 브라우저가 아닌 것이 부를 수 있는 자리다", () => {
+  assert.deepEqual(readServiceReportDeleteReason(7), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason({ reason: "지움" }), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason(["지움"]), { ok: true, reason: null });
+  assert.deepEqual(readServiceReportDeleteReason(true), { ok: true, reason: null });
+});
+
+test("적은 사유는 앞뒤만 다듬어 그대로 담긴다 — 가운데 줄바꿈은 사람이 넣은 것이다", () => {
+  assert.deepEqual(readServiceReportDeleteReason("  잘못 만든 장  "), {
+    ok: true,
+    reason: "잘못 만든 장",
+  });
+  assert.deepEqual(readServiceReportDeleteReason("잘못 만든 장\n번호를 다시 받는다"), {
+    ok: true,
+    reason: "잘못 만든 장\n번호를 다시 받는다",
+  });
+});
+
+test("상한만큼은 받고, 한 글자라도 넘으면 거절한다", () => {
+  const atLimit = "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH);
+  assert.deepEqual(readServiceReportDeleteReason(atLimit), { ok: true, reason: atLimit });
+
+  const tooLong = "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH + 1);
+  const rejected = readServiceReportDeleteReason(tooLong);
+  assert.equal(rejected.ok, false);
+  assert.equal(!rejected.ok && rejected.message, "삭제 사유가 너무 깁니다.");
+});
+
+test("길이는 다듬은 뒤에 센다 — 공백으로 상한을 넘겼다고 거절하지 않는다", () => {
+  const padded = `  ${"가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH)}  `;
+  assert.deepEqual(readServiceReportDeleteReason(padded), {
+    ok: true,
+    reason: "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH),
+  });
 });

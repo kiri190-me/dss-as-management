@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
+import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
 import {
   SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS,
   clearServiceReportDraft,
@@ -29,6 +31,7 @@ import {
   deleteServiceReportAction,
   updateServiceReportAction,
 } from "@/lib/server/actions/service-reports";
+import type { ServiceReportKind } from "@/lib/xlsx/service-report-template";
 import ServiceReportActions from "./ServiceReportActions";
 import ServiceReportBodyFields from "./ServiceReportBodyFields";
 import ServiceReportConflictNotice from "./ServiceReportConflictNotice";
@@ -68,7 +71,7 @@ import { editInputClass, Field, ServiceReportSection } from "./ServiceReportFiel
  *   3. **내려받기는 저장이 아니다.** 파일을 뽑았다고 지우지 않는다(예전 판단
  *      그대로 — 뽑아 본 뒤 고칠 것을 발견하는 것이 이 화면의 보통 쓰임이다).
  *
- * 지우기만 예외다 — 그때는 **묻고 나서** 지운다(아래 `handleDelete`).
+ * 지우기만 예외다 — 그때는 **묻고 나서** 지운다(아래 `openDelete`·`confirmDelete`).
  *
  * ── 🔴 임시보관 열쇠는 보고서 장마다 갈린다 ────────────────────────────
  * 한 접수 건에 여러 장이 붙으므로 사람 + 접수 건만으로는 서로 덮는다. 옛 열쇠로
@@ -103,6 +106,20 @@ const FAILURE_MESSAGES: Record<string, string> = {
 };
 
 const FALLBACK_FAILURE_MESSAGE = "보고서를 내려받지 못했습니다. 잠시 후 다시 시도해 주세요.";
+
+/**
+ * 종류의 한글 이름. **종류 드롭다운과 지우기 확인 창이 같은 것을 쓴다** — 한
+ * 화면 안에 두 벌이 있으면 문구가 바뀐 날 한쪽만 고쳐진다.
+ *
+ * 🔴 양식의 제목(`SERVICE_REPORT_TITLES`)을 그대로 가져오지 못한다. 그 파일은
+ * 채우개라 `node:fs`·`node:zlib` 를 끌고 오고, 이 화면은 브라우저에서 돈다
+ * (`domain/service-report-form.ts` 머리말의 같은 항목). 타입만 가져오는 것은
+ * 안전하다 — 컴파일에서 지워진다.
+ */
+const KIND_LABELS: Record<ServiceReportKind, string> = {
+  REPAIR: "수리 보고서",
+  INSPECTION: "검사 보고서",
+};
 
 /**
  * 클릭이 브라우저의 내려받기로 넘어간 뒤에 주소를 놓아 준다.
@@ -283,6 +300,15 @@ export default function ServiceReportForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string> | null>(null);
 
   /**
+   * 지우기 확인 창의 상태. 창은 자기 상태를 갖지 않으므로(그 파일의 원칙) 열림
+   * 여부·사유·실패 문구를 여기서 들고 있는다. 전송 중인지는 `isSaving` 이 이미
+   * 말한다 — 지우는 동안 저장·내려받기가 눌리면 안 되므로 같은 깃발을 쓴다.
+   */
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  /**
    * 지금 붙들고 있는 장. 서버가 넘긴 것으로 시작하고, **저장에 성공할 때마다
    * 갱신된다.**
    *
@@ -376,6 +402,10 @@ export default function ServiceReportForm({
     setSavedSnapshot(null);
     setConflict(null);
     setFieldErrors(null);
+    // 열려 있던 지우기 확인 창도 닫는다 — 앞 장의 이름을 보여 주면서 지우는 것은
+    // 새 장이 되는 창을 남겨 두지 않는다.
+    setDeleteOpen(false);
+    setDeleteError(null);
   } else if (savedReport !== null && saved !== null && savedReport.version > saved.version) {
     /**
      * 같은 장인데 서버가 **더 앞선 토큰**을 넘겼다 — 충돌 뒤 「최신 내용 다시
@@ -483,6 +513,28 @@ export default function ServiceReportForm({
   const mode: "NEW" | "SAVED" = saved === null ? "NEW" : "SAVED";
 
   /**
+   * 확인 창에 적을 «무엇을 지우는가» 한 줄 — 종류와 문서번호.
+   *
+   * 🔴 **지금 화면의 값(`values`)이 아니라 서버가 넘긴 저장된 값**을 쓴다. 지우는
+   * 것은 표에 있는 그 장이고, 아직 저장하지 않은 수정(되살린 임시보관 포함)은
+   * 그 장의 이름이 아니다 — 번호 칸을 고쳐 놓고 지우면 창이 저장된 적 없는
+   * 번호를 부르게 된다.
+   *
+   * 번호 세 칸은 다 비운 채로도 저장되므로 **빈 글자일 수 있다.** 그때 이름 없는
+   * 줄이 되지 않게 「문서번호 없음」으로 적는다(`ServiceReportList` 가 같은 자리에서
+   * 하는 그대로). 세 조각을 잇는 규칙은 파일 이름과 목록이 쓰는 그 함수를 그대로
+   * 쓴다 — 여기 베끼면 규칙이 두 곳에 산다.
+   */
+  const savedReportNumber = formatServiceReportNumber({
+    prefix: initialValues.reportNumberPrefix,
+    middle: initialValues.reportNumberMiddle,
+    tail: initialValues.reportNumberTail,
+  });
+  const deleteTargetName = `${KIND_LABELS[initialValues.kind]} · ${
+    savedReportNumber === "" ? "문서번호 없음" : savedReportNumber
+  }`;
+
+  /**
    * ── 저장 ─────────────────────────────────────────────────────────────
    * 새 장이면 만들고, 열어 둔 장이면 갱신한다. 어느 쪽인지는 `saved` 하나로
    * 갈린다.
@@ -586,20 +638,30 @@ export default function ServiceReportForm({
    *
    * 🔴 **묻고 나서 지운다.** 여기서만 임시보관을 사람의 글째로 버리기 때문이다 —
    * 아직 저장하지 않은 수정이 남아 있을 수 있고, 그 장은 다시 열리지 않으므로
-   * 그 글도 갈 곳이 없다. 무엇이 함께 사라지는지 물음에 그대로 적는다.
+   * 그 글도 갈 곳이 없다. 무엇이 함께 사라지는지 물음에 그대로 적는다(아래
+   * `cascadeNote`).
+   *
+   * 🔴 묻는 창은 **이 저장소의 표준 창**이다(`MasterDataDeleteDialog`). 예전에는
+   * 브라우저가 그린 기본 팝업이었는데, 그러면 이 화면만 생김새가 다르다 — 지우는
+   * 일의 모양이 화면마다 달라지면 사람은 화면마다 다른 규칙이 있다고 배운다(그
+   * 파일 머리말). 견적서가 한 건을 지울 때 하는 그대로 쓴다
+   * (`quotes/QuoteListScreen.tsx`).
+   *
+   * 창은 자기 상태를 갖지 않는다 — 열림 여부·사유·전송 중·오류는 전부 여기가
+   * 소유한다.
    */
-  async function handleDelete() {
+  function openDelete() {
+    if (!saved || !canDelete || busy) return;
+    setDeleteReason("");
+    setDeleteError(null);
+    setDeleteOpen(true);
+  }
+
+  async function confirmDelete() {
     if (!saved || !canDelete || busy) return;
 
-    const confirmed = window.confirm(
-      "이 보고서를 지웁니다.\n\n" +
-        "아직 저장하지 않은 수정 내용도 함께 사라집니다.\n" +
-        "지운 보고서는 목록에서 사라지지만 완전히 없어지지는 않습니다(관리자가 되살릴 수 있습니다).\n\n" +
-        "계속할까요?"
-    );
-    if (!confirmed) return;
-
     setIsSaving(true);
+    setDeleteError(null);
     setFormError(null);
     setStatusMessage(null);
     setFieldErrors(null);
@@ -608,21 +670,31 @@ export default function ServiceReportForm({
       const result = await deleteServiceReportAction({
         serviceReportId: saved.id,
         expectedVersion: saved.version,
+        // 다듬는 규칙은 서버가 한 번 더 본다(`service-report-action-input.ts`).
+        // 여기서 미리 접어 보내는 것은 공백만 친 사유를 굳이 실어 보내지 않으려는
+        // 것뿐이다 — 견적서와 같은 모양이다.
+        reason: deleteReason.trim() === "" ? null : deleteReason.trim(),
       });
 
       if (!result.ok) {
         if (result.code === "NOT_FOUND") {
           // 이미 없다. 지우려던 일은 어차피 이루어진 셈이라 목록으로 보낸다.
+          // 🔴 이 갈래만 창을 띄운 채 화면을 떠난다 — 없는 장에 대한 오류를
+          //    창에 남겨 봐야 사람이 할 수 있는 일이 없다.
           forgetDraft();
           router.replace(reportHref);
           router.refresh();
           return;
         }
         /**
-         * CONFLICT 는 여기서 얼리지 않는다 — 지우기는 **아무 글도 잃지 않은
+         * 🔴 **창을 닫지 않고 그 안에 오류를 보여 준다.** 닫아 버리면 사람이 방금
+         * 적은 사유가 함께 사라지고, 무엇이 잘못됐는지도 모른 채 다시 눌러야 한다
+         * (견적서와 같은 처리).
+         *
+         * CONFLICT 도 여기서 얼리지 않는다 — 지우기는 **아무 글도 잃지 않은
          * 실패**다(폼은 그대로다). 최신 내용을 보고 다시 판단하라고만 말한다.
          */
-        setFormError(result.message);
+        setDeleteError(result.message);
         return;
       }
 
@@ -630,7 +702,7 @@ export default function ServiceReportForm({
       router.replace(reportHref);
       router.refresh();
     } catch {
-      setFormError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
+      setDeleteError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
     } finally {
       setIsSaving(false);
     }
@@ -804,8 +876,8 @@ export default function ServiceReportForm({
               disabled={disabled}
               className={editInputClass}
             >
-              <option value="REPAIR">수리 보고서</option>
-              <option value="INSPECTION">검사 보고서</option>
+              <option value="REPAIR">{KIND_LABELS.REPAIR}</option>
+              <option value="INSPECTION">{KIND_LABELS.INSPECTION}</option>
             </select>
           </Field>
         </div>
@@ -862,7 +934,41 @@ export default function ServiceReportForm({
         }
         onSave={() => void handleSave()}
         onDownload={() => void handleDownload()}
-        onDelete={() => void handleDelete()}
+        onDelete={openDelete}
+      />
+
+      {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. 견적서와 같은
+          이유로 **보관 문구를 우리 것으로 넘긴다**: 보고서에는 자동 만료도 영구
+          삭제도 없어서(`mutations/service-reports.ts` 의 '영구 삭제는 없다') 기본
+          문장(15일 뒤 완전 삭제)이 사실이 아니다. */}
+      <MasterDataDeleteDialog
+        isOpen={deleteOpen}
+        entityLabel="보고서"
+        names={saved === null ? [] : [deleteTargetName]}
+        retentionNote={
+          <>
+            지운 보고서는 목록에서 사라지지만 완전히 없어지지는 않고,
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+              {" "}
+              관리자가 되살릴 수 있습니다
+            </strong>
+            . 보고서는 자동으로 완전히 삭제되지 않습니다.
+          </>
+        }
+        cascadeNote={
+          <>
+            <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+              아직 저장하지 않은 수정 내용도 함께 사라집니다.
+            </strong>{" "}
+            저장된 확인내용·조치 줄과 고른 원인은 그대로 남고, 되살리면 함께 돌아옵니다.
+          </>
+        }
+        reason={deleteReason}
+        isSubmitting={isSaving}
+        submitError={deleteError}
+        onReasonChange={setDeleteReason}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteOpen(false)}
       />
     </div>
   );

@@ -16,7 +16,11 @@ import {
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
 import { createServiceReport, softDeleteServiceReport } from "../mutations/service-reports";
-import { getServiceReportForEdit, listServiceReportsForRepairCase } from "./service-reports";
+import {
+  getServiceReportForEdit,
+  listDeletedServiceReportsForRepairCase,
+  listServiceReportsForRepairCase,
+} from "./service-reports";
 import type { ServiceReportSaveValues } from "@/lib/validation/service-report-save-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -33,6 +37,9 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  3. 한 건에 **여러 장**이 붙고, 최근에 낸 것이 먼저 온다.
  *  4. 🔴 목록에 **본문도 고객사명도 담기지 않는다** — 목록을 그리는 데 필요하지
  *     않고, 담으면 로그와 오류 보고에 딸려 나갈 자리가 늘어난다.
+ *
+ * 휴지통 조회(`listDeletedServiceReportsForRepairCase`)도 같은 넷을 지켜야 한다.
+ * 다른 것은 정렬 기준 하나뿐이다 — 그쪽은 **지운 시각 내림차순**이다.
  *
  * ── 격리 규약 ────────────────────────────────────────────────────────────
  * 접수 월 "9612", 고객사 접두사 "AS-TEST-SVCRPTQ-", 제품 모델 접두사
@@ -285,5 +292,143 @@ describe("🔴 지운 장은 어느 길로도 안 나온다", () => {
 
   test("없는 id 도 null 이다", async () => {
     assert.equal(await getServiceReportForEdit(randomUUID()), null);
+  });
+});
+
+/**
+ * 휴지통. 되살릴 장을 고르는 화면이 읽는 자리다.
+ *
+ * 「어떤 장이 지워졌나」는 위 describe 가 이미 반대쪽에서 못 박았다. 여기서
+ * 보는 것은 **되살리려면 알아야 하는 것들**이다 — 어느 건의 것인지, 언제 누가
+ * 왜 지웠는지, 그리고 방금 지운 것이 맨 위에 오는지.
+ */
+describe("listDeletedServiceReportsForRepairCase", () => {
+  async function softDelete(
+    report: { id: string; version: number },
+    reason: string | null = null
+  ): Promise<void> {
+    const result = await softDeleteServiceReport({
+      serviceReportId: report.id,
+      expectedVersion: report.version,
+      actorUserId,
+      reason,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+  }
+
+  /**
+   * 지운 시각을 못 박는다. 실제 삭제는 `new Date()` 를 쓰므로 잇달아 두 장을
+   * 지우면 같은 밀리초에 들어갈 수 있고, 그러면 **정렬을 보는 시험이 순서를
+   * 우연에 맡기게 된다.** 여기서 보려는 것은 「ORDER BY 가 지운 시각 내림차순인가」
+   * 하나이므로 그 값을 시험이 정한다.
+   */
+  async function pinDeletedAt(id: string, at: string): Promise<void> {
+    await db.update(serviceReports).set({ deletedAt: new Date(at) }).where(eq(serviceReports.id, id));
+  }
+
+  test("아무것도 안 지운 접수 건은 빈 휴지통이다", async () => {
+    const repairCaseId = await newRepairCase();
+    await create(repairCaseId);
+    assert.deepEqual(await listDeletedServiceReportsForRepairCase(repairCaseId), []);
+  });
+
+  test("🔴 지운 것만 나온다 — 살아 있는 장은 휴지통에 없다", async () => {
+    const repairCaseId = await newRepairCase();
+    const doomed = await create(repairCaseId, { reportNumberTail: "지울 것" });
+    const kept = await create(repairCaseId, { reportNumberTail: "남길 것" });
+    await softDelete(doomed);
+
+    assert.deepEqual(
+      (await listDeletedServiceReportsForRepairCase(repairCaseId)).map((row) => row.id),
+      [doomed.id]
+    );
+    // 반대쪽도 그대로다 — 목록과 휴지통이 한 장을 두 번 보여 주면 안 된다.
+    assert.deepEqual(
+      (await listServiceReportsForRepairCase(repairCaseId)).map((row) => row.id),
+      [kept.id]
+    );
+  });
+
+  test("다른 접수 건의 휴지통이 섞이지 않는다", async () => {
+    const mine = await newRepairCase();
+    const theirs = await newRepairCase();
+    const doomedMine = await create(mine);
+    const doomedTheirs = await create(theirs);
+    await softDelete(doomedMine);
+    await softDelete(doomedTheirs);
+
+    assert.deepEqual(
+      (await listDeletedServiceReportsForRepairCase(mine)).map((row) => row.id),
+      [doomedMine.id]
+    );
+  });
+
+  test("🔴 지운 시각 내림차순 — 방금 지운 것이 맨 위다", async () => {
+    const repairCaseId = await newRepairCase();
+    const first = await create(repairCaseId, { reportNumberTail: "001" });
+    const second = await create(repairCaseId, { reportNumberTail: "002" });
+    const third = await create(repairCaseId, { reportNumberTail: "003" });
+
+    await softDelete(first);
+    await softDelete(second);
+    await softDelete(third);
+
+    // 발행일·문서번호는 모두 같은데 지운 시각만 다르게 둔다 — 다른 기준이 끼어들
+    // 여지를 없앤다.
+    await pinDeletedAt(first.id, "2096-12-20T01:00:00.000Z");
+    await pinDeletedAt(second.id, "2096-12-20T03:00:00.000Z");
+    await pinDeletedAt(third.id, "2096-12-20T02:00:00.000Z");
+
+    const rows = await listDeletedServiceReportsForRepairCase(repairCaseId);
+    assert.deepEqual(
+      rows.map((row) => row.reportNumber),
+      ["DSS-Z494-002", "DSS-Z494-003", "DSS-Z494-001"]
+    );
+    assert.equal(rows[0].deletedAt, "2096-12-20T03:00:00.000Z");
+  });
+
+  test("사유와 지운 사람이 함께 온다 — 되살릴지 판단하는 단서다", async () => {
+    const repairCaseId = await newRepairCase();
+    const doomed = await create(repairCaseId);
+    await softDelete(doomed, "번호를 잘못 매겼다");
+
+    const [row] = await listDeletedServiceReportsForRepairCase(repairCaseId);
+    assert.equal(row.deleteReason, "번호를 잘못 매겼다");
+    assert.equal(row.deletedByName, actorUserName);
+    assert.ok(row.deletedAt, "지운 때가 있어야 한다");
+    // 되살리기가 대조할 토큰. 지우면서 한 번 올라갔다.
+    assert.equal(row.version, doomed.version + 1);
+  });
+
+  test("사유 없이 지우면 사유가 null 이다 — 빈 글자로 뭉개지 않는다", async () => {
+    const repairCaseId = await newRepairCase();
+    await softDelete(await create(repairCaseId));
+
+    const [row] = await listDeletedServiceReportsForRepairCase(repairCaseId);
+    assert.equal(row.deleteReason, null);
+  });
+
+  test("🔴 휴지통에도 본문도 고객사명도 담기지 않는다", async () => {
+    const repairCaseId = await newRepairCase();
+    const doomed = await create(repairCaseId, { findings: "휴지통에 새면 안 되는 확인내용" });
+    await softDelete(doomed);
+
+    const [row] = await listDeletedServiceReportsForRepairCase(repairCaseId);
+    assert.deepEqual(
+      Object.keys(row).sort(),
+      [
+        "deleteReason",
+        "deletedAt",
+        "deletedByName",
+        "id",
+        "issuedOn",
+        "kind",
+        "reportNumber",
+        "version",
+      ]
+    );
+    const serialized = JSON.stringify(row);
+    assert.ok(!serialized.includes("휴지통에 새면 안 되는"), "본문이 휴지통에 새어 나갔다");
+    assert.ok(!serialized.includes("ICD Co.,Ltd"), "고객사명이 휴지통에 새어 나갔다");
   });
 });
