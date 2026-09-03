@@ -60,7 +60,11 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
 $Container  = 'dss-as-postgres-dev'
-$Database   = 'dss_as_dev'
+# 2026-09-03 2단계 리허설로 A/S DB 가 dss-pg-app(공용 인스턴스)의 dss_as 로 옮겨졌다.
+# 백업은 그쪽을 떠야 한다 — 옛 컨테이너를 뜨면 멈춘 시점의 자료가 '오늘 백업'으로 남는다.
+# 공용 인스턴스는 계측기도 쓰므로 여기서 끄지 않는다. 끄는 대상은 위 $Container(옛 상자) 그대로다.
+$BackupContainer = 'dss-pg-app'
+$Database   = 'dss_as'
 # 이 프로젝트는 이미 자료 폴더 규약을 갖고 있다 — .env의 BACKUPS_DIR이 가리키는
 # C:\DSS-AS-DATA 아래에 backups\postgres, backups\uploads, logs, uploads가
 # 미리 잡혀 있고 2026-08-18 백업도 거기 들어 있다. 새 자리를 만들면 백업이 두 곳으로
@@ -145,10 +149,10 @@ if (Test-Path $handoffFile) {
 
 # ── 2. DB 백업 ────────────────────────────────────────────────────────────
 Write-Step "DB 백업"
-$running    = (Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`"").Output
+$running    = (Invoke-Native "docker ps --filter name=^/$BackupContainer`$ --format `"{{.Names}}`"").Output
 $backupMade = $false
 
-if ($running -ne $Container) {
+if ($running -ne $BackupContainer) {
     Write-Warn2 "DB가 이미 꺼져 있어 백업을 건너뜁니다."
 } else {
     $stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
@@ -161,7 +165,7 @@ if ($running -ne $Container) {
 
         # cmd로 리다이렉트한다 — pg_dump가 내보내는 바이트를 PowerShell이
         # 문자열로 해석해 인코딩을 바꿔 버리지 않도록.
-        $dump = Invoke-Native "docker exec $Container pg_dump -U dss_app -d $Database > `"$file`""
+        $dump = Invoke-Native "docker exec $BackupContainer pg_dump -U dss_app -d $Database > `"$file`""
 
         $ok = $false
         if ($dump.ExitCode -eq 0 -and (Test-Path $file)) {

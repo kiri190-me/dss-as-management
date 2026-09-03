@@ -121,7 +121,8 @@ if ($unpushed -match '^\d+$' -and [int]$unpushed -gt 0) { Write-Warn2 "깃허브
 if ($dirty -gt 0) { Write-Warn2 "커밋 안 된 파일 $($dirty)개" }
 if ($dirty -eq 0 -and $unpushed -eq '0') { Write-Ok "깃허브와 같음 — 정리된 상태" }
 
-$counts = (Invoke-Native "docker exec $Container psql -U dss_app -d dss_as_dev -At -c ""select 'A/S 접수 '||count(*)||'건' from repair_cases""").Output
+# 2026-09-03 2단계 리허설 뒤 A/S 자료는 dss-pg-app 의 dss_as 에 있다. 옛 $Container 는 비어 있는 상자다.
+$counts = (Invoke-Native "docker exec dss-pg-app psql -U dss_app -d dss_as -At -c ""select 'A/S 접수 '||count(*)||'건' from repair_cases""").Output
 if ($counts) { Write-Info "DB 내용     $counts" }
 
 # ── 4. 적용 대기 마이그레이션 (알림만) ────────────────────────────────────
