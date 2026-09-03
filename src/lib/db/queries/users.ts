@@ -210,3 +210,82 @@ export async function invalidateSessionsForSsoSubject(subject: string): Promise<
     .returning({ id: users.id });
   return updated.length > 0;
 }
+
+/**
+ * 포털이 보내온 사람의 계정을 처음 만든다 (자동 프로비저닝).
+ *
+ * 만들 값의 판정은 auth/sso-provision.ts가 한다. 여기는 그 결과를 쓰기만
+ * 하되, **주워가지 않는다**는 규칙만은 데이터베이스 앞에서 한 번 더 지킨다.
+ *
+ * 이메일이 이미 쓰이고 있으면 만들지 않고 EMAIL_TAKEN을 돌려준다. 삭제된
+ * 행까지 함께 보는 이유는 users_email_unique 에 조건이 없어서다 — 소프트
+ * 삭제된 행도 그 이메일 자리를 계속 차지한다. 못 본 척하면 insert가
+ * 색인 충돌로 터진다.
+ *
+ * approval_status를 APPROVED로 두는 것은 scripts/link-sso-subject.ts의
+ * --create와 같은 판단이다: 포털에서 이미 승인받은 사람을 여기서 또
+ * 기다리게 하면 승인이 두 겹이 된다.
+ */
+export type SsoProvisionResult =
+  | { outcome: "CREATED"; user: UserRow }
+  /** 그 이메일을 쓰는 계정이 이미 있다. 사람이 sso:link로 명시적으로 이어야 한다. */
+  | { outcome: "EMAIL_TAKEN" }
+  /** 유일 색인 충돌 — 같은 사람이 동시에 처음 로그인한 경우다. 다시 읽으면 된다. */
+  | { outcome: "CONFLICT" };
+
+export async function provisionSsoUser(params: {
+  subject: string;
+  email: string;
+  name: string;
+  role: Role;
+}): Promise<SsoProvisionResult> {
+  const email = params.email.trim().toLowerCase();
+
+  const [taken] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  if (taken) {
+    return { outcome: "EMAIL_TAKEN" };
+  }
+
+  try {
+    const [created] = await db
+      .insert(users)
+      .values({
+        email,
+        name: params.name,
+        role: params.role,
+        ssoSubject: params.subject,
+        ssoLinkedAt: new Date(),
+        approvalStatus: "APPROVED",
+        isActive: true,
+      })
+      .returning(SELECT_COLUMNS);
+    return created
+      ? { outcome: "CREATED", user: created }
+      : { outcome: "CONFLICT" };
+  } catch {
+    // 위 사전 확인과 insert 사이에 다른 요청이 끼어든 경우다. 부르는 쪽이
+    // subject로 다시 읽으면 그 행을 찾는다.
+    return { outcome: "CONFLICT" };
+  }
+}
+
+/**
+ * 삭제 여부를 가리지 않고 subject로 찾는다.
+ *
+ * getUserBySsoSubject는 삭제된 행을 걸러내므로, 그것만 보고 "없으니 만들자"로
+ * 가면 users_sso_subject_unique(부분 유일, sso_subject is not null)에 걸려
+ * 터진다. 더 나쁜 것은 내보낸 사람이 새 계정으로 조용히 돌아오는 것이다.
+ */
+export async function ssoSubjectIsTaken(subject: string): Promise<boolean> {
+  if (!subject) return false;
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.ssoSubject, subject))
+    .limit(1);
+  return row !== undefined;
+}

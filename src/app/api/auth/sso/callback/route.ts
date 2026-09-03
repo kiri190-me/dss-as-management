@@ -199,17 +199,28 @@ export async function GET(request: NextRequest) {
 
   const result = await resolveSsoLogin(subject, profileClaims);
   if (result.outcome !== "SESSION") {
-    if (result.code === "UNKNOWN_ROLE") {
-      // Its own message: nothing the user can do, and the fix is a one-line
-      // change in the portal. resolveSsoLogin already logged the value.
-      return fail("unknown_role");
-    }
-    if (result.code === "NOT_PROVISIONED") {
-      // Distinguished from a generic failure on purpose: this one has a
-      // clear next step for the user, and the subject is logged so an admin
-      // can run `npm run sso:link` without hunting for it.
-      console.warn(`[sso] 연결되지 않은 DSS 사용자입니다: ${subject}`);
-      return fail("not_provisioned");
+    // 이 네 가지만 따로 알린다. 공통점은 **사람에게 다음 행동이 실제로
+    // 있다**는 것이다(포털 설정을 고치거나, 관리자에게 그 사실을 전하거나).
+    // 나머지는 일반 실패로 뭉뚱그린다 — 자세히 알려주면 이 화면이 "누가 이
+    // 시스템 사용자인지" 확인해 주는 조회 도구가 된다.
+    const SPOKEN: Partial<Record<typeof result.code, string>> = {
+      UNKNOWN_ROLE: "unknown_role",
+      // 포털에서 권한을 주며 역할을 지정하지 않은 경우. 계정을 자동으로
+      // 만들려 해도 이 시스템의 역할은 전부 실질적인 쓰기 권한이라
+      // 임의로 정하지 않는다(sso-provision.ts).
+      PORTAL_ROLE_MISSING: "portal_role_missing",
+      PORTAL_EMAIL_MISSING: "portal_email_missing",
+      // 같은 이메일을 쓰는 계정이 이미 있다. 주워가지 않는 것이 이 설계의
+      // 핵심이라, 사람이 sso:link로 명시적으로 잇게 한다.
+      EMAIL_TAKEN: "email_taken",
+      NOT_PROVISIONED: "not_provisioned",
+    };
+
+    const spoken = SPOKEN[result.code];
+    if (spoken) {
+      // resolveSsoLogin이 이미 사유와 다음 명령을 로그에 남겼다.
+      console.warn(`[sso] 로그인 거절(${result.code}): subject ${subject}`);
+      return fail(spoken);
     }
     console.warn("[sso] 로그인 거절:", result.code);
     return fail("sso");
