@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { detectLanAddresses } from "./src/lib/config/lan-address";
 
 /**
  * 모든 응답에 붙는 보안 헤더. dss-auth의 같은 목록과 맞춰 둔다 — 두 시스템이
@@ -67,38 +68,19 @@ const nextConfig: NextConfig = {
   // serverActions.allowedOrigins (this login endpoint is a Route Handler,
   // not a Server Action). Has no effect in production builds.
   //
-  // 192.168.35.215 added (regression fix): the dev machine's Wi-Fi LAN IP
-  // changed since 192.168.1.132 was set (confirmed via `Get-NetIPAddress`
-  // — 192.168.1.132 is no longer bound to any interface on this machine).
-  // With only the stale IP allow-listed, Next.js was silently blocking the
-  // HMR WebSocket (/_next/webpack-hmr) for the browser's actual origin —
-  // "Blocked cross-origin request to Next.js dev resource" in the dev
-  // server log — so live-reload never reached the browser during this
-  // session's edits, leaving it on an increasingly stale client bundle.
-  // That stale-vs-current-server mismatch is what produced this
-  // checkpoint's regression symptoms (unresponsive 휴지통 tab, blank
-  // dashboard content on the next client-side navigation) — not a defect
-  // in DiagnosisFlowchartManagementScreen.tsx itself, which SSRs and
-  // builds cleanly on a fresh server process. Keeping the old IP too
-  // (harmless) in case that network is reconnected later.
+  // 왜 비워두면 안 되는가 (실측 기록): 목록에 살아 있는 주소가 하나도 없으면
+  // Next가 브라우저의 실제 출처에 대해 HMR 웹소켓(/_next/webpack-hmr)을 조용히
+  // 막는다 — 개발 서버 로그에 "Blocked cross-origin request to Next.js dev
+  // resource"만 남고 화면은 아무 말이 없다. 그대로 편집을 이어가면 브라우저가
+  // 점점 낡은 번들에 머물고, 그 불일치가 "휴지통 탭이 안 눌린다", "대시보드가
+  // 빈 화면으로 뜬다" 같은 엉뚱한 증상으로 나타난다. 원인이 증상과 전혀 무관한
+  // 곳에 있어 찾는 데 가장 오래 걸린 종류의 사고였다.
   //
-  // 192.168.0.12 added (같은 사유의 재발): `Get-NetIPAddress` 확인 결과 이
-  // PC의 현재 LAN IPv4는 192.168.0.12 하나뿐이고, 위 두 주소는 어느
-  // 인터페이스에도 바인딩되어 있지 않다(172.23.224.1은 Hyper-V/WSL 가상
-  // 어댑터라 폰에서 닿지 않는다). 즉 목록에 살아 있는 주소가 하나도 없는
-  // 상태였고, 그대로 두면 폰에서 접속할 때 위에 적힌 stale-bundle 증상이
-  // 그대로 재현된다 — 모바일 레이아웃/PWA 검증 자체가 불가능해진다.
-  // 앞의 두 주소는 위 주석의 판단대로 그대로 남겨 둔다.
-  //
-  // 10.150.71.135 added: PC가 폰 핫스팟("... S25")에 접속하면서 IP 대역 자체가
-  // 사설 192.168.x가 아닌 10.150.71.x로 바뀌었다. 이 목록에 살아 있는 주소가
-  // 없으면 위에 기록된 stale-bundle 사고가 그대로 재발한다.
-  //
-  // 이 목록이 오늘 하루에만 세 번 늘어난 데서 보이듯, 접속 네트워크가 바뀔
-  // 때마다 여기를 고쳐야 한다. 근본 해결은 공유기 DHCP 예약(고정 IP)이며,
-  // 핫스팟처럼 고정할 수 없는 환경이라면 접속 전에 `Get-NetIPAddress`로
-  // 현재 IP를 확인하고 이 배열과 폰 쪽 설정을 함께 갱신해야 한다.
-  allowedDevOrigins: ["192.168.1.132", "192.168.35.215", "192.168.0.12", "10.150.71.135"],
+  // 예전에는 여기에 IP를 손으로 적었다. 하루에만 세 번 늘었고(192.168.1.132 →
+  // 192.168.35.215 → 192.168.0.12 → 폰 핫스팟 10.150.71.135), 갱신을 잊을
+  // 때마다 위 사고가 그대로 재발했다. 이제 이 기계가 실제로 가진 주소를 실행
+  // 시점에 읽는다 — 망을 옮겨도 목록이 저절로 맞고, 손댈 곳이 없다.
+  allowedDevOrigins: detectLanAddresses(),
   experimental: {
     // The application still rejects workbook bytes above 20 MiB. This
     // slightly larger transport ceiling leaves room for multipart metadata.
