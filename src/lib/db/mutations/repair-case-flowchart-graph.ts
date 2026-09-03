@@ -153,6 +153,13 @@ async function touchFlowchart(tx: Tx, flowchartId: string, actorId: string): Pro
 }
 
 type GraphEditActionType =
+  // 이 파일에서 흐름도 행 자체를 만드는 것은
+  // createRepairCaseFlowchartWithGraph 하나뿐이다(파일 맨 아래) — 흐름도 한
+  // 장을 칸·연결선까지 한 트랜잭션으로 통째로 만드는 그 mutation 은 자기
+  // CREATE_FLOWCHART 이력도 같은 changeGroupId 로 남겨야 하므로 여기 있다.
+  // 그 밖의 흐름도 객체 관리(이름 바꾸기·휴지통·영구 삭제)는 여전히
+  // repair-case-flowcharts.ts 의 몫이다.
+  | "CREATE_FLOWCHART"
   | "CREATE_NODE"
   | "UPDATE_NODE"
   | "CHANGE_NODE_TYPE"
@@ -1022,6 +1029,252 @@ export async function insertRepairCaseFlowchartNodeOnEdge(params: {
 
       const updatedAt = await touchFlowchart(tx, flowchart.id, actor.id);
       return { ok: true, nodeId: insertedNode.id, firstEdgeId: edge.id, secondEdgeId: secondEdge.id, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof GraphMutationError) return err.result;
+    throw err;
+  }
+}
+
+// =====================================================================
+// 흐름도 한 장을 통째로 (WHOLE-FLOWCHART CREATE — 한 번의 트랜잭션)
+// =====================================================================
+
+/**
+ * 만들 칸 하나. `key` 는 **DB uuid 가 아니다** — 부르는 쪽이 지은 임시 이름이고
+ * (「작업 기록 흐름도」의 경우 work-record-flowchart.ts 가 짓는
+ * `work-record-flowchart:record:<기록 uuid>` 같은 것), 이 mutation 안에서
+ * 진짜 uuid 로 갈린다. 연결선은 그 `key` 로만 칸을 가리킨다.
+ */
+export type NewFlowchartNodeInput = {
+  key: string;
+  nodeType: string;
+  title: string;
+  description: string | null;
+  instructions: string | null;
+  positionX: number;
+  positionY: number;
+};
+
+/**
+ * 만들 연결선 하나. routePoints 가 없는 것은 일부러다 — 통째로 만드는 흐름도는
+ * 아직 아무도 손으로 선을 끌어 본 적이 없으므로 남길 「사람이 정한 경로」가
+ * 없다. 만든 뒤 편집기에서 끌면 saveRepairCaseFlowchartEdgeRoute 가 받는다.
+ */
+export type NewFlowchartEdgeInput = {
+  fromKey: string;
+  toKey: string;
+  branchType: string;
+  branchLabel: string | null;
+};
+
+export type CreateFlowchartWithGraphResult =
+  | { ok: true; flowchartId: string; nodeCount: number; edgeCount: number; updatedAt: string }
+  | Failure;
+
+/**
+ * 연결선 중복(같은 시작·대상·분기 유형)을 가려내는 열쇠의 구분자.
+ *
+ * NUL 을 쓰는 까닭은 `fromKey`·`toKey`·`branchType` 어디에도 나올 수 없는
+ * 글자라, 이어 붙인 열쇠가 서로 섞이지 않기 때문이다(구분자가 될 수 있는
+ * 보통 글자를 쓰면 `a|b` + `c` 와 `a` + `b|c` 가 같은 열쇠가 된다).
+ *
+ * 🔴 **소스에 진짜 제어문자를 넣지 않는다** — 넣으면 git 이 이 파일을 이진
+ * 파일로 보아 diff 가 통째로 사라지고(`Binary file … matches`), grep 도 이
+ * 파일을 건너뛴다. 눈에 보이지 않는 글자라 다음 사람이 원인을 찾지 못한다.
+ * 실제로 한 번 그렇게 박혔다가 되돌린 자리다. 이 저장소가 같은 함정을 겪고
+ * 남긴 경고가 `domain/service-report-file-name.ts` 머리말에 있다 — "정규식에
+ * 적은 유니코드 이스케이프는 편집기·도구를 거치는 동안 조용히 진짜
+ * 제어문자로 풀려 소스에 박히는 일이 있다".
+ */
+const EDGE_DEDUPE_SEPARATOR = "\u0000";
+
+/**
+ * 흐름도 한 장 + 칸 전부 + 연결선 전부 + 그 모두의 편집 이력을 **한 번의
+ * 트랜잭션으로** 만든다.
+ *
+ * 왜 기존 mutation 을 칸 수만큼 부르지 않는가: createRepairCaseFlowchartNode /
+ * …Edge 는 각자 자기 트랜잭션을 열고, 낙관적 잠금 토큰
+ * (expectedFlowchartUpdatedAt)을 요구하고, 끝날 때마다 touchFlowchart 로 그
+ * 토큰을 바꿔 버린다. 그래서 스무 개를 만들려면 스무 번 커밋해야 하는데, 그러면
+ * 열두 번째에서 실패했을 때 **칸 열한 개만 있는 반쪽 흐름도**가 남아 사람이
+ * 손으로 치워야 한다. 여기서는 하나라도 실패하면 아무것도 남지 않는다.
+ * 낙관적 잠금 토큰을 받지 않는 것도 같은 이유다 — 지금 막 만드는 빈 흐름도라
+ * 「다른 사람이 그 사이에 고쳤을 흐름도」가 아직 없다.
+ *
+ * 관문은 createRepairCaseFlowchart(repair-case-flowcharts.ts) 가 하는 그대로,
+ * 같은 차례로 한다 — requireActor → loadCaseForUpdate → 유·무상 확정 확인 →
+ * diagnosisFlowcharts.edit(WRITE). 새 규칙을 만들지 않는다. 특히
+ * repair_cases.is_locked 는 **여기서도 막지 않는다**: 이 저장소의 확정된
+ * shipment-lock 제거 정책(repair-case-flowcharts.ts 머리말)대로 출하로 잠긴
+ * 건의 흐름도도 계속 관리할 수 있어야 하고, 손으로 만드는 길이 허용하는 것을
+ * 이 길만 막으면 두 길의 규칙이 서로 달라진다.
+ *
+ * 🔴 편집 이력은 **하나의 changeGroupId** 로 묶인다. 사람이 단추를 한 번 누른
+ * 한 번의 행동이므로 이력에서도 한 묶음이어야 하고, 나중에 6E 의 Undo/Redo
+ * 접기가 이것을 되돌릴 수 없는 스무 개의 남남으로 보면 안 된다 —
+ * insertRepairCaseFlowchartNodeOnEdge 가 CREATE_NODE + RETARGET_EDGE +
+ * CREATE_EDGE 를 한 묶음으로 두는 것과 같은 판단이다.
+ *
+ * 칸·연결선의 uuid 는 INSERT 가 지어 주기를 기다리지 않고 여기서 미리 짓는다.
+ * 그래야 임시 key → 진짜 uuid 대응표가 INSERT 전에 완성되어, 연결선을 한 번에
+ * 넣을 수 있고 「여러 행 INSERT 의 RETURNING 순서가 넣은 순서와 같은가」라는
+ * 물음에 기대지 않아도 된다.
+ */
+export async function createRepairCaseFlowchartWithGraph(params: {
+  repairCaseId: string;
+  actorUserId: string;
+  title: string;
+  description: string | null;
+  nodes: readonly NewFlowchartNodeInput[];
+  edges: readonly NewFlowchartEdgeInput[];
+}): Promise<CreateFlowchartWithGraphResult> {
+  const title = params.title.trim();
+  if (title.length === 0) return { ok: false, code: "INVALID_INPUT", message: "Flowchart 제목을 입력해 주세요." };
+  if (params.nodes.length === 0) return { ok: false, code: "INVALID_INPUT", message: "만들 노드가 없습니다." };
+
+  // 모양 검사는 트랜잭션 밖에서 먼저 끝낸다 — 잘못된 요청 때문에 접수 건 행을
+  // 잠그고 있을 이유가 없다. 개별 mutation 들이 하는 검사와 같은 것들이다.
+  const nodeKeys = new Set<string>();
+  for (const node of params.nodes) {
+    if (nodeKeys.has(node.key)) return { ok: false, code: "INVALID_INPUT", message: "노드 식별자가 중복되었습니다." };
+    nodeKeys.add(node.key);
+    if (node.title.trim().length === 0) return { ok: false, code: "INVALID_INPUT", message: "노드 제목을 입력해 주세요." };
+    if (!(REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES as readonly string[]).includes(node.nodeType)) {
+      return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 노드 유형입니다." };
+    }
+    if (!Number.isFinite(node.positionX) || !Number.isFinite(node.positionY)) {
+      return { ok: false, code: "INVALID_INPUT", message: "노드 위치가 올바르지 않습니다." };
+    }
+  }
+
+  const seenEdgeKeys = new Set<string>();
+  for (const edge of params.edges) {
+    if (!nodeKeys.has(edge.fromKey) || !nodeKeys.has(edge.toKey)) {
+      // 이 묶음 안에 없는 칸을 가리키는 연결선. 바깥 흐름도의 칸을 가리킬 길
+      // 자체가 없으므로(가리키는 수단이 key 뿐이다) CROSS_FLOWCHART 가 아니라
+      // NOT_FOUND 다.
+      return { ok: false, code: "NOT_FOUND", message: "분기가 가리키는 노드가 목록에 없습니다." };
+    }
+    if (edge.fromKey === edge.toKey) return { ok: false, code: "SELF_EDGE", message: "분기의 시작과 대상 노드는 같을 수 없습니다." };
+    if (!(REPAIR_CASE_FLOWCHART_BRANCH_TYPE_CODES as readonly string[]).includes(edge.branchType)) {
+      return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 분기 유형입니다." };
+    }
+    if (edge.branchType === "CUSTOM" && isBlank(edge.branchLabel)) {
+      return { ok: false, code: "INVALID_INPUT", message: "사용자 정의(CUSTOM) 분기에는 라벨이 필요합니다." };
+    }
+    const dedupeKey = `${edge.fromKey}${EDGE_DEDUPE_SEPARATOR}${edge.toKey}${EDGE_DEDUPE_SEPARATOR}${edge.branchType}`;
+    if (seenEdgeKeys.has(dedupeKey)) return { ok: false, code: "DUPLICATE_EDGE", message: "동일한 시작/대상/분기 유형을 가진 분기가 이미 존재합니다." };
+    seenEdgeKeys.add(dedupeKey);
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, params.actorUserId);
+
+      const repairCase = await loadCaseForUpdate(tx, params.repairCaseId);
+      if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 생성할 수 있습니다.");
+      }
+
+      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+        fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
+      }
+
+      const [flowchart] = await tx
+        .insert(repairCaseFlowcharts)
+        .values({
+          repairCaseId: params.repairCaseId,
+          title,
+          description: params.description,
+          createdBy: actor.id,
+          updatedBy: actor.id,
+        })
+        .returning();
+
+      // 이 저장 전체가 사람의 한 번의 행동이다 — 행마다 새 uuid 를 짓지 않는다.
+      const changeGroupId = randomUUID();
+
+      await insertGraphEditHistory(tx, {
+        flowchartId: flowchart.id,
+        actionType: "CREATE_FLOWCHART",
+        beforeState: null,
+        afterState: {
+          id: flowchart.id,
+          repairCaseId: flowchart.repairCaseId,
+          title: flowchart.title,
+          description: flowchart.description,
+        },
+        actorUserId: actor.id,
+        changeGroupId,
+      });
+
+      const nodeIdByKey = new Map<string, string>(params.nodes.map((node) => [node.key, randomUUID()]));
+
+      const insertedNodes = await tx
+        .insert(repairCaseFlowchartNodes)
+        .values(
+          params.nodes.map((node) => ({
+            id: nodeIdByKey.get(node.key)!,
+            flowchartId: flowchart.id,
+            nodeType: node.nodeType as RepairCaseFlowchartNodeType,
+            title: node.title.trim(),
+            description: node.description,
+            instructions: node.instructions,
+            positionX: node.positionX,
+            positionY: node.positionY,
+          }))
+        )
+        .returning();
+
+      const insertedEdges =
+        params.edges.length === 0
+          ? []
+          : await tx
+              .insert(repairCaseFlowchartEdges)
+              .values(
+                params.edges.map((edge) => ({
+                  id: randomUUID(),
+                  flowchartId: flowchart.id,
+                  fromNodeId: nodeIdByKey.get(edge.fromKey)!,
+                  toNodeId: nodeIdByKey.get(edge.toKey)!,
+                  branchType: edge.branchType as RepairCaseFlowchartBranchType,
+                  branchLabel: edge.branchLabel,
+                }))
+              )
+              .returning();
+
+      // 이력은 칸·연결선마다 한 줄씩, 그러나 changeGroupId 는 위의 하나 그대로.
+      // 다른 mutation 들과 똑같은 insertGraphEditHistory 를 지나가므로 감사
+      // 자료의 모양(origin=USER_EDIT, before/after 스냅숏)이 어긋날 수 없다.
+      for (const node of insertedNodes) {
+        await insertGraphEditHistory(tx, {
+          flowchartId: flowchart.id,
+          actionType: "CREATE_NODE",
+          nodeId: node.id,
+          beforeState: null,
+          afterState: serializeNodeSnapshot(node),
+          actorUserId: actor.id,
+          changeGroupId,
+        });
+      }
+
+      for (const edge of insertedEdges) {
+        await insertGraphEditHistory(tx, {
+          flowchartId: flowchart.id,
+          actionType: "CREATE_EDGE",
+          edgeId: edge.id,
+          beforeState: null,
+          afterState: serializeEdgeSnapshot(edge),
+          actorUserId: actor.id,
+          changeGroupId,
+        });
+      }
+
+      // 마지막에 한 번만. 칸마다 부르면 같은 행을 뜻 없이 수십 번 고치게 된다.
+      const updatedAt = await touchFlowchart(tx, flowchart.id, actor.id);
+      return { ok: true, flowchartId: flowchart.id, nodeCount: insertedNodes.length, edgeCount: insertedEdges.length, updatedAt };
     });
   } catch (err) {
     if (err instanceof GraphMutationError) return err.result;

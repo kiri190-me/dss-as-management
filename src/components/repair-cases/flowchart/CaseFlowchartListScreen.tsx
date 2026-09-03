@@ -13,15 +13,26 @@ import type { RepairCaseFlowchartRow } from "@/lib/db/queries/repair-case-flowch
  * Repair Case tab described for a later checkpoint (no DetailTabs nav
  * entry added here) — this is a direct, unlinked route for development/
  * manual verification, per the 6D plan's own §12.
+ *
+ * 목록 맨 위의 「작업 기록 흐름도」 줄은 저장된 흐름도가 아니다 — 작업 기록에서
+ * 열 때마다 그려지는 보기 전용 화면으로 가는 링크일 뿐이다(만드는 단추가 없고,
+ * 사용자가 아무것도 누르지 않아도 그릴 것이 있으면 거기 있다). 지어낸 것을 진짜
+ * 흐름도처럼 보이게 하지 않으려고 「자동」 표와 점선 테두리로 구분하고, 저장되지
+ * 않는다는 사실을 그 자리에서 적어 둔다. 그릴 것이 있는지(hasWorkRecordFlowchart)
+ * 는 이 조각이 판단하지 않는다 — "use client" 라 DB 를 읽을 수 없으므로 서버
+ * 페이지가 정해 내려보낸다.
  */
 export default function CaseFlowchartListScreen({
   repairCaseId,
   flowcharts,
   canEdit,
+  hasWorkRecordFlowchart,
 }: {
   repairCaseId: string;
   flowcharts: RepairCaseFlowchartRow[];
   canEdit: boolean;
+  /** 무효 처리되지 않은 작업 기록이 하나라도 있어 실제로 그릴 것이 있는가 — 서버 페이지가 계산한다. */
+  hasWorkRecordFlowchart: boolean;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -45,10 +56,22 @@ export default function CaseFlowchartListScreen({
     <div className="flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">진단 Flowchart</h2>
 
-      {flowcharts.length === 0 ? (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">아직 등록된 Flowchart가 없습니다.</p>
-      ) : (
+      {(hasWorkRecordFlowchart || flowcharts.length > 0) && (
         <ul className="flex flex-col gap-2">
+          {hasWorkRecordFlowchart && (
+            <li className="rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/repair-cases/${repairCaseId}/diagnosis/work-records`}
+                  className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-400"
+                >
+                  작업 기록 흐름도
+                </Link>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">자동</span>
+              </div>
+              <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">작업 기록에서 자동으로 그립니다. 저장되지 않고, 고칠 수 없습니다.</p>
+            </li>
+          )}
           {flowcharts.map((f) => (
             <li key={f.id} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <Link href={`/repair-cases/${repairCaseId}/diagnosis/${f.id}`} className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-400">
@@ -62,6 +85,8 @@ export default function CaseFlowchartListScreen({
           ))}
         </ul>
       )}
+      {/* 「자동」 줄은 저장된 흐름도가 아니므로, 그 줄이 보이는 중에도 이 문장은 그대로 사실이다. */}
+      {flowcharts.length === 0 && <p className="text-xs text-zinc-500 dark:text-zinc-400">아직 등록된 Flowchart가 없습니다.</p>}
 
       {canEdit && (
         <div className="flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs dark:border-blue-900 dark:bg-blue-950">

@@ -15,10 +15,20 @@ import {
   repairCaseFlowchartNodes,
   repairCaseFlowchartEdges,
   repairCaseFlowchartEditHistory,
+  repairCaseWorkRecords,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { createRepairCaseFlowchart } from "./repair-case-flowcharts";
+import { createWorkRecord } from "./repair-case-work-records";
+import { getWorkRecordHistoryForCase } from "../queries/repair-case-work-records";
 import {
+  buildWorkRecordFlowchart,
+  listWorkRecordIdsInFlowchart,
+  WORK_RECORD_FLOWCHART_MAX_RECORDS,
+  type WorkRecordFlowchartInput,
+} from "@/lib/domain/work-record-flowchart";
+import {
+  createRepairCaseFlowchartWithGraph,
   createRepairCaseFlowchartNode,
   updateRepairCaseFlowchartNode,
   changeRepairCaseFlowchartNodeType,
@@ -60,6 +70,7 @@ let customerId: string;
 
 const createdRepairCaseIds: string[] = [];
 const createdFlowchartIds: string[] = [];
+const createdWorkRecordIds: string[] = [];
 
 function baseCreateInput(overrides: Partial<ValidatedCreateRepairCaseInput> = {}): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
@@ -101,6 +112,11 @@ async function createTestRepairCase(overrides: Partial<ValidatedCreateRepairCase
 
 async function lockCase(repairCaseId: string) {
   await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, repairCaseId));
+}
+
+/** 유·무상 미확정으로 되돌린다. lockCase 와 같은 결의 시험용 손질이다 — 이 시험이 만든 건에만 쓴다. */
+async function setPendingBilling(repairCaseId: string) {
+  await db.update(repairCases).set({ billingType: "PENDING_DECISION" }).where(eq(repairCases.id, repairCaseId));
 }
 
 async function createTestFlowchart(repairCaseId: string, actorUserId = superAdminId) {
@@ -204,6 +220,11 @@ after(async () => {
     // explicit node/edge delete is needed here.
     await db.delete(repairCaseFlowchartEditHistory).where(inArray(repairCaseFlowchartEditHistory.flowchartId, createdFlowchartIds));
     await db.delete(repairCaseFlowcharts).where(inArray(repairCaseFlowcharts.id, createdFlowchartIds));
+  }
+  // 작업 기록은 접수 건보다 먼저 지운다 — repair_case_id 가 ON DELETE SET NULL
+  // 이라 접수 건을 먼저 지우면 주인 없는 기록이 시험 DB 에 남는다.
+  if (createdWorkRecordIds.length > 0) {
+    await db.delete(repairCaseWorkRecords).where(inArray(repairCaseWorkRecords.id, createdWorkRecordIds));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
@@ -1177,5 +1198,259 @@ describe("insertRepairCaseFlowchartNodeOnEdge", () => {
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+});
+
+// =====================================================================
+// 흐름도 한 장 통째로 (createRepairCaseFlowchartWithGraph)
+// =====================================================================
+
+/** 순수 함수가 그린 「작업 기록 흐름도」를 통째로-만들기 mutation 의 입력 모양으로 옮긴다 — 서버 액션이 하는 그 매핑 그대로. */
+function toWholeFlowchartInput(records: readonly WorkRecordFlowchartInput[]) {
+  const { nodes, edges } = buildWorkRecordFlowchart(records);
+  return {
+    nodes: nodes.map((node) => ({
+      key: node.id,
+      nodeType: node.nodeType,
+      title: node.title,
+      description: node.description,
+      instructions: node.instructions,
+      positionX: node.positionX,
+      positionY: node.positionY,
+    })),
+    edges: edges.map((edge) => ({
+      fromKey: edge.fromNodeId,
+      toKey: edge.toNodeId,
+      branchType: edge.branchType,
+      branchLabel: edge.branchLabel,
+    })),
+  };
+}
+
+function fakeWorkRecords(count: number): WorkRecordFlowchartInput[] {
+  return Array.from({ length: count }, (_unused, index) => ({
+    id: randomUUID(),
+    memo: `${index + 1}번째 작업 기록`,
+    recordKind: "GENERAL" as const,
+    createdAt: `2098-02-1${index}T00:00:00.000Z`,
+    isInvalidated: false,
+  }));
+}
+
+/** 이 접수 건에 흐름도가 하나도 만들어지지 않았음을 확인한다 — 칸·연결선·이력은 흐름도 없이는 존재할 수 없다(둘 다 flowchart_id NOT NULL). */
+async function assertNothingCreated(repairCaseId: string) {
+  const flowcharts = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.repairCaseId, repairCaseId));
+  assert.equal(flowcharts.length, 0, "a rejected whole-flowchart create must leave no flowchart row");
+}
+
+async function createTestWorkRecord(repairCaseId: string, memo: string) {
+  const result = await createWorkRecord({
+    repairCaseId,
+    actorUserId: superAdminId,
+    memo,
+    recordKind: "GENERAL",
+    relatedProcedureExecutionNodeId: null,
+    clientRequestId: randomUUID(),
+  });
+  assert.equal(result.ok, true, `setup work record create failed: ${JSON.stringify(result)}`);
+  if (!result.ok) throw new Error("unreachable");
+  createdWorkRecordIds.push(result.id);
+  return result;
+}
+
+describe("createRepairCaseFlowchartWithGraph", () => {
+  test("흐름도 한 장 + 칸 전부 + 연결선 전부가 한 번에 만들어진다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const input = toWholeFlowchartInput(fakeWorkRecords(3));
+    // 시작 + 기록 셋 + 현재까지 = 칸 5, 연결선 4.
+    assert.equal(input.nodes.length, 5);
+    assert.equal(input.edges.length, 4);
+
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "작업 기록 흐름도 (2098-02-13 09:00)",
+      description: "작업 기록 3건을 그대로 옮겨 만든 흐름도입니다.",
+      ...input,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    createdFlowchartIds.push(result.flowchartId);
+    assert.equal(result.nodeCount, 5);
+    assert.equal(result.edgeCount, 4);
+
+    const [flowchartRow] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, result.flowchartId));
+    assert.ok(flowchartRow);
+    assert.equal(flowchartRow.repairCaseId, repairCaseId);
+    assert.equal(flowchartRow.isDeleted, false);
+
+    const nodeRows = await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.flowchartId, result.flowchartId));
+    const edgeRows = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.flowchartId, result.flowchartId));
+    assert.equal(nodeRows.length, 5);
+    assert.equal(edgeRows.length, 4);
+
+    // 임시 key 가 진짜 uuid 로 갈렸다: 어떤 칸 id 도 순수 함수가 지은 가짜 id 가 아니다.
+    for (const node of nodeRows) {
+      assert.ok(!node.id.startsWith("work-record-flowchart:"), "a saved node id must be a real DB uuid, never the pure function's fake id");
+    }
+
+    // 사슬이 그대로 이어졌다 — 시작 → 기록1 → 기록2 → 기록3 → 현재까지.
+    const titleById = new Map(nodeRows.map((node) => [node.id, node.title]));
+    const chain = edgeRows.map((edge) => [titleById.get(edge.fromNodeId), titleById.get(edge.toNodeId)]);
+    chain.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    assert.deepEqual(chain, [
+      ["1번째 작업 기록", "2번째 작업 기록"],
+      ["2번째 작업 기록", "3번째 작업 기록"],
+      ["3번째 작업 기록", "현재까지"],
+      ["시작", "1번째 작업 기록"],
+    ]);
+    for (const edge of edgeRows) {
+      assert.equal(edge.branchType, "DEFAULT");
+      assert.equal(edge.branchLabel, null);
+    }
+  });
+
+  test("편집 이력이 하나의 changeGroupId 로 묶인다 — 사람이 한 번 누른 한 번의 행동", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "이력 묶음 시험",
+      description: null,
+      ...toWholeFlowchartInput(fakeWorkRecords(3)),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    createdFlowchartIds.push(result.flowchartId);
+
+    const history = await db.select().from(repairCaseFlowchartEditHistory).where(eq(repairCaseFlowchartEditHistory.flowchartId, result.flowchartId));
+    // CREATE_FLOWCHART 1 + CREATE_NODE 5 + CREATE_EDGE 4.
+    assert.equal(history.length, 10);
+    assert.equal(new Set(history.map((row) => row.changeGroupId)).size, 1, "one user action must be one change group, never one group per row");
+    assert.equal(history.filter((row) => row.actionType === "CREATE_FLOWCHART").length, 1);
+    assert.equal(history.filter((row) => row.actionType === "CREATE_NODE").length, 5);
+    assert.equal(history.filter((row) => row.actionType === "CREATE_EDGE").length, 4);
+    for (const row of history) {
+      assert.equal(row.origin, "USER_EDIT");
+      assert.equal(row.actorUserId, superAdminId);
+      assert.equal(row.beforeState, null);
+      assert.ok(row.afterState !== null, "every create row must carry an after-state snapshot");
+    }
+  });
+
+  test("권한 없는 사람은 FORBIDDEN — 흐름도도 칸도 하나 만들어지지 않는다", async () => {
+    for (const actorUserId of [salesId, inventoryManagerId]) {
+      const repairCaseId = await createTestRepairCase();
+      const result = await createRepairCaseFlowchartWithGraph({
+        repairCaseId,
+        actorUserId,
+        title: "권한 시험",
+        description: null,
+        ...toWholeFlowchartInput(fakeWorkRecords(3)),
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+      await assertNothingCreated(repairCaseId);
+    }
+  });
+
+  test("유·무상 미확정 건에서는 막히고 아무것도 만들어지지 않는다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    await setPendingBilling(repairCaseId);
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "유·무상 시험",
+      description: null,
+      ...toWholeFlowchartInput(fakeWorkRecords(3)),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "BILLING_DECISION_REQUIRED");
+    await assertNothingCreated(repairCaseId);
+  });
+
+  test("없는 접수 건이면 NOT_FOUND — 아무것도 만들어지지 않는다", async () => {
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId: randomUUID(),
+      actorUserId: superAdminId,
+      title: "없는 건 시험",
+      description: null,
+      ...toWholeFlowchartInput(fakeWorkRecords(3)),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("shipment-lock 제거 정책: 잠긴(출하된) 건도 막지 않는다 — 손으로 만드는 길과 같은 규칙", async () => {
+    // createRepairCaseFlowchart 가 is_locked 를 보지 않는 것과 같다. 이 길만
+    // 더 엄하게 막으면 같은 일을 하는 두 길의 규칙이 서로 달라진다.
+    const repairCaseId = await createTestRepairCase();
+    await lockCase(repairCaseId);
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "잠긴 건 시험",
+      description: null,
+      ...toWholeFlowchartInput(fakeWorkRecords(2)),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (result.ok) createdFlowchartIds.push(result.flowchartId);
+  });
+
+  test("연결선이 목록에 없는 칸을 가리키면 아무것도 만들어지지 않는다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const input = toWholeFlowchartInput(fakeWorkRecords(3));
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "끊긴 연결선 시험",
+      description: null,
+      nodes: input.nodes,
+      edges: [...input.edges, { fromKey: input.nodes[0].key, toKey: "존재하지 않는 칸", branchType: "DEFAULT", branchLabel: null }],
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+    await assertNothingCreated(repairCaseId);
+  });
+
+  test("저장한 뒤 작업 기록을 하나 더 넣어도 저장된 흐름도는 그대로다", async () => {
+    // 저장되고 나면 평범한 흐름도다 — 다시 그려 주지도, 따라 바뀌지도 않는다.
+    const repairCaseId = await createTestRepairCase();
+    await createTestWorkRecord(repairCaseId, "첫 번째 실제 기록");
+    await createTestWorkRecord(repairCaseId, "두 번째 실제 기록");
+
+    const before = await getWorkRecordHistoryForCase(repairCaseId, { limit: WORK_RECORD_FLOWCHART_MAX_RECORDS, offset: 0 });
+    assert.equal(listWorkRecordIdsInFlowchart(buildWorkRecordFlowchart(before.rows).nodes).length, 2);
+
+    const result = await createRepairCaseFlowchartWithGraph({
+      repairCaseId,
+      actorUserId: superAdminId,
+      title: "그때 모습",
+      description: "작업 기록 2건",
+      ...toWholeFlowchartInput(before.rows),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    createdFlowchartIds.push(result.flowchartId);
+
+    const savedTitles = (await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.flowchartId, result.flowchartId)))
+      .map((node) => node.title)
+      .sort();
+
+    await createTestWorkRecord(repairCaseId, "세 번째 실제 기록");
+
+    const after = await getWorkRecordHistoryForCase(repairCaseId, { limit: WORK_RECORD_FLOWCHART_MAX_RECORDS, offset: 0 });
+    // 자동으로 그리는 쪽은 세 건으로 늘었지만…
+    assert.equal(listWorkRecordIdsInFlowchart(buildWorkRecordFlowchart(after.rows).nodes).length, 3);
+    // …저장된 흐름도는 두 건짜리 그대로다.
+    const stillSavedTitles = (await db.select().from(repairCaseFlowchartNodes).where(eq(repairCaseFlowchartNodes.flowchartId, result.flowchartId)))
+      .map((node) => node.title)
+      .sort();
+    assert.equal(stillSavedTitles.length, 4);
+    assert.deepEqual(stillSavedTitles, savedTitles);
+    assert.ok(!stillSavedTitles.includes("세 번째 실제 기록"));
+
+    const edgeRows = await db.select().from(repairCaseFlowchartEdges).where(eq(repairCaseFlowchartEdges.flowchartId, result.flowchartId));
+    assert.equal(edgeRows.length, 3);
   });
 });
