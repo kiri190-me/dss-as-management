@@ -206,12 +206,3 @@ export function resolveAllRepairCases(
     ...localCases.map((c) => toResolvedFromLocal(c, referenceDate)),
   ];
 }
-
-/** 서버 컴포넌트에서 안전하게 쓸 수 있는 mock 전용 조회(로컬스토리지 접근 없음). */
-export function resolveMockRepairCaseById(
-  id: string,
-  referenceDate: Date = DEMO_REFERENCE_DATE
-): ResolvedRepairCase | null {
-  const repairCase = mockRepairCases.find((c) => c.id === id);
-  return repairCase ? toResolvedFromMock(repairCase, referenceDate) : null;
-}

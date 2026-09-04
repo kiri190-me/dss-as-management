@@ -6,23 +6,28 @@ import "server-only";
  * prefix, never passed through page props) and never logged/printed —
  * same discipline as every other secret-adjacent value in this project.
  *
- * Policy (approved for Stage G-2):
- *  - absent → defaults to "mock" (current PC-development stage only; this
- *    default is expected to change once PC staging/NAS deployment requires
- *    the database explicitly — that enforcement is deferred, not decided
- *    here).
- *  - "mock" | "database" are the only accepted values.
+ * Policy:
+ *  - "database" is the only accepted value, and the default when absent.
+ *    An environment that simply forgets the line (NAS deployment, a fresh
+ *    .env) now reads the real database instead of silently serving demo
+ *    rows that look like production data.
+ *  - the former "mock" demo read path was removed, so "mock" is now
+ *    rejected exactly like any other invalid value — it must never be
+ *    accepted-but-ignored, which would silently look like a working setting.
  *  - anything else throws clearly — never silently falls back.
- *  - NODE_ENV=production does NOT by itself require "database" yet.
+ *
+ * The callers that gate real mutations still re-check `!== "database"`
+ * independently; keeping that check is deliberate even though only one value
+ * remains.
  */
-export const REPAIR_CASE_READ_SOURCES = ["mock", "database"] as const;
+export const REPAIR_CASE_READ_SOURCES = ["database"] as const;
 export type RepairCaseReadSource = (typeof REPAIR_CASE_READ_SOURCES)[number];
 
 export function getRepairCaseReadSource(): RepairCaseReadSource {
   const raw = process.env.REPAIR_CASE_READ_SOURCE;
 
   if (raw === undefined || raw === "") {
-    return "mock";
+    return "database";
   }
 
   if ((REPAIR_CASE_READ_SOURCES as readonly string[]).includes(raw)) {

@@ -3,7 +3,6 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listDeletedRepairCases, listRepairCases } from "@/lib/db/queries/repair-cases";
@@ -20,8 +19,7 @@ export const metadata: Metadata = {
 };
 
 // DB-backed rows must never be statically cached — this route always
-// re-queries at request time in database mode (and does no I/O at all in
-// mock mode, so this has no cost there).
+// re-queries at request time.
 export const dynamic = "force-dynamic";
 
 export default async function RepairCasesPage() {
@@ -37,16 +35,6 @@ export default async function RepairCasesPage() {
   const session = await readSession();
   if (!session) {
     redirect("/login");
-  }
-
-  const readSource = getRepairCaseReadSource();
-
-  if (readSource === "mock") {
-    return (
-      <Suspense>
-        <RepairCaseListPage />
-      </Suspense>
-    );
   }
 
   const serverBaseCases = await listRepairCases();
