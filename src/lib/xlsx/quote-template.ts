@@ -6,6 +6,7 @@ import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from ".
 import {
   assertAscending,
   clearCellIfPresent,
+  dropExcludedWorkScopeLines,
   EMPTY_WORK_SCOPE_LINES,
   fillWorkScopeRows,
   findItemBlock,
@@ -15,7 +16,9 @@ import {
   dropErrorValueCaches,
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
+  NO_WORK_SCOPE_EXCLUSIONS,
   resizeWorkScopeBlocks,
+  type WorkScopeExclusions,
   type WorkScopeLabels,
   type WorkScopeLines,
 } from "./quote-sheet-layout";
@@ -162,7 +165,20 @@ export type QuoteInput = {
  * 있고, 그것들을 다시 내려받았을 때 양식의 표준 문구가 사라지면 안 된다
  * (quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
  */
-export type GeneratorQuoteInput = QuoteInput & { workScope?: WorkScopeLines };
+export type GeneratorQuoteInput = QuoteInput & {
+  workScope?: WorkScopeLines;
+  /**
+   * 켜면 「③ 통전검사」 구역을 **머리글까지 문서에서 지운다.** 통전작업을 하지
+   * 않아 작업비에서 그 몫을 뺐는데 문서에는 「절연저항치·내압시험 …」 이 그대로
+   * 찍혀 나가면, 하지 않은 시험을 했다고 적어 보내는 셈이다.
+   *
+   * 🔴 **빈 목록과 정반대의 뜻이다.** 빈 목록은 "양식 그대로 둔다"이고 이것은
+   * "없앤다"이다(quote-sheet-layout.ts 의 `WorkScopeExclusions`).
+   *
+   * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
+   */
+  powerTestExcluded?: boolean;
+};
 
 /**
  * 원본 양식 버퍼 + 입력 → 채워진 xlsx 버퍼.
@@ -222,7 +238,17 @@ function fillSheet(
 ): { xml: string; rowShift: number } {
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
-  const workScope = input.workScope ?? EMPTY_WORK_SCOPE_LINES;
+
+  // 없애기로 한 묶음. 지금 켤 수 있는 것은 ③ 뿐이다 — 나머지 둘은 늘 꺼짐이다.
+  const excluded: WorkScopeExclusions = {
+    ...NO_WORK_SCOPE_EXCLUSIONS,
+    POWER_TEST: input.powerTestExcluded === true,
+  };
+  // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
+  const workScope = dropExcludedWorkScopeLines(
+    input.workScope ?? EMPTY_WORK_SCOPE_LINES,
+    excluded
+  );
 
   // ── 1) 자리를 찾는다 ──────────────────────────────────────────────
   const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
@@ -245,7 +271,7 @@ function fillSheet(
 
   // ── 2) 줄 수를 맞춘다 — 반드시 아래에서부터 ──────────────────────
   // 작업 내역 셋(③→②→①)을 먼저, 그 위의 부품 칸을 마지막에.
-  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope);
+  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope, excluded);
   const resizedParts = resizeRowBlock(resizedScope.rows, {
     firstRow: parts.firstRow,
     currentCount: parts.count,
@@ -302,6 +328,8 @@ function fillSheet(
 
   // 작업 내역 세 묶음. 빈 묶음은 아무것도 하지 않는다 — 양식의 기본 목록이
   // 그대로 나간다(quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+  // 없앤 묶음도 목록이 비어 있어 여기서 아무 일도 일어나지 않는다 — 자리가
+  // 사라졌으므로 적을 것도 없다(dropExcludedWorkScopeLines).
   xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);

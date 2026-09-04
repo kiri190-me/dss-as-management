@@ -163,12 +163,57 @@ export type WorkScopeLines = Record<WorkScopeSection, readonly string[]>;
 
 export type WorkScopeBlocks = Record<WorkScopeSection, ItemBlock>;
 
+/**
+ * ── 🔴 "비어 있음" 과 "일부러 없앰" 은 다르다 ──────────────────────────
+ *
+ * 묶음별로 **그 구역을 문서에서 통째로 지울지**. 켜면 항목 줄만이 아니라
+ * **머리글 줄까지** 사라진다.
+ *
+ * 🔴 이것은 줄 수와 **완전히 별개의 입력**이다. 빈 목록은 위 머리말대로
+ * "양식 그대로 둔다"는 뜻이고, 그것을 "없애라"로 읽으면 손대지 않은 예전
+ * 견적서에서 표준 문구가 통째로 사라진 문서가 고객사로 나간다.
+ *
+ * 왜 집합(`Set<WorkScopeSection>`)이 아니라 `Record` 인가 — `WorkScopeLines`·
+ * `WorkScopeLabels` 가 이미 그 모양이고, 묶음이 하나 더 생기는 날 **컴파일러가
+ * 여기를 채우라고 짚어 주기 때문**이다. 집합이면 새 묶음이 조용히 "안 없앰"
+ * 으로 흘러가고, 그런 종류의 누락은 문서가 나간 뒤에야 드러난다.
+ */
+export type WorkScopeExclusions = Record<WorkScopeSection, boolean>;
+
 /** 아무것도 주지 않았을 때. 셋 다 양식 그대로 나간다. */
 export const EMPTY_WORK_SCOPE_LINES: WorkScopeLines = {
   INVESTIGATION: [],
   REPAIR: [],
   POWER_TEST: [],
 };
+
+/** 신호를 주지 않았을 때. 하나도 없애지 않는다 — 예전과 한 글자도 다르지 않다. */
+export const NO_WORK_SCOPE_EXCLUSIONS: WorkScopeExclusions = {
+  INVESTIGATION: false,
+  REPAIR: false,
+  POWER_TEST: false,
+};
+
+/**
+ * 없애기로 한 묶음의 줄 목록을 비운다.
+ *
+ * 없앤 묶음은 **적을 자리 자체가 문서에서 사라진다.** 그런데 줄 목록은 화면에서
+ * 온 그대로 들어오므로, 그것을 들고 채우러 가면 사라진 자리 아래에 있던 **남의
+ * 줄에** 글이 적힌다. 채우개 셋이 저마다 막게 두지 않고 여기서 한 번 비운다.
+ *
+ * 없애는 묶음이 하나도 없으면 내용이 같은 그릇을 그대로 돌려준다 — 신호를 주지
+ * 않았을 때 결과가 달라질 여지를 남기지 않기 위해서다.
+ */
+export function dropExcludedWorkScopeLines(
+  lines: WorkScopeLines,
+  excluded: WorkScopeExclusions
+): WorkScopeLines {
+  const next = { ...lines };
+  for (const section of WORK_SCOPE_SECTIONS) {
+    if (excluded[section]) next[section] = [];
+  }
+  return next;
+}
 
 /** 세 묶음의 자리. 못 찾으면 던진다(findLabelRow 와 같은 판단). */
 export function findWorkScopeBlocks(
@@ -186,8 +231,16 @@ export function findWorkScopeBlocks(
 /**
  * 그 묶음이 실제로 갖게 될 줄 수. 빈 목록이면 **양식의 줄 수 그대로**다.
  * 자리를 셈하는 쪽(합계 범위의 끝 따위)이 이 값을 봐야 한다.
+ *
+ * 없앤 묶음은 **0** 이다 — 빈 목록과 정반대다. 그래서 그 뜻을 줄 수에서 읽지
+ * 않고 따로 받는다.
  */
-export function workScopeRowCount(block: ItemBlock, lines: readonly string[]): number {
+export function workScopeRowCount(
+  block: ItemBlock,
+  lines: readonly string[],
+  excluded = false
+): number {
+  if (excluded) return 0;
   return lines.length === 0 ? block.count : lines.length;
 }
 
@@ -203,11 +256,22 @@ export function workScopeRowCount(block: ItemBlock, lines: readonly string[]): n
  * 구간 안에 없으므로 **① 의 마지막 줄을 본으로 건네준다** — 같은 서식이라 그대로
  * 복제하면 그 줄만 모양이 다른 일이 없다. ① 을 아직 안 건드린 시점이라(아래에서
  * 부터 고친다) 그 행 번호는 양식 그대로다.
+ *
+ * ── 🔴 없애는 묶음은 머리글까지 지운다 ─────────────────────────────────
+ * `excluded` 에서 켠 묶음은 항목 줄을 0개로 줄이는 데서 그치지 않고 **머리글
+ * 줄까지** 없앤다. 통전작업을 하지 않아 돈을 빼면서 문서에는 「절연저항치·
+ * 내압시험 …」 이 그대로 찍혀 나가면, 하지 않은 시험을 했다고 적어 보내는 셈이다.
+ *
+ * 그래서 구간의 시작을 **머리글 행**으로 잡고 줄 수를 하나 더 세어 0으로 줄인다.
+ * 이렇게 하면 돌려주는 이동량(delta)에 **머리글 한 줄이 저절로 들어간다** —
+ * 부르는 쪽은 그 값으로 rowShift 를 셈하므로, 여기서 한 줄을 빠뜨리면 공급가·
+ * 부가세·합계가 엉뚱한 칸에 박힌다.
  */
 export function resizeWorkScopeBlocks(
   rows: readonly SheetRow[],
   blocks: WorkScopeBlocks,
-  lines: WorkScopeLines
+  lines: WorkScopeLines,
+  excluded: WorkScopeExclusions = NO_WORK_SCOPE_EXCLUSIONS
 ): { rows: SheetRow[]; deltas: Record<WorkScopeSection, number> } {
   const modelRow =
     blocks.INVESTIGATION.count > 0
@@ -224,6 +288,20 @@ export function resizeWorkScopeBlocks(
   // 아래에서부터. 순서를 뒤집으면 조용히 어긋난 문서가 나간다.
   for (const section of ["POWER_TEST", "REPAIR", "INVESTIGATION"] as const) {
     const block = blocks[section];
+
+    // 🔴 없애는 묶음. **줄 수를 보기 전에** 판단한다 — 이 신호는 줄 수와 별개다.
+    // 머리글 행부터 한 줄 더 세어 통째로 0줄로 만든다(위 머리말).
+    if (excluded[section]) {
+      const resized = resizeRowBlock(next, {
+        firstRow: block.headerRow,
+        currentCount: block.count + 1,
+        targetCount: 0,
+      });
+      next = resized.rows;
+      deltas[section] = resized.delta;
+      continue;
+    }
+
     // 빈 묶음은 양식 그대로 둔다(위 머리말).
     if (lines[section].length === 0) continue;
 

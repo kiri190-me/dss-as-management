@@ -7,11 +7,14 @@ import {
   assertAscending,
   clearCellIfPresent,
   dropErrorValueCaches,
+  dropExcludedWorkScopeLines,
   findItemBlock,
   findSpacedLabelRow,
   findLabelRow,
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
+  NO_WORK_SCOPE_EXCLUSIONS,
+  type WorkScopeExclusions,
   type WorkScopeLabels,
 } from "./quote-sheet-layout";
 import {
@@ -156,7 +159,18 @@ export type MatcherWorkScope = {
  * `MODEL: …, S/N:…` 을 적는 줄(D24)이 있지만 매쳐 양식에는 없고, 그 정보는 이미
  * 품명(D14)에 들어 있다(domain/quote-subject.ts).
  */
-export type MatcherQuoteInput = QuoteInput & { workScope: MatcherWorkScope };
+export type MatcherQuoteInput = QuoteInput & {
+  workScope: MatcherWorkScope;
+  /**
+   * 켜면 「통전작업」 구역을 **머리글까지 문서에서 지운다.** 통전작업을 하지
+   * 않아 작업비에서 그 몫을 뺐는데 문서에는 통전 시험 항목이 그대로 찍혀 나가면,
+   * 하지 않은 시험을 했다고 적어 보내는 셈이다.
+   *
+   * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
+   * (제너레이터 양식의 같은 신호는 quote-template.ts 의 `GeneratorQuoteInput`.)
+   */
+  powerTestExcluded?: boolean;
+};
 
 export function fillMatcherQuoteWorkbook(templateXlsx: Buffer, input: MatcherQuoteInput): Buffer {
   validateQuoteInput(input);
@@ -214,6 +228,14 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
+  // 없애기로 한 묶음. 지금 켤 수 있는 것은 통전작업뿐이다 — 나머지 둘은 늘 꺼짐.
+  const excluded: WorkScopeExclusions = {
+    ...NO_WORK_SCOPE_EXCLUSIONS,
+    POWER_TEST: input.powerTestExcluded === true,
+  };
+  // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
+  const workScope = dropExcludedWorkScopeLines(input.workScope, excluded);
+
   // ── 1) 양식에서 자리를 찾는다 ──────────────────────────────────────
   const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
   const laborRow = findLabelRow(templateRows, read, COLUMNS.name, BLOCK_LABELS.labor);
@@ -239,16 +261,27 @@ function fillSheet(
 
   // ── 2) 줄 수를 맞춘다 — 반드시 아래에서부터 ────────────────────────
   let rows: SheetRow[] = [...templateRows];
-  const powerTestCount = input.workScope.POWER_TEST.length;
-  const repairCount = input.workScope.REPAIR.length;
-  const investigationCount = input.workScope.INVESTIGATION.length;
+  const powerTestCount = workScope.POWER_TEST.length;
+  const repairCount = workScope.REPAIR.length;
+  const investigationCount = workScope.INVESTIGATION.length;
   const partCount = input.parts.length;
 
-  const resizedPowerTest = resizeRowBlock(rows, {
-    firstRow: powerTest.firstRow,
-    currentCount: powerTest.count,
-    targetCount: powerTestCount,
-  });
+  /**
+   * 🔴 통전작업을 없앨 때는 **머리글 행부터** 한 줄 더 세어 통째로 0줄로 만든다.
+   * 그래야 돌려받는 이동량에 머리글 한 줄이 들어가고, 아래에서 셈하는 `rowShift`
+   * 가 맞는다 — 여기서 한 줄을 빠뜨리면 공급가·부가세·합계가 엉뚱한 칸에 박힌다.
+   */
+  const resizedPowerTest = excluded.POWER_TEST
+    ? resizeRowBlock(rows, {
+        firstRow: powerTest.headerRow,
+        currentCount: powerTest.count + 1,
+        targetCount: 0,
+      })
+    : resizeRowBlock(rows, {
+        firstRow: powerTest.firstRow,
+        currentCount: powerTest.count,
+        targetCount: powerTestCount,
+      });
   rows = resizedPowerTest.rows;
 
   const resizedRepair = resizeRowBlock(rows, {
@@ -327,16 +360,24 @@ function fillSheet(
   xml = setNumber(xml, `${COLUMNS.unitPrice}${at.labor}`, input.workCost);
   xml = setFormula(xml, `${COLUMNS.amount}${at.labor}`, `${COLUMNS.unitPrice}${at.labor}`);
 
-  xml = fillScopeSection(xml, at.investigationFirst, input.workScope.INVESTIGATION);
-  xml = fillScopeSection(xml, at.repairFirst, input.workScope.REPAIR);
-  xml = fillScopeSection(xml, at.powerTestFirst, input.workScope.POWER_TEST);
+  // 없앤 묶음은 목록이 비어 있어 아무 일도 일어나지 않는다 — 자리가 사라졌으므로
+  // 적을 것도 없다(dropExcludedWorkScopeLines).
+  xml = fillScopeSection(xml, at.investigationFirst, workScope.INVESTIGATION);
+  xml = fillScopeSection(xml, at.repairFirst, workScope.REPAIR);
+  xml = fillScopeSection(xml, at.powerTestFirst, workScope.POWER_TEST);
 
   /**
    * 통전작업 마지막 줄과 공급가 사이의 금액 칸을 비운다. 이 자리는 양식이
    * 남겨 둔 여유 줄이고 합계 범위 안에 든다 — OH 양식의 견본에는 손으로 적은
    * 조정액(-6,000)이 남아 있었다. 우리 문서에는 우리 자료에 있는 것만 적힌다.
+   *
+   * 통전작업을 없앴으면 **머리글까지 사라졌으므로 한 줄 더 위**에서 시작한다.
+   * 그 한 줄을 건너뛰면 밀려 올라온 여유 줄의 금액이 그대로 살아남는다.
    */
-  for (let row = at.powerTestFirst + powerTestCount; row < at.supply; row += 1) {
+  const belowPowerTest = excluded.POWER_TEST
+    ? powerTest.headerRow + afterRepair
+    : at.powerTestFirst + powerTestCount;
+  for (let row = belowPowerTest; row < at.supply; row += 1) {
     xml = clearCellIfPresent(xml, `${COLUMNS.amount}${row}`);
   }
 

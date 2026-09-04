@@ -217,6 +217,18 @@ function assertSheetIsSound(filled: Filled): void {
   assert.ok(/fullCalcOnLoad="1"/.test(filled.workbookXml), "fullCalcOnLoad 가 꺼져 있다");
 }
 
+/**
+ * 그 글자가 적힌 줄을 전부 모은다. 「사라졌다」를 행 번호로 짚으면 한 칸 옮겨 갔을
+ * 뿐인 경우를 놓친다 — 문서 어느 줄에도 없다는 것을 봐야 한다.
+ */
+function rowsWithText(filled: Filled, column: string, wanted: string): number[] {
+  const found: number[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    if (filled.text(`${column}${row}`) === wanted) found.push(row);
+  }
+  return found;
+}
+
 function printAreaLastRow(workbookXml: string): number {
   const found = /name="_xlnm\.Print_Area"[^>]*>[^<]*\$[A-Z]+\$(\d+)</.exec(workbookXml);
   assert.ok(found, "인쇄 영역을 찾지 못했다");
@@ -315,6 +327,84 @@ test("매쳐 OH: 줄어들면 아래가 당겨 올라온다", { skip: skipOverha
   }
 
   assert.equal(printAreaLastRow(filled.workbookXml), 55);
+});
+
+// ── 통전작업 제외 ───────────────────────────────────────────────────────
+
+/**
+ * 🔴 통전작업을 하지 않으면 작업비에서 그 몫을 뺀다. 그때 문서에 통전작업 구역이
+ * 그대로 남으면 **하지 않은 시험을 했다고 적어 보내는** 셈이다.
+ *
+ * 머리글 한 줄이 함께 사라지므로 아래가 그만큼 더 당겨 올라온다. 그 한 줄을
+ * 이동량에서 빠뜨리면 공급가·부가세·합계가 엉뚱한 칸에 박힌다.
+ */
+test("🔴 통전작업 제외: 머리글까지 사라지고 합계 세 줄이 제자리에 온다", { skip: skipDomestic }, () => {
+  const filled = fill(domesticPath as string, {
+    ...BASE,
+    parts: [
+      { name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 },
+      { name: "VDC_VPP기판", quantity: 2, unitPrice: 300_000 },
+      { name: "세 번째 부품", quantity: 1, unitPrice: 111_111 },
+      { name: "네 번째 부품", quantity: 3, unitPrice: 22_222 },
+      { name: "다섯 번째 부품", quantity: 1, unitPrice: 5_000 },
+    ],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환", "VDC 개조작업", "추가 작업"] },
+    powerTestExcluded: true,
+  });
+
+  assertSheetIsSound(filled);
+
+  // 1) 머리글이 문서 어느 줄에도 없다. 2) 항목 줄도 한 줄도 없다.
+  assert.deepEqual(rowsWithText(filled, "D", "통전작업"), []);
+  for (const line of POWER_TEST_SIX) {
+    assert.deepEqual(rowsWithText(filled, "D", line), [], `${line} 이 남았다`);
+  }
+
+  // 5) 조사작업·수리작업은 제외와 무관하게 그대로다.
+  assert.equal(filled.text("D37"), "조사작업");
+  assert.equal(filled.text("D38"), "외관 및 내부 검사");
+  assert.equal(filled.text("D43"), "알람기능 작동 여부 확인");
+  assert.equal(filled.text("D44"), "수리작업");
+  assert.equal(filled.text("D47"), "추가 작업");
+
+  // 3) 🔴 공급가·부가세·합계. 제외 안 했을 때 58·59·60 이던 것이 일곱 줄
+  //    (머리글 1 + 항목 6) 올라와 51·52·53 이다.
+  assert.equal(filled.text("H51"), "공 급 가");
+  assert.equal(filled.formula("I51"), "SUM(I28:I50)");
+  assert.equal(filled.text("H52"), "부 가 세");
+  assert.equal(filled.formula("I52"), "I51*0.1");
+  assert.equal(filled.text("H53"), "합     계");
+  assert.equal(filled.formula("I53"), "SUM(I51:I52)");
+  assert.equal(filled.formula(MATCHER_QUOTE_CELLS.amount), "I51");
+
+  // 밀려 올라온 여유 줄에 금액이 남아 있으면 합계 범위 안에 든다.
+  for (let row = 48; row < 51; row += 1) {
+    assert.equal(filled.text(`I${row}`), undefined, `${row}행에 남은 값이 있다`);
+  }
+
+  assert.equal(printAreaLastRow(filled.workbookXml), 57);
+});
+
+/**
+ * 🔴 신호는 **기본이 꺼짐**이다. 주지 않은 것과 꺼서 준 것이 같은 시트여야 하고,
+ * 둘 다 통전작업 구역을 그대로 내보내야 한다.
+ */
+test("🔴 제외하지 않으면 통전작업 구역이 그대로다 — 시트가 한 글자도 다르지 않다", { skip: skipDomestic }, () => {
+  const input: MatcherQuoteInput = {
+    ...BASE,
+    parts: [{ name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 }],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환"] },
+  };
+  const omitted = fill(domesticPath as string, input);
+  const off = fill(domesticPath as string, { ...input, powerTestExcluded: false });
+
+  assert.equal(off.sheetXml, omitted.sheetXml, "신호를 꺼서 주면 결과가 달라졌다");
+
+  const header = rowsWithText(omitted, "D", "통전작업");
+  assert.equal(header.length, 1, "통전작업 머리글이 사라졌다");
+  POWER_TEST_SIX.forEach((line, index) => {
+    assert.equal(omitted.text(`D${header[0] + 1 + index}`), line, `${line} 이 사라졌다`);
+  });
 });
 
 test("매쳐: 값이 모자라면 빈 칸짜리 견적서를 만드는 대신 던진다", { skip: skipDomestic }, () => {

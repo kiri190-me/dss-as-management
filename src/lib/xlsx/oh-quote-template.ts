@@ -6,6 +6,7 @@ import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from ".
 import {
   assertAscending,
   clearCellIfPresent,
+  dropExcludedWorkScopeLines,
   EMPTY_WORK_SCOPE_LINES,
   fillWorkScopeRows,
   findItemBlock,
@@ -14,8 +15,10 @@ import {
   findWorkScopeBlocks,
   dropErrorValueCaches,
   LAYOUT_COLUMNS as COLUMNS,
+  NO_WORK_SCOPE_EXCLUSIONS,
   resizeWorkScopeBlocks,
   workScopeRowCount,
+  type WorkScopeExclusions,
   type WorkScopeLabels,
 } from "./quote-sheet-layout";
 import {
@@ -128,6 +131,11 @@ const CALC_LABEL = "계산";
 
 const EXTERNAL_LINK_PREFIX = "xl/externalLinks/";
 
+/**
+ * 내자 입력에 O/H 부품 칸만 더한 것. `workScope` 와 `powerTestExcluded` 는
+ * `GeneratorQuoteInput` 에서 그대로 물려받는다 — 두 양식이 같은 뜻으로 받아야 할
+ * 신호라 한 곳에만 적는다(quote-template.ts).
+ */
 export type OhQuoteInput = GeneratorQuoteInput & {
   /**
    * `2) OH 부품 비용` 칸에 들어갈 부품들. 재고 관리의 O/H 템플릿에서 담아 온
@@ -190,7 +198,17 @@ function fillSheet(
 ): { xml: string; rowShift: number } {
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
-  const workScope = input.workScope ?? EMPTY_WORK_SCOPE_LINES;
+
+  // 없애기로 한 묶음. 지금 켤 수 있는 것은 ③ 뿐이다 — 나머지 둘은 늘 꺼짐이다.
+  const excluded: WorkScopeExclusions = {
+    ...NO_WORK_SCOPE_EXCLUSIONS,
+    POWER_TEST: input.powerTestExcluded === true,
+  };
+  // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
+  const workScope = dropExcludedWorkScopeLines(
+    input.workScope ?? EMPTY_WORK_SCOPE_LINES,
+    excluded
+  );
 
   // ── 1) 자리를 찾는다 ──────────────────────────────────────────────
   const parts = findItemBlock(templateRows, read, BLOCK_LABELS.parts);
@@ -227,7 +245,7 @@ function fillSheet(
   // ── 2) 줄 수를 맞춘다 — 아래에서부터 ─────────────────────────────
   // 작업 내역 셋(③→②→①) → O/H 부품 → 부품. 위를 먼저 고치면 아래 묶음의
   // 시작 행이 이미 밀려 있어 엉뚱한 줄을 잡는다.
-  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope);
+  const resizedScope = resizeWorkScopeBlocks(templateRows, scope, workScope, excluded);
   const resizedOverhaul = resizeRowBlock(resizedScope.rows, {
     firstRow: overhaul.firstRow,
     currentCount: overhaul.count,
@@ -247,10 +265,26 @@ function fillSheet(
   const rowShift = afterRepair + resizedScope.deltas.POWER_TEST;
 
   /**
-   * 통전검사 묶음이 갖게 될 줄 수. **빈 목록이면 양식의 줄 수 그대로**다 —
-   * 합계 범위의 끝이 이 값으로 정해지므로 여기서 틀리면 순환 참조가 된다.
+   * 통전검사 묶음이 갖게 될 줄 수. **빈 목록이면 양식의 줄 수 그대로**이고,
+   * **없앴으면 0** 이다 — 합계 범위의 끝이 이 값으로 정해지므로 여기서 틀리면
+   * 순환 참조가 된다.
    */
-  const powerTestCount = workScopeRowCount(scope.POWER_TEST, workScope.POWER_TEST);
+  const powerTestCount = workScopeRowCount(
+    scope.POWER_TEST,
+    workScope.POWER_TEST,
+    excluded.POWER_TEST
+  );
+
+  /**
+   * 합계 범위의 끝 — 작업 내역의 마지막 줄.
+   *
+   * 🔴 통전검사를 없앴으면 **머리글까지 사라졌으므로 그 윗줄**(② 의 마지막 줄)이
+   * 끝이다. 한 줄이라도 더 내려 잡으면 그 자리로 절사 줄이 올라와 있어 합계가
+   * 자기 자신을 삼킨다 — 이 파일 머리말의 순환 참조가 바로 그것이다.
+   */
+  const powerTestLastRow = excluded.POWER_TEST
+    ? scope.POWER_TEST.headerRow - 1
+    : scope.POWER_TEST.firstRow + powerTestCount - 1;
 
   const at = {
     partsFirst: parts.firstRow,
@@ -259,7 +293,7 @@ function fillSheet(
     investigationFirst: scope.INVESTIGATION.firstRow + afterOverhaul,
     repairFirst: scope.REPAIR.firstRow + afterInvestigation,
     powerTestFirst: scope.POWER_TEST.firstRow + afterRepair,
-    powerTestLast: scope.POWER_TEST.firstRow + powerTestCount - 1 + afterRepair,
+    powerTestLast: powerTestLastRow + afterRepair,
     writeOff: writeOffRow === null ? null : writeOffRow + rowShift,
     supply: supplyRow + rowShift,
     vat: vatRow + rowShift,
@@ -299,6 +333,8 @@ function fillSheet(
 
   // 작업 내역 세 묶음. 빈 묶음은 아무것도 하지 않는다 — 양식의 기본 목록이
   // 그대로 나간다(quote-sheet-layout.ts 의 '빈 묶음은 양식 그대로 둔다').
+  // 없앤 묶음도 목록이 비어 있어 아무 일도 일어나지 않는다 — 자리가 사라졌으므로
+  // 적을 것도 없다(dropExcludedWorkScopeLines).
   xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);

@@ -101,6 +101,18 @@ function assertSheetIsSound(filled: Filled): void {
   assert.ok(/fullCalcOnLoad="1"/.test(filled.workbookXml), "fullCalcOnLoad 가 꺼져 있다");
 }
 
+/**
+ * 그 글자가 적힌 줄을 전부 모은다. 「사라졌다」를 행 번호로 짚으면 한 칸 옮겨 갔을
+ * 뿐인 경우를 놓친다 — 문서 어느 줄에도 없다는 것을 봐야 한다.
+ */
+function rowsWithText(filled: Filled, column: string, wanted: string): number[] {
+  const found: number[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    if (filled.text(`${column}${row}`) === wanted) found.push(row);
+  }
+  return found;
+}
+
 function printAreaLastRow(workbookXml: string, sheetName: string): number | null {
   for (const found of workbookXml.matchAll(
     /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>([^<]*)<\/definedName>/g
@@ -313,6 +325,103 @@ test("🔴 빈 묶음은 양식 그대로 남는다 — 합계 범위의 끝도 
   // 통째로 안 주는 것과 셋 다 빈 배열로 주는 것이 같은 뜻이다.
   const omitted = fill({ ...BASE, parts: parts(3, "부품"), overhaulParts: parts(2, "OH부품") });
   assert.equal(omitted.sheetXml, empty.sheetXml);
+});
+
+// ── 통전검사 제외 ───────────────────────────────────────────────────────
+
+/** 양식에 적혀 있는 ③ 의 머리글. 뒤에 `[출하검사]` 가 붙어 있다. */
+const POWER_TEST_HEADER = "통전검사[출하검사]";
+
+/**
+ * 🔴 이 양식에서는 통전검사를 없애는 것이 **합계 범위의 끝을 옮긴다.** 없앤 자리
+ * 아래로 절사 줄이 올라오므로, 끝을 한 줄이라도 내려 잡으면 합계가 자기 자신을
+ * 삼켜 순환 참조가 된다. 그 자리를 못 박아 두는 시험이다.
+ */
+test("🔴 통전검사 제외: 구역이 사라지고 합계 범위·사슬이 제자리에 온다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    workScope: {
+      INVESTIGATION: ["조사 하나", "조사 둘"],
+      REPAIR: ["수리 하나", "수리 둘", "수리 셋"],
+      POWER_TEST: ["통전 하나"],
+    },
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+
+  // 1) 머리글이 문서 어느 줄에도 없다. 2) 항목 줄도 없다.
+  assert.deepEqual(rowsWithText(filled, "D", POWER_TEST_HEADER), []);
+  assert.deepEqual(rowsWithText(filled, "D", "통전 하나"), []);
+  assert.deepEqual(rowsWithText(filled, "D", "에이징 시험 (정격연속출력:1시간)"), []);
+
+  // 5) ①·② 는 그대로. ④ 도 손대지 않는다(통전검사 두 줄만큼 올라왔다).
+  assert.equal(filled.text("D37"), "인수 조사");
+  assert.equal(filled.text("D38"), "조사 하나");
+  assert.equal(filled.text("D41"), "OH 및 수리 작업");
+  assert.equal(filled.text("C42"), "-", "복제한 줄에 줄임표가 없다");
+  assert.equal(filled.text("D44"), "수리 셋");
+  assert.equal(filled.text("D47"), "서류작업");
+
+  // 3) 🔴 공급가·부가세·합계. 제외 안 했을 때 52·53·54 이던 것이 두 줄 올라왔다.
+  assert.equal(filled.text("H50"), "공 급 가");
+  assert.equal(filled.formula("I50"), "H57", "공급가는 내린 값이다");
+  assert.equal(filled.text("H51"), "부 가 세");
+  assert.equal(filled.formula("I51"), "I50*0.1");
+  assert.equal(filled.text("H52"), "합     계");
+  assert.equal(filled.formula("I52"), "I50+I51");
+  assert.equal(filled.formula(OH_QUOTE_CELLS.amount), "I50");
+
+  // 만원 단위 내림 사슬도 같이 올라온다.
+  assert.equal(filled.formula("G56"), "SUM(I26:I45)");
+  assert.equal(filled.formula("H56"), "G56/10000");
+  assert.equal(filled.formula("H57"), "ROUNDDOWN(H56,0)*10000");
+  assert.equal(filled.formula("I57"), "H57-G56");
+  assert.equal(filled.formula("I49"), "I57", "절사 줄이 내림 결과를 받아야 한다");
+
+  // 🔴 합계 범위의 끝(45)이 절사 줄(49)보다 위여야 순환 참조가 안 된다.
+  const range = /SUM\(I\d+:I(\d+)\)/.exec(filled.formula("G56") ?? "");
+  assert.ok(range, "합계 수식을 찾지 못했다");
+  assert.ok(
+    Number(range[1]) < 49,
+    `합계 범위가 절사 줄까지 삼켰다 — 순환 참조가 된다 (끝: ${range[1]}행)`
+  );
+
+  assert.equal(printAreaLastRow(filled.workbookXml, OH_QUOTE_SHEET_NAME), 52);
+});
+
+/**
+ * 🔴 신호는 **기본이 꺼짐**이다. 주지 않은 것과 꺼서 준 것이 같은 시트여야 하고,
+ * 둘 다 통전검사 구역을 그대로 내보내야 한다.
+ */
+test("🔴 제외하지 않으면 통전검사 구역이 그대로다 — 시트가 한 글자도 다르지 않다", { skip }, () => {
+  const scope = {
+    INVESTIGATION: ["조사 하나", "조사 둘"],
+    REPAIR: ["수리 하나", "수리 둘", "수리 셋"],
+    POWER_TEST: ["통전 하나"],
+  };
+  const omitted = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    workScope: scope,
+  });
+  const off = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    workScope: scope,
+    powerTestExcluded: false,
+  });
+
+  assert.equal(off.sheetXml, omitted.sheetXml, "신호를 꺼서 주면 결과가 달라졌다");
+
+  assert.equal(omitted.text("D46"), POWER_TEST_HEADER);
+  assert.equal(omitted.text("D47"), "통전 하나");
+  assert.equal(omitted.formula("G58"), "SUM(I26:I47)");
+  assert.equal(omitted.text("H52"), "공 급 가");
+  assert.equal(printAreaLastRow(omitted.workbookXml, OH_QUOTE_SHEET_NAME), 54);
 });
 
 test("부품이 없어도 무너지지 않는다 — 작업비만 받는 O/H 견적", { skip }, () => {
