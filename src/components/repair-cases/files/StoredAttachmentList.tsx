@@ -130,6 +130,39 @@ function isViewablePdf(mimeType: string): boolean {
 }
 
 /**
+ * 「미리보기」를 여는 두 가지 길. 같은 말을 쓰지만 같은 일이 아니다.
+ *
+ *  - `"viewer"` — 이 화면 위에 뷰어(AttachmentViewer)를 띄운다. 원본을 그리고
+ *    **좌우로 다른 사진을 넘겨 볼 수 있다.**
+ *  - `"new-tab"` — 새 탭에서 그대로 연다. 뷰어는 `<img>` 로 그려서 PDF 를 받지
+ *    못하므로 PDF 가 가는 길이 이쪽이다(위 isViewablePdf 주석).
+ *  - `"none"` — 압축 파일·로그처럼 열어 봐야 보여 줄 것이 없는 것들.
+ */
+export type AttachmentPreviewAffordance = "viewer" | "new-tab" | "none";
+
+/**
+ * 이 첨부에 「미리보기」를 내밀어야 하는가 — 내민다면 **어느 길로**인가.
+ *
+ * 화면 안에 조건을 흩어 두면 세 군데(표·카드·격자)가 서로 어긋나도 아무도
+ * 모른다. 그래서 판정만 여기로 뽑았고 시험이 이 함수를 못박는다.
+ *
+ * 🔴 **previewPath(썸네일)를 보지 않는다.** 두 길 모두 `?view=full` 로 **원본**을
+ *    여는 것이라 썸네일이 있고 없고와 아무 상관이 없다. 미리보기가 없는 옛
+ *    사진에서 단추가 사라지면, 정작 크게 봐야 확인이 되는 그 사진들만 누를 곳이
+ *    없어진다.
+ *
+ * 🔴 **사진과 PDF 를 한 값으로 뭉치지 않는다.** 뭉치는 순간 PDF 가 사진 목록에
+ *    끼어들 길이 생기고, 그러면 뷰어에서 좌우로 넘기다 빈 화면을 만난다.
+ */
+export function previewAffordanceOf(
+  item: RepairCaseAttachmentListItem
+): AttachmentPreviewAffordance {
+  if (isViewableImage(item.mimeType)) return "viewer";
+  if (isViewablePdf(item.mimeType)) return "new-tab";
+  return "none";
+}
+
+/**
  * 화면에서 원본을 그대로 여는 주소. `?view=full` 은 썸네일이 아니라 **원본**을,
  * 첨부가 아니라 **inline** 으로 준다(형식이 서버 목록에 있을 때만).
  *
@@ -218,6 +251,51 @@ function Thumbnail({
       className={`${size === "small" ? "shrink-0" : "block w-full"} overflow-hidden rounded`}
     >
       {image}
+    </button>
+  );
+}
+
+/**
+ * 사진의 「미리보기」 단추 — **자리와 모양은 PDF 단추와 같고, 하는 일은 왼쪽
+ * 썸네일 누르기와 같다.**
+ *
+ * 예전에는 조작 칸에 PDF 것만 있었다. 사진은 썸네일을 누르면 열렸는데, 40px
+ * 짜리 그림이 눌리는 것이라는 사실이 눈에 띄지 않아 크게 보는 길이 있는 줄
+ * 모르는 채로 쓰는 사람이 있었다(2026-09-04 요구로 단추를 붙였다).
+ *
+ * 🔴 **썸네일 누르기를 대신하지 않는다 — 길을 하나 더 내는 것이다.** 두 길이
+ *    같은 뷰어를 연다. 그동안 썸네일로 쓰던 사람의 손이 달라지지 않아야 한다.
+ *
+ * 🔴 **새 탭이 아니라 뷰어다.** 뷰어는 원본을 그리고 좌우로 넘길 수 있는데,
+ *    새 탭으로 열면 그 넘기기가 사라지고 사진 보는 길이 두 갈래로 갈린다.
+ *    새 탭인 것은 PDF 뿐이고, 그것은 뷰어가 PDF 를 그리지 못해서다.
+ *
+ * PDF 쪽이 `<a>` 인 것과 달리 이쪽은 `<button>` 이다 — 가는 곳이 있는 것이
+ * 아니라 이 화면에서 여는 것이기 때문이다. 다만 **보이는 모양은 같아야** 사람이
+ * "이건 다른 단추인가" 하고 멈추지 않는다. 그래서 클래스를 부르는 쪽에서 받는다
+ * (세 목록이 저마다 다른 크기의 PDF 단추를 쓰고 있고, 그것에 맞춘다).
+ */
+function ImagePreviewButton({
+  item,
+  onOpen,
+  className,
+}: {
+  item: RepairCaseAttachmentListItem;
+  onOpen: (item: RepairCaseAttachmentListItem) => void;
+  className: string;
+}) {
+  if (previewAffordanceOf(item) !== "viewer") return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(item)}
+      // 한 화면에 같은 말이 여럿이라 무엇을 여는지 이름으로 밝힌다 — PDF 단추와
+      // 같은 방식이다(sr-only 로 숨긴 글자는 쓰지 않는다. 아래 표의 주석 참조).
+      aria-label={`${item.originalFileName} 미리보기`}
+      className={className}
+    >
+      미리보기
     </button>
   );
 }
@@ -738,10 +816,20 @@ export default function StoredAttachmentList({
               <td className="px-3 py-2 whitespace-nowrap text-right">
                 <div className="flex items-center justify-end gap-2">
                   {/*
-                    PDF 는 새 탭에서 그대로 열어 본다. 사진은 여기 없다 — 사진은
-                    왼쪽 썸네일을 누르면 화면 위 뷰어가 열리므로 같은 일을 하는
-                    단추가 한 줄에 둘이 되지 않게 한다.
+                    「미리보기」는 사진과 PDF 둘 다에 붙는다. **자리도 모양도 글자도
+                    같지만 여는 길이 다르다** — 사진은 이 화면 위의 뷰어(좌우로
+                    넘길 수 있다), PDF 는 새 탭(뷰어가 <img> 라 PDF 를 못 그린다).
+                    판정은 previewAffordanceOf 한 곳에 있다.
+
+                    🔴 사진 단추는 왼쪽 썸네일 누르기를 **대신하지 않는다** — 둘 다
+                    같은 뷰어를 연다. 작은 썸네일이 눌린다는 것이 눈에 띄지 않아
+                    누를 곳을 하나 더 낸 것이다(2026-09-04 요구). 지우지 말 것.
                   */}
+                  <ImagePreviewButton
+                    item={item}
+                    onOpen={openViewer}
+                    className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  />
                   {isViewablePdf(item.mimeType) && (
                     <a
                       href={inlineViewUrlOf(item.id)}
@@ -821,7 +909,12 @@ export default function StoredAttachmentList({
             </div>
           </div>
           <div className="mt-2 flex justify-end gap-2">
-            {/* 표 보기와 같은 규칙이다 — PDF 만, 새 탭에서(위 표의 주석 참조). */}
+            {/* 표 보기와 같은 규칙이다 — 사진은 뷰어로, PDF 는 새 탭으로(위 표의 주석 참조). */}
+            <ImagePreviewButton
+              item={item}
+              onOpen={openViewer}
+              className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+            />
             {isViewablePdf(item.mimeType) && (
               <a
                 href={inlineViewUrlOf(item.id)}
@@ -970,10 +1063,15 @@ export default function StoredAttachmentList({
                 {/*
                   왼쪽 한 덩어리로 묶는다 — 이 줄은 justify-between 이라
                   묶지 않으면 단추가 셋일 때 `내려받기` 가 가운데로 흩어지고
-                  `지우기` 만 오른쪽에 남는다. 표 보기와 같은 규칙으로 PDF 에만
-                  `미리보기` 가 붙는다(위 표의 주석 참조).
+                  `지우기` 만 오른쪽에 남는다. 표 보기와 같은 규칙으로 `미리보기`
+                  가 붙는다 — 사진은 뷰어로, PDF 는 새 탭으로(위 표의 주석 참조).
                 */}
                 <div className="flex min-w-0 items-center gap-2">
+                  <ImagePreviewButton
+                    item={item}
+                    onOpen={openViewer}
+                    className="text-[11px] font-medium text-zinc-700 underline dark:text-zinc-300"
+                  />
                   {isViewablePdf(item.mimeType) && (
                     <a
                       href={inlineViewUrlOf(item.id)}
