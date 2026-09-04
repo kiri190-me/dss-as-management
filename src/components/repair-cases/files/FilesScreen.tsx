@@ -156,6 +156,14 @@ function DatabaseFilesScreen({
   const [description, setDescription] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  /**
+   * 「파일 올리기」 구역을 펼쳤는가. **평소에는 접혀 있다**(2026-09-04 요구) —
+   * 이 화면에 오는 대부분의 일은 이미 올라온 파일을 보는 것이고, 올리는 칸이
+   * 늘 펼쳐져 있으면 목록이 화면 아래로 밀려난다.
+   *
+   * 어디에도 저장하지 않는다. 탭을 다시 열면 접힌 상태로 돌아온다.
+   */
+  const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false);
 
   /**
    * 찍었지만 아직 올리지 않은 사진들.
@@ -362,8 +370,15 @@ function DatabaseFilesScreen({
     return null;
   }
 
-  /** 한 장을 실제로 보낸다. 실패하면 사람이 읽을 수 있는 이유를 돌려준다. */
-  async function uploadOne(file: File): Promise<{ ok: true } | { ok: false; reason: string }> {
+  /**
+   * 한 장을 실제로 보낸다. 실패하면 사람이 읽을 수 있는 이유를 돌려준다.
+   *
+   * 성공하면 **썸네일 올리기의 약속을 함께 넘긴다.** 여기서 기다리지 않되
+   * 부르는 쪽이 "다 끝났을 때"를 알 수 있어야 하기 때문이다(handleUpload).
+   */
+  async function uploadOne(
+    file: File
+  ): Promise<{ ok: true; previewUpload: Promise<void> | null } | { ok: false; reason: string }> {
     try {
       // 본문은 파일 바이트 그 자체이고 메타데이터는 쿼리 문자열이다 —
       // multipart로 보내면 서버가 파일 전체를 메모리에 올려야 한다
@@ -387,10 +402,15 @@ function DatabaseFilesScreen({
       // await 하지 않는다 — 사용자가 한 일(사진 올리기)은 이미 끝났고, 썸네일은
       // 없어도 목록이 원본으로 보여 준다. 여기서 기다리면 여러 장 올릴 때
       // 장마다 썸네일 만드는 시간이 그대로 얹힌다.
+      //
+      // 다만 **약속은 버리지 않고 돌려준다.** 예전에는 여기서 그냥 흘려보내
+      // 아무도 끝을 몰랐고, 그 사이에 목록을 다시 받아 오는 바람에 썸네일이
+      // 없는 목록이 화면에 남았다(handleUpload 의 두 번째 refresh 참조).
+      // uploadPreview 는 스스로 실패를 삼키므로 이 약속은 거절되지 않는다.
       const created = (await response.json().catch(() => null)) as { id?: string } | null;
-      if (created?.id) void uploadPreview(created.id, file);
+      const previewUpload = created?.id ? uploadPreview(created.id, file) : null;
 
-      return { ok: true };
+      return { ok: true, previewUpload };
     } catch {
       return { ok: false, reason: "네트워크 문제" };
     }
@@ -428,6 +448,11 @@ function DatabaseFilesScreen({
     // 실제로 올라간 사진의 id — 이것만 모아 둔 목록에서 뺀다. 실패한 것은
     // 남겨서 다시 시도할 수 있게 한다.
     const uploadedPhotoIds: string[] = [];
+    /**
+     * 썸네일 올리기들. 올리는 흐름은 이것을 기다리지 않고 끝나지만, 다 끝난
+     * 뒤에 목록을 한 번 더 받아 오려면 끝을 알아야 한다(아래).
+     */
+    const previewUploads: Promise<void>[] = [];
     let uploaded = 0;
 
     try {
@@ -445,6 +470,7 @@ function DatabaseFilesScreen({
         const result = await uploadOne(file);
         if (result.ok) {
           uploaded += 1;
+          if (result.previewUpload) previewUploads.push(result.previewUpload);
           if (fromCamera) uploadedPhotoIds.push(chosenPhotos[index].id);
         } else {
           failures.push({ name: file.name, reason: result.reason });
@@ -499,8 +525,33 @@ function DatabaseFilesScreen({
         // 다시 집어 같은 파일이 두 번 올라간다. (촬영 쪽은 위에서 올라간 것만
         // 골라 뺐고, 입력 자체는 촬영 때마다 이미 비워진다.)
         if (!fromCamera && fileInputRef.current) fileInputRef.current.value = "";
+        // 연달아 올리는 사람이 매번 다시 펼치지 않도록, 올린 직후에는 접기
+        // 구역을 펼친 채로 둔다(접기 카드 주석 참조).
+        setIsUploadPanelOpen(true);
         // 목록은 서버가 만든다 — 화면에서 지어내지 않고 다시 받아 온다.
         router.refresh();
+
+        /**
+         * 🔴 **썸네일이 다 올라간 뒤에 한 번 더 받아 온다.**
+         *
+         * 바로 위 refresh 는 사진 자체를 지금 당장 보여 주려는 것이고, 그 시점에
+         * 썸네일은 아직 서버에 없다(위에서 기다리지 않았으므로). 예전에는 그것이
+         * 전부라 목록이 미리보기 없는 상태로 굳었고, 사람이 「미리보기 만들기」를
+         * 눌러야 그제서야 보였다(2026-09-04 요구로 없앤 그 과정이다).
+         *
+         * 여기서도 기다리지 않는다 — 올리는 흐름은 이미 끝났고 이 뒷정리만
+         * 혼자 돈다. 실패한 것이 있어도 진행한다(allSettled). 사용자가 이미 다른
+         * 탭으로 옮겨 갔을 수 있으므로 refresh 는 감싸 둔다.
+         */
+        if (previewUploads.length > 0) {
+          void Promise.allSettled(previewUploads).then(() => {
+            try {
+              router.refresh();
+            } catch {
+              // 화면을 떠났다 — 다음에 열 때 썸네일이 붙은 목록이 온다.
+            }
+          });
+        }
       }
     } catch {
       setStatusMessage({ type: "error", text: "파일을 올리는 중 문제가 생겼습니다." });
@@ -529,229 +580,300 @@ function DatabaseFilesScreen({
       )}
 
       {canUpload ? (
-        <form
-          onSubmit={handleUpload}
-          className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+        /*
+          기본 접힘 상태다(2026-09-04 요구). 이 탭에서 하는 일의 대부분은 이미
+          올라온 파일을 보는 것인데, 올리는 칸이 늘 펼쳐져 있어 목록이 화면
+          아래로 밀려나 있었다.
+
+          useState 토글 대신 네이티브 <details>를 쓴 것은 이 앱의 기존 관례를
+          따른 것이다(ManualStepSetPanel, 작업 이력의 "워크플로 변경 이력",
+          바로 아래 휴지통이 같은 방식). 키보드 조작·접근성은 브라우저가 처리한다.
+          (좁은 화면에서만 접히는 FilterDisclosure 는 목적이 달라 쓰지 않는다 —
+          여기서는 넓은 화면에서도 접혀 있어야 한다.)
+
+          🔴 **올리는 중에는 접히지 않는다.** 진행 표시와 되돌릴 수 없는 작업이
+          그 안에 있다. 막는 방법은 summary 의 click 을 preventDefault 하는
+          것이다 — 아예 닫히지 않게 한다.
+
+          ⚠️ `open={... || isUploading}` 으로 "닫혀도 다시 열리게" 하는 길은
+          **듣지 않는다.** 사람이 닫으면 브라우저가 DOM 의 open 을 끄는데, 그때
+          React 가 넘긴 prop 값은 true 그대로라(true → true) 아무것도 바뀌지
+          않은 것으로 보고 DOM 을 되돌리지 않는다. `<details>` 는 input 처럼
+          제어 상태를 복구해 주는 물건이 아니다. 그래서 열림 상태는 언제나
+          **DOM 을 따라가게** 두고(onToggle), 막을 때는 사건 자체를 막는다.
+
+          올린 직후에도 펼친 채로 둔다(handleUpload 의
+          setIsUploadPanelOpen(true)): 연달아 올리는 사람이 매번 다시 펼쳐야
+          하면 접은 것이 오히려 불편해진다.
+
+          안에 있는 것은 하나도 빼지 않았다 — 분류·파일 고르기·앱 안 카메라·
+          연속 촬영·설명이 그대로 있고, 접기만 씌웠다.
+        */
+        <details
+          open={isUploadPanelOpen}
+          onToggle={(event) => setIsUploadPanelOpen(event.currentTarget.open)}
+          className="group rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
         >
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">파일 올리기</h2>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">분류</span>
-              <select
-                value={category}
-                onChange={(event) => setCategory(event.target.value as AttachmentCategory)}
-                disabled={isUploading}
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                {ATTACHMENT_CATEGORY_CODES.map((code) => (
-                  <option key={code} value={code}>
-                    {attachmentCategoryLabels[code]}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">파일 (여러 개 선택 가능)</span>
+          {/* 손가락이 닿는 자리다. 목록 화면의 고르기 동그라미와 같은 기준(44px)으로 키워 둔다. */}
+          <summary
+            onClick={(event) => {
+              // 올리는 중에는 접지 못한다(위 주석). 키보드로 여는 것도 이
+              // click 을 거치므로 한 자리에서 막힌다.
+              if (isUploading) event.preventDefault();
+            }}
+            className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 p-4"
+          >
+            <div className="flex min-w-0 flex-col">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">파일 올리기</h2>
               {/*
-                multiple은 앨범에서 여러 장을 한 번에 고르는 경로다. 폰 기본
-                카메라로 여러 장 찍어 둔 뒤 앨범에서 골라 올리는 것이 현장에서
-                가장 흔한 방식이라, 촬영 입력(한 장씩)과 함께 둔다.
+                접혀 있어도 무엇을 하는 구역인지, 그리고 **찍어 두고 아직 올리지
+                않은 사진이 있는지**는 보여야 한다. 그것을 감추면 접는 순간
+                사진을 잊어버린다.
               */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={acceptAttribute}
-                multiple
-                disabled={isUploading}
-                onChange={() => {
-                  // 찍어 모아 둔 사진이 있으면 그쪽이 우선이라(handleUpload),
-                  // 앨범에서 고른 파일이 조용히 무시된다. 그 사실을 미리 알린다.
-                  if (stagedPhotos.length > 0) {
-                    setStatusMessage({
-                      type: "error",
-                      text: "찍어 둔 사진이 있어 그쪽이 먼저 올라갑니다. 앨범에서 고른 파일을 올리려면 찍은 사진을 먼저 올리거나 버려 주세요.",
-                    });
-                  }
-                }}
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </label>
-          </div>
-
-          {cameraSupported && (
-            <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">휴대폰으로 바로 촬영</span>
-              {/*
-                파일 입력(capture)이 아니라 앱 안에서 도는 카메라다. 그 이유는
-                InAppCamera.tsx 헤더에 적었다 — 요약하면 파일 입력 방식은
-                확인을 누를 때마다 카메라가 닫혀서 두 장에서 멈춘다.
-              */}
-              <InAppCamera
-                onCapture={stagePhoto}
-                disabled={isUploading}
-                onUnavailable={setCameraUnavailableReason}
-              />
-
-              {/*
-                앱 안 카메라는 미리보기 스트림이라 폰 기본 카메라 앱보다 해상도가
-                낮다(InAppCamera.tsx 헤더 "두 가지 대가"). 화면에서는 그 차이가
-                보이지 않아 각인·파형처럼 화질이 필요한 사진까지 여기서 찍게 되고,
-                작게 저장된 것은 현장을 떠난 뒤에야 드러난다. 그래서 카메라가
-                멀쩡할 때도 대체 경로를 늘 옆에 적어 둔다.
-
-                경고가 아니라 안내이므로 다른 설명문과 같은 회색을 쓴다 — 노란색은
-                아래 "카메라를 못 쓴다" 쪽이 쓰고 있어, 같은 색이면 무언가 잘못된
-                것으로 읽힌다. 그 안내가 떠 있을 때는 이 문구를 내지 않는다.
-                거기에 이미 같은 말이 들어 있어 화면에 두 번 뜨기 때문이다.
-              */}
-              {!cameraUnavailableReason && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  각인·파형처럼 화질이 중요한 사진은 폰 기본 카메라로 찍어 위 <strong>파일</strong> 칸에서 올려 주세요 —
-                  앱 안 카메라는 미리보기 화질이라 원본보다 작게 저장됩니다.
-                </p>
+              <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                사진·문서를 이 접수 건에 올립니다
+                {stagedPhotos.length > 0 ? ` · 찍어 둔 사진 ${stagedPhotos.length}장` : ""}
+              </span>
+            </div>
+            {/*
+              네이티브 삼각형 마커를 list-none으로 숨겼으므로 이 문구가 유일한
+              상태 표시가 된다. 올리는 중에는 눌러도 접히지 않으므로 "접기"
+              대신 그 사정을 적는다 — 안 듣는 단추처럼 보이지 않게.
+            */}
+            <span className="shrink-0 text-xs font-normal text-zinc-600 dark:text-zinc-400">
+              {isUploading ? (
+                "올리는 중…"
+              ) : (
+                <>
+                  <span className="group-open:hidden">더보기</span>
+                  <span className="hidden group-open:inline">접기</span>
+                </>
               )}
+            </span>
+          </summary>
 
-              {cameraUnavailableReason && (
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  {cameraUnavailableReason} 폰 기본 카메라로 찍은 뒤 위의 <strong>파일</strong> 칸에서 여러 장을 골라
-                  올리셔도 됩니다.
-                </p>
-              )}
+          <form
+            onSubmit={handleUpload}
+            className="flex flex-col gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">분류</span>
+                <select
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value as AttachmentCategory)}
+                  disabled={isUploading}
+                  className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                >
+                  {ATTACHMENT_CATEGORY_CODES.map((code) => (
+                    <option key={code} value={code}>
+                      {attachmentCategoryLabels[code]}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-              {stagedPhotos.length > 0 && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                      찍은 사진 {stagedPhotos.length}장 · 올릴 것 {selectedPhotoCount}장
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setAllPhotosSelected(true)}
-                        disabled={isUploading}
-                        className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
-                      >
-                        전체 선택
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAllPhotosSelected(false)}
-                        disabled={isUploading}
-                        className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
-                      >
-                        전체 해제
-                      </button>
-                      <button
-                        type="button"
-                        onClick={discardAllPhotos}
-                        disabled={isUploading}
-                        className="text-xs text-red-700 underline disabled:opacity-50 dark:text-red-400"
-                      >
-                        전부 버리기
-                      </button>
-                    </div>
-                  </div>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">파일 (여러 개 선택 가능)</span>
+                {/*
+                  multiple은 앨범에서 여러 장을 한 번에 고르는 경로다. 폰 기본
+                  카메라로 여러 장 찍어 둔 뒤 앨범에서 골라 올리는 것이 현장에서
+                  가장 흔한 방식이라, 촬영 입력(한 장씩)과 함께 둔다.
+                */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={acceptAttribute}
+                  multiple
+                  disabled={isUploading}
+                  onChange={() => {
+                    // 찍어 모아 둔 사진이 있으면 그쪽이 우선이라(handleUpload),
+                    // 앨범에서 고른 파일이 조용히 무시된다. 그 사실을 미리 알린다.
+                    if (stagedPhotos.length > 0) {
+                      setStatusMessage({
+                        type: "error",
+                        text: "찍어 둔 사진이 있어 그쪽이 먼저 올라갑니다. 앨범에서 고른 파일을 올리려면 찍은 사진을 먼저 올리거나 버려 주세요.",
+                      });
+                    }
+                  }}
+                  className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+            </div>
 
-                  <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-                    {stagedPhotos.map((photo, index) => (
-                      <li key={photo.id} className="relative">
-                        {/*
-                          라벨 전체가 누를 수 있는 영역이다 — 폰에서 작은
-                          체크박스만 겨냥하게 하면 장갑 낀 손으로 못 누른다.
-                        */}
-                        <label
-                          className={`block cursor-pointer overflow-hidden rounded-md border-2 ${
-                            photo.selected
-                              ? "border-zinc-900 dark:border-zinc-50"
-                              : "border-zinc-200 opacity-60 dark:border-zinc-800"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={photo.selected}
-                            disabled={isUploading}
-                            onChange={() => togglePhotoSelected(photo.id)}
-                            className="sr-only"
-                          />
-                          {/*
-                            objectURL 미리보기다. next/image를 쓰지 않는 이유는
-                            이 주소가 서버에 없는 블롭이라 최적화 대상이 아니고,
-                            버릴 때 revokeObjectURL로 직접 놓아 줘야 하기 때문이다.
-                          */}
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={photo.previewUrl}
-                            alt={`찍은 사진 ${index + 1}장째`}
-                            className="aspect-square w-full bg-zinc-100 object-cover dark:bg-zinc-800"
-                          />
-                          <span className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-zinc-600 dark:text-zinc-400">
-                            <span>{photo.selected ? "올림" : "제외"}</span>
-                            <span className="tabular-nums">{formatBytes(photo.file.size)}</span>
-                          </span>
-                        </label>
+            {cameraSupported && (
+              <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">휴대폰으로 바로 촬영</span>
+                {/*
+                  파일 입력(capture)이 아니라 앱 안에서 도는 카메라다. 그 이유는
+                  InAppCamera.tsx 헤더에 적었다 — 요약하면 파일 입력 방식은
+                  확인을 누를 때마다 카메라가 닫혀서 두 장에서 멈춘다.
+                */}
+                <InAppCamera
+                  onCapture={stagePhoto}
+                  disabled={isUploading}
+                  onUnavailable={setCameraUnavailableReason}
+                />
+
+                {/*
+                  앱 안 카메라는 미리보기 스트림이라 폰 기본 카메라 앱보다 해상도가
+                  낮다(InAppCamera.tsx 헤더 "두 가지 대가"). 화면에서는 그 차이가
+                  보이지 않아 각인·파형처럼 화질이 필요한 사진까지 여기서 찍게 되고,
+                  작게 저장된 것은 현장을 떠난 뒤에야 드러난다. 그래서 카메라가
+                  멀쩡할 때도 대체 경로를 늘 옆에 적어 둔다.
+
+                  경고가 아니라 안내이므로 다른 설명문과 같은 회색을 쓴다 — 노란색은
+                  아래 "카메라를 못 쓴다" 쪽이 쓰고 있어, 같은 색이면 무언가 잘못된
+                  것으로 읽힌다. 그 안내가 떠 있을 때는 이 문구를 내지 않는다.
+                  거기에 이미 같은 말이 들어 있어 화면에 두 번 뜨기 때문이다.
+                */}
+                {!cameraUnavailableReason && (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    각인·파형처럼 화질이 중요한 사진은 폰 기본 카메라로 찍어 위 <strong>파일</strong> 칸에서 올려 주세요 —
+                    앱 안 카메라는 미리보기 화질이라 원본보다 작게 저장됩니다.
+                  </p>
+                )}
+
+                {cameraUnavailableReason && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {cameraUnavailableReason} 폰 기본 카메라로 찍은 뒤 위의 <strong>파일</strong> 칸에서 여러 장을 골라
+                    올리셔도 됩니다.
+                  </p>
+                )}
+
+                {stagedPhotos.length > 0 && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        찍은 사진 {stagedPhotos.length}장 · 올릴 것 {selectedPhotoCount}장
+                      </span>
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => discardPhoto(photo.id)}
+                          onClick={() => setAllPhotosSelected(true)}
                           disabled={isUploading}
-                          aria-label={`${index + 1}장째 사진 버리기`}
-                          className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
+                          className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
                         >
-                          버리기
+                          전체 선택
                         </button>
-                      </li>
-                    ))}
-                  </ul>
+                        <button
+                          type="button"
+                          onClick={() => setAllPhotosSelected(false)}
+                          disabled={isUploading}
+                          className="text-xs text-zinc-600 underline disabled:opacity-50 dark:text-zinc-400"
+                        >
+                          전체 해제
+                        </button>
+                        <button
+                          type="button"
+                          onClick={discardAllPhotos}
+                          disabled={isUploading}
+                          className="text-xs text-red-700 underline disabled:opacity-50 dark:text-red-400"
+                        >
+                          전부 버리기
+                        </button>
+                      </div>
+                    </div>
 
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    누르면 올릴 사진에서 넣고 뺄 수 있습니다. <strong>버리기</strong>는 이 자리에서만 없애는 것이고,
-                    이미 올라간 파일과는 무관합니다.
-                  </p>
-                </div>
-              )}
+                    <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                      {stagedPhotos.map((photo, index) => (
+                        <li key={photo.id} className="relative">
+                          {/*
+                            라벨 전체가 누를 수 있는 영역이다 — 폰에서 작은
+                            체크박스만 겨냥하게 하면 장갑 낀 손으로 못 누른다.
+                          */}
+                          <label
+                            className={`block cursor-pointer overflow-hidden rounded-md border-2 ${
+                              photo.selected
+                                ? "border-zinc-900 dark:border-zinc-50"
+                                : "border-zinc-200 opacity-60 dark:border-zinc-800"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={photo.selected}
+                              disabled={isUploading}
+                              onChange={() => togglePhotoSelected(photo.id)}
+                              className="sr-only"
+                            />
+                            {/*
+                              objectURL 미리보기다. next/image를 쓰지 않는 이유는
+                              이 주소가 서버에 없는 블롭이라 최적화 대상이 아니고,
+                              버릴 때 revokeObjectURL로 직접 놓아 줘야 하기 때문이다.
+                            */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={photo.previewUrl}
+                              alt={`찍은 사진 ${index + 1}장째`}
+                              className="aspect-square w-full bg-zinc-100 object-cover dark:bg-zinc-800"
+                            />
+                            <span className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-zinc-600 dark:text-zinc-400">
+                              <span>{photo.selected ? "올림" : "제외"}</span>
+                              <span className="tabular-nums">{formatBytes(photo.file.size)}</span>
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => discardPhoto(photo.id)}
+                            disabled={isUploading}
+                            aria-label={`${index + 1}장째 사진 버리기`}
+                            className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
+                          >
+                            버리기
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      누르면 올릴 사진에서 넣고 뺄 수 있습니다. <strong>버리기</strong>는 이 자리에서만 없애는 것이고,
+                      이미 올라간 파일과는 무관합니다.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">설명 (선택)</span>
+              <input
+                type="text"
+                value={description}
+                maxLength={500}
+                onChange={(event) => setDescription(event.target.value)}
+                disabled={isUploading}
+                placeholder="예: 반입 당시 전면 패널 상태"
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              여러 장을 한 번에 고르면 <strong>분류와 설명이 모두에 똑같이</strong> 붙습니다. 장마다 다르게 적으려면
+              나눠 올리세요.
+            </p>
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              최대 {formatBytes(MAX_ATTACHMENT_SIZE_BYTES)} · 허용 형식{" "}
+              {allowedExtensions.map((extension) => `.${extension}`).join(", ")}
+            </p>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isUploading}
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {isUploading
+                  ? uploadProgress
+                    ? `올리는 중… ${uploadProgress.total}장 중 ${uploadProgress.current}장째`
+                    : "올리는 중…"
+                  : stagedPhotos.length > 0
+                    ? `고른 ${selectedPhotoCount}장 올리기`
+                    : "올리기"}
+              </button>
             </div>
-          )}
-
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">설명 (선택)</span>
-            <input
-              type="text"
-              value={description}
-              maxLength={500}
-              onChange={(event) => setDescription(event.target.value)}
-              disabled={isUploading}
-              placeholder="예: 반입 당시 전면 패널 상태"
-              className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-            />
-          </label>
-
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            여러 장을 한 번에 고르면 <strong>분류와 설명이 모두에 똑같이</strong> 붙습니다. 장마다 다르게 적으려면
-            나눠 올리세요.
-          </p>
-
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            최대 {formatBytes(MAX_ATTACHMENT_SIZE_BYTES)} · 허용 형식{" "}
-            {allowedExtensions.map((extension) => `.${extension}`).join(", ")}
-          </p>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={isUploading}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              {isUploading
-                ? uploadProgress
-                  ? `올리는 중… ${uploadProgress.total}장 중 ${uploadProgress.current}장째`
-                  : "올리는 중…"
-                : stagedPhotos.length > 0
-                  ? `고른 ${selectedPhotoCount}장 올리기`
-                  : "올리기"}
-            </button>
-          </div>
-        </form>
+          </form>
+        </details>
       ) : (
         <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           {actingUser

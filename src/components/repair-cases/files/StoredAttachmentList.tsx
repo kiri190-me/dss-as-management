@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import {
@@ -36,6 +36,11 @@ import {
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
 import AttachmentViewer from "./AttachmentViewer";
 import ShrinkDownloadDialog from "./ShrinkDownloadDialog";
+import {
+  decideAutoPreviewBackfill,
+  formatPreviewBackfillProgress,
+  shouldOfferManualPreviewRebuild,
+} from "./preview-backfill";
 import { fetchAttachmentBlob, saveBlobAs, uploadPreview } from "./shrink-image";
 import { createStoredZip, uniqueEntryNames } from "./zip-store";
 
@@ -56,8 +61,10 @@ import { createStoredZip, uniqueEntryNames } from "./zip-store";
  * 전혀 하지 않는다 — 네이티브 라이브러리를 들이면 NAS 컨테이너로 옮길 때
  * 짐이 되기 때문이다.
  *
- * 미리보기가 없는 옛 사진은 원본으로 보여 준다(없어도 되는 것이다). 위쪽의
- * "미리보기 만들기"로 한 번에 채울 수 있고, 그때도 만드는 쪽은 브라우저다.
+ * 미리보기가 없는 옛 사진은 원본으로 보여 준다(없어도 되는 것이다). 그런 사진이
+ * 있으면 **화면이 뜬 뒤 스스로 한 번 채운다**(2026-09-04 요구 — 사람이
+ * "미리보기 만들기"를 누르는 일이 없어졌다). 그때도 만드는 쪽은 브라우저다.
+ * 돌아도 되는지의 판정은 preview-backfill.ts 에 있고 거기서 검증한다.
  *
  * ── 표와 카드를 직접 고르지 않는다 ───────────────────────────────────────
  * ResponsiveList가 "표가 들어가면 표, 안 들어가면 카드"를 재서 정하고 사용자가
@@ -312,6 +319,14 @@ export default function StoredAttachmentList({
   const [filters, setFilters] = useState<AttachmentListFilters>(DEFAULT_ATTACHMENT_LIST_FILTERS);
   /** 옛 사진의 미리보기를 채우는 중. */
   const [previewProgress, setPreviewProgress] = useState<{ current: number; total: number } | null>(null);
+  /**
+   * 채우기가 **한 번 끝났는가**(자동이든 사람이 누른 것이든).
+   *
+   * 아래 깃발(useRef)과 다른 물건이다. 저것은 "두 번 돌지 않는다"를 지키는
+   * 자물쇠라 화면을 다시 그리지 않고, 이것은 **화면이 읽는 값**이다 — 다 돌고
+   * 나서도 남은 것이 있으면 그때 단추를 내밀어야 하기 때문이다.
+   */
+  const [hasFinishedBackfillRun, setHasFinishedBackfillRun] = useState(false);
 
   /** 사진인데 미리보기가 없는 것들 — 목록이 원본을 그대로 받아 오는 대상이다. */
   const missingPreview = useMemo(
@@ -319,6 +334,17 @@ export default function StoredAttachmentList({
     [attachments]
   );
 
+  /**
+   * 미리보기가 없는 사진을 한 장씩 채운다.
+   *
+   * 🔴 **한 장씩 하는 지금 방식을 유지한다** — 폰에서 여러 장을 동시에 풀면
+   *    메모리가 모자라 탭이 죽는다. 병렬로 바꾸지 않는다.
+   *
+   * 🔴 **오류를 밖으로 내보내지 않는다.** 사람이 누를 때는 던져도 그 자리에서
+   *    끝났지만, 이제는 화면이 스스로 부른다 — 처리되지 않은 거절이 렌더 밖으로
+   *    나가면 탭 전체가 깨진다. 삼켜서 조용히 끝내되, 남은 것이 있다는 사실은
+   *    아래 단추가 알려 준다(shouldOfferManualPreviewRebuild).
+   */
   async function buildMissingPreviews() {
     setPreviewProgress({ current: 0, total: missingPreview.length });
     try {
@@ -329,12 +355,61 @@ export default function StoredAttachmentList({
         const source = await fetchAttachmentBlob(item.id);
         await uploadPreview(item.id, source);
       }
-      // 목록은 서버가 만든다 — 새 previewPath를 받아 오려면 다시 그려야 한다.
-      router.refresh();
+    } catch {
+      // 조용히 끝낸다(위 주석). 여기서 다시 시도하지 않는다 — 서버가 거절하는
+      // 상황이면 원본을 계속 받아 오며 무한히 두드리게 된다.
     } finally {
       setPreviewProgress(null);
+      setHasFinishedBackfillRun(true);
+      // 목록은 서버가 만든다 — 새 previewPath를 받아 오려면 다시 그려야 한다.
+      // 중간에 막혔어도 그때까지 만든 것은 보여야 하므로 finally 에서 부른다.
+      try {
+        router.refresh();
+      } catch {
+        // 화면을 떠났을 수 있다 — 다음에 열 때 보인다.
+      }
     }
   }
+
+  /**
+   * 🔴 화면이 뜬 뒤 **한 번만** 스스로 채운다(2026-09-04 요구).
+   *
+   * ── 왜 효과 본문에서 곧바로 부르지 않는가 ──────────────────────────────
+   * buildMissingPreviews 는 첫 줄부터 상태를 건드려서(setPreviewProgress)
+   * 그리자마자 렌더가 연쇄한다. 이 저장소는 그것을 **오류**로 잡는다
+   * (react-hooks/set-state-in-effect). 한 틱 미루면 첫 그림은 그대로 나오고
+   * 채우기는 그 뒤에 시작된다 — 사람 눈에는 차이가 없다.
+   * QuoteEditForm 의 자동 불러오기가 같은 방식이고, 새 우회법을 만들지 않았다.
+   *
+   * ── 깃발을 타이머 **안에서** 세운다 ────────────────────────────────────
+   * 개발 모드의 StrictMode 는 효과를 두 번 도는데, 바깥에서 세우면 첫 번째가
+   * 깃발만 세우고 정리(cleanup)에 지워져 채우기가 아예 안 도는 상태가 된다.
+   *
+   * ── 두 번은 없다 ───────────────────────────────────────────────────────
+   * 의존성이 비어 있어 **마운트 때 한 번만** 걸리고, 깃발이 그 안에서 다시 한
+   * 번 막는다. 채우기가 끝나면 router.refresh() 로 목록이 다시 그려지지만
+   * 컴포넌트가 다시 마운트되는 것이 아니므로 이 효과는 다시 돌지 않는다.
+   * 실패해서 남은 것이 있어도 마찬가지다 — 남은 것은 사람이 단추로 처리한다.
+   */
+  const didStartAutoBackfill = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const decision = decideAutoPreviewBackfill({
+        canManage,
+        missingCount: missingPreview.length,
+        hasStarted: didStartAutoBackfill.current,
+        isRunning: previewProgress !== null,
+        isBusy,
+      });
+      if (!decision.run) return;
+      didStartAutoBackfill.current = true;
+      void buildMissingPreviews();
+    }, 0);
+    return () => clearTimeout(timer);
+    // 마운트 때 한 번만이다. missingPreview 나 buildMissingPreviews 를 넣으면
+    // 목록이 다시 그려질 때마다 또 돌아 원본을 되풀이해 받아 온다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * 조건에 맞아 지금 화면에 있는 것들.
@@ -942,23 +1017,45 @@ export default function StoredAttachmentList({
 
       {/*
         옛 사진 채우기. 미리보기가 생기기 전에 올라온 것들은 목록에서 원본을
-        그대로 받아 오므로 느리다. 한 번 눌러 두면 그 뒤로는 빨라진다.
-        만드는 쪽은 여기서도 브라우저다 — 서버는 이미지 처리를 하지 않는다.
+        그대로 받아 오므로 느리다. 이제는 화면이 뜬 뒤 스스로 한 번 채우므로
+        (위 useEffect) 사람이 누를 일이 없다. 만드는 쪽은 여기서도 브라우저다 —
+        서버는 이미지 처리를 하지 않는다.
+
+        그래서 **노란 경고 띠를 조용한 진행 표시로 바꿨다.** 사람이 할 일이
+        아니게 됐으니 경고할 일도 아니고, 끝나면 사라진다.
       */}
-      {missingPreview.length > 0 && (
+      {previewProgress !== null && (
+        <p
+          aria-live="polite"
+          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+        >
+          {formatPreviewBackfillProgress(previewProgress)}
+        </p>
+      )}
+
+      {/*
+        🔴 단추를 없애지 않는다. 저절로 채우다 **막혀서 남은 것이 있을 때만**
+        내민다 — 자동 재시도는 하지 않기로 했으므로(원본을 계속 받아 오며
+        무한히 두드리게 된다) 그때 빠져나갈 길이 여기 하나다. 이때는 실제로
+        무언가 잘못된 것이라 노란색이 제 뜻으로 쓰인다.
+      */}
+      {shouldOfferManualPreviewRebuild({
+        canManage,
+        hasFinishedRun: hasFinishedBackfillRun,
+        missingCount: missingPreview.length,
+        isRunning: previewProgress !== null,
+      }) && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs dark:border-amber-900 dark:bg-amber-950">
           <span className="text-amber-800 dark:text-amber-300">
-            사진 {missingPreview.length}장에 미리보기가 없어 목록이 원본을 그대로 받아 옵니다.
+            사진 {missingPreview.length}장은 미리보기를 만들지 못했습니다 — 그 사진은 목록이 원본을 그대로 받아 옵니다.
           </span>
           <button
             type="button"
-            onClick={buildMissingPreviews}
-            disabled={isBusy || previewProgress !== null}
+            onClick={() => void buildMissingPreviews()}
+            disabled={isBusy}
             className="rounded-md border border-amber-300 px-2.5 py-1.5 font-medium text-amber-900 disabled:opacity-50 dark:border-amber-800 dark:text-amber-200"
           >
-            {previewProgress
-              ? `만드는 중… ${previewProgress.current}/${previewProgress.total}`
-              : "미리보기 만들기"}
+            미리보기 다시 만들기
           </button>
         </div>
       )}
