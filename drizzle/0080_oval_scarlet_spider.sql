@@ -1,0 +1,2 @@
+ALTER TABLE "repair_labor_settings" ADD COLUMN "power_test_hours" integer;--> statement-breakpoint
+ALTER TABLE "repair_labor_settings" ADD CONSTRAINT "repair_labor_settings_power_test_hours_positive" CHECK ("repair_labor_settings"."power_test_hours" > 0);

@@ -561,6 +561,20 @@
       "when": 1788333774695,
       "tag": "0079_uneven_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1788489992732,
+      "tag": "0080_oval_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1788493214258,
+      "tag": "0081_familiar_sage",
+      "breakpoints": true
     }
   ]
 }

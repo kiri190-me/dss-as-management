@@ -9,13 +9,17 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 
 export const metadata: Metadata = {
-  title: "수리 작업 비용 | DSS A/S 관리 시스템",
+  title: "작업 비용 | DSS A/S 관리 시스템",
 };
 
 export const dynamic = "force-dynamic";
 
 /**
- * 수리 작업 비용 — 견적서 작업비의 근거가 되는 표.
+ * 작업 비용 — 견적서 작업비의 근거가 되는 표(수리 작업 · 통전 작업).
+ *
+ * 🔴 주소(`/repair-labor`)와 권한 열쇠(`repairLabor`)는 그대로다. 이름표만 넓혔다 —
+ * 열쇠를 바꾸면 관리자가 저장해 둔 역할별 접근 권한이 초기화되고, 이미 쓰던
+ * 링크가 깨진다.
  *
  * 가드가 사이드바보다 먼저 온다 — 메뉴에서 감추는 것은 막은 것이 아니고, 주소를
  * 직접 치거나 예전 링크를 누르면 그대로 들어와진다(견적서 화면의 같은 순서).
@@ -31,7 +35,7 @@ export default async function RepairLaborPage() {
   if (getAuthSource() !== "database") {
     return (
       <PlaceholderPage
-        title="수리 작업 비용"
+        title="작업 비용"
         description="이 화면은 데이터베이스 저장 모드에서만 사용할 수 있습니다."
       />
     );
@@ -49,7 +53,7 @@ export default async function RepairLaborPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">수리 작업 비용</h1>
+      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">작업 비용</h1>
       <RepairLaborScreen kinds={kinds} canEdit={canEdit} />
     </div>
   );

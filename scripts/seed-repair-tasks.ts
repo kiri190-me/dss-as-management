@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * 수리 작업 목록 · 시간당 단가 · 기본 작업비 넣기
+ * 수리 작업 목록 · 시간당 단가 · 기본 작업비 · 통전작업 공수시간 넣기
  * ============================================================================
  * 사용자가 준 표 두 장을 그대로 옮긴다(2026-08-31).
  *   · 제너레이터 20건 — 「FH 작업비」
@@ -98,6 +98,22 @@ const BASE_COSTS: Record<"GENERATOR" | "MATCHER" | "TOTAL_CONTROLLER", string | 
   TOTAL_CONTROLLER: "2200000",
 };
 
+/**
+ * 통전작업 공수시간(2026-09-04 사용자).
+ *
+ * **기본 작업비 안에 이미 들어 있는 몫이다.** 제너레이터·매쳐 350만원 중 14시간 =
+ * 140만원이 그것이고, 통전작업이 빠지는 견적서는 210만원이 되어야 한다.
+ *
+ * 🔴 **T/C 는 null 이다 — 아직 모른다.** 0 으로 적으면 "통전작업이 0시간인 장비"가
+ * 되어, 모르는 채로 차감이 일어난다. 모르는 것은 비워 두고 사람이 화면에서 채운다
+ * (schema/repair-labor.ts 의 그 항목).
+ */
+const POWER_TEST_HOURS: Record<"GENERATOR" | "MATCHER" | "TOTAL_CONTROLLER", number | null> = {
+  GENERATOR: 14,
+  MATCHER: 14,
+  TOTAL_CONTROLLER: null,
+};
+
 async function main() {
   const [actor] = await db
     .select({ id: users.id })
@@ -166,9 +182,16 @@ async function main() {
 
   for (const kind of ["GENERATOR", "MATCHER", "TOTAL_CONTROLLER"] as const) {
     const [row] = await db
-      .select({ id: repairLaborSettings.id, baseCost: repairLaborSettings.baseCost })
+      .select({
+        id: repairLaborSettings.id,
+        baseCost: repairLaborSettings.baseCost,
+        powerTestHours: repairLaborSettings.powerTestHours,
+      })
       .from(repairLaborSettings)
       .where(eq(repairLaborSettings.equipmentKind, kind));
+
+    const baseCost = BASE_COSTS[kind];
+    const powerTestHours = POWER_TEST_HOURS[kind];
 
     if (row) {
       /**
@@ -178,13 +201,23 @@ async function main() {
        * 아니다 — 몰라서 비어 있던 자리에 이제 답이 생긴 것뿐이다. 반대로 값이
        * 이미 있는데 시드가 덮으면, 화면에서 고쳐 둔 사람은 자기 변경이 왜
        * 사라졌는지 알 수 없다. 시간당 단가도 같은 이유로 손대지 않는다.
+       *
+       * 칸마다 따로 본다 — 기본 작업비는 이미 채워졌는데 통전작업 시간만 비어
+       * 있는 줄이 실제로 있다(이 칸이 나중에 생겼다). 둘을 묶어 판단하면 그런
+       * 줄은 영영 채워지지 않는다.
        */
-      if (row.baseCost === null && BASE_COSTS[kind] !== null) {
+      const patch: { baseCost?: string; powerTestHours?: number } = {};
+      if (row.baseCost === null && baseCost !== null) patch.baseCost = baseCost;
+      if (row.powerTestHours === null && powerTestHours !== null) {
+        patch.powerTestHours = powerTestHours;
+      }
+
+      if (Object.keys(patch).length > 0) {
         await db
           .update(repairLaborSettings)
-          .set({ baseCost: BASE_COSTS[kind], updatedBy: actor.id, updatedAt: new Date() })
+          .set({ ...patch, updatedBy: actor.id, updatedAt: new Date() })
           .where(eq(repairLaborSettings.id, row.id));
-        console.log(`${kind}: 비어 있던 기본 작업비를 ${BASE_COSTS[kind]} 로 채움.`);
+        console.log(`${kind}: 비어 있던 칸을 채움 — ${JSON.stringify(patch)}.`);
       } else {
         console.log(`${kind}: 단가 설정이 이미 있어 건드리지 않음.`);
       }
@@ -193,11 +226,14 @@ async function main() {
     await db.insert(repairLaborSettings).values({
       equipmentKind: kind,
       hourlyRate: HOURLY_RATE,
-      baseCost: BASE_COSTS[kind],
+      baseCost,
+      powerTestHours,
       updatedBy: actor.id,
     });
     console.log(
-      `${kind}: 시간당 ${HOURLY_RATE}원 · 기본 작업비 ${BASE_COSTS[kind] ?? "(정하지 않음)"} 넣음.`
+      `${kind}: 시간당 ${HOURLY_RATE}원 · 기본 작업비 ${baseCost ?? "(정하지 않음)"} · 통전작업 ${
+        powerTestHours === null ? "(정하지 않음)" : `${powerTestHours}시간`
+      } 넣음.`
     );
   }
 }

@@ -128,6 +128,20 @@ export const repairLaborSettings = pgTable(
     hourlyRate: numeric("hourly_rate", { precision: 15, scale: 2 }).notNull(),
     /** 기본 작업비(원). **NULL 이면 정하지 않은 것**이고 합계에 더하지 않는다. */
     baseCost: numeric("base_cost", { precision: 15, scale: 2 }),
+    /**
+     * 통전작업 공수시간.
+     *
+     * 기본 작업비 안에는 **통전작업이 이미 들어 있다**(2026-09-04 사용자). 제너레이터
+     * 350만원 중 14시간 = 140만원이 그 몫이고, 통전작업이 빠지는 견적서는 210만원이
+     * 되어야 한다. 그 14 를 코드에 박지 않는 이유는 시간당 단가를 박지 않는 이유와
+     * 같다 — 값이 바뀌는 날 금액을 고치는 일이 배포가 된다(이 파일 아래 머리말).
+     *
+     * **NULL 이면 정하지 않은 것**이고 `0` 이 아니다. T/C 는 통전작업 시간을 아직
+     * 모른다. 0 으로 접으면 "통전작업이 0시간인 장비"와 갈라지지 않고, 모르는 채로
+     * 차감이 일어나 버린다 — 정하지 않은 장비는 차감하지 않는 편이 맞다
+     * (base_cost 가 NULL 을 다루는 규칙과 같다).
+     */
+    powerTestHours: integer("power_test_hours"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "restrict" }),
   },
@@ -136,6 +150,69 @@ export const repairLaborSettings = pgTable(
     check("repair_labor_settings_hourly_rate_not_negative", sql`${table.hourlyRate} >= 0`),
     // NULL 은 이 CHECK 를 통과한다 — '정하지 않음'은 잘못된 값이 아니라 값의 부재다.
     check("repair_labor_settings_base_cost_not_negative", sql`${table.baseCost} >= 0`),
+    // 0시간짜리 통전작업은 뜻이 없다 — 그건 '통전작업이 없다'가 아니라 '정하지
+    // 않았다'이고, 그 상태는 NULL 이 담는다. 여기서도 NULL 은 통과한다.
+    check("repair_labor_settings_power_test_hours_positive", sql`${table.powerTestHours} > 0`),
+  ]
+);
+
+/**
+ * ============================================================================
+ * 통전 작업 목록 — 통전작업으로 **무엇을 하는가**
+ * ============================================================================
+ * 장비 종류마다의 통전 작업 건명 목록이다. **공수시간이 없다.**
+ *
+ * ── 🔴 이 표는 글이고, 금액은 옆 표가 정한다 ────────────────────────────
+ * 통전작업의 값은 `repair_labor_settings.power_test_hours × hourly_rate` 하나로
+ * 정해진다(위 표의 그 항목). 이 목록은 그 한 덩어리 안에서 **무슨 일을 하는지**를
+ * 적어 두는 자리다 — 사람이 보고, 앞으로 견적서 문서에 적힐 글이다.
+ *
+ * 그래서 줄마다 시간을 두지 않는다. 두면 "줄들의 합"과 "power_test_hours" 라는
+ * 서로 다른 두 숫자가 같은 금액을 주장하게 되고, 어긋나는 날 어느 쪽이 참인지
+ * 답할 수 없다. **줄별 시간 배분은 필요 없다고 사용자가 정했다(2026-09-04).**
+ *
+ * ── 🔴 왜 repair_task_catalog 에 섞지 않는가 ────────────────────────────
+ * 두 가지가 막는다.
+ *
+ *  1. 그 표는 `CHECK (hours > 0)` 으로 공수시간을 **반드시** 요구한다. 시간 없는
+ *     통전 항목을 넣으려면 그 규칙을 느슨하게 해야 하고, 그러면 **0시간짜리
+ *     수리 작업이 들어올 길이 함께 열린다** — 견적서에서 고를 수는 있는데 값이
+ *     0인 줄이 생긴다.
+ *  2. 견적서 화면이 그 표를 읽어 "고를 수리 작업" 목록을 그린다. 섞으면 통전
+ *     항목이 그 선택지에 딸려 나오고, 사람이 그걸 고르면 시간이 없어 0원짜리
+ *     줄이 견적서에 박힌다.
+ *
+ * 표를 나누면 둘 다 없는 문제가 된다. 대신 장비 종류 enum 은 그대로 나눠 쓴다 —
+ * 이유는 위 repair_task_catalog 머리말의 「장비 종류는 새로 만들지 않는다」와 같다.
+ * ============================================================================
+ */
+export const powerTestTasks = pgTable(
+  "power_test_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** 어느 장비의 통전작업인가. 목록이 장비 종류마다 통째로 다르다. */
+    equipmentKind: productModelKindEnum("equipment_kind").notNull(),
+    /** 건명. 사람이 화면에서 보고, 앞으로 문서에 적힐 글자 그대로다. */
+    taskName: text("task_name").notNull(),
+    /** 화면에 늘어놓는 차례. 통전작업은 순서대로 하는 일이라 차례가 뜻을 갖는다. */
+    displayOrder: integer("display_order").notNull(),
+
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "restrict" }),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    // 같은 장비에 같은 건명을 두 줄 두지 않는다 — 같은 일을 두 번 적은 것인지
+    // 다른 일인지 사람도 코드도 답할 수 없다. 지운 이름은 다시 쓸 수 있다
+    // (부분 unique, 이 저장소의 관례 — 위 repair_task_catalog 와 같은 모양).
+    uniqueIndex("power_test_tasks_kind_name_not_deleted_unique")
+      .on(table.equipmentKind, table.taskName)
+      .where(sql`is_deleted = false`),
+    index("power_test_tasks_kind_idx").on(table.equipmentKind),
   ]
 );
 

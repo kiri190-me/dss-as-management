@@ -44,7 +44,9 @@ export const navItems: NavItem[] = [
   // 견적서의 **작업비가 나오는 근거**다. 견적서 바로 옆에 두는 것은 견적을 내다가
   // "이 작업이 몇 시간이었지"를 확인하러 가는 일이 잦기 때문이다. 보는 권한은
   // 견적서와 같고, 고치는 권한만 더 좁다(actions/repair-labor.ts).
-  { key: "repairLabor", href: "/repair-labor", label: "수리 작업 비용" },
+  // 🔴 이름표만 넓혔다(2026-09-04, 통전 작업 비용 탭). key 와 href 는 그대로다 —
+  // 열쇠를 바꾸면 저장해 둔 역할별 접근 권한이 초기화되고 옛 링크가 깨진다.
+  { key: "repairLabor", href: "/repair-labor", label: "작업 비용" },
   { key: "settings", href: "/settings", label: "시스템 설정" },
   // A/S 접수 알림 메일의 자동 발송 여부·수신자·문구. 「설정」 그룹에 두는 것은
   // 사용자 관리와 나란히 "누가 무엇을 받는가"를 정하는 자리이기 때문이다.
