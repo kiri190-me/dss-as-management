@@ -582,6 +582,13 @@
       "when": 1788499024932,
       "tag": "0082_rapid_justice",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1788503163390,
+      "tag": "0083_familiar_ironclad",
+      "breakpoints": true
     }
   ]
 }

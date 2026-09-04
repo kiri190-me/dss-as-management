@@ -74,14 +74,15 @@ test("검사 상태 기본값은 DB enum에 실재하는 값이다", () => {
 
 // ───────────────────────────────────────────────────── 목록 자체의 무결성
 
-test("분류 코드는 14종이고 중복이 없다", () => {
+test("분류 코드는 15종이고 중복이 없다", () => {
   // 개수를 적어 두는 이유는 **DB enum과 함께 움직이기 때문**이다. 코드에만
   // 더하고 마이그레이션을 잊으면 화면에서는 고를 수 있는데 저장할 때 서버가
   // 거절한다 — 그 어긋남이 이 줄에서 먼저 걸린다.
   //
   // 11 → 14: 수리 중·수리 후·출하 사진을 더했다(마이그레이션 0047).
-  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 14);
-  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 14);
+  // 14 → 15: 견적서를 더했다(마이그레이션 0083).
+  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 15);
+  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 15);
 });
 
 test("업무 순서대로 늘어놓는다 — 화면의 고르는 차례가 이 순서다", () => {
@@ -97,6 +98,34 @@ test("업무 순서대로 늘어놓는다 — 화면의 고르는 차례가 이 
     "AFTER_REPAIR",
     "SHIPMENT_PHOTO",
   ]);
+});
+
+test("검사 보고서는 이름표만 바뀌었다 — 코드는 여전히 INSPECTION_REPORT다", () => {
+  // 이름표가 '점검 보고서'에서 '검사 보고서'로 바뀌었다. 바뀐 것은 사람이 보는
+  // 글자뿐이고, **코드를 함께 바꾸면 이미 올라간 파일들이 깨진다** — attachments
+  // 표의 category 컬럼에 'INSPECTION_REPORT' 가 그대로 적혀 있고, DB enum 에서
+  // 그 값을 없애는 순간 그 행들은 어느 분류에도 속하지 않게 된다. 이름표를
+  // 고치려다 코드까지 손대는 일을 이 줄이 막는다.
+  assert.ok(ATTACHMENT_CATEGORY_CODES.includes("INSPECTION_REPORT"));
+  assert.ok(attachmentCategoryEnum.enumValues.includes("INSPECTION_REPORT"));
+  assert.equal(attachmentCategoryLabels.INSPECTION_REPORT, "검사 보고서");
+});
+
+test("견적서는 수리 보고서 뒤·교산 문서 앞에 있다", () => {
+  // 우리가 만들어 고객에게 보내는 문서끼리 모은 자리다. 화면의 고르는 차례가
+  // 이 배열 순서 그대로라(AttachmentFilters·ProductModelFilesSection 이 map 한다),
+  // 자리가 곧 사용자가 보는 목록의 자리다.
+  assert.ok(ATTACHMENT_CATEGORY_CODES.includes("QUOTE"));
+  assert.equal(attachmentCategoryLabels.QUOTE, "견적서");
+  const quoteIndex = ATTACHMENT_CATEGORY_CODES.indexOf("QUOTE");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[quoteIndex - 1], "REPAIR_REPORT");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[quoteIndex + 1], "KYOSAN_DOCUMENT");
+});
+
+test("기타는 언제나 목록의 맨 끝이다", () => {
+  // 사람이 목록을 훑을 때의 관례다 — '기타'가 가운데 있으면 그 뒤의 분류들은
+  // 사실상 읽히지 않는다. 새 분류를 더할 때 끝에 붙이지 않도록 못 박는다.
+  assert.equal(ATTACHMENT_CATEGORY_CODES[ATTACHMENT_CATEGORY_CODES.length - 1], "OTHER");
 });
 
 test("모든 분류에 한국어 라벨이 있다", () => {

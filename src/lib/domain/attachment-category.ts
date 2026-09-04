@@ -30,6 +30,11 @@ export const ATTACHMENT_CATEGORY_CODES = [
   "SHIPMENT_PHOTO",
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
+  // 우리가 만들어 고객에게 보내는 문서끼리 모은 자리다(검사·수리 보고서 뒤).
+  // 코드가 QUOTE 인 것은 이 저장소가 견적서를 그렇게 부르기 때문이고
+  // (quotes 표·quote-*.ts), 견적서 기능 자체와는 아무 관계가 없다 — 여기 것은
+  // 파일에 붙는 분류 이름 하나다.
+  "QUOTE",
   "KYOSAN_DOCUMENT",
   "CUSTOMER_DOCUMENT",
   "OSCILLOSCOPE_DATA",
@@ -47,8 +52,12 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   IN_REPAIR: "수리 중",
   AFTER_REPAIR: "수리 후",
   SHIPMENT_PHOTO: "출하 사진",
-  INSPECTION_REPORT: "점검 보고서",
+  // 이름표만 '점검'에서 '검사'로 바꿨다. 코드(INSPECTION_REPORT)는 그대로다 —
+  // 이미 올라간 파일들의 category 컬럼에 그 값이 적혀 있어서, 코드를 바꾸면
+  // 그 파일들의 분류가 통째로 깨진다.
+  INSPECTION_REPORT: "검사 보고서",
   REPAIR_REPORT: "수리 보고서",
+  QUOTE: "견적서",
   KYOSAN_DOCUMENT: "교산 문서",
   CUSTOMER_DOCUMENT: "고객사 문서",
   OSCILLOSCOPE_DATA: "오실로스코프 데이터",

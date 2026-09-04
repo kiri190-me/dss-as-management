@@ -90,6 +90,7 @@ export const attachmentCategoryEnum = pgEnum("attachment_category", [
   "SHIPMENT_PHOTO",
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
+  "QUOTE",
   "KYOSAN_DOCUMENT",
   "CUSTOMER_DOCUMENT",
   "OSCILLOSCOPE_DATA",

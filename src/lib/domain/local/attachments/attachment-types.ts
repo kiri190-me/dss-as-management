@@ -12,6 +12,8 @@ export const ATTACHMENT_CATEGORY_CODES = [
   "SHIPMENT_PHOTO",
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
+  // 정본(src/lib/domain/attachment-category.ts)과 순서까지 같아야 한다.
+  "QUOTE",
   "KYOSAN_DOCUMENT",
   "CUSTOMER_DOCUMENT",
   "OSCILLOSCOPE_DATA",
@@ -27,8 +29,10 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   IN_REPAIR: "수리 중",
   AFTER_REPAIR: "수리 후",
   SHIPMENT_PHOTO: "출하 사진",
-  INSPECTION_REPORT: "점검 보고서",
+  // 이름표만 바꾼다 — 코드는 그대로 INSPECTION_REPORT 다(정본 쪽 주석 참조).
+  INSPECTION_REPORT: "검사 보고서",
   REPAIR_REPORT: "수리 보고서",
+  QUOTE: "견적서",
   KYOSAN_DOCUMENT: "교산 문서",
   CUSTOMER_DOCUMENT: "고객사 문서",
   OSCILLOSCOPE_DATA: "오실로스코프 데이터",
