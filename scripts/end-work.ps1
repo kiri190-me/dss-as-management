@@ -16,6 +16,8 @@
     커밋도 푸시도 하지 않는다. 알려만 준다 — 무엇을 남길지는 사람이 정한다.
     컨테이너는 stop만 하고 지우지 않는다. `docker compose down -v`는 볼륨을
     지워 DB를 통째로 날리므로 이 스크립트는 그 명령을 쓰지 않는다.
+    DB 컨테이너(dss-pg-app)는 계측기 관리 시스템과 공용이다. 저쪽 서버가 아직
+    떠 있으면 끄지 않고 둔다 — 마지막에 나가는 쪽이 끈다.
 
     ── 대신 멈춘다 ─────────────────────────────────────────────────────────
     경고는 읽히지 않는다. 창이 닫히면 더더욱. 그래서 안 올린 것이 있으면
@@ -59,12 +61,15 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
-$Container  = 'dss-as-postgres-dev'
-# 2026-09-03 2단계 리허설로 A/S DB 가 dss-pg-app(공용 인스턴스)의 dss_as 로 옮겨졌다.
-# 백업은 그쪽을 떠야 한다 — 옛 컨테이너를 뜨면 멈춘 시점의 자료가 '오늘 백업'으로 남는다.
-# 공용 인스턴스는 계측기도 쓰므로 여기서 끄지 않는다. 끄는 대상은 위 $Container(옛 상자) 그대로다.
-$BackupContainer = 'dss-pg-app'
+# 2026-09-03 NAS 이식 2단계 리허설 뒤로 A/S DB는 공용 인스턴스 dss-pg-app의 dss_as에
+# 있다. 백업도 정지도 그쪽이 대상이다. 옛 dss-as-postgres-dev는 정지된 채
+# 2026-09-17까지 되돌리기용으로만 남아 있고 이 스크립트는 더 건드리지 않는다.
+$Container  = 'dss-pg-app'
 $Database   = 'dss_as'
+# 같은 인스턴스를 계측기 관리 시스템도 쓴다. 저쪽 서버(3300)가 아직 떠 있으면
+# 컨테이너를 끄지 않는다 — 끄면 저쪽이 한창 일하다 DB를 잃는다. 마지막에
+# 나가는 쪽이 끈다.
+$PeerPort   = 3300
 # 이 프로젝트는 이미 자료 폴더 규약을 갖고 있다 — .env의 BACKUPS_DIR이 가리키는
 # C:\DSS-AS-DATA 아래에 backups\postgres, backups\uploads, logs, uploads가
 # 미리 잡혀 있고 2026-08-18 백업도 거기 들어 있다. 새 자리를 만들면 백업이 두 곳으로
@@ -149,10 +154,10 @@ if (Test-Path $handoffFile) {
 
 # ── 2. DB 백업 ────────────────────────────────────────────────────────────
 Write-Step "DB 백업"
-$running    = (Invoke-Native "docker ps --filter name=^/$BackupContainer`$ --format `"{{.Names}}`"").Output
+$running    = (Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`"").Output
 $backupMade = $false
 
-if ($running -ne $BackupContainer) {
+if ($running -ne $Container) {
     Write-Warn2 "DB가 이미 꺼져 있어 백업을 건너뜁니다."
 } else {
     $stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
@@ -165,7 +170,7 @@ if ($running -ne $BackupContainer) {
 
         # cmd로 리다이렉트한다 — pg_dump가 내보내는 바이트를 PowerShell이
         # 문자열로 해석해 인코딩을 바꿔 버리지 않도록.
-        $dump = Invoke-Native "docker exec $BackupContainer pg_dump -U dss_app -d $Database > `"$file`""
+        $dump = Invoke-Native "docker exec $Container pg_dump -U dss_app -d $Database > `"$file`""
 
         $ok = $false
         if ($dump.ExitCode -eq 0 -and (Test-Path $file)) {
@@ -302,9 +307,14 @@ if (-not $listener) {
 }
 
 # ── 4. 컨테이너 정지 (자료는 그대로 남는다) ───────────────────────────────
-Write-Step "DB 컨테이너 정지"
+# 공용 인스턴스라 혼자 쓰는 것이 아니다. 계측기 서버가 아직 떠 있으면 그대로
+# 두고, 저쪽 종료 스크립트가 같은 확인을 거쳐 끈다.
+Write-Step "DB 컨테이너 정지 ($Container)"
+$peerUp = $null -ne (Get-NetTCPConnection -LocalPort $PeerPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
 if ($running -ne $Container) {
     Write-Ok "이미 꺼져 있음"
+} elseif ($peerUp) {
+    Write-Ok "계측기 관리 시스템($PeerPort)이 아직 쓰고 있어 켜 둡니다 — 저쪽 종료가 끕니다"
 } elseif ($DryRun) {
     Write-Info "실행할 명령: docker stop $Container"
 } else {

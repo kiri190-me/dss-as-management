@@ -15,6 +15,12 @@
     마이그레이션은 자료를 지울 수 있고, 그 판단은 사람이 db:preflight를 보고
     내려야 한다. 아침에 창을 하나 열었을 뿐인데 표가 사라져 있으면 안 된다.
 
+    ── DB가 이 저장소의 것이 아닌 이유 ─────────────────────────────────────
+    2026-09-03부터 이 PC의 DB는 NAS와 같은 모양의 공용 인스턴스 둘이다.
+    A/S는 계측기와 dss-pg-app 하나를 나눠 쓴다. 그래서 이 스크립트는 저장소의
+    docker-compose.yml(db-dev)을 켜지 않고, dss-deploy가 만든 컨테이너를 켠다.
+    자세한 것은 dss-deploy\runbook\01-postgres-통합.md 9절 부록.
+
 .PARAMETER WithClaude
     개발 서버와 함께 Claude Code를 별도 창으로 띄운다. 바탕화면 단축어는 이걸 켜서 부른다.
 
@@ -34,9 +40,23 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $RepoRoot      = Split-Path -Parent $PSScriptRoot
-$Container     = 'dss-as-postgres-dev'
+$DevRoot       = Split-Path -Parent $RepoRoot
 $DevUrl        = 'http://localhost:3000'
 $DockerDesktop = Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe'
+
+# ── DB는 저장소마다 하나가 아니라 공용 인스턴스다 (2026-09-03) ──────────────
+# NAS 이식 2단계 리허설 뒤로 이 PC의 DB는 dss-pg-app(A/S·계측기 공용)과
+# dss-pg-auth(포털) 둘뿐이다. NAS에 세울 것과 같은 모양이라, 여기서 검증된 것이
+# 그대로 NAS로 간다. 정의는 dss-deploy\nas\docker-compose.rehearsal.yml 한 곳에만
+# 있고, 이 스크립트는 그 파일로 만든 컨테이너를 켜고 기다릴 뿐 자기 compose
+# (docker-compose.yml의 db-dev)는 더 쓰지 않는다. 옛 dss-as-postgres-dev는
+# 정지된 채 2026-09-17까지 되돌리기용으로만 남는다.
+$DbContainer   = 'dss-pg-app'
+$DbService     = 'db-app'      # 리허설 compose 안의 서비스 이름
+$DbPort        = 5442
+$Database      = 'dss_as'
+$DbCompose     = Join-Path $DevRoot 'dss-deploy\nas\docker-compose.rehearsal.yml'
+$DbEnvFile     = Join-Path $DevRoot 'dss-deploy\nas\.env.nas'
 
 # 네이티브 명령은 cmd를 거쳐 부른다. Windows PowerShell 5.1은 exe의 stderr를
 # ErrorRecord로 감싸면서 성공한 명령도 실패로 보이게 만들기 때문이다.
@@ -79,34 +99,47 @@ if ((Invoke-Native 'docker info --format "{{.ServerVersion}}"').ExitCode -ne 0) 
 }
 Write-Ok "엔진 준비됨"
 
-# ── 2. DB 컨테이너 ────────────────────────────────────────────────────────
-Write-Step "DB 컨테이너 시작"
-$exists = (Invoke-Native "docker ps -a --filter name=^/$Container`$ --format `"{{.Names}}`"").Output
-if ($exists -ne $Container) {
-    Write-Info "컨테이너가 없습니다. compose로 새로 만듭니다."
-    $up = Invoke-Native 'docker compose --env-file .env.compose.local up -d db-dev'
+# ── 2. DB 인스턴스 (공용) ─────────────────────────────────────────────────
+Write-Step "DB 인스턴스 확인 ($DbContainer)"
+$exists = (Invoke-Native "docker ps -a --filter name=^/$DbContainer`$ --format `"{{.Names}}`"").Output
+if ($exists -ne $DbContainer) {
+    # 처음 한 번만 여기로 온다. 만드는 파일은 dss-deploy에 있고, 비밀번호는
+    # 그 옆의 .env.nas에서 온다 — 없으면 빈 값으로 만들어져 재시작 루프에 빠지므로
+    # 미리 막는다.
+    if (-not (Test-Path $DbCompose)) {
+        Write-Warn2 "공용 DB 인스턴스가 없고 만들 파일도 없습니다: $DbCompose"
+        Write-Info "dss-deploy 저장소를 Development\ 아래에 받아 온 뒤 다시 시작하세요."
+        exit 1
+    }
+    if (-not (Test-Path $DbEnvFile)) {
+        Write-Warn2 "비밀번호 파일이 없습니다: $DbEnvFile"
+        Write-Info "dss-deploy\README.md 1단계 2번대로 .env.nas 를 채운 뒤 다시 시작하세요."
+        exit 1
+    }
+    Write-Info "컨테이너가 없습니다. dss-deploy 의 리허설 compose 로 새로 만듭니다."
+    $up = Invoke-Native "docker compose -f `"$DbCompose`" --env-file `"$DbEnvFile`" up -d $DbService"
     if ($up.ExitCode -ne 0) {
         Write-Warn2 "생성 실패:"; Write-Host $up.Output
         exit 1
     }
 } else {
     # 이미 만들어진 컨테이너는 start로 켠다 — 비밀번호 파일이 필요 없고,
-    # 볼륨(=자료)이 그대로 다시 붙는다.
-    Invoke-Native "docker start $Container" | Out-Null
+    # 볼륨(=자료)이 그대로 다시 붙는다. 계측기 쪽이 먼저 켜 두었으면 그냥 지나간다.
+    Invoke-Native "docker start $DbContainer" | Out-Null
 }
 
 $healthy = $false
 foreach ($i in 1..30) {
-    $state = (Invoke-Native "docker inspect -f `"{{.State.Health.Status}}`" $Container").Output
+    $state = (Invoke-Native "docker inspect -f `"{{.State.Health.Status}}`" $DbContainer").Output
     if ($state -eq 'healthy') { $healthy = $true; break }
     Start-Sleep -Seconds 2
 }
 if (-not $healthy) {
     Write-Warn2 "DB가 60초 안에 준비되지 않았습니다."
-    Write-Info "docker logs $Container --tail 30 으로 원인을 볼 수 있습니다."
+    Write-Info "docker logs $DbContainer --tail 30 으로 원인을 볼 수 있습니다."
     exit 1
 }
-Write-Ok "DB 준비됨 (localhost:5432)"
+Write-Ok "DB 준비됨 (127.0.0.1:$DbPort · $Database)"
 
 # ── 3. 떠날 때의 상태 그대로인지 ──────────────────────────────────────────
 Write-Step "지난 작업 상태"
@@ -121,8 +154,7 @@ if ($unpushed -match '^\d+$' -and [int]$unpushed -gt 0) { Write-Warn2 "깃허브
 if ($dirty -gt 0) { Write-Warn2 "커밋 안 된 파일 $($dirty)개" }
 if ($dirty -eq 0 -and $unpushed -eq '0') { Write-Ok "깃허브와 같음 — 정리된 상태" }
 
-# 2026-09-03 2단계 리허설 뒤 A/S 자료는 dss-pg-app 의 dss_as 에 있다. 옛 $Container 는 비어 있는 상자다.
-$counts = (Invoke-Native "docker exec dss-pg-app psql -U dss_app -d dss_as -At -c ""select 'A/S 접수 '||count(*)||'건' from repair_cases""").Output
+$counts = (Invoke-Native "docker exec $DbContainer psql -U dss_app -d $Database -At -c ""select 'A/S 접수 '||count(*)||'건' from repair_cases""").Output
 if ($counts) { Write-Info "DB 내용     $counts" }
 
 # ── 4. 적용 대기 마이그레이션 (알림만) ────────────────────────────────────
