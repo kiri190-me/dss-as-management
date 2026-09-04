@@ -407,6 +407,53 @@ test("🔴 제외하지 않으면 통전작업 구역이 그대로다 — 시트
   });
 });
 
+/**
+ * 🔴 **매쳐 양식에는 당길 번호가 없다.**
+ *
+ * 제너레이터 양식은 세 묶음 아래에 「④ 서류작업」이 하나 더 있어서, ③ 을 지우면
+ * 그 ④ 를 ③ 으로 당겨야 번호가 `① ② ④` 로 건너뛰지 않는다
+ * (xlsx/quote-sheet-layout.ts 의 `renumberPaperworkBlock`). 매쳐 양식 둘은
+ * `1) 조사작업 · 2) 수리작업 · 3) 통전작업` 에서 끝나므로 맨 뒤인 3) 이 빠지면
+ * `1) 2)` 로 그대로 이어진다.
+ *
+ * 이 시험이 지키는 것은 **없는 것을 지어내지 않았다**는 사실이다. 언젠가 이
+ * 양식에 서류작업 줄이 들어오면 여기서 걸리고, 그때 번호를 함께 손봐야 한다.
+ */
+test("🔴 매쳐: 서류작업 묶음이 없어 당길 번호도 없다", { skip: skipDomestic }, () => {
+  const input: MatcherQuoteInput = {
+    ...BASE,
+    parts: [{ name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 }],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환"] },
+  };
+
+  const kept = fill(domesticPath as string, input);
+  assert.deepEqual(rowsWithText(kept, "D", "서류작업"), [], "이 양식에 없던 묶음이다");
+  assert.deepEqual(rowsWithText(kept, "B", "④"), [], "매쳐 양식은 ①②③④ 를 쓰지 않는다");
+  // 양식 그대로면 세 묶음이 1) 2) 3) 이다.
+  for (const [mark, label] of [
+    ["1)", "조사작업"],
+    ["2)", "수리작업"],
+    ["3)", "통전작업"],
+  ] as const) {
+    const rows = rowsWithText(kept, "B", mark);
+    assert.equal(rows.length, 1, `${mark} 이 하나가 아니다`);
+    assert.equal(kept.text(`D${rows[0]}`), label);
+  }
+
+  // 통전작업을 없애면 맨 뒤가 빠진다 — 1) 2) 는 그대로고 3) 은 사라진다.
+  const excluded = fill(domesticPath as string, { ...input, powerTestExcluded: true });
+  assert.deepEqual(rowsWithText(excluded, "D", "서류작업"), [], "없던 묶음을 지어냈다");
+  assert.deepEqual(rowsWithText(excluded, "B", "3)"), [], "통전작업과 함께 사라져야 한다");
+  for (const [mark, label] of [
+    ["1)", "조사작업"],
+    ["2)", "수리작업"],
+  ] as const) {
+    const rows = rowsWithText(excluded, "B", mark);
+    assert.equal(rows.length, 1, `${mark} 이 하나가 아니다`);
+    assert.equal(excluded.text(`D${rows[0]}`), label);
+  }
+});
+
 test("매쳐: 값이 모자라면 빈 칸짜리 견적서를 만드는 대신 던진다", { skip: skipDomestic }, () => {
   assert.throws(
     () => fillMatcherQuoteWorkbook(readFileSync(domesticPath as string), { ...BASE, subject: "" }),

@@ -109,9 +109,10 @@ export type QuotePrintData = Pick<
 > & {
   /**
    * 통전작업을 빼고 청구하는 장인가. 켜면 **「③ 통전검사」 묶음을 그리지
-   * 않는다** — 실제로 나가는 xlsx 가 그 구역을 머리글까지 지우기 때문이다
-   * (xlsx/quote-template.ts 의 `powerTestExcluded`). 둘이 다르면 미리보기와
-   * 받아 본 문서가 서로 다른 종이가 된다.
+   * 않고, 그 아래 서류작업이 ③ 이 된다** — 실제로 나가는 xlsx 가 그 구역을
+   * 머리글까지 지우고 번호를 함께 당기기 때문이다(xlsx/quote-template.ts 의
+   * `powerTestExcluded`). 둘이 다르면 미리보기와 받아 본 문서가 서로 다른
+   * 종이가 된다.
    *
    * 🔴 **없으면 예전 그대로 그린다.** 이 기능이 생기기 전에 저장된 견적서는
    * 전부 꺼짐이고, 그 장들은 한 줄도 달라지지 않아야 한다.
@@ -445,29 +446,37 @@ function SectionRows({ section }: { section: WorkSection }) {
   );
 }
 
+/** 묶음 번호. 자리 순서대로 쓴다 — 어느 묶음이 몇 번인지 따로 적지 않는다. */
+const SECTION_MARKS = ["①", "②", "③", "④"] as const;
+
 /**
- * 그려야 하는 네 묶음.
+ * 그려야 하는 묶음들.
  *
- * ①②③ 은 실제 작업 내역이고, **④ 서류작업만 고정 문구**다 — 양식에도 그 아래
+ * ①②③ 은 실제 작업 내역이고, **서류작업만 고정 문구**다 — 양식에도 그 아래
  * 줄이 없고 견적서마다 달라지는 값이 아니다.
  *
  * ── 통전작업을 뺀 장은 ③ 을 아예 그리지 않는다 ──────────────────────────
- * 하지 않은 시험을 했다고 적어 보내지 않기 위해서다. 🔴 **그때도 ④ 는 ④ 로
- * 남는다** — 양식에서도 ③ 의 줄만 지워지고 ④ 의 번호는 손대지 않기 때문이다
- * (xlsx/quote-template.test.ts 의 '④ 서류작업은 손대지 않는다'). 여기서만
- * 번호를 당기면 미리보기와 파일의 번호가 어긋난다.
+ * 하지 않은 시험을 했다고 적어 보내지 않기 위해서다. 🔴 **그러면 서류작업이
+ * ③ 이 된다** — 양식에서도 ③ 의 줄을 지우면서 서류작업의 번호를 함께 당긴다
+ * (xlsx/quote-sheet-layout.ts 의 `renumberPaperworkBlock`). 여기만 ④ 로 두면
+ * 미리보기와 받아 본 문서의 번호가 어긋나고, 문서에는 `① ② ④` 로 번호가
+ * 하나 건너뛴 견적서가 나간다.
+ *
+ * 🔴 **번호를 손으로 적지 않고 자리 순서에서 뽑는다.** 두 벌로 적어 두면 묶음이
+ * 하나 더 생기거나 빠지는 날 또 어긋난다 — 파일 쪽도 같은 방식으로 셈한다.
  */
 function buildWorkSections(
   sections: QuoteWorkSections | undefined,
   powerTestExcluded: boolean
 ): WorkSection[] {
   const resolved = sections ?? FALLBACK_WORK_SECTIONS;
-  return [
-    { mark: "①", ...resolved.INVESTIGATION },
-    { mark: "②", ...resolved.REPAIR },
-    ...(powerTestExcluded ? [] : [{ mark: "③", ...resolved.POWER_TEST }]),
-    { mark: "④", label: "서류작업", items: [] },
+  const drawn = [
+    resolved.INVESTIGATION,
+    resolved.REPAIR,
+    ...(powerTestExcluded ? [] : [resolved.POWER_TEST]),
+    { label: "서류작업", items: [] as readonly string[] },
   ];
+  return drawn.map((section, index) => ({ mark: SECTION_MARKS[index], ...section }));
 }
 
 /**

@@ -185,20 +185,28 @@ function renderSections(powerTestExcluded?: boolean): string {
 
 test("🔴 통전작업 제외: ③ 통전검사 묶음이 사라진다 — 파일이 그렇게 나간다", () => {
   const html = renderSections(true);
-  assert.ok(!html.includes("③"), "머리글까지 사라져야 한다");
   assert.ok(!html.includes("통전검사"), "하지 않은 시험을 적어 보내면 안 된다");
-  // 🔴 ④ 는 ④ 로 남는다 — 양식도 ③ 의 줄만 지우고 번호는 손대지 않는다.
-  assert.ok(html.includes("④"), "번호를 당기면 파일과 어긋난다");
   assert.ok(html.includes("서류작업"));
   // ①·② 는 그대로다.
-  assert.ok(html.includes("①") && html.includes("②"));
+  assert.ok(html.includes("①　인수 조사") && html.includes("②　수리 작업"));
+});
+
+/**
+ * 🔴 지우기만 하고 번호를 두면 고객이 받는 종이에 `① ② ④` 로 번호가 하나
+ * 건너뛴다. 양식(xlsx)도 같은 자리에서 번호를 당긴다 — 둘이 다르면 미리보기와
+ * 받아 본 문서가 서로 다른 종이가 된다.
+ */
+test("🔴 통전작업 제외: 서류작업이 ③ 이 되고 ④ 는 종이 어디에도 없다", () => {
+  const html = renderSections(true);
+  assert.ok(html.includes("③　서류작업"), "서류작업의 번호가 안 당겨졌다");
+  assert.ok(!html.includes("④"), "④ 가 남으면 번호가 건너뛴다");
 });
 
 test("🔴 옛 견적서 — 제외를 주지 않으면 ③ 이 그대로다", () => {
   for (const html of [renderSections(), renderSections(false)]) {
-    assert.ok(html.includes("③"));
-    assert.ok(html.includes("통전검사[출하검사]"), "예전과 한 줄도 달라지면 안 된다");
-    assert.ok(html.includes("④"));
+    assert.ok(html.includes("③　통전검사[출하검사]"), "예전과 한 줄도 달라지면 안 된다");
+    // 🔴 제외하지 않았으면 서류작업은 ④ 그대로다.
+    assert.ok(html.includes("④　서류작업"));
   }
   assert.equal(renderSections(), renderSections(false), "안 준 것과 꺼진 것은 같은 종이다");
 });

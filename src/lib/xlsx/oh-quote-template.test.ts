@@ -113,6 +113,16 @@ function rowsWithText(filled: Filled, column: string, wanted: string): number[] 
   return found;
 }
 
+/**
+ * 「서류작업」 줄의 **묶음 번호**(B열). 🔴 번호는 줄임표의 C열이 아니라 B열이다.
+ * 행을 박지 않고 글자로 찾는다 — 통전검사를 없애면 이 줄이 당겨 올라온다.
+ */
+function paperworkMark(filled: Filled): string | undefined {
+  const rows = rowsWithText(filled, "D", "서류작업");
+  assert.equal(rows.length, 1, "서류작업 줄이 하나가 아니다");
+  return filled.text(`B${rows[0]}`);
+}
+
 function printAreaLastRow(workbookXml: string, sheetName: string): number | null {
   for (const found of workbookXml.matchAll(
     /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>([^<]*)<\/definedName>/g
@@ -270,7 +280,9 @@ test("작업 내역: 준 대로 채워지고, 0줄짜리 ② 에도 줄이 들�
   assert.equal(filled.text("D46"), "통전검사[출하검사]");
   assert.equal(filled.text("D47"), "통전 하나");
   assert.equal(filled.text("D48"), undefined, "두 번째 통전 줄이 남았다");
-  assert.equal(filled.text("D49"), "서류작업", "④ 는 손대지 않는다");
+  // ④ 서류작업은 손대지 않는다 — 없앤 묶음이 없으니 번호도 ④ 그대로다.
+  assert.equal(filled.text("D49"), "서류작업");
+  assert.equal(filled.text("B49"), "④");
 
   // 🔴 합계 범위의 끝이 **통전검사 묶음의 마지막 항목**(47)까지다.
   assert.equal(filled.formula("G58"), "SUM(I26:I47)");
@@ -356,13 +368,14 @@ test("🔴 통전검사 제외: 구역이 사라지고 합계 범위·사슬이 
   assert.deepEqual(rowsWithText(filled, "D", "통전 하나"), []);
   assert.deepEqual(rowsWithText(filled, "D", "에이징 시험 (정격연속출력:1시간)"), []);
 
-  // 5) ①·② 는 그대로. ④ 도 손대지 않는다(통전검사 두 줄만큼 올라왔다).
+  // 5) ①·② 는 그대로. 서류작업은 통전검사 두 줄만큼 올라오고 번호가 ③ 이 된다.
   assert.equal(filled.text("D37"), "인수 조사");
   assert.equal(filled.text("D38"), "조사 하나");
   assert.equal(filled.text("D41"), "OH 및 수리 작업");
   assert.equal(filled.text("C42"), "-", "복제한 줄에 줄임표가 없다");
   assert.equal(filled.text("D44"), "수리 셋");
   assert.equal(filled.text("D47"), "서류작업");
+  assert.equal(filled.text("B47"), "③", "④ 로 남으면 번호가 ① ② ④ 로 건너뛴다");
 
   // 3) 🔴 공급가·부가세·합계. 제외 안 했을 때 52·53·54 이던 것이 두 줄 올라왔다.
   assert.equal(filled.text("H50"), "공 급 가");
@@ -422,6 +435,48 @@ test("🔴 제외하지 않으면 통전검사 구역이 그대로다 — 시트
   assert.equal(omitted.formula("G58"), "SUM(I26:I47)");
   assert.equal(omitted.text("H52"), "공 급 가");
   assert.equal(printAreaLastRow(omitted.workbookXml, OH_QUOTE_SHEET_NAME), 54);
+});
+
+// ── 서류작업의 번호 ────────────────────────────────────────────────────
+
+/**
+ * 🔴 ③ 을 지우면서 ④ 를 그대로 두면 고객사가 받는 견적서에 번호가 `① ② ④` 로
+ * **하나 건너뛴다.** 번호가 든 칸은 줄임표(`-`)의 C열이 아니라 **B열**이다.
+ */
+test("🔴 통전검사 제외: 서류작업이 ③ 이 되고 ④ 는 시트 어디에도 없다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+
+  assert.equal(paperworkMark(filled), "③", "서류작업의 번호가 안 당겨졌다");
+  assert.deepEqual(rowsWithText(filled, "B", "④"), [], "④ 가 남았다 — 번호가 건너뛴다");
+
+  const marked = rowsWithText(filled, "B", "③");
+  assert.equal(marked.length, 1);
+  assert.equal(filled.text(`D${marked[0]}`), "서류작업");
+
+  // ①·② 는 어느 경우에도 그대로다.
+  const first = rowsWithText(filled, "B", "①");
+  const second = rowsWithText(filled, "B", "②");
+  assert.deepEqual([first.length, second.length], [1, 1]);
+  assert.equal(filled.text(`D${first[0]}`), "인수 조사");
+  assert.equal(filled.text(`D${second[0]}`), "OH 및 수리 작업");
+});
+
+/** 🔴 제외하지 않으면 그 칸을 건드리지 않는다 — 양식의 ④ 가 그대로 나간다. */
+test("🔴 제외하지 않으면 서류작업은 ④ 그대로다", { skip }, () => {
+  const base = { ...BASE, parts: parts(2, "부품"), overhaulParts: parts(2, "OH부품") };
+  for (const filled of [fill(base), fill({ ...base, powerTestExcluded: false })]) {
+    assert.equal(paperworkMark(filled), "④");
+
+    const marked = rowsWithText(filled, "B", "③");
+    assert.equal(marked.length, 1);
+    assert.equal(filled.text(`D${marked[0]}`), POWER_TEST_HEADER);
+  }
 });
 
 test("부품이 없어도 무너지지 않는다 — 작업비만 받는 O/H 견적", { skip }, () => {

@@ -17,6 +17,7 @@ import {
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
   NO_WORK_SCOPE_EXCLUSIONS,
+  renumberPaperworkBlock,
   resizeWorkScopeBlocks,
   type WorkScopeExclusions,
   type WorkScopeLabels,
@@ -40,8 +41,11 @@ import {
  * 내자견적서 — 원본 양식을 채운다
  * ============================================================================
  * 원본을 읽어 값이 들어간 새 버퍼를 돌려준다. 원본 파일은 절대 쓰지 않는다.
- * 로고·직인 이미지, styles.xml, 인쇄설정, 회사 정보, 「④ 서류작업」 구역은
- * **손대지 않는다.**
+ * 로고·직인 이미지, styles.xml, 인쇄설정, 회사 정보는 **손대지 않는다.**
+ *
+ * 「④ 서류작업」 구역도 문구는 그대로 두지만, **③ 통전검사를 없앤 문서에서는
+ * 번호만 ③ 으로 당긴다** — 안 그러면 `① ② ④` 로 번호가 건너뛴다
+ * (quote-sheet-layout.ts 의 `renumberPaperworkBlock`).
  *
  * ── 작업 내역 세 묶음은 채운다 ──────────────────────────────────────────
  * 「① 인수 조사 · ② 수리 작업 · ③ 통전검사」 는 화면에서 정한 값으로 적는다.
@@ -174,6 +178,9 @@ export type GeneratorQuoteInput = QuoteInput & {
    *
    * 🔴 **빈 목록과 정반대의 뜻이다.** 빈 목록은 "양식 그대로 둔다"이고 이것은
    * "없앤다"이다(quote-sheet-layout.ts 의 `WorkScopeExclusions`).
+   *
+   * 그 아래 「④ 서류작업」의 번호도 함께 ③ 으로 당겨진다 — 지우기만 하고 번호를
+   * 두면 고객사가 받는 견적서에 `① ② ④` 로 번호가 건너뛴다.
    *
    * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
    */
@@ -333,6 +340,10 @@ function fillSheet(
   xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
+
+  // ③ 을 지웠으면 「④ 서류작업」이 ③ 이 된다. 없앤 것이 없으면 그 칸은 손도
+  // 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
+  xml = renumberPaperworkBlock(xml, templateRows, read, excluded, rowShift);
 
   /**
    * 작업비 아래부터 공급가 바로 위까지의 금액 칸을 비운다. 그 사이는 작업 내역

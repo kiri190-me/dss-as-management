@@ -26,6 +26,14 @@ import { findRowByCellText, resizeRowBlock, type SheetRow } from "./sheet-rows";
 export const ITEM_MARKER = "-";
 
 export const LAYOUT_COLUMNS = {
+  /**
+   * 묶음 번호가 앉는 열 — `1)` · `2)` · `①` · `②` · `③` · `④`.
+   *
+   * 🔴 **`marker`(C열)와 다르다.** C 는 항목 줄의 줄임표(`-`) 자리이고, 묶음의
+   * 번호는 그보다 한 칸 왼쪽인 **B열**이다. 양식 넷을 실측해 확인했다 —
+   * 번호를 C 에 쓰면 줄임표 자리에 ③ 이 찍히고 B 의 ④ 는 그대로 남는다.
+   */
+  sectionMark: "B",
   marker: "C",
   name: "D",
   quantity: "G",
@@ -336,6 +344,65 @@ export function fillWorkScopeRows(
     xml = setInlineString(xml, `${LAYOUT_COLUMNS.name}${row}`, line.trim());
   });
   return xml;
+}
+
+/**
+ * ============================================================================
+ * 「서류작업」의 번호를 당긴다 — ④ 가 ④ 로 남으면 번호가 건너뛴다
+ * ============================================================================
+ * 제너레이터 양식(내자·O/H)은 작업 내역 세 묶음 아래에 **「④ 서류작업」** 이라는
+ * 고정 문구 묶음을 하나 더 갖는다. 항목 줄이 없어서 채울 것도 없고, 그래서
+ * 지금까지 이 파일들은 그 줄을 아예 건드리지 않았다.
+ *
+ * 🔴 그런데 **③ 통전검사를 통째로 지우면 ④ 만 덩그러니 남는다.** 고객사가 받는
+ * 견적서에 번호가 `① ② ④` 로 하나 건너뛴다. 지우는 쪽만 만들고 번호를 손대지
+ * 않았던 것이 결함이었다(2026-09-04 사용자 지적).
+ *
+ * ── 번호를 손으로 적지 않는다 ───────────────────────────────────────────
+ * **살아남은 묶음 수에서 셈한다.** 서류작업은 늘 그 다음 자리이므로, 셋이 다
+ * 남으면 ④ 고 하나가 빠지면 ③ 이다. 손으로 두 벌 적어 두면 묶음이 하나 더
+ * 생기는 날 또 어긋난다(미리보기 QuotePrintView.tsx 도 같은 방식으로 셈한다 —
+ * 둘이 다르면 미리보기와 받아 본 문서가 서로 다른 종이가 된다).
+ *
+ * 🔴 지금 없앨 수 있는 것은 **맨 아래의 ③ 뿐**이라 ①·② 의 번호는 그대로 옳다.
+ * 언젠가 가운데 묶음을 없앨 수 있게 되면 그 아래 번호도 함께 당겨야 한다 —
+ * 그때는 이 함수가 아니라 세 묶음의 번호까지 다시 쓰는 일이 된다.
+ *
+ * ── 매쳐 양식에는 이 묶음이 아예 없다 ──────────────────────────────────
+ * 매쳐 내자·OH 는 「부품 비용 · 작업 비용」 아래 `1) 조사작업 · 2) 수리작업 ·
+ * 3) 통전작업` 으로 끝난다. 서류작업 줄이 없으니 당길 번호도 없고(3) 이 빠지면
+ * `1) 2)` 로 이어진다), 그래서 매쳐 채우개는 이 함수를 부르지 않는다.
+ * ============================================================================
+ */
+
+/** D열에서 찾는 고정 문구 묶음의 머리글. 제너레이터 양식 둘에만 있다. */
+export const PAPERWORK_LABEL = "서류작업";
+
+/** 묶음 번호. 자리 순서대로 쓴다 — 어느 묶음이 몇 번인지 따로 적지 않는다. */
+const SECTION_MARKS = ["①", "②", "③", "④"] as const;
+
+/**
+ * 없앤 묶음 수만큼 「서류작업」의 번호를 당긴다.
+ *
+ * 🔴 **하나도 없애지 않았으면 그 칸을 건드리지 않는다** — 양식의 ④ 가 그대로
+ * 나가야 하고, 예전에 만든 문서와 한 바이트도 달라지지 않아야 한다. 못 찾았을
+ * 때 던지는 것도 그 안쪽에서만 일어난다.
+ *
+ * 줄은 **양식 그대로의 자리**에서 찾고 `rowShift` 로 옮긴다. 서류작업은 우리가
+ * 늘리고 줄이는 구간보다 아래라, 공급가·부가세·합계와 같은 이동량을 쓴다.
+ */
+export function renumberPaperworkBlock(
+  sheetXml: string,
+  templateRows: readonly SheetRow[],
+  read: (ref: string) => string | null,
+  excluded: WorkScopeExclusions,
+  rowShift: number
+): string {
+  const kept = WORK_SCOPE_SECTIONS.filter((section) => !excluded[section]).length;
+  if (kept === WORK_SCOPE_SECTIONS.length) return sheetXml;
+
+  const row = findLabelRow(templateRows, read, LAYOUT_COLUMNS.name, PAPERWORK_LABEL) + rowShift;
+  return setInlineString(sheetXml, `${LAYOUT_COLUMNS.sectionMark}${row}`, SECTION_MARKS[kept]);
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   dropErrorValueCaches,
   LAYOUT_COLUMNS as COLUMNS,
   NO_WORK_SCOPE_EXCLUSIONS,
+  renumberPaperworkBlock,
   resizeWorkScopeBlocks,
   workScopeRowCount,
   type WorkScopeExclusions,
@@ -338,6 +339,10 @@ function fillSheet(
   xml = fillWorkScopeRows(xml, at.investigationFirst, workScope.INVESTIGATION);
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
+
+  // ③ 을 지웠으면 「④ 서류작업」이 ③ 이 된다. 없앤 것이 없으면 그 칸은 손도
+  // 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
+  xml = renumberPaperworkBlock(xml, templateRows, read, excluded, rowShift);
 
   // 작업 내역 문구가 적히는 자리에는 금액이 없어야 한다. 합계 범위 안이라 치운다.
   // (작업 내역 줄은 C·D 열만 쓰므로 방금 적은 값이 지워지지 않는다.)
