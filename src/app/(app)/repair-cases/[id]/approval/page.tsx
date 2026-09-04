@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import ApprovalScreen from "@/components/repair-cases/approval/ApprovalScreen";
 import DatabaseApprovalScreen from "@/components/repair-cases/approval/DatabaseApprovalScreen";
 import { getCurrentApprovalsForCase, getApprovalHistoryForCase } from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
@@ -41,22 +40,21 @@ export default async function RepairCaseApprovalPage({
     notFound();
   }
 
-  if (resolved.source === "DATABASE") {
-    const [currentApprovals, history, decideAuthorization] = await Promise.all([
-      getCurrentApprovalsForCase(resolved.id),
-      getApprovalHistoryForCase(resolved.id),
-      actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
-    ]);
-    return (
-      <DatabaseApprovalScreen
-        resolved={resolved}
-        actingUser={actingUser}
-        currentApprovals={currentApprovals}
-        history={history}
-        decideAuthorization={decideAuthorization}
-      />
-    );
-  }
+  // 읽기 소스에서 mock이 사라진 뒤로 모든 수리 건은 항상 DATABASE로 해석되므로
+  // 검수/승인 화면은 DB 판 한 벌만 그린다(데모판 분기는 제거했다).
+  const [currentApprovals, history, decideAuthorization] = await Promise.all([
+    getCurrentApprovalsForCase(resolved.id),
+    getApprovalHistoryForCase(resolved.id),
+    actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
+  ]);
 
-  return <ApprovalScreen resolved={resolved} actingUser={actingUser} />;
+  return (
+    <DatabaseApprovalScreen
+      resolved={resolved}
+      actingUser={actingUser}
+      currentApprovals={currentApprovals}
+      history={history}
+      decideAuthorization={decideAuthorization}
+    />
+  );
 }
