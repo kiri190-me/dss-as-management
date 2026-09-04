@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   editErrorClass,
@@ -253,6 +253,8 @@ export default function QuoteEditForm({
   repairLabor,
   printHeaders,
   workScopeDefaults,
+  initialIntakeNumber = null,
+  returnHref = null,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -281,13 +283,33 @@ export default function QuoteEditForm({
    * 양식을 못 읽으면 줄 목록만 빈 배열이고 머리글은 그대로 온다.
    */
   workScopeDefaults: Record<string, Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>>;
+  /**
+   * 수리 건의 「견적서」 탭에서 들어왔을 때 그 건의 인수번호. 없으면 null 이고,
+   * 그때 이 폼은 지금까지와 완전히 같다.
+   *
+   * 🔴 **이 값 하나만 받는다.** 고객사·모델명·L/N·S/N 을 미리 채워 받지 않는
+   * 까닭은, 그러면 폼을 채우는 길이 둘이 되기 때문이다 — 아래 useEffect 가
+   * 이 번호로 **기존 「인수번호로 불러오기」를 그대로 눌러 준다**. 채우는 규칙이
+   * 한 곳(lookupIntakeForQuoteAction)에만 남는다.
+   */
+  initialIntakeNumber?: string | null;
+  /**
+   * 저장·취소 뒤에 돌아갈 곳. 수리 건에서 들어왔으면 그 건의 「견적서」 탭이다.
+   * null 이면 지금까지와 같이 `/quotes/{새 id}` 와 `/quotes` 로 간다.
+   *
+   * 주소는 **서버가 만들어** 넘긴다(domain/quote-new-link.ts) — 링크가 실어 온
+   * 글자를 그대로 밀어 넣으면 남이 만든 링크가 사람을 바깥으로 보낼 수 있다.
+   */
+  returnHref?: string | null;
 }) {
   const router = useRouter();
 
   const [quoteNumber, setQuoteNumber] = useState(quote?.quoteNumber ?? "");
   const [kind, setKind] = useState<QuoteKind>(quote?.kind ?? "DOMESTIC");
   const [quoteDate, setQuoteDate] = useState(quote?.quoteDate ?? defaultQuoteDate ?? todayInSeoul());
-  const [intakeNumberText, setIntakeNumberText] = useState(quote?.intakeNumberText ?? "");
+  const [intakeNumberText, setIntakeNumberText] = useState(
+    quote?.intakeNumberText ?? initialIntakeNumber ?? ""
+  );
   const [repairCaseId, setRepairCaseId] = useState<string | null>(quote?.repairCaseId ?? null);
   const [customerId, setCustomerId] = useState<string | null>(quote?.customerId ?? null);
   const [customerNameText, setCustomerNameText] = useState(quote?.customerNameText ?? "");
@@ -654,6 +676,44 @@ export default function QuoteEditForm({
   }
 
   /**
+   * 🔴 수리 건의 「견적서」 탭에서 들어왔으면 **「불러오기」를 한 번 대신 눌러
+   * 준다.** 방금 그 건에서 눌러 왔는데 인수번호를 손으로 다시 적게 하지 않으려는
+   * 것이고, 무엇보다 **`repairCaseId` 가 채워지는 곳이 여기 하나이기 때문**이다 —
+   * 그 값이 비면 저장된 견적서가 그 건의 탭에서 영영 보이지 않는다.
+   *
+   * 값을 서버에서 미리 받아 칸에 꽂지 않는 것이 요점이다. 그러면 폼을 채우는
+   * 길이 둘이 되고, 두 입구가 서로 다른 값을 채우기 시작한다(그 차이는 한참 뒤에
+   * 금액으로 드러난다). 여기서는 **사람이 누르는 것과 똑같은 길**을 탄다.
+   *
+   * 새로 만들 때만, 그리고 한 번만 돈다. 고치기(quote !== null)에는 이미 저장된
+   * 값이 있어서 불러오기가 그것을 덮어쓰면 안 된다.
+   */
+  const didAutoLookup = useRef(false);
+  useEffect(() => {
+    if (quote !== null) return;
+    if ((initialIntakeNumber ?? "").trim() === "") return;
+    /**
+     * 효과 **본문에서 곧바로** 부르지 않는다. 불러오기는 첫 줄부터 상태를
+     * 건드려서(`setIsLookingUp(true)`) 그리자마자 렌더가 연쇄한다
+     * (react-hooks/set-state-in-effect). 한 틱 미루면 첫 그림은 그대로 나오고,
+     * 불러오기는 그 뒤에 시작된다 — 사람 눈에는 차이가 없다.
+     *
+     * 깃발을 **타이머 안에서** 세운다. 개발 모드의 StrictMode 는 효과를 두 번
+     * 도는데, 바깥에서 세우면 첫 번째가 깃발만 세우고 정리(cleanup)에 지워져
+     * 불러오기가 아예 안 도는 상태가 된다.
+     */
+    const timer = setTimeout(() => {
+      if (didAutoLookup.current) return;
+      didAutoLookup.current = true;
+      void handleLookup();
+    }, 0);
+    return () => clearTimeout(timer);
+    // handleLookup 은 매 렌더 새로 만들어진다 — 넣으면 무한히 다시 불러온다.
+    // 위 깃발이 "처음 한 번"을 보장한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote, initialIntakeNumber]);
+
+  /**
    * 출고 부품을 부품 줄에 담는다. 하나든 여럿이든 이 함수 하나를 쓴다 —
    * 일괄 담기가 하나씩 담기를 여러 번 부르면 setItems 가 여러 번 돌아 "빈 첫 줄"
    * 처리가 중간 상태에 걸린다.
@@ -806,9 +866,15 @@ export default function QuoteEditForm({
        * 옮겨 간 곳은 force-dynamic 이라 어차피 서버가 새로 그린다 —
        * 새로고침이 할 일이 애초에 없다. 접수 등록(IntakeFormInner)도 저장 뒤
        * push 하나뿐이고, 이 화면만 달랐다.
+       *
+       * ── 어디로 옮기는가 ──────────────────────────────────────────────
+       * 🔴 **왔던 곳으로 돌아간다.** 수리 건의 「견적서」 탭에서 들어왔으면 그
+       * 탭으로 — 방금 만든 장이 그 목록에 붙어 있는 것을 그 자리에서 보게 된다.
+       * 그냥 `/quotes/new` 로 들어왔으면 지금까지와 똑같이 새 장의 수정 화면으로
+       * 간다.
        */
       leaving = true;
-      router.push(`/quotes/${result.id}`);
+      router.push(returnHref ?? `/quotes/${result.id}`);
     } catch (err) {
       // 액션이 대답을 못 하고 끊긴 자리(서버 재시작·네트워크 끊김). 아무 말도
       // 없이 단추만 되살아나면, 저장이 된 건지 만 건지 알 수 없다.
@@ -917,9 +983,11 @@ export default function QuoteEditForm({
               견적서 받기
             </a>
           )}
+          {/* 취소도 왔던 곳으로 — 수리 건에서 들어왔으면 그 건의 「견적서」 탭,
+              아니면 지금까지와 같이 PO/내자 목록이다. */}
           <button
             type="button"
-            onClick={() => router.push("/quotes")}
+            onClick={() => router.push(returnHref ?? "/quotes")}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
           >
             취소

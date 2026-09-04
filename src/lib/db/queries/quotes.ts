@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, type SQL } from "drizzle-orm";
 import { db } from "../client";
 import {
   customers,
@@ -83,6 +83,34 @@ export type QuoteListItem = {
  * 문자열 정렬이 발행 순서와 어긋날 수 있기 때문이다.
  */
 export async function listQuotes(): Promise<QuoteListItem[]> {
+  return selectQuoteList();
+}
+
+/** 접수 건 id 는 UUID 다. 다른 글자가 그대로 조회에 들어가면 Postgres 가 22P02 로
+ *  던져 화면이 오류 페이지가 된다(queries/attachments.ts 와 같은 방어). */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * **이 접수 건**에 붙은 견적서. 수리 건 상세의 「견적서」 탭이 쓴다.
+ *
+ * 🔴 위 목록과 **같은 함수 몸통을 쓴다.** 조건 하나만 다르고 select·join·정렬·
+ * 매핑이 전부 같아야 하기 때문이다 — 두 벌로 적어 두면 한쪽만 고쳐지는 날이
+ * 오고, 그때 사람은 PO/내자 목록과 이 탭에서 **같은 견적서의 다른 금액**을 보게
+ * 된다. 그 차이는 한참 뒤에 드러난다.
+ *
+ * 지운 장은 여기에도 나오지 않는다(`is_deleted = false`) — 휴지통은 PO/내자
+ * 목록 화면에만 있다.
+ */
+export async function listQuotesForRepairCase(repairCaseId: string): Promise<QuoteListItem[]> {
+  if (!UUID_PATTERN.test(repairCaseId)) return [];
+  return selectQuoteList(eq(quotes.repairCaseId, repairCaseId));
+}
+
+/**
+ * 위 둘의 공통 몸통. `narrow` 는 `is_deleted = false` 에 **더해지는** 조건이다 —
+ * 대신하지 않는다. 지운 장을 되살리는 통로가 이 함수를 통해 열리면 안 된다.
+ */
+async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
   const rows = await db
     .select({
       id: quotes.id,
@@ -105,7 +133,7 @@ export async function listQuotes(): Promise<QuoteListItem[]> {
     })
     .from(quotes)
     .leftJoin(repairCases, eq(repairCases.id, quotes.repairCaseId))
-    .where(eq(quotes.isDeleted, false))
+    .where(narrow ? and(eq(quotes.isDeleted, false), narrow) : eq(quotes.isDeleted, false))
     .orderBy(desc(quotes.quoteDate), desc(quotes.createdAt));
 
   const itemsByQuoteId = await loadItemsByQuoteId(rows.map((row) => row.id));

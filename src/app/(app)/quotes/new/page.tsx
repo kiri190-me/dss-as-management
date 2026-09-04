@@ -13,6 +13,11 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { toKstDateOnly } from "@/lib/domain/date-only";
+import {
+  parseNewQuoteLink,
+  returnHrefForNewQuote,
+  type SearchParamsInput,
+} from "@/lib/domain/quote-new-link";
 
 export const metadata: Metadata = {
   title: "새 견적서 | DSS A/S 관리 시스템",
@@ -28,8 +33,18 @@ export const dynamic = "force-dynamic";
  * 영역 가드에 더해 쓰기 권한까지 확인하고, 없으면 목록으로 돌려보낸다. 저장
  * 자체는 서버 액션이 또 한 번 처음부터 검사한다(관문이 셋이 아니라, 화면이
  * 감춘 것은 애초에 관문이 아니라는 뜻이다).
+ *
+ * ── 접수 건에서 들어온 경우 ─────────────────────────────────────────────
+ * 수리 건 상세의 「견적서」 탭에서 오면 주소에 **인수번호와 그 건의 id** 가
+ * 실려 온다(domain/quote-new-link.ts). 인수번호는 폼이 기존 「불러오기」 길을
+ * 그대로 태우는 데 쓰고, 건의 id 는 저장·취소 뒤에 **돌아갈 곳**을 만드는 데
+ * 쓴다. 아무것도 실려 오지 않으면 지금까지와 완전히 같은 화면이다.
  */
-export default async function NewQuotePage() {
+export default async function NewQuotePage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParamsInput>;
+}) {
   await requireAreaAccessForCurrentUser("quotes");
 
   if (getAuthSource() !== "database") {
@@ -62,6 +77,8 @@ export default async function NewQuotePage() {
     readAllQuoteWorkSectionDefaults(),
   ]);
 
+  const link = parseNewQuoteLink(searchParams ? await searchParams : undefined);
+
   return (
     <QuoteEditForm
       quote={null}
@@ -69,6 +86,8 @@ export default async function NewQuotePage() {
       repairLabor={repairLabor}
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
+      initialIntakeNumber={link.intakeNumber}
+      returnHref={returnHrefForNewQuote(link)}
     />
   );
 }

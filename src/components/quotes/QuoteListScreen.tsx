@@ -62,12 +62,25 @@ export default function QuoteListScreen({
   trashRows,
   canEdit,
   canDelete,
+  newQuoteHref = "/quotes/new",
+  emptyMessage = "아직 만든 견적서가 없습니다.",
 }: {
   rows: QuoteListItem[];
   /** 휴지통. 지울 수 없는 사람에게는 빈 배열이 온다 — 못 여는 탭의 내용을 실어 보내지 않는다. */
   trashRows: DeletedQuoteRow[];
   canEdit: boolean;
   canDelete: boolean;
+  /**
+   * `새 견적서` 단추가 갈 곳. 기본값이 지금까지의 그 주소다.
+   *
+   * 접수 건 상세의 「견적서」 탭이 여기에 **그 건의 인수번호를 실은 주소**를
+   * 넘긴다(domain/quote-new-link.ts). 이 화면을 그쪽에서 그대로 쓰기 위해서다 —
+   * 목록을 한 벌 더 만들면 PO/내자 목록과 이 탭이 같은 견적서를 다른 글자로
+   * 보이게 되는 날이 온다.
+   */
+  newQuoteHref?: string;
+  /** 한 장도 없을 때의 안내. 기본값이 지금까지의 그 문장이다. */
+  emptyMessage?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -145,7 +158,7 @@ export default function QuoteListScreen({
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">견적서</h1>
         {canEdit && (
           <Link
-            href="/quotes/new"
+            href={newQuoteHref}
             className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
           >
             새 견적서
@@ -204,7 +217,7 @@ export default function QuoteListScreen({
 
       {rows.length === 0 ? (
         <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-          아직 만든 견적서가 없습니다.
+          {emptyMessage}
         </p>
       ) : filtered.length === 0 ? (
         <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
