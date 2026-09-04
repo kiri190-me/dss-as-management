@@ -612,7 +612,10 @@ export default function StoredAttachmentList({
               type="button"
               onClick={() => setFilters((previous) => ({ ...previous, kind: value }))}
               aria-pressed={filters.kind === value}
-              className={`px-2.5 py-1.5 text-xs font-medium tabular-nums ${
+              // 글자를 접지 않는다 — `전체 / 128` 처럼 가운데서 갈리면 단추 셋의
+              // 높이가 제각각이 된다. 셋을 합쳐도 200px 남짓이라 제일 좁은 폰에서도
+              // 넘치지 않고, 넘칠 만한 것(분류·검색)은 아랫줄로 내려간다.
+              className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap tabular-nums ${
                 filters.kind === value
                   ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
                   : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
@@ -634,7 +637,14 @@ export default function StoredAttachmentList({
               }))
             }
             aria-label="분류로 거르기"
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+            // 좁은 화면에서는 **남는 폭을 이 select 가 채운다.** 종류 단추 묶음
+            // 뒤에 제 폭만큼만 붙어 있으면 오른쪽이 휑하게 비기 때문이다.
+            // `flex-1` 은 자라기만 할 뿐 줄어들지는 않는다 — min-width 가 auto 라
+            // 제 내용보다 좁아지지 않고, 줄바꿈도 지금과 똑같이 일어난다(아주
+            // 좁은 폰에서는 여전히 제 줄로 내려가 그 줄을 다 쓴다).
+            // sm 부터는 `flex-initial` 로 돌아가 지금까지와 같은 제 폭이다 —
+            // 넓은 화면에서 분류 상자가 화면 끝까지 늘어나면 안 된다.
+            className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs sm:flex-initial dark:border-zinc-700 dark:bg-zinc-950"
           >
             <option value="all">분류 전체</option>
             {presentCategories.map((code) => (
@@ -645,24 +655,43 @@ export default function StoredAttachmentList({
           </select>
         )}
 
-        <input
-          type="search"
-          value={filters.query}
-          onChange={(event) => setFilters((previous) => ({ ...previous, query: event.target.value }))}
-          placeholder="파일명·설명 검색"
-          aria-label="파일명이나 설명으로 검색"
-          className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950"
-        />
+        {/*
+          검색 — 좁은 화면에서는 **자기 줄을 통째로 쓴다.**
 
-        {hasActiveFilters(filters) && (
-          <button
-            type="button"
-            onClick={() => setFilters(DEFAULT_ATTACHMENT_LIST_FILTERS)}
-            className="text-xs text-zinc-600 underline dark:text-zinc-400"
-          >
-            조건 지우기
-          </button>
-        )}
+          예전에는 이 입력이 `min-w-0 flex-1` 인 채로 종류·분류와 한 줄에 섞여
+          있었다. flex-wrap 은 「더 못 줄이는 것」만 아랫줄로 내려보내는데,
+          min-w-0 이 붙은 입력은 0 까지도 줄어들 수 있어 **영영 안 내려간다** —
+          폰에서 한 글자도 안 들어가는 폭으로 짜부라져 있던 까닭이다.
+
+          이제 감싼 상자가 좁은 화면에서 `w-full` 이다. 폭이 100% 라 다른 것과
+          같은 줄에 들어갈 수 없어 스스로 아랫줄로 내려가고, 내려간 줄에서는
+          혼자이므로 그 폭이 그대로 검색창이 된다. sm 부터는 `w-auto flex-1` 로
+          돌아가 지금까지와 똑같이 종류·분류와 한 줄에 나란히 선다(sm 은 이
+          저장소가 폰/그 위를 가르는 분기점이고 이 파일도 이미 쓴다 — zoomBar).
+
+          「조건 지우기」를 이 상자 안에 같이 넣었다. 밖에 두면 폭을 다 쓴
+          검색창에 밀려 혼자 셋째 줄로 내려간다. 검색과 함께 다니는 것이다.
+        */}
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+          <input
+            type="search"
+            value={filters.query}
+            onChange={(event) => setFilters((previous) => ({ ...previous, query: event.target.value }))}
+            placeholder="파일명·설명 검색"
+            aria-label="파일명이나 설명으로 검색"
+            className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+          />
+
+          {hasActiveFilters(filters) && (
+            <button
+              type="button"
+              onClick={() => setFilters(DEFAULT_ATTACHMENT_LIST_FILTERS)}
+              className="shrink-0 whitespace-nowrap text-xs text-zinc-600 underline dark:text-zinc-400"
+            >
+              조건 지우기
+            </button>
+          )}
+        </div>
       </div>
 
       {hasActiveFilters(filters) && (
@@ -674,9 +703,48 @@ export default function StoredAttachmentList({
     </div>
   );
 
+  /**
+   * 고르기와 조작 — 좁은 화면에서는 **두 줄로 나눈다.**
+   *
+   * 예전에는 「전체 선택」과 단추 묶음이 한 줄에 억지로 같이 있었다. 단추
+   * 묶음은 줄바꿈을 못 하는 flex 여서 자리가 모자라면 단추마다 폭이 깎였고,
+   * 그러면 글자가 가운데서 접혔다 — `내려받 / 기`, `줄여서 받 / 기`, `목 / 록`.
+   *
+   * 고친 방향은 **글자를 접는 대신 단추를 내려보내는 것**이다.
+   *  - 좁은 화면(기본): 세로로 쌓아 「전체 선택」이 한 줄, 단추 묶음이 그 아래.
+   *  - sm 부터: 지금까지와 같이 `flex-row … justify-between` 한 줄.
+   *  - 단추 묶음 자체에 flex-wrap 을 줘서, 폭이 모자라면 단추가 아랫줄로 간다.
+   *
+   * 그다음 손질은 **네 덩어리를 한 줄에 담는 것**이었다 — 「목록|미리보기」가
+   * 「내려받기」와 같은 줄에 와야 하고, 오른쪽이 비어 보이지 않아야 한다. 자리는
+   * **사이 간격과 좌우 안쪽 여백에서만** 짜냈다(`gap-2 → gap-1.5` 로 6px, 단추
+   * 셋 `px-2.5 → px-2` 로 12px, 합쳐 18px). 높이·세로 여백(py-1.5)과 글자
+   * 크기(text-xs)는 한 글자도 건드리지 않았다 — 손가락으로 누르는 크기가 줄면
+   * 안 된다. sm 부터는 모두 원래 값으로 되돌아간다.
+   *
+   * 393px 폰(카드 안쪽 ≈338px)에서 내려받기 ≈65 + 줄여서 받기 ≈80 + 지우기 ≈52
+   * + 「목록|미리보기」≈113 + 사이 6×3 ≈ 328px 라 한 줄에 들어가고, 남는 자리는
+   * `ml-auto` 가 보기 전환 앞으로 모아 양 끝에 맞춘다. 고른 것이 둘 이상이라
+   * 「묶어서 받기」·「묶는 중…」으로 글자가 길어지면 다시 접힐 수 있는데, 그때는
+   * 접히는 편이 옳다(아래 근거).
+   *
+   * 🔴 **넘치지 않는 근거** — 글자를 안 접게 만들었으므로 단추 하나하나가 더는
+   *    줄어들지 않는다. 대신 제일 넓은 덩어리가 「묶는 중… 999/999」(≈130px)이고
+   *    그다음이 「목록|미리보기」(≈113px)라, 제일 좁은 폰(320px, 카드 안쪽
+   *    ≈265px)에서도 **한 덩어리가 한 줄을 넘지 않는다.** 줄바꿈은 언제나
+   *    덩어리 사이에서 일어나므로 가로로 밀려나갈 자리가 없다.
+   *
+   * 🔴 「목록|미리보기」는 테두리 하나로 붙은 **한 덩어리**다. 이 줄에서 단독
+   *    자식이라 통째로 내려갈 뿐 둘로 갈리지 않는다.
+   */
   const selectionBar = (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
-      <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+    <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-900">
+      {/*
+        w-fit 이 있어야 한다 — 세로로 쌓은 줄에서 <label> 이 폭을 다 차지하면
+        글자 오른쪽 빈자리를 눌러도 전체 선택이 켜진다(라벨은 그 안 어디를
+        눌러도 먹는다). sm 이후로는 어차피 내용만큼이라 달라지는 것이 없다.
+      */}
+      <label className="flex w-fit items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
           type="checkbox"
           checked={allSelected}
@@ -687,12 +755,12 @@ export default function StoredAttachmentList({
         {selected.length > 0 ? `${selected.length}건 선택됨` : "전체 선택"}
       </label>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         <button
           type="button"
           onClick={downloadSelected}
           disabled={isBusy || selected.length === 0 || bundleProgress !== null}
-          className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs font-medium whitespace-nowrap text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 sm:px-2.5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           {bundleProgress
             ? `묶는 중… ${bundleProgress.current}/${bundleProgress.total}`
@@ -713,7 +781,7 @@ export default function StoredAttachmentList({
               ? "고른 것 중에 사진이 없습니다"
               : undefined
           }
-          className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs font-medium whitespace-nowrap text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 sm:px-2.5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           줄여서 받기
         </button>
@@ -722,20 +790,32 @@ export default function StoredAttachmentList({
             type="button"
             onClick={() => onDeleteMany(selected)}
             disabled={isBusy || selected.length === 0}
-            className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
+            className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs font-medium whitespace-nowrap text-red-700 hover:bg-red-50 disabled:opacity-40 sm:px-2.5 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
           >
             지우기
           </button>
         )}
-        {/* 보기 전환 — 목록과 미리보기 */}
-        <div className="flex overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700">
+        {/*
+          보기 전환 — 목록과 미리보기. 테두리 하나로 붙은 **한 덩어리**라
+          위 줄바꿈에서도 통째로 움직인다(shrink-0 으로 깎이지도 않는다).
+
+          `ml-auto` 가 이 덩어리를 **줄의 오른쪽 끝으로 민다** — 좁은 화면에서
+          단추 묶음이 카드 폭을 다 쓰므로, 남는 자리가 전부 이 앞으로 모여
+          조작 단추(왼쪽)와 보기 전환(오른쪽)이 양 끝에 선다. 오른쪽이 휑하게
+          비지 않는다. `justify-between` 을 쓰지 않은 까닭은 **접혔을 때**다 —
+          그러면 줄에 남은 단추끼리도 서로 멀리 벌어져 흩어져 보인다. ml-auto 는
+          내려받기·줄여서 받기·지우기를 gap 만큼 붙여 둔 채 이것만 오른쪽으로
+          보낸다. sm 부터는 묶음 폭이 내용만큼이라 남는 자리가 없어 아무 일도
+          일어나지 않지만, 넓은 화면이 절대 달라지지 않도록 `sm:ml-0` 을 못박는다.
+        */}
+        <div className="ml-auto flex shrink-0 overflow-hidden rounded-md border border-zinc-300 sm:ml-0 dark:border-zinc-700">
           {(["list", "gallery"] as const).map((kind) => (
             <button
               key={kind}
               type="button"
               onClick={() => setView(kind)}
               aria-pressed={view === kind}
-              className={`px-2.5 py-1.5 text-xs font-medium ${
+              className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap ${
                 view === kind
                   ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
                   : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
