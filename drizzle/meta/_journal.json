@@ -575,6 +575,13 @@
       "when": 1788493214258,
       "tag": "0081_familiar_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1788499024932,
+      "tag": "0082_rapid_justice",
+      "breakpoints": true
     }
   ]
 }

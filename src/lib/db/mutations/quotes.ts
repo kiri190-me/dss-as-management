@@ -109,6 +109,15 @@ function toColumnValues(fields: QuoteFields) {
     // (이 함수 머리말의 "새로 만들면 들어가는데 고치면 안 들어가는 칸").
     laborEquipmentKind: fields.laborEquipmentKind,
     laborBaseCost: fields.laborBaseCost,
+    /**
+     * 통전작업 제외와 **그때 뺀 금액**.
+     *
+     * 🔴 **화면이 보낸 금액을 그대로 적는다.** 여기서 repair_labor_settings 를
+     * 다시 보고 셈하면 스냅샷을 두는 이유가 무너진다 — 통전 공수시간이 바뀌는
+     * 순간 이미 보낸 견적서의 근거가 소리 없이 달라진다(schema/quotes.ts).
+     */
+    powerTestExcluded: fields.powerTestExcluded,
+    laborPowerTestDeduction: fields.laborPowerTestDeduction,
   };
 }
 

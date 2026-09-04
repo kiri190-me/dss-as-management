@@ -171,6 +171,34 @@ export const quotes = pgTable(
     laborEquipmentKind: productModelKindEnum("labor_equipment_kind"),
     laborBaseCost: numeric("labor_base_cost", { precision: 15, scale: 2 }),
 
+    /**
+     * ── 통전작업을 빼고 청구하는가 ─────────────────────────────────────
+     * 기본 작업비 안에는 **통전작업 몫이 이미 들어 있다**(2026-09-04 사용자:
+     * 제너레이터·매쳐 350만원 중 14시간 = 140만원). 통전작업을 하지 않는 장은
+     * 그 몫을 빼서 210만원이 되어야 하고, 문서에서도 「③ 통전검사」 구역이
+     * 사라진다(xlsx 생성기 셋의 `powerTestExcluded`).
+     *
+     * 🔴 **칸이 둘인 것은 일부러다.**
+     * `power_test_excluded` 는 **사람의 결정**이고,
+     * `labor_power_test_deduction` 은 **그때 실제로 뺀 금액**이다.
+     *
+     * 뺀 금액을 여기에 함께 남기는 이유는 바로 위 laborBaseCost 와 같다 —
+     * repair_labor_settings 를 나중에 다시 보게 하면, 통전 공수시간이나 시간당
+     * 단가가 바뀌는 순간 **이미 보낸 견적서의 근거가 소리 없이 달라진다.**
+     *
+     * 하나로 합칠 수 없는 것은 **"제외하기로 했으나 빼지 못했다"** 는 상태가
+     * 실제로 있기 때문이다: 그 장비의 통전 공수시간을 아직 정하지 않았거나
+     * (T/C 가 그렇다) 기본 작업비 자체가 비어 있으면, 사람의 결정은 남아 있는데
+     * 뺄 금액은 없다. 금액 한 칸만 두고 null 로 접으면 그 둘이 구별되지 않고,
+     * 화면은 "왜 210만원이 아니지"에 답할 수 없게 된다.
+     *
+     * 그래서 NULL 은 **"빼지 않았다"** 이고 `"0"` 은 "빼기는 했는데 0원"이다 —
+     * 위 '기본 작업비의 null 은 0 이 아니다'(domain/quote-labor-cost.ts)와 같은
+     * 규칙이다. 옛 견적서는 전부 false · NULL 이라 금액도 문서도 그대로다.
+     */
+    powerTestExcluded: boolean("power_test_excluded").notNull().default(false),
+    laborPowerTestDeduction: numeric("labor_power_test_deduction", { precision: 15, scale: 2 }),
+
     // 낙관적 잠금. 목록에서 열어 고치는 화면이 있으므로 처음부터 쓴다.
     version: integer("version").notNull().default(1),
 
@@ -206,6 +234,16 @@ export const quotes = pgTable(
     index("quotes_customer_id_not_deleted_idx")
       .on(table.customerId)
       .where(sql`is_deleted = false`),
+    /**
+     * 뺀 금액은 음수일 수 없다. 0 은 허용한다 — "빼기는 했는데 0원"이 실제
+     * 값이고(통전 공수시간이 0시간인 장비를 나중에 정할 수 있다), NULL 인
+     * "빼지 않았다"와는 다른 뜻이다. quote_items_unit_price_not_negative ·
+     * repair_labor_settings_base_cost_not_negative 와 같은 작명이다.
+     */
+    check(
+      "quotes_labor_power_test_deduction_not_negative",
+      sql`${table.laborPowerTestDeduction} >= 0`
+    ),
   ]
 );
 

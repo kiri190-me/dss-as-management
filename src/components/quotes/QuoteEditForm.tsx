@@ -232,6 +232,16 @@ function formatAmount(value: number): string {
   return `₩${AMOUNT_FORMAT.format(Math.round(value))}`;
 }
 
+/**
+ * 셈한 금액을 numeric(15,2) 칸으로 보낼 글자로.
+ *
+ * 소수 둘째 자리에서 끊는 것은 **부동소수점의 꼬리를 그대로 보내면 검증에
+ * 걸려 저장 자체가 막히기** 때문이다(validation/quote-input.ts 의 AMOUNT_PATTERN).
+ */
+function toAmountText(value: number): string {
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
 /** 오늘(한국 표준시). 새 견적서의 발행일자 기본값이다. */
 function todayInSeoul(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
@@ -347,6 +357,17 @@ export default function QuoteEditForm({
           .filter((id): id is string => id !== null)
       )
   );
+  /**
+   * 「통전작업 제외」. **사람의 결정**이고, 켜면 기본 작업비에서 통전작업 몫
+   * (통전 공수시간 × 시간당 작업비)이 빠지고 문서에서 「③ 통전검사」 구역이
+   * 사라진다.
+   *
+   * 저장된 견적서는 그때 결정을 그대로 편다. 옛 견적서는 전부 꺼짐이다 —
+   * 그때는 제외할 방법 자체가 없었다.
+   */
+  const [powerTestExcluded, setPowerTestExcluded] = useState<boolean>(
+    quote?.powerTestExcluded ?? false
+  );
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
@@ -452,10 +473,31 @@ export default function QuoteEditForm({
       }));
   }, [activeLabor, checkedTaskIds]);
 
+  /**
+   * 🔴 **통전 공수시간과 시간당 단가는 이미 화면에 들어와 있다**(activeLabor).
+   * 새로 불러오지 않는다 — 그때 값을 그대로 셈에 쓰고, 그대로 저장한다.
+   *
+   * 장비 종류를 아직 안 골랐으면 차감을 아예 부탁하지 않는다. 그래야 옛
+   * 견적서를 열었을 때와 한 글자도 다르지 않은 값이 나온다
+   * (domain/quote-labor-cost.ts 의 그 항목).
+   */
   const laborSuggestion = useMemo(
-    () => sumQuoteLaborCost(selectedTasks, activeLabor?.baseCost ?? null),
-    [selectedTasks, activeLabor]
+    () =>
+      sumQuoteLaborCost(
+        selectedTasks,
+        activeLabor?.baseCost ?? null,
+        activeLabor
+          ? {
+              excluded: powerTestExcluded,
+              hours: activeLabor.powerTestHours,
+              hourlyRate: activeLabor.hourlyRate,
+            }
+          : undefined
+      ),
+    [selectedTasks, activeLabor, powerTestExcluded]
   );
+  /** 실제로 뺀 금액(원). 켜지 않았거나 뺄 수 없었으면 null. */
+  const powerTestDeduction = laborSuggestion.powerTestDeduction ?? null;
 
   /**
    * 견적서 종류를 바꾸면 **오버홀 작업이 따라 체크·해제된다**(2026-08-31 요구).
@@ -675,6 +717,19 @@ export default function QuoteEditForm({
        */
       laborEquipmentKind: laborKind,
       laborBaseCost: activeLabor?.baseCost ?? null,
+      /**
+       * 통전작업 제외 — **결정과 그때 뺀 금액을 따로 보낸다.**
+       *
+       * 🔴 뺀 금액은 **화면이 셈한 값**이다. 서버가 설정 표를 다시 보고
+       * 계산하게 하면, 통전 공수시간이 바뀌는 순간 이미 보낸 견적서의 근거가
+       * 소리 없이 달라진다(schema/quotes.ts 의 그 항목).
+       *
+       * 제외를 켰는데 금액이 null 인 것은 **"빼기로 했으나 빼지 못했다"**
+       * 이다(그 장비의 통전 공수시간을 아직 정하지 않았다). 화면이 아래에서
+       * 그 사실을 말한다.
+       */
+      powerTestExcluded,
+      laborPowerTestDeduction: powerTestDeduction === null ? null : toAmountText(powerTestDeduction),
       repairTasks: selectedTasks,
       /**
        * 문서에 적히는 작업 내역. 빈 줄은 검증이 걸러 낸다 — 적힐 것이 없는
@@ -813,6 +868,9 @@ export default function QuoteEditForm({
           serialNumberText: orNull(serialNumberText),
           lotNumberText: orNull(lotNumberText),
           workCost,
+          // 켜면 미리보기에서도 「③ 통전검사」 묶음이 사라진다 — 파일이 정확히
+          // 그렇게 나가기 때문이다. 둘이 다르면 받아 본 쪽이 다른 문서로 읽는다.
+          powerTestExcluded,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
           items: items
@@ -1320,61 +1378,83 @@ export default function QuoteEditForm({
                 </option>
               ))}
             </select>
+
+            {/* ── 통전작업 제외 ─────────────────────────────────────────
+                🔴 기본 작업비 안에 **통전작업 몫이 이미 들어 있다**(2026-09-04
+                사용자: 350만원 중 14시간 = 140만원). 켜면 그 몫이 빠져 210만원이
+                되고, 문서에서도 「③ 통전검사」 구역이 사라진다 — 하지 않은
+                시험을 했다고 적어 보내지 않기 위해서다. */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={powerTestExcluded}
+                onChange={(e) => setPowerTestExcluded(e.target.checked)}
+                disabled={disabled}
+                className="h-4 w-4"
+              />
+              <span className="text-zinc-800 dark:text-zinc-200">통전작업 제외</span>
+            </label>
           </div>
 
           {activeLabor === null ? (
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               장비 종류를 고르면 그 장비의 수리 작업 목록이 나옵니다. 고른 작업으로 작업비가 계산됩니다.
             </p>
-          ) : activeLabor.tasks.length === 0 ? (
-            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
-              {workflowKindLabels[activeLabor.equipmentKind]}의 작업 목록이 아직 없습니다 — [PO/내자] ›
-              수리 작업 비용에서 넣어 주세요.
-            </p>
           ) : (
             <>
-              <ul className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
-                {activeLabor.tasks.map((task) => {
-                  const checked = checkedTaskIds.has(task.id);
-                  return (
-                    <li key={task.id}>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const next = new Set(checkedTaskIds);
-                            if (e.target.checked) next.add(task.id);
-                            else next.delete(task.id);
-                            setCheckedTaskIds(next);
-                            // 고른 작업이 곧 문서의 「2) 수리작업」이다
-                            // (손대지 않았을 때만 따라간다).
-                            fillRepairScopeFrom(taskNamesOf(activeLabor, next));
-                          }}
-                          disabled={disabled}
-                          className="h-4 w-4"
-                        />
-                        <span className="text-zinc-800 dark:text-zinc-200">{task.taskName}</span>
-                        {/* 오버홀 줄임을 표시한다 — 견적서 종류를 바꾸면 이 줄이
-                            저절로 움직이는데, 어느 줄인지 안 보이면 사람은 자기가
-                            체크한 것이 왜 풀렸는지 알 수 없다. */}
-                        {task.isOverhaul && (
-                          <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-800 dark:bg-sky-900 dark:text-sky-200">
-                            O/H
+              {/* 🔴 작업 목록이 비어 있어도 계산 내역은 그린다 — T/C 가 그렇다.
+                  목록이 없다고 셈까지 숨기면, 통전작업 제외를 켰는데 왜 금액이
+                  그대로인지(통전 공수시간을 아직 안 정했다) 말할 자리가 없다. */}
+              {activeLabor.tasks.length === 0 ? (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 작업 목록이 아직 없습니다 —
+                  [PO/내자] › 수리 작업 비용에서 넣어 주세요.
+                </p>
+              ) : (
+                <ul className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                  {activeLabor.tasks.map((task) => {
+                    const checked = checkedTaskIds.has(task.id);
+                    return (
+                      <li key={task.id}>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const next = new Set(checkedTaskIds);
+                              if (e.target.checked) next.add(task.id);
+                              else next.delete(task.id);
+                              setCheckedTaskIds(next);
+                              // 고른 작업이 곧 문서의 「2) 수리작업」이다
+                              // (손대지 않았을 때만 따라간다).
+                              fillRepairScopeFrom(taskNamesOf(activeLabor, next));
+                            }}
+                            disabled={disabled}
+                            className="h-4 w-4"
+                          />
+                          <span className="text-zinc-800 dark:text-zinc-200">{task.taskName}</span>
+                          {/* 오버홀 줄임을 표시한다 — 견적서 종류를 바꾸면 이 줄이
+                              저절로 움직이는데, 어느 줄인지 안 보이면 사람은 자기가
+                              체크한 것이 왜 풀렸는지 알 수 없다. */}
+                          {task.isOverhaul && (
+                            <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-800 dark:bg-sky-900 dark:text-sky-200">
+                              O/H
+                            </span>
+                          )}
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {task.hours}시간 ·{" "}
+                            {formatAmount(task.hours * Number(activeLabor.hourlyRate))}
                           </span>
-                        )}
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                          {task.hours}시간 ·{" "}
-                          {formatAmount(task.hours * Number(activeLabor.hourlyRate))}
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
 
               {/* 🔴 식을 그대로 보여 준다. 합계 하나만 보이면 "왜 이 숫자지"에
-                  답할 것이 없고, 기본 작업비가 더해진 것도 드러나지 않는다. */}
+                  답할 것이 없고, 기본 작업비가 더해진 것도 드러나지 않는다.
+                  통전작업 제외도 마찬가지다 — **뺀 금액을 눈에 보이게 적는다.** */}
               <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
                 기본 작업비{" "}
                 {laborSuggestion.baseCost === null ? (
@@ -1383,7 +1463,16 @@ export default function QuoteEditForm({
                   <b className="tabular-nums">{formatAmount(laborSuggestion.baseCost)}</b>
                 )}{" "}
                 + 고른 작업 {selectedTasks.length}건{" "}
-                <b className="tabular-nums">{formatAmount(laborSuggestion.tasksTotal)}</b> ={" "}
+                <b className="tabular-nums">{formatAmount(laborSuggestion.tasksTotal)}</b>{" "}
+                {powerTestDeduction !== null && (
+                  <>
+                    <span className="text-zinc-500 dark:text-zinc-400">· 통전작업 제외</span>{" "}
+                    <b className="tabular-nums text-amber-700 dark:text-amber-400">
+                      −{formatAmount(powerTestDeduction)}
+                    </b>{" "}
+                  </>
+                )}
+                ={" "}
                 <b className="tabular-nums text-zinc-900 dark:text-zinc-50">
                   {formatAmount(laborSuggestion.total)}
                 </b>
@@ -1392,6 +1481,26 @@ export default function QuoteEditForm({
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                   {workflowKindLabels[activeLabor.equipmentKind]}의 기본 작업비를 정하지 않아 합계에
                   더해지지 않았습니다 — [PO/내자] › 수리 작업 비용에서 적어 주세요.
+                </p>
+              )}
+              {/* 🔴 못 뺐으면 못 뺐다고 말한다. 조용히 두면 사람은 210만원이
+                  나온 줄 알고 그대로 고객사에 보낸다. */}
+              {laborSuggestion.powerTestNotice === "NO_POWER_TEST_HOURS" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 통전 공수시간을 먼저 정해 주세요 —
+                  정하기 전까지는 통전작업 몫을 빼지 않습니다([PO/내자] › 작업 비용 › 통전 작업 비용).
+                </p>
+              )}
+              {laborSuggestion.powerTestNotice === "UNKNOWN_HOURLY_RATE" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  시간당 작업비를 읽지 못해 통전작업 몫을 빼지 않았습니다 — [PO/내자] › 작업 비용에서
+                  확인해 주세요.
+                </p>
+              )}
+              {laborSuggestion.powerTestNotice === "CLAMPED_TO_ZERO" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  뺄 통전작업 몫이 기본 작업비보다 커서 기본 작업비를 0원에서 멈췄습니다 — 두 값을
+                  확인해 주세요.
                 </p>
               )}
               {laborSuggestion.unknown.length > 0 && (
@@ -1527,7 +1636,9 @@ export default function QuoteEditForm({
               disabled={disabled}
             />
           </Field>
-          {activeLabor !== null && activeLabor.tasks.length > 0 && (
+          {/* 작업 목록이 비어 있는 장비(T/C)에서도 적용할 것이 있다 — 기본
+              작업비와 통전작업 제외가 그것이다. */}
+          {activeLabor !== null && (
             <button
               type="button"
               onClick={() => setWorkCost(String(laborSuggestion.total))}

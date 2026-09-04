@@ -106,7 +106,18 @@ export type QuotePrintData = Pick<
   | "lotNumberText"
   | "workCost"
   | "items"
->;
+> & {
+  /**
+   * 통전작업을 빼고 청구하는 장인가. 켜면 **「③ 통전검사」 묶음을 그리지
+   * 않는다** — 실제로 나가는 xlsx 가 그 구역을 머리글까지 지우기 때문이다
+   * (xlsx/quote-template.ts 의 `powerTestExcluded`). 둘이 다르면 미리보기와
+   * 받아 본 문서가 서로 다른 종이가 된다.
+   *
+   * 🔴 **없으면 예전 그대로 그린다.** 이 기능이 생기기 전에 저장된 견적서는
+   * 전부 꺼짐이고, 그 장들은 한 줄도 달라지지 않아야 한다.
+   */
+  powerTestExcluded?: boolean;
+};
 
 function productLine(quote: QuotePrintData): string {
   const pieces: string[] = [];
@@ -370,7 +381,7 @@ export default function QuotePrintView({
                   </td>
                 </tr>
 
-                {buildWorkSections(workSections).map((section) => (
+                {buildWorkSections(workSections, quote.powerTestExcluded === true).map((section) => (
                   <SectionRows key={section.mark} section={section} />
                 ))}
               </tbody>
@@ -439,13 +450,22 @@ function SectionRows({ section }: { section: WorkSection }) {
  *
  * ①②③ 은 실제 작업 내역이고, **④ 서류작업만 고정 문구**다 — 양식에도 그 아래
  * 줄이 없고 견적서마다 달라지는 값이 아니다.
+ *
+ * ── 통전작업을 뺀 장은 ③ 을 아예 그리지 않는다 ──────────────────────────
+ * 하지 않은 시험을 했다고 적어 보내지 않기 위해서다. 🔴 **그때도 ④ 는 ④ 로
+ * 남는다** — 양식에서도 ③ 의 줄만 지워지고 ④ 의 번호는 손대지 않기 때문이다
+ * (xlsx/quote-template.test.ts 의 '④ 서류작업은 손대지 않는다'). 여기서만
+ * 번호를 당기면 미리보기와 파일의 번호가 어긋난다.
  */
-function buildWorkSections(sections: QuoteWorkSections | undefined): WorkSection[] {
+function buildWorkSections(
+  sections: QuoteWorkSections | undefined,
+  powerTestExcluded: boolean
+): WorkSection[] {
   const resolved = sections ?? FALLBACK_WORK_SECTIONS;
   return [
     { mark: "①", ...resolved.INVESTIGATION },
     { mark: "②", ...resolved.REPAIR },
-    { mark: "③", ...resolved.POWER_TEST },
+    ...(powerTestExcluded ? [] : [{ mark: "③", ...resolved.POWER_TEST }]),
     { mark: "④", label: "서류작업", items: [] },
   ];
 }

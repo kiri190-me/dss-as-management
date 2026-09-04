@@ -136,6 +136,21 @@ export type QuoteFields = {
    */
   laborEquipmentKind: WorkflowKind | null;
   laborBaseCost: string | null;
+  /**
+   * 통전작업을 빼고 청구하는가 — **사람의 결정**이다. 보내지 않으면 `false` 다
+   * (이 칸이 생기기 전에 만들어진 요청이 그대로 동작해야 하고, DB 기본값도
+   * false 다).
+   */
+  powerTestExcluded: boolean;
+  /**
+   * 그때 실제로 뺀 금액. **화면이 셈해 보낸 값을 그대로 적는다** — 서버가
+   * repair_labor_settings 를 다시 보고 계산하면, 통전 공수시간이 바뀌는 순간
+   * 이미 보낸 견적서의 근거가 소리 없이 달라진다(schema/quotes.ts 의 그 항목).
+   *
+   * `null` 은 **"빼지 않았다"**이다 — 제외하기로 했으나 통전 공수시간이 없어
+   * 빼지 못한 장이 여기에 해당한다. `"0"` 은 "빼기는 했는데 0원"이라 다르다.
+   */
+  laborPowerTestDeduction: string | null;
   repairTasks: QuoteRepairTaskInput[];
   /**
    * 견적서에 적히는 작업 내역(조사/수리/통전). 묶음 안의 **차례가 곧 배열
@@ -276,6 +291,18 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
    */
   const laborEquipmentKind = isWorkflowKind(raw.laborEquipmentKind) ? raw.laborEquipmentKind : null;
   const laborBaseCost = normalizeAmount("laborBaseCost", "기본 작업비", raw.laborBaseCost, fieldErrors);
+  /**
+   * 통전작업 제외. **켜졌다고 말한 것만 켜짐**으로 본다(items 의 isOverhaulPart
+   * 와 같은 규칙) — `"false"` 나 `0` 같은 값이 참으로 읽혀 금액이 140만원
+   * 줄어드는 일은 없어야 한다.
+   */
+  const powerTestExcluded = raw.powerTestExcluded === true;
+  const laborPowerTestDeduction = normalizeAmount(
+    "laborPowerTestDeduction",
+    "통전작업 제외 금액",
+    raw.laborPowerTestDeduction,
+    fieldErrors
+  );
   const repairTasks = normalizeRepairTasks(raw.repairTasks, fieldErrors);
   const workScopeLines = normalizeWorkScopeLines(raw.workScopeLines, fieldErrors);
 
@@ -302,6 +329,8 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       workCost,
       laborEquipmentKind,
       laborBaseCost,
+      powerTestExcluded,
+      laborPowerTestDeduction,
       repairTasks,
       workScopeLines,
       items,

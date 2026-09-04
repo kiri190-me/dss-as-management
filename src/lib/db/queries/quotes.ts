@@ -262,6 +262,17 @@ export type QuoteEditData = {
    */
   laborEquipmentKind: WorkflowKind | null;
   laborBaseCost: string | null;
+  /**
+   * 통전작업을 빼고 청구한 장인가, 그리고 **그때 실제로 뺀 금액**.
+   *
+   * 🔴 **다시 셈하지 않는다.** 저장된 이 두 값이 곧 근거다 — 통전 공수시간이나
+   * 시간당 단가가 나중에 바뀌어도 이미 보낸 견적서는 그대로여야 한다
+   * (schema/quotes.ts 의 그 항목).
+   *
+   * 옛 견적서는 `false` · `null` 이다. 그때는 제외할 방법 자체가 없었다.
+   */
+  powerTestExcluded: boolean;
+  laborPowerTestDeduction: string | null;
   repairTasks: {
     /** 카탈로그의 그 줄. 지워졌으면 null 일 수 있다(참고용). */
     taskId: string | null;
@@ -317,6 +328,8 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       workCost: quotes.workCost,
       laborEquipmentKind: quotes.laborEquipmentKind,
       laborBaseCost: quotes.laborBaseCost,
+      powerTestExcluded: quotes.powerTestExcluded,
+      laborPowerTestDeduction: quotes.laborPowerTestDeduction,
     })
     .from(quotes)
     .where(and(eq(quotes.id, id), eq(quotes.isDeleted, false)))

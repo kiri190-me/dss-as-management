@@ -145,6 +145,51 @@ test("부품 줄 상한을 넘으면 거절한다 — 상한이 곧 안전장치
   assert.match(errors({ ...MINIMAL, items }).items, new RegExp(String(MAX_QUOTE_ITEMS)));
 });
 
+/**
+ * ============================================================================
+ * 통전작업 제외 — 결정(boolean)과 그때 뺀 금액(numeric)은 서로 다른 칸이다
+ * ============================================================================
+ * 하나로 합치면 "제외하기로 했으나 통전 공수시간이 없어 빼지 못했다"는 상태를
+ * 적을 자리가 없다(schema/quotes.ts 의 그 항목).
+ * ============================================================================
+ */
+test("통전작업 제외: 안 보내면 꺼짐이고 뺀 금액은 null 이다 — 옛 요청이 그대로 동작한다", () => {
+  const data = ok(MINIMAL);
+  assert.equal(data.powerTestExcluded, false);
+  assert.equal(data.laborPowerTestDeduction, null, "null 은 '빼지 않았다'이다");
+});
+
+test("통전작업 제외: 켰다고 말한 것만 켜진다 — 140만원이 실수로 빠지면 안 된다", () => {
+  assert.equal(ok({ ...MINIMAL, powerTestExcluded: true }).powerTestExcluded, true);
+  for (const value of ["true", 1, "on", {}, null, undefined]) {
+    assert.equal(
+      ok({ ...MINIMAL, powerTestExcluded: value }).powerTestExcluded,
+      false,
+      `${JSON.stringify(value)} 가 켜짐으로 읽혔다`
+    );
+  }
+});
+
+test("통전작업 제외: 뺀 금액도 문자열 그대로 둔다 — 다른 금액 칸과 같은 규칙", () => {
+  const data = ok({
+    ...MINIMAL,
+    powerTestExcluded: true,
+    laborPowerTestDeduction: "1,400,000",
+  });
+  assert.equal(data.laborPowerTestDeduction, "1400000");
+  assert.equal(
+    ok({ ...MINIMAL, laborPowerTestDeduction: "0" }).laborPowerTestDeduction,
+    "0",
+    "'0' 은 '빼기는 했는데 0원'이라 null 과 다르다"
+  );
+});
+
+test("통전작업 제외: 음수나 형식이 아닌 뺀 금액은 거절한다 — CHECK 제약과 같은 규칙", () => {
+  const bad = errors({ ...MINIMAL, laborPowerTestDeduction: "-1400000" });
+  assert.match(bad.laborPowerTestDeduction, /통전작업 제외 금액/);
+  assert.match(errors({ ...MINIMAL, laborPowerTestDeduction: "백사십만" }).laborPowerTestDeduction, /통전작업/);
+});
+
 test("id 형식", () => {
   assert.equal(isValidQuoteId(VALID_UUID), true);
   assert.equal(isValidQuoteId("nope"), false);

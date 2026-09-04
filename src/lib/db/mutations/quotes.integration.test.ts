@@ -91,6 +91,10 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     // 생기기 전에 만든 견적서와 같은 상태다.
     laborEquipmentKind: null,
     laborBaseCost: null,
+    // 통전작업 제외(2026-09-04). 기본은 "빼지 않음" — 이 기능이 생기기 전에 만든
+    // 견적서와 같은 상태다.
+    powerTestExcluded: false,
+    laborPowerTestDeduction: null,
     repairTasks: [],
     // 작업 내역(2026-08-31). 기본은 "안 적음" — 제너레이터 양식에는 이 구역이 없다.
     workScopeLines: [],
@@ -560,5 +564,89 @@ describe("견적서 작업 내역", () => {
 
     await db.delete(quotes).where(eq(quotes.id, created.id));
     assert.deepEqual(await readScope(created.id), [], "부모가 사라지면 딸린 줄도 사라진다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 통전작업 제외 — 결정과 그때 뺀 금액을 함께 남긴다
+ * ============================================================================
+ * 🔴 두 칸인 이유가 여기서 드러난다: **"제외하기로 했으나 빼지 못했다"** 는
+ * 상태가 실제로 있다(T/C 는 통전 공수시간을 아직 정하지 않았다). 금액 한 칸만
+ * 두고 null 로 접으면 그 상태와 "제외하지 않았다"가 구별되지 않는다.
+ *
+ * 뺀 금액은 **화면이 셈해 보낸 값을 그대로** 적는다 — 서버가 설정 표를 다시 보고
+ * 계산하면, 통전 공수시간이 바뀌는 순간 이미 보낸 견적서의 근거가 소리 없이
+ * 달라진다(schema/quotes.ts 의 그 항목).
+ * ============================================================================
+ */
+describe("견적서 통전작업 제외", () => {
+  test("🔴 기본은 '빼지 않음' — 이 기능이 생기기 전에 만든 견적서와 같은 상태다", async () => {
+    const created = await create();
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.powerTestExcluded, false);
+    assert.equal(row.laborPowerTestDeduction, null, "null 은 '빼지 않았다'이다");
+  });
+
+  test("켜면 결정과 뺀 금액이 그대로 적힌다 — 350만 − 140만", async () => {
+    const created = await create({
+      laborEquipmentKind: "GENERATOR",
+      laborBaseCost: "3500000",
+      powerTestExcluded: true,
+      laborPowerTestDeduction: "1400000",
+      workCost: "2100000",
+    });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.powerTestExcluded, true);
+    assert.equal(Number(row.laborPowerTestDeduction), 1400000);
+    assert.equal(row.laborBaseCost, "3500000.00", "뺀 금액과 별개로 기본 작업비는 그때 값 그대로다");
+  });
+
+  test("🔴 제외하기로 했으나 빼지 못한 장 — 결정은 남고 금액은 null 이다(T/C)", async () => {
+    const created = await create({
+      laborEquipmentKind: "TOTAL_CONTROLLER",
+      laborBaseCost: "2200000",
+      powerTestExcluded: true,
+      laborPowerTestDeduction: null,
+    });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.powerTestExcluded, true, "사람의 결정은 남아야 한다");
+    assert.equal(row.laborPowerTestDeduction, null, "빼지 못했다는 사실도 남아야 한다");
+  });
+
+  test("고쳐 저장하면 둘 다 따라간다 — 켰다 끄면 금액도 지워진다", async () => {
+    const created = await create({
+      laborBaseCost: "3500000",
+      powerTestExcluded: true,
+      laborPowerTestDeduction: "1400000",
+    });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const updated = await updateQuote({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({
+        quoteNumber: (await readQuote(created.id)).quoteNumber,
+        laborBaseCost: "3500000",
+        powerTestExcluded: false,
+        laborPowerTestDeduction: null,
+      }),
+      actorUserId,
+    });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+
+    const row = await readQuote(created.id);
+    assert.equal(row.powerTestExcluded, false);
+    assert.equal(row.laborPowerTestDeduction, null, "끈 뒤에도 옛 차감이 남아 있으면 안 된다");
   });
 });

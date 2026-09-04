@@ -164,3 +164,41 @@ test("Excel 받기: 독립 페이지에서도 받기 링크다", () => {
   const html = render({ quoteId: "q-1" });
   assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'));
 });
+
+// ───────────────────────────── 통전작업 제외 — ③ 을 그리지 않는다
+
+/**
+ * 미리보기와 실제로 나가는 xlsx 는 **같은 종이여야 한다.** 파일 쪽은 「③
+ * 통전검사」 구역을 머리글까지 지우고(xlsx/quote-template.ts), 여기가 그리는
+ * 것이 다르면 받아 본 쪽이 다른 문서로 읽는다.
+ */
+function renderSections(powerTestExcluded?: boolean): string {
+  return renderToStaticMarkup(
+    <QuotePrintView
+      quote={{ ...QUOTE, powerTestExcluded }}
+      header={HEADER}
+      quoteId="q-1"
+      onClose={() => {}}
+    />
+  );
+}
+
+test("🔴 통전작업 제외: ③ 통전검사 묶음이 사라진다 — 파일이 그렇게 나간다", () => {
+  const html = renderSections(true);
+  assert.ok(!html.includes("③"), "머리글까지 사라져야 한다");
+  assert.ok(!html.includes("통전검사"), "하지 않은 시험을 적어 보내면 안 된다");
+  // 🔴 ④ 는 ④ 로 남는다 — 양식도 ③ 의 줄만 지우고 번호는 손대지 않는다.
+  assert.ok(html.includes("④"), "번호를 당기면 파일과 어긋난다");
+  assert.ok(html.includes("서류작업"));
+  // ①·② 는 그대로다.
+  assert.ok(html.includes("①") && html.includes("②"));
+});
+
+test("🔴 옛 견적서 — 제외를 주지 않으면 ③ 이 그대로다", () => {
+  for (const html of [renderSections(), renderSections(false)]) {
+    assert.ok(html.includes("③"));
+    assert.ok(html.includes("통전검사[출하검사]"), "예전과 한 줄도 달라지면 안 된다");
+    assert.ok(html.includes("④"));
+  }
+  assert.equal(renderSections(), renderSections(false), "안 준 것과 꺼진 것은 같은 종이다");
+});

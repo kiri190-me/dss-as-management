@@ -147,6 +147,18 @@ export async function GET(
        * 다시 내려받아도 표준 문구가 사라지지 않는다.
        */
       workScope: groupWorkScope(quote.workScopeLines),
+      /**
+       * 통전작업을 빼고 청구한 장이면 **「③ 통전검사」 구역을 머리글까지
+       * 지운다.** 작업비에서 그 몫을 뺐는데 문서에는 「절연저항치·내압시험 …」
+       * 이 그대로 찍혀 나가면, 하지 않은 시험을 했다고 적어 보내는 셈이다.
+       *
+       * 🔴 **빈 묶음과 정반대의 뜻이다** — 빈 묶음은 "양식 그대로 둔다"이고
+       * 이것은 "없앤다"이다(생성기 셋의 powerTestExcluded 주석).
+       *
+       * 생성기 셋이 이 객체를 나눠 쓰므로 이 한 줄로 양식 넷이 전부 이어진다.
+       * 옛 견적서는 false 라 결과가 한 바이트도 달라지지 않는다.
+       */
+      powerTestExcluded: quote.powerTestExcluded,
     };
 
     if (templateKey.startsWith("MATCHER:")) {
