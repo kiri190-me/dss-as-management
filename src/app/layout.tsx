@@ -1,7 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadUiThemeTokens } from "@/lib/db/queries/ui-theme-tokens";
+import {
+  UI_THEME_BYPASS_COOKIE,
+  isUiThemeBypassed,
+  serializeUiThemeCss,
+} from "@/lib/domain/ui-theme-tokens";
 import "./globals.css";
 
 /**
@@ -82,11 +89,33 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({
+/**
+ * <head>에 심을 화면 토큰 오버라이드 CSS. 심을 것이 없으면 빈 문자열이다.
+ *
+ * ── 우회 쿠키를 값보다 **먼저** 본다 ────────────────────────────────────
+ * 이 쿠키가 붙은 브라우저에는 DB를 읽지도 않고 빈 문자열을 돌려준다. 순서가
+ * 반대면 "화면이 안 보인다"를 고치러 온 사람이 그 오버라이드를 여전히
+ * 뒤집어쓴 화면을 보게 된다 — 탈출구가 탈출구 구실을 못 한다.
+ * 쿠키를 굽고 지우는 곳은 /api/theme/bypass 하나다.
+ *
+ * ── async 전환으로 잃는 정적 렌더가 없다 ────────────────────────────────
+ * cookies()를 읽으면 이 아래 전부가 동적 렌더가 되지만, 이 앱에는 원래
+ * 정적으로 렌더되던 페이지가 없다 — (app)/** · /login · /pending-approval이
+ * 모두 readSession()으로 쿠키를 먼저 읽는다.
+ */
+async function readUiThemeOverrideCss(): Promise<string> {
+  const cookieStore = await cookies();
+  if (isUiThemeBypassed(cookieStore.get(UI_THEME_BYPASS_COOKIE)?.value)) return "";
+  return serializeUiThemeCss(await loadUiThemeTokens());
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const uiThemeOverrideCss = await readUiThemeOverrideCss();
+
   return (
     <html
       lang="ko"
@@ -95,6 +124,25 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {/*
+          바꾼 값이 하나도 없으면 <style> 태그 **자체를** 내보내지 않는다.
+          빈 태그를 남겨 두면 두 가지가 깨진다. 하나, 소스를 열어 본 사람에게
+          "이 기능이 켜져 있는데 아무 일도 안 하는" 것처럼 보인다 — 무엇을
+          고쳐야 할지 판단할 때 잘못된 단서가 된다. 둘, 마이그레이션을 적용하기
+          전과 후, 표가 비어 있는 동안에는 렌더 결과가 이전과 **바이트 단위로
+          같아야 한다**는 이 축의 성질이 사라진다(스키마 주석의 "어느 지점에서
+          멈춰도 화면이 지금과 똑같다"). 그 성질이 있어야 되돌릴 일이 없는
+          배포가 된다.
+
+          위 theme-init 스크립트 **바로 다음** 자리인 것이 중요하다.
+          globals.css는 <head> 아래쪽에 오고, 오버라이드가 이기는 근거는
+          순서가 아니라 선택자 명시도(:root:root…)다 — 자리를 옮겨도 이기지만,
+          기본값 옆에 오버라이드가 붙어 있어야 소스를 읽는 사람이 둘의 관계를
+          한눈에 본다.
+        */}
+        {uiThemeOverrideCss.length > 0 ? (
+          <style id="ui-theme-overrides" dangerouslySetInnerHTML={{ __html: uiThemeOverrideCss }} />
+        ) : null}
       </head>
       {/*
         Sidebar-footer layout fix — this was `min-h-full`, which lets body

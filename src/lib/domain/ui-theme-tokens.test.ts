@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 
 import {
   NO_UI_THEME_OVERRIDES,
+  UI_THEME_BYPASS_COOKIE,
+  UI_THEME_BYPASS_MAX_AGE_SECONDS,
+  UI_THEME_BYPASS_VALUE,
   UI_THEME_CONTRAST_BLOCKING,
   UI_THEME_CONTRAST_FLOOR,
   UI_THEME_CONTRAST_PAIRS,
   UI_THEME_CONTRAST_WARN,
   UI_THEME_TOKENS,
   contrastRatio,
+  isUiThemeBypassed,
   normalizeUiThemeValue,
   resolveUiTheme,
   serializeUiThemeCss,
@@ -451,4 +455,28 @@ test("출력 어디에도 규칙을 탈출하는 글자가 없다", () => {
       ":root:root.dark{--foreground:#eeeeee}\n" +
       ":root:root{--radius-2xl:0;--text-2xl:1.25rem}"
   );
+});
+
+test("우회 판정은 정해진 값 하나만 받는다", () => {
+  // 쿠키가 없는 상태가 기본이다 — 아무도 우회하고 있지 않다.
+  assert.equal(isUiThemeBypassed(undefined), false);
+  assert.equal(isUiThemeBypassed(""), false);
+
+  assert.equal(isUiThemeBypassed(UI_THEME_BYPASS_VALUE), true);
+
+  // 비슷하지만 다른 값은 우회가 아니다. 여기를 느슨하게 하면(예: truthy 판정)
+  // 지우려고 빈 문자열을 구운 쿠키가 남았을 때 판정이 갈린다.
+  assert.equal(isUiThemeBypassed("0"), false);
+  assert.equal(isUiThemeBypassed("true"), false);
+  assert.equal(isUiThemeBypassed(" 1"), false);
+});
+
+test("우회 쿠키 상수가 굽는 쪽과 보는 쪽에서 같은 것을 가리킨다", () => {
+  // 이름이 어긋나면 우회가 조용히 안 걸리고, 그 증상은 정말 화면이 안 보이는
+  // 순간에만 드러난다. 이름 자체를 시험이 못 박아 둔다.
+  assert.equal(UI_THEME_BYPASS_COOKIE, "ui-theme-bypass");
+  assert.equal(UI_THEME_BYPASS_VALUE, "1");
+
+  // 하루. 세션 쿠키도 영구 쿠키도 아니어야 하는 이유는 상수 주석에 있다.
+  assert.equal(UI_THEME_BYPASS_MAX_AGE_SECONDS, 24 * 60 * 60);
 });

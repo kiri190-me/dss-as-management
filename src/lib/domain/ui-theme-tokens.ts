@@ -851,3 +851,45 @@ export function serializeUiThemeCss(rows: readonly UiThemeOverrideRow[]): string
     .filter((block) => block.length > 0)
     .join("\n");
 }
+
+// ───────────────────────────────────────────────────────── 우회(탈출구)
+
+/**
+ * ── 화면이 안 보이게 됐을 때의 탈출구 ───────────────────────────────────
+ * 저장 경로에 대비 하한(UI_THEME_CONTRAST_FLOOR)이 있어도 "읽을 수는 있는데
+ * 못 쓰겠는" 조합은 얼마든지 만들어진다 — 글자 크기를 하한까지 줄이거나
+ * 테두리 색이 바탕과 붙어 버리는 식이다. 그때 되돌릴 편집 화면 자체가 그
+ * 오버라이드를 뒤집어쓰고 있으면, 고칠 수 있는 사람이 고칠 화면에 닿지
+ * 못한다. 이 쿠키가 붙은 브라우저에는 루트 레이아웃이 <style>을 아예 심지
+ * 않아서, 그 한 대만 오버라이드 이전의 화면을 본다.
+ *
+ * 이름·값·수명을 여기 상수로 둔 이유는, 굽는 쪽(api/theme/bypass)과 보는
+ * 쪽(app/layout.tsx)이 서로 다른 파일이기 때문이다. 문자열을 두 번 적으면
+ * 한쪽만 고쳐지는 날 우회가 조용히 안 걸리고, 그 증상은 "정말 화면이 안
+ * 보이는" 순간에만 드러난다. 이 파일은 DB도 server-only도 들어오지 않는
+ * 순수 모듈이라 양쪽에서 그대로 가져다 쓸 수 있다.
+ */
+export const UI_THEME_BYPASS_COOKIE = "ui-theme-bypass";
+
+/** 우회를 켜는 유일한 값. 이 값이 아니면 우회가 아니다. */
+export const UI_THEME_BYPASS_VALUE = "1";
+
+/**
+ * 우회 쿠키의 수명(초). 24시간.
+ *
+ * 세션 쿠키로 두지 않는 이유: 브라우저가 세션 복원을 켜 두면 창을 닫아도 안
+ * 지워져서, 우회를 켠 사람이 그 사실을 잊은 채 "나만 색이 안 바뀐다"를 계속
+ * 겪는다. 반대로 영구 쿠키로 두면 그 상태에 영영 갇힌다. 하루면 화면을
+ * 되돌리기에 충분하고, 잊어버려도 저절로 풀린다.
+ */
+export const UI_THEME_BYPASS_MAX_AGE_SECONDS = 86400;
+
+/**
+ * 이 브라우저가 오버라이드를 무시해야 하는가.
+ *
+ * 쿠키가 없을 때(undefined)와 다른 값일 때를 한자리에서 판정한다 — 레이아웃이
+ * `=== "1"`을 직접 적으면 상수를 둔 뜻이 사라진다.
+ */
+export function isUiThemeBypassed(cookieValue: string | undefined): boolean {
+  return cookieValue === UI_THEME_BYPASS_VALUE;
+}
