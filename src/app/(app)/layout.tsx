@@ -5,6 +5,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { roleLabels } from "@/lib/domain/types";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
+import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getSsoPortalUrl } from "@/lib/config/sso";
@@ -45,6 +46,13 @@ export default async function AppLayout({
   // requireAreaAccess로 따로 하므로, 여기서 열려 있다고 들어가지지는 않는다.
   const accessibleAreaKeys = await listAccessibleAreaKeys(user);
 
+  // 개발자 모드는 위 목록에 **담길 수 없다** — PERMISSION_AREAS 에 없기 때문이고,
+  // 없는 이유는 역할별 접근 권한 설정이 「접근을 넓히는 화면」이라서다
+  // (auth/developer-mode-gate.ts). 그래서 노출 여부를 여기서 따로 계산해
+  // 내려보낸다. 차단 자체는 여전히 그 페이지가 같은 함수로 다시 한다 —
+  // 여기서 감춘다고 막히는 것이 아니다.
+  const canEnterDeveloperMode = mayEnterDeveloperMode(user);
+
   // 헤더 종 알림 + 사이드바 "내게 온 결재 요청" 배지 — 여기서 넘기는 사용자
   // id와 역할은 **둘 다 위에서 살아 있는 계정을 다시 읽어 푼 것**이다
   // (resolveActingUserForSession) — 토큰에 박힌 옛 역할이 아니고, 다른 사람
@@ -67,6 +75,7 @@ export default async function AppLayout({
       <AppShell
         user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
         accessibleAreaKeys={accessibleAreaKeys}
+        canEnterDeveloperMode={canEnterDeveloperMode}
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
         portalUrl={portalUrl}

@@ -18,17 +18,20 @@ function eligibilityBlockReason(user: RepresentativeManagementUserRow): string |
 }
 
 /**
- * users.is_shipment_representative flag list — SUPER_ADMIN can toggle;
- * everyone else sees the same list read-only with an explanation. A
- * LAST_REPRESENTATIVE result from the server prompts a confirmation
- * re-submit rather than silently failing or silently forcing it through.
+ * users.is_shipment_representative flag list — whoever the server says may
+ * manage representatives can toggle (`canManageRepresentatives`, computed
+ * server-side as hasPermission(actor, "users.shipmentRepresentatives",
+ * "MANAGE") — 개발자 표시가 켜진 계정도 통과한다); everyone else sees the same
+ * list read-only with an explanation. A LAST_REPRESENTATIVE result from the
+ * server prompts a confirmation re-submit rather than silently failing or
+ * silently forcing it through.
  */
 export default function RepresentativeListSection({
   users,
-  isSuperAdmin,
+  canManageRepresentatives,
 }: {
   users: RepresentativeManagementUserRow[];
-  isSuperAdmin: boolean;
+  canManageRepresentatives: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<PendingAction>(null);
@@ -100,9 +103,13 @@ export default function RepresentativeListSection({
     const isPendingThis = pending?.userId === user.id;
     const isConfirmingThis = confirmingLastRemoval?.userId === user.id;
     const canFlag = user.isShipmentRepresentative || !blockReason;
-    const disabled = !isSuperAdmin || !canFlag || isPendingThis;
-    const disabledReason = !isSuperAdmin
-      ? "최고관리자만 변경할 수 있습니다."
+    const disabled = !canManageRepresentatives || !canFlag || isPendingThis;
+    // 🔴 문구에 역할 이름을 박지 않는다. 이 값은 서버와 같은 판정
+    // (hasPermission(actor, "users.shipmentRepresentatives", "MANAGE"))이고,
+    // 개발자 표시가 켜진 계정도 통과한다 — 역할 이름으로 적으면 막힌 사람에게
+    // 잘못된 이유를 알려 주게 된다.
+    const disabledReason = !canManageRepresentatives
+      ? "대표 지정을 관리할 권한이 없습니다."
       : !user.isShipmentRepresentative && blockReason
         ? blockReason
         : null;
@@ -154,9 +161,9 @@ export default function RepresentativeListSection({
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">최종 출하 승인 대표</h2>
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-        {isSuperAdmin
+        {canManageRepresentatives
           ? "대표로 지정된 사용자만 최종 출하 승인을 직접 처리할 수 있습니다."
-          : "최고관리자만 대표 지정을 변경할 수 있습니다."}
+          : "대표 지정을 관리할 권한이 있는 사용자만 이 목록을 변경할 수 있습니다."}
       </p>
 
       {message && (

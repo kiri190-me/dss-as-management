@@ -44,6 +44,18 @@ type SidebarProps = {
    * 모바일 드로어가 안 넘기고 있었다(2026-08-31, AppShell 에서 고침).
    */
   accessibleAreaKeys: readonly string[];
+  /**
+   * 개발자 모드 항목을 그릴지 — **위 접근 권한과는 다른 축이다.**
+   *
+   * 그 항목은 PERMISSION_AREAS 에 없어서 accessibleAreaKeys 에 절대 담기지
+   * 않는다(설정으로 열 수 없다는 뜻이다). 대신 서버가
+   * mayEnterDeveloperMode 로 계산해 내려보낸다(auth/developer-mode-gate.ts).
+   *
+   * 🔴 필수다. accessibleAreaKeys 와 **똑같은 함정**이 있다 — 데스크톱만 넘기고
+   * 모바일 드로어를 빠뜨리면 폰에서 아무나 이 메뉴를 본다(2026-08-31 에 실제로
+   * 일어난 일). 빠뜨리면 컴파일이 실패하게 둔다.
+   */
+  canEnterDeveloperMode: boolean;
   /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
   portalUrl?: string | null;
   /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
@@ -131,8 +143,8 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
-  const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys);
+export default function Sidebar({ activeHref, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
+  const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys, canEnterDeveloperMode);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   /** 좁은 모양으로 그릴지. prop 을 넘기지 않는 모바일 드로어는 늘 넓다. */
   const isNarrow = isCollapsed ?? false;

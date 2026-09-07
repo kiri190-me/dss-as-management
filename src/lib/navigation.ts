@@ -1,3 +1,4 @@
+import { DEVELOPER_MODE_NAV_KEY } from "./auth/developer-mode-gate";
 
 export type NavItem = {
   key: string;
@@ -51,6 +52,15 @@ export const navItems: NavItem[] = [
   // A/S 접수 알림 메일의 자동 발송 여부·수신자·문구. 「설정」 그룹에 두는 것은
   // 사용자 관리와 나란히 "누가 무엇을 받는가"를 정하는 자리이기 때문이다.
   { key: "mailSettings", href: "/settings/mail", label: "메일 설정" },
+  // 🔴 **역할별 접근 권한 설정으로는 절대 열 수 없는 유일한 항목이다.**
+  // PERMISSION_AREAS 에 없으므로 listAccessibleAreaKeys 가 이 열쇠를 돌려주는
+  // 일이 없고, 그래서 설정 화면에는 이 줄이 아예 나오지 않는다. 대신
+  // mayEnterDeveloperMode(auth/developer-mode-gate.ts) 하나가 노출을 정한다 —
+  // 아래 filterNavItemsForAccess 의 셋째 인자가 그 값이다.
+  // 열쇠는 상수로 적는다 — 아래 필터의 예외도 같은 상수를 본다. 둘이 갈리면
+  // 이 항목이 accessibleAreaKeys 로 걸러지고, 그 목록에는 절대 들어가지 않으므로
+  // **아무에게도 안 보이게** 된다(닫히는 쪽으로 실패하지만 조용히 실패한다).
+  { key: DEVELOPER_MODE_NAV_KEY, href: "/settings/developer", label: "개발자 모드" },
 ];
 
 
@@ -77,14 +87,38 @@ export const navItems: NavItem[] = [
  *
  * 차단 자체는 여전히 각 페이지의 requireAreaAccess 가 한다 — 여기서 보인다고
  * 들어가지는 것이 아니고, 여기서 감춘다고 막히는 것도 아니다.
+ *
+ * ── 🔴 예외는 하나다: 개발자 모드 ──────────────────────────────────────────
+ * 그 항목만 접근 권한 설정 **밖의** 길로 통과한다. 이유는 설정 화면의 존재
+ * 목적이 「접근을 넓히는 것」이라서다 — 목록에 넣으면 최고관리자가 영업
+ * 담당자에게 개발자 모드를 열어 줄 수 있게 된다(developer-mode-gate.ts).
+ *
+ * **이 예외가 퍼지지 못하게 하는 것**이 아래 모양의 요점이다:
+ *
+ *  - 예외 대상이 상수 하나(`DEVELOPER_MODE_NAV_KEY`)로 못 박혀 있다.
+ *    「예외 열쇠 목록」이 아니라 열쇠 하나다 — 둘째 항목을 예외로 만들려면
+ *    이 함수의 모양 자체를 고쳐야 하고, 그러면 시험이 먼저 걸린다.
+ *  - 새 입력은 **참/거짓 하나**다. 항목마다 붙일 수 있는 술어 인자가 아니다 —
+ *    그런 인자를 두는 것이 위 머리말이 금지한 「항목별 역할 술어」의 부활이다.
+ *  - 시험이 「설정 밖의 길로 보이는 항목은 정확히 하나이고 그것은
+ *    developerMode 다」를 단언한다(navigation.test.ts).
+ *
+ * ── 🔴 canEnterDeveloperMode 도 필수다 ─────────────────────────────────────
+ * accessibleAreaKeys 와 정확히 같은 함정이 있다. 데스크톱만 고치고 모바일
+ * 드로어를 빠뜨리면 **폰에서는 아무나 개발자 모드 메뉴를 본다** — 2026-08-31 에
+ * AppShell 에서 실제로 일어난 일이다. 그래서 선택 인자로 두지 않는다:
+ * 빠뜨리면 컴파일이 실패한다.
  * ============================================================================
  */
 export function filterNavItemsForAccess(
   items: NavItem[],
-  accessibleAreaKeys: readonly string[]
+  accessibleAreaKeys: readonly string[],
+  canEnterDeveloperMode: boolean
 ): NavItem[] {
   const allowed = new Set(accessibleAreaKeys);
-  return items.filter((item) => allowed.has(item.key));
+  return items.filter((item) =>
+    item.key === DEVELOPER_MODE_NAV_KEY ? canEnterDeveloperMode : allowed.has(item.key)
+  );
 }
 
 export type NavGroup = {
@@ -141,5 +175,12 @@ export const navGroups: NavGroup[] = [
   // navItems 의 key 와 섞이는 자리가 없다) 그대로 둬도 동작은 같지만, 한 파일 안에서
   // key: "settings" 가 뜻이 다르게 두 번 나오면 읽는 사람이 매번 그 사실을 다시
   // 확인해야 한다. 이름을 갈라 두는 편이 공짜다. 라벨은 요청대로 "설정" 이다.
-  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings", "mailSettings"] },
+  //
+  // 🔴 개발자 모드가 이 그룹의 **맨 끝**이다(2026-09-07). 그룹에 넣지 않으면
+  // 사이드바가 아예 그리지 않고, navigation.test.ts 가 「모든 항목은 정확히 한
+  // 그룹에 속한다」를 단언한다. 자리가 여기인 이유는 「시스템을 운영하는 자리」가
+  // 곧 이 그룹의 뜻이기 때문이고, 맨 끝인 이유는 다른 셋과 달리 **역할별 접근
+  // 권한 설정으로는 열 수 없는 항목**이라서다 — 노출 규칙이 다른 줄을 사이에
+  // 끼워 두면 읽는 사람이 그 사실을 매번 다시 확인해야 한다.
+  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings", "mailSettings", "developerMode"] },
 ];

@@ -5,7 +5,8 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { findPermissionArea } from "@/lib/auth/permission-areas";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
-import { navItems } from "@/lib/navigation";
+import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
+import { filterNavItemsForAccess, navItems } from "@/lib/navigation";
 import { roleLabels } from "@/lib/domain/types";
 
 export const metadata: Metadata = {
@@ -35,8 +36,15 @@ export default async function NoAccessPage({
   if (!actingUser) redirect("/login");
 
   const blockedArea = area ? findPermissionArea(area) : undefined;
-  const accessibleKeys = new Set(await listAccessibleAreaKeys(actingUser));
-  const accessibleItems = navItems.filter((item) => accessibleKeys.has(item.key));
+  // 사이드바와 **같은 창구**로 거른다. 예전에는 여기서 직접 Set 을 만들어
+  // 걸렀는데, 그러면 설정 밖의 길(개발자 모드)이 이쪽에만 없어서 "사이드바에는
+  // 있는 메뉴가 이 목록에는 없다"가 된다 — 이 저장소가 반복해 겪은
+  // 「보이는데 없다」류 어긋남이라 한 함수로 모은다.
+  const accessibleItems = filterNavItemsForAccess(
+    navItems,
+    await listAccessibleAreaKeys(actingUser),
+    mayEnterDeveloperMode(actingUser)
+  );
 
   return (
     <div className="flex flex-col gap-5">

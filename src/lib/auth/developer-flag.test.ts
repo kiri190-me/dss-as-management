@@ -15,6 +15,7 @@ import {
 } from "@/lib/domain/local/approval/transitions";
 import type { LocalShipmentDelegation } from "@/lib/domain/local/approval/delegation-types";
 import { actorHasAllowedRole, actorMay, DEVELOPER_PROMOTED_ROLE } from "./developer-promotion";
+import { mayEnterDeveloperMode } from "./developer-mode-gate";
 import {
   canViewPublishedProcedureTemplates,
   canViewAllProcedureTemplateStatuses,
@@ -1019,7 +1020,40 @@ test("🔴 대표 지정 판정을 화면이 직접 계산하지 않는다 — �
   );
   // 서버가 계산해 내려보낸 값을 받는다.
   assert.ok(/canManageRepresentatives:\s*boolean/.test(screen), "화면이 판정 prop 을 받지 않는다");
-  assert.ok(/isSuperAdmin=\{canManageRepresentatives\}/.test(screen), "받은 값을 아래로 넘기지 않는다");
+  // 🔴 아래 두 화면의 prop 이름도 2026-09-07 에 `canManageRepresentatives` 로
+  // 바뀌었다. 이름만 고친 순수 개명이지만 여기서 대조하는 문자열이 그것이라
+  // 함께 옮긴다 — 그리고 **두 자리 모두**에 넘기는지 개수로 확인한다. 한쪽만
+  // 넘기면 목록은 열리는데 위임 칸이 잠긴다(또는 그 반대).
+  assert.equal(
+    [...screen.matchAll(/canManageRepresentatives=\{canManageRepresentatives\}/g)].length,
+    2,
+    "받은 값을 아래 두 화면 모두에 넘기지 않는다"
+  );
+  // 옛 이름으로 넘기는 자리가 남아 있지 않다(주석에서 경위를 설명하는 것은 별개).
+  assert.ok(!/isSuperAdmin=\{/.test(screen), "옛 prop 이름 isSuperAdmin 으로 넘기는 자리가 남아 있다");
+});
+
+test("🔴 대표 지정 화면 둘의 prop 이름이 값의 뜻과 같다 — isSuperAdmin 은 거짓말이었다", () => {
+  // 넘어오는 값은 hasPermission(actor, "users.shipmentRepresentatives",
+  // "MANAGE") 이고, 개발자 표시가 켜진 계정도 통과한다. 이름이 `isSuperAdmin`
+  // 이면 읽는 사람이 「최고관리자만」으로 읽고, 화면 문구도 그렇게 적힌다.
+  for (const relative of [
+    "src/components/users/RepresentativeListSection.tsx",
+    "src/components/users/DelegationSection.tsx",
+  ]) {
+    const source = readFileSync(join(process.cwd(), relative), "utf8");
+    assert.ok(
+      /canManageRepresentatives:\s*boolean/.test(source),
+      `${relative}: prop 이름이 canManageRepresentatives 가 아니다`
+    );
+    assert.ok(!/\bisSuperAdmin\b/.test(source), `${relative}: 옛 이름 isSuperAdmin 이 남아 있다`);
+    // 안내 문구도 함께 고쳤다 — 「최고관리자만」이라고 적혀 있으면 개발자
+    // 표시로 통과하는 사람에게 어긋난 이유를 알려 준다.
+    assert.ok(
+      !/최고관리자만/.test(source),
+      `${relative}: 「최고관리자만」이라는 문구가 남아 있다`
+    );
+  }
 });
 
 test("🔴 화면 페이지와 서버 mutation 세 곳이 같은 영역 열쇠·같은 수준을 쓴다", () => {
@@ -1045,6 +1079,144 @@ test("🔴 화면 페이지와 서버 mutation 세 곳이 같은 영역 열쇠·
   // 화면 1 + 대표 지정 1 + 위임 생성·철회 2 = 4. 늘거나 줄면 새 자리가 생긴
   // 것이므로 같은 열쇠·수준인지 사람이 한 번 봐야 한다.
   assert.equal(total, 4, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
+});
+
+/**
+ * ============================================================================
+ * 🔴 개발자 모드 관문 — 설정으로는 절대 열 수 없는 문 하나
+ * ============================================================================
+ * 「개발자 모드」 메뉴만은 역할별 접근 권한 설정 밖의 길로 통과한다. 근거는
+ * 그 설정 화면의 존재 목적이 **「접근을 넓히는 것」**이라서다 — 목록에 넣으면
+ * 최고관리자가 A/S 엔지니어나 영업 담당자에게 그 화면을 열어 줄 수 있게 된다.
+ * 더미 데이터와 배포 도구를 다루게 될 화면에 그 길이 있어서는 안 된다.
+ *
+ * 관문은 `actorMay` 를 쓰지 않는다. 그 창구의 질문은 「최고관리자 동급 권한이
+ * 필요한 일을 해도 되는가」이고, 여기는 「이 사람이 **개발자냐**」다. 지금은 답이
+ * 같아 보이지만(개발자가 최고관리자 권한을 가지므로) 뜻이 달라서, 섞으면 승격
+ * 규칙을 손보는 날 이 문이 함께 움직인다(developer-mode-gate.ts 파일 주석).
+ * ============================================================================
+ */
+
+test("🔴 개발자 모드 관문 — 최고관리자와 개발자만 통과한다", () => {
+  // 최고관리자는 표시가 꺼져 있어도 통과한다.
+  assert.equal(mayEnterDeveloperMode(actorWithRole("SUPER_ADMIN")), true);
+  // 개발자 엔지니어도 통과한다 — 이 문이 열려야 하는 나머지 절반이다.
+  assert.equal(mayEnterDeveloperMode(engineer({ isDeveloper: true })), true);
+
+  // 다섯 역할의 **비개발자는 전부 거절**된다(최고관리자만 예외).
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      mayEnterDeveloperMode(actorWithRole(role)),
+      role === "SUPER_ADMIN",
+      `${role}: 개발자 표시가 꺼진 계정의 답이 틀렸다`
+    );
+    // 표시가 켜지면 역할과 무관하게 통과한다.
+    assert.equal(
+      mayEnterDeveloperMode(actorWithRole(role, { isDeveloper: true })),
+      true,
+      `${role}: 개발자인데 거절됐다`
+    );
+  }
+});
+
+test("🔴 승인되지 않은 개발자는 개발자 모드에 못 들어간다 — 승인은 승격 대상이 아니다", () => {
+  for (const role of ROLE_CODES) {
+    for (const isDeveloper of [false, true]) {
+      assert.equal(
+        mayEnterDeveloperMode(actorWithRole(role, { isDeveloper, approvalStatus: "PENDING" })),
+        false,
+        `${role}/개발자=${isDeveloper}: 승인 대기 계정이 통과했다`
+      );
+    }
+  }
+  // 승인 상태가 유일한 차이일 때 답이 갈린다는 것을 한 줄로 못 박는다.
+  assert.equal(mayEnterDeveloperMode(engineer({ isDeveloper: true })), true);
+  assert.equal(
+    mayEnterDeveloperMode(engineer({ isDeveloper: true, approvalStatus: "PENDING" })),
+    false
+  );
+});
+
+test("🔴 관문은 승격 창구(actorMay)를 쓰지 않는다 — 다른 질문이기 때문이다", () => {
+  const source = readFileSync(join(process.cwd(), "src/lib/auth/developer-mode-gate.ts"), "utf8");
+  assert.ok(
+    !/from ["'][^"']*developer-promotion["']/.test(source),
+    "관문이 승격 창구를 불러왔다 — 승격 규칙을 바꾸는 날 이 문이 함께 움직인다"
+  );
+  // 호출을 본다 — 파일 주석은 왜 안 쓰는지를 설명하느라 그 이름을 적고 있다.
+  assert.ok(!/\bactorMay\(|\bactorHasAllowedRole\(/.test(source), "관문 판정에 승격 창구가 들어갔다");
+  // 그런데 답은 지금 「최고관리자 ∪ 개발자」와 같아야 한다 — 뜻이 다르다는 것이
+  // 값이 다르다는 뜻은 아니다. 갈리면 어느 한쪽이 잘못된 것이므로 여기서 걸린다.
+  for (const role of ROLE_CODES) {
+    for (const isDeveloper of [false, true]) {
+      const actor = actorWithRole(role, { isDeveloper });
+      assert.equal(
+        mayEnterDeveloperMode(actor),
+        actorMay(actor, (r) => r === DEVELOPER_PROMOTED_ROLE),
+        `${role}/개발자=${isDeveloper}: 관문의 답이 「최고관리자 ∪ 개발자」와 갈렸다`
+      );
+    }
+  }
+});
+
+test("🔴 데스크톱과 모바일 드로어가 같은 답을 준다 — 폰에서만 문이 열려 있던 자리다", () => {
+  // 2026-08-31 에 accessibleAreaKeys 가 정확히 여기서 새어 나갔다: 데스크톱
+  // <aside> 에만 넘기고 모바일 드로어를 빠뜨려서, 폰에서는 접근 권한 설정이
+  // 통째로 무시됐다. 같은 처방을 쓴다 — **필수 prop** 으로 두어 빠뜨리면
+  // 컴파일이 실패하게 하고, 두 호출부가 같은 값을 넘기는지 여기서 대조한다.
+  const shell = readFileSync(join(process.cwd(), "src/components/layout/AppShell.tsx"), "utf8");
+
+  // 필수 prop 이다(물음표가 붙어 있으면 빠뜨려도 컴파일이 통과한다).
+  assert.ok(
+    /canEnterDeveloperMode:\s*boolean/.test(shell),
+    "AppShell 이 canEnterDeveloperMode 를 받지 않는다"
+  );
+  assert.ok(
+    !/canEnterDeveloperMode\?:/.test(shell),
+    "canEnterDeveloperMode 가 선택 인자다 — 빠뜨려도 컴파일이 통과한다"
+  );
+
+  // <Sidebar 호출이 정확히 둘(데스크톱·모바일)이고, 둘 다 같은 값을 넘긴다.
+  const sidebarCalls = [...shell.matchAll(/<Sidebar\b/g)].length;
+  assert.equal(sidebarCalls, 2, `AppShell 의 Sidebar 호출부가 둘이 아니다: ${sidebarCalls}`);
+  assert.equal(
+    [...shell.matchAll(/canEnterDeveloperMode=\{canEnterDeveloperMode\}/g)].length,
+    sidebarCalls,
+    "Sidebar 호출부 중 관문 값을 안 넘기는 곳이 있다 — 폰과 컴퓨터가 다른 메뉴를 그린다"
+  );
+  // 접근 권한 쪽도 같은 수만큼 넘어간다 — 예전에 새던 그 값이다.
+  assert.equal(
+    [...shell.matchAll(/accessibleAreaKeys=\{accessibleAreaKeys\}/g)].length,
+    sidebarCalls
+  );
+
+  // Sidebar 쪽도 필수로 받고, 거른다.
+  const sidebar = readFileSync(join(process.cwd(), "src/components/layout/Sidebar.tsx"), "utf8");
+  assert.ok(/canEnterDeveloperMode:\s*boolean/.test(sidebar), "Sidebar 가 관문 값을 받지 않는다");
+  assert.ok(!/canEnterDeveloperMode\?:/.test(sidebar), "Sidebar 의 관문 prop 이 선택 인자다");
+  assert.ok(
+    /filterNavItemsForAccess\(navItems,\s*accessibleAreaKeys,\s*canEnterDeveloperMode\)/.test(sidebar),
+    "Sidebar 가 관문 값을 필터에 넘기지 않는다"
+  );
+});
+
+test("🔴 개발자 모드 페이지가 스스로 막는다 — 메뉴에서 감추는 것은 관문이 아니다", () => {
+  // 주소를 직접 쳐도 막혀야 한다. 다른 페이지들이 requireAreaAccess 를 부르는
+  // 자리에서 이 페이지는 같은 관문 함수를 부른다 — 영역 가드는 이 질문에 답할
+  // 수 없다(PERMISSION_AREAS 에 developerMode 가 없으므로 늘 NONE 이고, 그러면
+  // 최고관리자까지 막힌다).
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/settings/developer/page.tsx"), "utf8");
+  assert.ok(
+    /from ["'][^"']*developer-mode-gate["']/.test(page),
+    "페이지가 관문 창구를 부르지 않는다"
+  );
+  assert.ok(/if\s*\(!mayEnterDeveloperMode\(/.test(page), "페이지가 스스로 막지 않는다");
+  assert.ok(/redirect\(/.test(page), "막힐 때 보낼 곳이 없다");
+  // 🔴 없는 기능의 단추를 두지 않는다. 누르면 아무 일도 안 나는 단추는
+  // 「고장난 화면」으로 읽히고, 이 화면에서는 특히 「배포한 줄 알았는데 안 됐다」가
+  // 된다. 앱은 자기 다음 버전을 자기 안에서 배포할 수 없다(CLAUDE.md 의 배포 규칙).
+  assert.ok(!/<button\b/.test(page), "동작하지 않는 단추가 자리 표시로 들어갔다");
+  assert.ok(!/<form\b/.test(page), "저장할 곳이 없는 입력 양식이 들어갔다");
 });
 
 test("개발자 표시는 역할별 권한 설정으로 켤 수 없다 — 설정 단위에 존재하지 않는다", () => {

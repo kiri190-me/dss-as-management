@@ -29,12 +29,38 @@ import { canViewWorkflowTemplates, canPublishWorkflowTemplates } from "./workflo
 
 // ─────────────────────────────────────────────── 영역 목록과 메뉴의 대응
 
-test("권한 영역과 메뉴가 1:1이다", () => {
+/**
+ * 🔴 설정으로 열 수 없는 메뉴 — **개발자 모드 하나뿐이다**(2026-09-07).
+ *
+ * 아래 1:1 단언에서 이 항목을 빼는 것은 약화가 아니라 **정확화**다. 이 메뉴는
+ * 일부러 PERMISSION_AREAS 에 없다 — 역할별 접근 권한 설정 화면의 존재 목적이
+ * 「접근을 넓히는 것」이라, 목록에 넣으면 최고관리자가 영업 담당자에게 개발자
+ * 모드를 열어 줄 수 있게 된다(auth/developer-mode-gate.ts).
+ *
+ * 목록을 상수로 못 박아 둔 이유: 둘째 항목이 여기로 들어오는 것은 IA 변경이고,
+ * 그 사실이 이 줄에서 먼저 드러나야 한다. `filter(k => !areaKeys.has(k))` 처럼
+ * 계산해 버리면 예외가 몇 개든 조용히 통과한다.
+ */
+const SETTINGS_EXEMPT_NAV_KEYS = ["developerMode"] as const;
+
+test("권한 영역과 메뉴가 1:1이다 — 설정으로 열 수 없는 개발자 모드만 예외", () => {
   // 어긋나면 화면에 나오지 않는 메뉴가 생기거나(설정 불가), 설정은 있는데
   // 갈 곳이 없는 줄이 생긴다.
   const areaKeys = PERMISSION_AREAS.map((area) => area.key).sort();
-  const navKeys = navItems.map((item) => item.key).sort();
+  const navKeys = navItems
+    .map((item) => item.key)
+    .filter((key) => !(SETTINGS_EXEMPT_NAV_KEYS as readonly string[]).includes(key))
+    .sort();
   assert.deepEqual(areaKeys, navKeys);
+
+  // 예외 목록은 실재하는 메뉴만 담고, 그중 어느 것도 영역 목록에 없어야 한다 —
+  // 한쪽에만 남으면 「설정에는 있는데 예외라고 적힌」 모순이 생긴다.
+  const navKeySet = new Set(navItems.map((item) => item.key));
+  const areaKeySet = new Set(areaKeys);
+  for (const key of SETTINGS_EXEMPT_NAV_KEYS) {
+    assert.ok(navKeySet.has(key), `예외 목록의 "${key}" 는 실재하는 메뉴가 아니다`);
+    assert.equal(areaKeySet.has(key), false, `"${key}" 가 권한 영역 목록에 들어갔다`);
+  }
 });
 
 test("영역 키는 중복되지 않는다", () => {

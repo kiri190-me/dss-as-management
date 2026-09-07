@@ -120,14 +120,15 @@ export default function RepresentativeManagementScreen({
         <NotificationSettings data={notificationSettings} />
       ) : (
         <>
-          {/* 두 아래 화면의 prop 이름은 아직 isSuperAdmin 이다 — 넘기는 값은
-              「대표 지정·위임을 관리해도 되는가」이고, 이제 최고관리자 여부가
-              아니다. 이름을 고치는 것은 이 조각의 범위 밖이라 남겨 둔다. */}
-          <RepresentativeListSection users={users} isSuperAdmin={canManageRepresentatives} />
+          {/* 아래 두 화면의 prop 이름도 이제 값이 뜻하는 바와 같다
+              (2026-09-07). 예전에는 `isSuperAdmin` 이었는데, 넘기는 값은
+              「대표 지정·위임을 관리해도 되는가」이고 개발자 표시가 생기면서
+              최고관리자 여부와 갈렸다 — 이름이 거짓말을 하고 있었다. */}
+          <RepresentativeListSection users={users} canManageRepresentatives={canManageRepresentatives} />
 
           <DelegationSection
             actingUser={actingUser}
-            isSuperAdmin={canManageRepresentatives}
+            canManageRepresentatives={canManageRepresentatives}
             representatives={representatives}
             allUsers={users}
             delegations={delegations}

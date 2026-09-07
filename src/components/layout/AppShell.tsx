@@ -32,6 +32,17 @@ type AppShellProps = {
    */
   accessibleAreaKeys: readonly string[];
   /**
+   * 개발자 모드 메뉴를 그릴지(layout.tsx가 서버에서 mayEnterDeveloperMode 로
+   * 계산해 넘긴다). 위 accessibleAreaKeys 와 **다른 축이다** — 그 항목은
+   * 역할별 접근 권한 설정에 존재하지 않으므로 저 목록에 담길 수 없다
+   * (auth/developer-mode-gate.ts).
+   *
+   * **null 도 선택 인자도 허용하지 않는다.** 아래 두 Sidebar(데스크톱 <aside>,
+   * 모바일 드로어)에 똑같이 넘겨야 하고, 한쪽을 빠뜨리면 폰에서만 관문이
+   * 사라진다 — accessibleAreaKeys 가 정확히 그렇게 새던 자리다.
+   */
+  canEnterDeveloperMode: boolean;
+  /**
    * 로그인한 사용자가 결재해야 할 A/S 건수(layout.tsx가 서버에서 계산해
    * 넘긴다). 사이드바 배지를 그릴지에만 쓴다 — 실제 결재 권한은 승인
    * 화면/서버 액션이 각자 다시 확인한다. 0이면 배지가 없다.
@@ -64,7 +75,7 @@ function isKeyboardFocus(element: HTMLElement): boolean {
   }
 }
 
-export default function AppShell({ children, user, accessibleAreaKeys, myPendingApprovalCount = 0, notifications = [], portalUrl = null }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalUrl = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
@@ -153,6 +164,11 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
             activeHref={pathname}
             user={user}
             accessibleAreaKeys={accessibleAreaKeys}
+            // 🔴 아래 모바일 드로어에도 **같은 값**을 넘긴다. 두 곳이 갈리면
+            // 폰과 컴퓨터가 서로 다른 메뉴를 그린다(같은 파일 안의 두 호출부라
+            // 여기서 갈리는 것을 막을 수 있는 것은 사람 눈뿐이다 —
+            // developer-mode-gate 시험이 이 파일을 읽어 대조한다).
+            canEnterDeveloperMode={canEnterDeveloperMode}
             // 메뉴와 하단 유틸의 **모양**은 둘 다 "지금 보이는가"를 따른다
             // — 머무름으로 펼쳐진 동안에도 하단이 넓은 모양이다.
             isCollapsed={!isSidebarOpen}
@@ -186,10 +202,15 @@ export default function AppShell({ children, user, accessibleAreaKeys, myPending
               {/* 🔴 accessibleAreaKeys 를 여기에도 넘긴다. 빠뜨렸던 동안 모바일
                   드로어만 **역할별 접근 권한 설정을 통째로 무시**했다 —
                   관리자가 좁혀도 폰에서는 메뉴가 그대로 보였다(2026-08-31). */}
+              {/* 🔴 canEnterDeveloperMode 도 데스크톱과 **같은 값**으로 여기에
+                  넘긴다. 빠뜨리면 컴파일이 실패한다(필수 prop) — 위
+                  accessibleAreaKeys 가 조용히 빠져 있었던 경험 때문에 그렇게
+                  두었다. */}
               <Sidebar
                 activeHref={pathname}
                 user={user}
                 accessibleAreaKeys={accessibleAreaKeys}
+                canEnterDeveloperMode={canEnterDeveloperMode}
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
                 portalUrl={portalUrl}

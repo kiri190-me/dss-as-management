@@ -36,22 +36,22 @@ function toDatetimeLocalValue(date: Date): string {
 
 export default function DelegationSection({
   actingUser,
-  isSuperAdmin,
+  canManageRepresentatives,
   representatives,
   allUsers,
   delegations,
 }: {
   actingUser: ActingUser;
-  isSuperAdmin: boolean;
+  canManageRepresentatives: boolean;
   representatives: RepresentativeManagementUserRow[];
   allUsers: RepresentativeManagementUserRow[];
   delegations: ShipmentDelegationRow[];
 }) {
   const router = useRouter();
   const actingUserIsRepresentative = representatives.some((r) => r.id === actingUser.id);
-  const canAssign = isSuperAdmin || actingUserIsRepresentative;
+  const canAssign = canManageRepresentatives || actingUserIsRepresentative;
 
-  const defaultRepresentativeId = isSuperAdmin ? (representatives[0]?.id ?? "") : actingUser.id;
+  const defaultRepresentativeId = canManageRepresentatives ? (representatives[0]?.id ?? "") : actingUser.id;
   const [representativeUserId, setRepresentativeUserId] = useState(defaultRepresentativeId);
   const [delegateUserId, setDelegateUserId] = useState("");
   const now = new Date();
@@ -127,7 +127,7 @@ export default function DelegationSection({
     const displayStatus = deriveDelegationDisplayStatus(delegation);
     const canRevoke =
       (displayStatus === "ACTIVE" || displayStatus === "SCHEDULED") &&
-      (isSuperAdmin || actingUser.id === delegation.representativeUserId);
+      (canManageRepresentatives || actingUser.id === delegation.representativeUserId);
 
     if (canRevoke) {
       return (
@@ -160,7 +160,7 @@ export default function DelegationSection({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
               대표
-              {isSuperAdmin ? (
+              {canManageRepresentatives ? (
                 <select
                   value={representativeUserId}
                   onChange={(e) => setRepresentativeUserId(e.target.value)}
@@ -243,7 +243,9 @@ export default function DelegationSection({
         </form>
       ) : (
         <p className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
-          대표 본인 또는 최고관리자만 위임을 지정할 수 있습니다.
+          {/* 위 canAssign 과 같은 말이어야 한다 — 문구에 역할 이름을 박으면
+              개발자 표시로 통과하는 사람에게 어긋난 이유를 알려 준다. */}
+          대표 본인 또는 위임을 관리할 권한이 있는 사용자만 위임을 지정할 수 있습니다.
         </p>
       )}
 

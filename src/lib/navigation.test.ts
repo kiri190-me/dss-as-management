@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "./navigation";
 import { baselinePermissionLevel } from "./auth/permission-baseline";
+import { PERMISSION_AREAS } from "./auth/permission-areas";
+import { PERMISSION_LEAF_KEYS } from "./auth/permission-features";
 import type { Role } from "./domain/types";
 
 /**
@@ -23,13 +25,21 @@ import type { Role } from "./domain/types";
  * 앱이 실제로 쓰는 경로와 같다 — listAccessibleAreaKeys 가 DB(없으면 기본
  * 정책)에서 키 목록을 만들고, filterNavItemsForAccess 가 그것으로 거른다.
  * 여기서는 DB 를 타지 않으려고 기본 정책을 직접 쓴다.
+ *
+ * 🔴 개발자 모드 관문은 **닫아 둔다**(셋째 인자 false). 이 함수가 답하는 질문은
+ * 「역할과 접근 권한 설정만으로 무엇이 보이는가」이고, 개발자 모드는 그 축에
+ * 아예 존재하지 않는다 — 어느 역할의 기본 노출에도 없는 것이 사실이다. 관문이
+ * 열렸을 때의 답은 아래 「설정 밖의 길」 시험들이 따로 본다.
  */
 function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
   const accessibleAreaKeys = items
     .map((item) => item.key)
     .filter((key) => baselinePermissionLevel(key, role) !== "NONE");
-  return filterNavItemsForAccess(items, accessibleAreaKeys);
+  return filterNavItemsForAccess(items, accessibleAreaKeys, false);
 }
+
+/** 다섯 역할 — 아래 시험들이 같은 목록을 돌게 한다. */
+const ALL_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const;
 
 
 /**
@@ -103,15 +113,23 @@ test("navigation: 항목별 역할 술어가 없다 — 노출은 접근 권한 
  * 여기서 걸린다.
  */
 test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노출", () => {
+  // 🔴 developerMode 는 **다섯 역할 전부에서 빠진다**(2026-09-07). 약화가 아니라
+  // 사실이다 — 그 항목은 PERMISSION_AREAS 에 없으므로 어느 역할의 기본 노출에도
+  // 없고(baselinePermissionLevel 이 NONE 을 돌려준다), 노출은 오직 개발자 모드
+  // 관문으로만 정해진다(auth/developer-mode-gate.ts). 다른 항목처럼 「이 역할만
+  // 빠진다」로 적으면 나머지 역할에게 열린 것처럼 읽힌다.
   const expected: Record<string, string[]> = {
-    SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => k !== "myActiveWork"),
-    ADMIN: navItems.map((i) => i.key).filter((k) => k !== "myActiveWork"),
+    SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
+    ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
     AS_ENGINEER: navItems
       .map((i) => i.key)
-      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings"].includes(k)),
+      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings", "developerMode"].includes(k)),
     SALES: navItems
       .map((i) => i.key)
-      .filter((k) => !["myActiveWork", "technicalProcedures", "workflows", "mailSettings"].includes(k)),
+      .filter(
+        (k) =>
+          !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "developerMode"].includes(k)
+      ),
     INVENTORY_MANAGER: navItems
       .map((i) => i.key)
       .filter(
@@ -119,11 +137,12 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
           ![
             "myActiveWork", "technicalProcedures", "customers", "productModels", "workflows",
             "domesticOrders", "quotes", "repairLabor", "customerPortal", "mailSettings",
+            "developerMode",
           ].includes(k)
       ),
   };
 
-  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+  for (const role of ALL_ROLES) {
     assert.deepEqual(
       filterNavItemsForRole(navItems, role).map((i) => i.key),
       expected[role],
@@ -149,6 +168,74 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER see the workflows
       `expected workflows hidden for ${role}`
     );
   }
+});
+
+/**
+ * ============================================================================
+ * 🔴 설정 밖의 길 — **하나뿐이고, 하나로 남아야 한다**
+ * ============================================================================
+ * 위 「항목별 역할 술어가 없다」 단언은 그대로 서 있다(개발자 모드 항목에도
+ * isVisibleForRole 을 붙이지 않았다). 그 불변식이 금지한 것은 **아무 항목에나
+ * 붙일 수 있는 술어**이고, 여기 있는 것은 이름이 박힌 예외 하나다.
+ *
+ * 예외를 두는 근거: 역할별 접근 권한 설정 화면의 존재 목적이 「접근을 넓히는
+ * 것」이라, 개발자 모드를 그 목록에 넣으면 최고관리자가 A/S 엔지니어나 영업
+ * 담당자에게 그 화면을 열어 줄 수 있게 된다(developer-mode-gate.ts).
+ *
+ * 아래 시험들이 그 예외가 **퍼지지 못하게** 못 박는다.
+ * ============================================================================
+ */
+
+test("🔴 설정 밖의 길로 보이는 항목은 정확히 하나이고 developerMode 다", () => {
+  // 접근 권한을 통째로 비운 상태 = 설정이 아무것도 열어 주지 않은 상태.
+  // 그런데도 남는 항목이 곧 「설정 밖의 길로 통과한 항목」이다.
+  assert.deepEqual(
+    filterNavItemsForAccess(navItems, [], true).map((i) => i.key),
+    ["developerMode"],
+    "설정 밖의 길로 통과하는 항목이 developerMode 하나가 아니다"
+  );
+
+  // 관문이 닫혀 있으면 그 하나까지 사라진다 — 예외가 「늘 열린 문」이 아니다.
+  assert.deepEqual(filterNavItemsForAccess(navItems, [], false), []);
+});
+
+test("🔴 관문은 developerMode 하나만 움직인다 — 다른 항목의 노출을 건드리지 않는다", () => {
+  // 접근 권한을 전부 연 상태에서 관문만 뒤집는다. 달라지는 항목이 하나뿐이어야
+  // 한다 — 관문이 다른 줄에 새면 여기서 걸린다.
+  const allKeys = navItems.map((i) => i.key);
+  const open = filterNavItemsForAccess(navItems, allKeys, true).map((i) => i.key);
+  const shut = filterNavItemsForAccess(navItems, allKeys, false).map((i) => i.key);
+
+  assert.deepEqual(open, allKeys, "관문이 열렸는데 다른 항목이 사라졌다");
+  assert.deepEqual(shut, allKeys.filter((k) => k !== "developerMode"));
+});
+
+test("🔴 developerMode 는 역할별 접근 권한 설정에 존재하지 않는다 — 그래서 열어 줄 수 없다", () => {
+  // 영역 목록에 있으면 설정 화면에 줄이 하나 생기고, 최고관리자가 다른 역할에게
+  // 개발자 모드를 열어 줄 수 있게 된다. 잎 키 쪽도 같은 이유다.
+  assert.equal(PERMISSION_AREAS.some((area) => area.key === "developerMode"), false);
+  assert.equal(PERMISSION_LEAF_KEYS.includes("developerMode"), false);
+  assert.equal(
+    PERMISSION_LEAF_KEYS.some((key) => key.startsWith("developerMode.")),
+    false,
+    "개발자 모드의 하위 기능 노드가 생겼다 — 설정으로 열 수 있게 됐다는 뜻이다"
+  );
+
+  // 그래서 기본 정책도 다섯 역할 전부 접근 불가다(목록에 없는 키는 NONE).
+  for (const role of ALL_ROLES) {
+    assert.equal(baselinePermissionLevel("developerMode", role), "NONE", role);
+  }
+});
+
+test("🔴 개발자 모드 항목은 「설정」 그룹에 있고, 주소는 /settings/developer 다", () => {
+  const item = navItems.find((i) => i.key === "developerMode");
+  assert.equal(item?.href, "/settings/developer");
+  assert.equal(item?.label, "개발자 모드");
+  // 하위메뉴가 아니다 — parentKey 를 붙이면 그룹에서 빠져 사이드바가 다르게 그린다.
+  assert.equal(item?.parentKey, undefined);
+
+  const owning = navGroups.filter((g) => g.itemKeys.includes("developerMode")).map((g) => g.key);
+  assert.deepEqual(owning, ["systemSettings"]);
 });
 
 test("navigation: no 'procedures' (all-category list) entry exists", () => {
@@ -328,7 +415,9 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["customers", "productModels"]);
   // 메일 설정이 「설정」 그룹 세 번째로 붙었다(2026-08-31) — 사용자 관리와
   // 나란히 "누가 무엇을 받는가"를 정하는 자리다.
-  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings", "mailSettings"]);
+  // 개발자 모드가 「설정」 그룹 네 번째, 맨 끝으로 붙었다(2026-09-07) — 노출
+  // 규칙이 다른 셋과 다른 유일한 줄이라 사이에 끼우지 않았다(navigation.ts 주석).
+  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings", "mailSettings", "developerMode"]);
 });
 
 test("navGroups: 그룹의 key·이름·차례 — '설정'은 '관리' 다음, 맨 끝이다", () => {
@@ -363,9 +452,12 @@ test("navGroups: 사용자 관리와 시스템 설정은 '관리'가 아니라 '
 });
 
 test("filterNavItemsForRole: unrestricted items remain visible to every role", () => {
+  // 🔴 developerMode(2026-09-07)가 다섯 줄 전부에서 하나씩 늘렸다 — 이 항목은
+  // 역할·설정 축에 존재하지 않으므로 **모든 역할에게 감춰진다.** 그것이 이
+  // 표에서 다섯 줄이 함께 늘어난 유일한 경우다.
   const hiddenCountByRole: Record<string, number> = {
-    SUPER_ADMIN: 1, // myActiveWork
-    ADMIN: 1, // myActiveWork
+    SUPER_ADMIN: 2, // myActiveWork + developerMode
+    ADMIN: 2, // myActiveWork + developerMode
     // Excel 이관 메뉴가 사라지면서 역할별로 감춰지는 항목이 하나씩 줄었고,
     // 내자 정리가 생기면서 엔지니어에게 감춰지는 항목이 처음으로 하나 생겼다.
     // 견적서(2026-08-28)가 내자 정리와 똑같은 세 역할에게만 보이므로, 감춰지는
@@ -373,14 +465,14 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 수리 작업 비용(2026-08-31)이 견적서와 같은 판정이라, 견적서가 감춰지는
     // 두 역할에서 감춰지는 항목이 하나씩 더 늘었다.
     // 메일 설정(2026-08-31)은 관리자 이상만 본다 — 아래 세 역할에서 하나씩 늘었다.
-    AS_ENGINEER: 4, // domesticOrders + quotes + repairLabor + mailSettings
-    SALES: 4, // myActiveWork + technicalProcedures + workflows + mailSettings
+    AS_ENGINEER: 5, // domesticOrders + quotes + repairLabor + mailSettings + developerMode
+    SALES: 5, // myActiveWork + technicalProcedures + workflows + mailSettings + developerMode
     // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
     // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
     // 나갈 안내를 정하는 화면인데 그 역할에는 접수를 만들 수단이 없다.
-    INVENTORY_MANAGER: 10, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings
+    INVENTORY_MANAGER: 11, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings + developerMode
   };
-  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+  for (const role of ALL_ROLES) {
     const visible = filterNavItemsForRole(navItems, role);
     assert.equal(visible.length, navItems.length - hiddenCountByRole[role]);
     assert.ok(visible.some((i) => i.key === "dashboard"));
