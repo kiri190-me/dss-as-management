@@ -188,7 +188,7 @@ export async function savePartOwnerSettings(
     return await db.transaction(async (tx): Promise<SavePartMinimumQuantitiesResult> => {
       const actor = await requireActor(tx, input.actorUserId);
 
-      if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.parts", "WRITE"))) {
         throw new SaveRejected({ ok: false, code: "FORBIDDEN", message: "수정 권한이 없습니다." });
       }
 

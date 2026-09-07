@@ -48,6 +48,8 @@ test("mock mode: resolves a known mock user id to the matching ActingUser", asyn
     name: known.name,
     role: known.role,
     approvalStatus: known.approvalStatus,
+    // mock 사용자에는 is_developer 칸이 없다 — 관문이 언제나 false 로 채운다.
+    isDeveloper: false,
   });
 });
 
@@ -70,6 +72,8 @@ test('mock mode: resolves correctly with AUTH_SOURCE explicitly set to "mock"', 
     name: known.name,
     role: known.role,
     approvalStatus: known.approvalStatus,
+    // mock 사용자에는 is_developer 칸이 없다 — 관문이 언제나 false 로 채운다.
+    isDeveloper: false,
   });
 });
 

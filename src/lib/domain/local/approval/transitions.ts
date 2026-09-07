@@ -13,6 +13,17 @@ export type ActingUser = {
   name: string;
   role: Role;
   approvalStatus: AccountApprovalStatus;
+  /**
+   * 개발자 표시(users.is_developer).
+   *
+   * **역할이 아니다.** 이 값이 켜져도 role은 그대로다 — A/S 엔지니어인 개발자는
+   * 배정·「내 작업」·부품 요청 자격·역할 이름표·감사 기록에서 계속 엔지니어다.
+   * 바뀌는 것은 권한 판정 하나뿐이고, 그 승격은 permission-resolver.ts 한 곳에서만
+   * 일어난다(개발자면 최고관리자로 해석한다).
+   *
+   * mock 모드에는 이 칸이 없으므로 언제나 false다.
+   */
+  isDeveloper: boolean;
 };
 
 export const REQUEST_ELIGIBLE_ROLES: readonly Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"];

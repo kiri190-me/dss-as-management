@@ -51,7 +51,7 @@ export default async function DomesticOrdersPage() {
   // 고치는 권한은 관리자가 정한 수준 하나로 정해진다(2026-08-31 전환) —
   // 예전에는 canEditDomesticOrders(역할)를 AND 로 겹쳐 넓혀도 열리지 않았다.
   const canEdit =
-    actingUser !== null && (await hasPermission(actingUser.role, "domesticOrders", "WRITE"));
+    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "WRITE"));
 
   // 고칠 수 없는 사람에게는 폼의 드롭다운 목록을 읽지 않는다 — 쓰지 않을 값을
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).

@@ -71,7 +71,7 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
 
   return (
     <InventoryPartDetailScreen
-      capabilities={await resolveInventoryCapabilities(actingUser.role)}
+      capabilities={await resolveInventoryCapabilities(actingUser)}
       part={part}
       history={history}
       minimumQuantities={minimumQuantities}

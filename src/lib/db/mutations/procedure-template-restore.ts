@@ -137,7 +137,7 @@ export async function restoreProcedureTemplateChange(templateId: string, actorUs
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      const templateRow = await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      const templateRow = await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       const groups = await loadTemplateHistoryGroups(tx, templateId);
       const targetGroup = groups.find((g) => g.changeGroupId === targetChangeGroupId);

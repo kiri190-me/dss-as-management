@@ -61,7 +61,7 @@ export default async function ProductModelDetailPage({
     redirect("/login");
   }
 
-  if (!(await hasPermission(actingUser.role, "productModels.view", "READ"))) {
+  if (!(await hasPermission(actingUser, "productModels.view", "READ"))) {
     return <PlaceholderPage title="제품 모델 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -78,8 +78,8 @@ export default async function ProductModelDetailPage({
   // 아래 자료 조회보다 **먼저** 묻는다 — 고객사 후보 목록을 내려보낼지 말지가
   // canEdit 에 달려 있기 때문이다(다음 묶음의 마지막 줄).
   const [canEdit, canManageFiles] = await Promise.all([
-    hasPermission(actingUser.role, "productModels.edit", "WRITE"),
-    hasPermission(actingUser.role, "productModels.files", "WRITE"),
+    hasPermission(actingUser, "productModels.edit", "WRITE"),
+    hasPermission(actingUser, "productModels.files", "WRITE"),
   ]);
 
   // A/S 이력 구역이 쓰는 두 재료와, 사진·도면 구역이 쓰는 두 목록, 그리고 수정

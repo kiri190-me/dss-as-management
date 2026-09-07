@@ -42,7 +42,7 @@ export default async function CustomerRequestsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "customerPortal", "READ"))) {
+  if (!(await hasPermission(actingUser, "customerPortal", "READ"))) {
     return (
       <PlaceholderPage
         title="수리 의뢰"
@@ -63,7 +63,7 @@ export default async function CustomerRequestsPage() {
   return (
     <CustomerRequestListScreen
       requests={requests}
-      canConvert={await hasPermission(actingUser.role, "customerPortal", "WRITE")}
+      canConvert={await hasPermission(actingUser, "customerPortal", "WRITE")}
     />
   );
 }

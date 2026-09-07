@@ -83,7 +83,7 @@ export default async function WeeklyReportPage({
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEditGoals =
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "weeklyReport", "WRITE"));
+    (await hasPermission(actingUser, "weeklyReport", "WRITE"));
 
   // 상세표의 `비고` 는 위 두 구역과 **다른 권한**으로 열린다. 그 값은 주간보고가
   // 가진 자료가 아니라 **수리 건의 컬럼**(repair_cases.notes)이고, 저장도 수리 건

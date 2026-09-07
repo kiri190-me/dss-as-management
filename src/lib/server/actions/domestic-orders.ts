@@ -82,7 +82,7 @@ async function resolveAuthorizedActingUser() {
   // canEditDomesticOrders(역할)와 AND 였고, 그래서 넓혀 줘도 열리지 않았다.
   // 기본값은 그대로다 — permission-baseline.ts 의 domesticOrders 기본값이
   // 바로 그 역할 함수라, 설정을 건드리지 않으면 같은 답을 낸다.
-  if (!(await hasPermission(actingUser.role, "domesticOrders", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "domesticOrders", "WRITE"))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "이 작업을 수행할 권한이 없습니다." };
   }
   return { ok: true as const, actingUser };

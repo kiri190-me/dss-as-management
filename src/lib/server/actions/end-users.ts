@@ -73,7 +73,7 @@ export async function createEndUserAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!(await hasPermission(auth.actingUser.role, "customers.endUsers", "WRITE"))) {
+  if (!(await hasPermission(auth.actingUser, "customers.endUsers", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidCustomerId(input.customerId)) {
@@ -106,7 +106,7 @@ export async function renameEndUserAction(input: {
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
   // 등록(쓰기)보다 한 단계 위다 — 이 구분이 하위 기능 권한을 만든 계기다.
-  if (!(await hasPermission(auth.actingUser.role, "customers.endUsers", "MANAGE"))) {
+  if (!(await hasPermission(auth.actingUser, "customers.endUsers", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserId(input.endUserId)) {
@@ -150,7 +150,7 @@ export async function createEndUserContactAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "WRITE"))) {
+  if (!(await hasPermission(auth.actingUser, "customers.contacts", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserId(input.endUserId)) {
@@ -187,7 +187,7 @@ export async function updateEndUserContactAction(input: {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
-  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "WRITE"))) {
+  if (!(await hasPermission(auth.actingUser, "customers.contacts", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserContactId(input.contactId)) {
@@ -232,7 +232,7 @@ export async function removeEndUserContactAction(input: {
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
   // 삭제는 추가·수정보다 한 단계 위다.
-  if (!(await hasPermission(auth.actingUser.role, "customers.contacts", "MANAGE"))) {
+  if (!(await hasPermission(auth.actingUser, "customers.contacts", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   if (!isValidEndUserContactId(input.contactId)) {

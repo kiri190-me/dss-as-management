@@ -93,7 +93,7 @@ test("🔴 저장 권한은 xlsx 내려받기 권한보다 약할 수 없다", (
   const route = readFileSync(XLSX_ROUTE, "utf8");
   assert.ok(
     route.includes(
-      `hasPermission(actingUser.role, "${SERVICE_REPORT_PERMISSION_AREA}", "${SERVICE_REPORT_REQUIRED_LEVELS.edit}")`
+      `hasPermission(actingUser, "${SERVICE_REPORT_PERMISSION_AREA}", "${SERVICE_REPORT_REQUIRED_LEVELS.edit}")`
     ),
     "내려받기 라우트가 요구하는 영역·수준이 저장의 것과 달라졌다"
   );

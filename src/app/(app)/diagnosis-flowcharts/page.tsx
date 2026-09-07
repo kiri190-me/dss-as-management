@@ -63,15 +63,14 @@ export default async function DiagnosisFlowchartsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "diagnosisFlowcharts.view", "READ"))) {
+  if (!(await hasPermission(actingUser, "diagnosisFlowcharts.view", "READ"))) {
     return <PlaceholderPage title="진단 Flowchart 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
   // 전체 관리는 편집과 같은 권한이다(코드가 둘을 구분하지 않는다). 영구 삭제는
   // 더 좁아서 별도 노드다 — 엔지니어는 고칠 수 있어도 영구 삭제는 못 한다.
-  const canManage = await hasPermission(actingUser.role, "diagnosisFlowcharts.edit", "WRITE");
-  const canPermanentlyDelete = await hasPermission(
-    actingUser.role,
+  const canManage = await hasPermission(actingUser, "diagnosisFlowcharts.edit", "WRITE");
+  const canPermanentlyDelete = await hasPermission(actingUser,
     "diagnosisFlowcharts.permanentDelete",
     "MANAGE"
   );

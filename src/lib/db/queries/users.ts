@@ -14,6 +14,11 @@ export type UserRow = {
   lockedAt: Date | null;
   /** 이 시각보다 먼저 발급된 세션은 무효다. null이면 끊긴 적이 없다. */
   sessionsValidFrom: Date | null;
+  /**
+   * 개발자 표시. 역할이 아니라 별도 칸이다(users.is_developer) — 권한 판정에서만
+   * 최고관리자로 해석되고, role 자체는 건드리지 않는다.
+   */
+  isDeveloper: boolean;
 };
 
 const SELECT_COLUMNS = {
@@ -25,6 +30,7 @@ const SELECT_COLUMNS = {
   isActive: users.isActive,
   lockedAt: users.lockedAt,
   sessionsValidFrom: users.sessionsValidFrom,
+  isDeveloper: users.isDeveloper,
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

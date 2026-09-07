@@ -72,7 +72,7 @@ export async function bulkDeleteRepairCasesAction(input: {
   if (!actingUser) {
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
-  if (!(await hasPermission(actingUser.role, "repairCases.lifecycle", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "repairCases.lifecycle", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "A/S 접수 건 삭제 권한이 없습니다." };
   }
 

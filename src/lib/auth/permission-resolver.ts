@@ -39,10 +39,61 @@ import { baselineLeafLevel } from "./permission-baseline";
  * AUTH_SOURCE가 database가 아니면 DB를 읽지 않고 상한을 그대로 쓴다. 로컬
  * 데모 모드에는 role_permissions 표가 없을 수 있고, 없다고 해서 화면이 잠기면
  * 안 된다.
+ *
+ * ── 개발자 표시 ─────────────────────────────────────────────────────────
+ * 이 창구들은 역할이 아니라 **사람**(PermissionActor)을 받는다. users.is_developer
+ * 가 켜진 계정은 여기서 최고관리자로 해석된다 — 그 한 줄이 승격의 전부이고,
+ * 앱의 다른 어디에도 승격 코드가 없다.
+ *
+ * 왜 인자인가. 해석기가 현재 세션을 몰래 들여다보고 알아서 승격하면 호출부를
+ * 안 건드려 편하지만, buildRolePermissionViews()가 다섯 역할을 훑으며 이 함수를
+ * 부르는 순간 **권한 설정 화면의 표가 개발자에게만 전부 「모든 권한」으로 보인다.**
+ * 게다가 그 방향은 열리는 쪽으로 실패한다 — 자기 역할이 아닌 역할을 물어도
+ * 「예」가 돌아온다. 인자로 받으면 반대다: 호출부를 빠뜨리면 그 자리만 승격이
+ * 안 될 뿐(개발자가 그 화면을 못 쓸 뿐)이고, 남에게 권한이 새지 않는다.
  * ============================================================================
  */
 
+/**
+ * 권한을 묻는 주체. `ActingUser`가 그대로 들어맞는다(구조적 타입).
+ *
+ * 역할만 있고 개발자 여부를 모르는 자리에서 억지로 만들지 말 것 —
+ * 그럴 때는 roleOnlyActor()를 쓰고, 왜 승격이 필요 없는지 그 자리에 적는다.
+ */
+export type PermissionActor = {
+  role: Role;
+  isDeveloper: boolean;
+};
+
+/**
+ * 역할 **그 자체**의 권한을 묻는 행위자 — 개발자 승격이 일어나지 않는다.
+ *
+ * 두 종류의 자리에서만 쓴다:
+ *  1. 특정 사람이 아니라 역할을 보여 주는 화면(role-permission-views.ts의 표)
+ *  2. 살아 있는 행위자를 손에 들고 있지 않은 자리 — 닫히는 쪽으로 실패한다
+ *
+ * grep 한 번으로 "승격이 닿지 않는 자리"가 전부 보이게 하려고 이름을 붙였다.
+ */
+export function roleOnlyActor(role: Role): PermissionActor {
+  return { role, isDeveloper: false };
+}
+
+/**
+ * 승격은 여기 한 줄이다 — 개발자면 최고관리자로 해석한다.
+ *
+ * "모든 영역을 MANAGE"로 박지 않는 이유: 요구사항이 「최고관리자와 동급」이기
+ * 때문이다. 영역마다 maxMeaningfulLevel 상한이 있고 설정으로 좁혀질 수도 있는데,
+ * 무조건 MANAGE로 박으면 개발자가 최고관리자보다 **높아진다**.
+ */
+function permissionRole(actor: PermissionActor): Role {
+  return actor.isDeveloper ? "SUPER_ADMIN" : actor.role;
+}
+
 export type EffectivePermissions = {
+  /**
+   * 실제로 표를 읽은 역할. 개발자면 "SUPER_ADMIN"이다 —
+   * **그 사람의 진짜 역할이 아니다.** 화면에 이름표로 쓰지 말 것.
+   */
   role: Role;
   /**
    * 메뉴 키 → 실효 수준. PERMISSION_AREAS의 모든 메뉴가 반드시 들어 있다.
@@ -85,7 +136,8 @@ function isUndefinedTableError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === UNDEFINED_TABLE;
 }
 
-export async function resolveEffectivePermissions(role: Role): Promise<EffectivePermissions> {
+export async function resolveEffectivePermissions(actor: PermissionActor): Promise<EffectivePermissions> {
+  const role = permissionRole(actor);
   const stored = await loadOnce();
   const configured = stored?.[role] ?? {};
 
@@ -110,18 +162,18 @@ export async function resolveEffectivePermissions(role: Role): Promise<Effective
  * 메뉴 또는 하위 기능의 실효 수준. 둘 다 같은 함수로 묻는다 — 부르는 쪽이
  * "inventory"인지 "inventory.parts"인지만 정하면 된다.
  */
-export async function getPermissionLevel(role: Role, key: string): Promise<PermissionLevel> {
-  const resolved = await resolveEffectivePermissions(role);
+export async function getPermissionLevel(actor: PermissionActor, key: string): Promise<PermissionLevel> {
+  const resolved = await resolveEffectivePermissions(actor);
   return resolved.leafLevels[key] ?? resolved.levels[key] ?? "NONE";
 }
 
-/** 이 역할이 그 영역에서 required 이상인가. 서버 액션·페이지 가드가 부른다. */
-export async function hasPermission(role: Role, areaKey: string, required: PermissionLevel): Promise<boolean> {
-  return meetsPermissionLevel(await getPermissionLevel(role, areaKey), required);
+/** 이 사람이 그 영역에서 required 이상인가. 서버 액션·페이지 가드가 부른다. */
+export async function hasPermission(actor: PermissionActor, areaKey: string, required: PermissionLevel): Promise<boolean> {
+  return meetsPermissionLevel(await getPermissionLevel(actor, areaKey), required);
 }
 
 /** 메뉴에 들어갈 수 있는 영역 키. 사이드바가 이 목록으로 항목을 거른다. */
-export async function listAccessibleAreaKeys(role: Role): Promise<string[]> {
-  const resolved = await resolveEffectivePermissions(role);
+export async function listAccessibleAreaKeys(actor: PermissionActor): Promise<string[]> {
+  const resolved = await resolveEffectivePermissions(actor);
   return PERMISSION_AREAS.filter((area) => resolved.levels[area.key] !== "NONE").map((area) => area.key);
 }

@@ -46,11 +46,11 @@ export default async function QuotesPage() {
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEdit =
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "quotes", "WRITE"));
+    (await hasPermission(actingUser, "quotes", "WRITE"));
 
   const canDelete =
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "quotes", "MANAGE"));
+    (await hasPermission(actingUser, "quotes", "MANAGE"));
 
   // 휴지통을 못 여는 사람에게는 그 내용을 읽지도 내려보내지도 않는다 — 쓰지 않을
   // 값을 클라이언트로 실어 보내지 않는다(내자 정리 화면과 같은 규칙).

@@ -8,7 +8,7 @@ import { db, pgClient } from "../connection";
 import { parts, rolePermissions, users } from "../schema";
 import { saveRolePermissions } from "./role-permissions";
 import { createPart } from "./inventory";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
 import { PERMISSION_LEAF_KEYS } from "@/lib/auth/permission-features";
 import { baselineLeafLevel } from "@/lib/auth/permission-baseline";
 import type { PermissionLevel } from "@/lib/auth/permission-areas";
@@ -246,8 +246,8 @@ test("한 노드 안에서 쓰기와 관리가 갈린다 — End-User 등록 vs 
   assert.equal(baselineLeafLevel("customers.endUsers", "SALES"), "WRITE");
 
   // 기본 상태: 영업은 등록은 되고 이름 변경은 안 된다.
-  assert.equal(await hasPermission("SALES", "customers.endUsers", "WRITE"), true);
-  assert.equal(await hasPermission("SALES", "customers.endUsers", "MANAGE"), false);
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.endUsers", "WRITE"), true);
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.endUsers", "MANAGE"), false);
 
   // 최고관리자가 영업에게 이름 변경까지 열어 준다.
   const widened = await saveRolePermissions({
@@ -255,7 +255,7 @@ test("한 노드 안에서 쓰기와 관리가 갈린다 — End-User 등록 vs 
     actorUserId: superAdminId,
   });
   assert.equal(widened.ok, true);
-  assert.equal(await hasPermission("SALES", "customers.endUsers", "MANAGE"), true);
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.endUsers", "MANAGE"), true);
 });
 
 test("좁히면 그 노드의 위쪽 수준만 닫힌다 — 담당자 삭제만 회수", async () => {
@@ -268,8 +268,8 @@ test("좁히면 그 노드의 위쪽 수준만 닫힌다 — 담당자 삭제만
     actorUserId: adminId,
   });
   assert.equal(narrowed.ok, true);
-  assert.equal(await hasPermission("AS_ENGINEER", "customers.contacts", "WRITE"), false);
-  assert.equal(await hasPermission("AS_ENGINEER", "customers.view", "READ"), true);
+  assert.equal(await hasPermission(roleOnlyActor("AS_ENGINEER"), "customers.contacts", "WRITE"), false);
+  assert.equal(await hasPermission(roleOnlyActor("AS_ENGINEER"), "customers.view", "READ"), true);
 });
 
 test("모든 역할의 모든 잎에 대해 기본값 그대로 저장하면 행이 하나도 생기지 않는다", async () => {

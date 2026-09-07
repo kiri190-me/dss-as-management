@@ -46,11 +46,21 @@ export async function resolveActingUserForSession(
       return null;
     }
 
-    return { id: row.id, name: row.name, role: row.role, approvalStatus: row.approvalStatus };
+    // isDeveloper는 매 요청 살아 있는 행에서 읽는다 — 세션 토큰에 담지 않는다.
+    // 담으면 표시를 끈 뒤에도 토큰이 만료될 때까지 승격이 남는다.
+    return {
+      id: row.id,
+      name: row.name,
+      role: row.role,
+      approvalStatus: row.approvalStatus,
+      isDeveloper: row.isDeveloper,
+    };
   }
 
+  // mock 사용자에는 is_developer 칸이 없다. 데모에 개발자를 만들 이유도 없으므로
+  // 언제나 false — mock 모드의 동작은 이 기능을 넣기 전과 완전히 같다.
   const user = mockUsers.find((candidate) => candidate.id === session.userId);
   return user
-    ? { id: user.id, name: user.name, role: user.role, approvalStatus: user.approvalStatus }
+    ? { id: user.id, name: user.name, role: user.role, approvalStatus: user.approvalStatus, isDeveloper: false }
     : null;
 }

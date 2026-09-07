@@ -88,7 +88,7 @@ async function resolveActingUser(required: "READ" | "WRITE") {
   // 관문은 하나다 — 관리자가 설정한 수준(2026-08-31 전환). 예전에는 역할 정책
   // (canEditQuotes/canViewQuotes)과 AND 여서, 넓혀 줘도 열리지 않았다. 기본값은
   // 그대로다 — permission-baseline.ts 의 quotes 사다리가 바로 그 함수들이다.
-  if (!(await hasPermission(actingUser.role, "quotes", required))) {
+  if (!(await hasPermission(actingUser, "quotes", required))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "이 작업을 수행할 권한이 없습니다." };
   }
   return { ok: true as const, actingUser };
@@ -209,7 +209,7 @@ async function resolveDeletingUser() {
   if (!actingUser) {
     return { ok: false as const, code: "UNAUTHORIZED" as const, message: "로그인이 필요합니다." };
   }
-  if (!(await hasPermission(actingUser.role, "quotes", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "quotes", "MANAGE"))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "견적서를 지울 권한이 없습니다." };
   }
   return { ok: true as const, actingUser };

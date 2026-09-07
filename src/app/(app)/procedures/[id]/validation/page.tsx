@@ -29,7 +29,7 @@ export default async function ProcedureValidationListPage({ params }: { params: 
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "technicalProcedures.validation", "READ"))) {
+  if (!(await hasPermission(actingUser, "technicalProcedures.validation", "READ"))) {
     return <PlaceholderPage title="검증 문제 검토" description="이 화면에 접근할 권한이 없습니다." />;
   }
 

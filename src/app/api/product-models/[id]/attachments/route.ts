@@ -113,7 +113,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   // 올리는 것은 productModels.files WRITE다 — productModels.view가 아니다.
   // 모델을 **보는** 사람(영업 포함)과 사진·도면을 **바꾸는** 사람은 다르다.
-  if (!(await hasPermission(actingUser.role, "productModels.files", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "productModels.files", "WRITE"))) {
     return fail(403, "FORBIDDEN", "이 제품 모델에 파일을 올릴 권한이 없습니다.");
   }
 

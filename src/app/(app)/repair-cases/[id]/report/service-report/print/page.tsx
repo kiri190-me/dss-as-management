@@ -140,7 +140,7 @@ export default async function ServiceReportPrintPage({
   if (!resolved) notFound();
 
   // 🔴 권한을 **조회보다 앞에** 본다 — 위 '볼 수 없는 사람에게는 404 다'.
-  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
+  const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
   if (!canViewServiceReports(level)) notFound();
 
   const serviceReportId = serviceReportIdFromParam(serviceReportIdParam);

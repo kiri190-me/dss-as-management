@@ -79,7 +79,7 @@ export default async function RepairCaseDetailPage({
   const partRequestData =
     isDatabaseBacked &&
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "inventory.requests", "WRITE"))
+    (await hasPermission(actingUser, "inventory.requests", "WRITE"))
       ? {
           caseContext: await getRequestCaseContext(resolved.id),
           availableParts: await getPartList(),

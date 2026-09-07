@@ -67,11 +67,11 @@ export default async function WorkflowDetailPage({
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.view", "READ"))) redirect("/dashboard");
+  if (!actingUser || !(await hasPermission(actingUser, "workflows.view", "READ"))) redirect("/dashboard");
 
   // 초안은 편집 권한이 있는 사람에게만 읽어 온다 — 아래에서 두 번 쓰이므로
   // 한 번만 묻는다.
-  const mayEditDraft = await hasPermission(actingUser.role, "workflows.editDraft", "WRITE");
+  const mayEditDraft = await hasPermission(actingUser, "workflows.editDraft", "WRITE");
 
   const detail = await getWorkflowTemplateDetail(code);
   if (!detail) notFound();

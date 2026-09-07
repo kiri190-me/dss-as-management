@@ -44,6 +44,7 @@ let seededUserId: string;
 let seededName: string;
 let seededRole: string;
 let seededApprovalStatus: string;
+let seededIsDeveloper: boolean;
 let deletedTestUserId: string;
 let deactivatedTestUserId: string;
 let lockedTestUserId: string;
@@ -56,7 +57,7 @@ before(async () => {
   // "resolves to that row's data" test fail against a row that fails
   // closed by design).
   const [row] = await db
-    .select({ id: users.id, name: users.name, role: users.role, approvalStatus: users.approvalStatus })
+    .select({ id: users.id, name: users.name, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
     .from(users)
     .where(and(eq(users.isDeleted, false), eq(users.isActive, true), isNull(users.lockedAt)))
     .limit(1);
@@ -65,6 +66,7 @@ before(async () => {
   seededName = row.name;
   seededRole = row.role;
   seededApprovalStatus = row.approvalStatus;
+  seededIsDeveloper = row.isDeveloper;
 
   const [deleted] = await db
     .insert(users)
@@ -130,6 +132,8 @@ test("database mode: resolves a real users.id UUID to that row's data, not a moc
     name: seededName,
     role: seededRole,
     approvalStatus: seededApprovalStatus,
+    // users.is_developer 도 이 관문을 통해서만 앱으로 들어온다.
+    isDeveloper: seededIsDeveloper,
   });
 });
 

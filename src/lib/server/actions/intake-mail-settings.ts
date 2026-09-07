@@ -62,7 +62,7 @@ export async function saveIntakeMailSettingsAction(
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 메일 설정을 바꿀 수 있습니다." };
   }
 
@@ -132,7 +132,7 @@ export async function sendTestIntakeMailAction(input: {
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 시험 메일을 보낼 수 있습니다." };
   }
 
@@ -222,7 +222,7 @@ export async function uploadSignatureImageAction(
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 서명 이미지를 올릴 수 있습니다." };
   }
 
@@ -279,7 +279,7 @@ export async function deleteSignatureImageAction(input: {
   if (!session) return { ok: false, message: "로그인이 필요합니다." };
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return { ok: false, message: "로그인이 필요합니다." };
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 서명 이미지를 지울 수 있습니다." };
   }
 

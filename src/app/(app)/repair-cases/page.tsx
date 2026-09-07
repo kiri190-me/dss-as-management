@@ -51,7 +51,7 @@ export default async function RepairCasesPage() {
   const mayManageLifecycle =
     isDatabaseWriteMode &&
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "repairCases.lifecycle", "MANAGE"));
+    (await hasPermission(actingUser, "repairCases.lifecycle", "MANAGE"));
   const canBulkDelete = mayManageLifecycle;
 
   // Repair Case Trash + Restore checkpoint — same UX-hint-only precedent as

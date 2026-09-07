@@ -48,7 +48,7 @@ export default async function MyActiveWorkPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "myActiveWork", "READ"))) {
+  if (!(await hasPermission(actingUser, "myActiveWork", "READ"))) {
     return (
       <PlaceholderPage
         title="내 담당 제품"

@@ -41,19 +41,19 @@ export default async function TechnicalProceduresPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "technicalProcedures.view", "READ"))) {
+  if (!(await hasPermission(actingUser, "technicalProcedures.view", "READ"))) {
     return <PlaceholderPage title="기술 작업 절차" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
   // 초안까지 보이는 것과 초안을 고칠 수 있는 것은 같은 권한이다 — 볼 수 없는
   // 초안을 고칠 수는 없고, 고칠 수 있는데 안 보이면 화면이 쓸모없다.
-  const mayEditDraft = await hasPermission(actingUser.role, "technicalProcedures.editDraft", "WRITE");
+  const mayEditDraft = await hasPermission(actingUser, "technicalProcedures.editDraft", "WRITE");
 
   // 삭제·복원 권한(기본값: 관리자 이상)이 있는 세션에만 휴지통과 "지금 지울 수
   // 없는 절차" 목록을 읽는다 — 다른 마스터 화면과 같은 규칙이다. 화면에서
   // 감추는 것은 편의일 뿐 경계가 아니므로, 삭제 mutation은 이 판정과 무관하게
   // 트랜잭션 안에서 역할과 **분류**를 다시 본다.
-  const canDelete = await hasPermission(actingUser.role, "technicalProcedures.lifecycle", "MANAGE");
+  const canDelete = await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE");
   const [templates, trashTemplates, undeletableIds] = await Promise.all([
     listTechnicalProcedureTemplates(mayEditDraft),
     canDelete ? listDeletedTechnicalProcedureTemplates() : Promise.resolve([]),

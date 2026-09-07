@@ -6,7 +6,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { listRepairCaseFlowcharts, getRepairCaseFlowchartPageContext } from "@/lib/db/queries/repair-case-flowcharts";
 import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { buildWorkRecordFlowchart, WORK_RECORD_FLOWCHART_MAX_RECORDS } from "@/lib/domain/work-record-flowchart";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
 import CaseFlowchartListScreen from "@/components/repair-cases/flowchart/CaseFlowchartListScreen";
 
 export const metadata: Metadata = {
@@ -48,7 +48,12 @@ export default async function CaseFlowchartListPage({ params }: { params: Promis
     !!session &&
     session.approvalStatus === "APPROVED" &&
     !!pageContext &&
-    (await hasPermission(session.role, "diagnosisFlowcharts.edit", "WRITE"));
+    // 이 화면은 살아 있는 행위자(ActingUser)를 손에 들고 있지 않다 — 세션 토큰의
+    // role/approvalStatus만 본다. 그래서 개발자 승격이 여기까지 닿지 않는다
+    // (roleOnlyActor = 승격 없음). 닫히는 쪽으로 실패하는 선택이다: 개발자가
+    // 이 단추를 못 볼 뿐, 남에게 권한이 새지는 않는다. 고치려면 세 화면을
+    // resolveActingUserForSession 으로 옮겨야 하고, 그것은 이 조각의 범위가 아니다.
+    (await hasPermission(roleOnlyActor(session.role), "diagnosisFlowcharts.edit", "WRITE"));
 
   const [flowcharts, workRecords] = await Promise.all([
     listRepairCaseFlowcharts(id),

@@ -42,10 +42,10 @@ async function requireEditableDraft(
   actorUserId: string
 ): Promise<{ ok: true; actorId: string } | { ok: false; code: DraftTransitionResultCode; message: string }> {
   const [actor] = await tx
-    .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
+    .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
     .from(users)
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
-  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
   const [version] = await tx

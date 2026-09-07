@@ -31,7 +31,7 @@ import {
   type ManualTechnicalNodeType,
 } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
-import type { Role } from "@/lib/domain/types";
+import type { PermissionActor } from "@/lib/auth/permission-resolver";
 import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
 
 /**
@@ -187,14 +187,14 @@ class DetailedEditorFailure extends Error {
  * an actor who fails the category-specific check learns only that they're
  * FORBIDDEN, never the template's current status.
  */
-async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
+async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actor: PermissionActor) {
   const [template] = await tx
     .select()
     .from(procedureTemplates)
     .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
     .for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!(await mayEditTemplateOfCategory(actorRole, template.category))) {
+  if (!(await mayEditTemplateOfCategory(actor, template.category))) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
   }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
@@ -217,14 +217,14 @@ async function assertEditableDraft(tx: Tx, templateId: string, expectedTemplateU
  * create/delete nodes on a FULL_SERVICE template.
  */
 /** Exported for reuse by procedure-template-undo-redo.ts — Undo/Redo is a TECHNICAL_TASK-graph-editing capability and must share this exact gate, never a looser copy. */
-export async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actorRole: Role) {
+export async function assertTechnicalGraphEditable(tx: Tx, templateId: string, expectedTemplateUpdatedAt: string, actor: PermissionActor) {
   const [template] = await tx
     .select()
     .from(procedureTemplates)
     .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
     .for("update");
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!(await mayManageTemplateGraph(actorRole, template.category))) {
+  if (!(await mayManageTemplateGraph(actor, template.category))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
   if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 편집할 수 있습니다.");
@@ -347,7 +347,7 @@ export async function requireEditor(tx: Tx, actorUserId: string) {
   // specific boundary is assertEditableDraft (or validateProcedureTemplate's
   // own inline equivalent), which runs after the template row — and
   // therefore its category — is known.
-  if (!(await mayEnterTemplateEditor(actor.role))) {
+  if (!(await mayEnterTemplateEditor(actor))) {
     fail("FORBIDDEN", "이 템플릿을 편집할 권한이 없습니다.");
   }
   return actor;
@@ -397,7 +397,7 @@ export async function updateProcedureTemplateNode(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // Phase 5C-5C — `id` is carried in both states so historical
       // replay/Undo/Redo/Restore can identify this node even after
@@ -459,7 +459,7 @@ export async function changeProcedureTemplateNodeType(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      const template = await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // Phase 5C-5B usability — TECHNICAL_TASK authoring never requires a
       // reason for an ordinary edit; FULL_SERVICE/REFERENCE keep the
@@ -543,7 +543,7 @@ export async function saveProcedureTemplateLayout(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       // One shared change_group_id for this whole call: node-position and
       // edge-route saves are one logical "저장" click (see this function's
@@ -678,7 +678,7 @@ export async function updateProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       const nextBranchType = patch.branchType ?? edge.branchType;
       const nextBranchLabel = patch.branchLabel !== undefined ? patch.branchLabel : edge.branchLabel;
@@ -764,7 +764,7 @@ export async function retargetProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      const template = await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // Phase 5C-5B usability — see changeProcedureTemplateNodeType's own note.
       if (template.category !== "TECHNICAL_TASK" && isBlank(reason)) {
@@ -829,7 +829,7 @@ export async function createProcedureTemplateEdge(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      const template = await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      const template = await assertEditableDraft(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       // Phase 5C-5B usability — see changeProcedureTemplateNodeType's own note.
       if (template.category !== "TECHNICAL_TASK" && isBlank(input.reason)) {
@@ -905,7 +905,7 @@ export async function validateProcedureTemplate(templateId: string, actorUserId:
       // Same category-specific boundary as assertEditableDraft, duplicated
       // here because this function never calls it (validate intentionally
       // skips the expectedTemplateUpdatedAt/STALE_REVISION check).
-      if (!(await mayEditTemplateOfCategory(actor.role, template.category))) {
+      if (!(await mayEditTemplateOfCategory(actor, template.category))) {
         fail("FORBIDDEN", "이 템플릿을 검증할 권한이 없습니다.");
       }
       if (template.status !== "DRAFT") fail("NOT_DRAFT", "초안(DRAFT) 상태의 템플릿만 검증할 수 있습니다.");
@@ -1105,7 +1105,7 @@ export async function createProcedureTemplateNode(
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       const [maxSortRow] = await tx
         .select({ sortOrder: procedureTemplateNodes.sortOrder })
@@ -1217,7 +1217,7 @@ export async function deleteProcedureTemplateEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // Dependency check: another edge's clonedFromEdgeId still points at
       // this one (a PUBLISHED-then-cloned-into-DRAFT lineage pointer) —
@@ -1313,7 +1313,7 @@ export async function deleteProcedureTemplateNode(
       const [node] = await tx.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, nodeId)).for("update");
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
 
-      await assertTechnicalGraphEditable(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, node.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // A. connected edges (incoming or outgoing) — never cascade-deleted.
       const connectedEdges = await tx
@@ -1453,7 +1453,7 @@ export async function insertProcedureTemplateNodeOnEdge(
       const [edge] = await tx.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.id, edgeId)).for("update");
       if (!edge) fail("NOT_FOUND", "해당 분기를 찾을 수 없습니다.");
 
-      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, edge.procedureTemplateId, expectedTemplateUpdatedAt, actor);
 
       // Defensive invariant check — same rationale as deleteProcedureTemplateEdge's own: a DRAFT edge should be structurally unreachable from procedure_case_execution_nodes (executions only ever reference PUBLISHED rows), but retargeting a referenced edge's toNodeId would be just as corrupting as deleting it, so this is never assumed silently either.
       const [executionRef] = await tx

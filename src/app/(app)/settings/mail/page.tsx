@@ -42,7 +42,7 @@ export default async function MailSettingsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return (
       <PlaceholderPage
         title="메일 설정"

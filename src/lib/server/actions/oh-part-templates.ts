@@ -51,7 +51,7 @@ async function resolveActor(): Promise<{ ok: true; userId: string } | { ok: fals
   // 만료 전까지 예전 권한으로 저장하는 구멍을 막는다.
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return deny("로그인이 필요합니다.");
-  if (!(await hasPermission(actingUser.role, "inventory.parts", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "inventory.parts", "WRITE"))) {
     return deny("O/H 템플릿을 고칠 권한이 없습니다.");
   }
   return { ok: true, userId: actingUser.id };

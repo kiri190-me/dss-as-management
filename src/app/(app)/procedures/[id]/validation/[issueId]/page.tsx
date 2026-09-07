@@ -37,7 +37,7 @@ export default async function ProcedureValidationIssueDetailPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "technicalProcedures.validation", "READ"))) {
+  if (!(await hasPermission(actingUser, "technicalProcedures.validation", "READ"))) {
     return <PlaceholderPage title="검증 이슈 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -56,7 +56,7 @@ export default async function ProcedureValidationIssueDetailPage({
       issue={issue}
       history={history}
       nodeOptions={nodeOptions}
-      canResolve={await hasPermission(actingUser.role, "technicalProcedures.validation", "WRITE")}
+      canResolve={await hasPermission(actingUser, "technicalProcedures.validation", "WRITE")}
     />
   );
 }

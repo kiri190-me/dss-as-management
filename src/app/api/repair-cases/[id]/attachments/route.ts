@@ -104,7 +104,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return fail(403, "ACCOUNT_NOT_APPROVED", "승인 대기 중인 계정은 파일을 올릴 수 없습니다.");
   }
 
-  if (!(await hasPermission(actingUser.role, "repairCases.files", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "repairCases.files", "WRITE"))) {
     return fail(403, "FORBIDDEN", "이 접수 건에 파일을 올릴 권한이 없습니다.");
   }
 

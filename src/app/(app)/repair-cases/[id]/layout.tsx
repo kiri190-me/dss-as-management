@@ -50,7 +50,7 @@ export default async function RepairCaseDetailLayout({
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canViewQuotes =
-    actingUser !== null && (await hasPermission(actingUser.role, "quotes", "READ"));
+    actingUser !== null && (await hasPermission(actingUser, "quotes", "READ"));
 
   return (
     <div className="flex flex-col gap-4">

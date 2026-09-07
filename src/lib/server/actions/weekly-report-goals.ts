@@ -104,7 +104,7 @@ async function resolveAuthorizedActingUser() {
   // canEditWeeklyReportGoals(역할)와 AND 여서, 넓혀 줘도 열리지 않았다.
   // 기본값은 그대로다 — permission-baseline.ts 의 weeklyReport WRITE 기본값이
   // 바로 그 역할 함수다.
-  if (!(await hasPermission(actingUser.role, "weeklyReport", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "weeklyReport", "WRITE"))) {
     return {
       ok: false as const,
       code: "FORBIDDEN" as const,

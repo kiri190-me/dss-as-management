@@ -46,7 +46,7 @@ export default async function UsersPage() {
     redirect("/login");
   }
 
-  await requireAreaAccess("users", actingUser.role);
+  await requireAreaAccess("users", actingUser);
 
   const [users, delegations] = await Promise.all([
     listUsersForRepresentativeManagement(),

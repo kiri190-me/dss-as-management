@@ -43,7 +43,7 @@ export default async function AppLayout({
 
   // 사이드바에서 감출 항목을 정하기 위한 것이다. 차단 자체는 각 페이지가
   // requireAreaAccess로 따로 하므로, 여기서 열려 있다고 들어가지지는 않는다.
-  const accessibleAreaKeys = await listAccessibleAreaKeys(user.role);
+  const accessibleAreaKeys = await listAccessibleAreaKeys(user);
 
   // 헤더 종 알림 + 사이드바 "내게 온 결재 요청" 배지 — 여기서 넘기는 사용자
   // id와 역할은 **둘 다 위에서 살아 있는 계정을 다시 읽어 푼 것**이다

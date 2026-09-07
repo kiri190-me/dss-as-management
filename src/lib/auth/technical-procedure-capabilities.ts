@@ -1,8 +1,7 @@
 import "server-only";
 
-import type { Role } from "@/lib/domain/types";
 import type { ProcedureTemplateCategory } from "@/lib/domain/procedure-template-types";
-import { hasPermission } from "./permission-resolver";
+import { hasPermission, type PermissionActor } from "./permission-resolver";
 import {
   canEditProcedureTemplateDraft,
   canPublishProcedureTemplates,
@@ -32,32 +31,32 @@ import {
 
 /** 이 템플릿을 편집할 수 있는가. TECHNICAL_TASK만 설정이 판정한다. */
 export async function mayEditTemplateOfCategory(
-  role: Role,
+  actor: PermissionActor,
   category: ProcedureTemplateCategory
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
-    ? hasPermission(role, "technicalProcedures.editDraft", "WRITE")
-    : canEditProcedureTemplateDraft(role);
+    ? hasPermission(actor, "technicalProcedures.editDraft", "WRITE")
+    : canEditProcedureTemplateDraft(actor.role);
 }
 
 /** 이 템플릿을 발행할 수 있는가. */
 export async function mayPublishTemplateOfCategory(
-  role: Role,
+  actor: PermissionActor,
   category: ProcedureTemplateCategory
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
-    ? hasPermission(role, "technicalProcedures.publish", "MANAGE")
-    : canPublishProcedureTemplates(role);
+    ? hasPermission(actor, "technicalProcedures.publish", "MANAGE")
+    : canPublishProcedureTemplates(actor.role);
 }
 
 /** 이 템플릿의 새 초안 버전을 만들 수 있는가. */
 export async function mayCreateDraftVersionOfCategory(
-  role: Role,
+  actor: PermissionActor,
   category: ProcedureTemplateCategory
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
-    ? hasPermission(role, "technicalProcedures.editDraft", "WRITE")
-    : canCreateProcedureTemplateDraft(role);
+    ? hasPermission(actor, "technicalProcedures.editDraft", "WRITE")
+    : canCreateProcedureTemplateDraft(actor.role);
 }
 
 /**
@@ -69,11 +68,11 @@ export async function mayCreateDraftVersionOfCategory(
  * 옮기면서도 그 성질은 그대로 둔다. 카테고리 조건이 먼저이고 설정은 그다음이다.
  */
 export async function mayManageTemplateGraph(
-  role: Role,
+  actor: PermissionActor,
   category: ProcedureTemplateCategory
 ): Promise<boolean> {
   if (category !== "TECHNICAL_TASK") return false;
-  return hasPermission(role, "technicalProcedures.editDraft", "WRITE");
+  return hasPermission(actor, "technicalProcedures.editDraft", "WRITE");
 }
 
 /**
@@ -84,6 +83,6 @@ export async function mayManageTemplateGraph(
  * 다시 한다 — 종전 구조(canManageTechnicalTemplates로 먼저 거르고
  * assertEditableDraft가 다시 보는 것)와 같은 두 겹이다.
  */
-export async function mayEnterTemplateEditor(role: Role): Promise<boolean> {
-  return hasPermission(role, "technicalProcedures.editDraft", "WRITE");
+export async function mayEnterTemplateEditor(actor: PermissionActor): Promise<boolean> {
+  return hasPermission(actor, "technicalProcedures.editDraft", "WRITE");
 }

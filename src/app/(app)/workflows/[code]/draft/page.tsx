@@ -26,7 +26,7 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.editDraft", "WRITE"))) {
+  if (!actingUser || !(await hasPermission(actingUser, "workflows.editDraft", "WRITE"))) {
     redirect("/dashboard");
   }
 

@@ -4,7 +4,7 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
 import { PERMISSION_AREAS, type PermissionLevel } from "./permission-areas";
 import { PERMISSION_LEAF_KEYS } from "./permission-features";
 import { baselineLeafLevel } from "./permission-baseline";
-import { resolveEffectivePermissions } from "./permission-resolver";
+import { resolveEffectivePermissions, roleOnlyActor } from "./permission-resolver";
 
 export type RolePermissionView = {
   /** 잎 키 → 지금 통하는 값. */
@@ -39,13 +39,21 @@ export type RolePermissionScreenData = {
  * 잎(하위 기능) 단위로 내려보낸다 — 저장·판정이 그 단위이므로, 화면도 같은
  * 단위로 다뤄야 "화면에서 본 것"과 "저장된 것"이 어긋나지 않는다. 메뉴 수준은
  * 계산 결과일 뿐이라 편집 대상이 아니고, 메뉴가 열려 있는지 보여 주는 데만 쓴다.
+ *
+ * ── 개발자 승격이 닿지 않는 자리 ────────────────────────────────────────
+ * 이 표는 **역할 자체의 권한**을 보여 준다. 보는 사람이 개발자든 아니든 같은
+ * 표여야 한다 — 그래서 roleOnlyActor()로 부른다. 여기서 승격이 일어나면
+ * 개발자가 이 화면을 열 때만 다섯 역할이 전부 「모든 권한 있음」으로 보이고,
+ * 관리자는 그 표를 보고 권한을 판단한다.
+ *
+ * 개발자 표시는 이 화면에서 켤 수 없다 — 역할별 설정과 무관한 사람 단위 칸이다.
  */
 export async function buildRolePermissionViews(params: {
   actorRole: Role;
 }): Promise<RolePermissionScreenData> {
   const entries = await Promise.all(
     ROLE_CODES.map(async (role) => {
-      const resolved = await resolveEffectivePermissions(role);
+      const resolved = await resolveEffectivePermissions(roleOnlyActor(role));
 
       const baseline: Record<string, PermissionLevel> = {};
       for (const leafKey of PERMISSION_LEAF_KEYS) {

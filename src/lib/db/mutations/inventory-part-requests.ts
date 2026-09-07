@@ -142,7 +142,7 @@ export async function createPartRequest(input: CreatePartRequestInput): Promise<
       // 잠금 여부는 지금도 요청 생성을 막지 않는다(shipment-lock removal policy).
       // 역할 판정만 설정으로 넘어갔다.
       void rc.isLocked;
-      if (!(await hasPermission(actor.role, "inventory.requests", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.requests", "WRITE"))) {
         fail("FORBIDDEN", "부품 요청 권한이 없습니다.");
       }
 
@@ -215,7 +215,7 @@ export async function cancelPartRequest(input: CancelPartRequestInput): Promise<
 
       if (
         !isRequestCancellable({ isOwnRequest: request.requestedByUserId === actor.id, status: request.status }) ||
-        !(await hasPermission(actor.role, "inventory.requests", "WRITE"))
+        !(await hasPermission(actor, "inventory.requests", "WRITE"))
       ) {
         fail("FORBIDDEN", "요청을 취소할 권한이 없습니다.");
       }
@@ -279,7 +279,7 @@ export async function rejectPartRequest(input: RejectPartRequestInput): Promise<
 
       if (
         !isRequestRejectable({ status: request.status, issuedQuantityAcrossItems: totalIssued }) ||
-        !(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))
+        !(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))
       ) {
         fail("FORBIDDEN", "요청을 거절할 권한이 없습니다.");
       }
@@ -348,7 +348,7 @@ export async function partiallyCloseRequest(input: PartiallyCloseRequestInput): 
           issuedQuantityAcrossItems: totalIssued,
           remainingQuantityAcrossItems: totalRemaining,
         }) ||
-        !(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))
+        !(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))
       ) {
         fail("FORBIDDEN", "요청을 종료할 권한이 없습니다.");
       }
@@ -449,7 +449,7 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
       if (!isRequestIssuable({ status: request.status })) {
         fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
       }
-      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))) {
         fail("FORBIDDEN", "불출 권한이 없습니다.");
       }
 
@@ -642,7 +642,7 @@ export async function holdPartRequest(input: HoldPartRequestInput): Promise<Requ
       if (!isRequestHoldable({ status: request.status })) {
         fail("NOT_ISSUABLE", "보류할 수 있는 상태가 아닙니다.");
       }
-      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))) {
         fail("FORBIDDEN", "요청을 보류할 권한이 없습니다.");
       }
 
@@ -708,7 +708,7 @@ export async function releasePartRequestHold(input: ReleasePartRequestHoldInput)
       if (!isRequestHoldReleasable({ status: request.status })) {
         fail("NOT_ISSUABLE", "보류 중인 요청이 아닙니다.");
       }
-      if (!(await hasPermission(actor.role, "inventory.requestProcessing", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))) {
         fail("FORBIDDEN", "보류를 해제할 권한이 없습니다.");
       }
 

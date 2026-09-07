@@ -47,7 +47,7 @@ export default async function RepairLaborPage() {
   // 예전에는 canDeleteQuotes(역할)를 AND 로 겹쳐서, 넓혀 줘도 화면의 편집이
   // 열리지 않았다. 기본값은 그대로다(actions/repair-labor.ts 의 같은 주석).
   const canEdit =
-    actingUser !== null && (await hasPermission(actingUser.role, "repairLabor", "MANAGE"));
+    actingUser !== null && (await hasPermission(actingUser, "repairLabor", "MANAGE"));
 
   const kinds = await listRepairLabor();
 

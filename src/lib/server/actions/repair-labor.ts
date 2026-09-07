@@ -61,7 +61,7 @@ async function resolveActor(): Promise<{ ok: true; userId: string } | { ok: fals
    * 건드리지 않은 상태에서 이 검사는 예전 검사와 **정확히 같은 답**을 낸다
    * (모든 역할로 대조해 확인). 달라지는 것은 관리자가 넓혔을 때뿐이다.
    */
-  if (!(await hasPermission(actingUser.role, "repairLabor", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "repairLabor", "MANAGE"))) {
     return deny("수리 작업 비용을 고칠 권한이 없습니다. 관리자에게 문의해 주세요.");
   }
   return { ok: true, userId: actingUser.id };

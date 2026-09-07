@@ -97,7 +97,7 @@ function isBlank(s: string | null | undefined): boolean {
 
 // ---- shared gate: actor + flowchart (locked) + case (locked, authorized) + concurrency ----
 
-type EligibleActor = { id: string; role: Awaited<ReturnType<typeof resolveEligibleActor>>["role"] };
+type EligibleActor = { id: string; role: Awaited<ReturnType<typeof resolveEligibleActor>>["role"]; isDeveloper: boolean };
 
 async function requireActor(tx: Tx, actorUserId: string): Promise<EligibleActor> {
   try {
@@ -135,7 +135,7 @@ async function loadFlowchartForGraphEdit(
     fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 진행할 수 있습니다.");
   }
 
-  if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+  if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 
@@ -1178,7 +1178,7 @@ export async function createRepairCaseFlowchartWithGraph(params: {
         fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 생성할 수 있습니다.");
       }
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
         fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

@@ -47,7 +47,7 @@ export default async function CustomersPage() {
     redirect("/login");
   }
 
-  if (!(await hasPermission(actingUser.role, "customers.view", "READ"))) {
+  if (!(await hasPermission(actingUser, "customers.view", "READ"))) {
     return <PlaceholderPage title="고객사 관리" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -55,7 +55,7 @@ export default async function CustomersPage() {
   // 볼 수 없는 사람에게는 질의 자체가 일어나지 않는다 — 접수 건 휴지통이
   // serverTrashCases를 다루는 방식과 같다. 화면에서 감추는 것은 편의일 뿐
   // 경계가 아니므로, 삭제 서버 액션은 이 판정과 무관하게 다시 검사한다.
-  const canDelete = await hasPermission(actingUser.role, "customers.lifecycle", "MANAGE");
+  const canDelete = await hasPermission(actingUser, "customers.lifecycle", "MANAGE");
   const [rows, trashRows] = await Promise.all([
     listCustomersWithCounts(),
     canDelete ? listDeletedCustomers() : Promise.resolve([]),

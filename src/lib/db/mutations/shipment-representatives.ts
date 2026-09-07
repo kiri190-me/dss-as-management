@@ -36,13 +36,13 @@ export async function setShipmentRepresentative(
   try {
     return await db.transaction(async (tx) => {
       const [actor] = await tx
-        .select({ role: users.role, approvalStatus: users.approvalStatus })
+        .select({ role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
       if (
         actor.approvalStatus !== "APPROVED" ||
-        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+        !(await hasPermission(actor, "users.shipmentRepresentatives", "MANAGE"))
       ) {
         fail("FORBIDDEN", "출하 승인 대표 지정을 변경할 권한이 없습니다.");
       }

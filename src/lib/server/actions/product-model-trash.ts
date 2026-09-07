@@ -59,7 +59,7 @@ async function passGate(): Promise<Gate> {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
 
-  if (!(await hasPermission(actingUser.role, "productModels.lifecycle", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "productModels.lifecycle", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "제품 모델을 삭제하거나 복원할 권한이 없습니다." };
   }
 

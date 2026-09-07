@@ -97,7 +97,7 @@ export async function createPart(input: CreatePartInput): Promise<CreatePartResu
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.parts", "WRITE"))) {
         fail("FORBIDDEN", "부품 등록 권한이 없습니다.");
       }
 
@@ -152,7 +152,7 @@ export async function updatePart(input: UpdatePartInput): Promise<UpdatePartResu
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.parts", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.parts", "WRITE"))) {
         fail("FORBIDDEN", "부품 수정 권한이 없습니다.");
       }
 
@@ -215,7 +215,7 @@ export async function receiveStock(input: ReceiveStockInput): Promise<StockTrans
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.stock", "WRITE"))) {
         fail("FORBIDDEN", "입고 권한이 없습니다.");
       }
 
@@ -371,7 +371,7 @@ export async function consumeStock(input: ConsumeStockInput): Promise<StockTrans
       // authContext는 그대로 둔다 — 맥락(대상 접수 건이 있는지, 잠겼는지)은
       // 여전히 여기서 판정한다. 역할 부분만 설정으로 넘어갔다.
       void authContext;
-      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.stock", "WRITE"))) {
         fail("FORBIDDEN", "재고를 사용할 권한이 없습니다.");
       }
 
@@ -417,7 +417,7 @@ export async function returnStock(input: ReturnStockInput): Promise<StockTransac
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.stock", "WRITE"))) {
+      if (!(await hasPermission(actor, "inventory.stock", "WRITE"))) {
         fail("FORBIDDEN", "반환 권한이 없습니다.");
       }
 
@@ -551,7 +551,7 @@ export async function softDeletePart(input: PartTrashInput & { reason: string | 
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.lifecycle", "MANAGE"))) {
         fail("FORBIDDEN", "부품 삭제 권한이 없습니다.");
       }
 
@@ -610,7 +610,7 @@ export async function restorePart(input: PartTrashInput): Promise<PartTrashResul
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.lifecycle", "MANAGE"))) {
         fail("FORBIDDEN", "부품 복원 권한이 없습니다.");
       }
 
@@ -661,7 +661,7 @@ export async function permanentlyDeletePart(input: PartTrashInput & { reason: st
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireActor(tx, input.actorUserId);
-      if (!(await hasPermission(actor.role, "inventory.lifecycle", "MANAGE"))) {
+      if (!(await hasPermission(actor, "inventory.lifecycle", "MANAGE"))) {
         fail("FORBIDDEN", "부품 완전 삭제 권한이 없습니다.");
       }
       if (input.reason.trim().length === 0) fail("INVALID_INPUT", "완전 삭제 사유를 입력해 주세요.");

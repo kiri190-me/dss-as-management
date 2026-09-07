@@ -121,7 +121,7 @@ async function resolveAuthorizedActor(need: "edit" | "delete"): Promise<Authoriz
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
 
-  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
+  const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
   const allowed =
     need === "delete" ? canDeleteServiceReports(level) : canEditServiceReports(level);
   if (!allowed) {

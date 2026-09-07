@@ -70,7 +70,7 @@ async function passGate(): Promise<Gate> {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
 
-  if (!(await hasPermission(actingUser.role, "customers.lifecycle", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "customers.lifecycle", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "고객사를 삭제하거나 복원할 권한이 없습니다." };
   }
 

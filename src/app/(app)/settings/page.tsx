@@ -51,7 +51,7 @@ export default async function SettingsPage() {
       */}
       <CustomerStatusOptionSettings
         options={options}
-        canManage={await hasPermission(actingUser.role, "customerPortal", "MANAGE")}
+        canManage={await hasPermission(actingUser, "customerPortal", "MANAGE")}
       />
     </div>
   );

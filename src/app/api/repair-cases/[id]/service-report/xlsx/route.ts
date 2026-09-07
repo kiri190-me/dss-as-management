@@ -144,7 +144,7 @@ export async function POST(
   if (!actingUser) return fail(401, "UNAUTHENTICATED", "로그인이 필요합니다.");
 
   // ── 5) 권한 — 조회보다 앞이다. 위 '왜 WRITE 인가' ────────────────────
-  if (!(await hasPermission(actingUser.role, "repairCases", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "repairCases", "WRITE"))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 
@@ -298,8 +298,7 @@ export async function GET(
    * 라우트가 어긋나기 시작한다.
    */
   if (
-    !(await hasPermission(
-      actingUser.role,
+    !(await hasPermission(actingUser,
       SERVICE_REPORT_PERMISSION_AREA,
       SERVICE_REPORT_REQUIRED_LEVELS.edit
     ))

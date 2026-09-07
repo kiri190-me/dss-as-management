@@ -18,10 +18,10 @@ import { meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
  * 그 대신 이 파일은 **순수하다** — DB 도 세션도 만지지 않으므로 단위 시험이
  * 붙는다. 부르는 쪽은 이렇게 쓴다:
  *
- *     const level = await getPermissionLevel(role, SERVICE_REPORT_PERMISSION_AREA);
+ *     const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
  *     if (!canEditServiceReports(level)) …
  *
- * 또는 그냥 `hasPermission(role, SERVICE_REPORT_PERMISSION_AREA, 수준)` 이다 —
+ * 또는 그냥 `hasPermission(actingUser, SERVICE_REPORT_PERMISSION_AREA, 수준)` 이다 —
  * 내려받기 라우트가 이미 그렇게 하고 있고, 아래 상수가 그 수준의 원본이다.
  *
  * ── 🔴 만들기·고치기가 WRITE 인 근거 ────────────────────────────────────

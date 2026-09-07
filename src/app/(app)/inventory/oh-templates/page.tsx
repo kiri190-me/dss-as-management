@@ -35,7 +35,7 @@ export default async function OhTemplatesPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  const canEdit = await hasPermission(actingUser.role, "inventory.parts", "WRITE");
+  const canEdit = await hasPermission(actingUser, "inventory.parts", "WRITE");
 
   // 연결 드롭다운 목록은 고칠 수 있는 사람에게만 읽어 내려보낸다 — 쓰지 않을
   // 값을 클라이언트로 실어 보내지 않는다.

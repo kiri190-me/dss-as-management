@@ -101,8 +101,8 @@ async function resolveWriteActor(
   // 어느 쪽 파일도 다룰 수 없는 사람은 첨부를 읽기 전에 막는다. 예전에
   // repairCases.files 하나로 막던 그 자리이고, 그때처럼 존재 여부가 드러나지
   // 않는다. 두 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const canWriteRepairCaseFiles = await hasPermission(actingUser.role, "repairCases.files", "WRITE");
-  const canWriteProductModelFiles = await hasPermission(actingUser.role, "productModels.files", "WRITE");
+  const canWriteRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "WRITE");
+  const canWriteProductModelFiles = await hasPermission(actingUser, "productModels.files", "WRITE");
   if (!canWriteRepairCaseFiles && !canWriteProductModelFiles) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "파일을 지울 권한이 없습니다." } };
   }

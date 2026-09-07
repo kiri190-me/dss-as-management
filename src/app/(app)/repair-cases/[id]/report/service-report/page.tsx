@@ -165,7 +165,7 @@ export default async function ServiceReportPage({
    */
   if (saved && saved.repairCaseId !== resolved.id) notFound();
 
-  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
+  const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
 
   let choices: ServiceReportChoices | null = null;
   let templateError: string | null = null;

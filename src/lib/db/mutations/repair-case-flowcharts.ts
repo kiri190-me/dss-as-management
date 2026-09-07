@@ -171,7 +171,7 @@ export async function createRepairCaseFlowchart(params: {
         failCreate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 생성할 수 있습니다.");
       }
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
         failCreate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -252,7 +252,7 @@ export async function updateRepairCaseFlowchartMetadata(params: {
         failUpdate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Case Flowchart를 변경할 수 있습니다.");
       }
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
         failUpdate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -333,7 +333,7 @@ export async function softDeleteRepairCaseFlowchart(params: {
       const repairCase = await loadCaseForUpdate(tx, params.repairCaseId);
       if (!repairCase) failSoftDelete("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
         failSoftDelete("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -439,7 +439,7 @@ export async function restoreRepairCaseFlowchart(params: {
       const repairCase = await loadCaseForUpdate(tx, params.repairCaseId);
       if (!repairCase) failRestore("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.edit", "WRITE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.edit", "WRITE"))) {
         failRestore("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -556,7 +556,7 @@ export async function permanentlyDeleteRepairCaseFlowchart(params: {
       // indistinguishable to the caller.
       if (!flowchart) failPermanentlyDelete("NOT_FOUND", "해당 Flowchart를 찾을 수 없습니다.");
 
-      if (!(await hasPermission(actor.role, "diagnosisFlowcharts.permanentDelete", "MANAGE"))) {
+      if (!(await hasPermission(actor, "diagnosisFlowcharts.permanentDelete", "MANAGE"))) {
         failPermanentlyDelete("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

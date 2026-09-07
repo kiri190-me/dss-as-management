@@ -60,7 +60,7 @@ export default async function QuoteDetailPage({
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canEdit =
     actingUser !== null &&
-    (await hasPermission(actingUser.role, "quotes", "WRITE"));
+    (await hasPermission(actingUser, "quotes", "WRITE"));
 
   if (!canEdit) redirect("/quotes");
 

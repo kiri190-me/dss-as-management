@@ -53,7 +53,7 @@ export default async function WorkHistoryPage({
 
   /**
    * 작업 기록 무효화 권한 — 작업내용 탭(execution/page.tsx)이 쓰던 판정을
-   * 글자 그대로 옮긴 것이다: hasPermission(role, "repairCases.workRecords",
+   * 글자 그대로 옮긴 것이다: hasPermission(actingUser, "repairCases.workRecords",
    * "MANAGE"). 세션이 없거나 그 세션으로 실제 사용자를 못 찾으면 무효화를
    * 내주지 않는다(상위 (app)/layout.tsx가 이미 두 경우를 로그인으로 돌려보내
    * 므로 여기까지 오지 않지만, 이 화면 혼자서도 닫혀 있어야 한다).
@@ -62,7 +62,7 @@ export default async function WorkHistoryPage({
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canInvalidate = actingUser
-    ? await hasPermission(actingUser.role, "repairCases.workRecords", "MANAGE")
+    ? await hasPermission(actingUser, "repairCases.workRecords", "MANAGE")
     : false;
 
   return (

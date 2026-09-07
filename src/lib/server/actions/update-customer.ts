@@ -58,7 +58,7 @@ export async function updateCustomerAction(
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
 
-  if (!(await hasPermission(actingUser.role, "customers.edit", "WRITE"))) {
+  if (!(await hasPermission(actingUser, "customers.edit", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
 

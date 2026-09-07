@@ -111,7 +111,7 @@ function assertNotSystemEntryNode(nodeType: ProcedureNodeType | null): void {
 
 /** Lock check + role/assignment check for the common "ordinary mutation" tier (start execution, start/complete/skip/block a node, add an extra task, update a memo). */
 async function assertOrdinaryMutationAuthorized(
-  actor: { id: string; role: Role },
+  actor: { id: string; role: Role; isDeveloper: boolean },
   repairCase: { isLocked: boolean; assignedEngineerId: string | null },
   nodeAssignedEngineerId: string | null
 ): Promise<void> {
@@ -123,7 +123,7 @@ async function assertOrdinaryMutationAuthorized(
   const isAssigned = effectiveAssigneeId !== null && effectiveAssigneeId === actor.id;
   const assignmentOk = !executionRequiresOwnAssignment(actor.role) || isAssigned;
 
-  if (!assignmentOk || !(await hasPermission(actor.role, "repairCases.procedureExecution", "WRITE"))) {
+  if (!assignmentOk || !(await hasPermission(actor, "repairCases.procedureExecution", "WRITE"))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 }
@@ -484,7 +484,7 @@ async function transitionToExceptionalStatus(
   tx: Tx,
   params: {
     executionNodeId: string;
-    actor: { id: string; role: Role };
+    actor: { id: string; role: Role; isDeveloper: boolean };
     ctx: LoadedExecutionNode;
     targetStatus: "SKIPPED" | "BLOCKED";
     expectedVersion: number;
@@ -623,9 +623,9 @@ export async function reopenExecutionNode(
         assignment.effectiveAssigneeId !== null && assignment.effectiveAssigneeId === actor.id;
       const allowed = wasCompletedOrSkipped
         ? // 이미 끝난 단계를 되돌리는 것은 담당 여부와 무관하게 관리 수준이다.
-          await hasPermission(actor.role, "repairCases.procedureExecution", "MANAGE")
+          await hasPermission(actor, "repairCases.procedureExecution", "MANAGE")
         : (!executionRequiresOwnAssignment(actor.role) || isAssigned) &&
-          (await hasPermission(actor.role, "repairCases.procedureExecution", "WRITE"));
+          (await hasPermission(actor, "repairCases.procedureExecution", "WRITE"));
       if (!allowed) {
         fail("FORBIDDEN", "이 작업을 재개(되돌림)할 권한이 없습니다.");
       }

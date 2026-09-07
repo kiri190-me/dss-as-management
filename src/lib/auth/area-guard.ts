@@ -2,10 +2,10 @@ import "server-only";
 
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import type { Role } from "@/lib/domain/types";
+import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { readSession } from "./session";
 import { resolveActingUserForSession } from "./acting-user";
-import { getPermissionLevel } from "./permission-resolver";
+import { getPermissionLevel, type PermissionActor } from "./permission-resolver";
 import { meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
 
 /**
@@ -28,10 +28,10 @@ import { meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
  */
 export async function requireAreaAccess(
   areaKey: string,
-  role: Role,
+  actor: PermissionActor,
   required: PermissionLevel = "READ"
 ): Promise<void> {
-  const level = await getPermissionLevel(role, areaKey);
+  const level = await getPermissionLevel(actor, areaKey);
   if (!meetsPermissionLevel(level, required)) {
     redirect(`/no-access?area=${encodeURIComponent(areaKey)}`);
   }
@@ -40,26 +40,27 @@ export async function requireAreaAccess(
 /** 리다이렉트 없이 가부만 묻는다 — 한 화면 안에서 일부만 감출 때 쓴다. */
 export async function hasAreaAccess(
   areaKey: string,
-  role: Role,
+  actor: PermissionActor,
   required: PermissionLevel = "READ"
 ): Promise<boolean> {
-  return meetsPermissionLevel(await getPermissionLevel(role, areaKey), required);
+  return meetsPermissionLevel(await getPermissionLevel(actor, areaKey), required);
 }
 
 /**
- * 지금 요청의 사용자 역할. 요청 한 번에 한 번만 실제로 조회한다(cache).
+ * 지금 요청의 사용자. 요청 한 번에 한 번만 실제로 조회한다(cache).
  *
- * 페이지마다 role을 인자로 넘기게 하지 않은 이유: 넘기는 방식이면 어떤 페이지는
+ * 페이지마다 인자로 넘기게 하지 않은 이유: 넘기는 방식이면 어떤 페이지는
  * 세션의 role(발급 시점 값)을, 어떤 페이지는 다시 읽은 값을 쓰게 된다.
  * 강등된 계정이 토큰 만료 전까지 예전 권한으로 다니는 구멍이 그렇게 생긴다.
- * 여기서는 언제나 살아 있는 계정을 다시 읽는다.
+ * 여기서는 언제나 살아 있는 계정을 다시 읽는다 — 개발자 표시도 함께 살아 있는
+ * 값이므로, 표시를 끈 직후 다음 요청부터 승격이 사라진다.
  */
-const currentRole = cache(async (): Promise<Role | null> => {
+const currentActingUser = cache(async (): Promise<ActingUser | null> => {
   const session = await readSession();
   if (!session) return null;
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser || actingUser.approvalStatus !== "APPROVED") return null;
-  return actingUser.role;
+  return actingUser;
 });
 
 /**
@@ -70,7 +71,7 @@ export async function requireAreaAccessForCurrentUser(
   areaKey: string,
   required: PermissionLevel = "READ"
 ): Promise<void> {
-  const role = await currentRole();
-  if (!role) redirect("/login");
-  await requireAreaAccess(areaKey, role, required);
+  const actingUser = await currentActingUser();
+  if (!actingUser) redirect("/login");
+  await requireAreaAccess(areaKey, actingUser, required);
 }

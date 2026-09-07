@@ -30,7 +30,7 @@ export async function previewNextIntakeNumberAction(receivedAt: string): Promise
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser || actingUser.approvalStatus !== "APPROVED") return null;
 
-  if (!(await hasAreaAccess("repairCaseNew", actingUser.role))) return null;
+  if (!(await hasAreaAccess("repairCaseNew", actingUser))) return null;
 
   try {
     return await getNextIntakeNumberPreview(receivedAt);

@@ -37,7 +37,7 @@ export default async function RepairCaseNewPage({
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canRegisterProductModel =
-    actingUser !== null && (await hasPermission(actingUser.role, "productModels.edit", "WRITE"));
+    actingUser !== null && (await hasPermission(actingUser, "productModels.edit", "WRITE"));
 
   /*
    * 고객이 보낸 수리 의뢰에서 넘어왔으면 아는 값만 미리 채운다.

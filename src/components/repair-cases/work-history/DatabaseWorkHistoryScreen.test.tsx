@@ -143,7 +143,7 @@ test("🔴 작업 이력 탭의 무효화 권한 판정이 작업내용 탭이 �
     new URL("../../../app/(app)/repair-cases/[id]/work-history/page.tsx", import.meta.url)
   );
   assert.ok(
-    workHistoryPage.includes('hasPermission(actingUser.role, "repairCases.workRecords", "MANAGE")'),
+    workHistoryPage.includes('hasPermission(actingUser, "repairCases.workRecords", "MANAGE")'),
     "작업내용 탭이 쓰던 것과 같은 권한(repairCases.workRecords / MANAGE)이어야 한다"
   );
 });

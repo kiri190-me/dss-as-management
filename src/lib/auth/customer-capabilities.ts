@@ -1,7 +1,6 @@
 import "server-only";
 
-import type { Role } from "@/lib/domain/types";
-import { hasPermission } from "./permission-resolver";
+import { hasPermission, type PermissionActor } from "./permission-resolver";
 
 /**
  * ============================================================================
@@ -36,13 +35,13 @@ export type CustomerCapabilities = {
   removeContact: boolean;
 };
 
-export async function resolveCustomerCapabilities(role: Role): Promise<CustomerCapabilities> {
+export async function resolveCustomerCapabilities(actor: PermissionActor): Promise<CustomerCapabilities> {
   const [edit, createEndUser, renameEndUser, editContact, removeContact] = await Promise.all([
-    hasPermission(role, "customers.edit", "WRITE"),
-    hasPermission(role, "customers.endUsers", "WRITE"),
-    hasPermission(role, "customers.endUsers", "MANAGE"),
-    hasPermission(role, "customers.contacts", "WRITE"),
-    hasPermission(role, "customers.contacts", "MANAGE"),
+    hasPermission(actor, "customers.edit", "WRITE"),
+    hasPermission(actor, "customers.endUsers", "WRITE"),
+    hasPermission(actor, "customers.endUsers", "MANAGE"),
+    hasPermission(actor, "customers.contacts", "WRITE"),
+    hasPermission(actor, "customers.contacts", "MANAGE"),
   ]);
   return { edit, createEndUser, renameEndUser, editContact, removeContact };
 }

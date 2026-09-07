@@ -98,8 +98,8 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
 
   // 미리보기를 만드는 것은 파일을 바꾸는 일이므로 올리기와 같은 권한을 본다.
   // 어느 쪽 파일도 다룰 수 없는 사람은 조회 전에 막는다(파일 헤더 참조).
-  const canWriteRepairCaseFiles = await hasPermission(actingUser.role, "repairCases.files", "WRITE");
-  const canWriteProductModelFiles = await hasPermission(actingUser.role, "productModels.files", "WRITE");
+  const canWriteRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "WRITE");
+  const canWriteProductModelFiles = await hasPermission(actingUser, "productModels.files", "WRITE");
   if (!canWriteRepairCaseFiles && !canWriteProductModelFiles) {
     return fail(403, "FORBIDDEN", "이 파일을 다룰 권한이 없습니다.");
   }

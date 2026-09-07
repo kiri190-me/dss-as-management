@@ -119,7 +119,7 @@ export default async function RepairCaseReportPage({
    */
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
-  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
+  const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
 
   /**
    * 접수 건이 실제로 있는지는 `[id]/layout.tsx` 가 이미 본다. 그래도 여기서 한 번

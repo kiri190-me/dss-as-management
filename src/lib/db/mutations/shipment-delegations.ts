@@ -62,7 +62,7 @@ export async function createShipmentDelegation(
   try {
     return await db.transaction(async (tx) => {
       const [actor] = await tx
-        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isActive: users.isActive, lockedAt: users.lockedAt, isDeleted: users.isDeleted })
+        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isActive: users.isActive, lockedAt: users.lockedAt, isDeleted: users.isDeleted, isDeveloper: users.isDeveloper })
         .from(users)
         .where(eq(users.id, actorUserId));
       if (!isEligibleActor(actor)) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
@@ -72,7 +72,7 @@ export async function createShipmentDelegation(
       // 권한을 본다.
       if (
         !isSelfDelegating &&
-        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+        !(await hasPermission(actor, "users.shipmentRepresentatives", "MANAGE"))
       ) {
         fail("FORBIDDEN", "대표 본인 또는 권한이 있는 관리자만 위임을 지정할 수 있습니다.");
       }
@@ -167,7 +167,7 @@ export async function revokeShipmentDelegation(
   try {
     return await db.transaction(async (tx) => {
       const [actor] = await tx
-        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isActive: users.isActive, lockedAt: users.lockedAt, isDeleted: users.isDeleted })
+        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isActive: users.isActive, lockedAt: users.lockedAt, isDeleted: users.isDeleted, isDeveloper: users.isDeveloper })
         .from(users)
         .where(eq(users.id, actorUserId));
       if (!isEligibleActor(actor)) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
@@ -189,7 +189,7 @@ export async function revokeShipmentDelegation(
       const isSelfRevoking = actor.id === delegation.representativeUserId;
       if (
         !isSelfRevoking &&
-        !(await hasPermission(actor.role, "users.shipmentRepresentatives", "MANAGE"))
+        !(await hasPermission(actor, "users.shipmentRepresentatives", "MANAGE"))
       ) {
         fail("FORBIDDEN", "대표 본인 또는 권한이 있는 관리자만 위임을 철회할 수 있습니다.");
       }

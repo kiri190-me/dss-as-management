@@ -38,7 +38,7 @@ export async function GET(
   if (!actingUser || actingUser.approvalStatus !== "APPROVED") {
     return NextResponse.json({ message: "권한이 없습니다." }, { status: 403 });
   }
-  if (!(await hasPermission(actingUser.role, "mailSettings", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "mailSettings", "MANAGE"))) {
     return NextResponse.json({ message: "권한이 없습니다." }, { status: 403 });
   }
 

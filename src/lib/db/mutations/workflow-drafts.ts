@@ -49,7 +49,7 @@ export type WorkflowDraftResult<T> =
 
 async function resolveActor(actorUserId: string) {
   const [actor] = await db
-    .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
+    .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
     .from(users)
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
   return actor ?? null;
@@ -67,7 +67,7 @@ export async function createWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string; versionNumber: number }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
 
@@ -199,7 +199,7 @@ export async function publishWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string; versionNumber: number; archivedVersionId: string | null }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.publish", "MANAGE"))) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor, "workflows.publish", "MANAGE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 발행할 권한이 없습니다." };
   }
 
@@ -316,7 +316,7 @@ export async function discardWorkflowDraft(params: {
   actorUserId: string;
 }): Promise<WorkflowDraftResult<{ versionId: string }>> {
   const actor = await resolveActor(params.actorUserId);
-  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor.role, "workflows.editDraft", "WRITE"))) {
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor, "workflows.editDraft", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "워크플로를 편집할 권한이 없습니다." };
   }
 

@@ -127,10 +127,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   // 하나로 막던 그 자리이고, 그때와 마찬가지로 존재 여부가 드러나지 않는다.
   //
   // 두 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const canReadRepairCaseFiles = await hasPermission(actingUser.role, "repairCases.files", "READ");
+  const canReadRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "READ");
   // 모델 파일을 **보는** 권한은 productModels.files가 아니라 view다 — 파일
   // 헤더의 '권한이 주인에 따라 갈린다' 참조.
-  const canReadProductModelFiles = await hasPermission(actingUser.role, "productModels.view", "READ");
+  const canReadProductModelFiles = await hasPermission(actingUser, "productModels.view", "READ");
   if (!canReadRepairCaseFiles && !canReadProductModelFiles) {
     return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
   }

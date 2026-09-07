@@ -52,7 +52,7 @@ export default async function CustomerDetailPage({
     redirect("/login");
   }
 
-  if (!(await hasPermission(actingUser.role, "customers.view", "READ"))) {
+  if (!(await hasPermission(actingUser, "customers.view", "READ"))) {
     return <PlaceholderPage title="고객사 상세" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -75,7 +75,7 @@ export default async function CustomerDetailPage({
     listRepairCasesByCustomerId(customer.id),
   ]);
 
-  const capabilities = await resolveCustomerCapabilities(actingUser.role);
+  const capabilities = await resolveCustomerCapabilities(actingUser);
 
   return (
     <CustomerDetailScreen

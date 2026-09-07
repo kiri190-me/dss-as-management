@@ -625,7 +625,7 @@ export async function undoProcedureTemplateChange(templateId: string, actorUserI
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       const groups = await loadTemplateHistoryGroups(tx, templateId);
       const fold = foldOrFail(groups);
@@ -681,7 +681,7 @@ export async function redoProcedureTemplateChange(templateId: string, actorUserI
   try {
     return await db.transaction(async (tx) => {
       const actor = await requireEditor(tx, actorUserId);
-      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor.role);
+      await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor);
 
       const groups = await loadTemplateHistoryGroups(tx, templateId);
       const fold = foldOrFail(groups);

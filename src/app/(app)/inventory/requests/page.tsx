@@ -24,7 +24,7 @@ export default async function InventoryPartRequestsPage() {
   // instead); this is not merely nav-hiding, since a hidden nav link is a
   // UX convenience only and every mutation this screen triggers re-checks
   // authorization independently regardless.
-  if (!(await hasPermission(actingUser.role, "inventory.requestProcessing", "MANAGE"))) {
+  if (!(await hasPermission(actingUser, "inventory.requestProcessing", "MANAGE"))) {
     return (
       <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
         이 화면에 접근할 권한이 없습니다.

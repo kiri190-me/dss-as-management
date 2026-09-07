@@ -68,7 +68,7 @@ function fail(code: ProcedureTemplateResultCode, message: string): never {
   throw new ProcedureTemplateMutationError({ ok: false, code, message });
 }
 
-type EligibleActor = { id: string; role: Role };
+type EligibleActor = { id: string; role: Role; isDeveloper: boolean };
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Exported for reuse by procedure-template-editor.ts — every Phase 4A editor mutation re-checks the same live actor eligibility this file's own mutations always have, never a second/looser copy of the check. */
@@ -84,6 +84,7 @@ export async function resolveEligibleActor(
       isActive: users.isActive,
       lockedAt: users.lockedAt,
       isDeleted: users.isDeleted,
+      isDeveloper: users.isDeveloper,
     })
     .from(users)
     .where(eq(users.id, actorUserId));

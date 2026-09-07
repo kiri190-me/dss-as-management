@@ -52,7 +52,7 @@ export default async function RepairCaseFilesPage({
   // 라우트와 서버 액션이 각자 다시 한다 — 여기서 숨기는 것은 눌러도 막히는
   // 버튼을 내밀지 않기 위해서다.
   const canManageFiles = actingUser
-    ? await hasPermission(actingUser.role, "repairCases.files", "WRITE")
+    ? await hasPermission(actingUser, "repairCases.files", "WRITE")
     : false;
 
   return (

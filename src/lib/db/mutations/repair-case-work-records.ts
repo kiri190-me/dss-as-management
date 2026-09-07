@@ -128,7 +128,7 @@ export async function createWorkRecord(params: {
       const isAssignedToCase = repairCase.assignedEngineerId === actor.id;
       // 담당 조건은 엔지니어에게만 붙는다 — 역할은 설정이, 담당 여부는 여기가 본다.
       const assignmentOk = !workRecordRequiresOwnAssignment(actor.role) || isAssignedToCase;
-      if (!assignmentOk || !(await hasPermission(actor.role, "repairCases.workRecords", "WRITE"))) {
+      if (!assignmentOk || !(await hasPermission(actor, "repairCases.workRecords", "WRITE"))) {
         failCreate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 
@@ -282,7 +282,7 @@ export async function invalidateWorkRecord(params: {
         failInvalidate("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 작업 기록을 변경할 수 있습니다.");
       }
 
-      if (!(await hasPermission(actor.role, "repairCases.workRecords", "MANAGE"))) {
+      if (!(await hasPermission(actor, "repairCases.workRecords", "MANAGE"))) {
         failInvalidate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

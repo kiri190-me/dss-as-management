@@ -98,7 +98,7 @@ export async function GET(
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
-  const level = await getPermissionLevel(actingUser.role, SERVICE_REPORT_PERMISSION_AREA);
+  const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
   if (!canViewServiceReports(level)) {
     return NextResponse.json({ error: "이 작업을 수행할 권한이 없습니다." }, { status: 403 });
   }

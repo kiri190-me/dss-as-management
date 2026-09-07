@@ -32,7 +32,7 @@ export default async function WorkflowsPage() {
   const session = await readSession();
   if (!session) redirect("/login");
   const actingUser = await resolveActingUserForSession(session);
-  if (!actingUser || !(await hasPermission(actingUser.role, "workflows.view", "READ"))) redirect("/dashboard");
+  if (!actingUser || !(await hasPermission(actingUser, "workflows.view", "READ"))) redirect("/dashboard");
 
   const templates = await listWorkflowTemplateSummaries();
   const active = templates.filter((t) => !t.isArchived);

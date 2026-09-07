@@ -120,7 +120,7 @@ export async function transitionWorkflow(
       }
 
       const [actor] = await tx
-        .select({ id: users.id, name: users.name, role: users.role, approvalStatus: users.approvalStatus })
+        .select({ id: users.id, name: users.name, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) {

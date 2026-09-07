@@ -14,7 +14,7 @@ const NOT_ON_HOLD: HoldState = { isOnHold: false, reason: null, startedByUserId:
 const ON_HOLD: HoldState = { isOnHold: true, reason: "부품 대기", startedByUserId: "u-hold", startedByNameSnapshot: "테스트", startedAt: "2026-01-01T00:00:00Z" };
 
 function user(role: ActingUser["role"], overrides: Partial<ActingUser> = {}): ActingUser {
-  return { id: "actor-1", name: "테스트 사용자", role, approvalStatus: "APPROVED", ...overrides };
+  return { id: "actor-1", name: "테스트 사용자", role, approvalStatus: "APPROVED", isDeveloper: false, ...overrides };
 }
 
 function transition(overrides: Partial<TransitionDefinition> = {}): TransitionDefinition {

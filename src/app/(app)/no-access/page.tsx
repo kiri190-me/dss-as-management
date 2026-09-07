@@ -35,7 +35,7 @@ export default async function NoAccessPage({
   if (!actingUser) redirect("/login");
 
   const blockedArea = area ? findPermissionArea(area) : undefined;
-  const accessibleKeys = new Set(await listAccessibleAreaKeys(actingUser.role));
+  const accessibleKeys = new Set(await listAccessibleAreaKeys(actingUser));
   const accessibleItems = navItems.filter((item) => accessibleKeys.has(item.key));
 
   return (

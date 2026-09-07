@@ -49,7 +49,7 @@ export default async function CustomerPortalPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!(await hasPermission(actingUser.role, "customerPortal", "READ"))) {
+  if (!(await hasPermission(actingUser, "customerPortal", "READ"))) {
     return (
       <PlaceholderPage
         title="고객 안내 현황"
@@ -85,8 +85,8 @@ export default async function CustomerPortalPage() {
       itemsByCustomer={itemsByCustomer}
       statusOptions={statusOptions}
       customersWithoutLink={customersWithoutLink}
-      canManageLinks={await hasPermission(actingUser.role, "customerPortal", "MANAGE")}
-      canEdit={await hasPermission(actingUser.role, "customerPortal", "WRITE")}
+      canManageLinks={await hasPermission(actingUser, "customerPortal", "MANAGE")}
+      canEdit={await hasPermission(actingUser, "customerPortal", "WRITE")}
     />
   );
 }

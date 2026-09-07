@@ -126,7 +126,7 @@ export default async function RepairCaseExecutionPage({
   const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
   const canCreate =
     (!workRecordRequiresOwnAssignment(actingUser.role) || isAssignedToCase) &&
-    (await hasPermission(actingUser.role, "repairCases.workRecords", "WRITE"));
+    (await hasPermission(actingUser, "repairCases.workRecords", "WRITE"));
   // 무효화 권한 판정은 이 화면에 없다 — 무효화가 작업 이력 탭으로 옮겨 갔고,
   // 같은 판정을 work-history/page.tsx가 그대로 한다.
   void isCaseLocked;

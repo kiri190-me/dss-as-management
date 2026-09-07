@@ -1,7 +1,6 @@
 import "server-only";
 
-import type { Role } from "@/lib/domain/types";
-import { hasPermission } from "./permission-resolver";
+import { hasPermission, type PermissionActor } from "./permission-resolver";
 
 /**
  * ============================================================================
@@ -39,12 +38,12 @@ export type InventoryCapabilities = {
   lifecycle: boolean;
 };
 
-export async function resolveInventoryCapabilities(role: Role): Promise<InventoryCapabilities> {
+export async function resolveInventoryCapabilities(actor: PermissionActor): Promise<InventoryCapabilities> {
   const [parts, stock, requestProcessing, lifecycle] = await Promise.all([
-    hasPermission(role, "inventory.parts", "WRITE"),
-    hasPermission(role, "inventory.stock", "WRITE"),
-    hasPermission(role, "inventory.requestProcessing", "MANAGE"),
-    hasPermission(role, "inventory.lifecycle", "MANAGE"),
+    hasPermission(actor, "inventory.parts", "WRITE"),
+    hasPermission(actor, "inventory.stock", "WRITE"),
+    hasPermission(actor, "inventory.requestProcessing", "MANAGE"),
+    hasPermission(actor, "inventory.lifecycle", "MANAGE"),
   ]);
   return { parts, stock, requestProcessing, lifecycle };
 }

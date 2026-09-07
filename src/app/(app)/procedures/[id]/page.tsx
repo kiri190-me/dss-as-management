@@ -95,15 +95,15 @@ export default async function ProcedureTemplateDetailPage({
   const canPublish =
     canManageTechnicalTemplates(actingUser.role) &&
     canActorPublishTemplateOfCategory(actingUser.role, template.category) &&
-    (await mayPublishTemplateOfCategory(actingUser.role, template.category));
+    (await mayPublishTemplateOfCategory(actingUser, template.category));
 
   return (
     <Suspense fallback={null}>
       <ProcedureTemplateDetailScreen
         template={template}
-        canManageValidation={await hasPermission(actingUser.role, "technicalProcedures.validation", "READ")}
-        canCreateDraftVersion={await mayCreateDraftVersionOfCategory(actingUser.role, template.category)}
-        canEditDraft={await mayEditTemplateOfCategory(actingUser.role, template.category)}
+        canManageValidation={await hasPermission(actingUser, "technicalProcedures.validation", "READ")}
+        canCreateDraftVersion={await mayCreateDraftVersionOfCategory(actingUser, template.category)}
+        canEditDraft={await mayEditTemplateOfCategory(actingUser, template.category)}
         canPublish={canPublish}
       />
     </Suspense>

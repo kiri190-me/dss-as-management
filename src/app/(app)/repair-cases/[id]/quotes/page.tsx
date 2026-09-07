@@ -67,7 +67,7 @@ export default async function RepairCaseQuotesPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  const canView = await hasPermission(actingUser.role, "quotes", "READ");
+  const canView = await hasPermission(actingUser, "quotes", "READ");
   if (!canView) {
     return (
       <PlaceholderPage
@@ -90,7 +90,7 @@ export default async function RepairCaseQuotesPage({
    * 그대로다(`quotes` WRITE). **이것도 관문이 아니다**: `/quotes/new` 가 다시
    * 확인하고, 저장은 서버 액션이 처음부터 또 검사한다.
    */
-  const canEdit = await hasPermission(actingUser.role, "quotes", "WRITE");
+  const canEdit = await hasPermission(actingUser, "quotes", "WRITE");
 
   const rows = await listQuotesForRepairCase(resolved.id);
 

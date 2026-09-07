@@ -71,7 +71,7 @@ export async function setCustomerStatusAction(input: {
 }): Promise<ActionResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "WRITE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "WRITE"))) {
     return { ok: false, message: "고객 안내 상태를 정할 권한이 없습니다." };
   }
 
@@ -115,7 +115,7 @@ export async function issueCustomerLinkAction(input: {
 }): Promise<ActionResult & { url?: string }> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "MANAGE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 주소를 발급할 수 있습니다." };
   }
   if (typeof input.customerId !== "string" || !input.customerId) {
@@ -230,7 +230,7 @@ export async function revealCustomerLinkUrlAction(input: {
   if (!gate.ok) {
     return { ok: false, reason: "FORBIDDEN", message: gate.message };
   }
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "MANAGE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "MANAGE"))) {
     return {
       ok: false,
       reason: "FORBIDDEN",
@@ -280,7 +280,7 @@ export async function revokeCustomerLinkAction(input: {
 }): Promise<ActionResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "MANAGE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 주소를 회수할 수 있습니다." };
   }
 
@@ -311,7 +311,7 @@ export async function revokeCustomerLinkAction(input: {
 export async function syncNowAction(input: { linkId: string }): Promise<ActionResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "WRITE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "WRITE"))) {
     return { ok: false, message: "내보낼 권한이 없습니다." };
   }
 
@@ -331,7 +331,7 @@ export async function createStatusOptionAction(input: {
 }): Promise<ActionResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "MANAGE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 상태 목록을 바꿀 수 있습니다." };
   }
 
@@ -359,7 +359,7 @@ export async function updateStatusOptionAction(input: {
 }): Promise<ActionResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
-  if (!(await hasPermission(gate.actingUser.role, "customerPortal", "MANAGE"))) {
+  if (!(await hasPermission(gate.actingUser, "customerPortal", "MANAGE"))) {
     return { ok: false, message: "관리자 이상만 상태 목록을 바꿀 수 있습니다." };
   }
 
