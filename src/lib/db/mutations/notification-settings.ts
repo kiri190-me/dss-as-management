@@ -13,6 +13,8 @@ import {
 } from "@/lib/domain/notification-settings";
 import type { NotificationKind } from "@/lib/domain/notifications";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
+import { actorMay } from "@/lib/auth/developer-promotion";
+import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
 
 export type SaveNotificationSettingsResult =
   | { ok: true; changedCount: number }
@@ -100,13 +102,15 @@ export async function saveNotificationSettings(params: {
   try {
     return await db.transaction(async (tx): Promise<SaveNotificationSettingsResult> => {
       const [actor] = await tx
-        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
+        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
         .from(users)
         .where(and(eq(users.id, params.actorUserId), eq(users.isDeleted, false)));
       if (!actor || actor.approvalStatus !== "APPROVED") {
         throw new SaveRejected({ ok: false, code: "FORBIDDEN", message: "사용자 정보를 확인할 수 없습니다." });
       }
-      if (actor.role !== "SUPER_ADMIN" && actor.role !== "ADMIN") {
+      // 권한 설정 쪽과 같은 이유로 승격이 여기까지 닿아야 한다 —
+      // 액션 층이 통과시킨 요청을 이 층이 다시 막으면 화면과 서버가 어긋난다.
+      if (!actorMay(actor, canManageNotificationSettings)) {
         throw new SaveRejected({
           ok: false,
           code: "FORBIDDEN",

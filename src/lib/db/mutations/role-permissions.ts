@@ -20,6 +20,8 @@ import {
   minMeaningfulLevelOfLeaf,
 } from "@/lib/auth/permission-features";
 import { baselineLeafLevel } from "@/lib/auth/permission-baseline";
+import { actorMay } from "@/lib/auth/developer-promotion";
+import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
 import type { Role } from "@/lib/domain/types";
 
 export type SaveRolePermissionsResult =
@@ -89,13 +91,17 @@ export async function saveRolePermissions(params: {
   try {
     return await db.transaction(async (tx): Promise<SaveRolePermissionsResult> => {
       const [actor] = await tx
-        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
+        .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
         .from(users)
         .where(and(eq(users.id, params.actorUserId), eq(users.isDeleted, false)));
       if (!actor || actor.approvalStatus !== "APPROVED") {
         throw new SaveRejected({ ok: false, code: "FORBIDDEN", message: "사용자 정보를 확인할 수 없습니다." });
       }
-      if (actor.role !== "SUPER_ADMIN" && actor.role !== "ADMIN") {
+      // 개발자 승격이 여기까지 닿아야 한다 — 액션 층(actions/role-permissions.ts)이
+      // 승격된 판정으로 통과시킨 요청을 이 층이 다시 막으면, 개발자는 화면은
+      // 열고 저장은 못 하는 상태가 된다. 정책 함수는 그대로 부르고 넘기는
+      // 행위자만 바꾼다(developer-promotion.ts).
+      if (!actorMay(actor, canManageRolePermissions)) {
         throw new SaveRejected({
           ok: false,
           code: "FORBIDDEN",
@@ -108,7 +114,7 @@ export async function saveRolePermissions(params: {
         changedCount += await applyOneRole(tx, {
           role: change.role,
           levels: change.levels,
-          actor: { id: actor.id, role: actor.role },
+          actor: { id: actor.id, role: actor.role, isDeveloper: actor.isDeveloper },
         });
       }
       return { ok: true, changedCount };
@@ -122,10 +128,12 @@ export async function saveRolePermissions(params: {
 /** 역할 하나분의 저장. 거절할 일이 생기면 SaveRejected를 던져 전체를 되돌린다. */
 async function applyOneRole(
   tx: Tx,
-  params: { role: Role; levels: Record<string, string>; actor: { id: string; role: Role } }
+  params: { role: Role; levels: Record<string, string>; actor: { id: string; role: Role; isDeveloper: boolean } }
 ): Promise<number> {
   // 기본 정책보다 높게 올릴 수 있는 사람. 이 한 줄이 넓히기의 관문이다.
-  const mayWiden = params.actor.role === "SUPER_ADMIN";
+  // 개발자는 최고관리자 동급이므로 더하기로 통과한다 — 화면의 canWiden
+  // (role-permission-views.ts)과 같은 판정이라야 어긋나지 않는다.
+  const mayWiden = actorMay(params.actor, (role) => role === "SUPER_ADMIN");
 
   // 화면이 보낸 값을 잎 목록 기준으로 정규화한다. 목록에 없는 키는 버리고,
   // 빠진 잎은 기본 정책(= 설정 없음)으로 둔다.

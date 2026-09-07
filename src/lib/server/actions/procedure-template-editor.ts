@@ -1,6 +1,8 @@
 "use server";
 
 import { readSession } from "@/lib/auth/session";
+import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
 import { canEditTechnicalTemplateDraft, canManageTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
@@ -70,7 +72,8 @@ async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } 
   // ADMIN+SUPER_ADMIN function). The mutation layer's category-aware check
   // (procedure-template-editor.ts's assertEditableDraft /
   // validateProcedureTemplate) remains the sole authoritative boundary.
-  if (!canEditProcedureTemplateDraft(session.role) && !canEditTechnicalTemplateDraft(session.role)) {
+  const actor = await sessionActorWithDeveloperFlag(session);
+  if (!actorMay(actor, canEditProcedureTemplateDraft) && !actorMay(actor, canEditTechnicalTemplateDraft)) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "편집 권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };
@@ -254,7 +257,7 @@ export async function resolveTechnicalGraphActorId(): Promise<{ ok: true; userId
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
   }
-  if (!canManageTechnicalTemplates(session.role)) {
+  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };

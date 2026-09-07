@@ -8,6 +8,7 @@ import CreateDraftVersionButton from "@/components/procedures/editor/CreateDraft
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { getProcedureTemplateForEditor, compareDraftWithParent } from "@/lib/db/queries/procedure-template-editor";
 import { getProcedureTemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import {
@@ -56,7 +57,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewPublishedProcedureTemplates(actingUser.role)) {
+  if (!actorMay(actingUser, canViewPublishedProcedureTemplates)) {
     return <PlaceholderPage title="기술 절차 편집기" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -65,7 +66,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   const template = await getProcedureTemplateForEditor(id);
   if (!template) notFound();
 
-  if (template.status !== "PUBLISHED" && !canViewAllProcedureTemplateStatuses(actingUser.role)) {
+  if (template.status !== "PUBLISHED" && !actorMay(actingUser, canViewAllProcedureTemplateStatuses)) {
     notFound();
   }
 

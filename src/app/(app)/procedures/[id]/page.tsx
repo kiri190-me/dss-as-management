@@ -21,6 +21,7 @@ import {
   canActorPublishTemplateOfCategory,
 } from "@/lib/auth/technical-procedure-template-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { actorMay } from "@/lib/auth/developer-promotion";
 
 export const metadata: Metadata = {
   title: "기술 절차 템플릿 상세 | DSS A/S 관리 시스템",
@@ -52,7 +53,7 @@ export default async function ProcedureTemplateDetailPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!canViewPublishedProcedureTemplates(actingUser.role)) {
+  if (!actorMay(actingUser, canViewPublishedProcedureTemplates)) {
     return (
       <PlaceholderPage
         title="기술 절차 템플릿"
@@ -69,7 +70,7 @@ export default async function ProcedureTemplateDetailPage({
   // AS_ENGINEER (view-published-only) must never see a DRAFT/ARCHIVED
   // template just by knowing/guessing its id — the list already hides
   // these rows, this is the direct-URL backstop.
-  if (template.status !== "PUBLISHED" && !canViewAllProcedureTemplateStatuses(actingUser.role)) {
+  if (template.status !== "PUBLISHED" && !actorMay(actingUser, canViewAllProcedureTemplateStatuses)) {
     notFound();
   }
 
@@ -93,8 +94,8 @@ export default async function ProcedureTemplateDetailPage({
   // 설정으로 "넓히는" 것이 실제로 통하게 하려면 publishProcedureTemplate 을
   // mayPublishTemplateOfCategory 로 전환해야 한다 — 별도 결정 사항이다.
   const canPublish =
-    canManageTechnicalTemplates(actingUser.role) &&
-    canActorPublishTemplateOfCategory(actingUser.role, template.category) &&
+    actorMay(actingUser, canManageTechnicalTemplates) &&
+    actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
     (await mayPublishTemplateOfCategory(actingUser, template.category));
 
   return (

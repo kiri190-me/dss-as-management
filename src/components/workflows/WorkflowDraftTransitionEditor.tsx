@@ -127,6 +127,13 @@ function TransitionRow({
         ))}
       </select>
 
+      {/*
+        🔴 여기의 roles.includes(role) 은 **현재 사용자에 대한 판정이 아니다.**
+        「이 전이를 어느 역할에 허용할지」 고르는 체크박스의 체크 상태, 즉 편집
+        중인 값이다. 개발자 승격(developer-promotion.ts)을 여기 넣으면 개발자에게만
+        엉뚱한 체크 상태가 보이고, 저장하면 그 값이 실제 전이에 박힌다.
+        「이 사람이 해도 되는가」는 승격하고, 「이것이 어떤 값인가」는 승격하지 않는다.
+      */}
       <span className="flex flex-wrap items-center gap-1">
         {ROLE_CODES.map((role) => (
           <label key={role} className="flex items-center gap-0.5 text-zinc-600 dark:text-zinc-400">

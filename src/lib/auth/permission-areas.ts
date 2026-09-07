@@ -58,6 +58,16 @@ export function lowerPermissionLevel(a: PermissionLevel, b: PermissionLevel): Pe
   return LEVEL_RANK[a] <= LEVEL_RANK[b] ? a : b;
 }
 
+/**
+ * 둘 중 높은 수준. 개발자 승격이 **더하기**라서 필요하다 — 진짜 역할의 수준과
+ * 최고관리자의 수준 중 높은 쪽이 답이다(developer-promotion.ts).
+ *
+ * 상한을 구할 때는 쓰지 않는다. 상한은 여전히 낮은 쪽으로만 접힌다.
+ */
+export function higherPermissionLevel(a: PermissionLevel, b: PermissionLevel): PermissionLevel {
+  return LEVEL_RANK[a] >= LEVEL_RANK[b] ? a : b;
+}
+
 /** actual이 required 이상인가. NONE은 어떤 요구도 만족하지 못한다. */
 export function meetsPermissionLevel(actual: PermissionLevel, required: PermissionLevel): boolean {
   if (required === "NONE") return true;

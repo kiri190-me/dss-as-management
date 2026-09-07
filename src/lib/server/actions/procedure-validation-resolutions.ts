@@ -1,6 +1,8 @@
 "use server";
 
 import { readSession } from "@/lib/auth/session";
+import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canResolveProcedureValidationIssues } from "@/lib/auth/procedure-template-authorization";
 import {
@@ -33,7 +35,7 @@ async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } 
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
   }
-  if (!canResolveProcedureValidationIssues(session.role)) {
+  if (!actorMay(await sessionActorWithDeveloperFlag(session), canResolveProcedureValidationIssues)) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "검증 이슈 해결 권한이 없습니다 (SUPER_ADMIN 전용)." } };
   }
   return { ok: true, userId: session.userId };

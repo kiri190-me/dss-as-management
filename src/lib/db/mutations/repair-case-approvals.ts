@@ -3,6 +3,7 @@ import { and, desc, eq, gt, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, shipmentApprovalDelegations, users } from "../schema";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import type {
   ApprovalActionResult,
   RepairCaseApprovalType,
@@ -80,13 +81,13 @@ export async function requestRepairCaseApproval(
       }
 
       const [actor] = await tx
-        .select({ role: users.role, approvalStatus: users.approvalStatus })
+        .select({ role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
       if (
         actor.approvalStatus !== "APPROVED" ||
-        !(REQUEST_ELIGIBLE_ROLES as readonly string[]).includes(actor.role)
+        !actorHasAllowedRole(actor, REQUEST_ELIGIBLE_ROLES)
       ) {
         fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
@@ -172,6 +173,7 @@ export async function decideRepairCaseApproval(
           isShipmentRepresentative: users.isShipmentRepresentative,
           isActive: users.isActive,
           lockedAt: users.lockedAt,
+          isDeveloper: users.isDeveloper,
         })
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
@@ -183,7 +185,7 @@ export async function decideRepairCaseApproval(
       if (approvalType === "REPAIR_INSPECTION") {
         // Unchanged from before this task — REPAIR_INSPECTION eligibility
         // stays role + approvalStatus only, deliberately not touched here.
-        if (!(INSPECTION_DECIDE_ELIGIBLE_ROLES as readonly string[]).includes(actor.role)) {
+        if (!actorHasAllowedRole(actor, INSPECTION_DECIDE_ELIGIBLE_ROLES)) {
           fail("FORBIDDEN", "현재 역할로는 이 작업을 수행할 수 없습니다.");
         }
       } else if (!actor.isActive || actor.lockedAt !== null) {

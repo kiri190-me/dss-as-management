@@ -90,7 +90,7 @@ async function createPendingCase(sequence: number) {
     contactName: null, contactPhone: null, contactEmail: null,
   };
   const result = await createRepairCaseWithIdempotency({
-    actor: { userId: adminId, role: "SUPER_ADMIN", approvalStatus: "APPROVED" },
+    actor: { userId: adminId, role: "SUPER_ADMIN", approvalStatus: "APPROVED", isDeveloper: false },
     intake, idempotencyKey: key, logContext: "EXCEL_IMPORT",
   });
   assert.equal(result.ok, true, JSON.stringify(result));

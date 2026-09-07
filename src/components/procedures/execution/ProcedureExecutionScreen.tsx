@@ -4,6 +4,7 @@ import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -58,7 +59,7 @@ function NodeSection({
 }: {
   title: string;
   nodes: ExecutionDetail["nodes"];
-  actingUser: { id: string; role: string };
+  actingUser: { id: string; role: string; isDeveloper: boolean };
   emptyMessage: string;
 }) {
   return (
@@ -119,7 +120,7 @@ export default function ProcedureExecutionScreen({
   // Shipment-lock removal policy: role-only now — see isBlockedByCaseLock
   // (procedure-case-execution-authorization.ts), which the server
   // independently enforces regardless of this UI hint.
-  const extraTaskEligible = (ORDINARY_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
+  const extraTaskEligible = actorHasAllowedRole(actingUser, ORDINARY_ELIGIBLE_ROLES);
 
   return (
     <div className="flex flex-col gap-4">

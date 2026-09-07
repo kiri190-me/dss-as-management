@@ -4,6 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { saveNotificationSettings } from "@/lib/db/mutations/notification-settings";
 
 export type SaveNotificationSettingsActionInput = {
@@ -43,7 +44,7 @@ export async function saveNotificationSettingsAction(
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canManageNotificationSettings(actingUser.role)) {
+  if (!actorMay(actingUser, canManageNotificationSettings)) {
     return { ok: false, message: "관리자 이상만 알림 설정을 바꿀 수 있습니다." };
   }
 

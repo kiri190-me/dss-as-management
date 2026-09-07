@@ -9,6 +9,7 @@ import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
 import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
 import { requireAreaAccess } from "@/lib/auth/area-guard";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { buildRolePermissionViews } from "@/lib/auth/role-permission-views";
 import { buildNotificationSettingsView } from "@/lib/db/queries/notification-settings";
 
@@ -57,10 +58,10 @@ export default async function UsersPage() {
   // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다. 알림 설정도
   // 같다 — 어느 역할이 무엇을 받는지는 그 자체가 조직 구성 정보다.
   const [rolePermissions, notificationSettings] = await Promise.all([
-    canManageRolePermissions(actingUser.role)
-      ? buildRolePermissionViews({ actorRole: actingUser.role })
+    actorMay(actingUser, canManageRolePermissions)
+      ? buildRolePermissionViews({ actorRole: actingUser.role, actorIsDeveloper: actingUser.isDeveloper })
       : Promise.resolve(null),
-    canManageNotificationSettings(actingUser.role)
+    actorMay(actingUser, canManageNotificationSettings)
       ? buildNotificationSettingsView()
       : Promise.resolve(null),
   ]);

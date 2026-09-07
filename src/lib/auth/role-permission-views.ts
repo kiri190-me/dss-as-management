@@ -5,6 +5,7 @@ import { PERMISSION_AREAS, type PermissionLevel } from "./permission-areas";
 import { PERMISSION_LEAF_KEYS } from "./permission-features";
 import { baselineLeafLevel } from "./permission-baseline";
 import { resolveEffectivePermissions, roleOnlyActor } from "./permission-resolver";
+import { actorMay } from "./developer-promotion";
 
 export type RolePermissionView = {
   /** 잎 키 → 지금 통하는 값. */
@@ -47,9 +48,20 @@ export type RolePermissionScreenData = {
  * 관리자는 그 표를 보고 권한을 판단한다.
  *
  * 개발자 표시는 이 화면에서 켤 수 없다 — 역할별 설정과 무관한 사람 단위 칸이다.
+ *
+ * 다만 **표가 아닌 것 하나**는 승격된다: canWiden 은 표의 내용이 아니라 「이
+ * 사람이 기본 정책 위로 올려 저장해도 되는가」이므로 권한 판정이다. 여기서
+ * 승격하지 않으면 개발자는 화면은 열지만 넓히는 선택지가 없는데, 저장 쪽
+ * (mutations/role-permissions.ts 의 mayWiden)은 받아 준다 — 화면과 서버가
+ * 어긋난다.
  */
 export async function buildRolePermissionViews(params: {
   actorRole: Role;
+  /**
+   * 보는 사람의 개발자 표시. 넘기지 않으면 승격이 없다 —
+   * 닫히는 쪽으로 실패한다(permission-resolver.ts 머리말과 같은 규율).
+   */
+  actorIsDeveloper?: boolean;
 }): Promise<RolePermissionScreenData> {
   const entries = await Promise.all(
     ROLE_CODES.map(async (role) => {
@@ -71,6 +83,9 @@ export async function buildRolePermissionViews(params: {
 
   return {
     roles: Object.fromEntries(entries) as Record<Role, RolePermissionView>,
-    canWiden: params.actorRole === "SUPER_ADMIN",
+    canWiden: actorMay(
+      { role: params.actorRole, isDeveloper: params.actorIsDeveloper === true },
+      (role) => role === "SUPER_ADMIN"
+    ),
   };
 }

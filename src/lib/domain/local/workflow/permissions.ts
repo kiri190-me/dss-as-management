@@ -1,5 +1,6 @@
 import type { WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
@@ -22,7 +23,12 @@ export function checkRoleEligibility(
   if (!isApprovedAccount(actingUser)) {
     return { allowed: false, reason: "승인되지 않은 계정은 이 작업을 수행할 수 없습니다." };
   }
-  if (!transition.allowedRoles.includes(actingUser.role)) {
+  // 🔴 전이의 허용 역할은 초안 편집기에서 사람이 정하는 값이다. 어떤 전이를
+  // ["AS_ENGINEER"] 만으로 만들어 두면, 승격을 「갈아치우기」로 구현했을 때
+  // 개발자 엔지니어는 진짜 역할로는 통과하는데 승격 뒤에는 막힌다. 더하기라서
+  // 그런 일이 없다 — 진짜 역할이 있거나 최고관리자가 있으면 통과한다
+  // (developer-promotion.ts).
+  if (!actorHasAllowedRole(actingUser, transition.allowedRoles)) {
     return { allowed: false, reason: "현재 역할로는 이 작업을 수행할 수 없습니다." };
   }
   return { allowed: true };

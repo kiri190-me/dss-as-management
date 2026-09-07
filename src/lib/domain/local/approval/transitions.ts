@@ -1,4 +1,5 @@
 import type { AccountApprovalStatus, Role } from "../../types";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { isDelegationValidAt, type LocalShipmentDelegation } from "./delegation-types";
 import { FINAL_SHIPMENT_REPRESENTATIVE_USER_ID } from "./representative";
 import type { ApprovalType, DisplayApprovalStatus, LocalApprovalRecord } from "./approval-types";
@@ -33,13 +34,19 @@ function isApprovedAccount(user: ActingUser): boolean {
   return user.approvalStatus === "APPROVED";
 }
 
-/** 검수/출하 요청(및 보완요청·반려 후 재요청) 모두에 공통으로 쓰는 자격이다. */
+/**
+ * 검수/출하 요청(및 보완요청·반려 후 재요청) 모두에 공통으로 쓰는 자격이다.
+ *
+ * 개발자 표시는 **역할 목록 판정에만** 더한다 — 목록이 최고관리자를 담고
+ * 있으므로 개발자는 통과한다(developer-promotion.ts). 승인 상태는 그대로다:
+ * 승인되지 않은 계정은 개발자여도 아무것도 못 한다.
+ */
 export function isRequestEligible(user: ActingUser): boolean {
-  return isApprovedAccount(user) && REQUEST_ELIGIBLE_ROLES.includes(user.role);
+  return isApprovedAccount(user) && actorHasAllowedRole(user, REQUEST_ELIGIBLE_ROLES);
 }
 
 export function isInspectionDecideEligible(user: ActingUser): boolean {
-  return isApprovedAccount(user) && INSPECTION_DECIDE_ELIGIBLE_ROLES.includes(user.role);
+  return isApprovedAccount(user) && actorHasAllowedRole(user, INSPECTION_DECIDE_ELIGIBLE_ROLES);
 }
 
 export type ShipmentAuthorization =

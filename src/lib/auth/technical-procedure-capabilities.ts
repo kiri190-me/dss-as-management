@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ProcedureTemplateCategory } from "@/lib/domain/procedure-template-types";
 import { hasPermission, type PermissionActor } from "./permission-resolver";
+import { actorMay } from "./developer-promotion";
 import {
   canEditProcedureTemplateDraft,
   canPublishProcedureTemplates,
@@ -26,6 +27,12 @@ import {
  * 분기 규칙을 여기 한 번만 적는 이유도 같다 — 호출부마다 삼항 연산자를
  * 되풀이하면 한 곳만 고쳐지는 날이 오고, 권한에서 그런 어긋남은 조용히 뚫리는
  * 쪽으로 기운다.
+ *
+ * ── 개발자 승격 ─────────────────────────────────────────────────────────
+ * TECHNICAL_TASK 가지는 hasPermission 이 승격을 이미 처리한다(해석기가 더한다).
+ * 나머지 가지는 역할 고정 함수를 부르므로 여기서 actorMay 로 더한다 — 두 가지가
+ * 서로 다르게 승격되면 「기술 절차는 되는데 전체 서비스 절차는 안 되는」
+ * 개발자가 만들어진다.
  * ============================================================================
  */
 
@@ -36,7 +43,7 @@ export async function mayEditTemplateOfCategory(
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
     ? hasPermission(actor, "technicalProcedures.editDraft", "WRITE")
-    : canEditProcedureTemplateDraft(actor.role);
+    : actorMay(actor, canEditProcedureTemplateDraft);
 }
 
 /** 이 템플릿을 발행할 수 있는가. */
@@ -46,7 +53,7 @@ export async function mayPublishTemplateOfCategory(
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
     ? hasPermission(actor, "technicalProcedures.publish", "MANAGE")
-    : canPublishProcedureTemplates(actor.role);
+    : actorMay(actor, canPublishProcedureTemplates);
 }
 
 /** 이 템플릿의 새 초안 버전을 만들 수 있는가. */
@@ -56,7 +63,7 @@ export async function mayCreateDraftVersionOfCategory(
 ): Promise<boolean> {
   return category === "TECHNICAL_TASK"
     ? hasPermission(actor, "technicalProcedures.editDraft", "WRITE")
-    : canCreateProcedureTemplateDraft(actor.role);
+    : actorMay(actor, canCreateProcedureTemplateDraft);
 }
 
 /**

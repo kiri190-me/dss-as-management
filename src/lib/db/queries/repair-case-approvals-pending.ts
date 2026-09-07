@@ -5,6 +5,7 @@ import { repairCaseApprovals, repairCases, users } from "../schema";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 import { resolveShipmentDecideAuthorization } from "./shipment-delegations";
 import { countNotificationTargets } from "@/lib/domain/notifications";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
@@ -97,7 +98,7 @@ type DecidableTypes = {
  */
 async function resolveDecidableApprovalTypes(actorUserId: string): Promise<DecidableTypes> {
   const [actor] = await db
-    .select({ role: users.role, approvalStatus: users.approvalStatus })
+    .select({ role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
     .from(users)
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
 
@@ -106,7 +107,7 @@ async function resolveDecidableApprovalTypes(actorUserId: string): Promise<Decid
   }
 
   const types: RepairCaseApprovalType[] = [];
-  if ((INSPECTION_DECIDE_ELIGIBLE_ROLES as readonly string[]).includes(actor.role)) {
+  if (actorHasAllowedRole(actor, INSPECTION_DECIDE_ELIGIBLE_ROLES)) {
     types.push("REPAIR_INSPECTION");
   }
   // 대표 자격/위임은 역할과 무관한 별도 축이다 — 같은 함수를 승인 화면이

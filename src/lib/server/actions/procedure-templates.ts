@@ -1,6 +1,8 @@
 "use server";
 
 import { readSession } from "@/lib/auth/session";
+import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
 import { canCreateTechnicalTemplateDraftVersion, canManageTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
@@ -34,7 +36,8 @@ export async function createNewDraftVersionAction(input: { templateId: string })
   // Phase 5C-5B — fast pre-check broadened to admit either category's
   // permission (FULL_SERVICE's existing function OR TECHNICAL_TASK's);
   // createNewDraftVersion's own category-aware check remains authoritative.
-  if (!canCreateProcedureTemplateDraft(session.role) && !canCreateTechnicalTemplateDraftVersion(session.role)) {
+  const actor = await sessionActorWithDeveloperFlag(session);
+  if (!actorMay(actor, canCreateProcedureTemplateDraft) && !actorMay(actor, canCreateTechnicalTemplateDraftVersion)) {
     return { ok: false, code: "FORBIDDEN", message: "새 버전 작성 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {
@@ -74,7 +77,7 @@ export async function publishProcedureTemplateAction(input: { templateId: string
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canManageTechnicalTemplates(session.role)) {
+  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
     return { ok: false, code: "FORBIDDEN", message: "게시 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {
@@ -108,7 +111,7 @@ export async function createManualTechnicalProcedureTemplateAction(
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canManageTechnicalTemplates(session.role)) {
+  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
     return { ok: false, code: "FORBIDDEN", message: "기술 절차 템플릿 생성 권한이 없습니다." };
   }
   if (!(PROCEDURE_EQUIPMENT_TYPE_CODES as readonly string[]).includes(input.equipmentType)) {
@@ -146,7 +149,7 @@ export async function renameTechnicalProcedureTemplateAction(input: {
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canManageTechnicalTemplates(session.role)) {
+  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
     return { ok: false, code: "FORBIDDEN", message: "이름 변경 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {

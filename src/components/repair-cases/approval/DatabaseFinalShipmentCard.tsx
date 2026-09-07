@@ -6,6 +6,7 @@ import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./Datab
 import ApprovalActionDialog from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
@@ -67,7 +68,7 @@ export default function DatabaseFinalShipmentCard({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const displayStatus = displayStatusOf(record, currentVersion);
-  const requestEligible = (REQUEST_ELIGIBLE_ROLES as readonly string[]).includes(actingUser.role);
+  const requestEligible = actorHasAllowedRole(actingUser, REQUEST_ELIGIBLE_ROLES);
 
   const actions: DatabaseApprovalActionButton[] = [];
   let disabledReason: string | null = null;

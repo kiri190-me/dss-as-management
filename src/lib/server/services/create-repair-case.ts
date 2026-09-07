@@ -1,6 +1,7 @@
 import "server-only";
 
 import { canEditProductModels } from "@/lib/auth/product-model-authorization";
+import { actorHasAllowedRole, actorMay } from "@/lib/auth/developer-promotion";
 import {
   claimIdempotencyKey,
   markIdempotencyKeyFailed,
@@ -28,6 +29,15 @@ export type RepairCaseCreator = {
   userId: string;
   role: Role;
   approvalStatus: "PENDING" | "APPROVED";
+  /**
+   * 개발자 표시(users.is_developer). 세션 토큰에는 없는 값이라 호출부가 살아
+   * 있는 계정에서 읽어 넘긴다 — 못 읽으면 false 다(닫히는 쪽).
+   *
+   * 접수 화면은 이미 승격된 판정으로 「새 Model 등록」 칸을 여닫으므로
+   * (repair-cases/new/page.tsx 의 hasPermission), 이 값이 없으면 화면은
+   * 열어 두고 저장은 거절하는 어긋남이 생긴다.
+   */
+  isDeveloper: boolean;
 };
 
 function isPgErrorLike(err: unknown): err is { code?: string } {
@@ -76,11 +86,14 @@ export async function createRepairCaseWithIdempotency(input: {
   const { actor, intake, idempotencyKey } = input;
   if (
     actor.approvalStatus !== "APPROVED" ||
-    !ALLOWED_INTAKE_CREATOR_ROLES.includes(actor.role)
+    !actorHasAllowedRole({ role: actor.role, isDeveloper: actor.isDeveloper }, ALLOWED_INTAKE_CREATOR_ROLES)
   ) {
     return { ok: false, code: "FORBIDDEN", message: "A/S 접수 등록 권한이 없습니다." };
   }
-  if (intake.newProductModelName && !canEditProductModels(actor.role)) {
+  if (
+    intake.newProductModelName &&
+    !actorMay({ role: actor.role, isDeveloper: actor.isDeveloper }, canEditProductModels)
+  ) {
     return {
       ok: false,
       code: "FORBIDDEN",

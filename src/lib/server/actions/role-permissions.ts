@@ -4,6 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { saveRolePermissions } from "@/lib/db/mutations/role-permissions";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
@@ -44,7 +45,7 @@ export async function saveRolePermissionsAction(
   if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!canManageRolePermissions(actingUser.role)) {
+  if (!actorMay(actingUser, canManageRolePermissions)) {
     return { ok: false, message: "관리자 이상만 권한을 설정할 수 있습니다." };
   }
 

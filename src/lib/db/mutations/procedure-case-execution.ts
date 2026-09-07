@@ -17,6 +17,7 @@ import {
   type EffectiveAssigneeContext,
 } from "@/lib/auth/procedure-case-execution-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { isExecutableNodeType, isSystemEntryNodeType } from "@/lib/domain/procedure-execution-topology";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
@@ -119,9 +120,14 @@ async function assertOrdinaryMutationAuthorized(
 
   // 역할은 설정이 정하고, "내 담당 건인가"는 종전대로 여기서 본다. 담당 조건은
   // 엔지니어에게만 붙는 것이라 맥락만으로는 답이 나오지 않는다.
+  //
+  // ⚠️ 승격은 **담당을 요구하는가**라는 역할 쪽 판정에만 더한다. 배정 사실
+  // (isAssigned)은 손대지 않는다 — 개발자라고 해서 그 사람이 이 건에 배정된
+  // 것이 되지는 않는다. 최고관리자는 담당을 요구받지 않으므로, 더한 결과
+  // 개발자도 요구받지 않는다(「최고관리자 동급」).
   const effectiveAssigneeId = nodeAssignedEngineerId ?? repairCase.assignedEngineerId;
   const isAssigned = effectiveAssigneeId !== null && effectiveAssigneeId === actor.id;
-  const assignmentOk = !executionRequiresOwnAssignment(actor.role) || isAssigned;
+  const assignmentOk = actorMay(actor, (role) => !executionRequiresOwnAssignment(role) || isAssigned);
 
   if (!assignmentOk || !(await hasPermission(actor, "repairCases.procedureExecution", "WRITE"))) {
     fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
@@ -624,7 +630,7 @@ export async function reopenExecutionNode(
       const allowed = wasCompletedOrSkipped
         ? // 이미 끝난 단계를 되돌리는 것은 담당 여부와 무관하게 관리 수준이다.
           await hasPermission(actor, "repairCases.procedureExecution", "MANAGE")
-        : (!executionRequiresOwnAssignment(actor.role) || isAssigned) &&
+        : actorMay(actor, (role) => !executionRequiresOwnAssignment(role) || isAssigned) &&
           (await hasPermission(actor, "repairCases.procedureExecution", "WRITE"));
       if (!allowed) {
         fail("FORBIDDEN", "이 작업을 재개(되돌림)할 권한이 없습니다.");

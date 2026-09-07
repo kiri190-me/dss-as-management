@@ -64,3 +64,22 @@ export async function resolveActingUserForSession(
     ? { id: user.id, name: user.name, role: user.role, approvalStatus: user.approvalStatus, isDeveloper: false }
     : null;
 }
+
+/**
+ * 세션의 역할에 **개발자 표시만** 덧붙인 행위자.
+ *
+ * 서버 액션의 빠른 되돌림(fast pre-check)들이 쓴다. 그 검사들은 예전부터
+ * session.role 로 판정해 왔고, 이 함수는 그 성질을 바꾸지 않는다 — **역할은
+ * 여전히 토큰 값이다.** 세션의 역할 대신 살아 있는 역할까지 읽도록 옮기는 것은
+ * 별도의 보안 변경이라 여기서 하지 않는다.
+ *
+ * 개발자 표시는 토큰에 담기지 않으므로(위 주석) 살아 있는 행에서만 읽을 수 있고,
+ * 읽지 못하면 false 로 떨어진다 — 닫히는 쪽으로 실패한다. 어차피 그다음의 실제
+ * 판정(mutation)이 DB 에서 행위자를 다시 읽어 확정한다.
+ */
+export async function sessionActorWithDeveloperFlag(
+  session: SessionPayload
+): Promise<{ role: SessionPayload["role"]; isDeveloper: boolean }> {
+  const actingUser = await resolveActingUserForSession(session);
+  return { role: session.role, isDeveloper: actingUser?.isDeveloper ?? false };
+}

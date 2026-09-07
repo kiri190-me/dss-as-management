@@ -1,6 +1,7 @@
 "use server";
 
 import { readSession } from "@/lib/auth/session";
+import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { createRepairCaseWithIdempotency } from "@/lib/server/services/create-repair-case";
@@ -55,11 +56,15 @@ export async function createRepairCaseAction(
   if (!session) {
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
+  // 역할·승인 상태는 예전대로 토큰 값이다. 개발자 표시만 살아 있는 행에서
+  // 읽어 더한다 — 토큰에 담기지 않는 값이라 다른 길이 없다(acting-user.ts).
+  const { isDeveloper } = await sessionActorWithDeveloperFlag(session);
   return createRepairCaseWithIdempotency({
     actor: {
       userId: session.userId,
       role: session.role,
       approvalStatus: session.approvalStatus,
+      isDeveloper,
     },
     intake: input,
     idempotencyKey,

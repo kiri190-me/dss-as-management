@@ -15,6 +15,7 @@ import {
 import type { ExecutionNodeDetail } from "@/lib/db/queries/procedure-case-execution";
 import { procedureCaseExecutionNodeStatusLabels } from "@/lib/domain/procedure-case-execution-types";
 import { procedureNodeTypeLabels } from "@/lib/domain/procedure-template-types";
+import { actorMay } from "@/lib/auth/developer-promotion";
 
 type DialogState = "SKIP" | "BLOCK" | "REOPEN" | "DECISION_COMPLETE" | null;
 
@@ -39,7 +40,7 @@ export default function ExecutionNodeCard({
   actingUser,
 }: {
   node: ExecutionNodeDetail;
-  actingUser: { id: string; role: string };
+  actingUser: { id: string; role: string; isDeveloper: boolean };
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -51,11 +52,17 @@ export default function ExecutionNodeCard({
   // Shipment-lock removal policy: eligibility is role/assignment-only now —
   // see isBlockedByCaseLock (procedure-case-execution-authorization.ts),
   // which the server independently enforces regardless of this UI hint.
-  const ordinaryEligible = canActOrdinary(actingUser.role, actingUser.id, node.effectiveAssigneeId);
+  //
+  // 개발자 표시는 **역할 축에만** 더한다(developer-promotion.ts). 배정 인자는
+  // 그대로다 — 서버도 같은 모양으로 판정하므로(mutations/procedure-case-
+  // execution.ts) 화면과 서버가 어긋나지 않는다.
+  const ordinaryEligible = actorMay(actingUser, (role) =>
+    canActOrdinary(role, actingUser.id, node.effectiveAssigneeId)
+  );
   const reopenEligible =
     node.status === "BLOCKED"
-      ? canReopenBlocked(actingUser.role, actingUser.id, node.effectiveAssigneeId)
-      : canReopenCompletedOrSkipped(actingUser.role);
+      ? actorMay(actingUser, (role) => canReopenBlocked(role, actingUser.id, node.effectiveAssigneeId))
+      : actorMay(actingUser, canReopenCompletedOrSkipped);
 
   async function runAction<T extends { ok: boolean; message?: string }>(run: () => Promise<T>) {
     setIsSubmitting(true);

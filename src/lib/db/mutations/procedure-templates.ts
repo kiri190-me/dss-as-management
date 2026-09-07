@@ -24,6 +24,7 @@ import {
   canActorManageTechnicalTemplateGraph,
   canDeleteTechnicalTemplates,
 } from "@/lib/auth/technical-procedure-template-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 import { PROCEDURE_EQUIPMENT_TYPE_CODES, type ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
@@ -131,7 +132,7 @@ export async function createDraftProcedureTemplateFromImport(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canImportProcedureTemplates(actor.role)) {
+      if (!actorMay(actor, canImportProcedureTemplates)) {
         fail("FORBIDDEN", "가져오기 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
 
@@ -222,7 +223,7 @@ export async function createManualTechnicalProcedureTemplate(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canManageTechnicalTemplates(actor.role)) {
+      if (!actorMay(actor, canManageTechnicalTemplates)) {
         fail("FORBIDDEN", "기술 절차 템플릿 생성 권한이 없습니다.");
       }
 
@@ -291,7 +292,7 @@ export async function renameTechnicalProcedureTemplate(
       const actor = await resolveEligibleActor(tx, actorUserId);
       // Coarse pre-gate before any template row is looked up — same
       // non-disclosure rationale as every other mutation in this file.
-      if (!canManageTechnicalTemplates(actor.role)) {
+      if (!actorMay(actor, canManageTechnicalTemplates)) {
         fail("FORBIDDEN", "이름 변경 권한이 없습니다.");
       }
 
@@ -307,7 +308,7 @@ export async function renameTechnicalProcedureTemplate(
         .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-      if (!canActorManageTechnicalTemplateGraph(actor.role, template.category)) {
+      if (!actorMay(actor, (role) => canActorManageTechnicalTemplateGraph(role, template.category))) {
         fail("FORBIDDEN", "이 템플릿의 이름을 변경할 권한이 없습니다.");
       }
       if (template.status !== "DRAFT") {
@@ -497,7 +498,7 @@ export async function publishProcedureTemplate(
       // Phase 5C-5B — coarse pre-gate (SUPER_ADMIN or ADMIN) before any
       // template row is looked up, same non-disclosure rationale as
       // procedure-template-editor.ts's requireEditor.
-      if (!canManageTechnicalTemplates(actor.role)) {
+      if (!actorMay(actor, canManageTechnicalTemplates)) {
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
 
@@ -510,7 +511,7 @@ export async function publishProcedureTemplate(
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
       // fall through to canPublishProcedureTemplates unchanged (SUPER_ADMIN
       // only); only TECHNICAL_TASK evaluates the broader technical policy.
-      if (!canActorPublishTemplateOfCategory(actor.role, template.category)) {
+      if (!actorMay(actor, (role) => canActorPublishTemplateOfCategory(role, template.category))) {
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
       if (template.status !== "DRAFT") {
@@ -577,7 +578,7 @@ export async function archiveProcedureTemplate(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canArchiveProcedureTemplates(actor.role)) {
+      if (!actorMay(actor, canArchiveProcedureTemplates)) {
         fail("FORBIDDEN", "보관 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
 
@@ -622,7 +623,7 @@ export async function createNewDraftVersion(
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
       // Phase 5C-5B — coarse pre-gate before any template row is looked up.
-      if (!canManageTechnicalTemplates(actor.role)) {
+      if (!actorMay(actor, canManageTechnicalTemplates)) {
         fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
       }
 
@@ -636,7 +637,7 @@ export async function createNewDraftVersion(
       // fall through to canCreateProcedureTemplateDraft unchanged
       // (SUPER_ADMIN only); only TECHNICAL_TASK evaluates the broader
       // technical policy.
-      if (!canActorCreateDraftVersionOfCategory(actor.role, published.category)) {
+      if (!actorMay(actor, (role) => canActorCreateDraftVersionOfCategory(role, published.category))) {
         fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
       }
       if (published.status !== "PUBLISHED") {
@@ -890,7 +891,7 @@ export async function replaceDraftProcedureTemplates(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!canImportProcedureTemplates(actor.role)) {
+      if (!actorMay(actor, canImportProcedureTemplates)) {
         fail("FORBIDDEN", "가져오기 권한이 없습니다 (SUPER_ADMIN 전용).");
       }
 
@@ -1072,7 +1073,7 @@ async function requireDeletableTemplate(
     .for("update");
 
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!canDeleteTechnicalTemplates(actor.role, template.category)) {
+  if (!actorMay(actor, (role) => canDeleteTechnicalTemplates(role, template.category))) {
     fail("FORBIDDEN", "이 절차를 삭제하거나 복원할 권한이 없습니다.");
   }
 

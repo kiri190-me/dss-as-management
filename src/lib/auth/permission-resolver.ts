@@ -4,9 +4,15 @@ import { cache } from "react";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { loadStoredRolePermissions } from "@/lib/db/queries/role-permissions";
 import type { Role } from "@/lib/domain/types";
-import { PERMISSION_AREAS, meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
+import {
+  PERMISSION_AREAS,
+  higherPermissionLevel,
+  meetsPermissionLevel,
+  type PermissionLevel,
+} from "./permission-areas";
 import { PERMISSION_LEAF_KEYS, areaLevelFromLeaves } from "./permission-features";
 import { baselineLeafLevel } from "./permission-baseline";
+import { DEVELOPER_PROMOTED_ROLE } from "./developer-promotion";
 
 /**
  * ============================================================================
@@ -42,8 +48,8 @@ import { baselineLeafLevel } from "./permission-baseline";
  *
  * ── 개발자 표시 ─────────────────────────────────────────────────────────
  * 이 창구들은 역할이 아니라 **사람**(PermissionActor)을 받는다. users.is_developer
- * 가 켜진 계정은 여기서 최고관리자로 해석된다 — 그 한 줄이 승격의 전부이고,
- * 앱의 다른 어디에도 승격 코드가 없다.
+ * 가 켜진 계정은 여기서 최고관리자의 권한을 **더해서** 해석된다 — 갈아치우지
+ * 않는다(자세한 이유는 developer-promotion.ts).
  *
  * 왜 인자인가. 해석기가 현재 세션을 몰래 들여다보고 알아서 승격하면 호출부를
  * 안 건드려 편하지만, buildRolePermissionViews()가 다섯 역할을 훑으며 이 함수를
@@ -79,22 +85,29 @@ export function roleOnlyActor(role: Role): PermissionActor {
 }
 
 /**
- * 승격은 여기 한 줄이다 — 개발자면 최고관리자로 해석한다.
+ * 이 사람의 권한을 구할 때 **함께** 읽을 역할들. 개발자면 진짜 역할에
+ * 최고관리자를 더한다 — 갈아치우지 않는다.
+ *
+ * 갈아치우면 안 되는 이유: role_permissions 표는 화면에서 사람이 바꾸는 값이다.
+ * 최고관리자의 어떤 영역을 A/S 엔지니어보다 낮게 저장해 두면, 갈아치우기
+ * 방식에서는 **개발자 표시를 켠 엔지니어가 그 영역에서 권한을 잃는다.**
+ * 더하기로 두면 그 일이 구조적으로 일어날 수 없다(developer-promotion.ts).
  *
  * "모든 영역을 MANAGE"로 박지 않는 이유: 요구사항이 「최고관리자와 동급」이기
  * 때문이다. 영역마다 maxMeaningfulLevel 상한이 있고 설정으로 좁혀질 수도 있는데,
  * 무조건 MANAGE로 박으면 개발자가 최고관리자보다 **높아진다**.
  */
-function permissionRole(actor: PermissionActor): Role {
-  return actor.isDeveloper ? "SUPER_ADMIN" : actor.role;
+function permissionRoles(actor: PermissionActor): readonly Role[] {
+  if (!actor.isDeveloper || actor.role === DEVELOPER_PROMOTED_ROLE) return [actor.role];
+  return [actor.role, DEVELOPER_PROMOTED_ROLE];
 }
 
 export type EffectivePermissions = {
   /**
-   * 실제로 표를 읽은 역할. 개발자면 "SUPER_ADMIN"이다 —
-   * **그 사람의 진짜 역할이 아니다.** 화면에 이름표로 쓰지 말 것.
+   * 실제로 표를 읽은 역할들. 개발자면 [진짜 역할, "SUPER_ADMIN"] 두 개다 —
+   * **그 사람의 진짜 역할 하나가 아니다.** 화면에 이름표로 쓰지 말 것.
    */
-  role: Role;
+  roles: readonly Role[];
   /**
    * 메뉴 키 → 실효 수준. PERMISSION_AREAS의 모든 메뉴가 반드시 들어 있다.
    *
@@ -137,16 +150,24 @@ function isUndefinedTableError(err: unknown): boolean {
 }
 
 export async function resolveEffectivePermissions(actor: PermissionActor): Promise<EffectivePermissions> {
-  const role = permissionRole(actor);
+  const roles = permissionRoles(actor);
   const stored = await loadOnce();
-  const configured = stored?.[role] ?? {};
 
   // 잎: 저장된 값이 있으면 그것이 답이다. 상한으로 깎지 않는다 — 설정이 최종
   // 권위라는 것이 넓히기를 가능하게 하는 유일한 방법이고, 상한을 넘는 값은
   // 애초에 최고관리자만 저장할 수 있다(mutations/role-permissions.ts).
+  //
+  // 역할이 둘일 때(= 개발자)는 **각 역할의 답을 따로 구해 높은 쪽을 쓴다.**
+  // 두 표를 먼저 합치는 방식은 안 된다 — 한쪽에만 저장된 값이 있으면 다른
+  // 역할의 기본 정책과 짝이 맞지 않게 섞인다.
   const leafLevels: Record<string, PermissionLevel> = {};
   for (const leafKey of PERMISSION_LEAF_KEYS) {
-    leafLevels[leafKey] = configured[leafKey] ?? baselineLeafLevel(leafKey, role);
+    let level: PermissionLevel = "NONE";
+    for (const role of roles) {
+      const configured = stored?.[role] ?? {};
+      level = higherPermissionLevel(level, configured[leafKey] ?? baselineLeafLevel(leafKey, role));
+    }
+    leafLevels[leafKey] = level;
   }
 
   // 메뉴: 하위 기능이 있으면 그 최대값, 없으면 자기 값.
@@ -155,7 +176,7 @@ export async function resolveEffectivePermissions(actor: PermissionActor): Promi
     levels[area.key] = areaLevelFromLeaves(area.key, (leafKey) => leafLevels[leafKey] ?? "NONE");
   }
 
-  return { role, levels, leafLevels };
+  return { roles, levels, leafLevels };
 }
 
 /**
