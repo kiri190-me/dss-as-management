@@ -11,6 +11,7 @@ import {
   workflowVersions,
 } from "../schema";
 import { insertAuditLog } from "./audit-logs";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import type { RepairStatus } from "@/lib/domain/types";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 
@@ -209,7 +210,15 @@ export async function addCaseWorkflowStep(params: {
     }
 
     const [actor] = await tx
-      .select({ id: users.id, role: users.role, approvalStatus: users.approvalStatus })
+      .select({
+        id: users.id,
+        role: users.role,
+        approvalStatus: users.approvalStatus,
+        // 개발자 표시. 아래 역할 관문이 「최고관리자 동급」을 더해 판정한다 —
+        // 이 칸을 안 읽으면 화면(evaluateAddCaseStepAvailability)만 열리고
+        // 서버가 거절하는 어긋남이 된다.
+        isDeveloper: users.isDeveloper,
+      })
       .from(users)
       .where(and(eq(users.id, params.actorUserId), eq(users.isDeleted, false)));
     if (!actor || actor.approvalStatus !== "APPROVED") {
@@ -217,7 +226,11 @@ export async function addCaseWorkflowStep(params: {
     }
     // 담당 엔지니어 본인만(사용자 결정). 관리자는 이 앱의 다른 모든 권한
     // 검사와 마찬가지로 담당 일치 검사를 우회한다.
-    const isAdmin = actor.role === "SUPER_ADMIN" || actor.role === "ADMIN";
+    //
+    // 문을 **여는** 자리다 — 승격은 개발자가 이 문을 통과하는 방향으로 작동한다
+    // (developer-promotion.ts). 아래 두 검사는 개발자가 여기서 이미 통과하므로
+    // 닿지 않는다: 승인 검사(위)는 승격 대상이 아니고, 배정 사실도 그대로다.
+    const isAdmin = actorMay(actor, (role) => role === "SUPER_ADMIN" || role === "ADMIN");
     if (!isAdmin) {
       if (actor.role !== "AS_ENGINEER") {
         return { ok: false, code: "FORBIDDEN", message: "담당 엔지니어 또는 관리자만 단계를 추가할 수 있습니다." };

@@ -3,21 +3,28 @@ import "../../../scripts/load-env";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { db, pgClient } from "@/lib/db/connection";
 import {
+  auditLogs,
   customers,
   procedureTemplates,
   products,
   repairCaseIntakeSequences,
   repairCaseWorkRecords,
   repairCases,
+  representativeChangeHistory,
   rolePermissions,
   statusChangeHistories,
   users,
+  workflowSteps,
+  workflowTransitions,
+  workflowVersions,
 } from "@/lib/db/schema";
 import { publishProcedureTemplate } from "@/lib/db/mutations/procedure-templates";
 import { createRepairCase } from "@/lib/db/mutations/repair-cases";
+import { addCaseWorkflowStep } from "@/lib/db/mutations/case-workflow-steps";
+import { setShipmentRepresentative } from "@/lib/db/mutations/shipment-representatives";
 import { createWorkRecord } from "@/lib/db/mutations/repair-case-work-records";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import { resolveActingUserForSession } from "./acting-user";
@@ -30,6 +37,7 @@ import {
   type PermissionActor,
 } from "./permission-resolver";
 import { buildRolePermissionViews } from "./role-permission-views";
+import { evaluateAddCaseStepAvailability } from "@/lib/domain/local/workflow/workflow-action-availability";
 import { PERMISSION_AREAS, meetsPermissionLevel } from "./permission-areas";
 import { PERMISSION_LEAF_KEYS, maxMeaningfulLevelOfLeaf } from "./permission-features";
 import { baselineLeafLevel } from "./permission-baseline";
@@ -124,9 +132,41 @@ after(async () => {
     await db.delete(repairCaseWorkRecords).where(inArray(repairCaseWorkRecords.repairCaseId, testCaseIds));
     await db.delete(statusChangeHistories).where(inArray(statusChangeHistories.repairCaseId, testCaseIds));
     await db.delete(repairCases).where(inArray(repairCases.id, testCaseIds));
+
+    // 「이 건에만 단계 추가」가 만든 **건 전용 버전**과 그 자식 행. 접수 건을
+    // 먼저 지워야 한다(repair_cases.workflow_version_id FK). 고르는 기준은
+    // is_case_scoped **와** 이 파일이 만든 접수 건 id 둘 다다 — 템플릿의 공용
+    // 버전은 어떤 경우에도 걸리지 않는다.
+    const caseScopedVersions = await db
+      .select({ id: workflowVersions.id })
+      .from(workflowVersions)
+      .where(
+        and(
+          eq(workflowVersions.isCaseScoped, true),
+          inArray(workflowVersions.repairCaseId, testCaseIds)
+        )
+      );
+    const caseScopedVersionIds = caseScopedVersions.map((row) => row.id);
+    if (caseScopedVersionIds.length > 0) {
+      await db.delete(workflowTransitions).where(inArray(workflowTransitions.workflowVersionId, caseScopedVersionIds));
+      await db.delete(workflowSteps).where(inArray(workflowSteps.workflowVersionId, caseScopedVersionIds));
+      await db.delete(workflowVersions).where(inArray(workflowVersions.id, caseScopedVersionIds));
+    }
   }
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
+
+  // 아래 둘은 users 를 지우기 전에 해야 한다(둘 다 onDelete: restrict).
+  // 고르는 기준은 이 파일이 만든 두 계정의 id 뿐이다 — 다른 행은 걸리지 않는다.
+  await db
+    .delete(representativeChangeHistory)
+    .where(
+      or(
+        inArray(representativeChangeHistory.targetUserId, [devUserId, plainUserId]),
+        inArray(representativeChangeHistory.changedByUserId, [devUserId, plainUserId])
+      )
+    );
+  await db.delete(auditLogs).where(inArray(auditLogs.actorUserId, [devUserId, plainUserId]));
 
   await db.delete(users).where(inArray(users.id, [devUserId, plainUserId]));
   if (originalAuthSource === undefined) delete process.env.AUTH_SOURCE;
@@ -612,6 +652,240 @@ test("🔴 승인 안 된 개발자는 작업 기록도 못 남긴다 — 승인
     clientRequestId: randomUUID(),
   });
   assert.equal(afterRestore.ok, true, JSON.stringify(afterRestore));
+});
+
+/**
+ * ============================================================================
+ * 🔴 「이 건에만 단계 추가」 — 남의 담당 건에 단계를 넣는다 (서버 경로)
+ * ============================================================================
+ * 화면(workflow-action-availability.ts 의 evaluateAddCaseStepAvailability)과
+ * 서버(db/mutations/case-workflow-steps.ts 의 addCaseWorkflowStep)가 같은 식을
+ * 각자 계산한다. 여기서는 **두 답이 실제로 같은지**를 살아 있는 계정으로 본다 —
+ * 화면 판정은 순수 함수라 그대로 부르고, 서버는 DB 를 타게 한다.
+ *
+ * 접수 건은 `plainUserId`(표시가 꺼진 엔지니어)에게 배정하고 단계는
+ * `devUserId`(개발자 엔지니어)가 추가한다 — 정확히 「남의 담당 건」이다.
+ * ============================================================================
+ */
+
+async function caseVersionOf(caseId: string): Promise<number> {
+  const [row] = await db.select({ version: repairCases.version }).from(repairCases).where(eq(repairCases.id, caseId));
+  assert.ok(row, "접수 건을 찾지 못했다");
+  return row.version;
+}
+
+async function actingUserOf(userId: string) {
+  const actingUser = await resolveActingUserForSession(sessionFor(userId));
+  assert.ok(actingUser, "세션 관문에서 행위자를 얻지 못했다");
+  return actingUser;
+}
+
+async function stepCountOfCase(caseId: string): Promise<number> {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(workflowSteps)
+    .innerJoin(repairCases, eq(repairCases.workflowVersionId, workflowSteps.workflowVersionId))
+    .where(eq(repairCases.id, caseId));
+  return count;
+}
+
+test("🔴 개발자 엔지니어는 남의 담당 건에도 단계를 추가한다 — 화면과 서버 양쪽", async () => {
+  const caseId = await createCaseAssignedTo(plainUserId);
+  const devActing = await actingUserOf(devUserId);
+  const before = await stepCountOfCase(caseId);
+
+  // 화면 쪽 — 단추가 보이는가.
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({
+      actingUser: devActing,
+      assignedEngineerId: plainUserId,
+      isCaseLocked: false,
+    }),
+    { available: true },
+    "화면이 개발자 엔지니어에게 단추를 잠갔다"
+  );
+
+  // 서버 쪽 — 저장이 통과하는가. 한쪽만 승격됐다면 여기서 갈린다.
+  const result = await addCaseWorkflowStep({
+    repairCaseId: caseId,
+    expectedVersion: await caseVersionOf(caseId),
+    label: "개발자 엔지니어가 남의 담당 건에 넣은 단계",
+    status: "IN_REPAIR",
+    category: "TECHNICAL",
+    actorUserId: devUserId,
+  });
+  assert.equal(result.ok, true, `개발자 엔지니어가 단계 추가 관문에서 막혔다: ${JSON.stringify(result)}`);
+
+  // 실제로 단계가 하나 늘었다 — 관문만 통과하고 끝난 것이 아니다.
+  assert.equal(await stepCountOfCase(caseId), before + 1);
+
+  // 그리고 배정 사실은 그대로다 — 승격이 남의 배정을 내 것으로 바꿔 적지 않는다.
+  const [row] = await db
+    .select({ assignedEngineerId: repairCases.assignedEngineerId })
+    .from(repairCases)
+    .where(eq(repairCases.id, caseId));
+  assert.equal(row.assignedEngineerId, plainUserId, "승격이 배정 사실을 바꿨다");
+});
+
+test("🔴 표시가 꺼진 엔지니어는 남의 담당 건에 단계를 못 넣는다 — 화면과 서버가 같은 답", async () => {
+  // 개발자에게 배정된 건에 표시가 꺼진 엔지니어가 시도한다(방향만 뒤집었다).
+  const caseId = await createCaseAssignedTo(devUserId);
+  const plainActing = await actingUserOf(plainUserId);
+  const before = await stepCountOfCase(caseId);
+
+  assert.equal(
+    evaluateAddCaseStepAvailability({
+      actingUser: plainActing,
+      assignedEngineerId: devUserId,
+      isCaseLocked: false,
+    }).available,
+    false,
+    "화면이 표시가 꺼진 엔지니어에게 단추를 열었다"
+  );
+
+  const result = await addCaseWorkflowStep({
+    repairCaseId: caseId,
+    expectedVersion: await caseVersionOf(caseId),
+    label: "표시가 꺼진 엔지니어의 시도",
+    status: "IN_REPAIR",
+    category: "TECHNICAL",
+    actorUserId: plainUserId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false ? result.code : null, "FORBIDDEN", "표시가 꺼진 엔지니어에게 권한이 샜다");
+
+  // 거절된 쪽은 단계도 건 전용 버전도 만들지 않았다.
+  assert.equal(await stepCountOfCase(caseId), before);
+  const [version] = await db
+    .select({ isCaseScoped: workflowVersions.isCaseScoped })
+    .from(workflowVersions)
+    .innerJoin(repairCases, eq(repairCases.workflowVersionId, workflowVersions.id))
+    .where(eq(repairCases.id, caseId));
+  assert.equal(version.isCaseScoped, false, "거절됐는데 건 전용 버전이 만들어졌다");
+});
+
+test("🔴 승인 안 된 개발자는 단계를 추가하지 못한다 — 승인 검사는 승격되지 않는다", async () => {
+  const caseId = await createCaseAssignedTo(devUserId);
+  const before = await stepCountOfCase(caseId);
+
+  // 개발자 계정의 승인을 잠시 내린다. try/finally 로 반드시 되돌린다.
+  await db.update(users).set({ approvalStatus: "PENDING" }).where(eq(users.id, devUserId));
+  try {
+    const result = await addCaseWorkflowStep({
+      repairCaseId: caseId,
+      // 자기 담당 건이다 — 막히는 이유는 배정이 아니라 승인 상태여야 한다.
+      expectedVersion: await caseVersionOf(caseId),
+      label: "승인 안 된 개발자의 시도",
+      status: "IN_REPAIR",
+      category: "TECHNICAL",
+      actorUserId: devUserId,
+    });
+    assert.equal(result.ok, false, "승인되지 않은 개발자가 통과했다");
+    assert.equal(result.ok === false ? result.code : null, "FORBIDDEN");
+    assert.equal(await stepCountOfCase(caseId), before);
+  } finally {
+    await db.update(users).set({ approvalStatus: "APPROVED" }).where(eq(users.id, devUserId));
+  }
+
+  // 되돌린 뒤에는 다시 된다 — 위 실패가 승인 상태 때문이었다는 확인이다.
+  const afterRestore = await addCaseWorkflowStep({
+    repairCaseId: caseId,
+    expectedVersion: await caseVersionOf(caseId),
+    label: "승인 회복 후",
+    status: "IN_REPAIR",
+    category: "TECHNICAL",
+    actorUserId: devUserId,
+  });
+  assert.equal(afterRestore.ok, true, JSON.stringify(afterRestore));
+});
+
+/**
+ * ============================================================================
+ * 🔴 출하 대리인 「지정」 — 화면과 서버가 같은 답을 낸다
+ * ============================================================================
+ * 서버(db/mutations/shipment-representatives.ts)는 처음부터
+ * `hasPermission(actor, "users.shipmentRepresentatives", "MANAGE")` 으로
+ * 판정했고 그 창구는 승격된다. 화면은 `actingUser.role === "SUPER_ADMIN"` 을
+ * 스스로 계산했다 — 기본 정책이 `MANAGE = 최고관리자` 라서 다섯 역할에서는 두
+ * 답이 같았고, **개발자에게만 갈렸다**(서버는 허용, 단추는 잠김).
+ *
+ * 이제 서버 페이지(app/(app)/users/page.tsx)가 아래 첫 단언과 **같은 식**을
+ * 계산해 prop 으로 내려보낸다. 같은 열쇠·같은 수준을 쓰는지는
+ * developer-flag.test.ts 가 원본을 읽어 따로 지킨다.
+ * ============================================================================
+ */
+
+const REPRESENTATIVE_AREA_KEY = "users.shipmentRepresentatives";
+
+test("🔴 개발자는 출하 대리인을 지정할 수 있다 — 화면과 서버가 같은 답", async () => {
+  const devActing = await actingUserOf(devUserId);
+  const plainActing = await actingUserOf(plainUserId);
+
+  // 화면 쪽 — users/page.tsx 가 내려보내는 값 그대로다.
+  assert.equal(
+    await hasPermission(devActing, REPRESENTATIVE_AREA_KEY, "MANAGE"),
+    true,
+    "개발자에게 대표 지정 단추가 잠긴다"
+  );
+  assert.equal(
+    await hasPermission(plainActing, REPRESENTATIVE_AREA_KEY, "MANAGE"),
+    false,
+    "표시가 꺼진 엔지니어에게 권한이 샜다"
+  );
+  // 최고관리자가 실제로 그렇게 지나간다는 것이 이 승격의 근거다.
+  assert.equal(await hasPermission(SUPER_ADMIN_ACTOR, REPRESENTATIVE_AREA_KEY, "MANAGE"), true);
+
+  // 서버 쪽 — 개발자가 실제로 대표를 지정한다. 대상은 이 파일이 만든 계정뿐이다.
+  try {
+    const designated = await setShipmentRepresentative(plainUserId, true, devUserId, "개발자 승격 시험", false);
+    assert.equal(designated.ok, true, `개발자가 대표 지정 관문에서 막혔다: ${JSON.stringify(designated)}`);
+
+    const [target] = await db
+      .select({ isShipmentRepresentative: users.isShipmentRepresentative })
+      .from(users)
+      .where(eq(users.id, plainUserId));
+    assert.equal(target.isShipmentRepresentative, true, "관문만 통과하고 실제로 지정되지 않았다");
+
+    // 이력에 남은 행위자는 개발자 본인이다 — 승격은 권한 판정만이고, 기록의
+    // 행위자는 값이므로 최고관리자로 바뀌지 않는다.
+    const history = await db
+      .select({ changedByUserId: representativeChangeHistory.changedByUserId, newValue: representativeChangeHistory.newValue })
+      .from(representativeChangeHistory)
+      .where(eq(representativeChangeHistory.targetUserId, plainUserId));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].changedByUserId, devUserId, "이력의 행위자가 개발자 본인이 아니다");
+    assert.equal(history[0].newValue, true);
+
+    // 표시가 꺼진 엔지니어는 여전히 거절된다 — 방향을 뒤집어 확인한다.
+    const asPlainEngineer = await setShipmentRepresentative(plainUserId, false, plainUserId, null, false);
+    assert.equal(asPlainEngineer.ok, false);
+    assert.equal(
+      asPlainEngineer.ok === false ? asPlainEngineer.code : null,
+      "FORBIDDEN",
+      "표시가 꺼진 엔지니어에게 권한이 샜다"
+    );
+  } finally {
+    // 「마지막 대표 해제」 확인 경로를 타지 않도록 칸을 직접 되돌린다.
+    await db.update(users).set({ isShipmentRepresentative: false }).where(eq(users.id, plainUserId));
+  }
+});
+
+test("🔴 승인 안 된 개발자는 대표를 지정하지 못한다 — 승인 검사는 승격되지 않는다", async () => {
+  await db.update(users).set({ approvalStatus: "PENDING" }).where(eq(users.id, devUserId));
+  try {
+    const result = await setShipmentRepresentative(plainUserId, true, devUserId, null, false);
+    assert.equal(result.ok, false, "승인되지 않은 개발자가 통과했다");
+    assert.equal(result.ok === false ? result.code : null, "FORBIDDEN");
+
+    // 대상은 손대지 않았다.
+    const [target] = await db
+      .select({ isShipmentRepresentative: users.isShipmentRepresentative })
+      .from(users)
+      .where(eq(users.id, plainUserId));
+    assert.equal(target.isShipmentRepresentative, false);
+  } finally {
+    await db.update(users).set({ approvalStatus: "APPROVED" }).where(eq(users.id, devUserId));
+  }
 });
 
 test("표가 비어 있는 상태로 되돌아왔다 — 다음 시험 파일이 전제하는 상태다", async () => {

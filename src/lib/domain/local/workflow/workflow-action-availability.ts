@@ -1,5 +1,6 @@
 import type { Role, WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { checkHoldEligibilityForCategory, checkTransitionEligibility } from "./permissions";
 import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
@@ -217,8 +218,16 @@ export function evaluateAddCaseStepAvailability(params: {
   if (params.isCaseLocked) return { available: false, reason: LOCKED_CASE_MESSAGE };
   if (!params.actingUser) return { available: false, reason: "로그인한 사용자 정보를 확인할 수 없습니다." };
 
+  // 문을 **여는** 자리 — 「최고관리자·관리자면 담당 검사를 건너뛴다」. 승격은
+  // 개발자가 이 문을 통과하는 방향이다(permissions.ts 의 두 창구 주석).
+  // 서버(mutations/case-workflow-steps.ts)가 같은 식을 독립적으로 계산한다 —
+  // 한쪽만 고치면 「보이는데 저장은 거절」 또는 그 반대가 된다.
+  if (actorMay(params.actingUser, (role) => role === "SUPER_ADMIN" || role === "ADMIN")) {
+    return { available: true };
+  }
   const role = params.actingUser.role;
-  if (role === "SUPER_ADMIN" || role === "ADMIN") return { available: true };
+  // 개발자는 위에서 이미 통과했으므로 아래 두 검사에 닿지 않는다 — 여기서
+  // 승격할 것이 없다. 배정 사실 비교도 그대로 둔다(역할 축만 더한다).
   if (role !== "AS_ENGINEER") {
     return { available: false, reason: "담당 엔지니어 또는 관리자만 단계를 추가할 수 있습니다." };
   }

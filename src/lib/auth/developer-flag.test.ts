@@ -51,6 +51,7 @@ import {
   checkRoleEligibility,
   checkTransitionEligibility,
 } from "@/lib/domain/local/workflow/permissions";
+import { evaluateAddCaseStepAvailability } from "@/lib/domain/local/workflow/workflow-action-availability";
 import {
   STEP_CATEGORY_CODES,
   roleForCategory,
@@ -807,6 +808,243 @@ test("🔴 작업 기록의 화면과 서버가 둘 다 승격 창구를 지난�
       `${relative}: 승격을 거치지 않고 역할을 그대로 넘긴다`
     );
   }
+});
+
+/**
+ * ============================================================================
+ * 🔴 「이 건에만 단계 추가」 — 화면과 서버가 같은 모양이다
+ * ============================================================================
+ * 화면(workflow-action-availability.ts 의 evaluateAddCaseStepAvailability)과
+ * 서버(db/mutations/case-workflow-steps.ts 의 addCaseWorkflowStep)가 같은 식을
+ * 각자 계산한다. 한쪽만 승격하면 「단추는 보이는데 저장은 거절」 또는 「안
+ * 보이는데 서버는 허용」이 된다.
+ *
+ * 화면 쪽은 순수 함수라 여기서 직접 부른다. **서버가 실제로 통과시키는지**는
+ * developer-permissions.integration.test.ts 가 DB 로 확인한다.
+ *
+ * ⚠️ 이 화면 판정에는 승인 상태 검사가 없다(전이 쪽과 달리 예전부터 그렇다 —
+ * (app)/layout.tsx 가 APPROVED 세션만 통과시키고, 이 함수는 힌트다). 승격이
+ * 그 사실을 바꾸지 않는다는 것도 아래 대조 시험이 다섯 역할 × 두 승인 상태로
+ * 지킨다. 실제 차단은 서버가 승인 상태를 먼저 보는 것으로 이뤄진다.
+ * ============================================================================
+ */
+
+const CASE_LOCKS: readonly boolean[] = [false, true];
+
+/** 승격 **이전**의 화면 판정을 그대로 적어 둔다 — 다른 역할의 답을 대조할 기준. */
+function legacyAddCaseStep(
+  user: ActingUser,
+  assignedEngineerId: string | null,
+  isCaseLocked: boolean
+): boolean {
+  if (isCaseLocked) return false;
+  if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return true;
+  if (user.role !== "AS_ENGINEER") return false;
+  return assignedEngineerId === user.id;
+}
+
+test("🔴 개발자 엔지니어는 남의 담당 건에도 단계를 추가할 수 있다 — 화면 판정", () => {
+  const dev = engineer({ isDeveloper: true });
+
+  // 남의 담당 건 — 승격이 닿지 않으면 여기서 단추가 잠긴다.
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({ actingUser: dev, assignedEngineerId: OTHER_ENGINEER_ID, isCaseLocked: false }),
+    { available: true }
+  );
+  // 담당이 아무도 없는 건도 최고관리자와 같은 답이다.
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({ actingUser: dev, assignedEngineerId: null, isCaseLocked: false }),
+    { available: true }
+  );
+
+  // 최고관리자가 실제로 그렇게 지나간다는 것이 이 승격의 근거다.
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({
+      actingUser: actorWithRole("SUPER_ADMIN"),
+      assignedEngineerId: OTHER_ENGINEER_ID,
+      isCaseLocked: false,
+    }),
+    { available: true }
+  );
+
+  // 표시가 꺼진 엔지니어는 예전 그대로 자기 담당 건만.
+  assert.equal(
+    evaluateAddCaseStepAvailability({ actingUser: engineer(), assignedEngineerId: OTHER_ENGINEER_ID, isCaseLocked: false })
+      .available,
+    false
+  );
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({ actingUser: engineer(), assignedEngineerId: "u-eng", isCaseLocked: false }),
+    { available: true }
+  );
+
+  // 역할 관문 자체도 열린다 — 영업 개발자는 최고관리자로 지난다.
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({
+      actingUser: actorWithRole("SALES", { isDeveloper: true }),
+      assignedEngineerId: OTHER_ENGINEER_ID,
+      isCaseLocked: false,
+    }),
+    { available: true }
+  );
+  assert.equal(
+    evaluateAddCaseStepAvailability({
+      actingUser: actorWithRole("SALES"),
+      assignedEngineerId: OTHER_ENGINEER_ID,
+      isCaseLocked: false,
+    }).available,
+    false
+  );
+
+  // 잠금은 승격 대상이 아니다 — 출하 완료로 잠긴 건은 개발자도 못 건드린다.
+  assert.equal(
+    evaluateAddCaseStepAvailability({ actingUser: dev, assignedEngineerId: OTHER_ENGINEER_ID, isCaseLocked: true })
+      .available,
+    false
+  );
+  // 로그인 정보가 없으면 개발자든 아니든 없는 것이다.
+  assert.equal(
+    evaluateAddCaseStepAvailability({ actingUser: null, assignedEngineerId: null, isCaseLocked: false }).available,
+    false
+  );
+});
+
+test("🔴 단계 추가에서도 배정 사실은 달라지지 않는다 — 바뀌는 것은 역할 축뿐이다", () => {
+  const dev = engineer({ isDeveloper: true });
+  const assignedEngineerId = OTHER_ENGINEER_ID;
+
+  assert.deepEqual(
+    evaluateAddCaseStepAvailability({ actingUser: dev, assignedEngineerId, isCaseLocked: false }),
+    { available: true }
+  );
+  // 판정 함수는 배정을 읽기만 하고 쓰지 않는다(순수 함수라 되읽어 확인한다).
+  assert.equal(assignedEngineerId, OTHER_ENGINEER_ID, "승격이 배정 사실을 바꿔 적었다");
+  assert.equal(dev.id, "u-eng");
+  assert.notEqual(dev.id, assignedEngineerId);
+});
+
+test("🔴 개발자 표시가 꺼진 계정의 단계 추가 답은 예전과 같다 — 다섯 역할", () => {
+  // 남에게 권한이 새지 않는다. 다른 역할의 정책이 한 톨이라도 바뀌면 여기서 걸린다.
+  for (const role of ROLE_CODES) {
+    for (const approvalStatus of APPROVALS) {
+      const user = actorWithRole(role, { approvalStatus });
+      for (const assignedEngineerId of ASSIGNEES) {
+        for (const isCaseLocked of CASE_LOCKS) {
+          assert.equal(
+            evaluateAddCaseStepAvailability({ actingUser: user, assignedEngineerId, isCaseLocked }).available,
+            legacyAddCaseStep(user, assignedEngineerId, isCaseLocked),
+            `${role}/${approvalStatus}/${assignedEngineerId}/잠금=${isCaseLocked}: 단계 추가 판정이 달라졌다`
+          );
+        }
+      }
+    }
+  }
+});
+
+test("🔴 개발자의 단계 추가 답은 「진짜 역할 ∪ 최고관리자」다 — 다섯 역할", () => {
+  for (const role of ROLE_CODES) {
+    for (const approvalStatus of APPROVALS) {
+      const plain = actorWithRole(role, { approvalStatus });
+      const dev: ActingUser = { ...plain, isDeveloper: true };
+      const asSuperAdmin: ActingUser = { ...plain, role: DEVELOPER_PROMOTED_ROLE };
+
+      for (const assignedEngineerId of ASSIGNEES) {
+        for (const isCaseLocked of CASE_LOCKS) {
+          assert.equal(
+            evaluateAddCaseStepAvailability({ actingUser: dev, assignedEngineerId, isCaseLocked }).available,
+            evaluateAddCaseStepAvailability({ actingUser: plain, assignedEngineerId, isCaseLocked }).available ||
+              evaluateAddCaseStepAvailability({ actingUser: asSuperAdmin, assignedEngineerId, isCaseLocked }).available,
+            `${role}/${approvalStatus}/${assignedEngineerId}/잠금=${isCaseLocked}: 단계 추가가 더하기가 아니다`
+          );
+        }
+      }
+    }
+  }
+});
+
+test("🔴 단계 추가의 화면과 서버가 둘 다 승격 창구를 지난다 — 한쪽만 고치면 어긋난다", () => {
+  const screen = readFileSync(
+    join(process.cwd(), "src/lib/domain/local/workflow/workflow-action-availability.ts"),
+    "utf8"
+  );
+  const server = readFileSync(join(process.cwd(), "src/lib/db/mutations/case-workflow-steps.ts"), "utf8");
+
+  for (const [label, source] of [["화면", screen], ["서버", server]] as const) {
+    assert.ok(
+      /from ["'][^"']*developer-promotion["']/.test(source),
+      `${label}: 승격 창구를 부르지 않는다`
+    );
+    assert.ok(/\bactorMay\(/.test(source), `${label}: actorMay 를 쓰지 않는다`);
+  }
+
+  // 🔴 서버는 actor 를 select 할 때 isDeveloper 를 함께 읽어야 한다. 이 칸이
+  // 빠지면 actorMay 를 불러도 언제나 false 로 판정된다(조용히 실패한다).
+  assert.ok(
+    /isDeveloper:\s*users\.isDeveloper/.test(server),
+    "서버: actor select 에 isDeveloper 칸이 없다"
+  );
+  // 승격을 거치지 않고 역할을 그대로 비교하던 옛 모양이 남아 있지 않다.
+  assert.ok(
+    !/const isAdmin = actor\.role ===/.test(server),
+    "서버: 승격을 거치지 않는 옛 역할 비교가 남아 있다"
+  );
+});
+
+/**
+ * ============================================================================
+ * 🔴 출하 대리인 「지정」 — 화면과 서버가 같은 열쇠·같은 수준을 쓴다
+ * ============================================================================
+ * 서버는 세 곳 모두 `hasPermission(actor, "users.shipmentRepresentatives",
+ * "MANAGE")` 으로 판정한다(대표 지정, 위임 생성, 위임 철회). 화면은
+ * 클라이언트 컴포넌트라 그 함수를 await 할 수 없어서, 서버 페이지가 계산해
+ * prop 으로 내려보낸다.
+ *
+ * 기본 정책이 `MANAGE = 최고관리자` 라서 다섯 역할에서는 화면이 역할 리터럴을
+ * 쓰던 시절에도 두 답이 같았다. **개발자에게만 갈렸다** — 서버는 허용하는데
+ * 단추가 잠겼다. 그래서 여기서는 「같은 열쇠·같은 수준을 쓰는가」를 원본으로
+ * 지킨다. 서버가 실제로 개발자를 통과시키는지는 integration 시험이 본다.
+ * ============================================================================
+ */
+
+const REPRESENTATIVE_AREA_KEY = "users.shipmentRepresentatives";
+
+test("🔴 대표 지정 판정을 화면이 직접 계산하지 않는다 — 서버 페이지가 내려보낸다", () => {
+  const screen = readFileSync(join(process.cwd(), "src/components/users/RepresentativeManagementScreen.tsx"), "utf8");
+
+  // 🔴 예전 모양: 화면이 스스로 `const isSuperAdmin = actingUser.role === "SUPER_ADMIN"`
+  // 을 계산했다. 그 자리가 남아 있으면 개발자에게 다시 갈린다.
+  assert.ok(
+    !/const\s+isSuperAdmin\s*=/.test(screen),
+    "화면이 아직 역할 리터럴로 대표 지정 자격을 스스로 계산한다"
+  );
+  // 서버가 계산해 내려보낸 값을 받는다.
+  assert.ok(/canManageRepresentatives:\s*boolean/.test(screen), "화면이 판정 prop 을 받지 않는다");
+  assert.ok(/isSuperAdmin=\{canManageRepresentatives\}/.test(screen), "받은 값을 아래로 넘기지 않는다");
+});
+
+test("🔴 화면 페이지와 서버 mutation 세 곳이 같은 영역 열쇠·같은 수준을 쓴다", () => {
+  // 열쇠나 수준이 한 곳만 달라지면 개발자에게 또 갈린다 — 그때 증상은
+  // 「단추는 보이는데 저장은 거절」이고, 화면에는 아무 설명도 남지 않는다.
+  const sources = [
+    "src/app/(app)/users/page.tsx",
+    "src/lib/db/mutations/shipment-representatives.ts",
+    "src/lib/db/mutations/shipment-delegations.ts",
+  ];
+
+  const pattern = /hasPermission\(\s*\w+(?:\.\w+)*\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
+  let total = 0;
+  for (const relative of sources) {
+    const source = readFileSync(join(process.cwd(), relative), "utf8");
+    const found = [...source.matchAll(pattern)].filter(([, areaKey]) => areaKey === REPRESENTATIVE_AREA_KEY);
+    assert.ok(found.length > 0, `${relative}: ${REPRESENTATIVE_AREA_KEY} 판정이 없다`);
+    for (const [, , level] of found) {
+      assert.equal(level, "MANAGE", `${relative}: 수준이 MANAGE 가 아니다`);
+    }
+    total += found.length;
+  }
+  // 화면 1 + 대표 지정 1 + 위임 생성·철회 2 = 4. 늘거나 줄면 새 자리가 생긴
+  // 것이므로 같은 열쇠·수준인지 사람이 한 번 봐야 한다.
+  assert.equal(total, 4, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
 });
 
 test("개발자 표시는 역할별 권한 설정으로 켤 수 없다 — 설정 단위에 존재하지 않는다", () => {

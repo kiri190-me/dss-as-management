@@ -33,6 +33,7 @@ export default function RepresentativeManagementScreen({
   delegations,
   rolePermissions,
   notificationSettings,
+  canManageRepresentatives,
 }: {
   actingUser: ActingUser;
   users: RepresentativeManagementUserRow[];
@@ -41,8 +42,22 @@ export default function RepresentativeManagementScreen({
   rolePermissions: RolePermissionScreenData | null;
   /** 관리자 이상일 때만 내려온다. null이면 알림 설정 탭이 없다. */
   notificationSettings: NotificationSettingsScreenData | null;
+  /**
+   * 🔴 「최고관리자인가」가 아니라 **「대표 지정·위임을 관리해도 되는가」**다.
+   *
+   * 예전에는 여기서 `actingUser.role === "SUPER_ADMIN"` 을 직접 계산했다. 서버
+   * mutation 세 곳(shipment-representatives.ts, shipment-delegations.ts 의
+   * 생성·철회)은 그때도 이미 `hasPermission(actor,
+   * "users.shipmentRepresentatives", "MANAGE")` 으로 판정했고, 기본 정책이
+   * `MANAGE = 최고관리자` 라서 다섯 역할에서는 두 답이 같았다. 개발자 표시가
+   * 생기면서 갈렸다 — 서버는 허용하는데 단추가 잠겼다.
+   *
+   * 그래서 판정을 화면에서 하지 않는다. 서버 페이지(app/(app)/users/page.tsx)가
+   * 서버와 **같은 영역 열쇠·같은 수준**으로 계산해 내려보낸다. 이 화면은
+   * 클라이언트 컴포넌트라 hasPermission 을 await 할 수 없다.
+   */
+  canManageRepresentatives: boolean;
 }) {
-  const isSuperAdmin = actingUser.role === "SUPER_ADMIN";
   const representatives = users.filter((u) => u.isShipmentRepresentative);
   const [activeTab, setActiveTab] = useState<"representatives" | "permissions" | "notifications">(
     "representatives"
@@ -105,11 +120,14 @@ export default function RepresentativeManagementScreen({
         <NotificationSettings data={notificationSettings} />
       ) : (
         <>
-          <RepresentativeListSection users={users} isSuperAdmin={isSuperAdmin} />
+          {/* 두 아래 화면의 prop 이름은 아직 isSuperAdmin 이다 — 넘기는 값은
+              「대표 지정·위임을 관리해도 되는가」이고, 이제 최고관리자 여부가
+              아니다. 이름을 고치는 것은 이 조각의 범위 밖이라 남겨 둔다. */}
+          <RepresentativeListSection users={users} isSuperAdmin={canManageRepresentatives} />
 
           <DelegationSection
             actingUser={actingUser}
-            isSuperAdmin={isSuperAdmin}
+            isSuperAdmin={canManageRepresentatives}
             representatives={representatives}
             allUsers={users}
             delegations={delegations}
