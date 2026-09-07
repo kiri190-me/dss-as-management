@@ -19,6 +19,7 @@ import {
 } from "@/lib/db/queries/procedure-case-execution";
 import { getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
 import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   listManuallySelectableStepsFromRules,
@@ -124,8 +125,12 @@ export default async function RepairCaseExecutionPage({
   }
 
   const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
+  // ⚠️ 서버(db/mutations/repair-case-work-records.ts)가 **같은 판정**을 한다 —
+  // 한쪽만 승격하면 「보이는데 저장은 거절」 또는 「안 보이는데 서버는 허용」이
+  // 된다. 승격은 「담당을 요구하는가」라는 역할 축에만 더하고, 배정 사실
+  // (isAssignedToCase)은 그대로 둔다.
   const canCreate =
-    (!workRecordRequiresOwnAssignment(actingUser.role) || isAssignedToCase) &&
+    actorMay(actingUser, (role) => !workRecordRequiresOwnAssignment(role) || isAssignedToCase) &&
     (await hasPermission(actingUser, "repairCases.workRecords", "WRITE"));
   // 무효화 권한 판정은 이 화면에 없다 — 무효화가 작업 이력 탭으로 옮겨 갔고,
   // 같은 판정을 work-history/page.tsx가 그대로 한다.

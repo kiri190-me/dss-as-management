@@ -4,6 +4,7 @@ import { db } from "../client";
 import { repairCases, repairCaseWorkRecords, procedureCaseExecutionNodes, procedureCaseExecutions } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { WorkRecordKind } from "@/lib/domain/types";
 
@@ -127,7 +128,22 @@ export async function createWorkRecord(params: {
 
       const isAssignedToCase = repairCase.assignedEngineerId === actor.id;
       // 담당 조건은 엔지니어에게만 붙는다 — 역할은 설정이, 담당 여부는 여기가 본다.
-      const assignmentOk = !workRecordRequiresOwnAssignment(actor.role) || isAssignedToCase;
+      //
+      // ⚠️ 승격은 **담당을 요구하는가**라는 역할 쪽 판정에만 더한다. 배정 사실
+      // (isAssignedToCase)은 손대지 않는다 — 개발자라고 해서 그 사람이 이 건에
+      // 배정된 것이 되지는 않는다. 최고관리자는 담당을 요구받지 않으므로, 더한
+      // 결과 개발자도 요구받지 않는다(「최고관리자 동급」).
+      //
+      // 형제 함수 executionRequiresOwnAssignment 와 **같은 모양**이다
+      // (mutations/procedure-case-execution.ts). 두 기능이 다르게 동작하면
+      // 「작업 실행은 되는데 작업 기록은 거절」이 된다.
+      //
+      // 화면(app/(app)/repair-cases/[id]/execution/page.tsx)도 같은 판정을 한다 —
+      // 한쪽만 고치면 「보이는데 저장은 거절」 또는 그 반대가 된다.
+      const assignmentOk = actorMay(
+        actor,
+        (role) => !workRecordRequiresOwnAssignment(role) || isAssignedToCase
+      );
       if (!assignmentOk || !(await hasPermission(actor, "repairCases.workRecords", "WRITE"))) {
         failCreate("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }

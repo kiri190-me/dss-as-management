@@ -1,6 +1,6 @@
 import type { WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
-import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { actorHasAllowedRole, actorMay } from "@/lib/auth/developer-promotion";
 import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
@@ -9,6 +9,47 @@ export type PermissionCheckResult = { allowed: true } | { allowed: false; reason
 
 function isApprovedAccount(user: ActingUser): boolean {
   return user.approvalStatus === "APPROVED";
+}
+
+/**
+ * ============================================================================
+ * 🔴 이 파일의 역할 비교는 두 종류다 — 방향을 틀리면 정반대가 된다
+ * ============================================================================
+ * 자리마다 물어야 한다: **이 비교가 문을 「여는」 것인가 「조이는」 것인가.**
+ *
+ *  - 여는 자리 — 「최고관리자·관리자면 담당 검사를 건너뛴다」.
+ *    승격은 개발자가 그 문을 **통과하게** 한다 → `maySkipAssignmentCheck`
+ *  - 조이는 자리 — 「엔지니어일 뿐이면 담당 조건을 더 건다」.
+ *    승격은 개발자가 그 제약에 **걸리지 않게** 한다 → `isEngineerOnly`
+ *
+ * 조이는 자리에 순진하게 `actorMay` 를 씌우면 방향이 뒤집혀 **개발자에게
+ * 제약이 더 붙는다.** 그래서 두 창구를 이름으로 갈라 둔다.
+ *
+ * ⚠️ 배정 **사실**은 어느 쪽에서도 손대지 않는다. `assignedEngineerId` ·
+ * `actingUser.id` 비교는 그대로다 — 바뀌는 것은 「배정이 요구되는가」라는
+ * 역할 축뿐이다(developer-promotion.ts).
+ *
+ * ⚠️ 승인 상태(`isApprovedAccount`)도 승격하지 않는다. 승인 안 된 개발자는
+ * 여전히 아무것도 못 하고, 그 검사가 가장 먼저 오는 순서도 그대로다.
+ * ============================================================================
+ */
+
+/**
+ * 문을 **여는** 쪽: 담당 엔지니어 검사를 건너뛰는 역할인가.
+ * 최고관리자가 건너뛰므로, 더한 결과 개발자도 건너뛴다(「최고관리자 동급」).
+ */
+function maySkipAssignmentCheck(user: ActingUser): boolean {
+  return actorMay(user, (role) => role === "SUPER_ADMIN" || role === "ADMIN");
+}
+
+/**
+ * 제약을 **조이는** 쪽: 「엔지니어일 뿐인가」. 최고관리자로도 볼 수 없는
+ * 사람일 때만 참이다 — 그래서 개발자 엔지니어에게는 추가 제약이 붙지 않는다.
+ *
+ * 표시가 꺼진 계정의 답은 예전 `role === "AS_ENGINEER"` 와 한 톨도 다르지 않다.
+ */
+function isEngineerOnly(user: ActingUser): boolean {
+  return !actorMay(user, (role) => role !== "AS_ENGINEER");
 }
 
 /**
@@ -45,7 +86,10 @@ export function checkAssignedEngineer(
   assignedEngineerId: string | null
 ): PermissionCheckResult {
   if (!transition.requiresAssignedEngineer) return { allowed: true };
-  if (actingUser.role === "SUPER_ADMIN" || actingUser.role === "ADMIN") return { allowed: true };
+  // 문을 **여는** 자리 — 승격은 개발자가 통과하는 방향이다(위 두 창구 주석).
+  if (maySkipAssignmentCheck(actingUser)) return { allowed: true };
+  // 이 부정형도 통과를 반환하므로 **여는** 자리다. 개발자는 이미 위에서
+  // 통과했으니 여기서 따로 승격할 것이 없다.
   if (actingUser.role !== "AS_ENGINEER") return { allowed: true }; // 역할 검사는 checkRoleEligibility가 담당
 
   if (!assignedEngineerId) {
@@ -93,7 +137,9 @@ export function checkHoldEligibilityForCategory(
   if (!isApprovedAccount(actingUser)) {
     return { allowed: false, reason: "승인되지 않은 계정은 이 작업을 수행할 수 없습니다." };
   }
-  if (actingUser.role === "SUPER_ADMIN" || actingUser.role === "ADMIN") return { allowed: true };
+  // 문을 **여는** 자리 — 최고관리자·관리자는 분류도 담당도 보지 않는다.
+  // 승격하면 개발자도 같다(분류가 없는 단계까지 포함해 최고관리자와 같은 답).
+  if (maySkipAssignmentCheck(actingUser)) return { allowed: true };
 
   if (!category) {
     return { allowed: false, reason: "이 단계에서는 보류를 시작하거나 해제할 수 없습니다." };
@@ -102,6 +148,8 @@ export function checkHoldEligibilityForCategory(
   if (actingUser.role !== requiredRole) {
     return { allowed: false, reason: "현재 역할로는 이 단계에서 보류를 시작하거나 해제할 수 없습니다." };
   }
+  // 이 비교는 **행위자가 아니라 단계 분류에서 나온 값**(requiredRole)을 본다 —
+  // 승격 대상이 아니다. 개발자는 위에서 이미 통과했으므로 여기까지 오지 않는다.
   if (requiredRole === "AS_ENGINEER") {
     if (!assignedEngineerId) {
       return { allowed: false, reason: "이 접수 건에는 담당 엔지니어가 배정되어 있지 않습니다." };
@@ -162,14 +210,20 @@ export function checkManualStepSetEligibility(
   if (!isApprovedAccount(actingUser)) {
     return { allowed: false, reason: "승인되지 않은 계정은 이 작업을 수행할 수 없습니다." };
   }
+  // 문을 **여는** 자리 — 세 역할에게 열린 허용 목록을 부정형으로 적은 것이다.
+  // 승격은 개발자가 이 문을 통과하게 한다.
   if (
-    actingUser.role !== "SUPER_ADMIN" &&
-    actingUser.role !== "ADMIN" &&
-    actingUser.role !== "AS_ENGINEER"
+    !actorMay(
+      actingUser,
+      (role) => role === "SUPER_ADMIN" || role === "ADMIN" || role === "AS_ENGINEER"
+    )
   ) {
     return { allowed: false, reason: "현재 역할로는 단계를 직접 변경할 수 없습니다." };
   }
-  if (actingUser.role === "AS_ENGINEER") {
+  // 🔴 여기는 제약을 **조이는** 자리다 — 「엔지니어일 뿐이면 자기 담당 건만」.
+  // 순진하게 actorMay 를 씌우면 개발자에게 제약이 하나 더 붙는다(정반대).
+  // 최고관리자로도 볼 수 없는 사람일 때만 들어가야 한다 — isEngineerOnly.
+  if (isEngineerOnly(actingUser)) {
     if (!assignedEngineerId) {
       return { allowed: false, reason: "이 접수 건에는 담당 엔지니어가 배정되어 있지 않습니다." };
     }
