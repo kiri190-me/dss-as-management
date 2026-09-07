@@ -589,6 +589,13 @@
       "when": 1788503163390,
       "tag": "0083_familiar_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1788788264964,
+      "tag": "0084_dark_serpent_society",
+      "breakpoints": true
     }
   ]
 }
