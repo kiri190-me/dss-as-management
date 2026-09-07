@@ -73,16 +73,28 @@ export default function RepresentativeListSection({
    * 둔다.
    */
   function renderRoleCell(user: RepresentativeManagementUserRow) {
-    if (!user.isSsoManaged) return roleText(user);
+    if (!user.isSsoManaged && !user.isDeveloper) return roleText(user);
     return (
       <span className="inline-flex items-center gap-1.5">
         {roleText(user)}
-        <span
-          title="DSS 통합 로그인에서 지정된 역할입니다. 로그인할 때마다 포털의 값으로 갱신됩니다."
-          className="rounded border border-zinc-300 px-1 py-px text-[11px] leading-tight font-normal text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
-        >
-          통합 로그인
-        </span>
+        {user.isSsoManaged && (
+          <span
+            title="DSS 통합 로그인에서 지정된 역할입니다. 로그인할 때마다 포털의 값으로 갱신됩니다."
+            className="rounded border border-zinc-300 px-1 py-px text-[11px] leading-tight font-normal text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+          >
+            통합 로그인
+          </span>
+        )}
+        {/* 개발자 표시는 역할이 아니다 — 역할 옆에 작은 표지로만 보인다. 켜고 끄는
+            자리는 「개발자 표시」 탭이다(DeveloperFlagSection.tsx). */}
+        {user.isDeveloper && (
+          <span
+            title="개발자 표시가 켜진 계정입니다. 역할은 그대로이고, 권한 판정에서만 최고관리자의 권한이 더해집니다."
+            className="rounded border border-violet-300 px-1 py-px text-[11px] leading-tight font-normal text-violet-700 dark:border-violet-800 dark:text-violet-400"
+          >
+            개발자
+          </span>
+        )}
       </span>
     );
   }

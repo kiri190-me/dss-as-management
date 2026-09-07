@@ -11,6 +11,7 @@ import { canManageNotificationSettings } from "@/lib/auth/notification-settings-
 import { requireAreaAccess } from "@/lib/auth/area-guard";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { actorMay } from "@/lib/auth/developer-promotion";
+import { mayManageDeveloperFlag } from "@/lib/auth/developer-flag-authorization";
 import { buildRolePermissionViews } from "@/lib/auth/role-permission-views";
 import { buildNotificationSettingsView } from "@/lib/db/queries/notification-settings";
 
@@ -73,6 +74,15 @@ export default async function UsersPage() {
     hasPermission(actingUser, "users.shipmentRepresentatives", "MANAGE"),
   ]);
 
+  // 🔴 개발자 표시 판정만은 actorMay / hasPermission 을 쓰지 않는다 — **진짜
+  // 최고관리자만**이다. 이 값이 권한을 최고관리자급으로 올리는 스위치 그 자체라서,
+  // 승격된 개발자가 통과하면 개발자가 개발자를 만든다(「동급」 규칙의 유일하고
+  // 의도된 예외, 2026-09-07). 서버 mutation(db/mutations/developer-flag.ts)이
+  // **같은 함수**로 판정한다 — 식을 여기 다시 적지 않는다
+  // (auth/developer-flag-authorization.ts). 승인 상태는 (app)/layout.tsx 가 이미
+  // 확인했지만 함수가 한 번 더 본다 — 공짜고, 서버와 정확히 같은 식이 된다.
+  const canManageDeveloperFlag = mayManageDeveloperFlag(actingUser);
+
   return (
     <RepresentativeManagementScreen
       actingUser={actingUser}
@@ -81,6 +91,7 @@ export default async function UsersPage() {
       rolePermissions={rolePermissions}
       notificationSettings={notificationSettings}
       canManageRepresentatives={canManageRepresentatives}
+      canManageDeveloperFlag={canManageDeveloperFlag}
     />
   );
 }

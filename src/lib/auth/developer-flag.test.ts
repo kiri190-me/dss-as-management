@@ -16,6 +16,7 @@ import {
 import type { LocalShipmentDelegation } from "@/lib/domain/local/approval/delegation-types";
 import { actorHasAllowedRole, actorMay, DEVELOPER_PROMOTED_ROLE } from "./developer-promotion";
 import { mayEnterDeveloperMode } from "./developer-mode-gate";
+import { mayManageDeveloperFlag } from "./developer-flag-authorization";
 import {
   canViewPublishedProcedureTemplates,
   canViewAllProcedureTemplateStatuses,
@@ -1228,5 +1229,107 @@ test("개발자 표시는 역할별 권한 설정으로 켤 수 없다 — 설�
   }
   for (const area of PERMISSION_AREAS) {
     assert.ok(!/developer/i.test(area.key), `영역 키에 개발자 항목이 생겼다: ${area.key}`);
+  }
+});
+
+/**
+ * ============================================================================
+ * 🔴 개발자 표시를 켜고 끄는 사람 — 진짜 최고관리자만 (「동급」 규칙의 유일한 예외)
+ * ============================================================================
+ * users.is_developer 는 권한을 최고관리자급으로 올리는 스위치 그 자체다. 이 판정에
+ * 「동급」 규칙(actorMay / hasPermission)을 쓰면 개발자가 개발자를 만들 수 있다 —
+ * 사람인 최고관리자가 개입하지 않고 승격이 번식한다. 그래서 이 판정 하나만은
+ * 승격 창구를 지나지 않는다(auth/developer-flag-authorization.ts, 2026-09-07).
+ *
+ * 화면(users/page.tsx)과 서버(mutations/developer-flag.ts)가 **같은 함수**를
+ * 부른다. 서버가 실제로 개발자를 거절하는지는 developer-flag.integration.test.ts
+ * 가 DB 로 본다. 여기서는 함수 자체와, 두 자리가 그 함수를 쓰는지(원본)를 지킨다.
+ * ============================================================================
+ */
+
+test("🔴 개발자 표시는 진짜 최고관리자만 켜고 끈다 — 다섯 역할 × 개발자 표시 × 승인 상태", () => {
+  for (const role of ROLE_CODES) {
+    for (const isDeveloper of [false, true]) {
+      for (const approvalStatus of APPROVALS) {
+        assert.equal(
+          mayManageDeveloperFlag(actorWithRole(role, { isDeveloper, approvalStatus })),
+          role === "SUPER_ADMIN" && approvalStatus === "APPROVED",
+          `${role}/개발자=${isDeveloper}/${approvalStatus}: 판정이 틀렸다`
+        );
+      }
+    }
+  }
+});
+
+test("🔴 개발자 표시가 켜진 A/S 엔지니어는 승격 창구로는 최고관리자지만, 이 판정은 거절한다", () => {
+  const dev = engineer({ isDeveloper: true });
+  // 다른 모든 자리에서 이 사람은 최고관리자와 동급이다.
+  assert.equal(actorMay(dev, (role) => role === DEVELOPER_PROMOTED_ROLE), true);
+  assert.equal(actorMay(dev, canManageRolePermissions), true);
+  // 개발자 표시를 켜고 끄는 일만은 아니다 — 개발자가 개발자를 만들 수 없다.
+  assert.equal(mayManageDeveloperFlag(dev), false);
+  // 진짜 최고관리자는 표시와 무관하게 통과한다.
+  assert.equal(mayManageDeveloperFlag(actorWithRole("SUPER_ADMIN")), true);
+  assert.equal(mayManageDeveloperFlag(actorWithRole("SUPER_ADMIN", { isDeveloper: true })), true);
+  // 승인은 여기서도 승격 대상이 아니다.
+  assert.equal(mayManageDeveloperFlag(actorWithRole("SUPER_ADMIN", { approvalStatus: "PENDING" })), false);
+});
+
+test("🔴 이 판정은 승격 창구를 쓰지 않는다 — 원본", () => {
+  const source = readFileSync(join(process.cwd(), "src/lib/auth/developer-flag-authorization.ts"), "utf8");
+  assert.ok(!/from ["'][^"']*developer-promotion["']/.test(source), "판정 파일이 승격 창구를 불러왔다");
+  assert.ok(!/from ["'][^"']*permission-resolver["']/.test(source), "판정 파일이 권한 해석기를 불러왔다");
+  assert.ok(!/\bactorMay\(|\bactorHasAllowedRole\(|\bhasPermission\(/.test(source), "판정에 승격 창구가 들어갔다");
+  // 개발자 표시를 보지 않는다 — 받는 모양에도 그 칸이 없다(주석은 뺀다).
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  assert.ok(!/isDeveloper/.test(withoutComments), "판정이 개발자 표시를 읽는다");
+});
+
+test("🔴 화면 페이지와 서버 mutation 이 같은 함수로 판정한다 — 식을 두 번 적지 않는다", () => {
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/users/page.tsx"), "utf8");
+  const mutation = readFileSync(join(process.cwd(), "src/lib/db/mutations/developer-flag.ts"), "utf8");
+
+  for (const [label, source] of [["화면 페이지", page], ["서버 mutation", mutation]] as const) {
+    assert.ok(/from ["'][^"']*developer-flag-authorization["']/.test(source), `${label}: 판정 창구를 부르지 않는다`);
+    assert.ok(/\bmayManageDeveloperFlag\(/.test(source), `${label}: mayManageDeveloperFlag 를 쓰지 않는다`);
+  }
+  // 페이지는 그 값을 계산해 prop 으로 내려보낸다 — 역할 리터럴로 스스로 적지 않는다.
+  assert.ok(
+    /const canManageDeveloperFlag = mayManageDeveloperFlag\(actingUser\)/.test(page),
+    "페이지가 판정 함수로 canManageDeveloperFlag 를 계산하지 않는다"
+  );
+  assert.ok(/canManageDeveloperFlag=\{canManageDeveloperFlag\}/.test(page), "페이지가 값을 화면에 넘기지 않는다");
+  // mutation 은 승격 창구를 부르지 않는다 — 그것이 개발자가 개발자를 만드는 길이다.
+  assert.ok(!/from ["'][^"']*developer-promotion["']/.test(mutation), "mutation 이 승격 창구를 불러왔다");
+  assert.ok(!/from ["'][^"']*permission-resolver["']/.test(mutation), "mutation 이 권한 해석기를 불러왔다");
+  assert.ok(!/\bactorMay\(|\bhasPermission\(/.test(mutation), "mutation 판정에 승격 창구가 들어갔다");
+
+  // 서버 액션은 토큰의 역할로 미리 거르지 않는다 — 토큰은 발급 시점 값이라
+  // 살아 있는 행으로 판정하는 화면과 갈린다(「단추는 보이는데 저장은 거절」).
+  const action = readFileSync(join(process.cwd(), "src/lib/server/actions/developer-flag.ts"), "utf8");
+  assert.ok(!/session\.role/.test(action), "서버 액션이 토큰의 역할로 판정한다");
+  assert.ok(!/\bactorMay\(|\bhasPermission\(/.test(action), "서버 액션 판정에 승격 창구가 들어갔다");
+});
+
+test("🔴 개발자 표시 탭과 목록은 서버가 내려준 값으로만 여닫는다", () => {
+  const screen = readFileSync(join(process.cwd(), "src/components/users/RepresentativeManagementScreen.tsx"), "utf8");
+  const section = readFileSync(join(process.cwd(), "src/components/users/DeveloperFlagSection.tsx"), "utf8");
+
+  // 필수 prop 이다(물음표가 붙어 있으면 빠뜨려도 컴파일이 통과한다).
+  assert.ok(/canManageDeveloperFlag:\s*boolean/.test(screen), "화면이 판정 prop 을 받지 않는다");
+  assert.ok(!/canManageDeveloperFlag\?:/.test(screen), "판정 prop 이 선택 인자다 — 빠뜨려도 컴파일이 통과한다");
+  assert.ok(/canManageDeveloperFlag=\{canManageDeveloperFlag\}/.test(screen), "화면이 받은 값을 목록에 넘기지 않는다");
+  assert.ok(/canManageDeveloperFlag:\s*boolean/.test(section), "목록이 판정 prop 을 받지 않는다");
+  // 어느 쪽도 역할 리터럴이나 승격 창구로 스스로 판정하지 않는다 — 클라이언트
+  // 컴포넌트가 판정을 들고 있으면 서버와 갈릴 길이 다시 생긴다. 주석은 뺀다 —
+  // 화면 파일의 머리말이 옛 모양(`actingUser.role === "SUPER_ADMIN"`)을 경위로
+  // 적어 두고 있다.
+  for (const [label, source] of [["화면", screen], ["목록", section]] as const) {
+    const withoutComments = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    assert.ok(!/role === "SUPER_ADMIN"/.test(withoutComments), `${label}: 역할 리터럴로 스스로 판정한다`);
+    assert.ok(
+      !/\bactorMay\(|\bhasPermission\(|\bmayManageDeveloperFlag\(/.test(withoutComments),
+      `${label}: 클라이언트 화면이 판정을 스스로 한다`
+    );
   }
 });

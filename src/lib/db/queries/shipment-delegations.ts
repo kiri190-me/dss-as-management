@@ -98,6 +98,12 @@ export type RepresentativeManagementUserRow = {
   isLocked: boolean;
   isShipmentRepresentative: boolean;
   /**
+   * 개발자 표시(users.is_developer). 역할이 아니다 — 켜지면 권한 판정에서만
+   * 최고관리자의 권한이 더해진다. /users 의 「개발자 표시」 탭이 켜고 끈다
+   * (DeveloperFlagSection.tsx); 대표 목록에는 역할 옆 작은 표지로만 보인다.
+   */
+  isDeveloper: boolean;
+  /**
    * Linked to a DSS 통합 로그인 account. When true, `role` is decided by the
    * login portal and rewritten on every sign-in, so the screen shows where
    * the value comes from rather than presenting it as locally editable.
@@ -122,6 +128,7 @@ export async function listUsersForRepresentativeManagement(): Promise<Representa
       isActive: users.isActive,
       lockedAt: users.lockedAt,
       isShipmentRepresentative: users.isShipmentRepresentative,
+      isDeveloper: users.isDeveloper,
       ssoSubject: users.ssoSubject,
     })
     .from(users)
@@ -137,6 +144,7 @@ export async function listUsersForRepresentativeManagement(): Promise<Representa
     isActive: row.isActive,
     isLocked: row.lockedAt !== null,
     isShipmentRepresentative: row.isShipmentRepresentative,
+    isDeveloper: row.isDeveloper,
     // The subject itself never leaves the server — the screen only needs to
     // know that one exists.
     isSsoManaged: row.ssoSubject !== null,

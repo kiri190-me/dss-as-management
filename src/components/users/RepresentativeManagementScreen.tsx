@@ -5,6 +5,7 @@ import RepresentativeListSection from "./RepresentativeListSection";
 import DelegationSection from "./DelegationSection";
 import RolePermissionSettings, { type RolePermissionScreenData } from "./RolePermissionSettings";
 import NotificationSettings from "./NotificationSettings";
+import DeveloperFlagSection from "./DeveloperFlagSection";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { NotificationSettingsScreenData } from "@/lib/domain/notification-settings";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
@@ -26,6 +27,10 @@ import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/l
  * notificationSettings가 null이면 그 탭을 아예 그리지 않는다. 두 자료를 따로
  * 받는 이유는, 지금은 두 탭의 권한이 같지만 갈라지는 날에 화면이 한쪽만 감출
  * 수 있어야 하기 때문이다(각자 자기 자료가 있으면 보이고, 없으면 없다).
+ *
+ * 2026-09-07: 「개발자 표시」가 네 번째 탭으로 들어왔다. 자료가 아니라 판정 하나
+ * (canManageDeveloperFlag)로 여닫는다 — 목록 자체는 대표 탭과 같은 `users` 를
+ * 쓰기 때문이다. 거짓이면 탭을 아예 그리지 않는다(위 두 탭과 같은 방식).
  */
 export default function RepresentativeManagementScreen({
   actingUser,
@@ -34,6 +39,7 @@ export default function RepresentativeManagementScreen({
   rolePermissions,
   notificationSettings,
   canManageRepresentatives,
+  canManageDeveloperFlag,
 }: {
   actingUser: ActingUser;
   users: RepresentativeManagementUserRow[];
@@ -57,9 +63,21 @@ export default function RepresentativeManagementScreen({
    * 클라이언트 컴포넌트라 hasPermission 을 await 할 수 없다.
    */
   canManageRepresentatives: boolean;
+  /**
+   * 🔴 「개발자 표시를 켜고 끌 수 있는가」 — **진짜 최고관리자만**이다. 위의
+   * canManageRepresentatives 와 달리 이 값은 승격되지 않는다: 개발자 표시가
+   * 권한을 최고관리자급으로 올리는 스위치 그 자체라서, 승격된 개발자가 통과하면
+   * 개발자가 개발자를 만든다. 「동급」 규칙의 유일하고 의도된 예외다.
+   *
+   * 서버 페이지가 mayManageDeveloperFlag(actingUser) 로 계산해 내려보내고, 서버
+   * mutation(db/mutations/developer-flag.ts)이 **같은 함수**로 판정한다
+   * (auth/developer-flag-authorization.ts). 이 값이 거짓이면 「개발자 표시」 탭을
+   * 아예 그리지 않는다 — 권한·알림 탭이 자료가 null 이면 없는 것과 같은 방식이다.
+   */
+  canManageDeveloperFlag: boolean;
 }) {
   const representatives = users.filter((u) => u.isShipmentRepresentative);
-  const [activeTab, setActiveTab] = useState<"representatives" | "permissions" | "notifications">(
+  const [activeTab, setActiveTab] = useState<"representatives" | "permissions" | "notifications" | "developer">(
     "representatives"
   );
 
@@ -72,7 +90,7 @@ export default function RepresentativeManagementScreen({
         </p>
       </div>
 
-      {(rolePermissions || notificationSettings) && (
+      {(rolePermissions || notificationSettings || canManageDeveloperFlag) && (
         <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
           <button
             type="button"
@@ -111,6 +129,19 @@ export default function RepresentativeManagementScreen({
               알림 설정
             </button>
           )}
+          {canManageDeveloperFlag && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("developer")}
+              className={`border-b-2 px-3 py-2 text-sm font-medium ${
+                activeTab === "developer"
+                  ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
+                  : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              개발자 표시
+            </button>
+          )}
         </div>
       )}
 
@@ -118,6 +149,8 @@ export default function RepresentativeManagementScreen({
         <RolePermissionSettings actingRole={actingUser.role} data={rolePermissions} />
       ) : notificationSettings && activeTab === "notifications" ? (
         <NotificationSettings data={notificationSettings} />
+      ) : canManageDeveloperFlag && activeTab === "developer" ? (
+        <DeveloperFlagSection users={users} canManageDeveloperFlag={canManageDeveloperFlag} />
       ) : (
         <>
           {/* 아래 두 화면의 prop 이름도 이제 값이 뜻하는 바와 같다
