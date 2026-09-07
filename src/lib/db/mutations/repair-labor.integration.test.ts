@@ -12,7 +12,7 @@ import {
   repairTaskCatalog,
   users,
 } from "../schema";
-import { saveRepairLabor } from "./repair-labor";
+import { saveRepairLabor, STAGED_TASK_NAME_PREFIX } from "./repair-labor";
 import { getRepairLaborForKind } from "../queries/repair-labor";
 import type {
   PowerTestTaskInput,
@@ -213,6 +213,23 @@ async function settingsAudit(recordId: string) {
       )
     )
     .orderBy(asc(auditLogs.createdAt));
+}
+
+/**
+ * 드라이버 오류에서 오류 코드와 색인 이름을 꺼낸다.
+ *
+ * 🔴 drizzle 이 드라이버 오류를 **자기 오류로 감싸므로** cause 까지 본다.
+ * mutations/repair-labor.ts 의 색인 위반 판정이 보는 자리와 같아야 한다 — 여기가
+ * 갈라지면 그 판정이 조용히 안 켜지는데도 이 시험은 통과한다.
+ */
+function pgFields(err: unknown): { code?: unknown; constraintName?: unknown } {
+  for (const candidate of [err, err instanceof Error ? err.cause : undefined]) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const fields = candidate as { code?: unknown; constraint_name?: unknown };
+    if (fields.code === undefined) continue;
+    return { code: fields.code, constraintName: fields.constraint_name };
+  }
+  return {};
 }
 
 before(async () => {
@@ -1060,5 +1077,435 @@ describe("changedCount 와 종류 격리", () => {
     const generatorSetting = await storedSetting("GENERATOR");
     assert.ok(generatorSetting);
     assert.equal(generatorSetting.hourlyRate, HOURLY_RATE_STORED);
+  });
+});
+
+/**
+ * ============================================================================
+ * 이름을 맞바꾸거나 되쓰는 저장 — 부분 unique 색인과 부딪히던 자리
+ * ============================================================================
+ * 두 목록 표에는 `(equipment_kind, task_name) WHERE is_deleted = false` 부분
+ * unique 색인이 걸려 있다. 사람이 화면에서 당연히 하는 두 가지 조작이 그 색인과
+ * **찰나에** 부딪힌다.
+ *
+ *  - 작업 두 개의 **이름을 맞바꾼다.** 순환이라 어느 쪽을 먼저 써도 상대가 아직
+ *    그 이름을 쥐고 있다.
+ *  - 줄을 빼면서 **그 이름을 같은 저장에서 새 줄에** 쓴다. 새 줄이 들어갈 때 옛
+ *    줄이 아직 살아 있다.
+ *
+ * 둘 다 자료를 깨뜨리지는 않았다(트랜잭션이 통째로 되돌아간다). 대신 정당한
+ * 조작이 막혔고, 화면에는 "잠시 후 다시 시도해 주세요"가 떴다 — 구조적인 문제라
+ * 다시 눌러도 영원히 안 되는데도.
+ *
+ * 아래 시험들이 못 박는 것은 **한 번의 저장으로 된다**는 것이다. 위 「지운 건명은
+ * 다시 쓸 수 있다」 시험이 일부러 저장 두 번으로 짜여 있는데, 그것도 여전히
+ * 되어야 하므로 그대로 두고 여기에 한 번짜리를 따로 더한다.
+ * ============================================================================
+ */
+describe("🔴 이름 맞바꾸기와 이름 되쓰기 — 한 번의 저장으로 된다", () => {
+  test("🔴 두 작업의 이름을 한 번에 맞바꾼다 — 같은 두 줄의 이름만 서로 바뀐다", async () => {
+    await resetKind("MATCHER");
+    await save({
+      kind: "MATCHER",
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("MATCHER");
+
+    // 공수시간은 줄에 그대로 두고 **이름만** 서로 바꾼다.
+    const result = await save({
+      kind: "MATCHER",
+      tasks: [
+        { id: before[0].id, taskName: "작업 B", hours: 2, isOverhaul: false },
+        { id: before[1].id, taskName: "작업 A", hours: 3, isOverhaul: false },
+      ],
+      powerTestTasks: [],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(
+      (await liveTasks("MATCHER")).map((row) => [row.id, row.taskName, row.hours]),
+      [
+        [before[0].id, "작업 B", 2],
+        [before[1].id, "작업 A", 3],
+      ],
+      "🔴 id 가 유지된 채로 이름만 바뀌어야 한다 — 지우고 새로 만든 것이 아니다"
+    );
+    const all = await allTasks("MATCHER");
+    assert.equal(all.length, 2, "줄이 늘어나면 안 된다");
+    assert.ok(
+      all.every((row) => row.isDeleted === false),
+      "맞바꾸기는 아무것도 지우지 않는다"
+    );
+  });
+
+  test("🔴 줄을 빼면서 그 이름으로 새 줄을 만든다 — 저장을 두 번으로 나누지 않아도 된다", async () => {
+    await resetKind("MATCHER");
+    await save({
+      kind: "MATCHER",
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("MATCHER");
+
+    // 「작업 A」를 빼고, **같은 저장에서** 그 이름의 새 줄을 만든다.
+    const result = await save({
+      kind: "MATCHER",
+      tasks: [
+        { id: before[1].id, taskName: "작업 B", hours: 3, isOverhaul: false },
+        newTask("작업 A", 7),
+      ],
+      powerTestTasks: [],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const live = await liveTasks("MATCHER");
+    assert.deepEqual(
+      live.map((row) => [row.taskName, row.hours, row.displayOrder]),
+      [
+        ["작업 B", 3, 1],
+        ["작업 A", 7, 2],
+      ]
+    );
+    const created = live.find((row) => row.taskName === "작업 A");
+    assert.ok(created);
+    assert.notEqual(created.id, before[0].id, "옛 줄이 되살아난 것이 아니라 새 id 의 새 줄이다");
+
+    const all = await allTasks("MATCHER");
+    assert.equal(all.length, 3, "옛 줄은 소프트 삭제로 남는다");
+    const removed = all.find((row) => row.id === before[0].id);
+    assert.ok(removed, "빠진 줄이 표에서 사라지면 안 된다");
+    assert.equal(removed.isDeleted, true);
+    assert.equal(removed.deletedBy, secondActorId, "누가 지웠는지가 남는다");
+  });
+
+  test("통전 목록도 이름을 한 번에 맞바꿀 수 있다 — 두 표에 같이 적용됐다", async () => {
+    await resetKind("GENERATOR");
+    await save({
+      kind: "GENERATOR",
+      tasks: [],
+      powerTestTasks: [
+        { id: null, taskName: "통전 A" },
+        { id: null, taskName: "통전 B" },
+      ],
+      actorUserId: superAdminId,
+    });
+    const before = await livePowerTests("GENERATOR");
+
+    const result = await save({
+      kind: "GENERATOR",
+      tasks: [],
+      powerTestTasks: [
+        { id: before[0].id, taskName: "통전 B" },
+        { id: before[1].id, taskName: "통전 A" },
+      ],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(
+      (await livePowerTests("GENERATOR")).map((row) => [row.id, row.taskName]),
+      [
+        [before[0].id, "통전 B"],
+        [before[1].id, "통전 A"],
+      ]
+    );
+    const all = await allPowerTests("GENERATOR");
+    assert.equal(all.length, 2);
+    assert.ok(all.every((row) => row.isDeleted === false));
+  });
+
+  test("통전 목록도 줄을 빼면서 그 이름으로 새 줄을 만들 수 있다", async () => {
+    await resetKind("GENERATOR");
+    await save({
+      kind: "GENERATOR",
+      tasks: [],
+      powerTestTasks: [
+        { id: null, taskName: "통전 A" },
+        { id: null, taskName: "통전 B" },
+      ],
+      actorUserId: superAdminId,
+    });
+    const before = await livePowerTests("GENERATOR");
+
+    const result = await save({
+      kind: "GENERATOR",
+      tasks: [],
+      powerTestTasks: [
+        { id: before[1].id, taskName: "통전 B" },
+        { id: null, taskName: "통전 A" },
+      ],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const live = await livePowerTests("GENERATOR");
+    assert.deepEqual(
+      live.map((row) => [row.taskName, row.displayOrder]),
+      [
+        ["통전 B", 1],
+        ["통전 A", 2],
+      ]
+    );
+    const created = live.find((row) => row.taskName === "통전 A");
+    assert.ok(created);
+    assert.notEqual(created.id, before[0].id, "옛 줄이 되살아난 것이 아니라 새 줄이다");
+    assert.equal((await allPowerTests("GENERATOR")).length, 3, "옛 줄은 남아 있다");
+  });
+
+  test("세 줄을 돌려 바꿔도 된다 — 순환이 두 줄짜리만 풀리는 게 아니다", async () => {
+    await resetKind("MATCHER");
+    await save({
+      kind: "MATCHER",
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3), newTask("작업 C", 4)],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("MATCHER");
+
+    // A→B, B→C, C→A. 어느 줄을 먼저 써도 상대가 그 이름을 쥐고 있다.
+    const result = await save({
+      kind: "MATCHER",
+      tasks: [
+        { id: before[0].id, taskName: "작업 B", hours: 2, isOverhaul: false },
+        { id: before[1].id, taskName: "작업 C", hours: 3, isOverhaul: false },
+        { id: before[2].id, taskName: "작업 A", hours: 4, isOverhaul: false },
+      ],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(
+      (await liveTasks("MATCHER")).map((row) => [row.id, row.taskName, row.hours]),
+      [
+        [before[0].id, "작업 B", 2],
+        [before[1].id, "작업 C", 3],
+        [before[2].id, "작업 A", 4],
+      ]
+    );
+    assert.equal((await allTasks("MATCHER")).length, 3, "줄이 늘거나 지워지면 안 된다");
+  });
+
+  test("이름을 안 바꾸고 다른 값만 고쳐도 멀쩡하다 — 임시값 단계가 감사 기록까지 흐리지 않는다", async () => {
+    await resetKind("MATCHER");
+    await save({
+      kind: "MATCHER",
+      hourlyRate: HOURLY_RATE,
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      powerTestTasks: [{ id: null, taskName: "통전 A" }],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("MATCHER");
+    const powerBefore = await livePowerTests("MATCHER");
+    const setting = await storedSetting("MATCHER");
+    assert.ok(setting);
+    const trailBefore = await settingsAudit(setting.id);
+
+    const result = await save({
+      kind: "MATCHER",
+      hourlyRate: HOURLY_RATE,
+      tasks: [
+        { id: before[0].id, taskName: "작업 A", hours: 9, isOverhaul: true },
+        { id: before[1].id, taskName: "작업 B", hours: 3, isOverhaul: false },
+      ],
+      powerTestTasks: powerBefore.map((row) => ({ id: row.id, taskName: row.taskName })),
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(
+      (await liveTasks("MATCHER")).map((row) => [
+        row.id,
+        row.taskName,
+        row.hours,
+        row.isOverhaul,
+        row.displayOrder,
+      ]),
+      [
+        [before[0].id, "작업 A", 9, true, 1],
+        [before[1].id, "작업 B", 3, false, 2],
+      ],
+      "이름은 그대로고 값만 바뀐다"
+    );
+    assert.ok(
+      (await allTasks("MATCHER")).every((row) => row.isDeleted === false),
+      "한 줄도 지워지면 안 된다"
+    );
+
+    // 🔴 감사에 임시값이 새어 나가면 안 된다 — previousValue 는 저장 전에 읽고,
+    // newValue 는 화면이 보낸 글자다. 둘 다 사람이 적은 이름이어야 한다.
+    const trail = await settingsAudit(setting.id);
+    assert.equal(trail.length, trailBefore.length + 1, "저장 한 번에 한 줄이다");
+    const entry = trail[trail.length - 1];
+    assert.deepEqual(entry.previousValue, {
+      equipmentKind: "MATCHER",
+      hourlyRate: HOURLY_RATE_STORED,
+      baseCost: null,
+      powerTestHours: null,
+      taskCount: 2,
+      totalHours: 5,
+      powerTestTaskCount: 1,
+      powerTestTaskNames: ["통전 A"],
+    });
+    assert.deepEqual(entry.newValue, {
+      equipmentKind: "MATCHER",
+      hourlyRate: HOURLY_RATE,
+      baseCost: null,
+      powerTestHours: null,
+      taskCount: 2,
+      totalHours: 12,
+      powerTestTaskCount: 1,
+      powerTestTaskNames: ["통전 A"],
+    });
+  });
+
+  test("🔴 임시값이 남지 않는다 — 저장이 끝나면 어떤 줄의 이름도 그 모양이 아니다", async () => {
+    await resetKind("GENERATOR");
+    await save({
+      kind: "GENERATOR",
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      powerTestTasks: [
+        { id: null, taskName: "통전 A" },
+        { id: null, taskName: "통전 B" },
+      ],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("GENERATOR");
+    const powerBefore = await livePowerTests("GENERATOR");
+
+    const result = await save({
+      kind: "GENERATOR",
+      tasks: [
+        { id: before[0].id, taskName: "작업 B", hours: 2, isOverhaul: false },
+        { id: before[1].id, taskName: "작업 A", hours: 3, isOverhaul: false },
+      ],
+      powerTestTasks: [
+        { id: powerBefore[0].id, taskName: "통전 B" },
+        { id: powerBefore[1].id, taskName: "통전 A" },
+      ],
+      actorUserId: superAdminId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    // 지운 줄까지 포함해서 본다 — 임시값을 쥔 채 소프트 삭제된 줄이 남는 사고도
+    // 여기서 걸려야 한다.
+    const names = [
+      ...(await allTasks("GENERATOR")).map((row) => row.taskName),
+      ...(await allPowerTests("GENERATOR")).map((row) => row.taskName),
+    ];
+    assert.deepEqual(
+      names.filter((name) => name.includes(STAGED_TASK_NAME_PREFIX)),
+      [],
+      "🔴 이름을 옮겨 담던 임시값이 한 줄도 남으면 안 된다"
+    );
+    assert.deepEqual(
+      new Set(names),
+      new Set(["작업 A", "작업 B", "통전 A", "통전 B"]),
+      "사람이 적은 이름만 남는다"
+    );
+  });
+
+  test("🔴 잘못된 id 와 이름 맞바꾸기를 함께 보내면 NOT_FOUND 이고, 이름이 하나도 안 바뀐다", async () => {
+    await resetKind("MATCHER");
+    await save({
+      kind: "MATCHER",
+      hourlyRate: HOURLY_RATE,
+      tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    const before = await liveTasks("MATCHER");
+
+    const result = await save({
+      kind: "MATCHER",
+      hourlyRate: "999999",
+      tasks: [
+        { id: before[0].id, taskName: "작업 B", hours: 2, isOverhaul: false },
+        { id: before[1].id, taskName: "작업 A", hours: 3, isOverhaul: false },
+        { id: randomUUID(), taskName: "없는 줄", hours: 5, isOverhaul: false },
+      ],
+      powerTestTasks: [],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+
+    assert.deepEqual(
+      (await liveTasks("MATCHER")).map((row) => [row.id, row.taskName]),
+      [
+        [before[0].id, "작업 A"],
+        [before[1].id, "작업 B"],
+      ],
+      "🔴 이름을 임시값으로 밀어 두던 단계까지 되돌아가야 한다"
+    );
+    const all = await allTasks("MATCHER");
+    assert.equal(all.length, 2, "줄이 늘거나 지워지면 안 된다");
+    assert.ok(all.every((row) => row.isDeleted === false));
+    const setting = await storedSetting("MATCHER");
+    assert.ok(setting);
+    assert.equal(setting.hourlyRate, HOURLY_RATE_STORED, "단가도 되돌아간다");
+  });
+
+  test("🔴 색인 위반은 23505 와 색인 이름을 들고 온다 — 남은 충돌을 알아보는 근거다", async () => {
+    // saveRepairLabor 는 이제 이 충돌을 스스로 만들지 않는다. 그래도 다른 쓰는
+    // 쪽(scripts/seed-repair-tasks.ts)이나 같은 순간의 저장이 부딪힐 수 있어
+    // 그 오류를 알아보는 갈래가 남아 있다. **그 갈래가 무엇을 보고 판정하는지**를
+    // 여기서 못 박는다 — 오류의 모양이 바뀌면 그 판정이 조용히 죽고, 사람은 다시
+    // "잠시 후 다시 시도해 주세요"를 듣게 된다.
+    await resetKind("TOTAL_CONTROLLER");
+    await save({
+      kind: "TOTAL_CONTROLLER",
+      tasks: [newTask("겹칠 작업", 4)],
+      powerTestTasks: [{ id: null, taskName: "겹칠 통전 작업" }],
+      actorUserId: superAdminId,
+    });
+
+    const taskError = await db
+      .insert(repairTaskCatalog)
+      .values({
+        equipmentKind: "TOTAL_CONTROLLER",
+        taskName: "겹칠 작업",
+        hours: 4,
+        displayOrder: 2,
+        createdBy: superAdminId,
+        updatedBy: superAdminId,
+      })
+      .then(
+        () => null,
+        (err: unknown) => err
+      );
+    assert.ok(taskError, "부분 unique 색인이 막아야 한다");
+    // 🔴 drizzle 이 드라이버 오류를 자기 오류로 **감싼다.** 코드도 색인 이름도
+    // 바깥 오류에는 없고 cause 에 있다 — 바깥만 보고 판정하면 그 갈래는 영원히
+    // 안 켜진다.
+    assert.deepEqual(pgFields(taskError), {
+      code: "23505",
+      constraintName: "repair_task_catalog_kind_name_not_deleted_unique",
+    });
+
+    const powerError = await db
+      .insert(powerTestTasks)
+      .values({
+        equipmentKind: "TOTAL_CONTROLLER",
+        taskName: "겹칠 통전 작업",
+        displayOrder: 2,
+        createdBy: superAdminId,
+        updatedBy: superAdminId,
+      })
+      .then(
+        () => null,
+        (err: unknown) => err
+      );
+    assert.ok(powerError, "통전 표에도 같은 색인이 있다");
+    assert.deepEqual(pgFields(powerError), {
+      code: "23505",
+      constraintName: "power_test_tasks_kind_name_not_deleted_unique",
+    });
   });
 });
