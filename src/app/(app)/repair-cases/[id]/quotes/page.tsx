@@ -85,17 +85,6 @@ export default async function RepairCaseQuotesPage({
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) notFound();
 
-  // 견적서는 DB 에만 있다. mock 읽기 소스로 띄운 데모 건에는 붙일 행이 없다
-  // (파일 관리 탭이 같은 자리에서 같은 판단을 한다).
-  if (resolved.source !== "DATABASE") {
-    return (
-      <PlaceholderPage
-        title="견적서"
-        description="이 화면은 데이터베이스 저장 모드에서만 사용할 수 있습니다."
-      />
-    );
-  }
-
   /**
    * 고칠 수 있는 사람에게만 `새 견적서` 단추를 그린다 — PO/내자 목록이 하는
    * 그대로다(`quotes` WRITE). **이것도 관문이 아니다**: `/quotes/new` 가 다시

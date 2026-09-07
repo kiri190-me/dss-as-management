@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import ActivityTimelineScreen from "@/components/repair-cases/work-history/ActivityTimelineScreen";
 import DatabaseWorkHistoryScreen from "@/components/repair-cases/work-history/DatabaseWorkHistoryScreen";
 import { invalidateWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
 import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
@@ -23,16 +22,10 @@ export const dynamic = "force-dynamic";
  * 필요 없었다. 작업 기록 무효화가 작업내용 탭에서 이 탭으로 옮겨 오면서
  * 쓰기 동작이 생겼으므로, 이제 세션과 실제 사용자를 읽어 권한을 판정한다.
  *
- * Stage G-2 Batch 3: resolveMockRepairCaseById → resolveRepairCaseForServer로
- * 교체해 database 모드의 UUID도 이 탭에 도달할 수 있게 한다. mockWorkHistories/
- * 로컬 이벤트 병합 로직 자체는 변경하지 않는다 — MOCK/LOCAL_DEMO 소스 건은
- * 대응하는 mockWorkHistories/로컬 이벤트가 없으므로 기존 "이력 없음" 빈 상태를
- * 그대로 보여준다(ActivityTimelineScreen, 이번 배치에서도 변경하지 않음).
- *
- * Phase 5C-2: a DATABASE-sourced case now gets its own branch —
- * DatabaseWorkHistoryScreen (work records as primary content, workflow/
- * status history as a secondary collapsible subsection) — entirely
- * additive, ActivityTimelineScreen's local-only merge logic is untouched.
+ * 이 탭이 그리는 것은 DatabaseWorkHistoryScreen 하나다 — 작업 기록을 본문으로,
+ * 워크플로/상태 이력을 접히는 하위 구역으로 보여 준다.
+ * resolveRepairCaseForServer가 내놓는 값은 DATABASE 소스이거나 null 뿐이므로
+ * (옛 브라우저 저장소 타임라인은 사라졌다) 소스에 따른 분기가 없다.
  */
 export default async function WorkHistoryPage({
   params,
@@ -48,10 +41,6 @@ export default async function WorkHistoryPage({
   // 항상 존재해야 한다. 방어적으로만 남겨둔다.
   if (!resolved) {
     notFound();
-  }
-
-  if (resolved.source !== "DATABASE") {
-    return <ActivityTimelineScreen resolved={resolved} />;
   }
 
   const { page: pageParam } = await searchParams;

@@ -43,13 +43,6 @@ export default async function RepairCaseFilesPage({
     notFound();
   }
 
-  // 실제 DB 접수 건에서만 실제 저장을 쓴다. mock 읽기 소스로 띄운 데모 건은
-  // 붙일 DB 행이 없으므로 종전의 브라우저 저장소 화면 그대로 둔다 — 이번
-  // 단계는 저장 바닥을 놓는 일이지 데모를 걷는 일이 아니다.
-  if (resolved.source !== "DATABASE") {
-    return <FilesScreen resolved={resolved} actingUser={actingUser} />;
-  }
-
   const [attachments, trashedAttachments] = await Promise.all([
     listAttachmentsForRepairCase(resolved.id),
     listTrashedAttachmentsForRepairCase(resolved.id),

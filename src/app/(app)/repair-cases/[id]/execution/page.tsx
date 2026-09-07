@@ -4,7 +4,6 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import { NonDatabaseWorkContent } from "@/components/repair-cases/detail/NonDatabaseWorkContent";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
@@ -36,15 +35,15 @@ export const dynamic = "force-dynamic";
 
 /**
  * Phase 5C-1 — "작업내용" tab (URL unchanged: /repair-cases/[id]/execution,
- * see DetailTabs.tsx for the visible-label-only rename). This screen now
- * owns both the workflow-transition action list (moved off 기본 정보 —
- * DatabaseWorkflowControlPanel / local WorkflowControlPanel, plus the
- * workflowHistory/holdState/currentApprovals fetch that used to live in
- * [id]/page.tsx) and the existing Phase 5A procedure-execution UI.
+ * see DetailTabs.tsx for the visible-label-only rename). This screen owns
+ * both the workflow-transition action list (moved off 기본 정보 —
+ * DatabaseWorkflowControlPanel, plus the workflowHistory/holdState/
+ * currentApprovals fetch that used to live in [id]/page.tsx) and the
+ * existing Phase 5A procedure-execution UI.
  *
- * The procedure-execution feature itself remains database-mode only (see
- * ProcedureExecutionScreen/DatabaseModeOnlyNotice) — that Phase 5A
- * constraint is unchanged by this restructuring.
+ * resolveRepairCaseForServer only ever yields a DATABASE-sourced case (or
+ * null) — the demo read sources are gone — so this screen has a single
+ * body, no source branch.
  */
 export default async function RepairCaseExecutionPage({
   params,
@@ -63,10 +62,6 @@ export default async function RepairCaseExecutionPage({
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) {
     notFound();
-  }
-
-  if (resolved.source !== "DATABASE") {
-    return <NonDatabaseWorkContent resolved={resolved} actingUser={actingUser} />;
   }
 
   if (!actingUser) {
