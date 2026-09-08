@@ -488,7 +488,7 @@ export default function IntakeMailSettingsScreen({
           type="button"
           disabled={pending}
           onClick={save}
-          className="rounded-lg bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="rounded-lg bg-primary-900 px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:bg-primary-100 dark:text-zinc-900"
         >
           {pending ? "저장 중…" : "저장"}
         </button>

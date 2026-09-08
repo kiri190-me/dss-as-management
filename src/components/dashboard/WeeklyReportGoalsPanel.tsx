@@ -98,7 +98,7 @@ const errorClass = "mt-1 text-[11px] text-red-600 dark:text-red-400";
 const smallButtonClass =
   "rounded-md border border-zinc-300 px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 const primaryButtonClass =
-  "rounded-md bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200";
+  "rounded-md bg-primary-900 px-3 py-1 text-xs font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200";
 
 /**
  * 줄 앞부분 — 흐린 글씨, 그중 인수번호만 링크.

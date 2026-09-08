@@ -12,10 +12,10 @@ import {
 
 /**
  * ============================================================================
- * 색상 톤 템플릿 — 색 24개(라이트/다크 48값)를 한 번에 갈아 끼운다
+ * 색상 톤 템플릿 — 색 35개(라이트/다크 70값)를 한 번에 갈아 끼운다
  * ============================================================================
- * 화면 토큰 편집기(ThemeTokenEditor)는 48칸을 하나씩 고치는 화면이다. 그것으로
- * 「앱 전체의 인상」을 바꾸려면 48번을 서로 어울리게 골라야 하고, 그 사이 어느
+ * 화면 토큰 편집기(ThemeTokenEditor)는 70칸을 하나씩 고치는 화면이다. 그것으로
+ * 「앱 전체의 인상」을 바꾸려면 70번을 서로 어울리게 골라야 하고, 그 사이 어느
  * 한 칸이라도 어긋나면 대비가 무너진다. 이 파일은 **미리 맞춰 둔 한 벌**을
  * 골라 넣는 지름길이다.
  *
@@ -32,7 +32,7 @@ import {
  * 그래서 여기 담는 것은 등록부의 `kind === "color"` 토큰뿐이다.
  *
  * ── 🔴 램프의 라이트/다크는 같은 값이다 ─────────────────────────────────
- * zinc·red 는 팔레트이지 역할이 아니다 — 라이트 화면은 zinc-900 을 글자로,
+ * zinc·primary·red 는 팔레트이지 역할이 아니다 — 라이트 화면은 zinc-900 을 글자로,
  * 다크 화면은 같은 zinc-900 을 카드 바탕으로 쓴다(ui-theme-tokens.ts 머리말).
  * 램프의 라이트/다크를 서로 다른 색으로 만들면 다크의 카드 바탕과 라이트의
  * 글자가 따로 놀아 화면이 망가진다. 그래서 아래 `template()` 도우미가 램프를
@@ -75,7 +75,7 @@ export type UiThemeTemplateKey =
   | "soft-contrast"
   | "calm-red";
 
-/** 논리 키 → [라이트, 다크]. 색 토큰 24개를 빠짐없이 담는다. */
+/** 논리 키 → [라이트, 다크]. 색 토큰 35개를 빠짐없이 담는다. */
 export type UiThemeTemplateColors = Readonly<Record<string, readonly [string, string]>>;
 
 export type UiThemeTemplate = {
@@ -107,16 +107,35 @@ type Ends = {
   foregroundDark: string;
 };
 
+/** 강조(primary) 단계는 중립(zinc)의 같은 단계에서 만든다. 아래 주석 참조. */
+const ZINC_PREFIX = "zinc-";
+const PRIMARY_PREFIX = "primary-";
+
 /**
- * 램프 한 벌과 양 끝 넷으로 24색 표를 만든다.
+ * 램프 한 벌과 양 끝 넷으로 35색 표를 만든다.
  *
  * 램프를 두 번 적을 자리를 만들지 않는 것이 요점이다(머리말). 반대로
  * `background`·`foreground` 는 두 값을 반드시 따로 받는다 — 이 둘은 라이트와
  * 다크가 애초에 다른 색이고, 한 값으로 받으면 한쪽 화면이 반드시 깨진다.
+ *
+ * ── 🔴 강조(primary) 11단은 받지 않고 **중립에서 만든다** ───────────────
+ * 지금 강조색이 놓인 자리는 원래 중립의 가장 진한 단계였다(주 버튼이
+ * `bg-zinc-900` 이었다). 그래서 톤을 고르는 동안 둘은 계속 같이 움직여야
+ * 한다 — 「차분한 청색」을 골랐는데 화면 전체는 푸른 회색이 되고 **주 버튼만
+ * 옛 검정으로 남으면** 고른 사람 눈에는 그것이 그냥 고장이다.
+ *
+ * 손으로 한 벌 더 적지 않는 이유는 아래 DEFAULT_COLORS 가 등록부에서 값을
+ * 가져오는 이유와 같다 — 두 벌이 되는 순간 한쪽만 고쳐지는 날이 오고, 그때
+ * 「중립은 바뀌었는데 강조색만 옛 톤」인 템플릿이 조용히 생긴다. 강조색을
+ * 톤과 따로 고르는 화면은 다음 판이고, 그때 이 자리가 갈라진다.
  */
 function template(ramp: Ramp, ends: Ends): UiThemeTemplateColors {
   const colors: Record<string, readonly [string, string]> = {};
-  for (const [key, value] of Object.entries(ramp)) colors[key] = [value, value];
+  for (const [key, value] of Object.entries(ramp)) {
+    colors[key] = [value, value];
+    if (!key.startsWith(ZINC_PREFIX)) continue;
+    colors[`${PRIMARY_PREFIX}${key.slice(ZINC_PREFIX.length)}`] = [value, value];
+  }
   colors.background = [ends.backgroundLight, ends.backgroundDark];
   colors.foreground = [ends.foregroundLight, ends.foregroundDark];
   return colors;
@@ -385,7 +404,7 @@ function scopesOf(token: UiThemeToken): readonly UiThemeScope[] {
  * 상태가 생긴다 — 그러면 나중에 기본 팔레트를 손볼 때 옛 값이 오버라이드로
  * 굳어 아무 화면도 따라 바뀌지 않는다.
  *
- * 색 칸을 **전부** 싣는다(48칸). 지금 저장된 값과 견주어 달라진 것만 싣지 않는
+ * 색 칸을 **전부** 싣는다(70칸). 지금 저장된 값과 견주어 달라진 것만 싣지 않는
  * 이유는, 기본값으로 돌아가는 칸도 「행을 지워라」라는 뜻으로 실려야 하기
  * 때문이다. 이미 행이 없는 자리에 대한 삭제 요청은 mutation 이 0으로 세고
  * 넘어간다(applyOneChange).

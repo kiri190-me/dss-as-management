@@ -83,11 +83,13 @@ export type UiThemeToken = {
  * node_modules/tailwindcss/theme.css로 교차 확인했다. 그 청크에는
  * `@supports (color: lab(...))` 상위 분기가 있어 같은 변수가 두 번 나오는데
  * **hex 쪽을 적었다** — `<input type="color">`가 주고받는 표기가 그것이고,
- * 검증기가 받는 표기도 그것이다. `background`/`foreground` 둘만
- * src/app/globals.css에서 읽었다(이 저장소가 직접 정의하는 변수라서).
+ * 검증기가 받는 표기도 그것이다. `background`/`foreground`와 강조(primary)
+ * 램프는 src/app/globals.css에서 읽었다(이 저장소가 직접 정의하는 변수라서).
+ * primary는 같은 단계의 zinc와 값이 같다 — 원래 zinc-900이던 주 버튼을 이름만
+ * 바꿔 옮겨 온 것이고, 그때 화면이 하나도 바뀌지 않아야 했다(아래 램프 주석).
  *
  * ── 왜 라이트/다크 기본값이 대부분 같은가 ───────────────────────────────
- * zinc·red는 **팔레트**이지 역할이 아니다. 라이트 화면은 zinc-900을 글자로,
+ * zinc·primary·red는 **팔레트**이지 역할이 아니다. 라이트 화면은 zinc-900을 글자로,
  * 다크 화면은 같은 zinc-900을 카드 바탕으로 쓴다 — 색 자체는 한 벌이고 쓰는
  * 자리가 다를 뿐이다. 그래도 `scoped: true`로 둔 이유는, 다크에서만 한 단계를
  * 살짝 눕히고 싶은 요구가 실제로 생기기 때문이다(예: 다크의 zinc-400만 조금 더
@@ -209,6 +211,129 @@ export const UI_THEME_TOKENS: readonly UiThemeToken[] = [
     scoped: true,
     label: "먹빛 중립",
     usage: "다크에서 가장 깊은 바탕(패널 뒤·표 머리)",
+    defaultLight: "#09090b",
+    defaultDark: "#09090b",
+  },
+
+  // ── 강조(primary) — 주 버튼과 선택된 메뉴만 이 램프 위에 있다 ─────────
+  //
+  // 🔴 기본값이 같은 단계의 zinc 와 **글자 하나까지 같다.** 이 램프를 들여올 때
+  // 화면이 하나도 바뀌지 않아야 했기 때문이다 — 원래 주 버튼이 `bg-zinc-900`
+  // 이었고, 그 자리를 이름만 바꿔 옮겨 왔다. 값이 같다고 해서 zinc 를 var() 로
+  // 가리키지는 않는다(globals.css 의 @theme 블록 주석 참조): 가리키면 톤
+  // 템플릿이 중립을 바꿀 때 강조색이 딸려 움직여, "메인 컬러를 따로 고른다"가
+  // 다시 불가능해진다. 두 램프가 같은 값에서 출발할 뿐 서로 묶여 있지는 않다.
+  //
+  // 램프에 구멍을 내지 않는 이유는 red-500 과 같다 — 지금 안 쓰는 단계라도
+  // 빼면 편집 화면의 "50부터 950까지 한 줄"이 깨지고, 나중에 누가 그 단계를
+  // 쓰기 시작하는 날 혼자만 못 바꾸는 색이 된다.
+  {
+    key: "primary-50",
+    cssVar: "--color-primary-50",
+    kind: "color",
+    scoped: true,
+    label: "가장 연한 강조색",
+    usage: "다크 주 버튼 바탕(라이트의 900 자리를 다크에서는 이 단계가 맡는다)",
+    defaultLight: "#fafafa",
+    defaultDark: "#fafafa",
+  },
+  {
+    key: "primary-100",
+    cssVar: "--color-primary-100",
+    kind: "color",
+    scoped: true,
+    label: "연한 강조색",
+    usage: "라이트 선택된 메뉴 바탕 · 일부 화면의 다크 주 버튼 바탕",
+    defaultLight: "#f4f4f5",
+    defaultDark: "#f4f4f5",
+  },
+  {
+    key: "primary-200",
+    cssVar: "--color-primary-200",
+    kind: "color",
+    scoped: true,
+    label: "옅은 강조색",
+    usage: "다크 주 버튼에 마우스를 올렸을 때 바탕",
+    defaultLight: "#e4e4e7",
+    defaultDark: "#e4e4e7",
+  },
+  {
+    key: "primary-300",
+    cssVar: "--color-primary-300",
+    kind: "color",
+    scoped: true,
+    label: "밝은 강조색",
+    usage: "다크 주 버튼 마우스 올림의 변종(견적 목록)",
+    defaultLight: "#d4d4d8",
+    defaultDark: "#d4d4d8",
+  },
+  {
+    key: "primary-400",
+    cssVar: "--color-primary-400",
+    kind: "color",
+    scoped: true,
+    label: "중간 밝은 강조색",
+    usage: "강조 램프의 밝은 가운데 단계(지금은 쓰지 않지만 램프를 끊지 않으려고 둔다)",
+    defaultLight: "#9f9fa9",
+    defaultDark: "#9f9fa9",
+  },
+  {
+    key: "primary-500",
+    cssVar: "--color-primary-500",
+    kind: "color",
+    scoped: true,
+    label: "중간 강조색",
+    usage: "강조 램프의 가운데 단계(지금은 쓰지 않는다)",
+    defaultLight: "#71717b",
+    defaultDark: "#71717b",
+  },
+  {
+    key: "primary-600",
+    cssVar: "--color-primary-600",
+    kind: "color",
+    scoped: true,
+    label: "중간 어두운 강조색",
+    usage: "강조 램프의 어두운 가운데 단계(지금은 쓰지 않는다)",
+    defaultLight: "#52525c",
+    defaultDark: "#52525c",
+  },
+  {
+    key: "primary-700",
+    cssVar: "--color-primary-700",
+    kind: "color",
+    scoped: true,
+    label: "어두운 강조색",
+    usage: "라이트 주 버튼에 마우스를 올렸을 때 바탕의 변종(견적 목록)",
+    defaultLight: "#3f3f46",
+    defaultDark: "#3f3f46",
+  },
+  {
+    key: "primary-800",
+    cssVar: "--color-primary-800",
+    kind: "color",
+    scoped: true,
+    label: "진한 강조색",
+    usage: "라이트 주 버튼 마우스 올림 바탕 · 다크 선택된 메뉴 바탕",
+    defaultLight: "#27272a",
+    defaultDark: "#27272a",
+  },
+  {
+    key: "primary-900",
+    cssVar: "--color-primary-900",
+    kind: "color",
+    scoped: true,
+    label: "가장 진한 강조색 (주 버튼)",
+    usage: "라이트 주 버튼 바탕 · 선택된 메뉴 왼쪽 테두리 — 앱의 메인 컬러",
+    defaultLight: "#18181b",
+    defaultDark: "#18181b",
+  },
+  {
+    key: "primary-950",
+    cssVar: "--color-primary-950",
+    kind: "color",
+    scoped: true,
+    label: "먹빛 강조색",
+    usage: "강조 램프의 가장 깊은 단계(지금은 쓰지 않는다)",
     defaultLight: "#09090b",
     defaultDark: "#09090b",
   },
@@ -619,7 +744,7 @@ export type UiThemeContrastPair = {
  * 대비를 실제로 재는 조합.
  *
  * ── 전 조합을 재지 않는 이유 ────────────────────────────────────────────
- * 색 24개를 전부 맞물려 재면 경고가 수백 줄 쏟아지는데, 그중 거의 전부가 앱에서
+ * 색 35개를 전부 맞물려 재면 경고가 수백 줄 쏟아지는데, 그중 거의 전부가 앱에서
  * 절대 겹치지 않는 조합이다. 아무도 안 읽는 경고는 없는 것과 같고, 진짜 문제
  * 하나가 그 안에 묻힌다. 그래서 **화면에서 실제로 겹쳐 놓이는 짝만** 적는다.
  *

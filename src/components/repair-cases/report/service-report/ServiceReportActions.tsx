@@ -114,7 +114,7 @@ export default function ServiceReportActions({
           onClick={onDownload}
           disabled={!canDownload}
           aria-busy={isDownloading}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="rounded-md bg-primary-900 px-4 py-2 text-sm font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
           {isDownloading ? "만드는 중…" : "Excel 내려받기"}
         </button>

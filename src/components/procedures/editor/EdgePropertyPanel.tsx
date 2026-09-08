@@ -423,7 +423,7 @@ export default function EdgePropertyPanel({
             type="button"
             onClick={() => void handleConfirmRetarget()}
             disabled={isRetargeting}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isRetargeting ? "적용 중..." : "적용"}
           </button>

@@ -125,7 +125,7 @@ export default async function LoginPage({
         // 실리는 state가 한다.
         <a
           href="/api/auth/sso/start"
-          className="mt-6 flex items-center justify-center rounded-md bg-zinc-900 px-4 py-3 text-sm font-medium text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="mt-6 flex items-center justify-center rounded-md bg-primary-900 px-4 py-3 text-sm font-medium text-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
         >
           DSS 통합 로그인으로 계속
         </a>
@@ -177,7 +177,7 @@ export default async function LoginPage({
               ))}
           <button
             type="submit"
-            className="mt-4 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="mt-4 rounded-md bg-primary-900 px-4 py-2 text-sm font-medium text-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             로그인
           </button>

@@ -798,7 +798,7 @@ export default function DiagnosisFlowchartManagementScreen({
           <button
             type="button"
             onClick={() => setShowCreateForm(true)}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900"
           >
             새 Flowchart 추가
           </button>

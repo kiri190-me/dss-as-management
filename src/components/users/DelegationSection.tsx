@@ -235,7 +235,7 @@ export default function DelegationSection({
             <button
               type="submit"
               disabled={isSubmitting || !representativeUserId}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+              className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
             >
               {isSubmitting ? "처리 중..." : "위임 지정"}
             </button>

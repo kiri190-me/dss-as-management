@@ -161,7 +161,7 @@ export default function ProcedureTemplateDetailScreen({
             {!template.isReferenceOnly && template.status === "DRAFT" && canEditDraft && (
               <Link
                 href={`/procedures/${template.id}/edit`}
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900"
+                className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900"
               >
                 편집 시작
               </Link>

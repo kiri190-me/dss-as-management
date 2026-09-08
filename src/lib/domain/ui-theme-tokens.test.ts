@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   NO_UI_THEME_OVERRIDES,
@@ -51,11 +52,11 @@ const FONT_SIZE_TOKEN = tokenByKey("text-sm");
 
 // ───────────────────────────────────────────── 등록부 자기 정합성
 
-test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 35다", () => {
+test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 46다", () => {
   const keys = UI_THEME_TOKENS.map((token) => token.key);
   const cssVars = UI_THEME_TOKENS.map((token) => token.cssVar);
 
-  assert.equal(UI_THEME_TOKENS.length, 35);
+  assert.equal(UI_THEME_TOKENS.length, 46);
   assert.equal(new Set(keys).size, keys.length, "논리 키가 겹친다");
   assert.equal(new Set(cssVars).size, cssVars.length, "CSS 변수 이름이 겹친다");
 
@@ -143,6 +144,89 @@ test("색 토큰의 기본값은 전부 소문자 hex 여섯 자리다", () => {
     assert.match(token.defaultLight, /^#[0-9a-f]{6}$/, `${token.key}의 라이트 기본값 표기가 다르다`);
     assert.match(token.defaultDark, /^#[0-9a-f]{6}$/, `${token.key}의 다크 기본값 표기가 다르다`);
   }
+});
+
+// ─────────────────────────────────────────────── 강조색(primary) 어긋남 방지
+
+/**
+ * 🔴 강조 램프의 기본값은 **두 곳**에 적혀 있다 — globals.css 의 `@theme` 블록과
+ * 이 등록부다. 둘이 어긋나는 날은 반드시 오고, 그날의 증상은 "기본값으로
+ * 되돌렸는데 색이 안 돌아옴"이다: 화면은 등록부를 기준으로 "기본값과 같으니
+ * 저장할 것이 없다"고 판정해 오버라이드 행을 지우는데, 실제로 그려지는 값은
+ * globals.css 가 정하기 때문이다. 눈으로는 원인을 찾을 수 없다.
+ *
+ * 그래서 시험이 CSS 파일을 직접 읽어 대조한다. 왜 한쪽을 지우고 한 곳에서만
+ * 읽지 않는가 — globals.css 는 Tailwind 가 `.bg-primary-900` 유틸리티를 만드는
+ * 근거이고(그 파일이 없으면 클래스 자체가 생기지 않는다), 등록부는 편집 화면과
+ * 서버 검증이 보는 곳이다. 둘 다 필요하고, 그래서 대조가 필요하다.
+ */
+const GLOBALS_CSS = new URL("../../app/globals.css", import.meta.url);
+
+/** globals.css 의 `@theme` 에 적힌 `--color-primary-*` 를 논리 키 → hex 로 읽는다. */
+function primaryPaletteFromGlobalsCss(): Map<string, string> {
+  const css = readFileSync(GLOBALS_CSS, "utf8");
+  const found = new Map<string, string>();
+  for (const match of css.matchAll(/--color-primary-(\d+)\s*:\s*(#[0-9a-fA-F]{6})\s*;/g)) {
+    found.set(`primary-${match[1]}`, match[2]);
+  }
+  return found;
+}
+
+const PRIMARY_TOKENS: readonly UiThemeToken[] = UI_THEME_TOKENS.filter((token) =>
+  token.key.startsWith("primary-")
+);
+
+test("globals.css 의 강조 램프와 등록부의 기본값이 글자까지 같다", () => {
+  const css = primaryPaletteFromGlobalsCss();
+
+  assert.equal(PRIMARY_TOKENS.length, 11, "등록부의 강조 램프가 11단이 아니다");
+  assert.equal(css.size, 11, `globals.css 의 강조 램프가 11단이 아니다: ${css.size}`);
+
+  for (const token of PRIMARY_TOKENS) {
+    assert.equal(
+      css.get(token.key),
+      token.defaultLight,
+      `${token.key}가 globals.css 와 등록부에서 다르다`
+    );
+    // 램프는 한 벌이다 — 라이트/다크를 나눠 저장하되 기본값은 같은 색이다.
+    assert.equal(token.defaultDark, token.defaultLight, `${token.key}의 기본값이 둘로 갈라져 있다`);
+    assert.equal(token.cssVar, `--color-${token.key}`, `${token.key}의 변수 이름이 다르다`);
+  }
+
+  // 등록부에 없는 단계가 CSS 에만 있으면 그 색은 편집할 길이 없다.
+  const registryKeys = new Set(PRIMARY_TOKENS.map((token) => token.key));
+  for (const key of css.keys()) {
+    assert.ok(registryKeys.has(key), `globals.css 의 ${key}가 등록부에 없다`);
+  }
+});
+
+test("강조색 기본값이 같은 단계의 중립과 한 자도 다르지 않다", () => {
+  // 🔴 이 판의 완료 조건이 「화면이 하나도 안 바뀌는 것」이었다는 기계적 증거다.
+  // 주 버튼은 원래 `bg-zinc-900` 이었고, 이름만 `bg-primary-900` 으로 옮겼다.
+  // 한 단계라도 값이 다르면 그 자리에서 화면이 바뀐 것이고, 그것은 갈아 끼우기가
+  // 아니라 색을 고른 것이다 — 메인 컬러를 실제로 고르는 일은 다음 판이고, 그때
+  // 이 시험이 먼저 걸려 "지금 무엇을 바꾸는 중인지"를 알려 준다.
+  for (const token of PRIMARY_TOKENS) {
+    const step = token.key.slice("primary-".length);
+    const zinc = tokenByKey(`zinc-${step}`);
+    assert.equal(token.defaultLight, zinc.defaultLight, `primary-${step} 라이트가 중립과 다르다`);
+    assert.equal(token.defaultDark, zinc.defaultDark, `primary-${step} 다크가 중립과 다르다`);
+  }
+});
+
+test("주 버튼의 흰 글자가 강조색 위에서 읽힌다", () => {
+  // 주 버튼은 `bg-primary-900 text-white` 다. 글자색은 이 축이 여는 값이 아니라
+  // 못 박힌 흰색이므로, 바닥이 밝아지는 만큼 그대로 안 보이게 된다 — 다음 판에서
+  // 메인 컬러를 고르게 되면 실제로 밟는 함정이다. 그 방어의 바닥을 여기 깔아 둔다.
+  //
+  // 🔴 다크 쪽은 짝이 다르다: `dark:bg-primary-50 dark:text-zinc-900` 이라 바탕은
+  // 강조 램프인데 글자는 중립 램프다. 두 램프가 갈라지는 날 그 짝도 함께 봐야
+  // 한다 — 지금은 두 값이 같아서 문제가 드러나지 않는다.
+  const ratio = contrastRatio("#ffffff", tokenByKey("primary-900").defaultLight);
+  assert.ok(
+    ratio >= UI_THEME_CONTRAST_WARN,
+    `주 버튼의 흰 글자가 경고선 아래다: ${ratio} < ${UI_THEME_CONTRAST_WARN}`
+  );
 });
 
 // ───────────────────────────────────────────────────────── 검증기

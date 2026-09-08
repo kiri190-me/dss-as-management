@@ -139,7 +139,7 @@ export default function CustomerPortalScreen({
               onClick={() => setSelectedCustomerId(link.customerId)}
               className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
                 link.customerId === selectedCustomerId
-                  ? "border-zinc-900 bg-zinc-900 text-white"
+                  ? "border-zinc-900 bg-primary-900 text-white"
                   : "border-zinc-300 text-zinc-700 hover:border-zinc-500"
               }`}
             >
@@ -202,7 +202,7 @@ export default function CustomerPortalScreen({
                 type="button"
                 disabled={pending || !canEdit}
                 onClick={() => run(() => syncNowAction({ linkId: selected.id }))}
-                className="rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                className="rounded-lg bg-primary-900 px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
               >
                 지금 내보내기
               </button>
@@ -359,7 +359,7 @@ function ItemRow({
                     })
                   )
                 }
-                className="shrink-0 rounded bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white"
+                className="shrink-0 rounded bg-primary-900 px-3 py-1.5 text-xs font-semibold text-white"
               >
                 저장
               </button>

@@ -118,7 +118,7 @@ export default function CustomerStatusOptionSettings({
                 return result;
               })
             }
-            className="rounded bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded bg-primary-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             더하기
           </button>
@@ -189,7 +189,7 @@ function LabelEditor({
         <button
           type="button"
           onClick={() => onSave(value.trim())}
-          className="rounded bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white"
+          className="rounded bg-primary-900 px-3 py-1.5 text-xs font-semibold text-white"
         >
           저장
         </button>

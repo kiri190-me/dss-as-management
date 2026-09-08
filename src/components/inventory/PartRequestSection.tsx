@@ -332,7 +332,7 @@ export default function PartRequestSection({
               type="button"
               onClick={() => void handleSubmit()}
               disabled={isSubmitting || cart.length === 0}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
             >
               {isSubmitting ? "제출 중..." : "부품 인수 요청"}
             </button>

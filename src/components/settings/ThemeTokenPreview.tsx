@@ -133,7 +133,7 @@ function PreviewBody() {
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-50 dark:text-zinc-900">
+          <span className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-primary-50 dark:text-zinc-900">
             주 단추
           </span>
           <span className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">

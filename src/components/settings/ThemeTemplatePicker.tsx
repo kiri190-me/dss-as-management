@@ -261,7 +261,7 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
           type="button"
           onClick={() => setConfirmOpen(true)}
           disabled={!canSave}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
         >
           저장
         </button>
@@ -580,7 +580,7 @@ function SaveConfirmDialog({
           onClick={onConfirm}
           disabled={isSaving || template === null}
           aria-busy={isSaving}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
           {isSaving ? "저장 중..." : "저장"}
         </button>

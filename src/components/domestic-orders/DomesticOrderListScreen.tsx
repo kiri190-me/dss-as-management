@@ -1294,7 +1294,7 @@ export default function DomesticOrderListScreen({
             <button
               type="button"
               onClick={() => setEditTarget({ kind: "new" })}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
             >
               행 추가
             </button>

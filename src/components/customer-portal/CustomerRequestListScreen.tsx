@@ -125,7 +125,7 @@ export default function CustomerRequestListScreen({
                       <>
                         <Link
                           href={`/repair-cases/new?fromRequestId=${request.id}`}
-                          className="rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white hover:opacity-90"
+                          className="rounded-lg bg-primary-900 px-4 py-2 text-xs font-semibold text-white hover:opacity-90"
                         >
                           접수 만들기
                         </Link>

@@ -1074,7 +1074,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
           type="submit"
           disabled={isSubmitting}
           aria-busy={isSubmitting}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="rounded-md bg-primary-900 px-4 py-2 text-sm font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
           {isSubmitting ? "저장 중..." : "A/S 접수 등록"}
         </button>

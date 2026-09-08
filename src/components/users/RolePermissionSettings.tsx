@@ -227,7 +227,7 @@ export default function RolePermissionSettings({
                       aria-current={selectedKey === area.key ? "true" : undefined}
                       className={`flex flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-left ${
                         selectedKey === area.key
-                          ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                          ? "bg-primary-900 text-zinc-50 dark:bg-primary-100 dark:text-zinc-900"
                           : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
                       }`}
                     >
@@ -247,7 +247,7 @@ export default function RolePermissionSettings({
                             aria-current={selectedKey === feature.key ? "true" : undefined}
                             className={`ml-3 flex flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-left ${
                               selectedKey === feature.key
-                                ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
+                                ? "bg-primary-900 text-zinc-50 dark:bg-primary-100 dark:text-zinc-900"
                                 : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
                             }`}
                           >
@@ -322,7 +322,7 @@ export default function RolePermissionSettings({
             onClick={() => void save()}
             disabled={isSaving || changedCount === 0}
             aria-busy={isSaving}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isSaving ? "저장 중..." : "저장"}
           </button>

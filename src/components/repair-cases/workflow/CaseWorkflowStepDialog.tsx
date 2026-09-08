@@ -163,7 +163,7 @@ export default function CaseWorkflowStepDialog({
           onClick={() => onConfirm({ label: trimmed, status, category: category === "" ? null : category })}
           disabled={isSubmitting || !trimmed}
           aria-busy={isSubmitting}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
         >
           {isSubmitting ? "추가 중..." : "추가"}
         </button>

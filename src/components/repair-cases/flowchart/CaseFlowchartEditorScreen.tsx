@@ -981,7 +981,7 @@ export default function CaseFlowchartEditorScreen({
             type="button"
             disabled={!hasAnyPendingChanges || globalSaveStatus === "saving"}
             onClick={() => void handleGlobalSave()}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {globalSaveStatus === "saving"
               ? "저장 중..."
@@ -1043,7 +1043,7 @@ export default function CaseFlowchartEditorScreen({
             type="button"
             disabled={!hasMetadataChanges || titleDraft.trim().length === 0 || isSavingMetadata}
             onClick={() => void handleSaveMetadata()}
-            className="self-start rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="self-start rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isSavingMetadata ? "저장 중..." : "제목/설명 저장"}
           </button>
@@ -1127,7 +1127,7 @@ export default function CaseFlowchartEditorScreen({
                   setIsPickingReferenceNode(false);
                   setRightPanelTab(tab);
                 }}
-                className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+                className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
                 {tab === "properties" ? "속성" : tab === "addNode" ? "노드 추가" : "연결 추가"}
               </button>

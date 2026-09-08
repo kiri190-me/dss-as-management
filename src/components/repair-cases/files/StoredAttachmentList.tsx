@@ -617,7 +617,7 @@ export default function StoredAttachmentList({
               // 넘치지 않고, 넘칠 만한 것(분류·검색)은 아랫줄로 내려간다.
               className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap tabular-nums ${
                 filters.kind === value
-                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                  ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900"
                   : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
               }`}
             >
@@ -817,7 +817,7 @@ export default function StoredAttachmentList({
               aria-pressed={view === kind}
               className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap ${
                 view === kind
-                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                  ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900"
                   : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
               }`}
             >
@@ -1124,7 +1124,7 @@ export default function StoredAttachmentList({
                   aria-hidden="true"
                   className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold ${
                     isSelected
-                      ? "border-white bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                      ? "border-white bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900"
                       : "border-white/90 bg-black/40 text-transparent"
                   }`}
                 >

@@ -374,7 +374,7 @@ function ActionButtons({
           onClick={() => onAction(request.id, action)}
           className={`rounded-md ${base} ${
             action === "ISSUE"
-              ? "bg-zinc-900 font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              ? "bg-primary-900 font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
               : action === "REJECT"
                 ? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                 : action === "HOLD"

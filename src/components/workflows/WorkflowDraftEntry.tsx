@@ -31,7 +31,7 @@ export default function WorkflowDraftEntry({
       <div className="flex items-center gap-3">
         <Link
           href={`/workflows/${templateCode}/draft`}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-primary-50 dark:text-zinc-900"
         >
           초안 이어서 편집 (v{draftVersionNumber})
         </Link>

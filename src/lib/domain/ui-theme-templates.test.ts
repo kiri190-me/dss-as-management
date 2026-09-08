@@ -33,7 +33,7 @@ import {
  * 하나다 — 고르는 순간 서버가 저장을 거절하거나, 저장에는 성공했는데 전 직원이
  * 화면을 못 읽게 된다. 눌러 보기 전에는 아무도 모른다. 그래서 못 박는다.
  *
- *  1) **빠짐이 없다.** 색 24개가 전부 들어 있고, 등록부에 없는 키가 섞여 있지도
+ *  1) **빠짐이 없다.** 색 35개가 전부 들어 있고, 등록부에 없는 키가 섞여 있지도
  *     않다. 하나가 빠지면 절반만 바뀐 화면이 된다.
  *  2) **서버 문을 지난다.** 모든 값이 검증기를 그대로 통과하고, 정규화 결과가
  *     적어 둔 값과 **글자까지** 같다(대문자로 적어 두면 「기본으로 되돌렸는데
@@ -105,8 +105,8 @@ test("템플릿의 키와 이름과 팔레트가 저마다 고유하다", () => 
   assert.equal(UI_THEME_TEMPLATES[0].key, "default");
 });
 
-test("모든 템플릿이 색 24개를 빠짐없이 갖고 모르는 키가 섞여 있지 않다", () => {
-  assert.equal(COLOR_TOKEN_KEYS.length, 24);
+test("모든 템플릿이 색 35개를 빠짐없이 갖고 모르는 키가 섞여 있지 않다", () => {
+  assert.equal(COLOR_TOKEN_KEYS.length, 35);
 
   for (const template of UI_THEME_TEMPLATES) {
     const keys = Object.keys(template.colors).sort();
@@ -157,10 +157,32 @@ test("램프(zinc·red)는 라이트와 다크가 같고, 바탕·본문 글자�
     }
   }
 
-  // 램프가 22개, 따로 가는 것이 2개. 등록부에 색이 늘어 이 숫자가 흔들리면
-  // 위의 규칙이 새 색을 어느 쪽으로 다루고 있는지 여기서 먼저 드러난다.
+  // 램프가 33개(중립·강조·경고 11단씩), 따로 가는 것이 2개. 등록부에 색이 늘어
+  // 이 숫자가 흔들리면 위의 규칙이 새 색을 어느 쪽으로 다루고 있는지 여기서
+  // 먼저 드러난다.
   const rampKeys = COLOR_TOKEN_KEYS.filter((key) => !SCOPED_APART_KEYS.has(key));
-  assert.equal(rampKeys.length, 22);
+  assert.equal(rampKeys.length, 33);
+});
+
+test("모든 템플릿에서 강조색이 그 템플릿의 중립과 같은 값이다", () => {
+  // 🔴 템플릿은 강조색을 따로 받지 않고 중립에서 만든다(ui-theme-templates.ts
+  // 의 template() 주석). 그 규칙이 실제로 지켜지는지를 값으로 못 박아 둔다 —
+  // 어긋나면 「차분한 청색」을 골랐는데 주 버튼만 옛 검정으로 남는다. 고른
+  // 사람 눈에는 고장과 구별되지 않고, 카드에는 아무 표시도 나지 않는다.
+  const primaryKeys = COLOR_TOKEN_KEYS.filter((key) => key.startsWith("primary-"));
+  assert.equal(primaryKeys.length, 11, "강조 램프가 11단이 아니다");
+
+  for (const template of UI_THEME_TEMPLATES) {
+    for (const key of primaryKeys) {
+      const zincKey = `zinc-${key.slice("primary-".length)}`;
+      assert.ok(COLOR_TOKEN_KEYS.includes(zincKey), `${zincKey}가 등록부에 없다`);
+      assert.deepEqual(
+        template.colors[key],
+        template.colors[zincKey],
+        `${template.key} · ${key}가 ${zincKey}와 다르다`
+      );
+    }
+  }
 });
 
 test("default 템플릿은 등록부 기본값과 정확히 같다", () => {
@@ -267,10 +289,10 @@ test("경고선(4.5:1) 미만인 짝은 이것뿐이다", () => {
 
 // ──────────────────────────────────────────────────── 저장 형태로 바꾸기
 
-test("default 를 저장 형태로 바꾸면 48칸이 전부 value: null 이다", () => {
+test("default 를 저장 형태로 바꾸면 70칸이 전부 value: null 이다", () => {
   const changes = uiThemeTemplateToChanges(templateByKey("default"));
 
-  assert.equal(changes.length, 48, "색 24개 × 라이트/다크 = 48칸이어야 한다");
+  assert.equal(changes.length, 70, "색 35개 × 라이트/다크 = 70칸이어야 한다");
   for (const change of changes) {
     assert.equal(
       change.value,
@@ -286,7 +308,7 @@ test("default 를 저장 형태로 바꾸면 48칸이 전부 value: null 이다"
 test("기본값과 다른 값만 행으로 남고, 그 행을 되풀면 템플릿 값 그대로다", () => {
   for (const template of UI_THEME_TEMPLATES) {
     const changes = uiThemeTemplateToChanges(template);
-    assert.equal(changes.length, 48, `${template.key}의 저장 칸 수가 48이 아니다`);
+    assert.equal(changes.length, 70, `${template.key}의 저장 칸 수가 70이 아니다`);
 
     // 모든 칸이 색 토큰의 라이트/다크다 — 모서리·글자 크기가 섞이면 톤을
     // 골랐는데 크기까지 바뀐다.
@@ -364,19 +386,22 @@ test("한 칸만 달라도 판정은 null 이다 — 「직접 고친 값」", (
 });
 
 test("기본 상태에서 각 템플릿까지 몇 칸이 다른지 센다", () => {
-  // 화면이 카드에 적는 숫자다. 램프 11단계 × 라이트·다크 = 22칸이 중립을
-  // 바꾸는 템플릿의 몫이고, 거기에 바탕·본문 글자가 붙는다.
+  // 화면이 카드에 적는 숫자다. 중립을 바꾸는 템플릿은 강조색도 함께 끌고 가므로
+  // (중립 11단 + 강조 11단) × 라이트·다크 = 44칸이 그 몫이고, 거기에 바탕·본문
+  // 글자가 붙는다.
   const diffs = Object.fromEntries(
     UI_THEME_TEMPLATES.map((template) => [template.key, countUiThemeTemplateDiff(template, [])])
   );
 
   assert.deepEqual(diffs, {
     default: 0,
-    "cool-slate": 25,
-    "warm-stone": 25,
-    // 고대비는 라이트 바탕만 기본과 같다(둘 다 순백) — 그래서 47.
-    "high-contrast": 47,
-    "soft-contrast": 48,
+    "cool-slate": 47,
+    "warm-stone": 47,
+    // 고대비는 라이트 바탕만 기본과 같다(둘 다 순백) — 그래서 69.
+    "high-contrast": 69,
+    "soft-contrast": 70,
+    // 차분한 경고색은 중립을 건드리지 않으므로 강조색도 그대로다 — 경고 11단 ×
+    // 라이트·다크 = 22칸.
     "calm-red": 22,
   });
 });

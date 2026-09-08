@@ -122,7 +122,7 @@ export default function ReopenRollbackControls({
               type="button"
               onClick={() => void handleReopen()}
               disabled={isSubmitting}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+              className="rounded-md bg-primary-900 px-3 py-1.5 text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
             >
               {isSubmitting ? "처리 중..." : "재검토 재개 확정"}
             </button>

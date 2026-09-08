@@ -157,7 +157,7 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
               aria-pressed={mode === kind}
               className={`flex-1 px-3 py-2 text-sm font-medium disabled:opacity-50 ${
                 mode === kind
-                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                  ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900"
                   : "text-zinc-700 dark:text-zinc-300"
               }`}
             >
@@ -178,7 +178,7 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
                   aria-pressed={ratio === preset}
                   className={`rounded-md border px-2 py-2 text-sm font-medium disabled:opacity-50 ${
                     ratio === preset
-                      ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                      ? "border-zinc-900 bg-primary-900 text-white dark:border-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
                       : "border-zinc-300 text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
                   }`}
                 >
@@ -223,7 +223,7 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
                   aria-pressed={unit === value}
                   className={`px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
                     unit === value
-                      ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                      ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900"
                       : "text-zinc-700 dark:text-zinc-300"
                   }`}
                 >
@@ -296,7 +296,7 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
             type="button"
             onClick={run}
             disabled={isBusy || target === null || items.length === 0}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isBusy ? "줄이는 중…" : "줄여서 내려받기"}
           </button>

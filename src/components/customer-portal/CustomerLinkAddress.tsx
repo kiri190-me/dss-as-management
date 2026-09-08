@@ -122,7 +122,7 @@ export default function CustomerLinkAddress({
               const ok = await copyText(result.url);
               setCopy({ linkId, state: ok ? "copied" : "failed" });
             }}
-            className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            className="rounded-lg bg-primary-900 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
           >
             {copyState === "copied" ? "복사했습니다" : "주소 복사"}
           </button>

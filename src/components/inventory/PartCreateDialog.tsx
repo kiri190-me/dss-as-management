@@ -175,7 +175,7 @@ export default function PartCreateDialog({
           type="button"
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !partName.trim()}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
           {isSubmitting ? "등록하는 중..." : "등록"}
         </button>

@@ -83,10 +83,10 @@ export default function ThemeToggle({ compact = false }: ThemeToggleProps) {
           className={
             compact
               ? mode === option.mode
-                ? "flex h-8 w-8 items-center justify-center rounded bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                ? "flex h-8 w-8 items-center justify-center rounded bg-primary-900 text-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
                 : "flex h-8 w-8 items-center justify-center rounded text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               : mode === option.mode
-                ? "rounded px-2 py-1 text-xs font-medium bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                ? "rounded px-2 py-1 text-xs font-medium bg-primary-900 text-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
                 : "rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
           }
         >

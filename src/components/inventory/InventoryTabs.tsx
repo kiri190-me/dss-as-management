@@ -4,7 +4,7 @@ import Link from "next/link";
 export default function InventoryTabs({ active }: { active: "LIST" | "REQUESTS" | "OH_TEMPLATES" }) {
   const tabClass = (isActive: boolean) =>
     isActive
-      ? "rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
+      ? "rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-primary-50 dark:text-zinc-900"
       : "rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (

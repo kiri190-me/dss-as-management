@@ -270,7 +270,7 @@ export default function NotificationSettings({ data }: { data: NotificationSetti
             onClick={() => void save()}
             disabled={isSaving || changedCount === 0}
             aria-busy={isSaving}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isSaving ? "저장 중..." : "저장"}
           </button>

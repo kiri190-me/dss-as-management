@@ -91,9 +91,21 @@ const MY_PENDING_APPROVAL_HREF = "/repair-cases?myApproval=1";
  */
 const SUBMENU_TRANSITION = "duration-200 ease-out motion-reduce:transition-none";
 
+/**
+ * 🔴 **선택된 가지에서만** 강조색(primary)을 쓴다.
+ *
+ * 선택되지 않은 가지의 hover 까지 강조색으로 물들이면, "지금 어디에 있는가"를
+ * 알려 주는 신호가 마우스를 스치는 것만으로 여러 줄에 동시에 켜져 흐려진다.
+ * 그래서 아래쪽 가지의 `hover:bg-zinc-100` · `dark:hover:bg-zinc-800` 은 중립
+ * 램프에 그대로 남겨 둔다 — 마우스 자국은 중립, 선택은 강조색이다.
+ *
+ * 글자색(`text-zinc-900` · `dark:text-zinc-50`)도 중립 그대로다. 이 판에서 옮긴
+ * 것은 **바탕과 왼쪽 테두리**뿐이고, 강조색을 실제로 고르게 되는 다음 판에서
+ * 그 위의 글자가 읽히는지는 대비 짝으로 따로 봐야 한다.
+ */
 function navLinkClassName(isActive: boolean): string {
   return isActive
-    ? "rounded-md border-l-2 border-zinc-900 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-50 dark:bg-zinc-800 dark:text-zinc-50"
+    ? "rounded-md border-l-2 border-primary-900 bg-primary-100 px-3 py-2 text-sm font-medium text-zinc-900 dark:border-primary-50 dark:bg-primary-800 dark:text-zinc-50"
     : "rounded-md border-l-2 border-transparent px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50";
 }
 
