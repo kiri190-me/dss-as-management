@@ -852,6 +852,77 @@ export function serializeUiThemeCss(rows: readonly UiThemeOverrideRow[]): string
     .join("\n");
 }
 
+// ─────────────────────────────────────────────────────── 구조선(lifeboat)
+
+/**
+ * 편집 화면을 감싸는 컨테이너의 id. 페이지가 `<div id={…}>` 로 걸고, 아래
+ * 생성기가 같은 이름으로 선택자를 만든다.
+ *
+ * 🔴 문자열을 두 곳에 적지 않는 이유는 우회 쿠키 상수와 같다 — 한쪽만 고쳐지는
+ * 날 구조선이 조용히 풀리고, 그 증상은 **오버라이드로 화면이 안 보이게 된
+ * 바로 그 순간에만** 드러난다. 그때는 이미 고치러 들어갈 화면이 없다.
+ */
+export const UI_THEME_LIFEBOAT_ID = "ui-theme-lifeboat";
+
+/** 라이트 기본값 블록. 명시도 (1,0,0). */
+const UI_THEME_LIFEBOAT_SELECTOR = `#${UI_THEME_LIFEBOAT_ID}`;
+
+/** 다크 기본값 블록. 명시도 (1,1,0) — 위 블록을 순서와 무관하게 이긴다. */
+const UI_THEME_LIFEBOAT_DARK_SELECTOR = `.dark #${UI_THEME_LIFEBOAT_ID}`;
+
+/**
+ * 되돌리러 온 화면만은 항상 기본색이게 하는 CSS.
+ *
+ * ── 왜 이 한 장이 필요한가 ──────────────────────────────────────────────
+ * 저장된 값은 `:root` 에 얹히고 커스텀 프로퍼티는 상속되므로, 편집 화면도
+ * 그 값을 그대로 뒤집어쓴다. 대비 하한이 "아예 안 보임"은 막지만 "읽을 수는
+ * 있는데 못 쓰겠는" 조합은 얼마든지 만들어진다. 그때 되돌릴 화면 자체가 그
+ * 상태이면 고칠 수 있는 사람이 고칠 화면에 닿지 못한다. 우회 쿠키가 **그
+ * 브라우저 전체**를 오버라이드 이전으로 되돌리는 탈출구라면, 이쪽은 **이 화면
+ * 하나**를 항상 기본값에 묶어 두는 탈출구다. 서버에서 렌더되고, JS 가 필요
+ * 없고, 깜빡임이 없다.
+ *
+ * ── 상속값을 이기는 근거는 명시도가 아니다 ──────────────────────────────
+ * `:root:root:not(.dark)` 는 **루트 요소**를 겨냥한 선언이고, 여기 두 블록은
+ * **컨테이너 자신**을 겨냥한 선언이다. 명시도 비교는 같은 요소를 두고 다투는
+ * 선언들 사이에서만 일어나므로, 컨테이너에 직접 걸린 선언은 조상에게서
+ * 물려받는 값을 언제나 이긴다 — 저장된 값이 무엇이든 상관없다. 두 블록 사이의
+ * 명시도 순서(다크가 강하다)만 이 파일이 책임진다.
+ *
+ * ── 🔴 `!important` 를 쓰지 않는다 ──────────────────────────────────────
+ * 쓰는 순간 미리보기가 인라인 style 로 같은 변수를 덮는 **정당한 길**이 막힌다.
+ * 편집 중인 색을 견본에 걸 수 없게 되면 이 화면은 "저장해 보고 확인하는" 화면이
+ * 되고, 그것이 정확히 이 기능에서 가장 위험한 사용법이다.
+ *
+ * 저장된 값을 인자로 받지 않는다 — 언제나 **코드 기본값**만 쏟아낸다. 그래서
+ * 출력은 등록부가 같으면 늘 같은 문자열이고, DB 를 읽지 못하는 상황에서도
+ * 이 화면은 읽힌다.
+ */
+export function serializeUiThemeLifeboatCss(): string {
+  const light: CssDeclaration[] = [];
+  const dark: CssDeclaration[] = [];
+
+  for (const token of UI_THEME_TOKENS) {
+    // 등록부의 **모든** 토큰이 라이트 블록에 나와야 한다. 하나라도 빠지면 그
+    // 값만 조용히 오버라이드를 뒤집어쓴다 — 눈으로는 절대 못 찾는 구멍이다.
+    light.push({ cssVar: token.cssVar, value: token.defaultLight });
+
+    // scoped:false 토큰(모서리·글자 크기)은 라이트/다크가 같은 값이라 다크
+    // 블록에 넣을 것이 없다. 넣어 봐야 같은 값을 두 번 적는 것뿐이고,
+    // 나중에 한쪽만 고쳐지는 길만 열린다.
+    if (token.scoped) {
+      dark.push({ cssVar: token.cssVar, value: token.defaultDark });
+    }
+  }
+
+  return [
+    renderBlock(UI_THEME_LIFEBOAT_SELECTOR, light),
+    renderBlock(UI_THEME_LIFEBOAT_DARK_SELECTOR, dark),
+  ]
+    .filter((block) => block.length > 0)
+    .join("\n");
+}
+
 // ───────────────────────────────────────────────────────── 우회(탈출구)
 
 /**

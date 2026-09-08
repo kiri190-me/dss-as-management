@@ -16,6 +16,8 @@ import {
   normalizeUiThemeValue,
   resolveUiTheme,
   serializeUiThemeCss,
+  serializeUiThemeLifeboatCss,
+  UI_THEME_LIFEBOAT_ID,
   type UiThemeToken,
 } from "./ui-theme-tokens";
 
@@ -455,6 +457,128 @@ test("출력 어디에도 규칙을 탈출하는 글자가 없다", () => {
       ":root:root.dark{--foreground:#eeeeee}\n" +
       ":root:root{--radius-2xl:0;--text-2xl:1.25rem}"
   );
+});
+
+// ───────────────────────────────────────────────────── 구조선(lifeboat)
+
+/** 구조선 CSS 에서 한 블록의 본문(`{…}` 안)을 꺼낸다. 없으면 null. */
+function lifeboatBlockBody(css: string, selector: string): string | null {
+  for (const block of css.split("\n")) {
+    const brace = block.indexOf("{");
+    if (brace === -1) continue;
+    if (block.slice(0, brace) !== selector) continue;
+    return block.slice(brace + 1, block.length - 1);
+  }
+  return null;
+}
+
+/** 블록 본문을 `--변수 → 값` 표로 바꾼다. */
+function lifeboatDeclarations(body: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const declaration of body.split(";")) {
+    const colon = declaration.indexOf(":");
+    map.set(declaration.slice(0, colon), declaration.slice(colon + 1));
+  }
+  return map;
+}
+
+test("구조선 선택자는 페이지가 거는 id 하나에서 나온다", () => {
+  // 이름이 어긋나면 구조선이 조용히 풀리고, 그 증상은 오버라이드로 화면이 안
+  // 보이게 된 바로 그 순간에만 드러난다 — 그때는 고치러 들어갈 화면이 없다.
+  assert.equal(UI_THEME_LIFEBOAT_ID, "ui-theme-lifeboat");
+
+  const css = serializeUiThemeLifeboatCss();
+  assert.ok(css.includes(`#${UI_THEME_LIFEBOAT_ID}{`), `라이트 블록 선택자가 다르다: ${css}`);
+  assert.ok(css.includes(`.dark #${UI_THEME_LIFEBOAT_ID}{`), `다크 블록 선택자가 다르다: ${css}`);
+});
+
+test("등록부의 모든 토큰이 구조선 라이트 블록에 나온다", () => {
+  // 하나라도 빠지면 그 값만 오버라이드를 뒤집어쓴다. 눈으로는 절대 못 찾는
+  // 종류의 구멍이라 시험이 등록부 전체를 훑어 못 박는다.
+  const body = lifeboatBlockBody(serializeUiThemeLifeboatCss(), `#${UI_THEME_LIFEBOAT_ID}`);
+  assert.ok(body !== null, "라이트 블록이 없다");
+
+  const declarations = lifeboatDeclarations(body);
+  assert.equal(declarations.size, UI_THEME_TOKENS.length);
+  for (const token of UI_THEME_TOKENS) {
+    assert.equal(
+      declarations.get(token.cssVar),
+      token.defaultLight,
+      `${token.key}의 라이트 기본값이 구조선에 없거나 다르다`
+    );
+  }
+});
+
+test("구조선 다크 블록에는 scoped 토큰만, 다크 기본값으로 나온다", () => {
+  const body = lifeboatBlockBody(serializeUiThemeLifeboatCss(), `.dark #${UI_THEME_LIFEBOAT_ID}`);
+  assert.ok(body !== null, "다크 블록이 없다");
+
+  const declarations = lifeboatDeclarations(body);
+  const scoped = UI_THEME_TOKENS.filter((token) => token.scoped);
+  assert.equal(declarations.size, scoped.length);
+  for (const token of scoped) {
+    assert.equal(
+      declarations.get(token.cssVar),
+      token.defaultDark,
+      `${token.key}의 다크 기본값이 구조선에 없거나 다르다`
+    );
+  }
+
+  // 모서리·글자 크기는 라이트/다크가 같은 값이라 여기 나올 것이 없다. 나오면
+  // 같은 값을 두 곳에 적는 셈이고, 한쪽만 고쳐지는 길이 열린다.
+  for (const token of UI_THEME_TOKENS) {
+    if (token.scoped) continue;
+    assert.equal(declarations.has(token.cssVar), false, `${token.key}가 다크 블록에 있다`);
+  }
+});
+
+test("구조선의 다크 블록이 라이트 블록보다 강하고, 뒤에 온다", () => {
+  // 순서(뒤)와 명시도(강함) 둘 다 다크 쪽이다. 하나만 맞아도 지금은 동작하지만,
+  // 둘을 함께 못 박아 두면 나중에 어느 쪽을 건드려도 시험이 먼저 걸린다.
+  const css = serializeUiThemeLifeboatCss();
+  const lightAt = css.indexOf(`#${UI_THEME_LIFEBOAT_ID}{`);
+  const darkAt = css.indexOf(`.dark #${UI_THEME_LIFEBOAT_ID}{`);
+  assert.ok(lightAt < darkAt, `다크 블록이 라이트 블록보다 앞에 있다: ${css}`);
+
+  // 다크 블록 선택자는 라이트 블록 선택자에 클래스 하나(.dark)를 더한 것이다 —
+  // 같은 id 를 겨냥하므로 명시도가 (1,0,0) 대 (1,1,0)이 되어 다크가 이긴다.
+  assert.equal(css.slice(darkAt).startsWith(`.dark #${UI_THEME_LIFEBOAT_ID}{`), true);
+});
+
+test("구조선 출력에 !important 도 규칙을 탈출하는 글자도 없다", () => {
+  const css = serializeUiThemeLifeboatCss();
+
+  // 🔴 !important 를 쓰면 미리보기가 인라인 style 로 같은 변수를 덮는 정당한
+  // 길이 막힌다. 편집 중인 색을 견본에 걸 수 없게 되는 것이 이 한 단어의 값이다.
+  assert.ok(!css.includes("!important"), "구조선에 !important 가 있다");
+
+  assert.ok(!css.includes("<"), `꺾쇠가 출력에 있다: ${css}`);
+  assert.ok(!css.includes(">"), `꺾쇠가 출력에 있다: ${css}`);
+  assert.ok(!css.includes(";}"), `규칙을 닫는 자리에 세미콜론이 붙었다: ${css}`);
+  assert.ok(!css.includes("("), "값 쪽에 함수가 들어왔다");
+  assert.equal(css.split("{").length - 1, 2, "블록이 둘이 아니다");
+  assert.equal(css.split("}").length - 1, 2, "블록이 둘이 아니다");
+});
+
+test("구조선 출력은 결정적이다", () => {
+  // 등록부가 같으면 늘 같은 문자열이어야 한다 — 서버가 매 요청 찍어 내는 것이라
+  // 순서가 흔들리면 HTML 이 요청마다 달라진다.
+  assert.equal(serializeUiThemeLifeboatCss(), serializeUiThemeLifeboatCss());
+});
+
+test("구조선은 저장된 값을 전혀 보지 않는다", () => {
+  // 인자가 없다는 것이 곧 이 성질이다. 그래도 오버라이드를 얹은 CSS 와 견주어
+  // 두면, 나중에 누가 "저장된 값도 반영하자"고 고칠 때 시험이 먼저 걸린다.
+  const overridden = serializeUiThemeCss([
+    { tokenKey: "background", scope: "light", value: "#101010" },
+    { tokenKey: "foreground", scope: "light", value: "#111111" },
+  ]);
+  assert.ok(overridden.includes("#101010"));
+
+  const lifeboat = serializeUiThemeLifeboatCss();
+  assert.ok(!lifeboat.includes("#101010"));
+  assert.ok(!lifeboat.includes("#111111"));
+  assert.ok(lifeboat.includes(`--background:${tokenByKey("background").defaultLight}`));
 });
 
 test("우회 판정은 정해진 값 하나만 받는다", () => {

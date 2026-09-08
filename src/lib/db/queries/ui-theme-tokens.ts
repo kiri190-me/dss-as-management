@@ -105,8 +105,16 @@ function isUndefinedTableError(err: unknown): boolean {
  * 값을 다루는 경로(여기)의 요구가 다르다. notification-settings.ts의
  * buildNotificationSettingsView와 같은 자리다.
  *
- * 편집 화면이 아직 없으므로 지금은 저장된 행 목록이 전부다. 기본값과의 병합·
- * 대비 판정·화면 묶음은 그 화면을 만들 때 여기에 붙인다.
+ * 돌려주는 것은 **저장된 행 목록 그대로**다. 기본값과의 병합·대비 판정·화면
+ * 묶음을 여기 붙이지 않은 이유는 편집 화면의 성질 때문이다 — 그 셋은 전부
+ * "지금 편집 중인 값"을 대상으로 매 글자마다 다시 계산돼야 하고(미리보기와
+ * 대비 표가 저장 전에 움직인다), 그 값은 서버가 알 수 없다. 그래서 편집기가
+ * 등록부와 순수 함수(resolveUiTheme·normalizeUiThemeValue·contrastRatio)로
+ * 클라이언트에서 계산한다. 서버가 같은 계산을 한 벌 더 갖고 있으면 둘이
+ * 어긋나는 날 어느 쪽이 옳은지 알 수 없어진다.
+ *
+ * 편집기는 여기서 받은 행을 "지금 저장돼 있는 값"의 기준선으로만 쓴다 —
+ * 무엇이 바뀌었는지를 그 기준선과 견주어 정하고, 바뀐 것만 서버로 보낸다.
  */
 export async function buildUiThemeView(): Promise<UiThemeOverrideRow[]> {
   return loadStoredUiThemeTokens();
