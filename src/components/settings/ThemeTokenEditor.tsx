@@ -32,6 +32,16 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 저장 단추 하나가 **전 직원의 화면**을 바꾼다 — 그래서 다른 설정 화면보다
  * 미리 말해 주는 것이 많다.
  *
+ * ── 🔴 화면은 둘, 편집기는 하나 ─────────────────────────────────────────
+ * 색 화면(theme/colors)과 모서리·글자 크기 화면(theme/shapes)이 **같은 이
+ * 컴포넌트**를 쓰고, `group` 이 어느 칸을 그릴지만 정한다. 편집기를 둘로
+ * 복사하면 저장·대비·미리보기 로직이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
+ *
+ * 🔴 줄어드는 것은 **그리는 칸**뿐이다. 대비 계산과 미리보기는 언제나 등록부
+ * 전체(35개 토큰·11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
+ * 이 화면에 없는 글자색이 함께 필요하고, 미리보기 역시 한 벌이 다 있어야
+ * 그려진다.
+ *
  * ── 되돌리는 길이 셋이고, 셋의 뜻이 전부 다르다 ─────────────────────────
  *   · **되돌리기** — 편집 중인 값을 *지금 저장돼 있는 값*으로 돌린다. 서버에
  *     아무것도 보내지 않는다.
@@ -43,7 +53,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 그대로 따른다 — 두 단추의 뜻이 섞이면 "되돌렸는데 왜 그대로냐"가 된다.
  *
  * ── 바뀐 것만 보낸다 ────────────────────────────────────────────────────
- * 59칸을 통째로 보내지 않는다. 서버 액션의 입력은 "사람이 만진 것"이고,
+ * 화면의 칸을 통째로 보내지 않는다. 서버 액션의 입력은 "사람이 만진 것"이고,
  * `value: null` 이 "그 자리를 기본값으로 되돌려라(= 행을 지워라)"는 뜻이다.
  * 안 만진 값까지 실어 보내면 "행이 없다 = 기본값"이라는 이 축의 뜻이 요청
  * 모양에서 사라진다.
@@ -55,8 +65,11 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 자리가 없다). 형식이 틀린 값도 마찬가지로 여기서 먼저 막는다.
  *
  * ── 🔴 이 편집기는 구조선 안에서 그려진다 ───────────────────────────────
- * 감싸는 컨테이너(page.tsx 의 `#ui-theme-lifeboat`)가 모든 토큰을 기본값으로
- * 되돌려 놓기 때문에, 저장된 값이 무엇이든 이 화면만은 항상 읽힌다. 미리보기가
+ * 감싸는 컨테이너(settings/developer/layout.tsx 의 `#ui-theme-lifeboat`)가 모든
+ * 토큰을 기본값으로 되돌려 놓기 때문에, 저장된 값이 무엇이든 이 화면만은 항상
+ * 읽힌다. 그 래퍼가 페이지가 아니라 **레이아웃**에 있어서 하위 화면들도 함께
+ * 그 안에 들어간다 — 색을 고치러 들어간 화면이 자기가 저장한 색을 뒤집어쓰면
+ * 되돌리러 온 사람이 되돌릴 화면을 못 본다. 미리보기가
  * 편집 중인 색을 보여줄 수 있는 것은 인라인 style 이 그 컨테이너 선언을 이기기
  * 때문이고, 그래서 구조선 CSS 에 `!important` 를 쓰지 않는다.
  * ============================================================================
@@ -98,6 +111,31 @@ const OTHER_COLOR_TOKENS = COLOR_TOKENS.filter(
 );
 const RADIUS_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "radius");
 const FONT_SIZE_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "fontSize");
+/** 색도 모서리도 글자 크기도 아닌 것. 지금은 비어 있고, 비면 그려지지 않는다. */
+const OTHER_SHAPE_TOKENS = UI_THEME_TOKENS.filter(
+  (token) => token.kind !== "color" && token.kind !== "radius" && token.kind !== "fontSize"
+);
+
+/**
+ * 화면 하나가 맡는 묶음.
+ *
+ * 🔴 등록부를 **남김없이** 둘로 가른다 — 색이면 색 화면, 아니면 모서리·글자
+ * 크기 화면이다. 어느 화면에도 안 걸리는 토큰이 생기면 그 값은 편집할 길이
+ * 없어지고, 색 묶음이 마지막 묶음으로 남김없이 떨어지게 해 둔 것과 같은
+ * 이유다(위 COLOR_TOKENS 주석).
+ */
+export type ThemeTokenGroup = "colors" | "shapes";
+
+/**
+ * 그 화면에 그려지는 칸. **여기 든 칸만** 저장 대상이고, 「이 화면 전부
+ * 기본값으로」가 채우는 것도, 바뀐 칸 수와 저장 단추의 잠김 판정이 세는 것도
+ * 이것이다 — 색 화면에서 누른 단추가 모서리·글자 크기까지 조용히 지우면,
+ * 누른 사람은 색만 되돌린 줄 안다.
+ */
+const GROUP_SLOTS: Record<ThemeTokenGroup, readonly Slot[]> = {
+  colors: SLOTS.filter((slot) => slot.token.kind === "color"),
+  shapes: SLOTS.filter((slot) => slot.token.kind !== "color"),
+};
 
 /** 저장을 실제로 거절시키는 짝인가. 등록부의 목록에서 그대로 만든다. */
 const BLOCKING_PAIR_KEYS: ReadonlySet<string> = new Set(
@@ -112,8 +150,18 @@ function isBlockingPair(pair: UiThemeContrastPair): boolean {
 
 type Draft = Record<string, string>;
 
-export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOverrideRow[] }) {
+export default function ThemeTokenEditor({
+  saved,
+  group,
+}: {
+  saved: readonly UiThemeOverrideRow[];
+  /** 이 화면이 그리는 묶음. 계산 범위가 아니라 **그리는 범위**를 정한다. */
+  group: ThemeTokenGroup;
+}) {
   const router = useRouter();
+
+  /** 이 화면이 그리는 칸. 저장·되돌리기·판정이 전부 이 목록을 기준으로 돈다. */
+  const groupSlots = GROUP_SLOTS[group];
 
   /** 지금 저장돼 있는 값(칸마다 하나). 오버라이드가 없는 칸은 코드 기본값이다. */
   const savedValues = useMemo(() => savedValuesOf(saved), [saved]);
@@ -138,19 +186,24 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
     return result;
   }, [draft]);
 
+  /**
+   * 형식이 틀린 칸. **이 화면의 칸만** 본다 — 다른 화면의 값은 사람이 만질 수
+   * 없어 애초에 틀릴 수 없고, 그래서 그 범위를 이 화면 안으로 좁혀도 잃는
+   * 것이 없다.
+   */
   const invalidSlots = useMemo(
-    () => SLOTS.filter((slot) => normalized[slot.key] === null),
-    [normalized]
+    () => groupSlots.filter((slot) => normalized[slot.key] === null),
+    [groupSlots, normalized]
   );
 
   /** 저장돼 있는 값과 달라진 칸. 요청에 실릴 것이 정확히 이것이다. */
   const changedSlots = useMemo(
     () =>
-      SLOTS.filter((slot) => {
+      groupSlots.filter((slot) => {
         const value = normalized[slot.key];
         return value !== null && value !== savedValues[slot.key];
       }),
-    [normalized, savedValues]
+    [groupSlots, normalized, savedValues]
   );
 
   /**
@@ -158,6 +211,10 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
    * 본다. 형식이 틀린 칸은 저장돼 있는 값으로 메운다 — 글자를 지우는 중에
    * 견본이 깨지거나 대비 계산이 던지면, 고치는 중인 사람에게는 그것이 고장으로
    * 읽힌다.
+   *
+   * 🔴 화면이 무엇을 그리든 **등록부 전체**로 만든다. 대비는 이 화면에 없는
+   * 칸과 겹쳐 재야 하고(글자색은 색 화면에 있어도 바탕은 다른 묶음일 수 있다),
+   * 미리보기도 한 벌이 다 있어야 그려진다.
    */
   const resolved = useMemo(() => {
     const light: Record<string, string> = {};
@@ -206,11 +263,19 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
     setMessage(null);
   }
 
-  /** 코드 기본값으로 채운다. 저장을 눌러야 저장된 행이 지워진다. */
+  /**
+   * 코드 기본값으로 채운다. 저장을 눌러야 저장된 행이 지워진다.
+   *
+   * 🔴 **이 화면에 그려진 칸만** 채운다. 59칸 전부를 채우면 색 화면에서 누른
+   * 것이 모서리·글자 크기까지 함께 지우고, 누른 사람은 색만 되돌린 줄 안다 —
+   * 그 값들은 이 화면에 보이지도 않으므로 지워졌다는 사실조차 알 수 없다.
+   */
   function fillWithDefaults() {
-    const next: Draft = {};
-    for (const slot of SLOTS) next[slot.key] = uiThemeDefaultFor(slot.token, slot.scope);
-    setDraft(next);
+    setDraft((prev) => {
+      const next: Draft = { ...prev };
+      for (const slot of groupSlots) next[slot.key] = uiThemeDefaultFor(slot.token, slot.scope);
+      return next;
+    });
     setMessage(null);
   }
 
@@ -247,107 +312,169 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
     }
   }
 
+  const isColors = group === "colors";
+
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">화면 토큰 (색·모서리·글자 크기)</h2>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          {isColors ? "색" : "모서리 · 글자 크기"}
+        </h2>
         <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-          코드를 고치지 않고 앱 전체의 색과 모서리, 글자 크기를 바꿉니다. 편집할 수 있는 자리는{" "}
-          {SLOTS.length}개입니다 — 색 {COLOR_TOKENS.length}개는 라이트와 다크를 따로, 모서리{" "}
-          {RADIUS_TOKENS.length}개와 글자 크기 {FONT_SIZE_TOKENS.length}개는 라이트·다크 공용으로
-          저장합니다.
+          {isColors ? (
+            <>
+              코드를 고치지 않고 앱 전체의 색을 바꿉니다. 색 {COLOR_TOKENS.length}개를 라이트와 다크로
+              따로 저장하므로, 이 화면에서 편집할 수 있는 자리는 {groupSlots.length}칸입니다.
+            </>
+          ) : (
+            <>
+              코드를 고치지 않고 앱 전체의 모서리와 글자 크기를 바꿉니다. 모서리{" "}
+              {RADIUS_TOKENS.length}개와 글자 크기 {FONT_SIZE_TOKENS.length}개를 라이트·다크 공용으로
+              저장하므로, 이 화면에서 편집할 수 있는 자리는 {groupSlots.length}칸입니다.
+            </>
+          )}
         </p>
       </div>
 
       <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm leading-relaxed text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
         <strong>저장하면 전 직원 화면에 적용됩니다.</strong> 이 값은 특정 사용자 설정이 아니라 앱 전체의
         기본 팔레트입니다. 다른 사용자에게는 다음 화면 이동부터 보입니다. 되돌리려면{" "}
-        <strong>전부 기본값으로</strong>를 누르고 다시 저장하면 되고, 화면이 읽히지 않을 만큼 어긋났다면
-        주소창에 <code className="font-mono">/api/theme/bypass</code>를 쳐서 이 브라우저만 원래 화면으로
-        볼 수 있습니다.
+        <strong>이 화면 전부 기본값으로</strong>를 누르고 다시 저장하면 되고, 화면이 읽히지 않을 만큼
+        어긋났다면 주소창에 <code className="font-mono">/api/theme/bypass</code>를 쳐서 이 브라우저만
+        원래 화면으로 볼 수 있습니다.
       </p>
 
-      <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-        <strong>이번 판에서 바꿀 수 있는 색은 중립(zinc)·경고(red)와 페이지 바탕·본문 글자입니다.</strong>{" "}
-        앱이 쓰는 나머지 색(amber · blue · emerald · green · violet · sky)과 흰색·검은색은 아직 열려 있지
-        않아, 여기서 무엇을 바꿔도 그 색으로 그려진 자리는 그대로입니다 — 앱 전체 색 사용의 14%쯤입니다.
-      </p>
+      {isColors && (
+        <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+          <strong>이번 판에서 바꿀 수 있는 색은 중립(zinc)·경고(red)와 페이지 바탕·본문 글자입니다.</strong>{" "}
+          앱이 쓰는 나머지 색(amber · blue · emerald · green · violet · sky)과 흰색·검은색은 아직 열려
+          있지 않아, 여기서 무엇을 바꿔도 그 색으로 그려진 자리는 그대로입니다 — 앱 전체 색 사용의
+          14%쯤입니다.
+        </p>
+      )}
 
+      {/*
+        미리보기는 두 화면 모두에 둔다 — 모서리와 글자 크기도 견본에서 바로
+        보이고, 그 값들은 색과 함께 놓고 봐야 판단이 된다.
+      */}
       <ThemeTokenPreview light={resolved.light} dark={resolved.dark} />
 
-      <ContrastReport readings={contrastReadings} />
+      {/*
+        🔴 대비 표는 색 화면에만 그린다. 모서리·글자 크기 화면에서 바꾸는 값은
+        대비를 한 칸도 움직이지 못하므로, 늘 같은 숫자만 늘어놓는 표가 된다.
+        **재는 것을 줄인 것이 아니다** — contrastReadings 는 두 화면 모두에서
+        등록부 전체로 계산되고, 저장을 막는 판정(blockedReadings)도 그대로다.
+      */}
+      {isColors && <ContrastReport readings={contrastReadings} />}
 
-      <details
-        open
-        className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
-      >
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          색 <ChangedBadge count={changedCountOf(changedSlots, COLOR_TOKENS)} />
-        </summary>
-        <div className="flex flex-col gap-4 border-t border-zinc-200 p-3 dark:border-zinc-800">
-          <ColorGroup
-            title="중립 (zinc) — 글자·바탕·테두리"
-            tokens={ZINC_TOKENS}
-            draft={draft}
-            normalized={normalized}
-            savedValues={savedValues}
-            disabled={isSaving}
-            onChange={setSlot}
-          />
-          <ColorGroup
-            title="경고 (red) — 삭제·오류·기한 초과"
-            tokens={RED_TOKENS}
-            draft={draft}
-            normalized={normalized}
-            savedValues={savedValues}
-            disabled={isSaving}
-            onChange={setSlot}
-          />
-          <ColorGroup
-            title="페이지 바탕과 본문 글자"
-            tokens={OTHER_COLOR_TOKENS}
-            draft={draft}
-            normalized={normalized}
-            savedValues={savedValues}
-            disabled={isSaving}
-            onChange={setSlot}
-          />
-        </div>
-      </details>
+      {isColors ? (
+        <details
+          open
+          className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+        >
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            색 <ChangedBadge count={changedCountOf(changedSlots, COLOR_TOKENS)} />
+          </summary>
+          <div className="flex flex-col gap-4 border-t border-zinc-200 p-3 dark:border-zinc-800">
+            <ColorGroup
+              title="중립 (zinc) — 글자·바탕·테두리"
+              tokens={ZINC_TOKENS}
+              draft={draft}
+              normalized={normalized}
+              savedValues={savedValues}
+              disabled={isSaving}
+              onChange={setSlot}
+            />
+            <ColorGroup
+              title="경고 (red) — 삭제·오류·기한 초과"
+              tokens={RED_TOKENS}
+              draft={draft}
+              normalized={normalized}
+              savedValues={savedValues}
+              disabled={isSaving}
+              onChange={setSlot}
+            />
+            <ColorGroup
+              title="페이지 바탕과 본문 글자"
+              tokens={OTHER_COLOR_TOKENS}
+              draft={draft}
+              normalized={normalized}
+              savedValues={savedValues}
+              disabled={isSaving}
+              onChange={setSlot}
+            />
+          </div>
+        </details>
+      ) : (
+        <>
+          <details
+            open
+            className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              모서리 <ChangedBadge count={changedCountOf(changedSlots, RADIUS_TOKENS)} />
+            </summary>
+            <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+              <LengthGroup
+                tokens={RADIUS_TOKENS}
+                hint="0 부터 2rem 까지. rem 과 px 을 쓸 수 있고, 0 만 단위를 생략할 수 있습니다."
+                draft={draft}
+                normalized={normalized}
+                savedValues={savedValues}
+                disabled={isSaving}
+                onChange={setSlot}
+              />
+            </div>
+          </details>
 
-      <details className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          모서리 <ChangedBadge count={changedCountOf(changedSlots, RADIUS_TOKENS)} />
-        </summary>
-        <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-          <LengthGroup
-            tokens={RADIUS_TOKENS}
-            hint="0 부터 2rem 까지. rem 과 px 을 쓸 수 있고, 0 만 단위를 생략할 수 있습니다."
-            draft={draft}
-            normalized={normalized}
-            savedValues={savedValues}
-            disabled={isSaving}
-            onChange={setSlot}
-          />
-        </div>
-      </details>
+          <details
+            open
+            className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              글자 크기 <ChangedBadge count={changedCountOf(changedSlots, FONT_SIZE_TOKENS)} />
+            </summary>
+            <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+              <LengthGroup
+                tokens={FONT_SIZE_TOKENS}
+                hint="0.625rem 부터 1.5rem 까지. px 은 쓸 수 없습니다 — 브라우저·OS 의 글자 확대 설정이 통하지 않게 됩니다."
+                draft={draft}
+                normalized={normalized}
+                savedValues={savedValues}
+                disabled={isSaving}
+                onChange={setSlot}
+              />
+            </div>
+          </details>
 
-      <details className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          글자 크기 <ChangedBadge count={changedCountOf(changedSlots, FONT_SIZE_TOKENS)} />
-        </summary>
-        <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-          <LengthGroup
-            tokens={FONT_SIZE_TOKENS}
-            hint="0.625rem 부터 1.5rem 까지. px 은 쓸 수 없습니다 — 브라우저·OS 의 글자 확대 설정이 통하지 않게 됩니다."
-            draft={draft}
-            normalized={normalized}
-            savedValues={savedValues}
-            disabled={isSaving}
-            onChange={setSlot}
-          />
-        </div>
-      </details>
+          {/*
+            등록부에 색도 모서리도 글자 크기도 아닌 종류가 늘어난 날, 그 칸이
+            어느 화면에도 안 나오면 편집할 길이 사라진다(GROUP_SLOTS 는 이미
+            그 칸을 이 화면 몫으로 세고 있다). 지금은 비어 있어 그려지지 않는다.
+          */}
+          {OTHER_SHAPE_TOKENS.length > 0 && (
+            <details
+              open
+              className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+            >
+              <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                그 밖 <ChangedBadge count={changedCountOf(changedSlots, OTHER_SHAPE_TOKENS)} />
+              </summary>
+              <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+                <LengthGroup
+                  tokens={OTHER_SHAPE_TOKENS}
+                  hint="이 값의 형식은 등록부(domain/ui-theme-tokens.ts)의 규칙을 따릅니다."
+                  draft={draft}
+                  normalized={normalized}
+                  savedValues={savedValues}
+                  disabled={isSaving}
+                  onChange={setSlot}
+                />
+              </div>
+            </details>
+          )}
+        </>
+      )}
 
       {message && (
         <p
@@ -399,7 +526,7 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
             disabled={isSaving}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
-            전부 기본값으로
+            이 화면 전부 기본값으로
           </button>
           <button
             type="button"
@@ -422,8 +549,9 @@ export default function ThemeTokenEditor({ saved }: { saved: readonly UiThemeOve
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         <strong>되돌리기</strong>는 편집 중인 값을 지금 저장돼 있는 값으로 돌립니다(서버에 아무것도 보내지
-        않습니다). <strong>전부 기본값으로</strong>는 편집 중인 값을 코드 기본값으로 채우며,{" "}
-        <strong>저장을 눌러야</strong> 저장된 값이 실제로 지워집니다.
+        않습니다). <strong>이 화면 전부 기본값으로</strong>는 <strong>이 화면에 있는 칸만</strong> 코드
+        기본값으로 채우며(다른 화면의 값은 건드리지 않습니다), <strong>저장을 눌러야</strong> 저장된 값이
+        실제로 지워집니다.
       </p>
 
       <SaveConfirmDialog
@@ -645,6 +773,9 @@ function ColorField({
 
 /** 라이트/다크를 나누지 않는 값들. 한 줄에 한 칸이다. */
 function LengthGroup({ tokens, hint, draft, normalized, savedValues, disabled, onChange }: FieldGroupProps & { hint: string }) {
+  // 빈 묶음은 그리지 않는다(ColorGroup 과 같은 처리). 머리글만 있고 줄이 하나도
+  // 없는 표는 "불러오지 못했다"로 읽힌다.
+  if (tokens.length === 0) return null;
   return (
     <div>
       <div className="overflow-x-auto">
