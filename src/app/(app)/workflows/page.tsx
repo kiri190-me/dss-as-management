@@ -7,7 +7,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listWorkflowTemplateSummaries } from "@/lib/db/queries/workflow-templates";
-import { workflowTypeLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -60,7 +60,12 @@ export default async function WorkflowsPage() {
   );
 }
 
-function WorkflowTable({
+/**
+ * 서버 컴포넌트라 문구를 스스로 읽는다(prop 으로 받지 않는다). getUiText 는
+ * 요청 단위 cache 라 위 페이지가 이미 불렀든 안 불렀든 DB 조회는 요청당 한 번뿐이고,
+ * 인자를 늘리지 않는 편이 이 표가 쓰이는 두 자리(사용 중·사용 안 함) 모두에서 짧다.
+ */
+async function WorkflowTable({
   title,
   description,
   rows,
@@ -69,6 +74,8 @@ function WorkflowTable({
   description?: string;
   rows: Awaited<ReturnType<typeof listWorkflowTemplateSummaries>>;
 }) {
+  const uiText = await getUiText();
+
   return (
     <section className="flex flex-col gap-2">
       <div>
@@ -96,7 +103,7 @@ function WorkflowTable({
                     href={`/workflows/${row.code}`}
                     className="font-medium text-zinc-900 hover:underline dark:text-zinc-50"
                   >
-                    {workflowTypeLabels[row.code]}
+                    {uiText.workflowType[row.code]}
                   </Link>
                   <span className="ml-2 font-mono text-xs text-zinc-400 dark:text-zinc-500">{row.code}</span>
                 </td>
@@ -122,7 +129,7 @@ function WorkflowTable({
               <ListCard
                 key={row.code}
                 href={`/workflows/${row.code}`}
-                title={workflowTypeLabels[row.code]}
+                title={uiText.workflowType[row.code]}
                 badge={
                   <span className="shrink-0 whitespace-nowrap rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                     {row.currentVersionNumber === null ? "버전 없음" : `v${row.currentVersionNumber}`}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
+import { ROLE_CODES, type Role } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { WorkflowDraftStepView } from "@/lib/db/queries/workflow-templates";
 import type { WorkflowDraftTransitionView } from "@/lib/db/queries/workflow-templates";
 
@@ -93,6 +94,9 @@ function TransitionRow({
   onSave: (actionCode: string, form: TransitionDraftForm) => void;
   onRemove: (transitionId: string) => void;
 }) {
+  // 체크박스 옆에 적히는 역할 이름만 저장된 문구를 따른다. 저장되는 값은 여전히
+  // 코드(ROLE_CODES)이므로 문구를 바꿔도 전이 규칙의 내용이 달라지지 않는다.
+  const uiText = useUiText();
   const [toStepId, setToStepId] = useState(existing?.toStepId ?? "");
   const [roles, setRoles] = useState<Role[]>(
     (existing?.allowedRoles as Role[] | undefined) ?? ["SUPER_ADMIN", "ADMIN"]
@@ -145,7 +149,7 @@ function TransitionRow({
                 setRoles((prev) => (e.target.checked ? [...prev, role] : prev.filter((r) => r !== role)))
               }
             />
-            {roleLabels[role]}
+            {uiText.role[role]}
           </label>
         ))}
       </span>

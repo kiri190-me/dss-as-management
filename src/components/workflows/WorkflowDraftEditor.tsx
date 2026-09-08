@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { REPAIR_STATUS_CODES, repairStatusLabels } from "@/lib/domain/types";
+import { REPAIR_STATUS_CODES } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import { STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
 import type { DraftValidationResult } from "@/lib/domain/workflow-draft-validation";
 import type {
@@ -53,6 +54,9 @@ export default function WorkflowDraftEditor({
   transitions: WorkflowDraftTransitionView[];
 }) {
   const router = useRouter();
+  // 고르는 값은 코드(REPAIR_STATUS_CODES)로 두고 보여 줄 문구만 갈아 끼운다 —
+  // 저장되는 것은 상태 코드이므로 문구를 바꿔도 초안의 내용이 달라지지 않는다.
+  const uiText = useUiText();
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const [newLabel, setNewLabel] = useState("");
@@ -206,7 +210,7 @@ export default function WorkflowDraftEditor({
                   </option>
                   {REPAIR_STATUS_CODES.map((code) => (
                     <option key={code} value={code}>
-                      {repairStatusLabels[code]}
+                      {uiText.repairStatus[code]}
                     </option>
                   ))}
                 </select>
@@ -334,7 +338,7 @@ export default function WorkflowDraftEditor({
                     >
                       {REPAIR_STATUS_CODES.map((code) => (
                         <option key={code} value={code}>
-                          {repairStatusLabels[code]}
+                          {uiText.repairStatus[code]}
                         </option>
                       ))}
                     </select>
@@ -411,7 +415,7 @@ export default function WorkflowDraftEditor({
           >
             {REPAIR_STATUS_CODES.map((code) => (
               <option key={code} value={code}>
-                {repairStatusLabels[code]}
+                {uiText.repairStatus[code]}
               </option>
             ))}
           </select>

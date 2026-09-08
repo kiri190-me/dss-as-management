@@ -6,7 +6,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getWorkflowDraftDetail } from "@/lib/db/queries/workflow-templates";
 import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
-import { workflowTypeLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 import WorkflowDraftEditor from "@/components/workflows/WorkflowDraftEditor";
 
 export const metadata: Metadata = {
@@ -35,11 +35,14 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
   const draft = await getWorkflowDraftDetail(draftRef.id);
   if (!draft) notFound();
 
+  // 되돌아가는 링크에 찍히는 워크플로 종류 이름 — 저장된 문구를 따른다.
+  const uiText = await getUiText();
+
   return (
     <div className="flex flex-col gap-5">
       <div>
         <Link href={`/workflows/${code}`} className="text-xs text-zinc-500 hover:underline dark:text-zinc-400">
-          &larr; {workflowTypeLabels[draft.templateCode]}
+          &larr; {uiText.workflowType[draft.templateCode]}
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           초안 편집 (v{draft.versionNumber})

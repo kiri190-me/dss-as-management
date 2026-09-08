@@ -6,14 +6,13 @@ import {
 } from "@/lib/domain/repair-case-filters";
 import {
   billingTypeLabels,
-  priorityLabels,
-  repairStatusLabels,
   BILLING_TYPE_CODES,
   PRIORITY_CODES,
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
 } from "@/lib/domain/types";
 import type { Customer } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import FilterDisclosure from "./FilterDisclosure";
 
 type RepairCaseFiltersProps = {
@@ -82,6 +81,11 @@ export default function RepairCaseFilters({
   onLongPendingPoOnlyChange,
   onReset,
 }: RepairCaseFiltersProps) {
+  // 🔴 고르는 값(value)은 언제나 코드다. 저장된 문구는 **보여 줄 글자**만
+  // 갈아 끼운다 — 값에 문구를 쓰면 문구를 바꾸는 순간 필터가 아무것도 못 찾는데
+  // 오류도 나지 않는다(types.ts 의 PRODUCT_CATEGORY_OPTIONS 가 실제로 그 모양이다).
+  const uiText = useUiText();
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-col gap-1">
@@ -118,7 +122,7 @@ export default function RepairCaseFilters({
               <option value="ALL">전체</option>
               {REPAIR_STATUS_CODES.map((status) => (
                 <option key={status} value={status}>
-                  {repairStatusLabels[status]}
+                  {uiText.repairStatus[status]}
                 </option>
               ))}
             </select>
@@ -200,7 +204,7 @@ export default function RepairCaseFilters({
               <option value="ALL">전체</option>
               {PRIORITY_CODES.map((priority) => (
                 <option key={priority} value={priority}>
-                  {priorityLabels[priority]}
+                  {uiText.priority[priority]}
                 </option>
               ))}
             </select>

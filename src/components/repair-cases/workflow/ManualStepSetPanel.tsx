@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { repairStatusLabels } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { checkManualStepSetEligibility } from "@/lib/domain/local/workflow/permissions";
 import type { WorkflowRuleStep } from "@/lib/domain/workflow-rules-view";
@@ -44,6 +44,8 @@ export default function ManualStepSetPanel({
   isCaseLocked: boolean;
 }) {
   const router = useRouter();
+  // 고르는 값은 단계 key 그대로 두고, 괄호 안 상태 이름만 저장된 문구를 따른다.
+  const uiText = useUiText();
   const [selectedStepKey, setSelectedStepKey] = useState(currentStepKey);
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -137,7 +139,7 @@ export default function ManualStepSetPanel({
         >
           {options.map((option) => (
             <option key={option.key} value={option.key}>
-              {option.order}. {option.label} ({repairStatusLabels[option.status]})
+              {option.order}. {option.label} ({uiText.repairStatus[option.status]})
               {option.key === currentStepKey ? " — 현재" : ""}
             </option>
           ))}

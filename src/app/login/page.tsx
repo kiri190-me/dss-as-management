@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { mockUsers } from "@/lib/domain/mock-data";
-import { roleLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { isDemoLoginEnabled } from "@/lib/config/demo-login";
 import { getLoginMode } from "@/lib/config/login-mode";
@@ -86,6 +86,9 @@ export default async function LoginPage({
       : null;
   const viewModel = getLoginViewModel(authSource, loginMode);
   const ssoError = ssoMode && error ? (SSO_ERROR_MESSAGES[error] ?? SSO_ERROR_MESSAGES.sso) : null;
+  // 계정 고르는 목록에 붙는 역할 이름 — 저장된 문구를 따른다. 이 화면은 (app)
+  // 밖이라, Provider 가 루트 레이아웃에 있어야 하는 이유가 바로 여기다.
+  const uiText = await getUiText();
 
   return (
     // AppShell 밖의 독립 화면이라 하단 여백 보정을 여기서 따로 해준다.
@@ -148,7 +151,7 @@ export default async function LoginPage({
                   <input type="radio" name="email" value={user.email} required />
                   <span className="flex flex-col">
                     <span>
-                      {user.name} ({roleLabels[user.role]})
+                      {user.name} ({uiText.role[user.role]})
                       {user.approvalStatus === "PENDING" ? " · 승인 대기" : ""}
                     </span>
                     {/* Email only — user.id (a real users.id UUID) is deliberately
@@ -170,7 +173,7 @@ export default async function LoginPage({
                 >
                   <input type="radio" name="userId" value={user.id} required />
                   <span>
-                    {user.name} ({roleLabels[user.role]})
+                    {user.name} ({uiText.role[user.role]})
                     {user.approvalStatus === "PENDING" ? " · 승인 대기" : ""}
                   </span>
                 </label>

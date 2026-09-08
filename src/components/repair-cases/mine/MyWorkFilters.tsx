@@ -1,8 +1,9 @@
 "use client";
 
-import { exceptionStatusLabels, REPAIR_STATUS_CODES, repairStatusLabels } from "@/lib/domain/types";
+import { REPAIR_STATUS_CODES } from "@/lib/domain/types";
 import type { ExceptionStatus } from "@/lib/domain/types";
 import type { MyWorkFilterState } from "@/lib/domain/my-active-work-filter";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import FilterDisclosure from "@/components/repair-cases/FilterDisclosure";
 
 /** 접혔을 때 감춰지는 조건 중 지금 걸려 있는 개수(검색어는 늘 보이므로 세지 않는다). */
@@ -59,6 +60,10 @@ export default function MyWorkFilters({
   onExceptionStatusChange: (value: MyWorkFilterState["exceptionStatus"]) => void;
   onReset: () => void;
 }) {
+  // 🔴 고르는 값(value)은 코드 그대로다 — 저장된 문구는 보여 줄 글자만 바꾼다.
+  // 예외 상태 문구는 DB 의 exception_statuses.label 에서 온다(domain/ui-text.ts).
+  const uiText = useUiText();
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-col gap-1">
@@ -90,7 +95,7 @@ export default function MyWorkFilters({
               <option value="ALL">전체</option>
               {REPAIR_STATUS_CODES.map((code) => (
                 <option key={code} value={code}>
-                  {repairStatusLabels[code]}
+                  {uiText.repairStatus[code]}
                 </option>
               ))}
             </select>
@@ -148,7 +153,7 @@ export default function MyWorkFilters({
               <option value="NONE">예외 없음</option>
               {exceptionStatuses.map((code) => (
                 <option key={code} value={code}>
-                  {exceptionStatusLabels[code]}
+                  {uiText.exceptionStatus[code]}
                 </option>
               ))}
             </select>

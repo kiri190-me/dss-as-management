@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
-import { REPAIR_STATUS_CODES, repairStatusLabels } from "@/lib/domain/types";
+import { REPAIR_STATUS_CODES } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 
 const CATEGORY_LABELS: Record<string, string> = {
   TECHNICAL: "기술",
@@ -47,6 +48,8 @@ export default function CaseWorkflowStepDialog({
   onConfirm: (input: { label: string; status: string; category: string | null }) => void;
   onCancel: () => void;
 }) {
+  // 고르는 값은 코드(REPAIR_STATUS_CODES)로 두고 보여 줄 문구만 갈아 끼운다.
+  const uiText = useUiText();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [label, setLabel] = useState("");
   const [status, setStatus] = useState<string>("IN_REPAIR");
@@ -109,7 +112,7 @@ export default function CaseWorkflowStepDialog({
             >
               {REPAIR_STATUS_CODES.map((code) => (
                 <option key={code} value={code}>
-                  {repairStatusLabels[code]}
+                  {uiText.repairStatus[code]}
                 </option>
               ))}
             </select>

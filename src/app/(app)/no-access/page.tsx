@@ -7,7 +7,7 @@ import { findPermissionArea } from "@/lib/auth/permission-areas";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { filterNavItemsForAccess, navItems } from "@/lib/navigation";
-import { roleLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 
 export const metadata: Metadata = {
   title: "접근 권한 없음 | DSS A/S 관리 시스템",
@@ -46,6 +46,9 @@ export default async function NoAccessPage({
     mayEnterDeveloperMode(actingUser)
   );
 
+  // 막힌 이유를 설명하는 문장에 들어가는 역할 이름 — 저장된 문구를 따른다.
+  const uiText = await getUiText();
+
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -54,10 +57,10 @@ export default async function NoAccessPage({
           {blockedArea ? (
             <>
               <strong>{blockedArea.label}</strong> 메뉴는 현재 역할(
-              {roleLabels[actingUser.role]})에 열려 있지 않습니다.
+              {uiText.role[actingUser.role]})에 열려 있지 않습니다.
             </>
           ) : (
-            <>요청하신 화면은 현재 역할({roleLabels[actingUser.role]})에 열려 있지 않습니다.</>
+            <>요청하신 화면은 현재 역할({uiText.role[actingUser.role]})에 열려 있지 않습니다.</>
           )}
         </p>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">

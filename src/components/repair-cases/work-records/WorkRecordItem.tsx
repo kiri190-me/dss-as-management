@@ -1,5 +1,5 @@
 import type { WorkRecordRow } from "@/lib/db/queries/repair-case-work-records";
-import { workRecordKindLabels } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 
 const badgeClass =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
@@ -29,12 +29,15 @@ export default function WorkRecordItem({
   canInvalidate: boolean;
   onInvalidateClick?: () => void;
 }) {
+  // WorkRecordList → DatabaseWorkHistoryScreen("use client") 아래에서만 렌더된다.
+  const uiText = useUiText();
+
   return (
     <li className="rounded-md border border-zinc-100 p-3 text-sm dark:border-zinc-800">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-zinc-900 dark:text-zinc-50">{record.authorName}</span>
-          <span className={recordKindBadgeClass}>{workRecordKindLabels[record.recordKind]}</span>
+          <span className={recordKindBadgeClass}>{uiText.workRecordKind[record.recordKind]}</span>
           {record.workflowStepLabel && <span className={badgeClass}>{record.workflowStepLabel}</span>}
           {record.procedureNodeTitle && <span className={badgeClass}>{record.procedureNodeTitle}</span>}
           {record.isInvalidated && (

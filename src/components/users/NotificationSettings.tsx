@@ -8,7 +8,8 @@ import {
   type NotificationSettingsScreenData,
 } from "@/lib/domain/notification-settings";
 import type { NotificationKind } from "@/lib/domain/notifications";
-import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
+import { ROLE_CODES, type Role } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import { saveNotificationSettingsAction } from "@/lib/server/actions/notification-settings";
 
 type Draft = Record<string, { enabled: boolean; roles: Record<Role, boolean> }>;
@@ -43,6 +44,9 @@ type Draft = Record<string, { enabled: boolean; roles: Record<Role, boolean> }>;
  */
 export default function NotificationSettings({ data }: { data: NotificationSettingsScreenData }) {
   const router = useRouter();
+  // 표 머리와 체크박스 aria-label 의 역할 이름 — 저장된 문구를 따른다.
+  // 열의 순서는 여전히 ROLE_CODES(코드) 기준이라 문구를 바꿔도 자리가 안 바뀐다.
+  const uiText = useUiText();
 
   const [draft, setDraft] = useState<Draft>(() => initialDraft(data));
   const [isSaving, setIsSaving] = useState(false);
@@ -153,7 +157,7 @@ export default function NotificationSettings({ data }: { data: NotificationSetti
               </th>
               {ROLE_CODES.map((role) => (
                 <th key={role} scope="col" className="px-2 py-1 text-center font-medium">
-                  {roleLabels[role]}
+                  {uiText.role[role]}
                 </th>
               ))}
             </tr>
@@ -201,7 +205,7 @@ export default function NotificationSettings({ data }: { data: NotificationSetti
                       <td key={role} className="px-2 py-2 text-center">
                         <input
                           type="checkbox"
-                          aria-label={`${row.label} — ${roleLabels[role]}`}
+                          aria-label={`${row.label} — ${uiText.role[role]}`}
                           checked={checked}
                           // 종류를 끄면 역할 칸은 손대지 못하게 한다. 끈 상태에서
                           // 역할을 고르면 무언가 달라졌다고 믿게 되지만 실제로는

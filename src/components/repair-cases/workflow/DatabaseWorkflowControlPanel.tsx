@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { roleLabels } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { roleForCategory } from "@/lib/domain/local/workflow/step-category";
 import { findTransitionInDto, type WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
@@ -106,6 +106,8 @@ export default function DatabaseWorkflowControlPanel({
   rules: WorkflowRulesDto;
 }) {
   const router = useRouter();
+  // "관리자 또는 …" 안내에 들어가는 역할 이름 — 저장된 문구를 따른다.
+  const uiText = useUiText();
   const [openDialog, setOpenDialog] = useState<DialogKind>(null);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,7 +123,7 @@ export default function DatabaseWorkflowControlPanel({
   const stepInfo = stepLabelAndOrder(rules, currentStepKey);
   const category = rules.steps.find((s) => s.key === currentStepKey)?.category ?? null;
   const responsibleRoleLabel = category
-    ? `관리자 또는 ${roleLabels[roleForCategory(category)]}`
+    ? `관리자 또는 ${uiText.role[roleForCategory(category)]}`
     : "관리자(SUPER_ADMIN/ADMIN)";
 
   function approvalGateStatusFor(transition: ReturnType<typeof findTransitionInDto> | null): ApprovalGateStatus {

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
-import { WORK_RECORD_KIND_CODES, workRecordKindLabels, type WorkRecordKind } from "@/lib/domain/types";
+import { WORK_RECORD_KIND_CODES, type WorkRecordKind } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import { generateClientUuid } from "@/lib/client-uuid";
 
 export default function WorkRecordForm({
@@ -21,6 +22,8 @@ export default function WorkRecordForm({
   disabledReason: string | null;
 }) {
   const router = useRouter();
+  // 고르는 값은 코드(WORK_RECORD_KIND_CODES)로 두고 보여 줄 문구만 갈아 끼운다.
+  const uiText = useUiText();
   const [recordKind, setRecordKind] = useState<WorkRecordKind>("GENERAL");
   const [memo, setMemo] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -77,7 +80,7 @@ export default function WorkRecordForm({
         >
           {WORK_RECORD_KIND_CODES.map((code) => (
             <option key={code} value={code}>
-              {workRecordKindLabels[code]}
+              {uiText.workRecordKind[code]}
             </option>
           ))}
         </select>

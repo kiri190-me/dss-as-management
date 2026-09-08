@@ -9,6 +9,8 @@ import {
   isUiThemeBypassed,
   serializeUiThemeCss,
 } from "@/lib/domain/ui-theme-tokens";
+import { UiTextProvider } from "@/components/providers/UiTextProvider";
+import { getUiText } from "@/lib/server/ui-text";
 import "./globals.css";
 
 /**
@@ -115,6 +117,18 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const uiThemeOverrideCss = await readUiThemeOverrideCss();
+  /*
+    저장된 화면 문구 한 벌. 병합이 끝난 평범한 객체라 그대로 클라이언트로
+    내려간다(함수·Map·Symbol 없음). 저장된 것이 없으면 코드의 기본 문구와
+    글자 하나까지 같은 값이므로, 표가 비어 있는 동안에는 이 줄이 있으나 없으나
+    화면이 같다 — 위 화면 토큰 CSS 가 빈 문자열이면 <style> 태그조차 나오지
+    않는 것과 같은 성질이다(그래야 되돌릴 일이 없는 배포가 된다).
+
+    표가 아직 없는 DB(마이그레이션 전)에서도 죽지 않는다: 두 조회 모두
+    42P01 "표 없음"만 삼키고 기본 문구로 답한다. 여기서 터지면 앱의 모든
+    화면이 한꺼번에 죽는다 — 고치러 들어갈 화면조차 안 뜬다.
+  */
+  const uiText = await getUiText();
 
   return (
     <html
@@ -167,7 +181,17 @@ export default async function RootLayout({
         globals.css의 그 규칙은 레이어 밖이라, 레이어 밖 선언이 이기긴 하지만
         높이 기준이 두 곳에 흩어지는 것 자체가 혼란스럽다.
       */}
-      <body className="flex flex-col">{children}</body>
+      {/*
+        UiTextProvider 는 DOM 을 하나도 만들지 않는다(Context.Provider 뿐이다)
+        — children 이 여전히 <body>의 직계 자식이므로 위 flex 배치가 그대로다.
+
+        🔴 이 자리가 (app)/layout.tsx 가 아니라 루트인 것이 중요하다.
+        /login · /pending-approval 은 (app) 밖에 있는데 역할 이름 같은 문구를
+        쓴다 — (app) 안에 두면 그 화면들만 빈손이 된다.
+      */}
+      <body className="flex flex-col">
+        <UiTextProvider value={uiText}>{children}</UiTextProvider>
+      </body>
     </html>
   );
 }

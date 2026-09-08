@@ -3,7 +3,7 @@ import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { roleLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getLoginMode } from "@/lib/config/login-mode";
@@ -70,10 +70,15 @@ export default async function AppLayout({
   // 없거나 설정이 없다며 터진다.
   const portalUrl = getLoginMode() === "sso" ? getSsoPortalUrl() : null;
 
+  // 사이드바 프로필에 찍히는 역할 이름은 저장된 문구를 따른다. 조회는 루트
+  // 레이아웃에서 이미 한 번 돌았고, getUiText 는 요청 단위 cache 라 여기서
+  // 다시 불러도 DB 를 또 읽지 않는다.
+  const uiText = await getUiText();
+
   return (
     <>
       <AppShell
-        user={{ name: user.name, roleLabel: roleLabels[user.role], role: user.role }}
+        user={{ name: user.name, roleLabel: uiText.role[user.role], role: user.role }}
         accessibleAreaKeys={accessibleAreaKeys}
         canEnterDeveloperMode={canEnterDeveloperMode}
         myPendingApprovalCount={myPendingApprovalCount}

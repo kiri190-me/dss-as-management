@@ -8,7 +8,7 @@ import {
 } from "@/components/repair-cases/badges";
 import EngineerEditCell from "@/components/repair-cases/detail/edit/EngineerEditCell";
 import ReportNumberEditCell from "@/components/repair-cases/detail/edit/ReportNumberEditCell";
-import { workflowTypeLabels } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 
@@ -33,6 +33,9 @@ export default function DetailHeader({
   canEditReportNumber: boolean;
   referenceData: IntakeReferenceData | null;
 }) {
+  // RepairCaseDetailView("use client") 아래에서만 렌더되므로 훅을 쓸 수 있다.
+  const uiText = useUiText();
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -63,7 +66,7 @@ export default function DetailHeader({
         <div>
           <dt className="text-xs text-zinc-500 dark:text-zinc-400">워크플로 유형</dt>
           <dd className="text-zinc-900 dark:text-zinc-50">
-            {workflowTypeLabels[resolved.workflowType]}
+            {uiText.workflowType[resolved.workflowType]}
           </dd>
         </div>
         <div>

@@ -11,7 +11,7 @@ import WorkflowDraftEntry from "@/components/workflows/WorkflowDraftEntry";
 import { getWorkflowTemplateDetail } from "@/lib/db/queries/workflow-templates";
 import { loadWorkflowRules } from "@/lib/db/queries/workflow-rules";
 import { db } from "@/lib/db/client";
-import { repairStatusLabels, workflowTypeLabels } from "@/lib/domain/types";
+import { getUiText } from "@/lib/server/ui-text";
 
 export const metadata: Metadata = {
   title: "워크플로 상세 | DSS A/S 관리 시스템",
@@ -80,6 +80,9 @@ export default async function WorkflowDetailPage({
   const rules = currentVersion ? await loadWorkflowRules(db, currentVersion.id) : null;
   const draft = mayEditDraft ? await findWorkflowDraft(code) : null;
 
+  // 제목의 워크플로 종류 이름과 단계 목록의 상태 배지 — 저장된 문구를 따른다.
+  const uiText = await getUiText();
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -87,7 +90,7 @@ export default async function WorkflowDetailPage({
           &larr; 워크플로 관리
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          {workflowTypeLabels[detail.code]}
+          {uiText.workflowType[detail.code]}
         </h1>
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-500">{detail.code}</p>
       </div>
@@ -190,7 +193,7 @@ export default async function WorkflowDetailPage({
                     </span>
                     <span className="font-medium text-zinc-900 dark:text-zinc-50">{step.label}</span>
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                      {repairStatusLabels[step.status]}
+                      {uiText.repairStatus[step.status]}
                     </span>
                     {step.category && (
                       <span className="text-xs text-zinc-500 dark:text-zinc-400">

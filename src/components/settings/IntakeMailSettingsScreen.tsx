@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { roleLabels, type Role } from "@/lib/domain/types";
+import type { Role } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import {
   composeIntakeMail,
   INTAKE_MAIL_PLACEHOLDERS,
@@ -53,6 +54,11 @@ export default function IntakeMailSettingsScreen({
 }: {
   initial: IntakeMailSettingsView;
 }) {
+  // 받는 사람 고르는 목록의 역할 이름 — 저장된 문구를 따른다. 이 화면이 미리
+  // 보여 주는 **메일 본문**의 유·무상 문구는 여기 통로를 타지 않는다
+  // (composeIntakeMail 이 코드 표를 그대로 읽는다) — 화면과 메일이 서로 다른
+  // 말을 하지 않게 하려는 결정이다.
+  const uiText = useUiText();
   const [isEnabled, setIsEnabled] = useState(initial.isEnabled);
   const [subjectTemplate, setSubjectTemplate] = useState(initial.subjectTemplate);
   const [introText, setIntroText] = useState(initial.introText);
@@ -467,7 +473,7 @@ export default function IntakeMailSettingsScreen({
                     <span className="block truncate text-sm text-zinc-900 dark:text-zinc-50">
                       {option.name}{" "}
                       <span className="text-xs text-zinc-500">
-                        {roleLabels[option.role as Role] ?? option.role}
+                        {uiText.role[option.role as Role] ?? option.role}
                       </span>
                     </span>
                     {/* 이름이 같은 사람이 있을 수 있어 주소를 함께 보여 준다 —

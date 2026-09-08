@@ -19,7 +19,8 @@ import {
   levelHintOfLeaf,
   selectableLevelsOfLeaf,
 } from "@/lib/auth/permission-features";
-import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
+import { ROLE_CODES, type Role } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import { saveRolePermissionsAction } from "@/lib/server/actions/role-permissions";
 
 export type RolePermissionView = {
@@ -68,6 +69,7 @@ export default function RolePermissionSettings({
   data: RolePermissionScreenData;
 }) {
   const router = useRouter();
+  const uiText = useUiText();
 
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(PERMISSION_AREAS.filter((area) => hasFeatures(area.key)).map((area) => area.key))
@@ -331,7 +333,7 @@ export default function RolePermissionSettings({
 
       {changedRoles.includes(actingRole) && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          지금 사용 중인 역할({roleLabels[actingRole]})을 편집하고 있습니다. &lsquo;사용자 관리&rsquo;를
+          지금 사용 중인 역할({uiText.role[actingRole]})을 편집하고 있습니다. &lsquo;사용자 관리&rsquo;를
           닫으면 이 화면에 다시 들어올 수 없으므로 저장이 거부됩니다.
         </p>
       )}
@@ -378,6 +380,8 @@ function AreaSummary({
   onApply: (areaKey: string, mode: "close" | "default") => void;
   disabled: boolean;
 }) {
+  const uiText = useUiText();
+
   return (
     <div className="flex flex-col gap-3">
       <p className="rounded-md bg-zinc-50 p-2 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
@@ -402,7 +406,7 @@ function AreaSummary({
               const level = areaLevelOf(areaKey, role);
               return (
                 <tr key={role} className="border-t border-zinc-200 dark:border-zinc-800">
-                  <td className="py-1.5 pr-3">{roleLabels[role]}</td>
+                  <td className="py-1.5 pr-3">{uiText.role[role]}</td>
                   <td className="py-1.5">
                     <span className={level === "NONE" ? "text-zinc-400 dark:text-zinc-500" : ""}>
                       {permissionLevelLabels[level]}
@@ -472,6 +476,7 @@ function LeafTable({
   disabled: boolean;
   onChange: (leafKey: string, role: Role, level: PermissionLevel) => void;
 }) {
+  const uiText = useUiText();
   const feature = findPermissionFeature(leafKey);
   const levels = selectableLevelsOfLeaf(leafKey);
   const isFixed = Boolean(feature?.fixed);
@@ -517,7 +522,7 @@ function LeafTable({
                   }`}
                 >
                   <th scope="row" className="py-1.5 pr-3 text-left font-normal">
-                    {roleLabels[role]}
+                    {uiText.role[role]}
                     {!editableRole && <span className="ml-1 text-xs text-zinc-400">고정</span>}
                     {role === actingRole && <span className="ml-1 text-xs text-amber-600">현재</span>}
                   </th>
@@ -532,7 +537,7 @@ function LeafTable({
                         <input
                           type="radio"
                           name={`${leafKey}:${role}`}
-                          aria-label={`${roleLabels[role]} — ${permissionLevelLabels[level]}`}
+                          aria-label={`${uiText.role[role]} — ${permissionLevelLabels[level]}`}
                           checked={current === level}
                           disabled={disabled || isFixed || !editableRole || blocked}
                           onChange={() => onChange(leafKey, role, level)}

@@ -6,10 +6,9 @@ import {
   PRIORITY_CODES,
   billingTypeLabels,
   MANUAL_INTAKE_BILLING_TYPE_CODES,
-  priorityLabels,
-  workflowTypeLabels,
   type BillingType,
 } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import {
   deriveWorkflowType,
@@ -177,6 +176,9 @@ const RESULT_CODE_MESSAGES: Record<CreateRepairCaseResultCode, string> = {
 
 export default function IntakeFormInner({ referenceData, canRegisterProductModel, initialDraft, fromRequestId }: IntakeFormInnerProps) {
   const router = useRouter();
+  // 워크플로 종류·우선순위 이름표만 저장된 문구를 따른다 — 유·무상 구분
+  // (billingTypeLabels)은 접수 알림 메일 본문에도 나가므로 코드 표를 그대로 읽는다.
+  const uiText = useUiText();
   const { draft, updateDraft, isEmpty, clear, idempotencyKey } = useIntakeDraft(initialDraft);
 
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
@@ -613,7 +615,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
           <DerivedProductFields workflowType={draft.workflowType} />
         </div>
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          적용 워크플로: {workflowTypeLabels[draft.workflowType]} (종류/유상·무상 선택에 따라 자동 결정됩니다)
+          적용 워크플로: {uiText.workflowType[draft.workflowType]} (종류/유상·무상 선택에 따라 자동 결정됩니다)
         </p>
       </section>
 
@@ -747,7 +749,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               onChange={(e) => setField("priority", e.target.value as IntakeDraftData["priority"])}
             >
               {PRIORITY_CODES.map((p) => (
-                <option key={p} value={p}>{priorityLabels[p]}</option>
+                <option key={p} value={p}>{uiText.priority[p]}</option>
               ))}
             </select>
           </div>

@@ -5,7 +5,8 @@ import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-l
 import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
 import { setShipmentRepresentativeAction } from "@/lib/server/actions/shipment-representatives";
-import { roleLabels } from "@/lib/domain/types";
+import type { Role } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { RepresentativeManagementUserRow } from "@/lib/db/queries/shipment-delegations";
 
 type PendingAction = { userId: string; nextFlag: boolean } | null;
@@ -34,6 +35,7 @@ export default function RepresentativeListSection({
   canManageRepresentatives: boolean;
 }) {
   const router = useRouter();
+  const uiText = useUiText();
   const [pending, setPending] = useState<PendingAction>(null);
   const [confirmingLastRemoval, setConfirmingLastRemoval] = useState<PendingAction>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -61,7 +63,8 @@ export default function RepresentativeListSection({
   }
 
   function roleText(user: RepresentativeManagementUserRow): string {
-    return roleLabels[user.role as keyof typeof roleLabels] ?? user.role;
+    // 알 수 없는 역할 코드면 코드 그대로 보여 준다 — 이름표가 사라지는 것보다 낫다.
+    return uiText.role[user.role as Role] ?? user.role;
   }
 
   /**

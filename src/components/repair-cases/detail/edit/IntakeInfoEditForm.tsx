@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
-import { BILLING_TYPE_CODES, billingTypeLabels, PRIORITY_CODES, priorityLabels, type BillingType, type Priority } from "@/lib/domain/types";
+import { BILLING_TYPE_CODES, billingTypeLabels, PRIORITY_CODES, type BillingType, type Priority } from "@/lib/domain/types";
+import { useUiText } from "@/components/providers/UiTextProvider";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
@@ -96,6 +97,10 @@ export default function IntakeInfoEditForm({
   onDone: () => void;
 }) {
   const canEdit = (field: string) => editableFields.includes(field);
+  // 우선순위 이름표만 저장된 문구를 따른다 — 유·무상 구분(billingTypeLabels)은
+  // 접수 알림 메일 본문에도 나가므로 일부러 코드 표를 그대로 읽는다
+  // (domain/ui-text.ts 의 "유·무상 구분은 여기 없다" 주석 참조).
+  const uiText = useUiText();
 
   const [customerName, setCustomerName] = useState(resolved.customerName);
   const [customerId, setCustomerId] = useState(resolved.customerId);
@@ -458,14 +463,14 @@ export default function IntakeInfoEditForm({
             >
               {PRIORITY_CODES.map((code) => (
                 <option key={code} value={code}>
-                  {priorityLabels[code]}
+                  {uiText.priority[code]}
                 </option>
               ))}
             </select>
             {fieldErrors.priority && <p className={editErrorClass}>{fieldErrors.priority}</p>}
           </div>
         ) : (
-          <ReadOnlyField label="우선순위" value={priorityLabels[resolved.priority]} />
+          <ReadOnlyField label="우선순위" value={uiText.priority[resolved.priority]} />
         )}
 
         <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
