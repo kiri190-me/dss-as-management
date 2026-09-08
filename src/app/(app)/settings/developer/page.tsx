@@ -6,6 +6,7 @@ import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { buildUiThemeView } from "@/lib/db/queries/ui-theme-tokens";
+import { buildUiTextView } from "@/lib/db/queries/ui-text-overrides";
 import {
   normalizeUiThemeValue,
   UI_THEME_TOKENS,
@@ -14,6 +15,12 @@ import {
 } from "@/lib/domain/ui-theme-tokens";
 import { detectUiThemeTemplate } from "@/lib/domain/ui-theme-templates";
 import { detectUiThemeMainColor } from "@/lib/domain/ui-theme-primary-ramp";
+import {
+  findUiTextItem,
+  normalizeUiTextValue,
+  type UiTextOverrideRow,
+} from "@/lib/domain/ui-text-overrides";
+import { DEFAULT_UI_TEXT } from "@/lib/domain/ui-text";
 import {
   scopeFitsUiThemeToken,
   uiThemeDefaultFor,
@@ -59,9 +66,11 @@ export default async function DeveloperModePage() {
   // 화면이 나오는 대신 여기서 갈라 둔다. settings/page.tsx 와 같은 판단이다.
   const isDatabaseMode = getAuthSource() === "database";
   const savedThemeTokens = isDatabaseMode ? await buildUiThemeView() : [];
+  const savedUiText = isDatabaseMode ? await buildUiTextView() : [];
 
   const colorCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind === "color");
   const shapeCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind !== "color");
+  const uiTextCount = countOverriddenUiTextItems(savedUiText);
 
   // 「지금 무슨 톤을 쓰는가」는 따로 저장하지 않는다 — 저장된 값을 대조해
   // 알아낸다(domain/ui-theme-templates.ts). 색 화면에서 한 칸만 손으로 고쳐도
@@ -131,6 +140,35 @@ export default async function DeveloperModePage() {
       </section>
 
       {/*
+        🔴 문구는 색과 **다른 축**이라 구역을 따로 둔다. 위의 네 카드에 섞어 넣으면
+        「화면 토큰」이라는 머리글이 색이 아닌 것까지 덮게 되고, 목차만 보고
+        무엇을 바꾸는 자리인지 가려낼 수 없다. 색을 다 고른 다음에 말을 고르는
+        순서이기도 해서 색 넷 **뒤**에 온다.
+      */}
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">화면 문구</h2>
+          <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            코드를 고치지 않고 앱 곳곳에 박혀 있는 이름표를 바꿉니다.{" "}
+            <strong>저장하면 전 직원 화면의 이름표가 바뀝니다.</strong>
+          </p>
+        </div>
+
+        {isDatabaseMode ? (
+          <DeveloperMenuCard
+            href="/settings/developer/text"
+            title="화면 문구"
+            description="역할 이름·상태 배지·작업 이력 구분처럼 화면에 박혀 있는 이름표를 바꿉니다. 제품 구분과 유·무상 구분, 예외 상태는 여기서 바꿀 수 없고 그 까닭을 화면에 적어 두었습니다."
+            changedCount={uiTextCount}
+          />
+        ) : (
+          <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            화면 문구 편집은 데이터베이스 저장 모드에서만 사용할 수 있습니다.
+          </p>
+        )}
+      </section>
+
+      {/*
         🔴 단추를 하나도 두지 않는다. 누르면 아무 일도 안 나는 단추는 「고장난
         화면」으로 읽히고, 특히 이 화면에서는 「배포한 줄 알았는데 안 됐다」가
         된다. 각 기능은 실제로 동작하는 조각이 붙는 순서대로 위의 목차에 자리를
@@ -141,11 +179,12 @@ export default async function DeveloperModePage() {
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">앞으로 여기에 들어올 것</h2>
         <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
           위의 화면 토큰(색 · 모서리 · 글자 크기)이 첫 항목이었고, 색 한 벌을 한 번에 갈아 끼우는 색상
-          톤 템플릿이 그 위에 얹혔습니다. 앞으로는 버튼과 팝업·알림의 모양, 화면에 박혀 있는 고정 문구를
-          코드를 고치지 않고 편집하는 자리, 그리고 실제 자료를 건드리지 않고 더미 데이터로 기능을 시험해
-          보는 자리가 차례로 들어옵니다. 여기서 다루는 것은 <strong>설정을 적용하는 쪽</strong>까지입니다
-          — 앱이 자기 다음 버전을 자기 안에서 배포할 수는 없으므로, 버전 적용이나 운영 배포는 이 화면의
-          일이 아닙니다.
+          톤 템플릿이 그 위에 얹혔습니다. 화면에 박혀 있는 고정 문구를 코드를 고치지 않고 바꾸는 자리도
+          들어왔습니다 — 위의 <strong>화면 문구</strong>입니다. 앞으로는 버튼과 팝업·알림의 모양, 예외
+          상태처럼 아직 데이터베이스에서만 고칠 수 있는 문구를 화면에서 다루는 자리, 그리고 실제 자료를
+          건드리지 않고 더미 데이터로 기능을 시험해 보는 자리가 차례로 들어옵니다. 여기서 다루는 것은{" "}
+          <strong>설정을 적용하는 쪽</strong>까지입니다 — 앱이 자기 다음 버전을 자기 안에서 배포할 수는
+          없으므로, 버전 적용이나 운영 배포는 이 화면의 일이 아닙니다.
         </p>
       </section>
     </>
@@ -176,6 +215,30 @@ function countOverriddenSlots(
     const value = normalizeUiThemeValue(token, row.value);
     if (value === null) continue;
     if (value === uiThemeDefaultFor(token, row.scope)) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * 문구 편집 화면이 맡는 칸 가운데 **지금 기본 문구에서 벗어나 저장돼 있는 칸**의 수.
+ *
+ * 위의 countOverriddenSlots 와 같은 판단이다 — 편집기가 버리는 행은 여기서도 세지
+ * 않는다. 등록부에 없는 키, 형식이 틀린 값, 기본 문구와 같은 값, 그리고
+ * **화면이 읽지 않는 묶음**(유·무상 구분)이 그렇다. 마지막 것을 빼지 않으면
+ * 「기본값과 다른 칸 N개」라 적힌 카드를 눌렀는데 그 칸이 없는 화면이 나온다 —
+ * 편집기가 편집칸을 만드는 기준(DEFAULT_UI_TEXT 에 그 묶음이 있는가)과 같은
+ * 기준을 여기서도 쓴다.
+ */
+function countOverriddenUiTextItems(rows: readonly UiTextOverrideRow[]): number {
+  let count = 0;
+  for (const row of rows) {
+    if (!(row.groupKey in DEFAULT_UI_TEXT)) continue;
+    const item = findUiTextItem(row.groupKey, row.itemKey);
+    if (!item) continue;
+    const value = normalizeUiTextValue(row.value);
+    if (value === null) continue;
+    if (value === item.defaultText) continue;
     count += 1;
   }
   return count;
