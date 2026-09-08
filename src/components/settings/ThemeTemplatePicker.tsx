@@ -27,9 +27,9 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
 
 /**
  * ============================================================================
- * 색상 톤 템플릿 고르기 — 색 48값을 한 번에 갈아 끼우는 화면
+ * 색상 톤 템플릿 고르기 — 색 70값을 한 번에 갈아 끼우는 화면
  * ============================================================================
- * 색 화면(ThemeTokenEditor)이 48칸을 하나씩 고치는 자리라면, 여기는 **미리
+ * 색 화면(ThemeTokenEditor)이 70칸을 하나씩 고치는 자리라면, 여기는 **미리
  * 맞춰 둔 한 벌**을 골라 넣는 자리다. 저장되는 것은 똑같은 `ui_theme_tokens`
  * 행이고, 저장 경로도 같은 서버 액션 하나다 — 이 화면이 따로 아는 것은 없다.
  *
@@ -159,7 +159,7 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
     setMessage(null);
     try {
       const result = await saveUiThemeTokensAction({
-        // 색 48칸을 전부 싣는다. 기본값과 같아진 칸은 `value: null` 로 나가
+        // 색 70칸을 전부 싣는다. 기본값과 같아진 칸은 `value: null` 로 나가
         // 저장된 행이 지워진다(domain/ui-theme-templates.ts).
         changes: uiThemeTemplateToChanges(selected),
       });

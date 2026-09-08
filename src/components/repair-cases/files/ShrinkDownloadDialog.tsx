@@ -178,7 +178,7 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
                   aria-pressed={ratio === preset}
                   className={`rounded-md border px-2 py-2 text-sm font-medium disabled:opacity-50 ${
                     ratio === preset
-                      ? "border-zinc-900 bg-primary-900 text-white dark:border-zinc-50 dark:bg-primary-50 dark:text-zinc-900"
+                      ? "border-primary-900 bg-primary-900 text-white dark:border-primary-50 dark:bg-primary-50 dark:text-zinc-900"
                       : "border-zinc-300 text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
                   }`}
                 >

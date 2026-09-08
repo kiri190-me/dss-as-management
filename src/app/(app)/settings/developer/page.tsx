@@ -13,6 +13,7 @@ import {
   type UiThemeToken,
 } from "@/lib/domain/ui-theme-tokens";
 import { detectUiThemeTemplate } from "@/lib/domain/ui-theme-templates";
+import { detectUiThemeMainColor } from "@/lib/domain/ui-theme-primary-ramp";
 import {
   scopeFitsUiThemeToken,
   uiThemeDefaultFor,
@@ -67,6 +68,10 @@ export default async function DeveloperModePage() {
   // 이 이름이 곧바로 「직접 고친 값」으로 바뀐다.
   const currentTemplate = detectUiThemeTemplate(savedThemeTokens);
 
+  // 「지금 무슨 메인 컬러를 쓰는가」도 같은 방식이다 — 저장하지 않고 강조 램프
+  // 22칸을 대조해 알아낸다(domain/ui-theme-primary-ramp.ts).
+  const currentMainColor = detectUiThemeMainColor(savedThemeTokens);
+
   return (
     <>
       <section className="flex flex-col gap-3">
@@ -89,6 +94,18 @@ export default async function DeveloperModePage() {
               title="색상 톤 템플릿"
               description="미리 맞춰 둔 색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 모서리와 글자 크기는 바뀌지 않습니다."
               badge={`지금 쓰는 톤 · ${currentTemplate ? currentTemplate.name : "직접 고친 값"}`}
+              changedCount={0}
+            />
+            {/*
+              🔴 톤(중립) 다음이 강조색이다. 톤이 화면 전체의 인상을 정하고 그
+              위에 강조색 하나가 얹히는 순서라, 두 카드가 붙어 있어야 「무엇을
+              먼저 고르는가」가 목차만 보고도 읽힌다.
+            */}
+            <DeveloperMenuCard
+              href="/settings/developer/theme/main-color"
+              title="메인 컬러"
+              description="색 하나를 고르면 강조색 11단을 자동으로 만들어 주 버튼과 선택된 메뉴에 적용합니다. 중립색과 모서리·글자 크기는 바뀌지 않습니다."
+              badge={`지금 쓰는 색 · ${currentMainColor ? currentMainColor.name : "직접 고른 색"}`}
               changedCount={0}
             />
             <div className="grid gap-3 sm:grid-cols-2">

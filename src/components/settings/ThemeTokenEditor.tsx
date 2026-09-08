@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -38,7 +39,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 복사하면 저장·대비·미리보기 로직이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
  *
  * 🔴 줄어드는 것은 **그리는 칸**뿐이다. 대비 계산과 미리보기는 언제나 등록부
- * 전체(35개 토큰·11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
+ * 전체(46개 토큰·11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
  * 이 화면에 없는 글자색이 함께 필요하고, 미리보기 역시 한 벌이 다 있어야
  * 그려진다.
  *
@@ -75,7 +76,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * ============================================================================
  */
 
-// ────────────────────────────────────────────────── 편집 가능한 자리(59칸)
+// ────────────────────────────────────────────────── 편집 가능한 자리(81칸)
 
 /** 편집 가능한 한 칸. 토큰 하나가 scoped 면 두 칸, 아니면 한 칸이 된다. */
 type Slot = { key: string; token: UiThemeToken; scope: UiThemeScope };
@@ -99,15 +100,23 @@ const SCOPE_LABELS: Record<UiThemeScope, string> = {
 };
 
 /**
- * 색 묶음. zinc·red 를 램프로 묶고, **그 밖의 색은 남김없이 마지막 묶음**으로
- * 떨어진다 — 등록부에 색이 하나 늘었을 때 어느 묶음에도 못 들어가 화면에서
- * 조용히 사라지는 일이 없어야 한다.
+ * 색 묶음. zinc·primary·red 를 램프로 묶고, **그 밖의 색은 남김없이 마지막
+ * 묶음**으로 떨어진다 — 등록부에 색이 하나 늘었을 때 어느 묶음에도 못 들어가
+ * 화면에서 조용히 사라지는 일이 없어야 한다.
+ *
+ * 🔴 강조(primary)를 따로 가르는 이유: 없으면 「페이지 바탕과 본문 글자」 묶음
+ * 아래로 떨어져, 램프 11단이 양 끝 둘과 한 표에 섞인다. 순서는 중립 → 강조 →
+ * 경고 → 그 밖이다(화면에서 겹치는 순서 그대로).
  */
 const COLOR_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "color");
 const ZINC_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("zinc-"));
+const PRIMARY_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("primary-"));
 const RED_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("red-"));
 const OTHER_COLOR_TOKENS = COLOR_TOKENS.filter(
-  (token) => !token.key.startsWith("zinc-") && !token.key.startsWith("red-")
+  (token) =>
+    !token.key.startsWith("zinc-") &&
+    !token.key.startsWith("primary-") &&
+    !token.key.startsWith("red-")
 );
 const RADIUS_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "radius");
 const FONT_SIZE_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "fontSize");
@@ -266,7 +275,7 @@ export default function ThemeTokenEditor({
   /**
    * 코드 기본값으로 채운다. 저장을 눌러야 저장된 행이 지워진다.
    *
-   * 🔴 **이 화면에 그려진 칸만** 채운다. 59칸 전부를 채우면 색 화면에서 누른
+   * 🔴 **이 화면에 그려진 칸만** 채운다. 81칸 전부를 채우면 색 화면에서 누른
    * 것이 모서리·글자 크기까지 함께 지우고, 누른 사람은 색만 되돌린 줄 안다 —
    * 그 값들은 이 화면에 보이지도 않으므로 지워졌다는 사실조차 알 수 없다.
    */
@@ -346,10 +355,11 @@ export default function ThemeTokenEditor({
 
       {isColors && (
         <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-          <strong>이번 판에서 바꿀 수 있는 색은 중립(zinc)·경고(red)와 페이지 바탕·본문 글자입니다.</strong>{" "}
+          <strong>
+            여기서 바꿀 수 있는 색은 중립(zinc)·강조(primary)·경고(red)와 페이지 바탕·본문 글자입니다.
+          </strong>{" "}
           앱이 쓰는 나머지 색(amber · blue · emerald · green · violet · sky)과 흰색·검은색은 아직 열려
-          있지 않아, 여기서 무엇을 바꿔도 그 색으로 그려진 자리는 그대로입니다 — 앱 전체 색 사용의
-          14%쯤입니다.
+          있지 않아, 여기서 무엇을 바꿔도 그 색으로 그려진 자리는 그대로입니다.
         </p>
       )}
 
@@ -379,6 +389,27 @@ export default function ThemeTokenEditor({
             <ColorGroup
               title="중립 (zinc) — 글자·바탕·테두리"
               tokens={ZINC_TOKENS}
+              draft={draft}
+              normalized={normalized}
+              savedValues={savedValues}
+              disabled={isSaving}
+              onChange={setSlot}
+            />
+            <ColorGroup
+              title="강조 (primary) — 주 버튼·선택된 메뉴"
+              note={
+                <>
+                  색 하나만 고르면 이 11단을 한 번에 만들어 주는 화면이 있습니다 —{" "}
+                  <Link
+                    href="/settings/developer/theme/main-color"
+                    className="underline hover:no-underline"
+                  >
+                    메인 컬러
+                  </Link>
+                  . 여기서 한 칸이라도 손으로 고치면 그 화면은 「직접 고른 색입니다」로 바뀝니다.
+                </>
+              }
+              tokens={PRIMARY_TOKENS}
               draft={draft}
               normalized={normalized}
               savedValues={savedValues}
@@ -653,11 +684,23 @@ type FieldGroupProps = {
  * 폰에서 표가 넓어도 **페이지 전체가 가로로 스크롤되면 안 된다** — 넓은 것은
  * 자기 컨테이너 안에서만 스크롤한다(이 저장소 목록 화면들의 방식).
  */
-function ColorGroup({ title, tokens, draft, normalized, savedValues, disabled, onChange }: FieldGroupProps & { title: string }) {
+function ColorGroup({
+  title,
+  note,
+  tokens,
+  draft,
+  normalized,
+  savedValues,
+  disabled,
+  onChange,
+}: FieldGroupProps & { title: string; note?: React.ReactNode }) {
   if (tokens.length === 0) return null;
   return (
     <div>
       <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{title}</h3>
+      {note && (
+        <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{note}</p>
+      )}
       <div className="mt-1 overflow-x-auto">
         <table className="w-full min-w-[34rem] border-collapse text-sm">
           <thead className="text-xs text-zinc-500 dark:text-zinc-400">

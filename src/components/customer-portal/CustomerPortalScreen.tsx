@@ -139,7 +139,7 @@ export default function CustomerPortalScreen({
               onClick={() => setSelectedCustomerId(link.customerId)}
               className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
                 link.customerId === selectedCustomerId
-                  ? "border-zinc-900 bg-primary-900 text-white"
+                  ? "border-primary-900 bg-primary-900 text-white"
                   : "border-zinc-300 text-zinc-700 hover:border-zinc-500"
               }`}
             >
