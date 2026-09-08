@@ -180,6 +180,11 @@ test("🔴 같은 (묶음, 항목)이 두 번 오면 거절한다", () => {
 
 test("묶음이 다르면 같은 항목 키라도 중복이 아니다", () => {
   // billingType.WARRANTY 와 role 의 어느 항목도 서로 다른 자리다.
+  // 🔴 billingType 은 **등록부에 없는 묶음**이다(유·무상 구분은 접수 알림 메일
+  // 본문에도 나가서 2026-09-08 사용자 결정으로 뺐다). 그런데도 여기서 쓰는 것이
+  // 이 시험의 뜻이다 — findDuplicateUiTextChange 는 등록부를 보지 않고 (묶음, 항목)
+  // 문자열만 견준다. 등록부 판정은 checkUiTextOverrideChange 의 몫이라 이 함수까지
+  // 등록부를 알면 같은 판정이 두 벌이 된다.
   const notDuplicate = findDuplicateUiTextChange([
     { groupKey: "role", itemKey: "ADMIN", value: "관리자님" },
     { groupKey: "billingType", itemKey: "WARRANTY", value: "보증" },

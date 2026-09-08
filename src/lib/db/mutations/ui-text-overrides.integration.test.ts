@@ -33,8 +33,15 @@ import { repairStatusLabels, roleLabels } from "@/lib/domain/types";
 
 const TEST_EMAIL_PREFIX = "uitext-test-";
 
-/** 이 파일이 건드리는 묶음. 뒷정리를 이 목록으로 좁힌다. */
-const TOUCHED_GROUP_KEYS = ["role", "repairStatus", "priority", "billingType"];
+/**
+ * 이 파일이 건드리는 묶음. 뒷정리를 이 목록으로 좁힌다.
+ *
+ * 🔴 시험이 실제로 저장하는 묶음이 전부 여기 있어야 한다 — 하나라도 빠지면 그 행이
+ * 시험 DB 에 남고, before() 의 「ui_text_overrides 가 비어 있다」 전제가 다음 실행부터
+ * 깨진다. 지금 저장까지 가는 묶음은 role · repairStatus · priority ·
+ * accountApprovalStatus 넷이다.
+ */
+const TOUCHED_GROUP_KEYS = ["role", "repairStatus", "priority", "accountApprovalStatus"];
 
 let superAdminId: string;
 let developerEngineerId: string;
@@ -467,7 +474,10 @@ describe("saveUiTextOverrides", () => {
         { groupKey: "role", itemKey: "ADMIN", value: "매니저" },
         { groupKey: "repairStatus", itemKey: "IN_REPAIR", value: "수리 진행 중" },
         // 정규화가 저장 전에 눕힌다 — 읽어 오는 값은 이미 다듬어진 것이어야 한다.
-        { groupKey: "billingType", itemKey: "PAID", value: "  유상   수리  " },
+        // 앞뒤 공백과 가운데 연속 공백을 일부러 넣는다. 다듬은 결과("승인 기다림")가
+        // 그 자리의 기본 문구("승인 대기")와 **다르다** — 같으면 행이 남지 않고
+        // 지워지는 것이 이 축의 규칙이라, 그랬다면 이 시험이 엉뚱하게 실패한다.
+        { groupKey: "accountApprovalStatus", itemKey: "PENDING", value: "  승인   기다림  " },
       ],
       actorUserId: developerEngineerId,
     });
@@ -477,21 +487,24 @@ describe("saveUiTextOverrides", () => {
     const stored = await loadStoredUiTextOverrides();
     assert.equal(stored.length, 3);
     assert.ok(
-      stored.some((row) => row.groupKey === "billingType" && row.value === "유상 수리"),
+      stored.some(
+        (row) => row.groupKey === "accountApprovalStatus" && row.value === "승인 기다림"
+      ),
       `저장된 값이 정규화를 지나지 않았다: ${JSON.stringify(stored)}`
     );
 
     const resolved = resolveUiText(stored);
     assert.equal(resolved.role.ADMIN, "매니저");
     assert.equal(resolved.repairStatus.IN_REPAIR, "수리 진행 중");
-    assert.equal(resolved.billingType.PAID, "유상 수리");
+    assert.equal(resolved.accountApprovalStatus.PENDING, "승인 기다림");
     // 안 건드린 문구는 코드의 기본값 그대로다.
     assert.equal(resolved.role.SUPER_ADMIN, roleLabels.SUPER_ADMIN);
     assert.equal(
       resolved.repairStatus.WAITING_REPAIR,
       repairStatusLabels.WAITING_REPAIR
     );
-    // 묶음 8개가 모두 병합 결과에 있다 — 하나라도 빠지면 그 화면만 문구를 못 읽는다.
+    // 등록부의 7묶음이 모두 병합 결과에 있다 — 하나라도 빠지면 그 화면만 문구를 못
+    // 읽는다. 숫자를 여기 적지 않고 등록부에서 가져오므로 묶음이 늘고 줄어도 따라간다.
     assert.deepEqual(Object.keys(resolved).sort(), UI_TEXT_GROUPS.map((g) => g.key).sort());
   });
 

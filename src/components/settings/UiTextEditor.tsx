@@ -31,14 +31,15 @@ import { saveUiTextOverridesAction } from "@/lib/server/actions/ui-text-override
  * 사람들의 판단이 함께 움직인다. 그래서 경고 상자를 맨 위에 두고, 저장 확인
  * 창에서도 몇 칸이 바뀌는지와 전 직원 적용을 다시 말한다.
  *
- * ── 🔴 편집칸을 만드는 묶음은 등록부 전체가 아니다 ──────────────────────
- * 등록부(UI_TEXT_GROUPS)에는 8묶음이 있지만 **화면이 실제로 읽는 것은 7묶음**
- * 이다(domain/ui-text.ts 의 UiText). 유·무상 구분은 접수 알림 메일 본문에도
- * 나가서 일부러 코드 표를 그대로 읽게 두었다 — 그 묶음에 편집칸을 만들면
- * "저장했는데 화면이 안 바뀐다"가 되고, 관리자에게 그것은 고장과 구별되지
- * 않는다. 그래서 목록을 손으로 적지 않고 **DEFAULT_UI_TEXT 에 그 묶음이 있는
- * 가**로 가른다: 화면이 읽지 않는 묶음은 저절로 떨어져 나가고, 언젠가 그 묶음을
- * 화면이 읽게 되는 날 편집칸도 저절로 생긴다.
+ * ── 🔴 편집칸을 만드는 묶음은 등록부에서 손으로 고르지 않는다 ────────────
+ * 지금은 등록부(UI_TEXT_GROUPS)의 7묶음이 곧 **화면이 읽는 7묶음**이다
+ * (domain/ui-text.ts 의 UiText). 그래도 목록을 손으로 적지 않고
+ * **DEFAULT_UI_TEXT 에 그 묶음이 있는가**로 가른다 — 화면이 읽지 않는 묶음에
+ * 편집칸을 만들면 "저장했는데 화면이 안 바뀐다"가 되고, 관리자에게 그것은 고장과
+ * 구별되지 않는다. 이렇게 두면 등록부에만 있는 묶음이 생기는 날 편집칸이 저절로
+ * 떨어져 나가고, 화면이 읽게 되는 날 저절로 생긴다.
+ * (유·무상 구분은 접수 알림 메일 본문에도 나가서 아예 등록부에서 뺐다 —
+ * 2026-09-08 사용자 결정. 아래 잠긴 문구 안내가 그 사실을 화면에서 말한다.)
  *
  * ── 검증 규칙을 여기 다시 적지 않는다 ───────────────────────────────────
  * 칸마다의 판정을 **서버가 쓰는 함수**(checkUiTextOverrideChange)로 한다. 오류
@@ -65,24 +66,25 @@ function slotKey(groupKey: string, itemKey: string): string {
  * 편집칸을 만드는 묶음 — **화면이 실제로 읽는 묶음만.**
  *
  * 판정 기준을 DEFAULT_UI_TEXT 에서 가져오는 이유는 위 머리말에 있다. 지금은
- * 유·무상 구분 하나가 여기서 떨어져 나가고, 그 사실은 아래 잠긴 문구 안내가
- * 화면에서 말한다.
+ * 등록부의 7묶음이 모두 여기 남는다.
  */
 const EDITABLE_GROUPS: readonly UiTextGroup[] = UI_TEXT_GROUPS.filter(
   (group) => group.key in DEFAULT_UI_TEXT
 );
 
 /**
- * 등록부에는 있지만 화면이 읽지 않는 묶음.
+ * 등록부에는 있지만 화면이 읽지 않는 묶음 — **지금은 비어 있다.**
  *
- * 지금은 유·무상 구분 하나뿐이고 그 하나는 아래에서 **이름을 불러** 설명한다.
- * 그 밖의 것이 생기는 날 화면에서 조용히 사라지지 않도록, 남은 것들은 이름만이라도
- * 안내에 적는다 — 편집칸이 없는 것과 존재를 모르는 것은 다르다.
+ * 두 목록이 정확히 같아야 한다는 것은 시험이 단언한다
+ * (domain/ui-text-overrides.test.ts 의 「등록부의 묶음과 DEFAULT_UI_TEXT 의 묶음이
+ * 정확히 같다」). 그러니 이 목록은 빠뜨림을 알리는 통로가 아니라 **그 시험이
+ * 뚫렸을 때를 대비한 두 번째 그물**이다 — 등록부에만 있는 묶음이 생기면 화면에서
+ * 조용히 사라지지 않고 아래 안내에 이름이 뜬다. 편집칸이 없는 것과 존재를 모르는
+ * 것은 다르다.
  */
 const UNREAD_GROUPS: readonly UiTextGroup[] = UI_TEXT_GROUPS.filter(
   (group) => !(group.key in DEFAULT_UI_TEXT)
 );
-const UNNAMED_UNREAD_GROUPS = UNREAD_GROUPS.filter((group) => group.key !== "billingType");
 
 const SLOTS: readonly Slot[] = EDITABLE_GROUPS.flatMap((group) =>
   group.items.map((item) => ({ key: slotKey(group.key, item.key), group, item }))
@@ -398,9 +400,9 @@ function LockedTextNotice() {
           <code className="font-mono">exception_statuses</code> 표가 그 문구의 주인이고, 화면 3곳이 이미
           그 표를 읽습니다. 그 표를 화면에서 편집하는 자리는 아직 없습니다.
         </li>
-        {UNNAMED_UNREAD_GROUPS.length > 0 && (
+        {UNREAD_GROUPS.length > 0 && (
           <li>
-            <strong>{UNNAMED_UNREAD_GROUPS.map((group) => group.label).join(" · ")}</strong> — 등록부에는
+            <strong>{UNREAD_GROUPS.map((group) => group.label).join(" · ")}</strong> — 등록부에는
             있지만 화면이 읽지 않는 묶음입니다. 여기서 바꿔도 화면에 나오지 않으므로 편집칸을 만들지
             않았습니다.
           </li>

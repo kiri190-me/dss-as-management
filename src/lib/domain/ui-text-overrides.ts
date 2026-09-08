@@ -1,6 +1,5 @@
 import {
   accountApprovalStatusLabels,
-  billingTypeLabels,
   priorityLabels,
   repairStatusLabels,
   roleLabels,
@@ -32,8 +31,8 @@ import {
  * 된다 — 되돌림은 행을 지우는 것이고, 그때 화면에 남는 값은 코드의 기본값이기
  * 때문이다. 색 축의 톤 템플릿이 등록부에서 값을 가져오는 것과 같은 근거다.
  *
- * ── 🔴 일부러 뺀 표 둘 ──────────────────────────────────────────────────
- * types.ts 에는 `*Labels` 표가 10개 있지만 여기 담은 것은 8개다. 아래 둘은
+ * ── 🔴 일부러 뺀 표 셋 ──────────────────────────────────────────────────
+ * types.ts 에는 `*Labels` 표가 10개 있지만 여기 담은 것은 7개다. 아래 셋은
  * **빠뜨린 것이 아니라 뺀 것**이므로, 「빠졌네」 하며 넣지 말 것.
  *
  *   ① `productCategoryLabels` — **문구 값이 곧 비교값이다.**
@@ -52,6 +51,18 @@ import {
  *      아직 코드 표를 읽어서 **이중 진실이 이미 하나 있다.** 여기에 또 담으면
  *      진실이 셋이 된다. 이 표는 「화면이 exception_statuses.label 을 읽게」
  *      해서 닫을 몫이지, 이 등록부가 맡을 몫이 아니다.
+ *
+ *   ③ `billingTypeLabels` — **화면에만 나오는 문구가 아니다.**
+ *      유상 · 일부유상 · 무상 · 추후결정 이 넷은 접수 알림 **메일 본문에도 그대로
+ *      나간다**(domain/intake-mail-body.ts). 화면만 바꿀 수 있게 열어 두면 화면과
+ *      메일이 서로 다른 말을 하게 되고, 그 어긋남은 우리보다 **고객에게 먼저
+ *      보인다.** 그래서 이 문구는 코드 표(types.ts 의 billingTypeLabels)를 그대로
+ *      읽는다 — 2026-09-08 **사용자 결정**이다. 그 결정 덕에 순수 함수 셋
+ *      (intake-mail-body.ts · db/mappers/repair-case.ts ·
+ *      domain/product-model-breakdown.ts)이 DB 를 모르는 채로 남았다: 이 표를
+ *      여기 담는 순간 저 셋이 저장된 문구를 읽어야 하고, 그러면 메일 본문을 만드는
+ *      함수가 DB 를 알게 된다. 이 표를 열려면 화면과 메일이 **같은 한 벌**을 읽는
+ *      길을 먼저 내야 한다.
  *
  * ── 🔴 줄바꿈·탭·제어문자를 막는 이유 ───────────────────────────────────
  * 여기 담긴 문구들은 표 머리·배지·필터 단추 같은 **한 줄 자리**에 들어간다.
@@ -89,7 +100,7 @@ export type UiTextGroup = {
 };
 
 /**
- * 관리자가 바꿀 수 있는 문구 전부 — 8묶음 46문구.
+ * 관리자가 바꿀 수 있는 문구 전부 — 7묶음 42문구.
  *
  * 항목을 여기 손으로 늘어놓는 이유는, 코드 목록(`ROLE_CODES` 등)에서 자동으로
  * 펼치면 types.ts 에 코드가 하나 늘 때 **아무도 모르는 사이에** 이 등록부와
@@ -140,21 +151,6 @@ export const UI_TEXT_GROUPS: readonly UiTextGroup[] = [
       {
         key: "PENDING_TOTAL_CONTROLLER",
         defaultText: workflowTypeLabels.PENDING_TOTAL_CONTROLLER,
-      },
-    ],
-  },
-  {
-    key: "billingType",
-    label: "유·무상 구분",
-    usage: "수리 목록의 유·무상 배지, 견적·청구 판단 화면의 구분 문구",
-    items: [
-      { key: "PAID", defaultText: billingTypeLabels.PAID },
-      { key: "PARTIAL_PAID", defaultText: billingTypeLabels.PARTIAL_PAID },
-      { key: "WARRANTY", defaultText: billingTypeLabels.WARRANTY },
-      {
-        key: "PENDING_DECISION",
-        defaultText: billingTypeLabels.PENDING_DECISION,
-        usage: "Excel 이관 건에만 붙는 임시 구분 — 유·무상 판단이 끝나면 사라진다",
       },
     ],
   },
