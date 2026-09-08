@@ -92,7 +92,7 @@ export default async function DeveloperModePage() {
             <DeveloperMenuCard
               href="/settings/developer/theme/templates"
               title="색상 톤 템플릿"
-              description="미리 맞춰 둔 색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 모서리와 글자 크기는 바뀌지 않습니다."
+              description="미리 맞춰 둔 중립·경고색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 목록은 지금 고른 메인 컬러의 색조로 만들어지고, 강조색과 모서리·글자 크기는 바뀌지 않습니다."
               badge={`지금 쓰는 톤 · ${currentTemplate ? currentTemplate.name : "직접 고친 값"}`}
               changedCount={0}
             />

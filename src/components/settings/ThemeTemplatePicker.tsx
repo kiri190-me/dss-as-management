@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -10,16 +11,20 @@ import {
   UI_THEME_CONTRAST_FLOOR,
   UI_THEME_CONTRAST_PAIRS,
   UI_THEME_CONTRAST_WARN,
-  UI_THEME_TOKENS,
   type UiThemeContrastPair,
   type UiThemeOverrideRow,
 } from "@/lib/domain/ui-theme-tokens";
 import {
+  detectUiThemeMainColor,
+  readUiThemePrimaryTint,
+} from "@/lib/domain/ui-theme-primary-ramp";
+import {
+  buildUiThemeTemplates,
   countUiThemeTemplateDiff,
   detectUiThemeTemplate,
   resolveUiThemeWithTemplate,
   uiThemeTemplateToChanges,
-  UI_THEME_TEMPLATES,
+  UI_THEME_TEMPLATE_TOKEN_KEYS,
   type UiThemeTemplate,
 } from "@/lib/domain/ui-theme-templates";
 import { saveUiThemeTokensAction } from "@/lib/server/actions/ui-theme-tokens";
@@ -33,11 +38,20 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 맞춰 둔 한 벌**을 골라 넣는 자리다. 저장되는 것은 똑같은 `ui_theme_tokens`
  * 행이고, 저장 경로도 같은 서버 액션 하나다 — 이 화면이 따로 아는 것은 없다.
  *
- * ── 🔴 모서리·글자 크기는 이 화면이 건드리지 않는다 ─────────────────────
+ * ── 🔴 강조색·모서리·글자 크기는 이 화면이 건드리지 않는다 ──────────────
  * 톤을 고르는 일과 크기를 고르는 일이 한 단추에 묶이면 「톤만 바꿨는데 글자
  * 크기까지 바뀐」 상태가 되고, 되돌릴 때 무엇이 함께 움직였는지 알 수 없다.
- * 화면에도 그 사실을 적는다 — 적어 두지 않으면 「템플릿을 골랐는데 모서리는
- * 왜 그대로지」가 고장으로 읽힌다.
+ * 강조색(주 버튼)은 메인 컬러 화면의 몫이다 — 예전에는 이 화면이 그것까지
+ * 저장해서, 메인 컬러를 고른 뒤 톤을 저장하면 주 버튼이 다시 검정이 됐다.
+ * 화면에도 그 사실을 적는다 — 적어 두지 않으면 「톤을 골랐는데 모서리는 왜
+ * 그대로지」가 고장으로 읽힌다.
+ *
+ * ── 🔴 톤 목록은 지금 고른 메인 컬러에서 만들어진다 ─────────────────────
+ * 저장된 강조색에서 색조를 읽어(readUiThemePrimaryTint) 그 색조로 물든 여섯을
+ * 만든다. 그래서 목록이 메인 컬러에 따라 달라지고, **그 사실을 화면 맨 위에
+ * 적는다** — 적어 두지 않으면 「톤 목록이 왜 바뀌었지」가 고장으로 읽힌다.
+ * 메인 컬러가 「회색 (기본)」이면 얹을 색조가 없으므로 지금까지의 여섯이 그대로
+ * 나오고, 그때도 그 사실과 함께 메인 컬러 화면으로 가는 길을 적는다.
  *
  * ── 지금 쓰는 톤은 기억해 둔 것이 아니라 대조해 알아낸 것이다 ───────────
  * 「무슨 템플릿을 쓰는가」를 따로 저장하지 않는다(domain/ui-theme-templates.ts
@@ -81,8 +95,11 @@ const DARK_SWATCH_KEYS: readonly string[] = [
   "red-400",
 ];
 
-/** 템플릿 하나가 정하는 색의 수. 등록부에서 세므로 안내 문구가 늘 실제와 같다. */
-const TEMPLATE_COLOR_COUNT = UI_THEME_TOKENS.filter((token) => token.kind === "color").length;
+/** 톤 하나가 정하는 색의 수. 등록부에서 세므로 안내 문구가 늘 실제와 같다. */
+const TEMPLATE_COLOR_COUNT = UI_THEME_TEMPLATE_TOKEN_KEYS.length;
+
+/** 강조색을 고치러 가는 자리. 이 화면이 그것을 건드리지 않는다고 적으면서 길도 준다. */
+const MAIN_COLOR_HREF = "/settings/developer/theme/main-color";
 
 /** 저장을 실제로 거절시키는 짝인가. 등록부의 목록에서 그대로 만든다. */
 const BLOCKING_PAIR_KEYS: ReadonlySet<string> = new Set(
@@ -95,6 +112,18 @@ function isBlockingPair(pair: UiThemeContrastPair): boolean {
 
 export default function ThemeTemplatePicker({ saved }: { saved: readonly UiThemeOverrideRow[] }) {
   const router = useRouter();
+
+  /**
+   * 지금 저장된 강조색의 색조. 없으면(= 메인 컬러가 「회색 (기본)」) null 이고,
+   * 그때는 색조 없는 여섯이 나온다.
+   */
+  const tint = useMemo(() => readUiThemePrimaryTint(saved), [saved]);
+
+  /** 지금 쓰는 메인 컬러. 안내 문구가 이름을 부르기 위해서만 쓴다. */
+  const mainColor = useMemo(() => detectUiThemeMainColor(saved), [saved]);
+
+  /** 고를 수 있는 톤 여섯. 🔴 지금 고른 메인 컬러의 색조로 만들어진다. */
+  const templates = useMemo(() => buildUiThemeTemplates(tint), [tint]);
 
   /** 지금 저장돼 있는 값이 어느 템플릿인가. 어느 것과도 다르면 null. */
   const current = useMemo(() => detectUiThemeTemplate(saved), [saved]);
@@ -159,8 +188,9 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
     setMessage(null);
     try {
       const result = await saveUiThemeTokensAction({
-        // 색 70칸을 전부 싣는다. 기본값과 같아진 칸은 `value: null` 로 나가
-        // 저장된 행이 지워진다(domain/ui-theme-templates.ts).
+        // 중립·경고색 48칸을 전부 싣는다. 🔴 강조색은 한 칸도 실리지 않는다 —
+        // 그것은 메인 컬러 화면의 몫이다. 기본값과 같아진 칸은 `value: null` 로
+        // 나가 저장된 행이 지워진다(domain/ui-theme-templates.ts).
         changes: uiThemeTemplateToChanges(selected),
       });
       setConfirmOpen(false);
@@ -184,8 +214,9 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
       <div>
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">색상 톤 템플릿</h2>
         <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-          미리 맞춰 둔 색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 템플릿 하나가 색{" "}
-          {TEMPLATE_COLOR_COUNT}개의 라이트·다크 값을 모두 정합니다.
+          미리 맞춰 둔 색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 톤 하나가 중립색·경고색{" "}
+          {TEMPLATE_COLOR_COUNT}개의 라이트·다크 값을 모두 정합니다. 강조색(주 버튼)은 여기에 들어
+          있지 않습니다.
         </p>
       </div>
 
@@ -196,16 +227,18 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
       </p>
 
       {/*
-        🔴 적어 두지 않으면 「템플릿을 골랐는데 모서리는 왜 그대로지」가 고장으로
-        읽힌다. 톤과 크기를 한 단추에 묶지 않는 것이 이 화면의 규율이다.
+        🔴 적어 두지 않으면 「톤을 골랐는데 주 버튼 색은 왜 그대로지」가 고장으로
+        읽힌다. 담당을 가르는 것이 이 화면의 규율이다.
       */}
       <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-        <strong>이 화면은 색만 바꿉니다.</strong> 모서리와 글자 크기는 템플릿에 들어 있지 않아, 무엇을
-        고르든 지금 값 그대로 남습니다. 그 둘은{" "}
-        <strong>개발자 모드 목차 → 모서리 · 글자 크기</strong>에서 따로 정합니다. 색을 한 칸씩 손보려면{" "}
-        <strong>색</strong> 화면을 쓰세요 — 거기서 한 칸이라도 고치면 이 화면은{" "}
+        <strong>이 화면은 중립색과 경고색만 바꿉니다.</strong> 강조색(주 버튼·선택된 메뉴)은{" "}
+        <strong>메인 컬러</strong>가, 모서리와 글자 크기는{" "}
+        <strong>모서리 · 글자 크기</strong>가 맡습니다 — 무엇을 고르든 그 값들은 지금 그대로 남습니다.
+        색을 한 칸씩 손보려면 <strong>색</strong> 화면을 쓰세요. 거기서 한 칸이라도 고치면 이 화면은{" "}
         <strong>직접 고친 값입니다</strong>로 바뀝니다.
       </p>
+
+      <MainColorNote mainColorName={mainColor?.name ?? null} hasTint={tint !== null} />
 
       <CurrentToneNote current={current} />
 
@@ -214,7 +247,7 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
           톤 고르기 — 고르면 저장하지 않고 아래 견본이 먼저 바뀝니다
         </legend>
         <div className="mt-1 grid gap-3 sm:grid-cols-2">
-          {UI_THEME_TEMPLATES.map((template) => (
+          {templates.map((template) => (
             <TemplateCard
               key={template.key}
               template={template}
@@ -255,7 +288,7 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
             ? "톤을 고르면 저장할 수 있습니다."
             : changedCount === 0
               ? `지금 저장돼 있는 값이 이미 「${selected.name}」입니다. 바뀔 칸이 없습니다.`
-              : `「${selected.name}」을(를) 저장하면 색 ${changedCount}칸이 바뀝니다.`}
+              : `「${selected.name}」을(를) 저장하면 중립·경고색 ${changedCount}칸이 바뀝니다.`}
         </p>
         <button
           type="button"
@@ -279,6 +312,54 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
   );
 }
 
+// ────────────────────────────────────── 메인 컬러와 톤 목록의 관계
+
+/**
+ * 🔴 「이 목록이 어디서 왔는가」를 화면에 적는다.
+ *
+ * 톤 목록은 지금 저장된 메인 컬러의 색조로 만들어진다. 적어 두지 않으면 메인
+ * 컬러를 바꾼 다음 이 화면에 들어온 사람 눈에는 **카드 이름과 색이 통째로 바뀐
+ * 것**만 보이고, 그것은 고장과 구별되지 않는다. 그래서 관계를 적고, 고치러 갈
+ * 자리로 가는 길을 함께 준다.
+ */
+function MainColorNote({
+  mainColorName,
+  hasTint,
+}: {
+  mainColorName: string | null;
+  hasTint: boolean;
+}) {
+  const name = mainColorName ?? "직접 고른 색";
+
+  if (hasTint) {
+    return (
+      <p className="rounded-md border border-zinc-200 bg-white p-3 text-sm leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+        아래 톤은{" "}
+        <strong className="text-zinc-900 dark:text-zinc-50">
+          지금 고른 메인 컬러({name})를 따라 만들어진 톤
+        </strong>
+        입니다. 중립색에 그 색조가 얹혀 있어 주 버튼과 화면 전체가 같은 계열로 보입니다. 밝기는
+        건드리지 않으므로 글자와 바탕의 대비는 색조가 없을 때와 같습니다. 메인 컬러를 바꾸면 이 목록도
+        그 색조로 다시 만들어지니, 바꾼 뒤에는 톤을 한 번 더 골라 저장하세요.{" "}
+        <Link href={MAIN_COLOR_HREF} className="font-medium underline">
+          메인 컬러 고치기
+        </Link>
+      </p>
+    );
+  }
+
+  return (
+    <p className="rounded-md border border-zinc-200 bg-white p-3 text-sm leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+      지금 메인 컬러가 <strong className="text-zinc-900 dark:text-zinc-50">{name}</strong>이라 얹을
+      색조가 없습니다. 그래서 아래는 색조가 없는 기본 여섯입니다.{" "}
+      <strong>메인 컬러를 고르면 그 색조로 물든 톤</strong>이 이 자리에 나옵니다.{" "}
+      <Link href={MAIN_COLOR_HREF} className="font-medium underline">
+        메인 컬러 고르기
+      </Link>
+    </p>
+  );
+}
+
 // ────────────────────────────────────────────────────── 지금 쓰는 톤
 
 function CurrentToneNote({ current }: { current: UiThemeTemplate | null }) {
@@ -292,8 +373,9 @@ function CurrentToneNote({ current }: { current: UiThemeTemplate | null }) {
   }
   return (
     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-      <strong>지금은 직접 고친 값입니다.</strong> 저장된 색이 여섯 템플릿 어느 것과도 맞지 않습니다 —
-      색 화면에서 한 칸이라도 손으로 고치면 이 상태가 됩니다. 여기서 톤을 하나 골라 저장하면 색{" "}
+      <strong>지금은 직접 고친 값입니다.</strong> 저장된 중립·경고색이 아래 여섯 어느 것과도 맞지
+      않습니다 — 색 화면에서 한 칸이라도 손으로 고쳤거나, <strong>메인 컬러를 바꾼 뒤 톤을 다시 저장하지
+      않았을 때</strong> 이 상태가 됩니다. 여기서 톤을 하나 골라 저장하면 중립·경고색{" "}
       <strong>전부</strong>가 그 톤으로 덮입니다.
     </p>
   );
@@ -551,17 +633,17 @@ function SaveConfirmDialog({
       <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
         {template ? (
           <>
-            <strong className="text-zinc-900 dark:text-zinc-50">{template.name}</strong> 으로 색{" "}
-            {changedCount}칸을 바꿉니다. <strong>모든 사용자</strong>의 화면이 다음 화면 이동부터 이
-            톤으로 그려집니다.
+            <strong className="text-zinc-900 dark:text-zinc-50">{template.name}</strong> 으로
+            중립·경고색 {changedCount}칸을 바꿉니다. <strong>모든 사용자</strong>의 화면이 다음 화면
+            이동부터 이 톤으로 그려집니다.
           </>
         ) : (
           <>고른 톤이 없습니다.</>
         )}
       </p>
       <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-        모서리와 글자 크기는 바뀌지 않습니다. 되돌리려면 <strong>기본</strong>을 고르고 다시 저장하면
-        되고, 화면이 읽히지 않을 만큼 어긋났다면 주소창에{" "}
+        강조색(주 버튼·선택된 메뉴)과 모서리·글자 크기는 바뀌지 않습니다. 되돌리려면{" "}
+        <strong>기본</strong>을 고르고 다시 저장하면 되고, 화면이 읽히지 않을 만큼 어긋났다면 주소창에{" "}
         <code className="font-mono">/api/theme/bypass</code>를 쳐서 이 브라우저만 원래 화면으로 볼 수
         있습니다.
       </p>

@@ -642,6 +642,108 @@ export type UiThemePrimaryContrastReading = {
   ratio: number;
 };
 
+// ──────────────────────────────────────────────────────── 색조 읽기·얹기
+
+/**
+ * ── 왜 이 셋이 **여기** 있는가 ──────────────────────────────────────────
+ * 색상 톤 템플릿(ui-theme-templates.ts)이 「지금 고른 메인 컬러의 색조로 중립을
+ * 물들인 톤」을 만들려면 두 가지가 필요하다 — 저장된 강조색에서 색조를 읽는 일과,
+ * 그 색조를 다른 색에 얹는 일. 둘 다 HSL 변환이고, 그 변환은 이 파일이 이미
+ * 갖고 있다. 저쪽에 30줄을 다시 적으면 두 벌이 되고, 램프를 손보는 날 한쪽만
+ * 고쳐져 「메인 컬러는 파랑인데 톤은 옛 파랑」이 된다.
+ */
+
+/** 색 하나가 갖는 색조 — 색상(0~360)과 채도(0~1). 밝기는 들어 있지 않다. */
+export type UiThemeTint = { hue: number; saturation: number };
+
+/**
+ * 색 하나에서 색조만 읽는다. 밝기는 버린다 — 램프를 만들 때와 같은 규칙이다
+ * (파일 머리말 ②).
+ */
+export function uiThemeTintOf(hex: string): UiThemeTint {
+  return hueAndSaturationOf(hex);
+}
+
+/** 휘도를 맞추는 이분 탐색의 횟수. 8비트 색이 갖는 자리보다 넉넉하다. */
+const TINT_MATCH_STEPS = 24;
+
+/**
+ * 이 색의 **휘도는 그대로 두고** 색조만 갈아 끼운다.
+ *
+ * ── 🔴 왜 HSL 밝기가 아니라 휘도를 맞추는가 ─────────────────────────────
+ * 중립색은 글자와 바탕 그 자체라, 잘못되면 강조색보다 훨씬 위험하다. 그래서
+ * 이 변환이 지키는 것을 「거의 안 움직인다」가 아니라 **「한 자도 안 움직인다」**
+ * 로 잡았다 — 대비비(contrastRatio)는 두 색의 상대휘도만으로 정해지므로, 물든
+ * 색의 휘도가 물들기 전과 같으면 **모든 대비가 그대로**다. 저장 거절선 4쌍도,
+ * 경고선 11쌍도, 아직 목록에 없는 어떤 조합도 함께 그대로다.
+ *
+ * HSL 밝기를 고정하는 편이 훨씬 짧지만 그것은 다른 물건이다. 같은 HSL 밝기라도
+ * 노랑은 파랑보다 훨씬 밝아서(휘도 가중치가 R 0.2126 · G 0.7152 · B 0.0722),
+ * 색조에 따라 대비가 눈에 띄게 흔들린다 — 실제로 재 보면 「흐린 글자 / 연한
+ * 바탕」 짝이 4.62 에서 3.32 까지 내려갔다. 사람 눈에는 같은 회색인데 어떤
+ * 메인 컬러를 골랐느냐에 따라 읽기가 나빠지는 셈이고, 그 인과는 화면에서
+ * 절대 보이지 않는다.
+ *
+ * ── 이분 탐색이 성립하는 근거 ───────────────────────────────────────────
+ * 색상·채도를 고정하면 세 채널이 전부 HSL 밝기에 대해 단조증가한다(hslToHex
+ * 주석). 휘도는 채널의 단조증가 함수이므로 휘도도 밝기에 대해 단조증가한다.
+ * 재는 자는 `brightnessOf`(검정과의 대비) 하나로, 이 파일이 램프의 단조 보정에
+ * 쓰는 것과 **같은 자**다.
+ *
+ * 순백(#ffffff)과 순검(#000000)은 목표 휘도가 각각 1과 0이라 답이 l=1·l=0 이고,
+ * 그 자리에서는 채도가 아무리 높아도 색차가 0이다 — **양 끝은 물들지 않는다.**
+ * 고대비 톤의 순검·순백이 물든 목록에서도 한 자 그대로 남는 이유가 이것이다.
+ */
+export function tintUiThemeColor(hex: string, tint: UiThemeTint): string {
+  const target = brightnessOf(hex);
+
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < TINT_MATCH_STEPS; i += 1) {
+    const mid = (low + high) / 2;
+    if (brightnessOf(hslToHex(tint.hue, tint.saturation, mid)) < target) low = mid;
+    else high = mid;
+  }
+
+  // 8비트로 떨어뜨리면 휘도가 계단으로 움직이므로 마지막 두 후보 가운데 목표에
+  // 가까운 쪽을 고른다. 「가까운 쪽」을 고르지 않으면 늘 한쪽으로만 치우친다.
+  const lower = hslToHex(tint.hue, tint.saturation, low);
+  const upper = hslToHex(tint.hue, tint.saturation, high);
+  return Math.abs(brightnessOf(lower) - target) <= Math.abs(brightnessOf(upper) - target)
+    ? lower
+    : upper;
+}
+
+/**
+ * 「색조가 있다」고 볼 최소 채도.
+ *
+ * 등록부의 기본 강조색(`#18181b`)은 채도가 0이 아니다 — zinc 는 아주 옅은 푸른
+ * 기가 있는 회색이라 0.06 쯤 된다. 그래서 `> 0` 으로는 「회색(기본)」을 가려낼 수
+ * 없다. 반대로 미리 만들어 둔 메인 컬러 여덟의 주 버튼은 전부 0.69 이상이다.
+ * 그 사이가 넓게 비어 있어 0.15 를 자리로 잡았다 — 아래로는 회색 계열이 전부
+ * 걸러지고, 위로는 실제로 「색」을 고른 경우가 전부 통과한다.
+ */
+export const UI_THEME_TINT_MIN_SATURATION = 0.15;
+
+/**
+ * 저장된 강조색이 갖는 색조. 물들일 것이 없으면 null.
+ *
+ * 🔴 저장하지 않고 **값을 대조해** 알아낸다(detectUiThemeMainColor 과 같은 방식).
+ * 「지금 무슨 메인 컬러를 쓰는가」를 따로 기억해 두는 표를 만들지 않는 것이 이
+ * 축의 규율이고, 색조도 같은 규율을 따른다.
+ *
+ * 읽는 자리는 주 버튼 단계(primary-900) 하나다 — 등록부가 그 단계를 「앱의 메인
+ * 컬러」라고 부르고, 생성기는 램프 열한 단을 **같은 색상·채도**로 만들므로 어느
+ * 단계에서 읽어도 같은 색조가 나온다. 그중 주 버튼이 사람이 실제로 「이 색」이라
+ * 부르는 자리다.
+ */
+export function readUiThemePrimaryTint(rows: readonly UiThemeOverrideRow[]): UiThemeTint | null {
+  const anchor = resolveUiTheme(rows).light[ACCENT_ANCHOR_KEY];
+  if (typeof anchor !== "string") return null;
+  const tint = uiThemeTintOf(anchor);
+  return tint.saturation >= UI_THEME_TINT_MIN_SATURATION ? tint : null;
+}
+
 /**
  * 위 짝들을 실제로 잰다. 화면과 시험이 **같은 함수**를 부른다 — 두 벌의 판정이
  * 어긋날 자리를 만들지 않는다.
