@@ -12,6 +12,7 @@ import {
   type UiThemeOverrideRow,
   type UiThemeToken,
 } from "@/lib/domain/ui-theme-tokens";
+import { detectUiThemeTemplate } from "@/lib/domain/ui-theme-templates";
 import {
   scopeFitsUiThemeToken,
   uiThemeDefaultFor,
@@ -61,6 +62,11 @@ export default async function DeveloperModePage() {
   const colorCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind === "color");
   const shapeCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind !== "color");
 
+  // 「지금 무슨 톤을 쓰는가」는 따로 저장하지 않는다 — 저장된 값을 대조해
+  // 알아낸다(domain/ui-theme-templates.ts). 색 화면에서 한 칸만 손으로 고쳐도
+  // 이 이름이 곧바로 「직접 고친 값」으로 바뀐다.
+  const currentTemplate = detectUiThemeTemplate(savedThemeTokens);
+
   return (
     <>
       <section className="flex flex-col gap-3">
@@ -73,19 +79,32 @@ export default async function DeveloperModePage() {
         </div>
 
         {isDatabaseMode ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-3">
+            {/*
+              🔴 톤을 먼저 고르고 세부를 손보는 순서가 자연스럽다. 그래서 이
+              카드가 목차의 맨 위에 있고, 한 줄을 통째로 쓴다.
+            */}
             <DeveloperMenuCard
-              href="/settings/developer/theme/colors"
-              title="색"
-              description="글자·바탕·테두리와 경고색을 라이트/다크 각각 정합니다. 저장 전에 대비를 재서 읽을 수 없는 조합을 막습니다."
-              changedCount={colorCount}
+              href="/settings/developer/theme/templates"
+              title="색상 톤 템플릿"
+              description="미리 맞춰 둔 색 한 벌을 골라 앱 전체의 인상을 한 번에 바꿉니다. 모서리와 글자 크기는 바뀌지 않습니다."
+              badge={`지금 쓰는 톤 · ${currentTemplate ? currentTemplate.name : "직접 고친 값"}`}
+              changedCount={0}
             />
-            <DeveloperMenuCard
-              href="/settings/developer/theme/shapes"
-              title="모서리 · 글자 크기"
-              description="상자의 둥근 정도와 본문·제목 글자 크기를 정합니다. 라이트와 다크가 같은 값을 씁니다."
-              changedCount={shapeCount}
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DeveloperMenuCard
+                href="/settings/developer/theme/colors"
+                title="색"
+                description="글자·바탕·테두리와 경고색을 라이트/다크 각각 정합니다. 저장 전에 대비를 재서 읽을 수 없는 조합을 막습니다."
+                changedCount={colorCount}
+              />
+              <DeveloperMenuCard
+                href="/settings/developer/theme/shapes"
+                title="모서리 · 글자 크기"
+                description="상자의 둥근 정도와 본문·제목 글자 크기를 정합니다. 라이트와 다크가 같은 값을 씁니다."
+                changedCount={shapeCount}
+              />
+            </div>
           </div>
         ) : (
           <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
@@ -104,11 +123,12 @@ export default async function DeveloperModePage() {
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">앞으로 여기에 들어올 것</h2>
         <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-          위의 화면 토큰(색 · 모서리 · 글자 크기)이 첫 항목입니다. 그 위에 화면 전체의 인상을 한 번에
-          바꾸는 디자인 템플릿, 버튼과 팝업·알림의 모양, 화면에 박혀 있는 고정 문구를 코드를 고치지 않고
-          편집하는 자리, 그리고 실제 자료를 건드리지 않고 더미 데이터로 기능을 시험해 보는 자리가 차례로
-          들어옵니다. 여기서 다루는 것은 <strong>설정을 적용하는 쪽</strong>까지입니다 — 앱이 자기 다음
-          버전을 자기 안에서 배포할 수는 없으므로, 버전 적용이나 운영 배포는 이 화면의 일이 아닙니다.
+          위의 화면 토큰(색 · 모서리 · 글자 크기)이 첫 항목이었고, 색 한 벌을 한 번에 갈아 끼우는 색상
+          톤 템플릿이 그 위에 얹혔습니다. 앞으로는 버튼과 팝업·알림의 모양, 화면에 박혀 있는 고정 문구를
+          코드를 고치지 않고 편집하는 자리, 그리고 실제 자료를 건드리지 않고 더미 데이터로 기능을 시험해
+          보는 자리가 차례로 들어옵니다. 여기서 다루는 것은 <strong>설정을 적용하는 쪽</strong>까지입니다
+          — 앱이 자기 다음 버전을 자기 안에서 배포할 수는 없으므로, 버전 적용이나 운영 배포는 이 화면의
+          일이 아닙니다.
         </p>
       </section>
     </>

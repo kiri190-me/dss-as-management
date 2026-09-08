@@ -13,6 +13,10 @@ import Link from "next/link";
  * 어디를 건드려 놨는지 알 수 있어야 해서 카드에 싣는다 — 0이면 배지를 그리지
  * 않는다. 「손댄 곳이 없다」를 굳이 배지로 말하면, 배지가 있다는 사실 자체가
  * 신호가 되지 못한다.
+ *
+ * `badge` 는 「칸 수」로는 말할 수 없는 지금 상태를 한 마디로 적는 자리다 —
+ * 색상 톤 템플릿 카드가 「지금 쓰는 톤」의 이름을 여기 싣는다. 셈이 아니라
+ * 상태이므로 0과 같은 「없음」이 없고, 그래서 값이 있으면 언제나 그린다.
  * ============================================================================
  */
 export default function DeveloperMenuCard({
@@ -20,11 +24,13 @@ export default function DeveloperMenuCard({
   title,
   description,
   changedCount,
+  badge,
 }: {
   href: string;
   title: string;
   description: string;
   changedCount: number;
+  badge?: string;
 }) {
   return (
     <Link
@@ -33,6 +39,11 @@ export default function DeveloperMenuCard({
     >
       <span className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{title}</span>
+        {badge && (
+          <span className="rounded-sm bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+            {badge}
+          </span>
+        )}
         {changedCount > 0 && (
           <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
             기본값과 다른 칸 {changedCount}개
