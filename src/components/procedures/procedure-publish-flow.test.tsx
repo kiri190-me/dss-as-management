@@ -35,6 +35,21 @@ const read = (relativePath: string) => readFileSync(new URL(relativePath, repoUr
 /** 줄바꿈·들여쓰기 차이로 시험이 깨지지 않도록 공백을 하나로 접는다. */
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
+/**
+ * 원본에서 **함수 하나의 본문만** 잘라낸다.
+ *
+ * 같은 관문(예: `actorMay(actor, canManageTechnicalTemplates)`)이 이웃 함수에도
+ * 있으므로, 시작점부터 파일 끝까지 자르면 정작 이 함수의 관문이 사라져도 이웃
+ * 것에 걸려 시험이 통과해 버린다. 그래서 다음 함수 앞에서 끊는다.
+ */
+const sliceFunction = (source: string, startMarker: string, endMarker: string) => {
+  const start = source.indexOf(startMarker);
+  assert.ok(start >= 0, `원본에서 '${startMarker}' 를 찾지 못했다`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.ok(end > start, `원본에서 '${endMarker}' 를 찾지 못했다`);
+  return source.slice(start, end);
+};
+
 const detailScreen = read("src/components/procedures/ProcedureTemplateDetailScreen.tsx");
 const publishButton = read("src/components/procedures/editor/PublishTemplateButton.tsx");
 const detailPage = read("src/app/(app)/procedures/[id]/page.tsx");
@@ -90,26 +105,52 @@ describe("🔴 화면 판정과 서버 판정이 같은 것을 본다", () => {
   test("게시 단추의 노출 판정은 publishProcedureTemplate 이 실제로 보는 두 함수를 그대로 쓴다", () => {
     const canPublishExpr = detailPage.slice(detailPage.indexOf("const canPublish ="), detailPage.lastIndexOf("return ("));
     assert.ok(canPublishExpr.length > 0, "page.tsx 에서 canPublish 계산부를 찾지 못했다");
-    assert.match(canPublishExpr, /canManageTechnicalTemplates\(actingUser\.role\)/, "서버의 거친 관문과 같은 함수");
+    // 「개발자 표시」가 들어오면서 판정이 `actorMay(행위자, 정책함수)` 로 감싸였다.
+    // 감싼 모양을 통째로 못 박는다 — 정책 함수 이름만 찾으면 **누구를 판정하는지**가
+    // 빠져나가서, 화면과 서버가 서로 다른 사람을 봐도 시험이 통과한다.
     assert.match(
-      canPublishExpr,
-      /canActorPublishTemplateOfCategory\(actingUser\.role, template\.category\)/,
+      flat(canPublishExpr),
+      /actorMay\(actingUser, canManageTechnicalTemplates\)/,
+      "서버의 거친 관문과 같은 함수 — 승격 창구(actorMay)를 거쳐 actingUser 로 판정한다"
+    );
+    assert.match(
+      flat(canPublishExpr),
+      /actorMay\(actingUser, \(role\) => canActorPublishTemplateOfCategory\(role, template\.category\)\)/,
       "서버의 분류별 관문과 같은 함수"
     );
     assert.match(detailPage, /canPublish=\{canPublish\}/, "계산한 값을 화면에 넘겨야 한다");
   });
 
   test("그 두 함수가 정말 서버(mutation)가 보는 것과 같은 함수다", () => {
-    const publishBody = templateMutations.slice(templateMutations.indexOf("export async function publishProcedureTemplate"));
-    assert.match(publishBody, /canManageTechnicalTemplates\(actor\.role\)/);
-    assert.match(publishBody, /canActorPublishTemplateOfCategory\(actor\.role, template\.category\)/);
+    const publishBody = sliceFunction(
+      templateMutations,
+      "export async function publishProcedureTemplate",
+      "export async function archiveProcedureTemplate"
+    );
+    assert.match(flat(publishBody), /actorMay\(actor, canManageTechnicalTemplates\)/);
+    assert.match(
+      flat(publishBody),
+      /actorMay\(actor, \(role\) => canActorPublishTemplateOfCategory\(role, template\.category\)\)/
+    );
   });
 
   test("게시 서버 액션의 사전 검사도 mutation 의 거친 관문과 같은 함수다", () => {
-    const body = templateActions.slice(templateActions.indexOf("export async function publishProcedureTemplateAction"));
-    assert.ok(body.length > 0, "게시 서버 액션을 찾지 못했다");
-    assert.match(body, /canManageTechnicalTemplates\(session\.role\)/, "권한 없는 사람은 여기서 먼저 걸린다");
-    assert.match(flat(body), /canManageTechnicalTemplates\(session\.role\)\) \{ return \{ ok: false, code: "FORBIDDEN"/);
+    const body = sliceFunction(
+      templateActions,
+      "export async function publishProcedureTemplateAction",
+      "export async function createManualTechnicalProcedureTemplateAction"
+    );
+    // 사전 검사의 판정 대상은 세션에 개발자 표시만 얹은 행위자다
+    // (sessionActorWithDeveloperFlag — 역할은 여전히 토큰 값이다).
+    assert.match(
+      flat(body),
+      /actorMay\(await sessionActorWithDeveloperFlag\(session\), canManageTechnicalTemplates\)/,
+      "권한 없는 사람은 여기서 먼저 걸린다"
+    );
+    assert.match(
+      flat(body),
+      /if \(!actorMay\(await sessionActorWithDeveloperFlag\(session\), canManageTechnicalTemplates\)\) \{ return \{ ok: false, code: "FORBIDDEN"/
+    );
   });
 
   test("🔴 액션은 mutation 의 실패 결과를 고치지 않고 그대로 돌려준다 (FORBIDDEN 이 화면까지 온다)", () => {
