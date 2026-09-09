@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
-import ApprovalActionDialog from "./ApprovalActionDialog";
+import ApprovalActionDialog, { type ApprovalAssigneeOption } from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
@@ -44,12 +45,19 @@ export default function DatabaseRepairInspectionCard({
   record,
   actingUser,
   currentVersion,
+  assigneeCandidates,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
   actingUser: ActingUser;
   /** 지금 접수 건의 version — 이 값과 다른 승인은 서버가 무효로 본다. */
   currentVersion: number;
+  /**
+   * 「누구에게 보낼까요」 후보 — 지금 검수 승인을 처리할 수 있는 사람들이다.
+   * 서버에서 계산해 내려온다(page.tsx). 지정은 선택이라 비어 있어도 요청은
+   * 그대로 된다.
+   */
+  assigneeCandidates: ApprovalAssigneeOption[];
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -59,6 +67,10 @@ export default function DatabaseRepairInspectionCard({
   const displayStatus = displayStatusOf(record, currentVersion);
   const requestEligible = actorHasAllowedRole(actingUser, REQUEST_ELIGIBLE_ROLES);
   const decideEligible = actorHasAllowedRole(actingUser, DECIDE_ELIGIBLE_ROLES);
+  // 자격(위)을 통과한 **뒤** 보는 관문이다. 서버가 실제로 강제하는 것과 같은
+  // 함수를 부른다 — 여기서 따로 계산하면 「단추는 보이는데 누르면 거절」이나
+  // 그 반대가 된다. 지정이 없으면(null) 언제나 참이라 지금까지와 같다.
+  const assignedGateOpen = mayDecideAssignedApproval(record?.assignedApproverUserId ?? null, actingUser);
 
   const actions: DatabaseApprovalActionButton[] = [];
   let disabledReason: string | null = null;
@@ -79,24 +91,35 @@ export default function DatabaseRepairInspectionCard({
       disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
     }
   } else if (displayStatus === "REQUESTED") {
-    if (decideEligible) {
+    if (!decideEligible) {
+      disabledReason = "최고관리자·관리자·A/S 엔지니어만 처리할 수 있습니다.";
+    } else if (!assignedGateOpen) {
+      // 자격은 있는데 이 요청이 남에게 지정돼 있는 경우. 단추를 감추기만 하면
+      // 사람은 왜 못 누르는지 모른다 — 누구에게 갔는지 이름을 적는다.
+      disabledReason = record?.assignedApproverName
+        ? `이 요청은 ${record.assignedApproverName} 님에게 지정되어 있습니다.`
+        : "이 요청은 지정된 승인자만 처리할 수 있습니다.";
+    } else {
       actions.push(
         { key: "approve", label: "검수 승인", onClick: () => setDialogState("APPROVED") },
         { key: "reject", label: "반려", onClick: () => setDialogState("REJECTED"), tone: "danger" }
       );
-    } else {
-      disabledReason = "최고관리자·관리자·A/S 엔지니어만 처리할 수 있습니다.";
     }
   } else if (displayStatus === "APPROVED") {
     disabledReason = "이미 승인 완료되어 추가 처리를 할 수 없습니다.";
   }
 
-  async function handleConfirm(comment: string | null) {
+  async function handleConfirm(comment: string | null, assignedApproverUserId: string | null) {
     if (!dialogState || isSubmitting) return;
     setIsSubmitting(true);
     const result =
       dialogState === "REQUEST"
-        ? await requestRepairCaseApprovalAction({ repairCaseId, approvalType: "REPAIR_INSPECTION", reason: comment })
+        ? await requestRepairCaseApprovalAction({
+            repairCaseId,
+            approvalType: "REPAIR_INSPECTION",
+            reason: comment,
+            assignedApproverUserId,
+          })
         : await decideRepairCaseApprovalAction({
             repairCaseId,
             approvalType: "REPAIR_INSPECTION",
@@ -137,7 +160,10 @@ export default function DatabaseRepairInspectionCard({
         title={dialogState ? DIALOG_TITLES[dialogState] : ""}
         requireComment={dialogState === "REJECTED"}
         isSubmitting={isSubmitting}
-        onConfirm={(comment) => void handleConfirm(comment)}
+        // 고르는 자리는 **요청일 때만** 나온다 — 같은 창을 승인·반려에도
+        // 쓰는데, 그때는 지정할 것이 없다(이미 정해진 요청을 처리할 뿐이다).
+        assigneeOptions={dialogState === "REQUEST" ? assigneeCandidates : undefined}
+        onConfirm={(comment, assignedApproverUserId) => void handleConfirm(comment, assignedApproverUserId)}
         onCancel={() => setDialogState(null)}
       />
     </>

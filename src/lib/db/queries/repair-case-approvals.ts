@@ -1,13 +1,16 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseApprovals, users } from "../schema";
+import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { INSPECTION_DECIDE_ELIGIBLE_ROLES } from "../mutations/repair-case-approvals";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 const requester = alias(users, "requester");
 const decider = alias(users, "decider");
 const delegator = alias(users, "delegator");
+const assignedApprover = alias(users, "assigned_approver");
 
 export type ApprovalRecordRow = {
   id: string;
@@ -17,6 +20,14 @@ export type ApprovalRecordRow = {
   requestedByName: string;
   requestedAt: string;
   requestReason: string | null;
+  /**
+   * 이 요청을 처리하도록 지정된 사람. `null` 은 「지정 없음」이고 정상값이다 —
+   * 자격 있는 사람 누구나 처리한다(스키마 칸 주석 참조). 화면이 이 값을
+   * mayDecideAssignedApproval 에 그대로 넘겨 단추를 열지 말지 정한다.
+   */
+  assignedApproverUserId: string | null;
+  /** 지정된 사람의 이름. 지정이 없으면 `null` — 카드가 `-` 로 그린다. */
+  assignedApproverName: string | null;
   decidedByUserId: string | null;
   decidedByName: string | null;
   decidedAt: string | null;
@@ -34,6 +45,8 @@ const SELECT_COLUMNS = {
   requestedByName: requester.name,
   requestedAt: repairCaseApprovals.requestedAt,
   requestReason: repairCaseApprovals.requestReason,
+  assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
+  assignedApproverName: assignedApprover.name,
   decidedByUserId: repairCaseApprovals.decidedByUserId,
   decidedByName: decider.name,
   decidedAt: repairCaseApprovals.decidedAt,
@@ -49,7 +62,9 @@ function baseQuery() {
     .from(repairCaseApprovals)
     .innerJoin(requester, eq(repairCaseApprovals.requestedByUserId, requester.id))
     .leftJoin(decider, eq(repairCaseApprovals.decidedByUserId, decider.id))
-    .leftJoin(delegator, eq(repairCaseApprovals.delegatedFromUserId, delegator.id));
+    .leftJoin(delegator, eq(repairCaseApprovals.delegatedFromUserId, delegator.id))
+    // LEFT JOIN — 지정이 없는 행(대부분이 그렇다)이 여기서 떨어지면 안 된다.
+    .leftJoin(assignedApprover, eq(repairCaseApprovals.assignedApproverUserId, assignedApprover.id));
 }
 
 function toRow(row: Awaited<ReturnType<typeof baseQuery>>[number]): ApprovalRecordRow {
@@ -104,6 +119,55 @@ export async function getCurrentApprovalsForCase(repairCaseId: string): Promise<
     approvalType,
     latest: latestByType.get(approvalType) ?? null,
   }));
+}
+
+export type ApprovalAssigneeCandidate = {
+  id: string;
+  name: string;
+  role: string;
+};
+
+/**
+ * 검수 승인 요청 창의 「누구에게 보낼까요」 후보 목록 — 지금 그 승인을 처리할
+ * 수 있는 사람들이다.
+ *
+ * 🔴 자격 판정은 요청 mutation 과 **같은 목록·같은 함수**로 한다
+ * (INSPECTION_DECIDE_ELIGIBLE_ROLES + actorHasAllowedRole). 여기서 목록을 한
+ * 벌 더 만들면 화면에는 고를 수 있게 나오는데 요청하면 서버가 거절하는(또는
+ * 그 반대의) 어긋남이 생긴다 — 그 어긋남은 사용자에게 「왜 안 되지」로만
+ * 보인다.
+ *
+ * 계정 상태 조건도 요청 mutation 이 트랜잭션 안에서 다시 보는 것과 같다:
+ * 삭제 안 됨 · 승인됨 · 활성 · 잠기지 않음. 이 목록은 어디까지나 화면을 위한
+ * 힌트이고, 최종 판정은 언제나 mutation 이 자기 트랜잭션 안에서 다시 한다.
+ *
+ * 역할 필터를 SQL 이 아니라 메모리에서 하는 이유: 개발자 표시(is_developer)가
+ * 켜진 계정은 역할이 목록에 없어도 최고관리자 권한을 더해 받는데, 그 규칙은
+ * actorHasAllowedRole 안에만 있다. SQL 에 역할 목록을 적으면 그 계정이 조용히
+ * 빠진다. 사용자 표는 규모가 작아 전량을 읽어 거르는 비용이 문제되지 않는다.
+ */
+export async function listInspectionApproverCandidates(): Promise<ApprovalAssigneeCandidate[]> {
+  const rows = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      role: users.role,
+      isDeveloper: users.isDeveloper,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.isDeleted, false),
+        eq(users.approvalStatus, "APPROVED"),
+        eq(users.isActive, true),
+        isNull(users.lockedAt)
+      )
+    )
+    .orderBy(asc(users.name));
+
+  return rows
+    .filter((row) => actorHasAllowedRole(row, INSPECTION_DECIDE_ELIGIBLE_ROLES))
+    .map((row) => ({ id: row.id, name: row.name, role: row.role }));
 }
 
 /**

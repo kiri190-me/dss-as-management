@@ -90,9 +90,16 @@ export default function DatabaseApprovalCard({
         </p>
       )}
 
+      {/*
+        「지정 승인자」도 이 격자 **안**에 둔다 — 카드 밖 형제로 내보내면
+        부모(2열 격자)의 칸 하나를 먹어 옆 카드가 다음 줄로 밀린다.
+        지정이 없으면 Field 가 다른 칸들과 똑같이 `-` 로 그린다. 그것이 정상
+        상태다(= 자격 있는 사람 누구나 처리).
+      */}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
         <Field label="요청자" value={record?.requestedByName ?? null} />
         <Field label="승인자" value={decidedByLabel(record)} />
+        <Field label="지정 승인자" value={record?.assignedApproverName ?? null} />
         <Field label="요청 시각" value={formatTimestamp(record?.requestedAt ?? null)} />
         <Field label="결정 시각" value={formatTimestamp(record?.decidedAt ?? null)} />
       </dl>

@@ -6,6 +6,7 @@ import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-appro
 import { resolveShipmentDecideAuthorization } from "./shipment-delegations";
 import { countNotificationTargets } from "@/lib/domain/notifications";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
@@ -67,6 +68,23 @@ import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approv
  * 권한이 없는 종류는 조회 조건에서 아예 빠진다 — 걸러 내는 게 아니라 애초에
  * 묻지 않는다.
  *
+ * ── 지정 승인자 ─────────────────────────────────────────────────────────
+ * 요청 행에 「누가 처리할지」가 지정돼 있을 수 있다
+ * (`assigned_approver_user_id`). 지정된 건은 **그 사람(과 최고관리자)에게만**
+ * 보여야 한다 — 안 그러면 지정이 장식이 되고, 엉뚱한 사람이 알림을 받는다.
+ * 판정은 여기서 새로 적지 않고 `mayDecideAssignedApproval`
+ * (auth/approval-assignment.ts) 하나만 부른다. 결재를 실제로 막는
+ * decideRepairCaseApproval도, 단추를 그리는 화면도 같은 함수를 본다.
+ *
+ * ⚠️ **실패하는 방향이 조용하다.** 잘못 좁히면 처리해야 할 사람이 알림을 못
+ * 받는데, 그 실패는 화면에 아무 표시도 남기지 않는다(그냥 목록에 안 뜬다).
+ * 그래서 두 가지를 지킨다:
+ *  - 지정이 NULL 인 건은 **지금과 똑같이** 자격 있는 사람 모두에게 보인다.
+ *    통합 시험이 그 경로를 못 박는다.
+ *  - 거르는 자리는 「(건, 종류)별 가장 최근 행」을 고른 **뒤**다. 접기 전에
+ *    거르면 최신 행이 빠지면서 옛 REQUESTED 행이 최신 행 행세를 하게 되고,
+ *    지정을 존중하기는커녕 **엉뚱한 사람에게 옛 요청이 뜬다.**
+ *
  * 이 함수는 읽기 전용이고 최종 판정도 아니다. 실제 승인/반려는 여전히
  * decideRepairCaseApproval이 자기 트랜잭션 안에서 전부 다시 확인한다.
  * ============================================================================
@@ -88,8 +106,17 @@ export type PendingApprovalItem = {
   state: "PENDING";
 };
 
+/** 지정 관문(mayDecideAssignedApproval)에 그대로 넘기는 최소 모양. */
+type AssignmentActor = { id: string; role: string; isDeveloper: boolean };
+
 type DecidableTypes = {
   types: RepairCaseApprovalType[];
+  /**
+   * 지정 관문에 넘길 행위자. `types`가 비어 있으면 null이다(그때는 판정할
+   * 것도 없다). 역할 승격 규칙이 들어 있는 함수에 그대로 넘겨야 하므로
+   * `role`·`isDeveloper`를 함께 들고 다닌다.
+   */
+  actor: AssignmentActor | null;
 };
 
 /**
@@ -103,7 +130,7 @@ async function resolveDecidableApprovalTypes(actorUserId: string): Promise<Decid
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
 
   if (!actor || actor.approvalStatus !== "APPROVED") {
-    return { types: [] };
+    return { types: [], actor: null };
   }
 
   const types: RepairCaseApprovalType[] = [];
@@ -116,7 +143,10 @@ async function resolveDecidableApprovalTypes(actorUserId: string): Promise<Decid
   if (shipmentAuthorization.allowed) {
     types.push("FINAL_SHIPMENT");
   }
-  return { types };
+  return {
+    types,
+    actor: { id: actorUserId, role: actor.role, isDeveloper: actor.isDeveloper },
+  };
 }
 
 /**
@@ -150,8 +180,8 @@ export async function canDecideAnyRepairCaseApproval(actorUserId: string): Promi
  * 워크플로 단계는 보지 않는다 — 단계가 무엇이든 요청이 들어와 있으면 나온다.
  */
 export async function listRepairCasesPendingMyApproval(actorUserId: string): Promise<PendingApprovalItem[]> {
-  const { types } = await resolveDecidableApprovalTypes(actorUserId);
-  if (types.length === 0) return [];
+  const { types, actor } = await resolveDecidableApprovalTypes(actorUserId);
+  if (types.length === 0 || !actor) return [];
 
   // 후보는 요청 기록이다 — 내가 결재할 수 있는 종류의 결재 행 전부를, 그 행이
   // 달린 접수 건과 함께 가져온다. 워크플로 단계는 조건에 없다(파일 상단 주석
@@ -168,6 +198,9 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       approvalType: repairCaseApprovals.approvalType,
       status: repairCaseApprovals.status,
       repairCaseVersionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
+      // 지정 승인자. NULL이면 「지정 없음」이고, 그때는 지금까지와 똑같이
+      // 자격 있는 사람 모두에게 보인다(파일 상단 "지정 승인자" 참조).
+      assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
     })
     .from(repairCaseApprovals)
     .innerJoin(repairCases, eq(repairCases.id, repairCaseApprovals.repairCaseId))
@@ -206,6 +239,7 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       approvalType: RepairCaseApprovalType;
       status: string;
       repairCaseVersionAtRequest: number;
+      assignedApproverUserId: string | null;
     }
   >();
   for (const row of approvalRows) {
@@ -218,6 +252,11 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
   for (const latest of latestByCaseAndType.values()) {
     const state = resolveApprovalState(latest, latest.version);
     if (state !== "PENDING") continue;
+    // 🔴 지정 관문은 **접기가 끝난 뒤** 본다. 접기 전에 걸러 내면 최신 행이
+    // 빠지면서 옛 REQUESTED 행이 최신 행 행세를 하게 되고, 지정을 존중하기는
+    // 커녕 엉뚱한 사람에게 옛 요청이 뜬다. NULL(지정 없음)은 언제나 통과하므로
+    // 이 줄은 기존 동작을 바꾸지 않는다.
+    if (!mayDecideAssignedApproval(latest.assignedApproverUserId, actor)) continue;
     items.push({
       repairCaseId: latest.repairCaseId,
       intakeNumber: latest.intakeNumber,

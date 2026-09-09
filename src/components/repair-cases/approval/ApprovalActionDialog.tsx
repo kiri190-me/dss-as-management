@@ -2,12 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 
+export type ApprovalAssigneeOption = {
+  id: string;
+  name: string;
+  /** 역할 이름표 — 동명이인을 구별하는 데만 쓴다. 없으면 이름만 보인다. */
+  roleLabel?: string;
+};
+
 type ApprovalActionDialogProps = {
   isOpen: boolean;
   title: string;
   requireComment: boolean;
   isSubmitting: boolean;
-  onConfirm: (comment: string | null) => void;
+  /**
+   * 「누구에게 보낼까요」 고르는 자리의 후보. **주지 않으면 그 자리를 아예
+   * 그리지 않는다** — 이 창은 요청·승인·반려 셋에 함께 쓰이고 검수 카드와
+   * 출하 카드 둘 다 쓰므로, 고르는 자리가 나와야 하는 것은 검수 승인 **요청**
+   * 하나뿐이다. 나머지 경우는 이 속성을 주지 않아 지금과 똑같이 그려진다.
+   */
+  assigneeOptions?: ApprovalAssigneeOption[];
+  /**
+   * 두 번째 인자는 고른 사람의 id다. 고르는 자리를 그리지 않았으면 언제나
+   * `null`이므로, 그 자리를 쓰지 않는 호출부는 인자를 하나만 받으면 된다.
+   */
+  onConfirm: (comment: string | null, assignedApproverUserId: string | null) => void;
   onCancel: () => void;
 };
 
@@ -21,12 +39,16 @@ export default function ApprovalActionDialog({
   title,
   requireComment,
   isSubmitting,
+  assigneeOptions,
   onConfirm,
   onCancel,
 }: ApprovalActionDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [comment, setComment] = useState("");
+  // 빈 문자열이 「지정하지 않음」이고 기본값이다 — 창을 열 때마다 여기로
+  // 돌아온다(지난 선택이 다음 요청에 묻어가지 않게).
+  const [assigneeId, setAssigneeId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,6 +56,7 @@ export default function ApprovalActionDialog({
     if (!dialog) return;
     if (isOpen && !dialog.open) {
       setComment("");
+      setAssigneeId("");
       setError(null);
       dialog.showModal();
     } else if (!isOpen && dialog.open) {
@@ -48,7 +71,7 @@ export default function ApprovalActionDialog({
       textareaRef.current?.focus();
       return;
     }
-    onConfirm(trimmed || null);
+    onConfirm(trimmed || null, assigneeOptions ? assigneeId || null : null);
   }
 
   return (
@@ -64,6 +87,31 @@ export default function ApprovalActionDialog({
       <h2 id="approval-action-dialog-title" className="text-sm font-semibold">
         {title}
       </h2>
+
+      {assigneeOptions && (
+        <div className="mt-3 flex flex-col gap-1">
+          <label htmlFor="approval-action-assignee" className="text-xs text-zinc-500 dark:text-zinc-400">
+            처리할 사람 (선택)
+          </label>
+          <select
+            id="approval-action-assignee"
+            value={assigneeId}
+            onChange={(event) => setAssigneeId(event.target.value)}
+            aria-describedby="approval-action-assignee-help"
+            className="w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            <option value="">지정하지 않음</option>
+            {assigneeOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.roleLabel ? `${option.name} (${option.roleLabel})` : option.name}
+              </option>
+            ))}
+          </select>
+          <p id="approval-action-assignee-help" className="text-xs text-zinc-500 dark:text-zinc-400">
+            지정하면 그 사람만 처리할 수 있습니다. 비워 두면 자격 있는 사람 누구나 처리합니다.
+          </p>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-col gap-1">
         <label htmlFor="approval-action-comment" className="text-xs text-zinc-500 dark:text-zinc-400">

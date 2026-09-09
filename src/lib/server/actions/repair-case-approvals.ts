@@ -9,6 +9,7 @@ import {
   isValidApprovalDecision,
   isValidApprovalType,
   isValidRepairCaseId,
+  validateAssignedApproverId,
   validateReasonFormat,
   type ApprovalActionResult,
   type ApprovalDecisionCode,
@@ -26,6 +27,14 @@ export type RequestApprovalActionInput = {
   repairCaseId: string;
   approvalType: RepairCaseApprovalType;
   reason?: string | null;
+  /**
+   * 「누구에게 보낼까」 — 선택이다. 주지 않거나 `null`이면 지정 없음이고,
+   * 그것이 기본값이자 이 칸이 생기기 전과 같은 동작이다. 여기서는 형식만
+   * 보고(UUID 모양), 그 사람이 실제로 처리할 수 있는지는 mutation이 자기
+   * 트랜잭션 안에서 판정한다 — 클라이언트가 보낸 값은 아무것도 신뢰하지
+   * 않는다는 이 파일의 원칙 그대로다.
+   */
+  assignedApproverUserId?: string | null;
 };
 
 export type DecideApprovalActionInput = {
@@ -95,6 +104,10 @@ export async function requestRepairCaseApprovalAction(
   if (!reasonValidation.ok) {
     return { ok: false, code: "VALIDATION_ERROR", message: reasonValidation.error };
   }
+  const assigneeValidation = validateAssignedApproverId(input.assignedApproverUserId);
+  if (!assigneeValidation.ok) {
+    return { ok: false, code: "VALIDATION_ERROR", message: assigneeValidation.error };
+  }
 
   // 갱신은 try 밖에서 한다 — 여기서 나는 오류까지 DB 오류로 접어 넣으면
   // "저장은 됐는데 화면만 안 바뀐 것"을 "저장 실패"라고 사용자에게 말하게 된다.
@@ -104,7 +117,8 @@ export async function requestRepairCaseApprovalAction(
       input.repairCaseId,
       input.approvalType,
       actorCheck.userId,
-      reasonValidation.reason
+      reasonValidation.reason,
+      assigneeValidation.userId
     );
   } catch (err) {
     const code = isPgErrorLike(err) ? err.code : undefined;

@@ -5,6 +5,7 @@ import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { ApprovalRecordRow, CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
+import type { ApprovalAssigneeOption } from "./ApprovalActionDialog";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 
@@ -20,12 +21,15 @@ export default function DatabaseApprovalScreen({
   currentApprovals,
   history,
   decideAuthorization,
+  inspectionAssigneeCandidates,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
   currentApprovals: CurrentApprovalState[];
   history: ApprovalRecordRow[];
   decideAuthorization: ShipmentDecideAuthorization;
+  /** 검수 승인 요청 창의 「누구에게 보낼까요」 후보 — 서버에서 계산해 온다. */
+  inspectionAssigneeCandidates: ApprovalAssigneeOption[];
 }) {
   if (!actingUser) {
     return (
@@ -52,6 +56,7 @@ export default function DatabaseApprovalScreen({
           record={inspectionState}
           actingUser={actingUser}
           currentVersion={resolved.version}
+          assigneeCandidates={inspectionAssigneeCandidates}
         />
         <DatabaseFinalShipmentCard
           repairCaseId={resolved.id}

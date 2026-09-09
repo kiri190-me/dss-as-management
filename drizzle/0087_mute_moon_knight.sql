@@ -1,0 +1,3 @@
+ALTER TABLE "repair_case_approvals" ADD COLUMN "assigned_approver_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "repair_case_approvals" ADD CONSTRAINT "repair_case_approvals_assigned_approver_user_id_users_id_fk" FOREIGN KEY ("assigned_approver_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "repair_case_approvals_assigned_approver_user_id_idx" ON "repair_case_approvals" USING btree ("assigned_approver_user_id");

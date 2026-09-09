@@ -170,13 +170,16 @@ async function insertApproval(
   approvalType: RepairCaseApprovalType,
   status: "REQUESTED" | "APPROVED" | "REJECTED",
   versionAtRequest: number,
-  deciderId: string | null
+  deciderId: string | null,
+  /** 지정 승인자. 기본값 null 이 「지정 없음」이고, 기존 시험들은 전부 이쪽이다. */
+  assignedApproverUserId: string | null = null
 ) {
   await db.insert(repairCaseApprovals).values({
     repairCaseId,
     approvalType,
     status,
     requestedByUserId: engineerId,
+    assignedApproverUserId,
     repairCaseVersionAtRequest: versionAtRequest,
     ...(status === "REQUESTED"
       ? {}
@@ -493,6 +496,116 @@ describe("listRepairCasesPendingMyApproval: FINAL_SHIPMENT 위임", () => {
 
     assert.ok((await idsFor(engineerId)).includes(caseId), "검수를 결재할 수 있는 사용자에게는 보여야 대조가 성립한다");
     assert.equal((await idsFor(delegateId)).includes(caseId), false);
+  });
+});
+
+/**
+ * ============================================================================
+ * 지정 승인자 — 알림 종·배지가 지정을 존중한다
+ * ============================================================================
+ * ⚠️ 이 축은 **실패가 조용하다.** 잘못 좁히면 처리해야 할 사람이 알림을 못
+ * 받는데, 그 실패는 화면에 아무 표시도 남기지 않는다(그냥 목록에 안 뜬다).
+ * 그래서 첫 시험이 「NULL 이면 지금과 똑같다」를 못 박고, 나머지가 좁히는
+ * 방향을 확인한다.
+ * ============================================================================
+ */
+describe("listRepairCasesPendingMyApproval: 지정 승인자", () => {
+  test("🔴 지정이 없으면(NULL) 지금과 똑같이 자격 있는 사람 **모두**에게 보인다", async () => {
+    const adminUserId = await createTestUser({ role: "ADMIN" });
+    const engineerUserId = await createTestUser({ role: "AS_ENGINEER" });
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+
+    for (const [label, actorId] of [
+      ["관리자", adminUserId],
+      ["A/S 엔지니어", engineerUserId],
+      ["최고관리자", superAdminId],
+      ["요청자 본인", engineerId],
+    ] as const) {
+      assert.ok(
+        (await idsFor(actorId)).includes(caseId),
+        `${label}에게 안 보인다 — 지정이 없으면 자격 있는 사람 모두에게 보여야 한다`
+      );
+    }
+  });
+
+  test("지정된 건은 그 사람에게 보인다", async () => {
+    const assigneeId = await createTestUser({ role: "AS_ENGINEER" });
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null, assigneeId);
+
+    const item = (await listRepairCasesPendingMyApproval(assigneeId)).find((row) => row.repairCaseId === caseId);
+    assert.ok(item, "지정된 사람에게 안 보이면 지정이 곧 실종이다");
+    assert.equal(item!.approvalType, "REPAIR_INSPECTION");
+    assert.equal(item!.state, "PENDING");
+  });
+
+  test("🔴 지정된 건은 다른 사람에게 안 보인다 — 자격이 있어도 마찬가지다", async () => {
+    const assigneeId = await createTestUser({ role: "AS_ENGINEER" });
+    const otherAdminId = await createTestUser({ role: "ADMIN" });
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+
+    // 대조 — 지정 없이 넣으면 이 관리자에게도 보인다.
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+    assert.ok((await idsFor(otherAdminId)).includes(caseId), "지정 전에는 보여야 대조가 성립한다");
+
+    // 같은 (건, 종류)의 더 새로운 행이 지정을 달고 들어온다. 부분 유니크
+    // 인덱스가 REQUESTED 를 하나로 제한하므로 앞 행을 먼저 반려로 닫는다.
+    await db
+      .update(repairCaseApprovals)
+      .set({ status: "REJECTED", decidedByUserId: superAdminId, decidedAt: new Date(), decisionReason: "테스트" })
+      .where(and(eq(repairCaseApprovals.repairCaseId, caseId), eq(repairCaseApprovals.status, "REQUESTED")));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null, assigneeId);
+
+    assert.equal((await idsFor(otherAdminId)).includes(caseId), false, "지정된 건이 엉뚱한 사람에게 뜬다");
+    assert.ok((await idsFor(assigneeId)).includes(caseId), "지정된 사람에게는 계속 보여야 한다");
+  });
+
+  test("최고관리자에게는 지정이 남에게 되어 있어도 보인다", async () => {
+    const assigneeId = await createTestUser({ role: "AS_ENGINEER" });
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null, assigneeId);
+
+    assert.ok(
+      (await idsFor(superAdminId)).includes(caseId),
+      "최고관리자가 못 보면 지정된 사람이 자리를 비웠을 때 아무도 처리할 수 없다"
+    );
+  });
+
+  test("건수(배지·종 알림)도 같은 규칙을 본다", async () => {
+    const assigneeId = await createTestUser({ role: "AS_ENGINEER" });
+    const otherAdminId = await createTestUser({ role: "ADMIN" });
+    const assigneeBefore = await countRepairCasesPendingMyApproval(assigneeId);
+    const otherBefore = await countRepairCasesPendingMyApproval(otherAdminId);
+
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null, assigneeId);
+
+    assert.equal(await countRepairCasesPendingMyApproval(assigneeId), assigneeBefore + 1, "지정된 사람은 1 늘어난다");
+    assert.equal(await countRepairCasesPendingMyApproval(otherAdminId), otherBefore, "다른 사람은 그대로다");
+  });
+
+  test("지정은 그 (건, 종류)에만 걸린다 — 같은 건의 다른 종류는 그대로 보인다", async () => {
+    const assigneeId = await createTestUser({ role: "AS_ENGINEER" });
+    const representativeId = await createTestRepresentative();
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null, assigneeId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null);
+
+    // 대표는 검수도 결재할 수 있는 역할(A/S 엔지니어)이지만 검수 요청은 남에게
+    // 지정돼 있다 — 그러니 이 건에서 대표에게 남는 것은 출하 하나뿐이어야 한다.
+    const repItems = (await listRepairCasesPendingMyApproval(representativeId)).filter(
+      (row) => row.repairCaseId === caseId
+    );
+    assert.equal(repItems.length, 1, `대표에게 남는 것은 출하 하나여야 한다: ${JSON.stringify(repItems)}`);
+    assert.equal(repItems[0].approvalType, "FINAL_SHIPMENT", "검수 쪽 지정이 출하 쪽을 가리면 안 된다");
   });
 });
 

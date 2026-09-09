@@ -53,6 +53,30 @@ export function validateReasonFormat(value: unknown): ReasonValidationResult {
   return { ok: true, reason: trimmed === "" ? null : trimmed };
 }
 
+export type AssignedApproverValidationResult =
+  | { ok: true; userId: string | null }
+  | { ok: false; error: string };
+
+/**
+ * 「누구에게 보낼까」의 **형식만** 본다 — 값이 없으면 `null`(= 지정하지 않음,
+ * 정상값이고 기본값이다), 있으면 UUID 모양인지만 확인한다.
+ *
+ * 🔴 **그 사람이 실제로 그 승인을 처리할 수 있는지는 여기서 보지 않는다.**
+ * 그것은 DB 를 읽어야 알 수 있고(역할·계정 상태), 읽는 순간과 쓰는 순간
+ * 사이에 바뀔 수 있으므로 mutation 이 자기 트랜잭션 안에서 판정한다
+ * (validateReasonFormat 이 「사유가 필수인가」를 여기서 정하지 않는 것과 같은
+ * 이유).
+ */
+export function validateAssignedApproverId(value: unknown): AssignedApproverValidationResult {
+  if (value === null || value === undefined || value === "") {
+    return { ok: true, userId: null };
+  }
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    return { ok: false, error: "지정할 승인자를 확인할 수 없습니다." };
+  }
+  return { ok: true, userId: value };
+}
+
 export type ApprovalActionResultCode =
   | "VALIDATION_ERROR"
   | "UNAUTHORIZED"
@@ -63,6 +87,14 @@ export type ApprovalActionResultCode =
   | "CASE_LOCKED"
   | "BILLING_DECISION_REQUIRED"
   | "INVALID_APPROVAL_TYPE"
+  /**
+   * 요청할 때 지정한 사람이 그 승인을 처리할 수 없는 사람이다(역할이 맞지
+   * 않거나 계정이 승인 전·비활성·잠김·삭제됨). FORBIDDEN 과 굳이 나눈 이유:
+   * FORBIDDEN 은 **요청하는 나**에 대한 거절이고 이것은 **내가 고른 상대**에
+   * 대한 거절이라, 사람이 해야 할 다음 행동이 서로 다르다(포기 vs 다른 사람
+   * 고르기). 메시지에는 누구를 왜 지정할 수 없는지 이름과 함께 담는다.
+   */
+  | "ASSIGNEE_NOT_ELIGIBLE"
   | "DATABASE_UNAVAILABLE";
 
 export type ApprovalActionResult =

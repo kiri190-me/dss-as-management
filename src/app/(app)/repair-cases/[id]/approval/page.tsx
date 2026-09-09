@@ -5,8 +5,13 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import DatabaseApprovalScreen from "@/components/repair-cases/approval/DatabaseApprovalScreen";
-import { getCurrentApprovalsForCase, getApprovalHistoryForCase } from "@/lib/db/queries/repair-case-approvals";
+import {
+  getCurrentApprovalsForCase,
+  getApprovalHistoryForCase,
+  listInspectionApproverCandidates,
+} from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
+import { roleLabels, type Role } from "@/lib/domain/types";
 
 export const metadata: Metadata = {
   title: "검수/승인 | DSS A/S 관리 시스템",
@@ -42,10 +47,16 @@ export default async function RepairCaseApprovalPage({
 
   // 읽기 소스에서 mock이 사라진 뒤로 모든 수리 건은 항상 DATABASE로 해석되므로
   // 검수/승인 화면은 DB 판 한 벌만 그린다(데모판 분기는 제거했다).
-  const [currentApprovals, history, decideAuthorization] = await Promise.all([
+  // 「누구에게 보낼까요」 후보도 여기서 계산해 내려보낸다 — 자격 판정(역할
+  // 목록 + 개발자 승격 + 계정 상태)은 요청을 실제로 받는 mutation과 **같은
+  // 목록·같은 함수**를 써야 하고, 그것은 서버에만 있다. 클라이언트가 사용자
+  // 표를 읽어 스스로 거르게 두면 두 판정이 갈라진다(decideAuthorization을
+  // 서버에서 계산해 내려보내는 것과 같은 이유다).
+  const [currentApprovals, history, decideAuthorization, inspectionAssignees] = await Promise.all([
     getCurrentApprovalsForCase(resolved.id),
     getApprovalHistoryForCase(resolved.id),
     actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
+    listInspectionApproverCandidates(),
   ]);
 
   return (
@@ -55,6 +66,13 @@ export default async function RepairCaseApprovalPage({
       currentApprovals={currentApprovals}
       history={history}
       decideAuthorization={decideAuthorization}
+      // 역할 이름표는 화면에 보여 줄 **값**이라 승격하지 않는다 — 개발자
+      // 표시가 켜져 있어도 그 사람의 역할은 그대로다(developer-promotion.ts).
+      inspectionAssigneeCandidates={inspectionAssignees.map((candidate) => ({
+        id: candidate.id,
+        name: candidate.name,
+        roleLabel: roleLabels[candidate.role as Role],
+      }))}
     />
   );
 }

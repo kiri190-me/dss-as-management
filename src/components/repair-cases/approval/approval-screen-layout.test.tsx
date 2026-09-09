@@ -59,6 +59,9 @@ function approvalRecord(overrides: Partial<ApprovalRecordRow> = {}): ApprovalRec
     requestedByName: "홍길동",
     requestedAt: "2026-09-01T01:00:00.000Z",
     requestReason: "검수 완료",
+    // 지정 없음(NULL)이 기본값이다 — 자격 있는 사람 누구나 처리한다.
+    assignedApproverUserId: null,
+    assignedApproverName: null,
     decidedByUserId: null,
     decidedByName: null,
     decidedAt: null,
