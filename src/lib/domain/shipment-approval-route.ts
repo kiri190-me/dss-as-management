@@ -115,3 +115,71 @@ export function validateShipmentApprovalRouteSteps(
 
   return { ok: true };
 }
+
+/**
+ * ── 편집 도우미 ─────────────────────────────────────────────────────────
+ * 화면(components/users/ShipmentApprovalRouteSection.tsx)이 목록을 만질 때
+ * 쓰는 배열 조작이다. 화면 안에 두지 않고 여기로 내린 이유가 둘이다:
+ *
+ *  1. **그 화면은 렌더 시험이 붙지 않는다.** 서버 액션을 물고 있고 그 사슬 끝에
+ *     `server-only` 가 있어서, 컴포넌트 시험 목록(test:components)에 넣을 수
+ *     없다. 실수가 나기 쉬운 부분(경계에서 한 칸 어긋나기, 원본을 그대로
+ *     뒤집어 놓기)만 순수 함수로 내려 두면 그 부분은 시험할 수 있다.
+ *  2. 🔴 **isSameRouteStepList 는 화면만의 것이 아니다.** 저장 경로가 「바뀐 게
+ *     없으면 새 판을 만들지 않는다」를 판정할 때 같은 함수를 쓴다
+ *     (db/mutations/shipment-approval-routes.ts). 두 곳이 각자 비교식을 적으면
+ *     화면은 「바뀌었다」는데 저장은 「그대로다」라고 답하는 날이 온다.
+ *
+ * 🔴 **넷 다 입력 배열을 건드리지 않는다.** 언제나 새 배열을 돌려준다 —
+ * 범위를 벗어나 아무 일도 일어나지 않는 경우에도 그렇다. React 상태로 쓰이는
+ * 배열이라, 제자리에서 뒤집으면 화면이 다시 그려지지 않은 채 자료만 달라진다.
+ */
+
+/**
+ * index 자리의 단계를 한 칸 위로. **맨 위에서 더 올리려 하면 내용이 그대로인
+ * 새 배열을 돌려준다** — 던지지 않는다.
+ *
+ * 화면은 맨 위 줄의 [▲] 를 비활성으로 두지만, 그것과 별개로 여기서도 조용히
+ * 아무 일이 없어야 한다. 단추가 눌리는 길(키보드, 비활성 처리를 빠뜨린 다음
+ * 판)은 언제든 열릴 수 있고, 그때 오류 상자가 뜨는 것은 사람에게 「고장」이다.
+ */
+export function moveRouteStepUp(list: readonly string[], index: number): string[] {
+  const next = [...list];
+  if (index <= 0 || index >= next.length) return next;
+  [next[index - 1], next[index]] = [next[index], next[index - 1]];
+  return next;
+}
+
+/** index 자리의 단계를 한 칸 아래로. 맨 아래에서 더 내리려 하면 그대로. */
+export function moveRouteStepDown(list: readonly string[], index: number): string[] {
+  const next = [...list];
+  if (index < 0 || index >= next.length - 1) return next;
+  [next[index], next[index + 1]] = [next[index + 1], next[index]];
+  return next;
+}
+
+/** index 자리의 단계를 뺀다. 범위를 벗어나면 내용이 그대로인 새 배열. */
+export function removeRouteStep(list: readonly string[], index: number): string[] {
+  const next = [...list];
+  if (index < 0 || index >= next.length) return next;
+  next.splice(index, 1);
+  return next;
+}
+
+/**
+ * 두 승인자 목록이 **순서까지** 같은가.
+ *
+ * 🔴 순서가 다르면 다른 절차다. 같은 사람 둘이라도 누가 먼저 보느냐가 결재선의
+ * 뜻 그 자체이므로, 순서만 바꾼 저장은 새 판이 되어야 한다.
+ *
+ * 저장 경로가 이 함수로 「바뀐 게 없으면 새 판을 만들지 않는다」를 판정한다.
+ * 판은 지우지 않으므로(append-only), 저장 단추를 두 번 누르면 똑같은 판이 둘
+ * 쌓여 「누가 언제 결재선을 바꿨나」가 잡음에 묻힌다.
+ */
+export function isSameRouteStepList(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}

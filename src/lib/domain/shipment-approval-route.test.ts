@@ -2,7 +2,11 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isSameRouteStepList,
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
+  moveRouteStepDown,
+  moveRouteStepUp,
+  removeRouteStep,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
 } from "./shipment-approval-route";
@@ -152,5 +156,151 @@ describe("validateShipmentApprovalRouteSteps", () => {
     const snapshot = [...input];
     validateShipmentApprovalRouteSteps(input);
     assert.deepEqual(input, snapshot);
+  });
+});
+
+/**
+ * ============================================================================
+ * 편집 도우미
+ * ============================================================================
+ * 편집 화면(ShipmentApprovalRouteSection.tsx)은 서버 액션을 물고 있어 렌더
+ * 시험이 붙지 않는다. 그래서 실수가 나기 쉬운 부분만 순수 함수로 내려 두었고,
+ * 여기서 못 박는 것 셋이다:
+ *  1. **경계에서 던지지 않는다** — 맨 위에서 [▲], 맨 아래에서 [▼] 를 눌러도
+ *     조용히 아무 일이 없어야 한다(오류 상자는 사람에게 「고장」이다).
+ *  2. 🔴 **입력 배열을 절대 건드리지 않는다** — React 상태로 쓰이는 배열이라
+ *     제자리에서 뒤집으면 화면은 안 바뀌는데 자료만 달라진다.
+ *  3. 🔴 **순서가 다르면 다른 목록이다** — 저장 경로의 「바뀐 게 없으면 새 판을
+ *     만들지 않는다」가 이 판정 하나에 걸려 있다.
+ * ============================================================================
+ */
+
+/** 세 도우미가 모두 원본을 건드리지 않는지 한 자리에서 확인한다. */
+function assertLeavesInputAlone(run: (list: readonly string[]) => string[]): void {
+  const input = [approver(1), approver(2), approver(3)];
+  const snapshot = [...input];
+  const result = run(input);
+  assert.deepEqual(input, snapshot, "입력 배열이 제자리에서 바뀌었다");
+  assert.notEqual(result, input, "입력 배열을 그대로 돌려주면 화면이 다시 그려지지 않는다");
+}
+
+describe("moveRouteStepUp", () => {
+  test("한 칸 위로 올라간다", () => {
+    assert.deepEqual(moveRouteStepUp([approver(1), approver(2), approver(3)], 1), [
+      approver(2),
+      approver(1),
+      approver(3),
+    ]);
+  });
+
+  test("🔴 맨 위에서 더 올리려 하면 그대로다 — 던지지 않는다", () => {
+    const list = [approver(1), approver(2)];
+    assert.deepEqual(moveRouteStepUp(list, 0), list);
+  });
+
+  test("범위를 벗어난 자리도 그대로다", () => {
+    const list = [approver(1), approver(2)];
+    assert.deepEqual(moveRouteStepUp(list, 9), list);
+    assert.deepEqual(moveRouteStepUp(list, -1), list);
+    assert.deepEqual(moveRouteStepUp([], 0), []);
+  });
+
+  test("🔴 입력 배열을 바꾸지 않고 새 배열을 돌려준다", () => {
+    assertLeavesInputAlone((list) => moveRouteStepUp(list, 2));
+    // 아무 일도 일어나지 않는 경우에도 새 배열이어야 한다.
+    assertLeavesInputAlone((list) => moveRouteStepUp(list, 0));
+  });
+});
+
+describe("moveRouteStepDown", () => {
+  test("한 칸 아래로 내려간다", () => {
+    assert.deepEqual(moveRouteStepDown([approver(1), approver(2), approver(3)], 0), [
+      approver(2),
+      approver(1),
+      approver(3),
+    ]);
+  });
+
+  test("🔴 맨 아래에서 더 내리려 하면 그대로다 — 던지지 않는다", () => {
+    const list = [approver(1), approver(2)];
+    assert.deepEqual(moveRouteStepDown(list, 1), list);
+  });
+
+  test("범위를 벗어난 자리도 그대로다", () => {
+    const list = [approver(1), approver(2)];
+    assert.deepEqual(moveRouteStepDown(list, 9), list);
+    assert.deepEqual(moveRouteStepDown(list, -1), list);
+    assert.deepEqual(moveRouteStepDown([], 0), []);
+  });
+
+  test("위로 올린 것을 다시 내리면 처음으로 돌아온다", () => {
+    const list = [approver(1), approver(2), approver(3)];
+    assert.deepEqual(moveRouteStepDown(moveRouteStepUp(list, 2), 1), list);
+  });
+
+  test("🔴 입력 배열을 바꾸지 않고 새 배열을 돌려준다", () => {
+    assertLeavesInputAlone((list) => moveRouteStepDown(list, 0));
+    assertLeavesInputAlone((list) => moveRouteStepDown(list, 2));
+  });
+});
+
+describe("removeRouteStep", () => {
+  test("그 자리의 단계만 빠진다", () => {
+    assert.deepEqual(removeRouteStep([approver(1), approver(2), approver(3)], 1), [
+      approver(1),
+      approver(3),
+    ]);
+  });
+
+  test("마지막 하나를 빼면 빈 목록이 된다 — 0개는 정상이다", () => {
+    assert.deepEqual(removeRouteStep([approver(1)], 0), []);
+  });
+
+  test("범위를 벗어나면 그대로다", () => {
+    const list = [approver(1), approver(2)];
+    assert.deepEqual(removeRouteStep(list, 2), list);
+    assert.deepEqual(removeRouteStep(list, -1), list);
+    assert.deepEqual(removeRouteStep([], 0), []);
+  });
+
+  test("🔴 입력 배열을 바꾸지 않고 새 배열을 돌려준다", () => {
+    assertLeavesInputAlone((list) => removeRouteStep(list, 1));
+    assertLeavesInputAlone((list) => removeRouteStep(list, 9));
+  });
+});
+
+describe("isSameRouteStepList", () => {
+  test("같은 사람이 같은 순서로 있으면 같다", () => {
+    assert.equal(isSameRouteStepList([approver(1), approver(2)], [approver(1), approver(2)]), true);
+  });
+
+  test("빈 목록 둘은 같다 — 「절차를 쓰지 않겠다」가 두 번 저장돼도 판은 하나여야 한다", () => {
+    assert.equal(isSameRouteStepList([], []), true);
+  });
+
+  test("🔴 순서만 달라도 다른 목록이다 — 누가 먼저 보느냐가 결재선의 뜻이다", () => {
+    assert.equal(isSameRouteStepList([approver(1), approver(2)], [approver(2), approver(1)]), false);
+  });
+
+  test("길이가 다르면 다르다", () => {
+    assert.equal(isSameRouteStepList([approver(1)], [approver(1), approver(2)]), false);
+    assert.equal(isSameRouteStepList([], [approver(1)]), false);
+  });
+
+  test("한 자리만 다른 사람이어도 다르다", () => {
+    assert.equal(
+      isSameRouteStepList([approver(1), approver(2), approver(3)], [approver(1), approver(9), approver(3)]),
+      false
+    );
+  });
+
+  test("어느 배열도 건드리지 않는다", () => {
+    const a = [approver(1), approver(2)];
+    const b = [approver(2), approver(1)];
+    const snapshotA = [...a];
+    const snapshotB = [...b];
+    isSameRouteStepList(a, b);
+    assert.deepEqual(a, snapshotA);
+    assert.deepEqual(b, snapshotB);
   });
 });

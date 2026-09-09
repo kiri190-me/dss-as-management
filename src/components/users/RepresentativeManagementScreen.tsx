@@ -6,9 +6,14 @@ import DelegationSection from "./DelegationSection";
 import RolePermissionSettings, { type RolePermissionScreenData } from "./RolePermissionSettings";
 import NotificationSettings from "./NotificationSettings";
 import DeveloperFlagSection from "./DeveloperFlagSection";
+import ShipmentApprovalRouteSection from "./ShipmentApprovalRouteSection";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { NotificationSettingsScreenData } from "@/lib/domain/notification-settings";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
+import type {
+  SelectableApproverCandidate,
+  ShipmentApprovalRouteView,
+} from "@/lib/db/queries/shipment-approval-routes";
 
 /**
  * Top-level orchestrator for the database-mode /users page — shipment
@@ -31,6 +36,16 @@ import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/l
  * 2026-09-07: 「개발자 표시」가 네 번째 탭으로 들어왔다. 자료가 아니라 판정 하나
  * (canManageDeveloperFlag)로 여닫는다 — 목록 자체는 대표 탭과 같은 `users` 를
  * 쓰기 때문이다. 거짓이면 탭을 아예 그리지 않는다(위 두 탭과 같은 방식).
+ *
+ * 2026-09-09: 「출하 승인 절차」(결재선)가 다섯 번째 탭으로 들어왔고, 자리는
+ * 첫 탭 바로 다음이다 — 「누가 출하를 승인하는가」라는 같은 물음을 다루고,
+ * 절차가 「출하 대표」를 대신하게 될 것이므로 둘을 떨어뜨려 두면 관리자가 두
+ * 설정이 서로 무관하다고 오해한다. 🔴 **이 탭만은 자료로 여닫지 않고 항상
+ * 보인다** — 위 세 탭은 자료가 null 이면 「감추는 것이 아니라 없는 것」이지만,
+ * 절차는 판이 하나도 없는 상태(=지금 대표 방식으로 돈다)를 화면이 **말해 줘야**
+ * 하는 종류의 자료라 비어 있어도 그릴 것이 있다. 고치는 단추만
+ * canManageRepresentatives 로 가른다. 그래서 탭 줄 자체도 이제 늘 그려진다
+ * (탭이 언제나 둘 이상이다) — 기존 세 탭의 노출 조건은 그대로다.
  */
 export default function RepresentativeManagementScreen({
   actingUser,
@@ -38,6 +53,8 @@ export default function RepresentativeManagementScreen({
   delegations,
   rolePermissions,
   notificationSettings,
+  shipmentApprovalRoute,
+  approverCandidates,
   canManageRepresentatives,
   canManageDeveloperFlag,
 }: {
@@ -48,6 +65,13 @@ export default function RepresentativeManagementScreen({
   rolePermissions: RolePermissionScreenData | null;
   /** 관리자 이상일 때만 내려온다. null이면 알림 설정 탭이 없다. */
   notificationSettings: NotificationSettingsScreenData | null;
+  /**
+   * 현재 출하 승인 절차(version 이 가장 큰 판). **null 이어도 탭은 있다** —
+   * 「아직 절차가 없어 대표 방식으로 돈다」가 화면이 말해야 할 상태이기 때문이다.
+   */
+  shipmentApprovalRoute: ShipmentApprovalRouteView | null;
+  /** 승인 단계에 올릴 수 있는 사용자. 「출하 대표」로 지정할 수 있는 조건과 같다. */
+  approverCandidates: SelectableApproverCandidate[];
   /**
    * 🔴 「최고관리자인가」가 아니라 **「대표 지정·위임을 관리해도 되는가」**다.
    *
@@ -77,9 +101,9 @@ export default function RepresentativeManagementScreen({
   canManageDeveloperFlag: boolean;
 }) {
   const representatives = users.filter((u) => u.isShipmentRepresentative);
-  const [activeTab, setActiveTab] = useState<"representatives" | "permissions" | "notifications" | "developer">(
-    "representatives"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "representatives" | "approvalRoute" | "permissions" | "notifications" | "developer"
+  >("representatives");
 
   return (
     <div className="flex flex-col gap-6">
@@ -90,60 +114,72 @@ export default function RepresentativeManagementScreen({
         </p>
       </div>
 
-      {(rolePermissions || notificationSettings || canManageDeveloperFlag) && (
-        <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      {/* 🔴 탭 줄은 이제 조건 없이 그린다 — 「출하 승인 절차」가 자료와 무관하게
+          늘 있으므로 탭이 언제나 둘 이상이다. 안쪽 세 탭의 노출 조건은 그대로다.
+          가로로 넘칠 수 있어(탭 다섯) 이 줄 안에서만 밀리게 한다. */}
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800">
+        <button
+          type="button"
+          onClick={() => setActiveTab("representatives")}
+          className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+            activeTab === "representatives"
+              ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
+              : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          출하 대표자 / 위임
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("approvalRoute")}
+          className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+            activeTab === "approvalRoute"
+              ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
+              : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          출하 승인 절차
+        </button>
+        {rolePermissions && (
           <button
             type="button"
-            onClick={() => setActiveTab("representatives")}
-            className={`border-b-2 px-3 py-2 text-sm font-medium ${
-              activeTab === "representatives"
+            onClick={() => setActiveTab("permissions")}
+            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+              activeTab === "permissions"
                 ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
                 : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
             }`}
           >
-            출하 대표자 / 위임
+            역할별 접근 권한
           </button>
-          {rolePermissions && (
-            <button
-              type="button"
-              onClick={() => setActiveTab("permissions")}
-              className={`border-b-2 px-3 py-2 text-sm font-medium ${
-                activeTab === "permissions"
-                  ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-                  : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              역할별 접근 권한
-            </button>
-          )}
-          {notificationSettings && (
-            <button
-              type="button"
-              onClick={() => setActiveTab("notifications")}
-              className={`border-b-2 px-3 py-2 text-sm font-medium ${
-                activeTab === "notifications"
-                  ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-                  : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              알림 설정
-            </button>
-          )}
-          {canManageDeveloperFlag && (
-            <button
-              type="button"
-              onClick={() => setActiveTab("developer")}
-              className={`border-b-2 px-3 py-2 text-sm font-medium ${
-                activeTab === "developer"
-                  ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-                  : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              개발자 표시
-            </button>
-          )}
-        </div>
-      )}
+        )}
+        {notificationSettings && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("notifications")}
+            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+              activeTab === "notifications"
+                ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            알림 설정
+          </button>
+        )}
+        {canManageDeveloperFlag && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("developer")}
+            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+              activeTab === "developer"
+                ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            개발자 표시
+          </button>
+        )}
+      </div>
 
       {rolePermissions && activeTab === "permissions" ? (
         <RolePermissionSettings actingRole={actingUser.role} data={rolePermissions} />
@@ -151,6 +187,14 @@ export default function RepresentativeManagementScreen({
         <NotificationSettings data={notificationSettings} />
       ) : canManageDeveloperFlag && activeTab === "developer" ? (
         <DeveloperFlagSection users={users} canManageDeveloperFlag={canManageDeveloperFlag} />
+      ) : activeTab === "approvalRoute" ? (
+        // 위 셋과 달리 자료를 앞에 두고 여닫지 않는다 — 판이 없는 것(=지금 대표
+        // 방식으로 돈다)도 화면이 말해 줘야 하는 상태라 그릴 것이 늘 있다.
+        <ShipmentApprovalRouteSection
+          route={shipmentApprovalRoute}
+          candidates={approverCandidates}
+          canManageRepresentatives={canManageRepresentatives}
+        />
       ) : (
         <>
           {/* 아래 두 화면의 prop 이름도 이제 값이 뜻하는 바와 같다

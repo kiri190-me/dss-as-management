@@ -6,6 +6,10 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@/lib/db/queries/shipment-delegations";
+import {
+  getCurrentShipmentApprovalRoute,
+  listSelectableApproverCandidates,
+} from "@/lib/db/queries/shipment-approval-routes";
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
 import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
 import { requireAreaAccess } from "@/lib/auth/area-guard";
@@ -51,9 +55,18 @@ export default async function UsersPage() {
 
   await requireAreaAccess("users", actingUser);
 
-  const [users, delegations] = await Promise.all([
+  // 출하 승인 절차(결재선) 둘도 여기서 함께 읽어 내려보낸다. 편집 화면이
+  // 클라이언트 컴포넌트라 이 조회들을 스스로 부를 수 없다(db 조회는 서버 전용이고
+  // await 가 필요하다) — 대표·위임 목록과 같은 이유, 같은 자리다.
+  // 🔴 「현재 절차」는 version 이 가장 큰 판 하나이고, 그 정의가 적힌 곳은
+  // queries/shipment-approval-routes.ts 하나여야 한다 — 여기서 다시 고르지 않는다.
+  // 후보 목록은 화면이 고를 것일 뿐 최종 판정이 아니다: 저장은 mutation 이 자기
+  // 트랜잭션 안에서 같은 자격 조건을 다시 확인한다(고르는 사이에 계정이 잠길 수 있다).
+  const [users, delegations, shipmentApprovalRoute, approverCandidates] = await Promise.all([
     listUsersForRepresentativeManagement(),
     listShipmentDelegations(),
+    getCurrentShipmentApprovalRoute(),
+    listSelectableApproverCandidates(),
   ]);
 
   // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
@@ -90,6 +103,8 @@ export default async function UsersPage() {
       delegations={delegations}
       rolePermissions={rolePermissions}
       notificationSettings={notificationSettings}
+      shipmentApprovalRoute={shipmentApprovalRoute}
+      approverCandidates={approverCandidates}
       canManageRepresentatives={canManageRepresentatives}
       canManageDeveloperFlag={canManageDeveloperFlag}
     />
