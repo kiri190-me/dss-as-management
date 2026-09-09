@@ -51,6 +51,12 @@ type DatabaseApprovalCardProps = {
   blockedNotice?: string | null;
   actions: DatabaseApprovalActionButton[];
   disabledReason?: string | null;
+  /**
+   * 조작 결과 한 줄(요청했습니다 / 처리되었습니다, 그리고 서버가 거절한 이유).
+   * 카드 **안**에 두는 이유: 부모가 이 카드들을 2열 격자에 놓으므로, 카드 밖
+   * 형제로 두면 이 문단이 격자 칸 하나를 먹어 옆 카드가 다음 줄로 밀린다.
+   */
+  statusMessage?: string | null;
 };
 
 /**
@@ -67,6 +73,7 @@ export default function DatabaseApprovalCard({
   blockedNotice,
   actions,
   disabledReason,
+  statusMessage,
 }: DatabaseApprovalCardProps) {
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -112,6 +119,12 @@ export default function DatabaseApprovalCard({
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{disabledReason}</p>
         ) : null}
       </div>
+
+      {/*
+        읽어 주기(role="status")는 여기 붙이지 않는다 — 호출부가 이미 sr-only
+        문단 하나로 알리고 있어서, 여기에 또 붙이면 두 번 읽힌다.
+      */}
+      {statusMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusMessage}</p>}
     </section>
   );
 }

@@ -121,11 +121,17 @@ export default function DatabaseRepairInspectionCard({
         displayStatus={displayStatus}
         actions={actions}
         disabledReason={disabledReason}
+        // 확인 창이 떠 있는 동안에는 보이지 않는다 — 창 뒤에서 지난 결과가
+        // 새 결과처럼 읽히지 않게 하려는 것이다(원래 동작 그대로).
+        statusMessage={dialogState ? null : statusMessage}
       />
+      {/*
+        읽어 주기 통로. 값이 없을 때도 빈 문자열로 **항상 DOM 에 남아 있어야**
+        내용이 바뀔 때 읽힌다. 절대배치(sr-only)라 격자 칸을 먹지 않는다.
+      */}
       <p role="status" aria-live="polite" className="sr-only">
         {statusMessage ?? ""}
       </p>
-      {statusMessage && !dialogState && <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusMessage}</p>}
       <ApprovalActionDialog
         isOpen={dialogState !== null}
         title={dialogState ? DIALOG_TITLES[dialogState] : ""}
