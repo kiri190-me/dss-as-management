@@ -169,7 +169,10 @@ export async function saveShipmentApprovalRoute(
         throw new SaveRejected({
           ok: false,
           code: "FORBIDDEN",
-          message: "출하 승인 절차를 변경할 권한이 없습니다.",
+          // 🔴 용도를 말하지 않는다. 이 판정은 입력 검증(4)보다 **먼저**라
+          // 그 시점의 `scope` 는 아직 확인되지 않은 값이고, 무엇보다 권한은
+          // 용도마다 갈리지 않는다 — 열쇠도 수준도 하나다(머리말 참조).
+          message: "승인 절차를 변경할 권한이 없습니다.",
         });
       }
 

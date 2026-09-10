@@ -6,14 +6,13 @@ import DelegationSection from "./DelegationSection";
 import RolePermissionSettings, { type RolePermissionScreenData } from "./RolePermissionSettings";
 import NotificationSettings from "./NotificationSettings";
 import DeveloperFlagSection from "./DeveloperFlagSection";
-import ShipmentApprovalRouteSection from "./ShipmentApprovalRouteSection";
+import ShipmentApprovalRouteSection, {
+  type ShipmentApprovalRoutesByScope,
+} from "./ShipmentApprovalRouteSection";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { NotificationSettingsScreenData } from "@/lib/domain/notification-settings";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
-import type {
-  SelectableApproverCandidate,
-  ShipmentApprovalRouteView,
-} from "@/lib/db/queries/shipment-approval-routes";
+import type { SelectableApproverCandidate } from "@/lib/db/queries/shipment-approval-routes";
 
 /**
  * Top-level orchestrator for the database-mode /users page — shipment
@@ -37,6 +36,12 @@ import type {
  * (canManageDeveloperFlag)로 여닫는다 — 목록 자체는 대표 탭과 같은 `users` 를
  * 쓰기 때문이다. 거짓이면 탭을 아예 그리지 않는다(위 두 탭과 같은 방식).
  *
+ * 2026-09-10: 그 탭이 「승인 절차」가 됐다 — 부품 불출도 같은 결재선 제도를 타게
+ * 되면서, 이름에 「출하」가 붙어 있으면 재고 담당자의 절차를 여기서 정한다는 것을
+ * 아무도 알 수 없다. 어떤 절차인지는 탭 **안에서** 고른다(용도가 늘어도 탭은
+ * 하나다 — 탭으로 쪼개면 다섯 개이던 탭 줄이 계속 길어지고, 두 절차가 같은 표·
+ * 같은 규칙을 쓴다는 사실도 화면에서 사라진다).
+ *
  * 2026-09-09: 「출하 승인 절차」(결재선)가 다섯 번째 탭으로 들어왔고, 자리는
  * 첫 탭 바로 다음이다 — 「누가 출하를 승인하는가」라는 같은 물음을 다루고,
  * 절차가 「출하 대표」를 대신하게 될 것이므로 둘을 떨어뜨려 두면 관리자가 두
@@ -53,7 +58,7 @@ export default function RepresentativeManagementScreen({
   delegations,
   rolePermissions,
   notificationSettings,
-  shipmentApprovalRoute,
+  shipmentApprovalRoutes,
   approverCandidates,
   canManageRepresentatives,
   canManageDeveloperFlag,
@@ -66,10 +71,11 @@ export default function RepresentativeManagementScreen({
   /** 관리자 이상일 때만 내려온다. null이면 알림 설정 탭이 없다. */
   notificationSettings: NotificationSettingsScreenData | null;
   /**
-   * 현재 출하 승인 절차(version 이 가장 큰 판). **null 이어도 탭은 있다** —
-   * 「아직 절차가 없어 대표 방식으로 돈다」가 화면이 말해야 할 상태이기 때문이다.
+   * **용도별** 현재 승인 절차(그 용도 안에서 version 이 가장 큰 판). 값이 전부
+   * null 이어도 탭은 있다 — 「아직 절차가 없어 예전 방식으로 돈다」가 화면이
+   * 말해야 할 상태이기 때문이다.
    */
-  shipmentApprovalRoute: ShipmentApprovalRouteView | null;
+  shipmentApprovalRoutes: ShipmentApprovalRoutesByScope;
   /** 승인 단계에 올릴 수 있는 사용자. 「출하 대표」로 지정할 수 있는 조건과 같다. */
   approverCandidates: SelectableApproverCandidate[];
   /**
@@ -138,7 +144,7 @@ export default function RepresentativeManagementScreen({
               : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
           }`}
         >
-          출하 승인 절차
+          승인 절차
         </button>
         {rolePermissions && (
           <button
@@ -188,10 +194,10 @@ export default function RepresentativeManagementScreen({
       ) : canManageDeveloperFlag && activeTab === "developer" ? (
         <DeveloperFlagSection users={users} canManageDeveloperFlag={canManageDeveloperFlag} />
       ) : activeTab === "approvalRoute" ? (
-        // 위 셋과 달리 자료를 앞에 두고 여닫지 않는다 — 판이 없는 것(=지금 대표
+        // 위 셋과 달리 자료를 앞에 두고 여닫지 않는다 — 판이 없는 것(=지금 예전
         // 방식으로 돈다)도 화면이 말해 줘야 하는 상태라 그릴 것이 늘 있다.
         <ShipmentApprovalRouteSection
-          route={shipmentApprovalRoute}
+          routes={shipmentApprovalRoutes}
           candidates={approverCandidates}
           canManageRepresentatives={canManageRepresentatives}
         />

@@ -10,6 +10,8 @@ import {
   moveRouteStepDown,
   moveRouteStepUp,
   removeRouteStep,
+  SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES,
+  SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS,
   SHIPMENT_APPROVAL_ROUTE_SCOPES,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
@@ -495,5 +497,66 @@ describe("용도(scope)", () => {
         `${JSON.stringify(bad)} 가 통과했다`
       );
     }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 용도의 이름표와 「비었을 때」 안내 — 한 곳에만 적힌다
+ * ============================================================================
+ * 편집 화면(components/users/ShipmentApprovalRouteSection.tsx)의 고르는 자리·
+ * 설명 문장·빈 상태와, 저장 결과 문구(server/actions/shipment-approval-routes.ts)가
+ * 전부 아래 두 표를 본다. 두 곳에 적히면 같은 절차가 화면마다 다른 이름으로
+ * 불리거나, 화면은 「대표가 처리합니다」라는데 저장은 다른 말을 하게 된다.
+ * ============================================================================
+ */
+describe("용도의 이름표 · 빈 절차 안내", () => {
+  test("🔴 모든 용도에 이름표가 있다 — 빠진 용도가 코드 값으로 새어 나가지 않는다", () => {
+    assert.deepEqual(
+      Object.keys(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS).sort(),
+      [...SHIPMENT_APPROVAL_ROUTE_SCOPES].sort()
+    );
+    for (const scope of SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      const label = SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[scope];
+      assert.ok(label.trim().length > 0, `${scope}: 이름표가 비어 있다`);
+      // 🔴 코드 값을 그대로 보여 주는 것은 이름표가 아니다.
+      assert.notEqual(label, scope, `${scope}: 코드 값을 그대로 이름표로 썼다`);
+      assert.ok(!/[A-Z_]{4,}/.test(label), `${scope}: 이름표에 코드 값이 섞여 있다 — ${label}`);
+    }
+  });
+
+  test("🔴 이름표는 용도마다 다르다 — 같으면 화면에서 둘을 고를 수 없다", () => {
+    const labels = SHIPMENT_APPROVAL_ROUTE_SCOPES.map(
+      (scope) => SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[scope]
+    );
+    assert.equal(new Set(labels).size, labels.length, `이름표가 겹친다: ${labels.join(" / ")}`);
+  });
+
+  test("🔴 「절차가 비었을 때」 안내가 용도마다 있고, 서로 다르다", () => {
+    // 단계 0개는 「절차를 쓰지 않겠다」는 정상적인 뜻이고, 그때 **무엇이 그 일을
+    // 대신하는지는 용도마다 다르다**. 한 문장으로 뭉뚱그리면 둘 중 하나에게는
+    // 거짓말이 된다 — 실제로 출하만을 말하던 문장이 그렇게 틀린 말이 됐다.
+    assert.deepEqual(
+      Object.keys(SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES).sort(),
+      [...SHIPMENT_APPROVAL_ROUTE_SCOPES].sort()
+    );
+    const notices = SHIPMENT_APPROVAL_ROUTE_SCOPES.map(
+      (scope) => SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES[scope]
+    );
+    for (const [index, notice] of notices.entries()) {
+      assert.ok(
+        notice.trim().length > 0,
+        `${SHIPMENT_APPROVAL_ROUTE_SCOPES[index]}: 안내가 비어 있다`
+      );
+    }
+    assert.equal(new Set(notices).size, notices.length, "용도마다 같은 말을 하고 있다");
+  });
+
+  test("최종 출하 승인의 안내는 예전 문장 그대로다 — 출하 쪽 동작은 달라지지 않았다", () => {
+    // 이 조각에서 출하 쪽은 한 글자도 바뀌지 않는다는 약속을 문구에서도 지킨다.
+    assert.equal(
+      SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES.FINAL_SHIPMENT,
+      "지금은 출하 대표로 지정된 사용자가 최종 출하 승인을 처리합니다."
+    );
   });
 });

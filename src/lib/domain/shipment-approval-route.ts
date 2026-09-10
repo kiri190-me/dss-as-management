@@ -43,11 +43,46 @@
  * (repair_case_approval_type ↔ REPAIR_CASE_APPROVAL_TYPES 와 같은 관례다) 두 벌이
  * 되고, 갈라지지 않도록 이 파일의 시험이 둘을 맞춰 본다.
  *
- * 'PART_ISSUE' 는 다음 조각의 부품 불출 승인이 쓴다 — 지금은 이 값을 쓰는 코드가
- * 없다.
+ * 'PART_ISSUE' 는 부품 불출 승인이 쓴다(domain/inventory-part-issue-rules.ts 의
+ * PART_ISSUE_APPROVAL_ROUTE_SCOPE 가 그 값에 이름을 붙여 둔 자리다).
  */
 export const SHIPMENT_APPROVAL_ROUTE_SCOPES = ["FINAL_SHIPMENT", "PART_ISSUE"] as const;
 export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
+
+/**
+ * 🔴 **용도의 이름표가 적힌 유일한 곳.** 코드 값(`FINAL_SHIPMENT`)은 사람이 읽을
+ * 말이 아니므로 화면에 그대로 내보내지 않는다.
+ *
+ * 편집 화면의 용도 고르는 자리·설명 문장·저장 결과 문구가 전부 여기를 본다. 두
+ * 곳에 적으면 같은 절차가 화면마다 다른 이름으로 불리고, 관리자는 그것이 같은
+ * 것인지 알 수 없다(components/inventory/part-issue-approval-texts.ts 가 재고
+ * 쪽에서 지키는 것과 같은 규약이다).
+ *
+ * 🔴 **Record 로 둔다** — 용도를 하나 더하면 여기 빠진 자리를 컴파일러가 바로
+ * 잡는다. 이름표 없는 용도가 화면에 코드 값으로 새어 나가는 일이 없다.
+ */
+export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteScope, string> = {
+  FINAL_SHIPMENT: "최종 출하 승인",
+  PART_ISSUE: "부품 불출",
+};
+
+/**
+ * 그 용도의 절차가 **비어 있을 때 지금 무슨 일이 일어나는가** — 한 문장.
+ *
+ * 🔴 단계 0개는 「절차를 쓰지 않겠다」는 정상적인 뜻이고, 그때 앱이 어떻게 도는지는
+ * **용도마다 다르다.** 출하는 「출하 대표」가, 불출은 재고 담당자가 그 자리에서
+ * 처리한다. 한 문장으로 뭉뚱그리면 둘 중 하나에게는 거짓말이 된다.
+ *
+ * 🔴 **편집 화면의 빈 상태와 저장 결과 문구가 같은 문장을 쓴다**
+ * (components/users/ShipmentApprovalRouteSection.tsx ·
+ * server/actions/shipment-approval-routes.ts). 두 곳에 각자 적으면 화면은 「대표가
+ * 처리합니다」라는데 저장은 다른 말을 하는 날이 온다 — 예전에 그 문장이 서버 액션
+ * 안에 글자로 박혀 있었고, 그래서 용도가 늘자 그대로 틀린 말이 됐다.
+ */
+export const SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES: Record<ShipmentApprovalRouteScope, string> = {
+  FINAL_SHIPMENT: "지금은 출하 대표로 지정된 사용자가 최종 출하 승인을 처리합니다.",
+  PART_ISSUE: "지금은 재고 담당자가 그 자리에서 바로 불출합니다.",
+};
 
 /**
  * 바깥에서 들어온 값이 쓸 수 있는 용도인가.

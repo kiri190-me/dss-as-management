@@ -10,6 +10,8 @@ import {
   getCurrentShipmentApprovalRoute,
   listSelectableApproverCandidates,
 } from "@/lib/db/queries/shipment-approval-routes";
+import { SHIPMENT_APPROVAL_ROUTE_SCOPES } from "@/lib/domain/shipment-approval-route";
+import type { ShipmentApprovalRoutesByScope } from "@/components/users/ShipmentApprovalRouteSection";
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
 import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
 import { requireAreaAccess } from "@/lib/auth/area-guard";
@@ -55,22 +57,33 @@ export default async function UsersPage() {
 
   await requireAreaAccess("users", actingUser);
 
-  // 출하 승인 절차(결재선) 둘도 여기서 함께 읽어 내려보낸다. 편집 화면이
-  // 클라이언트 컴포넌트라 이 조회들을 스스로 부를 수 없다(db 조회는 서버 전용이고
-  // await 가 필요하다) — 대표·위임 목록과 같은 이유, 같은 자리다.
-  // 🔴 「현재 절차」는 version 이 가장 큰 판 하나이고, 그 정의가 적힌 곳은
-  // queries/shipment-approval-routes.ts 하나여야 한다 — 여기서 다시 고르지 않는다.
+  // 승인 절차(결재선)도 여기서 함께 읽어 내려보낸다. 편집 화면이 클라이언트
+  // 컴포넌트라 이 조회들을 스스로 부를 수 없다(db 조회는 서버 전용이고 await 가
+  // 필요하다) — 대표·위임 목록과 같은 이유, 같은 자리다.
+  // 🔴 「현재 절차」는 그 용도 안에서 version 이 가장 큰 판 하나이고, 그 정의가
+  // 적힌 곳은 queries/shipment-approval-routes.ts 하나여야 한다 — 여기서 다시
+  // 고르지 않는다.
   // 후보 목록은 화면이 고를 것일 뿐 최종 판정이 아니다: 저장은 mutation 이 자기
   // 트랜잭션 안에서 같은 자격 조건을 다시 확인한다(고르는 사이에 계정이 잠길 수 있다).
-  const [users, delegations, shipmentApprovalRoute, approverCandidates] = await Promise.all([
+  const [users, delegations, approvalRouteEntries, approverCandidates] = await Promise.all([
     listUsersForRepresentativeManagement(),
     listShipmentDelegations(),
-    // 🔴 용도를 여기서 못 박는다 — 이 화면의 결재선 편집은 아직 「최종 출하 승인」
-    // 하나뿐이다. 탭으로 용도를 고르는 것은 다음 조각이고, 그때 이 자리가 고를 값을
-    // 받는다. 기본값에 기대지 않고 적어 두는 이유가 그것이다.
-    getCurrentShipmentApprovalRoute("FINAL_SHIPMENT"),
+    // 🔴 **용도 목록을 돌며 전부 읽는다.** 화면이 탭 안에서 용도를 고르는데 그
+    // 판정은 클라이언트에서 일어나므로, 고를 수 있는 용도의 현재 판이 처음부터
+    // 다 내려와 있어야 한다. 목록에서 파생시키는 이유는 용도를 하나 더할 때
+    // 여기를 고치는 것을 잊어도 새 용도가 조용히 빠지지 않게 하기 위해서다 —
+    // 글자로 적어 두면 그 용도만 「판이 없다」로 보이고, 그것은 「절차를 쓰지
+    // 않는다」와 구별되지 않는다.
+    Promise.all(
+      SHIPMENT_APPROVAL_ROUTE_SCOPES.map(
+        async (scope) => [scope, await getCurrentShipmentApprovalRoute(scope)] as const
+      )
+    ),
     listSelectableApproverCandidates(),
   ]);
+  const shipmentApprovalRoutes = Object.fromEntries(
+    approvalRouteEntries
+  ) as ShipmentApprovalRoutesByScope;
 
   // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
   // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다. 알림 설정도
@@ -106,7 +119,7 @@ export default async function UsersPage() {
       delegations={delegations}
       rolePermissions={rolePermissions}
       notificationSettings={notificationSettings}
-      shipmentApprovalRoute={shipmentApprovalRoute}
+      shipmentApprovalRoutes={shipmentApprovalRoutes}
       approverCandidates={approverCandidates}
       canManageRepresentatives={canManageRepresentatives}
       canManageDeveloperFlag={canManageDeveloperFlag}
