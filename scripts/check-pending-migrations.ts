@@ -4,7 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../src/lib/db/connection";
-import { findDestructiveOperations, describeOperation, type DestructiveOperation } from "../src/lib/db/migration-safety";
+import {
+  findDestructiveOperations,
+  describeOperation,
+  findRiskyOperations,
+  describeRiskyOperation,
+  type DestructiveOperation,
+} from "../src/lib/db/migration-safety";
 import {
   classifyDbConnectionFailure,
   describeDbConnectionFailure,
@@ -19,11 +25,22 @@ import {
  *
  * 하는 일은 셋이다.
  *  1. 아직 적용되지 않은 마이그레이션이 무엇인지 센다.
- *  2. 그중 자료를 지우는 문장을 찾는다(표 삭제·열 삭제·TRUNCATE·DELETE).
+ *  2. 그중 자료를 지우는 문장을 찾는다(표 삭제·열 삭제·비우기·행 삭제).
  *  3. 그 대상에 **지금 자료가 몇 줄 들어 있는지** 실제로 세어 보여 준다.
  *
  * 자료가 걸려 있으면 종료 코드 1로 끝난다 — CI나 배포 스크립트에 물리면 사람이
  * 보기 전에는 넘어가지 않는다.
+ *
+ * ── 자료는 그대로인데 살펴봐야 하는 것 ──────────────────────────────────
+ * 2026-09-10에 인덱스를 하나 없애고 하나 만드는 마이그레이션이 "더하기만 합니다"로
+ * 통과했다. 이 저장소는 「한 번에 한 단계만 결재 대기」·「지금 쓰는 결재선 판은
+ * 하나」를 전부 유니크 인덱스에 맡기고 있어서, 자료가 한 줄도 사라지지 않는
+ * 그 변경이 사실은 가장 조심해야 할 축에 든다.
+ *
+ * 그래서 둘째 갈래를 따로 보여 준다(migration-safety의 findRiskyOperations).
+ * 이쪽은 **막지 않는다.** 종료 코드도 건드리지 않고, DB에 붙지도 않는다 — 인덱스나
+ * 제약에는 셀 행이 없다. 자료가 사라지는 것과 한 덩어리로 경고하면 사람이 곧
+ * 경고 전체를 흘려보내기 때문에, 줄을 나눠 적는 것이 핵심이다.
  *
  * ── 세기 전에 접속부터 확인한다 ─────────────────────────────────────────
  * 2026-09-02에 이 스크립트가 "처음 적용하는 DB로 보입니다 / 적용 대기 80건"이라고
@@ -167,6 +184,8 @@ async function main() {
   }
 
   let atRisk = 0;
+  // 살펴볼 것의 수. 종료 코드에는 관여하지 않는다 — 이 갈래는 보여 주기만 한다.
+  let toReview = 0;
 
   for (const entry of pending) {
     const file = path.join(DRIZZLE_DIR, `${entry.tag}.sql`);
@@ -176,24 +195,50 @@ async function main() {
       continue;
     }
 
-    const operations = findDestructiveOperations(fs.readFileSync(file, "utf8"));
-    if (operations.length === 0) {
+    const source = fs.readFileSync(file, "utf8");
+    const operations = findDestructiveOperations(source);
+    // 자료를 지우지는 않지만 눈으로 확인해야 하는 것들. DB에 묻지 않는다.
+    const review = findRiskyOperations(source);
+
+    if (operations.length === 0 && review.length === 0) {
+      // 진짜 더하기만 하는 것은 여기서 조용히 끝난다.
       console.log(`\n[${entry.tag}] 더하기만 합니다 — 사라지는 자료 없음`);
       continue;
     }
 
-    console.log(`\n[${entry.tag}] 지우는 문장 ${operations.length}건`);
-    for (const op of operations) {
-      const amount = await measure(op);
-      if (amount === null) {
-        console.log(`  · ${describeOperation(op)} — 대상이 이 DB에 없음(사라질 자료 없음)`);
-      } else if (amount === 0) {
-        console.log(`  · ${describeOperation(op)} — 비어 있음`);
-      } else {
-        console.log(`  · ${describeOperation(op)} — ⚠ ${amount.toLocaleString("ko-KR")}건이 사라집니다`);
-        atRisk += 1;
+    if (operations.length > 0) {
+      console.log(`\n[${entry.tag}] 지우는 문장 ${operations.length}건`);
+      for (const op of operations) {
+        const amount = await measure(op);
+        if (amount === null) {
+          console.log(`  · ${describeOperation(op)} — 대상이 이 DB에 없음(사라질 자료 없음)`);
+        } else if (amount === 0) {
+          console.log(`  · ${describeOperation(op)} — 비어 있음`);
+        } else {
+          console.log(`  · ${describeOperation(op)} — ⚠ ${amount.toLocaleString("ko-KR")}건이 사라집니다`);
+          atRisk += 1;
+        }
       }
     }
+
+    if (review.length > 0) {
+      toReview += review.length;
+      console.log(
+        `\n[${entry.tag}] 자료는 그대로지만 살펴볼 문장 ${review.length}건 — 확인하세요`
+      );
+      for (const op of review) {
+        console.log(`  · ${describeRiskyOperation(op)}`);
+      }
+    }
+  }
+
+  if (toReview > 0) {
+    console.log(
+      `\n※ 살펴볼 문장 ${toReview}건 — 사라지는 자료는 없지만 적용을 막지도 않습니다.` +
+        `\n   유니크 인덱스나 제약이 빠지면 다음부터 중복이 조용히 들어옵니다.` +
+        `\n   필수값 전환·자료형 변경은 기존 행 때문에 적용 자체가 실패할 수 있고,` +
+        `\n   이름 변경은 되돌리기 절차를 무효로 만듭니다. 의도한 변경인지 확인하세요.`
+    );
   }
 
   if (atRisk > 0) {
@@ -205,7 +250,11 @@ async function main() {
     return 1;
   }
 
-  console.log("\n사라지는 자료 없이 적용할 수 있습니다.");
+  if (toReview > 0) {
+    console.log("\n사라지는 자료는 없습니다 — 다만 위의 살펴볼 문장을 확인한 뒤 적용하세요.");
+  } else {
+    console.log("\n사라지는 자료 없이 적용할 수 있습니다.");
+  }
   return 0;
 }
 
