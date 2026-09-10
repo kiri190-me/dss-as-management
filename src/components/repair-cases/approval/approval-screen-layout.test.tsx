@@ -5,6 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import DatabaseApprovalCard from "./DatabaseApprovalCard";
 import ApprovalActionDialog from "./ApprovalActionDialog";
+/**
+ * 🔴 이 import 자체가 시험이다 — 빈 값 문구를 모아 둔 파일이 무언가를 물기
+ * 시작하면(server-only 사슬 끝, "use client", React) 이 시험 파일이 **여기서**
+ * 죽는다. 아래 머리말이 말하는 그 사슬이다.
+ */
+import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 import { standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
@@ -43,6 +49,8 @@ const inspectionCardSource = read("src/components/repair-cases/approval/Database
 const shipmentCardSource = read("src/components/repair-cases/approval/DatabaseFinalShipmentCard.tsx");
 const approvalScreenSource = read("src/components/repair-cases/approval/DatabaseApprovalScreen.tsx");
 const dialogSource = read("src/components/repair-cases/approval/ApprovalActionDialog.tsx");
+/** 두 자리가 같은 말을 해야 하는 문구를 모아 둔 순수 파일(문자열 상수만). */
+const sharedTextsSource = read("src/components/repair-cases/approval/approval-texts.ts");
 
 const CARD_PARTS: Array<[string, string]> = [
   ["수리 검수 승인 카드", inspectionCardSource],
@@ -1042,8 +1050,12 @@ describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, �
  */
 describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 출하일", () => {
   const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
-  /** 값이 비었을 때의 문구는 카드가 **한 곳에** 적어 둔다 — 아래에서 창과 대조한다. */
+  /**
+   * 값이 비었을 때의 문구는 **공용 파일 한 곳**에 적어 둔다 — 아래에서 카드와
+   * 창이 둘 다 그것을 부르는지 확인한다(예전에는 양쪽 원본을 대조했다).
+   */
   const UNSET_TEXT_DECLARATION = /const UNSET_TARGET_SHIPMENT_DATE_TEXT = "([^"]+)";/;
+  const SHARED_TEXTS_IMPORT = /import \{[^}]*\bUNSET_TARGET_SHIPMENT_DATE_TEXT\b[^}]*\} from "\.\/approval-texts"/;
 
   test("회색 상자에 「사내 목표 출하일」 칸이 있다", () => {
     // 상자 밖(카드 다른 자리)이 아니라 이 상자 안이라는 것은 slice 가 보장한다 —
@@ -1063,15 +1075,20 @@ describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 �
     );
   });
 
-  test("🔴 값이 없을 때의 문구가 확인 창과 **글자 그대로** 같다", () => {
-    const declared = UNSET_TEXT_DECLARATION.exec(shipmentCardSource);
-    assert.ok(declared, "빈 값 문구를 한 곳(상수)에 모아 두지 않았다 — 두 곳이 갈라지기 시작한다");
+  test("🔴 값이 없을 때의 문구가 확인 창과 **글자 그대로** 같다 — 같은 상수 한 곳을 부른다", () => {
+    // 예전에는 카드와 창이 각자 자기 파일에 같은 문장을 적고 있어서 **양쪽 원본을
+    // 대조**했다. 이제는 공용 파일 하나에만 적혀 있고 둘이 그것을 부른다 — 지키려던
+    // 것(두 화면이 같은 말을 한다)은 그대로이고, 갈라질 자리 자체가 없어졌다.
+    const declared = UNSET_TEXT_DECLARATION.exec(sharedTextsSource);
+    assert.ok(declared, "빈 값 문구를 공용 파일(approval-texts.ts)에 모아 두지 않았다");
     const text = declared[1];
+    assert.equal(text, UNSET_TARGET_SHIPMENT_DATE_TEXT, "부른 상수와 원본에 적힌 문장이 다르다");
 
-    // 창 쪽은 아직 자기 파일에 같은 문장을 적고 있다(그 파일은 검수 카드도 함께
-    // 쓰는 자리라 이번 범위 밖이었다). 한쪽만 고치면 같은 사실에 두 가지 말이
-    // 생긴다 — 그래서 **원본을 대조**하고, 창이 실제로 그리는 글자까지 확인한다.
-    assert.ok(dialogSource.includes(`"${text}"`), "확인 창 쪽 문구가 갈라졌다");
+    assert.match(flat(shipmentCardSource), SHARED_TEXTS_IMPORT, "카드가 공용 문구를 부르지 않는다");
+    assert.match(flat(dialogSource), SHARED_TEXTS_IMPORT, "확인 창이 공용 문구를 부르지 않는다");
+
+    // 그리고 창이 **실제로 그리는 글자**까지 확인한다 — 부르기만 하고 다른 것을
+    // 그리면 사람이 보는 화면은 여전히 갈라진다.
     const dialogHtml = renderToStaticMarkup(
       <ApprovalActionDialog
         isOpen
@@ -1083,14 +1100,39 @@ describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 �
         onCancel={() => {}}
       />
     );
-    assert.ok(flat(dialogHtml).includes(text), "창이 그리는 문구가 카드의 문구와 다르다");
+    assert.ok(flat(dialogHtml).includes(text), "창이 그리는 문구가 공용 상수의 문구와 다르다");
   });
 
-  test("🔴 카드가 그 문장을 한 벌 더 적지 않는다 — 상수를 쓴다", () => {
+  test("🔴 카드도 창도 그 문장을 자기 파일에 적지 않는다 — 상수를 쓴다", () => {
+    const written = /아직 정해지지 않았습니다\. 접수 정보에서 입력합니다\./g;
     assert.equal(
-      (shipmentCardSource.match(/아직 정해지지 않았습니다\. 접수 정보에서 입력합니다\./g) ?? []).length,
+      (shipmentCardSource.match(written) ?? []).length,
+      0,
+      "카드가 문장을 직접 적었다 — 공용 상수와 갈라지기 시작한다"
+    );
+    assert.equal(
+      (dialogSource.match(written) ?? []).length,
+      0,
+      "확인 창이 문장을 직접 적었다 — 공용 상수와 갈라지기 시작한다"
+    );
+    assert.equal(
+      (sharedTextsSource.match(written) ?? []).length,
       1,
-      "같은 문장이 카드 안에서도 둘이 되면 언젠가 한쪽만 고쳐진다"
+      "공용 파일 안에서도 둘이 되면 언젠가 한쪽만 고쳐진다"
+    );
+  });
+
+  test("🔴 공용 문구 파일은 아무것도 물지 않는다 — 문자열 상수만 있다", () => {
+    // 카드는 서버 액션을 물고 있어 server-only 사슬이 걸린다. 문구를 카드에 두고
+    // 창이 카드를 부르게 했다면 **이 시험 파일이 import 단계에서 죽었다** — 그래서
+    // 양쪽 어느 쪽도 아닌 순수 파일에 둔다. 맨 위 import 가 그 사실의 산 증거이고,
+    // 여기서는 되돌아갈 길을 원본으로 막는다.
+    assert.ok(!/"use client"/.test(sharedTextsSource), "클라이언트 경계를 얹으면 순수 파일이 아니다");
+    assert.ok(!/server-only/.test(sharedTextsSource), "server-only 사슬이 걸리면 창을 렌더하는 시험이 죽는다");
+    assert.ok(!/^\s*import\s/m.test(sharedTextsSource), "아무것도 import 하지 않는다 — 무엇을 물지 모른다");
+    assert.ok(
+      !/\bfunction\b|=>/.test(sharedTextsSource),
+      "판정이나 서식이 끼어들기 시작하면 이 파일이 무언가를 물게 된다"
     );
   });
 
@@ -1200,6 +1242,136 @@ describe("🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계
     // 같은 것을 보지만, 이번 수정이 건드린 자리라 여기서도 한 번 붙잡아 둔다.
     assert.match(flat(extraBlock), /\{routeProgress \? "결재선 진행" : "처리 자격"\}/);
     assert.match(flat(extraBlock), /previewSteps\.length > 0 &&/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 승인 카드 껍데기 — 카드 **안의** 한국어 문장도 어절 경계에서만 접힌다
+ * ============================================================================
+ * 앞 커밋은 출하 카드의 **회색 상자에만** break-keep 을 걸었다. 그런데 껍데기
+ * (DatabaseApprovalCard)가 직접 그리는 문장들이 아직 어절 중간에서 잘렸다:
+ *
+ *   · 「이 요청은 ○○○ 님에게 지정되어 있습니다」(disabledReason)
+ *   · 비상구 안내 · 무효 안내(blockedNotice)
+ *   · 서버가 거절한 이유(statusMessage)
+ *   · 요청 사유 · 결정 사유 — 사람이 쓴 긴 한국어 문장이 들어온다
+ *
+ * 전부 string 프롭으로 넘어와 껍데기의 <p>·<dd> 에서 그려지므로 **카드 부품
+ * 쪽에서는 감쌀 방법이 없다.** 그래서 껍데기의 바깥 <section> 에 건다 —
+ * word-break 는 물려받는 속성이라 그 한 자리로 카드 안이 모두 따른다.
+ *
+ * 🔴 두 카드가 이 껍데기를 함께 쓰므로 **함께 바뀐다.** 그것이 의도다.
+ *
+ * ⚠️ 껍데기는 순수해서(타입 말고 물고 있는 것이 없다) 그대로 렌더해 검사한다 —
+ * 원본 글자가 아니라 **그려진 결과**를 본다. 그래서 주석에 클래스 이름을 적어도
+ * 걸리지 않는다.
+ * ============================================================================
+ */
+describe("🔴 승인 카드 껍데기 — 카드 안의 한국어 문장은 어절 경계에서만 접힌다", () => {
+  const baseProps = {
+    title: "최종 출하 승인",
+    record: null,
+    displayStatus: "REQUESTED" as const,
+    actions: [],
+  };
+
+  test("🔴 껍데기 <section> 에 break-keep 이 걸려 있다", () => {
+    const html = renderToStaticMarkup(<DatabaseApprovalCard {...baseProps} />);
+    assert.match(
+      html,
+      /^<section class="[^"]*\bbreak-keep\b/,
+      "한글은 기본 규칙으로 어절 중간에서 잘린다 — 「위임 / 을」이 그것이었다"
+    );
+  });
+
+  test("🔴 껍데기가 그리는 문장들이 그 <section> 안이다 — 물려받아 다 따른다", () => {
+    // 자리를 함께 못 박아야 「break-keep 은 걸렸는데 문장은 밖」이 되지 않는다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        {...baseProps}
+        record={approvalRecord({
+          requestReason: "검수 결과 이상 없어 출하 승인을 요청합니다.",
+          decisionReason: "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다.",
+        })}
+        blockedNotice="지금 차례는 김도윤 님입니다. 최고관리자 권한으로 대신 처리합니다."
+        statusMessage="이미 대기 중인 승인 요청이 있습니다."
+      />
+    );
+    const sectionEnd = html.indexOf("</section>");
+    assert.ok(sectionEnd >= 0, "카드가 <section> 으로 끝나야 한다");
+    for (const sentence of [
+      "검수 결과 이상 없어 출하 승인을 요청합니다.",
+      "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다.",
+      "최고관리자 권한으로 대신 처리합니다.",
+      "이미 대기 중인 승인 요청이 있습니다.",
+    ]) {
+      const at = html.indexOf(sentence);
+      assert.ok(at >= 0, `문장이 아예 그려지지 않았다: ${sentence}`);
+      assert.ok(at < sectionEnd, `문장이 껍데기 밖으로 나갔다 — 물려받지 못한다: ${sentence}`);
+    }
+  });
+
+  test("🔴 단추가 없을 때의 지정 안내도 같은 <section> 안이다", () => {
+    // 이 문구는 단추가 하나도 없을 때만 그려진다 — 위 렌더로는 잡히지 않는 갈래다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard {...baseProps} disabledReason="이 요청은 김도윤 님에게 지정되어 있습니다." />
+    );
+    const at = html.indexOf("이 요청은 김도윤 님에게 지정되어 있습니다.");
+    assert.ok(at >= 0, "안내가 아예 그려지지 않았다");
+    assert.ok(at < html.indexOf("</section>"));
+  });
+
+  test("⚠️ 억지로 한 줄에 밀어 넣지 않는다 — 껍데기가 그리는 자리에 whitespace-nowrap·truncate 가 없다", () => {
+    // 밀어 넣으면 좁은 화면에서 글자가 상자 밖으로 넘치거나 가로 스크롤이 생긴다.
+    // extra 는 호출부가 넣는 것이라 여기서는 주지 않는다(그쪽 예외는 아래에서 본다).
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        {...baseProps}
+        record={approvalRecord({ requestReason: "긴 한국어 문장이 들어오는 자리다." })}
+        blockedNotice="지금 차례는 김도윤 님입니다. 최고관리자 권한으로 대신 처리합니다."
+        statusMessage="이미 대기 중인 승인 요청이 있습니다."
+        disabledReason="이 요청은 김도윤 님에게 지정되어 있습니다."
+      />
+    );
+    // 예외는 상태 배지 하나뿐이다 — 「승인 대기」 같은 **짧은 이름표**라 알약이
+    // 접히면 오히려 이상하다(예전부터 그랬다). 그 하나를 덜어 내고 나면 남는 것이
+    // 없어야 한다. 개수까지 함께 세어, 새 자리가 배지 뒤에 숨지 못하게 한다.
+    assert.equal((html.match(/whitespace-nowrap/g) ?? []).length, 1, "문장을 한 줄로 고정한 자리가 늘었다");
+    const withoutBadge = html.replace(/<span class="[^"]*\brounded-full\b[^"]*">[^<]*<\/span>/, "");
+    assert.ok(!/whitespace-nowrap/.test(withoutBadge), "문장을 한 줄로 고정하면 접히는 대신 넘친다");
+    assert.ok(!/truncate/.test(html), "잘라내면 문장의 뒷부분이 아예 사라진다");
+  });
+
+  for (const [name, source] of CARD_PARTS) {
+    test(`🔴 ${name}: 같은 껍데기를 쓰므로 함께 적용된다`, () => {
+      assert.match(
+        flat(source),
+        /import DatabaseApprovalCard, \{[^}]*\} from "\.\/DatabaseApprovalCard"/,
+        "껍데기를 부르지 않으면 이 카드만 옛 줄바꿈으로 남는다"
+      );
+      assert.match(flat(renderBlock(source)), /<DatabaseApprovalCard /, "껍데기로 그리지 않는다");
+    });
+  }
+
+  test("🔴 결재선 미리보기의 이름 상자는 예외로 남는다 — 한 줄 + 가로 스크롤 그대로다", () => {
+    // white-space: nowrap 은 줄바꿈 자리 자체를 없애므로 word-break 가 이기지
+    // 못한다 — 이름은 지금처럼 한 줄로 남고, 넘치는 만큼 **그 상자 안에서** 밀린다.
+    // 원본 쪽 확인은 위 「최종 출하 승인 카드」 시험들이 이미 하고 있고, 여기서는
+    // 둘이 **한 화면에 함께 있어도 각자 남는지**를 그려진 결과로 본다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        {...baseProps}
+        extra={
+          <div className="mt-2 overflow-x-auto pb-1">
+            <span className="whitespace-nowrap rounded-md border px-3 py-2 text-xs">김도윤</span>
+          </div>
+        }
+      />
+    );
+    assert.match(html, /^<section class="[^"]*\bbreak-keep\b/, "껍데기 쪽이 사라졌다");
+    assert.match(html, /class="whitespace-nowrap rounded-md border/, "이름 상자의 한 줄 처리가 사라졌다");
+    assert.match(html, /class="mt-2 overflow-x-auto pb-1"/, "넘치는 만큼 그 상자 안에서 밀려야 한다");
   });
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 
 export type ApprovalAssigneeOption = {
   id: string;
@@ -30,7 +31,9 @@ type ApprovalActionDialogProps = {
    *
    * 🔴 「주지 않음」(undefined)과 「아직 정해지지 않음」(null)이 서로 다른 뜻이다 —
    * 뒤엣것은 그 사실과 **어디서 입력하는지**를 대신 적는다. 「-」 한 글자만
-   * 보여 주면 사람은 어디서 고치는지 모른다.
+   * 보여 주면 사람은 어디서 고치는지 모른다. 그 문구는 출하 카드의 회색 상자와
+   * **같은 상수 한 곳**에서 온다(approval-texts.ts) — 같은 사실에 두 가지 말이
+   * 생기면 사람은 어느 쪽이 맞는지 알 수 없다.
    *
    * 🔴 이 창에서는 **고칠 수 없다.** 이 값의 편집 경로는 「접수 정보 편집」
    * 하나뿐이고(IntakeInfoEditForm.tsx 머리말), 이 창은 그 약속을 지켜 읽기만
@@ -120,7 +123,7 @@ export default function ApprovalActionDialog({
                 : "mt-0.5 text-sm text-zinc-500 dark:text-zinc-400"
             }
           >
-            {internalTargetShipmentDate ?? "아직 정해지지 않았습니다. 접수 정보에서 입력합니다."}
+            {internalTargetShipmentDate ?? UNSET_TARGET_SHIPMENT_DATE_TEXT}
           </dd>
         </dl>
       )}

@@ -76,7 +76,24 @@ export default function DatabaseApprovalCard({
   statusMessage,
 }: DatabaseApprovalCardProps) {
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+    /*
+      🔴 `break-keep`(word-break: keep-all)을 **껍데기에** 건다. word-break 는 물려받는
+      속성이라 여기 한 자리에 걸면 카드 안의 한국어 문장이 모두 어절 경계에서만
+      접힌다 — 한글은 기본 규칙으로 어절 중간에서 잘려서, 좁은 칸에서 「…유효한 위임 /
+      을 받은…」처럼 끊겼다. 이 껍데기가 그리는 문장들(지정 안내·비상구 안내·서버가
+      거절한 이유, 그리고 사람이 쓴 요청 사유·결정 사유)은 전부 string 프롭으로
+      들어오므로 **카드 부품 쪽에서는 감쌀 방법이 없다.** 인쇄용 양식도 같은 이유로
+      같은 속성을 쓴다(ServiceReportPrintView).
+
+      🔴 두 카드(수리 검수 승인·최종 출하 승인)가 이 껍데기를 함께 쓰므로 함께 바뀐다 —
+      그것이 의도다. 같은 결함을 둘 다 갖고 있었다.
+
+      ⚠️ 「어떤 폭에서도 무조건 한 줄」이 목표가 아니다. 창을 좁히면 접혀야 한다 —
+      whitespace-nowrap 으로 밀어 넣으면 글자가 상자 밖으로 넘친다. 예외는 호출부가
+      extra 로 넣는 결재선 미리보기의 이름 상자뿐이고, 거기는 whitespace-nowrap 이
+      word-break 를 이겨(줄바꿈 자체를 막는다) 지금처럼 **그 상자 안에서** 가로로 밀린다.
+    */
+    <section className="flex flex-col gap-3 break-keep rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
         <DatabaseApprovalStatusBadge status={displayStatus} />

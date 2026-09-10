@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
 import ApprovalActionDialog from "./ApprovalActionDialog";
+import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
@@ -27,20 +28,6 @@ const DIALOG_TITLES: Record<Exclude<DialogState, null>, string> = {
   APPROVED: "출하 승인",
   REJECTED: "출하 반려",
 };
-
-/**
- * 사내 목표 출하일이 **아직 비어 있을 때**의 문구. 카드의 회색 상자와 확인 창이
- * 같은 사실을 말하므로 **글자 그대로 같아야** 한다 — 같은 사실에 두 가지 말이
- * 생기면 사람은 어느 쪽이 맞는지 알 수 없다. 「-」 한 글자로 줄이지 않는 이유도
- * 같다: 어디서 고치는지를 말해 주지 않으면 사람은 그 자리에서 멈춘다.
- *
- * 🔴 지금은 확인 창(ApprovalActionDialog)이 자기 파일에 같은 문장을 한 벌 더
- * 적고 있다. 그 파일은 **검수 카드도 함께 쓰는 자리**라 이번 작업 범위 밖이어서
- * 한 곳으로 모으지 못했다 — 대신 화면 배치 시험(approval-screen-layout.test.tsx)이
- * **양쪽 원본을 대조해** 갈라짐을 잡는다. 창을 함께 고칠 수 있게 되면 이 문구를
- * 공용 자리로 옮기고 양쪽이 그것을 부르게 한다.
- */
-const UNSET_TARGET_SHIPMENT_DATE_TEXT = "아직 정해지지 않았습니다. 접수 정보에서 입력합니다.";
 
 /**
  * 검수 카드와 같은 이유로 도메인 함수 하나만 쓴다 — record.status만 보면
@@ -155,8 +142,9 @@ export default function DatabaseFinalShipmentCard({
    *
    * 🔴 여기서 **고치지 않는다.** 이 값의 편집 경로는 「접수 정보 편집」
    * 하나뿐이다(IntakeInfoEditForm.tsx 머리말). 아직 정해지지 않았으면 `null`
-   * 이고, 그때 그 사실과 어디서 입력하는지를 대신 말한다
-   * (UNSET_TARGET_SHIPMENT_DATE_TEXT — 카드와 창이 같은 말을 한다).
+   * 이고, 그때 그 사실과 어디서 입력하는지를 대신 말한다 — 그 문구는 카드도 창도
+   * **같은 상수 한 곳**에서 부른다(approval-texts.ts 의
+   * UNSET_TARGET_SHIPMENT_DATE_TEXT).
    */
   internalTargetShipmentDate: string | null;
 }) {
