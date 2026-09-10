@@ -617,6 +617,13 @@
       "when": 1788966610232,
       "tag": "0087_mute_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1788999362437,
+      "tag": "0088_hot_black_knight",
+      "breakpoints": true
     }
   ]
 }

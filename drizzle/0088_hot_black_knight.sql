@@ -1,0 +1,5 @@
+ALTER TABLE "repair_case_approvals" ADD COLUMN "route_id" uuid;--> statement-breakpoint
+ALTER TABLE "repair_case_approvals" ADD COLUMN "route_step_order" integer;--> statement-breakpoint
+ALTER TABLE "repair_case_approvals" ADD CONSTRAINT "repair_case_approvals_route_id_shipment_approval_routes_id_fk" FOREIGN KEY ("route_id") REFERENCES "public"."shipment_approval_routes"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "repair_case_approvals" ADD CONSTRAINT "repair_case_approvals_route_columns_together" CHECK ((route_id IS NULL AND route_step_order IS NULL) OR (route_id IS NOT NULL AND route_step_order IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "repair_case_approvals" ADD CONSTRAINT "repair_case_approvals_route_only_for_final_shipment" CHECK (route_id IS NULL OR approval_type = 'FINAL_SHIPMENT');
