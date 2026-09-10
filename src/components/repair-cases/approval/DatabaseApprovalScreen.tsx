@@ -82,6 +82,9 @@ export default function DatabaseApprovalScreen({
           inspectionApproved={inspectionApproved}
           currentVersion={resolved.version}
           routeSteps={shipmentRouteSteps}
+          // 이미 이 화면에 와 있는 값이다 — 서버도 조회도 새로 부르지 않는다.
+          // 카드는 이것을 확인 창에 읽기 전용으로 넘기기만 한다.
+          internalTargetShipmentDate={resolved.internalTargetShipmentDate}
         />
       </div>
 

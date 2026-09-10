@@ -22,6 +22,22 @@ type ApprovalActionDialogProps = {
    */
   assigneeOptions?: ApprovalAssigneeOption[];
   /**
+   * 사내 목표 출하일(YYYY-MM-DD) — 판단에 참고하라고 **읽기 전용**으로 한 줄
+   * 보여 준다. 위 「처리할 사람」과 같은 방식으로 **주지 않으면 그 자리를 아예
+   * 그리지 않는다**: 이 창은 검수 카드와 출하 카드가 함께 쓰는데, 이 날짜를
+   * 보고 판단하는 것은 출하 승인 쪽(요청·승인·반려 셋 다)뿐이다. 검수 카드는
+   * 주지 않으므로 지금과 똑같이 그려진다.
+   *
+   * 🔴 「주지 않음」(undefined)과 「아직 정해지지 않음」(null)이 서로 다른 뜻이다 —
+   * 뒤엣것은 그 사실과 **어디서 입력하는지**를 대신 적는다. 「-」 한 글자만
+   * 보여 주면 사람은 어디서 고치는지 모른다.
+   *
+   * 🔴 이 창에서는 **고칠 수 없다.** 이 값의 편집 경로는 「접수 정보 편집」
+   * 하나뿐이고(IntakeInfoEditForm.tsx 머리말), 이 창은 그 약속을 지켜 읽기만
+   * 한다 — 그래서 입력칸이 아니라 글자로 그린다.
+   */
+  internalTargetShipmentDate?: string | null;
+  /**
    * 두 번째 인자는 고른 사람의 id다. 고르는 자리를 그리지 않았으면 언제나
    * `null`이므로, 그 자리를 쓰지 않는 호출부는 인자를 하나만 받으면 된다.
    */
@@ -40,6 +56,7 @@ export default function ApprovalActionDialog({
   requireComment,
   isSubmitting,
   assigneeOptions,
+  internalTargetShipmentDate,
   onConfirm,
   onCancel,
 }: ApprovalActionDialogProps) {
@@ -87,6 +104,26 @@ export default function ApprovalActionDialog({
       <h2 id="approval-action-dialog-title" className="text-sm font-semibold">
         {title}
       </h2>
+
+      {/*
+        읽기 전용 한 줄. 🔴 <input>·<select> 를 만들지 않는다 — 입력칸처럼
+        생기면 사람이 여기서 고치려 든다. 이름표에 「읽기 전용」을 적어 두는
+        것도 같은 이유다(고치는 자리는 「접수 정보 편집」 하나뿐이다).
+      */}
+      {internalTargetShipmentDate !== undefined && (
+        <dl className="mt-3 rounded-md bg-zinc-50 px-3 py-2 dark:bg-zinc-800/60">
+          <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일 (읽기 전용)</dt>
+          <dd
+            className={
+              internalTargetShipmentDate
+                ? "mt-0.5 text-sm text-zinc-900 dark:text-zinc-50"
+                : "mt-0.5 text-sm text-zinc-500 dark:text-zinc-400"
+            }
+          >
+            {internalTargetShipmentDate ?? "아직 정해지지 않았습니다. 접수 정보에서 입력합니다."}
+          </dd>
+        </dl>
+      )}
 
       {assigneeOptions && (
         <div className="mt-3 flex flex-col gap-1">

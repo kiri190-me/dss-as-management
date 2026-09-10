@@ -108,6 +108,7 @@ export default function DatabaseFinalShipmentCard({
   inspectionApproved,
   currentVersion,
   routeSteps,
+  internalTargetShipmentDate,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
@@ -132,6 +133,15 @@ export default function DatabaseFinalShipmentCard({
    * 🔴 배열이다(Map 이 아니다) — 서버 컴포넌트 경계를 넘어야 하기 때문이다.
    */
   routeSteps: ShipmentApprovalRouteStepLabel[] | null;
+  /**
+   * 사내 목표 출하일 — 확인 창에 **읽기 전용**으로 넘기기만 한다. 요청하는
+   * 사람과 결재하는 사람이 같은 창을 쓰므로 양쪽이 같은 날짜를 보고 판단한다.
+   *
+   * 🔴 여기서 **고치지 않는다.** 이 값의 편집 경로는 「접수 정보 편집」
+   * 하나뿐이다(IntakeInfoEditForm.tsx 머리말). 아직 정해지지 않았으면 `null`
+   * 이고, 그때 창이 그 사실과 어디서 입력하는지를 대신 말한다.
+   */
+  internalTargetShipmentDate: string | null;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -351,6 +361,9 @@ export default function DatabaseFinalShipmentCard({
         title={dialogState ? DIALOG_TITLES[dialogState] : ""}
         requireComment={dialogState === "REJECTED"}
         isSubmitting={isSubmitting}
+        // 요청·승인·반려 셋 다 같은 창이라, 넘기는 것만으로 세 경우에 다 나온다.
+        // 검수 카드는 이 프롭을 주지 않으므로 그쪽 창은 지금과 똑같다.
+        internalTargetShipmentDate={internalTargetShipmentDate}
         onConfirm={(comment) => void handleConfirm(comment)}
         onCancel={() => setDialogState(null)}
       />

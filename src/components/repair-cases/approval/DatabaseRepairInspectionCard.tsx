@@ -93,7 +93,12 @@ export default function DatabaseRepairInspectionCard({
         onClick: () => setDialogState("REQUEST"),
       });
       if (displayStatus === "STALE") {
-        disabledReason = "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
+        // 🔴 이 안내를 disabledReason 으로 내보내면 **아무 데도 보이지 않는다** —
+        // 껍데기(DatabaseApprovalCard)는 그 문구를 단추가 하나도 없을 때만 그리는데,
+        // 여기는 바로 위에서 「재요청」 단추를 밀어 넣은 자리다. 그래서 단추와 함께
+        // 그려지는 blockedNotice 로 낸다(출하 카드가 같은 상황에 쓰는 자리와 같다).
+        // 문구는 그대로다 — 자리만 옮겼다.
+        blockedNotice = "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
       }
     } else {
       disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";

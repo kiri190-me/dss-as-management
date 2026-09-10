@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import DatabaseApprovalCard from "./DatabaseApprovalCard";
+import ApprovalActionDialog from "./ApprovalActionDialog";
 import { standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
@@ -40,6 +41,8 @@ const flat = (source: string) => source.replace(/\s+/g, " ");
 
 const inspectionCardSource = read("src/components/repair-cases/approval/DatabaseRepairInspectionCard.tsx");
 const shipmentCardSource = read("src/components/repair-cases/approval/DatabaseFinalShipmentCard.tsx");
+const approvalScreenSource = read("src/components/repair-cases/approval/DatabaseApprovalScreen.tsx");
+const dialogSource = read("src/components/repair-cases/approval/ApprovalActionDialog.tsx");
 
 const CARD_PARTS: Array<[string, string]> = [
   ["수리 검수 승인 카드", inspectionCardSource],
@@ -853,5 +856,292 @@ describe("🔴 수리 검수 승인 카드 — 비상구 안내", () => {
     );
     assert.match(html, /이 요청은 김도윤 님에게 지정되어 있습니다\./);
     assert.ok(!/대신 처리합니다/.test(html), "단추가 없는데 비상구 안내가 나왔다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 확인 창 — 사내 목표 출하일은 **읽기 전용**으로 보인다
+ * ============================================================================
+ * 출하 승인은 「언제까지 내보내야 하는가」를 보고 판단하는 일이다. 그 날짜가
+ * repair_cases 에 이미 있는데 승인 창에는 없어서, 요청하는 사람도 결재하는
+ * 사람도 다른 화면을 열어 봐야 했다.
+ *
+ * 🔴 값의 편집 경로는 「접수 정보 편집」 하나뿐이다(IntakeInfoEditForm.tsx
+ * 머리말). 그래서 이 창은 **읽기만** 한다 — 입력칸을 만들지 않는다는 것을
+ * 아래에서 렌더 결과로 붙잡는다.
+ *
+ * 확인 창(ApprovalActionDialog)은 순수해서(react 말고 물고 있는 것이 없다)
+ * 카드와 달리 그대로 렌더해 검사한다.
+ * ============================================================================
+ */
+describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
+  const baseDialogProps = {
+    isOpen: true,
+    title: "출하 승인 요청",
+    requireComment: false,
+    isSubmitting: false,
+    onConfirm: () => {},
+    onCancel: () => {},
+  };
+
+  test("값이 있으면 날짜가 이름표와 함께 나온다", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate="2026-09-20" />
+    );
+    assert.match(flat(html), /사내 목표 출하일/);
+    assert.match(flat(html), /2026-09-20/);
+  });
+
+  test("🔴 요청·승인·반려 셋 다 같은 창이라 세 경우에 모두 나온다", () => {
+    // 요청은 사유가 선택, 반려는 필수다 — 그 차이와 무관하게 날짜는 늘 있다.
+    for (const [title, requireComment] of [
+      ["출하 승인 요청", false],
+      ["출하 승인", false],
+      ["출하 반려", true],
+    ] as Array<[string, boolean]>) {
+      const html = renderToStaticMarkup(
+        <ApprovalActionDialog
+          {...baseDialogProps}
+          title={title}
+          requireComment={requireComment}
+          internalTargetShipmentDate="2026-09-20"
+        />
+      );
+      assert.match(flat(html), /사내 목표 출하일/, `${title} 창에 날짜가 없다`);
+      assert.match(flat(html), /2026-09-20/, `${title} 창에 날짜가 없다`);
+    }
+  });
+
+  test("🔴 값이 없으면 「아직 정해지지 않았다 + 접수 정보에서 입력」이 나온다", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate={null} />
+    );
+    assert.match(flat(html), /아직 정해지지 않았습니다\./);
+    assert.match(flat(html), /접수 정보에서 입력합니다\./, "어디서 고치는지를 말해 주지 않는다");
+    assert.ok(!/>-</.test(html), "「-」 한 글자만 보여 주면 사람은 어디서 고치는지 모른다");
+  });
+
+  test("🔴 프롭을 주지 않으면 그 자리를 아예 그리지 않는다 — 검수 승인 창이 그 경우다", () => {
+    const html = renderToStaticMarkup(<ApprovalActionDialog {...baseDialogProps} title="검수 승인 요청" />);
+    assert.ok(!/사내 목표 출하일/.test(html), "검수 승인 창에까지 날짜가 끼어들었다");
+    assert.ok(!/아직 정해지지 않았습니다/.test(html), "주지 않았는데 빈 값 안내가 나왔다");
+  });
+
+  test("🔴 고칠 수 있는 입력칸이 아니다 — 그 자리에 <input>·<select> 가 생기지 않는다", () => {
+    for (const value of ["2026-09-20", null]) {
+      const html = renderToStaticMarkup(
+        <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate={value} />
+      );
+      assert.ok(!/<input/.test(html), `입력칸처럼 생기면 사람이 여기서 고치려 든다 (값: ${value})`);
+      assert.ok(!/<select/.test(html), `고르는 자리를 만들면 안 된다 (값: ${value})`);
+    }
+  });
+
+  test("읽기 전용이라는 것이 글자로도 보인다", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate="2026-09-20" />
+    );
+    assert.match(flat(html), /읽기 전용/, "고칠 수 없다는 것이 눈에 보여야 한다");
+  });
+
+  test("🔴 창이 그 값을 서버로 돌려보내지 않는다 — 확인 콜백의 모양이 그대로다", () => {
+    // 날짜가 onConfirm 에 얹히는 순간 이 창은 읽기 전용이 아니게 된다.
+    assert.match(
+      flat(dialogSource),
+      /onConfirm: \(comment: string \| null, assignedApproverUserId: string \| null\) => void;/,
+      "확인 콜백에 값이 하나 더 붙었다 — 읽기 전용 약속이 깨진다"
+    );
+  });
+
+  test("「처리할 사람」 고르는 자리는 그대로다 (요청일 때만 나오는 것 포함)", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalActionDialog
+        {...baseDialogProps}
+        title="검수 승인 요청"
+        assigneeOptions={[{ id: "u-1", name: "김도윤", roleLabel: "관리자" }]}
+      />
+    );
+    assert.match(html, /<select id="approval-action-assignee"/);
+    assert.match(flat(html), /지정하지 않음/);
+    assert.match(flat(html), /김도윤 \(관리자\)/);
+    assert.match(flat(html), /지정하면 그 사람만 처리할 수 있습니다\./);
+    assert.ok(!/사내 목표 출하일/.test(html), "검수 요청 창에 날짜가 끼어들었다");
+
+    // 검수 카드가 그 자리를 요청에만 여는 조건도 그대로다.
+    assert.match(
+      flat(inspectionCardSource),
+      /assigneeOptions=\{dialogState === "REQUEST" \? assigneeCandidates : undefined\}/,
+      "고르는 자리가 승인·반려 창에까지 열렸다"
+    );
+  });
+
+  test("코멘트 칸도 그대로다 — 필수일 때 * 가 붙는 것까지", () => {
+    const optional = renderToStaticMarkup(
+      <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate="2026-09-20" />
+    );
+    assert.match(flat(optional), /<textarea id="approval-action-comment"/);
+    assert.match(flat(optional), /결정 코멘트 \(선택\)/);
+
+    const required = renderToStaticMarkup(
+      <ApprovalActionDialog {...baseDialogProps} requireComment internalTargetShipmentDate={null} />
+    );
+    assert.match(flat(required), /결정 코멘트 \*/);
+  });
+});
+
+describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, 읽기만 한다", () => {
+  test("출하 카드가 확인 창에 그 값을 넘긴다 — 프롭이 빠지면 코드는 멀쩡한데 한 글자도 안 나온다", () => {
+    assert.match(
+      flat(renderBlock(shipmentCardSource)),
+      /internalTargetShipmentDate=\{internalTargetShipmentDate\}/,
+      "창까지 가지 않으면 카드만 값을 들고 있게 된다"
+    );
+  });
+
+  test("🔴 검수 카드는 그 값을 아예 다루지 않는다 — 검수 승인 창에는 나오면 안 된다", () => {
+    assert.ok(
+      !/internalTargetShipmentDate/.test(inspectionCardSource),
+      "검수 카드가 날짜를 넘기면 검수 승인 창에도 나온다"
+    );
+  });
+
+  test("화면에 이미 와 있는 값을 그대로 내려보낸다 — 서버·조회를 새로 부르지 않는다", () => {
+    assert.match(
+      flat(approvalScreenSource),
+      /internalTargetShipmentDate=\{resolved\.internalTargetShipmentDate\}/,
+      "resolved 에 이미 들어 있는 값이다"
+    );
+  });
+
+  test("🔴 읽기뿐이다 — 승인 요청·결정 payload 에 날짜가 실리지 않는다", () => {
+    // 편집 경로는 「접수 정보 편집」 하나뿐이다(IntakeInfoEditForm.tsx 머리말).
+    // 승인 창이 쓰기를 시작하면 그 약속이 조용히 깨진다.
+    const submitBlock = sliceBetween(shipmentCardSource, "async function handleConfirm(", "const routeProgress =");
+    assert.ok(
+      !/internalTargetShipmentDate/.test(submitBlock),
+      "승인 요청·결정이 날짜를 서버로 보낸다 — 이 창은 읽기 전용이다"
+    );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 수리 검수 승인 카드 — 무효가 된 승인의 안내
+ * ============================================================================
+ * STALE(승인 뒤 접수 건이 바뀌어 무효가 된 상태)에서 검수 카드는 「재요청」
+ * 단추를 밀어 넣은 **뒤** 그 이유를 disabledReason 으로 냈다. 껍데기는 그 문구를
+ * **단추가 하나도 없을 때만** 그리므로, 사람은 왜 무효가 됐는지 모른 채 단추만
+ * 보고 있었다 — 한 글자도 나오지 않았다.
+ *
+ * 출하 카드는 같은 상황을 blockedNotice 로 내고 있어 정상적으로 보인다. 검수
+ * 카드도 같은 자리로 옮겼고, **문구는 그대로**다.
+ * ============================================================================
+ */
+describe("🔴 수리 검수 승인 카드 — 무효가 된 승인의 안내", () => {
+  const STALE_NOTICE =
+    "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
+
+  /**
+   * 요청을 다시 열어 주는 갈래 하나만 잘라낸다. 끝 표시가 `} else if` 라는 것
+   * 자체가 **두 안내가 같은 사슬의 다른 가지**임을 보장한다 — 따로 떨어진 if 로
+   * 갈라 놓으면 여기서 찾지 못해 시험이 멈춘다.
+   */
+  const requestBranch = sliceBetween(
+    inspectionCardSource,
+    'if (displayStatus === "NOT_REQUESTED"',
+    '} else if (displayStatus === "REQUESTED") {'
+  );
+  const decideBranch = sliceBetween(
+    inspectionCardSource,
+    '} else if (displayStatus === "REQUESTED") {',
+    '} else if (displayStatus === "APPROVED") {'
+  );
+
+  test("🔴 안내가 blockedNotice 로 나간다 — 단추가 있는 자리라 disabledReason 은 그려지지 않는다", () => {
+    const stale = requestBranch.indexOf('if (displayStatus === "STALE")');
+    const assignment = requestBranch.indexOf(`blockedNotice = "${STALE_NOTICE}"`);
+    const button = requestBranch.indexOf('key: "request"');
+    assert.ok(stale >= 0, "STALE 갈래가 아예 없다");
+    assert.ok(assignment > stale, "안내가 STALE 갈래 안에 있지 않다");
+    assert.ok(button >= 0 && button < assignment, "단추를 밀어 넣기 전이면 blockedNotice 가 맞는 자리가 아니다");
+    assert.ok(
+      !requestBranch.includes(`disabledReason = "${STALE_NOTICE}"`),
+      "옛 자리로 돌아갔다 — 그러면 화면에 한 글자도 나오지 않는다"
+    );
+  });
+
+  test("문구는 바뀌지 않았고, 출하 카드와도 여전히 같은 말이다", () => {
+    assert.ok(inspectionCardSource.includes(STALE_NOTICE), "문구가 바뀌었다 — 자리만 옮기기로 했다");
+    assert.ok(shipmentCardSource.includes(STALE_NOTICE), "출하 카드 쪽 문구가 갈라졌다");
+  });
+
+  test("🔴 자격이 없어 단추가 없을 때의 문구는 그대로 disabledReason 이다", () => {
+    // 그쪽은 단추가 없어 지금도 제대로 그려지고 있다 — 건드리지 않는다.
+    assert.ok(
+      requestBranch.includes('disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다."'),
+      "자격 안내까지 옮기면 단추가 없는 자리에서 안내가 사라진다"
+    );
+
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="수리 검수 승인"
+        record={null}
+        displayStatus="NOT_REQUESTED"
+        actions={[]}
+        disabledReason="최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다."
+      />
+    );
+    assert.match(html, /최고관리자·관리자·A\/S 엔지니어만 요청할 수 있습니다\./);
+  });
+
+  test("🔴 재요청 단추와 **함께** 실제로 그려진다 — 껍데기가 그렇게 그린다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="수리 검수 승인"
+        record={approvalRecord({ status: "APPROVED", repairCaseVersionAtRequest: 2 })}
+        displayStatus="STALE"
+        blockedNotice={STALE_NOTICE}
+        actions={[{ key: "request", label: "재요청", onClick: () => {} }]}
+      />
+    );
+    const notice = html.indexOf("다시 요청해 주세요.");
+    assert.ok(notice >= 0, "🔴 안내가 아예 그려지지 않았다 — 자리를 잘못 골랐다");
+    assert.ok(notice < html.indexOf("</section>"), "안내가 카드 밖으로 나가면 2열 격자의 칸을 먹는다");
+    assert.match(html, /재요청<\/button>/, "단추가 함께 있어야 하는 상황이다");
+  });
+
+  test("🔴 옛 자리(disabledReason)였다면 한 글자도 안 나왔다 — 그것이 이번 결함이다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="수리 검수 승인"
+        record={null}
+        displayStatus="STALE"
+        actions={[{ key: "request", label: "재요청", onClick: () => {} }]}
+        disabledReason={STALE_NOTICE}
+      />
+    );
+    assert.match(html, /재요청<\/button>/);
+    assert.ok(
+      !/다시 요청해 주세요\./.test(html),
+      "껍데기가 규칙을 바꿨다 — 이 시험(과 이번 수정)의 전제가 사라졌다"
+    );
+  });
+
+  test("🔴 앞 커밋의 비상구 안내와 서로 덮어쓰지 않는다 — 서로 다른 상태에서만 나온다", () => {
+    // 무효 안내는 「요청을 다시 열어 주는」 갈래, 비상구 안내는 「요청 대기」
+    // 갈래다. 같은 if/else 사슬의 다른 가지라 한 번에 둘 다 정해지는 일이 없다
+    // (사슬이라는 것은 위 requestBranch 의 끝 표시 `} else if` 가 보장한다).
+    assert.ok(
+      !requestBranch.includes("최고관리자 권한으로 대신 처리합니다."),
+      "무효 갈래에까지 비상구 안내가 들어왔다 — 둘 중 하나가 지워진다"
+    );
+    assert.ok(
+      !decideBranch.includes("다시 요청해 주세요."),
+      "요청 대기 갈래에까지 무효 안내가 들어왔다 — 둘 중 하나가 지워진다"
+    );
+    // 두 안내가 같은 상태에서 겹칠 수 없다는 것은 상태 자체로도 갈린다:
+    // STALE 과 REQUESTED 는 동시에 참이 될 수 없다.
+    assert.ok(decideBranch.includes("최고관리자 권한으로 대신 처리합니다."), "비상구 안내가 사라졌다");
   });
 });
