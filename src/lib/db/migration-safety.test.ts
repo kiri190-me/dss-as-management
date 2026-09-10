@@ -47,6 +47,67 @@ test("열 삭제도 잡는다", () => {
   ]);
 });
 
+/**
+ * 0029(2026)가 실제로 이 모양이었다. 위쪽에서 새 표를 만들고 손보는 문장이
+ * 이어지다가, 맨 아래에서 **다른 표의** 칸 둘을 지운다.
+ *
+ * 점검은 위쪽 표의 이름을 아래쪽 열 삭제에 붙여 보고했다. 부르는 쪽은 받은
+ * 이름으로 행을 세므로, 엉뚱한 표를 세고 정작 사라지는 표는 한 번도 세지 않는다.
+ * 잘못 붙은 표가 비어 있었다면 "비어 있음"이라는 거짓 안심까지 나온다.
+ *
+ * 파일을 읽지 않고 글자로 박아 둔다. 시험이 drizzle 폴더의 파일 존재에 매이면
+ * 나중에 그 파일이 정리되는 순간 회귀 가드가 조용히 사라진다.
+ */
+const MIGRATION_0029 = `
+CREATE TABLE "end_user_contacts" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"end_user_id" uuid NOT NULL,
+	"contact_name" text NOT NULL,
+	"contact_email" text
+);
+--> statement-breakpoint
+ALTER TABLE "end_user_contacts" ADD CONSTRAINT "end_user_contacts_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "end_user_contacts_end_user_id_idx" ON "end_user_contacts" USING btree ("end_user_id");--> statement-breakpoint
+
+INSERT INTO "end_user_contacts" ("end_user_id", "contact_name", "contact_email")
+SELECT "id", "contact_name", "contact_email"
+FROM "end_users"
+WHERE "contact_name" IS NOT NULL OR "contact_email" IS NOT NULL;--> statement-breakpoint
+
+ALTER TABLE "end_users" DROP COLUMN "contact_name";--> statement-breakpoint
+ALTER TABLE "end_users" DROP COLUMN "contact_email";
+`;
+
+test("0029의 열 삭제는 둘 다 end_users로 보고된다 — 앞 문장의 표 이름이 붙지 않는다", () => {
+  assert.deepEqual(findDestructiveOperations(MIGRATION_0029), [
+    { kind: "DROP_COLUMN", table: "end_users", column: "contact_name" },
+    { kind: "DROP_COLUMN", table: "end_users", column: "contact_email" },
+  ]);
+});
+
+test("0029에서 새로 만드는 표는 지우는 문장으로 세지 않는다", () => {
+  // 외래키 구절의 ON DELETE restrict도, 새 표를 만들고 손보는 문장도 이쪽
+  // 갈래에서는 아무것도 아니다. 둘째 갈래와도 겹치지 않는다.
+  assert.deepEqual(findRiskyOperations(MIGRATION_0029), []);
+});
+
+test("한 문장이 칸을 여럿 지워도 전부 같은 표로 잡는다", () => {
+  // 지금 drizzle 폴더에는 이 모양이 없다. 나중에 생겼을 때 표 이름이 어긋나지
+  // 않도록 미리 못 박아 둔다.
+  const sql = `ALTER TABLE "t" DROP COLUMN "a", DROP COLUMN "b";`;
+  assert.deepEqual(findDestructiveOperations(sql), [
+    { kind: "DROP_COLUMN", table: "t", column: "a" },
+    { kind: "DROP_COLUMN", table: "t", column: "b" },
+  ]);
+});
+
+test("열 삭제에 붙는 IF EXISTS·따옴표·스키마 접두사는 지금처럼 다룬다", () => {
+  const sql = `ALTER TABLE IF EXISTS "public"."repair_cases" DROP COLUMN IF EXISTS "legacy_report_number";`;
+  assert.deepEqual(findDestructiveOperations(sql), [
+    { kind: "DROP_COLUMN", table: "repair_cases", column: "legacy_report_number" },
+  ]);
+});
+
 test("TRUNCATE와 DELETE도 잡는다", () => {
   const sql = `
     TRUNCATE TABLE "audit_logs";

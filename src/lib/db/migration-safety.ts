@@ -45,7 +45,39 @@ function stripComments(sql: string): string {
     .replace(/--[^\n]*/g, " ");
 }
 
-const PATTERNS: {
+/**
+ * ── 두 갈래가 함께 쓴다 ─────────────────────────────────────────────────
+ * 문장 단위로 자른다.
+ *
+ * 대상 이름과 동작 사이를 문장 경계 너머까지 건너뛰면, 앞 문장의 표 이름이 뒷
+ * 문장의 동작에 붙는다. 0029(2026)가 실제로 그랬다 — 그 파일 위쪽 다른 표의
+ * 이름이 아래쪽 열 삭제에 붙었고, **부르는 쪽은 그 이름으로 행을 센다.** 엉뚱한
+ * 표를 세면 숫자가 틀릴 뿐 아니라 정작 사라지는 표는 한 번도 세지 않는다. 잘못
+ * 붙은 표가 비어 있었다면 "비어 있음"이라는 거짓 안심까지 나온다.
+ *
+ * 그래서 두 갈래 모두 먼저 잘라 두고 **한 문장 안에서만** 이름과 동작을 짝짓는다.
+ * 자르는 규칙을 갈래마다 따로 두면 언젠가 한쪽만 고쳐지므로 한 벌만 둔다.
+ *
+ * 주석을 걷어낸 뒤라 `--> statement-breakpoint`는 이미 사라졌고, 남는 구분자는
+ * 세미콜론뿐이다. 이 저장소의 마이그레이션에는 함수 본문(`$$ ... $$`)이 없어
+ * 세미콜론으로 갈라도 문장이 깨지지 않는다.
+ */
+function splitStatements(sql: string): string[] {
+  return sql
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+}
+
+/** `ALTER TABLE <이름> <나머지>` 로 시작하는 문장에서 표 이름과 나머지를 가른다. */
+const ALTER_TABLE_HEAD =
+  /^ALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?([\w".]+)\s+([\s\S]+)$/i;
+
+/**
+ * 어느 표에 매이지 않은 문장들 — 대상 이름이 그 문장 안에 바로 붙어 있다.
+ * 문장 단위로 돌리기는 하지만, 이름이 동작에 붙어 있어 원래도 어긋나지 않았다.
+ */
+const STANDALONE_DESTRUCTIVE: {
   re: RegExp;
   build: (m: RegExpMatchArray) => DestructiveOperation;
 }[] = [
@@ -62,12 +94,23 @@ const PATTERNS: {
     build: (m) => ({ kind: "DELETE", table: bareName(m[1]) }),
   },
   {
-    re: /\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\w".]+)[\s\S]*?\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?([\w".]+)/gi,
-    build: (m) => ({ kind: "DROP_COLUMN", table: bareName(m[1]), column: bareName(m[2]) }),
-  },
-  {
     re: /\bDROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?([\w".]+)/gi,
     build: (m) => ({ kind: "DROP_SCHEMA", schema: bareName(m[1]) }),
+  },
+];
+
+/**
+ * 표 하나에 매인 문장. 표 이름은 위 머리에서 이미 떼어 냈으므로 여기서는 동작만 본다.
+ *
+ * 한 문장이 칸을 여럿 지우는 모양도 있으므로 문장 안에서 전부 훑는다.
+ */
+const TABLE_SCOPED_DESTRUCTIVE: {
+  re: RegExp;
+  build: (table: string, m: RegExpMatchArray) => DestructiveOperation;
+}[] = [
+  {
+    re: /\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?([\w".]+)/gi,
+    build: (table, m) => ({ kind: "DROP_COLUMN", table, column: bareName(m[1]) }),
   },
 ];
 
@@ -79,21 +122,34 @@ const PATTERNS: {
  * 진짜 위험한 줄이 묻힌다.
  */
 export function findDestructiveOperations(sql: string): DestructiveOperation[] {
-  const clean = stripComments(sql);
   const found: DestructiveOperation[] = [];
   const seen = new Set<string>();
 
-  for (const { re, build } of PATTERNS) {
-    // 매 호출마다 새로 만들어 lastIndex가 남지 않게 한다.
-    const pattern = new RegExp(re.source, re.flags);
-    for (const match of clean.matchAll(pattern)) {
-      const op = build(match);
-      const key = JSON.stringify(op);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push(op);
+  const remember = (op: DestructiveOperation) => {
+    const key = JSON.stringify(op);
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push(op);
+  };
+
+  for (const statement of splitStatements(stripComments(sql))) {
+    for (const { re, build } of STANDALONE_DESTRUCTIVE) {
+      // 매 호출마다 새로 만들어 lastIndex가 남지 않게 한다.
+      const pattern = new RegExp(re.source, re.flags);
+      for (const match of statement.matchAll(pattern)) remember(build(match));
+    }
+
+    const head = statement.match(ALTER_TABLE_HEAD);
+    if (!head) continue;
+
+    const table = bareName(head[1]);
+    const rest = head[2];
+    for (const { re, build } of TABLE_SCOPED_DESTRUCTIVE) {
+      const pattern = new RegExp(re.source, re.flags);
+      for (const match of rest.matchAll(pattern)) remember(build(table, match));
     }
   }
+
   return found;
 }
 
@@ -144,25 +200,6 @@ export type RiskyOperation =
   | { kind: "CHANGE_COLUMN_TYPE"; table: string; column: string; to: string }
   | { kind: "DROP_TYPE"; type: string };
 
-/**
- * 문장 단위로 자른다.
- *
- * 위 갈래는 표 이름과 동작 사이를 `[\s\S]*?`로 건너뛴다. 그러면 앞 문장의 표
- * 이름이 뒷 문장의 동작에 붙을 수 있다 — 표 하나에 여러 문장이 이어지는
- * drizzle 출력에서는 실제로 그렇게 어긋난다. 새 갈래는 먼저 잘라 두고 한 문장
- * 안에서만 이름과 동작을 짝짓는다.
- *
- * 주석을 걷어낸 뒤라 `--> statement-breakpoint`는 이미 사라졌고, 남는 구분자는
- * 세미콜론뿐이다. 이 저장소의 마이그레이션에는 함수 본문(`$$ ... $$`)이 없어
- * 세미콜론으로 갈라도 문장이 깨지지 않는다.
- */
-function splitStatements(sql: string): string[] {
-  return sql
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
-}
-
 /** 어느 표에 매이지 않은 문장들. */
 const STANDALONE_RISKY: {
   re: RegExp;
@@ -180,12 +217,8 @@ const STANDALONE_RISKY: {
   },
 ];
 
-/** `ALTER TABLE <이름> <나머지>` 로 시작하는 문장에서 표 이름과 나머지를 가른다. */
-const ALTER_TABLE_HEAD =
-  /^ALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?([\w".]+)\s+([\s\S]+)$/i;
-
 /**
- * 표 하나에 매인 문장들. 표 이름은 위에서 이미 떼어 냈으므로 여기서는 동작만 본다.
+ * 표 하나에 매인 문장들. 표 이름은 위 머리에서 이미 떼어 냈으므로 여기서는 동작만 본다.
  *
  * ⚠ 외래키 구절의 `ON DELETE cascade` / `ON DELETE restrict` / `ON DELETE set null`
  * 은 무엇도 지우지 않는다. 아래 어느 것도 그 구절에 걸리지 않아야 한다.
