@@ -7,8 +7,9 @@ import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import {
   getCurrentShipmentApprovalRouteChain,
-  getShipmentApprovalRouteStep,
+  getShipmentApprovalRouteSteps,
 } from "../queries/shipment-approval-routes";
+import { findNextRouteStepToApprove } from "@/lib/domain/shipment-approval-route";
 import type {
   ApprovalActionResult,
   RepairCaseApprovalType,
@@ -48,7 +49,7 @@ const delegationRepresentative = alias(users, "delegation_representative");
  * 자격 검사들을 **약하게 만들지 않고 그 위에 얹힌다**.
  *
  * 결재선(순차 출하 승인): 최종 출하 승인을 요청할 때 결재선 판
- * (shipment_approval_routes)이 있으면 **1단계 행 하나만** 만들고, 그 행이
+ * (shipment_approval_routes)이 있으면 **첫 단계 행 하나만** 만들고, 그 행이
  * 승인될 때마다 같은 판의 다음 단계 행을 하나씩 이어 만든다(요청 행에
  * route_id · route_step_order 를 적어 둔다). 단계마다 요청 행이 하나씩이므로
  * 「한 번에 한 단계」는 repair_case_approvals_one_active_request 부분 유니크가
@@ -58,10 +59,21 @@ const delegationRepresentative = alias(users, "delegation_representative");
  * 관문만 본다(절차가 대표를 대신한다). 판이 없거나 단계가 0개면 세 칸이 전부
  * NULL 로 남아 이 기능이 생기기 전과 완전히 같이 돈다.
  *
+ * 🔴 **요청자 본인 단계는 건너뛴다** — 처음 요청할 때도, 사슬이 나아갈 때마다도.
+ * 자기가 올린 것을 자기가 결재하는 칸을 없애는 것이다. 고르는 규칙은 순수 함수
+ * (domain/shipment-approval-route.ts 의 findNextRouteStepToApprove) 하나에만
+ * 있고 두 자리가 그것을 부른다. 건너뛰고 나서 **남는 단계가 하나도 없으면**
+ * 요청은 거절되고(ROUTE_HAS_NO_OTHER_APPROVER), 반대로 **사슬이 돌다가**
+ * 그렇게 되면 정상이다 — 다음 행을 만들지 않으면 최신 행이 APPROVED 로 남아
+ * 출하 문이 열린다.
+ *
  * No self-approval restriction: the local-demo layer's decideApproval never
  * checks requestedByUserId against the deciding actingUser, so none is
  * added here either (task instruction: preserve current local-mode
- * behavior when a rule isn't already defined).
+ * behavior when a rule isn't already defined). 바로 위의 「요청자 본인 단계는
+ * 건너뛴다」와 어긋나지 않는다 — 그것은 **누구에게 보낼지**를 고르는 규칙이고,
+ * 여기 적힌 것은 **결재 시점에 누구를 막는가**다. 결재 시점의 판정은 한 줄도
+ * 바뀌지 않았다.
  */
 
 const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
@@ -210,7 +222,9 @@ export async function requestRepairCaseApproval(
         fail("ALREADY_REQUESTED", "이미 처리 대기 중인 승인 요청이 있습니다.");
       }
 
-      // 🔴 최종 출하 승인은 결재선(판)이 있으면 그 **1단계**로 시작한다.
+      // 🔴 최종 출하 승인은 결재선(판)이 있으면 그 **첫 단계**로 시작한다 —
+      // 정확히는 「승인자가 요청자 본인이 아닌 첫 단계」다. 자기가 올린 것을
+      // 자기가 결재하는 칸은 없앤다.
       //
       // 판이 없거나 단계가 0개면 세 칸(route_id · route_step_order ·
       // assigned_approver_user_id)이 전부 NULL 로 남고, 그때는 이 기능이 생기기
@@ -235,9 +249,29 @@ export async function requestRepairCaseApproval(
         // 아니라 같은 뜻이다: 최종 출하 승인 요청은 최종 출하 승인 절차를 탄다.
         // 부품 불출은 이 함수를 지나지 않는다(별도 표·별도 흐름이다).
         const route = await getCurrentShipmentApprovalRouteChain(tx, "FINAL_SHIPMENT");
-        const firstStep = route?.steps[0];
-        if (route && firstStep) {
+        if (route && route.steps.length > 0) {
+          // 🔴 「지금까지 온 단계」가 0 이므로 1단계부터 본다. 고르는 규칙은
+          // 여기 적지 않는다 — 아래 사슬 잇는 자리가 **같은 함수**를 부른다.
+          // 두 곳에 적으면 「요청할 때는 건너뛰는데 사슬에서는 안 건너뛴다」가
+          // 되고, 그때 요청자는 자기 차례를 받는다.
+          const firstStep = findNextRouteStepToApprove(route.steps, 0, actorUserId);
+          if (!firstStep) {
+            // 🔴 단계는 있는데 전부 요청자 본인이다 — 아무에게도 보낼 수
+            // 없으므로 **요청 자체를 거절한다.** 조용히 승인 완료로 보면 혼자
+            // 짜인 결재선이 결재 없는 것과 같아지고, 대표·위임 방식으로
+            // 되돌리면 같은 절차가 요청자에 따라 다른 뜻이 된다.
+            //
+            // 고쳐야 할 것은 이 사람이 지금 화면에서 적는 값이 아니라 **승인
+            // 절차 그 자체**라, 메시지에 그것까지 적는다(코드를 따로 둔 이유도
+            // 그것이다 — validation/repair-case-approval-input.ts).
+            fail(
+              "ROUTE_HAS_NO_OTHER_APPROVER",
+              "승인 절차의 모든 단계가 요청자 본인으로 지정되어 있어 출하 승인을 요청할 수 없습니다. 승인 절차에 다른 사람을 넣어 주세요."
+            );
+          }
           routeId = route.routeId;
+          // 🔴 **건너뛴 뒤의 실제 번호**를 적는다(예: 2). 1로 고쳐 적으면 이
+          // 번호로 옛 판의 다음 단계를 찾을 때 이미 지나온 단계로 되돌아간다.
           routeStepOrder = firstStep.stepOrder;
           routeAssignedApproverUserId = firstStep.approverUserId;
         }
@@ -483,11 +517,24 @@ export async function decideRepairCaseApproval(
       if (decision === "APPROVED" && latest.routeId !== null && latest.routeStepOrder !== null) {
         // 「현재 판」이 아니라 **이 행에 적힌 판**으로 다음 단계를 찾는다.
         // 진행 중인 건은 관리자가 절차를 바꿔도 옛 판을 끝까지 따라간다.
-        const nextStep = await getShipmentApprovalRouteStep(
-          tx,
-          latest.routeId,
-          latest.routeStepOrder + 1
+        //
+        // 🔴 「바로 다음 한 칸」이 아니다 — 승인자가 이 사슬의 요청자인 단계는
+        // 건너뛰므로 두 칸 뒤일 수도 있다. 그래서 판의 단계를 통째로 읽고
+        // 요청 경로와 **같은 함수**로 고른다.
+        //
+        // 🔴 요청자는 **이 사슬의 요청자**(latest.requestedByUserId)다. 방금
+        // 결재한 사람(actorUserId)이 아니다 — 사슬이 나아가도 요청자는 그대로이고,
+        // 아래에서 그 값이 다음 행에 그대로 물려 내려간다.
+        const routeSteps = await getShipmentApprovalRouteSteps(tx, latest.routeId);
+        const nextStep = findNextRouteStepToApprove(
+          routeSteps,
+          latest.routeStepOrder,
+          latest.requestedByUserId
         );
+        // 다음 단계가 없으면 아무것도 만들지 않는다 — 마지막 단계였거나, 남은
+        // 단계가 전부 요청자 본인이었거나다. 둘 다 정상이고, 그때 최신 행이
+        // APPROVED 로 남아 출하 문이 열린다(resolveApprovalValidity 는 그것만
+        // 본다 — 한 줄도 고치지 않았다).
         if (nextStep) {
           await tx.insert(repairCaseApprovals).values({
             repairCaseId,

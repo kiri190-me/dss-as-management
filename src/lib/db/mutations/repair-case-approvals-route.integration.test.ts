@@ -31,7 +31,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * 순서대로** 넘어가는지, 그리고 판이 없을 때는 **어제와 한 칸도 다르지 않은지**를
  * 못 박는다.
  *
- * 여기서 지키려는 것은 여섯이다:
+ * 여기서 지키려는 것은 일곱이다(일곱째는 파일 맨 아래 갈래에 따로 적었다):
  *  1. 🔴 **판이 없으면(또는 단계 0개면) 이 기능이 생기기 전과 완전히 같다** —
  *     세 칸 전부 NULL, 「출하 대표」가 승인, 출하 문이 열린다.
  *  2. 단계마다 요청 행이 **하나씩**이고, 한 시점에 REQUESTED 는 언제나 하나다
@@ -603,5 +603,156 @@ describe("최종 출하 승인 — 사슬이 끊길 때와 판이 바뀔 때", (
     if (!again.ok) assert.equal(again.code, "FORBIDDEN");
 
     assert.equal((await shipmentRows(caseId)).length, 2, "거절이 행을 만들었다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 요청자 본인 단계는 건너뛴다
+ * ============================================================================
+ * 자기가 올린 것을 자기가 결재하는 칸을 없앤다. 규칙은 순수 함수 한 곳에 있고
+ * (domain/shipment-approval-route.ts 의 findNextRouteStepToApprove) 그 함수 자체는
+ * shipment-approval-route.test.ts 가 못 박는다. 여기서 보는 것은 **그 규칙이 실제
+ * 표에 어떻게 남는가**다:
+ *
+ *  1. 요청 행의 route_step_order 가 **건너뛴 뒤의 실제 번호**다(1로 고쳐 적지 않는다).
+ *  2. 사슬이 나아갈 때마다 다시 본다 — 중간 단계도 건너뛴다.
+ *  3. 🔴 요청자는 **그 사슬의 요청자**다. 방금 결재한 사람이 아니다.
+ *  4. 🔴 요청할 때 남는 단계가 0개면 **거절**하고 행을 하나도 만들지 않는다.
+ *  5. 🔴 사슬이 돌다가 그렇게 되면 **정상**이다 — 출하 문이 열린다.
+ *
+ * 이 파일의 다른 시험들과 달리 요청자(engineerId)가 **결재선 안에** 있다. 그것이
+ * 이 갈래의 전제다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 — 요청자 본인 단계는 건너뛴다", () => {
+  test("🔴 14. 1단계가 요청자면 2단계 사람에게 간다 — 행의 번호도 2다", async () => {
+    const routeId = await saveRoute([engineerId, stepBId, stepCId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    const requested = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, null);
+    assert.equal(requested.ok, true, `요청이 막혔다: ${JSON.stringify(requested)}`);
+
+    const rows = await shipmentRows(caseId);
+    assert.equal(rows.length, 1, "요청 한 번에 행이 하나보다 많이 생겼다");
+    assert.equal(rows[0].routeId, routeId);
+    assert.equal(
+      rows[0].routeStepOrder,
+      2,
+      "🔴 번호를 1로 고쳐 적으면 이 번호로 다음 단계를 찾을 때 건너뛴 칸으로 되돌아간다"
+    );
+    assert.equal(rows[0].assignedApproverUserId, stepBId, "2단계 승인자에게 지정돼야 한다");
+
+    // 그리고 그 번호에서 사슬이 이어진다 — 다음은 3단계다.
+    assert.equal((await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", stepBId, null)).ok, true);
+    const after = await shipmentRows(caseId);
+    assert.equal(after.length, 2);
+    assert.equal(after[1].routeStepOrder, 3);
+    assert.equal(after[1].assignedApproverUserId, stepCId);
+  });
+
+  test("🔴 15. 대조 — 같은 판이라도 요청자가 결재선에 없으면 1단계부터다", async () => {
+    // 건너뛰기는 **요청한 사람**에 달렸지 판에 달린 것이 아니다. 같은 판에서
+    // 요청자만 바꿔 본다.
+    await saveRoute([engineerId, stepBId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    const requested = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", superAdminId, null);
+    assert.equal(requested.ok, true, `요청이 막혔다: ${JSON.stringify(requested)}`);
+
+    const [row] = await shipmentRows(caseId);
+    assert.equal(row.routeStepOrder, 1, "요청자가 결재선에 없는데 1단계를 건너뛰었다");
+    assert.equal(row.assignedApproverUserId, engineerId);
+  });
+
+  test("🔴 16. 중간 단계가 요청자면 사슬이 그 단계를 건너뛴다 — 1단계 다음이 3단계다", async () => {
+    const routeId = await saveRoute([stepAId, engineerId, stepCId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    assert.equal((await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, null)).ok, true);
+
+    let rows = await shipmentRows(caseId);
+    assert.equal(rows[0].routeStepOrder, 1, "1단계는 요청자가 아니므로 그대로다");
+    assert.equal(rows[0].assignedApproverUserId, stepAId);
+
+    // 🔴 사슬이 나아갈 때 보는 요청자는 **방금 결재한 사람(stepA)이 아니라**
+    // 그 사슬의 요청자(engineer)다. 그래서 2단계를 건너뛴다.
+    const first = await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", stepAId, null);
+    assert.equal(first.ok, true, `1단계가 막혔다: ${JSON.stringify(first)}`);
+
+    rows = await shipmentRows(caseId);
+    assert.equal(rows.length, 2, "건너뛰면서 행이 둘 생겼다");
+    assert.equal(rows[1].routeId, routeId, "같은 판을 이어 써야 한다");
+    assert.equal(rows[1].routeStepOrder, 3, "🔴 2단계가 요청자인데 그 사람에게 차례가 갔다");
+    assert.equal(rows[1].assignedApproverUserId, stepCId);
+    assert.equal(rows[1].requestedByUserId, engineerId, "요청자는 사슬이 나아가도 그대로다");
+    assert.equal(await pendingShipmentCount(caseId), 1);
+    assert.notEqual((await shipmentGate(caseId)).state, "VALID", "아직 3단계가 남았는데 출하 문이 열렸다");
+
+    // 건너뛴 단계의 사람은 결재할 것이 없다 — 지정은 3단계 사람이다.
+    const bySkipped = await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", engineerId, null);
+    assert.equal(bySkipped.ok, false, "건너뛴 사람이 남의 단계를 결재했다");
+    if (!bySkipped.ok) assert.equal(bySkipped.code, "FORBIDDEN");
+
+    assert.equal((await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", stepCId, null)).ok, true);
+    // 🔴 3단계짜리 판인데 행은 둘이다 — 건너뛴 단계는 **행 자체가 없다**.
+    // 그래서 알림·배지 조회도 저절로 맞는다(그쪽은 고칠 것이 없다).
+    assert.equal((await shipmentRows(caseId)).length, 2, "마지막 단계 뒤에 행이 또 생겼다");
+    assert.equal((await shipmentGate(caseId)).state, "VALID", "다 끝났는데 출하 문이 닫혀 있다");
+  });
+
+  test("🔴 17. 마지막 단계가 요청자라 건너뛰어 끝나면 출하 문이 열린다 — 거절이 아니다", async () => {
+    await saveRoute([stepAId, engineerId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    assert.equal((await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, null)).ok, true);
+
+    const decided = await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", stepAId, null);
+    assert.equal(decided.ok, true, `1단계가 막혔다: ${JSON.stringify(decided)}`);
+
+    // 다음 행을 만들지 않으면 최신 행이 APPROVED 로 남아 문이 열린다 —
+    // resolveApprovalValidity 는 그것만 보므로 한 줄도 고치지 않았다.
+    assert.equal((await shipmentRows(caseId)).length, 1, "건너뛴 단계의 행이 생겼다");
+    assert.equal(await pendingShipmentCount(caseId), 0);
+    assert.equal((await shipmentGate(caseId)).state, "VALID", "🔴 앞 단계가 다 끝났는데 출하 문이 닫혀 있다");
+  });
+
+  test("🔴 18. 단계가 하나뿐이고 그것이 요청자면 요청 자체가 거절된다 — 행이 하나도 안 생긴다", async () => {
+    await saveRoute([engineerId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    const requested = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, "출하 부탁드립니다");
+    assert.equal(requested.ok, false, "혼자 짜인 결재선이 그대로 통과했다");
+    if (!requested.ok) {
+      assert.equal(
+        requested.code,
+        "ROUTE_HAS_NO_OTHER_APPROVER",
+        "FORBIDDEN·VALIDATION_ERROR 로 뭉뚱그리면 사람이 무엇을 고쳐야 할지 모른다"
+      );
+      // 🔴 고쳐야 할 것은 이 화면의 값이 아니라 승인 절차 그 자체다.
+      assert.match(requested.message, /승인 절차/);
+    }
+
+    assert.equal((await shipmentRows(caseId)).length, 0, "🔴 거절됐는데 행이 남았다");
+    assert.notEqual((await shipmentGate(caseId)).state, "VALID", "거절이 출하 문을 열었다");
+  });
+
+  test("🔴 19. 모든 단계가 요청자여도 마찬가지다 — 그리고 다른 사람은 그대로 요청할 수 있다", async () => {
+    await saveRoute([engineerId]);
+
+    const caseId = await createCaseReadyForShipmentRequest();
+    const blocked = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, null);
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "ROUTE_HAS_NO_OTHER_APPROVER");
+
+    // 대조 — 막히는 것은 「그 결재선 + 그 요청자」 조합이지 결재선 자체가 아니다.
+    // 거절된 요청이 아무 흔적도 남기지 않았으므로 곧바로 다시 요청할 수 있다.
+    const byOther = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", superAdminId, null);
+    assert.equal(byOther.ok, true, `다른 사람의 요청까지 막혔다: ${JSON.stringify(byOther)}`);
+
+    const rows = await shipmentRows(caseId);
+    assert.equal(rows.length, 1, "거절된 요청이 행을 남겼다");
+    assert.equal(rows[0].routeStepOrder, 1);
+    assert.equal(rows[0].assignedApproverUserId, engineerId);
   });
 });

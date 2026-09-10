@@ -12,6 +12,7 @@ import ApprovalActionDialog from "./ApprovalActionDialog";
  */
 import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 import { standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
+import { isRouteStepSkippedForRequester } from "@/lib/domain/shipment-approval-route";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
 
@@ -660,6 +661,96 @@ describe("🔴 최종 출하 승인 카드 — 진행 미리보기", () => {
     const preview = html.indexOf("박서준 ▶ 김도윤 ▶ 이서연");
     assert.ok(preview >= 0, "미리보기가 아예 그려지지 않았다");
     assert.ok(preview < html.indexOf("</section>"), "카드 밖으로 나가면 옆 카드가 밀린다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 진행 미리보기 — 건너뛴 단계가 「완료」로 보이면 안 된다
+ * ============================================================================
+ * 승인 요청자와 지정 승인자가 같으면 그 단계는 결재를 받지 않고 지나간다
+ * (서버 쪽은 repair-case-approvals-route.integration.test.ts 가 실제 DB 로 못
+ * 박는다). 그런데 미리보기는 「지금 단계보다 앞이면 완료」로 칠하고 있었다 —
+ * **아무도 승인하지 않은 칸이 승인된 것처럼 보인다.**
+ *
+ * 카드 부품은 렌더하지 못하므로(맨 위 머리말: 서버 액션 → server-only) 판정이
+ * 적힌 자리를 원본에서 잘라 확인하고, 갈림 자체는 카드가 부르는 **그 함수**를
+ * 여기서 직접 불러 못 박는다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 카드 — 건너뛴 단계", () => {
+  const mark = sliceBetween(shipmentCardSource, "function markForRouteStep(", "const extra = (");
+  const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+
+  test("🔴 건너뜀을 「앞이면 완료」보다 **먼저** 본다 — 순서가 뒤집히면 거짓말이 된다", () => {
+    const skipped = mark.indexOf("return SKIPPED_MARK");
+    const done = mark.indexOf("stepOrder < currentStepOrder) return DONE_MARK");
+    assert.ok(skipped >= 0, "건너뜀 갈래가 아예 없다");
+    assert.ok(done >= 0, "앞 단계 완료 판정이 사라졌다 — 이 시험의 전제가 없어졌다");
+    assert.ok(skipped < done, "「앞이면 완료」가 먼저 걸리면 건너뛴 칸이 「완료」로 보인다");
+  });
+
+  test("🔴 지금 단계 자신은 건너뜀으로 칠하지 않는다 — 열려 있는 차례를 부정하게 된다", () => {
+    assert.match(
+      flat(mark),
+      /if \(isSkippedStep && stepOrder !== currentStepOrder\) return SKIPPED_MARK;/,
+      "이 규칙이 생기기 전에 만들어진 행은 요청자 자신이 지정된 채 대기 중일 수 있다"
+    );
+  });
+
+  test("🔴 색만으로 구분하지 않는다 — 「건너뜀 · 요청자 본인」이 글자로 붙는다", () => {
+    // UI_GUIDELINE 7절. 상태 이름은 판정 함수 한 곳에서 색과 함께 나온다.
+    assert.ok(
+      shipmentCardSource.includes('stateLabel: "건너뜀 · 요청자 본인"'),
+      "글자가 없으면 색약 사용자에게는 대기 칸과 구분되지 않는다"
+    );
+    assert.match(
+      flat(shipmentCardSource),
+      /const SKIPPED_MARK: RouteStepMark = \{ toneClass: "[^"]+", stateLabel: "건너뜀 · 요청자 본인", \};/,
+      "색과 글자를 한 자리에서 함께 정하지 않으면 한쪽만 늘어난다"
+    );
+  });
+
+  test("🔴 판정을 카드가 새로 적지 않고 공용 함수를 부른다", () => {
+    // 서버가 사슬을 이을 때 보는 것과 같은 함수여야 한다 — 두 곳에 적으면
+    // 화면은 「완료」라는데 서버는 아무도 결재하지 않은 칸이 되는 날이 온다.
+    assert.match(
+      flat(shipmentCardSource),
+      /import \{[^}]*\bisRouteStepSkippedForRequester\b[^}]*\} from "@\/lib\/domain\/shipment-approval-route"/,
+      "서버가 보는 것과 같은 함수를 봐야 한다"
+    );
+    const previewSteps = sliceBetween(shipmentCardSource, "const previewSteps =", "const extra = (");
+    assert.match(
+      flat(previewSteps),
+      /isRouteStepSkippedForRequester\(step\.approverUserId, record\?\.requestedByUserId \?\? null\)/,
+      "요청자 칸이 아니라 다른 값을 보고 있다"
+    );
+  });
+
+  test("🔴 서버에서 더 가져오지 않는다 — 카드가 이미 들고 있는 두 값으로 판정한다", () => {
+    // 요청자는 이 요청 행에, 단계 승인자는 판의 단계에 이미 있다. 조회를 하나 더
+    // 붙이면 화면과 서버가 서로 다른 시점의 자료를 보게 된다.
+    assert.ok(
+      !/getShipmentApprovalRouteSteps|listShipmentApprovalRouteSteps\(/.test(shipmentCardSource),
+      "카드가 판을 직접 읽으려 한다"
+    );
+  });
+
+  test("🔴 갈림은 그 함수가 정한다 — 요청자 본인만 건너뛴다", () => {
+    // 카드 부품은 렌더하지 못하므로(머리말), 카드가 부르는 함수를 그대로 부른다.
+    assert.equal(isRouteStepSkippedForRequester("user-1", "user-1"), true);
+    assert.equal(isRouteStepSkippedForRequester("approver-2", "user-1"), false);
+    // 결재선을 타지 않는 요청·요청자를 모르는 경우가 셋째다 — 여기서 참이 나오면
+    // 아무도 건너뛰지 않았는데 칸이 「건너뜀」으로 바뀐다.
+    assert.equal(isRouteStepSkippedForRequester("approver-2", null), false);
+  });
+
+  test("건너뛴 칸도 같은 상자에 그려진다 — 새 자리를 만들지 않는다", () => {
+    // 달라지는 것은 상자 색과 아래 글자뿐이라, 미리보기의 배치는 그대로다.
+    // (새 markup 이 생기면 카드 <section> 밖으로 나갈 길이 열린다.)
+    const preview = sliceBetween(extraBlock, "{previewSteps.length > 0 &&", "</dl>");
+    assert.match(flat(preview), /\$\{step\.toneClass\}/, "상자 색이 판정에서 오지 않는다");
+    assert.match(flat(preview), /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/, "글자가 판정에서 오지 않는다");
   });
 });
 

@@ -15,6 +15,7 @@ import {
 } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-approval-routes";
+import { isRouteStepSkippedForRequester } from "@/lib/domain/shipment-approval-route";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
@@ -57,11 +58,32 @@ const UPCOMING_MARK: RouteStepMark = {
   toneClass: "border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400",
   stateLabel: "대기",
 };
+/**
+ * 🔴 요청자 본인이라 결재를 받지 않는 단계. **「완료」로 칠하면 거짓말이다** —
+ * 아무도 승인하지 않았는데 승인된 것처럼 보인다.
+ *
+ * 색은 아직 안 온 단계와 같은 중립색이되 **테두리를 점선으로** 둔다. 색만으로
+ * 구분하지 않는다는 원칙(위 참조) 위에 한 겹 더 얹는 것이다 — 아래 글자가 이미
+ * 「건너뜀 · 요청자 본인」이라고 말하고, 점선은 그 칸이 이 사슬에서 자리를 차지
+ * 하지 않는다는 것을 모양으로도 보여 준다.
+ */
+const SKIPPED_MARK: RouteStepMark = {
+  toneClass: "border-dashed border-zinc-300 text-zinc-400 dark:border-zinc-700 dark:text-zinc-500",
+  stateLabel: "건너뜀 · 요청자 본인",
+};
 
 /**
  * 그 단계가 지금 어디쯤인가. 앞 단계는 이미 승인돼야 다음 요청 행이 생기므로
  * **지금 단계보다 앞이면 언제나 완료**다(진행 중인 건은 옛 판을 끝까지 따라가고,
  * 그 판의 단계 번호가 곧 여기 들어오는 값이다).
+ *
+ * 🔴 **건너뛴 단계는 예외다.** 요청자 본인 단계는 결재를 받지 않고 지나가므로,
+ * 「앞이면 완료」에 그대로 걸리면 아무도 승인하지 않은 칸이 「완료」로 보인다.
+ * 그래서 앞뒤를 가르기 **전에** 먼저 본다.
+ *
+ * 다만 **지금 단계 자신**은 건너뜀으로 칠하지 않는다. 이 규칙이 생기기 전에
+ * 만들어진 행은 요청자 자신이 지정된 채 대기 중일 수 있는데, 그 칸을
+ * 「건너뜀」이라고 하면 지금 실제로 열려 있는 차례를 부정하게 된다.
  *
  * 지금 단계 자신은 이 요청 행의 상태를 그대로 따른다 — 승인·반려가 끝난 칸이
  * 「지금 차례」라고 말하지 않게 하려는 것이다.
@@ -69,8 +91,10 @@ const UPCOMING_MARK: RouteStepMark = {
 function markForRouteStep(
   stepOrder: number,
   currentStepOrder: number,
-  displayStatus: DatabaseDisplayApprovalStatus
+  displayStatus: DatabaseDisplayApprovalStatus,
+  isSkippedStep: boolean
 ): RouteStepMark {
+  if (isSkippedStep && stepOrder !== currentStepOrder) return SKIPPED_MARK;
   if (stepOrder < currentStepOrder) return DONE_MARK;
   if (stepOrder > currentStepOrder) return UPCOMING_MARK;
   if (displayStatus === "APPROVED") return DONE_MARK;
@@ -284,7 +308,18 @@ export default function DatabaseFinalShipmentCard({
    */
   const previewSteps = (followsRoute ? (routeSteps ?? []) : []).map((step) => ({
     ...step,
-    ...markForRouteStep(step.stepOrder, record?.routeStepOrder ?? 0, displayStatus),
+    ...markForRouteStep(
+      step.stepOrder,
+      record?.routeStepOrder ?? 0,
+      displayStatus,
+      // 🔴 「이 단계를 건너뛰는가」를 카드가 새로 적지 않는다 — 서버가 사슬을
+      // 이을 때 보는 것과 **같은 함수**다. 두 곳에 적으면 화면은 「완료」라는데
+      // 서버는 건너뛴(= 아무도 결재하지 않은) 칸이 되는 날이 온다.
+      //
+      // 서버에서 더 가져올 자료는 없다: 요청자도 단계 승인자도 카드가 이미 받아
+      // 들고 있다.
+      isRouteStepSkippedForRequester(step.approverUserId, record?.requestedByUserId ?? null)
+    ),
   }));
 
   const extra = (

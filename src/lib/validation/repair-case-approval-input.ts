@@ -95,6 +95,19 @@ export type ApprovalActionResultCode =
    * 고르기). 메시지에는 누구를 왜 지정할 수 없는지 이름과 함께 담는다.
    */
   | "ASSIGNEE_NOT_ELIGIBLE"
+  /**
+   * 승인 절차(결재선)의 단계가 **전부 요청자 본인**이라 보낼 곳이 없다. 자기가
+   * 올린 것을 자기가 결재하는 칸은 건너뛰는데, 건너뛰고 나니 아무도 남지
+   * 않은 것이다.
+   *
+   * FORBIDDEN·VALIDATION_ERROR 로 뭉뚱그리지 않는 이유는 위
+   * ASSIGNEE_NOT_ELIGIBLE 과 같다 — 사람이 해야 할 다음 행동이 다르다.
+   * FORBIDDEN 은 「나는 이 일을 할 수 없다」(포기),
+   * VALIDATION_ERROR 는 「내가 적어 넣은 값을 고쳐라」인데, 여기서 고쳐야 할
+   * 것은 요청하는 사람이 이 화면에서 적는 값이 아니라 **승인 절차 그 자체**다.
+   * 메시지에도 그것까지 적는다.
+   */
+  | "ROUTE_HAS_NO_OTHER_APPROVER"
   | "DATABASE_UNAVAILABLE";
 
 export type ApprovalActionResult =

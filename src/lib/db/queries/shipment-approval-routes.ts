@@ -180,42 +180,39 @@ export async function getCurrentShipmentApprovalRouteChain(
   const route = await selectCurrentRouteHeader(tx, scope);
   if (!route) return null;
 
-  const steps = await tx
-    .select({
-      stepOrder: shipmentApprovalRouteSteps.stepOrder,
-      approverUserId: shipmentApprovalRouteSteps.approverUserId,
-    })
-    .from(shipmentApprovalRouteSteps)
-    .where(eq(shipmentApprovalRouteSteps.routeId, route.id))
-    .orderBy(asc(shipmentApprovalRouteSteps.stepOrder));
+  const steps = await getShipmentApprovalRouteSteps(tx, route.id);
 
   return { routeId: route.id, version: route.version, steps };
 }
 
 /**
- * **그 판의** 특정 단계 하나. 없으면 null(= 마지막 단계였다는 뜻이다).
+ * **그 판의 단계 전부** — step_order 순. 단계가 0개면 빈 배열이다.
  *
- * 🔴 「현재 판」이 아니라 **행에 적힌 판**으로 찾는다. 진행 중인 건은 관리자가
+ * 🔴 「현재 판」이 아니라 **행에 적힌 판**으로 읽는다. 진행 중인 건은 관리자가
  * 절차를 바꿔도 요청 시점의 옛 판을 끝까지 따라가야 하기 때문이다.
+ *
+ * 🔴 **한 단계씩이 아니라 통째로 읽는 이유.** 사슬은 「바로 다음 한 칸」으로
+ * 나아가지 않는다 — 승인자가 그 요청의 요청자인 단계는 건너뛰므로, 다음에
+ * 결재할 단계는 두 칸 뒤일 수도 세 칸 뒤일 수도 있다. 고르는 규칙은 순수 함수
+ * (domain/shipment-approval-route.ts 의 findNextRouteStepToApprove)가 쥐고
+ * 있고, 이 조회는 그 함수가 볼 자료를 그대로 실어 줄 뿐이다. 단계 상한이 10이라
+ * 한 번에 읽어도 판 하나에 열 줄이다.
+ *
+ * listShipmentApprovalRouteSteps(아래)와 달리 승인자 이름을 싣지 않고 tx 를
+ * 받는다 — 이쪽은 결재 트랜잭션 **안에서** 부르고, 화면에 그릴 것이 아니다.
  */
-export async function getShipmentApprovalRouteStep(
+export async function getShipmentApprovalRouteSteps(
   tx: Tx,
-  routeId: string,
-  stepOrder: number
-): Promise<ShipmentApprovalRouteChainStep | null> {
-  const [step] = await tx
+  routeId: string
+): Promise<ShipmentApprovalRouteChainStep[]> {
+  return tx
     .select({
       stepOrder: shipmentApprovalRouteSteps.stepOrder,
       approverUserId: shipmentApprovalRouteSteps.approverUserId,
     })
     .from(shipmentApprovalRouteSteps)
-    .where(
-      and(
-        eq(shipmentApprovalRouteSteps.routeId, routeId),
-        eq(shipmentApprovalRouteSteps.stepOrder, stepOrder)
-      )
-    );
-  return step ?? null;
+    .where(eq(shipmentApprovalRouteSteps.routeId, routeId))
+    .orderBy(asc(shipmentApprovalRouteSteps.stepOrder));
 }
 
 /**

@@ -150,6 +150,91 @@ export function validateShipmentApprovalRouteSteps(
 }
 
 /**
+ * ============================================================================
+ * 🔴 요청자 본인 단계는 건너뛴다 — 「다음에 결재할 단계」 고르기
+ * ============================================================================
+ * 자기가 올린 것을 자기가 결재하는 칸을 없앤다. 결재선이 [김철수 · 최희만 ·
+ * 박대표]인데 최희만이 요청하면 1단계 김철수 → (2단계 건너뜀) → 3단계 박대표다.
+ *
+ * 🔴 **처음 요청할 때만이 아니라 사슬이 나아갈 때마다 본다.** 그래서 규칙을
+ * 순수 함수 하나로 내려 두고 **요청 경로와 사슬 잇는 자리가 같은 함수를 부른다**
+ * (db/mutations/repair-case-approvals.ts 의 두 자리). 두 곳에 각자 적으면
+ * 「요청할 때는 건너뛰는데 사슬에서는 안 건너뛴다」가 되고, 그때 요청자는
+ * 자기 차례를 받아 자기가 올린 것을 결재하게 된다.
+ *
+ * 진행 미리보기(승인 카드)도 같은 판정을 봐야 한다 — 건너뛴 단계를 「완료」로
+ * 칠하면 아무도 승인하지 않은 칸이 승인된 것처럼 보인다. 그래서 갈림 자체는
+ * isRouteStepSkippedForRequester 한 곳에 적고 셋이 그것을 부른다.
+ * ============================================================================
+ */
+
+/**
+ * 이 층이 단계 하나에서 보는 것 — 몇 번째이고 누구인가. 표를 읽는 층
+ * (db/queries/shipment-approval-routes.ts)의 단계 타입들이 이 모양을 이미
+ * 만족하므로, 그쪽 타입을 그대로 넘기고 **그대로 돌려받는다**(아래 함수가
+ * 제네릭인 이유다 — 돌려받은 값에서 그쪽 층의 다른 칸도 계속 쓸 수 있다).
+ *
+ * 🔴 도메인 층은 db 층을 가져오지 않는다. 같은 모양을 여기 한 벌 적어 두는 것이
+ * 이 저장소의 관례다(REPAIR_CASE_APPROVAL_TYPES ↔ 표의 enum 과 같은 자리).
+ */
+export type RouteStepAssignment = {
+  /** 1부터. */
+  stepOrder: number;
+  approverUserId: string;
+};
+
+/**
+ * 이 단계를 **건너뛰는가** — 그 단계의 승인자가 그 요청을 올린 사람인가.
+ *
+ * 요청자를 모르면(`null`) 언제나 거짓이다. 건너뛸 근거가 없으면 결재선은
+ * 예전 그대로 도는 것이 맞다 — 여기서 참을 돌려주면 아무도 결재하지 않은
+ * 단계가 조용히 사라진다.
+ */
+export function isRouteStepSkippedForRequester(
+  approverUserId: string,
+  requesterUserId: string | null
+): boolean {
+  if (requesterUserId === null) return false;
+  return approverUserId === requesterUserId;
+}
+
+/**
+ * `completedStepOrder` 다음에 **실제로 결재할** 단계. 없으면 `null`.
+ *
+ * @param steps 그 판의 단계들. 순서가 뒤섞여 있어도 된다 — 아래에서 번호가
+ *   가장 작은 것을 고르므로 부르는 쪽의 정렬에 기대지 않는다.
+ * @param completedStepOrder 지금까지 온 단계 번호. **처음 요청이면 0** 이다
+ *   (0보다 큰 번호만 후보가 되므로 1단계부터 본다).
+ * @param requesterUserId 그 사슬을 시작한 사람. 사슬이 나아가도 바뀌지 않는다 —
+ *   방금 결재한 사람이 아니라 요청 행에 적힌 요청자다.
+ *
+ * 🔴 **돌려주는 단계의 번호를 1로 고쳐 적지 않는다.** 건너뛴 뒤의 실제 번호
+ * (예: 2)가 그대로 표에 들어가야 한다 — 다음 단계를 찾을 때 그 번호로 옛 판을
+ * 이어 세기 때문이다.
+ *
+ * `null` 의 뜻은 부르는 자리마다 다르다:
+ *  - 요청 경로: 단계가 있는데 남는 단계가 하나도 없다 → **요청을 거절한다**
+ *    (혼자 짜인 결재선은 결재 없는 것과 같아진다).
+ *  - 사슬 잇는 자리: 뒤에 결재할 사람이 없다 → **다음 행을 만들지 않는다**.
+ *    그러면 최신 행이 APPROVED 로 남아 출하 문이 열린다(정상이다).
+ * 두 뜻을 이 함수가 가르지 않는 것은 의도다 — 여기서 가르려면 「요청인가
+ * 사슬인가」를 인자로 받아야 하고, 그 순간 규칙 하나가 둘로 갈라진다.
+ */
+export function findNextRouteStepToApprove<T extends RouteStepAssignment>(
+  steps: readonly T[],
+  completedStepOrder: number,
+  requesterUserId: string | null
+): T | null {
+  let next: T | null = null;
+  for (const step of steps) {
+    if (step.stepOrder <= completedStepOrder) continue;
+    if (isRouteStepSkippedForRequester(step.approverUserId, requesterUserId)) continue;
+    if (next === null || step.stepOrder < next.stepOrder) next = step;
+  }
+  return next;
+}
+
+/**
  * ── 편집 도우미 ─────────────────────────────────────────────────────────
  * 화면(components/users/ShipmentApprovalRouteSection.tsx)이 목록을 만질 때
  * 쓰는 배열 조작이다. 화면 안에 두지 않고 여기로 내린 이유가 둘이다:
