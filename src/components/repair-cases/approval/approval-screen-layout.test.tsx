@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import DatabaseApprovalCard from "./DatabaseApprovalCard";
+import { standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
 
@@ -715,5 +716,142 @@ describe("🔴 최종 출하 승인 카드 — 비상구 안내", () => {
       /standsInForAssignedApprover\( record\?\.assignedApproverUserId \?\? null, actingUser\.id \)/,
       "지정 칸이 아니라 다른 값을 보고 있다"
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 수리 검수 승인 카드 — 비상구 안내
+ * ============================================================================
+ * 검수 승인도 요청할 때 「누구에게 보낼까요」로 처리할 사람을 지정할 수 있고,
+ * 지정이 걸린 요청을 최고관리자가 대신 처리하는 길(비상구)이 열려 있다. 출하
+ * 카드에는 그 사실을 말해 주는 안내가 있는데 검수 카드에는 없어서, 같은 상황에
+ * 한쪽은 말하고 한쪽은 말없이 단추만 보여 주고 있었다.
+ *
+ * 위 머리말과 같은 이유로 카드 부품은 렌더하지 못한다(서버 액션 → server-only).
+ * 그래서 갈래를 원본에서 잘라 확인하고, 그 문구가 **실제로 그려지는 자리**인지는
+ * 껍데기(DatabaseApprovalCard)를 렌더해 확인한다.
+ * ============================================================================
+ */
+describe("🔴 수리 검수 승인 카드 — 비상구 안내", () => {
+  const decideBranch = sliceBetween(
+    inspectionCardSource,
+    '} else if (displayStatus === "REQUESTED") {',
+    '} else if (displayStatus === "APPROVED") {'
+  );
+
+  /**
+   * 두 카드가 **글자 그대로 같은 말**을 하는지 한 벌의 정규식으로 양쪽에 건다 —
+   * 이름을 못 찾을 때의 대비 문구("다른 승인자")까지 포함이다. 같은 상황에 두
+   * 가지 말이 생기면 사람은 어느 쪽이 맞는지 알 수 없다.
+   */
+  const NOTICE_SOURCE =
+    /지금 차례는 \$\{\s*record\?\.assignedApproverName \?\? "다른 승인자"\s*\} 님입니다\. 최고관리자 권한으로 대신 처리합니다\./;
+
+  test("판정을 카드가 새로 적지 않고 공용 함수를 부른다", () => {
+    for (const shared of ["mayDecideAssignedApproval", "standsInForAssignedApprover"]) {
+      assert.match(
+        flat(inspectionCardSource),
+        new RegExp(`import \\{[^}]*\\b${shared}\\b[^}]*\\} from "@/lib/auth/approval-assignment"`),
+        `서버가 보는 것과 같은 함수를 봐야 한다: ${shared}`
+      );
+    }
+    assert.ok(
+      !/assignedApproverUserId !== actingUser\.id/.test(inspectionCardSource),
+      "「지정된 사람 대신 서 있는가」 판정을 카드가 한 벌 더 적었다 — 언젠가 한쪽만 고쳐진다"
+    );
+    assert.match(
+      flat(inspectionCardSource),
+      /standsInForAssignedApprover\( record\?\.assignedApproverUserId \?\? null, actingUser\.id \)/,
+      "지정 칸이 아니라 다른 값을 보고 있다"
+    );
+  });
+
+  test("🔴 안내가 blockedNotice 로 나간다 — disabledReason 이 아니다", () => {
+    // disabledReason 은 껍데기가 **단추가 하나도 없을 때만** 그린다. 비상구는
+    // 단추가 **있는** 상황이므로 거기 넣으면 아무 데도 보이지 않는다.
+    assert.match(flat(decideBranch), /if \(standingInForAssignee\) \{ blockedNotice =/);
+    const notice = decideBranch.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    assert.ok(notice >= 0, "안내 문구가 없다");
+    assert.ok(
+      decideBranch.lastIndexOf("disabledReason =", notice) < decideBranch.indexOf("} else {"),
+      "안내가 disabledReason 으로 나가면 화면에 나타나지 않는다"
+    );
+  });
+
+  test("🔴 그 값을 카드에 실제로 넘긴다 — 프롭이 빠지면 코드는 멀쩡한데 한 글자도 안 나온다", () => {
+    assert.match(
+      flat(renderBlock(inspectionCardSource)),
+      /blockedNotice=\{blockedNotice\}/,
+      "검수 카드는 원래 이 프롭을 넘기지 않았다 — 새로 넘기지 않으면 안내가 사라진다"
+    );
+  });
+
+  test("🔴 안내는 단추가 열리는 갈래에서만 나온다 — 남의 차례면 단추도 안내도 아니다", () => {
+    // 지정 관문(!assignedGateOpen)에서 걸러진 사람은 단추 자체가 없고 지정된
+    // 사람의 이름만 본다. 그 뒤 갈래에 있어야 「단추는 열렸는데 남의 차례」다.
+    const gate = decideBranch.indexOf("!assignedGateOpen");
+    const notice = decideBranch.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    const approve = decideBranch.indexOf('key: "approve"');
+    assert.ok(gate >= 0, "지정 관문이 아예 없다");
+    assert.ok(notice > gate, "지정 관문보다 앞에서 안내를 만든다 — 남의 차례에도 뜬다");
+    assert.ok(notice < approve, "단추를 만든 뒤에 안내를 정하면 갈래가 어긋나기 쉽다");
+  });
+
+  test("🔴 문구가 출하 카드와 글자 그대로 같다 — 대비 문구까지", () => {
+    assert.match(flat(decideBranch), NOTICE_SOURCE);
+    assert.match(flat(shipmentCardSource), NOTICE_SOURCE, "출하 카드 쪽 문구가 바뀌어 둘이 갈라졌다");
+  });
+
+  test("🔴 지정된 본인이거나 지정이 없으면(NULL) 안내가 만들어지지 않는다", () => {
+    // 카드 부품은 렌더하지 못하므로(머리말 참조), 카드가 부르는 **그 함수**를
+    // 여기서 그대로 불러 갈림을 못 박는다. 지정 칸이 생기기 전의 모든 요청이
+    // 셋째 경우다 — 여기서 참이 나오면 예전 화면에 없던 문구가 끼어든다.
+    assert.equal(standsInForAssignedApprover("approver-2", "super-admin"), true);
+    assert.equal(standsInForAssignedApprover("approver-2", "approver-2"), false);
+    assert.equal(standsInForAssignedApprover(null, "super-admin"), false);
+  });
+
+  test("🔴 그 안내는 단추와 **함께**, 카드 <section> 안에 그려진다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="수리 검수 승인"
+        record={approvalRecord({ assignedApproverUserId: "approver-2", assignedApproverName: "김도윤" })}
+        displayStatus="REQUESTED"
+        blockedNotice="지금 차례는 김도윤 님입니다. 최고관리자 권한으로 대신 처리합니다."
+        actions={[
+          { key: "approve", label: "검수 승인", onClick: () => {} },
+          { key: "reject", label: "반려", onClick: () => {}, tone: "danger" },
+        ]}
+      />
+    );
+    const notice = html.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    assert.ok(notice >= 0, "🔴 안내가 아예 그려지지 않았다 — 자리를 잘못 골랐다");
+    assert.ok(notice < html.indexOf("</section>"), "안내가 카드 밖으로 나가면 2열 격자의 칸을 먹는다");
+    assert.match(html, /검수 승인<\/button>/, "단추가 함께 있어야 하는 상황이다");
+    assert.match(html, /반려<\/button>/);
+  });
+
+  test("🔴 자격이 없어 단추가 없을 때는 예전 문구 그대로다 — 안내가 끼어들지 않는다", () => {
+    // 그 갈래는 blockedNotice 를 만들지 않는다(원본), 그리고 껍데기는 단추가
+    // 없을 때 disabledReason 을 그린다(렌더) — 두 가지를 함께 못 박는다.
+    const blockedBranch = sliceBetween(decideBranch, "} else if (!assignedGateOpen) {", "} else {");
+    assert.ok(
+      !/blockedNotice/.test(blockedBranch),
+      "차례가 아닌 사람에게도 「대신 처리합니다」가 뜬다"
+    );
+    assert.match(flat(blockedBranch), /이 요청은 \$\{record\.assignedApproverName\} 님에게 지정되어 있습니다\./);
+
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="수리 검수 승인"
+        record={approvalRecord({ assignedApproverUserId: "approver-2", assignedApproverName: "김도윤" })}
+        displayStatus="REQUESTED"
+        actions={[]}
+        disabledReason="이 요청은 김도윤 님에게 지정되어 있습니다."
+      />
+    );
+    assert.match(html, /이 요청은 김도윤 님에게 지정되어 있습니다\./);
+    assert.ok(!/대신 처리합니다/.test(html), "단추가 없는데 비상구 안내가 나왔다");
   });
 });
