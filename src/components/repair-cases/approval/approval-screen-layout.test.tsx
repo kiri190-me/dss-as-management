@@ -1027,6 +1027,184 @@ describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, �
 
 /**
  * ============================================================================
+ * 🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 출하일
+ * ============================================================================
+ * 앞 커밋에서 카드는 이 값을 프롭으로 받아 **확인 창에만** 넘겼다. 그래서 창을
+ * 열어야만 날짜가 보였는데, 「열어 볼까」를 정하는 것이 바로 그 날짜다. 이제
+ * 카드의 회색 상자 — 「처리 자격 / 결재선 진행」과 같은 묶음 — 에도 나온다.
+ *
+ * 🔴 여기서도 **읽기 전용**이다. 값의 편집 경로는 「접수 정보 편집」 하나뿐이다
+ * (IntakeInfoEditForm.tsx 머리말).
+ *
+ * 카드 부품은 렌더하지 못하므로(맨 위 머리말: 서버 액션 → server-only) 원본에서
+ * 회색 상자 갈래를 잘라 확인한다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 출하일", () => {
+  const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+  /** 값이 비었을 때의 문구는 카드가 **한 곳에** 적어 둔다 — 아래에서 창과 대조한다. */
+  const UNSET_TEXT_DECLARATION = /const UNSET_TARGET_SHIPMENT_DATE_TEXT = "([^"]+)";/;
+
+  test("회색 상자에 「사내 목표 출하일」 칸이 있다", () => {
+    // 상자 밖(카드 다른 자리)이 아니라 이 상자 안이라는 것은 slice 가 보장한다 —
+    // extraBlock 은 `const extra = (` 부터다.
+    assert.match(
+      flat(extraBlock),
+      /<dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일<\/dt>/,
+      "이름표가 없으면 날짜만 덩그러니 남는다"
+    );
+  });
+
+  test("🔴 값이 있으면 날짜, 없으면 대신 말해 주는 문구 — 한 자리에서 갈린다", () => {
+    assert.match(
+      flat(extraBlock),
+      /\{internalTargetShipmentDate \?\? UNSET_TARGET_SHIPMENT_DATE_TEXT\}/,
+      "값이 있는 경우와 없는 경우가 한 자리에서 갈려야 두 문구가 어긋나지 않는다"
+    );
+  });
+
+  test("🔴 값이 없을 때의 문구가 확인 창과 **글자 그대로** 같다", () => {
+    const declared = UNSET_TEXT_DECLARATION.exec(shipmentCardSource);
+    assert.ok(declared, "빈 값 문구를 한 곳(상수)에 모아 두지 않았다 — 두 곳이 갈라지기 시작한다");
+    const text = declared[1];
+
+    // 창 쪽은 아직 자기 파일에 같은 문장을 적고 있다(그 파일은 검수 카드도 함께
+    // 쓰는 자리라 이번 범위 밖이었다). 한쪽만 고치면 같은 사실에 두 가지 말이
+    // 생긴다 — 그래서 **원본을 대조**하고, 창이 실제로 그리는 글자까지 확인한다.
+    assert.ok(dialogSource.includes(`"${text}"`), "확인 창 쪽 문구가 갈라졌다");
+    const dialogHtml = renderToStaticMarkup(
+      <ApprovalActionDialog
+        isOpen
+        title="출하 승인 요청"
+        requireComment={false}
+        isSubmitting={false}
+        internalTargetShipmentDate={null}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    assert.ok(flat(dialogHtml).includes(text), "창이 그리는 문구가 카드의 문구와 다르다");
+  });
+
+  test("🔴 카드가 그 문장을 한 벌 더 적지 않는다 — 상수를 쓴다", () => {
+    assert.equal(
+      (shipmentCardSource.match(/아직 정해지지 않았습니다\. 접수 정보에서 입력합니다\./g) ?? []).length,
+      1,
+      "같은 문장이 카드 안에서도 둘이 되면 언젠가 한쪽만 고쳐진다"
+    );
+  });
+
+  test("🔴 고칠 수 있는 입력칸이 아니다 — 회색 상자에 <input>·<select> 가 없다", () => {
+    // 입력칸처럼 생기면 사람이 여기서 고치려 든다. 편집 경로는 「접수 정보 편집」
+    // 하나뿐이다(IntakeInfoEditForm.tsx 머리말).
+    // ⚠️ 카드 부품은 렌더하지 못해(머리말) **원본 글자**를 본다 — 그래서 주석에
+    // 태그 이름을 적어도 걸린다. 그쪽이 맞다: 약하게 고치지 말고 주석을 바꾼다.
+    assert.ok(!/<input/.test(extraBlock), "카드가 접수 건을 고치는 자리가 되었다");
+    assert.ok(!/<select/.test(extraBlock), "고르는 자리를 만들면 안 된다");
+    assert.ok(!/onChange/.test(extraBlock), "값이 바뀌는 통로가 생겼다");
+  });
+
+  test("🔴 새로 그리는 것도 카드 <section> 안이다 — extra 는 껍데기가 카드 안에 그린다", () => {
+    // 카드 부품은 렌더하지 못하므로(머리말) 둘로 나눠 못 박는다: 새 markup 이
+    // extra 안이라는 것은 위 slice 가, extra 가 <section> 안이라는 것은 이 렌더가.
+    // 밖으로 나가면 2열 격자의 칸을 먹어 옆 카드가 다음 줄로 밀린다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="최종 출하 승인"
+        record={null}
+        displayStatus="REQUESTED"
+        actions={[]}
+        extra={<span>사내 목표 출하일 2026-09-20</span>}
+      />
+    );
+    const shown = html.indexOf("사내 목표 출하일 2026-09-20");
+    assert.ok(shown >= 0, "회색 상자가 아예 그려지지 않았다");
+    assert.ok(shown < html.indexOf("</section>"), "카드 밖으로 나가면 옆 카드가 밀린다");
+  });
+
+  test("검수 카드에는 넣지 않는다 — 출하 판단에 쓰는 값이다", () => {
+    assert.ok(
+      !/internalTargetShipmentDate/.test(inspectionCardSource),
+      "검수 카드가 날짜를 다루기 시작했다 — 검수 승인에는 쓰지 않는 값이다"
+    );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계에서만 접힌다
+ * ============================================================================
+ * 실기 화면에서 「처리 자격」 값이 **어절 중간**에서 끊겼다:
+ *
+ *     대표로 지정된 계정도, 유효한 위임
+ *     을 받은 대리 승인자도 아닙니다.
+ *
+ * 원인이 둘이다. (1) 그 칸이 회색 상자 2열 격자의 한 칸이라 카드 폭의 절반만
+ * 썼다 — 카드 자신도 2열 중 하나라 실제로 아주 좁다. (2) 한글은 기본 규칙으로
+ * 어절 중간에서 잘린다. 둘 다 고쳤다.
+ *
+ * ⚠️ 「어떤 폭에서도 무조건 한 줄」은 목표가 **아니다**. 창을 아주 좁히면 접혀야
+ * 하고, whitespace-nowrap 으로 밀어 넣으면 글자가 상자 밖으로 넘치거나 가로
+ * 스크롤이 생긴다. 목표는 보통 폭에서 한 줄, 좁아지면 **어절 경계에서만** 접힘이다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계에서만 접힌다", () => {
+  const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+  /** 문장을 그리는 두 칸(사내 목표 출하일 · 처리 자격)만 — 미리보기는 예외다. */
+  const sentenceCells = sliceBetween(extraBlock, '<dl className="', "{previewSteps.length > 0 &&");
+
+  test("🔴 「처리 자격」 칸이 카드 폭을 다 쓴다", () => {
+    // 미리보기가 이미 쓰는 방식과 같다(sm:col-span-2). 이름표와 붙여서 확인해야
+    // 「어느 칸이 넓어졌는가」가 바뀌었을 때 잡힌다.
+    assert.match(
+      flat(extraBlock),
+      /<div className="sm:col-span-2"> <dt className="[^"]*">\{routeProgress \? "결재선 진행" : "처리 자격"\}<\/dt>/,
+      "반 칸에 갇히면 한 줄에 들어갈 문장이 어절 중간에서 잘린다"
+    );
+  });
+
+  test("사내 목표 출하일 칸도 같은 이유로 카드 폭을 다 쓴다", () => {
+    assert.match(
+      flat(extraBlock),
+      /<div className="sm:col-span-2"> <dt className="[^"]*">사내 목표 출하일<\/dt>/,
+      "빈 값 안내가 반 칸에 갇히면 두세 줄로 접힌다"
+    );
+  });
+
+  test("🔴 회색 상자에 break-keep 이 걸려 있다 — 어절 경계에서만 접힌다", () => {
+    // word-break 는 물려받는 속성이라 상자 하나에 걸면 안의 문장이 모두 따른다.
+    assert.match(
+      flat(extraBlock),
+      /<dl className="[^"]*\bbreak-keep\b[^"]*">/,
+      "한글은 기본 규칙으로 어절 중간에서 잘린다 — 「위임 / 을」이 그것이었다"
+    );
+  });
+
+  test("⚠️ 억지로 한 줄에 밀어 넣지 않는다 — 문장 칸에 whitespace-nowrap 이 없다", () => {
+    // 밀어 넣으면 좁은 화면에서 글자가 상자 밖으로 넘치거나 가로 스크롤이 생긴다.
+    assert.ok(
+      !/whitespace-nowrap/.test(sentenceCells),
+      "문장을 한 줄로 고정하면 접히는 대신 넘친다"
+    );
+    assert.ok(!/truncate/.test(sentenceCells), "잘라내면 문장의 뒷부분이 아예 사라진다");
+  });
+
+  test("결재선 미리보기의 이름 상자는 예외다 — 한 줄로 두고 가로 스크롤로 처리한다", () => {
+    const preview = sliceBetween(extraBlock, "{previewSteps.length > 0 &&", "</dl>");
+    assert.match(flat(preview), /whitespace-nowrap rounded-md border/, "이름 상자의 한 줄 처리가 사라졌다");
+    assert.match(flat(preview), /className="mt-2 overflow-x-auto pb-1"/, "넘치는 만큼 그 상자 안에서 밀려야 한다");
+  });
+
+  test("결재선을 타는 요청의 「결재선 진행」과 미리보기는 그대로다", () => {
+    // 칸을 넓히고 날짜를 얹는 동안 갈래가 사라지지 않았는지 — 위 결재선 시험들과
+    // 같은 것을 보지만, 이번 수정이 건드린 자리라 여기서도 한 번 붙잡아 둔다.
+    assert.match(flat(extraBlock), /\{routeProgress \? "결재선 진행" : "처리 자격"\}/);
+    assert.match(flat(extraBlock), /previewSteps\.length > 0 &&/);
+  });
+});
+
+/**
+ * ============================================================================
  * 🔴 수리 검수 승인 카드 — 무효가 된 승인의 안내
  * ============================================================================
  * STALE(승인 뒤 접수 건이 바뀌어 무효가 된 상태)에서 검수 카드는 「재요청」

@@ -29,6 +29,20 @@ const DIALOG_TITLES: Record<Exclude<DialogState, null>, string> = {
 };
 
 /**
+ * 사내 목표 출하일이 **아직 비어 있을 때**의 문구. 카드의 회색 상자와 확인 창이
+ * 같은 사실을 말하므로 **글자 그대로 같아야** 한다 — 같은 사실에 두 가지 말이
+ * 생기면 사람은 어느 쪽이 맞는지 알 수 없다. 「-」 한 글자로 줄이지 않는 이유도
+ * 같다: 어디서 고치는지를 말해 주지 않으면 사람은 그 자리에서 멈춘다.
+ *
+ * 🔴 지금은 확인 창(ApprovalActionDialog)이 자기 파일에 같은 문장을 한 벌 더
+ * 적고 있다. 그 파일은 **검수 카드도 함께 쓰는 자리**라 이번 작업 범위 밖이어서
+ * 한 곳으로 모으지 못했다 — 대신 화면 배치 시험(approval-screen-layout.test.tsx)이
+ * **양쪽 원본을 대조해** 갈라짐을 잡는다. 창을 함께 고칠 수 있게 되면 이 문구를
+ * 공용 자리로 옮기고 양쪽이 그것을 부르게 한다.
+ */
+const UNSET_TARGET_SHIPMENT_DATE_TEXT = "아직 정해지지 않았습니다. 접수 정보에서 입력합니다.";
+
+/**
  * 검수 카드와 같은 이유로 도메인 함수 하나만 쓴다 — record.status만 보면
  * 무효가 된 승인이 "승인 완료"로 보이고, 그 상태에는 재요청 버튼이 없어
  * 화면에서 빠져나갈 길이 없었다.
@@ -134,12 +148,15 @@ export default function DatabaseFinalShipmentCard({
    */
   routeSteps: ShipmentApprovalRouteStepLabel[] | null;
   /**
-   * 사내 목표 출하일 — 확인 창에 **읽기 전용**으로 넘기기만 한다. 요청하는
-   * 사람과 결재하는 사람이 같은 창을 쓰므로 양쪽이 같은 날짜를 보고 판단한다.
+   * 사내 목표 출하일 — **읽기 전용**으로 두 자리에 보여 준다: 카드의 회색 상자와
+   * 확인 창. 창에만 있으면 창을 열어야 보이는데, 「열어 볼까」를 정하는 것이 바로
+   * 그 날짜다. 요청하는 사람과 결재하는 사람이 같은 카드·같은 창을 쓰므로 양쪽이
+   * 같은 날짜를 보고 판단한다.
    *
    * 🔴 여기서 **고치지 않는다.** 이 값의 편집 경로는 「접수 정보 편집」
    * 하나뿐이다(IntakeInfoEditForm.tsx 머리말). 아직 정해지지 않았으면 `null`
-   * 이고, 그때 창이 그 사실과 어디서 입력하는지를 대신 말한다.
+   * 이고, 그때 그 사실과 어디서 입력하는지를 대신 말한다
+   * (UNSET_TARGET_SHIPMENT_DATE_TEXT — 카드와 창이 같은 말을 한다).
    */
   internalTargetShipmentDate: string | null;
 }) {
@@ -283,8 +300,44 @@ export default function DatabaseFinalShipmentCard({
   }));
 
   const extra = (
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md bg-zinc-50 p-3 text-sm sm:grid-cols-2 dark:bg-zinc-800/60">
-      <div>
+    /*
+      🔴 `break-keep`(word-break: keep-all)을 **상자에** 건다. word-break 는 물려받는
+      속성이라 한 자리에 걸면 안의 문장이 모두 어절 경계에서만 접힌다 — 한글은 기본
+      규칙으로 어절 중간에서 잘려서, 좁은 칸에서 「…유효한 위임 / 을 받은…」처럼
+      끊겼다. 인쇄용 양식도 같은 이유로 같은 속성을 쓴다(ServiceReportPrintView).
+
+      ⚠️ 「어떤 폭에서도 무조건 한 줄」이 목표가 아니다. 창을 좁히면 접혀야 한다 —
+      whitespace-nowrap 으로 밀어 넣으면 글자가 상자 밖으로 넘친다. 아래 미리보기의
+      이름 상자만 예외이고, 거기는 넘치는 만큼 **그 상자 안에서** 가로로 밀린다.
+    */
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-2 break-keep rounded-md bg-zinc-50 p-3 text-sm sm:grid-cols-2 dark:bg-zinc-800/60">
+      {/*
+        판단에 쓰는 맥락이라 「처리 자격 / 결재선 진행」과 같은 상자에 둔다 —
+        출하 승인은 「언제까지 내보내야 하는가」를 보고 하는 일이고, 그 날짜가
+        창을 열어야만 보이면 판단이 한 번 더 끊긴다.
+
+        🔴 여기서도 **읽기 전용**이다 — 입력칸도 고르는 자리도 만들지 않는다.
+        (여기에 그 태그 이름을 글자로도 적지 않는다: 화면 배치 시험이 이 상자의
+        원본에서 그 두 태그를 찾아 막으므로, 주석에 적으면 시험이 걸린다.)
+        값을 고치는 자리는 「접수 정보 편집」 하나뿐이다(IntakeInfoEditForm.tsx
+        머리말). 카드는 접수 건을 고치지 않는다.
+      */}
+      <div className="sm:col-span-2">
+        <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일</dt>
+        <dd
+          className={
+            internalTargetShipmentDate ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-500 dark:text-zinc-400"
+          }
+        >
+          {internalTargetShipmentDate ?? UNSET_TARGET_SHIPMENT_DATE_TEXT}
+        </dd>
+      </div>
+      {/*
+        🔴 이 칸은 카드 폭을 **다 쓴다**(미리보기가 이미 쓰는 방식과 같다). 카드
+        자신이 2열 격자의 한 칸이라, 이 안에서 또 반으로 쪼개면 한 줄에 들어갈
+        문장이 두세 줄로 접힌다 — 사용자가 본 「위임 / 을」이 그것이었다.
+      */}
+      <div className="sm:col-span-2">
         <dt className="text-xs text-zinc-500 dark:text-zinc-400">{routeProgress ? "결재선 진행" : "처리 자격"}</dt>
         <dd className="text-zinc-900 dark:text-zinc-50">
           {routeProgress ??
