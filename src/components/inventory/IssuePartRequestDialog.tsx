@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { issuePartRequestAction } from "@/lib/server/actions/inventory-part-requests";
+import { createPartIssueRequestAction } from "@/lib/server/actions/inventory-part-issue-requests";
+import {
+  PART_ISSUE_REQUEST_DIALOG_NOTICE,
+  PART_ISSUE_REQUEST_SUBMIT_LABEL,
+} from "./part-issue-approval-texts";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
 import { stockOwnerLabels, stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
 import { generateClientUuid } from "@/lib/client-uuid";
@@ -17,17 +22,28 @@ type AllocationRow = { key: string; requestItemId: string; partStockBalanceId: s
  * physical stock, case lock, request status) regardless of what this
  * dialog shows — availability shown here is only as current as the last
  * page load.
+ *
+ * 🔴 **「부품 불출」 승인 절차가 있으면 이 창은 신청서가 된다** — 고르는 칸은
+ * 한 글자도 달라지지 않고(무엇을 어느 버킷에서 얼마나), 끝에서 재고를 빼는 대신
+ * 결재를 올린다. 두 길이 같은 창을 쓰는 것이 의도다: 판을 만들고 지운다고 해서
+ * 사람이 배운 조작이 달라지면 안 된다.
+ *
+ * 🔴 판이 있는지 **여기서 판정하지 않는다.** 서버가 문을 다는 데 쓰는 그 판정을
+ * 서버 컴포넌트가 계산해 프롭으로 내려보낸다(inventory/requests/page.tsx).
  */
 export default function IssuePartRequestDialog({
   isOpen,
   onClose,
   request,
   balancesByPartId,
+  approvalRequired,
 }: {
   isOpen: boolean;
   onClose: () => void;
   request: ManagerPartRequestRow;
   balancesByPartId: Map<string, IssuableBalanceRow[]>;
+  /** 참이면 이 창은 재고를 빼지 않고 **불출 승인 요청**을 올린다. */
+  approvalRequired: boolean;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -105,14 +121,25 @@ export default function IssuePartRequestDialog({
 
     setIsSubmitting(true);
     setErrorMessage(null);
-    const result = await issuePartRequestAction({
-      requestId: request.id,
-      allocations,
-      note: note || null,
-      idempotencyKey: getOrCreateIdempotencyKey(),
-    });
+    const result = approvalRequired
+      ? await createPartIssueRequestAction({
+          kind: "PART_REQUEST",
+          partRequestId: request.id,
+          // 🔴 **승인받을 값이 곧 실행될 값이다.** 실행 액션은 신청 id 하나만
+          // 받으므로, 여기 적힌 수량 말고 다른 것이 나갈 길이 없다.
+          allocations,
+          requestReason: note || null,
+        })
+      : await issuePartRequestAction({
+          requestId: request.id,
+          allocations,
+          note: note || null,
+          idempotencyKey: getOrCreateIdempotencyKey(),
+        });
     setIsSubmitting(false);
     if (!result.ok) {
+      // 서버가 준 이유를 그대로 — ROUTE_NOT_CONFIGURED · ROUTE_HAS_NO_OTHER_APPROVER
+      // 처럼 사람이 할 일이 아주 다른 실패가 이 자리로 온다.
       setErrorMessage(result.message);
       return;
     }
@@ -131,8 +158,13 @@ export default function IssuePartRequestDialog({
       className="w-full max-w-2xl rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
     >
       <h2 id="issue-part-request-dialog-title" className="text-sm font-semibold">
-        불출 — {request.intakeNumber}
+        {approvalRequired ? "불출 승인 요청" : "불출"} — {request.intakeNumber}
       </h2>
+      {approvalRequired && (
+        <p className="mt-2 break-keep rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          {PART_ISSUE_REQUEST_DIALOG_NOTICE}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-col gap-3">
         {remainingItems.map((item) => {
@@ -185,7 +217,7 @@ export default function IssuePartRequestDialog({
         })}
 
         <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-          불출 메모 (선택)
+          {approvalRequired ? "신청 사유 (선택)" : "불출 메모 (선택)"}
           <textarea
             rows={2}
             value={note}
@@ -212,7 +244,7 @@ export default function IssuePartRequestDialog({
           disabled={isSubmitting}
           className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
-          {isSubmitting ? "처리 중..." : "불출 확정"}
+          {isSubmitting ? "처리 중..." : approvalRequired ? PART_ISSUE_REQUEST_SUBMIT_LABEL : "불출 확정"}
         </button>
       </div>
     </dialog>

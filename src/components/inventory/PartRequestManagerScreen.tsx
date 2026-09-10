@@ -22,6 +22,7 @@ import {
   type InventoryPartRequestStatus,
 } from "@/lib/domain/inventory-types";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
+import { PART_ISSUE_REQUEST_BUTTON_LABEL } from "./part-issue-approval-texts";
 
 type DialogAction = "ISSUE" | "REJECT" | "PARTIALLY_CLOSE" | "HOLD";
 type DialogState = { requestId: string; action: DialogAction } | null;
@@ -96,13 +97,31 @@ const actionLabels: Record<DialogAction, string> = {
   HOLD: "보류",
 };
 
+/**
+ * 단추 이름 — [불출]만 갈린다. 🔴 판이 있으면 그 단추는 **재고를 빼지 않으므로**
+ * 이름도 그렇게 말해야 한다. 판이 없으면 위 표 그대로다(한 글자도 달라지지 않는다).
+ */
+function actionLabel(action: DialogAction, partIssueApprovalRequired: boolean): string {
+  return action === "ISSUE" && partIssueApprovalRequired
+    ? PART_ISSUE_REQUEST_BUTTON_LABEL
+    : actionLabels[action];
+}
+
 /** 부품 요청 관리 — SUPER_ADMIN/ADMIN/INVENTORY_MANAGER only (server-gated in page.tsx; SALES and AS_ENGINEER never reach this screen). */
 export default function PartRequestManagerScreen({
   requests,
   balancesByPartId,
+  partIssueApprovalRequired,
 }: {
   requests: ManagerPartRequestRow[];
   balancesByPartId: Record<string, IssuableBalanceRow[]>;
+  /**
+   * 🔴 「부품 불출」 승인 절차가 지금 쓰이고 있는가 — **서버가 문을 다는 데 쓰는
+   * 그 판정**을 서버 컴포넌트가 계산해 내려보낸 값이다(page.tsx). 화면이 다시
+   * 판정하지 않는다: 두 벌이 되면 「단추는 보이는데 누르면 거절」이나 그 반대가
+   * 되고, 후자는 화면에 아무 표시도 남기지 않아 더 나쁘다.
+   */
+  partIssueApprovalRequired: boolean;
 }) {
   const [statusFilter, setStatusFilter] = useState<InventoryPartRequestStatus | "ALL">("ALL");
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -171,6 +190,7 @@ export default function PartRequestManagerScreen({
               onAction={openDialog}
               onReleaseHold={releaseHold}
               releasingId={releasingId}
+              partIssueApprovalRequired={partIssueApprovalRequired}
             />
           }
           cards={
@@ -182,6 +202,7 @@ export default function PartRequestManagerScreen({
                   onAction={openDialog}
                   onReleaseHold={releaseHold}
                   releasingId={releasingId}
+                  partIssueApprovalRequired={partIssueApprovalRequired}
                 />
               ))}
             </ul>
@@ -195,6 +216,7 @@ export default function PartRequestManagerScreen({
           onClose={() => setDialog(null)}
           request={selectedRequest}
           balancesByPartId={balancesMap}
+          approvalRequired={partIssueApprovalRequired}
         />
       )}
       {selectedRequest && dialog?.action === "REJECT" && (
@@ -338,12 +360,14 @@ function ActionButtons({
   onReleaseHold,
   releasing,
   size,
+  partIssueApprovalRequired,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
   onReleaseHold: (requestId: string) => void;
   releasing: boolean;
   size: "card" | "table";
+  partIssueApprovalRequired: boolean;
 }) {
   const actions = availableActions(request);
 
@@ -382,7 +406,7 @@ function ActionButtons({
                   : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           }`}
         >
-          {actionLabels[action]}
+          {actionLabel(action, partIssueApprovalRequired)}
         </button>
       ))}
     </div>
@@ -394,11 +418,13 @@ function RequestCard({
   onAction,
   onReleaseHold,
   releasingId,
+  partIssueApprovalRequired,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
   onReleaseHold: (requestId: string) => void;
   releasingId: string | null;
+  partIssueApprovalRequired: boolean;
 }) {
   return (
     <li className="flex flex-col rounded-lg border border-zinc-200 bg-white focus-within:ring-2 focus-within:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900">
@@ -442,7 +468,14 @@ function RequestCard({
       </div>
 
       <div className="mt-auto border-t border-zinc-200 p-3 dark:border-zinc-800">
-        <ActionButtons request={request} onAction={onAction} onReleaseHold={onReleaseHold} releasing={releasingId === request.id} size="card" />
+        <ActionButtons
+          request={request}
+          onAction={onAction}
+          onReleaseHold={onReleaseHold}
+          releasing={releasingId === request.id}
+          size="card"
+          partIssueApprovalRequired={partIssueApprovalRequired}
+        />
       </div>
     </li>
   );
@@ -454,11 +487,13 @@ function RequestTable({
   onAction,
   onReleaseHold,
   releasingId,
+  partIssueApprovalRequired,
 }: {
   requests: ManagerPartRequestRow[];
   onAction: (requestId: string, action: DialogAction) => void;
   onReleaseHold: (requestId: string) => void;
   releasingId: string | null;
+  partIssueApprovalRequired: boolean;
 }) {
   return (
       <table className="w-full min-w-[64rem] text-sm">
@@ -510,7 +545,14 @@ function RequestTable({
                 </div>
               </td>
               <td className="px-3 py-2">
-                <ActionButtons request={request} onAction={onAction} onReleaseHold={onReleaseHold} releasing={releasingId === request.id} size="table" />
+                <ActionButtons
+                  request={request}
+                  onAction={onAction}
+                  onReleaseHold={onReleaseHold}
+                  releasing={releasingId === request.id}
+                  size="table"
+                  partIssueApprovalRequired={partIssueApprovalRequired}
+                />
               </td>
             </tr>
           ))}

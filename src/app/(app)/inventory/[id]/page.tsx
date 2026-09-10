@@ -12,6 +12,11 @@ import {
 import { getPartMinimumQuantities } from "@/lib/db/queries/part-minimum-quantities";
 import { getPartUnitPrices } from "@/lib/db/queries/part-unit-prices";
 import { listRepairCases } from "@/lib/db/queries/repair-cases";
+import { getCurrentShipmentApprovalRoute } from "@/lib/db/queries/shipment-approval-routes";
+import {
+  isPartIssueApprovalRouteInForce,
+  PART_ISSUE_APPROVAL_ROUTE_SCOPE,
+} from "@/lib/domain/inventory-part-issue-rules";
 import InventoryPartDetailScreen from "@/components/inventory/InventoryPartDetailScreen";
 import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
 
@@ -43,14 +48,19 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
     notFound();
   }
 
-  const [history, minimumQuantities, unitPrices, categories, itemTypes, repairCases] = await Promise.all([
-    getPartTransactionHistory(id),
-    getPartMinimumQuantities(id),
-    getPartUnitPrices(id),
-    getDistinctCategories(),
-    getDistinctItemTypes(),
-    listRepairCases(),
-  ]);
+  const [history, minimumQuantities, unitPrices, categories, itemTypes, repairCases, partIssueRoute] =
+    await Promise.all([
+      getPartTransactionHistory(id),
+      getPartMinimumQuantities(id),
+      getPartUnitPrices(id),
+      getDistinctCategories(),
+      getDistinctItemTypes(),
+      listRepairCases(),
+      // 🔴 「부품 불출」 승인 절차가 지금 쓰이고 있는가 — 서버가 [사용]에 문을
+      // 달 때 보는 **그 판정**을 아래에서 같은 함수로 한다. 클라이언트가 DB 를
+      // 읽게 두지 않는다.
+      getCurrentShipmentApprovalRoute(PART_ISSUE_APPROVAL_ROUTE_SCOPE),
+    ]);
   // Not filtered by lock status here — ResolvedRepairCase doesn't expose
   // is_locked, and the mutation itself always re-checks it live and
   // unconditionally (plan §8) regardless of what this picker shows.
@@ -81,6 +91,7 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
       itemTypeSuggestions={itemTypes}
       repairCaseOptions={repairCaseOptions}
       actingUser={{ id: actingUser.id, role: actingUser.role }}
+      partIssueApprovalRequired={isPartIssueApprovalRouteInForce(partIssueRoute)}
     />
   );
 }

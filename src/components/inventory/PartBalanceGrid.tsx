@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ConsumeStockDialog, { type RepairCaseOption } from "./ConsumeStockDialog";
 import ReturnStockDialog from "./ReturnStockDialog";
+import { PART_ISSUE_REQUEST_BUTTON_LABEL } from "./part-issue-approval-texts";
 import type { PartBalanceRow, ReturnableUseRow } from "@/lib/db/queries/inventory";
 import { stockOwnerLabels } from "@/lib/domain/inventory-types";
 import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
@@ -22,6 +23,7 @@ export default function PartBalanceGrid({
   repairCaseOptions,
   actingUserRole,
   capabilities,
+  partIssueApprovalRequired,
 }: {
   balances: PartBalanceRow[];
   returnableByBalanceId: Record<string, ReturnableUseRow[]>;
@@ -29,6 +31,13 @@ export default function PartBalanceGrid({
   /** ConsumeStockDialog의 '소비처 전용' 규칙에만 쓰인다 — 권한 판정용이 아니다. */
   actingUserRole: Role;
   capabilities: InventoryCapabilities;
+  /**
+   * 🔴 「부품 불출」 승인 절차가 지금 쓰이고 있는가 — **서버가 문을 다는 데 쓰는
+   * 그 판정**을 서버 컴포넌트가 계산해 내려보낸 값이다(inventory/[id]/page.tsx).
+   * 참이면 [사용]은 그 자리에서 재고를 빼지 않으므로 이름부터 달라진다.
+   * 화면이 다시 판정하지 않는다(두 벌이 되면 단추와 서버가 갈라진다).
+   */
+  partIssueApprovalRequired: boolean;
 }) {
   const [selected, setSelected] = useState<SelectedAction>(null);
 
@@ -74,7 +83,7 @@ export default function PartBalanceGrid({
                             onClick={() => setSelected({ balanceId: balance.id, action: "CONSUME" })}
                             className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                           >
-                            사용
+                            {partIssueApprovalRequired ? PART_ISSUE_REQUEST_BUTTON_LABEL : "사용"}
                           </button>
                         )}
                         {showReturnButton && (
@@ -106,6 +115,7 @@ export default function PartBalanceGrid({
             expectedVersion={selectedBalance.version}
             repairCaseOptions={repairCaseOptions}
             actingUserRole={actingUserRole}
+            approvalRequired={partIssueApprovalRequired}
           />
           <ReturnStockDialog
             isOpen={selected?.action === "RETURN"}

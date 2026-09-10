@@ -38,6 +38,68 @@ import type { ShipmentApprovalRouteScope } from "./shipment-approval-route";
 export const PART_ISSUE_APPROVAL_ROUTE_SCOPE: ShipmentApprovalRouteScope = "PART_ISSUE";
 
 /**
+ * 「부품 불출」 판이 **지금 쓰이고 있는가** — 판이 있고 단계가 1개 이상이다.
+ *
+ * 🔴 **이 판정이 적힌 곳은 저장소에서 여기 하나여야 한다.** 보는 쪽이 넷이다:
+ *  · 문(mutations/inventory.ts 의 isPartIssueApprovalRequired) — 그 자리에서
+ *    빼는 두 길을 막을지 정한다.
+ *  · 신청을 만드는 쪽(mutations/inventory-part-issue-requests.ts) — 반대 방향으로
+ *    같은 질문을 한다(판이 없으면 ROUTE_NOT_CONFIGURED).
+ *  · 재고 화면의 서버 컴포넌트 — [불출]·[사용]을 [불출 승인 요청]으로 바꿀지
+ *    정해 프롭으로 내려보낸다.
+ * 한쪽만 「단계 0개」를 절차로 치면 신청도 못 하고 불출도 못 하는 상태가 생기고,
+ * 화면만 갈라지면 「단추는 보이는데 누르면 거절」(또는 그 반대 — 이쪽은 화면에
+ * 아무 표시도 남기지 않아 더 나쁘다)이 된다.
+ *
+ * 🔴 **순수 자리에 둔 이유.** 원래 mutations/inventory.ts 에 있었는데 그 파일은
+ * `server-only` 사슬을 물고 있어, 화면 쪽에서 같은 함수를 부르려면 판정을 한 벌
+ * 더 적는 수밖에 없었다. 판을 **읽는** 것은 여전히 조회의 몫이고(그쪽은 트랜잭션
+ * 안이냐 밖이냐가 다르다) 여기서는 읽어 온 판을 보고 답만 한다.
+ *
+ * 🔴 **판의 모양을 가리지 않는다**(`steps` 만 본다). 판을 읽는 조회가 둘이고
+ * (사슬을 이을 최소 모양 · 화면에 그릴 모양) 돌려주는 타입이 서로 다른데, 이
+ * 판정에 필요한 것은 양쪽에 똑같이 있는 단계 목록뿐이다. 타입 하나에 묶으면
+ * 부르는 쪽이 맞추려고 값을 옮겨 담게 되고, 그 옮겨 담기가 곧 두 벌이다.
+ * 타입 좁힘까지 겸한다 — 참이면 부르는 쪽이 그 판을 그대로 쓸 수 있다.
+ */
+export function isPartIssueApprovalRouteInForce<TRoute extends { steps: readonly unknown[] }>(
+  route: TRoute | null
+): route is TRoute {
+  return route !== null && route.steps.length > 0;
+}
+
+/**
+ * 결재 이력 한 줄이 **신청자가 스스로 물러서 닫힌 줄인가.**
+ *
+ * 🔴 취소로 닫힌 행은 표에 `REJECTED` 로 남는다 — 결정 상태에 닫는 값이 그것뿐
+ * 이라 그렇게 했다(mutations/inventory-part-issue-requests.ts 의
+ * cancelPartIssueRequest 머리말). 그래서 화면이 그대로 그리면 **신청자가 물린
+ * 건이 「결재자가 반려함」으로 보인다.** 되짚을 때 가장 헷갈리는 자리다.
+ *
+ * 가르는 것은 **결정자가 신청자 자신인가** 하나다. 취소 경로는 신청한 사람만
+ * 지날 수 있고(다른 사람은 FORBIDDEN), 결재 경로는 신청자 본인 단계를 건너뛰므로
+ * (findNextRouteStepToApprove) 자기 신청을 자기가 반려하는 줄은 생기지 않는다.
+ *
+ * `requestedByUserId` 는 **그 사슬을 올린 사람**이다 — 단계가 나아가도 물려
+ * 내려가므로(같은 파일의 사슬 잇는 자리) 2단계·3단계 행에서도 신청자를 가리킨다.
+ *
+ * 🔴 판정을 화면에 적지 않고 여기 두는 이유는 위와 같다: 이력을 그리는 자리가
+ * 하나가 아니게 되는 날(재고 화면 · 부품 요청 상세) 한쪽만 고쳐지면 같은 줄이 두
+ * 화면에서 다른 말을 한다.
+ */
+export function isPartIssueApprovalClosedByRequester(row: {
+  status: "REQUESTED" | "APPROVED" | "REJECTED";
+  requestedByUserId: string;
+  decidedByUserId: string | null;
+}): boolean {
+  return (
+    row.status === "REJECTED" &&
+    row.decidedByUserId !== null &&
+    row.decidedByUserId === row.requestedByUserId
+  );
+}
+
+/**
  * 불출 신청이 지나가는 상태.
  *
  * 🔴 표의 enum(`inventory_part_issue_request_status`)과 **글자 그대로 같아야

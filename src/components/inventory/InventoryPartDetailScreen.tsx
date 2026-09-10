@@ -22,6 +22,7 @@ export default function InventoryPartDetailScreen({
   repairCaseOptions,
   actingUser,
   capabilities,
+  partIssueApprovalRequired,
 }: {
   part: PartDetail;
   history: StockTransactionRow[];
@@ -35,6 +36,12 @@ export default function InventoryPartDetailScreen({
   repairCaseOptions: RepairCaseOption[];
   actingUser: { id: string; role: Role };
   capabilities: InventoryCapabilities;
+  /**
+   * 「부품 불출」 승인 절차가 지금 쓰이고 있는가. 잔량 표의 [사용] 단추가
+   * [불출 승인 요청]으로 갈리는 데만 쓴다 — 판정은 서버가 하고(page.tsx) 이
+   * 화면은 지나가는 자리다.
+   */
+  partIssueApprovalRequired: boolean;
 }) {
   const totalQuantity = part.balances.reduce((sum, b) => sum + b.currentQuantity, 0);
 
@@ -105,6 +112,7 @@ export default function InventoryPartDetailScreen({
             repairCaseOptions={repairCaseOptions}
             actingUserRole={actingUser.role}
             capabilities={capabilities}
+            partIssueApprovalRequired={partIssueApprovalRequired}
           />
         </div>
       </div>

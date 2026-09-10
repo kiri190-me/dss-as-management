@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { consumeStockAction } from "@/lib/server/actions/inventory";
+import { createPartIssueRequestAction } from "@/lib/server/actions/inventory-part-issue-requests";
+import {
+  PART_ISSUE_REQUEST_BUTTON_LABEL,
+  PART_ISSUE_REQUEST_DIALOG_NOTICE,
+  PART_ISSUE_REQUEST_SUBMIT_LABEL,
+} from "./part-issue-approval-texts";
 
 export type RepairCaseOption = { id: string; intakeNumber: string; assignedEngineerId: string | null };
 
@@ -12,6 +18,13 @@ export type RepairCaseOption = { id: string; intakeNumber: string; assignedEngin
  * but the server re-checks role/assignment/lock independently regardless
  * of what this dialog allows through, so hiding it here is a UX
  * convenience only, never the enforcement boundary.
+ *
+ * 🔴 **「부품 불출」 승인 절차가 있으면 이 창은 신청서가 된다** — 적는 칸은 한
+ * 글자도 달라지지 않고(수리 건이나 사용처 · 수량 · 사유), 끝에서 재고를 빼는
+ * 대신 결재를 올린다. 판이 없으면 지금까지와 완전히 같다.
+ *
+ * 🔴 판이 있는지 **여기서 판정하지 않는다.** 서버가 문을 다는 데 쓰는 그 판정을
+ * 서버 컴포넌트가 계산해 프롭으로 내려보낸다(inventory/[id]/page.tsx).
  */
 export default function ConsumeStockDialog({
   isOpen,
@@ -20,6 +33,7 @@ export default function ConsumeStockDialog({
   expectedVersion,
   repairCaseOptions,
   actingUserRole,
+  approvalRequired,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -27,6 +41,8 @@ export default function ConsumeStockDialog({
   expectedVersion: number;
   repairCaseOptions: RepairCaseOption[];
   actingUserRole: string;
+  /** 참이면 이 창은 재고를 빼지 않고 **불출 승인 요청**을 올린다. */
+  approvalRequired: boolean;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -71,16 +87,33 @@ export default function ConsumeStockDialog({
     }
     setIsSubmitting(true);
     setErrorMessage(null);
-    const result = await consumeStockAction({
-      partStockBalanceId,
-      quantity: parsedQuantity,
-      expectedVersion,
-      repairCaseId: mode === "CASE" ? repairCaseId : null,
-      destinationNote: mode === "DESTINATION" ? destinationNote : null,
-      reason: reason || null,
-    });
+    const result = approvalRequired
+      ? await createPartIssueRequestAction({
+          kind: "DIRECT_USE",
+          partStockBalanceId,
+          quantity: parsedQuantity,
+          repairCaseId: mode === "CASE" ? repairCaseId : null,
+          destinationNote: mode === "DESTINATION" ? destinationNote : null,
+          // 절차 실행에서 올라온 사용이 아니다 — 그 길은 따로 있다.
+          procedureExecutionNodeId: null,
+          requestReason: reason || null,
+          // 🔴 expectedVersion 을 보내지 않는다. 신청은 재고를 건드리지 않으므로
+          // 「지금 이 잔량 행이 그대로인가」를 물을 이유가 없고, 물으면 결재를
+          // 기다리는 동안 남이 입고만 해도 신청이 막힌다. 그 검사는 **실행**이
+          // 자기 트랜잭션 안에서 잠그고 한다.
+        })
+      : await consumeStockAction({
+          partStockBalanceId,
+          quantity: parsedQuantity,
+          expectedVersion,
+          repairCaseId: mode === "CASE" ? repairCaseId : null,
+          destinationNote: mode === "DESTINATION" ? destinationNote : null,
+          reason: reason || null,
+        });
     setIsSubmitting(false);
     if (!result.ok) {
+      // 서버가 준 이유를 그대로 보여 준다 — 뭉개면 사람은 승인 절차를 만들어야
+      // 하는지, 재고를 기다려야 하는지 알 수 없다.
       setErrorMessage(result.message);
       return;
     }
@@ -99,8 +132,13 @@ export default function ConsumeStockDialog({
       className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
     >
       <h2 id="consume-stock-dialog-title" className="text-sm font-semibold">
-        사용
+        {approvalRequired ? PART_ISSUE_REQUEST_BUTTON_LABEL : "사용"}
       </h2>
+      {approvalRequired && (
+        <p className="mt-2 break-keep rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          {PART_ISSUE_REQUEST_DIALOG_NOTICE}
+        </p>
+      )}
 
       {canUseDestinationOnly && (
         <div className="mt-3 flex gap-3 text-xs text-zinc-600 dark:text-zinc-300">
@@ -183,7 +221,7 @@ export default function ConsumeStockDialog({
           disabled={isSubmitting}
           className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
-          {isSubmitting ? "처리 중..." : "사용"}
+          {isSubmitting ? "처리 중..." : approvalRequired ? PART_ISSUE_REQUEST_SUBMIT_LABEL : "사용"}
         </button>
       </div>
     </dialog>

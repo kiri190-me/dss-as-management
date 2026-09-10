@@ -5,14 +5,14 @@ import { parts, partStockBalances, stockTransactions, inventoryPartRequestItems,
 import { insertAuditLog } from "./audit-logs";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore } from "./internal/inventory-stock-use";
-import {
-  getCurrentShipmentApprovalRouteChain,
-  type ShipmentApprovalRouteChain,
-} from "../queries/shipment-approval-routes";
+import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { UseStockAuthorizationContext } from "@/lib/auth/inventory-authorization";
 import { computeAlreadyReversedQuantity, canReturnQuantity } from "@/lib/domain/inventory-return-rules";
-import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-issue-rules";
+import {
+  isPartIssueApprovalRouteInForce,
+  PART_ISSUE_APPROVAL_ROUTE_SCOPE,
+} from "@/lib/domain/inventory-part-issue-rules";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 
 /**
@@ -125,20 +125,18 @@ export const PART_ISSUE_APPROVAL_REQUIRED_MESSAGE =
   "부품 불출 승인 절차가 설정되어 있어 바로 불출할 수 없습니다. 불출 승인 요청을 올려 결재를 받은 뒤 실행해 주세요.";
 
 /**
- * 「부품 불출」 판이 **지금 쓰이고 있는가** — 판이 있고 단계가 1개 이상이다.
+ * 🔴 **판정 자체는 여기 있지 않다** — 순수 자리로 옮겼다
+ * (domain/inventory-part-issue-rules.ts 의 isPartIssueApprovalRouteInForce).
+ * 재고 **화면**(서버 컴포넌트)이 [불출]·[사용] 단추를 [불출 승인 요청]으로 바꿀지
+ * 정할 때 서버와 **같은 함수 하나**를 봐야 하는데, 이 파일은 `server-only` 사슬을
+ * 물고 있어 화면 쪽에서 부를 수 없었다. 옮기지 않으면 화면이 판정을 한 벌 더 적게
+ * 되고, 그때 「단추는 보이는데 누르면 거절」이나 그 반대가 된다.
  *
- * 🔴 이 판정이 적힌 곳은 저장소에서 여기 하나여야 한다. 신청을 만드는 쪽
- * (createPartIssueRequest)은 반대 방향으로 같은 질문을 하고(판이 없으면
- * ROUTE_NOT_CONFIGURED), 두 문은 같은 이 함수를 본다. 한쪽만 「단계 0개」를
- * 절차로 치면 신청도 못 하고 불출도 못 하는 상태가 생긴다.
- *
- * 타입 좁힘까지 겸한다 — 참이면 부르는 쪽이 그 판을 그대로 쓸 수 있다.
+ * 이 파일이 그대로 다시 내보내는 이유는 부르는 쪽(inventory-part-requests.ts ·
+ * inventory-part-issue-requests.ts)의 import 경로를 흔들지 않기 위해서다 —
+ * 구현은 한 벌뿐이다.
  */
-export function isPartIssueApprovalRouteInForce(
-  route: ShipmentApprovalRouteChain | null
-): route is ShipmentApprovalRouteChain {
-  return route !== null && route.steps.length > 0;
-}
+export { isPartIssueApprovalRouteInForce };
 
 /**
  * 지금 이 트랜잭션에서 「부품 불출」 절차가 쓰이고 있는가.

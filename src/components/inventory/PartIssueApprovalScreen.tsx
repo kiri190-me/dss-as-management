@@ -1,0 +1,377 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import InventoryTabs from "./InventoryTabs";
+import PartIssueApprovalTrail, { formatPartIssueMoment } from "./PartIssueApprovalTrail";
+import {
+  PART_ISSUE_EXECUTION_BLOCKED_NOTICE,
+  PART_ISSUE_NOTHING_TO_DECIDE,
+  PART_ISSUE_NOTHING_TO_EXECUTE,
+  PART_ISSUE_SIBLING_PENDING_NOTICE,
+} from "./part-issue-approval-texts";
+import {
+  decidePartIssueRequestApprovalAction,
+  executePartIssueRequestAction,
+} from "@/lib/server/actions/inventory-part-issue-requests";
+import { stockOwnerLabels } from "@/lib/domain/inventory-types";
+import type { PartIssueRequestDetail } from "@/lib/db/queries/inventory-part-issue-requests";
+import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-approval-routes";
+
+/**
+ * ============================================================================
+ * [승인 요청건] 탭 — 결재할 건과 실행할 건
+ * ============================================================================
+ * 재고 담당자가 [불출]·[사용]을 누르면 그 자리에서 재고가 빠지던 것을, 단계적
+ * 승인을 받은 뒤에 빠지게 만드는 절차의 **받는 쪽**이다. 두 묶음이 있다:
+ *
+ *  (가) 내가 결재할 건 — 지금 내 차례인 신청. 좁히는 것은 조회의 몫이고
+ *       (listPartIssueRequestsPendingMyApproval → mayDecideAssignedApproval)
+ *       여기서 한 벌 더 좁히지 않는다.
+ *  (나) 실행할 건 — 결재가 끝나 재고 담당자가 내보낼 것.
+ *
+ * 🔴 **묶음을 함부로 감추지 않는다.** 「지금 할 일이 없다」와 「이 화면이 나와
+ * 상관없다」는 다른 말이다. 처리할 건이 0건이면 그렇게 **말하고**, 애초에
+ * 결재자도 재고 담당자도 아닌 세션에만 그 묶음을 감춘다(그 판정은 서버가 한다 —
+ * 아래 프롭 참조).
+ *
+ * 🔴 **실패 이유를 뭉개지 않는다.** 서버가 돌려주는 문구를 그대로 보여 준다.
+ * 「처리할 수 없습니다」로 접으면 사람은 승인 절차를 만들어야 하는지, 입고를
+ * 기다려야 하는지, 새로 고쳐야 하는지 알 수 없다.
+ * ============================================================================
+ */
+
+/** 신청 한 건과, 그 건을 그리는 데 필요한 서버 쪽 자료. */
+export type PartIssueApprovalRequestView = {
+  detail: PartIssueRequestDetail;
+  /**
+   * 🔴 이 신청이 타고 있는 **판**의 단계들(이름 포함). 「현재 판」이 아니다 —
+   * 서버가 결재 행의 routeId 로 읽어 내려보낸다. 못 찾으면 `null`.
+   */
+  routeSteps: ShipmentApprovalRouteStepLabel[] | null;
+  /**
+   * 같은 부품 요청에 **아직 결재 중인 다른 신청**의 수. 신청은 재고를 예약하지
+   * 않으므로 둘이 합쳐 남은 수량을 넘길 수 있고, 그때 뒤엣것이 실행에서 막힌다.
+   */
+  siblingPendingCount: number;
+};
+
+type DecisionDraft = { issueRequestId: string; decision: "APPROVED" | "REJECTED" };
+
+export default function PartIssueApprovalScreen({
+  pending,
+  executable,
+  showApprovalSection,
+  showExecutionSection,
+}: {
+  /** 내가 지금 결재해야 할 신청들 — 오래 기다린 것부터. */
+  pending: PartIssueApprovalRequestView[];
+  /** 승인이 끝나 실행할 수 있는 신청들. */
+  executable: PartIssueApprovalRequestView[];
+  /**
+   * 🔴 「이 사람이 애초에 결재자인가 / 재고 담당자인가」는 **서버가 판정해**
+   * 내려보낸다. 화면이 역할을 보고 정하면 관리자가 설정으로 연 권한이 반영되지
+   * 않는다(inventory-capabilities.ts 머리말과 같은 이유).
+   */
+  showApprovalSection: boolean;
+  showExecutionSection: boolean;
+}) {
+  const router = useRouter();
+  const [draft, setDraft] = useState<DecisionDraft | null>(null);
+  const [reason, setReason] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  /** 신청마다 마지막 결과 한 줄 — 성공이든 **서버가 거절한 이유든** 같은 자리다. */
+  const [messages, setMessages] = useState<Record<string, string>>({});
+
+  function setMessage(issueRequestId: string, message: string) {
+    setMessages((prev) => ({ ...prev, [issueRequestId]: message }));
+  }
+
+  async function submitDecision() {
+    if (!draft || busyId) return;
+    setBusyId(draft.issueRequestId);
+    const result = await decidePartIssueRequestApprovalAction({
+      issueRequestId: draft.issueRequestId,
+      decision: draft.decision,
+      reason: reason.trim() ? reason : null,
+    });
+    setBusyId(null);
+    if (!result.ok) {
+      // 서버 문구 그대로 — 반려 사유 누락도, 남이 먼저 처리한 것도 여기로 온다.
+      setMessage(draft.issueRequestId, result.message);
+      return;
+    }
+    setMessage(
+      draft.issueRequestId,
+      draft.decision === "APPROVED" ? "승인했습니다." : "반려했습니다."
+    );
+    setDraft(null);
+    setReason("");
+    router.refresh();
+  }
+
+  async function execute(issueRequestId: string) {
+    if (busyId) return;
+    setBusyId(issueRequestId);
+    /*
+      🔴 **신청 id 하나만 보낸다.** 무엇을 얼마나 빼는지는 신청 항목에 이미 적혀
+      있고, 화면이 수량이나 잔량 행을 함께 보내면 「승인받은 것과 다른 것이
+      나갔다」가 가능해진다. 서버 액션에도 그것을 받을 자리가 없다 — 이 모양을
+      깨지 말 것.
+    */
+    const result = await executePartIssueRequestAction({ issueRequestId });
+    setBusyId(null);
+    if (!result.ok) {
+      // 🔴 재고가 모자라 막혔을 때 **신청이 살아 있다**는 사실을 함께 말한다.
+      // 서버가 트랜잭션째 되돌리므로 신청은 그대로 APPROVED 로 남는데, 실패만
+      // 보여 주면 사라진 줄 알고 처음부터 다시 올리게 된다.
+      setMessage(
+        issueRequestId,
+        result.code === "INSUFFICIENT_STOCK"
+          ? `${result.message} ${PART_ISSUE_EXECUTION_BLOCKED_NOTICE}`
+          : result.message
+      );
+      return;
+    }
+    setMessage(issueRequestId, "불출을 실행했습니다.");
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <InventoryTabs active="APPROVALS" />
+      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">불출 승인 요청건</h1>
+
+      {!showApprovalSection && !showExecutionSection && (
+        <p className="rounded-lg border border-zinc-200 px-3 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          이 화면에서 처리할 수 있는 권한이 없습니다.
+        </p>
+      )}
+
+      {showApprovalSection && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            내가 결재할 건 <span className="tabular-nums text-zinc-500 dark:text-zinc-400">{pending.length}건</span>
+          </h2>
+          {pending.length === 0 ? (
+            <p className="rounded-lg border border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {PART_ISSUE_NOTHING_TO_DECIDE}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {pending.map((view) => (
+                <RequestCard
+                  key={view.detail.id}
+                  view={view}
+                  message={messages[view.detail.id] ?? null}
+                  actions={
+                    draft?.issueRequestId === view.detail.id ? (
+                      <div className="flex w-full flex-col gap-2">
+                        <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          {draft.decision === "REJECTED" ? "반려 사유 (필수)" : "승인 의견 (선택)"}
+                          <textarea
+                            rows={2}
+                            value={reason}
+                            onChange={(event) => setReason(event.target.value)}
+                            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                          />
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={busyId !== null}
+                            onClick={() => void submitDecision()}
+                            className={`rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                              draft.decision === "REJECTED"
+                                ? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                                : "bg-primary-900 text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+                            }`}
+                          >
+                            {busyId !== null ? "처리 중..." : draft.decision === "REJECTED" ? "반려 확정" : "승인 확정"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId !== null}
+                            onClick={() => {
+                              setDraft(null);
+                              setReason("");
+                            }}
+                            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busyId !== null}
+                          onClick={() => {
+                            setReason("");
+                            setDraft({ issueRequestId: view.detail.id, decision: "APPROVED" });
+                          }}
+                          className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+                        >
+                          승인
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyId !== null}
+                          onClick={() => {
+                            setReason("");
+                            setDraft({ issueRequestId: view.detail.id, decision: "REJECTED" });
+                          }}
+                          className="rounded-md border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                        >
+                          반려
+                        </button>
+                      </>
+                    )
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {showExecutionSection && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            실행할 건{" "}
+            <span className="tabular-nums text-zinc-500 dark:text-zinc-400">{executable.length}건</span>
+          </h2>
+          {executable.length === 0 ? (
+            <p className="rounded-lg border border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {PART_ISSUE_NOTHING_TO_EXECUTE}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {executable.map((view) => (
+                <RequestCard
+                  key={view.detail.id}
+                  view={view}
+                  message={messages[view.detail.id] ?? null}
+                  actions={
+                    <button
+                      type="button"
+                      disabled={busyId !== null}
+                      onClick={() => void execute(view.detail.id)}
+                      className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+                    >
+                      {busyId === view.detail.id ? "처리 중..." : "불출 실행"}
+                    </button>
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {/*
+        읽어 주기 통로. 값이 없을 때도 빈 문자열로 **항상 DOM 에 남아 있어야**
+        내용이 바뀔 때 읽힌다.
+      */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {Object.values(messages).join(" ")}
+      </p>
+    </div>
+  );
+}
+
+/** 신청 한 건 — 무엇을 얼마나 · 어디에 쓸 것인지 · 결재선 진행 · 단추. */
+function RequestCard({
+  view,
+  actions,
+  message,
+}: {
+  view: PartIssueApprovalRequestView;
+  actions: React.ReactNode;
+  message: string | null;
+}) {
+  const { detail } = view;
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            {detail.repairCaseId !== null && detail.intakeNumber ? (
+              <Link
+                href={`/repair-cases/${detail.repairCaseId}`}
+                className="text-blue-700 hover:underline dark:text-blue-400"
+              >
+                {detail.intakeNumber}
+              </Link>
+            ) : (
+              /* 사용처만 있는 직접 사용이다 — 접수 건이 없는 것이 정상값이다. */
+              (detail.destinationNote ?? "사용처 미지정")
+            )}
+          </span>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            {detail.partRequestId !== null ? "부품 요청 기반 불출" : "직접 사용"} · 신청자{" "}
+            {detail.requestedByName} · {formatPartIssueMoment(detail.requestedAt)}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      </div>
+
+      {detail.requestReason && (
+        <p className="break-keep rounded-md bg-zinc-50 px-2 py-1 text-xs text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-200">
+          신청 사유: “{detail.requestReason}”
+        </p>
+      )}
+
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[10px] text-zinc-400 dark:text-zinc-500">
+            <th scope="col" className="pb-1 text-left font-normal">품목</th>
+            <th scope="col" className="pb-1 text-left font-normal">소유 / 위치</th>
+            <th scope="col" className="w-16 pb-1 text-right font-normal">승인 수량</th>
+            <th scope="col" className="w-16 pb-1 text-right font-normal">현재 잔량</th>
+          </tr>
+        </thead>
+        <tbody>
+          {detail.items.map((item) => {
+            // 지금 잔량으로도 모자라면 실행이 막힌다 — 누르기 전에 보여 준다.
+            // 판정은 여기서 열지 않는다(실행 mutation 이 잠그고 다시 본다).
+            const short = item.currentQuantity < item.quantity;
+            return (
+              <tr key={item.id} className="border-t border-zinc-100 align-top dark:border-zinc-800">
+                <td className="py-1 pr-2 text-zinc-800 dark:text-zinc-100">
+                  {item.partName}
+                  {item.partSpec && (
+                    <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">{item.partSpec}</span>
+                  )}
+                </td>
+                <td className="py-1 pr-2 text-zinc-600 dark:text-zinc-300">
+                  {stockOwnerLabels[item.owner]} / {item.location}
+                </td>
+                <td className="py-1 text-right tabular-nums text-zinc-800 dark:text-zinc-100">{item.quantity}</td>
+                <td
+                  className={`py-1 text-right tabular-nums ${
+                    short ? "font-medium text-red-700 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"
+                  }`}
+                >
+                  {item.currentQuantity}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {view.siblingPendingCount > 0 && (
+        <p className="break-keep rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          {PART_ISSUE_SIBLING_PENDING_NOTICE} (결재 중 {view.siblingPendingCount}건)
+        </p>
+      )}
+
+      <PartIssueApprovalTrail approvals={detail.approvals} routeSteps={view.routeSteps} />
+
+      {message && <p className="text-xs text-zinc-500 dark:text-zinc-400">{message}</p>}
+    </li>
+  );
+}
