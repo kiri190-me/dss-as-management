@@ -1,14 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
 import ApprovalActionDialog from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import {
+  approvalFollowsRoute,
+  mayDecideAssignedApproval,
+  standsInForAssignedApprover,
+} from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
+import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-approval-routes";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
@@ -33,6 +38,59 @@ function displayStatusOf(record: ApprovalRecordRow | null, currentVersion: numbe
   return state === "PENDING" ? "REQUESTED" : state;
 }
 
+/** 진행 미리보기 한 칸의 모양 — 상자 색과 그 아래 글자를 함께 정한다. */
+type RouteStepMark = { toneClass: string; stateLabel: string };
+
+/**
+ * 🔴 **색만으로 상태를 구분하지 않는다**(UI_GUIDELINE 7절) — 상자 색과 글자를
+ * 한 자리에서 함께 정하는 이유가 그것이다. 따로 두면 한쪽만 늘어난다.
+ *
+ * 색 계열은 승인 배지(DatabaseApprovalStatusBadge)와 같게 맞춘다: 완료=성공색,
+ * 지금 차례=강조색, 반려=위험색, 재승인 필요=경고색, 아직 안 온 단계=중립색.
+ */
+const DONE_MARK: RouteStepMark = {
+  toneClass: "border-green-300 text-green-700 dark:border-green-900 dark:text-green-400",
+  stateLabel: "완료",
+};
+const UPCOMING_MARK: RouteStepMark = {
+  toneClass: "border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400",
+  stateLabel: "대기",
+};
+
+/**
+ * 그 단계가 지금 어디쯤인가. 앞 단계는 이미 승인돼야 다음 요청 행이 생기므로
+ * **지금 단계보다 앞이면 언제나 완료**다(진행 중인 건은 옛 판을 끝까지 따라가고,
+ * 그 판의 단계 번호가 곧 여기 들어오는 값이다).
+ *
+ * 지금 단계 자신은 이 요청 행의 상태를 그대로 따른다 — 승인·반려가 끝난 칸이
+ * 「지금 차례」라고 말하지 않게 하려는 것이다.
+ */
+function markForRouteStep(
+  stepOrder: number,
+  currentStepOrder: number,
+  displayStatus: DatabaseDisplayApprovalStatus
+): RouteStepMark {
+  if (stepOrder < currentStepOrder) return DONE_MARK;
+  if (stepOrder > currentStepOrder) return UPCOMING_MARK;
+  if (displayStatus === "APPROVED") return DONE_MARK;
+  if (displayStatus === "REJECTED") {
+    return {
+      toneClass: "border-red-300 text-red-700 dark:border-red-900 dark:text-red-400",
+      stateLabel: "반려",
+    };
+  }
+  if (displayStatus === "STALE") {
+    return {
+      toneClass: "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400",
+      stateLabel: "재승인 필요",
+    };
+  }
+  return {
+    toneClass: "border-blue-300 text-blue-700 dark:border-blue-900 dark:text-blue-400",
+    stateLabel: "지금 차례",
+  };
+}
+
 /**
  * Database-mode counterpart to FinalShipmentCard.tsx. Supports both direct
  * representative approval and delegated approval — decideAuthorization is
@@ -49,7 +107,7 @@ export default function DatabaseFinalShipmentCard({
   decideAuthorization,
   inspectionApproved,
   currentVersion,
-  routeTotalSteps,
+  routeSteps,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
@@ -64,14 +122,16 @@ export default function DatabaseFinalShipmentCard({
   /** 지금 접수 건의 version — 이 값과 다른 승인은 서버가 무효로 본다. */
   currentVersion: number;
   /**
-   * 이 요청이 타고 있는 결재선 **판의 전체 단계 수**. 결재선을 타지 않으면
-   * `null`이고, 그때 진행 표시는 그리지 않는다.
+   * 이 요청이 타고 있는 결재선 **판의 단계들**(순서 + 승인자 이름). 결재선을
+   * 타지 않으면 `null`이고, 그때 진행 표시도 미리보기도 그리지 않는다.
    *
-   * 🔴 「현재 판」이 아니라 **이 요청 행에 적힌 판**을 센 값이라야 한다 —
-   * 서버(page.tsx)가 record.routeId 로 읽어 내려보낸다. 진행 중인 건은 옛 판을
-   * 끝까지 따라가므로, 현재 판을 세면 「2/2단계」가 「2/4단계」로 보인다.
+   * 🔴 「현재 판」이 아니라 **이 요청 행에 적힌 판**이라야 한다 — 서버(page.tsx)가
+   * record.routeId 로 읽어 내려보낸다. 진행 중인 건은 옛 판을 끝까지 따라가므로,
+   * 현재 판을 세면 「2/2단계」가 「2/4단계」로 보인다.
+   *
+   * 🔴 배열이다(Map 이 아니다) — 서버 컴포넌트 경계를 넘어야 하기 때문이다.
    */
-  routeTotalSteps: number | null;
+  routeSteps: ShipmentApprovalRouteStepLabel[] | null;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -86,6 +146,15 @@ export default function DatabaseFinalShipmentCard({
   // 지정 관문. 결재선을 타지 않는 출하 요청은 지정이 언제나 NULL 이라 늘
   // 열려 있어 동작이 바뀌지 않는다 — 그래도 두 축을 함께 적어 둔다.
   const assignedGateOpen = mayDecideAssignedApproval(record?.assignedApproverUserId ?? null, actingUser);
+  // 지정된 사람이 따로 있는데 내가 그 자리에 서 있는가. 「그래도 되는가」는 위
+  // 지정 관문이 이미 답했다 — 이것은 **모양**만 묻는 판정이고, 이력의 「지정자
+  // 대신 처리」 배지가 같은 함수를 본다.
+  const standingInForAssignee = standsInForAssignedApprover(
+    record?.assignedApproverUserId ?? null,
+    actingUser.id
+  );
+  // 「2/3단계」의 뒷자리. 서버가 **이 행에 적힌 판**으로 읽어 준 단계 수다.
+  const routeTotalSteps = routeSteps?.length ?? 0;
 
   const actions: DatabaseApprovalActionButton[] = [];
   let disabledReason: string | null = null;
@@ -122,6 +191,22 @@ export default function DatabaseFinalShipmentCard({
         ? `이 요청은 ${record.assignedApproverName} 님에게 지정되어 있습니다.`
         : "이 요청은 지정된 승인자만 처리할 수 있습니다.";
     } else {
+      // 🔴 비상구를 **누르기 전에** 말한다. 지정 관문이 열렸는데 지정된 사람이
+      // 따로 있다는 것은, 지금 보고 있는 사람이 최고관리자 권한으로 남의 단계에
+      // 서 있다는 뜻이다(그 길이 mayDecideAssignedApproval 의 유일한 예외다).
+      //
+      // 🔴 이 안내를 disabledReason 으로 내보내면 **아무 데도 보이지 않는다** —
+      // 껍데기(DatabaseApprovalCard)는 그 문구를 단추가 하나도 없을 때만 그리는데,
+      // 여기는 단추가 **있는** 자리다. 그래서 단추와 함께 그려지는 blockedNotice
+      // 로 낸다.
+      //
+      // 결재선을 타지 않는 출하 요청은 지정이 언제나 NULL 이라 여기서 언제나
+      // 거짓이다 — 예전 화면에 없던 문구가 끼어들지 않는다.
+      if (standingInForAssignee) {
+        blockedNotice = `지금 차례는 ${
+          record?.assignedApproverName ?? "다른 승인자"
+        } 님입니다. 최고관리자 권한으로 대신 처리합니다.`;
+      }
       actions.push(
         { key: "approve", label: "출하 승인", onClick: () => setDialogState("APPROVED") },
         { key: "reject", label: "출하 반려", onClick: () => setDialogState("REJECTED"), tone: "danger" }
@@ -173,6 +258,20 @@ export default function DatabaseFinalShipmentCard({
         }`
       : null;
 
+  /**
+   * 진행 미리보기를 그릴 단계들 — 이름과 함께 **그 칸의 상태**까지 미리 정해
+   * 둔다. 결재선을 타지 않거나 판을 못 찾았으면 빈 배열이고, 그때는 미리보기
+   * 자체를 그리지 않는다.
+   *
+   * 상태를 여기서 정하는 이유는 아래 JSX 안에 `return` 을 두지 않기 위해서다 —
+   * 화면 배치 시험(approval-screen-layout.test.tsx)이 이 파일의 `return (` 위치로
+   * 카드 안팎을 가른다.
+   */
+  const previewSteps = (followsRoute ? (routeSteps ?? []) : []).map((step) => ({
+    ...step,
+    ...markForRouteStep(step.stepOrder, record?.routeStepOrder ?? 0, displayStatus),
+  }));
+
   const extra = (
     <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md bg-zinc-50 p-3 text-sm sm:grid-cols-2 dark:bg-zinc-800/60">
       <div>
@@ -186,6 +285,43 @@ export default function DatabaseFinalShipmentCard({
                 : "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다.")}
         </dd>
       </div>
+      {previewSteps.length > 0 && (
+        <div className="sm:col-span-2">
+          <dt className="text-xs text-zinc-500 dark:text-zinc-400">결재선</dt>
+          {/*
+            모양은 관리자 화면(users/ShipmentApprovalRouteSection)의 미리보기를
+            그대로 따른다 — 상자들 사이에 ▶, 상자 아래 「n단계」. 그래프 라이브러리는
+            쓰지 않는다: 일렬이라 상자와 화살표 글자로 충분하다.
+
+            🔴 가로로 길어지면 **이 상자 안에서만** 밀린다(overflow-x-auto). 카드
+            바깥이 밀리면 옆 카드까지 못 쓰게 된다.
+
+            🔴 공용 부품으로 뽑지 않는다 — 저쪽은 편집 중인 id 배열 + 자격 경고이고
+            이쪽은 확정된 이름 + 진행 상태다. 같아 보이는 것은 배치뿐이다.
+          */}
+          <dd className="mt-2 overflow-x-auto pb-1">
+            <div className="flex min-w-max items-start gap-2">
+              {previewSteps.map((step, index) => (
+                <Fragment key={step.stepOrder}>
+                  {index > 0 && (
+                    <span aria-hidden className="self-center text-sm text-zinc-400 dark:text-zinc-500">
+                      ▶
+                    </span>
+                  )}
+                  <div className="flex flex-col items-center gap-1">
+                    <span className={`whitespace-nowrap rounded-md border px-3 py-2 text-xs ${step.toneClass}`}>
+                      {step.approverName}
+                    </span>
+                    <span className="whitespace-nowrap text-[11px] text-zinc-400 dark:text-zinc-500">
+                      {step.stepOrder}단계 · {step.stateLabel}
+                    </span>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          </dd>
+        </div>
+      )}
     </dl>
   );
 

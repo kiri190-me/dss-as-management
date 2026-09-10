@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
 import DatabaseApprovalCard from "./DatabaseApprovalCard";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
+import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
 
 /**
  * [검수/승인] 탭의 **화면 배치**를 못 박는다. 두 가지다.
@@ -87,6 +88,30 @@ function approvalRecord(overrides: Partial<ApprovalRecordRow> = {}): ApprovalRec
     repairCaseVersionAtRequest: 3,
     ...overrides,
   };
+}
+
+/** 판 하나 — 단계 순서는 이름 순서대로 1부터 매긴다. */
+function route(routeId: string, approverNames: string[]): ShipmentApprovalRouteStepList {
+  return {
+    routeId,
+    steps: approverNames.map((approverName, index) => ({
+      stepOrder: index + 1,
+      approverUserId: `approver-${index + 1}`,
+      approverName,
+    })),
+  };
+}
+
+/** 결재선을 타는 이력 한 줄 — 판·단계·지정이 함께 있어야 결재선이다. */
+function routeRecord(overrides: Partial<ApprovalRecordRow> = {}): ApprovalRecordRow {
+  return approvalRecord({
+    approvalType: "FINAL_SHIPMENT",
+    routeId: "route-a",
+    routeStepOrder: 2,
+    assignedApproverUserId: "approver-2",
+    assignedApproverName: "김도윤",
+    ...overrides,
+  });
 }
 
 describe("승인 이력 — 기본은 접혀 있다", () => {
@@ -233,14 +258,23 @@ describe("🔴 최종 출하 승인 카드 — 결재선 행에서는 절차가 
   );
 
   test("판정을 카드가 새로 적지 않고 공용 함수를 부른다", () => {
-    assert.match(
-      flat(shipmentCardSource),
-      /import \{ approvalFollowsRoute, mayDecideAssignedApproval \} from "@\/lib\/auth\/approval-assignment"/,
-      "서버가 보는 것과 같은 함수를 봐야 한다"
-    );
+    // 판정 셋 다 공용 관문(approval-assignment.ts)에서 온다 — 서버·알림 조회·
+    // 승인 이력이 보는 것과 **같은 함수**여야 한다. 이름만 확인하고 줄바꿈에는
+    // 걸리지 않게 둔다(하나가 늘 때마다 이 시험이 깨지면 덫이 잡음이 된다).
+    for (const shared of ["approvalFollowsRoute", "mayDecideAssignedApproval", "standsInForAssignedApprover"]) {
+      assert.match(
+        flat(shipmentCardSource),
+        new RegExp(`import \\{[^}]*\\b${shared}\\b[^}]*\\} from "@/lib/auth/approval-assignment"`),
+        `서버가 보는 것과 같은 함수를 봐야 한다: ${shared}`
+      );
+    }
     assert.ok(
       !/routeId !== null/.test(shipmentCardSource),
       "「결재선을 타는가」 판정을 카드가 한 벌 더 적었다 — 언젠가 한쪽만 고쳐진다"
+    );
+    assert.ok(
+      !/assignedApproverUserId !== actingUser\.id/.test(shipmentCardSource),
+      "「지정된 사람 대신 서 있는가」 판정을 카드가 한 벌 더 적었다"
     );
   });
 
@@ -364,5 +398,322 @@ describe("결재선 — 새 문구도 카드 밖으로 나가지 않는다", () 
     assert.match(html, /출하 승인<\/button>/);
     assert.match(html, /출하 반려<\/button>/);
     assert.ok(!/김도윤/.test(html), "단추와 이유가 함께 나오면 사람이 어느 쪽을 믿을지 모른다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 승인 이력 — 단계와 「대신 처리」가 줄에 남는다
+ * ============================================================================
+ * 이 화면은 결재 기록이다. 「이 건 누가 승인했지」를 되짚을 때, **비상구로 남의
+ * 단계를 대신 처리한 건**과 **지정된 사람이 자기 차례에 처리한 건**이 구분되지
+ * 않는 것이 이번에 고친 결함이다 — 위임에는 배지가 남는데 비상구에는 아무 표시도
+ * 없었다.
+ *
+ * 이력 부품은 순수해서 그대로 렌더해 검사한다(위 머리말 참조).
+ * ============================================================================
+ */
+describe("🔴 승인 이력 — 결재선 단계", () => {
+  test("결재선을 탄 줄에는 「결재선 2/3단계」가 나온다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[routeRecord()]}
+        routeSteps={[route("route-a", ["박서준", "김도윤", "이서연"])]}
+      />
+    );
+    assert.match(flat(html), /결재선 2\/3단계/);
+  });
+
+  test("🔴 결재선을 타지 않은 줄에는 단계 표시가 아예 없다", () => {
+    // 이 칸이 생기기 전의 모든 행이 여기다 — 지난 이력 전부에 뭔가 붙으면 안 된다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[approvalRecord()]}
+        routeSteps={[route("route-a", ["박서준", "김도윤", "이서연"])]}
+      />
+    );
+    assert.ok(!/결재선/.test(html), "결재선을 안 탄 줄에 단계 표시가 붙었다");
+  });
+
+  test("🔴 판만 적히고 지정이 빈 줄도 결재선으로 보지 않는다 — 공용 판정을 그대로 쓴다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[routeRecord({ assignedApproverUserId: null, assignedApproverName: null })]}
+        routeSteps={[route("route-a", ["박서준", "김도윤", "이서연"])]}
+      />
+    );
+    assert.ok(!/결재선/.test(html));
+  });
+
+  test("판을 못 찾으면 앞자리만 적는다 — 「2/」 같은 반쪽짜리를 보여 주지 않는다", () => {
+    const html = renderToStaticMarkup(<DatabaseApprovalEventTimeline records={[routeRecord()]} routeSteps={[]} />);
+    assert.match(flat(html), /결재선 2단계/);
+    assert.ok(!/2\//.test(html), "뒷자리를 모르는데 빗금이 남았다");
+  });
+
+  test("🔴 단계 수는 **그 줄에 적힌 판**으로 센다 — 옛 판을 탄 줄이 섞여 있다", () => {
+    // 관리자가 절차를 바꾸면 새 판이 얹히고, 그때 진행 중이던 건은 옛 판을 끝까지
+    // 따라간다. 현재 판(4단계)으로 세면 이미 끝난 옛 줄이 「2/4단계」로 보여 아직
+    // 두 사람이 더 남은 것처럼 읽힌다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[
+          routeRecord({ id: "new", routeId: "route-new", routeStepOrder: 1 }),
+          routeRecord({ id: "old", routeId: "route-old", routeStepOrder: 2 }),
+        ]}
+        routeSteps={[
+          route("route-new", ["가", "나", "다", "라"]),
+          route("route-old", ["가", "나"]),
+        ]}
+      />
+    );
+    assert.match(flat(html), /결재선 1\/4단계/, "새 판을 탄 줄이 자기 판으로 세어지지 않았다");
+    assert.match(flat(html), /결재선 2\/2단계/, "옛 판을 탄 줄이 현재 판으로 세어졌다");
+  });
+});
+
+describe("🔴 승인 이력 — 지정과 「지정자 대신 처리」", () => {
+  test("「지정: ○○○」이 지정이 있는 줄에 나온다", () => {
+    const html = renderToStaticMarkup(<DatabaseApprovalEventTimeline records={[routeRecord()]} routeSteps={[]} />);
+    assert.match(flat(html), /지정: 김도윤/);
+  });
+
+  test("🔴 검수 승인의 지정에도 똑같이 나온다 — 결재선 전용이 아니다", () => {
+    // 검수 승인은 요청할 때 「누구에게 보낼까요」를 고를 수 있고 판은 없다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[approvalRecord({ assignedApproverUserId: "u-9", assignedApproverName: "이서연" })]}
+        routeSteps={[]}
+      />
+    );
+    assert.match(flat(html), /수리 검수 승인/);
+    assert.match(flat(html), /지정: 이서연/);
+  });
+
+  test("지정이 없는 줄에는 「지정:」이 나오지 않는다", () => {
+    const html = renderToStaticMarkup(<DatabaseApprovalEventTimeline records={[approvalRecord()]} routeSteps={[]} />);
+    assert.ok(!/지정:/.test(html));
+  });
+
+  test("🔴 지정된 사람과 처리한 사람이 다르면 배지가 뜬다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[
+          routeRecord({
+            status: "APPROVED",
+            decidedByUserId: "super-admin",
+            decidedByName: "최희만",
+            decidedAt: "2026-09-02T01:00:00.000Z",
+          }),
+        ]}
+        routeSteps={[route("route-a", ["박서준", "김도윤", "이서연"])]}
+      />
+    );
+    assert.match(flat(html), /지정자 대신 처리/);
+    // 누구 차례였는지·누가 처리했는지가 같은 줄에 함께 남아야 되짚을 수 있다.
+    assert.match(flat(html), /처리자: 최희만/);
+    assert.match(flat(html), /지정: 김도윤/);
+  });
+
+  test("🔴 지정된 사람이 자기 차례에 처리했으면 배지가 뜨지 않는다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[
+          routeRecord({
+            status: "APPROVED",
+            decidedByUserId: "approver-2",
+            decidedByName: "김도윤",
+            decidedAt: "2026-09-02T01:00:00.000Z",
+          }),
+        ]}
+        routeSteps={[route("route-a", ["박서준", "김도윤", "이서연"])]}
+      />
+    );
+    assert.ok(!/지정자 대신 처리/.test(html), "자기 차례에 승인한 건까지 대신 처리로 남는다");
+  });
+
+  test("🔴 아직 처리되지 않은 줄에도 배지가 뜨지 않는다", () => {
+    // 요청만 해 둔 줄은 처리자가 없다. 여기서 배지가 뜨면 「승인 요청」 줄마다
+    // 대신 처리했다고 적히게 된다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline records={[routeRecord()]} routeSteps={[route("route-a", ["가", "나"])]} />
+    );
+    assert.ok(!/지정자 대신 처리/.test(html));
+  });
+
+  test("기존 「위임 승인 처리」 배지는 그대로다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[
+          approvalRecord({
+            approvalType: "FINAL_SHIPMENT",
+            status: "APPROVED",
+            decidedByUserId: "u-2",
+            decidedByName: "이서연",
+            delegatedFromUserId: "u-3",
+            delegatedFromName: "박서준",
+          }),
+        ]}
+        routeSteps={[]}
+      />
+    );
+    assert.match(flat(html), /위임 승인 처리/);
+    // 위임 행은 지정이 NULL 이라 둘이 함께 뜨는 일은 없다.
+    assert.ok(!/지정자 대신 처리/.test(html));
+  });
+
+  test("두 배지는 같은 모양(둥근 알약)이고 색만 다르다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalEventTimeline
+        records={[
+          routeRecord({
+            status: "APPROVED",
+            decidedByUserId: "super-admin",
+            decidedByName: "최희만",
+            delegatedFromUserId: "u-3",
+            delegatedFromName: "박서준",
+          }),
+        ]}
+        routeSteps={[]}
+      />
+    );
+    // 겹칠 일은 없지만 겹쳐도 깨지지 않아야 한다 — 둘 다 그려진다.
+    assert.match(flat(html), /rounded-full[^"]*"[^>]*>\s*위임 승인 처리/);
+    assert.match(flat(html), /rounded-full[^"]*"[^>]*>\s*지정자 대신 처리/);
+    assert.match(flat(html), /bg-amber-50[^"]*"[^>]*>\s*지정자 대신 처리/, "주의 계열 색이 아니다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 최종 출하 승인 카드 — 진행 미리보기와 비상구 안내
+ * ============================================================================
+ * 카드 부품은 렌더하지 못한다(서버 액션 → server-only). 그래서 원본을 잘라
+ * 확인하고, 새 문구가 실제로 **그려지는 자리**인지는 껍데기를 렌더해 확인한다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 카드 — 진행 미리보기", () => {
+  const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+
+  test("결재선을 타는 요청에서만 그린다", () => {
+    const previewSteps = sliceBetween(shipmentCardSource, "const previewSteps =", "const extra = (");
+    assert.match(flat(previewSteps), /followsRoute \?/, "결재선 판정을 보지 않고 그린다");
+    assert.match(flat(extraBlock), /previewSteps\.length > 0 &&/, "단계가 없을 때도 빈 상자를 그린다");
+  });
+
+  test("🔴 가로로 길어져도 그 상자 안에서만 밀린다", () => {
+    // 카드 바깥이 밀리면 옆 카드까지 못 쓰게 된다 — 관리자 화면의 미리보기가
+    // 같은 이유로 같은 처리를 하고 있다.
+    assert.match(flat(extraBlock), /className="mt-2 overflow-x-auto pb-1"/);
+    assert.match(flat(extraBlock), /className="flex min-w-max items-start gap-2"/);
+  });
+
+  test("상자들 사이에 ▶ 가 있고 상자 아래에 「n단계」가 있다 — 관리자 화면과 같은 모양", () => {
+    assert.match(flat(extraBlock), /index > 0 &&/, "첫 칸 앞에도 화살표가 붙는다");
+    assert.match(flat(extraBlock), /▶/);
+    assert.match(flat(extraBlock), /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/);
+    assert.match(flat(extraBlock), /\{step\.approverName\}/);
+  });
+
+  test("🔴 색만으로 상태를 구분하지 않는다 — 칸마다 글자가 함께 붙는다", () => {
+    // UI_GUIDELINE 7절(색약 사용자). 상태 이름은 판정 함수 한 곳에서 색과 함께 나온다.
+    for (const label of ["완료", "대기", "지금 차례", "반려", "재승인 필요"]) {
+      assert.ok(shipmentCardSource.includes(`stateLabel: "${label}"`), `상태 글자가 없다: ${label}`);
+    }
+  });
+
+  test("🔴 끝난 단계 / 지금 차례 / 아직 안 온 단계가 갈린다", () => {
+    const mark = sliceBetween(shipmentCardSource, "function markForRouteStep(", "const extra = (");
+    assert.match(flat(mark), /stepOrder < currentStepOrder\) return DONE_MARK/, "앞 단계가 완료로 안 보인다");
+    assert.match(flat(mark), /stepOrder > currentStepOrder\) return UPCOMING_MARK/, "뒷 단계가 대기로 안 보인다");
+    // 이미 처리된 단계가 「지금 차례」라고 말하면 안 된다.
+    assert.match(flat(mark), /displayStatus === "APPROVED"\) return DONE_MARK/);
+  });
+
+  test("🔴 그래프 라이브러리를 쓰지 않는다 — 일렬이라 상자와 화살표 글자로 충분하다", () => {
+    assert.ok(!/reactflow|d3|mermaid/i.test(shipmentCardSource));
+  });
+
+  test("🔴 미리보기도 카드 <section> **안**에 들어간다", () => {
+    // extra 는 껍데기가 카드 안에 그린다. 밖으로 나가면 2열 격자의 칸을 먹는다.
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="최종 출하 승인"
+        record={null}
+        displayStatus="REQUESTED"
+        actions={[]}
+        extra={<span>박서준 ▶ 김도윤 ▶ 이서연</span>}
+      />
+    );
+    const preview = html.indexOf("박서준 ▶ 김도윤 ▶ 이서연");
+    assert.ok(preview >= 0, "미리보기가 아예 그려지지 않았다");
+    assert.ok(preview < html.indexOf("</section>"), "카드 밖으로 나가면 옆 카드가 밀린다");
+  });
+});
+
+describe("🔴 최종 출하 승인 카드 — 비상구 안내", () => {
+  const decideBranch = sliceBetween(
+    shipmentCardSource,
+    '} else if (displayStatus === "REQUESTED") {',
+    '} else if (displayStatus === "APPROVED") {'
+  );
+
+  test("🔴 안내가 blockedNotice 로 나간다 — disabledReason 이 아니다", () => {
+    // disabledReason 은 껍데기가 **단추가 하나도 없을 때만** 그린다. 비상구는
+    // 단추가 **있는** 상황이므로 거기 넣으면 아무 데도 보이지 않는다.
+    assert.match(flat(decideBranch), /if \(standingInForAssignee\) \{ blockedNotice =/);
+    const notice = decideBranch.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    assert.ok(notice >= 0, "안내 문구가 없다");
+    assert.ok(
+      decideBranch.lastIndexOf("disabledReason =", notice) < decideBranch.indexOf("} else {"),
+      "안내가 disabledReason 으로 나가면 화면에 나타나지 않는다"
+    );
+  });
+
+  test("🔴 안내는 단추가 열리는 갈래에서만 나온다 — 내 차례면 나오지 않는다", () => {
+    // 지정 관문(!assignedGateOpen)에서 걸러진 사람은 단추 자체가 없고 지정된
+    // 사람의 이름만 본다. 그 뒤 갈래에 있어야 「단추는 열렸는데 남의 차례」다.
+    const gate = decideBranch.indexOf("!assignedGateOpen");
+    const notice = decideBranch.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    const approve = decideBranch.indexOf('key: "approve"');
+    assert.ok(notice > gate, "지정 관문보다 앞에서 안내를 만든다 — 남의 차례에도 뜬다");
+    assert.ok(notice < approve, "단추를 만든 뒤에 안내를 정하면 갈래가 어긋나기 쉽다");
+    // 내 차례면 판정 자체가 거짓이라 문구가 만들어지지 않는다(그 대조는
+    // approval-assignment.test.ts 가 함수 수준에서 못 박는다).
+    assert.match(flat(decideBranch), /if \(standingInForAssignee\) \{/);
+  });
+
+  test("🔴 그 안내는 단추와 **함께** 그려진다 — 껍데기가 실제로 그렇게 그린다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        title="최종 출하 승인"
+        record={null}
+        displayStatus="REQUESTED"
+        blockedNotice="지금 차례는 김도윤 님입니다. 최고관리자 권한으로 대신 처리합니다."
+        disabledReason="이 문구는 단추가 있으면 그려지지 않는다."
+        actions={[
+          { key: "approve", label: "출하 승인", onClick: () => {} },
+          { key: "reject", label: "출하 반려", onClick: () => {}, tone: "danger" },
+        ]}
+      />
+    );
+    const notice = html.indexOf("최고관리자 권한으로 대신 처리합니다.");
+    assert.ok(notice >= 0, "🔴 안내가 아예 그려지지 않았다 — 자리를 잘못 골랐다");
+    assert.ok(notice < html.indexOf("</section>"), "안내가 카드 밖으로 나갔다");
+    assert.match(html, /출하 승인<\/button>/, "단추가 함께 있어야 하는 상황이다");
+    assert.ok(
+      !/이 문구는 단추가 있으면 그려지지 않는다\./.test(html),
+      "disabledReason 이 단추와 함께 그려졌다 — 이 시험의 전제가 사라졌다"
+    );
+  });
+
+  test("결재선을 안 쓰는 요청에는 안내가 나올 수 없다 — 지정이 언제나 NULL 이다", () => {
+    // 판정의 첫 줄이 그것을 보장한다(지정 NULL → 거짓). 여기서는 카드가 그
+    // 값을 그대로 넘기는지만 본다.
+    assert.match(
+      flat(shipmentCardSource),
+      /standsInForAssignedApprover\( record\?\.assignedApproverUserId \?\? null, actingUser\.id \)/,
+      "지정 칸이 아니라 다른 값을 보고 있다"
+    );
   });
 });

@@ -1,6 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { approvalFollowsRoute, mayDecideAssignedApproval } from "./approval-assignment";
+import {
+  approvalFollowsRoute,
+  mayDecideAssignedApproval,
+  standsInForAssignedApprover,
+} from "./approval-assignment";
 import type { Role } from "@/lib/domain/types";
 
 const ALL_ROLES: Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"];
@@ -88,5 +92,47 @@ describe("approvalFollowsRoute — 판과 지정이 **둘 다** 있어야 결재
     // 이 함수는 행 모양 하나만 받는다. 사람이 인자에 없다는 것 자체가, 여기에
     // 권한 판정이 섞여 들어갈 자리가 없다는 뜻이다.
     assert.equal(approvalFollowsRoute.length, 1);
+  });
+});
+
+describe("standsInForAssignedApprover — 지정된 사람 자리에 다른 사람이 서 있는가", () => {
+  test("지정된 사람 본인이면 거짓 — 자기 차례에 자기가 처리한 것이다", () => {
+    assert.equal(standsInForAssignedApprover(ME, ME), false);
+  });
+
+  test("지정이 남에게 되어 있는데 내가 서 있으면 참", () => {
+    assert.equal(standsInForAssignedApprover(SOMEONE_ELSE, ME), true);
+  });
+
+  test("🔴 지정이 없으면(NULL) 언제나 거짓 — 대신할 자리가 애초에 없다", () => {
+    // 이 칸이 생기기 전의 모든 행이 여기다. 여기서 참을 내면 지난 승인 전부에
+    // 「지정자 대신 처리」 배지가 붙는다.
+    assert.equal(standsInForAssignedApprover(null, ME), false);
+    assert.equal(standsInForAssignedApprover(null, null), false);
+  });
+
+  test("🔴 아직 처리되지 않은 행도 거짓 — 비교할 사람이 없다", () => {
+    // 승인 대기 중인 행은 decidedByUserId 가 NULL 이다. 그때 참을 내면 요청만
+    // 해 둔 줄에 「대신 처리」 배지가 뜬다.
+    assert.equal(standsInForAssignedApprover(SOMEONE_ELSE, null), false);
+  });
+
+  test("🔴 「그래도 되는가」는 보지 않는다 — 역할이 인자에 없다", () => {
+    // 대신 설 수 있는지는 mayDecideAssignedApproval 이 따로 판정한다. 이 함수는
+    // 사람 둘의 id 만 받는다 — 권한 판정이 섞여 들어갈 자리가 구조적으로 없다.
+    assert.equal(standsInForAssignedApprover.length, 2);
+  });
+
+  test("🔴 두 판정은 서로를 대신하지 않는다 — 최고관리자가 자기 차례일 때가 갈린다", () => {
+    // 최고관리자가 **자기에게 지정된** 요청을 처리하는 흔한 경우. 지정 관문은
+    // 참(처리할 수 있다)이지만 대신 서는 것은 아니므로 배지도 안내도 나오면 안
+    // 된다. 한쪽 판정으로 두 물음을 답하려 하면 여기서 어긋난다.
+    const superAdmin = actor({ role: "SUPER_ADMIN" });
+    assert.equal(mayDecideAssignedApproval(ME, superAdmin), true);
+    assert.equal(standsInForAssignedApprover(ME, superAdmin.id), false);
+
+    // 남에게 지정된 요청이면 둘 다 참이다 — 그것이 비상구로 넘어간 건이다.
+    assert.equal(mayDecideAssignedApproval(SOMEONE_ELSE, superAdmin), true);
+    assert.equal(standsInForAssignedApprover(SOMEONE_ELSE, superAdmin.id), true);
   });
 });

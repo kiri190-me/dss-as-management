@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../client";
 import { shipmentApprovalRouteSteps, shipmentApprovalRoutes, users } from "../schema";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
@@ -194,22 +194,80 @@ export async function getShipmentApprovalRouteStep(
 }
 
 /**
- * **그 판의** 전체 단계 수. 승인 카드가 「2/3단계」의 뒷자리를 그리는 데 쓴다.
+ * 화면이 결재선을 **그리는 데** 필요한 단계 한 줄 — 몇 번째이고 누구인가.
  *
- * 🔴 「현재 판」이 아니라 **요청 행에 적힌 판(`repair_case_approvals.route_id`)**
- * 으로 센다. 진행 중인 건은 옛 판을 끝까지 따라가므로, 현재 판을 세면 이미
- * 끝나 가는 건이 「2/2단계」가 아니라 「2/4단계」로 보인다 — 사람은 아직 두
- * 사람이 더 남았다고 읽는다.
- *
- * 판이 없거나 단계가 0개면 0이다(부르는 쪽은 그때 진행 표시를 그리지 않는다).
- * 단계 수가 한 자릿수라 전량을 읽어 세는 비용은 문제되지 않는다.
+ * ShipmentApprovalRouteStepView(관리자 화면용)와 달리 승인자의 계정 상태를 싣지
+ * 않는다. 이쪽은 이미 확정된 진행을 보여 줄 뿐이라 「지금 이 사람을 올릴 수
+ * 있는가」를 묻지 않기 때문이다 — 그 물음은 절차를 **편집하는** 화면의 것이다.
  */
-export async function countShipmentApprovalRouteSteps(routeId: string): Promise<number> {
-  const steps = await db
-    .select({ stepOrder: shipmentApprovalRouteSteps.stepOrder })
+export type ShipmentApprovalRouteStepLabel = {
+  /** 1부터. */
+  stepOrder: number;
+  approverUserId: string;
+  approverName: string;
+};
+
+/** 판 하나와 그 단계들. */
+export type ShipmentApprovalRouteStepList = {
+  routeId: string;
+  /** step_order 순. **빈 배열도 정상이다** — 「절차를 쓰지 않겠다」는 뜻이다. */
+  steps: ShipmentApprovalRouteStepLabel[];
+};
+
+/**
+ * **판 여러 개**의 단계들을 한 번에. 승인 카드의 진행 미리보기와 승인 이력의
+ * 「n/m단계」가 함께 쓴다.
+ *
+ * 🔴 **판을 여러 개 받는 이유.** 이력에는 서로 다른 판을 탄 줄이 섞여 있다 —
+ * 관리자가 절차를 바꾸면 새 판이 얹히고, 그때 진행 중이던 건은 옛 판을 끝까지
+ * 따라가기 때문이다. 단계 수를 「현재 판」으로 세면 옛 판을 탄 줄이 「2/4단계」로
+ * 보여 아직 두 사람이 더 남은 것처럼 읽힌다. 그래서 **그 줄에 적힌 판**으로
+ * 세도록 줄들이 가리키는 판을 전부 받아 한 번에 읽는다.
+ *
+ * 🔴 **Map 이 아니라 배열로 돌려준다.** 이 값은 서버 컴포넌트를 지나 클라이언트
+ * 컴포넌트(승인 카드)까지 내려가는데, Map 은 그 경계를 넘지 못한다.
+ *
+ * 없는 판 id 를 넘겨도 그 판은 결과에 들어 있지 않다(빈 배열이 아니라 아예
+ * 없다). 부르는 쪽은 「못 찾음」과 「단계 0개」를 같게 다뤄야 한다 — 둘 다 진행
+ * 표시를 그리지 않는다는 뜻이다.
+ *
+ * 🔴 소프트삭제·비활성 승인자의 단계도 빼지 않는다(getCurrentShipmentApprovalRoute
+ * 와 같은 이유다). 조용히 빼면 이미 지나온 단계가 사라져 「1/3단계」가 「1/2단계」로
+ * 보이고, 그러면 이력이 실제로 일어난 일과 다른 말을 한다.
+ */
+export async function listShipmentApprovalRouteSteps(
+  routeIds: readonly string[]
+): Promise<ShipmentApprovalRouteStepList[]> {
+  const uniqueIds = [...new Set(routeIds)];
+  // 빈 IN 절은 드라이버마다 다르게 굴러 굳이 확인할 이유가 없다 — 물어볼 판이
+  // 없으면 질의 자체를 하지 않는다.
+  if (uniqueIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      routeId: shipmentApprovalRouteSteps.routeId,
+      stepOrder: shipmentApprovalRouteSteps.stepOrder,
+      approverUserId: shipmentApprovalRouteSteps.approverUserId,
+      approverName: users.name,
+    })
     .from(shipmentApprovalRouteSteps)
-    .where(eq(shipmentApprovalRouteSteps.routeId, routeId));
-  return steps.length;
+    .innerJoin(users, eq(users.id, shipmentApprovalRouteSteps.approverUserId))
+    .where(inArray(shipmentApprovalRouteSteps.routeId, uniqueIds))
+    .orderBy(asc(shipmentApprovalRouteSteps.routeId), asc(shipmentApprovalRouteSteps.stepOrder));
+
+  const byRoute: ShipmentApprovalRouteStepList[] = [];
+  for (const row of rows) {
+    const last = byRoute[byRoute.length - 1];
+    const bucket = last?.routeId === row.routeId ? last : null;
+    const target = bucket ?? { routeId: row.routeId, steps: [] };
+    if (!bucket) byRoute.push(target);
+    target.steps.push({
+      stepOrder: row.stepOrder,
+      approverUserId: row.approverUserId,
+      approverName: row.approverName,
+    });
+  }
+  return byRoute;
 }
 
 /** 결재선에 올릴 수 있는 사람 한 줄. */

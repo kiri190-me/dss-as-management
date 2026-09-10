@@ -91,3 +91,34 @@ export type RouteFollowingApprovalRow = {
 export function approvalFollowsRoute(row: RouteFollowingApprovalRow): boolean {
   return row.routeId !== null && row.assignedApproverUserId !== null;
 }
+
+/**
+ * 이 사람이 **지정된 사람을 대신하고 있는가** — 지정이 걸린 자리에 다른 사람이
+ * 서 있는가.
+ *
+ * 🔴 두 곳이 같은 물음을 묻는다. 시제만 다르다:
+ *  - 승인 이력: 「지정은 김도윤인데 **처리한 사람**이 최희만이었다」 → 배지
+ *  - 승인 카드: 「지정은 김도윤인데 **지금 보고 있는 사람**이 최희만이다」 → 안내
+ * 그래서 파일 머리말의 이유 그대로 판정을 여기 한 곳에만 적는다. 두 곳에 적으면
+ * 이력에는 대신 처리했다고 남는데 카드는 아무 말도 안 하는(또는 그 반대) 어긋남이
+ * 생기고, 결재 기록에서 그 어긋남은 「누가 승인했지」를 되짚을 때 드러난다.
+ *
+ * ── 🔴 이 함수는 「그래도 되는가」를 보지 않는다 ─────────────────────────
+ * 대신 설 수 있는지는 mayDecideAssignedApproval 이 판정한다. 이 함수는 **이미
+ * 일어난(또는 일어나려는) 일의 모양**만 말한다 — 참이라고 해서 허용된다는 뜻이
+ * 아니고, 거짓이라고 해서 막힌다는 뜻도 아니다.
+ *
+ * @param assignedApproverUserId 요청 행의 지정 승인자. `null` 이면 대신할 자리가
+ *   애초에 없으므로 거짓이다 — 「지정 없음」은 정상값이고, 그때는 자격 있는
+ *   사람 누구나 자기 자격으로 처리한다.
+ * @param userId 그 자리에 서 있는 사람. 아직 처리되지 않은 행의 처리자처럼
+ *   `null` 일 수 있고, 그때도 거짓이다(비교할 사람이 없다).
+ */
+export function standsInForAssignedApprover(
+  assignedApproverUserId: string | null,
+  userId: string | null
+): boolean {
+  if (assignedApproverUserId === null) return false;
+  if (userId === null) return false;
+  return assignedApproverUserId !== userId;
+}
