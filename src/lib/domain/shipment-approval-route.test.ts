@@ -3,19 +3,22 @@ import assert from "node:assert/strict";
 
 import {
   isSameRouteStepList,
+  isShipmentApprovalRouteScope,
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
   moveRouteStepDown,
   moveRouteStepUp,
   removeRouteStep,
+  SHIPMENT_APPROVAL_ROUTE_SCOPES,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
 } from "./shipment-approval-route";
+import { shipmentApprovalRouteScopeEnum } from "@/lib/db/schema/shipment-approval-routes";
 
 /**
  * ============================================================================
- * 출하 승인 절차 순수 규칙
+ * 승인 절차 순수 규칙
  * ============================================================================
- * 여기서 못 박는 것 셋:
+ * 여기서 못 박는 것 넷:
  *  1. **0개는 정상이다** — 「절차를 쓰지 않겠다」는 뜻이라, 막으면 한 번 만든
  *     절차를 되돌릴 길이 없어진다.
  *  2. **같은 사람이 두 번 나오면 거절한다** — 표의 유니크가 최종 방어선이고,
@@ -26,6 +29,10 @@ import {
  * uuid 형식은 일부러 보지 않는다(저장 경로가 isValidUuid 로 본다) — 그 사실도
  * 아래에서 시험으로 못 박는다. 나중에 여기에 형식 검사가 슬그머니 들어오면
  * 그 시험이 깨진다.
+ *
+ * 넷째는 용도(scope)다: **값 목록이 표의 enum 과 글자 그대로 같아야 한다.** 두 곳에
+ * 적혀 있고(이 저장소의 스키마 파일은 도메인 층을 가져오지 않는다), 갈라지면
+ * 화면은 받아 주는데 저장이 22P02 로 터지거나 그 반대가 된다.
  * ============================================================================
  */
 
@@ -302,5 +309,33 @@ describe("isSameRouteStepList", () => {
     isSameRouteStepList(a, b);
     assert.deepEqual(a, snapshotA);
     assert.deepEqual(b, snapshotB);
+  });
+});
+
+describe("용도(scope)", () => {
+  test("🔴 값 목록이 표의 enum 과 글자 그대로 같다 — 순서까지", () => {
+    // 순서까지 맞추는 이유: enum 값은 ALTER TYPE ... ADD VALUE 로 뒤에 붙으므로,
+    // 배열 순서가 실제 DB 의 순서와 어긋나면 다음 db:generate 가 있지도 않은
+    // 차이를 감지한다(manual-step-set.test.ts 가 세운 선례다).
+    assert.deepEqual(
+      [...shipmentApprovalRouteScopeEnum.enumValues],
+      [...SHIPMENT_APPROVAL_ROUTE_SCOPES]
+    );
+  });
+
+  test("목록에 있는 값만 통과한다", () => {
+    for (const scope of SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      assert.equal(isShipmentApprovalRouteScope(scope), true, `${scope} 가 막혔다`);
+    }
+  });
+
+  test("🔴 모르는 값·빈 값·다른 타입은 거절한다", () => {
+    for (const bad of ["", " ", "final_shipment", "SHIPMENT", "PART", 0, 1, null, undefined, {}, []]) {
+      assert.equal(
+        isShipmentApprovalRouteScope(bad),
+        false,
+        `${JSON.stringify(bad)} 가 통과했다`
+      );
+    }
   });
 });

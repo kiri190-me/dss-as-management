@@ -140,7 +140,13 @@ export default function ShipmentApprovalRouteSection({
 
     setIsSaving(true);
     setMessage(null);
-    const result = await saveShipmentApprovalRouteAction({ approverUserIds: steps });
+    // 🔴 용도는 지금 「최종 출하 승인」으로 못 박혀 있다. 이 화면이 다루는 절차가
+    // 그것 하나뿐이기 때문이고, 탭으로 고르게 하는 것은 다음 조각이다. 서버가
+    // 기본값으로 채워 주지 않으므로 여기서 반드시 적어야 한다.
+    const result = await saveShipmentApprovalRouteAction({
+      scope: "FINAL_SHIPMENT",
+      approverUserIds: steps,
+    });
     setIsSaving(false);
     setMessage(result.message);
     if (result.ok) router.refresh();

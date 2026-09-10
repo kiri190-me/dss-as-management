@@ -166,9 +166,9 @@ async function shipmentGate(repairCaseId: string) {
 }
 
 async function saveRoute(approverUserIds: string[]): Promise<string> {
-  const result = await saveShipmentApprovalRoute(approverUserIds, superAdminId);
+  const result = await saveShipmentApprovalRoute(approverUserIds, superAdminId, "FINAL_SHIPMENT");
   assert.equal(result.ok, true, `setup route save failed: ${JSON.stringify(result)}`);
-  const current = await getCurrentShipmentApprovalRoute();
+  const current = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
   assert.ok(current, "저장했는데 현재 판이 없다");
   return current.id;
 }
@@ -270,7 +270,7 @@ after(async () => {
 
 describe("최종 출하 승인 — 결재선이 없을 때는 어제와 같다", () => {
   test("🔴 1. 판이 하나도 없으면 세 칸이 NULL 이고 대표가 승인하며 출하 문이 열린다", async () => {
-    assert.equal(await getCurrentShipmentApprovalRoute(), null, "이 시험은 판이 없는 상태를 전제로 한다");
+    assert.equal(await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT"), null, "이 시험은 판이 없는 상태를 전제로 한다");
 
     const caseId = await createCaseReadyForShipmentRequest();
     const requested = await requestRepairCaseApproval(caseId, "FINAL_SHIPMENT", engineerId, "출하 승인 요청");

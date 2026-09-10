@@ -218,14 +218,20 @@ const routeTestCaseIds: string[] = [];
  * mutations/shipment-approval-routes.integration.test.ts 가 본다).
  */
 async function createTestRoute(approverUserIds: string[]): Promise<string> {
+  // 판 번호는 **그 용도 안에서** 센다 — 표 전체의 일련번호가 아니다.
   const [latest] = await db
     .select({ version: shipmentApprovalRoutes.version })
     .from(shipmentApprovalRoutes)
+    .where(eq(shipmentApprovalRoutes.scope, "FINAL_SHIPMENT"))
     .orderBy(desc(shipmentApprovalRoutes.version))
     .limit(1);
   const [route] = await db
     .insert(shipmentApprovalRoutes)
-    .values({ version: (latest?.version ?? 0) + 1, createdByUserId: superAdminId })
+    .values({
+      scope: "FINAL_SHIPMENT",
+      version: (latest?.version ?? 0) + 1,
+      createdByUserId: superAdminId,
+    })
     .returning({ id: shipmentApprovalRoutes.id });
   createdRouteIds.push(route.id);
 

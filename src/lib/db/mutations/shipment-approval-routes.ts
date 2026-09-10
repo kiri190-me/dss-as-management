@@ -9,19 +9,28 @@ import { validateShipmentApprovalRouteInput } from "@/lib/validation/shipment-ap
 import {
   isSameRouteStepList,
   stepOrderFromIndex,
+  type ShipmentApprovalRouteScope,
 } from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
- * 출하 승인 절차(결재선) 저장 — 판(version)을 하나 얹는다
+ * 승인 절차(결재선) 저장 — 그 용도에 판(version)을 하나 얹는다
  * ============================================================================
  * saveUiThemeTokens 를 본보기로 삼았고, 거기서 이미 내려진 판단들을 그대로
  * 가져왔다. 화면이 보낸 값을 그대로 믿지 않는다 — 화면을 거치지 않고 이 함수를
  * 부를 수 있기 때문이다.
  *
- * 🔴 **이 조각에서는 저장까지만이다.** 만들어 둔 절차를 실제 승인 판정에 쓰는
- * 것은 다음 조각이다. 지금 최종 출하 승인은 여전히 「출하 대표」·위임 방식으로
- * 돌아간다 — repair_case_approvals 쪽은 한 줄도 건드리지 않았다.
+ * ── 🔴 용도(scope)가 가르는 것 셋 ───────────────────────────────────────
+ * 판을 얹는 자리에서 용도가 하는 일은 칸 하나를 채우는 것으로 끝나지 않는다.
+ * 아래 셋이 **전부 그 용도 안에서** 이뤄져야 한다:
+ *  1. **지금 판을 읽는 자리** — 다른 용도의 판을 현재로 잡으면 엉뚱한 절차를
+ *     고친 것이 된다.
+ *  2. **판 번호 매기기** — 전체에서 max + 1 을 하면 「출하 3판 다음 불출이 4판」이
+ *     되어 사람이 읽는 번호가 망가진다.
+ *  3. **「바뀐 게 없으면 새 판을 만들지 않는다」** — 다른 용도의 판과 견주면,
+ *     같은 사람들을 두 절차에 세운 순간 한쪽 저장이 조용히 삼켜진다.
+ * 셋 다 아래의 `currentRoute` 하나에서 나온다 — 그 조회에 걸린 `scope` 조건이
+ * 이 파일의 핵심이다.
  *
  * ── 🔴 거절은 반드시 던진다 ─────────────────────────────────────────────
  * 트랜잭션 콜백에서 그냥 `return` 하면 **커밋된다.** 그래서 검증도 자격 확인도
@@ -31,10 +40,16 @@ import {
  *
  * ── 🔴 잠금을 먼저 건다 ─────────────────────────────────────────────────
  * 판 번호를 `max + 1` 로 매기므로, 두 관리자가 동시에 저장하면 같은 번호를
- * 계산해 shipment_approval_routes_version_unique 가 터진다 — 사람에게는 「알 수
- * 없는 오류」로 보인다. 위임 생성(shipment-delegations.ts)이 겹치는 기간을 볼 때
- * 쓰는 것과 같은 방식의 advisory 트랜잭션 잠금이고, 절차는 **하나뿐**이므로
- * 열쇠도 고정된 문자열 하나다. 트랜잭션이 끝나면 저절로 풀린다.
+ * 계산해 shipment_approval_routes_scope_version_unique 가 터진다 — 사람에게는
+ * 「알 수 없는 오류」로 보인다. 위임 생성(shipment-delegations.ts)이 겹치는 기간을
+ * 볼 때 쓰는 것과 같은 방식의 advisory 트랜잭션 잠금이고, 트랜잭션이 끝나면
+ * 저절로 풀린다.
+ *
+ * 🔴 **열쇠를 용도별로 쪼개지 않는다.** 고정된 문자열 하나로 전체를 잠근다 —
+ * 저장은 사람이 관리 화면에서 어쩌다 한 번 누르는 일이라 두 용도의 저장이
+ * 부딪혀 기다리는 비용이 사실상 0 이고, 열쇠를 용도로 나누면 「용도별 열쇠를
+ * 만드는 규칙」이 하나 더 생겨 새 용도를 더할 때 빠뜨릴 자리가 늘어난다.
+ * 전체 잠금은 용도가 몇 개로 늘어도 그대로 안전하다.
  *
  * ── 🔴 인가는 「출하 대표」와 같은 열쇠·같은 수준이다 ───────────────────
  * `users.shipmentRepresentatives` 영역의 `MANAGE` 수준으로 판정한다.
@@ -65,6 +80,8 @@ import {
  *
  * 감사 기록은 audit_logs 에 한 줄 남긴다(대표 지정과 달리 전용 이력 표를 두지
  * 않는다 — 판 자체가 이미 이력이라 두 곳에 같은 사실이 적히면 갈라진다).
+ * 🔴 그 한 줄에 **용도를 적는다** — 로그만 읽고도 어느 절차가 바뀌었는지 알아야
+ * 한다. 대상 표 이름(shipment_approval_routes)은 이제 용도를 말해 주지 못한다.
  * ============================================================================
  */
 
@@ -73,8 +90,8 @@ export type SaveShipmentApprovalRouteResult =
   | { ok: false; code: "FORBIDDEN" | "INVALID_INPUT"; message: string };
 
 /**
- * advisory 잠금의 고정 열쇠. 절차는 하나뿐이라 대상을 나눌 것이 없다 — 저장이
- * 동시에 들어오면 한 줄로 세운다.
+ * advisory 잠금의 고정 열쇠. 용도로 나누지 않는다(머리말 참조) — 저장이 동시에
+ * 들어오면 용도가 무엇이든 한 줄로 세운다.
  */
 const ROUTE_LOCK_KEY = "shipment_approval_routes:current";
 
@@ -113,9 +130,14 @@ function approverBlockReason(row: {
   return null;
 }
 
+/**
+ * @param scope 어느 절차를 저장하는가. 🔴 **기본값을 두지 않는다** — 부르는 쪽이
+ *   언제나 적어야 새 용도를 더할 때 고쳐야 할 자리가 컴파일러에 보인다.
+ */
 export async function saveShipmentApprovalRoute(
   approverUserIds: readonly string[],
-  actorUserId: string
+  actorUserId: string,
+  scope: ShipmentApprovalRouteScope
 ): Promise<SaveShipmentApprovalRouteResult> {
   try {
     return await db.transaction(async (tx): Promise<SaveShipmentApprovalRouteResult> => {
@@ -151,8 +173,13 @@ export async function saveShipmentApprovalRoute(
         });
       }
 
-      // 4. 입력 검증. 화면이 보낸 값을 그대로 믿지 않는다.
-      const validated = validateShipmentApprovalRouteInput({ approverUserIds: [...approverUserIds] });
+      // 4. 입력 검증. 화면이 보낸 값을 그대로 믿지 않는다 — 용도도 함께 본다.
+      //    타입이 막아 줄 것 같지만, 이 함수는 화면을 거치지 않고도 불릴 수 있고
+      //    그때 엉뚱한 용도는 표의 enum 에서 「알 수 없는 오류」로 터진다.
+      const validated = validateShipmentApprovalRouteInput({
+        approverUserIds: [...approverUserIds],
+        scope,
+      });
       if (!validated.ok) {
         throw new SaveRejected({ ok: false, code: "INVALID_INPUT", message: validated.message });
       }
@@ -197,11 +224,15 @@ export async function saveShipmentApprovalRoute(
         nextSteps.push({ stepOrder, approverUserId: row.id, approverName: row.name });
       }
 
-      // 6. 지금 판을 읽는다. 「현재 절차」의 정의(version 이 가장 큰 판)는
-      //    queries/shipment-approval-routes.ts 와 같다.
+      // 6. 🔴 **그 용도의** 지금 판을 읽는다. 「현재 절차」의 정의(그 용도 안에서
+      //    version 이 가장 큰 판)는 queries/shipment-approval-routes.ts 와 같다.
+      //    아래 세 가지 — 판 번호 매기기·「그대로인가」 판정·감사 기록의 이전 값
+      //    — 가 전부 이 한 줄에서 나온다. scope 조건이 빠지면 셋이 한꺼번에
+      //    다른 절차를 가리킨다.
       const [currentRoute] = await tx
         .select({ id: shipmentApprovalRoutes.id, version: shipmentApprovalRoutes.version })
         .from(shipmentApprovalRoutes)
+        .where(eq(shipmentApprovalRoutes.scope, validated.scope))
         .orderBy(desc(shipmentApprovalRoutes.version))
         .limit(1);
 
@@ -232,10 +263,12 @@ export async function saveShipmentApprovalRoute(
       }
 
       // 7. 새 판. 단계가 0개면 판만 만들고 단계는 넣지 않는다(정상이다).
+      //    🔴 판 번호는 **그 용도 안에서** 이어진다 — 출하가 3판까지 갔어도 불출의
+      //    첫 판은 1판이다. 사람이 읽는 번호는 「이 절차의 몇 번째 판인가」다.
       const nextVersion = (currentRoute?.version ?? 0) + 1;
       const [insertedRoute] = await tx
         .insert(shipmentApprovalRoutes)
-        .values({ version: nextVersion, createdByUserId: actor.id })
+        .values({ scope: validated.scope, version: nextVersion, createdByUserId: actor.id })
         .returning({ id: shipmentApprovalRoutes.id });
 
       if (nextSteps.length > 0) {
@@ -263,10 +296,15 @@ export async function saveShipmentApprovalRoute(
         // 🔴 id 만이 아니라 이름도 함께 적는다. 나중에 그 사용자가 소프트삭제돼도
         // 로그만 읽고 **누구였는지** 알 수 있어야 한다 — id 만 남기면 로그가
         // 스스로를 설명하지 못한다.
+        //
+        // 🔴 용도도 양쪽에 적는다. 대상 표 이름은 이제 어느 절차인지 말해 주지
+        // 못하고(이름은 옛것이다), 판 번호는 용도마다 따로 세므로 「2판 → 3판」만
+        // 보고는 무엇이 바뀌었는지 알 수 없다. 이전 값이 없는 첫 판일 때도
+        // newValue 만 읽으면 용도를 알 수 있다.
         previousValue: currentRoute
-          ? { version: currentRoute.version, steps: currentSteps }
+          ? { scope: validated.scope, version: currentRoute.version, steps: currentSteps }
           : null,
-        newValue: { version: nextVersion, steps: nextSteps },
+        newValue: { scope: validated.scope, version: nextVersion, steps: nextSteps },
       });
 
       return { ok: true, changed: true, version: nextVersion };

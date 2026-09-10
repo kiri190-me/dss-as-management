@@ -10,25 +10,29 @@ import {
   getCurrentShipmentApprovalRoute,
   listSelectableApproverCandidates,
 } from "./shipment-approval-routes";
+import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
- * 출하 승인 절차 읽기 — 실제 DB (시험 DB)
+ * 승인 절차 읽기 — 실제 DB (시험 DB)
  * ============================================================================
- * 판(version)을 손으로 직접 넣고 읽어 본다. 저장 경로는 아직 없다(다음 조각) —
- * 그래서 여기서는 mutation 을 거치지 않고 표에 바로 넣는다.
+ * 판(version)을 손으로 직접 넣고 읽어 본다 — mutation 을 거치지 않고 표에 바로
+ * 넣는다(저장 경로는 mutations/shipment-approval-routes.integration.test.ts 가 본다).
  *
- * 이 파일이 못 박는 것 넷:
- *  1. **「현재 절차」는 version 이 가장 큰 판이다** — 나중에 넣은 판이 아니다.
- *     그래서 일부러 version 이 큰 판을 **먼저** 넣고 작은 판을 나중에 넣는다.
- *     created_at 순으로 고르는 코드였다면 여기서 걸린다.
+ * 이 파일이 못 박는 것 다섯:
+ *  1. **「현재 절차」는 그 용도 안에서 version 이 가장 큰 판이다** — 나중에 넣은
+ *     판이 아니다. 그래서 일부러 version 이 큰 판을 **먼저** 넣고 작은 판을
+ *     나중에 넣는다. created_at 순으로 고르는 코드였다면 여기서 걸린다.
  *  2. 🔴 **소프트삭제된 사용자의 단계도 빼지 않고 그대로 돌려준다.** 조용히
  *     빼면 절차가 짧아진 것처럼 보이고, 결재가 왜 멈췄는지 아무도 모른다.
  *  3. 🔴 **유니크가 실제로 돈다** — 한 판에 같은 사람, 한 판에 같은 순서, 그리고
- *     겹치는 판 번호. 셋 다 23505 와 **제약 이름까지** 확인한다. 아무 오류나
- *     잡아 통과하는 시험이 되지 않도록.
+ *     한 용도 안에서 겹치는 판 번호. 셋 다 23505 와 **제약 이름까지** 확인한다.
+ *     아무 오류나 잡아 통과하는 시험이 되지 않도록.
  *  4. 후보 목록의 자격이 「출하 대표」 지정 조건과 같다 — 비활성·미승인·잠김·
  *     삭제된 계정은 빠진다.
+ *  5. 🔴 **용도가 다른 판은 서로를 흔들지 않는다** — 부품 불출 판을 얹어도 출하
+ *     쪽 「현재 절차」가 그대로다. 걸러내기를 빠뜨린 조회는 번호가 더 큰 다른
+ *     용도의 판을 현재로 잡는다.
  *
  * 격리 규약은 ui-theme-tokens.integration.test.ts 와 같다 — 이 파일이 만든
  * "shiproute-test-" 계정만 쓰고, 그 계정이 남긴 판·단계까지 함께 걷는다
@@ -67,15 +71,22 @@ async function createTestUser(
   return row.id;
 }
 
-/** 판 하나와 그 단계들을 표에 바로 넣는다. steps 는 [순서, 승인자] 짝이다. */
+/**
+ * 판 하나와 그 단계들을 표에 바로 넣는다. steps 는 [순서, 승인자] 짝이다.
+ *
+ * 🔴 용도를 **첫 인자로 받고 기본값을 두지 않는다.** 이 파일에는 용도가 갈리는
+ * 시험이 섞여 있어서, 기본값에 숨겨 두면 어느 시험이 어느 절차를 보는지 읽어
+ * 낼 수 없다.
+ */
 async function insertRoute(
+  scope: ShipmentApprovalRouteScope,
   version: number,
   steps: readonly (readonly [number, string])[],
   createdByUserId: string = creatorId
 ): Promise<string> {
   const [route] = await db
     .insert(shipmentApprovalRoutes)
-    .values({ version, createdByUserId })
+    .values({ scope, version, createdByUserId })
     .returning({ id: shipmentApprovalRoutes.id });
   createdRouteIds.push(route.id);
 
@@ -204,13 +215,13 @@ after(async () => {
 describe("getCurrentShipmentApprovalRoute", () => {
   test("판이 하나도 없으면 null 이다 — 이 기능을 넣기 전과 같은 상태다", async () => {
     assert.equal(await routeRowCount(), 0, "이 시험은 표가 빈 상태를 전제로 한다");
-    assert.equal(await getCurrentShipmentApprovalRoute(), null);
+    assert.equal(await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT"), null);
   });
 
   test("단계 0개인 판도 정상으로 읽힌다 — 「절차를 쓰지 않겠다」는 뜻이다", async () => {
-    await insertRoute(1, []);
+    await insertRoute("FINAL_SHIPMENT", 1, []);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route, "판이 있는데 null 이 나왔다");
     assert.equal(route.version, 1);
     assert.deepEqual(route.steps, [], "단계가 없는 판은 빈 배열이어야 한다");
@@ -221,10 +232,10 @@ describe("getCurrentShipmentApprovalRoute", () => {
   test("🔴 판이 둘이면 version 이 큰 쪽이 나온다 — 나중에 넣은 판이 아니다", async () => {
     // 큰 번호를 **먼저** 넣는다. created_at 이나 insert 순서로 고르는 코드라면
     // 여기서 작은 쪽이 나온다.
-    await insertRoute(7, [[1, approverAId]]);
-    await insertRoute(3, [[1, approverBId]]);
+    await insertRoute("FINAL_SHIPMENT", 7, [[1, approverAId]]);
+    await insertRoute("FINAL_SHIPMENT", 3, [[1, approverBId]]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     assert.equal(route.version, 7, "가장 큰 판이 아니라 다른 판이 나왔다");
     assert.deepEqual(
@@ -236,13 +247,13 @@ describe("getCurrentShipmentApprovalRoute", () => {
 
   test("🔴 단계가 step_order 순서대로 나온다 — 넣은 순서가 아니다", async () => {
     // 일부러 뒤섞어 넣는다. ORDER BY 가 없으면 Postgres 는 순서를 보장하지 않는다.
-    await insertRoute(1, [
+    await insertRoute("FINAL_SHIPMENT", 1, [
       [3, approverCId],
       [1, approverAId],
       [2, approverBId],
     ]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     assert.deepEqual(
       route.steps.map((step) => [step.stepOrder, step.approverUserId]),
@@ -255,9 +266,9 @@ describe("getCurrentShipmentApprovalRoute", () => {
   });
 
   test("승인자의 지금 상태가 함께 나온다 — 화면이 이유를 말해 줄 수 있어야 한다", async () => {
-    await insertRoute(1, [[1, approverAId]]);
+    await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     const [step] = route.steps;
     assert.equal(step.approverName, "shiproute approver A");
@@ -271,13 +282,13 @@ describe("getCurrentShipmentApprovalRoute", () => {
   test("🔴 소프트삭제된 사용자의 단계도 그대로 나오고 approverIsDeleted 가 참이다", async () => {
     // 조용히 빼면 절차가 짧아진 것처럼 보이고, 결재가 왜 그 자리에서 멈췄는지
     // 화면에서 알 방법이 없어진다.
-    await insertRoute(1, [
+    await insertRoute("FINAL_SHIPMENT", 1, [
       [1, approverAId],
       [2, deletedApproverId],
       [3, approverBId],
     ]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     assert.equal(route.steps.length, 3, "삭제된 사용자의 단계가 조용히 빠졌다");
     assert.deepEqual(
@@ -290,13 +301,13 @@ describe("getCurrentShipmentApprovalRoute", () => {
   });
 
   test("비활성·미승인·잠긴 계정의 단계도 상태를 실은 채 그대로 나온다", async () => {
-    await insertRoute(1, [
+    await insertRoute("FINAL_SHIPMENT", 1, [
       [1, inactiveUserId],
       [2, pendingUserId],
       [3, lockedUserId],
     ]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     assert.equal(route.steps.length, 3);
     assert.equal(route.steps[0].approverIsActive, false);
@@ -307,7 +318,7 @@ describe("getCurrentShipmentApprovalRoute", () => {
 
 describe("표의 제약이 실제로 도는가", () => {
   test("🔴 같은 판에 같은 사람을 두 번 넣으면 DB 가 거절한다", async () => {
-    const routeId = await insertRoute(1, [[1, approverAId]]);
+    const routeId = await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
 
     await assertUniqueViolation(
       () =>
@@ -323,7 +334,7 @@ describe("표의 제약이 실제로 도는가", () => {
   });
 
   test("🔴 같은 판에 같은 순서를 두 번 넣으면 DB 가 거절한다", async () => {
-    const routeId = await insertRoute(1, [[1, approverAId]]);
+    const routeId = await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
 
     await assertUniqueViolation(
       () =>
@@ -339,24 +350,84 @@ describe("표의 제약이 실제로 도는가", () => {
   });
 
   test("다른 판이면 같은 사람도 같은 순서도 괜찮다 — 유니크는 판 안에서만이다", async () => {
-    await insertRoute(1, [[1, approverAId]]);
-    await insertRoute(2, [[1, approverAId]]);
+    await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
+    await insertRoute("FINAL_SHIPMENT", 2, [[1, approverAId]]);
 
-    const route = await getCurrentShipmentApprovalRoute();
+    const route = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(route);
     assert.equal(route.version, 2);
     assert.equal(route.steps.length, 1);
   });
 
-  test("🔴 판 번호가 겹치면 DB 가 거절한다 — 「현재 절차」의 정의가 여기 걸려 있다", async () => {
-    await insertRoute(4, []);
+  test("🔴 같은 용도 안에서 판 번호가 겹치면 DB 가 거절한다 — 「현재 절차」의 정의가 여기 걸려 있다", async () => {
+    await insertRoute("FINAL_SHIPMENT", 4, []);
 
     await assertUniqueViolation(
-      () => db.insert(shipmentApprovalRoutes).values({ version: 4, createdByUserId: creatorId }),
-      "shipment_approval_routes_version_unique"
+      () =>
+        db
+          .insert(shipmentApprovalRoutes)
+          .values({ scope: "FINAL_SHIPMENT", version: 4, createdByUserId: creatorId }),
+      "shipment_approval_routes_scope_version_unique"
     );
 
     assert.equal(await routeRowCount(), 1, "거절됐는데 판이 늘었다");
+  });
+
+  test("🔴 용도가 다르면 같은 판 번호를 써도 된다 — 유니크는 (용도, 번호) 다", async () => {
+    // 판 번호는 「이 절차의 몇 번째 판인가」다. 출하 1판과 불출 1판이 함께 있는
+    // 것이 정상이고, 여기서 막히면 두 번째 용도는 1판을 영영 가질 수 없다.
+    await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
+    await insertRoute("PART_ISSUE", 1, [[1, approverAId]]);
+
+    assert.equal(await routeRowCount(), 2, "다른 용도의 같은 번호가 거절됐다");
+  });
+});
+
+describe("🔴 용도가 다른 판은 서로를 흔들지 않는다", () => {
+  test("부품 불출 판을 얹어도 출하 쪽 「현재 절차」가 그대로다", async () => {
+    // 이 조각의 핵심이다. 판 번호는 용도 안에서 세므로, 걸러내기를 빠뜨린 조회는
+    // 번호가 더 큰 불출 판을 출하의 현재로 잡는다.
+    await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
+    await insertRoute("PART_ISSUE", 9, [[1, approverBId]]);
+
+    const shipment = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
+    assert.ok(shipment, "출하 판이 사라졌다");
+    assert.equal(shipment.scope, "FINAL_SHIPMENT");
+    assert.equal(shipment.version, 1, "다른 용도의 판을 출하의 현재로 잡았다");
+    assert.deepEqual(
+      shipment.steps.map((step) => step.approverUserId),
+      [approverAId],
+      "다른 용도의 단계가 섞여 나왔다"
+    );
+  });
+
+  test("한쪽 용도의 판만 있으면 다른 쪽은 null 이다 — 「판 없음」이 용도별로 판정된다", async () => {
+    await insertRoute("FINAL_SHIPMENT", 1, [[1, approverAId]]);
+
+    assert.equal(
+      await getCurrentShipmentApprovalRoute("PART_ISSUE"),
+      null,
+      "출하 판을 불출의 현재로 내줬다"
+    );
+  });
+
+  test("용도 안에서는 여전히 번호가 가장 큰 판이 현재다", async () => {
+    await insertRoute("PART_ISSUE", 1, [[1, approverAId]]);
+    // 큰 번호를 나중에, 그리고 그 사이에 출하 판을 끼워 넣는다.
+    await insertRoute("FINAL_SHIPMENT", 5, [[1, approverCId]]);
+    await insertRoute("PART_ISSUE", 2, [[1, approverBId]]);
+
+    const partIssue = await getCurrentShipmentApprovalRoute("PART_ISSUE");
+    assert.ok(partIssue);
+    assert.equal(partIssue.version, 2);
+    assert.deepEqual(
+      partIssue.steps.map((step) => step.approverUserId),
+      [approverBId]
+    );
+
+    const shipment = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
+    assert.ok(shipment);
+    assert.equal(shipment.version, 5);
   });
 });
 

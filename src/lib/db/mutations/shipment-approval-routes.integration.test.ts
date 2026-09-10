@@ -8,6 +8,7 @@ import { db, pgClient } from "../connection";
 import { auditLogs, shipmentApprovalRouteSteps, shipmentApprovalRoutes, users } from "../schema";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
 import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-routes";
+import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
@@ -17,7 +18,7 @@ import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-ro
  * 와 같은 격리 규약이다: 이 파일이 만든 "shiproutesave-test-" 계정만 쓰고, 그
  * 계정이 남긴 판·단계·감사 기록까지 걷는다(사람 참조가 restrict 라 순서가 있다).
  *
- * 여기서 지키려는 것은 다섯이다:
+ * 여기서 지키려는 것은 여섯이다:
  *  1. **인가는 「출하 대표」 지정과 같은 열쇠·같은 수준이다** — 새 권한을 만들지
  *     않았으므로 기본 정책상 최고관리자만 통과한다. 막히면 **판이 생기지 않는다.**
  *  2. 🔴 **화면이 보낸 승인자를 그대로 믿지 않는다** — 비활성·잠김·미승인·삭제된
@@ -29,6 +30,9 @@ import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-ro
  *  4. **단계 0개인 판도 정상이다** — 「절차를 쓰지 않겠다」는 뜻이다.
  *  5. 🔴 **거절은 트랜잭션째 되돌아간다.** 콜백에서 그냥 반환하면 커밋되므로,
  *     막힌 저장이 판도 감사 기록도 남기지 않았는지 실제로 확인한다.
+ *  6. 🔴 **용도(scope)가 판을 가른다** — 판 번호 매기기·「그대로인가」 판정·「현재
+ *     절차」 셋이 전부 용도 안에서 이뤄지고, 감사 기록에 용도가 남는다. 부품 불출
+ *     판을 얹어도 출하 쪽이 흔들리지 않아야 한다.
  * ============================================================================
  */
 
@@ -69,7 +73,11 @@ async function createTestUser(
 
 async function routeRows() {
   return db
-    .select({ id: shipmentApprovalRoutes.id, version: shipmentApprovalRoutes.version })
+    .select({
+      id: shipmentApprovalRoutes.id,
+      scope: shipmentApprovalRoutes.scope,
+      version: shipmentApprovalRoutes.version,
+    })
     .from(shipmentApprovalRoutes)
     .orderBy(asc(shipmentApprovalRoutes.version));
 }
@@ -177,7 +185,7 @@ after(async () => {
 
 describe("saveShipmentApprovalRoute — 인가", () => {
   test("1. 최고관리자는 저장할 수 있다", async () => {
-    const result = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const result = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(result.ok, true, `거절됐다: ${JSON.stringify(result)}`);
     if (result.ok) {
@@ -194,7 +202,7 @@ describe("saveShipmentApprovalRoute — 인가", () => {
       ["관리자", adminId],
       ["A/S 엔지니어", engineerId],
     ] as const) {
-      const result = await saveShipmentApprovalRoute([approverAId], actorId);
+      const result = await saveShipmentApprovalRoute([approverAId], actorId, "FINAL_SHIPMENT");
 
       assert.equal(result.ok, false, `${label}가 통과했다`);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN", label);
@@ -204,11 +212,11 @@ describe("saveShipmentApprovalRoute — 인가", () => {
   });
 
   test("1c. 없는 계정·지워진 계정은 거절된다 — 트랜잭션 안에서 살아 있는 행을 다시 읽는다", async () => {
-    const missing = await saveShipmentApprovalRoute([approverAId], randomUUID());
+    const missing = await saveShipmentApprovalRoute([approverAId], randomUUID(), "FINAL_SHIPMENT");
     assert.equal(missing.ok, false);
     if (!missing.ok) assert.equal(missing.code, "FORBIDDEN");
 
-    const deleted = await saveShipmentApprovalRoute([approverAId], deletedUserId);
+    const deleted = await saveShipmentApprovalRoute([approverAId], deletedUserId, "FINAL_SHIPMENT");
     assert.equal(deleted.ok, false);
     if (!deleted.ok) assert.equal(deleted.code, "FORBIDDEN");
 
@@ -221,7 +229,7 @@ describe("saveShipmentApprovalRoute — 인가", () => {
       approvalStatus: "PENDING",
     });
 
-    const result = await saveShipmentApprovalRoute([approverAId], pendingSuperAdminId);
+    const result = await saveShipmentApprovalRoute([approverAId], pendingSuperAdminId, "FINAL_SHIPMENT");
 
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
@@ -241,7 +249,7 @@ describe("saveShipmentApprovalRoute — 승인자 자격", () => {
     ];
 
     for (const { label, userId, reason } of cases) {
-      const result = await saveShipmentApprovalRoute([approverAId, userId], superAdminId);
+      const result = await saveShipmentApprovalRoute([approverAId, userId], superAdminId, "FINAL_SHIPMENT");
 
       assert.equal(result.ok, false, `${label}: 통과했다`);
       if (!result.ok) {
@@ -257,7 +265,7 @@ describe("saveShipmentApprovalRoute — 승인자 자격", () => {
   });
 
   test("2b. 없는 사용자 id 는 거절된다", async () => {
-    const result = await saveShipmentApprovalRoute([randomUUID()], superAdminId);
+    const result = await saveShipmentApprovalRoute([randomUUID()], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
@@ -266,7 +274,7 @@ describe("saveShipmentApprovalRoute — 승인자 자격", () => {
 
   test("2c. 입력 형식이 틀리면 거절된다 — 화면을 거치지 않고 부를 수 있다", async () => {
     for (const bad of [["not-a-uuid"], [approverAId, approverAId], [""]]) {
-      const result = await saveShipmentApprovalRoute(bad, superAdminId);
+      const result = await saveShipmentApprovalRoute(bad, superAdminId, "FINAL_SHIPMENT");
       assert.equal(result.ok, false, `${JSON.stringify(bad)} 가 통과했다`);
       if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
       assert.equal(await routeRowCount(), 0);
@@ -277,14 +285,14 @@ describe("saveShipmentApprovalRoute — 승인자 자격", () => {
     // 결재선에 올라간 뒤 계정이 잠기는 일은 실제로 일어난다. 그 사람을 그대로
     // 둔 채 다른 자리만 고쳐 저장하려 하면 여기서 걸리고, 화면은 그 줄에 왜
     // 안 되는지를 이미 보여 주고 있다.
-    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
 
     await db.update(users).set({ isActive: false }).where(eq(users.id, approverBId));
     try {
       const result = await saveShipmentApprovalRoute(
         [approverAId, approverBId, approverCId],
-        superAdminId
+        superAdminId, "FINAL_SHIPMENT"
       );
       assert.equal(result.ok, false);
       if (!result.ok) assert.match(result.message, /비활성화된 계정/);
@@ -299,7 +307,7 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   test("🔴 3. 정상 저장이면 판이 하나 생기고 step_order 가 1..N 으로 매겨진다", async () => {
     const result = await saveShipmentApprovalRoute(
       [approverCId, approverAId, approverBId],
-      superAdminId
+      superAdminId, "FINAL_SHIPMENT"
     );
 
     assert.equal(result.ok, true, `거절됐다: ${JSON.stringify(result)}`);
@@ -318,11 +326,11 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   test("🔴 4. 같은 목록을 다시 저장하면 판이 늘지 않는다", async () => {
     // 판은 지우지 않으므로, 저장 단추를 두 번 누르면 똑같은 판이 둘 쌓여
     // 이력이 지저분해진다.
-    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
     const auditAfterFirst = await routeAuditCount();
 
-    const again = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const again = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(again.ok, true, `거절됐다: ${JSON.stringify(again)}`);
     if (again.ok) {
@@ -334,8 +342,8 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   });
 
   test("4b. 다른 사람이 저장해도 목록이 같으면 판이 늘지 않는다", async () => {
-    await saveShipmentApprovalRoute([approverAId], superAdminId);
-    const again = await saveShipmentApprovalRoute([approverAId], otherSuperAdminId);
+    await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT");
+    const again = await saveShipmentApprovalRoute([approverAId], otherSuperAdminId, "FINAL_SHIPMENT");
 
     assert.equal(again.ok, true);
     if (again.ok) assert.equal(again.changed, false);
@@ -343,10 +351,10 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   });
 
   test("🔴 5. 순서만 바꿔 저장하면 새 판이 생긴다 — 같은 사람들이라도 순서가 다르면 다른 절차다", async () => {
-    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
 
-    const flipped = await saveShipmentApprovalRoute([approverBId, approverAId], superAdminId);
+    const flipped = await saveShipmentApprovalRoute([approverBId, approverAId], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(flipped.ok, true, `거절됐다: ${JSON.stringify(flipped)}`);
     if (flipped.ok) {
@@ -356,7 +364,7 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
     assert.equal(await routeRowCount(), 2, "새 판이 쌓이지 않았다");
 
     // 「현재 절차」는 나중에 넣은 판이 아니라 version 이 가장 큰 판이다.
-    const current = await getCurrentShipmentApprovalRoute();
+    const current = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(current);
     assert.equal(current.version, 2);
     assert.deepEqual(
@@ -366,10 +374,10 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   });
 
   test("🔴 6. 단계 0개로 저장하면 판은 생기고 단계는 0개다 — 「절차를 쓰지 않겠다」는 뜻이다", async () => {
-    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
 
-    const emptied = await saveShipmentApprovalRoute([], superAdminId);
+    const emptied = await saveShipmentApprovalRoute([], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(emptied.ok, true, `거절됐다: ${JSON.stringify(emptied)}`);
     if (emptied.ok) {
@@ -382,7 +390,7 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
     assert.deepEqual(await stepRows(routes[1].id), []);
 
     // 빈 판을 다시 비워도 늘지 않는다.
-    const againEmpty = await saveShipmentApprovalRoute([], superAdminId);
+    const againEmpty = await saveShipmentApprovalRoute([], superAdminId, "FINAL_SHIPMENT");
     assert.equal(againEmpty.ok, true);
     if (againEmpty.ok) assert.equal(againEmpty.changed, false);
     assert.equal(await routeRowCount(), 2);
@@ -391,7 +399,7 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
   test("6b. 판이 하나도 없을 때 0개로 저장하면 첫 판이 생긴다 — 「쓰지 않기로 했다」도 기록이다", async () => {
     assert.equal(await routeRowCount(), 0, "이 시험은 표가 빈 상태를 전제로 한다");
 
-    const result = await saveShipmentApprovalRoute([], superAdminId);
+    const result = await saveShipmentApprovalRoute([], superAdminId, "FINAL_SHIPMENT");
 
     assert.equal(result.ok, true);
     if (result.ok) {
@@ -405,7 +413,7 @@ describe("saveShipmentApprovalRoute — 판 쌓기", () => {
 
 describe("saveShipmentApprovalRoute — 감사 기록", () => {
   test("🔴 7. 옛 판과 새 판이 previousValue/newValue 에 이름까지 담겨 남는다", async () => {
-    const first = await saveShipmentApprovalRoute([approverAId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
 
     const created = await routeAuditRows();
@@ -416,7 +424,9 @@ describe("saveShipmentApprovalRoute — 감사 기록", () => {
     assert.equal(created[0].actionType, "UPDATE");
     assert.equal(created[0].targetEntity, "shipment_approval_routes");
     assert.equal(created[0].previousValue, null, "첫 판의 이전 값은 없다");
+    // 🔴 용도가 함께 남는다 — 대상 표 이름은 이제 어느 절차인지 말해 주지 못한다.
     assert.deepEqual(created[0].newValue, {
+      scope: "FINAL_SHIPMENT",
       version: 1,
       steps: [
         { stepOrder: 1, approverUserId: approverAId, approverName: "shiproutesave approver A" },
@@ -427,7 +437,7 @@ describe("saveShipmentApprovalRoute — 감사 기록", () => {
     assert.equal(created[0].targetRecordId, routes[0].id, "새 판 하나를 정확히 가리켜야 한다");
 
     // 두 번째 판 — 이전 값에 옛 판이 통째로 들어 있어야 한다.
-    const second = await saveShipmentApprovalRoute([approverBId, approverAId], superAdminId);
+    const second = await saveShipmentApprovalRoute([approverBId, approverAId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(second.ok, true);
 
     const rows = await routeAuditRows();
@@ -436,12 +446,14 @@ describe("saveShipmentApprovalRoute — 감사 기록", () => {
     assert.ok(updated, "두 번째 기록을 찾지 못했다");
     assert.equal(updated.actionType, "UPDATE");
     assert.deepEqual(updated.previousValue, {
+      scope: "FINAL_SHIPMENT",
       version: 1,
       steps: [
         { stepOrder: 1, approverUserId: approverAId, approverName: "shiproutesave approver A" },
       ],
     });
     assert.deepEqual(updated.newValue, {
+      scope: "FINAL_SHIPMENT",
       version: 2,
       steps: [
         { stepOrder: 1, approverUserId: approverBId, approverName: "shiproutesave approver B" },
@@ -451,7 +463,7 @@ describe("saveShipmentApprovalRoute — 감사 기록", () => {
   });
 
   test("🔴 7b. 이름이 함께 남는다 — 그 사용자가 나중에 지워져도 로그가 스스로를 설명해야 한다", async () => {
-    const saved = await saveShipmentApprovalRoute([approverCId], superAdminId);
+    const saved = await saveShipmentApprovalRoute([approverCId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(saved.ok, true);
 
     const [row] = await routeAuditRows();
@@ -463,23 +475,147 @@ describe("saveShipmentApprovalRoute — 감사 기록", () => {
     // 콜백에서 그냥 반환하면 커밋된다. 자격 확인은 판을 넣기 **전**에 하지만,
     // 되돌아가는 것 자체를 확인하려면 남을 수 있는 것 둘(판·감사 기록)을 모두
     // 봐야 한다.
-    const first = await saveShipmentApprovalRoute([approverAId], superAdminId);
+    const first = await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(first.ok, true);
     const routesBefore = await routeRowCount();
     const auditBefore = await routeAuditCount();
 
-    const rejected = await saveShipmentApprovalRoute([approverBId, lockedUserId], superAdminId);
+    const rejected = await saveShipmentApprovalRoute([approverBId, lockedUserId], superAdminId, "FINAL_SHIPMENT");
     assert.equal(rejected.ok, false);
 
     assert.equal(await routeRowCount(), routesBefore, "거절됐는데 판이 늘었다");
     assert.equal(await routeAuditCount(), auditBefore, "거절됐는데 감사 기록이 남았다");
 
     // 그리고 「현재 절차」는 거절 전의 그것 그대로다.
-    const current = await getCurrentShipmentApprovalRoute();
+    const current = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
     assert.ok(current);
     assert.deepEqual(
       current.steps.map((step) => step.approverUserId),
       [approverAId]
     );
+  });
+});
+
+describe("🔴 saveShipmentApprovalRoute — 용도(scope)가 판을 가른다", () => {
+  test("9. 판 번호를 그 용도 안에서 센다 — 출하 3판 다음 불출이 4판이 되지 않는다", async () => {
+    // 전체에서 max + 1 을 하면 새 유니크와 어긋나지는 않지만, 사람이 읽는
+    // 번호(「이 절차의 몇 번째 판인가」)가 망가진다.
+    for (const ids of [[approverAId], [approverBId], [approverCId]]) {
+      const saved = await saveShipmentApprovalRoute(ids, superAdminId, "FINAL_SHIPMENT");
+      assert.equal(saved.ok, true, `출하 판 저장이 막혔다: ${JSON.stringify(saved)}`);
+    }
+
+    const partIssue = await saveShipmentApprovalRoute([approverAId], superAdminId, "PART_ISSUE");
+
+    assert.equal(partIssue.ok, true, `거절됐다: ${JSON.stringify(partIssue)}`);
+    if (partIssue.ok) {
+      assert.equal(partIssue.changed, true);
+      assert.equal(partIssue.version, 1, "다른 용도의 판 번호를 이어받았다");
+    }
+  });
+
+  test("🔴 10. 부품 불출 판을 얹어도 출하 쪽 「현재 절차」가 흔들리지 않는다", async () => {
+    const shipment = await saveShipmentApprovalRoute(
+      [approverAId, approverBId],
+      superAdminId,
+      "FINAL_SHIPMENT"
+    );
+    assert.equal(shipment.ok, true);
+
+    const partIssue = await saveShipmentApprovalRoute([approverCId], superAdminId, "PART_ISSUE");
+    assert.equal(partIssue.ok, true);
+
+    const current = await getCurrentShipmentApprovalRoute("FINAL_SHIPMENT");
+    assert.ok(current, "출하 판이 사라졌다");
+    assert.equal(current.scope, "FINAL_SHIPMENT");
+    assert.equal(current.version, 1);
+    assert.deepEqual(
+      current.steps.map((step) => step.approverUserId),
+      [approverAId, approverBId],
+      "출하 절차에 불출 단계가 섞였다"
+    );
+
+    // 반대쪽도 자기 판만 본다.
+    const partIssueRoute = await getCurrentShipmentApprovalRoute("PART_ISSUE");
+    assert.ok(partIssueRoute);
+    assert.deepEqual(
+      partIssueRoute.steps.map((step) => step.approverUserId),
+      [approverCId]
+    );
+
+    // 두 용도의 1판이 함께 남는다 — (scope, version) 유니크가 그것을 허락한다.
+    const rows = await routeRows();
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((row) => [row.scope, row.version]).sort(),
+      [
+        ["FINAL_SHIPMENT", 1],
+        ["PART_ISSUE", 1],
+      ].sort()
+    );
+  });
+
+  test("🔴 11. 「바뀐 게 없다」를 용도 안에서 판정한다 — 다른 용도에 같은 사람들이 있어도 새 판이 생긴다", async () => {
+    // 용도를 빼고 견주면, 같은 사람들을 두 절차에 세우려는 저장이 조용히
+    // 삼켜진다 — 사람에게는 「저장했는데 아무 일도 안 일어났다」로 보인다.
+    const shipment = await saveShipmentApprovalRoute(
+      [approverAId, approverBId],
+      superAdminId,
+      "FINAL_SHIPMENT"
+    );
+    assert.equal(shipment.ok, true);
+
+    const partIssue = await saveShipmentApprovalRoute(
+      [approverAId, approverBId],
+      superAdminId,
+      "PART_ISSUE"
+    );
+
+    assert.equal(partIssue.ok, true, `거절됐다: ${JSON.stringify(partIssue)}`);
+    if (partIssue.ok) {
+      assert.equal(partIssue.changed, true, "다른 용도인데 「그대로다」로 삼켜졌다");
+      assert.equal(partIssue.version, 1);
+    }
+    assert.equal(await routeRowCount(), 2, "새 판이 쌓이지 않았다");
+
+    // 그리고 같은 용도 안에서는 여전히 「그대로다」가 돈다.
+    const again = await saveShipmentApprovalRoute(
+      [approverAId, approverBId],
+      superAdminId,
+      "PART_ISSUE"
+    );
+    assert.equal(again.ok, true);
+    if (again.ok) assert.equal(again.changed, false);
+    assert.equal(await routeRowCount(), 2);
+  });
+
+  test("🔴 12. 감사 기록에 용도가 남는다 — 로그만 읽고도 어느 절차가 바뀌었는지 알아야 한다", async () => {
+    const saved = await saveShipmentApprovalRoute([approverAId], superAdminId, "PART_ISSUE");
+    assert.equal(saved.ok, true);
+
+    const [row] = await routeAuditRows();
+    assert.ok(row, "감사 기록이 남지 않았다");
+    assert.deepEqual(row.newValue, {
+      scope: "PART_ISSUE",
+      version: 1,
+      steps: [
+        { stepOrder: 1, approverUserId: approverAId, approverName: "shiproutesave approver A" },
+      ],
+    });
+  });
+
+  test("13. 목록에 없는 용도는 거절된다 — 화면을 거치지 않고 부를 수 있다", async () => {
+    // 표의 enum 이 결국 막긴 하지만, 거기까지 가면 사람에게는 「알 수 없는
+    // 오류」로 보인다. 형식 검증이 그 앞에서 잡아 이유를 말해 준다.
+    const result = await saveShipmentApprovalRoute(
+      [approverAId],
+      superAdminId,
+      "SOMETHING_ELSE" as unknown as ShipmentApprovalRouteScope
+    );
+
+    assert.equal(result.ok, false, "모르는 용도가 통과했다");
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    assert.equal(await routeRowCount(), 0, "거절됐는데 판이 생겼다");
+    assert.equal(await routeAuditCount(), 0, "거절됐는데 감사 기록이 남았다");
   });
 });

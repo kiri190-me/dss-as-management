@@ -1,13 +1,15 @@
 import {
+  isShipmentApprovalRouteScope,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
+  type ShipmentApprovalRouteScope,
   type ShipmentApprovalRouteStepsIssueCode,
 } from "@/lib/domain/shipment-approval-route";
 import { isValidUuid } from "./procedure-validation-resolution-input";
 
 /**
  * ============================================================================
- * 출하 승인 절차(결재선) 입력 검증 — 형식만 본다
+ * 승인 절차(결재선) 입력 검증 — 형식만 본다
  * ============================================================================
  * ui-theme-token-input.ts · shipment-delegation-input.ts 와 같은 자리다.
  * **DB 도 세션도 여기서 만지지 않는다** — 순수 함수만 두어야 단위 시험이 붙고,
@@ -37,21 +39,26 @@ import { isValidUuid } from "./procedure-validation-resolution-input";
  */
 
 export type ShipmentApprovalRouteInputIssueCode =
-  /** 요청 자체의 모양이 아니다 — 배열이 아니거나, 원소가 문자열/uuid 가 아니다. */
+  /** 요청 자체의 모양이 아니다 — 배열이 아니거나, 원소가 문자열/uuid 가 아니거나, 용도가 목록에 없다. */
   | "INVALID_INPUT"
   | ShipmentApprovalRouteStepsIssueCode;
 
 export type ValidateShipmentApprovalRouteInputResult =
-  | { ok: true; approverUserIds: string[] }
+  | { ok: true; scope: ShipmentApprovalRouteScope; approverUserIds: string[] }
   | { ok: false; code: ShipmentApprovalRouteInputIssueCode; message: string };
 
 /**
  * 서버 액션과 mutation 이 화면에서 받은 값을 그대로 믿지 않기 위해 부른다.
  *
- * 받는 모양은 `{ approverUserIds: string[] }` 하나다. 순서 번호를 받지 않는
+ * 받는 모양은 `{ scope, approverUserIds: string[] }` 다. 순서 번호를 받지 않는
  * 이유(배열의 자리가 곧 순서다)는 domain/shipment-approval-route.ts 머리말에
  * 있다 — 번호를 받으면 빠진 번호·겹친 번호·배열과 어긋난 번호를 전부 검사해야
  * 하고, 그 검사가 하나라도 틀리면 표의 유니크가 저장 시점에 터진다.
+ *
+ * 🔴 **용도는 반드시 적혀 있어야 한다 — 여기서 「없으면 출하」로 채우지 않는다.**
+ * 그런 기본값을 두면 화면이 용도를 빠뜨린 요청이 조용히 출하 절차를 덮어쓴다.
+ * 모르는 값도 같은 이유로 거절한다: 표의 enum 이 결국 막아 주긴 하지만, 거기까지
+ * 가면 사람에게는 「알 수 없는 오류」로 보인다.
  *
  * 🔴 **빈 배열은 정상이다.** 「절차를 쓰지 않겠다」는 뜻이고, 그때 앱은 지금까지처럼
  * 「출하 대표」 방식으로 최종 출하 승인을 처리한다.
@@ -63,7 +70,10 @@ export function validateShipmentApprovalRouteInput(
     return { ok: false, code: "INVALID_INPUT", message: "승인 절차 입력을 확인할 수 없습니다." };
   }
 
-  const { approverUserIds } = input as { approverUserIds?: unknown };
+  const { approverUserIds, scope } = input as { approverUserIds?: unknown; scope?: unknown };
+  if (!isShipmentApprovalRouteScope(scope)) {
+    return { ok: false, code: "INVALID_INPUT", message: "어떤 승인 절차인지 확인할 수 없습니다." };
+  }
   if (!Array.isArray(approverUserIds)) {
     return { ok: false, code: "INVALID_INPUT", message: "승인 단계 목록을 확인할 수 없습니다." };
   }
@@ -93,5 +103,5 @@ export function validateShipmentApprovalRouteInput(
 
   // 새 배열로 돌려준다 — 부르는 쪽이 받은 배열을 그대로 트랜잭션에 실어 보내므로,
   // 요청 객체와 자리를 나눠 쓰지 않는 편이 안전하다.
-  return { ok: true, approverUserIds: [...(approverUserIds as string[])] };
+  return { ok: true, scope, approverUserIds: [...(approverUserIds as string[])] };
 }

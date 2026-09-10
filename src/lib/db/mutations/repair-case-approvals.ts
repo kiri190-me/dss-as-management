@@ -230,7 +230,11 @@ export async function requestRepairCaseApproval(
       let routeStepOrder: number | null = null;
       let routeAssignedApproverUserId: string | null = null;
       if (approvalType === "FINAL_SHIPMENT") {
-        const route = await getCurrentShipmentApprovalRouteChain(tx);
+        // 🔴 절차 표는 이제 출하 전용이 아니다 — 어느 절차를 읽을지 적어야 한다.
+        // 여기서 "FINAL_SHIPMENT" 는 위 조건의 승인 종류와 **우연히 같은 글자**가
+        // 아니라 같은 뜻이다: 최종 출하 승인 요청은 최종 출하 승인 절차를 탄다.
+        // 부품 불출은 이 함수를 지나지 않는다(별도 표·별도 흐름이다).
+        const route = await getCurrentShipmentApprovalRouteChain(tx, "FINAL_SHIPMENT");
         const firstStep = route?.steps[0];
         if (route && firstStep) {
           routeId = route.routeId;

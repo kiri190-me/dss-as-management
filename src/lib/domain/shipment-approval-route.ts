@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * 출하 승인 절차(결재선) — 순수 규칙
+ * 승인 절차(결재선) — 순수 규칙
  * ============================================================================
  * DB 도 서버도 여기서 만지지 않는다. 나중 조각의 **저장 경로와 편집 화면이 같은
  * 함수 하나**를 보게 하려고 따로 뺀 자리다 — 규칙을 두 곳에 적어 두면 화면은
@@ -31,6 +31,39 @@
  * 남았는가.
  * ============================================================================
  */
+
+/**
+ * ── 🔴 절차의 「용도」 ───────────────────────────────────────────────────
+ * 이 절차가 **무엇을 결재하는가**. 판(version)은 용도 안에서 세고, 「현재 절차」도
+ * 용도 안에서 정해진다 — 출하 절차를 고쳐도 부품 불출 절차는 흔들리지 않는다.
+ *
+ * 값 목록이 적힌 곳은 둘이다: 여기와 표의 enum
+ * (db/schema/shipment-approval-routes.ts 의 shipmentApprovalRouteScopeEnum).
+ * 이 저장소의 스키마 파일은 도메인 층을 가져오지 않으므로
+ * (repair_case_approval_type ↔ REPAIR_CASE_APPROVAL_TYPES 와 같은 관례다) 두 벌이
+ * 되고, 갈라지지 않도록 이 파일의 시험이 둘을 맞춰 본다.
+ *
+ * 'PART_ISSUE' 는 다음 조각의 부품 불출 승인이 쓴다 — 지금은 이 값을 쓰는 코드가
+ * 없다.
+ */
+export const SHIPMENT_APPROVAL_ROUTE_SCOPES = ["FINAL_SHIPMENT", "PART_ISSUE"] as const;
+export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
+
+/**
+ * 바깥에서 들어온 값이 쓸 수 있는 용도인가.
+ *
+ * 🔴 서버 액션이 **화면이 보낸 용도를 그대로 믿지 않기** 위해 부른다. 형식만
+ * 본다 — 그 용도의 절차를 이 사람이 고칠 수 있는가(인가)는 자료를 봐야 알 수
+ * 있으므로 저장 경로가 자기 트랜잭션 안에서 맡는다.
+ */
+export function isShipmentApprovalRouteScope(
+  value: unknown
+): value is ShipmentApprovalRouteScope {
+  return (
+    typeof value === "string" &&
+    (SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * 한 절차에 둘 수 있는 단계의 최대 개수.

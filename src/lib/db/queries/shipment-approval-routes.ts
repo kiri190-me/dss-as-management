@@ -3,20 +3,24 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../client";
 import { shipmentApprovalRouteSteps, shipmentApprovalRoutes, users } from "../schema";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
+import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
- * 출하 승인 절차(결재선) 읽기
+ * 승인 절차(결재선) 읽기
  * ============================================================================
- * 읽기만 한다. 저장은 다음 조각이다.
+ * 「현재 절차」는 **그 용도(scope) 안에서 version 이 가장 큰 판** 하나다 —
+ * is_current 같은 깃발 칸이 없는 이유는 db/schema/shipment-approval-routes.ts
+ * 머리말에 있다(같은 사실이 두 곳에 적히면 갈라진다). 그래서 여기서도
+ * `WHERE scope = ? ORDER BY version DESC LIMIT 1` 하나로 정한다. 이 정의가 적힌
+ * 곳은 저장소 전체에서 이 파일 하나여야 한다.
  *
- * 「현재 절차」는 **version 이 가장 큰 판** 하나다 — is_current 같은 깃발 칸이
- * 없는 이유는 db/schema/shipment-approval-routes.ts 머리말에 있다(같은 사실이
- * 두 곳에 적히면 갈라진다). 그래서 여기서도 `ORDER BY version DESC LIMIT 1`
- * 하나로 정한다. 이 정의가 적힌 곳은 저장소 전체에서 이 파일 하나여야 한다.
+ * 🔴 **용도를 받는 함수는 기본값을 두지 않는다.** 부르는 쪽이 언제나 「출하」인지
+ * 「불출」인지 적어야 한다 — 기본값을 두면 새 용도를 더할 때 고쳐야 할 자리가
+ * 컴파일러에 보이지 않고, 빠뜨린 자리는 조용히 출하 절차를 읽는다.
  *
- * 판이 하나도 없으면 null 이다. 그때 앱은 이 기능이 없던 때와 똑같이 — 「출하
- * 대표」(users.is_shipment_representative)·위임 방식으로 — 최종 출하 승인을
+ * 그 용도의 판이 하나도 없으면 null 이다. 그때 앱은 이 기능이 없던 때와 똑같이 —
+ * 「출하 대표」(users.is_shipment_representative)·위임 방식으로 — 최종 출하 승인을
  * 처리한다.
  * ============================================================================
  */
@@ -44,7 +48,13 @@ export type ShipmentApprovalRouteStepView = {
 
 export type ShipmentApprovalRouteView = {
   id: string;
-  /** 판 번호. 가장 큰 것이 현재 절차다. */
+  /**
+   * 이 판이 어느 절차의 것인가. 부른 쪽이 이미 아는 값이지만 함께 실어 보낸다 —
+   * 다음 조각의 편집 화면이 판 하나를 통째로 받아 「지금 보고 있는 절차」를
+   * 표시하는데, 그때 화면이 자기 상태와 받은 판을 짝지어야 하기 때문이다.
+   */
+  scope: ShipmentApprovalRouteScope;
+  /** 판 번호. **그 용도 안에서** 가장 큰 것이 현재 절차다. */
   version: number;
   createdAt: Date;
   /** 이 판을 만든 사람의 이름. 「누가 언제 결재선을 바꿨나」가 화면에 그대로 보인다. */
@@ -62,27 +72,34 @@ export type ShipmentApprovalRouteView = {
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
 /**
- * 🔴 **「현재 절차」의 정의가 적힌 유일한 곳.** version 이 가장 큰 판 하나다.
- * 이 파일의 공개 함수들은 전부 여기를 거친다 — 같은 정렬을 한 벌 더 적으면
- * 언젠가 한쪽만 고쳐지고 그때 「현재」가 둘이 된다.
+ * 🔴 **「현재 절차」의 정의가 적힌 유일한 곳.** 그 용도 안에서 version 이 가장 큰
+ * 판 하나다. 이 파일의 공개 함수들은 전부 여기를 거친다 — 같은 정렬(과 같은
+ * 걸러내기)을 한 벌 더 적으면 언젠가 한쪽만 고쳐지고, 그때 「현재」가 둘이 되거나
+ * 다른 용도의 판이 섞여 나온다.
+ *
+ * 🔴 **용도로 거르는 것이 정렬만큼 중요하다.** 거르지 않으면 부품 불출 절차를
+ * 한 판 저장하는 것만으로 출하 쪽 「현재 절차」가 바뀌어 버린다 — 판 번호는 용도
+ * 안에서 세므로 다른 용도의 판이 더 큰 번호를 가질 수 있다.
  */
-async function selectCurrentRouteHeader(tx: Tx) {
+async function selectCurrentRouteHeader(tx: Tx, scope: ShipmentApprovalRouteScope) {
   const [route] = await tx
     .select({
       id: shipmentApprovalRoutes.id,
+      scope: shipmentApprovalRoutes.scope,
       version: shipmentApprovalRoutes.version,
       createdAt: shipmentApprovalRoutes.createdAt,
       createdByName: users.name,
     })
     .from(shipmentApprovalRoutes)
     .innerJoin(users, eq(users.id, shipmentApprovalRoutes.createdByUserId))
+    .where(eq(shipmentApprovalRoutes.scope, scope))
     .orderBy(desc(shipmentApprovalRoutes.version))
     .limit(1);
   return route ?? null;
 }
 
 /**
- * 지금 쓰이는 절차 한 판과 그 단계들. 판이 하나도 없으면 null.
+ * 그 용도에 지금 쓰이는 절차 한 판과 그 단계들. 그 용도의 판이 하나도 없으면 null.
  *
  * 🔴 **소프트삭제된 사용자의 단계도 빼지 않는다.** 조용히 빼면 절차가 짧아진
  * 것처럼 보이고, 결재가 왜 그 자리에서 멈췄는지 화면에서 알 방법이 없어진다.
@@ -92,8 +109,10 @@ async function selectCurrentRouteHeader(tx: Tx) {
  * users 조인은 innerJoin 이어도 행을 잃지 않는다 — 사람 참조가 RESTRICT 이고
  * 이 저장소의 사용자는 소프트삭제만 하므로, 참조된 users 행은 언제나 실재한다.
  */
-export async function getCurrentShipmentApprovalRoute(): Promise<ShipmentApprovalRouteView | null> {
-  const route = await selectCurrentRouteHeader(db);
+export async function getCurrentShipmentApprovalRoute(
+  scope: ShipmentApprovalRouteScope
+): Promise<ShipmentApprovalRouteView | null> {
+  const route = await selectCurrentRouteHeader(db, scope);
 
   if (!route) return null;
 
@@ -140,19 +159,25 @@ export type ShipmentApprovalRouteChain = {
 };
 
 /**
- * 최종 출하 승인을 요청할 때 붙잡아 둘 **지금 판**. 판이 하나도 없으면 null.
+ * 승인을 요청할 때 붙잡아 둘 **그 용도의 지금 판**. 그 용도의 판이 하나도 없으면
+ * null.
  *
  * getCurrentShipmentApprovalRoute() 와 「현재 절차」의 정의를 공유한다
  * (selectCurrentRouteHeader) — 승인 요청 mutation 은 자기 트랜잭션 안에서
  * 읽어야 하는데 그쪽은 db 를 직접 쓰기 때문에 이 함수가 따로 있다.
  *
+ * 🔴 돌려주는 값에 용도를 싣지 않는다 — 부르는 쪽이 방금 넘긴 값이라 다시 받을
+ * 이유가 없고, 실어 보내면 「받은 용도」와 「넘긴 용도」를 견주는 코드가 생긴다.
+ * 화면에 그릴 판을 통째로 읽는 쪽(ShipmentApprovalRouteView)만 용도를 싣는다.
+ *
  * 단계가 0개인 판은 `steps: []` 로 돌아온다. 부르는 쪽은 그때 「결재선을 쓰지
  * 않는다」로 다뤄야 한다 — 판이 아예 없을 때와 같다.
  */
 export async function getCurrentShipmentApprovalRouteChain(
-  tx: Tx
+  tx: Tx,
+  scope: ShipmentApprovalRouteScope
 ): Promise<ShipmentApprovalRouteChain | null> {
-  const route = await selectCurrentRouteHeader(tx);
+  const route = await selectCurrentRouteHeader(tx, scope);
   if (!route) return null;
 
   const steps = await tx

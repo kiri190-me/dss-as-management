@@ -65,7 +65,10 @@ export default async function UsersPage() {
   const [users, delegations, shipmentApprovalRoute, approverCandidates] = await Promise.all([
     listUsersForRepresentativeManagement(),
     listShipmentDelegations(),
-    getCurrentShipmentApprovalRoute(),
+    // 🔴 용도를 여기서 못 박는다 — 이 화면의 결재선 편집은 아직 「최종 출하 승인」
+    // 하나뿐이다. 탭으로 용도를 고르는 것은 다음 조각이고, 그때 이 자리가 고를 값을
+    // 받는다. 기본값에 기대지 않고 적어 두는 이유가 그것이다.
+    getCurrentShipmentApprovalRoute("FINAL_SHIPMENT"),
     listSelectableApproverCandidates(),
   ]);
 

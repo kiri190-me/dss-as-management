@@ -6,8 +6,19 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { validateShipmentApprovalRouteInput } from "@/lib/validation/shipment-approval-route-input";
 import { saveShipmentApprovalRoute } from "@/lib/db/mutations/shipment-approval-routes";
+import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
 
 export type SaveShipmentApprovalRouteActionInput = {
+  /**
+   * 어느 절차를 저장하는가. 🔴 **화면이 보낸 값을 그대로 믿지 않는다** —
+   * validateShipmentApprovalRouteInput 이 허용된 값인지 확인하고, 기본값으로
+   * 채워 주지 않는다. 여기서 「없으면 출하」로 채우면 용도를 빠뜨린 요청이 조용히
+   * 출하 절차를 덮어쓴다.
+   *
+   * 타입이 이미 좁지만 이 함수는 Server Action 이라 **네트워크 경계 너머**에서
+   * 불린다 — 타입은 그 경계에서 아무것도 막지 못한다.
+   */
+  scope: ShipmentApprovalRouteScope;
   /**
    * 결재 순서대로 담은 승인자 id. **자리가 곧 순서다** — 순서 번호를 따로 받지
    * 않는다(그 이유는 domain/shipment-approval-route.ts 머리말).
@@ -23,12 +34,16 @@ export type SaveShipmentApprovalRouteActionResult =
   | { ok: false; message: string };
 
 /**
- * Server Action: 출하 승인 절차(결재선) 저장.
+ * Server Action: 승인 절차(결재선) 저장.
  *
  * 다른 Server Action 과 같은 층위의 일만 한다 — 모드 확인, 세션, 행위자 해석,
- * 인가, 입력 형식 검증, 예상 못한 오류 은닉. 승인자 자격 재확인·「바뀐 게 없으면
- * 새 판을 만들지 않는다」·판 번호 매기기·감사 기록은 saveShipmentApprovalRoute()가
- * 자기 트랜잭션 안에서 DB 를 다시 읽어 수행한다.
+ * 인가, 입력 형식 검증(용도 포함), 예상 못한 오류 은닉. 승인자 자격 재확인·「바뀐
+ * 게 없으면 새 판을 만들지 않는다」·판 번호 매기기·감사 기록은
+ * saveShipmentApprovalRoute()가 자기 트랜잭션 안에서 DB 를 다시 읽어 수행한다.
+ *
+ * ⚠️ 아래 문구 둘은 아직 **출하 절차만을 말한다**(「출하 승인 절차를 변경할 권한이
+ * 없습니다」·「출하 대표로 지정된 사용자가…」). 지금은 부르는 곳이 출하 하나뿐이라
+ * 틀린 말이 아니지만, 부품 불출이 이 절차를 타는 조각에서 용도에 맞게 갈라야 한다.
  *
  * 🔴 인가를 여기서 한 번, mutation 에서 또 한 번 한다. 중복이지만 겹쳐 두는 것이
  * 이 저장소의 관례다 — 한쪽이 무너져도 다른 쪽이 남는다(ui-theme-tokens.ts ·
@@ -62,7 +77,13 @@ export async function saveShipmentApprovalRouteAction(
   if (!validated.ok) return { ok: false, message: validated.message };
 
   try {
-    const result = await saveShipmentApprovalRoute(validated.approverUserIds, actingUser.id);
+    const result = await saveShipmentApprovalRoute(
+      validated.approverUserIds,
+      actingUser.id,
+      // 🔴 검증을 지난 값을 넘긴다 — input.scope 를 그대로 넘기면 위에서 확인한
+      // 것과 아래에서 쓰는 것이 다른 값이 될 수 있다.
+      validated.scope
+    );
     if (!result.ok) return { ok: false, message: result.message };
     if (!result.changed) {
       // 🔴 「저장됐다」와 구별해 말해 준다. 같은 값을 다시 저장하면 판을 늘리지

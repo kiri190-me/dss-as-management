@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  pgEnum,
   pgTable,
   timestamp,
   uniqueIndex,
@@ -12,16 +13,26 @@ import { users } from "./users";
 
 /**
  * ============================================================================
- * 출하 승인 절차(결재선) — 한 판(version)씩 쌓는 표 둘
+ * 승인 절차(결재선) — 한 판(version)씩 쌓는 표 둘
  * ============================================================================
- * 최종 출하 승인(repair_case_approvals.approval_type = 'FINAL_SHIPMENT')을
- * **여러 사람에게 순서대로** 받기 위한 절차다. 지금까지 그 승인은 「출하 대표」
- * (users.is_shipment_representative)나 위임(shipment_approval_delegations)을 받은
- * 사람이면 **아무나** 처리할 수 있었다 — 「누구에게 보낸다」는 개념 자체가 없었다.
- * 이 표는 그 순서를 담는다.
+ * 단계적 승인이 필요한 곳에서 **여러 사람에게 순서대로** 결재를 받기 위한
+ * 절차다. 처음에는 최종 출하 승인
+ * (repair_case_approvals.approval_type = 'FINAL_SHIPMENT') 하나만을 위한 것이었고,
+ * 그 승인은 「출하 대표」(users.is_shipment_representative)나 위임
+ * (shipment_approval_delegations)을 받은 사람이면 **아무나** 처리할 수 있었다 —
+ * 「누구에게 보낸다」는 개념 자체가 없었다. 이 표는 그 순서를 담는다.
+ *
+ * ── 🔴 표 이름은 옛것이고, 지금은 scope 칸이 뜻을 정한다 ────────────────
+ * 이름에 남은 `shipment` 는 **처음 쓰임새의 흔적일 뿐이다**(2026-09-10). 지금 이
+ * 표는 출하 전용이 아니고, 어느 절차인지는 `scope` 칸 하나가 정한다 —
+ * 'FINAL_SHIPMENT'(최종 출하 승인) · 'PART_ISSUE'(부품 불출 승인). 표·코드 이름을
+ * 바꾸지 않은 것은 의도다: 표 이름 바꾸기는 db:preflight 가 보지 못하는 종류의
+ * 위험한 변경이고(자료가 사라지지는 않지만 적용 도중 끊기면 앱이 통째로 멈춘다),
+ * 지금 얻을 것보다 잃을 것이 크다. **다음 사람은 이름이 아니라 scope 를 보고
+ * 판단할 것.**
  *
  * 설계 결정(2026-09-09, 사용자 승인):
- *  · 절차는 **하나**뿐이다. 고객사별·금액별 분기는 없다.
+ *  · 한 용도에 절차는 **하나**뿐이다. 고객사별·금액별 분기는 없다.
  *  · 절차가 「출하 대표」를 **대신한다**. 대표 지정은 절차를 아직 만들지 않았을
  *    때의 기본값으로만 남는다.
  *  · 순서는 **일렬**이다 — 갈래도 병렬 승인도 없다.
@@ -44,11 +55,14 @@ import { users } from "./users";
  *     겹치는 문제(유니크 위반)가 원천적으로 없다 — 새 판을 통째로 새로 쓰기
  *     때문이다. 「임시로 999 를 넣었다가 되돌린다」 같은 우회가 필요 없다.
  *
- * ── 🔴 「현재 절차」 = version 이 가장 큰 판 ───────────────────────────────
+ * ── 🔴 「현재 절차」 = **그 용도 안에서** version 이 가장 큰 판 ────────────
  * is_current 같은 칸을 두지 않는다. 같은 사실이 두 곳(정렬 순서와 깃발)에 적히면
  * 언젠가 갈라지고, 그때 「현재」가 둘이 되거나 0개가 된다. 현재 판은 언제나
- * `ORDER BY version DESC LIMIT 1` 하나로 정해진다
+ * `WHERE scope = ? ORDER BY version DESC LIMIT 1` 하나로 정해진다
  * (queries/shipment-approval-routes.ts).
+ *
+ * 판 번호도 **용도 안에서** 센다 — 출하 3판과 불출 1판이 함께 있는 것이 정상이다.
+ * 유니크가 (scope, version) 인 이유가 그것이다.
  *
  * ── 🔴 이 표가 비어 있으면 앱은 이 기능이 없던 때와 완전히 같이 동작한다 ──
  * 판이 하나도 없는 것이 정상 초기 상태다. 그때는 지금까지처럼 「출하 대표」·위임
@@ -57,6 +71,25 @@ import { users } from "./users";
  * 않는다).
  * ============================================================================
  */
+
+/**
+ * 이 절차가 **무엇을 결재하는가**.
+ *
+ * 🔴 값 목록은 domain/shipment-approval-route.ts 의
+ * SHIPMENT_APPROVAL_ROUTE_SCOPES 와 **글자 그대로 같아야 한다**. 여기서 다시
+ * 적는 이유는 이 저장소의 스키마 파일이 도메인 층을 가져오지 않기 때문이고
+ * (repair_case_approval_type 이 APPROVAL_TYPE_CODES 를 다시 적는 것과 같다),
+ * 두 벌이 갈라지지 않도록 domain/shipment-approval-route.test.ts 가 둘을 맞춰
+ * 본다.
+ *
+ * 'PART_ISSUE' 는 **아직 쓰는 코드가 없다** — 부품 불출 승인이 다음 조각에서
+ * 이 절차를 탄다. enum 값은 나중에 뺄 수 없으므로 미리 넣어 두는 것이 값을
+ * 두 번 더하는 마이그레이션보다 낫다.
+ */
+export const shipmentApprovalRouteScopeEnum = pgEnum("shipment_approval_route_scope", [
+  "FINAL_SHIPMENT",
+  "PART_ISSUE",
+]);
 
 /**
  * 절차 한 판. **한 번 쓰면 바뀌지 않는다**(append-only).
@@ -74,7 +107,15 @@ export const shipmentApprovalRoutes = pgTable(
   "shipment_approval_routes",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** 1 부터. 가장 큰 값이 곧 「현재 절차」다. */
+    /**
+     * 어느 절차인가. 🔴 **기본값을 두지 않는다.** 기본값을 남겨 두면 용도를 적지
+     * 않은 판이 조용히 출하 절차로 들어가고, 그러면 다음 사람이 「불출 절차를
+     * 저장했는데 출하가 바뀌었다」를 만나게 된다. 뜻을 숨기는 기본값을 두지
+     * 않는 것은 이 표의 관례다(repair_case_approvals.assigned_approver_user_id
+     * 가 nullable·기본값 없음인 것과 같은 이유).
+     */
+    scope: shipmentApprovalRouteScopeEnum("scope").notNull(),
+    /** 1 부터. **그 용도 안에서** 가장 큰 값이 곧 「현재 절차」다. */
     version: integer("version").notNull(),
     /**
      * 이 판을 만든 사람. RESTRICT 는 이 저장소의 사람 참조 관례다 — 사용자는
@@ -87,9 +128,14 @@ export const shipmentApprovalRoutes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // 판 번호는 겹치지 않는다 — 「현재 절차」의 정의가 version 하나에 걸려
-    // 있으므로, 겹치는 순간 현재가 둘이 된다.
-    uniqueIndex("shipment_approval_routes_version_unique").on(table.version),
+    // 판 번호는 **한 용도 안에서** 겹치지 않는다 — 「현재 절차」의 정의가 그
+    // 용도의 가장 큰 version 에 걸려 있으므로, 겹치는 순간 현재가 둘이 된다.
+    //
+    // 🔴 반대로 **다른 용도끼리는 같은 번호를 써도 된다.** 출하 1판과 불출 1판이
+    // 함께 있는 것이 정상이다 — 사람이 읽는 번호는 「이 절차의 몇 번째 판인가」이지
+    // 표 전체의 일련번호가 아니다. 2026-09-10 이전에는 version 하나에만 걸려
+    // 있었고, 용도가 늘면서 (scope, version) 으로 옮겼다.
+    uniqueIndex("shipment_approval_routes_scope_version_unique").on(table.scope, table.version),
   ]
 );
 
