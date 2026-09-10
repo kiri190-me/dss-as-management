@@ -6,7 +6,7 @@ import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-appro
 import { resolveShipmentDecideAuthorization } from "./shipment-delegations";
 import { countNotificationTargets } from "@/lib/domain/notifications";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
@@ -62,11 +62,32 @@ import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approv
  * 강제하는 것과 같다:
  *  - REPAIR_INSPECTION: 삭제되지 않은 사용자 + approvalStatus APPROVED +
  *    역할이 최고관리자/관리자/A/S 엔지니어.
- *  - FINAL_SHIPMENT: `resolveShipmentDecideAuthorization`을 그대로 호출한다
- *    (대표 직접 결재 또는 유효한 위임을 받은 대리 결재). 스키마 CHECK상 위임은
+ *  - FINAL_SHIPMENT: 두 축이다. 결재선을 타지 않는 행은
+ *    `resolveShipmentDecideAuthorization`을 그대로 호출하고(대표 직접 결재
+ *    또는 유효한 위임을 받은 대리 결재), 결재선을 타는 행은 그 단계의 지정
+ *    승인자만 본다. 아래 「결재선」 절 참조. 스키마 CHECK상 위임도 결재선도
  *    FINAL_SHIPMENT에만 적용된다.
  * 권한이 없는 종류는 조회 조건에서 아예 빠진다 — 걸러 내는 게 아니라 애초에
  * 묻지 않는다.
+ *
+ * ── 결재선(순차 출하 승인) ──────────────────────────────────────────────
+ * 최종 출하 승인 행에 `route_id`가 적혀 있으면 「누가 결재하는가」를 **절차가**
+ * 정한다 — 대표·위임 판정을 건너뛰고 그 단계의 지정 승인자(와 최고관리자)만
+ * 본다. 결재를 실제로 막는 decideRepairCaseApproval이 그렇게 판정하므로 여기도
+ * 같아야 한다. 판정 자체는 여기서 새로 적지 않고 approvalFollowsRoute
+ * (auth/approval-assignment.ts) 하나만 부른다.
+ *
+ * 그래서 두 곳이 함께 넓어져야 한다:
+ *  - 🔴 **조회 종류**(resolveDecidableApprovalTypes). 예전에는 대표·위임일
+ *    때만 FINAL_SHIPMENT를 물었다. 결재선 1단계로 지정된 사람이 대표가 아니면
+ *    그 종류를 **애초에 묻지 않아** 영영 뜨지 않는다. 그래서 「대표·위임이거나
+ *    결재선 단계를 맡을 수 있는 계정이거나」로 넓힌다. 넓게 물어도 좁히는 일은
+ *    아래 행별 판정이 그대로 한다.
+ *  - **행별 판정.** 축이 둘이 됐으므로 행마다 어느 쪽으로 볼지 갈라야 한다.
+ *
+ * 행위자 조회가 `is_active`·`locked_at`을 함께 읽는 것도 이 때문이다. 결재
+ * mutation이 FINAL_SHIPMENT에서 그 둘을 강제하므로(결재선 경로에도 걸린다),
+ * 읽지 않으면 배지에는 잡히는데 눌러도 막히는 건이 생긴다.
  *
  * ── 지정 승인자 ─────────────────────────────────────────────────────────
  * 요청 행에 「누가 처리할지」가 지정돼 있을 수 있다
@@ -110,6 +131,11 @@ export type PendingApprovalItem = {
 type AssignmentActor = { id: string; role: string; isDeveloper: boolean };
 
 type DecidableTypes = {
+  /**
+   * 조회에 넣을 승인 종류. 🔴 **최종 판정이 아니라 사전 거름망**이다 —
+   * FINAL_SHIPMENT는 결재선 때문에 넓게 잡고(아래 참조), 좁히는 일은 행별
+   * 판정이 한다.
+   */
   types: RepairCaseApprovalType[];
   /**
    * 지정 관문에 넘길 행위자. `types`가 비어 있으면 null이다(그때는 판정할
@@ -117,6 +143,13 @@ type DecidableTypes = {
    * `role`·`isDeveloper`를 함께 들고 다닌다.
    */
   actor: AssignmentActor | null;
+  /** 검수 승인을 결재할 수 있는 역할인가. */
+  inspectionEligible: boolean;
+  /**
+   * 대표 직접 결재 또는 유효한 위임 — **결재선을 타지 않는** 최종 출하 승인
+   * 행을 가르는 축이다.
+   */
+  shipmentDecideAllowed: boolean;
 };
 
 /**
@@ -125,27 +158,48 @@ type DecidableTypes = {
  */
 async function resolveDecidableApprovalTypes(actorUserId: string): Promise<DecidableTypes> {
   const [actor] = await db
-    .select({ role: users.role, approvalStatus: users.approvalStatus, isDeveloper: users.isDeveloper })
+    .select({
+      role: users.role,
+      approvalStatus: users.approvalStatus,
+      isDeveloper: users.isDeveloper,
+      // 결재 mutation이 FINAL_SHIPMENT에서 강제하는 두 칸(결재선 경로에도
+      // 걸린다). 읽지 않으면 배지에 잡히는데 눌러도 막히는 건이 생긴다.
+      isActive: users.isActive,
+      lockedAt: users.lockedAt,
+    })
     .from(users)
     .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
 
   if (!actor || actor.approvalStatus !== "APPROVED") {
-    return { types: [], actor: null };
+    return { types: [], actor: null, inspectionEligible: false, shipmentDecideAllowed: false };
   }
 
   const types: RepairCaseApprovalType[] = [];
-  if (actorHasAllowedRole(actor, INSPECTION_DECIDE_ELIGIBLE_ROLES)) {
+  const inspectionEligible = actorHasAllowedRole(actor, INSPECTION_DECIDE_ELIGIBLE_ROLES);
+  if (inspectionEligible) {
     types.push("REPAIR_INSPECTION");
   }
   // 대표 자격/위임은 역할과 무관한 별도 축이다 — 같은 함수를 승인 화면이
   // 이미 쓰고 있으므로 여기서 다시 짜지 않는다.
   const shipmentAuthorization = await resolveShipmentDecideAuthorization(actorUserId);
-  if (shipmentAuthorization.allowed) {
+  // 결재선 단계를 맡을 수 있는 계정인가 — 대표·위임과 **다른 축**이다.
+  // 조건은 「결재선에 올릴 수 있는 사람」(queries/shipment-approval-routes.ts의
+  // listSelectableApproverCandidates)과 글자 그대로 같다: 승인됨 · 활성 ·
+  // 잠기지 않음 · 삭제 안 됨. 역할 제한은 없다 — 결재선 지정에도 없다.
+  //
+  // 🔴 여기서 사람을 좁히지 않는 것이 의도다. 넓게 물어도 결재선 행은 아래에서
+  // 지정 관문이 그 단계 승인자(와 최고관리자)로 좁히고, 결재선을 타지 않는
+  // 행은 대표·위임으로 좁힌다. 반대로 여기서 좁히면 **최고관리자 비상구**가
+  // 함께 닫힌다(자기 단계가 아니면 물어보지도 않게 되므로).
+  const mayHoldRouteStep = actor.isActive && actor.lockedAt === null;
+  if (shipmentAuthorization.allowed || mayHoldRouteStep) {
     types.push("FINAL_SHIPMENT");
   }
   return {
     types,
     actor: { id: actorUserId, role: actor.role, isDeveloper: actor.isDeveloper },
+    inspectionEligible,
+    shipmentDecideAllowed: shipmentAuthorization.allowed,
   };
 }
 
@@ -153,10 +207,16 @@ async function resolveDecidableApprovalTypes(actorUserId: string): Promise<Decid
  * 이 사용자가 결재할 수 있는 승인 종류가 하나라도 있는가 — 목록이 0건일 때
  * "결재할 게 없다"와 "애초에 결재자가 아니다"를 화면이 구분하기 위한 것이다
  * (전자는 조건을 보여 주고, 후자는 조건 자체를 감춘다).
+ *
+ * 🔴 `types`를 그대로 세지 않는다. 그쪽은 결재선 때문에 「맡을 수 있는 계정」
+ * 까지 넓게 잡는 **사전 거름망**이라, 그대로 세면 승인·활성 계정 누구나
+ * "결재자"가 되어 언제나 0건인 조건이 모두에게 보인다. 여기서 묻는 것은
+ * 지금까지와 같은 「확실한 결재자인가」다 — 결재선 단계를 실제로 맡은 사람은
+ * 그 건이 목록에 잡히므로 호출부의 "0건이 아니다" 쪽에서 이미 걸린다.
  */
 export async function canDecideAnyRepairCaseApproval(actorUserId: string): Promise<boolean> {
-  const { types } = await resolveDecidableApprovalTypes(actorUserId);
-  return types.length > 0;
+  const { inspectionEligible, shipmentDecideAllowed } = await resolveDecidableApprovalTypes(actorUserId);
+  return inspectionEligible || shipmentDecideAllowed;
 }
 
 /**
@@ -180,7 +240,7 @@ export async function canDecideAnyRepairCaseApproval(actorUserId: string): Promi
  * 워크플로 단계는 보지 않는다 — 단계가 무엇이든 요청이 들어와 있으면 나온다.
  */
 export async function listRepairCasesPendingMyApproval(actorUserId: string): Promise<PendingApprovalItem[]> {
-  const { types, actor } = await resolveDecidableApprovalTypes(actorUserId);
+  const { types, actor, shipmentDecideAllowed } = await resolveDecidableApprovalTypes(actorUserId);
   if (types.length === 0 || !actor) return [];
 
   // 후보는 요청 기록이다 — 내가 결재할 수 있는 종류의 결재 행 전부를, 그 행이
@@ -201,6 +261,8 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       // 지정 승인자. NULL이면 「지정 없음」이고, 그때는 지금까지와 똑같이
       // 자격 있는 사람 모두에게 보인다(파일 상단 "지정 승인자" 참조).
       assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
+      // 이 행이 결재선을 타는가를 가르는 나머지 한 칸(파일 상단 "결재선" 참조).
+      routeId: repairCaseApprovals.routeId,
     })
     .from(repairCaseApprovals)
     .innerJoin(repairCases, eq(repairCases.id, repairCaseApprovals.repairCaseId))
@@ -240,6 +302,7 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       status: string;
       repairCaseVersionAtRequest: number;
       assignedApproverUserId: string | null;
+      routeId: string | null;
     }
   >();
   for (const row of approvalRows) {
@@ -252,10 +315,27 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
   for (const latest of latestByCaseAndType.values()) {
     const state = resolveApprovalState(latest, latest.version);
     if (state !== "PENDING") continue;
-    // 🔴 지정 관문은 **접기가 끝난 뒤** 본다. 접기 전에 걸러 내면 최신 행이
+    // 🔴 인가는 **접기가 끝난 뒤** 본다. 접기 전에 걸러 내면 최신 행이
     // 빠지면서 옛 REQUESTED 행이 최신 행 행세를 하게 되고, 지정을 존중하기는
-    // 커녕 엉뚱한 사람에게 옛 요청이 뜬다. NULL(지정 없음)은 언제나 통과하므로
-    // 이 줄은 기존 동작을 바꾸지 않는다.
+    // 커녕 엉뚱한 사람에게 옛 요청이 뜬다.
+    //
+    // 축이 둘이라 행마다 갈라야 한다 — decideRepairCaseApproval이 같은 순서로
+    // 판정한다:
+    //  - 결재선을 타는 행: 절차가 대표를 대신한다. 대표·위임을 보지 않고 그
+    //    단계의 지정 승인자(와 최고관리자)만 본다. 계정이 승인됨·활성·잠기지
+    //    않음인 것은 조회 종류를 정할 때 이미 봤다.
+    //  - 그 밖의 최종 출하 승인: 지금까지 그대로 대표·위임이다.
+    //  - 검수 승인: 결재선을 탈 수 없다(스키마 CHECK). 역할 자격은 조회 종류가
+    //    이미 걸렀으므로 지정 관문만 남는다.
+    // 지정이 NULL(지정 없음)이면 관문이 언제나 열리므로, 결재선을 쓰지 않는
+    // 저장소에서는 이 줄들이 기존 동작을 한 톨도 바꾸지 않는다.
+    if (
+      latest.approvalType === "FINAL_SHIPMENT" &&
+      !approvalFollowsRoute(latest) &&
+      !shipmentDecideAllowed
+    ) {
+      continue;
+    }
     if (!mayDecideAssignedApproval(latest.assignedApproverUserId, actor)) continue;
     items.push({
       repairCaseId: latest.repairCaseId,

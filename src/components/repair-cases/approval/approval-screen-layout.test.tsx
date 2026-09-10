@@ -50,6 +50,19 @@ const CARD_PARTS: Array<[string, string]> = [
  */
 const renderBlock = (source: string) => source.slice(source.lastIndexOf("return ("));
 
+/**
+ * 원본에서 **한 갈래만** 잘라낸다. 파일 전체에 정규식을 걸면 이웃 갈래의 같은
+ * 문구에 걸려, 정작 이 갈래의 관문이 사라져도 시험이 통과해 버린다
+ * (procedure-publish-flow.test.tsx 의 sliceFunction 과 같은 이유·같은 모양).
+ */
+const sliceBetween = (source: string, startMarker: string, endMarker: string) => {
+  const start = source.indexOf(startMarker);
+  assert.ok(start >= 0, `원본에서 '${startMarker}' 를 찾지 못했다`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.ok(end > start, `원본에서 '${endMarker}' 를 찾지 못했다`);
+  return source.slice(start, end);
+};
+
 function approvalRecord(overrides: Partial<ApprovalRecordRow> = {}): ApprovalRecordRow {
   return {
     id: "approval-1",
@@ -62,6 +75,9 @@ function approvalRecord(overrides: Partial<ApprovalRecordRow> = {}): ApprovalRec
     // 지정 없음(NULL)이 기본값이다 — 자격 있는 사람 누구나 처리한다.
     assignedApproverUserId: null,
     assignedApproverName: null,
+    // 결재선을 타지 않음(NULL)이 기본값이다 — 대표·위임 방식 그대로다.
+    routeId: null,
+    routeStepOrder: null,
     decidedByUserId: null,
     decidedByName: null,
     decidedAt: null,
@@ -192,4 +208,161 @@ describe("🔴 두 카드 부품 — 카드 밖 형제로 보이는 문단이 �
       );
     });
   }
+});
+
+/**
+ * ============================================================================
+ * 최종 출하 승인 카드 — 결재선(순차 출하 승인)
+ * ============================================================================
+ * 서버는 이미 결재선을 탄다(mutations/repair-case-approvals-route.integration
+ * .test.ts 가 그 인가를 실제 DB 로 못 박는다). 여기서 지키는 것은 **화면이 같은
+ * 규칙으로 단추를 그리는가**다 — 어긋나면 「단추는 보이는데 누르면 거절」이나
+ * 그 반대가 되고, 후자는 화면에 아무 표시도 남기지 않아 더 나쁘다.
+ *
+ * 위 머리말과 같은 이유로 카드 부품은 렌더하지 못한다(서버 액션 → server-only).
+ * 그래서 판정이 적힌 갈래를 **원본에서 잘라** 확인하고, 새 문구가 카드 **안**에
+ * 들어가는지는 껍데기(DatabaseApprovalCard)를 실제로 렌더해 확인한다.
+ * ============================================================================
+ */
+describe("🔴 최종 출하 승인 카드 — 결재선 행에서는 절차가 대표를 대신한다", () => {
+  /** 요청 대기(REQUESTED) 갈래 하나만 — 이웃 갈래의 같은 문구에 걸리지 않게. */
+  const decideBranch = sliceBetween(
+    shipmentCardSource,
+    '} else if (displayStatus === "REQUESTED") {',
+    '} else if (displayStatus === "APPROVED") {'
+  );
+
+  test("판정을 카드가 새로 적지 않고 공용 함수를 부른다", () => {
+    assert.match(
+      flat(shipmentCardSource),
+      /import \{ approvalFollowsRoute, mayDecideAssignedApproval \} from "@\/lib\/auth\/approval-assignment"/,
+      "서버가 보는 것과 같은 함수를 봐야 한다"
+    );
+    assert.ok(
+      !/routeId !== null/.test(shipmentCardSource),
+      "「결재선을 타는가」 판정을 카드가 한 벌 더 적었다 — 언젠가 한쪽만 고쳐진다"
+    );
+  });
+
+  test("🔴 결재선 행에는 대표·위임을 요구하지 않는다 — 단계 승인자가 대표가 아니어도 단추가 나온다", () => {
+    // 옛 모양(`if (decideAuthorization.allowed)`)이 되살아나면 절차에 올라간
+    // 사람이 대표가 아니라는 이유로 자기 단계를 결재하지 못한다.
+    assert.match(
+      flat(decideBranch),
+      /if \(!followsRoute && !decideAuthorization\.allowed\)/,
+      "대표·위임 관문이 결재선 행에까지 걸린다"
+    );
+    assert.ok(
+      !/if \(decideAuthorization\.allowed\)/.test(flat(decideBranch)),
+      "결재선을 보지 않는 옛 관문이 되살아났다"
+    );
+    assert.equal(
+      (decideBranch.match(/대표로 지정된 계정 또는 유효한 위임/g) ?? []).length,
+      1,
+      "대표·위임 안내가 두 자리에 적히면 한쪽만 고쳐지는 날이 온다"
+    );
+  });
+
+  test("🔴 차례가 아니면 단추 대신 지정된 사람의 이름이 나온다", () => {
+    assert.match(flat(decideBranch), /else if \(!assignedGateOpen\)/);
+    assert.match(
+      flat(decideBranch),
+      /이 요청은 \$\{record\.assignedApproverName\} 님에게 지정되어 있습니다\./,
+      "검수 카드와 같은 문구여야 한다 — 이름이 없으면 사람은 무엇을 해야 할지 모른다"
+    );
+    assert.match(
+      flat(decideBranch),
+      /이 요청은 지정된 승인자만 처리할 수 있습니다\./,
+      "이름을 못 찾을 때의 대비 문구가 없다"
+    );
+  });
+
+  test("🔴 승인·반려 단추는 두 관문을 **다 지난 뒤에만** 밀어 넣는다", () => {
+    const gate = decideBranch.indexOf("!assignedGateOpen");
+    const approve = decideBranch.indexOf('key: "approve"');
+    const reject = decideBranch.indexOf('key: "reject"');
+    assert.ok(gate >= 0, "지정 관문이 아예 없다");
+    assert.ok(approve > gate, "지정 관문보다 먼저 승인 단추를 만든다 — 남의 차례에도 눌린다");
+    assert.ok(reject > gate, "지정 관문보다 먼저 반려 단추를 만든다");
+  });
+
+  test("🔴 결재선을 안 쓰는 요청의 자격 문구는 예전 그대로다", () => {
+    const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+    assert.match(
+      flat(extraBlock),
+      /routeProgress \?\? \(decideAuthorization\.allowed && decideAuthorization\.mode === "DIRECT"/,
+      "결재선을 타지 않으면 예전 문구로 돌아가는 갈래가 사라졌다"
+    );
+    for (const text of [
+      "대표로 지정된 계정입니다.",
+      "의 위임을 받아 처리할 수 있습니다.",
+      "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다.",
+    ]) {
+      assert.ok(extraBlock.includes(text), `예전 문구가 사라졌다: ${text}`);
+    }
+  });
+
+  test("🔴 진행 표시는 「n/m단계 · 지금 차례: ○○○」이고, 전체 단계 수는 서버가 준 값이다", () => {
+    const progressBlock = sliceBetween(shipmentCardSource, "const routeProgress =", "const extra = (");
+    assert.match(flat(progressBlock), /followsRoute &&/, "결재선 행에서만 그려야 한다");
+    assert.match(flat(progressBlock), /결재선 \$\{record\.routeStepOrder\}/, "앞자리는 이 행의 단계다");
+    assert.match(flat(progressBlock), /\/\$\{routeTotalSteps\}/, "뒷자리는 서버가 센 전체 단계 수다");
+    assert.match(flat(progressBlock), /· 지금 차례: \$\{record\.assignedApproverName/);
+    // 이미 처리된 단계에 「지금 차례」가 남으면 끝난 칸이 남의 차례를 말한다.
+    assert.match(
+      flat(progressBlock),
+      /displayStatus === "REQUESTED" \? ` · 지금 차례: /,
+      "「지금 차례」가 대기 중일 때로 묶여 있지 않다"
+    );
+    // 「현재 판」을 화면에서 세지 않는다 — 진행 중인 건은 옛 판을 따라간다.
+    assert.ok(
+      !/getCurrentShipmentApprovalRoute/.test(shipmentCardSource),
+      "카드가 현재 판을 읽으려 한다 — 「2/2단계」가 「2/4단계」로 보인다"
+    );
+  });
+});
+
+describe("결재선 — 새 문구도 카드 밖으로 나가지 않는다", () => {
+  const baseProps = {
+    title: "최종 출하 승인",
+    record: null,
+    displayStatus: "REQUESTED" as const,
+    actions: [],
+  };
+
+  test("🔴 「2/3단계 · 지금 차례: ○○○」이 카드 <section> **안**에 나온다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard {...baseProps} extra={<span>결재선 2/3단계 · 지금 차례: 김도윤</span>} />
+    );
+    const progress = html.indexOf("결재선 2/3단계 · 지금 차례: 김도윤");
+    const sectionEnd = html.indexOf("</section>");
+    assert.ok(progress >= 0, "진행 표시가 아예 그려지지 않았다");
+    assert.ok(progress < sectionEnd, "카드 밖으로 나가면 2열 격자의 칸을 먹어 옆 카드가 밀린다");
+  });
+
+  test("🔴 차례가 아닐 때의 이유도 카드 <section> **안**에 나온다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard {...baseProps} disabledReason="이 요청은 김도윤 님에게 지정되어 있습니다." />
+    );
+    const reason = html.indexOf("이 요청은 김도윤 님에게 지정되어 있습니다.");
+    const sectionEnd = html.indexOf("</section>");
+    assert.ok(reason >= 0, "이유가 아예 그려지지 않았다");
+    assert.ok(reason < sectionEnd);
+  });
+
+  test("내 차례면 단추가 나오고 이유 문단은 나오지 않는다", () => {
+    const html = renderToStaticMarkup(
+      <DatabaseApprovalCard
+        {...baseProps}
+        actions={[
+          { key: "approve", label: "출하 승인", onClick: () => {} },
+          { key: "reject", label: "출하 반려", onClick: () => {}, tone: "danger" },
+        ]}
+        disabledReason="이 요청은 김도윤 님에게 지정되어 있습니다."
+      />
+    );
+    assert.match(html, /출하 승인<\/button>/);
+    assert.match(html, /출하 반려<\/button>/);
+    assert.ok(!/김도윤/.test(html), "단추와 이유가 함께 나오면 사람이 어느 쪽을 믿을지 모른다");
+  });
 });

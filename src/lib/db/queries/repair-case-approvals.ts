@@ -28,6 +28,17 @@ export type ApprovalRecordRow = {
   assignedApproverUserId: string | null;
   /** 지정된 사람의 이름. 지정이 없으면 `null` — 카드가 `-` 로 그린다. */
   assignedApproverName: string | null;
+  /**
+   * 이 요청이 타고 있는 결재선 판. `null` 은 「결재선을 타지 않는다」이고
+   * 정상값이다 — 그때는 대표·위임 방식으로 처리한다. 화면이 이 값을
+   * approvalFollowsRoute 에 그대로 넘겨 어느 축으로 판정할지 정한다.
+   *
+   * 🔴 **「현재 판」이 아니라 요청 시점에 붙잡아 둔 판**이다. 진행 중인 건은
+   * 관리자가 절차를 바꿔도 이 판을 끝까지 따라간다.
+   */
+  routeId: string | null;
+  /** 그 판 안에서 몇 번째 단계인가(1부터). `routeId` 와 함께 있거나 함께 없다. */
+  routeStepOrder: number | null;
   decidedByUserId: string | null;
   decidedByName: string | null;
   decidedAt: string | null;
@@ -47,6 +58,8 @@ const SELECT_COLUMNS = {
   requestReason: repairCaseApprovals.requestReason,
   assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
   assignedApproverName: assignedApprover.name,
+  routeId: repairCaseApprovals.routeId,
+  routeStepOrder: repairCaseApprovals.routeStepOrder,
   decidedByUserId: repairCaseApprovals.decidedByUserId,
   decidedByName: decider.name,
   decidedAt: repairCaseApprovals.decidedAt,

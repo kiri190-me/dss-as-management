@@ -11,6 +11,7 @@ import {
   listInspectionApproverCandidates,
 } from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
+import { countShipmentApprovalRouteSteps } from "@/lib/db/queries/shipment-approval-routes";
 import { roleLabels, type Role } from "@/lib/domain/types";
 
 export const metadata: Metadata = {
@@ -59,6 +60,16 @@ export default async function RepairCaseApprovalPage({
     listInspectionApproverCandidates(),
   ]);
 
+  // 결재선 진행 표시(「2/3단계」)의 뒷자리. 🔴 「현재 판」이 아니라 **그 요청
+  // 행에 적힌 판**으로 센다 — 진행 중인 건은 관리자가 절차를 바꿔도 옛 판을
+  // 끝까지 따라가므로, 현재 판을 세면 「2/2단계」가 「2/4단계」로 보인다.
+  // 서버에서 계산해 내려보내는 것은 decideAuthorization 과 같은 이유다
+  // (클라이언트가 DB 를 읽게 두지 않는다).
+  const shipmentRecord = currentApprovals.find((a) => a.approvalType === "FINAL_SHIPMENT")?.latest ?? null;
+  const shipmentRouteTotalSteps = shipmentRecord?.routeId
+    ? await countShipmentApprovalRouteSteps(shipmentRecord.routeId)
+    : null;
+
   return (
     <DatabaseApprovalScreen
       resolved={resolved}
@@ -66,6 +77,7 @@ export default async function RepairCaseApprovalPage({
       currentApprovals={currentApprovals}
       history={history}
       decideAuthorization={decideAuthorization}
+      shipmentRouteTotalSteps={shipmentRouteTotalSteps}
       // 역할 이름표는 화면에 보여 줄 **값**이라 승격하지 않는다 — 개발자
       // 표시가 켜져 있어도 그 사람의 역할은 그대로다(developer-promotion.ts).
       inspectionAssigneeCandidates={inspectionAssignees.map((candidate) => ({

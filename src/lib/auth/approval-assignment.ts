@@ -60,3 +60,34 @@ export function mayDecideAssignedApproval(
   if (assignedApproverUserId === actor.id) return true;
   return actorHasAllowedRole(actor, ASSIGNMENT_OVERRIDE_ROLES);
 }
+
+/**
+ * 결재선(shipment_approval_routes)을 판정하는 데 필요한 요청 행의 두 칸.
+ * 행 전체가 아니라 이 모양만 받으므로 조회·화면·mutation 이 각자 들고 있는
+ * 서로 다른 행 타입을 그대로 넘길 수 있다.
+ */
+export type RouteFollowingApprovalRow = {
+  routeId: string | null;
+  assignedApproverUserId: string | null;
+};
+
+/**
+ * 이 요청 행이 **결재선을 타는가** — 「누가 결재하는가」를 절차가 정하는가.
+ *
+ * 🔴 판정을 세 곳(mutation · 알림 조회 · 승인 카드)이 본다. 그래서 이 파일
+ * 머리말의 이유 그대로 여기 한 곳에만 적는다 — 두 곳에 적으면 「단추는 보이는데
+ * 누르면 거절」이나 그 반대가 되고, 후자는 화면에 아무 표시도 남기지 않는다.
+ *
+ * 참이면 대표·위임 판정을 건너뛰고 지정 관문(mayDecideAssignedApproval) 하나만
+ * 본다 — 절차가 「출하 대표」를 **대신하는** 것이 이 기능의 설계다.
+ *
+ * ── 🔴 판만 보지 않고 **지정까지 함께** 보는 이유 ───────────────────────
+ * 지정이 비어 있으면 결재선 경로로 보지 않는다. 요청 경로는 판 단계를 넣을 때
+ * 지정을 언제나 함께 채우므로 정상적으로는 생기지 않는 조합이고, 만에 하나 그런
+ * 행이 있어도 **넓어지는 쪽이 아니라 지금까지의 대표·위임 판정으로 되돌아간다**
+ * — 판만 적히고 사람이 빈 행을 결재선으로 보면 대표 검사도 지정 검사도 없어져
+ * 자격 있는 사람 아무나 결재하게 되기 때문이다.
+ */
+export function approvalFollowsRoute(row: RouteFollowingApprovalRow): boolean {
+  return row.routeId !== null && row.assignedApproverUserId !== null;
+}

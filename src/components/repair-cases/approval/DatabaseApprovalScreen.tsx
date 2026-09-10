@@ -22,6 +22,7 @@ export default function DatabaseApprovalScreen({
   history,
   decideAuthorization,
   inspectionAssigneeCandidates,
+  shipmentRouteTotalSteps,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -30,6 +31,12 @@ export default function DatabaseApprovalScreen({
   decideAuthorization: ShipmentDecideAuthorization;
   /** 검수 승인 요청 창의 「누구에게 보낼까요」 후보 — 서버에서 계산해 온다. */
   inspectionAssigneeCandidates: ApprovalAssigneeOption[];
+  /**
+   * 지금 최종 출하 승인 요청이 타고 있는 결재선 판의 전체 단계 수. 결재선을
+   * 타지 않으면 null. 서버(page.tsx)가 **그 행에 적힌 판**으로 세어 내려보낸다
+   * — 클라이언트가 DB 를 읽게 두지 않는 것은 decideAuthorization 과 같은 이유다.
+   */
+  shipmentRouteTotalSteps: number | null;
 }) {
   if (!actingUser) {
     return (
@@ -65,6 +72,7 @@ export default function DatabaseApprovalScreen({
           decideAuthorization={decideAuthorization}
           inspectionApproved={inspectionApproved}
           currentVersion={resolved.version}
+          routeTotalSteps={shipmentRouteTotalSteps}
         />
       </div>
 

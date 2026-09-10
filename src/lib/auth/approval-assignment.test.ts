@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mayDecideAssignedApproval } from "./approval-assignment";
+import { approvalFollowsRoute, mayDecideAssignedApproval } from "./approval-assignment";
 import type { Role } from "@/lib/domain/types";
 
 const ALL_ROLES: Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"];
@@ -58,5 +58,35 @@ describe("mayDecideAssignedApproval — 지정은 권한을 만들지 않는다"
     // 자격을 끌어들이는 순간 「지정 = 권한 부여」가 된다.
     const sales = actor({ id: SOMEONE_ELSE, role: "SALES" });
     assert.equal(mayDecideAssignedApproval(SOMEONE_ELSE, sales), true);
+  });
+});
+
+const ROUTE = "33333333-3333-4333-8333-333333333333";
+
+describe("approvalFollowsRoute — 판과 지정이 **둘 다** 있어야 결재선이다", () => {
+  test("판 + 지정이 함께 있으면 결재선을 탄다", () => {
+    assert.equal(approvalFollowsRoute({ routeId: ROUTE, assignedApproverUserId: SOMEONE_ELSE }), true);
+  });
+
+  test("🔴 둘 다 없으면 결재선이 아니다 — 이 기능이 생기기 전의 모든 행이 여기다", () => {
+    assert.equal(approvalFollowsRoute({ routeId: null, assignedApproverUserId: null }), false);
+  });
+
+  test("🔴 판만 적히고 지정이 빈 행은 결재선으로 보지 않는다 — 좁아지는 쪽으로 실패한다", () => {
+    // 결재선으로 보면 대표 검사(대표·위임)도 지정 검사도 없어져 자격 있는
+    // 사람 아무나 결재하게 된다. 그래서 지금까지의 대표·위임 판정으로 되돌아간다.
+    assert.equal(approvalFollowsRoute({ routeId: ROUTE, assignedApproverUserId: null }), false);
+  });
+
+  test("지정만 있고 판이 없으면 결재선이 아니다 — 검수 승인의 지정이 그 모양이다", () => {
+    // 검수 승인은 요청할 때 「누구에게 보낼까」를 고를 수 있지만 결재선은 아니다
+    // (스키마 CHECK 도 route_id 를 최종 출하 승인에만 허용한다).
+    assert.equal(approvalFollowsRoute({ routeId: null, assignedApproverUserId: SOMEONE_ELSE }), false);
+  });
+
+  test("🔴 행위자를 보지 않는다 — 「누가 결재하는가」는 지정 관문이 따로 본다", () => {
+    // 이 함수는 행 모양 하나만 받는다. 사람이 인자에 없다는 것 자체가, 여기에
+    // 권한 판정이 섞여 들어갈 자리가 없다는 뜻이다.
+    assert.equal(approvalFollowsRoute.length, 1);
   });
 });

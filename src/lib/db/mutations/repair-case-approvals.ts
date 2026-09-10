@@ -4,7 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, shipmentApprovalDelegations, users } from "../schema";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import {
   getCurrentShipmentApprovalRouteChain,
   getShipmentApprovalRouteStep,
@@ -337,12 +337,11 @@ export async function decideRepairCaseApproval(
       // 정한다 — 대표·위임 판정을 건너뛰고 아래 지정 관문 하나만 본다.
       // 절차가 「출하 대표」를 **대신하는** 것이 이 기능의 설계다.
       //
-      // 지정이 비어 있으면 결재선 경로로 보지 않는다. 우리 요청 경로는 판
-      // 단계를 넣을 때 지정을 언제나 함께 채우므로 정상적으로는 생기지 않는
-      // 조합이고, 만에 하나 그런 행이 있어도 **넓어지는 쪽이 아니라 지금까지의
-      // 대표·위임 판정으로 되돌아간다**(지정도 대표 검사도 없는 행은 자격 있는
-      // 사람 아무나 결재하게 되므로).
-      const followsRoute = latest.routeId !== null && latest.assignedApproverUserId !== null;
+      // 판정은 여기 적지 않는다 — 화면(승인 카드)과 알림 조회도 같은 물음을
+      // 물으므로 approvalFollowsRoute(auth/approval-assignment.ts) 하나만
+      // 부른다. 「판만 적히고 지정이 빈 행」을 왜 결재선으로 보지 않는지도
+      // 그 함수 주석에 있다.
+      const followsRoute = approvalFollowsRoute(latest);
 
       let delegatedFromUserId: string | null = null;
       if (approvalType === "REPAIR_INSPECTION") {

@@ -193,6 +193,25 @@ export async function getShipmentApprovalRouteStep(
   return step ?? null;
 }
 
+/**
+ * **그 판의** 전체 단계 수. 승인 카드가 「2/3단계」의 뒷자리를 그리는 데 쓴다.
+ *
+ * 🔴 「현재 판」이 아니라 **요청 행에 적힌 판(`repair_case_approvals.route_id`)**
+ * 으로 센다. 진행 중인 건은 옛 판을 끝까지 따라가므로, 현재 판을 세면 이미
+ * 끝나 가는 건이 「2/2단계」가 아니라 「2/4단계」로 보인다 — 사람은 아직 두
+ * 사람이 더 남았다고 읽는다.
+ *
+ * 판이 없거나 단계가 0개면 0이다(부르는 쪽은 그때 진행 표시를 그리지 않는다).
+ * 단계 수가 한 자릿수라 전량을 읽어 세는 비용은 문제되지 않는다.
+ */
+export async function countShipmentApprovalRouteSteps(routeId: string): Promise<number> {
+  const steps = await db
+    .select({ stepOrder: shipmentApprovalRouteSteps.stepOrder })
+    .from(shipmentApprovalRouteSteps)
+    .where(eq(shipmentApprovalRouteSteps.routeId, routeId));
+  return steps.length;
+}
+
 /** 결재선에 올릴 수 있는 사람 한 줄. */
 export type SelectableApproverCandidate = {
   id: string;

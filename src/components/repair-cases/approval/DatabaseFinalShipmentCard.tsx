@@ -7,6 +7,7 @@ import ApprovalActionDialog from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
@@ -48,6 +49,7 @@ export default function DatabaseFinalShipmentCard({
   decideAuthorization,
   inspectionApproved,
   currentVersion,
+  routeTotalSteps,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
@@ -61,6 +63,15 @@ export default function DatabaseFinalShipmentCard({
   inspectionApproved: boolean;
   /** 지금 접수 건의 version — 이 값과 다른 승인은 서버가 무효로 본다. */
   currentVersion: number;
+  /**
+   * 이 요청이 타고 있는 결재선 **판의 전체 단계 수**. 결재선을 타지 않으면
+   * `null`이고, 그때 진행 표시는 그리지 않는다.
+   *
+   * 🔴 「현재 판」이 아니라 **이 요청 행에 적힌 판**을 센 값이라야 한다 —
+   * 서버(page.tsx)가 record.routeId 로 읽어 내려보낸다. 진행 중인 건은 옛 판을
+   * 끝까지 따라가므로, 현재 판을 세면 「2/2단계」가 「2/4단계」로 보인다.
+   */
+  routeTotalSteps: number | null;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -69,6 +80,12 @@ export default function DatabaseFinalShipmentCard({
 
   const displayStatus = displayStatusOf(record, currentVersion);
   const requestEligible = actorHasAllowedRole(actingUser, REQUEST_ELIGIBLE_ROLES);
+  // 이 요청이 결재선을 타는가 — 서버가 실제로 판정하는 것과 **같은 함수**를
+  // 부른다. 참이면 절차가 「출하 대표」를 대신하므로 대표·위임을 보지 않는다.
+  const followsRoute = record !== null && approvalFollowsRoute(record);
+  // 지정 관문. 결재선을 타지 않는 출하 요청은 지정이 언제나 NULL 이라 늘
+  // 열려 있어 동작이 바뀌지 않는다 — 그래도 두 축을 함께 적어 둔다.
+  const assignedGateOpen = mayDecideAssignedApproval(record?.assignedApproverUserId ?? null, actingUser);
 
   const actions: DatabaseApprovalActionButton[] = [];
   let disabledReason: string | null = null;
@@ -95,13 +112,20 @@ export default function DatabaseFinalShipmentCard({
       disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
     }
   } else if (displayStatus === "REQUESTED") {
-    if (decideAuthorization.allowed) {
+    if (!followsRoute && !decideAuthorization.allowed) {
+      // 결재선을 타지 않는 요청 — 예전 그대로 대표·위임만 처리한다.
+      disabledReason = "대표로 지정된 계정 또는 유효한 위임을 받은 대리 승인자만 처리할 수 있습니다.";
+    } else if (!assignedGateOpen) {
+      // 자격은 있는데 지금 내 차례가 아닌 경우. 단추를 감추기만 하면 사람은 왜
+      // 못 누르는지 모른다 — 누구 차례인지 이름을 적는다(검수 카드와 같은 문구).
+      disabledReason = record?.assignedApproverName
+        ? `이 요청은 ${record.assignedApproverName} 님에게 지정되어 있습니다.`
+        : "이 요청은 지정된 승인자만 처리할 수 있습니다.";
+    } else {
       actions.push(
         { key: "approve", label: "출하 승인", onClick: () => setDialogState("APPROVED") },
         { key: "reject", label: "출하 반려", onClick: () => setDialogState("REJECTED"), tone: "danger" }
       );
-    } else {
-      disabledReason = "대표로 지정된 계정 또는 유효한 위임을 받은 대리 승인자만 처리할 수 있습니다.";
     }
   } else if (displayStatus === "APPROVED") {
     disabledReason = "이미 승인 완료되어 추가 처리를 할 수 없습니다.";
@@ -129,16 +153,37 @@ export default function DatabaseFinalShipmentCard({
     router.refresh();
   }
 
+  /**
+   * 결재선을 타는 요청에서는 이 칸이 「처리 자격」(대표·위임) 대신 **진행
+   * 상황**을 말한다 — 절차가 대표를 대신하므로 대표 여부는 이 요청에 아무
+   * 의미가 없고, 사람이 알고 싶은 것은 「몇 단계까지 왔고 지금 누구 차례인가」다.
+   *
+   * 뒷자리(전체 단계 수)는 서버가 **이 행에 적힌 판**을 세어 내려보낸 값이다.
+   * 못 세었으면 앞자리만 적는다 — 「2/」처럼 반쪽짜리를 보여 주지 않는다.
+   *
+   * 「지금 차례」는 **아직 대기 중일 때만** 적는다. 이미 처리된 단계에 그대로
+   * 두면 승인·반려가 끝난 칸이 「지금 ○○○ 차례」라고 말하게 된다.
+   */
+  const routeProgress =
+    followsRoute && record?.routeStepOrder !== null && record?.routeStepOrder !== undefined
+      ? `결재선 ${record.routeStepOrder}${routeTotalSteps && routeTotalSteps > 0 ? `/${routeTotalSteps}` : ""}단계${
+          displayStatus === "REQUESTED"
+            ? ` · 지금 차례: ${record.assignedApproverName ?? "확인할 수 없습니다"}`
+            : ""
+        }`
+      : null;
+
   const extra = (
     <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md bg-zinc-50 p-3 text-sm sm:grid-cols-2 dark:bg-zinc-800/60">
       <div>
-        <dt className="text-xs text-zinc-500 dark:text-zinc-400">처리 자격</dt>
+        <dt className="text-xs text-zinc-500 dark:text-zinc-400">{routeProgress ? "결재선 진행" : "처리 자격"}</dt>
         <dd className="text-zinc-900 dark:text-zinc-50">
-          {decideAuthorization.allowed && decideAuthorization.mode === "DIRECT"
-            ? "대표로 지정된 계정입니다."
-            : decideAuthorization.allowed && decideAuthorization.mode === "DELEGATED"
-              ? `${decideAuthorization.representativeName}의 위임을 받아 처리할 수 있습니다.`
-              : "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다."}
+          {routeProgress ??
+            (decideAuthorization.allowed && decideAuthorization.mode === "DIRECT"
+              ? "대표로 지정된 계정입니다."
+              : decideAuthorization.allowed && decideAuthorization.mode === "DELEGATED"
+                ? `${decideAuthorization.representativeName}의 위임을 받아 처리할 수 있습니다.`
+                : "대표로 지정된 계정도, 유효한 위임을 받은 대리 승인자도 아닙니다.")}
         </dd>
       </div>
     </dl>

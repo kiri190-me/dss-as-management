@@ -1,9 +1,9 @@
 import "../../../../scripts/load-env";
 
-import { after, before, describe, test } from "node:test";
+import { after, afterEach, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   customers,
@@ -13,6 +13,8 @@ import {
   repairCases,
   representativeChangeHistory,
   shipmentApprovalDelegations,
+  shipmentApprovalRouteSteps,
+  shipmentApprovalRoutes,
   users,
   workflowTransitions,
 } from "../schema";
@@ -172,7 +174,12 @@ async function insertApproval(
   versionAtRequest: number,
   deciderId: string | null,
   /** 지정 승인자. 기본값 null 이 「지정 없음」이고, 기존 시험들은 전부 이쪽이다. */
-  assignedApproverUserId: string | null = null
+  assignedApproverUserId: string | null = null,
+  /**
+   * 결재선 두 칸. 기본값 null 이 「결재선을 타지 않는다」이고, 기존 시험들은
+   * 전부 이쪽이다 — 그 경로가 한 톨도 바뀌지 않았음을 그대로 지킨다.
+   */
+  route: { routeId: string; routeStepOrder: number } | null = null
 ) {
   await db.insert(repairCaseApprovals).values({
     repairCaseId,
@@ -180,6 +187,8 @@ async function insertApproval(
     status,
     requestedByUserId: engineerId,
     assignedApproverUserId,
+    routeId: route?.routeId ?? null,
+    routeStepOrder: route?.routeStepOrder ?? null,
     repairCaseVersionAtRequest: versionAtRequest,
     ...(status === "REQUESTED"
       ? {}
@@ -189,6 +198,54 @@ async function insertApproval(
           decisionReason: status === "REJECTED" ? "테스트 반려 사유" : null,
         }),
   });
+}
+
+/**
+ * ⚠️ **이 시험 파일이 만든 결재선 판은 afterEach 로 반드시 걷는다.** 시험 DB 에
+ * 판이 남으면 뒤에 도는 다른 시험 파일이 갑자기 결재선을 타면서 깨진다
+ * (shipment-approval-routes / repair-case-approvals-route 의 before() 는 판이
+ * 하나도 없는 상태를 전제로 한다). 아래 두 배열이 그 청소의 유일한 근거다.
+ */
+const createdRouteIds: string[] = [];
+const routeTestCaseIds: string[] = [];
+
+/**
+ * 결재선 판 하나를 **직접 넣는다.** saveShipmentApprovalRoute 를 거치지 않는
+ * 이유는 그 mutation 이 감사 기록을 남기는데, 그 행위자로 쓸 수 있는 것이 이
+ * 파일이 만들지 않은 시드 최고관리자뿐이라 청소할 때 남의 감사 기록까지 지우게
+ * 되기 때문이다. 이 시험이 보려는 것은 판을 **저장하는 절차**가 아니라
+ * 「판을 탄 요청이 누구에게 보이는가」다(저장 절차는
+ * mutations/shipment-approval-routes.integration.test.ts 가 본다).
+ */
+async function createTestRoute(approverUserIds: string[]): Promise<string> {
+  const [latest] = await db
+    .select({ version: shipmentApprovalRoutes.version })
+    .from(shipmentApprovalRoutes)
+    .orderBy(desc(shipmentApprovalRoutes.version))
+    .limit(1);
+  const [route] = await db
+    .insert(shipmentApprovalRoutes)
+    .values({ version: (latest?.version ?? 0) + 1, createdByUserId: superAdminId })
+    .returning({ id: shipmentApprovalRoutes.id });
+  createdRouteIds.push(route.id);
+
+  if (approverUserIds.length > 0) {
+    await db.insert(shipmentApprovalRouteSteps).values(
+      approverUserIds.map((approverUserId, index) => ({
+        routeId: route.id,
+        stepOrder: index + 1,
+        approverUserId,
+      }))
+    );
+  }
+  return route.id;
+}
+
+/** 결재선을 타는 접수 건 하나 — 청소 대상으로 함께 적어 둔다. */
+async function createRouteTestCase(): Promise<string> {
+  const caseId = await createTestCase();
+  routeTestCaseIds.push(caseId);
+  return caseId;
 }
 
 async function idsFor(actorId: string): Promise<string[]> {
@@ -215,6 +272,19 @@ before(async () => {
     .limit(1);
   assert.ok(superAdmin, "expected an approved SUPER_ADMIN in the test DB");
   superAdminId = superAdmin.id;
+});
+
+afterEach(async () => {
+  // ⚠️ 판을 만든 시험 뒤에만 움직인다 — 다른 시험이 쌓아 둔 결재 행을 건드리지
+  // 않기 위해서다. 삭제 순서가 있다: 결재 행이 판을 RESTRICT 로 참조한다.
+  if (createdRouteIds.length === 0) return;
+  if (routeTestCaseIds.length > 0) {
+    await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.repairCaseId, routeTestCaseIds));
+  }
+  await db.delete(shipmentApprovalRouteSteps).where(inArray(shipmentApprovalRouteSteps.routeId, createdRouteIds));
+  await db.delete(shipmentApprovalRoutes).where(inArray(shipmentApprovalRoutes.id, createdRouteIds));
+  createdRouteIds.length = 0;
+  routeTestCaseIds.length = 0;
 });
 
 after(async () => {
@@ -606,6 +676,237 @@ describe("listRepairCasesPendingMyApproval: 지정 승인자", () => {
     );
     assert.equal(repItems.length, 1, `대표에게 남는 것은 출하 하나여야 한다: ${JSON.stringify(repItems)}`);
     assert.equal(repItems[0].approvalType, "FINAL_SHIPMENT", "검수 쪽 지정이 출하 쪽을 가리면 안 된다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 결재선(순차 출하 승인) — 절차가 「출하 대표」를 대신한다
+ * ============================================================================
+ * 최종 출하 승인 요청 행에 route_id 가 적혀 있으면 「누가 결재하는가」를 절차가
+ * 정한다. 결재 mutation 이 이미 그렇게 판정하므로(그 인가는
+ * mutations/repair-case-approvals-route.integration.test.ts 가 실제 DB 로 못
+ * 박는다) 알림·배지도 같아야 한다 — 어긋나면 **처리해야 할 사람이 그냥 목록에서
+ * 사라지고, 그 실패는 화면에 아무 표시도 남기지 않는다.**
+ *
+ * 그래서 여기서 지키는 것은 두 방향이다:
+ *  - 넓히는 쪽: 단계 승인자는 대표가 아니어도(심지어 결재 자격이 없는 역할이어도)
+ *    자기 차례의 건을 본다.
+ *  - 🔴 좁히는 쪽: **결재선을 타지 않는 요청은 한 톨도 바뀌지 않는다.** 대표·
+ *    위임에게 뜨고 그 밖에는 안 뜬다.
+ * ============================================================================
+ */
+describe("listRepairCasesPendingMyApproval: 결재선(순차 출하 승인)", () => {
+  test("🔴 1단계 승인자는 출하 대표가 아니어도 목록·배지에 뜬다", async () => {
+    // 영업 담당자로 만든다 — 역할로는 어떤 결재도 할 수 없는 사람이다. 그래도
+    // 결재선에는 올릴 수 있고(대표 지정과 마찬가지로 역할을 보지 않는다),
+    // 그러면 자기 단계는 결재할 수 있어야 한다.
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const [stepApprover] = await db
+      .select({ isShipmentRepresentative: users.isShipmentRepresentative })
+      .from(users)
+      .where(eq(users.id, stepApproverId));
+    assert.equal(stepApprover.isShipmentRepresentative, false, "대조가 성립하지 않는다 — 대표가 아니어야 한다");
+    const countBefore = await countRepairCasesPendingMyApproval(stepApproverId);
+
+    const routeId = await createTestRoute([stepApproverId]);
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, stepApproverId, {
+      routeId,
+      routeStepOrder: 1,
+    });
+
+    const item = (await listRepairCasesPendingMyApproval(stepApproverId)).find((row) => row.repairCaseId === caseId);
+    assert.ok(item, "단계 승인자에게 안 보이면 결재선이 곧 실종이다 — 아무도 그 건을 처리하러 오지 않는다");
+    assert.equal(item!.approvalType, "FINAL_SHIPMENT");
+    assert.equal(item!.state, "PENDING");
+    assert.equal(
+      await countRepairCasesPendingMyApproval(stepApproverId),
+      countBefore + 1,
+      "건수(배지·종 알림)에도 세어져야 한다"
+    );
+  });
+
+  test("🔴 그 차례가 아닌 출하 대표에게는 뜨지 않는다 — 절차가 대표를 대신한다", async () => {
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const representativeId = await createTestRepresentative();
+
+    const routeId = await createTestRoute([stepApproverId]);
+    const routedCaseId = await createRouteTestCase();
+    const routedVersion = await getCase(routedCaseId);
+    await insertApproval(
+      routedCaseId,
+      "FINAL_SHIPMENT",
+      "REQUESTED",
+      routedVersion.version,
+      null,
+      stepApproverId,
+      { routeId, routeStepOrder: 1 }
+    );
+
+    // 대조 — 같은 대표가, 결재선을 타지 않는 다른 건은 그대로 본다. 이게 없으면
+    // 「대표에게 아무것도 안 보이게 만들었다」와 구분되지 않는다.
+    const plainCaseId = await createTestCase();
+    const plainVersion = await getCase(plainCaseId);
+    await insertApproval(plainCaseId, "FINAL_SHIPMENT", "REQUESTED", plainVersion.version, null);
+
+    const repIds = await idsFor(representativeId);
+    assert.ok(repIds.includes(plainCaseId), "대표에게는 결재선 없는 건이 보여야 대조가 성립한다");
+    assert.equal(repIds.includes(routedCaseId), false, "대표가 남의 단계까지 넘겨받았다");
+  });
+
+  test("최고관리자에게는 뜬다 — 지정된 사람이 자리를 비워도 막히지 않는 비상구", async () => {
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const emergencySuperAdminId = await createTestUser({ role: "SUPER_ADMIN" });
+
+    const routeId = await createTestRoute([stepApproverId]);
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, stepApproverId, {
+      routeId,
+      routeStepOrder: 1,
+    });
+
+    const item = (await listRepairCasesPendingMyApproval(emergencySuperAdminId)).find(
+      (row) => row.repairCaseId === caseId
+    );
+    assert.ok(item, "최고관리자가 못 보면 단계 승인자가 자리를 비웠을 때 아무도 처리할 수 없다");
+    assert.equal(item!.approvalType, "FINAL_SHIPMENT");
+  });
+
+  test("🔴 결재선을 타지 않는 출하 요청은 지금 그대로다 — 대표에게 뜨고 그 밖에는 안 뜬다", async () => {
+    // 이 시험이 이번 변경의 안전장치다. 조회 종류를 넓히면서 결재선 없는 행까지
+    // 넓어지면, 대표 제도가 조용히 무력화된다(그리고 아무 표시도 남지 않는다).
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const plainEngineerId = await createTestUser({ role: "AS_ENGINEER" });
+    const representativeId = await createTestRepresentative();
+    // 이 사람은 실제로 어떤 판의 단계를 맡고 있다 — 그래도 결재선을 타지 않는
+    // 요청까지 볼 수 있게 되면 안 된다.
+    await createTestRoute([stepApproverId]);
+
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null);
+
+    assert.ok((await idsFor(representativeId)).includes(caseId), "대표에게는 보여야 대조가 성립한다");
+    assert.equal((await idsFor(stepApproverId)).includes(caseId), false, "결재선 단계 자격이 대표를 대신해 버렸다");
+    assert.equal((await idsFor(plainEngineerId)).includes(caseId), false, "역할만으로 출하 결재가 열렸다");
+  });
+
+  test("🔴 판만 적히고 지정이 빈 행은 결재선으로 보지 않는다 — 대표·위임으로 되돌아간다", async () => {
+    // 정상적으로는 생기지 않는 조합이다(요청 경로가 지정을 언제나 함께 채운다).
+    // 만에 하나 그런 행이 있어도 **넓어지는 쪽이 아니라** 지금까지의 판정으로
+    // 되돌아가야 한다 — 지정도 대표 검사도 없으면 아무나 결재하게 된다.
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const representativeId = await createTestRepresentative();
+
+    const routeId = await createTestRoute([stepApproverId]);
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, null, {
+      routeId,
+      routeStepOrder: 1,
+    });
+
+    assert.ok((await idsFor(representativeId)).includes(caseId), "대표·위임 판정으로 되돌아가지 않았다");
+    assert.equal((await idsFor(stepApproverId)).includes(caseId), false, "지정이 빈 행이 아무에게나 열렸다");
+  });
+
+  test("🔴 비활성·잠긴 계정에는 뜨지 않는다 — 배지에 잡히는데 눌러도 막히면 배지를 믿지 않게 된다", async () => {
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const routeId = await createTestRoute([stepApproverId]);
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, stepApproverId, {
+      routeId,
+      routeStepOrder: 1,
+    });
+
+    assert.ok((await idsFor(stepApproverId)).includes(caseId), "막기 전에는 보여야 대조가 성립한다");
+
+    for (const [label, patch] of [
+      ["비활성", { isActive: false }],
+      ["잠김", { lockedAt: new Date() }],
+    ] as const) {
+      await db.update(users).set(patch).where(eq(users.id, stepApproverId));
+      try {
+        assert.equal(
+          (await idsFor(stepApproverId)).includes(caseId),
+          false,
+          `${label} 계정에 뜬다 — 결재 mutation 은 그 둘을 결재선 경로에서도 막는다`
+        );
+        assert.equal(await countRepairCasesPendingMyApproval(stepApproverId), 0, `${label}: 건수에도 남아 있다`);
+      } finally {
+        await db.update(users).set({ isActive: true, lockedAt: null }).where(eq(users.id, stepApproverId));
+      }
+    }
+
+    assert.ok((await idsFor(stepApproverId)).includes(caseId), "되돌리면 다시 보여야 한다 — 대조가 성립한다");
+  });
+
+  test("검수 승인은 결재선과 무관하다 — 판이 있어도 자격 있는 사람 모두에게 그대로 보인다", async () => {
+    // 결재선은 최종 출하 승인만의 것이다(스키마 CHECK 도 그렇게 막는다).
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    await createTestRoute([stepApproverId]);
+
+    const adminUserId = await createTestUser({ role: "ADMIN" });
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+
+    for (const [label, actorId] of [
+      ["관리자", adminUserId],
+      ["A/S 엔지니어", engineerId],
+      ["최고관리자", superAdminId],
+    ] as const) {
+      assert.ok((await idsFor(actorId)).includes(caseId), `${label}에게 안 보인다 — 검수 경로가 달라졌다`);
+    }
+    assert.equal((await idsFor(stepApproverId)).includes(caseId), false, "결재선 자격이 검수 승인까지 열었다");
+  });
+
+  test("배지 숫자와 목록이 어긋나지 않는다 — 결재선 건에서도", async () => {
+    const stepApproverId = await createTestUser({ role: "SALES" });
+    const routeId = await createTestRoute([stepApproverId]);
+
+    for (let i = 0; i < 2; i += 1) {
+      const caseId = await createRouteTestCase();
+      const current = await getCase(caseId);
+      await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, stepApproverId, {
+        routeId,
+        routeStepOrder: 1,
+      });
+    }
+
+    const items = await listRepairCasesPendingMyApproval(stepApproverId);
+    const distinctCases = new Set(items.map((item) => item.repairCaseId)).size;
+    assert.ok(distinctCases >= 2, "비교할 대상이 있어야 한다");
+    assert.equal(await countRepairCasesPendingMyApproval(stepApproverId), distinctCases);
+  });
+
+  test("승인된 단계는 목록에서 빠진다 — 다음 단계 행이 최신이 된다", async () => {
+    // 사슬을 잇는 것은 결재 mutation 의 일이지만(그쪽 시험이 본다), 알림은
+    // 언제나 **가장 최근 행**만 보고 그 행의 지정을 존중해야 한다.
+    const firstId = await createTestUser({ role: "SALES" });
+    const secondId = await createTestUser({ role: "SALES" });
+    const routeId = await createTestRoute([firstId, secondId]);
+    const caseId = await createRouteTestCase();
+    const current = await getCase(caseId);
+
+    await insertApproval(caseId, "FINAL_SHIPMENT", "APPROVED", current.version, firstId, firstId, {
+      routeId,
+      routeStepOrder: 1,
+    });
+    // requested_at 기본값이 now()라 같은 밀리초에 두 행이 들어가면 순서가
+    // 흔들린다 — 뒤 행을 명시적으로 나중으로 만든다.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await insertApproval(caseId, "FINAL_SHIPMENT", "REQUESTED", current.version, null, secondId, {
+      routeId,
+      routeStepOrder: 2,
+    });
+
+    assert.ok((await idsFor(secondId)).includes(caseId), "2단계 승인자에게 넘어가지 않았다");
+    assert.equal((await idsFor(firstId)).includes(caseId), false, "1단계 승인자에게 자기 몫이 끝난 건이 남아 있다");
   });
 });
 
