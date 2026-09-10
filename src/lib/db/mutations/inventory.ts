@@ -5,9 +5,14 @@ import { parts, partStockBalances, stockTransactions, inventoryPartRequestItems,
 import { insertAuditLog } from "./audit-logs";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore } from "./internal/inventory-stock-use";
+import {
+  getCurrentShipmentApprovalRouteChain,
+  type ShipmentApprovalRouteChain,
+} from "../queries/shipment-approval-routes";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import type { UseStockAuthorizationContext } from "@/lib/auth/inventory-authorization";
 import { computeAlreadyReversedQuantity, canReturnQuantity } from "@/lib/domain/inventory-return-rules";
+import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-issue-rules";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 
 /**
@@ -37,9 +42,21 @@ export type InventoryMutationResultCode =
   | "INVALID_INPUT"
   | "INVALID_RETURN_TARGET"
   | "OVER_RETURN"
-  | "BILLING_DECISION_REQUIRED";
+  | "BILLING_DECISION_REQUIRED"
+  /**
+   * 🔴 「부품 불출」 승인 절차가 설정돼 있어 **그 자리에서 바로 뺄 수 없다.**
+   * 사람이 할 일은 불출 승인 요청을 올리는 것이다 — FORBIDDEN 과 뭉뚱그리면
+   * 「나는 권한이 없구나」로 읽고 관리자를 찾아가게 된다.
+   */
+  | "PART_ISSUE_APPROVAL_REQUIRED";
 
-type Failure = { ok: false; code: InventoryMutationResultCode; message: string };
+export type InventoryMutationFailure = {
+  ok: false;
+  code: InventoryMutationResultCode;
+  message: string;
+};
+
+type Failure = InventoryMutationFailure;
 
 class InventoryMutationError extends Error {
   result: Failure;
@@ -76,6 +93,63 @@ function requirePositiveIntegerQuantity(quantity: number): void {
   if (!Number.isInteger(quantity) || quantity <= 0) {
     fail("INVALID_INPUT", "수량은 1 이상의 정수여야 합니다.");
   }
+}
+
+/**
+ * 이 모듈의 안쪽 함수가 던진 실패를 꺼낸다 — **다른 모듈이 자기 트랜잭션 안에서
+ * 안쪽 함수를 부를 때** 필요하다(mutations/inventory-part-issue-requests.ts 의
+ * 실행 경로). 오류 클래스 자체를 내보내지 않는 것은 의도다: 바깥에서 이 오류를
+ * **만들어 던지는** 길을 열면 이 파일이 쥔 실패 코드가 남의 손에 넘어간다.
+ * 꺼내 읽는 것만 열어 둔다.
+ */
+export function extractInventoryFailure(err: unknown): InventoryMutationFailure | null {
+  return err instanceof InventoryMutationError ? err.result : null;
+}
+
+/**
+ * ============================================================================
+ * 🔴 문 — 「부품 불출」 승인 절차가 있으면 그 자리에서 빼지 못한다
+ * ============================================================================
+ * 재고가 빠지는 두 길(이 파일의 consumeStock, inventory-part-requests.ts 의
+ * issuePartRequest)은 **겉 함수에서만** 이 문을 지난다. 승인을 받은 신청을
+ * 실행하는 길은 안쪽 함수(`*Core`)를 직접 부르므로 문에 걸리지 않는다 — 판정이
+ * 한 곳에만 있어야 두 갈래가 갈라지지 않는다.
+ *
+ * 🔴 **판이 없거나 단계가 0개면 지금까지와 똑같이 동작한다.** 이것이
+ * schema/inventory-part-issue-requests.ts 머리말이 못 박은 안전장치다 —
+ * 관리자가 절차를 만들기 전까지 재고가 통째로 잠기면 안 된다.
+ * ============================================================================
+ */
+
+export const PART_ISSUE_APPROVAL_REQUIRED_MESSAGE =
+  "부품 불출 승인 절차가 설정되어 있어 바로 불출할 수 없습니다. 불출 승인 요청을 올려 결재를 받은 뒤 실행해 주세요.";
+
+/**
+ * 「부품 불출」 판이 **지금 쓰이고 있는가** — 판이 있고 단계가 1개 이상이다.
+ *
+ * 🔴 이 판정이 적힌 곳은 저장소에서 여기 하나여야 한다. 신청을 만드는 쪽
+ * (createPartIssueRequest)은 반대 방향으로 같은 질문을 하고(판이 없으면
+ * ROUTE_NOT_CONFIGURED), 두 문은 같은 이 함수를 본다. 한쪽만 「단계 0개」를
+ * 절차로 치면 신청도 못 하고 불출도 못 하는 상태가 생긴다.
+ *
+ * 타입 좁힘까지 겸한다 — 참이면 부르는 쪽이 그 판을 그대로 쓸 수 있다.
+ */
+export function isPartIssueApprovalRouteInForce(
+  route: ShipmentApprovalRouteChain | null
+): route is ShipmentApprovalRouteChain {
+  return route !== null && route.steps.length > 0;
+}
+
+/**
+ * 지금 이 트랜잭션에서 「부품 불출」 절차가 쓰이고 있는가.
+ *
+ * 🔴 **같은 트랜잭션 안에서 읽는다.** 밖에서 미리 읽어 넘기면 그 사이 관리자가
+ * 절차를 만들거나 지운 순간에 문이 열린 채로 재고가 나간다.
+ */
+export async function isPartIssueApprovalRequired(tx: Tx): Promise<boolean> {
+  return isPartIssueApprovalRouteInForce(
+    await getCurrentShipmentApprovalRouteChain(tx, PART_ISSUE_APPROVAL_ROUTE_SCOPE)
+  );
 }
 
 // ---- 부품 마스터 (part master) ----
@@ -303,99 +377,139 @@ export type ConsumeStockInput = {
   reason?: string | null;
 };
 
+/** 성공했을 때의 모양. 실패는 전부 fail() 로 **던진다** — 그래야 트랜잭션이 되돌아간다. */
+export type ConsumeStockCoreResult = {
+  ok: true;
+  version: number;
+  resultingQuantity: number;
+  partStockBalanceId: string;
+};
+
+/**
+ * 🔴 **안쪽 — 트랜잭션을 열지 않고 문도 없다.**
+ *
+ * consumeStock 의 본문을 **그대로** 옮겨 온 것이다. 잠금 순서·검증 순서·오류
+ * 코드가 한 줄도 바뀌지 않았고, 바뀐 것은 트랜잭션을 여기서 열지 않는다는 것
+ * 하나뿐이다. 그렇게 나눈 이유: 승인된 불출 신청을 실행할 때 **재고 이동과 신청
+ * 상태(EXECUTED)가 한 트랜잭션이어야** 하는데, 이 함수가 자기 트랜잭션을 열면
+ * 다른 연결을 쓰게 되어 원자적이지 않다.
+ *
+ * 🔴 **문(부품 불출 승인 절차 확인)은 여기 달지 않는다.** 실행 경로가 이 함수를
+ * 부르므로, 여기에 문이 있으면 승인을 받고도 실행할 수 없게 된다.
+ *
+ * 부르는 곳은 둘뿐이다: 아래 겉 함수(consumeStock)와
+ * mutations/inventory-part-issue-requests.ts 의 실행 mutation.
+ */
+export async function consumeStockCore(
+  tx: Tx,
+  input: ConsumeStockInput
+): Promise<ConsumeStockCoreResult> {
+  const actor = await requireActor(tx, input.actorUserId);
+
+  requirePositiveIntegerQuantity(input.quantity);
+  if (!input.repairCaseId && !input.destinationNote) {
+    fail("INVALID_INPUT", "수리 건 또는 사용처를 입력해 주세요.");
+  }
+
+  let repairCase: { id: string; isLocked: boolean; billingType: string | null } | null = null;
+  if (input.repairCaseId) {
+    const [rc] = await tx
+      .select({ id: repairCases.id, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
+      .from(repairCases)
+      .where(and(eq(repairCases.id, input.repairCaseId), eq(repairCases.isDeleted, false)));
+    if (!rc) fail("NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
+    if (rc.billingType === "PENDING_DECISION") {
+      fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 재고를 사용할 수 있습니다.");
+    }
+    repairCase = rc;
+  }
+
+  // procedureExecutionNodeId is kept as a general reverse-traceability
+  // input for any role that supplies it (Phase 5B-3: no longer tied to
+  // AS_ENGINEER authorization specifically, since AS_ENGINEER can never
+  // reach this mutation at all now — see canUseStock) — still
+  // re-validated live: it must belong to an execution whose repair case
+  // is exactly the one submitted, never trusted at face value.
+  if (input.procedureExecutionNodeId) {
+    if (!input.repairCaseId) {
+      fail("INVALID_INPUT", "절차 작업을 지정하려면 수리 건도 함께 지정해야 합니다.");
+    }
+    const [node] = await tx
+      .select({ executionId: procedureCaseExecutionNodes.executionId })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, input.procedureExecutionNodeId));
+    if (!node) fail("INVALID_INPUT", "해당 절차 작업을 찾을 수 없습니다.");
+
+    const [execution] = await tx
+      .select({ repairCaseId: procedureCaseExecutions.repairCaseId })
+      .from(procedureCaseExecutions)
+      .where(eq(procedureCaseExecutions.id, node.executionId));
+    // execution.repairCaseId is nullable (repair-case permanent-delete
+    // schema foundation checkpoint) — input.repairCaseId is guaranteed
+    // a real string by the guard above, so an orphaned (purged-case)
+    // execution's null already correctly fails this `!==` comparison
+    // (null can never equal a real uuid) and falls into the same
+    // cross-case-mismatch rejection as any other unrelated execution —
+    // no special-casing needed.
+    if (!execution || execution.repairCaseId !== input.repairCaseId) {
+      fail("INVALID_INPUT", "지정한 절차 작업이 해당 수리 건에 속하지 않습니다.");
+    }
+  }
+
+  // Shipment-lock removal policy: USE is no longer blocked by
+  // repair_cases.is_locked (see canUseStock's own doc comment) — this
+  // explicit pre-check was the sole enforcement point and has been
+  // removed accordingly, rather than left as a dead branch that could
+  // still misfire a stale CASE_LOCKED message for an otherwise-
+  // unauthorized caller.
+  const authContext: UseStockAuthorizationContext = {
+    hasRepairCase: input.repairCaseId != null,
+    isCaseLocked: repairCase?.isLocked ?? false,
+  };
+  // authContext는 그대로 둔다 — 맥락(대상 접수 건이 있는지, 잠겼는지)은
+  // 여전히 여기서 판정한다. 역할 부분만 설정으로 넘어갔다.
+  void authContext;
+  if (!(await hasPermission(actor, "inventory.stock", "WRITE"))) {
+    fail("FORBIDDEN", "재고를 사용할 권한이 없습니다.");
+  }
+
+  const result = await applyStockUseCore(
+    tx,
+    {
+      partStockBalanceId: input.partStockBalanceId,
+      quantity: input.quantity,
+      actorUserId: actor.id,
+      repairCaseId: input.repairCaseId ?? null,
+      destinationNote: input.destinationNote ?? null,
+      procedureExecutionNodeId: input.procedureExecutionNodeId ?? null,
+      reason: input.reason ?? null,
+    },
+    { expectedVersion: input.expectedVersion }
+  );
+
+  if (!result.ok) {
+    if (result.code === "NOT_FOUND") fail("NOT_FOUND", "해당 재고를 찾을 수 없습니다.");
+    if (result.code === "CONFLICT") fail("CONFLICT", "다른 사용자가 이 재고를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+    fail("INSUFFICIENT_STOCK", "재고가 부족합니다.");
+  }
+
+  return { ok: true, version: result.version, resultingQuantity: result.resultingQuantity, partStockBalanceId: input.partStockBalanceId };
+}
+
+/**
+ * **겉 — 트랜잭션을 열고 문을 단다.** 이름·인자·반환 모양·오류 코드는 나누기
+ * 전과 같다(새 코드 PART_ISSUE_APPROVAL_REQUIRED 하나만 더 나올 수 있다).
+ *
+ * 🔴 문은 트랜잭션을 연 **직후**에 본다 — 아무것도 읽기 전, 아무것도 쓰기 전이다.
+ * 판이 없거나 단계가 0개면 지금까지와 한 줄도 다르지 않게 흘러간다.
+ */
 export async function consumeStock(input: ConsumeStockInput): Promise<StockTransactionMutationResult> {
   try {
     return await db.transaction(async (tx) => {
-      const actor = await requireActor(tx, input.actorUserId);
-
-      requirePositiveIntegerQuantity(input.quantity);
-      if (!input.repairCaseId && !input.destinationNote) {
-        fail("INVALID_INPUT", "수리 건 또는 사용처를 입력해 주세요.");
+      if (await isPartIssueApprovalRequired(tx)) {
+        fail("PART_ISSUE_APPROVAL_REQUIRED", PART_ISSUE_APPROVAL_REQUIRED_MESSAGE);
       }
-
-      let repairCase: { id: string; isLocked: boolean; billingType: string | null } | null = null;
-      if (input.repairCaseId) {
-        const [rc] = await tx
-          .select({ id: repairCases.id, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
-          .from(repairCases)
-          .where(and(eq(repairCases.id, input.repairCaseId), eq(repairCases.isDeleted, false)));
-        if (!rc) fail("NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
-        if (rc.billingType === "PENDING_DECISION") {
-          fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 재고를 사용할 수 있습니다.");
-        }
-        repairCase = rc;
-      }
-
-      // procedureExecutionNodeId is kept as a general reverse-traceability
-      // input for any role that supplies it (Phase 5B-3: no longer tied to
-      // AS_ENGINEER authorization specifically, since AS_ENGINEER can never
-      // reach this mutation at all now — see canUseStock) — still
-      // re-validated live: it must belong to an execution whose repair case
-      // is exactly the one submitted, never trusted at face value.
-      if (input.procedureExecutionNodeId) {
-        if (!input.repairCaseId) {
-          fail("INVALID_INPUT", "절차 작업을 지정하려면 수리 건도 함께 지정해야 합니다.");
-        }
-        const [node] = await tx
-          .select({ executionId: procedureCaseExecutionNodes.executionId })
-          .from(procedureCaseExecutionNodes)
-          .where(eq(procedureCaseExecutionNodes.id, input.procedureExecutionNodeId));
-        if (!node) fail("INVALID_INPUT", "해당 절차 작업을 찾을 수 없습니다.");
-
-        const [execution] = await tx
-          .select({ repairCaseId: procedureCaseExecutions.repairCaseId })
-          .from(procedureCaseExecutions)
-          .where(eq(procedureCaseExecutions.id, node.executionId));
-        // execution.repairCaseId is nullable (repair-case permanent-delete
-        // schema foundation checkpoint) — input.repairCaseId is guaranteed
-        // a real string by the guard above, so an orphaned (purged-case)
-        // execution's null already correctly fails this `!==` comparison
-        // (null can never equal a real uuid) and falls into the same
-        // cross-case-mismatch rejection as any other unrelated execution —
-        // no special-casing needed.
-        if (!execution || execution.repairCaseId !== input.repairCaseId) {
-          fail("INVALID_INPUT", "지정한 절차 작업이 해당 수리 건에 속하지 않습니다.");
-        }
-      }
-
-      // Shipment-lock removal policy: USE is no longer blocked by
-      // repair_cases.is_locked (see canUseStock's own doc comment) — this
-      // explicit pre-check was the sole enforcement point and has been
-      // removed accordingly, rather than left as a dead branch that could
-      // still misfire a stale CASE_LOCKED message for an otherwise-
-      // unauthorized caller.
-      const authContext: UseStockAuthorizationContext = {
-        hasRepairCase: input.repairCaseId != null,
-        isCaseLocked: repairCase?.isLocked ?? false,
-      };
-      // authContext는 그대로 둔다 — 맥락(대상 접수 건이 있는지, 잠겼는지)은
-      // 여전히 여기서 판정한다. 역할 부분만 설정으로 넘어갔다.
-      void authContext;
-      if (!(await hasPermission(actor, "inventory.stock", "WRITE"))) {
-        fail("FORBIDDEN", "재고를 사용할 권한이 없습니다.");
-      }
-
-      const result = await applyStockUseCore(
-        tx,
-        {
-          partStockBalanceId: input.partStockBalanceId,
-          quantity: input.quantity,
-          actorUserId: actor.id,
-          repairCaseId: input.repairCaseId ?? null,
-          destinationNote: input.destinationNote ?? null,
-          procedureExecutionNodeId: input.procedureExecutionNodeId ?? null,
-          reason: input.reason ?? null,
-        },
-        { expectedVersion: input.expectedVersion }
-      );
-
-      if (!result.ok) {
-        if (result.code === "NOT_FOUND") fail("NOT_FOUND", "해당 재고를 찾을 수 없습니다.");
-        if (result.code === "CONFLICT") fail("CONFLICT", "다른 사용자가 이 재고를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
-        fail("INSUFFICIENT_STOCK", "재고가 부족합니다.");
-      }
-
-      return { ok: true, version: result.version, resultingQuantity: result.resultingQuantity, partStockBalanceId: input.partStockBalanceId };
+      return await consumeStockCore(tx, input);
     });
   } catch (err) {
     if (err instanceof InventoryMutationError) return err.result;

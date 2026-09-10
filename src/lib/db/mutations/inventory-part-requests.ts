@@ -5,6 +5,9 @@ import { parts, partStockBalances, repairCases, inventoryPartRequests, inventory
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { applyStockUseCore, type PrelockedBalanceState } from "./internal/inventory-stock-use";
 import { claimOrReplayIdempotency, finalizeIdempotencySuccess } from "./internal/inventory-request-idempotency";
+// 🔴 문의 판정은 **한 곳에만** 적힌다 — mutations/inventory.ts 가 쥔다. 이 방향
+// (요청 워크플로 → 재고 원장)이 아니면 두 모듈이 서로를 가져오게 된다.
+import { isPartIssueApprovalRequired, PART_ISSUE_APPROVAL_REQUIRED_MESSAGE } from "./inventory";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   isRequestCancellable,
@@ -61,9 +64,21 @@ export type InventoryPartRequestResultCode =
   | "NOT_ISSUABLE"
   | "IDEMPOTENCY_PAYLOAD_MISMATCH"
   | "IDEMPOTENCY_UNRESOLVED"
-  | "BILLING_DECISION_REQUIRED";
+  | "BILLING_DECISION_REQUIRED"
+  /**
+   * 🔴 「부품 불출」 승인 절차가 설정돼 있어 **그 자리에서 바로 뺄 수 없다.**
+   * 사람이 할 일은 불출 승인 요청을 올리는 것이다 — FORBIDDEN 과 뭉뚱그리면
+   * 「나는 권한이 없구나」로 읽고 관리자를 찾아가게 된다.
+   */
+  | "PART_ISSUE_APPROVAL_REQUIRED";
 
-type Failure = { ok: false; code: InventoryPartRequestResultCode; message: string };
+export type InventoryPartRequestFailure = {
+  ok: false;
+  code: InventoryPartRequestResultCode;
+  message: string;
+};
+
+type Failure = InventoryPartRequestFailure;
 
 class InventoryPartRequestMutationError extends Error {
   result: Failure;
@@ -83,6 +98,17 @@ async function requireActor(tx: Tx, actorUserId: string) {
   } catch {
     return fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
   }
+}
+
+/**
+ * 이 모듈의 안쪽 함수가 던진 실패를 꺼낸다 — **다른 모듈이 자기 트랜잭션 안에서**
+ * issuePartRequestCore 를 부를 때 필요하다(mutations/
+ * inventory-part-issue-requests.ts 의 실행 경로). 오류 클래스 자체는 내보내지
+ * 않는다 — 꺼내 읽는 것만 열어 두고, 이 파일의 실패 코드를 남이 **만들어 던지는**
+ * 길은 막아 둔다(mutations/inventory.ts 의 extractInventoryFailure 와 같다).
+ */
+export function extractPartRequestFailure(err: unknown): InventoryPartRequestFailure | null {
+  return err instanceof InventoryPartRequestMutationError ? err.result : null;
 }
 
 /** Every non-terminal idempotency claim outcome maps to a failure the same way across all five mutations. CLAIMED/REPLAY are handled by each mutation's own caller. */
@@ -392,15 +418,45 @@ export type IssuePartRequestResult =
   | { ok: true; requestId: string; requestIssueId: string; status: InventoryPartRequestStatus }
   | Failure;
 
-export async function issuePartRequest(input: IssuePartRequestInput): Promise<IssuePartRequestResult> {
+/** 성공했을 때의 모양. 실패는 전부 fail() 로 **던진다** — 그래야 트랜잭션이 되돌아간다. */
+export type IssuePartRequestCoreResult = {
+  ok: true;
+  requestId: string;
+  requestIssueId: string;
+  status: InventoryPartRequestStatus;
+};
+
+/**
+ * 🔴 **안쪽 — 트랜잭션을 열지 않고 문도 없다.**
+ *
+ * issuePartRequest 의 본문을 **그대로** 옮겨 온 것이다. 중복 방지 청구 →
+ * 요청 헤더 잠금 → 요청 항목 일괄 잠금 → 잔량 행 일괄 잠금 → 검증 → 쓰기 라는
+ * 이 모듈의 결정적 잠금 순서(파일 머리말)가 한 칸도 바뀌지 않았고, 오류 코드도
+ * 그대로다. 바뀐 것은 둘뿐이다:
+ *  · 트랜잭션을 여기서 열지 않는다(부르는 쪽의 tx 를 받는다).
+ *  · 형식 검증 셋(원시 배분·중복 합치기·항목별 합산)이 트랜잭션 **안**으로
+ *    들어왔다. 결과는 같다 — 실패하면 같은 INVALID_INPUT 이 같은 문구로 나가고,
+ *    그때 아직 아무것도 쓰지 않았다.
+ *
+ * 나눈 이유: 승인된 불출 신청을 실행할 때 **재고 이동과 신청 상태(EXECUTED)가 한
+ * 트랜잭션이어야** 하는데, 이 함수가 자기 트랜잭션을 열면 다른 연결을 쓰게 되어
+ * 원자적이지 않다.
+ *
+ * 🔴 **문(부품 불출 승인 절차 확인)은 여기 달지 않는다.** 실행 경로가 이 함수를
+ * 부르므로, 여기에 문이 있으면 승인을 받고도 실행할 수 없게 된다.
+ */
+export async function issuePartRequestCore(
+  tx: Tx,
+  input: IssuePartRequestInput
+): Promise<IssuePartRequestCoreResult> {
   const rawCheck = validateRawIssueAllocations(input.allocations);
-  if (!rawCheck.ok) return { ok: false, code: "INVALID_INPUT", message: rawCheck.message };
+  if (!rawCheck.ok) fail("INVALID_INPUT", rawCheck.message);
 
   const merged = mergeDuplicateAllocations(input.allocations);
-  if (!merged.ok) return { ok: false, code: "INVALID_INPUT", message: merged.message };
+  if (!merged.ok) fail("INVALID_INPUT", merged.message);
 
   const aggregated = aggregateAllocationsByItem(merged.allocations);
-  if (!aggregated.ok) return { ok: false, code: "INVALID_INPUT", message: aggregated.message };
+  if (!aggregated.ok) fail("INVALID_INPUT", aggregated.message);
 
   const normalizedNote = normalizeNote(input.note);
   const fingerprint = computeRequestFingerprint({
@@ -408,185 +464,199 @@ export async function issuePartRequest(input: IssuePartRequestInput): Promise<Is
     payload: { requestId: input.requestId, allocations: merged.allocations, note: normalizedNote },
   });
 
+  const actor = await requireActor(tx, input.actorUserId);
+
+  const claim = await claimOrReplayIdempotency<{ requestId: string; requestIssueId: string; status: InventoryPartRequestStatus }>(tx, {
+    idempotencyKey: input.idempotencyKey,
+    actorUserId: actor.id,
+    operationType: "ISSUE",
+    fingerprint,
+  });
+  if (claim.state === "REPLAY") {
+    return { ok: true, requestId: claim.snapshot.requestId, requestIssueId: claim.snapshot.requestIssueId, status: claim.snapshot.status };
+  }
+  if (claim.state !== "CLAIMED") failOnNonClaimState(claim.state);
+
+  // Lock order: request header first.
+  const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
+  if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
+
+  // repair_case_id is nullable (repair-case permanent-delete schema
+  // foundation checkpoint): a request whose repair case has since been
+  // permanently purged is a legitimate historical row, but issuing NEW
+  // stock against it is never sensible — there is no live case left to
+  // receive the parts. Reject cleanly here rather than querying a
+  // nonexistent case; cancel/reject/partiallyClose (which don't touch
+  // stock) are unaffected by this and remain reachable for such a row.
+  if (!request.repairCaseId) fail("NOT_FOUND", "이 요청과 연결된 접수 건이 더 이상 존재하지 않아 불출할 수 없습니다.");
+
+  const [rc] = await tx.select({ isLocked: repairCases.isLocked, billingType: repairCases.billingType }).from(repairCases).where(eq(repairCases.id, request.repairCaseId));
+  if (rc?.billingType === "PENDING_DECISION") {
+    fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 부품을 불출할 수 있습니다.");
+  }
+  const isCaseLocked = rc?.isLocked ?? false;
+
+  // 상태와 역할을 따로 판정한다. 전에는 한 함수가 둘을 함께 보고 실패
+  // 이유를 사후에 되짚었는데, 이제 어느 쪽에서 막혔는지가 코드에 그대로
+  // 드러난다.
+  void isCaseLocked;
+  if (!isRequestIssuable({ status: request.status })) {
+    fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
+  }
+  if (!(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))) {
+    fail("FORBIDDEN", "불출 권한이 없습니다.");
+  }
+
+  // Batch-lock every touched request item, in one id-sorted query.
+  const itemIds = [...new Set(aggregated.aggregates.map((a) => a.requestItemId))].sort();
+  const lockedItems = await tx
+    .select()
+    .from(inventoryPartRequestItems)
+    .where(inArray(inventoryPartRequestItems.id, itemIds))
+    .orderBy(inventoryPartRequestItems.id)
+    .for("update");
+  if (lockedItems.length !== itemIds.length) fail("NOT_FOUND", "요청 항목을 찾을 수 없습니다.");
+  for (const item of lockedItems) {
+    if (item.requestId !== request.id) fail("INVALID_INPUT", "요청 항목이 해당 요청에 속하지 않습니다.");
+  }
+  const itemById = new Map(lockedItems.map((item) => [item.id, item]));
+
+  // Batch-lock every distinct balance touched, in one id-sorted query —
+  // this, combined with the identical ordering used by every other
+  // write path in this module, is what prevents two different requests
+  // that both touch the same two balances (in opposite client-supplied
+  // order) from deadlocking each other.
+  const balanceIds = [...new Set(merged.allocations.map((a) => a.partStockBalanceId))].sort();
+  const lockedBalances = await tx
+    .select()
+    .from(partStockBalances)
+    .where(inArray(partStockBalances.id, balanceIds))
+    .orderBy(partStockBalances.id)
+    .for("update");
+  if (lockedBalances.length !== balanceIds.length) fail("NOT_FOUND", "재고 정보를 찾을 수 없습니다.");
+  const balanceStateById = new Map<string, PrelockedBalanceState & { partId: string; owner: StockOwner }>(
+    lockedBalances.map((b) => [b.id, { id: b.id, currentQuantity: b.currentQuantity, version: b.version, partId: b.partId, owner: b.owner }])
+  );
+
+  // Part-match: the request item's part must equal the selected balance's part.
+  // Owner-match (Parts Request 소유구분 checkpoint): when the request
+  // item states an owner (non-null — every item created after
+  // migration 0024 always does; legacy pre-existing items are NULL and
+  // impose no constraint here, remaining issuable from any bucket
+  // exactly as before), the selected balance's owner must match it
+  // exactly. The requested owner is the requester's stated
+  // requirement — never silently overridden by whichever bucket the
+  // inventory manager happens to pick.
+  for (const allocation of merged.allocations) {
+    const item = itemById.get(allocation.requestItemId)!;
+    const balance = balanceStateById.get(allocation.partStockBalanceId)!;
+    if (item.partId !== balance.partId) fail("INVALID_INPUT", "선택한 재고의 부품이 요청 항목과 일치하지 않습니다.");
+    if (item.owner !== null && item.owner !== balance.owner) {
+      fail("INVALID_INPUT", "선택한 재고의 소유구분이 요청한 소유구분과 일치하지 않습니다.");
+    }
+  }
+
+  // Aggregate validation per item — the roundIssueQuantity (already
+  // summed across every bucket touched for that item this round) is
+  // what gets compared to the remaining requested amount, never any
+  // individual allocation in isolation.
+  for (const aggregate of aggregated.aggregates) {
+    const item = itemById.get(aggregate.requestItemId)!;
+    const sum = safeAddQuantity(item.issuedQuantity, aggregate.roundIssueQuantity);
+    if (!sum.ok) fail("INVALID_INPUT", sum.message);
+    if (sum.value > item.requestedQuantity) {
+      const remaining = Math.max(0, item.requestedQuantity - item.issuedQuantity);
+      fail("EXCEEDS_REMAINING_REQUESTED", `요청 항목의 남은 수량(${remaining}개)을 초과하여 불출할 수 없습니다.`);
+    }
+  }
+
+  // Only now — after every lock is held and every validation has
+  // passed — do any writes happen. One issue event groups everything
+  // this confirmation produces.
+  const [issueEvent] = await tx
+    .insert(inventoryPartRequestIssues)
+    .values({ requestId: request.id, issuedByUserId: actor.id, note: normalizedNote })
+    .returning({ id: inventoryPartRequestIssues.id });
+
+  for (const allocation of merged.allocations) {
+    const balanceState = balanceStateById.get(allocation.partStockBalanceId)!;
+    const result = await applyStockUseCore(
+      tx,
+      {
+        partStockBalanceId: allocation.partStockBalanceId,
+        quantity: allocation.quantity,
+        actorUserId: actor.id,
+        repairCaseId: request.repairCaseId,
+        requestItemId: allocation.requestItemId,
+        requestIssueId: issueEvent.id,
+      },
+      { prelocked: balanceState }
+    );
+    if (!result.ok) {
+      // Already pre-locked and pre-validated against the balance state
+      // read in this same transaction — INSUFFICIENT_STOCK is still
+      // possible if two allocations in this same event target the same
+      // balance for more than it holds.
+      fail("INSUFFICIENT_STOCK", "재고가 부족합니다.");
+    }
+    // Track the running balance state in-process so a second
+    // allocation against the same balance later in this same loop
+    // validates against the up-to-date quantity, not the originally
+    // locked snapshot.
+    balanceStateById.set(allocation.partStockBalanceId, { ...balanceState, currentQuantity: result.resultingQuantity, version: result.version });
+  }
+
+  for (const aggregate of aggregated.aggregates) {
+    const item = itemById.get(aggregate.requestItemId)!;
+    await tx
+      .update(inventoryPartRequestItems)
+      .set({ issuedQuantity: item.issuedQuantity + aggregate.roundIssueQuantity, updatedAt: new Date() })
+      .where(eq(inventoryPartRequestItems.id, item.id));
+  }
+
+  // Recompute overall status from every item on the request (not just
+  // the ones touched this round) — read fresh, post-update.
+  const allItems = await tx
+    .select({ requestedQuantity: inventoryPartRequestItems.requestedQuantity, issuedQuantity: inventoryPartRequestItems.issuedQuantity })
+    .from(inventoryPartRequestItems)
+    .where(eq(inventoryPartRequestItems.requestId, request.id));
+  const allFullyIssued = allItems.every((item) => item.issuedQuantity >= item.requestedQuantity);
+  const newStatus = computeStatusAfterIssue(allFullyIssued);
+
+  await tx
+    .update(inventoryPartRequests)
+    .set({ status: newStatus, version: request.version + 1, updatedAt: new Date() })
+    .where(eq(inventoryPartRequests.id, request.id));
+
+  await tx.insert(inventoryPartRequestHistory).values({
+    requestId: request.id,
+    requestIssueId: issueEvent.id,
+    actionType: "ISSUED",
+    beforeState: { status: request.status },
+    afterState: { status: newStatus, allocations: merged.allocations },
+    actorUserId: actor.id,
+  });
+
+  const snapshot = { requestId: request.id, requestIssueId: issueEvent.id, status: newStatus };
+  await finalizeIdempotencySuccess(tx, input.idempotencyKey, request.id, snapshot);
+
+  return { ok: true, requestId: request.id, requestIssueId: issueEvent.id, status: newStatus };
+}
+
+/**
+ * **겉 — 트랜잭션을 열고 문을 단다.** 이름·인자·반환 모양·오류 코드는 나누기
+ * 전과 같다(새 코드 PART_ISSUE_APPROVAL_REQUIRED 하나만 더 나올 수 있다).
+ *
+ * 🔴 문은 트랜잭션을 연 **직후**에 본다 — 아무것도 읽기 전, 아무것도 쓰기 전이다.
+ * 판이 없거나 단계가 0개면 지금까지와 한 줄도 다르지 않게 흘러간다.
+ */
+export async function issuePartRequest(input: IssuePartRequestInput): Promise<IssuePartRequestResult> {
   try {
     return await db.transaction(async (tx) => {
-      const actor = await requireActor(tx, input.actorUserId);
-
-      const claim = await claimOrReplayIdempotency<{ requestId: string; requestIssueId: string; status: InventoryPartRequestStatus }>(tx, {
-        idempotencyKey: input.idempotencyKey,
-        actorUserId: actor.id,
-        operationType: "ISSUE",
-        fingerprint,
-      });
-      if (claim.state === "REPLAY") {
-        return { ok: true, requestId: claim.snapshot.requestId, requestIssueId: claim.snapshot.requestIssueId, status: claim.snapshot.status };
+      if (await isPartIssueApprovalRequired(tx)) {
+        fail("PART_ISSUE_APPROVAL_REQUIRED", PART_ISSUE_APPROVAL_REQUIRED_MESSAGE);
       }
-      if (claim.state !== "CLAIMED") failOnNonClaimState(claim.state);
-
-      // Lock order: request header first.
-      const [request] = await tx.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, input.requestId)).for("update");
-      if (!request) fail("NOT_FOUND", "해당 요청을 찾을 수 없습니다.");
-
-      // repair_case_id is nullable (repair-case permanent-delete schema
-      // foundation checkpoint): a request whose repair case has since been
-      // permanently purged is a legitimate historical row, but issuing NEW
-      // stock against it is never sensible — there is no live case left to
-      // receive the parts. Reject cleanly here rather than querying a
-      // nonexistent case; cancel/reject/partiallyClose (which don't touch
-      // stock) are unaffected by this and remain reachable for such a row.
-      if (!request.repairCaseId) fail("NOT_FOUND", "이 요청과 연결된 접수 건이 더 이상 존재하지 않아 불출할 수 없습니다.");
-
-      const [rc] = await tx.select({ isLocked: repairCases.isLocked, billingType: repairCases.billingType }).from(repairCases).where(eq(repairCases.id, request.repairCaseId));
-      if (rc?.billingType === "PENDING_DECISION") {
-        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 부품을 불출할 수 있습니다.");
-      }
-      const isCaseLocked = rc?.isLocked ?? false;
-
-      // 상태와 역할을 따로 판정한다. 전에는 한 함수가 둘을 함께 보고 실패
-      // 이유를 사후에 되짚었는데, 이제 어느 쪽에서 막혔는지가 코드에 그대로
-      // 드러난다.
-      void isCaseLocked;
-      if (!isRequestIssuable({ status: request.status })) {
-        fail("NOT_ISSUABLE", "처리할 수 없는 요청 상태입니다.");
-      }
-      if (!(await hasPermission(actor, "inventory.requestProcessing", "MANAGE"))) {
-        fail("FORBIDDEN", "불출 권한이 없습니다.");
-      }
-
-      // Batch-lock every touched request item, in one id-sorted query.
-      const itemIds = [...new Set(aggregated.aggregates.map((a) => a.requestItemId))].sort();
-      const lockedItems = await tx
-        .select()
-        .from(inventoryPartRequestItems)
-        .where(inArray(inventoryPartRequestItems.id, itemIds))
-        .orderBy(inventoryPartRequestItems.id)
-        .for("update");
-      if (lockedItems.length !== itemIds.length) fail("NOT_FOUND", "요청 항목을 찾을 수 없습니다.");
-      for (const item of lockedItems) {
-        if (item.requestId !== request.id) fail("INVALID_INPUT", "요청 항목이 해당 요청에 속하지 않습니다.");
-      }
-      const itemById = new Map(lockedItems.map((item) => [item.id, item]));
-
-      // Batch-lock every distinct balance touched, in one id-sorted query —
-      // this, combined with the identical ordering used by every other
-      // write path in this module, is what prevents two different requests
-      // that both touch the same two balances (in opposite client-supplied
-      // order) from deadlocking each other.
-      const balanceIds = [...new Set(merged.allocations.map((a) => a.partStockBalanceId))].sort();
-      const lockedBalances = await tx
-        .select()
-        .from(partStockBalances)
-        .where(inArray(partStockBalances.id, balanceIds))
-        .orderBy(partStockBalances.id)
-        .for("update");
-      if (lockedBalances.length !== balanceIds.length) fail("NOT_FOUND", "재고 정보를 찾을 수 없습니다.");
-      const balanceStateById = new Map<string, PrelockedBalanceState & { partId: string; owner: StockOwner }>(
-        lockedBalances.map((b) => [b.id, { id: b.id, currentQuantity: b.currentQuantity, version: b.version, partId: b.partId, owner: b.owner }])
-      );
-
-      // Part-match: the request item's part must equal the selected balance's part.
-      // Owner-match (Parts Request 소유구분 checkpoint): when the request
-      // item states an owner (non-null — every item created after
-      // migration 0024 always does; legacy pre-existing items are NULL and
-      // impose no constraint here, remaining issuable from any bucket
-      // exactly as before), the selected balance's owner must match it
-      // exactly. The requested owner is the requester's stated
-      // requirement — never silently overridden by whichever bucket the
-      // inventory manager happens to pick.
-      for (const allocation of merged.allocations) {
-        const item = itemById.get(allocation.requestItemId)!;
-        const balance = balanceStateById.get(allocation.partStockBalanceId)!;
-        if (item.partId !== balance.partId) fail("INVALID_INPUT", "선택한 재고의 부품이 요청 항목과 일치하지 않습니다.");
-        if (item.owner !== null && item.owner !== balance.owner) {
-          fail("INVALID_INPUT", "선택한 재고의 소유구분이 요청한 소유구분과 일치하지 않습니다.");
-        }
-      }
-
-      // Aggregate validation per item — the roundIssueQuantity (already
-      // summed across every bucket touched for that item this round) is
-      // what gets compared to the remaining requested amount, never any
-      // individual allocation in isolation.
-      for (const aggregate of aggregated.aggregates) {
-        const item = itemById.get(aggregate.requestItemId)!;
-        const sum = safeAddQuantity(item.issuedQuantity, aggregate.roundIssueQuantity);
-        if (!sum.ok) fail("INVALID_INPUT", sum.message);
-        if (sum.value > item.requestedQuantity) {
-          const remaining = Math.max(0, item.requestedQuantity - item.issuedQuantity);
-          fail("EXCEEDS_REMAINING_REQUESTED", `요청 항목의 남은 수량(${remaining}개)을 초과하여 불출할 수 없습니다.`);
-        }
-      }
-
-      // Only now — after every lock is held and every validation has
-      // passed — do any writes happen. One issue event groups everything
-      // this confirmation produces.
-      const [issueEvent] = await tx
-        .insert(inventoryPartRequestIssues)
-        .values({ requestId: request.id, issuedByUserId: actor.id, note: normalizedNote })
-        .returning({ id: inventoryPartRequestIssues.id });
-
-      for (const allocation of merged.allocations) {
-        const balanceState = balanceStateById.get(allocation.partStockBalanceId)!;
-        const result = await applyStockUseCore(
-          tx,
-          {
-            partStockBalanceId: allocation.partStockBalanceId,
-            quantity: allocation.quantity,
-            actorUserId: actor.id,
-            repairCaseId: request.repairCaseId,
-            requestItemId: allocation.requestItemId,
-            requestIssueId: issueEvent.id,
-          },
-          { prelocked: balanceState }
-        );
-        if (!result.ok) {
-          // Already pre-locked and pre-validated against the balance state
-          // read in this same transaction — INSUFFICIENT_STOCK is still
-          // possible if two allocations in this same event target the same
-          // balance for more than it holds.
-          fail("INSUFFICIENT_STOCK", "재고가 부족합니다.");
-        }
-        // Track the running balance state in-process so a second
-        // allocation against the same balance later in this same loop
-        // validates against the up-to-date quantity, not the originally
-        // locked snapshot.
-        balanceStateById.set(allocation.partStockBalanceId, { ...balanceState, currentQuantity: result.resultingQuantity, version: result.version });
-      }
-
-      for (const aggregate of aggregated.aggregates) {
-        const item = itemById.get(aggregate.requestItemId)!;
-        await tx
-          .update(inventoryPartRequestItems)
-          .set({ issuedQuantity: item.issuedQuantity + aggregate.roundIssueQuantity, updatedAt: new Date() })
-          .where(eq(inventoryPartRequestItems.id, item.id));
-      }
-
-      // Recompute overall status from every item on the request (not just
-      // the ones touched this round) — read fresh, post-update.
-      const allItems = await tx
-        .select({ requestedQuantity: inventoryPartRequestItems.requestedQuantity, issuedQuantity: inventoryPartRequestItems.issuedQuantity })
-        .from(inventoryPartRequestItems)
-        .where(eq(inventoryPartRequestItems.requestId, request.id));
-      const allFullyIssued = allItems.every((item) => item.issuedQuantity >= item.requestedQuantity);
-      const newStatus = computeStatusAfterIssue(allFullyIssued);
-
-      await tx
-        .update(inventoryPartRequests)
-        .set({ status: newStatus, version: request.version + 1, updatedAt: new Date() })
-        .where(eq(inventoryPartRequests.id, request.id));
-
-      await tx.insert(inventoryPartRequestHistory).values({
-        requestId: request.id,
-        requestIssueId: issueEvent.id,
-        actionType: "ISSUED",
-        beforeState: { status: request.status },
-        afterState: { status: newStatus, allocations: merged.allocations },
-        actorUserId: actor.id,
-      });
-
-      const snapshot = { requestId: request.id, requestIssueId: issueEvent.id, status: newStatus };
-      await finalizeIdempotencySuccess(tx, input.idempotencyKey, request.id, snapshot);
-
-      return { ok: true, requestId: request.id, requestIssueId: issueEvent.id, status: newStatus };
+      return await issuePartRequestCore(tx, input);
     });
   } catch (err) {
     if (err instanceof InventoryPartRequestMutationError) return err.result;

@@ -13,6 +13,7 @@ import {
   inventoryPartIssueRequests,
   inventoryPartRequestHistory,
   inventoryPartRequestIdempotencyKeys,
+  inventoryPartRequestIssues,
   inventoryPartRequestItems,
   inventoryPartRequests,
   partStockBalances,
@@ -25,12 +26,13 @@ import {
   stockTransactions,
   users,
 } from "../schema";
-import { createPart, receiveStock } from "./inventory";
-import { createPartRequest } from "./inventory-part-requests";
+import { consumeStock, createPart, receiveStock } from "./inventory";
+import { createPartRequest, issuePartRequest } from "./inventory-part-requests";
 import {
   cancelPartIssueRequest,
   createPartIssueRequest,
   decidePartIssueRequestApproval,
+  executePartIssueRequest,
 } from "./inventory-part-issue-requests";
 import { createRepairCase } from "./repair-cases";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
@@ -287,12 +289,28 @@ async function removeIssueFixtures(): Promise<void> {
     .where(inArray(inventoryPartRequests.requestedByUserId, createdUserIds));
   const partRequestIds = partRequests.map((row) => row.id);
   if (partRequestIds.length > 0) {
+    // ⚠️ 실행 시험이 생기면서 **재고 장부 줄**이 요청 줄·불출 사건을 붙잡는다
+    // (stock_transactions.request_item_id · request_issue_id 둘 다 RESTRICT).
+    // 순서는 FK 가 강제한다: 장부 줄 → 이력 → 불출 사건 → 요청 줄 → 요청.
+    const requestItemRows = await db
+      .select({ id: inventoryPartRequestItems.id })
+      .from(inventoryPartRequestItems)
+      .where(inArray(inventoryPartRequestItems.requestId, partRequestIds));
+    const requestItemIds = requestItemRows.map((row) => row.id);
+    if (requestItemIds.length > 0) {
+      await db
+        .delete(stockTransactions)
+        .where(inArray(stockTransactions.requestItemId, requestItemIds));
+    }
     await db
       .delete(inventoryPartRequestIdempotencyKeys)
       .where(inArray(inventoryPartRequestIdempotencyKeys.requestId, partRequestIds));
     await db
       .delete(inventoryPartRequestHistory)
       .where(inArray(inventoryPartRequestHistory.requestId, partRequestIds));
+    await db
+      .delete(inventoryPartRequestIssues)
+      .where(inArray(inventoryPartRequestIssues.requestId, partRequestIds));
     await db
       .delete(inventoryPartRequestItems)
       .where(inArray(inventoryPartRequestItems.requestId, partRequestIds));
@@ -1358,5 +1376,583 @@ describe("🔴 이 조각이 하지 않는 일", () => {
       .from(inventoryPartRequestItems)
       .where(eq(inventoryPartRequestItems.id, itemId));
     assert.equal(item.issuedQuantity, 0, "🔴 승인만 했는데 요청이 불출된 것으로 적혔다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 문 달기 + 실행 (조각 ③-3)
+ * ============================================================================
+ * 여기부터가 못 박는 것:
+ *  1. 🔴 **판이 없으면 [불출]·[사용]이 지금까지와 똑같이 동작한다.** 이것이
+ *     안전장치다 — 관리자가 절차를 만들기 전까지 재고가 잠기면 안 된다.
+ *  2. 🔴 판이 있으면 겉 함수가 **전용 코드로 거절**하고 그때 재고가 한 톨도
+ *     움직이지 않는다.
+ *  3. 🔴 **실행 경로는 문에 걸리지 않는다** — 판이 있어도 승인된 신청은 실행된다.
+ *  4. 🔴 실행은 **신청 항목에 적힌 잔량 행·수량으로만** 한다.
+ *  5. 🔴 **재고 이동과 상태 변경이 한 트랜잭션이다** — 중간에 막히면 먼저 나간
+ *     것까지 되돌아가고 신청은 APPROVED 로 남는다.
+ *  6. 🔴 **두 번 실행해도 한 번만 나간다**(이어서 눌러도, 동시에 눌러도).
+ *
+ * ⚠️ 이 절의 시험들은 **자기 잔량 자리를 새로 만들어** 쓴다. 위쪽 시험들이 쓰는
+ * balanceA/balanceB 의 수량에 기대면, 재고를 실제로 움직이는 이 시험들이 그 값을
+ * 바꿔 앞 시험을 깨뜨린다.
+ * ============================================================================
+ */
+
+/** 이 시험만 쓰는 새 잔량 자리 하나. after() 가 부품과 함께 걷는다. */
+async function arrangeFreshBalance(quantity: number): Promise<string> {
+  const received = await receiveStock({
+    partId,
+    owner: "DSS",
+    location: `${TEST_LOCATION}-${randomUUID().slice(0, 8)}`,
+    quantity,
+    actorUserId: superAdminId,
+  });
+  assert.equal(received.ok, true, `setup stock failed: ${JSON.stringify(received)}`);
+  if (!received.ok) throw new Error("unreachable");
+  return received.partStockBalanceId;
+}
+
+async function balanceRow(balanceId: string) {
+  const [row] = await db
+    .select({
+      currentQuantity: partStockBalances.currentQuantity,
+      version: partStockBalances.version,
+      location: partStockBalances.location,
+    })
+    .from(partStockBalances)
+    .where(eq(partStockBalances.id, balanceId));
+  return row;
+}
+
+/** 그 자리의 **사용(USE)** 장부 줄들. 입고 줄은 세지 않는다. */
+async function useRowsFor(balanceId: string) {
+  const rows = await db
+    .select({
+      transactionType: stockTransactions.transactionType,
+      quantityDelta: stockTransactions.quantityDelta,
+      resultingQuantity: stockTransactions.resultingQuantity,
+      repairCaseId: stockTransactions.repairCaseId,
+      destinationNote: stockTransactions.destinationNote,
+      requestItemId: stockTransactions.requestItemId,
+      requestIssueId: stockTransactions.requestIssueId,
+      actorUserId: stockTransactions.actorUserId,
+    })
+    .from(stockTransactions)
+    .where(eq(stockTransactions.partStockBalanceId, balanceId));
+  return rows.filter((row) => row.transactionType === "USE");
+}
+
+async function approveAll(issueRequestId: string, approverIds: string[]): Promise<void> {
+  for (const approverId of approverIds) {
+    const decided = await decidePartIssueRequestApproval({
+      issueRequestId,
+      decision: "APPROVED",
+      actorUserId: approverId,
+      decisionReason: null,
+    });
+    assert.equal(decided.ok, true, `approve failed: ${JSON.stringify(decided)}`);
+  }
+}
+
+/** 결재까지 끝난 직접 사용 신청 하나. 부르기 전에 판이 저장돼 있어야 한다. */
+async function arrangeApprovedDirectUse(balanceId: string, quantity: number): Promise<string> {
+  const created = await createPartIssueRequest({
+    kind: "DIRECT_USE",
+    partStockBalanceId: balanceId,
+    quantity,
+    repairCaseId: null,
+    destinationNote: "상해수리소",
+    procedureExecutionNodeId: null,
+    requestReason: "실행 시험",
+    actorUserId: managerId,
+  });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  if (!created.ok) throw new Error("unreachable");
+  await approveAll(created.issueRequestId, [approverAId]);
+  assert.equal((await issueRequestRow(created.issueRequestId)).status, "APPROVED");
+  return created.issueRequestId;
+}
+
+/** 결재까지 끝난 요청 기반 신청 하나 — 한 요청 줄을 여러 잔량 자리로 나눠 담는다. */
+async function arrangeApprovedRequestIssue(
+  requestedQuantity: number,
+  lines: { balanceId: string; quantity: number }[]
+): Promise<{ issueRequestId: string; requestId: string; itemId: string }> {
+  const { requestId, itemId } = await arrangePartRequest(requestedQuantity);
+  const created = await createPartIssueRequest({
+    kind: "PART_REQUEST",
+    partRequestId: requestId,
+    allocations: lines.map((line) => ({
+      requestItemId: itemId,
+      partStockBalanceId: line.balanceId,
+      quantity: line.quantity,
+    })),
+    requestReason: "실행 시험",
+    actorUserId: managerId,
+  });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  if (!created.ok) throw new Error("unreachable");
+  await approveAll(created.issueRequestId, [approverAId]);
+  assert.equal((await issueRequestRow(created.issueRequestId)).status, "APPROVED");
+  return { issueRequestId: created.issueRequestId, requestId, itemId };
+}
+
+describe("🔴 문 — 「부품 불출」 절차가 있을 때만 바로 못 뺀다", () => {
+  test("🔴 36. 판이 없으면 [불출]·[사용]이 지금까지와 똑같이 동작한다", async () => {
+    // 판을 저장하지 않는다 — afterEach 가 매번 걷으므로 여기는 「절차 없음」이다.
+    const directBalance = await arrangeFreshBalance(5);
+    const before = await balanceRow(directBalance);
+
+    const used = await consumeStock({
+      partStockBalanceId: directBalance,
+      quantity: 2,
+      destinationNote: "상해수리소",
+      actorUserId: managerId,
+      expectedVersion: before.version,
+    });
+    assert.equal(used.ok, true, `🔴 절차가 없는데 사용이 막혔다: ${JSON.stringify(used)}`);
+    if (used.ok) assert.equal(used.resultingQuantity, 3);
+    assert.equal((await balanceRow(directBalance)).currentQuantity, 3);
+
+    const issueBalance = await arrangeFreshBalance(5);
+    const { requestId, itemId } = await arrangePartRequest(3);
+    const issued = await issuePartRequest({
+      requestId,
+      allocations: [{ requestItemId: itemId, partStockBalanceId: issueBalance, quantity: 3 }],
+      actorUserId: managerId,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(issued.ok, true, `🔴 절차가 없는데 불출이 막혔다: ${JSON.stringify(issued)}`);
+    if (issued.ok) assert.equal(issued.status, "FULLY_ISSUED");
+    assert.equal((await balanceRow(issueBalance)).currentQuantity, 2);
+  });
+
+  test("🔴 37. 판이 있으면 두 길 다 거절하고 재고가 한 톨도 안 움직인다", async () => {
+    await saveRoute([approverAId]);
+
+    const directBalance = await arrangeFreshBalance(5);
+    const beforeDirect = await balanceRow(directBalance);
+    const used = await consumeStock({
+      partStockBalanceId: directBalance,
+      quantity: 2,
+      destinationNote: "상해수리소",
+      actorUserId: managerId,
+      expectedVersion: beforeDirect.version,
+    });
+    assert.equal(used.ok, false, "🔴 절차가 있는데 재고가 그냥 나갔다");
+    if (!used.ok) {
+      assert.equal(used.code, "PART_ISSUE_APPROVAL_REQUIRED");
+      assert.match(used.message, /불출 승인 요청/);
+    }
+    assert.deepEqual(await balanceRow(directBalance), beforeDirect, "🔴 막혔는데 잔량이 바뀌었다");
+    assert.equal((await useRowsFor(directBalance)).length, 0);
+
+    const issueBalance = await arrangeFreshBalance(5);
+    const beforeIssue = await balanceRow(issueBalance);
+    const { requestId, itemId } = await arrangePartRequest(3);
+    const idempotencyKey = randomUUID();
+    const issued = await issuePartRequest({
+      requestId,
+      allocations: [{ requestItemId: itemId, partStockBalanceId: issueBalance, quantity: 3 }],
+      actorUserId: managerId,
+      idempotencyKey,
+    });
+    assert.equal(issued.ok, false, "🔴 절차가 있는데 불출이 그냥 나갔다");
+    if (!issued.ok) {
+      assert.equal(issued.code, "PART_ISSUE_APPROVAL_REQUIRED");
+      assert.match(issued.message, /불출 승인 요청/);
+    }
+    assert.deepEqual(await balanceRow(issueBalance), beforeIssue, "🔴 막혔는데 잔량이 바뀌었다");
+    assert.equal((await useRowsFor(issueBalance)).length, 0);
+
+    // 🔴 문이 **중복 방지 청구보다 먼저** 있다 — 막힌 시도가 열쇠를 태우면 사람이
+    // 절차를 만든 뒤 같은 열쇠로 다시 눌렀을 때 「이전 제출과 다르다」로 막힌다.
+    const claimed = await db
+      .select({ idempotencyKey: inventoryPartRequestIdempotencyKeys.idempotencyKey })
+      .from(inventoryPartRequestIdempotencyKeys)
+      .where(eq(inventoryPartRequestIdempotencyKeys.idempotencyKey, idempotencyKey));
+    assert.equal(claimed.length, 0, "🔴 문에 막힌 시도가 중복 방지 열쇠를 남겼다");
+
+    // 요청의 나간 수량도 그대로 0이다.
+    const [item] = await db
+      .select({ issuedQuantity: inventoryPartRequestItems.issuedQuantity })
+      .from(inventoryPartRequestItems)
+      .where(eq(inventoryPartRequestItems.id, itemId));
+    assert.equal(item.issuedQuantity, 0);
+  });
+});
+
+describe("🔴 실행 — 승인된 신청으로 재고가 나간다", () => {
+  test("🔴 38. 요청 기반 — 신청 항목에 적힌 대로 정확히 나가고 EXECUTED 가 된다", async () => {
+    await saveRoute([approverAId]);
+    const balanceId = await arrangeFreshBalance(10);
+    const { issueRequestId, itemId } = await arrangeApprovedRequestIssue(5, [
+      { balanceId, quantity: 4 },
+    ]);
+
+    // 🔴 판이 그대로 서 있는 채로 실행한다 — 실행 경로는 문에 걸리지 않는다.
+    const executed = await executePartIssueRequest({ issueRequestId, actorUserId: managerId });
+    assert.equal(executed.ok, true, `🔴 승인된 신청이 실행되지 않았다: ${JSON.stringify(executed)}`);
+    if (!executed.ok) return;
+    assert.equal(executed.status, "EXECUTED");
+    assert.ok(executed.requestIssueId, "요청 기반 실행인데 불출 사건이 없다");
+    assert.deepEqual(executed.movedBalanceIds, [balanceId]);
+
+    assert.equal(
+      (await balanceRow(balanceId)).currentQuantity,
+      6,
+      "🔴 신청 항목에 적힌 수량과 다르게 나갔다"
+    );
+
+    const uses = await useRowsFor(balanceId);
+    assert.equal(uses.length, 1);
+    assert.equal(uses[0].quantityDelta, -4);
+    assert.equal(uses[0].resultingQuantity, 6);
+    assert.equal(uses[0].requestItemId, itemId);
+    assert.equal(uses[0].requestIssueId, executed.requestIssueId);
+    assert.equal(uses[0].actorUserId, managerId, "실행자가 장부에 남지 않았다");
+
+    const [requestItem] = await db
+      .select({
+        issuedQuantity: inventoryPartRequestItems.issuedQuantity,
+        requestId: inventoryPartRequestItems.requestId,
+      })
+      .from(inventoryPartRequestItems)
+      .where(eq(inventoryPartRequestItems.id, itemId));
+    assert.equal(requestItem.issuedQuantity, 4, "부품 요청의 나간 수량이 갱신되지 않았다");
+    const [partRequest] = await db
+      .select({ status: inventoryPartRequests.status })
+      .from(inventoryPartRequests)
+      .where(eq(inventoryPartRequests.id, requestItem.requestId));
+    assert.equal(partRequest.status, "PARTIALLY_ISSUED");
+
+    const header = await issueRequestRow(issueRequestId);
+    assert.equal(header.status, "EXECUTED");
+    assert.equal(header.executedByUserId, managerId);
+    assert.ok(header.executedAt, "🔴 실행 시각이 비어 있다(표의 CHECK 이 셋을 함께 요구한다)");
+  });
+
+  test("🔴 39. 직접 사용 — 사용처·실행자가 그대로 장부에 남는다", async () => {
+    await saveRoute([approverAId]);
+    const balanceId = await arrangeFreshBalance(6);
+    const issueRequestId = await arrangeApprovedDirectUse(balanceId, 2);
+
+    const executed = await executePartIssueRequest({ issueRequestId, actorUserId: managerId });
+    assert.equal(executed.ok, true, JSON.stringify(executed));
+    if (!executed.ok) return;
+    assert.equal(executed.requestIssueId, null, "직접 사용인데 불출 사건이 생겼다");
+
+    assert.equal((await balanceRow(balanceId)).currentQuantity, 4);
+    const uses = await useRowsFor(balanceId);
+    assert.equal(uses.length, 1);
+    assert.equal(uses[0].quantityDelta, -2);
+    assert.equal(
+      uses[0].destinationNote,
+      "상해수리소",
+      "🔴 신청 헤더의 사용처가 장부로 넘어가지 않았다"
+    );
+    assert.equal(uses[0].repairCaseId, null);
+    assert.equal(uses[0].requestItemId, null);
+    assert.equal(uses[0].actorUserId, managerId);
+
+    const header = await issueRequestRow(issueRequestId);
+    assert.equal(header.status, "EXECUTED");
+    assert.equal(header.executedByUserId, managerId);
+    assert.ok(header.executedAt);
+  });
+
+  test("🔴 40. 두 번 실행해도 한 번만 나간다 — 이어서 눌러도, 동시에 눌러도", async () => {
+    await saveRoute([approverAId]);
+
+    const sequentialBalance = await arrangeFreshBalance(6);
+    const sequentialId = await arrangeApprovedDirectUse(sequentialBalance, 2);
+    assert.equal(
+      (await executePartIssueRequest({ issueRequestId: sequentialId, actorUserId: managerId })).ok,
+      true
+    );
+    const again = await executePartIssueRequest({
+      issueRequestId: sequentialId,
+      actorUserId: managerId,
+    });
+    assert.equal(again.ok, false, "🔴 같은 신청이 두 번 실행됐다");
+    if (!again.ok) {
+      assert.equal(again.code, "NOT_EXECUTABLE");
+      assert.match(again.message, /이미 실행/);
+    }
+    assert.equal((await balanceRow(sequentialBalance)).currentQuantity, 4, "🔴 두 번 빠졌다");
+    assert.equal((await useRowsFor(sequentialBalance)).length, 1);
+
+    const concurrentBalance = await arrangeFreshBalance(6);
+    const concurrentId = await arrangeApprovedDirectUse(concurrentBalance, 2);
+    const results = await Promise.all([
+      executePartIssueRequest({ issueRequestId: concurrentId, actorUserId: managerId }),
+      executePartIssueRequest({ issueRequestId: concurrentId, actorUserId: managerId }),
+    ]);
+    assert.equal(
+      results.filter((row) => row.ok).length,
+      1,
+      "🔴 동시에 누른 두 실행이 둘 다 통과했다"
+    );
+    const blocked = results.find((row) => !row.ok);
+    assert.ok(blocked, "둘 다 통과하지 않았다면 막힌 쪽이 있어야 한다");
+    if (blocked && !blocked.ok) assert.equal(blocked.code, "NOT_EXECUTABLE");
+    assert.equal(
+      (await balanceRow(concurrentBalance)).currentQuantity,
+      4,
+      "🔴 동시에 눌러 두 번 빠졌다"
+    );
+    assert.equal((await useRowsFor(concurrentBalance)).length, 1);
+  });
+
+  test("🔴 41. 승인되지 않은 신청은 실행되지 않는다 — 대기·반려·취소", async () => {
+    await saveRoute([approverAId]);
+
+    // 아직 결재 중.
+    const pendingBalance = await arrangeFreshBalance(5);
+    const pending = await createPartIssueRequest({
+      kind: "DIRECT_USE",
+      partStockBalanceId: pendingBalance,
+      quantity: 2,
+      repairCaseId: null,
+      destinationNote: "상해수리소",
+      procedureExecutionNodeId: null,
+      requestReason: null,
+      actorUserId: managerId,
+    });
+    assert.equal(pending.ok, true);
+    if (!pending.ok) return;
+    const pendingResult = await executePartIssueRequest({
+      issueRequestId: pending.issueRequestId,
+      actorUserId: managerId,
+    });
+    assert.equal(pendingResult.ok, false, "🔴 결재가 끝나기 전에 재고가 나갔다");
+    if (!pendingResult.ok) {
+      assert.equal(pendingResult.code, "NOT_EXECUTABLE");
+      assert.match(pendingResult.message, /결재/);
+    }
+    assert.equal((await balanceRow(pendingBalance)).currentQuantity, 5);
+    assert.equal((await useRowsFor(pendingBalance)).length, 0);
+
+    // 반려됐다.
+    const rejectedBalance = await arrangeFreshBalance(5);
+    const rejected = await createPartIssueRequest({
+      kind: "DIRECT_USE",
+      partStockBalanceId: rejectedBalance,
+      quantity: 2,
+      repairCaseId: null,
+      destinationNote: "상해수리소",
+      procedureExecutionNodeId: null,
+      requestReason: null,
+      actorUserId: managerId,
+    });
+    assert.equal(rejected.ok, true);
+    if (!rejected.ok) return;
+    assert.equal(
+      (
+        await decidePartIssueRequestApproval({
+          issueRequestId: rejected.issueRequestId,
+          decision: "REJECTED",
+          actorUserId: approverAId,
+          decisionReason: "재고 확인 필요",
+        })
+      ).ok,
+      true
+    );
+    const rejectedResult = await executePartIssueRequest({
+      issueRequestId: rejected.issueRequestId,
+      actorUserId: managerId,
+    });
+    assert.equal(rejectedResult.ok, false, "🔴 반려된 신청이 실행됐다");
+    if (!rejectedResult.ok) assert.equal(rejectedResult.code, "NOT_EXECUTABLE");
+    assert.equal((await balanceRow(rejectedBalance)).currentQuantity, 5);
+    assert.equal((await useRowsFor(rejectedBalance)).length, 0);
+
+    // 승인 뒤에 무른 신청.
+    const cancelledBalance = await arrangeFreshBalance(5);
+    const cancelledId = await arrangeApprovedDirectUse(cancelledBalance, 2);
+    assert.equal(
+      (
+        await cancelPartIssueRequest({
+          issueRequestId: cancelledId,
+          actorUserId: managerId,
+          reason: null,
+        })
+      ).ok,
+      true
+    );
+    const cancelledResult = await executePartIssueRequest({
+      issueRequestId: cancelledId,
+      actorUserId: managerId,
+    });
+    assert.equal(cancelledResult.ok, false, "🔴 무른 신청이 실행됐다");
+    if (!cancelledResult.ok) assert.equal(cancelledResult.code, "NOT_EXECUTABLE");
+    assert.equal((await balanceRow(cancelledBalance)).currentQuantity, 5);
+    assert.equal((await useRowsFor(cancelledBalance)).length, 0);
+  });
+
+  test("🔴 42. 재고가 모자라면 기존 코드가 막고 신청은 APPROVED 로 남는다", async () => {
+    await saveRoute([approverAId]);
+    const balanceId = await arrangeFreshBalance(4);
+    const issueRequestId = await arrangeApprovedDirectUse(balanceId, 4);
+
+    // 결재 사이에 남이 가져간 상황을 만든다(arrange 전용 직접 갱신 — 이 판이 서
+    // 있는 동안에는 [사용]으로 뺄 수 없다. 그것이 이 조각이 만든 문이다).
+    const before = await balanceRow(balanceId);
+    await db
+      .update(partStockBalances)
+      .set({ currentQuantity: 1, version: before.version + 1, updatedAt: new Date() })
+      .where(eq(partStockBalances.id, balanceId));
+    const drained = await balanceRow(balanceId);
+
+    const executed = await executePartIssueRequest({ issueRequestId, actorUserId: managerId });
+    assert.equal(executed.ok, false, "🔴 재고가 모자란데 실행이 통과했다");
+    if (!executed.ok) {
+      assert.equal(executed.code, "INSUFFICIENT_STOCK");
+      assert.match(executed.message, /재고가 부족/);
+    }
+
+    assert.deepEqual(await balanceRow(balanceId), drained, "🔴 막혔는데 잔량이 바뀌었다");
+    assert.equal((await useRowsFor(balanceId)).length, 0);
+
+    const header = await issueRequestRow(issueRequestId);
+    assert.equal(header.status, "APPROVED", "🔴 실행이 막혔는데 신청이 EXECUTED 가 됐다");
+    assert.equal(header.executedByUserId, null);
+    assert.equal(header.executedAt, null);
+
+    // 🔴 APPROVED 로 남겨 두는 이유 — 입고 뒤에 다시 누르면 그대로 나간다.
+    const refilled = await receiveStock({
+      partId,
+      owner: "DSS",
+      location: drained.location,
+      quantity: 10,
+      actorUserId: superAdminId,
+    });
+    assert.equal(refilled.ok, true, JSON.stringify(refilled));
+    const retried = await executePartIssueRequest({ issueRequestId, actorUserId: managerId });
+    assert.equal(retried.ok, true, `🔴 입고 뒤에도 실행되지 않았다: ${JSON.stringify(retried)}`);
+    assert.equal((await balanceRow(balanceId)).currentQuantity, 7);
+    assert.equal((await issueRequestRow(issueRequestId)).status, "EXECUTED");
+  });
+
+  test("🔴 43. 재고 이동과 상태 변경이 한 트랜잭션이다 — 막히면 먼저 나간 것도 되돌아간다", async () => {
+    await saveRoute([approverAId]);
+
+    // ── (가) 상태가 이미 바뀌어 있으면 재고도 안 나간다 ──────────────────
+    const cancelledBalance = await arrangeFreshBalance(5);
+    const cancelledId = await arrangeApprovedDirectUse(cancelledBalance, 2);
+    // 다른 트랜잭션이 먼저 물린 상황을 만든다(arrange 전용).
+    await db
+      .update(inventoryPartIssueRequests)
+      .set({ status: "CANCELLED", updatedAt: new Date() })
+      .where(eq(inventoryPartIssueRequests.id, cancelledId));
+    const stateChanged = await executePartIssueRequest({
+      issueRequestId: cancelledId,
+      actorUserId: managerId,
+    });
+    assert.equal(stateChanged.ok, false);
+    if (!stateChanged.ok) assert.equal(stateChanged.code, "NOT_EXECUTABLE");
+    assert.equal(
+      (await balanceRow(cancelledBalance)).currentQuantity,
+      5,
+      "🔴 상태가 막혔는데 재고가 나갔다"
+    );
+    assert.equal((await useRowsFor(cancelledBalance)).length, 0);
+
+    // ── (나) 두 자리 중 뒤엣것이 모자라면 **앞엣것도 되돌아간다** ─────────
+    // 불출은 잔량 행 id 순으로 나간다(mergeDuplicateAllocations 의 정렬). 뒤에 오는
+    // 자리를 비워 두면 앞자리는 이미 빠진 뒤에 막히고, 그때 앞자리까지 되돌아가는지가
+    // 이 시험의 전부다 — 되돌아가지 않으면 「재고는 나갔는데 신청은 승인됨」이다.
+    const madeFirst = await arrangeFreshBalance(3);
+    const madeSecond = await arrangeFreshBalance(3);
+    const [earlier, later] = [madeFirst, madeSecond].sort();
+    const { issueRequestId, itemId } = await arrangeApprovedRequestIssue(6, [
+      { balanceId: earlier, quantity: 3 },
+      { balanceId: later, quantity: 3 },
+    ]);
+
+    const laterBefore = await balanceRow(later);
+    await db
+      .update(partStockBalances)
+      .set({ currentQuantity: 1, version: laterBefore.version + 1, updatedAt: new Date() })
+      .where(eq(partStockBalances.id, later));
+
+    const executed = await executePartIssueRequest({ issueRequestId, actorUserId: managerId });
+    assert.equal(executed.ok, false, "🔴 뒤엣자리가 모자란데 실행이 통과했다");
+    if (!executed.ok) assert.equal(executed.code, "INSUFFICIENT_STOCK");
+
+    assert.equal(
+      (await balanceRow(earlier)).currentQuantity,
+      3,
+      "🔴 뒤에서 막혔는데 먼저 나간 재고가 되돌아오지 않았다"
+    );
+    assert.equal((await balanceRow(later)).currentQuantity, 1);
+    assert.equal((await useRowsFor(earlier)).length, 0, "🔴 되돌아갔어야 할 장부 줄이 남아 있다");
+    assert.equal((await useRowsFor(later)).length, 0);
+
+    const header = await issueRequestRow(issueRequestId);
+    assert.equal(header.status, "APPROVED");
+    assert.equal(header.executedByUserId, null);
+    assert.equal(header.executedAt, null);
+
+    const [requestItem] = await db
+      .select({ issuedQuantity: inventoryPartRequestItems.issuedQuantity })
+      .from(inventoryPartRequestItems)
+      .where(eq(inventoryPartRequestItems.id, itemId));
+    assert.equal(requestItem.issuedQuantity, 0, "🔴 되돌아갔는데 요청이 불출된 것으로 적혔다");
+  });
+
+  test("🔴 44. 자격 없는 사람은 실행할 수 없다 — 두 갈래 모두", async () => {
+    await saveRoute([approverAId]);
+
+    const directBalance = await arrangeFreshBalance(5);
+    const directId = await arrangeApprovedDirectUse(directBalance, 2);
+    const directResult = await executePartIssueRequest({
+      issueRequestId: directId,
+      actorUserId: engineerId,
+    });
+    assert.equal(directResult.ok, false, "🔴 자격 없는 사람이 재고를 뺐다");
+    if (!directResult.ok) {
+      assert.equal(directResult.code, "FORBIDDEN");
+      assert.match(directResult.message, /재고를 사용할 권한/);
+    }
+    assert.equal((await balanceRow(directBalance)).currentQuantity, 5);
+    assert.equal((await useRowsFor(directBalance)).length, 0);
+
+    const issueBalance = await arrangeFreshBalance(5);
+    const { issueRequestId } = await arrangeApprovedRequestIssue(4, [
+      { balanceId: issueBalance, quantity: 3 },
+    ]);
+    const issueResult = await executePartIssueRequest({
+      issueRequestId,
+      actorUserId: engineerId,
+    });
+    assert.equal(issueResult.ok, false, "🔴 자격 없는 사람이 불출했다");
+    if (!issueResult.ok) {
+      assert.equal(issueResult.code, "FORBIDDEN");
+      assert.match(issueResult.message, /불출 권한/);
+    }
+    assert.equal((await balanceRow(issueBalance)).currentQuantity, 5);
+    assert.equal((await useRowsFor(issueBalance)).length, 0);
+
+    // 🔴 결재선에 올라간 사람이라고 실행까지 할 수 있는 것은 아니다 — 결재는
+    // 「해도 된다」이고 실행은 재고를 만지는 일이라 자격이 다르다.
+    const approverResult = await executePartIssueRequest({
+      issueRequestId,
+      actorUserId: approverAId,
+    });
+    assert.equal(approverResult.ok, false, "🔴 결재자가 그대로 실행까지 했다");
+    if (!approverResult.ok) assert.equal(approverResult.code, "FORBIDDEN");
+    assert.equal((await balanceRow(issueBalance)).currentQuantity, 5);
+  });
+
+  test("45. 없는 신청은 NOT_FOUND 다", async () => {
+    const executed = await executePartIssueRequest({
+      issueRequestId: randomUUID(),
+      actorUserId: managerId,
+    });
+    assert.equal(executed.ok, false);
+    if (!executed.ok) assert.equal(executed.code, "NOT_FOUND");
   });
 });

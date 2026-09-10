@@ -293,6 +293,16 @@ export type PartIssueActionResultCode =
   | "ROUTE_HAS_NO_OTHER_APPROVER"
   /** 이미 나갔거나 이미 끝난 신청은 무를 수 없다. */
   | "NOT_CANCELLABLE"
+  /**
+   * 🔴 **지금 실행할 수 있는 상태가 아니다** — 아직 결재 중이거나, 이미 나갔거나,
+   * 반려·취소됐다. 사람이 할 일이 셋 다 다르므로 메시지로 나눈다(아직 결재
+   * 중이면 기다린다 · 이미 나갔으면 되돌리려면 반품이다 · 반려·취소됐으면 새로
+   * 신청한다).
+   *
+   * NOT_CANCELLABLE 과 나누는 이유: 그쪽은 「무를 수 없다」이고 이쪽은 「뺄 수
+   * 없다」다. 뭉뚱그리면 화면이 어느 단추를 닫아야 할지 알 수 없다.
+   */
+  | "NOT_EXECUTABLE"
   /** 예상 못 한 DB 오류를 서버 액션이 가린 것. */
   | "DATABASE_UNAVAILABLE";
 

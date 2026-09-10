@@ -7,9 +7,11 @@ import {
   cancelPartIssueRequest,
   createPartIssueRequest,
   decidePartIssueRequestApproval,
+  executePartIssueRequest,
   type CancelPartIssueRequestResult,
   type CreatePartIssueRequestResult,
   type DecidePartIssueRequestApprovalResult,
+  type ExecutePartIssueRequestResult,
 } from "@/lib/db/mutations/inventory-part-issue-requests";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 import {
@@ -34,8 +36,8 @@ import {
  * 처리해도 되는가」는 전부 mutation 이 자기 트랜잭션 안에서 다시 판정한다.
  *
  * 🔴 **이 조각(2026-09-10)에서는 이 액션들을 부르는 화면이 아직 없다.** 두 불출
- * 길에 문을 다는 것과 화면은 다음 조각들이므로, 쓰이지 않는 채로 남는 것이
- * 정상이다.
+ * 길에 문을 다는 것과 실행 경로까지가 여기고 **화면은 다음 조각**이므로, 쓰이지
+ * 않는 채로 남는 것이 정상이다.
  * ============================================================================
  */
 
@@ -196,6 +198,42 @@ export async function cancelPartIssueRequestAction(
     })
   );
 
+  if (result.ok) revalidatePartIssueSurfaces();
+  return result;
+}
+
+export type ExecutePartIssueRequestActionInput = {
+  issueRequestId: string;
+};
+
+/**
+ * 승인된 불출 신청을 실제로 실행한다 — **여기서 재고가 나간다.**
+ *
+ * 🔴 **받는 것이 신청 id 하나뿐인 것이 설계다.** 무엇을 얼마나 빼는지는 신청
+ * 항목에 이미 적혀 있고, 화면이 보낸 수량을 쓰면 「승인받은 것과 다른 것이
+ * 나갔다」가 가능해진다. 그래서 이 액션에는 수량도 잔량 행도 받을 자리가 없다.
+ *
+ * 「지금 실행할 수 있는가」·「이 사람이 실행해도 되는가」·「재고가 남아 있는가」는
+ * 전부 mutation 이 자기 트랜잭션 안에서 판정한다 — 여기서 보는 것은 형식뿐이다.
+ */
+export async function executePartIssueRequestAction(
+  input: ExecutePartIssueRequestActionInput
+): Promise<ExecutePartIssueRequestResult | PartIssueActionFailure> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+
+  if (!isValidUuid(input.issueRequestId)) {
+    return { ok: false, code: "INVALID_INPUT", message: "불출 신청 정보를 확인할 수 없습니다." };
+  }
+
+  const result = await withErrorRedaction("executePartIssueRequestAction", () =>
+    executePartIssueRequest({
+      issueRequestId: input.issueRequestId,
+      actorUserId: actorCheck.userId,
+    })
+  );
+
+  // 성사됐을 때만 — 막힌 실행은 재고도 신청도 그대로다.
   if (result.ok) revalidatePartIssueSurfaces();
   return result;
 }

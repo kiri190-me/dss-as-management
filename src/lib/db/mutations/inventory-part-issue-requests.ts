@@ -1,5 +1,6 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
 import {
   inventoryPartIssueApprovals,
@@ -14,6 +15,20 @@ import {
   users,
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
+// 🔴 **안쪽 함수들** — 재고를 실제로 빼는 이미 검증된 경로다. 문이 달린 겉 함수
+// (issuePartRequest · consumeStock)가 아니라 이쪽을 부른다: 실행은 문에 걸리면
+// 안 되고, 무엇보다 **재고 이동과 신청 상태가 한 트랜잭션**이어야 한다.
+import {
+  consumeStockCore,
+  extractInventoryFailure,
+  isPartIssueApprovalRouteInForce,
+  type InventoryMutationResultCode,
+} from "./inventory";
+import {
+  extractPartRequestFailure,
+  issuePartRequestCore,
+  type InventoryPartRequestResultCode,
+} from "./inventory-part-requests";
 import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
 import { isRequestIssuable } from "@/lib/auth/inventory-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
@@ -27,6 +42,7 @@ import {
   canTransitionPartIssueRequestStatus,
   isPartIssueRequestAwaitingApproval,
   isPartIssueRequestCancellable,
+  isPartIssueRequestExecutable,
   type InventoryPartIssueRequestStatus,
 } from "@/lib/domain/inventory-part-issue-rules";
 import {
@@ -54,20 +70,24 @@ import type {
  * mutations/repair-case-approvals.ts(최종 출하 승인)를 그대로 본떴다 — 같은
  * 결재선 표를 쓰므로 사슬의 규칙도 한 벌이어야 한다.
  *
- * ── 🔴 이 파일은 재고를 **한 톨도 움직이지 않는다** ──────────────────────
- * `stock_transactions` 에도 `part_stock_balances` 에도 한 줄도 쓰지 않는다.
- * 승인은 「빼도 된다」까지이고, 실제로 빼는 것은 재고 담당자가 따로 누른다
- * (그래서 상태에 APPROVED 와 EXECUTED 가 따로 있다). **이 조각에는 EXECUTED 로
- * 가는 길이 없다** — 실행은 다음 조각이고, 그때 이미 검증된 불출 경로
- * (issuePartRequest · consumeStock)가 자기 트랜잭션 안에서 재고·수량·잠금을
- * 전부 다시 본다.
+ * ── 🔴 신청 · 결재 · 취소는 재고를 **한 톨도 움직이지 않는다** ──────────
+ * 아래 세 mutation(createPartIssueRequest · decidePartIssueRequestApproval ·
+ * cancelPartIssueRequest)은 `stock_transactions` 에도 `part_stock_balances` 에도
+ * 한 줄도 쓰지 않는다. 승인은 「빼도 된다」까지이고, 실제로 빼는 것은 재고
+ * 담당자가 따로 누른다(그래서 상태에 APPROVED 와 EXECUTED 가 따로 있다).
  *
- * ── 🔴 안전장치: 「부품 불출」 판이 없으면 신청 자체가 만들어지지 않는다 ──
- * 결재선 판이 하나도 없거나 단계가 0개면 ROUTE_NOT_CONFIGURED 로 거절하고 행을
- * 하나도 남기지 않는다. 그때는 지금까지처럼 그 자리에서 바로 불출하는 것이
- * 맞고, **그 갈래를 정하는 것은 다음 조각**이다(이 코드는 「절차가 없다」는
- * 사실만 정확히 말한다). 이 약속이 없으면 기능을 올리는 순간 관리자가 절차를
+ * 재고를 움직이는 것은 이 파일 맨 아래 **executePartIssueRequest 하나뿐**이고,
+ * 그것도 직접 움직이지 않는다 — 이미 검증된 두 불출 경로의 **안쪽 함수**
+ * (issuePartRequestCore · consumeStockCore)를 자기 트랜잭션 안에서 부른다. 그
+ * 함수의 머리말에 왜 한 트랜잭션이어야 하는지가 적혀 있다.
+ *
+ * ── 🔴 안전장치: 「부품 불출」 판이 없으면 이 절차는 없는 것과 같다 ────────
+ * 결재선 판이 하나도 없거나 단계가 0개면 신청은 ROUTE_NOT_CONFIGURED 로 거절되고
+ * 행을 하나도 남기지 않으며, **두 불출 경로의 문도 열려 있어** 지금까지처럼 그
+ * 자리에서 바로 불출된다. 이 약속이 없으면 기능을 올리는 순간 관리자가 절차를
  * 만들기 전까지 재고가 통째로 잠긴다 — 아무도 결재할 수 없는 신청만 쌓인다.
+ * 「절차가 쓰이고 있는가」의 판정은 mutations/inventory.ts 의
+ * isPartIssueApprovalRouteInForce 하나이고, 신청과 두 문이 전부 그것을 본다.
  *
  * ── 🔴 신청은 재고를 예약하지 않는다 ────────────────────────────────────
  * 아래 수량 검사는 「지금 잔량으로도 명백히 안 되는 것」을 앞에서 걸러 낼 뿐,
@@ -457,7 +477,11 @@ export async function createPartIssueRequest(
       // 이 가장 큰 판 하나이고, 그 정의가 적힌 곳은 queries/shipment-approval-
       // routes.ts 하나다. 용도 문자열도 글자로 적지 않는다(도메인 상수 하나).
       const route = await getCurrentShipmentApprovalRouteChain(tx, PART_ISSUE_APPROVAL_ROUTE_SCOPE);
-      if (!route || route.steps.length === 0) {
+      // 🔴 「절차가 쓰이고 있는가」의 판정은 **한 곳에만** 적힌다
+      // (mutations/inventory.ts 의 isPartIssueApprovalRouteInForce). 두 불출
+      // 경로의 문이 같은 함수를 반대 방향으로 본다 — 한쪽만 「단계 0개」를 절차로
+      // 치면 신청도 못 하고 불출도 못 하는 상태가 생긴다.
+      if (!isPartIssueApprovalRouteInForce(route)) {
         // 판이 없는 것도 단계가 0개인 것도 「절차를 쓰지 않겠다」는 같은 뜻이다.
         fail(
           "ROUTE_NOT_CONFIGURED",
@@ -720,8 +744,10 @@ export async function decidePartIssueRequestApproval(
       // 다음 단계가 없다 = 마지막 단계였거나, 남은 단계가 전부 신청자 본인이었다.
       // 둘 다 정상이고 그때 결재가 끝난다.
       //
-      // 🔴 **여기서 재고를 빼지 않는다.** 상태는 APPROVED 까지이고 EXECUTED 로
-      // 가는 길은 이 파일에 없다 — 실행은 재고 담당자가 따로 누른다(다음 조각).
+      // 🔴 **여기서 재고를 빼지 않는다.** 상태는 APPROVED 까지다 — 실행은 재고
+      // 담당자가 따로 누르고(executePartIssueRequest), 그때 재고와 상태가 한
+      // 트랜잭션에서 함께 바뀐다. 마지막 결재자가 「재고 부족」으로 막히면 안 되는
+      // 것이 승인과 실행을 나눈 이유다(표 머리말).
       await setRequestStatus(tx, request.id, request.status, "APPROVED");
       return {
         ok: true,
@@ -887,4 +913,297 @@ export async function cancelPartIssueRequest(
     if (err instanceof PartIssueMutationError) return err.result;
     throw err;
   }
+}
+
+/**
+ * ============================================================================
+ * 실행 — 승인된 신청으로 **실제로 재고를 뺀다**
+ * ============================================================================
+ * 이 파일에서 재고를 움직이는 함수는 아래 하나뿐이다. 그리고 직접 움직이지
+ * 않는다 — 이미 검증된 두 경로의 **안쪽 함수**를 자기 트랜잭션 안에서 부른다
+ * (issuePartRequestCore · consumeStockCore). 수량 검사·잔량 갱신·장부 기록·
+ * 잠금 순서는 전부 그쪽에 있고 여기서 다시 적지 않는다.
+ *
+ * ── 🔴 재고 이동과 상태 변경이 **한 트랜잭션**이다 ──────────────────────
+ * 나뉘면 「재고는 나갔는데 신청은 아직 승인됨」이 실재하게 되고, 그 신청은 다시
+ * 실행될 수 있다. 겉 함수(issuePartRequest · consumeStock)를 부르지 않고 안쪽
+ * 함수를 부르는 이유가 이것이다 — 겉은 자기 트랜잭션을 열어 다른 연결을 쓴다.
+ *
+ * ── 🔴 문에 걸리지 않는다 ───────────────────────────────────────────────
+ * 안쪽 함수에는 「부품 불출 승인 절차」 문이 없다. 있으면 승인을 받고도 실행할 수
+ * 없게 된다 — 문은 겉에만 있다.
+ *
+ * ── 🔴 화면이 보낸 수량을 쓰지 않는다 ───────────────────────────────────
+ * 무엇을 승인했는지는 **신청 항목**에 적혀 있다
+ * (inventory_part_issue_request_items). 실행은 그 잔량 행과 그 수량으로만 한다 —
+ * 그것과 다른 것이 나가면 「승인받은 것과 다른 것이 나갔다」가 되고, 나중에 그것을
+ * 밝혀낼 방법이 없다. 그래서 이 mutation 은 신청 id 와 실행자 말고는 아무것도
+ * 받지 않는다.
+ * ============================================================================
+ */
+
+/**
+ * 실행이 쓰는 **중복 방지 열쇠의 이름공간** — 고정 UUID 하나다(RFC 4122 v5 의
+ * namespace 와 같은 자리). 값 자체에는 뜻이 없고, 바뀌면 안 된다: 바뀌는 순간
+ * 이미 실행된 신청의 열쇠가 달라져 「두 번 눌러도 한 번만 나간다」가 깨진다.
+ */
+const PART_ISSUE_EXECUTION_IDEMPOTENCY_NAMESPACE = "9c1d4b7e-5a30-4f21-8e6c-2b7f0d93a641";
+
+/**
+ * 🔴 **신청 id 에서 유도한 중복 방지 열쇠.** 같은 신청은 몇 번을 눌러도 같은
+ * 열쇠를 만들고, 그래서 요청 기반 불출의 멱등 장치가 두 번째를 재생(replay)으로
+ * 돌려준다.
+ *
+ * 무작위 값을 쓰면 안 된다 — 그러면 두 번 누른 것이 서로 다른 두 불출이 된다.
+ * 신청 id 를 **그대로** 쓰지 않는 것은 화면이 보낸 열쇠와 같은 공간을 쓰기
+ * 때문이다: 유도해 두면 그 둘이 우연히도 겹치지 않는다.
+ *
+ * 표의 칸이 uuid 라 결과도 uuid 여야 한다(text 가 아니다). v5 와 같은 방식으로
+ * 접는다 — 이름공간 16바이트 + 이름을 SHA-1 로 접고 판·변종 비트를 박는다.
+ */
+function derivePartIssueExecutionIdempotencyKey(issueRequestId: string): string {
+  const namespaceBytes = Buffer.from(
+    PART_ISSUE_EXECUTION_IDEMPOTENCY_NAMESPACE.replace(/-/g, ""),
+    "hex"
+  );
+  const digest = createHash("sha1").update(namespaceBytes).update(issueRequestId, "utf8").digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // 판(version) 5
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 변종(variant)
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * 안쪽이 돌려준 실패를 **이 영역의 말로 옮긴다.**
+ *
+ * 🔴 **메시지는 손대지 않는다** — 「재고가 부족합니다」·「요청 항목의 남은
+ * 수량(3개)을 초과하여…」는 사람이 실제로 읽고 행동할 문장이고, 여기서 뭉뚱그리면
+ * 실행이 왜 막혔는지 알 수 없게 된다. 코드만 이 영역에 있는 이름으로 바꾼다.
+ *
+ * 두 union 에만 있고 이쪽에는 없는 값들(멱등 관련·반품 관련·잠긴 접수 건)은
+ * CONFLICT 로 모은다. 실행 경로에서 실제로 나올 수 있는 값이 아니고(열쇠는 신청
+ * id 에서 유도하고, 반품은 이 길로 오지 않는다), 나온다면 「새로 고쳐 다시
+ * 보라」가 사람에게 할 수 있는 유일한 말이다.
+ */
+function toPartIssueFailureCode(
+  code: InventoryPartRequestResultCode | InventoryMutationResultCode
+): PartIssueActionResultCode {
+  switch (code) {
+    case "FORBIDDEN":
+    case "NOT_FOUND":
+    case "CONFLICT":
+    case "INVALID_INPUT":
+    case "INSUFFICIENT_STOCK":
+    case "EXCEEDS_REMAINING_REQUESTED":
+    case "NOT_ISSUABLE":
+    case "BILLING_DECISION_REQUIRED":
+      return code;
+    default:
+      return "CONFLICT";
+  }
+}
+
+export type ExecutePartIssueRequestInput = {
+  issueRequestId: string;
+  actorUserId: string;
+};
+
+export type ExecutePartIssueRequestResult =
+  | {
+      ok: true;
+      issueRequestId: string;
+      status: "EXECUTED";
+      /** 요청 기반이면 방금 만들어진 **불출 사건** id. 직접 사용이면 `null`. */
+      requestIssueId: string | null;
+      /** 실제로 빠져나간 잔량 행들 — 화면이 「무엇이 나갔는지」를 그대로 보여 준다. */
+      movedBalanceIds: string[];
+    }
+  | PartIssueActionFailure;
+
+/**
+ * 승인된 불출 신청 하나를 실행한다.
+ *
+ * 순서에 이유가 있다:
+ *  1. **신청 헤더를 먼저 잠근다.** 같은 신청을 동시에 실행·취소하려는 트랜잭션이
+ *     여기서 줄을 선다. 뒤에 온 쪽은 커밋 뒤의 상태(EXECUTED)를 다시 읽고 거절
+ *     된다 — 이것이 「두 번 눌러도 한 번만 나간다」의 1차 방어선이다.
+ *  2. **지금 실행할 수 있는가**는 순수 규칙 하나가 답한다
+ *     (isPartIssueRequestExecutable — APPROVED 하나뿐이다).
+ *  3. **자격**을 묻는다. 갈래마다 기존 두 불출 경로와 같은 영역 열쇠·같은 수준
+ *     이다. 안쪽 함수도 자기 안에서 같은 것을 다시 묻는다 — 여기서 먼저 묻는
+ *     것은 아무것도 잠그기 전에 막기 위해서다.
+ *  4. **신청 항목**을 읽어 그것으로만 실행한다.
+ *  5. 안쪽 함수를 **같은 tx** 로 부른다.
+ *  6. 안쪽이 실패하면 그 실패를 그대로 돌려주고 **트랜잭션째 되돌린다.** 신청은
+ *     APPROVED 로 남는다 — 입고 뒤에 다시 누르면 된다.
+ *  7. 성공하면 헤더를 EXECUTED + 실행자 + 실행 시각으로 **한꺼번에** 바꾼다
+ *     (표의 CHECK 이 셋을 함께 요구한다). WHERE 에 `status = 'APPROVED'` 를 걸어
+ *     둔 것은 잠금이 이미 막고 있는 경쟁에 대한 최종 방어선이다.
+ */
+export async function executePartIssueRequest(
+  input: ExecutePartIssueRequestInput
+): Promise<ExecutePartIssueRequestResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+
+      const [request] = await tx
+        .select({
+          id: inventoryPartIssueRequests.id,
+          status: inventoryPartIssueRequests.status,
+          partRequestId: inventoryPartIssueRequests.partRequestId,
+          repairCaseId: inventoryPartIssueRequests.repairCaseId,
+          destinationNote: inventoryPartIssueRequests.destinationNote,
+          procedureExecutionNodeId: inventoryPartIssueRequests.procedureExecutionNodeId,
+        })
+        .from(inventoryPartIssueRequests)
+        .where(eq(inventoryPartIssueRequests.id, input.issueRequestId))
+        .for("update");
+      if (!request) fail("NOT_FOUND", "해당 불출 신청을 찾을 수 없습니다.");
+
+      // 🔴 판정을 여기서 다시 적지 않는다 — 순수 규칙 하나가 쥐고 있고, 화면의
+      // [실행] 단추와 「실행할 차례인 신청」 목록도 같은 것을 본다.
+      if (!isPartIssueRequestExecutable(request.status)) {
+        fail("NOT_EXECUTABLE", executionBlockedMessage(request.status));
+      }
+
+      // 🔴 자격 — **새 역할 목록을 만들지 않는다.** 갈래마다 지금 그 불출을 하는
+      // 경로가 묻는 것과 글자 그대로 같은 영역·같은 수준을 묻는다(신청을 만들 때
+      // 물은 것과도 같다).
+      const allowed =
+        request.partRequestId !== null
+          ? await hasPermission(actor, "inventory.requestProcessing", "MANAGE")
+          : await hasPermission(actor, "inventory.stock", "WRITE");
+      if (!allowed) {
+        fail(
+          "FORBIDDEN",
+          request.partRequestId !== null ? "불출 권한이 없습니다." : "재고를 사용할 권한이 없습니다."
+        );
+      }
+
+      const items = await tx
+        .select({
+          id: inventoryPartIssueRequestItems.id,
+          requestItemId: inventoryPartIssueRequestItems.requestItemId,
+          partStockBalanceId: inventoryPartIssueRequestItems.partStockBalanceId,
+          quantity: inventoryPartIssueRequestItems.quantity,
+        })
+        .from(inventoryPartIssueRequestItems)
+        .where(eq(inventoryPartIssueRequestItems.issueRequestId, request.id))
+        // 잔량 행 id 순 — 안쪽 함수의 잠금 순서와 같은 기준이라 서로 다른 실행이
+        // 같은 두 잔량 행을 반대 순서로 잡는 일이 없다.
+        .orderBy(asc(inventoryPartIssueRequestItems.partStockBalanceId));
+      if (items.length === 0) {
+        // 신청을 만드는 길이 항목 0개를 막으므로 실제로는 생기지 않는다.
+        fail("CONFLICT", "이 불출 신청에는 실행할 항목이 없습니다.");
+      }
+
+      const movedBalanceIds = items.map((item) => item.partStockBalanceId);
+      let requestIssueId: string | null = null;
+
+      if (request.partRequestId !== null) {
+        // ── 요청 기반 ──────────────────────────────────────────────────
+        const allocations = items.map((item) => {
+          if (item.requestItemId === null) {
+            // 헤더는 요청 기반인데 줄에 요청 항목이 없다 — 신청을 만드는 길이
+            // 짝을 맞추므로 생기지 않는다(표는 그 짝을 강제하지 않는다).
+            fail("CONFLICT", "불출 신청 항목이 부품 요청과 짝이 맞지 않습니다.");
+          }
+          return {
+            requestItemId: item.requestItemId,
+            partStockBalanceId: item.partStockBalanceId,
+            quantity: item.quantity,
+          };
+        });
+
+        const issued = await issuePartRequestCore(tx, {
+          requestId: request.partRequestId,
+          allocations,
+          note: null,
+          actorUserId: actor.id,
+          // 🔴 신청 id 에서 유도한다 — 두 번 눌러도 한 번만 나간다.
+          idempotencyKey: derivePartIssueExecutionIdempotencyKey(request.id),
+        });
+        requestIssueId = issued.requestIssueId;
+      } else {
+        // ── 직접 사용 ──────────────────────────────────────────────────
+        for (const item of items) {
+          // 🔴 `expectedVersion` 은 **지금 이 트랜잭션에서 읽은 값**이다. 신청
+          // 시점의 판번호는 이미 낡았다(그 사이 입고·반품이 있었으면 실행이 늘
+          // CONFLICT 로 막힌다). 여기서 잠그고 읽으므로 안쪽이 다시 잠글 때까지
+          // 아무도 끼어들 수 없다.
+          const [balance] = await tx
+            .select({ version: partStockBalances.version })
+            .from(partStockBalances)
+            .where(eq(partStockBalances.id, item.partStockBalanceId))
+            .for("update");
+          if (!balance) fail("NOT_FOUND", "재고 정보를 찾을 수 없습니다.");
+
+          await consumeStockCore(tx, {
+            partStockBalanceId: item.partStockBalanceId,
+            quantity: item.quantity,
+            // 접수 건·사용처·절차 작업은 **신청 헤더가** 들고 있다(표의 CHECK).
+            repairCaseId: request.repairCaseId,
+            destinationNote: request.destinationNote,
+            procedureExecutionNodeId: request.procedureExecutionNodeId,
+            actorUserId: actor.id,
+            expectedVersion: balance.version,
+          });
+        }
+      }
+
+      // 🔴 세 값을 **한꺼번에** 쓴다 — 표의 CHECK 이 status='EXECUTED' 와 실행 두
+      // 칸을 함께 요구한다. 그리고 `status = 'APPROVED'` 를 걸어 둔다.
+      const updated = await tx
+        .update(inventoryPartIssueRequests)
+        .set({
+          status: "EXECUTED",
+          executedByUserId: actor.id,
+          executedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(inventoryPartIssueRequests.id, request.id),
+            eq(inventoryPartIssueRequests.status, "APPROVED")
+          )
+        )
+        .returning({ id: inventoryPartIssueRequests.id });
+      if (updated.length === 0) {
+        // 헤더를 이미 잠그고 있으므로 실제로는 닿지 않는 자리다. 그래도 둔다 —
+        // 여기서 멈추면 **재고 이동도 함께 되돌아간다**(같은 트랜잭션이다).
+        fail("CONFLICT", "이 불출 신청이 방금 다른 곳에서 처리되었습니다. 최신 정보를 다시 불러와 주세요.");
+      }
+
+      return {
+        ok: true,
+        issueRequestId: request.id,
+        status: "EXECUTED" as const,
+        requestIssueId,
+        movedBalanceIds,
+      };
+    });
+  } catch (err) {
+    if (err instanceof PartIssueMutationError) return err.result;
+    // 🔴 안쪽 함수가 던진 실패 — 여기까지 올라왔다는 것은 **트랜잭션이 통째로
+    // 되돌아갔다**는 뜻이다. 재고도 상태도 그대로이고, 신청은 APPROVED 로 남는다.
+    const innerFailure = extractPartRequestFailure(err) ?? extractInventoryFailure(err);
+    if (innerFailure) {
+      return {
+        ok: false,
+        code: toPartIssueFailureCode(innerFailure.code),
+        message: innerFailure.message,
+      };
+    }
+    throw err;
+  }
+}
+
+/** 왜 지금 실행할 수 없는지 — 상태마다 사람이 할 일이 다르다. */
+function executionBlockedMessage(status: InventoryPartIssueRequestStatus): string {
+  if (status === "PENDING_APPROVAL") return "아직 결재가 끝나지 않은 불출 신청입니다.";
+  if (status === "EXECUTED") return "이미 실행된 불출 신청입니다. 되돌리려면 반품으로 처리해 주세요.";
+  if (status === "REJECTED") return "반려된 불출 신청은 실행할 수 없습니다.";
+  return "취소된 불출 신청은 실행할 수 없습니다.";
 }
