@@ -12,10 +12,12 @@ import {
   type NotificationItem,
   type NotificationKind,
   buildCustomerRepairRequestNotification,
+  buildPartIssueApprovalNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
 import { listNewCustomerRepairRequests } from "./customer-portal";
+import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-requests";
 
 /**
  * ============================================================================
@@ -27,7 +29,9 @@ import { listNewCustomerRepairRequests } from "./customer-portal";
  * ── 인가 판정은 두 가지 모양 중 하나다 ─────────────────────────────────
  *  (가) 부르는 조회가 스스로 판정한다 — 결재 알림이 그렇다. 누가 결재자인지가
  *       사람 단위(대표 자격·위임)라 SQL 안에서 정해지고, 사용자 id 하나면
- *       충분하다(repair-case-approvals-pending.ts).
+ *       충분하다(repair-case-approvals-pending.ts). 불출 승인 대기도 같은 모양이다
+ *       — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
+ *       (inventory-part-issue-requests.ts).
  *  (나) load가 **역할로** 먼저 거른다 — 부품 요청 알림이 그렇다. 대상이 사람이
  *       아니라 역할이고, 조회 자체는 "지금 처리 대기 중인 요청 전부"라 누가
  *       봐도 같은 결과다. 그래서 조회를 부르기 **전에** 역할을 보고, 아니면
@@ -153,6 +157,28 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           customerName: row.customerName,
           productModelName: row.productModelName,
           serialNumber: row.serialNumber,
+        })
+      );
+    },
+  },
+  {
+    kind: "PART_ISSUE_APPROVAL_PENDING",
+    load: async (actorUserId) => {
+      // 결재 알림과 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다. 그래서 역할로
+      // 먼저 거르지 않는다: 결재선에는 역할 제한 없이 누구든 올라갈 수 있어서, 여기서
+      // 역할을 보는 순간 자기 차례인 결재자가 알림을 못 받는다.
+      //
+      // 판정도 새로 적지 않는다 — [승인 요청건] 탭의 「내가 결재할 건」이 쓰는 바로
+      // 그 조회다(지정된 사람 + 최고관리자 비상구, 지금 열린 단계만). 알림과 목록이
+      // 서로 다른 말을 하면 안 된다. 여기서 하는 일은 모양 변환뿐이다.
+      const pending = await listPartIssueRequestsPendingMyApproval(actorUserId);
+      return pending.map((item) =>
+        buildPartIssueApprovalNotification({
+          issueRequestId: item.issueRequestId,
+          intakeNumber: item.intakeNumber,
+          destinationNote: item.destinationNote,
+          routeStepOrder: item.routeStepOrder,
+          requestedByName: item.requestedByName,
         })
       );
     },

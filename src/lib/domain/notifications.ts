@@ -32,6 +32,7 @@ export const NOTIFICATION_KINDS = [
   "PART_REQUEST_PENDING",
   "PART_STOCK_BELOW_MINIMUM",
   "CUSTOMER_REPAIR_REQUEST_NEW",
+  "PART_ISSUE_APPROVAL_PENDING",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -225,5 +226,54 @@ export function buildCustomerRepairRequestNotification(input: {
     subject: input.customerName,
     detail: `${input.productModelName} · S/N ${input.serialNumber}`,
     href: "/customer-portal/requests",
+  };
+}
+
+/**
+ * "지금 내 차례인 부품 불출 결재" 알림 한 줄.
+ *
+ * ── subject 는 무엇에 대한 신청인가 ────────────────────────────────────
+ * [승인 요청건] 탭의 신청 카드가 굵게 적는 것과 같은 순서다 — 접수 건이 있으면
+ * 그 인수번호, 없으면 직접 사용의 사용처. 인수번호는 헤더가 직접 가리키는 접수
+ * 건이거나(직접 사용) 부품 요청이 가리키는 접수 건이다(요청 기반). 둘 중 어느
+ * 쪽인지를 가려 읽는 것은 조회의 몫이고, 여기는 받은 값을 순서대로 고르기만 한다.
+ *
+ * 둘 다 없는 행은 **요청 기반인데 그 접수 건이 영구 삭제된 것**뿐이다. 직접
+ * 사용은 표 CHECK(direct_use_has_destination)가 접수 건이나 사용처 중 하나를
+ * 요구하고, 부품 요청은 접수 건 없이 만들어지지 않는다. 그래서 대신하는 문구는
+ * 부품 요청 알림과 같은 DELETED_REPAIR_CASE_SUBJECT 다 — 같은 상황을 두 말로
+ * 부르지 않는다.
+ *
+ * ── detail 은 몇 단계의 결재인가 + 신청자 ──────────────────────────────
+ * "불출 승인 대기"라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다
+ * (NOTIFICATION_KIND_META). detail 에 같은 말을 또 넣으면 잘리는 자리의 폭만
+ * 먹는다 — 결재 알림이 detail 에 "무슨 결재인가"(수리 검수 승인)만 적는 것과 같은
+ * 갈림이다. "결재선 N단계"는 신청 카드의 결재선 줄이 이미 쓰는 말이고, 결재선을
+ * 타지 않는 행(단계 번호가 없는 행)이면 단계 없이 신청자만 적는다.
+ *
+ * href 는 건별 상세가 아니라 [승인 요청건] 탭이다 — 신청에는 자기만의 상세 화면이
+ * 없고, 실제로 승인·반려를 누르는 자리가 그 탭의 「내가 결재할 건」이다.
+ *
+ * targetKey 는 불출 신청 id 다. 한 신청에 열린 결재는 언제나 하나이고(표의 부분
+ * 유니크), 신청 하나가 사람에게도 한 건이다.
+ */
+export function buildPartIssueApprovalNotification(input: {
+  issueRequestId: string;
+  /** 그 신청이 향하는 접수 건의 인수번호. 없으면(사용처만 있는 직접 사용 등) `null`. */
+  intakeNumber: string | null;
+  /** 직접 사용의 사용처. 요청 기반이면 언제나 `null`. */
+  destinationNote: string | null;
+  /** 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
+  routeStepOrder: number | null;
+  requestedByName: string;
+}): NotificationItem {
+  const step = input.routeStepOrder !== null ? `결재선 ${input.routeStepOrder}단계 · ` : "";
+  return {
+    id: `PART_ISSUE_APPROVAL_PENDING:${input.issueRequestId}`,
+    kind: "PART_ISSUE_APPROVAL_PENDING",
+    targetKey: input.issueRequestId,
+    subject: input.intakeNumber ?? input.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT,
+    detail: `${step}신청자 ${input.requestedByName}`,
+    href: "/inventory/approvals",
   };
 }

@@ -82,6 +82,10 @@ import { ROLE_CODES, type Role } from "./types";
  * 사람이 밀린 것이 아니라 **물건이 모자란 것**이고, 눌러서 처리할 대상이 아예
  * 없다(입고가 되어야 사라진다). 저장소가 위험에 red를 쓰는 결과 그대로다.
  *
+ * 불출 승인 대기는 결재 대기와 같은 "눌러 처리하면 없어지는 결재 줄"이지만,
+ * 둘이 한 패널에 섞였을 때 갈라 보여야 하므로 amber를 나눠 쓰지 않는다. 앞의 네
+ * 색(amber·sky·red·emerald) 어느 것과도 색상환에서 떨어진 violet을 준다.
+ *
  * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
  * 색약이신 분에게는 amber와 red가 붙어 보이고, 흑백으로 인쇄하면 셋 다 같은
  * 회색이 된다. 그래서 화면은 이 색과 **함께 label을 글자로도** 그린다
@@ -126,6 +130,12 @@ export const NOTIFICATION_KIND_META: Record<
     description:
       "고객사가 전용 주소에서 보낸 수리 의뢰 중 아직 접수로 만들지도, 반려하지도 않은 것입니다. 접수를 만들 수 있는 쪽이 받습니다.",
     toneClassName: "text-emerald-700 dark:text-emerald-400",
+  },
+  PART_ISSUE_APPROVAL_PENDING: {
+    label: "불출 승인 대기",
+    description:
+      "내가 결재해야 할 부품 불출 신청입니다. 실제로 누구에게 가는지는 부품 불출 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
+    toneClassName: "text-violet-700 dark:text-violet-400",
   },
 };
 
@@ -176,6 +186,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "PART_REQUEST_PENDING":
     case "PART_STOCK_BELOW_MINIMUM":
     case "CUSTOMER_REPAIR_REQUEST_NEW":
+    case "PART_ISSUE_APPROVAL_PENDING":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
       // 넣는 순간부터 계산이 돌기 시작한다). 꺼진 채로 태어나는 종류가 있으면,
       // 등록해 두고 아무 일도 일어나지 않는 상태를 화면에서 설명할 수 없다.
@@ -217,6 +228,16 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 명단을 옮겨 적지 않고 저쪽 함수를 부른다 — 고객 안내 창구를 볼 수
       // 있는 사람이 곧 그 의뢰를 접수로 만들 사람이다.
       return canReceiveCustomerRepairRequestNotifications(role);
+
+    case "PART_ISSUE_APPROVAL_PENDING":
+      // 새로 태어나는 종류라 재현할 옛 동작은 없지만, 답은 결재 대기와 같은
+      // 이유로 다섯 역할 전부 받음이다. 누가 받는지는 역할이 아니라 **결재선
+      // 지정**(과 최고관리자 비상구)이 정하고, 그 판정은 조회 안의 지정 관문
+      // (queries/inventory-part-issue-requests.ts)이 한다. 결재선에는 역할 제한
+      // 없이 누구든 올릴 수 있으므로(영업도 된다), 여기서 어느 역할을 빼면 그
+      // 순간 자기 차례인 결재자인데 알림을 못 받는 사람이 생긴다 — 그 실패는
+      // 화면에 아무 표시도 남기지 않는다.
+      return true;
 
     default:
       // 종류를 NOTIFICATION_KINDS에만 추가하고 여기를 빠뜨리면, 조용히 전원

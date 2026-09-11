@@ -37,6 +37,8 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  * 「내가 결재할 건」(listPartIssueRequestsPendingMyApproval)이 아래 지정 관문으로
  * 좁히는 것뿐이다. 부품 요청 관리 화면(app/(app)/inventory/requests/page.tsx)도
  * [불출] 단추를 잠글지 정하려고 listInProgressPartIssueStatusesByPartRequest 를 부른다.
+ * 종 알림의 「불출 승인 대기」(db/queries/notifications.ts)도 「내가 결재할 건」과
+ * **같은 조회**를 그대로 부른다 — 알림과 목록이 서로 다른 말을 할 수 없게.
  *
  * ── 판정을 새로 만들지 않는다 ───────────────────────────────────────────
  * 「이 결재를 내가 처리할 수 있는가」는 출하 승인과 **같은 함수 하나**를 본다 —
@@ -279,6 +281,15 @@ export type PendingPartIssueApprovalItem = {
   requestReason: string | null;
   /** 요청 기반 불출이면 그 부품 요청. 직접 사용이면 `null`. */
   partRequestId: string | null;
+  /**
+   * 이 신청이 향하는 접수 건의 인수번호 — getPartIssueRequestDetail 의
+   * `intakeNumber` 와 같은 규칙이다(직접 사용이면 헤더가 가리키는 접수 건, 요청
+   * 기반이면 부품 요청이 가리키는 접수 건). 접수 건이 없으면 `null`.
+   * 종 알림이 「무엇에 대한 신청인가」를 굵게 적을 때 쓴다.
+   */
+  intakeNumber: string | null;
+  /** 직접 사용의 사용처. 요청 기반이면 언제나 `null`(표 CHECK). */
+  destinationNote: string | null;
 };
 
 /** 지정 관문(mayDecideAssignedApproval)에 그대로 넘기는 최소 모양. */
@@ -344,6 +355,9 @@ export async function listPartIssueRequestsPendingMyApproval(
       requestedAt: inventoryPartIssueApprovals.requestedAt,
       requestReason: inventoryPartIssueApprovals.requestReason,
       partRequestId: inventoryPartIssueRequests.partRequestId,
+      directIntakeNumber: directCase.intakeNumber,
+      partRequestIntakeNumber: requestCase.intakeNumber,
+      destinationNote: inventoryPartIssueRequests.destinationNote,
     })
     .from(inventoryPartIssueApprovals)
     .innerJoin(
@@ -354,6 +368,17 @@ export async function listPartIssueRequestsPendingMyApproval(
       approvalRequester,
       eq(approvalRequester.id, inventoryPartIssueApprovals.requestedByUserId)
     )
+    // 무엇에 대한 신청인가 — getPartIssueRequestDetail 과 같은 두 갈래 조인이다.
+    // 🔴 셋 다 상대의 기본키(id)에 붙는 LEFT JOIN 이라 행이 늘지도 줄지도 않는다 —
+    // 아래 WHERE·지정 관문이 걸러내는 결과는 이 조인이 없을 때와 같다. 신청마다
+    // 상세를 따로 읽지 않으려고(N+1) 여기서 한 번에 붙인다 — 종 알림이 이 조회를
+    // 모든 페이지 로드마다 부른다.
+    .leftJoin(directCase, eq(directCase.id, inventoryPartIssueRequests.repairCaseId))
+    .leftJoin(
+      inventoryPartRequests,
+      eq(inventoryPartRequests.id, inventoryPartIssueRequests.partRequestId)
+    )
+    .leftJoin(requestCase, eq(requestCase.id, inventoryPartRequests.repairCaseId))
     .where(
       and(
         eq(inventoryPartIssueApprovals.status, "REQUESTED"),
@@ -375,6 +400,8 @@ export async function listPartIssueRequestsPendingMyApproval(
       requestedAt: row.requestedAt.toISOString(),
       requestReason: row.requestReason,
       partRequestId: row.partRequestId,
+      intakeNumber: row.directIntakeNumber ?? row.partRequestIntakeNumber,
+      destinationNote: row.destinationNote,
     }));
 }
 

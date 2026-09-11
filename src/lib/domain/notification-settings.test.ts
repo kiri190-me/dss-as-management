@@ -67,6 +67,13 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
       role === "SALES"
     );
   }
+  if (kind === "PART_ISSUE_APPROVAL_PENDING") {
+    // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
+    // 적는다 — 다섯 역할 전부. 결재 대기와 같은 이유다: 누가 받는지는 역할이
+    // 아니라 결재선 지정(과 최고관리자 비상구)이 정하고, 결재선에는 역할 제한 없이
+    // 누구든 올라간다. 역할을 하나라도 빼면 자기 차례인 결재자가 알림을 못 받는다.
+    return true;
+  }
   throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
 }
 
@@ -133,6 +140,29 @@ test("결재 대기의 기본값은 다섯 역할 전부 받음이다 — 지금
   for (const role of ROLE_CODES) {
     assert.equal(defaultRoleReceivesNotification("REPAIR_CASE_APPROVAL", role), true, role);
   }
+});
+
+test("🔴 불출 승인 대기의 기본값도 다섯 역할 전부 받음이다 — 누가 받는지는 결재선 지정이 정한다", () => {
+  // 결재선에는 역할 제한 없이 누구든 올라간다(영업도). 여기서 어느 역할이
+  // 빠지면 그 역할의 결재자는 자기 차례인데 알림을 못 받고, 그 실패는 화면에
+  // 아무 표시도 남기지 않는다.
+  for (const role of ROLE_CODES) {
+    assert.equal(defaultRoleReceivesNotification("PART_ISSUE_APPROVAL_PENDING", role), true, role);
+    assert.equal(deliversNotification("PART_ISSUE_APPROVAL_PENDING", role, NO_NOTIFICATION_SETTINGS), true, role);
+  }
+  assert.equal(defaultNotificationKindEnabled("PART_ISSUE_APPROVAL_PENDING"), true, "켜진 채로 태어난다");
+});
+
+test("불출 승인 대기는 결재 대기와 이름·색이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
+  const partIssue = NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING;
+  const approval = NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL;
+  assert.equal(partIssue.label, "불출 승인 대기");
+  assert.notEqual(partIssue.label, approval.label);
+  assert.notEqual(partIssue.toneClassName, approval.toneClassName);
+  // 색상 이름까지 달라야 한다 — 같은 amber 의 진하기만 바꾸면 눈으로 갈라지지 않는다.
+  const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
+  const hues = NOTIFICATION_KINDS.map((kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName));
+  assert.equal(new Set(hues).size, hues.length, `색상 이름이 겹친다: ${hues.join(" / ")}`);
 });
 
 test("부품 요청 대기의 기본값은 명단을 옮겨 적지 않고 저쪽 함수를 부른 결과다", () => {

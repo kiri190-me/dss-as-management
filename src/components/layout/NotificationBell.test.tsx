@@ -11,6 +11,7 @@ import {
   NOTIFICATION_KINDS,
   buildApprovalNotification,
   buildCustomerRepairRequestNotification,
+  buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
 } from "@/lib/domain/notifications";
@@ -52,6 +53,13 @@ function oneOfEachKind() {
       customerName: "주성 엔지니어링",
       productModelName: "MBK200-JS3",
       serialNumber: "1708075",
+    }),
+    buildPartIssueApprovalNotification({
+      issueRequestId: "issue-1",
+      intakeNumber: "D9705-200",
+      destinationNote: null,
+      routeStepOrder: 2,
+      requestedByName: "홍길동",
     }),
   ];
 }
@@ -142,6 +150,28 @@ test("🔴 색만으로 구분하지 않는다 — 종류 이름이 글자로도
   for (const kind of NOTIFICATION_KINDS) {
     assert.ok(html.includes(NOTIFICATION_KIND_META[kind].label), `${kind} 의 이름이 글자로 보이지 않는다`);
   }
+});
+
+test("불출 승인 대기도 화면을 고치지 않고 같은 한 줄로 그려진다 — 이름·대상·상세·링크", () => {
+  const html = renderToStaticMarkup(
+    <NotificationList
+      items={[
+        buildPartIssueApprovalNotification({
+          issueRequestId: "issue-1",
+          intakeNumber: null,
+          destinationNote: "상해수리소",
+          routeStepOrder: 1,
+          requestedByName: "홍길동",
+        }),
+      ]}
+      onNavigate={() => {}}
+    />
+  );
+  assert.ok(html.includes('href="/inventory/approvals"'), "[승인 요청건] 탭으로 가야 한다");
+  assert.ok(html.includes(NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.label));
+  assert.ok(html.includes(NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.toneClassName));
+  assert.ok(html.includes("상해수리소"));
+  assert.ok(html.includes("결재선 1단계 · 신청자 홍길동"));
 });
 
 test("종류 이름은 윗줄에 따로 온다 — 지금 줄(대상 · 상세)이 길어져 잘리지 않게", () => {
