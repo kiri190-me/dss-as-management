@@ -1,0 +1,201 @@
+# 목록 unit — `npm test` 가 돌린다.
+#
+# 플래그(package.json 의 "test"):
+#   --conditions=react-server --import tsx --import ./scripts/test-template-bootstrap.ts --test
+#   - react-server 조건: `server-only` 를 불러오는 모듈을 그대로 시험할 수 있다.
+#     대신 이 조건에서는 react-dom/server 가 스스로 막힌다 — 컴포넌트를 렌더해 보는
+#     시험은 components.txt 에 적는다.
+#   - 템플릿 부트스트랩: .env.local 에서 xlsx 양식 경로 여섯 개만 골라 넣는다.
+#     DATABASE_URL 은 넣지 않는다 — 이 목록의 시험은 DB 에 닿을 길이 없어야 한다.
+#     DB 에 붙는 시험은 db.txt 에 적는다.
+#
+# 적는 법(네 목록 공통):
+#   - 한 줄에 한 경로. 저장소 뿌리 기준 상대경로, 구분자는 슬래시, 대소문자까지 정확히.
+#   - `#` 로 시작하는 줄과 빈 줄은 건너뛴다.
+#   - `*` 가 든 줄은 패턴이다 — node --test 가 직접 펼친다. App Router 의 `[id]` 같은
+#     폴더를 그대로 적으면 node 가 글롭 문자클래스로 읽어 `tests 0` 으로 조용히
+#     지나간다. 그 칸은 `*` 로 적는다.
+#   - 없는 파일, 아무것도 가리키지 않는 패턴, 같은 줄 두 번이 있으면
+#     scripts/run-test-list.mjs 가 돌기 전에 멈춘다.
+#   - 새 *.test.ts(x) 는 네 목록 가운데 하나에 반드시 적는다. 빠지면
+#     scripts/test-lists/test-list-registration.test.ts 가 `npm test` 에서 실패한다.
+#   - node --test 는 받은 파일을 이름순으로 정렬해 돈다 — 줄 순서는 실행 순서가 아니다.
+
+src/lib/domain/workflow-kind.test.ts
+src/lib/domain/workflow-draft-validation.test.ts
+src/lib/domain/local/workflow/workflow-foundation.test.ts
+src/lib/domain/repair-case-filters.test.ts
+src/lib/validation/repair-case-input.test.ts
+src/lib/config/write-source.test.ts
+src/lib/config/read-source.test.ts
+src/lib/config/auth-source.test.ts
+src/lib/config/login-mode.test.ts
+src/lib/config/demo-login.test.ts
+src/lib/auth/sso-role.test.ts
+src/lib/auth/sso-provision.test.ts
+src/lib/auth/sso-profile.test.ts
+src/lib/domain/local/intake-idempotency-key.test.ts
+src/lib/validation/repair-case-update-input.test.ts
+src/lib/auth/repair-case-edit-authorization.test.ts
+src/lib/validation/workflow-transition-input.test.ts
+src/lib/validation/repair-case-approval-input.test.ts
+src/lib/auth/session.test.ts
+src/lib/auth/request-guards.test.ts
+src/app/api/auth/login/route.test.ts
+src/app/api/auth/logout/route.test.ts
+src/app/login/login-view-model.test.ts
+src/lib/validation/shipment-delegation-input.test.ts
+src/lib/navigation.test.ts
+src/lib/auth/workflow-template-authorization.test.ts
+src/lib/auth/permission-areas.test.ts
+src/lib/auth/permission-features.test.ts
+src/lib/auth/developer-flag.test.ts
+src/lib/db/migration-safety.test.ts
+src/lib/client-uuid.test.ts
+scripts/lib/xlsx/branch-classification.test.ts
+scripts/lib/xlsx/extract-shape-graph.test.ts
+scripts/lib/xlsx/extract-checklist-form.test.ts
+scripts/lib/xlsx/extract-troubleshooting-matrix.test.ts
+scripts/lib/xlsx/combine-shape-graph-sheets.test.ts
+scripts/lib/xlsx/extract-plain-instruction.test.ts
+scripts/lib/xlsx/extract-reference-index.test.ts
+scripts/lib/attachment-backup-plan.test.ts
+src/lib/domain/procedure-validation-known-issues.test.ts
+src/lib/domain/procedure-visual-language.test.ts
+src/lib/domain/procedure-graph-navigation.test.ts
+src/lib/domain/procedure-edge-routing.test.ts
+src/lib/domain/procedure-graph-structural-validation.test.ts
+src/lib/domain/procedure-template-diff.test.ts
+src/lib/graph-editor-core/layout.test.ts
+src/lib/domain/procedure-editor-client-state.test.ts
+src/lib/graph-editor-core/routing.test.ts
+src/lib/graph-editor-core/selection.test.ts
+src/lib/graph-editor-core/edge-default-target.test.ts
+src/lib/graph-editor-core/undo-stack.test.ts
+src/lib/graph-editor-core/pointer.test.ts
+src/lib/graph-editor-core/axis-lock.test.ts
+src/lib/graph-editor-core/save-sequence.test.ts
+src/lib/domain/procedure-editor-save-state.test.ts
+src/lib/domain/procedure-execution-topology.test.ts
+src/lib/domain/product-relation.test.ts
+src/lib/domain/inventory-return-rules.test.ts
+src/lib/auth/inventory-authorization.test.ts
+src/lib/domain/inventory-part-request-rules.test.ts
+src/lib/domain/inventory-part-request-fingerprint.test.ts
+src/lib/domain/inventory-types.test.ts
+src/lib/domain/inventory-part-request-cart.test.ts
+src/lib/validation/repair-case-work-record-input.test.ts
+src/lib/auth/repair-case-work-record-authorization.test.ts
+src/lib/auth/my-active-work-authorization.test.ts
+src/lib/domain/date-only.test.ts
+src/lib/domain/my-active-work-sort.test.ts
+src/lib/domain/my-active-work-filter.test.ts
+src/lib/domain/local/workflow/workflow-action-availability.test.ts
+src/lib/domain/local/workflow/shipment-approval-checklist.test.ts
+src/lib/auth/technical-procedure-template-authorization.test.ts
+src/lib/domain/procedure-template-edit-history-fold.test.ts
+src/lib/domain/procedure-template-edit-history-replay.test.ts
+src/lib/domain/procedure-template-history-labels.test.ts
+src/lib/auth/repair-case-flowchart-authorization.test.ts
+src/lib/domain/repair-case-detail-tabs.test.ts
+src/lib/domain/repair-case-flowchart-editor-save-state.test.ts
+src/lib/domain/entity-name-match.test.ts
+src/lib/domain/local/draft-storage.test.ts
+src/lib/domain/local/report-number.test.ts
+src/lib/domain/repair-case-flowchart-retention.test.ts
+src/lib/domain/repair-case-trash-retention.test.ts
+src/lib/domain/master-data-trash-retention.test.ts
+src/lib/auth/customer-authorization.test.ts
+src/lib/validation/customer-update-input.test.ts
+src/lib/validation/end-user-input.test.ts
+src/lib/validation/domestic-order-input.test.ts
+src/lib/auth/product-model-authorization.test.ts
+src/lib/validation/product-model-input.test.ts
+src/lib/db/schema/legacy-import-state-set.test.ts
+src/lib/db/schema/legacy-report-number.test.ts
+src/lib/db/schema/manual-step-set.test.ts
+scripts/lib/xlsx/repair-case-list-import.test.ts
+scripts/lib/xlsx/repair-case-list-import.smoke.test.ts
+scripts/lib/xlsx/repair-case-xlsx-safety.test.ts
+src/lib/xlsx/zip-roundtrip.test.ts
+src/lib/xlsx/sheet-patch.test.ts
+src/lib/xlsx/quote-template.test.ts
+src/lib/xlsx/oh-quote-template.test.ts
+src/lib/xlsx/matcher-quote-template.test.ts
+src/lib/xlsx/service-report-template.test.ts
+src/lib/db/test-database-safety.test.ts
+src/lib/db/test-cleanup-static-safety.test.ts
+src/lib/domain/notifications.test.ts
+src/lib/domain/notification-settings.test.ts
+src/lib/domain/notification-toast.test.ts
+src/lib/validation/part-minimum-quantity-input.test.ts
+src/lib/validation/part-unit-price-input.test.ts
+src/lib/validation/repair-task-input.test.ts
+src/lib/domain/attachment-category.test.ts
+src/lib/domain/attachment-allowlist.test.ts
+src/lib/domain/attachment-path.test.ts
+src/lib/domain/attachment-download-policy.test.ts
+src/app/api/attachments/*/download/route.test.ts
+src/lib/domain/image-shrink.test.ts
+src/lib/domain/zip-entry-names.test.ts
+src/lib/domain/image-header.test.ts
+src/lib/domain/attachment-list-filters.test.ts
+src/lib/domain/attachment-gallery-zoom.test.ts
+src/lib/domain/camera-zoom.test.ts
+src/lib/domain/edit-draft-text.test.ts
+src/lib/domain/text-wrap.test.ts
+src/lib/domain/repair-case-overdue.test.ts
+src/lib/domain/dashboard-metrics.test.ts
+src/lib/domain/domestic-order-list.test.ts
+src/lib/domain/repair-case-link-search.test.ts
+src/lib/domain/customer-row-color.test.ts
+src/lib/domain/weekly-report.test.ts
+src/lib/domain/weekly-report-goal.test.ts
+src/lib/validation/weekly-report-goal-input.test.ts
+src/lib/domain/long-pending-po.test.ts
+src/lib/domain/weekly-report-delivery.test.ts
+src/lib/validation/weekly-report-delivery-input.test.ts
+src/lib/domain/domestic-order-cell-edit.test.ts
+src/lib/domain/quote-list.test.ts
+src/lib/domain/overhaul.test.ts
+src/lib/domain/quote-subject.test.ts
+src/lib/domain/quote-labor-cost.test.ts
+src/lib/validation/quote-input.test.ts
+src/lib/domain/quote-file-name.test.ts
+src/lib/domain/requested-due-date-link.test.ts
+src/lib/domain/fault-symptom-breakdown.test.ts
+src/lib/domain/pie-slices.test.ts
+src/lib/domain/product-model-breakdown.test.ts
+src/lib/server/customer-link-token-cipher.test.ts
+src/lib/domain/intake-mail-body.test.ts
+src/lib/domain/mail-signature-html.test.ts
+src/lib/xlsx/service-report-choices.test.ts
+src/lib/validation/service-report-input.test.ts
+src/lib/domain/service-report-file-name.test.ts
+src/lib/domain/service-report-form.test.ts
+src/lib/domain/service-report-draft.test.ts
+src/lib/domain/service-report-kind-param.test.ts
+src/lib/db/schema/service-reports-parity.test.ts
+src/lib/validation/service-report-save-input.test.ts
+src/lib/auth/service-report-authorization.test.ts
+src/lib/server/service-report-action-input.test.ts
+src/lib/xlsx/sheet-print-grid.test.ts
+scripts/lib/db-connection-failure.test.ts
+src/lib/domain/service-report-list.test.ts
+src/lib/domain/work-record-flowchart.test.ts
+src/lib/domain/quote-new-link.test.ts
+src/lib/domain/ui-theme-tokens.test.ts
+src/lib/validation/ui-theme-token-input.test.ts
+src/lib/domain/ui-theme-templates.test.ts
+src/lib/domain/ui-theme-primary-ramp.test.ts
+src/lib/domain/ui-text-overrides.test.ts
+src/lib/validation/ui-text-override-input.test.ts
+src/lib/domain/ui-text.test.ts
+src/lib/domain/shipment-approval-route.test.ts
+src/lib/domain/inventory-part-issue-rules.test.ts
+src/lib/validation/shipment-approval-route-input.test.ts
+src/lib/auth/approval-assignment.test.ts
+src/lib/validation/inventory-part-issue-input.test.ts
+src/lib/domain/notification-acknowledgement.test.ts
+src/lib/domain/quote-repair-task-selection.test.ts
+scripts/test-lists/test-list-registration.test.ts

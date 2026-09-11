@@ -1,0 +1,29 @@
+# 목록 components — `npm run test:components` 가 돌린다.
+#
+# 플래그(package.json 의 "test:components"):
+#   --import tsx --test
+#   - react-server 조건을 켜지 않는다. react-dom/server 가 그 조건에서 스스로 막히므로
+#     컴포넌트를 실제로 렌더해 보는 시험은 여기에 둔다. 그 대신 `server-only` 를
+#     불러오는 모듈은 여기서 부를 수 없다.
+#   - 부트스트랩을 싣지 않는다 — 환경변수도, DB 도 없다.
+#
+# 적는 법은 unit.txt 머리를 볼 것.
+
+src/components/common/responsive-list.test.ts
+src/components/procedures/visual/ProcedureNodeChip.test.tsx
+src/components/repair-cases/workflow/WorkflowStageStatus.test.tsx
+src/components/repair-cases/mine/MyActiveWorkScreen.test.tsx
+src/components/repair-cases/FilterDisclosure.test.tsx
+src/components/graph-editor-core/UndoRedoControls.test.tsx
+src/components/procedures/editor/EditHistoryList.test.tsx
+src/components/layout/NotificationBell.test.tsx
+src/components/quotes/QuotePrintView.test.tsx
+src/components/repair-cases/work-history/DatabaseWorkHistoryScreen.test.tsx
+src/components/procedures/procedure-publish-flow.test.tsx
+src/components/repair-cases/files/preview-backfill.test.ts
+src/components/repair-cases/files/StoredAttachmentList.test.tsx
+src/components/repair-cases/approval/approval-screen-layout.test.tsx
+src/components/inventory/part-issue-approval-screen.test.tsx
+src/components/users/approval-route-section.test.ts
+src/components/quotes/QuoteListScreen.test.ts
+src/components/quotes/quote-edit-work-scope-suppression.test.ts
