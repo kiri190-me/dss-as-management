@@ -8,6 +8,9 @@ import { db, pgClient } from "../connection";
 import {
   auditLogs,
   customers,
+  inventoryPartIssueApprovals,
+  inventoryPartIssueRequestItems,
+  inventoryPartIssueRequests,
   inventoryPartRequestItems,
   inventoryPartRequests,
   parts,
@@ -42,6 +45,9 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * write (with contact PII redacted from previous_value), the 6 preserved
  * history/accounting tables surviving with repair_case_id = NULL, the
  * stock_transactions destination_note backfill/no-overwrite behavior, the
+ * same backfill on inventory_part_issue_requests (a direct-use request that
+ * points only at the case must never make the purge fail its
+ * direct_use_has_destination CHECK), the
  * cascade-purge of every attached repair_case_flowchart (edges/nodes gone,
  * history survives), and restore-vs-purge / double-purge race behavior.
  * The Server Action's own auth/role gate (canPermanentlyDeleteRepairCases)
@@ -80,6 +86,7 @@ const createdProductIds: string[] = [];
 const createdWorkRecordIds: string[] = [];
 const createdStatusHistoryIds: string[] = [];
 const createdApprovalIds: string[] = [];
+const createdIssueRequestIds: string[] = [];
 let protectedAuditLogIds: string[] = [];
 let protectedIdempotencyKeys: string[] = [];
 
@@ -118,6 +125,17 @@ before(async () => {
 });
 
 after(async () => {
+  // 불출 신청이 **맨 먼저다.** 항목이 잔량 행을 RESTRICT 로 붙잡고 있고(아래
+  // 잔량 청소보다 앞서야 한다), 접수 건만 가리키는 직접 사용 신청이 남아 있으면
+  // 아래 접수 건 삭제의 SET NULL 이 사용처 CHECK 에 걸린다. 순서는 불출 신청
+  // 시험들의 규약 그대로다: 결재 행(RESTRICT) → 항목 → 신청. purge 로
+  // repair_case_id 가 NULL 이 된 신청도 있으므로 만든 id 로만 찾는다.
+  if (createdIssueRequestIds.length > 0) {
+    await db.delete(inventoryPartIssueApprovals).where(inArray(inventoryPartIssueApprovals.issueRequestId, createdIssueRequestIds));
+    await db.delete(inventoryPartIssueRequestItems).where(inArray(inventoryPartIssueRequestItems.issueRequestId, createdIssueRequestIds));
+    await db.delete(inventoryPartIssueRequests).where(inArray(inventoryPartIssueRequests.id, createdIssueRequestIds));
+  }
+
   // Flowcharts: any not already purged by a test (still-active fixtures)
   // are cleaned the normal way; any test id whose flowchart WAS purged is
   // already gone (that's what's being tested) — deleting again is a no-op.
@@ -267,6 +285,31 @@ async function createTestPart() {
 
 async function fetchRow(id: string) {
   const [row] = await db.select().from(repairCases).where(eq(repairCases.id, id));
+  return row;
+}
+
+/**
+ * 직접 사용 불출 신청 하나를 표에 손으로 넣는다 — queries/inventory-part-issue-
+ * requests.integration.test.ts 의 insertDirectIssueRequest 와 같은 방식이다.
+ * createPartIssueRequest 를 태우지 않는 이유: 그 길은 「부품 불출」 결재선 판을
+ * 요구하는데, 시험 DB 에 판이 남으면 판이 없는 상태를 전제하는 다른 시험 파일이
+ * 깨진다. 여기서 보려는 것은 표에 이미 있는 행이 영구 삭제를 어떻게 지나가느냐다.
+ *
+ * 사용처 기본값을 두지 않는다 — 이 파일의 관심사가 바로 「사용처가 빈 신청」이다.
+ */
+async function insertDirectIssueRequest(
+  values: Omit<Partial<typeof inventoryPartIssueRequests.$inferInsert>, "requestedByUserId">
+): Promise<string> {
+  const [row] = await db
+    .insert(inventoryPartIssueRequests)
+    .values({ requestedByUserId: engineerId, ...values })
+    .returning({ id: inventoryPartIssueRequests.id });
+  createdIssueRequestIds.push(row.id);
+  return row.id;
+}
+
+async function fetchIssueRequest(id: string) {
+  const [row] = await db.select().from(inventoryPartIssueRequests).where(eq(inventoryPartIssueRequests.id, id));
   return row;
 }
 
@@ -507,6 +550,116 @@ describe("permanentlyDeleteRepairCase", () => {
     assert.ok(useRowAfter);
     assert.equal(useRowAfter.repairCaseId, null);
     assert.equal(useRowAfter.destinationNote, ORIGINAL_NOTE, "an operator-entered destination_note must never be overwritten by the purge backfill");
+  });
+
+  test("inventory_part_issue_requests: a direct-use request pointing only at the case (destination_note NULL) no longer blocks the purge — it gets the ledger's exact note whatever its status; an existing note and another case's request are left alone", async () => {
+    const partId = await createTestPart();
+    const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 10, actorUserId: superAdminId });
+    assert.equal(received.ok, true);
+    if (!received.ok) return;
+
+    const created = await createTestCase();
+    const otherCase = await createTestCase();
+
+    // 같은 접수 건에 사용처가 빈 재고 장부 USE 줄도 하나 — 두 표가 **같은 문구**를
+    // 받는지 본다.
+    const used = await consumeStock({
+      partStockBalanceId: received.partStockBalanceId,
+      quantity: 1,
+      repairCaseId: created.id,
+      actorUserId: superAdminId,
+      expectedVersion: received.version,
+    });
+    assert.equal(used.ok, true, JSON.stringify(used));
+    const [useRowBefore] = await db
+      .select()
+      .from(stockTransactions)
+      .where(and(eq(stockTransactions.repairCaseId, created.id), eq(stockTransactions.transactionType, "USE")));
+    assert.ok(useRowBefore, "expected the USE row to exist before purge");
+    assert.equal(useRowBefore.destinationNote, null, "setup: destination_note must start NULL for this scenario");
+
+    // 결재 중 — 항목과 대기 중인 결재 행이 딸려 있다.
+    const pendingId = await insertDirectIssueRequest({ repairCaseId: created.id, status: "PENDING_APPROVAL", requestReason: "PD-TEST-PENDING" });
+    await db.insert(inventoryPartIssueRequestItems).values({ issueRequestId: pendingId, partStockBalanceId: received.partStockBalanceId, quantity: 2 });
+    await db.insert(inventoryPartIssueApprovals).values({
+      issueRequestId: pendingId,
+      requestedByUserId: engineerId,
+      assignedApproverUserId: adminId,
+      requestReason: "PD-TEST-PENDING",
+    });
+    // 이미 끝난 신청 — CHECK 는 상태를 가리지 않으므로 똑같이 걸린다.
+    const executedId = await insertDirectIssueRequest({
+      repairCaseId: created.id,
+      status: "EXECUTED",
+      executedByUserId: superAdminId,
+      executedAt: new Date(),
+    });
+    // 운영자가 사용처를 함께 적은 신청 — 덮으면 안 된다.
+    const ORIGINAL_NOTE = "PD-TEST-EXISTING-ISSUE-DESTINATION-NOTE";
+    const notedId = await insertDirectIssueRequest({ repairCaseId: created.id, status: "APPROVED", destinationNote: ORIGINAL_NOTE });
+    // 다른 접수 건의 신청 — 이 purge 와 무관하다.
+    const otherId = await insertDirectIssueRequest({ repairCaseId: otherCase.id });
+
+    const pendingBefore = await fetchIssueRequest(pendingId);
+    const executedBefore = await fetchIssueRequest(executedId);
+    const notedBefore = await fetchIssueRequest(notedId);
+    const otherBefore = await fetchIssueRequest(otherId);
+    assert.equal(pendingBefore.destinationNote, null, "setup: destination_note must start NULL for this scenario");
+    assert.equal(executedBefore.destinationNote, null, "setup: destination_note must start NULL for this scenario");
+    const itemsBefore = await db.select().from(inventoryPartIssueRequestItems).where(eq(inventoryPartIssueRequestItems.issueRequestId, pendingId));
+    const approvalsBefore = await db.select().from(inventoryPartIssueApprovals).where(eq(inventoryPartIssueApprovals.issueRequestId, pendingId));
+    assert.equal(itemsBefore.length, 1);
+    assert.equal(approvalsBefore.length, 1);
+
+    const softDeleted = await softDeleteRepairCase({ id: created.id, expectedVersion: 1, actorUserId: engineerId, reason: null });
+    assert.equal(softDeleted.ok, true);
+    const purged = await permanentlyDeleteRepairCase({ id: created.id, expectedVersion: 2, actorUserId: adminId, reason: "불출 신청 보존 검증" });
+    assert.equal(purged.ok, true, JSON.stringify(purged));
+    assert.equal(await fetchRow(created.id), undefined, "the repair_cases row must be physically gone after purge");
+
+    // 문구는 재고 장부와 **글자 그대로** 같다.
+    const EXPECTED_NOTE = `영구 삭제된 접수 건 (인수번호: ${created.intakeNumber})`;
+    const [useRowAfter] = await db.select().from(stockTransactions).where(eq(stockTransactions.id, useRowBefore.id));
+    assert.ok(useRowAfter, "the USE row must survive the purge");
+    assert.equal(useRowAfter.destinationNote, EXPECTED_NOTE, "the stock ledger backfill text must stay exactly as it was");
+
+    const pendingAfter = await fetchIssueRequest(pendingId);
+    assert.ok(pendingAfter, "the issue request must survive the purge");
+    assert.equal(pendingAfter.repairCaseId, null);
+    assert.equal(pendingAfter.destinationNote, EXPECTED_NOTE, "the issue request must get the very same note as the stock ledger");
+    assert.notEqual(pendingAfter.updatedAt.getTime(), pendingBefore.updatedAt.getTime(), "a backfilled issue request's updated_at is bumped like every other update of this table");
+    // 바뀐 세 칸(FK 의 SET NULL · 채운 사용처 · updated_at)을 되돌려 놓으면 나머지는
+    // 한 칸도 다르지 않다 — 상태·신청자·사유·실행 칸 전부.
+    assert.deepEqual(
+      { ...pendingAfter, repairCaseId: pendingBefore.repairCaseId, destinationNote: pendingBefore.destinationNote, updatedAt: pendingBefore.updatedAt },
+      pendingBefore,
+      "status/requester/reason/execution columns must stay exactly as they were"
+    );
+    assert.equal(pendingAfter.status, "PENDING_APPROVAL");
+    assert.deepEqual(
+      await db.select().from(inventoryPartIssueRequestItems).where(eq(inventoryPartIssueRequestItems.issueRequestId, pendingId)),
+      itemsBefore,
+      "the request's items must be untouched"
+    );
+    assert.deepEqual(
+      await db.select().from(inventoryPartIssueApprovals).where(eq(inventoryPartIssueApprovals.issueRequestId, pendingId)),
+      approvalsBefore,
+      "the request's approval rows must be untouched"
+    );
+
+    const executedAfter = await fetchIssueRequest(executedId);
+    assert.ok(executedAfter);
+    assert.equal(executedAfter.repairCaseId, null);
+    assert.equal(executedAfter.destinationNote, EXPECTED_NOTE, "a terminal (EXECUTED) request is backfilled too — the CHECK ignores status");
+    assert.equal(executedAfter.status, "EXECUTED");
+    assert.equal(executedAfter.executedByUserId, executedBefore.executedByUserId);
+    assert.deepEqual(executedAfter.executedAt, executedBefore.executedAt);
+
+    // 사용처가 적힌 신청은 FK 의 SET NULL 말고는 **아무것도** 바뀌지 않는다
+    // (updated_at 까지 그대로 — 채우기 UPDATE 가 이 행을 건드리지 않았다는 뜻).
+    assert.deepEqual(await fetchIssueRequest(notedId), { ...notedBefore, repairCaseId: null }, "an operator-entered destination_note must never be overwritten");
+
+    assert.deepEqual(await fetchIssueRequest(otherId), otherBefore, "another case's issue request must be untouched");
   });
 
   test("inventory_part_requests survives purge with repair_case_id = NULL", async () => {

@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   endUsers,
+  inventoryPartIssueRequests,
   products,
   repairCaseIdempotencyKeys,
   repairCaseIntakeSequences,
@@ -1295,6 +1296,19 @@ export type PermanentlyDeleteRepairCaseResult =
   | { ok: false; code: PermanentlyDeleteRepairCaseResultCode; message: string };
 
 /**
+ * 영구 삭제된 접수 건을 가리키던 직접 사용 기록에 채워 넣는 사용처 문구.
+ *
+ * 🔴 재고 장부(stock_transactions)와 불출 신청(inventory_part_issue_requests)이
+ * **이 함수 하나**에서 문구를 받는다 — 두 곳에 글자로 적으면 언젠가 한쪽만
+ * 바뀌어, 같은 접수 건에서 나간 부품이 두 화면에 다른 이름으로 남는다.
+ * 인수번호만 담는다(연락처 등 PII 는 넣지 않는다) — 접수 건 행이 사라진 뒤에도
+ * 「어느 건이었나」를 사람이 짚어 갈 수 있는 유일한 단서다.
+ */
+function purgedRepairCaseDestinationNote(intakeNumber: string): string {
+  return `영구 삭제된 접수 건 (인수번호: ${intakeNumber})`;
+}
+
+/**
  * Repair Case Permanent Delete checkpoint — irreversible hard delete of an
  * already-soft-deleted (휴지통) repair case, SUPER_ADMIN/ADMIN only
  * (enforced by the caller, permanently-delete-repair-cases.ts). One repair
@@ -1326,18 +1340,29 @@ export type PermanentlyDeleteRepairCaseResult =
  *  5. purgeAllRepairCaseFlowchartsForCase — force-purges every flowchart
  *     (active or already-trashed) belonging to this case; that FK also
  *     stayed RESTRICT by design, so nothing here can leave an orphan.
- *  6. backfill stock_transactions.destination_note (USE rows only, and
- *     only where it's still NULL — an existing operator-entered note is
- *     never overwritten) with a non-PII, identifiable reference (the
- *     intake number) — required so the stock_transactions_use_has_destination
- *     CHECK constraint still holds once step 7's DELETE fires this table's
- *     repair_case_id ON DELETE SET NULL action (migration 0031).
- *  7. DELETE the repair_cases row — the 6 preserved history/accounting
+ *  6. backfill destination_note, with the one non-PII, identifiable
+ *     reference purgedRepairCaseDestinationNote builds (the intake number),
+ *     on the two direct-use tables whose "must say where it went" CHECK
+ *     would otherwise break once step 7's DELETE fires their repair_case_id
+ *     ON DELETE SET NULL action — only where it's still NULL in both (an
+ *     existing operator-entered note is never overwritten):
+ *     6a. stock_transactions — USE rows only — so
+ *         stock_transactions_use_has_destination still holds (migration 0031).
+ *     6b. inventory_part_issue_requests — direct-use requests
+ *         (part_request_id NULL), whatever their status — so
+ *         inventory_part_issue_requests_direct_use_has_destination still
+ *         holds (migration 0090). A request picked against a case carries
+ *         only repair_case_id, so without this one pending/approved/executed
+ *         request would roll the whole purge back.
+ *  7. DELETE the repair_cases row — the 7 preserved history/accounting
  *     tables (status_change_histories, repair_case_approvals,
  *     procedure_case_executions, stock_transactions, inventory_part_requests,
- *     repair_case_work_records) go to repair_case_id = NULL automatically
- *     via their own ON DELETE SET NULL action; nothing here deletes or
- *     rewrites a single row in any of them, or in products/product_models/
+ *     inventory_part_issue_requests, repair_case_work_records) go to
+ *     repair_case_id = NULL automatically via their own ON DELETE SET NULL
+ *     action; nothing here deletes a single row in any of them, or rewrites
+ *     one beyond step 6's destination_note backfill (an issue request's
+ *     items and approval rows hang off the request, not the case, and are
+ *     never touched), nor anything in products/product_models/
  *     customers/end_users (repair_cases.product_id/customer_id/end_user_id
  *     point AT those tables — deleting this row can never cascade toward
  *     its own parents).
@@ -1399,7 +1424,10 @@ export async function permanentlyDeleteRepairCase(params: {
       reason: params.reason,
     });
 
-    // Never overwrites an existing destinationNote (operator-entered text
+    // 6a·6b 가 **같은 문구**를 받는다 — 한 번만 만든다.
+    const purgedCaseDestinationNote = purgedRepairCaseDestinationNote(current.intakeNumber);
+
+    // 6a. Never overwrites an existing destinationNote (operator-entered text
     // stays authoritative) — only backfills the rows that would otherwise
     // violate stock_transactions_use_has_destination once repair_case_id
     // goes NULL below. RECEIPT/RETURN rows are never touched: repair_case_id
@@ -1407,12 +1435,38 @@ export async function permanentlyDeleteRepairCase(params: {
     // ever applies to USE.
     await tx
       .update(stockTransactions)
-      .set({ destinationNote: `영구 삭제된 접수 건 (인수번호: ${current.intakeNumber})` })
+      .set({ destinationNote: purgedCaseDestinationNote })
       .where(
         and(
           eq(stockTransactions.repairCaseId, params.id),
           eq(stockTransactions.transactionType, "USE"),
           isNull(stockTransactions.destinationNote)
+        )
+      );
+
+    // 6b. 불출 신청도 같은 모양의 CHECK 을 가진다
+    // (inventory_part_issue_requests_direct_use_has_destination) — 접수 건을
+    // 골라 올린 직접 사용 신청은 repair_case_id 만 들고 사용처가 NULL 이 정상이라,
+    // 아래 DELETE 의 SET NULL 이 세 칸을 모두 비우는 순간 CHECK 에 걸려 영구 삭제가
+    // 통째로 되돌아간다. 위 장부 줄과 같은 규칙으로 막는다:
+    //  · 운영자가 적은 사용처는 덮지 않는다(NULL 인 행만).
+    //  · 상태는 가리지 않는다 — 결재 중·실행 대기인 신청은 삭제 뒤에도 이 사용처로
+    //    실행될 수 있어야 하고, 끝난 신청(EXECUTED·REJECTED·CANCELLED)도 CHECK 은
+    //    똑같이 걸린다.
+    //  · `part_request_id IS NULL` 은 방어선이다 — 요청 기반 신청은 표의
+    //    direct_use_columns_only_when_direct CHECK 상 repair_case_id 가 언제나
+    //    NULL 이라 여기 잡힐 수 없고, 잡혀서 사용처가 채워지면 오히려 그 CHECK 에
+    //    걸린다. 장부 쪽의 `transaction_type = 'USE'` 와 같은 자리다.
+    //  · updated_at 을 함께 올린다 — 이 표의 모든 갱신(결재·취소·실행)이 그렇게
+    //    한다. 사용처가 실제로 바뀐 행이다.
+    await tx
+      .update(inventoryPartIssueRequests)
+      .set({ destinationNote: purgedCaseDestinationNote, updatedAt: new Date() })
+      .where(
+        and(
+          eq(inventoryPartIssueRequests.repairCaseId, params.id),
+          isNull(inventoryPartIssueRequests.partRequestId),
+          isNull(inventoryPartIssueRequests.destinationNote)
         )
       );
 
