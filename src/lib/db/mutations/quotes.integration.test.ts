@@ -10,15 +10,22 @@ import {
   customers,
   products,
   quoteItems,
+  quoteRepairTasks,
   quoteWorkScopeLines,
   quotes,
   repairCaseIntakeSequences,
   repairCases,
+  repairTaskCatalog,
   users,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { createQuote, updateQuote } from "./quotes";
-import type { QuoteFields } from "@/lib/validation/quote-input";
+import { getQuoteForEdit } from "../queries/quotes";
+import {
+  expandRepairTaskLines,
+  restoreRepairTaskQuantities,
+} from "@/lib/domain/quote-repair-task-selection";
+import { validateQuoteFields, type QuoteFields } from "@/lib/validation/quote-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -45,7 +52,8 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *
  * ── 격리 규약 ────────────────────────────────────────────────────────────
  * 이 스위트만 쓰는 접수 월 "9602", 고객사 접두사 "AS-TEST-QUOTE-",
- * 제품 모델 접두사 "QUOTE-TEST-", 발행번호 접두사 "QUOTE-TEST-".
+ * 제품 모델 접두사 "QUOTE-TEST-", 발행번호 접두사 "QUOTE-TEST-",
+ * 수리 작업 카탈로그 건명 접두사 "QUOTE-TEST-TASK-".
  * 인수번호의 연월은 receivedAt 에서 나오므로 TEST_YEAR_MONTH 와
  * TEST_RECEIVED_AT 은 언제나 같은 달을 가리켜야 한다.
  *
@@ -60,6 +68,8 @@ const TEST_MODEL_PREFIX = "QUOTE-TEST-";
 const TEST_QUOTE_NUMBER_PREFIX = "QUOTE-TEST-";
 const TEST_YEAR_MONTH = "9602";
 const TEST_RECEIVED_AT = "2096-02-05";
+/** 이 스위트가 만드는 수리 작업 카탈로그 줄의 건명 접두사. after() 가 이것으로만 지운다. */
+const TEST_TASK_NAME_PREFIX = "QUOTE-TEST-TASK-";
 
 let actorUserId: string;
 let engineerId: string;
@@ -189,6 +199,11 @@ after(async () => {
   if (createdQuoteIds.length > 0) {
     await db.delete(quotes).where(inArray(quotes.id, createdQuoteIds));
   }
+  // 이 스위트가 만든 수리 작업 카탈로그 줄. quotes 뒤다 — quote_repair_tasks 가
+  // 이 줄을 RESTRICT 로 가리키고, 그 줄은 quotes 를 지울 때 CASCADE 로 사라진다.
+  // 이름 접두사로만 지운다 — 수리 작업 비용 시험(repair-labor.integration)이 같은
+  // 표를 종류째 비우고 쓰므로, 여기서 종류째 지우면 그쪽 자리를 건드린다.
+  await db.delete(repairTaskCatalog).where(like(repairTaskCatalog.taskName, `${TEST_TASK_NAME_PREFIX}%`));
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db
@@ -648,5 +663,128 @@ describe("견적서 통전작업 제외", () => {
     const row = await readQuote(created.id);
     assert.equal(row.powerTestExcluded, false);
     assert.equal(row.laborPowerTestDeduction, null, "끈 뒤에도 옛 차감이 남아 있으면 안 된다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 같은 수리 작업을 여러 번 — 수량은 같은 task_id 여러 줄로 저장된다
+ * ============================================================================
+ * 화면은 수량 N 을 **같은 작업 N 줄**로 펴서 보낸다(2026-09-11,
+ * domain/quote-repair-task-selection.ts). 수량 칸을 새로 만들지 않은 까닭은
+ * `quote_repair_tasks` 의 유니크가 `(quote_id, line_no)` 뿐이라 같은 task_id 여러
+ * 줄을 이미 담을 수 있어서다. 여기서 못 박는 것은 그 전제다:
+ *
+ *  1. 서버 검증이 같은 task_id 두 줄을 **걸러 내지 않는다**.
+ *  2. 저장이 두 줄을 **그대로, 차례대로** 담는다.
+ *  3. 다시 열면(getQuoteForEdit) 두 줄이 돌아와 **수량 2 로 되살아난다.**
+ * ============================================================================
+ */
+describe("견적서 수리 작업 — 같은 작업 여러 줄", () => {
+  let rfTaskId: string;
+  let fanTaskId: string;
+
+  before(async () => {
+    const inserted = await db
+      .insert(repairTaskCatalog)
+      .values([
+        {
+          equipmentKind: "GENERATOR",
+          taskName: `${TEST_TASK_NAME_PREFIX}RF 모듈 교체-${randomUUID().slice(0, 6)}`,
+          hours: 8,
+          displayOrder: 9001,
+        },
+        {
+          equipmentKind: "GENERATOR",
+          taskName: `${TEST_TASK_NAME_PREFIX}FAN 교환-${randomUUID().slice(0, 6)}`,
+          hours: 2,
+          displayOrder: 9002,
+        },
+      ])
+      .returning({ id: repairTaskCatalog.id });
+    [rfTaskId, fanTaskId] = inserted.map((row) => row.id);
+  });
+
+  async function readTaskLines(quoteId: string) {
+    return db
+      .select({
+        lineNo: quoteRepairTasks.lineNo,
+        taskId: quoteRepairTasks.taskId,
+        hours: quoteRepairTasks.hours,
+        hourlyRate: quoteRepairTasks.hourlyRate,
+      })
+      .from(quoteRepairTasks)
+      .where(eq(quoteRepairTasks.quoteId, quoteId))
+      .orderBy(asc(quoteRepairTasks.lineNo));
+  }
+
+  test("🔴 같은 task_id 두 줄이 검증을 지나 그대로 저장되고, 다시 열면 수량 2 로 되살아난다", async () => {
+    const catalog = [
+      { id: rfTaskId, taskName: "RF 모듈 교체", hours: 8, isOverhaul: false },
+      { id: fanTaskId, taskName: "FAN 교환", hours: 2, isOverhaul: false },
+    ];
+    // 화면이 보내는 그대로 — RF × 2, FAN × 1.
+    const lines = expandRepairTaskLines(
+      catalog,
+      new Map([
+        [rfTaskId, 2],
+        [fanTaskId, 1],
+      ]),
+      "100000"
+    );
+    assert.equal(lines.length, 3);
+
+    const validated = validateQuoteFields(
+      fields({ laborEquipmentKind: "GENERATOR", workCost: "1800000", repairTasks: lines })
+    );
+    assert.ok(validated.ok, JSON.stringify(validated));
+    if (!validated.ok) return;
+    assert.deepEqual(
+      validated.data.repairTasks.map((task) => task.taskId),
+      [rfTaskId, rfTaskId, fanTaskId],
+      "검증이 같은 작업의 둘째 줄을 걸러 내면 수량이 소리 없이 1 로 줄어든다"
+    );
+
+    const created = await create(validated.data);
+    assert.ok(created.ok, JSON.stringify(created));
+    if (!created.ok) return;
+
+    assert.deepEqual(
+      (await readTaskLines(created.id)).map((line) => [line.lineNo, line.taskId, line.hours, line.hourlyRate]),
+      [
+        [1, rfTaskId, 8, "100000.00"],
+        [2, rfTaskId, 8, "100000.00"],
+        [3, fanTaskId, 2, "100000.00"],
+      ]
+    );
+
+    const reopened = await getQuoteForEdit(created.id);
+    assert.ok(reopened);
+    const restored = restoreRepairTaskQuantities(reopened.repairTasks);
+    assert.equal(restored.get(rfTaskId), 2);
+    assert.equal(restored.get(fanTaskId), 1);
+  });
+
+  test("고쳐 저장하면 수량이 줄어든 만큼 줄도 줄어든다 — 통째로 갈아 끼워진다", async () => {
+    const twice = [
+      { taskId: rfTaskId, taskName: "RF 모듈 교체", hours: 8, hourlyRate: "100000" },
+      { taskId: rfTaskId, taskName: "RF 모듈 교체", hours: 8, hourlyRate: "100000" },
+    ];
+    const created = await create({ repairTasks: twice });
+    assert.ok(created.ok, JSON.stringify(created));
+    if (!created.ok) return;
+    assert.equal((await readTaskLines(created.id)).length, 2);
+
+    const updated = await updateQuote({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({ quoteNumber: (await readQuote(created.id)).quoteNumber, repairTasks: twice.slice(0, 1) }),
+      actorUserId,
+    });
+    assert.ok(updated.ok, JSON.stringify(updated));
+    assert.deepEqual(
+      (await readTaskLines(created.id)).map((line) => [line.lineNo, line.taskId]),
+      [[1, rfTaskId]]
+    );
   });
 });

@@ -11,6 +11,18 @@ import { generateClientUuid } from "@/lib/client-uuid";
 import { stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
 import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
+import {
+  MAX_REPAIR_TASK_QUANTITY,
+  MIN_REPAIR_TASK_QUANTITY,
+  applyOverhaulQuantities,
+  expandRepairTaskLines,
+  repairTaskQuantityOf,
+  restoreRepairTaskQuantities,
+  selectedRepairTaskNames,
+  setRepairTaskChecked,
+  setRepairTaskQuantity,
+  type RepairTaskQuantities,
+} from "@/lib/domain/quote-repair-task-selection";
 import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
 import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
@@ -365,19 +377,16 @@ export default function QuoteEditForm({
     quote?.laborEquipmentKind ?? null
   );
   /**
-   * 체크한 작업의 카탈로그 id.
+   * 체크한 작업의 카탈로그 id → 수량(≥ 1). 같은 작업을 여러 번 더해 작업비를
+   * 늘릴 수 있다(2026-09-11). 규칙은 전부 domain/quote-repair-task-selection.ts 에
+   * 있다 — 여기서는 부르기만 한다.
    *
-   * 저장된 견적서는 `task_id` 로 되살린다. 카탈로그에서 지워진 작업은 id 가
-   * 없거나 목록에 없어 체크가 살아나지 않는데, **그 줄의 금액은 이미 work_cost 에
-   * 들어 있다** — 화면이 그 사실을 아래에서 알린다.
+   * 저장된 견적서는 `task_id` 별 줄 수를 세어 수량으로 되살린다. 카탈로그에서
+   * 지워진 작업은 id 가 없거나 목록에 없어 체크가 살아나지 않는데, **그 줄의
+   * 금액은 이미 work_cost 에 들어 있다** — 화면이 그 사실을 아래에서 알린다.
    */
-  const [checkedTaskIds, setCheckedTaskIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        (quote?.repairTasks ?? [])
-          .map((task) => task.taskId)
-          .filter((id): id is string => id !== null)
-      )
+  const [taskQuantities, setTaskQuantities] = useState<RepairTaskQuantities>(() =>
+    restoreRepairTaskQuantities(quote?.repairTasks ?? [])
   );
   /**
    * 「통전작업 제외」. **사람의 결정**이고, 켜면 기본 작업비에서 통전작업 몫
@@ -482,18 +491,13 @@ export default function QuoteEditForm({
    * 체크한 작업들을 **그때 단가와 함께** 넘긴다. 저장할 때도 이 모양 그대로
    * 베껴 둔다 — 나중에 단가가 올라도 이미 보낸 견적서의 근거는 그대로여야 한다
    * (schema/repair-labor.ts 의 quote_repair_tasks).
+   *
+   * 수량 N 은 **같은 작업 N 줄**로 펴진다 — 합계·서버·DB 가 그대로 맞는다.
    */
   const selectedTasks = useMemo(() => {
     if (!activeLabor) return [];
-    return activeLabor.tasks
-      .filter((task) => checkedTaskIds.has(task.id))
-      .map((task) => ({
-        taskId: task.id,
-        taskName: task.taskName,
-        hours: task.hours,
-        hourlyRate: activeLabor.hourlyRate,
-      }));
-  }, [activeLabor, checkedTaskIds]);
+    return expandRepairTaskLines(activeLabor.tasks, taskQuantities, activeLabor.hourlyRate);
+  }, [activeLabor, taskQuantities]);
 
   /**
    * 🔴 **통전 공수시간과 시간당 단가는 이미 화면에 들어와 있다**(activeLabor).
@@ -574,25 +578,23 @@ export default function QuoteEditForm({
   function applyOverhaulRule(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
     const labor = repairLabor.find((row) => row.equipmentKind === nextLaborKind);
     if (!labor) return;
-    const overhaulIds = labor.tasks.filter((task) => task.isOverhaul).map((task) => task.id);
-    // 오버홀 작업이 표시돼 있지 않은 장비면 따라 움직일 줄이 없다. 이름으로
-    // 맞히지 않는다(schema/repair-labor.ts 의 is_overhaul).
-    if (overhaulIds.length === 0) return;
+    // O/H 면 오버홀 작업이 없을 때만 수량 1 로 넣고(있으면 수량을 건드리지
+    // 않는다), 아니면 뺀다. 오버홀 작업이 표시돼 있지 않은 장비면 null — 따라
+    // 움직일 줄이 없다. 이름으로 맞히지 않는다(schema/repair-labor.ts 의 is_overhaul).
+    const next = applyOverhaulQuantities(labor.tasks, taskQuantities, nextQuoteKind === "OVERHAUL");
+    if (next === null) return;
 
-    const shouldCheck = nextQuoteKind === "OVERHAUL";
-    const next = new Set(checkedTaskIds);
-    for (const id of overhaulIds) {
-      if (shouldCheck) next.add(id);
-      else next.delete(id);
-    }
-    setCheckedTaskIds(next);
+    setTaskQuantities(next);
     // 고른 작업이 바뀌었으니 수리작업 목록도 따라간다(손대지 않았을 때만).
     fillRepairScopeFrom(taskNamesOf(labor, next));
   }
 
-  /** 고른 작업의 건명들. 목록 차례를 그대로 따른다 — 문서에 적히는 순서다. */
-  function taskNamesOf(labor: RepairLaborKindRow, ids: Set<string>): string[] {
-    return labor.tasks.filter((task) => ids.has(task.id)).map((task) => task.taskName);
+  /**
+   * 고른 작업의 건명들. 목록 차례를 그대로 따른다 — 문서에 적히는 순서다.
+   * 🔴 **수량을 보지 않는다** — 수량은 작업비에만 들어가고 문구는 그대로다.
+   */
+  function taskNamesOf(labor: RepairLaborKindRow, quantities: RepairTaskQuantities): string[] {
+    return selectedRepairTaskNames(labor.tasks, quantities);
   }
 
   /**
@@ -1481,18 +1483,17 @@ export default function QuoteEditForm({
               ) : (
                 <ul className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
                   {activeLabor.tasks.map((task) => {
-                    const checked = checkedTaskIds.has(task.id);
+                    const quantity = repairTaskQuantityOf(taskQuantities, task.id);
+                    const checked = quantity > 0;
                     return (
-                      <li key={task.id}>
+                      <li key={task.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <label className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={(e) => {
-                              const next = new Set(checkedTaskIds);
-                              if (e.target.checked) next.add(task.id);
-                              else next.delete(task.id);
-                              setCheckedTaskIds(next);
+                              const next = setRepairTaskChecked(taskQuantities, task.id, e.target.checked);
+                              setTaskQuantities(next);
                               // 고른 작업이 곧 문서의 「2) 수리작업」이다
                               // (손대지 않았을 때만 따라간다).
                               fillRepairScopeFrom(taskNamesOf(activeLabor, next));
@@ -1509,11 +1510,56 @@ export default function QuoteEditForm({
                               O/H
                             </span>
                           )}
+                          {/* 수량이 2 이상이면 그 줄이 실제로 더하는 금액을 보인다 —
+                              합계만 늘고 줄의 금액이 그대로면 어디서 늘었는지 모른다. */}
                           <span className="text-xs text-zinc-500 dark:text-zinc-400">
                             {task.hours}시간 ·{" "}
-                            {formatAmount(task.hours * Number(activeLabor.hourlyRate))}
+                            <span className="tabular-nums">
+                              {formatAmount(task.hours * Number(activeLabor.hourlyRate) * Math.max(quantity, 1))}
+                            </span>
                           </span>
                         </label>
+                        {/* ── 수량 ─────────────────────────────────────────
+                            같은 작업을 여러 번 더한다(2026-09-11). **체크된 작업에만**
+                            보인다. − 로 0 이 되지 않는다 — 빼려면 체크를 푼다.
+                            🔴 수량은 작업비에만 들어가고 「2) 수리작업」 문구는 그대로라,
+                            여기서는 그 칸을 다시 채우지 않는다. */}
+                        {checked && (
+                          <span
+                            role="group"
+                            aria-label={`${task.taskName} 수량`}
+                            className="inline-flex items-center rounded-md border border-zinc-300 text-xs dark:border-zinc-700"
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTaskQuantities(setRepairTaskQuantity(taskQuantities, task.id, quantity - 1))
+                              }
+                              disabled={disabled || quantity <= MIN_REPAIR_TASK_QUANTITY}
+                              aria-label={`${task.taskName} 수량 줄이기`}
+                              className="px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                              −
+                            </button>
+                            <span
+                              aria-live="polite"
+                              className="min-w-[1.75rem] border-x border-zinc-300 px-1 text-center tabular-nums text-zinc-900 dark:border-zinc-700 dark:text-zinc-50"
+                            >
+                              {quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTaskQuantities(setRepairTaskQuantity(taskQuantities, task.id, quantity + 1))
+                              }
+                              disabled={disabled || quantity >= MAX_REPAIR_TASK_QUANTITY}
+                              aria-label={`${task.taskName} 수량 늘리기`}
+                              className="px-1.5 py-0.5 text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                              +
+                            </button>
+                          </span>
+                        )}
                       </li>
                     );
                   })}
@@ -1522,7 +1568,8 @@ export default function QuoteEditForm({
 
               {/* 🔴 식을 그대로 보여 준다. 합계 하나만 보이면 "왜 이 숫자지"에
                   답할 것이 없고, 기본 작업비가 더해진 것도 드러나지 않는다.
-                  통전작업 제외도 마찬가지다 — **뺀 금액을 눈에 보이게 적는다.** */}
+                  통전작업 제외도 마찬가지다 — **뺀 금액을 눈에 보이게 적는다.**
+                  「고른 작업 N건」은 **줄 수**다 — 같은 작업을 두 번 더했으면 2건이다. */}
               <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
                 기본 작업비{" "}
                 {laborSuggestion.baseCost === null ? (
@@ -1616,7 +1663,7 @@ export default function QuoteEditForm({
                         type="button"
                         onClick={() =>
                           fillRepairScopeFrom(
-                            activeLabor ? taskNamesOf(activeLabor, checkedTaskIds) : [],
+                            activeLabor ? taskNamesOf(activeLabor, taskQuantities) : [],
                             true
                           )
                         }
