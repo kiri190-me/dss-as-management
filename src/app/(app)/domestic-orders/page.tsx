@@ -12,6 +12,7 @@ import {
   listDomesticOrders,
   listRepairCaseLinkOptions,
 } from "@/lib/db/queries/domestic-orders";
+import { getDomesticOrderSheetHeading } from "@/lib/db/queries/domestic-order-sheet-settings";
 import { listQuoteOptions } from "@/lib/db/queries/quotes";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 
@@ -54,6 +55,8 @@ export default async function DomesticOrdersPage() {
   const actingUser = session ? await resolveActingUserForSession(session) : null;
   // 고치는 권한은 관리자가 정한 수준 하나로 정해진다(2026-08-31 전환) —
   // 예전에는 canEditDomesticOrders(역할)를 AND 로 겹쳐 넓혀도 열리지 않았다.
+  // 머리말 편집(2026-09-11)도 이 값 하나로 단추가 보인다 — 저장 액션
+  // (saveDomesticOrderSheetHeadingAction)이 같은 관문을 다시 본다.
   const canEdit =
     actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "WRITE"));
   // 휴지통으로 보내기·복원·완전 삭제는 한 칸 좁다 — 관리(2026-09-11). 서버
@@ -66,7 +69,7 @@ export default async function DomesticOrdersPage() {
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).
   // 고객사 목록도 같은 규칙이다: 이 화면을 볼 수만 있는 사람에게 전체 고객사
   // 명단을 실어 보낼 이유가 없다.
-  const [rows, repairCaseOptions, customerOptions, quoteOptions, trashRows] = await Promise.all([
+  const [rows, repairCaseOptions, customerOptions, quoteOptions, trashRows, sheetHeading] = await Promise.all([
     listDomesticOrders(),
     canEdit ? listRepairCaseLinkOptions() : Promise.resolve([]),
     canEdit ? listCustomerOptions() : Promise.resolve([]),
@@ -75,6 +78,10 @@ export default async function DomesticOrdersPage() {
     // 휴지통은 지울 수 있는 사람에게만 읽어 보낸다 — 볼 수 없는 탭의 내용을
     // 실어 보내지 않는다(견적서·고객사 화면과 같은 규칙).
     canDelete ? listDeletedDomesticOrders() : Promise.resolve([]),
+    // 머리말(인사문 · 내부 메모). 볼 수 있는 사람 모두에게 보이는 글이라 누구에게나
+    // 읽어 보낸다. 행이 없거나 표가 아직 없으면 코드의 기본 문구다 — 그때 화면은
+    // 이 기능을 넣기 전과 한 글자도 다르지 않다(queries/domestic-order-sheet-settings.ts).
+    getDomesticOrderSheetHeading(),
   ]);
 
   // 머리말의 "{날짜}자 진행 상황입니다"에 들어갈 날짜. 클라이언트에서 만들면
@@ -106,6 +113,7 @@ export default async function DomesticOrdersPage() {
       quoteOptions={quoteOptions}
       canDelete={canDelete}
       trashRows={trashRows}
+      sheetHeading={sheetHeading}
     />
   );
 }

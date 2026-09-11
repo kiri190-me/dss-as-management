@@ -21,6 +21,11 @@ import {
   softDeleteDomesticOrder,
   type DomesticOrderTrashResult,
 } from "@/lib/db/mutations/domestic-orders-trash";
+import { saveDomesticOrderSheetHeading } from "@/lib/db/mutations/domestic-order-sheet-settings";
+import {
+  validateDomesticOrderSheetHeadingInput,
+  type DomesticOrderSheetHeadingFieldErrors,
+} from "@/lib/domain/domestic-order-sheet-heading";
 
 /**
  * ============================================================================
@@ -422,4 +427,70 @@ export async function permanentlyDeleteDomesticOrdersAction(input: {
     })
   );
   return { ok: true, results };
+}
+
+/**
+ * ============================================================================
+ * 머리말(인사문 · 내부 메모) 저장 (2026-09-11)
+ * ============================================================================
+ * 관문은 **행 추가·수정과 같다**(resolveAuthorizedActingUser — domesticOrders WRITE).
+ * 머리말은 이 화면을 고치는 사람이 함께 고치는 문서의 일부이고, 되돌릴 수 있는
+ * 조작이라(기본 문구로 · 감사 로그의 전후 문구) 휴지통처럼 한 칸 좁힐 이유가 없다.
+ * 화면의 [머리말 편집] 단추도 같은 판정(page.tsx 의 canEdit)으로만 보인다.
+ *
+ * 순서는 이 파일의 다른 액션과 같다: 세션 → 인가 → 입력 검증 → mutation. mutation
+ * 이 트랜잭션 안에서 행위자와 권한을 한 번 더 본다(mutations/domestic-order-sheet-
+ * settings.ts) — 세션을 읽은 뒤 강등된 계정이 그 사이에 저장하는 구멍을 막는다.
+ *
+ * 🔴 오류 로그에 문구를 싣지 않는다 — 인사문에 사람 이름이 들어 있다. 오류 코드만 남긴다.
+ * ============================================================================
+ */
+
+export type DomesticOrderSheetHeadingActionResult =
+  | { ok: true; revertedToDefault: boolean }
+  | {
+      ok: false;
+      code: "VALIDATION_ERROR" | "UNAUTHORIZED" | "FORBIDDEN" | "DATABASE_UNAVAILABLE";
+      message: string;
+      fieldErrors?: DomesticOrderSheetHeadingFieldErrors;
+    };
+
+export async function saveDomesticOrderSheetHeadingAction(input: {
+  greetingText: string;
+  internalMemo: string;
+}): Promise<DomesticOrderSheetHeadingActionResult> {
+  const auth = await resolveAuthorizedActingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  const validation = validateDomesticOrderSheetHeadingInput(input);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: validation.fieldErrors,
+      message: VALIDATION_MESSAGE,
+    };
+  }
+
+  try {
+    const result = await saveDomesticOrderSheetHeading({
+      greetingText: validation.data.greetingText,
+      internalMemo: validation.data.internalMemo,
+      actorUserId: auth.actingUser.id,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code === "FORBIDDEN" ? "FORBIDDEN" : "VALIDATION_ERROR",
+        fieldErrors: result.fieldErrors,
+        message: result.message,
+      };
+    }
+    if (result.changed) revalidatePath(DOMESTIC_ORDERS_PATH);
+    return { ok: true, revertedToDefault: result.revertedToDefault };
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+    console.error("saveDomesticOrderSheetHeadingAction: unexpected DB error", { code });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
 }

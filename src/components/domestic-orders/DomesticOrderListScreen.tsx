@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useId, useMemo, useState, useTransition, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -48,9 +48,24 @@ import {
   deleteDomesticOrdersAction,
   permanentlyDeleteDomesticOrdersAction,
   restoreDomesticOrdersAction,
+  saveDomesticOrderSheetHeadingAction,
   setDomesticOrderCompletionAction,
   type DomesticOrderTrashItem,
 } from "@/lib/server/actions/domestic-orders";
+import type { DomesticOrderSheetHeadingView } from "@/lib/db/queries/domestic-order-sheet-settings";
+import {
+  countSheetHeadingChars,
+  DEFAULT_DOMESTIC_ORDER_SHEET_GREETING,
+  DEFAULT_DOMESTIC_ORDER_SHEET_MEMO,
+  DOMESTIC_ORDER_SHEET_AS_OF_DATE_PLACEHOLDER,
+  DOMESTIC_ORDER_SHEET_GREETING_MAX_CHARS,
+  DOMESTIC_ORDER_SHEET_MEMO_MAX_CHARS,
+  resolveSheetGreetingLines,
+  resolveSheetInternalMemo,
+  validateDomesticOrderSheetHeadingInput,
+  type DomesticOrderSheetHeadingFieldErrors,
+  type SheetIndentLevel,
+} from "@/lib/domain/domestic-order-sheet-heading";
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
 import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
@@ -604,12 +619,33 @@ const SHEET_HEADING_COLLAPSED = "COLLAPSED";
  * 조건부로 아예 안 그리면 aria-controls 가 없는 id 를 가리키게 된다. display:
  * none 인 자식은 flex 항목이 아니라 gap 도 함께 사라지므로, 접었을 때 이 상자는
  * 제목 줄 하나 높이 그대로다.
+ *
+ * ── 인사문과 메모는 이제 저장된 글이다 (2026-09-11) ──────────────────────
+ * 전에는 이 함수에 글자로 박혀 있었다. 지금은 서버가 내려준 글(heading)을
+ * domain/domestic-order-sheet-heading.ts 가 줄과 들여쓰기로 펴고, `{기준일}` 을
+ * 위 asOfDate 로 바꾼다. **저장된 행이 없으면 그 글이 전에 박혀 있던 문구 그대로라**
+ * 그린 결과가 한 글자도 다르지 않다(도메인 시험이 옛 JSX 의 글자와 대조한다).
+ *
+ * [머리말 편집] 단추는 **펼쳤을 때만, 고칠 수 있는 세션(canEditHeading)에만** 제목
+ * 줄에 선다 — 접기 단추와 같은 높이라 제목 줄이 자라지 않고, 접힌 상태의 높이는
+ * 전과 같다. 누르면 펼친 몸통 **그 자리에서** 인사문·메모가 편집칸으로 바뀐다
+ * (SheetHeadingEditor). 편집 상자는 펼친 머리말 안에서만 자라고, 표 위에 새 줄을
+ * 세우지 않는다. 화면이 감춘 단추는 경계가 아니다 — 저장 액션이 다시 본다.
+ *
+ * 편집 중에 머리말을 접어도 적던 글은 사라지지 않는다 — 몸통이 hidden 으로 남는
+ * 위 규칙 그대로다.
  */
 function SheetHeading({
   asOfDate,
+  heading,
+  canEditHeading,
   viewSwitch,
 }: {
   asOfDate: string;
+  /** 서버가 읽은 머리말. 저장된 행이 없으면 코드의 기본 문구다(page.tsx). */
+  heading: DomesticOrderSheetHeadingView;
+  /** 머리말을 고칠 수 있는가 — 행 추가·수정과 같은 판정(domesticOrders WRITE). */
+  canEditHeading: boolean;
   /**
    * 사용중 / 휴지통 전환(ViewSwitch). 지울 수 있는 세션에서만 넘어온다 —
    * 넘어오지 않으면 이 줄은 이 변경 전과 똑같다. 제목 줄에 세우는 까닭은 파일
@@ -622,6 +658,15 @@ function SheetHeading({
   // 서버가 그린 화면과 저장값이 없는 첫 그림이 같다.
   const isExpanded = stored === SHEET_HEADING_EXPANDED;
   const panelId = useId();
+  const [isEditingHeading, setIsEditingHeading] = useState(false);
+  // 권한을 잃은 채 편집칸이 남지 않게 한다(새로고침으로 canEditHeading 이 거짓이 되면).
+  const showEditor = canEditHeading && isEditingHeading;
+
+  const greetingLines = useMemo(
+    () => resolveSheetGreetingLines(heading.greetingText, asOfDate),
+    [heading.greetingText, asOfDate]
+  );
+  const internalMemo = resolveSheetInternalMemo(heading.internalMemo, asOfDate);
 
   return (
     <section
@@ -658,6 +703,18 @@ function SheetHeading({
               ▸
             </span>
           </button>
+          {/* 펼쳤을 때만, 고칠 수 있는 세션에만. 접기 단추와 같은 높이라 제목 줄이
+              자라지 않는다. sr-only 를 쓰지 않는다 — 보이는 글자가 다 말한다(위 ⚠️).
+              인쇄에서는 빠진다 — 이 머리말은 고객사에 보내는 문서의 일부다. */}
+          {canEditHeading && isExpanded && !showEditor && (
+            <button
+              type="button"
+              onClick={() => setIsEditingHeading(true)}
+              className="rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 print:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              머리말 편집
+            </button>
+          )}
         </div>
         {viewSwitch ? (
           // 전환 단추와 기준일을 한 덩어리로 오른쪽 끝에 둔다 — 따로 두면 좁아질
@@ -671,24 +728,223 @@ function SheetHeading({
         )}
       </div>
       <div id={panelId} className={isExpanded ? "flex flex-col gap-2" : "hidden"}>
-        <ol className="flex list-none flex-col gap-1">
-          <li>1. 귀사의 일익 번창하심을 기원합니다.</li>
-          <li>2. 납품 및 수리 관련하여 {asOfDate}자 진행 상황입니다.</li>
-          <li className="pl-4">
-            2) 수리품 반입/반출 및 기타 변동이 있을 경우 김유진 과장에게 전달해 주세요.
-          </li>
-          <li className="pl-4">3) 본 내용 변경을 요하거나 의견 있으면 주세요.</li>
-        </ol>
-        {/* 시트 머리말에 함께 적혀 있던 내부 메모다. 고객사에 보내는 문장이
-            아니라 우리 쪽 확인 사항이라 따로 떼어 둔다 — 위 인사문과 같은 줄에
-            두면 문서에 그대로 실려 나갈 말처럼 읽힌다. */}
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          내부 메모 — 발주 받으면 인사회신 잊지말기 (회신 前 수리소완성일 확인 必!) · 2023.08.23
-        </p>
+        {showEditor ? (
+          <SheetHeadingEditor heading={heading} onClose={() => setIsEditingHeading(false)} />
+        ) : (
+          <>
+            <ol className="flex list-none flex-col gap-1">
+              {greetingLines.map((line, index) => (
+                // 줄에는 id 가 없고 순서가 곧 정체다 — 글이 바뀌면 목록 전체가
+                // 새로 그려지므로 index 로 충분하다.
+                <li key={index} className={SHEET_INDENT_CLASS[line.indentLevel]}>
+                  {/* 빈 줄도 문서의 한 줄이다 — 글자가 없으면 li 높이가 0 이 되어
+                      사람이 넣은 빈 줄이 사라진다. 줄 높이만 차지하는 공백(NBSP)을 둔다. */}
+                  {line.text === "" ? NBSP : line.text}
+                </li>
+              ))}
+            </ol>
+            {/* 시트 머리말에 함께 적혀 있던 내부 메모다. 고객사에 보내는 문장이
+                아니라 우리 쪽 확인 사항이라 따로 떼어 둔다 — 위 인사문과 같은 줄에
+                두면 문서에 그대로 실려 나갈 말처럼 읽힌다. **메모가 비어 있으면
+                상자를 그리지 않는다.** 이름표("내부 메모 —")는 여기서 붙인다 —
+                저장된 글에 들어 있지 않다. 여러 줄 메모는 줄바꿈을 그대로
+                그린다(whitespace-pre-line — 한 줄짜리는 전과 모양이 같다). */}
+            {internalMemo !== null && (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs whitespace-pre-line text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                내부 메모 — {internalMemo}
+              </p>
+            )}
+          </>
+        )}
       </div>
     </section>
   );
 }
+
+/**
+ * 인사문 들여쓰기 단 → 클래스. 0단은 클래스를 달지 않는다(undefined) — 이 기능 전
+ * 들여쓰지 않은 줄이 className 없는 <li> 였던 것과 같다. 1단이 전의 pl-4 다.
+ * 규칙(공백 두 칸마다 한 단, 세 단까지)은 domain/domestic-order-sheet-heading.ts.
+ */
+/** 줄바꿈 없는 공백(U+00A0). 소스에 글자 그대로 두면 보통 공백과 구별되지 않는다. */
+const NBSP = String.fromCharCode(0xa0);
+
+const SHEET_INDENT_CLASS: Record<SheetIndentLevel, string | undefined> = {
+  0: undefined,
+  1: "pl-4",
+  2: "pl-8",
+  3: "pl-12",
+};
+
+/**
+ * 머리말 편집칸 — 펼친 머리말 몸통 **그 자리에** 선다(SheetHeading 주석).
+ *
+ * ── 단추 셋 ─────────────────────────────────────────────────────────────
+ *  - [저장]: 서버 액션으로 보낸다. 성공하면 편집칸을 닫고 서버에서 다시 받아
+ *    새 문구로 그린다(router.refresh — 저장된 글의 정규화 결과는 서버가 안다).
+ *  - [취소]: 적던 글을 버리고 닫는다. 서버에 아무것도 보내지 않는다.
+ *  - [기본 문구로]: 편집칸을 코드의 기본 문구로 **채우기만** 한다. [저장]을 눌러야
+ *    적용되고, 그때 서버는 저장된 행을 지운다(행이 없다 = 기본 문구). 화면 문구
+ *    편집기(UiTextEditor 의 「모든 문구를 기본값으로」)와 같은 방식이다 — 누르자마자
+ *    지우면 잘못 누른 한 번에 적어 둔 문구가 사라진다.
+ *
+ * ── 검증은 도메인 함수 하나 ─────────────────────────────────────────────
+ * 서버 액션과 같은 validateDomesticOrderSheetHeadingInput 을 저장 전에 부른다 —
+ * 막힐 것을 미리 알려 줄 뿐이고, 판정은 서버가 다시 한다. 글자 수도 서버와 같은
+ * 잣대(코드 포인트)로 센다.
+ *
+ * ⚠️ 이름표는 보이는 <label> 이다 — sr-only 를 쓰지 않는다(SheetHeading 주석의 ⚠️).
+ */
+function SheetHeadingEditor({
+  heading,
+  onClose,
+}: {
+  heading: DomesticOrderSheetHeadingView;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const greetingId = useId();
+  const memoId = useId();
+  const [greetingText, setGreetingText] = useState(heading.greetingText);
+  const [internalMemo, setInternalMemo] = useState(heading.internalMemo);
+  const [fieldErrors, setFieldErrors] = useState<DomesticOrderSheetHeadingFieldErrors>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  // 저장 뒤 서버에서 새 문구를 받아 오는 동안. 그 사이 옛 문구가 한순간 비치지 않게,
+  // 닫기와 새로고침을 한 전환(transition)으로 묶는다.
+  const [isRefreshing, startRefresh] = useTransition();
+  const isBusy = isSaving || isRefreshing;
+
+  const greetingCount = countSheetHeadingChars(greetingText);
+  const memoCount = countSheetHeadingChars(internalMemo);
+  // 편집칸 높이 — 적힌 줄 수에 맞추되 상한을 둔다. 그 이상은 칸 안에서 굴러간다
+  // (펼친 머리말이 표의 높이를 끝없이 가져가지 않게).
+  const greetingRows = Math.min(Math.max(greetingText.split("\n").length, 4), 8);
+
+  function fillWithDefaults() {
+    setGreetingText(DEFAULT_DOMESTIC_ORDER_SHEET_GREETING);
+    setInternalMemo(DEFAULT_DOMESTIC_ORDER_SHEET_MEMO);
+    setFieldErrors({});
+    setFormError(null);
+    setNotice("기본 문구로 채웠습니다 — [저장]을 눌러야 적용됩니다.");
+  }
+
+  async function save() {
+    if (isBusy) return;
+    setFormError(null);
+    setNotice(null);
+    const checked = validateDomesticOrderSheetHeadingInput({ greetingText, internalMemo });
+    if (!checked.ok) {
+      setFieldErrors(checked.fieldErrors);
+      return;
+    }
+    setFieldErrors({});
+    setIsSaving(true);
+    try {
+      const result = await saveDomesticOrderSheetHeadingAction(checked.data);
+      if (!result.ok) {
+        setFieldErrors(result.fieldErrors ?? {});
+        setFormError(result.message);
+        return;
+      }
+      startRefresh(() => {
+        onClose();
+        router.refresh();
+      });
+    } catch {
+      setFormError("일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 print:hidden">
+      <div className="flex flex-col gap-1">
+        <label htmlFor={greetingId} className={SHEET_EDIT_LABEL_CLASS}>
+          인사문 <span className="tabular-nums">({greetingCount} / {DOMESTIC_ORDER_SHEET_GREETING_MAX_CHARS}자)</span>
+        </label>
+        <textarea
+          id={greetingId}
+          value={greetingText}
+          onChange={(event) => setGreetingText(event.target.value)}
+          rows={greetingRows}
+          disabled={isBusy}
+          aria-invalid={fieldErrors.greetingText ? true : undefined}
+          className={SHEET_EDIT_TEXTAREA_CLASS}
+        />
+        <p className={SHEET_EDIT_HINT_CLASS}>
+          한 줄이 문서 한 줄입니다. 줄 앞에 공백 두 칸마다 한 단씩 들여씁니다(세 단까지).{" "}
+          <code>{DOMESTIC_ORDER_SHEET_AS_OF_DATE_PLACEHOLDER}</code> 은 기준일로 바뀝니다.
+        </p>
+        {fieldErrors.greetingText && <p className={SHEET_EDIT_ERROR_CLASS}>{fieldErrors.greetingText}</p>}
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor={memoId} className={SHEET_EDIT_LABEL_CLASS}>
+          내부 메모 <span className="tabular-nums">({memoCount} / {DOMESTIC_ORDER_SHEET_MEMO_MAX_CHARS}자)</span>
+        </label>
+        <textarea
+          id={memoId}
+          value={internalMemo}
+          onChange={(event) => setInternalMemo(event.target.value)}
+          rows={2}
+          disabled={isBusy}
+          aria-invalid={fieldErrors.internalMemo ? true : undefined}
+          className={SHEET_EDIT_TEXTAREA_CLASS}
+        />
+        <p className={SHEET_EDIT_HINT_CLASS}>
+          우리 쪽 확인 사항입니다. 비워 두면 메모 상자가 보이지 않습니다.
+        </p>
+        {fieldErrors.internalMemo && <p className={SHEET_EDIT_ERROR_CLASS}>{fieldErrors.internalMemo}</p>}
+      </div>
+      {formError && (
+        <p
+          role="alert"
+          className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
+        >
+          {formError}
+        </p>
+      )}
+      {notice && <p className={SHEET_EDIT_HINT_CLASS}>{notice}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={fillWithDefaults}
+          disabled={isBusy}
+          className={SHEET_EDIT_SECONDARY_BUTTON_CLASS}
+        >
+          기본 문구로
+        </button>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} disabled={isBusy} className={SHEET_EDIT_SECONDARY_BUTTON_CLASS}>
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isBusy}
+            aria-busy={isBusy}
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+          >
+            {isBusy ? "저장 중..." : "저장"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 편집칸 모양은 이 저장소의 편집 폼(EditSectionActions 의 editInputClass · 저장/취소
+// 단추)과 같다. 그 파일에서 가져오지 않고 적는 까닭은 [기본 문구로] 단추가 하나 더
+// 있어 그쪽 단추 묶음을 그대로 쓸 수 없어서다 — 글자 그대로 맞춰 둔다.
+const SHEET_EDIT_LABEL_CLASS = "text-xs text-zinc-500 dark:text-zinc-400";
+const SHEET_EDIT_HINT_CLASS = "text-xs text-zinc-500 dark:text-zinc-400";
+const SHEET_EDIT_ERROR_CLASS = "text-xs text-red-600 dark:text-red-400";
+const SHEET_EDIT_TEXTAREA_CLASS =
+  "w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+const SHEET_EDIT_SECONDARY_BUTTON_CLASS =
+  "rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
 const CARD_FIELD_GROUPS: {
   label: string;
@@ -1395,6 +1651,7 @@ export default function DomesticOrderListScreen({
   quoteOptions,
   canDelete = false,
   trashRows = [],
+  sheetHeading,
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
@@ -1420,6 +1677,12 @@ export default function DomesticOrderListScreen({
   canDelete?: boolean;
   /** 휴지통의 줄. 지울 수 있는 세션에만 서버가 채워 넘긴다 — 그 밖에는 빈 배열이다. */
   trashRows?: DeletedDomesticOrderRow[];
+  /**
+   * 머리말의 인사문 · 내부 메모(2026-09-11). 저장된 행이 없으면 서버가 코드의 기본
+   * 문구를 넘긴다 — 그때 머리말은 이 기능 전과 한 글자도 다르지 않다. 고칠 수
+   * 있는지는 canEdit 과 같은 판정이다(page.tsx).
+   */
+  sheetHeading: DomesticOrderSheetHeadingView;
 }) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [view, setView] = useState<ListView>("active");
@@ -1530,6 +1793,8 @@ export default function DomesticOrderListScreen({
     <div className="flex h-full flex-col gap-4 print:h-auto">
       <SheetHeading
         asOfDate={asOfDate}
+        heading={sheetHeading}
+        canEditHeading={canEdit}
         viewSwitch={
           canDelete ? (
             <ViewSwitch

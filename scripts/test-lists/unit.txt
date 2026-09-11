@@ -201,3 +201,4 @@ src/lib/domain/notification-acknowledgement.test.ts
 src/lib/domain/quote-repair-task-selection.test.ts
 src/lib/domain/quote-link-options.test.ts
 scripts/test-lists/test-list-registration.test.ts
+src/lib/domain/domestic-order-sheet-heading.test.ts
