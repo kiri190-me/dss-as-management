@@ -118,8 +118,8 @@ export type DomesticOrderDueDateDisplay = {
  *
  * ⚠️ **행 전체가 아니라 이 함수가 보는 두 칸만 받는다.** 목록 한 줄을 통째로
  * 받게 해 두면 언젠가 `deliveredDate` 나 원본 칸이 여기 섞여 들어오고, 그때
- * 이 규칙은 조용히 달라진다(resolveDomesticOrderDeliveredDate 가 값 하나가
- * 아니라 이름 붙은 칸을 받는 것과 같은 이유).
+ * 이 규칙은 조용히 달라진다(resolveDomesticOrderDeliveredDate 가 행 전체가
+ * 아니라 필요한 칸 셋만 이름 붙여 받는 것과 같은 이유).
  */
 export function resolveDomesticOrderDueDateDisplay(row: {
   dueDates: readonly { dueDate: string; note: string | null }[];

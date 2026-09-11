@@ -16,29 +16,35 @@ import {
   users,
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
+import { createDomesticOrder, updateDomesticOrder } from "../mutations/domestic-orders";
 import { listDomesticOrderDueDatesForRepairCase, listDomesticOrders } from "./domestic-orders";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
+import {
+  validateDomesticOrderFields,
+  type DomesticOrderFields,
+} from "@/lib/validation/domestic-order-input";
 
 /**
  * ============================================================================
  * listDomesticOrders — `납품일` 이 어디에서 오는가
  * ============================================================================
- * 화면의 `납품일` 은 **연결된 수리 건의 실제 출하일**
- * (repair_cases.actual_shipment_date)이고, 그 줄에 손으로 적혀 있던
- * `domestic_orders.delivered_date` 는 화면에 나오지 않는다. 고르는 규칙 자체는
+ * 수리 건이 연결된 줄의 `납품일` 은 **그 건의 실제 출하일**
+ * (repair_cases.actual_shipment_date)이고, 그 줄에 손으로 적혀 있는
+ * `domestic_orders.delivered_date` 는 화면에 나오지 않는다. **연결 없는 줄은
+ * 그 손 값이 곧 납품일이다**(2026-09-11 사용자 결정). 고르는 규칙 자체는
  * domain/domestic-order-list.test.ts 가 본다 — 여기서 확인하는 것은 **조회가 그
- * 값을 실제로 실어 오는가**다. 도메인 함수가 아무리 맞아도 조회가 그 칸을
- * 안 골라 오면 화면은 늘 빈칸이고, 그것을 잡는 자리는 여기뿐이다.
+ * 값들을 실제로 실어 와 매퍼에 넘기는가**다. 도메인 함수가 아무리 맞아도 조회가
+ * 그 칸을 안 골라 오면 화면은 늘 빈칸이고, 그것을 잡는 자리는 여기뿐이다.
  *
  * 확인하는 것 넷:
  *
  *  1. 연결된 건에 실제 출하일이 있으면 그 날짜가 displayDeliveredDate 로 온다.
- *  2. ⚠️ **그 줄에 delivered_date 가 적혀 있어도** 실제 출하일이 이긴다 —
+ *  2. ⚠️ **연결된 줄은 delivered_date 가 적혀 있어도** 실제 출하일이 이긴다 —
  *     그리고 원본 칼럼은 **지워지지 않고 그대로 실려 온다**(저장이 되실어
  *     보내야 하는 값이다).
- *  3. 연결이 없으면 displayDeliveredDate 는 null 이다 — 그 줄에 적힌 값으로
- *     메우지 않는다.
- *  4. 연결은 있어도 아직 안 나갔으면 null 이다.
+ *  3. 연결이 없으면 그 줄의 delivered_date 가 displayDeliveredDate 로 온다
+ *     (2026-09-11 전에는 null 이었다).
+ *  4. 연결은 있어도 아직 안 나갔으면 null 이다 — 손 값으로 메우지 않는다.
  *
  * ── 납기요청일이 두 화면을 오간다 ───────────────────────────────────────
  * 뒤쪽 시험 묶음은 **납기요청일 잇기**를 본다. 고르는 규칙 자체는
@@ -234,22 +240,33 @@ test("⚠️ 그 줄에 납품일이 적혀 있어도 실제 출하일이 보인
   assert.equal(found.deliveredDate, "2096-03-31", "원본 칼럼이 조회에서 사라졌다");
 });
 
-test("수리 건 연결이 없으면 납품일은 비어 있다 — 그 줄에 적힌 값으로 메우지 않는다", async () => {
-  // 실 자료에서 빈칸이 되는 줄이 이 모양이다. 그래도 원본은 남는다.
+test("수리 건 연결이 없으면 그 줄에 손으로 적은 납품일이 보인다 (2026-09-11)", async () => {
+  // 2026-09-11 전에는 이 줄이 빈칸이었다(HANDOFF V-4). 사용자가 연결 없는 줄에
+  // 한해 손 납품일을 보이게 하기로 정했다 — 실 자료에 남아 있던 옛 손 값도 다시
+  // 보이게 된다는 것을 알고 받아들였다.
   const orderId = await insertOrder({ repairCaseId: null, deliveredDate: "2096-03-31" });
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, null);
+  assert.equal(found.displayDeliveredDate, "2096-03-31");
   assert.equal(found.repairCaseActualShipmentDate, null);
   assert.equal(found.deliveredDate, "2096-03-31");
 });
 
-test("연결은 있어도 아직 안 나갔으면 납품일은 비어 있다", async () => {
+test("수리 건 연결이 없고 손 납품일도 없으면 납품일은 비어 있다", async () => {
+  const orderId = await insertOrder({ repairCaseId: null });
+
+  const found = await loadOrder(orderId);
+  assert.equal(found.displayDeliveredDate, null);
+});
+
+test("🔴 연결은 있어도 아직 안 나갔으면 납품일은 비어 있다 — 그 줄의 손 값으로 메우지 않는다", async () => {
+  // 연결 없는 줄이 손 값을 보여 주게 된 뒤로 이 시험이 더 중요해졌다. 출하일이
+  // null 이라고 손 값으로 내려가면 "아직 안 나갔다"는 사실이 옛 손 값에 가려진다.
   const caseId = await createTestCase();
   const orderId = await insertOrder({ repairCaseId: caseId, deliveredDate: "2096-03-31" });
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, null);
+  assert.equal(found.displayDeliveredDate, null, "연결된 줄에 손 납품일이 새어 나왔다");
   assert.equal(found.deliveredDate, "2096-03-31");
 
   // 대조 — 그 건이 나가면 같은 줄에 날짜가 생긴다. 이것이 없으면 위 단언은
@@ -270,6 +287,135 @@ test("같은 수리 건에 붙은 두 줄이 같은 날짜를 본다 — 줄마�
 
   assert.equal((await loadOrder(first)).displayDeliveredDate, "2096-07-25");
   assert.equal((await loadOrder(second)).displayDeliveredDate, "2096-07-25");
+});
+
+// ── 연결 없는 줄을 손으로 채운다 — 폼 → 검증 → 저장 → 조회(2026-09-11) ────
+//
+// 위 시험들은 줄을 직접 INSERT 한다. 여기서는 **폼이 보내는 모양**을 검증에
+// 태우고 실제 저장 함수로 넣는다 — 폼이 연결 없는 줄에 납품일 입력칸을 열게
+// 되었으므로, 그 값이 검증·저장을 지나 목록 조회에 원본 그대로 실려 오는지를
+// 한 번에 본다. 조회가 원본 칸을 안 실어 오면 폼은 다음에 열 때 빈칸으로
+// 시작하고, 그 상태로 저장하면 적어 둔 값이 지워진다.
+
+/**
+ * 폼의 collectFields 가 만드는 모양 — 안 적은 칸은 빈 문자열, 연결 없음은
+ * null 이다. 검증을 거쳐 저장 함수가 받는 값으로 바꾼다.
+ */
+function formFields(overrides: Record<string, unknown>): DomesticOrderFields {
+  const result = validateDomesticOrderFields({
+    repairCaseId: null,
+    intakeNumberText: "",
+    customerId: null,
+    modelNameText: "",
+    lotNumberText: "",
+    serialNumberText: "",
+    faultDescriptionText: "",
+    displayOrder: "",
+    purchaseOrderNumber: "",
+    projectName: "",
+    orderIssuedDate: "",
+    dueDates: [],
+    quoteIssuedDate: "",
+    quoteNumber: "",
+    quoteId: null,
+    progressNote: "",
+    deliveredDate: "",
+    deliveredBy: "",
+    taxInvoiceDate: "",
+    amountExcludingVat: "",
+    paymentCompleted: false,
+    japanRemittanceNote: "",
+    historyNote: "",
+    etcNote: "",
+    ...overrides,
+  });
+  assert.equal(result.ok, true, `검증 실패: ${JSON.stringify(result)}`);
+  if (!result.ok) throw new Error("unreachable");
+  return result.data;
+}
+
+async function customerName(id: string): Promise<string> {
+  const [row] = await db.select({ name: customers.name }).from(customers).where(eq(customers.id, id));
+  assert.ok(row, "시험 고객사를 찾지 못했다");
+  return row.name;
+}
+
+test("연결 없이 추가한 줄 — 손으로 적은 고객사·식별 칸·납품일이 저장되고 목록에 실린다", async () => {
+  const created = await createDomesticOrder({
+    fields: formFields({
+      customerId,
+      intakeNumberText: "D9607-손으로",
+      modelNameText: "ARC-손형식",
+      lotNumberText: "LN-손",
+      serialNumberText: "SN-손",
+      faultDescriptionText: "손으로 적은 고장내역",
+      deliveredDate: "2096-07-28",
+    }),
+    actorUserId: engineerId,
+  });
+  assert.equal(created.ok, true, `추가 실패: ${JSON.stringify(created)}`);
+  if (!created.ok) return;
+  createdOrderIds.push(created.id);
+
+  const found = await loadOrder(created.id);
+  assert.equal(found.repairCaseId, null);
+  // 목록이 그리는 값 — 연결이 없으니 이 줄에 적힌 값이 그대로 정해진다.
+  assert.equal(found.customerName, await customerName(customerId));
+  assert.equal(found.displayIntakeNumber, "D9607-손으로");
+  assert.equal(found.modelName, "ARC-손형식");
+  assert.equal(found.lotNumber, "LN-손");
+  assert.equal(found.serialNumber, "SN-손");
+  assert.equal(found.reportedSymptom, "손으로 적은 고장내역");
+  // 목록의 `납품일` — 연결 없는 줄은 손으로 적은 날짜다(2026-09-11).
+  assert.equal(found.displayDeliveredDate, "2096-07-28");
+  // 폼이 다음에 열 때 입력칸에 담을 원본 칸. 이것이 안 실려 오면 폼은 빈칸으로
+  // 시작하고, 그대로 저장하면 적어 둔 납품일이 지워진다.
+  assert.equal(found.deliveredDate, "2096-07-28");
+  assert.equal(found.customerId, customerId);
+});
+
+test("연결을 붙였다 떼도 손으로 적은 납품일은 남는다 — 붙어 있는 동안 목록의 납품일은 출하일이다", async () => {
+  // 폼은 연결을 켰다 꺼도 납품일 state 를 비우지 않고 늘 싣는다
+  // (DomesticOrderEditForm 의 deliveredDate 선언). 여기서는 그 payload 그대로
+  // 저장을 두 번 태운다.
+  const caseId = await createTestCase("2096-07-30");
+  const created = await createDomesticOrder({
+    fields: formFields({ customerId, deliveredDate: "2096-07-28" }),
+    actorUserId: engineerId,
+  });
+  assert.equal(created.ok, true, `추가 실패: ${JSON.stringify(created)}`);
+  if (!created.ok) return;
+  createdOrderIds.push(created.id);
+
+  const linked = await updateDomesticOrder({
+    id: created.id,
+    expectedVersion: created.version,
+    fields: formFields({ repairCaseId: caseId, customerId, deliveredDate: "2096-07-28" }),
+    actorUserId: engineerId,
+  });
+  assert.equal(linked.ok, true, `연결 실패: ${JSON.stringify(linked)}`);
+  if (!linked.ok) return;
+
+  const whileLinked = await loadOrder(created.id);
+  // 🔴 연결된 줄의 납품일은 여전히 수리 건의 실제 출하일이다 — 손 값이 가리지 않는다.
+  assert.equal(whileLinked.displayDeliveredDate, "2096-07-30");
+  assert.equal(whileLinked.deliveredDate, "2096-07-28", "연결하는 저장이 손 납품일을 지웠다");
+
+  const unlinked = await updateDomesticOrder({
+    id: created.id,
+    expectedVersion: linked.version,
+    fields: formFields({ repairCaseId: null, customerId, deliveredDate: "2096-07-28" }),
+    actorUserId: engineerId,
+  });
+  assert.equal(unlinked.ok, true, `연결 풀기 실패: ${JSON.stringify(unlinked)}`);
+
+  const afterUnlink = await loadOrder(created.id);
+  assert.equal(afterUnlink.repairCaseId, null);
+  assert.equal(afterUnlink.repairCaseActualShipmentDate, null);
+  assert.equal(afterUnlink.deliveredDate, "2096-07-28", "연결을 푼 뒤 손 납품일이 사라졌다");
+  // 연결을 풀면 그 손 값이 다시 목록의 납품일이 된다.
+  assert.equal(afterUnlink.displayDeliveredDate, "2096-07-28");
+  assert.equal(afterUnlink.customerName, await customerName(customerId));
 });
 
 // ── 납기요청일 잇기 — 조회가 재료를 실어 오는가(파일 헤더) ────────────────

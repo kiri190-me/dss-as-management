@@ -309,44 +309,73 @@ test("이 행의 값이 우선이라는 규칙은 다섯 칸 모두에 같게 �
 
 // ── 납품일: 다섯 칸과 규칙이 정반대인 칸 ──────────────────────────────
 
+/** 시험용 연결된 수리 건 id. 값은 상관없고 null 이 아니라는 것만 뜻이 있다. */
+const LINKED_CASE_ID = "11111111-1111-4111-8111-111111111111";
+
 test("납품일은 연결된 수리 건의 실제 출하일이다", () => {
   assert.equal(
-    resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "2025-11-14" }),
+    resolveDomesticOrderDeliveredDate({
+      repairCaseId: LINKED_CASE_ID,
+      repairCaseActualShipmentDate: "2025-11-14",
+      deliveredDate: null,
+    }),
     "2025-11-14"
   );
 });
 
-test("⚠️ 그 줄에 납품일이 적혀 있어도 실제 출하일이 이긴다 — 다섯 칸과 정반대다", () => {
+test("⚠️ 연결된 줄은 그 줄에 납품일이 적혀 있어도 실제 출하일이 이긴다 — 다섯 칸과 정반대다", () => {
   /**
-   * 이 시험이 이 칸의 전부다. 다섯 칸(resolveDomesticOrderValue)은 "이 행에 적힌
-   * 값이 먼저"지만 납품일은 **수리 건 하나뿐**이다 — 실제 출하일은 워크플로가
-   * 출하 완료 때 자동으로 찍는 값이라, "언제 나갔는가"에 대해 이 시스템이 가진
-   * 유일한 사실이기 때문이다.
+   * 이 시험이 연결된 줄의 전부다. 다섯 칸(resolveDomesticOrderValue)은 "이 행에
+   * 적힌 값이 먼저"지만 연결된 줄의 납품일은 **수리 건 하나뿐**이다 — 실제
+   * 출하일은 워크플로가 출하 완료 때 자동으로 찍는 값이라, "언제 나갔는가"에
+   * 대해 이 시스템이 가진 유일한 사실이기 때문이다.
    *
-   * 함수가 그 줄의 값을 **받지도 않는다**는 것으로 규칙을 못 박는다. 여기서
-   * deliveredDate 를 함께 넘겨 보아도 결과는 실제 출하일 그대로다.
+   * 2026-09-11 에 함수가 그 줄의 값도 받게 되었다(연결 없는 줄 때문이다).
+   * 받게 된 뒤에도 연결된 줄에서는 **보지 않는다**는 것을 여기서 못 박는다.
    */
   const row = {
-    // 손으로 적어 DB 에 남아 있는 옛 값. 화면에 나오면 안 된다.
+    repairCaseId: LINKED_CASE_ID,
+    // 손으로 적어 DB 에 남아 있는 값. 연결된 줄에서는 화면에 나오면 안 된다.
     deliveredDate: "2026-03-31",
     repairCaseActualShipmentDate: "2025-11-14",
   };
   assert.equal(resolveDomesticOrderDeliveredDate(row), "2025-11-14");
 });
 
-test("수리 건 연결이 없으면 납품일도 없다 — 그 줄에 적힌 값으로 메우지 않는다", () => {
-  // 실 자료에서 지금까지 날짜가 보이던 줄이 빈칸이 되는 경우가 바로 이것이다.
-  // 화면은 이때 "-"로 그리고, 왜 비었는지는 화면의 한 줄이 설명한다.
-  const row = { deliveredDate: "2026-03-31", repairCaseActualShipmentDate: null };
+test("🔴 연결된 줄이 아직 안 나갔으면 납품일은 없다 — 그 줄에 적힌 손 값으로 메우지 않는다", () => {
+  // 출하일이 null 이라고 해서 손 값으로 내려가면 "아직 안 나갔다"는 사실이 옛
+  // 손 값에 가려진다. 연결 여부는 repairCaseId 로만 가른다(함수 주석).
+  const row = {
+    repairCaseId: LINKED_CASE_ID,
+    deliveredDate: "2026-03-31",
+    repairCaseActualShipmentDate: null,
+  };
   assert.equal(resolveDomesticOrderDeliveredDate(row), null);
+  // 공백은 이 파일의 다른 값들과 같은 규칙으로 접는다 — 비어 있음의 모양이
+  // 칸마다 다르면 화면이 어느 칸은 "-"로 어느 칸은 빈칸으로 그린다. 공백으로
+  // 접힌 출하일도 손 값으로 메우지 않는다.
+  assert.equal(
+    resolveDomesticOrderDeliveredDate({ ...row, repairCaseActualShipmentDate: "" }),
+    null
+  );
+  assert.equal(
+    resolveDomesticOrderDeliveredDate({ ...row, repairCaseActualShipmentDate: "   " }),
+    null
+  );
 });
 
-test("연결은 있어도 아직 안 나갔으면 납품일은 없다", () => {
-  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: null }), null);
-  // 공백은 이 파일의 다른 값들과 같은 규칙으로 접는다 — 비어 있음의 모양이
-  // 칸마다 다르면 화면이 어느 칸은 "-"로 어느 칸은 빈칸으로 그린다.
-  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "" }), null);
-  assert.equal(resolveDomesticOrderDeliveredDate({ repairCaseActualShipmentDate: "   " }), null);
+test("수리 건 연결이 없으면 그 줄에 손으로 적은 납품일이 보인다 (2026-09-11)", () => {
+  // 처음(HANDOFF V-4)에는 이 경우도 null 이었다 — 연결 없는 줄의 손 값까지
+  // 감췄다. 사용자가 연결 없는 줄에 한해 그 결정을 바꿨다: 그런 줄에는 출하일이
+  // 없어 어긋날 상대가 없고, 납품일을 적을 자리가 이 칸뿐이다.
+  const row = { repairCaseId: null, deliveredDate: "2026-03-31", repairCaseActualShipmentDate: null };
+  assert.equal(resolveDomesticOrderDeliveredDate(row), "2026-03-31");
+});
+
+test("수리 건 연결이 없고 손 값도 없으면 납품일은 없다", () => {
+  const row = { repairCaseId: null, deliveredDate: null, repairCaseActualShipmentDate: null };
+  assert.equal(resolveDomesticOrderDeliveredDate(row), null);
+  assert.equal(resolveDomesticOrderDeliveredDate({ ...row, deliveredDate: "   " }), null);
 });
 
 test("줄 색은 이름을 고른 쪽 고객사의 색이다 — 이 행에 고객사가 있으면 그쪽", () => {

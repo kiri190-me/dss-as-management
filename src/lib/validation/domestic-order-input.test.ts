@@ -151,6 +151,65 @@ test("YYYY-MM-DD가 아닌 날짜 표기는 거부한다", () => {
   }
 });
 
+// ── 납품일 — 연결 없는 줄에서 손으로 적는다(2026-09-11) ─────────────────
+
+test("납품일도 형식만 보지 않고 실제로 있는 날짜인지 본다", () => {
+  // 연결 없는 줄의 폼이 이 칸을 입력칸으로 받게 되었다. 2월 30일은 형식은
+  // 맞지만 없는 날이고, 그대로 넘기면 Postgres 가 이유 없이 거절한다.
+  const result = validateDomesticOrderFields({ deliveredDate: "2026-02-30" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(result.fieldErrors.deliveredDate);
+});
+
+test("연결 없는 줄의 폼이 보내는 모양 그대로 — 고객사·식별 칸·납품일이 전부 남는다", () => {
+  // 폼(DomesticOrderEditForm 의 collectFields)은 안 적은 칸을 빈 문자열로,
+  // 연결 없음을 null 로 보낸다. 손으로 적은 칸만 값으로 남고 나머지는 null 로
+  // 접혀야 한다.
+  const customerId = "22222222-2222-4222-8222-222222222222";
+  const result = validateDomesticOrderFields({
+    repairCaseId: null,
+    customerId,
+    intakeNumberText: " D2609-손 ",
+    modelNameText: "ARC-200",
+    lotNumberText: "LN-1",
+    serialNumberText: "SN-1",
+    faultDescriptionText: "전원 불량",
+    deliveredDate: "2026-09-10",
+    deliveredBy: "",
+    taxInvoiceDate: "",
+    dueDates: [],
+    paymentCompleted: false,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.repairCaseId, null);
+  assert.equal(result.data.customerId, customerId);
+  assert.equal(result.data.intakeNumberText, "D2609-손");
+  assert.equal(result.data.modelNameText, "ARC-200");
+  assert.equal(result.data.lotNumberText, "LN-1");
+  assert.equal(result.data.serialNumberText, "SN-1");
+  assert.equal(result.data.faultDescriptionText, "전원 불량");
+  assert.equal(result.data.deliveredDate, "2026-09-10");
+  assert.equal(result.data.deliveredBy, null);
+  assert.equal(result.data.taxInvoiceDate, null);
+});
+
+test("수리 건이 연결된 줄에서 온 납품일도 받는다 — 두 저장 경로가 원본을 되실어 보낸다", () => {
+  // 🔴 거절하면 안 된다. 연결된 줄의 저장도 이 칸을 늘 싣는다 — 이 화면의
+  // 저장은 모든 칼럼을 SET 하므로, 폼과 칸 편집이 불러온 원본을 그대로
+  // 되실어 보낸다(domain/domestic-order-cell-edit.ts 의 줄 전체 키). 여기서
+  // 거절하면 원본 납품일이 남아 있는 연결된 줄은 어떤 칸도 저장할 수 없게 된다.
+  // 목록이 그 줄에서 이 값을 그리지 않는 것은 조회 쪽 규칙이다.
+  const result = validateDomesticOrderFields({
+    repairCaseId: "11111111-1111-4111-8111-111111111111",
+    deliveredDate: "2026-03-31",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.deliveredDate, "2026-03-31");
+});
+
 test("날짜 칸에 문자열이 아닌 값이 오면 그 칸의 오류가 된다", () => {
   const result = validateDomesticOrderFields({ taxInvoiceDate: 20260105 });
   assert.equal(result.ok, false);
