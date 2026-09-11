@@ -46,6 +46,13 @@ const TOUCHED_TOKEN_KEYS = [
   "foreground",
   "radius-md",
   "text-sm",
+  // 주간보고 전용(시험 10 · 10b). 거절되는 쪽도 적어 둔다 — 거절이 뚫려 행이
+  // 남았을 때 다음 시험의 「표가 비어 있다」 전제를 깨지 않게.
+  "text-wr-body",
+  "text-wr-title",
+  "spacing-wr-table-min",
+  "spacing-wr-cell-x",
+  "spacing-wr-block",
 ];
 
 let superAdminId: string;
@@ -65,6 +72,8 @@ const zinc900 = tokenOf("zinc-900");
 const background = tokenOf("background");
 const foreground = tokenOf("foreground");
 const radiusMd = tokenOf("radius-md");
+const weeklyBody = tokenOf("text-wr-body");
+const weeklyTableMin = tokenOf("spacing-wr-table-min");
 
 async function createTestUser(overrides: Partial<typeof users.$inferInsert> = {}): Promise<string> {
   const [row] = await db
@@ -536,6 +545,131 @@ describe("saveUiThemeTokens", () => {
         ":root:root.dark{--color-zinc-900:#000000}\n" +
         ":root:root{--radius-md:0.5rem;--text-sm:0.9375rem}"
     );
+  });
+
+  // ───────────────────────────────────────────── 주간보고 전용 토큰
+
+  test("🔴 10. 주간보고 크기 — 저장하면 CSS 에 실리고, 되돌리면 행이 지워지고, 감사가 남는다", async () => {
+    const seen = new Set((await themeAuditRows()).map((row) => row.id));
+    async function newlyAdded() {
+      const rows = (await themeAuditRows()).filter((row) => !seen.has(row.id));
+      for (const row of rows) seen.add(row.id);
+      return rows;
+    }
+
+    // 개발자 표시가 켜진 엔지니어로 저장한다 — 주간보고 편집 화면도 개발자 모드 안에
+    // 들어갈 자리라 인가 넓이가 같아야 한다.
+    const saved = await saveUiThemeTokens({
+      changes: [
+        { tokenKey: "text-wr-body", scope: "both", value: ".875rem" },
+        { tokenKey: "spacing-wr-table-min", scope: "both", value: "12rem" },
+      ],
+      actorUserId: developerEngineerId,
+    });
+    assert.equal(saved.ok, true, `거절됐다: ${JSON.stringify(saved)}`);
+    if (saved.ok) assert.equal(saved.changedCount, 2);
+    assert.equal(await storedValue("text-wr-body", "both"), "0.875rem", "정규화된 값으로 저장돼야 한다");
+    assert.equal(await storedValue("spacing-wr-table-min", "both"), "12rem");
+
+    // 읽기 → 병합 → 직렬화. 공용 블록 하나에만 실리고, 앱 전체 글자 크기는 안 나온다.
+    const stored = await loadStoredUiThemeTokens();
+    assert.equal(stored.length, 2);
+    const resolved = resolveUiTheme(stored);
+    assert.equal(resolved.light["text-wr-body"], "0.875rem");
+    assert.equal(resolved.dark["text-wr-body"], "0.875rem", "공용 토큰이 다크에도 얹혀야 한다");
+    assert.equal(resolved.light["text-xs"], tokenOf("text-xs").defaultLight, "앱 전체 글자 크기는 그대로다");
+    assert.equal(
+      serializeUiThemeCss(stored),
+      ":root:root{--text-wr-body:0.875rem;--spacing-wr-table-min:12rem}"
+    );
+
+    // 감사 — 처음 저장은 CREATE, 이전 값은 코드 기본값(= globals.css 값).
+    const created = await newlyAdded();
+    assert.equal(created.length, 2);
+    for (const row of created) {
+      assert.equal(row.actionType, "CREATE");
+      assert.equal(row.actorUserId, developerEngineerId);
+      assert.equal(row.targetEntity, "ui_theme_tokens");
+    }
+    const createdBody = created.find(
+      (row) => (row.newValue as { tokenKey?: string } | null)?.tokenKey === "text-wr-body"
+    );
+    assert.ok(createdBody, "text-wr-body 의 감사 기록이 없다");
+    assert.deepEqual(createdBody.previousValue, {
+      tokenKey: "text-wr-body",
+      scope: "both",
+      value: weeklyBody.defaultLight,
+    });
+    assert.deepEqual(createdBody.newValue, { tokenKey: "text-wr-body", scope: "both", value: "0.875rem" });
+
+    // 되돌리기 — null 로도, 기본값 문자열(표기만 다른 것)로도 행이 지워진다.
+    const reverted = await saveUiThemeTokens({
+      changes: [
+        { tokenKey: "text-wr-body", scope: "both", value: null },
+        { tokenKey: "spacing-wr-table-min", scope: "both", value: "8.0rem" },
+      ],
+      actorUserId: developerEngineerId,
+    });
+    assert.equal(reverted.ok, true, `거절됐다: ${JSON.stringify(reverted)}`);
+    if (reverted.ok) assert.equal(reverted.changedCount, 2);
+    assert.equal(await storedRowCount(), 0, "되돌렸는데 행이 남았다");
+    assert.equal(serializeUiThemeCss(await loadStoredUiThemeTokens()), "", "되돌렸는데 CSS 가 남았다");
+
+    // 🔴 기본값 복귀도 UPDATE 다(시험 5와 같은 판단).
+    const revertAudit = await newlyAdded();
+    assert.equal(revertAudit.length, 2);
+    for (const row of revertAudit) assert.equal(row.actionType, "UPDATE");
+    const revertedTableMin = revertAudit.find(
+      (row) => (row.newValue as { tokenKey?: string } | null)?.tokenKey === "spacing-wr-table-min"
+    );
+    assert.ok(revertedTableMin, "spacing-wr-table-min 의 되돌리기 감사 기록이 없다");
+    assert.deepEqual(revertedTableMin.previousValue, {
+      tokenKey: "spacing-wr-table-min",
+      scope: "both",
+      value: "12rem",
+    });
+    assert.deepEqual(revertedTableMin.newValue, {
+      tokenKey: "spacing-wr-table-min",
+      scope: "both",
+      value: weeklyTableMin.defaultLight,
+      revertedToDefault: true,
+    });
+  });
+
+  test("10b. 주간보고 크기의 범위 밖 · 단위 틀린 값 · 안 맞는 스코프는 거절되고 표는 그대로다", async () => {
+    const auditBefore = await themeAuditCount();
+    const cases: { label: string; change: { tokenKey: string; scope: string; value: string } }[] = [
+      {
+        label: "상세표 최소 높이 상한(20rem) 밖",
+        change: { tokenKey: "spacing-wr-table-min", scope: "both", value: "21rem" },
+      },
+      {
+        label: "표 칸 여백 상한(1rem) 밖",
+        change: { tokenKey: "spacing-wr-cell-x", scope: "both", value: "1.5rem" },
+      },
+      { label: "상자 크기에 px", change: { tokenKey: "spacing-wr-block", scope: "both", value: "8px" } },
+      {
+        label: "상자 크기에 규칙 탈출",
+        change: { tokenKey: "spacing-wr-block", scope: "both", value: "0.5rem;}body{display:none}" },
+      },
+      {
+        label: "글자 크기 상한(1.5rem) 밖",
+        change: { tokenKey: "text-wr-title", scope: "both", value: "1.75rem" },
+      },
+      { label: "글자 크기에 px", change: { tokenKey: "text-wr-title", scope: "both", value: "20px" } },
+      {
+        label: "공용 토큰인데 light",
+        change: { tokenKey: "text-wr-body", scope: "light", value: "0.875rem" },
+      },
+    ];
+
+    for (const { label, change } of cases) {
+      const result = await saveUiThemeTokens({ changes: [change], actorUserId: superAdminId });
+      assert.equal(result.ok, false, `${label}: 통과했다`);
+      if (!result.ok) assert.equal(result.code, "INVALID_INPUT", label);
+      assert.equal(await storedRowCount(), 0, `${label}: 거절됐는데 행이 남았다`);
+    }
+    assert.equal(await themeAuditCount(), auditBefore, "거절됐는데 감사 기록이 남았다");
   });
 
   test("9. 개발자로 표시된 계정은 이 파일이 만든 것뿐이다 — 시험이 다른 계정을 승격하지 않았다", async () => {

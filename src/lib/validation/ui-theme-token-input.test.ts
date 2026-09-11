@@ -127,6 +127,55 @@ test("🔴 형식이 틀린 값은 거절한다 — 이 좁음이 이 축의 CSS
   }
 });
 
+// ────────────────────────────────────────────────── 주간보고 전용 토큰
+
+test("주간보고 토큰도 같은 문으로 들어온다 — 공용 스코프, 정규화된 값", () => {
+  const font = checkUiThemeTokenChange({ tokenKey: "text-wr-body", scope: "both", value: ".875rem" });
+  assert.equal(font.ok, true, JSON.stringify(font));
+  if (font.ok) assert.equal(font.change.value, "0.875rem");
+
+  const box = checkUiThemeTokenChange({ tokenKey: "spacing-wr-table-min", scope: "both", value: "12rem" });
+  assert.equal(box.ok, true, JSON.stringify(box));
+  if (box.ok) assert.equal(box.change.value, "12rem");
+
+  // 여백 없음(0)은 뜻이 있는 값이다. 0rem 은 0 으로 눕힌다.
+  const zero = checkUiThemeTokenChange({ tokenKey: "spacing-wr-cell-y", scope: "both", value: "0rem" });
+  assert.equal(zero.ok, true);
+  if (zero.ok) assert.equal(zero.change.value, "0");
+
+  const revert = checkUiThemeTokenChange({ tokenKey: "spacing-wr-box-min", scope: "both", value: null });
+  assert.equal(revert.ok, true);
+  if (revert.ok) assert.equal(revert.change.value, null);
+
+  assert.equal(uiThemeDefaultFor(tokenOf("spacing-wr-table-min"), "both"), "8rem");
+});
+
+test("🔴 주간보고 크기의 형식이 틀리면 거절한다 — 범위 밖 · 단위 · 주입 · 스코프", () => {
+  const rejected: { tokenKey: string; scope: string; value: unknown }[] = [
+    { tokenKey: "spacing-wr-table-min", scope: "both", value: "21rem" }, // 상한(20rem) 밖
+    { tokenKey: "spacing-wr-cell-x", scope: "both", value: "1.5rem" }, // 상한(1rem) 밖 — 상자마다 다르다
+    { tokenKey: "spacing-wr-block", scope: "both", value: "8px" }, // 상자 크기는 rem 만
+    { tokenKey: "spacing-wr-block", scope: "both", value: "2" }, // 단위 없는 맨숫자
+    { tokenKey: "spacing-wr-block", scope: "both", value: "-0.5rem" },
+    { tokenKey: "spacing-wr-block", scope: "both", value: "calc(1rem + 2px)" },
+    { tokenKey: "spacing-wr-block", scope: "both", value: "0.5rem;}body{display:none}" },
+    { tokenKey: "text-wr-title", scope: "both", value: "1.75rem" }, // 글자 상한(1.5rem) 밖
+    { tokenKey: "text-wr-title", scope: "both", value: "20px" }, // 글자 크기는 px 를 받지 않는다
+    // 라이트/다크를 나누지 않는 토큰이다.
+    { tokenKey: "text-wr-body", scope: "light", value: "0.875rem" },
+    { tokenKey: "spacing-wr-block", scope: "dark", value: "1rem" },
+  ];
+
+  for (const change of rejected) {
+    const result = checkUiThemeTokenChange(change);
+    assert.equal(
+      result.ok,
+      false,
+      `${change.tokenKey}(${change.scope}) = ${String(change.value)} 가 통과했다`
+    );
+  }
+});
+
 test("value 를 빠뜨린 요청은 거절한다 — 되돌리려면 null 을 명시해야 한다", () => {
   // 칸을 빠뜨린 요청과 되돌리려는 요청이 같은 모양이면, 화면의 버그 하나가
   // 조용히 오버라이드를 지우는 조작이 된다.

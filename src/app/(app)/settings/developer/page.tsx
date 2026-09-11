@@ -10,6 +10,7 @@ import { buildUiTextView } from "@/lib/db/queries/ui-text-overrides";
 import {
   normalizeUiThemeValue,
   UI_THEME_TOKENS,
+  uiThemeTokenScreen,
   type UiThemeOverrideRow,
   type UiThemeToken,
 } from "@/lib/domain/ui-theme-tokens";
@@ -68,8 +69,17 @@ export default async function DeveloperModePage() {
   const savedThemeTokens = isDatabaseMode ? await buildUiThemeView() : [];
   const savedUiText = isDatabaseMode ? await buildUiTextView() : [];
 
-  const colorCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind === "color");
-  const shapeCount = countOverriddenSlots(savedThemeTokens, (token) => token.kind !== "color");
+  // 🔴 카드마다 자기 몫을 편집기와 **같은 함수**로 가른다(uiThemeTokenScreen).
+  // `kind !== "color"` 로 세면 주간보고 전용 크기까지 「모서리 · 글자 크기」 카드의
+  // 「N칸 바뀜」에 들어가, 눌러 들어간 화면에는 그 칸이 없다.
+  const colorCount = countOverriddenSlots(
+    savedThemeTokens,
+    (token) => uiThemeTokenScreen(token) === "colors"
+  );
+  const shapeCount = countOverriddenSlots(
+    savedThemeTokens,
+    (token) => uiThemeTokenScreen(token) === "shapes"
+  );
   const uiTextCount = countOverriddenUiTextItems(savedUiText);
 
   // 「지금 무슨 톤을 쓰는가」는 따로 저장하지 않는다 — 저장된 값을 대조해

@@ -2,7 +2,8 @@
  * ============================================================================
  * 화면 토큰 — 등록부·검증기·직렬화
  * ============================================================================
- * 관리자가 코드를 고치지 않고 앱의 색·모서리·글자 크기를 바꿀 수 있게 하는 축의
+ * 관리자가 코드를 고치지 않고 앱의 색·모서리·글자 크기(그리고 주간보고 한 화면의
+ * 글자·상자 크기)를 바꿀 수 있게 하는 축의
  * 맨 아래 조각이다. DB도, server-only도 여기 들어오지 않는다 —
  * notification-settings.ts가 알림 쪽에서 하는 일과 같은 자리다. 화면(나중에 붙을
  * 편집기)과 서버(나중에 붙을 저장·조회)와 루트 레이아웃이 **같은 규칙**을 쓰게
@@ -53,8 +54,26 @@
  * ============================================================================
  */
 
-export type UiThemeTokenKind = "color" | "radius" | "fontSize";
+/**
+ * 값의 종류. 종류가 곧 검증 규칙이다(normalizeUiThemeValue).
+ *
+ * `spacing` 은 **주간보고 전용**이다 — 여백·간격·최소 높이. 앱 전체의 여백은
+ * 배율(--spacing) 하나라 건드리면 모든 화면의 배치가 한꺼번에 움직이므로 열지
+ * 않는다(HANDOFF Y11-5 결정 2). 이 종류의 토큰은 전부 `area` 가 붙어 있고,
+ * 시험(ui-theme-tokens.test.ts)이 그것을 단언한다.
+ */
+export type UiThemeTokenKind = "color" | "radius" | "fontSize" | "spacing";
 export type UiThemeScope = "light" | "dark" | "both";
+
+/**
+ * 한 화면에서만 쓰이는 토큰의 그 화면. 앱 전체에 걸리는 토큰에는 붙이지 않는다.
+ *
+ * 🔴 이 표시가 있는 토큰은 앱 전체용 편집 화면(색 · 모서리·글자 크기)에 나오지
+ * 않는다(uiThemeTokenScreen). 표시 없이 들어오면 「모서리 · 글자 크기」 화면이
+ * 자기 몫으로 세어, 그 화면의 「이 화면 전부 기본값으로」가 이 값까지 지운다 —
+ * 누른 사람은 그 화면에 보이지도 않던 값이 지워졌다는 것을 알 수 없다.
+ */
+export type UiThemeTokenArea = "weeklyReport";
 
 export type UiThemeToken = {
   /** 논리 키. DB에 저장되는 값. 예: "zinc-900" */
@@ -71,6 +90,18 @@ export type UiThemeToken = {
   defaultLight: string;
   /** scoped:false 이면 defaultLight 와 반드시 같아야 한다 */
   defaultDark: string;
+  /** 한 화면 전용이면 그 화면. 없으면 앱 전체에 걸리는 값이다(UiThemeTokenArea). */
+  area?: UiThemeTokenArea;
+  /**
+   * 허용 범위(rem, 양 끝 포함). **`spacing` 종류만 읽고, 그 종류에는 반드시 있다.**
+   *
+   * 여백과 최소 높이는 자리마다 쓸 만한 폭이 크게 달라서(표 칸 여백 0.375rem ·
+   * 상세표 최소 높이 8rem) 종류 하나에 범위 하나를 둘 수 없다. 다른 종류는 종류
+   * 공통 범위를 쓰므로 적지 않는다 — 적어 두면 읽히지 않는 값이 읽히는 것처럼
+   * 보인다(시험이 둘 다 단언한다). 빠진 spacing 토큰은 검증기가 모든 값을
+   * 거절한다(열어 두는 쪽이 아니라 닫는 쪽으로 틀린다).
+   */
+  rangeRem?: { min: number; max: number };
 };
 
 /**
@@ -84,7 +115,8 @@ export type UiThemeToken = {
  * `@supports (color: lab(...))` 상위 분기가 있어 같은 변수가 두 번 나오는데
  * **hex 쪽을 적었다** — `<input type="color">`가 주고받는 표기가 그것이고,
  * 검증기가 받는 표기도 그것이다. `background`/`foreground`와 강조(primary)
- * 램프는 src/app/globals.css에서 읽었다(이 저장소가 직접 정의하는 변수라서).
+ * 램프, 주간보고 전용 크기(`--text-wr-*` · `--spacing-wr-*`)는
+ * src/app/globals.css에서 읽었다(이 저장소가 직접 정의하는 변수라서).
  * primary는 같은 단계의 zinc와 값이 같다 — 원래 zinc-900이던 주 버튼을 이름만
  * 바꿔 옮겨 온 것이고, 그때 화면이 하나도 바뀌지 않아야 했다(아래 램프 주석).
  *
@@ -95,7 +127,7 @@ export type UiThemeToken = {
  * 살짝 눕히고 싶은 요구가 실제로 생기기 때문이다(예: 다크의 zinc-400만 조금 더
  * 밝게). 반대로 `background`/`foreground` 둘은 애초에 두 값이 다르다.
  *
- * 모서리·글자 크기는 `scoped: false`다. 다크에서만 모서리가 둥글어지거나 글자가
+ * 모서리·글자 크기(주간보고 전용 크기 포함)는 `scoped: false`다. 다크에서만 모서리가 둥글어지거나 글자가
  * 커질 이유가 없고, 나눠 두면 한쪽만 고쳐진 채로 남는 길만 열린다.
  *
  * red-500은 지금 앱에서 거의 쓰이지 않지만 넣었다 — 램프에 구멍을 내면 "50부터
@@ -585,7 +617,232 @@ export const UI_THEME_TOKENS: readonly UiThemeToken[] = [
     defaultLight: "1.5rem",
     defaultDark: "1.5rem",
   },
+
+  // ── 주간보고 전용 — 글자 8 · 상자 7 ──────────────────────────────────
+  //
+  // 주간보고 세 컴포넌트(WeeklyReportScreen · WeeklyReportGoalsPanel ·
+  // WeeklyReportDeliveriesPanel)만 읽는 변수다. 그 화면의 글자·상자 크기만 따로
+  // 고르고 싶다는 요청(2026-09-11)에서 나왔고, 전역 text-xs 나 여백 배율을 바꾸면
+  // 앱 전체가 함께 움직이기 때문에 따로 둔다(globals.css 의 같은 블록 머리말).
+  //
+  // 🔴 전부 `area: "weeklyReport"` 다. 빠뜨리면 「모서리 · 글자 크기」 화면이 이
+  // 값을 자기 몫으로 센다(UiThemeTokenArea 주석).
+  //
+  // 🔴 기본값은 globals.css `@theme` 의 값과 **글자까지 같아야** 한다. 어긋나면
+  // 「기본값으로 되돌렸는데 크기가 안 돌아옴」이 된다 — 등록부가 "기본값과 같다"며
+  // 행을 지우는데 실제로 그려지는 값은 globals.css 가 정하기 때문이다. 강조 램프와
+  // 같은 사정이고, 시험이 파일을 직접 읽어 대조한다.
+  //
+  // 키는 CSS 변수 이름에서 `--` 만 뗀 것이다(`--text-sm` ↔ "text-sm" 과 같은 규칙).
+  // 줄 높이 짝(`--text-wr-*--line-height`)은 여기 없다 — 비율(calc(1.75 / 1.25))로
+  // 적혀 있어 글자 크기를 바꾸면 줄 높이가 따라 움직이고, 따로 고칠 값이 아니다.
+  //
+  // 글자 크기는 앱 전체 글자 크기와 같은 종류·같은 범위(0.625 ~ 1.5rem)를 쓴다.
+  // 가장 큰 기본값(화면 제목 1.25rem)도 그 안에 든다. 「집계 칸 이름」은 기본값이
+  // 이미 하한(0.625rem = 10px)이라 키울 수만 있다 — 하한은 읽기의 바닥이라
+  // 이 화면이라고 내리지 않는다.
+  {
+    key: "text-wr-title",
+    cssVar: "--text-wr-title",
+    kind: "fontSize",
+    scoped: false,
+    label: "화면 제목 글자",
+    usage: "주간보고 맨 위의 「주간보고」 제목",
+    defaultLight: "1.25rem",
+    defaultDark: "1.25rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-section",
+    cssVar: "--text-wr-section",
+    kind: "fontSize",
+    scoped: false,
+    label: "구역 제목 글자",
+    usage: "종류별 총합 · PO 발행 현황 · 금주 목표 · 납입 예정 건 같은 구역 제목",
+    defaultLight: "0.875rem",
+    defaultDark: "0.875rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-heading",
+    cssVar: "--text-wr-heading",
+    kind: "fontSize",
+    scoped: false,
+    label: "소제목 글자",
+    usage: "고객사 블록 · 금주 목표 상자 · 납입 예정 상자의 소제목",
+    defaultLight: "0.875rem",
+    defaultDark: "0.875rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-body",
+    cssVar: "--text-wr-body",
+    kind: "fontSize",
+    scoped: false,
+    label: "표 본문 글자",
+    usage: "상세표 · 납입 예정 표의 본문과 금주 목표 줄",
+    defaultLight: "0.75rem",
+    defaultDark: "0.75rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-table-head",
+    cssVar: "--text-wr-table-head",
+    kind: "fontSize",
+    scoped: false,
+    label: "표 머리 글자",
+    usage: "상세표 · 납입 예정 표의 머리 줄",
+    defaultLight: "0.6875rem",
+    defaultDark: "0.6875rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-label",
+    cssVar: "--text-wr-label",
+    kind: "fontSize",
+    scoped: false,
+    label: "집계 칸 이름 글자",
+    usage: "집계 칸 이름 · 종류 배지 · PO 발행 현황의 고객사명",
+    defaultLight: "0.625rem",
+    defaultDark: "0.625rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-count",
+    cssVar: "--text-wr-count",
+    kind: "fontSize",
+    scoped: false,
+    label: "집계 숫자 글자",
+    usage: "집계 칸 숫자 · 소제목 옆 총 대수 · 줄 수",
+    defaultLight: "0.75rem",
+    defaultDark: "0.75rem",
+    area: "weeklyReport",
+  },
+  {
+    key: "text-wr-meta",
+    cssVar: "--text-wr-meta",
+    kind: "fontSize",
+    scoped: false,
+    label: "보조 글자",
+    usage: "종류 설명 · 줄 수 문장 · 「해당 없음」 안내",
+    defaultLight: "0.6875rem",
+    defaultDark: "0.6875rem",
+    area: "weeklyReport",
+  },
+
+  // 상자 — rem 만, 항목마다 범위가 다르다(rangeRem 주석). 전부 여백·간격·
+  // **최소** 높이다. 확정 높이는 만들지 않는다 — 주간보고의 세로 스크롤바 두 개
+  // (HANDOFF U-1)를 다시 부를 수 있는 모양은 애초에 열지 않는다.
+  //
+  // 표 칸 여백의 상한을 1rem 으로 좁힌 이유: 표가 여덟~아홉 칸이고 줄바꿈을 하지
+  // 않아서(whitespace-nowrap), 칸마다 양쪽으로 붙는 여백이 표 너비를 곧바로 늘린다.
+  // 1rem 이면 기본값의 약 2.7배로, 넓혀 볼 여지는 충분하다.
+  {
+    key: "spacing-wr-block",
+    cssVar: "--spacing-wr-block",
+    kind: "spacing",
+    scoped: false,
+    label: "고객사 블록 안 여백",
+    usage: "고객사마다 하나씩 놓이는 블록의 테두리와 내용 사이",
+    defaultLight: "0.5rem",
+    defaultDark: "0.5rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 2 },
+  },
+  {
+    key: "spacing-wr-section",
+    cssVar: "--spacing-wr-section",
+    kind: "spacing",
+    scoped: false,
+    label: "구역 안 여백",
+    usage: "종류별 총합 · PO 발행 현황 · 금주 목표 · 납입 예정 건 구역의 테두리와 내용 사이",
+    defaultLight: "0.75rem",
+    defaultDark: "0.75rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 2 },
+  },
+  {
+    key: "spacing-wr-block-gap",
+    cssVar: "--spacing-wr-block-gap",
+    kind: "spacing",
+    scoped: false,
+    label: "블록 사이 간격",
+    usage: "고객사 블록끼리, 그리고 좌우 두 단으로 놓일 때 두 단 사이",
+    defaultLight: "0.75rem",
+    defaultDark: "0.75rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 2 },
+  },
+  {
+    key: "spacing-wr-cell-x",
+    cssVar: "--spacing-wr-cell-x",
+    kind: "spacing",
+    scoped: false,
+    label: "표 칸 좌우 여백",
+    usage: "상세표 · 납입 예정 표의 칸 안 왼쪽·오른쪽 여백",
+    defaultLight: "0.375rem",
+    defaultDark: "0.375rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 1 },
+  },
+  {
+    key: "spacing-wr-cell-y",
+    cssVar: "--spacing-wr-cell-y",
+    kind: "spacing",
+    scoped: false,
+    label: "표 칸 위아래 여백",
+    usage: "상세표 · 납입 예정 표의 칸 안 위·아래 여백(줄 간격이 여기서 정해진다)",
+    defaultLight: "0.25rem",
+    defaultDark: "0.25rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 1 },
+  },
+  {
+    key: "spacing-wr-table-min",
+    cssVar: "--spacing-wr-table-min",
+    kind: "spacing",
+    scoped: false,
+    label: "상세표 최소 높이",
+    usage: "고객사 블록 안 상세표의 최소 높이 — 줄이 적어도 이 높이는 차지한다",
+    defaultLight: "8rem",
+    defaultDark: "8rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 20 },
+  },
+  {
+    key: "spacing-wr-box-min",
+    cssVar: "--spacing-wr-box-min",
+    kind: "spacing",
+    scoped: false,
+    label: "목표 · 납입 상자 최소 높이",
+    usage: "금주 목표 상자와 납입 예정 표 상자의 최소 높이",
+    defaultLight: "4rem",
+    defaultDark: "4rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 16 },
+  },
 ];
+
+// ────────────────────────────────────────────────── 화면 가르기
+
+/**
+ * 토큰 하나를 맡는 편집 화면.
+ *
+ * 🔴 등록부를 **남김없이, 겹치지 않게** 셋으로 가른다. 편집 화면과 개발자 모드
+ * 목차의 「N칸 바뀜」이 전부 이 함수 하나로 자기 몫을 정한다 — 화면마다 따로
+ * `kind !== "color"` 같은 조건을 적으면, 등록부에 새 묶음이 들어온 날 한 화면만
+ * 그 묶음을 자기 몫으로 세고, 그 화면의 「이 화면 전부 기본값으로」가 보이지도
+ * 않는 값을 지운다(주간보고 토큰을 들일 때 실제로 그 자리였다).
+ *
+ * `weeklyReport` 화면은 아직 없다(다음 조각). 그 사이에는 이 묶음을 편집하는
+ * 화면이 없을 뿐, 저장 경로·직렬화·구조선은 이미 이 토큰들을 다룬다.
+ */
+export type UiThemeTokenScreen = "colors" | "shapes" | "weeklyReport";
+
+export function uiThemeTokenScreen(token: UiThemeToken): UiThemeTokenScreen {
+  if (token.area === "weeklyReport") return "weeklyReport";
+  return token.kind === "color" ? "colors" : "shapes";
+}
 
 /** 키로 토큰을 찾는 표. 등록부에 없는 키는 어디서도 통과하지 못한다. */
 const UI_THEME_TOKEN_BY_KEY: ReadonlyMap<string, UiThemeToken> = new Map(
@@ -686,6 +943,25 @@ export function normalizeUiThemeValue(token: UiThemeToken, raw: unknown): string
         minPx: FONT_SIZE_MIN_PX,
         maxPx: FONT_SIZE_MAX_PX,
       });
+
+    case "spacing": {
+      // 여백·간격·최소 높이(주간보고 전용). 모서리와 같은 "숫자 + 정해진 단위"
+      // 규칙이라 괄호·세미콜론·공백이 들어올 자리가 없다 — 이것이 이 종류의 주입
+      // 방어선이다. 단위는 rem 하나뿐이다: 글자 크기와 같은 까닭으로, px 로 못
+      // 박으면 글자를 키운 브라우저에서 글자만 커지고 상자는 그대로라 글자가
+      // 상자를 뚫고 나온다. `0` 은 단위 없이 받는다(여백 없음은 뜻이 있는 값이다).
+      //
+      // 범위는 토큰마다 다르다(UiThemeToken.rangeRem). 🔴 적혀 있지 않으면 전부
+      // 거절한다 — 범위를 모르는 채 통과시키면 상한이 없는 것과 같다.
+      const range = token.rangeRem;
+      if (!range) return null;
+      return normalizeLengthValue(value, {
+        allowPx: false,
+        allowUnitlessZero: true,
+        minPx: range.min * REM_IN_PX,
+        maxPx: range.max * REM_IN_PX,
+      });
+    }
 
     default:
       // 종류만 늘리고 여기를 빠뜨리면 조용히 통과시키는 것보다 거절하는 편이
@@ -938,9 +1214,13 @@ function renderBlock(selector: string, declarations: readonly CssDeclaration[]):
  *
  * ── 선택자가 정확히 이 모양이어야 하는 이유는 파일 머리말에 있다 ────────
  * 라이트 블록의 `:not(.dark)`를 빼면 다크 모드에서 배경이 흰색이 된다.
- * scoped:false 토큰(모서리·글자 크기)은 양쪽이 같으므로 `:root:root{}`에만
- * 나오고, `:not(.dark)`를 붙이지 않는다 — 붙이면 다크에서만 기본 크기로
- * 돌아가는 값이 된다.
+ * scoped:false 토큰(모서리·글자 크기·주간보고 크기)은 양쪽이 같으므로
+ * `:root:root{}`에만 나오고, `:not(.dark)`를 붙이지 않는다 — 붙이면 다크에서만
+ * 기본 크기로 돌아가는 값이 된다.
+ *
+ * 주간보고 크기가 여기서 이기는 근거: globals.css 의 `@theme` 기본값은 Tailwind 가
+ * `@layer theme` 안의 `:root, :host` 로 내보내고, 이 블록은 레이어 밖에 있다 —
+ * 레이어 밖 선언이 레이어 안 선언을 명시도와 무관하게 이긴다.
  */
 export function serializeUiThemeCss(rows: readonly UiThemeOverrideRow[]): string {
   const resolved = resolveUiTheme(rows);
@@ -1032,7 +1312,11 @@ export function serializeUiThemeLifeboatCss(): string {
     // 값만 조용히 오버라이드를 뒤집어쓴다 — 눈으로는 절대 못 찾는 구멍이다.
     light.push({ cssVar: token.cssVar, value: token.defaultLight });
 
-    // scoped:false 토큰(모서리·글자 크기)은 라이트/다크가 같은 값이라 다크
+    // 주간보고 전용 크기도 여기 나온다. 개발자 모드 화면 안에는 주간보고가
+    // 없으므로 지금은 아무것도 바꾸지 않고, 다음 조각의 주간보고 미리보기는
+    // 인라인 style 로 이 선언을 이긴다(아래 !important 를 쓰지 않는 이유와 같다).
+    //
+    // scoped:false 토큰(모서리·글자 크기·주간보고 크기)은 라이트/다크가 같은 값이라 다크
     // 블록에 넣을 것이 없다. 넣어 봐야 같은 값을 두 번 적는 것뿐이고,
     // 나중에 한쪽만 고쳐지는 길만 열린다.
     if (token.scoped) {

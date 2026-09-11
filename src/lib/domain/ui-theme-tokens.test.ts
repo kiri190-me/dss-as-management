@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  uiThemeTokenScreen,
   NO_UI_THEME_OVERRIDES,
   UI_THEME_BYPASS_COOKIE,
   UI_THEME_BYPASS_MAX_AGE_SECONDS,
@@ -20,6 +21,7 @@ import {
   serializeUiThemeLifeboatCss,
   UI_THEME_LIFEBOAT_ID,
   type UiThemeToken,
+  type UiThemeTokenScreen,
 } from "./ui-theme-tokens";
 
 /**
@@ -52,11 +54,12 @@ const FONT_SIZE_TOKEN = tokenByKey("text-sm");
 
 // ───────────────────────────────────────────── 등록부 자기 정합성
 
-test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 46다", () => {
+test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 61이다", () => {
   const keys = UI_THEME_TOKENS.map((token) => token.key);
   const cssVars = UI_THEME_TOKENS.map((token) => token.cssVar);
 
-  assert.equal(UI_THEME_TOKENS.length, 46);
+  // 앱 전체 46(색 35 · 모서리 5 · 글자 크기 6) + 주간보고 전용 15(글자 8 · 상자 7).
+  assert.equal(UI_THEME_TOKENS.length, 61);
   assert.equal(new Set(keys).size, keys.length, "논리 키가 겹친다");
   assert.equal(new Set(cssVars).size, cssVars.length, "CSS 변수 이름이 겹친다");
 
@@ -229,6 +232,183 @@ test("주 버튼의 흰 글자가 강조색 위에서 읽힌다", () => {
   );
 });
 
+// ─────────────────────────────────────────────── 주간보고 전용 토큰
+
+/**
+ * 주간보고 전용 글자·상자 크기(`--text-wr-*` · `--spacing-wr-*`)도 강조 램프처럼
+ * 기본값이 **두 곳**에 적혀 있다 — globals.css 의 `@theme` 과 이 등록부. 어긋나면
+ * 「기본값으로 되돌렸는데 크기가 안 돌아옴」이 되고, 원인이 화면에 안 보인다
+ * (위 강조 램프 대조의 머리말과 같은 사정). 그래서 여기서도 파일을 읽어 대조한다.
+ */
+const WEEKLY_REPORT_TOKENS: readonly UiThemeToken[] = UI_THEME_TOKENS.filter(
+  (token) => token.area === "weeklyReport"
+);
+
+/**
+ * globals.css 의 주간보고 전용 변수를 이름 → 값으로 읽는다. 줄 높이 짝
+ * (`--text-wr-*--line-height`)은 등록부가 다루지 않는 값이라 뺀다. 주석을 먼저
+ * 걷는다 — 그 블록의 머리말이 변수 이름을 설명으로 적고 있다.
+ */
+function weeklyReportSizesFromGlobalsCss(): Map<string, string> {
+  const css = readFileSync(GLOBALS_CSS, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const found = new Map<string, string>();
+  for (const match of css.matchAll(/(--(?:text|spacing)-wr-[a-z-]+)\s*:\s*([^;]+);/g)) {
+    if (match[1].endsWith("--line-height")) continue;
+    assert.ok(!found.has(match[1]), `globals.css 에 ${match[1]}가 두 번 적혀 있다`);
+    found.set(match[1], match[2].trim());
+  }
+  return found;
+}
+
+test("globals.css 의 주간보고 크기 15개와 등록부의 기본값이 글자까지 같다", () => {
+  const css = weeklyReportSizesFromGlobalsCss();
+
+  assert.equal(WEEKLY_REPORT_TOKENS.length, 15, "등록부의 주간보고 토큰이 15개가 아니다");
+  assert.equal(css.size, 15, `globals.css 의 주간보고 크기 변수가 15개가 아니다: ${css.size}`);
+
+  for (const token of WEEKLY_REPORT_TOKENS) {
+    assert.equal(
+      css.get(token.cssVar),
+      token.defaultLight,
+      `${token.key}가 globals.css 와 등록부에서 다르다`
+    );
+    assert.equal(token.defaultDark, token.defaultLight, `${token.key}의 기본값이 둘로 갈라져 있다`);
+  }
+
+  // CSS 에만 있는 변수는 편집할 길이 없다.
+  const registryVars = new Set(WEEKLY_REPORT_TOKENS.map((token) => token.cssVar));
+  for (const cssVar of css.keys()) {
+    assert.ok(registryVars.has(cssVar), `globals.css 의 ${cssVar}가 등록부에 없다`);
+  }
+});
+
+test("주간보고 토큰의 모양 — 키는 변수 이름에서 -- 를 뗀 것, 글자 8 · 상자 7, 공용 스코프", () => {
+  for (const token of WEEKLY_REPORT_TOKENS) {
+    assert.equal(token.cssVar, `--${token.key}`, `${token.key}의 변수 이름이 키와 짝이 아니다`);
+    assert.equal(token.scoped, false, `${token.key}가 라이트/다크로 나뉘어 있다`);
+    if (token.key.startsWith("text-wr-")) {
+      assert.equal(token.kind, "fontSize", `${token.key}는 글자 크기 종류여야 한다`);
+    } else if (token.key.startsWith("spacing-wr-")) {
+      assert.equal(token.kind, "spacing", `${token.key}는 상자 크기 종류여야 한다`);
+    } else {
+      assert.fail(`${token.key}는 주간보고 전용 변수 이름 모양이 아니다`);
+    }
+  }
+  assert.equal(WEEKLY_REPORT_TOKENS.filter((token) => token.kind === "fontSize").length, 8);
+  assert.equal(WEEKLY_REPORT_TOKENS.filter((token) => token.kind === "spacing").length, 7);
+
+  // 반대 방향 — 주간보고 변수 이름인데 표시가 빠진 토큰이 있으면 「모서리 · 글자
+  // 크기」 화면이 그 값을 자기 몫으로 센다.
+  for (const token of UI_THEME_TOKENS) {
+    if (/^--(?:text|spacing)-wr-/.test(token.cssVar)) {
+      assert.equal(token.area, "weeklyReport", `${token.key}에 주간보고 표시가 없다`);
+    }
+  }
+});
+
+test("상자 크기(spacing)는 주간보고 전용이고 전부 범위가 있다 — 범위는 그 종류에만 있다", () => {
+  const spacing = UI_THEME_TOKENS.filter((token) => token.kind === "spacing");
+  assert.equal(spacing.length, 7);
+
+  for (const token of UI_THEME_TOKENS) {
+    if (token.kind === "spacing") {
+      // 🔴 앱 전체 여백은 열지 않는다(HANDOFF Y11-5 결정 2) — 배율 하나라 건드리면
+      // 모든 화면의 배치가 한꺼번에 움직인다.
+      assert.equal(token.area, "weeklyReport", `${token.key}는 앱 전체 여백이다 — 열지 않기로 했다`);
+      assert.ok(token.rangeRem, `${token.key}에 범위가 없다`);
+      assert.ok(
+        token.rangeRem.min >= 0 && token.rangeRem.min < token.rangeRem.max,
+        `${token.key}의 범위가 이상하다: ${JSON.stringify(token.rangeRem)}`
+      );
+    } else {
+      // 다른 종류는 종류 공통 범위를 쓴다. 여기 적힌 값은 읽히지 않는다.
+      assert.equal(token.rangeRem, undefined, `${token.key}에 읽히지 않는 범위가 적혀 있다`);
+    }
+  }
+
+  // 범위 표 자체를 못 박는다 — 넓히는 것도 좁히는 것도 여기서 한 번 걸린다.
+  assert.deepEqual(Object.fromEntries(spacing.map((token) => [token.key, token.rangeRem])), {
+    "spacing-wr-block": { min: 0, max: 2 },
+    "spacing-wr-section": { min: 0, max: 2 },
+    "spacing-wr-block-gap": { min: 0, max: 2 },
+    "spacing-wr-cell-x": { min: 0, max: 1 },
+    "spacing-wr-cell-y": { min: 0, max: 1 },
+    "spacing-wr-table-min": { min: 0, max: 20 },
+    "spacing-wr-box-min": { min: 0, max: 16 },
+  });
+});
+
+test("화면 가르기 — 등록부를 남김없이 셋으로 가르고, 주간보고 토큰은 모서리·글자 크기 화면에 없다", () => {
+  const byScreen: Record<UiThemeTokenScreen, string[]> = {
+    colors: [],
+    shapes: [],
+    weeklyReport: [],
+  };
+  for (const token of UI_THEME_TOKENS) byScreen[uiThemeTokenScreen(token)].push(token.key);
+
+  assert.equal(byScreen.colors.length, 35);
+  assert.equal(byScreen.weeklyReport.length, 15);
+  assert.equal(
+    byScreen.colors.length + byScreen.shapes.length + byScreen.weeklyReport.length,
+    UI_THEME_TOKENS.length,
+    "어느 화면에도 안 걸리는 토큰이 있다"
+  );
+
+  // 🔴 「모서리 · 글자 크기」 화면은 앱 전체 모서리 5 · 글자 크기 6 뿐이다. 여기에
+  // 주간보고 글자 크기가 섞이면 그 화면의 「이 화면 전부 기본값으로」가 주간보고
+  // 값까지 지운다.
+  assert.deepEqual(byScreen.shapes, [
+    "radius-sm",
+    "radius-md",
+    "radius-lg",
+    "radius-xl",
+    "radius-2xl",
+    "text-xs",
+    "text-sm",
+    "text-base",
+    "text-lg",
+    "text-xl",
+    "text-2xl",
+  ]);
+
+  for (const token of UI_THEME_TOKENS) {
+    const screen = uiThemeTokenScreen(token);
+    if (token.area === "weeklyReport") assert.equal(screen, "weeklyReport", token.key);
+    else if (token.kind === "color") assert.equal(screen, "colors", token.key);
+    else assert.equal(screen, "shapes", token.key);
+  }
+});
+
+/**
+ * 앱 전체용 편집 화면과 개발자 모드 목차가 자기 몫을 uiThemeTokenScreen 으로
+ * 가르는지 원본을 읽어 확인한다. 편집기 컴포넌트에는 시험 파일이 없고(렌더 시험
+ * 목록에 없다), 이 가르기가 틀리면 증상이 「보이지 않는 값이 지워진다」라서
+ * 눈으로도 못 잡는다. 주석은 걷고 본다 — 주석이 옛 조건을 설명으로 적고 있다.
+ */
+function readSourceWithoutComments(url: URL): string {
+  return readFileSync(url, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+test("편집기와 목차는 종류(kind)가 아니라 uiThemeTokenScreen 으로 자기 몫을 가른다", () => {
+  const files = {
+    editor: new URL("../../components/settings/ThemeTokenEditor.tsx", import.meta.url),
+    index: new URL("../../app/(app)/settings/developer/page.tsx", import.meta.url),
+  };
+  for (const [name, url] of Object.entries(files)) {
+    const source = readSourceWithoutComments(url);
+    assert.match(source, /uiThemeTokenScreen\(/, `${name}가 uiThemeTokenScreen 을 쓰지 않는다`);
+    // `kind === "color"` / `kind !== "color"` 는 색이 아닌 **모든** 것(주간보고
+    // 크기까지)을 한 화면 몫으로 만든다 — 이 조건이 돌아오면 여기서 걸린다.
+    assert.doesNotMatch(
+      source,
+      /kind\s*[!=]==\s*"color"/,
+      `${name}가 색 여부만으로 화면 몫을 가른다`
+    );
+  }
+});
+
 // ───────────────────────────────────────────────────────── 검증기
 
 test("색은 hex 여섯 자리만 받고 대문자는 소문자로 눕힌다", () => {
@@ -316,6 +496,84 @@ test("글자 크기는 rem만 받고 상·하한 밖은 거절한다", () => {
   assert.equal(normalizeUiThemeValue(FONT_SIZE_TOKEN, "1"), null);
   assert.equal(normalizeUiThemeValue(FONT_SIZE_TOKEN, "calc(1rem)"), null);
   assert.equal(normalizeUiThemeValue(FONT_SIZE_TOKEN, "larger"), null);
+});
+
+test("주간보고 글자 크기도 같은 범위다 — 화면 제목 기본값이 그 안에 들고, 하한은 내리지 않는다", () => {
+  const title = tokenByKey("text-wr-title");
+  assert.equal(normalizeUiThemeValue(title, "1.25rem"), "1.25rem");
+  assert.equal(normalizeUiThemeValue(title, "1.5rem"), "1.5rem");
+  assert.equal(normalizeUiThemeValue(title, "1.501rem"), null);
+  assert.equal(normalizeUiThemeValue(title, "20px"), null);
+
+  // 기본값이 이미 하한(10px)인 자리 — 키울 수만 있다.
+  const label = tokenByKey("text-wr-label");
+  assert.equal(label.defaultLight, "0.625rem");
+  assert.equal(normalizeUiThemeValue(label, "0.624rem"), null);
+  assert.equal(normalizeUiThemeValue(label, "0.75rem"), "0.75rem");
+});
+
+test("🔴 상자 크기는 rem 과 0 만 받고, 범위는 항목마다 다르다 — 이 좁음이 곧 주입 차단이다", () => {
+  const cellX = tokenByKey("spacing-wr-cell-x"); // 0 ~ 1rem
+  const tableMin = tokenByKey("spacing-wr-table-min"); // 0 ~ 20rem
+
+  // 경계 바로 안.
+  assert.equal(normalizeUiThemeValue(cellX, "0"), "0");
+  assert.equal(normalizeUiThemeValue(cellX, "1rem"), "1rem");
+  assert.equal(normalizeUiThemeValue(tableMin, "20rem"), "20rem");
+  assert.equal(normalizeUiThemeValue(tableMin, "12.5rem"), "12.5rem");
+
+  // 같은 값의 다른 표기는 한 벌로 눕힌다 — 기본값으로 되돌렸는데 행이 남는 일을 막는다.
+  assert.equal(normalizeUiThemeValue(cellX, "0rem"), "0");
+  assert.equal(normalizeUiThemeValue(cellX, ".5rem"), "0.5rem");
+  assert.equal(normalizeUiThemeValue(cellX, " 0.375rem "), "0.375rem");
+  assert.equal(normalizeUiThemeValue(tableMin, "8.0rem"), "8rem");
+
+  // 경계 바로 밖. 같은 1.01rem 이 표 칸 여백에서는 막히고 상세표 높이에서는 된다 —
+  // 범위가 종류가 아니라 항목에 걸려 있다는 증거다.
+  assert.equal(normalizeUiThemeValue(cellX, "1.01rem"), null);
+  assert.equal(normalizeUiThemeValue(tableMin, "1.01rem"), "1.01rem");
+  assert.equal(normalizeUiThemeValue(tableMin, "20.01rem"), null);
+  assert.equal(normalizeUiThemeValue(cellX, "-0.25rem"), null);
+
+  // px 는 받지 않는다(0px 도) — 글자를 키운 브라우저에서 상자만 그대로 남는다.
+  assert.equal(normalizeUiThemeValue(cellX, "6px"), null);
+  assert.equal(normalizeUiThemeValue(cellX, "0px"), null);
+  assert.equal(normalizeUiThemeValue(tableMin, "128px"), null);
+
+  // 단위 없는 맨숫자는 0 말고 전부 거절한다 — CSS 가 무시해 값이 조용히 사라진다.
+  assert.equal(normalizeUiThemeValue(cellX, "1"), null);
+  assert.equal(normalizeUiThemeValue(tableMin, "8"), null);
+
+  // 함수·다른 단위·여러 값·키워드·색.
+  for (const raw of [
+    "calc(1rem)",
+    "var(--spacing-wr-block)",
+    "max(1rem, 2rem)",
+    "1em",
+    "10%",
+    "1vh",
+    "1rem 2rem",
+    "auto",
+    "#ffffff",
+  ]) {
+    assert.equal(normalizeUiThemeValue(tableMin, raw), null, `${raw} 가 통과했다`);
+  }
+
+  // 규칙 탈출 시도.
+  for (const raw of ["0.5rem;}body{display:none}", "0.5rem</style>", "0.5rem !important", "0.5rem;"]) {
+    assert.equal(normalizeUiThemeValue(tableMin, raw), null, `${raw} 가 통과했다`);
+  }
+
+  // 문자열이 아닌 것.
+  for (const raw of [8, 0, null, undefined, { rem: 8 }]) {
+    assert.equal(normalizeUiThemeValue(tableMin, raw), null, `${String(raw)} 가 통과했다`);
+  }
+});
+
+test("범위가 적혀 있지 않은 상자 크기 토큰은 모든 값을 거절한다 — 여는 쪽이 아니라 닫는 쪽으로 틀린다", () => {
+  const broken: UiThemeToken = { ...tokenByKey("spacing-wr-block"), rangeRem: undefined };
+  assert.equal(normalizeUiThemeValue(broken, "0.5rem"), null);
+  assert.equal(normalizeUiThemeValue(broken, "0"), null);
 });
 
 // ───────────────────────────────────────────────────────── 대비
@@ -443,6 +701,37 @@ test("스코프를 나누지 않는 토큰은 공용 블록에만 나온다", ()
   assert.ok(!css.includes(".dark{"), "모서리·글자 크기에 다크 전용 선택자가 붙었다");
   assert.ok(css.includes("--radius-md:0.5rem"));
   assert.ok(css.includes("--text-sm:1rem"));
+});
+
+test("주간보고 크기는 공용 블록에 실리고, 앱 전체 글자 크기와 제 이름으로 갈린다", () => {
+  const css = serializeUiThemeCss([
+    { tokenKey: "text-sm", scope: "both", value: "1rem" },
+    { tokenKey: "text-wr-body", scope: "both", value: ".875rem" },
+    { tokenKey: "spacing-wr-table-min", scope: "both", value: "0rem" },
+    // 아래 셋은 버려져야 한다.
+    { tokenKey: "text-wr-title", scope: "light", value: "1.5rem" }, // 스코프가 안 맞는다
+    { tokenKey: "spacing-wr-cell-x", scope: "both", value: "2rem" }, // 범위(1rem) 밖
+    { tokenKey: "spacing-wr-block", scope: "both", value: "0.5rem;}body{display:none}" },
+  ]);
+
+  // 🔴 `:not(.dark)` 도 `.dark` 도 없는 공용 블록 하나다. 저장값이 globals.css 의
+  // `@theme` 기본값(레이어 안)을 이기는 자리가 여기다.
+  assert.equal(css, ":root:root{--text-sm:1rem;--text-wr-body:0.875rem;--spacing-wr-table-min:0}");
+
+  // 주간보고 값만 바꾸면 앱 전체 글자 크기는 한 줄도 안 나온다.
+  const weeklyOnly = serializeUiThemeCss([
+    { tokenKey: "text-wr-body", scope: "both", value: "0.875rem" },
+  ]);
+  assert.equal(weeklyOnly, ":root:root{--text-wr-body:0.875rem}");
+
+  // 기본값과 같은 값은 나오지 않는다.
+  assert.equal(
+    serializeUiThemeCss([
+      { tokenKey: "text-wr-body", scope: "both", value: "0.75rem" },
+      { tokenKey: "spacing-wr-table-min", scope: "both", value: "8.0rem" },
+    ]),
+    ""
+  );
 });
 
 test("등록부에 없는 키는 출력에 나타나지 않는다", () => {
@@ -590,6 +879,22 @@ test("등록부의 모든 토큰이 구조선 라이트 블록에 나온다", ()
       token.defaultLight,
       `${token.key}의 라이트 기본값이 구조선에 없거나 다르다`
     );
+  }
+});
+
+test("구조선이 주간보고 크기도 기본값으로 선언한다 — 라이트 블록에만", () => {
+  // 개발자 모드 화면 안에는 주간보고가 없어 지금은 아무것도 바꾸지 않는다. 다음
+  // 조각의 주간보고 미리보기는 인라인 style 로 이 선언을 이긴다(!important 가 없다).
+  const css = serializeUiThemeLifeboatCss();
+  const light = lifeboatBlockBody(css, `#${UI_THEME_LIFEBOAT_ID}`);
+  const dark = lifeboatBlockBody(css, `.dark #${UI_THEME_LIFEBOAT_ID}`);
+  assert.ok(light !== null && dark !== null);
+
+  const lightDeclarations = lifeboatDeclarations(light);
+  const darkDeclarations = lifeboatDeclarations(dark);
+  for (const token of WEEKLY_REPORT_TOKENS) {
+    assert.equal(lightDeclarations.get(token.cssVar), token.defaultLight, `${token.key}가 구조선에 없다`);
+    assert.equal(darkDeclarations.has(token.cssVar), false, `${token.key}가 다크 블록에 있다`);
   }
 });
 

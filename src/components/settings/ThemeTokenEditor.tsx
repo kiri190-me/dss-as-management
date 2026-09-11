@@ -12,6 +12,7 @@ import {
   UI_THEME_CONTRAST_PAIRS,
   UI_THEME_CONTRAST_WARN,
   UI_THEME_TOKENS,
+  uiThemeTokenScreen,
   type UiThemeContrastPair,
   type UiThemeOverrideRow,
   type UiThemeScope,
@@ -39,7 +40,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 복사하면 저장·대비·미리보기 로직이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
  *
  * 🔴 줄어드는 것은 **그리는 칸**뿐이다. 대비 계산과 미리보기는 언제나 등록부
- * 전체(46개 토큰·11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
+ * 전체(토큰 61개·대비 11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
  * 이 화면에 없는 글자색이 함께 필요하고, 미리보기 역시 한 벌이 다 있어야
  * 그려진다.
  *
@@ -76,7 +77,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * ============================================================================
  */
 
-// ────────────────────────────────────────────────── 편집 가능한 자리(81칸)
+// ─────────────────────────── 편집 가능한 자리(등록부 전체 96칸 · 이 편집기가 그리는 것 81칸)
 
 /** 편집 가능한 한 칸. 토큰 하나가 scoped 면 두 칸, 아니면 한 칸이 된다. */
 type Slot = { key: string; token: UiThemeToken; scope: UiThemeScope };
@@ -108,7 +109,7 @@ const SCOPE_LABELS: Record<UiThemeScope, string> = {
  * 아래로 떨어져, 램프 11단이 양 끝 둘과 한 표에 섞인다. 순서는 중립 → 강조 →
  * 경고 → 그 밖이다(화면에서 겹치는 순서 그대로).
  */
-const COLOR_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "color");
+const COLOR_TOKENS = UI_THEME_TOKENS.filter((token) => uiThemeTokenScreen(token) === "colors");
 const ZINC_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("zinc-"));
 const PRIMARY_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("primary-"));
 const RED_TOKENS = COLOR_TOKENS.filter((token) => token.key.startsWith("red-"));
@@ -118,20 +119,27 @@ const OTHER_COLOR_TOKENS = COLOR_TOKENS.filter(
     !token.key.startsWith("primary-") &&
     !token.key.startsWith("red-")
 );
-const RADIUS_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "radius");
-const FONT_SIZE_TOKENS = UI_THEME_TOKENS.filter((token) => token.kind === "fontSize");
-/** 색도 모서리도 글자 크기도 아닌 것. 지금은 비어 있고, 비면 그려지지 않는다. */
-const OTHER_SHAPE_TOKENS = UI_THEME_TOKENS.filter(
-  (token) => token.kind !== "color" && token.kind !== "radius" && token.kind !== "fontSize"
+/**
+ * 「모서리 · 글자 크기」 화면이 맡는 토큰. 🔴 종류(kind)만으로 거르지 않는다 —
+ * 주간보고 전용 글자 크기도 kind 는 "fontSize" 라, 종류로만 거르면 앱 전체 글자
+ * 크기 표에 주간보고 여덟 줄이 섞이고 그 화면의 단추가 그 값까지 지운다.
+ */
+const SHAPE_TOKENS = UI_THEME_TOKENS.filter((token) => uiThemeTokenScreen(token) === "shapes");
+const RADIUS_TOKENS = SHAPE_TOKENS.filter((token) => token.kind === "radius");
+const FONT_SIZE_TOKENS = SHAPE_TOKENS.filter((token) => token.kind === "fontSize");
+/** 이 화면 몫인데 모서리도 글자 크기도 아닌 것. 지금은 비어 있고, 비면 그려지지 않는다. */
+const OTHER_SHAPE_TOKENS = SHAPE_TOKENS.filter(
+  (token) => token.kind !== "radius" && token.kind !== "fontSize"
 );
 
 /**
  * 화면 하나가 맡는 묶음.
  *
- * 🔴 등록부를 **남김없이** 둘로 가른다 — 색이면 색 화면, 아니면 모서리·글자
- * 크기 화면이다. 어느 화면에도 안 걸리는 토큰이 생기면 그 값은 편집할 길이
- * 없어지고, 색 묶음이 마지막 묶음으로 남김없이 떨어지게 해 둔 것과 같은
- * 이유다(위 COLOR_TOKENS 주석).
+ * 🔴 어느 토큰이 어느 화면 몫인지는 이 파일이 정하지 않는다 —
+ * domain/ui-theme-tokens.ts 의 uiThemeTokenScreen 하나가 등록부를 남김없이,
+ * 겹치지 않게 가른다(색 · 모서리·글자 크기 · 주간보고). 개발자 모드 목차의
+ * 「N칸 바뀜」도 같은 함수로 세므로 둘이 어긋날 자리가 없다. 주간보고 몫은 이
+ * 편집기가 그리지 않는다 — 그 값은 주간보고 화면(다음 조각)이 맡는다.
  */
 export type ThemeTokenGroup = "colors" | "shapes";
 
@@ -139,11 +147,12 @@ export type ThemeTokenGroup = "colors" | "shapes";
  * 그 화면에 그려지는 칸. **여기 든 칸만** 저장 대상이고, 「이 화면 전부
  * 기본값으로」가 채우는 것도, 바뀐 칸 수와 저장 단추의 잠김 판정이 세는 것도
  * 이것이다 — 색 화면에서 누른 단추가 모서리·글자 크기까지 조용히 지우면,
- * 누른 사람은 색만 되돌린 줄 안다.
+ * 누른 사람은 색만 되돌린 줄 안다. 모서리·글자 크기 화면에서 누른 단추가
+ * 주간보고 크기를 지우는 것도 같은 사고다.
  */
 const GROUP_SLOTS: Record<ThemeTokenGroup, readonly Slot[]> = {
-  colors: SLOTS.filter((slot) => slot.token.kind === "color"),
-  shapes: SLOTS.filter((slot) => slot.token.kind !== "color"),
+  colors: SLOTS.filter((slot) => uiThemeTokenScreen(slot.token) === "colors"),
+  shapes: SLOTS.filter((slot) => uiThemeTokenScreen(slot.token) === "shapes"),
 };
 
 /** 저장을 실제로 거절시키는 짝인가. 등록부의 목록에서 그대로 만든다. */
@@ -275,7 +284,7 @@ export default function ThemeTokenEditor({
   /**
    * 코드 기본값으로 채운다. 저장을 눌러야 저장된 행이 지워진다.
    *
-   * 🔴 **이 화면에 그려진 칸만** 채운다. 81칸 전부를 채우면 색 화면에서 누른
+   * 🔴 **이 화면에 그려진 칸만** 채운다. 등록부의 칸 전부를 채우면 색 화면에서 누른
    * 것이 모서리·글자 크기까지 함께 지우고, 누른 사람은 색만 되돌린 줄 안다 —
    * 그 값들은 이 화면에 보이지도 않으므로 지워졌다는 사실조차 알 수 없다.
    */
