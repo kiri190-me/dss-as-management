@@ -11,6 +11,11 @@ import PartIssueApprovalTrail, { approvalOutcomeLabel } from "./PartIssueApprova
 import {
   PART_ISSUE_CANCELLED_BY_REQUESTER_LABEL,
   PART_ISSUE_EXECUTION_BLOCKED_NOTICE,
+  PART_ISSUE_MINE_LABEL,
+  PART_ISSUE_NOTHING_AWAITING_APPROVAL,
+  PART_ISSUE_NOTHING_IN_PROGRESS,
+  PART_ISSUE_PROGRESS_AWAITING_APPROVAL_LABEL,
+  PART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL,
   PART_ISSUE_REJECTED_BY_APPROVER_LABEL,
   PART_ISSUE_REQUEST_BUTTON_LABEL,
 } from "./part-issue-approval-texts";
@@ -328,6 +333,252 @@ describe("🔴 [승인 요청건] 탭이 보여 주는 범위", () => {
       /capabilities\.requestProcessing \|\| capabilities\.stock/,
       "실행 묶음의 자격을 화면이 역할로 판단하게 두면 설정으로 연 권한이 닿지 않는다"
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「진행 중인 신청」 — 누가 올렸든, 재고를 볼 수 있는 사람 전원에게, 읽기 전용
+ * ============================================================================
+ * 신청을 올린 사람에게는 「내가 결재할 건」·「실행할 건」이 비어 보이는 것이
+ * 정상이다. 그래서 올린 신청이 사라진 것처럼 보였다(2026-09-11 신고). 이 묶음이
+ * 그 자리다. 보는 사람은 재고 목록(/inventory)에 들어올 수 있는 사람 전원이고
+ * (사용자 결정 2026-09-11), 그 판정은 서버가 한다.
+ * ============================================================================
+ */
+describe("🔴 [승인 요청건] 탭 — 진행 중인 신청", () => {
+  const screen = flat(approvalScreenSource);
+  const page = flat(approvalsPageSource);
+
+  test("보이는 조건은 재고 목록 화면의 입구와 같다 — 서버가 판정한다", () => {
+    assert.match(
+      page,
+      /import \{ hasAreaAccess \} from "@\/lib\/auth\/area-guard"/,
+      "메뉴 권한을 가드와 다른 길로 물으면 두 기준이 갈라진다"
+    );
+    assert.match(
+      page,
+      /const showProgressSection = actingUser\.approvalStatus === "APPROVED" && \(await hasAreaAccess\("inventory", actingUser\)\);/,
+      "「진행 중인 신청」을 보는 기준이 재고 목록(/inventory) 입구와 달라졌다"
+    );
+    assert.match(screen, /\{showProgressSection && \(/, "묶음을 서버 판정으로 감추는 자리가 사라졌다");
+    assert.match(page, /showProgressSection=\{showProgressSection\}/);
+  });
+
+  test("🔴 볼 수 없는 세션에는 조회 자체를 부르지 않는다", () => {
+    assert.match(
+      page,
+      /showProgressSection \? listPartIssueRequestsInProgress\(\) : Promise\.resolve\(\[\]\)/,
+      "화면에서 감추기만 하면 목록은 이미 읽혀 내려간다"
+    );
+  });
+
+  test("🔴 페이지 입구에 메뉴 권한 문을 달지 않는다 — 재고 권한이 없는 승인자도 결재하러 들어온다", () => {
+    assert.ok(
+      !/requireAreaAccess/.test(approvalsPageSource),
+      "입구를 막으면 재고 메뉴 권한이 없는 결재선 승인자(예: 영업)가 자기 차례를 처리하지 못한다"
+    );
+    assert.ok(!/requirePermission|notFound\(/.test(approvalsPageSource), "다른 이름의 입구 문이 생겼다");
+    // 남는 리다이렉트는 로그인뿐이다.
+    const targets = [...approvalsPageSource.matchAll(/redirect\(([^)]*)\)/g)].map((matched) => matched[1]);
+    assert.ok(targets.length > 0, "리다이렉트 호출을 하나도 찾지 못했다 — 검사가 헛돈다");
+    for (const target of targets) {
+      assert.equal(target, '"/login"', `로그인이 아닌 곳으로 튕기는 입구가 생겼다: ${target}`);
+    }
+  });
+
+  test("「이 화면에서 처리할 수 있는 권한이 없습니다」는 세 묶음이 모두 감춰질 때만 나온다", () => {
+    const noAccessBlock = sliceBetween(screen, "{!showApprovalSection", "이 화면에서 처리할 수 있는 권한이 없습니다.");
+    assert.match(
+      noAccessBlock,
+      /^\{!showApprovalSection && !showExecutionSection && !showProgressSection && \( <p [^>]*>\s*$/,
+      "묶음 하나라도 보이는 세션에 「권한 없음」이 함께 뜬다"
+    );
+    assert.equal(
+      approvalScreenSource.split("이 화면에서 처리할 수 있는 권한이 없습니다.").length - 1,
+      1,
+      "「권한 없음」 문구가 다른 조건 아래 한 번 더 생겼다"
+    );
+  });
+
+  test("기존 두 묶음 **아래**에, 같은 모양의 제목 · 0건이면 빈 상태 문구", () => {
+    const approvalAt = screen.indexOf("{showApprovalSection && (");
+    const executionAt = screen.indexOf("{showExecutionSection && (");
+    const progressAt = screen.indexOf("{showProgressSection && (");
+    assert.ok(approvalAt >= 0 && executionAt > approvalAt && progressAt > executionAt, "묶음 순서가 달라졌다");
+
+    assert.match(
+      screen,
+      /<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50"> 진행 중인 신청\{" "\} <span className="tabular-nums text-zinc-500 dark:text-zinc-400">\{inProgress\.length\}건<\/span> <\/h2>/
+    );
+    assert.match(screen, /inProgress\.length === 0 \?/, "0건일 때 묶음을 감추면 「할 일 없음」과 「상관없음」이 구분되지 않는다");
+    assert.match(screen, /\bPART_ISSUE_NOTHING_IN_PROGRESS\b\}/);
+    assert.ok(PART_ISSUE_NOTHING_IN_PROGRESS.length > 0);
+  });
+
+  test("🔴 읽기 전용이다 — 단추도, 서버 액션도 싣지 않는다", () => {
+    const progressSection = sliceBetween(screen, "{showProgressSection && (", 'role="status"');
+    for (const forbidden of ["<button", "onClick", "execute(", "submitDecision", "setDraft", "Action("]) {
+      assert.ok(!progressSection.includes(forbidden), `진행 중인 신청 묶음에 ${forbidden} 이 생겼다`);
+    }
+    assert.match(
+      progressSection,
+      /<RequestCard key=\{view\.detail\.id\} view=\{view\} actions=\{null\} message=\{null\} showProgress \/>/,
+      "카드는 기존 RequestCard 를 단추 없이 그대로 쓴다"
+    );
+  });
+
+  test("🔴 기존 두 묶음의 카드는 모양이 그대로다 — 상태 이름표·「내 신청」을 켜지 않는다", () => {
+    const approvalSection = sliceBetween(screen, "{showApprovalSection && (", "{showExecutionSection && (");
+    const executionSection = sliceBetween(screen, "{showExecutionSection && (", "{showProgressSection && (");
+    for (const [name, section] of [
+      ["내가 결재할 건", approvalSection],
+      ["실행할 건", executionSection],
+    ] as const) {
+      assert.ok(section.includes("<RequestCard"), `${name}: 검사할 카드를 찾지 못했다 — 자르는 경계가 틀렸다`);
+      assert.ok(!/\bshowProgress\b/.test(section), `${name}: 카드에 진행 표시가 켜졌다`);
+    }
+    // 이름표 둘 다 그 켜짐 하나에 매여 있다.
+    assert.match(screen, /showProgress = false,/, "진행 표시는 기본으로 꺼져 있어야 한다");
+    assert.match(screen, /const statusLabel = showProgress \? progressStatusLabel\(detail\.status\) : null;/);
+    assert.match(screen, /\{showProgress && view\.isMine && \(/);
+  });
+
+  test("상태 이름표 — 결재 중 / 승인 완료 · 실행 대기, 순수 규칙 두 개로 가른다", () => {
+    assert.equal(PART_ISSUE_PROGRESS_AWAITING_APPROVAL_LABEL, "결재 중");
+    assert.equal(PART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL, "승인 완료 · 실행 대기");
+    assert.match(
+      screen,
+      /if \(isPartIssueRequestAwaitingApproval\(status\)\) return PART_ISSUE_PROGRESS_AWAITING_APPROVAL_LABEL;/
+    );
+    assert.match(
+      screen,
+      /if \(isPartIssueRequestExecutable\(status\)\) return PART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL;/
+    );
+    // 🔴 신청 상태를 화면이 글자로 비교하지 않는다 — 조회가 상태를 고르는 규칙과
+    // 같은 함수여야 한다. (결재 결정 값 "APPROVED"·"REJECTED" 는 다른 것이다.)
+    assert.ok(!/"PENDING_APPROVAL"/.test(approvalScreenSource), "신청 상태를 화면이 글자로 적었다");
+    assert.ok(!/status === "/.test(approvalScreenSource), "신청 상태를 화면이 글자로 비교한다");
+  });
+
+  test("🔴 「내 신청」 판정은 서버가 한다 — 화면은 세션을 추측하지 않는다", () => {
+    assert.equal(PART_ISSUE_MINE_LABEL, "내 신청");
+    assert.match(
+      page,
+      /isMine: detail\.requestedByUserId === actingUser\.id,/,
+      "「내 신청」을 서버가 판정해 싣는 자리가 사라졌다"
+    );
+    assert.match(screen, /isMine: boolean;/);
+    assert.match(screen, /\{PART_ISSUE_MINE_LABEL\}/);
+    assert.ok(!/requestedByUserId ===|readSession|useSession/.test(approvalScreenSource), "화면이 세션을 스스로 짐작한다");
+  });
+
+  test("🔴 상세는 신청마다 한 번만 읽는다 — 세 묶음에 겹쳐도", () => {
+    assert.match(
+      page,
+      /new Set\(\[\.\.\.pendingRows, \.\.\.executableRows, \.\.\.progressRows\]\.map\(\(row\) => row\.issueRequestId\)\)/,
+      "id 를 중복 제거하지 않으면 같은 신청의 상세·형제 수 조회가 여러 번 돈다"
+    );
+    assert.equal(
+      approvalsPageSource.split("getPartIssueRequestDetail(").length - 1,
+      1,
+      "상세 조회를 부르는 자리가 둘이 됐다"
+    );
+    // 판 단계 이름 · 형제 신청 수는 세 묶음 카드에 똑같이 붙는다 — 한 지도(viewById)에서 나온다.
+    assert.match(page, /inProgress=\{toViews\(visibleProgressRows\)\}/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「진행 중인 신청」과 [실행할 건]이 겹칠 때 (사용자 요청 2026-09-11)
+ * ============================================================================
+ * 실행 묶음이 **보이는** 세션에서는 거기 이미 떠 있는 신청을 진행 목록에서 뺀다.
+ * **안 보이는** 세션에서는 빼지 않는다 — 빼면 그 사람에게서 승인 완료 건이
+ * 사라져 보이고, 그것이 이 묶음이 고치려던 문제다.
+ *
+ * 빼는 식은 서버 컴포넌트 안에 있어 import 해 부를 수 없다(페이지 파일은 다른
+ * 이름을 내보낼 수 없다). 그래서 **원본의 그 식 두 줄을 잘라 실제로 돌려 본다** —
+ * 정규식만 걸면 식의 모양은 지켜도 뜻이 뒤집힌 것(`!` 하나)을 놓친다. 식에 타입
+ * 표기가 끼면 여기서 문법 오류로 **시끄럽게** 깨진다(조용히 통과하지 않는다).
+ * ============================================================================
+ */
+describe("🔴 진행 중인 신청 — [실행할 건]과 겹치는 신청은 실행 묶음이 보일 때만 뺀다", () => {
+  const page = flat(approvalsPageSource);
+  const screen = flat(approvalScreenSource);
+
+  const expressionAfter = (marker: string) => sliceBetween(approvalsPageSource, marker, ";").slice(marker.length);
+  const executableIdsExpression = expressionAfter("const executableIds = ");
+  const visibleRowsExpression = expressionAfter("const visibleProgressRows = ");
+
+  type Row = { issueRequestId: string };
+  const visibleProgressIds = new Function(
+    "progressExcludesExecutable",
+    "progressRows",
+    "executableRows",
+    `const executableIds = ${executableIdsExpression}; return ${visibleRowsExpression};`
+  ) as (progressExcludesExecutable: boolean, progressRows: Row[], executableRows: Row[]) => Row[];
+
+  const rows = (...ids: string[]): Row[] => ids.map((issueRequestId) => ({ issueRequestId }));
+  // 진행 목록: 결재 중 p-1 · p-2, 승인 완료 a-1 · a-2. 실행할 건에는 a-1 · a-2 가 떠 있다.
+  const progress = rows("p-1", "a-1", "p-2", "a-2");
+  const executable = rows("a-1", "a-2");
+
+  test("판정은 「실행할 건이 보이는가」 하나다 — 서버가 한다", () => {
+    assert.match(page, /const progressExcludesExecutable = showExecutionSection;/);
+    assert.match(page, /progressExcludesExecutable=\{progressExcludesExecutable\}/);
+  });
+
+  test("🔴 (가) 실행 묶음이 보이는 세션 — 실행할 건과 겹치는 id 가 빠진다, 순서는 그대로", () => {
+    assert.deepEqual(
+      visibleProgressIds(true, progress, executable).map((row) => row.issueRequestId),
+      ["p-1", "p-2"]
+    );
+  });
+
+  test("🔴 (나) 실행 묶음이 안 보이는 세션 — 하나도 빠지지 않는다", () => {
+    // 실행 권한이 없으면 실행할 건 목록은 애초에 비어 오지만, 그 사실에 기대지
+    // 않는다 — 갈림 자체가 「빼지 않는다」여야 한다.
+    assert.deepEqual(
+      visibleProgressIds(false, progress, executable).map((row) => row.issueRequestId),
+      ["p-1", "a-1", "p-2", "a-2"]
+    );
+    assert.deepEqual(
+      visibleProgressIds(false, progress, []).map((row) => row.issueRequestId),
+      ["p-1", "a-1", "p-2", "a-2"]
+    );
+  });
+
+  test("🔴 빼는 기준은 실행할 건 목록에 **실제로 든 id** 다 — 상태 글자를 다시 적지 않는다", () => {
+    // 두 목록을 읽는 사이에 승인이 난 건(a-3)은 실행할 건에 없으므로 진행 쪽에 남는다.
+    assert.deepEqual(
+      visibleProgressIds(true, rows("p-1", "a-3"), executable).map((row) => row.issueRequestId),
+      ["p-1", "a-3"]
+    );
+    for (const expression of [executableIdsExpression, visibleRowsExpression]) {
+      assert.ok(!/APPROVED|PENDING_APPROVAL|status/.test(expression), `상태로 거르는 식이 됐다: ${expression}`);
+    }
+    assert.match(executableIdsExpression, /^new Set\(executableRows\.map\(\(row\) => row\.issueRequestId\)\)$/);
+  });
+
+  test("🔴 조회는 그대로 사람·권한을 모른다 — 거르는 것은 페이지의 몫이다", () => {
+    assert.match(page, /showProgressSection \? listPartIssueRequestsInProgress\(\) : Promise\.resolve\(\[\]\)/);
+    assert.match(page, /inProgress=\{toViews\(visibleProgressRows\)\}/, "걸러 낸 목록이 아니라 원래 목록이 화면에 간다");
+  });
+
+  test("🔴 (다) 빈 상태 문구가 두 경우에 맞게 갈린다", () => {
+    assert.match(
+      screen,
+      /inProgress\.length === 0 \? \( <p [^>]*> \{progressExcludesExecutable \? PART_ISSUE_NOTHING_AWAITING_APPROVAL : PART_ISSUE_NOTHING_IN_PROGRESS\} <\/p>/,
+      "뺀 세션에서 「실행을 기다리는 신청이 없다」고 말하면 틀린다 — 위 [실행할 건]에 있을 수 있다"
+    );
+    assert.equal(PART_ISSUE_NOTHING_AWAITING_APPROVAL, "결재 중인 신청이 없습니다.");
+    assert.ok(!/실행/.test(PART_ISSUE_NOTHING_AWAITING_APPROVAL), "뺀 세션의 문구가 실행 대기 건까지 없다고 말한다");
+    assert.match(PART_ISSUE_NOTHING_IN_PROGRESS, /결재 중이거나 실행을 기다리는/);
+  });
+
+  test("「승인 완료 · 실행 대기」 이름표는 남는다 — 실행 권한 없는 세션에서 여전히 쓰인다", () => {
+    assert.match(screen, /\bPART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL\b/);
   });
 });
 

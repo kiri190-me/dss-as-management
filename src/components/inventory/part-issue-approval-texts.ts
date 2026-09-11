@@ -10,6 +10,7 @@
  *  · [불출 승인 요청] 단추 — 부품 요청 관리(표·카드)와 부품 상세의 잔량 표.
  *  · 「이대로 승인 요청」 — 불출 창과 사용 창.
  *  · 「신청자가 취소함 / 결재자가 반려함」 — 승인 요청건 탭의 이력.
+ *  · 「결재 중 / 승인 완료 · 실행 대기」 — 승인 요청건 탭의 「진행 중인 신청」.
  * 각자 적으면 같은 단추가 화면마다 다른 이름으로 불리고, 사람은 그것이 같은
  * 기능인지 알 수 없다.
  * ============================================================================
@@ -61,3 +62,24 @@ export const PART_ISSUE_REJECTED_BY_APPROVER_LABEL = "결재자가 반려함";
  */
 export const PART_ISSUE_NOTHING_TO_DECIDE = "지금 처리할 건이 없습니다.";
 export const PART_ISSUE_NOTHING_TO_EXECUTE = "지금 실행할 건이 없습니다.";
+/**
+ * 「진행 중인 신청」이 비었을 때 — 🔴 **두 문구가 갈린다.** [실행할 건]이 보이는
+ * 세션에서는 거기 떠 있는 신청을 이 묶음에서 빼므로, 비었다고 「실행을 기다리는
+ * 신청이 없다」고 말하면 틀린다(위에 있을 수 있다). 그때는 결재 중인 것만 말한다.
+ * 어느 쪽인지는 서버가 넘기는 값으로 화면이 고른다.
+ */
+export const PART_ISSUE_NOTHING_IN_PROGRESS = "결재 중이거나 실행을 기다리는 신청이 없습니다.";
+export const PART_ISSUE_NOTHING_AWAITING_APPROVAL = "결재 중인 신청이 없습니다.";
+
+/**
+ * 「진행 중인 신청」 묶음의 카드가 **지금 어디까지 왔는지** 말하는 이름 둘.
+ * 🔴 신청 상태 두 개(PENDING_APPROVAL · APPROVED)와 짝이다 — 그 묶음을 모으는
+ * 조회도 같은 순수 규칙 두 개(결재를 기다리는가 · 지금 실행할 수 있는가)로
+ * 상태를 고른다. 「승인 완료」만 적으면 재고가 이미 빠진 줄 알므로 「실행 대기」를
+ * 함께 붙인다(승인과 실행은 따로다).
+ */
+export const PART_ISSUE_PROGRESS_AWAITING_APPROVAL_LABEL = "결재 중";
+export const PART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL = "승인 완료 · 실행 대기";
+
+/** 내가 올린 신청 표시. 판정(신청자 = 지금 세션)은 서버가 한다. */
+export const PART_ISSUE_MINE_LABEL = "내 신청";

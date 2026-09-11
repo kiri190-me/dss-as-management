@@ -21,8 +21,14 @@ import {
   getPartIssueRequestDetail,
   listExecutablePartIssueRequests,
   listPartIssueRequestsForPartRequest,
+  listPartIssueRequestsInProgress,
   listPartIssueRequestsPendingMyApproval,
 } from "./inventory-part-issue-requests";
+import {
+  INVENTORY_PART_ISSUE_REQUEST_STATUSES,
+  isPartIssueRequestTerminal,
+  type InventoryPartIssueRequestStatus,
+} from "@/lib/domain/inventory-part-issue-rules";
 
 /**
  * ============================================================================
@@ -32,7 +38,7 @@ import {
  * 없다** — 문을 다는 것은 다음 조각이므로, 여기서 보는 것은 「표가 무엇을 막고
  * 무엇을 허락하는가」와 「읽는 길이 제대로 묶어 오는가」다.
  *
- * 이 파일이 못 박는 것 여섯:
+ * 이 파일이 못 박는 것 일곱:
  *  1. 🔴 **표 셋이 비어 있는 것이 정상 초기 상태다** — 「부품 불출」 결재선 판을
  *     만들기 전까지 이 기능은 없는 것과 같이 동작한다(schema 머리말의 안전장치).
  *  2. 🔴 **한 신청에 결재 대기(REQUESTED) 행은 둘이 될 수 없다** — 부분 유니크가
@@ -44,6 +50,8 @@ import {
  *     나뉘지 않는다.
  *  6. 읽는 길이 신청 + 항목 + 승인 이력을 제대로 묶어 오고, 「내가 결재할 불출
  *     신청」은 **지정된 사람과 최고관리자에게만** 보인다.
+ *  7. 「진행 중인 신청」은 결재 중·실행 대기 **둘만**, **누가 올렸든 전부**, 오래된
+ *     것부터 잡힌다.
  *
  * 격리·청소 규약은 mutations/repair-case-approvals-route.integration.test.ts 를
  * 본떴다. 이 파일이 만든 "partissue-test-" 계정·부품만 쓰고,
@@ -377,6 +385,7 @@ describe("표 셋의 초기 상태", () => {
 
   test("판이 없으면 읽는 길도 아무것도 내놓지 않는다", async () => {
     assert.deepEqual(await listExecutablePartIssueRequests(), []);
+    assert.deepEqual(await listPartIssueRequestsInProgress(), []);
     assert.deepEqual(await listPartIssueRequestsPendingMyApproval(approverAId), []);
     assert.equal(await getPartIssueRequestDetail(randomUUID()), null);
   });
@@ -871,5 +880,107 @@ describe("listExecutablePartIssueRequests · listPartIssueRequestsForPartRequest
     for (const row of rows) {
       assert.equal(row.status, "PENDING_APPROVAL");
     }
+  });
+});
+
+describe("listPartIssueRequestsInProgress", () => {
+  /** 상태 하나짜리 직접 사용 신청. 실행됨은 실행 기록이 짝으로 있어야 들어간다(CHECK). */
+  async function insertWithStatus(
+    status: InventoryPartIssueRequestStatus,
+    overrides: Partial<typeof inventoryPartIssueRequests.$inferInsert> = {}
+  ): Promise<string> {
+    return insertDirectIssueRequest({
+      status,
+      ...(status === "EXECUTED" ? { executedByUserId: requesterId, executedAt: new Date() } : {}),
+      ...overrides,
+    });
+  }
+
+  test("🔴 결재 중·실행 대기만 잡힌다 — 실행됨·반려·취소는 빠진다", async () => {
+    const idByStatus = new Map<InventoryPartIssueRequestStatus, string>();
+    for (const status of INVENTORY_PART_ISSUE_REQUEST_STATUSES) {
+      idByStatus.set(status, await insertWithStatus(status));
+    }
+
+    const caught = new Set((await listPartIssueRequestsInProgress()).map((row) => row.issueRequestId));
+    const caughtStatuses = INVENTORY_PART_ISSUE_REQUEST_STATUSES.filter((status) =>
+      caught.has(idByStatus.get(status) ?? "")
+    );
+
+    // 글자로 한 번 못 박는다 — 규칙 쪽이 바뀌면 이 묶음의 뜻도 바뀌므로 알아채야 한다.
+    assert.deepEqual(caughtStatuses, ["PENDING_APPROVAL", "APPROVED"]);
+    assert.equal(caught.size, 2, "이 시험이 만들지 않은 신청까지 잡혔다");
+
+    // 🔴 SQL 의 목록과 순수 규칙이 같은 말인가 — 「더 나아갈 곳이 남은 상태」와
+    // 정확히 겹쳐야 한다. 끝난 신청이 「진행 중」에 남거나, 진행 중인 신청이
+    // 빠지면 올린 사람은 자기 신청이 어디 있는지 모르게 된다.
+    for (const status of INVENTORY_PART_ISSUE_REQUEST_STATUSES) {
+      assert.equal(
+        caught.has(idByStatus.get(status) ?? ""),
+        !isPartIssueRequestTerminal(status),
+        `${status}: 조회와 순수 규칙(isPartIssueRequestTerminal)이 다른 말을 한다`
+      );
+    }
+  });
+
+  test("🔴 누가 올렸든, 누가 결재하든 전부 잡힌다 — 사람으로 거르지 않는다", async () => {
+    const routeId = await insertPartIssueRoute(1, [approverAId, approverBId]);
+
+    // 서로 다른 사람이 올리고, 서로 다른 사람에게 지정된 신청들.
+    const byRequester = await insertWithStatus("PENDING_APPROVAL");
+    await insertPendingApproval(byRequester, {
+      routeId,
+      routeStepOrder: 1,
+      assignedApproverUserId: approverAId,
+    });
+    const byOutsider = await insertWithStatus("PENDING_APPROVAL", { requestedByUserId: outsiderId });
+    await insertPendingApproval(byOutsider, {
+      requestedByUserId: outsiderId,
+      routeId,
+      routeStepOrder: 2,
+      assignedApproverUserId: approverBId,
+    });
+    // 지정된 사람이 비활성이어도 신청 자체는 진행 중이다.
+    const byInactiveAssignee = await insertWithStatus("PENDING_APPROVAL", {
+      requestedByUserId: superAdminId,
+    });
+    await insertPendingApproval(byInactiveAssignee, {
+      requestedByUserId: superAdminId,
+      routeId,
+      routeStepOrder: 1,
+      assignedApproverUserId: inactiveApproverId,
+    });
+    // 결재 행이 없는(판을 타지 않은) 승인 완료 건.
+    const approvedByApprover = await insertWithStatus("APPROVED", { requestedByUserId: approverAId });
+
+    const caught = (await listPartIssueRequestsInProgress()).map((row) => row.issueRequestId);
+    assert.deepEqual(
+      [...caught].sort(),
+      [byRequester, byOutsider, byInactiveAssignee, approvedByApprover].sort()
+    );
+
+    // 대조군 — 같은 신청들이 「내가 결재할 건」에서는 사람마다 갈린다. 이 조회는
+    // 그 좁히기를 **타지 않는다**는 것이 이 시험의 요점이다.
+    assert.deepEqual(
+      (await listPartIssueRequestsPendingMyApproval(outsiderId)).map((row) => row.issueRequestId),
+      []
+    );
+  });
+
+  test("오래된 것부터 — 같은 시각이면 id 순이다", async () => {
+    const at = (iso: string) => new Date(iso);
+    const newest = await insertWithStatus("APPROVED", { requestedAt: at("2026-09-03T00:00:00.000Z") });
+    const oldest = await insertWithStatus("PENDING_APPROVAL", { requestedAt: at("2026-09-01T00:00:00.000Z") });
+    const tieA = await insertWithStatus("PENDING_APPROVAL", { requestedAt: at("2026-09-02T00:00:00.000Z") });
+    const tieB = await insertWithStatus("APPROVED", { requestedAt: at("2026-09-02T00:00:00.000Z") });
+
+    const [firstOfTie, secondOfTie] = [tieA, tieB].sort();
+    const rows = await listPartIssueRequestsInProgress();
+    assert.deepEqual(
+      rows.map((row) => row.issueRequestId),
+      [oldest, firstOfTie, secondOfTie, newest]
+    );
+    assert.equal(rows[0].requestedAt, "2026-09-01T00:00:00.000Z");
+    assert.equal(rows[0].partRequestId, null);
   });
 });

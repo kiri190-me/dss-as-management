@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -13,7 +13,12 @@ import {
   users,
 } from "../schema";
 import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
-import type { InventoryPartIssueRequestStatus } from "@/lib/domain/inventory-part-issue-rules";
+import {
+  INVENTORY_PART_ISSUE_REQUEST_STATUSES,
+  isPartIssueRequestAwaitingApproval,
+  isPartIssueRequestExecutable,
+  type InventoryPartIssueRequestStatus,
+} from "@/lib/domain/inventory-part-issue-rules";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 
 /**
@@ -26,9 +31,11 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  * 🔴 **이 파일은 아무것도 쓰지 않는다.** 판정도 최종 판정이 아니다 — 실제 승인·
  * 반려·실행은 다음 조각들의 mutation 이 자기 트랜잭션 안에서 전부 다시 확인한다.
  *
- * 🔴 **이번 조각(2026-09-10)에서는 이 함수들을 부르는 화면이 아직 없다.** 표와
- * 읽는 길만 먼저 깔고 문을 다는 것은 다음 조각이므로, 쓰이지 않는 채로 남는
- * 것이 정상이다.
+ * 이 함수들을 부르는 화면은 재고 관리 > [승인 요청건] 탭
+ * (app/(app)/inventory/approvals/page.tsx)이다. 🔴 **누가 어느 묶음을 보는지는
+ * 그 페이지가 정한다** — 여기 조회들은 사람으로 거르지 않는다. 예외는 하나,
+ * 「내가 결재할 건」(listPartIssueRequestsPendingMyApproval)이 아래 지정 관문으로
+ * 좁히는 것뿐이다.
  *
  * ── 판정을 새로 만들지 않는다 ───────────────────────────────────────────
  * 「이 결재를 내가 처리할 수 있는가」는 출하 승인과 **같은 함수 하나**를 본다 —
@@ -390,6 +397,53 @@ export async function listExecutablePartIssueRequests(): Promise<
     })
     .from(inventoryPartIssueRequests)
     .where(eq(inventoryPartIssueRequests.status, "APPROVED"))
+    .orderBy(asc(inventoryPartIssueRequests.requestedAt), asc(inventoryPartIssueRequests.id));
+
+  return rows.map((row) => ({
+    issueRequestId: row.issueRequestId,
+    requestedAt: row.requestedAt.toISOString(),
+    partRequestId: row.partRequestId,
+  }));
+}
+
+/**
+ * 「진행 중」인 신청의 상태들 — 결재 중이거나, 승인이 끝나 실행을 기다린다.
+ *
+ * 🔴 글자로 다시 적지 않고 **순수 규칙 두 개에서 뽑는다**(결재를 기다리는가 ·
+ * 지금 실행할 수 있는가). 그 둘이 화면의 두 이름(「결재 중」·「승인 완료 · 실행
+ * 대기」)과 짝이므로, 여기 목록과 화면의 이름표가 서로 다른 말을 할 수 없다.
+ * 그래도 뽑힌 결과가 PENDING_APPROVAL·APPROVED 둘뿐인지는 통합 시험이 못 박는다.
+ */
+const PART_ISSUE_IN_PROGRESS_STATUSES = INVENTORY_PART_ISSUE_REQUEST_STATUSES.filter(
+  (status) => isPartIssueRequestAwaitingApproval(status) || isPartIssueRequestExecutable(status)
+);
+
+/**
+ * 아직 끝나지 않은 불출 신청 전부 — 결재 중(PENDING_APPROVAL)이거나 승인이 끝나
+ * 실행을 기다리는(APPROVED) 것. 오래된 것부터.
+ *
+ * [승인 요청건] 탭의 「진행 중인 신청」 묶음이 쓴다. 신청을 올린 사람이 자기
+ * 신청이 어디까지 왔는지 볼 곳이 이것이다 — 「내가 결재할 건」과 「실행할 건」은
+ * 올린 사람에게는 비어 보이는 것이 정상이라, 이 묶음이 없으면 올린 신청이
+ * 사라진 것처럼 보인다.
+ *
+ * 🔴 **요청자·결재자로 거르지 않는다.** 누가 이 목록을 보는지는 부르는 페이지가
+ * 정한다(재고 메뉴를 볼 수 있는 사람 전원). 여기서 사람을 좁히면 그 기준이 두
+ * 곳에 적힌다.
+ *
+ * 동점 처리는 listExecutablePartIssueRequests 와 같다(요청 시각 → id).
+ */
+export async function listPartIssueRequestsInProgress(): Promise<
+  { issueRequestId: string; requestedAt: string; partRequestId: string | null }[]
+> {
+  const rows = await db
+    .select({
+      issueRequestId: inventoryPartIssueRequests.id,
+      requestedAt: inventoryPartIssueRequests.requestedAt,
+      partRequestId: inventoryPartIssueRequests.partRequestId,
+    })
+    .from(inventoryPartIssueRequests)
+    .where(inArray(inventoryPartIssueRequests.status, PART_ISSUE_IN_PROGRESS_STATUSES))
     .orderBy(asc(inventoryPartIssueRequests.requestedAt), asc(inventoryPartIssueRequests.id));
 
   return rows.map((row) => ({
