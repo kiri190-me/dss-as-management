@@ -110,10 +110,16 @@ export function quoteEditHref(input: { quoteId: string; repairCaseId: string | n
 }
 
 /**
- * 수정 화면이 [취소] 뒤에 돌아갈 곳. 위 머리말의 세 조건을 모두 넘으면 그 건의
- * 「견적서」 탭, 아니면 null 이다(그때는 지금까지와 똑같이 `/quotes`).
+ * 주소에 실려 온 건 id 를 **믿어도 되는가**. 위 머리말의 세 조건을 모두 넘으면
+ * 그 건의 id — **DB 가 준 값**(`quote.repairCaseId`) — 를, 하나라도 못 넘으면
+ * null 을 돌려준다.
+ *
+ * 🔴 이 판정은 **여기 한 곳에만** 적는다. 수정 화면의 [취소](returnHrefForEditQuote)
+ * 와 인쇄 화면의 「돌아가기」(returnHrefForQuotePrint)가 둘 다 이것을 부른다 — 두
+ * 벌로 적어 두면 언젠가 한쪽만 느슨해지고, 그쪽이 손으로 바꾼 링크를 남의 건으로
+ * 보내는 문이 된다.
  */
-export function returnHrefForEditQuote(
+export function trustedLinkedRepairCaseId(
   searchParams: SearchParamsInput | undefined,
   quote: { repairCaseId: string | null }
 ): string | null {
@@ -122,7 +128,60 @@ export function returnHrefForEditQuote(
   if (quote.repairCaseId === null) return null;
   // UUID 는 대소문자를 가리지 않는다. 같은 건인지는 글자 모양이 아니라 값으로 본다.
   if (linked.toLowerCase() !== quote.repairCaseId.toLowerCase()) return null;
-  return repairCaseDetailHrefs(quote.repairCaseId).quotes;
+  return quote.repairCaseId;
+}
+
+/**
+ * 수정 화면이 [취소] 뒤에 돌아갈 곳. 위 머리말의 세 조건을 모두 넘으면 그 건의
+ * 「견적서」 탭, 아니면 null 이다(그때는 지금까지와 똑같이 `/quotes`).
+ */
+export function returnHrefForEditQuote(
+  searchParams: SearchParamsInput | undefined,
+  quote: { repairCaseId: string | null }
+): string | null {
+  const repairCaseId = trustedLinkedRepairCaseId(searchParams, quote);
+  return repairCaseId === null ? null : repairCaseDetailHrefs(repairCaseId).quotes;
+}
+
+/**
+ * ============================================================================
+ * 수리 건 → 견적서 **인쇄 화면** → 수정 화면 → 다시 그 건
+ * ============================================================================
+ * 「견적서」 탭의 [미리보기 · PDF] 는 독립 페이지 `/quotes/{id}/print` 로 간다. 그
+ * 화면의 「← 견적서로 돌아가기」가 맨 주소 `/quotes/{id}` 로 가면 건 id 가 거기서
+ * 떨어지고, 이어서 수정 화면의 [취소]가 `/quotes` 로 떨어진다 — 위 수정 화면이
+ * 고친 그 일이 한 화면 건너서 다시 생긴다.
+ *
+ * 그래서 인쇄 주소에도 **같은 이름**(`repairCaseId`)으로 건 id 하나를 싣고, 인쇄
+ * 화면은 그것을 **수정 화면과 똑같은 판정**(trustedLinkedRepairCaseId)으로 걸러
+ * 돌아갈 수정 화면 주소에 다시 싣는다. 판정을 넘으면 수정 화면이 받는 값은 DB 가
+ * 준 id 이므로, 거기서도 같은 판정을 그대로 넘는다.
+ * ============================================================================
+ */
+
+/**
+ * 목록의 [미리보기 · PDF] 가 여는 인쇄 화면 주소. 접수 건이 없으면(null) **지금까지의
+ * 그 주소 그대로**다 — PO/내자 목록은 한 글자도 달라지지 않는다.
+ */
+export function quotePrintHref(input: { quoteId: string; repairCaseId: string | null }): string {
+  if (input.repairCaseId === null) return `/quotes/${input.quoteId}/print`;
+  const params = new URLSearchParams({ [QUOTE_NEW_REPAIR_CASE_PARAM]: input.repairCaseId });
+  return `/quotes/${input.quoteId}/print?${params.toString()}`;
+}
+
+/**
+ * 인쇄 화면의 「← 견적서로 돌아가기」가 갈 곳. 주소의 건 id 가 판정을 넘으면
+ * **그 건을 실은 수정 화면 주소**, 아니면 지금까지의 `/quotes/{id}` 그대로다.
+ * 언제나 주소가 있다(null 이 아니다) — 돌아갈 견적서 자체는 늘 있기 때문이다.
+ */
+export function returnHrefForQuotePrint(
+  searchParams: SearchParamsInput | undefined,
+  quote: { id: string; repairCaseId: string | null }
+): string {
+  return quoteEditHref({
+    quoteId: quote.id,
+    repairCaseId: trustedLinkedRepairCaseId(searchParams, quote),
+  });
 }
 
 function firstValue(value: string | string[] | undefined): string {

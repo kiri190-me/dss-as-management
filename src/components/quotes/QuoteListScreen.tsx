@@ -10,7 +10,7 @@ import {
 } from "@/components/common/master-data-trash-dialogs";
 import { deleteQuoteAction, restoreQuoteAction } from "@/lib/server/actions/quotes";
 import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
-import { quoteEditHref } from "@/lib/domain/quote-new-link";
+import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
 
 /**
@@ -94,7 +94,10 @@ export default function QuoteListScreen({
    *
    * ⚠️ 표와 카드 **두 곳 모두** 이 값으로 주소를 만든다 — 한쪽만 바꾸면 창 폭에 따라
    * 돌아가는 곳이 달라진다(ResponsiveList 가 폭을 재서 둘 중 하나를 고른다).
-   * 미리보기·xlsx 링크는 건드리지 않는다.
+   *
+   * [미리보기 · PDF] 도 이 값을 싣는다(quotePrintHref) — 인쇄 화면의 「돌아가기」가
+   * 맨 `/quotes/{id}` 로 가면 거기서 건 id 가 떨어져 [취소]가 다시 `/quotes` 로 간다.
+   * null 이면 지금까지의 `/quotes/{id}/print` 그대로다. xlsx 링크는 건드리지 않는다.
    */
   quoteLinkRepairCaseId?: string | null;
 }) {
@@ -430,7 +433,7 @@ function QuoteTable({
             </td>
             <td className="whitespace-nowrap px-3 py-2">
               <div className="flex gap-1">
-                <PreviewLink id={row.id} />
+                <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
                 <DownloadLink row={row} />
                 {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
               </div>
@@ -485,7 +488,7 @@ function QuoteCardList({
             </span>
           </p>
           <div className="flex gap-1">
-            <PreviewLink id={row.id} />
+            <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
             <DownloadLink row={row} />
             {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
           </div>
@@ -495,11 +498,16 @@ function QuoteCardList({
   );
 }
 
-/** 미리보기 · PDF. 브라우저 인쇄에서 "PDF로 저장"을 고르면 파일이 된다. */
-function PreviewLink({ id }: { id: string }) {
+/**
+ * 미리보기 · PDF. 브라우저 인쇄에서 "PDF로 저장"을 고르면 파일이 된다.
+ *
+ * `repairCaseId` 는 줄 링크와 같은 값이다(QuoteListScreen 의 quoteLinkRepairCaseId).
+ * 인쇄 화면이 그것을 받아 「돌아가기」를 그 건을 실은 수정 화면으로 보낸다.
+ */
+function PreviewLink({ id, repairCaseId }: { id: string; repairCaseId: string | null }) {
   return (
     <Link
-      href={`/quotes/${id}/print`}
+      href={quotePrintHref({ quoteId: id, repairCaseId })}
       className="inline-block rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
     >
       미리보기 · PDF

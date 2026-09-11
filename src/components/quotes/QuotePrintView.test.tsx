@@ -62,11 +62,17 @@ const QUOTE: QuotePrintData = {
   ],
 };
 
-type Opened = { quoteId: string | null; onClose?: () => void };
+type Opened = { quoteId: string | null; onClose?: () => void; backHref?: string };
 
 function render(opened: Opened): string {
   return renderToStaticMarkup(
-    <QuotePrintView quote={QUOTE} header={HEADER} quoteId={opened.quoteId} onClose={opened.onClose} />
+    <QuotePrintView
+      quote={QUOTE}
+      header={HEADER}
+      quoteId={opened.quoteId}
+      onClose={opened.onClose}
+      backHref={opened.backHref}
+    />
   );
 }
 
@@ -140,6 +146,40 @@ test("독립된 미리보기 페이지에서는 견적서 주소로 가는 링�
 
   const control = backControl({ quoteId: "q-1" });
   assert.notEqual(control.type, "button", "닫을 폼이 없는 화면에서 단추는 죽은 단추다");
+});
+
+/**
+ * 「견적서」 탭에서 연 인쇄 화면은 페이지가 **그 건을 실은 수정 화면 주소**를 넘긴다
+ * (print/page.tsx → domain/quote-new-link.ts 의 returnHrefForQuotePrint). 맨
+ * `/quotes/{id}` 로 가면 거기서 건 id 가 떨어져, 수정 화면의 [취소]가 `/quotes` 로 간다.
+ */
+const BACK_WITH_CASE = "/quotes/q-1?repairCaseId=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+test("🔴 독립 페이지: 넘겨받은 돌아가기 주소로 간다 — 수리 건 맥락이 끊기지 않게", () => {
+  const html = render({ quoteId: "q-1", backHref: BACK_WITH_CASE });
+  // 마크업은 & 를 이스케이프하지만 이 주소에는 & 가 없다 — 그대로 비교한다.
+  assert.ok(html.includes(`href="${BACK_WITH_CASE}"`), "넘겨받은 주소가 쓰이지 않았다");
+  assert.ok(!html.includes('href="/quotes/q-1"'), "맨 주소가 함께 그려지면 맥락이 끊긴다");
+
+  const control = backControl({ quoteId: "q-1", backHref: BACK_WITH_CASE });
+  assert.notEqual(control.type, "button");
+});
+
+test("🔴 겹쳐 뜬 미리보기는 돌아가기 주소를 받아도 여전히 닫기 단추다", () => {
+  // onClose 갈래는 이번 일과 무관하다 — 주소를 받았다고 링크가 되면 죽은 단추가 된다.
+  let closed = 0;
+  const control = backControl({ quoteId: "q-1", onClose: () => { closed += 1; }, backHref: BACK_WITH_CASE });
+  assert.equal(control.type, "button");
+  click(control);
+  assert.equal(closed, 1);
+
+  const html = render({ quoteId: "q-1", onClose: () => {}, backHref: BACK_WITH_CASE });
+  assert.ok(!html.includes(BACK_WITH_CASE), "겹쳐 뜬 미리보기에 주소 링크가 그려졌다");
+});
+
+test("돌아가기 주소를 받아도 Excel 받기는 그대로다", () => {
+  const html = render({ quoteId: "q-1", backHref: BACK_WITH_CASE });
+  assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'));
 });
 
 // ───────────────────────────── Excel 받기는 종전대로 저장 여부로 갈린다

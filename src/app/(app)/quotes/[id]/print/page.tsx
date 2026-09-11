@@ -8,6 +8,7 @@ import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { readAllQuoteTemplateHeaders, readQuoteWorkSections } from "@/lib/storage/quote-template";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
+import { returnHrefForQuotePrint, type SearchParamsInput } from "@/lib/domain/quote-new-link";
 
 export const metadata: Metadata = {
   title: "견적서 미리보기 | DSS A/S 관리 시스템",
@@ -27,11 +28,19 @@ export const dynamic = "force-dynamic";
  *
  * 지워진 장은 없는 것이다(getQuoteForEdit 이 is_deleted 로 좁힌다) — 휴지통에
  * 넣은 견적서를 주소만으로 계속 뽑을 수 있으면 휴지통이 뜻을 잃는다.
+ *
+ * ── 접수 건의 「견적서」 탭에서 들어온 경우 ──────────────────────────────
+ * 주소에 그 건의 id 가 실려 온다(domain/quote-new-link.ts 의 quotePrintHref).
+ * 그 id 가 **이 견적서가 붙은 건과 같을 때만** 「돌아가기」가 그 건을 실은 수정
+ * 화면으로 간다 — 그래야 거기서 [취소]가 그 탭으로 돌아온다. 아니면 지금까지와
+ * 같이 `/quotes/{id}` 다(판정은 수정 화면과 한 벌 — returnHrefForQuotePrint).
  */
 export default async function QuotePrintPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParamsInput>;
 }) {
   await requireAreaAccessForCurrentUser("quotes");
 
@@ -72,12 +81,17 @@ export default async function QuotePrintPage({
   ]);
   const header = headers[templateKey];
 
+  // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
+  // 정하면 손으로 바꾼 링크가 사람을 남의 건으로 보낸다(수정 화면과 같은 판단).
+  const backHref = returnHrefForQuotePrint(searchParams ? await searchParams : undefined, quote);
+
   return (
     <QuotePrintView
       quote={quote}
       header={header}
       workSections={workSections}
       quoteId={quote.id}
+      backHref={backHref}
     />
   );
 }

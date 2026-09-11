@@ -134,6 +134,7 @@ export default function QuotePrintView({
   workSections,
   quoteId,
   onClose,
+  backHref,
 }: {
   quote: QuotePrintData;
   /** 양식에서 읽어 온 회사 정보·기본 문구·계좌. 못 읽은 칸은 null 이고 그 줄은 비운다. */
@@ -166,6 +167,16 @@ export default function QuotePrintView({
    * `/quotes/{id}/print` 는 주지 않는다.
    */
   onClose?: () => void;
+  /**
+   * 독립 페이지의 「← 견적서로 돌아가기」가 갈 주소. **`onClose` 가 없을 때만 쓰인다**
+   * — 겹쳐 뜬 미리보기는 닫기 단추라 주소가 없다.
+   *
+   * 인쇄 페이지가 주소의 건 id 를 그 견적서의 건과 맞춰 본 뒤 정해 준다
+   * (domain/quote-new-link.ts 의 returnHrefForQuotePrint): 「견적서」 탭에서 왔으면
+   * 그 건을 실은 수정 화면, 아니면 `/quotes/{id}`. 안 주면 `/quotes/{quoteId}`
+   * (예전 그대로).
+   */
+  backHref?: string;
 }) {
   const items = quote.items.map((item) => ({
     name: item.partNameText,
@@ -220,8 +231,9 @@ export default function QuotePrintView({
           </button>
         ) : (
           // 독립된 미리보기 페이지(`/quotes/{id}/print`)다. 닫을 폼이 없으므로
-          // 돌아갈 곳은 주소로만 있다.
-          <Link href={`/quotes/${quoteId}`} className="qp-btn">
+          // 돌아갈 곳은 주소로만 있다 — 페이지가 정해 준 `backHref`(「견적서」
+          // 탭에서 왔으면 그 건을 실은 수정 화면), 없으면 `/quotes/{id}`.
+          <Link href={backHref ?? `/quotes/${quoteId}`} className="qp-btn">
             ← 견적서로 돌아가기
           </Link>
         )}
