@@ -18,6 +18,7 @@ import {
 } from "./weekly-report";
 import { isLongPendingPo } from "./long-pending-po";
 import { WORKFLOW_TYPE_CODES, type RepairStatus, type WorkflowType } from "./types";
+import { buildWeeklyReportPreviewSample } from "./weekly-report-preview-sample";
 
 /**
  * 이 파일이 지키려는 것은 둘이다 — **승인된 매핑표가 코드와 같다**, 그리고
@@ -1178,4 +1179,125 @@ test("옮긴 자리에 옛 크기 클래스가 남지 않았다 — 한 요소�
       assert.ok(!pattern.test(source), `${file} 에 옮겼어야 할 ${pattern} 가 남아 있다`);
     }
   }
+});
+
+// ─────────────────────────────── 개발자 모드 [주간보고] 미리보기의 표본 자료
+
+/**
+ * 개발자 모드 [주간보고] 편집 화면은 크기를 고르는 동안 실제 주간보고 컴포넌트를
+ * **표본(가짜) 자료**로 그린다(domain/weekly-report-preview-sample.ts). 이 표본이
+ * 지킬 것은 둘이다 — 실제 자료를 읽지 않는다(읽으면 주간보고 권한 없이 고객사
+ * 자료를 보여 주는 두 번째 문이 된다), 그리고 크기를 고를 때 봐야 하는 모양을
+ * 빠짐없이 담는다(하나가 빠지면 그 모양이 새 크기에서 어떻게 되는지 저장해 보고서야
+ * 안다).
+ */
+const PREVIEW_SAMPLE_FILE = new URL("./weekly-report-preview-sample.ts", import.meta.url);
+
+test("미리보기 표본은 실제 자료를 읽지 않는다 — DB 는 타입만, server-only 도 지금 시각도 없다", () => {
+  const source = readSourceWithoutComments(PREVIEW_SAMPLE_FILE);
+
+  // `[^;]` 가 줄바꿈까지 넘어가므로 여러 줄 import 도 한 덩어리로 잡힌다.
+  const imports = [...source.matchAll(/^import\s[^;]*?from\s+["']([^"']+)["'];?/gm)];
+  assert.ok(imports.length > 0, "import 줄을 찾지 못했다 — 시험의 읽는 법이 틀렸다");
+  for (const match of imports) {
+    const [line, from] = match;
+    if (from.startsWith("@/lib/db") || from.includes("/db/")) {
+      // `import type` 은 컴파일되면 사라진다. 값을 가져오는 순간 조회 모듈이 딸려 온다.
+      assert.match(line, /^import\s+type\s/, `표본이 DB 모듈에서 값을 가져온다: ${line}`);
+    }
+  }
+  assert.doesNotMatch(source, /server-only/, "표본이 server-only 를 불러온다");
+  assert.doesNotMatch(source, /\bdb\s*\./, "표본이 DB 클라이언트를 쓴다");
+  // 오늘을 못 박지 않으면 날이 지날수록 장기 PO 미발행 줄이 생겼다 없어졌다 한다.
+  assert.doesNotMatch(source, /new Date\(\s*\)/, "표본이 지금 시각을 읽는다");
+  assert.doesNotMatch(source, /Date\.now\(/, "표본이 지금 시각을 읽는다");
+
+  // 가짜임을 이름과 머리말이 말한다.
+  const raw = readFileSync(PREVIEW_SAMPLE_FILE, "utf8");
+  assert.match(raw, /표본\(가짜\) 자료/, "머리말이 가짜 자료임을 밝히지 않는다");
+});
+
+test("미리보기 표본이 크기를 고를 때 봐야 할 모양을 전부 담는다", () => {
+  const sample = buildWeeklyReportPreviewSample();
+  const pairs = pairWeeklyReportBlocksByCustomer(sample.report.blocks);
+  const rows = sample.report.blocks.flatMap((block) => block.rows);
+
+  // 짧게 — 한눈에 비교할 만큼.
+  assert.ok(pairs.length >= 2 && pairs.length <= 4, `고객사 줄이 ${pairs.length}개다`);
+  assert.ok(rows.length <= 10, `표본 줄이 ${rows.length}개다 — 한눈에 볼 만큼이어야 한다`);
+
+  // 긴 고객사명 — 소제목 줄이 넘치는 모양.
+  assert.ok(
+    pairs.some((pair) => pair.customerName.length >= 20),
+    "긴 고객사명이 없다"
+  );
+  // RFG/MB 한쪽만 빈 쌍 — 빈 쪽이 「해당 없음」으로 자리를 지키는 모양.
+  assert.ok(
+    pairs.some((pair) => (pair.rfg.rows.length === 0) !== (pair.mb.rows.length === 0)),
+    "한쪽만 빈 고객사 줄이 없다"
+  );
+  // 분류 안 됨 — 맨 위 빨간 안내 · 빨간 집계 칸 · 빨간 배지.
+  assert.ok(sample.report.total.unclassified > 0, "분류 안 된 건이 없다");
+  assert.ok(rows.some((row) => row.reportStatus === null));
+  // 장기 PO 미발행 — 빨간 볼드. 판정은 도메인 함수가 표본의 고정된 오늘로 한다.
+  assert.ok(rows.some((row) => row.isLongPendingPo), "장기 PO 미발행 줄이 없다");
+  // PO 발행 완료 — 겹쳐 세는 칸.
+  assert.ok(sample.report.total.poIssued > 0, "PO 발행 완료 건이 없다");
+  // 여러 줄 비고.
+  assert.ok(rows.some((row) => (row.notes ?? "").includes("\n")), "여러 줄 비고가 없다");
+
+  // 금주 목표 줄 · 납입 예정 줄.
+  assert.ok(sample.goals.length > 0, "금주 목표 줄이 없다");
+  assert.ok(sample.deliveries.length > 0, "납입 예정 줄이 없다");
+  // 목표·납입이 가리키는 수리 건이 표본 안에 있다 — 모양이 실제 조회와 같다.
+  const caseIds = new Set(rows.map((row) => row.id));
+  for (const goal of sample.goals) assert.ok(caseIds.has(goal.repairCaseId), goal.id);
+  for (const delivery of sample.deliveries) assert.ok(caseIds.has(delivery.repairCaseId), delivery.id);
+  // 목표·납입 줄의 주가 표본의 주다 — 다르면 목표 상자가 「이번 주가 아닌 주」 안내를 띄운다.
+  for (const row of [...sample.goals, ...sample.deliveries]) {
+    assert.equal(row.weekStartDate, sample.weekStart, row.id);
+  }
+
+  // 표본의 숫자도 실제와 같은 규칙으로 맞는다 — 총 대수 = 6칸의 합 + 분류 안 됨.
+  assert.equal(
+    sample.report.total.total,
+    sumWeeklyReportStatusCounts(sample.report.total) + sample.report.total.unclassified
+  );
+});
+
+test("미리보기 표본은 부를 때마다 새로 만든다 — 한 번 그린 것이 다음 표본에 번지지 않는다", () => {
+  const first = buildWeeklyReportPreviewSample();
+  const second = buildWeeklyReportPreviewSample();
+  assert.notEqual(first.report, second.report);
+  assert.notEqual(first.goals, second.goals);
+  assert.deepEqual(first.report, second.report, "같은 표본이 부를 때마다 달라진다");
+});
+
+test("🔴 [주간보고] 편집 화면은 표본으로만 그리고 권한 값을 전부 끈다 — 실제 주간보고 조회를 부르지 않는다", () => {
+  const page = readSourceWithoutComments(
+    new URL("../../app/(app)/settings/developer/weekly-report/page.tsx", import.meta.url)
+  );
+
+  assert.match(page, /buildWeeklyReportPreviewSample\(\)/, "표본을 쓰지 않는다");
+  // 실제 주간보고 페이지가 부르는 조회들. 하나라도 들어오면 개발자 모드가 주간보고
+  // 권한 없이 고객사 자료를 보여 주는 문이 된다.
+  for (const query of [
+    "listWeeklyReportCases",
+    "listWeeklyReportGoals",
+    "listWeeklyReportDeliveries",
+    "listRepairCaseLinkOptions",
+    "db/queries/weekly-report",
+  ]) {
+    assert.ok(!page.includes(query), `편집 화면이 실제 조회 ${query} 를 부른다`);
+  }
+
+  // 미리보기의 권한 값 — 비고 수정 · 목표 적기 · 고르개 목록이 전부 꺼져 있다.
+  const screen = /<WeeklyReportScreen\s[\s\S]*?\/>/.exec(page)?.[0];
+  assert.ok(screen, "미리보기로 실제 주간보고 컴포넌트를 그리지 않는다");
+  assert.match(screen, /canEditNotes=\{false\}/, "비고 수정이 켜져 있다");
+  assert.match(screen, /canEdit:\s*false/, "목표 적기가 켜져 있다");
+  assert.match(screen, /repairCaseOptions:\s*\[\]/, "수리 건 고르개 목록이 들어간다");
+  // 미리보기는 편집기의 preview 로 넘어간다(편집기가 inert 래퍼로 감싼다).
+  assert.match(page, /group="weeklyReport"/);
+  assert.match(page, /preview=\{\s*<WeeklyReportScreen/);
 });

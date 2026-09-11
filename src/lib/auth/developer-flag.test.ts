@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROLE_CODES, roleLabels, type AccountApprovalStatus, type Role } from "@/lib/domain/types";
 import { PERMISSION_LEAF_KEYS } from "./permission-features";
@@ -1245,6 +1245,41 @@ test("🔴 개발자 모드 페이지가 스스로 막는다 — 메뉴에서 �
   // 된다. 앱은 자기 다음 버전을 자기 안에서 배포할 수 없다(CLAUDE.md 의 배포 규칙).
   assert.ok(!/<button\b/.test(page), "동작하지 않는 단추가 자리 표시로 들어갔다");
   assert.ok(!/<form\b/.test(page), "저장할 곳이 없는 입력 양식이 들어갔다");
+});
+
+test("🔴 개발자 모드의 하위 화면이 **전부** 스스로 관문을 다시 건다 — [주간보고] 포함", () => {
+  // 레이아웃 한 겹에만 기대지 않는다(settings/developer/layout.tsx 머리말). 하위 화면이
+  // 늘 때마다 이 목록을 손으로 적으면 새 화면 하나가 빠진 채로 통과하므로, 폴더를
+  // 훑어 page.tsx 를 전부 찾는다.
+  const root = join(process.cwd(), "src/app/(app)/settings/developer");
+  const pages: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "page.tsx") pages.push(full);
+    }
+  };
+  walk(root);
+
+  const relativePages = pages.map((file) => file.slice(root.length).replace(/\\/g, "/")).sort();
+  assert.ok(
+    relativePages.includes("/weekly-report/page.tsx"),
+    `[주간보고] 화면이 없다: ${relativePages.join(", ")}`
+  );
+
+  for (const file of pages) {
+    const page = readFileSync(file, "utf8");
+    const name = file.slice(root.length).replace(/\\/g, "/");
+    assert.ok(/from ["'][^"']*developer-mode-gate["']/.test(page), `${name} 가 관문 창구를 부르지 않는다`);
+    assert.ok(/if\s*\(!mayEnterDeveloperMode\(/.test(page), `${name} 가 스스로 막지 않는다`);
+    assert.ok(/redirect\(["']\/no-access["']\)/.test(page), `${name} 가 막힐 때 /no-access 로 보내지 않는다`);
+    // 개발자 표시는 매 요청 읽는다 — 캐시된 페이지는 표시를 끈 뒤에도 남는다.
+    assert.ok(
+      /export const dynamic = "force-dynamic";/.test(page),
+      `${name} 가 force-dynamic 이 아니다`
+    );
+  }
 });
 
 test("개발자 표시는 역할별 권한 설정으로 켤 수 없다 — 설정 단위에 존재하지 않는다", () => {

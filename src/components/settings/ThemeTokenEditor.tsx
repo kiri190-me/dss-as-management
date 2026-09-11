@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -24,6 +24,16 @@ import {
 } from "@/lib/validation/ui-theme-token-input";
 import { saveUiThemeTokensAction } from "@/lib/server/actions/ui-theme-tokens";
 import ThemeTokenPreview from "./ThemeTokenPreview";
+import {
+  remNumberOf,
+  remTextOf,
+  remValueFromText,
+  WEEKLY_REPORT_BOX_TOKENS,
+  WEEKLY_REPORT_FONT_TOKENS,
+  WEEKLY_REPORT_OTHER_TOKENS,
+  weeklyReportPreviewStyle,
+  weeklyReportSizeRange,
+} from "./weekly-report-size-controls";
 
 /**
  * ============================================================================
@@ -43,6 +53,15 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * 전체(토큰 61개·대비 11쌍)로 한다 — 색 화면에서 바탕색 하나를 바꿔도 그 판정에는
  * 이 화면에 없는 글자색이 함께 필요하고, 미리보기 역시 한 벌이 다 있어야
  * 그려진다.
+ *
+ * ── 셋째 화면: 주간보고(settings/developer/weekly-report) ─────────────────
+ * 주간보고 전용 글자 8 · 상자 7 도 **같은 편집기**다(`group="weeklyReport"`). 저장·
+ * 되돌리기·「이 화면 전부 기본값으로」·확인창·우회 안내가 그대로 따라온다. 다른
+ * 것은 둘이다 — 칸이 슬라이더 + 숫자(rem)이고, 미리보기가 앱 공용 견본
+ * (ThemeTokenPreview)이 아니라 **실제 주간보고 컴포넌트**를 표본 자료로 그린 것이다.
+ * 그 미리보기는 서버 페이지가 그려 `preview` 로 넘기고, 이 편집기는 그것을 `inert`
+ * 래퍼로 감싸 편집 중인 값을 그 래퍼의 CSS 변수(인라인 style)로 건다 — 슬라이더를
+ * 움직이면 서버를 거치지 않고 바로 바뀐다(아래 구조선 문단과 같은 원리).
  *
  * ── 되돌리는 길이 셋이고, 셋의 뜻이 전부 다르다 ─────────────────────────
  *   · **되돌리기** — 편집 중인 값을 *지금 저장돼 있는 값*으로 돌린다. 서버에
@@ -77,7 +96,7 @@ import ThemeTokenPreview from "./ThemeTokenPreview";
  * ============================================================================
  */
 
-// ─────────────────────────── 편집 가능한 자리(등록부 전체 96칸 · 이 편집기가 그리는 것 81칸)
+// ─────────────── 편집 가능한 자리(등록부 전체 96칸 = 색 70 · 모서리·글자 크기 11 · 주간보고 15)
 
 /** 편집 가능한 한 칸. 토큰 하나가 scoped 면 두 칸, 아니면 한 칸이 된다. */
 type Slot = { key: string; token: UiThemeToken; scope: UiThemeScope };
@@ -138,10 +157,10 @@ const OTHER_SHAPE_TOKENS = SHAPE_TOKENS.filter(
  * 🔴 어느 토큰이 어느 화면 몫인지는 이 파일이 정하지 않는다 —
  * domain/ui-theme-tokens.ts 의 uiThemeTokenScreen 하나가 등록부를 남김없이,
  * 겹치지 않게 가른다(색 · 모서리·글자 크기 · 주간보고). 개발자 모드 목차의
- * 「N칸 바뀜」도 같은 함수로 세므로 둘이 어긋날 자리가 없다. 주간보고 몫은 이
- * 편집기가 그리지 않는다 — 그 값은 주간보고 화면(다음 조각)이 맡는다.
+ * 「N칸 바뀜」도 같은 함수로 세므로 둘이 어긋날 자리가 없다. 주간보고 몫은
+ * `weeklyReport` 화면만 그린다 — 색·모서리 화면에는 한 칸도 나오지 않는다.
  */
-export type ThemeTokenGroup = "colors" | "shapes";
+export type ThemeTokenGroup = "colors" | "shapes" | "weeklyReport";
 
 /**
  * 그 화면에 그려지는 칸. **여기 든 칸만** 저장 대상이고, 「이 화면 전부
@@ -153,6 +172,7 @@ export type ThemeTokenGroup = "colors" | "shapes";
 const GROUP_SLOTS: Record<ThemeTokenGroup, readonly Slot[]> = {
   colors: SLOTS.filter((slot) => uiThemeTokenScreen(slot.token) === "colors"),
   shapes: SLOTS.filter((slot) => uiThemeTokenScreen(slot.token) === "shapes"),
+  weeklyReport: SLOTS.filter((slot) => uiThemeTokenScreen(slot.token) === "weeklyReport"),
 };
 
 /** 저장을 실제로 거절시키는 짝인가. 등록부의 목록에서 그대로 만든다. */
@@ -171,10 +191,17 @@ type Draft = Record<string, string>;
 export default function ThemeTokenEditor({
   saved,
   group,
+  preview,
 }: {
   saved: readonly UiThemeOverrideRow[];
   /** 이 화면이 그리는 묶음. 계산 범위가 아니라 **그리는 범위**를 정한다. */
   group: ThemeTokenGroup;
+  /**
+   * `weeklyReport` 화면의 미리보기 — 서버 페이지가 표본 자료로 그린 실제
+   * 주간보고(WeeklyReportScreen). 다른 화면은 넘기지 않고, 넘겨도 쓰지 않는다
+   * (그쪽은 ThemeTokenPreview 를 그린다).
+   */
+  preview?: React.ReactNode;
 }) {
   const router = useRouter();
 
@@ -267,6 +294,15 @@ export default function ThemeTokenEditor({
     (reading) => reading.blocking && reading.ratio < UI_THEME_CONTRAST_FLOOR
   );
 
+  /**
+   * 주간보고 미리보기 래퍼의 인라인 style. 크기 토큰은 전부 라이트·다크 공용이라
+   * resolved.light 하나로 충분하다(scoped:false 는 두 벌이 같은 값이다).
+   */
+  const weeklyReportPreviewVars = useMemo(
+    () => weeklyReportPreviewStyle(resolved.light) as React.CSSProperties,
+    [resolved]
+  );
+
   const canSave =
     !isSaving && changedSlots.length > 0 && invalidSlots.length === 0 && blockedReadings.length === 0;
 
@@ -328,6 +364,128 @@ export default function ThemeTokenEditor({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  // ── 세 화면이 함께 쓰는 조각 ─────────────────────────────────────────
+  // 알림 · 단추 줄 · 단추 설명 · 확인창은 화면이 무엇이든 같다. 주간보고 화면이
+  // 배치만 달리 쓰므로(단추 줄을 고정된 조절 칸 안에 둔다) 한 벌을 여기 만들어
+  // 두 트리가 나눠 쓴다 — 복사해 두면 한쪽만 고쳐지는 날이 온다.
+
+  const feedback = (
+    <>
+      {message && (
+        <p
+          role="status"
+          className={
+            message.type === "error"
+              ? "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
+              : "rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
+          }
+        >
+          {message.text}
+        </p>
+      )}
+
+      {invalidSlots.length > 0 && (
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+          형식이 맞지 않는 값이 {invalidSlots.length}칸 있습니다. 빨갛게 표시된 칸을 고쳐야 저장할 수
+          있습니다.
+        </p>
+      )}
+
+      {blockedReadings.length > 0 && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+          <p>
+            <strong>이 조합은 서버가 저장을 거절합니다.</strong> 글자와 바탕의 대비가{" "}
+            {UI_THEME_CONTRAST_FLOOR}:1 미만이면 화면 자체를 읽을 수 없게 되어, 되돌리러 올 화면도 함께
+            사라집니다.
+          </p>
+          <ul className="mt-2 list-disc pl-5">
+            {blockedReadings.map((reading) => (
+              <li key={`${reading.pair.scope}:${reading.pair.fgKey}:${reading.pair.bgKey}`}>
+                {reading.pair.label} — {reading.ratio.toFixed(2)}:1
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+
+  const actionRow = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        {changedSlots.length === 0
+          ? "변경된 내용이 없습니다."
+          : `${changedSlots.length}칸이 바뀌었습니다. 저장해야 적용됩니다.`}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={fillWithDefaults}
+          disabled={isSaving}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          이 화면 전부 기본값으로
+        </button>
+        <button
+          type="button"
+          onClick={revert}
+          disabled={isSaving || changedSlots.length === 0}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          되돌리기
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          disabled={!canSave}
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
+        >
+          저장
+        </button>
+      </div>
+    </div>
+  );
+
+  const actionHelp = (
+    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      <strong>되돌리기</strong>는 편집 중인 값을 지금 저장돼 있는 값으로 돌립니다(서버에 아무것도 보내지
+      않습니다). <strong>이 화면 전부 기본값으로</strong>는 <strong>이 화면에 있는 칸만</strong> 코드
+      기본값으로 채우며(다른 화면의 값은 건드리지 않습니다), <strong>저장을 눌러야</strong> 저장된 값이
+      실제로 지워집니다.
+    </p>
+  );
+
+  const confirmDialog = (
+    <SaveConfirmDialog
+      isOpen={isConfirmOpen}
+      isSaving={isSaving}
+      changedSlots={changedSlots}
+      normalized={normalized}
+      onCancel={() => setConfirmOpen(false)}
+      onConfirm={() => void save()}
+    />
+  );
+
+  if (group === "weeklyReport") {
+    return (
+      <WeeklyReportEditorLayout
+        slotCount={groupSlots.length}
+        changedSlots={changedSlots}
+        draft={draft}
+        normalized={normalized}
+        savedValues={savedValues}
+        disabled={isSaving}
+        onChange={setSlot}
+        previewVars={weeklyReportPreviewVars}
+        preview={preview}
+        feedback={feedback}
+        actionRow={actionRow}
+        actionHelp={actionHelp}
+        confirmDialog={confirmDialog}
+      />
+    );
   }
 
   const isColors = group === "colors";
@@ -516,93 +674,311 @@ export default function ThemeTokenEditor({
         </>
       )}
 
-      {message && (
-        <p
-          role="status"
-          className={
-            message.type === "error"
-              ? "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
-              : "rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
-          }
-        >
-          {message.text}
-        </p>
-      )}
+      {feedback}
 
-      {invalidSlots.length > 0 && (
-        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
-          형식이 맞지 않는 값이 {invalidSlots.length}칸 있습니다. 빨갛게 표시된 칸을 고쳐야 저장할 수
+      {actionRow}
+
+      {actionHelp}
+
+      {confirmDialog}
+    </section>
+  );
+}
+
+// ──────────────────────────────────────────────────── 주간보고 화면의 배치
+
+/** 실제 주간보고의 주소. 새 탭으로 연다(아래 링크 주석). */
+const WEEKLY_REPORT_HREF = "/dashboard/weekly-report";
+
+/**
+ * 「주간보고」 화면 한 장. 계산·저장은 전부 위 편집기가 하고, 여기는 **자리만**
+ * 정한다 — 안내 카드 · 조절 칸(단추 줄 포함) · 미리보기 순서다.
+ *
+ * ── 🔴 미리보기는 페이지 폭 그대로다 ────────────────────────────────────
+ * 주간보고는 자기가 차지한 폭으로 좌우 두 칸을 가른다(WeeklyReportScreen 의
+ * `@container` · @6xl). 미리보기를 조절 칸 옆에 두거나 안쪽 여백이 있는 카드에
+ * 넣으면 실제보다 좁아져, 실제 화면은 좌우인데 미리보기만 위아래로 쌓인다. 그래서
+ * 다른 두 화면과 달리 페이지가 이 편집기를 흰 카드로 감싸지 않고(weekly-report/
+ * page.tsx), 카드가 필요한 안내·조절 칸만 여기서 스스로 카드를 그린다.
+ *
+ * ── 🔴 미리보기를 스크롤 상자로 만들지 않는다 ───────────────────────────
+ * 래퍼에 높이(h-* · max-h-*)도 overflow 도 주지 않는다. 주면 그 안에 세로 스크롤바가
+ * 하나 더 생긴다 — 이 앱의 세로 스크롤 자리는 AppShell 의 <main> 하나뿐이고, 주간보고가
+ * 실제로 겪은 고장이 바로 그것이다(HANDOFF U-1, WeeklyReportScreen 헤더). 미리보기가
+ * 길어 조절 칸이 밀려 올라가는 문제는 거꾸로 조절 칸을 붙여 두는(sticky) 쪽으로 푼다.
+ *
+ * ── 미리보기 래퍼는 inert 다 ────────────────────────────────────────────
+ * 표본 속 인수번호 링크 · 주 이동 링크가 눌리면 편집 중인 값을 버리고 이 화면을
+ * 떠난다(그것도 표본 id 라 없는 수리 건으로). inert 는 그 안의 모든 것을 누를 수도
+ * 초점을 줄 수도 없게 하고 낭독기에서도 감춘다 — 표본의 「주간보고」 제목이 이
+ * 화면의 제목 차례에 끼어들지 않는 것은 덤이다. React 19 는 inert 를 불리언
+ * 속성으로 내보낸다(`inert=""`).
+ */
+function WeeklyReportEditorLayout({
+  slotCount,
+  changedSlots,
+  draft,
+  normalized,
+  savedValues,
+  disabled,
+  onChange,
+  previewVars,
+  preview,
+  feedback,
+  actionRow,
+  actionHelp,
+  confirmDialog,
+}: {
+  slotCount: number;
+  changedSlots: readonly Slot[];
+  draft: Draft;
+  normalized: Record<string, string | null>;
+  savedValues: Record<string, string>;
+  disabled: boolean;
+  onChange: (slot: Slot, value: string) => void;
+  /** 편집 중인 값 — 주간보고 토큰의 CSS 변수 전부(weeklyReportPreviewStyle). */
+  previewVars: React.CSSProperties;
+  preview: React.ReactNode;
+  feedback: React.ReactNode;
+  actionRow: React.ReactNode;
+  actionHelp: React.ReactNode;
+  confirmDialog: React.ReactNode;
+}) {
+  const fieldProps = { draft, normalized, savedValues, disabled, onChange };
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            주간보고 · 글자와 상자 크기
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            코드를 고치지 않고 주간보고 화면의 글자 크기 {WEEKLY_REPORT_FONT_TOKENS.length}개와 상자 크기{" "}
+            {WEEKLY_REPORT_BOX_TOKENS.length}개를 바꿉니다. 라이트·다크 공용으로 저장하므로, 이 화면에서
+            편집할 수 있는 자리는 {slotCount}칸입니다. 앱의 다른 화면은 바뀌지 않습니다.
+          </p>
+        </div>
+
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm leading-relaxed text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+          <strong>저장하면 전 직원의 주간보고 화면에 적용됩니다. 브라우저 인쇄에도 반영됩니다.</strong>{" "}
+          다른 사용자에게는 다음 화면 이동부터 보입니다. 되돌리려면 <strong>이 화면 전부 기본값으로</strong>를
+          누르고 다시 저장하면 되고, 화면이 읽히지 않을 만큼 어긋났다면 주소창에{" "}
+          <code className="font-mono">/api/theme/bypass</code>를 쳐서 이 브라우저만 원래 화면으로 볼 수
           있습니다.
         </p>
-      )}
 
-      {blockedReadings.length > 0 && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
-          <p>
-            <strong>이 조합은 서버가 저장을 거절합니다.</strong> 글자와 바탕의 대비가{" "}
-            {UI_THEME_CONTRAST_FLOOR}:1 미만이면 화면 자체를 읽을 수 없게 되어, 되돌리러 올 화면도 함께
-            사라집니다.
-          </p>
-          <ul className="mt-2 list-disc pl-5">
-            {blockedReadings.map((reading) => (
-              <li key={`${reading.pair.scope}:${reading.pair.fgKey}:${reading.pair.bgKey}`}>
-                {reading.pair.label} — {reading.ratio.toFixed(2)}:1
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          {changedSlots.length === 0
-            ? "변경된 내용이 없습니다."
-            : `${changedSlots.length}칸이 바뀌었습니다. 저장해야 적용됩니다.`}
+        {/*
+          새 탭으로 연다 — 같은 탭에서 열면 아직 저장하지 않은 편집이 사라진다.
+          그 화면은 구조선 밖이라 **저장된 값**으로 그려진다는 것도 함께 적는다.
+          안 적으면 슬라이더를 움직인 뒤 열어 보고 「반영이 안 된다」로 읽는다.
+        */}
+        <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+          <Link
+            href={WEEKLY_REPORT_HREF}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            실제 주간보고 열기 ↗
+          </Link>{" "}
+          — 새 탭에서 열립니다. 그 화면은 실제 자료와 <strong>저장된 값</strong>으로 그려지므로, 여기서
+          편집 중인 값은 저장한 뒤에 보입니다.
         </p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={fillWithDefaults}
-            disabled={isSaving}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            이 화면 전부 기본값으로
-          </button>
-          <button
-            type="button"
-            onClick={revert}
-            disabled={isSaving || changedSlots.length === 0}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            되돌리기
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirmOpen(true)}
-            disabled={!canSave}
-            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
-          >
-            저장
-          </button>
+      </div>
+
+      {/*
+        조절 칸. 넓은 화면(xl 이상)에서는 스크롤해도 위에 붙어 있어, 미리보기의
+        아래쪽(목표 · 납입 상자)을 보면서도 슬라이더를 움직일 수 있다. 좁은
+        화면에서는 붙이지 않는다 — 칸이 한 줄로 쌓여 화면을 거의 다 덮는다.
+        묶음을 <details> 로 둔 것은 붙어 있는 높이를 사람이 줄일 수 있게 하려는
+        것이다(색 · 모서리 화면의 묶음과 같은 모양). 붙는 기준은 AppShell <main> 의
+        스크롤이고, 이 칸 자체는 스크롤 상자가 아니다.
+      */}
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm xl:sticky xl:top-0 xl:z-10 dark:border-zinc-800 dark:bg-zinc-900">
+        <details open className="rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            글자 크기 <ChangedBadge count={changedCountOf(changedSlots, WEEKLY_REPORT_FONT_TOKENS)} />
+          </summary>
+          <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+            <SizeSliderGroup tokens={WEEKLY_REPORT_FONT_TOKENS} {...fieldProps} />
+          </div>
+        </details>
+
+        <details open className="rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            상자 크기 <ChangedBadge count={changedCountOf(changedSlots, WEEKLY_REPORT_BOX_TOKENS)} />
+          </summary>
+          <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+            <SizeSliderGroup tokens={WEEKLY_REPORT_BOX_TOKENS} {...fieldProps} />
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              최소 높이는 <strong>최소</strong>일 뿐이라 내용이 더 길면 상자가 함께 자랍니다. 상자를
+              정해진 높이로 자르는 설정은 없습니다.
+            </p>
+          </div>
+        </details>
+
+        {/*
+          주간보고 몫인데 글자도 상자도 아닌 토큰이 등록부에 들어온 날, 두 묶음
+          어디에도 안 그려지면 편집할 길이 사라진다(GROUP_SLOTS 는 이미 이 화면
+          몫으로 세고 있다). 슬라이더 범위를 모르는 종류라 글자 칸으로 그린다.
+          지금은 비어 있어 그려지지 않는다.
+        */}
+        {WEEKLY_REPORT_OTHER_TOKENS.length > 0 && (
+          <details open className="rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              그 밖 <ChangedBadge count={changedCountOf(changedSlots, WEEKLY_REPORT_OTHER_TOKENS)} />
+            </summary>
+            <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+              <LengthGroup
+                tokens={WEEKLY_REPORT_OTHER_TOKENS}
+                hint="이 값의 형식은 등록부(domain/ui-theme-tokens.ts)의 규칙을 따릅니다."
+                {...fieldProps}
+              />
+            </div>
+          </details>
+        )}
+
+        {feedback}
+
+        {actionRow}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+          <strong>미리보기 — 표본(가짜) 자료입니다.</strong> 실제 접수 건이 아니며, 링크와 단추는 눌리지
+          않습니다. 실제 주간보고와 같은 폭으로 그려져 넓은 화면에서는 좌우 두 칸으로 놓입니다.
+        </p>
+        {/*
+          🔴 이 래퍼에 높이 · overflow 를 주지 말 것(위 머리말 — 세로 스크롤바 두 개).
+          style 은 편집 중인 값이다. 이 div 자신에게 걸린 선언이라 구조선
+          (#ui-theme-lifeboat)이 조상에서 내려 주는 기본값을 언제나 이긴다.
+        */}
+        <div data-weekly-report-preview="" inert style={previewVars}>
+          {preview}
         </div>
       </div>
 
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        <strong>되돌리기</strong>는 편집 중인 값을 지금 저장돼 있는 값으로 돌립니다(서버에 아무것도 보내지
-        않습니다). <strong>이 화면 전부 기본값으로</strong>는 <strong>이 화면에 있는 칸만</strong> 코드
-        기본값으로 채우며(다른 화면의 값은 건드리지 않습니다), <strong>저장을 눌러야</strong> 저장된 값이
-        실제로 지워집니다.
-      </p>
+      {actionHelp}
 
-      <SaveConfirmDialog
-        isOpen={isConfirmOpen}
-        isSaving={isSaving}
-        changedSlots={changedSlots}
-        normalized={normalized}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => void save()}
-      />
+      {confirmDialog}
     </section>
+  );
+}
+
+/**
+ * 슬라이더 묶음 하나. 칸이 넷씩(xl) 놓인다 — 붙어 있는 조절 칸의 높이를 줄이려는
+ * 배치다. 🔴 그리는 칸은 GROUP_SLOTS.weeklyReport 에서 고른다: 저장·되돌리기가 세는
+ * 목록과 그리는 목록이 같아야, 그려지지 않은 칸이 조용히 저장되는 일이 없다.
+ */
+function SizeSliderGroup({ tokens, draft, normalized, savedValues, disabled, onChange }: FieldGroupProps) {
+  if (tokens.length === 0) return null;
+  const keys = new Set(tokens.map((token) => token.key));
+  const slots = GROUP_SLOTS.weeklyReport.filter((slot) => keys.has(slot.token.key));
+  return (
+    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+      {slots.map((slot) => (
+        <SizeSliderField
+          key={slot.key}
+          slot={slot}
+          raw={draft[slot.key]}
+          normalized={normalized[slot.key]}
+          saved={savedValues[slot.key]}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 크기 한 칸 — 슬라이더와 숫자 칸(rem)을 **함께** 둔다. 슬라이더는 미리보기를 보며
+ * 끌기 좋고, 숫자 칸은 정확한 값을 적기 좋다(색 칸이 고르개와 글자 입력을 함께 두는
+ * 것과 같은 이유). 둘 다 같은 원문(draft)을 고친다.
+ *
+ * 숫자 칸은 `type="number"` 가 아니라 글자 칸(inputMode="decimal")이다 — number
+ * 입력은 치는 중인 `0.` 을 빈 값으로 돌려주어, 원문을 들고 있는 이 편집기와 맞지
+ * 않는다. 범위 밖이나 형식이 틀린 값은 칸이 빨개지고 저장이 잠긴다(판정은 등록부의
+ * 검증기 — 서버와 같은 함수).
+ */
+function SizeSliderField({
+  slot,
+  raw,
+  normalized,
+  saved,
+  disabled,
+  onChange,
+}: {
+  slot: Slot;
+  raw: string;
+  normalized: string | null;
+  saved: string;
+  disabled: boolean;
+  onChange: (slot: Slot, value: string) => void;
+}) {
+  const inputId = useId();
+  const usageId = useId();
+  const range = weeklyReportSizeRange(slot.token);
+  if (!range) return null;
+
+  const fallback = uiThemeDefaultFor(slot.token, slot.scope);
+  const label = slot.token.scoped
+    ? `${slot.token.label} ${SCOPE_LABELS[slot.scope]}`
+    : slot.token.label;
+  // 슬라이더 자리는 형식이 틀린 동안 저장돼 있는 값에 둔다 — 미리보기와 같은
+  // 규칙이다(valueOrSaved). 치는 중에 손잡이가 끝으로 튀면 고장으로 읽힌다.
+  const current = remNumberOf(normalized ?? saved) ?? remNumberOf(fallback) ?? range.min;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={inputId} className="min-w-0 text-xs font-medium text-zinc-900 dark:text-zinc-50">
+          {label}
+        </label>
+        <span className="flex shrink-0 items-center gap-1">
+          <input
+            id={inputId}
+            type="text"
+            inputMode="decimal"
+            value={remTextOf(raw)}
+            spellCheck={false}
+            autoComplete="off"
+            disabled={disabled}
+            aria-describedby={usageId}
+            onChange={(event) => onChange(slot, remValueFromText(event.target.value))}
+            className={`w-16 rounded-md border px-1.5 py-0.5 text-right font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
+              normalized === null
+                ? "border-red-300 text-red-700 dark:border-red-900 dark:text-red-400"
+                : "border-zinc-300 text-zinc-900 dark:border-zinc-700 dark:text-zinc-50"
+            }`}
+          />
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">rem</span>
+        </span>
+      </div>
+      <input
+        type="range"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        value={current}
+        disabled={disabled}
+        aria-label={`${label} 슬라이더`}
+        aria-valuetext={`${current}rem`}
+        aria-describedby={usageId}
+        onChange={(event) => onChange(slot, remValueFromText(event.target.value))}
+        className="w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+      />
+      <p id={usageId} className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+        {slot.token.usage}
+      </p>
+      <FieldNote
+        normalized={normalized}
+        saved={saved}
+        fallback={fallback}
+        invalidHint={`${range.min} 부터 ${range.max} 까지의 숫자(rem)만 됩니다`}
+      />
+    </div>
   );
 }
 

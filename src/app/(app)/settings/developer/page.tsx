@@ -80,6 +80,10 @@ export default async function DeveloperModePage() {
     savedThemeTokens,
     (token) => uiThemeTokenScreen(token) === "shapes"
   );
+  const weeklyReportCount = countOverriddenSlots(
+    savedThemeTokens,
+    (token) => uiThemeTokenScreen(token) === "weeklyReport"
+  );
   const uiTextCount = countOverriddenUiTextItems(savedUiText);
 
   // 「지금 무슨 톤을 쓰는가」는 따로 저장하지 않는다 — 저장된 값을 대조해
@@ -142,6 +146,35 @@ export default async function DeveloperModePage() {
               />
             </div>
           </div>
+        ) : (
+          <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            화면 토큰 편집은 데이터베이스 저장 모드에서만 사용할 수 있습니다.
+          </p>
+        )}
+      </section>
+
+      {/*
+        🔴 한 화면 전용 크기는 위 「화면 토큰」 구역과 **따로** 둔다. 저장되는 곳은
+        같지만(ui_theme_tokens) 위 구역은 머리글부터 「앱 전체」를 바꾸는 자리라,
+        거기 섞으면 주간보고 카드도 앱 전체를 바꾸는 것처럼 읽힌다. 같은 저장소를
+        쓰는 크기 설정이라 화면 토큰 **바로 뒤**, 문구보다 앞에 온다.
+      */}
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">화면별 크기</h2>
+          <p className="mt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            앱 전체가 아니라 한 화면의 글자와 상자 크기만 바꿉니다.{" "}
+            <strong>저장하면 전 직원의 그 화면에 적용됩니다.</strong>
+          </p>
+        </div>
+
+        {isDatabaseMode ? (
+          <DeveloperMenuCard
+            href="/settings/developer/weekly-report"
+            title="주간보고"
+            description="주간보고의 글자 크기 8개와 상자 크기 7개를 표본 자료로 그린 미리보기를 보며 정합니다. 다른 화면은 바뀌지 않고, 브라우저 인쇄에도 반영됩니다."
+            changedCount={weeklyReportCount}
+          />
         ) : (
           <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             화면 토큰 편집은 데이터베이스 저장 모드에서만 사용할 수 있습니다.

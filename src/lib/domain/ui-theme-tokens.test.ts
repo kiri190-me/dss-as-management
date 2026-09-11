@@ -23,6 +23,17 @@ import {
   type UiThemeToken,
   type UiThemeTokenScreen,
 } from "./ui-theme-tokens";
+import {
+  remNumberOf,
+  remTextOf,
+  remValueFromText,
+  WEEKLY_REPORT_BOX_TOKENS,
+  WEEKLY_REPORT_FONT_TOKENS,
+  WEEKLY_REPORT_OTHER_TOKENS,
+  WEEKLY_REPORT_SIZE_TOKENS,
+  weeklyReportPreviewStyle,
+  weeklyReportSizeRange,
+} from "../../components/settings/weekly-report-size-controls";
 
 /**
  * ============================================================================
@@ -407,6 +418,180 @@ test("편집기와 목차는 종류(kind)가 아니라 uiThemeTokenScreen 으로
       `${name}가 색 여부만으로 화면 몫을 가른다`
     );
   }
+});
+
+// ─────────────────────────────── 개발자 모드 [주간보고] 편집 화면
+
+/**
+ * 주간보고 편집 화면은 색·모서리 화면과 같은 편집기(ThemeTokenEditor)에
+ * `group="weeklyReport"` 로 그려진다. 슬라이더의 양 끝·눈금과 미리보기 style 은
+ * React 없는 도우미(components/settings/weekly-report-size-controls.ts)가 정해서
+ * 여기서 직접 부르고, 편집기·페이지·목차는 원본을 읽어 확인한다(편집기에는 렌더
+ * 시험이 없다 — 서버 액션을 불러오는 클라이언트 컴포넌트라서).
+ */
+const THEME_TOKEN_EDITOR_FILE = new URL(
+  "../../components/settings/ThemeTokenEditor.tsx",
+  import.meta.url
+);
+const DEVELOPER_INDEX_FILE = new URL("../../app/(app)/settings/developer/page.tsx", import.meta.url);
+
+/** 원본에서 함수 하나의 본문을 잘라 낸다(다음 최상위 function 앞까지). */
+function sourceOfFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `${name} 를 찾지 못했다`);
+  const next = source.indexOf("\nfunction ", start + 1);
+  return next < 0 ? source.slice(start) : source.slice(start, next);
+}
+
+test("주간보고 편집 화면이 그리는 토큰은 주간보고 몫 15개뿐이다 — 글자 8 · 상자 7, 그 밖 0", () => {
+  assert.deepEqual(
+    WEEKLY_REPORT_SIZE_TOKENS.map((token) => token.key),
+    UI_THEME_TOKENS.filter((token) => uiThemeTokenScreen(token) === "weeklyReport").map((token) => token.key)
+  );
+  assert.equal(WEEKLY_REPORT_SIZE_TOKENS.length, 15);
+  assert.equal(WEEKLY_REPORT_FONT_TOKENS.length, 8);
+  assert.equal(WEEKLY_REPORT_BOX_TOKENS.length, 7);
+  assert.equal(WEEKLY_REPORT_OTHER_TOKENS.length, 0);
+  // 두 묶음이 겹치지 않고 합이 전부다 — 한 칸이 두 번 그려지거나 빠지지 않는다.
+  assert.deepEqual(
+    [...WEEKLY_REPORT_FONT_TOKENS, ...WEEKLY_REPORT_BOX_TOKENS].map((token) => token.key).sort(),
+    WEEKLY_REPORT_SIZE_TOKENS.map((token) => token.key).sort()
+  );
+  // 전부 공용 스코프라 편집 칸도 정확히 15칸이다(편집기의 GROUP_SLOTS.weeklyReport).
+  for (const token of WEEKLY_REPORT_SIZE_TOKENS) assert.equal(token.scoped, false, token.key);
+  // 앱 전체 토큰은 한 칸도 섞이지 않는다.
+  for (const token of WEEKLY_REPORT_SIZE_TOKENS) assert.equal(token.area, "weeklyReport", token.key);
+
+  // 편집기가 실제로 그 목록을 그린다 — 칸을 GROUP_SLOTS.weeklyReport 에서 고르고,
+  // 그 목록은 uiThemeTokenScreen 으로 갈린다.
+  const editor = readSourceWithoutComments(THEME_TOKEN_EDITOR_FILE);
+  assert.match(
+    editor,
+    /weeklyReport:\s*SLOTS\.filter\(\(slot\)\s*=>\s*uiThemeTokenScreen\(slot\.token\)\s*===\s*"weeklyReport"\)/,
+    "GROUP_SLOTS 에 주간보고 몫이 uiThemeTokenScreen 으로 갈려 있지 않다"
+  );
+  const sliderGroup = sourceOfFunction(editor, "SizeSliderGroup");
+  assert.match(sliderGroup, /GROUP_SLOTS\.weeklyReport\.filter\(/, "슬라이더가 저장 목록과 다른 곳에서 칸을 고른다");
+  const layout = sourceOfFunction(editor, "WeeklyReportEditorLayout");
+  assert.match(layout, /tokens=\{WEEKLY_REPORT_FONT_TOKENS\}/, "글자 묶음이 그려지지 않는다");
+  assert.match(layout, /tokens=\{WEEKLY_REPORT_BOX_TOKENS\}/, "상자 묶음이 그려지지 않는다");
+  // 🔴 앱 공용 견본은 주간보고 토큰을 하나도 읽지 않는다 — 여기서 그리면 슬라이더를
+  // 움직여도 아무것도 안 바뀌는 견본이 된다.
+  assert.doesNotMatch(layout, /ThemeTokenPreview/, "주간보고 화면이 앱 공용 견본을 그린다");
+});
+
+test("주간보고 슬라이더의 양 끝은 등록부 검증기의 범위와 같고, 기본값은 눈금 위에 있다", () => {
+  for (const token of WEEKLY_REPORT_SIZE_TOKENS) {
+    const range = weeklyReportSizeRange(token);
+    assert.ok(range, `${token.key}의 슬라이더 범위가 없다`);
+    const { min, max, step } = range;
+
+    // 끝은 통과, 한 눈금 밖은 거절 — 슬라이더가 저장 못 할 값까지 가거나, 저장할 수
+    // 있는 값에 못 닿는 일이 없다.
+    assert.notEqual(normalizeUiThemeValue(token, remValueFromText(String(min))), null, `${token.key} 하한`);
+    assert.notEqual(normalizeUiThemeValue(token, remValueFromText(String(max))), null, `${token.key} 상한`);
+    assert.equal(normalizeUiThemeValue(token, remValueFromText(String(max + step))), null, `${token.key} 상한 밖`);
+    if (min - step >= 0) {
+      assert.equal(normalizeUiThemeValue(token, remValueFromText(String(min - step))), null, `${token.key} 하한 밖`);
+    }
+    if (token.kind === "spacing") assert.deepEqual({ min, max }, token.rangeRem, token.key);
+
+    // 🔴 기본값이 눈금 위에 있어야 슬라이더로 기본값에 되돌아올 수 있다.
+    const fallback = remNumberOf(token.defaultLight);
+    assert.notEqual(fallback, null, `${token.key}의 기본값을 숫자로 못 읽는다`);
+    const steps = (fallback! - min) / step;
+    assert.ok(Math.abs(steps - Math.round(steps)) < 1e-9, `${token.key} 기본값 ${token.defaultLight}이 눈금 밖이다`);
+    assert.ok(fallback! >= min && fallback! <= max, `${token.key} 기본값이 범위 밖이다`);
+
+    // 슬라이더가 내보내는 모든 눈금이 저장되는 값이다.
+    for (let value = min; value <= max + 1e-9; value += step) {
+      const text = String(Math.round(value * 10000) / 10000);
+      assert.notEqual(
+        normalizeUiThemeValue(token, remValueFromText(text)),
+        null,
+        `${token.key}의 눈금 ${text}를 검증기가 거절한다`
+      );
+    }
+  }
+});
+
+test("주간보고 숫자 칸은 원문을 그대로 들고, 비우면 형식 오류가 된다", () => {
+  assert.equal(remNumberOf("0"), 0);
+  assert.equal(remNumberOf("0.75rem"), 0.75);
+  assert.equal(remNumberOf("12px"), null);
+  assert.equal(remTextOf("0.75rem"), "0.75");
+  assert.equal(remTextOf("0"), "0");
+  // 치는 중인 글자가 사라지지 않는다 — 원문을 들고 있다.
+  assert.equal(remTextOf(remValueFromText("1.")), "1.");
+  assert.equal(remValueFromText("1.25"), "1.25rem");
+  assert.equal(remValueFromText("  "), "");
+  const token = tokenByKey("text-wr-title");
+  assert.equal(normalizeUiThemeValue(token, remValueFromText("")), null, "빈 칸이 저장된다");
+  assert.equal(normalizeUiThemeValue(token, remValueFromText("1.")), null, "치는 중인 값이 저장된다");
+  // 0 은 검증기가 단위 없이 눕힌다(상자 크기).
+  assert.equal(normalizeUiThemeValue(tokenByKey("spacing-wr-block"), remValueFromText("0")), "0");
+});
+
+test("미리보기 style 은 주간보고 CSS 변수 15개를 전부, 편집 중인 값으로 건다", () => {
+  const values: Record<string, string> = {};
+  for (const token of UI_THEME_TOKENS) values[token.key] = `값-${token.key}`;
+  const style = weeklyReportPreviewStyle(values);
+  assert.deepEqual(
+    Object.keys(style).sort(),
+    WEEKLY_REPORT_SIZE_TOKENS.map((token) => token.cssVar).sort(),
+    "주간보고 변수가 아닌 것이 섞였거나 빠졌다"
+  );
+  for (const token of WEEKLY_REPORT_SIZE_TOKENS) {
+    assert.equal(style[token.cssVar], `값-${token.key}`);
+    assert.match(token.cssVar, /^--(?:text|spacing)-wr-/);
+  }
+});
+
+test("🔴 미리보기 래퍼는 inert 이고 스크롤 상자가 아니다 — 편집 중인 값을 인라인 style 로 건다", () => {
+  const editor = readSourceWithoutComments(THEME_TOKEN_EDITOR_FILE);
+  const layout = sourceOfFunction(editor, "WeeklyReportEditorLayout");
+
+  const wrapper = /<div\s[^>]*data-weekly-report-preview[^>]*>/.exec(layout)?.[0];
+  assert.ok(wrapper, "미리보기 래퍼를 찾지 못했다");
+  // 링크·단추가 편집 화면을 떠나지 않게. React 19 는 불리언 inert 를 inert="" 로 내보낸다.
+  assert.match(wrapper, /\sinert(?:\s|=\{true\}|\/?>)/, "래퍼가 inert 가 아니다");
+  // 편집 중인 값은 이 래퍼 자신에게 건다 — 구조선이 조상에서 내려 주는 기본값을 이긴다.
+  assert.match(wrapper, /style=\{previewVars\}/, "래퍼가 편집 중인 값을 걸지 않는다");
+  // 미리보기를 페이지 폭 그대로 두고, 높이를 주지 않는다(U-1 세로 스크롤바 두 개).
+  assert.doesNotMatch(wrapper, /className=/, "래퍼에 클래스가 붙었다 — 여백·높이·overflow 는 금지다");
+  assert.match(layout, /\{preview\}/, "넘겨받은 미리보기를 그리지 않는다");
+
+  // 🔴 배치 전체에 스크롤 상자·확정 높이가 없다 — 붙어 있는 조절 칸(sticky)도
+  // 스크롤 상자로 만들지 않는다.
+  for (const className of layout.matchAll(/className="([^"]*)"/g)) {
+    assert.doesNotMatch(
+      className[1],
+      /(?:^|\s)(?:[a-z0-9]+:)*(?:overflow-[a-z-]+|max-h-\S+|h-(?:\d|\[|full|screen|dvh|svh)\S*)/,
+      `주간보고 편집 배치에 스크롤 상자·확정 높이 클래스가 있다: ${className[1]}`
+    );
+  }
+
+  // 새 탭으로 여는 실제 주간보고 링크와, 저장하면 인쇄에도 반영된다는 안내.
+  assert.match(layout, /href=\{WEEKLY_REPORT_HREF\}[\s\S]*?target="_blank"/);
+  assert.match(editor, /const WEEKLY_REPORT_HREF = "\/dashboard\/weekly-report";/);
+  assert.match(layout, /저장하면 전 직원의 주간보고 화면에 적용됩니다\. 브라우저 인쇄에도 반영됩니다\./);
+});
+
+test("목차의 [주간보고] 카드는 주간보고 몫만 센다 — 앱 전체 카드 둘의 셈은 그대로다", () => {
+  const index = readSourceWithoutComments(DEVELOPER_INDEX_FILE);
+
+  const countOf = (name: string) =>
+    new RegExp(
+      `const ${name} = countOverriddenSlots\\(\\s*savedThemeTokens,\\s*\\(token\\) => uiThemeTokenScreen\\(token\\) === "([a-zA-Z]+)"\\s*\\);`
+    ).exec(index)?.[1];
+  assert.equal(countOf("weeklyReportCount"), "weeklyReport", "주간보고 카드가 제 몫만 세지 않는다");
+  assert.equal(countOf("colorCount"), "colors");
+  assert.equal(countOf("shapeCount"), "shapes");
+
+  const card = /<DeveloperMenuCard\s[^>]*href="\/settings\/developer\/weekly-report"[^>]*\/>/.exec(index)?.[0];
+  assert.ok(card, "목차에 [주간보고] 카드가 없다");
+  assert.match(card, /changedCount=\{weeklyReportCount\}/);
+  assert.match(card, /title="주간보고"/);
 });
 
 // ───────────────────────────────────────────────────────── 검증기
