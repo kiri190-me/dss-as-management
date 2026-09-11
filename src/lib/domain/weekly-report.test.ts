@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   WEEKLY_REPORT_STATUSES,
@@ -951,5 +952,230 @@ test("고른 줄을 다시 고르면 그대로다 — 표시가 상세표의 두
       picked,
       `${JSON.stringify(picked)} 를 다시 고르니 값이 바뀌었다`
     );
+  }
+});
+
+// ─────────────────────────────────────────────── 주간보고 전용 크기 변수
+
+/**
+ * 주간보고 세 컴포넌트의 글자 · 상자 크기는 globals.css 의 주간보고 전용 `@theme`
+ * 변수(`--text-wr-*` · `--spacing-wr-*`)를 읽는다. 옮긴 판의 완료 조건이 **"화면이
+ * 한 픽셀도 안 바뀌는 것"** 이었는데, 그 조건은 눈으로 지킬 수 없다 — 11px 이
+ * 12px 이 되어도, 줄 높이 짝 하나가 빠져 표 머리가 벌어져도, 클래스 이름에 오타가
+ * 나서 Tailwind 가 **아무 규칙도 만들지 않아도**(오류 없이 부모 크기로 떨어진다)
+ * 아무도 못 알아본다. 그래서 이 시험이 두 쪽 원본을 직접 읽어 대조한다.
+ *
+ * 순수 도메인 시험 파일에 두는 까닭: 주간보고 컴포넌트에는 따로 시험 파일이 없고,
+ * 이 대조는 원본 글자만 읽어 브라우저도 DB 도 필요 없다.
+ */
+const GLOBALS_CSS = new URL("../../app/globals.css", import.meta.url);
+
+const WEEKLY_REPORT_COMPONENT_FILES = {
+  screen: new URL("../../components/dashboard/WeeklyReportScreen.tsx", import.meta.url),
+  goals: new URL("../../components/dashboard/WeeklyReportGoalsPanel.tsx", import.meta.url),
+  deliveries: new URL("../../components/dashboard/WeeklyReportDeliveriesPanel.tsx", import.meta.url),
+} as const;
+
+type WeeklyReportComponentFile = keyof typeof WEEKLY_REPORT_COMPONENT_FILES;
+
+/**
+ * 주석을 걷어 낸 원본. 주석에는 옛 클래스 이름이 설명으로 남아 있어("예전의
+ * min-h-32") 그대로 세면 옮긴 자리와 구별이 안 된다.
+ */
+function readSourceWithoutComments(url: URL): string {
+  return readFileSync(url, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+/**
+ * 변수의 기본값 — **옮기기 전 클래스의 계산값 그대로다**(줄 끝 주석이 그 클래스).
+ * 줄 높이 짝의 값도 Tailwind 가 text-xs · text-sm · text-xl 에 붙이는 것과 글자까지
+ * 같다(tailwindcss/theme.css).
+ *
+ * 🔴 table-head · label · meta 셋에 줄 높이 짝이 **없는 것이 정답이다.** 옮기기 전
+ * text-[10px] · text-[11px] 은 font-size 만 정하고 줄 높이는 부모에게서 물려받았다 —
+ * 짝을 두면 없던 줄 높이가 새로 붙어 표 머리와 집계 칸의 높이가 달라진다. 아래
+ * deepEqual 이 "빠진 것"과 함께 "더 붙은 것"도 잡는다.
+ */
+const EXPECTED_WEEKLY_REPORT_SIZE_VARIABLES: Readonly<Record<string, string>> = {
+  "--text-wr-title": "1.25rem", // text-xl
+  "--text-wr-title--line-height": "calc(1.75 / 1.25)",
+  "--text-wr-section": "0.875rem", // text-sm
+  "--text-wr-section--line-height": "calc(1.25 / 0.875)",
+  "--text-wr-heading": "0.875rem", // text-sm
+  "--text-wr-heading--line-height": "calc(1.25 / 0.875)",
+  "--text-wr-body": "0.75rem", // text-xs
+  "--text-wr-body--line-height": "calc(1 / 0.75)",
+  "--text-wr-table-head": "0.6875rem", // text-[11px]
+  "--text-wr-label": "0.625rem", // text-[10px]
+  "--text-wr-count": "0.75rem", // text-xs
+  "--text-wr-count--line-height": "calc(1 / 0.75)",
+  "--text-wr-meta": "0.6875rem", // text-[11px]
+  "--spacing-wr-block": "0.5rem", // p-2
+  "--spacing-wr-section": "0.75rem", // p-3
+  "--spacing-wr-block-gap": "0.75rem", // gap-3
+  "--spacing-wr-cell-x": "0.375rem", // px-1.5
+  "--spacing-wr-cell-y": "0.25rem", // py-1
+  "--spacing-wr-table-min": "8rem", // min-h-32
+  "--spacing-wr-box-min": "4rem", // min-h-16
+};
+
+/** globals.css 에 적힌 주간보고 전용 변수 전부를 이름 → 값으로 읽는다. */
+function weeklyReportSizeVariablesFromGlobalsCss(): Map<string, string> {
+  const css = readSourceWithoutComments(GLOBALS_CSS);
+  const found = new Map<string, string>();
+  for (const match of css.matchAll(/(--(?:text|spacing)-wr-[a-z-]+)\s*:\s*([^;]+);/g)) {
+    assert.ok(!found.has(match[1]), `globals.css 에 ${match[1]}가 두 번 적혀 있다`);
+    found.set(match[1], match[2].trim());
+  }
+  return found;
+}
+
+test("globals.css 의 주간보고 크기 변수가 옮기기 전 클래스의 값과 같다 — 줄 높이 짝까지", () => {
+  assert.deepEqual(
+    Object.fromEntries(weeklyReportSizeVariablesFromGlobalsCss()),
+    EXPECTED_WEEKLY_REPORT_SIZE_VARIABLES
+  );
+});
+
+/**
+ * 컴포넌트가 쓰는 주간보고 전용 클래스 → 그 클래스가 읽는 변수.
+ * `text-wr-x` 는 `--text-wr-x`, 여백 · 간격 · 최소 높이는 `--spacing-wr-x` 다 —
+ * Tailwind 가 `@theme` 의 이름으로 유틸리티를 만드는 규칙 그대로다.
+ */
+function weeklyReportClassToVariable(className: string): string {
+  const match = /^(text|p|px|py|gap|min-h)-(wr-[a-z-]+)$/.exec(className);
+  assert.ok(match, `${className} 는 주간보고 전용 클래스 모양이 아니다`);
+  return match[1] === "text" ? `--text-${match[2]}` : `--spacing-${match[2]}`;
+}
+
+const WEEKLY_REPORT_CLASS_PATTERN = /(?<![\w-])(?:text|p|px|py|gap|min-h)-wr-[a-z-]+/g;
+
+test("주간보고 컴포넌트가 쓰는 전용 클래스는 전부 globals.css 에 변수가 있다", () => {
+  // 오타 하나(`text-wr-titel`)면 Tailwind 는 규칙을 만들지 않고, 그 글자는 오류 없이
+  // 부모의 크기로 그려진다. 원인이 화면 어디에도 안 보이는 종류라 여기서 막는다.
+  const defined = weeklyReportSizeVariablesFromGlobalsCss();
+  const used = new Set<string>();
+  for (const url of Object.values(WEEKLY_REPORT_COMPONENT_FILES)) {
+    for (const match of readSourceWithoutComments(url).matchAll(WEEKLY_REPORT_CLASS_PATTERN)) {
+      used.add(match[0]);
+    }
+  }
+  assert.ok(used.size > 0, "주간보고 컴포넌트에서 전용 클래스를 하나도 못 찾았다");
+  for (const className of used) {
+    const variable = weeklyReportClassToVariable(className);
+    assert.ok(defined.has(variable), `${className} 가 읽을 ${variable} 가 globals.css 에 없다`);
+  }
+});
+
+/**
+ * 옮긴 자리마다 전용 클래스가 몇 번 쓰였는가 — 15개 항목이 놓인 자리의 목록이다.
+ * 자리를 하나 더하거나 빼면 이 표를 함께 고친다(그게 이 표의 쓸모다: 옮긴 줄
+ * 하나가 조용히 옛 클래스로 돌아가면 여기서 수가 어긋난다).
+ */
+const EXPECTED_WEEKLY_REPORT_CLASS_COUNTS: Record<WeeklyReportComponentFile, Record<string, number>> =
+  {
+    screen: {
+      "text-wr-title": 1, // 화면 제목
+      "text-wr-section": 2, // 종류별 총합 · PO 발행 현황 h2
+      "text-wr-heading": 1, // BlockHeading h3
+      "text-wr-body": 1, // 상세표
+      "text-wr-table-head": 1, // 상세표 머리 줄
+      "text-wr-label": 3, // 집계 칸 이름 · 종류 배지 · PO 현황 고객사명
+      "text-wr-count": 3, // 집계 숫자 · 소제목 총 대수 · PO 현황 건수
+      "text-wr-meta": 4, // 종류 설명 · 소제목 총 대수 줄 · 상세표 해당 없음 · PO 현황 해당 없음
+      "p-wr-block": 1, // 고객사 블록
+      "p-wr-section": 2, // 종류별 총합 · PO 발행 현황 구역
+      "gap-wr-block-gap": 2, // SIDE_BY_SIDE_GRID · 고객사 줄 목록
+      "px-wr-cell-x": 17, // 머리 8 + 해당 없음 1 + 본문 8
+      "py-wr-cell-y": 16, // 머리 8 + 본문 8 (해당 없음 줄은 py-3 그대로)
+      "min-h-wr-table-min": 1, // 상세표 래퍼
+    },
+    goals: {
+      "text-wr-section": 1, // 주 제목 h2
+      "text-wr-heading": 1, // 상자 소제목 h3
+      "text-wr-body": 1, // 목표 줄
+      "text-wr-count": 1, // 줄 수
+      "text-wr-meta": 2, // 줄 수 문장 · 적어 둔 목표가 없습니다
+      "p-wr-section": 1, // 구역
+      "min-h-wr-box-min": 1, // 목표 상자
+    },
+    deliveries: {
+      "text-wr-section": 1, // 구역 제목 h2
+      "text-wr-heading": 1, // 상자 소제목 h3
+      "text-wr-body": 1, // 표
+      "text-wr-table-head": 1, // 표 머리 줄
+      "text-wr-count": 1, // 줄 수
+      "text-wr-meta": 2, // 줄 수 문장 · 해당 없음
+      "p-wr-section": 1, // 구역
+      "px-wr-cell-x": 19, // 머리 8 + 버튼 칸 머리 1 + 해당 없음 1 + 본문 8 + 버튼 칸 1
+      "py-wr-cell-y": 18, // 위에서 해당 없음(py-3) 을 뺀 것
+      "min-h-wr-box-min": 1, // 표 래퍼
+    },
+  };
+
+test("주간보고 전용 클래스가 옮긴 자리마다 빠짐없이 쓰였다", () => {
+  for (const [file, expected] of Object.entries(EXPECTED_WEEKLY_REPORT_CLASS_COUNTS)) {
+    const source = readSourceWithoutComments(
+      WEEKLY_REPORT_COMPONENT_FILES[file as WeeklyReportComponentFile]
+    );
+    const counts: Record<string, number> = {};
+    for (const match of source.matchAll(WEEKLY_REPORT_CLASS_PATTERN)) {
+      counts[match[0]] = (counts[match[0]] ?? 0) + 1;
+    }
+    assert.deepEqual(counts, expected, `${file} 의 주간보고 전용 클래스 수가 다르다`);
+  }
+});
+
+test("옮긴 자리에 옛 크기 클래스가 남지 않았다 — 한 요소에 두 크기가 겹치지 않는다", () => {
+  // 같은 줄(= 이 파일들에서는 한 요소의 className)에 전용 클래스와 같은 속성의
+  // 옛 클래스가 함께 있으면, 어느 쪽이 이기는지는 Tailwind 가 규칙을 늘어놓는
+  // 차례가 정한다 — 그러면 크기 설정을 바꿔도 그 자리만 안 바뀌는 날이 온다.
+  const conflicts: ReadonlyArray<readonly [RegExp, RegExp]> = [
+    [/(?<![\w-])text-wr-/, /(?<![\w-])text-(?:xs|sm|base|lg|xl|2xl|\[[^\]]+\])(?![\w-])/],
+    [/(?<![\w-])p-wr-/, /(?<![\w-])p-(?:\d|\[)/],
+    [/(?<![\w-])px-wr-/, /(?<![\w-])px-(?:\d|\[)/],
+    [/(?<![\w-])py-wr-/, /(?<![\w-])py-(?:\d|\[)/],
+    [/(?<![\w-])gap-wr-/, /(?<![\w-])gap-(?:\d|\[)/],
+    [/(?<![\w-])min-h-wr-/, /(?<![\w-])min-h-(?:\d|\[)/],
+  ];
+  for (const [file, url] of Object.entries(WEEKLY_REPORT_COMPONENT_FILES)) {
+    const lines = readSourceWithoutComments(url).split(/\r?\n/);
+    for (const line of lines) {
+      for (const [wrClass, oldClass] of conflicts) {
+        if (wrClass.test(line)) {
+          assert.ok(!oldClass.test(line), `${file} 에 크기가 겹친 줄이 있다: ${line.trim()}`);
+        }
+      }
+    }
+  }
+
+  // 한 파일 안에서 **통째로** 옮긴 옛 클래스는 그 파일에 한 번도 남지 않는다.
+  // (옮기지 않은 자리 — 머리말 안내문의 text-xs, 폼 · 버튼의 text-[11px], 분류 안 됨
+  // 배지의 text-[10px] — 가 있는 클래스는 여기 적지 않는다. 위 겹침 검사가 맡는다.)
+  const fullyMoved: Record<WeeklyReportComponentFile, RegExp[]> = {
+    screen: [
+      /(?<![\w-])text-xl(?![\w-])/,
+      /(?<![\w-])text-\[11px\]/,
+      /(?<![\w-])p-2(?![\w.])/,
+      /(?<![\w-])p-3(?![\w.])/,
+      /(?<![\w-])px-1\.5 py-1(?![.\d])/,
+      /(?<![\w-])min-h-32(?![\w-])/,
+    ],
+    goals: [/(?<![\w-])min-h-16(?![\w-])/, /(?<![\w-])p-3(?![\w.])/],
+    deliveries: [
+      /(?<![\w-])min-h-16(?![\w-])/,
+      /(?<![\w-])p-3(?![\w.])/,
+      /(?<![\w-])px-1\.5(?![\w.])/,
+    ],
+  };
+  for (const [file, patterns] of Object.entries(fullyMoved)) {
+    const source = readSourceWithoutComments(
+      WEEKLY_REPORT_COMPONENT_FILES[file as WeeklyReportComponentFile]
+    );
+    for (const pattern of patterns) {
+      assert.ok(!pattern.test(source), `${file} 에 옮겼어야 할 ${pattern} 가 남아 있다`);
+    }
   }
 });

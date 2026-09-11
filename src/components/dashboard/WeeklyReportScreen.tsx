@@ -158,9 +158,11 @@ import {
  * 이 앱의 세로 스크롤 자리는 AppShell 의 <main> 하나뿐이고 다른 화면도 그렇다.
  * 고칠 곳은 AppShell 이 아니라 이 화면이다.
  *
- * 최소 높이(min-h-32)는 남긴다 — **최소**일 뿐이라 상자를 확정 높이로 만들지
- * 않고(내용이 그보다 길면 상자가 함께 자란다), 줄이 한둘뿐인 블록이 납작하게
- * 짜부라지는 것만 막는다.
+ * 최소 높이(min-h-wr-table-min, 기본 8rem — 예전의 min-h-32)는 남긴다 —
+ * **최소**일 뿐이라 상자를 확정 높이로 만들지 않고(내용이 그보다 길면 상자가
+ * 함께 자란다), 줄이 한둘뿐인 블록이 납작하게 짜부라지는 것만 막는다. 크기
+ * 설정이 생겨도 이 자리를 h-* 같은 확정 높이로 바꾸지 말 것 — 위 두 항목의
+ * 고장이 그대로 돌아온다.
  *
  * ── 가로 스크롤은 넘치는 그 줄 안에서만 ─────────────────────────────────
  * 8칼럼짜리 표 둘이 나란히 서면 반드시 좁다. 그래서 표마다 자기
@@ -192,6 +194,15 @@ import {
  * 빨간 칸이 하나 더 생기며, 상세표의 `현 상태`에도 그대로 적힌다. 조용히
  * 빼면 총 대수만 안 맞는 표가 되고, 그때 사람은 자료가 준 것인지 화면이 고장
  * 난 것인지 알 수 없다.
+ *
+ * ── 크기는 주간보고 전용 변수에서 온다 ──────────────────────────────────
+ * 제목 · 표 · 집계의 글자 크기와 블록 여백 · 표 칸 여백 · 최소 높이는 전역
+ * text-xs · p-2 가 아니라 `text-wr-*` · `p-wr-*` · `min-h-wr-*` 로 적혀 있다
+ * (금주 목표 · 납입 예정 상자도 같다). 값은 globals.css 의 주간보고 전용 `@theme`
+ * 블록이 정하고 이유도 거기 있다. 기본값은 옮기기 전 클래스와 계산값까지 같다.
+ * 여기서 한 자리를 text-xs 로 되돌리면 그 자리만 주간보고 크기 설정을 따르지
+ * 않는다. 머리말 안내문 · 경고문 · 분류 안 됨 배지처럼 그 목록에 없는 자리는
+ * 일부러 그대로 둔 것이다.
  * ============================================================================
  */
 
@@ -203,7 +214,7 @@ const TABLE_COLUMN_COUNT = 8;
  * 최소 폭). 고객사 줄과 아래 총합이 **같은 폭에서 같이** 갈려야 하므로 값을
  * 한 곳에 둔다 — 따로 적으면 한쪽만 고쳐져 두 배치가 어긋난다.
  */
-const SIDE_BY_SIDE_GRID = "grid grid-cols-1 gap-3 @6xl:grid-cols-2";
+const SIDE_BY_SIDE_GRID = "grid grid-cols-1 gap-wr-block-gap @6xl:grid-cols-2";
 
 /**
  * 자리에 붙은 색 세 가지(파일 헤더). 고객사 색과 달리 고르는 값이 아니라서
@@ -276,8 +287,8 @@ function CountCell({
     <div
       className={`flex items-baseline justify-between gap-1.5 rounded border px-1.5 py-0.5 ${boxClass}`}
     >
-      <span className="text-[10px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">{label}</span>
-      <span className={`text-xs font-semibold tabular-nums ${valueClass}`}>{value}</span>
+      <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className={`text-wr-count font-semibold tabular-nums ${valueClass}`}>{value}</span>
     </div>
   );
 }
@@ -405,19 +416,19 @@ function BlockHeading({
     <div
       className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 overflow-x-auto rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${toneClass}`}
     >
-      <h3 className="inline-flex shrink-0 items-baseline gap-x-2 gap-y-0.5 text-sm">
+      <h3 className="inline-flex shrink-0 items-baseline gap-x-2 gap-y-0.5 text-wr-heading">
         <span className="font-semibold text-zinc-900 dark:text-zinc-50">{name}</span>
-        <span className="rounded bg-zinc-800 px-1 py-0.5 text-[10px] leading-none font-medium text-white dark:bg-zinc-200 dark:text-zinc-900">
+        <span className="rounded bg-zinc-800 px-1 py-0.5 text-wr-label leading-none font-medium text-white dark:bg-zinc-200 dark:text-zinc-900">
           {kind}
         </span>
-        <span className="text-[11px] font-normal text-zinc-600 dark:text-zinc-400">
+        <span className="text-wr-meta font-normal text-zinc-600 dark:text-zinc-400">
           {weeklyReportKindDescriptions[kind]}
         </span>
       </h3>
       {total !== undefined && (
-        <p className="text-[11px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+        <p className="text-wr-meta whitespace-nowrap text-zinc-600 dark:text-zinc-400">
           {WEEKLY_REPORT_TOTAL_LABEL}{" "}
-          <span className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+          <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
             {total}
           </span>
         </p>
@@ -443,7 +454,7 @@ function ReportBlock({
 }) {
   const toneClass = customerRowColorClass(block.customerRowColor);
   return (
-    <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-wr-block dark:border-zinc-800 dark:bg-zinc-900">
       <BlockHeading
         name={block.customerName}
         kind={block.kind}
@@ -455,20 +466,20 @@ function ReportBlock({
           overflow-x 가 세로 축까지 스크롤 상자로 만들기 때문에, 여기에 확정 높이가
           붙으면 이 안에서 세로 스크롤이 생겨 스크롤바가 둘로 보인다. 좌우 두 칸의
           높이는 격자가 맞춘다(파일 헤더). */}
-      <div className="min-h-32 overflow-x-auto rounded border border-zinc-200 dark:border-zinc-800">
-        <table className="w-full border-collapse text-xs">
+      <div className="min-h-wr-table-min overflow-x-auto rounded border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full border-collapse text-wr-body">
           <thead>
             <tr
-              className={`border-b border-zinc-200 text-left text-[11px] font-semibold whitespace-nowrap text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 ${HEADER_ROW_TONE}`}
+              className={`border-b border-zinc-200 text-left text-wr-table-head font-semibold whitespace-nowrap text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 ${HEADER_ROW_TONE}`}
             >
-              <th className="px-1.5 py-1">인수 번호</th>
-              <th className="px-1.5 py-1">형식</th>
-              <th className="px-1.5 py-1">S/N</th>
-              <th className="px-1.5 py-1">L/N</th>
-              <th className="px-1.5 py-1">견적서 발행일</th>
-              <th className="px-1.5 py-1">현 상태</th>
-              <th className="px-1.5 py-1">PO 발행 일시</th>
-              <th className="px-1.5 py-1">비고</th>
+              <th className="px-wr-cell-x py-wr-cell-y">인수 번호</th>
+              <th className="px-wr-cell-x py-wr-cell-y">형식</th>
+              <th className="px-wr-cell-x py-wr-cell-y">S/N</th>
+              <th className="px-wr-cell-x py-wr-cell-y">L/N</th>
+              <th className="px-wr-cell-x py-wr-cell-y">견적서 발행일</th>
+              <th className="px-wr-cell-x py-wr-cell-y">현 상태</th>
+              <th className="px-wr-cell-x py-wr-cell-y">PO 발행 일시</th>
+              <th className="px-wr-cell-x py-wr-cell-y">비고</th>
             </tr>
           </thead>
           <tbody>
@@ -479,7 +490,7 @@ function ReportBlock({
               <tr>
                 <td
                   colSpan={TABLE_COLUMN_COUNT}
-                  className="px-1.5 py-3 text-center text-[11px] text-zinc-500 dark:text-zinc-400"
+                  className="px-wr-cell-x py-3 text-center text-wr-meta text-zinc-500 dark:text-zinc-400"
                 >
                   해당 없음
                 </td>
@@ -490,30 +501,30 @@ function ReportBlock({
                   key={row.id}
                   className="border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800"
                 >
-                  <td className="px-1.5 py-1 font-medium text-zinc-900 dark:text-zinc-50">
+                  <td className="px-wr-cell-x py-wr-cell-y font-medium text-zinc-900 dark:text-zinc-50">
                     {row.intakeNumber}
                   </td>
-                  <td className="px-1.5 py-1">{dash(row.modelName)}</td>
-                  <td className="px-1.5 py-1">{dash(row.serialNumber)}</td>
-                  <td className="px-1.5 py-1">{dash(row.lotNumber)}</td>
+                  <td className="px-wr-cell-x py-wr-cell-y">{dash(row.modelName)}</td>
+                  <td className="px-wr-cell-x py-wr-cell-y">{dash(row.serialNumber)}</td>
+                  <td className="px-wr-cell-x py-wr-cell-y">{dash(row.lotNumber)}</td>
                   {/* 장기 PO 미발행인 줄만 빨간 볼드다. 판정은 도메인이 이미
                       해서 실어 보냈고(row.isLongPendingPo), 여기서는 옷만 입힌다
                       (파일 헤더). 무슨 뜻인지는 맨 위 머리말에 한 번 적혀 있다. */}
                   <td
-                    className={`px-1.5 py-1 tabular-nums ${row.isLongPendingPo ? LONG_PENDING_PO_TONE : ""}`}
+                    className={`px-wr-cell-x py-wr-cell-y tabular-nums ${row.isLongPendingPo ? LONG_PENDING_PO_TONE : ""}`}
                     title={row.isLongPendingPo ? LONG_PENDING_PO_LABEL : undefined}
                   >
                     {dash(row.quoteIssuedDate)}
                   </td>
-                  <td className="px-1.5 py-1">
+                  <td className="px-wr-cell-x py-wr-cell-y">
                     <StatusCell row={row} />
                   </td>
-                  <td className="px-1.5 py-1 tabular-nums">{dash(row.orderIssuedDate)}</td>
+                  <td className="px-wr-cell-x py-wr-cell-y tabular-nums">{dash(row.orderIssuedDate)}</td>
                   {/* 이 표에서 유일하게 고칠 수 있는 칸이다(파일 헤더).
                       whitespace-pre-line 은 그대로 둔다 — 이 값에는 여러 줄이
                       들어 있고, 못 고치는 사람에게 보이는 모양이 지금까지와
                       한 글자도 달라지면 안 된다. */}
-                  <td className="px-1.5 py-1 whitespace-pre-line">
+                  <td className="px-wr-cell-x py-wr-cell-y whitespace-pre-line">
                     {canEditNotes ? (
                       <WeeklyReportNotesCell
                         repairCaseId={row.id}
@@ -555,7 +566,7 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
         toneClass={SECTION_HEADING_TONE}
       />
       {issuance.customers.length === 0 ? (
-        <p className="px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400">해당 없음</p>
+        <p className="px-2 py-1 text-wr-meta text-zinc-500 dark:text-zinc-400">해당 없음</p>
       ) : (
         // 고객사가 29곳이라 이름표는 어차피 한 줄에 다 안 들어간다. 그래도 접지
         // 않고 이 줄만 좌우로 민다 — 이 화면의 다른 줄과 같은 규칙이고, 접으면
@@ -568,10 +579,10 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
               key={entry.key}
               className={`inline-flex shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
             >
-              <span className="text-[10px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+              <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">
                 {entry.customerName}
               </span>
-              <span className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+              <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
                 {entry.count}
               </span>
             </li>
@@ -639,7 +650,7 @@ export default function WeeklyReportScreen({
     <div className="@container flex flex-col gap-4">
       <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">주간보고</h1>
+          <h1 className="text-wr-title font-semibold text-zinc-900 dark:text-zinc-50">주간보고</h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">갱신 일 {asOfDate}</p>
         </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -672,7 +683,7 @@ export default function WeeklyReportScreen({
           진행 중인 접수 건이 없습니다.
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-wr-block-gap">
           {customerRows.map((row) => (
             // 고객사 한 줄 = 왼쪽 RFG · 오른쪽 MB. 좁아지면 위아래로 쌓이고,
             // 그때도 같은 고객사의 둘은 붙어 있다(한 격자 안이라 갈릴 수 없다).
@@ -709,8 +720,8 @@ export default function WeeklyReportScreen({
           오른쪽 MB)에 둔다. 블록을 다 훑지 않고도 두 줄의 규모를 볼 수 있어야 한다.
           집계 칸도 고객사 블록과 **같은 자리·같은 차례**다(PO 발행 완료 포함) —
           두 곳을 눈으로 견주는 것이 이 줄의 쓸모라서다(파일 헤더). */}
-      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
+      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
         <div className={SIDE_BY_SIDE_GRID}>
           {report.totalsByKind.map(({ kind, counts }) => (
             <div key={kind} className="flex min-w-0 flex-col gap-1">
@@ -740,11 +751,11 @@ export default function WeeklyReportScreen({
 
       {/* PO 발행 현황 — 원본 아래쪽의 구역. 종류별로 고객사별 발행 완료 건수를
           늘어놓는다. 숫자는 위 블록의 PO 발행 완료 칸과 같은 계산에서 나온다. */}
-      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
         {/* 원본은 좌우 두 칸에 각각 "PO 발행 현황"을 적어 둔다. 바깥 제목이 같은
             글자인 것은 그래서다 — 두 칸의 소제목이 원본의 글자고, 이 h2 는 화면
             낭독기가 이 구역을 하나로 집을 수 있게 하는 발판이다. */}
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">PO 발행 현황</h2>
+        <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">PO 발행 현황</h2>
         <div className={SIDE_BY_SIDE_GRID}>
           {poIssuance.map((issuance) => (
             <PoIssuanceBlock key={issuance.kind} issuance={issuance} />

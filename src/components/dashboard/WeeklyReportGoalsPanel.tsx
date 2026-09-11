@@ -68,6 +68,9 @@ import {
  * 줄마다 하나씩 두면 상자가 폼 목록이 된다. 다만 저장할 때는 주·수리 건·차례를
  * **원래 값 그대로 다시 실어 보낸다** — 검증이 네 칸을 한 벌로 받기 때문이고
  * (validation/weekly-report-goal-input.ts), 빠뜨리면 차례가 조용히 지워진다.
+ *
+ * `text-wr-*` · `p-wr-*` · `min-h-wr-*` 는 주간보고 전용 크기다(globals.css ·
+ * WeeklyReportScreen 헤더). 폼 · 버튼의 크기는 그 목록에 없어 그대로 둔다.
  * ============================================================================
  */
 
@@ -220,7 +223,7 @@ function GoalLine({
   }
 
   return (
-    <li className="border-b border-zinc-100 px-2 py-1 text-xs leading-relaxed last:border-0 dark:border-zinc-800">
+    <li className="border-b border-zinc-100 px-2 py-1 text-wr-body leading-relaxed last:border-0 dark:border-zinc-800">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
         <p className="min-w-0 break-all">
           <GoalPrefix row={row} prefix={prefix} />
@@ -330,9 +333,9 @@ function GoalBox({
       <div
         className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${GOAL_HEADING_TONE}`}
       >
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{kind} 금주 목표</h3>
-        <p className="text-[11px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">
-          <span className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+        <h3 className="text-wr-heading font-semibold text-zinc-900 dark:text-zinc-50">{kind} 금주 목표</h3>
+        <p className="text-wr-meta whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+          <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
             {rows.length}
           </span>
           줄
@@ -340,9 +343,9 @@ function GoalBox({
       </div>
       {/* 한쪽이 비어도 상자는 자리를 지킨다 — 지우면 좌우가 어긋나 RFG 와 MB 를
           견줄 수 없다(이 화면의 다른 줄과 같은 규칙). */}
-      <div className="min-h-16 rounded border border-zinc-200 dark:border-zinc-800">
+      <div className="min-h-wr-box-min rounded border border-zinc-200 dark:border-zinc-800">
         {rows.length === 0 ? (
-          <p className="px-2 py-3 text-center text-[11px] text-zinc-500 dark:text-zinc-400">
+          <p className="px-2 py-3 text-center text-wr-meta text-zinc-500 dark:text-zinc-400">
             적어 둔 목표가 없습니다.
           </p>
         ) : (
@@ -686,7 +689,7 @@ export default function WeeklyReportGoalsPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {/* 주 이동은 링크다 — 서버 컴포넌트가 그 주의 목표를 다시 조회해야
             한다(파일 헤더). 버튼으로 두면 화면만 바뀌고 자료는 그대로다.
@@ -718,7 +721,7 @@ export default function WeeklyReportGoalsPanel({
           </Link>
           {/* 이 구역의 제목이다 — 화면의 다른 구역(종류별 총합 · PO 발행 현황)과
               같은 h2 자리다. 상자 둘의 소제목이 그 아래 h3 로 이어진다. */}
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">
             {weekLabel(weekStart)}
           </h2>
           <Link href={weekHref(nextWeekStart)} scroll={false} className={smallButtonClass}>

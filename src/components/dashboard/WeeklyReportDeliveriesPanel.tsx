@@ -68,6 +68,9 @@ import {
  * 고장이고 경위는 WeeklyReportScreen.tsx 파일 헤더에 그대로 적혀 있다.
  * 격자 칸의 min-w-0 도 같은 이유로 장식이 아니다 — 없으면 표가 칸을 밀어 넓혀
  * 화면 전체가 좌우로 밀린다.
+ *
+ * `text-wr-*` · `p-wr-*` · `min-h-wr-*` 는 주간보고 전용 크기다(globals.css ·
+ * WeeklyReportScreen 헤더). 폼 · 버튼의 크기는 그 목록에 없어 그대로 둔다.
  * ============================================================================
  */
 
@@ -225,17 +228,17 @@ function DeliveryLine({
 
   return (
     <tr className="border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800">
-      <td className="px-1.5 py-1 font-medium text-zinc-900 dark:text-zinc-50">
+      <td className="px-wr-cell-x py-wr-cell-y font-medium text-zinc-900 dark:text-zinc-50">
         <IntakeNumberLink row={row} />
       </td>
-      <td className="px-1.5 py-1">{dash(row.modelName)}</td>
-      <td className="px-1.5 py-1">{dash(row.serialNumber)}</td>
-      <td className="px-1.5 py-1">{dash(row.lotNumber)}</td>
-      <td className="px-1.5 py-1">{dash(row.customerName)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y">{dash(row.modelName)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y">{dash(row.serialNumber)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y">{dash(row.lotNumber)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y">{dash(row.customerName)}</td>
       {/* 두 날짜 모두 조회가 실어 온 값이다 — 저장돼 있지 않다(파일 헤더). */}
-      <td className="px-1.5 py-1 tabular-nums">{dash(row.internalTargetShipmentDate)}</td>
-      <td className="px-1.5 py-1 tabular-nums">{dash(row.earliestRequestedDueDate)}</td>
-      <td className="px-1.5 py-1 whitespace-pre-line">
+      <td className="px-wr-cell-x py-wr-cell-y tabular-nums">{dash(row.internalTargetShipmentDate)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y tabular-nums">{dash(row.earliestRequestedDueDate)}</td>
+      <td className="px-wr-cell-x py-wr-cell-y whitespace-pre-line">
         {canEdit && isEditing ? (
           <div className="flex min-w-40 flex-col gap-1">
             <input
@@ -294,7 +297,7 @@ function DeliveryLine({
         )}
       </td>
       {canEdit && (
-        <td className="px-1.5 py-1 text-right">
+        <td className="px-wr-cell-x py-wr-cell-y text-right">
           {isEditing ? (
             <span className="inline-flex gap-1">
               {isConflict ? (
@@ -377,11 +380,11 @@ function DeliveryBox({
       <div
         className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${DELIVERY_HEADING_TONE}`}
       >
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+        <h3 className="text-wr-heading font-semibold text-zinc-900 dark:text-zinc-50">
           {kind} 납입 예정 건
         </h3>
-        <p className="text-[11px] whitespace-nowrap text-zinc-600 dark:text-zinc-400">
-          <span className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+        <p className="text-wr-meta whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+          <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
             {rows.length}
           </span>
           줄
@@ -391,26 +394,26 @@ function DeliveryBox({
           overflow-x 가 세로 축까지 스크롤 상자로 만들기 때문에, 여기에 확정
           높이가 붙으면 이 안에서 세로 스크롤이 생겨 스크롤바가 둘로 보인다.
           좌우 두 칸의 높이는 격자가 맞춘다(파일 헤더). */}
-      <div className="min-h-16 overflow-x-auto rounded border border-zinc-200 dark:border-zinc-800">
-        <table className="w-full border-collapse text-xs">
+      <div className="min-h-wr-box-min overflow-x-auto rounded border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full border-collapse text-wr-body">
           <thead>
             <tr
-              className={`border-b border-zinc-200 text-left text-[11px] font-semibold whitespace-nowrap text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 ${HEADER_ROW_TONE}`}
+              className={`border-b border-zinc-200 text-left text-wr-table-head font-semibold whitespace-nowrap text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 ${HEADER_ROW_TONE}`}
             >
-              <th className="px-1.5 py-1">인수 번호</th>
-              <th className="px-1.5 py-1">형식</th>
-              <th className="px-1.5 py-1">S/N</th>
-              <th className="px-1.5 py-1">L/N</th>
-              <th className="px-1.5 py-1">고객사</th>
-              <th className="px-1.5 py-1">납입 예정</th>
-              <th className="px-1.5 py-1">입고 요청일</th>
-              <th className="px-1.5 py-1">비고</th>
+              <th className="px-wr-cell-x py-wr-cell-y">인수 번호</th>
+              <th className="px-wr-cell-x py-wr-cell-y">형식</th>
+              <th className="px-wr-cell-x py-wr-cell-y">S/N</th>
+              <th className="px-wr-cell-x py-wr-cell-y">L/N</th>
+              <th className="px-wr-cell-x py-wr-cell-y">고객사</th>
+              <th className="px-wr-cell-x py-wr-cell-y">납입 예정</th>
+              <th className="px-wr-cell-x py-wr-cell-y">입고 요청일</th>
+              <th className="px-wr-cell-x py-wr-cell-y">비고</th>
               {canEdit && (
                 // ⚠️ relative 를 떼지 말 것 — 안의 sr-only 는 position:absolute 다.
                 // 기준이 되는 조상이 없으면 그 span 이 AppShell <main> 의 자르기를
                 // 빠져나가 문서 바닥에 자리를 주장하고, 세로 스크롤바가 둘로 보인다
                 // (WeeklyReportScreen 의 고객사 줄 주석 — 실측까지 적혀 있다).
-                <th className="relative px-1.5 py-1 text-right">
+                <th className="relative px-wr-cell-x py-wr-cell-y text-right">
                   <span className="sr-only">줄 수정 · 삭제</span>
                 </th>
               )}
@@ -424,7 +427,7 @@ function DeliveryBox({
               <tr>
                 <td
                   colSpan={columnCount}
-                  className="px-1.5 py-3 text-center text-[11px] text-zinc-500 dark:text-zinc-400"
+                  className="px-wr-cell-x py-3 text-center text-wr-meta text-zinc-500 dark:text-zinc-400"
                 >
                   해당 없음
                 </td>
@@ -733,11 +736,11 @@ export default function WeeklyReportDeliveriesPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         {/* 이 구역의 제목이다 — 화면의 다른 구역(종류별 총합 · PO 발행 현황)과
             같은 h2 자리다. 표 둘의 소제목이 그 아래 h3 로 이어진다. */}
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">납입 예정 건</h2>
+        <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">납입 예정 건</h2>
         {/* 주 고르개가 여기 없는 이유를 한 줄로 말해 준다(파일 헤더). 지난 주를
             보고 있다는 안내는 위 상자에 한 번만 나오므로 여기서 되풀이하지 않는다. */}
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
