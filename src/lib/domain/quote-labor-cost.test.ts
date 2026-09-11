@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
 import { sumQuoteLaborCost, type SelectedRepairTask } from "./quote-labor-cost";
@@ -7,6 +8,25 @@ import { sumQuoteLaborCost, type SelectedRepairTask } from "./quote-labor-cost";
 // 않아도 이 파일은 이미 등록돼 있다(두 세션이 같은 저장소를 쓰는 동안 그 줄을
 // 건드리면 서로 섞인다).
 import { isPriceUnset, toPriceFieldValue } from "./quote-part-price";
+// 이것도 같은 파일에 둔다: 「통전작업 제외」가 **작업비**에 하는 일(위 차감)과
+// **문서의 작업 내역**에 하는 일(③ 을 뺀다)이라 한 신호의 두 얼굴이다. 그리고
+// 🔴 package.json 의 `test` 줄이 Windows 명령줄 한도(cmd.exe 8191자)에 닿아, 파일을
+// 하나만 더 적어도 `npm test` 가 「명령줄이 너무 깁니다」로 아예 돌지 않는다
+// (2026-09-11 확인 — 그 줄은 8113자였다).
+import { isWorkScopeSectionSuppressed } from "./quote-work-scope-suppression";
+import { QUOTE_WORK_SCOPE_SECTIONS, type QuoteWorkScopeSection } from "@/lib/validation/quote-input";
+import {
+  NO_WORK_SCOPE_EXCLUSIONS,
+  WORK_SCOPE_SECTIONS,
+  dropExcludedWorkScopeLines,
+  type WorkScopeExclusions,
+  type WorkScopeLines,
+} from "@/lib/xlsx/quote-sheet-layout";
+import { ZipArchive } from "@/lib/xlsx/zip-reader";
+import { resolveSheetPart } from "@/lib/xlsx/workbook-parts";
+import { fillQuoteWorkbook, QUOTE_SHEET_NAME, type GeneratorQuoteInput } from "@/lib/xlsx/quote-template";
+import { fillOhQuoteWorkbook, OH_QUOTE_SHEET_NAME } from "@/lib/xlsx/oh-quote-template";
+import { fillMatcherQuoteWorkbook, MATCHER_QUOTE_SHEET_NAME } from "@/lib/xlsx/matcher-quote-template";
 
 /**
  * ============================================================================
@@ -217,4 +237,203 @@ describe("단가를 화면 칸에 넣기", () => {
   test("숫자로 안 읽히는 값은 NaN 을 칸에 박지 않고 빈칸으로 둔다", () => {
     assert.equal(toPriceFieldValue("abc"), "", "'NaN' 이 칸에 보이면 사람이 지우는 수밖에 없다");
   });
+});
+
+/**
+ * ============================================================================
+ * 작업 내역의 어느 묶음이 문서에서 빠지는가 — 화면 판정과 문서 판정이 같은 답인가
+ * ============================================================================
+ * 수정 화면은 이 함수로 「3) 통전작업」 칸을 감춘다(QuoteEditForm). 문서 쪽은
+ * xlsx 생성기 셋이 각자 `POWER_TEST: input.powerTestExcluded === true` 로 적는다.
+ * 둘이 어긋나면 "화면에서는 사라졌는데 문서에는 찍혀 나가는" 칸이 생긴다 — 이
+ * 시험이 그 자리를 붙잡는다. 두 겹으로 본다:
+ *
+ *   1. **늘 도는 것** — 생성기 셋의 판정 줄을 원본에서 읽어 모양을 못 박고, 그 모양
+ *      그대로(`NO_WORK_SCOPE_EXCLUSIONS` + 그 줄) 셈한 답과 이 함수의 답을 견준다.
+ *   2. **양식이 있을 때만 도는 것** — 실제 양식을 채워, 묶음마다 넣은 표지 글자가
+ *      문서에 남는지로 판정을 거꾸로 읽는다(양식은 저장소에 두지 않는다 —
+ *      xlsx/quote-template.test.ts 머리말).
+ * ============================================================================
+ */
+
+const FLAGS = [true, false] as const;
+
+describe("작업 내역 감춤 — 판정", () => {
+  test("🔴 제외 켜짐 → 통전작업만 감춘다, 조사·수리는 그대로 둔다", () => {
+    const options = { powerTestExcluded: true };
+    assert.equal(isWorkScopeSectionSuppressed("POWER_TEST", options), true);
+    assert.equal(isWorkScopeSectionSuppressed("INVESTIGATION", options), false);
+    assert.equal(isWorkScopeSectionSuppressed("REPAIR", options), false);
+  });
+
+  test("🔴 제외 꺼짐 → 아무것도 감추지 않는다", () => {
+    for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+      assert.equal(isWorkScopeSectionSuppressed(section, { powerTestExcluded: false }), false, section);
+    }
+  });
+});
+
+// ── 문서 쪽 규칙과 같은 답 ─────────────────────────────────────────────
+
+const repoUrl = new URL("../../../", import.meta.url);
+/** CRLF 로 받아 둔 저장소에서도 같게 보이도록 줄바꿈을 맞추고 공백을 하나로 접는다. */
+const readFlat = (relativePath: string) =>
+  readFileSync(new URL(relativePath, repoUrl), "utf8").replace(/\s+/g, " ");
+
+const GENERATOR_SOURCES = [
+  "src/lib/xlsx/quote-template.ts",
+  "src/lib/xlsx/matcher-quote-template.ts",
+  "src/lib/xlsx/oh-quote-template.ts",
+] as const;
+
+/** 생성기 셋이 적어 둔 판정 줄. 셋 다 이 모양이어야 아래 셈이 그 셋의 답이 된다. */
+const XLSX_EXCLUSION_LITERAL =
+  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, POWER_TEST: input.powerTestExcluded === true, };";
+
+/** 위 줄을 그대로 옮긴 셈 — 생성기가 `input.powerTestExcluded` 로 받는 값에 대해. */
+function xlsxExclusions(powerTestExcluded: boolean): WorkScopeExclusions {
+  return { ...NO_WORK_SCOPE_EXCLUSIONS, POWER_TEST: powerTestExcluded === true };
+}
+
+describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
+  test("묶음 축이 같다 — 저장 쪽 키와 xlsx 쪽 키", () => {
+    assert.deepEqual([...WORK_SCOPE_SECTIONS], [...QUOTE_WORK_SCOPE_SECTIONS]);
+  });
+
+  test("🔴 생성기 셋이 모두 같은 판정 줄을 쓴다 — 하나라도 달라지면 여기서 멈춘다", () => {
+    for (const path of GENERATOR_SOURCES) {
+      const source = readFlat(path);
+      assert.ok(source.includes(XLSX_EXCLUSION_LITERAL), `${path} 의 판정 줄이 달라졌다`);
+      // 판정 줄이 둘이면 어느 쪽이 쓰이는지 원본만으로 알 수 없다.
+      assert.equal(
+        source.split("const excluded: WorkScopeExclusions").length - 1,
+        1,
+        `${path} 에 판정 줄이 하나가 아니다`
+      );
+    }
+  });
+
+  test("기본값은 셋 다 꺼짐이다 — 켤 수 있는 것은 통전작업 하나뿐", () => {
+    for (const section of WORK_SCOPE_SECTIONS) {
+      assert.equal(NO_WORK_SCOPE_EXCLUSIONS[section], false, section);
+    }
+  });
+
+  test("🔴 켜짐·꺼짐 모두 묶음마다 화면 판정 = 문서 판정", () => {
+    for (const flag of FLAGS) {
+      const excluded = xlsxExclusions(flag);
+      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+        assert.equal(
+          isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
+          excluded[section],
+          `제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
+        );
+      }
+    }
+  });
+
+  test("문서에서 줄이 비워지는 묶음 = 화면에서 감추는 묶음", () => {
+    // 생성기는 판정을 들고 dropExcludedWorkScopeLines 로 그 묶음의 줄을 비운다.
+    // 셋 다 줄이 있는 입력을 넣어, 비워진 묶음이 곧 감추는 묶음인지 본다.
+    const lines: WorkScopeLines = {
+      INVESTIGATION: ["조사 하나"],
+      REPAIR: ["수리 하나"],
+      POWER_TEST: ["통전 하나"],
+    };
+    for (const flag of FLAGS) {
+      const kept = dropExcludedWorkScopeLines(lines, xlsxExclusions(flag));
+      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+        assert.equal(
+          kept[section].length === 0,
+          isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
+          `제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
+        );
+      }
+    }
+  });
+});
+
+// ── 실제 양식으로 거꾸로 읽기 ──────────────────────────────────────────
+
+/** 묶음마다 다른 표지. 문서에 남았는지를 시트 원본에서 글자로 찾는다. */
+const MARKERS: Record<QuoteWorkScopeSection, string> = {
+  INVESTIGATION: "SUPPRESSION-MARK-INVESTIGATION",
+  REPAIR: "SUPPRESSION-MARK-REPAIR",
+  POWER_TEST: "SUPPRESSION-MARK-POWER_TEST",
+};
+
+const MARKED_SCOPE: WorkScopeLines = {
+  INVESTIGATION: [MARKERS.INVESTIGATION],
+  REPAIR: [MARKERS.REPAIR],
+  POWER_TEST: [MARKERS.POWER_TEST],
+};
+
+const GENERATOR_BASE: GeneratorQuoteInput = {
+  quoteNumber: "DSS 2026-TEST",
+  quoteDate: new Date(2026, 8, 11),
+  customerName: "테스트 고객사",
+  subject: "통전작업 제외 판정 시험",
+  modelName: "TEST-MODEL",
+  serialNumber: "TEST-SN",
+  lotNumber: "TEST-LN",
+  parts: [],
+  workCost: 1_000_000,
+};
+
+type TemplateCase = {
+  name: string;
+  envKey: string;
+  sheetName: string;
+  fill: (template: Buffer, powerTestExcluded: boolean) => Buffer;
+};
+
+const TEMPLATE_CASES: readonly TemplateCase[] = [
+  {
+    name: "제너레이터 내자",
+    envKey: "QUOTE_TEMPLATE_PATH",
+    sheetName: QUOTE_SHEET_NAME,
+    fill: (template, powerTestExcluded) =>
+      fillQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, powerTestExcluded }),
+  },
+  {
+    name: "제너레이터 O/H",
+    envKey: "OH_QUOTE_TEMPLATE_PATH",
+    sheetName: OH_QUOTE_SHEET_NAME,
+    fill: (template, powerTestExcluded) =>
+      fillOhQuoteWorkbook(template, {
+        ...GENERATOR_BASE,
+        overhaulParts: [],
+        workScope: MARKED_SCOPE,
+        powerTestExcluded,
+      }),
+  },
+  {
+    name: "매쳐 내자",
+    envKey: "MATCHER_QUOTE_TEMPLATE_PATH",
+    sheetName: MATCHER_QUOTE_SHEET_NAME,
+    fill: (template, powerTestExcluded) =>
+      fillMatcherQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, powerTestExcluded }),
+  },
+];
+
+describe("작업 내역 감춤 — 실제 양식: 문서에 남은 묶음 = 화면에서 보이는 묶음", () => {
+  for (const templateCase of TEMPLATE_CASES) {
+    const path = process.env[templateCase.envKey];
+    const skip = path ? false : `${templateCase.envKey} 가 설정되지 않았습니다`;
+
+    test(`🔴 ${templateCase.name}: 켜짐·꺼짐 모두 묶음마다 같은 답`, { skip }, () => {
+      const template = readFileSync(path as string);
+      for (const flag of FLAGS) {
+        const archive = ZipArchive.fromBuffer(templateCase.fill(template, flag));
+        const sheetXml = archive.readText(resolveSheetPart(archive, templateCase.sheetName));
+        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+          assert.equal(
+            sheetXml.includes(MARKERS[section]),
+            !isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
+            `${templateCase.name} · 제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
+          );
+        }
+      }
+    });
+  }
 });

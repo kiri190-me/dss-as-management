@@ -27,6 +27,7 @@ import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kin
 import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
 import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
+import { isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";
 import {
   MAX_QUOTE_ITEMS,
   QUOTE_WORK_SCOPE_SECTIONS,
@@ -98,6 +99,14 @@ const AMOUNT_FORMAT = new Intl.NumberFormat("ko-KR");
  */
 const SAVE_FAILED_MESSAGE =
   "저장 요청이 끝나지 못했습니다. 잠시 후 다시 시도해 주세요. 계속 그러면 화면을 새로고침해 주세요.";
+
+/**
+ * 「작업 내역」에서 문서에 나가지 않는 칸 자리에 두는 안내. 지금은 「통전작업 제외」
+ * 를 켰을 때의 「3) 통전작업」 하나뿐이다(domain/quote-work-scope-suppression.ts).
+ * 줄은 감췄을 뿐이라 체크를 풀면 그대로 다시 보인다 — 그 사실도 함께 말한다.
+ */
+const WORK_SCOPE_SUPPRESSED_NOTICE =
+  "통전작업 제외 — 이 구역은 견적서에 나가지 않습니다. 체크를 풀면 적어 둔 줄이 다시 보입니다.";
 
 type ItemRow = {
   key: string;
@@ -1648,6 +1657,17 @@ export default function QuoteEditForm({
               const rows = scopeLines[section];
               const templateDefaults =
                 workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section]?.items ?? [];
+              /**
+               * 문서에 나가지 않는 칸인가 — 「통전작업 제외」를 켜면 「3) 통전작업」이
+               * 그렇다. 판정은 xlsx 생성기와 같은 규칙이다(domain/quote-work-scope-
+               * suppression.ts). 줄이 떠 있으면 사람은 견적서에 나가는 줄로 읽는다.
+               *
+               * 🔴 **그리기만 감춘다.** scopeLines·scopeTouched 는 건드리지 않는다 —
+               * 체크를 풀면 손으로 고쳐 둔 줄까지 그대로 돌아와야 하고, 저장하는
+               * 값도 지금과 같다(collectFields 의 workScopeLines). 칸 제목은 남긴다 —
+               * 칸이 통째로 사라지면 어디 갔는지 모른다.
+               */
+              const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded });
               return (
                 <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                   <div className="flex items-baseline justify-between gap-2">
@@ -1657,8 +1677,8 @@ export default function QuoteEditForm({
                     </span>
                     {/* 다시 맞추는 길을 열어 둔다 — 손댄 뒤로는 자동으로 따라가지
                         않으므로, 되돌리고 싶을 때 누를 곳이 없으면 사람이 손으로
-                        지우고 다시 적게 된다. */}
-                    {section === "REPAIR" ? (
+                        지우고 다시 적게 된다. 감춘 칸에는 두지 않는다. */}
+                    {suppressed ? null : section === "REPAIR" ? (
                       <button
                         type="button"
                         onClick={() =>
@@ -1687,50 +1707,58 @@ export default function QuoteEditForm({
                     )}
                   </div>
 
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    {rows.map((row, index) => (
-                      <div key={row.key} className="flex items-center gap-1.5">
-                        <span className="text-xs text-zinc-400">-</span>
-                        <input
-                          value={row.text}
-                          onChange={(e) =>
-                            editScope(
-                              section,
-                              rows.map((r) => (r.key === row.key ? { ...r, text: e.target.value } : r))
-                            )
-                          }
-                          aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄`}
-                          className={editInputClass}
-                          disabled={disabled}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => editScope(section, rows.filter((r) => r.key !== row.key))}
-                          disabled={disabled}
-                          aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄 지우기`}
-                          className="rounded border border-zinc-300 px-1.5 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
-                        >
-                          ×
-                        </button>
+                  {suppressed ? (
+                    <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {WORK_SCOPE_SUPPRESSED_NOTICE}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        {rows.map((row, index) => (
+                          <div key={row.key} className="flex items-center gap-1.5">
+                            <span className="text-xs text-zinc-400">-</span>
+                            <input
+                              value={row.text}
+                              onChange={(e) =>
+                                editScope(
+                                  section,
+                                  rows.map((r) => (r.key === row.key ? { ...r, text: e.target.value } : r))
+                                )
+                              }
+                              aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄`}
+                              className={editInputClass}
+                              disabled={disabled}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => editScope(section, rows.filter((r) => r.key !== row.key))}
+                              disabled={disabled}
+                              aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄 지우기`}
+                              className="rounded border border-zinc-300 px-1.5 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                        {rows.length === 0 && (
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                            아직 없습니다. 아래에서 줄을 더하세요.
+                          </p>
+                        )}
                       </div>
-                    ))}
-                    {rows.length === 0 && (
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                        아직 없습니다. 아래에서 줄을 더하세요.
-                      </p>
-                    )}
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      editScope(section, [...rows, { key: generateClientUuid(), text: "" }])
-                    }
-                    disabled={disabled}
-                    className="mt-2 rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
-                  >
-                    + 줄 추가
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          editScope(section, [...rows, { key: generateClientUuid(), text: "" }])
+                        }
+                        disabled={disabled}
+                        className="mt-2 rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+                      >
+                        + 줄 추가
+                      </button>
+                    </>
+                  )}
                 </div>
               );
             })}
