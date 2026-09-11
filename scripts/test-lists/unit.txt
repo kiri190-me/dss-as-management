@@ -109,6 +109,7 @@ src/lib/auth/customer-authorization.test.ts
 src/lib/validation/customer-update-input.test.ts
 src/lib/validation/end-user-input.test.ts
 src/lib/validation/domestic-order-input.test.ts
+src/lib/auth/domestic-order-authorization.test.ts
 src/lib/auth/product-model-authorization.test.ts
 src/lib/validation/product-model-input.test.ts
 src/lib/db/schema/legacy-import-state-set.test.ts

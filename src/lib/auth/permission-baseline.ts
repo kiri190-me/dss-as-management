@@ -29,7 +29,11 @@ import {
   canViewPartRequests,
   canCreatePartRequest,
 } from "./inventory-authorization";
-import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-authorization";
+import {
+  canDeleteDomesticOrders,
+  canEditDomesticOrders,
+  canViewDomesticOrders,
+} from "./domestic-order-authorization";
 import { canDeleteQuotes, canEditQuotes, canViewQuotes } from "./quote-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import {
@@ -228,13 +232,20 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       });
 
     case "domesticOrders":
-      // 2단계에서 행 추가·수정이 생겼다 — 서버 액션(actions/domestic-orders.ts)이
-      // 실제로 저장하므로 다른 영역들처럼 사다리로 접는다. 관리는 없다:
-      // 삭제·휴지통은 아직 만들지 않았고, 없는 조작을 상한에 올려 두면 고른
-      // 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지 않는다.
+      // 행 추가·수정(2단계)에 이어 휴지통이 생겼다(2026-09-11) — 휴지통으로
+      // 보내기·되살리기·완전 삭제는 관리자 이상이다. 견적서와 같은 모양이다.
       // 여기서도 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서**
       // 구한다(이 파일 맨 위 주석).
-      return ladder({ write: canEditDomesticOrders(role), read: canViewDomesticOrders(role) });
+      //
+      // ⚠️ 이 값은 permission-areas.ts 의 domesticOrders.maxMeaningfulLevel 로
+      // **한 번 더 잘린다**(baselinePermissionLevel). 휴지통과 함께 그쪽도 관리로
+      // 올렸다 — 둘 중 하나만 올리면 상한은 쓰기에 머물고, 휴지통은 누구에게도
+      // 열리지 않는다(실제로 한 번 그 상태였다).
+      return ladder({
+        manage: canDeleteDomesticOrders(role),
+        write: canEditDomesticOrders(role),
+        read: canViewDomesticOrders(role),
+      });
 
     case "quotes":
       // 내자 정리와 같은 모양이다 — 만들기·고치기는 서버 액션이 실제로 저장하고

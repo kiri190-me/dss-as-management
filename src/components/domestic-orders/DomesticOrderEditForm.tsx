@@ -208,6 +208,7 @@ export default function DomesticOrderEditForm({
   customerOptions,
   quoteOptions,
   onDone,
+  onRequestDelete,
 }: {
   /** 고칠 줄. null 이면 새 줄을 추가하는 중이다. */
   row: DomesticOrderListItem | null;
@@ -215,6 +216,17 @@ export default function DomesticOrderEditForm({
   customerOptions: CustomerOption[];
   quoteOptions: QuoteOption[];
   onDone: () => void;
+  /**
+   * 이 줄을 휴지통으로 보내는 확인 창을 연다(2026-09-11). **지울 수 있는
+   * 세션에서만** 부르는 쪽이 넘긴다 — 넘기지 않으면 버튼이 없고, 폼은 이 변경
+   * 전과 똑같다. 버튼을 감추는 것은 편의일 뿐이고, 서버 액션이
+   * hasPermission("domesticOrders", "MANAGE") 로 다시 본다.
+   *
+   * 폼은 지우지 않는다 — 창을 여는 것까지만 하고, 창·사유·결과는 목록 화면이
+   * 소유한다(공용 휴지통 창의 원칙: master-data-trash-dialogs.tsx 머리말).
+   * `행 추가` 중에는 지울 줄이 없으므로 row 가 있을 때만 그린다.
+   */
+  onRequestDelete?: () => void;
 }) {
   const router = useRouter();
 
@@ -681,9 +693,30 @@ export default function DomesticOrderEditForm({
       noValidate
       className="rounded-lg border border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
     >
-      <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-        {row ? "줄 수정" : "행 추가"}
-      </h2>
+      {/* 제목 줄 오른쪽 끝에 `휴지통으로 보내기` 가 선다(지울 수 있는 세션에서
+          고치는 중일 때만). 제목과 한 줄이라 폼의 높이는 이 변경 전과 같고,
+          표의 22칼럼·순번 칸도 건드리지 않는다 — 한 줄의 조작이 모이는 자리가
+          이 폼이다. 저장 단추 옆에 두지 않는 것은 일부러다: 저장과 지우기가
+          나란히 서면 손이 미끄러지는 자리가 된다.
+
+          -my-0.5 는 단추(22px)가 제목 줄(20px)보다 높아 줄이 2px 자라는 것을
+          되돌린다 — 이 화면은 위쪽 높이가 그대로 표에서 빠지는 구조다(목록 화면
+          머리말의 '표 위쪽은 자리를 적게 쓴다'). */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          {row ? "줄 수정" : "행 추가"}
+        </h2>
+        {row && onRequestDelete && (
+          <button
+            type="button"
+            onClick={onRequestDelete}
+            disabled={disabled}
+            className="-my-0.5 rounded-md border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+          >
+            휴지통으로 보내기
+          </button>
+        )}
+      </div>
 
       {/* 비워 두는 것이 기본이라는 사실을 폼 맨 위에 적는다 — 입력칸만 보면
           "채워야 하는 칸"으로 읽히고, 그렇게 채운 값은 수리 건 쪽이 바뀌어도

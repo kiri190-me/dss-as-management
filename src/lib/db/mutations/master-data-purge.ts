@@ -2,6 +2,8 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../connection";
 import {
   customers,
+  domesticOrderDueDates,
+  domesticOrders,
   endUserContacts,
   endUsers,
   inventoryPartRequestItems,
@@ -30,6 +32,11 @@ import { getMasterDataTrashRetentionStatus } from "@/lib/domain/master-data-tras
  * ============================================================================
  * 마스터 데이터 자동 완전삭제 — 휴지통에서 15일이 지난 것
  * ============================================================================
+ * 고객사 · 제품 모델 · 부품 · 기술 절차, 그리고 내자 정리 줄(2026-09-11).
+ * 내자 정리는 마스터 데이터가 아니지만 같은 15일 규칙과 같은 배지를 쓰도록
+ * 정해졌고(사용자 결정), 같은 CLI 한 번으로 함께 도는 편이 야간 작업을 하나
+ * 더 늘리는 것보다 낫다.
+ *
  * 여기에 "server-only"가 없는 것은 실수가 아니다. 이 모듈의 유일한 호출자는
  * scripts/purge-expired-master-data.ts — Next.js 번들러 밖에서 tsx로 도는
  * CLI다. db를 ../client가 아니라 ../connection에서 가져오는 것도 같은
@@ -493,6 +500,103 @@ export async function listPurgeEligibleProcedureTemplateIds(now: Date = new Date
     .map((row) => row.id);
 }
 
+export type PurgeDomesticOrderOutcome = PurgeCustomerOutcome;
+
+/**
+ * 내자 정리 한 줄, 트랜잭션 하나(2026-09-11). 다른 마스터와 판정 순서·결과
+ * 종류가 같다 — 다만 **SKIPPED_REFERENCED 는 나오지 않는다.** 이 줄을 가리키는
+ * 표는 domestic_order_due_dates 하나뿐이고 ON DELETE CASCADE 라, 무엇도 이 줄의
+ * 삭제를 막지 않는다(납기요청일은 DB 가 함께 지운다).
+ *
+ * 사람이 휴지통에서 누르는 완전 삭제(domestic-orders-trash.ts 의
+ * permanentlyDeleteDomesticOrder)와 같은 일을 시스템이 한다. 그 파일은
+ * "server-only"라 부를 수 없어서 순서를 여기 다시 적는다(이 파일 머리말).
+ * 감사 로그의 스냅숏 칸도 그쪽과 같다 — 자유 입력 칸(현황·이력·기타·납품자·
+ * 일본 송금·고장내역)은 고르지 않는다. 사람 이름이 섞일 수 있는 칸이다.
+ */
+export async function purgeExpiredDomesticOrder(
+  id: string,
+  now: Date = new Date()
+): Promise<PurgeDomesticOrderOutcome> {
+  return await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({
+        id: domesticOrders.id,
+        version: domesticOrders.version,
+        repairCaseId: domesticOrders.repairCaseId,
+        customerId: domesticOrders.customerId,
+        quoteId: domesticOrders.quoteId,
+        intakeNumberText: domesticOrders.intakeNumberText,
+        displayOrder: domesticOrders.displayOrder,
+        purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
+        projectName: domesticOrders.projectName,
+        modelNameText: domesticOrders.modelNameText,
+        lotNumberText: domesticOrders.lotNumberText,
+        serialNumberText: domesticOrders.serialNumberText,
+        orderIssuedDate: domesticOrders.orderIssuedDate,
+        quoteIssuedDate: domesticOrders.quoteIssuedDate,
+        quoteNumber: domesticOrders.quoteNumber,
+        taxInvoiceDate: domesticOrders.taxInvoiceDate,
+        amountExcludingVat: domesticOrders.amountExcludingVat,
+        paymentCompleted: domesticOrders.paymentCompleted,
+        completedAt: domesticOrders.completedAt,
+        createdAt: domesticOrders.createdAt,
+        isDeleted: domesticOrders.isDeleted,
+        deletedAt: domesticOrders.deletedAt,
+        deletedBy: domesticOrders.deletedBy,
+        deleteReason: domesticOrders.deleteReason,
+      })
+      .from(domesticOrders)
+      .where(eq(domesticOrders.id, id))
+      .for("update");
+
+    if (!current) return "SKIPPED_ALREADY_GONE";
+    if (!current.isDeleted || !current.deletedAt) return "SKIPPED_RESTORED";
+    if (!getMasterDataTrashRetentionStatus(current.deletedAt.toISOString(), now).isExpired) {
+      return "SKIPPED_NOT_ELIGIBLE";
+    }
+
+    const [dueDates] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(domesticOrderDueDates)
+      .where(eq(domesticOrderDueDates.domesticOrderId, id));
+
+    // 납기요청일은 FK 의 ON DELETE CASCADE 가 함께 지운다.
+    await tx.delete(domesticOrders).where(eq(domesticOrders.id, id));
+
+    await insertAuditLog(tx, {
+      actorUserId: null,
+      actionType: "PURGE",
+      targetEntity: "domestic_orders",
+      targetRecordId: id,
+      previousValue: {
+        ...current,
+        completedAt: current.completedAt ? current.completedAt.toISOString() : null,
+        createdAt: current.createdAt.toISOString(),
+        deletedAt: current.deletedAt.toISOString(),
+        purgedDueDateCount: dueDates.total,
+      },
+      newValue: null,
+    });
+
+    return "PURGED";
+  });
+}
+
+/** 다른 마스터와 같은 규칙 — 읽기 전용이고, 판정은 각자의 트랜잭션에서 다시 한다. */
+export async function listPurgeEligibleDomesticOrderIds(now: Date = new Date()): Promise<string[]> {
+  const rows = await db
+    .select({ id: domesticOrders.id, deletedAt: domesticOrders.deletedAt })
+    .from(domesticOrders)
+    .where(eq(domesticOrders.isDeleted, true));
+
+  return rows
+    .filter(
+      (row) => row.deletedAt !== null && getMasterDataTrashRetentionStatus(row.deletedAt.toISOString(), now).isExpired
+    )
+    .map((row) => row.id);
+}
+
 export type MasterDataPurgeEntitySummary = {
   eligible: number;
   purged: number;
@@ -509,6 +613,7 @@ export type MasterDataPurgeSweepSummary = {
   productModels: MasterDataPurgeEntitySummary;
   parts: MasterDataPurgeEntitySummary;
   procedureTemplates: MasterDataPurgeEntitySummary;
+  domesticOrders: MasterDataPurgeEntitySummary;
 };
 
 function emptySummary(eligible: number): MasterDataPurgeEntitySummary {
@@ -556,8 +661,21 @@ async function sweepEntity(
  *
  * 한 종류가 통째로 실패해도 다른 종류는 계속 돈다 — 각 건의 실패는 그 건의
  * 요약에만 기록된다.
+ *
+ * ── 내자 정리는 고객사보다 **먼저** 돈다(2026-09-11) ─────────────────────
+ * 이쪽은 순서가 뜻을 갖는다. domestic_orders.customer_id 는 customers 를
+ * RESTRICT 로 가리키므로, 만료된 내자 줄이 남아 있는 채로 같은 고객사를 먼저
+ * 지우려 하면 그 고객사는 FK 오류로 이번 회차에서 실패한다. 내자 줄을 먼저
+ * 비우면 둘 다 만료된 경우 한 회차에 함께 정리된다. (활성 내자 줄이 걸린
+ * 고객사는 여전히 실패한다 — 그 검사는 고객사 쪽에 없고, 이 변경의 범위가
+ * 아니다.)
  */
 export async function runMasterDataPurgeSweep(now: Date = new Date()): Promise<MasterDataPurgeSweepSummary> {
+  const domesticOrderSummary = await sweepEntity(
+    await listPurgeEligibleDomesticOrderIds(now),
+    purgeExpiredDomesticOrder,
+    now
+  );
   const customerSummary = await sweepEntity(await listPurgeEligibleCustomerIds(now), purgeExpiredCustomer, now);
   const productModelSummary = await sweepEntity(
     await listPurgeEligibleProductModelIds(now),
@@ -576,5 +694,6 @@ export async function runMasterDataPurgeSweep(now: Date = new Date()): Promise<M
     productModels: productModelSummary,
     parts: partSummary,
     procedureTemplates: procedureTemplateSummary,
+    domesticOrders: domesticOrderSummary,
   };
 }

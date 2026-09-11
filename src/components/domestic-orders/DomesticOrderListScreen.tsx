@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, type MouseEvent } from "react";
+import { useId, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -9,8 +9,17 @@ import {
   setStoredChoice,
   useStoredChoice,
 } from "@/components/common/responsive-list";
+import {
+  MasterDataDeleteDialog,
+  MasterDataPermanentDeleteDialog,
+  MasterDataRestoreDialog,
+} from "@/components/common/master-data-trash-dialogs";
+import MasterDataTrashRetentionBadge from "@/components/common/master-data-trash-retention-badge";
+import { useMasterDataTrash, type MasterDataTrashTarget } from "@/lib/hooks/useMasterDataTrash";
+import { MASTER_DATA_TRASH_RETENTION_DAYS } from "@/lib/domain/master-data-trash-retention";
 import type {
   CustomerOption,
+  DeletedDomesticOrderRow,
   DomesticOrderListItem,
   RepairCaseLinkOption,
 } from "@/lib/db/queries/domestic-orders";
@@ -35,9 +44,16 @@ import {
 } from "@/lib/domain/customer-row-color";
 import type { InlineEditCellWrapping } from "@/components/common/inline-edit-cell-button";
 import type { DomesticOrderInlineEditableField } from "@/lib/domain/domestic-order-cell-edit";
-import { setDomesticOrderCompletionAction } from "@/lib/server/actions/domestic-orders";
+import {
+  deleteDomesticOrdersAction,
+  permanentlyDeleteDomesticOrdersAction,
+  restoreDomesticOrdersAction,
+  setDomesticOrderCompletionAction,
+  type DomesticOrderTrashItem,
+} from "@/lib/server/actions/domestic-orders";
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
+import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
 
 /**
  * ============================================================================
@@ -46,7 +62,34 @@ import DomesticOrderTextCell from "./DomesticOrderTextCell";
  * 손으로 관리하던 `내자 시트`를 그대로 옮겨 놓은 화면이다. 표의 22칼럼·머리말·
  * 합계는 1단계 그대로이고, 그 위에 **행 추가**와 **줄 수정**(2단계),
  * **발주 년도 고르기 · 완료 처리 · 고객사 묶기**(3단계)를 얹었다.
- * 삭제·휴지통은 아직 없다.
+ * 휴지통은 2026-09-11 에 붙었다 — 아래 '휴지통은 자리를 새로 차지하지 않는다'.
+ *
+ * ── 휴지통은 자리를 새로 차지하지 않는다 ────────────────────────────────
+ * 다른 휴지통(고객사·견적서·부품)과 같은 3단계다: 휴지통으로 보냄 → 15일 보관
+ * (그동안 복원) → 완전 삭제(관리자가 바로, 또는 15일 뒤 정리 스크립트). 확인 창·
+ * 보관 배지·창 상태 훅도 그쪽 것을 그대로 쓴다(master-data-trash-dialogs ·
+ * master-data-trash-retention-badge · useMasterDataTrash).
+ *
+ * 다른 화면과 다른 것은 **자리**다. 이 화면은 위쪽이 쓰고 남은 높이를 표가 받는
+ * 구조라(아래 '열 제목은 화면에 붙어 있다'), 다른 화면처럼 표 위에 탭 줄을 한 줄
+ * 더 세우면 그 높이(약 49px)가 그대로 표에서 빠진다. 그래서:
+ *
+ *  1. **보기 전환(사용중 / 휴지통)은 머리말의 제목 줄에 선다**(SheetHeading 의
+ *     viewSwitch). 이미 있는 줄이고, 옆의 `머리말 펼치기` 단추와 같은 높이라
+ *     그 줄이 자라지 않는다.
+ *  2. **`휴지통으로 보내기` 는 `줄 수정` 폼의 제목 줄에 선다**(DomesticOrderEditForm
+ *     의 onRequestDelete). 표의 22칼럼과 순번 칸(수정·완료 단추)은 그대로다 —
+ *     순번 칸에 단추를 하나 더 세우면 모든 줄의 폭이 늘고, 그 칸의 sr-only 함정
+ *     (EditRowButton 주석)을 한 번 더 밟을 자리가 생긴다.
+ *
+ * 둘 다 **지울 수 있는 세션(canDelete)에서만** 그려진다. 휴지통의 줄도 그 세션에만
+ * 서버가 실어 보낸다(page.tsx) — 볼 수 없는 휴지통의 존재를 알릴 이유가 없다.
+ * 화면이 감춘 것은 경계가 아니다: 서버 액션이 hasPermission("domesticOrders",
+ * "MANAGE") 로 매번 다시 본다.
+ *
+ * 휴지통을 보는 동안에는 검색·년도·합계 줄과 표 대신 휴지통 목록이 선다. 열려
+ * 있던 `줄 수정` 폼은 **지우지 않고 감춰 둔다**(display: contents / hidden) —
+ * 휴지통을 잠깐 들여다봤다고 적던 글이 사라지면 안 된다.
  *
  * ── 무엇을 보여 줄지 정하는 규칙은 여기 없다 ────────────────────────────
  * 년도 후보를 뽑고, 년도로 거르고, 고객사로 묶고, 완료인지 판정하는 일은
@@ -562,7 +605,18 @@ const SHEET_HEADING_COLLAPSED = "COLLAPSED";
  * none 인 자식은 flex 항목이 아니라 gap 도 함께 사라지므로, 접었을 때 이 상자는
  * 제목 줄 하나 높이 그대로다.
  */
-function SheetHeading({ asOfDate }: { asOfDate: string }) {
+function SheetHeading({
+  asOfDate,
+  viewSwitch,
+}: {
+  asOfDate: string;
+  /**
+   * 사용중 / 휴지통 전환(ViewSwitch). 지울 수 있는 세션에서만 넘어온다 —
+   * 넘어오지 않으면 이 줄은 이 변경 전과 똑같다. 제목 줄에 세우는 까닭은 파일
+   * 머리말의 '휴지통은 자리를 새로 차지하지 않는다'.
+   */
+  viewSwitch?: ReactNode;
+}) {
   const stored = useStoredChoice(SHEET_HEADING_STORAGE_KEY);
   // 적어 둔 적이 없으면(서버가 그릴 때도 그렇다) 접힘이다 — 기본이 접힘이라
   // 서버가 그린 화면과 저장값이 없는 첫 그림이 같다.
@@ -605,7 +659,16 @@ function SheetHeading({ asOfDate }: { asOfDate: string }) {
             </span>
           </button>
         </div>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{asOfDate} 기준</p>
+        {viewSwitch ? (
+          // 전환 단추와 기준일을 한 덩어리로 오른쪽 끝에 둔다 — 따로 두면 좁아질
+          // 때 기준일만 제목 쪽으로 흘러가 무엇의 기준일인지 흐려진다.
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            {viewSwitch}
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{asOfDate} 기준</p>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{asOfDate} 기준</p>
+        )}
       </div>
       <div id={panelId} className={isExpanded ? "flex flex-col gap-2" : "hidden"}>
         <ol className="flex list-none flex-col gap-1">
@@ -1041,6 +1104,278 @@ function CompletionToggle({
   );
 }
 
+/** 지금 보고 있는 것 — 사용중인 줄인가, 휴지통인가. */
+type ListView = "active" | "trash";
+
+/**
+ * 사용중 / 휴지통 전환. 머리말의 제목 줄에 선다(파일 머리말의 '휴지통은 자리를
+ * 새로 차지하지 않는다').
+ *
+ * 글자는 다른 휴지통 화면의 탭과 **같다**(`사용중 (N)` · `휴지통 (N)` — 고객사·
+ * 견적서). 생김새만 탭 줄 대신 붙은 단추 둘이다 — 표/카드 토글(responsive-list
+ * 의 ViewToggle)과 같은 모양이라 "둘 중 하나를 고르는 것"으로 읽힌다. 높이는
+ * 옆의 `머리말 펼치기` 단추와 같다(text-xs · py-0.5 · 테두리) — 이 줄이 자라지
+ * 않는 근거가 그것이다.
+ *
+ * 인쇄에서는 빠진다 — 이 화면은 고객사에 보내는 문서이기도 하다(SheetHeading).
+ * sr-only 는 쓰지 않는다: 보이는 글자가 이미 무슨 단추인지 다 말한다.
+ */
+function ViewSwitch({
+  view,
+  activeCount,
+  trashCount,
+  onChange,
+}: {
+  view: ListView;
+  activeCount: number;
+  trashCount: number;
+  onChange: (next: ListView) => void;
+}) {
+  const buttonClass = (selected: boolean) =>
+    `px-2 py-0.5 text-xs ${
+      selected
+        ? "bg-zinc-900 font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+        : "bg-white text-zinc-700 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+    }`;
+  return (
+    <div
+      role="group"
+      aria-label="내자 정리 보기"
+      className="flex overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700 print:hidden"
+    >
+      <button
+        type="button"
+        aria-pressed={view === "active"}
+        onClick={() => onChange("active")}
+        className={buttonClass(view === "active")}
+      >
+        사용중 ({activeCount})
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "trash"}
+        onClick={() => onChange("trash")}
+        className={`border-l border-zinc-300 dark:border-zinc-700 ${buttonClass(view === "trash")}`}
+      >
+        휴지통 ({trashCount})
+      </button>
+    </div>
+  );
+}
+
+/**
+ * 지운 시각 — 한국 표준시로 "2026-09-11 14:03". 시각까지 적는 것은 휴지통이
+ * 지운 순서(최신순)로 늘어서기 때문이다 — 같은 날 여러 줄을 지우면 날짜만으로는
+ * 그 순서가 읽히지 않는다.
+ *
+ * 표준시를 못 박는 이유는 이 화면의 다른 날짜와 같다(page.tsx 의 asOfDate) —
+ * 서버가 어디서 돌든, 브라우저가 어느 시간대든 같은 글자가 나와야 한다.
+ */
+const DELETED_AT_FORMAT = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function formatDeletedAt(iso: string | null): string {
+  if (iso === null) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    DELETED_AT_FORMAT.formatToParts(date).find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+}
+
+/**
+ * 휴지통. 줄마다 보관 만료 배지와 [복원] · [완전 삭제] 가 선다 — 고객사
+ * 휴지통(CustomerTrashTab)과 같은 칸·같은 단추 이름이다. 누르면 공용 확인 창이
+ * 열리고(부르는 쪽이 소유한다), 브라우저 기본 확인창(window.confirm)은 쓰지 않는다.
+ *
+ * 한 번에 한 줄씩 다룬다. 고객사처럼 여럿을 골라 한꺼번에 하는 선택 막대는
+ * 두지 않았다 — 내자 정리 줄은 하나씩 지우는 자료이고, 체크박스 칸을 세우면 그
+ * 자리만큼 폭을 쓴다. 서버 액션은 이미 여러 건을 받으므로(actions/
+ * domestic-orders.ts) 필요해지면 화면만 늘리면 된다.
+ *
+ * 배지는 지운 시각이 있을 때만 그린다 — 없는 줄은 정상 경로로는 생기지 않지만
+ * (queries 의 DeletedDomesticOrderRow.deletedAt 주석), 지어낸 시각으로 배지를
+ * 그리면 거짓말이 된다.
+ */
+function DomesticOrderTrashPanel({
+  rows,
+  isSubmitting,
+  onRestore,
+  onPermanentDelete,
+}: {
+  rows: DeletedDomesticOrderRow[];
+  isSubmitting: boolean;
+  onRestore: (row: DeletedDomesticOrderRow) => void;
+  onPermanentDelete: (row: DeletedDomesticOrderRow) => void;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        삭제한 지 {MASTER_DATA_TRASH_RETENTION_DAYS}일이 지나면 자동으로 완전히 삭제됩니다. 그
+        전에는 언제든 복원할 수 있습니다. 휴지통에 있는 줄은 주간보고 · 수리 건 상세 · 고객 안내
+        현황에서도 빠집니다.
+      </p>
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+          휴지통이 비어 있습니다.
+        </div>
+      ) : (
+        <ResponsiveList
+          listId="domestic-orders-trash"
+          measureKey={[rows.length]}
+          table={
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-zinc-200 bg-white text-left text-xs font-semibold whitespace-nowrap text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                  <th className="px-3 py-2">인수번호</th>
+                  <th className="px-3 py-2">고객사</th>
+                  <th className="px-3 py-2">형식</th>
+                  <th className="px-3 py-2">발주서번호</th>
+                  <th className="px-3 py-2">PJT</th>
+                  <th className="px-3 py-2">발주발행일</th>
+                  <th className="px-3 py-2">삭제 시각</th>
+                  <th className="px-3 py-2">삭제자</th>
+                  <th className="px-3 py-2">삭제 사유</th>
+                  <th className="px-3 py-2">보존</th>
+                  <th className="px-3 py-2">작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
+                  >
+                    <td className="px-3 py-2 font-medium whitespace-nowrap text-zinc-900 dark:text-zinc-50">
+                      {dash(row.displayIntakeNumber)}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{dash(row.customerName)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{dash(row.modelName)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{dash(row.purchaseOrderNumber)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{dash(row.projectName)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap tabular-nums">{dash(row.orderIssuedDate)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap tabular-nums">{formatDeletedAt(row.deletedAt)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{dash(row.deletedByUserName)}</td>
+                    <td className="px-3 py-2">{dash(row.deleteReason)}</td>
+                    <td className="px-3 py-2">
+                      {row.deletedAt !== null && <MasterDataTrashRetentionBadge deletedAt={row.deletedAt} />}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onRestore(row)}
+                          disabled={isSubmitting}
+                          className="text-sm text-blue-700 underline-offset-2 hover:underline disabled:opacity-50 dark:text-blue-400"
+                        >
+                          복원
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onPermanentDelete(row)}
+                          disabled={isSubmitting}
+                          className="text-sm text-red-700 underline-offset-2 hover:underline disabled:opacity-50 dark:text-red-400"
+                        >
+                          완전 삭제
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+          cards={
+            <div className={LIST_CARD_GRID}>
+              {rows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                      {dash(row.displayIntakeNumber)}
+                    </span>
+                    {row.deletedAt !== null && <MasterDataTrashRetentionBadge deletedAt={row.deletedAt} />}
+                  </div>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300">{dash(row.customerName)}</p>
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">형식</dt>
+                      <dd className="break-words">{dash(row.modelName)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">발주서번호</dt>
+                      <dd className="break-words">{dash(row.purchaseOrderNumber)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">PJT</dt>
+                      <dd className="break-words">{dash(row.projectName)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">발주발행일</dt>
+                      <dd>{dash(row.orderIssuedDate)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">삭제 시각</dt>
+                      <dd>{formatDeletedAt(row.deletedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">삭제자</dt>
+                      <dd>{dash(row.deletedByUserName)}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-500">삭제 사유</dt>
+                      <dd className="break-words">{dash(row.deleteReason)}</dd>
+                    </div>
+                  </dl>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onRestore(row)}
+                      disabled={isSubmitting}
+                      className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      복원
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onPermanentDelete(row)}
+                      disabled={isSubmitting}
+                      className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                    >
+                      완전 삭제
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+/** 확인 창에 넘길 한 건 — 서버 액션이 받는 두 칸에 창에 나열할 이름을 붙인다. */
+function trashTarget(row: {
+  id: string;
+  version: number;
+  displayIntakeNumber: string | null;
+  customerName: string | null;
+  purchaseOrderNumber: string | null;
+  modelName: string | null;
+}): MasterDataTrashTarget<DomesticOrderTrashItem> {
+  return { id: row.id, expectedVersion: row.version, name: domesticOrderTrashLabel(row) };
+}
+
 /**
  * 지금 무엇을 편집하고 있는가. null 이면 편집 중이 아니고, "new" 는 행 추가,
  * 그 밖의 값은 그 id 의 줄을 고치는 중이다.
@@ -1058,6 +1393,8 @@ export default function DomesticOrderListScreen({
   repairCaseOptions,
   customerOptions,
   quoteOptions,
+  canDelete = false,
+  trashRows = [],
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
@@ -1075,8 +1412,33 @@ export default function DomesticOrderListScreen({
   customerOptions: CustomerOption[];
   /** 견적서 연결 드롭다운. 고칠 수 없는 세션에는 빈 배열이 온다. */
   quoteOptions: QuoteOption[];
+  /**
+   * 휴지통으로 보내고·복원하고·완전 삭제할 수 있는가(domesticOrders MANAGE).
+   * 거짓이면 보기 전환도 `휴지통으로 보내기` 도 없고, 화면은 이 변경 전과 똑같다.
+   * 서버가 판정해 내려보낸다(page.tsx) — 화면이 감춘 것은 경계가 아니다.
+   */
+  canDelete?: boolean;
+  /** 휴지통의 줄. 지울 수 있는 세션에만 서버가 채워 넘긴다 — 그 밖에는 빈 배열이다. */
+  trashRows?: DeletedDomesticOrderRow[];
 }) {
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
+  const [view, setView] = useState<ListView>("active");
+  /**
+   * 휴지통 확인 창 셋의 상태. 창은 자기 상태를 갖지 않고 여기가 소유한다
+   * (master-data-trash-dialogs.tsx 머리말). 성공하면 훅이 router.refresh() 로
+   * 서버 목록을 다시 받는다 — 휴지통 줄의 지운 시각·지운 사람은 서버만 안다.
+   */
+  const trash = useMasterDataTrash<DomesticOrderTrashItem>({
+    onDelete: deleteDomesticOrdersAction,
+    onRestore: restoreDomesticOrdersAction,
+    onPermanentDelete: permanentlyDeleteDomesticOrdersAction,
+    // 폼에서 지웠으면 폼을 닫는다. 목록이 다시 오면 그 줄이 없어 어차피 닫히지만
+    // (아래 isFormOpen), 새로고침이 오기 전 한순간 지운 줄의 폼이 남지 않게 한다.
+    onAllSucceeded: () => setEditTarget(null),
+  });
+  // 권한을 잃은 채로 휴지통 보기가 남아 있지 않게 한다(새로고침으로 canDelete 가
+  // 거짓이 되면 전환 단추가 사라지므로, 돌아올 길이 없는 화면이 된다).
+  const showTrash = canDelete && view === "trash";
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [completionError, setCompletionError] = useState<string | null>(null);
@@ -1166,20 +1528,52 @@ export default function DomesticOrderListScreen({
       잘린다(responsive-list.tsx 의 같은 항목).
     */
     <div className="flex h-full flex-col gap-4 print:h-auto">
-      <SheetHeading asOfDate={asOfDate} />
+      <SheetHeading
+        asOfDate={asOfDate}
+        viewSwitch={
+          canDelete ? (
+            <ViewSwitch
+              view={showTrash ? "trash" : "active"}
+              activeCount={rows.length}
+              trashCount={trashRows.length}
+              onChange={setView}
+            />
+          ) : undefined
+        }
+      />
 
       {isFormOpen && (
-        <DomesticOrderEditForm
-          // 다른 줄을 누르면 폼 전체를 새로 만든다. key 가 없으면 이전 줄의
-          // 입력 상태가 그대로 남아 다른 줄에 저장된다.
-          key={editTarget?.kind === "new" ? "new" : editingRow?.id}
-          row={editingRow}
-          repairCaseOptions={repairCaseOptions}
-          customerOptions={customerOptions}
-          quoteOptions={quoteOptions}
-          onDone={() => setEditTarget(null)}
-        />
+        // 휴지통을 보는 동안에는 폼을 **지우지 않고 감춘다**(파일 머리말). 사용중
+        // 보기에서는 display: contents 라 이 감싸개는 상자를 만들지 않는다 — 폼이
+        // 예전처럼 바깥 flex 의 항목 그대로다(gap · 높이 계산이 이 변경 전과 같다).
+        <div className={showTrash ? "hidden" : "contents"}>
+          <DomesticOrderEditForm
+            // 다른 줄을 누르면 폼 전체를 새로 만든다. key 가 없으면 이전 줄의
+            // 입력 상태가 그대로 남아 다른 줄에 저장된다.
+            key={editTarget?.kind === "new" ? "new" : editingRow?.id}
+            row={editingRow}
+            repairCaseOptions={repairCaseOptions}
+            customerOptions={customerOptions}
+            quoteOptions={quoteOptions}
+            onDone={() => setEditTarget(null)}
+            onRequestDelete={
+              canDelete && editingRow
+                ? () => trash.open("DELETE", [trashTarget(editingRow)])
+                : undefined
+            }
+          />
+        </div>
       )}
+
+      {showTrash ? (
+        <DomesticOrderTrashPanel
+          rows={trashRows}
+          isSubmitting={trash.isSubmitting}
+          onRestore={(row) => trash.open("RESTORE", [trashTarget(row)])}
+          onPermanentDelete={(row) => trash.open("PERMANENT_DELETE", [trashTarget(row)])}
+        />
+      ) : (
+      <>
 
       {/* 검색칸은 년도와 달리 **늘 있다** — 고를 년도가 하나도 없는 자료
           (발주일이 전부 비어 있는 경우)에서도 번호로 찾는 일은 그대로 필요하다.
@@ -1863,6 +2257,69 @@ export default function DomesticOrderListScreen({
             </div>
           }
         />
+      )}
+      </>
+      )}
+
+      {/* 공용 확인 창 셋(고객사·견적서·부품과 같은 창). native <dialog> 라 닫혀
+          있는 동안은 display: none — flex 항목도 아니고 gap 도 만들지 않는다.
+          열리면 최상위 층(top layer)에 뜨므로 표 높이 계산과 무관하다.
+
+          보관 문구(retentionNote)는 넘기지 않는다 — 기본 문장(15일 뒤 자동 완전
+          삭제)이 이 표에도 **사실이다**. 견적서만 자기 문장을 넘기는 것은 그쪽
+          규칙이 달라서다.
+
+          지울 수 없는 세션에는 창 자체를 그리지 않는다 — 그 세션의 화면은 이
+          변경 전과 DOM 까지 같다. */}
+      {canDelete && (
+      <>
+      <MasterDataDeleteDialog
+        isOpen={trash.kind === "DELETE"}
+        entityLabel="내자 정리 항목"
+        names={trash.names}
+        cascadeNote={
+          <>
+            납기요청일도 함께 휴지통에 들어가고, 복원하면 같이 돌아옵니다. 휴지통에 있는 동안에는
+            주간보고 · 수리 건 상세 · 고객 안내 현황에서도 이 줄이 빠집니다.
+          </>
+        }
+        reason={trash.reason}
+        isSubmitting={trash.isSubmitting}
+        submitError={trash.submitError}
+        onReasonChange={trash.setReason}
+        onConfirm={trash.submit}
+        onCancel={trash.close}
+      />
+
+      <MasterDataRestoreDialog
+        isOpen={trash.kind === "RESTORE"}
+        entityLabel="내자 정리 항목"
+        names={trash.names}
+        cascadeNote={<>함께 휴지통에 들어갔던 납기요청일도 같이 돌아옵니다.</>}
+        isSubmitting={trash.isSubmitting}
+        submitError={trash.submitError}
+        onConfirm={trash.submit}
+        onCancel={trash.close}
+      />
+
+      <MasterDataPermanentDeleteDialog
+        isOpen={trash.kind === "PERMANENT_DELETE"}
+        entityLabel="내자 정리 항목"
+        names={trash.names}
+        cascadeNote={
+          <>
+            이 줄의 납기요청일도 함께 지워지고, 세금계산서 · 입금 기록을 포함한 이 줄의 모든 값이
+            데이터베이스에서 사라집니다.
+          </>
+        }
+        reason={trash.reason}
+        isSubmitting={trash.isSubmitting}
+        submitError={trash.submitError}
+        onReasonChange={trash.setReason}
+        onConfirm={trash.submit}
+        onCancel={trash.close}
+      />
+      </>
       )}
     </div>
   );

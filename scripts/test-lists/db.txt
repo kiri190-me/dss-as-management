@@ -77,6 +77,7 @@ src/lib/db/mutations/attachments.integration.test.ts
 src/lib/db/mutations/attachment-trash.integration.test.ts
 src/lib/db/queries/product-model-attachments.integration.test.ts
 src/lib/db/mutations/domestic-orders.integration.test.ts
+src/lib/db/mutations/domestic-orders-trash.integration.test.ts
 src/lib/db/mutations/quotes.integration.test.ts
 src/lib/db/queries/domestic-orders.integration.test.ts
 src/lib/db/mutations/weekly-report-goals.integration.test.ts

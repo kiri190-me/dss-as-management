@@ -29,10 +29,8 @@ import type { Role } from "@/lib/domain/types";
  *    반대로 넓히지도 않았다 — 볼 수 없는 역할(AS_ENGINEER / INVENTORY_MANAGER)
  *    에게 쓰기가 열리면 "못 보는 화면에 저장은 되는" 조합이 만들어진다.
  *
- *  - 삭제·휴지통: **아직 없다.** 화면도 서버 액션도 만들지 않았으므로
- *    canDelete... 류의 함수를 미리 만들어 두지 않는다. 쓰이지 않는 권한 함수는
- *    "이미 정해진 정책"처럼 읽혀서, 다음 단계에서 실제로 판단해야 할 것을
- *    판단하지 않고 지나가게 만든다.
+ *  - 삭제·휴지통(2026-09-11): **관리자 이상**(SUPER_ADMIN / ADMIN)이다.
+ *    아래 canDeleteDomesticOrders 참조.
  */
 export function canViewDomesticOrders(role: Role): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN" || role === "SALES";
@@ -48,4 +46,29 @@ export function canViewDomesticOrders(role: Role): boolean {
  */
 export function canEditDomesticOrders(role: Role): boolean {
   return canViewDomesticOrders(role);
+}
+
+/**
+ * 줄을 휴지통으로 보내고, 되살리고, 휴지통에서 바로 완전 삭제할 수 있는가.
+ * 셋이 한 함수다 — 나누면 "지울 수는 있는데 되살릴 수는 없는" 역할이 만들어진다
+ * (customer-authorization.ts 의 canDeleteCustomers 와 같은 판단).
+ *
+ * ── 보기·고치기보다 좁다 ────────────────────────────────────────────────
+ * 이 표에는 **세금계산서 발행일과 입금 사실**이 들어 있다. 휴지통에 있는 동안은
+ * 되살릴 수 있지만, 15일이 지나면 정리 스크립트가 영구히 지운다 — 그 판단을
+ * 영업 담당자 각자에게 맡기지 않는다. 견적서(canDeleteQuotes)·고객사·제품
+ * 모델의 삭제가 같은 이유로 관리자 이상인 것과 같은 자리다.
+ *
+ * ── 견적서와 같은 집합이지만 불러 쓰지 않는다 ───────────────────────────
+ * quote-authorization.ts 가 이미 이 파일을 import 한다(canViewQuotes 가
+ * canViewDomesticOrders 를 부른다). 여기서 canDeleteQuotes 를 부르면 두 파일이
+ * 서로를 import 하게 된다. 두 집합이 같다는 사실은 시험이 역할마다 대조해
+ * 지킨다(domestic-order-authorization.test.ts).
+ *
+ * 이 함수만으로 막지는 않는다. 실제 판정은 서버 액션이 관리자가 설정한
+ * 수준(hasPermission("domesticOrders", "MANAGE"))으로 한다 — 이 함수는
+ * permission-baseline.ts 가 그 기본값을 계산할 때 쓰인다.
+ */
+export function canDeleteDomesticOrders(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
 }

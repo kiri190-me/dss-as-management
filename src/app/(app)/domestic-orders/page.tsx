@@ -8,6 +8,7 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   listCustomerOptions,
+  listDeletedDomesticOrders,
   listDomesticOrders,
   listRepairCaseLinkOptions,
 } from "@/lib/db/queries/domestic-orders";
@@ -27,7 +28,10 @@ export const dynamic = "force-dynamic";
  * 온다 — 메뉴에서 감추는 것은 막은 것이 아니고, 주소를 직접 입력하거나 예전
  * 링크를 누르면 그대로 들어와진다.
  *
- * canEdit 은 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 실제 저장은
+ * 휴지통(2026-09-11)은 canDelete(domesticOrders MANAGE) 세션에만 보이고, 그
+ * 세션에만 휴지통의 줄을 읽어 보낸다.
+ *
+ * canEdit · canDelete 는 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 실제 저장은
  * server/actions/domestic-orders.ts 가 세션부터 다시 확인한다 — 버튼을 감추는
  * 것으로 막았다고 여기면, 액션을 직접 부르는 요청 앞에서 아무것도 막지 못한다.
  */
@@ -52,17 +56,25 @@ export default async function DomesticOrdersPage() {
   // 예전에는 canEditDomesticOrders(역할)를 AND 로 겹쳐 넓혀도 열리지 않았다.
   const canEdit =
     actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "WRITE"));
+  // 휴지통으로 보내기·복원·완전 삭제는 한 칸 좁다 — 관리(2026-09-11). 서버
+  // 액션(actions/domestic-orders.ts 의 resolveManagingActingUser)과 **같은 판정**
+  // 이라 화면에 보이는 단추와 실제로 되는 일이 어긋나지 않는다.
+  const canDelete =
+    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "MANAGE"));
 
   // 고칠 수 없는 사람에게는 폼의 드롭다운 목록을 읽지 않는다 — 쓰지 않을 값을
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).
   // 고객사 목록도 같은 규칙이다: 이 화면을 볼 수만 있는 사람에게 전체 고객사
   // 명단을 실어 보낼 이유가 없다.
-  const [rows, repairCaseOptions, customerOptions, quoteOptions] = await Promise.all([
+  const [rows, repairCaseOptions, customerOptions, quoteOptions, trashRows] = await Promise.all([
     listDomesticOrders(),
     canEdit ? listRepairCaseLinkOptions() : Promise.resolve([]),
     canEdit ? listCustomerOptions() : Promise.resolve([]),
     // 견적서 목록도 폼에서만 쓴다 — 고칠 수 없는 사람에게 실어 보내지 않는다.
     canEdit ? listQuoteOptions() : Promise.resolve([]),
+    // 휴지통은 지울 수 있는 사람에게만 읽어 보낸다 — 볼 수 없는 탭의 내용을
+    // 실어 보내지 않는다(견적서·고객사 화면과 같은 규칙).
+    canDelete ? listDeletedDomesticOrders() : Promise.resolve([]),
   ]);
 
   // 머리말의 "{날짜}자 진행 상황입니다"에 들어갈 날짜. 클라이언트에서 만들면
@@ -92,6 +104,8 @@ export default async function DomesticOrdersPage() {
       repairCaseOptions={repairCaseOptions}
       customerOptions={customerOptions}
       quoteOptions={quoteOptions}
+      canDelete={canDelete}
+      trashRows={trashRows}
     />
   );
 }

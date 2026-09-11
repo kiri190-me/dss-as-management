@@ -11,6 +11,7 @@ import {
   quoteItems,
   quotes,
   repairCases,
+  users,
 } from "../schema";
 import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
 import {
@@ -606,6 +607,92 @@ export async function listDomesticOrderDueDatesForRepairCase(
     );
 
   return rows.map((row) => row.dueDate);
+}
+
+/**
+ * 휴지통의 한 줄(2026-09-11). 목록 한 줄(DomesticOrderListItem)과 **일부러
+ * 다른 모양**이다 — 휴지통은 "무엇을 지웠는가"를 알아보고 되살리는 자리라 22칸이
+ * 필요하지 않고, 사람이 줄을 알아보는 칸(인수번호 · 고객사 · 형식 · 발주서번호 ·
+ * PJT · 발주발행일)과 지운 기록만 싣는다. 금액·입금·자유 메모는 내려보내지 않는다.
+ *
+ * 고객사·형식은 목록과 **같은 규칙**으로 정한다 — 이 행에 적힌 값이 먼저, 없으면
+ * 연결된 수리 건의 값(resolveDomesticOrderValue). 목록에서 보던 이름과 휴지통의
+ * 이름이 다르면 같은 줄인지 알아볼 수 없다.
+ */
+export type DeletedDomesticOrderRow = {
+  id: string;
+  /** 되살리기·완전 삭제의 낙관적 잠금 토큰(mutations/domestic-orders-trash.ts). */
+  version: number;
+  displayIntakeNumber: string | null;
+  customerName: string | null;
+  modelName: string | null;
+  purchaseOrderNumber: string | null;
+  projectName: string | null;
+  orderIssuedDate: string | null;
+  /**
+   * ISO 순간. 보관 만료 배지가 이 값 하나로 계산된다(master-data-trash-retention).
+   *
+   * null 은 정상 경로로는 생기지 않는다(softDeleteDomesticOrder 가 같은 UPDATE 에서
+   * is_deleted 와 함께 쓴다). 그래도 단정(!)하지 않는다 — 그런 줄을 목록에서
+   * 빼면 되살릴 길이 없어지고, 지어낸 시각을 붙이면 배지가 거짓말을 한다. 화면은
+   * 시각 대신 "-" 를 그리고 배지를 그리지 않는다. 정리 스크립트도 이 줄을 건너뛴다
+   * (listPurgeEligibleDomesticOrderIds).
+   */
+  deletedAt: string | null;
+  deletedByUserName: string | null;
+  deleteReason: string | null;
+};
+
+/**
+ * 휴지통에 있는 내자 정리 줄 전부 — 지운 시각이 최신인 것부터.
+ *
+ * 방금 지운 것을 되살리려고 여는 화면이라 최신순이다(견적서·고객사 휴지통과 같다).
+ * **지울 권한이 있는 세션에서만 부른다** — 부르는 쪽(page.tsx)이 그 판정을 한다.
+ *
+ * 조인은 목록과 같은 이유로 전부 LEFT JOIN 이다(파일 헤더). 지운 사람도
+ * LEFT JOIN 이다 — deleted_by 가 비어 있는 줄이 휴지통에서 통째로 사라지면
+ * 되살릴 방법이 없어진다(queries/customers.ts 의 같은 판단).
+ */
+export async function listDeletedDomesticOrders(): Promise<DeletedDomesticOrderRow[]> {
+  const rows = await db
+    .select({
+      id: domesticOrders.id,
+      version: domesticOrders.version,
+      intakeNumber: repairCases.intakeNumber,
+      intakeNumberText: domesticOrders.intakeNumberText,
+      ownCustomerName: orderCustomers.name,
+      repairCaseCustomerName: repairCaseCustomers.name,
+      modelNameText: domesticOrders.modelNameText,
+      repairCaseModelName: products.modelName,
+      purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
+      projectName: domesticOrders.projectName,
+      orderIssuedDate: domesticOrders.orderIssuedDate,
+      deletedAt: domesticOrders.deletedAt,
+      deletedByUserName: users.name,
+      deleteReason: domesticOrders.deleteReason,
+    })
+    .from(domesticOrders)
+    .leftJoin(repairCases, eq(repairCases.id, domesticOrders.repairCaseId))
+    .leftJoin(products, eq(products.id, repairCases.productId))
+    .leftJoin(orderCustomers, eq(orderCustomers.id, domesticOrders.customerId))
+    .leftJoin(repairCaseCustomers, eq(repairCaseCustomers.id, repairCases.customerId))
+    .leftJoin(users, eq(users.id, domesticOrders.deletedBy))
+    .where(eq(domesticOrders.isDeleted, true))
+    .orderBy(desc(domesticOrders.deletedAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    version: row.version,
+    displayIntakeNumber: row.intakeNumber ?? row.intakeNumberText,
+    customerName: resolveDomesticOrderValue(row.ownCustomerName, row.repairCaseCustomerName),
+    modelName: resolveDomesticOrderValue(row.modelNameText, row.repairCaseModelName),
+    purchaseOrderNumber: row.purchaseOrderNumber,
+    projectName: row.projectName,
+    orderIssuedDate: row.orderIssuedDate,
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    deletedByUserName: row.deletedByUserName,
+    deleteReason: row.deleteReason,
+  }));
 }
 
 /** 수정 폼의 '수리 건 연결' 목록에 들어갈 한 줄. */

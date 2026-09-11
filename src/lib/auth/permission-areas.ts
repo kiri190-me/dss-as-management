@@ -214,12 +214,14 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   {
     key: "domesticOrders",
     label: "내자 정리",
-    // 2단계에서 행 추가·수정이 생겨 상한을 쓰기까지 올렸다(1단계 주석이 예고한
-    // 그 시점이다). 관리는 아직 올리지 않는다 — 삭제·휴지통이 없는데 '관리'를
-    // 내밀면 고른 사람은 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지
-    // 않는다. 삭제를 붙이는 다음 단계에서 함께 올린다.
-    description: "국내 수주 진행 상황표(발주·견적·납품·입금). 금액과 입금 정보가 있습니다",
-    maxMeaningfulLevel: "WRITE",
+    // 2단계에서 행 추가·수정이 생겨 상한을 쓰기까지 올렸고, 휴지통이 생기면서
+    // (2026-09-11) 관리까지 올렸다 — 쓰기와 갈리는 조작이 실제로 생겼다: 추가·
+    // 수정은 영업까지고, 휴지통으로 보내기·복원·완전 삭제는 관리자 이상이다
+    // (domestic-order-authorization.ts 의 canDeleteDomesticOrders). 견적서와
+    // 같은 모양이다.
+    description:
+      "국내 수주 진행 상황표(발주·견적·납품·입금). 금액과 입금 정보가 있습니다. 관리는 휴지통(삭제·복원·완전 삭제)",
+    maxMeaningfulLevel: "MANAGE",
   },
   {
     key: "quotes",

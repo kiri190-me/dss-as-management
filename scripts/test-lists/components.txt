@@ -26,4 +26,5 @@ src/components/repair-cases/approval/approval-screen-layout.test.tsx
 src/components/inventory/part-issue-approval-screen.test.tsx
 src/components/users/approval-route-section.test.ts
 src/components/quotes/QuoteListScreen.test.ts
+src/components/domestic-orders/domestic-order-trash.test.ts
 src/components/quotes/quote-edit-work-scope-suppression.test.ts

@@ -14,7 +14,11 @@ import { navItems } from "@/lib/navigation";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 import { canViewCustomers, canEditCustomers } from "./customer-authorization";
-import { canEditDomesticOrders, canViewDomesticOrders } from "./domestic-order-authorization";
+import {
+  canDeleteDomesticOrders,
+  canEditDomesticOrders,
+  canViewDomesticOrders,
+} from "./domestic-order-authorization";
 import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
@@ -134,14 +138,14 @@ test("지금 고칠 수 있는 것은 상한이 최소 쓰기다", () => {
   }
 });
 
-// 내자 정리는 아래 '되돌리기 어려운 조작' 테스트에 일부러 없다 — 삭제·휴지통은
-// 아직 만들지 않았고, 그러므로 관리 수준으로 열려야 할 조작이 하나도 없다.
-// 삭제를 붙이는 단계에서 그때 생기는 함수로 여기 줄이 늘어난다.
+// 내자 정리는 휴지통이 생기면서(2026-09-11) 아래 '되돌리기 어려운 조작'
+// 테스트에 줄이 늘었다 — 휴지통으로 보내기·복원·완전 삭제(canDeleteDomesticOrders).
 
 test("지금 되돌리기 어려운 조작을 할 수 있으면 상한이 관리다", () => {
   for (const role of ROLE_CODES) {
     if (canProcessPartRequests(role)) assertCeilingAllows("inventory", role, "MANAGE", "부품 요청 처리");
     if (canPublishWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "MANAGE", "워크플로 발행");
+    if (canDeleteDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "MANAGE", "내자 정리 삭제");
   }
 });
 
