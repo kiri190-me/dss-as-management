@@ -9,6 +9,11 @@ import PartIssueApprovalTrail, { approvalOutcomeLabel } from "./PartIssueApprova
  * (`server-only` 사슬, React, "use client") 이 시험 파일이 **여기서** 죽는다.
  */
 import {
+  PART_ISSUE_CANCEL_BACK_LABEL,
+  PART_ISSUE_CANCEL_BUTTON_LABEL,
+  PART_ISSUE_CANCEL_CONFIRM_LABEL,
+  PART_ISSUE_CANCEL_DONE_MESSAGE,
+  PART_ISSUE_CANCEL_REASON_LABEL,
   PART_ISSUE_CANCELLED_BY_REQUESTER_LABEL,
   PART_ISSUE_EXECUTION_BLOCKED_NOTICE,
   PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL,
@@ -28,6 +33,7 @@ import {
   isPartIssueApprovalClosedByRequester,
   isPartIssueApprovalRouteInForce,
   isPartIssueRequestAwaitingApproval,
+  isPartIssueRequestCancellable,
   isPartIssueRequestExecutable,
   type InventoryPartIssueRequestStatus,
 } from "@/lib/domain/inventory-part-issue-rules";
@@ -350,8 +356,9 @@ describe("🔴 [승인 요청건] 탭이 보여 주는 범위", () => {
 
 /**
  * ============================================================================
- * 🔴 「진행 중인 신청」 — 누가 올렸든, 재고를 볼 수 있는 사람 전원에게, 읽기 전용
+ * 🔴 「진행 중인 신청」 — 누가 올렸든, 재고를 볼 수 있는 사람 전원에게, 결재·실행 없이
  * ============================================================================
+ * (내 신청에만 [신청 취소]가 붙는다 — 아래 「🔴 [신청 취소]」 묶음.)
  * 신청을 올린 사람에게는 「내가 결재할 건」·「실행할 건」이 비어 보이는 것이
  * 정상이다. 그래서 올린 신청이 사라진 것처럼 보였다(2026-09-11 신고). 이 묶음이
  * 그 자리다. 보는 사람은 재고 목록(/inventory)에 들어올 수 있는 사람 전원이고
@@ -428,7 +435,9 @@ describe("🔴 [승인 요청건] 탭 — 진행 중인 신청", () => {
     assert.ok(PART_ISSUE_NOTHING_IN_PROGRESS.length > 0);
   });
 
-  test("🔴 읽기 전용이다 — 단추도, 서버 액션도 싣지 않는다", () => {
+  test("🔴 결재·실행을 싣지 않는다 — 이 묶음이 단추를 직접 그리지도, 서버 액션을 부르지도 않는다", () => {
+    // 예외는 내 신청의 [신청 취소] 하나이고, 그것은 (나)와 함께 쓰는 도움 함수가
+    // 그린다 — 무엇을 어디에 싣는지는 아래 「🔴 [신청 취소]」 묶음이 못 박는다.
     const progressSection = sliceBetween(screen, "{showProgressSection && (", 'role="status"');
     for (const forbidden of ["<button", "onClick", "execute(", "submitDecision", "setDraft", "Action("]) {
       assert.ok(!progressSection.includes(forbidden), `진행 중인 신청 묶음에 ${forbidden} 이 생겼다`);
@@ -1001,6 +1010,385 @@ describe("🔴 취소와 반려를 가른다", () => {
       <PartIssueApprovalTrail approvals={[rejected]} routeSteps={routeSteps(["박서준", "김도윤"])} />
     );
     assert.match(flat(rejectedHtml), /2단계 · 반려/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 [신청 취소] — 내 신청을 내가 무른다 (사용자 요청 2026-09-11)
+ * ============================================================================
+ * 서버 쪽(액션 · mutation)은 이미 있고 통합 시험이 실제 DB 로 못 박는다 — 신청자
+ * 본인만, 최고관리자 비상구 없음, 열린 결재 행은 지우지 않고 닫는다. 여기서
+ * 지키는 것은 화면이 (1) 서버와 같은 규칙으로 단추를 그리는가, (2) 붙는 자리가
+ * (나)·(다)뿐인가, (3) 확정이 신청 id 와 사유만 보내는가, (4) 실패를 뭉개지
+ * 않는가, (5) 입력 칸이 결재 칸과 동시에 열리지 않는가다.
+ *
+ * 화면 부품은 import 할 수 없으므로(이 파일 머리말) 위 시험들과 같은 방법을
+ * 쓴다 — **타입 표기 없는 몸통은 원본을 잘라 실제로 돌려 보고**, JSX 는 잘라 낸
+ * 갈래 하나에만 정규식을 건다. 몸통에 타입 표기가 끼면 여기서 문법 오류로
+ * **시끄럽게** 깨진다.
+ * ============================================================================
+ */
+describe("🔴 [신청 취소] — 내 신청의 (나)·(다) 카드에만", () => {
+  const screen = flat(approvalScreenSource);
+  const approvalSection = sliceBetween(screen, "{showApprovalSection && (", "{showExecutionSection && (");
+  const executionSection = sliceBetween(screen, "{showExecutionSection && (", "{showProgressSection && (");
+  const progressSection = sliceBetween(screen, "{showProgressSection && (", 'role="status"');
+
+  /** 원본(접지 않은 것)에서 함수 몸통을 잘라 낸다 — `indent` 만큼 들여쓴 닫는 괄호까지. */
+  const bodyAfter = (signature: string, indent: string) => {
+    const start = approvalScreenSource.indexOf(signature);
+    assert.ok(start >= 0, `원본에서 '${signature}' 를 찾지 못했다`);
+    const rest = approvalScreenSource.slice(start + signature.length);
+    const end = rest.search(new RegExp(`\\r?\\n${indent}\\}\\r?\\n`));
+    assert.ok(end > 0, `'${signature}' 의 끝을 찾지 못했다`);
+    return rest.slice(0, end);
+  };
+  const countOf = (source: string, needle: string) => source.split(needle).length - 1;
+
+  const ISSUE_REQUEST_ID = "7d4c2a0e-6a55-4f3e-9f55-0a4b4a6f1a01";
+  const OTHER_REQUEST_ID = "7d4c2a0e-6a55-4f3e-9f55-0a4b4a6f1a02";
+
+  // ── 붙는 조건 — 원본의 offersCancel 몸통을 진짜 순수 규칙과 함께 돌린다 ──
+  const offersCancelCompiled = new Function(
+    "isPartIssueRequestCancellable",
+    "view",
+    bodyAfter("function offersCancel(view: PartIssueApprovalRequestView): boolean {", "")
+  ) as (
+    rule: typeof isPartIssueRequestCancellable,
+    view: { isMine: boolean; detail: { status: InventoryPartIssueRequestStatus } }
+  ) => boolean;
+  const offersCancel = (isMine: boolean, status: InventoryPartIssueRequestStatus) =>
+    offersCancelCompiled(isPartIssueRequestCancellable, { isMine, detail: { status } });
+
+  test("🔴 (가) 붙는 조건은 「내 신청 && 지금 무를 수 있음」 하나다 — 상태 다섯 × 내 것/남의 것", () => {
+    for (const status of INVENTORY_PART_ISSUE_REQUEST_STATUSES) {
+      assert.equal(offersCancel(true, status), isPartIssueRequestCancellable(status), `내 신청 · ${status}`);
+      assert.equal(offersCancel(false, status), false, `🔴 남의 신청에 [신청 취소]가 붙었다 · ${status}`);
+    }
+    // 규칙이 참인 상태가 정확히 둘인 것도 한 번 더 — 결재 중 · 승인 완료(실행 전).
+    assert.equal(offersCancel(true, "PENDING_APPROVAL"), true);
+    assert.equal(offersCancel(true, "APPROVED"), true);
+    assert.equal(offersCancel(true, "EXECUTED"), false, "이미 재고가 나간 신청에 단추가 붙는다");
+  });
+
+  test("🔴 판정은 서버가 보는 것과 같은 순수 규칙이다 — 상태 글자도, 세션 짐작도, 관리자 예외도 없다", () => {
+    assert.match(
+      screen,
+      /import \{[^}]*\bisPartIssueRequestCancellable\b[^}]*\} from "@\/lib\/domain\/inventory-part-issue-rules"/
+    );
+    assert.match(screen, /function offersCancel\(view: PartIssueApprovalRequestView\): boolean \{ return view\.isMine && isPartIssueRequestCancellable\(view\.detail\.status\); \}/);
+    // 최고관리자도 남의 신청은 무를 수 없다(mutation 머리말) — 화면이 그 문을 따로 열지 않는다.
+    assert.ok(!/SUPER_ADMIN|isSuperAdmin/.test(approvalScreenSource), "화면이 관리자 예외를 만들었다");
+    assert.ok(!/isMine \|\|/.test(approvalScreenSource), "「내 신청」 조건이 다른 조건과 OR 로 풀렸다");
+  });
+
+  test("🔴 (가) 내가 결재할 건에는 붙지 않는다", () => {
+    assert.ok(approvalSection.includes("<RequestCard"), "검사할 카드를 찾지 못했다 — 자르는 경계가 틀렸다");
+    for (const forbidden of [
+      "offersCancel",
+      "renderCancelButton",
+      "renderCancelDraft",
+      "cancelDraftOpenOn",
+      "submitCancel",
+      "PART_ISSUE_CANCEL_",
+      "cancelPartIssueRequestAction",
+    ]) {
+      assert.ok(!approvalSection.includes(forbidden), `내가 결재할 건에 ${forbidden} 이 생겼다`);
+    }
+  });
+
+  test("(나) 실행할 건 — [불출 실행] 옆에, 조건이 참일 때만. 칸이 펼쳐지면 단추 자리를 대신한다", () => {
+    assert.ok(
+      executionSection.includes(
+        "offersCancel(view) && cancelDraftOpenOn(view) ? ( renderCancelDraft() ) : ( <> <button"
+      ),
+      "(나)의 취소 칸이 조건 없이 펼쳐지거나, 단추 묶음의 모양이 달라졌다"
+    );
+    assert.ok(
+      executionSection.includes('{busyId === view.detail.id ? "처리 중..." : "불출 실행"} </button> {offersCancel(view) && renderCancelButton(view)} </> )'),
+      "[신청 취소]가 [불출 실행] 옆에 조건과 함께 놓이지 않는다"
+    );
+    // [불출 실행] 자체는 그대로다 — 부르는 것도, 비활성 조건도.
+    assert.ok(executionSection.includes("onClick={() => void execute(view.detail.id)}"));
+    assert.ok(executionSection.includes("disabled={busyId !== null}"));
+  });
+
+  test("(다) 진행 중인 신청 — 조건이 참인 카드에만, 그 밖의 카드는 예전 그대로", () => {
+    assert.ok(
+      progressSection.includes(
+        "offersCancel(view) ? ( <RequestCard key={view.detail.id} view={view} actions={cancelDraftOpenOn(view) ? renderCancelDraft() : renderCancelButton(view)} message={resultLineFor(view.detail.id, true)} showProgress /> ) : ( <RequestCard key={view.detail.id} view={view} actions={null} message={null} showProgress /> )"
+      ),
+      "(다)의 갈림이 달라졌다 — 취소 카드에 다른 것이 실리거나, 나머지 카드에 단추·결과 줄이 생겼다"
+    );
+    // 이 묶음의 카드에 실리는 actions 는 딱 두 가지다.
+    const actionProps = [...progressSection.matchAll(/actions=\{/g)].length;
+    assert.equal(actionProps, 2, "(다)의 카드에 다른 단추 자리가 생겼다");
+  });
+
+  test("🔴 취소 단추·칸을 그리는 곳은 도움 함수 둘뿐이고, 부르는 곳은 (나)·(다) 한 번씩이다", () => {
+    for (const helper of ["renderCancelButton(", "renderCancelDraft("]) {
+      assert.equal(countOf(screen, helper), 3, `${helper} 정의 1 + (나) 1 + (다) 1 이 아니다`);
+      assert.equal(countOf(executionSection, helper), 1, `(나)에서 ${helper} 를 부르는 수`);
+      assert.equal(countOf(progressSection, helper), 1, `(다)에서 ${helper} 를 부르는 수`);
+    }
+    assert.equal(countOf(screen, "{PART_ISSUE_CANCEL_BUTTON_LABEL}"), 1, "[신청 취소] 단추가 도움 함수 밖에서도 그려진다");
+    assert.equal(countOf(screen, "void submitCancel()"), 1, "취소를 확정하는 자리가 둘이 됐다");
+    // 도움 함수 안에는 결재·실행이 없다 — 취소 칸이 다른 일을 하지 않는다.
+    const helpers =
+      bodyAfter("function renderCancelButton(view: PartIssueApprovalRequestView): React.ReactNode {", "  ") +
+      bodyAfter("function renderCancelDraft(): React.ReactNode {", "  ");
+    for (const forbidden of ["execute(", "submitDecision", "decidePartIssueRequestApprovalAction", '"DECISION"']) {
+      assert.ok(!helpers.includes(forbidden), `취소 도움 함수에 ${forbidden} 이 들어갔다`);
+    }
+  });
+
+  test("🔴 (나) 브라우저 확인 창을 쓰지 않는다 — 결재 칸처럼 카드 안에 펼친다", () => {
+    assert.ok(!/\bconfirm\s*\(/.test(approvalScreenSource), "confirm 창을 쓴다");
+    assert.ok(!/window\.(confirm|prompt|alert)/.test(approvalScreenSource), "브라우저 창을 쓴다");
+    const draftForm = flat(bodyAfter("function renderCancelDraft(): React.ReactNode {", "  "));
+    assert.match(draftForm, /\{PART_ISSUE_CANCEL_REASON_LABEL\} <textarea rows=\{2\} value=\{reason\}/);
+    assert.match(draftForm, /onClick=\{\(\) => void submitCancel\(\)\}/);
+    assert.match(draftForm, /\{busyId !== null \? "처리 중\.\.\." : PART_ISSUE_CANCEL_CONFIRM_LABEL\}/);
+    assert.match(draftForm, /onClick=\{\(\) => \{ setDraft\(null\); setReason\(""\); \}\}[^>]*> \{PART_ISSUE_CANCEL_BACK_LABEL\}/);
+    // 처리 중에는 이 화면의 관례대로 칸의 두 단추도 막힌다.
+    assert.equal(countOf(draftForm, "disabled={busyId !== null}"), 2);
+  });
+
+  // ── 확정 — 원본의 submitCancel 몸통을 가짜 액션과 함께 실제로 돌린다 ──
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor;
+  const submitCancelBody = bodyAfter("async function submitCancel() {", "  ");
+  const submitCancelCompiled = new AsyncFunction(
+    "draft",
+    "busyId",
+    "reason",
+    "setBusyId",
+    "cancelPartIssueRequestAction",
+    "setMessage",
+    "setDraft",
+    "setReason",
+    "router",
+    "PART_ISSUE_CANCEL_DONE_MESSAGE",
+    submitCancelBody
+  ) as (...args: unknown[]) => Promise<void>;
+
+  type CancelDraftValue =
+    | { kind: "DECISION"; issueRequestId: string; decision: "APPROVED" | "REJECTED" }
+    | { kind: "CANCEL"; issueRequestId: string }
+    | null;
+  type ActionResult = { ok: true; issueRequestId: string } | { ok: false; code: string; message: string };
+
+  async function runSubmitCancel({
+    draft,
+    busyId = null,
+    reason = "",
+    result = { ok: true, issueRequestId: ISSUE_REQUEST_ID },
+  }: {
+    draft: CancelDraftValue;
+    busyId?: string | null;
+    reason?: string;
+    result?: ActionResult;
+  }) {
+    const events: string[] = [];
+    const sent: unknown[] = [];
+    const messages: Array<[string, string, unknown]> = [];
+    await submitCancelCompiled(
+      draft,
+      busyId,
+      reason,
+      (id: string | null) => events.push(`busy:${id}`),
+      async (input: unknown) => {
+        sent.push(input);
+        events.push("action");
+        return result;
+      },
+      (id: string, message: string, fromCancel: unknown) => {
+        messages.push([id, message, fromCancel]);
+        events.push("message");
+      },
+      (value: unknown) => events.push(`draft:${JSON.stringify(value)}`),
+      (value: string) => events.push(`reason:${value}`),
+      { refresh: () => events.push("refresh") },
+      PART_ISSUE_CANCEL_DONE_MESSAGE
+    );
+    return { events, sent, messages };
+  }
+
+  const cancelDraft = { kind: "CANCEL", issueRequestId: ISSUE_REQUEST_ID } as const;
+
+  test("🔴 (다) 확정은 신청 id 와 사유만 보낸다 — 빈 사유는 null", async () => {
+    assert.match(
+      flat(submitCancelBody),
+      /await cancelPartIssueRequestAction\(\{ issueRequestId, reason: reason\.trim\(\) \? reason : null, \}\);/,
+      "보내는 모양이 달라졌다"
+    );
+    for (const [reason, expected] of [
+      ["", null],
+      ["   ", null],
+      ["다른 건에 먼저 씁니다", "다른 건에 먼저 씁니다"],
+    ] as const) {
+      const { sent } = await runSubmitCancel({ draft: cancelDraft, reason });
+      assert.deepEqual(sent, [{ issueRequestId: ISSUE_REQUEST_ID, reason: expected }], `사유 '${reason}'`);
+      assert.deepEqual(Object.keys(sent[0] as object).sort(), ["issueRequestId", "reason"], "payload 에 다른 것이 실렸다");
+    }
+    // 서버 액션에도 그 둘 말고 받을 자리가 없다.
+    const inputType = sliceBetween(flat(issueActionSource), "export type CancelPartIssueRequestActionInput = {", "};");
+    assert.match(inputType, /^export type CancelPartIssueRequestActionInput = \{ issueRequestId: string; reason\?: string \| null; $/);
+    assert.match(
+      flat(approvalScreenSource),
+      /import \{[^}]*\bcancelPartIssueRequestAction\b[^}]*\} from "@\/lib\/server\/actions\/inventory-part-issue-requests"/
+    );
+  });
+
+  test("🔴 (라) 실패하면 서버 문구를 **그대로** 그 신청의 결과 줄에 싣고, 칸은 열어 둔다", async () => {
+    for (const failure of [
+      { ok: false, code: "FORBIDDEN", message: "신청한 사람만 불출 신청을 취소할 수 있습니다." },
+      { ok: false, code: "NOT_CANCELLABLE", message: "이미 재고가 나간 신청은 취소할 수 없습니다. 되돌리려면 반품으로 처리해 주세요." },
+      { ok: false, code: "CONFLICT", message: "결재가 방금 처리되었습니다. 최신 정보를 다시 불러와 주세요." },
+      { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." },
+    ] as const) {
+      const { events, messages } = await runSubmitCancel({ draft: cancelDraft, result: failure });
+      assert.deepEqual(messages, [[ISSUE_REQUEST_ID, failure.message, true]], `${failure.code}: 서버 문구가 바뀌었다`);
+      assert.deepEqual(events, [`busy:${ISSUE_REQUEST_ID}`, "action", "busy:null", "message"], `${failure.code}: 실패인데 칸을 닫거나 새로 고친다`);
+    }
+  });
+
+  test("🔴 (마) 성공하면 결과 한 줄 → 칸 닫기 → 새로 고침", async () => {
+    assert.equal(PART_ISSUE_CANCEL_DONE_MESSAGE, "신청을 취소했습니다.");
+    const { events, messages } = await runSubmitCancel({ draft: cancelDraft, reason: "사유" });
+    assert.deepEqual(messages, [[ISSUE_REQUEST_ID, PART_ISSUE_CANCEL_DONE_MESSAGE, true]]);
+    assert.deepEqual(events, [
+      `busy:${ISSUE_REQUEST_ID}`,
+      "action",
+      "busy:null",
+      "message",
+      "draft:null",
+      "reason:",
+      "refresh",
+    ]);
+  });
+
+  test("🔴 처리 중이거나 취소 칸이 아니면 아무것도 보내지 않는다", async () => {
+    for (const [name, input] of [
+      ["다른 건 처리 중", { draft: cancelDraft, busyId: OTHER_REQUEST_ID }],
+      ["열린 칸 없음", { draft: null }],
+      ["결재 칸이 열려 있음", { draft: { kind: "DECISION", issueRequestId: ISSUE_REQUEST_ID, decision: "REJECTED" } }],
+    ] as const) {
+      const { events, sent } = await runSubmitCancel(input);
+      assert.deepEqual(sent, [], `${name}: 액션을 불렀다`);
+      assert.deepEqual(events, [], `${name}: 상태를 건드렸다`);
+    }
+  });
+
+  // ── 칸은 하나뿐 — (가)의 조건식과 취소 쪽 몸통을 잘라 같은 draft 로 돌린다 ──
+  const decisionOpenExpression = sliceBetween(approvalSection, "actions={ ", " ? (").slice("actions={ ".length);
+  const decisionOpenOn = new Function("draft", "view", `return ${decisionOpenExpression};`) as (
+    draft: CancelDraftValue,
+    view: { detail: { id: string } }
+  ) => boolean;
+  const cancelOpenOn = new Function(
+    "draft",
+    "view",
+    bodyAfter("function cancelDraftOpenOn(view: PartIssueApprovalRequestView): boolean {", "  ")
+  ) as (draft: CancelDraftValue, view: { detail: { id: string } }) => boolean;
+
+  test("🔴 (바) 결재 칸과 취소 칸은 한 상태다 — 어느 값이든 화면 전체에 열리는 칸은 많아야 하나", () => {
+    assert.equal(decisionOpenExpression, 'draft?.kind === "DECISION" && draft.issueRequestId === view.detail.id');
+    assert.equal(
+      (approvalScreenSource.match(/useState<[^>]*Draft[^>]*>/g) ?? []).length,
+      1,
+      "입력 칸 상태가 둘로 갈라졌다 — 두 칸이 동시에 열릴 수 있다"
+    );
+    assert.match(screen, /const \[draft, setDraft\] = useState<CardDraft \| null>\(null\);/);
+    assert.match(
+      screen,
+      /type CardDraft = \| \{ kind: "DECISION"; issueRequestId: string; decision: "APPROVED" \| "REJECTED" \} \| \{ kind: "CANCEL"; issueRequestId: string \};/
+    );
+    // 여는 길 셋(승인 · 반려 · 신청 취소)이 모두 같은 setter 하나로 연다.
+    assert.equal(countOf(screen, 'setDraft({ kind: "DECISION", issueRequestId: view.detail.id, decision: '), 2);
+    assert.equal(countOf(screen, 'setDraft({ kind: "CANCEL", issueRequestId: view.detail.id })'), 1);
+
+    const cards = [ISSUE_REQUEST_ID, OTHER_REQUEST_ID].map((id) => ({ detail: { id } }));
+    const drafts: CancelDraftValue[] = [
+      null,
+      { kind: "DECISION", issueRequestId: ISSUE_REQUEST_ID, decision: "APPROVED" },
+      { kind: "DECISION", issueRequestId: ISSUE_REQUEST_ID, decision: "REJECTED" },
+      { kind: "CANCEL", issueRequestId: ISSUE_REQUEST_ID },
+      { kind: "CANCEL", issueRequestId: OTHER_REQUEST_ID },
+    ];
+    for (const draft of drafts) {
+      // 같은 신청이 (가)와 (다)에 함께 떠도 두 칸이 동시에 열리지 않는다.
+      const open = cards.flatMap((card) => [decisionOpenOn(draft, card), cancelOpenOn(draft, card)]).filter(Boolean);
+      assert.equal(open.length, draft === null ? 0 : 1, `draft ${JSON.stringify(draft)}`);
+    }
+    assert.equal(cancelOpenOn({ kind: "CANCEL", issueRequestId: ISSUE_REQUEST_ID }, cards[0]), true);
+    assert.equal(decisionOpenOn({ kind: "CANCEL", issueRequestId: ISSUE_REQUEST_ID }, cards[0]), false, "취소 칸을 열었는데 결재 칸이 펼쳐진다");
+  });
+
+  // ── 결과 한 줄 — 누른 카드에만 ──
+  const resultLineCompiled = new Function(
+    "messages",
+    "cancelResultIds",
+    "issueRequestId",
+    "fromCancel",
+    bodyAfter("function resultLineFor(issueRequestId: string, fromCancel: boolean): string | null {", "  ")
+  ) as (
+    messages: Record<string, string>,
+    cancelResultIds: Record<string, boolean>,
+    issueRequestId: string,
+    fromCancel: boolean
+  ) => string | null;
+
+  test("🔴 (사) 결과 한 줄은 누른 카드에만 — 같은 신청이 (가)와 (다)에 함께 떠도 한 번", () => {
+    const serverMessage = "결재가 방금 처리되었습니다. 최신 정보를 다시 불러와 주세요.";
+    // 취소에서 나온 결과: (다)의 취소 카드에만.
+    const afterCancel = [{ [ISSUE_REQUEST_ID]: serverMessage }, { [ISSUE_REQUEST_ID]: true }] as const;
+    assert.equal(resultLineCompiled(...afterCancel, ISSUE_REQUEST_ID, true), serverMessage);
+    assert.equal(resultLineCompiled(...afterCancel, ISSUE_REQUEST_ID, false), null, "취소 결과가 (가) 카드에도 찍힌다");
+    // 결재에서 나온 결과: (가) 카드에만.
+    const afterDecision = [{ [ISSUE_REQUEST_ID]: "승인했습니다." }, { [ISSUE_REQUEST_ID]: false }] as const;
+    assert.equal(resultLineCompiled(...afterDecision, ISSUE_REQUEST_ID, false), "승인했습니다.");
+    assert.equal(resultLineCompiled(...afterDecision, ISSUE_REQUEST_ID, true), null, "결재 결과가 (다) 카드에도 찍힌다");
+    // 결과가 없으면 어느 쪽도 비어 있다.
+    assert.equal(resultLineCompiled({}, {}, ISSUE_REQUEST_ID, true), null);
+    assert.equal(resultLineCompiled({}, {}, ISSUE_REQUEST_ID, false), null);
+
+    // 어느 카드가 어느 쪽을 싣는지.
+    assert.ok(approvalSection.includes("message={resultLineFor(view.detail.id, false)}"), "(가) 카드가 결재 결과만 싣지 않는다");
+    assert.ok(executionSection.includes("message={messages[view.detail.id] ?? null}"), "(나) 카드의 결과 줄이 달라졌다");
+    // 결재·실행은 표시 없이(= 취소 아님), 취소는 표시와 함께 결과를 남긴다.
+    assert.match(screen, /function setMessage\(issueRequestId: string, message: string, fromCancel = false\) \{/);
+    assert.equal(countOf(screen, ", true);"), 2, "취소 결과를 남기는 자리가 성공 · 실패 둘이 아니다");
+    // 읽어 주기 통로는 그대로 — 어느 쪽 결과든 읽힌다.
+    assert.match(screen, /<p role="status" aria-live="polite" className="sr-only"> \{Object\.values\(messages\)\.join\(" "\)\} <\/p>/);
+  });
+
+  test("단추 모양 — 되돌리는 동작이라 회색 테두리, 반려(빨강)와 섞이지 않는다", () => {
+    const cancelButton = flat(bodyAfter("function renderCancelButton(view: PartIssueApprovalRequestView): React.ReactNode {", "  "));
+    assert.match(
+      cancelButton,
+      /className="rounded-md border border-zinc-300 px-3 py-1\.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"/
+    );
+    assert.match(cancelButton, /disabled=\{busyId !== null\}/, "처리 중에 [신청 취소]가 눌린다");
+    const draftForm = bodyAfter("function renderCancelDraft(): React.ReactNode {", "  ");
+    for (const [name, source] of [
+      ["[신청 취소] 단추", cancelButton],
+      ["취소 칸", draftForm],
+    ] as const) {
+      assert.ok(!/red-|bg-primary/.test(source), `${name}: 반려·승인 색을 썼다`);
+    }
+  });
+
+  test("문구는 한곳의 상수다 — 화면에 글자로 적지 않는다", () => {
+    assert.equal(PART_ISSUE_CANCEL_BUTTON_LABEL, "신청 취소");
+    assert.equal(PART_ISSUE_CANCEL_REASON_LABEL, "취소 사유 (선택)");
+    assert.equal(PART_ISSUE_CANCEL_CONFIRM_LABEL, "취소 확정");
+    assert.equal(PART_ISSUE_CANCEL_BACK_LABEL, "돌아가기");
+    assert.ok(
+      !/"신청 취소"|"취소 사유|"취소 확정"|"돌아가기"|"신청을 취소했습니다|>\s*(신청 취소|취소 확정|돌아가기)\s*</.test(approvalScreenSource),
+      "문구를 화면에 글자로 적었다"
+    );
+    assert.match(read("src/components/inventory/part-issue-approval-texts.ts"), /\[신청 취소\]와 그 입력 칸 — 승인 요청건 탭/);
   });
 });
 

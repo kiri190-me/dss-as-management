@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 import InventoryTabs from "./InventoryTabs";
 import PartIssueApprovalTrail, { formatPartIssueMoment } from "./PartIssueApprovalTrail";
 import {
+  PART_ISSUE_CANCEL_BACK_LABEL,
+  PART_ISSUE_CANCEL_BUTTON_LABEL,
+  PART_ISSUE_CANCEL_CONFIRM_LABEL,
+  PART_ISSUE_CANCEL_DONE_MESSAGE,
+  PART_ISSUE_CANCEL_REASON_LABEL,
   PART_ISSUE_EXECUTION_BLOCKED_NOTICE,
   PART_ISSUE_MINE_LABEL,
   PART_ISSUE_NOTHING_AWAITING_APPROVAL,
@@ -17,11 +22,13 @@ import {
   PART_ISSUE_SIBLING_PENDING_NOTICE,
 } from "./part-issue-approval-texts";
 import {
+  cancelPartIssueRequestAction,
   decidePartIssueRequestApprovalAction,
   executePartIssueRequestAction,
 } from "@/lib/server/actions/inventory-part-issue-requests";
 import {
   isPartIssueRequestAwaitingApproval,
+  isPartIssueRequestCancellable,
   isPartIssueRequestExecutable,
   type InventoryPartIssueRequestStatus,
 } from "@/lib/domain/inventory-part-issue-rules";
@@ -40,13 +47,20 @@ import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-a
  *       (listPartIssueRequestsPendingMyApproval → mayDecideAssignedApproval)
  *       여기서 한 벌 더 좁히지 않는다.
  *  (나) 실행할 건 — 결재가 끝나 재고 담당자가 내보낼 것.
- *  (다) 진행 중인 신청 — 누가 올렸든 결재 중·실행 대기인 신청. **읽기
- *       전용**이다(단추가 없다). 신청을 올린 사람에게는 (가)(나)가 비어 보이는
+ *  (다) 진행 중인 신청 — 누가 올렸든 결재 중·실행 대기인 신청. 결재·실행
+ *       단추가 **없다**. 신청을 올린 사람에게는 (가)(나)가 비어 보이는
  *       것이 정상이라, 이 묶음이 없으면 올린 신청이 사라진 것처럼 보인다.
  *       🔴 (나)가 보이는 세션에서는 (나)에 이미 떠 있는 신청을 여기서 뺀다 —
  *       그 판정과 빼기는 서버(페이지)가 하고, 화면은 받은 목록을 그대로 그린다.
  *       (나)가 안 보이는 세션에서는 빼지 않으므로 「승인 완료 · 실행 대기」
  *       이름표가 여전히 쓰인다.
+ *
+ * [신청 취소]는 **내 신청**(서버 판정)이고 순수 규칙이 「지금 무를 수 있다」고
+ * 할 때만, (나)와 (다)의 카드에 붙는다. (가)에는 붙이지 않는다 — 거기는 결재하는
+ * 자리다. 결재 중인 내 신청을 무를 곳은 (다)이고, 승인이 끝난 내 신청은 (나)가
+ * 보이는 세션이면 (나)에만 뜨므로(바로 위 🔴) 거기서 무른다.
+ * 🔴 무를 수 있는지는 mutation 이 트랜잭션 안에서 다시 본다(신청자 본인만 —
+ * 최고관리자 비상구도 없다). 화면의 조건은 단추를 그릴지일 뿐이다.
  *
  * 🔴 **묶음을 함부로 감추지 않는다.** 「지금 할 일이 없다」와 「이 화면이 나와
  * 상관없다」는 다른 말이다. 처리할 건이 0건이면 그렇게 **말하고**, 애초에
@@ -79,7 +93,24 @@ export type PartIssueApprovalRequestView = {
   isMine: boolean;
 };
 
-type DecisionDraft = { issueRequestId: string; decision: "APPROVED" | "REJECTED" };
+/**
+ * 카드 안에 펼친 입력 칸 — 🔴 **화면 전체에 하나뿐이다.** 결재(승인·반려)와
+ * [신청 취소]를 한 상태에 담아, 두 칸이 동시에 펼쳐지는 일(같은 카드든 다른
+ * 카드든)을 모양으로 막는다. 하나를 열면 다른 하나는 저절로 닫힌다. 사유 칸
+ * (reason)도 그래서 하나를 같이 쓴다.
+ */
+type CardDraft =
+  | { kind: "DECISION"; issueRequestId: string; decision: "APPROVED" | "REJECTED" }
+  | { kind: "CANCEL"; issueRequestId: string };
+
+/**
+ * 이 카드에 [신청 취소]를 붙이는가 — 내 신청(서버 판정)이고, 순수 규칙이 「지금
+ * 무를 수 있다」고 할 때만. 🔴 규칙은 mutation 이 보는 것과 같은 함수 하나다
+ * (isPartIssueRequestCancellable). 신청 상태를 글자로 다시 적지 않는다.
+ */
+function offersCancel(view: PartIssueApprovalRequestView): boolean {
+  return view.isMine && isPartIssueRequestCancellable(view.detail.status);
+}
 
 export default function PartIssueApprovalScreen({
   pending,
@@ -114,18 +145,37 @@ export default function PartIssueApprovalScreen({
   showProgressSection: boolean;
 }) {
   const router = useRouter();
-  const [draft, setDraft] = useState<DecisionDraft | null>(null);
+  const [draft, setDraft] = useState<CardDraft | null>(null);
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   /** 신청마다 마지막 결과 한 줄 — 성공이든 **서버가 거절한 이유든** 같은 자리다. */
   const [messages, setMessages] = useState<Record<string, string>>({});
+  /**
+   * 그 신청의 마지막 결과가 [신청 취소]에서 나왔는가. 🔴 결과 한 줄을 **누른
+   * 카드에만** 싣기 위한 표시다. 같은 신청이 (가)와 (다)에 함께 뜰 수 있다 —
+   * 최고관리자는 결재 대기 건을 전부 (가)에서 보므로 자기가 올린 신청도 거기
+   * 뜬다. 이 표시가 없으면 한쪽에서 누른 결과가 두 카드에 똑같이 찍힌다.
+   */
+  const [cancelResultIds, setCancelResultIds] = useState<Record<string, boolean>>({});
 
-  function setMessage(issueRequestId: string, message: string) {
+  function setMessage(issueRequestId: string, message: string, fromCancel = false) {
     setMessages((prev) => ({ ...prev, [issueRequestId]: message }));
+    setCancelResultIds((prev) => ({ ...prev, [issueRequestId]: fromCancel }));
+  }
+
+  /**
+   * 카드에 실을 결과 한 줄 — `fromCancel` 과 같은 쪽에서 나온 결과만 돌려준다.
+   * (가) 카드는 취소 결과를, (다)의 취소 카드는 결재 결과를 싣지 않는다. (나)
+   * 카드는 [불출 실행]과 [신청 취소]가 한 카드에 있으므로 이것을 거치지 않는다.
+   */
+  function resultLineFor(issueRequestId: string, fromCancel: boolean): string | null {
+    const message = messages[issueRequestId];
+    if (message === undefined) return null;
+    return (cancelResultIds[issueRequestId] ?? false) === fromCancel ? message : null;
   }
 
   async function submitDecision() {
-    if (!draft || busyId) return;
+    if (draft?.kind !== "DECISION" || busyId) return;
     setBusyId(draft.issueRequestId);
     const result = await decidePartIssueRequestApprovalAction({
       issueRequestId: draft.issueRequestId,
@@ -174,6 +224,96 @@ export default function PartIssueApprovalScreen({
     router.refresh();
   }
 
+  async function submitCancel() {
+    if (draft?.kind !== "CANCEL" || busyId) return;
+    const issueRequestId = draft.issueRequestId;
+    setBusyId(issueRequestId);
+    /*
+      🔴 신청 id 와 사유만 보낸다. 「신청자 본인인가」·「지금 무를 수 있는가」는
+      mutation 이 트랜잭션 안에서 다시 본다 — 화면이 가진 판정(offersCancel)은
+      단추를 그릴지일 뿐이다.
+    */
+    const result = await cancelPartIssueRequestAction({
+      issueRequestId,
+      reason: reason.trim() ? reason : null,
+    });
+    setBusyId(null);
+    if (!result.ok) {
+      // 서버 문구 그대로 — 그사이 결재가 끝났거나 실행된 것도, 본인이 아닌 것도
+      // 여기로 온다. 칸은 열어 둔다(사유를 다시 적지 않게).
+      setMessage(issueRequestId, result.message, true);
+      return;
+    }
+    setMessage(issueRequestId, PART_ISSUE_CANCEL_DONE_MESSAGE, true);
+    setDraft(null);
+    setReason("");
+    router.refresh();
+  }
+
+  /** 이 카드에 [신청 취소] 칸이 펼쳐져 있는가. */
+  function cancelDraftOpenOn(view: PartIssueApprovalRequestView): boolean {
+    return draft?.kind === "CANCEL" && draft.issueRequestId === view.detail.id;
+  }
+
+  /*
+    [신청 취소] 단추와 그 칸 — (나)·(다) 두 묶음이 같은 것을 쓴다. 붙일지는
+    부르는 쪽이 offersCancel 로 정한다. 🔴 되돌리는 동작이라 회색 테두리다 —
+    반려(빨강)와 헷갈리지 않게. 브라우저 확인 창은 쓰지 않는다(결재 칸과 같은
+    모양으로 카드 안에 펼친다).
+  */
+  function renderCancelButton(view: PartIssueApprovalRequestView): React.ReactNode {
+    return (
+      <button
+        type="button"
+        disabled={busyId !== null}
+        onClick={() => {
+          setReason("");
+          setDraft({ kind: "CANCEL", issueRequestId: view.detail.id });
+        }}
+        className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        {PART_ISSUE_CANCEL_BUTTON_LABEL}
+      </button>
+    );
+  }
+
+  function renderCancelDraft(): React.ReactNode {
+    return (
+      <div className="flex w-full flex-col gap-2">
+        <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+          {PART_ISSUE_CANCEL_REASON_LABEL}
+          <textarea
+            rows={2}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          />
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={busyId !== null}
+            onClick={() => void submitCancel()}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {busyId !== null ? "처리 중..." : PART_ISSUE_CANCEL_CONFIRM_LABEL}
+          </button>
+          <button
+            type="button"
+            disabled={busyId !== null}
+            onClick={() => {
+              setDraft(null);
+              setReason("");
+            }}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {PART_ISSUE_CANCEL_BACK_LABEL}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <InventoryTabs active="APPROVALS" />
@@ -201,9 +341,9 @@ export default function PartIssueApprovalScreen({
                 <RequestCard
                   key={view.detail.id}
                   view={view}
-                  message={messages[view.detail.id] ?? null}
+                  message={resultLineFor(view.detail.id, false)}
                   actions={
-                    draft?.issueRequestId === view.detail.id ? (
+                    draft?.kind === "DECISION" && draft.issueRequestId === view.detail.id ? (
                       <div className="flex w-full flex-col gap-2">
                         <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
                           {draft.decision === "REJECTED" ? "반려 사유 (필수)" : "승인 의견 (선택)"}
@@ -247,7 +387,7 @@ export default function PartIssueApprovalScreen({
                           disabled={busyId !== null}
                           onClick={() => {
                             setReason("");
-                            setDraft({ issueRequestId: view.detail.id, decision: "APPROVED" });
+                            setDraft({ kind: "DECISION", issueRequestId: view.detail.id, decision: "APPROVED" });
                           }}
                           className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
                         >
@@ -258,7 +398,7 @@ export default function PartIssueApprovalScreen({
                           disabled={busyId !== null}
                           onClick={() => {
                             setReason("");
-                            setDraft({ issueRequestId: view.detail.id, decision: "REJECTED" });
+                            setDraft({ kind: "DECISION", issueRequestId: view.detail.id, decision: "REJECTED" });
                           }}
                           className="rounded-md border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                         >
@@ -292,14 +432,25 @@ export default function PartIssueApprovalScreen({
                   view={view}
                   message={messages[view.detail.id] ?? null}
                   actions={
-                    <button
-                      type="button"
-                      disabled={busyId !== null}
-                      onClick={() => void execute(view.detail.id)}
-                      className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
-                    >
-                      {busyId === view.detail.id ? "처리 중..." : "불출 실행"}
-                    </button>
+                    /*
+                      [신청 취소] 칸이 펼쳐지면 그 칸이 단추 자리를 대신한다 — 결재 칸과
+                      같은 모양이고, 무르려던 카드에서 [불출 실행]이 함께 눌리지 않게.
+                    */
+                    offersCancel(view) && cancelDraftOpenOn(view) ? (
+                      renderCancelDraft()
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busyId !== null}
+                          onClick={() => void execute(view.detail.id)}
+                          className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+                        >
+                          {busyId === view.detail.id ? "처리 중..." : "불출 실행"}
+                        </button>
+                        {offersCancel(view) && renderCancelButton(view)}
+                      </>
+                    )
                   }
                 />
               ))}
@@ -320,14 +471,26 @@ export default function PartIssueApprovalScreen({
             </p>
           ) : (
             <ul className="flex flex-col gap-3">
-              {inProgress.map((view) => (
+              {inProgress.map((view) =>
                 /*
-                  🔴 읽기 전용 — 단추를 싣지 않는다. 결재·실행은 위 두 묶음의 몫이고,
-                  같은 신청이 위에도 떠 있으면 거기서 처리한다. 결과 한 줄도 위 카드에만
-                  남긴다(같은 문장이 두 번 보이지 않게).
+                  🔴 결재·실행은 싣지 않는다 — 위 두 묶음의 몫이고, 같은 신청이 위에도
+                  떠 있으면 거기서 처리한다. 싣는 것은 **내 신청의 [신청 취소]** 하나뿐이다
+                  (결재 중인 내 신청을 무를 곳이 여기다). 결과 한 줄도 취소를 누른 이
+                  카드에만, 취소에서 나온 것만 싣는다 — 같은 문장이 두 번 보이지 않게.
+                  그 밖의 카드는 예전 그대로 단추도 결과 줄도 없다.
                 */
-                <RequestCard key={view.detail.id} view={view} actions={null} message={null} showProgress />
-              ))}
+                offersCancel(view) ? (
+                  <RequestCard
+                    key={view.detail.id}
+                    view={view}
+                    actions={cancelDraftOpenOn(view) ? renderCancelDraft() : renderCancelButton(view)}
+                    message={resultLineFor(view.detail.id, true)}
+                    showProgress
+                  />
+                ) : (
+                  <RequestCard key={view.detail.id} view={view} actions={null} message={null} showProgress />
+                )
+              )}
             </ul>
           )}
         </section>
