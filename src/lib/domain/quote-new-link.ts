@@ -73,6 +73,58 @@ export function returnHrefForNewQuote(link: NewQuoteLink): string | null {
   return link.repairCaseId === null ? null : repairCaseDetailHrefs(link.repairCaseId).quotes;
 }
 
+/**
+ * ============================================================================
+ * 수리 건 → **기존** 견적서 수정 → 다시 그 건
+ * ============================================================================
+ * 새 견적서와 같은 일을 이미 있는 장에도 한다(2026-09-11 사용자 요청). 「견적서」
+ * 탭에서 한 장을 눌러 수정 화면에 들어갔다가 [취소]를 누르면, 예전에는 PO/내자
+ * 목록(`/quotes`)으로 떨어졌다 — 방금 있던 건에서 한참 떨어진 곳이다.
+ *
+ * 링크에 싣는 것은 **접수 건 id 하나**이고, 이름도 새 견적서와 같은
+ * `repairCaseId` 다(QUOTE_NEW_REPAIR_CASE_PARAM). 돌아갈 주소를 통째로 싣지 않는
+ * 까닭도 위와 같다 — id 만 받아 **우리가 아는 주소를 우리가 만든다**.
+ *
+ * ── 🔴 새 견적서보다 하나 더 본다: 그 견적서가 정말 그 건의 것인가 ──────
+ * 새 견적서는 아직 어느 건에도 붙지 않았으니 비교할 대상이 없다. 기존 장은 이미
+ * `quotes.repair_case_id` 를 갖고 있다. 그래서 주소의 id 가 **그 값과 같을 때만**
+ * 그 건으로 돌려보낸다. 다르면 null(= 지금까지처럼 `/quotes`)이다.
+ *   · 주소를 손으로 바꾼 링크가 사람을 **남의 건**으로 보내지 않게 — UUID 모양만
+ *     맞으면 아무 건으로나 가는 문이 되면 안 된다.
+ *   · 견적서가 그 사이 **다른 건으로 옮겨졌으면** 옛 건으로 돌아가지 않게 — 옛
+ *     탭에는 그 장이 더 이상 없어서, 돌아간 사람은 방금 고친 장을 못 찾는다.
+ *   · 견적서가 어느 건에도 붙어 있지 않으면(NULL) 돌아갈 건 자체가 없다.
+ * 돌아갈 주소는 **DB 가 준 값으로** 만든다 — 대소문자까지 링크의 글자는 쓰지 않는다.
+ * ============================================================================
+ */
+
+/**
+ * 목록의 한 줄이 여는 수정 화면 주소. 접수 건이 없으면(null) **지금까지의 그
+ * 주소 그대로**다 — PO/내자 목록은 한 글자도 달라지지 않는다. 접수 건 탭은 그 건의
+ * id 를 실어 보내, 수정 화면이 돌아갈 곳을 알게 한다.
+ */
+export function quoteEditHref(input: { quoteId: string; repairCaseId: string | null }): string {
+  if (input.repairCaseId === null) return `/quotes/${input.quoteId}`;
+  const params = new URLSearchParams({ [QUOTE_NEW_REPAIR_CASE_PARAM]: input.repairCaseId });
+  return `/quotes/${input.quoteId}?${params.toString()}`;
+}
+
+/**
+ * 수정 화면이 [취소] 뒤에 돌아갈 곳. 위 머리말의 세 조건을 모두 넘으면 그 건의
+ * 「견적서」 탭, 아니면 null 이다(그때는 지금까지와 똑같이 `/quotes`).
+ */
+export function returnHrefForEditQuote(
+  searchParams: SearchParamsInput | undefined,
+  quote: { repairCaseId: string | null }
+): string | null {
+  const linked = firstValue(searchParams?.[QUOTE_NEW_REPAIR_CASE_PARAM]);
+  if (!UUID_PATTERN.test(linked)) return null;
+  if (quote.repairCaseId === null) return null;
+  // UUID 는 대소문자를 가리지 않는다. 같은 건인지는 글자 모양이 아니라 값으로 본다.
+  if (linked.toLowerCase() !== quote.repairCaseId.toLowerCase()) return null;
+  return repairCaseDetailHrefs(quote.repairCaseId).quotes;
+}
+
 function firstValue(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return (value[0] ?? "").trim();
   return (value ?? "").trim();

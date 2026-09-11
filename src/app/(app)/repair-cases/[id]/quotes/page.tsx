@@ -110,6 +110,12 @@ export default async function RepairCaseQuotesPage({
         intakeNumber: resolved.intakeNumber,
       })}
       emptyMessage="이 접수 건에 등록된 견적서가 없습니다. 「새 견적서」로 만들면 이 건에 붙습니다."
+      /**
+       * 줄을 눌러 여는 수정 화면에 이 건의 id 를 싣는다 — [취소]가 PO/내자 목록이
+       * 아니라 **이 탭으로** 돌아오게. 돌아갈지는 수정 화면이 그 견적서의 건과
+       * 맞춰 보고 정한다(domain/quote-new-link.ts 의 returnHrefForEditQuote).
+       */
+      quoteLinkRepairCaseId={resolved.id}
     />
   );
 }

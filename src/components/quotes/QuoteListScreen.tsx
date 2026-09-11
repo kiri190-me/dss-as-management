@@ -10,6 +10,7 @@ import {
 } from "@/components/common/master-data-trash-dialogs";
 import { deleteQuoteAction, restoreQuoteAction } from "@/lib/server/actions/quotes";
 import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
+import { quoteEditHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
 
 /**
@@ -64,6 +65,7 @@ export default function QuoteListScreen({
   canDelete,
   newQuoteHref = "/quotes/new",
   emptyMessage = "아직 만든 견적서가 없습니다.",
+  quoteLinkRepairCaseId = null,
 }: {
   rows: QuoteListItem[];
   /** 휴지통. 지울 수 없는 사람에게는 빈 배열이 온다 — 못 여는 탭의 내용을 실어 보내지 않는다. */
@@ -81,6 +83,20 @@ export default function QuoteListScreen({
   newQuoteHref?: string;
   /** 한 장도 없을 때의 안내. 기본값이 지금까지의 그 문장이다. */
   emptyMessage?: string;
+  /**
+   * 줄을 눌러 여는 수정 화면에 **실어 보낼 접수 건 id**. 기본값 null 이면 줄 링크는
+   * 지금까지의 `/quotes/{id}` 그대로다(PO/내자 목록).
+   *
+   * 접수 건의 「견적서」 탭이 그 건의 id 를 넘긴다 — 수정 화면의 [취소]가 `/quotes`
+   * 가 아니라 그 탭으로 돌아오게(domain/quote-new-link.ts 의 quoteEditHref).
+   * 함수가 아니라 id 를 받는 까닭: 이 화면은 클라이언트 컴포넌트이고 부르는 쪽은
+   * 서버 페이지라, 함수는 그 경계를 건너오지 못한다.
+   *
+   * ⚠️ 표와 카드 **두 곳 모두** 이 값으로 주소를 만든다 — 한쪽만 바꾸면 창 폭에 따라
+   * 돌아가는 곳이 달라진다(ResponsiveList 가 폭을 재서 둘 중 하나를 고른다).
+   * 미리보기·xlsx 링크는 건드리지 않는다.
+   */
+  quoteLinkRepairCaseId?: string | null;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -232,8 +248,24 @@ export default function QuoteListScreen({
             </span>
           }
           measureKey={[filtered.length, canEdit]}
-          table={<QuoteTable rows={filtered} canDelete={canDelete} busyId={busyId} onDelete={openDelete} />}
-          cards={<QuoteCardList rows={filtered} canDelete={canDelete} busyId={busyId} onDelete={openDelete} />}
+          table={
+            <QuoteTable
+              rows={filtered}
+              quoteLinkRepairCaseId={quoteLinkRepairCaseId}
+              canDelete={canDelete}
+              busyId={busyId}
+              onDelete={openDelete}
+            />
+          }
+          cards={
+            <QuoteCardList
+              rows={filtered}
+              quoteLinkRepairCaseId={quoteLinkRepairCaseId}
+              canDelete={canDelete}
+              busyId={busyId}
+              onDelete={openDelete}
+            />
+          }
         />
       )}
       </>
@@ -341,7 +373,19 @@ type RowActionProps = {
   onDelete: (row: QuoteListItem) => void;
 };
 
-function QuoteTable({ rows, canDelete, busyId, onDelete }: { rows: QuoteListItem[] } & RowActionProps) {
+/** 줄 링크가 실어 보낼 접수 건 id. 위 QuoteListScreen 의 같은 이름 프롭 참조. */
+type RowLinkProps = {
+  rows: QuoteListItem[];
+  quoteLinkRepairCaseId: string | null;
+};
+
+function QuoteTable({
+  rows,
+  quoteLinkRepairCaseId,
+  canDelete,
+  busyId,
+  onDelete,
+}: RowLinkProps & RowActionProps) {
   return (
     <table className="w-full min-w-[56rem] border-collapse text-sm">
       <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -367,7 +411,7 @@ function QuoteTable({ rows, canDelete, busyId, onDelete }: { rows: QuoteListItem
               <span className="flex flex-wrap items-center gap-1.5">
                 <KindTag kind={row.kind} />
                 <Link
-                  href={`/quotes/${row.id}`}
+                  href={quoteEditHref({ quoteId: row.id, repairCaseId: quoteLinkRepairCaseId })}
                   className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
                 >
                   {row.summaryLine}
@@ -398,7 +442,13 @@ function QuoteTable({ rows, canDelete, busyId, onDelete }: { rows: QuoteListItem
   );
 }
 
-function QuoteCardList({ rows, canDelete, busyId, onDelete }: { rows: QuoteListItem[] } & RowActionProps) {
+function QuoteCardList({
+  rows,
+  quoteLinkRepairCaseId,
+  canDelete,
+  busyId,
+  onDelete,
+}: RowLinkProps & RowActionProps) {
   return (
     <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
@@ -409,7 +459,7 @@ function QuoteCardList({ rows, canDelete, busyId, onDelete }: { rows: QuoteListI
           <span className="flex flex-wrap items-center gap-1.5">
             <KindTag kind={row.kind} />
             <Link
-              href={`/quotes/${row.id}`}
+              href={quoteEditHref({ quoteId: row.id, repairCaseId: quoteLinkRepairCaseId })}
               className="text-sm font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
             >
               {row.summaryLine}

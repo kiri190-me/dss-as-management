@@ -15,6 +15,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { toKstDateOnly } from "@/lib/domain/date-only";
+import { returnHrefForEditQuote, type SearchParamsInput } from "@/lib/domain/quote-new-link";
 
 export const metadata: Metadata = {
   title: "견적서 | DSS A/S 관리 시스템",
@@ -35,11 +36,19 @@ export const dynamic = "force-dynamic";
  * 볼 수는 있지만 고칠 수 없는 사람은 목록으로 돌려보낸다. 3단계 목록은 조회
  * 권한만으로 열리므로 그 사람도 여기까지 올 수 있고, 읽기 전용 상세 화면은
  * 아직 없다 — 저장할 수 없는 폼을 그려 주고 마지막에 거절하는 것보다 낫다.
+ *
+ * ── 접수 건의 「견적서」 탭에서 들어온 경우 ──────────────────────────────
+ * 주소에 그 건의 id 가 실려 온다(domain/quote-new-link.ts 의 quoteEditHref).
+ * 그 id 가 **이 견적서가 붙은 건과 같을 때만** [취소]가 그 탭으로 돌아간다 —
+ * 아니면 지금까지와 같이 `/quotes` 다(returnHrefForEditQuote 머리말). 저장은
+ * 이 주소에 머물러 다시 읽기만 하므로 돌아갈 곳과 무관하다.
  */
 export default async function QuoteDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParamsInput>;
 }) {
   await requireAreaAccessForCurrentUser("quotes");
 
@@ -78,6 +87,10 @@ export default async function QuoteDetailPage({
     readAllQuoteWorkSectionDefaults(),
   ]);
 
+  // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
+  // 정하면 손으로 바꾼 링크가 사람을 남의 건으로 보낸다.
+  const returnHref = returnHrefForEditQuote(searchParams ? await searchParams : undefined, quote);
+
   return (
     <QuoteEditForm
       quote={quote}
@@ -85,6 +98,7 @@ export default async function QuoteDetailPage({
       repairLabor={repairLabor}
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
+      returnHref={returnHref}
     />
   );
 }
