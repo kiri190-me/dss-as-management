@@ -7,8 +7,8 @@ import {
 } from "../src/lib/db/mutations/master-data-purge";
 
 /**
- * 마스터 데이터(고객사·제품 모델·부품·기술 절차)와 내자 정리 줄 휴지통의 15일
- * 자동 완전삭제 진입점.
+ * 마스터 데이터(고객사·제품 모델·부품·기술 절차)와 내자 정리 줄·견적서 휴지통의
+ * 15일 자동 완전삭제 진입점.
  * `npm run purge:master-data`로 직접 부를 수 있고, 야간 작업은
  * scripts/run-nightly-purge.ps1이 다른 정리 작업들과 함께 순서대로 부른다.
  * 페이지 요청이나 프로세스 안 타이머는 절대 건드리지 않는다 — CLI 전용이고,
@@ -47,6 +47,10 @@ async function main() {
   // 기존 네 줄의 순서를 흔들지 않도록 맨 뒤에 붙인다. 이 종류에서는
   // "referenced" 가 늘 0이다 — 이 줄을 붙잡는 표가 없다.
   report("domestic_orders", summary.domesticOrders);
+  // 견적서(2026-09-11)도 회차 안에서는 고객사·부품보다 먼저 돌고, 보고는 같은
+  // 이유로 맨 뒤에 붙인다. 여기서도 "referenced" 는 늘 0이다 — 딸린 표는 전부
+  // CASCADE 이거나(부품 줄·작업 내역·수리 작업) SET NULL 이다(내자 정리 줄).
+  report("quotes", summary.quotes);
 
   console.log("Purge sweep complete.");
   return summary;
@@ -62,7 +66,8 @@ main()
       summary.productModels.errored +
       summary.parts.errored +
       summary.procedureTemplates.errored +
-      summary.domesticOrders.errored;
+      summary.domesticOrders.errored +
+      summary.quotes.errored;
     process.exit(errored > 0 ? 1 : 0);
   })
   .catch(async (err) => {

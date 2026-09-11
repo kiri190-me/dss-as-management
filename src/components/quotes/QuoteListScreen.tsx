@@ -6,9 +6,16 @@ import { useRouter } from "next/navigation";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import {
   MasterDataDeleteDialog,
+  MasterDataPermanentDeleteDialog,
   MasterDataRestoreDialog,
 } from "@/components/common/master-data-trash-dialogs";
-import { deleteQuoteAction, restoreQuoteAction } from "@/lib/server/actions/quotes";
+import MasterDataTrashRetentionBadge from "@/components/common/master-data-trash-retention-badge";
+import { MASTER_DATA_TRASH_RETENTION_DAYS } from "@/lib/domain/master-data-trash-retention";
+import {
+  deleteQuoteAction,
+  permanentlyDeleteQuoteAction,
+  restoreQuoteAction,
+} from "@/lib/server/actions/quotes";
 import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
 import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
@@ -109,20 +116,36 @@ export default function QuoteListScreen({
 
   /**
    * 확인 창은 이 저장소의 표준 창을 쓴다(components/common/master-data-trash-dialogs).
-   * 고객사·제품 모델이 쓰는 바로 그 창이라, 지우는 일의 생김새가 화면마다 달라지지
-   * 않는다. **보관 문구만 우리 것을 넘긴다** — 견적서에는 자동 만료도 영구 삭제도
-   * 없어서 기본 문장(15일 뒤 완전 삭제)이 사실이 아니다.
+   * 고객사·제품 모델·내자 정리가 쓰는 바로 그 창이라, 지우는 일의 생김새가 화면마다
+   * 달라지지 않는다. 보관 문구(retentionNote)는 **넘기지 않는다** — 2026-09-11 부터
+   * 견적서도 다른 휴지통과 같은 규칙(15일 보관 → 자동 완전 삭제)이라 기본 문장이
+   * 사실이다(mutations/quote-trash.ts 머리말). 되살리기 창의 문장만 우리 것을
+   * 넘긴다 — 기본 문장의 "접수·편집 화면에서 다시 고를 수 있다"는 견적서에 맞지 않는다.
    *
    * 창은 자기 상태를 갖지 않는다. 열림 여부·사유·전송 중·오류는 전부 여기가
-   * 소유한다(그 파일의 원칙 그대로).
+   * 소유한다(그 파일의 원칙 그대로). 사유 칸 하나를 보내기 창과 완전 삭제 창이
+   * 함께 쓴다 — 두 창은 동시에 열리지 않고, 열 때마다 비운다.
    */
   const [deleteTarget, setDeleteTarget] = useState<QuoteListItem | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<DeletedQuoteRow | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<DeletedQuoteRow | null>(null);
   const [reason, setReason] = useState("");
 
   function openDelete(row: QuoteListItem) {
     setDeleteTarget(row);
     setReason("");
+    setTrashError(null);
+  }
+
+  function openPurge(row: DeletedQuoteRow) {
+    setPurgeTarget(row);
+    setReason("");
+    setTrashError(null);
+  }
+
+  // 앞선 조작(예: 실패한 완전 삭제)의 오류가 되살리기 창에 남아 보이지 않게 비운다.
+  function openRestore(row: DeletedQuoteRow) {
+    setRestoreTarget(row);
     setTrashError(null);
   }
 
@@ -158,6 +181,25 @@ export default function QuoteListScreen({
       return;
     }
     setRestoreTarget(null);
+    router.refresh();
+  }
+
+  async function confirmPurge() {
+    // 사유가 비어 있으면 창의 단추가 이미 꺼져 있다. 서버 액션도 다시 막는다.
+    if (!purgeTarget || busyId || reason.trim() === "") return;
+    setBusyId(purgeTarget.id);
+    setTrashError(null);
+    const result = await permanentlyDeleteQuoteAction({
+      id: purgeTarget.id,
+      expectedVersion: purgeTarget.version,
+      reason: reason.trim(),
+    });
+    setBusyId(null);
+    if (!result.ok) {
+      setTrashError(result.message);
+      return;
+    }
+    setPurgeTarget(null);
     router.refresh();
   }
 
@@ -221,7 +263,13 @@ export default function QuoteListScreen({
       )}
 
       {tab === "trash" ? (
-        <QuoteTrashList rows={trashRows} busyId={busyId} onRestore={setRestoreTarget} />
+        <QuoteTrashList
+          rows={trashRows}
+          busyId={busyId}
+          busyAction={busyId === null ? null : purgeTarget?.id === busyId ? "purge" : "restore"}
+          onRestore={openRestore}
+          onPermanentDelete={openPurge}
+        />
       ) : (
       <>
       <label className="flex flex-col gap-1 text-xs">
@@ -278,18 +326,11 @@ export default function QuoteListScreen({
         isOpen={deleteTarget !== null}
         entityLabel="견적서"
         names={deleteTarget ? [deleteTarget.summaryLine] : []}
-        retentionNote={
-          <>
-            휴지통에 있는 동안에는 목록에서 보이지 않고 견적서 파일도 나오지 않지만,
-            <strong className="font-medium text-zinc-800 dark:text-zinc-200">
-              {" "}
-              언제든 되살릴 수 있습니다
-            </strong>
-            . 견적서는 자동으로 완전히 삭제되지 않습니다.
-          </>
-        }
         cascadeNote={
-          <>부품 줄과 금액은 그대로 남고, 되살리면 함께 돌아옵니다.</>
+          <>
+            휴지통에 있는 동안에는 견적서 파일도 나오지 않습니다. 부품 줄과 금액은 그대로 남고,
+            되살리면 함께 돌아옵니다.
+          </>
         }
         reason={reason}
         isSubmitting={busyId !== null}
@@ -303,6 +344,7 @@ export default function QuoteListScreen({
         isOpen={restoreTarget !== null}
         entityLabel="견적서"
         names={restoreTarget ? [restoreTarget.summaryLine] : []}
+        restoreNote={<>복원하면 견적서 목록에 다시 나타나고, 견적서 파일도 다시 받을 수 있습니다.</>}
         cascadeNote={
           <>같은 발행번호의 견적서가 이미 있으면 되살릴 수 없습니다.</>
         }
@@ -311,56 +353,107 @@ export default function QuoteListScreen({
         onConfirm={() => void confirmRestore()}
         onCancel={() => setRestoreTarget(null)}
       />
+
+      {/* 완전 삭제. 딸려 가는 것은 mutations/quote-trash.ts 머리말의 '딸린 것' 그대로다 —
+          부품 줄·작업 내역·고른 수리 작업은 함께 지워지고(CASCADE), 내자 정리 줄은
+          남아 연결만 풀린다(SET NULL). */}
+      <MasterDataPermanentDeleteDialog
+        isOpen={purgeTarget !== null}
+        entityLabel="견적서"
+        names={purgeTarget ? [purgeTarget.summaryLine] : []}
+        cascadeNote={
+          <>
+            부품 줄 · 작업 내역 · 고른 수리 작업도 함께 지워집니다. 이 견적서를 연결해 둔 내자 정리 줄은
+            지워지지 않고 연결만 풀립니다 — 그 줄에는 손으로 적어 둔 견적서번호 · 금액이 보입니다.
+          </>
+        }
+        reason={reason}
+        isSubmitting={busyId !== null}
+        submitError={trashError}
+        onReasonChange={setReason}
+        onConfirm={() => void confirmPurge()}
+        onCancel={() => setPurgeTarget(null)}
+      />
     </div>
   );
 }
 
 /**
- * 휴지통. 되살리기만 있고 **영구 삭제는 없다** — 견적서는 고객사에 나간
- * 문서라 무엇을 얼마에 불렀는지가 남아야 한다(mutations/quote-trash.ts).
+ * 휴지통. 줄마다 보관 만료 배지와 [되살리기] · [완전 삭제] 가 선다 — 다른 휴지통
+ * (고객사·내자 정리)과 같은 루틴이다(2026-09-11 사용자 결정, mutations/quote-trash.ts).
+ * 누르면 공용 확인 창이 열리고(부르는 쪽이 소유한다), 브라우저 기본 확인창은 쓰지
+ * 않는다.
+ *
+ * 배지는 지운 시각이 있을 때만 그린다 — 없는 줄은 정상 경로로는 생기지 않지만,
+ * 지어낸 시각으로 배지를 그리면 거짓말이 된다(내자 정리 휴지통과 같은 판단).
+ * 배지의 "만료됨"은 정리 스크립트가 다음 회차에 지울 대상이라는 뜻이다 — 둘이 같은
+ * 판정 함수를 쓴다(master-data-trash-retention-badge.tsx).
  */
 function QuoteTrashList({
   rows,
   busyId,
+  busyAction,
   onRestore,
+  onPermanentDelete,
 }: {
   rows: DeletedQuoteRow[];
   busyId: string | null;
+  /** 지금 도는 조작이 무엇인가 — 단추 글자를 알맞게 바꾸려고 받는다. */
+  busyAction: "restore" | "purge" | null;
   onRestore: (row: DeletedQuoteRow) => void;
+  onPermanentDelete: (row: DeletedQuoteRow) => void;
 }) {
-  if (rows.length === 0) {
-    return (
-      <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-        휴지통이 비어 있습니다.
-      </p>
-    );
-  }
   return (
-    <ul className="flex flex-col gap-2">
-      {rows.map((row) => (
-        <li
-          key={row.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <div className="min-w-0">
-            <p className="text-zinc-900 dark:text-zinc-50">{row.summaryLine}</p>
-            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              {row.subject}
-              {row.deletedAt && ` · ${formatDeletedAt(row.deletedAt)} 삭제`}
-              {row.deleteReason && ` · 사유: ${row.deleteReason}`}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onRestore(row)}
-            disabled={busyId !== null}
-            className="rounded-md border border-zinc-300 px-3 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
-          >
-            {busyId === row.id ? "되살리는 중…" : "되살리기"}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <section className="flex flex-col gap-3">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        삭제한 지 {MASTER_DATA_TRASH_RETENTION_DAYS}일이 지나면 자동으로 완전히 삭제됩니다. 그
+        전에는 언제든 되살릴 수 있습니다.
+      </p>
+      {rows.length === 0 ? (
+        <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+          휴지통이 비어 있습니다.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+            >
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2 text-zinc-900 dark:text-zinc-50">
+                  <span>{row.summaryLine}</span>
+                  {row.deletedAt !== null && <MasterDataTrashRetentionBadge deletedAt={row.deletedAt} />}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  {row.subject}
+                  {row.deletedAt && ` · ${formatDeletedAt(row.deletedAt)} 삭제`}
+                  {row.deleteReason && ` · 사유: ${row.deleteReason}`}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => onRestore(row)}
+                  disabled={busyId !== null}
+                  className="rounded-md border border-zinc-300 px-3 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+                >
+                  {busyId === row.id && busyAction === "restore" ? "되살리는 중…" : "되살리기"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPermanentDelete(row)}
+                  disabled={busyId !== null}
+                  className="rounded-md border border-red-300 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                >
+                  {busyId === row.id && busyAction === "purge" ? "완전 삭제 중…" : "완전 삭제"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

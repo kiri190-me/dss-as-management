@@ -2295,6 +2295,9 @@ export default function DomesticOrderListScreen({
         isOpen={trash.kind === "RESTORE"}
         entityLabel="내자 정리 항목"
         names={trash.names}
+        restoreNote={
+          <>복원하면 내자 정리 목록에 다시 나타나고, 주간보고 · 수리 건 상세 · 고객 안내 현황에도 다시 잡힙니다.</>
+        }
         cascadeNote={<>함께 휴지통에 들어갔던 납기요청일도 같이 돌아옵니다.</>}
         isSubmitting={trash.isSubmitting}
         submitError={trash.submitError}

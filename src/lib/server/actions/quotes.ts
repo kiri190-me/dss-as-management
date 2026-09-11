@@ -10,7 +10,7 @@ import {
   validateQuoteFields,
 } from "@/lib/validation/quote-input";
 import { createQuote, updateQuote } from "@/lib/db/mutations/quotes";
-import { restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
+import { permanentlyDeleteQuote, restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
 import { lookupIntakeForQuote, type QuoteIntakeLookup } from "@/lib/db/queries/quotes";
 
 /**
@@ -185,14 +185,24 @@ export async function lookupIntakeForQuoteAction(input: {
 
 /**
  * ============================================================================
- * 휴지통 — 지우기와 되살리기
+ * 휴지통 — 보내기 · 되살리기 · 완전 삭제
  * ============================================================================
- * 관문이 하나 더 좁다. 만들기·고치기는 `quotes` WRITE 지만, 지우고 되살리는
- * 것은 `quotes` MANAGE 다 — 견적서는
+ * 관문이 하나 더 좁다. 만들기·고치기는 `quotes` WRITE 지만, 지우고 되살리고
+ * 완전히 지우는 것은 `quotes` MANAGE 다 — 견적서는
  * 고객사에 나간 문서라 지우는 판단을 담당자 각자에게 맡기지 않는다
- * (quote-authorization.ts 의 '삭제는 관리자 이상이다').
+ * (quote-authorization.ts 의 '삭제는 관리자 이상이다'). 완전 삭제
+ * (2026-09-11)도 같은 관문이다 — 내자 정리 휴지통의 셋이 한 관문인 것과 같다.
+ *
+ * 셋 다 한 건씩 받는다(이 파일의 관례). 화면이 한 번에 한 장씩만 다룬다.
  * ============================================================================
  */
+
+/** 완전 삭제 사유의 길이 상한. 내자 정리 휴지통(actions/domestic-orders.ts)과 같은 값이다. */
+const MAX_PURGE_REASON_LENGTH = 2000;
+
+export type QuotePermanentDeleteActionResult =
+  | { ok: true; id: string }
+  | { ok: false; code: QuoteActionResultCode; message: string };
 
 async function resolveDeletingUser() {
   if (getAuthSource() !== "database") {
@@ -277,6 +287,53 @@ export async function restoreQuoteAction(input: {
     return result;
   } catch (err) {
     console.error("restoreQuoteAction: unexpected DB error", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * 15일을 기다리지 않고 휴지통의 견적서를 완전히 지운다. 되돌릴 수 없으므로 사유가
+ * 필수다. 휴지통에 있는 장만 지워진다 — 그 판정은 mutation 이 잠금 안에서 한다
+ * (mutations/quote-trash.ts 의 permanentlyDeleteQuote).
+ */
+export async function permanentlyDeleteQuoteAction(input: {
+  id: string;
+  expectedVersion: number;
+  reason: string;
+}): Promise<QuotePermanentDeleteActionResult> {
+  const auth = await resolveDeletingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  if (!isValidQuoteId(input?.id)) {
+    return { ok: false, code: "NOT_FOUND", message: "해당 견적서를 찾을 수 없습니다." };
+  }
+  if (!isValidExpectedVersion(input.expectedVersion)) {
+    return { ok: false, code: "CONFLICT", message: "최신 정보를 다시 불러온 뒤 시도해 주세요." };
+  }
+
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if (reason === "") {
+    return { ok: false, code: "VALIDATION_ERROR", message: "완전 삭제 사유를 입력해 주세요." };
+  }
+  if (reason.length > MAX_PURGE_REASON_LENGTH) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "완전 삭제 사유가 너무 깁니다." };
+  }
+
+  try {
+    const result = await permanentlyDeleteQuote({
+      quoteId: input.id,
+      expectedVersion: input.expectedVersion,
+      actorUserId: auth.actingUser.id,
+      reason,
+    });
+    if (!result.ok) return { ok: false, code: result.code, message: result.message };
+    return { ok: true, id: result.id };
+  } catch (err) {
+    // 오류 객체를 통째로 남기지 않고 코드만 남긴다 — 되돌릴 수 없는 조작의 실패라
+    // 사유(사람이 적은 글자)가 오류 문맥에 섞여 로그로 새지 않게 한다(actions/
+    // domestic-orders.ts 의 휴지통 액션과 같은 판단).
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+    console.error("permanentlyDeleteQuoteAction: unexpected DB error", { id: input.id, code });
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

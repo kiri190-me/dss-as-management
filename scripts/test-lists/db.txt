@@ -101,3 +101,4 @@ src/lib/db/queries/inventory-part-issue-requests.integration.test.ts
 src/lib/db/mutations/inventory-part-issue-requests.integration.test.ts
 src/lib/db/mutations/notification-acknowledgements.integration.test.ts
 src/lib/db/queries/approval-outcome-notifications.integration.test.ts
+src/lib/db/mutations/quote-trash.integration.test.ts

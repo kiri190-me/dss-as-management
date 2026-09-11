@@ -168,10 +168,11 @@ export function MasterDataDeleteDialog({
    *
    * 파일 머리말은 "규칙이 하나이므로 창도 하나"라고 적어 두었고 그 말은 지금도
    * 맞다 — 다만 **모든 휴지통이 같은 보관 규칙을 갖지는 않는다**는 것이 나중에
-   * 드러났다. 견적서는 자동 만료도 영구 삭제도 없다(mutations/quote-trash.ts).
+   * 드러났다. 보고서는 자동 만료도 영구 삭제도 없다(mutations/service-reports.ts).
    * 그 화면에서 기본 문장을 그대로 쓰면 창이 **사실이 아닌 말**을 하게 되고,
    * 그건 화면마다 문구가 다른 것보다 나쁘다. 그래서 규칙이 실제로 다른 곳만
-   * 자기 문장을 넘긴다.
+   * 자기 문장을 넘긴다. (견적서도 처음에는 그런 곳이었지만 2026-09-11 부터 다른
+   * 휴지통과 같은 15일 규칙이라 기본 문장을 쓴다 — mutations/quote-trash.ts.)
    */
   retentionNote?: ReactNode;
   reason: string;
@@ -240,6 +241,7 @@ export function MasterDataRestoreDialog({
   entityLabel,
   names,
   cascadeNote,
+  restoreNote,
   isSubmitting,
   submitError,
   onConfirm,
@@ -249,6 +251,17 @@ export function MasterDataRestoreDialog({
   entityLabel: string;
   names: string[];
   cascadeNote?: ReactNode;
+  /**
+   * 되살리면 무엇이 달라지는지. **넘기지 않으면 기본 문장**(목록에 다시 나타나고
+   * 접수·편집 화면에서 다시 고를 수 있다)이라, 이 인자가 생기기 전과 한 글자도
+   * 다르지 않다.
+   *
+   * 기본 문장은 고객사·제품 모델·부품처럼 **다른 화면에서 골라 쓰는 자료**의
+   * 말이다. 내자 정리 줄이나 견적서는 접수·편집 화면에서 고르는 대상이 아니라서
+   * 그 문장이 사실이 아니다 — 그런 곳만 자기 문장을 넘긴다(위 MasterDataDeleteDialog
+   * 의 retentionNote 와 같은 원칙).
+   */
+  restoreNote?: ReactNode;
   isSubmitting: boolean;
   submitError: string | null;
   onConfirm: () => void;
@@ -262,7 +275,7 @@ export function MasterDataRestoreDialog({
         선택한 {names.length}개의 {entityLabel}을(를) 복원하시겠습니까?
       </h2>
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        복원하면 목록에 다시 나타나고, 접수·편집 화면에서도 다시 고를 수 있게 됩니다.
+        {restoreNote ?? <>복원하면 목록에 다시 나타나고, 접수·편집 화면에서도 다시 고를 수 있게 됩니다.</>}
       </p>
       {cascadeNote && <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{cascadeNote}</div>}
 
