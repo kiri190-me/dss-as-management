@@ -46,6 +46,11 @@ import {
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
 import LoadingNotice from "@/components/domain/LoadingNotice";
+import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
 import InAppCamera from "./InAppCamera";
 import { uploadPreview } from "./shrink-image";
 import StoredAttachmentList from "./StoredAttachmentList";
@@ -320,10 +325,24 @@ function DatabaseFilesScreen({
     setStatusMessage(null);
   }
 
-  function togglePhotoSelected(id: string) {
-    setStagedPhotos((previous) =>
-      previous.map((photo) => (photo.id === id ? { ...photo, selected: !photo.selected } : photo))
-    );
+  /**
+   * 한 장 누르기와 Shift 로 사이를 한꺼번에 넣고 빼기(useShiftRangeSelection).
+   * 범위의 순서는 찍은 순서, 곧 격자에 그려진 순서다. 선택이 사진마다의
+   * 깃발(selected)이라 그 깃발을 직접 맞춘다.
+   */
+  const photoRangeSelection = useShiftRangeSelection({
+    orderedIds: stagedPhotos.map((photo) => photo.id),
+    isSelected: (id) => stagedPhotos.some((photo) => photo.id === id && photo.selected),
+    apply: (ids, checked) => {
+      const targets = new Set(ids);
+      setStagedPhotos((previous) =>
+        previous.map((photo) => (targets.has(photo.id) ? { ...photo, selected: checked } : photo))
+      );
+    },
+  });
+
+  function togglePhotoSelected(id: string, shiftKey: boolean) {
+    photoRangeSelection.toggle(id, shiftKey);
   }
 
   function setAllPhotosSelected(selected: boolean) {
@@ -788,12 +807,13 @@ function DatabaseFilesScreen({
                                 ? "border-zinc-900 dark:border-zinc-50"
                                 : "border-zinc-200 opacity-60 dark:border-zinc-800"
                             }`}
+                            onMouseDown={preventShiftClickTextSelection}
                           >
                             <input
                               type="checkbox"
                               checked={photo.selected}
                               disabled={isUploading}
-                              onChange={() => togglePhotoSelected(photo.id)}
+                              onChange={(event) => togglePhotoSelected(photo.id, shiftKeyOf(event))}
                               className="sr-only"
                             />
                             {/*

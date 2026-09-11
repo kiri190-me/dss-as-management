@@ -12,6 +12,11 @@ import {
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import { useMasterDataTrash, type MasterDataTrashTarget } from "@/lib/hooks/useMasterDataTrash";
 import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
+import {
   deleteProductModelsAction,
   permanentlyDeleteProductModelsAction,
   restoreProductModelsAction,
@@ -105,24 +110,6 @@ export default function ProductModelListScreen({
     return row.repairCaseCount === 0;
   }
 
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleTrashSelected(id: string) {
-    setTrashSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   // 지금 화면에 보이는(검색으로 걸러진) 행 중 고를 수 있는 것만이 전체 선택의
   // 대상이다 — 접수 건이 걸린 모델은 여기서도 빠진다.
   const selectableVisibleIds = useMemo(
@@ -130,6 +117,32 @@ export default function ProductModelListScreen({
     [filteredRows]
   );
   const selectedVisibleCount = selectableVisibleIds.filter((id) => selectedIds.has(id)).length;
+  const selectableVisibleIdSet = useMemo(() => new Set(selectableVisibleIds), [selectableVisibleIds]);
+
+  /**
+   * 한 건 누르기와 Shift 로 사이를 한꺼번에 고르기(useShiftRangeSelection).
+   * 범위의 순서는 검색으로 걸러진 지금 목록 그대로이고, 접수 건이 걸린 모델은
+   * 범위 안에 있어도 건너뛴다. 휴지통은 검색이 없으므로 휴지통 목록 순서다.
+   */
+  const rangeSelection = useShiftRangeSelection({
+    orderedIds: filteredRows.map((row) => row.id),
+    isSelectable: (id) => selectableVisibleIdSet.has(id),
+    selectedIds,
+    setSelectedIds,
+  });
+  const trashRangeSelection = useShiftRangeSelection({
+    orderedIds: trashRows.map((row) => row.id),
+    selectedIds: trashSelectedIds,
+    setSelectedIds: setTrashSelectedIds,
+  });
+
+  function toggleSelected(id: string, shiftKey: boolean) {
+    rangeSelection.toggle(id, shiftKey);
+  }
+
+  function toggleTrashSelected(id: string, shiftKey: boolean) {
+    trashRangeSelection.toggle(id, shiftKey);
+  }
 
   function toggleSelectAllVisible(nextChecked: boolean) {
     setSelectedIds((prev) => {
@@ -305,7 +318,8 @@ export default function ProductModelListScreen({
                               type="checkbox"
                               checked={selectedIds.has(row.id)}
                               disabled={!isDeletable(row)}
-                              onChange={() => toggleSelected(row.id)}
+                              onChange={(event) => toggleSelected(row.id, shiftKeyOf(event))}
+                              onMouseDown={preventShiftClickTextSelection}
                               aria-label={`${row.modelName} 선택`}
                               title={
                                 isDeletable(row)
@@ -368,13 +382,14 @@ export default function ProductModelListScreen({
                             ? undefined
                             : `연결된 A/S 접수 건이 ${row.repairCaseCount}건 있어 삭제할 수 없습니다`
                         }
+                        onMouseDown={preventShiftClickTextSelection}
                       >
                         <span className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={selectedIds.has(row.id)}
                             disabled={!isDeletable(row)}
-                            onChange={() => toggleSelected(row.id)}
+                            onChange={(event) => toggleSelected(row.id, shiftKeyOf(event))}
                             className="disabled:cursor-not-allowed"
                           />
                           <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.modelName}</span>
@@ -496,7 +511,8 @@ function ProductModelTrashTab({
   rows: DeletedProductModelRow[];
   selectedIds: Set<string>;
   selectedCount: number;
-  onToggleSelected: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelected: (id: string, shiftKey: boolean) => void;
   onToggleSelectAll: (nextChecked: boolean) => void;
   onClearSelection: () => void;
   onRequestRestore: (ids: string[]) => void;
@@ -578,7 +594,8 @@ function ProductModelTrashTab({
                     <input
                       type="checkbox"
                       checked={selectedIds.has(row.id)}
-                      onChange={() => onToggleSelected(row.id)}
+                      onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
+                      onMouseDown={preventShiftClickTextSelection}
                       aria-label={`${row.modelName} 선택`}
                     />
                   </td>
@@ -623,11 +640,11 @@ function ProductModelTrashTab({
                 key={row.id}
                 className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2" onMouseDown={preventShiftClickTextSelection}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(row.id)}
-                    onChange={() => onToggleSelected(row.id)}
+                    onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
                   />
                   <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.modelName}</span>
                   <span className="ml-auto">

@@ -28,3 +28,6 @@ src/components/users/approval-route-section.test.ts
 src/components/quotes/QuoteListScreen.test.ts
 src/components/domestic-orders/domestic-order-trash.test.ts
 src/components/quotes/quote-edit-work-scope-suppression.test.ts
+src/lib/domain/range-selection.test.ts
+src/lib/hooks/useShiftRangeSelection.test.ts
+src/components/common/shift-range-selection-screens.test.ts

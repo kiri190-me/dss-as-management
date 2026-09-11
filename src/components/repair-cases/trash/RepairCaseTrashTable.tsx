@@ -2,6 +2,7 @@ import type { TrashedRepairCase } from "@/lib/db/mappers/repair-case";
 import { StatusBadge } from "../badges";
 import RepairCaseTrashRetentionBadge from "./RepairCaseTrashRetentionBadge";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
+import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 const thBaseClass =
   "border-b border-zinc-200 bg-white px-3 py-2 text-left text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
@@ -27,7 +28,8 @@ export default function RepairCaseTrashTable({
 }: {
   rows: TrashedRepairCase[];
   selectedIds: ReadonlySet<string>;
-  onToggleSelect: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelect: (id: string, shiftKey: boolean) => void;
   /** 체크박스 열 머리글의 전체 선택. 휴지통에는 고를 수 없는 행이 없으므로 대상은 늘 rows 전부다. */
   onToggleSelectAll: (nextChecked: boolean) => void;
   onRestoreOne: (id: string) => void;
@@ -70,7 +72,8 @@ export default function RepairCaseTrashTable({
                   type="checkbox"
                   aria-label={`${row.intakeNumber} 선택`}
                   checked={selectedIds.has(row.id)}
-                  onChange={() => onToggleSelect(row.id)}
+                  onChange={(event) => onToggleSelect(row.id, shiftKeyOf(event))}
+                  onMouseDown={preventShiftClickTextSelection}
                   className="h-4 w-4"
                 />
               </td>

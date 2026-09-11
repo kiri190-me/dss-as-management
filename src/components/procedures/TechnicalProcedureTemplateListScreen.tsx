@@ -13,6 +13,11 @@ import {
 } from "@/components/common/master-data-trash-dialogs";
 import { useMasterDataTrash, type MasterDataTrashTarget } from "@/lib/hooks/useMasterDataTrash";
 import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
+import {
   deleteProcedureTemplatesAction,
   permanentlyDeleteProcedureTemplatesAction,
   restoreProcedureTemplatesAction,
@@ -105,13 +110,26 @@ export default function TechnicalProcedureTemplateListScreen({
   );
   const selectedSelectableCount = selectableIds.filter((id) => selectedIds.has(id)).length;
 
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  /**
+   * 한 건 누르기와 Shift 로 사이를 한꺼번에 고르기(useShiftRangeSelection).
+   * 이 목록은 검색·페이지가 없어 범위의 순서는 templates 그대로이고, 수행
+   * 기록·후속 버전이 있어 막힌 절차는 범위 안에 있어도 건너뛴다. 휴지통도
+   * 휴지통 목록 순서 그대로다.
+   */
+  const rangeSelection = useShiftRangeSelection({
+    orderedIds: templates.map((t) => t.id),
+    isSelectable: (id) => !undeletable.has(id),
+    selectedIds,
+    setSelectedIds,
+  });
+  const trashRangeSelection = useShiftRangeSelection({
+    orderedIds: trashTemplates.map((t) => t.id),
+    selectedIds: trashSelectedIds,
+    setSelectedIds: setTrashSelectedIds,
+  });
+
+  function toggleSelected(id: string, shiftKey: boolean) {
+    rangeSelection.toggle(id, shiftKey);
   }
 
   function toggleSelectAll(nextChecked: boolean) {
@@ -196,14 +214,7 @@ export default function TechnicalProcedureTemplateListScreen({
         <ProcedureTrashTab
           rows={trashTemplates}
           selectedIds={trashSelectedIds}
-          onToggleSelected={(id) =>
-            setTrashSelectedIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            })
-          }
+          onToggleSelected={trashRangeSelection.toggle}
           onToggleSelectAll={(nextChecked) =>
             setTrashSelectedIds(nextChecked ? new Set(trashTemplates.map((t) => t.id)) : new Set())
           }
@@ -307,7 +318,8 @@ export default function TechnicalProcedureTemplateListScreen({
                                 type="checkbox"
                                 checked={selectedIds.has(t.id)}
                                 disabled={blocked}
-                                onChange={() => toggleSelected(t.id)}
+                                onChange={(event) => toggleSelected(t.id, shiftKeyOf(event))}
+                                onMouseDown={preventShiftClickTextSelection}
                                 aria-label={blocked ? `${t.name} — ${UNDELETABLE_REASON}` : `${t.name} 선택`}
                                 title={blocked ? UNDELETABLE_REASON : undefined}
                                 className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
@@ -390,13 +402,14 @@ export default function TechnicalProcedureTemplateListScreen({
                             blocked ? "cursor-not-allowed opacity-50" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                           }`}
                           title={blocked ? UNDELETABLE_REASON : undefined}
+                          onMouseDown={preventShiftClickTextSelection}
                         >
                           <span className="flex items-center gap-2">
                             <input
                               type="checkbox"
                               checked={selectedIds.has(t.id)}
                               disabled={blocked}
-                              onChange={() => toggleSelected(t.id)}
+                              onChange={(event) => toggleSelected(t.id, shiftKeyOf(event))}
                               aria-label={blocked ? `${t.name} — ${UNDELETABLE_REASON}` : `${t.name} 선택`}
                               className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
                             />
@@ -490,7 +503,8 @@ function ProcedureTrashTab({
 }: {
   rows: DeletedProcedureTemplateRow[];
   selectedIds: Set<string>;
-  onToggleSelected: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelected: (id: string, shiftKey: boolean) => void;
   onToggleSelectAll: (nextChecked: boolean) => void;
   onClearSelection: () => void;
   onRequestRestore: (ids: string[]) => void;
@@ -574,7 +588,8 @@ function ProcedureTrashTab({
                     <input
                       type="checkbox"
                       checked={selectedIds.has(row.id)}
-                      onChange={() => onToggleSelected(row.id)}
+                      onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
+                      onMouseDown={preventShiftClickTextSelection}
                       aria-label={`${row.name} 선택`}
                       className="h-4 w-4"
                     />
@@ -631,11 +646,11 @@ function ProcedureTrashTab({
                 key={row.id}
                 className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2" onMouseDown={preventShiftClickTextSelection}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(row.id)}
-                    onChange={() => onToggleSelected(row.id)}
+                    onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
                     className="h-4 w-4"
                   />
                   <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.name}</span>

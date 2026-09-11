@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 type RepairCaseCardListProps = {
   rows: EffectiveRepairCase[];
@@ -12,7 +13,8 @@ type RepairCaseCardListProps = {
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   selectableIds?: ReadonlySet<string>;
-  onToggleSelect?: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 표와 같은 부모 훅이 범위를 고른다. */
+  onToggleSelect?: (id: string, shiftKey: boolean) => void;
 };
 
 /**
@@ -58,7 +60,8 @@ export default function RepairCaseCardList({
                     aria-label={`${row.intakeNumber} 선택`}
                     checked={selectedIds?.has(row.id) ?? false}
                     disabled={!(selectableIds?.has(row.id) ?? false)}
-                    onChange={() => onToggleSelect?.(row.id)}
+                    onChange={(event) => onToggleSelect?.(row.id, shiftKeyOf(event))}
+                    onMouseDown={preventShiftClickTextSelection}
                     className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                 </span>

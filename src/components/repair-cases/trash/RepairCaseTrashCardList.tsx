@@ -2,6 +2,7 @@ import type { TrashedRepairCase } from "@/lib/db/mappers/repair-case";
 import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import { StatusBadge } from "../badges";
 import RepairCaseTrashRetentionBadge from "./RepairCaseTrashRetentionBadge";
+import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 /**
  * Mobile/narrow 휴지통 card list — same `lg:hidden` breakpoint as
@@ -20,7 +21,8 @@ export default function RepairCaseTrashCardList({
 }: {
   rows: TrashedRepairCase[];
   selectedIds: ReadonlySet<string>;
-  onToggleSelect: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 표와 같은 부모 훅이 범위를 고른다. */
+  onToggleSelect: (id: string, shiftKey: boolean) => void;
   onRestoreOne: (id: string) => void;
   /** Repair Case Permanent Delete checkpoint — SUPER_ADMIN/ADMIN only (canPermanentlyDeleteRepairCases), same role set as the trash tab itself today but checked as its own explicit prop. */
   canPermanentlyDelete: boolean;
@@ -39,7 +41,8 @@ export default function RepairCaseTrashCardList({
                 type="checkbox"
                 aria-label={`${row.intakeNumber} 선택`}
                 checked={selectedIds.has(row.id)}
-                onChange={() => onToggleSelect(row.id)}
+                onChange={(event) => onToggleSelect(row.id, shiftKeyOf(event))}
+                onMouseDown={preventShiftClickTextSelection}
                 className="h-4 w-4"
               />
               <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.intakeNumber}</span>

@@ -18,6 +18,11 @@ import {
 } from "@/components/common/master-data-trash-dialogs";
 import { useMasterDataTrash, type MasterDataTrashTarget } from "@/lib/hooks/useMasterDataTrash";
 import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
+import {
   deletePartsAction,
   permanentlyDeletePartsAction,
   restorePartsAction,
@@ -111,14 +116,28 @@ export default function InventoryListScreen({
     [filtered]
   );
   const selectedVisibleCount = selectableVisibleIds.filter((id) => selectedIds.has(id)).length;
+  const selectableVisibleIdSet = useMemo(() => new Set(selectableVisibleIds), [selectableVisibleIds]);
 
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  /**
+   * 한 건 누르기와 Shift 로 사이를 한꺼번에 고르기(useShiftRangeSelection).
+   * 범위의 순서는 검색·분류로 걸러진 지금 목록 그대로이고, 입출고 이력·부품
+   * 요청이 걸린 부품은 범위 안에 있어도 건너뛴다. 휴지통은 검색이 없으므로
+   * 휴지통 목록 순서다.
+   */
+  const rangeSelection = useShiftRangeSelection({
+    orderedIds: filtered.map((p) => p.id),
+    isSelectable: (id) => selectableVisibleIdSet.has(id),
+    selectedIds,
+    setSelectedIds,
+  });
+  const trashRangeSelection = useShiftRangeSelection({
+    orderedIds: trashParts.map((p) => p.id),
+    selectedIds: trashSelectedIds,
+    setSelectedIds: setTrashSelectedIds,
+  });
+
+  function toggleSelected(id: string, shiftKey: boolean) {
+    rangeSelection.toggle(id, shiftKey);
   }
 
   function toggleSelectAllVisible(nextChecked: boolean) {
@@ -214,14 +233,7 @@ export default function InventoryListScreen({
           <PartTrashTab
             rows={trashParts}
             selectedIds={trashSelectedIds}
-            onToggleSelected={(id) =>
-              setTrashSelectedIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                return next;
-              })
-            }
+            onToggleSelected={trashRangeSelection.toggle}
             // 휴지통은 검색도 페이지 나눔도 없으므로 '보이는 것'이 곧 전부다.
             onToggleSelectAll={(nextChecked) =>
               setTrashSelectedIds(nextChecked ? new Set(trashParts.map((p) => p.id)) : new Set())
@@ -424,7 +436,8 @@ function PartTrashTab({
 }: {
   rows: DeletedPartRow[];
   selectedIds: Set<string>;
-  onToggleSelected: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelected: (id: string, shiftKey: boolean) => void;
   onToggleSelectAll: (nextChecked: boolean) => void;
   onClearSelection: () => void;
   onRequestRestore: (ids: string[]) => void;
@@ -505,7 +518,8 @@ function PartTrashTab({
                     <input
                       type="checkbox"
                       checked={selectedIds.has(row.id)}
-                      onChange={() => onToggleSelected(row.id)}
+                      onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
+                      onMouseDown={preventShiftClickTextSelection}
                       aria-label={`${row.partName} 선택`}
                       className="h-4 w-4"
                     />
@@ -549,11 +563,11 @@ function PartTrashTab({
                 key={row.id}
                 className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2" onMouseDown={preventShiftClickTextSelection}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(row.id)}
-                    onChange={() => onToggleSelected(row.id)}
+                    onChange={(event) => onToggleSelected(row.id, shiftKeyOf(event))}
                     className="h-4 w-4"
                   />
                   <span className="font-semibold text-zinc-900 dark:text-zinc-50">{row.partName}</span>
@@ -626,7 +640,8 @@ function PartCard({
   availability: Partial<Record<StockOwner, number>> | undefined;
   selectionMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 표와 같은 부모 훅이 범위를 고른다. */
+  onToggleSelect?: (id: string, shiftKey: boolean) => void;
 }) {
   const isEmpty = part.totalQuantity === 0;
   // 이력이 걸린 부품은 지울 수 없다 — 고를 수도 없어야 한다(표와 같은 기준).
@@ -649,7 +664,8 @@ function PartCard({
                 type="checkbox"
                 checked={isSelected}
                 disabled={!isDeletable}
-                onChange={() => onToggleSelect?.(part.id)}
+                onChange={(event) => onToggleSelect?.(part.id, shiftKeyOf(event))}
+                onMouseDown={preventShiftClickTextSelection}
                 aria-label={
                   isDeletable
                     ? `${part.partName} 선택`
@@ -772,7 +788,8 @@ function PartTable({
   selectedIds?: ReadonlySet<string>;
   selectableCount?: number;
   selectedVisibleCount?: number;
-  onToggleSelect?: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelect?: (id: string, shiftKey: boolean) => void;
   onToggleSelectAll?: (nextChecked: boolean) => void;
 }) {
   return (
@@ -843,7 +860,8 @@ function PartTable({
                     type="checkbox"
                     checked={selectedIds?.has(p.id) ?? false}
                     disabled={p.hasLedgerHistory}
-                    onChange={() => onToggleSelect?.(p.id)}
+                    onChange={(event) => onToggleSelect?.(p.id, shiftKeyOf(event))}
+                    onMouseDown={preventShiftClickTextSelection}
                     // 이유를 이름에 넣어 둔다 — 화면을 보지 않는 사람에게는
                     // tooltip이 존재하지 않는 것과 같다.
                     aria-label={

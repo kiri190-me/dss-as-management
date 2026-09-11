@@ -31,6 +31,7 @@ import RepairCaseTrashTable from "./trash/RepairCaseTrashTable";
 import RepairCaseTrashCardList from "./trash/RepairCaseTrashCardList";
 import RepairCaseTrashActionBar from "./trash/RepairCaseTrashActionBar";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
+import { useShiftRangeSelection } from "@/lib/hooks/useShiftRangeSelection";
 import RepairCaseRestoreDialog from "./trash/RepairCaseRestoreDialog";
 import { restoreRepairCasesAction } from "@/lib/server/actions/restore-repair-cases";
 import RepairCasePermanentDeleteDialog from "./trash/RepairCasePermanentDeleteDialog";
@@ -291,16 +292,21 @@ export default function RepairCaseListPage({
   const versionById = useMemo(() => new Map(sortedRows.map((r) => [r.id, r.version])), [sortedRows]);
   const intakeNumberById = useMemo(() => new Map(sortedRows.map((r) => [r.id, r.intakeNumber])), [sortedRows]);
 
-  function handleToggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+  /**
+   * 한 건 누르기와 Shift 로 사이를 한꺼번에 고르기(useShiftRangeSelection).
+   * 범위의 순서는 **지금 이 페이지에 그려진 순서**(pagedRows)다 — 표와 카드가
+   * 같은 순서로 그리고, 페이지를 넘나드는 범위는 만들지 않는다. 로컬 임시
+   * 접수 건처럼 고를 수 없는 행은 범위 안에 있어도 건너뛴다.
+   */
+  const rangeSelection = useShiftRangeSelection({
+    orderedIds: pagedRows.map((row) => row.id),
+    isSelectable: (id) => selectableIds.has(id),
+    selectedIds,
+    setSelectedIds,
+  });
+
+  function handleToggleSelect(id: string, shiftKey: boolean) {
+    rangeSelection.toggle(id, shiftKey);
   }
 
   /**
@@ -412,16 +418,15 @@ export default function RepairCaseListPage({
     [trashCases]
   );
 
-  function handleToggleTrashSelect(id: string) {
-    setTrashSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+  // 휴지통은 페이지를 나누지 않으므로 범위의 순서는 휴지통 목록 그대로다.
+  const trashRangeSelection = useShiftRangeSelection({
+    orderedIds: trashCases.map((row) => row.id),
+    selectedIds: trashSelectedIds,
+    setSelectedIds: setTrashSelectedIds,
+  });
+
+  function handleToggleTrashSelect(id: string, shiftKey: boolean) {
+    trashRangeSelection.toggle(id, shiftKey);
   }
 
   function handleClearTrashSelection() {

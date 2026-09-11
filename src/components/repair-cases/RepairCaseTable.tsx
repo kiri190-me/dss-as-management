@@ -5,6 +5,7 @@ import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
+import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 type RepairCaseTableProps = {
   rows: EffectiveRepairCase[];
@@ -23,7 +24,8 @@ type RepairCaseTableProps = {
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   selectableIds?: ReadonlySet<string>;
-  onToggleSelect?: (id: string) => void;
+  /** shiftKey — Shift 를 누른 채 눌렀는가. 범위 고르기는 부모의 useShiftRangeSelection 이 한다. */
+  onToggleSelect?: (id: string, shiftKey: boolean) => void;
   /**
    * 체크박스 열 머리글의 전체 선택. 대상은 **지금 이 표에 그려진 행**(= 이
    * 페이지)이고, 그중 고를 수 있는 것만이다 — 보이지 않는 페이지까지 딸려
@@ -226,7 +228,8 @@ export default function RepairCaseTable({
                     aria-label={`${row.intakeNumber} 선택`}
                     checked={selectedIds?.has(row.id) ?? false}
                     disabled={!(selectableIds?.has(row.id) ?? false)}
-                    onChange={() => onToggleSelect?.(row.id)}
+                    onChange={(event) => onToggleSelect?.(row.id, shiftKeyOf(event))}
+                    onMouseDown={preventShiftClickTextSelection}
                     className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                 </td>

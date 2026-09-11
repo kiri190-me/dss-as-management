@@ -41,6 +41,12 @@ import {
   formatPreviewBackfillProgress,
   shouldOfferManualPreviewRebuild,
 } from "./preview-backfill";
+import { setIdsCheckedInList } from "@/lib/domain/range-selection";
+import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
 import { fetchAttachmentBlob, saveBlobAs, uploadPreview } from "./shrink-image";
 import { createStoredZip, uniqueEntryNames } from "./zip-store";
 
@@ -535,10 +541,20 @@ export default function StoredAttachmentList({
     [selected]
   );
 
-  function toggle(id: string) {
-    setSelectedIds((previous) =>
-      previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id]
-    );
+  /**
+   * 한 개 누르기와 Shift 로 사이를 한꺼번에 고르기(useShiftRangeSelection).
+   * 범위의 순서는 조건에 맞아 **지금 보이는 순서**(visible)다 — 표·카드·격자가
+   * 모두 같은 순서로 그리므로 어느 보기에서 눌러도 같은 범위가 잡힌다. 조건에
+   * 가려진 것은 범위에 들어가지 않는다(위 visible 주석과 같은 이유).
+   */
+  const rangeSelection = useShiftRangeSelection({
+    orderedIds: visible.map((item) => item.id),
+    isSelected: (id) => selectedIds.includes(id),
+    apply: (ids, checked) => setSelectedIds((previous) => setIdsCheckedInList(previous, ids, checked)),
+  });
+
+  function toggle(id: string, shiftKey: boolean) {
+    rangeSelection.toggle(id, shiftKey);
   }
 
   function toggleAll() {
@@ -853,7 +869,8 @@ export default function StoredAttachmentList({
                 <input
                   type="checkbox"
                   checked={selectedIds.includes(item.id)}
-                  onChange={() => toggle(item.id)}
+                  onChange={(event) => toggle(item.id, shiftKeyOf(event))}
+                  onMouseDown={preventShiftClickTextSelection}
                   disabled={isBusy}
                   aria-label={`${item.originalFileName} 선택`}
                   className="h-4 w-4"
@@ -967,7 +984,8 @@ export default function StoredAttachmentList({
             <input
               type="checkbox"
               checked={selectedIds.includes(item.id)}
-              onChange={() => toggle(item.id)}
+              onChange={(event) => toggle(item.id, shiftKeyOf(event))}
+              onMouseDown={preventShiftClickTextSelection}
               disabled={isBusy}
               aria-label={`${item.originalFileName} 선택`}
               className="mt-1 h-5 w-5 shrink-0"
@@ -1114,7 +1132,8 @@ export default function StoredAttachmentList({
               <Thumbnail item={item} size="large" onOpen={openViewer} />
               <button
                 type="button"
-                onClick={() => toggle(item.id)}
+                onClick={(event) => toggle(item.id, shiftKeyOf(event))}
+                onMouseDown={preventShiftClickTextSelection}
                 disabled={isBusy}
                 aria-pressed={isSelected}
                 aria-label={`${item.originalFileName} 선택`}
