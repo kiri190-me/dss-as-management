@@ -26,6 +26,7 @@ import {
   filterRepairCaseLinkOptions,
   keepSelectedRepairCaseOption,
 } from "@/lib/domain/repair-case-link-search";
+import { selectQuoteLinkChoices } from "@/lib/domain/quote-link-options";
 import type {
   CustomerOption,
   DomesticOrderListItem,
@@ -168,8 +169,16 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
  * 연결할 수 있는 견적서 하나. `summaryLine` 은 목록 한 줄 그대로다
  * (domain/quote-list.ts) — 번호만 보여 주면 같은 모델의 여러 장 중 어느
  * 것인지 가릴 수 없다.
+ *
+ * `repairCaseId` 는 그 견적서가 붙은 수리 건이다(NULL = 붙은 건 없음). 드롭다운은
+ * **폼에서 지금 고른 수리 건의 견적서만** 후보로 남긴다(아래 quoteChoices).
  */
-export type QuoteOption = { id: string; summaryLine: string; quoteDate: string };
+export type QuoteOption = {
+  id: string;
+  summaryLine: string;
+  quoteDate: string;
+  repairCaseId: string | null;
+};
 
 const textAreaClass = `${editInputClass} min-h-20 resize-y`;
 
@@ -359,6 +368,36 @@ export default function DomesticOrderEditForm({
     () => keepSelectedRepairCaseOption(repairCaseOptions, matchedRepairCases, repairCaseId),
     [repairCaseOptions, matchedRepairCases, repairCaseId]
   );
+
+  /**
+   * 견적서 드롭다운의 후보 — **지금 고른 수리 건의 견적서만**이다(2026-09-11).
+   * 무엇이 남는지 정하는 규칙은 domain/quote-link-options.ts 에 있다.
+   *
+   * 🔴 지금 연결된 견적서는 다른 건의 것이어도 남는다. 수리 건을 바꿨다고
+   * 연결을 조용히 풀지 않는다 — 풀면 "견적서를 따르던" 번호·발행일·금액이
+   * 저장 한 번에 손으로 적어 둔 옛 값으로 되돌아가는데, 화면에서는 수리 건만
+   * 바꿨으니 그 일이 일어났다는 것을 알 길이 없다. 대신 그 항목에 표시를 달고
+   * 경고를 띄워(아래 견적서 연결 칸), 풀지 말지는 사람이 정하게 한다.
+   */
+  const quoteChoices = useMemo(
+    () => selectQuoteLinkChoices(quoteOptions, repairCaseId, quoteId),
+    [quoteOptions, repairCaseId, quoteId]
+  );
+
+  /**
+   * 붙잡아 둔(고른 수리 건의 것이 아닌) 견적서 항목 앞에 붙일 말. 요약 줄
+   * **앞**에 둔다 — 요약 줄이 길어 select 가 뒤를 자르므로 뒤에 달면 안 보인다.
+   *
+   * 그 견적서가 붙은 건의 인수번호를 고르개 목록에서 찾아 적는다. 휴지통에 든
+   * 건은 거기 없으므로 인수번호 없이 적는다 — 없는 번호를 지어내지 않는다.
+   */
+  function outsideQuotePrefix(option: QuoteOption): string {
+    if (option.repairCaseId === null) return "(수리 건 없는 견적서)";
+    const intakeNumber = repairCaseOptions.find(
+      (candidate) => candidate.id === option.repairCaseId
+    )?.intakeNumber;
+    return intakeNumber ? `(다른 수리 건 ${intakeNumber})` : "(다른 수리 건)";
+  }
 
   /**
    * 흐린 글씨의 출처 — **지금 고른 수리 건**이다.
@@ -886,13 +925,46 @@ export default function DomesticOrderEditForm({
                 손으로 적어 둔 값은 지우지 않으므로, 연결을 풀면 다시 보인다
                 (schema/domestic-orders.ts 의 quote_id 주석). */}
             <option value="">연결 없음 (아래 칸에 직접 적습니다)</option>
-            {quoteOptions.map((option) => (
+            {/* 후보는 지금 고른 수리 건의 견적서뿐이다(quoteChoices). 다른 건의
+                것이 하나 섞여 있다면 그것은 **지금 연결된 견적서**다 — 빼면
+                select 가 '연결 없음'을 보여 주면서 상태에는 연결이 남는다.
+                그래서 남기되 앞에 표시를 단다. */}
+            {quoteChoices.visible.map((option) => (
               <option key={option.id} value={option.id}>
-                {option.summaryLine}
+                {quoteChoices.selectedOutsideRepairCase && option.id === quoteId
+                  ? `${outsideQuotePrefix(option)} ${option.summaryLine}`
+                  : option.summaryLine}
               </option>
             ))}
           </select>
           {fieldErrors.quoteId && <p className={editErrorClass}>{fieldErrors.quoteId}</p>}
+          {/* 후보가 비어 있는 까닭을 말해 준다. 이 말이 없으면 '연결 없음'
+              하나만 남은 목록이 "견적서가 사라졌다"로 읽힌다. 수리 건 연결의
+              '맞는 수리 건이 없습니다'와 같은 이유다. */}
+          {repairCaseId === "" ? (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              수리 건을 먼저 고르면 그 건의 견적서가 나옵니다.
+            </p>
+          ) : (
+            quoteChoices.sameRepairCase.length === 0 && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                이 수리 건에 만든 견적서가 없습니다.
+              </p>
+            )
+          )}
+          {/* 🔴 수리 건을 바꿨거나 옛 줄이 다른 건의 견적서를 물고 있을 때.
+              연결은 풀지 않고(quoteChoices 주석) 사실만 알린다 — 그대로
+              저장하면 이 연결이 남는다는 것까지 적어야, 경고를 보고도 "저장하면
+              알아서 정리되겠지"로 넘기지 않는다. 수리 건을 안 고른 줄은 '이
+              수리 건'이 없으므로 이 경고 대신 위 안내 한 줄만 보인다. */}
+          {repairCaseId !== "" && quoteChoices.selectedOutsideRepairCase && (
+            <p className="text-xs text-amber-800 dark:text-amber-300" role="status">
+              고른 견적서가 이 수리 건의 것이 아닙니다. 그대로 저장하면 이 연결이 남습니다 —{" "}
+              {quoteChoices.sameRepairCase.length > 0
+                ? "이 건의 견적서를 고르거나 ‘연결 없음’으로 바꾸세요."
+                : "풀려면 ‘연결 없음’으로 바꾸세요."}
+            </p>
+          )}
           {quoteId && (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               견적서번호 · 견적발행일 · 금액은 연결된 견적서를 따릅니다. 아래 칸에 적은 값은 지워지지 않고, 연결을 풀면 다시 보입니다.

@@ -198,4 +198,5 @@ src/lib/auth/approval-assignment.test.ts
 src/lib/validation/inventory-part-issue-input.test.ts
 src/lib/domain/notification-acknowledgement.test.ts
 src/lib/domain/quote-repair-task-selection.test.ts
+src/lib/domain/quote-link-options.test.ts
 scripts/test-lists/test-list-registration.test.ts

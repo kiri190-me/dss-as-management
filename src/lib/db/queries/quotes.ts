@@ -632,13 +632,18 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
  * 목록 한 줄을 그대로 준다 — 사람이 고를 때 보는 것이 `DSS 2026-077 ICD
  * CFK300FH-IC2 …` 이고, 번호만 보여 주면 같은 모델의 여러 장 중 어느 것인지
  * 가릴 수 없다(domain/quote-list.ts).
+ *
+ * `repairCaseId` 는 글자로 그리는 값이 아니다 — 폼이 **지금 고른 수리 건의
+ * 견적서만** 후보로 남기는 데 쓴다(domain/quote-link-options.ts). NULL 이면
+ * 수리 건이 붙지 않은 견적서라 어느 건의 후보에도 뜨지 않는다.
  */
 export async function listQuoteOptions(): Promise<
-  { id: string; summaryLine: string; quoteDate: string }[]
+  { id: string; summaryLine: string; quoteDate: string; repairCaseId: string | null }[]
 > {
   const rows = await db
     .select({
       id: quotes.id,
+      repairCaseId: quotes.repairCaseId,
       quoteNumber: quotes.quoteNumber,
       quoteDate: quotes.quoteDate,
       customerNameText: quotes.customerNameText,
@@ -654,6 +659,7 @@ export async function listQuoteOptions(): Promise<
   return rows.map((row) => ({
     id: row.id,
     quoteDate: row.quoteDate,
+    repairCaseId: row.repairCaseId,
     summaryLine: buildQuoteSummaryLine({
       quoteNumber: row.quoteNumber,
       customerName: row.customerNameText,
