@@ -2,19 +2,29 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
+  APPROVAL_REJECTION_REASON_PREVIEW_LENGTH,
   DELETED_REPAIR_CASE_SUBJECT,
   NOTIFICATION_KINDS,
+  PART_ISSUE_APPROVAL_LABEL,
+  approvalOutcomeNotificationWindowStart,
+  buildApprovalGrantedNotification,
   buildApprovalNotification,
+  buildApprovalRejectedNotification,
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
+  previewApprovalRejectionReason,
+  type ApprovalOutcomeTarget,
   type NotificationItem,
 } from "./notifications";
 import { inventoryPartRequestStatusLabels, stockOwnerLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
+import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
+import { checkNotificationAcknowledgementKey } from "./notification-acknowledgement";
 
 test("결재 알림은 인수번호와 승인 종류 라벨을 내고, 검수/승인 화면으로 바로 링크한다", () => {
   const item = buildApprovalNotification({
@@ -96,7 +106,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·새 수리 의뢰·불출 승인 대기 다섯이다", () => {
+test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·새 수리 의뢰·불출 승인 대기·승인 완료·반려됨 일곱이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -122,6 +132,11 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
   // listPartIssueRequestsPendingMyApproval(지정 관문 mayDecideAssignedApproval —
   // 그 단계에 지정된 사람과 최고관리자). 결재 요청과 같은 (가)형이라 역할로
   // 거르지 않는다(아래 레지스트리 시험이 그것을 못 박는다).
+  //
+  // APPROVAL_GRANTED·APPROVAL_REJECTED는 판정을 새로 세웠다: **요청자 본인**
+  // (queries/approval-outcome-notifications.ts 의 `requested_by_user_id = 나`). 남의
+  // 결재 결과를 요구할 입구가 없고, 역할로 거르지 않는 (가)형이다. 할 일이 아니라
+  // 정보성이라 눌러서 확인하면 사라진다(domain/notification-acknowledgement.ts).
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
     [
@@ -130,6 +145,8 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
       "PART_STOCK_BELOW_MINIMUM",
       "CUSTOMER_REPAIR_REQUEST_NEW",
       "PART_ISSUE_APPROVAL_PENDING",
+      "APPROVAL_GRANTED",
+      "APPROVAL_REJECTED",
     ]
   );
 });
@@ -433,5 +450,209 @@ test("🔴 불출 승인 대기는 판정을 새로 적지 않고 [승인 요청
     registrySource,
     /import \{[^}]*\blistPartIssueRequestsPendingMyApproval\b[^}]*\} from "\.\/inventory-part-issue-requests"/,
     "[승인 요청건] 탭이 쓰는 그 파일의 조회여야 한다"
+  );
+});
+
+// ═════════════════════════════════════ 결재 결과 — 승인 완료 · 반려됨
+
+const CASE_ID = "11111111-1111-4111-8111-111111111111";
+const CASE_APPROVAL_ID = "22222222-2222-4222-8222-222222222222";
+const ISSUE_APPROVAL_ID = "33333333-3333-4333-8333-333333333333";
+const PART_REQUEST_ID = "44444444-4444-4444-8444-444444444444";
+
+function caseTarget(approvalType: "REPAIR_INSPECTION" | "FINAL_SHIPMENT" = "FINAL_SHIPMENT"): ApprovalOutcomeTarget {
+  return {
+    source: "REPAIR_CASE",
+    approvalId: CASE_APPROVAL_ID,
+    repairCaseId: CASE_ID,
+    intakeNumber: "D2609012",
+    approvalType,
+  };
+}
+
+function issueTarget(overrides: Partial<Extract<ApprovalOutcomeTarget, { source: "PART_ISSUE" }>> = {}): ApprovalOutcomeTarget {
+  return {
+    source: "PART_ISSUE",
+    approvalId: ISSUE_APPROVAL_ID,
+    partRequestId: null,
+    intakeNumber: null,
+    destinationNote: null,
+    ...overrides,
+  };
+}
+
+test("부품 불출 결재의 이름은 용도 이름표에서 만든 「부품 불출 승인」이다 — 글자를 새로 쓰지 않는다", () => {
+  assert.equal(PART_ISSUE_APPROVAL_LABEL, "부품 불출 승인");
+  assert.ok(PART_ISSUE_APPROVAL_LABEL.startsWith(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE));
+});
+
+test("창은 7일이고 결정 시각으로 잰다 — 시작 시각은 지금에서 정확히 7일 전이다", () => {
+  assert.equal(APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, 7);
+  const now = new Date("2026-09-11T12:00:00.000Z");
+  assert.equal(approvalOutcomeNotificationWindowStart(now).toISOString(), "2026-09-04T12:00:00.000Z");
+});
+
+test("승인 완료(검수·출하) — 인수번호를 굵게, 결재 이름·결정자를 detail 에, 검수/승인 화면으로 링크한다", () => {
+  for (const approvalType of ["REPAIR_INSPECTION", "FINAL_SHIPMENT"] as const) {
+    const item = buildApprovalGrantedNotification({ ...caseTarget(approvalType), decidedByName: "김결재" });
+    assert.equal(item.kind, "APPROVAL_GRANTED");
+    assert.equal(item.id, `APPROVAL_GRANTED:rca:${CASE_APPROVAL_ID}`);
+    assert.equal(item.targetKey, item.id, "사건 하나가 한 건이다 — 접수 건으로 묶지 않는다");
+    assert.equal(item.subject, "D2609012");
+    assert.equal(item.detail, `${APPROVAL_TYPE_LABELS[approvalType]} · 김결재`);
+    assert.ok(!item.detail.includes("승인 완료"), "종류 이름은 패널이 윗줄에 따로 적는다");
+    assert.equal(item.href, repairCaseDetailHrefs(CASE_ID).approval);
+  }
+});
+
+test("승인 완료(부품 불출) — 인수번호 → 사용처 → 삭제된 접수 건 순으로 굵게 적고, [승인 요청건] 탭으로 링크한다", () => {
+  const withCase = buildApprovalGrantedNotification({
+    ...issueTarget({ intakeNumber: "D2609013", destinationNote: "상해수리소" }),
+    decidedByName: "박승인",
+  });
+  assert.equal(withCase.id, `APPROVAL_GRANTED:pia:${ISSUE_APPROVAL_ID}`);
+  assert.equal(withCase.subject, "D2609013", "인수번호가 먼저다");
+  assert.equal(withCase.detail, "부품 불출 승인 · 박승인");
+  assert.equal(withCase.href, "/inventory/approvals");
+
+  const destinationOnly = buildApprovalGrantedNotification({
+    ...issueTarget({ destinationNote: "상해수리소" }),
+    decidedByName: "박승인",
+  });
+  assert.equal(destinationOnly.subject, "상해수리소");
+
+  const neither = buildApprovalGrantedNotification({ ...issueTarget(), decidedByName: "박승인" });
+  assert.equal(neither.subject, DELETED_REPAIR_CASE_SUBJECT);
+
+  // 요청 기반이어도 승인 완료는 같은 탭으로 간다(실행 대기로 보이는 곳).
+  const requestBased = buildApprovalGrantedNotification({
+    ...issueTarget({ partRequestId: PART_REQUEST_ID }),
+    decidedByName: "박승인",
+  });
+  assert.equal(requestBased.href, "/inventory/approvals");
+});
+
+test("반려됨(검수·출하) — 결재 이름·사유를 detail 에, 다시 올리는 검수/승인 화면으로 링크한다", () => {
+  const item = buildApprovalRejectedNotification({ ...caseTarget("REPAIR_INSPECTION"), decisionReason: "사진 누락" });
+  assert.equal(item.kind, "APPROVAL_REJECTED");
+  assert.equal(item.id, `APPROVAL_REJECTED:rca:${CASE_APPROVAL_ID}`);
+  assert.equal(item.targetKey, item.id);
+  assert.equal(item.subject, "D2609012");
+  assert.equal(item.detail, "수리 검수 승인 · 사유: 사진 누락");
+  assert.ok(!item.detail.includes("반려됨"), "종류 이름은 패널이 윗줄에 따로 적는다");
+  assert.equal(item.href, repairCaseDetailHrefs(CASE_ID).approval);
+});
+
+test("반려됨(부품 불출) — 요청 기반이면 부품 요청 관리로, 직접 사용이면 재고 목록으로 링크한다", () => {
+  const requestBased = buildApprovalRejectedNotification({
+    ...issueTarget({ partRequestId: PART_REQUEST_ID, intakeNumber: "D2609014" }),
+    decisionReason: "수량 과다",
+  });
+  assert.equal(requestBased.id, `APPROVAL_REJECTED:pia:${ISSUE_APPROVAL_ID}`);
+  assert.equal(requestBased.subject, "D2609014");
+  assert.equal(requestBased.detail, "부품 불출 승인 · 사유: 수량 과다");
+  assert.equal(requestBased.href, "/inventory/requests", "요청 기반은 다시 올리는 곳이 부품 요청 관리다");
+
+  const directUse = buildApprovalRejectedNotification({
+    ...issueTarget({ destinationNote: "평택 창고" }),
+    decisionReason: "수량 과다",
+  });
+  assert.equal(directUse.subject, "평택 창고");
+  assert.equal(directUse.href, "/inventory", "직접 사용은 재고 목록의 [사용]에서 다시 시작한다");
+});
+
+test("반려 사유는 한 줄로 펴고, 길면 잘라 말줄임표를 붙인다 — 글자 단위로 자른다", () => {
+  assert.equal(previewApprovalRejectionReason("  사진이\n빠졌습니다 \t 다시 올려 주세요 "), "사진이 빠졌습니다 다시 올려 주세요");
+
+  const exact = "가".repeat(APPROVAL_REJECTION_REASON_PREVIEW_LENGTH);
+  assert.equal(previewApprovalRejectionReason(exact), exact, "상한까지는 자르지 않는다");
+
+  const long = "나".repeat(APPROVAL_REJECTION_REASON_PREVIEW_LENGTH + 5);
+  const preview = previewApprovalRejectionReason(long);
+  assert.ok(preview.endsWith("…"), "잘랐으면 말줄임표를 붙인다");
+  assert.equal(Array.from(preview).length, APPROVAL_REJECTION_REASON_PREVIEW_LENGTH + 1);
+
+  // 두 코드 단위짜리 글자를 반으로 가르지 않는다.
+  const emoji = "😀".repeat(APPROVAL_REJECTION_REASON_PREVIEW_LENGTH + 1);
+  const emojiPreview = previewApprovalRejectionReason(emoji);
+  assert.equal(Array.from(emojiPreview).length, APPROVAL_REJECTION_REASON_PREVIEW_LENGTH + 1);
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emojiPreview), "짝 잃은 서로게이트가 남았다");
+
+  const item = buildApprovalRejectedNotification({ ...caseTarget(), decisionReason: long });
+  assert.equal(item.detail, `최종 출하 승인 · 사유: ${preview}`);
+});
+
+test("반려 사유가 비어 있으면 「사유:」를 빈 채로 적지 않고 결재 이름만 적는다", () => {
+  for (const decisionReason of [null, "", "   \n "]) {
+    const item = buildApprovalRejectedNotification({ ...caseTarget(), decisionReason });
+    assert.equal(item.detail, "최종 출하 승인", JSON.stringify(decisionReason));
+  }
+});
+
+test("🔴 결재 결과 알림의 id 는 네 갈래 모두 확인 키 검증을 통과한다 — 눌러도 조용히 거절되지 않는다", () => {
+  const items = [
+    buildApprovalGrantedNotification({ ...caseTarget(), decidedByName: "김결재" }),
+    buildApprovalGrantedNotification({ ...issueTarget(), decidedByName: "김결재" }),
+    buildApprovalRejectedNotification({ ...caseTarget(), decisionReason: "사유" }),
+    buildApprovalRejectedNotification({ ...issueTarget({ partRequestId: PART_REQUEST_ID }), decisionReason: "사유" }),
+  ];
+  for (const item of items) {
+    const checked = checkNotificationAcknowledgementKey(item.id);
+    assert.equal(checked.ok, true, `거절됐다: ${item.id}`);
+    if (checked.ok) {
+      assert.equal(checked.key, item.id);
+      assert.equal(checked.kind, item.kind);
+    }
+  }
+  assert.equal(new Set(items.map((item) => item.id)).size, items.length, "네 갈래의 id 가 서로 겹친다");
+});
+
+test("같은 행 id 여도 두 표(접수 건 결재·불출 결재)의 키는 겹치지 않는다", () => {
+  const sameId = "55555555-5555-4555-8555-555555555555";
+  const fromCase = buildApprovalGrantedNotification({ ...caseTarget(), approvalId: sameId, decidedByName: "a" });
+  const fromIssue = buildApprovalGrantedNotification({ ...issueTarget(), approvalId: sameId, decidedByName: "a" });
+  assert.notEqual(fromCase.id, fromIssue.id);
+});
+
+test("결재 결과는 사건 단위로 센다 — 같은 접수 건의 검수·출하 승인 완료는 배지에 2다", () => {
+  const counts = countNotificationTargetsByKind([
+    buildApprovalGrantedNotification({ ...caseTarget("REPAIR_INSPECTION"), approvalId: "a-1", decidedByName: "a" }),
+    buildApprovalGrantedNotification({ ...caseTarget("FINAL_SHIPMENT"), approvalId: "a-2", decidedByName: "a" }),
+  ]);
+  assert.equal(counts.APPROVAL_GRANTED, 2, "하나를 확인해도 다른 하나는 남아야 하는 두 사건이다");
+  assert.equal(counts.REPAIR_CASE_APPROVAL, 0, "사이드바 결재 배지는 결재 결과를 세지 않는다");
+});
+
+// ─────────────────────── 레지스트리 — 결재 결과는 요청자 본인 · 확인한 것은 뺀다
+
+for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
+  test(`🔴 ${kind} 는 역할로 거르지 않고, 새 조회를 부른 뒤 확인한 키를 뺀다`, () => {
+    const block = registryBlockFor(kind);
+    assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
+    assert.ok(!block.includes("actorRole"), `${kind} load 가 역할을 본다`);
+    assert.ok(!/canReceive\w*\(/.test(block), `${kind} load 가 역할 판정 함수를 부른다`);
+    assert.match(block, /withoutAcknowledged\(\s*actorUserId,/, "확인한 키를 빼지 않는다");
+    const query = kind === "APPROVAL_GRANTED" ? "listMyGrantedApprovalOutcomes" : "listMyRejectedApprovalOutcomes";
+    const build = kind === "APPROVAL_GRANTED" ? "buildApprovalGrantedNotification(" : "buildApprovalRejectedNotification(";
+    assert.ok(block.includes(`${query}(actorUserId)`), "결과 사건 조회를 요청자 id 로 부르지 않는다");
+    assert.ok(block.includes(build), "모양 변환은 도메인의 build 함수가 한다");
+  });
+}
+
+test("🔴 확인 기록은 결재 결과 두 종류의 load 에서만 대 본다 — 할 일 알림에는 대 보지 않는다", () => {
+  for (const kind of NOTIFICATION_KINDS) {
+    const block = registryBlockFor(kind);
+    const usesAcknowledgements = block.includes("withoutAcknowledged(");
+    assert.equal(
+      usesAcknowledgements,
+      kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED",
+      `${kind}: 확인 기록을 대 보는지가 기대와 다르다`
+    );
+  }
+  // 확인 기록은 언제나 이 사람 것만 묻는다 — 사람 id 없이 키로만 묻는 호출이 없다.
+  assert.match(
+    registrySource,
+    /listAcknowledgedNotificationKeys\(\s*actorUserId,/,
+    "확인 기록 조회에 사람 id 를 넘기지 않는다"
   );
 });

@@ -2,6 +2,7 @@
 
 import NotificationBell from "./NotificationBell";
 import type { NotificationItem } from "@/lib/domain/notifications";
+import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
 
 type TopBarProps = {
   title: string;
@@ -80,7 +81,7 @@ export default function TopBar({ title, onMenuClick, notifications = [] }: TopBa
       )}
       {/* ml-auto는 NotificationBell 자신이 갖는다 — 여기 래퍼를 하나 더 두면
           펼침 패널의 기준(position: relative)이 두 겹이 된다. */}
-      <NotificationBell items={notifications} />
+      <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} />
     </header>
   );
 }

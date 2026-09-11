@@ -1,6 +1,6 @@
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
-import { NOTIFICATION_KINDS, type NotificationKind } from "./notifications";
+import { APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, NOTIFICATION_KINDS, type NotificationKind } from "./notifications";
 import { ROLE_CODES, type Role } from "./types";
 
 /**
@@ -86,6 +86,13 @@ import { ROLE_CODES, type Role } from "./types";
  * 둘이 한 패널에 섞였을 때 갈라 보여야 하므로 amber를 나눠 쓰지 않는다. 앞의 네
  * 색(amber·sky·red·emerald) 어느 것과도 색상환에서 떨어진 violet을 준다.
  *
+ * 결재 결과 둘(승인 완료·반려됨)은 할 일이 아니라 **지나간 사건**이라 앞의 다섯과
+ * 갈라 보여야 하고, 둘끼리도 갈라져야 한다. 남은 색상환에서 가장 넓은 두 틈에
+ * 하나씩 둔다 — amber와 emerald 사이의 lime(승인 완료 — 초록 쪽이라 「됐다」로
+ * 읽힌다), violet과 red 사이의 pink(반려됨 — 붉은 쪽이지만 red는 재고 부족이
+ * 쓰므로 한 칸 비켜 선다). rose는 red와, teal은 emerald와, indigo는 violet과
+ * 너무 붙어서 고르지 않았다.
+ *
  * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
  * 색약이신 분에게는 amber와 red가 붙어 보이고, 흑백으로 인쇄하면 셋 다 같은
  * 회색이 된다. 그래서 화면은 이 색과 **함께 label을 글자로도** 그린다
@@ -137,6 +144,16 @@ export const NOTIFICATION_KIND_META: Record<
       "내가 결재해야 할 부품 불출 신청입니다. 실제로 누구에게 가는지는 부품 불출 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
     toneClassName: "text-violet-700 dark:text-violet-400",
   },
+  APPROVAL_GRANTED: {
+    label: "승인 완료",
+    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·부품 불출 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    toneClassName: "text-lime-700 dark:text-lime-400",
+  },
+  APPROVAL_REJECTED: {
+    label: "반려됨",
+    description: `내가 요청한 결재가 어느 단계에서든 반려된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것과 내가 스스로 취소한 신청은 뜨지 않습니다. 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    toneClassName: "text-pink-700 dark:text-pink-400",
+  },
 };
 
 /**
@@ -187,6 +204,8 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "PART_STOCK_BELOW_MINIMUM":
     case "CUSTOMER_REPAIR_REQUEST_NEW":
     case "PART_ISSUE_APPROVAL_PENDING":
+    case "APPROVAL_GRANTED":
+    case "APPROVAL_REJECTED":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
       // 넣는 순간부터 계산이 돌기 시작한다). 꺼진 채로 태어나는 종류가 있으면,
       // 등록해 두고 아무 일도 일어나지 않는 상태를 화면에서 설명할 수 없다.
@@ -237,6 +256,17 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 없이 누구든 올릴 수 있으므로(영업도 된다), 여기서 어느 역할을 빼면 그
       // 순간 자기 차례인 결재자인데 알림을 못 받는 사람이 생긴다 — 그 실패는
       // 화면에 아무 표시도 남기지 않는다.
+      return true;
+
+    case "APPROVAL_GRANTED":
+    case "APPROVAL_REJECTED":
+      // 새로 태어나는 종류라 재현할 옛 동작은 없고, 답은 다섯 역할 전부 받음이다.
+      // 이 알림은 **요청자 본인에게만** 가는 사람 단위 알림이다 — 누가 받는지는
+      // 조회가 `requested_by_user_id = 나` 로 정하고(queries/approval-outcome-
+      // notifications.ts), 남의 결재 결과가 보일 길이 애초에 없다. 결재를 요청하는
+      // 쪽은 역할이 여럿이라(검수·출하는 엔지니어·관리자, 불출은 재고 담당자) 여기서
+      // 역할을 빼면 자기가 올린 결재의 결과를 모르는 사람이 생길 뿐 막아 주는 것이
+      // 없다.
       return true;
 
     default:

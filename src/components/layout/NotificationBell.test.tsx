@@ -6,16 +6,23 @@ import NotificationBell, {
   BrowserNotificationNotice,
   NotificationList,
   NotificationSelfTest,
+  acknowledgeInBackground,
+  handleNotificationPicked,
+  type AcknowledgeNotification,
 } from "./NotificationBell";
 import {
   NOTIFICATION_KINDS,
+  buildApprovalGrantedNotification,
   buildApprovalNotification,
+  buildApprovalRejectedNotification,
   buildCustomerRepairRequestNotification,
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
+  type NotificationItem,
 } from "@/lib/domain/notifications";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
+import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
   describeNotificationToastFailure,
@@ -61,7 +68,33 @@ function oneOfEachKind() {
       routeStepOrder: 2,
       requestedByName: "홍길동",
     }),
+    grantedItem(),
+    rejectedItem(),
   ];
+}
+
+/** 눌러서 확인하는 줄 — 내가 요청한 출하 승인이 끝났다. */
+function grantedItem(): NotificationItem {
+  return buildApprovalGrantedNotification({
+    source: "REPAIR_CASE",
+    approvalId: "approval-g1",
+    repairCaseId: "case-9",
+    intakeNumber: "D9705-300",
+    approvalType: "FINAL_SHIPMENT",
+    decidedByName: "김결재",
+  });
+}
+
+/** 눌러서 확인하는 줄 — 내가 올린 직접 사용 불출이 반려됐다. */
+function rejectedItem(): NotificationItem {
+  return buildApprovalRejectedNotification({
+    source: "PART_ISSUE",
+    approvalId: "approval-r1",
+    partRequestId: null,
+    intakeNumber: null,
+    destinationNote: "상해수리소",
+    decisionReason: "수량 과다",
+  });
 }
 
 test("0건이면 종은 남아 있고 배지만 없다", () => {
@@ -333,4 +366,153 @@ test("🔴 눌러 본 결과를 그 자리에 적는다 — 못 떴으면 왜 �
 
   assert.ok(html.includes("서비스워커"), "왜 못 떴는지가 화면에 보여야 한다");
   assert.ok(!html.includes("왜 안 뜨는지"), "결과가 나왔으면 안내 문구 자리를 결과가 차지한다");
+});
+
+// ─────────────────────────── 눌러서 확인하는 알림 — 승인 완료 · 반려됨
+
+test("승인 완료·반려됨도 화면을 고치지 않고 같은 한 줄로 그려진다 — 이름·대상·상세·링크", () => {
+  const html = renderToStaticMarkup(
+    <NotificationList items={[grantedItem(), rejectedItem()]} onNavigate={() => {}} />
+  );
+  assert.ok(html.includes(NOTIFICATION_KIND_META.APPROVAL_GRANTED.label));
+  assert.ok(html.includes(NOTIFICATION_KIND_META.APPROVAL_REJECTED.label));
+  assert.ok(html.includes('href="/repair-cases/case-9/approval"'));
+  assert.ok(html.includes("최종 출하 승인 · 김결재"));
+  assert.ok(html.includes('href="/inventory"'));
+  assert.ok(html.includes("부품 불출 승인 · 사유: 수량 과다"));
+});
+
+/** 부른 기록을 남기는 가짜 확인 함수. `result` 를 넘기지 않으면 끝나지 않는 약속을 돌려준다. */
+function fakeAcknowledge(result?: Promise<{ ok: boolean }>) {
+  const calls: { notificationKey: string }[] = [];
+  const acknowledge: AcknowledgeNotification = (input) => {
+    calls.push(input);
+    return result ?? new Promise(() => {});
+  };
+  return { acknowledge, calls };
+}
+
+test("🔴 눌러서 확인하는 줄을 누르면 확인을 부르고 이동한다 — 할 일 줄은 이동만 한다", () => {
+  for (const item of oneOfEachKind()) {
+    const acknowledged: string[] = [];
+    let navigated = 0;
+    handleNotificationPicked(item, {
+      onAcknowledge: (picked) => acknowledged.push(picked.id),
+      onNavigate: () => {
+        navigated += 1;
+      },
+    });
+    assert.equal(navigated, 1, `${item.kind}: 이동하지 않았다`);
+    assert.deepEqual(
+      acknowledged,
+      isAcknowledgeableNotificationKind(item.kind) ? [item.id] : [],
+      `${item.kind}: 확인을 부르는지가 도메인 판정과 다르다`
+    );
+  }
+  // 대조 — 위 반복이 실제로 두 갈래를 다 지났다.
+  assert.ok(oneOfEachKind().some((item) => isAcknowledgeableNotificationKind(item.kind)));
+  assert.ok(oneOfEachKind().some((item) => !isAcknowledgeableNotificationKind(item.kind)));
+});
+
+test("🔴 확인이 던져도 이동은 막히지 않는다 — 확인을 넘기지 않은 종은 이동만 한다", () => {
+  let navigated = 0;
+  handleNotificationPicked(grantedItem(), {
+    onAcknowledge: () => {
+      throw new Error("저장 실패");
+    },
+    onNavigate: () => {
+      navigated += 1;
+    },
+  });
+  assert.equal(navigated, 1);
+
+  navigated = 0;
+  handleNotificationPicked(grantedItem(), {
+    onNavigate: () => {
+      navigated += 1;
+    },
+  });
+  assert.equal(navigated, 1);
+});
+
+test("🔴 확인 저장은 기다리지 않는다 — 끝나지 않는 저장이어도 줄은 곧바로 빠지고 돌아온다", () => {
+  const { acknowledge, calls } = fakeAcknowledge();
+  const hidden: string[] = [];
+  const restored: string[] = [];
+  acknowledgeInBackground(grantedItem(), acknowledge, {
+    hide: (id) => hidden.push(id),
+    restore: (id) => restored.push(id),
+  });
+  // 여기 닿았다는 것 자체가 기다리지 않았다는 뜻이다(약속은 영영 끝나지 않는다).
+  assert.deepEqual(calls, [{ notificationKey: grantedItem().id }], "알림 id 를 그대로 키로 보낸다");
+  assert.deepEqual(hidden, [grantedItem().id], "저장 결과를 기다리지 않고 먼저 뺀다");
+  assert.deepEqual(restored, []);
+});
+
+test("🔴 확인 저장이 실패하면 그 줄이 다시 나타난다 — 성공하면 빠진 채로 남는다", async () => {
+  const outcomes: { label: string; run: AcknowledgeNotification; restoredExpected: boolean }[] = [
+    { label: "성공", run: async () => ({ ok: true }), restoredExpected: false },
+    { label: "거절(ok:false)", run: async () => ({ ok: false }), restoredExpected: true },
+    { label: "약속이 깨짐", run: () => Promise.reject(new Error("network")), restoredExpected: true },
+    {
+      label: "곧바로 던짐",
+      run: () => {
+        throw new Error("sync");
+      },
+      restoredExpected: true,
+    },
+  ];
+  for (const outcome of outcomes) {
+    const restored: string[] = [];
+    acknowledgeInBackground(rejectedItem(), outcome.run, {
+      hide: () => {},
+      restore: (id) => restored.push(id),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(restored, outcome.restoredExpected ? [rejectedItem().id] : [], outcome.label);
+  }
+});
+
+test("확인 함수를 받아도 첫 화면(닫힌 종)의 배지는 서버가 준 목록 그대로 센다", () => {
+  const { acknowledge } = fakeAcknowledge();
+  const html = renderToStaticMarkup(
+    <NotificationBell items={[grantedItem(), rejectedItem()]} acknowledge={acknowledge} />
+  );
+  assert.ok(html.includes('aria-label="알림 2건"'), "결재 결과는 사건 단위로 센다");
+});
+
+test("🔴 확인할지 가르는 자리는 도메인 판정 한 곳이다 — 화면은 서버 액션을 직접 가져오지 않는다", () => {
+  const source = readLayoutSource("NotificationBell.tsx");
+  const judgments = source.match(/isAcknowledgeableNotificationKind\(/g) ?? [];
+  assert.equal(judgments.length, 1, "확인 판정을 부르는 자리가 하나가 아니다");
+  assert.ok(
+    source.includes('from "@/lib/domain/notification-acknowledgement"'),
+    "판정은 도메인에서 가져온다"
+  );
+  // 서버 액션 파일을 가져오면 server-only 사슬 때문에 이 시험 파일부터 죽는다 —
+  // 확인 함수는 프롭으로 받는다(AcknowledgeNotification).
+  assert.ok(!source.includes("@/lib/server/actions/"), "화면이 서버 액션을 직접 가져온다");
+  // 이동을 붙잡는 await 가 확인 경로에 없다.
+  const pickedStart = source.indexOf("export function handleNotificationPicked(");
+  const backgroundStart = source.indexOf("export function acknowledgeInBackground(");
+  const listStart = source.indexOf("export function NotificationList(");
+  assert.ok(pickedStart > 0 && backgroundStart > pickedStart && listStart > backgroundStart, "함수 순서가 바뀌었다");
+  assert.ok(!/\bawait\b/.test(source.slice(pickedStart, listStart)), "확인 경로가 저장을 기다린다");
+});
+
+test("🔴 헤더(TopBar)가 종에 확인 서버 액션을 실제로 넘긴다 — 빠지면 눌러도 알림이 사라지지 않는다", () => {
+  // 종은 서버 액션을 직접 가져오지 않고 프롭으로 받는다(위 시험). 그래서 넘기는 쪽이
+  // 빠지면 아무 오류 없이 「눌러도 안 사라지는 알림」이 된다 — 화면에 흔적이 남지 않는
+  // 실패라 원본으로 붙잡는다. TopBar 는 server-only 사슬을 물고 있어 정적 렌더로는
+  // 가져올 수 없다.
+  const source = readFileSync(new URL("./TopBar.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /import \{[^}]*\backnowledgeNotificationAction\b[^}]*\} from "@\/lib\/server\/actions\/notification-acknowledgements"/,
+    "TopBar 가 확인 서버 액션을 가져오지 않는다"
+  );
+  const bells = source.match(/<NotificationBell\b[^>]*>/g) ?? [];
+  assert.equal(bells.length, 1, "TopBar 가 그리는 종이 하나가 아니다 — 아래 단언이 엉뚱한 종을 볼 수 있다");
+  assert.match(bells[0], /\backnowledge=\{acknowledgeNotificationAction\}/, "종에 확인 액션을 넘기지 않는다");
 });

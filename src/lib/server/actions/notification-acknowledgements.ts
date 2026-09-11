@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
@@ -10,10 +11,14 @@ import { checkNotificationAcknowledgementKey } from "@/lib/domain/notification-a
  * ============================================================================
  * 알림 확인 — 서버 액션
  * ============================================================================
- * 종에서 정보성 알림을 눌렀을 때 부른다(화면 연결은 다음 조각). 층을 나누는
- * 방식은 이 폴더의 다른 액션들과 같다:
+ * 종에서 정보성 알림(승인 완료·반려됨)을 눌렀을 때 부른다(NotificationBell). 층을
+ * 나누는 방식은 이 폴더의 다른 액션들과 같다:
  *
- *   세션 인가 → **형식만** 검증 → mutation → 예상 못 한 DB 오류 가리기
+ *   세션 인가 → 키의 형식·종류 검증 → mutation → 예상 못 한 DB 오류 가리기
+ *   → 종이 다시 계산되게 무효화
+ *
+ * 키 검증은 domain/notification-acknowledgement.ts 하나가 한다 — 형식이 맞아도
+ * 「눌러서 확인하는 종류」가 아니면(할 일 알림의 키면) INVALID_INPUT 으로 거절한다.
  *
  * ── 🔴 사용자는 세션에서 푼다 — 입력으로 받지 않는다 ─────────────────────
  * 받는 것은 알림 키 하나뿐이다. 입력 모양에 사용자 id 자리가 아예 없고, 누가 그런
@@ -28,13 +33,19 @@ import { checkNotificationAcknowledgementKey } from "@/lib/domain/notification-a
  * ── 역할·권한 영역은 보지 않는다 ────────────────────────────────────────
  * 자기 종에 뜬 알림을 자기가 치우는 일이다. 그 알림을 볼 자격은 알림을 파생할 때
  * (db/queries/notifications.ts) 이미 판정됐고, 확인 기록은 남에게 아무것도 보여
- * 주지도 바꾸지도 않는다. 형식만 맞으면 자기 종에 뜨지 않은 키를 적는 것도 막지
- * 않는다 — 그 행은 자기 종에서만 무언가를 걸러 낼 수 있고, 그 사람에게 뜨지 않는
+ * 주지도 바꾸지도 않는다. 형식·종류만 맞으면 자기 종에 뜨지 않은 키를 적는 것도
+ * 막지 않는다 — 그 행은 자기 종에서만 무언가를 걸러 낼 수 있고, 그 사람에게 뜨지 않는
  * 알림이라면 아무것도 걸러 내지 않는다.
  *
- * ── 캐시 무효화(revalidate)는 이 조각에서 하지 않는다 ─────────────────────
- * 종 화면 연결이 다음 조각이다. 그때 확인 뒤 종이 곧바로 비도록 무효화할지(또는
- * 화면이 제 목록에서 먼저 지울지)를 함께 정한다.
+ * ── 확인한 뒤 종이 비는 길은 둘이다 ────────────────────────────────────
+ *  1. 화면이 먼저 지운다 — 종(NotificationBell)은 누른 줄을 저장 결과를 기다리지
+ *     않고 제 목록에서 곧바로 뺀다. 저장이 실패하면 되돌려 놓는다.
+ *  2. 여기서 무효화한다 — 저장이 성사되면 `revalidatePath("/", "layout")` 로 종
+ *     목록을 만드는 (app)/layout.tsx 를 다시 계산하게 한다(불출·결재 액션이 쓰는
+ *     그 방식이다 — `(app)` 은 라우트 그룹이라 그 레이아웃의 경로가 `/` 다). 줄을
+ *     누르면 곧바로 다른 화면으로 옮겨 가므로 이 액션의 결과는 대개 그 이동에 밀려
+ *     버려지는데, 그때도 Next 가 무효화된 것을 기억해 이동이 끝난 뒤 한 번 새로
+ *     받는다 — 다음 렌더부터는 서버가 준 목록에도 그 줄이 없다.
  * ============================================================================
  */
 
@@ -126,6 +137,9 @@ export async function acknowledgeNotificationAction(
     acknowledgeNotification({ userId: actorCheck.userId, notificationKey: checked.key })
   );
   if (!result.ok) return result;
+  // 이미 확인한 것이었어도(newlyAcknowledged=false) 무효화한다 — 다른 기기에서 먼저
+  // 눌러 둔 알림이 이 기기의 낡은 목록에 남아 있던 경우라, 새로 받는 것이 맞다.
+  revalidatePath("/", "layout");
   // 새로 적었는지(newlyAcknowledged)는 화면에 알릴 이유가 없다 — 사람에게는 둘 다
   // 「사라졌다」로 같다.
   return { ok: true };

@@ -15,7 +15,7 @@ import {
   roleReceivesNotification,
   type NotificationSettingsOverrides,
 } from "./notification-settings";
-import { NOTIFICATION_KINDS } from "./notifications";
+import { APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, NOTIFICATION_KINDS } from "./notifications";
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { ROLE_CODES, type Role } from "./types";
 
@@ -72,6 +72,13 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     // 적는다 — 다섯 역할 전부. 결재 대기와 같은 이유다: 누가 받는지는 역할이
     // 아니라 결재선 지정(과 최고관리자 비상구)이 정하고, 결재선에는 역할 제한 없이
     // 누구든 올라간다. 역할을 하나라도 빼면 자기 차례인 결재자가 알림을 못 받는다.
+    return true;
+  }
+  if (kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED") {
+    // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
+    // 적는다 — 다섯 역할 전부. 요청자 본인에게만 가는 사람 단위 알림이라(조회가
+    // requested_by_user_id = 나 로 정한다) 역할로 막을 것이 없고, 결재를 요청하는
+    // 쪽은 역할이 여럿이다.
     return true;
   }
   throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
@@ -163,6 +170,41 @@ test("불출 승인 대기는 결재 대기와 이름·색이 갈라진다 — �
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
   const hues = NOTIFICATION_KINDS.map((kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName));
   assert.equal(new Set(hues).size, hues.length, `색상 이름이 겹친다: ${hues.join(" / ")}`);
+});
+
+test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 요청자 본인에게만 가는 알림이다", () => {
+  for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
+    assert.equal(defaultNotificationKindEnabled(kind), true, `${kind} 는 켜진 채로 태어난다`);
+    for (const role of ROLE_CODES) {
+      assert.equal(defaultRoleReceivesNotification(kind, role), true, `${kind}/${role}`);
+      assert.equal(deliversNotification(kind, role, NO_NOTIFICATION_SETTINGS), true, `${kind}/${role}`);
+    }
+  }
+});
+
+test("승인 완료·반려됨의 이름과 설명 — 사람이 읽는 말로, 창의 날짜 수는 상수에서 온다", () => {
+  const granted = NOTIFICATION_KIND_META.APPROVAL_GRANTED;
+  const rejected = NOTIFICATION_KIND_META.APPROVAL_REJECTED;
+  assert.equal(granted.label, "승인 완료");
+  assert.equal(rejected.label, "반려됨");
+  for (const meta of [granted, rejected]) {
+    // 관리자가 이 설명만 읽고 무엇을 끄는지 알아야 한다 — 누구에게 가는가, 언제까지
+    // 뜨는가, 어떻게 사라지는가.
+    assert.ok(meta.description.includes("요청"), meta.description);
+    assert.ok(meta.description.includes(`${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일`), meta.description);
+    assert.ok(meta.description.includes("확인하면 사라집니다"), meta.description);
+  }
+});
+
+test("🔴 승인 완료·반려됨의 색은 기존 다섯 색과도, 서로도 갈라진다", () => {
+  const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
+  const existing = ["amber", "sky", "red", "emerald", "violet"];
+  const grantedHue = hueOf(NOTIFICATION_KIND_META.APPROVAL_GRANTED.toneClassName);
+  const rejectedHue = hueOf(NOTIFICATION_KIND_META.APPROVAL_REJECTED.toneClassName);
+  assert.ok(grantedHue && rejectedHue);
+  assert.ok(!existing.includes(grantedHue), `승인 완료가 기존 색(${grantedHue})을 쓴다`);
+  assert.ok(!existing.includes(rejectedHue), `반려됨이 기존 색(${rejectedHue})을 쓴다`);
+  assert.notEqual(grantedHue, rejectedHue);
 });
 
 test("부품 요청 대기의 기본값은 명단을 옮겨 적지 않고 저쪽 함수를 부른 결과다", () => {

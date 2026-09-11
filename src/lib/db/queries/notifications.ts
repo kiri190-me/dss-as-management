@@ -13,11 +13,15 @@ import {
   type NotificationKind,
   buildCustomerRepairRequestNotification,
   buildPartIssueApprovalNotification,
+  buildApprovalGrantedNotification,
+  buildApprovalRejectedNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
 import { listNewCustomerRepairRequests } from "./customer-portal";
 import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-requests";
+import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
+import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
 
 /**
  * ============================================================================
@@ -38,6 +42,17 @@ import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-r
  *       빈 배열로 끝낸다 — 권한 없는 사람 앞에서 그 조회는 아예 돌지 않는다.
  * 판정 자체는 이 파일이 쓰지 않는다. auth/inventory-authorization.ts의 순수
  * 함수를 부른다(화면·mutation이 쓰는 그 파일).
+ *
+ * 결재 결과(승인 완료·반려됨)도 (가)형이다 — 대상이 **요청자 본인**이고, 조회가
+ * `requested_by_user_id = 나` 로 스스로 좁힌다(approval-outcome-notifications.ts).
+ *
+ * ── 눌러서 확인하는 종류는 확인 기록을 뺀다 ────────────────────────────
+ * 할 일 알림은 처리하면 저절로 사라지지만, 결재 결과는 알려 주는 것이라 사람이
+ * 눌러 확인해야 사라진다. 그 두 종류의 load 만 마지막에 확인 기록
+ * (listAcknowledgedNotificationKeys — 언제나 이 사람 것만)을 대 보고 확인한 키를
+ * 뺀다(withoutAcknowledged). 할 일 알림에는 대 보지 않는다 — 대 보면 처리하지 않은
+ * 일을 「확인」으로 숨기는 길이 생긴다(적는 쪽 문도 그 키를 거절한다:
+ * domain/notification-acknowledgement.ts).
  *
  * ── 종류를 하나 더 붙이려면 ────────────────────────────────────────────
  *  1. domain/notifications.ts의 NOTIFICATION_KINDS에 키를 추가하고
@@ -76,6 +91,23 @@ type NotificationSource = {
   /** 이 사용자에게 지금 보여야 할 그 종류의 알림 전부. */
   load: (actorUserId: string, actorRole: Role) => Promise<NotificationItem[]>;
 };
+
+/**
+ * 이 사람이 이미 눌러 확인한 알림을 뺀다 — 눌러서 확인하는 종류의 load 끝에서만
+ * 부른다(파일 머리말).
+ *
+ * 확인 기록은 언제나 **이 사람 것만** 읽는다(listAcknowledgedNotificationKeys 가
+ * user_id 로 좁힌다). 같은 키를 남이 확인했다고 내 알림이 사라지면 안 된다. 지금
+ * 띄우려는 알림의 키로만 묻고, 띄울 것이 없으면 DB 를 부르지 않는다.
+ */
+async function withoutAcknowledged(actorUserId: string, items: NotificationItem[]): Promise<NotificationItem[]> {
+  if (items.length === 0) return items;
+  const acknowledged = await listAcknowledgedNotificationKeys(
+    actorUserId,
+    items.map((item) => item.id)
+  );
+  return acknowledged.size === 0 ? items : items.filter((item) => !acknowledged.has(item.id));
+}
 
 const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   {
@@ -183,10 +215,37 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       );
     },
   },
+  {
+    kind: "APPROVAL_GRANTED",
+    load: async (actorUserId) => {
+      // (가)형 — 대상이 역할이 아니라 **요청자 본인**이다. 역할로 먼저 거르지 않는다:
+      // 결재를 요청하는 사람은 역할이 여럿이고, 받는 사람은 조회가
+      // `requested_by_user_id = 나` 로 이미 정한다. 여기서 하는 일은 모양 변환과
+      // 확인한 것 빼기뿐이다.
+      const outcomes = await listMyGrantedApprovalOutcomes(actorUserId);
+      return withoutAcknowledged(
+        actorUserId,
+        outcomes.map((outcome) => buildApprovalGrantedNotification(outcome))
+      );
+    },
+  },
+  {
+    kind: "APPROVAL_REJECTED",
+    load: async (actorUserId) => {
+      // 승인 완료와 같은 모양이다 — 요청자 본인, 역할로 거르지 않는다, 확인한 것은 뺀다.
+      const outcomes = await listMyRejectedApprovalOutcomes(actorUserId);
+      return withoutAcknowledged(
+        actorUserId,
+        outcomes.map((outcome) => buildApprovalRejectedNotification(outcome))
+      );
+    },
+  },
 ];
 
 /**
- * 지금 로그인한 사람이 처리해야 할 일 전부. 등록된 종류를 모두 돌며 모은다.
+ * 지금 로그인한 사람이 처리해야 할 일 전부(와, 아직 확인하지 않은 내 결재의 결과).
+ * 등록된 종류를 모두 돌며 모은다. 종류를 섞어 다시 세우지 않는다 — 아래 소스 순서
+ * 대로 종류별 묶음이 이어 붙는다.
  *
  * 인자는 서버가 세션에서 푼 사용자 id와 역할뿐이다 — 다른 사람의 알림을
  * 요구할 수 있는 입구가 없다. 역할도 부르는 쪽이 넘겨 주지만, 그 값은

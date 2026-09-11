@@ -46,9 +46,10 @@ export async function acknowledgeNotification(params: {
   userId: string;
   notificationKey: string;
 }): Promise<AcknowledgeNotificationResult> {
-  // 입구(서버 액션)가 이미 본 형식을 여기서 한 번 더 본다 — 이 함수를 액션을
-  // 거치지 않고 부르는 길이 생겨도 표에 아무 글이나 적히지 않도록. 같은 함수라
-  // 두 곳의 판정이 갈라질 수 없다.
+  // 입구(서버 액션)가 이미 본 형식·종류를 여기서 한 번 더 본다 — 이 함수를 액션을
+  // 거치지 않고 부르는 길이 생겨도 표에 아무 글이나, 할 일 알림의 키가 적히지
+  // 않도록(눌러서 확인하는 종류만 통과한다). 같은 함수라 두 곳의 판정이 갈라질 수
+  // 없다.
   const checked = checkNotificationAcknowledgementKey(params.notificationKey);
   if (!checked.ok) return { ok: false, code: "INVALID_INPUT", message: checked.message };
 

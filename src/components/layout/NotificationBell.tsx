@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
+import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
   NOTIFICATION_PERMISSION_CHANGED_EVENT,
@@ -35,6 +36,13 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * 늘면 그 표를 채우는 것으로 끝나고, 빠뜨리면 notification-settings.test.ts가
  * 잡는다.
  *
+ * ── 눌러서 확인하는 알림 ────────────────────────────────────────────────
+ * 결재 결과처럼 처리할 것이 없는 정보성 알림은 줄을 누르면 「확인함」을 적고 종에서
+ * 뺀다. 어느 줄이 그런 줄인지도 화면이 정하지 않는다 — 도메인 판정
+ * (isAcknowledgeableNotificationKind) **한 곳**을 부른다(handleNotificationPicked).
+ * 이동은 확인 저장을 기다리지 않고, 저장이 실패해도 막히지 않는다 — 실패하면 그
+ * 줄이 다시 나타날 뿐이다.
+ *
  * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
  * 색약이신 분에게는 색 차이가 사라지고 흑백 인쇄에는 아무것도 남지 않는다.
  * 그래서 종류 **이름을 글자로도** 한 줄 위에 함께 적는다. 이름을 지금 줄
@@ -52,15 +60,83 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  */
 
 /**
+ * 확인 기록을 적는 함수 — 서버 액션 acknowledgeNotificationAction
+ * (server/actions/notification-acknowledgements.ts)과 같은 모양이다.
+ *
+ * 🔴 이 파일은 그 서버 액션을 직접 가져오지 않고 **받아서** 쓴다. 서버 액션 파일은
+ * `server-only` 사슬(세션·DB)을 물고 있어서, 여기서 가져오면 이 파일을 정적 렌더로
+ * 시험하는 NotificationBell.test.tsx 가 가져오는 순간 죽는다. 받아서 쓰면 시험은 가짜
+ * 함수를 넘겨 「누가 언제 부르는가」를 그대로 볼 수 있다.
+ */
+export type AcknowledgeNotification = (input: { notificationKey: string }) => Promise<{ ok: boolean }>;
+
+/**
+ * 줄 하나를 눌렀을 때 이동 **전에** 할 일. 이동 자체는 Link 가 한다.
+ *
+ * 🔴 확인할지 말지는 도메인 판정 한 곳이 정한다 — 종류 이름을 여기 적거나 종류로
+ * 갈라지지 않는다(이 파일 머리말). 할 일 알림은 이 판정에서 거짓이라 확인 액션이
+ * 불리지 않고, 동작이 이 기능 전과 한 글자도 다르지 않다(onNavigate 만 부른다).
+ *
+ * 🔴 확인은 기다리지 않는다 — onAcknowledge 는 저장을 **시작만** 하고 곧바로
+ * 돌아오고, 그것이 던져도 이동은 그대로 간다.
+ */
+export function handleNotificationPicked(
+  item: NotificationItem,
+  handlers: { onAcknowledge?: (item: NotificationItem) => void; onNavigate: () => void }
+): void {
+  if (handlers.onAcknowledge && isAcknowledgeableNotificationKind(item.kind)) {
+    try {
+      handlers.onAcknowledge(item);
+    } catch {
+      // 확인을 못 적어도 이동은 막지 않는다 — 알림이 종에 남을 뿐이다.
+    }
+  }
+  handlers.onNavigate();
+}
+
+/**
+ * 확인 저장을 뒤에서 시작한다 — 줄은 **먼저** 종에서 빼고(hide), 저장이 실패하면
+ * 되돌린다(restore).
+ *
+ * 먼저 빼는 이유: 누르면 곧바로 다른 화면으로 옮겨 가는데, 서버가 준 목록은 저장이
+ * 끝나고 다시 계산될 때까지 그 줄을 그대로 들고 있다. 기다렸다가 빼면 옮겨 간 화면의
+ * 종에 방금 누른 줄이 잠깐 남는다. 저장이 성사되면 서버 액션이 종을 다시 계산하게
+ * 하므로(revalidatePath) 그 뒤로는 서버가 준 목록에도 그 줄이 없다.
+ *
+ * 결과를 기다리지 않고 곧바로 돌아온다 — 이동을 붙잡지 않기 위해서다.
+ */
+export function acknowledgeInBackground(
+  item: NotificationItem,
+  acknowledge: AcknowledgeNotification,
+  view: { hide: (id: string) => void; restore: (id: string) => void }
+): void {
+  view.hide(item.id);
+  const restore = () => view.restore(item.id);
+  let pending: Promise<{ ok: boolean }>;
+  try {
+    pending = acknowledge({ notificationKey: item.id });
+  } catch {
+    restore();
+    return;
+  }
+  void Promise.resolve(pending).then((result) => {
+    if (!result?.ok) restore();
+  }, restore);
+}
+
+/**
  * 패널 안의 목록. 펼침 상태와 무관하게 정적 렌더로 검사할 수 있도록 따로
  * 두었다(이 저장소의 컴포넌트 테스트는 renderToStaticMarkup만 쓴다).
  */
 export function NotificationList({
   items,
   onNavigate,
+  onAcknowledge,
 }: {
   items: readonly NotificationItem[];
   onNavigate: () => void;
+  /** 눌러서 확인하는 줄을 눌렀을 때. 없으면 확인하지 않고 이동만 한다. */
+  onAcknowledge?: (item: NotificationItem) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -79,7 +155,7 @@ export function NotificationList({
           <li key={item.id}>
             <Link
               href={item.href}
-              onClick={onNavigate}
+              onClick={() => handleNotificationPicked(item, { onAcknowledge, onNavigate })}
               className="block px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               <span className={`block truncate text-[11px] font-medium ${meta.toneClassName}`}>
@@ -217,8 +293,26 @@ function readBrowserNotificationStatus(): BrowserNotificationStatus {
 
 const unknownOnServer = (): BrowserNotificationStatus => "UNKNOWN";
 
-export default function NotificationBell({ items = [] }: { items?: readonly NotificationItem[] }) {
+export default function NotificationBell({
+  items = [],
+  acknowledge,
+}: {
+  items?: readonly NotificationItem[];
+  /**
+   * 확인 기록을 적는 서버 액션. 넘기지 않으면 눌러서 확인하는 줄도 이동만 하고
+   * 종에서 빠지지 않는다(저장하지 않은 것을 뺀 것처럼 보이게 하지 않는다).
+   */
+  acknowledge?: AcknowledgeNotification;
+}) {
   const [isOpen, setIsOpen] = useState(false);
+  /**
+   * 눌러서 확인했고 저장이 진행 중이거나 끝난 줄. 서버가 준 목록이 다시 계산되기
+   * 전까지 여기 든 줄은 그리지도 세지도 않는다(acknowledgeInBackground 주석).
+   * 저장이 실패하면 빠진다 — 그 줄이 다시 나타난다.
+   */
+  const [acknowledgedIds, setAcknowledgedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const visibleItems =
+    acknowledgedIds.size === 0 ? items : items.filter((item) => !acknowledgedIds.has(item.id));
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -239,7 +333,21 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
   const [selfTestResult, setSelfTestResult] = useState<string | null>(null);
 
   // 세는 규칙은 여기서 정하지 않는다 — 사이드바 배지와 같은 순수 헬퍼를 쓴다.
-  const count = countNotificationTargets(items.map((item) => item.targetKey));
+  // 방금 눌러 확인한 줄은 세지 않는다(목록과 배지가 같은 말을 해야 한다).
+  const count = countNotificationTargets(visibleItems.map((item) => item.targetKey));
+
+  function handleAcknowledge(item: NotificationItem) {
+    if (!acknowledge) return;
+    acknowledgeInBackground(item, acknowledge, {
+      hide: (id) => setAcknowledgedIds((prev) => new Set(prev).add(id)),
+      restore: (id) =>
+        setAcknowledgedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        }),
+    });
+  }
 
   useEffect(() => {
     if (!isOpen) return;
@@ -377,7 +485,11 @@ export default function NotificationBell({ items = [] }: { items?: readonly Noti
           <div className="border-b border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
             알림
           </div>
-          <NotificationList items={items} onNavigate={() => setIsOpen(false)} />
+          <NotificationList
+            items={visibleItems}
+            onNavigate={() => setIsOpen(false)}
+            onAcknowledge={acknowledge ? handleAcknowledge : undefined}
+          />
           <BrowserNotificationNotice
             status={notificationStatus}
             onAsk={() => void handleAskForNotificationPermission()}

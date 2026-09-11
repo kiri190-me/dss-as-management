@@ -5,11 +5,18 @@
  * 알림 테이블이 없다. 알림 행을 따로 쌓지 않고, 이미 있는 업무 데이터에서 매
  * 요청마다 다시 계산한다.
  *
- * 그래도 되는 이유는 이번에 담는 것이 **행동을 요구하는 알림**뿐이기 때문이다.
+ * 그래도 되는 이유는 대부분이 **행동을 요구하는 알림**이기 때문이다.
  * 결재를 처리하면 그 건은 다음 조회에서 저절로 빠진다 — 사라지게 만드는 것이
- * 처리 그 자체라서 "읽음" 표시를 따로 저장할 것이 없다. (반대로 "무슨 일이
- * 있었다"는 정보성 알림은 읽어도 사라지지 않으므로 읽음 상태를 어딘가 적어
- * 둬야 한다. 그런 종류가 실제로 필요해질 때 저장 테이블을 붙인다.)
+ * 처리 그 자체라서 "읽음" 표시를 따로 저장할 것이 없다.
+ *
+ * ── 예외: 눌러서 확인하면 사라지는 정보성 알림 ─────────────────────────
+ * 요청자에게 가는 결재 결과(「승인 완료」·「반려됨」)는 "무슨 일이 있었다"는
+ * 알림이라 처리할 것이 없고, 그래서 저절로 사라지지 않는다. 이 둘만은 사람이
+ * 눌러 확인한 사실을 notification_acknowledgements 표에 적고, 파생할 때 그 기록을
+ * 빼고 그린다(db/queries/notifications.ts). 알림 자체는 여전히 저장하지 않는다 —
+ * 결재 기록에서 매번 다시 계산하고, 표에 쌓이는 것은 「이 사람이 이 키를 눌렀다」
+ * 뿐이다. 어느 종류가 눌러서 확인하는 종류인지는 domain/notification-acknowledgement.ts
+ * 한 곳이 정한다.
  *
  * 이 파일은 순수 계산만 한다 — DB도, server-only도 여기 들어오지 않는다.
  * 화면(NotificationBell)과 서버 조회(db/queries/notifications.ts)가 **같은
@@ -21,6 +28,7 @@
 import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
+import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
 
 /**
  * 등록된 알림 종류. 새 종류를 붙일 때 손대는 곳은 이 배열과
@@ -33,6 +41,8 @@ export const NOTIFICATION_KINDS = [
   "PART_STOCK_BELOW_MINIMUM",
   "CUSTOMER_REPAIR_REQUEST_NEW",
   "PART_ISSUE_APPROVAL_PENDING",
+  "APPROVAL_GRANTED",
+  "APPROVAL_REJECTED",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -275,5 +285,176 @@ export function buildPartIssueApprovalNotification(input: {
     subject: input.intakeNumber ?? input.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT,
     detail: `${step}신청자 ${input.requestedByName}`,
     href: "/inventory/approvals",
+  };
+}
+
+// ═════════════════════════════════════ 결재 결과 — 요청자에게 가는 정보성 알림
+
+/**
+ * 결재 결과 알림이 종에 머무는 기간(일). **결정 시각**으로 잰다.
+ *
+ * 🔴 창이 있는 이유는 기능을 켜는 순간이다 — 창이 없으면 지금까지 쌓인 결재 결과가
+ * 전부 한꺼번에 종에 쏟아지고, 사람은 그것을 하나씩 눌러 치워야 한다. 그보다 오래된
+ * 것은 확인하지 않아도 뜨지 않는다(확인 기록도 필요 없다).
+ *
+ * 이 숫자가 적힌 곳은 여기 하나다 — 조회(창의 시작 시각)와 알림 설정 화면의 설명
+ * 문구가 이 값을 가져다 쓴다.
+ */
+export const APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS = 7;
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** `now` 기준 창의 시작 시각. 결정 시각이 이 값 이상이면 창 안이다. */
+export function approvalOutcomeNotificationWindowStart(now: Date): Date {
+  return new Date(now.getTime() - APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS * MILLISECONDS_PER_DAY);
+}
+
+/**
+ * 부품 불출 결재의 이름 — 「부품 불출 승인」.
+ *
+ * 글자로 새로 적지 않고 결재선 용도 이름표(「부품 불출」)에서 만든다. 절차 화면이
+ * 이 용도를 부르는 이름과 알림이 부르는 이름이 한쪽만 바뀌지 않게 하려는 것이다.
+ * 접수 건 결재의 이름(「수리 검수 승인」·「최종 출하 승인」)이 승인 체크리스트의
+ * LABELS 에서 오는 것과 같은 자리다.
+ */
+export const PART_ISSUE_APPROVAL_LABEL = `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} 승인`;
+
+/**
+ * 반려 사유를 detail 에 몇 글자까지 보여 주는가.
+ *
+ * 종 패널의 상세 칸은 어차피 한 줄에서 잘리지만(CSS truncate), 같은 detail 이
+ * 브라우저 알림창에도 그대로 실린다 — 거기서는 잘리지 않으므로 긴 사유가 알림창을
+ * 통째로 덮는다. 사유 전문은 누르면 가는 화면(결재 이력)에 있다.
+ */
+export const APPROVAL_REJECTION_REASON_PREVIEW_LENGTH = 40;
+
+/**
+ * 반려 사유 미리보기 — 줄바꿈·연속 공백을 한 칸으로 펴고, 길면 잘라 말줄임표를
+ * 붙인다. 글자 단위로 자른다(`Array.from` — 한 글자가 두 코드 단위인 문자를 반으로
+ * 가르지 않는다).
+ */
+export function previewApprovalRejectionReason(reason: string | null): string {
+  const flattened = (reason ?? "").replace(/\s+/g, " ").trim();
+  const characters = Array.from(flattened);
+  if (characters.length <= APPROVAL_REJECTION_REASON_PREVIEW_LENGTH) return flattened;
+  return `${characters.slice(0, APPROVAL_REJECTION_REASON_PREVIEW_LENGTH).join("").trimEnd()}…`;
+}
+
+/**
+ * 결재 결과 알림 하나가 가리키는 결재 행 — 두 표 중 하나다.
+ *
+ *  · REPAIR_CASE — `repair_case_approvals` 의 한 행(수리 검수 승인 · 최종 출하 승인).
+ *    접수 건이 없거나 휴지통에 간 결재는 조회가 애초에 내놓지 않으므로 인수번호가
+ *    언제나 있다.
+ *  · PART_ISSUE — `inventory_part_issue_approvals` 의 한 행(부품 불출 승인). 무엇에
+ *    대한 신청인가는 「불출 승인 대기」 알림과 같은 규칙으로 고른다(인수번호 → 사용처
+ *    → 삭제된 접수 건). `partRequestId` 가 있으면 요청 기반, 없으면 직접 사용이다.
+ */
+export type ApprovalOutcomeTarget =
+  | {
+      source: "REPAIR_CASE";
+      /** 결정된 결재 행의 id. 알림 키가 이 값으로 유일해진다. */
+      approvalId: string;
+      repairCaseId: string;
+      intakeNumber: string;
+      approvalType: ShipmentApprovalType;
+    }
+  | {
+      source: "PART_ISSUE";
+      approvalId: string;
+      /** 요청 기반 불출이면 그 부품 요청. 직접 사용이면 `null`. */
+      partRequestId: string | null;
+      intakeNumber: string | null;
+      destinationNote: string | null;
+    };
+
+/**
+ * 알림 키에서 결재 행이 어느 표의 것인지 가르는 짧은 표시. 두 표의 id 가 우연히
+ * 겹쳐도(둘 다 uuid 라 실제로는 없다) 키가 겹치지 않게 하고, 키만 보고도 어느 표를
+ * 봐야 하는지 알게 한다. 확인 키의 형식(`종류:나머지`, 영숫자·`:`·`-`·`_`)을 지킨다.
+ */
+const APPROVAL_OUTCOME_KEY_TABLE_TAG: Record<ApprovalOutcomeTarget["source"], string> = {
+  REPAIR_CASE: "rca",
+  PART_ISSUE: "pia",
+};
+
+function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
+  return `${APPROVAL_OUTCOME_KEY_TABLE_TAG[target.source]}:${target.approvalId}`;
+}
+
+function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
+  if (target.source === "REPAIR_CASE") return target.intakeNumber;
+  return target.intakeNumber ?? target.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT;
+}
+
+function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
+  return target.source === "REPAIR_CASE" ? APPROVAL_TYPE_LABELS[target.approvalType] : PART_ISSUE_APPROVAL_LABEL;
+}
+
+/**
+ * "내가 요청한 결재가 최종 승인됐다" 알림 한 줄.
+ *
+ * ── id 와 targetKey 는 결재 행 하나로 유일하다 ────────────────────────────
+ * 이 알림은 할 일이 아니라 **사건**이다. 같은 접수 건에서 검수 승인과 출하 승인이
+ * 둘 다 끝나면 사건도 둘이고, 하나를 눌러 확인해도 다른 하나는 남아야 한다. 그래서
+ * targetKey 를 접수 건이 아니라 id 와 같게 둔다(배지도 사건 수로 센다). id 는 곧
+ * 확인 기록의 키다 — domain/notification-acknowledgement.ts 의 형식을 지킨다.
+ *
+ * ── detail 은 무슨 결재인가 + 누가 승인했나 ──────────────────────────────
+ * 「승인 완료」라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다. 여기 또 적으면
+ * 잘리는 자리의 폭만 먹는다 — 다른 종류들과 같은 갈림이다. 결정자는 **마지막 단계**를
+ * 결재한 사람이다(중간 단계 승인은 이 알림이 되지 않는다 — 조회가 가른다).
+ *
+ * ── href 는 결과를 확인하는 자리 ────────────────────────────────────────
+ *  · 접수 건 결재 → 그 건의 검수/승인 화면(결재 대기 알림과 같은 헬퍼).
+ *  · 부품 불출 → [승인 요청건] 탭. 승인이 끝난 신청이 「실행 대기」로 보이는 곳이다.
+ */
+export function buildApprovalGrantedNotification(
+  input: ApprovalOutcomeTarget & { decidedByName: string }
+): NotificationItem {
+  const id = `APPROVAL_GRANTED:${approvalOutcomeKeySuffix(input)}`;
+  return {
+    id,
+    kind: "APPROVAL_GRANTED",
+    targetKey: id,
+    subject: approvalOutcomeSubject(input),
+    detail: `${approvalOutcomeName(input)} · ${input.decidedByName}`,
+    href: input.source === "REPAIR_CASE" ? repairCaseDetailHrefs(input.repairCaseId).approval : "/inventory/approvals",
+  };
+}
+
+/**
+ * "내가 요청한 결재가 반려됐다" 알림 한 줄.
+ *
+ * id·targetKey·subject 의 규칙은 승인 완료와 같다(위 주석).
+ *
+ * detail 은 무슨 결재인가 + 반려 사유 앞부분이다. 반려된 사람이 다음에 할 일은
+ * 사유를 읽고 고쳐서 다시 올리는 것이라, 누가 반려했는지보다 **왜**가 먼저다. 사유가
+ * 비어 있으면(표 CHECK 가 NULL 은 막지만 공백만 있는 글은 막지 않는다) 결재 이름만
+ * 적는다.
+ *
+ * href 는 다시 올리는 자리다:
+ *  · 접수 건 결재 → 그 건의 검수/승인 화면(재요청 단추가 거기 있다).
+ *  · 요청 기반 불출 → 부품 요청 관리 목록(반려된 요청을 거기서 다시 불출 신청한다).
+ *  · 직접 사용 불출 → 재고 목록(직접 사용은 품목의 [사용]에서 다시 시작한다).
+ */
+export function buildApprovalRejectedNotification(
+  input: ApprovalOutcomeTarget & { decisionReason: string | null }
+): NotificationItem {
+  const id = `APPROVAL_REJECTED:${approvalOutcomeKeySuffix(input)}`;
+  const reason = previewApprovalRejectionReason(input.decisionReason);
+  const name = approvalOutcomeName(input);
+  return {
+    id,
+    kind: "APPROVAL_REJECTED",
+    targetKey: id,
+    subject: approvalOutcomeSubject(input),
+    detail: reason.length > 0 ? `${name} · 사유: ${reason}` : name,
+    href:
+      input.source === "REPAIR_CASE"
+        ? repairCaseDetailHrefs(input.repairCaseId).approval
+        : input.partRequestId !== null
+          ? "/inventory/requests"
+          : "/inventory",
   };
 }

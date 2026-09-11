@@ -28,7 +28,8 @@ import { listAcknowledgedNotificationKeys } from "../queries/notification-acknow
  *     사라지면 안 된다.
  *  3. 조회는 **넘긴 키로만** 답한다(내가 확인한 다른 키가 끼지 않는다).
  *  4. 빈 키 목록은 **DB 를 부르지 않는다.**
- *  5. 형식이 틀린 키는 거절되고 행이 남지 않는다. 입구를 거치지 않고 표에 직접
+ *  5. 형식이 틀린 키는 거절되고 행이 남지 않는다. 형식이 맞아도 할 일 알림의
+ *     키(눌러서 확인하는 종류가 아닌 것)는 거절된다. 입구를 거치지 않고 표에 직접
  *     넣어도 CHECK(1~200자)가 막는다.
  *  6. 사용자 행이 지워지면 그 사람의 확인 기록도 함께 사라진다(CASCADE).
  *  7. 감사 로그를 남기지 않는다 — 업무 자료가 아니다.
@@ -212,6 +213,30 @@ describe("acknowledgeNotification / listAcknowledgedNotificationKeys", () => {
       if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
     }
     assert.equal((await rowsFor(userAId)).length, before, "거절됐는데 행이 남았다");
+  });
+
+  test("🔴 6a. 형식이 맞아도 할 일 알림의 키는 거절되고 행이 남지 않는다 — 확인으로 숨기는 길이 없다", async () => {
+    const before = (await rowsFor(userAId)).length;
+    const todoKeys = [
+      `REPAIR_CASE_APPROVAL:${randomUUID()}:FINAL_SHIPMENT`,
+      `PART_REQUEST_PENDING:${randomUUID()}`,
+      `PART_STOCK_BELOW_MINIMUM:${randomUUID()}:DSS`,
+      `CUSTOMER_REPAIR_REQUEST_NEW:${randomUUID()}`,
+      `PART_ISSUE_APPROVAL_PENDING:${randomUUID()}`,
+      `SOME_FUTURE_KIND:${randomUUID()}`,
+    ];
+    for (const notificationKey of todoKeys) {
+      const result = await acknowledgeNotification({ userId: userAId, notificationKey });
+      assert.equal(result.ok, false, `통과했다: ${notificationKey}`);
+      if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    }
+    assert.equal((await rowsFor(userAId)).length, before, "거절됐는데 행이 남았다");
+
+    // 대조 — 눌러서 확인하는 두 종류의 키는 통과한다.
+    for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"]) {
+      const result = await acknowledgeNotification({ userId: userAId, notificationKey: freshKey(kind) });
+      assert.deepEqual(result, { ok: true, newlyAcknowledged: true }, kind);
+    }
   });
 
   test("6b. 입구를 거치지 않고 표에 직접 넣어도 CHECK 가 1~200자를 지킨다", async () => {
