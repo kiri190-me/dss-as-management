@@ -68,6 +68,7 @@ import {
 } from "@/lib/domain/domestic-order-sheet-heading";
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
+import DomesticOrderDueDatesCell from "./DomesticOrderDueDatesCell";
 import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
 
 /**
@@ -174,11 +175,21 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  *
  * **열둘뿐인 것은 일부러다.** 금액·입금완료·고르기 칸은 다루는 방식이 제각각이라
  * (쉼표가 섞인 숫자, 체크상자, UUID 를 고르는 드롭다운) 아직 같은 방식으로 묶지
- * 않았다. 날짜 중에서도 **납품일과 납기요청일은 들어오지 않는다** — 납품일은
- * 사람이 적는 값이 아니고(아래 '납품일은 수리 건의 실제 출하일이다'),
- * 납기요청일은 한 칸에 날짜가 여럿인 별도 표다. 그 칸들은 지금도 `줄 수정`
- * 폼에서 고친다 — **`행 추가` 와 `줄 수정` 은 그대로 남고**, 줄의 나머지를 누르면
- * 폼이 열리는 동작도 그대로다.
+ * 않았다 — 금액은 견적서에서 가져오는 값이라 칸 편집을 두지 않기로 했다(사용자
+ * 결정 2026-09-11). 날짜 중에서도 **납품일은 들어오지 않는다** — 사람이 적는
+ * 값이 아니다(아래 '납품일은 수리 건의 실제 출하일이다'). 그 칸들은 지금도
+ * `줄 수정` 폼에서 고친다 — **`행 추가` 와 `줄 수정` 은 그대로 남고**, 줄의
+ * 나머지를 누르면 폼이 열리는 동작도 그대로다.
+ *
+ * **납기요청일은 열둘과 따로 눌러 고친다(2026-09-11).** 한 칸에 날짜가 여럿인
+ * 별도 표라 편집칸이 **날짜 목록**이다(DomesticOrderDueDatesCell — 추가 · 삭제 ·
+ * 고치기). 🔴 이 줄에 날짜가 없어 수리 건의 요청일을 빌려 보여 주는 칸이라도
+ * 편집 목록은 **빈 목록으로** 열린다 — 빌린 날짜를 채우면 저장 한 번에 수리 건
+ * 값이 이 줄의 납기요청일로 굳는다(그 파일 헤더 ②).
+ *
+ * ⚠️ **견적서가 연결된 줄의 견적서번호 · 견적발행일은 눌러 고치지 않는다.** 그
+ * 둘은 견적서의 값으로 덮여 보이는 칸이라, 고쳐도 화면이 바뀌지 않는다
+ * (DomesticOrderTextCell 헤더). 그 줄에서는 글자만 그리고 까닭을 title 로 띄운다.
  *
  * ⚠️ 이 화면의 저장은 **보낸 칸만 고치지 않는다.** 칸 하나를 고쳐도 그 줄의 값
  * 전체를 실어 보내야 하고, 그러지 않으면 나머지 칸이 지워진다. 그 규칙과 까닭은
@@ -527,14 +538,19 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
       {display.lines.map((line, index) => (
         // 같은 날짜에 같은 메모가 두 번 적힐 수 있어(사람이 적는 값이다) 글자를
         // key 로 쓰지 않는다. 이 목록은 다시 정렬되지 않으므로 차례가 곧 신원이다.
-        <div key={index}>
+        //
+        // <div> 가 아니라 block 인 <span> 이다 — 고칠 수 있는 사람에게는 이 줄들이
+        // 눌러서 여는 <button> 안에 들어가는데(DomesticOrderDueDatesCell), 버튼 안에는
+        // 구문 요소(phrasing content)만 둘 수 있다. 화면에서는 <div> 와 똑같이 한
+        // 줄에 날짜 하나로 쌓인다.
+        <span key={index} className="block">
           {line}
           {display.borrowed && (
             <span className={borrowedBadgeClass} title={DOMESTIC_ORDER_DUE_DATE_LINK_NOTE}>
               {DUE_DATE_FROM_REPAIR_CASE_LABEL}
             </span>
           )}
-        </div>
+        </span>
       ))}
     </>
   );
@@ -1001,6 +1017,13 @@ const CARD_FIELD_GROUPS: {
       field: DomesticOrderInlineEditableField;
       wrapping: InlineEditCellWrapping;
     };
+    /**
+     * 납기요청일 칸 — 날짜 **목록**을 그 자리에서 고친다(DomesticOrderDueDatesCell).
+     * 위 edit 와 따로인 것은 값이 문자열 하나가 아니라서다(그 파일 헤더). 표의 같은
+     * 칸도 같은 부품을 쓴다 — 좁은 화면으로 옮겼다고 고칠 수 있던 칸이 사라지면
+     * 안 된다. 접는 방식은 바로 아래 `<dd>` 가 쓰는 것과 결과가 같은 값이다.
+     */
+    dueDatesEdit?: { wrapping: InlineEditCellWrapping };
   }[];
 }[] = [
   {
@@ -1046,6 +1069,9 @@ const CARD_FIELD_GROUPS: {
         },
         multiline: true,
         hint: DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
+        // 멀티라인 <dd> 의 접는 방식 그대로(위 multiline). 빌려 온 날짜가 보이는
+        // 줄이라도 편집 목록은 빈 목록으로 열린다(DomesticOrderDueDatesCell ②).
+        dueDatesEdit: { wrapping: "break-words whitespace-pre-line" },
       },
     ],
   },
@@ -2245,9 +2271,25 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         {/* 날짜가 여럿이면 한 줄에 하나씩 전부 — 칼럼은 늘리지
-                            않고 줄 높이만 늘어난다(DueDateCellContent). */}
+                            않고 줄 높이만 늘어난다(DueDateCellContent).
+
+                            고칠 수 있으면 그 줄들 자체가 버튼이고, 누르면 이
+                            자리에 **날짜 목록 편집**이 열린다
+                            (DomesticOrderDueDatesCell). 칸이 넓어지는 것은
+                            편집하는 동안뿐이다. numeric 은 날짜 칸 셋과 같은
+                            이유로 넘긴다(`<td>` 의 tabular-nums 가 버튼 안까지 안
+                            내려온다). */}
                         <td className="px-3 py-2 tabular-nums">
-                          <DueDateCellContent row={row} />
+                          {canEdit ? (
+                            <DomesticOrderDueDatesCell
+                              row={row}
+                              displayText={<DueDateCellContent row={row} />}
+                              wrapping="whitespace-nowrap"
+                              numeric="tabular-nums"
+                            />
+                          ) : (
+                            <DueDateCellContent row={row} />
+                          )}
                         </td>
                         {/* 연결이 없는 줄은 시트에 적혀 있던 글자를 그대로 보여 준다
                             (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
@@ -2496,7 +2538,14 @@ export default function DomesticOrderListScreen({
                                           없고, 보이는 글자는 양쪽이 똑같다.
                                           접는 방식은 바로 위 <dd> 가 쓰는 것과
                                           결과가 같은 값을 넘긴다(edit.wrapping). */}
-                                      {canEdit && field.edit ? (
+                                      {canEdit && field.dueDatesEdit ? (
+                                        // 납기요청일 — 날짜 목록을 고친다(표와 같은 부품).
+                                        <DomesticOrderDueDatesCell
+                                          row={row}
+                                          displayText={field.of(row)}
+                                          wrapping={field.dueDatesEdit.wrapping}
+                                        />
+                                      ) : canEdit && field.edit ? (
                                         <DomesticOrderTextCell
                                           row={row}
                                           field={field.edit.field}

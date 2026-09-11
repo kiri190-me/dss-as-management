@@ -248,6 +248,8 @@ function cellEditRow(dueDates: readonly { dueDate: string; note: string | null }
     dueDates,
     quoteIssuedDate: null,
     quoteNumber: null,
+    // 칸 편집이 되실어 보내는 견적서 연결(2026-09-11, domestic-order-cell-edit.ts).
+    quoteId: null,
     progressNote: null,
     deliveredDate: null,
     deliveredBy: null,
@@ -274,7 +276,7 @@ test("⚠️ 빌려 온 날짜는 저장 payload 에 실리지 않는다 — 그
   const fields = buildDomesticOrderCellUpdateFields(cellEditRow([]), "quoteNumber", "Q-1");
   assert.deepEqual(fields.dueDates, [], "빌려 온 날짜가 저장에 섞여 나갔다");
   // 계산된 값이 자기 이름으로 키를 하나 더 만들지도 않는다.
-  assert.equal(Object.keys(fields).length, 23);
+  assert.equal(Object.keys(fields).length, 24);
 });
 
 test("이 줄에 적힌 납기요청일은 그대로 되실려 나간다 — 칸 하나 고친다고 지워지지 않는다", () => {
@@ -284,5 +286,5 @@ test("이 줄에 적힌 납기요청일은 그대로 되실려 나간다 — 칸
     "Q-1"
   );
   assert.deepEqual(fields.dueDates, [{ dueDate: "2026-01-20", note: "1차분" }]);
-  assert.equal(Object.keys(fields).length, 23);
+  assert.equal(Object.keys(fields).length, 24);
 });

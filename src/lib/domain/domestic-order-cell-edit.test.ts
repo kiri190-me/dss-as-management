@@ -5,13 +5,25 @@ import {
   DOMESTIC_ORDER_INLINE_EDIT_DATE,
   DOMESTIC_ORDER_INLINE_EDIT_LABELS,
   DOMESTIC_ORDER_INLINE_EDIT_MULTILINE,
+  DOMESTIC_ORDER_QUOTE_FOLLOWING_FIELDS,
+  DOMESTIC_ORDER_QUOTE_LOCK_NOTE,
   buildDomesticOrderCellUpdateFields,
+  buildDomesticOrderDueDatesUpdateFields,
+  domesticOrderDueDateBorrowHint,
+  domesticOrderDueDateEditDraft,
+  domesticOrderDueDatesDraftText,
   domesticOrderFaultDescriptionHint,
   domesticOrderInlineEditControl,
+  domesticOrderInlineEditQuoteLock,
   domesticOrderInlineEditYearNotice,
   type DomesticOrderCellEditRow,
   type DomesticOrderInlineEditableField,
 } from "./domestic-order-cell-edit";
+import { resolveDomesticOrderDueDateDisplay } from "./requested-due-date-link";
+// 보낸 값이 **실제 관문**을 지나 무엇이 되는지까지 본다 — 이 파일의 규칙은
+// "무엇을 싣는가"이고, 실은 것이 저장될 값이 되는 곳은 검증이다. 순수 함수라 DB
+// 없이 부를 수 있다(읽기만 한다).
+import { validateDomesticOrderFields } from "../validation/domestic-order-input";
 
 /**
  * 내자 정리의 칸 편집이 **보낼 값**을 만드는 규칙.
@@ -48,6 +60,9 @@ const COLLECT_FIELDS_KEYS = [
   "dueDates",
   "quoteIssuedDate",
   "quoteNumber",
+  // 2026-08-28 견적서 연결 때 폼에만 들어오고 이 목록엔 빠져 있었다 — 그래서 이
+  // 시험이 "폼과 한 칸도 다르지 않다"고 말하면서 통과했다(2026-09-11 에 바로잡음).
+  "quoteId",
   "progressNote",
   "deliveredDate",
   "deliveredBy",
@@ -58,6 +73,9 @@ const COLLECT_FIELDS_KEYS = [
   "historyNote",
   "etcNote",
 ] as const;
+
+/** 이 줄에 연결된 견적서. 검증을 지나야 하므로 UUID 모양이다. */
+const QUOTE_ID = "33333333-3333-4333-8333-333333333333";
 
 /** 모든 칸이 채워진 줄. 하나라도 빠지면 그것이 지워진 것인지 이 시험이 말해 준다. */
 function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCellEditRow {
@@ -79,6 +97,7 @@ function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCe
     ],
     quoteIssuedDate: "2026-01-07",
     quoteNumber: "Q-1",
+    quoteId: QUOTE_ID,
     progressNote: "수리중\n부품 대기",
     deliveredDate: "2026-02-20",
     deliveredBy: "김유진",
@@ -127,7 +146,7 @@ test("보내는 키는 `줄 수정` 폼의 collectFields 와 한 칸도 다르�
   assert.deepEqual(Object.keys(fields).sort(), [...COLLECT_FIELDS_KEYS].sort());
   // 빠진 키가 없다는 것을 한 번 더 못 박는다 — 위 비교는 목록 자체가 함께
   // 줄어들면 통과해 버린다.
-  assert.equal(Object.keys(fields).length, 23);
+  assert.equal(Object.keys(fields).length, 24);
 });
 
 test("dueDates · displayOrder · paymentCompleted 는 빠지지 않는다 — 셋 다 조용히 지워지는 칸이다", () => {
@@ -380,7 +399,7 @@ test("여러 줄 칸 넷을 각각 고쳐도 나머지 열한 칸이 원래 값 
       { dueDate: "2026-01-20", note: "1차분" },
       { dueDate: "2026-02-15", note: null },
     ]);
-    assert.equal(Object.keys(built).length, 23);
+    assert.equal(Object.keys(built).length, 24);
   }
 });
 
@@ -572,8 +591,8 @@ test("⚠️ 계산된 납품일(displayDeliveredDate)은 실리지 않는다 �
   // 계산된 값도, 조인해 온 수리 건의 칸도 키 자체가 없어야 한다.
   assert.equal("displayDeliveredDate" in built, false, "계산된 값이 함께 실려 나갔다");
   assert.equal("repairCaseActualShipmentDate" in built, false, "수리 건의 칸이 실려 나갔다");
-  // 키 개수는 그대로 23개다 — 늘었다면 무언가가 몰래 끼어든 것이다.
-  assert.equal(Object.keys(built).length, 23);
+  // 키 개수는 그대로 24개다 — 늘었다면 무언가가 몰래 끼어든 것이다.
+  assert.equal(Object.keys(built).length, 24);
 });
 
 /**
@@ -624,9 +643,9 @@ test("날짜 칸 셋을 각각 고쳐도 나머지 22칸이 원래 값 그대로
       assert.equal(built[key], original[key], `${field} 을(를) 고치는데 ${key} 가 바뀌었다`);
     }
 
-    // 키 개수는 그대로 23개다 — 날짜 칸이 자기 이름으로 키를 하나 더 만들면
+    // 키 개수는 그대로 24개다 — 날짜 칸이 자기 이름으로 키를 하나 더 만들면
     // (예: orderIssuedDate 를 안 지우고 덧붙이면) 여기서 걸린다.
-    assert.equal(Object.keys(built).length, 23);
+    assert.equal(Object.keys(built).length, 24);
   }
 });
 
@@ -653,7 +672,7 @@ test("날짜를 빈 값으로 지우면 빈 문자열 그대로 나간다 — nu
       { dueDate: "2026-01-20", note: "1차분" },
       { dueDate: "2026-02-15", note: null },
     ]);
-    assert.equal(Object.keys(built).length, 23);
+    assert.equal(Object.keys(built).length, 24);
   }
 });
 
@@ -756,4 +775,286 @@ test("년도 안내는 발주발행일에만 붙는다 — 그 칸만 목록에�
       `${field} 에 년도 안내가 붙었다`
     );
   }
+});
+
+/**
+ * ── 🔴 여기부터: 견적서 연결(quoteId) — 세금계산서발행일이 밟던 구멍 (2026-09-11) ──
+ *
+ * 2026-08-28 견적서 연결이 `줄 수정` 폼의 collectFields 에는 quoteId 를 넣었지만
+ * 이 파일의 목록에는 넣지 않았다. 검증은 키 없음을 null 로 접으므로, 그 뒤로
+ * **표에서 어느 칸을 고쳐도 그 줄의 견적서 연결이 풀렸다.** 세금계산서발행일을
+ * 적는 줄은 대개 견적서가 붙은 줄이라 이 칸이 그 구멍을 가장 자주 밟는다.
+ *
+ * 아래 첫 시험은 고치기 전 코드에서 **실패한다** — 검증을 지난 quoteId 가 null 이
+ * 된다. 위 COLLECT_FIELDS_KEYS 에 quoteId 가 빠져 있던 동안에는 "폼과 한 칸도
+ * 다르지 않다"는 시험이 틀린 기준으로 통과하고 있었다.
+ */
+
+test("🔴 세금계산서발행일을 고쳐도 견적서 연결이 검증을 지나 그대로 남는다", () => {
+  const built = buildDomesticOrderCellUpdateFields(row(), "taxInvoiceDate", "2026-09-11");
+  assert.equal(built.quoteId, QUOTE_ID, "quoteId 가 실리지 않았다 — 저장 한 번에 연결이 풀린다");
+
+  const validated = validateDomesticOrderFields(built);
+  assert.equal(validated.ok, true, "칸 편집이 만든 값이 검증에서 거절됐다");
+  if (!validated.ok) return;
+  assert.equal(validated.data.taxInvoiceDate, "2026-09-11");
+  assert.equal(validated.data.quoteId, QUOTE_ID, "검증을 지나며 견적서 연결이 null 이 됐다");
+});
+
+test("🔴 열두 칸 중 무엇을 고쳐도 견적서 연결은 그대로다 — 한 칸만 새도 연결이 풀린다", () => {
+  for (const field of ALL_INLINE_FIELDS) {
+    const value = DATE_INLINE_FIELDS.includes(field) ? "2026-09-11" : "새 값";
+    const validated = validateDomesticOrderFields(
+      buildDomesticOrderCellUpdateFields(row(), field, value)
+    );
+    assert.equal(validated.ok, true, `${field} 을(를) 고친 값이 검증에서 거절됐다`);
+    if (!validated.ok) continue;
+    assert.equal(validated.data.quoteId, QUOTE_ID, `${field} 을(를) 고치는데 견적서 연결이 풀렸다`);
+  }
+  // 연결이 없던 줄은 없는 채로 남는다 — 없던 연결이 생기는 것도 곤란하다.
+  const unlinked = validateDomesticOrderFields(
+    buildDomesticOrderCellUpdateFields(row({ quoteId: null }), "taxInvoiceDate", "2026-09-11")
+  );
+  assert.equal(unlinked.ok, true);
+  if (unlinked.ok) assert.equal(unlinked.data.quoteId, null);
+});
+
+test("세금계산서발행일은 비워서 지울 수 있고, 그래도 견적서 연결은 남는다", () => {
+  const validated = validateDomesticOrderFields(
+    buildDomesticOrderCellUpdateFields(row(), "taxInvoiceDate", "")
+  );
+  assert.equal(validated.ok, true);
+  if (!validated.ok) return;
+  assert.equal(validated.data.taxInvoiceDate, null);
+  assert.equal(validated.data.quoteId, QUOTE_ID);
+});
+
+test("견적서가 연결된 줄은 견적서번호 · 견적발행일만 막는다 — 세금계산서발행일은 열린다", () => {
+  const linked = { quoteId: QUOTE_ID };
+  for (const field of ALL_INLINE_FIELDS) {
+    const lock = domesticOrderInlineEditQuoteLock(linked, field);
+    if (field === "quoteNumber" || field === "quoteIssuedDate") {
+      assert.equal(lock, DOMESTIC_ORDER_QUOTE_LOCK_NOTE, `${field} 는 견적서를 따르는 칸이라 막혀야 한다`);
+    } else {
+      assert.equal(lock, null, `${field} 는 견적서와 상관없는 칸인데 막혔다`);
+    }
+  }
+  // 이번 일의 요점 — 견적서가 붙은 줄이 바로 세금계산서를 적는 줄이다.
+  assert.equal(domesticOrderInlineEditQuoteLock(linked, "taxInvoiceDate"), null);
+
+  // 연결이 없는 줄은 아무것도 막지 않는다 — 그 줄의 두 칸은 손으로 적는 값 그대로다.
+  for (const field of ALL_INLINE_FIELDS) {
+    assert.equal(domesticOrderInlineEditQuoteLock({ quoteId: null }, field), null);
+  }
+
+  // 막는 칸은 `줄 수정` 폼 안내의 셋에서 칸 편집이 없는 금액만 뺀 둘이다.
+  assert.deepEqual([...DOMESTIC_ORDER_QUOTE_FOLLOWING_FIELDS].sort(), [
+    "quoteIssuedDate",
+    "quoteNumber",
+  ]);
+  // 까닭과 가는 길을 함께 말한다 — 이유 없이 안 열리는 칸은 고장으로 읽힌다.
+  assert.ok(DOMESTIC_ORDER_QUOTE_LOCK_NOTE.includes("연결된 견적서를 따르"));
+  assert.ok(DOMESTIC_ORDER_QUOTE_LOCK_NOTE.includes("줄 수정"));
+});
+
+test("금액(VAT별도)·입금완료는 여전히 칸 편집이 아니다 — 금액은 견적서에서 가져오는 값이다(사용자 결정 2026-09-11)", () => {
+  const labelled = Object.keys(DOMESTIC_ORDER_INLINE_EDIT_LABELS);
+  assert.equal(labelled.includes("amountExcludingVat"), false);
+  assert.equal(labelled.includes("paymentCompleted"), false);
+});
+
+/**
+ * ── 여기부터: 납기요청일 목록 편집 (2026-09-11) ──────────────────────────────
+ *
+ * 저장은 칸 편집과 같은 길이고 줄 전체를 싣는다. 걸리는 것:
+ *
+ *  a. dueDates 만 바뀌고 **나머지 스물세 칸은 그대로** 실린다(견적서 연결 포함).
+ *  b. 🔴 **빌려 온 날짜로 편집 목록을 채우지 않는다** — 수리 건의 고객 요청
+ *     납기일이 이 줄의 납기요청일로 굳는다(HANDOFF V-3 · V-5).
+ *  c. 빈 목록으로 저장하면 이 줄의 날짜가 비고, 목록은 다시 수리 건 요청일을
+ *     빌려 보여 준다.
+ *  d. 검증은 `줄 수정` 폼과 같은 관문이다 — 빈 줄은 빠지고, 오류는 편집칸의 줄
+ *     번호로 돌아온다.
+ */
+
+/** 이 줄에 적힌 날짜가 없고, 연결된 수리 건에 요청일이 있는 줄(목록이 빌려 보여 준다). */
+function borrowingRow() {
+  return {
+    ...row({ dueDates: [] }),
+    repairCaseCustomerRequestedDueDate: "2026-03-15",
+  };
+}
+
+test("🔴 빌려 온 날짜는 편집 목록에 채우지 않는다 — 빈 목록으로 열린다", () => {
+  const subject = borrowingRow();
+  // 전제: 목록은 지금 수리 건의 요청일을 빌려 보여 주고 있다.
+  const display = resolveDomesticOrderDueDateDisplay(subject);
+  assert.equal(display.borrowed, true, "이 시험의 전제가 깨졌다 — 빌려 온 상태가 아니다");
+  assert.deepEqual(display.lines, ["2026-03-15"]);
+
+  // 편집 목록은 이 줄에 적힌 것만 — 없으므로 빈 목록이다.
+  assert.deepEqual(domesticOrderDueDateEditDraft(subject), []);
+
+  // 그대로 저장해도(아무것도 안 고치고 저장만 눌러도) 수리 건의 날짜가 실리지 않는다.
+  const built = buildDomesticOrderDueDatesUpdateFields(subject, domesticOrderDueDateEditDraft(subject));
+  assert.deepEqual(built.dueDates, [], "빌려 온 날짜가 이 줄의 납기요청일로 실려 나갔다");
+  assert.equal("repairCaseCustomerRequestedDueDate" in built, false);
+});
+
+test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 — 메모의 null 은 빈 문자열로", () => {
+  const subject = {
+    ...row({
+      dueDates: [
+        { dueDate: "2026-02-15", note: null },
+        { dueDate: "2026-01-20", note: "1차분" },
+      ],
+    }),
+    // 적힌 날짜가 있으면 수리 건 요청일은 목록에도 편집에도 끼지 않는다.
+    repairCaseCustomerRequestedDueDate: "2026-03-15",
+  };
+  assert.deepEqual(domesticOrderDueDateEditDraft(subject), [
+    { dueDate: "2026-02-15", note: "" },
+    { dueDate: "2026-01-20", note: "1차분" },
+  ]);
+});
+
+test("납기요청일을 고쳐도 나머지 스물세 칸은 원래 값 그대로 실린다 — 견적서 연결 포함", () => {
+  const original = row();
+  const built = buildDomesticOrderDueDatesUpdateFields(original, [
+    { dueDate: "2026-04-01", note: "1차분" },
+  ]);
+  assert.deepEqual(built.dueDates, [{ dueDate: "2026-04-01", note: "1차분" }]);
+  for (const key of COLLECT_FIELDS_KEYS) {
+    if (key === "dueDates") continue;
+    assert.equal(built[key], original[key], `납기요청일을 고치는데 ${key} 가 바뀌었다`);
+  }
+  assert.equal(built.quoteId, QUOTE_ID);
+  assert.equal(built.deliveredDate, "2026-02-20");
+  assert.equal(Object.keys(built).length, 24);
+  assert.deepEqual(Object.keys(built).sort(), [...COLLECT_FIELDS_KEYS].sort());
+});
+
+test("날짜 추가 · 삭제 · 고치기가 보낸 목록 그대로 검증을 지난다 — 차례도 그대로", () => {
+  // 원래 [01-20 (1차분), 02-15] 인 줄에서: 둘째를 지우고, 첫째를 고치고, 새로 둘을 더한다.
+  const drafts = [
+    { dueDate: "2026-01-25", note: "1차분(변경)" },
+    { dueDate: "2026-03-01", note: "" },
+    { dueDate: "2026-03-20", note: "3차분" },
+  ];
+  const validated = validateDomesticOrderFields(
+    buildDomesticOrderDueDatesUpdateFields(row(), drafts)
+  );
+  assert.equal(validated.ok, true);
+  if (!validated.ok) return;
+  assert.deepEqual(validated.data.dueDates, [
+    { dueDate: "2026-01-25", note: "1차분(변경)" },
+    { dueDate: "2026-03-01", note: null },
+    { dueDate: "2026-03-20", note: "3차분" },
+  ]);
+  // 다른 칸은 그대로다 — 특히 화면에 칸이 없는 둘.
+  assert.equal(validated.data.quoteId, QUOTE_ID);
+  assert.equal(validated.data.deliveredDate, "2026-02-20");
+  assert.equal(validated.data.taxInvoiceDate, "2026-02-25");
+});
+
+test("빈 목록으로 저장하면 이 줄의 납기요청일이 비고, 목록은 다시 수리 건 요청일을 빌려 보여 준다", () => {
+  const subject = { ...row(), repairCaseCustomerRequestedDueDate: "2026-03-15" };
+  const validated = validateDomesticOrderFields(buildDomesticOrderDueDatesUpdateFields(subject, []));
+  assert.equal(validated.ok, true);
+  if (!validated.ok) return;
+  // 저장하는 쪽은 받은 목록으로 통째로 바꿔 적는다(mutations 의 replaceDueDates) —
+  // 빈 배열이면 그 줄의 날짜가 모두 지워진다.
+  assert.deepEqual(validated.data.dueDates, []);
+
+  // 그 결과를 목록이 그리면 수리 건의 요청일이 표시와 함께 다시 보인다.
+  const after = resolveDomesticOrderDueDateDisplay({
+    dueDates: validated.data.dueDates,
+    repairCaseCustomerRequestedDueDate: subject.repairCaseCustomerRequestedDueDate,
+  });
+  assert.deepEqual(after, { lines: ["2026-03-15"], borrowed: true });
+  // 그리고 편집칸 아래 안내가 말한 것이 바로 그 날짜다.
+  assert.equal(domesticOrderDueDateBorrowHint(subject), "2026-03-15");
+});
+
+test("빈 줄은 거르지 않고 보낸다 — 검증이 빼고, 오류는 편집칸의 줄 번호로 돌아온다", () => {
+  // 가운데 빈 줄(추가만 하고 안 채운 줄)을 여기서 걸러 내면, 뒤 줄의 오류가 한
+  // 줄 앞 번호로 돌아와 엉뚱한 줄 밑에 붙는다.
+  const drafts = [
+    { dueDate: "2026-04-01", note: "" },
+    { dueDate: "", note: "" },
+    { dueDate: "", note: "날짜 없이 메모만" },
+  ];
+  const built = buildDomesticOrderDueDatesUpdateFields(row(), drafts);
+  assert.equal((built.dueDates as unknown[]).length, 3, "빈 줄을 미리 걸러 냈다");
+
+  const validated = validateDomesticOrderFields(built);
+  assert.equal(validated.ok, false);
+  if (validated.ok) return;
+  assert.ok(validated.fieldErrors["dueDates.2"], "셋째 줄의 오류가 셋째 줄 번호로 오지 않았다");
+  assert.equal(validated.fieldErrors["dueDates.1"], undefined, "빈 줄이 오류가 됐다");
+
+  // 빈 줄만 있는 목록은 오류 없이 빈 목록이 된다(추가하고 안 채운 채 저장).
+  const onlyBlank = validateDomesticOrderFields(
+    buildDomesticOrderDueDatesUpdateFields(row(), [{ dueDate: "", note: "  " }])
+  );
+  assert.equal(onlyBlank.ok, true);
+  if (onlyBlank.ok) assert.deepEqual(onlyBlank.data.dueDates, []);
+});
+
+test("없는 날짜와 스무 개 초과는 `줄 수정` 폼과 같은 관문에서 거절된다", () => {
+  const badDate = validateDomesticOrderFields(
+    buildDomesticOrderDueDatesUpdateFields(row(), [
+      { dueDate: "2026-04-01", note: "" },
+      { dueDate: "2026-02-31", note: "" },
+    ])
+  );
+  assert.equal(badDate.ok, false);
+  if (!badDate.ok) assert.ok(badDate.fieldErrors["dueDates.1"]);
+
+  const tooMany = validateDomesticOrderFields(
+    buildDomesticOrderDueDatesUpdateFields(
+      row(),
+      Array.from({ length: 21 }, (_, index) => ({
+        dueDate: `2026-05-${String(index + 1).padStart(2, "0")}`,
+        note: "",
+      }))
+    )
+  );
+  assert.equal(tooMany.ok, false);
+  if (!tooMany.ok) assert.ok(tooMany.fieldErrors.dueDates, "목록 전체 오류(dueDates)로 와야 한다");
+});
+
+test("보낸 목록은 새 배열·새 객체다 — 편집 중인 상태가 그대로 넘어가지 않는다", () => {
+  const drafts = [{ dueDate: "2026-04-01", note: "메모" }];
+  const built = buildDomesticOrderDueDatesUpdateFields(row(), drafts);
+  assert.notEqual(built.dueDates, drafts);
+  assert.notEqual((built.dueDates as unknown[])[0], drafts[0]);
+  // 앞뒤 공백도 다듬지 않는다 — 그 일은 검증이 한다.
+  const spaced = buildDomesticOrderDueDatesUpdateFields(row(), [
+    { dueDate: " 2026-04-01 ", note: " 1차 " },
+  ]);
+  assert.deepEqual(spaced.dueDates, [{ dueDate: " 2026-04-01 ", note: " 1차 " }]);
+});
+
+test("안내 날짜는 목록이 빌려 보여 줄 바로 그 날짜다 — 보일 것이 없으면 안내도 없다", () => {
+  assert.equal(
+    domesticOrderDueDateBorrowHint({ repairCaseCustomerRequestedDueDate: "2026-03-15" }),
+    "2026-03-15"
+  );
+  assert.equal(domesticOrderDueDateBorrowHint({ repairCaseCustomerRequestedDueDate: null }), null);
+  assert.equal(domesticOrderDueDateBorrowHint({ repairCaseCustomerRequestedDueDate: "   " }), null);
+});
+
+test("충돌 상자에 담는 납기요청일 — 빈 줄은 빼고, 메모만 친 줄은 남긴다", () => {
+  assert.equal(
+    domesticOrderDueDatesDraftText([
+      { dueDate: "2026-01-20", note: "1차분" },
+      { dueDate: "", note: "" },
+      { dueDate: "", note: "김 과장 확인" },
+      { dueDate: "2026-02-15", note: "" },
+    ]),
+    "2026-01-20 (1차분), (날짜 없음) (김 과장 확인), 2026-02-15"
+  );
+  assert.equal(domesticOrderDueDatesDraftText([]), "");
+  assert.equal(domesticOrderDueDatesDraftText([{ dueDate: " ", note: " " }]), "");
 });

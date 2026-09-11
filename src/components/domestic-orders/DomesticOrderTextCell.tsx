@@ -19,6 +19,7 @@ import {
   buildDomesticOrderCellUpdateFields,
   domesticOrderFaultDescriptionHint,
   domesticOrderInlineEditControl,
+  domesticOrderInlineEditQuoteLock,
   domesticOrderInlineEditYearNotice,
   type DomesticOrderInlineEditableField,
 } from "@/lib/domain/domestic-order-cell-edit";
@@ -131,6 +132,20 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * 정한다 — 표와 카드가 각각 적으면 한쪽에만 붙거나, 년도와 상관없는 날짜 칸에도
  * 붙어 있지도 않은 규칙을 설명하게 된다.
  *
+ * ── ⚠️ 견적서가 연결된 줄의 견적서번호 · 견적발행일은 열리지 않는다 ────
+ * 그 줄의 두 칸은 연결된 견적서의 값으로 덮여 온다(queries 의
+ * mapDomesticOrderRow). 열면 편집칸이 견적서 값으로 채워지고, 저장은 원본 칸에
+ * 들어가지만 화면은 계속 견적서 값을 그려 "저장했는데 안 바뀐다"가 된다. 그래서
+ * 그 줄에서는 버튼 대신 글자만 그리고, 왜 못 고치는지를 title 로 띄운다
+ * (도메인의 domesticOrderInlineEditQuoteLock — `줄 수정` 폼과 같은 조건). 그
+ * 글자를 누르면 줄 전체의 클릭으로 올라가 `줄 수정` 이 열린다 — 연결을 푸는
+ * 자리가 바로 거기라 막지 않는다.
+ *
+ * 판정은 **편집 중인지보다 먼저** 본다. 칸을 열어 둔 사이 다른 곳에서 견적서가
+ * 연결되어 목록이 다시 그려지면, 열려 있던 편집칸이 그대로 남아 덮인 값을 원본
+ * 칸에 저장하는 길이 된다(version 이 어긋나 막히기는 하지만, 애초에 열어 두지
+ * 않는다).
+ *
  * ── 못 고치는 사람에게는 아예 그리지 않는다 ─────────────────────────────
  * canEdit 을 받아 안에서 막지 않고, **부르는 쪽이 이 칸을 그릴지 말지 정한다**
  * (WeeklyReportNotesCell 과 같은 방식). 버튼을 그려 놓고 누르면 거절하는 것은
@@ -144,7 +159,7 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * (buildDraftText — `줄 수정` 폼이 이미 같은 방식이다).
  *
  * ⚠️ **위 ① 때문에 서버로 보내는 fields 를 그대로 담으면 안 된다.** 그쪽은 줄
- * 전체를 덮어쓰는 값이라, 사람이 방금 고친 것은 칸 하나뿐인데 스물세 칸이 쏟아져
+ * 전체를 덮어쓰는 값이라, 사람이 방금 고친 것은 칸 하나뿐인데 스물네 칸이 쏟아져
  * 나온다 — 정작 잃은 글이 그 사이에 묻힌다. 그래서 상자에 담는 것은
  * `{ [field]: value }` 하나뿐이다.
  *
@@ -349,7 +364,7 @@ export default function DomesticOrderTextCell({
           //
           // 얼리기 **전에** 방금 친 글을 붙잡는다. 담는 것은 위 fields 가 아니라
           // 고치던 칸 하나뿐이다 — 저쪽은 줄 전체를 덮어쓰는 값이라 그대로 담으면
-          // 스물세 칸이 쏟아진다(파일 헤더의 '그 칸 하나만').
+          // 스물네 칸이 쏟아진다(파일 헤더의 '그 칸 하나만').
           setIsConflict(true);
           setErrorMessage({
             message: result.message,
@@ -377,6 +392,21 @@ export default function DomesticOrderTextCell({
     setIsConflict(false);
     setIsEditing(false);
     setErrorMessage(null);
+  }
+
+  // 견적서를 따르는 칸이면 버튼도 편집칸도 그리지 않는다(파일 헤더) — 편집 중인지
+  // 보다 먼저 본다. 보이는 글자와 접는 방식은 버튼일 때와 같다. sr-only 조각을
+  // 두지 않으므로(누를 것이 아니다) relative 도 필요 없다.
+  const quoteLock = domesticOrderInlineEditQuoteLock(row, field);
+  if (quoteLock !== null) {
+    return (
+      <span
+        title={quoteLock}
+        className={`block ${wrapping}${numeric === undefined ? "" : ` ${numeric}`}`}
+      >
+        {displayText}
+      </span>
+    );
   }
 
   if (!isEditing) {
