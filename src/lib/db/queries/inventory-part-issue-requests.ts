@@ -35,7 +35,8 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  * (app/(app)/inventory/approvals/page.tsx)이다. 🔴 **누가 어느 묶음을 보는지는
  * 그 페이지가 정한다** — 여기 조회들은 사람으로 거르지 않는다. 예외는 하나,
  * 「내가 결재할 건」(listPartIssueRequestsPendingMyApproval)이 아래 지정 관문으로
- * 좁히는 것뿐이다.
+ * 좁히는 것뿐이다. 부품 요청 관리 화면(app/(app)/inventory/requests/page.tsx)도
+ * [불출] 단추를 잠글지 정하려고 listInProgressPartIssueStatusesByPartRequest 를 부른다.
  *
  * ── 판정을 새로 만들지 않는다 ───────────────────────────────────────────
  * 「이 결재를 내가 처리할 수 있는가」는 출하 승인과 **같은 함수 하나**를 본다 —
@@ -475,4 +476,77 @@ export async function listPartIssueRequestsForPartRequest(
     status: row.status,
     requestedAt: row.requestedAt.toISOString(),
   }));
+}
+
+/**
+ * 부품 요청 여러 개에 대해, 각 요청에 달린 **살아 있는** 불출 신청들의 상태 —
+ * 조회 한 번으로 읽는다. 부품 요청 관리 화면(app/(app)/inventory/requests/page.tsx)이
+ * 「이 요청의 [불출]을 잠가야 하는가」를 정할 때 쓴다.
+ *
+ * 「살아 있다」는 「진행 중인 신청」 묶음과 **같은 목록**(PART_ISSUE_IN_PROGRESS_STATUSES)
+ * 이다 — 글자로 다시 적지 않는다. 끝난 신청(실행됨·반려·취소)은 잡히지 않는다.
+ *
+ * 돌려주는 모양: 부품 요청 id → 그 요청에 달린 살아 있는 신청의 상태들(오래된
+ * 것부터). 살아 있는 신청이 없는 요청은 **아예 들어 있지 않다.** 직접 사용 신청
+ * (부품 요청이 없는 것)은 입력 id 와 짝이 될 수 없으므로 잡히지 않는다.
+ *
+ * 🔴 요청마다 한 번씩 부르지 않는다(N+1). 빈 입력이면 DB 를 부르지 않는다.
+ */
+export async function listInProgressPartIssueStatusesByPartRequest(
+  partRequestIds: readonly string[]
+): Promise<Map<string, InventoryPartIssueRequestStatus[]>> {
+  const statusesByPartRequest = new Map<string, InventoryPartIssueRequestStatus[]>();
+  if (partRequestIds.length === 0) return statusesByPartRequest;
+
+  const rows = await db
+    .select({
+      partRequestId: inventoryPartIssueRequests.partRequestId,
+      status: inventoryPartIssueRequests.status,
+    })
+    .from(inventoryPartIssueRequests)
+    .where(
+      and(
+        inArray(inventoryPartIssueRequests.partRequestId, [...new Set(partRequestIds)]),
+        inArray(inventoryPartIssueRequests.status, PART_ISSUE_IN_PROGRESS_STATUSES)
+      )
+    )
+    .orderBy(asc(inventoryPartIssueRequests.requestedAt), asc(inventoryPartIssueRequests.id));
+
+  for (const row of rows) {
+    // IN 조건 때문에 null 일 수는 없다 — 타입을 좁히려는 것뿐이다.
+    if (row.partRequestId === null) continue;
+    const statuses = statusesByPartRequest.get(row.partRequestId);
+    if (statuses) statuses.push(row.status);
+    else statusesByPartRequest.set(row.partRequestId, [row.status]);
+  }
+  return statusesByPartRequest;
+}
+
+/**
+ * 부품 요청의 [불출]이 잠긴 까닭. 잠기지 않았으면 `null` 을 쓴다(아래 함수).
+ *  · AWAITING_APPROVAL  — 결재 중인 불출 신청이 있다.
+ *  · AWAITING_EXECUTION — 결재 중인 것은 없고, 승인이 끝나 실행을 기다리는 신청이 있다.
+ */
+export type PartRequestIssueLock = "AWAITING_APPROVAL" | "AWAITING_EXECUTION";
+
+/**
+ * 한 부품 요청에 달린 신청 상태들 → 그 요청의 [불출] 잠금. **순수 함수**다.
+ *
+ * 🔴 결재 중이 하나라도 있으면 「승인 대기」가 이긴다 — 실행 대기 건을 실행해도
+ * 결재 중인 건이 남아 있으면 여전히 다시 올릴 수 없기 때문이다. 판정은 이 한
+ * 곳에서만 하고, 상태는 순수 규칙 두 개(결재를 기다리는가 · 지금 실행할 수
+ * 있는가)로 가른다 — 「진행 중인 신청」 묶음의 두 이름표와 같은 갈림이다.
+ *
+ * 🔴 절차(판)가 켜져 있는지는 **보지 않는다.** 관리자가 절차를 꺼도 이미 올라간
+ * 신청은 살아 있어 결재·실행될 수 있으므로, 그 사이 [불출]로 한 번 더 내보내면
+ * 같은 부품이 두 번 나간다.
+ *
+ * 이 잠금은 화면 힌트다. 서버의 불출·신청 mutation 은 이것을 보지 않는다.
+ */
+export function partRequestIssueLockFor(
+  statuses: readonly InventoryPartIssueRequestStatus[]
+): PartRequestIssueLock | null {
+  if (statuses.some((status) => isPartIssueRequestAwaitingApproval(status))) return "AWAITING_APPROVAL";
+  if (statuses.some((status) => isPartIssueRequestExecutable(status))) return "AWAITING_EXECUTION";
+  return null;
 }

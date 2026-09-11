@@ -20,9 +20,11 @@ import {
 import {
   getPartIssueRequestDetail,
   listExecutablePartIssueRequests,
+  listInProgressPartIssueStatusesByPartRequest,
   listPartIssueRequestsForPartRequest,
   listPartIssueRequestsInProgress,
   listPartIssueRequestsPendingMyApproval,
+  partRequestIssueLockFor,
 } from "./inventory-part-issue-requests";
 import {
   INVENTORY_PART_ISSUE_REQUEST_STATUSES,
@@ -38,7 +40,7 @@ import {
  * 없다** — 문을 다는 것은 다음 조각이므로, 여기서 보는 것은 「표가 무엇을 막고
  * 무엇을 허락하는가」와 「읽는 길이 제대로 묶어 오는가」다.
  *
- * 이 파일이 못 박는 것 일곱:
+ * 이 파일이 못 박는 것 여덟:
  *  1. 🔴 **표 셋이 비어 있는 것이 정상 초기 상태다** — 「부품 불출」 결재선 판을
  *     만들기 전까지 이 기능은 없는 것과 같이 동작한다(schema 머리말의 안전장치).
  *  2. 🔴 **한 신청에 결재 대기(REQUESTED) 행은 둘이 될 수 없다** — 부분 유니크가
@@ -52,6 +54,8 @@ import {
  *     신청」은 **지정된 사람과 최고관리자에게만** 보인다.
  *  7. 「진행 중인 신청」은 결재 중·실행 대기 **둘만**, **누가 올렸든 전부**, 오래된
  *     것부터 잡힌다.
+ *  8. 부품 요청 관리의 [불출] 잠금 — 요청 여러 개의 살아 있는 신청 상태를 **한 번에**
+ *     요청별로 갈라 읽고, 결재 중이 하나라도 있으면 「승인 대기」가 이긴다.
  *
  * 격리·청소 규약은 mutations/repair-case-approvals-route.integration.test.ts 를
  * 본떴다. 이 파일이 만든 "partissue-test-" 계정·부품만 쓰고,
@@ -982,5 +986,107 @@ describe("listPartIssueRequestsInProgress", () => {
     );
     assert.equal(rows[0].requestedAt, "2026-09-01T00:00:00.000Z");
     assert.equal(rows[0].partRequestId, null);
+  });
+});
+
+/**
+ * 부품 요청 관리 화면이 [불출] 자리를 잠글지 정할 때 쓰는 조회와 판정
+ * (사용자 요청 2026-09-11 — 신청을 올린 뒤에도 단추가 그대로라 같은 요청을 또
+ * 올릴 수 있었다).
+ */
+describe("listInProgressPartIssueStatusesByPartRequest · partRequestIssueLockFor", () => {
+  /** 부품 요청에 매인 신청 하나. 실행됨은 실행 기록이 짝으로 있어야 들어간다(CHECK). */
+  async function insertForPartRequest(
+    partRequestId: string,
+    status: InventoryPartIssueRequestStatus,
+    requestedAt?: string
+  ): Promise<string> {
+    return insertDirectIssueRequest({
+      partRequestId,
+      destinationNote: null,
+      status,
+      ...(status === "EXECUTED" ? { executedByUserId: requesterId, executedAt: new Date() } : {}),
+      ...(requestedAt ? { requestedAt: new Date(requestedAt) } : {}),
+    });
+  }
+
+  test("🔴 결재 중·실행 대기만 잡힌다 — 실행됨·반려·취소는 빠진다", async () => {
+    const { requestId } = await insertPartRequestWithItem();
+    // 상태 목록 순서대로 하루씩 늦게 올린다 — 결과가 오래된 것부터인지도 함께 본다.
+    for (const [index, status] of INVENTORY_PART_ISSUE_REQUEST_STATUSES.entries()) {
+      await insertForPartRequest(requestId, status, `2026-09-0${index + 1}T00:00:00.000Z`);
+    }
+    // 끝난 신청만 달린 요청은 결과에 아예 없다.
+    const { requestId: finishedOnly } = await insertPartRequestWithItem();
+    await insertForPartRequest(finishedOnly, "EXECUTED");
+    await insertForPartRequest(finishedOnly, "REJECTED");
+    await insertForPartRequest(finishedOnly, "CANCELLED");
+
+    const result = await listInProgressPartIssueStatusesByPartRequest([requestId, finishedOnly]);
+    assert.deepEqual([...result.keys()], [requestId]);
+    // 글자로 한 번 못 박는다 — 오래된 것부터.
+    assert.deepEqual(result.get(requestId), ["PENDING_APPROVAL", "APPROVED"]);
+
+    // 🔴 「진행 중인 신청」 묶음과 같은 말인가 — 더 나아갈 곳이 남은 상태와 정확히 겹쳐야 한다.
+    const caught = new Set(result.get(requestId));
+    for (const status of INVENTORY_PART_ISSUE_REQUEST_STATUSES) {
+      assert.equal(
+        caught.has(status),
+        !isPartIssueRequestTerminal(status),
+        `${status}: 조회와 순수 규칙(isPartIssueRequestTerminal)이 다른 말을 한다`
+      );
+    }
+  });
+
+  test("🔴 요청 여러 개를 한 번에 받아 요청별로 갈라 준다 — 넘기지 않은 요청·직접 사용은 섞이지 않는다", async () => {
+    const { requestId: mixed } = await insertPartRequestWithItem();
+    await insertForPartRequest(mixed, "APPROVED", "2026-09-01T00:00:00.000Z");
+    await insertForPartRequest(mixed, "PENDING_APPROVAL", "2026-09-02T00:00:00.000Z");
+
+    const { requestId: executableOnly } = await insertPartRequestWithItem();
+    await insertForPartRequest(executableOnly, "APPROVED");
+    await insertForPartRequest(executableOnly, "EXECUTED");
+
+    const { requestId: withoutIssue } = await insertPartRequestWithItem();
+
+    // 넘기지 않은 요청에 결재 중인 신청이 있어도 잡히지 않는다.
+    const { requestId: notAsked } = await insertPartRequestWithItem();
+    await insertForPartRequest(notAsked, "PENDING_APPROVAL");
+    // 부품 요청이 없는 직접 사용 신청도 섞이지 않는다.
+    await insertDirectIssueRequest();
+
+    const result = await listInProgressPartIssueStatusesByPartRequest([
+      mixed,
+      executableOnly,
+      withoutIssue,
+      mixed, // 같은 id 가 두 번 와도 결과는 같다.
+    ]);
+    assert.deepEqual([...result.keys()].sort(), [mixed, executableOnly].sort());
+    assert.deepEqual(result.get(mixed), ["APPROVED", "PENDING_APPROVAL"]);
+    assert.deepEqual(result.get(executableOnly), ["APPROVED"]);
+    assert.equal(result.has(withoutIssue), false);
+    assert.equal(result.has(notAsked), false);
+
+    // 페이지가 하는 그대로 — 결재 중이 섞인 요청은 「승인 대기」, 실행 대기만 있으면 「실행 대기」.
+    assert.equal(partRequestIssueLockFor(result.get(mixed) ?? []), "AWAITING_APPROVAL");
+    assert.equal(partRequestIssueLockFor(result.get(executableOnly) ?? []), "AWAITING_EXECUTION");
+    assert.equal(partRequestIssueLockFor(result.get(withoutIssue) ?? []), null);
+  });
+
+  test("신청이 없는 요청·없는 id·빈 입력은 빈 결과다", async () => {
+    const { requestId } = await insertPartRequestWithItem();
+    assert.equal((await listInProgressPartIssueStatusesByPartRequest([requestId])).size, 0);
+    assert.equal((await listInProgressPartIssueStatusesByPartRequest([randomUUID()])).size, 0);
+    assert.equal((await listInProgressPartIssueStatusesByPartRequest([])).size, 0);
+  });
+
+  test("🔴 판정 — 결재 중이 하나라도 있으면 「승인 대기」가 이긴다(순수 함수, DB 없음)", () => {
+    assert.equal(partRequestIssueLockFor([]), null);
+    assert.equal(partRequestIssueLockFor(["PENDING_APPROVAL"]), "AWAITING_APPROVAL");
+    assert.equal(partRequestIssueLockFor(["APPROVED"]), "AWAITING_EXECUTION");
+    assert.equal(partRequestIssueLockFor(["APPROVED", "PENDING_APPROVAL"]), "AWAITING_APPROVAL");
+    assert.equal(partRequestIssueLockFor(["PENDING_APPROVAL", "APPROVED"]), "AWAITING_APPROVAL");
+    assert.equal(partRequestIssueLockFor(["EXECUTED", "REJECTED", "CANCELLED"]), null);
+    assert.equal(partRequestIssueLockFor(INVENTORY_PART_ISSUE_REQUEST_STATUSES), "AWAITING_APPROVAL");
   });
 });

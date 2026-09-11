@@ -11,6 +11,7 @@
  *  · 「이대로 승인 요청」 — 불출 창과 사용 창.
  *  · 「신청자가 취소함 / 결재자가 반려함」 — 승인 요청건 탭의 이력.
  *  · 「결재 중 / 승인 완료 · 실행 대기」 — 승인 요청건 탭의 「진행 중인 신청」.
+ *  · 「불출 승인 대기 / 불출 실행 대기」 — 부품 요청 관리(표·카드)의 잠긴 [불출] 자리.
  * 각자 적으면 같은 단추가 화면마다 다른 이름으로 불리고, 사람은 그것이 같은
  * 기능인지 알 수 없다.
  * ============================================================================
@@ -83,3 +84,20 @@ export const PART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL = "승인 완료 · �
 
 /** 내가 올린 신청 표시. 판정(신청자 = 지금 세션)은 서버가 한다. */
 export const PART_ISSUE_MINE_LABEL = "내 신청";
+
+/**
+ * 🔴 부품 요청 관리에서 [불출]·[불출 승인 요청] 자리가 **잠겼을 때**의 이름 둘과,
+ * 왜 못 누르는지 말하는 풀이 둘(단추의 title). 그 요청에 아직 끝나지 않은 불출
+ * 신청이 있다는 뜻이다 — 그 사이 한 번 더 올리면 같은 부품에 결재가 두 번 돌고,
+ * 절차가 꺼진 사이 바로 내보내면 같은 부품이 두 번 나간다.
+ *
+ * 결재 중인 신청이 하나라도 있으면 「승인 대기」가 이긴다. 그 판정은 서버 쪽 한
+ * 곳(queries/inventory-part-issue-requests.ts 의 partRequestIssueLockFor)에 있고,
+ * 화면은 그 결과에 맞는 문구를 고르기만 한다.
+ */
+export const PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL = "불출 승인 대기";
+export const PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL = "불출 실행 대기";
+export const PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE =
+  "이 요청의 불출 신청이 결재 중입니다. 결재가 끝나기 전에는 다시 요청할 수 없습니다 — [승인 요청건] 탭에서 진행 상황을 볼 수 있습니다.";
+export const PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE =
+  "이 요청의 불출 신청이 승인되어 실행을 기다립니다. 그 신청이 실행되거나 취소되기 전에는 다시 요청할 수 없습니다 — [승인 요청건] 탭에서 실행합니다.";

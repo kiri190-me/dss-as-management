@@ -6,6 +6,11 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getPartRequestsForManager, getIssuableBalancesForParts } from "@/lib/db/queries/inventory-part-requests";
 import { getCurrentShipmentApprovalRoute } from "@/lib/db/queries/shipment-approval-routes";
 import {
+  listInProgressPartIssueStatusesByPartRequest,
+  partRequestIssueLockFor,
+  type PartRequestIssueLock,
+} from "@/lib/db/queries/inventory-part-issue-requests";
+import {
   isPartIssueApprovalRouteInForce,
   PART_ISSUE_APPROVAL_ROUTE_SCOPE,
 } from "@/lib/domain/inventory-part-issue-rules";
@@ -56,11 +61,31 @@ export default async function InventoryPartRequestsPage() {
     await getCurrentShipmentApprovalRoute(PART_ISSUE_APPROVAL_ROUTE_SCOPE)
   );
 
+  /*
+    🔴 아직 끝나지 않은 불출 신청이 있는 요청은 [불출] 자리를 잠근다(사용자 요청
+    2026-09-11) — 신청을 올린 뒤에도 단추가 그대로면 같은 요청을 또 올릴 수 있다.
+    살아 있는 신청은 조회 한 번으로 읽고, 「승인 대기인가 · 실행 대기인가」 판정은
+    partRequestIssueLockFor 한 곳에서 한다. 잠긴 요청만 담는다.
+
+    위의 절차 켜짐 판정과는 **따로 간다.** 절차를 꺼도 이미 올라간 신청은 살아
+    있어 결재·실행될 수 있고, 그 사이 [불출]로 한 번 더 내보내면 같은 부품이 두 번
+    나간다.
+  */
+  const inProgressIssueStatuses = await listInProgressPartIssueStatusesByPartRequest(
+    requests.map((request) => request.id)
+  );
+  const partIssueLocksByRequestId: Record<string, PartRequestIssueLock> = {};
+  for (const [partRequestId, statuses] of inProgressIssueStatuses) {
+    const lock = partRequestIssueLockFor(statuses);
+    if (lock !== null) partIssueLocksByRequestId[partRequestId] = lock;
+  }
+
   return (
     <PartRequestManagerScreen
       requests={requests}
       balancesByPartId={Object.fromEntries(balancesByPartId)}
       partIssueApprovalRequired={partIssueApprovalRequired}
+      partIssueLocksByRequestId={partIssueLocksByRequestId}
     />
   );
 }

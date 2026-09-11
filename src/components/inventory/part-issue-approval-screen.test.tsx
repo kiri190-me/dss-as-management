@@ -11,6 +11,10 @@ import PartIssueApprovalTrail, { approvalOutcomeLabel } from "./PartIssueApprova
 import {
   PART_ISSUE_CANCELLED_BY_REQUESTER_LABEL,
   PART_ISSUE_EXECUTION_BLOCKED_NOTICE,
+  PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL,
+  PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE,
+  PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL,
+  PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE,
   PART_ISSUE_MINE_LABEL,
   PART_ISSUE_NOTHING_AWAITING_APPROVAL,
   PART_ISSUE_NOTHING_IN_PROGRESS,
@@ -20,10 +24,17 @@ import {
   PART_ISSUE_REQUEST_BUTTON_LABEL,
 } from "./part-issue-approval-texts";
 import {
+  INVENTORY_PART_ISSUE_REQUEST_STATUSES,
   isPartIssueApprovalClosedByRequester,
   isPartIssueApprovalRouteInForce,
+  isPartIssueRequestAwaitingApproval,
+  isPartIssueRequestExecutable,
+  type InventoryPartIssueRequestStatus,
 } from "@/lib/domain/inventory-part-issue-rules";
-import type { PartIssueApprovalView } from "@/lib/db/queries/inventory-part-issue-requests";
+import type {
+  PartIssueApprovalView,
+  PartRequestIssueLock,
+} from "@/lib/db/queries/inventory-part-issue-requests";
 import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-approval-routes";
 
 /**
@@ -71,6 +82,7 @@ const partDetailPageSource = read("src/app/(app)/inventory/[id]/page.tsx");
 const approvalsPageSource = read("src/app/(app)/inventory/approvals/page.tsx");
 const inventoryMutationSource = read("src/lib/db/mutations/inventory.ts");
 const issueActionSource = read("src/lib/server/actions/inventory-part-issue-requests.ts");
+const issueQuerySource = read("src/lib/db/queries/inventory-part-issue-requests.ts");
 
 /** 서버 액션을 무는 화면들 — 판정을 새로 적어서는 안 되는 자리 전부. */
 const CLIENT_SCREENS: Array<[string, string]> = [
@@ -579,6 +591,230 @@ describe("🔴 진행 중인 신청 — [실행할 건]과 겹치는 신청은 �
 
   test("「승인 완료 · 실행 대기」 이름표는 남는다 — 실행 권한 없는 세션에서 여전히 쓰인다", () => {
     assert.match(screen, /\bPART_ISSUE_PROGRESS_AWAITING_EXECUTION_LABEL\b/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 살아 있는 불출 신청이 있으면 [불출] 자리가 잠긴다 (사용자 요청 2026-09-11)
+ * ============================================================================
+ * [불출 승인 요청]을 올린 뒤에도 단추가 그대로라 같은 요청을 또 올릴 수 있었다.
+ * 이제 그 요청에 결재 중인 신청이 있으면 「불출 승인 대기」, 결재 중은 없고 실행
+ * 대기만 있으면 「불출 실행 대기」로 **누를 수 없게** 그린다.
+ *
+ * ── 왜 렌더하지 않는가 ──────────────────────────────────────────────────────
+ * 단추를 그리는 ActionButtons 는 PartRequestManagerScreen.tsx 안에 있고, 그 파일은
+ * 서버 액션을 물어 test:components 에서 import 자체가 던진다(이 파일 머리말). 판정
+ * 함수가 사는 조회 파일도 `server-only` 라 마찬가지다. 그래서 위 「진행 중인 신청」
+ * 시험과 같은 방법을 쓴다 — **타입 표기가 없는 식은 원본을 잘라 실제로 돌려 보고**,
+ * JSX 는 잘라 낸 갈래 하나에만 정규식을 건다. 판정 함수는 조회 통합 시험
+ * (queries/inventory-part-issue-requests.integration.test.ts)이 진짜 import 로도
+ * 한 번 더 부른다.
+ * ============================================================================
+ */
+describe("🔴 부품 요청 관리 — 살아 있는 불출 신청이 있으면 [불출]이 잠긴다", () => {
+  const actionButtons = sliceBetween(flat(managerScreenSource), "function ActionButtons(", "function RequestCard(");
+  const lockedBranch = sliceBetween(actionButtons, 'action === "ISSUE" && issueLock !== null ? (', ") : (");
+  const availableActionsSource = sliceBetween(
+    flat(managerScreenSource),
+    "function availableActions(",
+    "function formatRequestedAt("
+  );
+
+  /**
+   * 판정 함수 — 원본의 몸통을 잘라 순수 규칙 두 개를 넣고 돌린다. 몸통에 타입
+   * 표기나 줄 주석이 끼면 여기서 **시끄럽게** 깨진다(조용히 통과하지 않는다).
+   */
+  const lockFunctionSource = sliceBetween(
+    flat(issueQuerySource),
+    "export function partRequestIssueLockFor(",
+    "return null; }"
+  );
+  const lockBodyMarker = "): PartRequestIssueLock | null {";
+  const lockBody = `${lockFunctionSource.slice(lockFunctionSource.indexOf(lockBodyMarker) + lockBodyMarker.length)} return null;`;
+  const lockForCompiled = new Function(
+    "isPartIssueRequestAwaitingApproval",
+    "isPartIssueRequestExecutable",
+    "statuses",
+    lockBody
+  ) as (
+    awaiting: typeof isPartIssueRequestAwaitingApproval,
+    executable: typeof isPartIssueRequestExecutable,
+    statuses: readonly InventoryPartIssueRequestStatus[]
+  ) => PartRequestIssueLock | null;
+  const lockFor = (statuses: readonly InventoryPartIssueRequestStatus[]) =>
+    lockForCompiled(isPartIssueRequestAwaitingApproval, isPartIssueRequestExecutable, statuses);
+
+  /** 페이지가 조회 결과를 잠금 지도로 바꾸는 반복문 — 역시 원본을 잘라 돌린다. */
+  const pageSource = flat(requestsPageSource);
+  const pageLoop = sliceBetween(
+    pageSource,
+    "for (const [partRequestId, statuses] of inProgressIssueStatuses) {",
+    "return ("
+  );
+  const buildLocks = new Function(
+    "partRequestIssueLockFor",
+    "inProgressIssueStatuses",
+    `const partIssueLocksByRequestId = {}; ${pageLoop} return partIssueLocksByRequestId;`
+  ) as (
+    decide: typeof lockFor,
+    inProgressIssueStatuses: Map<string, InventoryPartIssueRequestStatus[]>
+  ) => Record<string, PartRequestIssueLock>;
+
+  test("🔴 (가) 결재 중이 하나라도 섞이면 「승인 대기」가 이긴다 — 순서와 무관하게", () => {
+    assert.ok(lockFunctionSource.includes(lockBodyMarker), "판정 함수의 모양을 찾지 못했다 — 자르는 경계가 틀렸다");
+    assert.equal(lockFor(["PENDING_APPROVAL"]), "AWAITING_APPROVAL");
+    assert.equal(lockFor(["APPROVED", "PENDING_APPROVAL"]), "AWAITING_APPROVAL");
+    assert.equal(lockFor(["PENDING_APPROVAL", "APPROVED"]), "AWAITING_APPROVAL");
+    assert.equal(lockFor(["APPROVED", "APPROVED", "PENDING_APPROVAL"]), "AWAITING_APPROVAL");
+    assert.equal(lockFor(INVENTORY_PART_ISSUE_REQUEST_STATUSES), "AWAITING_APPROVAL");
+  });
+
+  test("결재 중은 없고 실행 대기만 있으면 「실행 대기」, 살아 있는 것이 없으면 잠그지 않는다", () => {
+    assert.equal(lockFor(["APPROVED"]), "AWAITING_EXECUTION");
+    assert.equal(lockFor(["APPROVED", "APPROVED"]), "AWAITING_EXECUTION");
+    assert.equal(lockFor([]), null);
+    // 조회가 끝난 신청을 거르지만, 판정도 그것에 기대지 않는다.
+    assert.equal(lockFor(["EXECUTED", "REJECTED", "CANCELLED"]), null);
+    assert.equal(lockFor(["EXECUTED", "APPROVED"]), "AWAITING_EXECUTION");
+  });
+
+  test("🔴 판정은 순수 규칙 두 개로 가른다 — 상태를 글자로 다시 적지 않는다", () => {
+    assert.match(lockBody, /\bisPartIssueRequestAwaitingApproval\b/);
+    assert.match(lockBody, /\bisPartIssueRequestExecutable\b/);
+    assert.ok(
+      !/"PENDING_APPROVAL"|"APPROVED"|"EXECUTED"|"REJECTED"|"CANCELLED"/.test(lockBody),
+      "판정 함수가 신청 상태를 글자로 적었다"
+    );
+    // 화면은 판정하지 않는다 — 서버가 계산한 잠금을 받아 문구만 고른다.
+    assert.ok(!/partRequestIssueLockFor\(/.test(managerScreenSource), "화면이 판정 함수를 스스로 부른다");
+    assert.ok(!/"PENDING_APPROVAL"|"APPROVED"/.test(managerScreenSource), "화면이 신청 상태를 글자로 적었다");
+  });
+
+  test("🔴 페이지는 조회를 **한 번** 부르고, 잠긴 요청만 지도에 담는다", () => {
+    assert.match(
+      pageSource,
+      /const inProgressIssueStatuses = await listInProgressPartIssueStatusesByPartRequest\( requests\.map\(\(request\) => request\.id\) \);/,
+      "요청 전부의 id 를 한 번에 넘기는 자리가 사라졌다"
+    );
+    assert.equal(
+      requestsPageSource.split("listInProgressPartIssueStatusesByPartRequest(").length - 1,
+      1,
+      "조회를 부르는 자리가 둘이 됐다 — 요청마다 부르면 N+1 이다"
+    );
+    assert.match(pageSource, /partIssueLocksByRequestId=\{partIssueLocksByRequestId\}/);
+
+    const locks = buildLocks(
+      lockFor,
+      new Map<string, InventoryPartIssueRequestStatus[]>([
+        ["request-a", ["APPROVED", "PENDING_APPROVAL"]],
+        ["request-b", ["APPROVED"]],
+        ["request-c", []],
+      ])
+    );
+    assert.deepEqual(locks, { "request-a": "AWAITING_APPROVAL", "request-b": "AWAITING_EXECUTION" });
+    assert.deepEqual(buildLocks(lockFor, new Map()), {});
+  });
+
+  test("🔴 (다) 잠금은 승인 절차가 켜져 있는지와 무관하다", () => {
+    // 절차를 꺼도 이미 올라간 신청은 살아 있다 — 그 사이 [불출]로 또 내보내면
+    // 같은 부품이 두 번 나간다.
+    const pageLockBlock = sliceBetween(pageSource, "const inProgressIssueStatuses = ", "return (");
+    assert.ok(!/partIssueApprovalRequired/.test(pageLockBlock), "페이지가 잠금을 절차 켜짐에 매었다");
+    assert.ok(!/partIssueApprovalRequired/.test(lockFunctionSource), "판정 함수가 절차 켜짐을 본다");
+    assert.match(actionButtons, /const issueLock = partIssueLocksByRequestId\[request\.id\] \?\? null;/);
+    assert.match(
+      actionButtons,
+      /\{actions\.map\(\(action\) => action === "ISSUE" && issueLock !== null \? \(/,
+      "잠긴 [불출]을 그리는 갈림의 조건이 달라졌다"
+    );
+    assert.ok(!/partIssueApprovalRequired/.test(lockedBranch), "잠긴 단추가 절차 켜짐에 따라 달라진다");
+  });
+
+  test("🔴 (나) 잠긴 단추는 disabled 이고, 조작 창을 여는 길이 없다", () => {
+    assert.match(lockedBranch, /<button key=\{action\} type="button" disabled title=\{issueLockTitles\[issueLock\]\}/);
+    for (const forbidden of ["onClick", "onAction", "openDialog", "setDialog", "actionLabel("]) {
+      assert.ok(!lockedBranch.includes(forbidden), `잠긴 단추에 ${forbidden} 이 생겼다`);
+    }
+    assert.match(lockedBranch, /\{issueLockLabels\[issueLock\]\} <\/button>/);
+    // 비활성 모양은 이 파일의 [보류 해제]와 같은 관례, 다크 모드도 함께.
+    assert.match(lockedBranch, /disabled:cursor-not-allowed disabled:opacity-50/);
+    assert.match(lockedBranch, /dark:bg-primary-50 dark:text-zinc-900/);
+  });
+
+  test("잠금 두 갈래가 각자의 이름과 풀이로 이어진다 — 문구는 한곳의 상수다", () => {
+    assert.equal(PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL, "불출 승인 대기");
+    assert.equal(PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL, "불출 실행 대기");
+    assert.match(PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE, /\[승인 요청건\] 탭/);
+    assert.match(PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE, /\[승인 요청건\] 탭/);
+    const screen = flat(managerScreenSource);
+    assert.match(
+      screen,
+      /const issueLockLabels: Record<PartRequestIssueLock, string> = \{ AWAITING_APPROVAL: PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL, AWAITING_EXECUTION: PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL, \};/
+    );
+    assert.match(
+      screen,
+      /const issueLockTitles: Record<PartRequestIssueLock, string> = \{ AWAITING_APPROVAL: PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE, AWAITING_EXECUTION: PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE, \};/
+    );
+    assert.ok(!/"불출 승인 대기"|"불출 실행 대기"/.test(managerScreenSource), "이름을 화면에 글자로 적었다");
+  });
+
+  test("🔴 (라) 잠금이 없으면 [불출]·[불출 승인 요청] 단추가 한 글자도 다르지 않다", () => {
+    const unlockedButton = [
+      "<button",
+      "key={action}",
+      'type="button"',
+      "onClick={() => onAction(request.id, action)}",
+      "className={`rounded-md ${base} ${",
+      'action === "ISSUE"',
+      '? "bg-primary-900 font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"',
+      ': action === "REJECT"',
+      '? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"',
+      ': action === "HOLD"',
+      '? "border border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"',
+      ': "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"',
+      "}`}",
+      ">",
+      "{actionLabel(action, partIssueApprovalRequired)}",
+      "</button>",
+    ].join(" ");
+    // 잠금 갈림의 「아니면」 쪽이 옛 단추 그대로이고, 거기서 map 이 끝난다.
+    assert.ok(
+      actionButtons.includes(`) : ( ${unlockedButton} ) )}`),
+      "잠기지 않은 요청의 단추가 예전과 달라졌다"
+    );
+  });
+
+  test("🔴 (마) 다른 단추·조작 목록은 그대로다 — 잠금은 그리는 단계에서만", () => {
+    assert.ok(!/issueLock|partIssueLocks/.test(availableActionsSource), "조작 목록(availableActions)이 잠금을 안다");
+    assert.match(
+      flat(managerScreenSource),
+      /const actionLabels: Record<DialogAction, string> = \{ ISSUE: "불출", REJECT: "거절", PARTIALLY_CLOSE: "부분 불출 종료", HOLD: "보류", \};/
+    );
+    // [보류 해제]는 잠금 갈림보다 앞에서 그대로 돌아간다.
+    assert.ok(
+      actionButtons.includes(
+        '<button type="button" disabled={releasing} onClick={() => onReleaseHold(request.id)} className="rounded-md border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950" > {releasing ? "처리 중..." : "보류 해제"} </button>'
+      ),
+      "[보류 해제] 단추가 달라졌다"
+    );
+    assert.ok(
+      actionButtons.indexOf("isRequestHoldReleasable(") < actionButtons.indexOf("issueLock !== null ?"),
+      "보류 중인 요청의 [보류 해제]보다 잠금 갈림이 먼저 온다"
+    );
+    // 잠긴 갈래는 ISSUE 하나에만 걸린다 — 거절·보류·부분 불출 종료는 언제나 원래 단추다.
+    assert.equal(actionButtons.split("issueLock !== null").length - 1, 1, "잠금 갈림이 둘이 됐다");
+  });
+
+  test("🔴 표와 카드가 같은 자리(ActionButtons 하나)에서 잠금을 받는다", () => {
+    const screen = flat(managerScreenSource);
+    const calls = [...screen.matchAll(/<ActionButtons [^/]*\/>/g)].map((matched) => matched[0]);
+    assert.equal(calls.length, 2, "ActionButtons 를 부르는 자리가 표·카드 둘이 아니다");
+    for (const call of calls) {
+      assert.match(call, /partIssueLocksByRequestId=\{partIssueLocksByRequestId\}/, `잠금을 넘기지 않는다: ${call}`);
+    }
+    assert.match(screen, /<ActionButtons [^/]*size="card"/);
+    assert.match(screen, /<ActionButtons [^/]*size="table"/);
   });
 });
 

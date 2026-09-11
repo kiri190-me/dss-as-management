@@ -15,6 +15,7 @@ import {
   isRequestHoldReleasable,
 } from "@/lib/auth/inventory-authorization";
 import type { ManagerPartRequestRow, IssuableBalanceRow } from "@/lib/db/queries/inventory-part-requests";
+import type { PartRequestIssueLock } from "@/lib/db/queries/inventory-part-issue-requests";
 import {
   INVENTORY_PART_REQUEST_STATUS_CODES,
   inventoryPartRequestStatusLabels,
@@ -22,7 +23,13 @@ import {
   type InventoryPartRequestStatus,
 } from "@/lib/domain/inventory-types";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
-import { PART_ISSUE_REQUEST_BUTTON_LABEL } from "./part-issue-approval-texts";
+import {
+  PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL,
+  PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE,
+  PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL,
+  PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE,
+  PART_ISSUE_REQUEST_BUTTON_LABEL,
+} from "./part-issue-approval-texts";
 
 type DialogAction = "ISSUE" | "REJECT" | "PARTIALLY_CLOSE" | "HOLD";
 type DialogState = { requestId: string; action: DialogAction } | null;
@@ -107,11 +114,26 @@ function actionLabel(action: DialogAction, partIssueApprovalRequired: boolean): 
     : actionLabels[action];
 }
 
+/**
+ * 잠긴 [불출] 자리의 이름과 풀이. 🔴 잠글지·어느 쪽인지는 서버가 정해 내려보낸다
+ * (page.tsx → queries/inventory-part-issue-requests.ts 의 partRequestIssueLockFor).
+ * 화면은 그 값에 맞는 문구를 고르기만 한다.
+ */
+const issueLockLabels: Record<PartRequestIssueLock, string> = {
+  AWAITING_APPROVAL: PART_ISSUE_LOCKED_AWAITING_APPROVAL_LABEL,
+  AWAITING_EXECUTION: PART_ISSUE_LOCKED_AWAITING_EXECUTION_LABEL,
+};
+const issueLockTitles: Record<PartRequestIssueLock, string> = {
+  AWAITING_APPROVAL: PART_ISSUE_LOCKED_AWAITING_APPROVAL_TITLE,
+  AWAITING_EXECUTION: PART_ISSUE_LOCKED_AWAITING_EXECUTION_TITLE,
+};
+
 /** 부품 요청 관리 — SUPER_ADMIN/ADMIN/INVENTORY_MANAGER only (server-gated in page.tsx; SALES and AS_ENGINEER never reach this screen). */
 export default function PartRequestManagerScreen({
   requests,
   balancesByPartId,
   partIssueApprovalRequired,
+  partIssueLocksByRequestId,
 }: {
   requests: ManagerPartRequestRow[];
   balancesByPartId: Record<string, IssuableBalanceRow[]>;
@@ -122,6 +144,12 @@ export default function PartRequestManagerScreen({
    * 되고, 후자는 화면에 아무 표시도 남기지 않아 더 나쁘다.
    */
   partIssueApprovalRequired: boolean;
+  /**
+   * 🔴 아직 끝나지 않은 불출 신청이 있는 요청 → 그 까닭. **잠긴 요청만 들어 있다.**
+   * 서버 컴포넌트가 계산해 내려보낸다(page.tsx). 위 절차 켜짐과는 따로 간다 —
+   * 절차가 꺼져도 이미 올라간 신청은 살아 있다.
+   */
+  partIssueLocksByRequestId: Record<string, PartRequestIssueLock>;
 }) {
   const [statusFilter, setStatusFilter] = useState<InventoryPartRequestStatus | "ALL">("ALL");
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -191,6 +219,7 @@ export default function PartRequestManagerScreen({
               onReleaseHold={releaseHold}
               releasingId={releasingId}
               partIssueApprovalRequired={partIssueApprovalRequired}
+              partIssueLocksByRequestId={partIssueLocksByRequestId}
             />
           }
           cards={
@@ -203,6 +232,7 @@ export default function PartRequestManagerScreen({
                   onReleaseHold={releaseHold}
                   releasingId={releasingId}
                   partIssueApprovalRequired={partIssueApprovalRequired}
+                  partIssueLocksByRequestId={partIssueLocksByRequestId}
                 />
               ))}
             </ul>
@@ -361,6 +391,7 @@ function ActionButtons({
   releasing,
   size,
   partIssueApprovalRequired,
+  partIssueLocksByRequestId,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
@@ -368,8 +399,12 @@ function ActionButtons({
   releasing: boolean;
   size: "card" | "table";
   partIssueApprovalRequired: boolean;
+  partIssueLocksByRequestId: Record<string, PartRequestIssueLock>;
 }) {
   const actions = availableActions(request);
+  // 🔴 잠금은 그리는 단계에서만 건다 — 조작 목록(availableActions)은 그대로 두고,
+  // [불출] 자리만 누를 수 없는 단추로 바꿔 그린다. 다른 단추는 손대지 않는다.
+  const issueLock = partIssueLocksByRequestId[request.id] ?? null;
 
   // 보류 중이면 할 수 있는 것은 해제뿐이다.
   if (isRequestHoldReleasable({ status: request.status })) {
@@ -391,24 +426,37 @@ function ActionButtons({
   const base = size === "card" ? "px-2.5 py-1 text-xs" : "px-2 py-1 text-xs";
   return (
     <div className={size === "card" ? "flex flex-wrap gap-1.5" : "flex flex-col gap-1"}>
-      {actions.map((action) => (
-        <button
-          key={action}
-          type="button"
-          onClick={() => onAction(request.id, action)}
-          className={`rounded-md ${base} ${
-            action === "ISSUE"
-              ? "bg-primary-900 font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
-              : action === "REJECT"
-                ? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-                : action === "HOLD"
-                  ? "border border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
-                  : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          }`}
-        >
-          {actionLabel(action, partIssueApprovalRequired)}
-        </button>
-      ))}
+      {actions.map((action) =>
+        action === "ISSUE" && issueLock !== null ? (
+          // 누를 수 없는 [불출] — 창을 여는 길이 아예 없다. 왜 못 누르는지는 title 로 말한다.
+          <button
+            key={action}
+            type="button"
+            disabled
+            title={issueLockTitles[issueLock]}
+            className={`rounded-md ${base} bg-primary-900 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900`}
+          >
+            {issueLockLabels[issueLock]}
+          </button>
+        ) : (
+          <button
+            key={action}
+            type="button"
+            onClick={() => onAction(request.id, action)}
+            className={`rounded-md ${base} ${
+              action === "ISSUE"
+                ? "bg-primary-900 font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+                : action === "REJECT"
+                  ? "border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                  : action === "HOLD"
+                    ? "border border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
+                    : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }`}
+          >
+            {actionLabel(action, partIssueApprovalRequired)}
+          </button>
+        )
+      )}
     </div>
   );
 }
@@ -419,12 +467,14 @@ function RequestCard({
   onReleaseHold,
   releasingId,
   partIssueApprovalRequired,
+  partIssueLocksByRequestId,
 }: {
   request: ManagerPartRequestRow;
   onAction: (requestId: string, action: DialogAction) => void;
   onReleaseHold: (requestId: string) => void;
   releasingId: string | null;
   partIssueApprovalRequired: boolean;
+  partIssueLocksByRequestId: Record<string, PartRequestIssueLock>;
 }) {
   return (
     <li className="flex flex-col rounded-lg border border-zinc-200 bg-white focus-within:ring-2 focus-within:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900">
@@ -475,6 +525,7 @@ function RequestCard({
           releasing={releasingId === request.id}
           size="card"
           partIssueApprovalRequired={partIssueApprovalRequired}
+          partIssueLocksByRequestId={partIssueLocksByRequestId}
         />
       </div>
     </li>
@@ -488,12 +539,14 @@ function RequestTable({
   onReleaseHold,
   releasingId,
   partIssueApprovalRequired,
+  partIssueLocksByRequestId,
 }: {
   requests: ManagerPartRequestRow[];
   onAction: (requestId: string, action: DialogAction) => void;
   onReleaseHold: (requestId: string) => void;
   releasingId: string | null;
   partIssueApprovalRequired: boolean;
+  partIssueLocksByRequestId: Record<string, PartRequestIssueLock>;
 }) {
   return (
       <table className="w-full min-w-[64rem] text-sm">
@@ -552,6 +605,7 @@ function RequestTable({
                   releasing={releasingId === request.id}
                   size="table"
                   partIssueApprovalRequired={partIssueApprovalRequired}
+                  partIssueLocksByRequestId={partIssueLocksByRequestId}
                 />
               </td>
             </tr>
