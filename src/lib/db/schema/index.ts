@@ -52,3 +52,4 @@ export * from "./ui-text-overrides";
 export * from "./shipment-approval-routes";
 export * from "./inventory-part-issue-requests";
 export * from "./notification-acknowledgements";
+export * from "./improvement-requests";
