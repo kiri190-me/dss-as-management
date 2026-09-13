@@ -7,16 +7,19 @@ import {
   CUSTOMER_CONTACT_NAME_MAX,
   CUSTOMER_CONTACT_PHONE_MAX,
   CUSTOMER_CONTACT_TITLE_MAX,
+  isValidCustomerContactId,
   validateCustomerContactFields,
 } from "./customer-contact-input";
 
 /**
- * 이 파일이 지키는 것은 넷이다.
+ * 이 파일이 지키는 것은 여섯이다.
  *
  *  1. **이름만 필수다** — 앞뒤 공백을 걷고 비면 거절한다.
  *  2. **선택 칸은 걷고 나서 비면 null이다** — 빈 글자를 저장하지 않는다.
  *  3. **칸마다 상한까지는 받고, 한 글자라도 넘으면 거절한다.**
  *  4. **이메일 형식 규칙은 End-User 담당자와 같다** — "@"가 있는지만 본다.
+ *  5. **메모의 줄바꿈은 LF 로 통일하고, 상한은 그 뒤에 센다.**
+ *  6. **담당자 id 는 UUID 모양만 받는다.**
  */
 
 describe("이름", () => {
@@ -138,6 +141,52 @@ describe("이메일 형식", () => {
   test('"@"만 있으면 받는다 — End-User 담당자와 같은 규칙이다', () => {
     const result = validateCustomerContactFields({ contactName: "홍길동", email: "a@b" });
     assert.equal(result.ok, true);
+  });
+});
+
+describe("메모 줄바꿈", () => {
+  test("CRLF·CR 을 LF 로 바꾼다", () => {
+    const result = validateCustomerContactFields({ contactName: "홍길동", memo: "첫 줄\r\n둘째 줄\r셋째 줄" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.data.memo, "첫 줄\n둘째 줄\n셋째 줄");
+  });
+
+  test("상한은 LF 로 바꾼 뒤에 센다 — 입력칸이 줄바꿈을 한 글자로 세는 것과 같다", () => {
+    const half = CUSTOMER_CONTACT_MEMO_MAX / 2;
+    const memo = `${"가".repeat(half - 1)}\r\n${"나".repeat(half)}`; // LF 로는 딱 상한이다
+    assert.equal(memo.length, CUSTOMER_CONTACT_MEMO_MAX + 1);
+    const result = validateCustomerContactFields({ contactName: "홍길동", memo });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.data.memo?.length, CUSTOMER_CONTACT_MEMO_MAX);
+  });
+
+  test("줄바꿈뿐인 메모는 null 이다", () => {
+    const result = validateCustomerContactFields({ contactName: "홍길동", memo: "\r\n\r\n " });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.data.memo, null);
+  });
+
+  test("한 줄 칸은 줄바꿈을 바꾸지 않는다 — 입력칸이 줄바꿈을 받지 않는다", () => {
+    const result = validateCustomerContactFields({ contactName: "홍길동", title: "과\r\n장" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.data.title, "과\r\n장");
+  });
+});
+
+describe("isValidCustomerContactId", () => {
+  test("UUID 모양이면 받는다(대소문자 무관)", () => {
+    assert.equal(isValidCustomerContactId("123e4567-e89b-12d3-a456-426614174000"), true);
+    assert.equal(isValidCustomerContactId("123E4567-E89B-12D3-A456-426614174000"), true);
+  });
+
+  test("UUID 모양이 아니거나 글자가 아니면 거절한다", () => {
+    for (const bad of ["", "abc", "123e4567-e89b-12d3-a456-42661417400", " 123e4567-e89b-12d3-a456-426614174000", null, undefined, 1, {}]) {
+      assert.equal(isValidCustomerContactId(bad), false, String(bad));
+    }
   });
 });
 

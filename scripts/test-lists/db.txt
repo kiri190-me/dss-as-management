@@ -65,6 +65,7 @@ src/lib/db/mutations/customers.integration.test.ts
 src/lib/db/mutations/customers-trash.integration.test.ts
 src/lib/db/queries/customers.integration.test.ts
 src/lib/db/mutations/end-users.integration.test.ts
+src/lib/db/mutations/customer-contacts.integration.test.ts
 src/lib/db/queries/product-models.integration.test.ts
 src/lib/db/mutations/product-models.integration.test.ts
 src/lib/db/mutations/product-models-trash.integration.test.ts

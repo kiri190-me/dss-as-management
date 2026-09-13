@@ -7,6 +7,7 @@ import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   auditLogs,
+  customerContacts,
   customers,
   endUserContacts,
   endUsers,
@@ -18,6 +19,7 @@ import {
 import { createRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { permanentlyDeleteCustomer, restoreCustomer, softDeleteCustomer } from "./customers-trash";
 import { listPurgeEligibleCustomerIds, purgeExpiredCustomer, runMasterDataPurgeSweep } from "./master-data-purge";
+import { listCustomerContactsByCustomerId } from "../queries/customers";
 import { MASTER_DATA_TRASH_RETENTION_DAYS } from "@/lib/domain/master-data-trash-retention";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -116,6 +118,8 @@ after(async () => {
       await db.delete(endUserContacts).where(inArray(endUserContacts.endUserId, leftoverEndUserIds));
       await db.delete(endUsers).where(inArray(endUsers.id, leftoverEndUserIds));
     }
+    // 고객사 담당자도 고객사보다 먼저(FK RESTRICT).
+    await db.delete(customerContacts).where(inArray(customerContacts.customerId, leftoverIds));
     await db.delete(customers).where(inArray(customers.id, leftoverIds));
   }
 
@@ -139,6 +143,20 @@ async function createTestEndUser(customerId: string, name: string) {
 
 async function createTestContact(endUserId: string, contactName: string) {
   const [row] = await db.insert(endUserContacts).values({ endUserId, contactName }).returning();
+  return row;
+}
+
+/** 고객사 담당자(customer_contacts) 한 줄 — 연쇄 시험용이라 값은 개인정보처럼 보이는 가짜다. */
+async function createTestCustomerContact(customerId: string, contactName: string) {
+  const [row] = await db
+    .insert(customerContacts)
+    .values({ customerId, contactName, phone: "010-9999-0000", email: "leak-check@example.test" })
+    .returning();
+  return row;
+}
+
+async function readCustomerContact(id: string) {
+  const [row] = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
   return row;
 }
 
@@ -439,11 +457,16 @@ describe("restoreCustomer", () => {
 
   test("같은 이름의 휴지통 고객사 둘을 동시에 복원하면 하나만 돌아오고, 진 쪽은 날것의 23505 가 아니라 NAME_TAKEN 이다", async () => {
     const suffix = `RESTORE-RACE-${randomUUID().slice(0, 8)}`;
-    const trashed: { customer: Awaited<ReturnType<typeof readCustomer>>; endUserId: string }[] = [];
+    const trashed: {
+      customer: Awaited<ReturnType<typeof readCustomer>>;
+      endUserId: string;
+      customerContactId: string;
+    }[] = [];
     // 부분 유니크 인덱스(is_deleted = false)라 휴지통에서는 같은 이름이 둘 있을 수 있다.
     for (const label of ["첫째", "둘째"]) {
       const customer = await createTestCustomer(suffix);
       const endUser = await createTestEndUser(customer.id, `경쟁 복원 End-User ${label}`);
+      const customerContact = await createTestCustomerContact(customer.id, `경쟁 복원 담당자 ${label}`);
       const deleted = await softDeleteCustomer({
         customerId: customer.id,
         expectedUpdatedAt: customer.updatedAt.toISOString(),
@@ -451,7 +474,11 @@ describe("restoreCustomer", () => {
         reason: null,
       });
       assert.equal(deleted.ok, true, `soft delete failed: ${JSON.stringify(deleted)}`);
-      trashed.push({ customer: await readCustomer(customer.id), endUserId: endUser.id });
+      trashed.push({
+        customer: await readCustomer(customer.id),
+        endUserId: endUser.id,
+        customerContactId: customerContact.id,
+      });
     }
     const name = trashed[0].customer.name;
     assert.equal(trashed[1].customer.name, name);
@@ -476,7 +503,7 @@ describe("restoreCustomer", () => {
     if (loser.ok) return;
     assert.equal(loser.code, "NAME_TAKEN");
 
-    for (const [index, { customer, endUserId }] of trashed.entries()) {
+    for (const [index, { customer, endUserId, customerContactId }] of trashed.entries()) {
       const won = results[index].ok;
       const row = await readCustomer(customer.id);
       const [endUserRow] = await db.select().from(endUsers).where(eq(endUsers.id, endUserId));
@@ -485,6 +512,14 @@ describe("restoreCustomer", () => {
         endUserRow.isDeleted,
         !won,
         won ? "이긴 쪽의 End-User 는 함께 돌아와야 한다" : "진 쪽의 End-User 도 휴지통에 그대로여야 한다 — 반쪽 복원 금지"
+      );
+      const customerContactRow = await readCustomerContact(customerContactId);
+      assert.equal(
+        customerContactRow.isDeleted,
+        !won,
+        won
+          ? "이긴 쪽의 고객사 담당자는 함께 돌아와야 한다"
+          : "진 쪽의 고객사 담당자도 휴지통에 그대로여야 한다 — 같은 세이브포인트 안이라 함께 되감긴다"
       );
       if (!won) {
         const restoreLogs = await db
@@ -500,6 +535,136 @@ describe("restoreCustomer", () => {
         assert.equal(restoreLogs.length, 0, "되돌아가지 않은 복원이 감사 로그를 남기면 안 된다");
       }
     }
+  });
+});
+
+describe("고객사 담당자(customer_contacts) 연쇄", () => {
+  test("휴지통 → 담당자도 숨음 → 복원 → 딸려 간 담당자만 돌아옴 → 다시 휴지통 → 완전 삭제가 FK 에 막히지 않는다", async () => {
+    const customer = await createTestCustomer("CC-CYCLE");
+    const first = await createTestCustomerContact(customer.id, "연쇄 담당자 가");
+    const second = await createTestCustomerContact(customer.id, "연쇄 담당자 나");
+    const removedEarlier = await createTestCustomerContact(customer.id, "먼저 지운 담당자");
+
+    // 고객사를 지우기 전에 따로 지워 둔다 — deleted_at 이 다른 순간이 된다.
+    const earlierDeletedAt = new Date(Date.now() - MS_PER_DAY);
+    await db
+      .update(customerContacts)
+      .set({ isDeleted: true, deletedAt: earlierDeletedAt, deletedBy: actorId })
+      .where(eq(customerContacts.id, removedEarlier.id));
+
+    // ── 1. 휴지통 ─────────────────────────────────────────────────────────
+    const deleted = await softDeleteCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      actorUserId: actorId,
+      reason: null,
+    });
+    assert.equal(deleted.ok, true, `soft delete failed: ${JSON.stringify(deleted)}`);
+
+    const trashedCustomer = await readCustomer(customer.id);
+    for (const contact of [first, second]) {
+      const row = await readCustomerContact(contact.id);
+      assert.equal(row.isDeleted, true, "고객사와 함께 휴지통에 들어가야 한다");
+      assert.equal(row.deletedAt?.getTime(), trashedCustomer.deletedAt?.getTime(), "고객사와 같은 순간이어야 한다");
+      assert.equal(row.deletedBy, actorId);
+    }
+    const earlierRow = await readCustomerContact(removedEarlier.id);
+    assert.equal(earlierRow.deletedAt?.getTime(), earlierDeletedAt.getTime(), "먼저 지운 줄의 삭제 시각은 그대로여야 한다");
+    assert.deepEqual(await listCustomerContactsByCustomerId(customer.id), [], "휴지통 고객사의 담당자는 목록에 나오지 않는다");
+
+    const [softDeleteLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "customers"),
+          eq(auditLogs.targetRecordId, customer.id),
+          eq(auditLogs.actionType, "SOFT_DELETE")
+        )
+      );
+    assert.ok(softDeleteLog, "고객사 SOFT_DELETE 감사 로그가 있어야 한다");
+    const softDeleteValue = softDeleteLog.newValue as { cascadedCustomerContactIds: string[] };
+    assert.deepEqual([...softDeleteValue.cascadedCustomerContactIds].sort(), [first.id, second.id].sort());
+    const softDeleteSerialized = JSON.stringify({ previous: softDeleteLog.previousValue, next: softDeleteLog.newValue });
+    assert.ok(!softDeleteSerialized.includes("연쇄 담당자"), "감사 로그에 담당자 이름이 들어갔다");
+    assert.ok(!softDeleteSerialized.includes("010-9999-0000"), "감사 로그에 담당자 전화가 들어갔다");
+    assert.ok(!softDeleteSerialized.includes("leak-check@"), "감사 로그에 담당자 이메일이 들어갔다");
+
+    // ── 2. 복원 ───────────────────────────────────────────────────────────
+    const restored = await restoreCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: trashedCustomer.updatedAt.toISOString(),
+      actorUserId: actorId,
+    });
+    assert.equal(restored.ok, true, `restore failed: ${JSON.stringify(restored)}`);
+
+    for (const contact of [first, second]) {
+      const row = await readCustomerContact(contact.id);
+      assert.equal(row.isDeleted, false, "딸려 갔던 담당자는 돌아와야 한다");
+      assert.equal(row.deletedAt, null);
+      assert.equal(row.deletedBy, null);
+    }
+    assert.equal((await readCustomerContact(removedEarlier.id)).isDeleted, true, "먼저 지운 담당자는 돌아오면 안 된다");
+    assert.deepEqual(
+      (await listCustomerContactsByCustomerId(customer.id)).map((c) => c.id),
+      [first.id, second.id],
+      "되살아난 둘만 이름순으로 나와야 한다"
+    );
+
+    const [restoreLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "customers"),
+          eq(auditLogs.targetRecordId, customer.id),
+          eq(auditLogs.actionType, "RESTORE")
+        )
+      );
+    assert.ok(restoreLog);
+    const restoreValue = restoreLog.newValue as { restoredCustomerContactIds: string[] };
+    assert.deepEqual([...restoreValue.restoredCustomerContactIds].sort(), [first.id, second.id].sort());
+
+    // ── 3. 다시 휴지통 → 완전 삭제 ─────────────────────────────────────────
+    const restoredCustomer = await readCustomer(customer.id);
+    const deletedAgain = await softDeleteCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: restoredCustomer.updatedAt.toISOString(),
+      actorUserId: actorId,
+      reason: null,
+    });
+    assert.equal(deletedAgain.ok, true);
+
+    const trashedAgain = await readCustomer(customer.id);
+    const purged = await permanentlyDeleteCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: trashedAgain.updatedAt.toISOString(),
+      actorUserId: actorId,
+      reason: "테스트 완전 삭제",
+    });
+    assert.equal(purged.ok, true, `permanent delete failed (FK?): ${JSON.stringify(purged)}`);
+
+    assert.equal(await readCustomer(customer.id), undefined);
+    const remaining = await db.select().from(customerContacts).where(eq(customerContacts.customerId, customer.id));
+    assert.equal(remaining.length, 0, "먼저 지운 줄까지 담당자 전부가 사라져야 한다");
+
+    const [purgeLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "customers"),
+          eq(auditLogs.targetRecordId, customer.id),
+          eq(auditLogs.actionType, "PURGE")
+        )
+      );
+    assert.ok(purgeLog);
+    const purgeValue = purgeLog.previousValue as { purgedCustomerContactIds: string[] };
+    assert.deepEqual(
+      [...purgeValue.purgedCustomerContactIds].sort(),
+      [first.id, second.id, removedEarlier.id].sort()
+    );
+    assert.ok(!JSON.stringify(purgeLog.previousValue).includes("연쇄 담당자"), "감사 로그에 담당자 이름이 들어갔다");
   });
 });
 
@@ -602,6 +767,46 @@ describe("purgeExpiredCustomer", () => {
       .where(and(eq(auditLogs.targetRecordId, customer.id), eq(auditLogs.actionType, "PURGE")));
     assert.ok(log);
     assert.equal(log.actorUserId, null, "자동 정리는 사람이 한 일이 아니다");
+  });
+
+  test("고객사 담당자가 있는 만료 고객사도 정리된다 — FK 에 막히지 않고 따로 지운 줄까지 함께 사라진다", async () => {
+    const customer = await createTestCustomer("PURGE-CC");
+    const active = await createTestCustomerContact(customer.id, "만료 고객사 담당자");
+    const removedEarlier = await createTestCustomerContact(customer.id, "만료 전에 지운 담당자");
+    await db
+      .update(customerContacts)
+      .set({ isDeleted: true, deletedAt: new Date(Date.now() - MS_PER_DAY), deletedBy: actorId })
+      .where(eq(customerContacts.id, removedEarlier.id));
+
+    const deleted = await softDeleteCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      actorUserId: actorId,
+      reason: null,
+    });
+    assert.equal(deleted.ok, true);
+    await backdateDeletion(customer.id, MASTER_DATA_TRASH_RETENTION_DAYS + 1);
+
+    assert.equal(await purgeExpiredCustomer(customer.id), "PURGED");
+    assert.equal(await readCustomer(customer.id), undefined);
+    const remaining = await db.select().from(customerContacts).where(eq(customerContacts.customerId, customer.id));
+    assert.equal(remaining.length, 0);
+
+    const [log] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "customers"),
+          eq(auditLogs.targetRecordId, customer.id),
+          eq(auditLogs.actionType, "PURGE")
+        )
+      );
+    assert.ok(log);
+    assert.equal(log.actorUserId, null);
+    const previous = log.previousValue as { purgedCustomerContactIds: string[] };
+    assert.deepEqual([...previous.purgedCustomerContactIds].sort(), [active.id, removedEarlier.id].sort());
+    assert.ok(!JSON.stringify(log.previousValue).includes("담당자"), "감사 로그에 담당자 이름이 들어갔다");
   });
 
   test("복원된 뒤라면 만료 목록에 들어 있었더라도 지우지 않는다", async () => {

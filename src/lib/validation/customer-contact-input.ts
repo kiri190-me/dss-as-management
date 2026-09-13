@@ -15,7 +15,21 @@
  * ── 이메일 ──────────────────────────────────────────────────────────────
  * 형식 규칙은 end-user-input.ts의 validateEndUserContactFields와 같다 — "@"가
  * 들어 있는지만 본다.
+ *
+ * ── 메모의 줄바꿈은 LF 로 통일한다 ──────────────────────────────────────
+ * 폼으로 보낸 여러 줄 글은 줄바꿈이 CRLF 로 온다. 입력칸은 줄바꿈을 한 글자로
+ * 세는데 CRLF 그대로 두면 두 글자가 되어, 화면에서 500자에 맞춘 메모가 서버에서
+ * 넘친다고 거절된다. 그래서 걷고 세기 전에 LF 로 바꾼다 — 개선 요청 본문
+ * (improvement-request-input.ts)과 같은 까닭·같은 규칙이다. 한 줄 칸(이름·직급·
+ * 전화·이메일)은 입력칸이 줄바꿈을 받지 않으므로 손대지 않는다.
  */
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 수정·삭제가 받는 담당자 id — end-user-input.ts 의 isValidEndUserContactId 와 같은 모양. */
+export function isValidCustomerContactId(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
 
 export const CUSTOMER_CONTACT_NAME_MAX = 200;
 export const CUSTOMER_CONTACT_TITLE_MAX = 200;
@@ -61,7 +75,8 @@ export function validateCustomerContactFields(
       fieldErrors[key] = `${label} 값을 확인할 수 없습니다.`;
       return null;
     }
-    const trimmed = value.trim();
+    // 메모만 줄바꿈을 받는다 — 세기 전에 LF 로 통일한다(파일 머리 주석).
+    const trimmed = (key === "memo" ? value.replace(/\r\n?/g, "\n") : value).trim();
     if (trimmed === "") return null;
     if (trimmed.length > max) {
       fieldErrors[key] = `${label}은(는) ${max}자를 넘을 수 없습니다.`;

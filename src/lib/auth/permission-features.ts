@@ -264,7 +264,7 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
     contacts: {
       label: "담당자 정보",
       minMeaningfulLevel: "WRITE",
-      description: "End-User 쪽 연락 담당자입니다.",
+      description: "고객사와 End-User 쪽 연락 담당자입니다.",
       levelHints: {
         WRITE: "담당자를 추가하고 수정합니다",
         MANAGE: "담당자를 삭제합니다",

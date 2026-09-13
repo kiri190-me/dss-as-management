@@ -53,7 +53,8 @@ export default function CustomerEditForm({
   const [contactEmail, setContactEmail] = useState(customer.contactEmail ?? "");
   const [contactPhone, setContactPhone] = useState(customer.contactPhone ?? "");
   /**
-   * 팔레트 키다(색 코드가 아니다). null 은 "안 고름"이고 폼 안에서는 빈
+   * 팔레트 키 또는 직접 고른 색 코드(소문자 #rrggbb)다 — 서버 검증은
+   * normalizeCustomerRowColorValue. null 은 "안 고름"이고 폼 안에서는 빈
    * 문자열로 다룬다 — 라디오의 value 는 문자열뿐이라서다. 저장할 때 다시
    * null 로 돌아간다.
    */
@@ -136,7 +137,7 @@ export default function CustomerEditForm({
         </div>
 
         <div>
-          <label className={editLabelClass}>담당자 성함</label>
+          <label className={editLabelClass}>대표 담당자 성함</label>
           <input
             className={editInputClass}
             value={contactName}
@@ -147,7 +148,7 @@ export default function CustomerEditForm({
         </div>
 
         <div>
-          <label className={editLabelClass}>연락처(이메일)</label>
+          <label className={editLabelClass}>대표 연락처(이메일)</label>
           <input
             type="email"
             className={editInputClass}
@@ -159,7 +160,7 @@ export default function CustomerEditForm({
         </div>
 
         <div>
-          <label className={editLabelClass}>연락처(전화)</label>
+          <label className={editLabelClass}>대표 연락처(전화)</label>
           <input
             className={editInputClass}
             value={contactPhone}

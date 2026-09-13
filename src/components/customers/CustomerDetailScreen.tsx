@@ -2,13 +2,19 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { CustomerDetail, CustomerEndUserRow, EndUserContactRow } from "@/lib/db/queries/customers";
+import type {
+  CustomerContactRow,
+  CustomerDetail,
+  CustomerEndUserRow,
+  EndUserContactRow,
+} from "@/lib/db/queries/customers";
 import type { CustomerProductModelRow } from "@/lib/db/queries/product-model-customers";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import {
   NO_CUSTOMER_ROW_COLOR_LABEL,
   resolveCustomerRowColor,
 } from "@/lib/domain/customer-row-color";
+import CustomerContactList from "./CustomerContactList";
 import CustomerEditForm from "./CustomerEditForm";
 import { CustomerRowColorSwatch } from "./CustomerRowColorField";
 import CustomerRepairCaseHistory from "./CustomerRepairCaseHistory";
@@ -65,14 +71,23 @@ function kindLabel(kind: string | null): string {
  * 🔴 그 차례인 까닭: 화면이 "고객사 정보 → 누가 쓰는가(End-User) → 무엇을
  * 쓰는가(제품 모델) → 무슨 일이 있었나(A/S 이력)" 로 읽히기 때문이다. 그래서
  * 제품 모델 구역은 End-User 구역과 A/S 이력 구역 **사이**에 놓는다.
+ *
+ * 「고객사 담당자」 구역(2026-09-13)은 고객사 정보 바로 아래다 — 고객사 자체에 딸린
+ * 사람들이라 End-User 보다 앞에 읽힌다. 고객사 정보의 대표 담당자 세 칸과는 따로
+ * 있는 목록이다(CustomerContactList 머리말). 추가·수정·삭제는 각자 서버가 정한
+ * 참/거짓을 받고, customer-contacts.ts 의 서버 액션이 다시 검사한다.
  */
 export default function CustomerDetailScreen({
   customer,
+  customerContacts,
   endUsers,
   endUserContacts,
   productModels,
   repairCases,
   canEdit,
+  canAddCustomerContact,
+  canEditCustomerContact,
+  canRemoveCustomerContact,
   canCreateEndUser,
   canRenameEndUser,
   canAddEndUserContact,
@@ -80,11 +95,15 @@ export default function CustomerDetailScreen({
   canRemoveEndUserContact,
 }: {
   customer: CustomerDetail;
+  customerContacts: CustomerContactRow[];
   endUsers: CustomerEndUserRow[];
   endUserContacts: EndUserContactRow[];
   productModels: CustomerProductModelRow[];
   repairCases: ResolvedRepairCase[];
   canEdit: boolean;
+  canAddCustomerContact: boolean;
+  canEditCustomerContact: boolean;
+  canRemoveCustomerContact: boolean;
   canCreateEndUser: boolean;
   canRenameEndUser: boolean;
   canAddEndUserContact: boolean;
@@ -132,9 +151,9 @@ export default function CustomerDetailScreen({
             <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <InfoField label="고객사명" value={customer.name} />
               <InfoField label="등록일" value={formatDateTime(customer.createdAt)} />
-              <InfoField label="담당자 성함" value={customer.contactName ?? "-"} />
-              <InfoField label="연락처(이메일)" value={customer.contactEmail ?? "-"} />
-              <InfoField label="연락처(전화)" value={customer.contactPhone ?? "-"} />
+              <InfoField label="대표 담당자 성함" value={customer.contactName ?? "-"} />
+              <InfoField label="대표 연락처(이메일)" value={customer.contactEmail ?? "-"} />
+              <InfoField label="대표 연락처(전화)" value={customer.contactPhone ?? "-"} />
               {/* 수정 폼에서 고른 색을 읽기 화면에서도 그대로 볼 수 있어야 한다 —
                   안 그러면 색을 확인하려고 매번 수정 버튼을 눌러야 한다. */}
               <div>
@@ -149,6 +168,22 @@ export default function CustomerDetailScreen({
               </div>
             </dl>
           )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">고객사 담당자</h2>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          위 대표 담당자와 따로 관리하는 목록입니다.
+        </p>
+        <div className="mt-3">
+          <CustomerContactList
+            customerId={customer.id}
+            contacts={customerContacts}
+            canAdd={canAddCustomerContact}
+            canEdit={canEditCustomerContact}
+            canRemove={canRemoveCustomerContact}
+          />
         </div>
       </section>
 

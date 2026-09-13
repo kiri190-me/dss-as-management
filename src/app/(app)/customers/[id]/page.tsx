@@ -7,7 +7,12 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveCustomerCapabilities } from "@/lib/auth/customer-capabilities";
-import { getCustomerDetailById, listEndUserContactsByCustomerId, listEndUsersByCustomerId } from "@/lib/db/queries/customers";
+import {
+  getCustomerDetailById,
+  listCustomerContactsByCustomerId,
+  listEndUserContactsByCustomerId,
+  listEndUsersByCustomerId,
+} from "@/lib/db/queries/customers";
 import { listProductModelsForCustomer } from "@/lib/db/queries/product-model-customers";
 import { listRepairCasesByCustomerId } from "@/lib/db/queries/repair-cases";
 
@@ -26,6 +31,11 @@ export const dynamic = "force-dynamic";
  * hint only, same as canEditCustomers — each is re-verified independently
  * by its own Server Action in end-users.ts regardless of what this page
  * decided to render.
+ *
+ * 고객사 담당자(canAddCustomerContact/canEditCustomerContact/
+ * canRemoveCustomerContact, 2026-09-13)도 같은 노드(customers.contacts)의 같은
+ * 두 능력(editContact = WRITE, removeContact = MANAGE)을 받는다 — 다시 검사하는
+ * 자리는 server/actions/customer-contacts.ts 다.
  */
 export default async function CustomerDetailPage({
   params,
@@ -61,7 +71,8 @@ export default async function CustomerDetailPage({
     notFound();
   }
 
-  const [endUsers, endUserContacts, productModels, repairCases] = await Promise.all([
+  const [customerContacts, endUsers, endUserContacts, productModels, repairCases] = await Promise.all([
+    listCustomerContactsByCustomerId(customer.id),
     listEndUsersByCustomerId(customer.id),
     listEndUserContactsByCustomerId(customer.id),
     // 🔴 이 목록으로 /product-models/{id} 링크를 걸지만 권한 판정을 하나 더 두지
@@ -80,11 +91,15 @@ export default async function CustomerDetailPage({
   return (
     <CustomerDetailScreen
       customer={customer}
+      customerContacts={customerContacts}
       endUsers={endUsers}
       endUserContacts={endUserContacts}
       productModels={productModels}
       repairCases={repairCases}
       canEdit={capabilities.edit}
+      canAddCustomerContact={capabilities.editContact}
+      canEditCustomerContact={capabilities.editContact}
+      canRemoveCustomerContact={capabilities.removeContact}
       canCreateEndUser={capabilities.createEndUser}
       canRenameEndUser={capabilities.renameEndUser}
       canAddEndUserContact={capabilities.editContact}

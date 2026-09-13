@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../client";
-import { customers, endUserContacts, endUsers, repairCases, users } from "../schema";
+import { customerContacts, customers, endUserContacts, endUsers, repairCases, users } from "../schema";
 
 // Deliberately permissive UUID matcher (any RFC-4122-shaped hex string, not
 // version-pinned) — same convention/reasoning as repair-cases.ts's own
@@ -204,6 +204,43 @@ export async function listEndUserContactsByCustomerId(customerId: string): Promi
       )
     )
     .orderBy(endUserContacts.contactName);
+  return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
+}
+
+export type CustomerContactRow = {
+  id: string;
+  contactName: string;
+  title: string | null;
+  phone: string | null;
+  email: string | null;
+  memo: string | null;
+  /** 수정·삭제의 낙관적 동시성 검사값(expectedUpdatedAt). */
+  updatedAt: string;
+};
+
+/**
+ * 고객사 담당자 목록(customer_contacts) — 상세 화면의 「고객사 담당자」 구역.
+ * 활성 줄만, 이름순(같은 이름이면 id 순으로 차례를 고정한다). 대표 담당자 칸
+ * (customers.contact_*)은 여기 섞지 않는다 — 둘은 따로 있는 목록이다
+ * (schema/customers.ts 의 customerContacts 머리 주석).
+ *
+ * 부르는 쪽은 getCustomerDetailById 로 활성 고객사를 확인한 뒤에만 부른다. 휴지통
+ * 고객사의 담당자는 고객사와 함께 is_deleted 가 되므로 어차피 나오지 않는다.
+ */
+export async function listCustomerContactsByCustomerId(customerId: string): Promise<CustomerContactRow[]> {
+  const rows = await db
+    .select({
+      id: customerContacts.id,
+      contactName: customerContacts.contactName,
+      title: customerContacts.title,
+      phone: customerContacts.phone,
+      email: customerContacts.email,
+      memo: customerContacts.memo,
+      updatedAt: customerContacts.updatedAt,
+    })
+    .from(customerContacts)
+    .where(and(eq(customerContacts.customerId, customerId), eq(customerContacts.isDeleted, false)))
+    .orderBy(customerContacts.contactName, customerContacts.id);
   return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
 }
 

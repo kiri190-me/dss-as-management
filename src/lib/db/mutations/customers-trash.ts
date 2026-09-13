@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../client";
-import { customers, endUserContacts, endUsers, repairCases } from "../schema";
+import { customerContacts, customers, endUserContacts, endUsers, repairCases } from "../schema";
 import { insertAuditLog } from "./audit-logs";
 import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
 
@@ -31,6 +31,12 @@ import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
  * 복원·완전삭제 셋 다 담당자 → End-User → 고객사 순으로 함께 움직인다
  * (완전삭제의 이 순서는 취향이 아니라 FK RESTRICT가 강제하는 순서다).
  *
+ * 고객사 담당자(customer_contacts, 2026-09-13)도 같다 — 고객사 바로 아래에서만
+ * 뜻이 있고 customer_id가 RESTRICT다. 삭제·복원은 End-User와 같은 순간 규칙으로
+ * 함께 움직이고, 완전삭제는 고객사보다 먼저 지운다(빠뜨리면 완전삭제가 FK 오류로
+ * 막힌다). 따로 지워 둔 줄(deleted_at이 다르다)은 복원되지 않고 완전삭제 때
+ * 함께 사라진다. 대표 담당자 칸(customers.contact_*)은 이 목록과 섞이지 않는다.
+ *
  * ── 복원은 '이번 삭제로 딸려 간 것'만 되살린다 ──────────────────────────
  * 고객사를 지우기 전에 이미 따로 삭제돼 있던 End-User는 복원 대상이 아니다.
  * 그걸 구분하는 방법이 deleted_at이다 — 한 트랜잭션에서 고객사와 딸려 가는
@@ -53,7 +59,10 @@ import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
  * 스냅샷이 audit_logs.previous_value에 절대 들어가지 않는 것과 같은 규칙으로
  * 여기서도 스냅샷에서 뺀다. 그래서 담당자는 행별 감사 로그를 남기지
  * 않는다 — 남길 수 있는 것이 id뿐이라 기록으로서 의미가 없다. 대신 몇 건이
- * 함께 움직였는지를 고객사 쪽 감사 로그에 적는다.
+ * 함께 움직였는지를 고객사 쪽 감사 로그에 적는다. 고객사 담당자
+ * (customer_contacts)도 행별 로그 없이 고객사 쪽 감사 로그에 **id만** 적는다
+ * (cascaded/restored/purgedCustomerContactIds) — 이름·직급·전화·이메일·메모는 싣지
+ * 않는다.
  * ============================================================================
  */
 
@@ -197,6 +206,15 @@ export async function softDeleteCustomer(params: {
       }
     }
 
+    // 고객사 담당자도 같은 순간으로 함께 간다 — 복원이 이 순간으로 딸려 간 줄만
+    // 알아본다. 이미 따로 지워 둔 줄(is_deleted = true)은 건드리지 않는다.
+    const customerContactRows = await tx
+      .update(customerContacts)
+      .set(deletion)
+      .where(and(eq(customerContacts.customerId, params.customerId), eq(customerContacts.isDeleted, false)))
+      .returning({ id: customerContacts.id });
+    const cascadedCustomerContactIds = customerContactRows.map((row) => row.id);
+
     const updated = await tx
       .update(customers)
       .set(deletion)
@@ -223,6 +241,8 @@ export async function softDeleteCustomer(params: {
         // (파일 상단 주석) 이 숫자가 그 사실의 유일한 기록이다.
         cascadedEndUserIds: cascadedIds,
         cascadedContactCount: contactCount,
+        // 고객사 담당자는 id만 — 값은 개인정보라 싣지 않는다(파일 상단 주석).
+        cascadedCustomerContactIds,
       },
     });
 
@@ -288,16 +308,18 @@ export async function restoreCustomer(params: {
       updatedAt: new Date(),
     };
 
-    // 🔴 복원 쓰기 셋(담당자 · End-User · 고객사 UPDATE)은 **세이브포인트 안에서**
-    // 한다(tx.transaction). postgres-js는 트랜잭션 안에서 난 오류를 catch로 잡아도
-    // 콜백이 끝난 뒤 다시 던지므로(customers.ts createCustomer 주석), 세이브포인트
-    // 없이는 아래 catch가 돌지 못하고 경쟁에서 진 쪽이 날것의 23505로 터졌다.
-    // 셋을 한 세이브포인트에 두는 것은 함께 되감기게 하려는 것이다 — 고객사
-    // UPDATE만 되감기고 End-User·담당자 복원이 커밋되면 휴지통 고객사 아래 살아
-    // 있는 End-User가 남는다. 감사 로그는 쓰기가 다 된 뒤 바깥 트랜잭션에 남긴다.
+    // 🔴 복원 쓰기 넷(End-User 담당자 · End-User · 고객사 담당자 · 고객사 UPDATE)은
+    // **세이브포인트 안에서** 한다(tx.transaction). postgres-js는 트랜잭션 안에서 난
+    // 오류를 catch로 잡아도 콜백이 끝난 뒤 다시 던지므로(customers.ts createCustomer
+    // 주석), 세이브포인트 없이는 아래 catch가 돌지 못하고 경쟁에서 진 쪽이 날것의
+    // 23505로 터졌다. 넷을 한 세이브포인트에 두는 것은 함께 되감기게 하려는 것이다 —
+    // 고객사 UPDATE만 되감기고 End-User·담당자 복원이 커밋되면 휴지통 고객사 아래
+    // 살아 있는 End-User·담당자가 남는다. 감사 로그는 쓰기가 다 된 뒤 바깥
+    // 트랜잭션에 남긴다.
     let updated: { id: string }[];
+    let restoredCustomerContactIds: string[];
     try {
-      updated = await tx.transaction(async (savepoint) => {
+      ({ updated, restoredCustomerContactIds } = await tx.transaction(async (savepoint) => {
         if (cascadedEndUsers.length > 0 && current.deletedAt) {
           const cascadedIds = cascadedEndUsers.map((endUser) => endUser.id);
           await savepoint
@@ -313,12 +335,31 @@ export async function restoreCustomer(params: {
           await savepoint.update(endUsers).set(restoration).where(inArray(endUsers.id, cascadedIds));
         }
 
-        return savepoint
+        // 고객사 담당자 — 고객사와 같은 순간에 딸려 간 줄만 되살린다. 먼저 따로
+        // 지워 둔 줄은 deleted_at이 달라 그대로 휴지통에 남는다.
+        const deletedAt = current.deletedAt;
+        const contactRows = deletedAt
+          ? await savepoint
+              .update(customerContacts)
+              .set(restoration)
+              .where(
+                and(
+                  eq(customerContacts.customerId, params.customerId),
+                  eq(customerContacts.isDeleted, true),
+                  eq(customerContacts.deletedAt, deletedAt)
+                )
+              )
+              .returning({ id: customerContacts.id })
+          : [];
+
+        const customerRows = await savepoint
           .update(customers)
           .set(restoration)
           .where(and(eq(customers.id, params.customerId), eq(customers.isDeleted, true)))
           .returning({ id: customers.id });
-      });
+
+        return { updated: customerRows, restoredCustomerContactIds: contactRows.map((row) => row.id) };
+      }));
     } catch (err) {
       // 위의 사전 검사와 이 UPDATE 사이에 같은 이름이 활성으로 들어온 경쟁.
       // 부분 유니크 인덱스가 최종 방어선이고, 여기서 사람이 읽을 수 있는
@@ -353,6 +394,7 @@ export async function restoreCustomer(params: {
         name: current.name,
         isDeleted: false,
         restoredEndUserIds: cascadedEndUsers.map((endUser) => endUser.id),
+        restoredCustomerContactIds,
       },
     });
 
@@ -365,7 +407,7 @@ export async function restoreCustomer(params: {
  * (master-data-purge.ts)와 같은 일을 하되 사람이 행위자다.
  *
  * 삭제 순서는 취향이 아니라 FK RESTRICT가 강제한다: 담당자 → End-User →
- * 고객사.
+ * 고객사 담당자 → 고객사.
  */
 export async function permanentlyDeleteCustomer(params: {
   customerId: string;
@@ -424,6 +466,13 @@ export async function permanentlyDeleteCustomer(params: {
       }
     }
 
+    // 🔴 고객사 담당자는 FK RESTRICT라 고객사보다 먼저 지운다 — 따로 지워 둔 줄
+    // (is_deleted = true)까지 전부. 빠뜨리면 아래 고객사 DELETE가 FK 오류로 막힌다.
+    const purgedCustomerContacts = await tx
+      .delete(customerContacts)
+      .where(eq(customerContacts.customerId, params.customerId))
+      .returning({ id: customerContacts.id });
+
     const deleted = await tx
       .delete(customers)
       .where(and(eq(customers.id, params.customerId), eq(customers.isDeleted, true)))
@@ -444,6 +493,7 @@ export async function permanentlyDeleteCustomer(params: {
         deletedBy: current.deletedBy,
         deleteReason: current.deleteReason,
         purgedEndUserIds: endUserIds,
+        purgedCustomerContactIds: purgedCustomerContacts.map((row) => row.id),
       },
       newValue: null,
     });

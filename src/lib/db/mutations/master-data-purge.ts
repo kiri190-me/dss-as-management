@@ -1,6 +1,7 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../connection";
 import {
+  customerContacts,
   customers,
   domesticOrderDueDates,
   domesticOrders,
@@ -83,9 +84,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  *    막았으므로 정상 운영에서는 나오지 않는다. 그래도 DB 오류로 터뜨리는
  *    대신 이유가 있는 건너뜀으로 보고한다 — 매일 밤 같은 줄이 다시 찍히는
  *    것 자체가 "손을 봐야 한다"는 신호가 된다.)
- *  - 그렇지 않으면 담당자 → End-User → 고객사 순으로 지운다. 이 순서는
- *    FK RESTRICT가 강제한다. 감사 로그는 actor_user_id = NULL(사람이 아닌
- *    시스템이 한 일)로 남는다.
+ *  - 그렇지 않으면 담당자 → End-User → 고객사 담당자 → 고객사 순으로 지운다.
+ *    이 순서는 FK RESTRICT가 강제한다. 감사 로그는 actor_user_id = NULL(사람이
+ *    아닌 시스템이 한 일)로 남는다. 고객사 담당자는 id만 적는다 — 값은
+ *    개인정보다(customers-trash.ts 상단 주석).
  */
 export async function purgeExpiredCustomer(id: string, now: Date = new Date()): Promise<PurgeCustomerOutcome> {
   return await db.transaction(async (tx) => {
@@ -137,6 +139,13 @@ export async function purgeExpiredCustomer(id: string, now: Date = new Date()): 
       }
     }
 
+    // 🔴 고객사 담당자는 FK RESTRICT라 고객사보다 먼저 지운다 — 따로 지워 둔 줄까지
+    // 전부. customers-trash.ts의 permanentlyDeleteCustomer와 같은 자리다.
+    const purgedCustomerContacts = await tx
+      .delete(customerContacts)
+      .where(eq(customerContacts.customerId, id))
+      .returning({ id: customerContacts.id });
+
     await tx.delete(customers).where(eq(customers.id, id));
 
     await insertAuditLog(tx, {
@@ -152,6 +161,7 @@ export async function purgeExpiredCustomer(id: string, now: Date = new Date()): 
         deletedBy: current.deletedBy,
         deleteReason: current.deleteReason,
         purgedEndUserIds: endUserIds,
+        purgedCustomerContactIds: purgedCustomerContacts.map((row) => row.id),
       },
       newValue: null,
     });

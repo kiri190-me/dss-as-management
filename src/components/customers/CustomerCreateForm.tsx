@@ -37,7 +37,10 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
-  /** 팔레트 키. 없음은 빈 문자열이고, 보낼 때 null 로 바꾼다(CustomerEditForm 과 같다). */
+  /**
+   * 팔레트 키 또는 직접 고른 색 코드(소문자 #rrggbb). 없음은 빈 문자열이고, 보낼 때
+   * null 로 바꾼다(CustomerEditForm 과 같다).
+   */
   const [rowColor, setRowColor] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -114,7 +117,7 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
 
           <div>
             <label htmlFor="customer-create-contact-name" className={editLabelClass}>
-              담당자 성함
+              대표 담당자 성함
             </label>
             <input
               id="customer-create-contact-name"
@@ -129,7 +132,7 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
 
           <div>
             <label htmlFor="customer-create-contact-phone" className={editLabelClass}>
-              연락처(전화)
+              대표 연락처(전화)
             </label>
             <input
               id="customer-create-contact-phone"
@@ -145,7 +148,7 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
 
           <div className="sm:col-span-2">
             <label htmlFor="customer-create-contact-email" className={editLabelClass}>
-              연락처(이메일)
+              대표 연락처(이메일)
             </label>
             <input
               id="customer-create-contact-email"
