@@ -1,4 +1,4 @@
-import { childNavItems, navGroups, navItems } from "@/lib/navigation";
+import { childNavItems, filterNavItemsForAccess, navGroups, navItems } from "@/lib/navigation";
 
 /**
  * ============================================================================
@@ -338,4 +338,183 @@ export function improvementRequestMenuLabel(menuKey: string | null): string {
   if (menuKey === null) return IMPROVEMENT_REQUEST_NO_MENU_LABEL;
   const option = listImprovementRequestMenuOptions().find((o) => o.key === menuKey);
   return option ? option.label : IMPROVEMENT_REQUEST_UNKNOWN_MENU_LABEL;
+}
+
+/**
+ * [복사] 단추가 클립보드에 넣는 글 — 「[메뉴 이름] 본문」. 메뉴 이름은 줄에 붙이는
+ * 표시와 같은 improvementRequestMenuLabel 이다(NULL 이면 「[메뉴 지정 안 함]」).
+ */
+export function improvementRequestCopyText(item: { menuKey: string | null; body: string }): string {
+  return `[${improvementRequestMenuLabel(item.menuKey)}] ${item.body}`;
+}
+
+// ────────────────────────────────────────────────── 이 사람이 고를 수 있는 메뉴
+
+/**
+ * 적기·고치기 선택칸에 내놓을 메뉴 — **이 사람이 사이드바에서 보는 메뉴만**,
+ * 사이드바 차례대로, 맨 끝에 기타(늘 넣는다).
+ *
+ * 인자 둘은 사이드바가 받는 값 그대로다: 페이지가 listAccessibleAreaKeys(actor) 와
+ * mayEnterDeveloperMode(actor) 로 구해 넘긴다(app/(app)/layout.tsx 와 같은 두 줄).
+ * 판정도 사이드바와 같은 filterNavItemsForAccess 다 — 규칙을 여기 한 벌 더 적으면
+ * 사이드바는 감추는 메뉴가 이 목록에는 나오는(또는 그 반대의) 날이 온다. 그래서
+ * 개발자가 아니면 「개발자 모드」가 빠진다(그 함수의 개발자 모드 예외).
+ *
+ * 하위메뉴(주간보고)는 **부모가 보일 때만** 넣는다 — Sidebar.tsx 가 부모 없는
+ * 하위메뉴를 그리지 않기 때문이다(그 파일의 dashboardChildren 주석). 사이드바에서
+ * 못 보는 메뉴를 여기서 고르게 하면 「사이드바에서 보는 메뉴」가 아니게 된다.
+ *
+ * 🔴 **이것은 화면의 편의이지 검증이 아니다.** 저장은 전체 목록
+ * (isImprovementRequestMenuKey)으로 판정한다 — 권한이 좁혀진 사람이 옛 글을 고칠 때
+ * 그 글의 메뉴 그대로 저장할 수 있어야 한다. 메뉴 칸은 「무슨 이야기인가」의 표시일
+ * 뿐 접근 권한이 아니다. 그런 글의 선택칸은 includeImprovementRequestMenuOption 이
+ * 그 한 항목을 더해 채운다.
+ */
+export function listSidebarImprovementRequestMenuOptions(input: {
+  accessibleAreaKeys: readonly string[];
+  canEnterDeveloperMode: boolean;
+}): ImprovementRequestMenuOption[] {
+  const visibleItems = filterNavItemsForAccess(navItems, input.accessibleAreaKeys, input.canEnterDeveloperMode);
+  const visibleKeys = new Set(visibleItems.map((item) => item.key));
+  const shownKeys = new Set(
+    visibleItems
+      .filter((item) => item.parentKey === undefined || visibleKeys.has(item.parentKey))
+      .map((item) => item.key)
+  );
+  return listImprovementRequestMenuOptions().filter(
+    (option) => option.key === IMPROVEMENT_REQUEST_OTHER_MENU_KEY || shownKeys.has(option.key)
+  );
+}
+
+/**
+ * 고치는 글의 지금 메뉴가 선택지에 없으면 그 한 항목을 **사이드바 차례 자리에** 더한다.
+ *
+ * 권한이 좁혀진 사람이 옛 글을 고칠 때, 그 글의 메뉴가 선택칸에 없으면 칸이 빈 값으로
+ * 열려 모르는 새 메뉴를 바꿔 버리게 된다. 올바른 열쇠(전체 목록에 있는 것)일 때만
+ * 더한다 — NULL(메뉴 지정 안 함)과 없어진 메뉴는 고를 수 있는 값이 아니므로 더하지
+ * 않고, 그 글은 빈 값으로 열려 새로 골라야 저장된다.
+ *
+ * 받은 배열은 건드리지 않는다. `options` 는 listImprovementRequestMenuOptions 의 부분
+ * 목록이어야 한다(차례를 그 목록에서 다시 세우므로).
+ */
+export function includeImprovementRequestMenuOption(
+  options: readonly ImprovementRequestMenuOption[],
+  menuKey: string | null
+): ImprovementRequestMenuOption[] {
+  if (
+    menuKey === null ||
+    !isImprovementRequestMenuKey(menuKey) ||
+    options.some((option) => option.key === menuKey)
+  ) {
+    return [...options];
+  }
+  const keys = new Set([...options.map((option) => option.key), menuKey]);
+  return listImprovementRequestMenuOptions().filter((option) => keys.has(option.key));
+}
+
+export type ImprovementRequestMenuOptionSection = {
+  /** `<optgroup>` 이름. null 이면 묶지 않고 그대로 늘어놓는다. */
+  groupLabel: string | null;
+  options: ImprovementRequestMenuOption[];
+};
+
+/**
+ * 선택칸에 그릴 묶음 — 차례를 바꾸지 않고 **이어진 같은 구획끼리** 묶는다.
+ *
+ * 그래서 구획이 없는 대시보드 · 주간보고는 맨 위에 묶음 없이, 구획 항목은 구획마다
+ * 한 묶음, 기타는 목록이 정한 대로 맨 끝에 묶음 없이 온다. 구획별로 모아 다시
+ * 세우지 않는 것은 사이드바 차례를 그대로 두기 위해서다.
+ */
+export function groupImprovementRequestMenuOptions(
+  options: readonly ImprovementRequestMenuOption[]
+): ImprovementRequestMenuOptionSection[] {
+  const sections: ImprovementRequestMenuOptionSection[] = [];
+  for (const option of options) {
+    const last = sections.at(-1);
+    if (last && last.groupLabel === option.groupLabel) last.options.push(option);
+    else sections.push({ groupLabel: option.groupLabel, options: [option] });
+  }
+  return sections;
+}
+
+// ────────────────────────────────────────────────── 메뉴로 거르기
+
+/*
+ * 목록 위 선택칸의 값. 메뉴 열쇠 그대로이거나 아래 셋 중 하나다. 🔴 셋 다 어떤 메뉴
+ * 열쇠와도 겹치지 않아야 한다(시험이 단언) — navItems 의 key 는 영문 낙타 표기라
+ * 「@」로 시작하지 않는다.
+ *
+ * 없어진 메뉴는 열쇠가 여럿이어도 **한 칸**으로 모은다 — 화면에서는 모두 같은
+ * 「(없어진 메뉴)」로 보여, 따로 세우면 이름이 같은 칸이 여럿 생긴다.
+ */
+export const IMPROVEMENT_REQUEST_MENU_FILTER_ALL = "@all";
+export const IMPROVEMENT_REQUEST_MENU_FILTER_NONE = "@none";
+export const IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN = "@unknown";
+export const IMPROVEMENT_REQUEST_ALL_MENUS_LABEL = "전체 메뉴";
+
+/** 글 하나가 거르기 선택칸의 어느 칸에 들어가는가. */
+export function improvementRequestMenuFilterValue(menuKey: string | null): string {
+  if (menuKey === null) return IMPROVEMENT_REQUEST_MENU_FILTER_NONE;
+  return isImprovementRequestMenuKey(menuKey) ? menuKey : IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN;
+}
+
+/**
+ * 고른 칸의 글만 남긴다. 「전체 메뉴」면 모두. 차례는 그대로 두고(차례는
+ * arrangeImprovementRequestList 가 정한다), 받은 배열은 건드리지 않는다.
+ */
+export function filterImprovementRequestsByMenu<T extends { menuKey: string | null }>(
+  items: readonly T[],
+  filter: string
+): T[] {
+  if (filter === IMPROVEMENT_REQUEST_MENU_FILTER_ALL) return [...items];
+  return items.filter((item) => improvementRequestMenuFilterValue(item.menuKey) === filter);
+}
+
+export type ImprovementRequestMenuFilterOption = {
+  value: string;
+  label: string;
+  /** 이 칸을 고르면 목록에 보일 글의 수(아래 함수 주석의 '건수는 지금 보이는 것만'). */
+  count: number;
+};
+
+/**
+ * 거르기 선택칸의 칸들 — 맨 앞에 「전체 메뉴」, 그다음 **글이 있는 메뉴만** 사이드바
+ * 차례대로(기타 포함), 그다음 「메뉴 지정 안 함」·「(없어진 메뉴)」(글이 있을 때만).
+ *
+ * 메뉴 목록은 보는 사람의 사이드바가 아니라 **전체 목록**에서 고른다. 목록 자체는
+ * 모두가 보므로, 내 사이드바에 없는 메뉴의 글도 거를 수 있어야 한다.
+ *
+ * ── 건수는 지금 보이는 것만 센다 ────────────────────────────────────────
+ * 「해결된 것도 보기」가 꺼져 있으면 해결된 글은 세지 않는다(켜져 있으면 센다).
+ * 칸 옆의 숫자는 「이것을 고르면 몇 줄이 보이는가」라서다 — 전체로 세면 「(5건)」을
+ * 골랐는데 세 줄만 보이는 일이 생긴다. 그래서 해결된 글만 있는 메뉴는 해결된 것을
+ * 감춘 동안 선택칸에서도 빠진다.
+ *
+ * 단 **지금 고른 칸(`selected`)은 0건이어도 남긴다** — 해결된 것을 감추거나 마지막
+ * 글을 지운 순간 고른 칸이 선택칸에서 사라지면, 선택칸은 다른 칸을 보이는데 목록은
+ * 옛 칸으로 걸러진 채가 된다.
+ */
+export function listImprovementRequestMenuFilterOptions(
+  items: readonly { menuKey: string | null; status: ImprovementRequestStatus }[],
+  options: { showResolved: boolean; selected: string }
+): ImprovementRequestMenuFilterOption[] {
+  const counted = options.showResolved ? items : items.filter((item) => item.status !== "RESOLVED");
+  const counts = new Map<string, number>();
+  for (const item of counted) {
+    const value = improvementRequestMenuFilterValue(item.menuKey);
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  const candidates = [
+    ...listImprovementRequestMenuOptions().map((option) => ({ value: option.key, label: option.label })),
+    { value: IMPROVEMENT_REQUEST_MENU_FILTER_NONE, label: IMPROVEMENT_REQUEST_NO_MENU_LABEL },
+    { value: IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN, label: IMPROVEMENT_REQUEST_UNKNOWN_MENU_LABEL },
+  ];
+
+  return [
+    { value: IMPROVEMENT_REQUEST_MENU_FILTER_ALL, label: IMPROVEMENT_REQUEST_ALL_MENUS_LABEL, count: counted.length },
+    ...candidates
+      .filter((candidate) => counts.has(candidate.value) || candidate.value === options.selected)
+      .map((candidate) => ({ ...candidate, count: counts.get(candidate.value) ?? 0 })),
+  ];
 }

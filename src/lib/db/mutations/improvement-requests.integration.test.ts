@@ -15,7 +15,11 @@ import {
   type ImprovementRequestMutationResult,
 } from "./improvement-requests";
 import { listImprovementRequests } from "../queries/improvement-requests";
-import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request";
+import { DEVELOPER_MODE_NAV_KEY } from "@/lib/auth/developer-mode-gate";
+import {
+  IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+  type ImprovementRequestStatus,
+} from "@/lib/domain/improvement-request";
 
 /**
  * ============================================================================
@@ -31,6 +35,9 @@ import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request"
  *  4. **version 이 낙관적 잠금으로 동작한다** — 낡은 version 은 CONFLICT.
  *  5. **감사 로그가 동작마다 한 줄씩** — 같은 상태로의 변경은 한 줄도 늘리지 않는다.
  *  6. **목록 조회**가 세 사람의 이름과 ISO 시각을 함께, 최근 글부터 준다.
+ *  7. **메뉴**(2026-09-13) — 적기·고치기가 menu_key 를 저장하고 감사에 이전·새
+ *     메뉴를 남긴다. 메뉴는 필수이고 전체 메뉴 목록으로 검증하며, 본문 오류와 함께
+ *     돌려준다. 메뉴 없이 적힌 옛 글은 목록이 null 로 싣고, 고칠 때 메뉴를 골라야 한다.
  *
  * 역할 · 관리자 설정은 여기서 시험하지 않는다. mutation 은 관리 권한을
  * `canManage` 인자로 받으므로(mutations 파일 헤더) 그 값을 직접 넘긴다. 그래서
@@ -49,6 +56,9 @@ import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request"
 
 const BODY_PREFIX = "IR-TEST-";
 const TARGET_ENTITY = "improvement_requests";
+/** 이 스위트가 적는 글의 기본 메뉴와, 고치기에서 바꿔 볼 다른 메뉴(둘 다 navItems 의 key). */
+const MENU_KEY = "repairCases";
+const OTHER_MENU_KEY = "customers";
 
 let authorId: string;
 let otherUserId: string;
@@ -72,7 +82,7 @@ function expectFailure(result: ImprovementRequestMutationResult, code: string): 
 
 async function createAs(actorUserId: string, label: string): Promise<{ id: string; version: number }> {
   const created = expectOk(
-    await createImprovementRequest({ body: testBody(label), actorUserId }),
+    await createImprovementRequest({ body: testBody(label), menuKey: MENU_KEY, actorUserId }),
     "setup create"
   );
   touchedIds.add(created.id);
@@ -213,6 +223,7 @@ describe("createImprovementRequest", () => {
 
     const row = await readRow(created.id);
     assert.equal(row.body, testBody("새 글"));
+    assert.equal(row.menuKey, MENU_KEY);
     assert.equal(row.status, "OPEN");
     assert.equal(row.inProgressBy, null);
     assert.equal(row.inProgressAt, null);
@@ -227,13 +238,14 @@ describe("createImprovementRequest", () => {
       audits.map((audit) => [audit.actionType, audit.actorUserId]),
       [["CREATE", authorId]]
     );
-    assert.deepEqual(audits[0].newValue, { body: testBody("새 글"), status: "OPEN" });
+    assert.deepEqual(audits[0].newValue, { body: testBody("새 글"), menuKey: MENU_KEY, status: "OPEN" });
   });
 
   test("서버 액션을 거치지 않아도 앞뒤 공백을 걷고 줄바꿈을 LF 로 저장한다", async () => {
     const created = expectOk(
       await createImprovementRequest({
         body: `  ${testBody("첫 줄")}\r\n둘째 줄  `,
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       "create"
@@ -243,7 +255,7 @@ describe("createImprovementRequest", () => {
   });
 
   test("빈 본문은 DB 오류가 아니라 VALIDATION_ERROR다", async () => {
-    const result = await createImprovementRequest({ body: "  \r\n ", actorUserId: authorId });
+    const result = await createImprovementRequest({ body: "  \r\n ", menuKey: MENU_KEY, actorUserId: authorId });
     expectFailure(result, "VALIDATION_ERROR");
     if (!result.ok) assert.ok(result.fieldErrors?.body);
   });
@@ -258,6 +270,7 @@ describe("updateImprovementRequestBody", () => {
         id: created.id,
         expectedVersion: created.version,
         body: testBody("고친 뒤"),
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       "update"
@@ -276,8 +289,8 @@ describe("updateImprovementRequestBody", () => {
       audits.map((audit) => audit.actionType),
       ["CREATE", "UPDATE"]
     );
-    assert.deepEqual(audits[1].previousValue, { body: testBody("고치기 전") });
-    assert.deepEqual(audits[1].newValue, { body: testBody("고친 뒤") });
+    assert.deepEqual(audits[1].previousValue, { body: testBody("고치기 전"), menuKey: MENU_KEY });
+    assert.deepEqual(audits[1].newValue, { body: testBody("고친 뒤"), menuKey: MENU_KEY });
   });
 
   test("남의 글은 고칠 수 없다 — FORBIDDEN이고 글도 감사도 그대로다", async () => {
@@ -287,6 +300,7 @@ describe("updateImprovementRequestBody", () => {
       id: created.id,
       expectedVersion: created.version,
       body: testBody("남이 고친 값"),
+      menuKey: MENU_KEY,
       actorUserId: otherUserId,
     });
     expectFailure(result, "FORBIDDEN");
@@ -309,6 +323,7 @@ describe("updateImprovementRequestBody", () => {
       id: created.id,
       expectedVersion: moved.version,
       body: testBody("발밑에서 바뀐 값"),
+      menuKey: MENU_KEY,
       actorUserId: authorId,
     });
     expectFailure(result, "FORBIDDEN");
@@ -325,6 +340,7 @@ describe("updateImprovementRequestBody", () => {
         id: created.id,
         expectedVersion: created.version,
         body: testBody("먼저 저장된 값"),
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       "first update"
@@ -334,6 +350,7 @@ describe("updateImprovementRequestBody", () => {
       id: created.id,
       expectedVersion: created.version,
       body: testBody("덮으면 안 되는 값"),
+      menuKey: MENU_KEY,
       actorUserId: authorId,
     });
     expectFailure(second, "CONFLICT");
@@ -352,6 +369,7 @@ describe("updateImprovementRequestBody", () => {
         id: created.id,
         expectedVersion: created.version,
         body: testBody("작성자가 고친 값"),
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       changeImprovementRequestStatus({
@@ -374,6 +392,7 @@ describe("updateImprovementRequestBody", () => {
       id: randomUUID(),
       expectedVersion: 1,
       body: testBody("없는 글"),
+      menuKey: MENU_KEY,
       actorUserId: authorId,
     });
     expectFailure(result, "NOT_FOUND");
@@ -432,7 +451,7 @@ describe("changeImprovementRequestStatus", () => {
     assert.deepEqual(
       audits.map((audit) => [audit.actionType, audit.previousValue, audit.newValue]),
       [
-        ["CREATE", null, { body: testBody("순서대로"), status: "OPEN" }],
+        ["CREATE", null, { body: testBody("순서대로"), menuKey: MENU_KEY, status: "OPEN" }],
         ["STATUS_CHANGE", { status: "OPEN" }, { status: "IN_PROGRESS" }],
         ["STATUS_CHANGE", { status: "IN_PROGRESS" }, { status: "RESOLVED" }],
       ]
@@ -564,6 +583,7 @@ describe("deleteImprovementRequest", () => {
     assert.deepEqual(audits[1].previousValue, {
       id: created.id,
       body: testBody("지울 글"),
+      menuKey: MENU_KEY,
       status: "OPEN",
       inProgressBy: null,
       inProgressAt: null,
@@ -643,6 +663,7 @@ describe("deleteImprovementRequest", () => {
         id: created.id,
         expectedVersion: created.version,
         body: testBody("그 사이 고친 글"),
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       "update"
@@ -670,6 +691,7 @@ describe("감사 로그", () => {
         id: created.id,
         expectedVersion: created.version,
         body: testBody("한 바퀴 고침"),
+        menuKey: MENU_KEY,
         actorUserId: authorId,
       }),
       "edit"
@@ -814,5 +836,216 @@ describe("listImprovementRequests", () => {
     assert.equal(open.resolvedByName, null);
     assert.equal(open.resolvedAt, null);
     assert.equal(open.version, 1);
+  });
+});
+
+describe("메뉴 — 어느 메뉴의 일인가", () => {
+  /**
+   * mutation 을 건너뛰고 menu_key 를 마음대로 넣는다 — 메뉴 칸이 생기기 전의 옛 글
+   * (NULL)과 사이드바에서 빠진 메뉴의 옛 글(모르는 열쇠)을 만든다. 본문이 접두사로
+   * 시작하고 id 를 touchedIds 에 넣으므로 after() 가 치운다.
+   */
+  async function insertLegacy(label: string, menuKey: string | null): Promise<{ id: string; version: number }> {
+    const [inserted] = await db
+      .insert(improvementRequests)
+      .values({ body: testBody(label), menuKey, createdBy: authorId })
+      .returning({ id: improvementRequests.id, version: improvementRequests.version });
+    touchedIds.add(inserted.id);
+    return inserted;
+  }
+
+  async function countRowsWithBody(label: string): Promise<number> {
+    const rows = await db
+      .select({ id: improvementRequests.id })
+      .from(improvementRequests)
+      .where(eq(improvementRequests.body, testBody(label)));
+    return rows.length;
+  }
+
+  test("적을 때 고른 메뉴가 저장되고, 목록 조회가 그대로 싣고, CREATE 감사에 새 메뉴가 남는다", async () => {
+    const created = expectOk(
+      await createImprovementRequest({
+        body: testBody("기타 메뉴 글"),
+        menuKey: IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+        actorUserId: authorId,
+      }),
+      "create"
+    );
+    touchedIds.add(created.id);
+
+    assert.equal((await readRow(created.id)).menuKey, IMPROVEMENT_REQUEST_OTHER_MENU_KEY);
+    const listed = (await listImprovementRequests()).find((item) => item.id === created.id);
+    assert.ok(listed, "목록에 있어야 한다");
+    assert.equal(listed.menuKey, IMPROVEMENT_REQUEST_OTHER_MENU_KEY);
+
+    const audits = await readAudits(created.id);
+    assert.deepEqual(
+      audits.map((audit) => [audit.actionType, audit.previousValue, audit.newValue]),
+      [["CREATE", null, { body: testBody("기타 메뉴 글"), menuKey: IMPROVEMENT_REQUEST_OTHER_MENU_KEY, status: "OPEN" }]]
+    );
+  });
+
+  test("고치기에서 메뉴만 바꿔도 저장되고, UPDATE 감사에 이전·새 메뉴가 남는다", async () => {
+    const created = await createAs(authorId, "메뉴를 바꿀 글");
+
+    const result = expectOk(
+      await updateImprovementRequestBody({
+        id: created.id,
+        expectedVersion: created.version,
+        body: testBody("메뉴를 바꿀 글"),
+        menuKey: OTHER_MENU_KEY,
+        actorUserId: authorId,
+      }),
+      "update menu"
+    );
+    assert.equal(result.version, 2);
+
+    const row = await readRow(created.id);
+    assert.equal(row.menuKey, OTHER_MENU_KEY);
+    assert.equal(row.body, testBody("메뉴를 바꿀 글"), "본문은 그대로다");
+    assert.equal(row.updatedBy, authorId);
+    assert.equal((await listImprovementRequests()).find((item) => item.id === created.id)?.menuKey, OTHER_MENU_KEY);
+
+    const audits = await readAudits(created.id);
+    assert.deepEqual(
+      audits.map((audit) => [audit.actionType, audit.previousValue, audit.newValue]),
+      [
+        ["CREATE", null, { body: testBody("메뉴를 바꿀 글"), menuKey: MENU_KEY, status: "OPEN" }],
+        [
+          "UPDATE",
+          { body: testBody("메뉴를 바꿀 글"), menuKey: MENU_KEY },
+          { body: testBody("메뉴를 바꿀 글"), menuKey: OTHER_MENU_KEY },
+        ],
+      ]
+    );
+  });
+
+  test("메뉴 없이 적힌 옛 글 — 목록은 null 로 싣고, 메뉴를 골라야 고쳐지며, 감사의 이전 메뉴는 null 이다", async () => {
+    const legacy = await insertLegacy("메뉴 없는 옛 글", null);
+    assert.equal((await listImprovementRequests()).find((item) => item.id === legacy.id)?.menuKey, null);
+
+    const withoutMenu = await updateImprovementRequestBody({
+      id: legacy.id,
+      expectedVersion: legacy.version,
+      body: testBody("메뉴 없는 옛 글"),
+      menuKey: "",
+      actorUserId: authorId,
+    });
+    expectFailure(withoutMenu, "VALIDATION_ERROR");
+    if (!withoutMenu.ok) assert.ok(withoutMenu.fieldErrors?.menuKey, "메뉴 칸 오류여야 한다");
+    const untouched = await readRow(legacy.id);
+    assert.equal(untouched.menuKey, null);
+    assert.equal(untouched.version, 1, "거절된 저장은 version 을 올리지 않는다");
+
+    expectOk(
+      await updateImprovementRequestBody({
+        id: legacy.id,
+        expectedVersion: legacy.version,
+        body: testBody("메뉴 없는 옛 글"),
+        menuKey: MENU_KEY,
+        actorUserId: authorId,
+      }),
+      "update legacy"
+    );
+    assert.equal((await readRow(legacy.id)).menuKey, MENU_KEY);
+    assert.deepEqual(
+      (await readAudits(legacy.id)).map((audit) => [audit.actionType, audit.previousValue, audit.newValue]),
+      [
+        [
+          "UPDATE",
+          { body: testBody("메뉴 없는 옛 글"), menuKey: null },
+          { body: testBody("메뉴 없는 옛 글"), menuKey: MENU_KEY },
+        ],
+      ]
+    );
+  });
+
+  test("사이드바에서 빠진 옛 열쇠 — 목록은 그대로 싣고, 그 열쇠로는 다시 저장되지 않는다", async () => {
+    const legacy = await insertLegacy("없어진 메뉴 글", "noSuchMenu");
+    assert.equal((await listImprovementRequests()).find((item) => item.id === legacy.id)?.menuKey, "noSuchMenu");
+
+    const result = await updateImprovementRequestBody({
+      id: legacy.id,
+      expectedVersion: legacy.version,
+      body: testBody("없어진 메뉴 글 고침"),
+      menuKey: "noSuchMenu",
+      actorUserId: authorId,
+    });
+    expectFailure(result, "VALIDATION_ERROR");
+    if (!result.ok) assert.ok(result.fieldErrors?.menuKey);
+    const row = await readRow(legacy.id);
+    assert.equal(row.body, testBody("없어진 메뉴 글"));
+    assert.equal(row.menuKey, "noSuchMenu");
+    assert.equal((await readAudits(legacy.id)).length, 0, "감사도 없다");
+  });
+
+  test("메뉴를 고르지 않았거나 고를 수 없는 값이면 VALIDATION_ERROR — 글도 감사도 생기지 않는다", async () => {
+    for (const [label, menuKey] of [
+      ["메뉴 빈 값", ""],
+      ["모르는 메뉴", "noSuchMenu"],
+      ["이름표를 보낸 메뉴", "전체 A/S 현황"],
+      ["구획 열쇠를 보낸 메뉴", "asOperations"],
+    ] as const) {
+      const result = await createImprovementRequest({ body: testBody(label), menuKey, actorUserId: authorId });
+      expectFailure(result, "VALIDATION_ERROR");
+      if (!result.ok) {
+        assert.ok(result.fieldErrors?.menuKey, `${label}: 메뉴 칸 오류여야 한다`);
+        assert.equal(result.fieldErrors?.body, undefined, `${label}: 본문은 틀리지 않았다`);
+      }
+      assert.equal(await countRowsWithBody(label), 0, `${label}: 저장되면 안 된다`);
+    }
+  });
+
+  test("본문과 메뉴가 둘 다 틀리면 두 칸의 오류를 한꺼번에 돌려준다 — 적기 · 고치기", async () => {
+    const created = await createImprovementRequest({ body: "   ", menuKey: "", actorUserId: authorId });
+    expectFailure(created, "VALIDATION_ERROR");
+    if (!created.ok) assert.deepEqual(Object.keys(created.fieldErrors ?? {}).sort(), ["body", "menuKey"]);
+
+    const target = await createAs(authorId, "둘 다 틀린 고치기");
+    const updated = await updateImprovementRequestBody({
+      id: target.id,
+      expectedVersion: target.version,
+      body: "",
+      menuKey: "noSuchMenu",
+      actorUserId: authorId,
+    });
+    expectFailure(updated, "VALIDATION_ERROR");
+    if (!updated.ok) assert.deepEqual(Object.keys(updated.fieldErrors ?? {}).sort(), ["body", "menuKey"]);
+
+    const row = await readRow(target.id);
+    assert.equal(row.body, testBody("둘 다 틀린 고치기"));
+    assert.equal(row.menuKey, MENU_KEY);
+    assert.equal(row.version, 1);
+  });
+
+  test("검증은 전체 메뉴 목록으로 한다 — 개발자 모드 열쇠도 저장된다(보는 사람의 사이드바로 좁히지 않는다)", async () => {
+    // authorId 는 개발자가 아닌 A/S 엔지니어다. 화면은 그에게 개발자 모드를 내놓지
+    // 않지만, 저장은 권한이 바뀐 사람의 옛 글이 막히지 않도록 전체 목록으로 본다.
+    const created = expectOk(
+      await createImprovementRequest({
+        body: testBody("개발자 모드 메뉴 글"),
+        menuKey: DEVELOPER_MODE_NAV_KEY,
+        actorUserId: authorId,
+      }),
+      "create"
+    );
+    touchedIds.add(created.id);
+    assert.equal((await readRow(created.id)).menuKey, DEVELOPER_MODE_NAV_KEY);
+  });
+
+  test("지우기의 PURGE 감사에 메뉴도 남는다 — 지운 뒤에는 그 줄만 안다", async () => {
+    const created = await createAs(authorId, "메뉴와 함께 지울 글");
+    expectOk(
+      await deleteImprovementRequest({
+        id: created.id,
+        expectedVersion: created.version,
+        actorUserId: otherUserId,
+        canManage: true,
+      }),
+      "delete"
+    );
+    const purge = (await readAudits(created.id)).find((audit) => audit.actionType === "PURGE");
+    assert.ok(purge, "PURGE 감사가 남아야 한다");
+    assert.equal((purge.previousValue as Record<string, unknown>).menuKey, MENU_KEY);
   });
 });

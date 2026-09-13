@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
@@ -8,10 +8,19 @@ import {
   canDeleteImprovementRequest,
   canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
+  filterImprovementRequestsByMenu,
+  groupImprovementRequestMenuOptions,
   IMPROVEMENT_REQUEST_BODY_MAX_CHARS,
+  IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
   IMPROVEMENT_REQUEST_STATUS_LABELS,
   IMPROVEMENT_REQUEST_STATUSES,
+  improvementRequestCopyText,
+  improvementRequestMenuLabel,
+  includeImprovementRequestMenuOption,
+  isImprovementRequestMenuKey,
   isImprovementRequestStatus,
+  listImprovementRequestMenuFilterOptions,
+  type ImprovementRequestMenuOption,
   type ImprovementRequestStatus,
 } from "@/lib/domain/improvement-request";
 import type { ImprovementRequestListItem } from "@/lib/db/queries/improvement-requests";
@@ -41,6 +50,17 @@ import {
  * canWrite(WRITE) · canManage(MANAGE)는 페이지가 서버 액션과 **같은 영역 · 같은
  * 수준**으로 구해 넘긴다. 단추를 감추는 것은 편의이고, 막는 것은 액션이다.
  *
+ * ■ 메뉴 — 고르고, 줄에 붙이고, 거른다 (2026-09-13)
+ *
+ * 적기·고치기 선택칸의 메뉴(menuOptions)는 페이지가 **이 사람이 사이드바에서 보는
+ * 것만**(+ 기타) 추려 넘긴다. 고치는 글의 지금 메뉴가 거기 없으면
+ * includeImprovementRequestMenuOption 이 그 한 항목을 더한다 — 권한이 좁혀진 사람도
+ * 옛 글의 메뉴를 그대로 둘 수 있다(저장은 전체 목록으로 검증한다). 메뉴가 없는
+ * 옛 글과 없어진 메뉴의 글은 빈 값으로 열려, 골라야 저장된다.
+ * 목록 위 거르기는 filterImprovementRequestsByMenu 와
+ * listImprovementRequestMenuFilterOptions 가 정한다 — 건수를 무엇으로 세는지는 그
+ * 함수 주석('건수는 지금 보이는 것만 센다')에 있다.
+ *
  * ■ 버전 충돌은 덮어쓰지 않는다
  *
  * 그 사이 누가 글을 고치거나 상태를 옮겼으면 서버가 CONFLICT 로 돌려준다. 그때는
@@ -55,7 +75,8 @@ import {
  *
  * 🔴 본문은 자유 입력이다(schema 헤더의 PII). 화면에 그리는 것 말고는 어디로도
  * 내보내지 않는다 — console 에도 싣지 않는다. [복사]는 누른 사람의 클립보드로만
- * 간다(보는 권한만 있어도 쓴다 — 이미 화면에 보이는 글이다).
+ * 간다(보는 권한만 있어도 쓴다 — 이미 화면에 보이는 글이다). 복사되는 글은
+ * 「[메뉴 이름] 본문」이다(improvementRequestCopyText).
  * ============================================================================
  */
 
@@ -70,8 +91,16 @@ const STATUS_BADGE_CLASS: Record<ImprovementRequestStatus, string> = {
     "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
 };
 
+/** 줄마다 붙이는 메뉴 표시. 메뉴가 없거나 없어진 글은 흐리게 기울여 쓴다. */
+const MENU_BADGE_CLASS =
+  "min-w-0 max-w-full truncate rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+const MENU_BADGE_UNASSIGNED_CLASS =
+  "min-w-0 max-w-full truncate rounded border border-dashed border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 italic dark:border-zinc-700 dark:text-zinc-400";
+
 const TEXTAREA_CLASS =
   "w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+const MENU_SELECT_CLASS =
+  "w-full min-w-0 rounded-md border border-zinc-300 px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 sm:w-auto sm:max-w-xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
 const PRIMARY_BUTTON_CLASS =
   "rounded-lg bg-primary-900 px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:bg-primary-100 dark:text-zinc-900";
 const SMALL_BUTTON_CLASS =
@@ -119,10 +148,19 @@ function formatDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : toKstDateOnly(date);
 }
 
-/** 서버가 준 실패를 한 문장으로 — 칸 오류가 있으면 그것이 더 구체적이다. */
+/** 서버가 준 실패를 한 문장으로 — 칸 오류가 있으면 그것이 더 구체적이다. 메뉴 오류는 선택칸 옆에 따로 보인다. */
 function failureText(result: Extract<ImprovementRequestActionResult, { ok: false }>): string {
   const fieldErrors = result.fieldErrors ?? {};
   return fieldErrors.body ?? fieldErrors.to ?? fieldErrors.id ?? fieldErrors.expectedVersion ?? result.message;
+}
+
+/**
+ * 틀린 것이 메뉴 하나뿐인가 — 그러면 선택칸 옆 문구로 충분하고, 그 밑에 「입력값을
+ * 확인해 주세요」를 한 번 더 붙이지 않는다.
+ */
+function isOnlyMenuError(fieldErrors: Record<string, string>): boolean {
+  const keys = Object.keys(fieldErrors);
+  return keys.length > 0 && keys.every((key) => key === "menuKey");
 }
 
 export default function ImprovementRequestsScreen({
@@ -130,6 +168,7 @@ export default function ImprovementRequestsScreen({
   actingUserId,
   canWrite,
   canManage,
+  menuOptions,
 }: {
   items: ImprovementRequestListItem[];
   actingUserId: string;
@@ -137,6 +176,11 @@ export default function ImprovementRequestsScreen({
   canWrite: boolean;
   /** hasPermission("improvementRequests", "MANAGE") — 페이지가 구해 넘긴다. */
   canManage: boolean;
+  /**
+   * 적기·고치기에서 고를 수 있는 메뉴 — 이 사람이 사이드바에서 보는 것만 + 기타
+   * (listSidebarImprovementRequestMenuOptions). 페이지가 구해 넘긴다.
+   */
+  menuOptions: ImprovementRequestMenuOption[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -144,10 +188,16 @@ export default function ImprovementRequestsScreen({
   const [pendingKey, setPendingKey] = useState<string | null>(null);
 
   const [draft, setDraft] = useState("");
+  /** 새 글의 메뉴. 빈 값 = 아직 고르지 않음([등록]이 꺼진다). */
+  const [draftMenuKey, setDraftMenuKey] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  /** 서버가 돌려준 메뉴 칸 오류 — 선택칸 옆에 보인다. */
+  const [createMenuError, setCreateMenuError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [editMenuKey, setEditMenuKey] = useState("");
+  const [editMenuError, setEditMenuError] = useState<string | null>(null);
 
   /** 줄 옆에 붙이는 실패 문구(권한 거절 · 검증 오류 등) — 글 id 로 찾는다. */
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
@@ -155,6 +205,8 @@ export default function ImprovementRequestsScreen({
   const [notice, setNotice] = useState<string | null>(null);
 
   const [showResolved, setShowResolved] = useState(false);
+  /** 목록 위 메뉴 거르기 — 메뉴 열쇠, 또는 도메인의 IMPROVEMENT_REQUEST_MENU_FILTER_* 셋. */
+  const [menuFilter, setMenuFilter] = useState<string>(IMPROVEMENT_REQUEST_MENU_FILTER_ALL);
 
   const [deleteTarget, setDeleteTarget] = useState<ImprovementRequestListItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -174,7 +226,17 @@ export default function ImprovementRequestsScreen({
     return () => clearTimeout(timer);
   }, [copyResult]);
 
-  const { rows, resolvedCount, hiddenResolvedCount } = arrangeImprovementRequestList(items, { showResolved });
+  // 메뉴로 먼저 거르고, 그 안에서 차례를 세우고 해결된 것을 감춘다 — 그래서
+  // 「(N건 숨김)」과 빈 목록 안내도 고른 메뉴 안의 수를 말한다.
+  const { rows, resolvedCount, hiddenResolvedCount } = arrangeImprovementRequestList(
+    filterImprovementRequestsByMenu(items, menuFilter),
+    { showResolved }
+  );
+  const menuFilterOptions = listImprovementRequestMenuFilterOptions(items, {
+    showResolved,
+    selected: menuFilter,
+  });
+  const isMenuFiltered = menuFilter !== IMPROVEMENT_REQUEST_MENU_FILTER_ALL;
 
   function setRowError(id: string, message: string | null) {
     setRowErrors((prev) => {
@@ -192,7 +254,7 @@ export default function ImprovementRequestsScreen({
   function run(
     key: string,
     send: () => Promise<ImprovementRequestActionResult>,
-    handlers: { onOk: () => void; onFailure: (text: string) => void }
+    handlers: { onOk: () => void; onFailure: (text: string, fieldErrors: Record<string, string>) => void }
   ) {
     setNotice(null);
     setPendingKey(key);
@@ -211,37 +273,56 @@ export default function ImprovementRequestsScreen({
         router.refresh();
         return;
       }
-      handlers.onFailure(failureText(result));
+      handlers.onFailure(failureText(result), result.fieldErrors ?? {});
     });
   }
 
   function submitNew() {
     setCreateError(null);
-    run("create", () => createImprovementRequestAction({ fields: { body: draft } }), {
-      onOk: () => setDraft(""),
-      onFailure: setCreateError,
-    });
+    setCreateMenuError(null);
+    run(
+      "create",
+      () => createImprovementRequestAction({ fields: { body: draft, menuKey: draftMenuKey } }),
+      {
+        // 메뉴도 비운다 — 글마다 어느 메뉴의 일인지 새로 고르게 한다.
+        onOk: () => {
+          setDraft("");
+          setDraftMenuKey("");
+        },
+        onFailure: (text, fieldErrors) => {
+          setCreateMenuError(fieldErrors.menuKey ?? null);
+          setCreateError(isOnlyMenuError(fieldErrors) ? null : text);
+        },
+      }
+    );
   }
 
   function startEdit(item: ImprovementRequestListItem) {
     setEditingId(item.id);
     setEditDraft(item.body);
+    // 메뉴가 없는 옛 글과 없어진 메뉴의 글은 빈 값으로 연다 — 골라야 저장된다.
+    setEditMenuKey(isImprovementRequestMenuKey(item.menuKey) ? item.menuKey : "");
+    setEditMenuError(null);
     setRowError(item.id, null);
   }
 
   function saveEdit(item: ImprovementRequestListItem) {
     setRowError(item.id, null);
+    setEditMenuError(null);
     run(
       `edit:${item.id}`,
       () =>
         updateImprovementRequestAction({
           id: item.id,
           expectedVersion: item.version,
-          fields: { body: editDraft },
+          fields: { body: editDraft, menuKey: editMenuKey },
         }),
       {
         onOk: () => setEditingId(null),
-        onFailure: (text) => setRowError(item.id, text),
+        onFailure: (text, fieldErrors) => {
+          setEditMenuError(fieldErrors.menuKey ?? null);
+          setRowError(item.id, isOnlyMenuError(fieldErrors) ? null : text);
+        },
       }
     );
   }
@@ -259,9 +340,9 @@ export default function ImprovementRequestsScreen({
     );
   }
 
-  /** 고치는 중이어도 저장된 본문을 복사한다 — 초안은 아직 이 글이 아니다. */
+  /** 고치는 중이어도 저장된 메뉴와 본문을 복사한다 — 초안은 아직 이 글이 아니다. */
   async function copyBody(item: ImprovementRequestListItem) {
-    const ok = await copyText(item.body);
+    const ok = await copyText(improvementRequestCopyText(item));
     setCopyResult({ id: item.id, state: ok ? "copied" : "failed" });
   }
 
@@ -279,7 +360,7 @@ export default function ImprovementRequestsScreen({
       () => deleteImprovementRequestAction({ id: item.id, expectedVersion: item.version }),
       {
         onOk: () => setDeleteTarget(null),
-        onFailure: setDeleteError,
+        onFailure: (text) => setDeleteError(text),
       }
     );
   }
@@ -309,11 +390,20 @@ export default function ImprovementRequestsScreen({
       {/* ───── 등록 ───── */}
       {canWrite ? (
         <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label
-            htmlFor="improvement-request-new-body"
-            className="text-sm font-bold text-zinc-900 dark:text-zinc-50"
-          >
-            새 개선 요청
+          <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">새 개선 요청</h2>
+          <MenuField
+            id="improvement-request-new-menu"
+            value={draftMenuKey}
+            options={menuOptions}
+            error={createMenuError}
+            disabled={isPending}
+            onChange={(value) => {
+              setDraftMenuKey(value);
+              if (createMenuError) setCreateMenuError(null);
+            }}
+          />
+          <label htmlFor="improvement-request-new-body" className="sr-only">
+            새 개선 요청 내용
           </label>
           <textarea
             id="improvement-request-new-body"
@@ -333,7 +423,7 @@ export default function ImprovementRequestsScreen({
             <button
               type="button"
               onClick={submitNew}
-              disabled={isPending || draft.trim() === "" || draftOver}
+              disabled={isPending || draftMenuKey === "" || draft.trim() === "" || draftOver}
               aria-busy={pendingKey === "create"}
               className={PRIMARY_BUTTON_CLASS}
             >
@@ -358,25 +448,43 @@ export default function ImprovementRequestsScreen({
           <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">
             목록 <span className="font-normal text-zinc-500 dark:text-zinc-400">({rows.length}건)</span>
           </h2>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={showResolved}
-              onChange={(event) => setShowResolved(event.target.checked)}
-              className="h-4 w-4"
-            />
-            해결된 것도 보기
-            {hiddenResolvedCount > 0 ? (
-              <span className="text-zinc-500 dark:text-zinc-400">({hiddenResolvedCount}건 숨김)</span>
-            ) : null}
-          </label>
+          <div className="flex max-w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+            <label className="flex max-w-full min-w-0 items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
+              <span className="shrink-0">메뉴</span>
+              <select
+                value={menuFilter}
+                onChange={(event) => setMenuFilter(event.target.value)}
+                className="max-w-full min-w-0 rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              >
+                {menuFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label} ({option.count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                checked={showResolved}
+                onChange={(event) => setShowResolved(event.target.checked)}
+                className="h-4 w-4"
+              />
+              해결된 것도 보기
+              {hiddenResolvedCount > 0 ? (
+                <span className="text-zinc-500 dark:text-zinc-400">({hiddenResolvedCount}건 숨김)</span>
+              ) : null}
+            </label>
+          </div>
         </div>
 
         {rows.length === 0 ? (
           <p className="rounded-md bg-zinc-50 px-3 py-4 text-center text-xs text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">
             {resolvedCount > 0 && !showResolved
-              ? `지금 열려 있는 개선 요청이 없습니다. 해결된 ${resolvedCount}건은 「해결된 것도 보기」로 볼 수 있습니다.`
-              : "아직 적힌 개선 요청이 없습니다."}
+              ? `${isMenuFiltered ? "이 메뉴에는 " : ""}지금 열려 있는 개선 요청이 없습니다. 해결된 ${resolvedCount}건은 「해결된 것도 보기」로 볼 수 있습니다.`
+              : isMenuFiltered
+                ? "이 메뉴로 적힌 개선 요청이 없습니다."
+                : "아직 적힌 개선 요청이 없습니다."}
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -401,6 +509,7 @@ export default function ImprovementRequestsScreen({
               const editOver = editCount > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
               const rowError = rowErrors[item.id];
               const copyState = copyResult?.id === item.id ? copyResult.state : null;
+              const menuLabel = improvementRequestMenuLabel(item.menuKey);
 
               return (
                 <li
@@ -413,6 +522,14 @@ export default function ImprovementRequestsScreen({
                     >
                       {IMPROVEMENT_REQUEST_STATUS_LABELS[item.status]}
                     </span>
+                    <span
+                      title={`메뉴: ${menuLabel}`}
+                      className={
+                        isImprovementRequestMenuKey(item.menuKey) ? MENU_BADGE_CLASS : MENU_BADGE_UNASSIGNED_CLASS
+                      }
+                    >
+                      {menuLabel}
+                    </span>
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
                       {item.createdByName} · {formatDate(item.createdAt)}
                     </span>
@@ -420,6 +537,17 @@ export default function ImprovementRequestsScreen({
 
                   {isEditing ? (
                     <div className="mt-2 flex flex-col gap-2">
+                      <MenuField
+                        id={`improvement-request-edit-${item.id}-menu`}
+                        value={editMenuKey}
+                        options={includeImprovementRequestMenuOption(menuOptions, item.menuKey)}
+                        error={editMenuError}
+                        disabled={isPending}
+                        onChange={(value) => {
+                          setEditMenuKey(value);
+                          if (editMenuError) setEditMenuError(null);
+                        }}
+                      />
                       <label htmlFor={`improvement-request-edit-${item.id}`} className="sr-only">
                         개선 요청 내용 고치기
                       </label>
@@ -442,6 +570,7 @@ export default function ImprovementRequestsScreen({
                             type="button"
                             onClick={() => {
                               setEditingId(null);
+                              setEditMenuError(null);
                               setRowError(item.id, null);
                             }}
                             disabled={isPending}
@@ -452,7 +581,7 @@ export default function ImprovementRequestsScreen({
                           <button
                             type="button"
                             onClick={() => saveEdit(item)}
-                            disabled={isPending || editDraft.trim() === "" || editOver}
+                            disabled={isPending || editMenuKey === "" || editDraft.trim() === "" || editOver}
                             aria-busy={pendingKey === `edit:${item.id}`}
                             className={SMALL_BUTTON_CLASS}
                           >
@@ -562,6 +691,69 @@ export default function ImprovementRequestsScreen({
           setDeleteError(null);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * 「어느 메뉴의 일인가」 선택칸 — 적기와 고치기가 함께 쓴다.
+ *
+ * 처음 값은 「메뉴를 고르세요」(빈 값)이고, 비어 있으면 부르는 쪽이 저장 단추를 끈다.
+ * 구획은 `<optgroup>` 으로 묶되 차례는 사이드바 그대로다 — 구획이 없는 대시보드 ·
+ * 주간보고는 맨 위에, 기타는 맨 끝에 묶음 없이 온다(groupImprovementRequestMenuOptions).
+ * 서버가 돌려준 메뉴 오류는 칸 바로 옆에 붙인다.
+ */
+function MenuField({
+  id,
+  value,
+  options,
+  error,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  options: readonly ImprovementRequestMenuOption[];
+  error: string | null;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const errorId = `${id}-error`;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <label htmlFor={id} className="shrink-0 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+        어느 메뉴의 일인가요?
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        className={MENU_SELECT_CLASS}
+      >
+        <option value="">메뉴를 고르세요</option>
+        {groupImprovementRequestMenuOptions(options).map((section, index) => {
+          const optionElements = section.options.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.label}
+            </option>
+          ));
+          return section.groupLabel === null ? (
+            <Fragment key={`plain-${index}`}>{optionElements}</Fragment>
+          ) : (
+            <optgroup key={`group-${index}`} label={section.groupLabel}>
+              {optionElements}
+            </optgroup>
+          );
+        })}
+      </select>
+      {error ? (
+        <p id={errorId} role="alert" className={FIELD_ERROR_CLASS}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

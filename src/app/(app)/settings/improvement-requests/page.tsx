@@ -4,10 +4,12 @@ import ImprovementRequestsScreen from "@/components/settings/ImprovementRequests
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
+import { hasPermission, listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { listImprovementRequests } from "@/lib/db/queries/improvement-requests";
+import { listSidebarImprovementRequestMenuOptions } from "@/lib/domain/improvement-request";
 
 export const metadata: Metadata = {
   title: "개선 요청 | DSS A/S 관리 시스템",
@@ -47,11 +49,20 @@ export default async function ImprovementRequestsPage() {
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  const [canWrite, canManage, items] = await Promise.all([
+  const [canWrite, canManage, items, accessibleAreaKeys] = await Promise.all([
     hasPermission(actingUser, "improvementRequests", "WRITE"),
     hasPermission(actingUser, "improvementRequests", "MANAGE"),
     listImprovementRequests(),
+    listAccessibleAreaKeys(actingUser),
   ]);
+
+  // 적기·고치기 선택칸에 내놓을 메뉴 — 이 사람이 사이드바에서 보는 것만(+ 기타).
+  // 두 인자는 app/(app)/layout.tsx 가 사이드바에 넘기는 값과 같은 함수로 구한다.
+  // 🔴 편의일 뿐이다: 저장은 전체 메뉴 목록으로 검증한다(도메인 함수 주석).
+  const menuOptions = listSidebarImprovementRequestMenuOptions({
+    accessibleAreaKeys,
+    canEnterDeveloperMode: mayEnterDeveloperMode(actingUser),
+  });
 
   return (
     <div className="p-6">
@@ -60,6 +71,7 @@ export default async function ImprovementRequestsPage() {
         actingUserId={actingUser.id}
         canWrite={canWrite}
         canManage={canManage}
+        menuOptions={menuOptions}
       />
     </div>
   );

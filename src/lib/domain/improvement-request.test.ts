@@ -7,23 +7,35 @@ import {
   canDeleteImprovementRequest,
   canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
+  filterImprovementRequestsByMenu,
+  groupImprovementRequestMenuOptions,
+  IMPROVEMENT_REQUEST_ALL_MENUS_LABEL,
   IMPROVEMENT_REQUEST_LIST_STATUS_ORDER,
+  IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+  IMPROVEMENT_REQUEST_MENU_FILTER_NONE,
+  IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN,
   IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
   IMPROVEMENT_REQUEST_STATUS_LABELS,
   IMPROVEMENT_REQUEST_STATUSES,
+  improvementRequestCopyText,
+  improvementRequestMenuFilterValue,
   improvementRequestMenuLabel,
+  includeImprovementRequestMenuOption,
   isImprovementRequestMenuKey,
   isImprovementRequestStatus,
+  listImprovementRequestMenuFilterOptions,
   listImprovementRequestMenuOptions,
+  listSidebarImprovementRequestMenuOptions,
   planImprovementRequestStatusChange,
   type ImprovementRequestProgressFields,
   type ImprovementRequestStatus,
 } from "./improvement-request";
+import { DEVELOPER_MODE_NAV_KEY } from "@/lib/auth/developer-mode-gate";
 import { improvementRequests, improvementRequestStatusEnum } from "@/lib/db/schema/improvement-requests";
 import { childNavItems, navGroups, navItems } from "@/lib/navigation";
 
 /**
- * 이 파일이 지키는 것은 넷이다(넷째는 2026-09-13 메뉴 칸).
+ * 이 파일이 지키는 것은 다섯이다(넷째·다섯째는 2026-09-13 메뉴 칸).
  *
  *  1. **도메인 목록과 표의 enum 이 같다** — 스키마는 도메인을 가져오지 않으므로
  *     두 벌이고, 갈라지면 여기서 걸린다.
@@ -33,6 +45,9 @@ import { childNavItems, navGroups, navItems } from "@/lib/navigation";
  *  3. **작성자는 접수 상태인 자기 글만 고치고 지운다** — 관리 권한은 지우기만 넓힌다.
  *  4. **고를 수 있는 메뉴는 사이드바 그대로다** — 차례도 이름도 navigation.ts 에서
  *     오고, 모든 항목이 한 번씩, 기타가 맨 끝이다.
+ *  5. **사람마다 내놓는 메뉴 · 메뉴로 거르기** — 선택칸은 그 사람의 사이드바
+ *     (filterNavItemsForAccess)와 같은 것만 내놓고, 고치는 글의 메뉴는 그대로 둘 수
+ *     있다. 거르기 칸의 건수는 그 칸을 고르면 보이는 줄 수와 같다.
  */
 
 const ACTOR = randomUUID();
@@ -410,4 +425,357 @@ describe("어느 메뉴의 일인가", () => {
     assert.equal(improvementRequests.menuKey.notNull, false);
     assert.equal(improvementRequests.menuKey.hasDefault, false);
   });
+
+  test("복사 글은 「[메뉴 이름] 본문」이다", () => {
+    const repairCasesLabel = navLabel("repairCases");
+    assert.equal(improvementRequestCopyText({ menuKey: "repairCases", body: "본문" }), `[${repairCasesLabel}] 본문`);
+    assert.equal(improvementRequestCopyText({ menuKey: null, body: "본문" }), "[메뉴 지정 안 함] 본문");
+    assert.equal(
+      improvementRequestCopyText({ menuKey: IMPROVEMENT_REQUEST_OTHER_MENU_KEY, body: "본문" }),
+      "[기타 · 메뉴 밖] 본문"
+    );
+    assert.equal(improvementRequestCopyText({ menuKey: "noSuchMenu", body: "본문" }), "[(없어진 메뉴)] 본문");
+    assert.equal(
+      improvementRequestCopyText({ menuKey: "quotes", body: "첫 줄\n둘째 줄" }),
+      `[${navLabel("quotes")}] 첫 줄\n둘째 줄`,
+      "본문은 줄바꿈까지 그대로다"
+    );
+  });
+});
+
+describe("이 사람이 고를 수 있는 메뉴 — 사이드바와 같은 것만", () => {
+  /** 개발자 모드를 뺀 모든 메뉴 열쇠 — 모든 영역에 접근할 수 있는 사람. */
+  const ALL_AREA_KEYS = navItems.map((i) => i.key).filter((k) => k !== DEVELOPER_MODE_NAV_KEY);
+  const keysOf = (input: { accessibleAreaKeys: readonly string[]; canEnterDeveloperMode: boolean }) =>
+    listSidebarImprovementRequestMenuOptions(input).map((o) => o.key);
+
+  test("모든 영역을 보는 개발자는 전체 목록 그대로다", () => {
+    assert.deepEqual(
+      listSidebarImprovementRequestMenuOptions({ accessibleAreaKeys: ALL_AREA_KEYS, canEnterDeveloperMode: true }),
+      listImprovementRequestMenuOptions()
+    );
+  });
+
+  test("개발자가 아니면 「개발자 모드」가 빠진다 — 나머지는 그대로", () => {
+    assert.deepEqual(
+      keysOf({ accessibleAreaKeys: ALL_AREA_KEYS, canEnterDeveloperMode: false }),
+      listImprovementRequestMenuOptions()
+        .map((o) => o.key)
+        .filter((k) => k !== DEVELOPER_MODE_NAV_KEY)
+    );
+    // 영역 목록에 열쇠를 넣어도 열리지 않는다 — filterNavItemsForAccess 의 예외 그대로다.
+    assert.ok(
+      !keysOf({ accessibleAreaKeys: [...ALL_AREA_KEYS, DEVELOPER_MODE_NAV_KEY], canEnterDeveloperMode: false }).includes(
+        DEVELOPER_MODE_NAV_KEY
+      )
+    );
+  });
+
+  test("보는 메뉴만, 사이드바 차례대로, 구획 이름과 함께 — 기타는 늘 맨 끝", () => {
+    const options = listSidebarImprovementRequestMenuOptions({
+      // 받은 차례는 뒤섞어 둔다 — 차례는 사이드바 것이다.
+      accessibleAreaKeys: ["improvementRequests", "quotes", "repairCases"],
+      canEnterDeveloperMode: false,
+    });
+    assert.deepEqual(
+      options.map((o) => [o.key, o.groupLabel]),
+      [
+        ["repairCases", "A/S 업무"],
+        ["quotes", "PO / 내자"],
+        ["improvementRequests", "설정"],
+        [IMPROVEMENT_REQUEST_OTHER_MENU_KEY, null],
+      ]
+    );
+  });
+
+  test("보는 메뉴가 하나도 없어도 기타는 있다", () => {
+    assert.deepEqual(keysOf({ accessibleAreaKeys: [], canEnterDeveloperMode: false }), [
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+    assert.deepEqual(keysOf({ accessibleAreaKeys: [], canEnterDeveloperMode: true }), [
+      DEVELOPER_MODE_NAV_KEY,
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+  });
+
+  test("하위메뉴는 부모가 보일 때만 — 사이드바가 부모 없는 하위메뉴를 그리지 않는다", () => {
+    assert.deepEqual(keysOf({ accessibleAreaKeys: ["weeklyReport"], canEnterDeveloperMode: false }), [
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+    assert.deepEqual(keysOf({ accessibleAreaKeys: ["dashboard"], canEnterDeveloperMode: false }), [
+      "dashboard",
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+    assert.deepEqual(keysOf({ accessibleAreaKeys: ["weeklyReport", "dashboard"], canEnterDeveloperMode: false }), [
+      "dashboard",
+      "weeklyReport",
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+  });
+
+  test("모르는 영역 열쇠는 아무것도 더하지 않는다", () => {
+    assert.deepEqual(keysOf({ accessibleAreaKeys: ["noSuchArea", "inventory.parts"], canEnterDeveloperMode: false }), [
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+  });
+
+  test("추린 목록 밖의 열쇠도 검증은 받는다 — 판정은 전체 목록이다", () => {
+    const narrow = keysOf({ accessibleAreaKeys: ["repairCases"], canEnterDeveloperMode: false });
+    assert.ok(!narrow.includes("quotes"));
+    assert.ok(!narrow.includes(DEVELOPER_MODE_NAV_KEY));
+    assert.equal(isImprovementRequestMenuKey("quotes"), true);
+    assert.equal(isImprovementRequestMenuKey(DEVELOPER_MODE_NAV_KEY), true);
+  });
+});
+
+describe("고치는 글의 지금 메뉴를 선택지에 둔다", () => {
+  const narrow = listSidebarImprovementRequestMenuOptions({
+    accessibleAreaKeys: ["repairCases"],
+    canEnterDeveloperMode: false,
+  });
+  const keysOf = (options: readonly { key: string }[]) => options.map((o) => o.key);
+
+  test("목록에 없는 올바른 열쇠는 사이드바 차례 자리에 더한다", () => {
+    assert.deepEqual(keysOf(narrow), ["repairCases", IMPROVEMENT_REQUEST_OTHER_MENU_KEY]);
+    assert.deepEqual(keysOf(includeImprovementRequestMenuOption(narrow, "quotes")), [
+      "repairCases",
+      "quotes",
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+    assert.deepEqual(keysOf(includeImprovementRequestMenuOption(narrow, "dashboard")), [
+      "dashboard",
+      "repairCases",
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+    assert.deepEqual(keysOf(includeImprovementRequestMenuOption(narrow, DEVELOPER_MODE_NAV_KEY)), [
+      "repairCases",
+      DEVELOPER_MODE_NAV_KEY,
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    ]);
+  });
+
+  test("더한 항목은 전체 목록의 것 그대로다(이름 · 구획)", () => {
+    const added = includeImprovementRequestMenuOption(narrow, "quotes").find((o) => o.key === "quotes");
+    assert.deepEqual(
+      added,
+      listImprovementRequestMenuOptions().find((o) => o.key === "quotes")
+    );
+  });
+
+  test("이미 있거나 · 메뉴 없음(NULL) · 없어진 메뉴면 그대로다", () => {
+    for (const menuKey of ["repairCases", IMPROVEMENT_REQUEST_OTHER_MENU_KEY, null, "noSuchMenu", ""]) {
+      assert.deepEqual(includeImprovementRequestMenuOption(narrow, menuKey), narrow, String(menuKey));
+    }
+  });
+
+  test("받은 배열을 건드리지 않는다 — 페이지가 넘긴 props 다", () => {
+    const before = keysOf(narrow);
+    const result = includeImprovementRequestMenuOption(narrow, "quotes");
+    assert.notEqual(result, narrow);
+    assert.deepEqual(keysOf(narrow), before);
+    assert.notEqual(includeImprovementRequestMenuOption(narrow, null), narrow, "그대로여도 새 배열이다");
+  });
+});
+
+describe("선택칸 묶음", () => {
+  test("전체 목록 — 맨 위 묶음 없이 대시보드 · 주간보고, 구획마다 한 묶음, 맨 끝 묶음 없이 기타", () => {
+    const options = listImprovementRequestMenuOptions();
+    const sections = groupImprovementRequestMenuOptions(options);
+    assert.deepEqual(
+      sections.map((s) => s.groupLabel),
+      [null, ...navGroups.map((g) => g.label), null]
+    );
+    assert.deepEqual(
+      sections[0].options.map((o) => o.key),
+      ["dashboard", ...childNavItems(navItems, "dashboard").map((i) => i.key)]
+    );
+    assert.deepEqual(
+      sections.at(-1)?.options.map((o) => o.key),
+      [IMPROVEMENT_REQUEST_OTHER_MENU_KEY]
+    );
+    assert.deepEqual(
+      sections.flatMap((s) => s.options),
+      options,
+      "묶어도 차례와 항목은 그대로다"
+    );
+  });
+
+  test("대시보드를 못 보는 사람은 첫 묶음이 구획이다", () => {
+    const sections = groupImprovementRequestMenuOptions(
+      listSidebarImprovementRequestMenuOptions({
+        accessibleAreaKeys: ["repairCases", "myActiveWork", "quotes"],
+        canEnterDeveloperMode: false,
+      })
+    );
+    assert.deepEqual(
+      sections.map((s) => [s.groupLabel, s.options.map((o) => o.key)]),
+      [
+        ["A/S 업무", ["repairCases", "myActiveWork"]],
+        ["PO / 내자", ["quotes"]],
+        [null, [IMPROVEMENT_REQUEST_OTHER_MENU_KEY]],
+      ]
+    );
+  });
+
+  test("빈 목록은 빈 묶음", () => {
+    assert.deepEqual(groupImprovementRequestMenuOptions([]), []);
+  });
+});
+
+describe("메뉴로 거르기", () => {
+  type Row = { id: string; menuKey: string | null; status: ImprovementRequestStatus; createdAt: string };
+  let seq = 0;
+  const row = (menuKey: string | null, status: ImprovementRequestStatus): Row => {
+    seq += 1;
+    return { id: `r${seq}`, menuKey, status, createdAt: `2026-09-${String(seq).padStart(2, "0")}T00:00:00.000Z` };
+  };
+
+  // 조회 차례와 상관없이 섞어 둔다. 없어진 열쇠는 둘이다 — 한 칸으로 모여야 한다.
+  const ITEMS: Row[] = [
+    row("quotes", "OPEN"),
+    row("repairCases", "IN_PROGRESS"),
+    row(null, "OPEN"),
+    row("repairCases", "RESOLVED"),
+    row("noSuchMenu", "OPEN"),
+    row(IMPROVEMENT_REQUEST_OTHER_MENU_KEY, "OPEN"),
+    row("dashboard", "RESOLVED"),
+    row("repairCases", "OPEN"),
+    row("goneMenu", "RESOLVED"),
+    row(null, "RESOLVED"),
+  ];
+
+  test("거르기 값 셋은 어떤 메뉴 열쇠와도, 서로와도 겹치지 않는다", () => {
+    const sentinels = [
+      IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+      IMPROVEMENT_REQUEST_MENU_FILTER_NONE,
+      IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN,
+    ];
+    assert.equal(new Set(sentinels).size, 3);
+    for (const value of sentinels) {
+      assert.equal(isImprovementRequestMenuKey(value), false, value);
+      assert.equal(
+        listImprovementRequestMenuOptions().some((o) => o.key === value),
+        false,
+        value
+      );
+    }
+  });
+
+  test("글 하나가 들어가는 칸 — 메뉴 열쇠 그대로 · NULL · 모르는 열쇠", () => {
+    assert.equal(improvementRequestMenuFilterValue("repairCases"), "repairCases");
+    assert.equal(
+      improvementRequestMenuFilterValue(IMPROVEMENT_REQUEST_OTHER_MENU_KEY),
+      IMPROVEMENT_REQUEST_OTHER_MENU_KEY
+    );
+    assert.equal(improvementRequestMenuFilterValue(null), IMPROVEMENT_REQUEST_MENU_FILTER_NONE);
+    for (const unknown of ["noSuchMenu", "", "대시보드", IMPROVEMENT_REQUEST_MENU_FILTER_ALL]) {
+      assert.equal(improvementRequestMenuFilterValue(unknown), IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN, unknown);
+    }
+  });
+
+  test("고른 칸의 글만 남긴다 — 차례는 그대로, 없어진 열쇠들은 한 칸", () => {
+    const ids = (rows: readonly Row[]) => rows.map((r) => r.id);
+    assert.deepEqual(ids(filterImprovementRequestsByMenu(ITEMS, IMPROVEMENT_REQUEST_MENU_FILTER_ALL)), ids(ITEMS));
+    assert.deepEqual(ids(filterImprovementRequestsByMenu(ITEMS, "repairCases")), ["r2", "r4", "r8"]);
+    assert.deepEqual(ids(filterImprovementRequestsByMenu(ITEMS, IMPROVEMENT_REQUEST_MENU_FILTER_NONE)), ["r3", "r10"]);
+    assert.deepEqual(ids(filterImprovementRequestsByMenu(ITEMS, IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN)), ["r5", "r9"]);
+    assert.deepEqual(ids(filterImprovementRequestsByMenu(ITEMS, IMPROVEMENT_REQUEST_OTHER_MENU_KEY)), ["r6"]);
+    assert.deepEqual(filterImprovementRequestsByMenu(ITEMS, "inventory"), [], "글이 없는 메뉴");
+  });
+
+  test("받은 배열을 건드리지 않는다 — 「전체 메뉴」여도 새 배열이다", () => {
+    const before = ITEMS.map((r) => r.id);
+    const all = filterImprovementRequestsByMenu(ITEMS, IMPROVEMENT_REQUEST_MENU_FILTER_ALL);
+    assert.notEqual(all, ITEMS);
+    filterImprovementRequestsByMenu(ITEMS, "repairCases");
+    assert.deepEqual(
+      ITEMS.map((r) => r.id),
+      before
+    );
+  });
+
+  test("해결된 것도 볼 때 — 전체 메뉴 + 글이 있는 메뉴만 사이드바 차례로, 끝에 메뉴 지정 안 함 · 없어진 메뉴", () => {
+    const options = listImprovementRequestMenuFilterOptions(ITEMS, {
+      showResolved: true,
+      selected: IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+    });
+    assert.deepEqual(options, [
+      { value: IMPROVEMENT_REQUEST_MENU_FILTER_ALL, label: IMPROVEMENT_REQUEST_ALL_MENUS_LABEL, count: 10 },
+      { value: "dashboard", label: navLabelOf("dashboard"), count: 1 },
+      { value: "repairCases", label: navLabelOf("repairCases"), count: 3 },
+      { value: "quotes", label: navLabelOf("quotes"), count: 1 },
+      { value: IMPROVEMENT_REQUEST_OTHER_MENU_KEY, label: "기타 · 메뉴 밖", count: 1 },
+      { value: IMPROVEMENT_REQUEST_MENU_FILTER_NONE, label: "메뉴 지정 안 함", count: 2 },
+      { value: IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN, label: "(없어진 메뉴)", count: 2 },
+    ]);
+  });
+
+  test("해결된 것을 감출 때 — 해결된 글은 세지 않고, 해결된 글만 있는 메뉴는 빠진다", () => {
+    const options = listImprovementRequestMenuFilterOptions(ITEMS, {
+      showResolved: false,
+      selected: IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+    });
+    assert.deepEqual(
+      options.map((o) => [o.value, o.count]),
+      [
+        [IMPROVEMENT_REQUEST_MENU_FILTER_ALL, 6],
+        ["repairCases", 2],
+        ["quotes", 1],
+        [IMPROVEMENT_REQUEST_OTHER_MENU_KEY, 1],
+        [IMPROVEMENT_REQUEST_MENU_FILTER_NONE, 1],
+        [IMPROVEMENT_REQUEST_MENU_FILTER_UNKNOWN, 1],
+      ]
+    );
+  });
+
+  test("지금 고른 칸은 0건이어도 제자리에 남는다", () => {
+    const options = listImprovementRequestMenuFilterOptions(ITEMS, { showResolved: false, selected: "dashboard" });
+    assert.deepEqual(
+      options.slice(0, 3).map((o) => [o.value, o.count]),
+      [
+        [IMPROVEMENT_REQUEST_MENU_FILTER_ALL, 6],
+        ["dashboard", 0],
+        ["repairCases", 2],
+      ]
+    );
+    // 글이 한 번도 없던 메뉴를 골라 둔 채여도(마지막 글을 지운 뒤) 남는다.
+    assert.ok(
+      listImprovementRequestMenuFilterOptions([], { showResolved: true, selected: "inventory" }).some(
+        (o) => o.value === "inventory" && o.count === 0
+      )
+    );
+    // 모르는 값을 골라 둔 채면 더하지 않는다 — 메뉴 칸도 거르기 칸도 아니다.
+    assert.deepEqual(
+      listImprovementRequestMenuFilterOptions([], { showResolved: true, selected: "noSuchMenu" }).map((o) => o.value),
+      [IMPROVEMENT_REQUEST_MENU_FILTER_ALL]
+    );
+  });
+
+  test("글이 없으면 「전체 메뉴」(0) 하나다", () => {
+    assert.deepEqual(
+      listImprovementRequestMenuFilterOptions([], { showResolved: false, selected: IMPROVEMENT_REQUEST_MENU_FILTER_ALL }),
+      [{ value: IMPROVEMENT_REQUEST_MENU_FILTER_ALL, label: IMPROVEMENT_REQUEST_ALL_MENUS_LABEL, count: 0 }]
+    );
+  });
+
+  test("칸 옆 건수 = 그 칸을 고르면 보이는 줄 수 — 해결된 것 보기 둘 다", () => {
+    for (const showResolved of [false, true]) {
+      const options = listImprovementRequestMenuFilterOptions(ITEMS, {
+        showResolved,
+        selected: IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+      });
+      for (const option of options) {
+        const { rows } = arrangeImprovementRequestList(filterImprovementRequestsByMenu(ITEMS, option.value), {
+          showResolved,
+        });
+        assert.equal(option.count, rows.length, `${option.value} · showResolved=${showResolved}`);
+      }
+    }
+  });
+
+  function navLabelOf(key: string): string {
+    const item = navItems.find((i) => i.key === key);
+    assert.ok(item, `navItems 에 ${key} 가 없다`);
+    return item.label;
+  }
 });

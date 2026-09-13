@@ -43,6 +43,12 @@ const resolvedUser = alias(users, "improvement_request_resolved_user");
 export type ImprovementRequestListItem = {
   id: string;
   body: string;
+  /**
+   * 어느 메뉴 아래의 일인가 — navItems 의 key 그대로(이름이 아니다). `null` 은 메뉴
+   * 칸이 생기기 전의 글이다. 이름은 화면이 improvementRequestMenuLabel 로 푼다 —
+   * 사이드바에서 빠진 옛 열쇠도 걸러 내지 않고 넘긴다(화면이 「(없어진 메뉴)」로 읽는다).
+   */
+  menuKey: string | null;
   status: ImprovementRequestStatus;
   createdByUserId: string;
   createdByName: string;
@@ -70,6 +76,7 @@ export async function listImprovementRequests(): Promise<ImprovementRequestListI
     .select({
       id: improvementRequests.id,
       body: improvementRequests.body,
+      menuKey: improvementRequests.menuKey,
       status: improvementRequests.status,
       createdByUserId: improvementRequests.createdBy,
       createdByName: author.name,

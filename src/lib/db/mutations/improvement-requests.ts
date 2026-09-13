@@ -10,7 +10,10 @@ import {
   planImprovementRequestStatusChange,
   type ImprovementRequestStatus,
 } from "@/lib/domain/improvement-request";
-import { validateImprovementRequestFields } from "@/lib/validation/improvement-request-input";
+import {
+  validateImprovementRequestFields,
+  validateImprovementRequestMenuKey,
+} from "@/lib/validation/improvement-request-input";
 
 /**
  * ============================================================================
@@ -43,22 +46,28 @@ import { validateImprovementRequestFields } from "@/lib/validation/improvement-r
  * ── 감사 로그는 같은 트랜잭션에서 ─────────────────────────────────────
  * 저장은 됐는데 감사가 빠지는(또는 그 반대) 일이 없도록 insertAuditLog 를 같은
  * tx 로 부른다. target_entity 는 "improvement_requests".
- *  · 적기      CREATE        newValue: { body, status }
- *  · 고치기    UPDATE        previousValue: { body }  newValue: { body }
+ *  · 적기      CREATE        newValue: { body, menuKey, status }
+ *  · 고치기    UPDATE        previousValue: { body, menuKey }  newValue: { body, menuKey }
  *  · 상태      STATUS_CHANGE previousValue: { status } newValue: { status }
- *  · 지우기    PURGE         previousValue: 지우기 직전 행 전체(시각은 ISO)
+ *  · 지우기    PURGE         previousValue: 지우기 직전 행 전체(menuKey 포함, 시각은 ISO)
  * 지우기는 휴지통 없이 바로 지우므로(schema 헤더) 무엇이 사라졌는지는 PURGE 줄만
  * 안다. 같은 상태로의 변경은 아무것도 바꾸지 않았으므로 저장도 감사도 없다.
+ * 고치기는 메뉴가 그대로여도 이전·새 메뉴를 함께 적는다 — 줄 하나만 읽어도 「고친
+ * 뒤 이 글이 어느 메뉴였는가」가 보이게. 옛 글(메뉴 NULL)을 고치면 이전 값이 null 이다.
  *
  * ── 「지금」은 트랜잭션마다 한 번 ───────────────────────────────────────
  * created_at 과 updated_at, 또는 in_progress_at/resolved_at 과 updated_at 이 같은
  * 시각이 되게 한다. 두 번 만들면 한 저장 안에서 밀리초가 어긋난다.
  *
- * ── 본문은 여기서 한 번 더 검증한다 ─────────────────────────────────────
+ * ── 본문과 메뉴는 여기서 한 번 더 검증한다 ─────────────────────────────
  * 서버 액션이 이미 검증하지만, 이 함수를 직접 부르는 길(시험 · 나중의 다른 호출)
  * 에서도 빈 글이 DB CHECK(23514)로 떨어져 「일시적 오류」가 되지 않도록 같은
  * 함수(validateImprovementRequestFields)를 트랜잭션 **전에** 부른다. 정규화는
- * 멱등이라 두 번 거쳐도 값이 바뀌지 않는다. DB 오류를 잡아 결과로 바꾸는 자리가
+ * 멱등이라 두 번 거쳐도 값이 바뀌지 않는다.
+ * 메뉴(validateImprovementRequestMenuKey)도 같은 자리에서 본다 — menu_key 에는 DB
+ * CHECK 가 없어서(schema 헤더) 검증을 건너뛴 길로는 아무 글자나 저장된다. 메뉴는
+ * 필수이고 **전체 메뉴 목록**으로 판정한다(보는 사람의 사이드바 목록이 아니다 —
+ * domain 의 listSidebarImprovementRequestMenuOptions 주석). 두 오류는 함께 돌려준다. DB 오류를 잡아 결과로 바꾸는 자리가
  * 없으므로 세이브포인트도 두지 않는다 — 생기면 intake-master-resolution.ts 처럼
  * `tx.transaction` 안에서 잡을 것(postgres-js 는 잡힌 오류도 콜백 뒤에 다시 던진다).
  *
@@ -133,6 +142,7 @@ function toAuditSnapshot(row: ImprovementRequestRow) {
   return {
     id: row.id,
     body: row.body,
+    menuKey: row.menuKey,
     status: row.status,
     inProgressBy: row.inProgressBy,
     inProgressAt: toIsoOrNull(row.inProgressAt),
@@ -146,14 +156,32 @@ function toAuditSnapshot(row: ImprovementRequestRow) {
   };
 }
 
-/** 새 글 하나. 접수 상태 · version 1 로 시작한다. */
+/**
+ * 본문과 메뉴를 함께 검증한다 — 파일 헤더의 '본문과 메뉴는 여기서 한 번 더
+ * 검증한다'. 둘 다 틀렸으면 두 칸의 오류를 함께 돌려준다.
+ */
+function validateBodyAndMenu(params: {
+  body: string;
+  menuKey: string;
+}): { ok: true; body: string; menuKey: string } | { ok: false; fieldErrors: Record<string, string> } {
+  const body = validateImprovementRequestFields({ body: params.body });
+  const menu = validateImprovementRequestMenuKey({ menuKey: params.menuKey });
+  if (body.ok && menu.ok) return { ok: true, body: body.data.body, menuKey: menu.data.menuKey };
+  return {
+    ok: false,
+    fieldErrors: { ...(body.ok ? {} : body.fieldErrors), ...(menu.ok ? {} : menu.fieldErrors) },
+  };
+}
+
+/** 새 글 하나. 접수 상태 · version 1 로 시작한다. 메뉴는 필수다. */
 export async function createImprovementRequest(params: {
   body: string;
+  menuKey: string;
   actorUserId: string;
 }): Promise<ImprovementRequestMutationResult> {
-  const validation = validateImprovementRequestFields({ body: params.body });
+  const validation = validateBodyAndMenu(params);
   if (!validation.ok) return invalid(validation.fieldErrors);
-  const { body } = validation.data;
+  const { body, menuKey } = validation;
 
   return db.transaction(async (tx): Promise<ImprovementRequestMutationResult> => {
     const now = new Date();
@@ -162,6 +190,7 @@ export async function createImprovementRequest(params: {
       .insert(improvementRequests)
       .values({
         body,
+        menuKey,
         status: "OPEN",
         createdBy: params.actorUserId,
         createdAt: now,
@@ -177,7 +206,7 @@ export async function createImprovementRequest(params: {
       actionType: "CREATE",
       targetEntity: TARGET_ENTITY,
       targetRecordId: inserted.id,
-      newValue: { body, status: "OPEN" },
+      newValue: { body, menuKey, status: "OPEN" },
     });
 
     return { ok: true, id: inserted.id, version: inserted.version };
@@ -185,18 +214,22 @@ export async function createImprovementRequest(params: {
 }
 
 /**
- * 글의 내용을 고친다 — 접수 상태인 자기 글만(canEditImprovementRequestBody).
+ * 글의 내용(본문과 메뉴)을 고친다 — 접수 상태인 자기 글만(canEditImprovementRequestBody).
  * 관리 권한이 있어도 남의 글 내용은 고칠 수 없으므로 `canManage` 를 받지 않는다.
+ *
+ * 메뉴는 필수다 — 메뉴 없이 적힌 옛 글도 고칠 때는 메뉴를 골라야 저장된다. 판정은
+ * 전체 메뉴 목록이라, 권한이 좁혀진 작성자도 그 글의 메뉴를 그대로 둘 수 있다.
  */
 export async function updateImprovementRequestBody(params: {
   id: string;
   expectedVersion: number;
   body: string;
+  menuKey: string;
   actorUserId: string;
 }): Promise<ImprovementRequestMutationResult> {
-  const validation = validateImprovementRequestFields({ body: params.body });
+  const validation = validateBodyAndMenu(params);
   if (!validation.ok) return invalid(validation.fieldErrors);
-  const { body } = validation.data;
+  const { body, menuKey } = validation;
 
   return db.transaction(async (tx): Promise<ImprovementRequestMutationResult> => {
     const now = new Date();
@@ -218,6 +251,7 @@ export async function updateImprovementRequestBody(params: {
       .update(improvementRequests)
       .set({
         body,
+        menuKey,
         version: sql`${improvementRequests.version} + 1`,
         updatedBy: params.actorUserId,
         updatedAt: now,
@@ -236,8 +270,8 @@ export async function updateImprovementRequestBody(params: {
       actionType: "UPDATE",
       targetEntity: TARGET_ENTITY,
       targetRecordId: updated.id,
-      previousValue: { body: current.body },
-      newValue: { body },
+      previousValue: { body: current.body, menuKey: current.menuKey },
+      newValue: { body, menuKey },
     });
 
     return { ok: true, id: updated.id, version: updated.version };

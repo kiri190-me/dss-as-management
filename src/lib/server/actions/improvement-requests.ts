@@ -6,7 +6,10 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isImprovementRequestStatus } from "@/lib/domain/improvement-request";
-import { validateImprovementRequestFields } from "@/lib/validation/improvement-request-input";
+import {
+  validateImprovementRequestFields,
+  validateImprovementRequestMenuKey,
+} from "@/lib/validation/improvement-request-input";
 import {
   changeImprovementRequestStatus,
   createImprovementRequest,
@@ -35,6 +38,15 @@ import {
  * authorization.ts 를 불러 정한다(전원 WRITE, 최고관리자·관리자 MANAGE). 화면의
  * 페이지 가드·단추 표시(settings/improvement-requests/page.tsx)도 같은 두 수준을
  * 본다 — 짝이 어긋나면 화면은 열어 주는데 여기서 거절된다.
+ *
+ * ── 메뉴는 필수이고 전체 목록으로 본다 (2026-09-13) ─────────────────────
+ * 적기·고치기는 본문(validateImprovementRequestFields)과 메뉴
+ * (validateImprovementRequestMenuKey)를 **둘 다** 거치고, 오류는 한꺼번에 돌려준다.
+ * 메뉴는 전체 메뉴 목록(사이드바 항목 전부 + 기타)으로 판정한다 — 화면은 그 사람이
+ * 사이드바에서 보는 메뉴만 내놓지만, 권한이 좁혀진 사람이 옛 글을 그 메뉴 그대로
+ * 고쳐 저장할 때 막히면 안 된다. 메뉴 칸은 「무슨 이야기인가」의 표시이지 접근
+ * 권한이 아니므로, 여기서 사람별로 좁히지 않는다. 상태 옮기기·지우기는 메뉴를 받지
+ * 않는다.
  *
  * ── 화면이 감춘 것은 경계가 아니다 ──────────────────────────────────────
  * 화면이 단추를 그리지 않는 것은 편의일 뿐이다. 이 액션은 화면이 무엇을 보여
@@ -137,6 +149,22 @@ function validateTarget(input: { id: unknown; expectedVersion: unknown }): Impro
   return null;
 }
 
+/**
+ * 본문과 메뉴를 함께 본다 — 파일 헤더의 '메뉴는 필수이고 전체 목록으로 본다'.
+ * 둘 다 틀렸으면 **둘 다** 돌려준다(하나씩 알려 주면 고쳐 보내도 한 번 더 거절된다).
+ */
+function validateRequestFields(
+  fields: Record<string, unknown>
+): { ok: true; body: string; menuKey: string } | { ok: false; fieldErrors: Record<string, string> } {
+  const body = validateImprovementRequestFields(fields);
+  const menu = validateImprovementRequestMenuKey(fields);
+  if (body.ok && menu.ok) return { ok: true, body: body.data.body, menuKey: menu.data.menuKey };
+  return {
+    ok: false,
+    fieldErrors: { ...(body.ok ? {} : body.fieldErrors), ...(menu.ok ? {} : menu.fieldErrors) },
+  };
+}
+
 /** 오류에서 값이 없는 부분만 꺼낸다 — 파일 헤더의 '로그에 본문을 싣지 않는다'. */
 function describeErrorWithoutValues(err: unknown): {
   name: string;
@@ -171,12 +199,13 @@ export async function createImprovementRequestAction(input: {
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
   if (!(await hasPermission(auth.actingUser, AREA_KEY, "WRITE"))) return forbidden();
 
-  const validation = validateImprovementRequestFields(input.fields ?? {});
+  const validation = validateRequestFields(input.fields ?? {});
   if (!validation.ok) return invalid(validation.fieldErrors);
 
   try {
     const result = await createImprovementRequest({
-      body: validation.data.body,
+      body: validation.body,
+      menuKey: validation.menuKey,
       actorUserId: auth.actingUser.id,
     });
     if (result.ok) revalidatePath(LIST_PATH);
@@ -199,14 +228,15 @@ export async function updateImprovementRequestAction(input: {
 
   const targetError = validateTarget(input);
   if (targetError) return targetError;
-  const validation = validateImprovementRequestFields(input.fields ?? {});
+  const validation = validateRequestFields(input.fields ?? {});
   if (!validation.ok) return invalid(validation.fieldErrors);
 
   try {
     const result = await updateImprovementRequestBody({
       id: input.id,
       expectedVersion: input.expectedVersion,
-      body: validation.data.body,
+      body: validation.body,
+      menuKey: validation.menuKey,
       actorUserId: auth.actingUser.id,
     });
     if (result.ok) revalidatePath(LIST_PATH);
