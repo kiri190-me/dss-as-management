@@ -11,18 +11,22 @@ import {
   domesticOrderDueDates,
   domesticOrders,
   products,
+  quotes,
   repairCaseIntakeSequences,
   repairCases,
   users,
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
 import { createDomesticOrder, updateDomesticOrder } from "../mutations/domestic-orders";
+import { createQuote } from "../mutations/quotes";
 import { listDomesticOrderDueDatesForRepairCase, listDomesticOrders } from "./domestic-orders";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import {
   validateDomesticOrderFields,
   type DomesticOrderFields,
 } from "@/lib/validation/domestic-order-input";
+import type { QuoteFields } from "@/lib/validation/quote-input";
+import { buildDomesticOrderCellUpdateFields } from "@/lib/domain/domestic-order-cell-edit";
 
 /**
  * ============================================================================
@@ -58,6 +62,12 @@ import {
  *  7. **지운 발주 줄의 날짜는 세지 않는다** — 화면에 없는 줄이 다른 화면의
  *     값을 정하면 안 된다.
  *
+ * ── 견적서가 연결된 줄의 세 칸 ──────────────────────────────────────────
+ *  8. 연결된 줄은 견적서번호 · 견적발행일 · 금액의 **원본 칸이 손 값 그대로**
+ *     오고, 화면에 그릴 값(display* 셋)만 견적서 값이다.
+ *  9. 🔴 그 줄에서 다른 칸 하나를 고쳐 저장해도 DB 의 손 값 셋이 견적서 값으로
+ *     바뀌지 않고, 연결을 풀면 목록이 다시 손 값을 그린다.
+ *
  * ── 실제 출하일은 손으로 못 넣는다 ──────────────────────────────────────
  * 그 값은 워크플로가 출하 완료 시점에 찍고(mutations/workflow-transitions.ts)
  * updateRepairCase 로도 고칠 수 없다. 그래서 준비 단계에서 그 칼럼만 직접
@@ -69,8 +79,9 @@ import {
  * 이 디렉터리의 다른 통합 테스트와 같다 — 이 스위트만 쓰는 접수 월 "9607",
  * 제품 모델 접두사 "DOMESTIC-ORDER-QUERY-TEST-". 인수번호의 연월은 receivedAt
  * 에서 나오므로 TEST_YEAR_MONTH 와 TEST_RECEIVED_AT 은 같은 달을 가리킨다.
+ * 견적서는 발행번호 접두사 TEST_QUOTE_NUMBER_PREFIX(실행마다 다른 토큰)로 가른다.
  * after() 는 이 스위트가 만든 행만 FK 순서대로 지운다 — domestic_orders 를 먼저
- * 지운다(그 표가 repair_cases 를 가리킨다).
+ * 지운다(그 표가 repair_cases 와 quotes 를 가리킨다).
  *
  * 이 조회는 **지워지지 않은 내자 줄 전부**를 돌려주므로 시드 자료의 줄도 함께
  * 나온다. 단언은 언제나 **이 스위트가 만든 id 를 찾아서** 한다(목록 전체와의
@@ -81,6 +92,7 @@ import {
 const TEST_YEAR_MONTH = "9607";
 const TEST_RECEIVED_AT = "2096-07-05";
 const TEST_MODEL_PREFIX = "DOMESTIC-ORDER-QUERY-TEST-";
+const TEST_QUOTE_NUMBER_PREFIX = `DOMESTIC-ORDER-QUERY-TEST-QUOTE-${randomUUID()}-`;
 
 let customerId: string;
 let engineerId: string;
@@ -210,6 +222,8 @@ after(async () => {
   for (const orderId of createdOrderIds) {
     await db.delete(domesticOrders).where(eq(domesticOrders.id, orderId));
   }
+  // 딸린 부품 줄 등은 CASCADE 로 함께 사라진다. 내자 줄을 먼저 지웠으므로 막는 것이 없다.
+  await db.delete(quotes).where(like(quotes.quoteNumber, `${TEST_QUOTE_NUMBER_PREFIX}%`));
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db
@@ -416,6 +430,141 @@ test("연결을 붙였다 떼도 손으로 적은 납품일은 남는다 — 붙
   // 연결을 풀면 그 손 값이 다시 목록의 납품일이 된다.
   assert.equal(afterUnlink.displayDeliveredDate, "2096-07-28");
   assert.equal(afterUnlink.customerName, await customerName(customerId));
+});
+
+// ── 견적서가 연결된 줄 — 저장이 손으로 적은 세 칸을 덮지 않는다 ──────────
+//
+// 연결된 견적서가 있으면 목록의 견적서번호 · 견적발행일 · 금액은 **견적서 값**을
+// 그린다. 예전에는 조회가 그 값을 원본 칸 이름(quoteNumber · quoteIssuedDate ·
+// amountExcludingVat) 그대로 덮어 실었고, 이 화면의 저장은 줄 전체를 SET 하므로
+// **다른 칸 하나를 고치는 저장 한 번에** 손으로 적은 옛 값이 DB 에서 견적서 값으로
+// 바뀌었다. 연결을 풀어도 옛 값은 돌아오지 않았다. 이제 그리는 값은
+// display* 셋으로 따로 오고, 원본 칸은 손 값 그대로 온다.
+
+/** 작업비만 있는 한 장 — 공급가가 곧 작업비라 금액 단언이 셈법에 흔들리지 않는다. */
+function quoteFields(suffix: string): QuoteFields {
+  return {
+    quoteNumber: `${TEST_QUOTE_NUMBER_PREFIX}${suffix}`,
+    kind: "DOMESTIC",
+    quoteDate: "2096-07-10",
+    repairCaseId: null,
+    intakeNumberText: null,
+    customerId: null,
+    customerNameText: "시험 고객사",
+    modelNameText: null,
+    lotNumberText: null,
+    serialNumberText: null,
+    faultDescriptionText: null,
+    subject: "시험 품명",
+    validity: null,
+    delivery: null,
+    payment: null,
+    workCost: "1200000.00",
+    laborEquipmentKind: null,
+    laborBaseCost: null,
+    powerTestExcluded: false,
+    laborPowerTestDeduction: null,
+    repairTasks: [],
+    workScopeLines: [],
+    items: [],
+  };
+}
+
+/**
+ * 견적서 한 장과 그것을 가리키는 내자 줄 하나. 내자 줄의 손 값 셋은 **견적서 값과
+ * 일부러 다르게** 적는다 — 같으면 덮였는지 아닌지 단언이 가려내지 못한다.
+ */
+async function createQuoteLinkedOrder(suffix: string) {
+  const quote = await createQuote({ fields: quoteFields(suffix), actorUserId: engineerId });
+  assert.equal(quote.ok, true, `견적서 만들기 실패: ${JSON.stringify(quote)}`);
+  if (!quote.ok) throw new Error("unreachable");
+
+  const created = await createDomesticOrder({
+    fields: formFields({
+      quoteId: quote.id,
+      quoteNumber: "손으로 적은 견적서번호",
+      quoteIssuedDate: "2096-01-05",
+      amountExcludingVat: "777000.00",
+    }),
+    actorUserId: engineerId,
+  });
+  assert.equal(created.ok, true, `추가 실패: ${JSON.stringify(created)}`);
+  if (!created.ok) throw new Error("unreachable");
+  createdOrderIds.push(created.id);
+  return { quoteId: quote.id, quoteNumber: `${TEST_QUOTE_NUMBER_PREFIX}${suffix}`, orderId: created.id };
+}
+
+/** 조회의 매퍼를 거치지 않은 DB 그대로의 칸. */
+async function readRawQuoteColumns(orderId: string) {
+  const [row] = await db
+    .select({
+      quoteId: domesticOrders.quoteId,
+      quoteNumber: domesticOrders.quoteNumber,
+      quoteIssuedDate: domesticOrders.quoteIssuedDate,
+      amountExcludingVat: domesticOrders.amountExcludingVat,
+      progressNote: domesticOrders.progressNote,
+    })
+    .from(domesticOrders)
+    .where(eq(domesticOrders.id, orderId));
+  assert.ok(row, "내자 줄이 DB 에 없다");
+  return row;
+}
+
+/** 칸 편집이 만드는 fields 를 서버 액션처럼 검증에 태워 저장한다. */
+async function saveCellEdit(item: Awaited<ReturnType<typeof loadOrder>>, fields: Record<string, unknown>) {
+  const validated = validateDomesticOrderFields(fields);
+  assert.equal(validated.ok, true, `검증 실패: ${JSON.stringify(validated)}`);
+  if (!validated.ok) throw new Error("unreachable");
+  const saved = await updateDomesticOrder({
+    id: item.id,
+    expectedVersion: item.version,
+    fields: validated.data,
+    actorUserId: engineerId,
+  });
+  assert.equal(saved.ok, true, `저장 실패: ${JSON.stringify(saved)}`);
+}
+
+test("견적서가 연결된 줄 — 원본 세 칸은 손 값으로, 화면에 그릴 세 값은 견적서 값으로 실려 온다", async () => {
+  const { quoteNumber, orderId } = await createQuoteLinkedOrder("LIST-SHAPE");
+
+  const item = await loadOrder(orderId);
+  // 원본 칸 — 저장이 되실어 보낼 값이다. 여기가 견적서 값이면 저장 한 번에 손 값이 덮인다.
+  assert.equal(item.quoteNumber, "손으로 적은 견적서번호", "원본 견적서번호 칸이 견적서 값으로 덮여 왔다");
+  assert.equal(item.quoteIssuedDate, "2096-01-05", "원본 견적발행일 칸이 견적서 값으로 덮여 왔다");
+  assert.equal(item.amountExcludingVat, "777000.00", "원본 금액 칸이 견적서 값으로 덮여 왔다");
+  // 화면이 그리는 값 — 연결된 견적서가 이긴다.
+  assert.equal(item.displayQuoteNumber, quoteNumber);
+  assert.equal(item.displayQuoteIssuedDate, "2096-07-10");
+  assert.equal(item.displayAmountExcludingVat, "1200000.00");
+});
+
+test("🔴 견적서가 연결된 줄에서 다른 칸을 고쳐 저장해도 손으로 적은 세 칸은 DB 에 그대로다 — 연결을 풀면 다시 보인다", async () => {
+  const { quoteId, orderId } = await createQuoteLinkedOrder("CELL-SAVE");
+
+  // 표에서 `현황` 칸 하나를 고친다 — 칸 편집은 목록 한 줄을 통째로 실어 보낸다.
+  const linked = await loadOrder(orderId);
+  await saveCellEdit(linked, buildDomesticOrderCellUpdateFields(linked, "progressNote", "현황을 고쳤다"));
+
+  const raw = await readRawQuoteColumns(orderId);
+  assert.equal(raw.progressNote, "현황을 고쳤다", "전제가 깨졌다 — 고친 칸이 저장되지 않았다");
+  assert.equal(raw.quoteId, quoteId, "칸 하나 고치는 저장에 견적서 연결이 풀렸다");
+  assert.equal(raw.quoteNumber, "손으로 적은 견적서번호", "저장 한 번에 손 견적서번호가 견적서 값으로 덮였다");
+  assert.equal(raw.quoteIssuedDate, "2096-01-05", "저장 한 번에 손 견적발행일이 견적서 값으로 덮였다");
+  assert.equal(raw.amountExcludingVat, "777000.00", "저장 한 번에 손 금액이 견적서 값으로 덮였다");
+
+  // 연결을 푼다 — 나머지 칸은 읽어 온 원본 그대로 싣고 quoteId 만 비운다.
+  const beforeUnlink = await loadOrder(orderId);
+  await saveCellEdit(
+    beforeUnlink,
+    buildDomesticOrderCellUpdateFields({ ...beforeUnlink, quoteId: null }, "progressNote", "현황을 고쳤다")
+  );
+
+  const unlinked = await loadOrder(orderId);
+  assert.equal(unlinked.quoteId, null);
+  // 연결이 풀리면 화면에 그리는 값이 다시 손 값이다(폼 안내문의 약속).
+  assert.equal(unlinked.displayQuoteNumber, "손으로 적은 견적서번호");
+  assert.equal(unlinked.displayQuoteIssuedDate, "2096-01-05");
+  assert.equal(unlinked.displayAmountExcludingVat, "777000.00");
 });
 
 // ── 납기요청일 잇기 — 조회가 재료를 실어 오는가(파일 헤더) ────────────────

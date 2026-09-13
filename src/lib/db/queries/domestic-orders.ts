@@ -211,13 +211,24 @@ export type DomesticOrderJoinRow = {
    * (아래 DomesticOrderListItem 의 dueDates), 그 칸은 옮긴 값의 원본으로만
    * 남아 있다(schema/domestic-orders.ts 의 그 칸 주석). 함께 실어 내리면
    * 화면이 어느 쪽을 그려야 하는지 두 가지 답을 갖게 된다.
+   *
+   * 이 줄에 **손으로 적은** 견적발행일 · 견적서번호(원본 칸). 아래
+   * amountExcludingVat 과 함께 셋이다.
+   *
+   * ⚠️ 견적서가 연결된 줄에서는 화면에 그리지 않는다 — 그 줄은 견적서 값을
+   * 그리고, 어느 쪽을 그릴지는 매퍼가 display* 셋으로 고른다
+   * (DomesticOrderListItem). 그래도 **덮지 않고 원본 그대로** 싣는 이유는
+   * deliveredDate 와 같다 — 이 화면의 저장은 모든 칼럼을 SET 하므로, 여기
+   * 견적서 값이 실려 있으면 칸 하나 고치는 저장에 손 값이 견적서 값으로 바뀌고
+   * 연결을 풀어도 옛 값이 돌아오지 않는다(2026-09-13 까지 실제로 그랬다).
    */
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   /**
    * 연결된 견적서(2026-08-28). 아래 두 칸은 그 견적서에서 온 값이고, 매퍼가
-   * 위 quoteNumber · quoteIssuedDate 를 이걸로 덮는다(mapDomesticOrderRow 의
-   * 머리말). 연결이 없거나 그 견적서가 휴지통에 있으면 셋 다 null 이다.
+   * 이것으로 display* 셋을 정한다(mapDomesticOrderRow 의 머리말) — 위 원본
+   * 칸은 덮지 않는다. 연결이 없으면 셋 다 null 이고, 그 견적서가 휴지통에
+   * 있으면 quoteId 는 남고 아래 두 칸만 null 이다(조인 조건).
    */
   quoteId: string | null;
   linkedQuoteNumber: string | null;
@@ -241,7 +252,12 @@ export type DomesticOrderJoinRow = {
   /** `납품일` 과 이름만 비슷한 다른 칸이다. 이쪽은 그대로 손으로 적는다. */
   deliveredBy: string | null;
   taxInvoiceDate: string | null;
-  /** numeric 컬럼 — 문자열로 읽는다(스키마 파일의 '금액은 numeric 이다'). */
+  /**
+   * 이 줄에 **손으로 적은** 금액(원본 칸). 위 quoteNumber 와 같은 이유로 견적서
+   * 값으로 덮지 않는다 — 화면이 그리는 것은 displayAmountExcludingVat 다.
+   *
+   * numeric 컬럼 — 문자열로 읽는다(스키마 파일의 '금액은 numeric 이다').
+   */
   amountExcludingVat: string | null;
   paymentCompleted: boolean;
   japanRemittanceNote: string | null;
@@ -311,6 +327,22 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
    */
   displayDeliveredDate: string | null;
   /**
+   * 화면의 견적서번호 · 견적발행일 · 금액(VAT별도)에 그릴 값 — **연결된 견적서의
+   * 값이 먼저**, 없으면 이 줄에 손으로 적은 값이다(mapDomesticOrderRow 의 머리말).
+   * 견적서가 휴지통에 있으면 조인이 null 을 주므로 손 값이 된다. 검색도 이 값을
+   * 본다(domain/domestic-order-list.ts 의 DomesticOrderSearchable).
+   *
+   * ⚠️ **저장에 실으면 안 되는 계산된 값이다** — displayDeliveredDate 와 같은
+   * 이유다. 원본 칸(quoteNumber · quoteIssuedDate · amountExcludingVat)에 옮겨
+   * 담으면 손으로 적은 값이 견적서 값으로 바뀌어, 연결을 풀어도 돌아오지 않는다.
+   * domain/domestic-order-cell-edit.ts 의 DomesticOrderCellEditRow 에 이 셋이
+   * 없는 것이 그 장치다.
+   */
+  displayQuoteNumber: string | null;
+  displayQuoteIssuedDate: string | null;
+  /** numeric — 문자열이다. 견적서 쪽 값은 소수 두 자리로 고정돼 온다(loadQuoteAmounts). */
+  displayAmountExcludingVat: string | null;
+  /**
    * 이 줄의 납기 요청일 전부. **차례대로**다(display_order → due_date).
    * 비어 있는 것이 정상이다 — 납기일이 아직 없는 줄이 실제로 있다.
    *
@@ -329,13 +361,21 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
  * 쓰는 순간 "-"라는 글자가 그대로 저장된다. 화면 쪽이 그릴 때만 바꾼다.
  */
 /**
- * 연결된 견적서가 있으면 **그쪽이 이긴다.**
+ * 견적서번호 · 견적발행일 · 금액은 연결된 견적서가 있으면 **그쪽이 이긴다** —
+ * 이기는 자리는 display* 셋이고, 원본 칸은 덮지 않는다.
  *
  * 이 표의 다른 칸들은 '이 행의 값이 먼저, 없으면 연결된 쪽'인데 이 셋만
  * 방향이 반대다. 이유는 견적서 쪽이 더 정확하기 때문이다 — 금액은 부품 줄에서
  * 계산되고, 번호·발행일은 실제로 발행된 문서의 값이다. 손으로 적은 값은 그
  * 문서가 없던 시절의 기록이고, **지우지 않으므로 연결을 풀면 다시 보인다**
  * (schema/domestic-orders.ts 의 quote_id 주석).
+ *
+ * ⚠️ 그 약속은 원본 칸(quoteNumber · quoteIssuedDate · amountExcludingVat)을
+ * **덮지 않아야** 지켜진다. 이 화면의 저장은 줄 전체를 되실어 보내 모든 칼럼을
+ * SET 하므로, 원본 칸 이름에 견적서 값을 실어 두면 칸 하나 고치는 저장에 손
+ * 값이 견적서 값으로 바뀐다. 2026-09-13 까지 이 매퍼가 그렇게 덮었다 — 그동안
+ * 저장된 연결된 줄은 되살릴 원본이 없다. 그래서 계산된 값은 이름을 가른다
+ * (deliveredDate / displayDeliveredDate 와 같은 모양).
  */
 export function mapDomesticOrderRow(
   row: DomesticOrderJoinRow,
@@ -379,11 +419,12 @@ export function mapDomesticOrderRow(
     // 그대로 따라간다(그 함수의 주석). 두 벌을 coalesce 하면 화면의 이름과 줄
     // 색이 서로 다른 고객사를 가리킬 수 있다.
     customerRowColor: resolveDomesticOrderCustomerRowColor(row),
-    // 위 '연결된 견적서가 있으면 그쪽이 이긴다'. ...row 로 들어온 손입력값을
-    // 여기서 덮는다 — 덮어쓸 값이 없으면(연결 없음) 그대로 남는다.
-    quoteNumber: row.linkedQuoteNumber ?? row.quoteNumber,
-    quoteIssuedDate: row.linkedQuoteDate ?? row.quoteIssuedDate,
-    amountExcludingVat: linkedQuoteAmount ?? row.amountExcludingVat,
+    // 위 '연결된 견적서가 있으면 그쪽이 이긴다'. ...row 로 들어온 원본 칸(손
+    // 값)은 **덮지 않는다** — 저장이 그 값을 그대로 되실어 보내야 한다(머리말).
+    // 견적서 값이 없으면(연결 없음 · 휴지통) 손 값이 그대로 그려진다.
+    displayQuoteNumber: row.linkedQuoteNumber ?? row.quoteNumber,
+    displayQuoteIssuedDate: row.linkedQuoteDate ?? row.quoteIssuedDate,
+    displayAmountExcludingVat: linkedQuoteAmount ?? row.amountExcludingVat,
   };
 }
 
@@ -443,7 +484,8 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       // 표를 따로 읽어 온다(위 타입 주석).
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
       quoteNumber: domesticOrders.quoteNumber,
-      // 연결된 견적서. 있으면 아래 세 칸이 손으로 적은 값 대신 쓰인다
+      // 연결된 견적서. 있으면 화면은 손으로 적은 값 대신 이 견적서의 값을
+      // 그린다 — 매퍼의 display* 셋이고, 위 원본 두 칸은 덮지 않는다
       // (schema/domestic-orders.ts 의 quote_id 주석 — 이 표에서 방향이
       // 반대인 유일한 칸들이다).
       quoteId: domesticOrders.quoteId,

@@ -306,18 +306,20 @@ export function filterDomesticOrdersByYear<T extends OrderIssued>(
  * 검색이 실제로 들여다보는 칸만 요구한다 — 조회의 전체 행 타입을 끌어오지
  * 않는다(이 파일의 다른 타입들과 같은 이유).
  *
- * **여기 적힌 다섯 칸(고객사·형식·S/N·L/N·인수번호)은 이미 정해진 값이다.**
- * 원본 두 벌(이 행의 값 / 연결된 수리 건의 값)이 아니라 resolveDomesticOrderValue
- * 가 고른 쪽, 곧 **화면에 그려지는 그 글자**를 본다(queries 의
+ * **여기 적힌 여섯 칸(고객사·형식·S/N·L/N·인수번호·견적서번호)은 이미 정해진
+ * 값이다.** 원본 두 벌이 아니라 고른 쪽 — 앞 다섯은 resolveDomesticOrderValue 가
+ * 고른 쪽(이 행의 값 / 연결된 수리 건의 값), 견적서번호는 연결된 견적서가 이긴
+ * 쪽(displayQuoteNumber) — 곧 **화면에 그려지는 그 글자**를 본다(queries 의
  * DomesticOrderListItem 에서 이미 접혀 온다). 원본 두 벌을 따로 뒤지면 화면이
  * 보여 주는 값과 검색이 보는 값이 어긋나, 눈에 보이는 글자를 그대로 쳤는데
- * 안 걸리는(혹은 화면에 없는 글자로 걸리는) 일이 생긴다.
+ * 안 걸리는(혹은 화면에 없는 글자로 걸리는) 일이 생긴다. 견적서번호의 원본 칸
+ * (quoteNumber)에는 연결된 줄에서 화면에 안 보이는 옛 손 번호가 남아 있다.
  */
 export type DomesticOrderSearchable = {
   customerName: string | null;
   displayIntakeNumber: string | null;
   purchaseOrderNumber: string | null;
-  quoteNumber: string | null;
+  displayQuoteNumber: string | null;
   projectName: string | null;
   modelName: string | null;
   serialNumber: string | null;
@@ -333,7 +335,7 @@ const DOMESTIC_ORDER_SEARCH_FIELDS: readonly (keyof DomesticOrderSearchable)[] =
   "customerName",
   "displayIntakeNumber",
   "purchaseOrderNumber",
-  "quoteNumber",
+  "displayQuoteNumber",
   "projectName",
   "modelName",
   "serialNumber",

@@ -68,9 +68,9 @@ test("금액(VAT별도)은 칸 편집이 없다 — 표시만 한다(사용자 �
   assert.equal(listScreen.includes('field: "amountExcludingVat"'), false, "카드에 금액 칸 편집이 생겼다");
   assert.match(
     tableBody,
-    /<td className="px-3 py-2 text-right tabular-nums"> \{formatAmount\(row\.amountExcludingVat\)\} <\/td>/
+    /<td className="px-3 py-2 text-right tabular-nums"> \{formatAmount\(row\.displayAmountExcludingVat\)\} <\/td>/
   );
-  assert.match(cardGroups, /\{ label: "금액\(VAT별도\)", of: \(row\) => formatAmount\(row\.amountExcludingVat\) \}/);
+  assert.match(cardGroups, /\{ label: "금액\(VAT별도\)", of: \(row\) => formatAmount\(row\.displayAmountExcludingVat\) \}/);
 });
 
 test("납기요청일은 표에서 눌러 고친다 — 못 고치는 사람에게는 지금과 같은 글자만", () => {

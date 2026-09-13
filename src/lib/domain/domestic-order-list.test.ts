@@ -537,7 +537,7 @@ type SearchRow = {
   customerName: string | null;
   displayIntakeNumber: string | null;
   purchaseOrderNumber: string | null;
-  quoteNumber: string | null;
+  displayQuoteNumber: string | null;
   projectName: string | null;
   modelName: string | null;
   serialNumber: string | null;
@@ -551,7 +551,7 @@ function searchRow(overrides: Partial<SearchRow> = {}): SearchRow {
     customerName: null,
     displayIntakeNumber: null,
     purchaseOrderNumber: null,
-    quoteNumber: null,
+    displayQuoteNumber: null,
     projectName: null,
     modelName: null,
     serialNumber: null,
@@ -573,7 +573,7 @@ test("여덟 칸 어디에 값이 있어도 그 칸으로 찾을 수 있다", ()
     { field: "customerName", label: "고객사", value: "한빛전자", query: "한빛" },
     { field: "displayIntakeNumber", label: "인수번호", value: "RFG-2026-0007", query: "0007" },
     { field: "purchaseOrderNumber", label: "발주서번호", value: "PO-88231", query: "88231" },
-    { field: "quoteNumber", label: "견적서번호", value: "QT-2024-115", query: "2024-115" },
+    { field: "displayQuoteNumber", label: "견적서번호", value: "QT-2024-115", query: "2024-115" },
     { field: "projectName", label: "PJT", value: "성층권 통신 시험", query: "성층권" },
     { field: "modelName", label: "형식", value: "ARC-200", query: "arc-200" },
     { field: "serialNumber", label: "S/N", value: "SN-9912", query: "9912" },
@@ -592,12 +592,26 @@ test("여덟 칸 어디에 값이 있어도 그 칸으로 찾을 수 있다", ()
   }
 });
 
+test("견적서번호는 화면에 그리는 값으로 찾는다 — 연결된 줄의 원본 칸에 남은 옛 손 번호로는 안 걸린다", () => {
+  // 연결된 줄은 견적서의 번호를 그리고, 원본 칸에는 손으로 적은 옛 번호가 그대로
+  // 남아 있다(queries 의 mapDomesticOrderRow). 검색은 눈에 보이는 쪽만 본다.
+  const linked = {
+    ...searchRow({ id: "linked", displayQuoteNumber: "QT-2026-0100" }),
+    quoteNumber: "손-옛번호",
+  };
+  assert.deepEqual(
+    filterDomesticOrdersBySearch([linked], "QT-2026-0100").map((r) => r.id),
+    ["linked"]
+  );
+  assert.deepEqual(filterDomesticOrdersBySearch([linked], "손-옛번호"), []);
+});
+
 test("대소문자는 무시한다 — 화면에 적힌 그대로 치지 않아도 걸린다", () => {
   const rows = [searchRow({ id: "hit", modelName: "ARC-200" })];
   assert.equal(filterDomesticOrdersBySearch(rows, "arc-200").length, 1);
   assert.equal(filterDomesticOrdersBySearch(rows, "Arc").length, 1);
   assert.equal(
-    filterDomesticOrdersBySearch([searchRow({ id: "hit", quoteNumber: "qt-2026-9" })], "QT").length,
+    filterDomesticOrdersBySearch([searchRow({ id: "hit", displayQuoteNumber: "qt-2026-9" })], "QT").length,
     1
   );
 });
@@ -636,7 +650,7 @@ test("빈 검색어와 공백뿐인 검색어는 아무것도 거르지 않는�
 });
 
 test("여덟 칸이 모두 비어 있어도 터지지 않는다 — 그냥 안 걸리는 줄이다", () => {
-  const rows = [searchRow({ id: "empty" }), searchRow({ id: "hit", quoteNumber: "QT-1" })];
+  const rows = [searchRow({ id: "empty" }), searchRow({ id: "hit", displayQuoteNumber: "QT-1" })];
   assert.deepEqual(
     filterDomesticOrdersBySearch(rows, "QT-1").map((r) => r.id),
     ["hit"]

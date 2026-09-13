@@ -35,10 +35,12 @@
  * 목록 한 줄(DomesticOrderListItem)에는 두 벌이 들어 있다:
  *
  *   - **원본 칸** — modelNameText · lotNumberText · serialNumberText ·
- *     intakeNumberText · customerId · faultDescriptionText
+ *     intakeNumberText · customerId · faultDescriptionText ·
+ *     quoteNumber · quoteIssuedDate · amountExcludingVat
  *   - **계산된 값** — modelName · lotNumber · serialNumber ·
  *     displayIntakeNumber · customerName · reportedSymptom ·
- *     **displayDeliveredDate**
+ *     **displayDeliveredDate** · **displayQuoteNumber · displayQuoteIssuedDate ·
+ *     displayAmountExcludingVat**
  *
  * 계산된 값은 *"그 줄에 적힌 것이 먼저, 없으면 연결된 수리 건의 것"* 이다
  * (resolveDomesticOrderValue). 마지막 하나만 규칙이 다르다 — displayDeliveredDate
@@ -46,7 +48,10 @@
  * 이라 그 줄의 deliveredDate 는 보지 않고, 연결 없는 줄은 그 deliveredDate
  * 그대로다(resolveDomesticOrderDeliveredDate). 그 값이 실려 나가면 담길 칼럼조차
  * 없거니와, 원본 칸(deliveredDate)에 옮겨 담으면 연결된 줄에서 자동으로 따라오던
- * 출하일이 이 줄에 박제된다. 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
+ * 출하일이 이 줄에 박제된다. 견적서 셋(display* 셋)은 방향이 반대라 **연결된
+ * 견적서의 값이 먼저**이고, 원본 칸에 옮겨 담으면 손으로 적은 값이 견적서 값으로
+ * 바뀌어 연결을 풀어도 돌아오지 않는다(아래 '견적서를 따르는 칸 둘').
+ * 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
  * 계산된 값을 보내면, 그 줄이 원래 비워 두고 수리 건 값을 빌려 쓰던 칸에 수리
  * 건의 값이 자기 값으로 복사되어 굳는다 — 그때부터 "일부러 다르게 적었다"와
  * "그냥 안 건드렸다"를 구분할 수 없고, 나중에 수리 건 쪽이 고쳐져도 이 줄만 옛
@@ -91,20 +96,20 @@
  * 그대로 따른다'가 한쪽만 고쳐졌을 때 생기는 바로 그 증상이다.
  *
  * ── ⚠️ 견적서를 따르는 칸 둘 — 견적서번호 · 견적발행일 ─────────────────
- * 목록 한 줄의 견적서번호 · 견적발행일 · 금액은 **연결된 견적서가 있으면 그
- * 견적서의 값으로 덮여서** 온다(queries 의 mapDomesticOrderRow). 덮인 줄에는
- * 사람이 손으로 적은 원래 값이 실려 오지 않는다. 그래서 그 줄에서는 이 둘을 눌러
- * 고치지 못하게 막는다(아래 domesticOrderInlineEditQuoteLock) — 열면 편집칸이
- * 견적서 값으로 채워지고, 저장은 원본 칸에 들어가지만 화면은 계속 견적서 값을
- * 그려 "저장했는데 안 바뀐다"가 된다. 금액은 원래 칸 편집이 없다(사용자 결정
+ * 견적서가 연결된 줄의 목록은 견적서번호 · 견적발행일 · 금액을 **그 견적서의
+ * 값으로** 그린다(queries 의 displayQuoteNumber · displayQuoteIssuedDate ·
+ * displayAmountExcludingVat). 편집칸은 원본 칸(손으로 적은 값)으로 채워지고 저장도
+ * 원본 칸에 들어가지만, 화면은 계속 견적서 값을 그려 "저장했는데 안 바뀐다"가
+ * 된다. 그래서 그 줄에서는 이 둘을 눌러 고치지 못하게 막는다(아래
+ * domesticOrderInlineEditQuoteLock). 금액은 원래 칸 편집이 없다(사용자 결정
  * 2026-09-11 — 견적서에서 가져오는 값이다).
  *
- * ⚠️ **아직 남은 구멍** — 연결된 줄에서 **다른** 칸을 고쳐도 이 세 칸은 함께 실려
- * 나가야 하는데(줄 전체 SET), 실을 원래 값이 없어 견적서 값이 실린다. 화면에는
- * 차이가 없지만(견적서가 이긴다) 원본 칸의 옛 손입력값이 견적서 값으로 덮여,
- * 나중에 연결을 풀면 옛 값이 아니라 견적서 값이 보인다. 막으려면 조회가 원본 세
- * 칸을 따로 실어 줘야 한다(queries/domestic-orders.ts) — 이 파일 혼자서는 막을 수
- * 없다. `줄 수정` 폼도 같은 값으로 채워지므로 같은 구멍이다.
+ * 연결된 줄에서 **다른** 칸을 고쳐도 이 세 칸은 함께 실려 나간다(줄 전체 SET).
+ * 실리는 것은 원본 칸의 손 값이다. 2026-09-13 까지는 조회가 원본 칸 이름에 견적서
+ * 값을 덮어 실어서, 저장 한 번에 옛 손 값이 견적서 값으로 바뀌고 연결을 풀어도
+ * 돌아오지 않았다(`줄 수정` 폼도 같은 값으로 채워져 같은 구멍이었다). 이제 그리는
+ * 값은 display* 셋으로 이름을 갈랐고, 그 셋은 아래 DomesticOrderCellEditRow 에
+ * **없다** — 함정 ②와 같은 장치다.
  *
  * ── 납기요청일 목록 편집 (2026-09-11) ────────────────────────────────────
  * 납기요청일은 칸 하나에 값 하나가 아니라 **날짜 여럿 + 메모**다. 그래서 위 열두
@@ -463,9 +468,9 @@ function collectRowFields(row: DomesticOrderCellEditRow): Record<string, unknown
 }
 
 /**
- * 견적서가 연결된 줄에서 **따르는 값이 덮여 오는** 칸 중, 눌러 고칠 수 있는 둘.
+ * 견적서가 연결된 줄에서 **견적서 값을 그리는** 칸 중, 눌러 고칠 수 있는 둘.
  * `줄 수정` 폼의 안내("견적서번호 · 견적발행일 · 금액은 연결된 견적서를
- * 따릅니다")와 조회가 덮어쓰는 셋(queries 의 mapDomesticOrderRow)에서 칸 편집이
+ * 따릅니다")와 조회의 display* 셋(queries 의 mapDomesticOrderRow)에서 칸 편집이
  * 없는 금액만 뺀 것이다.
  */
 export const DOMESTIC_ORDER_QUOTE_FOLLOWING_FIELDS: readonly DomesticOrderInlineEditableField[] = [
@@ -487,10 +492,10 @@ export const DOMESTIC_ORDER_QUOTE_LOCK_NOTE =
  *
  * ── 조건이 quoteId 하나인 까닭 ──────────────────────────────────────────
  * `줄 수정` 폼이 '연결된 견적서를 따릅니다'를 띄우는 조건이 quoteId 이고, 그와
- * 같게 둔다. 조회는 연결된 견적서가 휴지통에 있으면 덮지 않지만, 화면에 온 값만
- * 보고는 "지금 이 값이 덮인 값인가"를 틀림없이 말할 수 없다 — **덮였을지 모르는
- * 값을 원본 칸에 저장하는 길**을 남기는 것보다 연결이 걸린 줄을 통째로 막는 편이
- * 안전하다. 그런 줄은 `줄 수정` 에서 연결을 풀면 다시 열린다.
+ * 같게 둔다. 조회는 연결된 견적서가 휴지통에 있으면 손 값을 그리므로(display*
+ * 셋) 그런 줄은 열어도 맞는 값이 저장되지만, 그 견적서가 되살아나는 순간 화면은
+ * 다시 견적서 값을 그려 방금 고친 값이 안 보이게 된다 — 연결이 걸린 줄을 통째로
+ * 막는 편이 덜 헷갈린다. 그런 줄은 `줄 수정` 에서 연결을 풀면 다시 열린다.
  *
  * ⚠️ **세금계산서발행일은 막지 않는다.** 견적서가 붙은 줄이 바로 세금계산서를
  * 적는 줄이다 — 이 판정이 그 칸까지 번지면 이번에 고친 것이 도로 막힌다.

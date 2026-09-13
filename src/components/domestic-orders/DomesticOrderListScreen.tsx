@@ -481,8 +481,10 @@ function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: nu
   let total = 0;
   let skipped = 0;
   for (const row of rows) {
-    if (row.amountExcludingVat === null) continue;
-    const minor = toMinorUnits(row.amountExcludingVat);
+    // 줄마다 화면에 보이는 금액(연결된 견적서가 이긴 값)을 더한다 — 원본 칸을
+    // 더하면 합계가 표의 금액 칸과 어긋난다.
+    if (row.displayAmountExcludingVat === null) continue;
+    const minor = toMinorUnits(row.displayAmountExcludingVat);
     // 합계 자체가 안전 정수 범위를 넘으면 그 뒤의 값은 믿을 수 없다 — 더하지
     // 않고 뺀 건수로 센다.
     if (minor === null || !Number.isSafeInteger(total + minor)) {
@@ -1103,14 +1105,18 @@ const CARD_FIELD_GROUPS: {
   {
     label: "견적 · 납품",
     fields: [
+      // ⚠️ 견적발행일 · 견적서번호 · (정산의) 금액은 **그리는 값**(display* —
+      // 연결된 견적서가 이긴다)과 **편집칸을 채우고 저장되는 원본 칸**(edit.field)이
+      // 다르다(queries 의 mapDomesticOrderRow 머리말). 연결된 줄의 두 칸은 눌러도
+      // 열리지 않는다(domesticOrderInlineEditQuoteLock). 표와 같은 값이다.
       {
         label: "견적발행일",
-        of: (row) => dash(row.quoteIssuedDate),
+        of: (row) => dash(row.displayQuoteIssuedDate),
         edit: { field: "quoteIssuedDate", wrapping: "whitespace-nowrap" },
       },
       {
         label: "견적서번호",
-        of: (row) => dash(row.quoteNumber),
+        of: (row) => dash(row.displayQuoteNumber),
         edit: { field: "quoteNumber", wrapping: "whitespace-nowrap" },
       },
       // 사람이 <textarea> 에 줄바꿈을 섞어 적는 칸이다 — 표와 마찬가지로
@@ -1145,7 +1151,7 @@ const CARD_FIELD_GROUPS: {
         of: (row) => dash(row.taxInvoiceDate),
         edit: { field: "taxInvoiceDate", wrapping: "whitespace-nowrap" },
       },
-      { label: "금액(VAT별도)", of: (row) => formatAmount(row.amountExcludingVat) },
+      { label: "금액(VAT별도)", of: (row) => formatAmount(row.displayAmountExcludingVat) },
       { label: "입금완료 여부", of: (row) => paymentLabel(row.paymentCompleted) },
       {
         label: "일본 송금",
@@ -2330,18 +2336,23 @@ export default function DomesticOrderListScreen({
                         </td>
                         {/* 견적발행일 — 발주발행일과 달리 **년도 거르기와 아무
                             상관이 없다.** 고쳐도 줄이 사라지지 않으므로 그
-                            안내도 붙지 않는다(도메인이 칸별로 정한다). */}
+                            안내도 붙지 않는다(도메인이 칸별로 정한다).
+                            ⚠️ 이 칸과 다음 견적서번호 · 뒤의 금액은 **그리는
+                            값**(display* — 연결된 견적서가 이긴다)과 **편집칸을
+                            채우고 저장되는 원본 칸**(field)이 다르다(queries 의
+                            mapDomesticOrderRow 머리말). 연결된 줄의 두 칸은
+                            눌러도 열리지 않는다(domesticOrderInlineEditQuoteLock). */}
                         <td className="px-3 py-2 tabular-nums">
                           {canEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="quoteIssuedDate"
-                              displayText={dash(row.quoteIssuedDate)}
+                              displayText={dash(row.displayQuoteIssuedDate)}
                               wrapping="whitespace-nowrap"
                               numeric="tabular-nums"
                             />
                           ) : (
-                            dash(row.quoteIssuedDate)
+                            dash(row.displayQuoteIssuedDate)
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -2349,11 +2360,11 @@ export default function DomesticOrderListScreen({
                             <DomesticOrderTextCell
                               row={row}
                               field="quoteNumber"
-                              displayText={dash(row.quoteNumber)}
+                              displayText={dash(row.displayQuoteNumber)}
                               wrapping="whitespace-nowrap"
                             />
                           ) : (
-                            dash(row.quoteNumber)
+                            dash(row.displayQuoteNumber)
                           )}
                         </td>
                         {/* 사람이 줄바꿈을 섞어 적는 칸 — 적은 그대로 여러 줄로
@@ -2404,8 +2415,9 @@ export default function DomesticOrderListScreen({
                             dash(row.taxInvoiceDate)
                           )}
                         </td>
+                        {/* 금액 — 연결된 견적서가 이긴 값을 그린다(위 견적발행일 주석). */}
                         <td className="px-3 py-2 text-right tabular-nums">
-                          {formatAmount(row.amountExcludingVat)}
+                          {formatAmount(row.displayAmountExcludingVat)}
                         </td>
                         <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
                         <td className="px-3 py-2">

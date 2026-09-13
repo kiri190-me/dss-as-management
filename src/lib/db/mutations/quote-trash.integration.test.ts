@@ -420,13 +420,18 @@ describe("내자 정리 목록에 보이는 값", () => {
       quoteIssuedDate: "2096-01-05",
       amountExcludingVat: "777000.00",
     });
-    const view = async () => {
+    const find = async () => {
       const item = (await listDomesticOrders()).find((row) => row.id === order.id);
       assert.ok(item, "내자 줄이 목록에 없다");
+      return item;
+    };
+    // 화면이 그리는 값(display* 셋)이다.
+    const view = async () => {
+      const item = await find();
       return {
-        quoteNumber: item.quoteNumber,
-        quoteIssuedDate: item.quoteIssuedDate,
-        amountExcludingVat: item.amountExcludingVat,
+        quoteNumber: item.displayQuoteNumber,
+        quoteIssuedDate: item.displayQuoteIssuedDate,
+        amountExcludingVat: item.displayAmountExcludingVat,
       };
     };
 
@@ -436,6 +441,22 @@ describe("내자 정리 목록에 보이는 값", () => {
       quoteIssuedDate: "2096-03-11",
       amountExcludingVat: "1300000.00",
     });
+    // 활성 중에도 원본 칸은 손 값이다 — 저장이 되실어 보낼 값이라, 견적서 값으로
+    // 덮여 오면 칸 하나 고치는 저장에 손 값이 사라진다(queries 의 mapDomesticOrderRow).
+    const activeRaw = await find();
+    assert.deepEqual(
+      {
+        quoteNumber: activeRaw.quoteNumber,
+        quoteIssuedDate: activeRaw.quoteIssuedDate,
+        amountExcludingVat: activeRaw.amountExcludingVat,
+      },
+      {
+        quoteNumber: "손으로 적은 견적서번호",
+        quoteIssuedDate: "2096-01-05",
+        amountExcludingVat: "777000.00",
+      },
+      "활성 견적서가 연결된 줄의 원본 칸이 견적서 값으로 덮여 왔다"
+    );
 
     const version = await trash(created.id);
     const whileTrashed = await view();
