@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import { customers, endUserContacts, endUsers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
 import { createRepairCase } from "./repair-cases";
@@ -76,6 +76,58 @@ async function createTestCustomer(nameSuffix: string) {
     .values({ name: `${TEST_CUSTOMER_NAME_PREFIX}${nameSuffix}-${randomUUID().slice(0, 8)}` })
     .returning();
   return row;
+}
+
+type RaceHoldTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 붙든 트랜잭션을 되감는 신호 — 이것만 삼키고 나머지 오류는 그대로 올린다. */
+const RELEASE_NAME_HOLD = new Error("release name hold");
+
+/** 붙든 트랜잭션(holderPid)을 기다리며 멈춘 세션이 expected 개가 될 때까지 기다린다. */
+async function waitUntilBlockedBy(holderPid: number, expected: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity where ${holderPid} = any(pg_blocking_pids(pid))`
+    );
+    if (row.waiting >= expected) return;
+    if (Date.now() > deadline) {
+      throw new Error(`붙든 트랜잭션(pid ${holderPid})을 기다리는 호출이 ${row.waiting}개뿐이다 — ${expected}개를 기다렸다`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * 이름 중복 경쟁을 매번 같은 모양으로 만든다 — 두 호출이 **둘 다** 사전 검사를
+ * 지나친 뒤 유니크 색인에서 부딪히게 한다. 같은 이름의 행을 넣고 커밋하지 않은
+ * 트랜잭션을 붙들어 두면 두 호출은 사전 검사에서 그 행을 보지 못하고 쓰기에서
+ * 기다린다. 둘 다 기다리는 것을 확인한 뒤 되감으면 하나가 먼저 쓰고 다른 하나는
+ * 23505 를 받는다(그냥 Promise.all 은 대개 사전 검사가 먼저 걸러 버린다 — 위
+ * "concurrent creates" 시험이 세이브포인트 없는 코드로도 통과한 까닭).
+ * customers.integration.test.ts 의 같은 도우미와 같다.
+ */
+async function raceBehindUncommittedName<T>(
+  holdName: (tx: RaceHoldTx) => Promise<void>,
+  startRacers: () => Promise<T>[]
+): Promise<T[]> {
+  const state: { racing?: Promise<T[]> } = {};
+  try {
+    await db.transaction(async (tx) => {
+      await holdName(tx);
+      const [holder] = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+      const racing = Promise.all(startRacers());
+      // 되감기 전에 거절돼도 처리 안 된 거절로 새지 않게 한다 — 결과는 아래에서 다시 기다린다.
+      racing.catch(() => undefined);
+      state.racing = racing;
+      await waitUntilBlockedBy(holder.pid, 2);
+      throw RELEASE_NAME_HOLD;
+    });
+  } catch (err) {
+    if (err !== RELEASE_NAME_HOLD) throw err;
+  }
+  if (!state.racing) throw new Error("경쟁을 시작하지 못했다");
+  return state.racing;
 }
 
 function baseCreateInput(
@@ -161,6 +213,31 @@ describe("createEndUser", () => {
     ]);
     assert.deepEqual([a.ok, b.ok].sort(), [false, true], "exactly one of the two concurrent creates should succeed");
   });
+
+  test("사전 검사를 둘 다 지나친 동시 추가 — 진 쪽도 날것의 23505 가 아니라 이름 중복 오류를 받는다", async () => {
+    const customer = await createTestCustomer("RACE-HELD");
+    const name = `${TEST_CUSTOMER_NAME_PREFIX}RACE-HELD-${randomUUID().slice(0, 8)}`;
+
+    const results = await raceBehindUncommittedName(
+      async (tx) => {
+        await tx.insert(endUsers).values({ customerId: customer.id, name });
+      },
+      () => [createEndUser({ customerId: customer.id, name }), createEndUser({ customerId: customer.id, name })]
+    );
+
+    const losers = results.filter((result) => !result.ok);
+    assert.equal(losers.length, 1, `정확히 하나만 이겨야 한다: ${JSON.stringify(results)}`);
+    const [loser] = losers;
+    if (loser.ok) return;
+    assert.equal(loser.code, "VALIDATION_ERROR");
+    assert.equal(loser.fieldErrors?.name, "이미 존재하는 End-User명입니다.");
+
+    const rows = await db
+      .select()
+      .from(endUsers)
+      .where(and(eq(endUsers.customerId, customer.id), eq(endUsers.name, name), eq(endUsers.isDeleted, false)));
+    assert.equal(rows.length, 1, "붙든 행은 되감겼고 이긴 쪽 하나만 남아야 한다");
+  });
 });
 
 describe("renameEndUser", () => {
@@ -211,6 +288,39 @@ describe("renameEndUser", () => {
     const result = await renameEndUser({ endUserId: randomUUID(), expectedUpdatedAt: new Date().toISOString(), name: "x" });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+  });
+
+  test("사전 검사를 둘 다 지나친 동시 이름 변경 — 진 쪽도 날것의 23505 가 아니라 이름 중복 오류를 받는다", async () => {
+    const customer = await createTestCustomer("RENAME-RACE-HELD");
+    const a = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}RA-${randomUUID().slice(0, 8)}` });
+    const b = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}RB-${randomUUID().slice(0, 8)}` });
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true);
+    if (!a.ok || !b.ok) return;
+    const target = `${TEST_CUSTOMER_NAME_PREFIX}RENAME-RACE-${randomUUID().slice(0, 8)}`;
+
+    const results = await raceBehindUncommittedName(
+      async (tx) => {
+        await tx.insert(endUsers).values({ customerId: customer.id, name: target });
+      },
+      () => [
+        renameEndUser({ endUserId: a.id, expectedUpdatedAt: a.updatedAt, name: target }),
+        renameEndUser({ endUserId: b.id, expectedUpdatedAt: b.updatedAt, name: target }),
+      ]
+    );
+
+    const losers = results.filter((result) => !result.ok);
+    assert.equal(losers.length, 1, `정확히 하나만 이겨야 한다: ${JSON.stringify(results)}`);
+    const [loser] = losers;
+    if (loser.ok) return;
+    assert.equal(loser.code, "VALIDATION_ERROR");
+    assert.equal(loser.fieldErrors?.name, "이미 존재하는 End-User명입니다.");
+
+    const rows = await db
+      .select()
+      .from(endUsers)
+      .where(and(eq(endUsers.customerId, customer.id), eq(endUsers.name, target), eq(endUsers.isDeleted, false)));
+    assert.equal(rows.length, 1, "붙든 행은 되감겼고 이긴 쪽 하나만 그 이름을 가져야 한다");
   });
 });
 

@@ -43,7 +43,9 @@ import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
  * 부분 인덱스다. 즉 휴지통에 있는 동안 같은 이름의 고객사가 새로 생길 수
  * 있고, 그 상태로 복원하면 유니크 위반이 난다. 복원 전에 검사하고, 그
  * 사이의 경쟁까지 잡도록 23505도 함께 받는다 — updateCustomer가 이름 수정에
- * 대해 이미 쓰고 있는 두 겹 방어와 같다.
+ * 대해 이미 쓰고 있는 두 겹 방어와 같다. 그 23505 대비는 세이브포인트 안에서만
+ * 돈다 — postgres-js는 트랜잭션 안에서 잡힌 오류를 콜백이 끝난 뒤 다시 던진다
+ * (restoreCustomer 안의 주석).
  *
  * ── 감사 로그에 연락처는 넣지 않는다 ────────────────────────────────────
  * customers.contact_name/contact_email/contact_phone과 담당자
@@ -286,56 +288,37 @@ export async function restoreCustomer(params: {
       updatedAt: new Date(),
     };
 
+    // 🔴 복원 쓰기 셋(담당자 · End-User · 고객사 UPDATE)은 **세이브포인트 안에서**
+    // 한다(tx.transaction). postgres-js는 트랜잭션 안에서 난 오류를 catch로 잡아도
+    // 콜백이 끝난 뒤 다시 던지므로(customers.ts createCustomer 주석), 세이브포인트
+    // 없이는 아래 catch가 돌지 못하고 경쟁에서 진 쪽이 날것의 23505로 터졌다.
+    // 셋을 한 세이브포인트에 두는 것은 함께 되감기게 하려는 것이다 — 고객사
+    // UPDATE만 되감기고 End-User·담당자 복원이 커밋되면 휴지통 고객사 아래 살아
+    // 있는 End-User가 남는다. 감사 로그는 쓰기가 다 된 뒤 바깥 트랜잭션에 남긴다.
+    let updated: { id: string }[];
     try {
-      if (cascadedEndUsers.length > 0 && current.deletedAt) {
-        const cascadedIds = cascadedEndUsers.map((endUser) => endUser.id);
-        await tx
-          .update(endUserContacts)
-          .set(restoration)
-          .where(
-            and(
-              inArray(endUserContacts.endUserId, cascadedIds),
-              eq(endUserContacts.isDeleted, true),
-              eq(endUserContacts.deletedAt, current.deletedAt)
-            )
-          );
-        await tx.update(endUsers).set(restoration).where(inArray(endUsers.id, cascadedIds));
-
-        for (const endUser of cascadedEndUsers) {
-          await insertAuditLog(tx, {
-            actorUserId: params.actorUserId,
-            actionType: "RESTORE",
-            targetEntity: "end_users",
-            targetRecordId: endUser.id,
-            previousValue: null,
-            newValue: { id: endUser.id, customerId: params.customerId, name: endUser.name, isDeleted: false },
-          });
+      updated = await tx.transaction(async (savepoint) => {
+        if (cascadedEndUsers.length > 0 && current.deletedAt) {
+          const cascadedIds = cascadedEndUsers.map((endUser) => endUser.id);
+          await savepoint
+            .update(endUserContacts)
+            .set(restoration)
+            .where(
+              and(
+                inArray(endUserContacts.endUserId, cascadedIds),
+                eq(endUserContacts.isDeleted, true),
+                eq(endUserContacts.deletedAt, current.deletedAt)
+              )
+            );
+          await savepoint.update(endUsers).set(restoration).where(inArray(endUsers.id, cascadedIds));
         }
-      }
 
-      const updated = await tx
-        .update(customers)
-        .set(restoration)
-        .where(and(eq(customers.id, params.customerId), eq(customers.isDeleted, true)))
-        .returning({ id: customers.id });
-
-      if (updated.length === 0) return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
-
-      await insertAuditLog(tx, {
-        actorUserId: params.actorUserId,
-        actionType: "RESTORE",
-        targetEntity: "customers",
-        targetRecordId: params.customerId,
-        previousValue: null,
-        newValue: {
-          id: current.id,
-          name: current.name,
-          isDeleted: false,
-          restoredEndUserIds: cascadedEndUsers.map((endUser) => endUser.id),
-        },
+        return savepoint
+          .update(customers)
+          .set(restoration)
+          .where(and(eq(customers.id, params.customerId), eq(customers.isDeleted, true)))
+          .returning({ id: customers.id });
       });
-
-      return { ok: true, id: params.customerId, endUserCount: cascadedEndUsers.length };
     } catch (err) {
       // 위의 사전 검사와 이 UPDATE 사이에 같은 이름이 활성으로 들어온 경쟁.
       // 부분 유니크 인덱스가 최종 방어선이고, 여기서 사람이 읽을 수 있는
@@ -345,6 +328,35 @@ export async function restoreCustomer(params: {
       }
       throw err;
     }
+
+    for (const endUser of cascadedEndUsers) {
+      await insertAuditLog(tx, {
+        actorUserId: params.actorUserId,
+        actionType: "RESTORE",
+        targetEntity: "end_users",
+        targetRecordId: endUser.id,
+        previousValue: null,
+        newValue: { id: endUser.id, customerId: params.customerId, name: endUser.name, isDeleted: false },
+      });
+    }
+
+    if (updated.length === 0) return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
+
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "RESTORE",
+      targetEntity: "customers",
+      targetRecordId: params.customerId,
+      previousValue: null,
+      newValue: {
+        id: current.id,
+        name: current.name,
+        isDeleted: false,
+        restoredEndUserIds: cascadedEndUsers.map((endUser) => endUser.id),
+      },
+    });
+
+    return { ok: true, id: params.customerId, endUserCount: cascadedEndUsers.length };
   });
 }
 

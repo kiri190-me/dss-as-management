@@ -13,7 +13,14 @@ function hasPgCode(err: unknown, code: string): boolean {
   );
 }
 
-/** Same reasoning/precedent as customers.ts's own isUniqueViolation. */
+/**
+ * Same reasoning/precedent as customers.ts's own isUniqueViolation.
+ *
+ * 🔴 이 판정을 쓰는 쓰기(createEndUser 의 INSERT · renameEndUser 의 UPDATE)는
+ * 세이브포인트(tx.transaction) 안에서 한다. postgres-js 는 트랜잭션 안에서 난 오류를
+ * catch 로 잡아도 콜백이 끝난 뒤 다시 던지므로(customers.ts createCustomer 주석),
+ * 세이브포인트 없이는 경쟁에서 진 쪽이 이름 중복 오류가 아니라 날것의 23505 로 터졌다.
+ */
 function isUniqueViolation(err: unknown): boolean {
   if (hasPgCode(err, "23505")) return true;
   const cause = err instanceof Error ? err.cause : undefined;
@@ -35,6 +42,8 @@ export type CreateEndUserResult =
  * customer, and a catch-unique-violation fallback for the race where two
  * concurrent creates under the same customer collide on the same
  * normalized name (end_users_customer_normalized_name_unique).
+ *
+ * 그 경쟁 대비가 돌도록 INSERT 는 세이브포인트 안에서 한다(파일 머리 isUniqueViolation 주석).
  */
 export async function createEndUser(params: {
   customerId: string;
@@ -64,10 +73,13 @@ export async function createEndUser(params: {
     }
 
     try {
-      const [created] = await tx
-        .insert(endUsers)
-        .values({ customerId: params.customerId, name: params.name })
-        .returning({ id: endUsers.id, name: endUsers.name, updatedAt: endUsers.updatedAt });
+      const created = await tx.transaction(async (savepoint) => {
+        const [row] = await savepoint
+          .insert(endUsers)
+          .values({ customerId: params.customerId, name: params.name })
+          .returning({ id: endUsers.id, name: endUsers.name, updatedAt: endUsers.updatedAt });
+        return row;
+      });
       return { ok: true, id: created.id, name: created.name, updatedAt: created.updatedAt.toISOString() };
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -95,6 +107,8 @@ export type RenameEndUserResult =
  * row-lock + expectedUpdatedAt concurrency pattern as updateCustomer, and
  * the same normalized duplicate-name check as createEndUser above, scoped
  * to the same customer and excluding this End-User's own current row.
+ *
+ * 경쟁 대비가 돌도록 UPDATE 는 세이브포인트 안에서 한다(파일 머리 isUniqueViolation 주석).
  */
 export async function renameEndUser(params: {
   endUserId: string;
@@ -139,11 +153,14 @@ export async function renameEndUser(params: {
     }
 
     try {
-      const [updated] = await tx
-        .update(endUsers)
-        .set({ name: params.name, updatedAt: new Date() })
-        .where(eq(endUsers.id, params.endUserId))
-        .returning({ id: endUsers.id, name: endUsers.name, updatedAt: endUsers.updatedAt });
+      const updated = await tx.transaction(async (savepoint) => {
+        const [row] = await savepoint
+          .update(endUsers)
+          .set({ name: params.name, updatedAt: new Date() })
+          .where(eq(endUsers.id, params.endUserId))
+          .returning({ id: endUsers.id, name: endUsers.name, updatedAt: endUsers.updatedAt });
+        return row;
+      });
       return { ok: true, id: updated.id, name: updated.name, updatedAt: updated.updatedAt.toISOString() };
     } catch (err) {
       if (isUniqueViolation(err)) {

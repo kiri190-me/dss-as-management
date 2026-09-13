@@ -49,6 +49,10 @@ export type UpdateCustomerResult =
  * second one to commit gets a clean VALIDATION_ERROR instead of an
  * uncaught 23505.
  *
+ * 그 23505 대비가 실제로 돌려면 UPDATE 를 세이브포인트(tx.transaction) 안에서 해야
+ * 한다 — postgres-js 는 트랜잭션 안에서 난 오류를 catch 로 잡아도 콜백이 끝난 뒤 다시
+ * 던진다(createCustomer 주석). 세이브포인트 없이는 진 쪽이 날것의 23505 로 터졌다.
+ *
  * repair_cases.contact*_snapshot columns are never touched here — this
  * mutation only ever writes to the customers table itself, so existing
  * per-intake contact snapshots stay exactly as recorded regardless of any
@@ -101,19 +105,23 @@ export async function updateCustomer(params: {
       };
     }
 
+    // 🔴 세이브포인트 안에서 한다 — 위 함수 주석. 되감기는 이 UPDATE 몫뿐이다.
     try {
-      const [updated] = await tx
-        .update(customers)
-        .set({
-          name: params.name,
-          contactName: params.contactName,
-          contactEmail: params.contactEmail,
-          contactPhone: params.contactPhone,
-          rowColor: params.rowColor,
-          updatedAt: new Date(),
-        })
-        .where(eq(customers.id, params.customerId))
-        .returning({ id: customers.id, updatedAt: customers.updatedAt });
+      const updated = await tx.transaction(async (savepoint) => {
+        const [row] = await savepoint
+          .update(customers)
+          .set({
+            name: params.name,
+            contactName: params.contactName,
+            contactEmail: params.contactEmail,
+            contactPhone: params.contactPhone,
+            rowColor: params.rowColor,
+            updatedAt: new Date(),
+          })
+          .where(eq(customers.id, params.customerId))
+          .returning({ id: customers.id, updatedAt: customers.updatedAt });
+        return row;
+      });
 
       return { ok: true, id: updated.id, updatedAt: updated.updatedAt.toISOString() };
     } catch (err) {

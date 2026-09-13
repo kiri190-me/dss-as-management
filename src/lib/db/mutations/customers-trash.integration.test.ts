@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   auditLogs,
@@ -178,6 +178,57 @@ async function createTestRepairCase(customerId: string, endUserId: string | null
 async function readCustomer(id: string) {
   const [row] = await db.select().from(customers).where(eq(customers.id, id));
   return row;
+}
+
+type RaceHoldTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 붙든 트랜잭션을 되감는 신호 — 이것만 삼키고 나머지 오류는 그대로 올린다. */
+const RELEASE_NAME_HOLD = new Error("release name hold");
+
+/** 붙든 트랜잭션(holderPid)을 기다리며 멈춘 세션이 expected 개가 될 때까지 기다린다. */
+async function waitUntilBlockedBy(holderPid: number, expected: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity where ${holderPid} = any(pg_blocking_pids(pid))`
+    );
+    if (row.waiting >= expected) return;
+    if (Date.now() > deadline) {
+      throw new Error(`붙든 트랜잭션(pid ${holderPid})을 기다리는 호출이 ${row.waiting}개뿐이다 — ${expected}개를 기다렸다`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * 이름 중복 경쟁을 매번 같은 모양으로 만든다 — 두 호출이 **둘 다** 사전 검사를
+ * 지나친 뒤 유니크 색인에서 부딪히게 한다. 같은 이름의 행을 넣고 커밋하지 않은
+ * 트랜잭션을 붙들어 두면 두 호출은 사전 검사에서 그 행을 보지 못하고 쓰기에서
+ * 기다린다. 둘 다 기다리는 것을 확인한 뒤 되감으면 하나가 먼저 쓰고 다른 하나는
+ * 23505 를 받는다 — 그냥 Promise.all 은 대개 사전 검사가 먼저 걸러 버려 그
+ * 갈래까지 가지 않는다. customers.integration.test.ts 의 같은 도우미와 같다.
+ */
+async function raceBehindUncommittedName<T>(
+  holdName: (tx: RaceHoldTx) => Promise<void>,
+  startRacers: () => Promise<T>[]
+): Promise<T[]> {
+  const state: { racing?: Promise<T[]> } = {};
+  try {
+    await db.transaction(async (tx) => {
+      await holdName(tx);
+      const [holder] = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+      const racing = Promise.all(startRacers());
+      // 되감기 전에 거절돼도 처리 안 된 거절로 새지 않게 한다 — 결과는 아래에서 다시 기다린다.
+      racing.catch(() => undefined);
+      state.racing = racing;
+      await waitUntilBlockedBy(holder.pid, 2);
+      throw RELEASE_NAME_HOLD;
+    });
+  } catch (err) {
+    if (err !== RELEASE_NAME_HOLD) throw err;
+  }
+  if (!state.racing) throw new Error("경쟁을 시작하지 못했다");
+  return state.racing;
 }
 
 /** deleted_at을 N일 과거로 돌린다 — 15일을 실제로 기다리는 대신. */
@@ -384,6 +435,71 @@ describe("restoreCustomer", () => {
 
     const stillDeleted = await readCustomer(customer.id);
     assert.equal(stillDeleted.isDeleted, true, "복원에 실패했으면 휴지통에 그대로 있어야 한다");
+  });
+
+  test("같은 이름의 휴지통 고객사 둘을 동시에 복원하면 하나만 돌아오고, 진 쪽은 날것의 23505 가 아니라 NAME_TAKEN 이다", async () => {
+    const suffix = `RESTORE-RACE-${randomUUID().slice(0, 8)}`;
+    const trashed: { customer: Awaited<ReturnType<typeof readCustomer>>; endUserId: string }[] = [];
+    // 부분 유니크 인덱스(is_deleted = false)라 휴지통에서는 같은 이름이 둘 있을 수 있다.
+    for (const label of ["첫째", "둘째"]) {
+      const customer = await createTestCustomer(suffix);
+      const endUser = await createTestEndUser(customer.id, `경쟁 복원 End-User ${label}`);
+      const deleted = await softDeleteCustomer({
+        customerId: customer.id,
+        expectedUpdatedAt: customer.updatedAt.toISOString(),
+        actorUserId: actorId,
+        reason: null,
+      });
+      assert.equal(deleted.ok, true, `soft delete failed: ${JSON.stringify(deleted)}`);
+      trashed.push({ customer: await readCustomer(customer.id), endUserId: endUser.id });
+    }
+    const name = trashed[0].customer.name;
+    assert.equal(trashed[1].customer.name, name);
+
+    const results = await raceBehindUncommittedName(
+      async (tx) => {
+        await tx.insert(customers).values({ name });
+      },
+      () =>
+        trashed.map(({ customer }) =>
+          restoreCustomer({
+            customerId: customer.id,
+            expectedUpdatedAt: customer.updatedAt.toISOString(),
+            actorUserId: actorId,
+          })
+        )
+    );
+
+    const losers = results.filter((result) => !result.ok);
+    assert.equal(losers.length, 1, `정확히 하나만 돌아와야 한다: ${JSON.stringify(results)}`);
+    const [loser] = losers;
+    if (loser.ok) return;
+    assert.equal(loser.code, "NAME_TAKEN");
+
+    for (const [index, { customer, endUserId }] of trashed.entries()) {
+      const won = results[index].ok;
+      const row = await readCustomer(customer.id);
+      const [endUserRow] = await db.select().from(endUsers).where(eq(endUsers.id, endUserId));
+      assert.equal(row.isDeleted, !won, won ? "이긴 쪽은 복원돼야 한다" : "진 쪽은 휴지통에 그대로여야 한다");
+      assert.equal(
+        endUserRow.isDeleted,
+        !won,
+        won ? "이긴 쪽의 End-User 는 함께 돌아와야 한다" : "진 쪽의 End-User 도 휴지통에 그대로여야 한다 — 반쪽 복원 금지"
+      );
+      if (!won) {
+        const restoreLogs = await db
+          .select()
+          .from(auditLogs)
+          .where(
+            and(
+              eq(auditLogs.targetEntity, "customers"),
+              eq(auditLogs.targetRecordId, customer.id),
+              eq(auditLogs.actionType, "RESTORE")
+            )
+          );
+        assert.equal(restoreLogs.length, 0, "되돌아가지 않은 복원이 감사 로그를 남기면 안 된다");
+      }
+    }
   });
 });
 

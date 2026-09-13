@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import { auditLogs, customers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
 import { createRepairCase } from "./repair-cases";
@@ -64,6 +64,62 @@ async function createTestCustomer(nameSuffix: string) {
     .values({ name: `${TEST_CUSTOMER_NAME_PREFIX}${nameSuffix}-${randomUUID().slice(0, 8)}` })
     .returning();
   return row;
+}
+
+type RaceHoldTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 붙든 트랜잭션을 되감는 신호 — 이것만 삼키고 나머지 오류는 그대로 올린다. */
+const RELEASE_NAME_HOLD = new Error("release name hold");
+
+/** 붙든 트랜잭션(holderPid)을 기다리며 멈춘 세션이 expected 개가 될 때까지 기다린다. */
+async function waitUntilBlockedBy(holderPid: number, expected: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [row] = await db.execute<{ waiting: number }>(
+      sql`select count(*)::int as waiting from pg_stat_activity where ${holderPid} = any(pg_blocking_pids(pid))`
+    );
+    if (row.waiting >= expected) return;
+    if (Date.now() > deadline) {
+      throw new Error(`붙든 트랜잭션(pid ${holderPid})을 기다리는 호출이 ${row.waiting}개뿐이다 — ${expected}개를 기다렸다`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * 이름 중복 경쟁을 매번 같은 모양으로 만든다 — 두 호출이 **둘 다** 사전 검사를
+ * 지나친 뒤 유니크 색인에서 부딪히게 한다.
+ *
+ * 그냥 Promise.all 로 두 번 부르면 대개 늦은 쪽의 사전 검사가 먼저 끝난 쪽의
+ * 커밋을 보고 걸러 버려서 23505 갈래까지 가지 않는다(위 "concurrent rename race"
+ * 시험은 세이브포인트가 없던 코드로도 통과했다). 그래서 같은 이름의 행을 넣고
+ * **커밋하지 않은** 트랜잭션을 하나 붙들어 둔다. 두 호출은 사전 검사에서 그 행을
+ * 보지 못하고(READ COMMITTED) 쓰기에서 색인에 막혀 그 트랜잭션을 기다린다. 둘 다
+ * 기다리는 것을 pg_blocking_pids 로 확인한 뒤 되감으면 하나가 먼저 쓰고, 다른
+ * 하나는 그 행에 막혔다가 커밋을 보고 23505 를 받는다. 시간에 기대지 않으므로
+ * 결과가 매번 같다. 붙든 행은 되감기므로 정리할 것이 남지 않는다.
+ */
+async function raceBehindUncommittedName<T>(
+  holdName: (tx: RaceHoldTx) => Promise<void>,
+  startRacers: () => Promise<T>[]
+): Promise<T[]> {
+  const state: { racing?: Promise<T[]> } = {};
+  try {
+    await db.transaction(async (tx) => {
+      await holdName(tx);
+      const [holder] = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+      const racing = Promise.all(startRacers());
+      // 되감기 전에 거절돼도 처리 안 된 거절로 새지 않게 한다 — 결과는 아래에서 다시 기다린다.
+      racing.catch(() => undefined);
+      state.racing = racing;
+      await waitUntilBlockedBy(holder.pid, 2);
+      throw RELEASE_NAME_HOLD;
+    });
+  } catch (err) {
+    if (err !== RELEASE_NAME_HOLD) throw err;
+  }
+  if (!state.racing) throw new Error("경쟁을 시작하지 못했다");
+  return state.racing;
 }
 
 function baseCreateInput(
@@ -276,6 +332,42 @@ describe("updateCustomer", () => {
     ]);
 
     assert.deepEqual([resultA.ok, resultB.ok].sort(), [false, true], "exactly one of the two concurrent renames should succeed");
+  });
+
+  test("사전 검사를 둘 다 지나친 동시 이름 수정 — 진 쪽도 날것의 23505 가 아니라 이름 중복 오류를 받는다", async () => {
+    const target = `${TEST_CUSTOMER_NAME_PREFIX}RACE-HELD-${randomUUID().slice(0, 8)}`;
+    const customerA = await createTestCustomer("RACE-HELD-A");
+    const customerB = await createTestCustomer("RACE-HELD-B");
+    const renameToTarget = (customer: typeof customerA) =>
+      updateCustomer({
+        customerId: customer.id,
+        expectedUpdatedAt: customer.updatedAt.toISOString(),
+        name: target,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        rowColor: null,
+      });
+
+    const results = await raceBehindUncommittedName(
+      async (tx) => {
+        await tx.insert(customers).values({ name: target });
+      },
+      () => [renameToTarget(customerA), renameToTarget(customerB)]
+    );
+
+    const losers = results.filter((result) => !result.ok);
+    assert.equal(losers.length, 1, `정확히 하나만 이겨야 한다: ${JSON.stringify(results)}`);
+    const [loser] = losers;
+    if (loser.ok) return;
+    assert.equal(loser.code, "VALIDATION_ERROR");
+    assert.equal(loser.fieldErrors?.name, "이미 존재하는 고객사명입니다.");
+
+    const holders = await db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.name, target), eq(customers.isDeleted, false)));
+    assert.equal(holders.length, 1, "붙든 행은 되감겼고 이긴 쪽 하나만 그 이름을 가져야 한다");
   });
 
   test("never rewrites an existing repair case's contact snapshot when the customer's master contact info changes", async () => {
