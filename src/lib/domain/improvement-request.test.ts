@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import {
+  arrangeImprovementRequestList,
   canDeleteImprovementRequest,
   canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
+  IMPROVEMENT_REQUEST_LIST_STATUS_ORDER,
   IMPROVEMENT_REQUEST_STATUS_LABELS,
   IMPROVEMENT_REQUEST_STATUSES,
   isImprovementRequestStatus,
@@ -245,5 +247,76 @@ describe("글자 수", () => {
     assert.equal(countImprovementRequestBodyChars("가나다"), 3);
     assert.equal(countImprovementRequestBodyChars("😀"), 1, "이모지 하나는 한 글자다");
     assert.equal(countImprovementRequestBodyChars(""), 0);
+  });
+});
+
+describe("목록 차례", () => {
+  type Row = { id: string; status: ImprovementRequestStatus; createdAt: string };
+  const row = (id: string, status: ImprovementRequestStatus, createdAt: string): Row => ({ id, status, createdAt });
+
+  // 조회가 돌려주는 차례(최근 글부터)와 일부러 다르게 섞어 둔다.
+  const ITEMS: Row[] = [
+    row("a", "RESOLVED", "2026-09-12T00:00:00.000Z"),
+    row("b", "OPEN", "2026-09-10T00:00:00.000Z"),
+    row("c", "IN_PROGRESS", "2026-09-01T00:00:00.000Z"),
+    row("d", "OPEN", "2026-09-11T00:00:00.000Z"),
+    row("e", "IN_PROGRESS", "2026-09-05T00:00:00.000Z"),
+    row("f", "RESOLVED", "2026-08-30T00:00:00.000Z"),
+  ];
+
+  test("차례 목록은 세 상태를 한 번씩 담는다", () => {
+    assert.deepEqual([...IMPROVEMENT_REQUEST_LIST_STATUS_ORDER].sort(), [...IMPROVEMENT_REQUEST_STATUSES].sort());
+    assert.deepEqual(IMPROVEMENT_REQUEST_LIST_STATUS_ORDER, ["IN_PROGRESS", "OPEN", "RESOLVED"]);
+  });
+
+  test("진행중 → 접수 → 해결, 같은 상태 안에서는 최신순", () => {
+    const { rows } = arrangeImprovementRequestList(ITEMS, { showResolved: true });
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ["e", "c", "d", "b", "a", "f"]
+    );
+  });
+
+  test("해결된 것은 기본으로 감추고, 감춘 수를 알린다", () => {
+    const hidden = arrangeImprovementRequestList(ITEMS, { showResolved: false });
+    assert.deepEqual(
+      hidden.rows.map((r) => r.id),
+      ["e", "c", "d", "b"]
+    );
+    assert.equal(hidden.resolvedCount, 2);
+    assert.equal(hidden.hiddenResolvedCount, 2);
+
+    const shown = arrangeImprovementRequestList(ITEMS, { showResolved: true });
+    assert.equal(shown.resolvedCount, 2);
+    assert.equal(shown.hiddenResolvedCount, 0, "켜 두면 감춘 것이 없다");
+  });
+
+  test("같은 시각이면 id 내림차순 — 조회의 동점 규칙과 같다", () => {
+    const at = "2026-09-13T05:00:00.000Z";
+    const { rows } = arrangeImprovementRequestList(
+      [row("11", "OPEN", at), row("33", "OPEN", at), row("22", "OPEN", at)],
+      { showResolved: false }
+    );
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ["33", "22", "11"]
+    );
+  });
+
+  test("받은 배열을 건드리지 않는다 — 서버가 넘긴 props 다", () => {
+    const before = ITEMS.map((r) => r.id);
+    arrangeImprovementRequestList(ITEMS, { showResolved: false });
+    assert.deepEqual(
+      ITEMS.map((r) => r.id),
+      before
+    );
+  });
+
+  test("빈 목록", () => {
+    assert.deepEqual(arrangeImprovementRequestList([], { showResolved: false }), {
+      rows: [],
+      resolvedCount: 0,
+      hiddenResolvedCount: 0,
+    });
   });
 });

@@ -3,8 +3,8 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
 /**
  * 개선 요청(설정 › 「개선 요청」) 권한의 **역할 기본값** — 다른 *-authorization.ts
  * 와 같은 관례를 따른다: Role 만 보는 순수 함수다. 권한 영역 `improvementRequests`
- * 의 역할별 기본 수준을 permission-baseline.ts 가 이 함수들로 정한다(다음 조각에서
- * 연결한다 — 지금은 아무 데서도 부르지 않는다).
+ * 의 역할별 기본 수준을 permission-baseline.ts 가 이 함수들로 정한다(4조각에서
+ * 연결했다, 2026-09-13 — 그 밖에는 아무 데서도 부르지 않는다).
  *
  * 막는 곳은 여기가 아니다. 페이지와 서버 액션이 관리자 설정(role_permissions)까지
  * 함께 본 실효 권한으로 각자 다시 검사한다.

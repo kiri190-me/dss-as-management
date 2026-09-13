@@ -163,3 +163,72 @@ export function canDeleteImprovementRequest(input: {
   if (input.canManage) return true;
   return input.status === "OPEN" && input.createdBy === input.actorUserId;
 }
+
+// ────────────────────────────────────────────────── 목록 차례
+
+/**
+ * 목록에 놓는 상태의 차례 — 진행중 → 접수 → 해결.
+ *
+ * 진행중이 맨 위인 것은 「지금 누가 무엇을 하고 있는가」가 이 화면에서 가장 먼저
+ * 궁금한 것이라서다. 접수는 그다음 — 아직 아무도 맡지 않은 글이 거기 쌓인다.
+ * 해결은 끝난 일이라 맨 아래이고, 화면은 기본으로 감춘다.
+ */
+export const IMPROVEMENT_REQUEST_LIST_STATUS_ORDER: readonly ImprovementRequestStatus[] = [
+  "IN_PROGRESS",
+  "OPEN",
+  "RESOLVED",
+];
+
+/** 차례를 정하는 데 필요한 칸만. 조회 결과(ImprovementRequestListItem)가 그대로 맞는다. */
+export type ImprovementRequestListEntry = {
+  id: string;
+  status: ImprovementRequestStatus;
+  /** ISO 문자열 — 서버가 클라이언트로 넘기는 모양 그대로다. */
+  createdAt: string;
+};
+
+export type ArrangedImprovementRequestList<T> = {
+  /** 화면에 그릴 줄, 그릴 차례대로. */
+  rows: T[];
+  /** 해결된 글 전부의 수 — 감췄든 안 감췄든. */
+  resolvedCount: number;
+  /** 이번에 감춘 해결 글의 수. 해결된 것도 보기가 켜져 있으면 0 이다. */
+  hiddenResolvedCount: number;
+};
+
+/**
+ * 목록을 화면에 놓을 차례로 세우고, 해결된 글을 감출지 정한다.
+ *
+ *  · 상태는 IMPROVEMENT_REQUEST_LIST_STATUS_ORDER 차례다.
+ *  · 같은 상태 안에서는 **최근에 적힌 글부터**(createdAt 내림차순). 상태를 옮긴
+ *    시각이 아니라 적힌 시각이다 — 누가 상태를 누를 때마다 줄이 뛰면 읽던 자리를
+ *    잃는다.
+ *  · 같은 시각이면 id 내림차순 — 조회(listImprovementRequests)의 동점 규칙과 같아,
+ *    새로 고칠 때마다 두 줄이 자리를 바꾸지 않는다.
+ *
+ * 받은 배열은 건드리지 않는다(새 배열을 돌려준다) — 서버가 넘긴 props 다.
+ */
+export function arrangeImprovementRequestList<T extends ImprovementRequestListEntry>(
+  items: readonly T[],
+  options: { showResolved: boolean }
+): ArrangedImprovementRequestList<T> {
+  const rank = (status: ImprovementRequestStatus) => IMPROVEMENT_REQUEST_LIST_STATUS_ORDER.indexOf(status);
+  const sorted = [...items].sort((a, b) => {
+    const byStatus = rank(a.status) - rank(b.status);
+    if (byStatus !== 0) return byStatus;
+    const byCreatedAt = Date.parse(b.createdAt) - Date.parse(a.createdAt);
+    if (byCreatedAt !== 0) return byCreatedAt;
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? 1 : -1;
+  });
+
+  const resolvedCount = sorted.filter((item) => item.status === "RESOLVED").length;
+  if (options.showResolved) {
+    return { rows: sorted, resolvedCount, hiddenResolvedCount: 0 };
+  }
+  return {
+    rows: sorted.filter((item) => item.status !== "RESOLVED"),
+    resolvedCount,
+    hiddenResolvedCount: resolvedCount,
+  };
+}

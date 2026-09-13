@@ -495,6 +495,12 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   // 역할 함수(canManageIntakeMailSettings)는 이제 permission-baseline 의
   // 기본값을 계산할 때만 쓰인다 — 최종 관문이 아니다.
   "mailSettings",
+  // 페이지 가드와 서버 액션 넷(적기·고치기·지우기 WRITE, 상태 옮기기 MANAGE)이
+  // 이 설정만 본다(2026-09-13, 처음부터). 역할 함수(improvement-request-
+  // authorization.ts)는 기본값을 계산할 때만 쓰인다. 「접수 상태인 자기 글인가」는
+  // 역할이 아니라 글 한 건의 판정이라(domain/improvement-request.ts) 이 집합과
+  // 겹치지 않는다 — 설정으로 쓰기를 주면 적기는 실제로 열린다.
+  "improvementRequests",
 ]);
 
 /** 이 노드의 설정이 실제 판정을 지배하는가. */

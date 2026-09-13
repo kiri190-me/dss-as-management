@@ -1,4 +1,9 @@
 import { canManageIntakeMailSettings } from "./intake-mail-authorization";
+import {
+  canManageImprovementRequests,
+  canViewImprovementRequests,
+  canWriteImprovementRequests,
+} from "./improvement-request-authorization";
 import type { Role } from "@/lib/domain/types";
 import {
   PERMISSION_AREAS,
@@ -275,6 +280,19 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
     case "settings":
       // 아직 안내 문구만 있는 화면이다.
       return "READ";
+
+    case "improvementRequests":
+      // 🔴 여기를 빠뜨리면 아래 default 로 떨어져 NONE 이 되고, 최고관리자까지
+      // 화면에서 튕긴다(mailSettings 와 같은 함정).
+      //
+      // 표로 옮겨 적지 않고 *-authorization.ts 를 **호출해서** 구한다(이 파일
+      // 맨 위 주석). 지금은 전원 쓰기, 최고관리자·관리자 관리다 — 그 사실은
+      // improvement-request-authorization.ts 한 곳에만 있다.
+      return ladder({
+        manage: canManageImprovementRequests(role),
+        write: canWriteImprovementRequests(role),
+        read: canViewImprovementRequests(role),
+      });
 
     default:
       // 목록에 없는 영역은 열어 주지 않는다. 새 영역을 PERMISSION_AREAS에만

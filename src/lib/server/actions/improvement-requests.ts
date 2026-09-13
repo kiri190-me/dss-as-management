@@ -30,9 +30,11 @@ import {
  * 「접수 상태인 자기 글인가」처럼 글 한 건에 대한 판정은 여기서 하지 않는다 —
  * mutation 이 **잠근 행**으로 도메인 함수를 불러 판정한다(그 파일 헤더).
  *
- * ⚠️ 영역 `improvementRequests` 는 아직 permission-areas.ts 에 없다(4조각에서
- * 등록한다). 등록되지 않은 키는 getPermissionLevel 이 NONE 으로 읽으므로, 그
- * 전까지 네 액션은 모두 FORBIDDEN 을 돌려준다. **정상이다.**
+ * 영역 `improvementRequests` 는 4조각(2026-09-13)에서 permission-areas.ts 에
+ * 등록됐다. 역할 기본값은 permission-baseline.ts 가 improvement-request-
+ * authorization.ts 를 불러 정한다(전원 WRITE, 최고관리자·관리자 MANAGE). 화면의
+ * 페이지 가드·단추 표시(settings/improvement-requests/page.tsx)도 같은 두 수준을
+ * 본다 — 짝이 어긋나면 화면은 열어 주는데 여기서 거절된다.
  *
  * ── 화면이 감춘 것은 경계가 아니다 ──────────────────────────────────────
  * 화면이 단추를 그리지 않는 것은 편의일 뿐이다. 이 액션은 화면이 무엇을 보여
@@ -64,7 +66,7 @@ export type ImprovementRequestActionResult =
       message: string;
     };
 
-/** 권한 영역 키. 4조각이 permission-areas.ts 에 같은 글자로 등록한다. */
+/** 권한 영역 키. permission-areas.ts 의 `improvementRequests` 와 같은 글자다(4조각에서 등록). */
 const AREA_KEY = "improvementRequests";
 /** 설정 › 개선 요청 화면. 저장이 성공하면 이 경로를 다시 그린다. */
 const LIST_PATH = "/settings/improvement-requests";

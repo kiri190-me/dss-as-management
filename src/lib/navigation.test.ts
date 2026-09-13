@@ -417,7 +417,9 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자
   // 나란히 "누가 무엇을 받는가"를 정하는 자리다.
   // 개발자 모드가 「설정」 그룹 네 번째, 맨 끝으로 붙었다(2026-09-07) — 노출
   // 규칙이 다른 셋과 다른 유일한 줄이라 사이에 끼우지 않았다(navigation.ts 주석).
-  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings", "mailSettings", "developerMode"]);
+  // 개선 요청이 개발자 모드 **바로 앞**, 네 번째로 붙었다(2026-09-13) — 개발자
+  // 모드는 맨 끝 그대로다.
+  assert.deepEqual(byKey.get("systemSettings")?.itemKeys, ["users", "settings", "mailSettings", "improvementRequests", "developerMode"]);
 });
 
 test("navGroups: 그룹의 key·이름·차례 — '설정'은 '관리' 다음, 맨 끝이다", () => {
