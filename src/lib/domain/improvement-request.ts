@@ -340,12 +340,17 @@ export function improvementRequestMenuLabel(menuKey: string | null): string {
   return option ? option.label : IMPROVEMENT_REQUEST_UNKNOWN_MENU_LABEL;
 }
 
+/** 복사 글의 대괄호 안 앞머리 — 뒤에 메뉴 이름이 붙는다. */
+const IMPROVEMENT_REQUEST_COPY_PREFIX = "개선요청 메뉴 : ";
+
 /**
- * [복사] 단추가 클립보드에 넣는 글 — 「[메뉴 이름] 본문」. 메뉴 이름은 줄에 붙이는
- * 표시와 같은 improvementRequestMenuLabel 이다(NULL 이면 「[메뉴 지정 안 함]」).
+ * [복사] 단추가 클립보드에 넣는 글 — 「[개선요청 메뉴 : 메뉴 이름] 본문」
+ * (2026-09-13 사용자 요청. 예: 「[개선요청 메뉴 : 내자 정리] 표가 느려요」).
+ * 메뉴 이름은 줄에 붙이는 표시와 같은 improvementRequestMenuLabel 이다
+ * (NULL 이면 「[개선요청 메뉴 : 메뉴 지정 안 함]」). 본문은 줄바꿈까지 그대로 붙인다.
  */
 export function improvementRequestCopyText(item: { menuKey: string | null; body: string }): string {
-  return `[${improvementRequestMenuLabel(item.menuKey)}] ${item.body}`;
+  return `[${IMPROVEMENT_REQUEST_COPY_PREFIX}${improvementRequestMenuLabel(item.menuKey)}] ${item.body}`;
 }
 
 // ────────────────────────────────────────────────── 이 사람이 고를 수 있는 메뉴

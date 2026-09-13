@@ -426,19 +426,43 @@ describe("어느 메뉴의 일인가", () => {
     assert.equal(improvementRequests.menuKey.hasDefault, false);
   });
 
-  test("복사 글은 「[메뉴 이름] 본문」이다", () => {
-    const repairCasesLabel = navLabel("repairCases");
-    assert.equal(improvementRequestCopyText({ menuKey: "repairCases", body: "본문" }), `[${repairCasesLabel}] 본문`);
-    assert.equal(improvementRequestCopyText({ menuKey: null, body: "본문" }), "[메뉴 지정 안 함] 본문");
+  test("복사 글은 「[개선요청 메뉴 : 메뉴 이름] 본문」이다", () => {
+    // 메뉴 있음 — 사용자가 든 예(2026-09-13) 그대로.
+    assert.equal(
+      improvementRequestCopyText({ menuKey: "domesticOrders", body: "표가 느려요" }),
+      `[개선요청 메뉴 : ${navLabel("domesticOrders")}] 표가 느려요`
+    );
+    assert.equal(
+      improvementRequestCopyText({ menuKey: "repairCases", body: "본문" }),
+      `[개선요청 메뉴 : ${navLabel("repairCases")}] 본문`
+    );
+    // 메뉴 지정 안 함(NULL) — 메뉴 칸이 생기기 전의 옛 글.
+    assert.equal(improvementRequestCopyText({ menuKey: null, body: "본문" }), "[개선요청 메뉴 : 메뉴 지정 안 함] 본문");
+    // 기타.
     assert.equal(
       improvementRequestCopyText({ menuKey: IMPROVEMENT_REQUEST_OTHER_MENU_KEY, body: "본문" }),
-      "[기타 · 메뉴 밖] 본문"
+      "[개선요청 메뉴 : 기타 · 메뉴 밖] 본문"
     );
-    assert.equal(improvementRequestCopyText({ menuKey: "noSuchMenu", body: "본문" }), "[(없어진 메뉴)] 본문");
+    // 없어진 메뉴 — 모르는 열쇠, 빈 열쇠.
+    assert.equal(improvementRequestCopyText({ menuKey: "noSuchMenu", body: "본문" }), "[개선요청 메뉴 : (없어진 메뉴)] 본문");
+    assert.equal(improvementRequestCopyText({ menuKey: "", body: "본문" }), "[개선요청 메뉴 : (없어진 메뉴)] 본문");
+    // 고를 수 있는 모든 메뉴가 같은 모양이다 — 이름은 목록의 이름표 그대로.
+    for (const option of listImprovementRequestMenuOptions()) {
+      assert.equal(
+        improvementRequestCopyText({ menuKey: option.key, body: "본문" }),
+        `[개선요청 메뉴 : ${option.label}] 본문`,
+        option.key
+      );
+    }
+    // 본문은 줄바꿈까지 그대로다(빈 줄 · 끝 줄바꿈 포함).
     assert.equal(
       improvementRequestCopyText({ menuKey: "quotes", body: "첫 줄\n둘째 줄" }),
-      `[${navLabel("quotes")}] 첫 줄\n둘째 줄`,
+      `[개선요청 메뉴 : ${navLabel("quotes")}] 첫 줄\n둘째 줄`,
       "본문은 줄바꿈까지 그대로다"
+    );
+    assert.equal(
+      improvementRequestCopyText({ menuKey: null, body: "첫 줄\n\n셋째 줄\n" }),
+      "[개선요청 메뉴 : 메뉴 지정 안 함] 첫 줄\n\n셋째 줄\n"
     );
   });
 });
