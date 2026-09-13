@@ -41,11 +41,12 @@
  *     **displayDeliveredDate**
  *
  * 계산된 값은 *"그 줄에 적힌 것이 먼저, 없으면 연결된 수리 건의 것"* 이다
- * (resolveDomesticOrderValue). 마지막 하나만 규칙이 더 세다 —
- * displayDeliveredDate 는 **연결된 수리 건의 실제 출하일뿐**이고 그 줄의
- * deliveredDate 는 보지 않는다(resolveDomesticOrderDeliveredDate). 그 값이 실려
- * 나가면 담길 칼럼조차 없거니와, 원본 칸(deliveredDate)에 옮겨 담으면 자동으로
- * 따라오던 날짜가 이 줄에 박제된다. 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
+ * (resolveDomesticOrderValue). 마지막 하나만 규칙이 다르다 — displayDeliveredDate
+ * 는 둘을 섞지 않고 연결 여부로 가른다: **연결된 줄은 수리 건의 실제 출하일뿐**
+ * 이라 그 줄의 deliveredDate 는 보지 않고, 연결 없는 줄은 그 deliveredDate
+ * 그대로다(resolveDomesticOrderDeliveredDate). 그 값이 실려 나가면 담길 칼럼조차
+ * 없거니와, 원본 칸(deliveredDate)에 옮겨 담으면 연결된 줄에서 자동으로 따라오던
+ * 출하일이 이 줄에 박제된다. 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
  * 계산된 값을 보내면, 그 줄이 원래 비워 두고 수리 건 값을 빌려 쓰던 칸에 수리
  * 건의 값이 자기 값으로 복사되어 굳는다 — 그때부터 "일부러 다르게 적었다"와
  * "그냥 안 건드렸다"를 구분할 수 없고, 나중에 수리 건 쪽이 고쳐져도 이 줄만 옛
@@ -130,10 +131,11 @@ import { resolveDomesticOrderDueDateDisplay } from "./requested-due-date-link";
  * 이 셋은 **그 줄에 사람이 적는 날짜 하나**다. 값이 `"YYYY-MM-DD"` 문자열 하나라
  * 위 아홉과 똑같이 실려 나가고, 검증도 같은 관문 하나를 지난다. 반면:
  *
- *   - **`deliveredDate`(납품일)** — 목록이 그리는 납품일은 이 칼럼이 아니라
- *     연결된 수리 건의 실제 출하일이다. 사람이 적는 값이 아니라서 `줄 수정`
- *     폼에서도 입력칸을 없앴다(DomesticOrderEditForm). 칸 편집을 붙이면 그
- *     결정이 뒤집힌다 — **여기 적으면 안 된다.**
+ *   - **`deliveredDate`(납품일)** — 연결된 줄의 목록 납품일은 이 칼럼이 아니라
+ *     수리 건의 실제 출하일이라 사람이 적는 값이 아니고, 칸 편집을 붙이면 따라오던
+ *     출하일이 이 줄에 박제된다. 연결 없는 줄은 이 칼럼이 곧 납품일이지만 적는
+ *     자리는 `줄 수정` 폼의 입력칸뿐이다(DomesticOrderEditForm). 칸 편집은 연결
+ *     여부와 무관하게 없다 — **여기 적으면 안 된다.**
  *   - **`dueDates`(납기요청일)** — 날짜가 **여럿**이고 메모가 딸린 별도 표다
  *     (schema/domestic-order-due-dates.ts). 칸 하나에 값 하나라는 이 목록의 전제가
  *     통째로 다르다. 2026-09-11 부터 표에서 눌러 고치지만 **이 목록이 아니라**
@@ -352,8 +354,8 @@ export type DomesticOrderCellEditRow = {
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   /**
-   * 연결된 견적서. ⚠️ **화면에 칸이 없는데 반드시 여기 있어야 한다** — 납품일과
-   * 같은 종류다. 빠지면 검증이 undefined 를 null 로 접어, 칸 하나 고치는 저장
+   * 연결된 견적서. ⚠️ **화면에 칸이 없는데 반드시 여기 있어야 한다** — 연결된
+   * 줄의 납품일과 같은 종류다. 빠지면 검증이 undefined 를 null 로 접어, 칸 하나 고치는 저장
    * 한 번에 그 줄의 견적서 연결이 풀린다(파일 헤더 '견적서 연결도 되실어 보낸다').
    *
    * 원본 칼럼(quote_id) 그대로라 계산된 값이 아니다. 조인해 온 linkedQuoteNumber ·
@@ -362,17 +364,20 @@ export type DomesticOrderCellEditRow = {
   quoteId: string | null;
   progressNote: string | null;
   /**
-   * ⚠️ **화면 어디에도 안 나오는 값인데 반드시 여기 있어야 한다.**
+   * ⚠️ **칸 편집으로는 고치지 않는 값인데 반드시 여기 있어야 한다.**
    *
-   * 목록의 `납품일` 은 이제 이 칼럼이 아니라 연결된 수리 건의 실제 출하일이다
-   * (queries 의 displayDeliveredDate). `줄 수정` 폼에도 입력칸이 없다. 그래도
+   * 연결된 줄의 `납품일` 은 이 칼럼이 아니라 수리 건의 실제 출하일이고
+   * (queries 의 displayDeliveredDate), 연결 없는 줄은 이 칼럼이 곧 목록에 보이는
+   * 납품일이다(2026-09-11) — 적는 자리는 `줄 수정` 폼의 입력칸뿐이다. 어느 쪽이든
    * 이 칸을 뺄 수 없는 이유는 파일 헤더의 규칙 하나 때문이다 — **이 저장은 모든
    * 칼럼을 SET 한다.** 아래 builder 가 이 키를 안 실으면 검증이 undefined 를
-   * null 로 접고, 손으로 적던 시절의 납품일이 **칸 하나 고치는 저장 한 번에**
-   * DB 에서 사라진다.
+   * null 로 접고, 그 줄의 납품일이 **칸 하나 고치는 저장 한 번에** DB 에서
+   * 사라진다.
    *
-   * 화면에서 안 보여 주기로 한 것과 자료를 버리는 것은 다른 결정이다. 되돌릴 수
-   * 있게 두려고 칼럼을 남긴 것이므로, 이 경로로 지워지면 그 결정이 무의미해진다.
+   * ⚠️ **연결 없는 줄에서는 이 경고가 더 무겁다.** 거기서는 이 값이 화면에 보이는
+   * 납품일의 원본 그 자체라, 지워지면 목록의 날짜가 곧바로 "-"가 된다 — 다른 칸
+   * 하나 고치다 사람이 적은 납품일을 잃는다. 연결된 줄에서는 안 보여 줄 뿐 버린
+   * 값이 아니고, 연결을 풀면 다시 보인다(domestic-order-list.ts 헤더).
    *
    * ⚠️ 계산된 짝(displayDeliveredDate)은 **이 타입에 없다.** 고장내역과 같은
    * 함정이고(파일 헤더의 함정 ②), 여기 없다는 것이 그 함정에 빠질 자리를 없애는
@@ -444,8 +449,8 @@ function collectRowFields(row: DomesticOrderCellEditRow): Record<string, unknown
     // 2026-08-28 부터 09-11 까지 여기가 비어 있었다.
     quoteId: row.quoteId,
     progressNote: row.progressNote,
-    // ⚠️ 화면에 안 보이는 값이지만 **빼면 지워진다**(위 타입의 그 칸 주석).
-    // 안 보여 주기로 한 것이지 버리기로 한 것이 아니다.
+    // ⚠️ 칸 편집으로는 안 고치는 값이지만 **빼면 지워진다**(위 타입의 그 칸 주석).
+    // 연결 없는 줄에서는 목록에 보이는 납품일의 원본이다.
     deliveredDate: row.deliveredDate,
     deliveredBy: row.deliveredBy,
     taxInvoiceDate: row.taxInvoiceDate,
