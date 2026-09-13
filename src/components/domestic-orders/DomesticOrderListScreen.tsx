@@ -41,6 +41,7 @@ import {
 import {
   customerRowColorClass,
   customerRowColorInteractiveClass,
+  customerRowColorStyle,
 } from "@/lib/domain/customer-row-color";
 import type { InlineEditCellWrapping } from "@/components/common/inline-edit-cell-button";
 import type { DomesticOrderInlineEditableField } from "@/lib/domain/domestic-order-cell-edit";
@@ -2154,6 +2155,9 @@ export default function DomesticOrderListScreen({
                 // 이름은 고객사마다 유일하므로, 한 묶음의 줄들은 같은 색이다.
                 // 소제목과 줄이 같은 색이라야 한 덩어리로 읽힌다(파일 헤더).
                 const groupColorClass = customerRowColorClass(group.rows[0]?.customerRowColor);
+                // 직접 고른 색이면 위 클래스가 읽을 색을 CSS 변수로 곁들인다.
+                // 팔레트 색·없음이면 undefined 라 아무것도 붙지 않는다.
+                const groupColorStyle = customerRowColorStyle(group.rows[0]?.customerRowColor);
                 return (
                 <tbody key={group.customerName ?? "__unassigned__"}>
                   {/* 색이 있으면 기본 회색 소제목 배경을 **대신한다.** 두 배경
@@ -2165,6 +2169,7 @@ export default function DomesticOrderListScreen({
                         ? "bg-zinc-50 dark:bg-zinc-800/60"
                         : groupColorClass
                     }`}
+                    style={groupColorStyle}
                   >
                     <th
                       colSpan={TABLE_COLUMN_COUNT}
@@ -2190,6 +2195,7 @@ export default function DomesticOrderListScreen({
                     // 완료가 아닌 줄에만 고객사 색이 붙는다 — 아래 세 갈래의
                     // 순서가 곧 "완료 회색이 이긴다"는 규칙이다(파일 헤더).
                     const rowColorClass = customerRowColorInteractiveClass(row.customerRowColor);
+                    const rowColorStyle = customerRowColorStyle(row.customerRowColor);
                     return (
                       <tr
                         key={row.id}
@@ -2209,6 +2215,8 @@ export default function DomesticOrderListScreen({
                               ? "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                               : rowColorClass
                         } ${canEdit ? "cursor-pointer" : ""}`}
+                        // 완료된 줄은 고객사 색 클래스를 받지 않으므로 변수도 싣지 않는다.
+                        style={completed ? undefined : rowColorStyle}
                       >
                         <td className="px-3 py-2">
                           <span className="flex items-center gap-2">
@@ -2474,6 +2482,7 @@ export default function DomesticOrderListScreen({
                 // 표와 같은 규칙이다 — 좁은 화면이라고 색이 달라지면 같은 자료가
                 // 다른 화면처럼 읽힌다(파일 헤더).
                 const groupColorClass = customerRowColorClass(group.rows[0]?.customerRowColor);
+                const groupColorStyle = customerRowColorStyle(group.rows[0]?.customerRowColor);
                 return (
                 <section key={group.customerName ?? "__unassigned__"} className="flex flex-col gap-2">
                   {/* 카드 보기의 소제목에는 원래 배경이 없다. 색이 있을 때만
@@ -2483,6 +2492,7 @@ export default function DomesticOrderListScreen({
                     className={`flex items-baseline gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 ${
                       groupColorClass === "" ? "" : `rounded-md px-2 py-1 ${groupColorClass}`
                     }`}
+                    style={groupColorStyle}
                   >
                     {group.label}
                     <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
@@ -2495,6 +2505,7 @@ export default function DomesticOrderListScreen({
                       // 표의 줄과 같은 세 갈래 — 완료 회색이 고객사 색을 이긴다.
                       // 카드에는 원래 hover 색이 없으므로 배경만 칠한다.
                       const rowColorClass = customerRowColorClass(row.customerRowColor);
+                      const rowColorStyle = customerRowColorStyle(row.customerRowColor);
                       return (
                         <div
                           key={row.id}
@@ -2506,6 +2517,7 @@ export default function DomesticOrderListScreen({
                                 ? "bg-white dark:bg-zinc-900"
                                 : rowColorClass
                           } ${canEdit ? "cursor-pointer" : ""}`}
+                          style={completed ? undefined : rowColorStyle}
                         >
                           {/* 표와 같은 원칙이다 — 인수번호는 수리 건으로 가는
                               링크, 폼을 여는 것은 순번 옆의 수정 버튼. 좁은

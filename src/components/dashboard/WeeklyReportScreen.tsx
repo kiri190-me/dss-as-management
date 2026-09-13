@@ -1,10 +1,11 @@
+import type { CSSProperties } from "react";
 import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
 import WeeklyReportNotesCell from "./WeeklyReportNotesCell";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
-import { customerRowColorClass } from "@/lib/domain/customer-row-color";
+import { customerRowColorClass, customerRowColorStyle } from "@/lib/domain/customer-row-color";
 import {
   WEEKLY_REPORT_PO_ISSUED_LABEL,
   WEEKLY_REPORT_STATUSES,
@@ -272,11 +273,17 @@ function CountCell({
   label,
   value,
   toneClass = PLAIN_TONE,
+  toneStyle,
   alert = false,
 }: {
   label: string;
   value: number;
   toneClass?: string;
+  /**
+   * toneClass 가 직접 고른 고객사 색일 때 그 클래스가 읽을 CSS 변수
+   * (customerRowColorStyle). 팔레트 색·색 없음이면 undefined 다.
+   */
+  toneStyle?: CSSProperties;
   alert?: boolean;
 }) {
   const boxClass = alert
@@ -286,6 +293,7 @@ function CountCell({
   return (
     <div
       className={`flex items-baseline justify-between gap-1.5 rounded border px-1.5 py-0.5 ${boxClass}`}
+      style={alert ? undefined : toneStyle}
     >
       <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">{label}</span>
       <span className={`text-wr-count font-semibold tabular-nums ${valueClass}`}>{value}</span>
@@ -347,9 +355,12 @@ const BOTTOM_ROW_STATUSES = SUMMARY_CELL_ORDER.filter((status) => SUMMARY_CELL_P
 function CountsSummary({
   counts,
   toneClass = PLAIN_TONE,
+  toneStyle,
 }: {
   counts: WeeklyReportCounts;
   toneClass?: string;
+  /** toneClass 와 짝인 CSS 변수(CountCell). 직접 고른 고객사 색일 때만 있다. */
+  toneStyle?: CSSProperties;
 }) {
   return (
     // 넘치면 이 래퍼 안에서만 좌우로 밀린다. **flex-1 이나 높이를 붙이지 말 것** —
@@ -362,24 +373,24 @@ function CountsSummary({
             key={status}
             label={weeklyReportStatusLabels[status]}
             value={counts.byStatus[status]}
-            toneClass={toneClass}
+            toneClass={toneClass} toneStyle={toneStyle}
           />
         ))}
         {/* 네 번째 자리 — 겹쳐 세는 값이라 총 대수에 더해지지 않는다(파일 헤더). */}
         <CountCell
           label={WEEKLY_REPORT_PO_ISSUED_LABEL}
           value={counts.poIssued}
-          toneClass={toneClass}
+          toneClass={toneClass} toneStyle={toneStyle}
         />
         {BOTTOM_ROW_STATUSES.map((status) => (
           <CountCell
             key={status}
             label={weeklyReportStatusLabels[status]}
             value={counts.byStatus[status]}
-            toneClass={toneClass}
+            toneClass={toneClass} toneStyle={toneStyle}
           />
         ))}
-        <CountCell label={WEEKLY_REPORT_TOTAL_LABEL} value={counts.total} toneClass={toneClass} />
+        <CountCell label={WEEKLY_REPORT_TOTAL_LABEL} value={counts.total} toneClass={toneClass} toneStyle={toneStyle} />
         {counts.unclassified > 0 && (
           <CountCell label={UNCLASSIFIED_LABEL} value={counts.unclassified} alert />
         )}
@@ -398,6 +409,7 @@ function BlockHeading({
   kind,
   total,
   toneClass = PLAIN_TONE,
+  toneStyle,
 }: {
   /** 왼쪽에 굵게 적는 이름 — 고객사명, 또는 "총합". */
   name: string;
@@ -405,6 +417,8 @@ function BlockHeading({
   /** 오른쪽에 적는 숫자. 없으면 적지 않는다. */
   total?: number;
   toneClass?: string;
+  /** toneClass 와 짝인 CSS 변수(CountCell). 직접 고른 고객사 색일 때만 있다. */
+  toneStyle?: CSSProperties;
 }) {
   return (
     // 이 줄은 접지 않는다 — 아래 집계와 상세표가 **이 줄의 폭에 맞추므로**, 제목이
@@ -415,6 +429,7 @@ function BlockHeading({
     // shrink-0 이면 대신 넘치고, 넘친 만큼만 이 상자 안에서 좌우로 스크롤된다.
     <div
       className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 overflow-x-auto rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${toneClass}`}
+      style={toneStyle}
     >
       <h3 className="inline-flex shrink-0 items-baseline gap-x-2 gap-y-0.5 text-wr-heading">
         <span className="font-semibold text-zinc-900 dark:text-zinc-50">{name}</span>
@@ -453,15 +468,17 @@ function ReportBlock({
   canEditNotes: boolean;
 }) {
   const toneClass = customerRowColorClass(block.customerRowColor);
+  // 직접 고른 색이면 위 클래스가 읽을 CSS 변수. 팔레트 색·없음이면 undefined 다.
+  const toneStyle = customerRowColorStyle(block.customerRowColor);
   return (
     <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-wr-block dark:border-zinc-800 dark:bg-zinc-900">
       <BlockHeading
         name={block.customerName}
         kind={block.kind}
         total={block.counts.total}
-        toneClass={toneClass}
+        toneClass={toneClass} toneStyle={toneStyle}
       />
-      <CountsSummary counts={block.counts} toneClass={toneClass} />
+      <CountsSummary counts={block.counts} toneClass={toneClass} toneStyle={toneStyle} />
       {/* 가로 스크롤은 이 래퍼 안에서만 일어난다. **flex-1 을 되돌려 놓지 말 것** —
           overflow-x 가 세로 축까지 스크롤 상자로 만들기 때문에, 여기에 확정 높이가
           붙으면 이 안에서 세로 스크롤이 생겨 스크롤바가 둘로 보인다. 좌우 두 칸의
@@ -578,6 +595,7 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
             <li
               key={entry.key}
               className={`inline-flex shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
+              style={customerRowColorStyle(entry.customerRowColor)}
             >
               <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">
                 {entry.customerName}

@@ -123,8 +123,42 @@ test("validateCustomerUpdateFields: rowColor 칸이 아예 없으면 색 없음�
   if (result.ok) assert.equal(result.data.rowColor, null);
 });
 
-test("validateCustomerUpdateFields: 팔레트 밖의 값은 거절한다 — 색 코드도 마찬가지다", () => {
-  for (const bad of ["#FFE4B5", "zinc", "AMBER", "rgb(255,0,0)", 123, {}, true]) {
+test("validateCustomerUpdateFields: 직접 고른 색 코드는 통과하고 소문자로 정리돼 저장된다", () => {
+  // 🔴 설계 변경(2026-09-13 사용자 결정): 예전에는 색 코드를 거절했다. 이제는
+  // 「직접 고르기」로 고른 색을 받는다 — 약화가 아니라 뜻이 바뀐 것이다.
+  for (const [raw, stored] of [
+    ["#FFE4B5", "#ffe4b5"],
+    ["#ffe4b5", "#ffe4b5"],
+    ["  #1E3A8A ", "#1e3a8a"],
+  ] as const) {
+    const result = validateCustomerUpdateFields({
+      name: "Acme",
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: raw,
+    });
+    assert.equal(result.ok, true, `rowColor=${JSON.stringify(raw)} 는 통과해야 한다`);
+    if (result.ok) assert.equal(result.data.rowColor, stored);
+  }
+});
+
+test("validateCustomerUpdateFields: 팔레트 밖의 키와 형식이 어긋난 색 코드는 거절한다", () => {
+  for (const bad of [
+    "zinc",
+    "AMBER",
+    "rgb(255,0,0)",
+    "red",
+    "#12345",
+    "#1234567",
+    "#fff",
+    "ffe4b5",
+    "#gggggg",
+    "   ",
+    123,
+    {},
+    true,
+  ]) {
     const result = validateCustomerUpdateFields({
       name: "Acme",
       contactName: null,

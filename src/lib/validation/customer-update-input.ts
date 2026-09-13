@@ -1,4 +1,4 @@
-import { isCustomerRowColorKey } from "@/lib/domain/customer-row-color";
+import { normalizeCustomerRowColorValue } from "@/lib/domain/customer-row-color";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -19,8 +19,9 @@ export type CustomerUpdateFields = {
   contactEmail: string | null;
   contactPhone: string | null;
   /**
-   * 내자 정리 목록에서 이 고객사의 줄에 칠할 색 — **팔레트 키**이거나 null 이다
-   * (domain/customer-row-color.ts). 색 코드는 여기까지 오지 못한다.
+   * 내자 정리 목록에서 이 고객사의 줄에 칠할 색 — **팔레트 키**, 「직접 고르기」로
+   * 고른 **정리된 색 코드**(`#rrggbb`, 소문자), 또는 null 이다
+   * (domain/customer-row-color.ts). 형식이 어긋난 색 코드는 여기까지 오지 못한다.
    */
   rowColor: string | null;
 };
@@ -90,19 +91,24 @@ export function validateCustomerUpdateFields(
   }
 
   /**
-   * 색은 **고르는 값**이지 적는 값이 아니다. 그래서 길이를 재거나 다듬지 않고
-   * 팔레트에 있는 키인지만 본다 — 비어 있으면(고르지 않음) null 이고, 팔레트
-   * 밖의 값은 거절한다. 화면이 무엇을 그렸든 서버 액션은 이 검증을 다시
-   * 거치므로, 색 코드를 직접 보내는 요청은 여기서 멈춘다.
+   * 색은 **고르는 값**이다 — 팔레트 키이거나, 「직접 고르기」로 고른 색 코드다
+   * (2026-09-13 사용자 요청으로 색 코드를 받게 됐다). 길이를 재지 않고
+   * normalizeCustomerRowColorValue 하나로 거른다: 팔레트 키는 그대로, 색 코드는
+   * 소문자 `#rrggbb` 로 정리해 저장하고, 그 밖의 값은 거절한다. 비어 있으면
+   * (고르지 않음) null 이다. 화면이 무엇을 그렸든 서버 액션은 이 검증을 다시
+   * 거치므로, 형식이 어긋난 값을 직접 보내는 요청은 여기서 멈춘다.
    */
   let rowColor: string | null = null;
   const rowColorRaw = raw.rowColor;
   if (rowColorRaw === null || rowColorRaw === undefined || rowColorRaw === "") {
     rowColor = null;
-  } else if (isCustomerRowColorKey(rowColorRaw)) {
-    rowColor = rowColorRaw;
   } else {
-    fieldErrors.rowColor = "고를 수 없는 색입니다.";
+    const normalized = normalizeCustomerRowColorValue(rowColorRaw);
+    if (normalized === null) {
+      fieldErrors.rowColor = "고를 수 없는 색입니다.";
+    } else {
+      rowColor = normalized;
+    }
   }
 
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
