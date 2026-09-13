@@ -353,7 +353,16 @@ export default function CustomerListScreen({
                           </td>
                         )}
                         <td className="px-3 py-2 font-medium whitespace-nowrap text-zinc-900 dark:text-zinc-50">
-                          <CustomerName row={row} />
+                          {/* 이름을 누르면 상세로 간다. 삭제 모드에서는 링크를 끈다 —
+                              체크하려고 누른 손이 다른 화면으로 넘어가 버리면 안 된다
+                              (카드가 삭제 모드에서 링크가 아닌 것과 같은 까닭이다). */}
+                          {isDeleteMode ? (
+                            <CustomerName row={row} />
+                          ) : (
+                            <Link href={`/customers/${row.id}`} className="group">
+                              <CustomerName row={row} linkHint />
+                            </Link>
+                          )}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.endUserCount}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.repairCaseCount}</td>
@@ -491,13 +500,17 @@ export default function CustomerListScreen({
  *
  * 목록에 이것이 있어야 어느 고객사에 무슨 색을 줬는지 한눈에 보인다. 없으면
  * 색을 확인하려고 고객사를 하나씩 열어 봐야 한다.
+ *
+ * linkHint — `group` 링크 안에 넣을 때 켠다. 마우스를 얹으면 이름 글자에만
+ * 밑줄이 생긴다. 밑줄을 바깥 링크에 걸지 않는 것은 이 span 이 inline-flex 라
+ * 바깥의 밑줄이 안으로 전해지지 않기 때문이다(색 견본에 밑줄이 붙지 않는 것은 덤이다).
  */
-function CustomerName({ row }: { row: CustomerListRow }) {
+function CustomerName({ row, linkHint = false }: { row: CustomerListRow; linkHint?: boolean }) {
   const hasColor = resolveCustomerRowColor(row.rowColor) !== null;
   return (
     <span className="inline-flex items-center gap-1.5">
       {hasColor && <CustomerRowColorSwatch colorKey={row.rowColor} />}
-      {row.name}
+      {linkHint ? <span className="underline-offset-2 group-hover:underline">{row.name}</span> : row.name}
     </span>
   );
 }
