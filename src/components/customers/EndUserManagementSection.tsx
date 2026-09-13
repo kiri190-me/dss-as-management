@@ -8,10 +8,12 @@ import EndUserContactList from "./EndUserContactList";
 
 const inputClass =
   "w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+// 단추는 줄어들지 않고 글자를 한 줄로 세운다 — 입력칸(w-full)과 한 줄에 서면
+// 단추가 조금이라도 눌리는 순간 「추/가」처럼 한 글자씩 꺾였다. 남는 폭은 입력칸이 가져간다.
 const primaryButtonClass =
-  "rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200";
+  "shrink-0 whitespace-nowrap rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200";
 const secondaryButtonClass =
-  "rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "shrink-0 whitespace-nowrap rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 const errorClass = "text-xs text-red-600 dark:text-red-400";
 
 function CreateEndUserForm({
@@ -45,21 +47,25 @@ function CreateEndUserForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
-      <div className="flex items-center gap-2">
+      {/* 입력칸이 9rem 아래로 줄어들 폭이면 단추 묶음을 통째로 다음 줄 오른쪽으로 내린다 —
+          단추를 한 줄로 세운 대신 좁은 화면에서 입력칸이 한 뼘도 안 남는 일을 막는다. */}
+      <div className="flex flex-wrap items-center gap-2">
         <input
           value={name}
           disabled={isSubmitting}
           onChange={(e) => setName(e.target.value)}
           placeholder="End-User명"
-          className={inputClass}
+          className={`${inputClass} min-w-36 flex-1`}
           autoFocus
         />
-        <button type="submit" disabled={isSubmitting} className={primaryButtonClass}>
-          {isSubmitting ? "추가 중..." : "추가"}
-        </button>
-        <button type="button" onClick={onCancel} disabled={isSubmitting} className={secondaryButtonClass}>
-          취소
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button type="submit" disabled={isSubmitting} className={primaryButtonClass}>
+            {isSubmitting ? "추가 중..." : "추가"}
+          </button>
+          <button type="button" onClick={onCancel} disabled={isSubmitting} className={secondaryButtonClass}>
+            취소
+          </button>
+        </div>
       </div>
       {fieldError && <p className={errorClass}>{fieldError}</p>}
       {submitError && !fieldError && <p className={errorClass}>{submitError}</p>}
@@ -108,28 +114,32 @@ function RenameEndUserForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
+      {/* 추가 폼과 같은 배치다. 충돌 때의 「최신 정보 다시 불러오기」는 단추가 길어
+          좁은 화면에서는 입력칸 아래로 내려간다(그때 입력칸은 어차피 잠겨 있다). */}
+      <div className="flex flex-wrap items-center gap-2">
         <input
           value={name}
           disabled={isSubmitting || isConflict}
           onChange={(e) => setName(e.target.value)}
-          className={inputClass}
+          className={`${inputClass} min-w-36 flex-1`}
           autoFocus
         />
-        {isConflict ? (
-          <button type="button" onClick={onDone} className={secondaryButtonClass}>
-            최신 정보 다시 불러오기
-          </button>
-        ) : (
-          <>
-            <button type="submit" disabled={isSubmitting} className={primaryButtonClass}>
-              {isSubmitting ? "저장 중..." : "저장"}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isConflict ? (
+            <button type="button" onClick={onDone} className={secondaryButtonClass}>
+              최신 정보 다시 불러오기
             </button>
-            <button type="button" onClick={onCancel} disabled={isSubmitting} className={secondaryButtonClass}>
-              취소
-            </button>
-          </>
-        )}
+          ) : (
+            <>
+              <button type="submit" disabled={isSubmitting} className={primaryButtonClass}>
+                {isSubmitting ? "저장 중..." : "저장"}
+              </button>
+              <button type="button" onClick={onCancel} disabled={isSubmitting} className={secondaryButtonClass}>
+                취소
+              </button>
+            </>
+          )}
+        </div>
       </div>
       {fieldError && <p className={errorClass}>{fieldError}</p>}
       {submitError && !fieldError && <p className={errorClass}>{submitError}</p>}
