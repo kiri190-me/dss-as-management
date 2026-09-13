@@ -1,0 +1,5 @@
+ALTER TYPE "public"."attachment_category" ADD VALUE 'SCREENSHOT' BEFORE 'OTHER';--> statement-breakpoint
+ALTER TABLE "attachments" ADD COLUMN "improvement_request_id" uuid;--> statement-breakpoint
+ALTER TABLE "attachments" ADD CONSTRAINT "attachments_improvement_request_id_improvement_requests_id_fk" FOREIGN KEY ("improvement_request_id") REFERENCES "public"."improvement_requests"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "attachments_improvement_request_id_not_deleted_idx" ON "attachments" USING btree ("improvement_request_id") WHERE is_deleted = false;--> statement-breakpoint
+ALTER TABLE "attachments" ADD CONSTRAINT "attachments_improvement_owner_alone" CHECK ("attachments"."improvement_request_id" IS NULL OR ("attachments"."repair_case_id" IS NULL AND "attachments"."product_model_id" IS NULL));

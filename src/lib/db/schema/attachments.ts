@@ -10,6 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { improvementRequests } from "./improvement-requests";
 import { productModels } from "./product-models";
 import { repairCases } from "./repair-cases";
 import { users } from "./users";
@@ -30,7 +31,7 @@ import { users } from "./users";
  * 실제 저장으로 바꾸는 첫 단계이며, **이번 단계는 표와 권한 자리를 만드는
  * 데까지다** — 업로드·다운로드·저장소 어댑터는 다음 단계다.
  *
- * ── 첨부 대상은 접수 건과 제품 모델 둘이다 ───────────────────────────────
+ * ── 첨부 대상은 접수 건 · 제품 모델 · 개선 요청 셋이다 ────────────────────
  * 처음에는 A/S 접수 건 하나뿐이었다. 여기에 **제품 모델**(product_models)이
  * 더해졌다 — 모델의 외형 사진과 회로도를 붙이기 위해서다. 대상이 둘이 된
  * 지금도 다형 참조(owner_type + owner_id)를 쓰지 않는다: 그 구조는 외래키를
@@ -38,6 +39,14 @@ import { users } from "./users";
  * 애플리케이션 코드가 손으로 해야 한다. 대신 **주인 후보마다 NULL 허용 FK
  * 컬럼을 하나씩 두고, 둘이 동시에 차는 것만 CHECK 로 막는다**(아래
  * attachments_owner_not_both 참조).
+ *
+ * 셋째 주인은 **개선 요청**(improvement_requests)이다(2026-09-13) — 설정 ›
+ * 개선 요청 글에 화면을 찍은 스크린샷을 붙이기 위해서다. 모델을 더할 때와 같은
+ * 방식으로 NULL 허용 FK 컬럼을 하나 더 두었고, 새 표를 만들지 않은 까닭도 같다
+ * (아래 '같은 표를 쓰는 것도' 문단). 셋째 주인을 막는 CHECK 는 기존
+ * attachments_owner_not_both 를 고쳐 쓰지 않고 **따로 하나를 더했다**
+ * (attachments_improvement_owner_alone) — 이미 걸려 있는 제약을 지우고 다시
+ * 거는 마이그레이션을 만들지 않으려는 것이다.
  *
  * 같은 표를 쓰는 것도 의도된 선택이다. 백업 스크립트(scripts/backup-attachments.ts)가
  * 이 표를 조건절 없이 통째로 읽고 저장 루트 전체를 훑기 때문에, 같은 표에
@@ -97,6 +106,11 @@ export const attachmentCategoryEnum = pgEnum("attachment_category", [
   "LOG_FILE",
   "FIRMWARE",
   "CIRCUIT_DIAGRAM",
+  // 개선 요청 글에 붙는 화면 사진(2026-09-13). 기타 **앞**에 둔다 — 기타는
+  // 언제나 목록의 맨 끝이다(attachment-category.test.ts). 중간에 끼운 값은
+  // drizzle-kit 이 `ADD VALUE ... BEFORE 'OTHER'` 로 만든다 — 0047(IN_REPAIR 등)·
+  // 0083(QUOTE)과 같은 방식이고, 지우고 다시 만드는 일이 없다.
+  "SCREENSHOT",
   "OTHER",
 ]);
 
@@ -137,7 +151,22 @@ export const attachments = pgTable(
     productModelId: uuid("product_model_id").references(() => productModels.id, {
       onDelete: "set null",
     }),
-    category: attachmentCategoryEnum("category").notNull(),
+    // 개선 요청 글에 붙는 파일 — 설정 › 개선 요청에 올리는 스크린샷이 여기
+    // 걸린다(2026-09-13). 한 글에 몇 장까지인지 · 누가 붙이고 지우는지는 앱이
+    // 정한다 — 이 칸은 "어느 글의 것인가"만 적는다.
+    //
+    // 앞의 두 주인 칸과 같은 이유로 NULL 허용 + ON DELETE SET NULL 이다. 개선
+    // 요청은 휴지통 없이 **바로 지워지는 표**라(improvement-requests.ts 헤더의
+    // '휴지통은 두지 않는다'), cascade 로 두면 글 하나를 지우는 순간 이 행이
+    // 함께 사라지고 디스크의 실물만 주인 없이 남는다 — 무엇이었는지 적힌 곳이
+    // 없는 파일이 된다. restrict 로 두면 스크린샷이 붙은 글은 지울 수 없다.
+    // 그래서 연결만 끊고 첨부 행과 디스크 실물은 남긴다. 글을 지울 때 그 글의
+    // 스크린샷을 첨부 휴지통으로 보내는 일은 앱(개선 요청 삭제 통로)이 맡는다.
+    improvementRequestId: uuid("improvement_request_id").references(
+      () => improvementRequests.id,
+      { onDelete: "set null" }
+    ),
+    category:attachmentCategoryEnum("category").notNull(),
     // 사용자가 올린 그대로의 이름. 표시와 다운로드 파일명으로만 쓰고, 디스크
     // 경로를 만드는 데는 절대 쓰지 않는다(파일 헤더 참조).
     originalFileName: text("original_file_name").notNull(),
@@ -191,6 +220,11 @@ export const attachments = pgTable(
     index("attachments_product_model_id_not_deleted_idx")
       .on(table.productModelId)
       .where(sql`is_deleted = false`),
+    // 개선 요청 글의 스크린샷 목록이 쏘는 질의 — "이 글의 안 지워진 첨부".
+    // 위 두 인덱스와 똑같은 모양의 부분 인덱스다.
+    index("attachments_improvement_request_id_not_deleted_idx")
+      .on(table.improvementRequestId)
+      .where(sql`is_deleted = false`),
     // ── 주인은 둘일 수 없다 (하지만 없을 수는 있다) ─────────────────────
     // 파일 하나가 접수 건과 모델 양쪽에 동시에 걸리면 그 파일이 어느 폴더에
     // 사는지(stored_path 의 첫 마디가 repair-cases 인지 product-models 인지)가
@@ -206,6 +240,22 @@ export const attachments = pgTable(
     check(
       "attachments_owner_not_both",
       sql`NOT (${table.repairCaseId} IS NOT NULL AND ${table.productModelId} IS NOT NULL)`
+    ),
+    // ── 개선 요청 주인은 혼자다 (2026-09-13) ─────────────────────────────
+    // 셋째 주인(improvement_request_id)이 차 있으면 앞의 두 주인은 비어 있어야
+    // 한다. 위 CHECK 와 같은 이유다 — 파일 하나가 두 주인에 걸리면 사는 폴더
+    // (improvement-requests 인지 아닌지)가 정해지지 않는다.
+    //
+    // 위 attachments_owner_not_both 를 셋으로 고쳐 쓰지 않고 **따로 더한** 것은
+    // 일부러다. 고쳐 쓰면 마이그레이션이 이미 걸린 제약을 DROP 하고 다시 걸게
+    // 되는데, 더하기만 하면 기존 제약은 한 글자도 흔들리지 않는다. 두 CHECK 를
+    // 함께 읽으면 "셋 중 둘 이상이 차는 일은 없다"가 된다.
+    //
+    // ⚠️ 여기도 **XOR("정확히 하나")가 아니다.** 세 칸이 모두 ON DELETE SET NULL
+    // 이라 주인이 아무도 없는 행이 정상적으로 생긴다(위 CHECK 주석과 같은 까닭).
+    check(
+      "attachments_improvement_owner_alone",
+      sql`${table.improvementRequestId} IS NULL OR (${table.repairCaseId} IS NULL AND ${table.productModelId} IS NULL)`
     ),
     // 중복 업로드 판단과 디스크 실물 대조용. 부분 인덱스가 아닌 것은 일부러다 —
     // 휴지통에 있는 파일까지 찾아야 "이미 올린 파일인데 지워져 있다"를 말할 수

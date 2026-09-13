@@ -51,8 +51,13 @@ test("확장자 규칙이 데모 파일과 순서·값까지 정확히 같다", 
   assert.deepEqual([...ATTACHMENT_EXTENSION_RULES], [...DEMO_EXTENSION_RULES]);
 });
 
-test("분류별 확장자 제한이 데모 파일과 같다", () => {
-  assert.deepEqual(CATEGORY_EXTENSION_ALLOWLIST, DEMO_CATEGORY_ALLOWLIST);
+test("분류별 확장자 제한이 데모 파일과 같다 — SCREENSHOT 하나만 빼고", () => {
+  // SCREENSHOT(개선 요청 스크린샷)은 데모에 분류 자체가 없다(attachment-category.ts
+  // 헤더의 '데모 파일과의 관계'). 빼는 것은 그 한 줄뿐이다.
+  const withoutScreenshot = Object.fromEntries(
+    Object.entries(CATEGORY_EXTENSION_ALLOWLIST).filter(([category]) => category !== "SCREENSHOT")
+  );
+  assert.deepEqual(withoutScreenshot, DEMO_CATEGORY_ALLOWLIST);
 });
 
 test("크기 상한은 데모와 일부러 다르다 — 실제 저장은 20MB다", () => {
@@ -132,6 +137,29 @@ test("회로도를 넓힌 것이 '아무거나 받는다'가 되지는 않았다
   // 허용목록 밖은 당연히 막힌다.
   assert.equal(isExtensionAllowedForCategory("exe", "CIRCUIT_DIAGRAM"), false);
   assert.equal(isExtensionAllowedForCategory("svg", "CIRCUIT_DIAGRAM"), false);
+});
+
+test("스크린샷은 이미지(png/jpg/jpeg)만 받는다 — 개선 요청 글의 화면 사진", () => {
+  assert.deepEqual([...(CATEGORY_EXTENSION_ALLOWLIST.SCREENSHOT ?? [])], ["png", "jpg", "jpeg"]);
+  for (const extension of ["png", "jpg", "jpeg"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "SCREENSHOT"), true, `.${extension}이 막혔다`);
+    // 셋 다 화면에서 바로 볼 수 있는 형식이다.
+    assert.equal(isPreviewCapableExtension(extension), true, `.${extension}이 미리보기 불가다`);
+  }
+  // 허용목록 안에 있지만 이미지가 아닌 것들 — 하나라도 통과하면 "이미지만"이 깨진다.
+  for (const extension of ["pdf", "zip", "xlsx", "xls", "doc", "docx", "csv", "txt", "log", "bin", "hex"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "SCREENSHOT"), false, `.${extension}이 통과했다`);
+  }
+  // 허용목록 밖의 이미지 형식도 막힌다.
+  for (const extension of ["webp", "gif", "bmp", "svg", "heic", "exe"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "SCREENSHOT"), false, `.${extension}이 통과했다`);
+  }
+});
+
+test("webp는 전체 허용목록에 없다 — 스크린샷에 넣지 않은 까닭", () => {
+  // 스크린샷에 webp를 더하려면 전체 허용목록부터 넓혀야 하고, 그러면 제한 없는
+  // 분류 전부에 함께 열린다. 그 결정 없이 조용히 열리지 않았음을 못 박는다.
+  assert.equal(isAllowedExtension("webp"), false);
 });
 
 // ────────────────────────────────────────────────── 확장자 정규화

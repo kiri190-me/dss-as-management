@@ -680,6 +680,13 @@
       "when": 1789304857656,
       "tag": "0096_dry_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1789306591468,
+      "tag": "0097_short_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

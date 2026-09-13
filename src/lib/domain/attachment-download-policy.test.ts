@@ -131,6 +131,90 @@ test("isDetachedAttachment 는 두 주인이 모두 NULL 인 경우만 참이다
   assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: "" }), false);
 });
 
+// ─────────────────────────────────────────── 개선 요청이 주인인 첨부 (셋째 주인)
+
+const IMPROVEMENT_REQUEST_ID = "c4a81f07-0000-4000-8000-000000000003";
+
+test("isDetachedAttachment — 개선 요청만 주인이면 주인이 있다", () => {
+  // 🔴 개선 요청 스크린샷은 앞의 두 칸이 원래 NULL 이다. 여기서 참이 되면 정상적인
+  // 스크린샷이 전부 DETACHED 로 막힌다(모델 회로도 때와 같은 함정).
+  assert.equal(
+    isDetachedAttachment({
+      repairCaseId: null,
+      productModelId: null,
+      improvementRequestId: IMPROVEMENT_REQUEST_ID,
+    }),
+    false
+  );
+});
+
+test("isDetachedAttachment — 세 주인이 모두 NULL 이면 주인이 없다", () => {
+  assert.equal(
+    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: null }),
+    true
+  );
+});
+
+test("isDetachedAttachment — 개선 요청 칸을 생략하면 예전 두 칸 판정과 똑같다", () => {
+  // 선택 칸이라 지금의 부르는 쪽(내려받기 라우트)은 이 칸을 넘기지 않는다. 생략은
+  // NULL 과 같이 "없음"이다 — 그래서 예전 판정이 한 줄도 달라지지 않고, 개선 요청
+  // 주인의 파일은 닫히는 쪽(DETACHED)으로 떨어진다.
+  const cases: Array<{ repairCaseId: string | null; productModelId: string | null }> = [
+    { repairCaseId: null, productModelId: null },
+    { repairCaseId: CASE_ID, productModelId: null },
+    { repairCaseId: null, productModelId: MODEL_ID },
+  ];
+  for (const owner of cases) {
+    assert.equal(
+      isDetachedAttachment(owner),
+      isDetachedAttachment({ ...owner, improvementRequestId: null }),
+      JSON.stringify(owner)
+    );
+  }
+  assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: null }), true);
+  // 기존 두 칸과 같은 성질 — 빈 문자열은 NULL 이 아니다.
+  assert.equal(
+    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: "" }),
+    false
+  );
+});
+
+test("개선 요청이 주인이면 통과한다 — 휴지통·검사 규칙은 그대로 적용된다", () => {
+  const subject: AttachmentDownloadSubject = {
+    repairCaseId: null,
+    productModelId: null,
+    improvementRequestId: IMPROVEMENT_REQUEST_ID,
+    isDeleted: false,
+    malwareScanStatus: "CLEAN",
+  };
+  assert.equal(decideAttachmentDownload(subject).allowed, true);
+
+  const deleted = decideAttachmentDownload({ ...subject, isDeleted: true });
+  assert.equal(deleted.allowed === false && deleted.reason, "DELETED");
+
+  for (const status of MALWARE_SCAN_STATUS_CODES) {
+    const caseDecision = decideAttachmentDownload(healthySubject({ malwareScanStatus: status }));
+    const improvementDecision = decideAttachmentDownload({ ...subject, malwareScanStatus: status });
+    assert.equal(
+      improvementDecision.allowed,
+      caseDecision.allowed,
+      `${status} 의 답이 주인에 따라 갈렸다`
+    );
+  }
+});
+
+test("개선 요청 칸을 넘기지 않으면 개선 요청 주인의 파일은 DETACHED 로 막힌다 — 닫히는 쪽", () => {
+  // S2 가 이 칸을 필수로 바꾸기 전까지의 모양이다. 앞의 두 칸이 NULL 인 행을
+  // 이 칸 없이 판정하면 주인 없음이다 — 열리는 쪽으로 새지 않는다.
+  const decision = decideAttachmentDownload({
+    repairCaseId: null,
+    productModelId: null,
+    isDeleted: false,
+    malwareScanStatus: "CLEAN",
+  });
+  assert.equal(decision.allowed === false && decision.reason, "DETACHED");
+});
+
 // ─────────────────────────────────────────── 제품 모델이 주인인 첨부
 
 test("모델이 주인이면 통과한다 — 접수 건이 없다는 이유로 막히지 않는다", () => {
@@ -221,6 +305,8 @@ test("DETACHED 문장이 주인의 종류를 단정하지 않는다 — 접수 �
     assert.equal(decision.reason, "DETACHED");
     assert.ok(!decision.message.includes("접수 건"), "주인이 접수 건이라고 단정하고 있다");
     assert.ok(!decision.message.includes("모델"), "주인이 모델이라고 단정하고 있다");
+    // 셋째 주인(개선 요청)이 생긴 뒤에도 같은 원칙이다.
+    assert.ok(!decision.message.includes("개선 요청"), "주인이 개선 요청이라고 단정하고 있다");
     // 무엇을 해야 하는지는 그대로 알려 준다 — 사실만 고치고 안내는 남긴다.
     assert.ok(decision.message.includes("관리자에게 문의"), "안내가 사라졌다");
   }

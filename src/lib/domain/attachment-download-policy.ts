@@ -29,16 +29,18 @@ import type { MalwareScanStatus } from "./attachment-category";
  *     값만 뒤집으면 이미 올라와 있는 파일이 전부 잠긴다.
  *
  * ── 판정 순서 ────────────────────────────────────────────────────────────
- *  1. 주인이 아무도 없는 첨부(repair_case_id · product_model_id 둘 다 NULL) → 거부
+ *  1. 주인이 아무도 없는 첨부(repair_case_id · product_model_id ·
+ *     improvement_request_id 셋 다 NULL) → 거부
  *  2. 휴지통에 있는 첨부(is_deleted) → 거부
  *  3. 검사 상태 → 표대로
  *
  * 1번이 맨 앞인 이유는 그것만이 **권한을 물을 대상 자체가 없는** 경우이기
  * 때문이다. 자세한 근거는 isDetachedAttachment 주석에 적었다.
  *
- * ── 주인이 둘로 늘어도 판정 지점은 하나다 ────────────────────────────────
- * 첨부의 주인은 접수 건 아니면 제품 모델이다(schema/attachments.ts의
- * attachments_owner_not_both). 주인마다 판정 함수를 따로 두지 않는다 — 그러면
+ * ── 주인이 셋으로 늘어도 판정 지점은 하나다 ──────────────────────────────
+ * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 중 하나다(schema/attachments.ts의
+ * attachments_owner_not_both · attachments_improvement_owner_alone).
+ * 주인마다 판정 함수를 따로 두지 않는다 — 그러면
  * 검사기를 붙이는 날, 휴지통 규칙을 바꾸는 날 고칠 자리가 둘이 되고 한쪽을
  * 빠뜨리면 그 종류의 파일만 조용히 다르게 동작한다. 주인에 따라 갈리는 것은
  * **물을 권한**뿐이고 그것은 라우트가 정한다. 여기서는 "주인이 있는가"만 본다.
@@ -64,9 +66,9 @@ const SCAN_STATUS_ALLOWS_DOWNLOAD: Record<MalwareScanStatus, boolean> = {
 
 export type AttachmentDownloadDenialReason =
   /**
-   * 주인이 아무도 없다 — repair_case_id 와 product_model_id 가 둘 다 NULL.
-   * 접수 건이나 모델이 영구 삭제되어 연결만 끊긴 첨부가 이 상태가 된다
-   * (두 FK 모두 ON DELETE SET NULL).
+   * 주인이 아무도 없다 — repair_case_id · product_model_id · improvement_request_id
+   * 가 셋 다 NULL. 접수 건·모델·개선 요청이 영구 삭제되어 연결만 끊긴 첨부가 이
+   * 상태가 된다(세 FK 모두 ON DELETE SET NULL).
    */
   | "DETACHED"
   /** 휴지통에 있다. 복원하면 다시 받을 수 있다. */
@@ -84,14 +86,24 @@ export type AttachmentDownloadDecision =
     };
 
 /**
- * 판정에 쓰이는 첨부의 주인. 두 값이 동시에 채워진 첨부는 DB가 막고 있으므로
- * (attachments_owner_not_both) 여기서는 그 경우를 따로 다루지 않는다.
+ * 판정에 쓰이는 첨부의 주인. 둘 이상이 동시에 채워진 첨부는 DB가 막고 있으므로
+ * (attachments_owner_not_both · attachments_improvement_owner_alone) 여기서는 그
+ * 경우를 따로 다루지 않는다.
  */
 export type AttachmentOwnerRef = {
   /** 접수 건 주인. NULL 이면 접수 건이 주인이 아니다. */
   repairCaseId: string | null;
   /** 제품 모델 주인. NULL 이면 모델이 주인이 아니다. */
   productModelId: string | null;
+  /**
+   * 개선 요청 주인. NULL(또는 생략)이면 개선 요청이 주인이 아니다. 앞의 두 주인과
+   * 동시에 채워지지 않는다(attachments_improvement_owner_alone CHECK).
+   *
+   * ⚠️ 지금은 **선택 칸**이다. S2 에서 필수로 바꾼다 — 그때 컴파일러가 이 칸을
+   * 빠뜨린 경로를 전부 찾는다. 그 전까지 개선 요청 주인의 파일은 이 칸이 넘어오지
+   * 않아 주인 없음(DETACHED)으로 막히는 쪽이다 — 닫히는 쪽으로 실패한다.
+   */
+  improvementRequestId?: string | null;
 };
 
 export type AttachmentDownloadSubject = AttachmentOwnerRef & {
@@ -100,7 +112,7 @@ export type AttachmentDownloadSubject = AttachmentOwnerRef & {
 };
 
 /**
- * 주인이 아무도 없는 첨부인가 — 접수 건도 모델도 가리키지 않는가.
+ * 주인이 아무도 없는 첨부인가 — 접수 건도 모델도 개선 요청도 가리키지 않는가.
  *
  * 판정 함수와 따로 뽑아 둔 이유는 **부르는 순서** 때문이다. 라우트는 주인을
  * 보고 물을 권한을 고른다(접수 건이면 repairCases.files, 모델이면
@@ -111,18 +123,27 @@ export type AttachmentDownloadSubject = AttachmentOwnerRef & {
  *
  * ⚠️ **"접수 건이 없다"가 아니라 "주인이 아무도 없다"이다.** 모델 첨부는
  * repair_case_id 가 원래 NULL 이므로, 접수 건만 보면 정상적인 모델 회로도가
- * 전부 DETACHED 로 막힌다.
+ * 전부 DETACHED 로 막힌다. 개선 요청 첨부도 앞의 두 칸이 원래 NULL 이다.
+ *
+ * improvementRequestId 는 선택 칸이라 **생략(undefined)도 NULL 과 같이 "없음"**
+ * 으로 본다. 그래서 이 칸을 넘기지 않는 지금의 부르는 쪽은 예전과 똑같이
+ * 판정받고, 개선 요청 주인의 파일은 주인 없음으로 막힌다(AttachmentOwnerRef 의
+ * ⚠️ 주석). `== null` 을 쓰지 않고 두 경우를 적어 둔 것은, 빈 문자열을 없음으로
+ * 보지 않는다는 기존 두 칸의 성질("NULL 인가"만 본다)을 이 칸도 그대로 따르게
+ * 하려는 것이다.
  */
 export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
-  return owner.repairCaseId === null && owner.productModelId === null;
+  const improvementRequestAbsent =
+    owner.improvementRequestId === null || owner.improvementRequestId === undefined;
+  return owner.repairCaseId === null && owner.productModelId === null && improvementRequestAbsent;
 }
 
 /**
- * 🔴 **주인이 접수 건인지 모델인지 말하지 않는다.** 이 문장이 나가는 때는 두
- * FK 가 모두 NULL 인 때이고, 그때는 이 파일이 접수 건에 붙어 있었는지 모델에
- * 붙어 있었는지를 **알 방법이 남아 있지 않다**(둘 다 ON DELETE SET NULL 이라
- * 지워진 쪽의 흔적이 없다). "접수 건이 없어져"라고 적으면 모델 회로도를 열려던
- * 사람에게 사실이 아닌 안내가 나간다.
+ * 🔴 **주인이 접수 건인지 모델인지 개선 요청인지 말하지 않는다.** 이 문장이
+ * 나가는 때는 세 FK 가 모두 NULL 인 때이고, 그때는 이 파일이 어디에 붙어
+ * 있었는지를 **알 방법이 남아 있지 않다**(셋 다 ON DELETE SET NULL 이라 지워진
+ * 쪽의 흔적이 없다). "접수 건이 없어져"라고 적으면 모델 회로도나 개선 요청
+ * 스크린샷을 열려던 사람에게 사실이 아닌 안내가 나간다.
  */
 const DETACHED_MESSAGE =
   "이 파일이 붙어 있던 대상이 없어져 열람 권한을 확인할 수 없습니다. 관리자에게 문의해 주세요.";

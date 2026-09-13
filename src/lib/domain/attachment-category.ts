@@ -9,8 +9,17 @@
  * 데모가 걷히면서 사라질 수 있다.
  *
  * 그래서 실제 저장(attachments 테이블)이 기준으로 삼을 목록을 여기로 옮긴다.
- * 값은 **데모 파일과 정확히 같다.** 새로 만들거나 뺀 분류가 하나도 없다 —
- * 이번 단계는 저장 바닥을 놓는 일이지 분류 정책을 바꾸는 일이 아니다.
+ * 옮길 때 값은 **데모 파일과 정확히 같았다.** 새로 만들거나 뺀 분류가 하나도
+ * 없었다 — 그 단계는 저장 바닥을 놓는 일이지 분류 정책을 바꾸는 일이 아니었다.
+ *
+ * ── 데모 파일과의 관계 — SCREENSHOT 하나만 다르다 ─────────────────────────
+ * 2026-09-13 개선 요청 글에 스크린샷을 붙이면서 SCREENSHOT(「스크린샷」)이
+ * 더해졌다. 이 분류는 **여기와 DB enum에만 있고 데모 파일에는 없다.** 데모는
+ * 접수 건 파일 탭의 localStorage 화면이라 개선 요청과 관계가 없고, 데모
+ * 계층(src/lib/domain/local/attachments/*)은 손대지 않는 것이 지금까지의
+ * 규칙이다. 그래서 attachment-category.test.ts 는 「데모 목록 = 이 목록에서
+ * SCREENSHOT 을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면 여전히
+ * 걸린다.
  *
  * ── 순수 파일이다 ─────────────────────────────────────────────────────────
  * server-only / drizzle / React 를 import 하지 않는다. DB 스키마
@@ -41,6 +50,11 @@ export const ATTACHMENT_CATEGORY_CODES = [
   "LOG_FILE",
   "FIRMWARE",
   "CIRCUIT_DIAGRAM",
+  // 개선 요청 글에 붙는 화면 사진이다(2026-09-13). 새 분류는 기타 **앞**에
+  // 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
+  // 데모 파일(local/attachments/attachment-types.ts)에는 없다 — 파일 헤더의
+  // '데모 파일과의 관계' 참조.
+  "SCREENSHOT",
   "OTHER",
 ] as const;
 
@@ -64,6 +78,7 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   LOG_FILE: "로그 파일",
   FIRMWARE: "펌웨어",
   CIRCUIT_DIAGRAM: "회로도",
+  SCREENSHOT: "스크린샷",
   OTHER: "기타",
 };
 

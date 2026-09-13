@@ -40,13 +40,30 @@ import { attachmentCategoryEnum, malwareScanStatusEnum } from "@/lib/db/schema/a
 
 // ─────────────────────────────────────────── 데모 화면 목록과 어긋나지 않는가
 
-test("분류 코드가 데모 파일 목록과 순서까지 정확히 같다", () => {
-  assert.deepEqual([...ATTACHMENT_CATEGORY_CODES], [...DEMO_CATEGORY_CODES]);
+// SCREENSHOT(개선 요청 스크린샷, 2026-09-13)은 정본과 DB enum 에만 있고 데모에는
+// 없다 — 데모 계층은 손대지 않는다(attachment-category.ts 헤더의 '데모 파일과의
+// 관계'). 그래서 아래 두 대조는 「정본에서 SCREENSHOT 을 뺀 것 = 데모」를 본다.
+// 빼는 것은 그 한 값뿐이라, 다른 한 줄이라도 어긋나면 여전히 걸린다.
+const DEMO_ABSENT_CATEGORY = "SCREENSHOT";
+
+test("분류 코드가 데모 파일 목록과 순서까지 정확히 같다 — SCREENSHOT 하나만 빼고", () => {
+  assert.deepEqual(
+    ATTACHMENT_CATEGORY_CODES.filter((code) => code !== DEMO_ABSENT_CATEGORY),
+    [...DEMO_CATEGORY_CODES]
+  );
+  assert.equal(
+    (DEMO_CATEGORY_CODES as readonly string[]).includes(DEMO_ABSENT_CATEGORY),
+    false,
+    "데모에 SCREENSHOT 이 생겼다면 이 예외를 거둘 때다"
+  );
 });
 
-test("분류 라벨이 데모 파일과 글자까지 같다", () => {
+test("분류 라벨이 데모 파일과 글자까지 같다 — SCREENSHOT 하나만 빼고", () => {
   // 코드만 맞추고 라벨이 갈리면 같은 파일이 화면마다 다른 이름으로 보인다.
-  assert.deepEqual(attachmentCategoryLabels, demoCategoryLabels);
+  const labelsWithoutScreenshot = Object.fromEntries(
+    Object.entries(attachmentCategoryLabels).filter(([code]) => code !== DEMO_ABSENT_CATEGORY)
+  );
+  assert.deepEqual(labelsWithoutScreenshot, demoCategoryLabels);
 });
 
 test("교산 문서 분류는 남아 있다", () => {
@@ -74,15 +91,26 @@ test("검사 상태 기본값은 DB enum에 실재하는 값이다", () => {
 
 // ───────────────────────────────────────────────────── 목록 자체의 무결성
 
-test("분류 코드는 15종이고 중복이 없다", () => {
+test("분류 코드는 16종이고 중복이 없다", () => {
   // 개수를 적어 두는 이유는 **DB enum과 함께 움직이기 때문**이다. 코드에만
   // 더하고 마이그레이션을 잊으면 화면에서는 고를 수 있는데 저장할 때 서버가
   // 거절한다 — 그 어긋남이 이 줄에서 먼저 걸린다.
   //
   // 11 → 14: 수리 중·수리 후·출하 사진을 더했다(마이그레이션 0047).
   // 14 → 15: 견적서를 더했다(마이그레이션 0083).
-  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 15);
-  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 15);
+  // 15 → 16: 스크린샷을 더했다(마이그레이션 0097 — 개선 요청 글의 화면 사진).
+  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 16);
+  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 16);
+});
+
+test("스크린샷은 회로도 뒤·기타 앞에 있고 이름표는 「스크린샷」이다", () => {
+  // 새 분류를 끝에 붙이지 않는다(아래 '기타는 언제나 목록의 맨 끝이다'). DB enum
+  // 과 같은 차례인지는 위 enum 대조가 따로 본다.
+  assert.equal(attachmentCategoryLabels.SCREENSHOT, "스크린샷");
+  const index = ATTACHMENT_CATEGORY_CODES.indexOf("SCREENSHOT");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index - 1], "CIRCUIT_DIAGRAM");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "OTHER");
+  assert.ok(attachmentCategoryEnum.enumValues.includes("SCREENSHOT"));
 });
 
 test("업무 순서대로 늘어놓는다 — 화면의 고르는 차례가 이 순서다", () => {

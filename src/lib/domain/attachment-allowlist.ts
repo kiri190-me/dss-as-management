@@ -96,9 +96,10 @@ export const PREVIEW_CAPABLE_EXTENSIONS: ReadonlySet<string> = new Set(
 );
 
 /**
- * 4개 분류는 승인된 확장자만 허용한다. 나머지 분류는 여기 목록에 없으므로 전체
+ * 5개 분류는 승인된 확장자만 허용한다. 나머지 분류는 여기 목록에 없으므로 전체
  * 허용목록 중 아무 확장자나 쓸 수 있다. 데모 파일의 CATEGORY_EXTENSION_ALLOWLIST와
- * 같아야 하고, 어긋남은 테스트가 잡는다.
+ * 같아야 하고, 어긋남은 테스트가 잡는다 — 단 SCREENSHOT 한 줄은 데모에 없다
+ * (데모에 그 분류 자체가 없다. attachment-category.ts 헤더의 '데모 파일과의 관계').
  */
 export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, readonly string[]>> = {
   OSCILLOSCOPE_DATA: ["csv", "txt"],
@@ -114,6 +115,14 @@ export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, re
   // previewCapable이며, 앞머리 바이트 대조(isContentCompatibleWithExtension)가
   // 그대로 걸린다 — 이름만 .jpg로 바꾼 파일은 여전히 들어오지 못한다.
   CIRCUIT_DIAGRAM: ["pdf", "jpg", "jpeg", "png"],
+  // 개선 요청 글에 붙는 화면 사진 — 이미지만 받는다(2026-09-13 승인). 셋 다
+  // 이미 전체 허용목록에 있고 previewCapable이며 앞머리 바이트 대조가 걸린다.
+  //
+  // webp는 넣지 않았다. 전체 허용목록(ATTACHMENT_EXTENSION_RULES)에 webp가 없고,
+  // 여기에 적어도 isExtensionAllowedForCategory 앞의 전체 허용목록 검사에서
+  // 걸린다. 전체 목록을 넓히면 제한 없는 분류 전부에 webp가 함께 열리므로 그것은
+  // 따로 정할 일이다.
+  SCREENSHOT: ["png", "jpg", "jpeg"],
 };
 
 /**
