@@ -18,6 +18,13 @@ import type { Role } from "@/lib/domain/types";
  *    Narrower than view, mirroring canPermanentlyDeleteRepairCaseFlowchart's
  *    "admin-only subset of the viewing roles" shape.
  *
+ * 고객사 추가(2026-09-13 사용자 결정):
+ *  - 새 고객사 등록: SUPER_ADMIN/ADMIN/AS_ENGINEER/SALES. 볼 수 있는 역할 전부다.
+ *    수정(관리자만)보다 넓다 — End-User 등록(영업까지)과 이름 변경(관리자만)이
+ *    갈리는 것과 같은 모양이다. 새로 만드는 것은 접수 화면의 자유 입력이 이미
+ *    이 네 역할에게 허용하는 일이고, 남이 정한 이름을 고치는 것은 그보다 한
+ *    단계 위다.
+ *
  * End-User + multi-contact management (approved authorization design):
  *  - Create End-User: SUPER_ADMIN/ADMIN/AS_ENGINEER/SALES — matches the
  *    trust boundary intake's own free-entry combobox already grants these
@@ -46,6 +53,16 @@ export function canViewCustomers(role: Role): boolean {
 
 export function canEditCustomers(role: Role): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
+/**
+ * 고객사 관리 화면에서 새 고객사를 등록하는 권한.
+ *
+ * canEditCustomers와 따로 둔다 — 역할 집합부터 다르다(이쪽이 넓다). 재고
+ * 담당자는 빠진다: 고객사를 볼 수조차 없다(canViewCustomers).
+ */
+export function canCreateCustomer(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "AS_ENGINEER" || role === "SALES";
 }
 
 export function canCreateEndUser(role: Role): boolean {

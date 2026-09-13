@@ -9,6 +9,7 @@ import {
 
 import {
   canViewCustomers,
+  canCreateCustomer,
   canEditCustomers,
   canDeleteCustomers,
   canCreateEndUser,
@@ -399,6 +400,14 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
     // ── 고객사 관리 ───────────────────────────────────────────────────────
     case "customers.view":
       return canViewCustomers(role) ? "READ" : "NONE";
+    case "customers.create":
+      // 수정(아래 edit, 관리자만)보다 넓다 — 영업·엔지니어까지 등록한다. 두 함수를
+      // 한 칸에 접으면 영업에게 남의 고객사 이름 변경이 함께 열린다.
+      //
+      // read를 false로 둔다. 이 잎에서 '보기'는 뜻이 없다 — 보는 일은
+      // customers.view가 맡는다(productModels.files와 같은 모양).
+      // 🔴 이 case를 빠뜨리면 default로 떨어져 NONE — 아무에게도 열리지 않는다.
+      return ladder({ write: canCreateCustomer(role), read: false });
     case "customers.edit":
       return ladder({ write: canEditCustomers(role), read: canViewCustomers(role) });
     case "customers.endUsers":

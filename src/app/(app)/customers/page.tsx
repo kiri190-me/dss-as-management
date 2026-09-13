@@ -6,6 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { resolveCustomerCapabilities } from "@/lib/auth/customer-capabilities";
 import { listCustomersWithCounts, listDeletedCustomers } from "@/lib/db/queries/customers";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -56,10 +57,16 @@ export default async function CustomersPage() {
   // serverTrashCases를 다루는 방식과 같다. 화면에서 감추는 것은 편의일 뿐
   // 경계가 아니므로, 삭제 서버 액션은 이 판정과 무관하게 다시 검사한다.
   const canDelete = await hasPermission(actingUser, "customers.lifecycle", "MANAGE");
-  const [rows, trashRows] = await Promise.all([
+  // [고객사 추가] 단추를 그릴지. 수정(관리자 이상)보다 넓어서 영업·엔지니어에게도
+  // 보인다(customers.create). 이것도 안내일 뿐 — createCustomerAction 이 같은
+  // 노드를 다시 검사한다.
+  const [rows, trashRows, capabilities] = await Promise.all([
     listCustomersWithCounts(),
     canDelete ? listDeletedCustomers() : Promise.resolve([]),
+    resolveCustomerCapabilities(actingUser),
   ]);
 
-  return <CustomerListScreen rows={rows} trashRows={trashRows} canDelete={canDelete} />;
+  return (
+    <CustomerListScreen rows={rows} trashRows={trashRows} canDelete={canDelete} canCreate={capabilities.create} />
+  );
 }

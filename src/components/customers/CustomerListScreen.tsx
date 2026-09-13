@@ -26,6 +26,7 @@ import type { CustomerListRow, DeletedCustomerRow } from "@/lib/db/queries/custo
 import { rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { resolveCustomerRowColor } from "@/lib/domain/customer-row-color";
 import { CustomerRowColorSwatch } from "./CustomerRowColorField";
+import CustomerCreateForm from "./CustomerCreateForm";
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -61,18 +62,28 @@ function formatDate(iso: string): string {
  * canDelete가 false면 탭도, 삭제 모드 버튼도, 체크박스도 없다 — 이 화면은
  * 그 전과 완전히 같아진다. 물론 그것이 경계는 아니다: 서버 액션이 세션과
  * 권한을 독립적으로 다시 본다.
+ *
+ * ── 고객사 추가 (영업·엔지니어까지, 2026-09-13) ─────────────────────────
+ * canCreate(customers.create)일 때 제목 옆에 [고객사 추가]가 선다. 휴지통
+ * 탭과 삭제 모드에서는 감춘다 — 그 두 곳은 지우고 되살리는 자리라서, 거기서
+ * 새로 만드는 문이 열려 있으면 무엇을 하는 화면인지 흐려진다. 추가하면 바로 그
+ * 고객사의 상세 화면으로 간다(End-User·담당자는 거기서 붙인다).
  */
 export default function CustomerListScreen({
   rows,
   trashRows = [],
   canDelete = false,
+  canCreate = false,
 }: {
   rows: CustomerListRow[];
   /** 휴지통 행. canDelete인 세션에서만 서버가 채워 넘긴다. */
   trashRows?: DeletedCustomerRow[];
   canDelete?: boolean;
+  /** 새 고객사를 등록할 수 있는가(customers.create). 서버가 판단해 넘긴다. */
+  canCreate?: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"active" | "trash">("active");
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -170,16 +181,32 @@ export default function CustomerListScreen({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">고객사 관리</h1>
-        {canDelete && activeTab === "active" && !isDeleteMode && (
-          <button
-            type="button"
-            onClick={() => setIsDeleteMode(true)}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-          >
-            삭제 모드
-          </button>
+        {(canCreate || canDelete) && activeTab === "active" && !isDeleteMode && (
+          <div className="flex flex-wrap gap-2">
+            {canCreate && (
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(true)}
+                className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+              >
+                고객사 추가
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => setIsDeleteMode(true)}
+                className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+              >
+                삭제 모드
+              </button>
+            )}
+          </div>
         )}
       </div>
+
+      {/* 열 때마다 새로 그린다 — 닫았다 다시 열면 빈 칸에서 시작한다. */}
+      {canCreate && isCreateOpen && <CustomerCreateForm onClose={() => setIsCreateOpen(false)} />}
 
       {/* 탭 자체가 삭제 권한이 있는 세션에만 그려진다 — 볼 수 없는 휴지통의
           존재를 알릴 이유가 없다. */}

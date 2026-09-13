@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   canAddEndUserContact,
+  canCreateCustomer,
   canCreateEndUser,
   canEditCustomers,
   canEditEndUserContact,
@@ -23,6 +24,26 @@ test("canEditCustomers: SUPER_ADMIN/ADMIN only", () => {
   assert.equal(canEditCustomers("ADMIN"), true);
   for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     assert.equal(canEditCustomers(role), false, `expected ${role} not to edit customers`);
+  }
+});
+
+test("canCreateCustomer: SUPER_ADMIN/ADMIN/AS_ENGINEER/SALES can create; INVENTORY_MANAGER cannot", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES"] as const) {
+    assert.equal(canCreateCustomer(role), true, `expected ${role} to create customers`);
+  }
+  assert.equal(canCreateCustomer("INVENTORY_MANAGER"), false);
+});
+
+test("canCreateCustomer는 수정보다 넓다 — 영업·엔지니어는 추가만 되고 수정은 안 된다", () => {
+  // 추가를 열어 주려고 canEditCustomers를 넓히면 남의 고객사 이름까지 열린다.
+  // 둘이 같은 함수로 합쳐지는 순간 여기서 잡힌다.
+  for (const role of ["AS_ENGINEER", "SALES"] as const) {
+    assert.equal(canCreateCustomer(role), true, role);
+    assert.equal(canEditCustomers(role), false, role);
+  }
+  // 볼 수 없는 역할에게 추가만 열리는 일은 없다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    if (canCreateCustomer(role)) assert.equal(canViewCustomers(role), true, role);
   }
 });
 

@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "../client";
 import { customers } from "../schema";
+import { insertAuditLog } from "./audit-logs";
 import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
 
 function hasPgCode(err: unknown, code: string): boolean {
@@ -126,5 +127,115 @@ export async function updateCustomer(params: {
       }
       throw err;
     }
+  });
+}
+
+export type CreateCustomerResult =
+  | { ok: true; id: string }
+  | { ok: false; code: "VALIDATION_ERROR"; fieldErrors: Record<string, string>; message: string };
+
+const DUPLICATE_NAME_RESULT: CreateCustomerResult = {
+  ok: false,
+  code: "VALIDATION_ERROR",
+  fieldErrors: { name: "이미 존재하는 고객사명입니다." },
+  message: "입력값을 확인해 주세요.",
+};
+
+/**
+ * 고객사 관리 화면의 [고객사 추가] (2026-09-13).
+ *
+ * ── 접수 화면의 resolveOrCreateCustomerByName 과 다른 점 ────────────────
+ * 그쪽은 이름이 같으면 **조용히 기존 고객사를 돌려준다** — 접수하는 사람에게는
+ * "그 고객사로 접수된다"가 맞는 결과다. 관리 화면에서는 틀린 결과다: 새로
+ * 만들었다고 믿고 상세 화면에 들어가 연락처를 고치면 남의 고객사를 고치게 된다.
+ * 그래서 여기서는 같은 이름을 **거절한다**.
+ *
+ * ── 중복 방어는 updateCustomer 와 같은 두 겹이다 ─────────────────────────
+ * 활성 고객사를 훑는 isExactNormalizedMatch 사전 검사 + 그 사이의 경쟁을 잡는
+ * 유니크 위반(23505, cause 까지) 대비. 둘 다 같은 VALIDATION_ERROR 로 돌아간다.
+ * 휴지통에 있는 같은 이름은 막지 않는다 — customers_normalized_name_unique 가
+ * 활성 고객사만 보고, 이름 수정도 같은 규칙이다(복원할 때 NAME_TAKEN 으로 걸린다).
+ *
+ * ── 감사 로그에 연락처는 넣지 않는다 ────────────────────────────────────
+ * customers-trash.ts 와 같은 규칙이다 — contact_name/email/phone 은 개인정보다.
+ */
+export async function createCustomer(params: {
+  name: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  /** 팔레트 키이거나 null(domain/customer-row-color.ts). */
+  rowColor: string | null;
+  actorUserId: string;
+}): Promise<CreateCustomerResult> {
+  const name = params.name.trim();
+  if (name === "") {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { name: "고객사명을 입력해 주세요." },
+      message: "입력값을 확인해 주세요.",
+    };
+  }
+
+  return db.transaction(async (tx): Promise<CreateCustomerResult> => {
+    const active = await tx
+      .select({ id: customers.id, name: customers.name })
+      .from(customers)
+      .where(eq(customers.isDeleted, false));
+    if (active.some((existing) => isExactNormalizedMatch(existing.name, name))) {
+      return DUPLICATE_NAME_RESULT;
+    }
+
+    // 🔴 INSERT 는 **세이브포인트 안에서** 한다(tx.transaction). postgres-js 는
+    // 트랜잭션 안에서 난 쿼리 오류를 기억해 두었다가, 우리가 catch 로 잡아
+    // 정상 결과를 돌려줘도 콜백이 끝난 뒤 그 오류를 **다시 던진다**
+    // (node_modules/postgres/cjs/src/index.js 의 scope → uncaughtError). 그러면
+    // 경쟁에서 진 쪽이 "이미 존재하는 고객사명"이 아니라 날것의 23505 로 터진다
+    // — 동시 추가 시험이 실제로 그렇게 실패했다. 세이브포인트는 자기 몫의 오류를
+    // 따로 기억하고 되감으므로 바깥 트랜잭션은 멀쩡히 남고, 감사 로그도 그대로
+    // 같은 트랜잭션에 쓴다. intake-master-resolution.ts 가 같은 이유로 같은 모양이다.
+    let created: { id: string; name: string; rowColor: string | null; createdAt: Date };
+    try {
+      created = await tx.transaction(async (savepoint) => {
+        const [row] = await savepoint
+          .insert(customers)
+          .values({
+            name,
+            contactName: params.contactName,
+            contactEmail: params.contactEmail,
+            contactPhone: params.contactPhone,
+            rowColor: params.rowColor,
+          })
+          .returning({
+            id: customers.id,
+            name: customers.name,
+            rowColor: customers.rowColor,
+            createdAt: customers.createdAt,
+          });
+        return row;
+      });
+    } catch (err) {
+      // 위 사전 검사와 이 INSERT 사이에 같은 이름이 먼저 들어온 경쟁. 부분 유니크
+      // 인덱스가 최종 방어선이고, 여기서 사람이 읽을 수 있는 말로 바꾼다.
+      if (isUniqueViolation(err)) return DUPLICATE_NAME_RESULT;
+      throw err;
+    }
+
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "CREATE",
+      targetEntity: "customers",
+      targetRecordId: created.id,
+      previousValue: null,
+      newValue: {
+        id: created.id,
+        name: created.name,
+        rowColor: created.rowColor,
+        createdAt: created.createdAt.toISOString(),
+      },
+    });
+
+    return { ok: true, id: created.id };
   });
 }

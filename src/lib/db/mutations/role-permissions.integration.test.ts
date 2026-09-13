@@ -272,6 +272,24 @@ test("좁히면 그 노드의 위쪽 수준만 닫힌다 — 담당자 삭제만
   assert.equal(await hasPermission(roleOnlyActor("AS_ENGINEER"), "customers.view", "READ"), true);
 });
 
+test("영업의 고객사 추가는 기본으로 열려 있고, 관리자가 설정으로 회수할 수 있다", async () => {
+  // 2026-09-13 에 새로 연 권한이다. 기본값으로 열어 둔 것을 설정으로 닫을 수
+  // 없으면 넓힌 것을 되돌릴 길이 없다.
+  assert.equal(baselineLeafLevel("customers.create", "SALES"), "WRITE");
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.create", "WRITE"), true);
+
+  const narrowed = await saveRolePermissions({
+    changes: [{ role: "SALES", levels: { "customers.create": "NONE" } }],
+    actorUserId: adminId,
+  });
+  assert.equal(narrowed.ok, true);
+  assert.equal(await storedLevel("SALES", "customers.create"), "NONE");
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.create", "WRITE"), false);
+  // 추가만 닫혔다 — 조회와 End-User 등록은 그대로다.
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.view", "READ"), true);
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers.endUsers", "WRITE"), true);
+});
+
 test("모든 역할의 모든 잎에 대해 기본값 그대로 저장하면 행이 하나도 생기지 않는다", async () => {
   // "기본으로 되돌림"과 "기본과 같은 값을 굳이 적어 둠"이 구별되어야, 나중에
   // 코드의 정책이 넓어졌을 때 옛 값에 묶이지 않는다.

@@ -233,6 +233,17 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       description: "고객사와 End-User 목록을 봅니다.",
       maxMeaningfulLevel: "READ",
     },
+    create: {
+      // 수정(아래 edit)과 일부러 갈라 둔다 — edit은 관리자 전용이라 영업·엔지니어
+      // 에게 추가를 열어 주려고 그것을 넓히면 남의 고객사 이름까지 함께 열린다.
+      // End-User의 등록/이름 변경이 갈리는 것과 같은 판단이다. 조작이 하나뿐이라
+      // 쓰기 하나만 둔다(보는 것은 위 '고객사 조회'가 맡는다).
+      label: "고객사 추가",
+      minMeaningfulLevel: "WRITE",
+      description: "새 고객사를 등록합니다.",
+      levelHints: { WRITE: "고객사 관리 화면에서 새 고객사를 등록합니다" },
+      maxMeaningfulLevel: "WRITE",
+    },
     edit: {
       label: "고객사 정보 수정",
       minMeaningfulLevel: "WRITE",

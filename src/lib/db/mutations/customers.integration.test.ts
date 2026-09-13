@@ -3,11 +3,11 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
-import { customers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
+import { auditLogs, customers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
 import { createRepairCase } from "./repair-cases";
-import { updateCustomer } from "./customers";
+import { createCustomer, updateCustomer } from "./customers";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -32,6 +32,8 @@ const TEST_YEAR_MONTH = "9803";
 const TEST_RECEIVED_AT = "2098-03-01";
 
 let engineerId: string;
+/** createCustomer 가 만든 고객사 — 감사 로그 정리에 쓴다(고객사 행은 이름 접두사로 지운다). */
+const createdCustomerIds: string[] = [];
 
 before(async () => {
   const [engineer] = await db
@@ -44,6 +46,11 @@ before(async () => {
 });
 
 after(async () => {
+  if (createdCustomerIds.length > 0) {
+    await db
+      .delete(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "customers"), inArray(auditLogs.targetRecordId, createdCustomerIds)));
+  }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
@@ -425,5 +432,134 @@ describe("updateCustomer", () => {
 
     const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
     assert.equal(row.rowColor, "teal", "충돌한 두 번째 수정은 색도 적용하지 않는다");
+  });
+});
+
+/**
+ * 고객사 관리 화면의 [고객사 추가](2026-09-13). 권한 관문은 서버 액션에 있고
+ * (create-customer.ts — 단위 시험은 customer-authorization.test.ts ·
+ * permission-features.test.ts), 여기서는 mutation 의 데이터 규칙만 본다.
+ */
+describe("createCustomer", () => {
+  function uniqueName(label: string): string {
+    return `${TEST_CUSTOMER_NAME_PREFIX}${label}-${randomUUID().slice(0, 8)}`;
+  }
+
+  async function create(overrides: { name: string } & Partial<Parameters<typeof createCustomer>[0]>) {
+    const result = await createCustomer({
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      rowColor: null,
+      actorUserId: engineerId,
+      ...overrides,
+    });
+    if (result.ok) createdCustomerIds.push(result.id);
+    return result;
+  }
+
+  test("이름·연락처 셋·줄 색이 그대로 저장되고 활성 고객사로 생긴다", async () => {
+    const name = uniqueName("CREATE-OK");
+    const result = await create({
+      name,
+      contactName: "담당자",
+      contactEmail: "create@example.com",
+      contactPhone: "010-2222-3333",
+      rowColor: "amber",
+    });
+    assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, result.id));
+    assert.equal(row.name, name);
+    assert.equal(row.contactName, "담당자");
+    assert.equal(row.contactEmail, "create@example.com");
+    assert.equal(row.contactPhone, "010-2222-3333");
+    assert.equal(row.rowColor, "amber");
+    assert.equal(row.isDeleted, false);
+  });
+
+  test("이름의 앞뒤 공백은 걷어서 저장한다", async () => {
+    const name = uniqueName("CREATE-TRIM");
+    const result = await create({ name: `   ${name}  ` });
+    assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, result.id));
+    assert.equal(row.name, name);
+  });
+
+  test("활성 고객사와 정규화 기준으로 같은 이름은 거절한다 — 기존 고객사를 조용히 돌려주지 않는다", async () => {
+    const existing = await createTestCustomer("CREATE-DUP");
+    const result = await create({ name: `  ${existing.name.toUpperCase()}  ` });
+
+    assert.equal(result.ok, false, "대소문자·앞뒤 공백만 다른 이름이 새로 만들어졌다");
+    if (result.ok) return;
+    assert.equal(result.code, "VALIDATION_ERROR");
+    assert.equal(result.fieldErrors.name, "이미 존재하는 고객사명입니다.");
+
+    const sameUpper = await db.select().from(customers).where(eq(customers.name, existing.name.toUpperCase()));
+    assert.equal(sameUpper.length, 0, "거절된 추가가 행을 남기면 안 된다");
+  });
+
+  test("휴지통에 있는 같은 이름은 막지 않는다 — 유니크 인덱스가 활성 고객사만 본다", async () => {
+    const trashed = await createTestCustomer("CREATE-TRASHED");
+    await db
+      .update(customers)
+      .set({ isDeleted: true, deletedAt: new Date() })
+      .where(eq(customers.id, trashed.id));
+
+    const result = await create({ name: trashed.name });
+    assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+    assert.notEqual(result.id, trashed.id);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, result.id));
+    assert.equal(row.isDeleted, false);
+  });
+
+  test("같은 트랜잭션에서 CREATE 감사 로그를 정확히 1행 남기고, 연락처는 담지 않는다", async () => {
+    const name = uniqueName("CREATE-AUDIT");
+    const result = await create({
+      name,
+      contactName: "감사담당",
+      contactEmail: "audit-create@example.com",
+      contactPhone: "010-7777-8888",
+      rowColor: "sky",
+    });
+    assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const logs = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "customers"), eq(auditLogs.targetRecordId, result.id)));
+    assert.equal(logs.length, 1);
+    const [log] = logs;
+    assert.equal(log.actionType, "CREATE");
+    assert.equal(log.actorUserId, engineerId);
+    assert.equal(log.previousValue, null);
+    const newValue = log.newValue as Record<string, unknown>;
+    assert.equal(newValue.id, result.id);
+    assert.equal(newValue.name, name);
+    assert.equal(newValue.rowColor, "sky");
+
+    // 연락처는 개인정보다 — customers-trash.ts 와 같은 규칙.
+    const serialized = JSON.stringify(log.newValue);
+    for (const secret of ["감사담당", "audit-create@example.com", "010-7777-8888"]) {
+      assert.ok(!serialized.includes(secret), `감사 로그에 연락처(${secret})가 들어갔다`);
+    }
+  });
+
+  test("같은 이름을 동시에 두 번 추가하면 정확히 하나만 성공한다", async () => {
+    const name = uniqueName("CREATE-RACE");
+    const [first, second] = await Promise.all([create({ name }), create({ name })]);
+    assert.deepEqual([first.ok, second.ok].sort(), [false, true], "동시에 들어온 같은 이름 중 하나만 생겨야 한다");
+
+    const rows = await db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.name, name), eq(customers.isDeleted, false)));
+    assert.equal(rows.length, 1);
   });
 });

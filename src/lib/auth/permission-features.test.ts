@@ -137,6 +137,27 @@ test("영업은 담당자를 추가·수정할 수 있지만 삭제는 못 한�
   assert.equal(baselineLeafLevel("customers.contacts", "ADMIN"), "MANAGE");
 });
 
+test("고객사 추가는 영업·엔지니어까지 되지만 수정은 여전히 관리자 이상이다", () => {
+  // 2026-09-13 사용자 결정. customers.create 를 case 없이 트리에만 넣으면
+  // default 로 떨어져 아무에게도 열리지 않는다(permission-baseline.ts).
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES"] as const) {
+    assert.equal(baselineLeafLevel("customers.create", role), "WRITE", role);
+  }
+  assert.equal(baselineLeafLevel("customers.create", "INVENTORY_MANAGER"), "NONE");
+
+  // 추가를 연 것이 수정을 넓히지 않았다.
+  assert.equal(baselineLeafLevel("customers.edit", "SUPER_ADMIN"), "WRITE");
+  assert.equal(baselineLeafLevel("customers.edit", "ADMIN"), "WRITE");
+  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(baselineLeafLevel("customers.edit", role), "NONE", role);
+  }
+
+  // 조작이 하나뿐이라 쓰기 하나만 고른다. 고객사 영역은 전환이 끝났으므로
+  // 설정이 실제 판정이다 — 좁히면 서버 액션도 막힌다.
+  assert.deepEqual(selectableLevelsOfLeaf("customers.create"), ["NONE", "WRITE"]);
+  assert.equal(isSettingsEnforced("customers.create"), true);
+});
+
 test("엔지니어는 부품을 요청할 수 있지만 요청을 처리하지는 못한다", () => {
   assert.equal(baselineLeafLevel("inventory.requests", "AS_ENGINEER"), "WRITE");
   assert.equal(baselineLeafLevel("inventory.requestProcessing", "AS_ENGINEER"), "NONE");

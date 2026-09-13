@@ -15,6 +15,10 @@ import { hasPermission, type PermissionActor } from "./permission-resolver";
  *   customers.endUsers  쓰기 = 등록,        관리 = 이름 변경
  *   customers.contacts  쓰기 = 추가·수정,   관리 = 삭제
  *
+ * 고객사 자체도 같은 모양이지만 노드가 둘로 나뉜다(2026-09-13):
+ *   customers.create    쓰기 = 새 고객사 등록 (영업·엔지니어까지)
+ *   customers.edit      쓰기 = 기존 고객사 수정 (관리자만)
+ *
  * 화면은 이미 서버가 판단한 참/거짓을 받는 구조였다(customers/[id]/page.tsx).
  * 바뀐 것은 그 참/거짓을 역할표가 아니라 설정에서 구한다는 점뿐이다.
  *
@@ -23,6 +27,8 @@ import { hasPermission, type PermissionActor } from "./permission-resolver";
  * ============================================================================
  */
 export type CustomerCapabilities = {
+  /** 새 고객사를 등록할 수 있는가 — 수정보다 넓다(영업·엔지니어까지). */
+  create: boolean;
   /** 고객사 자체의 정보를 고칠 수 있는가. */
   edit: boolean;
   /** 새 End-User를 등록할 수 있는가. */
@@ -36,12 +42,13 @@ export type CustomerCapabilities = {
 };
 
 export async function resolveCustomerCapabilities(actor: PermissionActor): Promise<CustomerCapabilities> {
-  const [edit, createEndUser, renameEndUser, editContact, removeContact] = await Promise.all([
+  const [create, edit, createEndUser, renameEndUser, editContact, removeContact] = await Promise.all([
+    hasPermission(actor, "customers.create", "WRITE"),
     hasPermission(actor, "customers.edit", "WRITE"),
     hasPermission(actor, "customers.endUsers", "WRITE"),
     hasPermission(actor, "customers.endUsers", "MANAGE"),
     hasPermission(actor, "customers.contacts", "WRITE"),
     hasPermission(actor, "customers.contacts", "MANAGE"),
   ]);
-  return { edit, createEndUser, renameEndUser, editContact, removeContact };
+  return { create, edit, createEndUser, renameEndUser, editContact, removeContact };
 }
