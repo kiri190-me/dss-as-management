@@ -666,6 +666,13 @@
       "when": 1789300324639,
       "tag": "0094_organic_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789303920168,
+      "tag": "0095_known_deathstrike",
+      "breakpoints": true
     }
   ]
 }

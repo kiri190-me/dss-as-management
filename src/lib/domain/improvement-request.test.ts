@@ -8,17 +8,22 @@ import {
   canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
   IMPROVEMENT_REQUEST_LIST_STATUS_ORDER,
+  IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
   IMPROVEMENT_REQUEST_STATUS_LABELS,
   IMPROVEMENT_REQUEST_STATUSES,
+  improvementRequestMenuLabel,
+  isImprovementRequestMenuKey,
   isImprovementRequestStatus,
+  listImprovementRequestMenuOptions,
   planImprovementRequestStatusChange,
   type ImprovementRequestProgressFields,
   type ImprovementRequestStatus,
 } from "./improvement-request";
-import { improvementRequestStatusEnum } from "@/lib/db/schema/improvement-requests";
+import { improvementRequests, improvementRequestStatusEnum } from "@/lib/db/schema/improvement-requests";
+import { childNavItems, navGroups, navItems } from "@/lib/navigation";
 
 /**
- * 이 파일이 지키는 것은 셋이다.
+ * 이 파일이 지키는 것은 넷이다(넷째는 2026-09-13 메뉴 칸).
  *
  *  1. **도메인 목록과 표의 enum 이 같다** — 스키마는 도메인을 가져오지 않으므로
  *     두 벌이고, 갈라지면 여기서 걸린다.
@@ -26,6 +31,8 @@ import { improvementRequestStatusEnum } from "@/lib/db/schema/improvement-reques
  *     가지 전부. 아래 satisfiesCheck 는 스키마의 `improvement_requests_*_pair` ·
  *     `improvement_requests_status_columns` 를 그대로 옮긴 것이다.
  *  3. **작성자는 접수 상태인 자기 글만 고치고 지운다** — 관리 권한은 지우기만 넓힌다.
+ *  4. **고를 수 있는 메뉴는 사이드바 그대로다** — 차례도 이름도 navigation.ts 에서
+ *     오고, 모든 항목이 한 번씩, 기타가 맨 끝이다.
  */
 
 const ACTOR = randomUUID();
@@ -318,5 +325,89 @@ describe("목록 차례", () => {
       resolvedCount: 0,
       hiddenResolvedCount: 0,
     });
+  });
+});
+
+describe("어느 메뉴의 일인가", () => {
+  const options = listImprovementRequestMenuOptions();
+  const keys = options.map((o) => o.key);
+  const navLabel = (key: string) => {
+    const item = navItems.find((i) => i.key === key);
+    assert.ok(item, `navItems 에 ${key} 가 없다`);
+    return item.label;
+  };
+
+  test("기타 열쇠는 어떤 메뉴 열쇠와도 겹치지 않는다", () => {
+    assert.equal(
+      navItems.some((i) => i.key === IMPROVEMENT_REQUEST_OTHER_MENU_KEY),
+      false
+    );
+  });
+
+  test("차례가 사이드바와 같다 — 대시보드 → 그 하위메뉴 → 구획 차례대로 → 기타", () => {
+    // Sidebar.tsx 가 그리는 차례를 그대로 적은 것이다 — 대시보드 단독, 그 아래
+    // 하위메뉴, 그다음 navGroups 차례대로 각 구획의 itemKeys 차례.
+    const expected = [
+      { key: "dashboard", label: navLabel("dashboard"), groupLabel: null },
+      ...childNavItems(navItems, "dashboard").map((i) => ({ key: i.key, label: i.label, groupLabel: null })),
+      ...navGroups.flatMap((g) => g.itemKeys.map((key) => ({ key, label: navLabel(key), groupLabel: g.label }))),
+      { key: IMPROVEMENT_REQUEST_OTHER_MENU_KEY, label: "기타 · 메뉴 밖", groupLabel: null },
+    ];
+    assert.deepEqual(options, expected);
+  });
+
+  test("지금 사이드바로 몇 자리를 못 박는다", () => {
+    assert.deepEqual(keys.slice(0, 3), ["dashboard", "weeklyReport", "repairCases"]);
+    assert.deepEqual(
+      options.slice(0, 3).map((o) => o.groupLabel),
+      [null, null, "A/S 업무"],
+      "대시보드 · 주간보고는 구획이 없다"
+    );
+    // 구획 차례이지 navItems 차례가 아니다 — 사용자 관리는 navItems 에서 고객사
+    // 관리보다 앞이지만, 사이드바에서는 「관리」 구획 뒤의 「설정」 구획에 있다.
+    assert.ok(keys.indexOf("users") > keys.indexOf("productModels"));
+    assert.deepEqual(keys.slice(-3), ["improvementRequests", "developerMode", IMPROVEMENT_REQUEST_OTHER_MENU_KEY]);
+  });
+
+  test("모든 navItems 가 정확히 한 번 들어 있다", () => {
+    for (const item of navItems) {
+      assert.equal(keys.filter((k) => k === item.key).length, 1, item.key);
+    }
+    assert.equal(options.length, navItems.length + 1, "navItems 전부 + 기타 하나");
+  });
+
+  test("이름은 사이드바 이름표 그대로다 — 따로 적지 않는다", () => {
+    for (const option of options.slice(0, -1)) assert.equal(option.label, navLabel(option.key), option.key);
+  });
+
+  test("기타가 맨 끝이고 구획이 없다", () => {
+    assert.deepEqual(options.at(-1), {
+      key: IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+      label: "기타 · 메뉴 밖",
+      groupLabel: null,
+    });
+    assert.equal(keys.indexOf(IMPROVEMENT_REQUEST_OTHER_MENU_KEY), keys.length - 1);
+  });
+
+  test("열쇠 → 이름 — NULL · 기타 · 모르는 열쇠", () => {
+    assert.equal(improvementRequestMenuLabel(null), "메뉴 지정 안 함");
+    assert.equal(improvementRequestMenuLabel(IMPROVEMENT_REQUEST_OTHER_MENU_KEY), "기타 · 메뉴 밖");
+    assert.equal(improvementRequestMenuLabel("noSuchMenu"), "(없어진 메뉴)");
+    assert.equal(improvementRequestMenuLabel(""), "(없어진 메뉴)");
+    for (const item of navItems) assert.equal(improvementRequestMenuLabel(item.key), item.label, item.key);
+  });
+
+  test("고를 수 있는 열쇠 판정", () => {
+    for (const key of keys) assert.equal(isImprovementRequestMenuKey(key), true, key);
+    // 이름표 · 주소 · 구획 열쇠 · 대소문자 · 공백은 열쇠가 아니다.
+    for (const bad of ["대시보드", "/dashboard", "asOperations", "Dashboard", " dashboard", "", null, undefined, 1, {}]) {
+      assert.equal(isImprovementRequestMenuKey(bad), false, String(bad));
+    }
+  });
+
+  test("menu_key 칸은 NULL 을 허용하고 기본값이 없다 — NULL = 메뉴 지정 안 함", () => {
+    assert.equal(improvementRequests.menuKey.name, "menu_key");
+    assert.equal(improvementRequests.menuKey.notNull, false);
+    assert.equal(improvementRequests.menuKey.hasDefault, false);
   });
 });

@@ -56,6 +56,21 @@ import { users } from "./users";
  * 이 저장소의 다른 표들이 users 를 가리키는 방식과 같다 — 글을 적었거나 상태를
  * 옮긴 계정이 사라지면 「누가」가 끊긴다.
  *
+ * ── 메뉴 칸은 열쇠이고 CHECK 가 없다 (2026-09-13) ──────────────────────
+ * menu_key 는 「이 요청이 어느 메뉴 아래의 일인가」다. 메뉴 **이름이 아니라**
+ * navigation.ts 의 navItems `key` 를 담는다 — 사이드바 이름표가 바뀌어도 기록이
+ * 따라간다. 고를 수 있는 값과 열쇠 → 이름은 domain/improvement-request.ts 가 정한다.
+ *
+ *  · NULL = 「메뉴 지정 안 함」 — 이 칸이 생기기 전에 적힌 글이다. 기본값을 두지
+ *    않는 것도 그래서다: 옛 글에 아무 메뉴나 채워 넣으면 사실이 아닌 기록이 된다.
+ *  · DB CHECK 를 두지 않는다. 메뉴 열쇠는 메뉴가 늘고 줄 때마다 바뀌는 목록이라,
+ *    CHECK 로 박으면 메뉴 하나를 더할 때마다 마이그레이션이 따라붙고, 메뉴 하나를
+ *    뺄 때는 그 열쇠를 가진 옛 글 때문에 새 CHECK 를 걸 수 없다. 고객사 줄 색
+ *    (customers.row_color)과 같은 방식이다 — 검증이 쓸 때만 막고
+ *    (validation/improvement-request-input.ts), 없어진 열쇠는 화면이
+ *    「(없어진 메뉴)」로 읽는다.
+ *  · 인덱스를 두지 않는다 — 작은 표이고, 메뉴로 거르기는 화면이 받은 목록 위에서 한다.
+ *
  * ── PII ────────────────────────────────────────────────────────────────
  * body 는 자유 입력이라 사람 이름이나 고객사 사정이 섞일 수 있다. 다른 표의 메모
  * 칸들과 같은 규칙이다 — 로그나 오류 보고로 그대로 내보내지 않는다.
@@ -79,6 +94,12 @@ export const improvementRequests = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     /** 사람이 적는 글. 1~2000자(파일 헤더의 '길이 CHECK 는 검증과 같은 수다'). */
     body: text("body").notNull(),
+    /**
+     * 어느 메뉴 아래의 일인가 — navItems 의 key(이름이 아니다). NULL = 메뉴 지정 안 함
+     * (이 칸이 생기기 전의 글). 기본값·CHECK·인덱스를 두지 않는 까닭은 파일 헤더의
+     * '메뉴 칸은 열쇠이고 CHECK 가 없다'.
+     */
+    menuKey: text("menu_key"),
     status: improvementRequestStatusEnum("status").notNull().default("OPEN"),
     /** 진행중으로 옮긴 사람과 때. 파일 헤더의 '상태와 네 칸은 같은 말이어야 한다'. */
     inProgressBy: uuid("in_progress_by").references(() => users.id, { onDelete: "restrict" }),

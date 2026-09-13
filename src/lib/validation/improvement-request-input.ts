@@ -1,6 +1,7 @@
 import {
   countImprovementRequestBodyChars,
   IMPROVEMENT_REQUEST_BODY_MAX_CHARS,
+  isImprovementRequestMenuKey,
 } from "@/lib/domain/improvement-request";
 
 /**
@@ -25,6 +26,15 @@ import {
  * fieldErrors 의 키는 필드명 그대로이고, 화면은 그 키로 입력칸 밑에 문장을 붙인다.
  * 오류 문장에 본문을 싣지 않는다 — 자유 입력이라 PII 가 섞일 수 있다
  * (schema/improvement-requests.ts 헤더).
+ *
+ * ── 메뉴는 따로 된 함수가 본다 (2026-09-13) ─────────────────────────────
+ * validateImprovementRequestMenuKey 는 「이 요청이 어느 메뉴 아래의 일인가」를 본다.
+ * 비울 수 없고, 도메인의 고를 수 있는 열쇠(사이드바 항목 + 기타)만 받는다 — DB 에는
+ * CHECK 가 없으므로(스키마 헤더) 여기가 유일한 문이다. 받은 값을 오류 문장에 싣지
+ * 않는다(무엇이 올지 모르는 값이다).
+ *
+ * 본문 검증(validateImprovementRequestFields)에 섞지 않은 것은 그 함수의 결과 모양과
+ * 동작을 이미 저장·액션·통합 시험이 쓰고 있어서다. 두 결과를 합치는 것은 부르는 쪽이다.
  * ============================================================================
  */
 
@@ -59,4 +69,27 @@ export function validateImprovementRequestFields(
   }
 
   return { ok: true, data: { body } };
+}
+
+export type ImprovementRequestMenuFields = {
+  /** 고를 수 있는 메뉴 열쇠(navItems 의 key, 또는 기타). 비어 있지 않다. */
+  menuKey: string;
+};
+
+export type ValidateImprovementRequestMenuResult =
+  | { ok: true; data: ImprovementRequestMenuFields }
+  | { ok: false; fieldErrors: Record<string, string> };
+
+/** 메뉴 열쇠 검증 — 파일 헤더의 '메뉴는 따로 된 함수가 본다'. 오류 칸 이름은 `menuKey`. */
+export function validateImprovementRequestMenuKey(
+  raw: Record<string, unknown>
+): ValidateImprovementRequestMenuResult {
+  const menuKeyRaw = raw.menuKey;
+  if (menuKeyRaw === undefined || menuKeyRaw === null || menuKeyRaw === "") {
+    return { ok: false, fieldErrors: { menuKey: "메뉴를 골라 주세요." } };
+  }
+  if (!isImprovementRequestMenuKey(menuKeyRaw)) {
+    return { ok: false, fieldErrors: { menuKey: "고를 수 있는 메뉴가 아닙니다. 다시 골라 주세요." } };
+  }
+  return { ok: true, data: { menuKey: menuKeyRaw } };
 }

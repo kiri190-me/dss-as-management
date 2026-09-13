@@ -1,6 +1,8 @@
+import { childNavItems, navGroups, navItems } from "@/lib/navigation";
+
 /**
  * ============================================================================
- * 개선 요청 — 순수 규칙 (상태 옮기기 · 누가 무엇을)
+ * 개선 요청 — 순수 규칙 (상태 옮기기 · 누가 무엇을 · 어느 메뉴의 일인가)
  * ============================================================================
  * DB 도 서버도 여기서 만지지 않는다. 화면·서버 액션·mutation 이 **같은 함수**를
  * 보게 하려고 따로 뺀 자리다 — 규칙을 두 곳에 적으면 화면은 단추를 열어 주는데
@@ -231,4 +233,109 @@ export function arrangeImprovementRequestList<T extends ImprovementRequestListEn
     resolvedCount,
     hiddenResolvedCount: resolvedCount,
   };
+}
+
+// ────────────────────────────────────────────────── 어느 메뉴의 일인가
+
+/*
+ * 개선 요청이 **어느 메뉴 아래의 일인가**(2026-09-13, 사용자 요청).
+ *
+ * ── 🔴 이름이 아니라 열쇠를 저장한다 ────────────────────────────────────
+ * 표의 menu_key 칸에는 navItems 의 `key`("repairCases" 같은)가 들어간다. 이름표
+ * ("전체 A/S 현황")를 담아 두면 사이드바 이름을 고치는 날 옛 글이 가리키는 메뉴를
+ * 잃는다. 열쇠는 역할별 접근 권한도 쓰는 값이라 함부로 바뀌지 않는다
+ * (navigation.ts 의 repairLabor 주석).
+ *
+ * ── 🔴 메뉴 이름을 여기에 따로 적지 않는다 ──────────────────────────────
+ * 목록도 이름도 전부 navigation.ts 의 navItems · navGroups 에서 만든다. 여기에
+ * 이름을 한 벌 더 적으면 사이드바 이름이 바뀔 때 이 화면만 옛 이름으로 남는다.
+ * navigation.ts 는 DB·서버를 가져오지 않는 순수 모듈이라(가져오는 것은
+ * auth/developer-mode-gate.ts 의 상수 하나이고, 그 파일은 타입만 가져온다) 이 파일이
+ * import 해도 머리말의 「DB 도 서버도 만지지 않는다」가 깨지지 않는다.
+ *
+ * ── 차례는 사이드바 그대로다 ────────────────────────────────────────────
+ * 대시보드 → 그 하위메뉴(주간보고) → navGroups 차례대로 각 구획의 itemKeys 차례
+ * → 맨 끝에 「기타 · 메뉴 밖」. components/layout/Sidebar.tsx 가 그리는 차례와
+ * 같다 — 사람이 늘 보는 차례라 목록에서 찾기 쉽다. 모든 navItems 가 정확히 한 번
+ * 들어가는지는 시험이 단언한다.
+ *
+ * ── 열쇠 → 이름은 세 경우가 더 있다 ────────────────────────────────────
+ *  · NULL → 「메뉴 지정 안 함」 — menu_key 칸이 생기기 전에 적힌 글이다.
+ *  · 기타 → 「기타 · 메뉴 밖」 — 어느 메뉴에도 속하지 않는 요청(로그인, 인쇄 등).
+ *  · 모르는 열쇠 → 「(없어진 메뉴)」 — 메뉴가 사이드바에서 빠진 뒤의 옛 글이다.
+ *    DB 에 CHECK 가 없으므로(스키마 헤더) 그런 행은 남아 있을 수 있다.
+ */
+
+/** 「기타 · 메뉴 밖」의 열쇠. 🔴 navItems 의 어떤 key 와도 겹치지 않아야 한다(시험이 단언). */
+export const IMPROVEMENT_REQUEST_OTHER_MENU_KEY = "other";
+export const IMPROVEMENT_REQUEST_OTHER_MENU_LABEL = "기타 · 메뉴 밖";
+/** menu_key 가 NULL 인 글 — 메뉴 칸이 생기기 전에 적힌 글. */
+export const IMPROVEMENT_REQUEST_NO_MENU_LABEL = "메뉴 지정 안 함";
+/** 사이드바에서 빠진 메뉴를 가리키는 옛 글. */
+export const IMPROVEMENT_REQUEST_UNKNOWN_MENU_LABEL = "(없어진 메뉴)";
+
+/** 사이드바가 단독으로 그리고 그 아래에 하위메뉴를 들여 그리는 항목(Sidebar.tsx 의 DASHBOARD_KEY). */
+const DASHBOARD_MENU_KEY = "dashboard";
+
+export type ImprovementRequestMenuOption = {
+  /** 저장할 값 — navItems 의 key, 또는 IMPROVEMENT_REQUEST_OTHER_MENU_KEY. */
+  key: string;
+  /** 사이드바 이름표 그대로(기타는 「기타 · 메뉴 밖」). */
+  label: string;
+  /**
+   * 사이드바 구획 이름(「A/S 업무」 등) — 화면이 `<optgroup>` 으로 묶는 데 쓴다.
+   * 대시보드 · 그 하위메뉴 · 기타는 구획이 없어 null 이다.
+   */
+  groupLabel: string | null;
+};
+
+/**
+ * 고를 수 있는 메뉴 전부, 사이드바 차례대로, 맨 끝에 기타.
+ *
+ * 접근 권한으로 거르지 않은 **전체 목록**이다 — 검증(isImprovementRequestMenuKey)이
+ * 이 목록으로 판정한다.
+ */
+export function listImprovementRequestMenuOptions(): ImprovementRequestMenuOption[] {
+  const byKey = new Map(navItems.map((item) => [item.key, item]));
+  const options: ImprovementRequestMenuOption[] = [];
+
+  const dashboard = byKey.get(DASHBOARD_MENU_KEY);
+  if (dashboard) {
+    options.push({ key: dashboard.key, label: dashboard.label, groupLabel: null });
+    for (const child of childNavItems(navItems, DASHBOARD_MENU_KEY)) {
+      options.push({ key: child.key, label: child.label, groupLabel: null });
+    }
+  }
+
+  for (const group of navGroups) {
+    for (const key of group.itemKeys) {
+      const item = byKey.get(key);
+      if (item) options.push({ key: item.key, label: item.label, groupLabel: group.label });
+    }
+  }
+
+  options.push({
+    key: IMPROVEMENT_REQUEST_OTHER_MENU_KEY,
+    label: IMPROVEMENT_REQUEST_OTHER_MENU_LABEL,
+    groupLabel: null,
+  });
+  return options;
+}
+
+/** 이 값이 고를 수 있는 메뉴 열쇠인가(사이드바의 항목이거나 기타). */
+export function isImprovementRequestMenuKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    listImprovementRequestMenuOptions().some((option) => option.key === value)
+  );
+}
+
+/**
+ * 열쇠 → 화면에 보일 이름. NULL · 기타 · 모르는 열쇠의 세 경우는 위 구획 주석의
+ * '열쇠 → 이름은 세 경우가 더 있다'.
+ */
+export function improvementRequestMenuLabel(menuKey: string | null): string {
+  if (menuKey === null) return IMPROVEMENT_REQUEST_NO_MENU_LABEL;
+  const option = listImprovementRequestMenuOptions().find((o) => o.key === menuKey);
+  return option ? option.label : IMPROVEMENT_REQUEST_UNKNOWN_MENU_LABEL;
 }

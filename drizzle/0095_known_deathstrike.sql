@@ -1,0 +1,1 @@
+ALTER TABLE "improvement_requests" ADD COLUMN "menu_key" text;
