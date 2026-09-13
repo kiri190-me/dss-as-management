@@ -54,7 +54,8 @@ import {
  * 그린다(하이드레이션 어긋남이 없다).
  *
  * 🔴 본문은 자유 입력이다(schema 헤더의 PII). 화면에 그리는 것 말고는 어디로도
- * 내보내지 않는다 — console 에도 싣지 않는다.
+ * 내보내지 않는다 — console 에도 싣지 않는다. [복사]는 누른 사람의 클립보드로만
+ * 간다(보는 권한만 있어도 쓴다 — 이미 화면에 보이는 글이다).
  * ============================================================================
  */
 
@@ -78,6 +79,40 @@ const SMALL_BUTTON_CLASS =
 const SMALL_DANGER_BUTTON_CLASS =
   "rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:border-red-600 disabled:opacity-50 dark:border-red-800 dark:text-red-400";
 const FIELD_ERROR_CLASS = "text-xs text-red-600 dark:text-red-400";
+
+const COPY_DONE_MS = 2000;
+const COPY_FAILED_TEXT = "복사하지 못했습니다 — 글을 길게 눌러 직접 복사해 주세요";
+
+/**
+ * 두 갈래로 복사한다. 성공하면 true. customer-portal/CustomerLinkAddress.tsx 의
+ * copyText 와 같은 모양이다 — NAS 는 http 라 `navigator.clipboard` 가 아예 없어서
+ * 옛 방식(숨긴 textarea + execCommand)을 둘째 갈래로 둔다.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // https 가 아니거나 권한이 막힌 경우 — 아래 옛 방식으로 넘어간다.
+  }
+
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    // 화면 밖에 두되 focus 가 가야 하므로 display:none 은 쓸 수 없다.
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -123,6 +158,21 @@ export default function ImprovementRequestsScreen({
 
   const [deleteTarget, setDeleteTarget] = useState<ImprovementRequestListItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  /**
+   * 마지막으로 누른 [복사]의 결과 — 어느 글의 것인지 함께 담는다. 「복사했습니다」는
+   * 잠깐 뒤 걷고, 실패 안내는 다음 복사까지 남긴다(읽고 직접 복사해야 하므로).
+   */
+  const [copyResult, setCopyResult] = useState<{ id: string; state: "copied" | "failed" } | null>(
+    null
+  );
+
+  // 걷는 타이머는 결과가 바뀌거나 화면이 사라질 때 이 정리 함수가 치운다.
+  useEffect(() => {
+    if (copyResult?.state !== "copied") return;
+    const timer = setTimeout(() => setCopyResult(null), COPY_DONE_MS);
+    return () => clearTimeout(timer);
+  }, [copyResult]);
 
   const { rows, resolvedCount, hiddenResolvedCount } = arrangeImprovementRequestList(items, { showResolved });
 
@@ -207,6 +257,12 @@ export default function ImprovementRequestsScreen({
         onFailure: (text) => setRowError(item.id, text),
       }
     );
+  }
+
+  /** 고치는 중이어도 저장된 본문을 복사한다 — 초안은 아직 이 글이 아니다. */
+  async function copyBody(item: ImprovementRequestListItem) {
+    const ok = await copyText(item.body);
+    setCopyResult({ id: item.id, state: ok ? "copied" : "failed" });
   }
 
   function openDelete(item: ImprovementRequestListItem) {
@@ -344,6 +400,7 @@ export default function ImprovementRequestsScreen({
               const editCount = countImprovementRequestBodyChars(editDraft);
               const editOver = editCount > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
               const rowError = rowErrors[item.id];
+              const copyState = copyResult?.id === item.id ? copyResult.state : null;
 
               return (
                 <li
@@ -425,50 +482,62 @@ export default function ImprovementRequestsScreen({
                     </div>
                   ) : null}
 
-                  {canManage || (mayEdit && !isEditing) || mayDelete ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {canManage ? (
-                        <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
-                          상태
-                          <select
-                            value={item.status}
-                            onChange={(event) => changeStatus(item, event.target.value)}
-                            disabled={isPending}
-                            aria-busy={pendingKey === `status:${item.id}`}
-                            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-                          >
-                            {IMPROVEMENT_REQUEST_STATUSES.map((status) => (
-                              <option key={status} value={status}>
-                                {IMPROVEMENT_REQUEST_STATUS_LABELS[status]}
-                              </option>
-                            ))}
-                          </select>
-                          {pendingKey === `status:${item.id}` ? <span>옮기는 중…</span> : null}
-                        </label>
+                  {/* 단추 줄은 늘 그린다 — [복사]는 보는 권한만 있어도 쓴다. 나머지는 각자 조건. */}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {canManage ? (
+                      <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+                        상태
+                        <select
+                          value={item.status}
+                          onChange={(event) => changeStatus(item, event.target.value)}
+                          disabled={isPending}
+                          aria-busy={pendingKey === `status:${item.id}`}
+                          className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                        >
+                          {IMPROVEMENT_REQUEST_STATUSES.map((status) => (
+                            <option key={status} value={status}>
+                              {IMPROVEMENT_REQUEST_STATUS_LABELS[status]}
+                            </option>
+                          ))}
+                        </select>
+                        {pendingKey === `status:${item.id}` ? <span>옮기는 중…</span> : null}
+                      </label>
+                    ) : null}
+                    <div className="ml-auto flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void copyBody(item)}
+                        className={SMALL_BUTTON_CLASS}
+                      >
+                        {copyState === "copied" ? "복사했습니다" : "복사"}
+                      </button>
+                      {mayEdit && !isEditing ? (
+                        <button
+                          type="button"
+                          onClick={() => startEdit(item)}
+                          disabled={isPending}
+                          className={SMALL_BUTTON_CLASS}
+                        >
+                          고치기
+                        </button>
                       ) : null}
-                      <div className="ml-auto flex gap-2">
-                        {mayEdit && !isEditing ? (
-                          <button
-                            type="button"
-                            onClick={() => startEdit(item)}
-                            disabled={isPending}
-                            className={SMALL_BUTTON_CLASS}
-                          >
-                            고치기
-                          </button>
-                        ) : null}
-                        {mayDelete ? (
-                          <button
-                            type="button"
-                            onClick={() => openDelete(item)}
-                            disabled={isPending}
-                            className={SMALL_DANGER_BUTTON_CLASS}
-                          >
-                            지우기
-                          </button>
-                        ) : null}
-                      </div>
+                      {mayDelete ? (
+                        <button
+                          type="button"
+                          onClick={() => openDelete(item)}
+                          disabled={isPending}
+                          className={SMALL_DANGER_BUTTON_CLASS}
+                        >
+                          지우기
+                        </button>
+                      ) : null}
                     </div>
+                  </div>
+
+                  {copyState === "failed" ? (
+                    <p role="alert" className={`mt-2 ${FIELD_ERROR_CLASS}`}>
+                      {COPY_FAILED_TEXT}
+                    </p>
                   ) : null}
 
                   {rowError ? (
