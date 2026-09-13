@@ -22,6 +22,11 @@ export const customers = pgTable(
     contactName: text("contact_name"),
     contactEmail: text("contact_email"),
     contactPhone: text("contact_phone"),
+    // 대표 담당자의 직급·메모 — 2026-09-13 사용자 요청으로 고객사 담당자
+    // (customer_contacts)와 같은 칸을 갖추려고 더했다. 선택 입력이고 상한은 입력
+    // 검증(validation/customer-update-input.ts)이 지킨다(DB CHECK 없음).
+    contactTitle: text("contact_title"),
+    contactMemo: text("contact_memo"),
     // 내자 정리 목록에서 이 고객사의 줄에 칠할 배경색. 비어 있으면 색을 칠하지
     // 않는다(대부분의 고객사가 그렇다).
     //
@@ -69,6 +74,8 @@ export const customers = pgTable(
 // dev seed 스크립트가 mock 데모 데이터로만 채워둔 상태였다(백필 후 제거 —
 // 마이그레이션 파일 참고). phone/department/title은 도입하지 않는다
 // (PROJECT_REQUIREMENTS.md/DATABASE_DESIGN.md 어디에도 근거가 없음).
+// — 담당자 쪽(end_user_contacts)은 2026-09-13 사용자 요청으로 직급·전화·메모를
+// 갖게 됐다(그 표 주석). 이 end_users 표 자체에는 여전히 두지 않는다.
 export const endUsers = pgTable(
   "end_users",
   {
@@ -109,9 +116,14 @@ export const endUsers = pgTable(
  * 존재 이유가 "누군가를 가리키는 것"이므로 이름 없는 담당자 행은 의미가
  * 없다) — end_users/customers의 contact_name이 nullable이었던 것과는
  * 다른 이유다(그쪽은 "고객사/End-User 자체는 있지만 담당자를 아직 모름").
- * contact_email은 선택 입력(이메일을 아직 모를 수 있음). phone/department/
- * title은 도입하지 않는다(현재 요구사항 문서 어디에도 근거가 없음 —
- * 필요해지면 별도의 추가 마이그레이션으로 도입한다).
+ * contact_email은 선택 입력(이메일을 아직 모를 수 있음).
+ *
+ * 직급(title)·전화(phone)·메모(memo)는 2026-09-13 사용자 요청으로 더했다 —
+ * 처음에는 요구사항 문서에 근거가 없어 두지 않았고 "필요해지면 별도의 추가
+ * 마이그레이션으로 도입한다"고 적어 두었던 바로 그 경우다. 칸 이름과 규칙은
+ * 고객사 담당자(customer_contacts)와 같다 — 모두 선택 입력이고, 길이 상한은
+ * 입력 검증(validation/end-user-input.ts, 상한은 customer-contact-input.ts 의
+ * 상수)이 지킨다(DB CHECK 없음). 부서(department)는 요청에 없어 두지 않는다.
  *
  * repair_cases.contact*_snapshot과는 완전히 독립이다 — 이 테이블이나
  * end_users/customers의 어떤 mutation도 repair_cases를 절대 쓰지 않는다
@@ -126,6 +138,10 @@ export const endUserContacts = pgTable(
       .references(() => endUsers.id, { onDelete: "restrict" }),
     contactName: text("contact_name").notNull(),
     contactEmail: text("contact_email"),
+    // 2026-09-13 사용자 요청 — customer_contacts 와 같은 칸(위 표 주석).
+    title: text("title"),
+    phone: text("phone"),
+    memo: text("memo"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -162,10 +178,10 @@ export const endUserContacts = pgTable(
  *
  * ── 칸 ──────────────────────────────────────────────────────────────────
  * contact_name은 NOT NULL이다 — end_user_contacts와 같은 이유다(이 행의 존재
- * 이유가 누군가를 가리키는 것이다). 나머지는 모두 선택이다. end_user_contacts
- * 는 phone/department/title을 두지 않았지만 그것은 End-User 쪽 결정이고,
- * 고객사 담당자는 사용자 요청(2026-09-13)으로 직급(title)·전화·메모를 둔다.
- * 부서는 요청에 없어 두지 않는다. 길이 상한은 입력 검증
+ * 이유가 누군가를 가리키는 것이다). 나머지는 모두 선택이다. 고객사 담당자는
+ * 사용자 요청(2026-09-13)으로 직급(title)·전화·메모를 둔다 — 같은 날의 뒤이은
+ * 요청으로 end_user_contacts 와 대표 담당자 칸(customers.contact_title/
+ * contact_memo)도 같은 칸을 갖추게 됐다. 부서는 요청에 없어 두지 않는다. 길이 상한은 입력 검증
  * (validation/customer-contact-input.ts)이 지킨다 — customers·end_user_contacts
  * 와 마찬가지로 DB CHECK는 두지 않는다.
  *

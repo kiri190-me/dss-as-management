@@ -1,4 +1,5 @@
 import { normalizeCustomerRowColorValue } from "@/lib/domain/customer-row-color";
+import { CUSTOMER_CONTACT_MEMO_MAX, CUSTOMER_CONTACT_TITLE_MAX } from "@/lib/validation/customer-contact-input";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,6 +19,13 @@ export type CustomerUpdateFields = {
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  /**
+   * 대표 담당자의 직급·메모(2026-09-13 사용자 요청 — 고객사 담당자
+   * customer_contacts 와 같은 칸). 둘 다 선택이고, 상한·규칙은
+   * customer-contact-input.ts 와 같다(직급 200, 메모 500·줄바꿈 LF 통일).
+   */
+  contactTitle: string | null;
+  contactMemo: string | null;
   /**
    * 내자 정리 목록에서 이 고객사의 줄에 칠할 색 — **팔레트 키**, 「직접 고르기」로
    * 고른 **정리된 색 코드**(`#rrggbb`, 소문자), 또는 null 이다
@@ -73,6 +81,32 @@ export function validateCustomerUpdateFields(
   const contactName = normalizeNullableShortText("contactName", "담당자 성함");
   const contactPhone = normalizeNullableShortText("contactPhone", "연락처");
 
+  /**
+   * 대표 담당자의 직급·메모 — 고객사 담당자(customer-contact-input.ts)의
+   * optionalText 와 같은 규칙이다: 없거나 걷고 나서 비면 null, 글자가 아니면
+   * 오류, 상한을 넘으면 오류. 메모만 줄바꿈을 받으므로 세기 전에 CRLF → LF 로
+   * 통일한다(그 파일 머리 주석의 까닭). 위의 이름·연락처 칸은 예전 규칙·문구
+   * 그대로 둔다.
+   */
+  function optionalContactText(key: "contactTitle" | "contactMemo", label: string, max: number): string | null {
+    const value = raw[key];
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "string") {
+      fieldErrors[key] = `${label} 값을 확인할 수 없습니다.`;
+      return null;
+    }
+    const trimmed = (key === "contactMemo" ? value.replace(/\r\n?/g, "\n") : value).trim();
+    if (trimmed === "") return null;
+    if (trimmed.length > max) {
+      fieldErrors[key] = `${label}은(는) ${max}자를 넘을 수 없습니다.`;
+      return null;
+    }
+    return trimmed;
+  }
+
+  const contactTitle = optionalContactText("contactTitle", "직급", CUSTOMER_CONTACT_TITLE_MAX);
+  const contactMemo = optionalContactText("contactMemo", "메모", CUSTOMER_CONTACT_MEMO_MAX);
+
   let contactEmail: string | null = null;
   const emailRaw = raw.contactEmail;
   if (emailRaw === null || emailRaw === undefined || emailRaw === "") {
@@ -112,5 +146,8 @@ export function validateCustomerUpdateFields(
   }
 
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
-  return { ok: true, data: { name, contactName, contactEmail, contactPhone, rowColor } };
+  return {
+    ok: true,
+    data: { name, contactName, contactEmail, contactPhone, contactTitle, contactMemo, rowColor },
+  };
 }
