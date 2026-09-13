@@ -8,7 +8,7 @@ import { validateCustomerUpdateFields } from "@/lib/validation/customer-update-i
 import { createCustomer } from "@/lib/db/mutations/customers";
 
 export type CreateCustomerActionInput = {
-  /** Raw, untrusted. 수정 폼과 같은 다섯 칸이다(이름·연락처 셋·줄 색). */
+  /** Raw, untrusted. 수정 폼과 같은 일곱 칸이다(이름·대표 담당자 다섯 칸·줄 색). */
   fields: Record<string, unknown>;
 };
 
@@ -31,8 +31,10 @@ export type CreateCustomerActionResult =
  * 화면이 버튼을 감추는 것은 안내일 뿐이고, 이 함수를 직접 부르는 요청도 여기서
  * 똑같이 걸러진다.
  *
- * 형식 검증은 수정과 같은 validateCustomerUpdateFields 를 쓴다 — 같은 다섯 칸에
+ * 형식 검증은 수정과 같은 validateCustomerUpdateFields 를 쓴다 — 같은 일곱 칸에
  * 같은 규칙이다(이름 필수·앞뒤 공백 제거·길이, 이메일 형식, 팔레트 키만).
+ * 검증 결과는 통째로 펼쳐 넘긴다 — 대표 담당자의 직급·메모도 여기서 빠지지 않는다
+ * (createCustomer 가 그 둘을 꼭 받으므로 타입 검사가 누락을 잡는다).
  */
 export async function createCustomerAction(input: CreateCustomerActionInput): Promise<CreateCustomerActionResult> {
   if (getAuthSource() !== "database") {

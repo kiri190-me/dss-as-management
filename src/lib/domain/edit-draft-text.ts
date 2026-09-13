@@ -66,12 +66,19 @@ export const EDIT_DRAFT_LABELS: Readonly<Record<string, string>> = {
  * 고객사 편집 화면(CustomerEditForm)의 이름표. **기본 맵을 쓰지 않는다.**
  *
  * 세 이름(contactName · contactEmail · contactPhone)이 위 EDIT_DRAFT_LABELS 에도
- * 같은 이름으로 있지만, 그것을 그대로 쓸 수는 없다:
+ * 같은 키로 있지만, 그것을 그대로 쓸 수는 없다:
  *  - `name`(고객사명)이 위 맵에 **없다.** 수리 건 인수 정보에서 고객사는 콤보박스라
  *    UUID 로 남고, 손으로 친 이름이 남는 것은 "새로 등록"일 때뿐이다
  *    (newCustomerName). 이 화면은 고객사 자체를 고치는 자리라 그 칸이 자유 입력이다.
+ *  - **부르는 이름이 다르다.** 이 화면의 칸은 고객사의 **대표** 담당자라 화면
+ *    이름표 그대로 「대표 담당자 성함」 · 「대표 연락처(…)」로 부른다 — 같은 화면에
+ *    「고객사 담당자」 목록이 따로 있어서 「담당자 성함」만으로는 어느 쪽인지 모른다.
+ *    위 맵의 같은 키는 **접수 건의 연락처**라 그대로 둔다.
  *  - 화면에 놓인 차례가 다르다(이 화면은 이메일이 전화보다 위다). 상자에 나오는
  *    차례는 사람이 방금 보고 있던 폼의 차례여야 다시 옮겨 적기 쉽다.
+ *
+ * 대표 담당자의 직급·메모(2026-09-13)도 손으로 친 글이라 넣는다 — 메모는 여러 줄로
+ * 적는 칸이라 잃으면 가장 아프다.
  *
  * **rowColor 는 없다** — 팔레트에서 고르는 값이라 다시 고르는 데 몇 초면 되고,
  * 저장되는 것은 `blue` 같은 팔레트 키라 보여 줘 봐야 사람에게 뜻이 없다
@@ -79,9 +86,11 @@ export const EDIT_DRAFT_LABELS: Readonly<Record<string, string>> = {
  */
 export const CUSTOMER_DRAFT_LABELS: Readonly<Record<string, string>> = {
   name: "고객사명",
-  contactName: "담당자 성함",
-  contactEmail: "연락처(이메일)",
-  contactPhone: "연락처(전화)",
+  contactName: "대표 담당자 성함",
+  contactTitle: "대표 담당자 직급",
+  contactEmail: "대표 연락처(이메일)",
+  contactPhone: "대표 연락처(전화)",
+  contactMemo: "대표 담당자 메모",
 };
 
 /**

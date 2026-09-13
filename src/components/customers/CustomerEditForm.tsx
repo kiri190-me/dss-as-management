@@ -11,6 +11,7 @@ import EditSectionActions, {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { CUSTOMER_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
+import { CUSTOMER_CONTACT_MEMO_MAX, CUSTOMER_CONTACT_TITLE_MAX } from "@/lib/validation/customer-contact-input";
 import { CustomerRowColorPicker } from "./CustomerRowColorField";
 
 /**
@@ -53,6 +54,13 @@ export default function CustomerEditForm({
   const [contactEmail, setContactEmail] = useState(customer.contactEmail ?? "");
   const [contactPhone, setContactPhone] = useState(customer.contactPhone ?? "");
   /**
+   * 대표 담당자의 직급·메모(2026-09-13). 🔴 저장할 때 **반드시 함께 보낸다** — 이 폼은
+   * 모든 칸을 다시 보내고 서버는 빠진 칸을 null 로 읽으므로(validateCustomerUpdateFields),
+   * 빠뜨리면 다른 칸만 고친 저장 한 번에 이 둘이 지워진다.
+   */
+  const [contactTitle, setContactTitle] = useState(customer.contactTitle ?? "");
+  const [contactMemo, setContactMemo] = useState(customer.contactMemo ?? "");
+  /**
    * 팔레트 키 또는 직접 고른 색 코드(소문자 #rrggbb)다 — 서버 검증은
    * normalizeCustomerRowColorValue. null 은 "안 고름"이고 폼 안에서는 빈
    * 문자열로 다룬다 — 라디오의 value 는 문자열뿐이라서다. 저장할 때 다시
@@ -86,6 +94,8 @@ export default function CustomerEditForm({
       contactName: contactName || null,
       contactEmail: contactEmail || null,
       contactPhone: contactPhone || null,
+      contactTitle: contactTitle || null,
+      contactMemo: contactMemo || null,
       rowColor: rowColor || null,
     };
     try {
@@ -124,8 +134,10 @@ export default function CustomerEditForm({
 
   return (
     <form onSubmit={handleSubmit} noValidate>
+      {/* 고객사명은 한 줄 전체 — 그 아래로 대표 담당자 칸이 읽기 화면과 같은 짝으로
+          놓인다(성함 · 직급 / 이메일 · 전화 / 메모). */}
       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-        <div>
+        <div className="sm:col-span-2">
           <label className={editLabelClass}>고객사명</label>
           <input
             className={editInputClass}
@@ -145,6 +157,18 @@ export default function CustomerEditForm({
             onChange={(e) => setContactName(e.target.value)}
           />
           {fieldErrors.contactName && <p className={editErrorClass}>{fieldErrors.contactName}</p>}
+        </div>
+
+        <div>
+          <label className={editLabelClass}>대표 담당자 직급</label>
+          <input
+            className={editInputClass}
+            value={contactTitle}
+            maxLength={CUSTOMER_CONTACT_TITLE_MAX}
+            disabled={disabled}
+            onChange={(e) => setContactTitle(e.target.value)}
+          />
+          {fieldErrors.contactTitle && <p className={editErrorClass}>{fieldErrors.contactTitle}</p>}
         </div>
 
         <div>
@@ -168,6 +192,20 @@ export default function CustomerEditForm({
             onChange={(e) => setContactPhone(e.target.value)}
           />
           {fieldErrors.contactPhone && <p className={editErrorClass}>{fieldErrors.contactPhone}</p>}
+        </div>
+
+        {/* 메모는 여러 줄로 적는 칸이라 두 칸을 가로지른다. */}
+        <div className="sm:col-span-2">
+          <label className={editLabelClass}>대표 담당자 메모</label>
+          <textarea
+            rows={3}
+            className={`${editInputClass} resize-y`}
+            value={contactMemo}
+            maxLength={CUSTOMER_CONTACT_MEMO_MAX}
+            disabled={disabled}
+            onChange={(e) => setContactMemo(e.target.value)}
+          />
+          {fieldErrors.contactMemo && <p className={editErrorClass}>{fieldErrors.contactMemo}</p>}
         </div>
 
         {/* 색 고르개는 칸이 열한 개라 한 칸 폭에 들어가지 않는다 — 두 칸을

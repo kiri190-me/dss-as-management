@@ -8,14 +8,15 @@ import {
   editInputClass,
   editLabelClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
+import { CUSTOMER_CONTACT_MEMO_MAX, CUSTOMER_CONTACT_TITLE_MAX } from "@/lib/validation/customer-contact-input";
 import { CustomerRowColorPicker } from "./CustomerRowColorField";
 
 /**
  * ============================================================================
  * [고객사 추가] 창 — 고객사 관리 목록에서 연다 (2026-09-13)
  * ============================================================================
- * 칸은 수정 폼(CustomerEditForm)과 같은 다섯 개다 — 이름(필수)·담당자·이메일·
- * 전화·목록 배경색. 서버 검증도 같은 함수를 쓰므로(validateCustomerUpdateFields)
+ * 칸은 수정 폼(CustomerEditForm)과 같은 일곱 개다 — 이름(필수)·대표 담당자 성함·
+ * 직급·전화·이메일·메모·목록 배경색. 서버 검증도 같은 함수를 쓰므로(validateCustomerUpdateFields)
  * 오류가 돌아오는 칸 이름도 같다. 수정 폼 자체를 고쳐 두 쓰임을 겸하게 하지 않은
  * 이유: 그쪽은 충돌(CONFLICT) 처리와 적어 둔 글 보존이 붙어 있는데, 새로 만드는
  * 쪽에는 충돌이 없다.
@@ -37,6 +38,9 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  /** 대표 담당자의 직급·메모(2026-09-13). 빈 값은 보낼 때 null 로 바꾼다. */
+  const [contactTitle, setContactTitle] = useState("");
+  const [contactMemo, setContactMemo] = useState("");
   /**
    * 팔레트 키 또는 직접 고른 색 코드(소문자 #rrggbb). 없음은 빈 문자열이고, 보낼 때
    * null 로 바꾼다(CustomerEditForm 과 같다).
@@ -66,6 +70,8 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
           contactName: contactName || null,
           contactEmail: contactEmail || null,
           contactPhone: contactPhone || null,
+          contactTitle: contactTitle || null,
+          contactMemo: contactMemo || null,
           rowColor: rowColor || null,
         },
       });
@@ -131,6 +137,22 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
           </div>
 
           <div>
+            <label htmlFor="customer-create-contact-title" className={editLabelClass}>
+              대표 담당자 직급
+            </label>
+            <input
+              id="customer-create-contact-title"
+              className={editInputClass}
+              value={contactTitle}
+              maxLength={CUSTOMER_CONTACT_TITLE_MAX}
+              disabled={isSubmitting}
+              aria-invalid={fieldErrors.contactTitle ? true : undefined}
+              onChange={(e) => setContactTitle(e.target.value)}
+            />
+            {fieldErrors.contactTitle && <p className={editErrorClass}>{fieldErrors.contactTitle}</p>}
+          </div>
+
+          <div>
             <label htmlFor="customer-create-contact-phone" className={editLabelClass}>
               대표 연락처(전화)
             </label>
@@ -146,7 +168,7 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
             {fieldErrors.contactPhone && <p className={editErrorClass}>{fieldErrors.contactPhone}</p>}
           </div>
 
-          <div className="sm:col-span-2">
+          <div>
             <label htmlFor="customer-create-contact-email" className={editLabelClass}>
               대표 연락처(이메일)
             </label>
@@ -160,6 +182,24 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
               onChange={(e) => setContactEmail(e.target.value)}
             />
             {fieldErrors.contactEmail && <p className={editErrorClass}>{fieldErrors.contactEmail}</p>}
+          </div>
+
+          {/* 메모는 여러 줄로 적는 칸이라 두 칸을 가로지른다(수정 폼과 같다). */}
+          <div className="sm:col-span-2">
+            <label htmlFor="customer-create-contact-memo" className={editLabelClass}>
+              대표 담당자 메모
+            </label>
+            <textarea
+              id="customer-create-contact-memo"
+              rows={3}
+              className={`${editInputClass} resize-y`}
+              value={contactMemo}
+              maxLength={CUSTOMER_CONTACT_MEMO_MAX}
+              disabled={isSubmitting}
+              aria-invalid={fieldErrors.contactMemo ? true : undefined}
+              onChange={(e) => setContactMemo(e.target.value)}
+            />
+            {fieldErrors.contactMemo && <p className={editErrorClass}>{fieldErrors.contactMemo}</p>}
           </div>
 
           {/* 색 고르개는 칸이 열한 개라 두 칸을 가로지른다(수정 폼과 같다). */}

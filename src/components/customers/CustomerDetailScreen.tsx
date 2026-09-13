@@ -73,7 +73,7 @@ function kindLabel(kind: string | null): string {
  * 제품 모델 구역은 End-User 구역과 A/S 이력 구역 **사이**에 놓는다.
  *
  * 「고객사 담당자」 구역(2026-09-13)은 고객사 정보 바로 아래다 — 고객사 자체에 딸린
- * 사람들이라 End-User 보다 앞에 읽힌다. 고객사 정보의 대표 담당자 세 칸과는 따로
+ * 사람들이라 End-User 보다 앞에 읽힌다. 고객사 정보의 대표 담당자 칸들과는 따로
  * 있는 목록이다(CustomerContactList 머리말). 추가·수정·삭제는 각자 서버가 정한
  * 참/거짓을 받고, customer-contacts.ts 의 서버 액션이 다시 검사한다.
  */
@@ -152,8 +152,16 @@ export default function CustomerDetailScreen({
               <InfoField label="고객사명" value={customer.name} />
               <InfoField label="등록일" value={formatDateTime(customer.createdAt)} />
               <InfoField label="대표 담당자 성함" value={customer.contactName ?? "-"} />
+              <InfoField label="대표 담당자 직급" value={customer.contactTitle ?? "-"} />
               <InfoField label="대표 연락처(이메일)" value={customer.contactEmail ?? "-"} />
               <InfoField label="대표 연락처(전화)" value={customer.contactPhone ?? "-"} />
+              {/* 메모는 여러 줄로 적는 칸이다 — 두 칸을 가로지르고 줄바꿈을 그대로 보인다. */}
+              <div className="sm:col-span-2">
+                <dt className="text-xs text-zinc-500 dark:text-zinc-400">대표 담당자 메모</dt>
+                <dd className="whitespace-pre-wrap break-words text-sm text-zinc-900 dark:text-zinc-50">
+                  {customer.contactMemo ?? "-"}
+                </dd>
+              </div>
               {/* 수정 폼에서 고른 색을 읽기 화면에서도 그대로 볼 수 있어야 한다 —
                   안 그러면 색을 확인하려고 매번 수정 버튼을 눌러야 한다. */}
               <div>

@@ -66,6 +66,14 @@ export async function updateCustomer(params: {
   contactEmail: string | null;
   contactPhone: string | null;
   /**
+   * 대표 담당자의 직급·메모(2026-09-13). 🔴 **선택 칸이 아니라 꼭 받는 칸이다** —
+   * 이 수정은 모든 칸을 통째로 다시 쓰므로, 부르는 쪽이 이 둘을 빠뜨리면 저장 한 번에
+   * 지금 값이 지워진다. 예전에는 서버 액션이 `...validation.data` 로 새 칸을 넘겨도
+   * 여기 이름이 없어 조용히 버려졌다 — 꼭 받게 두어야 타입 검사가 그런 누락을 잡는다.
+   */
+  contactTitle: string | null;
+  contactMemo: string | null;
+  /**
    * 내자 정리 목록의 줄 배경색 — 팔레트 키이거나 null 이다
    * (domain/customer-row-color.ts). 저장할 칸이 하나 늘었을 뿐이라서
    * expectedUpdatedAt 대조와 이름 중복 검사는 그대로다.
@@ -115,6 +123,8 @@ export async function updateCustomer(params: {
             contactName: params.contactName,
             contactEmail: params.contactEmail,
             contactPhone: params.contactPhone,
+            contactTitle: params.contactTitle,
+            contactMemo: params.contactMemo,
             rowColor: params.rowColor,
             updatedAt: new Date(),
           })
@@ -166,12 +176,16 @@ const DUPLICATE_NAME_RESULT: CreateCustomerResult = {
  *
  * ── 감사 로그에 연락처는 넣지 않는다 ────────────────────────────────────
  * customers-trash.ts 와 같은 규칙이다 — contact_name/email/phone 은 개인정보다.
+ * 대표 담당자의 직급·메모(contact_title/memo)도 같은 사람에 대한 기록이라 넣지 않는다.
  */
 export async function createCustomer(params: {
   name: string;
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  /** 대표 담당자의 직급·메모 — updateCustomer 와 같은 까닭으로 꼭 받는다. */
+  contactTitle: string | null;
+  contactMemo: string | null;
   /** 팔레트 키이거나 null(domain/customer-row-color.ts). */
   rowColor: string | null;
   actorUserId: string;
@@ -213,6 +227,8 @@ export async function createCustomer(params: {
             contactName: params.contactName,
             contactEmail: params.contactEmail,
             contactPhone: params.contactPhone,
+            contactTitle: params.contactTitle,
+            contactMemo: params.contactMemo,
             rowColor: params.rowColor,
           })
           .returning({

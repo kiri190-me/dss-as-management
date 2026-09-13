@@ -110,6 +110,12 @@ export type CustomerDetail = {
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  /**
+   * 대표 담당자의 직급·메모(2026-09-13). 🔴 편집 폼의 초기값이기도 하다 — 폼은 모든
+   * 칸을 다시 보내므로 여기서 빠지면 저장 한 번에 지워진다(validateCustomerUpdateFields).
+   */
+  contactTitle: string | null;
+  contactMemo: string | null;
   createdAt: string;
   updatedAt: string;
   /** 내자 정리 목록의 줄 배경색(팔레트 키). 편집 폼의 색 고르개 초기값이다. */
@@ -126,6 +132,8 @@ export async function getCustomerDetailById(id: string): Promise<CustomerDetail 
       contactName: customers.contactName,
       contactEmail: customers.contactEmail,
       contactPhone: customers.contactPhone,
+      contactTitle: customers.contactTitle,
+      contactMemo: customers.contactMemo,
       rowColor: customers.rowColor,
       createdAt: customers.createdAt,
       updatedAt: customers.updatedAt,
@@ -173,6 +181,13 @@ export type EndUserContactRow = {
   endUserId: string;
   contactName: string;
   contactEmail: string | null;
+  /**
+   * 직급·전화·메모(2026-09-13). 🔴 수정 폼의 초기값이기도 하다 — 폼은 다섯 칸을 다
+   * 다시 보내므로 여기서 빠지면 저장 한 번에 지워진다(validateEndUserContactFields).
+   */
+  title: string | null;
+  phone: string | null;
+  memo: string | null;
   updatedAt: string;
 };
 
@@ -192,6 +207,9 @@ export async function listEndUserContactsByCustomerId(customerId: string): Promi
       endUserId: endUserContacts.endUserId,
       contactName: endUserContacts.contactName,
       contactEmail: endUserContacts.contactEmail,
+      title: endUserContacts.title,
+      phone: endUserContacts.phone,
+      memo: endUserContacts.memo,
       updatedAt: endUserContacts.updatedAt,
     })
     .from(endUserContacts)

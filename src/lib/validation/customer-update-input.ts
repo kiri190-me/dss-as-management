@@ -63,7 +63,19 @@ export function validateCustomerUpdateFields(
     }
   }
 
-  function normalizeNullableShortText(key: "contactName" | "contactPhone", label: string): string | null {
+  /**
+   * 대표 담당자 칸(성함·전화·이메일·직급·메모)의 오류 문구는 **화면 이름표와 같은
+   * 이름**으로 부른다 — 「대표 담당자 성함」 · 「대표 연락처(전화)」 …(2026-09-13).
+   * 같은 화면에 「고객사 담당자」 목록이 따로 생겨서 「담당자 성함이 너무 깁니다」만으로는
+   * 어느 쪽 칸인지 알 수 없다. 조사는 이름마다 맞춰 적는다(「성함이」 · 「(전화)가」 —
+   * 예전의 「이(가)」 틀은 버렸다). 칸 이름을 부르지 않는 형식 오류(「올바른 이메일
+   * 형식이 아닙니다.」)는 그대로다. 규칙(길이·빈 값·글자 여부)은 하나도 바뀌지 않았다.
+   */
+  function normalizeNullableShortText(
+    key: "contactName" | "contactPhone",
+    label: string,
+    tooLongMessage: string
+  ): string | null {
     const value = raw[key];
     if (value === null || value === undefined || value === "") return null;
     if (typeof value !== "string") {
@@ -72,23 +84,36 @@ export function validateCustomerUpdateFields(
     }
     const trimmed = value.trim();
     if (trimmed.length > MAX_SHORT_TEXT) {
-      fieldErrors[key] = `${label}이(가) 너무 깁니다.`;
+      fieldErrors[key] = tooLongMessage;
       return null;
     }
     return trimmed === "" ? null : trimmed;
   }
 
-  const contactName = normalizeNullableShortText("contactName", "담당자 성함");
-  const contactPhone = normalizeNullableShortText("contactPhone", "연락처");
+  const contactName = normalizeNullableShortText(
+    "contactName",
+    "대표 담당자 성함",
+    "대표 담당자 성함이 너무 깁니다."
+  );
+  const contactPhone = normalizeNullableShortText(
+    "contactPhone",
+    "대표 연락처(전화)",
+    "대표 연락처(전화)가 너무 깁니다."
+  );
 
   /**
    * 대표 담당자의 직급·메모 — 고객사 담당자(customer-contact-input.ts)의
    * optionalText 와 같은 규칙이다: 없거나 걷고 나서 비면 null, 글자가 아니면
    * 오류, 상한을 넘으면 오류. 메모만 줄바꿈을 받으므로 세기 전에 CRLF → LF 로
-   * 통일한다(그 파일 머리 주석의 까닭). 위의 이름·연락처 칸은 예전 규칙·문구
-   * 그대로 둔다.
+   * 통일한다(그 파일 머리 주석의 까닭). `topic` 은 조사까지 붙인 이름이다
+   * (「대표 담당자 직급은」 — 위 문구 주석).
    */
-  function optionalContactText(key: "contactTitle" | "contactMemo", label: string, max: number): string | null {
+  function optionalContactText(
+    key: "contactTitle" | "contactMemo",
+    label: string,
+    topic: string,
+    max: number
+  ): string | null {
     const value = raw[key];
     if (value === null || value === undefined) return null;
     if (typeof value !== "string") {
@@ -98,25 +123,35 @@ export function validateCustomerUpdateFields(
     const trimmed = (key === "contactMemo" ? value.replace(/\r\n?/g, "\n") : value).trim();
     if (trimmed === "") return null;
     if (trimmed.length > max) {
-      fieldErrors[key] = `${label}은(는) ${max}자를 넘을 수 없습니다.`;
+      fieldErrors[key] = `${topic} ${max}자를 넘을 수 없습니다.`;
       return null;
     }
     return trimmed;
   }
 
-  const contactTitle = optionalContactText("contactTitle", "직급", CUSTOMER_CONTACT_TITLE_MAX);
-  const contactMemo = optionalContactText("contactMemo", "메모", CUSTOMER_CONTACT_MEMO_MAX);
+  const contactTitle = optionalContactText(
+    "contactTitle",
+    "대표 담당자 직급",
+    "대표 담당자 직급은",
+    CUSTOMER_CONTACT_TITLE_MAX
+  );
+  const contactMemo = optionalContactText(
+    "contactMemo",
+    "대표 담당자 메모",
+    "대표 담당자 메모는",
+    CUSTOMER_CONTACT_MEMO_MAX
+  );
 
   let contactEmail: string | null = null;
   const emailRaw = raw.contactEmail;
   if (emailRaw === null || emailRaw === undefined || emailRaw === "") {
     contactEmail = null;
   } else if (typeof emailRaw !== "string") {
-    fieldErrors.contactEmail = "이메일 값을 확인할 수 없습니다.";
+    fieldErrors.contactEmail = "대표 연락처(이메일) 값을 확인할 수 없습니다.";
   } else {
     const trimmed = emailRaw.trim();
     if (trimmed.length > MAX_SHORT_TEXT) {
-      fieldErrors.contactEmail = "이메일이 너무 깁니다.";
+      fieldErrors.contactEmail = "대표 연락처(이메일)가 너무 깁니다.";
     } else if (!trimmed.includes("@")) {
       fieldErrors.contactEmail = "올바른 이메일 형식이 아닙니다.";
     } else {

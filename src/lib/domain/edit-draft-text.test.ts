@@ -143,13 +143,16 @@ test("이름표 맵에 사람이 읽을 수 없는 항목이 들어 있지 않�
 
 // ─────────────────────────────── 화면 전용 이름표 맵 (고객사 · 제품모델)
 
-test("고객사 맵에는 자유 입력 넷만 있다 — 고르는 색(rowColor)과 id·시각은 없다", () => {
+test("고객사 맵에는 자유 입력 여섯만 있다 — 고르는 색(rowColor)과 id·시각은 없다", () => {
   assert.deepEqual(Object.keys(CUSTOMER_DRAFT_LABELS), [
-    // 차례가 곧 상자에 나오는 차례다 — 화면(CustomerEditForm)에 놓인 그대로.
+    // 차례가 곧 상자에 나오는 차례다 — 화면(CustomerEditForm)에 놓인 그대로
+    // (고객사명 / 성함 · 직급 / 이메일 · 전화 / 메모).
     "name",
     "contactName",
+    "contactTitle",
     "contactEmail",
     "contactPhone",
+    "contactMemo",
   ]);
   // rowColor 는 팔레트에서 고르는 값이고 저장되는 것은 `blue` 같은 키다.
   // id·updatedAt 은 사람이 읽을 수 없다. 셋 다 새어 나가면 안 된다.
@@ -206,6 +209,7 @@ test("★ 고객사(customerIds)도 제품모델 맵에 없다 — 고른 값이
 
 test("화면 전용 맵은 그 화면이 보내는 값만 골라 담는다 — 나머지는 그냥 빠진다", () => {
   // 고객사 저장이 실제로 보내는 모양(CustomerEditForm 의 fields) 그대로 넣는다.
+  // 이름표는 화면 그대로 「대표 …」다 — 같은 화면의 고객사 담당자 목록과 헷갈리지 않게.
   assert.equal(
     buildDraftText(
       {
@@ -213,11 +217,15 @@ test("화면 전용 맵은 그 화면이 보내는 값만 골라 담는다 — �
         contactName: "홍길동",
         contactEmail: "hong@example.com",
         contactPhone: "010-1234-5678",
+        contactTitle: "부장",
+        contactMemo: "견적은 메일로\n오전에만 통화",
         rowColor: "blue",
       },
       CUSTOMER_DRAFT_LABELS
     ),
-    "고객사명\n㈜한빛전자\n\n담당자 성함\n홍길동\n\n연락처(이메일)\nhong@example.com\n\n연락처(전화)\n010-1234-5678"
+    "고객사명\n㈜한빛전자\n\n대표 담당자 성함\n홍길동\n\n대표 담당자 직급\n부장\n\n" +
+      "대표 연락처(이메일)\nhong@example.com\n\n대표 연락처(전화)\n010-1234-5678\n\n" +
+      "대표 담당자 메모\n견적은 메일로\n오전에만 통화"
   );
   assert.ok(
     !buildDraftText({ name: "㈜한빛전자", rowColor: "blue" }, CUSTOMER_DRAFT_LABELS).includes(
@@ -252,7 +260,14 @@ test("두 맵 모두 담을 글이 하나도 없으면 빈 문자열이다 — �
   // 빈 값으로 지우기만 한 저장도 마찬가지다(폼은 빈 문자열을 null 로 접어 보낸다).
   assert.equal(
     buildDraftText(
-      { name: "", contactName: null, contactEmail: null, contactPhone: null },
+      {
+        name: "",
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
+      },
       CUSTOMER_DRAFT_LABELS
     ),
     ""

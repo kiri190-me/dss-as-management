@@ -8,7 +8,9 @@ import { db, pgClient } from "../connection";
 import { auditLogs, customers, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { createCustomer, updateCustomer } from "./customers";
+import { getCustomerDetailById } from "../queries/customers";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
+import { validateCustomerUpdateFields } from "@/lib/validation/customer-update-input";
 
 /**
  * Real-DB integration test against dss-as-postgres-dev, exercising
@@ -165,6 +167,8 @@ describe("updateCustomer", () => {
       contactName: "담당자",
       contactEmail: "contact@example.com",
       contactPhone: "010-1234-5678",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -188,6 +192,8 @@ describe("updateCustomer", () => {
       contactName: "temp",
       contactEmail: "temp@example.com",
       contactPhone: "010-0000-0000",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(first.ok, true);
@@ -200,6 +206,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, true);
@@ -221,6 +229,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, false);
@@ -241,6 +251,8 @@ describe("updateCustomer", () => {
       contactName: "unchanged-update",
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -256,6 +268,8 @@ describe("updateCustomer", () => {
       contactName: "v1",
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(first.ok, true);
@@ -267,6 +281,8 @@ describe("updateCustomer", () => {
       contactName: "v2-should-not-apply",
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, false);
@@ -285,6 +301,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(missing.ok, false);
@@ -299,6 +317,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, false);
@@ -318,6 +338,8 @@ describe("updateCustomer", () => {
         contactName: null,
         contactEmail: null,
         contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
         rowColor: null,
       }),
       updateCustomer({
@@ -327,6 +349,8 @@ describe("updateCustomer", () => {
         contactName: null,
         contactEmail: null,
         contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
         rowColor: null,
       }),
     ]);
@@ -346,6 +370,8 @@ describe("updateCustomer", () => {
         contactName: null,
         contactEmail: null,
         contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
         rowColor: null,
       });
 
@@ -389,6 +415,8 @@ describe("updateCustomer", () => {
       contactName: "새 마스터 담당자",
       contactEmail: "new-master@example.com",
       contactPhone: "010-9999-8888",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -410,6 +438,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "amber",
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
@@ -427,6 +457,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "sky",
     });
     assert.equal(first.ok, true);
@@ -439,6 +471,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "violet",
     });
     assert.equal(second.ok, true);
@@ -454,6 +488,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(cleared.ok, true);
@@ -471,6 +507,8 @@ describe("updateCustomer", () => {
       contactName: "담당자",
       contactEmail: "keep@example.com",
       contactPhone: "010-5555-6666",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
     });
     assert.equal(first.ok, true);
@@ -483,6 +521,8 @@ describe("updateCustomer", () => {
       contactName: "담당자",
       contactEmail: "keep@example.com",
       contactPhone: "010-5555-6666",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "emerald",
     });
     assert.equal(result.ok, true);
@@ -505,6 +545,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "teal",
     });
     assert.equal(first.ok, true);
@@ -516,6 +558,8 @@ describe("updateCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "rose",
     });
     assert.equal(result.ok, false);
@@ -524,6 +568,102 @@ describe("updateCustomer", () => {
 
     const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
     assert.equal(row.rowColor, "teal", "충돌한 두 번째 수정은 색도 적용하지 않는다");
+  });
+
+  // ── 대표 담당자의 직급·메모(2026-09-13) ─────────────────────────────────
+
+  test("대표 담당자 직급·메모가 저장되고(메모 줄바꿈 그대로), 비우면 null 로 돌아간다", async () => {
+    const customer = await createTestCustomer("REP-TITLE-MEMO");
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: "김대표",
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: "부장",
+      contactMemo: "견적은 메일로\n오전에만 통화",
+      rowColor: null,
+    });
+    assert.equal(first.ok, true, `update failed: ${JSON.stringify(first)}`);
+    if (!first.ok) return;
+
+    const [saved] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(saved.contactTitle, "부장");
+    assert.equal(saved.contactMemo, "견적은 메일로\n오전에만 통화", "메모의 줄바꿈이 그대로 남아야 한다");
+
+    const cleared = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: first.updatedAt,
+      name: customer.name,
+      contactName: "김대표",
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+    });
+    assert.equal(cleared.ok, true, `clear failed: ${JSON.stringify(cleared)}`);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.contactTitle, null);
+    assert.equal(row.contactMemo, null);
+    assert.equal(row.contactName, "김대표", "비운 것은 직급·메모뿐이다");
+  });
+
+  test("🔴 폼이 모든 칸을 다시 보내는 길 그대로 — 전화만 고쳐도 직급·메모가 남는다", async () => {
+    // 수정 폼(CustomerEditForm)은 상세 조회(getCustomerDetailById) 값으로 칸을 채우고,
+    // 저장할 때 모든 칸을 다시 보낸다. 서버 액션은 그것을 validateCustomerUpdateFields 로
+    // 거른 뒤 통째로 펼쳐 updateCustomer 에 넘긴다(update-customer.ts). 검증은 빠진 키를
+    // null 로 읽으므로, 이 길의 어느 한 곳에서라도 직급·메모가 빠지면 이 저장 한 번에
+    // 지워진다. 조회 → 폼 → 검증 → mutation 을 그대로 밟는다.
+    const customer = await createTestCustomer("REP-KEEP");
+    const seeded = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: "김대표",
+      contactEmail: "rep@example.com",
+      contactPhone: "010-1111-2222",
+      contactTitle: "부장",
+      contactMemo: "견적은 메일로\n오전에만 통화",
+      rowColor: "amber",
+    });
+    assert.equal(seeded.ok, true, `seed failed: ${JSON.stringify(seeded)}`);
+
+    const detail = await getCustomerDetailById(customer.id);
+    assert.ok(detail, "상세 조회가 고객사를 돌려줘야 한다");
+    if (!detail) return;
+    assert.equal(detail.contactTitle, "부장", "상세 조회가 직급을 실어야 폼이 채울 수 있다");
+    assert.equal(detail.contactMemo, "견적은 메일로\n오전에만 통화", "상세 조회가 메모를 실어야 폼이 채울 수 있다");
+
+    // 폼이 보내는 모양 그대로 — 채워 둔 값을 모두 다시 싣고, 전화만 새 값이다.
+    const validation = validateCustomerUpdateFields({
+      name: detail.name,
+      contactName: detail.contactName,
+      contactEmail: detail.contactEmail,
+      contactPhone: "010-3333-4444",
+      contactTitle: detail.contactTitle,
+      contactMemo: detail.contactMemo,
+      rowColor: detail.rowColor,
+    });
+    assert.equal(validation.ok, true, `validation failed: ${JSON.stringify(validation)}`);
+    if (!validation.ok) return;
+
+    const result = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: detail.updatedAt,
+      ...validation.data,
+    });
+    assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.contactPhone, "010-3333-4444", "고친 칸은 바뀌어야 한다");
+    assert.equal(row.contactTitle, "부장", "다른 칸만 고친 저장이 직급을 지우면 안 된다");
+    assert.equal(row.contactMemo, "견적은 메일로\n오전에만 통화", "다른 칸만 고친 저장이 메모를 지우면 안 된다");
+    assert.equal(row.contactName, "김대표");
+    assert.equal(row.contactEmail, "rep@example.com");
+    assert.equal(row.rowColor, "amber");
   });
 });
 
@@ -542,6 +682,8 @@ describe("createCustomer", () => {
       contactName: null,
       contactEmail: null,
       contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
       rowColor: null,
       actorUserId: engineerId,
       ...overrides,
@@ -557,6 +699,8 @@ describe("createCustomer", () => {
       contactName: "담당자",
       contactEmail: "create@example.com",
       contactPhone: "010-2222-3333",
+      contactTitle: null,
+      contactMemo: null,
       rowColor: "amber",
     });
     assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
@@ -569,6 +713,33 @@ describe("createCustomer", () => {
     assert.equal(row.contactPhone, "010-2222-3333");
     assert.equal(row.rowColor, "amber");
     assert.equal(row.isDeleted, false);
+  });
+
+  test("대표 담당자 직급·메모도 만들 때 저장된다 — 폼 → 검증 → 통째로 펼쳐 넘기는 길 그대로", async () => {
+    // createCustomerAction 은 검증 결과를 통째로 펼쳐 createCustomer 에 넘긴다. 예전에는
+    // 새 칸이 그 사이에서 조용히 버려졌다(mutation 이 칸을 이름으로 골라 썼다) — 같은
+    // 길을 밟아 끝까지 가는지 본다.
+    const name = uniqueName("CREATE-REP");
+    const validation = validateCustomerUpdateFields({
+      name,
+      contactName: "김대표",
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: " 과장 ",
+      contactMemo: "평일 오전만\r\n통화 가능",
+      rowColor: null,
+    });
+    assert.equal(validation.ok, true, `validation failed: ${JSON.stringify(validation)}`);
+    if (!validation.ok) return;
+
+    const result = await create(validation.data);
+    assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, result.id));
+    assert.equal(row.contactName, "김대표");
+    assert.equal(row.contactTitle, "과장");
+    assert.equal(row.contactMemo, "평일 오전만\n통화 가능", "메모는 줄바꿈을 LF 로 맞춰 저장한다");
   });
 
   test("이름의 앞뒤 공백은 걷어서 저장한다", async () => {
@@ -617,6 +788,8 @@ describe("createCustomer", () => {
       contactName: "감사담당",
       contactEmail: "audit-create@example.com",
       contactPhone: "010-7777-8888",
+      contactTitle: "감사직급",
+      contactMemo: "감사 메모 내용",
       rowColor: "sky",
     });
     assert.equal(result.ok, true, `create failed: ${JSON.stringify(result)}`);
@@ -636,9 +809,10 @@ describe("createCustomer", () => {
     assert.equal(newValue.name, name);
     assert.equal(newValue.rowColor, "sky");
 
-    // 연락처는 개인정보다 — customers-trash.ts 와 같은 규칙.
+    // 연락처는 개인정보다 — customers-trash.ts 와 같은 규칙. 대표 담당자의 직급·메모도
+    // 같은 사람에 대한 기록이라 담지 않는다.
     const serialized = JSON.stringify(log.newValue);
-    for (const secret of ["감사담당", "audit-create@example.com", "010-7777-8888"]) {
+    for (const secret of ["감사담당", "audit-create@example.com", "010-7777-8888", "감사직급", "감사 메모 내용"]) {
       assert.ok(!serialized.includes(secret), `감사 로그에 연락처(${secret})가 들어갔다`);
     }
   });

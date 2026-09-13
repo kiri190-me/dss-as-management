@@ -33,8 +33,33 @@ export type EndUserActionResult =
   | { ok: false; code: EndUserActionResultCode; fieldErrors?: Record<string, string>; message: string };
 
 export type EndUserContactActionResult =
-  | { ok: true; id: string; contactName: string; contactEmail: string | null; updatedAt: string }
+  | {
+      ok: true;
+      id: string;
+      contactName: string;
+      contactEmail: string | null;
+      title: string | null;
+      phone: string | null;
+      memo: string | null;
+      updatedAt: string;
+    }
   | { ok: false; code: EndUserActionResultCode; fieldErrors?: Record<string, string>; message: string };
+
+/**
+ * 담당자 폼이 보내는 다섯 칸(추가·수정 공통). 선택 칸의 빈 값은 null 이든 "" 든 검증이
+ * null 로 바꾼다.
+ *
+ * 🔴 직급·전화·메모도 **꼭 보내는 칸**이다. 수정은 다섯 칸을 통째로 다시 쓰고, 검증은
+ * 빠진 키를 null 로 읽으므로(validateEndUserContactFields) 폼이 하나라도 빠뜨리면 저장
+ * 한 번에 그 칸이 지워진다.
+ */
+export type EndUserContactFieldsInput = {
+  contactName: string;
+  contactEmail: string | null;
+  title: string | null;
+  phone: string | null;
+  memo: string | null;
+};
 
 export type RemoveEndUserContactActionResult =
   | { ok: true }
@@ -142,11 +167,9 @@ export async function renameEndUserAction(input: {
   }
 }
 
-export async function createEndUserContactAction(input: {
-  endUserId: string;
-  contactName: string;
-  contactEmail: string | null;
-}): Promise<EndUserContactActionResult> {
+export async function createEndUserContactAction(
+  input: { endUserId: string } & EndUserContactFieldsInput
+): Promise<EndUserContactActionResult> {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
@@ -167,23 +190,16 @@ export async function createEndUserContactAction(input: {
   }
 
   try {
-    return await createEndUserContact({
-      endUserId: input.endUserId,
-      contactName: validation.data.contactName,
-      contactEmail: validation.data.contactEmail,
-    });
+    return await createEndUserContact({ endUserId: input.endUserId, ...validation.data });
   } catch (err) {
     console.error("createEndUserContactAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요." };
   }
 }
 
-export async function updateEndUserContactAction(input: {
-  contactId: string;
-  expectedUpdatedAt: string;
-  contactName: string;
-  contactEmail: string | null;
-}): Promise<EndUserContactActionResult> {
+export async function updateEndUserContactAction(
+  input: { contactId: string; expectedUpdatedAt: string } & EndUserContactFieldsInput
+): Promise<EndUserContactActionResult> {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
@@ -215,8 +231,7 @@ export async function updateEndUserContactAction(input: {
     return await updateEndUserContact({
       contactId: input.contactId,
       expectedUpdatedAt: input.expectedUpdatedAt,
-      contactName: validation.data.contactName,
-      contactEmail: validation.data.contactEmail,
+      ...validation.data,
     });
   } catch (err) {
     console.error("updateEndUserContactAction: unexpected DB error", err);

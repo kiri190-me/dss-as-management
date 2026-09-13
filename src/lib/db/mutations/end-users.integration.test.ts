@@ -14,7 +14,9 @@ import {
   renameEndUser,
   updateEndUserContact,
 } from "./end-users";
+import { listEndUserContactsByCustomerId } from "../queries/customers";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
+import { validateEndUserContactFields } from "@/lib/validation/end-user-input";
 
 /**
  * Real-DB integration test against dss-as-postgres-dev, exercising the
@@ -331,7 +333,7 @@ describe("End-User contacts (create/update/remove)", () => {
     assert.equal(endUser.ok, true);
     if (!endUser.ok) return;
 
-    const result = await createEndUserContact({ endUserId: endUser.id, contactName: "김담당", contactEmail: null });
+    const result = await createEndUserContact({ endUserId: endUser.id, contactName: "김담당", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(result.ok, true, `create contact failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
     assert.equal(result.contactName, "김담당");
@@ -339,7 +341,7 @@ describe("End-User contacts (create/update/remove)", () => {
   });
 
   test("createEndUserContact: NOT_FOUND for a nonexistent End-User", async () => {
-    const result = await createEndUserContact({ endUserId: randomUUID(), contactName: "x", contactEmail: null });
+    const result = await createEndUserContact({ endUserId: randomUUID(), contactName: "x", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_FOUND");
   });
@@ -349,7 +351,7 @@ describe("End-User contacts (create/update/remove)", () => {
     const endUser = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}eu-${randomUUID().slice(0, 8)}` });
     assert.equal(endUser.ok, true);
     if (!endUser.ok) return;
-    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "이전", contactEmail: null });
+    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "이전", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(contact.ok, true);
     if (!contact.ok) return;
 
@@ -358,6 +360,9 @@ describe("End-User contacts (create/update/remove)", () => {
       expectedUpdatedAt: contact.updatedAt,
       contactName: "이후",
       contactEmail: "after@example.test",
+      title: null,
+      phone: null,
+      memo: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
@@ -370,18 +375,158 @@ describe("End-User contacts (create/update/remove)", () => {
     const endUser = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}eu-${randomUUID().slice(0, 8)}` });
     assert.equal(endUser.ok, true);
     if (!endUser.ok) return;
-    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "v1", contactEmail: null });
+    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "v1", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(contact.ok, true);
     if (!contact.ok) return;
 
     const staleTimestamp = contact.updatedAt;
-    const first = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: staleTimestamp, contactName: "v2", contactEmail: null });
+    const first = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: staleTimestamp, contactName: "v2", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(first.ok, true);
 
-    const second = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: staleTimestamp, contactName: "v3-should-not-apply", contactEmail: null });
+    const second = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: staleTimestamp, contactName: "v3-should-not-apply", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(second.ok, false);
     if (second.ok) return;
     assert.equal(second.code, "CONFLICT");
+  });
+
+  // ── 직급·전화·메모(2026-09-13) ────────────────────────────────────────
+
+  async function createTestEndUser(label: string) {
+    const customer = await createTestCustomer(label);
+    const endUser = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}eu-${randomUUID().slice(0, 8)}` });
+    assert.equal(endUser.ok, true, `setup End-User failed: ${JSON.stringify(endUser)}`);
+    if (!endUser.ok) throw new Error("setup End-User failed");
+    return { customer, endUser };
+  }
+
+  test("createEndUserContact: 직급·전화·메모가 저장되고 결과에도 실린다", async () => {
+    const { endUser } = await createTestEndUser("CONTACT-EXTRA-CREATE");
+
+    const result = await createEndUserContact({
+      endUserId: endUser.id,
+      contactName: "박담당",
+      contactEmail: "park@example.test",
+      title: "대리",
+      phone: "010-4444-5555",
+      memo: "야간 연락 불가\n메일 우선",
+    });
+    assert.equal(result.ok, true, `create contact failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+    assert.equal(result.title, "대리");
+    assert.equal(result.phone, "010-4444-5555");
+    assert.equal(result.memo, "야간 연락 불가\n메일 우선");
+
+    const [row] = await db.select().from(endUserContacts).where(eq(endUserContacts.id, result.id));
+    assert.equal(row.contactName, "박담당");
+    assert.equal(row.contactEmail, "park@example.test");
+    assert.equal(row.title, "대리");
+    assert.equal(row.phone, "010-4444-5555");
+    assert.equal(row.memo, "야간 연락 불가\n메일 우선", "메모의 줄바꿈이 그대로 남아야 한다");
+  });
+
+  test("updateEndUserContact: 직급·전화·메모를 바꾸고 비울 수 있다 — 결과에도 실린다", async () => {
+    const { endUser } = await createTestEndUser("CONTACT-EXTRA-UPDATE");
+    const contact = await createEndUserContact({
+      endUserId: endUser.id,
+      contactName: "최담당",
+      contactEmail: null,
+      title: "사원",
+      phone: "010-0000-1111",
+      memo: "처음 메모",
+    });
+    assert.equal(contact.ok, true);
+    if (!contact.ok) return;
+
+    const changed = await updateEndUserContact({
+      contactId: contact.id,
+      expectedUpdatedAt: contact.updatedAt,
+      contactName: "최담당",
+      contactEmail: null,
+      title: "과장",
+      phone: "02-123-4567",
+      memo: "바뀐 메모\n둘째 줄",
+    });
+    assert.equal(changed.ok, true, `update failed: ${JSON.stringify(changed)}`);
+    if (!changed.ok) return;
+    assert.equal(changed.title, "과장");
+    assert.equal(changed.phone, "02-123-4567");
+    assert.equal(changed.memo, "바뀐 메모\n둘째 줄");
+
+    const [afterChange] = await db.select().from(endUserContacts).where(eq(endUserContacts.id, contact.id));
+    assert.equal(afterChange.title, "과장");
+    assert.equal(afterChange.phone, "02-123-4567");
+    assert.equal(afterChange.memo, "바뀐 메모\n둘째 줄");
+
+    const cleared = await updateEndUserContact({
+      contactId: contact.id,
+      expectedUpdatedAt: changed.updatedAt,
+      contactName: "최담당",
+      contactEmail: null,
+      title: null,
+      phone: null,
+      memo: null,
+    });
+    assert.equal(cleared.ok, true, `clear failed: ${JSON.stringify(cleared)}`);
+    if (!cleared.ok) return;
+    assert.equal(cleared.title, null);
+    assert.equal(cleared.phone, null);
+    assert.equal(cleared.memo, null);
+
+    const [row] = await db.select().from(endUserContacts).where(eq(endUserContacts.id, contact.id));
+    assert.equal(row.title, null);
+    assert.equal(row.phone, null);
+    assert.equal(row.memo, null);
+    assert.equal(row.contactName, "최담당", "비운 것은 직급·전화·메모뿐이다");
+  });
+
+  test("🔴 폼이 다섯 칸을 다시 보내는 길 그대로 — 이름만 고쳐도 직급·전화·메모가 남는다", async () => {
+    // 수정 폼(EndUserContactList)은 목록 조회(listEndUserContactsByCustomerId) 값으로 칸을
+    // 채우고 저장할 때 다섯 칸을 다 보낸다. 서버 액션은 validateEndUserContactFields 로
+    // 거른 뒤 통째로 펼쳐 updateEndUserContact 에 넘긴다(server/actions/end-users.ts).
+    // 검증은 빠진 키를 null 로 읽으므로, 이 길 어디서든 새 칸이 빠지면 지워진다.
+    const { customer, endUser } = await createTestEndUser("CONTACT-EXTRA-KEEP");
+    const contact = await createEndUserContact({
+      endUserId: endUser.id,
+      contactName: "정담당",
+      contactEmail: "jung@example.test",
+      title: "차장",
+      phone: "010-7777-0000",
+      memo: "현장 출입 시 사전 연락\n주차 불가",
+    });
+    assert.equal(contact.ok, true);
+    if (!contact.ok) return;
+
+    const listed = (await listEndUserContactsByCustomerId(customer.id)).find((row) => row.id === contact.id);
+    assert.ok(listed, "목록 조회가 방금 만든 담당자를 돌려줘야 한다");
+    if (!listed) return;
+    assert.equal(listed.title, "차장", "목록 조회가 직급을 실어야 폼이 채울 수 있다");
+    assert.equal(listed.phone, "010-7777-0000", "목록 조회가 전화를 실어야 폼이 채울 수 있다");
+    assert.equal(listed.memo, "현장 출입 시 사전 연락\n주차 불가", "목록 조회가 메모를 실어야 폼이 채울 수 있다");
+
+    // 폼이 보내는 모양 그대로 — 채워 둔 값을 모두 다시 싣고, 이름만 새 값이다.
+    const validation = validateEndUserContactFields({
+      contactName: "정담당(수정)",
+      contactEmail: listed.contactEmail,
+      title: listed.title,
+      phone: listed.phone,
+      memo: listed.memo,
+    });
+    assert.equal(validation.ok, true, `validation failed: ${JSON.stringify(validation)}`);
+    if (!validation.ok) return;
+
+    const result = await updateEndUserContact({
+      contactId: listed.id,
+      expectedUpdatedAt: listed.updatedAt,
+      ...validation.data,
+    });
+    assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+
+    const [row] = await db.select().from(endUserContacts).where(eq(endUserContacts.id, contact.id));
+    assert.equal(row.contactName, "정담당(수정)", "고친 칸은 바뀌어야 한다");
+    assert.equal(row.contactEmail, "jung@example.test");
+    assert.equal(row.title, "차장", "이름만 고친 저장이 직급을 지우면 안 된다");
+    assert.equal(row.phone, "010-7777-0000", "이름만 고친 저장이 전화를 지우면 안 된다");
+    assert.equal(row.memo, "현장 출입 시 사전 연락\n주차 불가", "이름만 고친 저장이 메모를 지우면 안 된다");
   });
 
   test("removeEndUserContact: soft-deletes — no longer returned as active, and a second removal is NOT_FOUND", async () => {
@@ -389,7 +534,7 @@ describe("End-User contacts (create/update/remove)", () => {
     const endUser = await createEndUser({ customerId: customer.id, name: `${TEST_CUSTOMER_NAME_PREFIX}eu-${randomUUID().slice(0, 8)}` });
     assert.equal(endUser.ok, true);
     if (!endUser.ok) return;
-    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "제거대상", contactEmail: null });
+    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "제거대상", contactEmail: null, title: null, phone: null, memo: null });
     assert.equal(contact.ok, true);
     if (!contact.ok) return;
 
@@ -428,10 +573,10 @@ describe("End-User contacts (create/update/remove)", () => {
 
     const renamed = await renameEndUser({ endUserId: endUser.id, expectedUpdatedAt: endUser.updatedAt, name: `${endUser.name}-renamed` });
     assert.equal(renamed.ok, true);
-    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "새 담당자", contactEmail: "new@example.test" });
+    const contact = await createEndUserContact({ endUserId: endUser.id, contactName: "새 담당자", contactEmail: "new@example.test", title: null, phone: null, memo: null });
     assert.equal(contact.ok, true);
     if (!contact.ok) return;
-    const edited = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: contact.updatedAt, contactName: "수정된 담당자", contactEmail: "edited@example.test" });
+    const edited = await updateEndUserContact({ contactId: contact.id, expectedUpdatedAt: contact.updatedAt, contactName: "수정된 담당자", contactEmail: "edited@example.test", title: null, phone: null, memo: null });
     assert.equal(edited.ok, true);
     if (!edited.ok) return;
     const removed = await removeEndUserContact({ contactId: contact.id, expectedUpdatedAt: edited.updatedAt, actorUserId: engineerId });

@@ -176,17 +176,47 @@ export async function renameEndUser(params: {
   });
 }
 
+/**
+ * End-User 담당자 한 줄의 다섯 칸(이름·이메일·직급·전화·메모). 추가·수정이 함께 받는다.
+ *
+ * 🔴 직급·전화·메모(2026-09-13)도 **꼭 받는 칸이다.** 수정은 다섯 칸을 통째로 다시
+ * 쓰므로(폼이 늘 다섯 칸을 다 보낸다) 부르는 쪽이 빠뜨리면 그 칸이 지워진다 — 꼭 받게
+ * 두어야 타입 검사가 그런 누락을 잡는다(customers.ts updateCustomer 의 같은 주석).
+ */
+export type EndUserContactFieldsParams = {
+  contactName: string;
+  contactEmail: string | null;
+  title: string | null;
+  phone: string | null;
+  memo: string | null;
+};
+
+/** 저장 뒤 돌려주는 한 줄 — 화면이 다시 부르지 않고도 새 값을 알 수 있게 다섯 칸을 다 싣는다. */
+export type EndUserContactSaved = EndUserContactFieldsParams & { id: string; updatedAt: string };
+
+const savedContactColumns = {
+  id: endUserContacts.id,
+  contactName: endUserContacts.contactName,
+  contactEmail: endUserContacts.contactEmail,
+  title: endUserContacts.title,
+  phone: endUserContacts.phone,
+  memo: endUserContacts.memo,
+  updatedAt: endUserContacts.updatedAt,
+};
+
+function toSavedContact(row: Omit<EndUserContactSaved, "updatedAt"> & { updatedAt: Date }): EndUserContactSaved {
+  return { ...row, updatedAt: row.updatedAt.toISOString() };
+}
+
 export type CreateEndUserContactResult =
-  | { ok: true; id: string; contactName: string; contactEmail: string | null; updatedAt: string }
+  | ({ ok: true } & EndUserContactSaved)
   | { ok: false; code: "NOT_FOUND"; message: string };
 
 /** No duplicate-name protection here, unlike customers/end_users — multiple contacts sharing a name (e.g. a common name) is not the "same master identity" concern that motivates the customer/End-User unique index; no such constraint was part of the approved design. */
-export async function createEndUserContact(params: {
-  endUserId: string;
-  contactName: string;
-  contactEmail: string | null;
-}): Promise<CreateEndUserContactResult> {
-  return db.transaction(async (tx) => {
+export async function createEndUserContact(
+  params: { endUserId: string } & EndUserContactFieldsParams
+): Promise<CreateEndUserContactResult> {
+  return db.transaction(async (tx): Promise<CreateEndUserContactResult> => {
     const [endUser] = await tx
       .select({ id: endUsers.id })
       .from(endUsers)
@@ -197,35 +227,28 @@ export async function createEndUserContact(params: {
 
     const [created] = await tx
       .insert(endUserContacts)
-      .values({ endUserId: params.endUserId, contactName: params.contactName, contactEmail: params.contactEmail })
-      .returning({
-        id: endUserContacts.id,
-        contactName: endUserContacts.contactName,
-        contactEmail: endUserContacts.contactEmail,
-        updatedAt: endUserContacts.updatedAt,
-      });
-    return {
-      ok: true,
-      id: created.id,
-      contactName: created.contactName,
-      contactEmail: created.contactEmail,
-      updatedAt: created.updatedAt.toISOString(),
-    };
+      .values({
+        endUserId: params.endUserId,
+        contactName: params.contactName,
+        contactEmail: params.contactEmail,
+        title: params.title,
+        phone: params.phone,
+        memo: params.memo,
+      })
+      .returning(savedContactColumns);
+    return { ok: true, ...toSavedContact(created) };
   });
 }
 
 export type UpdateEndUserContactResultCode = "NOT_FOUND" | "CONFLICT";
 
 export type UpdateEndUserContactResult =
-  | { ok: true; id: string; contactName: string; contactEmail: string | null; updatedAt: string }
+  | ({ ok: true } & EndUserContactSaved)
   | { ok: false; code: UpdateEndUserContactResultCode; message: string };
 
-export async function updateEndUserContact(params: {
-  contactId: string;
-  expectedUpdatedAt: string;
-  contactName: string;
-  contactEmail: string | null;
-}): Promise<UpdateEndUserContactResult> {
+export async function updateEndUserContact(
+  params: { contactId: string; expectedUpdatedAt: string } & EndUserContactFieldsParams
+): Promise<UpdateEndUserContactResult> {
   return db.transaction(async (tx) => {
     const [current] = await tx
       .select()
@@ -245,21 +268,17 @@ export async function updateEndUserContact(params: {
 
     const [updated] = await tx
       .update(endUserContacts)
-      .set({ contactName: params.contactName, contactEmail: params.contactEmail, updatedAt: new Date() })
+      .set({
+        contactName: params.contactName,
+        contactEmail: params.contactEmail,
+        title: params.title,
+        phone: params.phone,
+        memo: params.memo,
+        updatedAt: new Date(),
+      })
       .where(eq(endUserContacts.id, params.contactId))
-      .returning({
-        id: endUserContacts.id,
-        contactName: endUserContacts.contactName,
-        contactEmail: endUserContacts.contactEmail,
-        updatedAt: endUserContacts.updatedAt,
-      });
-    return {
-      ok: true,
-      id: updated.id,
-      contactName: updated.contactName,
-      contactEmail: updated.contactEmail,
-      updatedAt: updated.updatedAt.toISOString(),
-    };
+      .returning(savedContactColumns);
+    return { ok: true, ...toSavedContact(updated) };
   });
 }
 

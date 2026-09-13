@@ -249,10 +249,14 @@ test("validateCustomerUpdateFields: 메모의 CRLF 는 LF 로 바꾼 뒤 센다 
   if (bareCr.ok) assert.equal(bareCr.data.contactMemo, "첫 줄\n둘째 줄");
 });
 
-test("validateCustomerUpdateFields: 새 칸이 늘어도 이름·이메일·연락처 오류는 예전 그대로다", () => {
+// ── 대표 담당자 칸의 오류 문구 — 화면 이름표와 같은 이름(「대표 …」)으로 부른다 ───
+// 같은 화면에 「고객사 담당자」 목록이 따로 있어서 「담당자 성함이 너무 깁니다」만으로는
+// 어느 쪽 칸인지 알 수 없다(2026-09-13). 규칙(길이·빈 값·글자 여부)은 예전 그대로다.
+
+test("validateCustomerUpdateFields: 길이를 넘은 대표 담당자 칸은 「대표 …」 이름으로 부른다 — 형식 오류 문구는 그대로", () => {
   const result = validateCustomerUpdateFields({
     name: "   ",
-    contactName: null,
+    contactName: "가".repeat(201),
     contactEmail: "not-an-email",
     contactPhone: "1".repeat(201),
     contactTitle: "부장",
@@ -261,8 +265,46 @@ test("validateCustomerUpdateFields: 새 칸이 늘어도 이름·이메일·연�
   if (!result.ok) {
     assert.deepEqual(result.fieldErrors, {
       name: "고객사명을 입력해 주세요.",
+      contactName: "대표 담당자 성함이 너무 깁니다.",
       contactEmail: "올바른 이메일 형식이 아닙니다.",
-      contactPhone: "연락처이(가) 너무 깁니다.",
+      contactPhone: "대표 연락처(전화)가 너무 깁니다.",
+    });
+  }
+
+  const tooLong = validateCustomerUpdateFields({
+    name: "Acme",
+    // 201자 — 「@」 가 있어도 길이가 먼저 걸린다.
+    contactEmail: `${"a".repeat(195)}@x.com`,
+    contactTitle: "가".repeat(201),
+    contactMemo: "메".repeat(501),
+  });
+  assert.equal(tooLong.ok, false);
+  if (!tooLong.ok) {
+    assert.deepEqual(tooLong.fieldErrors, {
+      contactEmail: "대표 연락처(이메일)가 너무 깁니다.",
+      contactTitle: "대표 담당자 직급은 200자를 넘을 수 없습니다.",
+      contactMemo: "대표 담당자 메모는 500자를 넘을 수 없습니다.",
+    });
+  }
+});
+
+test("validateCustomerUpdateFields: 글자가 아닌 대표 담당자 칸도 「대표 …」 이름으로 부른다", () => {
+  const result = validateCustomerUpdateFields({
+    name: "Acme",
+    contactName: 1,
+    contactEmail: 2,
+    contactPhone: 3,
+    contactTitle: 4,
+    contactMemo: 5,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.deepEqual(result.fieldErrors, {
+      contactName: "대표 담당자 성함 값을 확인할 수 없습니다.",
+      contactEmail: "대표 연락처(이메일) 값을 확인할 수 없습니다.",
+      contactPhone: "대표 연락처(전화) 값을 확인할 수 없습니다.",
+      contactTitle: "대표 담당자 직급 값을 확인할 수 없습니다.",
+      contactMemo: "대표 담당자 메모 값을 확인할 수 없습니다.",
     });
   }
 });
