@@ -171,10 +171,20 @@ import {
  * min-width 는 auto 라, 이것이 없으면 표가 칸을 밀어 넓혀 화면 전체(body)가
  * 좌우로 밀린다).
  *
- * 표만 그런 것이 아니다 — 접지 않기로 한 줄(블록 소제목 · 집계 8칸 · PO 발행
- * 현황의 이름표)도 저마다 같은 래퍼를 하나씩 갖는다. 넘치는 줄이 스스로 스크롤
- * 상자를 갖지 않으면 그 넘침이 바깥으로 새어 결국 화면 전체가 좌우로 밀린다.
- * 다만 그 래퍼에 **확정 높이를 함께 주지 말 것** — 바로 위 항목이 그 고장이다.
+ * 표만 그런 것이 아니다 — 접지 않기로 한 줄(블록 소제목 · 집계 8칸)도 저마다
+ * 같은 래퍼를 하나씩 갖는다. 넘치는 줄이 스스로 스크롤 상자를 갖지 않으면 그
+ * 넘침이 바깥으로 새어 결국 화면 전체가 좌우로 밀린다. 다만 그 래퍼에 **확정
+ * 높이를 함께 주지 말 것** — 바로 위 항목이 그 고장이다.
+ *
+ * **PO 발행 현황의 고객사 이름표만은 접는다(2026-09-13 사용자 요청 — 모든 고객사를
+ * 한 번에 보고, 칸이 세로로 길어져도 된다).** 예전에는 이 줄도 접지 않고 좌우로
+ * 밀었다. 그러면 29곳을 밀어 가며 찾아야 해서 한눈에 볼 수가 없었다. 접지 않았던
+ * 까닭은 "접으면 줄 수가 폭에 따라 달라져 좌우 두 칸의 높이가 어긋난다"였는데,
+ * 두 칸은 SIDE_BY_SIDE_GRID 의 격자 칸이라 위 항목대로 **격자가 큰 쪽에 높이를
+ * 맞춘다** — 그 걱정은 이제 없다. 접으면서 이 줄의 가로 스크롤 상자도 없앴다.
+ * 스크롤바가 둘로 보이던 고장의 한 쪽 원인(overflow-x 상자)을 아예 뺀 것이라 그
+ * 고장과는 반대 방향이다. 이 줄에 overflow 나 높이·flex-1 을 다시 붙이지 말 것.
+ * 이름 하나가 칸보다 긴 드문 경우의 처리는 PoIssuanceBlock 에 있다.
  *
  * ── 장기 PO 미발행은 빨간 볼드로 드러난다 ───────────────────────────────
  * 견적서를 낸 지 두 달이 지나도록 발주가 안 난 줄은 `견적서 발행일` 칸이 빨간
@@ -571,7 +581,7 @@ function ReportBlock({
  * 그것이다 — 두 곳이 따로 세면 언젠가 어긋난다.
  *
  * 이름표는 그 고객사의 색으로 칠한다. 0 인 고객사도 자리를 지킨다: 좌우 두
- * 줄의 이름 차례가 같아야 견줄 수 있다(원본도 0을 적어 둔다).
+ * 칸의 이름 차례가 같아야 견줄 수 있다(원본도 0을 적어 둔다).
  */
 function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
   return (
@@ -585,19 +595,34 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
       {issuance.customers.length === 0 ? (
         <p className="px-2 py-1 text-wr-meta text-zinc-500 dark:text-zinc-400">해당 없음</p>
       ) : (
-        // 고객사가 29곳이라 이름표는 어차피 한 줄에 다 안 들어간다. 그래도 접지
-        // 않고 이 줄만 좌우로 민다 — 이 화면의 다른 줄과 같은 규칙이고, 접으면
-        // 줄 수가 폭에 따라 달라져 좌우 두 칸의 높이가 매번 어긋난다.
-        // <li> 의 shrink-0 이 없으면 flex 항목의 기본값(shrink: 1)대로 이름표가
-        // 눌려 글자가 잘린다 — 스크롤이 아니라 손실이다.
-        <ul className="flex flex-nowrap gap-1 overflow-x-auto">
+        // 고객사가 29곳이라 이름표는 한 줄에 다 안 들어간다. 이 줄은 **접는다** —
+        // 모든 고객사를 한 번에 보게 해 달라는 요청이다(2026-09-13, 칸이 세로로
+        // 길어져도 된다). 이 화면의 다른 줄(소제목 · 집계 · 상세표)은 여전히 접지
+        // 않고 그 줄만 좌우로 민다. 이 줄만 다른 까닭과, 접어도 좌우 두 칸의
+        // 높이가 어긋나지 않는 까닭(격자가 맞춘다)은 파일 헤더에 있다.
+        // 🔴 가로 스크롤 상자는 없앴다. overflow · 높이 · flex-1 을 다시 붙이지 말 것.
+        //
+        // 이름표 하나하나는 전처럼 눌리지 않는다. <li> 의 shrink-0 이 있어서 이름표는
+        // 자기 글자 폭(max-content) 그대로 서고, 모자라면 **다음 줄로 넘어간다** —
+        // 이름이 두 줄로 접히거나 잘리지 않는다. 이름 칸의 whitespace-nowrap 을 뺀
+        // 것은 아래 드문 경우 하나를 위해서이고, 보통은 이름이 한 줄로 선다.
+        //
+        // 드문 경우 — 이름 하나가 칸 폭보다 길 때. 그 이름표는 줄을 바꿔도 안
+        // 들어가고, 가로 스크롤 상자가 없으니 넘친 만큼 화면 전체(body)가 좌우로
+        // 밀린다. 그래서 <li> 에 max-w-full 을 걸어 칸 폭에서 멈추게 하고, 그때만
+        // 이름 글자가 칸 안에서 접히게 한다. wrap-anywhere(overflow-wrap: anywhere)
+        // 인 까닭: break-words 는 글자를 접되 최소 폭 계산에는 끼지 않아, flex 항목의
+        // 기본 최소 폭(min-content = 가장 긴 낱말)이 그대로 남아 공백 없는 긴 영문
+        // 이름이면 여전히 넘친다. anywhere 는 최소 폭까지 줄여 준다. 숫자 칸은 그대로라
+        // 건수는 접히지 않는다.
+        <ul className="flex flex-wrap gap-1">
           {issuance.customers.map((entry) => (
             <li
               key={entry.key}
-              className={`inline-flex shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
+              className={`inline-flex max-w-full shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
               style={customerRowColorStyle(entry.customerRowColor)}
             >
-              <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+              <span className="text-wr-label wrap-anywhere text-zinc-600 dark:text-zinc-400">
                 {entry.customerName}
               </span>
               <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
