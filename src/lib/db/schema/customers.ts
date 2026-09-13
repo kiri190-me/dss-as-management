@@ -148,3 +148,65 @@ export const endUserContacts = pgTable(
       .where(sql`is_deleted = false`),
   ]
 );
+
+/**
+ * 고객사 다중 담당자(사용자 요청 2026-09-13) — 고객사 하나에 담당자를 여러 명
+ * 둘 수 있다.
+ *
+ * ── 대표 담당자 칸과의 관계 ─────────────────────────────────────────────
+ * customers.contact_name/contact_email/contact_phone은 「대표 담당자」로 그대로
+ * 남는다. 이 표는 그 칸과 **따로** 있는 목록이다(사용자 결정). 둘을 섞지
+ * 않는다 — 대표 담당자가 이 목록의 한 줄로 저절로 들어오지 않고, 목록의 한
+ * 줄이 대표 담당자 칸을 바꾸지도 않는다. 기존 대표 담당자 값은 이 표로
+ * 옮기지 않았다(백필 없음 — end_user_contacts 도입 때와 다르다).
+ *
+ * ── 칸 ──────────────────────────────────────────────────────────────────
+ * contact_name은 NOT NULL이다 — end_user_contacts와 같은 이유다(이 행의 존재
+ * 이유가 누군가를 가리키는 것이다). 나머지는 모두 선택이다. end_user_contacts
+ * 는 phone/department/title을 두지 않았지만 그것은 End-User 쪽 결정이고,
+ * 고객사 담당자는 사용자 요청(2026-09-13)으로 직급(title)·전화·메모를 둔다.
+ * 부서는 요청에 없어 두지 않는다. 길이 상한은 입력 검증
+ * (validation/customer-contact-input.ts)이 지킨다 — customers·end_user_contacts
+ * 와 마찬가지로 DB CHECK는 두지 않는다.
+ *
+ * ── 접수 건 스냅숏과 독립 ───────────────────────────────────────────────
+ * repair_cases.contact*_snapshot과는 완전히 독립이다 — 이 표의 어떤 mutation도
+ * repair_cases를 쓰지 않는다(그 반대도 마찬가지). 접수 시점 스냅숏은 그 시점
+ * 그대로 영구 보존된다.
+ *
+ * ── 개인정보 ────────────────────────────────────────────────────────────
+ * 이름·직급·전화·이메일·메모는 개인정보다. 서버 로그에도, audit_logs의
+ * previous_value/new_value에도 값을 싣지 않는다 — customers-trash.ts가 대표
+ * 담당자 칸과 end_user_contacts에 대해 지키는 규칙과 같다.
+ */
+export const customerContacts = pgTable(
+  "customer_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    contactName: text("contact_name").notNull(),
+    title: text("title"),
+    phone: text("phone"),
+    email: text("email"),
+    memo: text("memo"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Soft-delete four-column convention (DATABASE_DESIGN.md #8).
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "restrict" }),
+    deleteReason: text("delete_reason"),
+  },
+  (table) => [
+    index("customer_contacts_customer_id_idx").on(table.customerId),
+    index("customer_contacts_not_deleted_idx")
+      .on(table.isDeleted)
+      .where(sql`is_deleted = false`),
+  ]
+);
