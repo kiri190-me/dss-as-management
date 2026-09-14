@@ -10,6 +10,7 @@ import {
   getShipmentApprovalRouteSteps,
 } from "../queries/shipment-approval-routes";
 import { findNextRouteStepToApprove } from "@/lib/domain/shipment-approval-route";
+import { acquireShipmentApprovalRouteSharedLock } from "./shipment-approval-routes";
 import type {
   ApprovalActionResult,
   RepairCaseApprovalType,
@@ -115,6 +116,12 @@ export async function requestRepairCaseApproval(
 ): Promise<ApprovalActionResult> {
   try {
     return await db.transaction(async (tx) => {
+      // 🔴 결재선 공유 잠금 — 이 트랜잭션의 **첫 잠금**이다. 결재선을 읽어 지정을
+      // 채우는 동안 결재선 저장 · 사용자 계정 삭제(배타 잠금)가 끼어들지 못하게 한다.
+      // 그러지 않으면 삭제가 커밋되기 직전에 읽은 판(또는 지정 대상 확인)으로 지워진
+      // 사람에게 지정된 행이 들어간다(mutations/shipment-approval-routes.ts 의 도우미).
+      await acquireShipmentApprovalRouteSharedLock(tx);
+
       const [current] = await tx
         .select({ id: repairCases.id, version: repairCases.version, isLocked: repairCases.isLocked, billingType: repairCases.billingType })
         .from(repairCases)
@@ -312,6 +319,12 @@ export async function decideRepairCaseApproval(
 ): Promise<ApprovalActionResult> {
   try {
     return await db.transaction(async (tx) => {
+      // 🔴 결재선 공유 잠금 — 이 트랜잭션의 **첫 잠금**이다(요청 경로와 같은 이유).
+      // 아래에서 사슬을 이을 때 판의 다음 단계 승인자를 지정하는데, 그 사이 사용자
+      // 계정 삭제가 커밋되면 지워진 사람에게 다음 행이 간다. 결정 행을 FOR UPDATE 로
+      // 잠그기 **전에** 건다 — 뒤에 걸면 삭제(배타 잠금 → 결재 행)와 교착한다.
+      await acquireShipmentApprovalRouteSharedLock(tx);
+
       const [current] = await tx
         .select({ id: repairCases.id, billingType: repairCases.billingType })
         .from(repairCases)

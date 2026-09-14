@@ -36,6 +36,7 @@ import {
   getCurrentShipmentApprovalRouteChain,
   getShipmentApprovalRouteSteps,
 } from "../queries/shipment-approval-routes";
+import { acquireShipmentApprovalRouteSharedLock } from "./shipment-approval-routes";
 import { findNextRouteStepToApprove } from "@/lib/domain/shipment-approval-route";
 import {
   PART_ISSUE_APPROVAL_ROUTE_SCOPE,
@@ -448,6 +449,11 @@ export async function createPartIssueRequest(
 ): Promise<CreatePartIssueRequestResult> {
   try {
     return await db.transaction(async (tx) => {
+      // 🔴 결재선 공유 잠금 — 이 트랜잭션의 **첫 잠금**이다. 판을 읽어 첫 단계 승인자를
+      // 지정하는 동안 결재선 저장 · 사용자 계정 삭제(배타 잠금)가 끼어들지 못하게 한다
+      // (mutations/shipment-approval-routes.ts 의 도우미 주석).
+      await acquireShipmentApprovalRouteSharedLock(tx);
+
       const actor = await requireActor(tx, input.actorUserId);
 
       // 🔴 인가 — **새 역할 목록을 만들지 않는다.** 재고 영역의 판정은 설정
@@ -588,6 +594,11 @@ export async function decidePartIssueRequestApproval(
 ): Promise<DecidePartIssueRequestApprovalResult> {
   try {
     return await db.transaction(async (tx) => {
+      // 🔴 결재선 공유 잠금 — 이 트랜잭션의 **첫 잠금**이다. 사슬을 이을 때 판의 다음
+      // 단계 승인자를 지정하므로 요청 경로와 같은 이유로 건다. 신청 헤더를 잠그기
+      // **전에** 건다 — 뒤에 걸면 삭제(배타 잠금 → 헤더)와 교착한다.
+      await acquireShipmentApprovalRouteSharedLock(tx);
+
       const actor = await requireActor(tx, input.actorUserId);
 
       // 신청 헤더를 먼저 잠근다 — 같은 신청을 동시에 결재·취소하려는 트랜잭션이

@@ -79,7 +79,7 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
  * 「아직 끝나지 않은」 절차 노드 — 삭제가 담당을 되돌리는 대상이다. 끝난(COMPLETED ·
  * SKIPPED) 노드의 담당은 「누가 했나」라는 기록이라 그대로 둔다.
  */
-const OPEN_NODE_STATUSES = ["PENDING", "IN_PROGRESS", "BLOCKED"] as const;
+export const OPEN_NODE_STATUSES = ["PENDING", "IN_PROGRESS", "BLOCKED"] as const;
 
 /**
  * 지울 사람이 올린 것 중 아직 열려 있는 부품 요청 · 불출 신청 — **참고로 세기만
@@ -614,6 +614,23 @@ export type UserDeletionPreview =
 const FORBIDDEN_MESSAGE = "사용자 계정을 삭제할 권한이 없습니다.";
 
 /**
+ * 멈춤 사유 문장 — 미리보기와 삭제 mutation 이 **같은 말**을 하도록 여기 한 곳에 둔다.
+ * 확인 창에서 본 사유와 [삭제]를 누른 뒤의 거절 사유가 다르면 사람은 둘이 같은
+ * 문제인지 알 수 없다.
+ */
+export function inFlightOnOldRouteMessage(targetName: string, labels: readonly string[]): string {
+  return `바뀌기 전 승인 절차를 따라가는 진행 중 결재에 ${targetName} 님의 단계가 아직 남아 있어 삭제할 수 없습니다(${labels.join(", ")}). 그 결재가 끝나거나 반려된 뒤 다시 시도해 주세요.`;
+}
+
+/** 새 판 저장이 거절할 사람이 같은 판에 있을 때의 사유 — 미리보기 · 삭제 공용. */
+export function routeUpdateRejectedMessage(
+  scope: ShipmentApprovalRouteScope,
+  step: { stepOrder: number; approverName: string; reason: string }
+): string {
+  return `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[scope]} 절차 ${step.stepOrder}번째 단계의 ${step.approverName} 님은 ${step.reason}. 승인 절차를 먼저 정리한 뒤 삭제해 주세요.`;
+}
+
+/**
  * 이 사람을 지우면 무엇이 넘어가는가.
  *
  * 🔴 판정 순서: 행위자(진짜 최고관리자인가) → 자기 자신 → 대상. 권한이 없는 사람에게는
@@ -713,7 +730,7 @@ export async function getUserDeletionPreview(
     if (entry.plan.action !== "STOP") continue;
     blockers.push({
       code: "IN_FLIGHT_ON_OLD_ROUTE",
-      message: `${entry.label}: 바뀌기 전 승인 절차를 따라가는 진행 중 결재에 ${snapshot.target.name} 님의 단계가 아직 남아 있어 삭제할 수 없습니다. 그 결재가 끝나거나 반려된 뒤 다시 시도해 주세요.`,
+      message: inFlightOnOldRouteMessage(snapshot.target.name, [entry.label]),
       kind: entry.facts.kind,
       label: entry.label,
       intakeNumber: entry.subject.intakeNumber,
@@ -724,7 +741,7 @@ export async function getUserDeletionPreview(
     for (const step of slot.ineligibleOtherSteps) {
       blockers.push({
         code: "ROUTE_UPDATE_REJECTED",
-        message: `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[slot.scope]} 절차 ${step.stepOrder}번째 단계의 ${step.approverName} 님은 ${step.reason}. 승인 절차를 먼저 정리한 뒤 삭제해 주세요.`,
+        message: routeUpdateRejectedMessage(slot.scope, step),
         scope: slot.scope,
         stepOrder: step.stepOrder,
         approverName: step.approverName,

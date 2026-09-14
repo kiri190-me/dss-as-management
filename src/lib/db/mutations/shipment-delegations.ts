@@ -129,7 +129,13 @@ export async function createShipmentDelegation(
           isDeleted: users.isDeleted,
         })
         .from(users)
-        .where(eq(users.id, representativeUserId));
+        .where(eq(users.id, representativeUserId))
+        // 🔴 FOR SHARE — 이 사람을 지우는 사용자 계정 삭제(FOR UPDATE)와 줄을 세운다.
+        // 잠그지 않으면 삭제가 이 사람의 위임을 다 닫은 직후에 여기서 새 ACTIVE 위임이
+        // 들어갈 수 있다. 삭제가 먼저면 여기서 기다렸다가 지워진 행을 읽어 거절하고,
+        // 이쪽이 먼저면 삭제가 기다렸다가 이 위임까지 닫는다. 공유 잠금이라 같은 사람에
+        // 대한 위임 생성끼리는 서로 막지 않는다.
+        .for("share");
       if (
         !representativeRow ||
         representativeRow.isDeleted ||
@@ -144,7 +150,9 @@ export async function createShipmentDelegation(
       const [delegateRow] = await tx
         .select({ approvalStatus: users.approvalStatus, isActive: users.isActive, lockedAt: users.lockedAt, isDeleted: users.isDeleted })
         .from(users)
-        .where(eq(users.id, delegateUserId));
+        .where(eq(users.id, delegateUserId))
+        // 🔴 FOR SHARE — 대표 쪽과 같은 이유(바로 위 주석).
+        .for("share");
       if (
         !delegateRow ||
         delegateRow.isDeleted ||

@@ -122,6 +122,23 @@ export async function acquireShipmentApprovalRouteLock(tx: Tx): Promise<void> {
 }
 
 /**
+ * 같은 열쇠의 **공유** 잠금 — 결재선을 **읽어** 결재 행을 만드는 쪽(승인 요청 ·
+ * 결재 결정)이 트랜잭션의 첫 잠금으로 건다.
+ *
+ * 공유 잠금끼리는 서로 막지 않으므로 요청 · 결정끼리는 예전처럼 동시에 돈다. 막는
+ * 상대는 배타 잠금(acquireShipmentApprovalRouteLock)을 쥔 둘 — 결재선 저장과 사용자
+ * 계정 삭제 — 뿐이다. 이것이 없으면 「결재선을 읽은 뒤 삭제가 커밋되고, 그다음에
+ * 지워진 사람에게 지정된 행을 넣는」 틈이 생긴다. 삭제의 재지정은 커밋되지 않은 행을
+ * 볼 수 없으므로 그 행은 최고관리자 비상구로만 풀린다.
+ *
+ * 🔴 트랜잭션의 **첫 잠금**이어야 한다 — 다른 행을 먼저 잠근 채로 이것을 기다리면,
+ * 배타 잠금을 쥔 삭제가 그 행을 기다리는 순간 교착이 된다.
+ */
+export async function acquireShipmentApprovalRouteSharedLock(tx: Tx): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${ROUTE_LOCK_KEY}, 0))`);
+}
+
+/**
  * 거절을 트랜잭션 밖으로 던지기 위한 신호. 콜백에서 그냥 반환하면 트랜잭션이
  * **커밋된다**(saveUiThemeTokens 의 SaveRejected 와 같은 이유).
  *
