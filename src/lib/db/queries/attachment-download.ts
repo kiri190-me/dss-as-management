@@ -44,6 +44,13 @@ export type AttachmentForDownload = {
    * repairCases.files 를 묻는다. 그래서 조회에서 함께 읽지 않으면 안 된다.
    */
   productModelId: string | null;
+  /**
+   * 개선 요청 주인(2026-09-13). 앞의 두 칸과 **동시에 채워지지 않는다**
+   * (attachments_improvement_owner_alone CHECK). 차 있으면 라우트는
+   * improvementRequests 를 묻는다 — 보기는 READ, 미리보기 붙이기·지우기는 WRITE 에
+   * 글 한 건에 대한 판정(접수 상태인 자기 글 또는 관리 권한)을 더한다.
+   */
+  improvementRequestId: string | null;
   originalFileName: string;
   /** 저장 루트 기준 상대 경로. 라우트가 resolveAttachmentAbsolutePath로 반드시 다시 검증한다. */
   storedPath: string;
@@ -67,6 +74,7 @@ export async function getAttachmentForDownload(
       id: attachments.id,
       repairCaseId: attachments.repairCaseId,
       productModelId: attachments.productModelId,
+      improvementRequestId: attachments.improvementRequestId,
       originalFileName: attachments.originalFileName,
       storedPath: attachments.storedPath,
       mimeType: attachments.mimeType,

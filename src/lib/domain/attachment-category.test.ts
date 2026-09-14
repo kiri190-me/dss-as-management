@@ -3,10 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   ATTACHMENT_CATEGORY_CODES,
+  ATTACHMENT_OWNER_KINDS,
   DEFAULT_MALWARE_SCAN_STATUS,
+  IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY,
   MALWARE_SCAN_STATUS_CODES,
+  attachmentCategoriesForOwner,
   attachmentCategoryLabels,
   isAttachmentCategory,
+  isAttachmentCategoryAllowedForOwner,
   isMalwareScanStatus,
   malwareScanStatusLabels,
 } from "./attachment-category";
@@ -177,6 +181,36 @@ test("목록에 없는 값은 분류로 인정되지 않는다", () => {
   assert.equal(isAttachmentCategory("SHIPMENT_APPROVAL_EVIDENCE"), false);
   assert.equal(isAttachmentCategory("intake_photo"), false);
   assert.equal(isAttachmentCategory(""), false);
+});
+
+// ─────────────────────────────────── 분류와 주인의 짝 (2026-09-13)
+
+test("주인 종류는 셋이다 — 첨부 표의 세 주인 칸(접수 건 · 제품 모델 · 개선 요청)", () => {
+  assert.deepEqual([...ATTACHMENT_OWNER_KINDS], ["REPAIR_CASE", "PRODUCT_MODEL", "IMPROVEMENT_REQUEST"]);
+});
+
+test("스크린샷은 개선 요청 전용이다 — 접수 건 · 제품 모델에는 쓸 수 없다", () => {
+  assert.equal(IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY, "SCREENSHOT");
+  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "IMPROVEMENT_REQUEST"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "REPAIR_CASE"), false);
+  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "PRODUCT_MODEL"), false);
+});
+
+test("개선 요청에는 스크린샷만 붙는다 — 다른 분류는 모두 거절", () => {
+  assert.deepEqual(attachmentCategoriesForOwner("IMPROVEMENT_REQUEST"), ["SCREENSHOT"]);
+  for (const code of ATTACHMENT_CATEGORY_CODES) {
+    assert.equal(isAttachmentCategoryAllowedForOwner(code, "IMPROVEMENT_REQUEST"), code === "SCREENSHOT", code);
+  }
+});
+
+test("접수 건 · 제품 모델의 선택지는 스크린샷 하나만 빠진 목록이다 — 차례는 그대로", () => {
+  // 화면(FilesScreen · ProductModelFilesSection)이 이 목록을 그대로 map 한다. 차례가
+  // 바뀌면 사람이 보는 고르는 차례가 바뀐다 — 빼는 것은 한 값뿐이어야 한다.
+  const withoutScreenshot = ATTACHMENT_CATEGORY_CODES.filter((code) => code !== "SCREENSHOT");
+  assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE"), withoutScreenshot);
+  assert.deepEqual(attachmentCategoriesForOwner("PRODUCT_MODEL"), withoutScreenshot);
+  // 기타는 여전히 맨 끝이다.
+  assert.equal(attachmentCategoriesForOwner("REPAIR_CASE").at(-1), "OTHER");
 });
 
 test("목록에 없는 값은 검사 상태로 인정되지 않는다", () => {

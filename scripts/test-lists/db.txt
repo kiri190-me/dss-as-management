@@ -105,3 +105,4 @@ src/lib/db/queries/approval-outcome-notifications.integration.test.ts
 src/lib/db/mutations/quote-trash.integration.test.ts
 src/lib/db/mutations/domestic-order-sheet-settings.integration.test.ts
 src/lib/db/mutations/improvement-requests.integration.test.ts
+src/lib/db/mutations/improvement-request-attachments.integration.test.ts

@@ -298,6 +298,7 @@ async function recordDownloadOf(attachmentId: string, actorUserId: string) {
     owner: {
       repairCaseId: attachment!.repairCaseId,
       productModelId: attachment!.productModelId,
+      improvementRequestId: attachment!.improvementRequestId,
     },
     originalFileName: attachment!.originalFileName,
     fileSize: attachment!.fileSize,
@@ -683,6 +684,7 @@ describe("attachment 휴지통: 감사 기록만 읽어도 어느 파일이었�
     assert.equal(newValue.ownerType, "NONE");
     assert.equal("repairCaseId" in newValue, false);
     assert.equal("productModelId" in newValue, false);
+    assert.equal("improvementRequestId" in newValue, false, "셋째 주인 칸도 싣지 않는다");
     assert.equal(newValue.category, "INTAKE_PHOTO");
 
     // 이 파일의 가장 중요한 성질은 여기서도 그대로다.

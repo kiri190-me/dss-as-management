@@ -16,7 +16,7 @@ import {
   isExtensionAllowedForCategory,
 } from "@/lib/domain/attachment-allowlist";
 import {
-  ATTACHMENT_CATEGORY_CODES,
+  attachmentCategoriesForOwner,
   attachmentCategoryLabels,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
@@ -108,6 +108,13 @@ const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
  * (CATEGORY_EXTENSION_ALLOWLIST)이 정본이고, 그것이 넓어지거나 좁아지는 날
  * 파일 고르는 창이 저절로 따라와야 한다.
  */
+/**
+ * 올리기 칸의 분류 선택지 — 제품 모델 파일이 받는 분류만. 「스크린샷」은 개선 요청 글
+ * 전용이라 빠진다(attachment-category.ts 의 isAttachmentCategoryAllowedForOwner —
+ * 올리기 통로도 같은 함수로 거절한다).
+ */
+const PRODUCT_MODEL_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("PRODUCT_MODEL");
+
 function allowedExtensionsFor(category: AttachmentCategory): string[] {
   return ALL_EXTENSIONS.filter((extension) => isExtensionAllowedForCategory(extension, category));
 }
@@ -611,7 +618,7 @@ export default function ProductModelFilesSection({
                 disabled={isBusy}
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
               >
-                {ATTACHMENT_CATEGORY_CODES.map((code) => (
+                {PRODUCT_MODEL_UPLOAD_CATEGORIES.map((code) => (
                   <option key={code} value={code}>
                     {attachmentCategoryLabels[code]}
                   </option>

@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../connection";
 import { attachments, productModels, repairCases } from "../schema";
+import { guardImprovementRequestAttachmentChange } from "./attachments";
 import { insertAuditLog } from "./audit-logs";
 
 /**
@@ -42,16 +43,38 @@ import { insertAuditLog } from "./audit-logs";
  * 그래서 업로드 쪽(attachments.ts의 createAttachmentRecord)이 세운 모양을 그대로
  * 따른다 — 어느 주인인지를 먼저 적고 그 주인의 키**만** 싣는다. 계산은
  * ownerAuditFields 한 곳에서 하고, 세 자리가 모두 그것을 쓴다.
+ *
+ * ── 셋째 주인 — 개선 요청의 스크린샷 (2026-09-13) ───────────────────────
+ * 개선 요청이 주인인 첨부는 지우고 되살릴 때 **글 한 건에 대한 판정**을 더 거친다 —
+ * 접수 상태인 자기 글의 글쓴이 또는 관리 권한자만(올리기와 같은 판정). 되살리기는
+ * 5장 상한도 다시 센다: 한 장을 지우고 새로 올린 뒤 지운 것을 되살리면 여섯 장이
+ * 된다. 두 판정 모두 글 행을 잠근 **같은 트랜잭션**에서 한다
+ * (attachments.ts 의 guardImprovementRequestAttachmentChange). 잠근 행을 봐야 판정과
+ * 저장 사이에 상태가 옮겨지는 틈이 없다.
+ *
+ * 관리 권한은 부르는 쪽(서버 액션)이 계산해 `canManageImprovementRequests` 로
+ * 넘긴다. **생략하면 거짓이다** — 모르는 호출은 가장 좁은 규칙(접수 상태인 자기
+ * 글만)으로 판정받는다. 닫히는 쪽이다.
+ *
+ * 글을 지울 때 그 글의 스크린샷을 휴지통으로 보내는 일도 여기 있다
+ * (trashAttachmentsOfDeletedImprovementRequest). 부르는 쪽은 개선 요청 삭제
+ * mutation 이고, 그 트랜잭션 안에서 부른다.
  * ============================================================================
  */
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type AttachmentTrashFailureCode =
   | "INVALID_ID"
   | "NOT_FOUND"
   | "ALREADY_IN_STATE"
-  | "CASE_LOCKED";
+  | "CASE_LOCKED"
+  /** 개선 요청 스크린샷 — 접수 상태인 자기 글이 아니고 관리 권한도 없다. */
+  | "FORBIDDEN"
+  /** 개선 요청 스크린샷 되살리기 — 그 글에 이미 5장이 붙어 있다. */
+  | "LIMIT_REACHED";
 
 export type AttachmentTrashResult =
   | { ok: true; id: string }
@@ -85,6 +108,8 @@ export type AttachmentTrashResult =
 function ownerAuditFields(owner: {
   repairCaseId: string | null;
   productModelId: string | null;
+  /** 셋째 주인(2026-09-13). 개선 요청은 이름이 없는 글이라 id 만 싣는다. */
+  improvementRequestId: string | null;
   /** 생략하면 이름 키를 싣지 않는다(값이 null 인 것과 다르다). */
   intakeNumber?: string | null;
   /** 생략하면 이름 키를 싣지 않는다(값이 null 인 것과 다르다). */
@@ -104,19 +129,21 @@ function ownerAuditFields(owner: {
       ...(owner.modelName === undefined ? {} : { modelName: owner.modelName }),
     };
   }
+  if (owner.improvementRequestId !== null) {
+    return { ownerType: "IMPROVEMENT_REQUEST", improvementRequestId: owner.improvementRequestId };
+  }
   return { ownerType: "NONE" };
 }
 
 /** 첨부와 그것이 붙은 접수 건의 잠금 상태를 한 번에 잡는다. */
-async function loadForTrash(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  attachmentId: string
-) {
+async function loadForTrash(tx: Tx, attachmentId: string) {
   const [row] = await tx
     .select({
       id: attachments.id,
       repairCaseId: attachments.repairCaseId,
       productModelId: attachments.productModelId,
+      // 개선 요청 스크린샷이면 글 한 건에 대한 판정을 더 거친다(파일 헤더의 '셋째 주인').
+      improvementRequestId: attachments.improvementRequestId,
       originalFileName: attachments.originalFileName,
       category: attachments.category,
       isDeleted: attachments.isDeleted,
@@ -139,12 +166,43 @@ async function loadForTrash(
 }
 
 /**
+ * 개선 요청 스크린샷이면 글 행을 잠그고 판정한다. 다른 주인이면 아무것도 하지 않는다.
+ * 실패를 이 파일의 결과 모양으로 옮긴다.
+ */
+async function guardImprovementRequestOwner(
+  tx: Tx,
+  current: { improvementRequestId: string | null },
+  params: { actorUserId: string; canManageImprovementRequests?: boolean; adding: boolean }
+): Promise<AttachmentTrashResult | null> {
+  if (current.improvementRequestId === null) return null;
+  const guard = await guardImprovementRequestAttachmentChange(tx, {
+    improvementRequestId: current.improvementRequestId,
+    actorUserId: params.actorUserId,
+    // 생략은 거짓 — 파일 헤더의 '셋째 주인' 둘째 문단(닫히는 쪽).
+    canManage: params.canManageImprovementRequests === true,
+    adding: params.adding,
+  });
+  if (guard.ok) return null;
+  if (guard.code === "NOT_FOUND") {
+    // 읽은 뒤 잠그기 전에 글이 지워졌다 — 그 스크린샷은 이미 휴지통으로 가며 주인이
+    // 끊겼다. 다른 첨부의 「없음」과 같은 말로 답한다.
+    return { ok: false, code: "NOT_FOUND", message: "파일을 찾을 수 없습니다." };
+  }
+  return { ok: false, code: guard.code, message: guard.message };
+}
+
+/**
  * 첨부를 휴지통으로 보낸다. **디스크 파일은 그대로 둔다**(파일 상단 주석).
  */
 export async function softDeleteAttachment(params: {
   attachmentId: string;
   actorUserId: string;
   reason: string | null;
+  /**
+   * improvementRequests MANAGE — 개선 요청 스크린샷일 때만 쓰인다. **생략하면
+   * 거짓**이고, 그때는 접수 상태인 자기 글의 스크린샷만 지워진다(닫히는 쪽).
+   */
+  canManageImprovementRequests?: boolean;
 }): Promise<AttachmentTrashResult> {
   if (!UUID_PATTERN.test(params.attachmentId)) {
     return { ok: false, code: "INVALID_ID", message: "파일을 확인할 수 없습니다." };
@@ -165,6 +223,12 @@ export async function softDeleteAttachment(params: {
         message: "출하 완료로 잠긴 접수 건의 파일은 지울 수 없습니다.",
       };
     }
+    const rejected = await guardImprovementRequestOwner(tx, current, {
+      actorUserId: params.actorUserId,
+      canManageImprovementRequests: params.canManageImprovementRequests,
+      adding: false,
+    });
+    if (rejected) return rejected;
 
     const deletedAt = new Date();
     const updated = await tx
@@ -200,6 +264,7 @@ export async function softDeleteAttachment(params: {
         ...ownerAuditFields({
           repairCaseId: current.repairCaseId,
           productModelId: current.productModelId,
+          improvementRequestId: current.improvementRequestId,
           intakeNumber: current.caseIntakeNumber,
           modelName: current.productModelName,
         }),
@@ -214,10 +279,17 @@ export async function softDeleteAttachment(params: {
   });
 }
 
-/** 휴지통의 첨부를 되살린다. 실물이 남아 있으므로 표시만 되돌리면 된다. */
+/**
+ * 휴지통의 첨부를 되살린다. 실물이 남아 있으므로 표시만 되돌리면 된다.
+ *
+ * 개선 요청 스크린샷이면 지우기와 같은 판정에 더해 **5장 상한을 다시 센다**(파일
+ * 헤더의 '셋째 주인').
+ */
 export async function restoreAttachment(params: {
   attachmentId: string;
   actorUserId: string;
+  /** softDeleteAttachment 의 같은 이름 칸과 같다 — 생략하면 거짓. */
+  canManageImprovementRequests?: boolean;
 }): Promise<AttachmentTrashResult> {
   if (!UUID_PATTERN.test(params.attachmentId)) {
     return { ok: false, code: "INVALID_ID", message: "파일을 확인할 수 없습니다." };
@@ -238,6 +310,12 @@ export async function restoreAttachment(params: {
         message: "출하 완료로 잠긴 접수 건의 파일은 되살릴 수 없습니다.",
       };
     }
+    const rejected = await guardImprovementRequestOwner(tx, current, {
+      actorUserId: params.actorUserId,
+      canManageImprovementRequests: params.canManageImprovementRequests,
+      adding: true,
+    });
+    if (rejected) return rejected;
 
     const updated = await tx
       .update(attachments)
@@ -260,6 +338,7 @@ export async function restoreAttachment(params: {
         ...ownerAuditFields({
           repairCaseId: current.repairCaseId,
           productModelId: current.productModelId,
+          improvementRequestId: current.improvementRequestId,
           intakeNumber: current.caseIntakeNumber,
           modelName: current.productModelName,
         }),
@@ -290,7 +369,7 @@ export async function recordAttachmentDownload(params: {
    * 조인을 더하면 **모든 내려받기가 조인 둘을 더 치른다.** 무엇을 누가 받아
    * 갔는지는 attachmentId 와 originalFileName 이 이미 답한다.
    */
-  owner: { repairCaseId: string | null; productModelId: string | null };
+  owner: { repairCaseId: string | null; productModelId: string | null; improvementRequestId: string | null };
   originalFileName: string;
   fileSize: number;
 }): Promise<void> {
@@ -311,4 +390,107 @@ export async function recordAttachmentDownload(params: {
       },
     });
   });
+}
+
+// ─────────────────────────── 개선 요청 글을 지울 때 그 글의 스크린샷 (2026-09-13)
+
+/** 글을 지우며 함께 휴지통으로 보낸 첨부의 삭제 사유 칸. 사람이 적은 사유와 구분된다. */
+export const IMPROVEMENT_REQUEST_DELETED_ATTACHMENT_REASON = "개선 요청 글 삭제";
+
+export type ImprovementRequestAttachmentToTrash = {
+  id: string;
+  category: typeof attachments.$inferSelect.category;
+};
+
+/**
+ * 개선 요청 글의 살아 있는 첨부 — 글 행을 **지우기 전에**, 부르는 쪽(개선 요청 삭제
+ * mutation)의 트랜잭션에서 읽는다. 글 행이 지워지는 순간 FK(ON DELETE SET NULL)가
+ * improvement_request_id 를 비워, 그 뒤로는 어느 글의 것이었는지로 찾을 수 없다.
+ *
+ * 부르는 쪽은 이미 글 행을 잠갔다. 올리기 · 지우기 · 되살리기도 같은 행을 먼저 잠그므로
+ * (attachments.ts 의 guardImprovementRequestAttachmentChange) 읽은 목록과 지울 때
+ * 사이에 한 장이 끼어들거나 빠지지 않는다. 차례는 올린 차례 — PURGE 감사에 싣는 id
+ * 목록의 차례가 된다.
+ */
+export async function listLiveAttachmentsOfImprovementRequest(
+  tx: Tx,
+  improvementRequestId: string
+): Promise<ImprovementRequestAttachmentToTrash[]> {
+  return tx
+    .select({ id: attachments.id, category: attachments.category })
+    .from(attachments)
+    .where(and(eq(attachments.improvementRequestId, improvementRequestId), eq(attachments.isDeleted, false)))
+    .orderBy(asc(attachments.uploadedAt), asc(attachments.id));
+}
+
+/**
+ * 지워진 개선 요청 글의 첨부를 휴지통으로 보낸다 — **부르는 쪽의 트랜잭션 안에서.**
+ * softDeleteAttachment 와 같은 모양이다: 소프트 삭제 네 칸을 채우고 첨부마다
+ * FILE_DELETE 감사를 한 줄씩 남긴다. **디스크 실물은 건드리지 않는다**(파일 상단 ⚠️).
+ *
+ * 글 한 건에 대한 판정은 여기서 하지 않는다 — 글을 지울 수 있는 사람(부르는 쪽이
+ * canDeleteImprovementRequest 로 이미 판정했다)이 그 글의 스크린샷도 함께 치운다.
+ *
+ * 감사의 주인은 IMPROVEMENT_REQUEST 로 적는다. 이 시점에는 글 행이 이미 지워져 첨부의
+ * improvement_request_id 가 비었지만(FK SET NULL), 무엇에 붙어 있던 파일인지는 우리가
+ * 알고 있다 — 「NONE」으로 적으면 그 사실이 영영 사라진다.
+ *
+ * 실제로 휴지통으로 간 id 를 넘겨받은 차례대로 돌려준다(부르는 쪽이 PURGE 감사에 싣는다).
+ */
+export async function trashAttachmentsOfDeletedImprovementRequest(
+  tx: Tx,
+  params: {
+    improvementRequestId: string;
+    attachments: readonly ImprovementRequestAttachmentToTrash[];
+    actorUserId: string;
+  }
+): Promise<string[]> {
+  if (params.attachments.length === 0) return [];
+
+  const deletedAt = new Date();
+  const updated = await tx
+    .update(attachments)
+    .set({
+      isDeleted: true,
+      deletedAt,
+      deletedBy: params.actorUserId,
+      deleteReason: IMPROVEMENT_REQUEST_DELETED_ATTACHMENT_REASON,
+    })
+    .where(
+      and(
+        inArray(
+          attachments.id,
+          params.attachments.map((item) => item.id)
+        ),
+        eq(attachments.isDeleted, false)
+      )
+    )
+    .returning({ id: attachments.id });
+
+  const updatedIds = new Set(updated.map((row) => row.id));
+  const trashed = params.attachments.filter((item) => updatedIds.has(item.id));
+
+  for (const item of trashed) {
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "FILE_DELETE",
+      targetEntity: "attachments",
+      targetRecordId: item.id,
+      previousValue: { isDeleted: false },
+      newValue: {
+        isDeleted: true,
+        deletedAt: deletedAt.toISOString(),
+        deleteReason: IMPROVEMENT_REQUEST_DELETED_ATTACHMENT_REASON,
+        ...ownerAuditFields({
+          repairCaseId: null,
+          productModelId: null,
+          improvementRequestId: params.improvementRequestId,
+        }),
+        category: item.category,
+        storedFileRetained: true,
+      },
+    });
+  }
+
+  return trashed.map((item) => item.id);
 }

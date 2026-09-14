@@ -87,6 +87,40 @@ export function isAttachmentCategory(value: string): value is AttachmentCategory
 }
 
 /**
+ * ── 분류는 주인을 가린다 — 「스크린샷」은 개선 요청 전용이다 (2026-09-13) ──
+ * 첨부의 주인은 셋이다(schema/attachments.ts — 접수 건 · 제품 모델 · 개선 요청).
+ * 분류 목록은 하나라서, 목록을 그대로 도는 화면·통로에는 모든 분류가 보이고
+ * 받아진다. 그런데 SCREENSHOT 은 개선 요청 글의 화면 사진 자리이고, 개선 요청
+ * 글에는 거꾸로 SCREENSHOT **만** 붙는다. 그 짝을 여기 한 자리에서 정한다 —
+ * 접수 건·제품 모델 파일 화면의 분류 선택지, 두 올리기 통로의 거절, 그리고
+ * createAttachmentRecord 의 마지막 방어선이 모두 이 함수를 본다. 규칙을 세 곳에
+ * 따로 적으면 화면은 내놓는데 통로가 거절하는(또는 그 반대) 날이 온다.
+ *
+ * 개선 요청 쪽이 「SCREENSHOT 만」인 것은 승인된 설계다(이미지만 · 한 글에 5장).
+ * 분류를 요청값으로 받지 않으므로 이 규칙은 올리기 통로가 늘 지킨다.
+ */
+export const ATTACHMENT_OWNER_KINDS = ["REPAIR_CASE", "PRODUCT_MODEL", "IMPROVEMENT_REQUEST"] as const;
+
+export type AttachmentOwnerKind = (typeof ATTACHMENT_OWNER_KINDS)[number];
+
+/** 개선 요청 글에 붙는 첨부의 분류 — 언제나 이것 하나다. 올리기 통로가 요청값으로 받지 않는다. */
+export const IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY = "SCREENSHOT" satisfies AttachmentCategory;
+
+/** 이 분류를 이 주인의 첨부에 쓸 수 있는가. */
+export function isAttachmentCategoryAllowedForOwner(
+  category: AttachmentCategory,
+  ownerKind: AttachmentOwnerKind
+): boolean {
+  if (ownerKind === "IMPROVEMENT_REQUEST") return category === IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY;
+  return category !== IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY;
+}
+
+/** 이 주인의 올리기 칸에 내놓을 분류 — ATTACHMENT_CATEGORY_CODES 의 차례 그대로. */
+export function attachmentCategoriesForOwner(ownerKind: AttachmentOwnerKind): AttachmentCategory[] {
+  return ATTACHMENT_CATEGORY_CODES.filter((code) => isAttachmentCategoryAllowedForOwner(code, ownerKind));
+}
+
+/**
  * ── 악성코드 검사 상태 ────────────────────────────────────────────────────
  * 검사 엔진은 아직 없다. 이번 단계에서 만드는 것은 **상태를 적을 자리**뿐이고,
  * 모든 행은 NOT_SCANNED 로 시작한다.

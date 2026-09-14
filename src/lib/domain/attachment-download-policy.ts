@@ -1,4 +1,4 @@
-import type { MalwareScanStatus } from "./attachment-category";
+import type { AttachmentOwnerKind, MalwareScanStatus } from "./attachment-category";
 
 /**
  * ============================================================================
@@ -96,14 +96,15 @@ export type AttachmentOwnerRef = {
   /** 제품 모델 주인. NULL 이면 모델이 주인이 아니다. */
   productModelId: string | null;
   /**
-   * 개선 요청 주인. NULL(또는 생략)이면 개선 요청이 주인이 아니다. 앞의 두 주인과
-   * 동시에 채워지지 않는다(attachments_improvement_owner_alone CHECK).
+   * 개선 요청 주인. NULL 이면 개선 요청이 주인이 아니다. 앞의 두 주인과 동시에
+   * 채워지지 않는다(attachments_improvement_owner_alone CHECK).
    *
-   * ⚠️ 지금은 **선택 칸**이다. S2 에서 필수로 바꾼다 — 그때 컴파일러가 이 칸을
-   * 빠뜨린 경로를 전부 찾는다. 그 전까지 개선 요청 주인의 파일은 이 칸이 넘어오지
-   * 않아 주인 없음(DETACHED)으로 막히는 쪽이다 — 닫히는 쪽으로 실패한다.
+   * **필수 칸이다**(2026-09-13 S2 에서 선택 칸을 바꿨다). 선택 칸이던 동안에는 이
+   * 칸을 넘기지 않는 경로가 개선 요청 스크린샷을 주인 없음(DETACHED)으로 막았다.
+   * 필수로 바꾸면서 컴파일러가 이 칸을 빠뜨린 경로(내려받기 · 미리보기 · 지우기 ·
+   * 감사 기록)를 전부 짚었고, 지금은 모두 넘긴다.
    */
-  improvementRequestId?: string | null;
+  improvementRequestId: string | null;
 };
 
 export type AttachmentDownloadSubject = AttachmentOwnerRef & {
@@ -125,17 +126,66 @@ export type AttachmentDownloadSubject = AttachmentOwnerRef & {
  * repair_case_id 가 원래 NULL 이므로, 접수 건만 보면 정상적인 모델 회로도가
  * 전부 DETACHED 로 막힌다. 개선 요청 첨부도 앞의 두 칸이 원래 NULL 이다.
  *
- * improvementRequestId 는 선택 칸이라 **생략(undefined)도 NULL 과 같이 "없음"**
- * 으로 본다. 그래서 이 칸을 넘기지 않는 지금의 부르는 쪽은 예전과 똑같이
- * 판정받고, 개선 요청 주인의 파일은 주인 없음으로 막힌다(AttachmentOwnerRef 의
- * ⚠️ 주석). `== null` 을 쓰지 않고 두 경우를 적어 둔 것은, 빈 문자열을 없음으로
- * 보지 않는다는 기존 두 칸의 성질("NULL 인가"만 본다)을 이 칸도 그대로 따르게
- * 하려는 것이다.
+ * improvementRequestId 는 타입으로는 필수지만, 런타임에 칸이 빠진 채(undefined)
+ * 와도 **NULL 과 같이 "없음"**으로 본다 — 타입을 거치지 않은 값(손으로 만든 객체,
+ * 옛 직렬화)이 오면 주인 없음으로 막히는 쪽, 닫히는 쪽으로 떨어진다. `== null` 을
+ * 쓰지 않고 두 경우를 적어 둔 것은, 빈 문자열을 없음으로 보지 않는다는 기존 두
+ * 칸의 성질("NULL 인가"만 본다)을 이 칸도 그대로 따르게 하려는 것이다.
  */
 export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
   const improvementRequestAbsent =
     owner.improvementRequestId === null || owner.improvementRequestId === undefined;
   return owner.repairCaseId === null && owner.productModelId === null && improvementRequestAbsent;
+}
+
+/**
+ * 이 첨부의 주인은 어느 종류인가 — 물을 권한을 고르는 근거다. 주인이 아무도 없으면 null.
+ *
+ * 셋 중 둘 이상이 차는 행은 DB CHECK 가 막으므로 보는 차례에 뜻은 없지만, 예전 두
+ * 갈래(`productModelId ? 모델 : 접수 건`)와 같게 모델을 먼저 본다.
+ */
+export function attachmentOwnerKindOf(owner: AttachmentOwnerRef): AttachmentOwnerKind | null {
+  if (owner.productModelId !== null) return "PRODUCT_MODEL";
+  if (owner.improvementRequestId !== null && owner.improvementRequestId !== undefined) {
+    return "IMPROVEMENT_REQUEST";
+  }
+  if (owner.repairCaseId !== null) return "REPAIR_CASE";
+  return null;
+}
+
+/**
+ * 주인 종류마다 이 사람이 그 종류의 파일을 다룰 수 있는가 — 라우트·서버 액션이
+ * hasPermission 으로 계산해 채운다. 무엇을 묻는지는 부르는 쪽이 정한다:
+ *
+ *              내려받기(보기)            미리보기 PUT · 지우기 · 되살리기(쓰기)
+ *   접수 건    repairCases.files READ    repairCases.files WRITE
+ *   제품 모델  productModels.view READ   productModels.files WRITE
+ *   개선 요청  improvementRequests READ  improvementRequests WRITE
+ */
+export type AttachmentOwnerAccess = Readonly<Record<AttachmentOwnerKind, boolean>>;
+
+/**
+ * 넓은 문턱 — 셋 중 **어느 주인의 파일도** 다룰 수 없는 사람인가. 그런 사람은 첨부를
+ * 조회하기 **전에** 403 이다(HANDOFF W-1-3 — 존재 여부를 알리지 않는다).
+ */
+export function hasAnyAttachmentOwnerAccess(access: AttachmentOwnerAccess): boolean {
+  return access.REPAIR_CASE || access.PRODUCT_MODEL || access.IMPROVEMENT_REQUEST;
+}
+
+/**
+ * 주인별 판정 — 이 첨부의 주인 종류에 대한 권한이 있는가. 거짓이면 부르는 쪽은
+ * **403 이 아니라 404**(「없음」과 같은 응답)로 답한다 — 문턱을 넘은 사람에게 403 으로
+ * 갈라 답하면 「그 ID 는 실재하는 이런 종류의 첨부」가 새어 나간다(W-1-3).
+ *
+ * 주인이 아무도 없는 첨부는 **접수 건 권한으로** 판정한다. 예전 두 갈래 코드의
+ * else 쪽이 그랬고, 그 동작을 바꾸지 않는다 — 그 뒤 내려받기는 decideAttachmentDownload
+ * 가 DETACHED 로 막고, 지우기는 감사에 ownerType "NONE" 을 남긴다.
+ */
+export function isAttachmentOwnerAccessAllowed(
+  owner: AttachmentOwnerRef,
+  access: AttachmentOwnerAccess
+): boolean {
+  return access[attachmentOwnerKindOf(owner) ?? "REPAIR_CASE"];
 }
 
 /**

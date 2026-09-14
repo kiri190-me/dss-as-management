@@ -3,6 +3,10 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import { improvementRequests } from "../schema";
+import {
+  listLiveAttachmentsOfImprovementRequest,
+  trashAttachmentsOfDeletedImprovementRequest,
+} from "./attachment-trash";
 import { insertAuditLog } from "./audit-logs";
 import {
   canDeleteImprovementRequest,
@@ -50,8 +54,20 @@ import {
  *  · 고치기    UPDATE        previousValue: { body, menuKey }  newValue: { body, menuKey }
  *  · 상태      STATUS_CHANGE previousValue: { status } newValue: { status }
  *  · 지우기    PURGE         previousValue: 지우기 직전 행 전체(menuKey 포함, 시각은 ISO)
+ *                            + trashedAttachmentIds(함께 휴지통으로 보낸 스크린샷 id)
  * 지우기는 휴지통 없이 바로 지우므로(schema 헤더) 무엇이 사라졌는지는 PURGE 줄만
- * 안다. 같은 상태로의 변경은 아무것도 바꾸지 않았으므로 저장도 감사도 없다.
+ * 안다.
+ *
+ * ── 글을 지우면 그 글의 스크린샷은 첨부 휴지통으로 (2026-09-13) ──────────
+ * 글 행을 지우면 FK(ON DELETE SET NULL)가 첨부의 주인 칸만 비우고 첨부 행은 살아
+ * 있는 채 남는다 — 주인 없는 「살아 있는」 파일이 된다. 그래서 같은 트랜잭션에서
+ * 그 글의 살아 있는 스크린샷을 첨부 휴지통으로 보낸다(attachment-trash.ts — 소프트
+ * 삭제 네 칸 + 첨부마다 FILE_DELETE, 디스크 실물은 그대로). 순서는 ① 잠근 글의
+ * 살아 있는 스크린샷 id 를 읽고 ② 글을 지우고(조건부 — 0행이면 CONFLICT 로 돌아가며
+ * 아무것도 바뀌지 않는다) ③ 읽어 둔 id 들을 휴지통으로 보낸다. ②보다 먼저 휴지통으로
+ * 보내면, ②가 0행일 때 CONFLICT 를 돌려주면서 휴지통 이동만 커밋된다. PURGE 감사에는
+ * 그 id 목록만 싣는다 — 파일 이름·경로 같은 값은 첨부 쪽 감사가 이미 안다. 휴지통으로
+ * 보낸 것이 없어도 빈 배열로 싣는다(「없었다」와 「기록이 빠졌다」를 가르기 위해). 같은 상태로의 변경은 아무것도 바꾸지 않았으므로 저장도 감사도 없다.
  * 고치기는 메뉴가 그대로여도 이전·새 메뉴를 함께 적는다 — 줄 하나만 읽어도 「고친
  * 뒤 이 글이 어느 메뉴였는가」가 보이게. 옛 글(메뉴 NULL)을 고치면 이전 값이 null 이다.
  *
@@ -356,6 +372,9 @@ export async function changeImprovementRequestStatus(params: {
  * version 을 그래도 대조하는 이유는 weekly-report-goals.ts 의 삭제와 같다 — 낡은
  * 화면에서 누른 '삭제'가 그 사이 바뀐 글을 지우면, 되돌릴 수 없는 이 조작에서는
  * 그것이 곧 자료 손실이다.
+ *
+ * 그 글의 살아 있는 스크린샷은 같은 트랜잭션에서 첨부 휴지통으로 간다(파일 헤더의
+ * '글을 지우면 그 글의 스크린샷은 첨부 휴지통으로').
  */
 export async function deleteImprovementRequest(params: {
   id: string;
@@ -378,6 +397,10 @@ export async function deleteImprovementRequest(params: {
       return forbidden(DELETE_FORBIDDEN_MESSAGE);
     }
 
+    // ① 글 행이 지워지면 FK 가 주인 칸을 비워 더는 찾을 수 없다 — 지우기 전에 읽는다.
+    const liveAttachments = await listLiveAttachmentsOfImprovementRequest(tx, current.id);
+
+    // ② 글을 지운다. 0행이면 아무것도 바꾸지 않은 채 CONFLICT 로 돌아간다.
     const [deleted] = await tx
       .delete(improvementRequests)
       .where(
@@ -389,12 +412,19 @@ export async function deleteImprovementRequest(params: {
       .returning({ id: improvementRequests.id, version: improvementRequests.version });
     if (!deleted) return conflict();
 
+    // ③ 읽어 둔 스크린샷을 첨부 휴지통으로 — 같은 트랜잭션, 디스크 실물은 그대로.
+    const trashedAttachmentIds = await trashAttachmentsOfDeletedImprovementRequest(tx, {
+      improvementRequestId: deleted.id,
+      attachments: liveAttachments,
+      actorUserId: params.actorUserId,
+    });
+
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
       actionType: "PURGE",
       targetEntity: TARGET_ENTITY,
       targetRecordId: deleted.id,
-      previousValue: toAuditSnapshot(current),
+      previousValue: { ...toAuditSnapshot(current), trashedAttachmentIds },
     });
 
     // 지워진 글의 version 을 그대로 돌려준다 — 화면이 「무엇이 사라졌는가」를

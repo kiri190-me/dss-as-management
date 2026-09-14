@@ -8,6 +8,11 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { restoreAttachment, softDeleteAttachment } from "@/lib/db/mutations/attachment-trash";
 import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
+import {
+  hasAnyAttachmentOwnerAccess,
+  isAttachmentOwnerAccessAllowed,
+  type AttachmentOwnerAccess,
+} from "@/lib/domain/attachment-download-policy";
 
 /**
  * ============================================================================
@@ -29,10 +34,19 @@ import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
  * 밀어 넣지는 못한다 — 그건 폴링/웹소켓이 필요한 별도 작업이다.
  *
  * ── 🔴 권한은 첨부의 **주인**을 보고 고른다 ──────────────────────────────
- * 첨부의 주인은 접수 건 아니면 제품 모델이다(schema/attachments.ts).
+ * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 중 하나다(schema/attachments.ts).
  *
- *   접수 건 첨부  →  repairCases.files WRITE     (예전 그대로)
- *   모델 첨부     →  **productModels.files WRITE**
+ *   접수 건 첨부     →  repairCases.files WRITE     (예전 그대로)
+ *   모델 첨부        →  **productModels.files WRITE**
+ *   개선 요청 첨부   →  **improvementRequests WRITE** + 글 한 건에 대한 판정
+ *                       (2026-09-13 — 스크린샷)
+ *
+ * 개선 요청 스크린샷은 영역 권한만으로 끝나지 않는다 — 접수 상태인 자기 글의 글쓴이
+ * 또는 관리 권한자(improvementRequests MANAGE)만 지우고 되살린다(올리기와 같은
+ * 판정). 그 판정은 **글 행을 잠근** mutation 이 한다(attachment-trash.ts). 여기서는
+ * MANAGE 를 계산해 `canManageImprovementRequests` 로 넘길 뿐이고, 판정에 막히면
+ * mutation 이 FORBIDDEN 을 돌려준다 — NOT_FOUND 가 아닌 것은 그 사람이 개선 요청
+ * 목록(스크린샷 포함)을 이미 볼 수 있어 숨길 존재가 없기 때문이다(WRITE ⊇ READ).
  *
  * 예전에는 repairCases.files WRITE 하나만 물었다. 모델 첨부가 생긴 지금 그대로
  * 두면 **접수 건 파일 권한만 가진 사람이 모델 회로도를 지울 수 있다** — 그리고
@@ -65,12 +79,15 @@ type AttachmentTrashActionTarget = {
   attachmentId: string;
   repairCaseId?: string;
   productModelId?: string;
+  /** 개선 요청 스크린샷이면 그 글의 id — 설정 › 개선 요청 화면을 다시 그린다. */
+  improvementRequestId?: string;
 };
 
 async function resolveWriteActor(
   attachmentId: string
 ): Promise<
-  { ok: true; userId: string } | { ok: false; result: AttachmentTrashActionResult & { ok: false } }
+  | { ok: true; userId: string; canManageImprovementRequests: boolean }
+  | { ok: false; result: AttachmentTrashActionResult & { ok: false } }
 > {
   if (getRepairCaseWriteSource() !== "database" || getRepairCaseReadSource() !== "database") {
     return {
@@ -100,10 +117,15 @@ async function resolveWriteActor(
   // ── 넓은 문턱 — 조회보다 앞이다 ────────────────────────────────────────
   // 어느 쪽 파일도 다룰 수 없는 사람은 첨부를 읽기 전에 막는다. 예전에
   // repairCases.files 하나로 막던 그 자리이고, 그때처럼 존재 여부가 드러나지
-  // 않는다. 두 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const canWriteRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "WRITE");
-  const canWriteProductModelFiles = await hasPermission(actingUser, "productModels.files", "WRITE");
-  if (!canWriteRepairCaseFiles && !canWriteProductModelFiles) {
+  // 않는다. 여러 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
+  const access: AttachmentOwnerAccess = {
+    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "WRITE"),
+    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.files", "WRITE"),
+    // 개선 요청 스크린샷 — 글을 적는 권한이 곧 자기 글의 스크린샷을 떼는 권한의
+    // 문턱이다. 글 한 건에 대한 판정은 mutation 이 잠근 행으로 더 한다(파일 헤더).
+    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "WRITE"),
+  };
+  if (!hasAnyAttachmentOwnerAccess(access)) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "파일을 지울 권한이 없습니다." } };
   }
 
@@ -114,16 +136,21 @@ async function resolveWriteActor(
     return { ok: false, result: { ok: false, code: "NOT_FOUND", message: "파일을 찾을 수 없습니다." } };
   }
 
-  const allowedForOwner = attachment.productModelId
-    ? canWriteProductModelFiles
-    : canWriteRepairCaseFiles;
-  if (!allowedForOwner) {
+  // 주인 종류 → 물을 권한. 주인이 아무도 없는 첨부는 예전처럼 접수 건 권한으로
+  // 본다(isAttachmentOwnerAccessAllowed 주석).
+  if (!isAttachmentOwnerAccessAllowed(attachment, access)) {
     // 🔴 FORBIDDEN이 아니라 NOT_FOUND다 — 없는 것과 못 다루는 것을 응답에서
     // 구분하지 않는다(파일 헤더의 '권한 묻는 순서').
     return { ok: false, result: { ok: false, code: "NOT_FOUND", message: "파일을 찾을 수 없습니다." } };
   }
 
-  return { ok: true, userId: actingUser.id };
+  // 개선 요청 스크린샷일 때만 관리 권한을 묻는다 — 글 한 건에 대한 판정에 넘길 값이다.
+  const canManageImprovementRequests =
+    attachment.improvementRequestId !== null
+      ? await hasPermission(actingUser, "improvementRequests", "MANAGE")
+      : false;
+
+  return { ok: true, userId: actingUser.id, canManageImprovementRequests };
 }
 
 /**
@@ -136,6 +163,10 @@ function revalidateAfterTrashChange(target: AttachmentTrashActionTarget): void {
   }
   if (target.productModelId) {
     revalidatePath(`/product-models/${target.productModelId}`, "layout");
+  }
+  if (target.improvementRequestId) {
+    // 스크린샷은 글 목록 한 화면에 함께 그려진다(글마다 페이지가 없다).
+    revalidatePath("/settings/improvement-requests");
   }
 }
 
@@ -151,6 +182,7 @@ export async function softDeleteAttachmentAction(
     attachmentId: input.attachmentId,
     actorUserId: actor.userId,
     reason: reason.length > 0 ? reason.slice(0, 500) : null,
+    canManageImprovementRequests: actor.canManageImprovementRequests,
   });
 
   if (!result.ok) return { ok: false, code: result.code, message: result.message };
@@ -169,6 +201,7 @@ export async function restoreAttachmentAction(
   const result = await restoreAttachment({
     attachmentId: input.attachmentId,
     actorUserId: actor.userId,
+    canManageImprovementRequests: actor.canManageImprovementRequests,
   });
 
   if (!result.ok) return { ok: false, code: result.code, message: result.message };

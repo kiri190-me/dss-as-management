@@ -594,6 +594,9 @@ describe("deleteImprovementRequest", () => {
       updatedBy: authorId,
       updatedAt: rowBefore.updatedAt.toISOString(),
       version: 1,
+      // 함께 휴지통으로 보낸 스크린샷 id(2026-09-13). 없어도 빈 배열로 싣는다 —
+      // 「없었다」와 「기록이 빠졌다」를 가르기 위해서다.
+      trashedAttachmentIds: [],
     });
     assert.equal(audits[1].newValue, null);
   });

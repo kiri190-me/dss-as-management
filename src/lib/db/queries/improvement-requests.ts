@@ -1,8 +1,8 @@
 import "server-only";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { improvementRequests, users } from "../schema";
+import { attachments, improvementRequests, users } from "../schema";
 import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request";
 
 /**
@@ -33,8 +33,34 @@ import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request"
  *
  * 🔴 body 는 자유 입력이다(schema 헤더의 PII). 화면에 그리는 것 말고는 어디로도
  * 내보내지 않는다.
+ *
+ * ── 스크린샷은 한 번에 읽어 묶는다 (2026-09-13) ─────────────────────────
+ * 글마다 살아 있는 스크린샷(그 글이 주인이고 휴지통에 없는 첨부)을 올린 차례대로
+ * 싣는다. 🔴 **글마다 조회하지 않는다(N+1 금지)** — 글 목록을 읽은 뒤 그 id 들로
+ * attachments 를 **한 번** 읽어(`improvement_request_id IN (...) AND is_deleted =
+ * false` — 부분 인덱스 attachments_improvement_request_id_not_deleted_idx 를 타는
+ * 모양) 글 id 로 묶는다. 그래서 글이 몇 개든 조회는 둘이다(글이 없으면 하나).
+ *
+ * 「스크린샷」의 정의는 올리기 통로가 5장을 셀 때와 같다 — 분류로 다시 거르지 않는다.
+ * 개선 요청이 주인인 첨부는 올리기 통로가 언제나 SCREENSHOT 으로 만들고, 셈과 목록이
+ * 다른 정의를 쓰면 화면에는 넉 장인데 「5장까지」로 거절되는 일이 생긴다.
+ *
+ * 미리보기 경로(preview_path)는 내보내지 않는다 — 저장 루트 아래의 내부 구조다. 화면은
+ * 「있는가」만 알면 되고, 썸네일은 내려받기 통로(`?view=thumb`)가 경로를 대신 고른다.
  * ============================================================================
  */
+
+/** 글 한 건에 붙은 살아 있는 스크린샷 하나. */
+export type ImprovementRequestScreenshot = {
+  /** 첨부 id — 내려받기 통로(/api/attachments/{id}/download)와 지우기 액션이 받는 값. */
+  id: string;
+  /** 올린 사람이 붙인 원래 이름. 표시에만 쓴다(PII 가 섞일 수 있다 — schema/attachments.ts). */
+  originalFileName: string;
+  /** 미리보기(썸네일)가 있는가. 없으면 화면은 `?view=thumb` 가 원본을 돌려준다고 알면 된다. */
+  hasPreview: boolean;
+  /** 올린 시각(ISO). */
+  uploadedAt: string;
+};
 
 const author = alias(users, "improvement_request_author");
 const inProgressUser = alias(users, "improvement_request_in_progress_user");
@@ -64,10 +90,55 @@ export type ImprovementRequestListItem = {
   updatedAt: string;
   /** 고치기·상태 옮기기·지우기가 expectedVersion 으로 돌려보낼 값. */
   version: number;
+  /** 살아 있는 스크린샷, 올린 차례대로(먼저 올린 것부터). 없으면 빈 배열. */
+  screenshots: ImprovementRequestScreenshot[];
 };
 
 function toIsoOrNull(value: Date | null): string | null {
   return value ? value.toISOString() : null;
+}
+
+/**
+ * 글 id 들의 살아 있는 스크린샷을 **한 번의 조회로** 읽어 글 id 로 묶는다(파일 헤더의
+ * '스크린샷은 한 번에 읽어 묶는다'). 올린 시각 오름차순, 같은 시각이면 id 로 — 새로
+ * 고칠 때마다 두 장이 자리를 바꾸지 않게.
+ */
+async function listLiveScreenshotsByRequest(
+  improvementRequestIds: readonly string[]
+): Promise<Map<string, ImprovementRequestScreenshot[]>> {
+  const grouped = new Map<string, ImprovementRequestScreenshot[]>();
+  if (improvementRequestIds.length === 0) return grouped;
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      improvementRequestId: attachments.improvementRequestId,
+      originalFileName: attachments.originalFileName,
+      previewPath: attachments.previewPath,
+      uploadedAt: attachments.uploadedAt,
+    })
+    .from(attachments)
+    .where(
+      and(
+        inArray(attachments.improvementRequestId, [...improvementRequestIds]),
+        eq(attachments.isDeleted, false)
+      )
+    )
+    .orderBy(asc(attachments.uploadedAt), asc(attachments.id));
+
+  for (const row of rows) {
+    // IN 조건이라 NULL 은 올 수 없지만, 타입이 nullable 이라 한 번 거른다.
+    if (row.improvementRequestId === null) continue;
+    const list = grouped.get(row.improvementRequestId) ?? [];
+    list.push({
+      id: row.id,
+      originalFileName: row.originalFileName,
+      hasPreview: row.previewPath !== null,
+      uploadedAt: row.uploadedAt.toISOString(),
+    });
+    grouped.set(row.improvementRequestId, list);
+  }
+  return grouped;
 }
 
 /** 모든 개선 요청 — 최근 글부터. */
@@ -96,11 +167,14 @@ export async function listImprovementRequests(): Promise<ImprovementRequestListI
     .leftJoin(resolvedUser, eq(resolvedUser.id, improvementRequests.resolvedBy))
     .orderBy(desc(improvementRequests.createdAt), desc(improvementRequests.id));
 
+  const screenshotsByRequest = await listLiveScreenshotsByRequest(rows.map((row) => row.id));
+
   return rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.toISOString(),
     inProgressAt: toIsoOrNull(row.inProgressAt),
     resolvedAt: toIsoOrNull(row.resolvedAt),
     updatedAt: row.updatedAt.toISOString(),
+    screenshots: screenshotsByRequest.get(row.id) ?? [],
   }));
 }

@@ -3,7 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
-import { decideAttachmentDownload } from "@/lib/domain/attachment-download-policy";
+import {
+  decideAttachmentDownload,
+  hasAnyAttachmentOwnerAccess,
+  isAttachmentOwnerAccessAllowed,
+  type AttachmentOwnerAccess,
+} from "@/lib/domain/attachment-download-policy";
 import { AttachmentPathError, resolveAttachmentAbsolutePath } from "@/lib/domain/attachment-path";
 import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
 import { recordAttachmentDownload } from "@/lib/db/mutations/attachment-trash";
@@ -29,10 +34,15 @@ import { shouldServeInline } from "./inline-view";
  * 볼 자격을 먼저 확인한 뒤에 꺼낸다.
  *
  * ── 권한이 주인에 따라 갈린다 — 그래서 조회가 앞으로 왔다 ────────────────
- * 첨부의 주인은 접수 건 아니면 제품 모델이다(schema/attachments.ts).
+ * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 중 하나다(schema/attachments.ts).
  *
- *   접수 건 첨부  →  repairCases.files READ    (예전 그대로)
- *   모델 첨부     →  **productModels.view READ**
+ *   접수 건 첨부     →  repairCases.files READ    (예전 그대로)
+ *   모델 첨부        →  **productModels.view READ**
+ *   개선 요청 첨부   →  **improvementRequests READ** (2026-09-13 — 스크린샷)
+ *
+ * 개선 요청 스크린샷을 보는 데 READ 면 되는 까닭은 모델 회로도와 같다 — 글 목록을
+ * 볼 수 있는 사람은 그 글에 붙은 화면 사진도 볼 수 있어야 한다. 좁히는 것은 붙이고
+ * 떼는 쪽뿐이다(WRITE + 글 한 건에 대한 판정 — 올리기 통로 · 지우기 액션).
  *
  * 모델 파일을 보는 데 productModels.files가 아니라 **view**를 쓰는 까닭:
  * 회로도를 **보는 것**은 모델 상세를 보는 일의 일부다. 영업도 모델을 볼 수
@@ -44,7 +54,7 @@ import { shouldServeInline } from "./inline-view";
  * 순서(권한 → 조회)에서는 권한 없는 사람이 "그 ID의 첨부가 있는지"조차 알 수
  * 없었고, 그 성질을 잃지 않으려고 두 겹으로 나눴다.
  *
- *   3번(넓은 문턱)  둘 중 **어느 파일도** 볼 수 없는 사람은 조회 전에 403이다.
+ *   3번(넓은 문턱)  셋 중 **어느 파일도** 볼 수 없는 사람은 조회 전에 403이다.
  *                   예전에 repairCases.files 하나로 막던 자리와 같은 자리다.
  *   5번(주인별)     문턱은 넘었지만 이 주인의 파일은 못 보는 사람에게는
  *                   **"없음"과 똑같은 응답**(404 NOT_FOUND)을 준다. 403으로
@@ -122,16 +132,20 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   // ── 2) 넓은 권한 문턱 — 조회보다 앞이다 ────────────────────────────────
   //
-  // 두 권한을 여기서 한 번에 읽어 둔다. 어느 쪽도 없는 사람은 어떤 첨부도 볼
+  // 세 권한을 여기서 한 번에 읽어 둔다. 어느 쪽도 없는 사람은 어떤 첨부도 볼
   // 수 없으므로 **첨부를 조회하기 전에** 막는다 — 예전에 repairCases.files
   // 하나로 막던 그 자리이고, 그때와 마찬가지로 존재 여부가 드러나지 않는다.
   //
-  // 두 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const canReadRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "READ");
-  // 모델 파일을 **보는** 권한은 productModels.files가 아니라 view다 — 파일
-  // 헤더의 '권한이 주인에 따라 갈린다' 참조.
-  const canReadProductModelFiles = await hasPermission(actingUser, "productModels.view", "READ");
-  if (!canReadRepairCaseFiles && !canReadProductModelFiles) {
+  // 여러 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
+  const access: AttachmentOwnerAccess = {
+    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "READ"),
+    // 모델 파일을 **보는** 권한은 productModels.files가 아니라 view다 — 파일
+    // 헤더의 '권한이 주인에 따라 갈린다' 참조.
+    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.view", "READ"),
+    // 개선 요청 스크린샷 — 글 목록을 볼 수 있으면 본다(파일 헤더).
+    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "READ"),
+  };
+  if (!hasAnyAttachmentOwnerAccess(access)) {
     return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
   }
 
@@ -144,12 +158,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   // ── 4) 주인별 권한 — 판정 결과를 꺼내기 전에 확인한다 ──────────────────
   //
-  // 주인이 아무도 없는 첨부(둘 다 NULL)는 여기서 갈라 봐야 물을 대상이 없다.
-  // 아래 허용 판정이 DETACHED로 막으므로 그쪽에 맡긴다.
-  const allowedForOwner = attachment.productModelId
-    ? canReadProductModelFiles
-    : canReadRepairCaseFiles;
-  if (!allowedForOwner) {
+  // 주인이 아무도 없는 첨부(셋 다 NULL)는 여기서 갈라 봐야 물을 대상이 없다.
+  // 예전처럼 접수 건 권한으로 보고, 아래 허용 판정이 DETACHED로 막는다.
+  if (!isAttachmentOwnerAccessAllowed(attachment, access)) {
     // 🔴 403이 아니라 **404다.** 여기까지 온 사람은 문턱을 넘었으므로, 403으로
     // 갈라 답하면 "그 ID는 실재하고 이런 종류의 첨부다"가 새어 나간다. 없는
     // 것과 못 보는 것을 응답에서 구분하지 않는다.
@@ -182,6 +193,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const decision = decideAttachmentDownload({
     repairCaseId: attachment.repairCaseId,
     productModelId: attachment.productModelId,
+    improvementRequestId: attachment.improvementRequestId,
     isDeleted: attachment.isDeleted,
     malwareScanStatus: attachment.malwareScanStatus,
   });
@@ -254,6 +266,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       owner: {
         repairCaseId: attachment.repairCaseId,
         productModelId: attachment.productModelId,
+        improvementRequestId: attachment.improvementRequestId,
       },
       originalFileName: attachment.originalFileName,
       fileSize: attachment.fileSize,

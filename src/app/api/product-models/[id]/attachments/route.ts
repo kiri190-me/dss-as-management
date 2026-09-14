@@ -13,7 +13,11 @@ import {
   isExtensionAllowedForCategory,
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
-import { isAttachmentCategory } from "@/lib/domain/attachment-category";
+import {
+  attachmentCategoryLabels,
+  isAttachmentCategory,
+  isAttachmentCategoryAllowedForOwner,
+} from "@/lib/domain/attachment-category";
 import { buildProductModelAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getProductModelAttachmentUploadTarget } from "@/lib/db/queries/attachments";
@@ -73,6 +77,7 @@ type FailureCode =
   // 두지 않는다 — 제품 모델에는 잠금이 없다.
   | "MODEL_NOT_FOUND"
   | "INVALID_CATEGORY"
+  | "CATEGORY_NOT_ALLOWED_FOR_OWNER"
   | "INVALID_FILE_NAME"
   | "EXTENSION_NOT_ALLOWED"
   | "EXTENSION_NOT_ALLOWED_FOR_CATEGORY"
@@ -132,6 +137,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const category = (searchParams.get("category") ?? "").trim();
   if (!isAttachmentCategory(category)) {
     return fail(400, "INVALID_CATEGORY", "첨부 분류가 올바르지 않습니다.");
+  }
+  // 「스크린샷」은 개선 요청 글 전용이다(attachment-category.ts). 접수 건 통로와
+  // 같은 자리 · 같은 응답이다.
+  if (!isAttachmentCategoryAllowedForOwner(category, "PRODUCT_MODEL")) {
+    return fail(
+      400,
+      "CATEGORY_NOT_ALLOWED_FOR_OWNER",
+      `'${attachmentCategoryLabels[category]}' 분류는 제품 모델 파일에 쓸 수 없습니다. 개선 요청 글에만 붙입니다.`
+    );
   }
 
   const originalFileName = (searchParams.get("fileName") ?? "").trim();

@@ -166,6 +166,45 @@ export function canDeleteImprovementRequest(input: {
   return input.status === "OPEN" && input.createdBy === input.actorUserId;
 }
 
+// ────────────────────────────────────────────────── 스크린샷 (2026-09-13)
+
+/**
+ * 한 글에 붙일 수 있는 스크린샷의 수(승인된 설계). 🔴 이 수를 세는 곳은 **글 행을
+ * 잠근 트랜잭션** 안이다(mutations/attachments.ts 의 guardImprovementRequestAttachmentChange)
+ * — 잠그지 않고 세면 동시에 올린 두 장이 둘 다 「네 장뿐」을 보고 들어간다.
+ * 「살아 있는 첨부」(휴지통에 없는 것)만 센다. 휴지통의 것은 되살릴 때 다시 센다.
+ */
+export const IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT = 5;
+
+export const IMPROVEMENT_REQUEST_SCREENSHOT_LIMIT_MESSAGE = `스크린샷은 한 글에 ${IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT}장까지 붙일 수 있습니다.`;
+
+export const IMPROVEMENT_REQUEST_SCREENSHOT_FORBIDDEN_MESSAGE =
+  "접수 상태인 자기 글에만 스크린샷을 붙이거나 뗄 수 있습니다.";
+
+/**
+ * 이 사람이 이 글의 스크린샷을 붙이거나 뗄 수 있는가 — 관리 권한이 있으면 어느 글이든,
+ * 없으면 접수 상태인 자기 글만(승인된 설계). 올리기 · 지우기 · 되살리기 · 미리보기
+ * 붙이기가 모두 이 판정 하나를 본다.
+ *
+ * 모양은 지우기(canDeleteImprovementRequest)와 같다. 글 **내용** 고치기와 다른 점은
+ * 관리 권한이 남의 글에도 열린다는 것 — 스크린샷은 글쓴이의 말이 아니라 증거 자료라,
+ * 맡은 사람이 재현 화면을 붙이거나 잘못 붙은 것을 떼는 일이 있어야 한다.
+ */
+export function canChangeImprovementRequestScreenshots(input: {
+  status: ImprovementRequestStatus;
+  createdBy: string;
+  actorUserId: string;
+  canManage: boolean;
+}): boolean {
+  if (input.canManage) return true;
+  return canEditImprovementRequestBody(input);
+}
+
+/** 한 장을 더 붙일 자리가 있는가. `liveCount` 는 지금 살아 있는 첨부 수다. */
+export function hasImprovementRequestScreenshotRoom(liveCount: number): boolean {
+  return liveCount < IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT;
+}
+
 // ────────────────────────────────────────────────── 목록 차례
 
 /**

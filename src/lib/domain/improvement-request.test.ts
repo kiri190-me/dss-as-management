@@ -4,8 +4,12 @@ import { randomUUID } from "node:crypto";
 
 import {
   arrangeImprovementRequestList,
+  IMPROVEMENT_REQUEST_SCREENSHOT_LIMIT_MESSAGE,
+  IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT,
+  canChangeImprovementRequestScreenshots,
   canDeleteImprovementRequest,
   canEditImprovementRequestBody,
+  hasImprovementRequestScreenshotRoom,
   countImprovementRequestBodyChars,
   filterImprovementRequestsByMenu,
   groupImprovementRequestMenuOptions,
@@ -261,6 +265,50 @@ describe("누가 무엇을", () => {
         `남 · ${status}`
       );
     }
+  });
+});
+
+describe("스크린샷 — 누가 붙이고 떼는가 · 몇 장까지 (2026-09-13)", () => {
+  const AUTHOR = randomUUID();
+  const OTHER = randomUUID();
+
+  test("관리 권한이 있으면 어느 글 · 어느 상태든 붙이고 뗀다", () => {
+    for (const status of IMPROVEMENT_REQUEST_STATUSES) {
+      for (const actorUserId of [AUTHOR, OTHER]) {
+        assert.equal(
+          canChangeImprovementRequestScreenshots({ status, createdBy: AUTHOR, actorUserId, canManage: true }),
+          true,
+          status
+        );
+      }
+    }
+  });
+
+  test("관리 권한이 없으면 접수 상태인 자기 글만 — 진행중 · 해결된 자기 글, 남의 글은 안 된다", () => {
+    for (const status of IMPROVEMENT_REQUEST_STATUSES) {
+      assert.equal(
+        canChangeImprovementRequestScreenshots({ status, createdBy: AUTHOR, actorUserId: AUTHOR, canManage: false }),
+        status === "OPEN",
+        `작성자 · ${status}`
+      );
+      assert.equal(
+        canChangeImprovementRequestScreenshots({ status, createdBy: AUTHOR, actorUserId: OTHER, canManage: false }),
+        false,
+        `남 · ${status}`
+      );
+    }
+  });
+
+  test("한 글에 5장 — 네 장이면 한 장 더, 다섯 장이면 더 없다", () => {
+    assert.equal(IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT, 5);
+    assert.equal(hasImprovementRequestScreenshotRoom(0), true);
+    assert.equal(hasImprovementRequestScreenshotRoom(4), true);
+    assert.equal(hasImprovementRequestScreenshotRoom(5), false);
+    assert.equal(hasImprovementRequestScreenshotRoom(6), false, "넘친 상태에서도 자리가 없다고 답한다");
+  });
+
+  test("상한 문구는 사람이 읽는 한국어이고 수가 상수에서 온다", () => {
+    assert.equal(IMPROVEMENT_REQUEST_SCREENSHOT_LIMIT_MESSAGE, "스크린샷은 한 글에 5장까지 붙일 수 있습니다.");
   });
 });
 

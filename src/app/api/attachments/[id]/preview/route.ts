@@ -6,9 +6,22 @@ import { isTrustedOrigin } from "@/lib/auth/request-guards";
 import { readSession } from "@/lib/auth/session";
 import {
   buildAttachmentPreviewPath,
+  buildImprovementRequestAttachmentPreviewPath,
   buildProductModelAttachmentPreviewPath,
 } from "@/lib/domain/attachment-path";
+import type { AttachmentOwnerKind } from "@/lib/domain/attachment-category";
+import {
+  attachmentOwnerKindOf,
+  hasAnyAttachmentOwnerAccess,
+  isAttachmentOwnerAccessAllowed,
+  type AttachmentOwnerAccess,
+} from "@/lib/domain/attachment-download-policy";
+import {
+  IMPROVEMENT_REQUEST_SCREENSHOT_FORBIDDEN_MESSAGE,
+  canChangeImprovementRequestScreenshots,
+} from "@/lib/domain/improvement-request";
 import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
+import { getImprovementRequestAttachmentTarget } from "@/lib/db/queries/attachments";
 import { setAttachmentPreviewPath } from "@/lib/db/mutations/attachment-preview";
 import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
 import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
@@ -41,12 +54,19 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  * 이 통로는 미리보기를 **만들어 붙인다**. 그래서 묻는 것은 언제나 WRITE이고,
  * 주인에 따라 이렇게 갈린다:
  *
- *   접수 건 첨부  →  repairCases.files WRITE     (예전 그대로)
- *   모델 첨부     →  **productModels.files WRITE**
+ *   접수 건 첨부     →  repairCases.files WRITE     (예전 그대로)
+ *   모델 첨부        →  **productModels.files WRITE**
+ *   개선 요청 첨부   →  **improvementRequests WRITE** + 글 한 건에 대한 판정
+ *                       (2026-09-13 — 스크린샷을 올린 사람과 같은 판정)
  *
  * 모델 첨부를 **보는** 쪽(다운로드·썸네일 서빙)은 productModels.view면 되지만
  * (download/route.ts 헤더 참조), 여기서 view를 받으면 모델을 볼 수 있는 모든
  * 사람이 남의 도면에 그림을 붙일 수 있게 된다. 올리고 바꾸는 것은 좁힌다.
+ * 개선 요청 스크린샷도 같다 — READ 로 받으면 목록을 보는 모든 사람이 남의 글
+ * 스크린샷에 그림을 붙인다. 그래서 올리기 통로와 **같은 판정**(접수 상태인 자기
+ * 글이거나 improvementRequests MANAGE)을 거친다. 그 판정에 막히면 403 이다 —
+ * 그 사람은 WRITE(⊇ READ)라 목록에서 이 스크린샷을 이미 보고 있으므로, 404 로
+ * 숨길 존재가 없다(404 는 영역 권한 자체가 없을 때만이다).
  *
  * ── 권한 묻는 순서 ───────────────────────────────────────────────────────
  * 주인을 알아야 물을 권한이 정해지므로 조회가 앞으로 왔다. download 라우트와
@@ -98,9 +118,12 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
 
   // 미리보기를 만드는 것은 파일을 바꾸는 일이므로 올리기와 같은 권한을 본다.
   // 어느 쪽 파일도 다룰 수 없는 사람은 조회 전에 막는다(파일 헤더 참조).
-  const canWriteRepairCaseFiles = await hasPermission(actingUser, "repairCases.files", "WRITE");
-  const canWriteProductModelFiles = await hasPermission(actingUser, "productModels.files", "WRITE");
-  if (!canWriteRepairCaseFiles && !canWriteProductModelFiles) {
+  const access: AttachmentOwnerAccess = {
+    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "WRITE"),
+    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.files", "WRITE"),
+    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "WRITE"),
+  };
+  if (!hasAnyAttachmentOwnerAccess(access)) {
     return fail(403, "FORBIDDEN", "이 파일을 다룰 권한이 없습니다.");
   }
 
@@ -112,21 +135,43 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
 
   // 주인별 권한. 막힐 때는 "없음"과 같은 응답을 준다 — 403으로 갈라 답하면
   // 그 ID가 실재한다는 사실이 새어 나간다.
-  const allowedForOwner = attachment.productModelId
-    ? canWriteProductModelFiles
-    : canWriteRepairCaseFiles;
-  if (!allowedForOwner) {
+  if (!isAttachmentOwnerAccessAllowed(attachment, access)) {
     return fail(404, "NOT_FOUND", "파일을 찾을 수 없습니다.");
   }
 
-  // 미리보기를 둘 폴더는 **주인의 ID**로 정해진다(두 경로 함수 모두). 주인이
+  // 개선 요청 스크린샷 — 글 한 건에 대한 판정(올리기와 같다, 파일 헤더). 잠그지
+  // 않고 읽는다: 미리보기는 원본에서 파생된 화면용 사본이라 판정과 기록 사이의 틈이
+  // 남기는 것은 썸네일 한 장이고, 기록(setAttachmentPreviewPath)은 휴지통의 첨부에는
+  // 붙지 않는다.
+  if (attachment.improvementRequestId !== null) {
+    const request = await getImprovementRequestAttachmentTarget(attachment.improvementRequestId);
+    if (!request) {
+      return fail(404, "NOT_FOUND", "파일을 찾을 수 없습니다.");
+    }
+    const canManage = await hasPermission(actingUser, "improvementRequests", "MANAGE");
+    if (
+      !canChangeImprovementRequestScreenshots({
+        status: request.status,
+        createdBy: request.createdBy,
+        actorUserId: actingUser.id,
+        canManage,
+      })
+    ) {
+      return fail(403, "FORBIDDEN", IMPROVEMENT_REQUEST_SCREENSHOT_FORBIDDEN_MESSAGE);
+    }
+  }
+
+  // 미리보기를 둘 폴더는 **주인의 ID**로 정해진다(세 경로 함수 모두). 주인이
   // 아무도 없으면 둘 자리가 없다. 본문을 받기 전에 여기서 끝낸다.
-  const previewOwner: { kind: "PRODUCT_MODEL" | "REPAIR_CASE"; id: string } | null =
-    attachment.productModelId
-      ? { kind: "PRODUCT_MODEL", id: attachment.productModelId }
-      : attachment.repairCaseId
-        ? { kind: "REPAIR_CASE", id: attachment.repairCaseId }
-        : null;
+  const ownerKind = attachmentOwnerKindOf(attachment);
+  const previewOwner: { kind: AttachmentOwnerKind; id: string } | null =
+    ownerKind === "PRODUCT_MODEL" && attachment.productModelId
+      ? { kind: ownerKind, id: attachment.productModelId }
+      : ownerKind === "IMPROVEMENT_REQUEST" && attachment.improvementRequestId
+        ? { kind: ownerKind, id: attachment.improvementRequestId }
+        : ownerKind === "REPAIR_CASE" && attachment.repairCaseId
+          ? { kind: ownerKind, id: attachment.repairCaseId }
+          : null;
   if (!previewOwner) {
     return fail(404, "NOT_FOUND", "접수 건과 연결이 끊긴 파일입니다.");
   }
@@ -165,10 +210,15 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
           productModelId: previewOwner.id,
           attachmentId: attachment.id,
         })
-      : buildAttachmentPreviewPath({
-          repairCaseId: previewOwner.id,
-          attachmentId: attachment.id,
-        });
+      : previewOwner.kind === "IMPROVEMENT_REQUEST"
+        ? buildImprovementRequestAttachmentPreviewPath({
+            improvementRequestId: previewOwner.id,
+            attachmentId: attachment.id,
+          })
+        : buildAttachmentPreviewPath({
+            repairCaseId: previewOwner.id,
+            attachmentId: attachment.id,
+          });
 
   // 파일이 먼저, 기록이 나중 — 원본 업로드와 같은 순서다.
   try {

@@ -25,7 +25,7 @@ import {
 import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import {
-  ATTACHMENT_CATEGORY_CODES,
+  attachmentCategoriesForOwner,
   attachmentCategoryLabels,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
@@ -121,6 +121,13 @@ export default function FilesScreen(props: {
 // ============================================================================
 
 const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
+
+/**
+ * 올리기 칸의 분류 선택지 — 접수 건 파일이 받는 분류만. 「스크린샷」은 개선 요청 글
+ * 전용이라 빠진다(attachment-category.ts 의 isAttachmentCategoryAllowedForOwner —
+ * 올리기 통로도 같은 함수로 거절한다).
+ */
+const REPAIR_CASE_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("REPAIR_CASE");
 
 function allowedExtensionsFor(category: AttachmentCategory): string[] {
   return ALL_EXTENSIONS.filter((extension) => isExtensionAllowedForCategory(extension, category));
@@ -684,7 +691,7 @@ function DatabaseFilesScreen({
                   disabled={isUploading}
                   className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 >
-                  {ATTACHMENT_CATEGORY_CODES.map((code) => (
+                  {REPAIR_CASE_UPLOAD_CATEGORIES.map((code) => (
                     <option key={code} value={code}>
                       {attachmentCategoryLabels[code]}
                     </option>
