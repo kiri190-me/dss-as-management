@@ -8,6 +8,9 @@ import { setShipmentRepresentativeAction } from "@/lib/server/actions/shipment-r
 import type { Role } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import type { RepresentativeManagementUserRow } from "@/lib/db/queries/shipment-delegations";
+import UserDeletionDialog from "./UserDeletionDialog";
+import { UserDeletionRowButton } from "./UserDeletionParts";
+import { userDeletionSuccessMessage } from "./user-deletion-dialog-text";
 
 type PendingAction = { userId: string; nextFlag: boolean } | null;
 
@@ -26,19 +29,32 @@ function eligibilityBlockReason(user: RepresentativeManagementUserRow): string |
  * list read-only with an explanation. A LAST_REPRESENTATIVE result from the
  * server prompts a confirmation re-submit rather than silently failing or
  * silently forcing it through.
+ *
+ * 2026-09-14: 줄마다 [계정 삭제]가 붙었다. 대표 지정과 **다른 값**
+ * (`canDeleteUserAccounts`)으로 여닫는다 — 서버 페이지가 개발자 표시와 같은 판정
+ * 함수로 계산해 준 값이고 개발자에게 승격되지 않는다. 자기 자신의 줄에는 그리지
+ * 않는다(`actingUserId`). 막는 것은 서버다 — 이 판정은 단추를 보일지만 정한다.
  */
 export default function RepresentativeListSection({
   users,
   canManageRepresentatives,
+  canDeleteUserAccounts,
+  actingUserId,
 }: {
   users: RepresentativeManagementUserRow[];
   canManageRepresentatives: boolean;
+  /** [계정 삭제]를 보일까 — 서버 페이지가 계산해 내려보낸 값. */
+  canDeleteUserAccounts: boolean;
+  /** 지금 로그인한 사람 — 자기 자신의 줄에는 [계정 삭제]를 그리지 않는다. */
+  actingUserId: string;
 }) {
   const router = useRouter();
   const uiText = useUiText();
   const [pending, setPending] = useState<PendingAction>(null);
   const [confirmingLastRemoval, setConfirmingLastRemoval] = useState<PendingAction>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // 삭제 확인 창의 대상 — 있으면 창이 붙어 열리고, 비우면 떨어져 닫힌다.
+  const [deletionTarget, setDeletionTarget] = useState<{ id: string; name: string } | null>(null);
 
   async function submit(userId: string, nextFlag: boolean, confirmLastRepresentativeRemoval: boolean) {
     setPending({ userId, nextFlag });
@@ -168,6 +184,16 @@ export default function RepresentativeListSection({
         {disabledReason && (
           <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{disabledReason}</span>
         )}
+        <UserDeletionRowButton
+          canDeleteUserAccounts={canDeleteUserAccounts}
+          actingUserId={actingUserId}
+          userId={user.id}
+          disabled={isPendingThis || deletionTarget !== null}
+          onRequestDelete={() => {
+            setMessage(null);
+            setDeletionTarget({ id: user.id, name: user.name });
+          }}
+        />
       </div>
     );
   }
@@ -233,6 +259,22 @@ export default function RepresentativeListSection({
           </ul>
         }
       />
+
+      {/* 표와 카드가 같은 단추를 쓰고, 창은 여기 하나만 붙는다. 서버 액션은
+          revalidatePath 를 부르지 않으므로 성공 뒤 router.refresh() 로 다시 읽는다. */}
+      {deletionTarget && (
+        <UserDeletionDialog
+          key={deletionTarget.id}
+          targetUserId={deletionTarget.id}
+          targetName={deletionTarget.name}
+          onClose={() => setDeletionTarget(null)}
+          onDeleted={(deletedName) => {
+            setDeletionTarget(null);
+            setMessage(userDeletionSuccessMessage(deletedName));
+            router.refresh();
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -112,6 +112,13 @@ export default async function UsersPage() {
   // 확인했지만 함수가 한 번 더 본다 — 공짜고, 서버와 정확히 같은 식이 된다.
   const canManageDeveloperFlag = mayManageDeveloperFlag(actingUser);
 
+  // 🔴 사용자 계정 삭제도 **같은 판정 함수**다 — 진짜 최고관리자만, 개발자 승격 제외
+  // (사용자 결정 2026-09-13). 서버 액션 · mutation(server/actions/user-deletion.ts ·
+  // db/mutations/user-deletion.ts)이 같은 함수로 다시 판정하므로 이 값은 [계정 삭제]
+  // 단추를 보일지만 정한다. 지금은 개발자 표시와 답이 같지만 두 일이 갈라지는 날에
+  // 한쪽만 바꿀 수 있도록 값을 따로 둔다.
+  const canDeleteUserAccounts = mayManageDeveloperFlag(actingUser);
+
   return (
     <RepresentativeManagementScreen
       actingUser={actingUser}
@@ -123,6 +130,7 @@ export default async function UsersPage() {
       approverCandidates={approverCandidates}
       canManageRepresentatives={canManageRepresentatives}
       canManageDeveloperFlag={canManageDeveloperFlag}
+      canDeleteUserAccounts={canDeleteUserAccounts}
     />
   );
 }

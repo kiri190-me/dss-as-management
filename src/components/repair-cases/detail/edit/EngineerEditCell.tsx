@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectionActions";
+import { buildEngineerSelectOptions } from "./engineer-select-options";
 
 /**
  * Top-summary-card 담당 엔지니어 편집 — the only normal edit location for
@@ -76,11 +77,15 @@ export default function EngineerEditCell({
         onChange={(e) => setValue(e.target.value)}
       >
         <option value="">미배정</option>
-        {(referenceData?.engineers ?? []).map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.name}
-          </option>
-        ))}
+        {/* 지금 담당자가 후보 밖이면(삭제 · 역할 변경 등) 그 사람을 선택지로 하나 더한다 —
+            빼면 담당이 있는데 「미배정」처럼 보인다(engineer-select-options.ts). */}
+        {buildEngineerSelectOptions(referenceData?.engineers ?? [], assignedEngineerId, engineerName).map(
+          (option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          )
+        )}
       </select>
       {fieldErrors.assignedEngineerId && <p className={editErrorClass}>{fieldErrors.assignedEngineerId}</p>}
       <EditSectionActions

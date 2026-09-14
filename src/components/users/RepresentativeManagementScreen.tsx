@@ -62,6 +62,7 @@ export default function RepresentativeManagementScreen({
   approverCandidates,
   canManageRepresentatives,
   canManageDeveloperFlag,
+  canDeleteUserAccounts,
 }: {
   actingUser: ActingUser;
   users: RepresentativeManagementUserRow[];
@@ -105,6 +106,14 @@ export default function RepresentativeManagementScreen({
    * 아예 그리지 않는다 — 권한·알림 탭이 자료가 null 이면 없는 것과 같은 방식이다.
    */
   canManageDeveloperFlag: boolean;
+  /**
+   * 🔴 「사용자 계정을 삭제할 수 있는가」 — 진짜 최고관리자에게만 참이다(개발자 승격
+   * 제외, 사용자 결정 2026-09-13). 서버 페이지가 개발자 표시와 같은 판정 함수로 계산해
+   * 내려보내고, 서버 액션 · mutation 이 같은 함수로 다시 판정한다. 이 화면은 받은 값을
+   * 대표 목록에 넘기기만 한다 — 위의 canManageRepresentatives 와 섞지 않는다(그 값은
+   * 개발자에게 승격된다).
+   */
+  canDeleteUserAccounts: boolean;
 }) {
   const representatives = users.filter((u) => u.isShipmentRepresentative);
   const [activeTab, setActiveTab] = useState<
@@ -207,7 +216,14 @@ export default function RepresentativeManagementScreen({
               (2026-09-07). 예전에는 `isSuperAdmin` 이었는데, 넘기는 값은
               「대표 지정·위임을 관리해도 되는가」이고 개발자 표시가 생기면서
               최고관리자 여부와 갈렸다 — 이름이 거짓말을 하고 있었다. */}
-          <RepresentativeListSection users={users} canManageRepresentatives={canManageRepresentatives} />
+          {/* [계정 삭제]는 따로 받은 값으로 여닫는다. 자기 자신의 줄을 가리려고 행위자
+              id 를 함께 넘긴다. */}
+          <RepresentativeListSection
+            users={users}
+            canManageRepresentatives={canManageRepresentatives}
+            canDeleteUserAccounts={canDeleteUserAccounts}
+            actingUserId={actingUser.id}
+          />
 
           <DelegationSection
             actingUser={actingUser}
