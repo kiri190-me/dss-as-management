@@ -52,6 +52,50 @@ function fail(code: DeveloperFlagResultCode, message: string): never {
   throw new DeveloperFlagMutationError({ ok: false, code, message });
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 개발자 표시를 실제로 바꾸고 감사 기록을 한 줄 남긴다 — **부르는 쪽의 트랜잭션
+ * 안에서.**
+ *
+ * 🔴 판정은 하지 않는다. 누가 바꿀 수 있는가(진짜 최고관리자 — setDeveloperFlag)와
+ * 대상 자격은 부르는 쪽 몫이다. 사용자 계정 삭제도 같은 판정(mayManageDeveloperFlag)을
+ * 자기 트랜잭션에서 한 뒤 이 쓰기를 부른다 — 표시와 감사 기록이 어느 경로에서든
+ * 같은 모양으로 함께 남게 한 곳에 모았다.
+ *
+ * @param params.auditCause 감사 기록의 새 값에 `cause` 로 함께 적을 것. 주지 않으면
+ *   감사 기록은 예전과 글자 그대로 같다(`cause` 칸 자체가 없다).
+ */
+export async function writeDeveloperFlagChange(
+  tx: Tx,
+  params: {
+    targetUserId: string;
+    previousValue: boolean;
+    newValue: boolean;
+    actorUserId: string;
+    auditCause?: Record<string, unknown>;
+  }
+): Promise<void> {
+  await tx
+    .update(users)
+    .set({ isDeveloper: params.newValue, updatedAt: new Date() })
+    .where(eq(users.id, params.targetUserId));
+
+  // 같은 트랜잭션 안에서 남긴다 — 거절되면 부르는 쪽이 던져 이 줄에 오지 않고,
+  // 여기서 실패하면 위의 갱신도 함께 되돌아간다.
+  await insertAuditLog(tx, {
+    actorUserId: params.actorUserId,
+    actionType: "UPDATE",
+    targetEntity: "users",
+    targetRecordId: params.targetUserId,
+    previousValue: { isDeveloper: params.previousValue },
+    newValue: {
+      isDeveloper: params.newValue,
+      ...(params.auditCause ? { cause: params.auditCause } : {}),
+    },
+  });
+}
+
 export async function setDeveloperFlag(
   targetUserId: string,
   flag: boolean,
@@ -108,20 +152,11 @@ export async function setDeveloperFlag(
         }
       }
 
-      await tx
-        .update(users)
-        .set({ isDeveloper: flag, updatedAt: new Date() })
-        .where(eq(users.id, targetUserId));
-
-      // 같은 트랜잭션 안에서 남긴다 — 거절되면 위에서 던져져 이 줄에 오지
-      // 않고, 여기서 실패하면 위의 갱신도 함께 되돌아간다.
-      await insertAuditLog(tx, {
+      await writeDeveloperFlagChange(tx, {
+        targetUserId,
+        previousValue: target.isDeveloper,
+        newValue: flag,
         actorUserId,
-        actionType: "UPDATE",
-        targetEntity: "users",
-        targetRecordId: targetUserId,
-        previousValue: { isDeveloper: target.isDeveloper },
-        newValue: { isDeveloper: flag },
       });
 
       return { ok: true };

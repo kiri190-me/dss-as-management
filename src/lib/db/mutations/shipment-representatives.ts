@@ -26,6 +26,50 @@ function fail(code: ShipmentManagementResultCode, message: string): never {
   throw new RepresentativeMutationError({ ok: false, code, message });
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 대표 표시를 실제로 바꾸고 representative_change_history 에 한 줄 남긴다 —
+ * **부르는 쪽의 트랜잭션 안에서.**
+ *
+ * 🔴 판정은 하지 않는다. 누가 바꿀 수 있는가 · 대상이 대표가 될 수 있는 계정인가 ·
+ * 마지막 대표를 빼도 되는가는 부르는 자리마다 다르다 — 화면의 [대표 지정/해제]는
+ * setShipmentRepresentative 가, 사용자 계정 삭제는 자기 규칙으로 판정한다(삭제는
+ * 마지막 대표 가드를 일부러 따르지 않고 이어받을 사람을 대표로 세운다). 여기는 그
+ * 판정이 끝난 뒤의 **쓰기 두 줄**만 한 곳에 모은 것이다 — 표시와 이력이 어느
+ * 경로에서든 함께 움직이게.
+ *
+ * 부르는 쪽은 대상 행을 먼저 잠가(FOR UPDATE) 이전 값을 읽어 둬야 한다.
+ */
+export async function writeRepresentativeFlagChange(
+  tx: Tx,
+  params: {
+    targetUserId: string;
+    previousValue: boolean;
+    newValue: boolean;
+    actorUserId: string;
+    reason: string | null;
+  }
+): Promise<{ historyId: string }> {
+  await tx
+    .update(users)
+    .set({ isShipmentRepresentative: params.newValue, updatedAt: new Date() })
+    .where(eq(users.id, params.targetUserId));
+
+  const [historyRow] = await tx
+    .insert(representativeChangeHistory)
+    .values({
+      targetUserId: params.targetUserId,
+      previousValue: params.previousValue,
+      newValue: params.newValue,
+      changedByUserId: params.actorUserId,
+      reason: params.reason,
+    })
+    .returning({ id: representativeChangeHistory.id });
+
+  return { historyId: historyRow.id };
+}
+
 export async function setShipmentRepresentative(
   targetUserId: string,
   flag: boolean,
@@ -107,23 +151,15 @@ export async function setShipmentRepresentative(
         }
       }
 
-      await tx
-        .update(users)
-        .set({ isShipmentRepresentative: flag, updatedAt: new Date() })
-        .where(eq(users.id, targetUserId));
+      const { historyId } = await writeRepresentativeFlagChange(tx, {
+        targetUserId,
+        previousValue: target.isShipmentRepresentative,
+        newValue: flag,
+        actorUserId,
+        reason,
+      });
 
-      const [historyRow] = await tx
-        .insert(representativeChangeHistory)
-        .values({
-          targetUserId,
-          previousValue: target.isShipmentRepresentative,
-          newValue: flag,
-          changedByUserId: actorUserId,
-          reason,
-        })
-        .returning({ id: representativeChangeHistory.id });
-
-      return { ok: true, id: historyRow.id };
+      return { ok: true, id: historyId };
     });
   } catch (err) {
     if (err instanceof RepresentativeMutationError) return err.result;

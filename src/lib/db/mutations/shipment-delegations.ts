@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../client";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { shipmentApprovalDelegations, users } from "../schema";
@@ -35,6 +35,49 @@ type EligibleUser = {
 
 function isEligibleActor(user: EligibleUser | undefined): user is EligibleUser {
   return !!user && !user.isDeleted && user.approvalStatus === "APPROVED" && user.isActive && user.lockedAt === null;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 아직 ACTIVE 인 위임들을 REVOKED 로 닫는다 — **부르는 쪽의 트랜잭션 안에서.**
+ * 실제로 닫힌 행의 id 만 돌려준다(이미 닫힌 것·없는 것은 빠진다).
+ *
+ * 🔴 판정은 하지 않는다. 누가 철회할 수 있는가는 부르는 자리마다 다르다 — 화면의
+ * [철회]는 revokeShipmentDelegation 이(대표 본인 또는 권한 있는 관리자), 사용자
+ * 계정 삭제는 진짜 최고관리자 판정 뒤에 지울 사람이 대표이거나 대리인인 위임을
+ * 전부 닫는다. 여기는 그 뒤의 **쓰기**만 한 곳에 모았다 — 철회 칸 셋(상태 ·
+ * 철회자 · 철회 시각)이 표의 CHECK(revocation_metadata)대로 언제나 함께 채워지게.
+ *
+ * `status = 'ACTIVE'` 조건을 UPDATE 에 걸어 둔다 — 부르는 쪽이 행을 잠그고 읽었어도
+ * 0행 쓰기를 조용히 성공으로 넘기지 않으려면 돌려받은 id 로 확인해야 한다.
+ */
+export async function revokeActiveDelegationsInTx(
+  tx: Tx,
+  params: { delegationIds: readonly string[]; actorUserId: string }
+): Promise<string[]> {
+  // 빈 IN 절은 드라이버마다 다르게 굴러 굳이 확인할 이유가 없다 — 닫을 것이
+  // 없으면 질의 자체를 하지 않는다.
+  if (params.delegationIds.length === 0) return [];
+
+  const now = new Date();
+  const revoked = await tx
+    .update(shipmentApprovalDelegations)
+    .set({
+      status: "REVOKED",
+      revokedByUserId: params.actorUserId,
+      revokedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(shipmentApprovalDelegations.id, [...params.delegationIds]),
+        eq(shipmentApprovalDelegations.status, "ACTIVE")
+      )
+    )
+    .returning({ id: shipmentApprovalDelegations.id });
+
+  return revoked.map((row) => row.id);
 }
 
 export async function createShipmentDelegation(
@@ -194,22 +237,16 @@ export async function revokeShipmentDelegation(
         fail("FORBIDDEN", "대표 본인 또는 권한이 있는 관리자만 위임을 철회할 수 있습니다.");
       }
 
-      const updated = await tx
-        .update(shipmentApprovalDelegations)
-        .set({
-          status: "REVOKED",
-          revokedByUserId: actorUserId,
-          revokedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(shipmentApprovalDelegations.id, delegationId), eq(shipmentApprovalDelegations.status, "ACTIVE")))
-        .returning({ id: shipmentApprovalDelegations.id });
+      const revoked = await revokeActiveDelegationsInTx(tx, {
+        delegationIds: [delegationId],
+        actorUserId,
+      });
 
-      if (updated.length === 0) {
+      if (revoked.length === 0) {
         fail("CONFLICT", "이미 철회된 위임입니다. 최신 정보를 다시 불러와 주세요.");
       }
 
-      return { ok: true, id: updated[0].id };
+      return { ok: true, id: revoked[0] };
     });
   } catch (err) {
     if (err instanceof DelegationMutationError) return err.result;
