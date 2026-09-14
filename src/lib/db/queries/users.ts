@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../client";
 import { users } from "../schema";
+import { insertAuditLog } from "../mutations/audit-logs";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
 
 export type UserRow = {
@@ -294,4 +295,82 @@ export async function ssoSubjectIsTaken(subject: string): Promise<boolean> {
     .where(eq(users.ssoSubject, subject))
     .limit(1);
   return row !== undefined;
+}
+
+/**
+ * 삭제된 계정을 포털 로그인으로 되살린다 — auth/sso-login.ts 만 부른다.
+ *
+ * 사용자 결정(2026-09-13): 이 시스템의 삭제는 「목록에서 치우고 일을 넘기는 것」이고,
+ * 진짜 차단은 포털 권한 회수다. 그래서 포털이 본인임을 확인한 사람(같은 sso_subject)이
+ * 다시 들어오면 **같은 계정**이 되살아난다. 이메일 로그인(getUserForLoginByEmail)으로는
+ * 되살리지 않는다.
+ *
+ * 되살리는 것은 삭제 네 칸뿐이다(updated_at · version 은 올린다).
+ * 🔴 이메일과 sso_subject 는 건드리지 않는다 — users_email_unique 와
+ * users_sso_subject_unique 는 삭제된 행까지 포함하므로, 여기서 바꾸거나 비우면 다음
+ * 포털 로그인이 이 행을 찾지 못하고 새 계정을 조용히 만들 수 있다. 대표 · 위임 ·
+ * 개발자 표시도 건드리지 않는다(삭제할 때 끄는 것은 삭제 쪽의 몫이다).
+ *
+ * 한 트랜잭션에서 행 잠금 → 조건부 갱신 → 감사 순서다(mutations/customers-trash.ts 와
+ * 같은 규율). 같은 사람이 두 탭에서 동시에 로그인하면 둘째는 첫째의 커밋을 기다렸다가
+ * `is_deleted = true` 조건에서 빠져 null 을 받는다 — RESTORE 감사는 한 번만 남는다.
+ * 부르는 쪽은 null 이면 getUserBySsoSubject 로 다시 읽는다.
+ *
+ * 감사 로그의 행위자는 되살아난 본인이다(포털 로그인이 곧 그 사람의 행동이다).
+ * 이메일 · 전화 · 이름은 싣지 않는다 — 개인정보다(customers-trash.ts 헤더와 같은 규칙).
+ *
+ * 되살릴 행이 없으면 null.
+ */
+export async function restoreDeletedSsoUser(subject: string): Promise<UserRow | null> {
+  if (!subject) {
+    return null;
+  }
+  return db.transaction(async (tx): Promise<UserRow | null> => {
+    const [current] = await tx
+      .select({
+        id: users.id,
+        deletedAt: users.deletedAt,
+        deletedBy: users.deletedBy,
+        deleteReason: users.deleteReason,
+      })
+      .from(users)
+      .where(and(eq(users.ssoSubject, subject), eq(users.isDeleted, true)))
+      .for("update");
+    if (!current) {
+      return null;
+    }
+
+    const [restored] = await tx
+      .update(users)
+      .set({
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        deleteReason: null,
+        updatedAt: new Date(),
+        version: sql`${users.version} + 1`,
+      })
+      .where(and(eq(users.id, current.id), eq(users.isDeleted, true)))
+      .returning(SELECT_COLUMNS);
+    if (!restored) {
+      // 행을 잠그고 있어 실제로는 닿지 않는 가지다. 0행 쓰기를 성공으로 넘기지 않는다.
+      return null;
+    }
+
+    await insertAuditLog(tx, {
+      actorUserId: restored.id,
+      actionType: "RESTORE",
+      targetEntity: "users",
+      targetRecordId: restored.id,
+      previousValue: {
+        isDeleted: true,
+        deletedAt: current.deletedAt ? current.deletedAt.toISOString() : null,
+        deletedBy: current.deletedBy,
+        deleteReason: current.deleteReason,
+      },
+      newValue: { isDeleted: false, via: "SSO_LOGIN" },
+    });
+
+    return restored;
+  });
 }

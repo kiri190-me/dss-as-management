@@ -32,6 +32,7 @@ src/lib/auth/db-login.integration.test.ts
 src/lib/auth/acting-user.test.ts
 src/lib/auth/acting-user.integration.test.ts
 src/lib/auth/session-actor-e2e.integration.test.ts
+src/lib/auth/sso-login.integration.test.ts
 src/lib/db/mutations/repair-case-approvals.integration.test.ts
 src/lib/db/mutations/workflow-transitions-approval-gating.integration.test.ts
 src/lib/db/mutations/shipment-representatives.integration.test.ts

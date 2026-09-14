@@ -199,10 +199,16 @@ export async function GET(request: NextRequest) {
 
   const result = await resolveSsoLogin(subject, profileClaims);
   if (result.outcome !== "SESSION") {
-    // 이 네 가지만 따로 알린다. 공통점은 **사람에게 다음 행동이 실제로
+    // 아래 일곱 가지만 따로 알린다. 공통점은 **사람에게 다음 행동이 실제로
     // 있다**는 것이다(포털 설정을 고치거나, 관리자에게 그 사실을 전하거나).
     // 나머지는 일반 실패로 뭉뚱그린다 — 자세히 알려주면 이 화면이 "누가 이
     // 시스템 사용자인지" 확인해 주는 조회 도구가 된다.
+    //
+    // 잠김(ACCOUNT_LOCKED)과 사용 중지(ACCOUNT_DISABLED)를 알려도 그 조회 도구가
+    // 되지 않는다. 여기까지 온 사람은 포털이 이미 본인임을 확인했고(위에서 서명 ·
+    // nonce 검증을 마친 subject), 알리는 것은 **자기 계정**의 상태뿐이다 — 남의
+    // 이메일을 넣어 떠볼 입구가 없다. 이메일 로그인(api/auth/login)이 이 둘을
+    // 일반 실패로 뭉뚱그리는 것과 다른 까닭이 이것이다.
     const SPOKEN: Partial<Record<typeof result.code, string>> = {
       UNKNOWN_ROLE: "unknown_role",
       // 포털에서 권한을 주며 역할을 지정하지 않은 경우. 계정을 자동으로
@@ -214,11 +220,17 @@ export async function GET(request: NextRequest) {
       // 핵심이라, 사람이 sso:link로 명시적으로 잇게 한다.
       EMAIL_TAKEN: "email_taken",
       NOT_PROVISIONED: "not_provisioned",
+      // 포털 로그인은 됐지만 이 시스템에서 잠겼거나 사용이 중지된 계정 —
+      // 관리자가 풀어 줘야 한다. 삭제된 계정은 포털 로그인으로 되살아난 뒤
+      // 이 검사를 받는다(sso-login.ts).
+      ACCOUNT_LOCKED: "account_locked",
+      ACCOUNT_DISABLED: "account_disabled",
     };
 
     const spoken = SPOKEN[result.code];
     if (spoken) {
-      // resolveSsoLogin이 이미 사유와 다음 명령을 로그에 남겼다.
+      // 대부분은 resolveSsoLogin이 이미 사유와 다음 명령을 로그에 남겼다.
+      // 잠김 · 사용 중지는 이 줄이 기록이다(code와 subject).
       console.warn(`[sso] 로그인 거절(${result.code}): subject ${subject}`);
       return fail(spoken);
     }

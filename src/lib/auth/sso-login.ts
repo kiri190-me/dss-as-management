@@ -3,6 +3,7 @@ import {
   applySsoIdentity,
   getUserBySsoSubject,
   provisionSsoUser,
+  restoreDeletedSsoUser,
   ssoSubjectIsTaken,
   type UserRow,
 } from "@/lib/db/queries/users";
@@ -56,6 +57,15 @@ export type SsoLoginResult =
  * over the stored role on every login. Provisioning does not widen that. It
  * only removes the step where a person had to be created here first.
  *
+ * **삭제된 계정은 포털 로그인으로 되살아난다** — 사용자 결정(2026-09-13),
+ * 진짜 차단은 포털 권한 회수다. 이 시스템의 삭제는 「목록에서 치우고 일을
+ * 넘기는 것」이라, 포털이 본인임을 확인한 사람(같은 sso_subject)이 다시
+ * 들어오면 **같은 계정**이 돌아온다 — 새 계정이 아니다
+ * (queries/users.ts restoreDeletedSsoUser). 되살린 뒤에도 잠금 · 비활성 검사와
+ * 포털 역할 · 이름 · 이메일 반영은 똑같이 돈다. 그래서 삭제되고 잠긴 계정은
+ * 되살아나되 ACCOUNT_LOCKED 로 거절된다. 이메일 로그인(db-login.ts)은 되살리지
+ * 않는다.
+ *
  * A caller must have verified the ID token's signature, issuer, audience,
  * expiry, and nonce before calling this. The subject is trusted here.
  */
@@ -81,9 +91,9 @@ export async function resolveSsoLogin(
   }
 
   if (!row) {
-    // 처음 보는 사람이다. 만들 수 있으면 만들고, 만든 행을 아래 흐름에
-    // **그대로 합류**시킨다 — 잠금·비활성 검사와 역할 반영을 새 계정만
-    // 건너뛰는 일이 있어서는 안 된다.
+    // 처음 보는 사람이거나 삭제된 사람이다. 만들거나 되살릴 수 있으면 그렇게
+    // 하고, 그 행을 아래 흐름에 **그대로 합류**시킨다 — 잠금·비활성 검사와
+    // 역할 반영을 새 계정이나 되살린 계정만 건너뛰는 일이 있어서는 안 된다.
     const provisioned = await provisionNewAccount(subject, claims);
     if (provisioned.kind === "REJECTED") {
       return provisioned.result;
@@ -175,7 +185,9 @@ type ProvisionOutcome =
   | { kind: "REJECTED"; result: SsoLoginResult };
 
 /**
- * 이 시스템이 처음 보는 사람의 계정을 만든다.
+ * 이 시스템이 처음 보는 사람의 계정을 만든다. 같은 subject의 삭제된 계정이
+ * 있으면 만들지 않고 그 계정을 되살린다 — 삭제 계정은 포털 로그인으로
+ * 되살아난다(사용자 결정, 진짜 차단은 포털 권한 회수).
  *
  * 무엇으로 만들지는 sso-provision.ts가 정하고(순수 판정이라 테스트로
  * 고정했다), "이미 있는 것을 주워가지 않는다"는 규칙은 queries/users.ts가
@@ -191,17 +203,42 @@ async function provisionNewAccount(
     result: { outcome: "REJECTED", code },
   });
 
-  // 삭제되었거나 비활성인 계정이 이미 이 subject를 들고 있을 수 있다.
-  // getUserBySsoSubject는 삭제된 행을 걸러내므로 여기서 따로 본다. 못 본 척
-  // 만들면 부분 유일 색인에 걸려 터지고, 더 나쁘게는 내보낸 사람이 새
-  // 계정으로 조용히 돌아온다.
+  // 삭제된 계정이 이미 이 subject를 들고 있을 수 있다. getUserBySsoSubject는
+  // 삭제된 행을 걸러내므로 여기서 따로 본다. 못 본 척 만들면 부분 유일 색인에
+  // 걸려 터지고, 더 나쁘게는 내보낸 사람이 **새** 계정으로 조용히 돌아온다.
+  //
+  // 삭제 계정은 포털 로그인으로 되살아난다 — 사용자 결정(2026-09-13), 진짜
+  // 차단은 포털 권한 회수다. 그래서 거절하지 않고 **같은 행을** 되살려 아래
+  // 흐름에 합류시킨다(resolveSsoLogin의 잠금 · 비활성 검사와 포털 값 반영이
+  // 되살린 계정에도 그대로 돈다).
+  let taken: boolean;
   try {
-    if (await ssoSubjectIsTaken(subject)) {
-      console.warn(`[sso] 이미 이 subject를 쓰는 계정이 있습니다(삭제·비활성): ${subject}`);
-      return reject("ACCOUNT_DISABLED");
-    }
+    taken = await ssoSubjectIsTaken(subject);
   } catch {
     return reject("DATABASE_UNAVAILABLE");
+  }
+  if (taken) {
+    let restored: UserRow | null;
+    try {
+      restored = await restoreDeletedSsoUser(subject);
+    } catch {
+      return reject("DATABASE_UNAVAILABLE");
+    }
+    if (restored) {
+      // subject와 이름까지만 남긴다 — 이메일은 남기지 않는다.
+      console.info(`[sso] 삭제된 계정을 포털 로그인으로 되살렸습니다: ${restored.name} (subject ${subject})`);
+      return { kind: "ROW", row: restored };
+    }
+    // 되살릴 삭제 행이 없다. 같은 사람이 두 탭에서 동시에 로그인해 다른 쪽이
+    // 먼저 되살렸거나(또는 먼저 만들었거나) 한 경우다 — 다시 읽으면 그 행이 있다.
+    try {
+      const row = await getUserBySsoSubject(subject);
+      if (row) return { kind: "ROW", row };
+    } catch {
+      return reject("DATABASE_UNAVAILABLE");
+    }
+    console.warn(`[sso] 이 subject를 쓰는 계정을 되살리지 못했습니다: ${subject}`);
+    return reject("ACCOUNT_DISABLED");
   }
 
   const plan = planSsoProvision(claims);

@@ -1,5 +1,6 @@
 "use server";
 
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { readSession } from "@/lib/auth/session";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
@@ -38,6 +39,17 @@ export type UpdateRepairCaseActionInput = {
  * first, so an unauthenticated or unauthorized caller never reaches a real
  * DB query.
  *
+ * 예외는 하나 — 계정 확인(resolveActingUserForSession)이 세션 확인 바로 다음에
+ * 온다. 세션 토큰은 서명만 맞으면 최대 8시간 스스로 유효하므로, 토큰의
+ * approvalStatus · role · userId 만 믿으면 삭제 · 사용 중지 · 잠김 · 세션 끊김
+ * (sessionsValidFrom)인 사람도 열어 둔 화면에서 접수 건을 고칠 수 있었다. 그런
+ * 사람에게는 입력 검사 결과조차 돌려주지 않는다(actions/attachments.ts 의
+ * resolveWriteActor 와 같은 모양). 이 한 번의 읽기 뒤로는 값싼 검사 먼저가 그대로다.
+ *
+ * 승인 여부 · 역할 · 행위자 id 는 모두 살아 있는 계정에서 읽는다. 역할이 토큰
+ * 값에서 살아 있는 값으로 바뀌었으므로 승격과 강등이 다음 로그인을 기다리지 않고
+ * 즉시 반영된다 — 의도된 변화다.
+ *
  * Never called unless REPAIR_CASE_WRITE_SOURCE=database — same
  * independent re-check pattern as create-repair-case.ts.
  */
@@ -60,7 +72,13 @@ export async function updateRepairCaseAction(
   if (!session) {
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
-  if (session.approvalStatus !== "APPROVED") {
+  // 토큰이 아니라 살아 있는 계정을 다시 읽는다(파일 헤더) — 토큰이 발급된 뒤
+  // 계정이 삭제 · 사용 중지 · 잠김됐거나 세션이 끊겼을 수 있다.
+  const actingUser = await resolveActingUserForSession(session);
+  if (!actingUser) {
+    return { ok: false, code: "UNAUTHORIZED", message: "사용자 정보를 확인할 수 없습니다." };
+  }
+  if (actingUser.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
 
@@ -128,7 +146,8 @@ export async function updateRepairCaseAction(
 
   // Reject unauthorized field changes even if a malicious client submits
   // them directly — never silently drop them, reject the whole request.
-  const authorization = authorizeSubmittedFields(session.role, input.section, submittedFieldNames);
+  // 역할은 살아 있는 계정의 값이다 — 승격 · 강등이 즉시 반영된다(파일 헤더).
+  const authorization = authorizeSubmittedFields(actingUser.role, input.section, submittedFieldNames);
   if (!authorization.ok) {
     return { ok: false, code: "FORBIDDEN", message: "일부 필드를 수정할 권한이 없습니다." };
   }
@@ -151,7 +170,7 @@ export async function updateRepairCaseAction(
       input.expectedVersion,
       input.section,
       formatValidation.data,
-      session.userId
+      actingUser.id
     );
   } catch (err) {
     // Never forward the raw error (may reference Postgres internals, SQL
