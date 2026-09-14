@@ -267,25 +267,25 @@ export default function DelegationSection({
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                      <th scope="col" className="py-2 pr-3 font-medium">대표</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">대리 승인자</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">기간</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">상태</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">지정자</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">사유</th>
-                      <th scope="col" className="py-2 pr-3 font-medium">작업</th>
+                      <th scope="col" className="py-2 px-3 font-medium">대표</th>
+                      <th scope="col" className="py-2 px-3 font-medium">대리 승인자</th>
+                      <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                      <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                      <th scope="col" className="py-2 px-3 font-medium">지정자</th>
+                      <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                      <th scope="col" className="py-2 px-3 font-medium">작업</th>
                     </tr>
                   </thead>
                   <tbody>
                     {delegations.map((delegation) => (
                       <tr key={delegation.id} className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800">
-                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.representativeName}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
-                        <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
-                        <td className="py-2 pr-3">{renderStatus(delegation)}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{delegation.assignedByName}</td>
-                        <td className="py-2 pr-3 text-zinc-600 dark:text-zinc-400">{delegation.reason ?? "-"}</td>
-                        <td className="py-2 pr-3">{renderRevokeAction(delegation)}</td>
+                        <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.representativeName}</td>
+                        <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
+                        <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                        <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                        <td className="py-2 px-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{delegation.assignedByName}</td>
+                        <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason ?? "-"}</td>
+                        <td className="py-2 px-3">{renderRevokeAction(delegation)}</td>
                       </tr>
                     ))}
                   </tbody>

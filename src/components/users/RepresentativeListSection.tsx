@@ -221,21 +221,21 @@ export default function RepresentativeListSection({
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                  <th scope="col" className="py-2 pr-3 font-medium">이름</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">이메일</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">역할</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">대표 여부</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">작업</th>
+                  <th scope="col" className="py-2 px-3 font-medium">이름</th>
+                  <th scope="col" className="py-2 px-3 font-medium">이메일</th>
+                  <th scope="col" className="py-2 px-3 font-medium">역할</th>
+                  <th scope="col" className="py-2 px-3 font-medium">대표 여부</th>
+                  <th scope="col" className="py-2 px-3 font-medium">작업</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id} className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800">
-                    <td className="py-2 pr-3 text-zinc-900 dark:text-zinc-50">{user.name}</td>
-                    <td className="py-2 pr-3 break-all text-zinc-600 dark:text-zinc-400">{user.email}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{renderRoleCell(user)}</td>
-                    <td className="py-2 pr-3">{renderRepresentativeMark(user)}</td>
-                    <td className="py-2 pr-3">{renderActions(user)}</td>
+                    <td className="py-2 px-3 text-zinc-900 dark:text-zinc-50">{user.name}</td>
+                    <td className="py-2 px-3 break-all text-zinc-600 dark:text-zinc-400">{user.email}</td>
+                    <td className="py-2 px-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{renderRoleCell(user)}</td>
+                    <td className="py-2 px-3">{renderRepresentativeMark(user)}</td>
+                    <td className="py-2 px-3">{renderActions(user)}</td>
                   </tr>
                 ))}
               </tbody>
