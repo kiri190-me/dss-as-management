@@ -12,8 +12,11 @@
  * 의도적으로 복제해 두었다. 한쪽의 판정 규칙을 고치면 다른 쪽도 고쳐야
  * 한다 — 둘이 다른 주소를 고르면 redirect_uri가 어긋나 로그인이 막힌다.
  *
- * server-only를 붙이지 않는다. next.config.ts가 이 파일을 읽고, 테스트도
- * 이 판정을 직접 고정한다.
+ * server-only를 붙이지 않는다. next.config.ts가 이 파일을 읽는다.
+ *
+ * 이 저장소에는 이 판정의 테스트가 없다. 규칙은 dss-auth의
+ * src/lib/config/lan-address.test.ts가 지킨다 — 판정을 고칠 때는 그쪽
+ * 테스트부터 세우고, 통과한 판정을 여기에 그대로 옮긴다.
  */
 import { networkInterfaces } from "node:os";
 
@@ -25,7 +28,30 @@ export type InterfaceSnapshot = Record<
 /** 가상 어댑터. WSL이 172.23.224.1처럼 사설 대역을 들고 있어 주소만으로는 구별되지 않는다. */
 const VIRTUAL_ADAPTER = /(vethernet|hyper-?v|wsl|virtualbox|vmware|docker|bluetooth|블루투스|loopback)/i;
 
-/** 사설 대역 선호 순위. 이름 규칙이 빗나가도 한 번 더 걸러 준다. */
+/**
+ * Windows 모바일 핫스팟. 기본 대역이 192.168.137.0/24(PC가 .1)이고, 어댑터
+ * 이름은 "로컬 영역 연결* 12"·"Local Area Connection* 12"처럼 별표 뒤에 번호가
+ * 붙는다(별표 없는 "Local Area Connection 2"는 옛 Windows의 진짜 랜카드다).
+ * 2026-09-13 포털 issuer가 이 주소로 떠서 폰·동료 PC의 로그인이 막혔다 —
+ * 둘 다 192.168이라 사전순에서 "137"이 실제 Wi-Fi의 "35"보다 앞섰다.
+ * 버리지 않고 뒤로만 민다. 핫스팟에 폰을 붙여 쓸 때가 있다.
+ */
+const HOTSPOT_SUBNET = "192.168.137.";
+const HOTSPOT_ADAPTER = /(연결|connection)\*\s*\d+$/i;
+
+/**
+ * 어댑터 층. 0 진짜 어댑터 → 1 핫스팟 → 2 가상 어댑터. 대역 순위보다 먼저
+ * 본다 — 아이폰 핫스팟에 붙은 Wi-Fi(172.20.10.x)가 이 PC의 핫스팟에 밀리면
+ * 안 된다. 핫스팟은 폰이 실제로 붙는 망이라, 이 PC 밖에서 아무도 닿지 않는
+ * 가상 어댑터와 한 층에 두지 않고 그 앞에 둔다.
+ */
+function adapterTier(name: string, address: string): number {
+  if (VIRTUAL_ADAPTER.test(name)) return 2;
+  if (address.startsWith(HOTSPOT_SUBNET) || HOTSPOT_ADAPTER.test(name)) return 1;
+  return 0;
+}
+
+/** 사설 대역 선호 순위. 같은 층 안에서만 본다. 이름 규칙이 빗나가도 한 번 더 걸러 준다. */
 function subnetRank(address: string): number {
   if (address.startsWith("192.168.")) return 0;
   if (address.startsWith("10.")) return 1;
@@ -34,20 +60,20 @@ function subnetRank(address: string): number {
 }
 
 export function collectLanAddresses(snapshot: InterfaceSnapshot): string[] {
-  const found: { address: string; virtual: boolean }[] = [];
+  const found: { address: string; tier: number }[] = [];
 
   for (const [name, entries] of Object.entries(snapshot)) {
     for (const entry of entries ?? []) {
       if (entry.family !== "IPv4" && entry.family !== 4) continue;
       if (entry.internal) continue;
       if (entry.address.startsWith("169.254.")) continue; // 주소를 못 받았다는 뜻
-      found.push({ address: entry.address, virtual: VIRTUAL_ADAPTER.test(name) });
+      found.push({ address: entry.address, tier: adapterTier(name, entry.address) });
     }
   }
 
   return found
     .sort((a, b) => {
-      if (a.virtual !== b.virtual) return a.virtual ? 1 : -1;
+      if (a.tier !== b.tier) return a.tier - b.tier;
       const rank = subnetRank(a.address) - subnetRank(b.address);
       if (rank !== 0) return rank;
       return a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
