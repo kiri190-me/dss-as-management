@@ -1,17 +1,20 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition, type ClipboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   arrangeImprovementRequestList,
+  canChangeImprovementRequestScreenshots,
   canDeleteImprovementRequest,
   canEditImprovementRequestBody,
   countImprovementRequestBodyChars,
   filterImprovementRequestsByMenu,
   groupImprovementRequestMenuOptions,
+  hasImprovementRequestScreenshotRoom,
   IMPROVEMENT_REQUEST_BODY_MAX_CHARS,
   IMPROVEMENT_REQUEST_MENU_FILTER_ALL,
+  IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT,
   IMPROVEMENT_REQUEST_STATUS_LABELS,
   IMPROVEMENT_REQUEST_STATUSES,
   improvementRequestCopyText,
@@ -23,7 +26,11 @@ import {
   type ImprovementRequestMenuOption,
   type ImprovementRequestStatus,
 } from "@/lib/domain/improvement-request";
-import type { ImprovementRequestListItem } from "@/lib/db/queries/improvement-requests";
+import type {
+  ImprovementRequestListItem,
+  ImprovementRequestScreenshot,
+} from "@/lib/db/queries/improvement-requests";
+import { softDeleteAttachmentAction } from "@/lib/server/actions/attachments";
 import {
   changeImprovementRequestStatusAction,
   createImprovementRequestAction,
@@ -31,6 +38,24 @@ import {
   updateImprovementRequestAction,
   type ImprovementRequestActionResult,
 } from "@/lib/server/actions/improvement-requests";
+import {
+  createdWithScreenshotFailuresText,
+  formatScreenshotRejections,
+  nameScreenshotFile,
+  pickPastedScreenshots,
+  screenScreenshotBatch,
+  screenshotBatchNotice,
+  screenshotUploadProgressText,
+} from "./improvement-request-screenshot-files";
+import {
+  ImprovementRequestScreenshotStrip,
+  ScreenshotAddButton,
+  ScreenshotDeleteDialog,
+  ScreenshotTrashNote,
+  StagedScreenshotList,
+  uploadImprovementRequestScreenshots,
+  type StagedScreenshot,
+} from "./ImprovementRequestScreenshots";
 
 /**
  * ============================================================================
@@ -68,20 +93,36 @@ import {
  * 글에 닿으면 안 된다. 이미 지워진 글(NOT_FOUND)도 같은 길로 보낸다 — 그 줄은
  * 새로 불러오면 사라진다.
  *
+ * ■ 스크린샷 — 붙이고, 보고, 지운다 (2026-09-13)
+ *
+ * 누가 붙이고 뗄 수 있는가는 canChangeImprovementRequestScreenshots 를 줄마다 부른다
+ * (접수 상태인 자기 글, 또는 MANAGE). 형식 · 빈 파일 · 20MB · 5장의 사전 검사
+ * (improvement-request-screenshot-files.ts)는 20MB 를 다 보내고 거절당하지 않게 하는
+ * **편의**이고, 막는 것은 올리기 통로와 휴지통 mutation 이다 — 둘 다 글 행을 잠그고
+ * 판정과 5장을 다시 본다. 서버가 거절한 문구는 그 줄의 오류 자리에 그대로 보인다.
+ * 새 글의 스크린샷은 글을 먼저 만들고 받은 id 로 한 장씩 올린다 — 한 요청에 묶지
+ * 않으므로 일부만 실패할 수 있고, 그때 글은 이미 등록된 것이다(입력칸을 비우고 알린다).
+ * 붙이고 떼어도 글의 version 은 오르지 않는다(글 행을 잠그기만 한다) — 고치는 도중에
+ * 붙이거나 떼어도 [저장]이 충돌하지 않는다. 글을 지우면 붙은 스크린샷은 서버가 첨부
+ * 휴지통으로 옮긴다. 조각(썸네일 줄 · 크게 보기 · 등록 전 미리보기)은
+ * ImprovementRequestScreenshots.tsx 에 있다.
+ *
  * ■ 날짜는 KST 달력 날짜
  *
  * toKstDateOnly 는 시간대를 못 박아 둔 포매터라 서버와 브라우저가 같은 글자를
  * 그린다(하이드레이션 어긋남이 없다).
  *
  * 🔴 본문은 자유 입력이다(schema 헤더의 PII). 화면에 그리는 것 말고는 어디로도
- * 내보내지 않는다 — console 에도 싣지 않는다. [복사]는 누른 사람의 클립보드로만
- * 간다(보는 권한만 있어도 쓴다 — 이미 화면에 보이는 글이다). 복사되는 글은
- * 「[메뉴 이름] 본문」이다(improvementRequestCopyText).
+ * 내보내지 않는다 — console 에도 싣지 않는다. 스크린샷의 파일 이름과 이미지도 같다.
+ * [복사]는 누른 사람의 클립보드로만 간다(보는 권한만 있어도 쓴다 — 이미 화면에
+ * 보이는 글이다). 복사되는 글은 「[개선요청 메뉴 : 메뉴 이름] 본문」이다
+ * (improvementRequestCopyText).
  * ============================================================================
  */
 
 const CONFLICT_NOTICE = "다른 사람이 먼저 바꿨습니다. 새로 불러옵니다.";
 const NOT_FOUND_NOTICE = "이미 지워진 개선 요청입니다. 새로 불러옵니다.";
+const SCREENSHOT_NOT_FOUND_NOTICE = "이미 지워진 스크린샷입니다. 새로 불러옵니다.";
 
 const STATUS_BADGE_CLASS: Record<ImprovementRequestStatus, string> = {
   OPEN: "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300",
@@ -211,6 +252,35 @@ export default function ImprovementRequestsScreen({
   const [deleteTarget, setDeleteTarget] = useState<ImprovementRequestListItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  /** 새 글에 붙일 스크린샷 — 아직 올리지 않았다(등록 전 미리보기). */
+  const [staged, setStaged] = useState<StagedScreenshot[]>([]);
+  /** 새 글 칸에서 받지 않은 파일의 안내(형식 · 빈 파일 · 20MB · 5장). */
+  const [stagedNotice, setStagedNotice] = useState<string | null>(null);
+  /** 새 글을 만든 뒤 스크린샷을 올리는 동안의 진행 문구. */
+  const [createProgress, setCreateProgress] = useState<string | null>(null);
+  /** 글은 등록됐는데 스크린샷 일부를 못 올렸을 때 남기는 안내. */
+  const [createReport, setCreateReport] = useState<string | null>(null);
+  /** 목록 줄에 곧바로 올리는 중인 글과 그 진행 문구. */
+  const [rowUpload, setRowUpload] = useState<{ id: string; text: string } | null>(null);
+  const [screenshotDeleteTarget, setScreenshotDeleteTarget] = useState<{
+    requestId: string;
+    screenshot: ImprovementRequestScreenshot;
+  } | null>(null);
+  /**
+   * 등록 전 미리보기로 만든 주소 전부 — 화면이 사라질 때 놓는다. 바꿔 끼우지 않고
+   * 한 Set 을 계속 쓴다(정리 함수가 처음 잡은 그 Set 을 비운다).
+   */
+  const objectUrlsRef = useRef<Set<string>>(new Set());
+  const stagedKeySeqRef = useRef(0);
+
+  useEffect(() => {
+    const urls = objectUrlsRef.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
+
   /**
    * 마지막으로 누른 [복사]의 결과 — 어느 글의 것인지 함께 담는다. 「복사했습니다」는
    * 잠깐 뒤 걷고, 실패 안내는 다음 복사까지 남긴다(읽고 직접 복사해야 하므로).
@@ -277,17 +347,84 @@ export default function ImprovementRequestsScreen({
     });
   }
 
+  function releasePreviewUrls(entries: readonly StagedScreenshot[]) {
+    for (const entry of entries) {
+      URL.revokeObjectURL(entry.previewUrl);
+      objectUrlsRef.current.delete(entry.previewUrl);
+    }
+  }
+
+  /**
+   * 새 글에 붙일 파일을 모은다 — 한 장씩 사전 검사하고(틀린 장만 까닭과 함께 거절),
+   * 5장을 넘는 것은 받지 않고 몇 장을 못 넣었는지 알린다.
+   */
+  function stageScreenshots(files: File[]) {
+    const batch = screenScreenshotBatch(files, staged.length);
+    setStagedNotice(screenshotBatchNotice(batch));
+    setCreateReport(null);
+    if (batch.accepted.length === 0) return;
+    const added = batch.accepted.map((file): StagedScreenshot => {
+      stagedKeySeqRef.current += 1;
+      const previewUrl = URL.createObjectURL(file);
+      objectUrlsRef.current.add(previewUrl);
+      return { key: `staged-${stagedKeySeqRef.current}`, file, previewUrl };
+    });
+    setStaged((prev) => [...prev, ...added]);
+  }
+
+  function unstageScreenshot(key: string) {
+    const entry = staged.find((candidate) => candidate.key === key);
+    if (entry) releasePreviewUrls([entry]);
+    setStaged((prev) => prev.filter((candidate) => candidate.key !== key));
+    setStagedNotice(null);
+  }
+
+  /**
+   * 붙여넣기에서 이미지만 떼어 이름을 붙인다. 글자와 섞였으면 글자 붙여넣기는
+   * 그대로 두고, 이미지만 왔으면 기본 동작을 막는다. `firstSequence` 는 이름 끝 번호의
+   * 시작 — 이미 모아 둔(또는 붙은) 장 다음 번호로 이어 짓는다.
+   */
+  function takePastedScreenshots(event: ClipboardEvent<HTMLTextAreaElement>, firstSequence: number): File[] {
+    const { images, hasText } = pickPastedScreenshots(event.clipboardData.items);
+    if (images.length === 0) return [];
+    if (!hasText) event.preventDefault();
+    const now = new Date();
+    return images.map((file, index) => nameScreenshotFile(file, now, firstSequence + index));
+  }
+
   function submitNew() {
     setCreateError(null);
     setCreateMenuError(null);
+    setCreateReport(null);
+    setStagedNotice(null);
+    const toUpload = staged;
     run(
       "create",
-      () => createImprovementRequestAction({ fields: { body: draft, menuKey: draftMenuKey } }),
+      async () => {
+        const result = await createImprovementRequestAction({ fields: { body: draft, menuKey: draftMenuKey } });
+        if (!result.ok || toUpload.length === 0) return result;
+        // 글은 등록됐다 — 받은 id 로 한 장씩 차례로 올린다.
+        const outcome = await uploadImprovementRequestScreenshots(
+          result.id,
+          toUpload.map((entry) => entry.file),
+          (current, total) => setCreateProgress(screenshotUploadProgressText(current, total))
+        );
+        setCreateProgress(null);
+        if (outcome.failures.length > 0) {
+          setCreateReport(createdWithScreenshotFailuresText(toUpload.length, outcome.failures));
+        }
+        // 썸네일까지 올라간 뒤에 새로 불러와야 목록이 썸네일로 그려진다(run 이 refresh 한다).
+        await outcome.previewsSettled;
+        return result;
+      },
       {
-        // 메뉴도 비운다 — 글마다 어느 메뉴의 일인지 새로 고르게 한다.
+        // 메뉴도 비운다 — 글마다 어느 메뉴의 일인지 새로 고르게 한다. 올린 스크린샷의
+        // 미리보기도 놓는다. 글 만들기가 실패하면 여기 오지 않으므로 미리보기는 남는다.
         onOk: () => {
           setDraft("");
           setDraftMenuKey("");
+          releasePreviewUrls(toUpload);
+          setStaged((prev) => prev.filter((entry) => !toUpload.includes(entry)));
         },
         onFailure: (text, fieldErrors) => {
           setCreateMenuError(fieldErrors.menuKey ?? null);
@@ -365,6 +502,68 @@ export default function ImprovementRequestsScreen({
     );
   }
 
+  /**
+   * 목록 줄의 글에 곧바로 올린다 — 글이 이미 있으므로 미리보기 없이. 사전 검사는 새
+   * 글과 같고, 서버가 거절한 문구는 그 줄의 오류 자리에 그대로 보인다. 글이 그 사이
+   * 지워졌으면(IMPROVEMENT_REQUEST_NOT_FOUND) 다른 조작처럼 새로 불러온다.
+   */
+  function addRowScreenshots(item: ImprovementRequestListItem, files: File[]) {
+    const batch = screenScreenshotBatch(files, item.screenshots.length);
+    const batchNotice = screenshotBatchNotice(batch);
+    setRowError(item.id, batchNotice);
+    if (batch.accepted.length === 0) return;
+    setNotice(null);
+    setPendingKey(`shots:${item.id}`);
+    startTransition(async () => {
+      const outcome = await uploadImprovementRequestScreenshots(item.id, batch.accepted, (current, total) =>
+        setRowUpload({ id: item.id, text: screenshotUploadProgressText(current, total) })
+      );
+      setRowUpload(null);
+      await outcome.previewsSettled;
+      setPendingKey(null);
+      if (outcome.failureCodes.includes("IMPROVEMENT_REQUEST_NOT_FOUND")) {
+        setNotice(NOT_FOUND_NOTICE);
+        setEditingId(null);
+        setRowError(item.id, null);
+        router.refresh();
+        return;
+      }
+      if (outcome.failures.length > 0) {
+        const failed = `올리지 못한 스크린샷 — ${formatScreenshotRejections(outcome.failures)}`;
+        setRowError(item.id, batchNotice ? `${batchNotice} ${failed}` : failed);
+      }
+      router.refresh();
+    });
+  }
+
+  function confirmScreenshotDelete() {
+    const target = screenshotDeleteTarget;
+    if (!target) return;
+    setNotice(null);
+    setRowError(target.requestId, null);
+    setPendingKey(`shot-delete:${target.screenshot.id}`);
+    startTransition(async () => {
+      const result = await softDeleteAttachmentAction({
+        attachmentId: target.screenshot.id,
+        improvementRequestId: target.requestId,
+      });
+      setPendingKey(null);
+      setScreenshotDeleteTarget(null);
+      if (result.ok) {
+        router.refresh();
+        return;
+      }
+      if (result.code === "NOT_FOUND") {
+        setNotice(SCREENSHOT_NOT_FOUND_NOTICE);
+        router.refresh();
+        return;
+      }
+      setRowError(target.requestId, result.message);
+      // 그 사이 누가 먼저 휴지통으로 옮겼다 — 목록에서 걷히도록 새로 불러온다.
+      if (result.code === "ALREADY_IN_STATE") router.refresh();
+    });
+  }
+
   const draftCount = countImprovementRequestBodyChars(draft);
   const draftOver = draftCount > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
 
@@ -413,11 +612,32 @@ export default function ImprovementRequestsScreen({
               setDraft(event.target.value);
               if (createError) setCreateError(null);
             }}
+            onPaste={(event) => {
+              const files = takePastedScreenshots(event, staged.length + 1);
+              if (files.length > 0 && !isPending) stageScreenshots(files);
+            }}
             aria-invalid={createError || draftOver ? true : undefined}
             aria-describedby="improvement-request-new-body-count"
             placeholder="예: 전체 A/S 현황에서 고객사로 거를 때 이름 일부만 쳐도 찾아지면 좋겠습니다."
             className={TEXTAREA_CLASS}
           />
+          <StagedScreenshotList staged={staged} disabled={isPending} onRemove={unstageScreenshot} />
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            {hasImprovementRequestScreenshotRoom(staged.length) ? (
+              <ScreenshotAddButton onFiles={stageScreenshots} disabled={isPending} />
+            ) : null}
+            <span>
+              <span className="tabular-nums">
+                스크린샷 {staged.length}/{IMPROVEMENT_REQUEST_SCREENSHOT_MAX_COUNT}
+              </span>{" "}
+              · png · jpg · jpeg, 장당 20MB · 내용 칸에 Ctrl+V 로 붙여넣어도 됩니다
+            </span>
+          </div>
+          {stagedNotice ? (
+            <p role="alert" className={FIELD_ERROR_CLASS}>
+              {stagedNotice}
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <BodyCounter id="improvement-request-new-body-count" count={draftCount} />
             <button
@@ -433,6 +653,19 @@ export default function ImprovementRequestsScreen({
           {createError ? (
             <p role="alert" className={FIELD_ERROR_CLASS}>
               {createError}
+            </p>
+          ) : null}
+          {createProgress ? (
+            <p role="status" className="text-xs text-zinc-700 dark:text-zinc-300">
+              {createProgress}
+            </p>
+          ) : null}
+          {createReport ? (
+            <p
+              role="status"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+            >
+              {createReport}
             </p>
           ) : null}
         </section>
@@ -504,6 +737,14 @@ export default function ImprovementRequestsScreen({
                   actorUserId: actingUserId,
                   canManage,
                 });
+              const mayChangeScreenshots =
+                canWrite &&
+                canChangeImprovementRequestScreenshots({
+                  status: item.status,
+                  createdBy: item.createdByUserId,
+                  actorUserId: actingUserId,
+                  canManage,
+                });
               const isEditing = editingId === item.id;
               const editCount = countImprovementRequestBodyChars(editDraft);
               const editOver = editCount > IMPROVEMENT_REQUEST_BODY_MAX_CHARS;
@@ -559,6 +800,12 @@ export default function ImprovementRequestsScreen({
                           setEditDraft(event.target.value);
                           if (rowError) setRowError(item.id, null);
                         }}
+                        onPaste={(event) => {
+                          // 글이 이미 있으므로 미리보기 없이 그 글에 곧바로 올린다.
+                          if (!mayChangeScreenshots) return;
+                          const files = takePastedScreenshots(event, item.screenshots.length + 1);
+                          if (files.length > 0 && !isPending) addRowScreenshots(item, files);
+                        }}
                         aria-invalid={rowError || editOver ? true : undefined}
                         aria-describedby={`improvement-request-edit-${item.id}-count`}
                         className={TEXTAREA_CLASS}
@@ -595,6 +842,18 @@ export default function ImprovementRequestsScreen({
                       {item.body}
                     </p>
                   )}
+
+                  <ImprovementRequestScreenshotStrip
+                    screenshots={item.screenshots}
+                    canChange={mayChangeScreenshots}
+                    disabled={isPending}
+                    progressText={rowUpload?.id === item.id ? rowUpload.text : null}
+                    onAddFiles={(files) => addRowScreenshots(item, files)}
+                    onRequestDelete={(screenshot) => {
+                      setRowError(item.id, null);
+                      setScreenshotDeleteTarget({ requestId: item.id, screenshot });
+                    }}
+                  />
 
                   {item.inProgressAt || item.resolvedAt ? (
                     <div className="mt-2 flex flex-col gap-0.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -691,6 +950,15 @@ export default function ImprovementRequestsScreen({
           setDeleteError(null);
         }}
       />
+
+      {screenshotDeleteTarget ? (
+        <ScreenshotDeleteDialog
+          screenshot={screenshotDeleteTarget.screenshot}
+          isSubmitting={pendingKey === `shot-delete:${screenshotDeleteTarget.screenshot.id}`}
+          onConfirm={confirmScreenshotDelete}
+          onCancel={() => setScreenshotDeleteTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -778,7 +1046,8 @@ function BodyCounter({ id, count }: { id: string; count: number }) {
  * 다른 물건이 뜬다.
  *
  * 휴지통이 없어 바로 지워진다(mutations 헤더). 그래서 무엇이 사라지는지 본문을
- * 그대로 보여 준다 — 비슷한 요청이 여럿일 수 있다.
+ * 그대로 보여 준다 — 비슷한 요청이 여럿일 수 있다. 붙은 스크린샷은 글과 함께
+ * 사라지지 않고 서버가 첨부 휴지통으로 옮긴다 — 그 장 수를 한 줄 더한다.
  */
 function DeleteImprovementRequestDialog({
   target,
@@ -830,6 +1099,7 @@ function DeleteImprovementRequestDialog({
           {target.body}
         </p>
       ) : null}
+      {target ? <ScreenshotTrashNote count={target.screenshots.length} /> : null}
 
       {errorMessage ? (
         <p
