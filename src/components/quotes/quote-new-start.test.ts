@@ -353,7 +353,8 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     assert.ok(onChange.includes("setLaborKind(next); applyOverhaulRule(kind, next); fillScopeFromTemplate(kind, next);"), onChange);
     assert.ok(laborSelect.includes("장비 종류를 고르세요"), laborSelect);
     // 종류 select 는 그대로다 — 엑셀 전용이 아닐 때만 따라온다(quote-attachment-screens.test.ts 가 차례를 본다).
-    const kindSelect = sliceBetween(form, 'label="견적서 종류"', "</select>");
+    // select 의 onChange 가 부르는 changeKind 안에서 본다(견적서 ①b — [엑셀 값으로 바꾸기]도 같은 함수를 탄다).
+    const kindSelect = sliceBetween(form, "function changeKind(", "function editCustomerName(");
     assert.ok(indexOrFail(kindSelect, "setKind(next);") < indexOrFail(kindSelect, "if (!isExcelOnly) {"), kindSelect);
   });
 

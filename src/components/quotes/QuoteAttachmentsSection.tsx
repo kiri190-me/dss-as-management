@@ -105,10 +105,18 @@ const DELETE_FAILED_MESSAGE = "지우기 요청이 끝나지 못했습니다. �
 export function useQuoteAttachments({
   quoteId,
   serverSlots,
+  onExcelPicked,
 }: {
   quoteId: string | null;
   /** 수정 화면이 서버에서 읽은 칸(listQuoteAttachmentSlots). 새 견적서는 null. */
   serverSlots: QuoteAttachmentSlots | null;
+  /**
+   * 「수기 견적서 엑셀」 칸에 파일을 고른 순간(형식 · 크기 검사를 지난 파일만) — 폼이 엑셀 전용
+   * 장이면 그 엑셀을 읽어 칸을 채운다(견적서 ①b). 결재 PDF 칸에서는 부르지 않는다.
+   * 🔴 붙이기와 따로 간다: 붙이기(들고 있기 · 곧바로 올리기)를 시작한 **뒤에** 부르고, 읽기가
+   * 어떻게 되든 붙이기는 그대로다.
+   */
+  onExcelPicked?: (file: File) => void;
 }): QuoteAttachmentsController {
   const router = useRouter();
   const [pending, setPending] = useState<PendingQuoteAttachments<File>>({});
@@ -178,9 +186,12 @@ export function useQuoteAttachments({
       // 새 견적서 — 들고만 있는다. [저장] 뒤에 올린다.
       setPending((prev) => withPendingQuoteAttachment(prev, category, file));
       setSlotError(category, null);
-      return;
+    } else {
+      void uploadNow(quoteId, category, file);
     }
-    void uploadNow(quoteId, category, file);
+    // 🔴 붙이기를 시작한 **뒤에** 폼에 알린다(견적서 ①b) — 엑셀 읽기는 붙이기와 따로 간다.
+    // 읽을지(엑셀 전용 장인가)는 폼이 정한다. 결재 PDF 칸은 알리지 않는다.
+    if (category === "QUOTE_EXCEL") onExcelPicked?.(file);
   }
 
   function retry(category: QuoteAttachmentSlotCategory) {
@@ -310,10 +321,13 @@ export default function QuoteAttachmentsSection({
   controller,
   isExcelOnly,
   disabled,
+  excelSlotDetails = null,
 }: {
   controller: QuoteAttachmentsController;
   isExcelOnly: boolean;
   disabled: boolean;
+  /** 「수기 견적서 엑셀」 칸 맨 아래에 붙일 것 — 폼이 그린 엑셀 읽기 알림(견적서 ①b). 없으면 null. */
+  excelSlotDetails?: React.ReactNode;
 }) {
   const busy = controller.busyCategory !== null || controller.isDeleting;
   const deleteFile = controller.deleteTarget !== null ? controller.slots[controller.deleteTarget] : null;
@@ -337,6 +351,7 @@ export default function QuoteAttachmentsSection({
         onRetry={controller.retry}
         onClearPending={controller.clearPending}
         onRequestDelete={controller.requestDelete}
+        slotDetails={{ QUOTE_EXCEL: excelSlotDetails }}
       />
       {controller.deleteTarget !== null && deleteFile ? (
         <QuoteAttachmentDeleteDialog

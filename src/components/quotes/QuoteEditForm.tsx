@@ -58,7 +58,20 @@ import {
   updateQuoteAction,
 } from "@/lib/server/actions/quotes";
 import QuoteAttachmentsSection, { useQuoteAttachments } from "@/components/quotes/QuoteAttachmentsSection";
-import { ExcelOnlyClearLinesDialog, ExcelOnlySwitch } from "@/components/quotes/QuoteAttachmentParts";
+import {
+  ExcelOnlyClearLinesDialog,
+  ExcelOnlySwitch,
+  QuoteExcelAutofillNotice,
+} from "@/components/quotes/QuoteAttachmentParts";
+import { createLatestQuoteExcelReader, type QuoteExcelReadFields } from "@/components/quotes/quote-excel-parse";
+import {
+  planQuoteExcelAutofill,
+  quoteExcelAutofillNoticeLines,
+  quoteExcelPlanFormValues,
+  type QuoteExcelAutofillField,
+  type QuoteExcelFieldChange,
+  type QuoteExcelFormValues,
+} from "@/components/quotes/quote-excel-autofill";
 import { scopeLinesFilledFromTemplate, startNewQuoteLines } from "@/components/quotes/quote-new-start";
 import {
   countQuoteLinesForExcelOnly,
@@ -115,6 +128,14 @@ import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messa
  * [저장]이 견적서를 만든 **직후** 파일을 올리고, 하나라도 못 올리면 목록으로 넘기지 않는다.
  * 엑셀 전용을 켜면 부품 · 작업 구역을 접고 공급가액을 손으로 받는다. 줄이 있으면 서버가
  * 저장을 거절하므로 켤 때 비울지 묻고, 비운 줄은 저장 전에 끄면 돌아온다.
+ *
+ * ── 수기 견적서 엑셀로 칸 채우기 (견적서 ①b) ───────────────────────────
+ * 엑셀 전용 장에서 「수기 견적서 엑셀」 칸에 파일을 고르는 순간(훅의 onExcelPicked) 읽기 통로로
+ * 그 엑셀을 읽는다(quote-excel-parse.ts). 🔴 올리기와 따로 간다 — 읽기가 실패해도 파일은 그대로
+ * 붙는다. 채우는 규칙은 quote-excel-autofill.ts 한 곳이다: **빈 칸만 채우고**, 이미 적힌 칸이
+ * 엑셀과 다르면 덮지 않고 「엑셀과 다른 칸」 목록 · [엑셀 값으로 바꾸기]를 칸 곁에 보인다. 종류도
+ * 제안만 하고, 바꿀 때는 종류 select 와 같은 함수(changeKind)를 탄다. 엑셀 전용이 아니면 읽지
+ * 않는다. 두 번 고르면 마지막에 고른 파일의 결과만 쓴다(createLatestQuoteExcelReader).
  * ============================================================================
  */
 
@@ -330,6 +351,25 @@ type ExcelOnlyLines = {
 };
 
 /**
+ * 「수기 견적서 엑셀」로 칸 채우기의 지금 상태(견적서 ①b). 마지막에 고른 파일 하나의 것이다.
+ *  · reading — 읽는 중(칸 곁에 「엑셀을 읽는 중…」).
+ *  · failed — 읽지 못했다. 파일은 그대로 붙어 있다(읽기는 붙이기와 따로 간다).
+ *  · read — 읽었다. `fields` 는 엑셀 값 그대로 들고 있다가, 그릴 때마다 지금 폼 값과 견줘
+ *    「엑셀과 다른 칸」을 뽑는다 — 바꾼 칸은 저절로 목록에서 빠진다. `filled` 는 결과가 온 순간
+ *    채운 칸, `readCount` 는 엑셀에 값이 있던 칸의 수(알림 문장이 쓴다).
+ */
+type ExcelAutofillState =
+  | { status: "reading" }
+  | { status: "failed"; reason: string; code: string | null }
+  | {
+      status: "read";
+      fields: QuoteExcelReadFields;
+      filled: QuoteExcelAutofillField[];
+      readCount: number;
+      warnings: string[];
+    };
+
+/**
  * 비운 묶음. 작업 내역은 **손댄 것으로** 둔다 — 아니면 양식 기본값이 빈 칸을 몰래 다시
  * 채워, 접힌 구역에 줄이 생기고 저장이 거절된다.
  */
@@ -475,6 +515,12 @@ export default function QuoteEditForm({
   const [quoteNumber, setQuoteNumber] = useState(quote?.quoteNumber ?? "");
   const [kind, setKind] = useState<QuoteKind>(quote?.kind ?? newQuoteStart?.kind ?? "DOMESTIC");
   const [quoteDate, setQuoteDate] = useState(quote?.quoteDate ?? defaultQuoteDate ?? todayInSeoul());
+  /**
+   * 발행일자를 처음 값에서 한 번이라도 바꿨는가(견적서 ①b). 값이 아니라 표시로 가른다 — 고쳤다가
+   * 오늘로 되돌려도 고친 것이다. 새 견적서에서 이것이 거짓이면 엑셀 자동 채우기가 날짜를 빈 칸처럼
+   * 채운다(quoteExcelPlanFormValues). 바꾸는 길은 editQuoteDate 하나다.
+   */
+  const [quoteDateTouched, setQuoteDateTouched] = useState(false);
   const [intakeNumberText, setIntakeNumberText] = useState(
     quote?.intakeNumberText ?? initialIntakeNumber ?? ""
   );
@@ -658,6 +704,12 @@ export default function QuoteEditForm({
    * 저장하지 않은 변경이 있어 통로를 부르지 않았을 때의 「먼저 [저장]」도 여기다.
    */
   const [issueNotice, setIssueNotice] = useState<QuoteIssueNoticeLine[]>([]);
+  /**
+   * 「수기 견적서 엑셀」로 칸 채우기의 상태(견적서 ①b — ExcelAutofillState). 없으면 null.
+   * 읽개는 한 번 만들어 들고 있는다 — 마지막에 고른 파일의 결과만 돌려주는 차례표가 그 안에 있다.
+   */
+  const [excelAutofill, setExcelAutofill] = useState<ExcelAutofillState | null>(null);
+  const [excelReader] = useState(() => createLatestQuoteExcelReader());
 
   /** 저장된 견적서 — 수정 화면의 그 장, 또는 이 화면에서 방금 만든 장. 없으면 새 견적서. */
   const savedQuote = quote ? { id: quote.id, version: quote.version } : createdQuote;
@@ -666,10 +718,43 @@ export default function QuoteEditForm({
    * 결재 PDF · 수기 엑셀 두 칸의 상태. 🔴 폼이 들고 있는다 — 미리보기는 폼을 통째로
    * 갈아 그리므로, 구역 안에 두면 미리보기를 여는 순간 골라 둔 파일이 사라진다
    * (QuoteAttachmentsSection.tsx 머리말).
+   *
+   * 「수기 견적서 엑셀」을 고른 순간 훅이 onExcelPicked 를 부른다 — 엑셀 전용 장이면 그 엑셀을 읽어
+   * 칸을 채운다(견적서 ①b, handleExcelPicked). 붙이기는 훅이 먼저 시작해 두었다.
    */
   const attachments = useQuoteAttachments({
     quoteId: savedQuote?.id ?? null,
     serverSlots: attachmentSlots,
+    onExcelPicked: (file) => handleExcelPicked(file),
+  });
+
+  /**
+   * 엑셀로 채울 수 있는 칸의 **지금** 값(견적서 ①b). 이름은 폼 상태 이름 그대로다.
+   * 읽기는 기다리는 동안 사람이 칸을 고칠 수 있어서, 결과가 온 순간에는 고른 때의 값이 아니라
+   * 마지막으로 그린 값과 견준다(latestExcelFormValues) — 그 사이 적은 값을 빈 칸으로 읽고 덮지 않게.
+   */
+  const excelFormValues: QuoteExcelFormValues = quoteExcelPlanFormValues(
+    {
+      kind,
+      quoteNumber,
+      quoteDate,
+      customerNameText,
+      subject,
+      modelNameText,
+      lotNumberText,
+      serialNumberText,
+      validity,
+      delivery,
+      payment,
+      manualSupplyAmount,
+    },
+    // 🔴 새 견적서(아직 저장 전)에서 손대지 않은 기본 발행일자(오늘)는 빈 칸으로 본다 — 엑셀 날짜로
+    // 곧바로 채운다(2026-09-16 사용자 결정). 저장된 장 · 손댄 날짜는 그대로 「적힌 값」이다.
+    { isNewQuote: savedQuote === null, touched: quoteDateTouched }
+  );
+  const latestExcelFormValues = useRef(excelFormValues);
+  useEffect(() => {
+    latestExcelFormValues.current = excelFormValues;
   });
 
   /**
@@ -881,6 +966,44 @@ export default function QuoteEditForm({
   }
 
   /**
+   * 견적서 종류를 바꾼다 — **종류 select 와 엑셀 자동 채우기의 [엑셀 값으로 바꾸기](견적서 ①b)가
+   * 이 함수 하나를 부른다.** 종류를 바꾸면 따라 일어나는 일(오버홀 규칙 · 양식 기본 목록)이 있어,
+   * 길이 둘이면 한쪽만 그 일을 빠뜨리는 날이 온다.
+   */
+  function changeKind(next: QuoteKind) {
+    setKind(next);
+    // 엑셀 전용이면 줄을 건드리지 않는다 — 접힌 구역에 작업 · 작업 내역이 몰래
+    // 생기면 서버가 저장을 거절하고, 사람은 그 줄을 볼 수 없다. 끄면 켤 때 넣어
+    // 둔 줄이 그대로 돌아온다.
+    if (!isExcelOnly) {
+      // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
+      // 풀린다(applyOverhaulRule 머리말).
+      applyOverhaulRule(next, laborKind);
+      // 양식이 바뀌면 조사·통전 기본 목록도 그 양식 것으로 간다.
+      fillScopeFromTemplate(next, laborKind);
+    }
+  }
+
+  /**
+   * 공급처 이름을 바꾼다 — 칸에 치는 것과 [엑셀 값으로 바꾸기](견적서 ①b)가 같은 길이다.
+   * 이름을 바꾸면 고객사 연결은 끊는다 — 이름과 id 가 서로 다른 곳을 가리키는 상태를 만들지 않는다.
+   */
+  function editCustomerName(value: string) {
+    setCustomerNameText(value);
+    setCustomerId(null);
+  }
+
+  /**
+   * 발행일자를 바꾼다 — 날짜 칸에 친 것 · [엑셀 값으로 바꾸기] · 엑셀 자동 채우기가 모두 이 길이고,
+   * 셋 다 「손댐」을 켠다(견적서 ①b, 2026-09-16 사용자 결정). 빈 칸처럼 채우는 것은 새 견적서의
+   * 손대지 않은 처음 기본값 하나뿐이라, 한 번 채운 뒤 다시 고른 엑셀의 날짜는 제안만 한다.
+   */
+  function editQuoteDate(value: string) {
+    setQuoteDate(value);
+    setQuoteDateTouched(true);
+  }
+
+  /**
    * 고른 작업의 건명들. 목록 차례를 그대로 따른다 — 문서에 적히는 순서다.
    * 🔴 **수량을 보지 않는다** — 수량은 작업비에만 들어가고 문구는 그대로다.
    */
@@ -1088,6 +1211,76 @@ export default function QuoteEditForm({
     if (plan.lines) applyExcelOnlyLines(plan.lines);
     setExcelOnlyStash(plan.stash);
     setIsExcelOnly(plan.isExcelOnly);
+    // 엑셀 전용을 끄면 엑셀 읽기는 할 일이 없다 — 읽는 중이면 그 결과를 버리고 알림을 걷는다(견적서 ①b).
+    if (!plan.isExcelOnly) {
+      excelReader.cancel();
+      setExcelAutofill(null);
+    }
+  }
+
+  /**
+   * 「수기 견적서 엑셀」 칸에 파일을 고른 순간(견적서 ①b — 훅의 onExcelPicked). 붙이기는 훅이 이미
+   * 시작했다. 🔴 엑셀 전용 장만 읽는다 — 일반 견적서의 엑셀 칸은 앱이 만든 파일이 들어가는 칸이라
+   * 읽을 까닭이 없다(B1b).
+   */
+  function handleExcelPicked(file: File) {
+    if (!isExcelOnly) return;
+    void readPickedExcel(file);
+  }
+
+  /**
+   * 고른 엑셀을 읽어 칸을 채운다. 규칙은 quote-excel-autofill.ts 의 planQuoteExcelAutofill 한 곳이다 —
+   * **빈 칸만 채우고**, 이미 적힌 칸이 다르면 덮지 않는다(그 목록은 그릴 때 excelConflicts 가 뽑는다).
+   *
+   * 🔴 두 번 고르면 마지막 파일의 결과만 쓴다 — 늦게 온 옛 결과는 읽개가 null 로 돌려주고, 칸을
+   * 건드리기 전에 버린다. 🔴 견주는 값은 고른 때가 아니라 **마지막으로 그린** 폼 값이다
+   * (latestExcelFormValues) — 읽는 사이 사람이 적은 값을 빈 칸으로 보고 덮지 않게.
+   * 읽기가 실패해도 파일은 그대로 붙어 있다(붙이기는 훅이 따로 한다).
+   */
+  async function readPickedExcel(file: File) {
+    setExcelAutofill({ status: "reading" });
+    const result = await excelReader.read(file);
+    if (result === null) return;
+    if (!result.ok) {
+      setExcelAutofill({ status: "failed", reason: result.reason, code: result.code });
+      return;
+    }
+    const plan = planQuoteExcelAutofill(latestExcelFormValues.current, result.fields);
+    for (const change of plan.fills) applyExcelValue(change);
+    setExcelAutofill({
+      status: "read",
+      fields: result.fields,
+      filled: plan.fills.map((change) => change.field),
+      readCount: plan.fills.length + plan.conflicts.length + plan.unchanged.length,
+      warnings: result.warnings,
+    });
+  }
+
+  /**
+   * 엑셀 값 하나를 폼 칸에 넣는다 — 빈 칸 채우기와 [엑셀 값으로 바꾸기]가 이 함수 하나를 부른다
+   * (견적서 ①b). 🔴 종류는 select 와 같은 changeKind, 공급처는 칸에 치는 것과 같은 editCustomerName
+   * 을 탄다. `Record` 라 채울 칸이 하나 늘면 컴파일러가 여기를 짚는다.
+   */
+  function applyExcelValue(change: QuoteExcelFieldChange) {
+    const setters: Record<QuoteExcelAutofillField, (value: string) => void> = {
+      kind: (value) => {
+        const next = QUOTE_KINDS.find((candidate) => candidate === value);
+        if (next) changeKind(next);
+      },
+      quoteNumber: setQuoteNumber,
+      // 채운 날짜 · 바꾼 날짜도 손댐이다 — 다시 고른 엑셀의 날짜는 제안만 한다(2026-09-16 사용자 결정).
+      quoteDate: editQuoteDate,
+      customerNameText: editCustomerName,
+      subject: setSubject,
+      modelNameText: setModelNameText,
+      lotNumberText: setLotNumberText,
+      serialNumberText: setSerialNumberText,
+      validity: setValidity,
+      delivery: setDelivery,
+      payment: setPayment,
+      manualSupplyAmount: setManualSupplyAmount,
+    };
+    setters[change.field](change.excelValue);
   }
 
   function collectFields() {
@@ -1397,6 +1590,40 @@ export default function QuoteEditForm({
     );
   }
 
+  /**
+   * 「수기 견적서 엑셀」 칸 곁의 엑셀 읽기 알림(견적서 ①b). 🔴 엑셀 전용일 때만 그린다 — 끄면
+   * 아무것도 없다. 「엑셀과 다른 칸」은 그릴 때마다 **지금 폼 값**으로 다시 뽑는다 — 바꾼 칸
+   * (또는 사람이 같게 고친 칸)은 저절로 목록에서 빠진다. 단추는 모두 applyExcelValue 를 탄다.
+   */
+  const excelConflicts =
+    isExcelOnly && excelAutofill?.status === "read"
+      ? planQuoteExcelAutofill(excelFormValues, excelAutofill.fields).conflicts
+      : [];
+  const excelAutofillLines =
+    excelAutofill?.status === "failed"
+      ? quoteExcelAutofillNoticeLines({ kind: "failed", reason: excelAutofill.reason, code: excelAutofill.code })
+      : excelAutofill?.status === "read"
+        ? quoteExcelAutofillNoticeLines({
+            kind: "read",
+            filled: excelAutofill.filled,
+            readCount: excelAutofill.readCount,
+            conflictCount: excelConflicts.length,
+            warnings: excelAutofill.warnings,
+          })
+        : [];
+  const excelAutofillPanel =
+    isExcelOnly && excelAutofill !== null ? (
+      <QuoteExcelAutofillNotice
+        reading={excelAutofill.status === "reading"}
+        lines={excelAutofillLines}
+        conflicts={excelConflicts}
+        disabled={disabled}
+        onReplace={(change) => applyExcelValue(change)}
+        onReplaceAll={() => excelConflicts.forEach((change) => applyExcelValue(change))}
+        onDismiss={() => setExcelAutofill(null)}
+      />
+    ) : null;
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -1547,20 +1774,9 @@ export default function QuoteEditForm({
         <Field label="견적서 종류" error={fieldErrors.kind} required>
           <select
             value={kind}
-            onChange={(e) => {
-              const next = e.target.value as QuoteKind;
-              setKind(next);
-              // 엑셀 전용이면 줄을 건드리지 않는다 — 접힌 구역에 작업 · 작업 내역이 몰래
-              // 생기면 서버가 저장을 거절하고, 사람은 그 줄을 볼 수 없다. 끄면 켤 때 넣어
-              // 둔 줄이 그대로 돌아온다.
-              if (!isExcelOnly) {
-                // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
-                // 풀린다(applyOverhaulRule 머리말).
-                applyOverhaulRule(next, laborKind);
-                // 양식이 바뀌면 조사·통전 기본 목록도 그 양식 것으로 간다.
-                fillScopeFromTemplate(next, laborKind);
-              }
-            }}
+            // 종류를 바꾸면 따라 일어나는 일(오버홀 규칙 · 양식 기본 목록)은 changeKind 한 곳이다 —
+            // 엑셀 자동 채우기의 [엑셀 값으로 바꾸기]도 같은 함수를 부른다(견적서 ①b).
+            onChange={(e) => changeKind(e.target.value as QuoteKind)}
             className={editInputClass}
             disabled={disabled}
           >
@@ -1584,7 +1800,8 @@ export default function QuoteEditForm({
           <input
             type="date"
             value={quoteDate}
-            onChange={(e) => setQuoteDate(e.target.value)}
+            // 사람이 고치면 「손댐」이 켜진다 — 엑셀 자동 채우기가 그 날짜를 덮지 않는다(editQuoteDate).
+            onChange={(e) => editQuoteDate(e.target.value)}
             className={editInputClass}
             disabled={disabled}
           />
@@ -1592,12 +1809,8 @@ export default function QuoteEditForm({
         <Field label="공급처" error={fieldErrors.customerNameText} required>
           <input
             value={customerNameText}
-            onChange={(e) => {
-              setCustomerNameText(e.target.value);
-              // 이름을 손으로 고치면 고객사 연결은 끊는다 — 이름과 id 가 서로
-              // 다른 곳을 가리키는 상태를 만들지 않는다.
-              setCustomerId(null);
-            }}
+            // 이름을 손으로 고치면 고객사 연결은 끊는다(editCustomerName — [엑셀 값으로 바꾸기]도 같은 길).
+            onChange={(e) => editCustomerName(e.target.value)}
             placeholder="ICD Co.,Ltd"
             className={editInputClass}
             disabled={disabled}
@@ -1696,7 +1909,12 @@ export default function QuoteEditForm({
       {/* ── 견적서 파일(결재 PDF · 수기 엑셀) ─────────────────────────────
           상단 정보 바로 아래. 수정 화면에서는 [저장]과 따로 곧바로 반영되고, 새 견적서는
           [저장] 뒤에 올라간다(QuoteAttachmentsSection.tsx 머리말). */}
-      <QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly} disabled={disabled} />
+      <QuoteAttachmentsSection
+        controller={attachments}
+        isExcelOnly={isExcelOnly}
+        disabled={disabled}
+        excelSlotDetails={excelAutofillPanel}
+      />
 
       {/* ── 엑셀 전용이면 부품 · 작업 구역을 접는다 (2026-09-15 Q3) ──────
           줄은 켤 때 비웠고(저장 전에 끄면 돌아온다), 금액은 위의 공급가액 칸이 받는다.

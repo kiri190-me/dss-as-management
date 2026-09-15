@@ -42,7 +42,9 @@ describe("수정 화면 — 견적서 파일 두 칸", () => {
       form.includes('import QuoteAttachmentsSection, { useQuoteAttachments } from "@/components/quotes/QuoteAttachmentsSection";')
     );
     assert.ok(
-      form.includes("const attachments = useQuoteAttachments({ quoteId: savedQuote?.id ?? null, serverSlots: attachmentSlots, });"),
+      form.includes(
+        "const attachments = useQuoteAttachments({ quoteId: savedQuote?.id ?? null, serverSlots: attachmentSlots, onExcelPicked: (file) => handleExcelPicked(file), });"
+      ),
       "훅을 폼에서 부르지 않는다"
     );
     // 훅은 미리보기로 갈아 그리는 자리(if (showPreview)) 보다 앞에서 불린다.
@@ -50,7 +52,8 @@ describe("수정 화면 — 견적서 파일 두 칸", () => {
   });
 
   test("🔴 구역은 상단 정보 바로 아래 — 부품 구역보다 앞", () => {
-    const render = "<QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly} disabled={disabled} />";
+    const render =
+      "<QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly} disabled={disabled} excelSlotDetails={excelAutofillPanel} />";
     const at = indexOrFail(form, render);
     assert.ok(indexOrFail(form, "{/* ── 상단 정보") < at, "상단 정보보다 앞에 있다");
     assert.ok(at < indexOrFail(form, "{/* ── O/H 템플릿 부품"), "부품 구역보다 뒤에 있다");
@@ -122,10 +125,14 @@ describe("엑셀 전용 스위치", () => {
   });
 
   test("🔴 엑셀 전용일 때 종류를 바꿔도 줄이 몰래 생기지 않는다", () => {
+    // 종류 select 의 onChange 는 changeKind 하나를 부른다 — 엑셀 자동 채우기의 [엑셀 값으로 바꾸기]도
+    // 같은 함수라(견적서 ①b) 차례는 그 함수 안에서 본다.
     const kindSelect = sliceBetween(form, 'label="견적서 종류"', "</select>");
-    const guard = indexOrFail(kindSelect, "if (!isExcelOnly) {");
-    assert.ok(guard < indexOrFail(kindSelect, "applyOverhaulRule(next, laborKind);"));
-    assert.ok(guard < indexOrFail(kindSelect, "fillScopeFromTemplate(next, laborKind);"));
+    assert.ok(kindSelect.includes("onChange={(e) => changeKind(e.target.value as QuoteKind)}"), kindSelect);
+    const changeKind = sliceBetween(form, "function changeKind(", "function editCustomerName(");
+    const guard = indexOrFail(changeKind, "if (!isExcelOnly) {");
+    assert.ok(guard < indexOrFail(changeKind, "applyOverhaulRule(next, laborKind);"));
+    assert.ok(guard < indexOrFail(changeKind, "fillScopeFromTemplate(next, laborKind);"));
   });
 
   test("저장은 켜져 있을 때만 공급가액을 보낸다", () => {

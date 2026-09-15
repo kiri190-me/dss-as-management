@@ -54,3 +54,6 @@ src/components/quotes/QuoteIssueButton.test.tsx
 src/components/quotes/quote-issue-screens.test.ts
 src/components/quotes/NewQuoteDialog.test.tsx
 src/components/quotes/quote-new-start.test.ts
+src/components/quotes/quote-excel-parse.test.ts
+src/components/quotes/quote-excel-autofill.test.ts
+src/components/quotes/quote-excel-autofill-screens.test.tsx
