@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import AmountInput from "@/components/common/AmountInput";
 import {
   editErrorClass,
   editInputClass,
@@ -331,21 +332,18 @@ function KindEditor({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className={editLabelClass}>시간당 작업비 (원)</span>
-          <input
-            value={hourlyRate}
-            onChange={(e) => setHourlyRate(e.target.value)}
-            inputMode="numeric"
-            className={editInputClass}
-            disabled={disabled}
-          />
+          {/* 세 자리마다 콤마를 붙여 보여 준다 — 들고 있는 값은 콤마 없는 그대로다
+              (common/AmountInput.tsx). 받는 모양은 저장 검증과 같다(소수 둘째 자리까지). */}
+          <AmountInput value={hourlyRate} onValueChange={setHourlyRate} className={editInputClass} disabled={disabled} />
           {fieldErrors.hourlyRate && <p className={editErrorClass}>{fieldErrors.hourlyRate}</p>}
         </label>
         <label className="flex flex-col gap-1">
           <span className={editLabelClass}>기본 작업비 (원)</span>
-          <input
+          {/* 콤마 칸이다. 🔴 빈 칸(정하지 않음)과 0 은 그대로 갈린다 — 부품이 빈 글자는
+              빈 값으로, 0 은 0 으로 돌려준다. */}
+          <AmountInput
             value={baseCost}
-            onChange={(e) => setBaseCost(e.target.value)}
-            inputMode="numeric"
+            onValueChange={setBaseCost}
             placeholder="비워 두면 정하지 않음"
             className={editInputClass}
             disabled={disabled}
