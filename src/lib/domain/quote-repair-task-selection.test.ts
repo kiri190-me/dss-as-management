@@ -13,6 +13,7 @@ import {
   selectedRepairTaskNames,
   setRepairTaskChecked,
   setRepairTaskQuantity,
+  uncheckRepairTaskForRemovedLine,
   type RepairTaskCatalogEntry,
 } from "./quote-repair-task-selection";
 
@@ -287,6 +288,61 @@ describe("🔴 수량이 모두 1 이면 예전 동작과 한 글자도 같다",
         assert.deepEqual([...next.keys()].sort(), [...legacyNext].sort());
         assert.ok([...next.values()].every((quantity) => quantity === 1));
       }
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * 「2) 수리작업」 줄을 지우면 그 줄을 만든 작업의 체크가 풀린다 (2026-09-15)
+ * ============================================================================
+ * 줄과 작업을 잇는 것은 이름 글자뿐이다 — 맞는 체크된 작업이 있을 때만 푼다.
+ * ============================================================================
+ */
+describe("줄을 지우면 체크가 풀린다", () => {
+  const checked = q([
+    ["t-fan", 1],
+    ["t-rf", 1],
+  ]);
+
+  test("🔴 이름이 같은 체크된 작업이 풀린다 — 다른 작업은 그대로다", () => {
+    const next = uncheckRepairTaskForRemovedLine(CATALOG, checked, "FAN 교환", ["RF 모듈 교체"]);
+    assert.deepEqual([...next.entries()], [["t-rf", 1]]);
+    // 받은 그릇을 고치지 않는다.
+    assert.equal(checked.size, 2);
+  });
+
+  test("앞뒤 공백은 가리지 않는다", () => {
+    const next = uncheckRepairTaskForRemovedLine(CATALOG, checked, "  FAN 교환  ", ["RF 모듈 교체"]);
+    assert.equal(repairTaskQuantityOf(next, "t-fan"), 0);
+  });
+
+  test("🔴 수량이 2 이상이어도 문서의 줄은 하나라 수량째 빠진다", () => {
+    const next = uncheckRepairTaskForRemovedLine(CATALOG, q([["t-fan", 3]]), "FAN 교환", []);
+    assert.equal(next.size, 0);
+  });
+
+  test("🔴 손으로 고친 줄 · 더한 줄 · 빈 줄은 체크를 건드리지 않는다 — 받은 그릇을 그대로 돌려준다", () => {
+    for (const removed of ["FAN 교환(2EA)", "현장 점검", "", "   "]) {
+      assert.equal(uncheckRepairTaskForRemovedLine(CATALOG, checked, removed, ["RF 모듈 교체"]), checked, removed);
+    }
+  });
+
+  test("같은 글자의 줄이 아직 남아 있으면 풀지 않는다 — 그 작업은 여전히 문서에 적힌다", () => {
+    assert.equal(uncheckRepairTaskForRemovedLine(CATALOG, checked, "FAN 교환", ["FAN 교환", "RF 모듈 교체"]), checked);
+    assert.equal(uncheckRepairTaskForRemovedLine(CATALOG, checked, "FAN 교환", [" FAN 교환 "]), checked);
+  });
+
+  test("체크되지 않은 작업의 이름이면 아무것도 바꾸지 않는다", () => {
+    assert.equal(uncheckRepairTaskForRemovedLine(CATALOG, checked, "OH", ["FAN 교환", "RF 모듈 교체"]), checked);
+  });
+
+  test("🔴 체크를 푼 뒤의 문서 이름 목록 = 줄을 지운 뒤 남은 줄", () => {
+    const names = selectedRepairTaskNames(CATALOG, checked);
+    for (const removed of names) {
+      const remaining = names.filter((name) => name !== removed);
+      const next = uncheckRepairTaskForRemovedLine(CATALOG, checked, removed, remaining);
+      assert.deepEqual(selectedRepairTaskNames(CATALOG, next), remaining, removed);
     }
   });
 });

@@ -20,6 +20,7 @@ import {
   repairTaskQuantityOf,
   restoreRepairTaskQuantities,
   selectedRepairTaskNames,
+  uncheckRepairTaskForRemovedLine,
   setRepairTaskChecked,
   setRepairTaskQuantity,
   type RepairTaskQuantities,
@@ -586,6 +587,22 @@ export default function QuoteEditForm({
   function editScope(section: QuoteWorkScopeSection, rows: ScopeRow[]) {
     setScopeLines((prev) => ({ ...prev, [section]: rows }));
     setScopeTouched((prev) => ({ ...prev, [section]: true }));
+  }
+
+  /**
+   * 작업 내역 줄 하나를 지운다. 「2) 수리 작업」 줄이면 **그 줄을 만든 작업의 체크도
+   * 푼다**(2026-09-15 사용자 — 무엇을 풀고 무엇을 두는지는 domain/quote-repair-task-
+   * selection.ts 의 uncheckRepairTaskForRemovedLine 이 정한다). 줄은 여기서 이미
+   * 지웠으므로 fillRepairScopeFrom 으로 다시 채우지 않는다. 체크가 풀리면 작업비
+   * 합계도 그만큼 줄고, 제너레이터에서 마지막 작업이 풀리면 이 칸은 문서에서 빠진다
+   * (domain/quote-work-scope-suppression.ts).
+   */
+  function removeScopeRow(section: QuoteWorkScopeSection, rows: ScopeRow[], removed: ScopeRow) {
+    const remaining = rows.filter((r) => r.key !== removed.key);
+    editScope(section, remaining);
+    if (section !== "REPAIR" || !activeLabor) return;
+    const next = uncheckRepairTaskForRemovedLine(activeLabor.tasks, taskQuantities, removed.text, remaining.map((r) => r.text));
+    if (next !== taskQuantities) setTaskQuantities(next);
   }
 
   function applyOverhaulRule(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
@@ -1753,7 +1770,7 @@ export default function QuoteEditForm({
                             />
                             <button
                               type="button"
-                              onClick={() => editScope(section, rows.filter((r) => r.key !== row.key))}
+                              onClick={() => removeScopeRow(section, rows, row)}
                               disabled={disabled}
                               aria-label={`${quoteWorkScopeSectionLabels[section]} ${index + 1}번째 줄 지우기`}
                               className="rounded border border-zinc-300 px-1.5 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"

@@ -108,6 +108,23 @@ describe("판정을 부르는 자리", () => {
   });
 });
 
+describe("「2) 수리 작업」 줄을 지우면 그 작업의 체크도 풀린다", () => {
+  test("🔴 × 는 removeScopeRow 로 지운다 — 수리 칸일 때만 도메인 규칙으로 체크를 푼다", () => {
+    assert.ok(visibleBranch.includes("onClick={() => removeScopeRow(section, rows, row)}"), "× 가 줄만 지운다");
+    const fn = sliceBetween(form, "function removeScopeRow(", "function applyOverhaulRule(");
+    assert.ok(fn.includes("editScope(section, remaining);"), "줄을 지우지 않는다");
+    assert.ok(fn.includes('if (section !== "REPAIR" || !activeLabor) return;'), "수리 칸이 아닌데도 체크를 본다");
+    assert.ok(
+      fn.includes(
+        "uncheckRepairTaskForRemovedLine(activeLabor.tasks, taskQuantities, removed.text, remaining.map((r) => r.text))"
+      ),
+      "체크를 푸는 판단을 도메인에 맡기지 않는다"
+    );
+    // 줄은 이미 지웠다 — 다시 채우면 방금 지운 줄이 되살아나거나 손본 줄이 덮인다.
+    assert.ok(!fn.includes("fillRepairScopeFrom"), "지운 뒤에 줄을 다시 채운다");
+  });
+});
+
 describe("감춘 칸", () => {
   test("🔴 줄 입력·[+ 줄 추가]·[×] 가 없고 안내가 있다", () => {
     assert.ok(

@@ -160,6 +160,37 @@ export function selectedRepairTaskNames(
 }
 
 /**
+ * 문서의 「2) 수리작업」에서 줄 하나를 지웠을 때 — **그 줄을 만든 작업의 체크를
+ * 푼다**(2026-09-15 사용자: 「[작업 내역]의 [2) 수리작업]에서 줄을 제거하면
+ * [수리작업]에서 체크했던 것도 체크를 풀어줘」).
+ *
+ * 줄은 고른 작업의 이름으로 채워지므로(selectedRepairTaskNames) **글자가 같은 체크된
+ * 작업**을 찾는다. 줄과 작업을 잇는 것은 그 글자뿐이라 다음은 체크를 건드리지 않는다:
+ *   · 손으로 고친 줄 · 손으로 더한 줄 — 이름이 맞는 작업이 없다.
+ *   · 빈 줄.
+ *   · 같은 글자의 줄이 아직 남아 있을 때 — 그 작업은 여전히 문서에 적힌다.
+ *
+ * 수량이 2 이상이어도 문서의 줄은 하나라(이 파일 머리말 — 문구는 그대로다) 그 줄을
+ * 지우면 **수량째 빠진다.**
+ *
+ * 풀 것이 없으면 **받은 그릇을 그대로** 돌려준다 — 부르는 쪽이 같은 값으로 상태를
+ * 바꿔 다시 그리지 않게, 그리고 "안 바뀌었다"를 참조 비교로 알 수 있게.
+ */
+export function uncheckRepairTaskForRemovedLine(
+  tasks: readonly RepairTaskCatalogEntry[],
+  quantities: RepairTaskQuantities,
+  removedText: string,
+  remainingTexts: readonly string[]
+): RepairTaskQuantities {
+  const text = removedText.trim();
+  if (text === "") return quantities;
+  if (remainingTexts.some((remaining) => remaining.trim() === text)) return quantities;
+  const task = tasks.find((candidate) => quantities.has(candidate.id) && candidate.taskName.trim() === text);
+  if (!task) return quantities;
+  return setRepairTaskChecked(quantities, task.id, false);
+}
+
+/**
  * 견적서 종류에 따라 오버홀 작업을 넣고 뺀다.
  *
  * · O/H 견적서 — 오버홀 작업이 **없으면 수량 1 로** 넣고, 이미 있으면 **수량을
