@@ -48,3 +48,7 @@ src/components/quotes/quote-attachment-upload.test.ts
 src/components/quotes/QuoteAttachmentParts.test.tsx
 src/components/quotes/quote-print-excel-only.test.tsx
 src/components/quotes/quote-attachment-screens.test.ts
+src/components/quotes/quote-issue-messages.test.ts
+src/components/quotes/quote-issue-download.test.ts
+src/components/quotes/QuoteIssueButton.test.tsx
+src/components/quotes/quote-issue-screens.test.ts

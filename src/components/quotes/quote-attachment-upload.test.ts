@@ -85,6 +85,8 @@ test("한 칸 올리기 — 칸 · 이름을 쿼리로, 본문은 파일 그대�
       uploadedByName: null,
     },
     replaced: false,
+    // 응답에 공유폴더 칸이 없다(이 흉내 응답) — 해독하지 못한 것은 null 이다.
+    archive: null,
   });
 });
 
@@ -193,6 +195,61 @@ test("한 파일의 형식 거절(415)은 뒤의 파일을 막지 않는다", as
   assert.equal(calls.length, 2);
   assert.deepEqual(outcome.uploaded.map((item) => item.category), ["QUOTE_EXCEL"]);
   assert.deepEqual(outcome.failures.map((failure) => failure.category), ["SIGNED_QUOTE_PDF"]);
+});
+
+// ── 결재 PDF 의 공유폴더 사본 결과 (2026-09-15 B1b · B1c) ─────────────────────
+// 올리기 통로의 201 응답에 `archive` 칸이 있다 — 결재 PDF 면 [견적서 받기]와 같은 모양, 수기 엑셀
+// 칸이면 null. 모양이 다르면 null 로 읽는다(화면이 「확인하지 못했다」고 알린다).
+
+function createdWithArchive(archive: unknown) {
+  const reply = created("att-9");
+  return { ...reply, json: { ...reply.json, archive } };
+}
+
+test("🔴 결재 PDF 의 공유폴더 결과를 풀어 싣는다", async () => {
+  const archive = { status: "saved", relativePath: "2026/견적서/DSS 2026-077 - 有印.pdf", multipleFolderMatches: true };
+  const { fetchImpl } = fakeFetch([createdWithArchive(archive)]);
+  const result = await uploadQuoteAttachment("q-1", "SIGNED_QUOTE_PDF", pdf(), fetchImpl);
+  assert.deepEqual(result.ok && result.archive, archive);
+});
+
+test("수기 엑셀 칸이면 서버가 null 을 싣는다 — 그대로 null", async () => {
+  const { fetchImpl } = fakeFetch([createdWithArchive(null)]);
+  const result = await uploadQuoteAttachment("q-1", "QUOTE_EXCEL", xlsx(), fetchImpl);
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.archive, null);
+});
+
+test("🔴 공유폴더 칸의 모양이 이상하면 null — 모르는 칸을 싣지 않는다", async () => {
+  for (const odd of [{ status: "saved" }, { status: "exploded" }, "saved", 42]) {
+    const { fetchImpl } = fakeFetch([createdWithArchive(odd)]);
+    const result = await uploadQuoteAttachment("q-1", "SIGNED_QUOTE_PDF", pdf(), fetchImpl);
+    assert.equal(result.ok, true, JSON.stringify(odd));
+    assert.equal(result.ok && result.archive, null, JSON.stringify(odd));
+  }
+  const { fetchImpl } = fakeFetch([createdWithArchive({ status: "failed", reason: "공유폴더에 쓸 권한이 없습니다.", path: "C:/x" })]);
+  const result = await uploadQuoteAttachment("q-1", "SIGNED_QUOTE_PDF", pdf(), fetchImpl);
+  assert.deepEqual(result.ok && result.archive, { status: "failed", reason: "공유폴더에 쓸 권한이 없습니다." });
+});
+
+test("새 견적서의 차례 올리기도 올린 파일마다 공유폴더 결과를 싣는다", async () => {
+  const { fetchImpl } = fakeFetch([createdWithArchive({ status: "disabled" }), createdWithArchive(null)]);
+  const outcome = await uploadQueuedQuoteAttachments(
+    "q-1",
+    [
+      { category: "SIGNED_QUOTE_PDF", file: pdf() },
+      { category: "QUOTE_EXCEL", file: xlsx() },
+    ],
+    () => {},
+    fetchImpl
+  );
+  assert.deepEqual(
+    outcome.uploaded.map((item) => [item.category, item.archive]),
+    [
+      ["SIGNED_QUOTE_PDF", { status: "disabled" }],
+      ["QUOTE_EXCEL", null],
+    ]
+  );
 });
 
 test("올릴 것이 없으면 아무것도 부르지 않는다", async () => {

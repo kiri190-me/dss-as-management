@@ -21,6 +21,9 @@ import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
 import { QuoteFileBadges } from "@/components/quotes/QuoteAttachmentParts";
 import { quoteListAmountNote } from "@/components/quotes/quote-attachment-files";
+import QuoteIssueButton, { QuoteIssueNoticeLines } from "@/components/quotes/QuoteIssueButton";
+import { shouldReloadSlotsAfterIssue, type QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
+import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 
 /**
  * ============================================================================
@@ -117,6 +120,21 @@ export default function QuoteListScreen({
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [trashError, setTrashError] = useState<string | null>(null);
+
+  /**
+   * 수정 권한자의 [견적서 받기] 결과(견적서 B1c) — 화면 위 한 자리에, 어느 견적서인지 번호를
+   * 붙여 보인다. 줄마다 단추가 있어 결과를 단추 곁에 두면 표 칸이 늘고, 카드와 표가 서로 다른
+   * 자리에 알리게 된다. 보기 권한자(canEdit 거짓)는 링크라 이 자리를 쓰지 않는다.
+   */
+  const [issueNotice, setIssueNotice] = useState<{ quoteNumber: string; lines: QuoteIssueNoticeLine[] } | null>(
+    null
+  );
+
+  function handleIssueOutcome(row: QuoteListItem, outcome: QuoteIssueRunOutcome) {
+    setIssueNotice({ quoteNumber: row.quoteNumber, lines: outcome.lines });
+    // 엑셀 칸이 바뀌었으면(또는 모르면) 목록의 표시를 서버에서 다시 그려 온다 — 검색어 · 탭은 그대로다.
+    if (shouldReloadSlotsAfterIssue(outcome)) router.refresh();
+  }
 
   /**
    * 확인 창은 이 저장소의 표준 창을 쓴다(components/common/master-data-trash-dialogs).
@@ -266,6 +284,23 @@ export default function QuoteListScreen({
         </p>
       )}
 
+      {/* 수정 권한자의 [견적서 받기] 결과 — 어느 견적서인지 번호를 붙여 화면 위 한 자리에(견적서 B1c). */}
+      {issueNotice && (
+        <div className="flex items-start justify-between gap-3 rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="min-w-0">
+            <p className="font-medium text-zinc-900 dark:text-zinc-50">[견적서 받기] {issueNotice.quoteNumber}</p>
+            <QuoteIssueNoticeLines lines={issueNotice.lines} className="mt-1" />
+          </div>
+          <button
+            type="button"
+            onClick={() => setIssueNotice(null)}
+            className="shrink-0 rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            닫기
+          </button>
+        </div>
+      )}
+
       {tab === "trash" ? (
         <QuoteTrashList
           rows={trashRows}
@@ -310,6 +345,8 @@ export default function QuoteListScreen({
               canDelete={canDelete}
               busyId={busyId}
               onDelete={openDelete}
+              canEdit={canEdit}
+              onIssueOutcome={handleIssueOutcome}
             />
           }
           cards={
@@ -319,6 +356,8 @@ export default function QuoteListScreen({
               canDelete={canDelete}
               busyId={busyId}
               onDelete={openDelete}
+              canEdit={canEdit}
+              onIssueOutcome={handleIssueOutcome}
             />
           }
         />
@@ -473,6 +512,16 @@ type RowActionProps = {
   onDelete: (row: QuoteListItem) => void;
 };
 
+/**
+ * [견적서 받기]가 권한으로 갈린다(견적서 B1c) — 아래 DownloadLink. ⚠️ 표와 카드 **두 곳 모두**
+ * 같은 값을 받는다. 한쪽만 바꾸면 창 폭에 따라(ResponsiveList) 보기 권한자에게 부작용 단추가
+ * 보이거나, 수정 권한자의 받기가 공유폴더에 저장되지 않는다.
+ */
+type RowDownloadProps = {
+  canEdit: boolean;
+  onIssueOutcome: (row: QuoteListItem, outcome: QuoteIssueRunOutcome) => void;
+};
+
 /** 줄 링크가 실어 보낼 접수 건 id. 위 QuoteListScreen 의 같은 이름 프롭 참조. */
 type RowLinkProps = {
   rows: QuoteListItem[];
@@ -485,7 +534,9 @@ function QuoteTable({
   canDelete,
   busyId,
   onDelete,
-}: RowLinkProps & RowActionProps) {
+  canEdit,
+  onIssueOutcome,
+}: RowLinkProps & RowActionProps & RowDownloadProps) {
   return (
     <table className="w-full min-w-[56rem] border-collapse text-sm">
       <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -533,7 +584,7 @@ function QuoteTable({
             <td className="whitespace-nowrap px-3 py-2">
               <div className="flex gap-1">
                 <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
-                <DownloadLink row={row} />
+                <DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />
                 {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
               </div>
             </td>
@@ -550,7 +601,9 @@ function QuoteCardList({
   canDelete,
   busyId,
   onDelete,
-}: RowLinkProps & RowActionProps) {
+  canEdit,
+  onIssueOutcome,
+}: RowLinkProps & RowActionProps & RowDownloadProps) {
   return (
     <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
@@ -590,7 +643,7 @@ function QuoteCardList({
           </p>
           <div className="flex gap-1">
             <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
-            <DownloadLink row={row} />
+            <DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />
             {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
           </div>
         </div>
@@ -654,14 +707,38 @@ function KindTag({ kind }: { kind: QuoteListItem["kind"] }) {
 }
 
 /**
- * 견적서 xlsx 를 받는 링크. `<a download>` 가 아니라 그냥 링크다 — 파일 이름은
- * 서버가 Content-Disposition 으로 정한다(domain/quote-file-name.ts). 클라이언트가
- * 이름을 정하면 목록과 상세에서 서로 다른 이름으로 저장되는 날이 온다.
+ * [견적서 받기] — 권한으로 두 갈래다(2026-09-15 견적서 B1c).
  *
- * 이 주소는 화면이 감추든 말든 스스로 세션·권한을 다시 확인하고, 나갈 때마다
+ *  · 수정 권한자(canEdit) — 발행 단추(QuoteIssueButton → POST /api/quotes/{id}/issue). 서버가
+ *    파일을 만들며 사내 공유폴더에 저장하고 「수기 견적서 엑셀」 칸을 바꾼다. 결과는 화면 위 한
+ *    자리에 번호를 붙여 알린다(onIssueOutcome).
+ *  · 보기 권한자 — 지금까지의 링크 그대로. `<a download>` 가 아니라 그냥 링크다 — 파일 이름은
+ *    서버가 Content-Disposition 으로 정한다(domain/quote-file-name.ts). 클라이언트가
+ *    이름을 정하면 목록과 상세에서 서로 다른 이름으로 저장되는 날이 온다.
+ *
+ * 두 주소 모두 화면이 감추든 말든 스스로 세션·권한을 다시 확인하고, 나갈 때마다
  * 감사 기록(EXCEL_EXPORT)을 남긴다 — 직인이 찍힌 문서다.
  */
-function DownloadLink({ row }: { row: QuoteListItem }) {
+function DownloadLink({
+  row,
+  canEdit,
+  onIssueOutcome,
+}: {
+  row: QuoteListItem;
+  canEdit: boolean;
+  onIssueOutcome: (row: QuoteListItem, outcome: QuoteIssueRunOutcome) => void;
+}) {
+  if (canEdit) {
+    return (
+      <QuoteIssueButton
+        quoteId={row.id}
+        label="견적서 받기"
+        className="inline-block rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        showNotice={false}
+        onOutcome={(outcome) => onIssueOutcome(row, outcome)}
+      />
+    );
+  }
   return (
     <a
       href={`/api/quotes/${row.id}/xlsx`}

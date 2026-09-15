@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import QuotePrintView from "@/components/quotes/QuotePrintView";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
+import { readSession } from "@/lib/auth/session";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { listQuoteAttachmentSlots } from "@/lib/db/queries/attachments";
@@ -28,6 +31,10 @@ export const dynamic = "force-dynamic";
  * 수정 화면(`/quotes/{id}`)이 쓰기 권한을 요구하는 것과 여기가 갈리는 이유이기도
  * 하다: 그쪽은 저장할 수 없는 폼을 그려 주지 않으려는 것이고, 이쪽은 볼 수 있는
  * 것을 보여 주는 일이다.
+ *
+ * 단 [받기] 단추만은 권한으로 갈린다(2026-09-15 견적서 B1c) — 수정 권한자의 받기는 공유폴더에
+ * 저장하고 엑셀 칸을 바꾸는 부작용이 있어 발행 통로(POST)이고, 보기 권한자는 지금까지의
+ * 링크다(아래 canIssue).
  *
  * 지워진 장은 없는 것이다(getQuoteForEdit 이 is_deleted 로 좁힌다) — 휴지통에
  * 넣은 견적서를 주소만으로 계속 뽑을 수 있으면 휴지통이 뜻을 잃는다.
@@ -61,6 +68,17 @@ export default async function QuotePrintPage({
 
   const quote = await getQuoteForEdit(id);
   if (!quote) notFound();
+
+  /**
+   * [견적서 받기]는 두 갈래다(2026-09-15 견적서 B1c). 🔴 이 화면은 보기 권한만 있어도 열리므로
+   * 여기서 가른다 — 수정 권한자(quotes WRITE)에게만 발행 단추(POST /api/quotes/{id}/issue:
+   * 공유폴더 저장 · 엑셀 칸 교체)를 주고, 나머지는 지금까지의 링크(GET …/xlsx)다. 목록
+   * 화면(quotes/page.tsx)의 canEdit 과 같은 계산이다. 화면을 그리기 위한 값일 뿐 관문이
+   * 아니다 — 발행 통로가 세션 · 권한을 스스로 다시 본다.
+   */
+  const session = await readSession();
+  const actingUser = session ? await resolveActingUserForSession(session) : null;
+  const canIssue = actingUser !== null && (await hasPermission(actingUser, "quotes", "WRITE"));
 
   // 회사 정보·기본 문구·계좌는 **양식에서** 읽는다(코드에 두지 않는다).
   // 양식을 못 읽어도 미리보기는 떠야 한다 — 값만 빈 채로 그린다. 정본이
@@ -108,6 +126,7 @@ export default async function QuotePrintPage({
       backHref={backHref}
       signedPdf={excelOnly?.signedPdf ?? null}
       hasExcel={excelOnly?.hasExcel}
+      canIssue={canIssue}
     />
   );
 }

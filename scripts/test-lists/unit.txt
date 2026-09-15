@@ -220,3 +220,4 @@ src/lib/auth/kyosan-intake-import-authorization.test.ts
 src/lib/domain/quote-archive-naming.test.ts
 src/lib/storage/quote-archive.test.ts
 src/lib/domain/quote-issue-result.test.ts
+src/lib/domain/content-disposition-file-name.test.ts

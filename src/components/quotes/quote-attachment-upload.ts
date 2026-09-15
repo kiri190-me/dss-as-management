@@ -1,4 +1,5 @@
 import type { QuoteAttachmentSlotCategory } from "@/lib/domain/attachment-category";
+import { parseQuoteIssueArchiveResult, type QuoteIssueArchiveResult } from "@/lib/domain/quote-issue-result";
 import {
   quoteAttachmentUploadUrl,
   type QuoteAttachmentSlotFileView,
@@ -15,6 +16,12 @@ import {
  *
  * 새 견적서의 [저장] 뒤 올리기(QuoteEditForm)와 수정 화면의 즉시 올리기
  * (QuoteAttachmentsSection)가 **같은 함수**를 부른다 — 두 벌이면 응답을 읽는 법이 갈린다.
+ *
+ * ── 결재 PDF 의 공유폴더 사본 (2026-09-15 B1b · B1c) ─────────────────────
+ * 결재 PDF 를 올리면 서버가 사내 공유폴더에도 복사하고, 그 결과를 201 응답의 `archive` 칸에
+ * 싣는다(수기 엑셀 칸은 `null`). 모양은 [견적서 받기]의 결과와 같아 같은 해독기로 읽는다
+ * (domain/quote-issue-result.ts 의 parseQuoteIssueArchiveResult — 없거나 모양이 다르면 null).
+ * 문장은 quote-issue-messages.ts 의 quoteUploadArchiveNoticeLines 가 짓는다.
  * ============================================================================
  */
 
@@ -31,6 +38,11 @@ export type QuoteAttachmentUploadResult =
       file: QuoteAttachmentSlotFileView;
       /** 같은 칸의 옛 파일이 첨부 휴지통으로 갔는가(칸 교체). */
       replaced: boolean;
+      /**
+       * 결재 PDF 의 공유폴더 사본 결과. 수기 엑셀 칸이면 서버가 `null` 을 싣고, 칸이 없거나
+       * 모양이 다를 때도 null 이다 — 결재 PDF 인데 null 이면 화면이 「확인하지 못했다」고 알린다.
+       */
+      archive: QuoteIssueArchiveResult | null;
     }
   | { ok: false; reason: string; status: number | null; code: string | null };
 
@@ -84,12 +96,18 @@ export async function uploadQuoteAttachment(
       uploadedByName: null,
     },
     replaced: displaced.length > 0,
+    archive: parseQuoteIssueArchiveResult(payload.archive),
   };
 }
 
 export type QueuedQuoteAttachmentsOutcome = {
   total: number;
-  uploaded: { category: QuoteAttachmentSlotCategory; file: QuoteAttachmentSlotFileView }[];
+  uploaded: {
+    category: QuoteAttachmentSlotCategory;
+    file: QuoteAttachmentSlotFileView;
+    /** 결재 PDF 의 공유폴더 사본 결과(uploadQuoteAttachment 의 같은 칸). */
+    archive: QuoteIssueArchiveResult | null;
+  }[];
   failures: QuoteAttachmentUploadFailure[];
 };
 
@@ -120,7 +138,7 @@ export async function uploadQueuedQuoteAttachments(
     onProgress(index + 1, queue.length);
     const result = await uploadQuoteAttachment(quoteId, category, file, fetchImpl);
     if (result.ok) {
-      uploaded.push({ category, file: result.file });
+      uploaded.push({ category, file: result.file, archive: result.archive });
       continue;
     }
     failures.push({ category, fileName: file.name, reason: result.reason });

@@ -262,6 +262,7 @@ export function QuoteAttachmentSlotsView({
   errors,
   busyCategory,
   statusText,
+  statusDetails = null,
   notice,
   disabled,
   onPickFile,
@@ -275,6 +276,11 @@ export function QuoteAttachmentSlotsView({
   errors: Partial<Record<QuoteAttachmentSlotCategory, string>>;
   busyCategory: QuoteAttachmentSlotCategory | null;
   statusText: string | null;
+  /**
+   * 방금 한 일의 한 줄 아래에 붙는 것 — 결재 PDF 의 공유폴더 결과 줄(2026-09-15 B1c). 부르는
+   * 쪽(QuoteAttachmentsSection)이 그려서 넘긴다. 안 주면 지금 그대로다.
+   */
+  statusDetails?: React.ReactNode;
   /** 엑셀 전용인데 엑셀이 없을 때의 안내(quote-attachment-files.ts 의 excelOnlyMissingExcelNotice). */
   notice: string | null;
   disabled: boolean;
@@ -329,6 +335,7 @@ export function QuoteAttachmentSlotsView({
           {statusText}
         </p>
       ) : null}
+      {statusDetails}
     </section>
   );
 }

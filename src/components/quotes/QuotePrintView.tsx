@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import PrintFitFrame from "@/components/common/print-fit-frame";
+import QuoteIssueButton from "@/components/quotes/QuoteIssueButton";
+import type { QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
 import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import {
   EXCEL_ONLY_NO_SIGNED_PDF_TEXT,
@@ -169,6 +171,9 @@ export default function QuotePrintView({
   backHref,
   signedPdf = null,
   hasExcel,
+  canIssue = false,
+  hasUnsavedChanges = false,
+  onIssueOutcome,
 }: {
   quote: QuotePrintData;
   /** 양식에서 읽어 온 회사 정보·기본 문구·계좌. 못 읽은 칸은 null 이고 그 줄은 비운다. */
@@ -218,6 +223,21 @@ export default function QuotePrintView({
   signedPdf?: QuotePrintSignedPdf | null;
   /** 엑셀 전용 견적서에 수기 엑셀이 붙어 있는가. 안 주면 따로 알리지 않는다. */
   hasExcel?: boolean;
+  /**
+   * 🔴 수정 권한자인가(2026-09-15 견적서 B1c). 참이면 [받기]가 링크(GET …/xlsx) 대신 발행
+   * 단추(QuoteIssueButton — POST /api/quotes/{id}/issue: 공유폴더 저장 · 엑셀 칸 교체)다.
+   *
+   * **안 주면 지금처럼 링크다.** 독립 페이지는 보기 권한자도 들어오므로 페이지가 quotes WRITE 로
+   * 계산해 넘기고(print/page.tsx), 편집 폼 안 미리보기는 참을 넘긴다(수정 권한자만 들어온다).
+   */
+  canIssue?: boolean;
+  /**
+   * 🔴 편집 폼 안 미리보기 — 마지막 저장값과 지금 폼 값이 다르다. 참이면 단추가 발행 통로를
+   * 부르지 않고 「먼저 [저장]」을 알린다(통로는 DB 에 저장된 값으로 파일을 만든다).
+   */
+  hasUnsavedChanges?: boolean;
+  /** 발행 뒤 — 편집 폼이 「수기 견적서 엑셀」 칸을 다시 그려 오게 한다. */
+  onIssueOutcome?: (outcome: QuoteIssueRunOutcome) => void;
 }) {
   // 엑셀 전용 장은 앱 양식 대신 결재 PDF 를 보인다. 일반 견적서는 아래 그대로다.
   if (quote.isExcelOnly === true) {
@@ -229,6 +249,9 @@ export default function QuotePrintView({
         backHref={backHref}
         signedPdf={signedPdf}
         hasExcel={hasExcel}
+        canIssue={canIssue}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onIssueOutcome={onIssueOutcome}
       />
     );
   }
@@ -303,6 +326,16 @@ export default function QuotePrintView({
             // DB 의 그 줄을 읽기 때문이다. 단추를 회색으로 두기만 하면 "왜 안
             // 눌리지"가 되므로, 왜인지를 그 자리에 적는다.
             <span className="qp-toolbar-note">Excel 은 저장한 뒤에 받을 수 있습니다</span>
+          ) : canIssue ? (
+            // 수정 권한자 — 발행 통로(공유폴더 저장 · 엑셀 칸 교체). 결과 줄은 단추 아래, 흰 종이 색.
+            <QuoteIssueButton
+              quoteId={quoteId}
+              label="Excel 받기"
+              className="qp-btn"
+              onPaper
+              hasUnsavedChanges={hasUnsavedChanges}
+              onOutcome={onIssueOutcome}
+            />
           ) : (
             <a href={`/api/quotes/${quoteId}/xlsx`} className="qp-btn">
               Excel 받기
@@ -520,6 +553,9 @@ function ExcelOnlyQuotePreview({
   backHref,
   signedPdf,
   hasExcel,
+  canIssue,
+  hasUnsavedChanges,
+  onIssueOutcome,
 }: {
   quote: QuotePrintData;
   quoteId: string | null;
@@ -527,6 +563,10 @@ function ExcelOnlyQuotePreview({
   backHref?: string;
   signedPdf: QuotePrintSignedPdf | null;
   hasExcel?: boolean;
+  /** 위 QuotePrintView 의 같은 이름 프롭 — 수정 권한자면 [견적서 받기]가 발행 단추다. */
+  canIssue: boolean;
+  hasUnsavedChanges: boolean;
+  onIssueOutcome?: (outcome: QuoteIssueRunOutcome) => void;
 }) {
   const supply = quoteSupplyAmountOf({
     isExcelOnly: true,
@@ -558,6 +598,16 @@ function ExcelOnlyQuotePreview({
         <div className="flex flex-wrap items-center gap-2">
           {quoteId === null ? (
             <span className="text-xs text-zinc-500 dark:text-zinc-400">Excel 은 저장한 뒤에 받을 수 있습니다</span>
+          ) : canIssue ? (
+            // 수정 권한자 — 붙인 엑셀을 내려받으며 공유폴더에도 복사한다(엑셀 칸은 건드리지 않는다).
+            <QuoteIssueButton
+              quoteId={quoteId}
+              label="견적서 받기"
+              className={`${EXCEL_ONLY_BUTTON_CLASS} disabled:opacity-50`}
+              title="붙인 엑셀을 내려받으면서 사내 공유폴더에도 넣습니다"
+              hasUnsavedChanges={hasUnsavedChanges}
+              onOutcome={onIssueOutcome}
+            />
           ) : (
             <a href={`/api/quotes/${quoteId}/xlsx`} className={EXCEL_ONLY_BUTTON_CLASS}>
               견적서 받기
@@ -730,7 +780,8 @@ const FALLBACK_WORK_SECTIONS: QuoteWorkSections = {
 const STYLES = `
 .qp-root { background: #fff; color: #000; }
 .qp-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .5rem; }
-.qp-toolbar-actions { display: flex; gap: .5rem; }
+/* 수정 권한자의 받기 단추는 아래에 결과 줄을 단다 — 곁의 단추가 늘어나지 않게 위로 붙이고, 좁으면 줄바꿈한다. */
+.qp-toolbar-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem; }
 .qp-btn { border: 1px solid #d4d4d8; border-radius: .375rem; padding: .375rem .75rem; font-size: .875rem; text-decoration: none; color: #3f3f46; background: #fff; cursor: pointer; }
 .qp-btn-primary { border-color: #18181b; background: #18181b; color: #fff; }
 .qp-toolbar-note { align-self: center; font-size: .75rem; color: #71717a; }

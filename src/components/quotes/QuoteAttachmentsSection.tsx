@@ -25,7 +25,9 @@ import {
   uploadQueuedQuoteAttachments,
   type QueuedQuoteAttachmentsOutcome,
 } from "./quote-attachment-upload";
+import { quoteUploadArchiveNoticeLines, type QuoteIssueNoticeLine } from "./quote-issue-messages";
 import { QuoteAttachmentDeleteDialog, QuoteAttachmentSlotsView } from "./QuoteAttachmentParts";
+import { QuoteIssueNoticeLines } from "./QuoteIssueButton";
 
 /**
  * ============================================================================
@@ -49,6 +51,12 @@ import { QuoteAttachmentDeleteDialog, QuoteAttachmentSlotsView } from "./QuoteAt
  *  · 저장된 견적서 — 올리기 · 바꾸기 · 지우기가 [저장]과 따로 **곧바로** 반영된다. 파일은
  *    견적서 칸이 아니고, 올려도 견적서의 version 이 오르지 않는다(mutations/attachments.ts
  *    는 견적서 행을 잠글 뿐 고치지 않는다) — 파일을 만진 뒤 [저장]해도 충돌하지 않는다.
+ *
+ * ── 결재 PDF 의 공유폴더 사본 · [견적서 받기] 뒤 (2026-09-15 B1c) ─────────
+ * 결재 PDF 를 올리면 서버가 사내 공유폴더에도 복사한다. 그 결과 줄(archiveNotice)을 방금 한
+ * 일의 한 줄 아래에 붙인다 — 문장은 [견적서 받기]와 같은 함수다(quote-issue-messages.ts).
+ * [견적서 받기](발행 통로)가 「수기 견적서 엑셀」 칸을 바꾸면 폼이 reloadAfterIssue 를 불러
+ * 서버 칸을 다시 그려 온다 — 발행 통로가 올린 파일은 응답에 id 가 없어 화면이 들고 있을 수 없다.
  * ============================================================================
  */
 
@@ -62,6 +70,8 @@ export type QuoteAttachmentsController = {
   errors: SlotMessages;
   busyCategory: QuoteAttachmentSlotCategory | null;
   statusText: string | null;
+  /** 방금 올린 결재 PDF 의 공유폴더 결과 줄. 없으면 빈 배열. */
+  archiveNotice: QuoteIssueNoticeLine[];
   deleteTarget: QuoteAttachmentSlotCategory | null;
   deleteError: string | null;
   isDeleting: boolean;
@@ -83,6 +93,11 @@ export type QuoteAttachmentsController = {
     quoteId: string,
     onProgress: (current: number, total: number) => void
   ) => Promise<QueuedQuoteAttachmentsOutcome>;
+  /**
+   * [견적서 받기]가 「수기 견적서 엑셀」 칸을 바꿨다(또는 결과를 모른다) — 서버 칸을 다시 그려
+   * 온다. 앞서 한 일의 한 줄은 지난 일이라 걷는다. 폼에 적어 둔 값은 그대로다.
+   */
+  reloadAfterIssue: () => void;
 };
 
 const DELETE_FAILED_MESSAGE = "지우기 요청이 끝나지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -101,6 +116,7 @@ export function useQuoteAttachments({
   const [localChanges, setLocalChanges] = useState<QuoteSlotLocalChanges>({});
   const [busyCategory, setBusyCategory] = useState<QuoteAttachmentSlotCategory | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const [archiveNotice, setArchiveNotice] = useState<QuoteIssueNoticeLine[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<QuoteAttachmentSlotCategory | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -129,6 +145,7 @@ export function useQuoteAttachments({
   async function uploadNow(targetQuoteId: string, category: QuoteAttachmentSlotCategory, file: File) {
     setBusyCategory(category);
     setStatusText(null);
+    setArchiveNotice([]);
     setSlotError(category, null);
     try {
       const result = await uploadQuoteAttachment(targetQuoteId, category, file);
@@ -141,6 +158,8 @@ export function useQuoteAttachments({
       setPending((prev) => withPendingQuoteAttachment(prev, category, null));
       setLocalChanges((prev) => ({ ...prev, [category]: { kind: "uploaded", file: result.file } }));
       setStatusText(quoteAttachmentUploadedText(category, result.replaced));
+      // 결재 PDF 면 공유폴더 사본의 결과 줄(수기 엑셀 칸이면 빈 배열).
+      setArchiveNotice(quoteUploadArchiveNoticeLines(category, result.archive));
       refreshServerSlots();
     } finally {
       setBusyCategory(null);
@@ -207,6 +226,7 @@ export function useQuoteAttachments({
       setLocalChanges((prev) => ({ ...prev, [category]: { kind: "deleted", attachmentId: file.id } }));
       setDeleteTarget(null);
       setStatusText(quoteAttachmentDeletedText(category));
+      setArchiveNotice([]);
     } catch {
       setDeleteError(DELETE_FAILED_MESSAGE);
     } finally {
@@ -237,7 +257,17 @@ export function useQuoteAttachments({
       for (const failure of outcome.failures) next[failure.category] = failure.reason;
       return next;
     });
+    // 결재 PDF 가 올라갔으면 공유폴더 결과 줄 — 하나라도 못 올려 이 화면에 머물 때 보인다
+    // (다 올리면 폼이 곧바로 목록으로 넘어간다).
+    const signedPdf = outcome.uploaded.find((item) => item.category === "SIGNED_QUOTE_PDF");
+    setArchiveNotice(signedPdf ? quoteUploadArchiveNoticeLines(signedPdf.category, signedPdf.archive) : []);
     return outcome;
+  }
+
+  function reloadAfterIssue() {
+    setStatusText(null);
+    setArchiveNotice([]);
+    refreshServerSlots();
   }
 
   return {
@@ -247,6 +277,7 @@ export function useQuoteAttachments({
     errors,
     busyCategory,
     statusText,
+    archiveNotice,
     deleteTarget,
     deleteError,
     isDeleting,
@@ -267,6 +298,7 @@ export function useQuoteAttachments({
     cancelDelete,
     confirmDelete: () => void runDelete(),
     uploadQueuedAfterCreate,
+    reloadAfterIssue,
   };
 }
 
@@ -295,6 +327,7 @@ export default function QuoteAttachmentsSection({
         errors={controller.errors}
         busyCategory={controller.busyCategory}
         statusText={controller.statusText}
+        statusDetails={<QuoteIssueNoticeLines lines={controller.archiveNotice} className="mt-1" />}
         notice={excelOnlyMissingExcelNotice({
           isExcelOnly,
           excelAttachedOrQueued: controller.excelAttachedOrQueued,

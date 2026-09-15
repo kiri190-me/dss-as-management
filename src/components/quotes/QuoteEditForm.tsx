@@ -67,6 +67,9 @@ import {
   type QuoteLineCounts,
 } from "@/components/quotes/quote-attachment-files";
 import type { QuoteAttachmentSlots } from "@/lib/db/queries/attachments";
+import QuoteIssueButton, { QuoteIssueNoticeLines } from "@/components/quotes/QuoteIssueButton";
+import { shouldReloadSlotsAfterIssue, type QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
+import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 
 /**
  * ============================================================================
@@ -547,6 +550,11 @@ export default function QuoteEditForm({
   const [createdQuote, setCreatedQuote] = useState<{ id: string; version: number } | null>(null);
   /** 새 견적서 저장 뒤 파일 올리기의 진행 · 실패 안내. */
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  /**
+   * [견적서 받기](발행 통로)의 결과 줄 — 머리의 단추들 바로 아래에 보인다(견적서 B1c).
+   * 저장하지 않은 변경이 있어 통로를 부르지 않았을 때의 「먼저 [저장]」도 여기다.
+   */
+  const [issueNotice, setIssueNotice] = useState<QuoteIssueNoticeLine[]>([]);
 
   /** 저장된 견적서 — 수정 화면의 그 장, 또는 이 화면에서 방금 만든 장. 없으면 새 견적서. */
   const savedQuote = quote ? { id: quote.id, version: quote.version } : createdQuote;
@@ -1045,6 +1053,10 @@ export default function QuoteEditForm({
         return;
       }
 
+      // 🔴 이제 이 값이 DB 에 저장된 값이다 — [견적서 받기]의 「저장하지 않은 변경」 기준을 옮긴다.
+      // 고치기는 곧 목록으로 떠나지만, 새 견적서가 파일을 못 올려 이 화면에 머물면 이 기준으로 받는다.
+      setSavedFieldsSnapshot(JSON.stringify(fields));
+
       if (savedQuote) {
         // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
         // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
@@ -1153,6 +1165,37 @@ export default function QuoteEditForm({
     texts: scopeLines.INVESTIGATION.map((row) => row.text),
   });
 
+  /**
+   * 🔴 저장하지 않은 변경이 있는가 — [견적서 받기]를 부를지 가른다(견적서 B1c).
+   *
+   * 발행 통로는 **DB 에 저장된 값**으로 파일을 만든다. 이 폼은 저장하지 않은 변경을 따로
+   * 추적하지 않으므로, 고치고 저장하지 않은 채 누르면 옛 내용이 최종 이름으로 사람의
+   * 서류함(공유폴더)에 들어간다. 그래서 **저장이 보내는 바로 그 값**(collectFields)을 글자로
+   * 접어 마지막 저장값과 맞춰 본다 — 다르면 통로를 부르지 않고 「먼저 [저장]」을 보인다.
+   *
+   *  · 기준은 처음 열 때의 폼 값(저장된 견적서를 편 것)이고, [저장]이 성공하면 그때 보낸
+   *    값으로 옮긴다(handleSubmit). 고쳤다가 되돌리면 같은 글자라 막지 않는다.
+   *  · 저장이 보내지 않는 것(화면 전용 key · 출고 부품 참고 목록 · 미리보기 여부)은 보지
+   *    않는다 — 파일에 들어가지 않는다.
+   *  · 파일 칸(결재 PDF · 수기 엑셀)은 [저장]과 따로 곧바로 반영되므로 여기 들지 않는다.
+   *  · 기준이 없으면(새 견적서, 아직 저장 전) 변경이 있는 것으로 본다 — 받을 장이 없어 단추도 없다.
+   */
+  const [savedFieldsSnapshot, setSavedFieldsSnapshot] = useState<string | null>(() =>
+    quote ? JSON.stringify(collectFields()) : null
+  );
+  const hasUnsavedChanges = savedFieldsSnapshot === null || JSON.stringify(collectFields()) !== savedFieldsSnapshot;
+
+  /** 발행 뒤 「수기 견적서 엑셀」 칸이 바뀌었으면(또는 모르면) 서버 칸을 다시 그려 온다 — 폼 값은 그대로다. */
+  function reloadSlotsAfterIssue(outcome: QuoteIssueRunOutcome) {
+    if (shouldReloadSlotsAfterIssue(outcome)) attachments.reloadAfterIssue();
+  }
+
+  /** 머리의 [견적서 받기] — 결과 줄을 단추들 아래에 두고, 칸을 다시 그려 온다. */
+  function handleIssueOutcome(outcome: QuoteIssueRunOutcome) {
+    setIssueNotice(outcome.lines);
+    reloadSlotsAfterIssue(outcome);
+  }
+
   if (showPreview) {
     /**
      * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
@@ -1161,12 +1204,20 @@ export default function QuoteEditForm({
      * 미리보기는 유효기간·납기·결재조건을 `?? 양식의 기본 문구` 로 채우는데,
      * 빈 문자열은 null 이 아니라서 그 기본값이 안 뜬다. 그러면 실제로 나갈
      * 문서에는 "발행일로부터 4주"가 찍히는데 미리보기만 비어 보인다.
+     *
+     * ── 미리보기의 받기도 발행 단추다 (견적서 B1c) ──────────────────────
+     * 이 화면은 수정 권한자만 들어오므로 canIssue 다. 🔴 저장하지 않은 변경이 있으면 머리의
+     * 단추와 **같은 규칙**으로 통로를 부르지 않는다 — 미리보기는 지금 폼 값을 그리지만 통로는
+     * DB 에 저장된 값으로 파일을 만들기 때문이다.
      */
     const orNull = (value: string) => (value.trim() === "" ? null : value);
     return (
       <QuotePrintView
         quoteId={savedQuote?.id ?? null}
         onClose={() => setShowPreview(false)}
+        canIssue
+        hasUnsavedChanges={hasUnsavedChanges}
+        onIssueOutcome={reloadSlotsAfterIssue}
         header={activePrintHeader}
         workSections={activeWorkSections}
         signedPdf={attachments.signedPdfForPreview}
@@ -1230,15 +1281,21 @@ export default function QuoteEditForm({
           >
             미리보기 · PDF
           </button>
-          {/* 파일은 저장된 장에서만 받을 수 있다 — 만드는 라우트가 DB 의 그 줄을
-              읽기 때문이다. 그래서 이 단추만 저장 뒤에 나타난다. */}
+          {/* 파일은 저장된 장에서만 받을 수 있다 — 만드는 통로가 DB 의 그 줄을
+              읽기 때문이다. 그래서 이 단추만 저장 뒤에 나타난다.
+              🔴 이 화면은 수정 권한자만 들어온다(page 가 redirect) — 그래서 링크가 아니라 발행
+              단추다(공유폴더 저장 · 엑셀 칸 교체, 견적서 B1c). 저장하지 않은 변경이 있으면 통로를
+              부르지 않고 「먼저 [저장]」을 알린다. 저장 중 · 충돌이면 잠근다. */}
           {savedQuote && (
-            <a
-              href={`/api/quotes/${savedQuote.id}/xlsx`}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
-            >
-              견적서 받기
-            </a>
+            <QuoteIssueButton
+              quoteId={savedQuote.id}
+              label="견적서 받기"
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-700"
+              hasUnsavedChanges={hasUnsavedChanges}
+              disabled={disabled}
+              showNotice={false}
+              onOutcome={handleIssueOutcome}
+            />
           )}
           {/* 취소도 왔던 곳으로 — 수리 건에서 들어왔으면 그 건의 「견적서」 탭,
               아니면 지금까지와 같이 PO/내자 목록이다. */}
@@ -1258,6 +1315,16 @@ export default function QuoteEditForm({
           </button>
         </div>
       </div>
+
+      {/* [견적서 받기] 결과 — 단추들 바로 아래(견적서 B1c). 「먼저 [저장]」도 여기에 뜬다. */}
+      {issueNotice.length > 0 && (
+        <div className="flex justify-end">
+          <QuoteIssueNoticeLines
+            lines={issueNotice}
+            className="max-w-xl rounded-md border border-zinc-200 bg-white p-3 text-right dark:border-zinc-800 dark:bg-zinc-900"
+          />
+        </div>
+      )}
 
       {submitError && (
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

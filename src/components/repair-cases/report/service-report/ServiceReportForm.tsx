@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
+import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
 import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
 import {
@@ -130,24 +131,6 @@ const KIND_LABELS: Record<ServiceReportKind, string> = {
  * 어차피 방금 만든 파일 한 벌이다.
  */
 const OBJECT_URL_RELEASE_MS = 1000;
-
-/** `attachment; filename="..."; filename*=UTF-8''...` 에서 사람이 볼 이름을 꺼낸다. */
-export function fileNameFromContentDisposition(header: string | null): string | null {
-  if (!header) return null;
-
-  // 한글 이름은 이쪽에만 온전히 들어 있다(ASCII 쪽은 `_` 로 바뀌어 있다).
-  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded[1].trim());
-    } catch {
-      // 잘못 인코딩된 헤더 하나 때문에 내려받기를 포기하지는 않는다.
-    }
-  }
-
-  const ascii = /filename="([^"]*)"/i.exec(header);
-  return ascii && ascii[1] !== "" ? ascii[1] : null;
-}
 
 type FailurePayload = {
   error?: unknown;
