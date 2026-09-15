@@ -39,10 +39,19 @@ export type KyosanRawRow = {
   billingText: string | null;
 };
 
+/**
+ * 유/무상 원문과 다르게 가져온 까닭. 지금은 하나뿐이다.
+ *  · `WARRANTY_PO_TO_PARTIAL_PAID` — 無償 인데 상태가 中断:客先待ち(PO 대기)라 일부 유상으로
+ *    가져왔다(사용자 결정 2026-09-15, rules.ts 의 resolveBilling).
+ */
+export type KyosanBillingAdjustment = "WARRANTY_PO_TO_PARTIAL_PAID";
+
 export type KyosanImportableOutcome = {
   outcome: "IMPORTABLE";
   workflowKind: WorkflowKind;
-  billingType: "PAID" | "WARRANTY";
+  /** PARTIAL_PAID 는 無償 + PO 대기 줄에서만 나온다(아래 billingAdjustment). */
+  billingType: "PAID" | "PARTIAL_PAID" | "WARRANTY";
+  /** 일부 유상은 유상 절차를 탄다 — PARTIAL_PAID 여도 PAID_*. */
   workflowType: NewIntakeWorkflowType;
   /** 만든 수리 건을 옮겨 둘 단계의 key(case_workflow_steps 의 step key). */
   targetStepKey: string;
@@ -50,8 +59,13 @@ export type KyosanImportableOutcome = {
   actualShipmentDate: string | null;
   /** 유/무상 칸이 有償·無償 이 아니어서 PAID 로 가져오는 줄 — 가져오되 표시한다. */
   billingReview: boolean;
-  /** 유/무상 칸의 원문(trim 만). 빈칸이면 null. */
+  /** 유/무상 칸의 원문(trim 만). 빈칸이면 null. 일부 유상으로 바꿔 가져와도 원문(無償) 그대로다. */
   sourceBilling: string | null;
+  /**
+   * 원문과 다른 유/무상으로 가져왔으면 그 까닭, 아니면 null. S2 가 이 값을 보고 수리 건
+   * 메모에 한 줄을 남긴다.
+   */
+  billingAdjustment: KyosanBillingAdjustment | null;
   /** 가져오긴 하지만 사람이 한 번 볼 만한 것(인수일과 인수번호의 연월이 다름 등). */
   warnings: string[];
 };

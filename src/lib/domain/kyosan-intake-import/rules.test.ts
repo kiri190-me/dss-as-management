@@ -11,6 +11,7 @@ import {
   mapBilling,
   mapKind,
   mapStatus,
+  resolveBilling,
   type KyosanDateCell,
   type KyosanExtractedRow,
 } from "./rules";
@@ -211,6 +212,7 @@ describe("줄 분류 — 가져오는 줄", () => {
       actualShipmentDate: null,
       billingReview: false,
       sourceBilling: "有償",
+      billingAdjustment: null,
       warnings: [],
     });
   });
@@ -328,6 +330,204 @@ describe("줄 분류 — 가져오는 줄", () => {
     assert.deepEqual(row.warnings, [
       "인수일(D열) 2021-01-04 의 연월(2101)이 인수번호 D210201 의 연월(2102)과 다릅니다.",
     ]);
+  });
+});
+
+describe("無償 + 中断:客先待ち → 일부 유상(PARTIAL_PAID) · waiting_po (사용자 결정 2026-09-15)", () => {
+  const WARNING = "費用(Y열)은 無償이지만 상태가 中断：客先待ち(PO 대기)라 일부 유상으로 가져옵니다.";
+  const KINDS: readonly [string, WorkflowKind][] = [
+    ["MB", "MATCHER"],
+    ["RF(FH)", "GENERATOR"],
+    ["その他", "TOTAL_CONTROLLER"],
+  ];
+  const PAID_TYPE: Record<WorkflowKind, string> = {
+    MATCHER: "PAID_MATCHER",
+    GENERATOR: "PAID_GENERATOR",
+    TOTAL_CONTROLLER: "PAID_TOTAL_CONTROLLER",
+  };
+  const WARRANTY_TYPE: Record<WorkflowKind, string> = {
+    MATCHER: "WARRANTY_MATCHER",
+    GENERATOR: "WARRANTY_GENERATOR",
+    TOTAL_CONTROLLER: "WARRANTY_TOTAL_CONTROLLER",
+  };
+
+  function billingOf(row: KyosanClassifiedRow) {
+    const result = importable(row);
+    return {
+      workflowKind: result.workflowKind,
+      billingType: result.billingType,
+      workflowType: result.workflowType,
+      targetStepKey: result.targetStepKey,
+      billingReview: result.billingReview,
+      sourceBilling: result.sourceBilling,
+      billingAdjustment: result.billingAdjustment,
+      warnings: result.warnings,
+    };
+  }
+
+  function rowOf(kindText: string, kind: WorkflowKind, billingText: string | null, statusText: string) {
+    return extracted({ kindText, modelName: `TEST-MODEL-${kind}`, billingText, statusText });
+  }
+
+  test("매쳐 · 제너레이터 · T/C 모두 — 유상 절차의 PO 대기로, 원문은 無償 그대로", () => {
+    for (const [kindText, kind] of KINDS) {
+      assert.deepEqual(
+        billingOf(classifyOne(rowOf(kindText, kind, "無償", "中断:客先待ち"))),
+        {
+          workflowKind: kind,
+          billingType: "PARTIAL_PAID",
+          workflowType: PAID_TYPE[kind],
+          targetStepKey: "waiting_po",
+          billingReview: false,
+          sourceBilling: "無償",
+          billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID",
+          warnings: [WARNING],
+        },
+        kindText
+      );
+    }
+  });
+
+  test("전각 콜론 · 앞뒤 공백이 섞인 입력도 같은 결과", () => {
+    for (const [kindText, kind] of KINDS) {
+      assert.deepEqual(
+        billingOf(classifyOne(rowOf(kindText, kind, " 無償 ", " 中断：客先待ち "))),
+        {
+          workflowKind: kind,
+          billingType: "PARTIAL_PAID",
+          workflowType: PAID_TYPE[kind],
+          targetStepKey: "waiting_po",
+          billingReview: false,
+          sourceBilling: "無償",
+          billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID",
+          warnings: [WARNING],
+        },
+        kindText
+      );
+    }
+  });
+
+  test("有償 + 客先待ち — 바뀌지 않는다(PAID · waiting_po · 표시 없음)", () => {
+    for (const [kindText, kind] of KINDS) {
+      assert.deepEqual(
+        billingOf(classifyOne(rowOf(kindText, kind, "有償", "中断：客先待ち"))),
+        {
+          workflowKind: kind,
+          billingType: "PAID",
+          workflowType: PAID_TYPE[kind],
+          targetStepKey: "waiting_po",
+          billingReview: false,
+          sourceBilling: "有償",
+          billingAdjustment: null,
+          warnings: [],
+        },
+        kindText
+      );
+    }
+  });
+
+  test("調整中 · 빈칸 + 客先待ち — 바뀌지 않는다(PAID · waiting_po · 확인 표시)", () => {
+    for (const [kindText, kind] of KINDS) {
+      for (const billingText of ["調整中", null]) {
+        assert.deepEqual(
+          billingOf(classifyOne(rowOf(kindText, kind, billingText, "中断:客先待ち"))),
+          {
+            workflowKind: kind,
+            billingType: "PAID",
+            workflowType: PAID_TYPE[kind],
+            targetStepKey: "waiting_po",
+            billingReview: true,
+            sourceBilling: billingText,
+            billingAdjustment: null,
+            warnings: [],
+          },
+          `${kindText} ${String(billingText)}`
+        );
+      }
+    }
+  });
+
+  test("無償 + 다른 상태 9가지 — WARRANTY 그대로", () => {
+    const otherStatuses = [
+      "受付",
+      "調査完了",
+      "中断：部材待ち",
+      "中断：指示待ち",
+      "修理作業待ち",
+      "修理中",
+      "修理完了",
+      "出荷待ち",
+      "出荷済み",
+    ];
+    for (const statusText of otherStatuses) {
+      for (const [kindText, kind] of KINDS) {
+        const row = extracted(
+          { kindText, modelName: `TEST-MODEL-${kind}`, billingText: "無償", statusText },
+          { shipped: date("2021-02-01") }
+        );
+        const result = billingOf(classifyOne(row));
+        const label = `${statusText} × ${kind}`;
+        assert.equal(result.billingType, "WARRANTY", label);
+        assert.equal(result.workflowType, WARRANTY_TYPE[kind], label);
+        assert.equal(result.billingAdjustment, null, label);
+        assert.equal(result.billingReview, false, label);
+        assert.deepEqual(result.warnings, [], label);
+      }
+    }
+  });
+
+  test("연월 경고와 함께면 경고 둘 — 연월 → 유/무상 순", () => {
+    const result = billingOf(
+      classifyOne(extracted({ intakeNumber: "D210201", billingText: "無償", statusText: "中断:客先待ち" }))
+    );
+    assert.deepEqual(result.warnings, [
+      "인수일(D열) 2021-01-04 의 연월(2101)이 인수번호 D210201 의 연월(2102)과 다릅니다.",
+      WARNING,
+    ]);
+  });
+
+  test("일부 유상으로 바꿔도 확인 필요 사유 · 제외는 그대로 이긴다", () => {
+    assert.deepEqual(
+      reasonsOf(classifyOne(extracted({ billingText: "無償", statusText: "中断:客先待ち", serialNumber: null }))),
+      ["S/N(I열)이 비어 있습니다."]
+    );
+    assert.equal(
+      classifyOne(extracted({ kindText: "TTB/DUO", billingText: "無償", statusText: "中断:客先待ち" })).outcome,
+      "EXCLUDED"
+    );
+  });
+
+  test("resolveBilling — 유/무상 × 상태만 보고 정한다", () => {
+    assert.deepEqual(resolveBilling("無償", "中断：客先待ち"), {
+      billingType: "PARTIAL_PAID",
+      billingReview: false,
+      sourceBilling: "無償",
+      billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID",
+    });
+    assert.deepEqual(resolveBilling("無償", "受付"), {
+      billingType: "WARRANTY",
+      billingReview: false,
+      sourceBilling: "無償",
+      billingAdjustment: null,
+    });
+    assert.deepEqual(resolveBilling("有償", "中断:客先待ち"), {
+      billingType: "PAID",
+      billingReview: false,
+      sourceBilling: "有償",
+      billingAdjustment: null,
+    });
+    assert.deepEqual(resolveBilling(null, "中断:客先待ち"), {
+      billingType: "PAID",
+      billingReview: true,
+      sourceBilling: null,
+      billingAdjustment: null,
+    });
+    assert.deepEqual(resolveBilling("無償", null), {
+      billingType: "WARRANTY",
+      billingReview: false,
+      sourceBilling: "無償",
+      billingAdjustment: null,
+    });
   });
 });
 

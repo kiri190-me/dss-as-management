@@ -399,6 +399,20 @@ describe("원본 모양의 파일", () => {
     assert.equal(importable(rows[1]).targetStepKey, "waiting_kyosan_reply");
   });
 
+  test("無償 + 中断：客先待ち(공유문자열) → 일부 유상 · 유상 절차의 waiting_po", () => {
+    const rows = okRows(
+      parse(kyosanWorkbook(listSheet([dataRow(1, { Y: { shared: "無償" }, O: { shared: "中断：客先待ち" } })])))
+    );
+    const row = importable(rows[0]);
+    assert.deepEqual(
+      [row.billingType, row.workflowType, row.targetStepKey, row.sourceBilling, row.billingAdjustment],
+      ["PARTIAL_PAID", "PAID_GENERATOR", "waiting_po", "無償", "WARRANTY_PO_TO_PARTIAL_PAID"]
+    );
+    assert.deepEqual(row.warnings, [
+      "費用(Y열)은 無償이지만 상태가 中断：客先待ち(PO 대기)라 일부 유상으로 가져옵니다.",
+    ]);
+  });
+
   test("오류 칸(#N/A · #REF!)은 빈칸", () => {
     const rows = okRows(
       parse(kyosanWorkbook(listSheet([dataRow(1, { Y: { error: "#N/A" }, K: { error: "#REF!" } })])))

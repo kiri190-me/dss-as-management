@@ -4,7 +4,7 @@ import { excelSerialToDateOnly } from "@/lib/xlsx/excel-date";
 import type { GridCell } from "@/lib/xlsx/sheet-grid";
 import { columnCaption } from "./columns";
 import { nfkcNameKey } from "./name-suggestions";
-import type { KyosanClassifiedRow, KyosanRawRow } from "./types";
+import type { KyosanBillingAdjustment, KyosanClassifiedRow, KyosanRawRow } from "./types";
 
 /**
  * ============================================================================
@@ -21,6 +21,9 @@ import type { KyosanClassifiedRow, KyosanRawRow } from "./types";
  * 규칙은 사용자가 정한 표 그대로다(2026-09-15). 비교 전에 NFKC + trim —
  * `中断：客先待ち` 의 전각 콜론은 NFKC 로 `:` 가 된다.
  *
+ * 유/무상은 상태와 **함께** 본다 — 無償 인데 상태가 中断:客先待ち(PO 대기)면 일부 유상
+ * (PARTIAL_PAID)으로 가져온다(사용자 결정 2026-09-15, 아래 resolveBilling).
+ *
  * 파일 **안에서** 겹치는 것(같은 인수번호 두 줄 · 같은 모델이 다른 종류)도 여기서
  * 본다. DB 에 이미 있는지는 S2 의 일이다.
  * ============================================================================
@@ -32,6 +35,9 @@ export const KYOSAN_RECEIVED_DATE_MINIMUM = "2000-01-01";
 export const KYOSAN_INTAKE_NUMBER_PATTERN = /^D[0-9]{2}(0[1-9]|1[0-2])[0-9]{2}$/;
 
 export const KYOSAN_SHIPPED_STATUS = "出荷済み";
+
+/** PO 대기. NFKC 후의 글자다(원본은 전각 콜론 `中断：客先待ち`). */
+export const KYOSAN_WAITING_PO_STATUS = "中断:客先待ち";
 
 /** 규칙 비교용 — NFKC + trim. 원문을 바꾸지 않는다(반환값만 쓴다). */
 export function normalizeForCompare(text: string | null): string {
@@ -162,7 +168,8 @@ const AWAITING_SHIPMENT_STEP: StepByKind = {
 const STATUS_STEPS: ReadonlyMap<string, StepByKind> = new Map([
   ["受付", sameForAllKinds("intake_inspection")],
   ["調査完了", sameForAllKinds("intake_inspection")],
-  ["中断:客先待ち", sameForAllKinds("waiting_po")],
+  // 무상 절차에는 waiting_po 가 없다 — 그래서 無償 줄은 일부 유상(유상 절차)으로 가져온다(resolveBilling).
+  [KYOSAN_WAITING_PO_STATUS, sameForAllKinds("waiting_po")],
   ["中断:部材待ち", sameForAllKinds("parts_supply")],
   ["中断:指示待ち", sameForAllKinds("waiting_kyosan_reply")],
   ["修理作業待ち", REPAIR_STEP],
@@ -204,6 +211,48 @@ export function mapBilling(billingText: string | null): KyosanBillingMapping {
   if (key === "有償") return { billingType: "PAID", billingReview: false, sourceBilling };
   if (key === "無償") return { billingType: "WARRANTY", billingReview: false, sourceBilling };
   return { billingType: "PAID", billingReview: true, sourceBilling };
+}
+
+/** 無償 + PO 대기 줄에 붙는 경고. */
+export const KYOSAN_WARRANTY_PO_WARNING =
+  "費用(Y열)은 無償이지만 상태가 中断：客先待ち(PO 대기)라 일부 유상으로 가져옵니다.";
+
+export type KyosanBillingDecision = {
+  billingType: "PAID" | "PARTIAL_PAID" | "WARRANTY";
+  billingReview: boolean;
+  /** 원문(trim 만). 빈칸이면 null. 일부 유상으로 바꿔도 원문 그대로다. */
+  sourceBilling: string | null;
+  billingAdjustment: KyosanBillingAdjustment | null;
+};
+
+/**
+ * 유/무상(Y)을 **상태(O)와 함께** 보고 정한다.
+ *
+ * 🔴 無償 인데 상태가 中断:客先待ち(PO 대기)면 **일부 유상(PARTIAL_PAID)** 으로 가져온다
+ * (사용자 결정 2026-09-15). 무상 절차(WARRANTY_*)에는 PO 단계를 만들지 않기로 했고,
+ * 무상 건이 PO 를 기다린다면 그것은 일부 유상이라고 본다. 일부 유상은 유상 절차(PAID_*)를
+ * 타므로 세 종류 모두 `waiting_po` 가 있다(deriveWorkflowType 이 PARTIAL_PAID 를 PAID_* 로
+ * 접는다 — db/mutations/billing-workflow-target.ts 참고).
+ *
+ * 원문(`sourceBilling`)은 無償 그대로 남기고, 바꿨다는 사실은 `billingAdjustment` 로 알린다.
+ * 검토 표시(`billingReview`)는 켜지 않는다 — 원문이 분명하고 규칙이 정해진 경우라서다.
+ *
+ * 그 밖의 조합은 mapBilling 그대로다(有償·빈칸·調整中 + PO 대기는 PAID).
+ */
+export function resolveBilling(
+  billingText: string | null,
+  statusText: string | null
+): KyosanBillingDecision {
+  const mapped = mapBilling(billingText);
+  if (mapped.billingType === "WARRANTY" && normalizeForCompare(statusText) === KYOSAN_WAITING_PO_STATUS) {
+    return {
+      billingType: "PARTIAL_PAID",
+      billingReview: false,
+      sourceBilling: mapped.sourceBilling,
+      billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID",
+    };
+  }
+  return { ...mapped, billingAdjustment: null };
 }
 
 // ── 줄 분류 ───────────────────────────────────────────────────────────────
@@ -401,7 +450,9 @@ function classifyRow(
     return { raw, outcome: "NEEDS_REVIEW", reasons };
   }
 
-  const billing = mapBilling(raw.billingText);
+  const billing = resolveBilling(raw.billingText, raw.statusText);
+  if (billing.billingAdjustment === "WARRANTY_PO_TO_PARTIAL_PAID") warnings.push(KYOSAN_WARRANTY_PO_WARNING);
+
   return {
     raw,
     outcome: "IMPORTABLE",
@@ -412,11 +463,15 @@ function classifyRow(
     actualShipmentDate,
     billingReview: billing.billingReview,
     sourceBilling: billing.sourceBilling,
+    billingAdjustment: billing.billingAdjustment,
     warnings,
   };
 }
 
-/** PAID/WARRANTY 로 구한 workflowType 은 늘 새 접수용이다 — 아니면 규칙이 틀린 것이라 던진다. */
+/**
+ * PAID·PARTIAL_PAID·WARRANTY 로 구한 workflowType 은 늘 새 접수용이다(PARTIAL_PAID 는
+ * PAID_* 로 접힌다) — 아니면 규칙이 틀린 것이라 던진다.
+ */
 function toNewIntakeWorkflowType(value: string | null): NewIntakeWorkflowType {
   const found = NEW_INTAKE_WORKFLOW_TYPE_CODES.find((code) => code === value);
   if (!found) throw new Error(`workflowType 을 정하지 못했습니다: ${String(value)}`);
