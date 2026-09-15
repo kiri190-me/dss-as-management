@@ -3,12 +3,21 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  fillMatcherQuoteWorkbook,
+  MATCHER_QUOTE_CELLS,
+  MATCHER_QUOTE_SHEET_NAME,
+  type MatcherQuoteInput,
+} from "./matcher-quote-template";
+import { fillQuoteWorkbook, QUOTE_CELLS, QUOTE_SHEET_NAME, type GeneratorQuoteInput } from "./quote-template";
+import {
   buildSheetPrintGrid,
   readSheetPrintGrid,
   SheetPrintGridError,
   type PrintGridCell,
   type SheetPrintGrid,
+  type SheetPrintGridParts,
 } from "./sheet-print-grid";
+import { createCellTextReader } from "./sheet-text";
 import {
   fillServiceReportWorkbook,
   SERVICE_REPORT_BODY_LABELS,
@@ -17,7 +26,13 @@ import {
   SERVICE_REPORT_SHEET_NAME,
   type ServiceReportInput,
 } from "./service-report-template";
-import { resolveSheetDrawingPart, resolveSheetPart, WORKBOOK_PART } from "./workbook-parts";
+import {
+  resolveSheetDrawingPart,
+  resolveSheetPart,
+  SHARED_STRINGS_PART,
+  STYLES_PART,
+  WORKBOOK_PART,
+} from "./workbook-parts";
 import { ZipArchive } from "./zip-reader";
 
 /**
@@ -664,4 +679,474 @@ test("🔴 실제 양식: 인쇄 설정이 양식 그대로다", { skip: skipRep
   assert.equal(grid.page.margins.left, Number(/\sleft="([\d.]+)"/.exec(margins)?.[1]));
   assert.equal(grid.page.margins.bottom, Number(/\sbottom="([\d.]+)"/.exec(margins)?.[1]));
   assert.equal(grid.page.horizontallyCentered, true);
+});
+
+// ── 사람이 손으로 만든 견적서 엑셀 (견적서 ②a) — 양식 없이 ────────────────────
+
+/**
+ * 사람이 Excel 에서 만든 견적서를 본뜬 시트. 금액 칸에 숫자 서식, 발행일자 칸에
+ * 날짜 서식, 머리글에 색이 걸려 있다. 🔴 **인쇄 영역이 없다** — 사람이 만든 파일은
+ * 그럴 수 있다. 서식 코드 둘은 이 저장소 견적서 양식의 것을 그대로 옮겼다(실측).
+ */
+const HANDMADE_WORKBOOK_XML =
+  '<?xml version="1.0"?><workbook><workbookPr/>' +
+  `<sheets><sheet name="${SHEET_NAME}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+
+const HANDMADE_SHEET_XML =
+  '<?xml version="1.0"?><worksheet>' +
+  '<dimension ref="A1:C4"/>' +
+  "<sheetData>" +
+  '<row r="1"><c r="A1" s="1" t="inlineStr"><is><t>견 적 서</t></is></c>' +
+  '<c r="B1" s="4" t="inlineStr"><is><t>가나다</t></is></c></row>' +
+  '<row r="2"><c r="A2" s="2"><v>46262</v></c><c r="B2" s="5"><v>46262</v></c></row>' +
+  '<row r="3"><c r="A3" s="3"><v>3500000</v></c><c r="B3" s="6"><v>3500000</v></c>' +
+  '<c r="C3" s="3"><f>B3</f></c></row>' +
+  '<row r="4"><c r="A4" s="7"><v>1234.5</v></c><c r="B4" s="0"><v>0.30000000000000004</v></c>' +
+  '<c r="C4"><v>2019</v></c></row>' +
+  "</sheetData></worksheet>";
+
+/**
+ * 서식 번호(`s`)가 가리키는 것:
+ *   0 General · 1 머리글(rgb 글자 · 노란 배경) · 2 기본 제공 14(날짜) ·
+ *   3 기본 제공 3(`#,##0`) + 테마 배경 · 4 글자 구역(`@" 귀하"`) + 틴트 글자 + 무늬 채움 ·
+ *   5 견적서 발행일자 서식 · 6 견적서 금액 서식 · 7 기본 제공 4(`#,##0.00`)
+ */
+const HANDMADE_STYLES_XML =
+  '<?xml version="1.0"?><styleSheet>' +
+  '<numFmts count="3">' +
+  '<numFmt numFmtId="176" formatCode="&quot;₩&quot;#,##0_);\\(&quot;₩&quot;#,##0\\)"/>' +
+  '<numFmt numFmtId="177" formatCode="yyyy&quot;년&quot;\\ m&quot;월&quot;\\ d&quot;일&quot;;@"/>' +
+  '<numFmt numFmtId="178" formatCode="@&quot; 귀하&quot;"/>' +
+  "</numFmts>" +
+  '<fonts count="3">' +
+  '<font><sz val="11"/><color theme="1"/><name val="맑은 고딕"/></font>' +
+  '<font><b/><sz val="20"/><color rgb="FF1F4E79"/><name val="맑은 고딕"/></font>' +
+  '<font><sz val="11"/><color rgb="FFFF0000" tint="0.39997558519241921"/><name val="맑은 고딕"/></font>' +
+  "</fonts>" +
+  '<fills count="5">' +
+  '<fill><patternFill patternType="none"/></fill>' +
+  '<fill><patternFill patternType="gray125"/></fill>' +
+  '<fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill>' +
+  '<fill><patternFill patternType="solid"><fgColor theme="4" tint="0.79998168889431442"/><bgColor indexed="64"/></patternFill></fill>' +
+  '<fill><patternFill patternType="lightGray"><fgColor rgb="FF00FF00"/></patternFill></fill>' +
+  "</fills>" +
+  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+  '<cellXfs count="8">' +
+  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>' +
+  '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" applyFont="1" applyFill="1"/>' +
+  '<xf numFmtId="14" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="3" fontId="0" fillId="3" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="178" fontId="2" fillId="4" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="177" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="176" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="4" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>' +
+  "</cellXfs></styleSheet>";
+
+function handmadeParts(overrides: Partial<SheetPrintGridParts> = {}): SheetPrintGridParts {
+  return {
+    sheetName: SHEET_NAME,
+    workbookXml: HANDMADE_WORKBOOK_XML,
+    sheetXml: HANDMADE_SHEET_XML,
+    sharedStringsXml: null,
+    stylesXml: HANDMADE_STYLES_XML,
+    drawingXml: null,
+    drawingRelsXml: null,
+    ...overrides,
+  };
+}
+
+const USED_RANGE = { printArea: "fallback-to-used-range" } as const;
+
+function rangeOf(grid: SheetPrintGrid): { firstRow: number; lastRow: number; firstColumn: number; lastColumn: number } {
+  return {
+    firstRow: grid.firstRow,
+    lastRow: grid.lastRow,
+    firstColumn: grid.firstColumn,
+    lastColumn: grid.lastColumn,
+  };
+}
+
+/**
+ * 🔴 **인자가 없으면 예전과 똑같이 던진다.** 보고서 쪽 판단(인쇄 영역이 없는 양식은
+ * 그리지 않는다)이 그대로 살아 있는지를 본다 — 보고서 호출부는 인자를 주지 않는다.
+ */
+test("🔴 인쇄 영역이 없으면 — 인자가 없으면 예전처럼 던지고, 인자를 주면 쓰인 범위로 그린다", () => {
+  assert.throws(() => buildSheetPrintGrid(handmadeParts()), {
+    name: "Error",
+    message: `양식의 "${SHEET_NAME}" 시트에 인쇄 영역이 없습니다.`,
+  });
+  assert.throws(() => buildSheetPrintGrid(handmadeParts()), SheetPrintGridError);
+  assert.throws(() => buildSheetPrintGrid(handmadeParts(), { printArea: "required" }), SheetPrintGridError);
+
+  const grid = buildSheetPrintGrid(handmadeParts(), USED_RANGE);
+  assert.deepEqual(rangeOf(grid), { firstRow: 1, lastRow: 4, firstColumn: 1, lastColumn: 3 });
+  assertCoversRangeExactly(grid);
+});
+
+test("쓰인 범위 — `<dimension>` 이 없으면 실제 칸과 병합으로 모은다", () => {
+  const sheetXml = HANDMADE_SHEET_XML.replace('<dimension ref="A1:C4"/>', "").replace(
+    "</sheetData>",
+    '</sheetData><mergeCells count="1"><mergeCell ref="B5:D6"/></mergeCells>'
+  );
+  const grid = buildSheetPrintGrid(handmadeParts({ sheetXml }), USED_RANGE);
+  assert.deepEqual(rangeOf(grid), { firstRow: 1, lastRow: 6, firstColumn: 1, lastColumn: 4 });
+  assertCoversRangeExactly(grid);
+
+  // 칸도 병합도 없으면 그릴 것이 없다 — 짐작하지 않고 던진다.
+  const empty = '<?xml version="1.0"?><worksheet><sheetData></sheetData></worksheet>';
+  assert.throws(() => buildSheetPrintGrid(handmadeParts({ sheetXml: empty }), USED_RANGE), SheetPrintGridError);
+});
+
+test("🔴 인쇄 영역이 있으면 인자와 상관없이 인쇄 영역을 그린다 — 못 읽으면 인자를 줘도 던진다", () => {
+  const grid = buildSheetPrintGrid(handmadeParts({ workbookXml: workbookXml("$A$2:$B$3") }), USED_RANGE);
+  assert.deepEqual(rangeOf(grid), { firstRow: 2, lastRow: 3, firstColumn: 1, lastColumn: 2 });
+
+  assert.throws(
+    () => buildSheetPrintGrid(handmadeParts({ workbookXml: workbookXml("#REF!") }), USED_RANGE),
+    SheetPrintGridError
+  );
+});
+
+test("숫자 서식 — 금액 · 날짜 · 기본 제공 번호 · General · 글자 구역", () => {
+  const grid = buildSheetPrintGrid(handmadeParts(), USED_RANGE);
+
+  assert.equal(cellAt(grid, 2, 1).text, "2026-08-28", "기본 제공 14(날짜)");
+  assert.equal(cellAt(grid, 2, 2).text, "2026년 8월 28일", "견적서 발행일자 서식");
+  assert.equal(cellAt(grid, 3, 1).text, "3,500,000", "기본 제공 3(#,##0)");
+  // `_)` 는 괄호 폭의 빈자리 — 공백 한 칸이다.
+  assert.equal(cellAt(grid, 3, 2).text, "₩3,500,000 ", "견적서 금액 서식");
+  assert.equal(cellAt(grid, 4, 1).text, "1,234.50", "기본 제공 4(#,##0.00)");
+  assert.equal(cellAt(grid, 4, 2).text, "0.3", "General — 찌꺼기만 걷는다");
+  assert.equal(cellAt(grid, 4, 3).text, "2019", "서식 번호가 없는 칸");
+  assert.equal(cellAt(grid, 1, 2).text, "가나다 귀하", "글자 구역");
+  // 🔴 계산값(`<v>`)이 없는 수식 칸은 빈칸이다 — 짐작해서 셈하지 않는다.
+  assert.equal(cellAt(grid, 3, 3).text, "");
+});
+
+test("🔴 모르는 숫자 서식은 날 값 그대로다 — 던지지 않는다", () => {
+  const stylesXml = HANDMADE_STYLES_XML.replace(
+    /numFmtId="176" formatCode="[^"]*"/,
+    'numFmtId="176" formatCode="0.00E+00"'
+  ).replace('<xf numFmtId="4" ', '<xf numFmtId="11" ');
+  const grid = buildSheetPrintGrid(handmadeParts({ stylesXml }), USED_RANGE);
+
+  assert.equal(cellAt(grid, 3, 2).text, "3500000", "모르는 사용자 서식(지수)");
+  assert.equal(cellAt(grid, 4, 1).text, "1234.5", "모르는 기본 제공 번호(11)");
+  // 다른 칸은 멀쩡하다.
+  assert.equal(cellAt(grid, 3, 1).text, "3,500,000");
+});
+
+test("🔴 1904 날짜 체계를 통합문서에서 읽는다 — 안 읽으면 4년 어긋난다", () => {
+  const workbook1904 = HANDMADE_WORKBOOK_XML.replace("<workbookPr/>", '<workbookPr date1904="1"/>');
+  const grid = buildSheetPrintGrid(handmadeParts({ workbookXml: workbook1904 }), USED_RANGE);
+  // 같은 번호가 1904 체계에서는 1462 일 뒤다.
+  assert.equal(cellAt(grid, 2, 1).text, "2030-08-29");
+  assert.equal(cellAt(grid, 2, 2).text, "2030년 8월 29일");
+});
+
+test("글자 색 · 칸 배경 — rgb 로 적힌 것만, 모르는 색은 null", () => {
+  const grid = buildSheetPrintGrid(handmadeParts(), USED_RANGE);
+
+  const header = cellAt(grid, 1, 1);
+  assert.equal(header.fontColor, "#1F4E79");
+  assert.equal(header.backgroundColor, "#FFFF00");
+
+  // 테마 색 글자(s=0) · 테마 배경(s=3) — 모른다.
+  assert.equal(cellAt(grid, 4, 2).fontColor, null);
+  assert.equal(cellAt(grid, 3, 1).backgroundColor, null);
+  // 틴트가 걸린 rgb 글자 · 무늬 채움(s=4) — 모른다.
+  assert.equal(cellAt(grid, 1, 2).fontColor, null);
+  assert.equal(cellAt(grid, 1, 2).backgroundColor, null);
+  // 서식 번호가 없는 칸 · 시트에 없는 칸.
+  assert.equal(cellAt(grid, 4, 3).fontColor, null);
+  assert.equal(cellAt(grid, 1, 3).backgroundColor, null);
+
+  // 서식 파일이 없으면 색도 서식도 없다 — 숫자는 날 값 그대로(밋밋하게 넘어간다).
+  const plain = buildSheetPrintGrid(handmadeParts({ stylesXml: null }), USED_RANGE);
+  assert.equal(cellAt(plain, 1, 1).fontColor, null);
+  assert.equal(cellAt(plain, 1, 1).backgroundColor, null);
+  assert.equal(cellAt(plain, 3, 2).text, "3500000");
+});
+
+// ── 실제 견적서 양식으로 (견적서 ②a) ─────────────────────────────────────────
+
+const generatorQuotePath = process.env.QUOTE_TEMPLATE_PATH;
+const skipGeneratorQuote = generatorQuotePath ? false : "QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
+const matcherQuotePath = process.env.MATCHER_QUOTE_TEMPLATE_PATH;
+const skipMatcherQuote = matcherQuotePath ? false : "MATCHER_QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
+
+/** 🔴 지어낸 자료다 — 양식에 남은 실제 발행본의 값과 섞이지 않게. */
+const GENERATOR_QUOTE: GeneratorQuoteInput = {
+  quoteNumber: "DSS 2026-077",
+  quoteDate: new Date(2026, 7, 28),
+  customerName: "시험 고객사",
+  subject: "시험 품명 수리 견적",
+  modelName: "TEST-MODEL",
+  serialNumber: "SN0001",
+  lotNumber: "LN0001",
+  parts: [
+    { name: "부품 1", quantity: 1, unitPrice: 10_000 },
+    { name: "부품 2", quantity: 2, unitPrice: 1_234_500 },
+  ],
+  workCost: 1_200_000,
+};
+
+const MATCHER_QUOTE: MatcherQuoteInput = {
+  quoteNumber: "DSS 2026-999",
+  quoteDate: new Date(2026, 7, 31),
+  customerName: "시험 고객사",
+  subject: "시험 품명 수리 件",
+  parts: [{ name: "부품 1", quantity: 1, unitPrice: 2_050_000 }],
+  workCost: 3_500_000,
+  workScope: { INVESTIGATION: ["조사"], REPAIR: ["수리"], POWER_TEST: ["통전"] },
+};
+
+/** 채운 통합문서의 부품들 — 시험이 시트 XML 을 손봐 다시 그릴 수 있게. */
+function workbookParts(workbook: Buffer, sheetName: string): SheetPrintGridParts {
+  const archive = ZipArchive.fromBuffer(workbook);
+  return {
+    sheetName,
+    workbookXml: archive.readText(WORKBOOK_PART),
+    sheetXml: archive.readText(resolveSheetPart(archive, sheetName)),
+    sharedStringsXml: archive.readTextOrNull(SHARED_STRINGS_PART),
+    stylesXml: archive.readTextOrNull(STYLES_PART),
+    drawingXml: null,
+    drawingRelsXml: null,
+  };
+}
+
+/**
+ * 🔴 수식 칸에 **계산값을 넣는다** — Excel 이 저장한 파일을 흉내 낸다.
+ *
+ * 채우개가 만든 파일은 `fullCalcOnLoad` 라 수식의 계산값(`<v>`)이 없다(Excel 이 열 때
+ * 다시 셈한다). 사람이 Excel 에서 저장한 견적서에는 있다 — 미리보기가 그리는 것은
+ * 그쪽이다. 수식(`<f>`)은 그대로 두고 그 뒤에 `<v>` 만 붙인다(`<f>` 가 앞이 규격).
+ */
+function withCachedValue(sheetXml: string, ref: string, value: number): string {
+  const found = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`).exec(sheetXml);
+  assert.ok(found, `${ref} 칸이 없습니다`);
+  const attributes = found[1].replace(/\st="[^"]*"/, "");
+  const inner = (found[2] ?? "").replace(/<v>[\s\S]*?<\/v>/, "");
+  return sheetXml.replace(found[0], `<c r="${ref}"${attributes}>${inner}<v>${value}</v></c>`);
+}
+
+function gridTexts(grid: SheetPrintGrid): string[] {
+  return grid.rows.flatMap((row) => row.cells.map((cell) => cell.text));
+}
+
+test("🔴 실제 견적서(제너레이터 내자): 금액 칸은 콤마 서식으로, 발행일자는 날짜로 나온다", { skip: skipGeneratorQuote }, () => {
+  const workbook = fillQuoteWorkbook(readFileSync(generatorQuotePath as string), GENERATOR_QUOTE);
+
+  // 채운 파일을 그대로 — 발행일자와 단가는 채우개가 **값**으로 넣으므로 계산값이 필요 없다.
+  const direct = readSheetPrintGrid(workbook, QUOTE_SHEET_NAME);
+  assert.equal(textCovering(direct, QUOTE_CELLS.quoteDate), "2026년 8월 28일");
+  const texts = gridTexts(direct);
+  assert.ok(texts.some((text) => text.includes("1,234,500")), "단가가 콤마 서식으로 안 나왔습니다");
+  assert.ok(!texts.includes("46262"), "발행일자가 일련번호로 나왔습니다");
+  assert.ok(!texts.includes("1234500"), "단가가 날 값으로 나왔습니다");
+
+  // 금액 칸은 수식이다 — Excel 이 저장한 것처럼 계산값을 넣은 입력으로.
+  const parts = workbookParts(workbook, QUOTE_SHEET_NAME);
+  const grid = buildSheetPrintGrid({
+    ...parts,
+    sheetXml: withCachedValue(parts.sheetXml, QUOTE_CELLS.amount, 3_500_000),
+  });
+  const amount = textCovering(grid, QUOTE_CELLS.amount);
+  assert.match(amount, /3,500,000/);
+  assert.ok(!amount.includes("3500000"), `금액이 날 값으로 나왔습니다: ${JSON.stringify(amount)}`);
+  // 계산값을 안 넣으면 빈칸이다 — 짐작해서 셈하지 않는다.
+  assert.equal(textCovering(direct, QUOTE_CELLS.amount), "");
+});
+
+test("🔴 실제 견적서(매쳐 내자): 금액 칸은 콤마 서식으로, 발행일자는 날짜로 나온다", { skip: skipMatcherQuote }, () => {
+  const workbook = fillMatcherQuoteWorkbook(readFileSync(matcherQuotePath as string), MATCHER_QUOTE);
+
+  const direct = readSheetPrintGrid(workbook, MATCHER_QUOTE_SHEET_NAME);
+  assert.equal(textCovering(direct, MATCHER_QUOTE_CELLS.quoteDate), "2026년 8월 31일");
+  const texts = gridTexts(direct);
+  assert.ok(texts.some((text) => text.includes("2,050,000")), "단가가 콤마 서식으로 안 나왔습니다");
+  assert.ok(!texts.includes("46265"), "발행일자가 일련번호로 나왔습니다");
+
+  const parts = workbookParts(workbook, MATCHER_QUOTE_SHEET_NAME);
+  const grid = buildSheetPrintGrid({
+    ...parts,
+    sheetXml: withCachedValue(parts.sheetXml, MATCHER_QUOTE_CELLS.amount, 5_550_000),
+  });
+  const amount = textCovering(grid, MATCHER_QUOTE_CELLS.amount);
+  assert.match(amount, /5,550,000/);
+  assert.ok(!amount.includes("5550000"), `금액이 날 값으로 나왔습니다: ${JSON.stringify(amount)}`);
+});
+
+test("🔴 실제 견적서: 인쇄 영역을 지운 파일 — 인자가 없으면 던지고, 인자를 주면 쓰인 범위로 그린다", { skip: skipGeneratorQuote }, () => {
+  const workbook = fillQuoteWorkbook(readFileSync(generatorQuotePath as string), GENERATOR_QUOTE);
+  const parts = workbookParts(workbook, QUOTE_SHEET_NAME);
+  const printArea = buildSheetPrintGrid(parts);
+
+  const withoutPrintArea = {
+    ...parts,
+    workbookXml: parts.workbookXml.replace(
+      /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>[^<]*<\/definedName>/g,
+      ""
+    ),
+  };
+  assert.throws(() => buildSheetPrintGrid(withoutPrintArea), SheetPrintGridError);
+
+  const grid = buildSheetPrintGrid(withoutPrintArea, USED_RANGE);
+  assertCoversRangeExactly(grid);
+  // 쓰인 범위는 인쇄 영역을 품는다 — 문서의 어느 칸도 잘려 나가지 않는다.
+  assert.ok(grid.firstRow <= printArea.firstRow && grid.lastRow >= printArea.lastRow, "쓰인 범위가 문서의 행을 자릅니다");
+  assert.ok(
+    grid.firstColumn <= printArea.firstColumn && grid.lastColumn >= printArea.lastColumn,
+    "쓰인 범위가 문서의 열을 자릅니다"
+  );
+  // `<dimension>` 이 있으면 그것이 곧 쓰인 범위다 — 시험이 스스로 읽어 견준다.
+  const dimension = /<dimension\b[^>]*\sref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/.exec(parts.sheetXml);
+  if (dimension) {
+    assert.deepEqual(rangeOf(grid), {
+      firstRow: Number(dimension[2]),
+      lastRow: Number(dimension[4]),
+      firstColumn: columnOf(dimension[1]),
+      lastColumn: columnOf(dimension[3]),
+    });
+  }
+  assert.equal(textCovering(grid, QUOTE_CELLS.quoteDate), "2026년 8월 28일");
+});
+
+// ── 🔴 보고서 불변 (견적서 ②a) ──────────────────────────────────────────────
+
+/** 1 → `A`, 27 → `AA`. */
+function columnLetters(column: number): string {
+  let letters = "";
+  for (let rest = column; rest > 0; rest = Math.floor((rest - 1) / 26)) {
+    letters = String.fromCharCode(65 + ((rest - 1) % 26)) + letters;
+  }
+  return letters;
+}
+
+const REPORT_CELL_KEYS = [
+  "align",
+  "backgroundColor",
+  "bold",
+  "borders",
+  "colSpan",
+  "column",
+  "fontColor",
+  "fontSizePt",
+  "row",
+  "rowSpan",
+  "text",
+  "verticalAlign",
+  "wrap",
+];
+
+/**
+ * 🔴 **보고서 칸의 글자가 숫자 서식을 읽기 전과 한 글자도 다르지 않다.**
+ *
+ * 숫자 서식을 읽게 되면서 셀 글자가 서식을 지나가게 되었다. 보고서 양식의 숫자 칸이
+ * 서식 때문에 다른 글자로 찍히면 매일 쓰는 보고서 미리보기가 소리 없이 바뀐다.
+ * 그래서 **서식을 읽기 전의 규칙** — 셀의 날 글자(후리가나를 걷은 공유문자열) ·
+ * 줄바꿈 고르기 — 으로 이 시험이 모든 칸을 스스로 다시 읽어 견준다. ISO 날짜 칸
+ * (`t="d"`)은 예전 길 그대로이고 위 「날짜 칸 넷」 시험이 따로 본다.
+ *
+ * 돌려주는 값은 견준 칸 중 **숫자 칸**의 수다 — 0 이면 이 시험이 숫자 칸을 하나도
+ * 안 본 것이다.
+ */
+function assertReportTextUnchanged(grid: SheetPrintGrid, workbook: Buffer): number {
+  const archive = ZipArchive.fromBuffer(workbook);
+  const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+  const shared = archive.readTextOrNull(SHARED_STRINGS_PART);
+  const read = createCellTextReader(
+    sheetXml,
+    shared === null
+      ? null
+      : shared.replace(/<rPh\b[^>]*\/>/g, "").replace(/<rPh\b[^>]*>[\s\S]*?<\/rPh>/g, "")
+  );
+
+  const types = new Map<string, string | null>();
+  for (const match of sheetXml.matchAll(/<c r="([A-Z]+\d+)"([^>]*?)\/?>/g)) {
+    types.set(match[1], /\st="([^"]*)"/.exec(match[2])?.[1] ?? null);
+  }
+
+  let numericCells = 0;
+  for (const row of grid.rows) {
+    for (const cell of row.cells) {
+      const ref = `${columnLetters(cell.column)}${cell.row}`;
+      const type = types.get(ref) ?? null;
+      if (type === "d") continue;
+
+      const raw = read(ref);
+      const before = raw === null ? "" : raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      assert.equal(cell.text, before, `${ref} 의 글자가 서식 때문에 달라졌습니다`);
+      if (types.has(ref) && (type === null || type === "n") && raw !== null) numericCells += 1;
+
+      // 결과 모양은 **더하기만** 했다 — 옛 칸은 그대로고 새 칸은 둘뿐이다.
+      assert.deepEqual(Object.keys(cell).sort(), REPORT_CELL_KEYS, `${ref} 칸의 모양이 달라졌습니다`);
+    }
+  }
+  return numericCells;
+}
+
+/** 숫자가 들어가는 칸(제조년월 · 사용기간)까지 채운 수리 보고서. 🔴 지어낸 자료다. */
+const FULL_REPAIR_SAMPLE: ServiceReportInput = {
+  ...SAMPLE,
+  occurrencePlace: "라인 3",
+  occurredOn: new Date(Date.UTC(2026, 7, 10)),
+  productName: "13.56MHz 30kW",
+  productCategory: "RF제네레이터",
+  manufacturedYear: 2019,
+  manufacturedMonth: 7,
+  usedYears: 5,
+  usedMonths: 3,
+  situation: { request: " 요청", detail: " 상세" },
+  repairNumber: "R-001",
+  disposition: {
+    onSiteRepair: false,
+    replacementDelivery: false,
+    goodsReceipt: { on: new Date(Date.UTC(2026, 7, 21)), number: "IN-001" },
+    completion: { on: new Date(Date.UTC(2026, 8, 1)) },
+  },
+};
+
+test("🔴 실제 양식(수리 보고서): 칸의 글자가 숫자 서식을 읽기 전과 한 글자도 다르지 않다", { skip: skipRepair }, () => {
+  const workbook = fillServiceReportWorkbook(readFileSync(repairPath as string), FULL_REPAIR_SAMPLE);
+  const grid = readSheetPrintGrid(workbook, SERVICE_REPORT_SHEET_NAME);
+
+  const numericCells = assertReportTextUnchanged(grid, workbook);
+  assert.ok(numericCells > 0, "숫자 칸을 하나도 견주지 못했습니다 — 입력에 숫자 칸이 빠졌습니다");
+  // 날짜 칸은 예전 모양 그대로다.
+  assert.equal(textCovering(grid, SERVICE_REPORT_CELLS.issuedOn), "2026년 9월 2일 수요일");
+});
+
+const inspectionPath = process.env.INSPECTION_REPORT_TEMPLATE_PATH;
+const skipInspection = inspectionPath ? false : "INSPECTION_REPORT_TEMPLATE_PATH 가 설정되지 않았습니다";
+
+test("🔴 실제 양식(검사 보고서): 칸의 글자가 숫자 서식을 읽기 전과 한 글자도 다르지 않다", { skip: skipInspection }, () => {
+  const input: ServiceReportInput = {
+    kind: "INSPECTION",
+    customerName: "가나다 주식회사",
+    issuedOn: new Date(Date.UTC(2026, 8, 2)),
+    reportNumber: { prefix: "DSS", middle: "26", tail: "002" },
+    customer: "가나다 공장",
+    receivedOn: new Date(Date.UTC(2026, 7, 20)),
+    modelName: "TEST-MODEL",
+    manufacturedYear: 2019,
+    manufacturedMonth: 7,
+    usedYears: 5,
+    usedMonths: 3,
+    lotNumber: "LN-1234",
+    serialNumber: "SN12345",
+    causes: ["PART_DEFECT"],
+    remark: ["비고 첫 줄"],
+    disposition: {
+      onSiteRepair: true,
+      replacementDelivery: false,
+      goodsReceipt: { on: new Date(Date.UTC(2026, 7, 21)), number: "IN-002" },
+    },
+    body: { findings: ["-외관 검사 실시"], actions: ["점검 실시"] },
+  };
+  const workbook = fillServiceReportWorkbook(readFileSync(inspectionPath as string), input);
+  const grid = readSheetPrintGrid(workbook, SERVICE_REPORT_SHEET_NAME);
+
+  const numericCells = assertReportTextUnchanged(grid, workbook);
+  assert.ok(numericCells > 0, "숫자 칸을 하나도 견주지 못했습니다 — 입력에 숫자 칸이 빠졌습니다");
 });

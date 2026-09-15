@@ -1,3 +1,5 @@
+import type { ExcelDateSystem } from "./excel-date";
+import { builtInNumberFormat, formatNumber, formatText, koreanLongDate } from "./number-format";
 import { parseSheetRows, type SheetRow } from "./sheet-rows";
 import { createCellTextReader } from "./sheet-text";
 import {
@@ -7,6 +9,7 @@ import {
   STYLES_PART,
   WORKBOOK_PART,
 } from "./workbook-parts";
+import { decodeXmlCharacterData } from "./xml-entities";
 import { ZipArchive } from "./zip-reader";
 
 /**
@@ -34,12 +37,28 @@ import { ZipArchive } from "./zip-reader";
  * **일반적인 xlsx 뷰어가 아니다.** 이 양식이 실제로 쓰는 것만 다룬다:
  *
  *   읽는다  인쇄 영역 · 병합 · 열 너비 · 행 높이 · 셀 글자 · 테두리 · 가로세로
- *           맞춤 · 줄바꿈 · 글꼴 크기와 굵기 · 그림 앵커 · 인쇄 설정
- *   안 읽는다  숫자 서식 코드 · 글자 색과 배경 · 기울임/밑줄 · 조건부 서식 ·
- *           회전된 글자 · 대각선 테두리 · 자동 필터 · 틀 고정
+ *           맞춤 · 줄바꿈 · 글꼴 크기와 굵기 · 그림 앵커 · 인쇄 설정 ·
+ *           숫자 서식(`number-format.ts`) · 글자 색 · 칸 배경(rgb 로 적힌 것만)
+ *   안 읽는다  테마 색 · 색 번호(indexed) · 틴트 · 무늬 채움 · 기울임/밑줄 ·
+ *           조건부 서식 · 회전된 글자 · 대각선 테두리 · 자동 필터 · 틀 고정
  *
  * 안 읽는 것들은 이 양식의 인쇄 영역(`B8:AV64`)에 **하나도 쓰이지 않는다**
  * (실측). 나중에 쓰이게 되면 그 칸이 밋밋하게 나올 뿐 화면은 살아 있다.
+ *
+ * ── 사람이 손으로 만든 견적서 엑셀도 그린다 (2026-09-16, 견적서 ②a) ─────────
+ * 「엑셀 전용 견적서」의 미리보기가 **수기 견적서 엑셀을 PDF 로 만들었을 때의
+ * 모습**을 보여 주려고 넓혔다. 그 파일은 금액 칸에 `"₩"#,##0` 같은 숫자 서식이,
+ * 발행일자에 날짜 서식이 걸려 있어서 서식을 안 읽으면 `3500000` · `46262` 가
+ * 찍힌다 — 사람이 보기에 다른 문서다. 그래서 숫자 서식 · 글자 색 · 칸 배경을
+ * 읽게 되었다.
+ *
+ *   · 🔴 **보고서 미리보기는 한 글자도 달라지지 않는다.** 보고서 양식의 숫자 칸은
+ *     `@`(→ General) 서식 하나뿐이고 정수라 글자가 그대로다. 날짜 칸(`t="d"`)은
+ *     예전 길 그대로다. 결과에 칸 둘(`fontColor` · `backgroundColor`)이 **더해졌을**
+ *     뿐이고, 그것을 모르는 화면은 전과 같은 모양을 그린다(시험이 못 박는다).
+ *   · 사람이 만든 파일은 인쇄 영역이 없을 수 있다. 🔴 **기본은 여전히 던진다**
+ *     (아래 「구조를 못 읽으면 던진다」). `{ printArea: "fallback-to-used-range" }`
+ *     를 줄 때만 쓰인 범위로 대신 그린다 — 보고서 호출부는 그 인자를 주지 않는다.
  *
  * ── 🔴 모르는 것을 만났을 때 — 던지는 자리와 넘어가는 자리를 갈랐다 ─────
  * 채우개(`service-report-template.ts`)는 라벨이 어긋나면 던진다. 엉뚱한 칸을
@@ -107,6 +126,14 @@ export type PrintGridCell = {
   /** pt. 못 읽었으면 null — 화면이 자기 기본값을 쓴다. */
   fontSizePt: number | null;
   borders: PrintGridBorders;
+  /**
+   * 글자 색 `#RRGGBB`. 🔴 서식에 **rgb 로 적힌 것만** 읽는다 — 테마 색 · 색 번호
+   * (indexed) · 틴트가 걸린 색은 모르므로 null(화면의 기본 글자 색). 2026-09-16 에
+   * **더한** 칸이다 — 보고서 화면은 이 칸을 모르고도 전과 같은 모양이다.
+   */
+  fontColor: string | null;
+  /** 칸 배경 `#RRGGBB`. **단색(solid) 채움의 rgb 만** — 무늬 · 테마 색은 null. 2026-09-16 에 더한 칸. */
+  backgroundColor: string | null;
 };
 
 export type PrintGridRow = {
@@ -170,6 +197,21 @@ export type SheetPrintGridParts = {
   /** 없으면 그림 없이 그린다. */
   drawingXml: string | null;
   drawingRelsXml: string | null;
+};
+
+/**
+ * 부르는 쪽이 고르는 것. **안 주면 예전과 한 글자도 다르지 않다.**
+ *
+ * `printArea` — 그 시트에 인쇄 영역이 없을 때:
+ *   · `"required"`(기본) — 던진다. 🔴 보고서는 이것이다: 인쇄 영역이 없는 양식을
+ *     짐작해서 그리면 숨은 도우미 열이 딸려 나온 미리보기를 사람이 문서로 믿는다.
+ *   · `"fallback-to-used-range"` — 쓰인 범위(`<dimension ref>`, 없으면 실제 칸들)로
+ *     대신 그린다. 사람이 손으로 만든 견적서 엑셀처럼 인쇄 영역을 안 잡은 파일을
+ *     그릴 때 쓴다 — Excel 도 인쇄 영역이 없으면 쓰인 범위를 인쇄한다.
+ *   인쇄 영역이 **있는데 못 읽으면** 어느 쪽이든 던진다(구조를 못 읽은 것이다).
+ */
+export type SheetPrintGridOptions = {
+  printArea?: "required" | "fallback-to-used-range";
 };
 
 // ── 단위 ─────────────────────────────────────────────────────────────────
@@ -236,38 +278,50 @@ const MAX_GRID_CELLS = 200_000;
  * 만들어지고, 언젠가 한쪽만 바뀐다. zip 을 한 번 더 여는 값(수십 ms)은 그
  * 보증을 사는 값이다.
  */
-export function readSheetPrintGrid(workbookXlsx: Buffer, sheetName: string): SheetPrintGrid {
+export function readSheetPrintGrid(
+  workbookXlsx: Buffer,
+  sheetName: string,
+  options: SheetPrintGridOptions = {}
+): SheetPrintGrid {
   const archive = ZipArchive.fromBuffer(workbookXlsx);
   const sheetPart = resolveSheetPart(archive, sheetName);
   const drawingPart = resolveSheetDrawingPart(archive, sheetPart);
 
-  return buildSheetPrintGrid({
-    sheetName,
-    workbookXml: archive.readText(WORKBOOK_PART),
-    sheetXml: archive.readText(sheetPart),
-    sharedStringsXml: archive.readTextOrNull(SHARED_STRINGS_PART),
-    stylesXml: archive.readTextOrNull(STYLES_PART),
-    drawingXml: drawingPart === null ? null : archive.readTextOrNull(drawingPart),
-    drawingRelsXml:
-      drawingPart === null
-        ? null
-        : archive.readTextOrNull(drawingPart.replace(/([^/]+)$/, "_rels/$1.rels")),
-  });
+  return buildSheetPrintGrid(
+    {
+      sheetName,
+      workbookXml: archive.readText(WORKBOOK_PART),
+      sheetXml: archive.readText(sheetPart),
+      sharedStringsXml: archive.readTextOrNull(SHARED_STRINGS_PART),
+      stylesXml: archive.readTextOrNull(STYLES_PART),
+      drawingXml: drawingPart === null ? null : archive.readTextOrNull(drawingPart),
+      drawingRelsXml:
+        drawingPart === null
+          ? null
+          : archive.readTextOrNull(drawingPart.replace(/([^/]+)$/, "_rels/$1.rels")),
+    },
+    options
+  );
 }
 
 /**
  * 부품(XML 문자열)만 받아 표 자료를 만든다 — **파일을 만지지 않는다.**
  * 시험이 지어낸 시트로 규칙을 확인할 수 있게 이쪽을 갈라 두었다.
  */
-export function buildSheetPrintGrid(parts: SheetPrintGridParts): SheetPrintGrid {
-  const range = readPrintArea(parts.workbookXml, parts.sheetName);
-
-  const cellCount = (range.lastRow - range.firstRow + 1) * (range.lastColumn - range.firstColumn + 1);
-  if (cellCount > MAX_GRID_CELLS) {
-    throw new SheetPrintGridError(
-      `인쇄 영역이 ${cellCount}칸입니다. ${MAX_GRID_CELLS}칸까지만 그립니다.`
-    );
+export function buildSheetPrintGrid(
+  parts: SheetPrintGridParts,
+  options: SheetPrintGridOptions = {}
+): SheetPrintGrid {
+  /**
+   * 🔴 인쇄 영역이 있으면 **예전과 같은 순서**로 검사한다(인쇄 영역 → 칸 수 → 행).
+   * 없을 때 던지는 것도 예전 그대로이고, 쓰인 범위로 대신하는 것은 인자를 받았을
+   * 때뿐이다 — 보고서 호출부는 인자를 주지 않으므로 한 글자도 달라지지 않는다.
+   */
+  const declared = readPrintArea(parts.workbookXml, parts.sheetName);
+  if (declared === null && options.printArea !== "fallback-to-used-range") {
+    throw new SheetPrintGridError(`양식의 "${parts.sheetName}" 시트에 인쇄 영역이 없습니다.`);
   }
+  if (declared !== null) assertDrawableSize(declared, "인쇄 영역");
 
   /**
    * 🔴 행은 **한 번만** 훑는다. `parseSheetRows` 가 `<sheetData>` 를 못 찾으면
@@ -283,10 +337,16 @@ export function buildSheetPrintGrid(parts: SheetPrintGridParts): SheetPrintGrid 
     );
   }
 
+  const range = declared ?? readUsedRange(parts.sheetXml, sheetRows);
+  if (declared === null) assertDrawableSize(range, "쓰인 범위");
+
   const columnWidthsPx = readColumnWidths(parts.sheetXml);
   const rowHeightsPt = readRowHeights(parts.sheetXml, sheetRows);
   const styles = readStyles(parts.stylesXml);
-  const sheetCells = readSheetCells(sheetRows, parts.sharedStringsXml, range);
+  const dateSystem = readDateSystem(parts.workbookXml);
+  const sheetCells = readSheetCells(sheetRows, parts.sharedStringsXml, range, (raw, type, styleIndex) =>
+    displayText(raw, type, styles.numberFormatOf(styleIndex), dateSystem)
+  );
   const merges = readMerges(parts.sheetXml, range);
 
   // 가려진 칸(병합의 왼쪽 위가 아닌 칸)은 그리지 않는다.
@@ -329,6 +389,8 @@ export function buildSheetPrintGrid(parts: SheetPrintGridParts): SheetPrintGrid 
         fontSizePt: styles.fontSizeOf(found?.styleIndex),
         // 🔴 네 변을 각각 그 변에 놓인 칸들에서 모은다(위 머리말).
         borders: collectBorders(sheetCells, styles, row, column, lastRow, lastColumn),
+        fontColor: styles.fontColorOf(found?.styleIndex),
+        backgroundColor: styles.backgroundColorOf(found?.styleIndex),
       });
     }
 
@@ -372,7 +434,7 @@ type MergeRange = CellRange;
  * 덩이는 종이 두 장이라는 뜻이고, 그것을 한 장에 이어 붙여 그리면 있지도 않은
  * 문서를 보여 주게 된다. 이 양식은 한 덩이다.
  */
-function readPrintArea(workbookXml: string, sheetName: string): CellRange {
+function readPrintArea(workbookXml: string, sheetName: string): CellRange | null {
   const pattern = /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>([^<]*)<\/definedName>/g;
 
   for (const match of workbookXml.matchAll(pattern)) {
@@ -388,7 +450,62 @@ function readPrintArea(workbookXml: string, sheetName: string): CellRange {
     return range;
   }
 
-  throw new SheetPrintGridError(`양식의 "${sheetName}" 시트에 인쇄 영역이 없습니다.`);
+  // 없다 — 던질지 쓰인 범위로 대신할지는 부르는 쪽의 인자가 정한다(`buildSheetPrintGrid`).
+  return null;
+}
+
+/** 폭주 방지(`MAX_GRID_CELLS`). `label` 은 오류 문장에 들어갈 범위의 이름. */
+function assertDrawableSize(range: CellRange, label: string): void {
+  const cellCount = (range.lastRow - range.firstRow + 1) * (range.lastColumn - range.firstColumn + 1);
+  if (cellCount > MAX_GRID_CELLS) {
+    throw new SheetPrintGridError(`${label}이 ${cellCount}칸입니다. ${MAX_GRID_CELLS}칸까지만 그립니다.`);
+  }
+}
+
+/**
+ * 인쇄 영역 대신 그릴 **쓰인 범위** — `fallback-to-used-range` 를 받았을 때만 온다.
+ *
+ * 먼저 `<dimension ref>` 를 본다. Excel 이 저장할 때 적어 두는 «쓰인 범위»라, 사람이
+ * Excel 에서 만든 파일이면 그대로 맞다. 없거나 못 읽으면 **실제로 있는 칸**(`<c r>`)과
+ * 병합을 훑어 모은다. 둘 다 없으면 그릴 것이 없으므로 던진다(구조를 못 읽은 것).
+ */
+function readUsedRange(sheetXml: string, sheetRows: readonly SheetRow[]): CellRange {
+  const dimension = /<dimension\b[^>]*\sref="([^"]+)"/.exec(sheetXml)?.[1];
+  const declared = dimension === undefined ? null : parseRange(dimension);
+  if (declared !== null) return declared;
+
+  const bounds = { firstRow: Infinity, lastRow: -Infinity, firstColumn: Infinity, lastColumn: -Infinity };
+  const include = (row: number, column: number): void => {
+    bounds.firstRow = Math.min(bounds.firstRow, row);
+    bounds.lastRow = Math.max(bounds.lastRow, row);
+    bounds.firstColumn = Math.min(bounds.firstColumn, column);
+    bounds.lastColumn = Math.max(bounds.lastColumn, column);
+  };
+
+  for (const row of sheetRows) {
+    for (const match of row.xml.matchAll(/<c\s+r="([A-Z]+)(\d+)"/g)) {
+      include(Number(match[2]), columnToNumber(match[1]));
+    }
+  }
+  for (const match of sheetXml.matchAll(/<mergeCell\b[^>]*\sref="([^"]+)"[^>]*\/>/g)) {
+    const merge = parseRange(match[1]);
+    if (merge === null) continue;
+    include(merge.firstRow, merge.firstColumn);
+    include(merge.lastRow, merge.lastColumn);
+  }
+
+  if (!Number.isFinite(bounds.firstRow) || !Number.isFinite(bounds.firstColumn)) {
+    throw new SheetPrintGridError("시트에 인쇄 영역도 쓰인 칸도 없어 그릴 것이 없습니다.");
+  }
+  return bounds;
+}
+
+/**
+ * 통합문서의 날짜 체계. `<workbookPr date1904="1"/>` 이면 1904 체계다 — 같은 날짜가
+ * 1462 작은 번호로 적힌다(`excel-date.ts`). 안 읽으면 발행일자가 4년 어긋난다.
+ */
+function readDateSystem(workbookXml: string): ExcelDateSystem {
+  return /<workbookPr\b[^>]*\sdate1904="(?:1|true)"/.test(workbookXml) ? "1904" : "1900";
 }
 
 /** `견적서!$A$1:$I$60` 또는 `'내 시트'!$A$1` → 시트 이름. 없으면 null. */
@@ -508,6 +625,9 @@ function cellKey(row: number, column: number): string {
   return `${row}:${column}`;
 }
 
+/** 셀의 날 글자(없으면 null) · 형식(`t`) · 서식 번호 → 화면에 찍힐 글자. */
+type CellTextFormatter = (raw: string | null, type: string | null, styleIndex: number | null) => string;
+
 /**
  * 인쇄 영역 안에서 시트가 실제로 갖고 있는 칸들.
  *
@@ -517,7 +637,8 @@ function cellKey(row: number, column: number): string {
 function readSheetCells(
   sheetRows: readonly SheetRow[],
   sharedStringsXml: string | null,
-  range: CellRange
+  range: CellRange,
+  format: CellTextFormatter
 ): Map<string, SheetCell> {
   const shared = stripPhoneticRuns(sharedStringsXml);
   const cells = new Map<string, SheetCell>();
@@ -536,10 +657,11 @@ function readSheetCells(
       const attributes = match[3];
       const rawStyle = /\ss="(\d+)"/.exec(attributes)?.[1];
       const type = /\st="([^"]*)"/.exec(attributes)?.[1] ?? null;
+      const styleIndex = rawStyle === undefined ? null : Number(rawStyle);
 
       cells.set(cellKey(Number(match[2]), column), {
-        text: displayText(read(ref), type),
-        styleIndex: rawStyle === undefined ? null : Number(rawStyle),
+        text: format(read(ref), type, styleIndex),
+        styleIndex,
       });
     }
   }
@@ -548,49 +670,14 @@ function readSheetCells(
 }
 
 /**
- * 요일 이름. **코드에 못 박는다.**
- *
- * 🔴 `toLocaleDateString()` 도 `Intl.DateTimeFormat("ko-KR", { weekday })` 도 쓰지
- * 않는다. 앞의 것은 **읽는 컴퓨터의 로케일**을 따라가고(같은 문서가 기기마다 다른
- * 글자로 보인다), 뒤의 것은 로케일을 못 박아도 **그 컴퓨터의 Node 에 한국어 ICU 가
- * 들어 있어야** 한다 — small-icu 로 빌드된 Node 는 조용히 「Wednesday」를 돌려준다.
- * 그 어긋남은 오류를 내지 않아서 아무도 모른 채 문서에 찍힌다.
- *
- * `date-only.ts` 와 `service-report-draft.ts` 가 시간대를 KST 로 못 박은 것과 같은
- * 판단이다 — **보이는 글자를 기기에 맡기지 않는다.** 여기는 그보다 한 걸음 더
- * 간단하다: 다루는 값이 이미 날짜뿐(`YYYY-MM-DD`)이라 시간대 문제 자체가 없다.
- */
-const KOREAN_WEEKDAY_NAMES = [
-  "일요일",
-  "월요일",
-  "화요일",
-  "수요일",
-  "목요일",
-  "금요일",
-  "토요일",
-] as const;
-
-/**
- * 「2026년 9월 2일 수요일」 — 양식의 `[$-F800]`(시스템 긴 날짜)을 한국어 Windows 의
- * Excel 이 그리는 모양 그대로.
- *
- * 🔴 요일은 **UTC 자정으로 만든 날짜에서** 뽑는다(`date-only.ts` 의
- * `parseDateOnlyToUtcMidnight` 과 같은 수법). 그 값은 실제 시각이 아니라 달력 셈을
- * 위한 것이고, `getUTCDay()` 는 기기 시간대를 보지 않으므로 **같은 날짜면 어느
- * 컴퓨터에서도 늘 같은 요일**이다. `new Date("2026-09-02").getDay()` 로 하면 그
- * 보증이 사라진다.
- */
-function koreanLongDate(year: number, month: number, day: number): string {
-  const weekday = KOREAN_WEEKDAY_NAMES[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
-  return `${year}년 ${month}월 ${day}일 ${weekday}`;
-}
-
-/**
  * 셀에 찍히는 글자.
  *
- * 🔴 **숫자 서식 코드를 읽지 않는다.** 손보는 것은 날짜 하나뿐이다: 이 통합문서는
- * `dateCompatibility="0"` 이라 날짜가 일련번호가 아니라 ISO 8601(`t="d"`)로 들어
- * 있고(채우개의 `setIsoDate`), 그대로 두면 「2026-09-02」로 나온다.
+ * ── ISO 날짜 칸(`t="d"`) — 🔴 예전 길 그대로 ───────────────────────────
+ * 보고서 통합문서는 `dateCompatibility="0"` 이라 날짜가 일련번호가 아니라
+ * ISO 8601(`t="d"`)로 들어 있고(채우개의 `setIsoDate`), 그대로 두면
+ * 「2026-09-02」로 나온다. 이 칸은 서식 코드를 보지 않고 늘 한국어 긴 날짜로 그린다
+ * — 보고서의 날짜 칸 넷이 전부 `[$-F800]` 이라 서식을 읽어도 같은 글자이지만,
+ * 불변식(보고서 결과 불변)을 코드의 길로도 지키려고 갈라 두었다.
  *
  * ── 🔴 요일까지 그린다 (2026-09-02 사용자 결정) ─────────────────────────
  * 양식이 쓰는 날짜 서식은 `[$-F800]`(**시스템 긴 날짜**) 하나이고, 날짜 칸 넷
@@ -609,17 +696,41 @@ function koreanLongDate(year: number, month: number, day: number): string {
  * 것이 없다. 값(`2026-09-02`)은 양쪽이 한 글자도 다르지 않고 꾸밈만 맞춘 것이다.
  *
  * ⚠️ 양식이 언젠가 보통(transitional) 통합문서로 다시 저장되면 날짜가 일련번호로
- * 바뀐다(`usesIsoDates` 참조). 그때 이 칸은 「46265」처럼 보인다 — 그때 고칠 일이고,
- * 지금 없는 경우를 위해 서식 코드 해석기를 만들지 않는다.
+ * 바뀐다(`usesIsoDates` 참조). 그때는 아래 숫자 칸의 길로 가서 `[$-F800]` 서식이
+ * 같은 「2026년 9월 2일 수요일」을 그린다(`number-format.ts`).
+ *
+ * ── 숫자 칸 · 글자 칸 — 서식대로 (2026-09-16, 견적서 ②a) ──────────────────
+ * 숫자 칸(`t` 없음 · `t="n"`)은 서식 코드대로(`formatNumber`), 글자 칸(`s` ·
+ * `inlineStr` · `str`)은 서식의 **글자 구역**이 있을 때만 그 모양으로(`formatText`)
+ * 적는다. 🔴 **모르는 서식이면 날 값 그대로다** — 머리말의 「서식을 못 읽으면
+ * 밋밋하게 넘어간다」. 참/거짓(`b`) · 오류(`e`)는 예전처럼 날 값이다.
  */
-function displayText(raw: string | null, type: string | null): string {
+function displayText(
+  raw: string | null,
+  type: string | null,
+  numberFormat: string | null,
+  dateSystem: ExcelDateSystem
+): string {
   if (raw === null) return "";
   const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (type !== "d") return text;
 
-  const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
-  if (!date) return text;
-  return koreanLongDate(Number(date[1]), Number(date[2]), Number(date[3]));
+  if (type === "d") {
+    const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+    if (!date) return text;
+    return koreanLongDate(Number(date[1]), Number(date[2]), Number(date[3]));
+  }
+
+  if (numberFormat === null) return text;
+
+  if (type === null || type === "n") {
+    const value = Number(text);
+    if (text.trim() === "" || !Number.isFinite(value)) return text;
+    return formatNumber(value, numberFormat, dateSystem) ?? text;
+  }
+  if (type === "s" || type === "inlineStr" || type === "str") {
+    return formatText(text, numberFormat) ?? text;
+  }
+  return text;
 }
 
 /**
@@ -661,6 +772,8 @@ function readMerges(sheetXml: string, range: CellRange): MergeRange[] {
 type XfStyle = {
   borderId: number | null;
   fontId: number | null;
+  fillId: number | null;
+  numFmtId: number | null;
   parentXfId: number | null;
   align: string | null;
   verticalAlign: string | null;
@@ -674,6 +787,10 @@ type StyleTable = {
   boldOf(styleIndex: number | null | undefined): boolean;
   fontSizeOf(styleIndex: number | null | undefined): number | null;
   bordersOf(styleIndex: number | null | undefined): PrintGridBorders;
+  /** 서식 코드. 모르는 번호 · 서식 파일이 없으면 null — 글자는 날 값 그대로. */
+  numberFormatOf(styleIndex: number | null | undefined): string | null;
+  fontColorOf(styleIndex: number | null | undefined): string | null;
+  backgroundColorOf(styleIndex: number | null | undefined): string | null;
 };
 
 const EMPTY_BORDERS: PrintGridBorders = { top: null, right: null, bottom: null, left: null };
@@ -687,6 +804,7 @@ const EMPTY_BORDERS: PrintGridBorders = { top: null, right: null, bottom: null, 
 const XF_PATTERN = /<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g;
 const BORDER_PATTERN = /<border\b[^>]*?(?:\/>|>[\s\S]*?<\/border>)/g;
 const FONT_PATTERN = /<font\b[^>]*?(?:\/>|>[\s\S]*?<\/font>)/g;
+const FILL_PATTERN = /<fill\b[^>]*?(?:\/>|>[\s\S]*?<\/fill>)/g;
 
 /**
  * `styles.xml` 을 읽어 «서식 번호 → 실제 모양» 을 답해 주는 표.
@@ -702,6 +820,9 @@ function readStyles(stylesXml: string | null): StyleTable {
     boldOf: () => false,
     fontSizeOf: () => null,
     bordersOf: () => EMPTY_BORDERS,
+    numberFormatOf: () => null,
+    fontColorOf: () => null,
+    backgroundColorOf: () => null,
   };
   if (stylesXml === null) return blank;
 
@@ -711,6 +832,8 @@ function readStyles(stylesXml: string | null): StyleTable {
 
   const borders = readBorders(stylesXml);
   const fonts = readFonts(stylesXml);
+  const fills = readFills(stylesXml);
+  const numberFormats = readNumberFormats(stylesXml);
 
   const xfOf = (styleIndex: number | null | undefined): XfStyle | null =>
     styleIndex === null || styleIndex === undefined ? null : (cellXfs[styleIndex] ?? null);
@@ -744,6 +867,24 @@ function readStyles(stylesXml: string | null): StyleTable {
       if (borderId === null || borderId === undefined) return EMPTY_BORDERS;
       return borders[borderId] ?? EMPTY_BORDERS;
     },
+    /**
+     * 🔴 `s` 가 없는 칸은 Excel 에서 **0번 서식**이다. 맞춤 · 테두리는 예전처럼
+     * «서식 없음»으로 두지만(0번은 늘 밋밋하다), 숫자 서식은 0번을 따라야 0번이
+     * 날짜인 통합문서를 제대로 그린다. 파일이 적은 `<numFmt>` 가 기본 제공 번호보다
+     * 이긴다 — 이 저장소 견적서 양식이 41 · 42 를 그렇게 적어 두었다.
+     */
+    numberFormatOf: (index) => {
+      const numFmtId = xfOf(index ?? 0)?.numFmtId ?? 0;
+      return numberFormats.get(numFmtId) ?? builtInNumberFormat(numFmtId);
+    },
+    fontColorOf: (index) => {
+      const fontId = xfOf(index)?.fontId;
+      return fontId === null || fontId === undefined ? null : (fonts[fontId]?.color ?? null);
+    },
+    backgroundColorOf: (index) => {
+      const fillId = xfOf(index)?.fillId;
+      return fillId === null || fillId === undefined ? null : (fills[fillId] ?? null);
+    },
   };
 }
 
@@ -759,6 +900,8 @@ function readXfBlock(stylesXml: string, tag: "cellXfs" | "cellStyleXfs"): XfStyl
     return {
       borderId: numberAttribute(openTag, "borderId"),
       fontId: numberAttribute(openTag, "fontId"),
+      fillId: numberAttribute(openTag, "fillId"),
+      numFmtId: numberAttribute(openTag, "numFmtId"),
       parentXfId: numberAttribute(openTag, "xfId"),
       align: alignment === null ? null : (/\shorizontal="([^"]*)"/.exec(alignment)?.[1] ?? null),
       verticalAlign: alignment === null ? null : (/\svertical="([^"]*)"/.exec(alignment)?.[1] ?? null),
@@ -791,18 +934,69 @@ function borderSide(border: string, side: string): PrintGridBorderStyle {
   return /\sstyle="([^"]*)"/.exec(tag)?.[1] ?? null;
 }
 
-function readFonts(stylesXml: string): { sizePt: number | null; bold: boolean }[] {
+function readFonts(stylesXml: string): { sizePt: number | null; bold: boolean; color: string | null }[] {
   const block = /<fonts\b[^>]*>([\s\S]*?)<\/fonts>/.exec(stylesXml);
   if (!block) return [];
 
   return [...block[1].matchAll(FONT_PATTERN)].map((match) => {
     const size = Number(/<sz\b[^>]*\sval="([\d.]+)"/.exec(match[0])?.[1]);
+    const colorTag = /<color\b[^>]*\/?>/.exec(match[0])?.[0];
     return {
       sizePt: Number.isFinite(size) ? size : null,
       // `<b/>` 와 `<b val="1"/>` 둘 다 굵게다. `<b val="0"/>` 은 아니다.
       bold: /<b\b(?![^>]*\sval="(?:0|false)")[^>]*\/?>/.test(match[0]),
+      color: colorTag === undefined ? null : rgbColor(colorTag),
     };
   });
+}
+
+/**
+ * 채움 번호 → 칸 배경. 🔴 **단색(`solid`) 채움만** 읽는다 — 그때의 색은 `fgColor` 다
+ * (이름과 달리 배경색이 여기 담긴다). 0번 · 1번(`none` · `gray125`)을 비롯한 무늬
+ * 채움과 그라데이션은 null.
+ */
+function readFills(stylesXml: string): (string | null)[] {
+  const block = /<fills\b[^>]*>([\s\S]*?)<\/fills>/.exec(stylesXml);
+  if (!block) return [];
+
+  return [...block[1].matchAll(FILL_PATTERN)].map((match) => {
+    const pattern = /<patternFill\b[^>]*>/.exec(match[0])?.[0];
+    if (pattern === undefined || !/\spatternType="solid"/.test(pattern)) return null;
+    const foreground = /<fgColor\b[^>]*\/?>/.exec(match[0])?.[0];
+    return foreground === undefined ? null : rgbColor(foreground);
+  });
+}
+
+/**
+ * 파일이 적은 사용자 서식(`<numFmt numFmtId formatCode>`). 서식 코드는 XML 로
+ * 탈출돼 있다(`&quot;₩&quot;#,##0`) — 숫자 참조까지 한 번에 푼다.
+ */
+function readNumberFormats(stylesXml: string): Map<number, string> {
+  const formats = new Map<number, string>();
+  const block = /<numFmts\b[^>]*>([\s\S]*?)<\/numFmts>/.exec(stylesXml);
+  if (!block) return formats;
+
+  for (const match of block[1].matchAll(/<numFmt\b[^>]*\/?>/g)) {
+    const id = numberAttribute(match[0], "numFmtId");
+    const code = /\sformatCode="([^"]*)"/.exec(match[0])?.[1];
+    if (id === null || code === undefined) continue;
+    formats.set(id, decodeXmlCharacterData(code));
+  }
+  return formats;
+}
+
+/**
+ * `<color rgb="FFFF0000"/>` → `#FF0000`(앞 두 자리는 불투명도라 뗀다).
+ *
+ * 🔴 **rgb 로 적힌 것만** — 테마 색(`theme`) · 색 번호(`indexed`) · 자동(`auto`)은
+ * 통합문서의 테마와 팔레트를 풀어야 알 수 있고, 틴트(`tint`)가 걸리면 밝기를 셈해야
+ * 한다. 모르면 null(화면의 기본색) — 짐작한 색을 칠하지 않는다.
+ */
+function rgbColor(tag: string): string | null {
+  const tint = Number(/\stint="([^"]*)"/.exec(tag)?.[1] ?? "0");
+  if (tint !== 0) return null;
+  const rgb = /\srgb="([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})"/.exec(tag)?.[1];
+  return rgb === undefined ? null : `#${rgb.slice(-6).toUpperCase()}`;
 }
 
 function numberAttribute(tag: string, name: string): number | null {

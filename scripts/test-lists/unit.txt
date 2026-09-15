@@ -223,3 +223,4 @@ src/lib/domain/quote-issue-result.test.ts
 src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts
 src/app/api/quotes/parse-excel/route-source.test.ts
+src/lib/xlsx/number-format.test.ts
