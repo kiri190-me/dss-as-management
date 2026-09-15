@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
+import SavePopupHost from "@/components/common/SavePopup";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getUiText } from "@/lib/server/ui-text";
@@ -97,6 +98,12 @@ export default async function AppLayout({
         AppShell과 TopBar가 쓰지도 않을 값을 날라야 한다.
       */}
       <BrowserNotifications userKey={user.id} items={notifications} />
+      {/*
+        저장·등록 뒤 0.5초 뜨는 팝업. 폼이 showSavePopup 을 부르면 여기서 그리고,
+        넘어갈 곳이 있으면 여기서 넘긴다. 레이아웃은 화면을 옮겨도 다시 만들어지지
+        않으므로 목록이 그려질 때까지 팝업이 남는다(common/SavePopup.tsx).
+      */}
+      <SavePopupHost />
     </>
   );
 }

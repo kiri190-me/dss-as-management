@@ -37,3 +37,4 @@ src/components/settings/ImprovementRequestScreenshots.test.tsx
 src/components/users/user-deletion-dialog-text.test.ts
 src/components/users/UserDeletionParts.test.tsx
 src/components/repair-cases/detail/edit/engineer-select-options.test.ts
+src/components/common/SavePopup.test.tsx

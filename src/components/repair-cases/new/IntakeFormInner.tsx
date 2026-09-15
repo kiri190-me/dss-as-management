@@ -9,6 +9,7 @@ import {
   type BillingType,
 } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import {
   deriveWorkflowType,
@@ -481,7 +482,12 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
       }
 
       clear();
-      router.push(`/repair-cases/${result.id}?registered=1`);
+      // 등록 팝업을 0.5초 띄운 뒤 목록으로 넘어간다 — 넘기는 것은 팝업이 한다
+      // (common/SavePopup.tsx). 수리 의뢰에서 넘어온 접수는 그 목록으로 돌아간다.
+      showSavePopup({
+        message: `A/S 접수를 등록했습니다 (${result.intakeNumber})`,
+        redirectTo: fromRequestId ? "/customer-portal/requests" : "/repair-cases",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1045,7 +1051,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               type="button"
               onClick={() => {
                 clear();
-                router.push(`/repair-cases/${partialSuccess.repairCaseId}?registered=1`);
+                router.push(`/repair-cases/${partialSuccess.repairCaseId}`);
               }}
               className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800"
             >
