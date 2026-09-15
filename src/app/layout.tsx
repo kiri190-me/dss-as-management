@@ -66,7 +66,9 @@ export const metadata: Metadata = {
    * 데스크톱 북마크·탭 아이콘도 모바일 홈 화면 아이콘과 같은 그림이다(2026-09-15
    * 사용자). 작은 크기는 app/favicon.ico(모바일 아이콘 icon-512.png 로 만든 16·32·48·
    * 256)가 맡고 — Next.js 가 그 파일을 스스로 링크한다 — 큰 아이콘을 찾는 곳(고해상도
-   * 탭·새 탭 바로가기)은 아래 PNG 를 쓴다. 둘 다 manifest.ts 의 아이콘과 같은 그림이다.
+   * 탭·새 탭 바로가기)은 아래 PNG 를 쓴다. 둘 다 manifest.ts 의 아이콘과 같은 그림이고,
+   * 그 그림은 통합 로그인 포털(dss-auth)의 아이콘(흰 바탕에 파랑 · 흰색 · 빨강 사각형)을
+   * 그대로 복사한 것이다(public/icons/ — app/bookmark-icon.test.ts 가 지문으로 붙잡는다).
    */
   icons: {
     icon: [{ url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" }],

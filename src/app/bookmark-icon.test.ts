@@ -8,9 +8,12 @@ import { readFileSync } from "node:fs";
  * 데스크톱 북마크 아이콘 = 모바일 홈 화면 아이콘 (2026-09-15 사용자 요청)
  * ============================================================================
  * 북마크·탭은 app/favicon.ico 를 쓰는데, 그 파일이 프로젝트를 만들 때 들어온
- * **Next.js 기본 로고(검은 원 안의 흰 삼각형)** 그대로였다. 모바일은 public/icons/
- * 의 「DSS A/S」 그림을 써서 둘이 달라 보였다. 모바일 아이콘(icon-512.png)으로
- * 만든 파일로 바꿨고, 기본 로고로 되돌아가면 여기서 걸린다.
+ * **Next.js 기본 로고(검은 원 안의 흰 삼각형)** 그대로였다.
+ *
+ * 모바일 아이콘(public/icons/)은 사용자가 폰에서 보는 아이콘 — 통합 로그인 포털
+ * (dss-auth)의 **흰 바탕에 파랑 · 흰색 · 빨강 사각형** 그림 — 으로 맞췄고(포털 원본을
+ * 그대로 복사했다), 파비콘도 그 icon-512.png 로 만들었다. 기본 로고로 되돌아가거나
+ * 포털과 다른 그림이 되면 여기서 걸린다.
  * ============================================================================
  */
 
@@ -19,7 +22,28 @@ const NEXT_DEFAULT_FAVICON_SHA256 = "2b8ad2d33455a8f736fc3a8ebf8f0bdea8848ad4c0d
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/**
+ * 통합 로그인 포털(dss-auth)의 모바일 아이콘 원본 넷의 SHA-256. 이 저장소의
+ * public/icons/ 는 그 원본을 **그대로 복사한 것**이다(2026-09-15 사용자 — 폰에 저장한
+ * 웹앱의 삼색 아이콘으로). 포털 저장소가 옆에 없는 PC · NAS 에서도 돌도록 지문을 적어
+ * 둔다 — 포털 아이콘을 바꾸는 날에는 이 값도 함께 바꾼다.
+ */
+const PORTAL_ICON_SHA256: Readonly<Record<string, string>> = {
+  "apple-touch-icon.png": "62fae6251b2f7b6449e4ecf97c9e0582bec7858e4b9eda53e7f044b7673c9c8c",
+  "icon-192.png": "5788c418492c705813d2ed904eb8c712a95f93d2e2118103d4de26f0f5624f07",
+  "icon-512.png": "0b1592249f54267442103c2576308af237fe8c255264696d65284f4be62e668e",
+  "icon-maskable-512.png": "ea6d351a98f90323b53cf88a185f3c76b9b771af7a64ccccde4cc3c1dea464db",
+};
+
+const sha256 = (buffer: Buffer) => createHash("sha256").update(buffer).digest("hex");
+
 const favicon = readFileSync("src/app/favicon.ico");
+
+test("🔴 모바일 아이콘 넷이 통합 로그인 포털의 원본과 같은 파일이다", () => {
+  for (const [name, expected] of Object.entries(PORTAL_ICON_SHA256)) {
+    assert.equal(sha256(readFileSync(`public/icons/${name}`)), expected, `${name} 이 포털 원본과 다르다`);
+  }
+});
 
 /** ICO 머리의 목록 — 크기(0 은 256) · 그림이 든 자리. */
 function icoEntries(buffer: Buffer) {
