@@ -192,11 +192,131 @@ test("같은 이름이 있으면 덮어쓰지 않고 ` (2)`, ` (3)` 으로 새�
     bytes: bytes("%PDF 결재본"),
   } as const;
   const pdf = await saveToQuoteArchive(signedInput);
-  const pdfAgain = await saveToQuoteArchive(signedInput);
+  // 같은 이름 자리에 **다른 내용**이 오면 ` (2)` — 같은 바이트면 새로 쓰지 않는다(아래 「내용이 같으면」).
+  const pdfAgain = await saveToQuoteArchive({ ...signedInput, bytes: bytes("%PDF 다시 받은 결재본") });
   assertSaved(pdf);
   assertSaved(pdfAgain);
   assert.equal(pdf.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印.pdf`);
   assert.equal(pdfAgain.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印 (2).pdf`);
+  assert.equal(await readFile(absolute(root, pdf.relativePath), "utf8"), "%PDF 결재본");
+});
+
+// ── 내용이 같으면 새로 쓰지 않는다 (2026-09-15 사용자 결정) ──────────────────
+
+function assertUnchanged(
+  result: QuoteArchiveSaveResult
+): asserts result is Extract<QuoteArchiveSaveResult, { status: "unchanged" }> {
+  assert.equal(result.status, "unchanged", result.status === "failed" ? result.reason : result.status);
+}
+
+test("같은 바이트를 두 번 저장하면 둘째는 unchanged — 파일은 하나, 앞의 파일은 그대로", async () => {
+  const root = await makeRoot();
+  const first = await saveQuoteFile(root, bytes("같은 견적서"));
+  const second = await saveQuoteFile(root, bytes("같은 견적서"));
+
+  assertSaved(first);
+  assertUnchanged(second);
+  assert.equal(second.relativePath, first.relativePath);
+  assert.equal(second.multipleFolderMatches, false);
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "같은 견적서");
+});
+
+test("결재 PDF 도 같다 — 같은 PDF 를 두 번 저장하면 공유폴더 파일은 하나", async () => {
+  const root = await makeRoot();
+  const signedInput = {
+    root,
+    quoteDate: "2026-09-15",
+    naming: DOMESTIC,
+    fileKind: "SIGNED_PDF",
+    bytes: bytes("%PDF 같은 결재본"),
+  } as const;
+
+  const first = await saveToQuoteArchive(signedInput);
+  const second = await saveToQuoteArchive(signedInput);
+
+  assertSaved(first);
+  assertUnchanged(second);
+  assert.equal(second.relativePath, `${YEAR_2026}/${STEM}/${STEM} - 有印.pdf`);
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM} - 有印.pdf`]);
+});
+
+test("같은 바이트가 번호 붙은 자리에 있으면 그 자리를 가리킨다 — 다른 내용은 다음 번호", async () => {
+  const root = await makeRoot();
+  const a = await saveQuoteFile(root, bytes("가 판"));
+  const b = await saveQuoteFile(root, bytes("나 판"));
+  const c = await saveQuoteFile(root, bytes("다 판"));
+  assertSaved(a);
+  assertSaved(b);
+  assertSaved(c);
+  assert.equal(c.relativePath, `${YEAR_2026}/${STEM}/${STEM} (3).xlsx`);
+
+  const againB = await saveQuoteFile(root, bytes("나 판"));
+  assertUnchanged(againB);
+  assert.equal(againB.relativePath, `${YEAR_2026}/${STEM}/${STEM} (2).xlsx`);
+  const againA = await saveQuoteFile(root, bytes("가 판"));
+  assertUnchanged(againA);
+  assert.equal(againA.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+
+  const d = await saveQuoteFile(root, bytes("라 판"));
+  assertSaved(d);
+  assert.equal(d.relativePath, `${YEAR_2026}/${STEM}/${STEM} (4).xlsx`);
+  assert.equal((await readdir(path.join(root, YEAR_2026, STEM))).length, 4);
+});
+
+test("크기가 같아도 내용이 다르면 새로 쓴다", async () => {
+  const root = await makeRoot();
+  const first = await saveQuoteFile(root, bytes("가나"));
+  const second = await saveQuoteFile(root, bytes("나가"));
+  assertSaved(first);
+  assertSaved(second);
+  assert.equal(second.relativePath, `${YEAR_2026}/${STEM}/${STEM} (2).xlsx`);
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "가나");
+});
+
+test("다른 이름의 파일은 보지 않는다 — 같은 바이트여도 이번 이름의 후보가 아니면 새로 쓴다", async () => {
+  const root = await makeRoot();
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  await mkdir(quoteDirectory, { recursive: true });
+  const others = [`${STEM} 사본.xlsx`, `${STEM}.xls`, `${STEM} (2) 메모.xlsx`, `${BRANCH_STEM}(OH포함).xlsx`];
+  for (const name of others) await writeFile(path.join(quoteDirectory, name), "같은 바이트");
+
+  const result = await saveQuoteFile(root, bytes("같은 바이트"));
+
+  assertSaved(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  assert.equal((await readdir(quoteDirectory)).length, others.length + 1);
+});
+
+test(`${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개가 다 차 있어도 그 가운데 같은 바이트가 있으면 unchanged — 실패하지 않는다`, async () => {
+  const root = await makeRoot();
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  await mkdir(quoteDirectory, { recursive: true });
+  await writeFile(path.join(quoteDirectory, `${STEM}.xlsx`), "1");
+  for (let n = 2; n <= QUOTE_ARCHIVE_MAX_NUMBERED_COPIES; n += 1) {
+    await writeFile(path.join(quoteDirectory, `${STEM} (${n}).xlsx`), String(n));
+  }
+
+  const result = await saveQuoteFile(root, bytes("57"));
+
+  assertUnchanged(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM} (57).xlsx`);
+  assert.equal((await readdir(quoteDirectory)).length, QUOTE_ARCHIVE_MAX_NUMBERED_COPIES);
+});
+
+test("같은 내용을 동시에 두 번 — 덮어쓰기 0(둘 다 새로 쓸 수는 있다: 머리말의 틈)", async () => {
+  const root = await makeRoot();
+  const results = await Promise.all([saveQuoteFile(root, bytes("동시 같은 내용")), saveQuoteFile(root, bytes("동시 같은 내용"))]);
+
+  for (const result of results) {
+    assert.ok(result.status === "saved" || result.status === "unchanged", result.status === "failed" ? result.reason : "");
+  }
+  assert.ok(results.some((result) => result.status === "saved"), "적어도 하나는 썼다");
+  const names = await readdir(path.join(root, YEAR_2026, STEM));
+  assert.ok(names.length === 1 || names.length === 2, `파일 수: ${names.length}`);
+  for (const name of names) {
+    assert.equal(await readFile(path.join(root, YEAR_2026, STEM, name), "utf8"), "동시 같은 내용");
+  }
 });
 
 test("동시에 저장해도 덮어쓰기 0 — 파일이 다 남고 내용이 각각 온전하다", async () => {

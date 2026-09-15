@@ -1,6 +1,6 @@
 import "server-only";
 
-import { mkdir, open, readdir, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -41,6 +41,17 @@ import type { QuoteFileExtension } from "@/lib/domain/quote-file-name";
  * 파일은 `open(…, "wx")` 로만 연다 — 이미 있으면 `EEXIST` 로 실패하고 다음 번호
  * ` (2)`, ` (3)` … 로 넘어간다. 존재 확인과 쓰기 사이의 틈이 없으므로 두 사람이 동시에
  * 저장해도 서로 덮지 않는다. 폴더 만들기도 같은 이유로 `EEXIST` 면 다시 찾는다.
+ *
+ * ── 내용이 같으면 새로 쓰지 않는다 (2026-09-15 사용자 결정) ─────────────────
+ * 쓰기 전에 그 견적서 폴더에서 **이번 이름의 후보들만**(`이름`, `이름 (2)` … 상한까지)
+ * 본다. 같은 바이트의 파일이 있으면 새로 쓰지 않고 `unchanged` 로 그 파일의 자리를
+ * 돌려준다 — 같은 견적서를 받을 때마다 ` (2)`, ` (3)` 이 쌓이지 않게. 크기를 먼저 보고
+ * 같을 때만 내용을 읽어 맞춘다. 다른 이름의 파일은 보지 않는다. 방금 만든 폴더는 비어
+ * 있어 비교하지 않는다. 견적서 파일 · 결재 PDF 모두 같다.
+ *
+ * 비교와 쓰기 사이에는 틈이 있다 — 같은 내용을 **동시에** 두 번 저장하면 둘 다 「같은 파일
+ * 없음」을 보고 둘 다 새로 쓸 수 있다(` (2)` 가 하나 더 생긴다). 덮어쓰기는 여전히 0 이라
+ * 그대로 둔다: 잠금을 두어 막을 만큼의 손해가 아니다.
  *
  * ── 던지지 않는다 ───────────────────────────────────────────────────────
  * 모든 오류는 `{ status: "failed", reason }` 으로 돌아간다. `reason` 은 화면 · 응답
@@ -85,6 +96,13 @@ export type QuoteArchiveSaveResult =
       /** 루트 기준 슬래시 경로 — `21. 2026 내자견적서/…/….xlsx`. 디스크의 실제 폴더 이름이다. */
       relativePath: string;
       /** 맞는 연도 폴더나 견적서 폴더가 둘 이상이어서 이름순 첫째를 골랐다 — 사람이 확인할 일. */
+      multipleFolderMatches: boolean;
+    }
+  | {
+      /** 같은 바이트의 파일이 이번 이름의 후보 자리에 이미 있어 새로 쓰지 않았다. */
+      status: "unchanged";
+      /** 그 파일의 루트 기준 슬래시 경로(디스크의 실제 폴더 · 파일 이름). */
+      relativePath: string;
       multipleFolderMatches: boolean;
     }
   | { status: "failed"; reason: string };
@@ -151,6 +169,21 @@ async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveRes
     quoteFolderName
   );
   const quoteDirectory = path.join(yearDirectory, quoteFolder.name);
+  const multipleFolderMatches = yearFolder.multiple || quoteFolder.multiple;
+
+  // 이미 있던 폴더면 이번 이름의 후보들 가운데 같은 바이트의 파일을 찾는다(머리말 「내용이
+  // 같으면 새로 쓰지 않는다」). 방금 만든 폴더는 비어 있어 볼 것이 없다 — 연도 폴더를 만들었으면
+  // 견적서 폴더도 방금 만든 것이다.
+  if (!quoteFolder.created) {
+    const sameName = await findSameContentFile(root, quoteDirectory, fileName, input.bytes);
+    if (sameName !== null) {
+      return {
+        status: "unchanged",
+        relativePath: [yearFolder.name, quoteFolder.name, sameName].join("/"),
+        multipleFolderMatches,
+      };
+    }
+  }
 
   const savedName = await writeNewFile(root, quoteDirectory, fileName, input.bytes);
 
@@ -158,7 +191,7 @@ async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveRes
     status: "saved",
     // 루트 기준, 구분자는 슬래시 — OS 와 무관하게 같은 값이 나오도록 문자열로 잇는다.
     relativePath: [yearFolder.name, quoteFolder.name, savedName].join("/"),
-    multipleFolderMatches: yearFolder.multiple || quoteFolder.multiple,
+    multipleFolderMatches,
   };
 }
 
@@ -187,7 +220,8 @@ async function requireExistingRoot(rawRoot: string): Promise<string> {
   return root;
 }
 
-type FolderPick = { name: string; multiple: boolean };
+/** created — 이번 저장에서 mkdir 로 만든 폴더다(비어 있다). 찾은 폴더 · 경합에서 다시 찾은 폴더는 거짓. */
+type FolderPick = { name: string; multiple: boolean; created: boolean };
 
 /**
  * 부모 폴더 안에서 맞는 폴더를 찾는다 — `isDirectory()` 만 본다. readdir 의
@@ -201,7 +235,7 @@ async function findFolder(parent: string, matches: (name: string) => boolean): P
     .map((entry) => entry.name)
     .sort(compareFolderNames);
   if (names.length === 0) return null;
-  return { name: names[0], multiple: names.length > 1 };
+  return { name: names[0], multiple: names.length > 1, created: false };
 }
 
 function compareFolderNames(a: string, b: string): number {
@@ -234,7 +268,7 @@ async function findOrCreateFolder(
   try {
     // recursive 없이 — 부모(결국 루트)가 없으면 만들지 않고 실패해야 한다.
     await mkdir(target);
-    return { name: newName, multiple: false };
+    return { name: newName, multiple: false, created: true };
   } catch (error) {
     if (errorCode(error) !== "EEXIST") throw error;
   }
@@ -245,6 +279,46 @@ async function findOrCreateFolder(
     return again;
   }
   throw new QuoteArchiveFailure("같은 이름의 파일이 자리를 차지하고 있어 폴더를 만들 수 없습니다.");
+}
+
+/**
+ * 이번 이름의 후보들(`이름`, `이름 (2)` … 상한까지) 가운데 **같은 바이트**의 파일 이름을
+ * 찾는다. 없으면 null. 다른 이름의 파일은 보지 않는다.
+ *
+ * 폴더 목록을 한 번 읽고 후보 이름과 **글자 그대로** 같은 항목만 본다 — 후보마다 stat 을
+ * 상한만큼 부르지 않는다(NAS 너머라 한 번이 비싸다). `isFile()` 만 보므로 링크는 따라가지
+ * 않는다. 크기가 다르면 읽지 않는다.
+ */
+async function findSameContentFile(
+  root: string,
+  directory: string,
+  fileName: string,
+  bytes: Uint8Array
+): Promise<string | null> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = new Set(entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
+  for (let n = 1; n <= QUOTE_ARCHIVE_MAX_NUMBERED_COPIES; n += 1) {
+    const candidate = numberedQuoteArchiveName(fileName, n);
+    if (!files.has(candidate)) continue;
+    const target = path.join(directory, candidate);
+    assertInsideRoot(root, target);
+    if (await hasSameBytes(target, bytes)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * 그 파일이 이 바이트와 같은가 — 크기가 같을 때만 내용을 읽어 맞춘다. 읽지 못하면(사용 중 ·
+ * 권한) 「같지 않음」으로 친다: 새로 쓰는 쪽으로 틀린다(덮어쓰지 않으니 잃는 것이 없다).
+ */
+async function hasSameBytes(target: string, bytes: Uint8Array): Promise<boolean> {
+  try {
+    const info = await stat(target);
+    if (!info.isFile() || info.size !== bytes.byteLength) return false;
+    return (await readFile(target)).equals(bytes);
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -219,3 +219,4 @@ src/lib/domain/kyosan-intake-import/name-suggestions.test.ts
 src/lib/auth/kyosan-intake-import-authorization.test.ts
 src/lib/domain/quote-archive-naming.test.ts
 src/lib/storage/quote-archive.test.ts
+src/lib/domain/quote-issue-result.test.ts

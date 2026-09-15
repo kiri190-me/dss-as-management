@@ -24,7 +24,9 @@ import { ATTACHMENT_OWNER_PERMISSIONS } from "@/lib/domain/attachment-download-p
 import { buildQuoteAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { QuoteAttachmentRejectedError, createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getQuoteAttachmentUploadTarget } from "@/lib/db/queries/attachments";
+import { archiveSignedQuotePdf } from "@/lib/server/services/quote-issue";
 import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
+import { resolveQuoteArchiveRoot } from "@/lib/storage/quote-archive";
 import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
 
 /**
@@ -63,6 +65,13 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  * 문턱(quotes WRITE ⊇ READ)을 넘어 그 견적서를 이미 보던 사람이다 — 숨길 존재가 없고,
  * 404 는 「견적서가 사라졌다」로 잘못 읽힌다(개선 요청 통로의 '404 가 아니라 403' 과 같은
  * 판단).
+ *
+ * ── 결재 PDF 는 사내 공유폴더에도 복사한다 (2026-09-15 B1b) ─────────────────
+ * 결재 PDF 칸의 기록이 **성공한 뒤에만** 그 견적서의 공유폴더 폴더에 `… - 有印.pdf` 로
+ * 복사한다(services/quote-issue.ts 의 archiveSignedQuotePdf — 던지지 않는다). 결과는 201
+ * 응답의 `archive` 칸에만 싣는다(domain/quote-issue-result.ts 의 모양 — 저장 · 같은 내용 ·
+ * 실패 · 꺼짐). 🔴 공유폴더가 실패해도 응답 코드와 기존 칸은 그대로다. 수기 엑셀 칸 올리기는
+ * 복사하지 않는다 — `archive: null`.
  *
  * ⚠️ 4번(파일 이동)과 5번(DB)을 뒤집지 않는다 — 다른 통로와 같은 까닭이다.
  * ============================================================================
@@ -271,6 +280,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return fail(500, "RECORD_FAILED", "파일 기록을 저장하는 중 문제가 발생했습니다.");
   }
 
+  // ── 6) 결재 PDF 면 사내 공유폴더에 사본 (파일 헤더의 「공유폴더에도 복사한다」) ────
+  // 기록이 성공한 뒤에만 — 칸에 붙지 않은 파일을 서류함에 꽂지 않는다. 던지지 않으므로
+  // 공유폴더가 실패해도 아래 201 과 기존 칸은 그대로다.
+  const archive =
+    category === "SIGNED_QUOTE_PDF"
+      ? await archiveSignedQuotePdf({
+          quoteId: target.id,
+          storedPath,
+          archiveRoot: resolveQuoteArchiveRoot(),
+          storage,
+        })
+      : null;
+
   return NextResponse.json(
     {
       id: created.id,
@@ -282,6 +304,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       uploadedAt: created.uploadedAt,
       // 같은 칸의 옛 파일 — 첨부 휴지통으로 갔다(없으면 빈 배열). 화면이 「바꿨다」고 알릴 근거.
       displacedAttachmentIds: created.displacedAttachmentIds,
+      // 공유폴더 사본의 결과 — 결재 PDF 만(수기 엑셀 칸은 null). 모양은 domain/quote-issue-result.ts.
+      archive,
     },
     { status: 201 }
   );
