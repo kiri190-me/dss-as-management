@@ -600,6 +600,10 @@ export default function QuoteEditForm({
   function removeScopeRow(section: QuoteWorkScopeSection, rows: ScopeRow[], removed: ScopeRow) {
     const remaining = rows.filter((r) => r.key !== removed.key);
     editScope(section, remaining);
+    // 「3) 통전작업」의 마지막 줄을 지우면 「통전작업 제외」를 켠다(2026-09-15 사용자).
+    // 손으로 켤 때와 같은 일이 따라온다 — 칸이 감춰지고 문서에서 ③ 이 빠진다.
+    // 되돌리려면 체크를 풀고 [양식 기본값으로]를 누른다.
+    if (section === "POWER_TEST" && remaining.length === 0) setPowerTestExcluded(true);
     if (section !== "REPAIR" || !activeLabor) return;
     const next = uncheckRepairTaskForRemovedLine(activeLabor.tasks, taskQuantities, removed.text, remaining.map((r) => r.text));
     if (next !== taskQuantities) setTaskQuantities(next);

@@ -188,7 +188,18 @@ describe("감추지 않은 칸 — 지금까지 그대로", () => {
 describe("🔴 감출 뿐 지우지 않는다", () => {
   test("「통전작업 제외」 체크는 그 값만 바꾼다 — 줄을 건드리지 않는다", () => {
     assert.ok(form.includes("onChange={(e) => setPowerTestExcluded(e.target.checked)}"), "체크의 onChange 가 달라졌다");
-    assert.equal(form.split("setPowerTestExcluded(").length - 1, 1, "제외 상태를 바꾸는 곳이 하나가 아니다");
+    // 제외 상태를 바꾸는 곳은 둘이다 — 체크 상자, 그리고 통전 칸의 마지막 줄 지우기(아래).
+    assert.equal(form.split("setPowerTestExcluded(").length - 1, 2, "제외 상태를 바꾸는 곳이 둘이 아니다");
+  });
+
+  test("🔴 「3) 통전작업」의 마지막 줄을 지우면 「통전작업 제외」가 켜진다 — 켜기만 한다", () => {
+    const fn = sliceBetween(form, "function removeScopeRow(", "function applyOverhaulRule(");
+    assert.ok(
+      fn.includes('if (section === "POWER_TEST" && remaining.length === 0) setPowerTestExcluded(true);'),
+      "마지막 줄을 지워도 제외가 켜지지 않는다"
+    );
+    // 끄는 길은 체크 상자 하나다 — 줄을 더한다고 저절로 풀리지 않는다.
+    assert.ok(!fn.includes("setPowerTestExcluded(false)"));
   });
 
   test("감춤·제외 상태로 scopeLines·scopeTouched 를 바꾸는 코드가 없다", () => {
