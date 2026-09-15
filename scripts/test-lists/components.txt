@@ -57,3 +57,6 @@ src/components/quotes/quote-new-start.test.ts
 src/components/quotes/quote-excel-parse.test.ts
 src/components/quotes/quote-excel-autofill.test.ts
 src/components/quotes/quote-excel-autofill-screens.test.tsx
+src/components/quotes/quote-folder-open.test.ts
+src/components/quotes/QuoteFolderOpenButton.test.tsx
+src/components/quotes/quote-folder-open-screens.test.ts

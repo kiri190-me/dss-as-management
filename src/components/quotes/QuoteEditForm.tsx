@@ -84,6 +84,8 @@ import type { QuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 import QuoteIssueButton, { QuoteIssueNoticeLines } from "@/components/quotes/QuoteIssueButton";
 import { shouldReloadSlotsAfterIssue, type QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
+import QuoteFolderOpenButton, { QuoteFolderOpenNotice } from "@/components/quotes/QuoteFolderOpenButton";
+import type { QuoteFolderOpenOutcome } from "@/components/quotes/quote-folder-open";
 
 /**
  * ============================================================================
@@ -704,6 +706,8 @@ export default function QuoteEditForm({
    * 저장하지 않은 변경이 있어 통로를 부르지 않았을 때의 「먼저 [저장]」도 여기다.
    */
   const [issueNotice, setIssueNotice] = useState<QuoteIssueNoticeLine[]>([]);
+  /** [폴더 열기](견적서 ④b)의 결과 — [견적서 받기] 결과 아래에 보인다. 누르는 동안은 비운다(null). */
+  const [folderOpenOutcome, setFolderOpenOutcome] = useState<QuoteFolderOpenOutcome | null>(null);
   /**
    * 「수기 견적서 엑셀」로 칸 채우기의 상태(견적서 ①b — ExcelAutofillState). 없으면 null.
    * 읽개는 한 번 만들어 들고 있는다 — 마지막에 고른 파일의 결과만 돌려주는 차례표가 그 안에 있다.
@@ -1660,6 +1664,17 @@ export default function QuoteEditForm({
               onOutcome={handleIssueOutcome}
             />
           )}
+          {/* [폴더 열기](견적서 ④b) — 공유폴더의 이 견적서 폴더를 PC 의 도우미가 탐색기로 연다.
+              파일을 만들지 않으므로 저장하지 않은 변경이 있어도 막지 않는다. 저장 중 · 충돌이면 잠근다.
+              🔴 Windows 가 아니면 단추 자체가 없다 — 처음 렌더는 감춘 채 그린다. */}
+          {savedQuote && (
+            <QuoteFolderOpenButton
+              quoteId={savedQuote.id}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-700"
+              disabled={disabled}
+              onOutcome={setFolderOpenOutcome}
+            />
+          )}
           {/* 취소도 왔던 곳으로 — 수리 건에서 들어왔으면 그 건의 「견적서」 탭,
               아니면 지금까지와 같이 PO/내자 목록이다. */}
           <button
@@ -1684,6 +1699,17 @@ export default function QuoteEditForm({
         <div className="flex justify-end">
           <QuoteIssueNoticeLines
             lines={issueNotice}
+            className="max-w-xl rounded-md border border-zinc-200 bg-white p-3 text-right dark:border-zinc-800 dark:bg-zinc-900"
+          />
+        </div>
+      )}
+
+      {/* [폴더 열기] 결과 — 받기 결과와 같은 자리(머리 아래, 견적서 ④b). 도우미가 없으면 설치 파일 안내,
+          있으면 「탐색기가 열리지 않았다면 [설치 파일 다시 받기]」. */}
+      {folderOpenOutcome && (
+        <div className="flex justify-end">
+          <QuoteFolderOpenNotice
+            outcome={folderOpenOutcome}
             className="max-w-xl rounded-md border border-zinc-200 bg-white p-3 text-right dark:border-zinc-800 dark:bg-zinc-900"
           />
         </div>
