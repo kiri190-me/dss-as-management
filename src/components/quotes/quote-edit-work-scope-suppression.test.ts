@@ -17,6 +17,9 @@ import { readFileSync } from "node:fs";
  *  · 감추지 않은 칸은 지금까지 그대로 그린다.
  *  · 🔴 **감추기만 한다** — 감출 때 scopeLines·scopeTouched 를 비우는 코드가 없고,
  *    저장하는 작업 내역도 감춤과 무관하게 지금과 같다.
+ *  · 「조사작업 제외」(2026-09-15) — 체크 상자가 통전작업 제외 곁에 있고, 상태로 저장 ·
+ *    미리보기 · 작업비 계산에 같은 값을 넘긴다. 조사 칸 마지막 줄을 지우면 켜지고, 빈 채로
+ *    풀면 양식 기본 목록으로 다시 채운다.
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * QuoteEditForm 은 **서버 액션을 직접 import 하는 클라이언트 컴포넌트**라, 그 사슬
@@ -83,7 +86,7 @@ describe("판정을 부르는 자리", () => {
     );
     assert.ok(
       sectionMap.includes(
-        "const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped, investigationExcluded: false, });"
+        "const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped, investigationExcluded, });"
       ),
       "칸마다 판정을 부르지 않는다"
     );
@@ -108,34 +111,166 @@ describe("판정을 부르는 자리", () => {
   });
 });
 
-describe("「1) 조사작업」을 손대서 비우면 문서에서 빠진다 — 칸은 감추지 않는다", () => {
-  test("🔴 판정은 도메인이 한다 — 손댔는가 + 지금 적힌 줄", () => {
+describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업」을 감추고 기본 작업비를 뺀다", () => {
+  /** 「통전작업 제외」와 같은 모양의 체크 상자 한 벌. */
+  const checkbox = (checked: string, onChange: string, text: string) =>
+    `<label className="flex items-center gap-2 text-sm"> <input type="checkbox" checked={${checked}} onChange={(e) => ${onChange}(e.target.checked)} disabled={disabled} className="h-4 w-4" /> <span className="text-zinc-800 dark:text-zinc-200">${text}</span> </label>`;
+  const powerTestBox = checkbox("powerTestExcluded", "setPowerTestExcluded", "통전작업 제외");
+  const investigationBox = checkbox("investigationExcluded", "toggleInvestigationExcluded", "조사작업 제외");
+  const toggle = sliceBetween(form, "function toggleInvestigationExcluded(", "function removeScopeRow(");
+
+  test("🔴 상태다 — 저장된 결정으로 시작하고, 렌더마다 셈하지 않는다", () => {
     assert.ok(
       form.includes(
-        "const investigationExcluded = isInvestigationScopeEmptied({ touched: scopeTouched.INVESTIGATION, texts: scopeLines.INVESTIGATION.map((row) => row.text), });"
+        "const [investigationExcluded, setInvestigationExcluded] = useState<boolean>( quote?.investigationExcluded ?? false );"
       ),
-      "조사작업 뺌을 도메인으로 정하지 않는다"
+      "조사작업 제외가 상태가 아니다"
     );
+    // 예전의 계산값(손대서 비웠는가)이 남아 있으면 체크 상자와 두 목소리가 된다.
+    assert.ok(!form.includes("const investigationExcluded ="), "조사작업 제외를 아직도 렌더마다 셈한다");
+    assert.ok(!form.includes("scopeTouched.INVESTIGATION,"), "손댔는가로 조사작업 제외를 정한다");
+  });
+
+  test("🔴 체크 상자가 「통전작업 제외」 곁에 같은 모양으로 있다", () => {
+    assert.equal(form.split(powerTestBox).length - 1, 1, "통전작업 제외 체크 상자의 모양이 달라졌다");
+    assert.equal(form.split(investigationBox).length - 1, 1, "조사작업 제외 체크 상자가 없거나 모양이 다르다");
+    const at = form.indexOf(powerTestBox);
+    const next = form.indexOf(investigationBox);
+    assert.ok(at < next, "조사작업 제외가 통전작업 제외 뒤에 있지 않다");
+    // 같은 줄(같은 flex 칸)이다 — 사이에 칸을 열거나 닫는 태그가 없다.
+    const between = form.slice(at + powerTestBox.length, next);
+    assert.ok(!between.includes("<div") && !between.includes("</div>"), `두 체크 상자가 다른 칸에 있다: ${between}`);
+  });
+
+  test("🔴 켜면 값만 바꾼다 — 줄은 감출 뿐 지우지 않는다", () => {
+    assert.ok(toggle.includes("setInvestigationExcluded(excluded); if (excluded) return;"), "켤 때 먼저 돌아서지 않는다");
+    const turningOn = toggle.slice(0, toggle.indexOf("if (excluded) return;"));
+    for (const setter of ["setScopeLines(", "setScopeTouched(", "resetScopeToTemplate(", "editScope("]) {
+      assert.ok(!turningOn.includes(setter), `켜는 갈래가 줄을 바꾼다: ${setter}`);
+    }
+    // 감추는 판정은 칸마다 부르는 isWorkScopeSectionSuppressed 한 곳이다(위 「판정을 부르는 자리」).
+    assert.ok(sectionMap.includes("investigationExcluded, });"), "감춤 판정이 조사작업 제외 상태를 받지 않는다");
+  });
+
+  test("🔴 비어 있는 채 풀면 양식 기본 목록으로 다시 채운다 — 문서가 「비었다」를 읽는 그 뜻으로", () => {
+    assert.ok(
+      toggle.includes(
+        'if (excluded) return; if (writtenScopeTexts(scopeLines.INVESTIGATION).length > 0) return; resetScopeToTemplate("INVESTIGATION"); }'
+      ),
+      "빈 채로 풀어도 다시 채우지 않는다"
+    );
+    // 다시 채우는 도구는 [양식 기본값으로] 단추와 같은 것이다 — 지금 양식의 목록, 손대지 않은 것으로.
+    const reset = sliceBetween(form, "function resetScopeToTemplate(", "function toggleInvestigationExcluded(");
+    assert.ok(reset.includes("const items = workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section]?.items ?? [];"));
+    assert.ok(reset.includes("setScopeLines((prev) => ({ ...prev, [section]: toScopeRows(items) }));"));
+    assert.ok(reset.includes("setScopeTouched((prev) => ({ ...prev, [section]: false }));"));
+    assert.ok(headerRow.includes("onClick={() => resetScopeToTemplate(section)}"), "[양식 기본값으로] 가 다른 도구를 쓴다");
+    // 「비었다」는 미리보기(= 문서)가 양식 기본 목록으로 물러서는 그 판단과 같은 함수다.
+    assert.ok(
+      form.includes(
+        'function writtenScopeTexts(rows: readonly ScopeRow[]): string[] { return rows.map((row) => row.text.trim()).filter((text) => text !== ""); }'
+      )
+    );
+    const preview = sliceBetween(form, "function previewWorkSections(", "function formatAmount(");
+    assert.ok(preview.includes("const written = writtenScopeTexts(scopeLines[section]);"), "미리보기가 다른 「비었다」를 쓴다");
+    assert.ok(preview.includes("items: written.length > 0 ? written : (fromTemplate?.items ?? []),"));
+  });
+
+  test("🔴 조사 칸의 마지막 줄을 지우면 저절로 켜진다 — 켜기만 한다", () => {
+    const fn = sliceBetween(form, "function removeScopeRow(", "function applyOverhaulRule(");
+    assert.ok(
+      fn.includes(
+        'if (section === "INVESTIGATION" && isInvestigationScopeEmptied({ touched: true, texts: remaining.map((r) => r.text) })) { setInvestigationExcluded(true); }'
+      ),
+      "마지막 줄을 지워도 조사작업 제외가 켜지지 않는다"
+    );
+    assert.ok(!fn.includes("setInvestigationExcluded(false)"), "줄을 지우다 제외가 풀린다");
     assert.equal(form.split("isInvestigationScopeEmptied(").length - 1, 1, "판정을 부르는 곳이 하나가 아니다");
+    // 상태를 바꾸는 곳은 둘이다 — 체크 상자(toggleInvestigationExcluded), 그리고 마지막 줄 지우기.
+    assert.equal(form.split("setInvestigationExcluded(").length - 1, 2, "조사작업 제외를 바꾸는 곳이 둘이 아니다");
+    // 글자를 고쳐 쓰느라 칸을 잠깐 비웠다고 켜지면 안 된다 — 줄 입력은 editScope 만 부르고,
+    // editScope 는 조사작업 제외를 건드리지 않는다.
+    assert.ok(
+      visibleBranch.includes(
+        "onChange={(e) => editScope( section, rows.map((r) => (r.key === row.key ? { ...r, text: e.target.value } : r)) ) }"
+      )
+    );
+    const edit = sliceBetween(form, "function editScope(", "function resetScopeToTemplate(");
+    assert.ok(!edit.includes("setInvestigationExcluded"), "줄 입력이 조사작업 제외를 바꾼다");
   });
 
-  test("🔴 저장과 미리보기가 같은 결정을 받는다", () => {
+  test("🔴 저장과 미리보기가 같은 상태를 받는다 — 기본 작업비 스냅숏은 그대로", () => {
     const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
-    assert.ok(collect.includes("investigationExcluded,"), "저장에 조사작업 뺌이 실리지 않는다");
+    assert.ok(collect.includes("investigationExcluded,"), "저장에 조사작업 제외가 실리지 않는다");
+    // 뺀 사실은 investigationExcluded 가 말하고, 기본 작업비는 근거로 그때 값 그대로 보낸다.
+    assert.ok(collect.includes("laborBaseCost: activeLabor?.baseCost ?? null,"), "기본 작업비 스냅숏이 달라졌다");
     assert.ok(
       form.includes(
-        "// 조사 칸을 손대서 비웠으면 「① 인수 조사」도 사라진다 — 저장하면 그 결정이 남는다. investigationExcluded,"
+        "// 「조사작업 제외」를 켜면 「① 인수 조사」도 사라진다 — 저장할 때와 같은 그 상태다. investigationExcluded,"
       ),
-      "미리보기에 조사작업 뺌을 넘기지 않는다"
+      "미리보기에 조사작업 제외를 넘기지 않는다"
     );
   });
 
-  test("🔴 조사 칸은 감추지 않고 칸 안에 안내를 띄운다 — 감추면 줄을 다시 넣을 자리가 없다", () => {
-    assert.ok(visibleBranch.includes('{section === "INVESTIGATION" && investigationExcluded && ('), "안내가 없다");
-    assert.ok(visibleBranch.includes("{INVESTIGATION_EMPTIED_NOTICE}"));
-    const notice = sliceBetween(form, "const INVESTIGATION_EMPTIED_NOTICE =", ";");
-    assert.ok(notice.includes("견적서에 나가지 않습니다"), notice);
-    assert.ok(notice.includes("양식 기본값으로"), notice);
+  test("🔴 작업비 계산에 넘긴다 — 조사 몫을 셀 통전 공수시간 · 단가는 통전작업 제외가 꺼져 있어도 넘긴다", () => {
+    // 조사 몫 = 기본 작업비 − 통전 몫. 통전 몫은 이 인자로만 셈한다(domain 의 한 곳).
+    assert.ok(
+      form.includes(
+        "activeLabor ? { excluded: powerTestExcluded, hours: activeLabor.powerTestHours, hourlyRate: activeLabor.hourlyRate, } : undefined,"
+      ),
+      "통전 공수시간 · 단가를 넘기는 모양이 달라졌다"
+    );
+    assert.ok(
+      form.includes(
+        "activeLabor ? { excluded: investigationExcluded } : undefined ), [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded] );"
+      ),
+      "작업비 계산이 조사작업 제외를 받지 않는다"
+    );
+    assert.ok(form.includes("const investigationDeduction = laborSuggestion.investigationDeduction ?? null;"));
+  });
+
+  test("🔴 내역이 뺀 조사작업 몫과 까닭을 말한다 — 통전 차감 줄은 예전 그대로", () => {
+    const breakdown = sliceBetween(form, '<p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300"> 기본 작업비{" "}', "</p>");
+    assert.ok(breakdown.includes("{investigationDeduction !== null && ("), "뺀 조사 몫을 그리지 않는다");
+    assert.ok(breakdown.includes("− 조사작업 몫"), breakdown);
+    assert.ok(breakdown.includes("{formatAmount(investigationDeduction)}"), breakdown);
+    assert.ok(breakdown.includes("(조사작업 제외)"), breakdown);
+    // 기본 작업비는 통째로 빠지지 않는다 — 지운 줄로 그리지 않고 예전 모양 그대로다.
+    assert.ok(!breakdown.includes("line-through"), "기본 작업비를 통째로 뺀 것처럼 그린다");
+    assert.ok(breakdown.includes('<b className="tabular-nums">{formatAmount(laborSuggestion.baseCost)}</b>'));
+    // 통전 차감 줄 — 예전 그대로.
+    assert.ok(
+      breakdown.includes(
+        '{powerTestDeduction !== null && ( <> <span className="text-zinc-500 dark:text-zinc-400">· 통전작업 제외</span>{" "} <b className="tabular-nums text-amber-700 dark:text-amber-400"> −{formatAmount(powerTestDeduction)} </b>{" "} </> )}'
+      ),
+      "통전 차감 줄이 달라졌다"
+    );
+    // 🔴 못 뺀 까닭 셋. 기본 작업비를 정하지 않은 경우는 예전 안내가 그대로 말한다.
+    const reasons: readonly (readonly [string, string])[] = [
+      ["NO_POWER_TEST_HOURS", "통전 공수시간이 정해지지 않아 조사작업 몫(기본 작업비 − 통전작업 몫)을 셀 수 없습니다 — 빼지 않았습니다"],
+      ["UNKNOWN_HOURLY_RATE", "시간당 작업비를 읽지 못해 조사작업 몫을 셀 수 없습니다 — 빼지 않았습니다"],
+      ["CLAMPED_TO_ZERO", "통전작업 몫이 기본 작업비보다 커서 조사작업 몫을 0원에서 멈췄습니다"],
+    ];
+    for (const [notice, phrase] of reasons) {
+      const branch = sliceBetween(form, `{laborSuggestion.investigationNotice === "${notice}" && (`, "</p>");
+      assert.ok(branch.includes(phrase), branch);
+    }
+    assert.ok(form.includes("{laborSuggestion.baseCost === null && ( <p"), "기본 작업비를 정하지 않은 안내가 달라졌다");
+    // 옛 갈래(조사 제외면 기본 작업비를 통째로 빼고 통전 차감을 안 한다)는 없다.
+    for (const gone of ["BASE_COST_DROPPED", "baseCostDroppedByInvestigation", "조사작업 제외로 뺌"]) {
+      assert.ok(!form.includes(gone), `옛 갈래가 남았다: ${gone}`);
+    }
+  });
+
+  test("🔴 작업비 칸은 [계산한 작업비 적용] 을 누를 때만 바뀐다 — 체크가 금액을 조용히 덮지 않는다", () => {
+    assert.equal(form.split("setWorkCost(").length - 1, 1, "작업비 칸을 바꾸는 곳이 늘었다");
+    assert.ok(form.includes("onClick={() => setWorkCost(String(laborSuggestion.total))}"));
+    assert.ok(!toggle.includes("setWorkCost"), "체크 상자가 작업비 칸을 바꾼다");
+  });
+
+  test("옛 안내(「줄을 모두 지워 빠진다」)는 없다 — 감춘 칸의 안내가 대신한다", () => {
+    assert.ok(!form.includes("INVESTIGATION_EMPTIED_NOTICE"));
+    assert.ok(!visibleBranch.includes('section === "INVESTIGATION"'), "보이는 칸에 조사 전용 갈래가 남았다");
   });
 });
 
@@ -158,11 +293,13 @@ describe("「2) 수리 작업」 줄을 지우면 그 작업의 체크도 풀린
 
 describe("감춘 칸", () => {
   test("🔴 줄 입력·[+ 줄 추가]·[×] 가 없고 안내가 있다", () => {
+    assert.ok(suppressedBranch.includes("{SUPPRESSED_SCOPE_NOTICES[section]}"), "안내를 그리지 않는다");
+    // 칸마다 제 안내 — 묶음이 늘면 Record 가 컴파일에서 막는다.
     assert.ok(
-      suppressedBranch.includes(
-        '{section === "REPAIR" ? REPAIR_SCOPE_DROPPED_NOTICE : WORK_SCOPE_SUPPRESSED_NOTICE}'
+      form.includes(
+        "const SUPPRESSED_SCOPE_NOTICES: Record<QuoteWorkScopeSection, string> = { INVESTIGATION: INVESTIGATION_EXCLUDED_NOTICE, REPAIR: REPAIR_SCOPE_DROPPED_NOTICE, POWER_TEST: WORK_SCOPE_SUPPRESSED_NOTICE, };"
       ),
-      "안내를 그리지 않는다"
+      "칸마다의 안내가 달라졌다"
     );
     for (const absent of ["rows.map", "<input", "+ 줄 추가", "×", "아직 없습니다"]) {
       assert.ok(!suppressedBranch.includes(absent), `감춘 칸에 '${absent}' 가 있다`);
@@ -197,6 +334,18 @@ describe("감춘 칸", () => {
     assert.ok(repairNotice.includes("수리 작업을 하나도 고르지 않아"), repairNotice);
     assert.ok(repairNotice.includes("견적서에 나가지 않습니다"), repairNotice);
     assert.ok(repairNotice.includes("작업을 고르면 다시 보입니다"), repairNotice);
+    // 🔴 조사작업 쪽은 **기본 작업비 중 조사작업 몫이 빠진다**는 것까지 말한다 — 구역만 빠지는
+    // 줄 알고 켜면 작업비가 줄어든 것을 모른 채 적용한다. 되돌리는 길(체크를 푼다)도 함께.
+    const investigationNotice = sliceBetween(form, "const INVESTIGATION_EXCLUDED_NOTICE =", ";");
+    assert.ok(investigationNotice.includes("조사작업 제외"), investigationNotice);
+    assert.ok(investigationNotice.includes("견적서에 나가지 않"), investigationNotice);
+    assert.ok(
+      investigationNotice.includes("기본 작업비 중 조사작업 몫(기본 작업비 − 통전작업 몫)이 빠집니다"),
+      investigationNotice
+    );
+    assert.ok(!investigationNotice.includes("기본 작업비도"), "기본 작업비가 통째로 빠지는 것처럼 말한다");
+    assert.ok(investigationNotice.includes("체크를 풀면 적어 둔 줄이 다시 보이고"), investigationNotice);
+    assert.ok(investigationNotice.includes("양식 기본 목록으로 채워집니다"), investigationNotice);
   });
 });
 
@@ -243,6 +392,7 @@ describe("🔴 감출 뿐 지우지 않는다", () => {
         assert.ok(!call.includes("suppressed"), `${setter} 가 감춤을 본다: ${call}`);
         assert.ok(!call.includes("powerTestExcluded"), `${setter} 가 제외 상태를 본다: ${call}`);
         assert.ok(!call.includes("repairSectionDropped"), `${setter} 가 수리 빠짐을 본다: ${call}`);
+        assert.ok(!call.includes("investigationExcluded"), `${setter} 가 조사작업 제외를 본다: ${call}`);
         calls += 1;
         at = form.indexOf(setter, at + setter.length);
       }

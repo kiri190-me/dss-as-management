@@ -33,6 +33,31 @@
  * 않은 장비(T/C)에서 0 을 빼면 합계는 350만원 그대로인데 사람은 210만원이 나온
  * 줄 안다. 그래서 못 뺀 이유를 함께 돌려주고 화면이 그것을 말한다 — 아래
  * `unknown` 이 "무엇이 빠졌는지 이름을 돌려준다"고 한 그 정신과 같다.
+ *
+ * ── 조사작업을 빼면 기본 작업비 중 조사 몫을 뺀다 ───────────────────────
+ * 기본 작업비는 **조사작업 몫 + 통전작업 몫**이다(2026-09-15 사용자: 「[조사작업
+ * 제외]를 체크하면 기본 작업비에서 통전작업비를 뺀 금액만 기본 작업비에서 빠져야
+ * 해」). 통전 몫이 위의 `통전 공수시간 × 시간당 작업비` 이고, 조사 몫은 그 나머지
+ * `기본 작업비 − 통전 몫` 이다. 350만원 · 통전 140만원이면:
+ *
+ *   · 조사작업 제외만 — 조사 몫 210만원을 뺀다 → 고른 작업 + 140만원
+ *   · 통전작업 제외만 — 통전 몫 140만원을 뺀다 → 고른 작업 + 210만원
+ *   · 둘 다           — 두 몫을 다 뺀다       → 고른 작업만
+ *
+ * 두 차감은 **서로를 보지 않는다** — 통전 차감은 조사 제외 여부와 관계없이 예전 그대로
+ * 셈하고 싣는다(labor_power_test_deduction 의 뜻도 그대로 「통전 몫」이다).
+ * 🔴 **통전 몫은 한 곳에서만 셈한다**(resolvePowerTestShare). 조사 몫이 같은 셈을 따로
+ * 적으면 한쪽만 고쳐지는 날 두 몫의 합이 기본 작업비와 어긋난다.
+ *
+ * 조사 몫도 **못 빼는 쪽이 기본이다** — 기본 작업비 · 통전 공수시간 · 시간당 작업비 중
+ * 하나라도 모르면 빼지 않고 까닭을 돌려준다(`investigationNotice`). 통전 몫을 모른다고
+ * 기본 작업비를 통째로 빼지 않는다 — 그러면 통전 몫까지 빠진다. 통전 몫이 기본 작업비보다
+ * 크면 조사 몫은 0 에서 멈춘다.
+ *
+ * 🔴 **조사 몫은 저장하지 않는다**(새 칸을 만들지 않았다 — 마이그레이션 없음). 통전 쪽의
+ * `labor_power_test_deduction` 같은 스냅숏이 없으므로, 나중에 설정(기본 작업비 · 통전
+ * 공수시간 · 시간당 작업비)이 바뀌면 그 장에서 조사 몫이 얼마였는지 다시 셀 수 없다. 청구
+ * 금액은 사람이 적용한 `work_cost` 그대로 남고, 뺀 사실은 `investigation_excluded` 가 말한다.
  * ============================================================================
  */
 
@@ -46,13 +71,17 @@ export type SelectedRepairTask = {
 };
 
 /**
- * 「통전작업 제외」를 켰을 때 얼마를 빼는가를 셈하는 데 필요한 것.
+ * 통전작업 — 그 장비의 통전 공수시간 · 시간당 작업비와 「통전작업 제외」.
  *
  * 세 값 다 **그때 값**이다 — 화면이 이미 들고 있는 `RepairLaborKindRow` 에서
  * 그대로 온다(queries/repair-labor.ts). 이 함수가 설정 표를 다시 보지 않는다.
+ *
+ * 🔴 `hours` · `hourlyRate` 는 **`excluded` 가 거짓이어도 넘긴다.** 「조사작업 제외」가
+ * 조사 몫(기본 작업비 − 통전 몫)을 셀 때 통전 몫이 필요하기 때문이다. `excluded` 가
+ * 거짓이면 통전 차감만 일어나지 않는다.
  */
 export type PowerTestExclusion = {
-  /** 사람이 켠 「통전작업 제외」. 꺼져 있으면 아무 일도 일어나지 않는다. */
+  /** 사람이 켠 「통전작업 제외」. 꺼져 있으면 통전 차감은 일어나지 않는다. */
   excluded: boolean;
   /**
    * 그 장비의 통전작업 공수시간.
@@ -61,6 +90,18 @@ export type PowerTestExclusion = {
   hours: number | null;
   /** 그때의 시간당 작업비(원). numeric 이라 문자열로 오간다. */
   hourlyRate: string;
+};
+
+/**
+ * 「조사작업 제외」. 켜면 기본 작업비 중 **조사 몫**(기본 작업비 − 통전 몫)을 뺀다.
+ *
+ * 통전 몫은 여기서 따로 받지 않고 `powerTest` 인자의 공수시간 · 시간당 작업비로 셈한다 —
+ * 셈하는 곳이 한 곳이어야 두 몫의 합이 기본 작업비와 맞는다. `powerTest` 를 주지 않으면
+ * 통전 공수시간을 모르는 것과 같다(`NO_POWER_TEST_HOURS`).
+ */
+export type InvestigationExclusion = {
+  /** 사람이 켠 「조사작업 제외」. 꺼져 있으면 아무 일도 일어나지 않는다. */
+  excluded: boolean;
 };
 
 /**
@@ -78,8 +119,23 @@ export type PowerTestDeductionNotice =
   | "UNKNOWN_HOURLY_RATE"
   | "CLAMPED_TO_ZERO";
 
+/**
+ * 「조사작업 제외」를 켰는데 조사 몫을 그대로 빼지 못한 까닭 — 통전 쪽과 같은 모양이다.
+ *
+ * · `NO_BASE_COST`        기본 작업비를 아직 정하지 않았다 — 뺄 바탕이 없다.
+ * · `NO_POWER_TEST_HOURS` 통전 공수시간을 모른다(T/C) — 통전 몫을 몰라 조사 몫도 셀 수
+ *                         없다. **기본 작업비를 통째로 빼지 않는다.**
+ * · `UNKNOWN_HOURLY_RATE` 시간당 작업비를 숫자로 읽을 수 없다 — 위와 같은 까닭이다.
+ * · `CLAMPED_TO_ZERO`     통전 몫이 기본 작업비보다 커서 조사 몫이 0 에서 멈췄다.
+ */
+export type InvestigationDeductionNotice =
+  | "NO_BASE_COST"
+  | "NO_POWER_TEST_HOURS"
+  | "UNKNOWN_HOURLY_RATE"
+  | "CLAMPED_TO_ZERO";
+
 export type QuoteLaborSuggestion = {
-  /** 제안할 작업비 합계(원). 기본 작업비 + 고른 작업의 합 − 통전작업 차감. */
+  /** 제안할 작업비 합계(원). 기본 작업비 + 고른 작업의 합 − 통전작업 차감 − 조사작업 차감. */
   total: number;
   /** 그중 고른 작업의 합만. 화면이 내역을 갈라 보여 줄 때 쓴다. */
   tasksTotal: number;
@@ -100,19 +156,33 @@ export type QuoteLaborSuggestion = {
   powerTestDeduction?: number | null;
   /** 못 뺐거나 0 에서 멈춘 까닭. 그대로 뺐으면 `null` 이다. */
   powerTestNotice?: PowerTestDeductionNotice | null;
+  /**
+   * 「조사작업 제외」로 **실제로 뺀 조사 몫**(원, 0 이상 — 기본 작업비 − 통전 몫). `null`
+   * 이면 빼지 않았다. 화면이 「− 조사작업 몫 ○○원(조사작업 제외)」으로 까닭과 함께 보인다.
+   *
+   * 🔴 저장하지 않는다 — 파일 머리말의 그 항목. 그리고 **부탁하지 않았거나 꺼져 있으면 이
+   * 키 자체가 없다**(아래 `investigationNotice` 도 — 위 `powerTestDeduction` 과 같은 약속).
+   */
+  investigationDeduction?: number | null;
+  /** 조사 몫을 못 뺐거나 0 에서 멈춘 까닭. 그대로 뺐으면 `null` 이다. */
+  investigationNotice?: InvestigationDeductionNotice | null;
 };
 
 /**
  * @param baseCost 이 장비 종류의 기본 작업비.
  *   · `null` — 아직 정하지 않았다. **0 으로 접지 않고** 더하지 않는다.
  *   · `"3500000"` — 더한다. `"0"` 은 실제 0원이라 더해도 합계가 그대로다.
- * @param powerTest 「통전작업 제외」. **주지 않으면 예전과 한 글자도 다르지
- *   않은 결과가 나온다** — 옛 견적서가 달라지지 않는 자리가 여기다.
+ * @param powerTest 통전작업의 공수시간 · 시간당 작업비와 「통전작업 제외」. **주지 않으면
+ *   예전과 한 글자도 다르지 않은 결과가 나온다** — 옛 견적서가 달라지지 않는 자리가 여기다.
+ *   「조사작업 제외」가 통전 몫을 셀 때도 이 값을 쓴다.
+ * @param investigation 「조사작업 제외」. 켜면 기본 작업비 중 조사 몫을 뺀다(파일 머리말).
+ *   **주지 않거나 꺼져 있으면 예전과 한 글자도 다르지 않다.**
  */
 export function sumQuoteLaborCost(
   tasks: readonly SelectedRepairTask[],
   baseCost: string | null,
-  powerTest?: PowerTestExclusion
+  powerTest?: PowerTestExclusion,
+  investigation?: InvestigationExclusion
 ): QuoteLaborSuggestion {
   let tasksTotal = 0;
   const unknown: string[] = [];
@@ -142,22 +212,61 @@ export function sumQuoteLaborCost(
     unknown,
   };
 
-  // 🔴 부탁하지 않았으면 여기서 끝난다 — 키도 만들지 않는다(위 그 항목).
-  if (!powerTest?.excluded) return suggestion;
+  // 🔴 부탁하지 않은 차감은 키도 만들지 않는다(위 그 항목). 둘 다 아니면 여기서 끝난다.
+  if (!powerTest?.excluded && !investigation?.excluded) return suggestion;
 
-  const { deduction, notice } = resolvePowerTestDeduction(addedBase, powerTest);
-  suggestion.powerTestDeduction = deduction;
-  suggestion.powerTestNotice = notice;
-  // 뺀 몫은 **기본 작업비에서만** 나간다. 고른 작업의 합은 따로 청구하는 일이라
-  // 여기에 걸리지 않는다.
-  if (deduction !== null && addedBase !== null) {
-    suggestion.total = tasksTotal + (addedBase - deduction);
+  // 기본 작업비 중 남는 몫. 뺀 몫은 **기본 작업비에서만** 나간다 — 고른 작업의 합은 따로
+  // 청구하는 일이라 어느 차감에도 걸리지 않는다.
+  let baseLeft = addedBase;
+
+  if (powerTest?.excluded) {
+    const { deduction, notice } = resolvePowerTestDeduction(addedBase, powerTest);
+    suggestion.powerTestDeduction = deduction;
+    suggestion.powerTestNotice = notice;
+    if (deduction !== null && baseLeft !== null) baseLeft = baseLeft - deduction;
   }
+
+  // 조사 몫은 통전 차감과 **따로** 셈한다 — 기본 작업비에서 통전 몫을 뺀 나머지다. 둘 다
+  // 켜면 두 몫이 다 빠져 기본 작업비가 0 이 된다(통전 몫이 기본 작업비보다 크면 통전 쪽이
+  // 기본 작업비까지만 빼고 조사 몫은 0 이라 역시 0 — 음수는 없다).
+  if (investigation?.excluded) {
+    const { deduction, notice } = resolveInvestigationDeduction(addedBase, powerTest);
+    suggestion.investigationDeduction = deduction;
+    suggestion.investigationNotice = notice;
+    if (deduction !== null && baseLeft !== null) baseLeft = baseLeft - deduction;
+  }
+
+  suggestion.total = tasksTotal + (baseLeft ?? 0);
   return suggestion;
 }
 
 /**
- * 얼마를 뺄 수 있는가. **못 빼는 쪽이 기본이다** — 셋 중 하나라도 모르면
+ * 통전 몫 — `통전 공수시간 × 시간당 작업비`. 🔴 **이 셈은 여기 한 곳이다** — 통전 차감과
+ * 조사 몫이 함께 부른다. 둘 중 하나라도 모르면 몫 대신 까닭을 돌려준다(0 으로 접지 않는다).
+ */
+function resolvePowerTestShare(
+  powerTest: PowerTestExclusion | undefined
+):
+  | { share: number; notice: null }
+  | { share: null; notice: "NO_POWER_TEST_HOURS" | "UNKNOWN_HOURLY_RATE" } {
+  // 통전 인자를 받지 못했으면 공수시간을 모르는 것과 같다.
+  if (!powerTest) return { share: null, notice: "NO_POWER_TEST_HOURS" };
+  const { hours, hourlyRate } = powerTest;
+
+  // 🔴 null 은 0 이 아니다. 조용히 0 을 빼면 사람은 210만원이 나온 줄 안다.
+  if (hours === null || !Number.isFinite(hours)) {
+    return { share: null, notice: "NO_POWER_TEST_HOURS" };
+  }
+
+  // 빈 문자열도 "모른다"이다 — Number("") 는 0 이라 그냥 두면 0원을 뺀 것이 된다.
+  const rate = hourlyRate.trim() === "" ? Number.NaN : Number(hourlyRate);
+  if (!Number.isFinite(rate)) return { share: null, notice: "UNKNOWN_HOURLY_RATE" };
+
+  return { share: hours * rate, notice: null };
+}
+
+/**
+ * 통전 몫을 얼마 뺄 수 있는가. **못 빼는 쪽이 기본이다** — 셋 중 하나라도 모르면
  * 0 을 빼는 대신 이유를 돌려준다.
  */
 function resolvePowerTestDeduction(
@@ -168,18 +277,33 @@ function resolvePowerTestDeduction(
   // 여기서 차감까지 만들면 고른 작업의 합에서 통전 몫이 빠진다.
   if (addedBase === null) return { deduction: null, notice: "NO_BASE_COST" };
 
-  // 🔴 null 은 0 이 아니다. 조용히 0 을 빼면 사람은 210만원이 나온 줄 안다.
-  const hours = powerTest.hours;
-  if (hours === null || !Number.isFinite(hours)) {
-    return { deduction: null, notice: "NO_POWER_TEST_HOURS" };
-  }
+  const resolved = resolvePowerTestShare(powerTest);
+  if (resolved.notice !== null) return { deduction: null, notice: resolved.notice };
 
-  // 빈 문자열도 "모른다"이다 — Number("") 는 0 이라 그냥 두면 0원을 뺀 것이 된다.
-  const rate = powerTest.hourlyRate.trim() === "" ? Number.NaN : Number(powerTest.hourlyRate);
-  if (!Number.isFinite(rate)) return { deduction: null, notice: "UNKNOWN_HOURLY_RATE" };
-
-  const wanted = hours * rate;
   // 🔴 0 에서 멈춘다. 음수 청구는 없다 — 그리고 멈췄다는 사실을 알린다.
-  if (wanted > addedBase) return { deduction: addedBase, notice: "CLAMPED_TO_ZERO" };
-  return { deduction: wanted, notice: null };
+  if (resolved.share > addedBase) return { deduction: addedBase, notice: "CLAMPED_TO_ZERO" };
+  return { deduction: resolved.share, notice: null };
+}
+
+/**
+ * 조사 몫을 얼마 뺄 수 있는가 — `기본 작업비 − 통전 몫`. 통전 차감과 같은 원칙으로 **못
+ * 빼는 쪽이 기본이다.** 🔴 통전 몫을 모른다고 기본 작업비를 통째로 빼지 않는다 — 그러면
+ * 통전 몫까지 빠져 사람이 뜻한 것보다 더 깎인다.
+ */
+function resolveInvestigationDeduction(
+  addedBase: number | null,
+  powerTest: PowerTestExclusion | undefined
+): { deduction: number | null; notice: InvestigationDeductionNotice | null } {
+  if (addedBase === null) return { deduction: null, notice: "NO_BASE_COST" };
+
+  const resolved = resolvePowerTestShare(powerTest);
+  if (resolved.notice !== null) return { deduction: null, notice: resolved.notice };
+
+  const wanted = addedBase - resolved.share;
+  // 통전 몫이 기본 작업비보다 크면 조사 몫은 없다 — 음수를 빼면(= 더하면) 안 된다. 0 에서
+  // 멈추고 알린다.
+  if (wanted < 0) return { deduction: 0, notice: "CLAMPED_TO_ZERO" };
+  // 기본 작업비보다 많이 빼지 않는다 — 통전 몫이 음수로 적힌 설정이 오더라도 합계가 고른
+  // 작업의 합 아래로 내려가지 않게.
+  return { deduction: Math.min(wanted, addedBase), notice: null };
 }

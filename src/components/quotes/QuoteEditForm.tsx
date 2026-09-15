@@ -129,20 +129,32 @@ const SAVE_FAILED_MESSAGE =
 
 /**
  * 「작업 내역」에서 문서에 나가지 않는 칸 자리에 두는 안내. 「통전작업 제외」를 켰을
- * 때의 「3) 통전작업」과, 제너레이터에서 수리 작업을 하나도 고르지 않았을 때의
- * 「2) 수리 작업」 둘이다(domain/quote-work-scope-suppression.ts). 줄은 감췄을
- * 뿐이라 되돌리면 그대로 다시 보인다 — 그 사실도 함께 말한다.
+ * 때의 「3) 통전작업」, 제너레이터에서 수리 작업을 하나도 고르지 않았을 때의
+ * 「2) 수리 작업」, 「조사작업 제외」를 켰을 때의 「1) 조사작업」 셋이다
+ * (domain/quote-work-scope-suppression.ts). 줄은 감췄을 뿐이라 되돌리면 그대로 다시
+ * 보인다 — 그 사실도 함께 말한다.
  */
 const WORK_SCOPE_SUPPRESSED_NOTICE =
   "통전작업 제외 — 이 구역은 견적서에 나가지 않습니다. 체크를 풀면 적어 둔 줄이 다시 보입니다.";
 const REPAIR_SCOPE_DROPPED_NOTICE =
   "수리 작업을 하나도 고르지 않아 이 구역은 견적서에 나가지 않습니다. 위 목록에서 작업을 고르면 다시 보입니다.";
 /**
- * 조사 칸을 손대서 비웠을 때 그 칸 안에 두는 안내. 조사 칸은 **감추지 않는다** —
- * 되돌리는 체크 상자가 없어서, 감추면 줄을 다시 넣을 자리가 없어진다.
+ * 「조사작업 제외」를 켰을 때 「1) 조사작업」 칸 자리의 안내. 🔴 **기본 작업비 중 조사작업
+ * 몫(기본 작업비 − 통전작업 몫)이 작업비 계산에서 빠진다**는 것을 함께 말한다(2026-09-15
+ * 사용자 결정 — domain/quote-labor-cost.ts). 문서에서 구역만 빠지는 줄 알고 켜면, 계산한
+ * 작업비가 그만큼 줄어든 것을 모른 채 적용한다.
+ *
+ * 예전에는 되돌리는 체크 상자가 없어 조사 칸을 감추지 않고 칸 안에 「줄을 모두 지워 빠진다」
+ * 안내를 두었다. 이제 체크를 풀면 되돌아오므로 통전작업처럼 감춘다.
  */
-const INVESTIGATION_EMPTIED_NOTICE =
-  "조사 줄을 모두 지워 이 구역은 머리글까지 견적서에 나가지 않습니다. 줄을 더하거나 [양식 기본값으로]를 누르면 다시 나갑니다.";
+const INVESTIGATION_EXCLUDED_NOTICE =
+  "조사작업 제외 — 이 구역은 견적서에 나가지 않고, 기본 작업비 중 조사작업 몫(기본 작업비 − 통전작업 몫)이 빠집니다. 체크를 풀면 적어 둔 줄이 다시 보이고, 줄이 없었으면 양식 기본 목록으로 채워집니다.";
+/** 감춘 칸마다의 안내. `Record` 라 묶음이 하나 더 생기면 컴파일러가 여기를 짚는다. */
+const SUPPRESSED_SCOPE_NOTICES: Record<QuoteWorkScopeSection, string> = {
+  INVESTIGATION: INVESTIGATION_EXCLUDED_NOTICE,
+  REPAIR: REPAIR_SCOPE_DROPPED_NOTICE,
+  POWER_TEST: WORK_SCOPE_SUPPRESSED_NOTICE,
+};
 
 type ItemRow = {
   key: string;
@@ -251,6 +263,16 @@ function toScopeRows(texts: readonly string[]): ScopeRow[] {
 }
 
 /**
+ * 그 묶음에서 **문서에 적힐 줄**. 빈 줄과 앞뒤 공백을 버린다 — 저장할 때 그렇게 걸러지므로
+ * (validation/quote-input.ts 의 normalizeWorkScopeLines). 하나도 없으면 문서에는 양식의 기본
+ * 목록이 나간다(previewWorkSections). 「조사작업 제외」를 풀 때 다시 채울지도 이것으로 본다 —
+ * 화면과 문서가 「비었다」를 같은 뜻으로 읽게.
+ */
+function writtenScopeTexts(rows: readonly ScopeRow[]): string[] {
+  return rows.map((row) => row.text.trim()).filter((text) => text !== "");
+}
+
+/**
  * 미리보기에 그릴 작업 내역 세 묶음 — **지금 화면에 적혀 있는 값**으로 만든다.
  *
  * 🔴 저장된 견적서를 그릴 때와 **같은 답이 나와야 한다**
@@ -273,7 +295,7 @@ function previewWorkSections(
 ): QuoteWorkSections {
   const sections = {} as Record<QuoteWorkScopeSection, { label: string; items: string[] }>;
   for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-    const written = scopeLines[section].map((row) => row.text.trim()).filter((text) => text !== "");
+    const written = writtenScopeTexts(scopeLines[section]);
     const fromTemplate = templateDefaults?.[section];
     sections[section] = {
       // 양식을 아예 못 읽었을 때만 화면 표기로 물러선다 — 머리글 자리가 빈 채로
@@ -480,6 +502,22 @@ export default function QuoteEditForm({
   const [powerTestExcluded, setPowerTestExcluded] = useState<boolean>(
     quote?.powerTestExcluded ?? false
   );
+  /**
+   * 「조사작업 제외」(2026-09-15 사용자 결정). **사람의 결정**이고, 켜면 문서에서
+   * 「① 조사작업」 구역이 머리글까지 빠지고 🔴 **기본 작업비 중 조사작업 몫(기본 작업비 −
+   * 통전작업 몫)이 작업비 계산에서 빠진다**(domain/quote-labor-cost.ts). 작업비 칸은 [계산한
+   * 작업비 적용]을 누르기 전까지 그대로다.
+   *
+   * 저장된 견적서는 그때 결정(quotes.investigation_excluded)을 그대로 편다. 조사 칸의 마지막
+   * 줄을 지우면 저절로 켜지고(removeScopeRow), 켜도 줄은 감출 뿐 지우지 않는다. 비어 있는 채
+   * 풀면 양식 기본 목록으로 다시 채운다(toggleInvestigationExcluded).
+   *
+   * 예전에는 상태가 아니라 「조사 칸을 손대서 비웠는가」를 렌더마다 셈한 값이었다. 체크
+   * 상자가 생겨 줄이 있어도 뺄 수 있고 비어 있어도 되돌릴 수 있게 되어 상태로 바꿨다.
+   */
+  const [investigationExcluded, setInvestigationExcluded] = useState<boolean>(
+    quote?.investigationExcluded ?? false
+  );
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
@@ -521,8 +559,9 @@ export default function QuoteEditForm({
    * 사람이 정한 내용이다.
    */
   const [scopeTouched, setScopeTouched] = useState<Record<QuoteWorkScopeSection, boolean>>(() => ({
-    // 조사 칸을 비워 둔 채 저장한 장(investigationExcluded)도 손댄 것이다 — 아니면 다시
-    // 열어 저장하는 것만으로 그 결정이 풀리고, 표준 목록이 되살아나 문서에 나간다.
+    // 「조사작업 제외」로 저장한 장(investigationExcluded)도 손댄 것으로 본다 — 아니면 종류를
+    // 바꿀 때 감춰 둔 조사 칸에 양식 기본값이 사람 모르게 들어와 함께 저장된다. 비어 있는 채
+    // 체크를 풀면 그때 다시 채운다(toggleInvestigationExcluded).
     INVESTIGATION:
       (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION") ||
       quote?.investigationExcluded === true,
@@ -646,12 +685,21 @@ export default function QuoteEditForm({
               hours: activeLabor.powerTestHours,
               hourlyRate: activeLabor.hourlyRate,
             }
-          : undefined
+          : undefined,
+        // 「조사작업 제외」 — 켜면 기본 작업비 중 조사 몫(기본 작업비 − 통전 몫)을 뺀다. 통전 몫은
+        // 바로 위 인자의 공수시간 · 단가로 셈한다 — 그래서 위 인자는 「통전작업 제외」가 꺼져
+        // 있어도 값을 넘긴다. 장비 종류를 안 골랐으면 부탁하지 않는다(결과에 키도 생기지 않는다).
+        activeLabor ? { excluded: investigationExcluded } : undefined
       ),
-    [selectedTasks, activeLabor, powerTestExcluded]
+    [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded]
   );
   /** 실제로 뺀 금액(원). 켜지 않았거나 뺄 수 없었으면 null. */
   const powerTestDeduction = laborSuggestion.powerTestDeduction ?? null;
+  /**
+   * 「조사작업 제외」로 실제로 뺀 조사 몫(원). 켜지 않았거나 셀 수 없었으면 null.
+   * 🔴 저장하지 않는다 — 담을 칸이 없다(domain/quote-labor-cost.ts 머리말).
+   */
+  const investigationDeduction = laborSuggestion.investigationDeduction ?? null;
 
   /**
    * 견적서 종류를 바꾸면 **오버홀 작업이 따라 체크·해제된다**(2026-08-31 요구).
@@ -704,6 +752,35 @@ export default function QuoteEditForm({
   }
 
   /**
+   * 그 묶음을 **지금 양식의 기본 목록**으로 되돌린다 — [양식 기본값으로] 단추, 그리고 빈 채로
+   * 「조사작업 제외」를 풀 때(toggleInvestigationExcluded). 되돌린 뒤로는 손대지 않은 것으로
+   * 본다 — 종류를 바꾸면 새 양식의 목록을 따라간다(fillScopeFromTemplate).
+   */
+  function resetScopeToTemplate(section: QuoteWorkScopeSection) {
+    const items = workScopeDefaults[quoteTemplateKey(laborKind, kind)]?.[section]?.items ?? [];
+    setScopeLines((prev) => ({ ...prev, [section]: toScopeRows(items) }));
+    setScopeTouched((prev) => ({ ...prev, [section]: false }));
+  }
+
+  /**
+   * 「조사작업 제외」 체크 상자.
+   *
+   * 🔴 **켜면 값만 바꾼다** — 줄은 감출 뿐 지우지 않는다(「통전작업 제외」와 같다). 풀면 적어 둔
+   * 줄이 그대로 돌아온다.
+   *
+   * 🔴 **비어 있는 채 풀면 양식 기본 목록으로 다시 채운다.** 빈 묶음은 문서에 양식의 기본 목록이
+   * 그대로 나가므로(previewWorkSections · xlsx 의 「빈 묶음은 양식 그대로」), 화면만 빈 채로 두면
+   * 화면에는 아무것도 없는데 문서에는 표준 조사 목록이 적힌 — 서로 다른 말을 하게 된다.
+   * 「비었다」는 문서가 읽는 그 뜻(writtenScopeTexts — 공백뿐인 줄은 없는 줄)으로 본다.
+   */
+  function toggleInvestigationExcluded(excluded: boolean) {
+    setInvestigationExcluded(excluded);
+    if (excluded) return;
+    if (writtenScopeTexts(scopeLines.INVESTIGATION).length > 0) return;
+    resetScopeToTemplate("INVESTIGATION");
+  }
+
+  /**
    * 작업 내역 줄 하나를 지운다. 「2) 수리 작업」 줄이면 **그 줄을 만든 작업의 체크도
    * 푼다**(2026-09-15 사용자 — 무엇을 풀고 무엇을 두는지는 domain/quote-repair-task-
    * selection.ts 의 uncheckRepairTaskForRemovedLine 이 정한다). 줄은 여기서 이미
@@ -718,6 +795,13 @@ export default function QuoteEditForm({
     // 손으로 켤 때와 같은 일이 따라온다 — 칸이 감춰지고 문서에서 ③ 이 빠진다.
     // 되돌리려면 체크를 풀고 [양식 기본값으로]를 누른다.
     if (section === "POWER_TEST" && remaining.length === 0) setPowerTestExcluded(true);
+    // 「1) 조사작업」도 같다 — 줄을 다 지우면 「조사작업 제외」를 켠다(2026-09-15, 예전의 「손대서
+    // 비우면 뺀다」를 이어받는다). 공백뿐인 줄은 문서에 안 나가므로 없는 줄로 본다
+    // (isInvestigationScopeEmptied). 켜기만 한다 — 끄는 길은 체크 상자 하나다. 🔴 기본 작업비 중
+    // 조사작업 몫이 계산에서 빠지지만, 작업비 칸은 [계산한 작업비 적용]을 누르기 전까지 그대로다.
+    if (section === "INVESTIGATION" && isInvestigationScopeEmptied({ touched: true, texts: remaining.map((r) => r.text) })) {
+      setInvestigationExcluded(true);
+    }
     if (section !== "REPAIR" || !activeLabor) return;
     const next = uncheckRepairTaskForRemovedLine(activeLabor.tasks, taskQuantities, removed.text, remaining.map((r) => r.text));
     if (next !== taskQuantities) setTaskQuantities(next);
@@ -986,9 +1070,13 @@ export default function QuoteEditForm({
       powerTestExcluded,
       laborPowerTestDeduction: powerTestDeduction === null ? null : toAmountText(powerTestDeduction),
       /**
-       * 「① 조사작업」을 뺄 것인가 — 조사 칸을 손대서 비운 채 저장하면 켜진다. 문서는
-       * 저장된 이 결정만 읽는다. 빈 칸만으로 가르면 옛 견적서의 빈 칸과 구별되지 않는다
-       * (isInvestigationScopeEmptied 주석).
+       * 「조사작업 제외」 체크 — 문서는 저장된 이 결정만 읽는다(「① 조사작업」을 뺀다). 빈
+       * 칸만으로 가르면 옛 견적서의 빈 칸과 구별되지 않아 따로 보낸다.
+       *
+       * 🔴 기본 작업비 스냅숏(laborBaseCost)은 **조사 몫을 뺐어도 그대로 보낸다** — 그 장비의
+       * 기본 작업비가 얼마였는지는 근거로 남고, 조사 몫을 뺐다는 사실은 이 칸이 말한다. 뺀 조사
+       * 몫 자체는 **저장하지 않는다**(칸이 없다 — domain/quote-labor-cost.ts 머리말). 금액은
+       * 사람이 [계산한 작업비 적용]으로 넣은 workCost 그대로다.
        */
       investigationExcluded,
       /**
@@ -1155,17 +1243,6 @@ export default function QuoteEditForm({
   });
 
   /**
-   * 조사 칸을 손대서 비웠는가 — 그러면 「① 인수 조사」가 머리글까지 문서에서 빠지고,
-   * 저장하면 그 결정이 견적서에 남는다(quotes.investigation_excluded). 손대지 않은
-   * 빈 칸(옛 견적서 · 장비 종류를 안 고른 새 견적서)은 빼지 않는다
-   * (domain/quote-work-scope-suppression.ts).
-   */
-  const investigationExcluded = isInvestigationScopeEmptied({
-    touched: scopeTouched.INVESTIGATION,
-    texts: scopeLines.INVESTIGATION.map((row) => row.text),
-  });
-
-  /**
    * 🔴 저장하지 않은 변경이 있는가 — [견적서 받기]를 부를지 가른다(견적서 B1c).
    *
    * 발행 통로는 **DB 에 저장된 값**으로 파일을 만든다. 이 폼은 저장하지 않은 변경을 따로
@@ -1243,7 +1320,7 @@ export default function QuoteEditForm({
           powerTestExcluded,
           // 수리 작업을 하나도 안 골랐으면 「② 수리 작업」도 사라진다 — 같은 이유.
           repairSectionDropped,
-          // 조사 칸을 손대서 비웠으면 「① 인수 조사」도 사라진다 — 저장하면 그 결정이 남는다.
+          // 「조사작업 제외」를 켜면 「① 인수 조사」도 사라진다 — 저장할 때와 같은 그 상태다.
           investigationExcluded,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
@@ -1865,6 +1942,21 @@ export default function QuoteEditForm({
               />
               <span className="text-zinc-800 dark:text-zinc-200">통전작업 제외</span>
             </label>
+            {/* ── 조사작업 제외 (2026-09-15 사용자 결정) ──────────────────────
+                🔴 켜면 문서에서 「① 조사작업」 구역이 빠지고, 기본 작업비 중 **조사작업 몫(기본
+                작업비 − 통전작업 몫)**이 작업비 계산에서 빠진다. 기본 작업비 = 조사 몫 + 통전 몫
+                이라 둘을 함께 켜면 두 몫이 다 빠진다(domain/quote-labor-cost.ts). 조사 칸의 마지막
+                줄을 지우면 저절로 켜진다. */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={investigationExcluded}
+                onChange={(e) => toggleInvestigationExcluded(e.target.checked)}
+                disabled={disabled}
+                className="h-4 w-4"
+              />
+              <span className="text-zinc-800 dark:text-zinc-200">조사작업 제외</span>
+            </label>
           </div>
 
           {activeLabor === null ? (
@@ -1978,6 +2070,17 @@ export default function QuoteEditForm({
                 ) : (
                   <b className="tabular-nums">{formatAmount(laborSuggestion.baseCost)}</b>
                 )}{" "}
+                {/* 🔴 뺀 몫과 까닭을 말한다 — 이유 없이 금액만 작아지면 사람은 계산이 틀린 줄 안다.
+                    기본 작업비에서 조사 몫만 빠진다(통전 몫은 남는다 — 통전 차감은 아래에 따로다). */}
+                {investigationDeduction !== null && (
+                  <>
+                    <span className="text-zinc-500 dark:text-zinc-400">− 조사작업 몫</span>{" "}
+                    <b className="tabular-nums text-amber-700 dark:text-amber-400">
+                      {formatAmount(investigationDeduction)}
+                    </b>
+                    <span className="text-zinc-500 dark:text-zinc-400">(조사작업 제외)</span>{" "}
+                  </>
+                )}
                 + 고른 작업 {selectedTasks.length}건{" "}
                 <b className="tabular-nums">{formatAmount(laborSuggestion.tasksTotal)}</b>{" "}
                 {powerTestDeduction !== null && (
@@ -2017,6 +2120,26 @@ export default function QuoteEditForm({
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                   뺄 통전작업 몫이 기본 작업비보다 커서 기본 작업비를 0원에서 멈췄습니다 — 두 값을
                   확인해 주세요.
+                </p>
+              )}
+              {/* 🔴 조사작업 몫을 못 뺐으면 못 뺐다고 말한다 — 조사 몫은 기본 작업비 − 통전작업
+                  몫이라 통전 몫을 모르면 셀 수 없다. 기본 작업비를 정하지 않은 경우는 위 안내가
+                  말한다(통전 쪽과 같다). */}
+              {laborSuggestion.investigationNotice === "NO_POWER_TEST_HOURS" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 통전 공수시간이 정해지지 않아 조사작업 몫(기본
+                  작업비 − 통전작업 몫)을 셀 수 없습니다 — 빼지 않았습니다([PO/내자] › 작업 비용 › 통전 작업 비용).
+                </p>
+              )}
+              {laborSuggestion.investigationNotice === "UNKNOWN_HOURLY_RATE" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  시간당 작업비를 읽지 못해 조사작업 몫을 셀 수 없습니다 — 빼지 않았습니다([PO/내자] › 작업
+                  비용에서 확인해 주세요).
+                </p>
+              )}
+              {laborSuggestion.investigationNotice === "CLAMPED_TO_ZERO" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  통전작업 몫이 기본 작업비보다 커서 조사작업 몫을 0원에서 멈췄습니다 — 두 값을 확인해 주세요.
                 </p>
               )}
               {laborSuggestion.unknown.length > 0 && (
@@ -2059,12 +2182,12 @@ export default function QuoteEditForm({
                * 값도 지금과 같다(collectFields 의 workScopeLines). 칸 제목은 남긴다 —
                * 칸이 통째로 사라지면 어디 갔는지 모른다.
                */
-              // 조사 칸은 비워도 **감추지 않는다**(investigationExcluded: false) — 비운 것
-              // 자체가 빼는 결정이라, 감추면 줄을 다시 넣을 자리가 없다. 칸 안에 안내를 띄운다.
+              // 「조사작업 제외」를 켜면 「1) 조사작업」도 감춘다 — 체크를 풀면 되돌아오므로 통전과
+              // 같다(예전에는 되돌리는 체크 상자가 없어 감추지 않고 칸 안에 안내를 띄웠다).
               const suppressed = isWorkScopeSectionSuppressed(section, {
                 powerTestExcluded,
                 repairSectionDropped,
-                investigationExcluded: false,
+                investigationExcluded,
               });
               return (
                 <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
@@ -2093,10 +2216,7 @@ export default function QuoteEditForm({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => {
-                          setScopeLines((prev) => ({ ...prev, [section]: toScopeRows(templateDefaults) }));
-                          setScopeTouched((prev) => ({ ...prev, [section]: false }));
-                        }}
+                        onClick={() => resetScopeToTemplate(section)}
                         disabled={disabled || templateDefaults.length === 0}
                         className="rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] disabled:opacity-50 dark:border-zinc-700"
                       >
@@ -2107,7 +2227,7 @@ export default function QuoteEditForm({
 
                   {suppressed ? (
                     <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      {section === "REPAIR" ? REPAIR_SCOPE_DROPPED_NOTICE : WORK_SCOPE_SUPPRESSED_NOTICE}
+                      {SUPPRESSED_SCOPE_NOTICES[section]}
                     </p>
                   ) : (
                     <>
@@ -2141,11 +2261,6 @@ export default function QuoteEditForm({
                         {rows.length === 0 && (
                           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                             아직 없습니다. 아래에서 줄을 더하세요.
-                          </p>
-                        )}
-                        {section === "INVESTIGATION" && investigationExcluded && (
-                          <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                            {INVESTIGATION_EMPTIED_NOTICE}
                           </p>
                         )}
                       </div>
