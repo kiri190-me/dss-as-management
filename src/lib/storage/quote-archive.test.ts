@@ -7,8 +7,10 @@ import { after, test } from "node:test";
 import type { QuoteArchiveNamingInput } from "@/lib/domain/quote-archive-naming";
 import {
   QUOTE_ARCHIVE_MAX_NUMBERED_COPIES,
+  findQuoteArchiveFolder,
   resolveQuoteArchiveRoot,
   saveToQuoteArchive,
+  type QuoteArchiveFolderLookup,
   type QuoteArchiveSaveResult,
 } from "./quote-archive";
 
@@ -443,6 +445,164 @@ test("열고 나서 쓰다 실패하면 방금 만든 그 파일만 지우고 fa
   const quoteDirectory = path.join(root, YEAR_2026, STEM);
   assert.deepEqual(await readdir(quoteDirectory), [`${STEM}.xlsx`]);
   assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "먼저 저장한 견적서");
+});
+
+// ── 읽기 전용 찾기 (견적서 ④a — [폴더 열기]) ────────────────────────────────
+
+/** 루트 아래 전부(폴더 · 파일)를 슬래시 경로로 — 찾기 앞뒤가 같은지(아무것도 안 만들었는지) 본다. */
+async function snapshot(root: string): Promise<string[]> {
+  const found: string[] = [];
+  async function walk(directory: string, prefix: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      found.push(entry.isDirectory() ? `${relative}/` : relative);
+      if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative);
+    }
+  }
+  await walk(root, "");
+  return found.sort();
+}
+
+function find(root: string, naming: QuoteArchiveNamingInput = DOMESTIC, quoteDate = "2026-09-15") {
+  return findQuoteArchiveFolder({ root, quoteDate, naming });
+}
+
+function assertFound(
+  result: QuoteArchiveFolderLookup
+): asserts result is Extract<QuoteArchiveFolderLookup, { status: "found" }> {
+  assert.equal(result.status, "found", result.status === "failed" ? result.reason : result.status);
+}
+
+function assertFindFailedWithoutPath(result: QuoteArchiveFolderLookup, root: string): string {
+  assert.equal(result.status, "failed");
+  if (result.status !== "failed") throw new Error("unreachable");
+  const { reason } = result;
+  assert.ok(reason.length > 0);
+  assert.ok(!reason.includes(root), `사유에 루트가 들어 있다: ${reason}`);
+  assert.ok(!reason.includes(os.tmpdir()), `사유에 임시 폴더 경로가 들어 있다: ${reason}`);
+  assert.ok(!/[\\/]/.test(reason), `사유에 경로 구분자가 들어 있다: ${reason}`);
+  return reason;
+}
+
+test("찾기 — 연도 폴더 · 견적서 폴더가 있으면 found, 경로는 디스크의 실제 이름(NFD · 공백 두 칸 그대로)", async () => {
+  const root = await makeRoot();
+  const nfdYear = YEAR_2026.normalize("NFD");
+  const humanFolder = "DSS 2026-089  가나상사  MODEL-X1 수리 견적서";
+  await mkdir(path.join(root, nfdYear, humanFolder), { recursive: true });
+  await writeFile(path.join(root, nfdYear, humanFolder, `${STEM}.xlsx`), "견적서");
+  const before = await snapshot(root);
+
+  const result = await find(root);
+
+  assertFound(result);
+  assert.equal(result.relativePath, `${nfdYear}/${humanFolder}`);
+  assert.equal(result.multipleFolderMatches, false);
+  assert.deepEqual(await snapshot(root), before, "찾기가 무엇인가를 만들거나 지웠다");
+});
+
+test("찾기 — 저장이 고르는 폴더와 같은 폴더를 가리킨다(저장한 뒤 찾으면 그 폴더)", async () => {
+  const root = await makeRoot();
+  const saved = await saveQuoteFile(root, bytes("견적서"));
+  assertSaved(saved);
+
+  const result = await find(root);
+
+  assertFound(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}`);
+  assert.equal(saved.relativePath.startsWith(`${result.relativePath}/`), true);
+});
+
+test("찾기 — 가지 번호 견적서도 본 번호 폴더를 찾는다 · 번호가 이어지는 다른 폴더 · 같은 이름의 파일은 아니다", async () => {
+  const root = await makeRoot();
+  const yearDirectory = path.join(root, YEAR_2026);
+  await mkdir(yearDirectory);
+  await mkdir(path.join(yearDirectory, "DSS 2026-0891 다라상사 수리 견적서"));
+  await writeFile(path.join(yearDirectory, "DSS 2026-089 메모.txt"), "메모");
+  await mkdir(path.join(yearDirectory, STEM));
+  const before = await snapshot(root);
+
+  const result = await find(root, OVERHAUL_BRANCH);
+
+  assertFound(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}`);
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test("찾기 — 맞는 폴더가 둘이면 저장과 같이 이름순 첫째 · 그 사실을 싣는다", async () => {
+  const root = await makeRoot();
+  const yearDirectory = path.join(root, YEAR_2026);
+  await mkdir(path.join(yearDirectory, "DSS 2026-089 나 수리 견적서"), { recursive: true });
+  await mkdir(path.join(yearDirectory, "DSS 2026-089 가 수리 견적서"));
+
+  const result = await find(root);
+
+  assertFound(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/DSS 2026-089 가 수리 견적서`);
+  assert.equal(result.multipleFolderMatches, true);
+});
+
+test("찾기 — 연도 폴더가 없으면 not-found, 🔴 아무것도 만들지 않는다", async () => {
+  const root = await makeRoot();
+  await mkdir(path.join(root, "20. 2025 내자견적서"));
+  const before = await snapshot(root);
+
+  const result = await find(root);
+
+  assert.deepEqual(result, { status: "not-found" });
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test("찾기 — 연도 폴더는 있고 견적서 폴더가 없으면 not-found, 🔴 아무것도 만들지 않는다", async () => {
+  const root = await makeRoot();
+  await mkdir(path.join(root, YEAR_2026, "DSS 2026-090 다른 견적서"), { recursive: true });
+  // 견적서 폴더 이름과 같은 **파일**은 폴더가 아니다.
+  await writeFile(path.join(root, YEAR_2026, STEM), "폴더가 아니다");
+  const before = await snapshot(root);
+
+  const result = await find(root);
+
+  assert.deepEqual(result, { status: "not-found" });
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test("찾기 — 빈 루트에서도 not-found 이고 루트는 빈 채로 남는다", async () => {
+  const root = await makeRoot();
+  const result = await find(root);
+  assert.deepEqual(result, { status: "not-found" });
+  assert.deepEqual(await readdir(root), []);
+});
+
+test("찾기 — 루트가 없으면 failed, 🔴 루트를 만들지 않는다 · 사유에 경로가 없다", async () => {
+  const parent = await makeRoot();
+  const missingRoot = path.join(parent, "연결-안-된-공유폴더");
+
+  const result = await find(missingRoot);
+
+  const reason = assertFindFailedWithoutPath(result, missingRoot);
+  assert.match(reason, /공유폴더를 찾을 수 없습니다/);
+  assert.equal(await exists(missingRoot), false, "루트가 생겼다");
+  assert.deepEqual(await readdir(parent), []);
+});
+
+test("찾기 — 루트가 파일이거나 비었으면 failed", async () => {
+  const parent = await makeRoot();
+  const fileRoot = path.join(parent, "공유폴더인-척하는-파일");
+  await writeFile(fileRoot, "파일");
+
+  assertFindFailedWithoutPath(await find(fileRoot), fileRoot);
+  assert.equal(await readFile(fileRoot, "utf8"), "파일");
+  assert.equal((await find("   ")).status, "failed");
+});
+
+test("찾기 — 발행일자가 이상하거나 발행번호가 비면 failed, 아무것도 만들지 않는다", async () => {
+  const root = await makeRoot();
+  for (const quoteDate of ["2026-02-30", "not-a-date", "2005-12-31"]) {
+    const reason = assertFindFailedWithoutPath(await find(root, DOMESTIC, quoteDate), root);
+    assert.match(reason, /발행일자/);
+  }
+  const reason = assertFindFailedWithoutPath(await find(root, { ...DOMESTIC, quoteNumber: "   " }), root);
+  assert.match(reason, /발행번호/);
+  assert.deepEqual(await readdir(root), []);
 });
 
 test("resolveQuoteArchiveRoot — 부르는 시점에 읽고, 비었거나 공백이면 null(기능 꺼짐)", () => {

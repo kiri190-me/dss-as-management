@@ -8,6 +8,7 @@ import {
   matchesQuoteArchiveFolder,
   normalizeQuoteArchiveNameForCompare,
   numberedQuoteArchiveName,
+  quoteArchiveBaseNumber,
   quoteArchiveFileName,
   quoteArchiveFolderName,
   quoteArchiveSignedPdfFileName,
@@ -57,6 +58,12 @@ import type { QuoteFileExtension } from "@/lib/domain/quote-file-name";
  * 모든 오류는 `{ status: "failed", reason }` 으로 돌아간다. `reason` 은 화면 · 응답
  * 헤더로 나가므로 **절대 경로 · 루트 값을 담지 않는다**(fs 오류의 message 에는 경로가
  * 들어 있으므로 쓰지 않는다 — 오류 코드만 보고 짧은 한국어로 바꾼다).
+ *
+ * ── 읽기 전용 찾기 (견적서 ④a — [폴더 열기]) ─────────────────────────────
+ * findQuoteArchiveFolder 는 저장과 **같은 찾기 규칙**(연도 폴더 · 본 번호 폴더 · 이름순
+ * 첫째 · 디스크의 실제 이름)으로 그 견적서의 폴더를 찾기만 한다 — mkdir · 파일 쓰기가
+ * 0 이다. 없으면 `not-found` 로 끝난다(만들어 주지 않는다). 돌려주는 것은 루트 기준
+ * 슬래시 상대 경로뿐이다 — 루트 값은 부르는 쪽도 응답에 싣지 않는다.
  * ============================================================================
  */
 
@@ -192,6 +199,72 @@ async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveRes
     // 루트 기준, 구분자는 슬래시 — OS 와 무관하게 같은 값이 나오도록 문자열로 잇는다.
     relativePath: [yearFolder.name, quoteFolder.name, savedName].join("/"),
     multipleFolderMatches,
+  };
+}
+
+export type FindQuoteArchiveFolderInput = {
+  /** 공유폴더 루트(resolveQuoteArchiveRoot 의 값, 시험에서는 임시 폴더). 이미 있어야 한다. */
+  root: string;
+  /** 발행일자 `"YYYY-MM-DD"` — 연도 폴더를 정한다. */
+  quoteDate: string;
+  naming: QuoteArchiveNamingInput;
+};
+
+export type QuoteArchiveFolderLookup =
+  | {
+      status: "found";
+      /** 루트 기준 슬래시 경로 — `연도 폴더/견적서 폴더`. 디스크의 실제 이름이다. */
+      relativePath: string;
+      /** 맞는 연도 폴더나 견적서 폴더가 둘 이상이어서 이름순 첫째를 골랐다(저장과 같은 선택). */
+      multipleFolderMatches: boolean;
+    }
+  /** 연도 폴더나 견적서 폴더가 아직 없다 — 만들지 않는다. */
+  | { status: "not-found" }
+  | { status: "failed"; reason: string };
+
+/**
+ * 그 견적서의 공유폴더 폴더를 **찾기만** 한다(머리말 「읽기 전용 찾기」). **던지지 않는다.**
+ * 저장이 쓰는 찾기(findFolder)를 그대로 쓰므로 저장이 고를 폴더와 같은 폴더를 가리킨다.
+ */
+export async function findQuoteArchiveFolder(input: FindQuoteArchiveFolderInput): Promise<QuoteArchiveFolderLookup> {
+  try {
+    return await find(input);
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: error instanceof QuoteArchiveFailure ? error.reason : reasonFromFindFsError(error),
+    };
+  }
+}
+
+async function find(input: FindQuoteArchiveFolderInput): Promise<QuoteArchiveFolderLookup> {
+  const year = quoteArchiveYearFromDate(input.quoteDate);
+  if (year === null) {
+    throw new QuoteArchiveFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
+  }
+  // 저장은 폴더 이름을 만들다 같은 까닭으로 멈춘다. 번호가 비면 어느 폴더와도 맞지 않으므로
+  // 「없음」이 아니라 실패다 — 사람이 고칠 것은 번호다.
+  if (quoteArchiveBaseNumber(input.naming.quoteNumber).length === 0) {
+    throw new QuoteArchiveFailure("발행번호가 비어 있어 견적서 폴더를 찾을 수 없습니다.");
+  }
+
+  const root = await requireExistingRoot(input.root);
+
+  const yearFolder = await findFolder(root, (name) => isQuoteArchiveYearFolder(name, year));
+  if (!yearFolder) return { status: "not-found" };
+  const yearDirectory = path.join(root, yearFolder.name);
+  assertInsideRoot(root, yearDirectory, OUTSIDE_ROOT_ON_FIND);
+
+  const quoteFolder = await findFolder(yearDirectory, (name) =>
+    matchesQuoteArchiveFolder(name, input.naming.quoteNumber)
+  );
+  if (!quoteFolder) return { status: "not-found" };
+  assertInsideRoot(root, path.join(yearDirectory, quoteFolder.name), OUTSIDE_ROOT_ON_FIND);
+
+  return {
+    status: "found",
+    relativePath: [yearFolder.name, quoteFolder.name].join("/"),
+    multipleFolderMatches: yearFolder.multiple || quoteFolder.multiple,
   };
 }
 
@@ -354,11 +427,14 @@ async function writeNewFile(root: string, directory: string, fileName: string, b
   );
 }
 
+const OUTSIDE_ROOT_ON_SAVE = "저장 위치가 공유폴더 밖을 가리켜 저장하지 않았습니다.";
+const OUTSIDE_ROOT_ON_FIND = "찾은 폴더가 공유폴더 밖을 가리켜 쓰지 않았습니다.";
+
 /**
  * 이은 경로가 루트 밖이면 거절한다. 이름을 다듬으므로 일어나지 않아야 하지만,
- * 디스크의 이름을 그대로 잇는 자리가 있어 방어로 둔다.
+ * 디스크의 이름을 그대로 잇는 자리가 있어 방어로 둔다. 사유는 저장 · 찾기가 다르다.
  */
-function assertInsideRoot(root: string, target: string): void {
+function assertInsideRoot(root: string, target: string, reason: string = OUTSIDE_ROOT_ON_SAVE): void {
   const relative = path.relative(root, target);
   if (
     relative === "" ||
@@ -366,7 +442,7 @@ function assertInsideRoot(root: string, target: string): void {
     relative.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relative)
   ) {
-    throw new QuoteArchiveFailure("저장 위치가 공유폴더 밖을 가리켜 저장하지 않았습니다.");
+    throw new QuoteArchiveFailure(reason);
   }
 }
 
@@ -403,5 +479,28 @@ function reasonFromFsError(error: unknown): string {
       return "공유폴더에 연결할 수 없습니다(네트워크 · NAS 상태를 확인하세요).";
     default:
       return "공유폴더에 저장하지 못했습니다.";
+  }
+}
+
+/** 찾기의 fs 오류 → 짧은 사유. 저장과 같은 규칙(**message 는 쓰지 않는다**), 낱말만 「읽기」다. */
+function reasonFromFindFsError(error: unknown): string {
+  switch (errorCode(error)) {
+    case "EACCES":
+    case "EPERM":
+      return "공유폴더를 읽을 권한이 없습니다.";
+    case "ENOENT":
+    case "ENOTDIR":
+      return "공유폴더의 폴더를 찾을 수 없습니다(찾는 중 옮겨졌거나 연결이 끊겼을 수 있습니다).";
+    case "ENAMETOOLONG":
+      return "폴더 경로가 너무 깁니다.";
+    case "EIO":
+    case "ETIMEDOUT":
+    case "EHOSTDOWN":
+    case "EHOSTUNREACH":
+    case "ENETUNREACH":
+    case "ECONNRESET":
+      return "공유폴더에 연결할 수 없습니다(네트워크 · NAS 상태를 확인하세요).";
+    default:
+      return "공유폴더를 읽지 못했습니다.";
   }
 }

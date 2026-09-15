@@ -224,3 +224,7 @@ src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts
 src/app/api/quotes/parse-excel/route-source.test.ts
 src/lib/xlsx/number-format.test.ts
+src/lib/domain/quote-folder-link.test.ts
+src/lib/server/quote-folder-helper.test.ts
+src/app/api/quotes/*/archive-folder/route-source.test.ts
+src/app/api/quote-folder-helper/installer/route-source.test.ts
