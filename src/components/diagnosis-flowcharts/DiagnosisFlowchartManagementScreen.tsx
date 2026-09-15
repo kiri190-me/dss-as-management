@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { RepairCaseFlowchartManagementRow, RepairCaseFlowchartTrashRow } from "@/lib/db/queries/repair-case-flowcharts";
 import type { RepairCaseFlowchartCreateOption } from "@/lib/db/queries/repair-cases";
 import {
@@ -111,7 +112,6 @@ function RepairCaseComboSelect({
 
 /** Compact inline create form — toggled by "새 Flowchart 추가", same show/hide-toggle-button convention as TechnicalProcedureTemplateListScreen's CreateTechnicalTemplateForm and CaseFlowchartListScreen's own create panel. Reuses the existing createRepairCaseFlowchartAction unchanged (no second storage model, no new mutation). */
 function CreateFlowchartForm({ repairCaseOptions, onClose }: { repairCaseOptions: RepairCaseFlowchartCreateOption[]; onClose: () => void }) {
-  const router = useRouter();
   const [repairCaseId, setRepairCaseId] = useState("");
   const [title, setTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,7 +130,12 @@ function CreateFlowchartForm({ repairCaseOptions, onClose }: { repairCaseOptions
       setErrorMessage(result.message);
       return;
     }
-    router.push(`/repair-cases/${repairCaseId}/diagnosis/${result.id}`);
+    // 만든 뒤에는 그릴 차례라 편집 화면으로 넘어간다 — 저장 팝업을 0.5초 띄운 뒤
+    // 팝업이 넘긴다(common/SavePopup.tsx). 넘어갈 때까지 단추는 잠긴 채다.
+    showSavePopup({
+      message: "진단 Flowchart를 만들었습니다.",
+      redirectTo: `/repair-cases/${repairCaseId}/diagnosis/${result.id}`,
+    });
   }
 
   if (repairCaseOptions.length === 0) {

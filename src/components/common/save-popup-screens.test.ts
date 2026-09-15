@@ -135,6 +135,55 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
   }
 });
 
+test("고객 안내 현황·수리 의뢰는 목록 화면이라 팝업만 띄우고 머문다", () => {
+  const portal = readFileSync("src/components/customer-portal/CustomerPortalScreen.tsx", "utf8");
+  assert.deepEqual(popupCalls("src/components/customer-portal/CustomerPortalScreen.tsx"), [["result.message", "null"]]);
+  // 거절 이유만 화면에 남는다.
+  assert.match(portal, /if \(!result\.ok\) \{\s*setMessage\(\{ ok: false, text: result\.message \}\);\s*return;\s*\}/);
+  const requests = readFileSync("src/components/customer-portal/CustomerRequestListScreen.tsx", "utf8");
+  assert.match(requests, /onDone=\{\(text\) => showSavePopup\(\{ message: text, redirectTo: null \}\)\}/);
+});
+
+test("진단 Flowchart·초안을 만들면 그릴 차례라 편집 화면으로 넘어간다 — 팝업이 넘긴다", () => {
+  const cases: [string, RegExp][] = [
+    [
+      "src/components/repair-cases/flowchart/CaseFlowchartListScreen.tsx",
+      /message: "진단 Flowchart를 만들었습니다\.",\s*redirectTo: `\/repair-cases\/\$\{repairCaseId\}\/diagnosis\/\$\{result\.id\}`,/,
+    ],
+    [
+      "src/components/diagnosis-flowcharts/DiagnosisFlowchartManagementScreen.tsx",
+      /message: "진단 Flowchart를 만들었습니다\.",\s*redirectTo: `\/repair-cases\/\$\{repairCaseId\}\/diagnosis\/\$\{result\.id\}`,/,
+    ],
+    [
+      "src/components/repair-cases/flowchart/SaveWorkRecordFlowchartButton.tsx",
+      /message: "작업 기록 흐름도를 저장했습니다\.",\s*redirectTo: `\/repair-cases\/\$\{repairCaseId\}\/diagnosis\/\$\{result\.flowchartId\}`,/,
+    ],
+    [
+      "src/components/workflows/WorkflowDraftEntry.tsx",
+      /message: "새 초안을 만들었습니다\.",\s*redirectTo: `\/workflows\/\$\{templateCode\}\/draft`,/,
+    ],
+  ];
+  for (const [path, pattern] of cases) {
+    const source = readFileSync(path, "utf8");
+    assert.match(source, pattern, path);
+  }
+  for (const path of [
+    "src/components/repair-cases/flowchart/CaseFlowchartListScreen.tsx",
+    "src/components/repair-cases/flowchart/SaveWorkRecordFlowchartButton.tsx",
+    "src/components/workflows/WorkflowDraftEntry.tsx",
+  ]) {
+    assert.doesNotMatch(readFileSync(path, "utf8"), /router\.push\(/, path);
+  }
+});
+
+test("워크플로 발행·폐기는 도착 화면이 이미 알리므로 팝업을 더하지 않는다", () => {
+  const editor = readFileSync("src/components/workflows/WorkflowDraftEditor.tsx", "utf8");
+  assert.match(editor, /navigateTo: `\/workflows\/\$\{templateCode\}\?done=published`/);
+  assert.doesNotMatch(editor, /showSavePopup/);
+  const page = readFileSync("src/app/(app)/workflows/[code]/page.tsx", "utf8");
+  assert.match(page, /DONE_MESSAGES\[done\]/);
+});
+
 test("승인 카드는 성공 문구를 팝업으로 옮기고, 거절 이유만 카드에 남긴다", () => {
   for (const name of ["DatabaseRepairInspectionCard.tsx", "DatabaseFinalShipmentCard.tsx"]) {
     const source = readFileSync(`src/components/repair-cases/approval/${name}`, "utf8");

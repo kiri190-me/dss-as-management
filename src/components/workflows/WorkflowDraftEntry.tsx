@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createWorkflowDraftAction } from "@/lib/server/actions/workflow-drafts";
 
 /**
@@ -22,7 +22,6 @@ export default function WorkflowDraftEntry({
   /** 복제할 현재 발행본이 있는가. 없으면 초안을 만들 수 없다(빈 초안은 발행 불가). */
   canCreate: boolean;
 }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +53,12 @@ export default function WorkflowDraftEntry({
                 setError(result.message);
                 return;
               }
-              router.push(`/workflows/${templateCode}/draft`);
+              // 만든 초안은 편집할 차례라 편집 화면으로 — 저장 팝업을 0.5초 띄운 뒤
+              // 팝업이 넘긴다(common/SavePopup.tsx).
+              showSavePopup({
+                message: "새 초안을 만들었습니다.",
+                redirectTo: `/workflows/${templateCode}/draft`,
+              });
             });
           }}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"

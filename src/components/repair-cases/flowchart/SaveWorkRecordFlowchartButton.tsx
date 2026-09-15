@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createWorkRecordFlowchartSnapshotAction } from "@/lib/server/actions/repair-case-flowcharts";
 
 /**
@@ -29,7 +29,6 @@ export default function SaveWorkRecordFlowchartButton({
   /** 화면에 그려진 작업 기록 id 목록 — 그려진 차례 그대로. */
   workRecordIds: string[];
 }) {
-  const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -44,10 +43,14 @@ export default function SaveWorkRecordFlowchartButton({
         setIsSubmitting(false);
         return;
       }
-      // 성공하면 곧바로 편집 화면으로 — 목록 화면이 새 흐름도를 만든 뒤 하는
-      // 그대로다. 넘어가는 중에는 단추를 다시 열지 않는다(같은 저장이 한 번 더
-      // 일어날 틈을 만들지 않는다).
-      router.push(`/repair-cases/${repairCaseId}/diagnosis/${result.flowchartId}`);
+      // 성공하면 저장 팝업을 0.5초 띄운 뒤 편집 화면으로 — 목록 화면이 새 흐름도를
+      // 만든 뒤 하는 그대로다(넘기는 것은 팝업이 한다, common/SavePopup.tsx).
+      // 넘어가는 중에는 단추를 다시 열지 않는다(같은 저장이 한 번 더 일어날 틈을
+      // 만들지 않는다).
+      showSavePopup({
+        message: "작업 기록 흐름도를 저장했습니다.",
+        redirectTo: `/repair-cases/${repairCaseId}/diagnosis/${result.flowchartId}`,
+      });
     } catch {
       setErrorMessage("일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.");
       setIsSubmitting(false);

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import RejectRequestDialog from "./RejectRequestDialog";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 /**
  * 고객이 보낸 수리 의뢰 목록 — 접수로 만들거나 반려하는 곳.
@@ -44,7 +45,6 @@ export default function CustomerRequestListScreen({
   requests: RequestListItem[];
   canConvert: boolean;
 }) {
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   /** 반려 대화상자를 띄운 의뢰. null이면 닫힌 상태다. */
   const [rejecting, setRejecting] = useState<RequestListItem | null>(null);
 
@@ -69,19 +69,6 @@ export default function CustomerRequestListScreen({
           ← 고객 안내 현황
         </Link>
       </header>
-
-      {message ? (
-        <p
-          role="alert"
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            message.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {message.text}
-        </p>
-      ) : null}
 
       <section>
         <h2 className="text-sm font-bold text-zinc-900">
@@ -206,7 +193,10 @@ export default function CustomerRequestListScreen({
           customerName={rejecting.customerName}
           productModelName={rejecting.productModelName}
           onClose={() => setRejecting(null)}
-          onDone={(text) => setMessage({ ok: true, text })}
+          // 반려는 이 목록 화면에서 하므로 팝업만 띄우고 머문다(common/SavePopup.tsx).
+          // 이 화면의 문구 칸은 이 성공 한 줄만 적던 자리라 팝업으로 옮기며 걷어냈다 —
+          // 반려가 거절된 이유는 대화상자 안에 남는다.
+          onDone={(text) => showSavePopup({ message: text, redirectTo: null })}
         />
       ) : null}
     </div>

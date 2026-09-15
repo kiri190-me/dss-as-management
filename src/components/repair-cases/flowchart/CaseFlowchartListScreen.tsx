@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createRepairCaseFlowchartAction } from "@/lib/server/actions/repair-case-flowcharts";
 import type { RepairCaseFlowchartRow } from "@/lib/db/queries/repair-case-flowcharts";
 
@@ -34,7 +34,6 @@ export default function CaseFlowchartListScreen({
   /** 무효 처리되지 않은 작업 기록이 하나라도 있어 실제로 그릴 것이 있는가 — 서버 페이지가 계산한다. */
   hasWorkRecordFlowchart: boolean;
 }) {
-  const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -49,7 +48,13 @@ export default function CaseFlowchartListScreen({
       setErrorMessage(result.message);
       return;
     }
-    router.push(`/repair-cases/${repairCaseId}/diagnosis/${result.id}`);
+    // 만든 뒤에는 그릴 차례라 목록이 아니라 편집 화면으로 넘어간다 — 저장 팝업을
+    // 0.5초 띄운 뒤 팝업이 넘긴다(common/SavePopup.tsx). 떠 있는 동안은 모달이라
+    // [만들기]를 다시 누를 수 없다.
+    showSavePopup({
+      message: "진단 Flowchart를 만들었습니다.",
+      redirectTo: `/repair-cases/${repairCaseId}/diagnosis/${result.id}`,
+    });
   }
 
   return (

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { CustomerLinkInfo, CustomerPortalItem } from "@/lib/db/queries/customer-portal";
 import CustomerLinkAddress from "./CustomerLinkAddress";
 import {
@@ -65,9 +66,15 @@ export default function CustomerPortalScreen({
   function run(action: () => Promise<{ ok: boolean; message: string; url?: string }>) {
     startTransition(async () => {
       const result = await action();
-      setMessage({ ok: result.ok, text: result.message });
       if (result.url) setIssuedUrl(result.url);
-      if (result.ok) router.refresh();
+      if (!result.ok) {
+        setMessage({ ok: false, text: result.message });
+        return;
+      }
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx) — 이 화면이 곧 목록이라 머문다.
+      setMessage(null);
+      router.refresh();
+      showSavePopup({ message: result.message, redirectTo: null });
     });
   }
 
