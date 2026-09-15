@@ -11,7 +11,7 @@ import {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import { generateClientUuid } from "@/lib/client-uuid";
 import { stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
-import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
 import {
   MAX_REPAIR_TASK_QUANTITY,
@@ -57,6 +57,16 @@ import {
   lookupIntakeForQuoteAction,
   updateQuoteAction,
 } from "@/lib/server/actions/quotes";
+import QuoteAttachmentsSection, { useQuoteAttachments } from "@/components/quotes/QuoteAttachmentsSection";
+import { ExcelOnlyClearLinesDialog, ExcelOnlySwitch } from "@/components/quotes/QuoteAttachmentParts";
+import {
+  countQuoteLinesForExcelOnly,
+  createdWithAttachmentFailuresText,
+  planExcelOnlyToggle,
+  quoteAttachmentUploadProgressText,
+  type QuoteLineCounts,
+} from "@/components/quotes/quote-attachment-files";
+import type { QuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 
 /**
  * ============================================================================
@@ -94,6 +104,13 @@ import {
  * 여기서 셈한 값을 저장하지 않는다. 저장되는 것은 수량과 단가뿐이고, 합계는
  * 조회가 다시 셈하며 실제 문서에서는 양식의 수식이 계산한다. 세 곳이 각자
  * 저장하면 어긋날 자리가 생긴다(schema/quotes.ts 의 '합계 금액을 담지 않는다').
+ *
+ * ── 견적서 파일 · 엑셀 전용 (2026-09-15 Q3) ─────────────────────────────
+ * 결재 PDF · 수기 엑셀 두 칸은 QuoteAttachmentsSection 이 그리고, 상태는 이 폼이 부르는
+ * 훅(useQuoteAttachments)에 있다 — 미리보기를 열어도 골라 둔 파일이 살아남게. 새 견적서는
+ * [저장]이 견적서를 만든 **직후** 파일을 올리고, 하나라도 못 올리면 목록으로 넘기지 않는다.
+ * 엑셀 전용을 켜면 부품 · 작업 구역을 접고 공급가액을 손으로 받는다. 줄이 있으면 서버가
+ * 저장을 거절하므로 켤 때 비울지 묻고, 비운 줄은 저장 전에 끄면 돌아온다.
  * ============================================================================
  */
 
@@ -269,6 +286,36 @@ function formatAmount(value: number): string {
   return `₩${AMOUNT_FORMAT.format(Math.round(value))}`;
 }
 
+/** 금액을 알 수 없으면(엑셀 전용인데 공급가액이 비었다) 「—」 — 0 으로 접지 않는다. */
+function formatMaybeAmount(value: number | null): string {
+  return value === null ? "—" : formatAmount(value);
+}
+
+/**
+ * 엑셀 전용을 켤 때 비우고, 끌 때 돌려놓는 줄 묶음 — 서버가 엑셀 전용 장에서 거절하는
+ * 셋(부품 · 작업 내역 · 고른 수리 작업)과 작업 내역의 「손댔는가」 표시다
+ * (quote-attachment-files.ts 의 planExcelOnlyToggle).
+ */
+type ExcelOnlyLines = {
+  items: ItemRow[];
+  scopeLines: Record<QuoteWorkScopeSection, ScopeRow[]>;
+  scopeTouched: Record<QuoteWorkScopeSection, boolean>;
+  taskQuantities: RepairTaskQuantities;
+};
+
+/**
+ * 비운 묶음. 작업 내역은 **손댄 것으로** 둔다 — 아니면 양식 기본값이 빈 칸을 몰래 다시
+ * 채워, 접힌 구역에 줄이 생기고 저장이 거절된다.
+ */
+function clearedExcelOnlyLines(): ExcelOnlyLines {
+  return {
+    items: [emptyItem()],
+    scopeLines: { INVESTIGATION: [], REPAIR: [], POWER_TEST: [] },
+    scopeTouched: { INVESTIGATION: true, REPAIR: true, POWER_TEST: true },
+    taskQuantities: restoreRepairTaskQuantities([]),
+  };
+}
+
 /**
  * 셈한 금액을 numeric(15,2) 칸으로 보낼 글자로.
  *
@@ -292,6 +339,7 @@ export default function QuoteEditForm({
   workScopeDefaults,
   initialIntakeNumber = null,
   returnHref = null,
+  attachmentSlots = null,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -338,6 +386,11 @@ export default function QuoteEditForm({
    * 글자를 그대로 밀어 넣으면 남이 만든 링크가 사람을 바깥으로 보낼 수 있다.
    */
   returnHref?: string | null;
+  /**
+   * 결재 PDF · 수기 엑셀 두 칸에 지금 붙어 있는 파일(queries/attachments.ts 의
+   * listQuoteAttachmentSlots). 수정 화면이 읽어 넘기고, 새 견적서는 null 이다.
+   */
+  attachmentSlots?: QuoteAttachmentSlots | null;
 }) {
   const router = useRouter();
 
@@ -476,15 +529,53 @@ export default function QuoteEditForm({
   const [isConflict, setIsConflict] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  /**
+   * 엑셀 전용 견적서인가 · 손으로 적는 공급가액(2026-09-15 Q3). 저장된 장은 그때 값을 편다.
+   * 공급가액 칸의 글자는 **꺼도 지우지 않는다** — 다시 켜면 그대로다. 보내는 것은 켜져 있을
+   * 때뿐이다(collectFields).
+   */
+  const [isExcelOnly, setIsExcelOnly] = useState<boolean>(quote?.isExcelOnly ?? false);
+  const [manualSupplyAmount, setManualSupplyAmount] = useState(quote?.manualSupplyAmount ?? "");
+  /** 엑셀 전용을 켤 때 비운 줄 — 저장 전에 끄면 그대로 돌려놓는다. */
+  const [excelOnlyStash, setExcelOnlyStash] = useState<ExcelOnlyLines | null>(null);
+  /** 줄이 있는 채로 켜려 할 때 여는 확인 창의 줄 수. null 이면 닫혀 있다. */
+  const [clearLinesAsk, setClearLinesAsk] = useState<QuoteLineCounts | null>(null);
+  /**
+   * 새 견적서를 만들었는데 파일을 다 올리지 못해 이 화면에 머문 경우의 그 견적서.
+   * 🔴 있으면 다음 [저장]은 **고치기**다 — 다시 만들면 같은 견적서가 두 장 생긴다.
+   */
+  const [createdQuote, setCreatedQuote] = useState<{ id: string; version: number } | null>(null);
+  /** 새 견적서 저장 뒤 파일 올리기의 진행 · 실패 안내. */
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+
+  /** 저장된 견적서 — 수정 화면의 그 장, 또는 이 화면에서 방금 만든 장. 없으면 새 견적서. */
+  const savedQuote = quote ? { id: quote.id, version: quote.version } : createdQuote;
+
+  /**
+   * 결재 PDF · 수기 엑셀 두 칸의 상태. 🔴 폼이 들고 있는다 — 미리보기는 폼을 통째로
+   * 갈아 그리므로, 구역 안에 두면 미리보기를 여는 순간 골라 둔 파일이 사라진다
+   * (QuoteAttachmentsSection.tsx 머리말).
+   */
+  const attachments = useQuoteAttachments({
+    quoteId: savedQuote?.id ?? null,
+    serverSlots: attachmentSlots,
+  });
+
+  /**
+   * 합계 미리보기 — 서버가 금액을 셈하는 그 함수 하나로(domain/quote-list.ts 의
+   * quoteSupplyAmountOf). 엑셀 전용이면 손으로 적은 공급가액이고, 비어 있으면 null(「—」).
+   */
   const supplyAmount = useMemo(
     () =>
-      sumQuoteSupplyAmount(
-        items.map((item) => ({ quantity: Number(item.quantity) || 0, unitPrice: item.unitPrice })),
-        workCost
-      ),
-    [items, workCost]
+      quoteSupplyAmountOf({
+        isExcelOnly,
+        manualSupplyAmount,
+        items: items.map((item) => ({ quantity: Number(item.quantity) || 0, unitPrice: item.unitPrice })),
+        workCost,
+      }),
+    [isExcelOnly, manualSupplyAmount, items, workCost]
   );
-  const vat = supplyAmount * VAT_RATE;
+  const vat = supplyAmount === null ? null : supplyAmount * VAT_RATE;
 
   /**
    * 모델명·신고증상·종류로 지은 품명. 지금 적힌 것과 같으면 아래 단추를
@@ -803,6 +894,51 @@ export default function QuoteEditForm({
     setItems((prev) => (prev.length === 1 ? [emptyItem()] : prev.filter((row) => row.key !== key)));
   }
 
+  /**
+   * 엑셀 전용 장에 있으면 안 되는 줄의 수 — 서버 규칙이 세는 그대로다(저장이 거르는 빈
+   * 줄은 세지 않는다). 하나라도 있으면 켜기 전에 묻는다.
+   */
+  const excelOnlyLineCounts = countQuoteLinesForExcelOnly({
+    items,
+    workScopeTexts: QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) => scopeLines[section].map((row) => row.text)),
+    repairTaskCount: selectedTasks.length,
+  });
+
+  function applyExcelOnlyLines(lines: ExcelOnlyLines) {
+    setItems(lines.items);
+    setScopeLines(lines.scopeLines);
+    setScopeTouched(lines.scopeTouched);
+    setTaskQuantities(lines.taskQuantities);
+  }
+
+  /**
+   * 엑셀 전용 스위치. 판정은 planExcelOnlyToggle(quote-attachment-files.ts) 한 곳이다 —
+   * 줄이 있는 채로 켜려 하면 먼저 묻고(`confirmedClear` 가 거짓), 켜면 줄을 넣어 두고
+   * 비우며, 끄면 넣어 둔 줄을 그대로 돌려놓는다.
+   *
+   * 🔴 줄을 **조용히 버리지 않는다.** 서버가 줄이 있는 엑셀 전용 장을 거절하는 까닭(되돌렸을
+   * 때 무엇을 적었는지 되찾을 길이 없다)과 같은 판단이라, 비우는 것은 사람이 고른 뒤이고
+   * 저장 전에는 끄는 것으로 되돌릴 수 있다.
+   */
+  function toggleExcelOnly(turnOn: boolean, confirmedClear = false) {
+    const plan = planExcelOnlyToggle<ExcelOnlyLines>({
+      turnOn,
+      confirmedClear,
+      counts: excelOnlyLineCounts,
+      current: { items, scopeLines, scopeTouched, taskQuantities },
+      cleared: clearedExcelOnlyLines(),
+      stash: excelOnlyStash,
+    });
+    if (plan.kind === "ASK_TO_CLEAR") {
+      setClearLinesAsk(plan.counts);
+      return;
+    }
+    setClearLinesAsk(null);
+    if (plan.lines) applyExcelOnlyLines(plan.lines);
+    setExcelOnlyStash(plan.stash);
+    setIsExcelOnly(plan.isExcelOnly);
+  }
+
   function collectFields() {
     return {
       quoteNumber,
@@ -847,6 +983,12 @@ export default function QuoteEditForm({
        * (isInvestigationScopeEmptied 주석).
        */
       investigationExcluded,
+      /**
+       * 엑셀 전용 · 손으로 적은 공급가액. 공급가액은 **켜져 있을 때만** 보낸다 — 꺼진 장에
+       * 값이 있으면 검증이 거절한다(validation/quote-input.ts 의 quoteExcelOnlyFieldErrors).
+       */
+      isExcelOnly,
+      manualSupplyAmount: isExcelOnly ? manualSupplyAmount : null,
       repairTasks: selectedTasks,
       /**
        * 문서에 적히는 작업 내역. 빈 줄은 검증이 걸러 낸다 — 적힐 것이 없는
@@ -886,8 +1028,9 @@ export default function QuoteEditForm({
     let leaving = false;
     try {
       const fields = collectFields();
-      const result = quote
-        ? await updateQuoteAction({ id: quote.id, expectedVersion: quote.version, fields })
+      // 이 화면에서 방금 만든 장(createdQuote)도 고치기다 — 다시 만들면 두 장이 된다.
+      const result = savedQuote
+        ? await updateQuoteAction({ id: savedQuote.id, expectedVersion: savedQuote.version, fields })
         : await createQuoteAction({ fields });
 
       if (!result.ok) {
@@ -902,11 +1045,31 @@ export default function QuoteEditForm({
         return;
       }
 
-      if (quote) {
+      if (savedQuote) {
         // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
         // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
         leaving = true;
         showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });
+        return;
+      }
+
+      /**
+       * 새 견적서가 생겼다 — 들고 있던 파일(결재 PDF · 수기 엑셀)을 **지금** 올린다. id 가
+       * 이제야 생겼기 때문이다(2026-09-15 Q3).
+       *
+       * 🔴 올리기 **전에** 만든 장을 기억한다(createdQuote). 올리다 무엇이 잘못돼도 다음
+       * [저장]은 고치기가 되어야 한다 — 새로 만들면 같은 견적서가 두 장이 된다.
+       *
+       * 하나라도 못 올리면 **목록으로 넘기지 않는다** — 견적서는 저장됐고, 이 화면의
+       * 「견적서 파일」 칸이 못 올린 파일을 까닭과 함께 들고 [다시 올리기]를 내민다.
+       * 올릴 것이 없으면 곧바로 지나간다(예전 그대로).
+       */
+      setCreatedQuote({ id: result.id, version: result.version });
+      const upload = await attachments.uploadQueuedAfterCreate(result.id, (current, total) =>
+        setAttachmentNotice(quoteAttachmentUploadProgressText(current, total))
+      );
+      if (upload.failures.length > 0) {
+        setAttachmentNotice(createdWithAttachmentFailuresText(upload.total, upload.failures));
         return;
       }
 
@@ -1002,11 +1165,17 @@ export default function QuoteEditForm({
     const orNull = (value: string) => (value.trim() === "" ? null : value);
     return (
       <QuotePrintView
-        quoteId={quote?.id ?? null}
+        quoteId={savedQuote?.id ?? null}
         onClose={() => setShowPreview(false)}
         header={activePrintHeader}
         workSections={activeWorkSections}
+        signedPdf={attachments.signedPdfForPreview}
+        hasExcel={attachments.excelAttachedOrQueued}
         quote={{
+          // 엑셀 전용이면 앱 양식 대신 결재 PDF 를 보인다(QuotePrintView 의 엑셀 전용 갈래) —
+          // 받아 볼 문서가 손으로 만든 엑셀이기 때문이다. 일반 견적서는 아래 값으로 지금 그대로.
+          isExcelOnly,
+          manualSupplyAmount: isExcelOnly ? orNull(manualSupplyAmount) : null,
           quoteNumber,
           quoteDate,
           customerNameText,
@@ -1045,7 +1214,7 @@ export default function QuoteEditForm({
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          {quote ? "견적서 수정" : "새 견적서"}
+          {savedQuote ? "견적서 수정" : "새 견적서"}
         </h1>
         <div className="flex gap-2">
           {/* 🔴 **지금 화면의 값으로** 그린다 — 저장 여부와 무관하다.
@@ -1063,9 +1232,9 @@ export default function QuoteEditForm({
           </button>
           {/* 파일은 저장된 장에서만 받을 수 있다 — 만드는 라우트가 DB 의 그 줄을
               읽기 때문이다. 그래서 이 단추만 저장 뒤에 나타난다. */}
-          {quote && (
+          {savedQuote && (
             <a
-              href={`/api/quotes/${quote.id}/xlsx`}
+              href={`/api/quotes/${savedQuote.id}/xlsx`}
               className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
             >
               견적서 받기
@@ -1100,6 +1269,29 @@ export default function QuoteEditForm({
               className="mt-2 rounded-md border border-red-300 px-2 py-1 text-xs dark:border-red-800"
             >
               다시 불러오기
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 새 견적서 저장 뒤 파일 올리기 — 진행, 또는 못 올린 것(견적서는 이미 저장됐다). */}
+      {attachmentNotice && (
+        <div
+          role="status"
+          className={
+            isSubmitting
+              ? "rounded-md border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              : "rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          }
+        >
+          <p>{attachmentNotice}</p>
+          {createdQuote && !isSubmitting && (
+            <button
+              type="button"
+              onClick={() => router.push(returnHref ?? "/quotes")}
+              className="mt-2 rounded-md border border-amber-400 px-2 py-1 text-xs dark:border-amber-700"
+            >
+              목록으로
             </button>
           )}
         </div>
@@ -1155,11 +1347,16 @@ export default function QuoteEditForm({
             onChange={(e) => {
               const next = e.target.value as QuoteKind;
               setKind(next);
-              // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
-              // 풀린다(applyOverhaulRule 머리말).
-              applyOverhaulRule(next, laborKind);
-              // 양식이 바뀌면 조사·통전 기본 목록도 그 양식 것으로 간다.
-              fillScopeFromTemplate(next, laborKind);
+              // 엑셀 전용이면 줄을 건드리지 않는다 — 접힌 구역에 작업 · 작업 내역이 몰래
+              // 생기면 서버가 저장을 거절하고, 사람은 그 줄을 볼 수 없다. 끄면 켤 때 넣어
+              // 둔 줄이 그대로 돌아온다.
+              if (!isExcelOnly) {
+                // O/H 로 바꾸면 오버홀 작업이 자동으로 체크되고, 내자로 바꾸면
+                // 풀린다(applyOverhaulRule 머리말).
+                applyOverhaulRule(next, laborKind);
+                // 양식이 바뀌면 조사·통전 기본 목록도 그 양식 것으로 간다.
+                fillScopeFromTemplate(next, laborKind);
+              }
             }}
             className={editInputClass}
             disabled={disabled}
@@ -1262,9 +1459,59 @@ export default function QuoteEditForm({
         <Field label="결재조건" error={fieldErrors.payment} hint="비우면 양식 문구(귀사 결제 조건)">
           <input value={payment} onChange={(e) => setPayment(e.target.value)} className={editInputClass} disabled={disabled} />
         </Field>
+
+        {/* ── 엑셀 전용 (2026-09-15 Q3) ──────────────────────────────────
+            켜면 아래 부품 · 작업 구역을 접고 공급가액을 손으로 받는다. 켜고 끄는 판정은
+            toggleExcelOnly 한 곳 — 줄이 있으면 먼저 묻는다. */}
+        <div className="flex flex-col gap-3 border-t border-zinc-200 pt-4 sm:col-span-2 dark:border-zinc-800">
+          <ExcelOnlySwitch checked={isExcelOnly} disabled={disabled} onToggle={(next) => toggleExcelOnly(next)} />
+          {isExcelOnly && (
+            <div className="max-w-md">
+              <Field
+                label="공급가액(부가세 별도)"
+                error={fieldErrors.manualSupplyAmount}
+                required
+                hint="엑셀에 적은 공급가액 그대로"
+              >
+                {/* 세 자리마다 콤마를 붙여 보여 준다 — 들고 있는 값은 콤마 없는 그대로다. */}
+                <AmountInput value={manualSupplyAmount} onValueChange={setManualSupplyAmount} placeholder="0" className={editInputClass} disabled={disabled} />
+              </Field>
+            </div>
+          )}
+          {/* 접힌 구역의 오류 — 줄이 남아 서버가 거절했으면 여기에 보인다(그 자리는 접혀 있다). */}
+          {isExcelOnly &&
+            [fieldErrors.items, fieldErrors.workScopeLines, fieldErrors.repairTasks]
+              .filter((message): message is string => Boolean(message))
+              .map((message) => (
+                <p key={message} className={editErrorClass}>
+                  {message}
+                </p>
+              ))}
+        </div>
       </section>
 
-      {/* ── O/H 템플릿 부품 ──────────────────────────────────────────────
+      {/* ── 견적서 파일(결재 PDF · 수기 엑셀) ─────────────────────────────
+          상단 정보 바로 아래. 수정 화면에서는 [저장]과 따로 곧바로 반영되고, 새 견적서는
+          [저장] 뒤에 올라간다(QuoteAttachmentsSection.tsx 머리말). */}
+      <QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly} disabled={disabled} />
+
+      {/* ── 엑셀 전용이면 부품 · 작업 구역을 접는다 (2026-09-15 Q3) ──────
+          줄은 켤 때 비웠고(저장 전에 끄면 돌아온다), 금액은 위의 공급가액 칸이 받는다.
+          아래 세 구역(O/H 템플릿 · 출고된 부품 · 부품 비용과 그 안의 수리 작업 · 작업
+          내역 · 작업비)은 들여쓰기를 바꾸지 않고 이 조건으로만 감쌌다. */}
+      {isExcelOnly ? (
+        <section className="rounded-lg border border-dashed border-zinc-300 p-4 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          <p>
+            엑셀 전용 견적서 — 부품 · 수리 작업 · 작업 내역 · 작업비 구역을 접었습니다. 금액은 위의 공급가액이고,
+            [견적서 받기]는 「수기 견적서 엑셀」 칸의 파일을 내려줍니다.
+          </p>
+          {excelOnlyStash !== null && (
+            <p className="mt-1">켤 때 비운 줄은 저장하기 전에 엑셀 전용을 끄면 그대로 돌아옵니다.</p>
+          )}
+        </section>
+      ) : (
+      <>
+      {/* ── O/H 템플릿 부품──────────────────────────────────────────────
           🔴 **O/H 견적은 부품을 출고하기 전에 낸다**(2026-08-31 사용자 확인).
           얼마에 할지를 먼저 알려 주고 승인을 받은 뒤에 뜯기 시작하므로, 그 시점에
           아래 「출고된 부품」은 비어 있는 것이 정상이다. 청구할 부품은 이 기종의
@@ -1877,27 +2124,40 @@ export default function QuoteEditForm({
           )}
         </div>
       </section>
+      </>
+      )}
 
-      {/* ── 합계 미리보기 ───────────────────────────────────────────────── */}
+      {/* ── 합계 미리보기───────────────────────────────────────────────── */}
       <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
         <dl className="flex flex-wrap justify-end gap-x-8 gap-y-1 tabular-nums">
           <div className="flex gap-3">
             <dt className="text-zinc-500 dark:text-zinc-400">공 급 가</dt>
-            <dd className="text-zinc-900 dark:text-zinc-50">{formatAmount(supplyAmount)}</dd>
+            <dd className="text-zinc-900 dark:text-zinc-50">{formatMaybeAmount(supplyAmount)}</dd>
           </div>
           <div className="flex gap-3">
             <dt className="text-zinc-500 dark:text-zinc-400">부 가 세</dt>
-            <dd className="text-zinc-900 dark:text-zinc-50">{formatAmount(vat)}</dd>
+            <dd className="text-zinc-900 dark:text-zinc-50">{formatMaybeAmount(vat)}</dd>
           </div>
           <div className="flex gap-3 font-medium">
             <dt className="text-zinc-500 dark:text-zinc-400">합　　계</dt>
-            <dd className="text-zinc-900 dark:text-zinc-50">{formatAmount(supplyAmount + vat)}</dd>
+            <dd className="text-zinc-900 dark:text-zinc-50">{formatMaybeAmount(supplyAmount === null || vat === null ? null : supplyAmount + vat)}</dd>
           </div>
         </dl>
         <p className="mt-2 text-right text-xs text-zinc-500 dark:text-zinc-400">
-          미리보기입니다. 저장되는 값은 수량과 단가뿐이고, 견적서 파일에서는 양식의 수식이 계산합니다.
+          {isExcelOnly
+            ? "엑셀 전용 견적서의 공급가는 위에 적은 공급가액입니다. [견적서 받기]는 붙인 엑셀을 그대로 내려줍니다."
+            : "미리보기입니다. 저장되는 값은 수량과 단가뿐이고, 견적서 파일에서는 양식의 수식이 계산합니다."}
         </p>
       </section>
+
+      {/* 줄이 있는 채로 엑셀 전용을 켜려 할 때 — 비울지 묻는다(toggleExcelOnly). */}
+      {clearLinesAsk && (
+        <ExcelOnlyClearLinesDialog
+          counts={clearLinesAsk}
+          onConfirm={() => toggleExcelOnly(true, true)}
+          onCancel={() => setClearLinesAsk(null)}
+        />
+      )}
     </form>
   );
 }

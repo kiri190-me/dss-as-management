@@ -19,6 +19,8 @@ import {
 import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
 import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
+import { QuoteFileBadges } from "@/components/quotes/QuoteAttachmentParts";
+import { quoteListAmountNote } from "@/components/quotes/quote-attachment-files";
 
 /**
  * ============================================================================
@@ -508,6 +510,8 @@ function QuoteTable({
             <td className="px-3 py-2">
               <span className="flex flex-wrap items-center gap-1.5">
                 <KindTag kind={row.kind} />
+                {/* 엑셀 전용 · 결재 PDF · 엑셀 없음(2026-09-15 Q3) — 카드와 같은 조각이다. */}
+                <QuoteFileBadges row={row} />
                 <Link
                   href={quoteEditHref({ quoteId: row.id, repairCaseId: quoteLinkRepairCaseId })}
                   className="font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
@@ -523,7 +527,7 @@ function QuoteTable({
             <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-50">
               {formatAmount(row.supplyAmount)}
               <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-500">
-                ({row.itemCount}품목)
+                ({quoteListAmountNote(row)})
               </span>
             </td>
             <td className="whitespace-nowrap px-3 py-2">
@@ -556,6 +560,8 @@ function QuoteCardList({
         >
           <span className="flex flex-wrap items-center gap-1.5">
             <KindTag kind={row.kind} />
+            {/* 표와 같은 조각 — 창 폭에 따라 표시가 달라지지 않게. flex-wrap 이라 좁으면 줄바꿈된다. */}
+            <QuoteFileBadges row={row} />
             <Link
               href={quoteEditHref({ quoteId: row.id, repairCaseId: quoteLinkRepairCaseId })}
               className="text-sm font-medium text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
@@ -579,7 +585,7 @@ function QuoteCardList({
           <p className="text-sm tabular-nums text-zinc-900 dark:text-zinc-50">
             {formatAmount(row.supplyAmount)}
             <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-500">
-              ({row.itemCount}품목 · 부가세 별도)
+              ({quoteListAmountNote(row)} · 부가세 별도)
             </span>
           </p>
           <div className="flex gap-1">

@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import PrintFitFrame from "@/components/common/print-fit-frame";
-import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
+import {
+  EXCEL_ONLY_NO_SIGNED_PDF_TEXT,
+  quoteAttachmentDownloadUrl,
+  quoteAttachmentViewUrl,
+  type QuotePrintSignedPdf,
+} from "@/components/quotes/quote-attachment-files";
 import type { QuoteEditData } from "@/lib/db/queries/quotes";
 import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
 
@@ -135,6 +141,15 @@ export type QuotePrintData = Pick<
    * 🔴 **없으면 예전 그대로 그린다.** 빈 조사 칸만으로는 빠지지 않는다(옛 견적서).
    */
   investigationExcluded?: boolean;
+  /**
+   * 엑셀 전용 견적서인가 · 손으로 적은 공급가액(2026-09-15 Q3). 켜져 있으면 **앱 양식을
+   * 그리지 않고 결재 PDF 를 보인다**(아래 ExcelOnlyQuotePreview) — 그 장의 문서는 손으로
+   * 만든 엑셀이고, 앱 양식으로 그리면 품목 없는 빈 견적서가 된다.
+   *
+   * 🔴 **없으면 예전 그대로 그린다**(일반 견적서).
+   */
+  isExcelOnly?: boolean;
+  manualSupplyAmount?: string | null;
 };
 
 function productLine(quote: QuotePrintData): string {
@@ -152,6 +167,8 @@ export default function QuotePrintView({
   quoteId,
   onClose,
   backHref,
+  signedPdf = null,
+  hasExcel,
 }: {
   quote: QuotePrintData;
   /** 양식에서 읽어 온 회사 정보·기본 문구·계좌. 못 읽은 칸은 null 이고 그 줄은 비운다. */
@@ -194,7 +211,28 @@ export default function QuotePrintView({
    * (예전 그대로).
    */
   backHref?: string;
+  /**
+   * 엑셀 전용 견적서의 결재 PDF — 올라가 있는 것, 또는 새 견적서가 들고 있는 것. 없으면 null.
+   * **일반 견적서는 쓰지 않는다.**
+   */
+  signedPdf?: QuotePrintSignedPdf | null;
+  /** 엑셀 전용 견적서에 수기 엑셀이 붙어 있는가. 안 주면 따로 알리지 않는다. */
+  hasExcel?: boolean;
 }) {
+  // 엑셀 전용 장은 앱 양식 대신 결재 PDF 를 보인다. 일반 견적서는 아래 그대로다.
+  if (quote.isExcelOnly === true) {
+    return (
+      <ExcelOnlyQuotePreview
+        quote={quote}
+        quoteId={quoteId}
+        onClose={onClose}
+        backHref={backHref}
+        signedPdf={signedPdf}
+        hasExcel={hasExcel}
+      />
+    );
+  }
+
   const items = quote.items.map((item) => ({
     name: item.partNameText,
     quantity: item.quantity,
@@ -212,10 +250,15 @@ export default function QuotePrintView({
    */
   const printed = items;
 
-  const supply = sumQuoteSupplyAmount(
-    quote.items.map((item) => ({ quantity: item.quantity, unitPrice: item.unitPrice })),
-    quote.workCost
-  );
+  // 서버가 금액을 셈하는 그 함수 하나로(domain/quote-list.ts 의 quoteSupplyAmountOf). 엑셀
+  // 전용 장은 위에서 갈라 나갔으므로 여기서는 부품 줄 합 + 작업비이고, null 은 오지 않는다.
+  const supply =
+    quoteSupplyAmountOf({
+      isExcelOnly: false,
+      manualSupplyAmount: null,
+      items: quote.items.map((item) => ({ quantity: item.quantity, unitPrice: item.unitPrice })),
+      workCost: quote.workCost,
+    }) ?? 0;
   const vat = supply * VAT_RATE;
   const workCost = Number(quote.workCost);
 
@@ -440,6 +483,146 @@ export default function QuotePrintView({
           </div>
         </div>
       </PrintFitFrame>
+    </div>
+  );
+}
+
+const EXCEL_ONLY_BUTTON_CLASS =
+  "inline-block rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+const EXCEL_ONLY_PRIMARY_BUTTON_CLASS =
+  "inline-block rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 dark:bg-primary-100 dark:text-zinc-900 dark:hover:bg-primary-300";
+
+/**
+ * ============================================================================
+ * 엑셀 전용 견적서의 미리보기 — 앱 양식 대신 결재 PDF (2026-09-15 Q3)
+ * ============================================================================
+ * 엑셀 전용 장의 문서는 사람이 손으로 만든 엑셀이다. 앱 양식으로 그리면 품목 없는 빈
+ * 견적서가 나오므로 그리지 않는다. 대신 결재 사인이 들어간 PDF 가 있으면 그것을 열고,
+ * 없으면 [견적서 받기](붙인 엑셀을 내려준다 — api/quotes/[id]/xlsx)로 보낸다.
+ *
+ * 돌아가는 자리는 위 QuotePrintView 의 도구모음과 **같은 기준**이다 — `onClose` 를 받았으면
+ * 겹쳐 뜬 미리보기라 닫기 단추, 아니면 독립 페이지라 `backHref` 링크(그 까닭은 위 주석).
+ *
+ * ── 🔴 페이지 안에 끼워 보이지 않고 새 탭에서 연다 ─────────────────────────
+ * next.config.ts 가 **모든 주소**에 `X-Frame-Options: DENY` 와 `frame-ancestors 'none'` 을
+ * 건다 — 받기 통로(/api/attachments/{id}/download)도 예외가 아니라, iframe · object · embed
+ * 로 끼우면 브라우저가 빈 칸을 그린다. 이 화면 하나 때문에 그 규칙(클릭 가로채기 방어)을
+ * 풀지 않는다. 대신 받기 통로의 `view=full`(PDF 를 inline 으로 내준다 — inline-view.ts)을
+ * 새 탭으로 연다. 브라우저 내장 뷰어가 PDF 를 페이지 안에서 보인다.
+ *
+ * 올리기 · 지우기 단추는 없다 — 이 화면은 보기 권한만 있어도 열린다(print/page.tsx).
+ * ============================================================================
+ */
+function ExcelOnlyQuotePreview({
+  quote,
+  quoteId,
+  onClose,
+  backHref,
+  signedPdf,
+  hasExcel,
+}: {
+  quote: QuotePrintData;
+  quoteId: string | null;
+  onClose?: () => void;
+  backHref?: string;
+  signedPdf: QuotePrintSignedPdf | null;
+  hasExcel?: boolean;
+}) {
+  const supply = quoteSupplyAmountOf({
+    isExcelOnly: true,
+    manualSupplyAmount: quote.manualSupplyAmount ?? null,
+    items: quote.items,
+    workCost: quote.workCost,
+  });
+  const rows: [string, string][] = [
+    ["발행일자", formatDate(quote.quoteDate)],
+    ["발행번호", quote.quoteNumber],
+    ["공급처", quote.customerNameText],
+    ["품명", quote.subject],
+    // 금액을 알 수 없으면 「—」 — 0 으로 접지 않는다(0 은 무상 견적이라는 실제 값이다).
+    ["공급가액", supply === null ? "— (아직 적지 않았습니다)" : `${won(supply)} (V.A.T. 별도)`],
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {onClose ? (
+          <button type="button" onClick={onClose} className={EXCEL_ONLY_BUTTON_CLASS}>
+            ← 편집으로 돌아가기
+          </button>
+        ) : (
+          <Link href={backHref ?? `/quotes/${quoteId}`} className={EXCEL_ONLY_BUTTON_CLASS}>
+            ← 견적서로 돌아가기
+          </Link>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {quoteId === null ? (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">Excel 은 저장한 뒤에 받을 수 있습니다</span>
+          ) : (
+            <a href={`/api/quotes/${quoteId}/xlsx`} className={EXCEL_ONLY_BUTTON_CLASS}>
+              견적서 받기
+            </a>
+          )}
+        </div>
+      </div>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">엑셀 전용 견적서</h1>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          앱 양식이 아니라 손으로 만든 엑셀로 발행한 견적서입니다 — [견적서 받기]는 붙인 엑셀을 내려줍니다.
+        </p>
+        <dl className="mt-3 flex flex-col gap-1 text-sm">
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex flex-wrap gap-x-3">
+              <dt className="w-16 shrink-0 text-zinc-500 dark:text-zinc-400">{label}</dt>
+              <dd className="min-w-0 break-all text-zinc-900 dark:text-zinc-50">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section
+        aria-label="결재 견적서 PDF"
+        className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+      >
+        <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">결재 견적서 PDF</h2>
+        {signedPdf?.kind === "saved" ? (
+          <>
+            <p className="mt-2 break-all text-sm text-zinc-800 dark:text-zinc-200">{signedPdf.originalFileName}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href={quoteAttachmentViewUrl(signedPdf.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={EXCEL_ONLY_PRIMARY_BUTTON_CLASS}
+              >
+                결재 PDF 보기 (새 탭)
+              </a>
+              <a href={quoteAttachmentDownloadUrl(signedPdf.id)} className={EXCEL_ONLY_BUTTON_CLASS}>
+                내려받기
+              </a>
+            </div>
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              보안 설정상 이 화면 안에 끼워 보일 수 없어 새 탭에서 엽니다 — 그 화면에서 인쇄 · 저장할 수 있습니다.
+            </p>
+          </>
+        ) : signedPdf?.kind === "pending" ? (
+          <p className="mt-2 break-all text-sm text-zinc-700 dark:text-zinc-300">
+            골라 둔 결재 PDF({signedPdf.fileName})는 [저장]하면 올라갑니다 — 올린 뒤에 여기서 볼 수 있습니다.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">{EXCEL_ONLY_NO_SIGNED_PDF_TEXT}</p>
+        )}
+        {hasExcel === false ? (
+          <p
+            role="alert"
+            className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          >
+            수기 견적서 엑셀도 아직 붙지 않았습니다 — 견적서 수정 화면의 「수기 견적서 엑셀」 칸에 붙여야 [견적서 받기]가
+            파일을 내줍니다.
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }

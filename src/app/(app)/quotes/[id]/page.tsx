@@ -13,6 +13,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
+import { listQuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { returnHrefForEditQuote, type SearchParamsInput } from "@/lib/domain/quote-new-link";
@@ -81,10 +82,13 @@ export default async function QuoteDetailPage({
   // 저장하지 않은 수정분도 그대로 보인다.
   // 작업 내역 기본값은 **머리글까지** 받는다 — 미리보기가 그 양식의 머리글로
   // 작업 내역을 그려야 저장 전과 후가 같은 문서로 보인다.
-  const [repairLabor, printHeaders, workScopeDefaults] = await Promise.all([
+  // 결재 PDF · 수기 엑셀 두 칸 — 칸마다 지금 붙어 있는 파일(휴지통 것은 빼고). 내부 경로는
+  // 싣지 않는 조회다(queries/attachments.ts 의 listQuoteAttachmentSlots).
+  const [repairLabor, printHeaders, workScopeDefaults, attachmentSlots] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
     readAllQuoteWorkSectionDefaults(),
+    listQuoteAttachmentSlots(quote.id),
   ]);
 
   // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
@@ -99,6 +103,7 @@ export default async function QuoteDetailPage({
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
       returnHref={returnHref}
+      attachmentSlots={attachmentSlots}
     />
   );
 }

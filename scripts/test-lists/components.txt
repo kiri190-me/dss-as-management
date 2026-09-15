@@ -43,3 +43,8 @@ src/components/common/AmountInput.test.tsx
 src/app/bookmark-icon.test.ts
 src/components/excel-imports/kyosan-import-view-model.test.ts
 src/components/excel-imports/KyosanImportParts.test.tsx
+src/components/quotes/quote-attachment-files.test.ts
+src/components/quotes/quote-attachment-upload.test.ts
+src/components/quotes/QuoteAttachmentParts.test.tsx
+src/components/quotes/quote-print-excel-only.test.tsx
+src/components/quotes/quote-attachment-screens.test.ts

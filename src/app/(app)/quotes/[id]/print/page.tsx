@@ -5,6 +5,8 @@ import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
+import { listQuoteAttachmentSlots } from "@/lib/db/queries/attachments";
+import { excelOnlyPrintAttachments } from "@/components/quotes/quote-attachment-files";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { readAllQuoteTemplateHeaders, readQuoteWorkSections } from "@/lib/storage/quote-template";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
@@ -76,11 +78,15 @@ export default async function QuotePrintPage({
    * 규칙을 안 맞추면 화면에는 아무것도 없고 파일에는 표준 7줄이 적힌 서로 다른
    * 문서가 된다.
    */
-  const [headers, workSections] = await Promise.all([
+  const [headers, workSections, excelOnlySlots] = await Promise.all([
     readAllQuoteTemplateHeaders(),
     readQuoteWorkSections(templateKey, quote.workScopeLines),
+    // 엑셀 전용 장만 파일 칸을 읽는다 — 앱 양식 대신 결재 PDF 를 보이기 때문이다
+    // (QuotePrintView 의 엑셀 전용 갈래). 일반 견적서는 조회 하나 늘지 않고 지금 그대로다.
+    quote.isExcelOnly ? listQuoteAttachmentSlots(quote.id) : Promise.resolve(null),
   ]);
   const header = headers[templateKey];
+  const excelOnly = excelOnlySlots ? excelOnlyPrintAttachments(excelOnlySlots) : null;
 
   // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
   // 정하면 손으로 바꾼 링크가 사람을 남의 건으로 보낸다(수정 화면과 같은 판단).
@@ -100,6 +106,8 @@ export default async function QuotePrintPage({
       workSections={workSections}
       quoteId={quote.id}
       backHref={backHref}
+      signedPdf={excelOnly?.signedPdf ?? null}
+      hasExcel={excelOnly?.hasExcel}
     />
   );
 }
