@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EditSectionActions, {
   editErrorClass,
   editInputClass,
@@ -255,6 +256,7 @@ export default function DomesticOrderDueDatesCell({
 
       router.refresh();
       setIsEditing(false);
+      showSavePopup({ message: "납기요청일을 저장했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }

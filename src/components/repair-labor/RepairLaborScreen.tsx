@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   editErrorClass,
   editInputClass,
@@ -304,14 +305,16 @@ function KindEditor({
     const savedPowerTestCount = powerTestTasks.filter(
       (task) => task.taskName.trim() !== ""
     ).length;
-    onMessage(
+    const savedMessage =
       section === "tasks"
         ? `${workflowKindLabels[kind.equipmentKind]} 작업 ${result.changedCount}건을 저장했습니다.`
         : `${workflowKindLabels[kind.equipmentKind]} 통전작업 공수시간 ${
             powerTestHours.trim() === "" ? "'정하지 않음'" : `${powerTestHours.trim()}시간`
-          } · 통전 작업 ${savedPowerTestCount}건을 저장했습니다.`
-    );
+          } · 통전 작업 ${savedPowerTestCount}건을 저장했습니다.`;
     router.refresh();
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx) — 이 화면이 곧 목록이라 머문다.
+    // 서버가 거절한 이유는 지금처럼 위의 문구 칸에(onMessage).
+    showSavePopup({ message: savedMessage, redirectTo: null });
   }
 
   const disabled = busy || !canEdit;

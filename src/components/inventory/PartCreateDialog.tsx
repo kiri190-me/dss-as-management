@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createPartAction } from "@/lib/server/actions/inventory";
 
 /** Category/item-type suggestions use a native <datalist> — offers existing values but never blocks typing a new one, per the approved Phase 5B-2 decision to keep both fields free text. */
@@ -66,6 +67,8 @@ export default function PartCreateDialog({
     }
     onClose();
     router.refresh();
+    // 재고 목록 위에 뜨는 창이라 닫으면 그 자리가 곧 목록이다(common/SavePopup.tsx).
+    showSavePopup({ message: "부품을 등록했습니다.", redirectTo: null });
   }
 
   return (

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { rejectPartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import { generateClientUuid } from "@/lib/client-uuid";
 
@@ -53,6 +54,7 @@ export default function RejectPartRequestDialog({
     }
     onClose();
     router.refresh();
+    showSavePopup({ message: "요청을 거절했습니다.", redirectTo: null });
   }
 
   return (

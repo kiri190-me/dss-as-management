@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { consumeStockAction } from "@/lib/server/actions/inventory";
 import { createPartIssueRequestAction } from "@/lib/server/actions/inventory-part-issue-requests";
 import {
@@ -119,6 +120,12 @@ export default function ConsumeStockDialog({
     }
     onClose();
     router.refresh();
+    // 부품의 재고를 바꿨으므로(승인 절차가 있으면 신청) 팝업 뒤 재고 목록으로
+    // 넘어간다(common/SavePopup.tsx).
+    showSavePopup({
+      message: approvalRequired ? "불출 승인을 요청했습니다." : "사용 처리했습니다.",
+      redirectTo: "/inventory",
+    });
   }
 
   return (

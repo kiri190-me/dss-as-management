@@ -3,6 +3,7 @@
 import { useId, useMemo, useState, useTransition, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   LIST_CARD_GRID,
   ResponsiveList,
@@ -877,6 +878,7 @@ function SheetHeadingEditor({
         onClose();
         router.refresh();
       });
+      showSavePopup({ message: "머리말을 저장했습니다.", redirectTo: null });
     } catch {
       setFormError("일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -1382,6 +1384,7 @@ function CompletionToggle({
         return;
       }
       router.refresh();
+      showSavePopup({ message: completed ? "완료 표시를 풀었습니다." : "완료로 표시했습니다.", redirectTo: null });
     } finally {
       setIsPending(false);
     }

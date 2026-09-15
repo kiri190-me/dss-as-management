@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   editErrorClass,
   editInputClass,
@@ -312,6 +313,7 @@ function ModelLinks({
     }
     setSelected("");
     onDone();
+    showSavePopup({ message: "제품 모델을 연결했습니다.", redirectTo: null });
   }
 
   async function unlink(linkId: string) {
@@ -325,6 +327,7 @@ function ModelLinks({
       return;
     }
     onDone();
+    showSavePopup({ message: "제품 모델 연결을 풀었습니다.", redirectTo: null });
   }
 
   return (
@@ -523,6 +526,7 @@ function TemplateEditor({
       return;
     }
     onDone();
+    showSavePopup({ message: "O/H 템플릿을 저장했습니다.", redirectTo: null });
   }
 
   return (

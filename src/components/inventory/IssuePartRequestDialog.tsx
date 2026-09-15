@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { issuePartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import { createPartIssueRequestAction } from "@/lib/server/actions/inventory-part-issue-requests";
 import {
@@ -145,6 +146,8 @@ export default function IssuePartRequestDialog({
     }
     onClose();
     router.refresh();
+    // 요청 관리 목록 위의 창이라 팝업만 띄우고 머문다(common/SavePopup.tsx).
+    showSavePopup({ message: approvalRequired ? "불출 승인을 요청했습니다." : "불출했습니다.", redirectTo: null });
   }
 
   return (

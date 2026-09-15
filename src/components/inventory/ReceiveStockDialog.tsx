@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { receiveStockAction } from "@/lib/server/actions/inventory";
 import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/domain/inventory-types";
 
@@ -50,6 +51,8 @@ export default function ReceiveStockDialog({ isOpen, onClose, partId }: { isOpen
     }
     onClose();
     router.refresh();
+    // 부품의 재고를 바꿨으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
+    showSavePopup({ message: "입고했습니다.", redirectTo: "/inventory" });
   }
 
   return (

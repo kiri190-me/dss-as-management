@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { returnStockAction } from "@/lib/server/actions/inventory";
 import type { ReturnableUseRow } from "@/lib/db/queries/inventory";
 
@@ -65,6 +66,8 @@ export default function ReturnStockDialog({
     }
     onClose();
     router.refresh();
+    // 부품의 재고를 바꿨으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
+    showSavePopup({ message: "반환했습니다.", redirectTo: "/inventory" });
   }
 
   return (

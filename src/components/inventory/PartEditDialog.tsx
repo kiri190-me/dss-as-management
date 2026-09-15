@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { updatePartAction } from "@/lib/server/actions/inventory";
 import type { PartDetail } from "@/lib/db/queries/inventory";
 
@@ -78,6 +79,8 @@ export default function PartEditDialog({
     }
     onClose();
     router.refresh();
+    // 부품 자체를 고쳤으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
+    showSavePopup({ message: "부품 정보를 저장했습니다.", redirectTo: "/inventory" });
   }
 
   return (

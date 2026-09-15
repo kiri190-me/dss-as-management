@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EditSectionActions, {
   editErrorClass,
   editInputClass,
@@ -692,6 +693,8 @@ export default function DomesticOrderEditForm({
 
       router.refresh();
       onDone();
+      // 내자 목록 위의 폼이라 그 자리가 곧 목록이다 — 팝업만 띄운다(common/SavePopup.tsx).
+      showSavePopup({ message: row ? "내자 줄을 저장했습니다." : "내자 줄을 등록했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }

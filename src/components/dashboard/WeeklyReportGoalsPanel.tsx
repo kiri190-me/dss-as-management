@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import WeeklyReportGoalDeleteDialog from "./WeeklyReportGoalDeleteDialog";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
@@ -210,6 +211,7 @@ function GoalLine({
 
       router.refresh();
       setIsEditing(false);
+      showSavePopup({ message: "목표를 저장했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }
@@ -442,6 +444,7 @@ function GoalAddForm({
       setRepairCaseId("");
       setGoalText("");
       router.refresh();
+      showSavePopup({ message: "목표를 추가했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }
@@ -681,8 +684,12 @@ export default function WeeklyReportGoalsPanel({
       // (mutations/weekly-report-goals.ts).
       const skippedText =
         result.skipped > 0 ? ` ${result.skipped}건은 이미 있어 건너뛰었습니다.` : "";
-      setCopyMessage({ ok: true, text: `${result.copied}건 가져왔습니다.${skippedText}` });
+      const copiedText = `${result.copied}건 가져왔습니다.${skippedText}`;
+      // 팝업으로 알린다(common/SavePopup.tsx). 다만 건너뛴 건수는 0.5초 팝업으로는
+      // 읽고 지나치기 쉬워, 건너뛴 것이 있을 때만 화면에도 그대로 남긴다.
+      setCopyMessage(result.skipped > 0 ? { ok: true, text: copiedText } : null);
       router.refresh();
+      showSavePopup({ message: copiedText, redirectTo: null });
     } finally {
       setIsCopying(false);
     }

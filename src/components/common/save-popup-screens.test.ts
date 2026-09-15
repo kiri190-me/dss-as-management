@@ -184,6 +184,60 @@ test("워크플로 발행·폐기는 도착 화면이 이미 알리므로 팝업
   assert.match(page, /DONE_MESSAGES\[done\]/);
 });
 
+test("부품 상세에서 부품 자체를 바꾸면 팝업 뒤 재고 목록으로 넘어간다", () => {
+  const toList: [string, string][] = [
+    ["PartEditDialog.tsx", '"부품 정보를 저장했습니다."'],
+    ["ReceiveStockDialog.tsx", '"입고했습니다."'],
+    ["ConsumeStockDialog.tsx", 'approvalRequired ? "불출 승인을 요청했습니다." : "사용 처리했습니다."'],
+    ["ReturnStockDialog.tsx", '"반환했습니다."'],
+    ["PartMinimumQuantitySection.tsx", '"한계수량·단가를 저장했습니다."'],
+  ];
+  for (const [name, message] of toList) {
+    assert.deepEqual(popupCalls(`src/components/inventory/${name}`), [[message, '"/inventory"']], name);
+  }
+});
+
+test("재고 목록·요청 관리·O/H 템플릿·내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () => {
+  const stayOnly: [string, number][] = [
+    ["src/components/inventory/PartCreateDialog.tsx", 1],
+    ["src/components/inventory/IssuePartRequestDialog.tsx", 1],
+    ["src/components/inventory/HoldPartRequestDialog.tsx", 1],
+    ["src/components/inventory/RejectPartRequestDialog.tsx", 1],
+    ["src/components/inventory/PartiallyCloseRequestDialog.tsx", 1],
+    ["src/components/inventory/PartRequestManagerScreen.tsx", 1],
+    ["src/components/inventory/OhTemplateScreen.tsx", 3],
+    ["src/components/domestic-orders/DomesticOrderEditForm.tsx", 1],
+    ["src/components/domestic-orders/DomesticOrderTextCell.tsx", 1],
+    ["src/components/domestic-orders/DomesticOrderDueDatesCell.tsx", 1],
+    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 2],
+    ["src/components/dashboard/WeeklyReportGoalsPanel.tsx", 3],
+    ["src/components/dashboard/WeeklyReportDeliveriesPanel.tsx", 2],
+    ["src/components/repair-labor/RepairLaborScreen.tsx", 1],
+  ];
+  for (const [path, count] of stayOnly) {
+    const calls = popupCalls(path);
+    assert.equal(calls.length, count, path);
+    assert.ok(
+      calls.every(([, redirectTo]) => redirectTo === "null"),
+      path
+    );
+  }
+});
+
+test("불출 승인 화면은 누른 카드에 결과 한 줄을 싣는 설계라 팝업을 더하지 않는다", () => {
+  // 승인·반려·실행·취소의 결과는 이미 **누른 카드**에 한 줄로 뜨고 읽어 주기 통로도
+  // 있다. 그 함수 몸통은 part-issue-approval-screen.test.tsx 가 정해진 인자로 떼어
+  // 실제로 돌리므로, 여기에 팝업을 끼우면 그 시험의 계약(부르는 차례)부터 바뀐다.
+  const screen = readFileSync("src/components/inventory/PartIssueApprovalScreen.tsx", "utf8");
+  assert.doesNotMatch(screen, /showSavePopup/);
+  assert.match(screen, /setMessage\(issueRequestId, "불출을 실행했습니다\."\);/);
+});
+
+test("주간보고 가져오기 — 건너뛴 건수는 팝업으로 지나치기 쉬워 화면에도 남는다", () => {
+  const goals = readFileSync("src/components/dashboard/WeeklyReportGoalsPanel.tsx", "utf8");
+  assert.match(goals, /setCopyMessage\(result\.skipped > 0 \? \{ ok: true, text: copiedText \} : null\);/);
+});
+
 test("승인 카드는 성공 문구를 팝업으로 옮기고, 거절 이유만 카드에 남긴다", () => {
   for (const name of ["DatabaseRepairInspectionCard.tsx", "DatabaseFinalShipmentCard.tsx"]) {
     const source = readFileSync(`src/components/repair-cases/approval/${name}`, "utf8");

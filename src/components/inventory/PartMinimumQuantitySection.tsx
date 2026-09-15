@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { savePartMinimumQuantitiesAction } from "@/lib/server/actions/part-minimum-quantities";
 import { parseMinimumQuantityValue } from "@/lib/validation/part-minimum-quantity-input";
 import {
@@ -148,6 +149,8 @@ export default function PartMinimumQuantitySection({
       return;
     }
     router.refresh();
+    // 부품에 딸린 값을 고쳤으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
+    showSavePopup({ message: "한계수량·단가를 저장했습니다.", redirectTo: "/inventory" });
   }
 
   return (

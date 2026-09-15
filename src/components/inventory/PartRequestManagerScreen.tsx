@@ -10,6 +10,7 @@ import HoldPartRequestDialog from "./HoldPartRequestDialog";
 import { releasePartRequestHoldAction } from "@/lib/server/actions/inventory-part-requests";
 import { generateClientUuid } from "@/lib/client-uuid";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   isRequestHoldable,
   isRequestHoldReleasable,
@@ -168,7 +169,10 @@ export default function PartRequestManagerScreen({
       idempotencyKey: generateClientUuid(),
     });
     setReleasingId(null);
-    if (result.ok) router.refresh();
+    if (result.ok) {
+      router.refresh();
+      showSavePopup({ message: "보류를 풀었습니다.", redirectTo: null });
+    }
   }
 
   const balancesMap = useMemo(() => new Map(Object.entries(balancesByPartId)), [balancesByPartId]);

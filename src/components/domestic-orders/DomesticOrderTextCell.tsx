@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EditSectionActions, {
   editInputClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
@@ -382,6 +383,7 @@ export default function DomesticOrderTextCell({
       // `줄 수정` 폼이 이미 쓰는 방식이다(router.refresh).
       router.refresh();
       setIsEditing(false);
+      showSavePopup({ message: "저장했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }

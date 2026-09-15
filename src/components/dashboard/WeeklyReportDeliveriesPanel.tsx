@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import WeeklyReportDeliveryDeleteDialog from "./WeeklyReportDeliveryDeleteDialog";
 import {
   inlineEditCellButtonClass,
@@ -214,6 +215,7 @@ function DeliveryLine({
 
       router.refresh();
       setIsEditing(false);
+      showSavePopup({ message: "납품 건을 저장했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }
@@ -527,6 +529,7 @@ function DeliveryAddForm({
       setRepairCaseId("");
       setNote("");
       router.refresh();
+      showSavePopup({ message: "납품 건을 추가했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }
