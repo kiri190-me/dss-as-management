@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import AmountInput from "@/components/common/AmountInput";
 import {
   editErrorClass,
   editInputClass,
@@ -1469,10 +1470,11 @@ export default function QuoteEditForm({
                 )}
               </div>
               <div>
-                <input
+                {/* 세 자리마다 콤마를 붙여 보여 준다 — 들고 있는 값은 콤마 없는 그대로다
+                    (common/AmountInput.tsx). */}
+                <AmountInput
                   value={row.unitPrice}
-                  onChange={(e) => updateItem(row.key, { unitPrice: e.target.value })}
-                  inputMode="decimal"
+                  onValueChange={(raw) => updateItem(row.key, { unitPrice: raw })}
                   placeholder="단가"
                   aria-label={`${index + 1}번째 부품 단가`}
                   className={editInputClass}
@@ -1858,13 +1860,8 @@ export default function QuoteEditForm({
             error={fieldErrors.workCost}
             hint="기본 작업비 + 고른 작업(공수시간 × 시간당 단가)"
           >
-            <input
-              value={workCost}
-              onChange={(e) => setWorkCost(e.target.value)}
-              inputMode="decimal"
-              className={editInputClass}
-              disabled={disabled}
-            />
+            {/* 세 자리마다 콤마를 붙여 보여 준다 — 들고 있는 값은 콤마 없는 그대로다. */}
+            <AmountInput value={workCost} onValueChange={setWorkCost} className={editInputClass} disabled={disabled} />
           </Field>
           {/* 작업 목록이 비어 있는 장비(T/C)에서도 적용할 것이 있다 — 기본
               작업비와 통전작업 제외가 그것이다. */}

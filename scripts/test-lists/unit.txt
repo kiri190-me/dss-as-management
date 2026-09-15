@@ -131,6 +131,7 @@ src/lib/domain/notifications.test.ts
 src/lib/domain/notification-settings.test.ts
 src/lib/domain/notification-toast.test.ts
 src/lib/domain/save-popup.test.ts
+src/lib/domain/amount-input.test.ts
 src/lib/validation/part-minimum-quantity-input.test.ts
 src/lib/validation/part-unit-price-input.test.ts
 src/lib/validation/repair-task-input.test.ts

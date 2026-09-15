@@ -39,5 +39,6 @@ src/components/users/UserDeletionParts.test.tsx
 src/components/repair-cases/detail/edit/engineer-select-options.test.ts
 src/components/common/SavePopup.test.tsx
 src/components/common/save-popup-screens.test.ts
+src/components/common/AmountInput.test.tsx
 src/components/excel-imports/kyosan-import-view-model.test.ts
 src/components/excel-imports/KyosanImportParts.test.tsx
