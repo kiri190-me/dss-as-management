@@ -501,6 +501,11 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   // 역할이 아니라 글 한 건의 판정이라(domain/improvement-request.ts) 이 집합과
   // 겹치지 않는다 — 설정으로 쓰기를 주면 적기는 실제로 열린다.
   "improvementRequests",
+  // 과거 인수품 가져오기(2026-09-15, 처음부터). 서버 액션 둘(미리보기 · 실행)이 이 설정의
+  // 관리 수준만 본다. 역할 함수(kyosan-intake-import-authorization.ts)는 기본값을 계산할 때만
+  // 쓰인다. 새 모델을 만드는 줄만 따로 canEditProductModels 를 보는데, 그것은 A/S 접수와 같은
+  // 제품 모델 마스터 규칙이라 이 영역의 판정이 아니다(미리보기가 그 줄을 확인 필요로 알린다).
+  "kyosanIntakeImport",
 ]);
 
 /** 이 노드의 설정이 실제 판정을 지배하는가. */

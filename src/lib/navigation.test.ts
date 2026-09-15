@@ -118,17 +118,19 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
   // 없고(baselinePermissionLevel 이 NONE 을 돌려준다), 노출은 오직 개발자 모드
   // 관문으로만 정해진다(auth/developer-mode-gate.ts). 다른 항목처럼 「이 역할만
   // 빠진다」로 적으면 나머지 역할에게 열린 것처럼 읽힌다.
+  // 과거 인수품 가져오기(2026-09-15)는 최고관리자·관리자만 기본으로 본다 — 아래 세 역할에서
+  // 빠진다(auth/kyosan-intake-import-authorization.ts).
   const expected: Record<string, string[]> = {
     SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
     ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
     AS_ENGINEER: navItems
       .map((i) => i.key)
-      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings", "developerMode"].includes(k)),
+      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)),
     SALES: navItems
       .map((i) => i.key)
       .filter(
         (k) =>
-          !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "developerMode"].includes(k)
+          !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)
       ),
     INVENTORY_MANAGER: navItems
       .map((i) => i.key)
@@ -137,7 +139,7 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
           ![
             "myActiveWork", "technicalProcedures", "customers", "productModels", "workflows",
             "domesticOrders", "quotes", "repairLabor", "customerPortal", "mailSettings",
-            "developerMode",
+            "kyosanIntakeImport", "developerMode",
           ].includes(k)
       ),
   };
@@ -402,7 +404,9 @@ test("navGroups: every itemKey references a real navItems key", () => {
 
 test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자 / 관리 / 설정 structure", () => {
   const byKey = new Map(navGroups.map((g) => [g.key, g]));
-  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"]);
+  // 과거 인수품 가져오기(2026-09-15)가 「일본 본사 Excel 생성」 바로 뒤, 맨 끝으로 붙었다 —
+  // 같은 교산 인수품 리스트 양식을 다룬다(navigation.ts 주석).
+  assert.deepEqual(byKey.get("asOperations")?.itemKeys, ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList", "kyosanIntakeImport"]);
   assert.deepEqual(byKey.get("techResources")?.itemKeys, ["technicalProcedures", "inventory"]);
   // 내자 정리 1단계 — 수주·정산 흐름은 A/S 업무 그룹과 섞지 않는다(navigation.ts 주석).
   // 견적서가 둘째 항목으로 붙었다(2026-08-28). 내자 정리의 하위메뉴가 아니라
@@ -467,12 +471,13 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 수리 작업 비용(2026-08-31)이 견적서와 같은 판정이라, 견적서가 감춰지는
     // 두 역할에서 감춰지는 항목이 하나씩 더 늘었다.
     // 메일 설정(2026-08-31)은 관리자 이상만 본다 — 아래 세 역할에서 하나씩 늘었다.
-    AS_ENGINEER: 5, // domesticOrders + quotes + repairLabor + mailSettings + developerMode
-    SALES: 5, // myActiveWork + technicalProcedures + workflows + mailSettings + developerMode
+    // 과거 인수품 가져오기(2026-09-15)도 관리자 이상만 본다 — 아래 세 역할에서 하나씩 더 늘었다.
+    AS_ENGINEER: 6, // domesticOrders + quotes + repairLabor + mailSettings + kyosanIntakeImport + developerMode
+    SALES: 6, // myActiveWork + technicalProcedures + workflows + mailSettings + kyosanIntakeImport + developerMode
     // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
     // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
     // 나갈 안내를 정하는 화면인데 그 역할에는 접수를 만들 수단이 없다.
-    INVENTORY_MANAGER: 11, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings + developerMode
+    INVENTORY_MANAGER: 12, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings + kyosanIntakeImport + developerMode
   };
   for (const role of ALL_ROLES) {
     const visible = filterNavItemsForRole(navItems, role);

@@ -7,10 +7,11 @@ import {
   markIdempotencyKeyFailed,
   markIdempotencyKeySucceeded,
 } from "@/lib/db/mutations/idempotency-keys";
-import { createRepairCase } from "@/lib/db/mutations/repair-cases";
+import { createRepairCase, type LegacyImportMetadata } from "@/lib/db/mutations/repair-cases";
 import { sendIntakeNotificationMail } from "./send-intake-mail";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import type { Role } from "@/lib/domain/types";
+import { WORKFLOW_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import {
   isValidIdempotencyKey,
   validateCreateRepairCaseInput,
@@ -44,7 +45,15 @@ function isPgErrorLike(err: unknown): err is { code?: string } {
   return typeof err === "object" && err !== null && "code" in err;
 }
 
+/**
+ * 과거 상태 이관이 수리 건을 놓을 수 있는 단계. 인수점검 · 교산 회신 대기 · 출하 승인(제너레이터·T/C 의
+ * 出荷待ち)은 과거 인수품 가져오기(2026-09-15)가 더했다 — 셋 다 관리자 수동 단계 변경으로도 갈 수 있는
+ * 자리이고, 그 뒤는 정규 흐름(검수 → 최종 출하 승인 → 출하 완료)을 탄다.
+ */
 const LEGACY_IMPORT_TARGET_STEPS = new Set([
+  "intake_inspection",
+  "waiting_kyosan_reply",
+  "shipment_approved",
   "shipment_completed",
   "waiting_po",
   "parts_supply",
@@ -52,6 +61,49 @@ const LEGACY_IMPORT_TARGET_STEPS = new Set([
   "repair_in_progress",
   "repair_or_defective_parts_replacement",
 ]);
+
+/** 가져오기 흔적 metadata 가 가질 수 있는 칸 — 이것만, 전부 있어야 한다. */
+const LEGACY_IMPORT_METADATA_KEYS = new Set([
+  "source",
+  "fileSha256",
+  "billingReview",
+  "billingAdjustment",
+  "sourceStatus",
+  "sourceBilling",
+]);
+
+/** metadata 에 싣는 원문 글자의 한도. 부르는 쪽이 잘라서 넘긴다. */
+const LEGACY_IMPORT_METADATA_TEXT_MAX = 50;
+
+function isShortTextOrNull(value: unknown): boolean {
+  return value === null || (typeof value === "string" && value.length <= LEGACY_IMPORT_METADATA_TEXT_MAX);
+}
+
+/**
+ * 가져오기 흔적(LEGACY_IMPORT_STATE_SET 이력)의 metadata.
+ *
+ * 🔴 고객 이름 같은 개인정보가 섞이지 않게 **정해진 칸만** 받는다 — 칸이 하나라도 더 있거나
+ * 모자라면 거절한다(schema/status-change-histories.ts 의 metadata 주석). source 는 고정값,
+ * sha 는 64자리 hex, 원문 글자는 50자 이하.
+ */
+function validLegacyImportMetadata(metadata: unknown): boolean {
+  if (metadata === undefined) return true;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return false;
+  const keys = Object.keys(metadata);
+  if (keys.length !== LEGACY_IMPORT_METADATA_KEYS.size || !keys.every((key) => LEGACY_IMPORT_METADATA_KEYS.has(key))) {
+    return false;
+  }
+  const value = metadata as Record<string, unknown>;
+  return (
+    value.source === "KYOSAN_INTAKE_LIST" &&
+    typeof value.fileSha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(value.fileSha256) &&
+    typeof value.billingReview === "boolean" &&
+    (value.billingAdjustment === null || value.billingAdjustment === "WARRANTY_PO_TO_PARTIAL_PAID") &&
+    isShortTextOrNull(value.sourceStatus) &&
+    isShortTextOrNull(value.sourceBilling)
+  );
+}
 
 function validLegacyImportState(input: NonNullable<Parameters<typeof createRepairCaseWithIdempotency>[0]["legacyImportState"]>): boolean {
   const completed = input.targetStepKey === "shipment_completed";
@@ -61,7 +113,10 @@ function validLegacyImportState(input: NonNullable<Parameters<typeof createRepai
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.batchId)
     && (completed
       ? input.actualShipmentDate === null || /^\d{4}-\d{2}-\d{2}$/.test(input.actualShipmentDate)
-      : input.actualShipmentDate === null);
+      : input.actualShipmentDate === null)
+    && validLegacyImportMetadata(input.metadata)
+    && (input.productModelKindForNew === undefined
+      || (WORKFLOW_KIND_CODES as readonly string[]).includes(input.productModelKindForNew));
 }
 
 /**
@@ -80,6 +135,10 @@ export async function createRepairCaseWithIdempotency(input: {
     actualShipmentDate: string | null;
     batchId: string;
     sourceRowNumber: number;
+    /** 가져오기 흔적 이력에 더 적을 것 — validLegacyImportMetadata 가 칸을 본다. */
+    metadata?: LegacyImportMetadata;
+    /** 이 줄이 새 모델을 만들게 되면 그 모델의 종류. 기존 모델은 건드리지 않는다. */
+    productModelKindForNew?: WorkflowKind;
   };
   legacyReportNumber?: string | null;
 }): Promise<CreateRepairCaseResult> {

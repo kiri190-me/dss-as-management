@@ -27,6 +27,7 @@ import { users } from "./users";
  * in the current data. `kind` starts NULL for every backfilled row and is
  * only ever set later by an authorized user through a real model-master
  * edit action (not part of this migration).
+ * 예외(2026-09-15 사용자 승인): 과거 인수품 가져오기가 **새로 만드는** 모델에만 파일의 종류를 kind 로 넣는다 — 기존 모델은 건드리지 않는다(intake-master-resolution.ts 의 kindForNew).
  *
  * This is a genuinely separate "kind" enum from workflow_type_code
  * (MATCHER/PAID_GENERATOR/WARRANTY_GENERATOR, a billing-aware workflow

@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, eq } from "drizzle-orm";
 import { isExactNormalizedMatch } from "@/lib/domain/entity-name-match";
+import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { CreateRepairCaseResult } from "@/lib/validation/repair-case-input";
 import { db } from "../client";
 import { customers, endUsers, productModels } from "../schema";
@@ -116,7 +117,16 @@ export type ProductModelSelectionResolution =
 
 export async function resolveProductModelSelection(
   tx: IntakeTransaction,
-  input: { productModelId: string | null; newProductModelName: string | null }
+  input: {
+    productModelId: string | null;
+    newProductModelName: string | null;
+    /**
+     * **새로 만들 때만** 넣는 종류(과거 인수품 가져오기, 2026-09-15 사용자 승인 —
+     * schema/product-models.ts 의 kind 주석). 이름이 기존 모델과 맞으면 그 모델을
+     * 그대로 쓰고 kind 는 건드리지 않는다. 대화형 접수는 넘기지 않는다.
+     */
+    kindForNew?: WorkflowKind | null;
+  }
 ): Promise<ProductModelSelectionResolution> {
   if (input.productModelId) {
     const [master] = await tx.select({ id: productModels.id, modelName: productModels.modelName }).from(productModels)
@@ -132,7 +142,8 @@ export async function resolveProductModelSelection(
   if (match) return { ok: true, productModelId: match.id, modelName: match.modelName, origin: "EXISTING" };
   try {
     const created = await tx.transaction(async (tx2) => {
-      const [row] = await tx2.insert(productModels).values({ modelName: trimmed })
+      const [row] = await tx2.insert(productModels)
+        .values({ modelName: trimmed, ...(input.kindForNew ? { kind: input.kindForNew } : {}) })
         .returning({ id: productModels.id, modelName: productModels.modelName });
       return row;
     });

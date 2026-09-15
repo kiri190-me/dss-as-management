@@ -168,7 +168,7 @@ const AWAITING_SHIPMENT_STEP: StepByKind = {
 const STATUS_STEPS: ReadonlyMap<string, StepByKind> = new Map([
   ["受付", sameForAllKinds("intake_inspection")],
   ["調査完了", sameForAllKinds("intake_inspection")],
-  // 무상 절차에는 waiting_po 가 없다 — 그래서 無償 줄은 일부 유상(유상 절차)으로 가져온다(resolveBilling).
+  // 무상 제너레이터·T/C 절차에는 waiting_po 가 없고, 사용자 결정으로 無償+PO 대기는 종류와 관계없이 일부 유상으로 가져온다(resolveBilling).
   [KYOSAN_WAITING_PO_STATUS, sameForAllKinds("waiting_po")],
   ["中断:部材待ち", sameForAllKinds("parts_supply")],
   ["中断:指示待ち", sameForAllKinds("waiting_kyosan_reply")],

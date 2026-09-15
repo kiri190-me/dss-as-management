@@ -35,6 +35,10 @@ export const navItems: NavItem[] = [
     href: "/excel-reports/kyosan-intake-list",
     label: "일본 본사 Excel 생성",
   },
+  // 교산 인수품 리스트(xlsx)로 과거 수리 건을 한꺼번에 만든다(2026-09-15). 위 「일본 본사 Excel
+  // 생성」과 같은 원본 양식을 다루므로 그 바로 뒤에 둔다. 기본으로는 최고관리자·관리자만 본다
+  // (auth/kyosan-intake-import-authorization.ts).
+  { key: "kyosanIntakeImport", href: "/excel-imports/kyosan-intake-list", label: "과거 인수품 가져오기" },
   { key: "users", href: "/users", label: "사용자 관리" },
   { key: "customers", href: "/customers", label: "고객사 관리" },
   { key: "productModels", href: "/product-models", label: "제품 모델 관리" },
@@ -154,7 +158,7 @@ export function childNavItems(items: NavItem[], parentKey: string): NavItem[] {
 
  */
 export const navGroups: NavGroup[] = [
-  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList"] },
+  { key: "asOperations", label: "A/S 업무", itemKeys: ["repairCases", "myActiveWork", "repairCaseNew", "customerPortal", "diagnosisFlowcharts", "workflows", "excelKyosanIntakeList", "kyosanIntakeImport"] },
   { key: "techResources", label: "기술 / 자원", itemKeys: ["technicalProcedures", "inventory"] },
   // 수주·정산 쪽 화면들이 모이는 자리. 지금은 '내자 정리' 하나뿐이지만 A/S
   // 업무 그룹에 얹지 않았다 — 그 그룹은 장비가 들어와서 나가기까지의 흐름이고,

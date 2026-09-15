@@ -51,6 +51,21 @@ import {
  */
 type CreateRepairCaseFailure = Extract<CreateRepairCaseResult, { ok: false }>;
 
+/**
+ * 가져오기 흔적(LEGACY_IMPORT_STATE_SET 이력)에 importBatchId · sourceRowNumber 와 함께 적는 것
+ * (과거 인수품 가져오기, 2026-09-15). 🔴 고객 이름 같은 개인정보는 넣지 않는다 — 칸이 정해져 있고
+ * 서비스(server/services/create-repair-case.ts 의 validLegacyImportMetadata)가 그 칸만 받는다.
+ * 원문 글자(sourceStatus · sourceBilling)는 50자 이하로 잘려 온다.
+ */
+export type LegacyImportMetadata = {
+  source: "KYOSAN_INTAKE_LIST";
+  fileSha256: string;
+  billingReview: boolean;
+  billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID" | null;
+  sourceStatus: string | null;
+  sourceBilling: string | null;
+};
+
 class CreateRepairCaseRollback extends Error {
   constructor(readonly result: CreateRepairCaseFailure) {
     super("CREATE_REPAIR_CASE_ROLLBACK");
@@ -76,6 +91,9 @@ export async function createRepairCase(
       actorUserId: string;
       batchId: string;
       sourceRowNumber: number;
+      metadata?: LegacyImportMetadata;
+      /** 새 모델을 만들게 될 때만 쓰는 종류(intake-master-resolution.ts 의 kindForNew). */
+      productModelKindForNew?: WorkflowKind;
     };
   } = {}
 ): Promise<CreateRepairCaseResult> {
@@ -193,6 +211,7 @@ export async function createRepairCase(
       const selection = await resolveProductModelSelection(tx, {
         productModelId: input.productModelId ?? null,
         newProductModelName: input.newProductModelName ?? null,
+        kindForNew: options.legacyImportState?.productModelKindForNew ?? null,
       });
       if (!selection.ok) {
         rollbackCreate({ ok: false, code: selection.code, fieldErrors: selection.fieldErrors, message: selection.message });
@@ -302,7 +321,11 @@ export async function createRepairCase(
           .returning({ id: repairCases.id, intakeNumber: repairCases.intakeNumber });
       });
 
-      if (options.legacyImportState && targetStep.id !== initialStep.id) {
+      // 가져오기 흔적 — legacyImportState 가 있으면 **언제나** 한 줄(2026-09-15). 예전에는 대상
+      // 단계가 인수점검이 아닐 때만 남겼는데, 인수점검에 놓이는 줄(受付·調査完了)도 가져온 건이라는
+      // 사실과 metadata(유/무상 확인 필요 등)가 남아야 해서 from = to 도 적는다(CHECK 없음, 이력
+      // 화면은 이미 처리한다). 대화형 접수는 legacyImportState 가 없으므로 달라지지 않는다.
+      if (options.legacyImportState) {
         await tx.insert(statusChangeHistories).values({
           repairCaseId: inserted.id,
           workflowVersionId: version.id,
@@ -314,8 +337,26 @@ export async function createRepairCase(
           metadata: {
             importBatchId: options.legacyImportState.batchId,
             sourceRowNumber: options.legacyImportState.sourceRowNumber,
+            ...(options.legacyImportState.metadata ?? {}),
           },
         });
+      }
+
+      // 수기 인수번호는 월 순번을 올리지 않는다(위 할당기를 건너뛴다) — 과거 번호를 가져온 채로
+      // 두면 다음 정상 접수가 그 번호와 부딪힌다. 그래서 가져오기일 때만 그 달의 순번을
+      // GREATEST 로 끌어올린다(내려가지는 않는다). 같은 트랜잭션이라 이 건이 롤백되면 같이
+      // 되돌아간다. 대화형 수기 번호의 같은 틈은 이번 범위 밖이다(손대지 않았다).
+      if (options.legacyImportState && input.intakeNumber) {
+        await tx
+          .insert(repairCaseIntakeSequences)
+          .values({ yearMonth: intakeNumber.slice(1, 5), lastSequence: Number(intakeNumber.slice(5, 7)) })
+          .onConflictDoUpdate({
+            target: repairCaseIntakeSequences.yearMonth,
+            set: {
+              lastSequence: sql`GREATEST(${repairCaseIntakeSequences.lastSequence}, excluded.last_sequence)`,
+              updatedAt: sql`now()`,
+            },
+          });
       }
 
       return { ok: true, id: inserted.id, intakeNumber: inserted.intakeNumber };

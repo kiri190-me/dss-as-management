@@ -1,4 +1,5 @@
 import { canManageIntakeMailSettings } from "./intake-mail-authorization";
+import { canImportKyosanIntakeList } from "./kyosan-intake-import-authorization";
 import {
   canManageImprovementRequests,
   canViewImprovementRequests,
@@ -207,6 +208,14 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
     case "excelKyosanIntakeList":
       // 역할 검사 없음. 자료를 바꾸지 않고 내려받기만 한다.
       return "READ";
+
+    case "kyosanIntakeImport":
+      // 🔴 여기를 빠뜨리면 아래 default 로 떨어져 NONE 이 되고, 최고관리자까지 막힌다
+      // (mailSettings 와 같은 함정).
+      //
+      // 표로 옮겨 적지 않고 *-authorization.ts 를 **호출해서** 구한다(이 파일 맨 위 주석).
+      // 누가 과거 인수품을 가져올 수 있는지는 저쪽 한 곳에만 있어야 한다.
+      return ladder({ manage: canImportKyosanIntakeList(role), read: canImportKyosanIntakeList(role) });
 
     case "users":
       // 지금은 로그인한 누구나 목록을 본다. 출하 대표자 지정은 최고관리자만이고

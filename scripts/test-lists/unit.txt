@@ -214,3 +214,4 @@ src/lib/domain/kyosan-intake-import/columns.test.ts
 src/lib/domain/kyosan-intake-import/rules.test.ts
 src/lib/domain/kyosan-intake-import/parse.test.ts
 src/lib/domain/kyosan-intake-import/name-suggestions.test.ts
+src/lib/auth/kyosan-intake-import-authorization.test.ts

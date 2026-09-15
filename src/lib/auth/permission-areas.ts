@@ -177,6 +177,15 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "READ",
   },
   {
+    key: "kyosanIntakeImport",
+    label: "과거 인수품 가져오기",
+    // 교산 인수품 리스트(xlsx)로 과거 수리 건을 한꺼번에 만든다(2026-09-15) — 한 번에 수백 건이
+    // 생기고, 출하 완료 건은 잠긴 채로 들어간다. 보기만 해서 할 일이 없는 화면이라 중간 단계를
+    // 두지 않고 관리로만 연다(kyosan-intake-import-authorization.ts, mailSettings 와 같은 모양).
+    description: "교산 인수품 리스트 xlsx 로 과거 수리 건을 한꺼번에 만듭니다(미리보기 뒤 실행)",
+    maxMeaningfulLevel: "MANAGE",
+  },
+  {
     key: "users",
     label: "사용자 관리",
     description: "계정 목록·출하 대표자. 관리는 이 권한 설정 화면 포함",
