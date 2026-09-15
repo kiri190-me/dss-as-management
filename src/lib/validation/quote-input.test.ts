@@ -170,6 +170,18 @@ test("통전작업 제외: 켰다고 말한 것만 켜진다 — 140만원이 �
   }
 });
 
+test("조사작업 뺌: 안 보내면 꺼짐, 켰다고 말한 것만 켜진다 — 옛 요청이 그대로 동작한다", () => {
+  assert.equal(ok(MINIMAL).investigationExcluded, false);
+  assert.equal(ok({ ...MINIMAL, investigationExcluded: true }).investigationExcluded, true);
+  for (const value of ["true", 1, "on", {}, null, undefined]) {
+    assert.equal(
+      ok({ ...MINIMAL, investigationExcluded: value }).investigationExcluded,
+      false,
+      `${JSON.stringify(value)} 가 켜짐으로 읽혔다`
+    );
+  }
+});
+
 test("통전작업 제외: 뺀 금액도 문자열 그대로 둔다 — 다른 금액 칸과 같은 규칙", () => {
   const data = ok({
     ...MINIMAL,

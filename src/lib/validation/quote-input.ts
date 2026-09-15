@@ -137,6 +137,13 @@ export type QuoteFields = {
   laborEquipmentKind: WorkflowKind | null;
   laborBaseCost: string | null;
   /**
+   * 「① 조사작업」을 문서에서 빼는가 — 사람이 조사 칸을 **손대서 비운** 장이다
+   * (2026-09-15, domain/quote-work-scope-suppression.ts 의 isInvestigationScopeEmptied).
+   * 보내지 않으면 `false` 다 — 이 칸이 생기기 전에 만든 요청이 그대로 동작해야 하고,
+   * 빈 조사 칸만으로는 빼지 않는다(옛 견적서).
+   */
+  investigationExcluded: boolean;
+  /**
    * 통전작업을 빼고 청구하는가 — **사람의 결정**이다. 보내지 않으면 `false` 다
    * (이 칸이 생기기 전에 만들어진 요청이 그대로 동작해야 하고, DB 기본값도
    * false 다).
@@ -297,6 +304,11 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
    * 줄어드는 일은 없어야 한다.
    */
   const powerTestExcluded = raw.powerTestExcluded === true;
+  /**
+   * 「① 조사작업」 뺌. 통전작업 제외와 같은 규칙 — **켜졌다고 말한 것만 켜짐**이다.
+   * 잘못 읽혀 켜지면 표준 조사 목록이 문서에서 소리 없이 사라진다.
+   */
+  const investigationExcluded = raw.investigationExcluded === true;
   const laborPowerTestDeduction = normalizeAmount(
     "laborPowerTestDeduction",
     "통전작업 제외 금액",
@@ -329,6 +341,7 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       workCost,
       laborEquipmentKind,
       laborBaseCost,
+      investigationExcluded,
       powerTestExcluded,
       laborPowerTestDeduction,
       repairTasks,

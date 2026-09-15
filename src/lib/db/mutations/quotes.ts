@@ -118,6 +118,11 @@ function toColumnValues(fields: QuoteFields) {
      */
     powerTestExcluded: fields.powerTestExcluded,
     laborPowerTestDeduction: fields.laborPowerTestDeduction,
+    /**
+     * 「① 조사작업」 뺌 — 조사 칸을 손대서 비운 채 저장했는가(2026-09-15). 만들 때도
+     * 고칠 때도 이 한 곳을 지난다 — 빠지면 고친 뒤 다시 열었을 때 결정이 사라진다.
+     */
+    investigationExcluded: fields.investigationExcluded,
   };
 }
 

@@ -101,6 +101,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     // 생기기 전에 만든 견적서와 같은 상태다.
     laborEquipmentKind: null,
     laborBaseCost: null,
+    // 조사작업 뺌(2026-09-15). 기본은 "빼지 않음" — 옛 견적서와 같은 상태다.
+    investigationExcluded: false,
     // 통전작업 제외(2026-09-04). 기본은 "빼지 않음" — 이 기능이 생기기 전에 만든
     // 견적서와 같은 상태다.
     powerTestExcluded: false,
@@ -663,6 +665,44 @@ describe("견적서 통전작업 제외", () => {
     const row = await readQuote(created.id);
     assert.equal(row.powerTestExcluded, false);
     assert.equal(row.laborPowerTestDeduction, null, "끈 뒤에도 옛 차감이 남아 있으면 안 된다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 견적서 조사작업 뺌 (2026-09-15) — 조사 칸을 손대서 비운 채 저장한 결정
+ * ============================================================================
+ * 옛 견적서의 빈 조사 칸과 가르는 것이 이 저장된 칸뿐이다(schema/quotes.ts).
+ * 만들 때와 고칠 때 모두 적히고, 다시 읽을 때 그대로 돌아와야 한다.
+ * ============================================================================
+ */
+describe("견적서 조사작업 뺌", () => {
+  test("🔴 기본은 '빼지 않음' — 이 기능이 생기기 전에 만든 견적서와 같은 상태다", async () => {
+    const created = await create();
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.investigationExcluded, false);
+  });
+
+  test("켜서 만들면 그대로 적히고, 고쳐 저장하면 따라간다", async () => {
+    const created = await create({ investigationExcluded: true });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+    assert.equal((await readQuote(created.id)).investigationExcluded, true);
+
+    const updated = await updateQuote({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({
+        quoteNumber: (await readQuote(created.id)).quoteNumber,
+        investigationExcluded: false,
+      }),
+      actorUserId,
+    });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    assert.equal((await readQuote(created.id)).investigationExcluded, false, "끈 결정이 남지 않았다");
   });
 });
 

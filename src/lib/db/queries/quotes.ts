@@ -301,6 +301,12 @@ export type QuoteEditData = {
    */
   powerTestExcluded: boolean;
   laborPowerTestDeduction: string | null;
+  /**
+   * 「① 조사작업」을 문서에서 빼는가 — 조사 칸을 손대서 비운 채 저장한 장이다
+   * (schema/quotes.ts 의 그 항목). **다시 셈하지 않는다** — 옛 견적서의 빈 조사 칸과
+   * 가르는 것이 이 저장된 결정뿐이다. 옛 견적서는 `false` 다.
+   */
+  investigationExcluded: boolean;
   repairTasks: {
     /** 카탈로그의 그 줄. 지워졌으면 null 일 수 있다(참고용). */
     taskId: string | null;
@@ -358,6 +364,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       laborBaseCost: quotes.laborBaseCost,
       powerTestExcluded: quotes.powerTestExcluded,
       laborPowerTestDeduction: quotes.laborPowerTestDeduction,
+      investigationExcluded: quotes.investigationExcluded,
     })
     .from(quotes)
     .where(and(eq(quotes.id, id), eq(quotes.isDeleted, false)))

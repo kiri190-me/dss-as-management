@@ -199,6 +199,19 @@ export const quotes = pgTable(
     powerTestExcluded: boolean("power_test_excluded").notNull().default(false),
     laborPowerTestDeduction: numeric("labor_power_test_deduction", { precision: 15, scale: 2 }),
 
+    /**
+     * ── 조사작업을 문서에서 빼는가 ─────────────────────────────────────
+     * 사람이 수정 화면에서 조사 칸을 **손대서 비운** 채 저장한 장이다(2026-09-15
+     * 사용자: 「[1) 조사작업]도 줄을 모두 삭제하면 머리글도 없어지도록」). 켜지면
+     * 문서(미리보기 · xlsx 넷)에서 「① 조사작업」이 머리글까지 빠지고 번호가 당겨진다.
+     *
+     * 🔴 **줄이 0개라는 사실만으로는 가를 수 없어서 따로 둔다.** 이 기능이 생기기
+     * 전의 옛 견적서, 장비 종류를 아직 안 고른 새 견적서도 조사 줄이 0개이고, 그
+     * 장들은 양식의 표준 목록이 나가야 한다. 옛 견적서는 전부 false 라 문서가 그대로다
+     * (판정은 domain/quote-work-scope-suppression.ts 의 isInvestigationScopeEmptied).
+     */
+    investigationExcluded: boolean("investigation_excluded").notNull().default(false),
+
     // 낙관적 잠금. 목록에서 열어 고치는 화면이 있으므로 처음부터 쓴다.
     version: integer("version").notNull().default(1),
 

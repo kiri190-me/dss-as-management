@@ -1,0 +1,1 @@
+ALTER TABLE "quotes" ADD COLUMN "investigation_excluded" boolean DEFAULT false NOT NULL;

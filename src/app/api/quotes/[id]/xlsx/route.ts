@@ -170,6 +170,13 @@ export async function GET(
         equipmentKind: quote.laborEquipmentKind,
         chosenRepairTaskCount: quote.repairTasks.length,
       }),
+      /**
+       * 조사 칸을 손대서 비운 채 저장한 장이면 「① 조사작업」을 머리글까지 지운다
+       * (2026-09-15 사용자). **저장된 결정을 그대로 넘긴다** — 빈 조사 줄만 보고
+       * 셈하면 옛 견적서의 표준 목록까지 사라진다(schema/quotes.ts 의 그 항목).
+       * 생성기 셋 모두 받는다.
+       */
+      investigationExcluded: quote.investigationExcluded,
     };
 
     if (templateKey.startsWith("MATCHER:")) {

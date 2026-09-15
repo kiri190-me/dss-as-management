@@ -89,6 +89,7 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     workCost: "0",
     laborEquipmentKind: null,
     laborBaseCost: null,
+    investigationExcluded: false,
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
     repairTasks: [],

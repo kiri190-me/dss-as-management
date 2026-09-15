@@ -464,7 +464,11 @@ export default function QuoteEditForm({
    * 사람이 정한 내용이다.
    */
   const [scopeTouched, setScopeTouched] = useState<Record<QuoteWorkScopeSection, boolean>>(() => ({
-    INVESTIGATION: (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION"),
+    // 조사 칸을 비워 둔 채 저장한 장(investigationExcluded)도 손댄 것이다 — 아니면 다시
+    // 열어 저장하는 것만으로 그 결정이 풀리고, 표준 목록이 되살아나 문서에 나간다.
+    INVESTIGATION:
+      (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION") ||
+      quote?.investigationExcluded === true,
     REPAIR: (quote?.workScopeLines ?? []).some((l) => l.section === "REPAIR"),
     POWER_TEST: (quote?.workScopeLines ?? []).some((l) => l.section === "POWER_TEST"),
   }));

@@ -462,6 +462,7 @@ function quoteFields(suffix: string): QuoteFields {
     workCost: "1200000.00",
     laborEquipmentKind: null,
     laborBaseCost: null,
+    investigationExcluded: false,
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
     repairTasks: [],
