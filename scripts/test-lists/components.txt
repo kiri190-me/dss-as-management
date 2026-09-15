@@ -52,3 +52,5 @@ src/components/quotes/quote-issue-messages.test.ts
 src/components/quotes/quote-issue-download.test.ts
 src/components/quotes/QuoteIssueButton.test.tsx
 src/components/quotes/quote-issue-screens.test.ts
+src/components/quotes/NewQuoteDialog.test.tsx
+src/components/quotes/quote-new-start.test.ts

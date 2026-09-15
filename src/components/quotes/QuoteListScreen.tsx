@@ -20,6 +20,7 @@ import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
 import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
 import { QuoteFileBadges } from "@/components/quotes/QuoteAttachmentParts";
+import NewQuoteDialog from "@/components/quotes/NewQuoteDialog";
 import { quoteListAmountNote } from "@/components/quotes/quote-attachment-files";
 import QuoteIssueButton, { QuoteIssueNoticeLines } from "@/components/quotes/QuoteIssueButton";
 import { shouldReloadSlotsAfterIssue, type QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
@@ -87,7 +88,10 @@ export default function QuoteListScreen({
   canEdit: boolean;
   canDelete: boolean;
   /**
-   * `새 견적서` 단추가 갈 곳. 기본값이 지금까지의 그 주소다.
+   * `새 견적서` 가 갈 곳. 기본값이 지금까지의 그 주소다.
+   *
+   * 단추는 곧바로 가지 않고 팝업을 연다(견적서 ⑤ — NewQuoteDialog.tsx). 팝업의 [만들기]가 이
+   * 주소에 **두 값(견적서 종류 · 엑셀 전용)만 덧붙여** 간다 — 이 주소에 실린 값은 그대로 남는다.
    *
    * 접수 건 상세의 「견적서」 탭이 여기에 **그 건의 인수번호를 실은 주소**를
    * 넘긴다(domain/quote-new-link.ts). 이 화면을 그쪽에서 그대로 쓰기 위해서다 —
@@ -120,6 +124,12 @@ export default function QuoteListScreen({
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [trashError, setTrashError] = useState<string | null>(null);
+  /**
+   * [새 견적서] 팝업(견적서 ⑤)이 열려 있는가. 단추는 곧바로 작성 화면으로 가지 않고 이 창을
+   * 띄운다 — 견적서 종류 · 엑셀 전용을 먼저 고르면 [만들기]가 그 두 값을 `newQuoteHref` 에
+   * 덧붙여 간다. 수리 건 탭이 실어 둔 인수번호 · 건 id 는 그대로 남는다(NewQuoteDialog.tsx).
+   */
+  const [isNewQuoteDialogOpen, setIsNewQuoteDialogOpen] = useState(false);
 
   /**
    * 수정 권한자의 [견적서 받기] 결과(견적서 B1c) — 화면 위 한 자리에, 어느 견적서인지 번호를
@@ -240,12 +250,21 @@ export default function QuoteListScreen({
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">견적서</h1>
         {canEdit && (
-          <Link
-            href={newQuoteHref}
-            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 dark:bg-primary-100 dark:text-zinc-900 dark:hover:bg-primary-300"
-          >
-            새 견적서
-          </Link>
+          <>
+            <button
+              type="button"
+              onClick={() => setIsNewQuoteDialogOpen(true)}
+              aria-haspopup="dialog"
+              className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 dark:bg-primary-100 dark:text-zinc-900 dark:hover:bg-primary-300"
+            >
+              새 견적서
+            </button>
+            {/* 열려 있는 동안만 그린다 — 열 때마다 기본 선택(내자 · 엑셀 전용 아님)으로 돌아온다.
+                모달 창은 화면 맨 위 층에 뜨므로 이 자리의 배치에 끼어들지 않는다. */}
+            {isNewQuoteDialogOpen && (
+              <NewQuoteDialog baseHref={newQuoteHref} onCancel={() => setIsNewQuoteDialogOpen(false)} />
+            )}
+          </>
         )}
       </div>
 

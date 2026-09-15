@@ -59,6 +59,7 @@ import {
 } from "@/lib/server/actions/quotes";
 import QuoteAttachmentsSection, { useQuoteAttachments } from "@/components/quotes/QuoteAttachmentsSection";
 import { ExcelOnlyClearLinesDialog, ExcelOnlySwitch } from "@/components/quotes/QuoteAttachmentParts";
+import { scopeLinesFilledFromTemplate, startNewQuoteLines } from "@/components/quotes/quote-new-start";
 import {
   countQuoteLinesForExcelOnly,
   createdWithAttachmentFailuresText,
@@ -342,6 +343,20 @@ function clearedExcelOnlyLines(): ExcelOnlyLines {
 }
 
 /**
+ * 두 값 없이 연 새 견적서의 줄 묶음 — 지금까지 새 견적서가 들고 시작한 그대로다(부품 빈 줄
+ * 하나 · 작업 내역 없음 · 손대지 않음 · 고른 작업 없음). [새 견적서] 팝업의 처음 값은 이 위에서
+ * 사람이 고른 것처럼 돈다(quote-new-start.ts 의 startNewQuoteLines).
+ */
+function blankNewQuoteLines(): ExcelOnlyLines {
+  return {
+    items: [emptyItem()],
+    scopeLines: { INVESTIGATION: [], REPAIR: [], POWER_TEST: [] },
+    scopeTouched: { INVESTIGATION: false, REPAIR: false, POWER_TEST: false },
+    taskQuantities: restoreRepairTaskQuantities([]),
+  };
+}
+
+/**
  * 셈한 금액을 numeric(15,2) 칸으로 보낼 글자로.
  *
  * 소수 둘째 자리에서 끊는 것은 **부동소수점의 꼬리를 그대로 보내면 검증에
@@ -363,6 +378,8 @@ export default function QuoteEditForm({
   printHeaders,
   workScopeDefaults,
   initialIntakeNumber = null,
+  initialKind = null,
+  initialExcelOnly = false,
   returnHref = null,
   attachmentSlots = null,
 }: {
@@ -404,6 +421,19 @@ export default function QuoteEditForm({
    */
   initialIntakeNumber?: string | null;
   /**
+   * 목록의 [새 견적서] 팝업에서 고른 견적서 종류(견적서 ⑤ — domain/quote-new-link.ts 의
+   * parseNewQuoteStart). null 이면 지금까지처럼 내자로 연다. 새 견적서에만 쓴다.
+   *
+   * 🔴 처음 값만 바꾸지 않는다 — 빈 폼에서 사람이 종류 select 를 고른 것과 **같은 상태**로
+   * 연다(아래 newQuoteStart · quote-new-start.ts). 폼에서는 여전히 바꿀 수 있다.
+   */
+  initialKind?: QuoteKind | null;
+  /**
+   * 팝업에서 엑셀 전용을 골랐는가(견적서 ⑤). 참이면 사람이 엑셀 전용 스위치를 켠 것과 같은
+   * 상태로 연다 — 저장 전에 끄면 그 종류의 폼이 돌아온다. 새 견적서에만 쓴다.
+   */
+  initialExcelOnly?: boolean;
+  /**
    * 저장·취소 뒤에 돌아갈 곳. 수리 건에서 들어왔으면 그 건의 「견적서」 탭이다.
    * null 이면 지금까지와 같이 `/quotes/{새 id}` 와 `/quotes` 로 간다.
    *
@@ -419,8 +449,31 @@ export default function QuoteEditForm({
 }) {
   const router = useRouter();
 
+  /**
+   * [새 견적서] 팝업에서 고른 처음 값(initialKind · initialExcelOnly)으로 연 새 견적서의 처음
+   * 상태 — 한 번만 셈한다(견적서 ⑤).
+   *
+   * 🔴 **처음 값만 바꾸지 않는다.** 빈 폼을 연 뒤 사람이 ① 견적서 종류 select 를 고르고 ② 엑셀
+   * 전용 스위치를 켠 것과 **같은 상태**다 — 종류를 고르면 조사 · 통전 칸에 그 양식의 기본 목록이
+   * 따라오고, 엑셀 전용을 켜면 줄을 넣어 두고 비운다. 그 따라오는 일을 아래 onChange 들이 쓰는
+   * 그 함수들로 돌린다(quote-new-start.ts 머리말). 두 값이 없으면 지금까지의 빈 폼 그대로다.
+   *
+   * 고치기(quote 가 있다)에는 null 이다 — 저장된 값이 곧 처음 값이다.
+   */
+  const [newQuoteStart] = useState(() =>
+    quote === null
+      ? startNewQuoteLines({
+          start: { kind: initialKind, excelOnly: initialExcelOnly },
+          blank: blankNewQuoteLines(),
+          cleared: clearedExcelOnlyLines(),
+          workScopeDefaults,
+          toRows: toScopeRows,
+        })
+      : null
+  );
+
   const [quoteNumber, setQuoteNumber] = useState(quote?.quoteNumber ?? "");
-  const [kind, setKind] = useState<QuoteKind>(quote?.kind ?? "DOMESTIC");
+  const [kind, setKind] = useState<QuoteKind>(quote?.kind ?? newQuoteStart?.kind ?? "DOMESTIC");
   const [quoteDate, setQuoteDate] = useState(quote?.quoteDate ?? defaultQuoteDate ?? todayInSeoul());
   const [intakeNumberText, setIntakeNumberText] = useState(
     quote?.intakeNumberText ?? initialIntakeNumber ?? ""
@@ -452,7 +505,7 @@ export default function QuoteEditForm({
           // 이미 담긴 것으로 세지 않는다 — 사람이 지웠다가 다시 담을 수 있어야 한다.
           sourceKey: null,
         }))
-      : [emptyItem()]
+      : (newQuoteStart?.lines.items ?? [emptyItem()])
   );
 
   const [usedParts, setUsedParts] = useState<QuoteIntakeLookup["usedParts"]>([]);
@@ -488,8 +541,8 @@ export default function QuoteEditForm({
    * 지워진 작업은 id 가 없거나 목록에 없어 체크가 살아나지 않는데, **그 줄의
    * 금액은 이미 work_cost 에 들어 있다** — 화면이 그 사실을 아래에서 알린다.
    */
-  const [taskQuantities, setTaskQuantities] = useState<RepairTaskQuantities>(() =>
-    restoreRepairTaskQuantities(quote?.repairTasks ?? [])
+  const [taskQuantities, setTaskQuantities] = useState<RepairTaskQuantities>(
+    () => newQuoteStart?.lines.taskQuantities ?? restoreRepairTaskQuantities(quote?.repairTasks ?? [])
   );
   /**
    * 「통전작업 제외」. **사람의 결정**이고, 켜면 기본 작업비에서 통전작업 몫
@@ -537,8 +590,11 @@ export default function QuoteEditForm({
    *
    * 저장된 견적서는 그때 적힌 글자를 그대로 편다. 새 견적서는 빈 채로 시작하고,
    * 장비 종류를 고르는 순간 양식의 기본 목록이 들어온다(아래 fillScopeFrom...).
+   * [새 견적서] 팝업에서 OH 를 골랐으면 종류를 고른 순간처럼 그 양식의 목록으로 시작한다
+   * (newQuoteStart).
    */
   const [scopeLines, setScopeLines] = useState<Record<QuoteWorkScopeSection, ScopeRow[]>>(() => {
+    if (newQuoteStart) return newQuoteStart.lines.scopeLines;
     const initial: Record<QuoteWorkScopeSection, ScopeRow[]> = {
       INVESTIGATION: [],
       REPAIR: [],
@@ -558,16 +614,21 @@ export default function QuoteEditForm({
    * 처음 열었을 때 이미 적혀 있던 견적서도 손댄 것으로 본다 — 그 글자가 곧
    * 사람이 정한 내용이다.
    */
-  const [scopeTouched, setScopeTouched] = useState<Record<QuoteWorkScopeSection, boolean>>(() => ({
-    // 「조사작업 제외」로 저장한 장(investigationExcluded)도 손댄 것으로 본다 — 아니면 종류를
-    // 바꿀 때 감춰 둔 조사 칸에 양식 기본값이 사람 모르게 들어와 함께 저장된다. 비어 있는 채
-    // 체크를 풀면 그때 다시 채운다(toggleInvestigationExcluded).
-    INVESTIGATION:
-      (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION") ||
-      quote?.investigationExcluded === true,
-    REPAIR: (quote?.workScopeLines ?? []).some((l) => l.section === "REPAIR"),
-    POWER_TEST: (quote?.workScopeLines ?? []).some((l) => l.section === "POWER_TEST"),
-  }));
+  const [scopeTouched, setScopeTouched] = useState<Record<QuoteWorkScopeSection, boolean>>(
+    () =>
+      // 새 견적서는 처음 상태가 정한다(newQuoteStart) — 엑셀 전용으로 열었으면 비운 칸이 「손댄
+      // 것」이다(스위치를 켤 때와 같다).
+      newQuoteStart?.lines.scopeTouched ?? {
+        // 「조사작업 제외」로 저장한 장(investigationExcluded)도 손댄 것으로 본다 — 아니면 종류를
+        // 바꿀 때 감춰 둔 조사 칸에 양식 기본값이 사람 모르게 들어와 함께 저장된다. 비어 있는 채
+        // 체크를 풀면 그때 다시 채운다(toggleInvestigationExcluded).
+        INVESTIGATION:
+          (quote?.workScopeLines ?? []).some((l) => l.section === "INVESTIGATION") ||
+          quote?.investigationExcluded === true,
+        REPAIR: (quote?.workScopeLines ?? []).some((l) => l.section === "REPAIR"),
+        POWER_TEST: (quote?.workScopeLines ?? []).some((l) => l.section === "POWER_TEST"),
+      }
+  );
   const [isConflict, setIsConflict] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -576,10 +637,13 @@ export default function QuoteEditForm({
    * 공급가액 칸의 글자는 **꺼도 지우지 않는다** — 다시 켜면 그대로다. 보내는 것은 켜져 있을
    * 때뿐이다(collectFields).
    */
-  const [isExcelOnly, setIsExcelOnly] = useState<boolean>(quote?.isExcelOnly ?? false);
+  const [isExcelOnly, setIsExcelOnly] = useState<boolean>(quote?.isExcelOnly ?? newQuoteStart?.isExcelOnly ?? false);
   const [manualSupplyAmount, setManualSupplyAmount] = useState(quote?.manualSupplyAmount ?? "");
-  /** 엑셀 전용을 켤 때 비운 줄 — 저장 전에 끄면 그대로 돌려놓는다. */
-  const [excelOnlyStash, setExcelOnlyStash] = useState<ExcelOnlyLines | null>(null);
+  /**
+   * 엑셀 전용을 켤 때 비운 줄 — 저장 전에 끄면 그대로 돌려놓는다. 팝업에서 엑셀 전용을 골라 연
+   * 새 견적서는 스위치를 켤 때처럼 그 종류의 줄을 넣어 둔 채 시작한다(newQuoteStart).
+   */
+  const [excelOnlyStash, setExcelOnlyStash] = useState<ExcelOnlyLines | null>(newQuoteStart?.excelOnlyStash ?? null);
   /** 줄이 있는 채로 켜려 할 때 여는 확인 창의 줄 수. null 이면 닫혀 있다. */
   const [clearLinesAsk, setClearLinesAsk] = useState<QuoteLineCounts | null>(null);
   /**
@@ -723,14 +787,9 @@ export default function QuoteEditForm({
   function fillScopeFromTemplate(nextQuoteKind: QuoteKind, nextLaborKind: WorkflowKind | null) {
     const defaults = workScopeDefaults[quoteTemplateKey(nextLaborKind, nextQuoteKind)];
     if (!defaults) return;
-    setScopeLines((prev) => {
-      const next = { ...prev };
-      for (const section of ["INVESTIGATION", "POWER_TEST"] as const) {
-        if (scopeTouched[section]) continue;
-        next[section] = toScopeRows(defaults[section]?.items ?? []);
-      }
-      return next;
-    });
+    // 채우는 규칙은 quote-new-start.ts 한 곳이다 — [새 견적서] 팝업의 처음 값(newQuoteStart)도
+    // 같은 함수로 채워, 팝업으로 연 폼과 손으로 고른 폼이 같은 목록을 든다.
+    setScopeLines((prev) => scopeLinesFilledFromTemplate(prev, scopeTouched, defaults, toScopeRows));
   }
 
   /**

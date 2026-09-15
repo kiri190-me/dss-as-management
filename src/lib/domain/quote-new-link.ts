@@ -1,3 +1,4 @@
+import { isQuoteKind, type QuoteKind } from "@/lib/validation/quote-input";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 
 /**
@@ -71,6 +72,78 @@ export function parseNewQuoteLink(searchParams: SearchParamsInput | undefined): 
  */
 export function returnHrefForNewQuote(link: NewQuoteLink): string | null {
   return link.repairCaseId === null ? null : repairCaseDetailHrefs(link.repairCaseId).quotes;
+}
+
+/**
+ * ============================================================================
+ * [새 견적서] 팝업 → 새 견적서. 주소에 덧붙는 두 값 (견적서 ⑤)
+ * ============================================================================
+ * 목록의 [새 견적서]는 곧바로 작성 화면으로 가지 않고 팝업을 띄운다
+ * (components/quotes/NewQuoteDialog.tsx). 거기서 사람이 **견적서 종류**(내자 · OH)와
+ * **엑셀 전용 여부**를 먼저 고르면, [만들기]가 그 두 값을 주소에 덧붙여 작성 화면을
+ * 연다 — 폼이 그 값으로 **처음부터** 채워진다.
+ *
+ * ── 위 원칙(「열쇠만 싣는다」)과 어긋나지 않는가 ────────────────────────
+ * 위에서 싣지 않기로 한 것은 **다른 곳에서 불러와 채울 값**(고객사 · 모델명 · 금액
+ * 근거)이다. 이 두 값은 그런 값이 아니라 **사람이 팝업에서 고른 선택**이고, 폼에서도
+ * 사람이 고르는 칸 그대로다. 폼은 그 값을 「빈 폼에서 사람이 손으로 고른 것」과 똑같이
+ * 받는다(components/quotes/quote-new-start.ts) — 채우는 두 번째 길이 생기지 않는다.
+ *
+ * ── 정해진 값만 받는다 ──────────────────────────────────────────────────
+ * 종류는 `DOMESTIC` · `OVERHAUL`, 엑셀 전용은 `1` 하나다. 그 밖(소문자 · 앞뒤 공백 ·
+ * 빈 값 · 같은 이름 두 번)은 **없는 것으로 친다** — 오류가 아니다. 팝업이 만든 주소는
+ * 늘 정확한 글자라서, 그 밖의 글자는 사람이 손으로 고친 주소다. 그때 폼은 두 값 없이
+ * `/quotes/new` 로 들어온 것과 똑같이(내자 · 엑셀 전용 아님) 열린다.
+ *
+ * ── 기존 값은 그대로 둔다 ───────────────────────────────────────────────
+ * 수리 건 탭의 주소에는 이미 인수번호 · 건 id 가 실려 있다(newQuoteHrefForRepairCase).
+ * 덧붙이기는 그 둘을 **건드리지 않고** 두 값만 더한다 — 하나라도 떨어지면 저장한 견적서가
+ * 그 건에 붙지 않거나, 저장 뒤 그 건으로 돌아가지 못한다.
+ * ============================================================================
+ */
+
+export const QUOTE_NEW_KIND_PARAM = "kind";
+export const QUOTE_NEW_EXCEL_ONLY_PARAM = "excelOnly";
+/** 엑셀 전용을 뜻하는 단 하나의 글자. 아니면 이름 자체를 싣지 않는다. */
+const QUOTE_NEW_EXCEL_ONLY_ON = "1";
+
+/** 팝업에서 고른 두 값 — [만들기]가 주소에 덧붙인다. 팝업에서는 종류가 늘 하나 골라져 있다. */
+export type NewQuoteStartChoice = { kind: QuoteKind; excelOnly: boolean };
+
+/**
+ * 주소에서 되읽은 두 값. 종류가 없거나 정해진 값이 아니면 null 이다 — 폼은 그때 지금까지처럼
+ * 내자로 연다. 엑셀 전용은 `1` 일 때만 참이다.
+ */
+export type NewQuoteStart = { kind: QuoteKind | null; excelOnly: boolean };
+
+/**
+ * `baseHref`(맨 `/quotes/new` 또는 수리 건 탭이 만든 주소)에 팝업의 두 값을 덧붙인다.
+ *
+ * 🔴 기존 이름들은 **그대로** 두고 두 이름만 정한다(set). 이미 실려 있으면 바꾼다 — 같은
+ * 이름이 둘이 되면 되읽기가 없는 것으로 친다. 엑셀 전용이 아니면 그 이름을 싣지 않는다.
+ */
+export function newQuoteHrefWithStart(baseHref: string, choice: NewQuoteStartChoice): string {
+  // 조각(#…)은 이 화면들이 쓰지 않지만, 있으면 맨 뒤에 그대로 둔다 — 쿼리가 조각 뒤로
+  // 붙으면 주소가 아니라 조각의 글자가 된다.
+  const hashAt = baseHref.indexOf("#");
+  const hash = hashAt < 0 ? "" : baseHref.slice(hashAt);
+  const withoutHash = hashAt < 0 ? baseHref : baseHref.slice(0, hashAt);
+  const queryAt = withoutHash.indexOf("?");
+  const path = queryAt < 0 ? withoutHash : withoutHash.slice(0, queryAt);
+  const params = new URLSearchParams(queryAt < 0 ? "" : withoutHash.slice(queryAt + 1));
+  params.set(QUOTE_NEW_KIND_PARAM, choice.kind);
+  if (choice.excelOnly) params.set(QUOTE_NEW_EXCEL_ONLY_PARAM, QUOTE_NEW_EXCEL_ONLY_ON);
+  else params.delete(QUOTE_NEW_EXCEL_ONLY_PARAM);
+  return `${path}?${params.toString()}${hash}`;
+}
+
+/** 위 두 값을 되읽는다. 없거나 정해진 값이 아니면 「없음」이다 — 오류가 아니다. */
+export function parseNewQuoteStart(searchParams: SearchParamsInput | undefined): NewQuoteStart {
+  const kind = exactValue(searchParams?.[QUOTE_NEW_KIND_PARAM]);
+  return {
+    kind: isQuoteKind(kind) ? kind : null,
+    excelOnly: exactValue(searchParams?.[QUOTE_NEW_EXCEL_ONLY_PARAM]) === QUOTE_NEW_EXCEL_ONLY_ON,
+  };
 }
 
 /**
@@ -187,4 +260,12 @@ export function returnHrefForQuotePrint(
 function firstValue(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return (value[0] ?? "").trim();
   return (value ?? "").trim();
+}
+
+/**
+ * 글자 하나로 왔을 때만 그 글자. 배열(같은 이름 두 번)과 없음은 null 이다. 🔴 다듬지 않는다 —
+ * 위 firstValue 와 달리 사람이 적는 값이 아니라 **정해진 글자**만 받는다(팝업의 두 값).
+ */
+function exactValue(value: string | string[] | undefined): string | null {
+  return typeof value === "string" ? value : null;
 }

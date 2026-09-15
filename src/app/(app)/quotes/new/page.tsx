@@ -15,6 +15,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   parseNewQuoteLink,
+  parseNewQuoteStart,
   returnHrefForNewQuote,
   type SearchParamsInput,
 } from "@/lib/domain/quote-new-link";
@@ -39,6 +40,12 @@ export const dynamic = "force-dynamic";
  * 실려 온다(domain/quote-new-link.ts). 인수번호는 폼이 기존 「불러오기」 길을
  * 그대로 태우는 데 쓰고, 건의 id 는 저장·취소 뒤에 **돌아갈 곳**을 만드는 데
  * 쓴다. 아무것도 실려 오지 않으면 지금까지와 완전히 같은 화면이다.
+ *
+ * ── 목록의 [새 견적서] 팝업에서 들어온 경우 (견적서 ⑤) ──────────────────
+ * 팝업에서 고른 **견적서 종류 · 엑셀 전용 여부**가 주소에 덧붙어 온다(parseNewQuoteStart).
+ * 폼은 그 값을 「빈 폼에서 사람이 손으로 고른 것」과 같은 상태로 받는다
+ * (components/quotes/quote-new-start.ts). 없거나 정해진 값이 아니면 지금까지처럼 내자 ·
+ * 엑셀 전용 아님으로 연다. 인수번호 · 건 id 는 위 그대로 따로 읽는다.
  */
 export default async function NewQuotePage({
   searchParams,
@@ -77,7 +84,9 @@ export default async function NewQuotePage({
     readAllQuoteWorkSectionDefaults(),
   ]);
 
-  const link = parseNewQuoteLink(searchParams ? await searchParams : undefined);
+  const query = searchParams ? await searchParams : undefined;
+  const link = parseNewQuoteLink(query);
+  const start = parseNewQuoteStart(query);
 
   return (
     <QuoteEditForm
@@ -87,6 +96,8 @@ export default async function NewQuotePage({
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
       initialIntakeNumber={link.intakeNumber}
+      initialKind={start.kind}
+      initialExcelOnly={start.excelOnly}
       returnHref={returnHrefForNewQuote(link)}
     />
   );

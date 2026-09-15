@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 
 import {
   newQuoteHrefForRepairCase,
+  newQuoteHrefWithStart,
   parseNewQuoteLink,
+  parseNewQuoteStart,
   quoteEditHref,
   quotePrintHref,
   returnHrefForEditQuote,
@@ -260,5 +262,97 @@ test("🔴 판정 조건은 한 함수에만 적혀 있다 — 두 화면의 함
     for (const condition of ["UUID_PATTERN", "toLowerCase", "firstValue("]) {
       assert.ok(!fn.includes(condition), `${name} 가 판정 조건(${condition})을 따로 적었다`);
     }
+  }
+});
+
+// ───────────────────────────── [새 견적서] 팝업 → 새 견적서 (견적서 ⑤)
+
+/** 주소를 만든 뒤 팝업의 두 값을 되읽는다 — 브라우저가 그 주소로 들어오는 것 그대로. */
+function startRoundTrip(href: string) {
+  const query = new URL(href, "https://example.invalid").searchParams;
+  return parseNewQuoteStart(Object.fromEntries(query.entries()));
+}
+
+test("🔴 덧붙이기 — 맨 `/quotes/new` 에 종류를 싣고, 엑셀 전용은 켰을 때만 `1` 로 싣는다", () => {
+  assert.equal(newQuoteHrefWithStart("/quotes/new", { kind: "DOMESTIC", excelOnly: false }), "/quotes/new?kind=DOMESTIC");
+  assert.equal(newQuoteHrefWithStart("/quotes/new", { kind: "OVERHAUL", excelOnly: false }), "/quotes/new?kind=OVERHAUL");
+  assert.equal(
+    newQuoteHrefWithStart("/quotes/new", { kind: "OVERHAUL", excelOnly: true }),
+    "/quotes/new?kind=OVERHAUL&excelOnly=1"
+  );
+  assert.deepEqual(startRoundTrip(newQuoteHrefWithStart("/quotes/new", { kind: "DOMESTIC", excelOnly: true })), {
+    kind: "DOMESTIC",
+    excelOnly: true,
+  });
+});
+
+test("🔴 덧붙이기 — 수리 건 주소의 인수번호 · 건 id 가 한 글자도 떨어지지 않는다", () => {
+  for (const intakeNumber of [INTAKE_NUMBER, "D26/07 06&x=1"]) {
+    const base = newQuoteHrefForRepairCase({ repairCaseId: CASE_ID, intakeNumber });
+    for (const choice of [
+      { kind: "DOMESTIC", excelOnly: false },
+      { kind: "OVERHAUL", excelOnly: true },
+    ] as const) {
+      const href = newQuoteHrefWithStart(base, choice);
+      // 기존 주소 뒤에 덧붙을 뿐이다 — 앞부분은 그대로다.
+      assert.ok(href.startsWith(`${base}&`), href);
+      // 되읽은 인수번호 · 건 id · 돌아갈 곳이 덧붙이기 전과 같다.
+      assert.deepEqual(roundTrip(href), roundTrip(base));
+      assert.deepEqual(roundTrip(href), { intakeNumber, repairCaseId: CASE_ID });
+      assert.equal(returnHrefForNewQuote(roundTrip(href)), repairCaseDetailHrefs(CASE_ID).quotes);
+      assert.deepEqual(startRoundTrip(href), choice);
+    }
+  }
+});
+
+test("덧붙이기는 두 이름을 정한다 — 이미 있으면 바꾸고, 엑셀 전용이 아니면 그 이름을 뺀다", () => {
+  // 같은 이름이 둘이 되면 되읽기가 없는 것으로 친다 — 두 번 덧붙여도 하나다.
+  const twice = newQuoteHrefWithStart(
+    newQuoteHrefWithStart("/quotes/new", { kind: "OVERHAUL", excelOnly: true }),
+    { kind: "DOMESTIC", excelOnly: false }
+  );
+  assert.equal(twice, "/quotes/new?kind=DOMESTIC");
+  assert.deepEqual(startRoundTrip(twice), { kind: "DOMESTIC", excelOnly: false });
+});
+
+test("덧붙이기는 조각(#)을 맨 뒤에 둔다 — 쿼리가 조각의 글자가 되지 않게", () => {
+  assert.equal(
+    newQuoteHrefWithStart("/quotes/new?intakeNumber=D1#top", { kind: "OVERHAUL", excelOnly: true }),
+    "/quotes/new?intakeNumber=D1&kind=OVERHAUL&excelOnly=1#top"
+  );
+});
+
+test("🔴 되읽기 — 두 값이 없으면 지금과 같다(내자 · 엑셀 전용 아님), 기존 되읽기도 그대로다", () => {
+  for (const searchParams of [undefined, {}, { intakeNumber: INTAKE_NUMBER, repairCaseId: CASE_ID }]) {
+    assert.deepEqual(parseNewQuoteStart(searchParams), { kind: null, excelOnly: false });
+  }
+  // 두 값을 실은 주소라도 인수번호 · 건 id 되읽기는 그 둘만 돌려준다 — 모양이 달라지지 않았다.
+  const link = parseNewQuoteLink({ intakeNumber: INTAKE_NUMBER, repairCaseId: CASE_ID, kind: "OVERHAUL", excelOnly: "1" });
+  assert.deepEqual(link, { intakeNumber: INTAKE_NUMBER, repairCaseId: CASE_ID });
+});
+
+test("되읽기 — 정해진 값은 그대로 받는다", () => {
+  assert.deepEqual(parseNewQuoteStart({ kind: "DOMESTIC" }), { kind: "DOMESTIC", excelOnly: false });
+  assert.deepEqual(parseNewQuoteStart({ kind: "OVERHAUL" }), { kind: "OVERHAUL", excelOnly: false });
+  assert.deepEqual(parseNewQuoteStart({ kind: "OVERHAUL", excelOnly: "1" }), { kind: "OVERHAUL", excelOnly: true });
+  // 종류 없이 엑셀 전용만 와도 그것만 받는다 — 폼은 내자 · 엑셀 전용으로 연다.
+  assert.deepEqual(parseNewQuoteStart({ excelOnly: "1" }), { kind: null, excelOnly: true });
+});
+
+test("🔴 되읽기 — 정해지지 않은 종류 · 빈 값 · 배열은 없는 것으로 친다", () => {
+  for (const odd of ["overhaul", "Overhaul", "OH", " OVERHAUL", "OVERHAUL ", "", "DOMESTIC,OVERHAUL", "__proto__", "toString"]) {
+    assert.equal(parseNewQuoteStart({ kind: odd }).kind, null, `${JSON.stringify(odd)} 가 통과했다`);
+  }
+  for (const array of [["OVERHAUL"], ["OVERHAUL", "DOMESTIC"], ["DOMESTIC", "DOMESTIC"], []]) {
+    assert.equal(parseNewQuoteStart({ kind: array }).kind, null, `배열 ${JSON.stringify(array)} 가 통과했다`);
+  }
+});
+
+test("🔴 되읽기 — 엑셀 전용은 `1` 하나만 참이다", () => {
+  for (const odd of ["true", "TRUE", "0", "", " 1", "1 ", "01", "yes", "on"]) {
+    assert.equal(parseNewQuoteStart({ excelOnly: odd }).excelOnly, false, `${JSON.stringify(odd)} 가 통과했다`);
+  }
+  for (const array of [["1"], ["1", "1"], []]) {
+    assert.equal(parseNewQuoteStart({ excelOnly: array }).excelOnly, false, `배열 ${JSON.stringify(array)} 가 통과했다`);
   }
 });

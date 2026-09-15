@@ -267,3 +267,58 @@ describe("휴지통 — 만료 배지 · 완전 삭제", () => {
     assert.ok(page.includes("canDelete ? listDeletedQuotes() : Promise.resolve([])"), "휴지통 조회가 canDelete 로 감싸여 있지 않다");
   });
 });
+
+/**
+ * ============================================================================
+ * [새 견적서] 팝업 (견적서 ⑤) — 머리의 단추 한 곳
+ * ============================================================================
+ * 단추는 곧바로 작성 화면으로 가지 않고 팝업을 연다. 팝업이 무엇을 그리고 [만들기]가 어느
+ * 주소로 가는지는 NewQuoteDialog.test.tsx 가, 덧붙이는 규칙은 quote-new-link.test.ts 가 값으로
+ * 본다. 여기서는 목록이 **그 팝업을 제자리에서, 넘겨받은 주소 그대로** 여는가를 본다.
+ * 표 · 카드와는 무관하다 — 단추는 머리에 하나뿐이다.
+ * ============================================================================
+ */
+describe("[새 견적서] 팝업", () => {
+  const header = flat(
+    sliceBetween(listSource, '<h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">견적서</h1>', "{/* 탭 자체가")
+  );
+  const newQuoteBranch = sliceBetween(header, "{canEdit && (", "</> )}");
+
+  test("🔴 수정 권한이 없으면 단추도 팝업도 없다 — 지금과 같다", () => {
+    assert.ok(header.includes("{canEdit && ( <> <button"), header);
+    assert.ok(newQuoteBranch.includes("새 견적서 </button>"), newQuoteBranch);
+    assert.ok(newQuoteBranch.includes("<NewQuoteDialog "), "팝업이 수정 권한 갈래 밖에 있다");
+    // 팝업은 이 한 곳에서만 그린다 — 다른 자리에서 그리면 권한 갈래를 건너뛴다.
+    assert.equal(flat(listSource).split("<NewQuoteDialog ").length - 1, 1, "팝업을 그리는 곳이 하나가 아니다");
+  });
+
+  test("🔴 단추를 누르면 곧바로 가지 않고 팝업이 뜬다", () => {
+    assert.ok(
+      newQuoteBranch.includes('<button type="button" onClick={() => setIsNewQuoteDialogOpen(true)} aria-haspopup="dialog"'),
+      newQuoteBranch
+    );
+    assert.ok(
+      newQuoteBranch.includes("{isNewQuoteDialogOpen && ( <NewQuoteDialog baseHref={newQuoteHref} onCancel={() => setIsNewQuoteDialogOpen(false)} /> )}"),
+      newQuoteBranch
+    );
+    // 처음에는 닫혀 있다 — 목록을 열자마자 창이 뜨지 않는다.
+    assert.ok(flat(listSource).includes("const [isNewQuoteDialogOpen, setIsNewQuoteDialogOpen] = useState(false);"));
+    // 옛 「곧바로 가는 링크」가 남아 있으면 팝업을 건너뛰는 입구가 된다.
+    assert.ok(!flat(listSource).includes("href={newQuoteHref}"), "곧바로 가는 옛 링크가 남아 있다");
+    assert.ok(!flat(listSource).includes("router.push(newQuoteHref"), "팝업을 건너뛰고 가는 길이 있다");
+  });
+
+  test("🔴 [만들기]는 newQuoteHref 에 두 값을 덧붙인 주소로 간다 — 목록은 받은 주소를 그대로 넘긴다", () => {
+    // 수리 건 탭은 인수번호 · 건 id 를 실은 주소를 넘기고(아래), 팝업은 그 위에 두 값만 덧붙인다.
+    const dialogSource = flat(read("src/components/quotes/NewQuoteDialog.tsx"));
+    assert.ok(
+      dialogSource.includes("href={newQuoteHrefWithStart(baseHref, { kind, excelOnly })}"),
+      "[만들기]가 덧붙이는 규칙(newQuoteHrefWithStart)을 쓰지 않는다"
+    );
+    const tabCall = flat(sliceBetween(tabPageSource, "<QuoteListScreen", "/>\n  );"));
+    assert.ok(tabCall.includes("newQuoteHref={newQuoteHrefForRepairCase({"), "탭이 그 건의 주소를 넘기지 않는다");
+    // PO/내자 목록은 넘기지 않는다 — 기본값 `/quotes/new` 그대로.
+    assert.ok(!quotesPageSource.includes("newQuoteHref"), "PO/내자 목록이 새 견적서 주소를 따로 넘긴다");
+    assert.match(flat(sliceBetween(listSource, "export default function QuoteListScreen(", "}) {")), /newQuoteHref = "\/quotes\/new",/);
+  });
+});
