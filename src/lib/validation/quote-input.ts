@@ -158,6 +158,17 @@ export type QuoteFields = {
    * 빼지 못한 장이 여기에 해당한다. `"0"` 은 "빼기는 했는데 0원"이라 다르다.
    */
   laborPowerTestDeduction: string | null;
+  /**
+   * 엑셀 전용 견적서인가(2026-09-15 Q2 — schema/quotes.ts 의 is_excel_only). 켜지면 이
+   * 장에는 부품 · 작업 내역 · 고른 수리 작업이 **하나도 없어야** 하고, 공급가액을
+   * 아래 칸에 손으로 적는다. 보내지 않으면 `false` 다 — 옛 요청이 그대로 동작한다.
+   */
+  isExcelOnly: boolean;
+  /**
+   * 엑셀 전용 견적서의 공급가액(부가세 별도) — numeric 이라 문자열이다. **엑셀 전용일
+   * 때만** 값이 있고 그때는 필수다. 엑셀 전용이 아니면 늘 null 이다(DB CHECK 와 같은 규칙).
+   */
+  manualSupplyAmount: string | null;
   repairTasks: QuoteRepairTaskInput[];
   /**
    * 견적서에 적히는 작업 내역(조사/수리/통전). 묶음 안의 **차례가 곧 배열
@@ -318,6 +329,30 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
   const repairTasks = normalizeRepairTasks(raw.repairTasks, fieldErrors);
   const workScopeLines = normalizeWorkScopeLines(raw.workScopeLines, fieldErrors);
 
+  /**
+   * 엑셀 전용 견적서(2026-09-15 Q2). 켜짐은 다른 두 스위치와 같은 규칙 — **켜졌다고 말한
+   * 것만 켜짐**이다(잘못 읽혀 켜지면 품목이 있는 장이 저장을 거절당한다).
+   *
+   * 수기 공급가액은 다른 금액 칸과 **같은 규칙**으로 읽는다(normalizeAmount — 콤마를
+   * 지우고, numeric(15,2) 폭 · 0 이상 · 소수 둘째 자리까지). 엑셀 전용 · 줄 · 금액의
+   * 짝은 아래 quoteExcelOnlyFieldErrors 한 곳이 본다 — mutation 도 같은 함수를 마지막
+   * 방어선으로 부른다.
+   */
+  const isExcelOnly = raw.isExcelOnly === true;
+  const manualSupplyAmount = normalizeAmount("manualSupplyAmount", "공급가액", raw.manualSupplyAmount, fieldErrors);
+  const excelOnlyErrors = quoteExcelOnlyFieldErrors({
+    isExcelOnly,
+    manualSupplyAmount,
+    items,
+    workScopeLines,
+    repairTasks,
+  });
+  for (const [key, message] of Object.entries(excelOnlyErrors)) {
+    // 형식 오류가 이미 붙은 칸은 덮지 않는다 — 「형식이 틀렸다」가 더 정확한 말이다
+    // (형식이 틀린 금액은 null 로 오므로 여기서 「비었다」로 다시 읽힌다).
+    if (!(key in fieldErrors)) fieldErrors[key] = message;
+  }
+
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
 
   return {
@@ -347,8 +382,68 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       repairTasks,
       workScopeLines,
       items,
+      isExcelOnly,
+      manualSupplyAmount,
     },
   };
+}
+
+/**
+ * ============================================================================
+ * 엑셀 전용 견적서의 규칙 — 한 곳 (2026-09-15 Q2)
+ * ============================================================================
+ * 엑셀 전용 견적서는 손으로 만든 엑셀이 곧 보낸 문서다(schema/quotes.ts 의
+ * is_excel_only). 그래서:
+ *
+ *  1. **부품 · 작업 내역 · 고른 수리 작업이 하나도 없어야 한다.** 있으면 오류다 —
+ *     조용히 지우지 않는다. 사람이 적어 둔 줄이 저장 한 번에 사라지면, 그 장을 일반
+ *     견적서로 되돌렸을 때 무엇을 적었는지 되찾을 길이 없다.
+ *  2. **공급가액이 필수다.** 품목이 없으니 금액이 나올 곳이 이 칸뿐이다. 0 은 허용한다
+ *     (무상 견적 — DB CHECK quotes_manual_supply_amount_not_negative 와 같은 규칙).
+ *  3. 엑셀 전용이 **아니면** 공급가액은 비어 있어야 한다 — DB CHECK
+ *     quotes_manual_supply_amount_excel_only 와 같은 규칙을 검증에서 먼저 본다. 거기서
+ *     처음 걸리면 사람에게는 「일시적으로 저장할 수 없습니다」로만 보인다.
+ *
+ * 붙인 엑셀 파일이 있는지는 **여기서 보지 않는다** — 새 견적서는 저장한 뒤에야 파일을
+ * 올릴 수 있다. 목록 조회의 hasExcel 로 화면이 알린다(queries/quotes.ts).
+ *
+ * 작업비 · 작업비의 근거 칸(labor_* · 통전/조사 스위치)은 막지 않는다 — 금액은 그 칸들을
+ * 보지 않고(domain/quote-list.ts 의 quoteSupplyAmountOf), 막으면 일반 견적서에서 엑셀
+ * 전용으로 바꾸는 사람이 보이지 않는 칸까지 비워야 한다.
+ *
+ * 검증(validateQuoteFields)과 mutation(createQuote · updateQuote 의 마지막 방어선)이
+ * 이 함수 하나를 부른다. 두 곳에 따로 적으면 한쪽만 규칙이 바뀌는 날이 온다.
+ * ============================================================================
+ */
+export function quoteExcelOnlyFieldErrors(fields: {
+  isExcelOnly: boolean;
+  /** 이미 읽어 낸 금액(문자열) — 비었거나 형식이 틀렸으면 null. */
+  manualSupplyAmount: string | null;
+  items: readonly unknown[];
+  workScopeLines: readonly unknown[];
+  repairTasks: readonly unknown[];
+}): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (fields.isExcelOnly) {
+    if (fields.items.length > 0) {
+      errors.items = "엑셀 전용 견적서에는 부품 줄을 넣을 수 없습니다. 부품 줄을 모두 지운 뒤 저장해 주세요.";
+    }
+    if (fields.workScopeLines.length > 0) {
+      errors.workScopeLines =
+        "엑셀 전용 견적서에는 작업 내역을 적을 수 없습니다. 작업 내역을 모두 지운 뒤 저장해 주세요.";
+    }
+    if (fields.repairTasks.length > 0) {
+      errors.repairTasks =
+        "엑셀 전용 견적서에는 수리 작업을 고를 수 없습니다. 고른 수리 작업을 모두 뺀 뒤 저장해 주세요.";
+    }
+    if (fields.manualSupplyAmount === null) {
+      errors.manualSupplyAmount = "엑셀 전용 견적서는 공급가액(부가세 별도)을 입력해 주세요.";
+    }
+  } else if (fields.manualSupplyAmount !== null) {
+    errors.manualSupplyAmount =
+      "공급가액은 엑셀 전용 견적서에만 손으로 적습니다. 엑셀 전용을 켜거나 공급가액을 비워 주세요.";
+  }
+  return errors;
 }
 
 /**

@@ -8,13 +8,14 @@ import {
   buildAttachmentPreviewPath,
   buildImprovementRequestAttachmentPreviewPath,
   buildProductModelAttachmentPreviewPath,
+  buildQuoteAttachmentPreviewPath,
 } from "@/lib/domain/attachment-path";
 import type { AttachmentOwnerKind } from "@/lib/domain/attachment-category";
 import {
   attachmentOwnerKindOf,
   hasAnyAttachmentOwnerAccess,
   isAttachmentOwnerAccessAllowed,
-  type AttachmentOwnerAccess,
+  resolveAttachmentOwnerAccess,
 } from "@/lib/domain/attachment-download-policy";
 import {
   IMPROVEMENT_REQUEST_SCREENSHOT_FORBIDDEN_MESSAGE,
@@ -58,6 +59,9 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  *   모델 첨부        →  **productModels.files WRITE**
  *   개선 요청 첨부   →  **improvementRequests WRITE** + 글 한 건에 대한 판정
  *                       (2026-09-13 — 스크린샷을 올린 사람과 같은 판정)
+ *   견적서 첨부      →  **quotes WRITE** (2026-09-15 Q2 — 올리기 통로와 같다).
+ *                       결재 PDF · 수기 엑셀은 사진이 아니라 NOT_AN_IMAGE 로 끝나고,
+ *                       휴지통 견적서의 파일은 NOT_FOUND 다.
  *
  * 모델 첨부를 **보는** 쪽(다운로드·썸네일 서빙)은 productModels.view면 되지만
  * (download/route.ts 헤더 참조), 여기서 view를 받으면 모델을 볼 수 있는 모든
@@ -118,18 +122,20 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
 
   // 미리보기를 만드는 것은 파일을 바꾸는 일이므로 올리기와 같은 권한을 본다.
   // 어느 쪽 파일도 다룰 수 없는 사람은 조회 전에 막는다(파일 헤더 참조).
-  const access: AttachmentOwnerAccess = {
-    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "WRITE"),
-    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.files", "WRITE"),
-    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "WRITE"),
-  };
+  // 무엇을 묻는지는 판정 파일의 표(ATTACHMENT_OWNER_PERMISSIONS.CHANGE) 한 곳이 정한다 —
+  // 네 주인 모두 WRITE(견적서는 quotes WRITE — 올리기 통로와 같다).
+  const access = await resolveAttachmentOwnerAccess("CHANGE", (areaKey, level) =>
+    hasPermission(actingUser, areaKey, level)
+  );
   if (!hasAnyAttachmentOwnerAccess(access)) {
     return fail(403, "FORBIDDEN", "이 파일을 다룰 권한이 없습니다.");
   }
 
   const { id: attachmentId } = await context.params;
   const attachment = await getAttachmentForDownload(attachmentId);
-  if (!attachment || attachment.isDeleted) {
+  // 휴지통의 견적서에 딸린 파일도 없는 것으로 본다 — 그 파일은 견적서와 함께 첨부
+  // 휴지통으로 가 있고(quote-trash.ts), 휴지통의 견적서는 주소로도 열리지 않는다.
+  if (!attachment || attachment.isDeleted || attachment.quoteInTrash) {
     return fail(404, "NOT_FOUND", "파일을 찾을 수 없습니다.");
   }
 
@@ -161,17 +167,23 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     }
   }
 
-  // 미리보기를 둘 폴더는 **주인의 ID**로 정해진다(세 경로 함수 모두). 주인이
+  // 미리보기를 둘 폴더는 **주인의 ID**로 정해진다(네 경로 함수 모두). 주인이
   // 아무도 없으면 둘 자리가 없다. 본문을 받기 전에 여기서 끝낸다.
+  //
+  // 견적서 파일(결재 PDF · 수기 엑셀)은 사진이 아니라 아래 NOT_AN_IMAGE 에서 막힌다 —
+  // 그래도 주인 갈래는 넷을 다 적는다. 빠뜨리면 주인이 있는 파일이 「연결이 끊긴
+  // 파일」로 답해진다.
   const ownerKind = attachmentOwnerKindOf(attachment);
   const previewOwner: { kind: AttachmentOwnerKind; id: string } | null =
     ownerKind === "PRODUCT_MODEL" && attachment.productModelId
       ? { kind: ownerKind, id: attachment.productModelId }
       : ownerKind === "IMPROVEMENT_REQUEST" && attachment.improvementRequestId
         ? { kind: ownerKind, id: attachment.improvementRequestId }
-        : ownerKind === "REPAIR_CASE" && attachment.repairCaseId
-          ? { kind: ownerKind, id: attachment.repairCaseId }
-          : null;
+        : ownerKind === "QUOTE" && attachment.quoteId
+          ? { kind: ownerKind, id: attachment.quoteId }
+          : ownerKind === "REPAIR_CASE" && attachment.repairCaseId
+            ? { kind: ownerKind, id: attachment.repairCaseId }
+            : null;
   if (!previewOwner) {
     return fail(404, "NOT_FOUND", "접수 건과 연결이 끊긴 파일입니다.");
   }
@@ -215,10 +227,12 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
             improvementRequestId: previewOwner.id,
             attachmentId: attachment.id,
           })
-        : buildAttachmentPreviewPath({
-            repairCaseId: previewOwner.id,
-            attachmentId: attachment.id,
-          });
+        : previewOwner.kind === "QUOTE"
+          ? buildQuoteAttachmentPreviewPath({ quoteId: previewOwner.id, attachmentId: attachment.id })
+          : buildAttachmentPreviewPath({
+              repairCaseId: previewOwner.id,
+              attachmentId: attachment.id,
+            });
 
   // 파일이 먼저, 기록이 나중 — 원본 업로드와 같은 순서다.
   try {

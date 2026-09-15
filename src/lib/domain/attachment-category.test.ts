@@ -15,6 +15,7 @@ import {
   isAttachmentCategoryAllowedForOwner,
   isMalwareScanStatus,
   isQuoteAttachmentSlotCategory,
+  liveQuoteAttachmentInSlot,
   malwareScanStatusLabels,
   quoteAttachmentIdsDisplacedBy,
 } from "./attachment-category";
@@ -292,6 +293,28 @@ test("견적서의 한 칸에는 파일 하나 — 같은 칸의 살아 있는 �
     quoteAttachmentIdsDisplacedBy([{ id: "excel-trashed", category: "QUOTE_EXCEL", isDeleted: true }], "QUOTE_EXCEL"),
     []
   );
+});
+
+test("견적서의 한 칸에 지금 붙어 있는 파일 — 살아 있는 그 칸의 것, 겹치면 가장 나중에 올린 것", () => {
+  const existing = [
+    { id: "pdf-trashed", category: "SIGNED_QUOTE_PDF", isDeleted: true, uploadedAt: "2026-09-15T03:00:00.000Z" },
+    { id: "pdf-live", category: "SIGNED_QUOTE_PDF", isDeleted: false, uploadedAt: "2026-09-15T01:00:00.000Z" },
+    { id: "excel-live", category: "QUOTE_EXCEL", isDeleted: false, uploadedAt: new Date("2026-09-15T02:00:00.000Z") },
+  ] as const;
+  // 🔴 휴지통의 것은 더 나중에 올렸어도 칸의 파일이 아니다(교체로 밀려난 옛 파일).
+  assert.equal(liveQuoteAttachmentInSlot(existing, "SIGNED_QUOTE_PDF")?.id, "pdf-live");
+  assert.equal(liveQuoteAttachmentInSlot(existing, "QUOTE_EXCEL")?.id, "excel-live");
+  assert.equal(liveQuoteAttachmentInSlot([], "QUOTE_EXCEL"), null);
+  assert.equal(liveQuoteAttachmentInSlot(existing.slice(0, 2), "QUOTE_EXCEL"), null, "다른 칸의 파일은 고르지 않는다");
+
+  // 규칙을 거치지 않은 행이 겹쳐 있으면 가장 나중에 올린 것 — 시각이 같으면 id 로 가른다.
+  const overlapped = [
+    { id: "b-old", category: "QUOTE_EXCEL", isDeleted: false, uploadedAt: "2026-09-15T01:00:00.000Z" },
+    { id: "c-new", category: "QUOTE_EXCEL", isDeleted: false, uploadedAt: "2026-09-15T05:00:00.000Z" },
+    { id: "a-new", category: "QUOTE_EXCEL", isDeleted: false, uploadedAt: "2026-09-15T05:00:00.000Z" },
+  ] as const;
+  assert.equal(liveQuoteAttachmentInSlot(overlapped, "QUOTE_EXCEL")?.id, "c-new");
+  assert.equal(liveQuoteAttachmentInSlot([...overlapped].reverse(), "QUOTE_EXCEL")?.id, "c-new", "넘긴 차례와 무관하다");
 });
 
 test("목록에 없는 값은 검사 상태로 인정되지 않는다", () => {

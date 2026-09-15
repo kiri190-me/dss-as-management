@@ -107,6 +107,9 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     // 견적서와 같은 상태다.
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
+    // 엑셀 전용(2026-09-15 Q2). 기본은 "일반 견적서" — 옛 견적서와 같은 상태다.
+    isExcelOnly: false,
+    manualSupplyAmount: null,
     repairTasks: [],
     // 작업 내역(2026-08-31). 기본은 "안 적음" — 제너레이터 양식에는 이 구역이 없다.
     workScopeLines: [],

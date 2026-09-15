@@ -11,7 +11,7 @@ import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
 import {
   hasAnyAttachmentOwnerAccess,
   isAttachmentOwnerAccessAllowed,
-  type AttachmentOwnerAccess,
+  resolveAttachmentOwnerAccess,
 } from "@/lib/domain/attachment-download-policy";
 
 /**
@@ -40,6 +40,9 @@ import {
  *   모델 첨부        →  **productModels.files WRITE**
  *   개선 요청 첨부   →  **improvementRequests WRITE** + 글 한 건에 대한 판정
  *                       (2026-09-13 — 스크린샷)
+ *   견적서 첨부      →  **quotes WRITE** (2026-09-15 Q2 — 결재 PDF · 수기 엑셀).
+ *                       휴지통의 견적서에 딸린 파일은 지우지도 되살리지도 못한다 —
+ *                       그 판정은 견적서 행을 잠근 mutation 이 한다(attachment-trash.ts).
  *
  * 개선 요청 스크린샷은 영역 권한만으로 끝나지 않는다 — 접수 상태인 자기 글의 글쓴이
  * 또는 관리 권한자(improvementRequests MANAGE)만 지우고 되살린다(올리기와 같은
@@ -81,6 +84,8 @@ type AttachmentTrashActionTarget = {
   productModelId?: string;
   /** 개선 요청 스크린샷이면 그 글의 id — 설정 › 개선 요청 화면을 다시 그린다. */
   improvementRequestId?: string;
+  /** 견적서의 결재 PDF · 수기 엑셀이면 그 견적서의 id — 견적서 수정 화면과 목록을 다시 그린다. */
+  quoteId?: string;
 };
 
 async function resolveWriteActor(
@@ -118,13 +123,15 @@ async function resolveWriteActor(
   // 어느 쪽 파일도 다룰 수 없는 사람은 첨부를 읽기 전에 막는다. 예전에
   // repairCases.files 하나로 막던 그 자리이고, 그때처럼 존재 여부가 드러나지
   // 않는다. 여러 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const access: AttachmentOwnerAccess = {
-    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "WRITE"),
-    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.files", "WRITE"),
-    // 개선 요청 스크린샷 — 글을 적는 권한이 곧 자기 글의 스크린샷을 떼는 권한의
-    // 문턱이다. 글 한 건에 대한 판정은 mutation 이 잠근 행으로 더 한다(파일 헤더).
-    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "WRITE"),
-  };
+  //
+  // 무엇을 묻는지는 판정 파일의 표(ATTACHMENT_OWNER_PERMISSIONS.CHANGE) 한 곳이 정한다 —
+  // 네 주인 모두 WRITE. 개선 요청 스크린샷은 글을 적는 권한이 곧 자기 글의 스크린샷을 떼는
+  // 권한의 문턱이고 글 한 건에 대한 판정은 mutation 이 잠근 행으로 더 한다. 견적서 파일
+  // (2026-09-15 Q2)은 올리기 통로와 같은 quotes WRITE 이고, 휴지통 견적서의 파일은
+  // mutation 이 잠근 견적서 행으로 막는다(파일 헤더).
+  const access = await resolveAttachmentOwnerAccess("CHANGE", (areaKey, level) =>
+    hasPermission(actingUser, areaKey, level)
+  );
   if (!hasAnyAttachmentOwnerAccess(access)) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "파일을 지울 권한이 없습니다." } };
   }
@@ -167,6 +174,11 @@ function revalidateAfterTrashChange(target: AttachmentTrashActionTarget): void {
   if (target.improvementRequestId) {
     // 스크린샷은 글 목록 한 화면에 함께 그려진다(글마다 페이지가 없다).
     revalidatePath("/settings/improvement-requests");
+  }
+  if (target.quoteId) {
+    // 견적서 수정 화면의 첨부 칸과, 목록의 결재 PDF · 엑셀 표시(hasSignedPdf · hasExcel).
+    revalidatePath(`/quotes/${target.quoteId}`);
+    revalidatePath("/quotes");
   }
 }
 

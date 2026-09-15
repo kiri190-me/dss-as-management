@@ -7,7 +7,7 @@ import {
   decideAttachmentDownload,
   hasAnyAttachmentOwnerAccess,
   isAttachmentOwnerAccessAllowed,
-  type AttachmentOwnerAccess,
+  resolveAttachmentOwnerAccess,
 } from "@/lib/domain/attachment-download-policy";
 import { AttachmentPathError, resolveAttachmentAbsolutePath } from "@/lib/domain/attachment-path";
 import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
@@ -34,11 +34,16 @@ import { shouldServeInline } from "./inline-view";
  * 볼 자격을 먼저 확인한 뒤에 꺼낸다.
  *
  * ── 권한이 주인에 따라 갈린다 — 그래서 조회가 앞으로 왔다 ────────────────
- * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 중 하나다(schema/attachments.ts).
+ * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 · 견적서 중 하나다(schema/attachments.ts).
  *
  *   접수 건 첨부     →  repairCases.files READ    (예전 그대로)
  *   모델 첨부        →  **productModels.view READ**
  *   개선 요청 첨부   →  **improvementRequests READ** (2026-09-13 — 스크린샷)
+ *   견적서 첨부      →  **quotes READ** (2026-09-15 Q2 — 결재 PDF · 수기 엑셀)
+ *
+ * 견적서 파일은 견적서 받기(/api/quotes/{id}/xlsx)와 같은 READ 문턱이다. 그리고
+ * **견적서가 휴지통에 있으면** 판정이 QUOTE_IN_TRASH(409)로 막는다 — 휴지통의 견적서는
+ * 목록에도 주소에도 없는 것이고, 그 파일만 이 통로로 새어 나가면 휴지통이 뜻을 잃는다.
  *
  * 개선 요청 스크린샷을 보는 데 READ 면 되는 까닭은 모델 회로도와 같다 — 글 목록을
  * 볼 수 있는 사람은 그 글에 붙은 화면 사진도 볼 수 있어야 한다. 좁히는 것은 붙이고
@@ -90,6 +95,7 @@ type FailureCode =
   | "NOT_FOUND"
   | "FORBIDDEN"
   | "DETACHED"
+  | "QUOTE_IN_TRASH"
   | "DELETED"
   | "SCAN_BLOCKED"
   | "STORAGE_FAILED";
@@ -137,14 +143,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   // 하나로 막던 그 자리이고, 그때와 마찬가지로 존재 여부가 드러나지 않는다.
   //
   // 여러 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
-  const access: AttachmentOwnerAccess = {
-    REPAIR_CASE: await hasPermission(actingUser, "repairCases.files", "READ"),
-    // 모델 파일을 **보는** 권한은 productModels.files가 아니라 view다 — 파일
-    // 헤더의 '권한이 주인에 따라 갈린다' 참조.
-    PRODUCT_MODEL: await hasPermission(actingUser, "productModels.view", "READ"),
-    // 개선 요청 스크린샷 — 글 목록을 볼 수 있으면 본다(파일 헤더).
-    IMPROVEMENT_REQUEST: await hasPermission(actingUser, "improvementRequests", "READ"),
-  };
+  //
+  // 무엇을 묻는지는 판정 파일의 표(ATTACHMENT_OWNER_PERMISSIONS.VIEW) 한 곳이 정한다 —
+  // 접수 건 repairCases.files · 모델 productModels.view(**files 가 아니다** — 파일 헤더의
+  // '권한이 주인에 따라 갈린다') · 개선 요청 improvementRequests · 견적서 quotes, 모두 READ.
+  const access = await resolveAttachmentOwnerAccess("VIEW", (areaKey, level) =>
+    hasPermission(actingUser, areaKey, level)
+  );
   if (!hasAnyAttachmentOwnerAccess(access)) {
     return fail(403, "FORBIDDEN", "이 파일을 열람할 권한이 없습니다.");
   }
@@ -194,15 +199,20 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     repairCaseId: attachment.repairCaseId,
     productModelId: attachment.productModelId,
     improvementRequestId: attachment.improvementRequestId,
+    quoteId: attachment.quoteId,
     isDeleted: attachment.isDeleted,
+    // 견적서가 휴지통에 있으면 그 파일은 나가지 않는다(2026-09-15 Q2 — 조회가 견적서
+    // 표를 붙여 읽는다).
+    quoteInTrash: attachment.quoteInTrash,
     malwareScanStatus: attachment.malwareScanStatus,
   });
   if (!decision.allowed) {
     // 판정이 준 문장을 그대로 쓴다. "안 됩니다"만 보여 주면 사용자는 고장으로
     // 여기고, 검사 중이라 잠시 뒤면 되는 경우와 영영 안 되는 경우를 구분하지
     // 못한다. 상태 코드는 사유별로 나눈다 — 휴지통은 사용자가 되돌릴 수 있는
-    // 상태(409)이고, 연결이 끊긴 것과 검사 차단은 그렇지 않다(403).
-    const status = decision.reason === "DELETED" ? 409 : 403;
+    // 상태(409)이고, 연결이 끊긴 것과 검사 차단은 그렇지 않다(403). 견적서의
+    // 휴지통도 되돌릴 수 있는 상태다(견적서를 되살리면 파일도 함께 돌아온다).
+    const status = decision.reason === "DELETED" || decision.reason === "QUOTE_IN_TRASH" ? 409 : 403;
     return fail(status, decision.reason, decision.message);
   }
 
@@ -267,6 +277,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         repairCaseId: attachment.repairCaseId,
         productModelId: attachment.productModelId,
         improvementRequestId: attachment.improvementRequestId,
+        quoteId: attachment.quoteId,
       },
       originalFileName: attachment.originalFileName,
       fileSize: attachment.fileSize,

@@ -107,6 +107,7 @@ src/lib/db/mutations/quote-trash.integration.test.ts
 src/lib/db/mutations/domestic-order-sheet-settings.integration.test.ts
 src/lib/db/mutations/improvement-requests.integration.test.ts
 src/lib/db/mutations/improvement-request-attachments.integration.test.ts
+src/lib/db/mutations/quote-attachments.integration.test.ts
 src/lib/db/queries/user-deletion-impact.integration.test.ts
 src/lib/db/mutations/user-deletion.integration.test.ts
 src/lib/server/services/kyosan-intake-import.integration.test.ts

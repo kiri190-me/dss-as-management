@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { db } from "../client";
-import { attachments } from "../schema";
+import { attachments, quotes } from "../schema";
 import type { MalwareScanStatus } from "@/lib/domain/attachment-category";
 
 /**
@@ -22,6 +22,12 @@ import type { MalwareScanStatus } from "@/lib/domain/attachment-category";
  * 목록 조회는 화면에 이름을 보여야 해서 users를 조인하지만, 다운로드는 파일을
  * 내보내는 것뿐이라 이름이 필요 없다. 감사 로그에 남기는 것은 **받아 가는
  * 사람**이고 그 값은 세션에서 온다.
+ *
+ * ── 견적서 표 하나만 붙인다 (2026-09-15 Q2) ─────────────────────────────
+ * 넷째 주인(견적서)의 파일은 **견적서가 휴지통에 있으면** 내려받지 못한다(판정 파일의
+ * QUOTE_IN_TRASH). 그 사실은 첨부 행에 없고 견적서 행에 있으므로 quotes 를 왼쪽
+ * 조인해 is_deleted 를 **값으로** 읽는다(첨부의 is_deleted 와 같은 규율). 다른 주인의
+ * 표는 붙이지 않는다 — 그 주인들의 휴지통은 예전처럼 내려받기를 막지 않는다.
  * ============================================================================
  */
 
@@ -51,6 +57,18 @@ export type AttachmentForDownload = {
    * 글 한 건에 대한 판정(접수 상태인 자기 글 또는 관리 권한)을 더한다.
    */
   improvementRequestId: string | null;
+  /**
+   * 견적서 주인(2026-09-15 Q2). 앞의 세 칸과 **동시에 채워지지 않는다**
+   * (attachments_quote_owner_alone CHECK). 차 있으면 라우트는 quotes 를 묻는다 —
+   * 보기는 READ, 미리보기 붙이기·지우기·되살리기는 WRITE.
+   */
+  quoteId: string | null;
+  /**
+   * 주인인 견적서가 휴지통에 있는가(견적서 행의 is_deleted). 견적서 주인이 아니면
+   * false — 조인이 비어 NULL 이 오는 것을 false 로 접는다. 판정 함수가 QUOTE_IN_TRASH 로
+   * 막는 근거다(파일 헤더의 '견적서 표 하나만 붙인다').
+   */
+  quoteInTrash: boolean;
   originalFileName: string;
   /** 저장 루트 기준 상대 경로. 라우트가 resolveAttachmentAbsolutePath로 반드시 다시 검증한다. */
   storedPath: string;
@@ -75,6 +93,9 @@ export async function getAttachmentForDownload(
       repairCaseId: attachments.repairCaseId,
       productModelId: attachments.productModelId,
       improvementRequestId: attachments.improvementRequestId,
+      quoteId: attachments.quoteId,
+      // 견적서 주인이 아니면 조인이 비어 NULL 이다 — 아래에서 false 로 접는다.
+      quoteIsDeleted: quotes.isDeleted,
       originalFileName: attachments.originalFileName,
       storedPath: attachments.storedPath,
       mimeType: attachments.mimeType,
@@ -85,8 +106,11 @@ export async function getAttachmentForDownload(
       isDeleted: attachments.isDeleted,
     })
     .from(attachments)
+    .leftJoin(quotes, eq(quotes.id, attachments.quoteId))
     .where(eq(attachments.id, attachmentId))
     .limit(1);
 
-  return row ?? null;
+  if (!row) return null;
+  const { quoteIsDeleted, ...rest } = row;
+  return { ...rest, quoteInTrash: quoteIsDeleted === true };
 }

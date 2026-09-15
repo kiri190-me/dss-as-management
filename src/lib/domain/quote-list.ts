@@ -71,6 +71,54 @@ export function sumQuoteSupplyAmount(
   return itemsTotal + toAmount(workCost);
 }
 
+/**
+ * ============================================================================
+ * 견적서 한 장의 공급가액 — **서버가 금액을 셈하는 단 한 곳** (2026-09-15 Q2)
+ * ============================================================================
+ * 엑셀 전용 견적서(schema/quotes.ts 의 is_excel_only)는 품목이 없고 공급가액을 사람이
+ * 손으로 적는다(manual_supply_amount). 그래서 「부품 줄 합 + 작업비」만으로는 그 장의
+ * 금액이 나오지 않는다 — 그대로 두면 엑셀 전용 견적서가 목록에서 ₩0 으로 보이고, 그
+ * 장이 연결된 내자 정리 줄에서는 "0.00" 이 손으로 적은 금액을 가린다.
+ *
+ * 서버 쪽에서 공급가액을 내는 곳 — 견적서 목록 · 수리 건의 견적서 탭(둘은 한 몸통,
+ * queries/quotes.ts) · 내자 정리의 연결 금액(queries/domestic-orders.ts) · PURGE
+ * 스냅숏(quote-trash.ts · master-data-purge.ts) — 이 모두 이 함수를 부른다. 한 곳이라도
+ * sumQuoteSupplyAmount 를 직접 부르면 그 화면만 엑셀 전용 장을 ₩0 으로 보인다.
+ * (sumQuoteSupplyAmount 는 일반 견적서의 셈법으로 남는다 — 편집 화면이 입력 중인 값으로
+ * 합계를 보일 때 쓴다.)
+ *
+ * ── null 은 「금액을 알 수 없다」이다 ─────────────────────────────────────
+ * 엑셀 전용인데 수기 금액이 비어 있으면 **null** 을 돌려준다 — 0 이 아니다. 0 은 「무상
+ * 견적」이라는 실제 값이고(CHECK 가 허용한다), 비어 있는 값을 0 으로 접으면 화면이
+ * 「₩0 견적서」라고 단정한다. 부르는 쪽이 null 을 「—」로 그린다. 검증이 엑셀 전용 장의
+ * 금액을 필수로 받으므로(validation/quote-input.ts) 정상 경로로는 생기지 않는다 — 검증을
+ * 거치지 않은 행(손으로 넣은 SQL)에 대한 대비다.
+ *
+ * 엑셀 전용 장의 품목 · 작업비는 **보지 않는다.** 검증이 엑셀 전용 장의 줄을 비워 두게
+ * 막지만(작업비 칸은 막지 않는다), 남아 있더라도 이 장의 금액은 사람이 적은 공급가액이다.
+ * ============================================================================
+ */
+export function quoteSupplyAmountOf(quote: {
+  isExcelOnly: boolean;
+  manualSupplyAmount: string | null;
+  items: readonly { quantity: number; unitPrice: string }[];
+  workCost: string;
+}): number | null {
+  if (quote.isExcelOnly) {
+    if (quote.manualSupplyAmount === null || quote.manualSupplyAmount.trim() === "") return null;
+    return toAmount(quote.manualSupplyAmount);
+  }
+  return sumQuoteSupplyAmount(quote.items, quote.workCost);
+}
+
+/**
+ * 감사 스냅숏 · 내자 정리 금액 칸과 같은 모양(numeric 문자열, 소수 둘째 자리)으로. 금액을
+ * 알 수 없으면(위 null) null 이다 — "0.00" 으로 접지 않는다.
+ */
+export function formatQuoteSupplyAmount(amount: number | null): string | null {
+  return amount === null ? null : amount.toFixed(2);
+}
+
 /** 빈 값·못 읽는 값은 0 으로 본다. 목록의 합계가 통째로 안 그려지는 것보다 낫다. */
 export function toAmount(value: string | null | undefined): number {
   if (value === null || value === undefined || value.trim() === "") return 0;

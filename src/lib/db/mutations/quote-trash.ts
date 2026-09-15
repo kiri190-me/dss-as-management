@@ -4,7 +4,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import { domesticOrders, quoteItems, quoteRepairTasks, quoteWorkScopeLines, quotes } from "../schema";
 import { insertAuditLog } from "./audit-logs";
-import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import {
+  listAttachmentIdsOfQuote,
+  listLiveAttachmentsOfQuote,
+  restoreAttachmentsTrashedWithQuote,
+  trashAttachmentsOfDeletedQuote,
+} from "./attachment-trash";
+import { formatQuoteSupplyAmount, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 
 /**
  * ============================================================================
@@ -53,8 +59,8 @@ import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
  * 생기지 않는다 — 번호는 휴지통에 넣는 순간 이미 풀려 있었다.
  *
  * ── 딸린 것 ─────────────────────────────────────────────────────────────
- * quotes 를 가리키는 표는 넷이다(schema/quotes.ts · repair-labor.ts ·
- * domestic-orders.ts):
+ * quotes 를 가리키는 표는 다섯이다(schema/quotes.ts · repair-labor.ts ·
+ * domestic-orders.ts · attachments.ts):
  *   - quote_items · quote_work_scope_lines · quote_repair_tasks — ON DELETE
  *     CASCADE. 소프트 삭제는 행을 지우지 않으므로 CASCADE 가 돌지 않고, 되살리면
  *     그대로 돌아온다. 완전 삭제 때는 DB 가 함께 지운다.
@@ -63,17 +69,32 @@ import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
  *     줄의 조회는 휴지통의 견적서를 이미 빼고 손으로 적은 번호·금액을 보여 주므로
  *     (queries/domestic-orders.ts 의 linkedQuotes 조인), 목록에 보이는 값은 완전
  *     삭제 전후가 같다. 어느 줄의 연결이 풀렸는지는 감사 로그에 id 로 남긴다.
+ *   - attachments.quote_id(2026-09-15 Q2 — 결재 PDF · 수기 엑셀) — ON DELETE SET NULL.
+ *     아래 '견적서의 첨부' 항목.
  * 자식을 여기서 먼저 지우지 않는 것은 일부러다 — 스키마가 이미 약속한 일을 코드가
  * 한 번 더 하면, 둘 중 하나가 바뀌었을 때 어느 쪽이 실제로 지웠는지 말할 수
  * 없게 된다(domestic-orders-trash.ts 와 같은 판단).
+ *
+ * ── 견적서의 첨부 (2026-09-15 Q2) ───────────────────────────────────────
+ * 견적서에 붙은 결재 PDF · 수기 엑셀은 견적서를 따라 휴지통을 오간다 — 모두 **같은
+ * 트랜잭션**에서, 견적서 행을 잠근 뒤에(첨부 올리기 · 지우기 · 되살리기도 같은 행을
+ * 잠근다 — attachments.ts 의 guardQuoteAttachmentChange).
+ *   - 휴지통으로 보냄: 살아 있는 첨부가 첨부 휴지통으로 간다(고정 사유 · 견적서와 같은
+ *     삭제 시각 · 파일마다 FILE_DELETE). 견적서의 SOFT_DELETE 감사에 그 id 목록.
+ *   - 되살리기: **견적서와 함께 간 것만** 돌아온다(사유 + 삭제 시각으로 가른다 —
+ *     attachment-trash.ts 의 restoreAttachmentsTrashedWithQuote). 칸 교체로 밀려난 옛
+ *     파일은 휴지통에 남는다. 견적서의 RESTORE 감사에 그 id 목록.
+ *   - 완전 삭제: 첨부 행과 디스크 실물은 남고 FK 가 연결만 푼다(다른 주인과 같은 기존
+ *     동작). 어느 파일의 연결이 풀렸는지 PURGE 스냅숏에 id 로 남긴다.
  *
  * ── 감사 로그에 자유 입력 칸은 넣지 않는다 ──────────────────────────────
  * subject(품명) · fault_description_text(신고증상) · validity · delivery ·
  * payment 는 사람이 자유롭게 적는 칸이라 고객사 사정이 섞일 수 있다(schema/
  * quotes.ts 의 PII 항목). customer_name_text 도 사람이 적어 넣는 글자라 담지
  * 않고 customer_id 로 가리킨다. 부품 줄·작업 내역·수리 작업의 글자도 담지 않고
- * **몇 줄이었는지와 합계 금액**만 남긴다. 스냅숏은 이 장이 무엇이었는지 알아볼
- * 번호와 금액 사실만 담는다 — 아래 PURGE_SNAPSHOT_COLUMNS.
+ * **몇 줄이었는지와 합계 금액**만 남긴다. 첨부도 파일 이름 · 경로는 담지 않고 id 만
+ * 남긴다. 스냅숏은 이 장이 무엇이었는지 알아볼 번호와 금액 사실만 담는다 — 아래
+ * PURGE_SNAPSHOT_COLUMNS.
  * ============================================================================
  */
 
@@ -101,6 +122,8 @@ const NOT_IN_TRASH_MESSAGE =
  *
  * 형식·L/N·S/N·인수번호는 장비를 알아보는 번호라 넣는다(내자 정리 휴지통과 같은
  * 판단). 작업비의 근거(장비 종류·기본 작업비·통전 차감)도 금액 사실이라 넣는다.
+ * 엑셀 전용 여부와 손으로 적은 공급가액(2026-09-15 Q2)도 금액 사실이라 넣는다 —
+ * 엑셀 전용 장의 공급가액은 품목이 아니라 그 칸에서 나온다(supplyAmount 와 함께 읽는다).
  */
 const PURGE_SNAPSHOT_COLUMNS = {
   id: quotes.id,
@@ -119,6 +142,8 @@ const PURGE_SNAPSHOT_COLUMNS = {
   laborBaseCost: quotes.laborBaseCost,
   powerTestExcluded: quotes.powerTestExcluded,
   laborPowerTestDeduction: quotes.laborPowerTestDeduction,
+  isExcelOnly: quotes.isExcelOnly,
+  manualSupplyAmount: quotes.manualSupplyAmount,
   createdAt: quotes.createdAt,
   isDeleted: quotes.isDeleted,
   deletedAt: quotes.deletedAt,
@@ -130,38 +155,54 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * 지우기 직전에 딸린 것을 센다 — 무엇이 함께 사라지는지(자식 셋)와 어느 내자
- * 정리 줄의 연결이 풀리는지를 감사 로그에 남기기 위해서다.
+ * 정리 줄 · 첨부의 연결이 풀리는지를 감사 로그에 남기기 위해서다.
  *
  * 부르는 쪽이 이미 견적서 행을 FOR UPDATE 로 쥐고 있어서, 여기서 읽은 내자 정리
  * 줄 목록은 지울 때까지 늘지 않는다 — 새로 이 견적서를 가리키려는 쓰기는 FK
- * 검사가 그 행에 거는 KEY SHARE 잠금에서 기다리게 된다.
+ * 검사가 그 행에 거는 KEY SHARE 잠금에서 기다리게 된다. 첨부도 같다(올리기가 같은
+ * 행을 먼저 잠근다).
  */
-async function readPurgeFacts(tx: Tx, quoteId: string, workCost: string) {
+async function readPurgeFacts(
+  tx: Tx,
+  quote: { id: string; workCost: string; isExcelOnly: boolean; manualSupplyAmount: string | null }
+) {
   const items = await tx
     .select({ quantity: quoteItems.quantity, unitPrice: quoteItems.unitPrice })
     .from(quoteItems)
-    .where(eq(quoteItems.quoteId, quoteId));
+    .where(eq(quoteItems.quoteId, quote.id));
   const [scopeLines] = await tx
     .select({ total: sql<number>`count(*)::int` })
     .from(quoteWorkScopeLines)
-    .where(eq(quoteWorkScopeLines.quoteId, quoteId));
+    .where(eq(quoteWorkScopeLines.quoteId, quote.id));
   const [repairTasks] = await tx
     .select({ total: sql<number>`count(*)::int` })
     .from(quoteRepairTasks)
-    .where(eq(quoteRepairTasks.quoteId, quoteId));
+    .where(eq(quoteRepairTasks.quoteId, quote.id));
   // 휴지통의 내자 줄도 센다 — 그 줄도 연결이 풀리기는 마찬가지다.
   const linkedOrders = await tx
     .select({ id: domesticOrders.id })
     .from(domesticOrders)
-    .where(eq(domesticOrders.quoteId, quoteId));
+    .where(eq(domesticOrders.quoteId, quote.id));
+  // 휴지통의 첨부도 센다 — 칸 교체로 밀려난 옛 파일도 연결이 풀리기는 마찬가지다.
+  const attachmentIds = await listAttachmentIdsOfQuote(tx, quote.id);
 
   return {
-    // 목록·내자 정리가 쓰는 것과 같은 셈법(domain/quote-list.ts), 같은 모양(소수 둘째 자리).
-    supplyAmount: sumQuoteSupplyAmount(items, workCost).toFixed(2),
+    // 목록·내자 정리가 쓰는 것과 같은 셈법(domain/quote-list.ts 의 quoteSupplyAmountOf),
+    // 같은 모양(소수 둘째 자리). 엑셀 전용 장은 손으로 적은 공급가액이고, 그 값이 비어
+    // 있으면 null 이다("0.00" 으로 접지 않는다).
+    supplyAmount: formatQuoteSupplyAmount(
+      quoteSupplyAmountOf({
+        isExcelOnly: quote.isExcelOnly,
+        manualSupplyAmount: quote.manualSupplyAmount,
+        items,
+        workCost: quote.workCost,
+      })
+    ),
     purgedItemCount: items.length,
     purgedWorkScopeLineCount: scopeLines.total,
     purgedRepairTaskCount: repairTasks.total,
     unlinkedDomesticOrderIds: linkedOrders.map((order) => order.id),
+    unlinkedAttachmentIds: attachmentIds,
   };
 }
 
@@ -171,7 +212,8 @@ function numberTakenMessage(quoteNumber: string): string {
 
 /**
  * 휴지통으로 보낸다. 목록에서 사라지고, 주소로도 열 수 없고, 견적서 파일도
- * 나오지 않는다(라우트와 조회가 모두 is_deleted 로 좁힌다).
+ * 나오지 않는다(라우트와 조회가 모두 is_deleted 로 좁힌다). 붙어 있던 결재 PDF ·
+ * 수기 엑셀도 같은 트랜잭션에서 첨부 휴지통으로 간다(파일 헤더의 '견적서의 첨부').
  */
 export async function softDeleteQuote(params: {
   quoteId: string;
@@ -198,11 +240,15 @@ export async function softDeleteQuote(params: {
       return { ok: false, code: "CONFLICT", message: CONFLICT_MESSAGE };
     }
 
+    // 견적서와 그 첨부에 **같은 값 하나**를 적는다 — 되살릴 때 「함께 간 파일」을 가르는
+    // 열쇠다(attachment-trash.ts 의 QUOTE_DELETED_ATTACHMENT_REASON 주석).
+    const deletedAt = new Date();
+
     const [updated] = await tx
       .update(quotes)
       .set({
         isDeleted: true,
-        deletedAt: new Date(),
+        deletedAt,
         deletedBy: params.actorUserId,
         deleteReason: params.reason,
         version: sql`${quotes.version} + 1`,
@@ -212,13 +258,22 @@ export async function softDeleteQuote(params: {
       .where(eq(quotes.id, params.quoteId))
       .returning({ id: quotes.id, version: quotes.version });
 
+    const liveAttachments = await listLiveAttachmentsOfQuote(tx, current.id);
+    const trashedAttachmentIds = await trashAttachmentsOfDeletedQuote(tx, {
+      quoteId: current.id,
+      quoteNumber: current.quoteNumber,
+      attachments: liveAttachments,
+      actorUserId: params.actorUserId,
+      deletedAt,
+    });
+
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
       actionType: "SOFT_DELETE",
       targetEntity: "quotes",
       targetRecordId: current.id,
       previousValue: { quoteNumber: current.quoteNumber, quoteDate: current.quoteDate, isDeleted: false },
-      newValue: { isDeleted: true, deleteReason: params.reason },
+      newValue: { isDeleted: true, deleteReason: params.reason, trashedAttachmentIds },
     });
 
     return { ok: true, id: updated.id, version: updated.version };
@@ -227,7 +282,8 @@ export async function softDeleteQuote(params: {
 
 /**
  * 휴지통에서 되살린다. 발행번호가 그 사이에 다른 견적서에 쓰였으면 거절한다 —
- * 위 '번호는 다시 쓸 수 있다' 항목 참조.
+ * 위 '번호는 다시 쓸 수 있다' 항목 참조. **견적서와 함께 휴지통에 간 첨부만** 같은
+ * 트랜잭션에서 함께 돌아온다(파일 헤더의 '견적서의 첨부').
  */
 export async function restoreQuote(params: {
   quoteId: string;
@@ -236,7 +292,13 @@ export async function restoreQuote(params: {
 }): Promise<QuoteTrashResult> {
   return db.transaction(async (tx): Promise<QuoteTrashResult> => {
     const [current] = await tx
-      .select({ id: quotes.id, version: quotes.version, quoteNumber: quotes.quoteNumber })
+      .select({
+        id: quotes.id,
+        version: quotes.version,
+        quoteNumber: quotes.quoteNumber,
+        // 함께 간 첨부를 가르는 열쇠 — 아래에서 비우기 **전에** 읽는다.
+        deletedAt: quotes.deletedAt,
+      })
       .from(quotes)
       .where(and(eq(quotes.id, params.quoteId), eq(quotes.isDeleted, true)))
       .for("update");
@@ -271,13 +333,20 @@ export async function restoreQuote(params: {
       .where(eq(quotes.id, params.quoteId))
       .returning({ id: quotes.id, version: quotes.version });
 
+    const restoredAttachmentIds = await restoreAttachmentsTrashedWithQuote(tx, {
+      quoteId: current.id,
+      quoteNumber: current.quoteNumber,
+      quoteDeletedAt: current.deletedAt,
+      actorUserId: params.actorUserId,
+    });
+
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
       actionType: "RESTORE",
       targetEntity: "quotes",
       targetRecordId: current.id,
       previousValue: { isDeleted: true },
-      newValue: { quoteNumber: current.quoteNumber, isDeleted: false },
+      newValue: { quoteNumber: current.quoteNumber, isDeleted: false, restoredAttachmentIds },
     });
 
     return { ok: true, id: updated.id, version: updated.version };
@@ -289,7 +358,7 @@ export async function restoreQuote(params: {
  * 필수다(다른 휴지통의 완전 삭제와 같은 규칙 — 서버 액션이 빈 사유를 막는다).
  *
  * 휴지통에 있는 장만 받는다(위 '활성 견적서를 바로 지우는 길은 없다'). 부품 줄 ·
- * 작업 내역 · 고른 수리 작업은 FK CASCADE 로, 내자 정리 줄의 연결은 SET NULL 로
+ * 작업 내역 · 고른 수리 작업은 FK CASCADE 로, 내자 정리 줄과 첨부의 연결은 SET NULL 로
  * DB 가 처리한다(위 '딸린 것').
  */
 export async function permanentlyDeleteQuote(params: {
@@ -311,7 +380,7 @@ export async function permanentlyDeleteQuote(params: {
       return { ok: false, code: "CONFLICT", message: CONFLICT_MESSAGE };
     }
 
-    const facts = await readPurgeFacts(tx, params.quoteId, current.workCost);
+    const facts = await readPurgeFacts(tx, current);
 
     const deleted = await tx
       .delete(quotes)

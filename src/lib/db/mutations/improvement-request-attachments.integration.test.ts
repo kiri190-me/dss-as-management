@@ -469,11 +469,22 @@ describe("내려받기 — 조회 · 판정 · 보기 권한", () => {
 
     // 라우트가 hasPermission 으로 채우는 그 모양을 그대로 넘긴다.
     assert.equal(
-      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: false, PRODUCT_MODEL: false, IMPROVEMENT_REQUEST: true }),
+      isAttachmentOwnerAccessAllowed(found, {
+        REPAIR_CASE: false,
+        PRODUCT_MODEL: false,
+        IMPROVEMENT_REQUEST: true,
+        QUOTE: false,
+      }),
       true
     );
     assert.equal(
-      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: true, PRODUCT_MODEL: true, IMPROVEMENT_REQUEST: false }),
+      isAttachmentOwnerAccessAllowed(found, {
+        REPAIR_CASE: true,
+        PRODUCT_MODEL: true,
+        IMPROVEMENT_REQUEST: false,
+        // 넷째 주인(2026-09-15 Q2)의 권한으로도 열리지 않는다.
+        QUOTE: true,
+      }),
       false,
       "🔴 접수 건 파일 권한으로 스크린샷이 열리면 안 된다"
     );
@@ -491,6 +502,7 @@ describe("내려받기 — 조회 · 판정 · 보기 권한", () => {
         repairCaseId: found.repairCaseId,
         productModelId: found.productModelId,
         improvementRequestId: found.improvementRequestId,
+        quoteId: found.quoteId,
       },
       originalFileName: found.originalFileName,
       fileSize: found.fileSize,

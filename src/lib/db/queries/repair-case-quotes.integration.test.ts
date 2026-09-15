@@ -92,6 +92,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     investigationExcluded: false,
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
+    isExcelOnly: false,
+    manualSupplyAmount: null,
     repairTasks: [],
     workScopeLines: [],
     items: [],

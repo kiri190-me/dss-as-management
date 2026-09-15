@@ -299,6 +299,7 @@ async function recordDownloadOf(attachmentId: string, actorUserId: string) {
       repairCaseId: attachment!.repairCaseId,
       productModelId: attachment!.productModelId,
       improvementRequestId: attachment!.improvementRequestId,
+      quoteId: attachment!.quoteId,
     },
     originalFileName: attachment!.originalFileName,
     fileSize: attachment!.fileSize,

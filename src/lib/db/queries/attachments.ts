@@ -3,8 +3,14 @@ import "server-only";
 import { and, count, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { attachments, improvementRequests, productModels, repairCases, users } from "../schema";
-import type { AttachmentCategory, MalwareScanStatus } from "@/lib/domain/attachment-category";
+import { attachments, improvementRequests, productModels, quotes, repairCases, users } from "../schema";
+import {
+  QUOTE_ATTACHMENT_SLOT_CATEGORIES,
+  liveQuoteAttachmentInSlot,
+  type AttachmentCategory,
+  type MalwareScanStatus,
+  type QuoteAttachmentSlotCategory,
+} from "@/lib/domain/attachment-category";
 import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request";
 
 /**
@@ -350,4 +356,118 @@ export async function getImprovementRequestAttachmentTarget(
     .where(and(eq(attachments.improvementRequestId, row.id), eq(attachments.isDeleted, false)));
 
   return { ...row, liveAttachmentCount: counted?.value ?? 0 };
+}
+
+/**
+ * ============================================================================
+ * 견적서의 첨부 — 결재 PDF 칸 · 수기 엑셀 칸 (2026-09-15 Q2)
+ * ============================================================================
+ * 넷째 주인의 조회 셋. 앞의 주인들과 같은 규율이다 — 살아 있는 첨부는
+ * `WHERE quote_id = ? AND is_deleted = false` 그대로 적어 부분 인덱스
+ * (attachments_quote_id_not_deleted_idx)를 탄다.
+ * ============================================================================
+ */
+
+/**
+ * 올리기가 향할 견적서 — 올리기 통로가 **본문을 받기 전에** 부른다. 빠른 거절용일 뿐이다:
+ * 확정 판정은 행을 넣는 mutation(createAttachmentRecord)이 견적서 행을 잠근 트랜잭션에서
+ * 다시 한다(20MB 를 받는 동안 견적서가 휴지통으로 갈 수 있다).
+ *
+ * 휴지통의 견적서도 **찾는다**(isDeleted 를 값으로 준다) — 통로가 「없음」(404)과
+ * 「휴지통이라 못 붙임」(409)을 갈라 답하게 하려는 것이다. 개선 요청과 달리 견적서는
+ * 휴지통이 있는 표다.
+ */
+export type QuoteAttachmentUploadTarget = {
+  id: string;
+  isDeleted: boolean;
+};
+
+export async function getQuoteAttachmentUploadTarget(quoteId: string): Promise<QuoteAttachmentUploadTarget | null> {
+  if (!UUID_PATTERN.test(quoteId)) return null;
+
+  const [row] = await db
+    .select({ id: quotes.id, isDeleted: quotes.isDeleted })
+    .from(quotes)
+    .where(eq(quotes.id, quoteId))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * 견적서에 지금 붙어 있는 파일 전부(휴지통 것은 빼고). 견적서 받기(엑셀 전용 견적서의
+ * 붙인 엑셀)와 아래 칸 조회가 쓴다. 저장 경로 · 검사 상태까지 싣는다 — 받기 통로가
+ * 그 파일을 내보내며 판정(decideAttachmentDownload)과 경로 검증을 다시 거친다.
+ * 이 조회의 결과를 화면으로 그대로 넘기지 않는다(내부 경로가 들어 있다) — 화면은
+ * 아래 listQuoteAttachmentSlots 를 쓴다.
+ */
+export type LiveQuoteAttachment = {
+  id: string;
+  category: AttachmentCategory;
+  isDeleted: boolean;
+  originalFileName: string;
+  storedPath: string;
+  mimeType: string;
+  fileSize: number;
+  malwareScanStatus: MalwareScanStatus;
+  uploadedAt: Date;
+  uploadedByName: string;
+};
+
+export async function listLiveQuoteAttachments(quoteId: string): Promise<LiveQuoteAttachment[]> {
+  if (!UUID_PATTERN.test(quoteId)) return [];
+
+  return db
+    .select({
+      id: attachments.id,
+      category: attachments.category,
+      isDeleted: attachments.isDeleted,
+      originalFileName: attachments.originalFileName,
+      storedPath: attachments.storedPath,
+      mimeType: attachments.mimeType,
+      fileSize: attachments.fileSize,
+      malwareScanStatus: attachments.malwareScanStatus,
+      uploadedAt: attachments.uploadedAt,
+      uploadedByName: users.name,
+    })
+    .from(attachments)
+    .innerJoin(users, eq(users.id, attachments.uploadedBy))
+    .where(and(eq(attachments.quoteId, quoteId), eq(attachments.isDeleted, false)))
+    .orderBy(desc(attachments.uploadedAt));
+}
+
+/** 견적서 수정 화면의 한 칸에 보일 파일. 내부 경로는 싣지 않는다. */
+export type QuoteAttachmentSlotFile = {
+  id: string;
+  originalFileName: string;
+  fileSize: number;
+  /** 직렬화해서 클라이언트 컴포넌트로 넘기기 위해 ISO 문자열로 내린다. */
+  uploadedAt: string;
+  uploadedByName: string;
+};
+
+/** 칸마다 지금 붙어 있는 파일 — 비어 있으면 null. 키가 곧 칸이다(QUOTE_ATTACHMENT_SLOT_CATEGORIES). */
+export type QuoteAttachmentSlots = Record<QuoteAttachmentSlotCategory, QuoteAttachmentSlotFile | null>;
+
+/**
+ * 견적서 수정 화면의 첨부 칸 — 칸마다 파일 하나(id · 원래 이름 · 크기 · 올린 때 · 올린
+ * 사람). 칸마다 하나라는 규칙은 올리기가 지키고, 규칙을 거치지 않은 행이 겹쳐 있으면
+ * 가장 나중에 올린 것을 보인다(liveQuoteAttachmentInSlot — 받기 통로와 같은 고르기).
+ */
+export async function listQuoteAttachmentSlots(quoteId: string): Promise<QuoteAttachmentSlots> {
+  const live = await listLiveQuoteAttachments(quoteId);
+  const slots = {} as QuoteAttachmentSlots;
+  for (const slot of QUOTE_ATTACHMENT_SLOT_CATEGORIES) {
+    const picked = liveQuoteAttachmentInSlot(live, slot);
+    slots[slot] = picked
+      ? {
+          id: picked.id,
+          originalFileName: picked.originalFileName,
+          fileSize: picked.fileSize,
+          uploadedAt: picked.uploadedAt.toISOString(),
+          uploadedByName: picked.uploadedByName,
+        }
+      : null;
+  }
+  return slots;
 }

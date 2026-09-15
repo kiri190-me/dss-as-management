@@ -140,6 +140,7 @@ src/lib/domain/attachment-allowlist.test.ts
 src/lib/domain/attachment-path.test.ts
 src/lib/domain/attachment-download-policy.test.ts
 src/app/api/attachments/*/download/route.test.ts
+src/app/api/quotes/*/xlsx/download-source.test.ts
 src/lib/domain/image-shrink.test.ts
 src/lib/domain/zip-entry-names.test.ts
 src/lib/domain/image-header.test.ts

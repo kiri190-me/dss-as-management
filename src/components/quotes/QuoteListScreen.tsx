@@ -53,7 +53,9 @@ import { quoteKindLabels } from "@/lib/validation/quote-input";
 
 const AMOUNT_FORMAT = new Intl.NumberFormat("ko-KR");
 
-function formatAmount(value: number): string {
+// null 은 금액을 알 수 없는 엑셀 전용 견적서다(queries/quotes.ts 의 supplyAmount — 2026-09-15 Q2).
+function formatAmount(value: number | null): string {
+  if (value === null) return "—";
   return `₩${AMOUNT_FORMAT.format(Math.round(value))}`;
 }
 

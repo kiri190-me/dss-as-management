@@ -13,7 +13,7 @@ import {
   repairCases,
   users,
 } from "../schema";
-import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { formatQuoteSupplyAmount, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import {
   resolveDomesticOrderCustomerRowColor,
   resolveDomesticOrderDeliveredDate,
@@ -546,16 +546,28 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
 /**
  * 연결된 견적서들의 공급가(부품 줄 합 + 작업비)를 **질의 한 번으로** 구한다.
  *
- * 견적서 목록이 쓰는 것과 같은 셈법이라(queries/quotes.ts 의 sumQuoteSupplyAmount)
+ * 견적서 목록이 쓰는 것과 같은 셈법이라(domain/quote-list.ts 의 quoteSupplyAmountOf)
  * 두 화면의 금액이 갈라지지 않는다. 금액은 numeric 이라 문자열로 다루고, 마지막에
  * 소수 두 자리로 고정해 이 표의 다른 금액과 같은 모양으로 만든다.
+ *
+ * ── 엑셀 전용 견적서 (2026-09-15 Q2) ─────────────────────────────────────
+ * 품목이 없는 장이라 예전 셈법으로는 작업비만(보통 "0.00") 나와 **손으로 적은 금액을
+ * 가렸다.** 이제 그 장의 공급가는 사람이 손으로 적은 공급가액이다. 그 값이 비어 있는
+ * 옛 행(정상 경로로는 생기지 않는다 — 검증이 필수로 받는다)은 금액을 **싣지 않는다**
+ * (지도에 없음) — 그러면 매퍼가 휴지통 견적서와 같이 이 줄에 손으로 적은 금액을
+ * 그린다. 모르는 금액으로 손 값을 덮지 않는다.
  */
 async function loadQuoteAmounts(quoteIds: string[]): Promise<Map<string, string>> {
   const amounts = new Map<string, string>();
   if (quoteIds.length === 0) return amounts;
 
   const quoteRows = await db
-    .select({ id: quotes.id, workCost: quotes.workCost })
+    .select({
+      id: quotes.id,
+      workCost: quotes.workCost,
+      isExcelOnly: quotes.isExcelOnly,
+      manualSupplyAmount: quotes.manualSupplyAmount,
+    })
     .from(quotes)
     .where(and(inArray(quotes.id, quoteIds), eq(quotes.isDeleted, false)));
   if (quoteRows.length === 0) return amounts;
@@ -577,8 +589,16 @@ async function loadQuoteAmounts(quoteIds: string[]): Promise<Map<string, string>
   }
 
   for (const quote of quoteRows) {
-    const total = sumQuoteSupplyAmount(itemsByQuoteId.get(quote.id) ?? [], quote.workCost);
-    amounts.set(quote.id, total.toFixed(2));
+    const total = formatQuoteSupplyAmount(
+      quoteSupplyAmountOf({
+        isExcelOnly: quote.isExcelOnly,
+        manualSupplyAmount: quote.manualSupplyAmount,
+        items: itemsByQuoteId.get(quote.id) ?? [],
+        workCost: quote.workCost,
+      })
+    );
+    // 금액을 알 수 없는 엑셀 전용 장은 싣지 않는다 — 위 머리말의 '엑셀 전용 견적서'.
+    if (total !== null) amounts.set(quote.id, total);
   }
   return amounts;
 }

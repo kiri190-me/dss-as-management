@@ -3,6 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, gt, inArray, type SQL } from "drizzle-orm";
 import { db } from "../client";
 import {
+  attachments,
   customers,
   inventoryPartRequestItems,
   inventoryPartRequests,
@@ -19,7 +20,7 @@ import {
   quotes,
   repairCases,
 } from "../schema";
-import { buildQuoteSummaryLine, sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { buildQuoteSummaryLine, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { QuoteKind, QuoteWorkScopeSection } from "@/lib/validation/quote-input";
@@ -66,9 +67,25 @@ export type QuoteListItem = {
   intakeNumber: string | null;
   /** 목록 한 줄(quote-list.ts). 서버에서 만들어 내려보낸다 — 검색이 붙어도 같은 문자열을 본다. */
   summaryLine: string;
-  /** 공급가(부가세 별도). 부품 줄 합 + 작업비. */
-  supplyAmount: number;
+  /**
+   * 공급가(부가세 별도). 일반 견적서는 부품 줄 합 + 작업비, **엑셀 전용 견적서는 손으로
+   * 적은 공급가액**이다(domain/quote-list.ts 의 quoteSupplyAmountOf — 2026-09-15 Q2).
+   *
+   * `null` 은 「금액을 알 수 없다」— 엑셀 전용인데 공급가액이 비어 있는 장이다(검증이 필수로
+   * 받아 정상 경로로는 생기지 않는다). 화면은 「—」로 그린다. 0 으로 접지 않는다 — 0 은
+   * 「무상 견적」이라는 실제 값이다.
+   */
+  supplyAmount: number | null;
   itemCount: number;
+  /** 엑셀 전용 견적서인가(2026-09-15 Q2) — 품목 없이 손으로 만든 엑셀이 곧 보낸 문서다. */
+  isExcelOnly: boolean;
+  /**
+   * 결재 PDF 칸 · 수기 엑셀 칸에 지금 파일이 붙어 있는가(휴지통 것은 세지 않는다). 엑셀 전용
+   * 견적서인데 엑셀이 없으면 받기가 404 로 끝나므로 화면이 그 사실을 미리 알린다 — 저장
+   * 때는 강제할 수 없다(새 견적서는 저장한 **뒤에** 파일을 올린다).
+   */
+  hasSignedPdf: boolean;
+  hasExcel: boolean;
 };
 
 /**
@@ -125,6 +142,9 @@ async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
       faultDescriptionText: quotes.faultDescriptionText,
       subject: quotes.subject,
       workCost: quotes.workCost,
+      // 엑셀 전용 견적서의 금액은 품목이 아니라 손으로 적은 공급가액이다(2026-09-15 Q2).
+      isExcelOnly: quotes.isExcelOnly,
+      manualSupplyAmount: quotes.manualSupplyAmount,
       repairCaseId: quotes.repairCaseId,
       // 연결이 살아 있으면 진짜 인수번호, 아니면 이 표에 남은 글자.
       linkedIntakeNumber: repairCases.intakeNumber,
@@ -136,11 +156,18 @@ async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
     .where(narrow ? and(eq(quotes.isDeleted, false), narrow) : eq(quotes.isDeleted, false))
     .orderBy(desc(quotes.quoteDate), desc(quotes.createdAt));
 
-  const itemsByQuoteId = await loadItemsByQuoteId(rows.map((row) => row.id));
+  const quoteIds = rows.map((row) => row.id);
+  const itemsByQuoteId = await loadItemsByQuoteId(quoteIds);
+  // 결재 PDF · 엑셀이 붙어 있는가 — 부품 줄과 같이 **질의 한 번으로**(N+1 없음).
+  const attachmentFlagsByQuoteId = await loadAttachmentFlagsByQuoteId(quoteIds);
 
   return rows.map((row) => {
     const items = itemsByQuoteId.get(row.id) ?? [];
+    const attachmentFlags = attachmentFlagsByQuoteId.get(row.id);
     return {
+      isExcelOnly: row.isExcelOnly,
+      hasSignedPdf: attachmentFlags?.hasSignedPdf ?? false,
+      hasExcel: attachmentFlags?.hasExcel ?? false,
       id: row.id,
       kind: row.kind,
       version: row.version,
@@ -162,10 +189,47 @@ async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
         serialNumber: row.serialNumberText,
         faultDescription: row.faultDescriptionText,
       }),
-      supplyAmount: sumQuoteSupplyAmount(items, row.workCost),
+      // 서버가 금액을 셈하는 단 한 곳(domain/quote-list.ts) — 엑셀 전용 장은 손으로 적은
+      // 공급가액이고, 그 값이 비어 있으면 null(화면이 「—」로 그린다).
+      supplyAmount: quoteSupplyAmountOf({
+        isExcelOnly: row.isExcelOnly,
+        manualSupplyAmount: row.manualSupplyAmount,
+        items,
+        workCost: row.workCost,
+      }),
       itemCount: items.length,
     };
   });
+}
+
+type QuoteAttachmentFlags = { hasSignedPdf: boolean; hasExcel: boolean };
+
+/**
+ * 여러 장의 결재 PDF · 엑셀 칸이 차 있는가를 **질의 한 번으로** 걷어 온다(2026-09-15 Q2).
+ * 부품 줄(loadItemsByQuoteId)과 같은 까닭이다 — 장마다 한 번씩 물으면 목록 장수만큼
+ * 왕복이 는다.
+ *
+ * 휴지통의 첨부는 세지 않는다(`is_deleted = false` — 부분 인덱스
+ * attachments_quote_id_not_deleted_idx 를 타는 모양). 칸 교체로 밀려난 옛 파일은 휴지통에
+ * 있으므로 여기서 빠진다.
+ */
+async function loadAttachmentFlagsByQuoteId(quoteIds: string[]): Promise<Map<string, QuoteAttachmentFlags>> {
+  const flags = new Map<string, QuoteAttachmentFlags>();
+  if (quoteIds.length === 0) return flags;
+
+  const rows = await db
+    .select({ quoteId: attachments.quoteId, category: attachments.category })
+    .from(attachments)
+    .where(and(inArray(attachments.quoteId, quoteIds), eq(attachments.isDeleted, false)));
+
+  for (const row of rows) {
+    if (row.quoteId === null) continue;
+    const current = flags.get(row.quoteId) ?? { hasSignedPdf: false, hasExcel: false };
+    if (row.category === "SIGNED_QUOTE_PDF") current.hasSignedPdf = true;
+    if (row.category === "QUOTE_EXCEL") current.hasExcel = true;
+    flags.set(row.quoteId, current);
+  }
+  return flags;
 }
 
 export type DeletedQuoteRow = {
@@ -307,6 +371,13 @@ export type QuoteEditData = {
    * 가르는 것이 이 저장된 결정뿐이다. 옛 견적서는 `false` 다.
    */
   investigationExcluded: boolean;
+  /**
+   * 엑셀 전용 견적서인가 · 손으로 적은 공급가액(2026-09-15 Q2 — schema/quotes.ts). 엑셀
+   * 전용 장은 품목이 없고, 받기(/api/quotes/{id}/xlsx)가 앱 양식 대신 붙인 엑셀을 내려준다.
+   * 옛 견적서는 `false` · `null` 이다.
+   */
+  isExcelOnly: boolean;
+  manualSupplyAmount: string | null;
   repairTasks: {
     /** 카탈로그의 그 줄. 지워졌으면 null 일 수 있다(참고용). */
     taskId: string | null;
@@ -365,6 +436,8 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       powerTestExcluded: quotes.powerTestExcluded,
       laborPowerTestDeduction: quotes.laborPowerTestDeduction,
       investigationExcluded: quotes.investigationExcluded,
+      isExcelOnly: quotes.isExcelOnly,
+      manualSupplyAmount: quotes.manualSupplyAmount,
     })
     .from(quotes)
     .where(and(eq(quotes.id, id), eq(quotes.isDeleted, false)))

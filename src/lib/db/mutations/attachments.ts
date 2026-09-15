@@ -1,12 +1,14 @@
 import "server-only";
 
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
-import { attachments, improvementRequests } from "../schema";
+import { attachments, improvementRequests, quotes } from "../schema";
 import { insertAuditLog } from "./audit-logs";
 import {
   DEFAULT_MALWARE_SCAN_STATUS,
   isAttachmentCategoryAllowedForOwner,
+  isQuoteAttachmentSlotCategory,
+  quoteAttachmentIdsDisplacedBy,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import { assertPortableStoredPath } from "@/lib/domain/attachment-path";
@@ -39,12 +41,13 @@ import {
  * 남는 순간이 생기고, 그때 감사 기록은 "무슨 파일이 언제 들어왔는지"를 답하지
  * 못한다. audit-logs.ts가 이미 열린 트랜잭션을 인자로 받는 것도 같은 이유다.
  *
- * ── 주인은 셋 중 하나다 — 그것을 타입으로도 세운다 ───────────────────────
- * DB에는 attachments_owner_not_both · attachments_improvement_owner_alone CHECK가
- * 있다(schema/attachments.ts). "두 주인에 동시에 걸린 파일"은 어느 폴더에 사는지가
- * 정해지지 않는 모순이라 DB가 직접 막는다. 이 함수의 입력도 **같은 규칙을 타입으로**
- * 세워서, 그 모순을 만드는 코드가 애초에 컴파일되지 않게 한다 — DB가 던지는 것은
- * 마지막 방어선이지 첫 번째 방어선이 아니다(AttachmentOwnerInput 주석 참조).
+ * ── 주인은 넷 중 하나다 — 그것을 타입으로도 세운다 ───────────────────────
+ * DB에는 attachments_owner_not_both · attachments_improvement_owner_alone ·
+ * attachments_quote_owner_alone CHECK가 있다(schema/attachments.ts). "두 주인에
+ * 동시에 걸린 파일"은 어느 폴더에 사는지가 정해지지 않는 모순이라 DB가 직접 막는다.
+ * 이 함수의 입력도 **같은 규칙을 타입으로** 세워서, 그 모순을 만드는 코드가 애초에
+ * 컴파일되지 않게 한다 — DB가 던지는 것은 마지막 방어선이지 첫 번째 방어선이 아니다
+ * (AttachmentOwnerInput 주석 참조).
  *
  * ── 셋째 주인(개선 요청)만 트랜잭션 안에서 한 번 더 본다 (2026-09-13) ─────
  * 개선 요청 글에는 스크린샷이 **5장까지**만 붙고, 붙이는 사람은 접수 상태인 자기
@@ -57,13 +60,31 @@ import {
  * 주인의 짝(isAttachmentCategoryAllowedForOwner)을 트랜잭션 **전에** 한 번 보는 것
  * 하나다: 「스크린샷」 분류는 개선 요청에만, 개선 요청에는 「스크린샷」만. 두 올리기
  * 통로가 이미 400 으로 거절하므로 이것은 마지막 방어선이다.
+ *
+ * ── 넷째 주인(견적서) — 칸마다 한 파일, 새 파일이 옛 파일을 밀어낸다 (2026-09-15 Q2) ──
+ * 견적서에는 결재 PDF 칸과 엑셀 칸이 하나씩 있고 칸마다 파일은 하나다
+ * (domain/attachment-category.ts 의 QUOTE_ATTACHMENT_FILES_PER_SLOT). 같은 칸에 다시
+ * 올리면 **옛 파일은 첨부 휴지통으로** 가고 새 파일이 그 칸을 차지한다(사용자 결정).
+ * 그 교체는 행을 넣는 **같은 트랜잭션**에서, 견적서 행을 `FOR UPDATE` 로 잠근 뒤에 한다
+ * (guardQuoteAttachmentChange). 잠그지 않으면 같은 칸에 동시에 올린 두 파일이 서로의
+ * 존재를 못 본 채 둘 다 살아남아 「칸마다 하나」가 깨진다.
+ *
+ * 밀려난 파일은 지우지 않는다 — 소프트 삭제 네 칸을 채우고(사유는 고정 문구
+ * QUOTE_ATTACHMENT_REPLACED_REASON) FILE_DELETE 감사를 한 줄씩 남긴다. 디스크 실물은
+ * 그대로다(attachment-trash.ts 머리말의 ⚠️ — 복원하려면 실물이 있어야 한다). 사유를
+ * 고정 문구로 두는 까닭은, 견적서를 휴지통에서 되살릴 때 **견적서와 함께 휴지통에 간
+ * 파일만** 돌려보내고 교체로 밀려난 옛 파일은 돌려보내지 않아야 하기 때문이다
+ * (attachment-trash.ts 의 restoreAttachmentsTrashedWithQuote).
+ *
+ * 휴지통에 있는 견적서에는 붙이지 못한다(QUOTE_IN_TRASH) — 휴지통의 견적서는 목록에도
+ * 주소에도 없다. 판정은 같은 잠금 안에서 한다.
  * ============================================================================
  */
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * 이 첨부가 누구에게 붙는가. **셋 중 하나만 올 수 있다.**
+ * 이 첨부가 누구에게 붙는가. **넷 중 하나만 올 수 있다.**
  *
  * 선택 필드(`repairCaseId?` · `productModelId?` …)로 두지 않은 것이 요점이다.
  * 그렇게 두면 둘 다 채운 값이 타입을 통과하고, 그 모순은 DB의 CHECK가 던질
@@ -86,12 +107,18 @@ export type AttachmentOwnerInput =
        * 않는다(mutations/improvement-requests.ts 헤더와 같은 나눔).
        */
       canManage: boolean;
-    };
+    }
+  /**
+   * 견적서(2026-09-15 Q2). 권한(quotes WRITE)은 라우트가 이미 봤다 — 견적서 한 장에 대한
+   * 판정(글쓴이 · 상태)이 없어서 개선 요청과 달리 넘길 값이 없다. 이 파일이 보는 것은
+   * 자료의 규칙(견적서가 있는가 · 휴지통인가 · 칸마다 하나)뿐이다.
+   */
+  | { kind: "QUOTE"; quoteId: string };
 
 export type CreateAttachmentRecordInput = {
   /** 디스크 경로를 이미 이 값으로 만들었다. 위 'id를 밖에서 받는다' 참조. */
   id: string;
-  /** 접수 건 · 제품 모델 · 개선 요청 중 하나 — 둘 이상은 타입이 허용하지 않는다. */
+  /** 접수 건 · 제품 모델 · 개선 요청 · 견적서 중 하나 — 둘 이상은 타입이 허용하지 않는다. */
   owner: AttachmentOwnerInput;
   category: AttachmentCategory;
   /** 사용자가 올린 그대로의 이름. 표시·다운로드에만 쓰고 경로에는 쓰지 않는다. */
@@ -112,6 +139,11 @@ export type CreateAttachmentRecordResult = {
   id: string;
   storedPath: string;
   uploadedAt: string;
+  /**
+   * 견적서 칸 교체로 이 트랜잭션에서 첨부 휴지통에 간 옛 파일의 id(2026-09-15 Q2).
+   * 견적서가 아닌 주인과, 빈 칸에 처음 올린 견적서 파일은 늘 빈 배열이다.
+   */
+  displacedAttachmentIds: string[];
 };
 
 /** 개선 요청 글에 대한 판정이 막았을 때의 이유. */
@@ -214,6 +246,140 @@ export async function guardImprovementRequestAttachmentChange(
   return { ok: true };
 }
 
+// ─────────────────────────────────────────── 넷째 주인 — 견적서 (2026-09-15 Q2)
+
+/** 견적서에 대한 판정이 막았을 때의 이유. */
+export type QuoteAttachmentRejectionCode =
+  /** 견적서가 없다 — 그 사이 영구 삭제됐다. */
+  | "NOT_FOUND"
+  /** 견적서가 휴지통에 있다. */
+  | "QUOTE_IN_TRASH";
+
+export const QUOTE_ATTACHMENT_NOT_FOUND_MESSAGE = "해당 견적서를 찾을 수 없습니다.";
+export const QUOTE_ATTACHMENT_IN_TRASH_MESSAGE =
+  "휴지통에 있는 견적서의 파일은 붙이거나 지우거나 되살릴 수 없습니다. 견적서를 먼저 되살려 주세요.";
+
+/**
+ * 같은 칸에 새 파일이 올라와 밀려난 옛 파일의 삭제 사유 칸 — **고정 문구다.** 사람이
+ * 적는 사유와도, 견적서를 지울 때 함께 휴지통에 간 파일의 사유
+ * (attachment-trash.ts 의 QUOTE_DELETED_ATTACHMENT_REASON)와도 다르다. 견적서를
+ * 되살릴 때 이 사유의 파일은 돌려보내지 않는다(파일 헤더의 '넷째 주인').
+ */
+export const QUOTE_ATTACHMENT_REPLACED_REASON = "견적서 첨부 교체 — 같은 칸에 새 파일";
+
+/**
+ * createAttachmentRecord 가 견적서의 판정에 막혔을 때 던진다. 개선 요청 쪽
+ * (ImprovementRequestAttachmentRejectedError)과 같은 까닭으로 반환값이 아니라 예외다 —
+ * 트랜잭션이 되돌려져 행도 감사도 밀려난 파일의 휴지통 표시도 남지 않는다. 라우트는
+ * 코드별 상태(404 · 409)와 `message` 를 돌려주고 방금 놓은 파일을 치운다.
+ */
+export class QuoteAttachmentRejectedError extends Error {
+  readonly code: QuoteAttachmentRejectionCode;
+
+  constructor(code: QuoteAttachmentRejectionCode, message: string) {
+    super(message);
+    this.name = "QuoteAttachmentRejectedError";
+    this.code = code;
+  }
+}
+
+export type QuoteAttachmentGuardResult =
+  | { ok: true; quote: { id: string; quoteNumber: string } }
+  | { ok: false; code: QuoteAttachmentRejectionCode; message: string };
+
+/**
+ * 견적서의 첨부를 바꿔도 되는가 — **부르는 쪽의 트랜잭션 안에서** 견적서 행을
+ * `FOR UPDATE` 로 잠그고 판정한다. 올리기(createAttachmentRecord) · 지우기 · 되살리기
+ * (attachment-trash.ts)가 모두 이것 하나를 부른다.
+ *
+ * 이 잠금이 두 가지를 줄 세운다:
+ *  - **칸 교체** — 같은 견적서에 동시에 올린 파일들은 여기서 기다리고, 뒤에 온 쪽은
+ *    앞의 것이 넣은 행을 보고 밀어낸다(READ COMMITTED — 문장마다 새 스냅숏). 그래서
+ *    칸마다 살아 있는 파일은 늘 하나다.
+ *  - **견적서 휴지통** — softDeleteQuote · restoreQuote · permanentlyDeleteQuote 도 같은
+ *    행을 먼저 잠근다(quote-trash.ts). 휴지통으로 가는 견적서에 한 장이 끼어들거나,
+ *    휴지통의 견적서에 파일이 되살아나는 틈이 없다.
+ *
+ * ⚠️ 잠금은 `id` 로만 좁힌다 — 개선 요청 쪽과 같은 규율이다. is_deleted 로 좁히면 휴지통의
+ * 견적서를 「없음」으로 오판하고, 그 행은 잠그지도 못한다.
+ */
+export async function guardQuoteAttachmentChange(tx: Tx, quoteId: string): Promise<QuoteAttachmentGuardResult> {
+  const [quote] = await tx
+    .select({ id: quotes.id, quoteNumber: quotes.quoteNumber, isDeleted: quotes.isDeleted })
+    .from(quotes)
+    .where(eq(quotes.id, quoteId))
+    .for("update");
+
+  if (!quote) return { ok: false, code: "NOT_FOUND", message: QUOTE_ATTACHMENT_NOT_FOUND_MESSAGE };
+  if (quote.isDeleted) return { ok: false, code: "QUOTE_IN_TRASH", message: QUOTE_ATTACHMENT_IN_TRASH_MESSAGE };
+  return { ok: true, quote: { id: quote.id, quoteNumber: quote.quoteNumber } };
+}
+
+/**
+ * 같은 칸의 살아 있는 옛 파일을 첨부 휴지통으로 보낸다 — **부르는 쪽의 트랜잭션 안에서,
+ * 견적서 행을 잠근 뒤에.** 소프트 삭제 네 칸 + 파일마다 FILE_DELETE 감사 한 줄. 디스크
+ * 실물은 건드리지 않는다. 실제로 휴지통에 간 id 를 돌려준다.
+ *
+ * 누구를 밀어낼지는 순수 함수(quoteAttachmentIdsDisplacedBy)가 정한다 — 같은 칸이고
+ * 휴지통에 없는 것. 다른 칸의 파일과 이미 휴지통에 있는 파일은 그대로다.
+ */
+async function trashDisplacedQuoteAttachments(
+  tx: Tx,
+  params: {
+    quoteId: string;
+    category: AttachmentCategory;
+    replacedByAttachmentId: string;
+    actorUserId: string;
+  }
+): Promise<string[]> {
+  if (!isQuoteAttachmentSlotCategory(params.category)) return [];
+
+  const existing = await tx
+    .select({ id: attachments.id, category: attachments.category, isDeleted: attachments.isDeleted })
+    .from(attachments)
+    .where(and(eq(attachments.quoteId, params.quoteId), eq(attachments.isDeleted, false)));
+  const displacedIds = quoteAttachmentIdsDisplacedBy(existing, params.category);
+  if (displacedIds.length === 0) return [];
+
+  const deletedAt = new Date();
+  const updated = await tx
+    .update(attachments)
+    .set({
+      isDeleted: true,
+      deletedAt,
+      deletedBy: params.actorUserId,
+      deleteReason: QUOTE_ATTACHMENT_REPLACED_REASON,
+    })
+    .where(and(inArray(attachments.id, displacedIds), eq(attachments.isDeleted, false)))
+    .returning({ id: attachments.id });
+  const updatedIds = new Set(updated.map((row) => row.id));
+  const trashed = displacedIds.filter((id) => updatedIds.has(id));
+
+  for (const id of trashed) {
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "FILE_DELETE",
+      targetEntity: "attachments",
+      targetRecordId: id,
+      previousValue: { isDeleted: false },
+      newValue: {
+        isDeleted: true,
+        deletedAt: deletedAt.toISOString(),
+        deleteReason: QUOTE_ATTACHMENT_REPLACED_REASON,
+        // attachment-trash.ts 의 ownerAuditFields 와 같은 모양 — 주인을 먼저 적고 그 키만.
+        ownerType: "QUOTE",
+        quoteId: params.quoteId,
+        category: params.category,
+        // 무엇이 이 파일을 밀어냈는가 — 같은 트랜잭션의 FILE_UPLOAD 줄과 짝을 이룬다.
+        replacedByAttachmentId: params.replacedByAttachmentId,
+        storedFileRetained: true,
+      },
+    });
+  }
+
+  return trashed;
+}
+
 /** 감사 기록에 싣는 주인 — 어느 주인인지를 먼저 적고 그 주인의 ID **만** 싣는다. */
 function ownerAuditValue(owner: AttachmentOwnerInput): Record<string, unknown> {
   switch (owner.kind) {
@@ -223,6 +389,8 @@ function ownerAuditValue(owner: AttachmentOwnerInput): Record<string, unknown> {
       return { ownerType: owner.kind, productModelId: owner.productModelId };
     case "IMPROVEMENT_REQUEST":
       return { ownerType: owner.kind, improvementRequestId: owner.improvementRequestId };
+    case "QUOTE":
+      return { ownerType: owner.kind, quoteId: owner.quoteId };
   }
 }
 
@@ -235,13 +403,16 @@ export async function createAttachmentRecord(
 
   const { owner } = input;
 
-  // 분류와 주인의 짝 — 파일 헤더의 '셋째 주인만 ...' 둘째 문단. 두 올리기 통로가
+  // 분류와 주인의 짝 — 파일 헤더의 '셋째 주인만 ...' 둘째 문단. 올리기 통로들이
   // 먼저 400 으로 거절하므로 여기까지 오는 것은 통로를 거치지 않은 호출뿐이다.
+  // 견적서에는 결재 PDF · 수기 엑셀 두 칸만, 그 두 칸은 견적서에만 붙는다.
   if (!isAttachmentCategoryAllowedForOwner(input.category, owner.kind)) {
     throw new Error(`'${input.category}' 분류는 이 주인(${owner.kind})의 첨부에 쓸 수 없습니다.`);
   }
 
   return db.transaction(async (tx) => {
+    let displacedAttachmentIds: string[] = [];
+
     if (owner.kind === "IMPROVEMENT_REQUEST") {
       // 글 행을 잠그고 판정 · 5장 셈 — 행을 넣기 **전에**, 같은 트랜잭션에서.
       const guard = await guardImprovementRequestAttachmentChange(tx, {
@@ -255,15 +426,31 @@ export async function createAttachmentRecord(
       }
     }
 
+    if (owner.kind === "QUOTE") {
+      // 견적서 행을 잠그고 판정 — 있는가 · 휴지통이 아닌가(파일 헤더의 '넷째 주인').
+      const guard = await guardQuoteAttachmentChange(tx, owner.quoteId);
+      if (!guard.ok) {
+        throw new QuoteAttachmentRejectedError(guard.code, guard.message);
+      }
+      // 같은 잠금 안에서 같은 칸의 옛 파일을 첨부 휴지통으로 — 새 행을 넣기 **전에**.
+      displacedAttachmentIds = await trashDisplacedQuoteAttachments(tx, {
+        quoteId: owner.quoteId,
+        category: input.category,
+        replacedByAttachmentId: input.id,
+        actorUserId: input.uploadedBy,
+      });
+    }
+
     const [row] = await tx
       .insert(attachments)
       .values({
         id: input.id,
-        // 주인이 아닌 쪽은 언제나 NULL이다. 세 컬럼을 판별자 하나에서 함께
+        // 주인이 아닌 쪽은 언제나 NULL이다. 네 컬럼을 판별자 하나에서 함께
         // 계산하므로 "둘 이상 찬 행"은 이 코드로는 만들어지지 않는다.
         repairCaseId: owner.kind === "REPAIR_CASE" ? owner.repairCaseId : null,
         productModelId: owner.kind === "PRODUCT_MODEL" ? owner.productModelId : null,
         improvementRequestId: owner.kind === "IMPROVEMENT_REQUEST" ? owner.improvementRequestId : null,
+        quoteId: owner.kind === "QUOTE" ? owner.quoteId : null,
         category: input.category,
         originalFileName: input.originalFileName,
         storedPath: input.storedPath,
@@ -302,9 +489,16 @@ export async function createAttachmentRecord(
         mimeType: input.mimeType,
         fileSize: input.fileSize,
         checksumSha256: input.checksumSha256,
+        // 견적서 칸 교체로 밀려난 옛 파일(없으면 빈 배열). 다른 주인의 기록 모양은 그대로다.
+        ...(owner.kind === "QUOTE" ? { displacedAttachmentIds } : {}),
       },
     });
 
-    return { id: row.id, storedPath: row.storedPath, uploadedAt: row.uploadedAt.toISOString() };
+    return {
+      id: row.id,
+      storedPath: row.storedPath,
+      uploadedAt: row.uploadedAt.toISOString(),
+      displacedAttachmentIds,
+    };
   });
 }

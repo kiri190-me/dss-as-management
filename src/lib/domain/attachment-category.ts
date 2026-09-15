@@ -163,6 +163,33 @@ export function quoteAttachmentIdsDisplacedBy(
   return existing.filter((item) => !item.isDeleted && item.category === incoming).map((item) => item.id);
 }
 
+/**
+ * 견적서의 한 칸에 **지금 붙어 있는 파일** — 휴지통에 없고 그 칸(분류)인 것
+ * (2026-09-15 Q2). 칸마다 하나라는 규칙은 올리기 통로가 지키므로(칸 교체) 보통은 많아야
+ * 하나다. 규칙을 거치지 않은 행이 겹쳐 있으면 **가장 나중에 올린 것**을 고른다 — 사람이
+ * 마지막으로 올린 파일이 그 칸의 파일이라는 뜻과 같다(시각이 같으면 id 로 가른다 —
+ * 부를 때마다 같은 답을 내야 한다).
+ *
+ * 견적서 수정 화면의 칸 조회(queries/attachments.ts)와 견적서 받기의 파일 고르기
+ * (api/quotes/[id]/xlsx/download-source.ts)가 이것 하나를 본다. 없으면 null.
+ */
+export function liveQuoteAttachmentInSlot<
+  T extends { id: string; category: AttachmentCategory; isDeleted: boolean; uploadedAt: Date | string },
+>(existing: readonly T[], slot: QuoteAttachmentSlotCategory): T | null {
+  let picked: T | null = null;
+  for (const item of existing) {
+    if (item.isDeleted || item.category !== slot) continue;
+    if (picked === null) {
+      picked = item;
+      continue;
+    }
+    const itemTime = new Date(item.uploadedAt).getTime();
+    const pickedTime = new Date(picked.uploadedAt).getTime();
+    if (itemTime > pickedTime || (itemTime === pickedTime && item.id > picked.id)) picked = item;
+  }
+  return picked;
+}
+
 /** 이 주인의 올리기 칸에 내놓을 분류 — ATTACHMENT_CATEGORY_CODES 의 차례 그대로. */
 export function attachmentCategoriesForOwner(ownerKind: AttachmentOwnerKind): AttachmentCategory[] {
   return ATTACHMENT_CATEGORY_CODES.filter((code) => isAttachmentCategoryAllowedForOwner(code, ownerKind));

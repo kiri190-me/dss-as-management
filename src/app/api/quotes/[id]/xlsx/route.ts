@@ -4,8 +4,11 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { listLiveQuoteAttachments } from "@/lib/db/queries/attachments";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { recordQuoteExport } from "@/lib/db/mutations/quote-exports";
+import { decideAttachmentDownload } from "@/lib/domain/attachment-download-policy";
+import { AttachmentPathError, resolveAttachmentAbsolutePath } from "@/lib/domain/attachment-path";
 import { buildQuoteFileName, quoteContentDisposition } from "@/lib/domain/quote-file-name";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
@@ -16,12 +19,14 @@ import {
   readQuoteTemplate,
   readQuoteTemplateFor,
 } from "@/lib/storage/quote-template";
+import { getAttachmentStorage, resolveUploadsRoot } from "@/lib/storage/local-fs-adapter";
 import { fillQuoteWorkbook } from "@/lib/xlsx/quote-template";
 import { fillOhQuoteWorkbook } from "@/lib/xlsx/oh-quote-template";
 import {
   fillMatcherQuoteWorkbook,
   type MatcherWorkScope,
 } from "@/lib/xlsx/matcher-quote-template";
+import { QUOTE_EXCEL_MISSING_MESSAGE, decideQuoteDownloadSource } from "./download-source";
 
 /**
  * ============================================================================
@@ -38,6 +43,18 @@ import {
  * 4번이 5번보다 앞인 이유: 권한이 없는 사람에게는 "그 id 의 견적서가 있다"는
  * 사실조차 알려 주지 않는다.
  *
+ * ── 엑셀 전용 견적서는 붙인 엑셀을 그대로 내려준다 (2026-09-15 Q2) ─────────
+ * 품목 없이 손으로 만든 엑셀을 붙여 저장한 장(quotes.is_excel_only)은 그 엑셀이 곧
+ * 보낸 문서다(사용자 결정). 그런 장이면 5번 뒤에서 갈라져 6~7번(양식 채우기) 대신
+ * **엑셀 칸에 지금 붙어 있는 파일**을 저장소에서 읽어 그대로 흘려보낸다 — 무엇을 고르는지는
+ * 형제 파일 download-source.ts, 그 파일을 내보내도 되는지(악성코드 검사 상태)는 첨부
+ * 내려받기와 **같은 판정 함수**(decideAttachmentDownload)가 정한다. 파일 이름은 아래의
+ * 이름 규칙 그대로에 확장자만 붙인 파일의 것(xlsx · xls)을 따른다. 붙인 엑셀이 없으면
+ * 404 와 사람이 읽는 문장이다 — 앱 양식으로 대신 채우지 않는다(품목이 없어 빈 견적서가
+ * 나간다). 권한(READ) · 감사(EXCEL_EXPORT)는 일반 견적서와 같다.
+ *
+ * **일반 견적서는 한 바이트도 달라지지 않는다** — 그 길에는 조회 하나 늘지 않는다.
+ *
  * ── 왜 READ 로 충분한가 ─────────────────────────────────────────────────
  * 이 통로는 **아무것도 바꾸지 않는다.** 이미 저장된 값을 보기 좋은 형태로
  * 옮겨 줄 뿐이라, 목록에서 그 견적서를 볼 수 있는 사람이면 그 내용을 파일로도
@@ -50,7 +67,7 @@ import {
  * ── 실패 응답에 경로를 싣지 않는다 ──────────────────────────────────────
  * 양식을 못 읽었을 때 그 경로를 응답에 담으면 오류 메시지가 디스크 구조를
  * 알려 주는 창구가 된다. 경로는 서버 로그에만 남는다
- * (storage/quote-template.ts).
+ * (storage/quote-template.ts). 붙인 엑셀의 저장 경로도 같다.
  * ============================================================================
  */
 
@@ -63,7 +80,12 @@ type FailureCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "TEMPLATE_UNAVAILABLE"
-  | "RENDER_FAILED";
+  | "RENDER_FAILED"
+  /** 엑셀 전용 견적서인데 붙인 엑셀이 없다(2026-09-15 Q2). */
+  | "EXCEL_NOT_ATTACHED"
+  /** 붙인 엑셀이 악성코드 검사에 막혔다 — 첨부 내려받기와 같은 판정. */
+  | "SCAN_BLOCKED"
+  | "STORAGE_FAILED";
 
 function fail(status: number, code: FailureCode, message: string): NextResponse {
   return NextResponse.json({ error: message, code }, { status });
@@ -102,6 +124,11 @@ export async function GET(
   // 화면에서 지운 견적서를 주소만으로 계속 뽑을 수 있으면 휴지통이 뜻을 잃는다.
   const quote = await getQuoteForEdit(id);
   if (!quote) return fail(404, "NOT_FOUND", "해당 견적서를 찾을 수 없습니다.");
+
+  // ── 5-1) 엑셀 전용 견적서 — 붙인 엑셀을 그대로(파일 헤더) ──────────────
+  if (quote.isExcelOnly) {
+    return sendAttachedExcel(quote, actingUser.id);
+  }
 
   // ── 6~7) 양식을 읽어 채운다 ──────────────────────────────────────────
   let workbook: Buffer;
@@ -243,6 +270,90 @@ export async function GET(
       "Content-Disposition": quoteContentDisposition(fileName),
       "Content-Length": String(workbook.byteLength),
       // 직인이 찍힌 문서다. 중간 캐시에 남지 않게 한다.
+      "Cache-Control": "no-store, must-revalidate",
+    },
+  });
+}
+
+/**
+ * 엑셀 전용 견적서 — 엑셀 칸에 지금 붙어 있는 파일을 그대로 내려준다(파일 헤더).
+ *
+ * 첨부 내려받기 통로(api/attachments/[id]/download)와 같은 방어를 거친다: 판정 함수
+ * (decideAttachmentDownload — 검사 상태), DB 에 적힌 경로도 믿지 않는 경로 검증
+ * (resolveAttachmentAbsolutePath), 파일에 닿는 것은 StorageAdapter 로만. 감사는 이
+ * 통로의 것(EXCEL_EXPORT)을 남긴다 — 무엇을 누가 받았는지는 견적서 id 와 발행번호가
+ * 답한다(mutations/quote-exports.ts).
+ */
+async function sendAttachedExcel(
+  quote: { id: string; quoteNumber: string; customerNameText: string; isExcelOnly: boolean },
+  actorUserId: string
+): Promise<NextResponse> {
+  const source = decideQuoteDownloadSource(quote, await listLiveQuoteAttachments(quote.id));
+  if (source.kind !== "ATTACHED_EXCEL") {
+    // 엑셀 전용 장이라 앱 양식(TEMPLATE)으로 떨어질 일은 없다 — 남는 것은 「붙인 엑셀 없음」이다.
+    return fail(404, "EXCEL_NOT_ATTACHED", QUOTE_EXCEL_MISSING_MESSAGE);
+  }
+  const { attachment, extension } = source;
+
+  // 첨부 내려받기와 같은 판정 — 여기까지 온 파일은 주인이 살아 있는 견적서이고 휴지통에
+  // 없으므로 막는 것은 검사 상태뿐이다.
+  const decision = decideAttachmentDownload({
+    repairCaseId: null,
+    productModelId: null,
+    improvementRequestId: null,
+    quoteId: quote.id,
+    isDeleted: attachment.isDeleted,
+    quoteInTrash: false,
+    malwareScanStatus: attachment.malwareScanStatus,
+  });
+  if (!decision.allowed) {
+    return fail(403, "SCAN_BLOCKED", decision.message);
+  }
+
+  const storage = getAttachmentStorage();
+  let stream: ReadableStream<Uint8Array>;
+  try {
+    // 루트 밖을 가리키면 여기서 던진다. 존재 여부는 read 가 알려 준다.
+    resolveAttachmentAbsolutePath(resolveUploadsRoot(), attachment.storedPath);
+    stream = await storage.read(attachment.storedPath);
+  } catch (error) {
+    if (error instanceof AttachmentPathError) {
+      console.error("[quote-xlsx] 붙인 엑셀의 stored_path 가 저장 루트를 벗어난다", {
+        quoteId: quote.id,
+        attachmentId: attachment.id,
+        reason: error.message,
+      });
+      return fail(500, "STORAGE_FAILED", "파일 경로를 확인할 수 없습니다. 관리자에게 문의해 주세요.");
+    }
+    console.error("[quote-xlsx] 붙인 엑셀을 읽지 못했다", {
+      quoteId: quote.id,
+      attachmentId: attachment.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return fail(404, "NOT_FOUND", "저장된 파일을 찾을 수 없습니다. 관리자에게 문의해 주세요.");
+  }
+
+  // 감사 — 파일을 돌려주기 전에 남긴다(일반 견적서와 같은 방식 · 같은 자리).
+  await recordQuoteExport({ quoteId: quote.id, quoteNumber: quote.quoteNumber, actorUserId });
+
+  // 이름 규칙은 그대로, 확장자만 붙인 파일의 것(xlsx · xls).
+  const fileName = buildQuoteFileName({
+    quoteNumber: quote.quoteNumber,
+    customerName: quote.customerNameText,
+    extension,
+  });
+
+  return new NextResponse(stream, {
+    status: 200,
+    headers: {
+      // 올릴 때 확장자에서 서버가 고른 정본 MIME 이다(브라우저가 보낸 값이 아니다).
+      "Content-Type": attachment.mimeType,
+      "Content-Length": String(attachment.fileSize),
+      "Content-Disposition": quoteContentDisposition(fileName),
+      // 사람이 올린 파일이다 — 형식을 다시 추측하지 않게 한다. 전역 헤더와 값이 같아
+      // 실제로 나가는 것은 전역 쪽이지만 이 통로가 요구하는 값을 선언해 둔다(첨부
+      // 내려받기 라우트의 같은 줄 주석).
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "no-store, must-revalidate",
     },
   });

@@ -5,6 +5,7 @@ import {
   MAX_QUOTE_ITEMS,
   isValidExpectedVersion,
   isValidQuoteId,
+  quoteExcelOnlyFieldErrors,
   validateQuoteFields,
 } from "./quote-input";
 
@@ -208,6 +209,98 @@ test("id 형식", () => {
   assert.equal(isValidQuoteId(123), false);
   assert.match(errors({ ...MINIMAL, repairCaseId: "nope" }).repairCaseId, /수리 건/);
   assert.equal(ok({ ...MINIMAL, repairCaseId: "" }).repairCaseId, null);
+});
+
+/**
+ * ============================================================================
+ * 엑셀 전용 견적서 (2026-09-15 Q2) — 줄은 비어야 하고, 공급가액은 필수다
+ * ============================================================================
+ */
+test("엑셀 전용: 안 보내면 꺼짐이고 수기 금액은 null — 옛 요청이 그대로 동작한다", () => {
+  const data = ok(MINIMAL);
+  assert.equal(data.isExcelOnly, false);
+  assert.equal(data.manualSupplyAmount, null);
+  for (const value of ["true", 1, "on", {}, null, undefined]) {
+    assert.equal(ok({ ...MINIMAL, isExcelOnly: value }).isExcelOnly, false, `${JSON.stringify(value)} 가 켜짐으로 읽혔다`);
+  }
+});
+
+test("엑셀 전용: 필수 넷 + 공급가액이면 통과한다 — 금액은 다른 금액 칸과 같은 규칙(콤마 허용)", () => {
+  const data = ok({ ...MINIMAL, isExcelOnly: true, manualSupplyAmount: "3,456,789.50" });
+  assert.equal(data.isExcelOnly, true);
+  assert.equal(data.manualSupplyAmount, "3456789.50");
+  assert.deepEqual(data.items, []);
+  assert.equal(ok({ ...MINIMAL, isExcelOnly: true, manualSupplyAmount: 1200000 }).manualSupplyAmount, "1200000");
+  // 0 은 무상 견적 — 허용한다(DB CHECK 와 같은 규칙).
+  assert.equal(ok({ ...MINIMAL, isExcelOnly: true, manualSupplyAmount: "0" }).manualSupplyAmount, "0");
+  // 필수 넷은 엑셀 전용이어도 그대로 필수다.
+  const missing = errors({ isExcelOnly: true, manualSupplyAmount: "1000" });
+  assert.match(missing.quoteNumber, /발행번호/);
+  assert.match(missing.subject, /품명/);
+});
+
+test("엑셀 전용: 공급가액이 비면 거절한다 — 품목이 없으니 금액이 나올 곳이 이 칸뿐이다", () => {
+  for (const value of [undefined, null, "", "   "]) {
+    assert.match(
+      errors({ ...MINIMAL, isExcelOnly: true, manualSupplyAmount: value }).manualSupplyAmount,
+      /공급가액/,
+      JSON.stringify(value)
+    );
+  }
+});
+
+test("엑셀 전용: 공급가액의 형식 · 폭 · 음수는 다른 금액 칸과 같이 거절하고, 형식 오류 문장을 덮지 않는다", () => {
+  for (const value of ["-1", "12345678901234", "1.234", "삼백만"]) {
+    assert.match(
+      errors({ ...MINIMAL, isExcelOnly: true, manualSupplyAmount: value }).manualSupplyAmount,
+      /0 이상의 금액/,
+      value
+    );
+  }
+});
+
+test("🔴 엑셀 전용: 부품 · 작업 내역 · 수리 작업 줄이 있으면 거절한다 — 조용히 지우지 않는다", () => {
+  const fieldErrors = errors({
+    ...MINIMAL,
+    isExcelOnly: true,
+    manualSupplyAmount: "1000000",
+    items: [{ partNameText: "Bias Board ASSY", quantity: 1, unitPrice: "1850000" }],
+    workScopeLines: [{ section: "INVESTIGATION", text: "외관 및 내부 검사" }],
+    repairTasks: [{ taskId: null, taskName: "바리콘 교환", hours: 3, hourlyRate: "100000" }],
+  });
+  assert.match(fieldErrors.items, /엑셀 전용/);
+  assert.match(fieldErrors.workScopeLines, /엑셀 전용/);
+  assert.match(fieldErrors.repairTasks, /엑셀 전용/);
+  // 빈 작업 내역 줄은 원래 조용히 버려진다(적힐 것이 없다) — 엑셀 전용을 막지 않는다.
+  const data = ok({
+    ...MINIMAL,
+    isExcelOnly: true,
+    manualSupplyAmount: "1000000",
+    workScopeLines: [{ section: "INVESTIGATION", text: "   " }],
+  });
+  assert.deepEqual(data.workScopeLines, []);
+});
+
+test("🔴 엑셀 전용이 아니면 수기 공급가액을 받지 않는다 — DB CHECK 와 같은 규칙을 먼저 본다", () => {
+  assert.match(errors({ ...MINIMAL, manualSupplyAmount: "1000000" }).manualSupplyAmount, /엑셀 전용/);
+  assert.match(errors({ ...MINIMAL, isExcelOnly: false, manualSupplyAmount: 0 }).manualSupplyAmount, /엑셀 전용/);
+  // 비어 있으면 괜찮다 — 화면이 빈 칸을 그대로 보내도 저장된다.
+  assert.equal(ok({ ...MINIMAL, manualSupplyAmount: "" }).manualSupplyAmount, null);
+  assert.equal(ok({ ...MINIMAL, manualSupplyAmount: null }).manualSupplyAmount, null);
+});
+
+test("엑셀 전용 규칙 함수 — 검증과 mutation 이 함께 보는 한 곳", () => {
+  const empty = { items: [], workScopeLines: [], repairTasks: [] };
+  assert.deepEqual(quoteExcelOnlyFieldErrors({ isExcelOnly: true, manualSupplyAmount: "0", ...empty }), {});
+  assert.deepEqual(quoteExcelOnlyFieldErrors({ isExcelOnly: false, manualSupplyAmount: null, ...empty }), {});
+  // 일반 견적서는 줄이 있어도 이 규칙에 걸리지 않는다.
+  assert.deepEqual(
+    quoteExcelOnlyFieldErrors({ isExcelOnly: false, manualSupplyAmount: null, items: [{}], workScopeLines: [{}], repairTasks: [{}] }),
+    {}
+  );
+  assert.deepEqual(Object.keys(quoteExcelOnlyFieldErrors({ isExcelOnly: true, manualSupplyAmount: null, ...empty })), [
+    "manualSupplyAmount",
+  ]);
 });
 
 test("expectedVersion 은 1 이상의 정수다", () => {

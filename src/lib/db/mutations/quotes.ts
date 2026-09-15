@@ -11,7 +11,7 @@ import {
   quotes,
   repairCases,
 } from "../schema";
-import type { QuoteFields } from "@/lib/validation/quote-input";
+import { quoteExcelOnlyFieldErrors, type QuoteFields } from "@/lib/validation/quote-input";
 
 /**
  * ============================================================================
@@ -123,6 +123,14 @@ function toColumnValues(fields: QuoteFields) {
      * 고칠 때도 이 한 곳을 지난다 — 빠지면 고친 뒤 다시 열었을 때 결정이 사라진다.
      */
     investigationExcluded: fields.investigationExcluded,
+    /**
+     * 엑셀 전용 견적서와 손으로 적은 공급가액(2026-09-15 Q2). 만들 때도 고칠 때도 이 한
+     * 곳을 지난다. 엑셀 전용이 아니면 수기 금액은 늘 null 이다 — 검증이 먼저 막고
+     * (validation/quote-input.ts 의 quoteExcelOnlyFieldErrors), DB CHECK
+     * quotes_manual_supply_amount_excel_only 가 마지막으로 막는다.
+     */
+    isExcelOnly: fields.isExcelOnly,
+    manualSupplyAmount: fields.manualSupplyAmount,
   };
 }
 
@@ -297,6 +305,9 @@ export async function createQuote(params: {
   fields: QuoteFields;
   actorUserId: string;
 }): Promise<QuoteMutationResult> {
+  const excelOnlyViolation = excelOnlyViolationResult(params.fields);
+  if (excelOnlyViolation) return excelOnlyViolation;
+
   try {
     return await db.transaction(async (tx): Promise<QuoteMutationResult> => {
       const badReference = await checkReferences(tx, params.fields);
@@ -330,6 +341,21 @@ export async function createQuote(params: {
   }
 }
 
+/**
+ * 엑셀 전용 견적서의 규칙 — **마지막 방어선**(2026-09-15 Q2). 검증이 이미 같은 함수로
+ * 막았으므로(validation/quote-input.ts 의 quoteExcelOnlyFieldErrors) 여기까지 오는 것은
+ * 검증을 거치지 않은 호출뿐이다. 그래도 막는 까닭: 엑셀 전용 장에 줄이 저장되면 문서
+ * (붙인 엑셀)와 시스템의 품목이 두 벌이 되고, 어느 쪽이 보낸 금액인지 답할 수 없다.
+ * 수기 금액 쪽은 DB CHECK 도 막지만, 거기서 걸리면 사람에게는 「일시적으로 저장할 수
+ * 없습니다」로만 보인다. 트랜잭션을 열기 **전에** 본다 — 아무것도 쓰지 않는다.
+ */
+function excelOnlyViolationResult(fields: QuoteFields): QuoteMutationResult | null {
+  const fieldErrors = quoteExcelOnlyFieldErrors(fields);
+  const first = Object.values(fieldErrors)[0];
+  if (first === undefined) return null;
+  return { ok: false, code: "VALIDATION_ERROR", fieldErrors, message: first };
+}
+
 /** 있는 견적서 한 장. 위 '동시 수정은 version 으로 막는다' 순서를 그대로 따른다. */
 export async function updateQuote(params: {
   id: string;
@@ -337,6 +363,9 @@ export async function updateQuote(params: {
   fields: QuoteFields;
   actorUserId: string;
 }): Promise<QuoteMutationResult> {
+  const excelOnlyViolation = excelOnlyViolationResult(params.fields);
+  if (excelOnlyViolation) return excelOnlyViolation;
+
   try {
     return await db.transaction(async (tx): Promise<QuoteMutationResult> => {
       const [existing] = await tx

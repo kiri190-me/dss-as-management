@@ -1,6 +1,7 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../connection";
 import {
+  attachments,
   customerContacts,
   customers,
   domesticOrderDueDates,
@@ -32,7 +33,7 @@ import {
 } from "../schema";
 import { insertAuditLog } from "./audit-logs";
 import { getMasterDataTrashRetentionStatus } from "@/lib/domain/master-data-trash-retention";
-import { sumQuoteSupplyAmount } from "@/lib/domain/quote-list";
+import { formatQuoteSupplyAmount, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 
 /**
  * ============================================================================
@@ -647,6 +648,10 @@ export async function purgeExpiredQuote(id: string, now: Date = new Date()): Pro
         laborBaseCost: quotes.laborBaseCost,
         powerTestExcluded: quotes.powerTestExcluded,
         laborPowerTestDeduction: quotes.laborPowerTestDeduction,
+        // 엑셀 전용 여부와 손으로 적은 공급가액(2026-09-15 Q2) — 금액 사실이라 사람이
+        // 누르는 완전 삭제(quote-trash.ts 의 PURGE_SNAPSHOT_COLUMNS)와 같이 싣는다.
+        isExcelOnly: quotes.isExcelOnly,
+        manualSupplyAmount: quotes.manualSupplyAmount,
         createdAt: quotes.createdAt,
         isDeleted: quotes.isDeleted,
         deletedAt: quotes.deletedAt,
@@ -679,9 +684,18 @@ export async function purgeExpiredQuote(id: string, now: Date = new Date()): Pro
       .select({ id: domesticOrders.id })
       .from(domesticOrders)
       .where(eq(domesticOrders.quoteId, id));
+    // 결재 PDF · 수기 엑셀(2026-09-15 Q2) — 휴지통 여부와 무관하게 전부. 영구 삭제되면
+    // FK(ON DELETE SET NULL)가 연결을 풀어 어느 견적서의 것이었는지 알 수 없게 된다.
+    // attachment-trash.ts 의 listAttachmentIdsOfQuote 와 같은 조회다 — 그 파일은
+    // "server-only" 라 이 CLI 가 부를 수 없다(이 파일 머리말의 '넘을 수 없는 경계').
+    const quoteAttachments = await tx
+      .select({ id: attachments.id })
+      .from(attachments)
+      .where(eq(attachments.quoteId, id))
+      .orderBy(asc(attachments.uploadedAt), asc(attachments.id));
 
-    // 부품 줄·작업 내역·수리 작업은 FK 의 ON DELETE CASCADE 가, 내자 정리 줄의
-    // 연결은 ON DELETE SET NULL 이 처리한다.
+    // 부품 줄·작업 내역·수리 작업은 FK 의 ON DELETE CASCADE 가, 내자 정리 줄과
+    // 첨부의 연결은 ON DELETE SET NULL 이 처리한다. 첨부 행 · 디스크 실물은 남는다.
     await tx.delete(quotes).where(eq(quotes.id, id));
 
     await insertAuditLog(tx, {
@@ -693,11 +707,20 @@ export async function purgeExpiredQuote(id: string, now: Date = new Date()): Pro
         ...current,
         createdAt: current.createdAt.toISOString(),
         deletedAt: current.deletedAt.toISOString(),
-        supplyAmount: sumQuoteSupplyAmount(items, current.workCost).toFixed(2),
+        // 목록 · 내자 정리 · 사람이 누르는 완전 삭제와 같은 셈법(domain/quote-list.ts).
+        supplyAmount: formatQuoteSupplyAmount(
+          quoteSupplyAmountOf({
+            isExcelOnly: current.isExcelOnly,
+            manualSupplyAmount: current.manualSupplyAmount,
+            items,
+            workCost: current.workCost,
+          })
+        ),
         purgedItemCount: items.length,
         purgedWorkScopeLineCount: scopeLines.total,
         purgedRepairTaskCount: repairTasks.total,
         unlinkedDomesticOrderIds: linkedOrders.map((order) => order.id),
+        unlinkedAttachmentIds: quoteAttachments.map((attachment) => attachment.id),
       },
       newValue: null,
     });

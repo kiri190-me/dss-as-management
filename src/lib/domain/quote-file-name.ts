@@ -21,14 +21,26 @@ function sanitize(value: string): string {
   return value.replace(FORBIDDEN_IN_FILENAME, " ").replace(/\s+/g, " ").trim().slice(0, MAX_PART_LENGTH);
 }
 
-export function buildQuoteFileName(input: { quoteNumber: string; customerName: string }): string {
+/**
+ * 내려받는 견적서 파일의 확장자. 앱 양식을 채운 파일은 늘 xlsx 이고, **엑셀 전용
+ * 견적서**(2026-09-15 Q2)는 사람이 붙인 엑셀을 그대로 내려주므로 그 파일의 확장자를
+ * 따른다 — 옛 xls 를 xlsx 이름으로 내보내면 엑셀이 「형식과 확장자가 다르다」고 경고한다.
+ */
+export type QuoteFileExtension = "xlsx" | "xls";
+
+export function buildQuoteFileName(input: {
+  quoteNumber: string;
+  customerName: string;
+  /** 생략하면 xlsx — 앱 양식을 채운 파일(예전 그대로). */
+  extension?: QuoteFileExtension;
+}): string {
   const parts = [sanitize(input.quoteNumber), sanitize(input.customerName)].filter(
     (part) => part.length > 0
   );
   // 둘 다 비는 일은 없다(검증이 필수로 막는다). 그래도 빈 이름을 내보내지는
   // 않는다 — 이름 없는 첨부는 브라우저가 `download` 로 저장한다.
   const stem = parts.length > 0 ? parts.join("_") : "견적서";
-  return `견적서_${stem}.xlsx`;
+  return `견적서_${stem}.${input.extension ?? "xlsx"}`;
 }
 
 /**
