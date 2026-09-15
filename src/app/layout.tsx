@@ -62,7 +62,14 @@ export const metadata: Metadata = {
     title: "DSS A/S",
     statusBarStyle: "default",
   },
+  /**
+   * 데스크톱 북마크·탭 아이콘도 모바일 홈 화면 아이콘과 같은 그림이다(2026-09-15
+   * 사용자). 작은 크기는 app/favicon.ico(모바일 아이콘 icon-512.png 로 만든 16·32·48·
+   * 256)가 맡고 — Next.js 가 그 파일을 스스로 링크한다 — 큰 아이콘을 찾는 곳(고해상도
+   * 탭·새 탭 바로가기)은 아래 PNG 를 쓴다. 둘 다 manifest.ts 의 아이콘과 같은 그림이다.
+   */
   icons: {
+    icon: [{ url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" }],
     apple: "/icons/apple-touch-icon.png",
   },
 };
