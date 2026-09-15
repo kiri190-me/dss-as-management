@@ -10,7 +10,7 @@ import {
 } from "@/lib/domain/workflow-kind";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { useSectionEditSubmit } from "./useSectionEditSubmit";
+import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass, editLabelClass } from "./EditSectionActions";
 
 const MAX_SUGGESTIONS = 8;
@@ -120,6 +120,7 @@ export default function ProductInfoEditForm({
       version: resolved.version,
       section: "PRODUCT",
       onDone,
+      savedPopup: REPAIR_CASE_SAVED_POPUP,
     });
 
   const disabled = isSubmitting || isConflict;

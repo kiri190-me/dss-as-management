@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import ReasonPromptDialog from "./ReasonPromptDialog";
 import DecisionCompleteDialog from "./DecisionCompleteDialog";
 import {
@@ -122,6 +123,7 @@ export default function ExecutionNodeCard({
     }
     setIsMemoDirty(false);
     router.refresh();
+    showSavePopup({ message: "메모를 저장했습니다.", redirectTo: null });
   }
 
   return (

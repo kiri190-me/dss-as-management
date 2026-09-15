@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
+import type { SavePopupRequest } from "@/lib/domain/save-popup";
 import { buildDraftText } from "@/lib/domain/edit-draft-text";
 import { updateRepairCaseAction } from "@/lib/server/actions/update-repair-case";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
@@ -38,11 +40,24 @@ export type SectionEditConflictError = {
  * 직전에 저장하려던 fields에서 자유 입력 글만 뽑아 붙잡아 둔다(아래 CONFLICT
  * 분기) — 폼이 사라진 뒤에도 사용자가 그 글을 볼 수 있다.
  */
+/** 접수 건 상세에서 고친 뒤의 팝업 — 저장하면 전체 A/S 현황으로 넘어간다(2026-09-15 사용자 요청). */
+export const REPAIR_CASE_SAVED_POPUP: SavePopupRequest = {
+  message: "A/S 정보를 저장했습니다.",
+  redirectTo: "/repair-cases",
+};
+
 export function useSectionEditSubmit(params: {
   repairCaseId: string;
   version: number;
   section: RepairCaseEditSection;
   onDone: () => void;
+  /**
+   * 저장 뒤 띄울 팝업(common/SavePopup.tsx). 부르는 곳마다 넘어갈 곳이 달라서
+   * 받는다 — 접수 건 상세는 A/S 목록으로(REPAIR_CASE_SAVED_POPUP), 주간보고의
+   * 비고 칸은 그 표에 머문다. null 이면 띄우지 않는다. 필수로 둔 것은 새로 부르는
+   * 곳이 정하고 가게 하려는 것이다 — 빠뜨리면 타입이 막는다.
+   */
+  savedPopup: SavePopupRequest | null;
 }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,6 +96,7 @@ export function useSectionEditSubmit(params: {
 
       router.refresh();
       params.onDone();
+      if (params.savedPopup) showSavePopup(params.savedPopup);
     } finally {
       setIsSubmitting(false);
     }

@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import {
   addAttachment,
@@ -516,14 +517,14 @@ function DatabaseFilesScreen({
 
       if (uploaded > 0 && failures.length === 0) {
         const remaining = stagedPhotos.length - uploadedPhotoIds.length;
-        setStatusMessage({
-          type: "success",
-          text: fromCamera
-            ? `사진 ${uploaded}장을 올렸습니다.${remaining > 0 ? ` 고르지 않은 ${remaining}장은 그대로 있습니다.` : ""}`
-            : files.length === 1
-              ? `"${files[0].name}"을(를) 올렸습니다.`
-              : `${uploaded}장을 모두 올렸습니다.`,
-        });
+        // 다 올라갔으면 저장 팝업으로 알린다(접수 건 안에 딸린 것이라 머문다).
+        // 몇 장이 빠진 경우는 무엇이 빠졌는지 읽어야 하므로 아래처럼 화면에 남긴다.
+        const message = fromCamera
+          ? `사진 ${uploaded}장을 올렸습니다.${remaining > 0 ? ` 고르지 않은 ${remaining}장은 그대로 있습니다.` : ""}`
+          : files.length === 1
+            ? `"${files[0].name}"을(를) 올렸습니다.`
+            : `${uploaded}장을 모두 올렸습니다.`;
+        showSavePopup({ message, redirectTo: null });
       } else if (uploaded > 0) {
         setStatusMessage({
           type: "error",
@@ -1087,7 +1088,7 @@ function DemoFilesScreen({
     setIsSubmitting(false);
     if (result.ok) {
       setIsAddDialogOpen(false);
-      announce("success", `"${result.record.displayName}" 메타데이터를 등록했습니다.`);
+      showSavePopup({ message: `"${result.record.displayName}" 메타데이터를 등록했습니다.`, redirectTo: null });
     } else {
       announce("error", result.message ?? attachmentActionErrorMessages[result.reason]);
     }
@@ -1103,7 +1104,7 @@ function DemoFilesScreen({
     });
     if (result.ok) {
       setRenameTarget(null);
-      announce("success", `표시 이름을 "${result.record.displayName}"(으)로 변경했습니다.`);
+      showSavePopup({ message: `표시 이름을 "${result.record.displayName}"(으)로 변경했습니다.`, redirectTo: null });
     } else {
       announce("error", result.message ?? attachmentActionErrorMessages[result.reason]);
     }
@@ -1119,7 +1120,7 @@ function DemoFilesScreen({
     });
     if (result.ok) {
       setDescriptionTarget(null);
-      announce("success", "설명을 저장했습니다.");
+      showSavePopup({ message: "설명을 저장했습니다.", redirectTo: null });
     } else {
       announce("error", result.message ?? attachmentActionErrorMessages[result.reason]);
     }

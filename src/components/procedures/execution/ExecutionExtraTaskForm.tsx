@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { addExecutionExtraTaskAction } from "@/lib/server/actions/procedure-case-execution";
 
 export default function ExecutionExtraTaskForm({
@@ -32,6 +33,7 @@ export default function ExecutionExtraTaskForm({
     setTitle("");
     setInstructions("");
     router.refresh();
+    showSavePopup({ message: "추가 작업을 등록했습니다.", redirectTo: null });
   }
 
   return (

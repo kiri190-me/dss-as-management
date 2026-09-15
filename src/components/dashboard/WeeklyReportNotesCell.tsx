@@ -126,6 +126,8 @@ export default function WeeklyReportNotesCell({
       version,
       section: "FAULT_SERVICE",
       onDone: () => setIsEditing(false),
+      // 주간보고 표 안의 한 칸이라 A/S 목록으로 넘기지 않고 팝업만 띄운다.
+      savedPopup: { message: "비고를 저장했습니다.", redirectTo: null },
     });
 
   if (!isEditing) {

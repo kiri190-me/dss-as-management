@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { resolveRepairCaseBillingAction } from "@/lib/server/actions/resolve-repair-case-billing";
 import type { FinalBillingDecision } from "@/lib/db/mutations/repair-case-billing-decision";
 
@@ -38,6 +39,7 @@ export default function PendingBillingDecisionCard({
         return;
       }
       router.refresh();
+      showSavePopup({ message: "유·무상을 확정했습니다.", redirectTo: null });
     });
   }
 

@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { useSectionEditSubmit } from "./useSectionEditSubmit";
+import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectionActions";
 import { buildEngineerSelectOptions } from "./engineer-select-options";
 
@@ -39,6 +39,7 @@ export default function EngineerEditCell({
       version,
       section: "FAULT_SERVICE",
       onDone: () => setIsEditing(false),
+      savedPopup: REPAIR_CASE_SAVED_POPUP,
     });
 
   if (!isEditing) {

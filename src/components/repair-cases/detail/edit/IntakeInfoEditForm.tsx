@@ -7,7 +7,7 @@ import { useUiText } from "@/components/providers/UiTextProvider";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
-import { useSectionEditSubmit } from "./useSectionEditSubmit";
+import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass, editLabelClass } from "./EditSectionActions";
 
 const MAX_SUGGESTIONS = 8;
@@ -136,6 +136,7 @@ export default function IntakeInfoEditForm({
       version: resolved.version,
       section: "INTAKE",
       onDone,
+      savedPopup: REPAIR_CASE_SAVED_POPUP,
     });
 
   const disabled = isSubmitting || isConflict;

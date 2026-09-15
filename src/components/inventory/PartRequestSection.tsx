@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createPartRequestAction, cancelPartRequestAction } from "@/lib/server/actions/inventory-part-requests";
 import type { PartListRow } from "@/lib/db/queries/inventory";
 import type { OwnPartRequestRow } from "@/lib/db/queries/inventory-part-requests";
@@ -179,6 +180,8 @@ export default function PartRequestSection({
     setCart([]);
     setSearch("");
     router.refresh();
+    // 접수 건 안에 딸린 요청이라 목록으로 넘기지 않는다(common/SavePopup.tsx).
+    showSavePopup({ message: "부품을 요청했습니다.", redirectTo: null });
   }
 
   async function handleCancel(requestId: string) {

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { checkManualStepSetEligibility } from "@/lib/domain/local/workflow/permissions";
@@ -82,8 +83,9 @@ export default function ManualStepSetPanel({
         return;
       }
       setReason("");
-      setMessage({ type: "success", text: "현재 단계를 변경했습니다." });
       router.refresh();
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 오류는 지금처럼 이 칸 아래에.
+      showSavePopup({ message: "현재 단계를 변경했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }

@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
-import { useSectionEditSubmit } from "./useSectionEditSubmit";
+import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass, editLabelClass } from "./EditSectionActions";
 
 function ReadOnlyField({ label, value }: { label: string; value: string | null }) {
@@ -41,6 +41,7 @@ export default function FaultServiceEditForm({
       version: resolved.version,
       section: "FAULT_SERVICE",
       onDone,
+      savedPopup: REPAIR_CASE_SAVED_POPUP,
     });
 
   const disabled = isSubmitting || isConflict;

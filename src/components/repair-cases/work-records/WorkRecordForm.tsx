@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
 import { WORK_RECORD_KIND_CODES, type WorkRecordKind } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
@@ -58,6 +59,7 @@ export default function WorkRecordForm({
     setSelectedNodeId("");
     setClientRequestId(generateClientUuid());
     router.refresh();
+    showSavePopup({ message: "작업 기록을 등록했습니다.", redirectTo: null });
   }
 
   return (

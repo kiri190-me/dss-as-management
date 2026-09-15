@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useSectionEditSubmit } from "./useSectionEditSubmit";
+import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectionActions";
 
 /**
@@ -35,6 +35,7 @@ export default function ReportNumberEditCell({
       version,
       section: "INTAKE",
       onDone: () => setIsEditing(false),
+      savedPopup: REPAIR_CASE_SAVED_POPUP,
     });
 
   if (!isEditing) {

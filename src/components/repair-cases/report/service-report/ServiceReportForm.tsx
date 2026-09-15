@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
@@ -291,7 +292,6 @@ export default function ServiceReportForm({
   templateError: string | null;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -623,14 +623,17 @@ export default function ServiceReportForm({
       setSaved({ id: result.id, version: result.version });
       setSavedSnapshot(JSON.stringify(values));
       forgetDraft();
-      setStatusMessage(saved ? "저장했습니다." : "새 보고서로 저장했습니다.");
-
-      if (!saved) {
-        // 주소를 「고치기」로 바꾼다 — 새로고침해도 방금 만든 장이 열린다.
-        // 여기서 `?kind=` 는 자연히 떨어진다(저장된 장의 종류는 그 장에 있다).
-        router.replace(`${pathname}?id=${result.id}`);
-      }
-      router.refresh();
+      /*
+       * 저장 팝업을 0.5초 띄운 뒤 「보고서」 탭(보고서 목록)으로 넘어간다 —
+       * 2026-09-15 사용자 요청. 그 전에는 이 화면에 머물며 「저장했습니다」를
+       * 적고, 새 장이면 주소를 `?id=` 로 바꿨다. 떠날 화면이라 주소를 바꾸지도
+       * 다시 읽지도 않는다 — 넘어가기 직전에 replace·refresh 를 부르면 이동과
+       * 다툰다(QuoteEditForm 의 🔴 주석과 같은 사정). 넘기는 것은 팝업이 한다.
+       */
+      showSavePopup({
+        message: saved ? "보고서를 저장했습니다." : "새 보고서를 저장했습니다.",
+        redirectTo: reportHref,
+      });
     } catch {
       setFormError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
     } finally {

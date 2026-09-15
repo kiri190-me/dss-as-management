@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 import { useUiText } from "@/components/providers/UiTextProvider";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -202,8 +203,9 @@ export default function DatabaseWorkflowControlPanel({
         return;
       }
       setOpenDialog(null);
-      setStatusMessage({ type: "success", text: successText });
       router.refresh();
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 오류는 지금처럼 화면에.
+      showSavePopup({ message: successText, redirectTo: null });
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +228,7 @@ export default function DatabaseWorkflowControlPanel({
         return;
       }
       setOpenDialog(null);
-      setStatusMessage({ type: "success", text: result.message });
+      showSavePopup({ message: result.message, redirectTo: null });
       // 단계를 끼워넣으면 이 건의 workflow_version이 통째로 바뀐다 —
       // 화면이 들고 있는 rules가 곧바로 낡으므로 반드시 다시 읽어야 한다.
       router.refresh();

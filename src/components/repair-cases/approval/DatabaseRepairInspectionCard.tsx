@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
 import ApprovalActionDialog, { type ApprovalAssigneeOption } from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
@@ -161,7 +162,12 @@ export default function DatabaseRepairInspectionCard({
       setStatusMessage(result.message);
       return;
     }
-    setStatusMessage(dialogState === "REQUEST" ? "검수 승인을 요청했습니다." : `검수 ${DIALOG_TITLES[dialogState]}이 처리되었습니다.`);
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 거절 이유는 지금처럼 카드 안에.
+    setStatusMessage(null);
+    showSavePopup({
+      message: dialogState === "REQUEST" ? "검수 승인을 요청했습니다." : `검수 ${DIALOG_TITLES[dialogState]}이 처리되었습니다.`,
+      redirectTo: null,
+    });
     setDialogState(null);
     router.refresh();
   }
