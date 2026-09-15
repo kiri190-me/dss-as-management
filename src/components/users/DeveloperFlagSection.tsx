@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import { ListCard } from "@/components/common/list-card";
 import { setDeveloperFlagAction } from "@/lib/server/actions/developer-flag";
@@ -58,12 +59,14 @@ export default function DeveloperFlagSection({
       setMessage(result.message);
       return;
     }
-    setMessage(
-      nextFlag
-        ? "개발자 표시를 켰습니다. 그 사용자의 다음 화면부터 적용됩니다."
-        : "개발자 표시를 껐습니다. 그 사용자의 다음 화면부터 적용됩니다."
-    );
     router.refresh();
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+    showSavePopup({
+      message: nextFlag
+        ? "개발자 표시를 켰습니다. 그 사용자의 다음 화면부터 적용됩니다."
+        : "개발자 표시를 껐습니다. 그 사용자의 다음 화면부터 적용됩니다.",
+      redirectTo: null,
+    });
   }
 
   function roleText(user: RepresentativeManagementUserRow): string {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 import { DEFAULT_UI_TEXT } from "@/lib/domain/ui-text";
 import {
@@ -228,7 +229,8 @@ export default function UiTextEditor({ saved }: { saved: readonly UiTextOverride
         setMessage({ type: "error", text: result.message });
         return;
       }
-      setMessage({ type: "success", text: result.message });
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+      showSavePopup({ message: result.message, redirectTo: null });
       // 저장 결과(행이 지워진 칸 등)를 서버에서 다시 받아야 화면의 "저장돼 있는
       // 문구"가 실제와 같아진다.
       router.refresh();

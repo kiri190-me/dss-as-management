@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 import {
   isRoleEditableInNotificationSettings,
@@ -111,7 +112,8 @@ export default function NotificationSettings({ data }: { data: NotificationSetti
         setMessage({ type: "error", text: result.message });
         return;
       }
-      setMessage({ type: "success", text: result.message });
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+      showSavePopup({ message: result.message, redirectTo: null });
       // 저장 결과(기본값과 같아져 행이 지워진 칸 등)를 서버에서 다시 받아야
       // 화면이 실제 상태와 같아진다.
       router.refresh();

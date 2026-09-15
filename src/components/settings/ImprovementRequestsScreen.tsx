@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, useTransition, type ClipboardEvent } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   arrangeImprovementRequestList,
@@ -425,6 +426,9 @@ export default function ImprovementRequestsScreen({
           setDraftMenuKey("");
           releasePreviewUrls(toUpload);
           setStaged((prev) => prev.filter((entry) => !toUpload.includes(entry)));
+          // 이 목록 화면에서 적으므로 팝업만 띄우고 머문다(common/SavePopup.tsx).
+          // 스크린샷 몇 장이 빠졌으면 그 안내(createReport)는 화면에 남는다.
+          showSavePopup({ message: "개선 요청을 등록했습니다.", redirectTo: null });
         },
         onFailure: (text, fieldErrors) => {
           setCreateMenuError(fieldErrors.menuKey ?? null);
@@ -455,7 +459,10 @@ export default function ImprovementRequestsScreen({
           fields: { body: editDraft, menuKey: editMenuKey },
         }),
       {
-        onOk: () => setEditingId(null),
+        onOk: () => {
+          setEditingId(null);
+          showSavePopup({ message: "개선 요청을 저장했습니다.", redirectTo: null });
+        },
         onFailure: (text, fieldErrors) => {
           setEditMenuError(fieldErrors.menuKey ?? null);
           setRowError(item.id, isOnlyMenuError(fieldErrors) ? null : text);
@@ -471,7 +478,7 @@ export default function ImprovementRequestsScreen({
       `status:${item.id}`,
       () => changeImprovementRequestStatusAction({ id: item.id, expectedVersion: item.version, to }),
       {
-        onOk: () => {},
+        onOk: () => showSavePopup({ message: "상태를 바꿨습니다.", redirectTo: null }),
         onFailure: (text) => setRowError(item.id, text),
       }
     );
@@ -531,6 +538,8 @@ export default function ImprovementRequestsScreen({
       if (outcome.failures.length > 0) {
         const failed = `올리지 못한 스크린샷 — ${formatScreenshotRejections(outcome.failures)}`;
         setRowError(item.id, batchNotice ? `${batchNotice} ${failed}` : failed);
+      } else {
+        showSavePopup({ message: "스크린샷을 올렸습니다.", redirectTo: null });
       }
       router.refresh();
     });

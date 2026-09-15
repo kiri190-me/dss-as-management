@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 import {
   contrastRatio,
@@ -357,7 +358,8 @@ export default function ThemeTokenEditor({
         setMessage({ type: "error", text: result.message });
         return;
       }
-      setMessage({ type: "success", text: result.message });
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+      showSavePopup({ message: result.message, redirectTo: null });
       // 저장 결과(행이 지워진 칸 등)를 서버에서 다시 받아야 화면의 "저장돼
       // 있는 값"이 실제와 같아진다.
       router.refresh();

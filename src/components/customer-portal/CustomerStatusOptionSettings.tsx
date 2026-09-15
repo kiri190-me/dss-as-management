@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   createStatusOptionAction,
   updateStatusOptionAction,
@@ -37,8 +38,14 @@ export default function CustomerStatusOptionSettings({
   function run(action: () => Promise<{ ok: boolean; message: string }>) {
     startTransition(async () => {
       const result = await action();
-      setMessage({ ok: result.ok, text: result.message });
-      if (result.ok) router.refresh();
+      if (!result.ok) {
+        setMessage({ ok: false, text: result.message });
+        return;
+      }
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+      setMessage(null);
+      router.refresh();
+      showSavePopup({ message: result.message, redirectTo: null });
     });
   }
 

@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import { PART_ISSUE_REQUEST_BUTTON_LABEL } from "@/components/inventory/part-issue-approval-texts";
 import { saveShipmentApprovalRouteAction } from "@/lib/server/actions/shipment-approval-routes";
@@ -224,8 +225,13 @@ export default function ShipmentApprovalRouteSection({
       approverUserIds: steps,
     });
     setIsSaving(false);
-    setMessage(result.message);
-    if (result.ok) router.refresh();
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    router.refresh();
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+    showSavePopup({ message: result.message, redirectTo: null });
   }
 
   const scopeLabel = SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[scope];

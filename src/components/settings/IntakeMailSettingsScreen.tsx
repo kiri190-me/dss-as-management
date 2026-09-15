@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { Role } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import {
@@ -84,8 +85,14 @@ export default function IntakeMailSettingsScreen({
       const base = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "") || "image";
       form.set("cid", base.slice(0, 40));
       const result = await uploadSignatureImageAction(form);
-      setMessage({ ok: result.ok, text: result.message });
-      if (result.ok) router.refresh();
+      if (!result.ok) {
+        setMessage({ ok: false, text: result.message });
+        return;
+      }
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패·시험 발송 결과는 화면에.
+      setMessage(null);
+      router.refresh();
+      showSavePopup({ message: result.message, redirectTo: null });
     });
   }
 
@@ -147,8 +154,13 @@ export default function IntakeMailSettingsScreen({
         signatureHtml,
         recipientUserIds: [...selectedIds],
       });
-      setMessage({ ok: result.ok, text: result.message });
       setFieldErrors(result.ok ? {} : (result.fieldErrors ?? {}));
+      if (!result.ok) {
+        setMessage({ ok: false, text: result.message });
+        return;
+      }
+      setMessage(null);
+      showSavePopup({ message: result.message, redirectTo: null });
     });
   }
 

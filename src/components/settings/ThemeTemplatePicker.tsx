@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 
 import {
   contrastRatio,
@@ -198,10 +199,8 @@ export default function ThemeTemplatePicker({ saved }: { saved: readonly UiTheme
         setMessage({ type: "error", text: result.message });
         return;
       }
-      setMessage({
-        type: "success",
-        text: `${result.message} 다른 사용자는 다음 화면 이동부터 보입니다.`,
-      });
+      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패는 지금처럼 화면에.
+      showSavePopup({ message: `${result.message} 다른 사용자는 다음 화면 이동부터 보입니다.`, redirectTo: null });
       // 저장 결과를 서버에서 다시 받아야 「지금 쓰는 톤」 표시가 실제와 같아진다.
       router.refresh();
     } finally {

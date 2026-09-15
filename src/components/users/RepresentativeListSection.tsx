@@ -4,6 +4,7 @@ import { useState } from "react";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { setShipmentRepresentativeAction } from "@/lib/server/actions/shipment-representatives";
 import type { Role } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
@@ -74,8 +75,9 @@ export default function RepresentativeListSection({
       return;
     }
     setConfirmingLastRemoval(null);
-    setMessage(nextFlag ? "대표로 지정했습니다." : "대표를 해제했습니다.");
     router.refresh();
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패·계정 삭제 안내는 지금처럼 화면에.
+    showSavePopup({ message: nextFlag ? "대표로 지정했습니다." : "대표를 해제했습니다.", redirectTo: null });
   }
 
   function roleText(user: RepresentativeManagementUserRow): string {

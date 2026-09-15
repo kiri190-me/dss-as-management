@@ -4,6 +4,7 @@ import { useState } from "react";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { createShipmentDelegationAction, revokeShipmentDelegationAction } from "@/lib/server/actions/shipment-delegations";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
 import { deriveDelegationDisplayStatus } from "@/lib/domain/shipment-delegation-status";
@@ -85,10 +86,11 @@ export default function DelegationSection({
       setFormMessage(result.message);
       return;
     }
-    setFormMessage("위임을 지정했습니다.");
     setDelegateUserId("");
     setReason("");
     router.refresh();
+    // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 실패·철회 안내는 지금처럼 화면에.
+    showSavePopup({ message: "위임을 지정했습니다.", redirectTo: null });
   }
 
   async function handleRevoke(delegationId: string) {

@@ -238,6 +238,54 @@ test("주간보고 가져오기 — 건너뛴 건수는 팝업으로 지나치�
   assert.match(goals, /setCopyMessage\(result\.skipped > 0 \? \{ ok: true, text: copiedText \} : null\);/);
 });
 
+test("설정 화면은 성공 문구를 팝업으로 옮기고 그 자리에 머문다", () => {
+  const stayOnly: [string, number][] = [
+    ["src/components/settings/IntakeMailSettingsScreen.tsx", 2],
+    ["src/components/settings/MainColorPicker.tsx", 1],
+    ["src/components/settings/ThemeTemplatePicker.tsx", 1],
+    ["src/components/settings/ThemeTokenEditor.tsx", 1],
+    ["src/components/settings/UiTextEditor.tsx", 1],
+    ["src/components/settings/ImprovementRequestsScreen.tsx", 4],
+    ["src/components/users/NotificationSettings.tsx", 1],
+    ["src/components/users/RolePermissionSettings.tsx", 1],
+    ["src/components/users/DeveloperFlagSection.tsx", 1],
+    ["src/components/users/RepresentativeListSection.tsx", 1],
+    ["src/components/users/DelegationSection.tsx", 1],
+    ["src/components/users/ShipmentApprovalRouteSection.tsx", 1],
+    ["src/components/customer-portal/CustomerStatusOptionSettings.tsx", 1],
+  ];
+  for (const [path, count] of stayOnly) {
+    const calls = popupCalls(path);
+    assert.equal(calls.length, count, path);
+    assert.ok(
+      calls.every(([, redirectTo]) => redirectTo === "null"),
+      path
+    );
+  }
+  // 성공 문구를 화면 칸에 적던 줄은 팝업으로 옮겨 갔다 — 실패만 화면에 적는다.
+  for (const path of [
+    "src/components/settings/ThemeTokenEditor.tsx",
+    "src/components/settings/UiTextEditor.tsx",
+    "src/components/settings/MainColorPicker.tsx",
+    "src/components/settings/ThemeTemplatePicker.tsx",
+    "src/components/users/NotificationSettings.tsx",
+    "src/components/users/RolePermissionSettings.tsx",
+  ]) {
+    // 상태 타입 선언(`{ type: "success" | "error"; … }`)은 남는다 — 보는 것은 **적는 호출**뿐이다.
+    assert.doesNotMatch(readFileSync(path, "utf8"), /setMessage\(\{\s*type: "success"/, path);
+  }
+});
+
+test("메일 시험 발송 결과 · 계정 삭제 안내 · 위임 철회는 화면에 남는다", () => {
+  const mail = readFileSync("src/components/settings/IntakeMailSettingsScreen.tsx", "utf8");
+  // 시험 발송은 저장이 아니다 — 받았는지 못 받았는지를 읽어야 하므로 화면에 둔다.
+  assert.match(mail, /await sendTestIntakeMailAction\(\{[\s\S]*?\}\);\s*setMessage\(\{ ok: result\.ok, text: result\.message \}\);/);
+  const list = readFileSync("src/components/users/RepresentativeListSection.tsx", "utf8");
+  assert.match(list, /setMessage\(userDeletionSuccessMessage\(deletedName\)\)/);
+  const delegation = readFileSync("src/components/users/DelegationSection.tsx", "utf8");
+  assert.match(delegation, /setListMessage\("위임을 철회했습니다\."\);/);
+});
+
 test("승인 카드는 성공 문구를 팝업으로 옮기고, 거절 이유만 카드에 남긴다", () => {
   for (const name of ["DatabaseRepairInspectionCard.tsx", "DatabaseFinalShipmentCard.tsx"]) {
     const source = readFileSync(`src/components/repair-cases/approval/${name}`, "utf8");
