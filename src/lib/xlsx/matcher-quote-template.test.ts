@@ -454,6 +454,67 @@ test("🔴 매쳐: 서류작업 묶음이 없어 당길 번호도 없다", { ski
   }
 });
 
+// ── 조사작업 없앰 — 맨 위를 지우므로 번호를 당긴다 ───────────────────────
+
+/**
+ * 🔴 조사 칸을 손대서 비운 장이면 「조사작업」 구역을 머리글까지 지운다(2026-09-15).
+ * 통전작업과 달리 **맨 위**라, `2) 수리작업 · 3) 통전작업` 이 `1) · 2)` 로 당겨져야
+ * 한다 — 두면 고객사가 받는 견적서가 `2) 3)` 으로 시작한다.
+ */
+test("🔴 조사작업 없앰: 머리글이 사라지고 수리작업이 1), 통전작업이 2) 가 된다", { skip: skipDomestic }, () => {
+  const filled = fill(domesticPath as string, {
+    ...BASE,
+    parts: [{ name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 }],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환"] },
+    investigationExcluded: true,
+  });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "조사작업"), [], "비운 조사 칸의 머리글이 남았다");
+  for (const line of INVESTIGATION_SIX) {
+    assert.deepEqual(rowsWithText(filled, "D", line), [], `${line} 이 남았다`);
+  }
+  for (const [mark, label] of [
+    ["1)", "수리작업"],
+    ["2)", "통전작업"],
+  ] as const) {
+    const rows = rowsWithText(filled, "B", mark);
+    assert.equal(rows.length, 1, `${mark} 이 하나가 아니다`);
+    assert.equal(filled.text(`D${rows[0]}`), label);
+  }
+  assert.deepEqual(rowsWithText(filled, "B", "3)"), [], "3) 이 남았다 — 번호가 건너뛴다");
+
+  const supply = rowsWithText(filled, "H", "공 급 가");
+  assert.equal(supply.length, 1);
+  assert.match(filled.formula(`I${supply[0]}`) ?? "", new RegExp(`^SUM\\(I\\d+:I${supply[0] - 1}\\)$`));
+});
+
+test("🔴 조사작업·통전작업 둘 다 없앰: 수리작업 하나가 1) 로 남는다", { skip: skipDomestic }, () => {
+  const filled = fill(domesticPath as string, {
+    ...BASE,
+    parts: [{ name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 }],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환"] },
+    investigationExcluded: true,
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+  const first = rowsWithText(filled, "B", "1)");
+  assert.equal(first.length, 1);
+  assert.equal(filled.text(`D${first[0]}`), "수리작업");
+  assert.deepEqual([...rowsWithText(filled, "B", "2)"), ...rowsWithText(filled, "B", "3)")], []);
+});
+
+test("🔴 조사작업 뺌을 꺼 두면 시트가 한 글자도 다르지 않다", { skip: skipDomestic }, () => {
+  const input: MatcherQuoteInput = {
+    ...BASE,
+    parts: [{ name: "출력측 고정 콘덴서", quantity: 1, unitPrice: 2_050_000 }],
+    workScope: { ...BASE.workScope, REPAIR: ["고정 콘덴서 교환"] },
+  };
+  const omitted = fill(domesticPath as string, input);
+  const off = fill(domesticPath as string, { ...input, investigationExcluded: false });
+  assert.equal(off.sheetXml, omitted.sheetXml, "신호를 꺼서 주면 결과가 달라졌다");
+});
+
 test("매쳐: 값이 모자라면 빈 칸짜리 견적서를 만드는 대신 던진다", { skip: skipDomestic }, () => {
   assert.throws(
     () => fillMatcherQuoteWorkbook(readFileSync(domesticPath as string), { ...BASE, subject: "" }),

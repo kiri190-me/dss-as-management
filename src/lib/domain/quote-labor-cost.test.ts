@@ -13,7 +13,11 @@ import { isPriceUnset, toPriceFieldValue } from "./quote-part-price";
 // 🔴 package.json 의 `test` 줄이 Windows 명령줄 한도(cmd.exe 8191자)에 닿아, 파일을
 // 하나만 더 적어도 `npm test` 가 「명령줄이 너무 깁니다」로 아예 돌지 않는다
 // (2026-09-11 확인 — 그 줄은 8113자였다).
-import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "./quote-work-scope-suppression";
+import {
+  isInvestigationScopeEmptied,
+  isRepairSectionDropped,
+  isWorkScopeSectionSuppressed,
+} from "./quote-work-scope-suppression";
 import { quoteTemplateKey } from "./quote-template-variant";
 import { QUOTE_WORK_SCOPE_SECTIONS, type QuoteWorkScopeSection } from "@/lib/validation/quote-input";
 import {
@@ -260,40 +264,70 @@ describe("단가를 화면 칸에 넣기", () => {
 
 const FLAGS = [true, false] as const;
 
+type SuppressionFlags = {
+  investigationExcluded: boolean;
+  repairSectionDropped: boolean;
+  powerTestExcluded: boolean;
+};
+
+/** 세 신호의 모든 조합(8가지). */
+const COMBOS: readonly SuppressionFlags[] = FLAGS.flatMap((investigationExcluded) =>
+  FLAGS.flatMap((repairSectionDropped) =>
+    FLAGS.map((powerTestExcluded) => ({ investigationExcluded, repairSectionDropped, powerTestExcluded }))
+  )
+);
+
+const comboLabel = (flags: SuppressionFlags) =>
+  `조사 뺌 ${flags.investigationExcluded} · 수리 빠짐 ${flags.repairSectionDropped} · 통전 제외 ${flags.powerTestExcluded}`;
+
 describe("작업 내역 감춤 — 판정", () => {
-  test("🔴 통전 제외만 켜짐 → 통전작업만 감춘다, 조사·수리는 그대로 둔다", () => {
-    const options = { powerTestExcluded: true, repairSectionDropped: false };
-    assert.equal(isWorkScopeSectionSuppressed("POWER_TEST", options), true);
-    assert.equal(isWorkScopeSectionSuppressed("INVESTIGATION", options), false);
-    assert.equal(isWorkScopeSectionSuppressed("REPAIR", options), false);
+  test("🔴 신호마다 제 묶음 하나만 감춘다", () => {
+    const cases = [
+      ["investigationExcluded", "INVESTIGATION"],
+      ["repairSectionDropped", "REPAIR"],
+      ["powerTestExcluded", "POWER_TEST"],
+    ] as const;
+    for (const [flag, section] of cases) {
+      const flags: SuppressionFlags = {
+        investigationExcluded: false,
+        repairSectionDropped: false,
+        powerTestExcluded: false,
+        [flag]: true,
+      };
+      for (const other of QUOTE_WORK_SCOPE_SECTIONS) {
+        assert.equal(isWorkScopeSectionSuppressed(other, flags), other === section, `${flag} · ${other}`);
+      }
+    }
   });
 
-  test("🔴 수리 빠짐만 켜짐 → 수리 작업만 감춘다, 조사·통전은 그대로 둔다", () => {
-    const options = { powerTestExcluded: false, repairSectionDropped: true };
-    assert.equal(isWorkScopeSectionSuppressed("REPAIR", options), true);
-    assert.equal(isWorkScopeSectionSuppressed("INVESTIGATION", options), false);
-    assert.equal(isWorkScopeSectionSuppressed("POWER_TEST", options), false);
-  });
-
-  test("🔴 둘 다 꺼짐 → 아무것도 감추지 않는다", () => {
+  test("🔴 셋 다 꺼짐 → 아무것도 감추지 않는다", () => {
     for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
       assert.equal(
-        isWorkScopeSectionSuppressed(section, { powerTestExcluded: false, repairSectionDropped: false }),
+        isWorkScopeSectionSuppressed(section, {
+          investigationExcluded: false,
+          powerTestExcluded: false,
+          repairSectionDropped: false,
+        }),
         false,
         section
       );
     }
   });
+});
 
-  test("조사는 어느 경우에도 감추지 않는다", () => {
-    for (const powerTestExcluded of FLAGS) {
-      for (const repairSectionDropped of FLAGS) {
-        assert.equal(
-          isWorkScopeSectionSuppressed("INVESTIGATION", { powerTestExcluded, repairSectionDropped }),
-          false
-        );
-      }
-    }
+describe("「① 조사작업」을 빼는가 — 손대서 비웠을 때만", () => {
+  test("🔴 손대서 비웠으면 뺀다 — 공백뿐인 줄은 없는 줄이다", () => {
+    assert.equal(isInvestigationScopeEmptied({ touched: true, texts: [] }), true);
+    assert.equal(isInvestigationScopeEmptied({ touched: true, texts: ["", "   "] }), true);
+  });
+
+  test("🔴 손대지 않은 빈 칸은 빼지 않는다 — 옛 견적서 · 장비 종류를 안 고른 새 견적서", () => {
+    assert.equal(isInvestigationScopeEmptied({ touched: false, texts: [] }), false);
+  });
+
+  test("줄이 하나라도 있으면 빼지 않는다", () => {
+    assert.equal(isInvestigationScopeEmptied({ touched: true, texts: ["외관검사"] }), false);
+    assert.equal(isInvestigationScopeEmptied({ touched: true, texts: ["", "외관검사"] }), false);
   });
 });
 
@@ -335,16 +369,16 @@ const repoUrl = new URL("../../../", import.meta.url);
 const readFlat = (relativePath: string) =>
   readFileSync(new URL(relativePath, repoUrl), "utf8").replace(/\s+/g, " ");
 
-/** 제너레이터 둘(내자·O/H)이 적어 둔 판정 줄 — ② · ③ 을 없앨 수 있다. */
+/** 제너레이터 둘(내자·O/H)이 적어 둔 판정 줄 — 셋 다 없앨 수 있다. */
 const GENERATOR_EXCLUSION_LITERAL =
-  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, REPAIR: input.repairSectionDropped === true, POWER_TEST: input.powerTestExcluded === true, };";
+  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, INVESTIGATION: input.investigationExcluded === true, REPAIR: input.repairSectionDropped === true, POWER_TEST: input.powerTestExcluded === true, };";
 
 /**
- * 매쳐가 적어 둔 판정 줄 — ③ 만 없앨 수 있다. 수리작업에는 양식 기본 목록이 있어
- * 빠질 일이 없고, 도메인(isRepairSectionDropped)도 매쳐에는 늘 거짓을 준다.
+ * 매쳐가 적어 둔 판정 줄 — 조사작업·통전작업을 없앨 수 있다. 수리작업에는 양식 기본
+ * 목록이 있어 빠질 일이 없고, 도메인(isRepairSectionDropped)도 매쳐에는 늘 거짓을 준다.
  */
 const MATCHER_EXCLUSION_LITERAL =
-  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, POWER_TEST: input.powerTestExcluded === true, };";
+  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, INVESTIGATION: input.investigationExcluded === true, POWER_TEST: input.powerTestExcluded === true, };";
 
 /** 생성기마다 적혀 있어야 하는 판정 줄. 이 모양이어야 아래 셈이 그 생성기의 답이 된다. */
 const EXCLUSION_LITERALS: readonly (readonly [string, string])[] = [
@@ -353,12 +387,13 @@ const EXCLUSION_LITERALS: readonly (readonly [string, string])[] = [
   ["src/lib/xlsx/matcher-quote-template.ts", MATCHER_EXCLUSION_LITERAL],
 ];
 
-/** 제너레이터의 판정 줄을 그대로 옮긴 셈 — 생성기가 받는 두 값에 대해. */
-function xlsxExclusions(powerTestExcluded: boolean, repairSectionDropped: boolean): WorkScopeExclusions {
+/** 제너레이터의 판정 줄을 그대로 옮긴 셈 — 생성기가 받는 세 값에 대해. */
+function xlsxExclusions(flags: SuppressionFlags): WorkScopeExclusions {
   return {
     ...NO_WORK_SCOPE_EXCLUSIONS,
-    REPAIR: repairSectionDropped === true,
-    POWER_TEST: powerTestExcluded === true,
+    INVESTIGATION: flags.investigationExcluded === true,
+    REPAIR: flags.repairSectionDropped === true,
+    POWER_TEST: flags.powerTestExcluded === true,
   };
 }
 
@@ -386,17 +421,15 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
     }
   });
 
-  test("🔴 두 신호의 모든 조합에서 묶음마다 화면 판정 = 문서 판정", () => {
-    for (const powerTestExcluded of FLAGS) {
-      for (const repairSectionDropped of FLAGS) {
-        const excluded = xlsxExclusions(powerTestExcluded, repairSectionDropped);
-        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-          assert.equal(
-            isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
-            excluded[section],
-            `통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
-          );
-        }
+  test("🔴 세 신호의 모든 조합에서 묶음마다 화면 판정 = 문서 판정", () => {
+    for (const flags of COMBOS) {
+      const excluded = xlsxExclusions(flags);
+      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+        assert.equal(
+          isWorkScopeSectionSuppressed(section, flags),
+          excluded[section],
+          `${comboLabel(flags)} · ${section}`
+        );
       }
     }
   });
@@ -409,16 +442,14 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
       REPAIR: ["수리 하나"],
       POWER_TEST: ["통전 하나"],
     };
-    for (const powerTestExcluded of FLAGS) {
-      for (const repairSectionDropped of FLAGS) {
-        const kept = dropExcludedWorkScopeLines(lines, xlsxExclusions(powerTestExcluded, repairSectionDropped));
-        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-          assert.equal(
-            kept[section].length === 0,
-            isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
-            `통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
-          );
-        }
+    for (const flags of COMBOS) {
+      const kept = dropExcludedWorkScopeLines(lines, xlsxExclusions(flags));
+      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+        assert.equal(
+          kept[section].length === 0,
+          isWorkScopeSectionSuppressed(section, flags),
+          `${comboLabel(flags)} · ${section}`
+        );
       }
     }
   });
@@ -460,7 +491,7 @@ type TemplateCase = {
    * 늘 거짓을 주므로, 그 경우만 시험한다.
    */
   takesRepairDrop: boolean;
-  fill: (template: Buffer, powerTestExcluded: boolean, repairSectionDropped: boolean) => Buffer;
+  fill: (template: Buffer, flags: SuppressionFlags) => Buffer;
 };
 
 const TEMPLATE_CASES: readonly TemplateCase[] = [
@@ -469,35 +500,28 @@ const TEMPLATE_CASES: readonly TemplateCase[] = [
     envKey: "QUOTE_TEMPLATE_PATH",
     sheetName: QUOTE_SHEET_NAME,
     takesRepairDrop: true,
-    fill: (template, powerTestExcluded, repairSectionDropped) =>
-      fillQuoteWorkbook(template, {
-        ...GENERATOR_BASE,
-        workScope: MARKED_SCOPE,
-        powerTestExcluded,
-        repairSectionDropped,
-      }),
+    fill: (template, flags) => fillQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, ...flags }),
   },
   {
     name: "제너레이터 O/H",
     envKey: "OH_QUOTE_TEMPLATE_PATH",
     sheetName: OH_QUOTE_SHEET_NAME,
     takesRepairDrop: true,
-    fill: (template, powerTestExcluded, repairSectionDropped) =>
-      fillOhQuoteWorkbook(template, {
-        ...GENERATOR_BASE,
-        overhaulParts: [],
-        workScope: MARKED_SCOPE,
-        powerTestExcluded,
-        repairSectionDropped,
-      }),
+    fill: (template, flags) =>
+      fillOhQuoteWorkbook(template, { ...GENERATOR_BASE, overhaulParts: [], workScope: MARKED_SCOPE, ...flags }),
   },
   {
     name: "매쳐 내자",
     envKey: "MATCHER_QUOTE_TEMPLATE_PATH",
     sheetName: MATCHER_QUOTE_SHEET_NAME,
     takesRepairDrop: false,
-    fill: (template, powerTestExcluded) =>
-      fillMatcherQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, powerTestExcluded }),
+    fill: (template, { investigationExcluded, powerTestExcluded }) =>
+      fillMatcherQuoteWorkbook(template, {
+        ...GENERATOR_BASE,
+        workScope: MARKED_SCOPE,
+        investigationExcluded,
+        powerTestExcluded,
+      }),
   },
 ];
 
@@ -508,20 +532,16 @@ describe("작업 내역 감춤 — 실제 양식: 문서에 남은 묶음 = 화�
 
     test(`🔴 ${templateCase.name}: 신호의 모든 조합에서 묶음마다 같은 답`, { skip }, () => {
       const template = readFileSync(path as string);
-      const repairFlags = templateCase.takesRepairDrop ? FLAGS : ([false] as const);
-      for (const powerTestExcluded of FLAGS) {
-        for (const repairSectionDropped of repairFlags) {
-          const archive = ZipArchive.fromBuffer(
-            templateCase.fill(template, powerTestExcluded, repairSectionDropped)
+      const combos = templateCase.takesRepairDrop ? COMBOS : COMBOS.filter((flags) => !flags.repairSectionDropped);
+      for (const flags of combos) {
+        const archive = ZipArchive.fromBuffer(templateCase.fill(template, flags));
+        const sheetXml = archive.readText(resolveSheetPart(archive, templateCase.sheetName));
+        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+          assert.equal(
+            sheetXml.includes(MARKERS[section]),
+            !isWorkScopeSectionSuppressed(section, flags),
+            `${templateCase.name} · ${comboLabel(flags)} · ${section}`
           );
-          const sheetXml = archive.readText(resolveSheetPart(archive, templateCase.sheetName));
-          for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-            assert.equal(
-              sheetXml.includes(MARKERS[section]),
-              !isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
-              `${templateCase.name} · 통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
-            );
-          }
         }
       }
     });

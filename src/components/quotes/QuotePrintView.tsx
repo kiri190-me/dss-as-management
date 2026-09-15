@@ -127,6 +127,14 @@ export type QuotePrintData = Pick<
    * 🔴 **없으면 예전 그대로 그린다.**
    */
   repairSectionDropped?: boolean;
+  /**
+   * 「① 인수 조사」를 그리지 않는가 — 사람이 조사 칸을 손대서 비운 채 저장한 장이다
+   * (quotes.investigation_excluded, 2026-09-15). 켜면 그 아래 번호가 전부 하나씩
+   * 당겨진다 — xlsx 가 같은 규칙으로 구역을 지우고 번호를 당긴다.
+   *
+   * 🔴 **없으면 예전 그대로 그린다.** 빈 조사 칸만으로는 빠지지 않는다(옛 견적서).
+   */
+  investigationExcluded?: boolean;
 };
 
 function productLine(quote: QuotePrintData): string {
@@ -403,11 +411,11 @@ export default function QuotePrintView({
                   </td>
                 </tr>
 
-                {buildWorkSections(
-                  workSections,
-                  quote.powerTestExcluded === true,
-                  quote.repairSectionDropped === true
-                ).map((section) => (
+                {buildWorkSections(workSections, {
+                  investigation: quote.investigationExcluded === true,
+                  repair: quote.repairSectionDropped === true,
+                  powerTest: quote.powerTestExcluded === true,
+                }).map((section) => (
                   <SectionRows key={section.mark} section={section} />
                 ))}
               </tbody>
@@ -497,14 +505,13 @@ const SECTION_MARKS = ["①", "②", "③", "④"] as const;
  */
 function buildWorkSections(
   sections: QuoteWorkSections | undefined,
-  powerTestExcluded: boolean,
-  repairSectionDropped: boolean
+  dropped: { investigation: boolean; repair: boolean; powerTest: boolean }
 ): WorkSection[] {
   const resolved = sections ?? FALLBACK_WORK_SECTIONS;
   const drawn = [
-    resolved.INVESTIGATION,
-    ...(repairSectionDropped ? [] : [resolved.REPAIR]),
-    ...(powerTestExcluded ? [] : [resolved.POWER_TEST]),
+    ...(dropped.investigation ? [] : [resolved.INVESTIGATION]),
+    ...(dropped.repair ? [] : [resolved.REPAIR]),
+    ...(dropped.powerTest ? [] : [resolved.POWER_TEST]),
     { label: "서류작업", items: [] as readonly string[] },
   ];
   return drawn.map((section, index) => ({ mark: SECTION_MARKS[index], ...section }));

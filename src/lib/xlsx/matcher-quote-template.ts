@@ -14,6 +14,7 @@ import {
   ITEM_MARKER,
   LAYOUT_COLUMNS as COLUMNS,
   NO_WORK_SCOPE_EXCLUSIONS,
+  renumberWorkScopeSectionMarks,
   type WorkScopeExclusions,
   type WorkScopeLabels,
 } from "./quote-sheet-layout";
@@ -140,6 +141,12 @@ export const MATCHER_WORK_SCOPE_LABELS: WorkScopeLabels = {
 const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
 
 /**
+ * 세 묶음의 번호 모양(B열). 제너레이터의 `① ② ③` 과 다르다 — 조사작업을 지우면
+ * 이 모양대로 당긴다(quote-sheet-layout.ts 의 renumberWorkScopeSectionMarks).
+ */
+const MATCHER_SECTION_MARKS = ["1)", "2)", "3)"] as const;
+
+/**
  * `2. 작업 비용` 아래에 적히는 세 묶음. 키는 저장 쪽 구분과 같다
  * (validation/quote-input.ts 의 `QUOTE_WORK_SCOPE_SECTIONS`). 여기서 그 모듈을
  * 가져오지 않는 이유는, xlsx 층이 앱 층을 모르는 채로 남아 있어야 이 파일들을
@@ -177,6 +184,15 @@ export type MatcherQuoteInput = QuoteInput & {
    * (제너레이터 양식의 같은 신호는 quote-template.ts 의 `GeneratorQuoteInput`.)
    */
   powerTestExcluded?: boolean;
+  /**
+   * 켜면 「조사작업」 구역을 **머리글까지 문서에서 지운다.** 사람이 조사 칸을 손대서
+   * 비운 채 저장한 견적서다(quotes.investigation_excluded, 2026-09-15).
+   *
+   * 🔴 **이번에는 번호를 당긴다** — 맨 위를 지우므로 `2) 수리작업 · 3) 통전작업` 이
+   * `1) · 2)` 가 되어야 한다(MATCHER_SECTION_MARKS). 기본은 꺼짐이고, **주지 않으면
+   * 결과가 한 바이트도 달라지지 않는다.**
+   */
+  investigationExcluded?: boolean;
 };
 
 export function fillMatcherQuoteWorkbook(templateXlsx: Buffer, input: MatcherQuoteInput): Buffer {
@@ -235,9 +251,11 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
-  // 없애기로 한 묶음. 지금 켤 수 있는 것은 통전작업뿐이다 — 나머지 둘은 늘 꺼짐.
+  // 없애기로 한 묶음. 켤 수 있는 것은 조사작업·통전작업이다 — 수리작업은 양식에
+  // 기본 목록이 있어 빠질 일이 없다(domain 의 isRepairSectionDropped 가 매쳐엔 늘 거짓).
   const excluded: WorkScopeExclusions = {
     ...NO_WORK_SCOPE_EXCLUSIONS,
+    INVESTIGATION: input.investigationExcluded === true,
     POWER_TEST: input.powerTestExcluded === true,
   };
   // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
@@ -298,11 +316,19 @@ function fillSheet(
   });
   rows = resizedRepair.rows;
 
-  const resizedInvestigation = resizeRowBlock(rows, {
-    firstRow: investigation.firstRow,
-    currentCount: investigation.count,
-    targetCount: investigationCount,
-  });
+  // 조사작업을 없앨 때도 통전작업과 같다 — 머리글 행부터 한 줄 더 세어 0줄로 만든다
+  // (그 한 줄이 이동량에 들어가야 아래 공급가·부가세·합계가 제자리에 온다).
+  const resizedInvestigation = excluded.INVESTIGATION
+    ? resizeRowBlock(rows, {
+        firstRow: investigation.headerRow,
+        currentCount: investigation.count + 1,
+        targetCount: 0,
+      })
+    : resizeRowBlock(rows, {
+        firstRow: investigation.firstRow,
+        currentCount: investigation.count,
+        targetCount: investigationCount,
+      });
   rows = resizedInvestigation.rows;
 
   const resizedParts = resizeRowBlock(rows, {
@@ -372,6 +398,20 @@ function fillSheet(
   xml = fillScopeSection(xml, at.investigationFirst, workScope.INVESTIGATION);
   xml = fillScopeSection(xml, at.repairFirst, workScope.REPAIR);
   xml = fillScopeSection(xml, at.powerTestFirst, workScope.POWER_TEST);
+
+  // 조사작업을 지웠으면 그 아래 2) 수리작업 · 3) 통전작업의 번호를 하나씩 당긴다.
+  // 맨 뒤 3) 만 지웠으면 자리가 바뀐 묶음이 없어 손대지 않는다. 머리글 행은 줄 수를
+  // 맞춘 뒤의 자리다.
+  xml = renumberWorkScopeSectionMarks(
+    xml,
+    excluded,
+    {
+      INVESTIGATION: investigation.headerRow + afterParts,
+      REPAIR: repair.headerRow + afterInvestigation,
+      POWER_TEST: powerTest.headerRow + afterRepair,
+    },
+    MATCHER_SECTION_MARKS
+  );
 
   /**
    * 통전작업 마지막 줄과 공급가 사이의 금액 칸을 비운다. 이 자리는 양식이

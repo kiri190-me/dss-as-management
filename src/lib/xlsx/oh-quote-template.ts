@@ -201,9 +201,10 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
-  // 없애기로 한 묶음. 켤 수 있는 것은 ② · ③ 이다 — ① 은 늘 꺼짐이다.
+  // 없애기로 한 묶음. 셋 다 켤 수 있다 — 언제 켜지는지는 입력 타입의 각 신호 주석.
   const excluded: WorkScopeExclusions = {
     ...NO_WORK_SCOPE_EXCLUSIONS,
+    INVESTIGATION: input.investigationExcluded === true,
     REPAIR: input.repairSectionDropped === true,
     POWER_TEST: input.powerTestExcluded === true,
   };

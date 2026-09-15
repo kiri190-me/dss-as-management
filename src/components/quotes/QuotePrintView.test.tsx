@@ -212,10 +212,14 @@ test("Excel 받기: 독립 페이지에서도 받기 링크다", () => {
  * 통전검사」 구역을 머리글까지 지우고(xlsx/quote-template.ts), 여기가 그리는
  * 것이 다르면 받아 본 쪽이 다른 문서로 읽는다.
  */
-function renderSections(powerTestExcluded?: boolean, repairSectionDropped?: boolean): string {
+function renderSections(
+  powerTestExcluded?: boolean,
+  repairSectionDropped?: boolean,
+  investigationExcluded?: boolean
+): string {
   return renderToStaticMarkup(
     <QuotePrintView
-      quote={{ ...QUOTE, powerTestExcluded, repairSectionDropped }}
+      quote={{ ...QUOTE, powerTestExcluded, repairSectionDropped, investigationExcluded }}
       header={HEADER}
       quoteId="q-1"
       onClose={() => {}}
@@ -276,4 +280,26 @@ test("🔴 수리 작업 빠짐 + 통전작업 제외: 인수 조사 다음이 �
 test("🔴 옛 견적서 — 수리 빠짐을 주지 않으면 ② 수리 작업이 그대로다", () => {
   assert.ok(renderSections(false, false).includes("②　수리 작업"));
   assert.equal(renderSections(false), renderSections(false, false), "안 준 것과 꺼진 것은 같은 종이다");
+});
+
+// ─────────────── 조사 칸을 손대서 비운 장 — ① 인수 조사를 그리지 않는다
+
+test("🔴 조사작업 뺌: ① 인수 조사가 사라지고 그 아래 번호가 전부 하나씩 당겨진다", () => {
+  const html = renderSections(false, false, true);
+  assert.ok(!html.includes("인수 조사"), "비운 조사 칸의 머리글이 남았다");
+  assert.ok(html.includes("①　수리 작업"));
+  assert.ok(html.includes("②　통전검사[출하검사]"));
+  assert.ok(html.includes("③　서류작업"));
+  assert.ok(!html.includes("④"));
+});
+
+test("🔴 셋 다 빠지면 ① 서류작업만 남는다", () => {
+  const html = renderSections(true, true, true);
+  assert.ok(html.includes("①　서류작업"));
+  assert.ok(!html.includes("인수 조사") && !html.includes("　수리 작업") && !html.includes("통전검사"));
+});
+
+test("🔴 옛 견적서 — 조사작업 뺌을 주지 않으면 ① 인수 조사가 그대로다", () => {
+  assert.ok(renderSections(false, false, false).includes("①　인수 조사"));
+  assert.equal(renderSections(false, false), renderSections(false, false, false), "안 준 것과 꺼진 것은 같은 종이다");
 });

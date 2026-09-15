@@ -25,14 +25,22 @@ import type { WorkflowKind } from "./workflow-kind";
  * 함수를 거기서 부르게 바꾸지 않았다. 대신 xlsx 라우트가 isRepairSectionDropped 의
  * 답을 생성기에 넘긴다 — 판정은 여기 한 곳이다.
  *
- * ── 빠지는 묶음은 둘이다 ────────────────────────────────────────────────
- *   · ③ 통전작업 — 「통전작업 제외」를 켰을 때.
+ * ── 빠지는 묶음은 셋이다 ────────────────────────────────────────────────
+ *   · ① 조사작업 — 조사 칸을 손대서 비운 채 저장했을 때(2026-09-15, 아래
+ *     isInvestigationScopeEmptied).
  *   · ② 수리 작업 — 제너레이터 견적서에서 수리 작업을 하나도 고르지 않았을 때
  *     (2026-09-15, 아래 isRepairSectionDropped).
+ *   · ③ 통전작업 — 「통전작업 제외」를 켰을 때. 통전 칸의 마지막 줄을 지우면
+ *     저절로 켜진다(수정 화면).
  * ============================================================================
  */
 
 export type WorkScopeSuppressionInput = {
+  /**
+   * 「① 조사작업」을 뺄 것인가 — 사람이 조사 칸을 손대서 비운 장이다. 저장된 결정
+   * (quotes.investigation_excluded)이고, 수정 화면은 isInvestigationScopeEmptied 로 정한다.
+   */
+  investigationExcluded: boolean;
   /** 견적서의 「통전작업 제외」 체크. */
   powerTestExcluded: boolean;
   /**
@@ -46,14 +54,14 @@ export type WorkScopeSuppressionInput = {
  * 그 묶음이 이 견적서의 문서에서 빠지는가.
  *
  * `Record` 로 적는 이유는 xlsx 쪽 `WorkScopeExclusions` 와 같다 — 묶음이 하나 더
- * 생기는 날 **컴파일러가 여기를 채우라고 짚어 준다.** 조사는 늘 문서에 나간다.
+ * 생기는 날 **컴파일러가 여기를 채우라고 짚어 준다.**
  */
 export function isWorkScopeSectionSuppressed(
   section: QuoteWorkScopeSection,
-  { powerTestExcluded, repairSectionDropped }: WorkScopeSuppressionInput
+  { investigationExcluded, powerTestExcluded, repairSectionDropped }: WorkScopeSuppressionInput
 ): boolean {
   const suppressed: Record<QuoteWorkScopeSection, boolean> = {
-    INVESTIGATION: false,
+    INVESTIGATION: investigationExcluded === true,
     REPAIR: repairSectionDropped === true,
     POWER_TEST: powerTestExcluded === true,
   };
@@ -76,6 +84,32 @@ export function isWorkScopeSectionSuppressed(
  * 남는 일이 없다. 장비 종류가 없으면 제너레이터 양식이 쓰인다(quoteTemplateKey 와
  * 같은 판단 — 매쳐만 매쳐 양식이다).
  */
+export function isInvestigationScopeEmptied({
+  touched,
+  texts,
+}: {
+  /** 사람이 이 견적서의 조사 칸을 손댔는가(수정 화면의 scopeTouched). */
+  touched: boolean;
+  /** 지금 조사 칸에 적힌 줄들. */
+  texts: readonly string[];
+}): boolean {
+  return touched && texts.every((text) => text.trim() === "");
+}
+
+/**
+ * ↑ 「① 조사작업」을 문서에서 빼는가 — 사람이 조사 칸을 **손대서 비웠을 때**다
+ * (2026-09-15 사용자: 「[1) 조사작업]도 줄을 모두 삭제하면 머리글도 없어지도록」).
+ *
+ * 🔴 **비어 있다만으로는 빼지 않는다.** 이 기능이 생기기 전의 옛 견적서, 그리고
+ * 장비 종류를 아직 안 고른 새 견적서도 조사 칸이 비어 있다 — 그 장들은 지금처럼
+ * 양식의 기본 목록이 나가야 한다. 그래서 "손댔는가"를 함께 보고, 그 결정을 견적서에
+ * 저장한다(quotes.investigation_excluded). 문서 쪽은 저장된 그 칸을 읽을 뿐 다시
+ * 셈하지 않는다.
+ *
+ * 공백뿐인 줄은 저장할 때 걸러지므로(validation/quote-input.ts 의
+ * normalizeWorkScopeLines) 없는 줄로 본다.
+ */
+
 export function isRepairSectionDropped({
   equipmentKind,
   chosenRepairTaskCount,

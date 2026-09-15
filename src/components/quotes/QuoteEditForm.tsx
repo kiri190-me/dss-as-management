@@ -29,7 +29,11 @@ import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kin
 import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
 import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
-import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";
+import {
+  isInvestigationScopeEmptied,
+  isRepairSectionDropped,
+  isWorkScopeSectionSuppressed,
+} from "@/lib/domain/quote-work-scope-suppression";
 import {
   MAX_QUOTE_ITEMS,
   QUOTE_WORK_SCOPE_SECTIONS,
@@ -112,6 +116,12 @@ const WORK_SCOPE_SUPPRESSED_NOTICE =
   "통전작업 제외 — 이 구역은 견적서에 나가지 않습니다. 체크를 풀면 적어 둔 줄이 다시 보입니다.";
 const REPAIR_SCOPE_DROPPED_NOTICE =
   "수리 작업을 하나도 고르지 않아 이 구역은 견적서에 나가지 않습니다. 위 목록에서 작업을 고르면 다시 보입니다.";
+/**
+ * 조사 칸을 손대서 비웠을 때 그 칸 안에 두는 안내. 조사 칸은 **감추지 않는다** —
+ * 되돌리는 체크 상자가 없어서, 감추면 줄을 다시 넣을 자리가 없어진다.
+ */
+const INVESTIGATION_EMPTIED_NOTICE =
+  "조사 줄을 모두 지워 이 구역은 머리글까지 견적서에 나가지 않습니다. 줄을 더하거나 [양식 기본값으로]를 누르면 다시 나갑니다.";
 
 type ItemRow = {
   key: string;
@@ -826,6 +836,12 @@ export default function QuoteEditForm({
        */
       powerTestExcluded,
       laborPowerTestDeduction: powerTestDeduction === null ? null : toAmountText(powerTestDeduction),
+      /**
+       * 「① 조사작업」을 뺄 것인가 — 조사 칸을 손대서 비운 채 저장하면 켜진다. 문서는
+       * 저장된 이 결정만 읽는다. 빈 칸만으로 가르면 옛 견적서의 빈 칸과 구별되지 않는다
+       * (isInvestigationScopeEmptied 주석).
+       */
+      investigationExcluded,
       repairTasks: selectedTasks,
       /**
        * 문서에 적히는 작업 내역. 빈 줄은 검증이 걸러 낸다 — 적힐 것이 없는
@@ -958,6 +974,17 @@ export default function QuoteEditForm({
     chosenRepairTaskCount: selectedTasks.length,
   });
 
+  /**
+   * 조사 칸을 손대서 비웠는가 — 그러면 「① 인수 조사」가 머리글까지 문서에서 빠지고,
+   * 저장하면 그 결정이 견적서에 남는다(quotes.investigation_excluded). 손대지 않은
+   * 빈 칸(옛 견적서 · 장비 종류를 안 고른 새 견적서)은 빼지 않는다
+   * (domain/quote-work-scope-suppression.ts).
+   */
+  const investigationExcluded = isInvestigationScopeEmptied({
+    touched: scopeTouched.INVESTIGATION,
+    texts: scopeLines.INVESTIGATION.map((row) => row.text),
+  });
+
   if (showPreview) {
     /**
      * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
@@ -991,6 +1018,8 @@ export default function QuoteEditForm({
           powerTestExcluded,
           // 수리 작업을 하나도 안 골랐으면 「② 수리 작업」도 사라진다 — 같은 이유.
           repairSectionDropped,
+          // 조사 칸을 손대서 비웠으면 「① 인수 조사」도 사라진다 — 저장하면 그 결정이 남는다.
+          investigationExcluded,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
           items: items
@@ -1710,7 +1739,13 @@ export default function QuoteEditForm({
                * 값도 지금과 같다(collectFields 의 workScopeLines). 칸 제목은 남긴다 —
                * 칸이 통째로 사라지면 어디 갔는지 모른다.
                */
-              const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped });
+              // 조사 칸은 비워도 **감추지 않는다**(investigationExcluded: false) — 비운 것
+              // 자체가 빼는 결정이라, 감추면 줄을 다시 넣을 자리가 없다. 칸 안에 안내를 띄운다.
+              const suppressed = isWorkScopeSectionSuppressed(section, {
+                powerTestExcluded,
+                repairSectionDropped,
+                investigationExcluded: false,
+              });
               return (
                 <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                   <div className="flex items-baseline justify-between gap-2">
@@ -1786,6 +1821,11 @@ export default function QuoteEditForm({
                         {rows.length === 0 && (
                           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                             아직 없습니다. 아래에서 줄을 더하세요.
+                          </p>
+                        )}
+                        {section === "INVESTIGATION" && investigationExcluded && (
+                          <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                            {INVESTIGATION_EMPTIED_NOTICE}
                           </p>
                         )}
                       </div>

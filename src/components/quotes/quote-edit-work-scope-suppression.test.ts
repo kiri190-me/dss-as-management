@@ -77,13 +77,13 @@ describe("판정을 부르는 자리", () => {
   test("🔴 칸마다 도메인 판정을 「통전작업 제외」·「수리 작업 빠짐」 상태로 부른다", () => {
     assert.ok(
       form.includes(
-        'import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";'
+        'import { isInvestigationScopeEmptied, isRepairSectionDropped, isWorkScopeSectionSuppressed, } from "@/lib/domain/quote-work-scope-suppression";'
       ),
       "도메인 판정을 가져오지 않는다"
     );
     assert.ok(
       sectionMap.includes(
-        "const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped });"
+        "const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped, investigationExcluded: false, });"
       ),
       "칸마다 판정을 부르지 않는다"
     );
@@ -105,6 +105,37 @@ describe("판정을 부르는 자리", () => {
       form.includes("// 수리 작업을 하나도 안 골랐으면 「② 수리 작업」도 사라진다 — 같은 이유. repairSectionDropped,"),
       "미리보기에 수리 작업 빠짐을 넘기지 않는다"
     );
+  });
+});
+
+describe("「1) 조사작업」을 손대서 비우면 문서에서 빠진다 — 칸은 감추지 않는다", () => {
+  test("🔴 판정은 도메인이 한다 — 손댔는가 + 지금 적힌 줄", () => {
+    assert.ok(
+      form.includes(
+        "const investigationExcluded = isInvestigationScopeEmptied({ touched: scopeTouched.INVESTIGATION, texts: scopeLines.INVESTIGATION.map((row) => row.text), });"
+      ),
+      "조사작업 뺌을 도메인으로 정하지 않는다"
+    );
+    assert.equal(form.split("isInvestigationScopeEmptied(").length - 1, 1, "판정을 부르는 곳이 하나가 아니다");
+  });
+
+  test("🔴 저장과 미리보기가 같은 결정을 받는다", () => {
+    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    assert.ok(collect.includes("investigationExcluded,"), "저장에 조사작업 뺌이 실리지 않는다");
+    assert.ok(
+      form.includes(
+        "// 조사 칸을 손대서 비웠으면 「① 인수 조사」도 사라진다 — 저장하면 그 결정이 남는다. investigationExcluded,"
+      ),
+      "미리보기에 조사작업 뺌을 넘기지 않는다"
+    );
+  });
+
+  test("🔴 조사 칸은 감추지 않고 칸 안에 안내를 띄운다 — 감추면 줄을 다시 넣을 자리가 없다", () => {
+    assert.ok(visibleBranch.includes('{section === "INVESTIGATION" && investigationExcluded && ('), "안내가 없다");
+    assert.ok(visibleBranch.includes("{INVESTIGATION_EMPTIED_NOTICE}"));
+    const notice = sliceBetween(form, "const INVESTIGATION_EMPTIED_NOTICE =", ";");
+    assert.ok(notice.includes("견적서에 나가지 않습니다"), notice);
+    assert.ok(notice.includes("양식 기본값으로"), notice);
   });
 });
 

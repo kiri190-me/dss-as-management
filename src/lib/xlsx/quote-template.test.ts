@@ -545,6 +545,58 @@ test("🔴 수리 작업 빠짐을 주지 않거나 꺼 두면 예전과 한 바
   assert.equal(off.sheetXml, plain.sheetXml);
 });
 
+// ── ① 인수 조사를 없앨 때 — 그 아래 번호가 전부 하나씩 당겨진다 ────────────
+
+/**
+ * 사람이 조사 칸을 손대서 비운 채 저장한 견적서(2026-09-15 사용자 — 「줄을 모두
+ * 삭제하면 머리글도 없어지도록」). 🔴 **맨 위**를 지우므로 수리·통전·서류작업의
+ * 번호가 전부 하나씩 올라와야 한다.
+ */
+test("🔴 조사작업 없앰: 머리글이 사라지고 수리가 ①, 통전검사가 ②, 서류작업이 ③ 이 된다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(3), investigationExcluded: true });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "인수 조사"), [], "비운 조사 칸의 머리글이 남았다");
+
+  const first = rowsWithText(filled, "B", "①");
+  assert.equal(first.length, 1);
+  assert.equal(filled.text(`D${first[0]}`), "수리 작업");
+
+  const second = rowsWithText(filled, "B", "②");
+  assert.equal(second.length, 1);
+  assert.equal(filled.text(`D${second[0]}`), POWER_TEST_HEADER);
+
+  assert.equal(paperworkMark(filled), "③");
+  assert.deepEqual(rowsWithText(filled, "B", "④"), []);
+
+  const supply = rowsWithText(filled, "H", "공 급 가");
+  assert.equal(supply.length, 1);
+  assert.match(filled.formula(`I${supply[0]}`) ?? "", new RegExp(`^SUM\\(I\\d+:I${supply[0] - 1}\\)$`));
+});
+
+test("🔴 세 묶음을 모두 없애면 서류작업이 ① 이 된다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(3),
+    investigationExcluded: true,
+    repairSectionDropped: true,
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+  for (const header of ["인수 조사", "수리 작업", POWER_TEST_HEADER]) {
+    assert.deepEqual(rowsWithText(filled, "D", header), [], header);
+  }
+  assert.equal(paperworkMark(filled), "①");
+  for (const mark of ["②", "③", "④"]) assert.deepEqual(rowsWithText(filled, "B", mark), [], mark);
+});
+
+test("🔴 조사작업 뺌을 주지 않거나 꺼 두면 예전과 한 바이트도 다르지 않다 — 빈 조사 칸만으로는 빠지지 않는다", { skip }, () => {
+  const plain = fill({ ...BASE, parts: parts(3) });
+  const off = fill({ ...BASE, parts: parts(3), investigationExcluded: false });
+  assert.equal(off.sheetXml, plain.sheetXml);
+  assert.equal(rowsWithText(plain, "D", "인수 조사").length, 1, "옛 견적서의 표준 목록이 사라졌다");
+});
+
 test("유효기간·납기·결재조건: 안 주면 양식의 기본 문구가 남는다", { skip }, () => {
   const untouched = fill({ ...BASE, parts: parts(1) });
   assert.equal(untouched.text(QUOTE_CELLS.validity), "발행일로부터 4주");

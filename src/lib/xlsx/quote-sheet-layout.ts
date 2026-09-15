@@ -415,22 +415,25 @@ export function renumberPaperworkBlock(
  * `headerRows` 는 **줄 수를 맞춘 뒤의** 머리글 행이다(부르는 쪽이 이동량으로 셈한다).
  * 없앤 묶음의 값은 쓰이지 않는다.
  *
- * 🔴 **자리가 바뀐 묶음만 쓴다.** 번호가 그대로인 칸(① 과, 앞에서 빠진 것이 없는
- * 묶음)은 손대지 않는다 — 하나도 없애지 않았거나 맨 아래 ③ 만 없앴으면 아무것도
- * 하지 않아, 예전 문서와 한 바이트도 달라지지 않는다(renumberPaperworkBlock 과 같은
- * 약속).
+ * 🔴 **자리가 바뀐 묶음만 쓴다.** 번호가 그대로인 칸(앞에서 빠진 것이 없는 묶음)은
+ * 손대지 않는다 — 하나도 없애지 않았거나 맨 아래 ③ 만 없앴으면 아무것도 하지 않아,
+ * 예전 문서와 한 바이트도 달라지지 않는다(renumberPaperworkBlock 과 같은 약속).
+ *
+ * `marks` 는 번호의 모양이다. 제너레이터는 `① ② ③`, 매쳐는 `1) 2) 3)` 이다 — 매쳐도
+ * 「① 조사작업」을 지울 수 있게 되면서(2026-09-15) 그 아래 번호를 당겨야 해졌다.
  */
 export function renumberWorkScopeSectionMarks(
   sheetXml: string,
   excluded: WorkScopeExclusions,
-  headerRows: Record<WorkScopeSection, number>
+  headerRows: Record<WorkScopeSection, number>,
+  marks: readonly string[] = SECTION_MARKS
 ): string {
   let xml = sheetXml;
   let position = 0;
   WORK_SCOPE_SECTIONS.forEach((section, templateIndex) => {
     if (excluded[section]) return;
     if (position !== templateIndex) {
-      xml = setInlineString(xml, `${LAYOUT_COLUMNS.sectionMark}${headerRows[section]}`, SECTION_MARKS[position]);
+      xml = setInlineString(xml, `${LAYOUT_COLUMNS.sectionMark}${headerRows[section]}`, marks[position]);
     }
     position += 1;
   });

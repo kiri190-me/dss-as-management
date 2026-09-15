@@ -198,6 +198,18 @@ export type GeneratorQuoteInput = QuoteInput & {
    * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
    */
   repairSectionDropped?: boolean;
+  /**
+   * 켜면 「① 인수 조사」 구역을 **머리글까지 문서에서 지운다.** 사람이 조사 칸을
+   * 손대서 비운 채 저장한 견적서다(quotes.investigation_excluded — 판정은
+   * domain/quote-work-scope-suppression.ts 의 isInvestigationScopeEmptied).
+   *
+   * 🔴 **빈 목록과 다르다.** 빈 목록은 "양식 그대로 둔다"이고 이것은 "없앤다"이다 —
+   * 옛 견적서는 조사 칸이 비어 있어도 이 신호가 꺼져 있어 표준 목록이 그대로 나간다.
+   *
+   * 그 아래 번호가 전부 하나씩 당겨진다. 기본은 꺼짐이고, **주지 않으면 결과가 한
+   * 바이트도 달라지지 않는다.**
+   */
+  investigationExcluded?: boolean;
 };
 
 /**
@@ -259,9 +271,10 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
-  // 없애기로 한 묶음. 켤 수 있는 것은 ② · ③ 이다 — ① 은 늘 꺼짐이다.
+  // 없애기로 한 묶음. 셋 다 켤 수 있다 — 언제 켜지는지는 입력 타입의 각 신호 주석.
   const excluded: WorkScopeExclusions = {
     ...NO_WORK_SCOPE_EXCLUSIONS,
+    INVESTIGATION: input.investigationExcluded === true,
     REPAIR: input.repairSectionDropped === true,
     POWER_TEST: input.powerTestExcluded === true,
   };

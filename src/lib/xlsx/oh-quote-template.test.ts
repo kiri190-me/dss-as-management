@@ -461,6 +461,61 @@ test("🔴 수리 작업·통전검사 둘 다 없앰: 인수 조사 다음이 �
 });
 
 /**
+ * 🔴 사람이 조사 칸을 손대서 비운 채 저장하면 「① 인수 조사」를 머리글까지 지운다
+ * (2026-09-15). **맨 위**를 지우므로 그 아래 번호가 전부 하나씩 올라오고, 합계
+ * 범위의 끝은 여전히 절사 줄보다 위여야 한다.
+ */
+test("🔴 조사작업 없앰: 머리글이 사라지고 번호가 전부 당겨지며 합계 범위가 공급가 위에서 끝난다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    investigationExcluded: true,
+  });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "인수 조사"), [], "비운 조사 칸의 머리글이 남았다");
+
+  const first = rowsWithText(filled, "B", "①");
+  assert.equal(first.length, 1);
+  assert.equal(filled.text(`D${first[0]}`), "OH 및 수리 작업");
+
+  const second = rowsWithText(filled, "B", "②");
+  assert.equal(second.length, 1);
+  assert.equal(filled.text(`D${second[0]}`), POWER_TEST_HEADER);
+
+  assert.equal(paperworkMark(filled), "③");
+  assert.deepEqual(rowsWithText(filled, "B", "④"), []);
+
+  const supply = rowsWithText(filled, "H", "공 급 가");
+  assert.equal(supply.length, 1);
+  const sums: number[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    const found = /^SUM\(I\d+:I(\d+)\)$/.exec(filled.formula(`G${row}`) ?? "");
+    if (found) sums.push(Number(found[1]));
+  }
+  assert.equal(sums.length, 1, "합계 수식을 찾지 못했다");
+  assert.ok(sums[0] < supply[0] - 1, `합계 범위가 절사 줄까지 삼켰다 — 순환 참조가 된다 (끝: ${sums[0]}행)`);
+});
+
+test("🔴 세 묶음을 모두 없애면 서류작업이 ① 이 된다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    investigationExcluded: true,
+    repairSectionDropped: true,
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+  for (const header of ["인수 조사", "OH 및 수리 작업", POWER_TEST_HEADER]) {
+    assert.deepEqual(rowsWithText(filled, "D", header), [], header);
+  }
+  assert.equal(paperworkMark(filled), "①");
+  for (const mark of ["②", "③", "④"]) assert.deepEqual(rowsWithText(filled, "B", mark), [], mark);
+});
+
+/**
  * 🔴 신호는 **기본이 꺼짐**이다. 주지 않은 것과 꺼서 준 것이 같은 시트여야 하고,
  * 둘 다 통전검사 구역을 그대로 내보내야 한다.
  */
