@@ -1,8 +1,12 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import NewQuoteDialog, {
+  closeEventMeansCancel,
+  openAsModal,
+  type ModalDialogLike,
   NEW_QUOTE_DEFAULT_KIND,
   NEW_QUOTE_DIALOG_TITLE_ID,
   NEW_QUOTE_EXCEL_ONLY_NOTE,
@@ -232,7 +236,8 @@ describe("[취소] · Esc · 바깥 누름 = 취소", () => {
 
   test("브라우저가 cancel 없이 창을 닫아도(close) 같은 길을 탄다 — 부모가 열린 줄 알고 남지 않게", () => {
     const { dialog, calls } = renderView();
-    fire(dialog.props.onClose);
+    // close 가 도착한 순간 창은 닫혀 있다.
+    fire(dialog.props.onClose, { currentTarget: { open: false } });
     assert.equal(calls.cancel, 1);
   });
 
@@ -252,6 +257,83 @@ describe("[취소] · Esc · 바깥 누름 = 취소", () => {
     const inner = dialog.props.children as ReactElement<AnyProps>;
     assert.ok(isValidElement(inner), "창의 자식이 칸 하나가 아니다");
     assert.ok(String(inner.props.className).split(" ").includes("p-4"), String(inner.props.className));
+  });
+});
+
+/**
+ * 브라우저의 `<dialog>` 를 흉내 낸 가짜 창. close() 는 곧바로 닫되 **close 이벤트는 나중 작업으로
+ * 쌓는다** — 브라우저가 그렇게 한다. flush() 가 쌓인 이벤트를 창의 onClose 로 보낸다.
+ */
+function fakeDialog(onClose: unknown) {
+  const queued: (() => void)[] = [];
+  const dialog: ModalDialogLike & { showModalCalls: number } = {
+    open: false,
+    showModalCalls: 0,
+    showModal() {
+      if (dialog.open) throw new Error("이미 열린 창을 다시 showModal 했다");
+      dialog.open = true;
+      dialog.showModalCalls += 1;
+    },
+    close() {
+      if (!dialog.open) return;
+      dialog.open = false;
+      queued.push(() => fire(onClose, { currentTarget: dialog }));
+    },
+  };
+  const flush = () => {
+    for (const run of queued.splice(0)) run();
+  };
+  return { dialog, flush };
+}
+
+describe("🔴 개발 모드 StrictMode — 창이 뜨자마자 사라지지 않는다 (2026-09-16 「[새 견적서]가 안 눌린다」)", () => {
+  test("🔴 정리 뒤 다시 연 창에 늦게 도착한 close 는 취소가 아니다 — 창이 떠 있다", () => {
+    const { dialog: view, calls } = renderView();
+    const { dialog, flush } = fakeDialog(view.props.onClose);
+    // StrictMode 의 effect: 실행 → 정리 → 다시 실행.
+    const cleanupFirst = openAsModal(dialog);
+    cleanupFirst();
+    openAsModal(dialog);
+    // 정리가 쌓아 둔 close 가 이제 도착한다.
+    flush();
+    assert.equal(calls.cancel, 0, "늦은 close 를 취소로 받아 창이 사라진다");
+    assert.equal(dialog.open, true, "창이 닫혀 있다");
+    assert.equal(dialog.showModalCalls, 2);
+  });
+
+  test("🔴 닫힌 상태의 close 는 취소다 — 브라우저가 cancel 없이 닫은 창(연달아 누른 Esc 등)", () => {
+    const { dialog: view, calls } = renderView();
+    const { dialog, flush } = fakeDialog(view.props.onClose);
+    openAsModal(dialog);
+    dialog.close();
+    flush();
+    assert.equal(calls.cancel, 1, "닫힌 창인데 부모가 열린 줄 안다");
+  });
+
+  test("StrictMode 로 연 뒤에도 사람이 닫으면 한 번 취소된다", () => {
+    const { dialog: view, calls } = renderView();
+    const { dialog, flush } = fakeDialog(view.props.onClose);
+    openAsModal(dialog)();
+    openAsModal(dialog);
+    flush();
+    dialog.close();
+    flush();
+    assert.equal(calls.cancel, 1);
+  });
+
+  test("판정은 「그 순간 열려 있는가」 하나다", () => {
+    assert.equal(closeEventMeansCancel({ open: false }), true);
+    assert.equal(closeEventMeansCancel({ open: true }), false);
+  });
+
+  test("🔴 창이 그 판정 · 여닫기를 제자리에서 쓴다 — close 를 곧바로 취소에 잇지 않는다", () => {
+    const source = readFileSync(new URL("./NewQuoteDialog.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
+    assert.ok(!source.includes("onClose={onCancel}"), "close 를 판정 없이 취소에 잇는다");
+    assert.ok(source.includes("if (closeEventMeansCancel(event.currentTarget)) onCancel();"), "close 에 판정을 쓰지 않는다");
+    assert.ok(source.includes("const closeOnUnmount = openAsModal(dialog);"), "effect 가 openAsModal 로 열지 않는다");
+    assert.ok(source.includes("return closeOnUnmount; }, []);"), "effect 가 openAsModal 의 정리를 돌려주지 않는다");
+    // 여닫기를 effect 에 따로 적지 않는다 — 시험한 그 함수가 쓰이는 것이다.
+    assert.equal(source.split(".showModal()").length - 1, 1, "showModal 을 부르는 곳이 openAsModal 하나가 아니다");
   });
 });
 
