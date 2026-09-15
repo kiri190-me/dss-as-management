@@ -1012,6 +1012,158 @@ test("🔴 실제 견적서: 인쇄 영역을 지운 파일 — 인자가 없으
   assert.equal(textCovering(grid, QUOTE_CELLS.quoteDate), "2026년 8월 28일");
 });
 
+// ── 조건부 서식 · 값의 종류 (견적서 ②b 재작업, 2026-09-16) ─────────────────────
+
+/** 테마 — lt1 흰색 · dk1 검정(시스템 색), 나머지는 Office 기본. */
+const CF_THEME_XML =
+  '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="시험"><a:themeElements><a:clrScheme name="시험">' +
+  '<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>' +
+  '<a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2>' +
+  '<a:accent1><a:srgbClr val="4F81BD"/></a:accent1><a:accent2><a:srgbClr val="C0504D"/></a:accent2>' +
+  '<a:accent3><a:srgbClr val="9BBB59"/></a:accent3><a:accent4><a:srgbClr val="8064A2"/></a:accent4>' +
+  '<a:accent5><a:srgbClr val="4BACC6"/></a:accent5><a:accent6><a:srgbClr val="F79646"/></a:accent6>' +
+  '<a:hlink><a:srgbClr val="0000FF"/></a:hlink><a:folHlink><a:srgbClr val="800080"/></a:folHlink>' +
+  "</a:clrScheme></a:themeElements></a:theme>";
+
+/**
+ * 서식 번호(`s`): 0 General · 1 견적서 금액 서식(`"₩"#,##0;[Red]"₩"#,##0`) · 2 글자(`@`).
+ * 조건부 서식의 서식(dxf): 0 테마 0(흰) 글자 · 1 빨간 배경(rgb) · 2 색 번호 41 배경 · 3 rgb+틴트
+ * 글자 · 4 테마 1(검정) 글자 · 5 테마 0 + 틴트 -0.5 글자.
+ */
+const CF_STYLES_XML =
+  '<?xml version="1.0"?><styleSheet>' +
+  '<numFmts count="1"><numFmt numFmtId="176" formatCode="&quot;₩&quot;#,##0;[Red]&quot;₩&quot;#,##0"/></numFmts>' +
+  '<fonts count="1"><font><sz val="10"/></font></fonts>' +
+  '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+  '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>' +
+  '<xf numFmtId="176" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" applyNumberFormat="1"/></cellXfs>' +
+  '<dxfs count="6">' +
+  '<dxf><font><color theme="0"/></font></dxf>' +
+  '<dxf><fill><patternFill><bgColor rgb="FFFF0000"/></patternFill></fill></dxf>' +
+  '<dxf><fill><patternFill><bgColor indexed="41"/></patternFill></fill></dxf>' +
+  '<dxf><font><color rgb="FFFF0000" tint="0.5"/></font></dxf>' +
+  '<dxf><font><color theme="1"/></font></dxf>' +
+  '<dxf><font><color theme="0" tint="-0.5"/></font></dxf>' +
+  "</dxfs></styleSheet>";
+
+const CF_SHEET_XML =
+  '<?xml version="1.0"?><worksheet>' +
+  '<dimension ref="A1:C4"/>' +
+  "<sheetData>" +
+  '<row r="1"><c r="A1" s="1"><v>0</v></c><c r="B1"/><c r="C1" t="inlineStr"><is><t>가</t></is></c></row>' +
+  '<row r="2"><c r="A2" s="1"><v>5</v></c><c r="B2" t="inlineStr"><is><t>값</t></is></c><c r="C2" s="2"><v>7</v></c></row>' +
+  '<row r="3"><c r="A3" t="b"><v>1</v></c><c r="B3" t="e"><v>#DIV/0!</v></c><c r="C3" t="d"><v>2026-09-02</v></c></row>' +
+  '<row r="4"><c r="A4" s="1"><v>0</v></c><c r="B4"><v>2</v></c><c r="C4" t="inlineStr"><is><t xml:space="preserve">  </t></is></c></row>' +
+  "</sheetData>" +
+  // 0 이면 흰 글자 — 빈 칸(B1)도 0 으로 읽힌다.
+  '<conditionalFormatting sqref="A1:A2 B1"><cfRule type="cellIs" dxfId="0" priority="3" operator="equal"><formula>0</formula></cfRule></conditionalFormatting>' +
+  // 사이 — 두 값의 순서를 가리지 않는다.
+  '<conditionalFormatting sqref="A2"><cfRule type="cellIs" dxfId="1" priority="4" operator="between"><formula>10</formula><formula>1</formula></cfRule></conditionalFormatting>' +
+  // 공백 포함 — 빈 칸과 공백뿐인 글자.
+  '<conditionalFormatting sqref="B1:B2 C4"><cfRule type="containsBlanks" dxfId="2" priority="5"><formula>LEN(TRIM(B1))=0</formula></cfRule></conditionalFormatting>' +
+  // 따옴표 글자와 같음 — rgb + 틴트.
+  '<conditionalFormatting sqref="B2"><cfRule type="cellIs" dxfId="3" priority="6" operator="equal"><formula>"값"</formula></cfRule></conditionalFormatting>' +
+  // 우선순위와 stopIfTrue — 1 번이 맞으면 2 번(빨간 배경)은 안 본다.
+  '<conditionalFormatting sqref="A4"><cfRule type="cellIs" dxfId="4" priority="1" stopIfTrue="1" operator="lessThan"><formula>1</formula></cfRule>' +
+  '<cfRule type="cellIs" dxfId="1" priority="2" operator="equal"><formula>0</formula></cfRule></conditionalFormatting>' +
+  // 수식 규칙 · 칸 참조 비교는 모른다 — 셋째만 맞는다.
+  '<conditionalFormatting sqref="B4"><cfRule type="expression" dxfId="1" priority="7"><formula>B4&gt;1</formula></cfRule>' +
+  '<cfRule type="cellIs" dxfId="1" priority="8" operator="greaterThan"><formula>A4</formula></cfRule>' +
+  '<cfRule type="cellIs" dxfId="5" priority="9" operator="greaterThanOrEqual"><formula>2</formula></cfRule></conditionalFormatting>' +
+  // Excel 의 값 순서 — 글자는 어떤 수보다 크다.
+  '<conditionalFormatting sqref="C1"><cfRule type="cellIs" dxfId="1" priority="10" operator="greaterThan"><formula>100</formula></cfRule></conditionalFormatting>' +
+  // ISO 날짜 칸은 견주지 않는다.
+  '<conditionalFormatting sqref="C3"><cfRule type="cellIs" dxfId="1" priority="11" operator="notEqual"><formula>0</formula></cfRule></conditionalFormatting>' +
+  "</worksheet>";
+
+function conditionalParts(overrides: Partial<SheetPrintGridParts> = {}): SheetPrintGridParts {
+  return {
+    sheetName: SHEET_NAME,
+    workbookXml: HANDMADE_WORKBOOK_XML,
+    sheetXml: CF_SHEET_XML,
+    sharedStringsXml: null,
+    stylesXml: CF_STYLES_XML,
+    drawingXml: null,
+    drawingRelsXml: null,
+    themeXml: CF_THEME_XML,
+    ...overrides,
+  };
+}
+
+const APPLY_CF = { printArea: "fallback-to-used-range", conditionalFormatting: "apply" } as const;
+
+function colorsOf(grid: SheetPrintGrid, row: number, column: number): { fontColor: string | null; backgroundColor: string | null } {
+  const found = cellAt(grid, row, column);
+  return { fontColor: found.fontColor, backgroundColor: found.backgroundColor };
+}
+
+test("🔴 조건부 서식 — 인자가 없으면 예전처럼 안 읽는다(보고서 호출부가 이 길이다)", () => {
+  const grid = buildSheetPrintGrid(conditionalParts(), USED_RANGE);
+  for (const row of grid.rows) {
+    for (const found of row.cells) {
+      assert.equal(found.fontColor, null, `${found.row}:${found.column}`);
+      assert.equal(found.backgroundColor, null, `${found.row}:${found.column}`);
+    }
+  }
+});
+
+test("🔴 조건부 서식 — 0 이면 흰 글자(테마 0 = lt1) · 빈 칸은 0 으로 읽힌다 · 글자는 그대로 둔다", () => {
+  const grid = buildSheetPrintGrid(conditionalParts(), APPLY_CF);
+  assert.deepEqual(colorsOf(grid, 1, 1), { fontColor: "#FFFFFF", backgroundColor: null });
+  assert.equal(cellAt(grid, 1, 1).text, "₩0", "글자를 지우지 않고 색으로 감춘다 — Excel 과 같다");
+  assert.equal(colorsOf(grid, 1, 2).fontColor, "#FFFFFF", "빈 칸은 「0 과 같음」에 걸린다(Excel 규칙)");
+  assert.equal(colorsOf(grid, 2, 1).fontColor, null, "5 는 0 이 아니다");
+});
+
+test("조건부 서식 — 사이 · 공백 포함 · 따옴표 글자 · 색 번호 · 틴트", () => {
+  const grid = buildSheetPrintGrid(conditionalParts(), APPLY_CF);
+  assert.equal(colorsOf(grid, 2, 1).backgroundColor, "#FF0000", "5 는 10 과 1 사이(순서를 가리지 않는다)");
+  assert.equal(colorsOf(grid, 1, 2).backgroundColor, "#CCFFFF", "빈 칸 — 색 번호 41");
+  assert.equal(colorsOf(grid, 4, 3).backgroundColor, "#CCFFFF", "공백뿐인 글자도 빈 칸이다");
+  assert.deepEqual(colorsOf(grid, 2, 2), { fontColor: "#FF8080", backgroundColor: null }, "「값」과 같음 — 빨강에 틴트 0.5");
+});
+
+test("조건부 서식 — 우선순위 · stopIfTrue · 모르는 규칙 · 값의 순서 · 날짜 칸", () => {
+  const grid = buildSheetPrintGrid(conditionalParts(), APPLY_CF);
+  assert.deepEqual(colorsOf(grid, 4, 1), { fontColor: "#000000", backgroundColor: null }, "stopIfTrue 뒤의 빨간 배경이 안 걸린다");
+  assert.deepEqual(colorsOf(grid, 4, 2), { fontColor: "#808080", backgroundColor: null }, "수식 · 칸 참조 규칙은 건너뛰고 셋째만");
+  assert.equal(colorsOf(grid, 1, 3).backgroundColor, "#FF0000", "글자는 어떤 수보다 크다");
+  assert.deepEqual(colorsOf(grid, 3, 3), { fontColor: null, backgroundColor: null }, "ISO 날짜 칸은 견주지 않는다");
+});
+
+test("조건부 서식 — 테마가 없으면 테마 색은 모르는 색(null), rgb 는 그대로", () => {
+  const grid = buildSheetPrintGrid(conditionalParts({ themeXml: null }), APPLY_CF);
+  assert.equal(colorsOf(grid, 1, 1).fontColor, null);
+  assert.equal(colorsOf(grid, 2, 1).backgroundColor, "#FF0000");
+});
+
+test("🔴 값의 종류 — 수 · 날짜는 수, 서식이 @ 면 글자, 참/거짓 · 오류, 빈 칸은 null", () => {
+  const grid = buildSheetPrintGrid(conditionalParts(), USED_RANGE);
+  const kind = (row: number, column: number) => cellAt(grid, row, column).valueKind;
+  assert.equal(kind(1, 1), "number");
+  assert.equal(kind(1, 2), null, "빈 칸");
+  assert.equal(kind(1, 3), "text");
+  assert.equal(kind(2, 3), "text", "7 이어도 서식이 @ 면 글자 — 보고서의 숫자 칸이 이렇다");
+  assert.equal(kind(3, 1), "boolean");
+  assert.equal(kind(3, 2), "error");
+  assert.equal(kind(3, 3), "number", "ISO 날짜도 Excel 안에서는 수다");
+  assert.equal(kind(4, 3), "text");
+  // 수식의 글자 결과 · 공유문자열도 글자.
+  const shared = buildSheetPrintGrid(
+    conditionalParts({
+      sheetXml:
+        '<?xml version="1.0"?><worksheet><dimension ref="A1:B1"/><sheetData><row r="1">' +
+        '<c r="A1" t="s"><v>0</v></c><c r="B1" t="str"><f>A1</f><v>비고</v></c></row></sheetData></worksheet>',
+      sharedStringsXml: '<?xml version="1.0"?><sst count="1" uniqueCount="1"><si><t>비고</t></si></sst>',
+    }),
+    USED_RANGE
+  );
+  assert.equal(cellAt(shared, 1, 1).valueKind, "text");
+  assert.equal(cellAt(shared, 1, 2).valueKind, "text");
+});
+
 // ── 🔴 보고서 불변 (견적서 ②a) ──────────────────────────────────────────────
 
 /** 1 → `A`, 27 → `AA`. */
@@ -1035,6 +1187,7 @@ const REPORT_CELL_KEYS = [
   "row",
   "rowSpan",
   "text",
+  "valueKind",
   "verticalAlign",
   "wrap",
 ];
@@ -1072,6 +1225,14 @@ function assertReportTextUnchanged(grid: SheetPrintGrid, workbook: Buffer): numb
     for (const cell of row.cells) {
       const ref = `${columnLetters(cell.column)}${cell.row}`;
       const type = types.get(ref) ?? null;
+      // 🔴 「일반」 맞춤이 값의 종류로 바뀌는 칸이 없다(견적서 ②b 재작업) — 보고서 칸은 맞춤을 적어
+      // 두었거나 글자다. 이 단언이 깨지면 보고서 화면의 맞춤이 달라진다는 뜻이다.
+      if (cell.align === null || cell.align === "general") {
+        assert.ok(
+          cell.valueKind === null || cell.valueKind === "text",
+          `${ref} 가 「일반」 맞춤의 ${cell.valueKind} 칸이다 — 보고서 화면의 맞춤이 달라진다`
+        );
+      }
       if (type === "d") continue;
 
       const raw = read(ref);
@@ -1079,7 +1240,7 @@ function assertReportTextUnchanged(grid: SheetPrintGrid, workbook: Buffer): numb
       assert.equal(cell.text, before, `${ref} 의 글자가 서식 때문에 달라졌습니다`);
       if (types.has(ref) && (type === null || type === "n") && raw !== null) numericCells += 1;
 
-      // 결과 모양은 **더하기만** 했다 — 옛 칸은 그대로고 새 칸은 둘뿐이다.
+      // 결과 모양은 **더하기만** 했다 — 옛 칸은 그대로고 새 칸은 셋(글자색 · 배경 · 값의 종류)뿐이다.
       assert.deepEqual(Object.keys(cell).sort(), REPORT_CELL_KEYS, `${ref} 칸의 모양이 달라졌습니다`);
     }
   }

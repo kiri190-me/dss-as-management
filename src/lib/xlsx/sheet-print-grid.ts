@@ -8,6 +8,7 @@ import {
   SHARED_STRINGS_PART,
   STYLES_PART,
   WORKBOOK_PART,
+  WORKBOOK_RELS_PART,
 } from "./workbook-parts";
 import { decodeXmlCharacterData } from "./xml-entities";
 import { ZipArchive } from "./zip-reader";
@@ -44,6 +45,14 @@ import { ZipArchive } from "./zip-reader";
  *
  * 안 읽는 것들은 이 양식의 인쇄 영역(`B8:AV64`)에 **하나도 쓰이지 않는다**
  * (실측). 나중에 쓰이게 되면 그 칸이 밋밋하게 나올 뿐 화면은 살아 있다.
+ *
+ * ── 조건부 서식 · 값의 종류 (2026-09-16, 견적서 ②b 재작업) ─────────────────────
+ *   · 칸마다 **값의 종류**(`valueKind` — 수 · 글자 · 참/거짓 · 오류)를 싣는다. 화면이 Excel 의
+ *     「일반」 가로 맞춤(수 · 날짜는 오른쪽)을 따라 할 때 쓴다. 칸이 **더해졌을** 뿐이다.
+ *   · 🔴 조건부 서식은 **부르는 쪽이 켤 때만** 읽는다(`conditionalFormatting: "apply"` — 견적서
+ *     미리보기). 보고서 양식에는 «빈 필수 칸을 빨갛게» 칠하는 규칙이 있어서, 켜면 보고서
+ *     미리보기가 달라진다 — 보고서 호출부는 켜지 않는다. 그 규칙의 색이 테마 색 · 색 번호일 수
+ *     있어서 조건부 서식에서만 테마(`theme1.xml`)와 색 번호 팔레트를 푼다(아래 「조건부 서식」).
  *
  * ── 사람이 손으로 만든 견적서 엑셀도 그린다 (2026-09-16, 견적서 ②a) ─────────
  * 「엑셀 전용 견적서」의 미리보기가 **수기 견적서 엑셀을 PDF 로 만들었을 때의
@@ -134,7 +143,16 @@ export type PrintGridCell = {
   fontColor: string | null;
   /** 칸 배경 `#RRGGBB`. **단색(solid) 채움의 rgb 만** — 무늬 · 테마 색은 null. 2026-09-16 에 더한 칸. */
   backgroundColor: string | null;
+  /**
+   * 칸 값의 종류 — 화면이 Excel 의 「일반」 가로 맞춤(숫자 · 날짜는 오른쪽, 참/거짓 · 오류는
+   * 가운데, 글자는 왼쪽)을 따라 할 때 쓴다. 빈 칸은 null. 숫자여도 서식이 `@`(글자)면 "text".
+   * 2026-09-16(견적서 ②b 재작업)에 **더한** 칸이다.
+   */
+  valueKind: PrintGridValueKind | null;
 };
+
+/** 칸 값의 종류. 날짜는 Excel 안에서 수라 "number" 다. */
+export type PrintGridValueKind = "number" | "text" | "boolean" | "error";
 
 export type PrintGridRow = {
   row: number;
@@ -197,6 +215,11 @@ export type SheetPrintGridParts = {
   /** 없으면 그림 없이 그린다. */
   drawingXml: string | null;
   drawingRelsXml: string | null;
+  /**
+   * 통합문서의 테마(`xl/theme/theme1.xml`) — 조건부 서식의 색이 테마 색(`theme="0"` 따위)일 때
+   * 푼다. 조건부 서식을 읽을 때만 쓰고, 없으면 테마 색은 모르는 색(null)이다. 2026-09-16 에 더한 칸.
+   */
+  themeXml?: string | null;
 };
 
 /**
@@ -212,6 +235,17 @@ export type SheetPrintGridParts = {
  */
 export type SheetPrintGridOptions = {
   printArea?: "required" | "fallback-to-used-range";
+  /**
+   * 조건부 서식(`<conditionalFormatting>`)의 글자 색 · 칸 배경을 입힐 것인가(2026-09-16, 견적서 ②b
+   * 재작업).
+   *   · `"ignore"`(기본) — 예전 그대로 안 읽는다. 🔴 보고서는 이것이다: 보고서 양식에는 «빈
+   *     필수 칸을 빨갛게» 칠하는 규칙이 있어서, 읽으면 보고서 미리보기가 지금과 달라진다(사람의
+   *     판단이 필요한 변화라 여기서 켜지 않는다).
+   *   · `"apply"` — 읽을 수 있는 규칙(아래 「조건부 서식」)만 입힌다. 사람이 만든 견적서 엑셀은
+   *     「0 이면 흰 글자」 규칙으로 도우미 칸의 ₩0 을 감춘다 — 안 읽으면 Excel 에 없는 ₩0 이
+   *     미리보기에만 찍힌다.
+   */
+  conditionalFormatting?: "ignore" | "apply";
 };
 
 // ── 단위 ─────────────────────────────────────────────────────────────────
@@ -286,6 +320,8 @@ export function readSheetPrintGrid(
   const archive = ZipArchive.fromBuffer(workbookXlsx);
   const sheetPart = resolveSheetPart(archive, sheetName);
   const drawingPart = resolveSheetDrawingPart(archive, sheetPart);
+  // 테마는 조건부 서식을 읽을 때만 편다 — 안 읽는 호출(보고서)은 예전과 같은 파트만 읽는다.
+  const themePart = options.conditionalFormatting === "apply" ? resolveWorkbookThemePart(archive) : null;
 
   return buildSheetPrintGrid(
     {
@@ -299,9 +335,24 @@ export function readSheetPrintGrid(
         drawingPart === null
           ? null
           : archive.readTextOrNull(drawingPart.replace(/([^/]+)$/, "_rels/$1.rels")),
+      themeXml: themePart === null ? null : archive.readTextOrNull(themePart),
     },
     options
   );
+}
+
+/**
+ * 통합문서의 테마 파트(`xl/theme/theme1.xml`). 이름을 못 박지 않고 workbook.xml 의 관계에서
+ * `…/relationships/theme` 를 찾는다. 없으면 null. 2026-09-16 에 더했다.
+ */
+export function resolveWorkbookThemePart(archive: ZipArchive): string | null {
+  const rels = archive.readTextOrNull(WORKBOOK_RELS_PART);
+  if (rels === null) return null;
+  const tag = /<Relationship\b[^>]*Type="[^"]*\/relationships\/theme"[^>]*>/.exec(rels)?.[0];
+  const target = tag === undefined ? undefined : /\sTarget="([^"]+)"/.exec(tag)?.[1];
+  if (target === undefined) return null;
+  const part = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+  return archive.has(part) ? part : null;
 }
 
 /**
@@ -348,6 +399,11 @@ export function buildSheetPrintGrid(
     displayText(raw, type, styles.numberFormatOf(styleIndex), dateSystem)
   );
   const merges = readMerges(parts.sheetXml, range);
+  // 🔴 부르는 쪽이 켰을 때만(보고서는 켜지 않는다 — SheetPrintGridOptions).
+  const conditional =
+    options.conditionalFormatting === "apply"
+      ? readConditionalFormats(parts.sheetXml, parts.stylesXml, parts.themeXml ?? null)
+      : null;
 
   // 가려진 칸(병합의 왼쪽 위가 아닌 칸)은 그리지 않는다.
   const covered = new Set<string>();
@@ -375,6 +431,8 @@ export function buildSheetPrintGrid(
       const lastRow = merge ? merge.lastRow : row;
       const lastColumn = merge ? merge.lastColumn : column;
       const found = sheetCells.get(key);
+      // 조건부 서식은 병합의 왼쪽 위 칸의 값으로 가린다 — Excel 이 보여 주는 값이 그것이다.
+      const overlay = conditional === null ? null : conditional(row, column, found);
 
       cells.push({
         row,
@@ -389,8 +447,9 @@ export function buildSheetPrintGrid(
         fontSizePt: styles.fontSizeOf(found?.styleIndex),
         // 🔴 네 변을 각각 그 변에 놓인 칸들에서 모은다(위 머리말).
         borders: collectBorders(sheetCells, styles, row, column, lastRow, lastColumn),
-        fontColor: styles.fontColorOf(found?.styleIndex),
-        backgroundColor: styles.backgroundColorOf(found?.styleIndex),
+        fontColor: overlay?.fontColor ?? styles.fontColorOf(found?.styleIndex),
+        backgroundColor: overlay?.backgroundColor ?? styles.backgroundColorOf(found?.styleIndex),
+        valueKind: valueKindOf(found, styles.numberFormatOf(found?.styleIndex ?? null)),
       });
     }
 
@@ -619,7 +678,11 @@ function readRowHeights(sheetXml: string, sheetRows: readonly SheetRow[]): Map<n
 
 // ── 셀 ───────────────────────────────────────────────────────────────────
 
-type SheetCell = { text: string; styleIndex: number | null };
+/**
+ * `raw` · `type` 은 2026-09-16(②b 재작업)에 더했다 — 칸 값의 종류(일반 맞춤)와 조건부 서식의
+ * 비교에 쓴다. `raw` 는 서식을 먹이기 전의 값(공유문자열은 풀린 글자), 없으면 null.
+ */
+type SheetCell = { text: string; styleIndex: number | null; raw: string | null; type: string | null };
 
 function cellKey(row: number, column: number): string {
   return `${row}:${column}`;
@@ -659,9 +722,12 @@ function readSheetCells(
       const type = /\st="([^"]*)"/.exec(attributes)?.[1] ?? null;
       const styleIndex = rawStyle === undefined ? null : Number(rawStyle);
 
+      const raw = read(ref);
       cells.set(cellKey(Number(match[2]), column), {
-        text: format(read(ref), type, styleIndex),
+        text: format(raw, type, styleIndex),
         styleIndex,
+        raw,
+        type,
       });
     }
   }
@@ -1036,6 +1102,373 @@ function collectBorders(
   }
 
   return { top, right, bottom, left };
+}
+
+// ── 칸 값의 종류 (2026-09-16, 견적서 ②b 재작업) ─────────────────────────────
+
+/**
+ * 칸 값의 종류 — 화면이 Excel 의 「일반」 가로 맞춤을 따라 할 때 쓴다.
+ *
+ * `t` 속성으로 가른다: 공유문자열 · 인라인 글자 · 수식의 글자 결과(`s` · `inlineStr` · `str`)는
+ * 글자, `b` 는 참/거짓, `e` 는 오류, `t="d"`(ISO 날짜)와 `t` 없음 · `n` 은 수. 🔴 수여도 서식이
+ * 딱 `@`(글자)면 글자로 친다 — 보고서 양식의 숫자 칸이 그렇고, 그 칸들은 예전처럼 왼쪽이다.
+ * 값이 없으면 null(빈 칸 — 맞출 것이 없다).
+ */
+function valueKindOf(found: SheetCell | undefined, numberFormat: string | null): PrintGridValueKind | null {
+  if (found === undefined || found.raw === null || found.raw === "") return null;
+  switch (found.type) {
+    case "s":
+    case "inlineStr":
+    case "str":
+      return "text";
+    case "b":
+      return "boolean";
+    case "e":
+      return "error";
+    case "d":
+      return "number";
+    default:
+      if (!Number.isFinite(Number(found.raw))) return "text";
+      return numberFormat !== null && numberFormat.trim() === "@" ? "text" : "number";
+  }
+}
+
+// ── 조건부 서식 (2026-09-16, 견적서 ②b 재작업) ─────────────────────────────
+
+/**
+ * 🔴 **부르는 쪽이 `conditionalFormatting: "apply"` 를 줄 때만** 읽는다(SheetPrintGridOptions —
+ * 보고서는 주지 않는다).
+ *
+ * ── 왜 읽게 되었나 ──────────────────────────────────────────────────────
+ * 앱 제너레이터 내자 양식(과 그것으로 사람이 만든 견적서 엑셀)은 「공 급 가」 줄 바로 위, 금액
+ * 열에 도우미 칸(`=N45`)을 두고 **「값이 0 이면 흰 글자」**(`cellIs equal 0` → dxf 의
+ * `<color theme="0"/>` = 테마의 lt1, 흰색) 규칙으로 감춰 두었다(실측). Excel 은 그 ₩0 을 흰
+ * 글자로 그려 PDF 에 안 보이는데, 조건부 서식을 모르는 미리보기는 검정 「₩0」을 찍었다.
+ *
+ * ── 🔴 읽는 것 · 안 읽는 것 ─────────────────────────────────────────────
+ *   읽는다    `cellIs`(같음 · 다름 · 큼 · 작음 · 이상 · 이하 · 사이 · 사이 아님 — 비교 값이
+ *             숫자 · 따옴표 글자 · TRUE/FALSE 인 것) · `containsBlanks` · `notContainsBlanks`,
+ *             그 서식(dxf)의 **글자 색 · 칸 배경**(rgb · 테마 색 + 틴트 · 색 번호)
+ *   안 읽는다  수식 규칙(`expression`) · 칸 참조나 함수가 든 비교 값 · 색 막대 · 색조 · 아이콘 ·
+ *             상위/하위 · 중복 · 글자 포함 · 날짜 규칙 · dxf 의 굵기 · 숫자 서식 · 테두리
+ * 모르는 규칙은 **아무것도 입히지 않는다**(머리말의 「서식을 못 읽으면 밋밋하게」).
+ *
+ * 규칙이 여럿 맞으면 우선순위(`priority` 작은 것)가 먼저이고, 속성마다 먼저 정한 규칙이 이긴다.
+ * `stopIfTrue` 인 규칙이 맞으면 그 뒤는 보지 않는다(Excel 의 규칙).
+ */
+type ConditionalOverlay = (
+  row: number,
+  column: number,
+  cell: SheetCell | undefined
+) => { fontColor: string | null; backgroundColor: string | null } | null;
+
+type CfOperand = { kind: "number"; value: number } | { kind: "text"; value: string } | { kind: "boolean"; value: boolean };
+
+type CfValue = CfOperand | { kind: "blank" } | { kind: "unknown" };
+
+type DxfStyle = { fontColor: string | null; backgroundColor: string | null };
+
+type CfRule = {
+  ranges: CellRange[];
+  test: (value: CfValue) => boolean;
+  dxf: DxfStyle;
+  priority: number;
+  stopIfTrue: boolean;
+};
+
+const CF_OPERATORS = new Set([
+  "equal",
+  "notEqual",
+  "greaterThan",
+  "greaterThanOrEqual",
+  "lessThan",
+  "lessThanOrEqual",
+  "between",
+  "notBetween",
+]);
+
+function readConditionalFormats(
+  sheetXml: string,
+  stylesXml: string | null,
+  themeXml: string | null
+): ConditionalOverlay | null {
+  const dxfs = readDxfs(stylesXml, readThemeColors(themeXml), readIndexedPalette(stylesXml));
+  const rules: CfRule[] = [];
+
+  // `<x14:conditionalFormatting>`(확장 목록 안)은 이 정규식에 걸리지 않는다 — 안 읽는다.
+  for (const block of sheetXml.matchAll(/<conditionalFormatting\b([^>]*)>([\s\S]*?)<\/conditionalFormatting>/g)) {
+    const sqref = /\ssqref="([^"]*)"/.exec(block[1])?.[1] ?? "";
+    const ranges = sqref
+      .split(/\s+/)
+      .map((piece) => (piece === "" ? null : parseRange(piece)))
+      .filter((range): range is CellRange => range !== null);
+    if (ranges.length === 0) continue;
+
+    for (const rule of block[2].matchAll(/<cfRule\b([^>]*?)(?:\/>|>([\s\S]*?)<\/cfRule>)/g)) {
+      const attributes = rule[1];
+      const dxfId = numberAttribute(attributes, "dxfId");
+      const dxf = dxfId === null ? undefined : dxfs[dxfId];
+      if (dxf === undefined || (dxf.fontColor === null && dxf.backgroundColor === null)) continue;
+
+      const test = ruleTest(
+        /\stype="([^"]*)"/.exec(attributes)?.[1] ?? "",
+        /\soperator="([^"]*)"/.exec(attributes)?.[1] ?? null,
+        [...(rule[2] ?? "").matchAll(/<formula>([\s\S]*?)<\/formula>/g)].map((match) => decodeXmlCharacterData(match[1]))
+      );
+      if (test === null) continue;
+
+      rules.push({
+        ranges,
+        test,
+        dxf,
+        priority: numberAttribute(attributes, "priority") ?? Number.MAX_SAFE_INTEGER,
+        stopIfTrue: /\sstopIfTrue="(?:1|true)"/.test(attributes),
+      });
+    }
+  }
+  if (rules.length === 0) return null;
+  rules.sort((a, b) => a.priority - b.priority);
+
+  return (row, column, cell) => {
+    let fontColor: string | null = null;
+    let backgroundColor: string | null = null;
+    let value: CfValue | undefined;
+    for (const rule of rules) {
+      if (!rule.ranges.some((range) => inRange(range, row, column))) continue;
+      value ??= cfValueOf(cell);
+      if (!rule.test(value)) continue;
+      fontColor ??= rule.dxf.fontColor;
+      backgroundColor ??= rule.dxf.backgroundColor;
+      if (rule.stopIfTrue) break;
+    }
+    return fontColor === null && backgroundColor === null ? null : { fontColor, backgroundColor };
+  };
+}
+
+function inRange(range: CellRange, row: number, column: number): boolean {
+  return row >= range.firstRow && row <= range.lastRow && column >= range.firstColumn && column <= range.lastColumn;
+}
+
+/** 규칙 하나 → 값 시험. 모르는 규칙이면 null. */
+function ruleTest(type: string, operator: string | null, formulas: readonly string[]): ((value: CfValue) => boolean) | null {
+  if (type === "containsBlanks") return (value) => isBlankForCf(value);
+  if (type === "notContainsBlanks") return (value) => !isBlankForCf(value);
+  if (type !== "cellIs" || operator === null || !CF_OPERATORS.has(operator)) return null;
+
+  const operands = formulas.map(parseCfOperand);
+  const needed = operator === "between" || operator === "notBetween" ? 2 : 1;
+  if (operands.length < needed || operands.slice(0, needed).some((operand) => operand === null)) return null;
+  const [first, second] = operands as CfOperand[];
+
+  return (value) => {
+    if (value.kind === "unknown") return false; // 오류 칸 · ISO 날짜 — 견주지 않는다
+    const against = (operand: CfOperand) => compareCf(value.kind === "blank" ? blankAs(operand) : value, operand);
+    switch (operator) {
+      case "equal":
+        return against(first) === 0;
+      case "notEqual":
+        return against(first) !== 0;
+      case "greaterThan":
+        return against(first) > 0;
+      case "greaterThanOrEqual":
+        return against(first) >= 0;
+      case "lessThan":
+        return against(first) < 0;
+      case "lessThanOrEqual":
+        return against(first) <= 0;
+      default: {
+        // 사이 · 사이 아님 — Excel 은 두 값의 순서를 가리지 않는다(작은 쪽 ~ 큰 쪽).
+        const [low, high] = compareCf(first, second) <= 0 ? [first, second] : [second, first];
+        const inside = against(low) >= 0 && against(high) <= 0;
+        return operator === "between" ? inside : !inside;
+      }
+    }
+  };
+}
+
+/** 비교 값 — 숫자 · 따옴표 글자(`""` 는 `"`) · TRUE/FALSE 만. 칸 참조 · 함수는 모른다(null). */
+function parseCfOperand(formula: string): CfOperand | null {
+  const text = formula.trim();
+  if (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(text)) return { kind: "number", value: Number(text) };
+  const quoted = /^"((?:[^"]|"")*)"$/.exec(text);
+  if (quoted) return { kind: "text", value: quoted[1].replace(/""/g, '"') };
+  if (/^(?:TRUE|FALSE)$/i.test(text)) return { kind: "boolean", value: text.toUpperCase() === "TRUE" };
+  return null;
+}
+
+/** 조건부 서식이 보는 칸의 값 — 서식을 먹이기 전의 값이다(Excel 도 값으로 견준다). */
+function cfValueOf(cell: SheetCell | undefined): CfValue {
+  if (cell === undefined || cell.raw === null || cell.raw === "") return { kind: "blank" };
+  switch (cell.type) {
+    case "s":
+    case "inlineStr":
+    case "str":
+      return { kind: "text", value: cell.raw };
+    case "b":
+      return { kind: "boolean", value: cell.raw === "1" || cell.raw.toLowerCase() === "true" };
+    case "e":
+    case "d":
+      return { kind: "unknown" };
+    default: {
+      const value = Number(cell.raw);
+      return Number.isFinite(value) ? { kind: "number", value } : { kind: "text", value: cell.raw };
+    }
+  }
+}
+
+/** 「공백 포함」 — Excel 의 `LEN(TRIM(칸))=0`. 수는 비지 않았다. */
+function isBlankForCf(value: CfValue): boolean {
+  if (value.kind === "blank") return true;
+  return value.kind === "text" && value.value.trim() === "";
+}
+
+/** 🔴 빈 칸은 견주는 값의 종류로 읽힌다 — 숫자면 0, 글자면 "", 참/거짓이면 FALSE(Excel 규칙). */
+function blankAs(operand: CfOperand): CfOperand {
+  if (operand.kind === "number") return { kind: "number", value: 0 };
+  if (operand.kind === "text") return { kind: "text", value: "" };
+  return { kind: "boolean", value: false };
+}
+
+/** Excel 의 값 순서 — 수 < 글자 < 참/거짓. 글자는 대소문자를 가리지 않는다. */
+function compareCf(a: CfOperand, b: CfOperand): number {
+  const rank = { number: 0, text: 1, boolean: 2 } as const;
+  if (a.kind !== b.kind) return rank[a.kind] - rank[b.kind];
+  if (a.kind === "number" && b.kind === "number") return a.value === b.value ? 0 : a.value < b.value ? -1 : 1;
+  if (a.kind === "boolean" && b.kind === "boolean") return Number(a.value) - Number(b.value);
+  const left = String(a.value).toLowerCase();
+  const right = String(b.value).toLowerCase();
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+
+const DXF_PATTERN = /<dxf\b[^>]*?(?:\/>|>[\s\S]*?<\/dxf>)/g;
+
+/**
+ * 조건부 서식의 서식표(`<dxfs>`). 글자 색과 칸 배경만. 🔴 dxf 의 단색 채움은 **`bgColor`** 에
+ * 담긴다(칸 서식의 채움이 `fgColor` 인 것과 반대다 — Excel 이 그렇게 적는다).
+ */
+function readDxfs(stylesXml: string | null, theme: readonly (string | null)[], palette: readonly string[]): DxfStyle[] {
+  const block = stylesXml === null ? undefined : /<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/.exec(stylesXml)?.[1];
+  if (block === undefined) return [];
+
+  return [...block.matchAll(DXF_PATTERN)].map((match) => {
+    const dxf = match[0];
+    const fontColorTag = /<font\b[^>]*>[\s\S]*?(<color\b[^>]*\/?>)[\s\S]*?<\/font>/.exec(dxf)?.[1];
+    const pattern = /<patternFill\b([^>]*)>([\s\S]*?)<\/patternFill>/.exec(dxf);
+    let backgroundColor: string | null = null;
+    if (pattern !== null) {
+      const patternType = /\spatternType="([^"]*)"/.exec(pattern[1])?.[1] ?? "solid";
+      if (patternType === "solid") {
+        const colorTag = /<bgColor\b[^>]*\/?>/.exec(pattern[2])?.[0] ?? /<fgColor\b[^>]*\/?>/.exec(pattern[2])?.[0];
+        backgroundColor = colorTag === undefined ? null : resolveColor(colorTag, theme, palette);
+      }
+    }
+    return {
+      fontColor: fontColorTag === undefined ? null : resolveColor(fontColorTag, theme, palette),
+      backgroundColor,
+    };
+  });
+}
+
+/**
+ * `<color …/>` 하나 → `#RRGGBB`. rgb · 테마 색(`theme`) · 색 번호(`indexed`)를 풀고 틴트를 먹인다.
+ * `auto` · 모르는 번호는 null. 🔴 **조건부 서식에서만 쓴다** — 칸 서식의 색은 예전처럼
+ * `rgbColor`(rgb 만)로 읽어 보고서 격자가 달라지지 않는다.
+ */
+function resolveColor(tag: string, theme: readonly (string | null)[], palette: readonly string[]): string | null {
+  const tint = Number(/\stint="([^"]*)"/.exec(tag)?.[1] ?? "0");
+  let base: string | null = null;
+  const rgb = /\srgb="([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})"/.exec(tag)?.[1];
+  const themeIndex = numberAttribute(tag, "theme");
+  const indexed = numberAttribute(tag, "indexed");
+  if (rgb !== undefined) base = rgb.slice(-6).toUpperCase();
+  else if (themeIndex !== null) base = theme[themeIndex] ?? null;
+  else if (indexed !== null) base = palette[indexed] ?? null;
+  if (base === null) return null;
+  return `#${Number.isFinite(tint) && tint !== 0 ? applyTint(base, tint) : base}`;
+}
+
+/**
+ * 테마의 색표(`<a:clrScheme>`) → 테마 색 번호 차례. 🔴 SpreadsheetML 의 번호는 앞의 두 쌍이
+ * 뒤바뀐다: 0 = lt1(배경 · 흰색), 1 = dk1(글자 · 검정), 2 = lt2, 3 = dk2, 4~9 = accent1~6,
+ * 10 = hlink, 11 = folHlink. 시스템 색(`sysClr`)은 적어 둔 `lastClr` 를 쓴다.
+ */
+function readThemeColors(themeXml: string | null): (string | null)[] {
+  const scheme = themeXml === null ? undefined : /<a:clrScheme\b[^>]*>([\s\S]*?)<\/a:clrScheme>/.exec(themeXml)?.[1];
+  if (scheme === undefined) return [];
+  const colorOf = (name: string): string | null => {
+    const inner = new RegExp(`<a:${name}>([\\s\\S]*?)</a:${name}>`).exec(scheme)?.[1];
+    if (inner === undefined) return null;
+    const value =
+      /<a:srgbClr\b[^>]*\sval="([0-9A-Fa-f]{6})"/.exec(inner)?.[1] ??
+      /<a:sysClr\b[^>]*\slastClr="([0-9A-Fa-f]{6})"/.exec(inner)?.[1];
+    return value === undefined ? null : value.toUpperCase();
+  };
+  return ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"].map(
+    colorOf
+  );
+}
+
+/**
+ * 색 번호(`indexed`) → 색. Excel 의 기본 팔레트(0~63, 64 = 시스템 글자색 검정, 65 = 시스템
+ * 배경색 흰색)이고, 통합문서가 `<colors><indexedColors>` 로 바꿔 두었으면 그것을 쓴다.
+ */
+const DEFAULT_INDEXED_PALETTE: readonly string[] = [
+  "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+  "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+  "800000", "008000", "000080", "808000", "800080", "008080", "C0C0C0", "808080",
+  "9999FF", "993366", "FFFFCC", "CCFFFF", "660066", "FF8080", "0066CC", "CCCCFF",
+  "000080", "FF00FF", "FFFF00", "00FFFF", "800080", "800000", "008080", "0000FF",
+  "00CCFF", "CCFFFF", "CCFFCC", "FFFF99", "99CCFF", "FF99CC", "CC99FF", "FFCC99",
+  "3366FF", "33CCCC", "99CC00", "FFCC00", "FF9900", "FF6600", "666699", "969696",
+  "003366", "339966", "003300", "333300", "993300", "993366", "333399", "333333",
+  "000000", "FFFFFF",
+];
+
+function readIndexedPalette(stylesXml: string | null): readonly string[] {
+  const block = stylesXml === null ? undefined : /<indexedColors\b[^>]*>([\s\S]*?)<\/indexedColors>/.exec(stylesXml)?.[1];
+  if (block === undefined) return DEFAULT_INDEXED_PALETTE;
+  const custom = [...block.matchAll(/<rgbColor\b[^>]*\srgb="([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})"/g)].map((match) =>
+    match[1].slice(-6).toUpperCase()
+  );
+  return custom.length === 0 ? DEFAULT_INDEXED_PALETTE : [...custom, ...DEFAULT_INDEXED_PALETTE.slice(custom.length)];
+}
+
+/**
+ * 틴트 — 색의 밝기(HLS 의 L)를 옮긴다(ECMA-376 의 셈). 음수면 어둡게 `L × (1 + t)`, 양수면
+ * 밝게 `L × (1 − t) + t`.
+ */
+function applyTint(hex: string, tint: number): string {
+  const [r, g, b] = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  const delta = max - min;
+  let hue = 0;
+  let saturation = 0;
+  if (delta !== 0) {
+    saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    hue = max === r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6 : max === g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
+  }
+  const tinted = Math.min(1, Math.max(0, tint < 0 ? lightness * (1 + tint) : lightness * (1 - tint) + tint));
+
+  const channel = (p: number, q: number, t: number): number => {
+    const u = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+    if (u < 1 / 6) return p + (q - p) * 6 * u;
+    if (u < 1 / 2) return q;
+    if (u < 2 / 3) return p + (q - p) * (2 / 3 - u) * 6;
+    return p;
+  };
+  let rgb: number[];
+  if (saturation === 0) rgb = [tinted, tinted, tinted];
+  else {
+    const q = tinted < 0.5 ? tinted * (1 + saturation) : tinted + saturation - tinted * saturation;
+    const p = 2 * tinted - q;
+    rgb = [channel(p, q, hue + 1 / 3), channel(p, q, hue), channel(p, q, hue - 1 / 3)];
+  }
+  return rgb
+    .map((value) => Math.round(value * 255).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
 }
 
 // ── 그림 ─────────────────────────────────────────────────────────────────

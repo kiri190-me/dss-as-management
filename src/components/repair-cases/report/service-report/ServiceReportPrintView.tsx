@@ -3,11 +3,13 @@
 import Link from "next/link";
 
 import PrintFitFrame from "@/components/common/print-fit-frame";
-import type {
-  PrintGridBorderStyle,
-  PrintGridCell,
-  SheetPrintGrid,
-} from "@/lib/xlsx/sheet-print-grid";
+import {
+  PX_PER_MM,
+  SheetPrintGridView,
+  planPaper,
+  type PaperPlan,
+} from "@/components/print-grid/SheetPrintGridView";
+import type { SheetPrintGrid } from "@/lib/xlsx/sheet-print-grid";
 
 /**
  * ============================================================================
@@ -28,6 +30,13 @@ import type {
  * 이 파일이 하는 일은 셋뿐이다: **자리를 pt 로 바꾸고, 종이에 맞추고, 인쇄할 때
  * 앱 껍데기를 감춘다.**
  *
+ * ── 격자 그리기와 종이 셈은 공용 조각이다 (2026-09-16, 견적서 ②b) ──────────
+ * 칸 · 테두리 · 그림을 그리는 코드와 종이에 맞출 배율의 셈(`planPaper`)은
+ * `components/print-grid/SheetPrintGridView.tsx` 로 옮겼다 — 엑셀 전용 견적서의
+ * 미리보기가 붙인 수기 엑셀을 같은 그리기로 그린다. 🔴 **옮기기만 했다** — 이 화면의
+ * 렌더 HTML 은 옮기기 전과 한 글자도 같다(`SheetPrintGridView.test.tsx`). 아래 두 판단의
+ * 근거도 그 파일 머리말에 그대로 옮겨 두었다.
+ *
  * ── 🔴 배율은 CSS transform 이 아니라 수치에 미리 곱한다 ────────────────
  * `transform: scale()` 은 인쇄에서 브라우저마다 다르게 처리돼 자리가 틀어진다
  * (견적서 미리보기가 같은 자리에서 같은 판단을 했다). 열 너비·행 높이·글꼴
@@ -43,137 +52,6 @@ import type {
  * 배율이 그대로 쓰이고, 이 양식처럼 빠듯할 때만 몇 % 더 줄어든다.
  * ============================================================================
  */
-
-/**
- * 브라우저가 pt 를 픽셀로 반올림하면서 쌓이는 오차만큼의 여유.
- *
- * 행이 57개면 반올림이 한두 픽셀 쌓이고, 그 한두 픽셀이 「한 장이냐 두 장이냐」를
- * 가른다. 0.3% 는 A4 세로에서 0.8mm 다 — 눈으로는 안 보이고 종이는 한 장으로
- * 남는다.
- */
-const PRINT_SAFETY = 0.997;
-
-const MM_PER_POINT = 25.4 / 72;
-const MM_PER_INCH = 25.4;
-
-/** CSS 의 1in = 96px 이다. 종이 폭(mm)을 «화면에서 몇 픽셀인가»로 옮길 때 쓴다. */
-const PX_PER_MM = 96 / 25.4;
-
-/**
- * `<pageSetup paperSize>` → 종이 크기(mm, 세로 기준).
- *
- * 이 양식은 9(A4)다. 목록을 짧게 두는 것은 **모르는 종이를 지어내지 않기**
- * 위해서다 — 못 알아본 값은 A4 로 그리고, 그때 넘치면 위의 «넘치면 더 줄인다»가
- * 받아 준다.
- */
-const PAPER_SIZES_MM: Record<number, { width: number; height: number }> = {
-  8: { width: 297, height: 420 }, // A3
-  9: { width: 210, height: 297 }, // A4
-  11: { width: 148, height: 210 }, // A5
-};
-
-const DEFAULT_PAPER_SIZE = 9;
-
-type PaperPlan = {
-  paperWidthMm: number;
-  paperHeightMm: number;
-  marginsMm: { top: number; right: number; bottom: number; left: number };
-  /** 양식의 배율과 «넘치지 않을 배율» 중 작은 쪽. */
-  scale: number;
-};
-
-function planPaper(grid: SheetPrintGrid): PaperPlan {
-  const paper = PAPER_SIZES_MM[grid.page.paperSize ?? DEFAULT_PAPER_SIZE] ?? PAPER_SIZES_MM[DEFAULT_PAPER_SIZE];
-  const landscape = grid.page.orientation === "landscape";
-  const paperWidthMm = landscape ? paper.height : paper.width;
-  const paperHeightMm = landscape ? paper.width : paper.height;
-
-  const marginsMm = {
-    top: grid.page.margins.top * MM_PER_INCH,
-    right: grid.page.margins.right * MM_PER_INCH,
-    bottom: grid.page.margins.bottom * MM_PER_INCH,
-    left: grid.page.margins.left * MM_PER_INCH,
-  };
-
-  const printableWidthMm = Math.max(paperWidthMm - marginsMm.left - marginsMm.right, 1);
-  const printableHeightMm = Math.max(paperHeightMm - marginsMm.top - marginsMm.bottom, 1);
-  const naturalWidthMm = grid.widthPt * MM_PER_POINT;
-  const naturalHeightMm = grid.heightPt * MM_PER_POINT;
-
-  const fitted = Math.min(
-    grid.page.scale,
-    naturalWidthMm > 0 ? printableWidthMm / naturalWidthMm : grid.page.scale,
-    naturalHeightMm > 0 ? printableHeightMm / naturalHeightMm : grid.page.scale
-  );
-
-  return { paperWidthMm, paperHeightMm, marginsMm, scale: fitted * PRINT_SAFETY };
-}
-
-/**
- * OOXML 의 테두리 이름 → CSS.
- *
- * 못 알아본 이름은 **가는 실선**으로 그린다. 격자 서식에서 «있어야 할 선이 안
- * 보이는 것»이 «굵기가 조금 다른 것»보다 훨씬 나쁘다 — 앞은 문서가 표로 안
- * 보이고, 뒤는 아무도 눈치채지 못한다.
- */
-function borderCss(style: PrintGridBorderStyle): string {
-  if (style === null || style === "none") return "0";
-  switch (style) {
-    case "hair":
-      return "0.5pt solid #000";
-    case "medium":
-    case "mediumDashed":
-    case "mediumDashDot":
-    case "mediumDashDotDot":
-      return "1.5pt solid #000";
-    case "thick":
-      return "2.25pt solid #000";
-    case "double":
-      return "2.5pt double #000";
-    case "dashed":
-    case "dashDot":
-    case "dashDotDot":
-      return "0.75pt dashed #000";
-    case "dotted":
-      return "0.75pt dotted #000";
-    default:
-      return "0.75pt solid #000";
-  }
-}
-
-/** Excel 의 세로 맞춤 이름은 `center` 인데 CSS 는 `middle` 이다. */
-function verticalAlignCss(value: string | null): string {
-  if (value === "top" || value === "bottom") return value;
-  return "middle";
-}
-
-/**
- * Excel 의 가로 맞춤 이름 중 CSS 가 그대로 알아듣는 것만 넘긴다.
- *
- * `centerContinuous`(선택 영역 가운데)와 `distributed`(양쪽 균등)는 CSS 에 같은
- * 것이 없다. 흉내 내는 대신 **가운데**로 둔다 — 둘 다 «가운데로 보이는» 서식이라
- * 눈으로는 거의 같고, 잘못 흉내 낸 자리보다 낫다. `general` 은 «정하지 않음»
- * 이므로 브라우저에 맡긴다.
- */
-function horizontalAlignCss(value: string | null): string | undefined {
-  switch (value) {
-    case "left":
-    case "center":
-    case "right":
-    case "justify":
-      return value;
-    case "centerContinuous":
-    case "distributed":
-      return "center";
-    default:
-      return undefined;
-  }
-}
-
-/** pt 값 하나 — 배율을 먹인 뒤 CSS 로. */
-function pt(value: number, scale: number): string {
-  return `${(value * scale).toFixed(3)}pt`;
-}
 
 export default function ServiceReportPrintView({
   grid,
@@ -238,71 +116,17 @@ export default function ServiceReportPrintView({
         className="srp-viewport"
       >
         <div className="srp-page">
-          <div className="srp-sheet" style={{ width: `${sheetWidthPt.toFixed(3)}pt` }}>
-            <table className="srp-table">
-              <colgroup>
-                {grid.columnWidthsPt.map((width, index) => (
-                  <col key={index} style={{ width: pt(width, scale) }} />
-                ))}
-              </colgroup>
-              <tbody>
-                {grid.rows.map((row) => (
-                  <tr key={row.row} style={{ height: pt(row.heightPt, scale) }}>
-                    {row.cells.map((cell) => (
-                      <Cell key={`${cell.row}:${cell.column}`} cell={cell} scale={scale} />
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* 양식 안에 박힌 도장. next/image 를 쓰지 않는다: 인쇄 화면이라 지연
-                로딩이 오히려 방해가 되고(아직 안 뜬 그림이 빈칸으로 나간다),
-                인증이 걸린 API 라우트에서 온다. 못 꺼내도 화면은 살아 있다. */}
-            {grid.pictures.map((picture, index) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={`${picture.name}-${index}`}
-                className="srp-picture"
-                src={`${templateImageBase}${encodeURIComponent(picture.name)}`}
-                alt=""
-                style={{
-                  left: pt(picture.leftPt, scale),
-                  top: pt(picture.topPt, scale),
-                  width: pt(picture.widthPt, scale),
-                  height: pt(picture.heightPt, scale),
-                }}
-              />
-            ))}
-          </div>
+          {/* 격자와 도장 — 공용 조각(`srp-sheet` · `srp-table` · `srp-picture`). 도장은
+              인가가 걸린 그림 라우트에서 이름으로 받는다(`templateImageBase`). */}
+          <SheetPrintGridView
+            grid={grid}
+            scale={scale}
+            classPrefix="srp"
+            pictureSrc={(picture) => `${templateImageBase}${encodeURIComponent(picture.name)}`}
+          />
         </div>
       </PrintFitFrame>
     </div>
-  );
-}
-
-function Cell({ cell, scale }: { cell: PrintGridCell; scale: number }) {
-  return (
-    <td
-      colSpan={cell.colSpan === 1 ? undefined : cell.colSpan}
-      rowSpan={cell.rowSpan === 1 ? undefined : cell.rowSpan}
-      style={{
-        borderTop: borderCss(cell.borders.top),
-        borderRight: borderCss(cell.borders.right),
-        borderBottom: borderCss(cell.borders.bottom),
-        borderLeft: borderCss(cell.borders.left),
-        textAlign: horizontalAlignCss(cell.align) as React.CSSProperties["textAlign"],
-        verticalAlign: verticalAlignCss(cell.verticalAlign),
-        // 🔴 줄바꿈은 `wrapText` 를 따른다. 본문 줄은 채우개가 이미 칸 너비에
-        //    맞춰 나눠 두었으므로(`domain/text-wrap.ts`) 여기서 또 나누면 안 된다
-        //    — 그러면 미리보기만 한 줄이 더 생긴다.
-        whiteSpace: cell.wrap ? "pre-wrap" : "pre",
-        fontWeight: cell.bold ? 700 : undefined,
-        fontSize: cell.fontSizePt === null ? undefined : pt(cell.fontSizePt, scale),
-      }}
-    >
-      {cell.text}
-    </td>
   );
 }
 

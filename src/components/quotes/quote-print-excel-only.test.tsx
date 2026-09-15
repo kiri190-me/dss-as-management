@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import QuotePrintView, { type QuotePrintData } from "./QuotePrintView";
+import QuotePrintView, { ExcelOnlyQuotePreviewScreen, type QuotePrintData } from "./QuotePrintView";
 import type { QuotePrintSignedPdf } from "./quote-attachment-files";
 
 /**
@@ -9,6 +9,8 @@ import type { QuotePrintSignedPdf } from "./quote-attachment-files";
  * 미리보기 화면의 엑셀 전용 갈래 (2026-09-15 Q3)
  * ============================================================================
  * 엑셀 전용 견적서는 앱 양식 대신 결재 PDF 를 보인다(없으면 [견적서 받기]로 보낸다).
+ * 2026-09-16(견적서 ②b · 사용자 결정 2)부터는 붙인 엑셀의 인쇄 모양이 먼저이고 결재 PDF 는
+ * [결재 PDF 보기]로 바꿔 본다 — 엑셀 모양의 상태별 그림은 quote-print-excel-preview-screen.test.tsx.
  * 🔴 일반 견적서는 **한 글자도 달라지지 않아야 한다** — 맨 아래 묶음이 그것을 붙잡는다.
  * 돌아가기 · Excel 받기의 옛 규칙은 QuotePrintView.test.tsx 가 그대로 본다.
  * ============================================================================
@@ -61,6 +63,23 @@ function render(overrides: Partial<Props> & { quote: QuotePrintData }): string {
 
 describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
   const html = render({ quote: EXCEL_ONLY, signedPdf: SAVED_PDF, hasExcel: true });
+  /**
+   * 🔴 사용자 결정 2(2026-09-16) — **엑셀 모양이 먼저다.** 결재 PDF 칸은 [결재 PDF 보기]로 바꿔
+   * 본 화면에 있다. 그 화면은 상태(보기)를 쥔 바깥 조각 대신 그림 조각을 바로 그려 본다.
+   */
+  const pdfView = renderToStaticMarkup(
+    <ExcelOnlyQuotePreviewScreen
+      quote={EXCEL_ONLY}
+      quoteId="q-1"
+      signedPdf={SAVED_PDF}
+      hasExcel
+      canIssue={false}
+      hasUnsavedChanges={false}
+      excel={{ kind: "loading" }}
+      view="pdf"
+      onViewChange={() => {}}
+    />
+  );
 
   test("🔴 앱 양식을 그리지 않는다 — 품목 없는 빈 견적서가 나가지 않게", () => {
     assert.ok(!html.includes("견 적 서"), "앱 양식의 제목이 그려졌다");
@@ -69,17 +88,27 @@ describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
     assert.ok(html.includes("엑셀 전용 견적서"), html);
   });
 
-  test("🔴 결재 PDF 를 새 탭에서 페이지 안으로 연다(view=full) — 내려받기도 곁에", () => {
+  test("🔴 결정 2 — 기본 화면은 엑셀 모양이고, 결재 PDF 칸 대신 [결재 PDF 보기] 단추가 있다", () => {
+    assert.ok(html.includes(">결재 PDF 보기</button>"), html);
+    assert.ok(!html.includes("download?view=full"), "기본 화면에 결재 PDF 칸이 먼저 떴다");
+    assert.ok(html.includes("결재본.pdf"), "올라가 있는 결재 PDF 의 이름을 한 줄로 알린다");
+  });
+
+  test("🔴 결재 PDF 를 새 탭에서 페이지 안으로 연다(view=full) — 내려받기도 곁에([결재 PDF 보기] 화면)", () => {
     assert.ok(
-      html.includes('href="/api/attachments/att-pdf/download?view=full" target="_blank" rel="noopener noreferrer"'),
-      html
+      pdfView.includes('href="/api/attachments/att-pdf/download?view=full" target="_blank" rel="noopener noreferrer"'),
+      pdfView
     );
-    assert.ok(html.includes("결재 PDF 보기 (새 탭)"), html);
-    assert.ok(html.includes('href="/api/attachments/att-pdf/download"'), html);
-    assert.ok(html.includes("결재본.pdf"), html);
+    assert.ok(pdfView.includes("결재 PDF 보기 (새 탭)"), pdfView);
+    assert.ok(pdfView.includes('href="/api/attachments/att-pdf/download"'), pdfView);
+    assert.ok(pdfView.includes("결재본.pdf"), pdfView);
     // 끼워 보이지 않는 까닭을 적는다(frame-ancestors 'none').
-    assert.ok(html.includes("이 화면 안에 끼워 보일 수 없어 새 탭에서 엽니다"), html);
-    assert.ok(!html.includes("<iframe") && !html.includes("<object") && !html.includes("<embed"), html);
+    assert.ok(pdfView.includes("이 화면 안에 끼워 보일 수 없어 새 탭에서 엽니다"), pdfView);
+    // 돌아오는 단추.
+    assert.ok(pdfView.includes(">엑셀 모양 보기</button>"), pdfView);
+    for (const page of [html, pdfView]) {
+      assert.ok(!page.includes("<iframe") && !page.includes("<object") && !page.includes("<embed"), page);
+    }
   });
 
   test("[견적서 받기]는 받기 통로 그대로(붙인 엑셀을 내려준다) · 손으로 적은 공급가액", () => {
@@ -91,8 +120,10 @@ describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
   });
 
   test("🔴 보기 권한만 있어도 여는 화면이다 — 올리기 · 지우기 단추가 없다", () => {
-    for (const absent of ['type="file"', ">지우기<", ">파일 올리기<", ">바꾸기<"]) {
-      assert.ok(!html.includes(absent), `미리보기에 '${absent}' 가 있다`);
+    for (const page of [html, pdfView]) {
+      for (const absent of ['type="file"', ">지우기<", ">파일 올리기<", ">바꾸기<"]) {
+        assert.ok(!page.includes(absent), `미리보기에 '${absent}' 가 있다`);
+      }
     }
   });
 

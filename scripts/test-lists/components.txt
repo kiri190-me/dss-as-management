@@ -60,3 +60,6 @@ src/components/quotes/quote-excel-autofill-screens.test.tsx
 src/components/quotes/quote-folder-open.test.ts
 src/components/quotes/QuoteFolderOpenButton.test.tsx
 src/components/quotes/quote-folder-open-screens.test.ts
+src/components/print-grid/SheetPrintGridView.test.tsx
+src/components/quotes/quote-print-excel-preview.test.ts
+src/components/quotes/quote-print-excel-preview-screen.test.tsx

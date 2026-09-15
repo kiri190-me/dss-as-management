@@ -1,8 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import PrintFitFrame from "@/components/common/print-fit-frame";
+import {
+  PX_PER_MM,
+  SheetPrintGridView,
+  planPaper,
+  type PaperPlan,
+} from "@/components/print-grid/SheetPrintGridView";
 import QuoteIssueButton from "@/components/quotes/QuoteIssueButton";
+import {
+  QUOTE_EXCEL_PREVIEW_TEXT,
+  excelOnlyPreviewLayout,
+  fetchQuoteExcelPreview,
+  quoteExcelPreviewStateOf,
+  shouldFetchQuoteExcelPreview,
+  type ExcelOnlyPreviewView,
+  type QuoteExcelPreviewGrid,
+  type QuoteExcelPreviewOutcome,
+  type QuoteExcelPreviewState,
+} from "@/components/quotes/quote-print-excel-preview";
 import type { QuoteIssueRunOutcome } from "@/components/quotes/quote-issue-download";
 import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import {
@@ -145,8 +163,9 @@ export type QuotePrintData = Pick<
   investigationExcluded?: boolean;
   /**
    * 엑셀 전용 견적서인가 · 손으로 적은 공급가액(2026-09-15 Q3). 켜져 있으면 **앱 양식을
-   * 그리지 않고 결재 PDF 를 보인다**(아래 ExcelOnlyQuotePreview) — 그 장의 문서는 손으로
-   * 만든 엑셀이고, 앱 양식으로 그리면 품목 없는 빈 견적서가 된다.
+   * 그리지 않고 붙인 수기 엑셀의 인쇄 모양을 보인다**(아래 ExcelOnlyQuotePreview — 2026-09-16
+   * 견적서 ②b, 결재 PDF 는 [결재 PDF 보기]로) — 그 장의 문서는 손으로 만든 엑셀이고, 앱
+   * 양식으로 그리면 품목 없는 빈 견적서가 된다.
    *
    * 🔴 **없으면 예전 그대로 그린다**(일반 견적서).
    */
@@ -221,7 +240,10 @@ export default function QuotePrintView({
    * **일반 견적서는 쓰지 않는다.**
    */
   signedPdf?: QuotePrintSignedPdf | null;
-  /** 엑셀 전용 견적서에 수기 엑셀이 붙어 있는가. 안 주면 따로 알리지 않는다. */
+  /**
+   * 엑셀 전용 견적서에 수기 엑셀이 붙어 있는가. 안 주면 따로 알리지 않는다. **거짓이면** 엑셀
+   * 모양을 받으러 가지 않고 곧바로 「엑셀 없음」을 보인다(2026-09-16 견적서 ②b).
+   */
   hasExcel?: boolean;
   /**
    * 🔴 수정 권한자인가(2026-09-15 견적서 B1c). 참이면 [받기]가 링크(GET …/xlsx) 대신 발행
@@ -527,16 +549,30 @@ const EXCEL_ONLY_PRIMARY_BUTTON_CLASS =
 
 /**
  * ============================================================================
- * 엑셀 전용 견적서의 미리보기 — 앱 양식 대신 결재 PDF (2026-09-15 Q3)
+ * 엑셀 전용 견적서의 미리보기 — 붙인 수기 엑셀의 인쇄 모양 (2026-09-15 Q3 · 2026-09-16 ②b)
  * ============================================================================
  * 엑셀 전용 장의 문서는 사람이 손으로 만든 엑셀이다. 앱 양식으로 그리면 품목 없는 빈
- * 견적서가 나오므로 그리지 않는다. 대신 결재 사인이 들어간 PDF 가 있으면 그것을 열고,
- * 없으면 [견적서 받기](붙인 엑셀을 내려준다 — api/quotes/[id]/xlsx)로 보낸다.
+ * 견적서가 나오므로 그리지 않는다.
+ *
+ * ── 붙인 엑셀을 PDF 로 만들었을 때의 모습 (2026-09-16 견적서 ②b) ──────────────
+ * 견적서 id 로 GET /api/quotes/{id}/excel-preview 를 불러(quote-print-excel-preview.ts) 붙인
+ * 수기 엑셀(.xlsx)의 격자를 받고, 보고서 미리보기와 **같은 그리기**
+ * (components/print-grid/SheetPrintGridView.tsx)로 그린다. 용지 · 방향 · 배율 · 여백은 그
+ * 엑셀의 인쇄 설정에서 오고, [인쇄 · PDF로 저장]이 그 모양 그대로 PDF 를 만든다.
+ *   · 🔴 편집 폼은 격자를 넘기지 않는다 — 미리보기가 id 로 **스스로** 받아 온다. 저장 전
+ *     새 견적서(id 없음)는 「저장한 뒤 엑셀 모양으로 미리 볼 수 있습니다」.
+ *   · .xls 는 그리지 않는다(사용자 결정 1) — 까닭과 [견적서 받기]를 알린다.
+ *
+ * ── 결재 PDF 와의 관계 (2026-09-16 사용자 결정 2) ───────────────────────────
+ * **엑셀 모양이 먼저다.** 결재 PDF 가 올라가 있으면 도구모음의 [결재 PDF 보기]로 아래의
+ * 결재 PDF 칸으로 바꿔 보고, 거기서 [엑셀 모양 보기]로 돌아온다. 없으면 단추가 없다. 엑셀을
+ * 못 그리면 실패 문장과 함께 결재 PDF 칸을 보인다 — 볼 것이 하나라도 있게. 가르는 표는
+ * quote-print-excel-preview.ts 의 excelOnlyPreviewLayout 하나다.
  *
  * 돌아가는 자리는 위 QuotePrintView 의 도구모음과 **같은 기준**이다 — `onClose` 를 받았으면
  * 겹쳐 뜬 미리보기라 닫기 단추, 아니면 독립 페이지라 `backHref` 링크(그 까닭은 위 주석).
  *
- * ── 🔴 페이지 안에 끼워 보이지 않고 새 탭에서 연다 ─────────────────────────
+ * ── 🔴 결재 PDF 는 페이지 안에 끼워 보이지 않고 새 탭에서 연다 ─────────────────
  * next.config.ts 가 **모든 주소**에 `X-Frame-Options: DENY` 와 `frame-ancestors 'none'` 을
  * 건다 — 받기 통로(/api/attachments/{id}/download)도 예외가 아니라, iframe · object · embed
  * 로 끼우면 브라우저가 빈 칸을 그린다. 이 화면 하나 때문에 그 규칙(클릭 가로채기 방어)을
@@ -556,7 +592,29 @@ function ExcelOnlyQuotePreview({
   canIssue,
   hasUnsavedChanges,
   onIssueOutcome,
-}: {
+}: ExcelOnlyQuotePreviewProps) {
+  const excel = useQuoteExcelPreview(quoteId, hasExcel);
+  const [view, setView] = useState<ExcelOnlyPreviewView>("excel");
+
+  return (
+    <ExcelOnlyQuotePreviewScreen
+      quote={quote}
+      quoteId={quoteId}
+      onClose={onClose}
+      backHref={backHref}
+      signedPdf={signedPdf}
+      hasExcel={hasExcel}
+      canIssue={canIssue}
+      hasUnsavedChanges={hasUnsavedChanges}
+      onIssueOutcome={onIssueOutcome}
+      excel={excel}
+      view={view}
+      onViewChange={setView}
+    />
+  );
+}
+
+type ExcelOnlyQuotePreviewProps = {
   quote: QuotePrintData;
   quoteId: string | null;
   onClose?: () => void;
@@ -567,7 +625,58 @@ function ExcelOnlyQuotePreview({
   canIssue: boolean;
   hasUnsavedChanges: boolean;
   onIssueOutcome?: (outcome: QuoteIssueRunOutcome) => void;
+};
+
+/**
+ * 붙인 엑셀의 격자를 받아 온다 — 저장된 장이고 엑셀이 없다고 이미 알고 있지 않을 때만 부른다.
+ *
+ * 🔴 효과 본문에서 상태를 곧바로 바꾸지 않는다(react-hooks/set-state-in-effect) — 결과는
+ * 응답이 온 뒤의 콜백에서만 넣고, 「읽는 중」은 «이 요청의 결과가 아직 없음»에서 셈한다.
+ * 화면이 닫히거나 id 가 바뀌면 부르던 것을 끊고(AbortController) 늦게 온 답을 버린다.
+ */
+function useQuoteExcelPreview(quoteId: string | null, hasExcel: boolean | undefined): QuoteExcelPreviewState {
+  const requestKey = shouldFetchQuoteExcelPreview({ quoteId, hasExcel }) ? quoteId : null;
+  const [loaded, setLoaded] = useState<{ key: string; outcome: QuoteExcelPreviewOutcome } | null>(null);
+
+  useEffect(() => {
+    if (requestKey === null) return;
+    const controller = new AbortController();
+    void fetchQuoteExcelPreview(requestKey, undefined, controller.signal).then((outcome) => {
+      if (!controller.signal.aborted) setLoaded({ key: requestKey, outcome });
+    });
+    return () => controller.abort();
+  }, [requestKey]);
+
+  return quoteExcelPreviewStateOf({
+    quoteId,
+    hasExcel,
+    outcome: loaded !== null && loaded.key === requestKey ? loaded.outcome : null,
+  });
+}
+
+/**
+ * 엑셀 전용 미리보기의 그림 — **훅이 없다**(상태는 위 ExcelOnlyQuotePreview 가 든다). 시험이
+ * 함수로 불러 요소 나무를 걷고, 엑셀 쪽 상태 · 보기(엑셀 · 결재 PDF)를 골라 그려 본다.
+ */
+export function ExcelOnlyQuotePreviewScreen({
+  quote,
+  quoteId,
+  onClose,
+  backHref,
+  signedPdf,
+  hasExcel,
+  canIssue,
+  hasUnsavedChanges,
+  onIssueOutcome,
+  excel,
+  view,
+  onViewChange,
+}: ExcelOnlyQuotePreviewProps & {
+  excel: QuoteExcelPreviewState;
+  view: ExcelOnlyPreviewView;
+  onViewChange: (view: ExcelOnlyPreviewView) => void;
 }) {
+  const layout = excelOnlyPreviewLayout({ state: excel, view, signedPdf });
   const supply = quoteSupplyAmountOf({
     isExcelOnly: true,
     manualSupplyAmount: quote.manualSupplyAmount ?? null,
@@ -582,10 +691,21 @@ function ExcelOnlyQuotePreview({
     // 금액을 알 수 없으면 「—」 — 0 으로 접지 않는다(0 은 무상 견적이라는 실제 값이다).
     ["공급가액", supply === null ? "— (아직 적지 않았습니다)" : `${won(supply)} (V.A.T. 별도)`],
   ];
+  // 결재 PDF 칸이 안 보이는 동안에는 한 줄로 그 사정을 적는다 — 없으면 사용자 결정(2026-09-15) 문장.
+  if (!layout.showPdfPanel) {
+    rows.push([
+      "결재 PDF",
+      signedPdf?.kind === "saved"
+        ? `${signedPdf.originalFileName} — [결재 PDF 보기]로 볼 수 있습니다`
+        : signedPdf?.kind === "pending"
+          ? `골라 둔 결재 PDF(${signedPdf.fileName})는 [저장]하면 올라갑니다`
+          : EXCEL_ONLY_NO_SIGNED_PDF_TEXT,
+    ]);
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         {onClose ? (
           <button type="button" onClick={onClose} className={EXCEL_ONLY_BUTTON_CLASS}>
             ← 편집으로 돌아가기
@@ -596,6 +716,17 @@ function ExcelOnlyQuotePreview({
           </Link>
         )}
         <div className="flex flex-wrap items-center gap-2">
+          {/* 사용자 결정 2 — 엑셀 모양이 먼저, 결재 PDF 가 올라가 있을 때만 바꿔 보는 단추. */}
+          {layout.toggle === "SHOW_PDF" ? (
+            <button type="button" onClick={() => onViewChange("pdf")} className={EXCEL_ONLY_BUTTON_CLASS}>
+              결재 PDF 보기
+            </button>
+          ) : null}
+          {layout.toggle === "SHOW_EXCEL" ? (
+            <button type="button" onClick={() => onViewChange("excel")} className={EXCEL_ONLY_BUTTON_CLASS}>
+              엑셀 모양 보기
+            </button>
+          ) : null}
           {quoteId === null ? (
             <span className="text-xs text-zinc-500 dark:text-zinc-400">Excel 은 저장한 뒤에 받을 수 있습니다</span>
           ) : canIssue ? (
@@ -613,10 +744,20 @@ function ExcelOnlyQuotePreview({
               견적서 받기
             </a>
           )}
+          {layout.canPrint ? (
+            <button
+              type="button"
+              // 🔴 `window.print()` 는 사람이 누른 클릭 핸들러 안에서만 부른다(보고서 미리보기와 같다).
+              onClick={() => window.print()}
+              className={EXCEL_ONLY_PRIMARY_BUTTON_CLASS}
+            >
+              인쇄 · PDF로 저장
+            </button>
+          ) : null}
         </div>
       </div>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 print:hidden dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">엑셀 전용 견적서</h1>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           앱 양식이 아니라 손으로 만든 엑셀로 발행한 견적서입니다 — [견적서 받기]는 붙인 엑셀을 내려줍니다.
@@ -631,9 +772,12 @@ function ExcelOnlyQuotePreview({
         </dl>
       </section>
 
+      {layout.showExcel ? <ExcelOnlyExcelArea state={excel} /> : null}
+
+      {layout.showPdfPanel ? (
       <section
         aria-label="결재 견적서 PDF"
-        className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+        className="rounded-lg border border-zinc-200 bg-white p-4 print:hidden dark:border-zinc-800 dark:bg-zinc-900"
       >
         <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">결재 견적서 PDF</h2>
         {signedPdf?.kind === "saved" ? (
@@ -673,8 +817,137 @@ function ExcelOnlyQuotePreview({
           </p>
         ) : null}
       </section>
+      ) : null}
     </div>
   );
+}
+
+/** 엑셀 쪽 — 읽는 중 · 격자 · 저장 전 · 실패 문장. 격자 말고는 인쇄에 나가지 않는다. */
+function ExcelOnlyExcelArea({ state }: { state: QuoteExcelPreviewState }) {
+  if (state.kind === "ready") return <ExcelOnlyQuoteSheet grid={state.grid} warnings={state.warnings} />;
+  if (state.kind === "loading") {
+    return (
+      <p
+        role="status"
+        className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-600 print:hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+      >
+        {QUOTE_EXCEL_PREVIEW_TEXT.LOADING}
+      </p>
+    );
+  }
+  if (state.kind === "unsaved") {
+    return (
+      <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 print:hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+        {QUOTE_EXCEL_PREVIEW_TEXT.UNSAVED}
+      </p>
+    );
+  }
+  return (
+    <p
+      role="alert"
+      data-excel-preview-failure={state.reason}
+      className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 print:hidden dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+    >
+      {state.message}
+    </p>
+  );
+}
+
+/**
+ * 붙인 엑셀의 인쇄 모양 한 장. 종이 셈(`planPaper`)과 칸 그리기(`SheetPrintGridView`)는 보고서
+ * 미리보기와 **같은 조각**이다 — 용지 · 방향 · 배율 · 여백은 그 엑셀의 인쇄 설정에서 오고, 넘치면
+ * 한 장에 들어가도록 더 줄인다(보고서와 같은 판단).
+ */
+function ExcelOnlyQuoteSheet({ grid, warnings }: { grid: QuoteExcelPreviewGrid; warnings: readonly string[] }) {
+  const plan = planPaper(grid);
+  const scale = plan.scale;
+  // 엑셀의 배율보다 1% 넘게 줄었으면 알린다 — 여러 장짜리 엑셀도 한 장에 앉히기 때문이다.
+  const shrunk = plan.scale < grid.page.scale * 0.99;
+
+  return (
+    <section aria-label="붙인 수기 견적서 엑셀의 인쇄 모양" className="flex flex-col gap-3">
+      <style>{excelOnlySheetStyles(plan, grid.widthPt * scale, grid.page.horizontallyCentered)}</style>
+
+      <p className="text-xs leading-relaxed text-zinc-500 print:hidden dark:text-zinc-400">
+        붙인 수기 견적서 엑셀을 <b>PDF 로 만들었을 때의 모양</b>으로 그린 것입니다 — 용지 · 방향 · 배율은 그 엑셀의
+        인쇄 설정을 따릅니다. 인쇄 창에서 대상 <b>&ldquo;PDF로 저장&rdquo;</b>, 배율 <b>기본(100%)</b>, 여백{" "}
+        <b>기본</b>으로 두세요. 머리글·바닥글(주소·날짜)은 인쇄 창의 <b>&ldquo;머리글 및 바닥글&rdquo;</b> 체크를
+        해제하면 사라집니다. 칸의 글꼴 · 테마 색 · 조건부 서식은 그리지 않습니다 — 정본은 [견적서 받기]로 받는
+        엑셀입니다.
+        {shrunk ? (
+          <>
+            {" "}
+            종이 한 장에 들어가도록 엑셀의 배율({Math.round(grid.page.scale * 100)}%)보다 줄여{" "}
+            {Math.round(plan.scale * 100)}%로 그렸습니다.
+          </>
+        ) : null}
+      </p>
+
+      {warnings.length > 0 ? (
+        <ul
+          role="note"
+          className="flex list-disc flex-col gap-1 rounded-md border border-amber-300 bg-amber-50 py-2 pr-3 pl-6 text-xs text-amber-900 print:hidden dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {warnings.map((warning, index) => (
+            <li key={index}>{warning}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/* 좁은 화면에서 종이를 폭에 맞춰 줄여 «보여 주는» 상자. 인쇄에는 닿지 않는다. */}
+      <PrintFitFrame naturalWidthPx={plan.paperWidthMm * PX_PER_MM} cssVariable="--qxp-fit" className="qxp-viewport">
+        <div className="qxp-page">
+          <SheetPrintGridView grid={grid} scale={scale} classPrefix="qxp" pictureSrc={(picture) => picture.src} />
+        </div>
+      </PrintFitFrame>
+    </section>
+  );
+}
+
+/**
+ * 엑셀 모양 한 장의 CSS — 보고서 미리보기(`ServiceReportPrintView` 의 styleSheet)와 같은 틀이고
+ * 앞말만 `qxp` 다. **`@page` 의 크기 · 여백까지 그 엑셀의 인쇄 설정에서 온다.** 격자가 있을 때만
+ * 그려지므로 앱 양식 갈래(`.qp-*` · 92% · 15mm 10mm)와 부딪히지 않는다.
+ *
+ * 격자 말고는 전부 `print:hidden` 이다(도구모음 · 요약 · 안내 · 결재 PDF 칸). 칸 배경은 인쇄에서도
+ * 보이게 `print-color-adjust: exact` 를 건다 — 기본값이면 브라우저가 배경색을 빼고 인쇄한다.
+ * ⚠️ 이 글은 템플릿 리터럴 안이다 — 백틱을 쓰면 문자열이 거기서 끊긴다.
+ */
+function excelOnlySheetStyles(plan: PaperPlan, sheetWidthPt: number, horizontallyCentered: boolean): string {
+  const margins = `${plan.marginsMm.top.toFixed(2)}mm ${plan.marginsMm.right.toFixed(2)}mm ${plan.marginsMm.bottom.toFixed(
+    2
+  )}mm ${plan.marginsMm.left.toFixed(2)}mm`;
+
+  return `
+.qxp-page {
+  background: #fff; color: #000; box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.08);
+  width: ${plan.paperWidthMm.toFixed(2)}mm; min-height: ${plan.paperHeightMm.toFixed(2)}mm;
+  padding: ${margins}; margin: 0 auto; box-sizing: border-box; overflow: hidden;
+}
+.qxp-sheet {
+  position: relative;
+  /* 엑셀의 printOptions horizontalCentered 를 따른다. */
+  margin: ${horizontallyCentered ? "0 auto" : "0"};
+  /* 칸마다의 글꼴은 읽지 않는다. 앱 양식 견적서의 본문 글꼴(명조 계열)로 물려 둔다. */
+  font-family: "Batang", "바탕", "BatangChe", "Apple SD Gothic Neo", serif;
+  color: #000;
+  line-height: 1.15;
+}
+.qxp-table { width: ${sheetWidthPt.toFixed(3)}pt; table-layout: fixed; border-collapse: collapse; }
+.qxp-table td { padding: 0 1px; overflow: visible; word-break: keep-all; }
+.qxp-picture { position: absolute; object-fit: contain; }
+
+@media screen {
+  .qxp-viewport { overflow-x: auto; }
+  .qxp-page { zoom: var(--qxp-fit, 1); }
+}
+
+@media print {
+  @page { size: ${plan.paperWidthMm.toFixed(2)}mm ${plan.paperHeightMm.toFixed(2)}mm; margin: ${margins}; }
+  .qxp-page { box-shadow: none; padding: 0; margin: 0; width: auto; min-height: 0; overflow: visible; }
+  .qxp-sheet { break-inside: avoid; page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+`;
 }
 
 type WorkSection = { mark: string; label: string; items: readonly string[] };
