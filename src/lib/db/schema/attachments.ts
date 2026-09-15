@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { improvementRequests } from "./improvement-requests";
 import { productModels } from "./product-models";
+import { quotes } from "./quotes";
 import { repairCases } from "./repair-cases";
 import { users } from "./users";
 
@@ -31,7 +32,7 @@ import { users } from "./users";
  * 실제 저장으로 바꾸는 첫 단계이며, **이번 단계는 표와 권한 자리를 만드는
  * 데까지다** — 업로드·다운로드·저장소 어댑터는 다음 단계다.
  *
- * ── 첨부 대상은 접수 건 · 제품 모델 · 개선 요청 셋이다 ────────────────────
+ * ── 첨부 대상은 접수 건 · 제품 모델 · 개선 요청 · 견적서 넷이다 ────────────
  * 처음에는 A/S 접수 건 하나뿐이었다. 여기에 **제품 모델**(product_models)이
  * 더해졌다 — 모델의 외형 사진과 회로도를 붙이기 위해서다. 대상이 둘이 된
  * 지금도 다형 참조(owner_type + owner_id)를 쓰지 않는다: 그 구조는 외래키를
@@ -47,6 +48,12 @@ import { users } from "./users";
  * attachments_owner_not_both 를 고쳐 쓰지 않고 **따로 하나를 더했다**
  * (attachments_improvement_owner_alone) — 이미 걸려 있는 제약을 지우고 다시
  * 거는 마이그레이션을 만들지 않으려는 것이다.
+ *
+ * 넷째 주인은 **견적서**(quotes)다(2026-09-15) — [새 견적서] · [견적서 수정]에서
+ * 결재 사인이 들어간 PDF 와 손으로 만든 엑셀 견적서를 붙이기 위해서다(견적서마다
+ * 결재 PDF 1개 + 엑셀 1개). 셋째 주인과 똑같은 방식이다 — NULL 허용 FK 칸 하나,
+ * 부분 인덱스 하나, 기존 CHECK 를 고쳐 쓰지 않고 **따로 더한** CHECK 하나
+ * (attachments_quote_owner_alone).
  *
  * 같은 표를 쓰는 것도 의도된 선택이다. 백업 스크립트(scripts/backup-attachments.ts)가
  * 이 표를 조건절 없이 통째로 읽고 저장 루트 전체를 훑기 때문에, 같은 표에
@@ -111,6 +118,11 @@ export const attachmentCategoryEnum = pgEnum("attachment_category", [
   // drizzle-kit 이 `ADD VALUE ... BEFORE 'OTHER'` 로 만든다 — 0047(IN_REPAIR 등)·
   // 0083(QUOTE)과 같은 방식이고, 지우고 다시 만드는 일이 없다.
   "SCREENSHOT",
+  // 견적서에 붙는 두 칸 — 결재 견적서 PDF · 수기 견적서 엑셀(2026-09-15). 둘 다
+  // 기타 **앞**이고 `ADD VALUE ... BEFORE 'OTHER'` 로 더해진다(0099). 위 QUOTE 와는
+  // 다른 것이다 — 그쪽은 수리 건 파일의 분류 이름이고 뜻을 바꾸지 않는다.
+  "SIGNED_QUOTE_PDF",
+  "QUOTE_EXCEL",
   "OTHER",
 ]);
 
@@ -166,6 +178,16 @@ export const attachments = pgTable(
       () => improvementRequests.id,
       { onDelete: "set null" }
     ),
+    // 견적서에 붙는 파일 — 결재 견적서 PDF · 수기 견적서 엑셀이 여기 걸린다
+    // (2026-09-15). 한 견적서에 분류마다 한 파일이라는 규칙은 앱이 정한다
+    // (domain/attachment-category.ts 의 QUOTE_ATTACHMENT_SLOT_CATEGORIES).
+    //
+    // 앞의 세 주인 칸과 같은 이유로 NULL 허용 + ON DELETE SET NULL 이다. 견적서는
+    // 휴지통(소프트 삭제)을 쓰므로 평소에는 이 FK 가 돌 일이 없고, 영구 삭제될 때에만
+    // 연결이 끊긴다 — 그때도 첨부 행과 디스크 실물은 남는다. cascade 로 두면 행만
+    // 사라지고 실물이 주인도 기록도 없이 남고, restrict 로 두면 파일이 붙은 견적서를
+    // 영구 삭제할 수 없다.
+    quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
     category:attachmentCategoryEnum("category").notNull(),
     // 사용자가 올린 그대로의 이름. 표시와 다운로드 파일명으로만 쓰고, 디스크
     // 경로를 만드는 데는 절대 쓰지 않는다(파일 헤더 참조).
@@ -225,6 +247,11 @@ export const attachments = pgTable(
     index("attachments_improvement_request_id_not_deleted_idx")
       .on(table.improvementRequestId)
       .where(sql`is_deleted = false`),
+    // 견적서의 결재 PDF · 엑셀 칸이 쏘는 질의 — "이 견적서의 안 지워진 첨부".
+    // 위 세 인덱스와 똑같은 모양의 부분 인덱스다.
+    index("attachments_quote_id_not_deleted_idx")
+      .on(table.quoteId)
+      .where(sql`is_deleted = false`),
     // ── 주인은 둘일 수 없다 (하지만 없을 수는 있다) ─────────────────────
     // 파일 하나가 접수 건과 모델 양쪽에 동시에 걸리면 그 파일이 어느 폴더에
     // 사는지(stored_path 의 첫 마디가 repair-cases 인지 product-models 인지)가
@@ -256,6 +283,18 @@ export const attachments = pgTable(
     check(
       "attachments_improvement_owner_alone",
       sql`${table.improvementRequestId} IS NULL OR (${table.repairCaseId} IS NULL AND ${table.productModelId} IS NULL)`
+    ),
+    // ── 견적서 주인도 혼자다 (2026-09-15) ────────────────────────────────
+    // 넷째 주인(quote_id)이 차 있으면 앞의 세 주인은 비어 있어야 한다 — 파일이 사는
+    // 폴더(quotes 인지 아닌지)가 하나로 정해져야 한다. 앞의 두 CHECK 는 **한 글자도
+    // 고치지 않고** 이것을 따로 더한다(위 attachments_improvement_owner_alone 과 같은
+    // 까닭). 세 CHECK 를 함께 읽으면 "넷 중 둘 이상이 차는 일은 없다"가 된다.
+    //
+    // ⚠️ 여기도 **XOR 가 아니다.** 네 칸 모두 ON DELETE SET NULL 이라 주인 없는 행은
+    // 정상 상태다(위 attachments_owner_not_both 주석).
+    check(
+      "attachments_quote_owner_alone",
+      sql`${table.quoteId} IS NULL OR (${table.repairCaseId} IS NULL AND ${table.productModelId} IS NULL AND ${table.improvementRequestId} IS NULL)`
     ),
     // 중복 업로드 판단과 디스크 실물 대조용. 부분 인덱스가 아닌 것은 일부러다 —
     // 휴지통에 있는 파일까지 찾아야 "이미 올린 파일인데 지워져 있다"를 말할 수

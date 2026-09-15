@@ -98,8 +98,9 @@ export const PREVIEW_CAPABLE_EXTENSIONS: ReadonlySet<string> = new Set(
 /**
  * 5개 분류는 승인된 확장자만 허용한다. 나머지 분류는 여기 목록에 없으므로 전체
  * 허용목록 중 아무 확장자나 쓸 수 있다. 데모 파일의 CATEGORY_EXTENSION_ALLOWLIST와
- * 같아야 하고, 어긋남은 테스트가 잡는다 — 단 SCREENSHOT 한 줄은 데모에 없다
- * (데모에 그 분류 자체가 없다. attachment-category.ts 헤더의 '데모 파일과의 관계').
+ * 같아야 하고, 어긋남은 테스트가 잡는다 — 단 SCREENSHOT · SIGNED_QUOTE_PDF ·
+ * QUOTE_EXCEL 세 줄은 데모에 없다(데모에 그 분류 자체가 없다. attachment-category.ts
+ * 헤더의 '데모 파일과의 관계').
  */
 export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, readonly string[]>> = {
   OSCILLOSCOPE_DATA: ["csv", "txt"],
@@ -123,6 +124,12 @@ export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, re
   // 걸린다. 전체 목록을 넓히면 제한 없는 분류 전부에 webp가 함께 열리므로 그것은
   // 따로 정할 일이다.
   SCREENSHOT: ["png", "jpg", "jpeg"],
+  // 견적서에 붙는 두 칸(2026-09-15). 결재 사인이 들어간 견적서는 PDF 로만 받는다 —
+  // 사진으로 찍은 결재본은 받지 않는다(칸 이름이 곧 형식이다). 손으로 만든 엑셀
+  // 견적서는 xlsx 와 옛 xls 둘 다. 넷 모두 이미 전체 허용목록에 있고 앞머리 바이트
+  // 대조가 그대로 걸린다. 크기 상한은 다른 분류와 같은 20MB 다.
+  SIGNED_QUOTE_PDF: ["pdf"],
+  QUOTE_EXCEL: ["xlsx", "xls"],
 };
 
 /**

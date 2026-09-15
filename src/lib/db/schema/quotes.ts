@@ -212,6 +212,26 @@ export const quotes = pgTable(
      */
     investigationExcluded: boolean("investigation_excluded").notNull().default(false),
 
+    /**
+     * ── 엑셀 전용 견적서 (2026-09-15 사용자 결정) ──────────────────────
+     * 손으로 만든 엑셀 견적서를 붙여 저장하는 장이다 — 이 시스템의 품목 · 작업비로
+     * 문서를 만들지 않고, 붙인 엑셀(attachments 의 QUOTE_EXCEL)이 곧 보낸 문서다.
+     * 필수 칸(발행번호 · 품명 · 발행일자 · 공급처)은 다른 장과 같다.
+     *
+     * 🔴 **품목이 없다는 사실로 짐작하지 않고 따로 둔다.** 위 investigation_excluded 와
+     * 같은 까닭이다 — 품목 0개인 장은 엑셀 전용이 아니어도 있다(작업비만 부르는 장,
+     * 아직 쓰는 중인 장). 옛 견적서는 전부 false 라 문서도 금액도 그대로다.
+     */
+    isExcelOnly: boolean("is_excel_only").notNull().default(false),
+    /**
+     * 엑셀 전용 견적서의 **공급가액(부가세 별도)** 을 사람이 손으로 적은 값
+     * (2026-09-15 사용자 결정). 품목이 없으니 이 파일 머리말의 '합계 금액을 담지 않는다'
+     * 계산(품목 합 + 작업비)으로는 금액이 나오지 않는다 — 그래서 **엑셀 전용 장에만**
+     * 이 칸이 있다(아래 quotes_manual_supply_amount_excel_only). 부가세는 여기에도 담지
+     * 않는다(머리말의 같은 항목). NULL 은 "적지 않았다"이고 0 과 다르다.
+     */
+    manualSupplyAmount: numeric("manual_supply_amount", { precision: 15, scale: 2 }),
+
     // 낙관적 잠금. 목록에서 열어 고치는 화면이 있으므로 처음부터 쓴다.
     version: integer("version").notNull().default(1),
 
@@ -256,6 +276,24 @@ export const quotes = pgTable(
     check(
       "quotes_labor_power_test_deduction_not_negative",
       sql`${table.laborPowerTestDeduction} >= 0`
+    ),
+    /**
+     * 손으로 적은 공급가액은 **엑셀 전용 장에만** 있다(2026-09-15). 일반 견적서에 이 값이
+     * 남으면 금액이 두 벌(품목 합과 손 금액)이 되어 어느 쪽이 맞는지 답할 수 없다.
+     * 엑셀 전용이어도 NULL 은 허용한다 — 금액을 아직 적지 않은 장이다.
+     */
+    check(
+      "quotes_manual_supply_amount_excel_only",
+      sql`${table.isExcelOnly} OR ${table.manualSupplyAmount} IS NULL`
+    ),
+    /**
+     * 손으로 적은 공급가액은 음수일 수 없다. 0 은 허용한다(무상 견적). 위 CHECK 와 나눈
+     * 것은 어긋났을 때 **제약 이름만으로 무엇이 틀렸는지** 알게 하려는 것이다 — 한 CHECK 로
+     * 묶으면 "엑셀 전용이 아닌데 금액이 있다"와 "금액이 음수다"가 같은 이름으로 거절된다.
+     */
+    check(
+      "quotes_manual_supply_amount_not_negative",
+      sql`${table.manualSupplyAmount} IS NULL OR ${table.manualSupplyAmount} >= 0`
     ),
   ]
 );

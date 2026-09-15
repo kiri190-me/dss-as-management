@@ -107,6 +107,17 @@ export type AttachmentOwnerRef = {
   improvementRequestId: string | null;
 };
 
+/**
+ * 이 파일의 판정이 아는 주인 종류 — 견적서(QUOTE, 2026-09-15 Q1)를 **아직 뺀다.**
+ * 견적서 주인은 분류 · 경로 규칙(attachment-category.ts · attachment-path.ts)에만
+ * 먼저 들어왔고, 위 AttachmentOwnerRef 에는 견적서 칸이 아직 없다 — 견적서 파일은
+ * 지금 「주인 없음」(DETACHED)으로 막히는 쪽이다. 여기서 QUOTE 를 빼 두면
+ * AttachmentOwnerAccess 를 채우는 내려받기 · 미리보기 · 지우기 통로가 한 줄도
+ * 바뀌지 않는다(타입만의 조치, 동작 변화 없음). 다음 조각(Q2)이 AttachmentOwnerRef 에
+ * 견적서 칸을 더하면서 이 Exclude 를 거두면, 컴파일러가 권한을 채울 자리를 전부 짚는다.
+ */
+type DownloadPolicyOwnerKind = Exclude<AttachmentOwnerKind, "QUOTE">;
+
 export type AttachmentDownloadSubject = AttachmentOwnerRef & {
   isDeleted: boolean;
   malwareScanStatus: MalwareScanStatus;
@@ -144,7 +155,7 @@ export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
  * 셋 중 둘 이상이 차는 행은 DB CHECK 가 막으므로 보는 차례에 뜻은 없지만, 예전 두
  * 갈래(`productModelId ? 모델 : 접수 건`)와 같게 모델을 먼저 본다.
  */
-export function attachmentOwnerKindOf(owner: AttachmentOwnerRef): AttachmentOwnerKind | null {
+export function attachmentOwnerKindOf(owner: AttachmentOwnerRef): DownloadPolicyOwnerKind | null {
   if (owner.productModelId !== null) return "PRODUCT_MODEL";
   if (owner.improvementRequestId !== null && owner.improvementRequestId !== undefined) {
     return "IMPROVEMENT_REQUEST";
@@ -162,7 +173,7 @@ export function attachmentOwnerKindOf(owner: AttachmentOwnerRef): AttachmentOwne
  *   제품 모델  productModels.view READ   productModels.files WRITE
  *   개선 요청  improvementRequests READ  improvementRequests WRITE
  */
-export type AttachmentOwnerAccess = Readonly<Record<AttachmentOwnerKind, boolean>>;
+export type AttachmentOwnerAccess = Readonly<Record<DownloadPolicyOwnerKind, boolean>>;
 
 /**
  * 넓은 문턱 — 셋 중 **어느 주인의 파일도** 다룰 수 없는 사람인가. 그런 사람은 첨부를

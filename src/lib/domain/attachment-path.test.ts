@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   ATTACHMENT_IMPROVEMENT_REQUEST_STORED_PATH_PREFIX,
   ATTACHMENT_MODEL_STORED_PATH_PREFIX,
+  ATTACHMENT_QUOTE_STORED_PATH_PREFIX,
   ATTACHMENT_STORED_PATH_PREFIX,
   AttachmentPathError,
   assertPortableStoredPath,
@@ -16,6 +17,9 @@ import {
   buildProductModelAttachmentPreviewPath,
   buildProductModelAttachmentStoredPath,
   buildProductModelAttachmentStoredPathFromFileName,
+  buildQuoteAttachmentPreviewPath,
+  buildQuoteAttachmentStoredPath,
+  buildQuoteAttachmentStoredPathFromFileName,
   isPortableStoredPath,
   resolveAttachmentAbsolutePath,
 } from "./attachment-path";
@@ -625,4 +629,147 @@ test("개선 요청 경로도 저장 루트 아래로만 해석된다", () => {
     () => resolveAttachmentAbsolutePath(root, "improvement-requests/../../secrets.txt"),
     AttachmentPathError
   );
+});
+
+/**
+ * ============================================================================
+ * 견적서 첨부 — 네 번째 접두어 (2026-09-15)
+ * ============================================================================
+ * 견적서에 결재 견적서 PDF · 수기 견적서 엑셀을 붙이면서 첫 마디가 넷이 됐다.
+ * 앞의 접두어들과 같은 두 가지를 못박는다 — 규칙 1·2·3을 똑같이 지키는가, 그리고
+ * 넷 말고 다섯째 첫 마디는 여전히 거부되는가. 백업 스크립트(scripts/backup-attachments.ts)가
+ * assertPortableStoredPath 로 전 행을 검사하므로, 여기서 quotes/… 가 통과해야 백업이
+ * 첫 견적서 파일에서 멈추지 않는다.
+ * ============================================================================
+ */
+
+const QUOTE_ID = "d9e8f7a6-5b4c-4d3e-8f2a-1b0c9d8e7f6a";
+
+test("견적서 첨부의 stored_path는 quotes/{견적서id}/{첨부id}.{확장자}다", () => {
+  assert.equal(ATTACHMENT_QUOTE_STORED_PATH_PREFIX, "quotes");
+  for (const extension of ["pdf", "xlsx", "xls"]) {
+    const stored = buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension });
+    assert.equal(stored, `quotes/${QUOTE_ID}/${ATTACHMENT_ID}.${extension}`);
+    assert.equal(stored.split("/").length, 3);
+    assert.equal(stored.includes("\\"), false, "Linux는 역슬래시를 파일명의 일부로 읽는다");
+    assert.equal(stored, stored.toLowerCase());
+    if (path.sep !== "/") {
+      assert.equal(stored.includes(path.sep), false, `OS 구분자(${path.sep})가 DB 값에 들어갔다`);
+    }
+    // 백업 스크립트가 부르는 바로 그 검사를 통과한다.
+    assert.doesNotThrow(() => assertPortableStoredPath(stored), stored);
+    assert.equal(isPortableStoredPath(stored), true, stored);
+  }
+});
+
+test("견적서 경로도 대문자 UUID·대문자 확장자를 소문자로 눕힌다", () => {
+  const stored = buildQuoteAttachmentStoredPath({
+    quoteId: QUOTE_ID.toUpperCase(),
+    attachmentId: ATTACHMENT_ID.toUpperCase(),
+    extension: "XLSX",
+  });
+  assert.equal(stored, `quotes/${QUOTE_ID}/${ATTACHMENT_ID}.xlsx`);
+});
+
+test("견적서 경로도 원본 파일명에서 확장자만 뽑아 소문자로 붙인다", () => {
+  const stored = buildQuoteAttachmentStoredPathFromFileName({
+    quoteId: QUOTE_ID,
+    attachmentId: ATTACHMENT_ID,
+    originalFileName: "DSS 2026-077 견적서 (결재).PDF",
+  });
+  assert.equal(stored, `quotes/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`);
+  assert.equal(stored.includes("견적서"), false, "원본 이름은 디스크 경로에 들어가지 않는다");
+  assert.equal(stored.includes(" "), false);
+});
+
+test("견적서 첨부의 미리보기 경로는 .preview.jpg로 끝나고 검사를 통과한다", () => {
+  const preview = buildQuoteAttachmentPreviewPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID });
+  assert.equal(preview, `quotes/${QUOTE_ID}/${ATTACHMENT_ID}.preview.jpg`);
+  assert.equal(preview, preview.toLowerCase());
+  assert.equal(isPortableStoredPath(preview), true);
+});
+
+test("UUID가 아닌 견적서 ID·첨부 ID, 목록 밖 확장자로는 견적서 경로를 만들 수 없다", () => {
+  // 견적서 번호(발행번호)는 ID 가 아니다 — 사람이 적는 글자라 경로에 쓰지 않는다.
+  for (const badId of ["../../etc", "DSS 2026-077", "", "42"]) {
+    assert.throws(
+      () => buildQuoteAttachmentStoredPath({ quoteId: badId, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
+      AttachmentPathError,
+      badId
+    );
+  }
+  assert.throws(
+    () => buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: "local-demo-1", extension: "pdf" }),
+    AttachmentPathError
+  );
+  assert.throws(
+    () => buildQuoteAttachmentPreviewPath({ quoteId: "not-a-uuid", attachmentId: ATTACHMENT_ID }),
+    AttachmentPathError
+  );
+  for (const extension of ["exe", "xlsm", "", "p/df"]) {
+    assert.throws(
+      () => buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension }),
+      AttachmentPathError,
+      extension
+    );
+  }
+  for (const name of ["README", "trailing.", ".hidden", "weird.타입"]) {
+    assert.throws(
+      () =>
+        buildQuoteAttachmentStoredPathFromFileName({
+          quoteId: QUOTE_ID,
+          attachmentId: ATTACHMENT_ID,
+          originalFileName: name,
+        }),
+      AttachmentPathError,
+      name
+    );
+  }
+});
+
+test("assertPortableStoredPath는 네 접두어를 모두 받는다", () => {
+  const stored = [
+    buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
+    buildProductModelAttachmentStoredPath({ productModelId: MODEL_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
+    buildImprovementRequestAttachmentStoredPath({
+      improvementRequestId: IMPROVEMENT_REQUEST_ID,
+      attachmentId: ATTACHMENT_ID,
+      extension: "png",
+    }),
+    buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
+  ];
+  for (const value of stored) {
+    assert.doesNotThrow(() => assertPortableStoredPath(value), value);
+  }
+  assert.equal(new Set(stored.map((value) => value.split("/")[0])).size, 4, "첫 마디가 넷으로 갈려야 한다");
+});
+
+test("넷째 접두어를 더한 것이 '아무거나 받는다'가 되지 않았다 — 목록 밖 접두어와 규칙 위반은 여전히 거부된다", () => {
+  const rejected = [
+    `quote/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`, // 단수형 오타
+    `quotes-old/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`,
+    `quote-attachments/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`,
+    `QUOTES/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`, // 규칙 2 — 대문자
+    `quotes/${QUOTE_ID}/${ATTACHMENT_ID}.PDF`, // 규칙 2 — 확장자만
+    `quotes\\${QUOTE_ID}\\${ATTACHMENT_ID}.pdf`, // 규칙 1 — 역슬래시
+    `/quotes/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`, // 규칙 3 — 절대경로
+    `c:/quotes/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`, // 규칙 3 — 드라이브 문자
+    "quotes/../../windows/system32/config", // 상위 이동
+    "quotes//double.pdf", // 빈 마디
+    "quotes/./x.pdf", // 현재 디렉터리 마디
+  ];
+  for (const value of rejected) {
+    assert.equal(isPortableStoredPath(value), false, `거부돼야 한다: ${JSON.stringify(value)}`);
+    assert.throws(() => assertPortableStoredPath(value), AttachmentPathError, value);
+  }
+});
+
+test("견적서 경로도 저장 루트 아래로만 해석된다", () => {
+  const root = path.resolve(path.sep === "/" ? "/srv/dss-as-data/uploads" : "C:\\DSS-AS-DATA\\uploads");
+  const stored = buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension: "xlsx" });
+  const absolute = resolveAttachmentAbsolutePath(root, stored);
+  assert.ok(path.isAbsolute(absolute));
+  assert.equal(path.relative(root, absolute).startsWith(".."), false, "루트 밖으로 나가면 안 된다");
+  assert.ok(absolute.includes(`${path.sep}${ATTACHMENT_QUOTE_STORED_PATH_PREFIX}${path.sep}`));
+  assert.throws(() => resolveAttachmentAbsolutePath(root, "quotes/../../secrets.txt"), AttachmentPathError);
 });

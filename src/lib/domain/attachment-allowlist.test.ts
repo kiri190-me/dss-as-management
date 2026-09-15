@@ -51,13 +51,15 @@ test("확장자 규칙이 데모 파일과 순서·값까지 정확히 같다", 
   assert.deepEqual([...ATTACHMENT_EXTENSION_RULES], [...DEMO_EXTENSION_RULES]);
 });
 
-test("분류별 확장자 제한이 데모 파일과 같다 — SCREENSHOT 하나만 빼고", () => {
-  // SCREENSHOT(개선 요청 스크린샷)은 데모에 분류 자체가 없다(attachment-category.ts
-  // 헤더의 '데모 파일과의 관계'). 빼는 것은 그 한 줄뿐이다.
-  const withoutScreenshot = Object.fromEntries(
-    Object.entries(CATEGORY_EXTENSION_ALLOWLIST).filter(([category]) => category !== "SCREENSHOT")
+test("분류별 확장자 제한이 데모 파일과 같다 — 주인 전용 분류 셋만 빼고", () => {
+  // SCREENSHOT(개선 요청 스크린샷)과 견적서 두 칸 SIGNED_QUOTE_PDF · QUOTE_EXCEL 은 데모에
+  // 분류 자체가 없다(attachment-category.ts 헤더의 '데모 파일과의 관계'). 빼는 것은 그
+  // 세 줄뿐이다.
+  const ownerOnly = ["SCREENSHOT", "SIGNED_QUOTE_PDF", "QUOTE_EXCEL"];
+  const withoutOwnerOnly = Object.fromEntries(
+    Object.entries(CATEGORY_EXTENSION_ALLOWLIST).filter(([category]) => !ownerOnly.includes(category))
   );
-  assert.deepEqual(withoutScreenshot, DEMO_CATEGORY_ALLOWLIST);
+  assert.deepEqual(withoutOwnerOnly, DEMO_CATEGORY_ALLOWLIST);
 });
 
 test("크기 상한은 데모와 일부러 다르다 — 실제 저장은 20MB다", () => {
@@ -153,6 +155,31 @@ test("스크린샷은 이미지(png/jpg/jpeg)만 받는다 — 개선 요청 글
   // 허용목록 밖의 이미지 형식도 막힌다.
   for (const extension of ["webp", "gif", "bmp", "svg", "heic", "exe"]) {
     assert.equal(isExtensionAllowedForCategory(extension, "SCREENSHOT"), false, `.${extension}이 통과했다`);
+  }
+});
+
+test("결재 견적서는 PDF 만 받는다 — 사진 · 엑셀 · 문서는 거절", () => {
+  assert.deepEqual([...(CATEGORY_EXTENSION_ALLOWLIST.SIGNED_QUOTE_PDF ?? [])], ["pdf"]);
+  assert.equal(isExtensionAllowedForCategory("pdf", "SIGNED_QUOTE_PDF"), true);
+  for (const extension of ["jpg", "jpeg", "png", "xlsx", "xls", "doc", "docx", "zip", "csv", "txt", "log", "bin", "hex"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "SIGNED_QUOTE_PDF"), false, `.${extension}이 통과했다`);
+  }
+  for (const extension of ["exe", "hwp", "webp", ""]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "SIGNED_QUOTE_PDF"), false, `.${extension}이 통과했다`);
+  }
+});
+
+test("수기 견적서는 엑셀(xlsx · xls)만 받는다 — PDF · 사진 · 문서는 거절", () => {
+  assert.deepEqual([...(CATEGORY_EXTENSION_ALLOWLIST.QUOTE_EXCEL ?? [])], ["xlsx", "xls"]);
+  for (const extension of ["xlsx", "xls"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "QUOTE_EXCEL"), true, `.${extension}이 막혔다`);
+  }
+  for (const extension of ["pdf", "jpg", "jpeg", "png", "doc", "docx", "zip", "csv", "txt", "log", "bin", "hex"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "QUOTE_EXCEL"), false, `.${extension}이 통과했다`);
+  }
+  // 전체 허용목록 밖의 스프레드시트 형식은 막힌다 — 매크로가 든 xlsm 을 따로 열지 않는다.
+  for (const extension of ["xlsm", "xlsb", "ods", "exe"]) {
+    assert.equal(isExtensionAllowedForCategory(extension, "QUOTE_EXCEL"), false, `.${extension}이 통과했다`);
   }
 });
 
@@ -261,6 +288,20 @@ test("회로도로 올린 사진도 앞머리 바이트 대조를 그대로 받�
   assert.equal(isContentCompatibleWithExtension("png", PNG_HEADER), true);
   assert.equal(isContentCompatibleWithExtension("jpg", WINDOWS_EXE_HEADER), false);
   assert.equal(isContentCompatibleWithExtension("png", PDF_HEADER), false);
+});
+
+test("견적서 두 칸(결재 PDF · 엑셀)도 앞머리 바이트 대조를 그대로 받는다", () => {
+  // 분류 허용목록은 "이 확장자를 이 분류에 쓸 수 있는가"만 본다. 이름만 .pdf/.xlsx 로
+  // 바꾼 파일을 막는 것은 여전히 내용 대조 쪽이다.
+  assert.equal(isContentCompatibleWithExtension("pdf", PDF_HEADER), true);
+  assert.equal(isContentCompatibleWithExtension("pdf", ZIP_HEADER), false);
+  assert.equal(isContentCompatibleWithExtension("xlsx", ZIP_HEADER), true);
+  assert.equal(isContentCompatibleWithExtension("xlsx", PDF_HEADER), false);
+  assert.equal(isContentCompatibleWithExtension("xls", OLE2_HEADER), true);
+  assert.equal(isContentCompatibleWithExtension("xlsx", WINDOWS_EXE_HEADER), false);
+  assert.equal(isContentCompatibleWithExtension("pdf", WINDOWS_EXE_HEADER), false);
+  // 크기 상한은 다른 분류와 같은 20MB 다 — 분류마다 따로 두지 않는다.
+  assert.equal(MAX_ATTACHMENT_SIZE_BYTES, 20 * 1024 * 1024);
 });
 
 test("허용목록 밖 확장자는 내용이 무엇이든 통과하지 못한다", () => {
