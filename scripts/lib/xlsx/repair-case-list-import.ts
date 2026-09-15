@@ -1,3 +1,4 @@
+import { excelSerialToDateOnly } from "@/lib/xlsx/excel-date";
 import type { ParsedCellMetadata, WorkbookStyles } from "./ooxml-parser";
 import type { LoadedSheet, LoadedWorkbook } from "./workbook-loader";
 
@@ -185,19 +186,10 @@ export function isDateLikeStyle(styleIndex: number | null, styles?: WorkbookStyl
   return custom ? isDateFormatCode(custom) : false;
 }
 
-export function excelSerialToDateOnly(
-  serial: number,
-  dateSystem: "1900" | "1904"
-): string | null {
-  if (!Number.isFinite(serial) || serial < 0) return null;
-  const wholeDays = Math.floor(serial);
-  if (dateSystem === "1900" && wholeDays === 60) return null; // Excel's fictional 1900-02-29.
-  const epoch = dateSystem === "1904" ? Date.UTC(1904, 0, 1) : Date.UTC(1900, 0, 1);
-  const dayOffset = dateSystem === "1904" ? wholeDays : wholeDays - (wholeDays > 60 ? 2 : 1);
-  const date = new Date(epoch + dayOffset * 86_400_000);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
-}
+// 2026-09-15: 원본을 src/lib/xlsx/excel-date.ts 로 옮겼다(교산 인수품 읽개가 앱에서
+// 같은 변환을 쓴다 — 앱은 scripts/ 의 실행 코드를 가져오지 않는다). 여기서는 위에서
+// 가져와 쓰고 다시 내보내기만 한다 — 동작은 그대로다.
+export { excelSerialToDateOnly };
 
 export function repairCaseImportDateMaximum(referenceDate: string): string {
   const parsed = parseIsoDateParts(referenceDate);

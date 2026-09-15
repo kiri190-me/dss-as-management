@@ -10,14 +10,12 @@
  * a merge range, a connector's endpoint ids) mechanically derived from it.
  */
 
-export function decodeXmlEntities(s: string): string {
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&");
-}
+// 2026-09-15: 앱(src/)의 교산 인수품 읽개도 같은 함수를 쓰게 되어 원본을
+// src/lib/xlsx/xml-entities.ts 로 옮겼다(앱은 scripts/ 의 실행 코드를 가져오지 않는다).
+// 여기서는 가져와 쓰고 다시 내보내기만 한다 — 동작은 그대로다.
+import { decodeXmlEntities } from "@/lib/xlsx/xml-entities";
+
+export { decodeXmlEntities };
 
 export function colLettersToNum(letters: string): number {
   let n = 0;

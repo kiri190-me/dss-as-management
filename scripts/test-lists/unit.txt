@@ -209,3 +209,8 @@ src/lib/validation/improvement-request-input.test.ts
 src/lib/auth/improvement-request-authorization.test.ts
 src/lib/domain/user-deletion-rules.test.ts
 src/lib/validation/user-deletion-input.test.ts
+src/lib/xlsx/sheet-grid.test.ts
+src/lib/domain/kyosan-intake-import/columns.test.ts
+src/lib/domain/kyosan-intake-import/rules.test.ts
+src/lib/domain/kyosan-intake-import/parse.test.ts
+src/lib/domain/kyosan-intake-import/name-suggestions.test.ts
