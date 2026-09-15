@@ -8,6 +8,7 @@ import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { readAllQuoteTemplateHeaders, readQuoteWorkSections } from "@/lib/storage/quote-template";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
+import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
 import { returnHrefForQuotePrint, type SearchParamsInput } from "@/lib/domain/quote-new-link";
 
 export const metadata: Metadata = {
@@ -85,9 +86,16 @@ export default async function QuotePrintPage({
   // 정하면 손으로 바꾼 링크가 사람을 남의 건으로 보낸다(수정 화면과 같은 판단).
   const backHref = returnHrefForQuotePrint(searchParams ? await searchParams : undefined, quote);
 
+  // 제너레이터에서 수리 작업을 하나도 고르지 않았으면 「② 수리 작업」을 그리지
+  // 않는다 — xlsx 라우트가 같은 함수로 그 구역을 지운다(둘이 같은 종이여야 한다).
+  const repairSectionDropped = isRepairSectionDropped({
+    equipmentKind: quote.laborEquipmentKind,
+    chosenRepairTaskCount: quote.repairTasks.length,
+  });
+
   return (
     <QuotePrintView
-      quote={quote}
+      quote={{ ...quote, repairSectionDropped }}
       header={header}
       workSections={workSections}
       quoteId={quote.id}

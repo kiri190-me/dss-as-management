@@ -18,6 +18,7 @@ import {
   LAYOUT_COLUMNS as COLUMNS,
   NO_WORK_SCOPE_EXCLUSIONS,
   renumberPaperworkBlock,
+  renumberWorkScopeSectionMarks,
   resizeWorkScopeBlocks,
   type WorkScopeExclusions,
   type WorkScopeLabels,
@@ -185,6 +186,18 @@ export type GeneratorQuoteInput = QuoteInput & {
    * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
    */
   powerTestExcluded?: boolean;
+  /**
+   * 켜면 「② 수리 작업」 구역을 **머리글까지 문서에서 지운다.** 제너레이터에서 수리
+   * 작업을 하나도 고르지 않은 견적서다 — 판정은 domain/quote-work-scope-suppression.ts
+   * 의 isRepairSectionDropped 이고 라우트가 그 답을 넘긴다(2026-09-15 사용자). 양식의
+   * 그 묶음은 기본 줄이 0개라, 두면 줄 없는 머리글만 찍혀 나간다.
+   *
+   * 그 아래 ③ 통전검사·④ 서류작업의 번호도 하나씩 당겨진다
+   * (quote-sheet-layout.ts 의 renumberWorkScopeSectionMarks · renumberPaperworkBlock).
+   *
+   * 기본은 꺼짐이고, **주지 않으면 결과가 한 바이트도 달라지지 않는다.**
+   */
+  repairSectionDropped?: boolean;
 };
 
 /**
@@ -246,9 +259,10 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
-  // 없애기로 한 묶음. 지금 켤 수 있는 것은 ③ 뿐이다 — 나머지 둘은 늘 꺼짐이다.
+  // 없애기로 한 묶음. 켤 수 있는 것은 ② · ③ 이다 — ① 은 늘 꺼짐이다.
   const excluded: WorkScopeExclusions = {
     ...NO_WORK_SCOPE_EXCLUSIONS,
+    REPAIR: input.repairSectionDropped === true,
     POWER_TEST: input.powerTestExcluded === true,
   };
   // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
@@ -341,9 +355,16 @@ function fillSheet(
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
 
-  // ③ 을 지웠으면 「④ 서류작업」이 ③ 이 된다. 없앤 것이 없으면 그 칸은 손도
-  // 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
+  // 지운 묶음 수만큼 「④ 서류작업」의 번호가 당겨진다. 없앤 것이 없으면 그 칸은
+  // 손도 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
   xml = renumberPaperworkBlock(xml, templateRows, read, excluded, rowShift);
+  // ② 를 지웠으면 그 아래 ③ 통전검사가 ② 가 된다. 자리가 바뀐 묶음이 없으면 손대지
+  // 않는다(renumberWorkScopeSectionMarks). 머리글 행은 줄 수를 맞춘 뒤의 자리다.
+  xml = renumberWorkScopeSectionMarks(xml, excluded, {
+    INVESTIGATION: scope.INVESTIGATION.headerRow + afterParts,
+    REPAIR: scope.REPAIR.headerRow + afterInvestigation,
+    POWER_TEST: scope.POWER_TEST.headerRow + afterRepair,
+  });
 
   /**
    * 작업비 아래부터 공급가 바로 위까지의 금액 칸을 비운다. 그 사이는 작업 내역

@@ -364,9 +364,9 @@ export function fillWorkScopeRows(
  * 생기는 날 또 어긋난다(미리보기 QuotePrintView.tsx 도 같은 방식으로 셈한다 —
  * 둘이 다르면 미리보기와 받아 본 문서가 서로 다른 종이가 된다).
  *
- * 🔴 지금 없앨 수 있는 것은 **맨 아래의 ③ 뿐**이라 ①·② 의 번호는 그대로 옳다.
- * 언젠가 가운데 묶음을 없앨 수 있게 되면 그 아래 번호도 함께 당겨야 한다 —
- * 그때는 이 함수가 아니라 세 묶음의 번호까지 다시 쓰는 일이 된다.
+ * 🔴 2026-09-15 부터 **가운데 ② 도 없앨 수 있다**(제너레이터에서 수리 작업을
+ * 하나도 고르지 않았을 때). 그러면 서류작업만 당겨서는 `① ③ ③` 이 되므로, 세
+ * 묶음의 번호는 아래 renumberWorkScopeSectionMarks 가 따로 당긴다.
  *
  * ── 매쳐 양식에는 이 묶음이 아예 없다 ──────────────────────────────────
  * 매쳐 내자·OH 는 「부품 비용 · 작업 비용」 아래 `1) 조사작업 · 2) 수리작업 ·
@@ -403,6 +403,38 @@ export function renumberPaperworkBlock(
 
   const row = findLabelRow(templateRows, read, LAYOUT_COLUMNS.name, PAPERWORK_LABEL) + rowShift;
   return setInlineString(sheetXml, `${LAYOUT_COLUMNS.sectionMark}${row}`, SECTION_MARKS[kept]);
+}
+
+/**
+ * 없앤 묶음 **아래** 묶음들의 번호를 당긴다 — ② 를 지우면 ③ 통전검사가 ② 가 된다.
+ *
+ * 가운데 묶음(② 수리 작업)을 지울 수 있게 되면서 필요해졌다(2026-09-15, 판정은
+ * domain/quote-work-scope-suppression.ts). 서류작업의 번호는 renumberPaperworkBlock
+ * 이 따로 당긴다 — 이 함수는 작업 내역 세 묶음의 머리글만 본다.
+ *
+ * `headerRows` 는 **줄 수를 맞춘 뒤의** 머리글 행이다(부르는 쪽이 이동량으로 셈한다).
+ * 없앤 묶음의 값은 쓰이지 않는다.
+ *
+ * 🔴 **자리가 바뀐 묶음만 쓴다.** 번호가 그대로인 칸(① 과, 앞에서 빠진 것이 없는
+ * 묶음)은 손대지 않는다 — 하나도 없애지 않았거나 맨 아래 ③ 만 없앴으면 아무것도
+ * 하지 않아, 예전 문서와 한 바이트도 달라지지 않는다(renumberPaperworkBlock 과 같은
+ * 약속).
+ */
+export function renumberWorkScopeSectionMarks(
+  sheetXml: string,
+  excluded: WorkScopeExclusions,
+  headerRows: Record<WorkScopeSection, number>
+): string {
+  let xml = sheetXml;
+  let position = 0;
+  WORK_SCOPE_SECTIONS.forEach((section, templateIndex) => {
+    if (excluded[section]) return;
+    if (position !== templateIndex) {
+      xml = setInlineString(xml, `${LAYOUT_COLUMNS.sectionMark}${headerRows[section]}`, SECTION_MARKS[position]);
+    }
+    position += 1;
+  });
+  return xml;
 }
 
 /**

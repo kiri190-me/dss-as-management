@@ -17,6 +17,7 @@ import {
   LAYOUT_COLUMNS as COLUMNS,
   NO_WORK_SCOPE_EXCLUSIONS,
   renumberPaperworkBlock,
+  renumberWorkScopeSectionMarks,
   resizeWorkScopeBlocks,
   workScopeRowCount,
   type WorkScopeExclusions,
@@ -200,9 +201,10 @@ function fillSheet(
   const read = createCellTextReader(sheetXml, sharedStringsXml);
   const templateRows = parseSheetRows(sheetXml);
 
-  // 없애기로 한 묶음. 지금 켤 수 있는 것은 ③ 뿐이다 — 나머지 둘은 늘 꺼짐이다.
+  // 없애기로 한 묶음. 켤 수 있는 것은 ② · ③ 이다 — ① 은 늘 꺼짐이다.
   const excluded: WorkScopeExclusions = {
     ...NO_WORK_SCOPE_EXCLUSIONS,
+    REPAIR: input.repairSectionDropped === true,
     POWER_TEST: input.powerTestExcluded === true,
   };
   // 없앤 묶음의 줄은 여기서 비워진다 — 사라진 자리 아래 남의 줄에 적지 않도록.
@@ -340,9 +342,16 @@ function fillSheet(
   xml = fillWorkScopeRows(xml, at.repairFirst, workScope.REPAIR);
   xml = fillWorkScopeRows(xml, at.powerTestFirst, workScope.POWER_TEST);
 
-  // ③ 을 지웠으면 「④ 서류작업」이 ③ 이 된다. 없앤 것이 없으면 그 칸은 손도
-  // 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
+  // 지운 묶음 수만큼 「④ 서류작업」의 번호가 당겨진다. 없앤 것이 없으면 그 칸은
+  // 손도 대지 않는다(quote-sheet-layout.ts 의 '서류작업의 번호를 당긴다').
   xml = renumberPaperworkBlock(xml, templateRows, read, excluded, rowShift);
+  // ② 를 지웠으면 그 아래 ③ 통전검사가 ② 가 된다. 자리가 바뀐 묶음이 없으면 손대지
+  // 않는다(renumberWorkScopeSectionMarks). 머리글 행은 줄 수를 맞춘 뒤의 자리다.
+  xml = renumberWorkScopeSectionMarks(xml, excluded, {
+    INVESTIGATION: scope.INVESTIGATION.headerRow + afterOverhaul,
+    REPAIR: scope.REPAIR.headerRow + afterInvestigation,
+    POWER_TEST: scope.POWER_TEST.headerRow + afterRepair,
+  });
 
   // 작업 내역 문구가 적히는 자리에는 금액이 없어야 한다. 합계 범위 안이라 치운다.
   // (작업 내역 줄은 C·D 열만 쓰므로 방금 적은 값이 지워지지 않는다.)

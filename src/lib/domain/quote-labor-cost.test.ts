@@ -13,7 +13,8 @@ import { isPriceUnset, toPriceFieldValue } from "./quote-part-price";
 // 🔴 package.json 의 `test` 줄이 Windows 명령줄 한도(cmd.exe 8191자)에 닿아, 파일을
 // 하나만 더 적어도 `npm test` 가 「명령줄이 너무 깁니다」로 아예 돌지 않는다
 // (2026-09-11 확인 — 그 줄은 8113자였다).
-import { isWorkScopeSectionSuppressed } from "./quote-work-scope-suppression";
+import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "./quote-work-scope-suppression";
+import { quoteTemplateKey } from "./quote-template-variant";
 import { QUOTE_WORK_SCOPE_SECTIONS, type QuoteWorkScopeSection } from "@/lib/validation/quote-input";
 import {
   NO_WORK_SCOPE_EXCLUSIONS,
@@ -243,8 +244,9 @@ describe("단가를 화면 칸에 넣기", () => {
  * ============================================================================
  * 작업 내역의 어느 묶음이 문서에서 빠지는가 — 화면 판정과 문서 판정이 같은 답인가
  * ============================================================================
- * 수정 화면은 이 함수로 「3) 통전작업」 칸을 감춘다(QuoteEditForm). 문서 쪽은
- * xlsx 생성기 셋이 각자 `POWER_TEST: input.powerTestExcluded === true` 로 적는다.
+ * 수정 화면은 이 함수로 「3) 통전작업」·「2) 수리 작업」 칸을 감춘다(QuoteEditForm).
+ * 문서 쪽은 xlsx 생성기 셋이 각자 판정 줄을 적는다 — 제너레이터 둘은
+ * `REPAIR: input.repairSectionDropped === true` 까지, 매쳐는 통전작업만.
  * 둘이 어긋나면 "화면에서는 사라졌는데 문서에는 찍혀 나가는" 칸이 생긴다 — 이
  * 시험이 그 자리를 붙잡는다. 두 겹으로 본다:
  *
@@ -259,16 +261,69 @@ describe("단가를 화면 칸에 넣기", () => {
 const FLAGS = [true, false] as const;
 
 describe("작업 내역 감춤 — 판정", () => {
-  test("🔴 제외 켜짐 → 통전작업만 감춘다, 조사·수리는 그대로 둔다", () => {
-    const options = { powerTestExcluded: true };
+  test("🔴 통전 제외만 켜짐 → 통전작업만 감춘다, 조사·수리는 그대로 둔다", () => {
+    const options = { powerTestExcluded: true, repairSectionDropped: false };
     assert.equal(isWorkScopeSectionSuppressed("POWER_TEST", options), true);
     assert.equal(isWorkScopeSectionSuppressed("INVESTIGATION", options), false);
     assert.equal(isWorkScopeSectionSuppressed("REPAIR", options), false);
   });
 
-  test("🔴 제외 꺼짐 → 아무것도 감추지 않는다", () => {
+  test("🔴 수리 빠짐만 켜짐 → 수리 작업만 감춘다, 조사·통전은 그대로 둔다", () => {
+    const options = { powerTestExcluded: false, repairSectionDropped: true };
+    assert.equal(isWorkScopeSectionSuppressed("REPAIR", options), true);
+    assert.equal(isWorkScopeSectionSuppressed("INVESTIGATION", options), false);
+    assert.equal(isWorkScopeSectionSuppressed("POWER_TEST", options), false);
+  });
+
+  test("🔴 둘 다 꺼짐 → 아무것도 감추지 않는다", () => {
     for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-      assert.equal(isWorkScopeSectionSuppressed(section, { powerTestExcluded: false }), false, section);
+      assert.equal(
+        isWorkScopeSectionSuppressed(section, { powerTestExcluded: false, repairSectionDropped: false }),
+        false,
+        section
+      );
+    }
+  });
+
+  test("조사는 어느 경우에도 감추지 않는다", () => {
+    for (const powerTestExcluded of FLAGS) {
+      for (const repairSectionDropped of FLAGS) {
+        assert.equal(
+          isWorkScopeSectionSuppressed("INVESTIGATION", { powerTestExcluded, repairSectionDropped }),
+          false
+        );
+      }
+    }
+  });
+});
+
+describe("「② 수리 작업」이 빠지는가 — 제너레이터에서 수리 작업을 하나도 안 골랐을 때", () => {
+  test("🔴 제너레이터: 0개면 빠지고, 하나라도 골랐으면 남는다", () => {
+    assert.equal(isRepairSectionDropped({ equipmentKind: "GENERATOR", chosenRepairTaskCount: 0 }), true);
+    assert.equal(isRepairSectionDropped({ equipmentKind: "GENERATOR", chosenRepairTaskCount: 1 }), false);
+    assert.equal(isRepairSectionDropped({ equipmentKind: "GENERATOR", chosenRepairTaskCount: 5 }), false);
+  });
+
+  test("장비 종류가 없으면 제너레이터 양식이 쓰이므로 같은 규칙이다", () => {
+    assert.equal(isRepairSectionDropped({ equipmentKind: null, chosenRepairTaskCount: 0 }), true);
+    assert.equal(isRepairSectionDropped({ equipmentKind: null, chosenRepairTaskCount: 1 }), false);
+  });
+
+  test("🔴 매쳐는 하나도 안 골라도 빠지지 않는다 — 양식에 수리작업 기본 목록이 있다", () => {
+    for (const chosenRepairTaskCount of [0, 1]) {
+      assert.equal(isRepairSectionDropped({ equipmentKind: "MATCHER", chosenRepairTaskCount }), false);
+    }
+  });
+
+  test("🔴 제너레이터·매쳐를 가르는 판단이 양식 고르기(quoteTemplateKey)와 같다", () => {
+    for (const equipmentKind of ["GENERATOR", "MATCHER", null] as const) {
+      for (const quoteKind of ["DOMESTIC", "OVERHAUL"] as const) {
+        assert.equal(
+          isRepairSectionDropped({ equipmentKind, chosenRepairTaskCount: 0 }),
+          quoteTemplateKey(equipmentKind, quoteKind).startsWith("GENERATOR:"),
+          `${equipmentKind} · ${quoteKind}`
+        );
+      }
     }
   });
 });
@@ -280,19 +335,31 @@ const repoUrl = new URL("../../../", import.meta.url);
 const readFlat = (relativePath: string) =>
   readFileSync(new URL(relativePath, repoUrl), "utf8").replace(/\s+/g, " ");
 
-const GENERATOR_SOURCES = [
-  "src/lib/xlsx/quote-template.ts",
-  "src/lib/xlsx/matcher-quote-template.ts",
-  "src/lib/xlsx/oh-quote-template.ts",
-] as const;
+/** 제너레이터 둘(내자·O/H)이 적어 둔 판정 줄 — ② · ③ 을 없앨 수 있다. */
+const GENERATOR_EXCLUSION_LITERAL =
+  "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, REPAIR: input.repairSectionDropped === true, POWER_TEST: input.powerTestExcluded === true, };";
 
-/** 생성기 셋이 적어 둔 판정 줄. 셋 다 이 모양이어야 아래 셈이 그 셋의 답이 된다. */
-const XLSX_EXCLUSION_LITERAL =
+/**
+ * 매쳐가 적어 둔 판정 줄 — ③ 만 없앨 수 있다. 수리작업에는 양식 기본 목록이 있어
+ * 빠질 일이 없고, 도메인(isRepairSectionDropped)도 매쳐에는 늘 거짓을 준다.
+ */
+const MATCHER_EXCLUSION_LITERAL =
   "const excluded: WorkScopeExclusions = { ...NO_WORK_SCOPE_EXCLUSIONS, POWER_TEST: input.powerTestExcluded === true, };";
 
-/** 위 줄을 그대로 옮긴 셈 — 생성기가 `input.powerTestExcluded` 로 받는 값에 대해. */
-function xlsxExclusions(powerTestExcluded: boolean): WorkScopeExclusions {
-  return { ...NO_WORK_SCOPE_EXCLUSIONS, POWER_TEST: powerTestExcluded === true };
+/** 생성기마다 적혀 있어야 하는 판정 줄. 이 모양이어야 아래 셈이 그 생성기의 답이 된다. */
+const EXCLUSION_LITERALS: readonly (readonly [string, string])[] = [
+  ["src/lib/xlsx/quote-template.ts", GENERATOR_EXCLUSION_LITERAL],
+  ["src/lib/xlsx/oh-quote-template.ts", GENERATOR_EXCLUSION_LITERAL],
+  ["src/lib/xlsx/matcher-quote-template.ts", MATCHER_EXCLUSION_LITERAL],
+];
+
+/** 제너레이터의 판정 줄을 그대로 옮긴 셈 — 생성기가 받는 두 값에 대해. */
+function xlsxExclusions(powerTestExcluded: boolean, repairSectionDropped: boolean): WorkScopeExclusions {
+  return {
+    ...NO_WORK_SCOPE_EXCLUSIONS,
+    REPAIR: repairSectionDropped === true,
+    POWER_TEST: powerTestExcluded === true,
+  };
 }
 
 describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
@@ -300,10 +367,10 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
     assert.deepEqual([...WORK_SCOPE_SECTIONS], [...QUOTE_WORK_SCOPE_SECTIONS]);
   });
 
-  test("🔴 생성기 셋이 모두 같은 판정 줄을 쓴다 — 하나라도 달라지면 여기서 멈춘다", () => {
-    for (const path of GENERATOR_SOURCES) {
+  test("🔴 생성기 셋이 제 판정 줄을 쓴다 — 하나라도 달라지면 여기서 멈춘다", () => {
+    for (const [path, literal] of EXCLUSION_LITERALS) {
       const source = readFlat(path);
-      assert.ok(source.includes(XLSX_EXCLUSION_LITERAL), `${path} 의 판정 줄이 달라졌다`);
+      assert.ok(source.includes(literal), `${path} 의 판정 줄이 달라졌다`);
       // 판정 줄이 둘이면 어느 쪽이 쓰이는지 원본만으로 알 수 없다.
       assert.equal(
         source.split("const excluded: WorkScopeExclusions").length - 1,
@@ -313,21 +380,23 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
     }
   });
 
-  test("기본값은 셋 다 꺼짐이다 — 켤 수 있는 것은 통전작업 하나뿐", () => {
+  test("기본값은 셋 다 꺼짐이다 — 신호를 주지 않으면 하나도 없애지 않는다", () => {
     for (const section of WORK_SCOPE_SECTIONS) {
       assert.equal(NO_WORK_SCOPE_EXCLUSIONS[section], false, section);
     }
   });
 
-  test("🔴 켜짐·꺼짐 모두 묶음마다 화면 판정 = 문서 판정", () => {
-    for (const flag of FLAGS) {
-      const excluded = xlsxExclusions(flag);
-      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-        assert.equal(
-          isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
-          excluded[section],
-          `제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
-        );
+  test("🔴 두 신호의 모든 조합에서 묶음마다 화면 판정 = 문서 판정", () => {
+    for (const powerTestExcluded of FLAGS) {
+      for (const repairSectionDropped of FLAGS) {
+        const excluded = xlsxExclusions(powerTestExcluded, repairSectionDropped);
+        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+          assert.equal(
+            isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
+            excluded[section],
+            `통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
+          );
+        }
       }
     }
   });
@@ -340,14 +409,16 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
       REPAIR: ["수리 하나"],
       POWER_TEST: ["통전 하나"],
     };
-    for (const flag of FLAGS) {
-      const kept = dropExcludedWorkScopeLines(lines, xlsxExclusions(flag));
-      for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-        assert.equal(
-          kept[section].length === 0,
-          isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
-          `제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
-        );
+    for (const powerTestExcluded of FLAGS) {
+      for (const repairSectionDropped of FLAGS) {
+        const kept = dropExcludedWorkScopeLines(lines, xlsxExclusions(powerTestExcluded, repairSectionDropped));
+        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+          assert.equal(
+            kept[section].length === 0,
+            isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
+            `통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
+          );
+        }
       }
     }
   });
@@ -384,7 +455,12 @@ type TemplateCase = {
   name: string;
   envKey: string;
   sheetName: string;
-  fill: (template: Buffer, powerTestExcluded: boolean) => Buffer;
+  /**
+   * 「수리 작업 빠짐」을 받는 생성기인가. 매쳐는 받지 않는다 — 도메인이 매쳐에는
+   * 늘 거짓을 주므로, 그 경우만 시험한다.
+   */
+  takesRepairDrop: boolean;
+  fill: (template: Buffer, powerTestExcluded: boolean, repairSectionDropped: boolean) => Buffer;
 };
 
 const TEMPLATE_CASES: readonly TemplateCase[] = [
@@ -392,25 +468,34 @@ const TEMPLATE_CASES: readonly TemplateCase[] = [
     name: "제너레이터 내자",
     envKey: "QUOTE_TEMPLATE_PATH",
     sheetName: QUOTE_SHEET_NAME,
-    fill: (template, powerTestExcluded) =>
-      fillQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, powerTestExcluded }),
+    takesRepairDrop: true,
+    fill: (template, powerTestExcluded, repairSectionDropped) =>
+      fillQuoteWorkbook(template, {
+        ...GENERATOR_BASE,
+        workScope: MARKED_SCOPE,
+        powerTestExcluded,
+        repairSectionDropped,
+      }),
   },
   {
     name: "제너레이터 O/H",
     envKey: "OH_QUOTE_TEMPLATE_PATH",
     sheetName: OH_QUOTE_SHEET_NAME,
-    fill: (template, powerTestExcluded) =>
+    takesRepairDrop: true,
+    fill: (template, powerTestExcluded, repairSectionDropped) =>
       fillOhQuoteWorkbook(template, {
         ...GENERATOR_BASE,
         overhaulParts: [],
         workScope: MARKED_SCOPE,
         powerTestExcluded,
+        repairSectionDropped,
       }),
   },
   {
     name: "매쳐 내자",
     envKey: "MATCHER_QUOTE_TEMPLATE_PATH",
     sheetName: MATCHER_QUOTE_SHEET_NAME,
+    takesRepairDrop: false,
     fill: (template, powerTestExcluded) =>
       fillMatcherQuoteWorkbook(template, { ...GENERATOR_BASE, workScope: MARKED_SCOPE, powerTestExcluded }),
   },
@@ -421,17 +506,22 @@ describe("작업 내역 감춤 — 실제 양식: 문서에 남은 묶음 = 화�
     const path = process.env[templateCase.envKey];
     const skip = path ? false : `${templateCase.envKey} 가 설정되지 않았습니다`;
 
-    test(`🔴 ${templateCase.name}: 켜짐·꺼짐 모두 묶음마다 같은 답`, { skip }, () => {
+    test(`🔴 ${templateCase.name}: 신호의 모든 조합에서 묶음마다 같은 답`, { skip }, () => {
       const template = readFileSync(path as string);
-      for (const flag of FLAGS) {
-        const archive = ZipArchive.fromBuffer(templateCase.fill(template, flag));
-        const sheetXml = archive.readText(resolveSheetPart(archive, templateCase.sheetName));
-        for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
-          assert.equal(
-            sheetXml.includes(MARKERS[section]),
-            !isWorkScopeSectionSuppressed(section, { powerTestExcluded: flag }),
-            `${templateCase.name} · 제외 ${flag ? "켜짐" : "꺼짐"} · ${section}`
+      const repairFlags = templateCase.takesRepairDrop ? FLAGS : ([false] as const);
+      for (const powerTestExcluded of FLAGS) {
+        for (const repairSectionDropped of repairFlags) {
+          const archive = ZipArchive.fromBuffer(
+            templateCase.fill(template, powerTestExcluded, repairSectionDropped)
           );
+          const sheetXml = archive.readText(resolveSheetPart(archive, templateCase.sheetName));
+          for (const section of QUOTE_WORK_SCOPE_SECTIONS) {
+            assert.equal(
+              sheetXml.includes(MARKERS[section]),
+              !isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped }),
+              `${templateCase.name} · 통전 제외 ${powerTestExcluded} · 수리 빠짐 ${repairSectionDropped} · ${section}`
+            );
+          }
         }
       }
     });

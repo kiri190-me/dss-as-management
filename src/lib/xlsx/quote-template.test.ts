@@ -495,6 +495,56 @@ test("🔴 제외하지 않으면 서류작업은 ④ 그대로다", { skip }, (
   }
 });
 
+// ── ② 수리 작업을 없앨 때 — 그 아래 번호가 하나씩 당겨진다 ──────────────
+
+/**
+ * 제너레이터에서 수리 작업을 하나도 고르지 않으면 「② 수리 작업」을 머리글까지
+ * 지운다(2026-09-15 사용자 — 양식의 그 묶음은 기본 줄이 0개라 줄 없는 머리글만
+ * 남았다). 🔴 **가운데**를 지우므로 서류작업만 당겨서는 `① ③ ③` 이 된다 —
+ * 통전검사의 번호도 ② 로 당겨져야 한다.
+ */
+test("🔴 수리 작업 없앰: 머리글이 사라지고 통전검사가 ②, 서류작업이 ③ 이 된다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(3), repairSectionDropped: true });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "수리 작업"), [], "줄 없는 머리글이 남았다");
+
+  const first = rowsWithText(filled, "B", "①");
+  assert.equal(first.length, 1);
+  assert.equal(filled.text(`D${first[0]}`), "인수 조사");
+
+  const second = rowsWithText(filled, "B", "②");
+  assert.equal(second.length, 1);
+  assert.equal(filled.text(`D${second[0]}`), POWER_TEST_HEADER, "통전검사의 번호가 안 당겨졌다");
+
+  assert.equal(paperworkMark(filled), "③");
+  assert.deepEqual(rowsWithText(filled, "B", "④"), [], "④ 가 남았다 — 번호가 건너뛴다");
+  assert.equal(rowsWithText(filled, "B", "③").length, 1, "③ 이 둘이다");
+});
+
+test("🔴 수리 작업·통전검사 둘 다 없앰: 인수 조사 다음이 곧 ② 서류작업이다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(3), repairSectionDropped: true, powerTestExcluded: true });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "수리 작업"), []);
+  assert.deepEqual(rowsWithText(filled, "D", POWER_TEST_HEADER), []);
+  assert.equal(paperworkMark(filled), "②");
+  assert.deepEqual([...rowsWithText(filled, "B", "③"), ...rowsWithText(filled, "B", "④")], []);
+});
+
+test("🔴 수리 작업 없앰: 공급가 합계는 공급가 바로 윗줄에서 끝난다", { skip }, () => {
+  const filled = fill({ ...BASE, parts: parts(3), repairSectionDropped: true });
+  const supply = rowsWithText(filled, "H", "공 급 가");
+  assert.equal(supply.length, 1);
+  assert.match(filled.formula(`I${supply[0]}`) ?? "", new RegExp(`^SUM\\(I\\d+:I${supply[0] - 1}\\)$`));
+});
+
+test("🔴 수리 작업 빠짐을 주지 않거나 꺼 두면 예전과 한 바이트도 다르지 않다", { skip }, () => {
+  const plain = fill({ ...BASE, parts: parts(3) });
+  const off = fill({ ...BASE, parts: parts(3), repairSectionDropped: false });
+  assert.equal(off.sheetXml, plain.sheetXml);
+});
+
 test("유효기간·납기·결재조건: 안 주면 양식의 기본 문구가 남는다", { skip }, () => {
   const untouched = fill({ ...BASE, parts: parts(1) });
   assert.equal(untouched.text(QUOTE_CELLS.validity), "발행일로부터 4주");

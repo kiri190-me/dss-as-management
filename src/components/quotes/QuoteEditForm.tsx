@@ -28,7 +28,7 @@ import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kin
 import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
 import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
-import { isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";
+import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";
 import {
   MAX_QUOTE_ITEMS,
   QUOTE_WORK_SCOPE_SECTIONS,
@@ -102,12 +102,15 @@ const SAVE_FAILED_MESSAGE =
   "저장 요청이 끝나지 못했습니다. 잠시 후 다시 시도해 주세요. 계속 그러면 화면을 새로고침해 주세요.";
 
 /**
- * 「작업 내역」에서 문서에 나가지 않는 칸 자리에 두는 안내. 지금은 「통전작업 제외」
- * 를 켰을 때의 「3) 통전작업」 하나뿐이다(domain/quote-work-scope-suppression.ts).
- * 줄은 감췄을 뿐이라 체크를 풀면 그대로 다시 보인다 — 그 사실도 함께 말한다.
+ * 「작업 내역」에서 문서에 나가지 않는 칸 자리에 두는 안내. 「통전작업 제외」를 켰을
+ * 때의 「3) 통전작업」과, 제너레이터에서 수리 작업을 하나도 고르지 않았을 때의
+ * 「2) 수리 작업」 둘이다(domain/quote-work-scope-suppression.ts). 줄은 감췄을
+ * 뿐이라 되돌리면 그대로 다시 보인다 — 그 사실도 함께 말한다.
  */
 const WORK_SCOPE_SUPPRESSED_NOTICE =
   "통전작업 제외 — 이 구역은 견적서에 나가지 않습니다. 체크를 풀면 적어 둔 줄이 다시 보입니다.";
+const REPAIR_SCOPE_DROPPED_NOTICE =
+  "수리 작업을 하나도 고르지 않아 이 구역은 견적서에 나가지 않습니다. 위 목록에서 작업을 고르면 다시 보입니다.";
 
 type ItemRow = {
   key: string;
@@ -923,6 +926,17 @@ export default function QuoteEditForm({
     scopeLines
   );
 
+  /**
+   * 제너레이터 견적서에서 수리 작업을 하나도 고르지 않았는가 — 그러면 「2) 수리
+   * 작업」이 문서에서 빠진다(domain/quote-work-scope-suppression.ts). 고른 작업은
+   * 저장되는 그 목록(selectedTasks)으로 센다 — 저장된 견적서를 그리는 쪽이 세는
+   * repairTasks 가 곧 이것이다.
+   */
+  const repairSectionDropped = isRepairSectionDropped({
+    equipmentKind: laborKind,
+    chosenRepairTaskCount: selectedTasks.length,
+  });
+
   if (showPreview) {
     /**
      * 지금 폼에 적힌 값 그대로 미리보기를 그린다.
@@ -954,6 +968,8 @@ export default function QuoteEditForm({
           // 켜면 미리보기에서도 「③ 통전검사」 묶음이 사라진다 — 파일이 정확히
           // 그렇게 나가기 때문이다. 둘이 다르면 받아 본 쪽이 다른 문서로 읽는다.
           powerTestExcluded,
+          // 수리 작업을 하나도 안 골랐으면 「② 수리 작업」도 사라진다 — 같은 이유.
+          repairSectionDropped,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
           items: items
@@ -1673,7 +1689,7 @@ export default function QuoteEditForm({
                * 값도 지금과 같다(collectFields 의 workScopeLines). 칸 제목은 남긴다 —
                * 칸이 통째로 사라지면 어디 갔는지 모른다.
                */
-              const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded });
+              const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped });
               return (
                 <div key={section} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                   <div className="flex items-baseline justify-between gap-2">
@@ -1715,7 +1731,7 @@ export default function QuoteEditForm({
 
                   {suppressed ? (
                     <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      {WORK_SCOPE_SUPPRESSED_NOTICE}
+                      {section === "REPAIR" ? REPAIR_SCOPE_DROPPED_NOTICE : WORK_SCOPE_SUPPRESSED_NOTICE}
                     </p>
                   ) : (
                     <>

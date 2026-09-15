@@ -74,24 +74,48 @@ const suppressedBranch = sliceBetween(sectionMap, "{suppressed ? (", ") : ( <>")
 const visibleBranch = sliceBetween(sectionMap, ") : ( <>", "</> )}");
 
 describe("판정을 부르는 자리", () => {
-  test("🔴 칸마다 도메인 판정을 「통전작업 제외」 상태로 부른다", () => {
+  test("🔴 칸마다 도메인 판정을 「통전작업 제외」·「수리 작업 빠짐」 상태로 부른다", () => {
     assert.ok(
-      form.includes('import { isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";'),
+      form.includes(
+        'import { isRepairSectionDropped, isWorkScopeSectionSuppressed } from "@/lib/domain/quote-work-scope-suppression";'
+      ),
       "도메인 판정을 가져오지 않는다"
     );
     assert.ok(
-      sectionMap.includes("const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded });"),
+      sectionMap.includes(
+        "const suppressed = isWorkScopeSectionSuppressed(section, { powerTestExcluded, repairSectionDropped });"
+      ),
       "칸마다 판정을 부르지 않는다"
     );
     // 화면이 규칙을 따로 적으면 문서 쪽과 어긋날 자리가 생긴다 — 판정은 이 한 곳.
     assert.equal(form.split("isWorkScopeSectionSuppressed(").length - 1, 1, "판정을 부르는 곳이 하나가 아니다");
     assert.ok(!/section === "POWER_TEST" && powerTestExcluded/.test(form), "화면이 판정을 따로 적었다");
   });
+
+  test("🔴 「수리 작업 빠짐」은 저장될 그 목록(selectedTasks)의 수로 도메인이 정한다", () => {
+    assert.ok(
+      form.includes(
+        "const repairSectionDropped = isRepairSectionDropped({ equipmentKind: laborKind, chosenRepairTaskCount: selectedTasks.length, });"
+      ),
+      "수리 작업 빠짐을 도메인으로 정하지 않는다"
+    );
+    assert.equal(form.split("isRepairSectionDropped(").length - 1, 1, "판정을 부르는 곳이 하나가 아니다");
+    // 미리보기도 같은 값을 받는다 — 둘이 다르면 미리보기와 받아 본 문서가 다른 종이다.
+    assert.ok(
+      form.includes("// 수리 작업을 하나도 안 골랐으면 「② 수리 작업」도 사라진다 — 같은 이유. repairSectionDropped,"),
+      "미리보기에 수리 작업 빠짐을 넘기지 않는다"
+    );
+  });
 });
 
 describe("감춘 칸", () => {
   test("🔴 줄 입력·[+ 줄 추가]·[×] 가 없고 안내가 있다", () => {
-    assert.ok(suppressedBranch.includes("{WORK_SCOPE_SUPPRESSED_NOTICE}"), "안내를 그리지 않는다");
+    assert.ok(
+      suppressedBranch.includes(
+        '{section === "REPAIR" ? REPAIR_SCOPE_DROPPED_NOTICE : WORK_SCOPE_SUPPRESSED_NOTICE}'
+      ),
+      "안내를 그리지 않는다"
+    );
     for (const absent of ["rows.map", "<input", "+ 줄 추가", "×", "아직 없습니다"]) {
       assert.ok(!suppressedBranch.includes(absent), `감춘 칸에 '${absent}' 가 있다`);
       // 갈래 **밖**으로 옮겨져도 감춘 칸에 뜬다 — 칸 안의 모든 자리가 보이는 갈래에 있어야 한다.
@@ -120,6 +144,11 @@ describe("감춘 칸", () => {
     const notice = sliceBetween(form, "const WORK_SCOPE_SUPPRESSED_NOTICE =", ";");
     assert.ok(notice.includes("통전작업 제외"), notice);
     assert.ok(notice.includes("견적서에 나가지 않습니다"), notice);
+    // 수리 작업 쪽은 **왜** 빠졌는지와 되돌리는 길(작업을 고른다)을 말한다.
+    const repairNotice = sliceBetween(form, "const REPAIR_SCOPE_DROPPED_NOTICE =", ";");
+    assert.ok(repairNotice.includes("수리 작업을 하나도 고르지 않아"), repairNotice);
+    assert.ok(repairNotice.includes("견적서에 나가지 않습니다"), repairNotice);
+    assert.ok(repairNotice.includes("작업을 고르면 다시 보입니다"), repairNotice);
   });
 });
 
@@ -154,6 +183,7 @@ describe("🔴 감출 뿐 지우지 않는다", () => {
         const call = balancedCall(form, at + setter.length - 1);
         assert.ok(!call.includes("suppressed"), `${setter} 가 감춤을 본다: ${call}`);
         assert.ok(!call.includes("powerTestExcluded"), `${setter} 가 제외 상태를 본다: ${call}`);
+        assert.ok(!call.includes("repairSectionDropped"), `${setter} 가 수리 빠짐을 본다: ${call}`);
         calls += 1;
         at = form.indexOf(setter, at + setter.length);
       }

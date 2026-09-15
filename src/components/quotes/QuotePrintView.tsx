@@ -118,6 +118,15 @@ export type QuotePrintData = Pick<
    * 전부 꺼짐이고, 그 장들은 한 줄도 달라지지 않아야 한다.
    */
   powerTestExcluded?: boolean;
+  /**
+   * 「② 수리 작업」을 그리지 않는가 — 제너레이터에서 수리 작업을 하나도 고르지
+   * 않은 장이다(domain/quote-work-scope-suppression.ts 의 isRepairSectionDropped,
+   * 2026-09-15). 켜면 그 아래 통전검사가 ②, 서류작업이 ③ 이 된다 — xlsx 가 같은
+   * 규칙으로 구역을 지우고 번호를 당긴다.
+   *
+   * 🔴 **없으면 예전 그대로 그린다.**
+   */
+  repairSectionDropped?: boolean;
 };
 
 function productLine(quote: QuotePrintData): string {
@@ -394,7 +403,11 @@ export default function QuotePrintView({
                   </td>
                 </tr>
 
-                {buildWorkSections(workSections, quote.powerTestExcluded === true).map((section) => (
+                {buildWorkSections(
+                  workSections,
+                  quote.powerTestExcluded === true,
+                  quote.repairSectionDropped === true
+                ).map((section) => (
                   <SectionRows key={section.mark} section={section} />
                 ))}
               </tbody>
@@ -474,17 +487,23 @@ const SECTION_MARKS = ["①", "②", "③", "④"] as const;
  * 미리보기와 받아 본 문서의 번호가 어긋나고, 문서에는 `① ② ④` 로 번호가
  * 하나 건너뛴 견적서가 나간다.
  *
+ * ── 수리 작업을 하나도 안 고른 제너레이터 장은 ② 를 그리지 않는다 ─────────
+ * 양식의 그 묶음은 기본 줄이 0개라, 두면 줄 없는 머리글만 남는다(2026-09-15
+ * 사용자). 그러면 통전검사가 ②, 서류작업이 ③ 이 된다 — 파일 쪽도 같은 자리에서
+ * 번호를 당긴다(renumberWorkScopeSectionMarks).
+ *
  * 🔴 **번호를 손으로 적지 않고 자리 순서에서 뽑는다.** 두 벌로 적어 두면 묶음이
  * 하나 더 생기거나 빠지는 날 또 어긋난다 — 파일 쪽도 같은 방식으로 셈한다.
  */
 function buildWorkSections(
   sections: QuoteWorkSections | undefined,
-  powerTestExcluded: boolean
+  powerTestExcluded: boolean,
+  repairSectionDropped: boolean
 ): WorkSection[] {
   const resolved = sections ?? FALLBACK_WORK_SECTIONS;
   const drawn = [
     resolved.INVESTIGATION,
-    resolved.REPAIR,
+    ...(repairSectionDropped ? [] : [resolved.REPAIR]),
     ...(powerTestExcluded ? [] : [resolved.POWER_TEST]),
     { label: "서류작업", items: [] as readonly string[] },
   ];

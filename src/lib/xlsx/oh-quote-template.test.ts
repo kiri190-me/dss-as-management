@@ -405,6 +405,62 @@ test("🔴 통전검사 제외: 구역이 사라지고 합계 범위·사슬이 
 });
 
 /**
+ * 🔴 제너레이터에서 수리 작업을 하나도 고르지 않으면 「② OH 및 수리 작업」을
+ * 머리글까지 지운다(2026-09-15 사용자). **가운데**를 지우므로 통전검사가 ②,
+ * 서류작업이 ③ 이 되어야 하고, 합계 범위의 끝은 여전히 절사 줄보다 위여야 한다
+ * (아니면 순환 참조 — 이 파일 머리말).
+ */
+test("🔴 수리 작업 없앰: 머리글이 사라지고 번호가 당겨지며 합계 범위가 공급가 위에서 끝난다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    repairSectionDropped: true,
+  });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "OH 및 수리 작업"), [], "줄 없는 머리글이 남았다");
+
+  const first = rowsWithText(filled, "B", "①");
+  assert.equal(first.length, 1);
+  assert.equal(filled.text(`D${first[0]}`), "인수 조사");
+
+  const second = rowsWithText(filled, "B", "②");
+  assert.equal(second.length, 1);
+  assert.equal(filled.text(`D${second[0]}`), POWER_TEST_HEADER, "통전검사의 번호가 안 당겨졌다");
+
+  assert.equal(paperworkMark(filled), "③");
+  assert.deepEqual(rowsWithText(filled, "B", "④"), [], "④ 가 남았다 — 번호가 건너뛴다");
+
+  // 🔴 내림 사슬의 합계 범위 끝이 절사 줄(공급가 바로 위)보다 위여야 한다.
+  const supply = rowsWithText(filled, "H", "공 급 가");
+  assert.equal(supply.length, 1);
+  const sums: number[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    const found = /^SUM\(I\d+:I(\d+)\)$/.exec(filled.formula(`G${row}`) ?? "");
+    if (found) sums.push(Number(found[1]));
+  }
+  assert.equal(sums.length, 1, "합계 수식을 찾지 못했다");
+  assert.ok(sums[0] < supply[0] - 1, `합계 범위가 절사 줄까지 삼켰다 — 순환 참조가 된다 (끝: ${sums[0]}행)`);
+});
+
+test("🔴 수리 작업·통전검사 둘 다 없앰: 인수 조사 다음이 곧 ② 서류작업이다", { skip }, () => {
+  const filled = fill({
+    ...BASE,
+    parts: parts(2, "부품"),
+    overhaulParts: parts(2, "OH부품"),
+    repairSectionDropped: true,
+    powerTestExcluded: true,
+  });
+  assertSheetIsSound(filled);
+
+  assert.deepEqual(rowsWithText(filled, "D", "OH 및 수리 작업"), []);
+  assert.deepEqual(rowsWithText(filled, "D", POWER_TEST_HEADER), []);
+  assert.equal(paperworkMark(filled), "②");
+  assert.deepEqual([...rowsWithText(filled, "B", "③"), ...rowsWithText(filled, "B", "④")], []);
+});
+
+/**
  * 🔴 신호는 **기본이 꺼짐**이다. 주지 않은 것과 꺼서 준 것이 같은 시트여야 하고,
  * 둘 다 통전검사 구역을 그대로 내보내야 한다.
  */

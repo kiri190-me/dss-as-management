@@ -8,6 +8,7 @@ import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { recordQuoteExport } from "@/lib/db/mutations/quote-exports";
 import { buildQuoteFileName, quoteContentDisposition } from "@/lib/domain/quote-file-name";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
+import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import {
   QuoteTemplateError,
@@ -159,6 +160,16 @@ export async function GET(
        * 옛 견적서는 false 라 결과가 한 바이트도 달라지지 않는다.
        */
       powerTestExcluded: quote.powerTestExcluded,
+      /**
+       * 제너레이터에서 수리 작업을 하나도 고르지 않은 장이면 「② 수리 작업」을
+       * 머리글까지 지운다(2026-09-15 사용자). 판정은 도메인 한 곳이다 — 미리보기와
+       * 수정 화면이 같은 함수를 본다. 매쳐 채우개는 이 값을 받지 않는다(그 양식의
+       * 수리작업에는 기본 목록이 있고, 도메인도 매쳐에는 늘 거짓을 준다).
+       */
+      repairSectionDropped: isRepairSectionDropped({
+        equipmentKind: quote.laborEquipmentKind,
+        chosenRepairTaskCount: quote.repairTasks.length,
+      }),
     };
 
     if (templateKey.startsWith("MATCHER:")) {

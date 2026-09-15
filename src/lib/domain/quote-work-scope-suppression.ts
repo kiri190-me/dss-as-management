@@ -1,4 +1,5 @@
 import type { QuoteWorkScopeSection } from "@/lib/validation/quote-input";
+import type { WorkflowKind } from "./workflow-kind";
 
 /**
  * ============================================================================
@@ -21,30 +22,66 @@ import type { QuoteWorkScopeSection } from "@/lib/validation/quote-input";
  * xlsx 생성기가 이미 한다(quote-sheet-layout.ts 의 dropExcludedWorkScopeLines).
  *
  * xlsx 층은 앱 층을 모르는 채로 남아야 해서(quote-sheet-layout.ts 머리말) 이
- * 함수를 거기서 부르게 바꾸지 않았다.
+ * 함수를 거기서 부르게 바꾸지 않았다. 대신 xlsx 라우트가 isRepairSectionDropped 의
+ * 답을 생성기에 넘긴다 — 판정은 여기 한 곳이다.
+ *
+ * ── 빠지는 묶음은 둘이다 ────────────────────────────────────────────────
+ *   · ③ 통전작업 — 「통전작업 제외」를 켰을 때.
+ *   · ② 수리 작업 — 제너레이터 견적서에서 수리 작업을 하나도 고르지 않았을 때
+ *     (2026-09-15, 아래 isRepairSectionDropped).
  * ============================================================================
  */
 
 export type WorkScopeSuppressionInput = {
   /** 견적서의 「통전작업 제외」 체크. */
   powerTestExcluded: boolean;
+  /**
+   * 「② 수리 작업」을 뺄 것인가 — isRepairSectionDropped 의 답을 그대로 넘긴다.
+   * 필수로 둔 것은 부르는 곳마다 정하고 가게 하려는 것이다(빠뜨리면 타입이 막는다).
+   */
+  repairSectionDropped: boolean;
 };
 
 /**
  * 그 묶음이 이 견적서의 문서에서 빠지는가.
  *
  * `Record` 로 적는 이유는 xlsx 쪽 `WorkScopeExclusions` 와 같다 — 묶음이 하나 더
- * 생기는 날 **컴파일러가 여기를 채우라고 짚어 준다.** 지금 켤 수 있는 것은
- * 통전작업뿐이고, 조사·수리는 늘 문서에 나간다.
+ * 생기는 날 **컴파일러가 여기를 채우라고 짚어 준다.** 조사는 늘 문서에 나간다.
  */
 export function isWorkScopeSectionSuppressed(
   section: QuoteWorkScopeSection,
-  { powerTestExcluded }: WorkScopeSuppressionInput
+  { powerTestExcluded, repairSectionDropped }: WorkScopeSuppressionInput
 ): boolean {
   const suppressed: Record<QuoteWorkScopeSection, boolean> = {
     INVESTIGATION: false,
-    REPAIR: false,
+    REPAIR: repairSectionDropped === true,
     POWER_TEST: powerTestExcluded === true,
   };
   return suppressed[section];
+}
+
+/**
+ * 「② 수리 작업」을 문서에서 빼는가 — **제너레이터** 견적서에서 수리 작업을 하나도
+ * 고르지 않았을 때다.
+ *
+ * 2026-09-15 사용자: 「견적서 편집에서 정말로 수리작업 목록에서 아무것도 체크하지
+ * 않으면 2 수리작업도 없애길 원한다. 체크돼 있으면 출력물에 2 수리작업만 있어도
+ * 된다.」 제너레이터 양식 둘은 그 묶음의 기본 목록이 비어 있어(양식 실측 0줄), 고른
+ * 작업이 없으면 줄 없는 머리글만 찍혀 나갔다.
+ *
+ * 🔴 기준은 **고른 작업 수**다 — 작업 내역 줄 수가 아니다. 작업을 골라 두고 줄만
+ * 지웠으면 머리글은 남는다(「체크돼 있으면 머리글만 있어도 된다」).
+ *
+ * 매쳐는 해당하지 않는다 — 양식에 수리작업 기본 목록(2~3줄)이 있어 비어도 머리글만
+ * 남는 일이 없다. 장비 종류가 없으면 제너레이터 양식이 쓰인다(quoteTemplateKey 와
+ * 같은 판단 — 매쳐만 매쳐 양식이다).
+ */
+export function isRepairSectionDropped({
+  equipmentKind,
+  chosenRepairTaskCount,
+}: {
+  equipmentKind: WorkflowKind | null;
+  chosenRepairTaskCount: number;
+}): boolean {
+  return equipmentKind !== "MATCHER" && chosenRepairTaskCount === 0;
 }
