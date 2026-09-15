@@ -74,6 +74,11 @@ test("🔴 북마크·탭이 쓰는 크기(16·32·48)와 큰 크기(256)가 모
     // IHDR 의 가로·세로가 목록에 적힌 크기와 같아야 한다 — 어긋나면 브라우저가 흐리게 늘린다.
     assert.equal(png.readUInt32BE(16), entry.size, `${entry.size} 크기 그림의 가로가 다르다`);
     assert.equal(png.readUInt32BE(20), entry.size, `${entry.size} 크기 그림의 세로가 다르다`);
+    // 🔴 RGBA(PNG color type 6)여야 한다. Next.js(Turbopack)는 ICO 안의 PNG 를 RGBA 로만
+    // 풀어서, 알파 없는 RGB(2)면 「Processing image failed — The PNG is not in RGBA
+    // format!」으로 화면이 전부 500 이 된다. 불투명한 삼색 원본을 줄였을 때 실제로
+    // 났다(2026-09-15) — 만들 때 알파 칸을 붙여(sharp 의 ensureAlpha) 저장한다.
+    assert.equal(png[25], 6, `${entry.size} 크기 그림이 RGBA 가 아니다`);
   }
 });
 
