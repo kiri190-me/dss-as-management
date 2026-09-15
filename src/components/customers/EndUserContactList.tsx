@@ -2,6 +2,7 @@
 
 import { useId, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { EndUserContactRow } from "@/lib/db/queries/customers";
 import {
   createEndUserContactAction,
@@ -346,6 +347,7 @@ export default function EndUserContactList({
                   onDone={() => {
                     setEditingId(null);
                     router.refresh();
+                    showSavePopup({ message: "담당자 정보를 저장했습니다.", redirectTo: null });
                   }}
                   onCancel={() => setEditingId(null)}
                 />
@@ -380,6 +382,8 @@ export default function EndUserContactList({
             onDone={() => {
               setShowAddForm(false);
               router.refresh();
+              // End-User 안에 딸린 것이라 목록으로 넘기지 않는다 — 여럿을 이어 붙인다.
+              showSavePopup({ message: "담당자를 추가했습니다.", redirectTo: null });
             }}
             onCancel={() => setShowAddForm(false)}
           />

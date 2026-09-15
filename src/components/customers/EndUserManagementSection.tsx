@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { CustomerEndUserRow, EndUserContactRow } from "@/lib/db/queries/customers";
 import { createEndUserAction, renameEndUserAction } from "@/lib/server/actions/end-users";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EndUserContactList from "./EndUserContactList";
 
 const inputClass =
@@ -200,6 +201,8 @@ export default function EndUserManagementSection({
             onDone={() => {
               setShowCreateForm(false);
               router.refresh();
+              // 고객사 안에 딸린 것이라 목록으로 넘기지 않는다 — 여럿을 이어 붙인다.
+              showSavePopup({ message: "End-User를 추가했습니다.", redirectTo: null });
             }}
             onCancel={() => setShowCreateForm(false)}
           />
@@ -256,6 +259,7 @@ export default function EndUserManagementSection({
                       onDone={() => {
                         setRenamingId(null);
                         router.refresh();
+                        showSavePopup({ message: "End-User 이름을 바꿨습니다.", redirectTo: null });
                       }}
                       onCancel={() => setRenamingId(null)}
                     />

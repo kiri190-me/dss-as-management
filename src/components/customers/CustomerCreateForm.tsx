@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createCustomerAction } from "@/lib/server/actions/create-customer";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   editErrorClass,
   editInputClass,
@@ -25,10 +26,10 @@ import { CustomerRowColorPicker } from "./CustomerRowColorField";
  * 가운데 놓기와 좁은 화면의 여백은 globals.css 가 모든 창에 한꺼번에 준다.
  * **부모가 열 때마다 새로 그린다** — 그래서 입력칸을 비우는 코드가 따로 없다.
  *
- * 성공하면 그 고객사의 상세 화면으로 간다. End-User·담당자는 거기서 붙인다.
- * 이동하는 동안 [추가]는 계속 잠가 둔다 — 풀면 두 번 누른 손가락이 같은 이름을
- * 한 번 더 보내고, 그건 "이미 존재하는 고객사명입니다"로 돌아와 방금 성공한
- * 일을 실패처럼 보이게 만든다.
+ * 성공하면 창을 닫고 목록을 다시 그린 뒤 등록 팝업을 0.5초 띄운다 — 이 창은
+ * 목록 위에 뜨므로 닫으면 그 자리가 곧 목록이다(2026-09-15 사용자 요청: 저장하면
+ * 목록으로. 그 전에는 새 고객사의 상세 화면으로 갔다). End-User·담당자는 목록에서
+ * 그 고객사를 열어 붙인다. 팝업이 떠 있는 동안은 모달이라 [추가]를 다시 누를 수 없다.
  * ============================================================================
  */
 export default function CustomerCreateForm({ onClose }: { onClose: () => void }) {
@@ -62,7 +63,6 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
     setSubmitError(null);
     setFieldErrors({});
 
-    let navigating = false;
     try {
       const result = await createCustomerAction({
         fields: {
@@ -80,12 +80,13 @@ export default function CustomerCreateForm({ onClose }: { onClose: () => void })
         setSubmitError(result.message);
         return;
       }
-      navigating = true;
-      router.push(`/customers/${result.id}`);
+      onClose();
+      router.refresh();
+      showSavePopup({ message: `고객사를 등록했습니다 (${name.trim()})`, redirectTo: null });
     } catch {
       setSubmitError("일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
-      if (!navigating) setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 

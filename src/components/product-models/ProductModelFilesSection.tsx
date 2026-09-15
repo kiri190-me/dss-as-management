@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import AttachmentViewer from "@/components/repair-cases/files/AttachmentViewer";
 import DeleteAttachmentDialog from "@/components/repair-cases/files/DeleteAttachmentDialog";
@@ -526,16 +527,18 @@ export default function ProductModelFilesSection({
       return;
     }
 
-    setStatusMessage(
-      failures.length === 0
-        ? { type: "success", text: `${uploaded}건을 올렸습니다.` }
-        : {
-            type: "error",
-            text: `${uploaded}건을 올렸고 ${failures.length}건은 빠졌습니다 — ${failures
-              .map((item) => `${item.name}(${item.reason})`)
-              .join(", ")}`,
-          }
-    );
+    // 다 올라갔으면 팝업으로 알린다(모델 안에 딸린 것이라 그 자리에 머문다).
+    // 몇 건이 빠졌으면 무엇이 빠졌는지 읽고 다시 올려야 하므로 지금처럼 화면에 남긴다.
+    if (failures.length === 0) {
+      showSavePopup({ message: `${uploaded}건을 올렸습니다.`, redirectTo: null });
+    } else {
+      setStatusMessage({
+        type: "error",
+        text: `${uploaded}건을 올렸고 ${failures.length}건은 빠졌습니다 — ${failures
+          .map((item) => `${item.name}(${item.reason})`)
+          .join(", ")}`,
+      });
+    }
     // 목록은 서버가 만든다 — 방금 올린 것을 보려면 다시 그려야 한다.
     router.refresh();
   }

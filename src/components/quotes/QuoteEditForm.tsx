@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { showSavePopup } from "@/components/common/SavePopup";
 import {
   editErrorClass,
   editInputClass,
@@ -857,8 +858,10 @@ export default function QuoteEditForm({
       }
 
       if (quote) {
-        // 고치기는 이미 이 주소에 있다. 옮길 곳이 없으니 다시 읽기만 한다.
-        router.refresh();
+        // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
+        // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
+        leaving = true;
+        showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });
         return;
       }
 
@@ -881,11 +884,14 @@ export default function QuoteEditForm({
        * ── 어디로 옮기는가 ──────────────────────────────────────────────
        * 🔴 **왔던 곳으로 돌아간다.** 수리 건의 「견적서」 탭에서 들어왔으면 그
        * 탭으로 — 방금 만든 장이 그 목록에 붙어 있는 것을 그 자리에서 보게 된다.
-       * 그냥 `/quotes/new` 로 들어왔으면 지금까지와 똑같이 새 장의 수정 화면으로
-       * 간다.
+       * 그냥 `/quotes/new` 로 들어왔으면 견적서 목록으로 간다(2026-09-15 사용자
+       * 요청: 저장하면 목록으로. 그 전에는 새 장의 수정 화면으로 갔다).
+       *
+       * 옮기는 것은 저장 팝업이 0.5초 뒤에 한다(common/SavePopup.tsx) — 그쪽도
+       * push 하나뿐이고 뒤에 refresh 를 붙이지 않는다.
        */
       leaving = true;
-      router.push(returnHref ?? `/quotes/${result.id}`);
+      showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });
     } catch (err) {
       // 액션이 대답을 못 하고 끊긴 자리(서버 재시작·네트워크 끊김). 아무 말도
       // 없이 단추만 되살아나면, 저장이 된 건지 만 건지 알 수 없다.

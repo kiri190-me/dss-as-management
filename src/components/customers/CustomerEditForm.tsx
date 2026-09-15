@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { CustomerDetail } from "@/lib/db/queries/customers";
 import { updateCustomerAction } from "@/lib/server/actions/update-customer";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EditSectionActions, {
   editErrorClass,
   editInputClass,
@@ -122,6 +123,8 @@ export default function CustomerEditForm({
 
       router.refresh();
       onDone();
+      // 저장 팝업을 0.5초 띄운 뒤 고객사 목록으로 넘어간다(common/SavePopup.tsx).
+      showSavePopup({ message: "고객사 정보를 저장했습니다.", redirectTo: "/customers" });
     } finally {
       setIsSubmitting(false);
     }

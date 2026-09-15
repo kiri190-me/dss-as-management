@@ -6,6 +6,7 @@ import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-customers";
 import { isExactNormalizedMatch, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { updateProductModelAction } from "@/lib/server/actions/update-product-model";
+import { showSavePopup } from "@/components/common/SavePopup";
 import EditSectionActions, {
   editErrorClass,
   editInputClass,
@@ -196,6 +197,8 @@ export default function ProductModelEditForm({
 
       router.refresh();
       onDone();
+      // 저장 팝업을 0.5초 띄운 뒤 제품 모델 목록으로 넘어간다(common/SavePopup.tsx).
+      showSavePopup({ message: "제품 모델 정보를 저장했습니다.", redirectTo: "/product-models" });
     } finally {
       setIsSubmitting(false);
     }
