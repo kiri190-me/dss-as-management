@@ -1493,6 +1493,10 @@ describe("🔴 이름 맞바꾸기와 이름 되쓰기 — 한 번의 저장으�
       .insert(powerTestTasks)
       .values({
         equipmentKind: "TOTAL_CONTROLLER",
+        // 지금 이 시험이 보는 것은 통전 목록의 겹침이다. 조사·서류 갈래의 겹침은
+        // 설정 화면 조각이 세 탭을 만들 때 함께 온다(scope 가 유니크에 들어 있어
+        // 갈래가 다르면 같은 이름이 겹침이 아니다).
+        scope: "POWER_TEST",
         taskName: "겹칠 통전 작업",
         displayOrder: 2,
         createdBy: superAdminId,
@@ -1505,7 +1509,7 @@ describe("🔴 이름 맞바꾸기와 이름 되쓰기 — 한 번의 저장으�
     assert.ok(powerError, "통전 표에도 같은 색인이 있다");
     assert.deepEqual(pgFields(powerError), {
       code: "23505",
-      constraintName: "power_test_tasks_kind_name_not_deleted_unique",
+      constraintName: "power_test_tasks_kind_scope_name_not_deleted_unique",
     });
   });
 });

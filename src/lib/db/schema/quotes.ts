@@ -213,6 +213,25 @@ export const quotes = pgTable(
     investigationExcluded: boolean("investigation_excluded").notNull().default(false),
 
     /**
+     * ── 서류작업을 빼고 청구하는가 (2026-09-16 사용자 결정) ────────────
+     * 기본 작업비 안에는 이제 **서류작업 몫도 들어 있다** —
+     * `repair_labor_settings.document_hours × hourly_rate` 다(그 파일의 그 항목).
+     * 서류작업을 하지 않는 장은 그 몫이 빠져야 한다.
+     *
+     * 위 power_test_excluded · investigation_excluded 와 **같은 성격의 칸**이다 —
+     * **사람의 결정**을 담고, 줄이 0개라는 사실로 짐작하지 않는다. 그 까닭은 바로
+     * 위 두 칸의 설명과 같다.
+     *
+     * 🔴 **뺀 금액을 남기는 칸은 아직 없다.** 통전에는 labor_power_test_deduction
+     * 이 짝으로 있는데(「제외하기로 했으나 뺄 금액을 몰라 못 뺐다」를 담는 자리),
+     * 서류는 이 조각에서 결정 칸만 만들었다. 금액 계산 조각이 그 자리를 함께
+     * 판단한다 — 서류 시간이 NULL 인 장비에서 같은 상태가 그대로 생긴다.
+     *
+     * 옛 견적서는 전부 false 라 금액도 문서도 그대로다.
+     */
+    documentExcluded: boolean("document_excluded").notNull().default(false),
+
+    /**
      * ── 엑셀 전용 견적서 (2026-09-15 사용자 결정) ──────────────────────
      * 손으로 만든 엑셀 견적서를 붙여 저장하는 장이다 — 이 시스템의 품목 · 작업비로
      * 문서를 만들지 않고, 붙인 엑셀(attachments 의 QUOTE_EXCEL)이 곧 보낸 문서다.

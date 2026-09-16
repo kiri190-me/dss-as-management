@@ -106,7 +106,11 @@ const PG_UNIQUE_VIOLATION = "23505";
 const NAME_CONFLICT_MESSAGES: Record<string, string> = {
   repair_task_catalog_kind_name_not_deleted_unique:
     "같은 건명의 작업이 이미 있습니다. 같은 장비 종류를 같은 순간에 고친 쪽이 있습니다 — 최신 정보를 다시 불러온 뒤 겹치는 건명을 고쳐 주세요.",
-  power_test_tasks_kind_name_not_deleted_unique:
+  // 0100 에서 색인이 (장비, scope, 건명) 으로 넓어지며 이름이 바뀌었다. 🔴 옛 이름을
+  // 그대로 두면 열쇠가 어긋나 겹침이 "건명이 겹칩니다" 대신 **진짜 장애**로 올라간다.
+  // 문구가 아직 '통전'인 것은 지금 이 저장 경로가 통전 목록만 다루기 때문이다 —
+  // 조사·서류 탭이 생기는 설정 화면 조각에서 갈래에 맞는 말로 넓어진다.
+  power_test_tasks_kind_scope_name_not_deleted_unique:
     "같은 건명의 통전 작업이 이미 있습니다. 같은 장비 종류를 같은 순간에 고친 쪽이 있습니다 — 최신 정보를 다시 불러온 뒤 겹치는 건명을 고쳐 주세요.",
 };
 
@@ -376,6 +380,10 @@ export async function saveRepairLabor(params: {
 
       await tx.insert(powerTestTasks).values({
         equipmentKind,
+        // 이 저장 경로는 아직 **통전 목록 하나만** 다룬다 — 화면이 통전 탭만
+        // 보내기 때문이다. 조사·서류 탭이 생기는 설정 화면 조각에서 이 값이
+        // 보내온 갈래로 넓어진다(schema/repair-labor.ts 의 repair_labor_scope).
+        scope: "POWER_TEST",
         taskName: task.taskName,
         displayOrder,
         createdBy: params.actorUserId,
