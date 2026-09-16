@@ -6,6 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { isQuoteFolderRelativePath } from "@/lib/domain/quote-folder-link";
+import { resolveQuoteFolderHelperUncPath } from "@/lib/server/quote-folder-helper";
 import { findQuoteArchiveFolder, resolveQuoteArchiveRoot } from "@/lib/storage/quote-archive";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 
@@ -18,10 +19,16 @@ import { isValidQuoteId } from "@/lib/validation/quote-input";
  * `dss-folder://open/?p=…` 주소를 만들고(domain/quote-folder-link.ts), PC 의 도우미가 자기 루트
  * (UNC)에 붙여 탐색기로 연다(server/quote-folder-helper.ts).
  *
- * ── 🔴 루트 값을 싣지 않는다 ──────────────────────────────────────────────
- * 응답에는 **상대 경로만** 있다. 컨테이너 안 경로(QUOTE_ARCHIVE_DIR)는 서버 구조를, UNC 루트
- * (QUOTE_ARCHIVE_UNC_ROOT)는 사내망 구조를 알려 준다 — 둘 다 이 통로가 알 까닭이 없다. UNC 루트는
- * 이 파일이 읽지도 않는다. 실패 사유도 경로 없는 짧은 문장이다(storage/quote-archive.ts 머리말).
+ * ── 🔴 컨테이너 안 경로는 싣지 않는다 ─────────────────────────────────────
+ * 공유폴더가 서버 안에 마운트된 경로(QUOTE_ARCHIVE_DIR)는 서버 구조를 알려 준다 — 이 통로가
+ * 알릴 까닭이 없다. 응답에 나가는 것은 상대 경로와, 사람이 탐색기에 붙여넣을 전체 주소뿐이고,
+ * 실패 사유도 경로 없는 짧은 문장이다(storage/quote-archive.ts 머리말).
+ *
+ * ── 전체 주소(uncPath) ────────────────────────────────────────────────────
+ * 도우미 설치가 막힌 PC 를 위한 우회로다 — 사람이 `\\서버\공유\…` 를 탐색기 주소창에 붙여넣으면
+ * 도우미 없이도 폴더가 열린다. 사람이 보는 루트(QUOTE_ARCHIVE_UNC_ROOT)에 상대 경로를 이어
+ * server/quote-folder-helper.ts 가 만든다. 그 견적서를 볼 수 있는 사람에게 그 폴더의 주소만 간다.
+ * 🔴 설정이 비었거나 틀리면 **이 칸만 빠진다** — 폴더 열기(상대 경로 · 도우미 주소)는 그대로 돈다.
  *
  * ── 🔴 아무것도 만들지 않는다 ──────────────────────────────────────────────
  * 폴더가 없으면 `not-found` 로 끝난다(폴더는 [견적서 받기] · 결재 PDF 저장이 만든다). mkdir ·
@@ -35,8 +42,8 @@ import { isValidQuoteId } from "@/lib/validation/quote-input";
  * 조회보다 앞이다 — 권한이 없는 사람에게는 그 id 의 견적서가 있다는 사실도 알려 주지 않는다.
  *
  * ── 응답 ────────────────────────────────────────────────────────────────
- *  · 200 `{ status: "found", relativePath, multipleFolderMatches }` — 경로는 `연도 폴더/견적서 폴더`,
- *    디스크의 실제 이름. 도우미가 받지 않을 이름(규칙 밖)이면 대신 `failed` 다.
+ *  · 200 `{ status: "found", relativePath, multipleFolderMatches, uncPath? }` — 경로는 `연도 폴더/견적서
+ *    폴더`, 디스크의 실제 이름. 도우미가 받지 않을 이름(규칙 밖)이면 대신 `failed` 다.
  *  · 200 `{ status: "not-found" }` · `{ status: "disabled" }` · `{ status: "failed", reason }`
  *  · 실패 `{ error, code }` — 401 · 403 · 404. 모두 `Cache-Control: no-store`(JSON 성공 응답).
  * ============================================================================
@@ -47,9 +54,9 @@ export const dynamic = "force-dynamic";
 
 type FailureCode = "DATABASE_MODE_REQUIRED" | "UNAUTHENTICATED" | "ACCOUNT_NOT_APPROVED" | "FORBIDDEN" | "NOT_FOUND";
 
-/** 응답 본문. 🔴 루트(컨테이너 경로 · UNC)를 담는 칸이 없다. */
+/** 응답 본문. 🔴 컨테이너 안 경로를 담는 칸이 없다. uncPath 는 설정이 있을 때만 붙는다. */
 type ArchiveFolderResponse =
-  | { status: "found"; relativePath: string; multipleFolderMatches: boolean }
+  | { status: "found"; relativePath: string; multipleFolderMatches: boolean; uncPath?: string }
   | { status: "not-found" }
   | { status: "disabled" }
   | { status: "failed"; reason: string };
@@ -130,10 +137,13 @@ export async function GET(
     if (!isQuoteFolderRelativePath(result.relativePath)) {
       return respond({ status: "failed", reason: UNOPENABLE_FOLDER_REASON });
     }
+    // 탐색기 주소창에 붙여넣을 전체 주소 — 설정이 비었거나 틀리면 null 이고, 그 칸만 빠진다.
+    const uncPath = resolveQuoteFolderHelperUncPath(result.relativePath);
     return respond({
       status: "found",
       relativePath: result.relativePath,
       multipleFolderMatches: result.multipleFolderMatches,
+      ...(uncPath === null ? {} : { uncPath }),
     });
   }
   if (result.status === "not-found") {

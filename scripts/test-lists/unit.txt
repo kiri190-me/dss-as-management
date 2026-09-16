@@ -228,5 +228,6 @@ src/lib/domain/quote-folder-link.test.ts
 src/lib/server/quote-folder-helper.test.ts
 src/app/api/quotes/*/archive-folder/route-source.test.ts
 src/app/api/quote-folder-helper/installer/route-source.test.ts
+src/app/api/quote-folder-helper/install-command/route-source.test.ts
 src/lib/server/services/quote-excel-preview.test.ts
 src/app/api/quotes/*/excel-preview/route-source.test.ts

@@ -4,6 +4,7 @@ import {
   QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH,
   QUOTE_FOLDER_LINK_PREFIX,
   QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH,
+  isQuoteFolderRelativePath,
 } from "@/lib/domain/quote-folder-link";
 
 /**
@@ -30,8 +31,9 @@ import {
  *   (b) 주소가 명령줄로 삽입되지 않는다 — 레지스트리 명령은 `-File "…" "%1"` 이다. `-Command` 로
  *       주소를 이어 붙이지 않는다. `-File` 뒤의 것은 전부 스크립트 인자이고, 스크립트는 인자가
  *       **정확히 하나**가 아니면(따옴표를 깨고 인자를 늘린 주소) 끝낸다. 주소의 몸통은 base64url 이다.
- *   (c) 루트(UNC)는 서버 응답 · 저장소에 없다 — 설치 파일 본문에만 들어가고, 그 본문은 요청마다
- *       환경변수 QUOTE_ARCHIVE_UNC_ROOT 로 만든다. 로그에도 찍지 않는다.
+ *   (c) 루트(UNC)는 저장소 · 빌드 결과에 남지 않는다 — 설치 파일 · 설치 명령 본문에만 들어가고,
+ *       그 본문은 요청마다 환경변수 QUOTE_ARCHIVE_UNC_ROOT 로 만든다. 로그에도 찍지 않는다.
+ *       (견적서 폴더의 전체 주소를 사람에게 복사해 주는 통로는 아래 「전체 주소」 절.)
  *   (d) 공유폴더 저장 동작은 이 모듈과 무관하다(storage/quote-archive.ts).
  *
  * ── 설치 파일(.cmd)이 스크립트를 옮기는 법 ─────────────────────────────────
@@ -335,6 +337,13 @@ export const QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS = String.raw`function Read-Ds
  */
 export const QUOTE_FOLDER_HELPER_COMMAND_BUILDER_PS = String.raw`$q = [string][char]34; $percent = [string][char]37; $command = $q + $powershell + $q + ' -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + $q + $script + $q + ' ' + $q + $percent + '1' + $q`;
 
+/**
+ * 설치가 실패했을 때의 끝냄 — 설치 파일(.cmd)에서는 이 코드가 %ERRORLEVEL% 로 이어져야 한다.
+ * 창에 붙여넣는 명령에서는 이 조각만 덜어낸다(아래 「파일 없이 도는 설치 명령」 절). 아래
+ * INSTALL_STATEMENTS 의 마지막 문장에 **정확히 한 번** 들어 있고, 못 찾으면 명령을 만들지 않는다.
+ */
+export const QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS = "; exit 1";
+
 /** 설치 파일 속 PowerShell 이 하는 일 전부(한 줄로 이어 붙인다). 레지스트리는 HKCU 만. */
 const INSTALL_STATEMENTS = [
   String.raw`$ErrorActionPreference = 'Stop'`,
@@ -360,6 +369,18 @@ export function quoteFolderHelperInstallCommand(): string {
   return INSTALL_STATEMENTS.join("; ");
 }
 
+/**
+ * 설치가 PC 로 옮기는 것 셋 — 도우미 스크립트 · 설치 완료 문구 · 실패 문구.
+ * 🔴 설치 파일(base64 덩어리)과 붙여넣는 설치 명령(base64 문자열)이 **이 한 벌**을 함께 쓴다.
+ */
+function quoteFolderHelperPayloads(input: { uncRoot: string }): ReadonlyArray<{ name: string; bytes: Uint8Array }> {
+  return [
+    { name: "HELPER", bytes: quoteFolderHelperScriptBytes(input) },
+    { name: "DONE", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE, "utf8")) },
+    { name: "FAILED", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE, "utf8")) },
+  ];
+}
+
 function payloadBlock(name: string, bytes: Uint8Array): string[] {
   const base64 = Buffer.from(bytes).toString("base64");
   const lines: string[] = [`DSS-PAYLOAD-${name}-BEGIN`];
@@ -373,7 +394,6 @@ function payloadBlock(name: string, bytes: Uint8Array): string[] {
  * 싼 스크립트 안에만 있다. **요청마다 만든다**(루트가 저장소 · 빌드 결과에 남지 않게).
  */
 export function buildQuoteFolderHelperInstaller(input: { uncRoot: string }): string {
-  const scriptBytes = quoteFolderHelperScriptBytes(input);
   const lines = [
     "@echo off",
     "rem ==========================================================================",
@@ -404,10 +424,109 @@ export function buildQuoteFolderHelperInstaller(input: { uncRoot: string }): str
     "exit /b %DSS_HELPER_EXIT%",
     "",
     "rem Data below is read by the PowerShell line above. cmd never reaches it.",
-    ...payloadBlock("HELPER", scriptBytes),
-    ...payloadBlock("DONE", Buffer.from(QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE, "utf8")),
-    ...payloadBlock("FAILED", Buffer.from(QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE, "utf8")),
+    ...quoteFolderHelperPayloads(input).flatMap(({ name, bytes }) => payloadBlock(name, bytes)),
     "",
   ];
   return lines.join("\r\n");
+}
+
+/**
+ * ============================================================================
+ * 파일 없이 도는 설치 명령 — PowerShell 창에 붙여넣는 한 줄 (견적서 ④c)
+ * ============================================================================
+ * Windows 스마트 앱 컨트롤이 보는 기준은 「위험한가」가 아니라 「스크립트 파일인가」다.
+ * 내려받은 설치 파일(.cmd)은 [차단 해제] 없이는 더블클릭이 막히고(사내 공유폴더에 두어도,
+ * 바탕화면에 복사해도 막힌다), 확장자를 .bat · .ps1 로 바꿔도 같은 목록에 있다. 그래서
+ * **파일을 아예 주지 않는 길**을 하나 더 연다 — 사람이 PowerShell 창에 한 줄을 붙여넣는다.
+ *
+ * ── 🔴 설치 절차는 한 벌뿐이다 ────────────────────────────────────────────
+ * 아래 함수는 INSTALL_STATEMENTS(설치 파일이 쓰는 그 문장들)를 **글자 그대로** 쓰고,
+ * **매체가 달라서 다른 두 자리만** 갈아 끼운다(quoteFolderHelperInteractiveStatements):
+ *   · payload 읽개 — 파일(.cmd)에서는 자기 자신을 읽어 base64 덩어리를 꺼내지만, 창에는 읽을
+ *     파일이 없다. 그래서 **같은 이름 · 같은 반환값(byte[])** 의 읽개가 명령이 품은 base64 를 푼다.
+ *   · 마지막 `; exit 1` — 파일(.cmd)에서는 이 끝냄 코드가 %ERRORLEVEL% 로 이어져야 하지만,
+ *     대화형 창에서는 `exit` 가 **창을 닫아** 사람이 실패 문구를 읽지 못한다. 창에서는 끝냄 코드를
+ *     받아 갈 곳이 없으므로 그냥 덜어낸다(대신할 것을 새로 만들지 않는다).
+ * 실패 문구(FAILED payload)와 예외 메시지 출력은 양쪽에 그대로 있다. 설치 파일 방식도 그대로
+ * 살아 있다(차단 해제로 쓰는 사람이 있다).
+ *
+ * 루트(UNC)는 여기서도 base64 안에만 있다 — 명령의 날 글자에는 없다.
+ * ============================================================================
+ */
+
+/**
+ * 붙여넣는 명령 속 payload 읽개 — 파일을 읽는 대신 명령이 품은 base64 문자열을 바이트로 푼다.
+ * 이름 · 인자 · 반환값이 파일 읽개와 같아서 그 뒤 설치 문장들이 그대로 돈다. base64 에는
+ * 따옴표 · `$` 가 없으므로 작은따옴표 문자열에 그대로 담긴다.
+ */
+export function quoteFolderHelperInlinePayloadReaderPs(input: { uncRoot: string }): string {
+  const cases = quoteFolderHelperPayloads(input)
+    .map(({ name, bytes }) => `'${name}' { '${Buffer.from(bytes).toString("base64")}' }`)
+    .join(" ");
+  return `function Read-DssPayload([string]$Name) { $text = switch -CaseSensitive ($Name) { ${cases} default { throw ('payload missing: ' + $Name) } }; [System.Convert]::FromBase64String($text) }`;
+}
+
+/**
+ * 설치 문장을 **창에 붙여넣는 것**으로 옮긴다 — 매체가 달라서 다른 두 자리만 바꾼다(위 머리말):
+ * 읽을 파일이 없으니 읽개를, 돌아갈 곳이 없으니 끝냄(`; exit 1`)을.
+ *
+ * 🔴 두 자리를 **정확히 한 번씩** 찾지 못하면 던진다 — 설치 절차가 바뀌었는데 이쪽만 옛 모양으로
+ * 남거나, `exit` 가 남은 채(창이 닫히는) 명령이 조용히 나가는 일이 없게. 시험이 이 함수를 직접 돌린다.
+ */
+export function quoteFolderHelperInteractiveStatements(
+  statements: readonly string[],
+  payloadReader: string
+): string[] {
+  let readers = 0;
+  let exits = 0;
+  const moved = statements.map((statement) => {
+    if (statement === QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS) {
+      readers += 1;
+      return payloadReader;
+    }
+    const parts = statement.split(QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS);
+    exits += parts.length - 1;
+    return parts.join("");
+  });
+  if (readers !== 1) throw new Error("설치 문장에서 payload 읽개를 한 자리로 찾지 못했습니다.");
+  if (exits !== 1) throw new Error("설치 문장에서 끝냄(exit) 자리를 한 자리로 찾지 못했습니다.");
+  return moved;
+}
+
+/**
+ * PowerShell 창에 붙여넣는 설치 명령 한 줄 — 설치 파일과 **같은 절차 · 같은 payload**.
+ * 요청마다 만든다(루트가 저장소 · 이미지에 남지 않게).
+ */
+export function buildQuoteFolderHelperInlineInstallCommand(input: { uncRoot: string }): string {
+  const reader = quoteFolderHelperInlinePayloadReaderPs(input);
+  return quoteFolderHelperInteractiveStatements(INSTALL_STATEMENTS, reader).join("; ");
+}
+
+/**
+ * ============================================================================
+ * 전체 주소 — 사람이 탐색기 주소창에 붙여넣는 `\\서버\공유\연도 폴더\견적서 폴더`
+ * ============================================================================
+ * 도우미를 설치하지 않은(또는 설치가 막힌) 사람도 폴더를 열 수 있는 우회로다. 견적서를 볼 수
+ * 있는 사람에게, 그 견적서 폴더의 주소만 준다. 서버(컨테이너) 안 경로(QUOTE_ARCHIVE_DIR)는
+ * 여기에도 응답에도 싣지 않는다 — 이어 붙이는 루트는 QUOTE_ARCHIVE_UNC_ROOT 쪽이다.
+ * ============================================================================
+ */
+
+/** 루트 + 상대 경로 → 전체 주소. 루트 · 경로가 규칙 밖이면 null — 주소를 지어내지 않는다. */
+export function buildQuoteFolderHelperUncPath(input: { uncRoot: string; relativePath: string }): string | null {
+  const root = normalizeQuoteFolderHelperRoot(input.uncRoot);
+  if (root === null) return null;
+  if (!isQuoteFolderRelativePath(input.relativePath)) return null;
+  // 다듬은 루트는 끝에 `\` 가 없다(normalizeQuoteFolderHelperRoot) — 구분자는 여기서 붙이는 하나뿐이다.
+  return `${root}\\${input.relativePath.split("/").join("\\")}`;
+}
+
+/**
+ * 환경변수를 **부르는 시점에** 읽어 전체 주소를 만든다. 설정이 비었거나(unset) 틀리면(invalid)
+ * null — 부르는 쪽은 그 칸만 빼고 나머지 응답을 그대로 낸다(폴더 열기가 죽지 않게).
+ */
+export function resolveQuoteFolderHelperUncPath(relativePath: string): string | null {
+  const resolution = resolveQuoteFolderHelperRoot();
+  if (resolution.status !== "ok") return null;
+  return buildQuoteFolderHelperUncPath({ uncRoot: resolution.root, relativePath });
 }

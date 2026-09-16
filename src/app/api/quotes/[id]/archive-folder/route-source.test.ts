@@ -60,6 +60,7 @@ describe("견적서 폴더 위치 통로 — 소스로 지킨다", () => {
       "resolveQuoteArchiveRoot()",
       "findQuoteArchiveFolder({",
       "isQuoteFolderRelativePath(result.relativePath)",
+      "resolveQuoteFolderHelperUncPath(result.relativePath)",
     ];
     let previous = -1;
     for (const mark of marks) {
@@ -80,6 +81,7 @@ describe("견적서 폴더 위치 통로 — 소스로 지킨다", () => {
       "@/lib/config/auth-source",
       "@/lib/db/queries/quotes",
       "@/lib/domain/quote-folder-link",
+      "@/lib/server/quote-folder-helper",
       "@/lib/storage/quote-archive",
       "@/lib/validation/quote-input",
       "next/server",
@@ -100,9 +102,9 @@ describe("견적서 폴더 위치 통로 — 소스로 지킨다", () => {
     }
   });
 
-  test("🔴 루트 값이 응답에 실리지 않는다 — 루트는 찾기에만 쓰고, UNC 루트는 읽지도 않는다", () => {
+  test("🔴 컨테이너 안 경로가 응답에 실리지 않는다 — 루트는 찾기에만 쓰고, 환경변수는 읽지 않는다", () => {
+    assert.equal(code.includes("QUOTE_ARCHIVE_DIR"), false);
     assert.equal(code.includes("QUOTE_ARCHIVE_UNC_ROOT"), false);
-    assert.equal(code.includes("quote-folder-helper"), false);
     assert.equal(code.includes("process.env"), false);
     // archiveRoot 는 선언 · null 판정 · 찾기 입력 세 번만 나온다.
     assert.equal(getBody.match(/archiveRoot/g)?.length, 3);
@@ -118,6 +120,22 @@ describe("견적서 폴더 위치 통로 — 소스로 지킨다", () => {
     // 응답 본문 타입에 루트 칸이 없다.
     const type = route.slice(route.indexOf("type ArchiveFolderResponse"), route.indexOf("const UNOPENABLE_FOLDER_REASON"));
     assert.equal(type.toLowerCase().includes("root"), false);
+  });
+
+  test("전체 주소(uncPath) — 찾았을 때만, 만드는 일은 server/quote-folder-helper 한 곳", () => {
+    assert.ok(getBody.includes("const uncPath = resolveQuoteFolderHelperUncPath(result.relativePath);"));
+    // 🔴 설정이 비었거나 틀리면(null) 그 칸만 빠지고 나머지 응답은 그대로 나간다.
+    assert.ok(getBody.includes("...(uncPath === null ? {} : { uncPath }),"));
+    // 이 통로는 루트를 스스로 읽거나 이어 붙이지 않는다 — 가져와 부르는 자리 하나뿐이다.
+    assert.equal(code.match(/resolveQuoteFolderHelperUncPath/g)?.length, 2);
+    assert.equal(code.includes("resolveQuoteFolderHelperRoot"), false);
+    assert.equal(getBody.match(/uncPath/g)?.length, 3);
+    // found 응답 말고는 uncPath 가 없다(not-found · disabled · failed 는 그대로다).
+    const withUncPath = [...getBody.matchAll(/respond\(\{[\s\S]*?\}\)/g)]
+      .map((match) => match[0])
+      .filter((response) => response.includes("uncPath"));
+    assert.equal(withUncPath.length, 1);
+    assert.ok(withUncPath[0].includes('status: "found"'));
   });
 
   test("상태 넷 — found · not-found · disabled · failed, 캐시하지 않는다", () => {

@@ -16,16 +16,23 @@ import {
   QUOTE_FOLDER_HELPER_COMMAND_BUILDER_PS,
   QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE,
   QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME,
+  QUOTE_FOLDER_HELPER_INSTALLER_PATH_ENV,
+  QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS,
   QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE,
   QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS,
   QUOTE_FOLDER_HELPER_ROOT_MAX_LENGTH,
   QuoteFolderHelperRootError,
+  buildQuoteFolderHelperInlineInstallCommand,
   buildQuoteFolderHelperInstaller,
   buildQuoteFolderHelperScript,
+  buildQuoteFolderHelperUncPath,
   normalizeQuoteFolderHelperRoot,
+  quoteFolderHelperInlinePayloadReaderPs,
   quoteFolderHelperInstallCommand,
+  quoteFolderHelperInteractiveStatements,
   quoteFolderHelperScriptBytes,
   resolveQuoteFolderHelperRoot,
+  resolveQuoteFolderHelperUncPath,
 } from "./quote-folder-helper";
 
 /*
@@ -619,5 +626,267 @@ describe("🔴 설치 파일 — payload 읽개와 명령 만들기 한 줄만 P
       result.stdout,
       `"${powershell}" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${script}" "%1"`
     );
+  });
+});
+
+// ── 파일 없이 도는 설치 명령 (견적서 ④c) ───────────────────────────────────
+
+/** 붙여넣는 명령이 품은 payload — 읽개에 박힌 `'<이름>' { '<base64>' }` 를 되꺼낸다. */
+function inlinePayloadOf(command: string, name: string): Buffer {
+  const match = new RegExp(`'${name}' \\{ '([A-Za-z0-9+/=]+)' \\}`).exec(command);
+  assert.ok(match, `payload ${name}`);
+  return Buffer.from(match[1], "base64");
+}
+
+/** 설치가 실패했을 때 예외 메시지를 알리는 마지막 조각 — 양쪽 명령의 끝이다. */
+const CATCH_TAIL_PS = "Write-Host $_.Exception.Message";
+
+describe("파일 없이 도는 설치 명령 본문", () => {
+  const command = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: FAKE_UNC });
+  const installer = buildQuoteFolderHelperInstaller({ uncRoot: FAKE_UNC });
+
+  test("붙여넣기 한 번으로 끝난다 — 줄바꿈이 없다", () => {
+    assert.equal(/[\r\n]/.test(command), false);
+  });
+
+  test("🔴 설치 절차가 설치 파일과 한 벌이다 — 매체가 달라서 다른 두 자리만 갈아 끼웠다", () => {
+    const fileVersion = quoteFolderHelperInstallCommand();
+    const reader = quoteFolderHelperInlinePayloadReaderPs({ uncRoot: FAKE_UNC });
+    assert.ok(fileVersion.includes(QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS));
+    assert.ok(command.includes(reader));
+    // 다른 자리는 둘뿐이다 — 읽개(읽을 파일이 있느냐)와 끝냄(돌아갈 곳이 있느냐).
+    // 그 둘을 되돌려 놓으면 설치 파일의 명령과 글자 그대로 같아야 한다.
+    const restored = command
+      .replace(reader, () => QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS)
+      .replace(`${CATCH_TAIL_PS} }`, () => `${CATCH_TAIL_PS}${QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS} }`);
+    assert.equal(restored, fileVersion);
+    // 이름 · 인자가 같아서 그 뒤 설치 문장이 그대로 돈다.
+    assert.ok(command.includes("function Read-DssPayload([string]$Name)"));
+    // 파일에 기대는 흔적이 없다.
+    assert.equal(command.includes(QUOTE_FOLDER_HELPER_INSTALLER_PATH_ENV), false);
+    assert.equal(command.includes("ReadAllLines"), false);
+    assert.equal(command.includes("DSS-PAYLOAD-"), false);
+  });
+
+  test("🔴 붙여넣는 명령에는 exit 가 없다 — 실패해도 창이 남아 문구를 읽는다", () => {
+    assert.equal(command.includes(QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS), false);
+    // base64 payload 안에 우연히 든 글자에 걸리지 않게 payload 를 걷어내고 본다.
+    const withoutPayloads = command.replace(new RegExp("'[A-Za-z0-9+/=]{64,}'", "g"), "'PAYLOAD'");
+    assert.equal(/exit/i.test(withoutPayloads), false, withoutPayloads.slice(0, 200));
+    // 없앤 것은 끝냄뿐이다 — 실패했다고 알려 주는 두 줄은 그대로다.
+    assert.ok(command.includes("Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'FAILED')))"));
+    assert.ok(command.endsWith(`${CATCH_TAIL_PS} }`));
+  });
+
+  test("🔴 설치 파일 쪽은 그대로다 — exit 1 이 %ERRORLEVEL% 로 이어진다", () => {
+    const fileVersion = quoteFolderHelperInstallCommand();
+    assert.ok(fileVersion.endsWith(`${CATCH_TAIL_PS}${QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS} }`));
+    assert.ok(installer.includes(`${CATCH_TAIL_PS}${QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS} }`));
+    const lines = installer.split("\r\n");
+    assert.ok(lines.includes('set "DSS_HELPER_EXIT=%ERRORLEVEL%"'));
+    assert.ok(lines.includes("exit /b %DSS_HELPER_EXIT%"));
+  });
+
+  test("🔴 갈아 끼울 자리를 못 찾으면 던진다 — 반쪽짜리 명령을 내주지 않는다", () => {
+    const reader = "function Read-DssPayload([string]$Name) { }";
+    const tail = `${CATCH_TAIL_PS}${QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS} }`;
+    // 읽개 한 자리 · 끝냄 한 자리면 둘 다 옮긴다.
+    assert.deepEqual(quoteFolderHelperInteractiveStatements([QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS, tail], reader), [
+      reader,
+      `${CATCH_TAIL_PS} }`,
+    ]);
+    // 읽개가 없다 · 둘이다 — 끝냄이 없다 · 둘이다.
+    assert.throws(() => quoteFolderHelperInteractiveStatements([tail], reader), /읽개/);
+    assert.throws(
+      () =>
+        quoteFolderHelperInteractiveStatements(
+          [QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS, QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS, tail],
+          reader
+        ),
+      /읽개/
+    );
+    assert.throws(() => quoteFolderHelperInteractiveStatements([QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS], reader), /끝냄/);
+    assert.throws(
+      () => quoteFolderHelperInteractiveStatements([QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS, tail, tail], reader),
+      /끝냄/
+    );
+  });
+
+  test("payload 셋(HELPER · DONE · FAILED)이 base64 로 온전히 들어 있다 — 설치 파일의 것과 같다", () => {
+    for (const name of ["HELPER", "DONE", "FAILED"]) {
+      assert.deepEqual(
+        new Uint8Array(inlinePayloadOf(command, name)),
+        new Uint8Array(payloadOf(installer, name)),
+        name
+      );
+    }
+    const helper = inlinePayloadOf(command, "HELPER");
+    assert.deepEqual(new Uint8Array(helper), quoteFolderHelperScriptBytes({ uncRoot: FAKE_UNC }));
+    assert.deepEqual([...helper.slice(0, 3)], [0xef, 0xbb, 0xbf]);
+    assert.equal(helper.slice(3).toString("utf8"), buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC }));
+    assert.equal(inlinePayloadOf(command, "DONE").toString("utf8"), QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE);
+    assert.equal(inlinePayloadOf(command, "FAILED").toString("utf8"), QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE);
+  });
+
+  test("🔴 루트(UNC)는 base64 안에만 있다 — 명령의 날 글자에는 없다 · 요청마다 만든다", () => {
+    assert.equal(command.includes("TESTNAS"), false);
+    assert.ok(inlinePayloadOf(command, "HELPER").toString("utf8").includes(`$Root = '${FAKE_UNC}'`));
+    const other = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: "\\\\TESTNAS2\\archive" });
+    assert.notEqual(other, command);
+    assert.ok(inlinePayloadOf(other, "HELPER").toString("utf8").includes("$Root = '\\\\TESTNAS2\\archive'"));
+  });
+
+  test("틀린 루트로는 명령을 만들지 않는다 — 오류에 값이 실리지 않는다", () => {
+    assert.throws(
+      () => buildQuoteFolderHelperInlineInstallCommand({ uncRoot: "\\\\TESTNAS\\it's" }),
+      (error: unknown) => {
+        assert.ok(error instanceof QuoteFolderHelperRootError);
+        assert.equal(error.message.includes("TESTNAS"), false);
+        return true;
+      }
+    );
+  });
+
+  test("🔴 설치가 하는 일은 설치 파일과 같다 — 파일 하나 쓰기 · HKCU 만 · 풀어서 코드로 실행하는 것은 없다", () => {
+    assert.ok(command.includes("[System.IO.File]::WriteAllBytes($script, (Read-DssPayload 'HELPER'))"));
+    assert.ok(command.includes("$dir = Join-Path $env:LOCALAPPDATA 'DSS'"));
+    assert.ok(command.includes("[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\\Classes\\dss-folder')"));
+    for (const forbidden of [
+      "LocalMachine",
+      "HKLM",
+      "Invoke-Expression",
+      "iex ",
+      "ScriptBlock",
+      "EncodedCommand",
+      "Start-Process",
+      "RunAs",
+      "reg.exe",
+    ]) {
+      assert.equal(command.includes(forbidden), false, forbidden);
+    }
+    assert.equal(command.match(/WriteAllBytes/g)?.length, 1);
+    assert.equal(command.match(/SetValue\(/g)?.length, 3);
+  });
+});
+
+describe("🔴 설치 명령 — 문법 검사와 읽개 한 줄만 돌린다(설치하지 않는다)", { skip: WINDOWS_ONLY }, () => {
+  let parent = "";
+
+  before(async () => {
+    parent = await mkdtemp(path.join(os.tmpdir(), "dss-folder-install-command-test-"));
+  });
+
+  after(async () => {
+    if (parent) await rm(parent, { recursive: true, force: true });
+  });
+
+  test("PowerShell 파서를 통과한다 — 파싱만 하고 돌리지 않는다", async () => {
+    const file = path.join(parent, "install-command.txt");
+    await writeFile(file, buildQuoteFolderHelperInlineInstallCommand({ uncRoot: FAKE_UNC }), "utf8");
+    const result = await runPowerShell(
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        [
+          "$text = [System.IO.File]::ReadAllText($env:DSS_TEST_IN, [System.Text.Encoding]::UTF8)",
+          "$tokens = $null",
+          "$errors = $null",
+          "[void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)",
+          "if ($errors.Count -gt 0) { Write-Output $errors[0].ToString(); exit 1 }",
+          "Write-Output 'PARSED'",
+        ].join("; "),
+      ],
+      { env: { DSS_TEST_IN: file } }
+    );
+    assert.equal(result.stdout.trim(), "PARSED", result.stdout + result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  test("명령이 품은 읽개가 payload 셋을 그대로 되돌린다 — 읽개 한 줄만 돌린다", async () => {
+    const reader = quoteFolderHelperInlinePayloadReaderPs({ uncRoot: FAKE_UNC });
+    const outputs = { HELPER: "helper.ps1", DONE: "done.txt", FAILED: "failed.txt" } as const;
+
+    for (const [name, file] of Object.entries(outputs)) {
+      const result = await runPowerShell(
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${reader}; [System.IO.File]::WriteAllBytes($env:DSS_TEST_OUT, (Read-DssPayload '${name}'))`,
+        ],
+        { env: { DSS_TEST_OUT: path.join(parent, file) } }
+      );
+      assert.equal(result.code, 0, result.stderr);
+    }
+
+    const extracted = await readFile(path.join(parent, outputs.HELPER));
+    assert.deepEqual(new Uint8Array(extracted), quoteFolderHelperScriptBytes({ uncRoot: FAKE_UNC }));
+    assert.equal(await readFile(path.join(parent, outputs.DONE), "utf8"), QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE);
+    assert.equal(await readFile(path.join(parent, outputs.FAILED), "utf8"), QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE);
+  });
+
+  test("이름이 다르면 읽개가 실패한다(빈 파일을 쓰지 않는다)", async () => {
+    const target = path.join(parent, "should-not-exist.bin");
+    const reader = quoteFolderHelperInlinePayloadReaderPs({ uncRoot: FAKE_UNC });
+    const result = await runPowerShell(
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$ErrorActionPreference = 'Stop'; ${reader}; [System.IO.File]::WriteAllBytes($env:DSS_TEST_OUT, (Read-DssPayload 'NOPE'))`,
+      ],
+      { env: { DSS_TEST_OUT: target } }
+    );
+    assert.notEqual(result.code, 0);
+    assert.equal(existsSync(target), false);
+  });
+});
+
+// ── 견적서 폴더의 전체 공유폴더 주소(UNC) ──────────────────────────────────
+
+describe("전체 공유폴더 주소(UNC)", () => {
+  const RELATIVE = "21. 2026 내자견적서/DSS 2026-089 R&D 100% 가나상사 수리 견적서";
+  const EXPECTED = `${FAKE_UNC}\\21. 2026 내자견적서\\DSS 2026-089 R&D 100% 가나상사 수리 견적서`;
+
+  test("루트와 상대 경로를 역슬래시 하나로 잇는다 — 루트 끝에 \\ 가 있든 없든", () => {
+    assert.equal(buildQuoteFolderHelperUncPath({ uncRoot: FAKE_UNC, relativePath: RELATIVE }), EXPECTED);
+    assert.equal(buildQuoteFolderHelperUncPath({ uncRoot: `${FAKE_UNC}\\`, relativePath: RELATIVE }), EXPECTED);
+    assert.equal(buildQuoteFolderHelperUncPath({ uncRoot: `  ${FAKE_UNC}  `, relativePath: RELATIVE }), EXPECTED);
+    // 맨 앞의 `\\` 말고는 역슬래시가 겹치지 않는다.
+    assert.equal(EXPECTED.slice(2).includes("\\\\"), false);
+    assert.equal(buildQuoteFolderHelperUncPath({ uncRoot: "Z:\\견적서", relativePath: "2026" }), "Z:\\견적서\\2026");
+  });
+
+  test("루트 · 경로가 규칙 밖이면 null — 주소를 지어내지 않는다", () => {
+    for (const uncRoot of ["", "   ", "/mnt/archive", "\\\\TESTNAS", "\\\\TESTNAS\\it's"]) {
+      assert.equal(buildQuoteFolderHelperUncPath({ uncRoot, relativePath: RELATIVE }), null, JSON.stringify(uncRoot));
+    }
+    for (const relativePath of ["", "..", "../바깥 폴더", "2026\\견적서", "/2026", "C:/Windows", "2026//견적서", "2026/견적서 "]) {
+      assert.equal(
+        buildQuoteFolderHelperUncPath({ uncRoot: FAKE_UNC, relativePath }),
+        null,
+        JSON.stringify(relativePath)
+      );
+    }
+  });
+
+  test("resolveQuoteFolderHelperUncPath — 비었으면(unset) · 틀리면(invalid) null, 맞으면 전체 주소", () => {
+    const original = process.env.QUOTE_ARCHIVE_UNC_ROOT;
+    try {
+      delete process.env.QUOTE_ARCHIVE_UNC_ROOT;
+      assert.equal(resolveQuoteFolderHelperUncPath(RELATIVE), null);
+      process.env.QUOTE_ARCHIVE_UNC_ROOT = "   ";
+      assert.equal(resolveQuoteFolderHelperUncPath(RELATIVE), null);
+      process.env.QUOTE_ARCHIVE_UNC_ROOT = "/mnt/archive";
+      assert.equal(resolveQuoteFolderHelperUncPath(RELATIVE), null);
+      process.env.QUOTE_ARCHIVE_UNC_ROOT = `${FAKE_UNC}\\`;
+      assert.equal(resolveQuoteFolderHelperUncPath(RELATIVE), EXPECTED);
+      // 설정이 맞아도 경로가 규칙 밖이면 null.
+      assert.equal(resolveQuoteFolderHelperUncPath("../바깥 폴더"), null);
+    } finally {
+      if (original === undefined) delete process.env.QUOTE_ARCHIVE_UNC_ROOT;
+      else process.env.QUOTE_ARCHIVE_UNC_ROOT = original;
+    }
   });
 });
