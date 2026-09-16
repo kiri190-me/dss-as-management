@@ -64,3 +64,5 @@ src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx
 src/components/common/copy-text.test.ts
+src/components/repair-labor/base-cost-display.test.ts
+src/components/repair-labor/repair-labor-screen-source.test.ts

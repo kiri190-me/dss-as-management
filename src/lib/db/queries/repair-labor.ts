@@ -3,6 +3,10 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 import { db } from "../client";
 import { powerTestTasks, repairLaborSettings, repairTaskCatalog } from "../schema";
+import {
+  REPAIR_LABOR_SCOPES,
+  type RepairLaborScope,
+} from "@/lib/validation/repair-task-input";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 
 /**
@@ -14,6 +18,11 @@ import type { WorkflowKind } from "@/lib/domain/workflow-kind";
  * 장비 종류 셋을 **언제나 셋 다** 돌려준다. 목록이 빈 종류(T/C)도 화면에 자리가
  * 있어야 사람이 거기 채워 넣을 수 있다 — 없는 것을 안 보여 주면 "어디에 넣지"가
  * 된다.
+ *
+ * ── 🔴 `power_test_tasks` 는 이제 세 갈래를 담는다 ──────────────────────
+ * 표 이름은 통전으로 시작했지만 2026-09-16 부터 조사 · 통전 · 서류가 한 표에
+ * 산다(schema/repair-labor.ts). **그래서 읽을 때 반드시 scope 로 갈라야 한다** —
+ * 안 가르면 통전 탭에 조사·서류 건명이 섞여 나온다.
  * ============================================================================
  */
 
@@ -30,10 +39,10 @@ export type RepairTaskRow = {
 };
 
 /**
- * 통전 작업 한 줄. **공수시간이 없다** — 통전작업의 금액은 목록이 아니라
- * `powerTestHours` 하나가 정한다(schema/repair-labor.ts 의 그 표 머리말).
+ * 조사 · 통전 · 서류 목록의 한 줄. **공수시간이 없다** — 갈래의 금액은 목록이 아니라
+ * 그 갈래의 공수시간 하나가 정한다(schema/repair-labor.ts 의 그 표 머리말).
  */
-export type PowerTestTaskRow = {
+export type LaborScopeTaskRow = {
   id: string;
   taskName: string;
   displayOrder: number;
@@ -48,7 +57,8 @@ export type RepairLaborKindRow = {
    *
    * 🔴 **2026-09-16 부터 이 값으로 작업비를 셈하지 않는다** — 기본 작업비는 아래 세
    * 공수시간의 합 × 시간당 단가다(domain/quote-labor-cost.ts). 그때의 금액을 되짚을
-   * 근거로만 싣는다(schema/repair-labor.ts 의 base_cost 주석).
+   * 근거로만 싣는다(schema/repair-labor.ts 의 base_cost 주석). 화면은 이 값을 고칠 수
+   * 없고, 저장도 이 칸을 건드리지 않는다.
    */
   baseCost: string | null;
   /**
@@ -70,10 +80,13 @@ export type RepairLaborKindRow = {
   documentHours: number | null;
   tasks: RepairTaskRow[];
   /**
-   * 그 장비의 통전 작업 건명 목록. 하나도 없으면 **빈 배열**이다(`null` 이 아니다) —
-   * T/C 는 아직 아무것도 없고, 그건 "정하지 않음"이 아니라 그냥 빈 목록이다.
+   * 갈래별 작업 건명 목록. **세 갈래가 언제나 다 있다** — 하나도 없는 갈래는
+   * **빈 배열**이고(`null` 이 아니다), 그건 "정하지 않음"이 아니라 그냥 빈 목록이다.
+   *
+   * 🔴 화면의 저장이 이 세 목록을 **한 벌로 함께 보낸다.** 한 갈래를 빠뜨리면 그
+   * 목록이 통째로 소프트 삭제된다(mutations/repair-labor.ts 의 계약).
    */
-  powerTestTasks: PowerTestTaskRow[];
+  scopeTasks: Record<RepairLaborScope, LaborScopeTaskRow[]>;
 };
 
 /** 화면이 늘어놓는 차례. 사람이 이 순서로 기억한다. */
@@ -84,18 +97,17 @@ export const REPAIR_LABOR_KINDS: readonly WorkflowKind[] = [
 ];
 
 /**
- * 장비 종류 셋 × (단가 설정 + 작업 목록).
+ * 장비 종류 셋 × (단가 설정 + 수리 작업 목록 + 갈래 목록 셋).
  *
  * 질의 세 번으로 끝낸다 — 종류마다 읽으면 N+1 이고, 셋뿐이라 통째로 걷어 와
- * 메모리에서 가르는 편이 단순하다.
+ * 메모리에서 가르는 편이 단순하다. 갈래도 같은 자리에서 가른다.
  *
  * 설정 줄이 없는 종류는 **시간당 단가를 알 수 없다.** 그때는 0 으로 채우지 않고
- * `"0"` 도 아닌, 시드가 넣어 둔 값이 없다는 뜻으로 hourlyRate 를 `"0"` 으로 두지
- * 않는다 — 대신 화면이 "단가를 정해 주세요"를 그리도록 baseCost 와 함께
- * 있는 그대로 넘긴다. (시드가 셋 다 만들므로 실제로는 비지 않는다.)
+ * 있는 그대로 넘겨 화면이 "단가를 정해 주세요"를 그리게 한다.
+ * (시드가 셋 다 만들므로 실제로는 비지 않는다.)
  */
 export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
-  const [settings, tasks, powerTests] = await Promise.all([
+  const [settings, tasks, scopeRows] = await Promise.all([
     db
       .select({
         equipmentKind: repairLaborSettings.equipmentKind,
@@ -122,6 +134,8 @@ export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
       .select({
         id: powerTestTasks.id,
         equipmentKind: powerTestTasks.equipmentKind,
+        // 🔴 갈래를 함께 읽는다 — 이 칸 없이 걷어 오면 세 목록이 한 덩어리로 섞인다.
+        scope: powerTestTasks.scope,
         taskName: powerTestTasks.taskName,
         displayOrder: powerTestTasks.displayOrder,
       })
@@ -132,6 +146,17 @@ export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
 
   return REPAIR_LABOR_KINDS.map((kind) => {
     const setting = settings.find((row) => row.equipmentKind === kind);
+    // 갈래 셋을 **언제나 셋 다** 만든다. 줄이 하나도 없는 갈래도 빈 배열로 자리가
+    // 있어야 화면에 탭이 서고, 저장이 그 갈래를 빠뜨리지 않는다.
+    const scopeTasks = Object.fromEntries(
+      REPAIR_LABOR_SCOPES.map((scope) => [
+        scope,
+        scopeRows
+          .filter((row) => row.equipmentKind === kind && row.scope === scope)
+          .map(({ id, taskName, displayOrder }) => ({ id, taskName, displayOrder })),
+      ])
+    ) as Record<RepairLaborScope, LaborScopeTaskRow[]>;
+
     return {
       equipmentKind: kind,
       // 설정 줄이 아직 없는 종류는 시간당 단가가 없다. 0 으로 두면 고른 작업이
@@ -154,18 +179,14 @@ export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
           displayOrder,
           isOverhaul,
         })),
-      // 없는 종류는 빈 배열이다. 통전 목록이 비어 있는 것은 정상이고(T/C),
-      // "정하지 않음"을 뜻하는 powerTestHours 의 null 과는 다른 이야기다.
-      powerTestTasks: powerTests
-        .filter((task) => task.equipmentKind === kind)
-        .map(({ id, taskName, displayOrder }) => ({ id, taskName, displayOrder })),
+      scopeTasks,
     };
   });
 }
 
 /**
  * 견적서가 쓸 한 종류분. 목록과 단가를 함께 준다 — 견적서 화면이 그 둘로
- * 작업비를 계산한다(domain/repair-labor-cost.ts).
+ * 작업비를 계산한다(domain/quote-labor-cost.ts).
  */
 export async function getRepairLaborForKind(kind: WorkflowKind): Promise<RepairLaborKindRow> {
   const all = await listRepairLabor();

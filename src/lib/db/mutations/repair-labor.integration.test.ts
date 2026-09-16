@@ -14,9 +14,12 @@ import {
 } from "../schema";
 import { saveRepairLabor, STAGED_TASK_NAME_PREFIX } from "./repair-labor";
 import { getRepairLaborForKind } from "../queries/repair-labor";
-import type {
-  PowerTestTaskInput,
-  RepairTaskInput,
+import {
+  REPAIR_LABOR_SCOPES,
+  repairLaborScopeLabels,
+  type LaborScopeTaskInput,
+  type RepairLaborScope,
+  type RepairTaskInput,
 } from "@/lib/validation/repair-task-input";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { Role } from "@/lib/domain/types";
@@ -29,9 +32,12 @@ import type { Role } from "@/lib/domain/types";
  * 하나분을 **통째로 갈아 쓰는** 함수라, 잘못 부르면 금액의 근거가 소리 없이
  * 사라진다. 여기서 못 박는 것은 여섯이다.
  *
- *  1. **🔴 두 목록은 서로를 지우지 않는다.** 수리 작업 목록과 통전 작업 목록을
- *     한 벌로 보내면 서로 멀쩡하다 — 지금 화면이 어느 탭에서 눌러도 한 벌 전부를
- *     보내는 이유가 이것이다(RepairLaborScreen.tsx 의 🔴 주석).
+ *  1. **🔴 네 목록은 서로를 지우지 않는다.** 수리 작업 목록과 갈래 목록 셋(조사 ·
+ *     통전 · 서류)을 한 벌로 보내면 서로 멀쩡하다 — 지금 화면이 어느 탭에서 눌러도
+ *     한 벌 전부를 보내는 이유가 이것이다(RepairLaborScreen.tsx 의 🔴 주석).
+ *     🔴 갈래 셋은 **한 표(power_test_tasks)에 같이 산다.** 지우는 조건에 scope 가
+ *     빠지는 순간 조사 탭 저장이 통전 목록을 통째로 지운다 — 아래 「갈래가 서로를
+ *     지우는가」 묶음이 세 방향 모두를 못 박는다.
  *  2. **🔴 한쪽을 빈 배열로 보내면 그쪽이 통째로 소프트 삭제되고, 그런데도
  *     `ok: true` 가 돌아온다.** 이것이 이 함수의 **지금 계약**이다. 오류가 아니라
  *     정상 반환이라 부르는 쪽이 목록 한 줄을 빠뜨려도 아무도 알아채지 못하고,
@@ -92,27 +98,74 @@ async function resetKind(kind: WorkflowKind): Promise<void> {
   await db.delete(repairLaborSettings).where(eq(repairLaborSettings.equipmentKind, kind));
 }
 
-/** 화면이 보내는 한 벌. 안 적은 칸은 이 시험들의 기본값으로 채운다. */
+/**
+ * 화면이 보내는 한 벌. 안 적은 칸은 이 시험들의 기본값으로 채운다.
+ *
+ * 🔴 **갈래 목록은 안 적으면 빈 배열로 간다** — 그건 곧 그 갈래를 통째로 지운다는
+ * 뜻이다(이 함수의 계약). 「다른 갈래를 지우지 않는가」를 보는 시험들은 그래서 셋을
+ * 모두 적는다. 🔴 **기본 작업비(base_cost)는 아예 보낼 수 없다** — 저장이 그 칸을
+ * 건드리지 않는다(mutations/repair-labor.ts 머리말).
+ */
 function save(params: {
   kind: WorkflowKind;
   hourlyRate?: string;
-  baseCost?: string | null;
+  investigationHours?: number | null;
   powerTestHours?: number | null;
+  documentHours?: number | null;
   tasks: RepairTaskInput[];
-  powerTestTasks: PowerTestTaskInput[];
+  investigationTasks?: LaborScopeTaskInput[];
+  powerTestTasks: LaborScopeTaskInput[];
+  documentTasks?: LaborScopeTaskInput[];
   actorUserId: string;
 }) {
   return saveRepairLabor({
     fields: {
       equipmentKind: params.kind,
       hourlyRate: params.hourlyRate ?? HOURLY_RATE,
-      baseCost: params.baseCost ?? null,
+      investigationHours: params.investigationHours ?? null,
       powerTestHours: params.powerTestHours ?? null,
+      documentHours: params.documentHours ?? null,
       tasks: params.tasks,
-      powerTestTasks: params.powerTestTasks,
+      scopeTasks: {
+        INVESTIGATION: params.investigationTasks ?? [],
+        POWER_TEST: params.powerTestTasks,
+        DOCUMENT: params.documentTasks ?? [],
+      },
     },
     actorUserId: params.actorUserId,
   });
+}
+
+/** 지금 살아 있는 그 갈래의 줄. 화면의 한 탭이 보는 것이 이것이다. */
+async function liveScopeTasks(kind: WorkflowKind, scope: RepairLaborScope) {
+  return db
+    .select({
+      id: powerTestTasks.id,
+      taskName: powerTestTasks.taskName,
+      displayOrder: powerTestTasks.displayOrder,
+      updatedBy: powerTestTasks.updatedBy,
+    })
+    .from(powerTestTasks)
+    .where(
+      and(
+        eq(powerTestTasks.equipmentKind, kind),
+        eq(powerTestTasks.scope, scope),
+        eq(powerTestTasks.isDeleted, false)
+      )
+    )
+    .orderBy(asc(powerTestTasks.displayOrder));
+}
+
+/** 그 갈래의 살아 있는 건명만, 차례 그대로. */
+async function liveScopeNames(kind: WorkflowKind, scope: RepairLaborScope) {
+  return (await liveScopeTasks(kind, scope)).map((row) => row.taskName);
+}
+
+/** 그 장비의 세 갈래를 한눈에 — 「옆 갈래가 멀쩡한가」를 보는 자리다. */
+async function liveScopeSnapshot(kind: WorkflowKind) {
+  const snapshot = {} as Record<RepairLaborScope, string[]>;
+  for (const scope of REPAIR_LABOR_SCOPES) snapshot[scope] = await liveScopeNames(kind, scope);
+  return snapshot;
 }
 
 /** 새 줄 한 개분. 화면이 막 더한 줄에는 id 가 없다. */
@@ -154,23 +207,20 @@ async function allTasks(kind: WorkflowKind) {
     .orderBy(asc(repairTaskCatalog.taskName));
 }
 
+/**
+ * 살아 있는 **통전** 줄. 🔴 갈래로 거른다 — 2026-09-16 부터 한 표에 셋이 살아서,
+ * 안 거르면 조사·서류 줄이 통전 시험의 숫자에 섞여 들어온다.
+ */
 async function livePowerTests(kind: WorkflowKind) {
-  return db
-    .select({
-      id: powerTestTasks.id,
-      taskName: powerTestTasks.taskName,
-      displayOrder: powerTestTasks.displayOrder,
-      updatedBy: powerTestTasks.updatedBy,
-    })
-    .from(powerTestTasks)
-    .where(and(eq(powerTestTasks.equipmentKind, kind), eq(powerTestTasks.isDeleted, false)))
-    .orderBy(asc(powerTestTasks.displayOrder));
+  return liveScopeTasks(kind, "POWER_TEST");
 }
 
+/** 그 표에 남은 전부 — 갈래도 지운 줄도 가리지 않는다("정말 남아 있는가"를 본다). */
 async function allPowerTests(kind: WorkflowKind) {
   return db
     .select({
       id: powerTestTasks.id,
+      scope: powerTestTasks.scope,
       taskName: powerTestTasks.taskName,
       isDeleted: powerTestTasks.isDeleted,
       deletedBy: powerTestTasks.deletedBy,
@@ -187,7 +237,9 @@ async function storedSetting(kind: WorkflowKind) {
       id: repairLaborSettings.id,
       hourlyRate: repairLaborSettings.hourlyRate,
       baseCost: repairLaborSettings.baseCost,
+      investigationHours: repairLaborSettings.investigationHours,
       powerTestHours: repairLaborSettings.powerTestHours,
+      documentHours: repairLaborSettings.documentHours,
       updatedBy: repairLaborSettings.updatedBy,
       updatedAt: repairLaborSettings.updatedAt,
     })
@@ -256,8 +308,9 @@ describe("단가 설정", () => {
     const result = await save({
       kind: "TOTAL_CONTROLLER",
       hourlyRate: HOURLY_RATE,
-      baseCost: "2200000",
+      investigationHours: 22,
       powerTestHours: 8,
+      documentHours: 0,
       tasks: [],
       powerTestTasks: [],
       actorUserId: superAdminId,
@@ -267,8 +320,12 @@ describe("단가 설정", () => {
     const setting = await storedSetting("TOTAL_CONTROLLER");
     assert.ok(setting, "onConflictDoUpdate 의 insert 쪽이 줄을 만들어야 한다");
     assert.equal(setting.hourlyRate, HOURLY_RATE_STORED);
-    assert.equal(setting.baseCost, "2200000.00");
+    assert.equal(setting.investigationHours, 22);
     assert.equal(setting.powerTestHours, 8);
+    // 🔴 서류만 0 이 실제 값이다(「서류작업이 없는 장비」) — null 로 접히면 안 된다.
+    assert.equal(setting.documentHours, 0);
+    // 새로 만든 줄의 base_cost 는 비어 있다 — 저장이 그 칸을 쓰지 않기 때문이다.
+    assert.equal(setting.baseCost, null);
     assert.equal(setting.updatedBy, superAdminId, "정한 사람이 기록된다");
   });
 
@@ -281,8 +338,9 @@ describe("단가 설정", () => {
     const result = await save({
       kind: "MATCHER",
       hourlyRate: "120000",
-      baseCost: "1500000",
+      investigationHours: 21,
       powerTestHours: 3,
+      documentHours: 2,
       tasks: [],
       powerTestTasks: [],
       actorUserId: secondActorId,
@@ -299,17 +357,19 @@ describe("단가 설정", () => {
     assert.ok(updated);
     assert.equal(updated.id, created.id, "같은 줄이 갱신돼야 한다");
     assert.equal(updated.hourlyRate, "120000.00");
-    assert.equal(updated.baseCost, "1500000.00");
+    assert.equal(updated.investigationHours, 21);
     assert.equal(updated.powerTestHours, 3);
+    assert.equal(updated.documentHours, 2);
     assert.equal(updated.updatedBy, secondActorId, "마지막에 고친 사람이 남는다");
   });
 
-  test("기본 작업비와 통전 공수시간은 비울 수 있다 — null 은 '정하지 않음'이고 0 이 아니다", async () => {
+  test("세 공수시간은 비울 수 있다 — null 은 '정하지 않음'이고 0 이 아니다", async () => {
     await resetKind("MATCHER");
     await save({
       kind: "MATCHER",
-      baseCost: "3500000",
+      investigationHours: 21,
       powerTestHours: 14,
+      documentHours: 3,
       tasks: [],
       powerTestTasks: [],
       actorUserId: superAdminId,
@@ -317,8 +377,9 @@ describe("단가 설정", () => {
 
     const result = await save({
       kind: "MATCHER",
-      baseCost: null,
+      investigationHours: null,
       powerTestHours: null,
+      documentHours: null,
       tasks: [],
       powerTestTasks: [],
       actorUserId: superAdminId,
@@ -327,8 +388,48 @@ describe("단가 설정", () => {
 
     const setting = await storedSetting("MATCHER");
     assert.ok(setting);
-    assert.equal(setting.baseCost, null, "0 으로 접히면 안 된다");
+    assert.equal(setting.investigationHours, null, "0 으로 접히면 안 된다");
     assert.equal(setting.powerTestHours, null, "T/C 처럼 '아직 모른다'가 담겨야 한다");
+    assert.equal(setting.documentHours, null, "지금 세 장비가 실제로 이 상태다");
+  });
+
+  test("🔴 저장은 base_cost 를 건드리지 않는다 — 넘어오기 전 금액의 유일한 근거다", async () => {
+    await resetKind("GENERATOR");
+    await save({
+      kind: "GENERATOR",
+      investigationHours: 21,
+      powerTestHours: 14,
+      tasks: [],
+      powerTestTasks: [],
+      actorUserId: superAdminId,
+    });
+    // 이행이 채워 둔 옛 금액을 흉내 낸다 — 이 값은 저장 경로로는 들어갈 수 없다.
+    await db
+      .update(repairLaborSettings)
+      .set({ baseCost: "3500000" })
+      .where(eq(repairLaborSettings.equipmentKind, "GENERATOR"));
+
+    // 화면이 보내는 한 벌에는 base_cost 가 아예 없다. 🔴 안 보냈다고 NULL 로 덮이면
+    // 이미 나간 견적서가 왜 그 금액이었는지 물어볼 곳이 사라진다.
+    const result = await save({
+      kind: "GENERATOR",
+      hourlyRate: "120000",
+      investigationHours: 22,
+      powerTestHours: 15,
+      documentHours: 1,
+      tasks: [newTask("작업 A", 2)],
+      powerTestTasks: [{ id: null, taskName: "통전 A" }],
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const setting = await storedSetting("GENERATOR");
+    assert.ok(setting);
+    assert.equal(setting.baseCost, "3500000.00", "🔴 옛 기본 작업비가 남아 있어야 한다");
+    assert.equal(setting.hourlyRate, "120000.00", "나머지 칸은 제대로 바뀐다");
+    assert.equal(setting.investigationHours, 22);
+    assert.equal(setting.powerTestHours, 15);
+    assert.equal(setting.documentHours, 1);
   });
 });
 
@@ -722,8 +823,223 @@ describe("🔴 두 목록이 서로를 지우는가 — 이 함수의 가장 위
     // 견적서와 「작업 비용」 화면이 읽는 길로도 확인한다 — 사람이 실제로 보게 되는 것.
     const forQuote = await getRepairLaborForKind("GENERATOR");
     assert.deepEqual(forQuote.tasks, [], "🔴 고를 수리 작업이 하나도 남지 않는다");
-    assert.deepEqual(forQuote.powerTestTasks, []);
+    assert.deepEqual(forQuote.scopeTasks, {
+      INVESTIGATION: [],
+      POWER_TEST: [],
+      DOCUMENT: [],
+    });
     assert.equal(forQuote.hourlyRate, HOURLY_RATE_STORED, "단가 설정만 남는다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 갈래 셋이 서로를 지우는가 — 이 조각에서 가장 크게 다칠 수 있는 자리
+ * ============================================================================
+ * 조사 · 통전 · 서류 목록은 **한 표(power_test_tasks)에 같이 산다.** 저장이 「이번에
+ * 안 보낸 줄」을 소프트 삭제하므로, 지우는 조건에 `scope` 가 빠지는 순간 **조사 탭에서
+ * 저장하는 것만으로 통전·서류 목록이 통째로 사라진다.** 오류도 안 나고, 다음 견적서가
+ * 나가기 전까지 아무도 모른다.
+ *
+ * 아래 묶음이 **세 방향 모두**를 못 박는다 — 어느 갈래를 고쳐도 나머지 둘이 멀쩡해야
+ * 한다. 화면이 한 벌 전부를 보내는 것과(RepairLaborScreen.tsx) 짝이 되는 자리다.
+ * ============================================================================
+ */
+describe("🔴 갈래 셋이 서로를 지우는가", () => {
+  /** 지금 살아 있는 세 갈래를 화면이 되보내는 모양(id 를 쥔 채)으로 걷어 온다. */
+  async function scopePayload(kind: WorkflowKind) {
+    const payload = {} as Record<RepairLaborScope, LaborScopeTaskInput[]>;
+    for (const scope of REPAIR_LABOR_SCOPES) {
+      payload[scope] = (await liveScopeTasks(kind, scope)).map((row) => ({
+        id: row.id,
+        taskName: row.taskName,
+      }));
+    }
+    return payload;
+  }
+
+  /** 세 갈래가 다 차 있는 자리에서 시작한다. */
+  async function seedThreeScopes(kind: WorkflowKind) {
+    await resetKind(kind);
+    const result = await save({
+      kind,
+      investigationHours: 21,
+      powerTestHours: 14,
+      documentHours: 3,
+      tasks: [newTask("작업 A", 2)],
+      investigationTasks: [
+        { id: null, taskName: "조사 A" },
+        { id: null, taskName: "조사 B" },
+      ],
+      powerTestTasks: [{ id: null, taskName: "통전 A" }],
+      documentTasks: [{ id: null, taskName: "서류 A" }],
+      actorUserId: superAdminId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+  }
+
+  test("세 갈래가 저마다 제 줄만 갖는다 — 한 표에 담겨도 섞이지 않는다", async () => {
+    await seedThreeScopes("GENERATOR");
+    assert.deepEqual(await liveScopeSnapshot("GENERATOR"), {
+      INVESTIGATION: ["조사 A", "조사 B"],
+      POWER_TEST: ["통전 A"],
+      DOCUMENT: ["서류 A"],
+    });
+    assert.deepEqual(
+      (await liveTasks("GENERATOR")).map((row) => row.taskName),
+      ["작업 A"],
+      "수리 작업 목록은 다른 표라 그대로다"
+    );
+  });
+
+  // 🔴 세 방향 모두. 한 갈래만 고쳐 저장하는 것이 화면에서 실제로 일어나는 일이다.
+  for (const scope of REPAIR_LABOR_SCOPES) {
+    const label = repairLaborScopeLabels[scope];
+    test(`🔴 ${label} 탭에서 저장해도 나머지 두 갈래의 목록이 그대로다`, async () => {
+      await seedThreeScopes("GENERATOR");
+      const before = await scopePayload("GENERATOR");
+
+      // 그 갈래에만 줄을 더한다. 나머지 둘은 **있는 그대로 되보낸다** — 화면이 어느
+      // 탭에서 눌러도 한 벌 전부를 보내는 그 모양이다.
+      const payload = {
+        ...before,
+        [scope]: [...before[scope], { id: null, taskName: `${label} 새 줄` }],
+      } as Record<RepairLaborScope, LaborScopeTaskInput[]>;
+
+      const result = await save({
+        kind: "GENERATOR",
+        investigationHours: 21,
+        powerTestHours: 14,
+        documentHours: 3,
+        tasks: [{ id: (await liveTasks("GENERATOR"))[0].id, taskName: "작업 A", hours: 2, isOverhaul: false }],
+        investigationTasks: payload.INVESTIGATION,
+        powerTestTasks: payload.POWER_TEST,
+        documentTasks: payload.DOCUMENT,
+        actorUserId: secondActorId,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+
+      const after = await liveScopeSnapshot("GENERATOR");
+      for (const other of REPAIR_LABOR_SCOPES) {
+        if (other === scope) continue;
+        assert.deepEqual(
+          after[other],
+          before[other].map((row) => row.taskName),
+          `🔴 ${label} 을(를) 고쳤는데 ${repairLaborScopeLabels[other]} 목록이 달라졌다`
+        );
+      }
+      assert.deepEqual(
+        after[scope],
+        [...before[scope].map((row) => row.taskName), `${label} 새 줄`],
+        "고친 갈래에는 줄이 더해져 있어야 한다"
+      );
+      // 🔴 지워진 것으로 표시된 줄이 하나도 없어야 한다 — 소프트 삭제는 조용하다.
+      assert.ok(
+        (await allPowerTests("GENERATOR")).every((row) => row.isDeleted === false),
+        "🔴 옆 갈래의 줄이 소프트 삭제로 사라지면 안 된다"
+      );
+      assert.deepEqual(
+        (await liveTasks("GENERATOR")).map((row) => row.taskName),
+        ["작업 A"],
+        "수리 작업 목록도 멀쩡하다"
+      );
+    });
+  }
+
+  test("🔴 한 갈래를 빈 목록으로 보내면 **그 갈래만** 지워진다 — 옆 갈래는 멀쩡하다", async () => {
+    await seedThreeScopes("MATCHER");
+    const before = await scopePayload("MATCHER");
+
+    const result = await save({
+      kind: "MATCHER",
+      tasks: [],
+      // 통전만 비운다. 조사·서류는 그대로 되보낸다.
+      investigationTasks: before.INVESTIGATION,
+      powerTestTasks: [],
+      documentTasks: before.DOCUMENT,
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(await liveScopeSnapshot("MATCHER"), {
+      INVESTIGATION: ["조사 A", "조사 B"],
+      POWER_TEST: [],
+      DOCUMENT: ["서류 A"],
+    });
+    const deleted = (await allPowerTests("MATCHER")).filter((row) => row.isDeleted);
+    assert.deepEqual(
+      deleted.map((row) => [row.scope, row.taskName]),
+      [["POWER_TEST", "통전 A"]],
+      "🔴 지워진 것은 비워 보낸 갈래의 줄뿐이어야 한다"
+    );
+  });
+
+  test("🔴 갈래가 다르면 같은 건명을 쓸 수 있다 — 유니크가 (장비, scope, 건명)이다", async () => {
+    await resetKind("TOTAL_CONTROLLER");
+
+    const result = await save({
+      kind: "TOTAL_CONTROLLER",
+      tasks: [],
+      // 「외관 및 내부 검사」는 세 갈래에 다 있을 법한 이름이다. 막히면 안 된다.
+      investigationTasks: [{ id: null, taskName: "외관 및 내부 검사" }],
+      powerTestTasks: [{ id: null, taskName: "외관 및 내부 검사" }],
+      documentTasks: [{ id: null, taskName: "외관 및 내부 검사" }],
+      actorUserId: superAdminId,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(await liveScopeSnapshot("TOTAL_CONTROLLER"), {
+      INVESTIGATION: ["외관 및 내부 검사"],
+      POWER_TEST: ["외관 및 내부 검사"],
+      DOCUMENT: ["외관 및 내부 검사"],
+    });
+  });
+
+  test("🔴 옆 갈래의 줄 id 를 보내면 NOT_FOUND — 줄이 남몰래 갈래를 건너가지 않는다", async () => {
+    await seedThreeScopes("MATCHER");
+    const before = await scopePayload("MATCHER");
+    const stolen = before.POWER_TEST[0];
+
+    const result = await save({
+      kind: "MATCHER",
+      tasks: [],
+      // 통전 줄의 id 를 조사 목록에 넣는다.
+      investigationTasks: [...before.INVESTIGATION, { id: stolen.id, taskName: "훔쳐 온 줄" }],
+      powerTestTasks: before.POWER_TEST,
+      documentTasks: before.DOCUMENT,
+      actorUserId: secondActorId,
+    });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+
+    assert.deepEqual(
+      await liveScopeSnapshot("MATCHER"),
+      {
+        INVESTIGATION: ["조사 A", "조사 B"],
+        POWER_TEST: ["통전 A"],
+        DOCUMENT: ["서류 A"],
+      },
+      "🔴 거절이므로 세 목록이 통째로 되돌아가야 한다"
+    );
+  });
+
+  test("🔴 조회도 갈래로 갈라 준다 — 안 가르면 화면의 한 탭에 셋이 섞여 나온다", async () => {
+    await seedThreeScopes("GENERATOR");
+
+    const forScreen = await getRepairLaborForKind("GENERATOR");
+    assert.deepEqual(
+      {
+        INVESTIGATION: forScreen.scopeTasks.INVESTIGATION.map((row) => row.taskName),
+        POWER_TEST: forScreen.scopeTasks.POWER_TEST.map((row) => row.taskName),
+        DOCUMENT: forScreen.scopeTasks.DOCUMENT.map((row) => row.taskName),
+      },
+      { INVESTIGATION: ["조사 A", "조사 B"], POWER_TEST: ["통전 A"], DOCUMENT: ["서류 A"] }
+    );
+    // 세 공수시간도 함께 온다 — 화면의 기본 작업비가 이 셋으로 셈된다.
+    assert.equal(forScreen.investigationHours, 21);
+    assert.equal(forScreen.powerTestHours, 14);
+    assert.equal(forScreen.documentHours, 3);
   });
 });
 
@@ -733,7 +1049,7 @@ describe("🔴 거절은 트랜잭션째 되돌린다", () => {
     await save({
       kind: "MATCHER",
       hourlyRate: HOURLY_RATE,
-      baseCost: "3500000",
+      investigationHours: 21,
       powerTestHours: 14,
       tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
       powerTestTasks: [{ id: null, taskName: "통전 A" }],
@@ -744,7 +1060,7 @@ describe("🔴 거절은 트랜잭션째 되돌린다", () => {
     const result = await save({
       kind: "MATCHER",
       hourlyRate: "999999",
-      baseCost: "1",
+      investigationHours: 1,
       powerTestHours: 1,
       tasks: [
         // 앞줄은 멀쩡하다 — 여기까지는 실제로 쓰인 뒤에 다음 줄에서 거절된다.
@@ -762,7 +1078,7 @@ describe("🔴 거절은 트랜잭션째 되돌린다", () => {
     const setting = await storedSetting("MATCHER");
     assert.ok(setting);
     assert.equal(setting.hourlyRate, HOURLY_RATE_STORED, "🔴 단가가 바뀌면 안 된다");
-    assert.equal(setting.baseCost, "3500000.00", "🔴 기본 작업비도 그대로여야 한다");
+    assert.equal(setting.investigationHours, 21, "🔴 조사 공수시간도 그대로여야 한다");
     assert.equal(setting.powerTestHours, 14);
     assert.equal(setting.updatedBy, superAdminId, "고친 사람도 그대로다");
 
@@ -910,18 +1226,26 @@ describe("감사 기록", () => {
       equipmentKind: "MATCHER",
       hourlyRate: null,
       baseCost: null,
+      investigationHours: null,
       powerTestHours: null,
+      documentHours: null,
       taskCount: 0,
       totalHours: 0,
+      investigationTaskCount: 0,
+      investigationTaskNames: [],
       powerTestTaskCount: 0,
       powerTestTaskNames: [],
+      documentTaskCount: 0,
+      documentTaskNames: [],
     });
 
     const before = await liveTasks("MATCHER");
     const result = await save({
       kind: "MATCHER",
       hourlyRate: "120000",
+      documentHours: 0,
       tasks: [{ id: before[0].id, taskName: "작업 A", hours: 8, isOverhaul: false }],
+      investigationTasks: [{ id: null, taskName: "조사 A" }],
       powerTestTasks: [{ id: null, taskName: "통전 B" }],
       actorUserId: secondActorId,
     });
@@ -937,11 +1261,17 @@ describe("감사 기록", () => {
         // 바꾸기 전 값은 DB 에서 읽으므로 numeric 의 모습 그대로다.
         hourlyRate: HOURLY_RATE_STORED,
         baseCost: null,
+        investigationHours: null,
         powerTestHours: null,
+        documentHours: null,
         taskCount: 1,
         totalHours: 2,
+        investigationTaskCount: 0,
+        investigationTaskNames: [],
         powerTestTaskCount: 1,
         powerTestTaskNames: ["통전 A"],
+        documentTaskCount: 0,
+        documentTaskNames: [],
       },
       "바꾸기 전 상태가 그대로 남아야 한다"
     );
@@ -951,26 +1281,35 @@ describe("감사 기록", () => {
         equipmentKind: "MATCHER",
         // 바꾼 뒤 값은 **화면이 보낸 글자 그대로**다 — 위와 모양이 다르다.
         hourlyRate: "120000",
+        // 🔴 저장이 이 칸을 건드리지 않으므로 **바뀌기 전 값 그대로** 남는다.
         baseCost: null,
+        investigationHours: null,
         powerTestHours: null,
+        documentHours: 0,
         taskCount: 1,
         totalHours: 8,
+        investigationTaskCount: 1,
+        investigationTaskNames: ["조사 A"],
         powerTestTaskCount: 1,
         powerTestTaskNames: ["통전 B"],
+        documentTaskCount: 0,
+        documentTaskNames: [],
       },
       "바꾼 뒤 상태도 함께 남아야 한다"
     );
   });
 
-  test("🔴 통전 목록은 건명을 그대로 남긴다 — 견적서 문서에 적힐 글이라 문구가 답이 되어야 한다", async () => {
+  test("🔴 갈래 목록 셋은 건명을 그대로 남긴다 — 견적서 문서에 적힐 글이라 문구가 답이 되어야 한다", async () => {
     await resetKind("GENERATOR");
     await save({
       kind: "GENERATOR",
       tasks: [newTask("작업 A", 2), newTask("작업 B", 3)],
+      investigationTasks: [{ id: null, taskName: "외관 및 내부 검사" }],
       powerTestTasks: [
         { id: null, taskName: "전원 인가 확인" },
         { id: null, taskName: "출력 파형 확인" },
       ],
+      documentTasks: [{ id: null, taskName: "성적서 작성" }],
       actorUserId: superAdminId,
     });
     const setting = await storedSetting("GENERATOR");
@@ -983,6 +1322,12 @@ describe("감사 기록", () => {
       ["전원 인가 확인", "출력 파형 확인"],
       "건명이 차례까지 그대로 남아야 한다"
     );
+    // 🔴 갈래마다 제 자리에 남는다 — 한 덩어리로 섞이면 "그때 통전 목록이 무엇이었나"에
+    // 답할 수 없다.
+    assert.deepEqual(newValue.investigationTaskNames, ["외관 및 내부 검사"]);
+    assert.deepEqual(newValue.documentTaskNames, ["성적서 작성"]);
+    assert.equal(newValue.investigationTaskCount, 1);
+    assert.equal(newValue.documentTaskCount, 1);
     // 수리 작업 목록은 반대로 **건명을 남기지 않는다.** 줄마다 공수시간이 있어
     // 건수와 시간 합계로 크기를 가늠할 수 있기 때문이다(mutations 의 그 주석).
     assert.equal(newValue.taskCount, 2);
@@ -1346,21 +1691,33 @@ describe("🔴 이름 맞바꾸기와 이름 되쓰기 — 한 번의 저장으�
       equipmentKind: "MATCHER",
       hourlyRate: HOURLY_RATE_STORED,
       baseCost: null,
+      investigationHours: null,
       powerTestHours: null,
+      documentHours: null,
       taskCount: 2,
       totalHours: 5,
+      investigationTaskCount: 0,
+      investigationTaskNames: [],
       powerTestTaskCount: 1,
       powerTestTaskNames: ["통전 A"],
+      documentTaskCount: 0,
+      documentTaskNames: [],
     });
     assert.deepEqual(entry.newValue, {
       equipmentKind: "MATCHER",
       hourlyRate: HOURLY_RATE,
       baseCost: null,
+      investigationHours: null,
       powerTestHours: null,
+      documentHours: null,
       taskCount: 2,
       totalHours: 12,
+      investigationTaskCount: 0,
+      investigationTaskNames: [],
       powerTestTaskCount: 1,
       powerTestTaskNames: ["통전 A"],
+      documentTaskCount: 0,
+      documentTaskNames: [],
     });
   });
 
@@ -1493,9 +1850,8 @@ describe("🔴 이름 맞바꾸기와 이름 되쓰기 — 한 번의 저장으�
       .insert(powerTestTasks)
       .values({
         equipmentKind: "TOTAL_CONTROLLER",
-        // 지금 이 시험이 보는 것은 통전 목록의 겹침이다. 조사·서류 갈래의 겹침은
-        // 설정 화면 조각이 세 탭을 만들 때 함께 온다(scope 가 유니크에 들어 있어
-        // 갈래가 다르면 같은 이름이 겹침이 아니다).
+        // 🔴 **같은 갈래**여야 겹친다. 갈래가 다르면 같은 이름이 겹침이 아니라는 것은
+        // 위 「갈래가 다르면 같은 건명을 쓸 수 있다」가 따로 못 박는다.
         scope: "POWER_TEST",
         taskName: "겹칠 통전 작업",
         displayOrder: 2,

@@ -5,7 +5,12 @@ import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../client";
 import { powerTestTasks, repairLaborSettings, repairTaskCatalog } from "../schema";
 import { insertAuditLog } from "./audit-logs";
-import type { RepairLaborFields } from "@/lib/validation/repair-task-input";
+import {
+  REPAIR_LABOR_SCOPES,
+  repairLaborScopeLabels,
+  type RepairLaborFields,
+  type RepairLaborScope,
+} from "@/lib/validation/repair-task-input";
 
 /**
  * ============================================================================
@@ -24,11 +29,27 @@ import type { RepairLaborFields } from "@/lib/validation/repair-task-input";
  * 사진의 표 순서가 그대로 뜻을 갖는다(OH 가 맨 아래인 데는 이유가 있다).
  * 저장하는 쪽이 1부터 다시 매긴다 — oh_part_templates 의 replaceItems 와 같다.
  *
- * ── 통전 작업 목록도 같은 방식으로 나란히 저장한다 ──────────────────────
+ * ── 갈래 목록 셋도 같은 방식으로 나란히 저장한다 ────────────────────────
  * 표는 다르지만(power_test_tasks) 다루는 법은 똑같다: 목록 통째로 받아 빠진 줄은
  * 소프트 삭제하고, 남은 줄은 차례를 1부터 다시 매긴다. **같은 트랜잭션 안이다** —
- * 수리 목록은 저장됐는데 통전 목록은 안 된 반쪽 상태를 만들지 않는다.
- * 이 목록에는 **공수시간이 없다**(schema/repair-labor.ts 의 그 표 머리말).
+ * 수리 목록은 저장됐는데 갈래 목록은 안 된 반쪽 상태를 만들지 않는다.
+ * 이 목록들에는 **공수시간이 없다**(schema/repair-labor.ts 의 그 표 머리말).
+ *
+ * ── 🔴 갈래마다 따로 돈다 — 한 갈래의 저장이 옆 갈래를 지우지 않는다 ────
+ * 2026-09-16 부터 그 표는 조사 · 통전 · 서류 셋을 한 표에 담는다. 그래서 아래
+ * (1)(2)(3) 이 **언제나 `scope` 까지 걸고** 돈다. 안 걸면 (1)의 소프트 삭제가
+ * 「이 장비에서 이번에 안 보낸 줄 전부」를 지워, 조사 탭에서 저장하는 순간 통전·서류
+ * 목록이 통째로 사라진다. **이 파일에서 가장 크게 다칠 수 있는 자리다.**
+ *
+ * 부르는 쪽은 세 목록을 **언제나 셋 다** 싣는다 — 타입이
+ * `Record<RepairLaborScope, …>` 라 하나를 빠뜨릴 수 없다
+ * (validation/repair-task-input.ts 의 scopeTasks).
+ *
+ * ── 🔴 기본 작업비(base_cost) 칸은 **건드리지 않는다** ──────────────────
+ * 2026-09-16 부터 기본 작업비는 세 공수시간의 합 × 시간당 단가이고, 그 칸은 넘어오기
+ * 전의 금액을 되짚을 근거로만 남는다(schema/repair-labor.ts 의 그 주석). 그래서 아래
+ * upsert 의 `values` 에도 `set` 에도 그 칸이 없다 — **안 보냈다고 NULL 로 덮이면
+ * 이미 나간 견적서가 왜 그 금액이었는지 물어볼 곳이 사라진다.**
  *
  * ── 🔴 쓰는 차례가 규칙이다: 지우기 → 이름 밀어 두기 → 쓰기 ────────────
  * 두 목록 표에는 `(equipment_kind, task_name) WHERE is_deleted = false` 부분
@@ -103,15 +124,17 @@ const PG_UNIQUE_VIOLATION = "23505";
  * 유니크 색인이 붙는 날 그 위반이 "건명이 겹칩니다"로 둔갑하지 않는다. 여기에
  * 없는 오류는 그대로 던져 서버 액션이 진짜 장애로 다루게 둔다.
  */
-const NAME_CONFLICT_MESSAGES: Record<string, string> = {
-  repair_task_catalog_kind_name_not_deleted_unique:
+const NAME_CONFLICT_MESSAGES: Record<string, (scope: RepairLaborScope | null) => string> = {
+  repair_task_catalog_kind_name_not_deleted_unique: () =>
     "같은 건명의 작업이 이미 있습니다. 같은 장비 종류를 같은 순간에 고친 쪽이 있습니다 — 최신 정보를 다시 불러온 뒤 겹치는 건명을 고쳐 주세요.",
   // 0100 에서 색인이 (장비, scope, 건명) 으로 넓어지며 이름이 바뀌었다. 🔴 옛 이름을
   // 그대로 두면 열쇠가 어긋나 겹침이 "건명이 겹칩니다" 대신 **진짜 장애**로 올라간다.
-  // 문구가 아직 '통전'인 것은 지금 이 저장 경로가 통전 목록만 다루기 때문이다 —
-  // 조사·서류 탭이 생기는 설정 화면 조각에서 갈래에 맞는 말로 넓어진다.
-  power_test_tasks_kind_scope_name_not_deleted_unique:
-    "같은 건명의 통전 작업이 이미 있습니다. 같은 장비 종류를 같은 순간에 고친 쪽이 있습니다 — 최신 정보를 다시 불러온 뒤 겹치는 건명을 고쳐 주세요.",
+  //
+  // 🔴 **문구가 어느 갈래인지 말한다.** 색인 이름 하나로 세 목록을 다 막으므로, 예전처럼
+  // '통전'으로 굳혀 두면 조사 탭에서 겹친 사람이 통전 목록을 뒤지게 된다. 색인 이름만으로는
+  // 갈래를 알 수 없어, **그때 쓰고 있던 갈래**를 함께 받는다(saveRepairLabor 의 writingScope).
+  power_test_tasks_kind_scope_name_not_deleted_unique: (scope) =>
+    `같은 건명의 ${scope ? `${repairLaborScopeLabels[scope]} 작업` : "작업"}이 이미 있습니다. 같은 장비 종류를 같은 순간에 고친 쪽이 있습니다 — 최신 정보를 다시 불러온 뒤 겹치는 건명을 고쳐 주세요.`,
 };
 
 /**
@@ -120,15 +143,17 @@ const NAME_CONFLICT_MESSAGES: Record<string, string> = {
  * 🔴 drizzle 이 드라이버 오류를 **자기 오류로 감싸므로** `cause` 까지 본다. 바깥
  * 오류에는 코드도 색인 이름도 없다(이 저장소의 customers.ts · product-models.ts
  * 가 같은 이유로 cause 를 본다). 그 모양은 통합 시험이 못 박아 둔다.
+ *
+ * @param scope 그 오류가 났을 때 쓰고 있던 갈래. 수리 작업 목록을 쓰던 중이면 null 이다.
  */
-function nameConflictMessage(err: unknown): string | undefined {
+function nameConflictMessage(err: unknown, scope: RepairLaborScope | null): string | undefined {
   for (const candidate of [err, err instanceof Error ? err.cause : undefined]) {
     if (typeof candidate !== "object" || candidate === null) continue;
     const fields = candidate as { code?: unknown; constraint_name?: unknown };
     if (fields.code !== PG_UNIQUE_VIOLATION) continue;
     if (typeof fields.constraint_name !== "string") continue;
     const message = NAME_CONFLICT_MESSAGES[fields.constraint_name];
-    if (message) return message;
+    if (message) return message(scope);
   }
   return undefined;
 }
@@ -161,11 +186,20 @@ export async function saveRepairLabor(params: {
   const {
     equipmentKind,
     hourlyRate,
-    baseCost,
+    investigationHours,
     powerTestHours,
+    documentHours,
     tasks,
-    powerTestTasks: powerTestTaskList,
+    scopeTasks,
   } = params.fields;
+
+  /**
+   * 🔴 색인 위반이 났을 때 **어느 갈래를 쓰고 있었는지**. 아래 catch 가 사람에게 할
+   * 말을 고를 때 쓴다(NAME_CONFLICT_MESSAGES 의 그 항목). 색인 이름 하나가 세 목록을
+   * 다 막으므로 이것 없이는 "통전"으로 굳은 말밖에 못 한다. 수리 작업 목록을 쓰는
+   * 동안에는 null 이다.
+   */
+  let writingScope: RepairLaborScope | null = null;
 
   /**
    * 이름을 잠깐 옮겨 담을 임시값의 앞부분(아래 (2)단계).
@@ -184,15 +218,26 @@ export async function saveRepairLabor(params: {
     // ── 단가 설정 ────────────────────────────────────────────────────────
     // 종류마다 한 줄이므로 충돌 대상도 그 칸 하나다. 줄이 없으면 만든다 —
     // 시드를 안 돌린 채로 화면에서 먼저 저장하는 길도 막히지 않아야 한다.
+    //
+    // 🔴 `baseCost` 가 없는 것이 빠뜨린 것이 아니다 — 이 파일 머리말의 「기본 작업비
+    // 칸은 건드리지 않는다」. 없던 종류를 새로 만들 때만 그 칸이 NULL 로 시작한다.
     await tx
       .insert(repairLaborSettings)
-      .values({ equipmentKind, hourlyRate, baseCost, powerTestHours, updatedBy: params.actorUserId })
+      .values({
+        equipmentKind,
+        hourlyRate,
+        investigationHours,
+        powerTestHours,
+        documentHours,
+        updatedBy: params.actorUserId,
+      })
       .onConflictDoUpdate({
         target: repairLaborSettings.equipmentKind,
         set: {
           hourlyRate,
-          baseCost,
+          investigationHours,
           powerTestHours,
+          documentHours,
           updatedBy: params.actorUserId,
           updatedAt: new Date(),
         },
@@ -307,89 +352,100 @@ export async function saveRepairLabor(params: {
       });
     }
 
-    // ── 통전 작업 목록 ───────────────────────────────────────────────────
-    // 위 작업 목록과 **같은 차례**다((1)(2)(3)). 다른 점은 공수시간도 오버홀
-    // 표시도 없다는 것뿐이다(schema/repair-labor.ts 의 power_test_tasks 머리말).
-    const submittedPowerTestIds = [
-      ...new Set(powerTestTaskList.flatMap((task) => (task.id ? [task.id] : []))),
-    ];
-    await tx
-      .update(powerTestTasks)
-      .set({ isDeleted: true, deletedAt: new Date(), deletedBy: params.actorUserId })
-      .where(
-        and(
-          eq(powerTestTasks.equipmentKind, equipmentKind),
-          eq(powerTestTasks.isDeleted, false),
-          submittedPowerTestIds.length > 0
-            ? notInArray(powerTestTasks.id, submittedPowerTestIds)
-            : sql`true`
-        )
-      );
+    // ── 갈래 목록 셋 — 조사 · 통전 · 서류 ────────────────────────────────
+    // 위 작업 목록과 **같은 차례**다((1)(2)(3)). 다른 점은 공수시간도 오버홀 표시도
+    // 없다는 것과, 🔴 **모든 조건에 `scope` 가 함께 걸린다**는 것이다
+    // (schema/repair-labor.ts 의 power_test_tasks 머리말 — 한 표가 셋을 담는다).
+    //
+    // 🔴 갈래를 안 걸면 (1)의 소프트 삭제가 옆 갈래의 줄까지 「이번에 안 보낸 줄」로
+    // 보고 지운다. 조사 탭에서 저장하는 순간 통전 목록이 통째로 사라지는 길이다.
+    for (const scope of REPAIR_LABOR_SCOPES) {
+      writingScope = scope;
+      const scopeLabel = repairLaborScopeLabels[scope];
+      const scopeList = scopeTasks[scope];
+      const notFound = () =>
+        new SaveRejected({
+          ok: false,
+          code: "NOT_FOUND",
+          message: `이미 지워진 ${scopeLabel} 작업이 있습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.`,
+        });
 
-    if (submittedPowerTestIds.length > 0) {
-      const staged = await tx
+      const submittedScopeIds = [
+        ...new Set(scopeList.flatMap((task) => (task.id ? [task.id] : []))),
+      ];
+      await tx
         .update(powerTestTasks)
-        .set({ taskName: sql`${stagedNamePrefix} || ${powerTestTasks.id}::text` })
+        .set({ isDeleted: true, deletedAt: new Date(), deletedBy: params.actorUserId })
         .where(
           and(
             eq(powerTestTasks.equipmentKind, equipmentKind),
+            eq(powerTestTasks.scope, scope),
             eq(powerTestTasks.isDeleted, false),
-            inArray(powerTestTasks.id, submittedPowerTestIds)
+            submittedScopeIds.length > 0
+              ? notInArray(powerTestTasks.id, submittedScopeIds)
+              : sql`true`
           )
-        )
-        .returning({ id: powerTestTasks.id });
-      // 위 작업 목록과 같은 이유로 **던진다**(SaveRejected 주석).
-      if (staged.length !== submittedPowerTestIds.length) {
-        throw new SaveRejected({
-          ok: false,
-          code: "NOT_FOUND",
-          message: "이미 지워진 통전 작업이 있습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.",
-        });
-      }
-    }
+        );
 
-    for (const [index, task] of powerTestTaskList.entries()) {
-      const displayOrder = index + 1;
-      if (task.id) {
-        const [updated] = await tx
+      if (submittedScopeIds.length > 0) {
+        const staged = await tx
           .update(powerTestTasks)
-          .set({
-            taskName: task.taskName,
-            displayOrder,
-            updatedAt: new Date(),
-            updatedBy: params.actorUserId,
-          })
+          .set({ taskName: sql`${stagedNamePrefix} || ${powerTestTasks.id}::text` })
           .where(
             and(
-              eq(powerTestTasks.id, task.id),
               eq(powerTestTasks.equipmentKind, equipmentKind),
-              eq(powerTestTasks.isDeleted, false)
+              // 🔴 갈래까지 본다 — 옆 갈래의 id 를 보내온 저장은 **거절**이어야 한다.
+              // 안 걸면 그 줄이 남몰래 이 목록으로 옮겨 온다.
+              eq(powerTestTasks.scope, scope),
+              eq(powerTestTasks.isDeleted, false),
+              inArray(powerTestTasks.id, submittedScopeIds)
             )
           )
           .returning({ id: powerTestTasks.id });
-        // 위 작업 목록의 같은 자리와 같은 뜻의 방어다.
-        if (!updated) {
-          throw new SaveRejected({
-            ok: false,
-            code: "NOT_FOUND",
-            message: "이미 지워진 통전 작업이 있습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.",
-          });
-        }
-        continue;
+        // 위 작업 목록과 같은 이유로 **던진다**(SaveRejected 주석).
+        if (staged.length !== submittedScopeIds.length) throw notFound();
       }
 
-      await tx.insert(powerTestTasks).values({
-        equipmentKind,
-        // 이 저장 경로는 아직 **통전 목록 하나만** 다룬다 — 화면이 통전 탭만
-        // 보내기 때문이다. 조사·서류 탭이 생기는 설정 화면 조각에서 이 값이
-        // 보내온 갈래로 넓어진다(schema/repair-labor.ts 의 repair_labor_scope).
-        scope: "POWER_TEST",
-        taskName: task.taskName,
-        displayOrder,
-        createdBy: params.actorUserId,
-        updatedBy: params.actorUserId,
-      });
+      for (const [index, task] of scopeList.entries()) {
+        const displayOrder = index + 1;
+        if (task.id) {
+          const [updated] = await tx
+            .update(powerTestTasks)
+            .set({
+              taskName: task.taskName,
+              displayOrder,
+              updatedAt: new Date(),
+              updatedBy: params.actorUserId,
+            })
+            .where(
+              and(
+                eq(powerTestTasks.id, task.id),
+                eq(powerTestTasks.equipmentKind, equipmentKind),
+                eq(powerTestTasks.scope, scope),
+                eq(powerTestTasks.isDeleted, false)
+              )
+            )
+            .returning({ id: powerTestTasks.id });
+          // 위 작업 목록의 같은 자리와 같은 뜻의 방어다.
+          if (!updated) throw notFound();
+          continue;
+        }
+
+        await tx.insert(powerTestTasks).values({
+          equipmentKind,
+          // 🔴 보내온 갈래를 그대로 쓴다. 예전에는 "POWER_TEST" 로 굳어 있었다 —
+          // 화면이 통전 탭 하나만 보내던 때의 자리다(schema/repair-labor.ts 의
+          // repair_labor_scope).
+          scope,
+          taskName: task.taskName,
+          displayOrder,
+          createdBy: params.actorUserId,
+          updatedBy: params.actorUserId,
+        });
+      }
     }
+    // 여기부터는 갈래 목록을 쓰지 않는다 — 색인 위반이 나도 갈래 이름을 붙이면 거짓말이 된다.
+    writingScope = null;
 
     await insertAuditLog(tx, {
       actorUserId: params.actorUserId,
@@ -402,19 +458,27 @@ export async function saveRepairLabor(params: {
       newValue: {
         equipmentKind,
         hourlyRate,
-        baseCost,
+        // 🔴 이 저장은 base_cost 를 쓰지 않는다(파일 머리말). 그래서 바뀌기 전 값을
+        // 그대로 싣는다 — 빼 버리면 감사만 보고는 "그때 그 칸이 비워졌나"를 알 수 없다.
+        baseCost: previous.baseCost,
+        investigationHours,
         powerTestHours,
+        documentHours,
         taskCount: tasks.length,
         // 시간 합계를 함께 남긴다 — 나중에 "그때 작업비가 왜 그 값이었나"를
         // 물을 때 목록 전체를 복원하지 않고도 크기를 가늠할 수 있다.
         totalHours: tasks.reduce((sum, task) => sum + task.hours, 0),
-        powerTestTaskCount: powerTestTaskList.length,
-        // 🔴 통전 목록은 **건명을 그대로** 남긴다. 수리 목록처럼 건수와 시간
+        // 🔴 갈래 목록은 **건명을 그대로** 남긴다. 수리 목록처럼 건수와 시간
         // 합계로 가늠할 수가 없고(시간이 없다), 무엇보다 이 글이 앞으로 견적서
         // 문서에 적히는 내용이라 "누가 언제 무슨 문구로 바꿨나"에 답해야 한다.
-        // 100줄 상한이 있어(validation/repair-task-input.ts) 감사 한 줄이 감당
-        // 못할 크기가 되지 않는다.
-        powerTestTaskNames: powerTestTaskList.map((task) => task.taskName),
+        // 갈래마다 100줄 상한이 있어(validation/repair-task-input.ts) 감사 한 줄이
+        // 감당 못할 크기가 되지 않는다.
+        investigationTaskCount: scopeTasks.INVESTIGATION.length,
+        investigationTaskNames: scopeTasks.INVESTIGATION.map((task) => task.taskName),
+        powerTestTaskCount: scopeTasks.POWER_TEST.length,
+        powerTestTaskNames: scopeTasks.POWER_TEST.map((task) => task.taskName),
+        documentTaskCount: scopeTasks.DOCUMENT.length,
+        documentTaskNames: scopeTasks.DOCUMENT.map((task) => task.taskName),
       },
     });
 
@@ -437,7 +501,7 @@ export async function saveRepairLabor(params: {
      * 🔴 **다른 오류는 그대로 던진다.** 여기서 모든 예외를 삼키면 진짜 장애가
      * "이름이 겹칩니다"로 둔갑한다(nameConflictMessage 주석).
      */
-    const message = nameConflictMessage(err);
+    const message = nameConflictMessage(err, writingScope);
     if (message) return { ok: false, code: "NAME_CONFLICT", message };
     throw err;
   });
@@ -449,7 +513,9 @@ async function readKind(tx: Tx, equipmentKind: RepairLaborFields["equipmentKind"
     .select({
       hourlyRate: repairLaborSettings.hourlyRate,
       baseCost: repairLaborSettings.baseCost,
+      investigationHours: repairLaborSettings.investigationHours,
       powerTestHours: repairLaborSettings.powerTestHours,
+      documentHours: repairLaborSettings.documentHours,
     })
     .from(repairLaborSettings)
     .where(eq(repairLaborSettings.equipmentKind, equipmentKind));
@@ -464,25 +530,38 @@ async function readKind(tx: Tx, equipmentKind: RepairLaborFields["equipmentKind"
       )
     );
 
-  // 바뀌기 전의 통전 목록도 건명 그대로 남긴다 — newValue 와 짝이 맞아야
+  // 바뀌기 전의 갈래 목록도 건명 그대로 남긴다 — newValue 와 짝이 맞아야
   // 감사 기록만 보고 "어느 줄의 문구가 어떻게 달라졌나"를 읽을 수 있다.
-  const powerTests = await tx
-    .select({ taskName: powerTestTasks.taskName })
+  // 🔴 여기서도 scope 로 갈라 읽는다. 안 가르면 세 목록이 한 덩어리로 섞여 남아
+  // 나중에 "그때 통전 목록이 무엇이었나"에 답할 수 없다.
+  const scopeRows = await tx
+    .select({ scope: powerTestTasks.scope, taskName: powerTestTasks.taskName })
     .from(powerTestTasks)
     .where(
       and(eq(powerTestTasks.equipmentKind, equipmentKind), eq(powerTestTasks.isDeleted, false))
     )
     .orderBy(asc(powerTestTasks.displayOrder));
+  const namesOf = (scope: RepairLaborScope) =>
+    scopeRows.filter((row) => row.scope === scope).map((row) => row.taskName);
+  const investigationNames = namesOf("INVESTIGATION");
+  const powerTestNames = namesOf("POWER_TEST");
+  const documentNames = namesOf("DOCUMENT");
 
   return {
     equipmentKind,
     hourlyRate: setting?.hourlyRate ?? null,
     baseCost: setting?.baseCost ?? null,
+    investigationHours: setting?.investigationHours ?? null,
     powerTestHours: setting?.powerTestHours ?? null,
+    documentHours: setting?.documentHours ?? null,
     taskCount: tasks.length,
     totalHours: tasks.reduce((sum, task) => sum + task.hours, 0),
-    powerTestTaskCount: powerTests.length,
-    powerTestTaskNames: powerTests.map((task) => task.taskName),
+    investigationTaskCount: investigationNames.length,
+    investigationTaskNames: investigationNames,
+    powerTestTaskCount: powerTestNames.length,
+    powerTestTaskNames: powerTestNames,
+    documentTaskCount: documentNames.length,
+    documentTaskNames: documentNames,
   };
 }
 

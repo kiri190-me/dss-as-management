@@ -34,16 +34,19 @@ test("🔴 견적서 수정 화면의 금액 칸(부품 단가 · 작업비)이 
   assert.ok(!form.includes("value={workCost} onChange="), "작업비의 옛 칸이 남았다");
 });
 
-test("🔴 작업 비용 화면의 시간당 작업비 · 기본 작업비 칸도 이 부품을 쓴다", () => {
+test("🔴 작업 비용 화면의 시간당 작업비 칸이 이 부품을 쓴다", () => {
   const screen = readFileSync("src/components/repair-labor/RepairLaborScreen.tsx", "utf8").replace(/\s+/g, " ");
   assert.ok(screen.includes('import AmountInput from "@/components/common/AmountInput";'));
   assert.ok(screen.includes("<AmountInput value={hourlyRate} onValueChange={setHourlyRate}"), "시간당 작업비 칸이 콤마 칸이 아니다");
-  assert.ok(screen.includes("<AmountInput value={baseCost} onValueChange={setBaseCost}"), "기본 작업비 칸이 콤마 칸이 아니다");
   assert.ok(!screen.includes("value={hourlyRate} onChange="), "시간당 작업비의 옛 칸이 남았다");
-  assert.ok(!screen.includes("value={baseCost} onChange="), "기본 작업비의 옛 칸이 남았다");
+  // 🔴 기본 작업비는 **2026-09-16 부터 적는 칸이 아니다** — 세 공수시간의 합이라 적을
+  // 것이 없다(schema/repair-labor.ts · domain/quote-labor-cost.ts). 칸이 되살아나면
+  // 사람이 고쳐도 견적서 금액이 안 바뀌던 그 자리가 돌아온다. 읽기 전용 표시가
+  // 제대로 서 있는지는 repair-labor/repair-labor-screen-source.test.ts 가 본다.
+  assert.ok(!screen.includes("setBaseCost"), "🔴 기본 작업비를 적는 칸이 되살아났다");
 });
 
-test("🔴 기본 작업비의 「정하지 않음(빈 칸)」과 0 은 부품을 지나도 갈린다", () => {
+test("🔴 금액 칸의 「정하지 않음(빈 칸)」과 0 은 부품을 지나도 갈린다", () => {
   assert.match(renderToStaticMarkup(<AmountInput value="" onValueChange={() => {}} />), /value=""/);
   assert.match(renderToStaticMarkup(<AmountInput value="0" onValueChange={() => {}} />), /value="0"/);
 });
