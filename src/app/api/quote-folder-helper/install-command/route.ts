@@ -85,6 +85,6 @@ export async function GET(): Promise<NextResponse> {
   }
 
   // ── 5) 명령 한 줄 — 사람이 복사해 붙여넣는다 ───────────────────────────
-  const command = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root });
+  const command = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt });
   return NextResponse.json({ command }, { status: 200, headers: { "Cache-Control": "no-store" } });
 }

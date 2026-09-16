@@ -64,6 +64,11 @@ import {
 
 /** 도우미 루트를 담는 환경변수 — 사람이 Windows 탐색기에서 보는 공유폴더 루트(UNC). */
 export const QUOTE_FOLDER_HELPER_ROOT_ENV = "QUOTE_ARCHIVE_UNC_ROOT";
+/**
+ * 같은 공유폴더를 가리키는 **다른 주소**(이름 ↔ IP). 없어도 된다.
+ * 도우미가 첫째로 못 열면 이것으로 한 번 더 해 본다 — 이름 풀이가 안 되는 PC 가 있기 때문이다.
+ */
+export const QUOTE_FOLDER_HELPER_ROOT_ALT_ENV = "QUOTE_ARCHIVE_UNC_ROOT_ALT";
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";
 /** 이 값이 "1" 이면 스크립트가 탐색기를 여는 대신 결과를 표준출력에 적고 끝낸다(시험용). */
@@ -148,7 +153,13 @@ export function normalizeQuoteFolderHelperRoot(raw: unknown): string | null {
 export type QuoteFolderHelperRootResolution =
   | { status: "unset" }
   | { status: "invalid" }
-  | { status: "ok"; root: string };
+  | { status: "ok"; root: string; alt?: string };
+
+/**
+ * 도우미를 만드는 함수들이 함께 받는 것. `uncRootAlt` 는 **같은 공유폴더를 가리키는 다른 주소**다
+ * (이름 ↔ IP). 도우미가 첫째로 못 열면 둘째로 한 번 더 해 본다.
+ */
+export type QuoteFolderHelperRootsInput = { uncRoot: string; uncRootAlt?: string };
 
 /**
  * 환경변수 QUOTE_ARCHIVE_UNC_ROOT 를 **부르는 시점에** 읽는다. 값 자체는 로그로 찍지 않는다
@@ -158,7 +169,15 @@ export function resolveQuoteFolderHelperRoot(): QuoteFolderHelperRootResolution 
   const configured = process.env.QUOTE_ARCHIVE_UNC_ROOT;
   if (!configured || configured.trim().length === 0) return { status: "unset" };
   const root = normalizeQuoteFolderHelperRoot(configured);
-  return root === null ? { status: "invalid" } : { status: "ok", root };
+  if (root === null) return { status: "invalid" };
+  // 둘째 루트는 **없어도 되고, 틀리면 없는 셈 친다.** 여기서 invalid 로 끊으면 곁다리 설정
+  // 하나 때문에 [폴더 열기]가 통째로 죽는다 — 첫째가 멀쩡하면 그것으로 연다.
+  const configuredAlt = process.env.QUOTE_ARCHIVE_UNC_ROOT_ALT;
+  const alt =
+    configuredAlt && configuredAlt.trim().length > 0
+      ? (normalizeQuoteFolderHelperRoot(configuredAlt) ?? undefined)
+      : undefined;
+  return alt === undefined ? { status: "ok", root } : { status: "ok", root, alt };
 }
 
 /** PowerShell 작은따옴표 문자열 — 작은따옴표(와 닮은꼴)는 두 번. 루트 검사가 이미 막지만 한 겹 더. */
@@ -177,14 +196,35 @@ function requireRoot(uncRoot: string): string {
 }
 
 /**
+ * 도우미가 **차례로 시도할** 루트들. 첫째는 반드시 있어야 하고, 둘째(`uncRootAlt`)는 없어도 된다.
+ *
+ * 왜 둘인가 — 같은 공유폴더를 가리키는 주소가 PC 마다 다르게 닿는다. 이름(`\\DSS-NAS\…`)은
+ * 이름 풀이가 되는 PC 에서만 열리고, IP(`\\192.168.0.222\…`)는 이름 풀이와 무관하지만 NAS 주소가
+ * 바뀌면 죽는다. 하나만 두면 그 하나가 안 되는 PC 에서는 [폴더 열기]가 통째로 먹통이 된다.
+ *
+ * 🔴 불변식 (a) 는 그대로다 — 루트는 **설치 때 정해지고** 웹 페이지가 바꿀 수 없으며, 열 수 있는
+ *    것은 그 루트들 **아래의 폴더**뿐이다. 담김 검사는 시도하는 루트마다 따로 한다.
+ * 같은 값이 둘 들어오면 하나로 줄인다 — 없는 서버를 두 번 기다리지 않게.
+ */
+function requireRoots(input: QuoteFolderHelperRootsInput): string[] {
+  const roots = [requireRoot(input.uncRoot)];
+  const alt = input.uncRootAlt?.trim();
+  if (alt !== undefined && alt.length > 0) {
+    const normalized = requireRoot(alt);
+    if (normalized.toLowerCase() !== roots[0].toLowerCase()) roots.push(normalized);
+  }
+  return roots;
+}
+
+/**
  * open-dss-folder.ps1 의 본문(줄 끝 CRLF). 할 일과 거절 규칙은 머리말 (a) · (b).
  *
  * 표준출력 형식(DSS_FOLDER_DRY_RUN=1 일 때만): `OPEN <폴더 전체 경로>` · `NOT-FOUND` ·
  * `REJECT <까닭>`. 끝남 코드: 0 열었음 · 2 주소 모양 · 3 경로 규칙 · 루트 밖 · 바로 가기 폴더 ·
  * 4 폴더 없음 · 9 그 밖의 오류.
  */
-export function buildQuoteFolderHelperScript(input: { uncRoot: string }): string {
-  const root = requireRoot(input.uncRoot);
+export function buildQuoteFolderHelperScript(input: QuoteFolderHelperRootsInput): string {
+  const roots = requireRoots(input);
   const script = String.raw`# ============================================================================
 # DSS 견적서 폴더 열기 도우미 (${QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME})
 # ============================================================================
@@ -203,7 +243,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 # 공유폴더 루트 — 설치 때 정해졌습니다. 웹 페이지(주소)는 이 값을 바꿀 수 없습니다.
-$Root = ${powerShellSingleQuoted(root)}
+# 같은 폴더를 가리키는 주소가 여럿이면 차례로 해 보고, 처음으로 실제 있는 것을 엽니다
+# (이름으로 안 닿는 PC 에서는 IP 로, 그 반대도 마찬가지).
+$Roots = @(${roots.map((r) => powerShellSingleQuoted(r)).join(", ")})
 $Prefix = '${QUOTE_FOLDER_LINK_PREFIX}'
 $MaxRelativeLength = ${QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH}
 $MaxEncodedLength = ${QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH}
@@ -274,29 +316,44 @@ try {
   # (d) 상대 경로 규칙.
   if (-not (Test-RelativePath $relative)) { Stop-Helper 'REJECT bad-path' 3 }
 
-  # (e) 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
-  $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
-  $full = [System.IO.Path]::GetFullPath($rootFull + '\' + $relative.Replace('/', '\'))
-  if (-not $full.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
-    Stop-Helper 'REJECT outside-root' 3
+  # (e~f) 루트를 차례로 — 담김 검사는 **루트마다 따로** 하고, 처음으로 실제 있는 폴더를 고른다.
+  #       못 닿는 주소는 Test-Path 가 실패할 뿐이므로 다음 주소로 넘어간다.
+  $target = $null
+  $contained = $false
+  foreach ($candidateRoot in $Roots) {
+    # (e) 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
+    $rootFull = [System.IO.Path]::GetFullPath($candidateRoot).TrimEnd('\')
+    $full = [System.IO.Path]::GetFullPath($rootFull + '\' + $relative.Replace('/', '\'))
+    if (-not $full.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+    $contained = $true
+
+    # (f) 폴더가 아니면(없음 · 파일 · 서버에 못 닿음) 다음 루트로.
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { continue }
+
+    # 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다 — 열지 않는다.
+    # 다음 루트로 넘기지 않는다: 같은 폴더를 다른 주소로 열어도 같은 바로 가기다.
+    $current = $rootFull
+    foreach ($segment in $relative.Split([char]'/')) {
+      $current = $current + '\' + $segment
+      $attributes = [System.IO.File]::GetAttributes($current)
+      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.'
+        Stop-Helper 'REJECT reparse-point' 3
+      }
+    }
+
+    $target = $full
+    break
   }
 
-  # (f) 폴더가 아니면(없음 · 파일) 안내 창만 띄우고 끝.
-  if (-not (Test-Path -LiteralPath $full -PathType Container)) {
+  # 어느 루트 아래에도 들지 않는 경로 — 규칙 위반이다(없는 폴더와 구별한다).
+  if (-not $contained) { Stop-Helper 'REJECT outside-root' 3 }
+
+  if ($null -eq $target) {
     Show-Message ('폴더를 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 견적서 폴더가 옮겨졌는지 확인해 주세요.')
     Stop-Helper 'NOT-FOUND' 4
   }
-
-  # 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다 — 열지 않는다.
-  $current = $rootFull
-  foreach ($segment in $relative.Split([char]'/')) {
-    $current = $current + '\' + $segment
-    $attributes = [System.IO.File]::GetAttributes($current)
-    if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-      Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.'
-      Stop-Helper 'REJECT reparse-point' 3
-    }
-  }
+  $full = $target
 
   if ($DryRun) { Stop-Helper ('OPEN ' + $full) 0 }
 
@@ -318,7 +375,7 @@ try {
 }
 
 /** 설치 파일이 PC 에 쓰는 바이트 그대로 — UTF-8 BOM + 본문(머리말 「스크립트 파일은 UTF-8 BOM 으로」). */
-export function quoteFolderHelperScriptBytes(input: { uncRoot: string }): Uint8Array {
+export function quoteFolderHelperScriptBytes(input: QuoteFolderHelperRootsInput): Uint8Array {
   const body = Buffer.from(buildQuoteFolderHelperScript(input), "utf8");
   return new Uint8Array(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), body]));
 }
@@ -373,7 +430,7 @@ export function quoteFolderHelperInstallCommand(): string {
  * 설치가 PC 로 옮기는 것 셋 — 도우미 스크립트 · 설치 완료 문구 · 실패 문구.
  * 🔴 설치 파일(base64 덩어리)과 붙여넣는 설치 명령(base64 문자열)이 **이 한 벌**을 함께 쓴다.
  */
-function quoteFolderHelperPayloads(input: { uncRoot: string }): ReadonlyArray<{ name: string; bytes: Uint8Array }> {
+function quoteFolderHelperPayloads(input: QuoteFolderHelperRootsInput): ReadonlyArray<{ name: string; bytes: Uint8Array }> {
   return [
     { name: "HELPER", bytes: quoteFolderHelperScriptBytes(input) },
     { name: "DONE", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE, "utf8")) },
@@ -393,7 +450,7 @@ function payloadBlock(name: string, bytes: Uint8Array): string[] {
  * 설치 파일(install-dss-folder-helper.cmd)의 본문 — ASCII 만, 줄 끝 CRLF. 루트(UNC)는 base64 로
  * 싼 스크립트 안에만 있다. **요청마다 만든다**(루트가 저장소 · 빌드 결과에 남지 않게).
  */
-export function buildQuoteFolderHelperInstaller(input: { uncRoot: string }): string {
+export function buildQuoteFolderHelperInstaller(input: QuoteFolderHelperRootsInput): string {
   const lines = [
     "@echo off",
     "rem ==========================================================================",
@@ -459,7 +516,7 @@ export function buildQuoteFolderHelperInstaller(input: { uncRoot: string }): str
  * 이름 · 인자 · 반환값이 파일 읽개와 같아서 그 뒤 설치 문장들이 그대로 돈다. base64 에는
  * 따옴표 · `$` 가 없으므로 작은따옴표 문자열에 그대로 담긴다.
  */
-export function quoteFolderHelperInlinePayloadReaderPs(input: { uncRoot: string }): string {
+export function quoteFolderHelperInlinePayloadReaderPs(input: QuoteFolderHelperRootsInput): string {
   const cases = quoteFolderHelperPayloads(input)
     .map(({ name, bytes }) => `'${name}' { '${Buffer.from(bytes).toString("base64")}' }`)
     .join(" ");
@@ -497,7 +554,7 @@ export function quoteFolderHelperInteractiveStatements(
  * PowerShell 창에 붙여넣는 설치 명령 한 줄 — 설치 파일과 **같은 절차 · 같은 payload**.
  * 요청마다 만든다(루트가 저장소 · 이미지에 남지 않게).
  */
-export function buildQuoteFolderHelperInlineInstallCommand(input: { uncRoot: string }): string {
+export function buildQuoteFolderHelperInlineInstallCommand(input: QuoteFolderHelperRootsInput): string {
   const reader = quoteFolderHelperInlinePayloadReaderPs(input);
   return quoteFolderHelperInteractiveStatements(INSTALL_STATEMENTS, reader).join("; ");
 }

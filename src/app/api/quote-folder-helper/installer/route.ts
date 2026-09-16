@@ -82,7 +82,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   // ── 5) 설치 파일 — ASCII 본문, 첨부로 ──────────────────────────────────
-  const body = new TextEncoder().encode(buildQuoteFolderHelperInstaller({ uncRoot: helperRoot.root }));
+  const body = new TextEncoder().encode(buildQuoteFolderHelperInstaller({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt }));
   return new NextResponse(body, {
     status: 200,
     headers: {

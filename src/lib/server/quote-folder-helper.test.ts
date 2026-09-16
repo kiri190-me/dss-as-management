@@ -194,7 +194,7 @@ describe("도우미 스크립트 본문", () => {
   const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC });
 
   test("루트가 작은따옴표 문자열로 박히고, 주소 규칙의 값이 서버와 같다", () => {
-    assert.ok(script.includes(`$Root = '${FAKE_UNC}'\r\n`));
+    assert.ok(script.includes(`$Roots = @('${FAKE_UNC}')\r\n`));
     assert.ok(script.includes(`$Prefix = '${QUOTE_FOLDER_LINK_PREFIX}'\r\n`));
     assert.ok(script.includes(`$MaxRelativeLength = ${QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH}\r\n`));
     assert.ok(script.includes(`$MaxEncodedLength = ${QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH}\r\n`));
@@ -423,6 +423,111 @@ describe("🔴 도우미 스크립트 — DSS_FOLDER_DRY_RUN=1 로 실제로 돌
   });
 });
 
+// ── 루트 둘 ────────────────────────────────────────────────────────────────
+
+/**
+ * ============================================================================
+ * 🔴 같은 폴더를 가리키는 주소가 둘일 때 — 차례로 해 보고 처음으로 있는 것을 연다
+ * ============================================================================
+ * 사내 PC 마다 이름(`\\DSS-NAS\…`)이 풀리기도 하고 안 되기도 한다. 하나만 두면 그 하나가
+ * 안 닿는 PC 에서는 [폴더 열기]가 통째로 먹통이 된다. 그래서 둘을 심고 차례로 해 본다.
+ *
+ * 여기서 지키는 것은 **불변식 (a) 가 루트마다 그대로 산다**는 것이다 — 루트가 둘이 되었다고
+ * 루트 밖이 열려서는 안 된다. 닿지 않는 주소는 「없는 폴더」와 같게 다뤄 다음 주소로 넘어간다.
+ * ============================================================================
+ */
+describe("🔴 루트 둘 — 차례로 해 보고 처음으로 있는 것을 연다", { skip: WINDOWS_ONLY, concurrency: 2 }, () => {
+  // 앞 블록의 YEAR · QUOTE 는 그 블록 안에만 있다 — 여기서 따로 둔다.
+  const YEAR = "21. 2026 내자견적서";
+  const QUOTE = "DSS 2026-089 (주)한국 & 제어 100%";
+  let parent = "";
+  let real = "";
+  let second = "";
+  let missing = "";
+
+  before(async () => {
+    parent = await mkdtemp(path.join(os.tmpdir(), "dss-folder-helper-roots-"));
+    real = path.join(parent, "진짜 루트");
+    second = path.join(parent, "둘째 루트");
+    // 닿지 않는 주소를 흉내 낸다 — 없는 UNC 서버는 시험 기계에서 오래 기다리므로 없는 폴더로 둔다.
+    missing = path.join(parent, "없는 루트");
+    await mkdir(path.join(real, YEAR, QUOTE), { recursive: true });
+    await mkdir(path.join(second, YEAR, QUOTE), { recursive: true });
+  });
+
+  after(async () => {
+    if (parent) await rm(parent, { recursive: true, force: true });
+  });
+
+  /** 주어진 루트들로 도우미를 심고 한 번 돌린다. */
+  async function runWithRoots(
+    roots: { uncRoot: string; uncRootAlt?: string },
+    relativePath: string
+  ): Promise<RunResult> {
+    const scriptPath = path.join(parent, `open-${Math.random().toString(36).slice(2)}.ps1`);
+    await writeFile(scriptPath, quoteFolderHelperScriptBytes(roots));
+    return runPowerShell(
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, linkOf(relativePath)],
+      { env: { DSS_FOLDER_DRY_RUN: "1" } }
+    );
+  }
+
+  test("첫째가 없으면 둘째로 연다 — 하나가 안 닿아도 열린다", async () => {
+    const result = await runWithRoots({ uncRoot: missing, uncRootAlt: real }, `${YEAR}/${QUOTE}`);
+    assert.equal(result.stdout.trim(), `OPEN ${path.join(real, YEAR, QUOTE)}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  test("첫째가 있으면 첫째로 연다 — 둘째는 보지 않는다", async () => {
+    const result = await runWithRoots({ uncRoot: real, uncRootAlt: second }, `${YEAR}/${QUOTE}`);
+    assert.equal(result.stdout.trim(), `OPEN ${path.join(real, YEAR, QUOTE)}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  test("둘 다 없으면 NOT-FOUND — 지어내지 않는다", async () => {
+    const result = await runWithRoots({ uncRoot: missing, uncRootAlt: path.join(parent, "이것도 없다") }, YEAR);
+    assert.equal(result.stdout.trim(), "NOT-FOUND");
+    assert.equal(result.code, 4);
+  });
+
+  test("🔴 루트가 둘이어도 루트 밖은 열리지 않는다", async () => {
+    // 규칙을 거치지 않고 싼 주소 — 다른 사이트가 만든 주소 흉내다. 둘째 루트가 실제로
+    // 있으므로, 담김 검사가 루트마다 살아 있지 않으면 여기서 열려 버린다.
+    const scriptPath = path.join(parent, "open-escape.ps1");
+    await writeFile(scriptPath, quoteFolderHelperScriptBytes({ uncRoot: missing, uncRootAlt: real }));
+    for (const escape of ["../진짜 루트", "..", `${YEAR}/../../진짜 루트`]) {
+      const result = await runPowerShell(
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, rawLink(escape)],
+        { env: { DSS_FOLDER_DRY_RUN: "1" } }
+      );
+      assert.equal(result.stdout.includes("OPEN"), false, escape);
+      assert.equal(result.code, 3, escape);
+    }
+  });
+
+  test("둘째를 주지 않으면 하나만 심는다", () => {
+    const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC });
+    assert.ok(script.includes(`$Roots = @('${FAKE_UNC}')\r\n`));
+  });
+
+  test("같은 값을 둘 주면 하나로 줄인다 — 없는 서버를 두 번 기다리지 않게", () => {
+    const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC, uncRootAlt: FAKE_UNC.toLowerCase() });
+    assert.ok(script.includes(`$Roots = @('${FAKE_UNC}')\r\n`));
+  });
+
+  test("둘을 주면 적은 차례 그대로 심는다", () => {
+    const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC, uncRootAlt: "\\\\10.0.0.9\\archive" });
+    assert.ok(script.includes(`$Roots = @('${FAKE_UNC}', '\\\\10.0.0.9\\archive')\r\n`));
+  });
+
+  test("둘째가 규칙 밖이면 만들지 않는다 — 오류에 값이 실리지 않는다", () => {
+    assert.throws(
+      () => buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC, uncRootAlt: "\\\\TESTNAS\\it's" }),
+      (error: unknown) => error instanceof QuoteFolderHelperRootError && !String(error).includes("it's")
+    );
+  });
+});
+
 // ── 설치 파일 ──────────────────────────────────────────────────────────────
 
 /** 설치 파일에서 이름 붙은 payload 덩어리를 TypeScript 로 푼다. */
@@ -459,7 +564,7 @@ describe("설치 파일 본문", () => {
     assert.equal(installer.includes("TESTNAS"), false);
     const helper = payloadOf(installer, "HELPER");
     assert.deepEqual(new Uint8Array(helper), quoteFolderHelperScriptBytes({ uncRoot: FAKE_UNC }));
-    assert.ok(helper.toString("utf8").includes(`$Root = '${FAKE_UNC}'`));
+    assert.ok(helper.toString("utf8").includes(`$Roots = @('${FAKE_UNC}')`));
     assert.equal(payloadOf(installer, "DONE").toString("utf8"), QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE);
     assert.equal(payloadOf(installer, "FAILED").toString("utf8"), QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE);
   });
@@ -467,7 +572,7 @@ describe("설치 파일 본문", () => {
   test("요청마다 만든다 — 루트가 다르면 본문이 다르다", () => {
     const other = buildQuoteFolderHelperInstaller({ uncRoot: "\\\\TESTNAS2\\archive" });
     assert.notEqual(other, installer);
-    assert.ok(payloadOf(other, "HELPER").toString("utf8").includes("$Root = '\\\\TESTNAS2\\archive'"));
+    assert.ok(payloadOf(other, "HELPER").toString("utf8").includes("$Roots = @('\\\\TESTNAS2\\archive')"));
   });
 
   test("🔴 cmd 줄 — 지연 확장을 끄고, 자기 경로는 환경변수로, PowerShell 은 전체 경로로 한 번", () => {
@@ -730,10 +835,10 @@ describe("파일 없이 도는 설치 명령 본문", () => {
 
   test("🔴 루트(UNC)는 base64 안에만 있다 — 명령의 날 글자에는 없다 · 요청마다 만든다", () => {
     assert.equal(command.includes("TESTNAS"), false);
-    assert.ok(inlinePayloadOf(command, "HELPER").toString("utf8").includes(`$Root = '${FAKE_UNC}'`));
+    assert.ok(inlinePayloadOf(command, "HELPER").toString("utf8").includes(`$Roots = @('${FAKE_UNC}')`));
     const other = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: "\\\\TESTNAS2\\archive" });
     assert.notEqual(other, command);
-    assert.ok(inlinePayloadOf(other, "HELPER").toString("utf8").includes("$Root = '\\\\TESTNAS2\\archive'"));
+    assert.ok(inlinePayloadOf(other, "HELPER").toString("utf8").includes("$Roots = @('\\\\TESTNAS2\\archive')"));
   });
 
   test("틀린 루트로는 명령을 만들지 않는다 — 오류에 값이 실리지 않는다", () => {

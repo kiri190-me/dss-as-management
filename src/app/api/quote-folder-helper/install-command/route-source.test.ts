@@ -58,7 +58,7 @@ describe("도우미 설치 명령 통로 — 소스로 지킨다", () => {
       "resolveQuoteFolderHelperRoot()",
       'helperRoot.status === "unset"',
       'helperRoot.status === "invalid"',
-      "buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root })",
+      "buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt })",
     ];
     let previous = -1;
     for (const mark of marks) {
