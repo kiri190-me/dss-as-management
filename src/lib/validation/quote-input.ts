@@ -97,9 +97,39 @@ export type QuoteItemInput = {
 export const QUOTE_KINDS = ["DOMESTIC", "OVERHAUL"] as const;
 export type QuoteKind = (typeof QUOTE_KINDS)[number];
 
-export const quoteKindLabels: Record<QuoteKind, string> = {
+/**
+ * ============================================================================
+ * 🔴 DB 에 들어 있을 수 있는 종류 — 위 QUOTE_KINDS 와 **일부러 다르다**
+ * ============================================================================
+ * 2026-09-16 에 스키마의 quote_kind 에 `CABLE` 이 생겼다(0101). 그런데 케이블
+ * 견적서를 **만들고 고치는 화면 · 양식 · 검증은 아직 없다.** 그래서 이름을 둘로
+ * 갈라 둔다:
+ *
+ *   QUOTE_KINDS        앱이 **다루는** 종류. 사람이 고르는 자리(새 견적서 대화상자 ·
+ *                      수정 화면)와 검증(isQuoteKind)이 이것만 받는다.
+ *                      **여기에 CABLE 을 더하는 것이 케이블 견적서를 여는 일**이고,
+ *                      그것은 화면 · 라벨 · 양식 고르기가 함께 오는 뒤 조각의 몫이다.
+ *   STORED_QUOTE_KINDS DB 가 **내줄 수 있는** 종류 전부. 읽어서 있는 그대로 보여
+ *                      주기만 하는 자리(목록의 종류 딱지)가 이것을 쓴다.
+ *
+ * 하나로 합치면 둘 중 하나가 거짓말이 된다 — 좁히면 목록이 DB 에 있는 값을 못
+ * 받고(그래서 셋째 값을 둘 중 하나로 접게 된다), 넓히면 지금 못 만드는 견적서를
+ * 만들 수 있게 된다.
+ * ============================================================================
+ */
+export const STORED_QUOTE_KINDS = ["DOMESTIC", "OVERHAUL", "CABLE"] as const;
+export type StoredQuoteKind = (typeof STORED_QUOTE_KINDS)[number];
+
+/**
+ * 종류마다의 이름표. **DB 에 있을 수 있는 값을 전부 덮는다**(Record<StoredQuoteKind>) —
+ * 목록이 읽어 온 값을 그대로 그리기 때문이다. 케이블 견적서를 아직 만들 수는 없지만,
+ * 이름이 없으면 그 줄을 「종류를 알 수 없음」으로 그리거나 둘 중 하나로 접어야 한다.
+ * 이름표가 있다고 만들 수 있게 되는 것은 아니다 — 고르는 자리는 위 QUOTE_KINDS 를 돈다.
+ */
+export const quoteKindLabels: Record<StoredQuoteKind, string> = {
   DOMESTIC: "내자 견적서",
   OVERHAUL: "OH 견적서",
+  CABLE: "케이블 견적서",
 };
 
 export function isQuoteKind(value: unknown): value is QuoteKind {

@@ -73,25 +73,38 @@ import { users } from "./users";
  *
  * ── PII ─────────────────────────────────────────────────────────────────
  * 연락처 컬럼은 없다. subject · fault_description_text · validity · delivery ·
- * payment 는 사람이 자유롭게 적는 값이라 고객사 사정이 섞일 수 있다 — 로그나
- * 오류 보고로 그대로 내보내지 않는다.
+ * payment · remarks 는 사람이 자유롭게 적는 값이라 고객사 사정이 섞일 수 있다 —
+ * 로그나 오류 보고로 그대로 내보내지 않는다.
  *
  * **은행계좌는 이 표에 없다.** 양식(D18)에 이미 적혀 있고, 계좌번호를 코드에도
  * DB 에도 두지 않기 위해서다(quote-template.ts 의 같은 항목).
  * ============================================================================
  */
 /**
- * 견적서 종류. **두 양식이 실제로 다르다**(memory: 견적서.xlsx 의 내자견적서 /
- * 견적서 OH.xlsx 의 OH견적서). OH 는 발행번호에 `-1`, 품명에 ` + OH` 가 붙고,
- * 작업비에 240만이 더해지고, `2) OH 부품 비용` 그룹이 생기고, 공급가를 만원
- * 단위로 내린다.
+ * 견적서 종류. **양식이 종류마다 실제로 다르다**(memory: 견적서.xlsx 의
+ * 내자견적서 / 견적서 OH.xlsx 의 OH견적서 / 케이블 견적서.xlsx). OH 는 발행번호에
+ * `-1`, 품명에 ` + OH` 가 붙고, 작업비에 240만이 더해지고, `2) OH 부품 비용`
+ * 그룹이 생기고, 공급가를 만원 단위로 내린다.
  *
  * ── 🔴 O/H 대상 판정과 이 칸은 별개다 ──────────────────────────────────
  * O/H 대상품이어도 **일반 견적서와 OH 견적서를 모두 발행한다**(사용자 확인).
  * domain/overhaul.ts 의 판정은 화면에 알려 주기만 하고, 어느 종류로 낼지는
  * 사람이 이 칸으로 정한다. 판정으로 이 값을 자동으로 정하면 안 된다.
+ *
+ * ── 🔴 CABLE 은 수리품에 딸린 장이 아니다 (2026-09-16 사용자 요구) ───────
+ * 앞의 둘은 **수리 건 한 대를 두고 얼마를 부를까**를 적는 장이라, 형식 · L/N ·
+ * S/N · 신고증상을 그 건에서 불러와 채운다. 케이블 견적서에는 그 장비가 없다 —
+ * 케이블 몇 종을 파는 장이고, 고칠 물건이 애초에 없다. 담을 자리는 이미 있었다
+ * (이 파일 머리말의 '수리 건 연결은 비어 있어도 된다' — repair_case_id 는 NULL 을
+ * 허용한다). 이 값이 하는 일은 **그 장을 어느 양식으로 찍을지**를 정하는 것이다.
+ *
+ * 품목 표의 모양도 다르다. 내자 · OH 의 부품 칸은 품명 · 수량 · 단가 셋인데,
+ * 케이블 쪽은 **규격**이 한 칸 더 있고(quote_items.part_spec_text) 품목 사이에
+ * **설명만 있는 줄**이 낀다(quote_items.kind). 머리말에는 이 두 양식에 없는
+ * **특이사항**이 있다(quotes.remarks). 양식에 작업비 구역이 없어 합계가
+ * 품목 줄의 합뿐인 것도 다른데, 그 계산을 어떻게 맞출지는 뒤따르는 조각의 몫이다.
  */
-export const quoteKindEnum = pgEnum("quote_kind", ["DOMESTIC", "OVERHAUL"]);
+export const quoteKindEnum = pgEnum("quote_kind", ["DOMESTIC", "OVERHAUL", "CABLE"]);
 
 export const quotes = pgTable(
   "quotes",
@@ -104,7 +117,7 @@ export const quotes = pgTable(
      * 중복만 아래 부분 unique 인덱스로 막는다.
      */
     quoteNumber: text("quote_number").notNull(),
-    /** 내자(DOMESTIC) 인가 오버홀(OVERHAUL) 인가. 위 quoteKindEnum 주석 참조. */
+    /** 내자(DOMESTIC) · 오버홀(OVERHAUL) · 케이블(CABLE) 중 무엇인가. 위 quoteKindEnum 주석 참조. */
     kind: quoteKindEnum("kind").notNull().default("DOMESTIC"),
     /** 발행일자 → 양식 D10. 여기에 적힌 날짜가 그대로 문서에 찍힌다. */
     quoteDate: date("quote_date").notNull(),
@@ -149,6 +162,23 @@ export const quotes = pgTable(
     validity: text("validity"),
     delivery: text("delivery"),
     payment: text("payment"),
+
+    /**
+     * 특이사항 → 케이블 견적서 양식 10번(2026-09-16 사용자 요구). 그 장에만
+     * 해당하는 조건을 사람이 적는 자리이고, **여러 줄이 들어갈 수 있다** — 글자
+     * 칸 하나로 담고 줄바꿈은 글자 그대로 둔다(줄마다 행을 만들면 순서를 지키는
+     * 일과 빈 줄을 지우지 않는 일이 따라붙는데, 여기서 얻을 것이 없다).
+     *
+     * **비어 있는 것이 기본이다.** 바로 위 validity · delivery · payment 와 같은
+     * 모양으로 둔 이유도 같다 — NULL 이면 그 칸이 비어 나간다. 내자 · OH 양식에는
+     * 이 항목 자체가 없으므로 그 두 종류에서는 언제나 NULL 이다.
+     *
+     * 🔴 그렇다고 종류로 막지는 않았다. manual_supply_amount 는 엑셀 전용 장에만
+     * 있게 막았는데(아래 quotes_manual_supply_amount_excel_only), 그건 **금액이 두
+     * 벌이 되어 어느 쪽이 맞는지 답할 수 없게 되기** 때문이다. 이 칸은 금액이
+     * 아니라 글이고, 쓰지 않는 양식에서는 그냥 나가지 않을 뿐이라 같은 위험이 없다.
+     */
+    remarks: text("remarks"),
 
     /** 작업비(조사·수리·개조·통전·출하검사) 단가 → H33. 수량은 양식이 1 로 고정한다. */
     workCost: numeric("work_cost", { precision: 15, scale: 2 }).notNull().default("0"),
@@ -321,7 +351,10 @@ export const quotes = pgTable(
  * ============================================================================
  * 견적서에 딸린 부품 줄
  * ============================================================================
- * 양식의 `1) 부품 비용` 칸(D27~D31 · G · H)으로 나가는 줄들이다.
+ * 양식의 `1) 부품 비용` 칸(D27~D31 · G · H)으로 나가는 줄들이다. 케이블
+ * 견적서(quote_kind 의 CABLE)에서는 이 줄들이 **품목 표 전체**가 된다 — 그 양식에는
+ * 작업비 구역이 없고, 칸도 하나 더 많으며(규격), 금액 없는 설명 줄이 낀다.
+ * 아래 part_spec_text · kind 참조.
  *
  * ── 다섯 줄 제한은 여기에 없다 ──────────────────────────────────────────
  * 양식의 부품 칸은 27~58행이 아니라 **27~31행 다섯 줄 고정**이고, 인쇄영역이
@@ -343,6 +376,31 @@ export const quotes = pgTable(
  * 때는 행이 실제로 지워지지 않으므로 CASCADE 는 돌지 않는다.
  * ============================================================================
  */
+/**
+ * 품목 줄인가, 설명만 있는 줄인가 (2026-09-16 케이블 견적서).
+ *
+ * 케이블 견적서의 품목 표에는 **금액이 없는 줄**이 낀다 — 예:
+ * `* 20kW RFG 부속케이블 Parts 3종`. 뒤따르는 품목 몇 줄이 무엇인지 사람에게
+ * 알려 주는 글이고, 수량도 단가도 없으며 **합계에 들어가지 않는다**(사용자 확인:
+ * 「그때그때 적는 것」). 글자는 part_name_text 에 그대로 담는다 — 문서에서 품명
+ * 칸에 찍히는 줄이라 자리가 같고, 칸을 따로 만들면 「어느 칸을 봐야 이 줄의
+ * 글자인가」가 줄 종류마다 갈린다.
+ *
+ * ── 🔴 왜 CHECK 를 푸는 대신 줄 종류를 두었나 ──────────────────────────
+ * 설명 줄을 담으려면 quantity · unit_price 가 비어 있을 수 있어야 한다. 그렇다고
+ * `CHECK (quantity > 0)` 을 **그냥 느슨하게 풀면 안 된다** — 푸는 순간 수량 0짜리
+ * 품목 줄이 들어올 길이 함께 열리고, 그런 줄은 견적서에 0원으로 박히는데 합계는
+ * 멀쩡하니 아무도 알아채지 못한다. schema/repair-labor.ts 의 power_test_tasks 가
+ * repair_task_catalog 에 섞이지 않은 것이 같은 함정 때문이었다(그 머리말의
+ * '왜 repair_task_catalog 에 섞지 않는가' ①).
+ *
+ * 그래서 규칙을 푸는 대신 **줄 종류에 걸리도록 좁혔다.** 아래 CHECK 넷이 양쪽을
+ * 다 막는다 — 품목 줄은 수량 · 단가가 반드시 있고 수량은 0보다 커야 하며
+ * (quote_items_item_line_amounts_required · quote_items_quantity_positive),
+ * 품목 줄이 아니면 둘 다 NULL 이어야 한다(quote_items_amounts_item_line_only).
+ */
+export const quoteItemKindEnum = pgEnum("quote_item_kind", ["ITEM", "NOTE"]);
+
 export const quoteItems = pgTable(
   "quote_items",
   {
@@ -352,6 +410,18 @@ export const quoteItems = pgTable(
       .references(() => quotes.id, { onDelete: "cascade" }),
     /** 사람이 폼에 늘어놓은 차례. 저장할 때 1부터 다시 매긴다. */
     lineNo: integer("line_no").notNull(),
+    /**
+     * 품목 줄(ITEM)인가 설명 줄(NOTE)인가. 위 quoteItemKindEnum 주석 참조.
+     *
+     * 🔴 **여기서는 기본값을 둔다** — power_test_tasks.scope 가 기본값을 달았다가
+     * 곧바로 뗀 것과 반대다(0100). 그쪽에서 기본값이 위험했던 것은 갈래를 적지
+     * 않은 줄이 **조용히** 한쪽 목록에 끼기 때문이었다. 여기서는 조용할 수가
+     * 없다: 종류를 적지 않은 줄은 ITEM 이 되고, ITEM 은 수량 · 단가가 반드시
+     * 있어야 하므로(아래 quote_items_item_line_amounts_required) 설명 줄이 잘못
+     * 끼면 지나가는 대신 **거절된다.** 덕분에 이 칸을 아직 모르는 저장 경로
+     * (mutations/quotes.ts)가 그대로 품목 줄을 넣는다.
+     */
+    kind: quoteItemKindEnum("kind").notNull().default("ITEM"),
     /**
      * 재고에서 고른 부품. **NULL 이 정상이다** — 재고에 없는 품목이나 외주
      * 가공비를 부품 줄로 적을 수 있고, 인수번호로 불러온 '사용한 부품'은
@@ -365,8 +435,22 @@ export const quoteItems = pgTable(
      * 실제로 D27~D31 에 찍혀 나가는 글자. part_id 가 있어도 이 칸을 쓴다 —
      * 부품 마스터의 품명이 나중에 바뀌어도 이미 보낸 견적서는 그대로여야 한다
      * (부모 표의 '스냅샷이다'와 같은 이유).
+     *
+     * 설명 줄(kind = NOTE)의 글자도 이 칸에 담는다 — 그쪽도 문서에서 품명 칸에
+     * 찍히는 줄이다(위 quoteItemKindEnum 주석).
      */
     partNameText: text("part_name_text").notNull(),
+    /**
+     * 규격 → 케이블 견적서 양식의 셋째 칸(2026-09-16). 이름은 부품 마스터의
+     * 같은 자리를 따랐다(inventory.ts 의 parts.part_spec, 「품명2」).
+     *
+     * **NULL 이 정상이다.** 이 칸이 생기기 전의 줄에는 규격이 없고, 케이블
+     * 견적서에서도 양식 예시의 `-` 처럼 비는 줄이 있다. 내자 · OH 양식에는 규격
+     * 칸 자체가 없으므로 그 두 종류에서는 대체로 NULL 이다.
+     *
+     * part_id 가 있어도 이 칸을 쓰는 까닭은 바로 위 part_name_text 와 같다.
+     */
+    partSpecText: text("part_spec_text"),
     /**
      * 이 줄이 `2) OH 부품 비용` 칸에 들어가는가.
      *
@@ -378,8 +462,14 @@ export const quoteItems = pgTable(
      * 내자 견적서에는 이 그룹이 없으므로 그쪽에서는 언제나 false 다.
      */
     isOverhaulPart: boolean("is_overhaul_part").notNull().default(false),
-    quantity: integer("quantity").notNull(),
-    unitPrice: numeric("unit_price", { precision: 15, scale: 2 }).notNull(),
+    /**
+     * 🔴 **nullable 인 것은 설명 줄 하나 때문이다.** 품목 줄에서는 여전히 반드시
+     * 있고, 수량은 여전히 0보다 커야 한다 — 아래 CHECK 셋이 그대로 지킨다. 이
+     * 칸의 타입만 보고 「수량 없는 품목 줄이 있을 수 있다」고 읽으면 안 된다.
+     * 왜 CHECK 를 풀지 않고 좁혔는지는 위 quoteItemKindEnum 주석에 있다.
+     */
+    quantity: integer("quantity"),
+    unitPrice: numeric("unit_price", { precision: 15, scale: 2 }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -388,9 +478,42 @@ export const quoteItems = pgTable(
     uniqueIndex("quote_items_quote_id_line_no_unique").on(table.quoteId, table.lineNo),
     index("quote_items_quote_id_idx").on(table.quoteId),
     index("quote_items_part_id_idx").on(table.partId),
-    check("quote_items_quantity_positive", sql`${table.quantity} > 0`),
+    /**
+     * 수량은 0 이하일 수 없다. **NULL 을 비켜 가게 한 것은 설명 줄 하나 때문**이고,
+     * 「수량을 안 적어도 된다」는 뜻이 아니다 — 품목 줄에 수량이 반드시 있어야 하는
+     * 일은 바로 아래 quote_items_item_line_amounts_required 가 맡는다. 둘로 나눈 것은
+     * quotes_manual_supply_amount_excel_only 와 같은 이유다: **제약 이름만으로 무엇이
+     * 틀렸는지** 알게 하려는 것이다.
+     */
+    check("quote_items_quantity_positive", sql`${table.quantity} IS NULL OR ${table.quantity} > 0`),
     // 0원 줄은 허용한다 — 무상 교체 부품을 견적서에 적어 보이는 일이 실제로 있다.
-    check("quote_items_unit_price_not_negative", sql`${table.unitPrice} >= 0`),
+    // NULL 을 비켜 가는 까닭은 바로 위와 같다.
+    check(
+      "quote_items_unit_price_not_negative",
+      sql`${table.unitPrice} IS NULL OR ${table.unitPrice} >= 0`
+    ),
+    /**
+     * 🔴 품목 줄에는 수량 · 단가가 **반드시 있다.** 위 두 CHECK 가 NULL 을 비켜
+     * 가게 된 순간, 이게 없으면 「수량 없는 품목 줄」이 들어온다 — 합계에서 통째로
+     * 빠지거나 0원으로 계산되면서 문서에는 품목으로 찍힌다.
+     */
+    check(
+      "quote_items_item_line_amounts_required",
+      sql`${table.kind} <> 'ITEM' OR (${table.quantity} IS NOT NULL AND ${table.unitPrice} IS NOT NULL)`
+    ),
+    /**
+     * 🔴 그 반대쪽. 품목 줄이 아니면 수량 · 단가가 **없어야 한다** — 설명 줄에
+     * 금액이 남아 있으면 그 줄이 합계에 들어가야 하는지 아닌지를 아무도 답할 수 없다.
+     *
+     * `kind = 'ITEM' OR …` 로 쓴 것은 일부러다. `kind <> 'NOTE' OR …` 로 쓰면 줄
+     * 종류가 하나 더 생기는 날 **그 종류만 아무 규칙에도 걸리지 않는다.** 이렇게
+     * 두면 새 종류는 일단 금액 없는 줄로 막히고, 금액을 주려면 사람이 이 CHECK 를
+     * 보게 된다. 작명도 quotes_manual_supply_amount_excel_only 와 같은 모양이다.
+     */
+    check(
+      "quote_items_amounts_item_line_only",
+      sql`${table.kind} = 'ITEM' OR (${table.quantity} IS NULL AND ${table.unitPrice} IS NULL)`
+    ),
   ]
 );
 

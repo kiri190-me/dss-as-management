@@ -9,6 +9,7 @@ import { db, pgClient } from "../connection";
 import {
   customers,
   products,
+  quoteItems,
   quotes,
   repairCaseIntakeSequences,
   repairCases,
@@ -321,6 +322,49 @@ describe("접수 건의 견적서 ↔ PO/내자 견적서 목록", () => {
     assert.equal(fromTab.itemCount, 2);
     assert.equal(fromTab.intakeNumber, intakeNumber);
     assert.equal(fromTab.repairCaseId, caseId);
+  });
+
+  /**
+   * 🔴 설명 줄은 합계에도 「n품목」에도 들어가지 않는다 (2026-09-16 케이블 견적서).
+   *
+   * 셈법 자체는 domain/quote-list.test.ts 가 못 박는다. 여기서 보는 것은 **DB 에서
+   * 화면까지 오는 길** 셋이다: ① quote_items 가 수량·단가 없는 줄을 실제로 받아
+   * 주는가(0101 의 CHECK 둘), ② 목록 조회가 그 줄을 합계에서 빼는가, ③ 그러면서
+   * **먼저 있던 품목 줄의 금액은 한 푼도 바뀌지 않는가.**
+   *
+   * 설명 줄은 표에 직접 넣는다 — 그것을 만드는 화면 · 검증이 아직 없고, 그 조각이
+   * 오기 전에 이 길이 뚫려 있는지부터 확인해 두는 것이 이 시험의 목적이다.
+   */
+  test("🔴 설명 줄(NOTE)은 합계에도 「n품목」에도 섞이지 않는다", async () => {
+    const created = await create({
+      repairCaseId: caseId,
+      customerId,
+      subject: "설명 줄 섞인 장",
+      workCost: "1200000.00",
+      items: [
+        { partId: null, isOverhaulPart: false, partNameText: "Bias Board ASSY", quantity: 1, unitPrice: "1850000.00" },
+        { partId: null, isOverhaulPart: false, partNameText: "냉각 팬", quantity: 3, unitPrice: "45000.00" },
+      ],
+    });
+
+    const listedBefore = (await listQuotes()).find((row) => row.id === created.id);
+    assert.ok(listedBefore);
+    assert.equal(listedBefore.supplyAmount, 1850000 + 45000 * 3 + 1200000);
+    assert.equal(listedBefore.itemCount, 2);
+
+    await db.insert(quoteItems).values({
+      quoteId: created.id,
+      lineNo: 3,
+      kind: "NOTE",
+      partNameText: "* 20kW RFG 부속케이블 Parts 3종",
+      quantity: null,
+      unitPrice: null,
+    });
+
+    const listedAfter = (await listQuotes()).find((row) => row.id === created.id);
+    assert.ok(listedAfter);
+    assert.equal(listedAfter.supplyAmount, listedBefore.supplyAmount, "설명 줄이 합계를 움직였다");
+    assert.equal(listedAfter.itemCount, 2, "설명 줄이 품목 수에 섞였다");
   });
 
   test("정렬은 PO/내자 목록과 같다 — 발행일자 내림차순", async () => {

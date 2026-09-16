@@ -20,10 +20,20 @@ import {
   quotes,
   repairCases,
 } from "../schema";
-import { buildQuoteSummaryLine, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
+import {
+  buildQuoteSummaryLine,
+  isQuoteAmountItemLine,
+  quoteSupplyAmountOf,
+  type QuoteAmountLine,
+} from "@/lib/domain/quote-list";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
-import type { QuoteKind, QuoteWorkScopeSection } from "@/lib/validation/quote-input";
+import {
+  isQuoteKind,
+  type QuoteKind,
+  type QuoteWorkScopeSection,
+  type StoredQuoteKind,
+} from "@/lib/validation/quote-input";
 
 /**
  * ============================================================================
@@ -48,7 +58,14 @@ import type { QuoteKind, QuoteWorkScopeSection } from "@/lib/validation/quote-in
 
 export type QuoteListItem = {
   id: string;
-  kind: QuoteKind;
+  /**
+   * 🔴 **DB 가 내주는 값을 그대로 받는다**(StoredQuoteKind — QuoteKind 가 아니다).
+   * 목록은 있는 것을 보여 주는 자리라, 앱이 아직 다루지 못하는 종류(CABLE)를
+   * 만나도 **둘 중 하나로 접지 않는다.** 접으면 케이블 견적서가 「내자 견적서」라는
+   * 딱지를 달고 목록에 앉는다. 두 이름을 왜 갈랐는지는 validation/quote-input.ts 의
+   * STORED_QUOTE_KINDS 머리말에 있다.
+   */
+  kind: StoredQuoteKind;
   /** 수정 폼이 저장할 때 되돌려 보낼 값. 목록에 그리지는 않는다. */
   version: number;
   quoteNumber: string;
@@ -197,7 +214,9 @@ async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
         items,
         workCost: row.workCost,
       }),
-      itemCount: items.length,
+      // 화면이 「n품목」으로 그리는 값이라 **품목 줄만 센다** — 설명 줄은 품목이
+      // 아니다. 합계와 같은 잣대를 쓴다(domain/quote-list.ts 의 isQuoteAmountItemLine).
+      itemCount: items.filter(isQuoteAmountItemLine).length,
     };
   });
 }
@@ -288,11 +307,17 @@ export async function listDeletedQuotes(): Promise<DeletedQuoteRow[]> {
   }));
 }
 
-type QuoteItemAmount = { quantity: number; unitPrice: string };
-
-/** 여러 장의 부품 줄을 **질의 한 번으로** 걷어 와 장마다 묶는다. 위 '목록' 주석 참조. */
-async function loadItemsByQuoteId(quoteIds: string[]): Promise<Map<string, QuoteItemAmount[]>> {
-  const grouped = new Map<string, QuoteItemAmount[]>();
+/**
+ * 여러 장의 부품 줄을 **질의 한 번으로** 걷어 와 장마다 묶는다. 위 '목록' 주석 참조.
+ *
+ * 🔴 **`kind` 를 함께 싣는다**(2026-09-16). 설명 줄은 합계에 들어가지 않는데,
+ * 그 판단을 여기서 하지 않는 것은 **품목 줄이 무엇인가를 한 곳에서만 정하기**
+ * 위해서다(domain/quote-list.ts 의 isQuoteAmountItemLine). 여기서 미리 걸러 버리면
+ * 같은 규칙이 두 벌이 되고, 한쪽만 고쳐지는 날 목록의 금액과 줄 수가 서로 다른
+ * 기준을 말하게 된다.
+ */
+async function loadItemsByQuoteId(quoteIds: string[]): Promise<Map<string, QuoteAmountLine[]>> {
+  const grouped = new Map<string, QuoteAmountLine[]>();
   // inArray 에 빈 배열을 넘기면 뜻 없는 SQL 이 만들어진다. 읽을 장이 없으면
   // 질의 자체를 하지 않는 것이 맞다.
   if (quoteIds.length === 0) return grouped;
@@ -300,6 +325,7 @@ async function loadItemsByQuoteId(quoteIds: string[]): Promise<Map<string, Quote
   const rows = await db
     .select({
       quoteId: quoteItems.quoteId,
+      kind: quoteItems.kind,
       quantity: quoteItems.quantity,
       unitPrice: quoteItems.unitPrice,
     })
@@ -309,7 +335,11 @@ async function loadItemsByQuoteId(quoteIds: string[]): Promise<Map<string, Quote
 
   for (const row of rows) {
     const bucket = grouped.get(row.quoteId);
-    const item: QuoteItemAmount = { quantity: row.quantity, unitPrice: row.unitPrice };
+    const item: QuoteAmountLine = {
+      kind: row.kind,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+    };
     if (bucket) bucket.push(item);
     else grouped.set(row.quoteId, [item]);
   }
@@ -330,6 +360,12 @@ export type QuoteEditData = {
   id: string;
   version: number;
   quoteNumber: string;
+  /**
+   * 🔴 **앱이 다루는 종류만 온다**(QuoteKind — 목록의 StoredQuoteKind 와 다르다).
+   * 이 자료는 수정 화면 · 미리보기 · xlsx 생성기가 받는데, 그들이 아직 케이블
+   * 견적서를 그릴 줄 모른다. 그래서 그런 장은 **아예 오지 않는다** — 아래
+   * getQuoteForEdit 의 관문이 null 로 답한다.
+   */
   kind: QuoteKind;
   quoteDate: string;
   repairCaseId: string | null;
@@ -403,6 +439,16 @@ export type QuoteEditData = {
    * 없었다. 화면은 그때 양식의 기본 목록으로 채워 준다.
    */
   workScopeLines: { section: QuoteWorkScopeSection; text: string }[];
+  /**
+   * 🔴 **품목 줄만 온다**(2026-09-16). 설명 줄(quote_items.kind = 'NOTE')은 케이블
+   * 견적서의 것이고, 이 자료를 받는 세 곳(수정 화면 · 미리보기 · xlsx 생성기)이
+   * 아직 그 줄을 그릴 줄 모른다. 그래서 수량 · 단가도 **여기서는 비지 않는다** —
+   * DB 칸이 nullable 이 된 것(0101)은 설명 줄 하나 때문이고, 품목 줄에는 언제나
+   * 있다(CHECK quote_items_item_line_amounts_required).
+   *
+   * 위 kind 관문이 케이블 견적서를 막고 있어 **지금 걸러지는 줄은 없다.** 케이블
+   * 화면 조각이 저 셋을 함께 고치면서 이 타입을 설명 줄까지 담게 넓히면 된다.
+   */
   items: {
     partId: string | null;
     partNameText: string;
@@ -456,17 +502,46 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
 
   if (!row) return null;
 
-  const items = await db
+  /**
+   * 🔴 **아직 다루지 못하는 종류는 열지 않는다**(2026-09-16).
+   *
+   * DB 의 quote_kind 에는 이제 CABLE 이 있지만(0101), 이 자료를 받는 수정 화면 ·
+   * 미리보기 · xlsx 생성기는 케이블 견적서를 그릴 줄 모른다. 그렇다고 그 값을
+   * 내자나 OH 로 접으면 **다른 종류의 양식으로 문서가 나간다** — 그 편이 못 여는
+   * 것보다 나쁘다. 그래서 목록(있는 그대로 보여 준다)과 달리 여기서는 **없는 장으로
+   * 답한다.**
+   *
+   * 판정을 isQuoteKind 에 맡긴 것은 일부러다 — 「앱이 다루는 종류」 목록이 한
+   * 곳(QUOTE_KINDS)뿐이라, 뒤 조각이 거기에 CABLE 을 더하는 순간 이 관문도 함께
+   * 열린다. 지금은 케이블 견적서를 만들 길 자체가 없어 실제로 걸리는 장이 없다.
+   */
+  if (!isQuoteKind(row.kind)) return null;
+  const kind = row.kind;
+
+  const itemRows = await db
     .select({
       partId: quoteItems.partId,
       partNameText: quoteItems.partNameText,
       isOverhaulPart: quoteItems.isOverhaulPart,
+      kind: quoteItems.kind,
       quantity: quoteItems.quantity,
       unitPrice: quoteItems.unitPrice,
     })
     .from(quoteItems)
     .where(eq(quoteItems.quoteId, id))
     .orderBy(asc(quoteItems.lineNo));
+
+  /**
+   * 🔴 **품목 줄만 내보낸다** — 아래 QuoteEditData.items 의 그 항목 참조. 바로 위
+   * 관문이 케이블 견적서를 막고 있어 걸러지는 줄이 실제로는 없다.
+   */
+  const items = itemRows.filter(isQuoteAmountItemLine).map((item) => ({
+    partId: item.partId,
+    partNameText: item.partNameText,
+    isOverhaulPart: item.isOverhaulPart,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+  }));
 
   // 고른 수리 작업. **그때 값의 사본**이라 카탈로그를 조인하지 않는다 —
   // 조인하면 단가가 오른 뒤 옛 견적서의 근거가 소리 없이 바뀐다.
@@ -488,7 +563,9 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     .where(eq(quoteWorkScopeLines.quoteId, id))
     .orderBy(asc(quoteWorkScopeLines.section), asc(quoteWorkScopeLines.lineNo));
 
-  return { ...row, items, repairTasks, workScopeLines };
+  // kind 를 따로 싣는 것은 위 관문이 좁혀 둔 값을 쓰기 위해서다 — `...row` 는
+  // DB 가 내주는 넓은 값(CABLE 포함)을 그대로 펴 놓는다.
+  return { ...row, kind, items, repairTasks, workScopeLines };
 }
 
 export type QuoteIntakeLookup = {

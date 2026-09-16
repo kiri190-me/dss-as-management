@@ -56,18 +56,76 @@ export function buildQuoteSummaryLine(parts: QuoteSummaryParts): string {
 }
 
 /**
+ * ============================================================================
+ * 합계가 읽는 한 줄 — **품목 줄만 금액을 낸다** (2026-09-16 케이블 견적서)
+ * ============================================================================
+ * quote_items 한 줄의 종류다(schema/quotes.ts 의 quoteItemKindEnum). 케이블
+ * 견적서의 품목 표에는 금액이 없는 **설명 줄**이 낀다 — 예: `* 20kW RFG
+ * 부속케이블 Parts 3종`. 뒤따르는 품목 몇 줄이 무엇인지 알려 주는 글이고,
+ * 수량도 단가도 없으며 **합계에 들어가지 않는다.**
+ * ============================================================================
+ */
+export const QUOTE_ITEM_KINDS = ["ITEM", "NOTE"] as const;
+export type QuoteItemKind = (typeof QUOTE_ITEM_KINDS)[number];
+
+/**
+ * 합계가 받는 한 줄.
+ *
+ * ── 수량 · 단가가 비어 있을 수 있다 ─────────────────────────────────────
+ * 설명 줄 때문이다(0101). DB 는 「품목 줄 ⇒ 수량·단가가 반드시 있다 / 그 밖의 줄
+ * ⇒ 둘 다 NULL」을 CHECK 둘로 보증한다(quote_items_item_line_amounts_required ·
+ * quote_items_amounts_item_line_only). **그 보증이 아래 isQuoteAmountItemLine 의
+ * 전제**다.
+ *
+ * ── 🔴 종류를 적지 않은 줄은 품목 줄이다 ────────────────────────────────
+ * `kind` 가 없을 수 있는 것은 아직 설명 줄을 만들 줄 모르는 자리가 있어서다 —
+ * 수정 화면의 합계 미리보기와 미리보기 화면이 **입력 중인 값**으로 이 셈을
+ * 부르는데, 그 줄들은 전부 품목 줄이다. DB 칸의 `DEFAULT 'ITEM'` 과 같은 규칙이고,
+ * 같은 이유로 안전하다: 없으면 합계에 들어가므로 **금액이 조용히 빠지는 일은
+ * 생기지 않는다.**
+ */
+export type QuoteAmountLine = {
+  kind?: QuoteItemKind;
+  quantity: number | null;
+  unitPrice: string | null;
+};
+
+/**
+ * 이 줄이 합계에 들어가는가 — **품목 줄만 들어간다.**
+ *
+ * 🔴 **`=== "ITEM"` 으로 쓴 것은 일부러다.** `!== "NOTE"` 로 쓰면 줄 종류가 하나 더
+ * 생기는 날 그 종류가 **조용히 합계에 섞인다.** 0101 의 CHECK 도 같은 방향으로 썼다
+ * (`kind = 'ITEM' OR 금액이 없다`) — 새 종류는 일단 합계 밖에 서고, 넣으려면 사람이
+ * 이 자리를 보게 된다.
+ *
+ * 🔴 뒤의 두 조건(NULL 아님)은 **거르는 조건이 아니라 타입을 좁히는 손잡이**다. 품목
+ * 줄의 수량·단가는 위 CHECK 가 이미 보증하므로 여기서 실제로 걸러지는 줄은 없다.
+ * 이렇게 두는 것은 `quantity ?? 0` 으로 접지 않기 위해서다 — 접으면 설명 줄이
+ * 「0원짜리 품목 줄」로 합계에 들어간 것과 구별되지 않고, 종류가 늘어나는 날 그
+ * 구별이 없다는 사실조차 드러나지 않는다.
+ */
+export function isQuoteAmountItemLine<T extends QuoteAmountLine>(
+  line: T
+): line is T & { quantity: number; unitPrice: string } {
+  return (line.kind ?? "ITEM") === "ITEM" && line.quantity !== null && line.unitPrice !== null;
+}
+
+/**
  * 견적서 한 장의 합계(공급가). 부가세는 여기서 셈하지 않는다 — 세율은 시점에
  * 따라 달라지는 값이고, 실제 문서에서는 양식의 `=I55*0.1` 이 계산한다.
+ *
+ * **품목 줄만 더한다**(위 isQuoteAmountItemLine). 설명 줄은 0 을 보태는 것이 아니라
+ * 셈에 아예 들어오지 않는다 — 둘은 값이 같아 보여도 뜻이 다르고, 그 차이가
+ * 드러나야 나중에 줄 종류가 늘어날 때 이 자리를 보게 된다.
  *
  * 금액은 DB 에서 **문자열로 온다**(numeric 을 Drizzle 이 그렇게 읽는다). 숫자로
  * 바꾸는 자리를 여기 하나로 모아 두면, 화면마다 제각기 parseFloat 하다가 한
  * 군데만 NaN 을 그리는 일이 없다.
  */
-export function sumQuoteSupplyAmount(
-  items: readonly { quantity: number; unitPrice: string }[],
-  workCost: string
-): number {
-  const itemsTotal = items.reduce((sum, item) => sum + item.quantity * toAmount(item.unitPrice), 0);
+export function sumQuoteSupplyAmount(items: readonly QuoteAmountLine[], workCost: string): number {
+  const itemsTotal = items
+    .filter(isQuoteAmountItemLine)
+    .reduce((sum, item) => sum + item.quantity * toAmount(item.unitPrice), 0);
   return itemsTotal + toAmount(workCost);
 }
 
@@ -96,12 +154,15 @@ export function sumQuoteSupplyAmount(
  *
  * 엑셀 전용 장의 품목 · 작업비는 **보지 않는다.** 검증이 엑셀 전용 장의 줄을 비워 두게
  * 막지만(작업비 칸은 막지 않는다), 남아 있더라도 이 장의 금액은 사람이 적은 공급가액이다.
+ *
+ * 일반 견적서의 셈은 sumQuoteSupplyAmount 에 그대로 맡긴다 — **설명 줄을 빼는 일도
+ * 거기 한 곳에서 일어난다.**
  * ============================================================================
  */
 export function quoteSupplyAmountOf(quote: {
   isExcelOnly: boolean;
   manualSupplyAmount: string | null;
-  items: readonly { quantity: number; unitPrice: string }[];
+  items: readonly QuoteAmountLine[];
   workCost: string;
 }): number | null {
   if (quote.isExcelOnly) {

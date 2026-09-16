@@ -166,8 +166,13 @@ async function readPurgeFacts(
   tx: Tx,
   quote: { id: string; workCost: string; isExcelOnly: boolean; manualSupplyAmount: string | null }
 ) {
+  // kind 를 함께 읽는다 — 설명 줄은 합계에 들어가지 않는다(2026-09-16, domain/quote-list.ts).
   const items = await tx
-    .select({ quantity: quoteItems.quantity, unitPrice: quoteItems.unitPrice })
+    .select({
+      kind: quoteItems.kind,
+      quantity: quoteItems.quantity,
+      unitPrice: quoteItems.unitPrice,
+    })
     .from(quoteItems)
     .where(eq(quoteItems.quoteId, quote.id));
   const [scopeLines] = await tx

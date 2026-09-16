@@ -13,7 +13,11 @@ import {
   repairCases,
   users,
 } from "../schema";
-import { formatQuoteSupplyAmount, quoteSupplyAmountOf } from "@/lib/domain/quote-list";
+import {
+  formatQuoteSupplyAmount,
+  quoteSupplyAmountOf,
+  type QuoteAmountLine,
+} from "@/lib/domain/quote-list";
 import {
   resolveDomesticOrderCustomerRowColor,
   resolveDomesticOrderDeliveredDate,
@@ -572,16 +576,19 @@ async function loadQuoteAmounts(quoteIds: string[]): Promise<Map<string, string>
     .where(and(inArray(quotes.id, quoteIds), eq(quotes.isDeleted, false)));
   if (quoteRows.length === 0) return amounts;
 
+  // kind 를 함께 싣는다 — 설명 줄은 합계에 들어가지 않는다(2026-09-16).
+  // 거르는 일은 domain/quote-list.ts 한 곳에서 한다(그 파일의 isQuoteAmountItemLine).
   const itemRows = await db
     .select({
       quoteId: quoteItems.quoteId,
+      kind: quoteItems.kind,
       quantity: quoteItems.quantity,
       unitPrice: quoteItems.unitPrice,
     })
     .from(quoteItems)
     .where(inArray(quoteItems.quoteId, quoteRows.map((row) => row.id)));
 
-  const itemsByQuoteId = new Map<string, { quantity: number; unitPrice: string }[]>();
+  const itemsByQuoteId = new Map<string, QuoteAmountLine[]>();
   for (const item of itemRows) {
     const bucket = itemsByQuoteId.get(item.quoteId);
     if (bucket) bucket.push(item);
