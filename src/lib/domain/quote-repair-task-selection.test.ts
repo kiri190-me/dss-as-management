@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { sumQuoteLaborCost } from "./quote-labor-cost";
+import { sumQuoteLaborCost, type BaseLaborHours } from "./quote-labor-cost";
 import {
   MAX_REPAIR_TASK_QUANTITY,
   MIN_REPAIR_TASK_QUANTITY,
@@ -26,6 +26,18 @@ import {
  */
 
 const RATE = "100000";
+
+/**
+ * 제너레이터의 작업비 근거 — 조사 21시간 + 통전 14시간 = **기본 350만원**
+ * (2026-09-16 부터 기본 작업비는 세 공수시간의 합이다 — quote-labor-cost.ts).
+ * 서류 공수시간은 아직 정해지지 않았다(NULL).
+ */
+const GENERATOR_LABOR: BaseLaborHours = {
+  hourlyRate: RATE,
+  investigationHours: 21,
+  powerTestHours: 14,
+  documentHours: null,
+};
 
 const CATALOG: RepairTaskCatalogEntry[] = [
   { id: "t-oh", taskName: "OH", hours: 24, isOverhaul: true },
@@ -95,7 +107,7 @@ describe("수량 → 줄 펴기", () => {
 
   test("🔴 펴진 줄을 sumQuoteLaborCost 에 넣으면 수량만큼 더해진다 — OH × 2 = 350만 + 480만", () => {
     const lines = expandRepairTaskLines(CATALOG, q([["t-oh", 2], ["t-fan", 3]]), RATE);
-    const result = sumQuoteLaborCost(lines, "3500000");
+    const result = sumQuoteLaborCost(lines, GENERATOR_LABOR);
     assert.equal(result.tasksTotal, 24 * 100000 * 2 + 2 * 100000 * 3);
     assert.equal(result.tasksTotal, 5400000);
     assert.equal(result.total, 8900000);
@@ -103,7 +115,7 @@ describe("수량 → 줄 펴기", () => {
 
   test("수량이 늘면 통전작업 차감은 그대로다 — 차감은 기본 작업비에서만 나간다", () => {
     const lines = expandRepairTaskLines(CATALOG, q([["t-oh", 2]]), RATE);
-    const result = sumQuoteLaborCost(lines, "3500000", { excluded: true, hours: 14, hourlyRate: RATE });
+    const result = sumQuoteLaborCost(lines, GENERATOR_LABOR, { powerTest: true });
     assert.equal(result.powerTestDeduction, 1400000);
     assert.equal(result.total, 4800000 + 2100000);
   });
@@ -260,8 +272,8 @@ describe("🔴 수량이 모두 1 이면 예전 동작과 한 글자도 같다",
       assert.equal(JSON.stringify(lines), JSON.stringify(legacyLines), "직렬화한 글자까지");
 
       assert.deepEqual(
-        sumQuoteLaborCost(lines, "3500000"),
-        sumQuoteLaborCost(legacyLines, "3500000"),
+        sumQuoteLaborCost(lines, GENERATOR_LABOR),
+        sumQuoteLaborCost(legacyLines, GENERATOR_LABOR),
         "합계"
       );
       assert.deepEqual(

@@ -43,13 +43,31 @@ export type RepairLaborKindRow = {
   equipmentKind: WorkflowKind;
   /** 시간당 작업비(원). numeric 은 Drizzle 이 문자열로 읽는다. */
   hourlyRate: string;
-  /** 기본 작업비(원). **null 이면 정하지 않은 것**이고 합계에 더하지 않는다. */
+  /**
+   * 넘어오기 전의 기본 작업비(원). **null 이면 정하지 않은 것**이다.
+   *
+   * 🔴 **2026-09-16 부터 이 값으로 작업비를 셈하지 않는다** — 기본 작업비는 아래 세
+   * 공수시간의 합 × 시간당 단가다(domain/quote-labor-cost.ts). 그때의 금액을 되짚을
+   * 근거로만 싣는다(schema/repair-labor.ts 의 base_cost 주석).
+   */
   baseCost: string | null;
   /**
+   * 조사작업 공수시간. **null 이면 정하지 않은 것**이다.
+   * 예전에는 칸이 아니라 「기본 작업비 − 통전 몫」이라는 나머지였다 —
+   * schema/repair-labor.ts 의 그 항목.
+   */
+  investigationHours: number | null;
+  /**
    * 통전작업 공수시간. **null 이면 정하지 않은 것**이다(T/C 는 아직 모른다).
-   * 기본 작업비 안에 이미 들어 있는 몫이다 — schema/repair-labor.ts 의 그 항목.
+   * 기본 작업비를 이루는 세 몫 중 하나다 — schema/repair-labor.ts 의 그 항목.
    */
   powerTestHours: number | null;
+  /**
+   * 서류작업 공수시간. **null 이면 정하지 않은 것**이고 `0` 은 「서류작업이 없는
+   * 장비」라는 실제 값이다(셋 중 여기만 0 을 받는다 — schema/repair-labor.ts).
+   * 지금 세 장비 모두 null 이다.
+   */
+  documentHours: number | null;
   tasks: RepairTaskRow[];
   /**
    * 그 장비의 통전 작업 건명 목록. 하나도 없으면 **빈 배열**이다(`null` 이 아니다) —
@@ -83,7 +101,9 @@ export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
         equipmentKind: repairLaborSettings.equipmentKind,
         hourlyRate: repairLaborSettings.hourlyRate,
         baseCost: repairLaborSettings.baseCost,
+        investigationHours: repairLaborSettings.investigationHours,
         powerTestHours: repairLaborSettings.powerTestHours,
+        documentHours: repairLaborSettings.documentHours,
       })
       .from(repairLaborSettings),
     db
@@ -119,9 +139,12 @@ export async function listRepairLabor(): Promise<RepairLaborKindRow[]> {
       // 채워야 한다는 것이 드러나는 편이 낫다. 화면이 그 상태를 알린다.
       hourlyRate: setting?.hourlyRate ?? "0",
       baseCost: setting?.baseCost ?? null,
-      // 설정 줄이 없으면 통전작업 시간도 **정하지 않은 것**이다. 0 으로 두면
-      // "통전작업이 0시간"이라는 실제 값처럼 보인다(baseCost 와 같은 이유).
+      // 설정 줄이 없으면 세 공수시간도 **정하지 않은 것**이다. 0 으로 두면
+      // "그 작업이 0시간"이라는 실제 값처럼 보이고(서류는 실제로 그 값이 있다),
+      // 기본 작업비가 0원으로 셈된다 — 정하지 않은 것은 더하지도 빼지도 않는다.
+      investigationHours: setting?.investigationHours ?? null,
       powerTestHours: setting?.powerTestHours ?? null,
+      documentHours: setting?.documentHours ?? null,
       tasks: tasks
         .filter((task) => task.equipmentKind === kind)
         .map(({ id, taskName, hours, displayOrder, isOverhaul }) => ({

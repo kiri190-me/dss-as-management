@@ -372,6 +372,15 @@ export type QuoteEditData = {
    */
   investigationExcluded: boolean;
   /**
+   * 서류작업을 빼고 청구한 장인가(2026-09-16 — schema/quotes.ts 의 그 항목).
+   *
+   * 🔴 **켜고 끄는 체크 상자는 아직 없다.** 이 조각은 셈법만 갈아 끼웠고, 화면이
+   * 그 결정을 저장하는 것은 뒤따르는 조각이다 — 그래서 지금은 모든 장이 `false` 다.
+   * 그래도 싣는다: 셈법이 서류 몫을 다룰 수 있으려면 저장된 결정이 화면까지
+   * 닿아야 하고, 나중에 켜지는 날 여기를 다시 만들지 않아도 된다.
+   */
+  documentExcluded: boolean;
+  /**
    * 엑셀 전용 견적서인가 · 손으로 적은 공급가액(2026-09-15 Q2 — schema/quotes.ts). 엑셀
    * 전용 장은 품목이 없고, 받기(/api/quotes/{id}/xlsx)가 앱 양식 대신 붙인 엑셀을 내려준다.
    * 옛 견적서는 `false` · `null` 이다.
@@ -436,6 +445,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       powerTestExcluded: quotes.powerTestExcluded,
       laborPowerTestDeduction: quotes.laborPowerTestDeduction,
       investigationExcluded: quotes.investigationExcluded,
+      documentExcluded: quotes.documentExcluded,
       isExcelOnly: quotes.isExcelOnly,
       manualSupplyAmount: quotes.manualSupplyAmount,
     })

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { sumQuoteLaborCost, type PowerTestExclusion, type SelectedRepairTask } from "./quote-labor-cost";
+import { sumQuoteLaborCost, type BaseLaborHours, type SelectedRepairTask } from "./quote-labor-cost";
 // 같은 파일에 둔다: 견적서가 얼마를 청구하는가를 정하는 규칙 둘(작업비 합계 ·
 // 부품 단가 넣기)이라 함께 읽히는 편이 낫고, package.json 의 시험 목록을 건드리지
 // 않아도 이 파일은 이미 등록돼 있다(두 세션이 같은 저장소를 쓰는 동안 그 줄을
@@ -37,8 +37,10 @@ import { fillMatcherQuoteWorkbook, MATCHER_QUOTE_SHEET_NAME } from "@/lib/xlsx/m
  * ============================================================================
  * 작업비 = 기본 작업비 + Σ(공수시간 × 시간당 단가)
  * ============================================================================
- * 실제 값으로 못 박는다 — 제너레이터는 기본 350만원이고 `OH` 가 24시간이므로
- * O/H 한 건만 골랐을 때 **590만원**이 나와야 한다(2026-08-31 사용자 자료).
+ * 기본 작업비는 **(조사h + 통전h + 서류h) × 시간당 단가**다(2026-09-16 사용자
+ * 결정). 실제 값으로 못 박는다 — 제너레이터는 조사 21h + 통전 14h = 350만원이고
+ * `OH` 가 24시간이므로 O/H 한 건만 골랐을 때 **590만원**이 나와야 한다
+ * (2026-08-31 사용자 자료).
  * ============================================================================
  */
 
@@ -46,165 +48,139 @@ function task(patch: Partial<SelectedRepairTask> = {}): SelectedRepairTask {
   return { taskName: "OH", hours: 24, hourlyRate: "100000", ...patch };
 }
 
-test("🔴 실제 값 — 제너레이터에서 OH 하나를 고르면 350만 + 240만 = 590만원", () => {
-  const result = sumQuoteLaborCost([task()], "3500000");
-  assert.equal(result.tasksTotal, 2400000);
-  assert.equal(result.baseCost, 3500000);
-  assert.equal(result.total, 5900000);
-});
-
-test("여러 작업은 각각 공수시간 × 단가로 더해진다", () => {
-  const result = sumQuoteLaborCost(
-    [
-      task({ taskName: "OH", hours: 24 }),
-      task({ taskName: "FAN 교환", hours: 2 }),
-      task({ taskName: "MCU 기판 교환 작업", hours: 12 }),
-    ],
-    "3500000"
-  );
-  assert.equal(result.tasksTotal, 3800000, "(24+2+12)시간 × 10만원");
-  assert.equal(result.total, 7300000);
-});
-
-test("아무것도 안 고르면 기본 작업비만 남는다", () => {
-  const result = sumQuoteLaborCost([], "3500000");
-  assert.equal(result.tasksTotal, 0);
-  assert.equal(result.total, 3500000);
-});
-
-test("🔴 정하지 않은 기본 작업비(null)를 0 으로 접지 않는다 — 접으면 정하지 않은 사실이 사라진다", () => {
-  const result = sumQuoteLaborCost([task({ hours: 8 })], null);
-  assert.equal(result.baseCost, null, "더하지 않았다는 사실이 남아야 화면이 알린다");
-  assert.equal(result.total, 800000);
-});
-
-test("기본 작업비 '0' 은 실제 0원이라 더해지고, 정하지 않은 것과 구별된다", () => {
-  const zero = sumQuoteLaborCost([task({ hours: 8 })], "0");
-  assert.equal(zero.baseCost, 0, "0 은 '더했는데 0원'이다");
-  assert.equal(zero.total, 800000);
-
-  const unset = sumQuoteLaborCost([task({ hours: 8 })], null);
-  assert.equal(unset.baseCost, null, "null 은 '아예 안 더했다'이다");
-});
-
-test("줄마다의 시간당 단가를 그대로 쓴다 — 옛 견적서가 지금 단가로 다시 셈되지 않는다", () => {
-  // 단가가 오르기 전에 저장된 줄과 오른 뒤의 줄이 한 견적서에 섞일 수 있다.
-  const result = sumQuoteLaborCost(
-    [task({ taskName: "옛 줄", hours: 10, hourlyRate: "80000" }), task({ taskName: "새 줄", hours: 10 })],
-    null
-  );
-  assert.equal(result.tasksTotal, 1800000, "80만 + 100만");
-});
-
-test("숫자로 안 읽히는 값은 합계를 NaN 으로 만들지 않고, 무엇이 빠졌는지 알린다", () => {
-  const result = sumQuoteLaborCost(
-    [task({ taskName: "정상", hours: 2 }), task({ taskName: "망가진 단가", hourlyRate: "abc" })],
-    "3500000"
-  );
-  assert.equal(result.tasksTotal, 200000);
-  assert.deepEqual(result.unknown, ["망가진 단가"], "조용히 빼면 사람은 합계가 맞는 줄 안다");
-  assert.equal(Number.isFinite(result.total), true);
-});
-
-test("빈 목록에 기본 작업비도 없으면 0 이다", () => {
-  assert.deepEqual(sumQuoteLaborCost([], null), {
-    total: 0,
-    tasksTotal: 0,
-    baseCost: null,
-    unknown: [],
-  });
-});
-
 /**
- * ============================================================================
- * 통전작업 제외 — 기본 작업비 안에 이미 들어 있는 몫을 뺀다
- * ============================================================================
- * 실제 값으로 못 박는다(2026-09-04 사용자): 제너레이터·매쳐의 기본 작업비
- * 350만원 안에 **통전작업 14시간 = 140만원**이 들어 있다. 통전작업을 하지 않는
- * 견적서는 350만 − 140만 = **210만원**이 되어야 한다.
+ * 🔴 **개발 DB 의 지금 값 그대로**(2026-09-16 이행 직후). 새 셈법이 옛 `base_cost`
+ * 와 같은 금액을 내놓는지는 이 셋으로만 증명된다 — 하나라도 고치면 그 증명이 사라진다.
  *
- * 🔴 이 묶음이 지키는 것은 금액 하나가 아니라 **"못 뺐으면 못 뺐다고 말한다"**
- * 이다. 조용히 0 을 빼면 합계는 350만원인데 사람은 210만원이 나온 줄 안다.
- * ============================================================================
+ * | 장비 | 시간당 단가 | 조사h | 통전h | 서류h | (옛) base_cost |
+ * |---|---|---|---|---|---|
+ * | GENERATOR        | 100000 | 21 | 14   | NULL | 3500000 |
+ * | MATCHER          | 100000 | 21 | 14   | NULL | 3500000 |
+ * | TOTAL_CONTROLLER | 100000 | 22 | NULL | NULL | 2200000 |
  */
-describe("통전작업 제외", () => {
-  /** 제너레이터의 실제 값. 14시간 × 10만원 = 140만원. */
-  const GENERATOR = { excluded: true, hours: 14, hourlyRate: "100000" };
+const GENERATOR: BaseLaborHours = {
+  hourlyRate: "100000",
+  investigationHours: 21,
+  powerTestHours: 14,
+  documentHours: null,
+};
+const MATCHER: BaseLaborHours = {
+  hourlyRate: "100000",
+  investigationHours: 21,
+  powerTestHours: 14,
+  documentHours: null,
+};
+const TOTAL_CONTROLLER: BaseLaborHours = {
+  hourlyRate: "100000",
+  investigationHours: 22,
+  powerTestHours: null,
+  documentHours: null,
+};
 
-  test("🔴 실제 값 — 제너레이터에서 통전작업을 빼면 350만 − 140만 = 210만원", () => {
-    const result = sumQuoteLaborCost([], "3500000", GENERATOR);
-    assert.equal(result.powerTestDeduction, 1400000);
-    assert.equal(result.powerTestNotice, null, "그대로 뺐으면 할 말이 없다");
-    assert.equal(result.total, 2100000);
-    assert.equal(result.baseCost, 3500000, "기본 작업비는 그때 값 그대로 남는다");
+/** 셋 다 정하지 않은 장비 — 기본 작업비가 `null` 이다. */
+const NOTHING_SET: BaseLaborHours = {
+  hourlyRate: "100000",
+  investigationHours: null,
+  powerTestHours: null,
+  documentHours: null,
+};
+
+describe("🔴 기본 작업비 = 세 공수시간의 합 × 시간당 단가", () => {
+  test("🔴 실제 값 — 개발 DB 의 공수시간으로 셈한 기본 작업비가 옛 base_cost 그대로다", () => {
+    // 이 셋이 어긋나면 새 구조로 갈아 끼우면서 **청구 금액이 바뀐 것**이다.
+    assert.equal(sumQuoteLaborCost([], GENERATOR).baseCost, 3500000, "제너레이터 (21+14)×10만");
+    assert.equal(sumQuoteLaborCost([], MATCHER).baseCost, 3500000, "매쳐 (21+14)×10만");
+    assert.equal(sumQuoteLaborCost([], TOTAL_CONTROLLER).baseCost, 2200000, "T/C 22×10만");
   });
 
-  test("고른 작업은 차감에 걸리지 않는다 — 뺀 몫은 기본 작업비에서만 나간다", () => {
-    const result = sumQuoteLaborCost([task()], "3500000", GENERATOR);
-    assert.equal(result.tasksTotal, 2400000, "OH 24시간은 그대로 청구한다");
-    assert.equal(result.total, 4500000, "(350만 − 140만) + 240만");
+  test("🔴 정하지 않은 몫(null)은 합계에 들어가지 않는다 — 0 으로 접지 않는다", () => {
+    // T/C 는 통전·서류가 NULL 이다. 0 으로 접어도 금액은 같지만, 접는 순간 「정하지
+    // 않았다」와 「0시간이다」가 한 값이 되어 화면이 그 둘을 가를 수 없다.
+    assert.equal(sumQuoteLaborCost([], { ...GENERATOR, powerTestHours: null }).baseCost, 2100000, "조사 21h 만");
+    assert.equal(sumQuoteLaborCost([], { ...GENERATOR, investigationHours: null }).baseCost, 1400000, "통전 14h 만");
   });
 
-  test("🔴 T/C — 통전 공수시간을 정하지 않았으면 빼지 않고, 왜 못 뺐는지 말한다", () => {
-    // 조용히 0 을 빼면 합계는 220만원 그대로인데 사람은 뺀 줄 안다.
-    const result = sumQuoteLaborCost([], "2200000", {
-      excluded: true,
-      hours: null,
-      hourlyRate: "100000",
-    });
-    assert.equal(result.powerTestDeduction, null, "0 을 빼지 않는다");
-    assert.equal(result.powerTestNotice, "NO_POWER_TEST_HOURS");
-    assert.equal(result.total, 2200000, "합계는 뺀 적 없는 값 그대로다");
+  test("🔴 셋 다 정하지 않았으면 기본 작업비는 null 이다 — 0 이 아니다", () => {
+    const result = sumQuoteLaborCost([task({ hours: 8 })], NOTHING_SET);
+    assert.equal(result.baseCost, null, "더하지 않았다는 사실이 남아야 화면이 알린다");
+    assert.equal(result.total, 800000);
   });
 
-  test("기본 작업비를 정하지 않았으면 뺄 바탕이 없다 — 지금 동작 그대로 둔다", () => {
-    const result = sumQuoteLaborCost([task({ hours: 8 })], null, GENERATOR);
+  test("장비 종류를 아직 안 골랐으면(null) 기본 작업비도 없다", () => {
+    const result = sumQuoteLaborCost([task({ hours: 8 })], null);
     assert.equal(result.baseCost, null);
-    assert.equal(result.powerTestDeduction, null);
-    assert.equal(result.powerTestNotice, "NO_BASE_COST");
-    assert.equal(result.total, 800000, "고른 작업의 합만 남는다");
+    assert.equal(result.total, 800000);
   });
 
-  test("🔴 뺄 금액이 기본 작업비보다 크면 0 에서 멈춘다 — 음수 청구는 없다", () => {
-    const result = sumQuoteLaborCost([], "1000000", {
-      excluded: true,
-      hours: 14,
-      hourlyRate: "100000",
-    });
-    assert.equal(result.powerTestDeduction, 1000000, "실제로 뺀 금액은 기본 작업비까지다");
-    assert.equal(result.powerTestNotice, "CLAMPED_TO_ZERO", "멈췄다는 사실을 화면이 알린다");
-    assert.equal(result.total, 0);
-    assert.ok(result.total >= 0, "합계가 음수가 되면 안 된다");
+  test("🔴 서류 0시간은 '정하지 않음'이 아니라 '더했는데 0원'이다", () => {
+    // 🔴 셋 중 서류만 0 을 받는다(schema/repair-labor.ts 의 그 CHECK) — 「서류작업이
+    // 없는 장비」는 사람이 확인해서 내린 답이고, 그 답이 있으면 기본 작업비는 null 이
+    // 아니다.
+    const zero = sumQuoteLaborCost([], { ...NOTHING_SET, documentHours: 0 });
+    assert.equal(zero.baseCost, 0, "0 은 '더했는데 0원'이다");
+    assert.equal(sumQuoteLaborCost([], NOTHING_SET).baseCost, null, "null 은 '아예 안 더했다'이다");
   });
 
-  test("시간당 작업비를 숫자로 읽을 수 없으면 빼지 않고 알린다", () => {
+  test("시간당 단가를 숫자로 읽을 수 없으면 어느 몫도 셀 수 없다 — 기본 작업비가 null", () => {
     for (const hourlyRate of ["abc", ""]) {
-      const result = sumQuoteLaborCost([], "3500000", { excluded: true, hours: 14, hourlyRate });
-      assert.equal(result.powerTestDeduction, null, `"${hourlyRate}" 로 0 을 뺐다`);
-      assert.equal(result.powerTestNotice, "UNKNOWN_HOURLY_RATE");
-      assert.equal(result.total, 3500000);
+      const result = sumQuoteLaborCost([task({ hours: 8 })], { ...GENERATOR, hourlyRate });
+      assert.equal(result.baseCost, null, `"${hourlyRate}" 로 기본 작업비를 셈했다`);
+      assert.equal(result.total, 800000);
     }
   });
+});
 
-  test("체크를 켜지 않으면 통전 시간이 있어도 빼지 않는다 — 사람의 결정이다", () => {
-    const result = sumQuoteLaborCost([], "3500000", { ...GENERATOR, excluded: false });
-    assert.equal(result.total, 3500000);
-    assert.equal(result.powerTestDeduction, undefined, "부탁하지 않았으니 키도 없다");
+describe("고른 작업 — 기본 작업비에 더한다", () => {
+  test("🔴 실제 값 — 제너레이터에서 OH 하나를 고르면 350만 + 240만 = 590만원", () => {
+    const result = sumQuoteLaborCost([task()], GENERATOR);
+    assert.equal(result.tasksTotal, 2400000);
+    assert.equal(result.baseCost, 3500000);
+    assert.equal(result.total, 5900000);
   });
 
-  test("🔴 옛 견적서 — 차감을 주지 않으면 결과 객체가 통째로 예전 그대로다", () => {
-    // power_test_excluded 는 옛 행에서 전부 false 다. 그 장을 다시 열어도
-    // 화면이 셈하는 값이 한 글자도 달라지지 않아야 한다.
-    assert.deepEqual(sumQuoteLaborCost([task()], "3500000"), {
-      total: 5900000,
-      tasksTotal: 2400000,
-      baseCost: 3500000,
-      unknown: [],
-    });
-    assert.deepEqual(sumQuoteLaborCost([task()], "3500000", { ...GENERATOR, excluded: false }), {
-      total: 5900000,
-      tasksTotal: 2400000,
-      baseCost: 3500000,
+  test("여러 작업은 각각 공수시간 × 단가로 더해진다", () => {
+    const result = sumQuoteLaborCost(
+      [
+        task({ taskName: "OH", hours: 24 }),
+        task({ taskName: "FAN 교환", hours: 2 }),
+        task({ taskName: "MCU 기판 교환 작업", hours: 12 }),
+      ],
+      GENERATOR
+    );
+    assert.equal(result.tasksTotal, 3800000, "(24+2+12)시간 × 10만원");
+    assert.equal(result.total, 7300000);
+  });
+
+  test("아무것도 안 고르면 기본 작업비만 남는다", () => {
+    const result = sumQuoteLaborCost([], GENERATOR);
+    assert.equal(result.tasksTotal, 0);
+    assert.equal(result.total, 3500000);
+  });
+
+  test("줄마다의 시간당 단가를 그대로 쓴다 — 옛 견적서가 지금 단가로 다시 셈되지 않는다", () => {
+    // 단가가 오르기 전에 저장된 줄과 오른 뒤의 줄이 한 견적서에 섞일 수 있다.
+    const result = sumQuoteLaborCost(
+      [task({ taskName: "옛 줄", hours: 10, hourlyRate: "80000" }), task({ taskName: "새 줄", hours: 10 })],
+      null
+    );
+    assert.equal(result.tasksTotal, 1800000, "80만 + 100만");
+  });
+
+  test("숫자로 안 읽히는 값은 합계를 NaN 으로 만들지 않고, 무엇이 빠졌는지 알린다", () => {
+    const result = sumQuoteLaborCost(
+      [task({ taskName: "정상", hours: 2 }), task({ taskName: "망가진 단가", hourlyRate: "abc" })],
+      GENERATOR
+    );
+    assert.equal(result.tasksTotal, 200000);
+    assert.deepEqual(result.unknown, ["망가진 단가"], "조용히 빼면 사람은 합계가 맞는 줄 안다");
+    assert.equal(Number.isFinite(result.total), true);
+  });
+
+  test("빈 목록에 기본 작업비도 없으면 0 이다", () => {
+    assert.deepEqual(sumQuoteLaborCost([], null), {
+      total: 0,
+      tasksTotal: 0,
+      baseCost: null,
       unknown: [],
     });
   });
@@ -212,26 +188,25 @@ describe("통전작업 제외", () => {
 
 /**
  * ============================================================================
- * 조사작업 제외 — 기본 작업비 중 조사작업 몫을 뺀다 (2026-09-15 사용자 결정)
+ * 세 가지 제외 — 조사 · 통전 · 서류
  * ============================================================================
- * 기본 작업비 = 조사작업 몫 + 통전작업 몫. 통전 몫은 `통전 공수시간 × 시간당 작업비`
- * 이고 조사 몫은 그 나머지다. 실제 값(350만원 · 통전 14시간 × 10만원 = 140만원)으로:
+ * 각 몫은 **자기 공수시간 × 시간당 단가**이고 서로를 보지 않는다. 실제 값
+ * (제너레이터 조사 21h · 통전 14h · 10만원, 기본 350만원)으로:
  *   · 조사작업 제외만 → 조사 몫 210만원을 뺀다 → 고른 작업 + 140만원
- *   · 통전작업 제외만 → 고른 작업 + 210만원(위 묶음 그대로)
+ *   · 통전작업 제외만 → 통전 몫 140만원을 뺀다 → 고른 작업 + 210만원
  *   · 둘 다          → 두 몫을 다 뺀다 → 고른 작업만
+ *   · 서류작업 제외  → 서류 시간이 NULL 이라 **뺄 금액을 몰라 못 뺀다**
  *
- * 🔴 조사 몫도 **못 빼는 쪽이 기본이다** — 셀 수 없으면 빼지 않고 까닭을 돌려준다.
+ * 🔴 이 묶음이 지키는 것은 금액 하나가 아니라 **"못 뺐으면 못 뺐다고 말한다"** 이다.
+ * 조용히 0 을 빼면 합계는 350만원인데 사람은 210만원이 나온 줄 안다.
  * ============================================================================
  */
-describe("조사작업 제외", () => {
-  /** 제너레이터의 통전작업 — 14시간 × 10만원 = 140만원. 「통전작업 제외」는 꺼져 있다. */
-  const POWER_TEST_KEPT = { excluded: false, hours: 14, hourlyRate: "100000" };
-  /** 같은 통전작업에 「통전작업 제외」를 켠 것. */
-  const POWER_TEST_OFF = { ...POWER_TEST_KEPT, excluded: true };
-  const INVESTIGATION_OFF = { excluded: true };
+describe("세 가지 제외", () => {
+  /** 서류 공수시간까지 정해진 장비 — 셋을 함께 켜는 갈래를 보려면 필요하다. */
+  const ALL_THREE: BaseLaborHours = { ...GENERATOR, documentHours: 5 };
 
   test("🔴 실제 값 — 조사작업 제외만: 350만 − 조사 몫 210만 → 고른 작업 + 140만원", () => {
-    assert.deepEqual(sumQuoteLaborCost([task()], "3500000", POWER_TEST_KEPT, INVESTIGATION_OFF), {
+    assert.deepEqual(sumQuoteLaborCost([task()], GENERATOR, { investigation: true }), {
       total: 3800000,
       tasksTotal: 2400000,
       baseCost: 3500000,
@@ -241,131 +216,186 @@ describe("조사작업 제외", () => {
     });
   });
 
-  test("🔴 실제 값 — 통전작업 제외만: 예전 그대로 고른 작업 + 210만원", () => {
-    const result = sumQuoteLaborCost([task()], "3500000", POWER_TEST_OFF, { excluded: false });
-    assert.equal(result.total, 4500000);
-    assert.equal(result.powerTestDeduction, 1400000);
-    assert.equal(result.powerTestNotice, null);
-    assert.ok(!("investigationDeduction" in result), "조사 제외는 꺼져 있다 — 키도 없다");
-  });
-
-  test("🔴 실제 값 — 둘 다: 두 몫을 모두 빼 고른 작업만 남는다 · 통전 차감은 예전과 똑같이 싣는다", () => {
-    const both = sumQuoteLaborCost([task()], "3500000", POWER_TEST_OFF, INVESTIGATION_OFF);
-    assert.deepEqual(both, {
-      total: 2400000,
+  test("🔴 실제 값 — 통전작업 제외만: 350만 − 통전 몫 140만 → 고른 작업 + 210만원", () => {
+    assert.deepEqual(sumQuoteLaborCost([task()], GENERATOR, { powerTest: true }), {
+      total: 4500000,
       tasksTotal: 2400000,
       baseCost: 3500000,
       unknown: [],
       powerTestDeduction: 1400000,
       powerTestNotice: null,
+    });
+  });
+
+  test("🔴 서류작업 제외만 — 서류 5시간이면 50만원이 빠진다", () => {
+    const result = sumQuoteLaborCost([], ALL_THREE, { document: true });
+    assert.equal(result.baseCost, 4000000, "(21+14+5)×10만");
+    assert.equal(result.documentDeduction, 500000);
+    assert.equal(result.documentNotice, null, "그대로 뺐으면 할 말이 없다");
+    assert.equal(result.total, 3500000);
+  });
+
+  test("🔴 조사 + 통전 — 두 몫을 다 빼면 고른 작업만 남는다", () => {
+    assert.deepEqual(sumQuoteLaborCost([task()], GENERATOR, { investigation: true, powerTest: true }), {
+      total: 2400000,
+      tasksTotal: 2400000,
+      baseCost: 3500000,
+      unknown: [],
       investigationDeduction: 2100000,
       investigationNotice: null,
+      powerTestDeduction: 1400000,
+      powerTestNotice: null,
     });
-    // 통전 차감은 조사 제외 여부와 관계없다 — labor_power_test_deduction 스냅숏의 뜻이 그대로다.
-    const powerOnly = sumQuoteLaborCost([task()], "3500000", POWER_TEST_OFF);
-    assert.equal(both.powerTestDeduction, powerOnly.powerTestDeduction);
-    assert.equal(both.powerTestNotice, powerOnly.powerTestNotice);
   });
 
-  test("두 몫의 합은 기본 작업비다 — 한쪽씩 뺀 금액을 더하면 350만원", () => {
-    const investigationOnly = sumQuoteLaborCost([], "3500000", POWER_TEST_KEPT, INVESTIGATION_OFF);
-    const powerOnly = sumQuoteLaborCost([], "3500000", POWER_TEST_OFF);
-    assert.equal((investigationOnly.investigationDeduction ?? 0) + (powerOnly.powerTestDeduction ?? 0), 3500000);
+  test("🔴 셋 다 — 기본 작업비가 남김없이 빠져 고른 작업만 남는다", () => {
+    const result = sumQuoteLaborCost([task()], ALL_THREE, {
+      investigation: true,
+      powerTest: true,
+      document: true,
+    });
+    assert.equal(result.baseCost, 4000000);
+    assert.equal(result.investigationDeduction, 2100000);
+    assert.equal(result.powerTestDeduction, 1400000);
+    assert.equal(result.documentDeduction, 500000);
+    assert.equal(result.total, 2400000, "고른 작업만");
   });
 
-  test("🔴 둘 다 켜고 작업을 하나도 안 고르면 0원 — 음수가 아니다", () => {
-    const result = sumQuoteLaborCost([], "3500000", POWER_TEST_OFF, INVESTIGATION_OFF);
+  test("🔴 세 몫의 합이 곧 기본 작업비다 — 따로따로 뺀 금액을 더하면 400만원", () => {
+    const one = (exclusions: Parameters<typeof sumQuoteLaborCost>[2]) =>
+      sumQuoteLaborCost([], ALL_THREE, exclusions);
+    const sum =
+      (one({ investigation: true }).investigationDeduction ?? 0) +
+      (one({ powerTest: true }).powerTestDeduction ?? 0) +
+      (one({ document: true }).documentDeduction ?? 0);
+    assert.equal(sum, 4000000);
+  });
+
+  test("고른 작업은 차감에 걸리지 않는다 — 뺀 몫은 기본 작업비에서만 나간다", () => {
+    const result = sumQuoteLaborCost([task()], GENERATOR, { powerTest: true });
+    assert.equal(result.tasksTotal, 2400000, "OH 24시간은 그대로 청구한다");
+    assert.equal(result.total, 4500000, "(350만 − 140만) + 240만");
+  });
+
+  test("🔴 셋 다 켜고 작업을 하나도 안 고르면 0원 — 음수가 아니다", () => {
+    const result = sumQuoteLaborCost([], ALL_THREE, {
+      investigation: true,
+      powerTest: true,
+      document: true,
+    });
     assert.equal(result.total, 0);
   });
 
-  describe("못 빼면 빼지 않고 까닭을 돌려준다", () => {
-    test("🔴 기본 작업비를 정하지 않았다(null) — 뺄 바탕이 없다", () => {
-      const result = sumQuoteLaborCost([task({ hours: 8 })], null, POWER_TEST_KEPT, INVESTIGATION_OFF);
+  test("체크를 켜지 않으면 시간이 있어도 빼지 않는다 — 사람의 결정이다", () => {
+    const result = sumQuoteLaborCost([], GENERATOR, { investigation: false, powerTest: false });
+    assert.equal(result.total, 3500000);
+    assert.equal(result.powerTestDeduction, undefined, "부탁하지 않았으니 키도 없다");
+    assert.equal(result.investigationDeduction, undefined);
+  });
+
+  describe("🔴 못 빼면 빼지 않고 까닭을 돌려준다", () => {
+    test("🔴 서류 — 지금 세 장비 모두 서류 시간이 NULL 이라 이 경로가 실제로 쓰인다", () => {
+      const result = sumQuoteLaborCost([task({ hours: 2 })], GENERATOR, { document: true });
+      assert.equal(result.documentDeduction, null, "0 을 빼지 않는다");
+      assert.equal(result.documentNotice, "NO_HOURS");
+      assert.equal(result.total, 3700000, "합계는 뺀 적 없는 값 그대로다 — 350만 + 20만");
+    });
+
+    test("🔴 통전 — T/C 는 통전 공수시간을 정하지 않았다", () => {
+      // 조용히 0 을 빼면 합계는 220만원 그대로인데 사람은 뺀 줄 안다.
+      const result = sumQuoteLaborCost([], TOTAL_CONTROLLER, { powerTest: true });
+      assert.equal(result.powerTestDeduction, null, "0 을 빼지 않는다");
+      assert.equal(result.powerTestNotice, "NO_HOURS");
+      assert.equal(result.total, 2200000, "합계는 뺀 적 없는 값 그대로다");
+    });
+
+    test("🔴 조사 — 조사 공수시간을 정하지 않은 장비", () => {
+      const result = sumQuoteLaborCost([], { ...GENERATOR, investigationHours: null }, { investigation: true });
+      assert.equal(result.investigationDeduction, null);
+      assert.equal(result.investigationNotice, "NO_HOURS");
+      assert.equal(result.total, 1400000, "통전 몫 140만원은 그대로 남는다");
+    });
+
+    test("🔴 한 갈래를 못 빼도 다른 갈래는 그대로 뺀다 — 서로를 보지 않는다", () => {
+      const result = sumQuoteLaborCost([], GENERATOR, {
+        investigation: true,
+        powerTest: true,
+        document: true,
+      });
+      assert.equal(result.investigationDeduction, 2100000, "조사는 뺐다");
+      assert.equal(result.powerTestDeduction, 1400000, "통전도 뺐다");
+      assert.equal(result.documentDeduction, null, "서류만 못 뺐다");
+      assert.equal(result.documentNotice, "NO_HOURS");
+      assert.equal(result.total, 0);
+    });
+
+    test("🔴 장비 종류를 안 골랐으면(base 가 null) 어느 몫도 셀 수 없다", () => {
+      const result = sumQuoteLaborCost([task({ hours: 8 })], null, {
+        investigation: true,
+        powerTest: true,
+        document: true,
+      });
       assert.equal(result.baseCost, null, "null 을 0 으로 접지 않는다");
-      assert.equal(result.investigationDeduction, null);
-      assert.equal(result.investigationNotice, "NO_BASE_COST");
-      assert.equal(result.total, 800000, "고른 작업의 합만 — 예전 그대로");
+      for (const notice of [result.investigationNotice, result.powerTestNotice, result.documentNotice]) {
+        assert.equal(notice, "NO_HOURS");
+      }
+      assert.equal(result.total, 800000, "고른 작업의 합만");
     });
 
-    test("🔴 통전 공수시간을 정하지 않았다(T/C) — 조사 몫을 셀 수 없고, 기본 작업비를 통째로 빼지도 않는다", () => {
-      const result = sumQuoteLaborCost([], "2200000", { excluded: false, hours: null, hourlyRate: "100000" }, INVESTIGATION_OFF);
-      assert.equal(result.investigationDeduction, null, "0 도, 기본 작업비 전부도 빼지 않는다");
-      assert.equal(result.investigationNotice, "NO_POWER_TEST_HOURS");
-      assert.equal(result.total, 2200000);
-    });
-
-    test("통전 인자를 주지 않았으면 통전 공수시간을 모르는 것과 같다", () => {
-      const result = sumQuoteLaborCost([], "3500000", undefined, INVESTIGATION_OFF);
-      assert.equal(result.investigationDeduction, null);
-      assert.equal(result.investigationNotice, "NO_POWER_TEST_HOURS");
-      assert.equal(result.total, 3500000);
-      assert.ok(!("powerTestDeduction" in result), "통전 차감은 부탁하지 않았다 — 키도 없다");
-    });
-
-    test("시간당 작업비를 숫자로 읽을 수 없다", () => {
+    test("시간당 작업비를 숫자로 읽을 수 없으면 셋 다 못 뺀다", () => {
       for (const hourlyRate of ["abc", ""]) {
-        const result = sumQuoteLaborCost([], "3500000", { excluded: false, hours: 14, hourlyRate }, INVESTIGATION_OFF);
+        const result = sumQuoteLaborCost([], { ...GENERATOR, hourlyRate }, {
+          investigation: true,
+          powerTest: true,
+          document: true,
+        });
         assert.equal(result.investigationDeduction, null, `"${hourlyRate}" 로 조사 몫을 뺐다`);
         assert.equal(result.investigationNotice, "UNKNOWN_HOURLY_RATE");
-        assert.equal(result.total, 3500000);
+        assert.equal(result.powerTestNotice, "UNKNOWN_HOURLY_RATE");
+        // 서류는 시간부터 모른다 — 단가를 보기 전에 답이 난다.
+        assert.equal(result.documentNotice, "NO_HOURS");
+        assert.equal(result.total, 0, "기본 작업비도 셀 수 없으니 더한 것이 없다");
       }
-    });
-
-    test("🔴 통전 몫이 기본 작업비보다 크면 조사 몫은 0 에서 멈춘다 — 음수를 빼지(= 더하지) 않는다", () => {
-      const result = sumQuoteLaborCost([], "1000000", POWER_TEST_KEPT, INVESTIGATION_OFF);
-      assert.equal(result.investigationDeduction, 0);
-      assert.equal(result.investigationNotice, "CLAMPED_TO_ZERO", "멈췄다는 사실을 화면이 알린다");
-      assert.equal(result.total, 1000000, "기본 작업비가 그대로 남는다 — 전부가 통전 몫이다");
-
-      // 기본 작업비 0원도 같다 — 통전 몫(140만원)이 더 크다.
-      const zero = sumQuoteLaborCost([task({ hours: 8 })], "0", POWER_TEST_KEPT, INVESTIGATION_OFF);
-      assert.equal(zero.baseCost, 0);
-      assert.equal(zero.investigationDeduction, 0);
-      assert.equal(zero.investigationNotice, "CLAMPED_TO_ZERO");
-      assert.equal(zero.total, 800000);
-    });
-
-    test("🔴 둘 다 켰는데 통전 몫을 모르면 둘 다 못 빼고 까닭도 둘이다", () => {
-      const result = sumQuoteLaborCost(
-        [task({ hours: 2 })],
-        "2200000",
-        { excluded: true, hours: null, hourlyRate: "100000" },
-        INVESTIGATION_OFF
-      );
-      assert.equal(result.powerTestDeduction, null);
-      assert.equal(result.powerTestNotice, "NO_POWER_TEST_HOURS");
-      assert.equal(result.investigationDeduction, null);
-      assert.equal(result.investigationNotice, "NO_POWER_TEST_HOURS");
-      assert.equal(result.total, 2400000, "220만 + 20만 — 아무것도 빼지 않았다");
-    });
-
-    test("둘 다 켰는데 통전 몫이 기본 작업비보다 크면 — 통전은 기본 작업비까지, 조사는 0, 합계는 고른 작업만", () => {
-      const result = sumQuoteLaborCost([task({ hours: 2 })], "1000000", POWER_TEST_OFF, INVESTIGATION_OFF);
-      assert.equal(result.powerTestDeduction, 1000000);
-      assert.equal(result.powerTestNotice, "CLAMPED_TO_ZERO");
-      assert.equal(result.investigationDeduction, 0);
-      assert.equal(result.investigationNotice, "CLAMPED_TO_ZERO");
-      assert.equal(result.total, 200000);
     });
   });
 
   test("🔴 어떤 값이 와도 합계는 고른 작업의 합 이상, 고른 작업 + 기본 작업비 이하다 — 음수 없음", () => {
     const taskSets: SelectedRepairTask[][] = [[], [task()], [task({ hours: 2 }), task({ taskName: "FAN", hours: 1 })]];
-    for (const base of ["3500000", "1000000", "0", null]) {
-      for (const hours of [14, 40, 0, null]) {
-        for (const hourlyRate of ["100000", "abc"]) {
-          for (const powerOff of [true, false]) {
-            for (const tasks of taskSets) {
-              const result = sumQuoteLaborCost(tasks, base, { excluded: powerOff, hours, hourlyRate }, INVESTIGATION_OFF);
-              const label = `기본 ${base} · 통전 ${hours}시간 · 단가 ${hourlyRate} · 통전 제외 ${powerOff} · 작업 ${tasks.length}줄`;
-              assert.ok(result.total >= result.tasksTotal, label);
-              assert.ok(result.total <= result.tasksTotal + (result.baseCost ?? 0), label);
-              // 켰으니 키가 있다 — 없으면 화면이 까닭을 못 말한다.
-              assert.ok(result.investigationDeduction !== undefined, label);
-              assert.ok(result.investigationDeduction === null || result.investigationDeduction >= 0, label);
-              // 둘 다 켜고 둘 다 뺐으면 기본 작업비는 다 빠진다.
-              if (powerOff && result.powerTestDeduction != null && result.investigationDeduction != null) {
-                assert.equal(result.total, result.tasksTotal, label);
+    const flags = [true, false];
+    for (const investigationHours of [21, 0, null]) {
+      for (const powerTestHours of [14, 0, null]) {
+        for (const documentHours of [5, 0, null]) {
+          for (const hourlyRate of ["100000", "abc"]) {
+            const base: BaseLaborHours = { hourlyRate, investigationHours, powerTestHours, documentHours };
+            for (const investigation of flags) {
+              for (const powerTest of flags) {
+                for (const documentOff of flags) {
+                  for (const tasks of taskSets) {
+                    const result = sumQuoteLaborCost(tasks, base, {
+                      investigation,
+                      powerTest,
+                      document: documentOff,
+                    });
+                    const label = `${JSON.stringify(base)} · 제외 ${investigation}/${powerTest}/${documentOff} · 작업 ${tasks.length}줄`;
+                    assert.ok(result.total >= result.tasksTotal, label);
+                    assert.ok(result.total <= result.tasksTotal + (result.baseCost ?? 0), label);
+                    // 켰으니 키가 있다 — 없으면 화면이 까닭을 못 말한다.
+                    if (investigation) assert.ok(result.investigationDeduction !== undefined, label);
+                    if (powerTest) assert.ok(result.powerTestDeduction !== undefined, label);
+                    if (documentOff) assert.ok(result.documentDeduction !== undefined, label);
+                    // 셋 다 켜고 셋 다 뺐으면 기본 작업비는 남김없이 빠진다.
+                    if (
+                      investigation &&
+                      powerTest &&
+                      documentOff &&
+                      result.investigationDeduction != null &&
+                      result.powerTestDeduction != null &&
+                      result.documentDeduction != null
+                    ) {
+                      assert.equal(result.total, result.tasksTotal, label);
+                    }
+                  }
+                }
               }
             }
           }
@@ -377,63 +407,64 @@ describe("조사작업 제외", () => {
   test("값을 읽지 못한 작업은 여전히 이름으로 알린다", () => {
     const result = sumQuoteLaborCost(
       [task({ taskName: "정상", hours: 2 }), task({ taskName: "망가진 단가", hourlyRate: "abc" })],
-      "3500000",
-      POWER_TEST_KEPT,
-      INVESTIGATION_OFF
+      GENERATOR,
+      { investigation: true }
     );
     assert.equal(result.total, 200000 + 1400000);
     assert.deepEqual(result.unknown, ["망가진 단가"]);
   });
 
-  test("🔴 통전 몫은 한 곳에서만 셈한다 — 조사 몫이 같은 셈을 따로 적지 않는다", () => {
+  test("🔴 세 몫을 셈하는 곳은 한 곳이다 — 갈래마다 같은 셈을 따로 적지 않는다", () => {
     const source = readFileSync(new URL("./quote-labor-cost.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
     const count = (text: string) => source.split(text).length - 1;
-    assert.equal(count("function resolvePowerTestShare("), 1);
-    assert.equal(count("resolvePowerTestShare("), 3, "통전 차감 · 조사 몫 둘이 같은 셈을 불러야 한다");
-    for (const fn of ["function resolvePowerTestDeduction(", "function resolveInvestigationDeduction("]) {
-      const start = source.indexOf(fn);
-      assert.ok(start >= 0, fn);
-      const body = source.slice(start, source.indexOf("\n}\n", start));
-      assert.ok(!body.includes("hourlyRate") && !body.includes(".hours"), `${fn} 가 통전 몫을 따로 셈한다`);
-    }
+    assert.equal(count("function resolveShare("), 1);
+    assert.equal(count("resolveShare("), 4, "정의 하나 + 조사 · 통전 · 서류 셋이 불러야 한다");
   });
 
-  test("🔴 옵션을 주지 않거나 꺼 두면 결과 객체가 통째로 예전 그대로다 — 키도 없다", () => {
-    const cases: [SelectedRepairTask[], string | null, PowerTestExclusion | undefined][] = [
-      [[task()], "3500000", undefined],
-      [[task()], "3500000", POWER_TEST_OFF],
-      [[task()], "3500000", POWER_TEST_KEPT],
-      [[task({ hours: 8 })], null, POWER_TEST_OFF],
-      [[], "1000000", POWER_TEST_OFF],
-      [[], "2200000", { excluded: true, hours: null, hourlyRate: "100000" }],
-    ];
-    for (const [tasks, base, powerTest] of cases) {
-      const before = sumQuoteLaborCost(tasks, base, powerTest);
-      const label = `기본 ${base} · 통전 ${JSON.stringify(powerTest)}`;
-      assert.deepEqual(sumQuoteLaborCost(tasks, base, powerTest, undefined), before, label);
-      const off = sumQuoteLaborCost(tasks, base, powerTest, { excluded: false });
-      assert.deepEqual(off, before, label);
-      assert.ok(!("investigationDeduction" in off), `꺼 두었는데 키가 생겼다 — ${label}`);
-      assert.ok(!("investigationNotice" in off), `꺼 두었는데 키가 생겼다 — ${label}`);
+  test("🔴 조사 몫이 「나머지」이던 시절의 알림 종류는 값으로 남아 있지 않다", () => {
+    // 남겨 두면 다음 사람이 「아직 기본 작업비에서 빼서 셈하는구나」로 읽는다. 왜
+    // 사라졌는지는 머리말의 「사라진 예외들」이 말한다 — 거기 적힌 이름은 따옴표에
+    // 담긴 **값**이 아니라 설명이므로 이 시험에 걸리지 않는다.
+    const source = readFileSync(new URL("./quote-labor-cost.ts", import.meta.url), "utf8");
+    for (const gone of ['"NO_BASE_COST"', '"CLAMPED_TO_ZERO"', '"NO_POWER_TEST_HOURS"', "resolvePowerTestShare"]) {
+      assert.equal(source.split(gone).length - 1, 0, `${gone} 가 아직 남아 있다`);
     }
-    // 위 비교는 둘 다 함께 달라지면 못 잡는다 — 이전 값으로도 못 박는다.
-    assert.deepEqual(sumQuoteLaborCost([task()], "3500000", undefined, { excluded: false }), {
+    assert.ok(source.includes("사라진 예외들"), "왜 사라졌는지를 적어 두지 않았다");
+  });
+
+  test("🔴 제외를 주지 않거나 꺼 두면 결과 객체가 통째로 예전 그대로다 — 키도 없다", () => {
+    const cases: [SelectedRepairTask[], BaseLaborHours | null][] = [
+      [[task()], GENERATOR],
+      [[task()], TOTAL_CONTROLLER],
+      [[task({ hours: 8 })], NOTHING_SET],
+      [[], null],
+    ];
+    for (const [tasks, base] of cases) {
+      const before = sumQuoteLaborCost(tasks, base);
+      const label = `기본 ${JSON.stringify(base)}`;
+      assert.deepEqual(sumQuoteLaborCost(tasks, base, undefined), before, label);
+      const off = sumQuoteLaborCost(tasks, base, { investigation: false, powerTest: false, document: false });
+      assert.deepEqual(off, before, label);
+      for (const key of [
+        "investigationDeduction",
+        "investigationNotice",
+        "powerTestDeduction",
+        "powerTestNotice",
+        "documentDeduction",
+        "documentNotice",
+      ]) {
+        assert.ok(!(key in off), `꺼 두었는데 ${key} 키가 생겼다 — ${label}`);
+      }
+    }
+    // 위 비교는 둘 다 함께 달라지면 못 잡는다 — 값으로도 못 박는다.
+    assert.deepEqual(sumQuoteLaborCost([task()], GENERATOR), {
       total: 5900000,
       tasksTotal: 2400000,
       baseCost: 3500000,
       unknown: [],
     });
-    assert.deepEqual(sumQuoteLaborCost([task()], "3500000", POWER_TEST_OFF, { excluded: false }), {
-      total: 4500000,
-      tasksTotal: 2400000,
-      baseCost: 3500000,
-      unknown: [],
-      powerTestDeduction: 1400000,
-      powerTestNotice: null,
-    });
   });
 });
-
 /**
  * ============================================================================
  * 단가를 화면 칸에 넣기 — "정하지 않음"과 "0"을 가르는 자리

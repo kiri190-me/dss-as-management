@@ -164,15 +164,19 @@ const REPAIR_SCOPE_DROPPED_NOTICE =
   "수리 작업을 하나도 고르지 않아 이 구역은 견적서에 나가지 않습니다. 위 목록에서 작업을 고르면 다시 보입니다.";
 /**
  * 「조사작업 제외」를 켰을 때 「1) 조사작업」 칸 자리의 안내. 🔴 **기본 작업비 중 조사작업
- * 몫(기본 작업비 − 통전작업 몫)이 작업비 계산에서 빠진다**는 것을 함께 말한다(2026-09-15
+ * 몫(조사 공수시간 × 시간당 작업비)이 작업비 계산에서 빠진다**는 것을 함께 말한다(2026-09-15
  * 사용자 결정 — domain/quote-labor-cost.ts). 문서에서 구역만 빠지는 줄 알고 켜면, 계산한
  * 작업비가 그만큼 줄어든 것을 모른 채 적용한다.
+ *
+ * 🔴 2026-09-16 에 셈이 바뀌었다 — 조사 몫은 「기본 작업비 − 통전작업 몫」이라는 **나머지가
+ * 아니라** 제 공수시간으로 정해지는 몫이다. 옛 문구를 남기면 사람이 통전 시간을 고쳤을 때
+ * 조사 몫이 따라 움직이는 줄로 읽는다.
  *
  * 예전에는 되돌리는 체크 상자가 없어 조사 칸을 감추지 않고 칸 안에 「줄을 모두 지워 빠진다」
  * 안내를 두었다. 이제 체크를 풀면 되돌아오므로 통전작업처럼 감춘다.
  */
 const INVESTIGATION_EXCLUDED_NOTICE =
-  "조사작업 제외 — 이 구역은 견적서에 나가지 않고, 기본 작업비 중 조사작업 몫(기본 작업비 − 통전작업 몫)이 빠집니다. 체크를 풀면 적어 둔 줄이 다시 보이고, 줄이 없었으면 양식 기본 목록으로 채워집니다.";
+  "조사작업 제외 — 이 구역은 견적서에 나가지 않고, 기본 작업비 중 조사작업 몫(조사 공수시간 × 시간당 작업비)이 빠집니다. 체크를 풀면 적어 둔 줄이 다시 보이고, 줄이 없었으면 양식 기본 목록으로 채워집니다.";
 /** 감춘 칸마다의 안내. `Record` 라 묶음이 하나 더 생기면 컴파일러가 여기를 짚는다. */
 const SUPPRESSED_SCOPE_NOTICES: Record<QuoteWorkScopeSection, string> = {
   INVESTIGATION: INVESTIGATION_EXCLUDED_NOTICE,
@@ -605,8 +609,8 @@ export default function QuoteEditForm({
   );
   /**
    * 「조사작업 제외」(2026-09-15 사용자 결정). **사람의 결정**이고, 켜면 문서에서
-   * 「① 조사작업」 구역이 머리글까지 빠지고 🔴 **기본 작업비 중 조사작업 몫(기본 작업비 −
-   * 통전작업 몫)이 작업비 계산에서 빠진다**(domain/quote-labor-cost.ts). 작업비 칸은 [계산한
+   * 「① 조사작업」 구역이 머리글까지 빠지고 🔴 **기본 작업비 중 조사작업 몫(조사 공수시간 ×
+   * 시간당 작업비)이 작업비 계산에서 빠진다**(domain/quote-labor-cost.ts). 작업비 칸은 [계산한
    * 작업비 적용]을 누르기 전까지 그대로다.
    *
    * 저장된 견적서는 그때 결정(quotes.investigation_excluded)을 그대로 편다. 조사 칸의 마지막
@@ -619,6 +623,17 @@ export default function QuoteEditForm({
   const [investigationExcluded, setInvestigationExcluded] = useState<boolean>(
     quote?.investigationExcluded ?? false
   );
+  /**
+   * 「서류작업 제외」(2026-09-16). 켜면 기본 작업비 중 서류작업 몫(서류 공수시간 ×
+   * 시간당 작업비)이 빠진다 — 문서에는 서류작업 구역이 없어 **금액만** 빠진다
+   * (사용자 결정 2026-09-16).
+   *
+   * 🔴 **상태가 아니라 저장된 값을 읽기만 한다** — 켜고 끄는 체크 상자는 뒤따르는
+   * 조각이다. 지금은 그 결정을 쓰는 곳이 없어 늘 `false` 이고, 셈법이 서류 몫을
+   * 다룰 수 있게 길만 이어 둔다(domain/quote-labor-cost.ts). 저장에도 싣지 않으므로
+   * 이 장을 저장해도 quotes.document_excluded 는 그대로 남는다.
+   */
+  const documentExcluded = quote?.documentExcluded ?? false;
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
@@ -820,31 +835,38 @@ export default function QuoteEditForm({
   }, [activeLabor, taskQuantities]);
 
   /**
-   * 🔴 **통전 공수시간과 시간당 단가는 이미 화면에 들어와 있다**(activeLabor).
+   * 🔴 **세 공수시간과 시간당 단가는 이미 화면에 들어와 있다**(activeLabor).
    * 새로 불러오지 않는다 — 그때 값을 그대로 셈에 쓰고, 그대로 저장한다.
    *
-   * 장비 종류를 아직 안 골랐으면 차감을 아예 부탁하지 않는다. 그래야 옛
-   * 견적서를 열었을 때와 한 글자도 다르지 않은 값이 나온다
-   * (domain/quote-labor-cost.ts 의 그 항목).
+   * 기본 작업비는 **(조사h + 통전h + 서류h) × 시간당 단가**다(2026-09-16 —
+   * domain/quote-labor-cost.ts). 정하지 않은 몫은 더하지 않는다.
+   *
+   * 장비 종류를 아직 안 골랐으면 차감을 아예 부탁하지 않는다 — 결과에 키조차
+   * 생기지 않는다(그 파일의 그 항목).
    */
   const laborSuggestion = useMemo(
     () =>
       sumQuoteLaborCost(
         selectedTasks,
-        activeLabor?.baseCost ?? null,
         activeLabor
           ? {
-              excluded: powerTestExcluded,
-              hours: activeLabor.powerTestHours,
               hourlyRate: activeLabor.hourlyRate,
+              investigationHours: activeLabor.investigationHours,
+              powerTestHours: activeLabor.powerTestHours,
+              documentHours: activeLabor.documentHours,
             }
-          : undefined,
-        // 「조사작업 제외」 — 켜면 기본 작업비 중 조사 몫(기본 작업비 − 통전 몫)을 뺀다. 통전 몫은
-        // 바로 위 인자의 공수시간 · 단가로 셈한다 — 그래서 위 인자는 「통전작업 제외」가 꺼져
-        // 있어도 값을 넘긴다. 장비 종류를 안 골랐으면 부탁하지 않는다(결과에 키도 생기지 않는다).
-        activeLabor ? { excluded: investigationExcluded } : undefined
+          : null,
+        // 사람이 켠 세 가지 제외. 각 몫은 **제 공수시간 × 단가**이고 서로를 보지 않는다.
+        // 「서류작업 제외」는 아직 켤 방법이 없어 저장된 값(늘 false)이 그대로 온다.
+        activeLabor
+          ? {
+              investigation: investigationExcluded,
+              powerTest: powerTestExcluded,
+              document: documentExcluded,
+            }
+          : undefined
       ),
-    [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded]
+    [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded, documentExcluded]
   );
   /** 실제로 뺀 금액(원). 켜지 않았거나 뺄 수 없었으면 null. */
   const powerTestDeduction = laborSuggestion.powerTestDeduction ?? null;
@@ -1311,7 +1333,14 @@ export default function QuoteEditForm({
        * (schema/repair-labor.ts 의 quote_repair_tasks 머리말).
        */
       laborEquipmentKind: laborKind,
-      laborBaseCost: activeLabor?.baseCost ?? null,
+      /**
+       * 기본 작업비 스냅숏 — **이 장에 실제로 더해진 금액**이다(정해진 세 공수시간의 합 ×
+       * 시간당 단가). 🔴 `repair_labor_settings.base_cost` 를 베끼지 않는다: 2026-09-16 부터
+       * 그 칸은 계산의 근거가 아니라 넘어오기 전의 기록이라, 앞으로 공수시간을 고치면 두 값이
+       * 갈라진다. 근거로 남길 것은 **그때 청구한 기본 작업비** 쪽이다.
+       */
+      laborBaseCost:
+        laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),
       /**
        * 통전작업 제외 — **결정과 그때 뺀 금액을 따로 보낸다.**
        *
@@ -2401,13 +2430,15 @@ export default function QuoteEditForm({
               </p>
               {laborSuggestion.baseCost === null && (
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  {workflowKindLabels[activeLabor.equipmentKind]}의 기본 작업비를 정하지 않아 합계에
-                  더해지지 않았습니다 — [PO/내자] › 수리 작업 비용에서 적어 주세요.
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 조사·통전·서류 공수시간을 하나도 정하지
+                  않아 기본 작업비가 합계에 더해지지 않았습니다 — [PO/내자] › 수리 작업 비용에서 적어
+                  주세요.
                 </p>
               )}
               {/* 🔴 못 뺐으면 못 뺐다고 말한다. 조용히 두면 사람은 210만원이
-                  나온 줄 알고 그대로 고객사에 보낸다. */}
-              {laborSuggestion.powerTestNotice === "NO_POWER_TEST_HOURS" && (
+                  나온 줄 알고 그대로 고객사에 보낸다. 세 갈래가 저마다 제 공수시간을
+                  보므로 까닭도 갈래마다 따로다(domain/quote-labor-cost.ts). */}
+              {laborSuggestion.powerTestNotice === "NO_HOURS" && (
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                   {workflowKindLabels[activeLabor.equipmentKind]}의 통전 공수시간을 먼저 정해 주세요 —
                   정하기 전까지는 통전작업 몫을 빼지 않습니다([PO/내자] › 작업 비용 › 통전 작업 비용).
@@ -2419,30 +2450,19 @@ export default function QuoteEditForm({
                   확인해 주세요.
                 </p>
               )}
-              {laborSuggestion.powerTestNotice === "CLAMPED_TO_ZERO" && (
+              {/* 🔴 조사작업 몫도 같다 — 조사 공수시간을 모르면 뺄 금액을 모른다.
+                  예전에는 「기본 작업비 − 통전 몫」이라 통전 쪽을 함께 봐야 했지만,
+                  이제 조사 몫은 제 공수시간 하나로 정해진다. */}
+              {laborSuggestion.investigationNotice === "NO_HOURS" && (
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  뺄 통전작업 몫이 기본 작업비보다 커서 기본 작업비를 0원에서 멈췄습니다 — 두 값을
-                  확인해 주세요.
-                </p>
-              )}
-              {/* 🔴 조사작업 몫을 못 뺐으면 못 뺐다고 말한다 — 조사 몫은 기본 작업비 − 통전작업
-                  몫이라 통전 몫을 모르면 셀 수 없다. 기본 작업비를 정하지 않은 경우는 위 안내가
-                  말한다(통전 쪽과 같다). */}
-              {laborSuggestion.investigationNotice === "NO_POWER_TEST_HOURS" && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  {workflowKindLabels[activeLabor.equipmentKind]}의 통전 공수시간이 정해지지 않아 조사작업 몫(기본
-                  작업비 − 통전작업 몫)을 셀 수 없습니다 — 빼지 않았습니다([PO/내자] › 작업 비용 › 통전 작업 비용).
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 조사 공수시간을 먼저 정해 주세요 —
+                  정하기 전까지는 조사작업 몫을 빼지 않습니다([PO/내자] › 작업 비용 › 조사 작업 비용).
                 </p>
               )}
               {laborSuggestion.investigationNotice === "UNKNOWN_HOURLY_RATE" && (
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  시간당 작업비를 읽지 못해 조사작업 몫을 셀 수 없습니다 — 빼지 않았습니다([PO/내자] › 작업
-                  비용에서 확인해 주세요).
-                </p>
-              )}
-              {laborSuggestion.investigationNotice === "CLAMPED_TO_ZERO" && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  통전작업 몫이 기본 작업비보다 커서 조사작업 몫을 0원에서 멈췄습니다 — 두 값을 확인해 주세요.
+                  시간당 작업비를 읽지 못해 조사작업 몫을 빼지 않았습니다 — [PO/내자] › 작업 비용에서
+                  확인해 주세요.
                 </p>
               )}
               {laborSuggestion.unknown.length > 0 && (

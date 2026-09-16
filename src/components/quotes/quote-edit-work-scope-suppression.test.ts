@@ -199,11 +199,17 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     assert.ok(!edit.includes("setInvestigationExcluded"), "줄 입력이 조사작업 제외를 바꾼다");
   });
 
-  test("🔴 저장과 미리보기가 같은 상태를 받는다 — 기본 작업비 스냅숏은 그대로", () => {
+  test("🔴 저장과 미리보기가 같은 상태를 받는다 — 기본 작업비 스냅숏은 셈한 그 값", () => {
     const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
     assert.ok(collect.includes("investigationExcluded,"), "저장에 조사작업 제외가 실리지 않는다");
-    // 뺀 사실은 investigationExcluded 가 말하고, 기본 작업비는 근거로 그때 값 그대로 보낸다.
-    assert.ok(collect.includes("laborBaseCost: activeLabor?.baseCost ?? null,"), "기본 작업비 스냅숏이 달라졌다");
+    // 뺀 사실은 investigationExcluded 가 말하고, 기본 작업비는 근거로 **더한 그 금액**을 보낸다.
+    // 🔴 repair_labor_settings.base_cost 는 2026-09-16 부터 계산의 근거가 아니다 — 그 칸을
+    // 베끼면 앞으로 공수시간을 고치는 날 저장된 근거와 청구 금액이 갈라진다.
+    assert.ok(
+      collect.includes("laborBaseCost: laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),"),
+      "기본 작업비 스냅숏이 달라졌다"
+    );
+    assert.ok(!collect.includes("activeLabor?.baseCost"), "옛 base_cost 칸을 아직도 베낀다");
     assert.ok(
       form.includes(
         "// 「조사작업 제외」를 켜면 「① 인수 조사」도 사라진다 — 저장할 때와 같은 그 상태다. investigationExcluded,"
@@ -212,21 +218,35 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     );
   });
 
-  test("🔴 작업비 계산에 넘긴다 — 조사 몫을 셀 통전 공수시간 · 단가는 통전작업 제외가 꺼져 있어도 넘긴다", () => {
-    // 조사 몫 = 기본 작업비 − 통전 몫. 통전 몫은 이 인자로만 셈한다(domain 의 한 곳).
+  test("🔴 작업비 계산에 세 공수시간과 세 제외를 넘긴다 — 기본 작업비는 그 합이다", () => {
+    // 🔴 2026-09-16 — 기본 작업비 = (조사h + 통전h + 서류h) × 시간당 단가이고, 세 몫은
+    // 서로를 보지 않는다. 그래서 「통전 공수시간을 조사 몫 때문에 넘긴다」는 얽힘이 없다.
     assert.ok(
       form.includes(
-        "activeLabor ? { excluded: powerTestExcluded, hours: activeLabor.powerTestHours, hourlyRate: activeLabor.hourlyRate, } : undefined,"
+        "activeLabor ? { hourlyRate: activeLabor.hourlyRate, investigationHours: activeLabor.investigationHours, powerTestHours: activeLabor.powerTestHours, documentHours: activeLabor.documentHours, } : null,"
       ),
-      "통전 공수시간 · 단가를 넘기는 모양이 달라졌다"
+      "세 공수시간 · 단가를 넘기는 모양이 달라졌다"
     );
     assert.ok(
       form.includes(
-        "activeLabor ? { excluded: investigationExcluded } : undefined ), [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded] );"
+        "activeLabor ? { investigation: investigationExcluded, powerTest: powerTestExcluded, document: documentExcluded, } : undefined ), [selectedTasks, activeLabor, powerTestExcluded, investigationExcluded, documentExcluded] );"
       ),
-      "작업비 계산이 조사작업 제외를 받지 않는다"
+      "작업비 계산이 세 제외를 받지 않는다"
     );
     assert.ok(form.includes("const investigationDeduction = laborSuggestion.investigationDeduction ?? null;"));
+  });
+
+  test("🔴 「서류작업 제외」는 저장된 결정을 읽어 셈에 넘기는 데까지다 — 체크 상자는 아직 없다", () => {
+    // 뒤따르는 조각이 체크 상자와 저장을 만든다. 지금은 켤 방법이 없어 늘 false 이고,
+    // 그래서 **상태가 아니라 읽은 값**이다(저장에도 싣지 않아 그 칸은 그대로 남는다).
+    assert.ok(
+      form.includes("const documentExcluded = quote?.documentExcluded ?? false;"),
+      "저장된 서류작업 제외를 읽지 않는다"
+    );
+    assert.ok(!form.includes("setDocumentExcluded"), "서류작업 제외를 켜고 끄는 길이 생겼다 — 뒤 조각이다");
+    assert.ok(!form.includes("서류작업 제외</span>"), "서류작업 제외 체크 상자가 생겼다 — 뒤 조각이다");
+    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    assert.ok(!collect.includes("documentExcluded"), "아직 저장하지 않는다 — 검증도 서버도 그 칸을 모른다");
   });
 
   test("🔴 내역이 뺀 조사작업 몫과 까닭을 말한다 — 통전 차감 줄은 예전 그대로", () => {
@@ -245,11 +265,10 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
       ),
       "통전 차감 줄이 달라졌다"
     );
-    // 🔴 못 뺀 까닭 셋. 기본 작업비를 정하지 않은 경우는 예전 안내가 그대로 말한다.
+    // 🔴 못 뺀 까닭 **둘**. 조사 몫이 제 공수시간으로 정해지므로 통전 쪽을 볼 일이 없다.
     const reasons: readonly (readonly [string, string])[] = [
-      ["NO_POWER_TEST_HOURS", "통전 공수시간이 정해지지 않아 조사작업 몫(기본 작업비 − 통전작업 몫)을 셀 수 없습니다 — 빼지 않았습니다"],
-      ["UNKNOWN_HOURLY_RATE", "시간당 작업비를 읽지 못해 조사작업 몫을 셀 수 없습니다 — 빼지 않았습니다"],
-      ["CLAMPED_TO_ZERO", "통전작업 몫이 기본 작업비보다 커서 조사작업 몫을 0원에서 멈췄습니다"],
+      ["NO_HOURS", "조사 공수시간을 먼저 정해 주세요 — 정하기 전까지는 조사작업 몫을 빼지 않습니다"],
+      ["UNKNOWN_HOURLY_RATE", "시간당 작업비를 읽지 못해 조사작업 몫을 빼지 않았습니다"],
     ];
     for (const [notice, phrase] of reasons) {
       const branch = sliceBetween(form, `{laborSuggestion.investigationNotice === "${notice}" && (`, "</p>");
@@ -259,6 +278,19 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     // 옛 갈래(조사 제외면 기본 작업비를 통째로 빼고 통전 차감을 안 한다)는 없다.
     for (const gone of ["BASE_COST_DROPPED", "baseCostDroppedByInvestigation", "조사작업 제외로 뺌"]) {
       assert.ok(!form.includes(gone), `옛 갈래가 남았다: ${gone}`);
+    }
+    // 🔴 조사 몫이 「나머지」이던 시절의 알림 종류는 없다 — 남으면 화면이 통전 몫을 아직
+    // 보고 있다고 말하는 셈이다(domain/quote-labor-cost.ts 의 「사라진 예외들」).
+    for (const gone of ["CLAMPED_TO_ZERO", "NO_POWER_TEST_HOURS", "NO_BASE_COST"]) {
+      assert.ok(!form.includes(gone), `사라진 규칙이 화면에 남았다: ${gone}`);
+    }
+    // 옛 셈(기본 작업비 − 통전작업 몫)은 **사람이 읽는 글자**에 남아 있지 않다. 원본 주석에
+    // 한 줄 남는 것은 왜 사라졌는지를 적어 둔 자리라 여기서 가려 본다.
+    for (const [name, text] of [
+      ["조사작업 제외 안내", sliceBetween(form, "const INVESTIGATION_EXCLUDED_NOTICE =", ";")],
+      ["못 뺀 까닭", sliceBetween(form, '{laborSuggestion.investigationNotice === "NO_HOURS" && (', "</p>")],
+    ] as const) {
+      assert.ok(!text.includes("기본 작업비 −"), `${name} 가 아직 옛 셈으로 말한다: ${text}`);
     }
   });
 
@@ -340,7 +372,7 @@ describe("감춘 칸", () => {
     assert.ok(investigationNotice.includes("조사작업 제외"), investigationNotice);
     assert.ok(investigationNotice.includes("견적서에 나가지 않"), investigationNotice);
     assert.ok(
-      investigationNotice.includes("기본 작업비 중 조사작업 몫(기본 작업비 − 통전작업 몫)이 빠집니다"),
+      investigationNotice.includes("기본 작업비 중 조사작업 몫(조사 공수시간 × 시간당 작업비)이 빠집니다"),
       investigationNotice
     );
     assert.ok(!investigationNotice.includes("기본 작업비도"), "기본 작업비가 통째로 빠지는 것처럼 말한다");
