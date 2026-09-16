@@ -67,6 +67,9 @@ type FailureCode =
 const STATUS_BY_ISSUE_FAILURE: Record<QuoteIssueFailureCode, number> = {
   NOT_FOUND: 404,
   EXCEL_NOT_ATTACHED: 404,
+  // 🔴 아직 앱 양식이 없는 종류(케이블) — **고장이 아니라 안 만든 기능**이라 501 이다.
+  // GET 받기 통로가 같은 코드에 같은 응답 코드를 쓴다(그쪽 FailureCode 의 그 항목).
+  KIND_NOT_SUPPORTED: 501,
   SCAN_BLOCKED: 403,
   TEMPLATE_UNAVAILABLE: 503,
   RENDER_FAILED: 500,

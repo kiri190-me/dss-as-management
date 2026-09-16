@@ -87,6 +87,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     validity: null,
     delivery: null,
     payment: null,
+    // 특이사항 — 케이블 견적서 양식 10번(2026-09-16). 내자 · OH 는 늘 비어 있다.
+    remarks: null,
     workCost: "0",
     laborEquipmentKind: null,
     laborBaseCost: null,

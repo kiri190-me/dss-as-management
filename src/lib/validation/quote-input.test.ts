@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   MAX_QUOTE_ITEMS,
+  QUOTE_KINDS,
+  isQuoteKind,
   isValidExpectedVersion,
   isValidQuoteId,
   quoteExcelOnlyFieldErrors,
@@ -121,6 +123,99 @@ test("수량은 1 이상의 정수여야 한다 — CHECK 제약과 같은 규�
   assert.match(errors({ ...MINIMAL, items: [{ partNameText: "a", quantity: 0, unitPrice: "1" }] })["items.0.quantity"], /수량/);
   assert.match(errors({ ...MINIMAL, items: [{ partNameText: "a", quantity: -1, unitPrice: "1" }] })["items.0.quantity"], /수량/);
   assert.match(errors({ ...MINIMAL, items: [{ partNameText: "a", quantity: 1.5, unitPrice: "1" }] })["items.0.quantity"], /수량/);
+});
+
+/**
+ * ============================================================================
+ * 케이블 견적서 — 종류 · 규격 · 설명 줄 · 특이사항 (2026-09-16 케이블 ③)
+ * ============================================================================
+ */
+test("🔴 케이블이 고를 수 있는 종류가 됐다 — 이 한 줄이 만들기 · 검증 · 열기 관문을 연다", () => {
+  assert.deepEqual([...QUOTE_KINDS], ["DOMESTIC", "OVERHAUL", "CABLE"]);
+  assert.equal(isQuoteKind("CABLE"), true);
+  assert.equal(ok({ ...MINIMAL, kind: "CABLE" }).kind, "CABLE");
+  // 모르는 종류는 여전히 거절한다.
+  assert.match(errors({ ...MINIMAL, kind: "ANTENNA" }).kind, /견적서 종류/);
+});
+
+test("🔴 설명 줄은 글자 하나뿐이다 — 수량 · 단가 · 규격 · 재고 연결이 NULL 로 못 박힌다", () => {
+  const data = ok({
+    ...MINIMAL,
+    kind: "CABLE",
+    items: [
+      // 화면은 보내지 않는 값들이다. 그래도 섞여 오면 **버린다** — 남으면 DB 가
+      // 그 줄을 거절한다(CHECK quote_items_amounts_item_line_only).
+      {
+        kind: "NOTE",
+        partNameText: "* 20kW RFG 부속케이블 Parts 3종",
+        quantity: 3,
+        unitPrice: "1000",
+        partSpecText: "3M",
+        partId: VALID_UUID,
+        isOverhaulPart: true,
+      },
+    ],
+  });
+  assert.equal(data.items.length, 1);
+  assert.equal(data.items[0].kind, "NOTE");
+  assert.equal(data.items[0].partNameText, "* 20kW RFG 부속케이블 Parts 3종");
+  assert.equal(data.items[0].quantity, null);
+  assert.equal(data.items[0].unitPrice, null);
+  assert.equal(data.items[0].partSpecText, null);
+  assert.equal(data.items[0].partId, null);
+  assert.equal(data.items[0].isOverhaulPart, false);
+});
+
+test("🔴 설명 줄도 글자는 있어야 한다 — 빈 줄은 문서에 적힐 것이 없다", () => {
+  const fieldErrors = errors({
+    ...MINIMAL,
+    kind: "CABLE",
+    items: [{ kind: "NOTE", partNameText: "   " }],
+  });
+  assert.match(fieldErrors["items.0.partNameText"], /1번째 설명 줄/);
+});
+
+test("🔴 품목 줄은 종류를 적어도 안 적어도 같다 — 안 적으면 품목 줄이다(DB 기본값과 같은 규칙)", () => {
+  const withKind = ok({
+    ...MINIMAL,
+    items: [{ kind: "ITEM", partNameText: "케이블", quantity: 2, unitPrice: "1000" }],
+  });
+  const withoutKind = ok({
+    ...MINIMAL,
+    items: [{ partNameText: "케이블", quantity: 2, unitPrice: "1000" }],
+  });
+  assert.equal(withKind.items[0].kind, "ITEM");
+  assert.equal(withoutKind.items[0].kind, "ITEM");
+  assert.deepEqual(withoutKind.items, withKind.items);
+});
+
+test("모르는 줄 종류는 품목 줄로 접지 않고 거절한다 — 접으면 설명이 수량 없는 품목이 된다", () => {
+  const fieldErrors = errors({
+    ...MINIMAL,
+    items: [{ kind: "HEADING", partNameText: "묶음 제목" }],
+  });
+  assert.match(fieldErrors["items.0.kind"], /1번째 줄의 종류/);
+});
+
+test("규격은 없어도 되고, 앞뒤 공백만 있으면 없는 것으로 본다", () => {
+  const data = ok({
+    ...MINIMAL,
+    items: [
+      { partNameText: "케이블 A", partSpecText: " 5C-FB 3M ", quantity: 1, unitPrice: "1000" },
+      { partNameText: "케이블 B", partSpecText: "   ", quantity: 1, unitPrice: "1000" },
+      { partNameText: "케이블 C", quantity: 1, unitPrice: "1000" },
+    ],
+  });
+  assert.equal(data.items[0].partSpecText, "5C-FB 3M");
+  assert.equal(data.items[1].partSpecText, null);
+  assert.equal(data.items[2].partSpecText, null);
+});
+
+test("🔴 특이사항은 여러 줄이 그대로 들어간다 — 비우면 null(양식의 빈 칸)", () => {
+  assert.equal(ok(MINIMAL).remarks, null);
+  assert.equal(ok({ ...MINIMAL, remarks: "   " }).remarks, null);
+  const multiline = "1) 케이블 길이는 발주 시 확정\n2) 부가세 별도";
+  assert.equal(ok({ ...MINIMAL, kind: "CABLE", remarks: `  ${multiline}  ` }).remarks, multiline);
 });
 
 test("단가 0 은 허용한다 — 무상 교체 부품을 견적서에 적어 보이는 일이 있다", () => {

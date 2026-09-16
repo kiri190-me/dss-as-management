@@ -40,14 +40,16 @@ export type QuoteTemplateKey =
  * 장비 종류를 아직 안 고른 견적서(이 기능이 생기기 전에 만든 것들)도 제너레이터로
  * 본다 — 지금까지 그 양식 하나만 쓰였으니 그것이 사실에 가장 가깝다.
  *
- * 🔴 **`CABLE` 은 아직 여기서 나오지 않는다.** 케이블 견적서는 만들 수도 열 수도
- * 없는 상태이고(`QUOTE_KINDS` 가 내자 · O/H 둘 그대로다), 그 문을 여는 것은 뒤
- * 조각이다. 채우개와 양식 경로만 먼저 서 있다(xlsx/cable-quote-template.ts).
+ * 🔴 **케이블은 장비 종류를 보지 않는다.** 그 양식은 수리품과 이어지지 않는 별도
+ * 견적서라 제너레이터 · 매쳐 구분이 아예 없다(2026-09-16). 사람이 장비 종류를
+ * 골라 두었더라도 — 내자로 적다가 종류를 케이블로 바꾼 장이 그렇다 — 양식은
+ * 하나뿐이므로 `CABLE` 로 답한다.
  */
 export function quoteTemplateKey(
   equipmentKind: WorkflowKind | null,
   quoteKind: QuoteKind
 ): QuoteTemplateKey {
+  if (quoteKind === "CABLE") return "CABLE";
   const equipment = equipmentKind === "MATCHER" ? "MATCHER" : "GENERATOR";
   return `${equipment}:${quoteKind}`;
 }

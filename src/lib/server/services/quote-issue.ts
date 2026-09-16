@@ -12,6 +12,10 @@ import { liveQuoteAttachmentInSlot } from "@/lib/domain/attachment-category";
 import { decideAttachmentDownload } from "@/lib/domain/attachment-download-policy";
 import { AttachmentPathError, buildQuoteAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { quoteArchiveFileName, type QuoteArchiveNamingInput } from "@/lib/domain/quote-archive-naming";
+import {
+  QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE,
+  canRenderQuoteDocument,
+} from "@/lib/domain/quote-document-support";
 import { buildQuoteFileName, type QuoteFileExtension } from "@/lib/domain/quote-file-name";
 import type {
   QuoteIssueArchiveResult,
@@ -83,6 +87,11 @@ export type QuoteIssueFailureCode =
   | "NOT_FOUND"
   /** 엑셀 전용 견적서인데 붙인 엑셀이 없다. */
   | "EXCEL_NOT_ATTACHED"
+  /**
+   * 🔴 앱 양식이 아직 없는 종류다 — 케이블 견적서(2026-09-16). GET 받기 통로와 **같은
+   * 판정 · 같은 문장**이고, 라우트가 501 로 바꾼다(domain/quote-document-support.ts).
+   */
+  | "KIND_NOT_SUPPORTED"
   /** 붙인 엑셀이 악성코드 검사에 막혔다. */
   | "SCAN_BLOCKED"
   /** 원본 양식을 읽지 못했다. */
@@ -119,6 +128,16 @@ export async function issueQuoteFile(input: IssueQuoteFileInput): Promise<IssueQ
   // 지워진 장은 없는 것이다 — 휴지통 견적서를 주소만으로 공유폴더에 꽂을 수 없다.
   const quote = await getQuoteForEdit(input.quoteId);
   if (!quote) return fail("NOT_FOUND", QUOTE_NOT_FOUND_MESSAGE);
+
+  /**
+   * 🔴 앱 양식이 아직 없는 종류(케이블)는 **여기서 멈춘다** — GET 받기 통로와 같은 판정
+   * 하나를 본다(domain/quote-document-support.ts). 이 통로는 만든 파일을 **공유폴더와
+   * 첨부 칸에 남기므로**, 잘못된 문서가 나가면 사람의 서류함에까지 들어간다.
+   * 엑셀 전용 장은 앱 양식을 쓰지 않아 지나간다(종류와 무관하다).
+   */
+  if (!canRenderQuoteDocument(quote)) {
+    return fail("KIND_NOT_SUPPORTED", QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE);
+  }
 
   return quote.isExcelOnly ? issueAttachedExcel(quote, input) : issueRenderedWorkbook(quote, input);
 }

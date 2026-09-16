@@ -371,6 +371,10 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
 
   test("엑셀 전용이면 품목(부품) 구역이 없다 — 접는 조건이 부품 비용 구역 앞에서 열린다", () => {
     const open = indexOrFail(form, "{isExcelOnly ? (");
-    assert.ok(open < indexOrFail(form, ">부품 비용</h2>"), "부품 비용 구역이 접는 조건 밖이다");
+    // 구역의 제목은 2026-09-16(케이블 ③)부터 종류에 따라 갈린다 — 케이블이면 「품목」이다.
+    assert.ok(
+      open < indexOrFail(form, '{isCable ? "품목" : "부품 비용"}'),
+      "부품 비용 구역이 접는 조건 밖이다"
+    );
   });
 });

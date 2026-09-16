@@ -25,8 +25,16 @@
  * ============================================================================
  */
 
-/** 견적서 종류. schema/quotes.ts 의 quote_kind 와 같은 두 값이다. */
-export type QuoteArchiveKind = "DOMESTIC" | "OVERHAUL";
+/**
+ * 견적서 종류. schema/quotes.ts 의 quote_kind 와 같은 값들이다.
+ *
+ * 🔴 **`CABLE` 은 이름에 아무 표시도 붙이지 않는다**(2026-09-16). 이 종류가 이름
+ * 규칙에서 하는 일은 `(OH포함)` 을 붙일지 하나뿐이고(아래 fileStem), 케이블은 OH 가
+ * 아니라 안 붙는다. 케이블 견적서의 **받기 통로가 아직 없어**(양식 채우기는 뒤 조각)
+ * 이 이름으로 실제 파일이 만들어지는 길도 아직 없다 — 그때 「수리 견적서」라는 꼬리말이
+ * 그 종류에도 맞는지 사람이 정하면 된다.
+ */
+export type QuoteArchiveKind = "DOMESTIC" | "OVERHAUL" | "CABLE";
 
 /** 이름을 만드는 데 쓰는 견적서 칸. DB 의 빈 칸(null)을 그대로 넘겨도 된다. */
 export type QuoteArchiveNamingInput = {

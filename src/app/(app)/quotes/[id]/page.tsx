@@ -6,6 +6,7 @@ import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
 } from "@/lib/storage/quote-template";
+import { CABLE_QUOTE_MAX_LINES } from "@/lib/xlsx/cable-quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -100,6 +101,8 @@ export default async function QuoteDetailPage({
       quote={quote}
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
+      /* 케이블 견적서의 줄 수 상한 — 채우개의 상수를 그대로 내려보낸다(새 견적서 페이지의 같은 항목). */
+      cableMaxLines={CABLE_QUOTE_MAX_LINES}
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
       returnHref={returnHref}

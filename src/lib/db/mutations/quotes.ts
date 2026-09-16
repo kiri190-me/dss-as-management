@@ -104,6 +104,12 @@ function toColumnValues(fields: QuoteFields) {
     validity: fields.validity,
     delivery: fields.delivery,
     payment: fields.payment,
+    /**
+     * 특이사항 — 케이블 견적서 양식 10번(2026-09-16). 만들 때도 고칠 때도 이 한
+     * 곳을 지난다. 내자 · OH 는 화면이 보내지 않아 늘 null 이다(그 두 양식에는
+     * 이 항목이 없다 — schema/quotes.ts 의 remarks).
+     */
+    remarks: fields.remarks,
     workCost: fields.workCost,
     // 작업비의 근거. 여기 빠지면 사람이 작업을 골라도 다시 열었을 때 사라진다
     // (이 함수 머리말의 "새로 만들면 들어가는데 고치면 안 들어가는 칸").
@@ -245,6 +251,10 @@ async function checkReferences(tx: Tx, fields: QuoteFields): Promise<QuoteMutati
  * 차례(line_no)는 배열 index + 1 이다. 폼에 늘어놓은 순서가 곧 차례라서
  * (validation/quote-input.ts 의 normalizeItems 주석), 조회가 그 차례로 다시
  * 읽으면 사람이 보던 순서가 그대로 돌아온다.
+ *
+ * 🔴 **설명 줄도 같은 목록에 섞여 온다**(케이블 견적서 — kind = "NOTE"). 그 줄이
+ * 어느 품목 묶음 위에 붙는지가 곧 뜻이므로, 종류별로 나눠 담지 않고 **받은 차례
+ * 그대로** 넣는다. 수량 · 단가는 검증이 이미 null 로 못 박았다.
  */
 async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
   await tx.delete(quoteItems).where(eq(quoteItems.quoteId, quoteId));
@@ -254,8 +264,12 @@ async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
     fields.items.map((item, index) => ({
       quoteId,
       lineNo: index + 1,
+      // 종류를 안 보낸 줄은 품목 줄이다 — DB 칸의 DEFAULT 와 같은 규칙이고, 설명
+      // 줄이 잘못 끼면 CHECK 가 거절한다(schema/quotes.ts 의 quoteItemKindEnum).
+      kind: item.kind ?? "ITEM",
       partId: item.partId,
       partNameText: item.partNameText,
+      partSpecText: item.partSpecText ?? null,
       isOverhaulPart: item.isOverhaulPart,
       quantity: item.quantity,
       unitPrice: item.unitPrice,

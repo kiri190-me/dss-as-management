@@ -106,13 +106,16 @@ const queryOf = (href: string) => Object.fromEntries(new URL(href, "https://exam
 describe("기본 선택 — 창을 열면 지금까지의 [새 견적서] 그대로(내자 · 엑셀 전용 아님)", () => {
   const html = renderToStaticMarkup(<NewQuoteDialog baseHref="/quotes/new" onCancel={() => {}} />);
 
-  test("🔴 내자 견적서가 골라져 있고 OH 견적서는 아니다", () => {
+  test("🔴 내자 견적서가 골라져 있고 OH · 케이블은 아니다", () => {
     const kindRadios = inputTags(html).filter((tag) => tag.includes('type="radio"'));
-    assert.equal(kindRadios.length, 2, html);
+    // 셋이다 — 내자 · OH · 케이블(2026-09-16 케이블 ③에서 케이블이 늘었다).
+    assert.equal(kindRadios.length, 3, html);
     const domestic = kindRadios.find((tag) => tag.includes('value="DOMESTIC"'));
     const overhaul = kindRadios.find((tag) => tag.includes('value="OVERHAUL"'));
+    const cable = kindRadios.find((tag) => tag.includes('value="CABLE"'));
     assert.ok(domestic?.includes("checked"), `내자가 골라져 있지 않다: ${domestic}`);
     assert.ok(!overhaul?.includes("checked"), `OH 가 골라져 있다: ${overhaul}`);
+    assert.ok(!cable?.includes("checked"), `케이블이 골라져 있다: ${cable}`);
     assert.equal(NEW_QUOTE_DEFAULT_KIND, "DOMESTIC");
   });
 
@@ -152,20 +155,22 @@ describe("기본 선택 — 창을 열면 지금까지의 [새 견적서] 그대
 });
 
 describe("두 선택지 — 고르면 창의 상태로 올라간다", () => {
-  test("🔴 종류는 라디오 둘 — 같은 묶음, 차례는 내자 → OH", () => {
+  test("🔴 종류는 라디오 셋 — 같은 묶음, 차례는 내자 → OH → 케이블", () => {
     const { radios } = renderView();
     assert.deepEqual(
       radios.map((radio) => radio.props.value),
       [...QUOTE_KINDS]
     );
+    assert.deepEqual([...QUOTE_KINDS], ["DOMESTIC", "OVERHAUL", "CABLE"]);
     assert.equal(new Set(radios.map((radio) => radio.props.name)).size, 1, "라디오가 한 묶음이 아니다");
   });
 
-  test("🔴 OH 를 고르면 OVERHAUL, 내자를 고르면 DOMESTIC 이 올라간다", () => {
+  test("🔴 고른 종류가 그대로 올라간다 — OH · 케이블 · 내자", () => {
     const { radios, calls } = renderView();
     fire(radios.find((radio) => radio.props.value === "OVERHAUL")?.props.onChange);
+    fire(radios.find((radio) => radio.props.value === "CABLE")?.props.onChange);
     fire(radios.find((radio) => radio.props.value === "DOMESTIC")?.props.onChange);
-    assert.deepEqual(calls.kinds, ["OVERHAUL", "DOMESTIC"]);
+    assert.deepEqual(calls.kinds, ["OVERHAUL", "CABLE", "DOMESTIC"]);
     assert.equal(calls.cancel, 0, "고르기가 창을 닫는다");
   });
 
@@ -184,9 +189,23 @@ describe("두 선택지 — 고르면 창의 상태로 올라간다", () => {
       [
         ["DOMESTIC", false],
         ["OVERHAUL", true],
+        ["CABLE", false],
       ]
     );
     assert.equal(checkboxes[0].props.checked, true);
+  });
+
+  test("받은 값이 그대로 그려진다 — 케이블(2026-09-16 케이블 ③)", () => {
+    const { radios, checkboxes } = renderView({ kind: "CABLE", excelOnly: false });
+    assert.deepEqual(
+      radios.map((radio) => [radio.props.value, radio.props.checked]),
+      [
+        ["DOMESTIC", false],
+        ["OVERHAUL", false],
+        ["CABLE", true],
+      ]
+    );
+    assert.equal(checkboxes[0].props.checked, false);
   });
 });
 

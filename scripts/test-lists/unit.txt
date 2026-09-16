@@ -167,6 +167,7 @@ src/lib/domain/overhaul.test.ts
 src/lib/domain/quote-subject.test.ts
 src/lib/domain/quote-labor-cost.test.ts
 src/lib/validation/quote-input.test.ts
+src/lib/domain/quote-document-support.test.ts
 src/lib/domain/quote-file-name.test.ts
 src/lib/domain/requested-due-date-link.test.ts
 src/lib/domain/fault-symptom-breakdown.test.ts

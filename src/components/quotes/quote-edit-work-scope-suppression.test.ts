@@ -205,8 +205,12 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     // 뺀 사실은 investigationExcluded 가 말하고, 기본 작업비는 근거로 **더한 그 금액**을 보낸다.
     // 🔴 repair_labor_settings.base_cost 는 2026-09-16 부터 계산의 근거가 아니다 — 그 칸을
     // 베끼면 앞으로 공수시간을 고치는 날 저장된 근거와 청구 금액이 갈라진다.
+    // 🔴 케이블 견적서는 작업비 구역이 없어 이 근거도 비워 보낸다(2026-09-16 케이블 ③ —
+    // quote-edit-cable.test.ts 가 비우는 값 전부를 본다). 내자 · OH 는 그대로다.
     assert.ok(
-      collect.includes("laborBaseCost: laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),"),
+      collect.includes(
+        "laborBaseCost: isCable || laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),"
+      ),
       "기본 작업비 스냅숏이 달라졌다"
     );
     assert.ok(!collect.includes("activeLabor?.baseCost"), "옛 base_cost 칸을 아직도 베낀다");
@@ -484,9 +488,16 @@ describe("🔴 감출 뿐 지우지 않는다", () => {
 
   test("저장하는 작업 내역은 감춤과 무관하게 세 칸 모두 그대로 보낸다", () => {
     const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    /**
+     * 🔴 **감춤(suppressed)은 여전히 보지 않는다** — 통전 · 조사 · 수리 구역을 감춰도 적어 둔
+     * 줄은 그대로 저장된다(체크를 풀면 돌아와야 한다).
+     *
+     * 갈래가 하나 늘었다: **케이블 견적서는 작업 내역 자체가 없는 양식**이라 빈 배열을 보낸다
+     * (2026-09-16 케이블 ③ — quote-edit-cable.test.ts). 감춤과는 다른 일이다.
+     */
     assert.ok(
       collect.includes(
-        "workScopeLines: QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) => scopeLines[section].map((row) => ({ section, text: row.text })) ),"
+        "workScopeLines: isCable ? [] : QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) => scopeLines[section].map((row) => ({ section, text: row.text })) ),"
       ),
       "저장하는 작업 내역의 모양이 달라졌다"
     );

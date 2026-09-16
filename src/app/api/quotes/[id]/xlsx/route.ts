@@ -8,6 +8,10 @@ import { listLiveQuoteAttachments } from "@/lib/db/queries/attachments";
 import { getQuoteForEdit } from "@/lib/db/queries/quotes";
 import { recordQuoteExport } from "@/lib/db/mutations/quote-exports";
 import { decideAttachmentDownload } from "@/lib/domain/attachment-download-policy";
+import {
+  QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE,
+  canRenderQuoteDocument,
+} from "@/lib/domain/quote-document-support";
 import { AttachmentPathError, resolveAttachmentAbsolutePath } from "@/lib/domain/attachment-path";
 import { buildQuoteFileName, quoteContentDisposition } from "@/lib/domain/quote-file-name";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
@@ -67,6 +71,12 @@ type FailureCode =
   | "ACCOUNT_NOT_APPROVED"
   | "FORBIDDEN"
   | "NOT_FOUND"
+  /**
+   * 🔴 앱 양식이 아직 없는 종류다 — 케이블 견적서(2026-09-16). **잘못된 문서를 내려주는
+   * 대신 거절한다**(domain/quote-document-support.ts). 「만들지 못했다(RENDER_FAILED)」와
+   * 가른 것은 고장이 아니라 아직 안 만든 기능이기 때문이다 — 관리자에게 문의할 일이 아니다.
+   */
+  | "KIND_NOT_SUPPORTED"
   | "TEMPLATE_UNAVAILABLE"
   | "RENDER_FAILED"
   /** 엑셀 전용 견적서인데 붙인 엑셀이 없다(2026-09-15 Q2). */
@@ -113,7 +123,21 @@ export async function GET(
   const quote = await getQuoteForEdit(id);
   if (!quote) return fail(404, "NOT_FOUND", "해당 견적서를 찾을 수 없습니다.");
 
-  // ── 5-1) 엑셀 전용 견적서 — 붙인 엑셀을 그대로(파일 헤더) ──────────────
+  /**
+   * ── 5-1) 🔴 앱 양식으로 만들 수 있는 장인가 (2026-09-16) ───────────────
+   * 케이블 견적서를 아래 채우개로 보내면 **거절되는 것이 아니라 내자 양식에 케이블 값이
+   * 채워진 문서**가 나온다. 화면에서 단추를 감추는 것으로는 이 주소를 직접 여는 길(목록
+   * 링크 · 주소창)이 남아, **여기서 막는다**. 판정은 domain/quote-document-support.ts
+   * 한 곳이다 — 엑셀 전용 장은 앱 양식을 쓰지 않으므로 종류와 무관하게 지나간다.
+   *
+   * 501 인 것은 **고장이 아니라 아직 만들지 않은 기능**이기 때문이다(양식 채우기는 다음
+   * 조각이다). 사람에게는 까닭과 다음 차례를 그대로 말한다.
+   */
+  if (!canRenderQuoteDocument(quote)) {
+    return fail(501, "KIND_NOT_SUPPORTED", QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE);
+  }
+
+  // ── 5-2) 엑셀 전용 견적서 — 붙인 엑셀을 그대로(파일 헤더) ──────────────
   if (quote.isExcelOnly) {
     return sendAttachedExcel(quote, actingUser.id);
   }

@@ -12,6 +12,10 @@ import { listQuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 import { excelOnlyPrintAttachments } from "@/components/quotes/quote-attachment-files";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { readAllQuoteTemplateHeaders, readQuoteWorkSections } from "@/lib/storage/quote-template";
+import {
+  QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE,
+  canRenderQuoteDocument,
+} from "@/lib/domain/quote-document-support";
 import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
 import { returnHrefForQuotePrint, type SearchParamsInput } from "@/lib/domain/quote-new-link";
@@ -68,6 +72,22 @@ export default async function QuotePrintPage({
 
   const quote = await getQuoteForEdit(id);
   if (!quote) notFound();
+
+  /**
+   * 🔴 **앱 양식이 아직 없는 종류는 그리지 않는다** (2026-09-16 케이블 ③).
+   *
+   * 이 화면은 내자 · OH 양식의 모양을 그린다. 케이블 견적서를 그대로 그리면 **다른 종류의
+   * 문서**가 화면에 뜨고, 그대로 인쇄 · PDF 로 나간다 — 편집 화면에서 단추를 감춰도 이 주소를
+   * 직접 여는 길이 남아 여기서 막는다(받기 통로 둘과 **같은 판정**,
+   * domain/quote-document-support.ts).
+   *
+   * 🔴 `notFound()` 로 보내지 않는다 — 그 장은 목록에 멀쩡히 있고 수정 화면도 열린다.
+   * 「없다」고 하면 사람은 자기가 지운 줄 안다. 까닭과 다음 차례를 글자로 말한다.
+   * (엑셀 전용 장은 앱 양식 대신 결재 PDF 를 보이므로 종류와 무관하게 지나간다.)
+   */
+  if (!canRenderQuoteDocument(quote)) {
+    return <PlaceholderPage title="견적서 미리보기" description={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} />;
+  }
 
   /**
    * [견적서 받기]는 두 갈래다(2026-09-15 견적서 B1c). 🔴 이 화면은 보기 권한만 있어도 열리므로

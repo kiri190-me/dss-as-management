@@ -118,7 +118,10 @@ describe("인쇄 미리보기 — 🔴 보기 권한자도 들어오는 화면",
 describe("편집 화면 — 🔴 저장하지 않은 변경은 공유폴더로 가지 않는다", () => {
   test("머리의 [견적서 받기]는 발행 단추이고 옛 링크가 없다", () => {
     assert.ok(!form.includes("/xlsx"), "편집 화면에 옛 받기 링크가 남았다");
-    const header = sliceBetween(form, "{savedQuote && (", ")}");
+    // 🔴 앱 양식이 없는 종류(케이블)에는 이 단추가 없다(2026-09-16 케이블 ③) — 그 장을
+    // 채우면 **다른 종류의 문서**가 만들어진다. 판정은 통로 둘과 같은 함수 하나이고
+    // (domain/quote-document-support.ts), 통로도 서버에서 거절한다.
+    const header = sliceBetween(form, "{savedQuote && canGetDocument && (", ")}");
     assert.ok(header.includes('<QuoteIssueButton quoteId={savedQuote.id} label="견적서 받기"'), header);
     assert.ok(header.includes("hasUnsavedChanges={hasUnsavedChanges}"), header);
     assert.ok(header.includes("disabled={disabled}"), "저장 중 · 충돌에도 받을 수 있다");

@@ -91,23 +91,25 @@ describe("목록의 줄 링크", () => {
 });
 
 describe("[미리보기 · PDF] 링크", () => {
-  const PREVIEW_CALL = "<PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />";
+  // 🔴 2026-09-16(케이블 ③)부터 줄(row)을 통째로 받는다 — 앱 양식이 없는 종류(케이블)에는
+  // 이 링크를 내밀지 않기 때문이다(domain/quote-document-support.ts). 건 id 는 그대로 함께 간다.
+  const PREVIEW_CALL = "<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />";
   const previewSource = flat(sliceBetween(listSource, "function PreviewLink(", "function DeleteButton("));
 
   test("🔴 미리보기 링크는 접수 건 id 를 실을 수 있는 규칙으로 만든다", () => {
     // null 일 때 quotePrintHref 가 `/quotes/{id}/print` 를 그대로 돌려주는 것은 도메인 시험이 값으로 본다.
     assert.ok(
-      previewSource.includes("href={quotePrintHref({ quoteId: id, repairCaseId })}"),
+      previewSource.includes("href={quotePrintHref({ quoteId: row.id, repairCaseId })}"),
       "미리보기 링크가 quotePrintHref 를 쓰지 않는다"
     );
-    assert.ok(!listSource.includes("href={`/quotes/${id}/print`}"), "옛 고정 미리보기 주소가 남아 있다");
+    assert.ok(!listSource.includes("href={`/quotes/${row.id}/print`}"), "옛 고정 미리보기 주소가 남아 있다");
   });
 
   test("🔴 표와 카드 두 곳 모두 줄 링크와 같은 값을 넘긴다 — 창 폭에 따라 돌아가는 곳이 달라지지 않게", () => {
     assert.ok(tableSource.includes(PREVIEW_CALL), "표의 미리보기 링크에 건 id 가 넘어가지 않는다");
     assert.ok(cardSource.includes(PREVIEW_CALL), "카드의 미리보기 링크에 건 id 가 넘어가지 않는다");
     // 값을 안 넘기는 부르기가 하나라도 남으면 그쪽만 맥락이 끊긴다.
-    assert.ok(!flat(listSource).includes("<PreviewLink id={row.id} />"), "건 id 없이 부르는 곳이 남아 있다");
+    assert.ok(!flat(listSource).includes("<PreviewLink row={row} />"), "건 id 없이 부르는 곳이 남아 있다");
   });
 });
 

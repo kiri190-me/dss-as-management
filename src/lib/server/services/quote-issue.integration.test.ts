@@ -27,6 +27,7 @@ import {
   quoteArchiveYearFolderName,
   type QuoteArchiveNamingInput,
 } from "@/lib/domain/quote-archive-naming";
+import { QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE } from "@/lib/domain/quote-document-support";
 import { buildQuoteFileName } from "@/lib/domain/quote-file-name";
 import { QUOTE_ISSUE_RESULT_HEADER } from "@/lib/domain/quote-issue-result";
 import { createLocalFileSystemStorageAdapter } from "@/lib/storage/local-fs-adapter";
@@ -97,6 +98,8 @@ function quoteFields(suffix: string, overrides: Partial<QuoteFields> = {}): Quot
     validity: null,
     delivery: null,
     payment: null,
+    // 특이사항 — 케이블 견적서 양식 10번(2026-09-16). 내자 · OH 는 늘 비어 있다.
+    remarks: null,
     workCost: "120000.00",
     laborEquipmentKind: null,
     laborBaseCost: null,
@@ -639,6 +642,67 @@ describe("없는 견적서 · 휴지통 견적서 — NOT_FOUND(404 뜻), 아무
       const outcome = await issue(quoteId, null);
       assert.equal(outcome.ok === false && outcome.code, "NOT_FOUND", quoteId);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────── 아직 양식이 없는 종류(케이블)
+
+/**
+ * ============================================================================
+ * 🔴 케이블 견적서는 **발행되지 않는다** (2026-09-16 케이블 ③)
+ * ============================================================================
+ * 이 통로는 만든 파일을 공유폴더와 첨부 칸에 **남긴다.** 케이블 장을 그대로 채우면
+ * 거절되는 것이 아니라 **내자 양식에 케이블 값이 채워진 문서**가 만들어져 사람의
+ * 서류함에까지 들어간다. 그래서 채우기 전에 멈춘다(domain/quote-document-support.ts).
+ *
+ * 여기서 보는 것은 셋이다: 거절 코드 · **아무것도 쓰지 않았다**(공유폴더 · 첨부 · 감사) ·
+ * 그리고 **엑셀 전용 케이블 장은 그대로 된다**(그 장의 문서는 손으로 만든 엑셀이다).
+ * ============================================================================
+ */
+describe("케이블 견적서 — 앱 양식이 없어 거절한다(잘못된 문서가 나가지 않게)", () => {
+  test("🔴 KIND_NOT_SUPPORTED — 공유폴더 · 첨부 칸 · 감사에 아무것도 남지 않는다", async () => {
+    const quote = await createTestQuote(
+      quoteFields("CABLE", {
+        kind: "CABLE",
+        items: [
+          {
+            partId: null,
+            isOverhaulPart: false,
+            kind: "ITEM",
+            partNameText: "20kW RFG 부속케이블",
+            partSpecText: "5C-FB 3M",
+            quantity: 2,
+            unitPrice: "10000.00",
+          },
+        ],
+      })
+    );
+    const archiveRoot = await makeTempRoot("dss-qi-cable-");
+
+    const outcome = await issue(quote.id, archiveRoot);
+
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.ok === false && outcome.code, "KIND_NOT_SUPPORTED");
+    // 사람이 까닭을 안다 — 화면 · GET 통로와 같은 문장 하나다.
+    assert.equal(outcome.ok === false && outcome.message, QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE);
+    assert.deepEqual(await readdir(archiveRoot), [], "공유폴더에 파일이 생겼다");
+    assert.equal((await quoteAttachmentRows(quote.id)).length, 0, "첨부 칸에 파일이 올라갔다");
+    assert.equal(await exportAuditCount(quote.id), 0, "나가지 않은 문서의 감사가 남았다");
+  });
+
+  test("🔴 엑셀 전용 케이블 장은 그대로 발행된다 — 그 문서는 앱 양식이 아니라 붙인 엑셀이다", async () => {
+    const quote = await createTestQuote(
+      quoteFields("CABLE-EXCEL", { kind: "CABLE", isExcelOnly: true, manualSupplyAmount: "40000.00", items: [], workCost: "0" })
+    );
+    const content = new Uint8Array(Buffer.from("손으로 만든 케이블 견적서 엑셀", "utf8"));
+    await attachStoredFile(quote.id, "QUOTE_EXCEL", content, "xlsx");
+    const archiveRoot = await makeTempRoot("dss-qi-cable-x-");
+
+    const outcome = await issue(quote.id, archiveRoot);
+
+    // 종류가 아니라 **엑셀 전용인가**가 가른다 — 거절 코드가 나오면 안 된다.
+    const issued = expectIssued(outcome);
+    assert.equal(sha256(new Uint8Array(issued.bytes)), sha256(content));
   });
 });
 

@@ -1,4 +1,5 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
+import { QUOTE_ITEM_KINDS, type QuoteItemKind } from "@/lib/domain/quote-list";
 import { WORKFLOW_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
 
 function isWorkflowKind(value: unknown): value is WorkflowKind {
@@ -84,37 +85,60 @@ export type QuoteItemInput = {
   partId: string | null;
   /** `2) OH 부품 비용` 칸에 들어가는 줄인가(schema/quotes.ts). */
   isOverhaulPart: boolean;
+  /**
+   * 품목 줄(ITEM)인가 설명 줄(NOTE)인가 — 케이블 견적서의 품목 표에는 금액 없는
+   * 설명 줄이 낀다(schema/quotes.ts 의 quoteItemKindEnum, 2026-09-16).
+   *
+   * 🔴 **없으면 품목 줄이다.** DB 칸의 `DEFAULT 'ITEM'` · domain/quote-list.ts 의
+   * `isQuoteAmountItemLine` 과 같은 규칙이고, 같은 이유로 안전하다 — 설명 줄을
+   * 종류 없이 보내면 품목 줄이 되고, 품목 줄은 수량 · 단가가 반드시 있어야 하므로
+   * (CHECK quote_items_item_line_amounts_required) **조용히 지나가지 않고 거절된다.**
+   */
+  kind?: QuoteItemKind;
   partNameText: string;
-  quantity: number;
+  /**
+   * 규격 → 케이블 견적서 양식의 셋째 칸(quote_items.part_spec_text). 내자 · OH
+   * 양식에는 이 칸이 없다. 없으면 null 이다.
+   */
+  partSpecText?: string | null;
+  /**
+   * 🔴 **nullable 인 것은 설명 줄 하나 때문이다.** 품목 줄에서는 여전히 반드시
+   * 있고 수량은 0보다 커야 한다 — 아래 normalizeItems 와 DB CHECK 셋이 지킨다.
+   */
+  quantity: number | null;
   /** numeric 컬럼이라 문자열로 오간다(schema/quotes.ts 의 '금액은 numeric 이다'). */
-  unitPrice: string;
+  unitPrice: string | null;
 };
 
 /**
- * 견적서 종류. 두 양식이 실제로 다르다(schema/quotes.ts 의 quoteKindEnum).
+ * 견적서 종류. 세 양식이 실제로 다르다(schema/quotes.ts 의 quoteKindEnum).
  * **O/H 대상 판정과는 별개다** — 대상품이어도 둘 다 발행하므로 사람이 고른다.
+ *
+ * 🔴 **`CABLE` 을 더한 것이 케이블 견적서를 연 일이다**(2026-09-16). 이 한 줄이
+ * [새 견적서] 팝업의 라디오 · 수정 화면의 종류 select · 검증(isQuoteKind) ·
+ * 수정 화면의 관문(queries/quotes.ts 의 getQuoteForEdit)을 **동시에** 연다.
+ * 케이블 견적서에는 작업 범위 · 수리 작업 · 작업비가 없고(양식에 그 구역이 없다)
+ * 품목 표에 규격 칸과 설명 줄이 있다 — 화면이 종류로 갈라 그린다.
  */
-export const QUOTE_KINDS = ["DOMESTIC", "OVERHAUL"] as const;
+export const QUOTE_KINDS = ["DOMESTIC", "OVERHAUL", "CABLE"] as const;
 export type QuoteKind = (typeof QUOTE_KINDS)[number];
 
 /**
  * ============================================================================
- * 🔴 DB 에 들어 있을 수 있는 종류 — 위 QUOTE_KINDS 와 **일부러 다르다**
+ * DB 에 들어 있을 수 있는 종류 — 지금은 위 QUOTE_KINDS 와 같은 셋이다
  * ============================================================================
- * 2026-09-16 에 스키마의 quote_kind 에 `CABLE` 이 생겼다(0101). 그런데 케이블
- * 견적서를 **만들고 고치는 화면 · 양식 · 검증은 아직 없다.** 그래서 이름을 둘로
- * 갈라 둔다:
+ * 2026-09-16 에 스키마의 quote_kind 에 `CABLE` 이 생겼고(0101), 그때는 케이블
+ * 견적서를 만들고 고치는 화면이 없어 두 목록이 달랐다. 화면이 생긴 지금은 셋이
+ * 같다. **그래도 이름을 둘로 남겨 둔다**:
  *
  *   QUOTE_KINDS        앱이 **다루는** 종류. 사람이 고르는 자리(새 견적서 대화상자 ·
  *                      수정 화면)와 검증(isQuoteKind)이 이것만 받는다.
- *                      **여기에 CABLE 을 더하는 것이 케이블 견적서를 여는 일**이고,
- *                      그것은 화면 · 라벨 · 양식 고르기가 함께 오는 뒤 조각의 몫이다.
  *   STORED_QUOTE_KINDS DB 가 **내줄 수 있는** 종류 전부. 읽어서 있는 그대로 보여
  *                      주기만 하는 자리(목록의 종류 딱지)가 이것을 쓴다.
  *
- * 하나로 합치면 둘 중 하나가 거짓말이 된다 — 좁히면 목록이 DB 에 있는 값을 못
- * 받고(그래서 셋째 값을 둘 중 하나로 접게 된다), 넓히면 지금 못 만드는 견적서를
- * 만들 수 있게 된다.
+ * 하나로 합치면 **다음에 종류가 하나 더 생기는 날** 둘 중 하나가 거짓말이 된다 —
+ * 좁히면 목록이 DB 에 있는 값을 못 받고(그래서 새 값을 아는 종류로 접게 된다),
+ * 넓히면 아직 그릴 줄 모르는 견적서를 만들 수 있게 된다. 그 하루를 위해 둘로 둔다.
  * ============================================================================
  */
 export const STORED_QUOTE_KINDS = ["DOMESTIC", "OVERHAUL", "CABLE"] as const;
@@ -153,6 +177,12 @@ export type QuoteFields = {
   validity: string | null;
   delivery: string | null;
   payment: string | null;
+  /**
+   * 특이사항 → 케이블 견적서 양식 10번(2026-09-16 — schema/quotes.ts 의 remarks).
+   * **여러 줄이 들어갈 수 있다** — 줄바꿈을 그대로 둔 글자 하나로 담는다. 내자 ·
+   * OH 양식에는 이 항목이 없어 그 두 종류에서는 화면이 보내지 않는다(늘 null).
+   */
+  remarks: string | null;
   workCost: string;
   /**
    * 작업비를 만든 근거. **양식으로 나가지 않는다** — 견적서에 찍히는 것은 합계
@@ -339,6 +369,12 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
   }
 
   const faultDescriptionText = optionalText("faultDescriptionText", "신고증상", MAX_LONG_TEXT);
+  /**
+   * 특이사항(케이블 견적서 양식 10번). 신고증상과 **같은 규칙**으로 읽는다 —
+   * 사람이 길게 적는 칸이고, 앞뒤 공백만 걷어 내고 가운데 줄바꿈은 그대로 둔다
+   * (optionalText 의 trim 은 양끝만 자른다).
+   */
+  const remarks = optionalText("remarks", "특이사항", MAX_LONG_TEXT);
   const repairCaseId = optionalId("repairCaseId", "수리 건");
   const customerId = optionalId("customerId", "고객사");
   const workCost = normalizeAmount("workCost", "작업비", raw.workCost, fieldErrors) ?? "0";
@@ -420,6 +456,7 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       validity: shortTexts.validity,
       delivery: shortTexts.delivery,
       payment: shortTexts.payment,
+      remarks,
       workCost,
       laborEquipmentKind,
       laborBaseCost,
@@ -635,6 +672,13 @@ function normalizeAmount(
  * 맞는지 답할 방법이 없다.
  *
  * 빈 배열이 정상이다 — 작업비만 있는 견적(부품 교체 없이 조정만 한 경우)이 있다.
+ *
+ * ── 🔴 설명 줄은 글자 하나뿐이다 (2026-09-16 케이블 견적서) ──────────────
+ * 케이블 견적서의 품목 표에는 금액이 없는 설명 줄이 낀다(`kind = "NOTE"`).
+ * 그 줄은 **수량 · 단가가 NULL 이어야 하고**(CHECK quote_items_amounts_item_line_only),
+ * 글자는 품목 줄과 같은 칸(part_name_text)에 담는다. 그래서 여기서는 두 값을
+ * 읽지 않고 **null 로 못 박는다** — 화면이 잘못 실어 보내도 DB 까지 가지 않는다.
+ * 규격도 같다: 양식이 설명 줄에는 규격을 찍지 않는다(xlsx/cable-quote-template.ts).
  */
 function normalizeItems(
   value: unknown,
@@ -660,20 +704,54 @@ function normalizeItems(
     }
     const row = entry as Record<string, unknown>;
 
+    /**
+     * 줄 종류. **적지 않으면 품목 줄**이다(QuoteItemInput.kind 의 그 항목). 모르는
+     * 값은 품목 줄로 접지 않고 오류로 세운다 — 접으면 설명 줄로 적은 글이 수량 ·
+     * 단가 없는 품목 줄이 되어 저장이 거절되는데, 사람에게는 까닭이 안 보인다.
+     */
+    let lineKind: QuoteItemKind = "ITEM";
+    if (row.kind !== null && row.kind !== undefined && row.kind !== "") {
+      if (!isQuoteItemKind(row.kind)) {
+        fieldErrors[at("kind")] = `${line}번째 줄의 종류를 확인할 수 없습니다.`;
+        return;
+      }
+      lineKind = row.kind;
+    }
+
+    const isNote = lineKind === "NOTE";
+    const label = isNote ? "설명 줄" : "부품";
+
     const name = typeof row.partNameText === "string" ? row.partNameText.trim() : "";
     if (name === "") {
-      fieldErrors[at("partNameText")] = `${line}번째 부품의 품명을 입력해 주세요.`;
+      fieldErrors[at("partNameText")] = isNote
+        ? `${line}번째 설명 줄의 글자를 입력해 주세요.`
+        : `${line}번째 부품의 품명을 입력해 주세요.`;
     } else if (name.length > MAX_SHORT_TEXT) {
-      fieldErrors[at("partNameText")] = `${line}번째 부품의 품명은 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
+      fieldErrors[at("partNameText")] = `${line}번째 ${label}의 글자는 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
     }
 
-    // CHECK 제약이 quantity > 0 이다. 여기서 걸러야 사용자가 이유를 안다.
-    const quantity = typeof row.quantity === "number" ? row.quantity : Number(row.quantity);
-    if (!Number.isInteger(quantity) || quantity <= 0 || quantity > MAX_QUANTITY) {
-      fieldErrors[at("quantity")] = `${line}번째 부품의 수량은 1 이상의 정수여야 합니다.`;
+    const specValue = row.partSpecText;
+    let partSpecText: string | null = null;
+    if (!isNote && typeof specValue === "string") {
+      const trimmed = specValue.trim();
+      if (trimmed.length > MAX_SHORT_TEXT) {
+        fieldErrors[at("partSpecText")] = `${line}번째 부품의 규격은 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
+      } else if (trimmed !== "") {
+        partSpecText = trimmed;
+      }
     }
 
-    const unitPrice = normalizeAmount(at("unitPrice"), `${line}번째 부품의 단가`, row.unitPrice, fieldErrors);
+    let quantity: number | null = null;
+    let unitPrice: string | null = null;
+    if (!isNote) {
+      // CHECK 제약이 quantity > 0 이다. 여기서 걸러야 사용자가 이유를 안다.
+      const parsed = typeof row.quantity === "number" ? row.quantity : Number(row.quantity);
+      if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_QUANTITY) {
+        fieldErrors[at("quantity")] = `${line}번째 부품의 수량은 1 이상의 정수여야 합니다.`;
+      }
+      quantity = parsed;
+      unitPrice = normalizeAmount(at("unitPrice"), `${line}번째 부품의 단가`, row.unitPrice, fieldErrors) ?? "0";
+    }
 
     let partId: string | null = null;
     if (row.partId !== null && row.partId !== undefined && row.partId !== "") {
@@ -685,13 +763,20 @@ function normalizeItems(
     }
 
     items.push({
-      partId,
-      isOverhaulPart: row.isOverhaulPart === true,
+      // 설명 줄은 부품이 아니다 — 재고 연결도 OH 표시도 달 자리가 양식에 없다.
+      partId: isNote ? null : partId,
+      isOverhaulPart: !isNote && row.isOverhaulPart === true,
+      kind: lineKind,
       partNameText: name,
+      partSpecText,
       quantity,
-      unitPrice: unitPrice ?? "0",
+      unitPrice,
     });
   });
 
   return items;
+}
+
+function isQuoteItemKind(value: unknown): value is QuoteItemKind {
+  return typeof value === "string" && (QUOTE_ITEM_KINDS as readonly string[]).includes(value);
 }

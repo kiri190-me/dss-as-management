@@ -25,6 +25,7 @@ import {
   expandRepairTaskLines,
   restoreRepairTaskQuantities,
 } from "@/lib/domain/quote-repair-task-selection";
+import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
 import { validateQuoteFields, type QuoteFields } from "@/lib/validation/quote-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -96,6 +97,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     validity: null,
     delivery: null,
     payment: null,
+    // 특이사항 — 케이블 견적서 양식 10번(2026-09-16). 내자 · OH 는 늘 비어 있다.
+    remarks: null,
     workCost: "0",
     // 작업비의 근거(2026-08-31). 기본은 "작업을 골라 본 적 없음" — 이 기능이
     // 생기기 전에 만든 견적서와 같은 상태다.
@@ -889,6 +892,153 @@ describe("견적서 수리 작업 — 같은 작업 여러 줄", () => {
     assert.deepEqual(
       (await readTaskLines(created.id)).map((line) => [line.lineNo, line.taskId]),
       [[1, rfTaskId]]
+    );
+  });
+});
+
+/**
+ * ============================================================================
+ * 케이블 견적서 — 규격 · 설명 줄 · 특이사항이 왕복하는가 (2026-09-16 케이블 ③)
+ * ============================================================================
+ * 화면이 이 종류를 그리게 됐다. 여기서 보는 것은 **저장했다 다시 열었을 때 그대로인가**
+ * 하나다 — 규격 · 설명 줄 · 특이사항 · **줄의 차례**. 차례가 곧 뜻이라(설명이 어느 묶음
+ * 위에 붙는지) 줄 순서를 바꿔 넣으면 문서의 뜻이 달라진다.
+ *
+ * 그리고 마지막 방어선: **설명 줄에 금액이 남으면 DB 가 거절한다.** 화면이 그 칸을 아예
+ * 그리지 않고 검증이 null 로 못 박지만, 둘을 거치지 않는 부르기가 있으면 여기서 멈춘다.
+ * ============================================================================
+ */
+describe("케이블 견적서 (2026-09-16)", () => {
+  const cableItems = [
+    {
+      partId: null,
+      isOverhaulPart: false,
+      kind: "ITEM" as const,
+      partNameText: "20kW RFG 부속케이블 A",
+      partSpecText: "5C-FB 3M",
+      quantity: 2,
+      unitPrice: "10000.00",
+    },
+    {
+      partId: null,
+      isOverhaulPart: false,
+      kind: "NOTE" as const,
+      partNameText: "* 20kW RFG 부속케이블 Parts 3종",
+      partSpecText: null,
+      quantity: null,
+      unitPrice: null,
+    },
+    {
+      partId: null,
+      isOverhaulPart: false,
+      kind: "ITEM" as const,
+      partNameText: "20kW RFG 부속케이블 B",
+      partSpecText: null,
+      quantity: 1,
+      unitPrice: "20000.00",
+    },
+  ];
+  const REMARKS = "1) 케이블 길이는 발주 시 확정합니다.\n2) 부가세 별도.";
+
+  /**
+   * 그 CHECK 가 거절했는가. 드리즐은 실패한 질의를 감싸 던지므로 **까닭은 cause 에** 있다 —
+   * 겉 메시지에는 제약 이름이 없어, 거기만 보면 「어떤 오류든 통과」하는 시험이 된다.
+   */
+  async function rejectsWithCheck(run: () => Promise<unknown>, constraint: string) {
+    await assert.rejects(run, (err: unknown) => {
+      const cause = (err as { cause?: { message?: string } }).cause;
+      const text = `${(err as Error).message} ${cause?.message ?? ""}`;
+      assert.match(text, new RegExp(constraint), `${constraint} 가 아닌 까닭으로 거절됐다`);
+      return true;
+    });
+  }
+
+  test("🔴 저장했다 다시 열면 규격 · 설명 줄 · 특이사항 · 차례가 그대로다", async () => {
+    const result = await create({ kind: "CABLE", remarks: REMARKS, items: cableItems });
+    assert.ok(result.ok, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const row = await readQuote(result.id);
+    assert.equal(row.kind, "CABLE");
+    // 줄바꿈이 있는 그대로 저장된다 — 줄마다 행을 만들지 않는다.
+    assert.equal(row.remarks, REMARKS);
+
+    const reopened = await getQuoteForEdit(result.id);
+    assert.ok(reopened, "케이블 견적서를 다시 열지 못했다 — 종류 관문이 닫혀 있다");
+    assert.equal(reopened.kind, "CABLE");
+    assert.equal(reopened.remarks, REMARKS);
+
+    // 🔴 고치는 화면이 펴는 목록 — 설명 줄이 **적힌 자리 그대로** 들어 있다.
+    assert.deepEqual(
+      reopened.itemLines.map((line) => [line.kind, line.partNameText, line.partSpecText, line.quantity, line.unitPrice]),
+      [
+        ["ITEM", "20kW RFG 부속케이블 A", "5C-FB 3M", 2, "10000.00"],
+        ["NOTE", "* 20kW RFG 부속케이블 Parts 3종", null, null, null],
+        ["ITEM", "20kW RFG 부속케이블 B", null, 1, "20000.00"],
+      ]
+    );
+
+    // 🔴 문서로 나가는 쪽이 읽는 목록에는 **설명 줄이 없다** — 그쪽은 수량 · 단가가
+    // 반드시 있다는 것에 기대어 셈한다(queries/quotes.ts 의 items 항목).
+    assert.deepEqual(
+      reopened.items.map((item) => [item.partNameText, item.quantity, item.unitPrice]),
+      [
+        ["20kW RFG 부속케이블 A", 2, "10000.00"],
+        ["20kW RFG 부속케이블 B", 1, "20000.00"],
+      ]
+    );
+
+    // 🔴 합계에 설명 줄이 섞이지 않는다 — 2×10,000 + 1×20,000 = 40,000.
+    assert.equal(
+      quoteSupplyAmountOf({
+        isExcelOnly: reopened.isExcelOnly,
+        manualSupplyAmount: reopened.manualSupplyAmount,
+        items: reopened.itemLines,
+        workCost: reopened.workCost,
+      }),
+      40000
+    );
+  });
+
+  test("🔴 설명 줄에 금액이 남으면 DB 가 거절한다 — 화면 · 검증을 거치지 않은 부르기의 마지막 방어선", async () => {
+    await rejectsWithCheck(
+      () =>
+        create({
+          kind: "CABLE",
+          items: [
+            {
+              partId: null,
+              isOverhaulPart: false,
+              kind: "NOTE",
+              partNameText: "설명 줄인데 금액이 있다",
+              partSpecText: null,
+              quantity: 1,
+              unitPrice: "1000.00",
+            },
+          ],
+        }),
+      "quote_items_amounts_item_line_only"
+    );
+  });
+
+  test("🔴 품목 줄에 수량이 없으면 DB 가 거절한다 — 0원짜리 품목이 문서에 찍히지 않게", async () => {
+    await rejectsWithCheck(
+      () =>
+        create({
+          kind: "CABLE",
+          items: [
+            {
+              partId: null,
+              isOverhaulPart: false,
+              kind: "ITEM",
+              partNameText: "수량 없는 품목",
+              partSpecText: null,
+              quantity: null,
+              unitPrice: null,
+            },
+          ],
+        }),
+      "quote_items_item_line_amounts_required"
     );
   });
 });

@@ -98,6 +98,9 @@ function quoteFields(suffix: string, overrides: Partial<QuoteFields> = {}): Quot
     validity: `유효기간 ${PII_MARKER}`,
     delivery: `납기 ${PII_MARKER}`,
     payment: `결재조건 ${PII_MARKER}`,
+    // 특이사항도 사람이 자유롭게 적는 칸이다(2026-09-16 케이블 견적서 — schema/quotes.ts
+    // 의 PII 항목에 payment 와 나란히 적혀 있다). 감사 로그에 닿으면 안 된다.
+    remarks: `특이사항 ${PII_MARKER}`,
     workCost: "1200000.00",
     laborEquipmentKind: null,
     laborBaseCost: null,

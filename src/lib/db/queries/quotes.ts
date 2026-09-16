@@ -25,6 +25,7 @@ import {
   isQuoteAmountItemLine,
   quoteSupplyAmountOf,
   type QuoteAmountLine,
+  type QuoteItemKind,
 } from "@/lib/domain/quote-list";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
@@ -362,9 +363,9 @@ export type QuoteEditData = {
   quoteNumber: string;
   /**
    * 🔴 **앱이 다루는 종류만 온다**(QuoteKind — 목록의 StoredQuoteKind 와 다르다).
-   * 이 자료는 수정 화면 · 미리보기 · xlsx 생성기가 받는데, 그들이 아직 케이블
-   * 견적서를 그릴 줄 모른다. 그래서 그런 장은 **아예 오지 않는다** — 아래
-   * getQuoteForEdit 의 관문이 null 로 답한다.
+   * 아직 그릴 줄 모르는 종류는 **아예 오지 않는다** — 아래 getQuoteForEdit 의
+   * 관문이 null 로 답한다. 2026-09-16 에 CABLE 이 그 목록에 들어와 케이블
+   * 견적서도 이 관문을 지난다(validation/quote-input.ts 의 QUOTE_KINDS).
    */
   kind: QuoteKind;
   quoteDate: string;
@@ -380,6 +381,12 @@ export type QuoteEditData = {
   validity: string | null;
   delivery: string | null;
   payment: string | null;
+  /**
+   * 특이사항 — 케이블 견적서 양식 10번(2026-09-16 — schema/quotes.ts 의 remarks).
+   * 수정 화면이 케이블 견적서에서만 그리고, 그대로 다시 편다(왕복). 내자 · OH 는
+   * 늘 null 이다 — 그 두 양식에 이 항목이 없다.
+   */
+  remarks: string | null;
   workCost: string;
   /**
    * 위 workCost 를 만든 근거. **다시 열었을 때 금액만 남고 무엇을 골랐는지
@@ -440,14 +447,15 @@ export type QuoteEditData = {
    */
   workScopeLines: { section: QuoteWorkScopeSection; text: string }[];
   /**
-   * 🔴 **품목 줄만 온다**(2026-09-16). 설명 줄(quote_items.kind = 'NOTE')은 케이블
-   * 견적서의 것이고, 이 자료를 받는 세 곳(수정 화면 · 미리보기 · xlsx 생성기)이
-   * 아직 그 줄을 그릴 줄 모른다. 그래서 수량 · 단가도 **여기서는 비지 않는다** —
-   * DB 칸이 nullable 이 된 것(0101)은 설명 줄 하나 때문이고, 품목 줄에는 언제나
-   * 있다(CHECK quote_items_item_line_amounts_required).
+   * 🔴 **금액이 있는 품목 줄만 온다** — **문서로 나가는 쪽**이 읽는 목록이다
+   * (미리보기 QuotePrintView · xlsx 생성기 services/quote-workbook.ts). 그 둘은
+   * 수량 · 단가가 반드시 있다는 것에 기대어 셈하므로, 설명 줄이 섞이면 0원짜리
+   * 품목이 문서에 찍히거나 합계가 어긋난다. 그래서 수량 · 단가가 **여기서는 비지
+   * 않는다** — DB 칸이 nullable 이 된 것(0101)은 설명 줄 하나 때문이고, 품목 줄에는
+   * 언제나 있다(CHECK quote_items_item_line_amounts_required).
    *
-   * 위 kind 관문이 케이블 견적서를 막고 있어 **지금 걸러지는 줄은 없다.** 케이블
-   * 화면 조각이 저 셋을 함께 고치면서 이 타입을 설명 줄까지 담게 넓히면 된다.
+   * 🔴 규격(part_spec_text)도 여기 없다 — 내자 · OH 양식에는 규격 칸이 없다.
+   * **고치는 화면은 이 목록이 아니라 아래 itemLines 를 편다.**
    */
   items: {
     partId: string | null;
@@ -455,6 +463,34 @@ export type QuoteEditData = {
     isOverhaulPart: boolean;
     quantity: number;
     unitPrice: string;
+  }[];
+  /**
+   * ==========================================================================
+   * 🔴 품목 표 **전체** — 설명 줄까지, 적힌 차례 그대로 (2026-09-16 케이블 ③)
+   * ==========================================================================
+   * **고치는 화면(QuoteEditForm)이 이것으로 표를 다시 편다.** 위 items 와 같은
+   * 줄들을 담지만 셋이 다르다:
+   *
+   *   · 설명 줄(kind = "NOTE")이 **빠지지 않는다.** 빠지면 케이블 견적서를 다시
+   *     열었을 때 설명 줄이 사라지고, 저장하는 순간 영영 없어진다.
+   *   · **규격**을 싣는다 — 케이블 양식의 셋째 칸이다.
+   *   · 그래서 수량 · 단가가 **null 일 수 있다**(설명 줄).
+   *
+   * 차례가 곧 뜻이다 — 설명 줄이 어느 품목 묶음 **위에** 붙는지가 그 줄의 내용이다.
+   * 그래서 종류로 나누지 않고 line_no 순서 그대로 한 목록으로 준다.
+   *
+   * 🔴 위 items 와 **두 벌이 아니다**: 문서로 나가는 쪽(양식 셋을 채우는 코드)과
+   * 고치는 쪽이 필요로 하는 모양이 서로 다르고, 한쪽으로 합치면 문서 쪽이 설명
+   * 줄을 만난다. 둘 다 같은 조회 결과(itemRows) 하나에서 갈라 나온다.
+   */
+  itemLines: {
+    partId: string | null;
+    kind: QuoteItemKind;
+    partNameText: string;
+    partSpecText: string | null;
+    isOverhaulPart: boolean;
+    quantity: number | null;
+    unitPrice: string | null;
   }[];
 };
 
@@ -486,6 +522,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       validity: quotes.validity,
       delivery: quotes.delivery,
       payment: quotes.payment,
+      remarks: quotes.remarks,
       workCost: quotes.workCost,
       laborEquipmentKind: quotes.laborEquipmentKind,
       laborBaseCost: quotes.laborBaseCost,
@@ -505,15 +542,13 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
   /**
    * 🔴 **아직 다루지 못하는 종류는 열지 않는다**(2026-09-16).
    *
-   * DB 의 quote_kind 에는 이제 CABLE 이 있지만(0101), 이 자료를 받는 수정 화면 ·
-   * 미리보기 · xlsx 생성기는 케이블 견적서를 그릴 줄 모른다. 그렇다고 그 값을
-   * 내자나 OH 로 접으면 **다른 종류의 양식으로 문서가 나간다** — 그 편이 못 여는
-   * 것보다 나쁘다. 그래서 목록(있는 그대로 보여 준다)과 달리 여기서는 **없는 장으로
-   * 답한다.**
+   * 그 값을 아는 종류로 접으면 **다른 종류의 양식으로 문서가 나간다** — 그 편이 못
+   * 여는 것보다 나쁘다. 그래서 목록(있는 그대로 보여 준다)과 달리 여기서는 **없는
+   * 장으로 답한다.**
    *
    * 판정을 isQuoteKind 에 맡긴 것은 일부러다 — 「앱이 다루는 종류」 목록이 한
-   * 곳(QUOTE_KINDS)뿐이라, 뒤 조각이 거기에 CABLE 을 더하는 순간 이 관문도 함께
-   * 열린다. 지금은 케이블 견적서를 만들 길 자체가 없어 실제로 걸리는 장이 없다.
+   * 곳(QUOTE_KINDS)뿐이라, 거기에 종류가 들어오는 순간 이 관문도 함께 열린다.
+   * CABLE 은 2026-09-16 에 그렇게 열렸다(케이블 ③ — 화면이 그 종류를 그릴 줄 알게 됐다).
    */
   if (!isQuoteKind(row.kind)) return null;
   const kind = row.kind;
@@ -522,6 +557,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     .select({
       partId: quoteItems.partId,
       partNameText: quoteItems.partNameText,
+      partSpecText: quoteItems.partSpecText,
       isOverhaulPart: quoteItems.isOverhaulPart,
       kind: quoteItems.kind,
       quantity: quoteItems.quantity,
@@ -532,12 +568,23 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     .orderBy(asc(quoteItems.lineNo));
 
   /**
-   * 🔴 **품목 줄만 내보낸다** — 아래 QuoteEditData.items 의 그 항목 참조. 바로 위
-   * 관문이 케이블 견적서를 막고 있어 걸러지는 줄이 실제로는 없다.
+   * 한 조회에서 **두 모양**이 갈라져 나온다(위 QuoteEditData 의 items · itemLines).
+   *
+   *  · items     문서로 나가는 쪽이 읽는다 — **품목 줄만**, 수량 · 단가가 반드시 있다.
+   *  · itemLines 고치는 화면이 읽는다 — **설명 줄까지 차례 그대로**, 규격도 함께.
    */
   const items = itemRows.filter(isQuoteAmountItemLine).map((item) => ({
     partId: item.partId,
     partNameText: item.partNameText,
+    isOverhaulPart: item.isOverhaulPart,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+  }));
+  const itemLines = itemRows.map((item) => ({
+    partId: item.partId,
+    kind: item.kind,
+    partNameText: item.partNameText,
+    partSpecText: item.partSpecText,
     isOverhaulPart: item.isOverhaulPart,
     quantity: item.quantity,
     unitPrice: item.unitPrice,
@@ -565,7 +612,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
 
   // kind 를 따로 싣는 것은 위 관문이 좁혀 둔 값을 쓰기 위해서다 — `...row` 는
   // DB 가 내주는 넓은 값(CABLE 포함)을 그대로 펴 놓는다.
-  return { ...row, kind, items, repairTasks, workScopeLines };
+  return { ...row, kind, items, itemLines, repairTasks, workScopeLines };
 }
 
 export type QuoteIntakeLookup = {

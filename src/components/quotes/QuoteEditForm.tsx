@@ -11,7 +11,11 @@ import {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import { generateClientUuid } from "@/lib/client-uuid";
 import { stockOwnerLabelOrUnspecified } from "@/lib/domain/inventory-types";
-import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
+import {
+  QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE,
+  canRenderQuoteDocument,
+} from "@/lib/domain/quote-document-support";
+import { quoteSupplyAmountOf, type QuoteItemKind } from "@/lib/domain/quote-list";
 import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
 import {
   MAX_REPAIR_TASK_QUANTITY,
@@ -189,7 +193,21 @@ type ItemRow = {
   partId: string | null;
   /** `2) OH 부품 비용` 칸으로 갈 줄인가. OH 견적서에만 그 칸이 있다. */
   isOverhaulPart: boolean;
+  /**
+   * 품목 줄인가 **설명 줄**인가 — 케이블 견적서의 품목 표에는 금액 없는 줄이 낀다
+   * (`* 20kW RFG 부속케이블 Parts 3종`, schema/quotes.ts 의 quoteItemKindEnum).
+   *
+   * 🔴 설명 줄에는 수량 · 단가 칸을 **그리지 않는다.** 값이 남은 채로 저장되면 DB 가
+   * 거절한다(CHECK quote_items_amounts_item_line_only) — 화면이 먼저 막는 방법은 칸을
+   * 안 두는 것이다(잠가 두면 이미 적힌 값이 그대로 실려 간다).
+   */
+  lineKind: QuoteItemKind;
   partNameText: string;
+  /**
+   * 규격 — **케이블 견적서 양식의 셋째 칸**(quote_items.part_spec_text). 내자 · OH
+   * 양식에는 이 칸이 없어 그 두 종류에서는 그리지도 보내지도 않는다.
+   */
+  partSpecText: string;
   quantity: string;
   unitPrice: string;
   /**
@@ -208,8 +226,29 @@ function emptyItem(): ItemRow {
     key: generateClientUuid(),
     partId: null,
     isOverhaulPart: false,
+    lineKind: "ITEM",
     partNameText: "",
+    partSpecText: "",
     quantity: "1",
+    unitPrice: "",
+    sourceKey: null,
+  };
+}
+
+/**
+ * 빈 설명 줄(케이블 견적서). **수량 · 단가를 비운 채 시작한다** — 이 줄은 그 두
+ * 값을 갖지 못한다(CHECK quote_items_amounts_item_line_only). 품목 줄이 `quantity: "1"`
+ * 로 시작하는 것과 일부러 다르다.
+ */
+function emptyNoteItem(): ItemRow {
+  return {
+    key: generateClientUuid(),
+    partId: null,
+    isOverhaulPart: false,
+    lineKind: "NOTE",
+    partNameText: "",
+    partSpecText: "",
+    quantity: "",
     unitPrice: "",
     sourceKey: null,
   };
@@ -247,7 +286,11 @@ function usedPartToItem(part: QuoteIntakeLookup["usedParts"][number]): ItemRow {
     key: generateClientUuid(),
     partId: part.partId,
     isOverhaulPart: false,
+    lineKind: "ITEM",
     partNameText: part.partSpec ? `${part.partName} (${part.partSpec})` : part.partName,
+    // 규격 칸은 케이블 견적서에만 있다. 여기(출고 부품)는 내자 · OH 의 길이라
+    // 지금까지처럼 품명 뒤에 괄호로 붙인 그대로 둔다 — 문구를 바꾸지 않는다.
+    partSpecText: "",
     quantity: String(part.quantity),
     unitPrice: toPriceFieldValue(part.unitPrice),
     sourceKey: usedPartKey(part),
@@ -276,7 +319,9 @@ function ohTemplatePartToItem(
     key: generateClientUuid(),
     partId: part.partId,
     isOverhaulPart: true,
+    lineKind: "ITEM",
     partNameText: part.partNameText,
+    partSpecText: "",
     quantity: String(part.quantity),
     unitPrice: toPriceFieldValue(part.overhaulUnitPrice),
     sourceKey: ohTemplatePartKey(index),
@@ -421,6 +466,7 @@ export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
   repairLabor,
+  cableMaxLines,
   printHeaders,
   workScopeDefaults,
   initialIntakeNumber = null,
@@ -438,6 +484,19 @@ export default function QuoteEditForm({
    * 셋 다 온다 — 사람이 장비 종류를 골라 그 목록에서 체크한다.
    */
   repairLabor: RepairLaborKindRow[];
+  /**
+   * 케이블 견적서 한 장에 담을 수 있는 줄 수 — **품목 줄 + 설명 줄을 합쳐서**다
+   * (xlsx/cable-quote-template.ts 의 `CABLE_QUOTE_MAX_LINES`). 넘치면 생성기가
+   * 문서를 만들지 않고 던지므로, 화면이 **줄을 더하는 자리에서 미리 막는다** —
+   * 열 줄을 넣고 저장한 뒤 [견적서 받기]에서야 실패하면 늦다.
+   *
+   * 🔴 **숫자를 여기에 다시 적지 않고 서버에서 받아 온다.** 그 상수는 채우개
+   * 파일에 있고, 그 파일은 `node:fs`·`node:zlib` 를 끌고 와 클라이언트 번들에
+   * 들어올 수 없다(components/repair-cases/report/ServiceReportTabs.tsx 의 같은
+   * 항목). 그래서 **서버 컴포넌트인 페이지가 읽어 넘긴다** — 두 벌이 되면 양식이
+   * 바뀌는 날 한쪽만 고쳐진다.
+   */
+  cableMaxLines: number;
   /**
    * 양식 **넷**의 회사 정보·기본 문구·계좌(장비 종류 × 견적서 종류).
    *
@@ -541,18 +600,33 @@ export default function QuoteEditForm({
   const [validity, setValidity] = useState(quote?.validity ?? "");
   const [delivery, setDelivery] = useState(quote?.delivery ?? "");
   const [payment, setPayment] = useState(quote?.payment ?? "");
+  /**
+   * 특이사항 — **케이블 견적서 양식 10번**(quotes.remarks). 여러 줄이 들어간다.
+   * 다른 두 종류에서는 칸을 그리지 않고 보내지도 않는다 — 그 양식에는 이 항목이 없다.
+   * 글자는 종류를 바꿔도 지우지 않는다(유효기간 · 납기와 같다) — 다시 케이블로
+   * 돌리면 적어 둔 값이 그대로 있다.
+   */
+  const [remarks, setRemarks] = useState(quote?.remarks ?? "");
   const [workCost, setWorkCost] = useState(quote?.workCost ?? "0");
+  /**
+   * 품목 표. 🔴 **`itemLines` 로 편다 — `items` 가 아니다**(queries/quotes.ts 의 두
+   * 항목). `items` 는 문서로 나가는 쪽이 읽는 품목 줄만이라, 그것으로 펴면 케이블
+   * 견적서를 다시 열 때 **설명 줄이 사라지고** 저장하는 순간 영영 없어진다.
+   */
   const [items, setItems] = useState<ItemRow[]>(
-    quote?.items.length
-      ? quote.items.map((item) => ({
+    quote?.itemLines.length
+      ? quote.itemLines.map((item) => ({
           key: generateClientUuid(),
           partId: item.partId,
           // 저장된 줄에는 작업비를 싣지 않는다 — 그 값은 부품 마스터의 지금 값이고,
           // 이미 정해진 작업비를 다시 제안할 이유가 없다.
           isOverhaulPart: item.isOverhaulPart,
+          lineKind: item.kind,
           partNameText: item.partNameText,
-          quantity: String(item.quantity),
-          unitPrice: item.unitPrice,
+          partSpecText: item.partSpecText ?? "",
+          // 설명 줄은 수량 · 단가가 NULL 이다 — 빈 칸으로 편다(0 으로 접지 않는다).
+          quantity: item.quantity === null ? "" : String(item.quantity),
+          unitPrice: item.unitPrice ?? "",
           // 저장돼 있던 줄이 어느 출고 기록에서 왔는지는 남지 않는다. 그래서
           // 이미 담긴 것으로 세지 않는다 — 사람이 지웠다가 다시 담을 수 있어야 한다.
           sourceKey: null,
@@ -745,6 +819,38 @@ export default function QuoteEditForm({
   const savedQuote = quote ? { id: quote.id, version: quote.version } : createdQuote;
 
   /**
+   * ============================================================================
+   * 🔴 케이블 견적서인가 — 이 한 값이 화면의 절반을 가른다 (2026-09-16 케이블 ③)
+   * ============================================================================
+   * 케이블 견적서는 **수리품과 이어지지 않는 별도 견적서**다. 그래서 이 화면에서
+   * 그 종류일 때 **없는 것들**이 있다:
+   *
+   *   · 인수번호로 불러오기 · 수리 건 연결 — 고칠 물건이 없다.
+   *   · O/H 부품 템플릿 · 출고된 부품(참고) — 같은 이유다.
+   *   · 수리 작업 목록 · 세 가지 제외 · 작업비 · 작업 내역(조사 · 수리 · 통전) —
+   *     양식에 그 구역이 아예 없다(xlsx/cable-quote-template.ts 머리말).
+   *
+   * 🔴 **감추는 것만으로는 모자라다.** 감춘 칸의 값이 저장에 실리면 나중에 금액이
+   * 어긋난다 — 그 장을 다시 열면 보이지 않는 작업비가 합계에 들어 있다. 그래서
+   * collectFields 가 케이블일 때 그 값들을 **비워서 보낸다**(그 함수의 그 항목).
+   *
+   * 반대로 케이블에만 있는 것: 품목 표의 **규격** 칸 · **설명 줄** · **특이사항**.
+   * ============================================================================
+   */
+  const isCable = kind === "CABLE";
+
+  /**
+   * 🔴 이 장의 문서를 앱이 만들 수 있는가 — [미리보기 · PDF]와 [견적서 받기]를 그릴지
+   * 가른다(2026-09-16 케이블 ③). 판정은 **받기 통로 둘 · 미리보기 화면 · 목록과 같은
+   * 함수 하나**다(domain/quote-document-support.ts) — 화면이 따로 셈하면 서버가 거절하는
+   * 장에 단추가 남거나, 케이블 양식이 붙는 날 여기만 안 열린다.
+   *
+   * 🔴 **케이블이어도 엑셀 전용이면 된다** — 그 장의 문서는 손으로 만든 엑셀(과 결재
+   * PDF)이라 앱 양식을 쓰지 않는다. 그래서 `isCable` 이 아니라 이 판정을 본다.
+   */
+  const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });
+
+  /**
    * 결재 PDF · 수기 엑셀 두 칸의 상태. 🔴 폼이 들고 있는다 — 미리보기는 폼을 통째로
    * 갈아 그리므로, 구역 안에 두면 미리보기를 여는 순간 골라 둔 파일이 사라진다
    * (QuoteAttachmentsSection.tsx 머리말).
@@ -790,13 +896,22 @@ export default function QuoteEditForm({
   /**
    * 합계 미리보기 — 서버가 금액을 셈하는 그 함수 하나로(domain/quote-list.ts 의
    * quoteSupplyAmountOf). 엑셀 전용이면 손으로 적은 공급가액이고, 비어 있으면 null(「—」).
+   *
+   * 🔴 **설명 줄은 합계에 들어가지 않는다.** 여기서 거르지 않고 줄의 종류와 빈 값을
+   * 그대로 넘겨 `isQuoteAmountItemLine` 이 가르게 한다(도메인 한 곳) — 설명 줄의 수량을
+   * `Number("") || 0` 으로 접어 넘기면 「0원짜리 품목 줄」이 되어 셈에 **들어간 것과
+   * 구별되지 않는다**(그 함수의 그 항목).
    */
   const supplyAmount = useMemo(
     () =>
       quoteSupplyAmountOf({
         isExcelOnly,
         manualSupplyAmount,
-        items: items.map((item) => ({ quantity: Number(item.quantity) || 0, unitPrice: item.unitPrice })),
+        items: items.map((item) => ({
+          kind: item.lineKind,
+          quantity: item.lineKind === "NOTE" ? null : Number(item.quantity) || 0,
+          unitPrice: item.lineKind === "NOTE" ? null : item.unitPrice,
+        })),
         workCost,
       }),
     [isExcelOnly, manualSupplyAmount, items, workCost]
@@ -809,15 +924,23 @@ export default function QuoteEditForm({
    *
    * 작업비와 같은 방식이다: **자동으로 덮지 않고 제안만 한다.** 글자를 칠
    * 때마다 덮으면 손으로 다듬어 둔 품명이 사라진다.
+   *
+   * 🔴 **케이블 견적서에는 제안하지 않는다**(2026-09-16). 지어 주는 말이
+   * `… 수리 件`(OH 면 `+ OH`)인데, 케이블은 **고칠 물건이 없는 별도 견적서**라 그 말이
+   * 맞지 않는다(domain/quote-subject.ts 의 `수리 件` 은 수리 건에서 온 표기다). 억지로
+   * 다른 말을 지어내지 않고 **사람이 적게 둔다** — 빈 문자열이면 단추가 아예 안 그려진다.
+   * 지어내는 규칙(quote-subject.ts)은 내자 · OH 의 것이라 한 글자도 건드리지 않았다.
    */
   const suggestedSubject = useMemo(
     () =>
-      buildQuoteSubject({
-        modelName: modelNameText,
-        faultDescription: faultDescriptionText,
-        kind,
-      }),
-    [modelNameText, faultDescriptionText, kind]
+      isCable
+        ? ""
+        : buildQuoteSubject({
+            modelName: modelNameText,
+            faultDescription: faultDescriptionText,
+            kind,
+          }),
+    [modelNameText, faultDescriptionText, kind, isCable]
   );
 
   /**
@@ -1212,6 +1335,26 @@ export default function QuoteEditForm({
   }
 
   /**
+   * ============================================================================
+   * 🔴 줄 수의 상한 — 케이블은 아홉 줄이고, 넘으면 **문서가 만들어지지 않는다**
+   * ============================================================================
+   * 케이블 양식은 품목 자리가 아홉이고 줄을 늘리지 않는다. 열째 줄을 넣으면 채우개가
+   * 자르지 않고 **던진다**(xlsx/cable-quote-template.ts 의 CABLE_QUOTE_MAX_LINES).
+   * 그래서 저장한 뒤 [견적서 받기]에서 실패하는 대신 **여기서 막는다.**
+   *
+   * **설명 줄도 한 자리를 먹는다** — 그래서 종류를 가리지 않고 `items.length` 를 센다.
+   * 내자 · OH 는 지금까지와 같은 상한(MAX_QUOTE_ITEMS = 50)이다.
+   * ============================================================================
+   */
+  const maxItemLines = isCable ? cableMaxLines : MAX_QUOTE_ITEMS;
+  const itemLinesFull = items.length >= maxItemLines;
+
+  /** 줄 하나를 표 끝에 더한다. 🔴 단추를 잠그는 것과 **별개로** 여기서도 막는다. */
+  function addItemRow(row: ItemRow) {
+    setItems((prev) => (prev.length >= maxItemLines ? prev : [...prev, row]));
+  }
+
+  /**
    * 엑셀 전용 장에 있으면 안 되는 줄의 수 — 서버 규칙이 세는 그대로다(저장이 거르는 빈
    * 줄은 세지 않는다). 하나라도 있으면 켜기 전에 묻는다.
    */
@@ -1343,13 +1486,37 @@ export default function QuoteEditForm({
       validity,
       delivery,
       payment,
-      workCost,
+      /**
+       * 특이사항은 **케이블 견적서에서만** 보낸다 — 다른 두 양식에는 이 항목이 없어
+       * 적힐 자리가 없다. 칸의 글자는 지우지 않으므로(위 remarks) 종류를 되돌리면
+       * 그대로 돌아온다. 공급가액이 엑셀 전용일 때만 실리는 것과 같은 규칙이다.
+       */
+      remarks: isCable ? remarks : null,
+      /**
+       * ────────────────────────────────────────────────────────────────────
+       * 🔴 케이블 견적서는 **작업 값 일곱을 비워 보낸다** (2026-09-16 케이블 ③)
+       * ────────────────────────────────────────────────────────────────────
+       * 그 양식에는 작업비 구역이 없고, 화면도 그 칸들을 접어 두었다(isCable).
+       * 감춘 값을 그대로 실어 보내면 **보이지 않는 작업비가 합계에 들어간다** —
+       * 내자로 적다가 종류만 케이블로 바꾼 장이 정확히 그 꼴이 된다(작업비 350만원이
+       * 그대로 남는다). 그래서 여기서 비운다:
+       *
+       *   workCost "0" · laborEquipmentKind null · laborBaseCost null ·
+       *   powerTestExcluded false · laborPowerTestDeduction null ·
+       *   investigationExcluded false · documentExcluded false ·
+       *   repairTasks [] · workScopeLines []
+       *
+       * 🔴 **화면의 상태는 지우지 않는다** — 종류를 되돌리면 적어 둔 작업 내역과
+       * 고른 작업이 그대로 돌아온다(엑셀 전용 스위치가 줄을 넣어 두는 것과 같은 판단).
+       * 보내지 않을 뿐이다.
+       */
+      workCost: isCable ? "0" : workCost,
       /**
        * 작업비의 근거. **그때 값의 사본을 보낸다** — 나중에 시간당 단가가 오르거나
        * 공수시간이 고쳐져도 이미 보낸 견적서의 근거는 그대로여야 한다
        * (schema/repair-labor.ts 의 quote_repair_tasks 머리말).
        */
-      laborEquipmentKind: laborKind,
+      laborEquipmentKind: isCable ? null : laborKind,
       /**
        * 기본 작업비 스냅숏 — **이 장에 실제로 더해진 금액**이다(정해진 세 공수시간의 합 ×
        * 시간당 단가). 🔴 `repair_labor_settings.base_cost` 를 베끼지 않는다: 2026-09-16 부터
@@ -1357,7 +1524,7 @@ export default function QuoteEditForm({
        * 갈라진다. 근거로 남길 것은 **그때 청구한 기본 작업비** 쪽이다.
        */
       laborBaseCost:
-        laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),
+        isCable || laborSuggestion.baseCost === null ? null : toAmountText(laborSuggestion.baseCost),
       /**
        * 통전작업 제외 — **결정과 그때 뺀 금액을 따로 보낸다.**
        *
@@ -1369,8 +1536,9 @@ export default function QuoteEditForm({
        * 이다(그 장비의 통전 공수시간을 아직 정하지 않았다). 화면이 아래에서
        * 그 사실을 말한다.
        */
-      powerTestExcluded,
-      laborPowerTestDeduction: powerTestDeduction === null ? null : toAmountText(powerTestDeduction),
+      powerTestExcluded: isCable ? false : powerTestExcluded,
+      laborPowerTestDeduction:
+        isCable || powerTestDeduction === null ? null : toAmountText(powerTestDeduction),
       /**
        * 「조사작업 제외」 체크 — 문서는 저장된 이 결정만 읽는다(「① 조사작업」을 뺀다). 빈
        * 칸만으로 가르면 옛 견적서의 빈 칸과 구별되지 않아 따로 보낸다.
@@ -1380,20 +1548,20 @@ export default function QuoteEditForm({
        * 몫 자체는 **저장하지 않는다**(칸이 없다 — domain/quote-labor-cost.ts 머리말). 금액은
        * 사람이 [계산한 작업비 적용]으로 넣은 workCost 그대로다.
        */
-      investigationExcluded,
+      investigationExcluded: isCable ? false : investigationExcluded,
       /**
        * 「서류작업 제외」 체크(2026-09-16) — **금액에만 쓰이는 결정**이다. 문서는 이 칸을
        * 읽지 않는다(견적서에 서류작업 구역이 없다). 조사와 같이 **뺀 금액은 보내지 않는다** —
        * 담을 칸이 없고, 청구 금액은 사람이 [계산한 작업비 적용]으로 넣은 workCost 그대로다.
        */
-      documentExcluded,
+      documentExcluded: isCable ? false : documentExcluded,
       /**
        * 엑셀 전용 · 손으로 적은 공급가액. 공급가액은 **켜져 있을 때만** 보낸다 — 꺼진 장에
        * 값이 있으면 검증이 거절한다(validation/quote-input.ts 의 quoteExcelOnlyFieldErrors).
        */
       isExcelOnly,
       manualSupplyAmount: isExcelOnly ? manualSupplyAmount : null,
-      repairTasks: selectedTasks,
+      repairTasks: isCable ? [] : selectedTasks,
       /**
        * 문서에 적히는 작업 내역. 빈 줄은 검증이 걸러 낸다 — 적힐 것이 없는
        * 문장이라 버려도 잃는 것이 없다.
@@ -1401,21 +1569,38 @@ export default function QuoteEditForm({
        * 묶음 차례는 배열 순서가 그대로다: 조사 → 수리 → 통전, 양식에 적히는
        * 순서와 같게 보낸다.
        */
-      workScopeLines: QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) =>
-        scopeLines[section].map((row) => ({ section, text: row.text }))
-      ),
+      workScopeLines: isCable
+        ? []
+        : QUOTE_WORK_SCOPE_SECTIONS.flatMap((section) =>
+            scopeLines[section].map((row) => ({ section, text: row.text }))
+          ),
       // 통째로 빈 줄은 보내지 않는다 — 사람이 `+ 부품 추가`를 눌러 두고 안 채운
-      // 줄이 저장을 막으면, 어디가 문제인지 찾느라 폼을 다시 훑게 된다.
+      // 줄이 저장을 막으면, 어디가 문제인지 찾느라 폼을 다시 훑게 된다. 설명 줄은
+      // 단가 칸이 아예 없으므로 **글자 하나로** 빈 줄인지 가려진다.
       items: items
         .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
-        .map((row) => ({
-          partId: row.partId,
-          // 내자 견적서에는 OH 칸이 없다 — 종류를 바꿔 저장하면 그 표시를 지운다.
-          isOverhaulPart: kind === "OVERHAUL" ? row.isOverhaulPart : false,
-          partNameText: row.partNameText,
-          quantity: Number(row.quantity),
-          unitPrice: row.unitPrice,
-        })),
+        .map((row) => {
+          const isNote = row.lineKind === "NOTE";
+          return {
+            partId: row.partId,
+            // 내자 견적서에는 OH 칸이 없다 — 종류를 바꿔 저장하면 그 표시를 지운다.
+            isOverhaulPart: kind === "OVERHAUL" ? row.isOverhaulPart : false,
+            kind: row.lineKind,
+            partNameText: row.partNameText,
+            /**
+             * 규격은 **케이블 견적서에서만** 보낸다 — 다른 두 양식에는 규격 칸이 없다.
+             * OH 표시를 종류가 바뀌면 지우는 것과 같은 규칙이다.
+             */
+            partSpecText: isCable && !isNote ? row.partSpecText : null,
+            /**
+             * 🔴 설명 줄은 수량 · 단가가 **NULL 이어야 한다**(CHECK
+             * quote_items_amounts_item_line_only). 화면에 그 칸이 없으므로 여기서
+             * 지어낼 것도 없다 — `Number("")` 가 NaN 으로 새어 나가지 않게 못 박는다.
+             */
+            quantity: isNote ? null : Number(row.quantity),
+            unitPrice: isNote ? null : row.unitPrice,
+          };
+        }),
     };
   }
 
@@ -1632,7 +1817,11 @@ export default function QuoteEditForm({
           investigationExcluded,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
+          // 🔴 설명 줄은 넘기지 않는다 — 이 미리보기는 내자 · OH 양식을 그리는 화면이고,
+          // 그쪽은 수량 · 단가가 있는 품목 줄만 안다(queries/quotes.ts 의 items · itemLines).
+          // 케이블 견적서는 애초에 이 단추가 없다(아래 머리의 [미리보기 · PDF]).
           items: items
+            .filter((row) => row.lineKind === "ITEM")
             .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
             .map((row) => ({
               partId: row.partId,
@@ -1693,19 +1882,26 @@ export default function QuoteEditForm({
               방금 고친 값이 보여야 한다. 예전에는 `/quotes/{id}/print` 로
               보냈는데, 그 통로는 저장된 값을 그려서 고치는 중에 누르면 화면과
               다른 문서가 나왔다. */}
-          <button
-            type="button"
-            onClick={() => setShowPreview(true)}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
-          >
-            미리보기 · PDF
-          </button>
+          {/* 🔴 **앱 양식이 없는 종류에는 이 단추가 없다**(2026-09-16 케이블 ③). 미리보기는
+              내자 · OH 양식을 그리는 화면이라, 케이블 장을 그리면 **다른 종류의 문서**가 보이고
+              그대로 인쇄된다. 그 화면과 받기 통로 둘은 **서버에서도 거절한다** — 여기서 감추는
+              것은 「눌러서 실패하는 단추를 두지 않는다」이지 그것이 관문인 것은 아니다.
+              못 하는 일을 잠긴 단추로 두지 않는 것은 이 저장소의 규칙이다 — 「왜 안 눌리지」가 된다. */}
+          {canGetDocument && (
+            <button
+              type="button"
+              onClick={() => setShowPreview(true)}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
+            >
+              미리보기 · PDF
+            </button>
+          )}
           {/* 파일은 저장된 장에서만 받을 수 있다 — 만드는 통로가 DB 의 그 줄을
               읽기 때문이다. 그래서 이 단추만 저장 뒤에 나타난다.
               🔴 이 화면은 수정 권한자만 들어온다(page 가 redirect) — 그래서 링크가 아니라 발행
               단추다(공유폴더 저장 · 엑셀 칸 교체, 견적서 B1c). 저장하지 않은 변경이 있으면 통로를
               부르지 않고 「먼저 [저장]」을 알린다. 저장 중 · 충돌이면 잠근다. */}
-          {savedQuote && (
+          {savedQuote && canGetDocument && (
             <QuoteIssueButton
               quoteId={savedQuote.id}
               label="견적서 받기"
@@ -1745,6 +1941,16 @@ export default function QuoteEditForm({
           </button>
         </div>
       </div>
+
+      {/* 🔴 **지금 안 되는 일**을 말한다(2026-09-16 케이블 ③). 단추를 말없이 감추면 사람은
+          화면이 고장 난 줄 안다 — 무엇이 없고 왜 없는지 한 줄로 적는다. 🔴 문장은 서버가
+          거절할 때 돌려주는 것과 **같은 하나**다(domain/quote-document-support.ts) — 두 벌이면
+          화면과 통로가 다른 말을 한다. */}
+      {!canGetDocument && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          {QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}
+        </p>
+      )}
 
       {/* [견적서 받기] 결과 — 단추들 바로 아래(견적서 B1c). 「먼저 [저장]」도 여기에 뜬다. */}
       {issueNotice.length > 0 && (
@@ -1805,7 +2011,16 @@ export default function QuoteEditForm({
         </div>
       )}
 
-      {/* ── 인수번호로 불러오기 ─────────────────────────────────────────── */}
+      {/* ── 인수번호로 불러오기 ───────────────────────────────────────────
+          🔴 **케이블 견적서에는 없다**(2026-09-16 케이블 ③). 이 구역이 하는 일은 수리 건
+          하나를 골라 그 장비의 값을 끌어오고 `repairCaseId` 를 잇는 것인데, 케이블 견적서는
+          고칠 물건이 없는 별도 견적서다(schema/quotes.ts 의 'CABLE 은 수리품에 딸린 장이
+          아니다'). 검증도 수리 건을 선택 사항으로 본다 — 이어야 할 것이 없다.
+
+          🔴 **이미 이어져 있던 연결은 끊지 않는다** — 내자로 만들어 어느 건에 붙여 둔 장을
+          케이블로 바꿔도 `repairCaseId` 는 그대로 보낸다. 끊으면 그 건의 「견적서」 탭에서
+          이 장이 소리 없이 사라지고, 되돌릴 길이 화면에 없다. */}
+      {!isCable && (
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">인수번호로 불러오기</h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
@@ -1842,6 +2057,7 @@ export default function QuoteEditForm({
           </p>
         )}
       </section>
+      )}
 
       {/* ── 상단 정보 ───────────────────────────────────────────────────── */}
       <section className="grid gap-4 rounded-lg border border-zinc-200 bg-white p-4 sm:grid-cols-2 dark:border-zinc-800 dark:bg-zinc-900">
@@ -1953,6 +2169,28 @@ export default function QuoteEditForm({
         <Field label="결재조건" error={fieldErrors.payment} hint="비우면 양식 문구(귀사 결제 조건)">
           <input value={payment} onChange={(e) => setPayment(e.target.value)} className={editInputClass} disabled={disabled} />
         </Field>
+
+        {/* ── 특이사항 (케이블 견적서 양식 10번, 2026-09-16) ──────────────
+            🔴 **케이블 견적서에만 있다** — 내자 · OH 양식에는 이 항목이 자체가 없어,
+            거기서 적으면 어디에도 나가지 않는 글이 된다. 여러 줄이 들어가므로
+            textarea 이고, 줄바꿈은 적은 그대로 저장된다(schema/quotes.ts 의 remarks). */}
+        {isCable && (
+          <div className="sm:col-span-2">
+            <Field
+              label="특이사항"
+              error={fieldErrors.remarks}
+              hint="케이블 견적서 양식의 10번 항목 · 여러 줄"
+            >
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="예) 케이블 길이는 발주 시 확정합니다."
+                className={`${editInputClass} min-h-20 resize-y`}
+                disabled={disabled}
+              />
+            </Field>
+          </div>
+        )}
 
         {/* ── 엑셀 전용 (2026-09-15 Q3) ──────────────────────────────────
             켜면 아래 부품 · 작업 구역을 접고 공급가액을 손으로 받는다. 켜고 끄는 판정은
@@ -2097,8 +2335,10 @@ export default function QuoteEditForm({
         </section>
       )}
 
-      {/* ── 사용한 부품 (참고) ──────────────────────────────────────────── */}
-      {usedParts.length > 0 && (
+      {/* ── 사용한 부품 (참고) ────────────────────────────────────────────
+          🔴 케이블 견적서에는 그리지 않는다 — 출고된 부품은 수리 건에 딸린 값이고, 그
+          종류에는 수리 건이 없다. (내자로 불러온 뒤 종류만 바꾼 장에서도 감춘다.) */}
+      {!isCable && usedParts.length > 0 && (
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
           <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
             이 접수 건에 출고된 부품 <span className="font-normal text-zinc-500 dark:text-zinc-400">(참고용)</span>
@@ -2166,18 +2406,38 @@ export default function QuoteEditForm({
         </section>
       )}
 
-      {/* ── 부품 줄 ─────────────────────────────────────────────────────── */}
+      {/* ── 부품 줄 ───────────────────────────────────────────────────────
+          케이블 견적서에서는 이 표가 **품목 표 전체**다 — 그 양식에는 작업비 구역이
+          없고(아래 세 구역을 접는다), 칸이 하나 더 많으며(규격), 금액 없는 설명 줄이 낀다. */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">부품 비용</h2>
-          <button
-            type="button"
-            onClick={() => setItems((prev) => [...prev, emptyItem()])}
-            disabled={disabled || items.length >= MAX_QUOTE_ITEMS}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
-          >
-            + 부품 추가
-          </button>
+          <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            {isCable ? "품목" : "부품 비용"}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 🔴 설명 줄은 **따로 더한다** — 줄마다 종류를 바꾸는 스위치를 두지 않았다.
+                바꾸는 순간 이미 적어 둔 수량 · 단가를 어떻게 할지(지울지, 숨긴 채 들고
+                있을지) 정해야 하는데, 숨긴 채 들고 있으면 DB 가 거절하고 지우면 되돌릴
+                길이 없다. 더하고 지우는 두 길만 두면 그 물음이 생기지 않는다. */}
+            {isCable && (
+              <button
+                type="button"
+                onClick={() => addItemRow(emptyNoteItem())}
+                disabled={disabled || itemLinesFull}
+                className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+              >
+                + 설명 줄 추가
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => addItemRow(emptyItem())}
+              disabled={disabled || itemLinesFull}
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+            >
+              {isCable ? "+ 품목 추가" : "+ 부품 추가"}
+            </button>
+          </div>
         </div>
 
         {kind === "OVERHAUL" && (
@@ -2187,14 +2447,72 @@ export default function QuoteEditForm({
           </p>
         )}
 
+        {isCable && (
+          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+            품목 줄과 설명 줄을 합쳐 <b>{cableMaxLines}줄</b>까지 넣을 수 있습니다 — 양식의 품목
+            자리가 그만큼입니다. 설명 줄은 글자만 적히고 <b>합계에 들어가지 않습니다</b>. 적어 둔
+            차례가 그대로 문서의 차례입니다.
+          </p>
+        )}
+        {/* 🔴 상한에 닿으면 **까닭을 적는다.** 단추만 잠가 두면 「왜 안 눌리지」가 된다. */}
+        {isCable && itemLinesFull && (
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+            줄이 {cableMaxLines}줄을 다 찼습니다 — 케이블 견적서 양식에 더 넣을 자리가 없습니다.
+            줄을 지우거나 견적서를 나눠 주세요.
+          </p>
+        )}
+
         <div className="mt-3 flex flex-col gap-2">
-          {items.map((row, index) => (
-            <div key={row.key} className={`grid grid-cols-1 gap-2 ${kind === "OVERHAUL" ? "sm:grid-cols-[1fr_5rem_8rem_auto_auto]" : "sm:grid-cols-[1fr_5rem_8rem_auto]"}`}>
+          {items.map((row, index) =>
+            /**
+             * 🔴 설명 줄에는 **수량 · 단가 칸이 없다.** 잠가 두는 것이 아니라 아예 그리지
+             * 않는다 — 잠가 두면 이미 적혀 있던 값이 그대로 실려 가고, DB 가 그 줄을
+             * 거절한다(CHECK quote_items_amounts_item_line_only).
+             */
+            row.lineKind === "NOTE" ? (
+              <div key={row.key} className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr_auto]">
+                <span className="self-center rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  설명 줄
+                </span>
+                <div>
+                  <input
+                    value={row.partNameText}
+                    onChange={(e) => updateItem(row.key, { partNameText: e.target.value })}
+                    placeholder="* 20kW RFG 부속케이블 Parts 3종"
+                    aria-label={`${index + 1}번째 설명 줄`}
+                    className={editInputClass}
+                    disabled={disabled}
+                  />
+                  {fieldErrors[`items.${index}.partNameText`] && (
+                    <p className={editErrorClass}>{fieldErrors[`items.${index}.partNameText`]}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItem(row.key)}
+                  disabled={disabled}
+                  aria-label={`${index + 1}번째 설명 줄 지우기`}
+                  className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+            <div
+              key={row.key}
+              className={`grid grid-cols-1 gap-2 ${
+                isCable
+                  ? "sm:grid-cols-[1fr_1fr_5rem_8rem_auto]"
+                  : kind === "OVERHAUL"
+                    ? "sm:grid-cols-[1fr_5rem_8rem_auto_auto]"
+                    : "sm:grid-cols-[1fr_5rem_8rem_auto]"
+              }`}
+            >
               <div>
                 <input
                   value={row.partNameText}
                   onChange={(e) => updateItem(row.key, { partNameText: e.target.value, partId: null })}
-                  placeholder={`${index + 1}번째 부품 품명`}
+                  placeholder={`${index + 1}번째 ${isCable ? "품목 품명" : "부품 품명"}`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2202,12 +2520,29 @@ export default function QuoteEditForm({
                   <p className={editErrorClass}>{fieldErrors[`items.${index}.partNameText`]}</p>
                 )}
               </div>
+              {/* 🔴 규격 칸은 **케이블 견적서에만** 있다 — 내자 · OH 양식에는 그 칸이 없어,
+                  거기서 적으면 어디에도 안 나가는 값이 된다(저장도 하지 않는다 — collectFields). */}
+              {isCable && (
+                <div>
+                  <input
+                    value={row.partSpecText}
+                    onChange={(e) => updateItem(row.key, { partSpecText: e.target.value })}
+                    placeholder="규격 (없으면 비워 두세요)"
+                    aria-label={`${index + 1}번째 품목 규격`}
+                    className={editInputClass}
+                    disabled={disabled}
+                  />
+                  {fieldErrors[`items.${index}.partSpecText`] && (
+                    <p className={editErrorClass}>{fieldErrors[`items.${index}.partSpecText`]}</p>
+                  )}
+                </div>
+              )}
               <div>
                 <input
                   value={row.quantity}
                   onChange={(e) => updateItem(row.key, { quantity: e.target.value })}
                   inputMode="numeric"
-                  aria-label={`${index + 1}번째 부품 수량`}
+                  aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 수량`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2222,7 +2557,7 @@ export default function QuoteEditForm({
                   value={row.unitPrice}
                   onValueChange={(raw) => updateItem(row.key, { unitPrice: raw })}
                   placeholder="단가"
-                  aria-label={`${index + 1}번째 부품 단가`}
+                  aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 단가`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2245,15 +2580,28 @@ export default function QuoteEditForm({
                 type="button"
                 onClick={() => removeItem(row.key)}
                 disabled={disabled}
-                aria-label={`${index + 1}번째 부품 줄 지우기`}
+                aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 줄 지우기`}
                 className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
               >
                 ×
               </button>
             </div>
-          ))}
+            )
+          )}
         </div>
         {fieldErrors.items && <p className={editErrorClass}>{fieldErrors.items}</p>}
+
+        {/* ── 🔴 케이블이면 여기부터 세 구역을 접는다 (2026-09-16 케이블 ③) ──
+            수리 작업 목록 · 세 가지 제외 · 작업 내역(조사 · 수리 · 통전) · 작업비 —
+            케이블 양식에는 그 구역이 하나도 없다(xlsx/cable-quote-template.ts 머리말의
+            '작업 범위 구역이 없다'). 엑셀 전용이 부품 · 작업 구역을 접는 것과 같은 방식이고,
+            아래 세 덩이는 **들여쓰기를 바꾸지 않고** 이 조건으로만 감쌌다.
+
+            🔴 접기만 하면 모자라다 — 감춘 값이 저장에 실리지 않게 collectFields 가
+            비워 보낸다(그 함수의 '작업 값 일곱을 비워 보낸다'). 상태는 그대로 두므로
+            종류를 되돌리면 적어 둔 것이 그대로 돌아온다. */}
+        {!isCable && (
+        <>
 
         {/* ── 수리 작업 목록 ─────────────────────────────────────────────
             🔴 **작업비는 부품이 아니라 '작업'에 붙는다**(2026-08-31 사용자 정정).
@@ -2694,6 +3042,9 @@ export default function QuoteEditForm({
             </button>
           )}
         </div>
+
+        </>
+        )}
       </section>
       </>
       )}
@@ -2717,7 +3068,9 @@ export default function QuoteEditForm({
         <p className="mt-2 text-right text-xs text-zinc-500 dark:text-zinc-400">
           {isExcelOnly
             ? "엑셀 전용 견적서의 공급가는 위에 적은 공급가액입니다. [견적서 받기]는 붙인 엑셀을 그대로 내려줍니다."
-            : "미리보기입니다. 저장되는 값은 수량과 단가뿐이고, 견적서 파일에서는 양식의 수식이 계산합니다."}
+            : isCable
+              ? "미리보기입니다. 설명 줄은 합계에 들어가지 않고, 견적서 파일에서는 양식의 수식이 계산합니다."
+              : "미리보기입니다. 저장되는 값은 수량과 단가뿐이고, 견적서 파일에서는 양식의 수식이 계산합니다."}
         </p>
       </section>
 

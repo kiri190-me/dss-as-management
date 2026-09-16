@@ -17,6 +17,10 @@ import {
   restoreQuoteAction,
 } from "@/lib/server/actions/quotes";
 import type { DeletedQuoteRow, QuoteListItem } from "@/lib/db/queries/quotes";
+import {
+  QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE,
+  canRenderQuoteDocument,
+} from "@/lib/domain/quote-document-support";
 import { quoteEditHref, quotePrintHref } from "@/lib/domain/quote-new-link";
 import { quoteKindLabels } from "@/lib/validation/quote-input";
 import { QuoteFileBadges } from "@/components/quotes/QuoteAttachmentParts";
@@ -602,7 +606,7 @@ function QuoteTable({
             </td>
             <td className="whitespace-nowrap px-3 py-2">
               <div className="flex gap-1">
-                <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
+                <PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />
                 <DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />
                 {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
               </div>
@@ -661,7 +665,7 @@ function QuoteCardList({
             </span>
           </p>
           <div className="flex gap-1">
-            <PreviewLink id={row.id} repairCaseId={quoteLinkRepairCaseId} />
+            <PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />
             <DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />
             {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
           </div>
@@ -676,11 +680,15 @@ function QuoteCardList({
  *
  * `repairCaseId` 는 줄 링크와 같은 값이다(QuoteListScreen 의 quoteLinkRepairCaseId).
  * 인쇄 화면이 그것을 받아 「돌아가기」를 그 건을 실은 수정 화면으로 보낸다.
+ *
+ * 🔴 앱 양식이 아직 없는 종류(케이블)에는 **내밀지 않는다** — 그 화면도 서버에서 거절한다
+ * (아래 DownloadLink · domain/quote-document-support.ts). 까닭은 그 자리의 곁말이 말한다.
  */
-function PreviewLink({ id, repairCaseId }: { id: string; repairCaseId: string | null }) {
+function PreviewLink({ row, repairCaseId }: { row: QuoteListItem; repairCaseId: string | null }) {
+  if (!canRenderQuoteDocument(row)) return null;
   return (
     <Link
-      href={quotePrintHref({ quoteId: id, repairCaseId })}
+      href={quotePrintHref({ quoteId: row.id, repairCaseId })}
       className="inline-block rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
     >
       미리보기 · PDF
@@ -747,6 +755,21 @@ function DownloadLink({
   canEdit: boolean;
   onIssueOutcome: (row: QuoteListItem, outcome: QuoteIssueRunOutcome) => void;
 }) {
+  /**
+   * 🔴 앱 양식이 아직 없는 종류(케이블)에는 **받기를 내밀지 않는다**(2026-09-16 케이블 ③).
+   * 두 통로 모두 서버에서 거절하지만, 눌러서 실패하는 단추를 보여 줄 까닭이 없다. 곁말로
+   * 까닭을 달아 둔다 — 빈 칸만 있으면 「왜 이 줄만 받기가 없지」가 된다.
+   */
+  if (!canRenderQuoteDocument(row)) {
+    return (
+      <span
+        title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}
+        className="text-xs text-zinc-400 dark:text-zinc-500"
+      >
+        —
+      </span>
+    );
+  }
   if (canEdit) {
     return (
       <QuoteIssueButton

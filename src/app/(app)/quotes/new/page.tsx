@@ -6,6 +6,7 @@ import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
 } from "@/lib/storage/quote-template";
+import { CABLE_QUOTE_MAX_LINES } from "@/lib/xlsx/cable-quote-template";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
@@ -93,6 +94,13 @@ export default async function NewQuotePage({
       quote={null}
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
+      /**
+       * 케이블 견적서의 줄 수 상한 — **채우개의 상수를 그대로 내려보낸다**(케이블 ③).
+       * 그 파일은 `node:fs`·`node:zlib` 를 끌고 와 클라이언트 번들에 들어갈 수 없어서,
+       * 서버 컴포넌트인 이 페이지가 읽어 넘긴다(폼의 cableMaxLines 항목). 숫자를 화면에
+       * 다시 적으면 양식이 바뀌는 날 한쪽만 고쳐진다.
+       */
+      cableMaxLines={CABLE_QUOTE_MAX_LINES}
       printHeaders={printHeaders}
       workScopeDefaults={workScopeDefaults}
       initialIntakeNumber={link.intakeNumber}
