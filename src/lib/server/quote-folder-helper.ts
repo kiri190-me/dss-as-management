@@ -272,6 +272,39 @@ function Stop-Helper([string]$Outcome, [int]$Code) {
   exit $Code
 }
 
+# 폴더가 있나 — 'found' · 'missing' · 'unreachable'.
+#
+# 🔴 try/catch 가 여기 있는 까닭 (2026-09-16 실측). 이 스크립트는 맨 위에서
+# $ErrorActionPreference = 'Stop' 을 걸어 둔다. 그래서 **풀리지 않는 서버 이름**
+# (\\없는이름\공유)에 Test-Path 를 하면 $false 가 돌아오는 것이 아니라 **던진다** —
+# 바깥 catch 로 빠져 'REJECT error' 로 끝나고, 둘째 주소는 시도조차 못 한다.
+# 없는 로컬 폴더는 얌전히 $false 라서 이 차이가 잘 드러나지 않는다.
+# 못 닿는 것과 없는 것을 여기서 함께 삼켜 **다음 주소로 넘긴다**.
+function Test-FolderState([string]$Path) {
+  try {
+    if (Test-Path -LiteralPath $Path -PathType Container) { return 'found' }
+    return 'missing'
+  } catch {
+    return 'unreachable'
+  }
+}
+
+# 루트부터 그 폴더까지 마디마다 바로 가기(정션 · 심볼릭 링크)가 없는가.
+# 읽다가 실패하면 $false — 확인하지 못한 것은 열지 않는다(안전한 쪽으로).
+function Test-NoReparsePoint([string]$RootFull, [string]$Relative) {
+  try {
+    $current = $RootFull
+    foreach ($segment in $Relative.Split([char]'/')) {
+      $current = $current + '\' + $segment
+      $attributes = [System.IO.File]::GetAttributes($current)
+      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+    }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 # 상대 경로 규칙 — 서버의 domain/quote-folder-link.ts 와 같다.
 function Test-RelativePath([string]$Value) {
   if ([string]::IsNullOrEmpty($Value)) { return $false }
@@ -317,9 +350,9 @@ try {
   if (-not (Test-RelativePath $relative)) { Stop-Helper 'REJECT bad-path' 3 }
 
   # (e~f) 루트를 차례로 — 담김 검사는 **루트마다 따로** 하고, 처음으로 실제 있는 폴더를 고른다.
-  #       못 닿는 주소는 Test-Path 가 실패할 뿐이므로 다음 주소로 넘어간다.
   $target = $null
   $contained = $false
+  $reparse = $false
   foreach ($candidateRoot in $Roots) {
     # (e) 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
     $rootFull = [System.IO.Path]::GetFullPath($candidateRoot).TrimEnd('\')
@@ -328,22 +361,19 @@ try {
     $contained = $true
 
     # (f) 폴더가 아니면(없음 · 파일 · 서버에 못 닿음) 다음 루트로.
-    if (-not (Test-Path -LiteralPath $full -PathType Container)) { continue }
+    if ((Test-FolderState $full) -ne 'found') { continue }
 
     # 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다 — 열지 않는다.
     # 다음 루트로 넘기지 않는다: 같은 폴더를 다른 주소로 열어도 같은 바로 가기다.
-    $current = $rootFull
-    foreach ($segment in $relative.Split([char]'/')) {
-      $current = $current + '\' + $segment
-      $attributes = [System.IO.File]::GetAttributes($current)
-      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.'
-        Stop-Helper 'REJECT reparse-point' 3
-      }
-    }
+    if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }
 
     $target = $full
     break
+  }
+
+  if ($reparse) {
+    Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.'
+    Stop-Helper 'REJECT reparse-point' 3
   }
 
   # 어느 루트 아래에도 들지 않는 경로 — 규칙 위반이다(없는 폴더와 구별한다).

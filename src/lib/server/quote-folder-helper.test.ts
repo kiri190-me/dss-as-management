@@ -251,8 +251,10 @@ describe("도우미 스크립트 본문", () => {
       "if (-not (Test-RelativePath $relative)) { Stop-Helper 'REJECT bad-path' 3 }",
       "[System.IO.Path]::GetFullPath($rootFull + '\\' + $relative.Replace('/', '\\'))",
       "$full.StartsWith($rootFull + '\\', [System.StringComparison]::OrdinalIgnoreCase)",
-      "Test-Path -LiteralPath $full -PathType Container",
-      "[System.IO.FileAttributes]::ReparsePoint",
+      // 폴더 확인 · 바로 가기 확인은 함수로 빼 두었다 — 못 닿는 주소가 던져도 다음 루트로
+      // 넘어가야 해서다(Test-FolderState 머리 주석). 여기서는 부르는 자리를 본다.
+      "if ((Test-FolderState $full) -ne 'found') { continue }",
+      "if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }",
       "if ($DryRun) { Stop-Helper ('OPEN ' + $full) 0 }",
       "[System.Diagnostics.Process]::Start($start)",
     ];
@@ -474,6 +476,19 @@ describe("🔴 루트 둘 — 차례로 해 보고 처음으로 있는 것을 �
 
   test("첫째가 없으면 둘째로 연다 — 하나가 안 닿아도 열린다", async () => {
     const result = await runWithRoots({ uncRoot: missing, uncRootAlt: real }, `${YEAR}/${QUOTE}`);
+    assert.equal(result.stdout.trim(), `OPEN ${path.join(real, YEAR, QUOTE)}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  /**
+   * 🔴 2026-09-16 에 실제로 겪은 것. 없는 **로컬 폴더**는 Test-Path 가 얌전히 $false 를
+   * 주지만, **풀리지 않는 서버 이름**은 던진다 — 스크립트가 $ErrorActionPreference = 'Stop'
+   * 이라 바깥 catch 로 빠져 'REJECT error'(9)로 끝나고 둘째 주소를 시도조차 못 했다.
+   * 위의 "없는 루트" 시험은 로컬 폴더라 이 차이를 못 잡았다. 그래서 하나 더 둔다.
+   */
+  test("🔴 첫째가 풀리지 않는 서버 이름이어도 둘째로 연다 — 던지는 것과 없는 것은 다르다", async () => {
+    const unresolvable = "\\\\NOSUCHSERVER-DSS\\share";
+    const result = await runWithRoots({ uncRoot: unresolvable, uncRootAlt: real }, `${YEAR}/${QUOTE}`);
     assert.equal(result.stdout.trim(), `OPEN ${path.join(real, YEAR, QUOTE)}`, result.stderr);
     assert.equal(result.code, 0);
   });
