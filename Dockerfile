@@ -37,6 +37,47 @@ ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build_time_only"
 
 RUN npm run build
 
+# ── 곁가지 : 저장소의 스크립트를 돌리는 도구 이미지 ───────────────────
+#
+# 운영 이미지(3단계)에는 tsx·drizzle-kit 이 없다 — devDependency 라서다. 그래서
+# 그 안에서는 db:migrate·db:preflight·purge:* 를 부를 수 없다. 이 스테이지가 그
+# 자리를 맡는다 — runbook/05-배포-리허설.md 6절 길 ㄴ.
+#
+#   docker build --target tools -t dss-as-tools:1 .
+#
+# NAS 에서는 compose 의 `profiles: [tools]` 서비스 tools-as 로 두고, 부를 때만
+# 잠깐 떴다 사라진다(`run --rm`). 상시 서비스가 아니라 메모리 예산 밖이다.
+#
+# ⚠️ 이 스테이지를 runner 뒤로 옮기지 않는다. **마지막 스테이지가 `docker build`
+#    의 기본 대상**이라, 뒤에 두면 `--target` 없이 구운 이미지가 앱이 아니라
+#    도구가 된다 — 그 이미지는 `node server.js` 를 모른다.
+#
+# ⚠️ **drizzle/ 은 굽지 않는다** (runbook/05 6절 ①). 28MB 이고 배포마다 바뀌는
+#    것은 사실상 그것뿐이다. 이미지를 배포마다 옮기지 않으려고 볼륨으로 붙인다:
+#      /volume1/dss/as-migrations:/app/drizzle:ro
+#    drizzle.config.ts 의 out 과 scripts/check-pending-migrations.ts 의
+#    DRIZZLE_DIR 이 둘 다 **작업 폴더 기준 ./drizzle** 이라 WORKDIR 이 /app 이면 맞다.
+FROM ${NODE_IMAGE} AS tools
+WORKDIR /app
+ENV NODE_ENV=production TZ=Asia/Seoul
+
+# 소유자는 COPY 할 때 정한다 — 다 옮겨 놓고 `RUN chown -R /app` 을 하면 그 한 줄이
+# /app 전체를 새 레이어에 한 벌 더 복사한다(계측기 도구 이미지에서 1.86GB → 1.07GB).
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json tsconfig.json drizzle.config.ts ./
+COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node src ./src
+
+# 볼륨이 붙지 않아도 드러나게 빈 폴더를 만들어 둔다 — 붙이는 것을 잊으면
+# db:preflight 가 "마이그레이션 0건" 이라고 답하지 "폴더가 없다"고 하지 않는다.
+RUN mkdir -p /app/drizzle && chown node:node /app/drizzle
+
+USER node
+
+# 기본값은 **읽기만 하는** 쪽으로 둔다. 적용은 명령을 적어 부른다:
+#   docker compose … run --rm tools-as npm run db:migrate
+CMD ["npm", "run", "db:preflight"]
+
 # ── 3단계 : 실행에 필요한 것만 담는다 ─────────────────────────────────
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
