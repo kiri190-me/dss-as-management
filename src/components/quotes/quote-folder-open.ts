@@ -1,11 +1,10 @@
-import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
+import { copyText } from "@/components/common/copy-text";
 import { buildQuoteFolderLink } from "@/lib/domain/quote-folder-link";
-import { saveBlobAsDownload } from "./quote-issue-download";
 import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
 
 /**
  * ============================================================================
- * 편집 화면의 [폴더 열기] — 폴더 위치를 묻고, 도우미 주소를 열고, 도우미가 없으면 설치 파일을 받는다 (견적서 ④b)
+ * 편집 화면의 [폴더 열기] — 폴더 위치를 묻고, 도우미 주소를 열고, 없으면 설치 명령을 쥐여 준다 (견적서 ④b·④c)
  * ============================================================================
  * 브라우저는 탐색기를 직접 열 수 없다. 그래서 PC 마다 한 번 설치하는 도우미가
  * `dss-folder://open/?p=…` 주소를 받아 공유폴더 루트 아래의 폴더만 연다(④a — 보안의 핵심은
@@ -15,8 +14,14 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
  *  2) found → buildQuoteFolderLink(상대 경로)로 주소를 만들어 **페이지를 떠나지 않고** 연다
  *  3) 약 2초(QUOTE_FOLDER_HELPER_DETECTION_MS) 안에 창이 초점을 잃으면(blur · visibilitychange)
  *     도우미가 있는 것으로 보고 이 브라우저에 「도우미 확인됨」 표시를 적는다
- *  4) 아무 일이 없으면 — 표시가 없을 때만 설치 파일(GET /api/quote-folder-helper/installer)을
- *     곧바로 받는다. 표시가 있으면 받지 않고 [설치 파일 다시 받기]만 내민다.
+ *  4) 아무 일이 없고 표시도 없으면 — 도우미가 없는 것으로 보고 [설치 명령 복사]로 이끈다
+ *
+ * ── 🔴 화면은 설치 파일을 주지 않는다 (사용자 결정 2026-09-16) ──────────────
+ * 설치 파일(.cmd)은 Windows 스마트 앱 컨트롤이 막는다 — [속성] › [차단 해제]를 거쳐야만 열리는데,
+ * 그 단계를 사람에게 시키느니 **PowerShell 에 붙여넣는 길 하나로 모으는 편이 낫다**는 판단이다
+ * (붙여넣기는 실기 확인을 마쳤다). 그래서 이 파일에는 설치 파일을 받거나 저장하는 코드가 **없다.**
+ * 서버 통로(`GET /api/quote-folder-helper/installer`)는 살아 있지만 **화면이 부르지 않는다**
+ * (quote-folder-open-screens.test.ts 가 못 박는다).
  *
  * ── 왜 숨은 iframe 인가 ──────────────────────────────────────────────────
  * `location.assign` · `<a>` 클릭은 페이지 자체가 그 주소로 가려고 한다. 도우미가 없는 PC 에서
@@ -27,16 +32,30 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
  * 브라우저는 「이 주소를 받을 프로그램이 있는가」를 알려 주지 않는다. 초점을 잃는 것은 탐색기가
  * 앞에 뜨거나 브라우저가 「dss-folder 를 열까요?」를 물을 때다 — 둘 다 도우미가 있다는 뜻이다.
  * 틀릴 수 있는 경우(탐색기가 브라우저 뒤에 뜸 · 서버가 늦어 브라우저가 사용자 동작으로 보지 않음
- * · 모르는 주소에도 창을 띄우는 브라우저)가 있어, 초점을 잃은 뒤에도 [설치 파일 다시 받기]를
- * 함께 내민다. 자동 내려받기는 「확인됨」 표시가 없을 때, 한 번 누를 때 한 번만이다.
+ * · 모르는 주소에도 창을 띄우는 브라우저)가 있어, 초점을 잃은 뒤에도 두 단추를 함께 내민다.
  *
- * ── 🔴 루트 값을 싣지 않는다 ─────────────────────────────────────────────
- * 서버는 공유폴더 루트(UNC · 컨테이너 경로)를 주지 않고, 이 파일도 응답의 알려진 칸(상대 경로 ·
- * 여럿 여부 · 사유)만 읽는다. 알림에는 상대 경로와 서버의 짧은 문장만 들어간다.
+ * ── 🔴 [폴더 열기] 알림에는 루트 값을 싣지 않는다 ─────────────────────────
+ * 응답의 알려진 칸(상대 경로 · 여럿 여부 · 사유 · 전체 주소)만 읽는다. [폴더 열기] 알림에
+ * 들어가는 것은 **상대 경로와 서버의 짧은 문장뿐**이고, 부르는 통로도 둘(archive-folder ·
+ * install-command)뿐이다.
+ *
+ * ── 파일 없이 가는 두 길 (④c) ────────────────────────────────────────────
+ *  · [위치 복사] — 전체 공유폴더 주소(`uncPath`)를 클립보드로. 사람이 탐색기 주소창에 붙여넣으면
+ *    **도우미 없이도** 폴더가 열린다. `uncPath` 는 서버 설정이 있을 때만 응답에 붙는다
+ *    (없으면 통째로 빠진다) — 그래서 outcome 의 `uncPath` 도 있을 때만 붙고, 단추도 그때만 낸다.
+ *  · [설치 명령 복사] — GET /api/quote-folder-helper/install-command 의 한 줄을 클립보드로.
+ *    PowerShell 창에 붙여넣으면 설치된다(관리자 권한 없이).
+ * 🔴 설치 명령 본문은 **어디에도 싣지 않는다** — 알림 줄에도, 콘솔에도. 사내 공유폴더 주소가
+ * base64 로 들어 있고, 길이도 약 10,300자라 화면에 보여 긁게 하는 것은 비현실적이다. 전체 주소는
+ * 짧으므로 복사가 막혔을 때만 화면에 보인다.
+ *
+ * ── 복사가 두 갈래인 까닭 ────────────────────────────────────────────────
+ * 운영 서버는 사내 NAS 에 http 로 올라간다 — `navigator.clipboard` 가 없다. 공용 모듈
+ * (components/common/copy-text.ts)이 옛 방식까지 두 갈래를 다 본다.
  *
  * ── 던지지 않는다 · 바꿔 끼울 수 있다 ───────────────────────────────────────
- * fetch · 주소 열기 · 창 이벤트 · 시계 · 저장소(localStorage) · 파일 저장을 부르는 쪽이 바꿔 끼울
- * 수 있다 — 네트워크 · DOM 없이 시험한다(quote-folder-open.test.ts). localStorage 는 막혀 있거나
+ * fetch · 주소 열기 · 창 이벤트 · 시계 · 저장소(localStorage) · 복사를 부르는 쪽이 바꿔 끼울 수
+ * 있다 — 네트워크 · DOM 없이 시험한다(quote-folder-open.test.ts). localStorage 는 막혀 있거나
  * 던질 수 있다(사생활 보호 창 · 정책) — 그때는 표시가 없는 것으로 보고 그대로 돈다.
  * ============================================================================
  */
@@ -44,8 +63,6 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
 type FolderResponse = {
   ok: boolean;
   status: number;
-  headers: { get(name: string): string | null };
-  blob(): Promise<Blob>;
   json(): Promise<unknown>;
 };
 
@@ -67,7 +84,6 @@ export type QuoteFolderOpenEnvironment = {
   delay: (ms: number) => Promise<void>;
   /** 저장소를 꺼내는 일 자체가 던질 수 있다(localStorage 접근이 막힌 브라우저). */
   storage: () => QuoteFolderHelperStorage | null;
-  save: (blob: Blob, fileName: string) => void;
 };
 
 /** 주소를 연 뒤 초점을 잃기를 기다리는 시간. */
@@ -76,10 +92,11 @@ export const QUOTE_FOLDER_HELPER_DETECTION_MS = 2000;
 /** 이 브라우저에서 도우미가 한 번이라도 반응했다는 표시. 값은 "1". */
 export const QUOTE_FOLDER_HELPER_CONFIRMED_KEY = "dss.quoteFolderHelper.confirmed";
 
-/** 서버가 Content-Disposition 으로 이름을 싣지 않았을 때 — 서버의 이름과 같다. */
-export const QUOTE_FOLDER_HELPER_INSTALLER_FALLBACK_FILE_NAME = "install-dss-folder-helper.cmd";
+/** 파일 없이 붙여넣는 설치 명령 한 줄 — `{ command }` (④c). */
+export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_URL = "/api/quote-folder-helper/install-command";
 
-export const QUOTE_FOLDER_HELPER_INSTALLER_URL = "/api/quote-folder-helper/installer";
+/** 복사 갈래 — 기본은 공용 copyText(두 갈래). 던지지 않고 true · false 만 돌려준다. */
+export type QuoteFolderCopy = (text: string) => Promise<boolean>;
 
 export function quoteArchiveFolderUrl(quoteId: string): string {
   return `/api/quotes/${encodeURIComponent(quoteId)}/archive-folder`;
@@ -91,18 +108,39 @@ export const QUOTE_FOLDER_DISABLED_TEXT = "공유폴더 저장이 꺼져 있습�
 export const QUOTE_FOLDER_NOT_FOUND_TEXT =
   "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [견적서 받기]를 먼저 눌러 주세요";
 export const QUOTE_FOLDER_MULTIPLE_TEXT = "맞는 폴더가 여럿이라 이름순 첫째를 엽니다 — 폴더를 확인해 주세요";
-export const QUOTE_FOLDER_HELPER_MISSING_FAILED_TEXT =
-  "이 PC 에 폴더 열기 도우미가 없는 것 같습니다 — 설치 파일을 받지 못했습니다";
 
-/** 설치 파일을 받은 뒤의 안내 — 자동으로 받았을 때. */
-export function quoteFolderHelperInstalledText(fileName: string): string {
-  return `이 PC 에 폴더 열기 도우미가 없는 것 같습니다 — 설치 파일(${fileName})을 받았습니다. 한 번 더블클릭해 설치한 뒤 [폴더 열기]를 다시 눌러 주세요`;
-}
+/**
+ * 🔴 반응도 표시도 없을 때 — 도우미가 없는 것으로 본다. 설치 파일을 주지 않고
+ * [설치 명령 복사]로 이끈다(사용자 결정 2026-09-16). 관리자 권한을 쓰라고 하지 않는다 —
+ * 도우미는 지금 로그인한 사람(HKCU)에게만 설치되므로 관리자 계정으로 돌리면 엉뚱한 계정에
+ * 조용히 설치된다.
+ */
+export const QUOTE_FOLDER_HELPER_MISSING_TEXT =
+  "이 PC 에 폴더 열기 도우미가 없는 것 같습니다 — [설치 명령 복사]를 눌러 PowerShell 창에 붙여넣어 주세요. 관리자 권한은 필요 없습니다";
 
-/** 설치 파일을 받은 뒤의 안내 — [설치 파일 다시 받기]로 받았을 때. */
-export function quoteFolderHelperRedownloadedText(fileName: string): string {
-  return `설치 파일(${fileName})을 받았습니다 — 한 번 더블클릭해 설치한 뒤 [폴더 열기]를 다시 눌러 주세요`;
-}
+// ── ④c 복사 두 갈래의 문장 ───────────────────────────────────────────────
+
+/** [위치 복사] — 됐을 때. */
+export const QUOTE_FOLDER_UNC_PATH_COPIED_TEXT =
+  "폴더 위치를 복사했습니다 — 탐색기 주소창에 붙여넣고 Enter 를 눌러 주세요";
+
+/** 🔴 두 갈래 다 막혔을 때 — 주소는 짧으니 다음 줄에 보여 긁어 가게 한다. */
+export const QUOTE_FOLDER_UNC_PATH_COPY_BLOCKED_TEXT =
+  "이 브라우저에서는 자동 복사가 막혀 있습니다 — 아래 주소를 직접 긁어 복사해 주세요";
+
+/** [설치 명령 복사] — 됐을 때. */
+export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT =
+  "설치 명령을 복사했습니다 — PowerShell 창을 열어 붙여넣고 Enter 를 눌러 주세요. 관리자 권한은 필요 없습니다";
+
+/**
+ * 🔴 두 갈래 다 막혔을 때 — 명령은 약 10,300자라 화면에 보여 긁게 할 수 없다. 남은 길은
+ * 복사가 되는 브라우저로 옮기거나, 도우미 없이 [위치 복사]로 여는 것뿐이다.
+ */
+export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPY_BLOCKED_TEXT =
+  "이 브라우저에서는 자동 복사가 막혀 있습니다 — 설치 명령은 너무 길어 화면에 보여 드릴 수 없습니다. 다른 브라우저에서 다시 시도하시거나, 관리자에게 설치를 부탁해 주세요";
+
+/** 통로가 실패했을 때 함께 내미는 줄 — 사람이 혼자 풀 수 없는 종류다(설정 · 권한). */
+export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ADMIN_HINT_TEXT = "문제가 이어지면 관리자에게 알려 주세요";
 
 function openingText(relativePath: string): string {
   return `탐색기로 폴더를 엽니다: ${relativePath}`;
@@ -121,8 +159,6 @@ const UNREADABLE_RESPONSE_REASON = "서버 응답을 읽지 못했습니다";
 const UNKNOWN_REASON = "까닭을 알 수 없습니다";
 const UNOPENABLE_LINK_REASON = "이 폴더 이름은 도우미 주소로 만들 수 없습니다. 공유폴더에서 직접 열어 주세요";
 const OPEN_LINK_FAILED_REASON = "브라우저가 폴더 열기 주소를 열지 못했습니다";
-const INSTALLER_BODY_FAILED_REASON = "설치 파일을 받는 중에 연결이 끊겼습니다";
-const INSTALLER_NOT_SAVED_REASON = "설치 파일을 받았지만 브라우저가 저장하지 못했습니다";
 
 function rejectedReason(status: number): string {
   return `서버가 요청을 처리하지 못했습니다(HTTP ${status})`;
@@ -142,7 +178,8 @@ async function failureReason(response: FolderResponse): Promise<string> {
 // ── 1) 폴더 위치 ─────────────────────────────────────────────────────────
 
 type ArchiveFolderAnswer =
-  | { status: "found"; relativePath: string; multipleFolderMatches: boolean }
+  /** 🔴 `uncPath`(전체 공유폴더 주소)는 서버 설정이 있을 때만 붙는다 — 없으면 칸이 통째로 없다. */
+  | { status: "found"; relativePath: string; multipleFolderMatches: boolean; uncPath?: string }
   | { status: "not-found" }
   | { status: "disabled" }
   | { status: "failed"; reason: string };
@@ -151,13 +188,17 @@ type ArchiveFolderAnswer =
 function readArchiveFolderAnswer(payload: unknown): ArchiveFolderAnswer | null {
   if (!isRecord(payload)) return null;
   switch (payload.status) {
-    case "found":
+    case "found": {
       if (typeof payload.relativePath !== "string") return null;
+      // 설정이 없으면 이 칸이 통째로 빠진다 — 빈 글자도 없는 것으로 본다.
+      const uncPath = typeof payload.uncPath === "string" && payload.uncPath.trim() !== "" ? payload.uncPath : undefined;
       return {
         status: "found",
         relativePath: payload.relativePath,
         multipleFolderMatches: payload.multipleFolderMatches === true,
+        ...(uncPath === undefined ? {} : { uncPath }),
       };
+    }
     case "not-found":
       return { status: "not-found" };
     case "disabled":
@@ -246,37 +287,6 @@ async function openAndWatch(
   return lost ? "FOCUS_LOST" : "NO_RESPONSE";
 }
 
-// ── 4) 설치 파일 ─────────────────────────────────────────────────────────
-
-/** 설치 파일을 받아 저장한다. 던지지 않는다. */
-async function downloadInstaller(
-  env: Pick<QuoteFolderOpenEnvironment, "fetchImpl" | "save">
-): Promise<{ ok: true; fileName: string } | { ok: false; reason: string }> {
-  let response: FolderResponse;
-  try {
-    response = await env.fetchImpl(QUOTE_FOLDER_HELPER_INSTALLER_URL);
-  } catch {
-    return { ok: false, reason: NETWORK_FAILED_REASON };
-  }
-  if (!response.ok) return { ok: false, reason: await failureReason(response) };
-
-  let blob: Blob;
-  try {
-    blob = await response.blob();
-  } catch {
-    return { ok: false, reason: INSTALLER_BODY_FAILED_REASON };
-  }
-  const fileName =
-    fileNameFromContentDisposition(response.headers.get("Content-Disposition")) ??
-    QUOTE_FOLDER_HELPER_INSTALLER_FALLBACK_FILE_NAME;
-  try {
-    env.save(blob, fileName);
-  } catch {
-    return { ok: false, reason: INSTALLER_NOT_SAVED_REASON };
-  }
-  return { ok: true, fileName };
-}
-
 // ── 브라우저 기본값 — 부를 때만 window · document 를 만진다 ─────────────────
 
 /** 숨은 iframe 을 늦게 치운다 — 곧바로 떼면 주소 넘기기가 취소될 수 있다. */
@@ -314,7 +324,6 @@ const BROWSER_ENVIRONMENT: QuoteFolderOpenEnvironment = {
   watchFocusLoss: watchWindowFocusLoss,
   delay: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
   storage: browserStorage,
-  save: saveBlobAsDownload,
 };
 
 // ── 부르는 곳 ────────────────────────────────────────────────────────────
@@ -325,22 +334,26 @@ export type QuoteFolderOpenOutcomeKind =
   | "FAILED"
   /** 초점을 잃었다 — 도우미가 반응했다. 「확인됨」 표시를 적었다. */
   | "OPENED"
-  /** 반응이 없었지만 이 브라우저에 「확인됨」 표시가 있다 — 받지 않았다. */
+  /** 반응이 없었지만 이 브라우저에 「확인됨」 표시가 있다 — 탐색기가 뒤에 떴을 수 있다. */
   | "NO_RESPONSE_CONFIRMED"
-  /** 반응도 표시도 없어 설치 파일을 받았다. */
-  | "NO_RESPONSE_INSTALLER_SAVED"
-  /** 반응도 표시도 없어 설치 파일을 받으려 했지만 못 받았다. */
-  | "NO_RESPONSE_INSTALLER_FAILED";
+  /** 반응도 표시도 없다 — 도우미가 없는 것으로 보고 [설치 명령 복사]로 이끈다. */
+  | "NO_RESPONSE";
 
 export type QuoteFolderOpenOutcome = {
   kind: QuoteFolderOpenOutcomeKind;
   lines: QuoteIssueNoticeLine[];
-  /** 「탐색기가 열리지 않았다면 [설치 파일 다시 받기]」를 내미는가. */
-  offerInstallerDownload: boolean;
+  /** 「탐색기가 열리지 않았다면 …」 곁말과 두 단추를 내미는가 — 폴더를 찾은 뒤에만. */
+  offerHelperInstall: boolean;
+  /**
+   * 폴더를 찾았고 **서버에 공유폴더 주소 설정이 있을 때만** 있는 전체 주소
+   * (`\\서버\공유\연도 폴더\견적서 폴더`). 있을 때만 [위치 복사]를 낸다.
+   * 🔴 알림 줄에는 넣지 않는다 — 복사가 막혔을 때만 화면에 보인다.
+   */
+  uncPath?: string;
 };
 
 function failed(reason: string): QuoteFolderOpenOutcome {
-  return { kind: "FAILED", lines: [{ text: folderFailureText(reason), tone: "warning" }], offerInstallerDownload: false };
+  return { kind: "FAILED", lines: [{ text: folderFailureText(reason), tone: "warning" }], offerHelperInstall: false };
 }
 
 /**
@@ -361,17 +374,21 @@ export async function runQuoteFolderOpen({
   const { answer } = asked;
   switch (answer.status) {
     case "disabled":
-      return { kind: "DISABLED", lines: [{ text: QUOTE_FOLDER_DISABLED_TEXT, tone: "muted" }], offerInstallerDownload: false };
+      return { kind: "DISABLED", lines: [{ text: QUOTE_FOLDER_DISABLED_TEXT, tone: "muted" }], offerHelperInstall: false };
     case "not-found":
-      return { kind: "NOT_FOUND", lines: [{ text: QUOTE_FOLDER_NOT_FOUND_TEXT, tone: "warning" }], offerInstallerDownload: false };
+      return { kind: "NOT_FOUND", lines: [{ text: QUOTE_FOLDER_NOT_FOUND_TEXT, tone: "warning" }], offerHelperInstall: false };
     case "failed":
       return failed(answer.reason);
     case "found":
       break;
   }
 
+  // 🔴 찾은 뒤의 모든 결과에 전체 주소를 붙인다 — 도우미가 막혀도 [위치 복사]로 갈 수 있게.
+  //    설정이 없으면 칸 자체가 없다(undefined). 알림 줄에는 넣지 않는다.
+  const withUncPath: { uncPath?: string } = answer.uncPath === undefined ? {} : { uncPath: answer.uncPath };
+
   const link = buildQuoteFolderLink(answer.relativePath);
-  if (link === null) return failed(UNOPENABLE_LINK_REASON);
+  if (link === null) return { ...failed(UNOPENABLE_LINK_REASON), ...withUncPath };
 
   const multiple: QuoteIssueNoticeLine[] = answer.multipleFolderMatches
     ? [{ text: QUOTE_FOLDER_MULTIPLE_TEXT, tone: "warning" }]
@@ -379,49 +396,106 @@ export async function runQuoteFolderOpen({
   const opening: QuoteIssueNoticeLine[] = [{ text: openingText(answer.relativePath), tone: "normal" }, ...multiple];
 
   const watched = await openAndWatch(link, env);
-  if (watched === "OPEN_FAILED") return failed(OPEN_LINK_FAILED_REASON);
+  if (watched === "OPEN_FAILED") return { ...failed(OPEN_LINK_FAILED_REASON), ...withUncPath };
 
   if (watched === "FOCUS_LOST") {
     markHelperConfirmed(env.storage);
-    return { kind: "OPENED", lines: opening, offerInstallerDownload: true };
+    return { kind: "OPENED", lines: opening, offerHelperInstall: true, ...withUncPath };
   }
 
-  // 반응이 없었다. 이 브라우저에서 도우미가 반응한 적이 있으면 받지 않는다(탐색기가 뒤에 떴을 수 있다).
+  // 반응이 없었다. 이 브라우저에서 도우미가 반응한 적이 있으면 「없다」고 말하지 않는다
+  // (탐색기가 브라우저 뒤에 떴을 수 있다) — 단추만 곁에 둔다.
   if (readHelperConfirmed(env.storage)) {
-    return { kind: "NO_RESPONSE_CONFIRMED", lines: opening, offerInstallerDownload: true };
+    return { kind: "NO_RESPONSE_CONFIRMED", lines: opening, offerHelperInstall: true, ...withUncPath };
   }
 
-  // 🔴 표시가 없을 때만, 한 번 누를 때 한 번 — 설치 파일을 곧바로 받는다.
-  const attempted: QuoteIssueNoticeLine[] = [{ text: attemptedText(answer.relativePath), tone: "muted" }, ...multiple];
-  const installer = await downloadInstaller(env);
-  if (installer.ok) {
-    return {
-      kind: "NO_RESPONSE_INSTALLER_SAVED",
-      lines: [{ text: quoteFolderHelperInstalledText(installer.fileName), tone: "warning" }, ...attempted],
-      offerInstallerDownload: false,
-    };
-  }
+  // 🔴 반응도 표시도 없다 — 설치 파일을 주지 않고 [설치 명령 복사]로 이끈다(사용자 결정 2026-09-16).
   return {
-    kind: "NO_RESPONSE_INSTALLER_FAILED",
+    kind: "NO_RESPONSE",
     lines: [
-      { text: QUOTE_FOLDER_HELPER_MISSING_FAILED_TEXT, tone: "warning" },
-      { text: installer.reason, tone: "warning" },
-      ...attempted,
+      { text: QUOTE_FOLDER_HELPER_MISSING_TEXT, tone: "warning" },
+      { text: attemptedText(answer.relativePath), tone: "muted" },
+      ...multiple,
     ],
-    offerInstallerDownload: false,
+    offerHelperInstall: true,
+    ...withUncPath,
   };
 }
 
-/** [설치 파일 다시 받기] — 사람이 눌러서 받는다. 던지지 않는다. */
-export async function runQuoteFolderHelperInstallerDownload({
+// ── ④c 파일 없이 가는 두 길 ──────────────────────────────────────────────
+
+/** 복사는 던지지 않아야 한다 — 바꿔 끼운 갈래가 던져도 「못 했다」로 본다. */
+async function copySafely(text: string, copy: QuoteFolderCopy): Promise<boolean> {
+  try {
+    return (await copy(text)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * [위치 복사] — 전체 공유폴더 주소를 클립보드로. 붙여넣으면 **도우미 없이도** 폴더가 열린다.
+ * 막히면 주소를 줄로 내려 긁어 가게 한다(주소는 짧다). 던지지 않는다.
+ */
+export async function runQuoteFolderUncPathCopy({
+  uncPath,
+  copy = copyText,
+}: {
+  uncPath: string;
+  copy?: QuoteFolderCopy;
+}): Promise<QuoteIssueNoticeLine[]> {
+  return (await copySafely(uncPath, copy))
+    ? [{ text: QUOTE_FOLDER_UNC_PATH_COPIED_TEXT, tone: "normal" }]
+    : [
+        { text: QUOTE_FOLDER_UNC_PATH_COPY_BLOCKED_TEXT, tone: "warning" },
+        { text: uncPath, tone: "muted" },
+      ];
+}
+
+/**
+ * 설치 명령 한 줄을 받아 온다. 🔴 본문은 돌려주기만 하고 **어디에도 싣지 않는다** —
+ * 알림 줄에도, 콘솔에도. 사내 공유폴더 주소가 들어 있다.
+ */
+async function fetchInstallCommand(
+  fetchImpl: QuoteFolderFetch
+): Promise<{ ok: true; command: string } | { ok: false; reason: string }> {
+  let response: FolderResponse;
+  try {
+    response = await fetchImpl(QUOTE_FOLDER_HELPER_INSTALL_COMMAND_URL);
+  } catch {
+    return { ok: false, reason: NETWORK_FAILED_REASON };
+  }
+  if (!response.ok) return { ok: false, reason: await failureReason(response) };
+
+  const payload = await response.json().catch(() => null);
+  const command = isRecord(payload) && typeof payload.command === "string" ? payload.command : "";
+  return command.trim() === "" ? { ok: false, reason: UNREADABLE_RESPONSE_REASON } : { ok: true, command };
+}
+
+/**
+ * [설치 명령 복사] — 도우미를 설치하는 **유일한** 길. 받은 한 줄을 곧바로 클립보드로 넣는다.
+ * 🔴 복사가 막혀도 명령을 화면에 쏟지 않는다(약 10,300자) — 짧은 안내 한 줄만 낸다.
+ * 던지지 않는다.
+ */
+export async function runQuoteFolderHelperInstallCommandCopy({
   env: overrides = {},
 }: {
-  env?: Partial<Pick<QuoteFolderOpenEnvironment, "fetchImpl" | "save">>;
+  env?: Partial<Pick<QuoteFolderOpenEnvironment, "fetchImpl">> & { copy?: QuoteFolderCopy };
 } = {}): Promise<QuoteIssueNoticeLine[]> {
-  const installer = await downloadInstaller({ ...BROWSER_ENVIRONMENT, ...overrides });
-  return installer.ok
-    ? [{ text: quoteFolderHelperRedownloadedText(installer.fileName), tone: "normal" }]
-    : [{ text: `설치 파일을 받지 못했습니다 — ${installer.reason}`, tone: "warning" }];
+  const fetchImpl = overrides.fetchImpl ?? BROWSER_ENVIRONMENT.fetchImpl;
+  const copy = overrides.copy ?? copyText;
+
+  const asked = await fetchInstallCommand(fetchImpl);
+  if (!asked.ok) {
+    return [
+      { text: `설치 명령을 받지 못했습니다 — ${asked.reason}`, tone: "warning" },
+      { text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ADMIN_HINT_TEXT, tone: "muted" },
+    ];
+  }
+
+  return (await copySafely(asked.command, copy))
+    ? [{ text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT, tone: "normal" }]
+    : [{ text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPY_BLOCKED_TEXT, tone: "warning" }];
 }
 
 // ── Windows 인가 (순수) ──────────────────────────────────────────────────
