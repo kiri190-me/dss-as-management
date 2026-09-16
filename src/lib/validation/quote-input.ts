@@ -159,6 +159,18 @@ export type QuoteFields = {
    */
   laborPowerTestDeduction: string | null;
   /**
+   * 서류작업을 빼고 청구하는가(2026-09-16) — 위 둘과 **같은 성격의 사람의 결정**이다.
+   * 보내지 않으면 `false` 다(옛 요청이 그대로 동작하고, DB 기본값도 false 다).
+   *
+   * 🔴 **뺀 금액을 담는 칸이 없다** — 통전의 laborPowerTestDeduction 같은 짝이 조사에도
+   * 서류에도 없다(domain/quote-labor-cost.ts 머리말). 뺀 사실은 이 칸이 말하고, 청구한
+   * 금액은 사람이 적용한 workCost 그대로다.
+   *
+   * 🔴 **문서는 이 칸을 보지 않는다** — 견적서의 구역은 조사 · 수리 · 통전 셋뿐이라
+   * 서류작업은 적히는 자리가 없다(사용자 결정 2026-09-16). 금액만 빠진다.
+   */
+  documentExcluded: boolean;
+  /**
    * 엑셀 전용 견적서인가(2026-09-15 Q2 — schema/quotes.ts 의 is_excel_only). 켜지면 이
    * 장에는 부품 · 작업 내역 · 고른 수리 작업이 **하나도 없어야** 하고, 공급가액을
    * 아래 칸에 손으로 적는다. 보내지 않으면 `false` 다 — 옛 요청이 그대로 동작한다.
@@ -326,6 +338,11 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
     raw.laborPowerTestDeduction,
     fieldErrors
   );
+  /**
+   * 서류작업 제외(2026-09-16). 위 둘과 같은 규칙 — **켜졌다고 말한 것만 켜짐**이다.
+   * 잘못 읽혀 켜지면 기본 작업비에서 서류 몫이 소리 없이 빠진 채 저장된다.
+   */
+  const documentExcluded = raw.documentExcluded === true;
   const repairTasks = normalizeRepairTasks(raw.repairTasks, fieldErrors);
   const workScopeLines = normalizeWorkScopeLines(raw.workScopeLines, fieldErrors);
 
@@ -379,6 +396,7 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       investigationExcluded,
       powerTestExcluded,
       laborPowerTestDeduction,
+      documentExcluded,
       repairTasks,
       workScopeLines,
       items,

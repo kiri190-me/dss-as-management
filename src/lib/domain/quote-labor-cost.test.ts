@@ -689,6 +689,28 @@ describe("작업 내역 감춤 — xlsx 생성기 셋과 같은 답", () => {
     }
   });
 
+  /**
+   * 🔴 서류작업은 **문서에 항목이 없다**(사용자 결정 2026-09-16). 「조사작업 제외」는
+   * 문서에서 「① 조사작업」을 통째로 빼지만 서류는 그런 일을 하지 않는다 — 금액만 빠진다.
+   * 그래서 문서를 만드는 넷(xlsx 생성기 셋 · 미리보기)은 그 결정을 **글자로도 모른다.**
+   * 어느 날 누군가 여기에 서류를 끼워 넣으면 있지도 않은 구역을 빼려다 번호가 어긋난다.
+   */
+  test("🔴 문서 쪽 넷은 서류작업 제외를 모른다 — 견적서에 서류작업 구역이 없다", () => {
+    const documentSide = [
+      "src/lib/xlsx/quote-template.ts",
+      "src/lib/xlsx/oh-quote-template.ts",
+      "src/lib/xlsx/matcher-quote-template.ts",
+      "src/components/quotes/QuotePrintView.tsx",
+    ];
+    for (const path of documentSide) {
+      const source = readFlat(path);
+      assert.ok(!source.includes("documentExcluded"), `${path} 가 서류작업 제외를 본다`);
+      assert.ok(!source.includes("document_excluded"), `${path} 가 서류작업 제외 칸을 본다`);
+    }
+    // 묶음 축 자체가 셋이다 — 서류가 낄 자리가 없다는 것을 값으로도 못 박는다.
+    assert.deepEqual([...WORK_SCOPE_SECTIONS], ["INVESTIGATION", "REPAIR", "POWER_TEST"]);
+  });
+
   test("문서에서 줄이 비워지는 묶음 = 화면에서 감추는 묶음", () => {
     // 생성기는 판정을 들고 dropExcludedWorkScopeLines 로 그 묶음의 줄을 비운다.
     // 셋 다 줄이 있는 입력을 넣어, 비워진 묶음이 곧 감추는 묶음인지 본다.

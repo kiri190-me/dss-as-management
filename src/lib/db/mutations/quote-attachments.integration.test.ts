@@ -137,6 +137,7 @@ function quoteFields(suffix: string, overrides: Partial<QuoteFields> = {}): Quot
     investigationExcluded: false,
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
+    documentExcluded: false,
     isExcelOnly: false,
     manualSupplyAmount: null,
     repairTasks: [],

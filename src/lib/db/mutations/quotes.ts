@@ -124,6 +124,14 @@ function toColumnValues(fields: QuoteFields) {
      */
     investigationExcluded: fields.investigationExcluded,
     /**
+     * 서류작업 제외 — 기본 작업비에서 서류 몫을 뺐는가(2026-09-16). 만들 때도 고칠 때도
+     * 이 한 곳을 지난다 — 빠지면 켜고 저장해도 다시 열었을 때 꺼져 있다.
+     *
+     * 🔴 **금액 짝이 없다.** 통전의 laborPowerTestDeduction 같은 칸을 서류에는 두지
+     * 않았다(조사에도 없다 — domain/quote-labor-cost.ts 머리말). 뺀 사실만 남는다.
+     */
+    documentExcluded: fields.documentExcluded,
+    /**
      * 엑셀 전용 견적서와 손으로 적은 공급가액(2026-09-15 Q2). 만들 때도 고칠 때도 이 한
      * 곳을 지난다. 엑셀 전용이 아니면 수기 금액은 늘 null 이다 — 검증이 먼저 막고
      * (validation/quote-input.ts 의 quoteExcelOnlyFieldErrors), DB CHECK

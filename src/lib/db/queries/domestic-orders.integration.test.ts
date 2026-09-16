@@ -465,6 +465,7 @@ function quoteFields(suffix: string): QuoteFields {
     investigationExcluded: false,
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
+    documentExcluded: false,
     isExcelOnly: false,
     manualSupplyAmount: null,
     repairTasks: [],

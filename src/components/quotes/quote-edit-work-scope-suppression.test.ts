@@ -236,17 +236,66 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     assert.ok(form.includes("const investigationDeduction = laborSuggestion.investigationDeduction ?? null;"));
   });
 
-  test("🔴 「서류작업 제외」는 저장된 결정을 읽어 셈에 넘기는 데까지다 — 체크 상자는 아직 없다", () => {
-    // 뒤따르는 조각이 체크 상자와 저장을 만든다. 지금은 켤 방법이 없어 늘 false 이고,
-    // 그래서 **상태가 아니라 읽은 값**이다(저장에도 싣지 않아 그 칸은 그대로 남는다).
+  test("🔴 「서류작업 제외」도 상태다 — 저장된 결정으로 시작하고, 저장에 실린다(왕복)", () => {
     assert.ok(
-      form.includes("const documentExcluded = quote?.documentExcluded ?? false;"),
-      "저장된 서류작업 제외를 읽지 않는다"
+      form.includes(
+        "const [documentExcluded, setDocumentExcluded] = useState<boolean>( quote?.documentExcluded ?? false );"
+      ),
+      "서류작업 제외가 상태가 아니다"
     );
-    assert.ok(!form.includes("setDocumentExcluded"), "서류작업 제외를 켜고 끄는 길이 생겼다 — 뒤 조각이다");
-    assert.ok(!form.includes("서류작업 제외</span>"), "서류작업 제외 체크 상자가 생겼다 — 뒤 조각이다");
+    // 읽기 전용이던 옛 줄이 남아 있으면 체크 상자와 두 목소리가 된다.
+    assert.ok(!form.includes("const documentExcluded = quote?.documentExcluded ?? false;"), "아직도 읽기만 한다");
     const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
-    assert.ok(!collect.includes("documentExcluded"), "아직 저장하지 않는다 — 검증도 서버도 그 칸을 모른다");
+    assert.ok(collect.includes("documentExcluded,"), "저장에 서류작업 제외가 실리지 않는다");
+    // 🔴 조사·통전과 달리 **뺀 금액을 보내지 않는다** — 담을 칸이 없다(조사도 같다).
+    assert.ok(!collect.includes("laborDocumentDeduction"), "서류용 차감 금액 칸이 생겼다 — 이번 결정이 아니다");
+    // 상태를 바꾸는 곳은 체크 상자 하나다 — 서류에는 줄을 지워 저절로 켜질 작업 내역 칸이 없다.
+    assert.equal(form.split("setDocumentExcluded(").length - 1, 1, "서류작업 제외를 바꾸는 곳이 하나가 아니다");
+    // 🔴 「손댄 것으로 본다」 판정에도 들어가지 않는다 — 조사가 그 판정에 든 까닭은 감춰 둔 조사
+    // 칸에 양식 기본값이 들어오는 일 때문인데, 서류에는 감출 칸도 저장될 줄도 없다.
+    const touched = sliceBetween(form, "const [scopeTouched, setScopeTouched] = useState<", "const [isConflict,");
+    assert.ok(!touched.includes("documentExcluded"), "손댄 것으로 보는 판정이 서류작업 제외를 본다");
+  });
+
+  test("🔴 체크 상자가 셋째로 같은 줄에 있다 — 곁말이 「금액만 빠진다」를 말한다", () => {
+    const documentBox = checkbox("documentExcluded", "setDocumentExcluded", "서류작업 제외").replace(
+      "</label>",
+      '<span className="text-xs text-zinc-500 dark:text-zinc-400"> (견적서에는 서류작업 항목이 없어 금액만 빠집니다) </span> </label>'
+    );
+    assert.equal(form.split(documentBox).length - 1, 1, "서류작업 제외 체크 상자가 없거나 모양이 다르다");
+    const at = form.indexOf(investigationBox);
+    const next = form.indexOf(documentBox);
+    assert.ok(at < next, "서류작업 제외가 조사작업 제외 뒤에 있지 않다");
+    // 통전 · 조사와 같은 줄(같은 flex 칸)이다.
+    const between = form.slice(at + investigationBox.length, next);
+    assert.ok(!between.includes("<div") && !between.includes("</div>"), `체크 상자가 다른 칸에 있다: ${between}`);
+  });
+
+  test("🔴 문서는 서류작업 제외에 반응하지 않는다 — 미리보기에 넘기지 않는다", () => {
+    // 견적서의 구역은 조사 · 수리 · 통전 셋뿐이라 서류작업은 적히는 자리가 없다
+    // (사용자 결정 2026-09-16). 넘기면 미리보기와 받아 본 문서가 갈라진다.
+    const preview = sliceBetween(form, "quote={{", "}} />");
+    assert.ok(!preview.includes("documentExcluded"), "미리보기에 서류작업 제외를 넘긴다");
+    // 감춤 판정도 세 묶음짜리 그대로다 — 서류는 감출 칸이 없다.
+    assert.ok(!sectionMap.includes("documentExcluded"), "작업 내역 칸이 서류작업 제외를 본다");
+  });
+
+  test("🔴 내역이 뺀 서류작업 몫과 못 뺀 까닭을 말한다 — 지금 세 장비 모두 서류 시간이 비어 있다", () => {
+    assert.ok(form.includes("const documentDeduction = laborSuggestion.documentDeduction ?? null;"));
+    const breakdown = sliceBetween(form, '<p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300"> 기본 작업비{" "}', "</p>");
+    assert.ok(breakdown.includes("{documentDeduction !== null && ("), "뺀 서류 몫을 그리지 않는다");
+    assert.ok(breakdown.includes("− 서류작업 몫"), breakdown);
+    assert.ok(breakdown.includes("{formatAmount(documentDeduction)}"), breakdown);
+    assert.ok(breakdown.includes("(서류작업 제외)"), breakdown);
+    // 🔴 못 뺀 까닭 둘 — 통전 · 조사와 같은 모양이다.
+    const reasons: readonly (readonly [string, string])[] = [
+      ["NO_HOURS", "서류 공수시간을 먼저 정해 주세요 — 정하기 전까지는 서류작업 몫을 빼지 않습니다"],
+      ["UNKNOWN_HOURLY_RATE", "시간당 작업비를 읽지 못해 서류작업 몫을 빼지 않았습니다"],
+    ];
+    for (const [notice, phrase] of reasons) {
+      const branch = sliceBetween(form, `{laborSuggestion.documentNotice === "${notice}" && (`, "</p>");
+      assert.ok(branch.includes(phrase), branch);
+    }
   });
 
   test("🔴 내역이 뺀 조사작업 몫과 까닭을 말한다 — 통전 차감 줄은 예전 그대로", () => {

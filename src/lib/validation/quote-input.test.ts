@@ -183,6 +183,33 @@ test("조사작업 뺌: 안 보내면 꺼짐, 켰다고 말한 것만 켜진다 
   }
 });
 
+/**
+ * 서류작업 제외(2026-09-16) — 결정만 있고 **뺀 금액 칸이 없다**. 통전에만 있는 짝이고
+ * 조사에도 없다(domain/quote-labor-cost.ts 머리말). 문서는 이 칸을 읽지 않는다 —
+ * 견적서의 구역은 조사 · 수리 · 통전 셋뿐이라 금액만 빠진다.
+ */
+test("서류작업 제외: 안 보내면 꺼짐, 켰다고 말한 것만 켜진다 — 옛 요청이 그대로 동작한다", () => {
+  assert.equal(ok(MINIMAL).documentExcluded, false);
+  assert.equal(ok({ ...MINIMAL, documentExcluded: true }).documentExcluded, true);
+  for (const value of ["true", 1, "on", {}, null, undefined]) {
+    assert.equal(
+      ok({ ...MINIMAL, documentExcluded: value }).documentExcluded,
+      false,
+      `${JSON.stringify(value)} 가 켜짐으로 읽혔다`
+    );
+  }
+});
+
+test("🔴 세 제외는 서로를 건드리지 않는다 — 하나를 켜도 나머지 둘은 꺼진 채다", () => {
+  const flags = ["investigationExcluded", "powerTestExcluded", "documentExcluded"] as const;
+  for (const on of flags) {
+    const data = ok({ ...MINIMAL, [on]: true });
+    for (const flag of flags) {
+      assert.equal(data[flag], flag === on, `${on} 을 켰는데 ${flag} 가 함께 움직였다`);
+    }
+  }
+});
+
 test("통전작업 제외: 뺀 금액도 문자열 그대로 둔다 — 다른 금액 칸과 같은 규칙", () => {
   const data = ok({
     ...MINIMAL,

@@ -107,6 +107,8 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     // 견적서와 같은 상태다.
     powerTestExcluded: false,
     laborPowerTestDeduction: null,
+    // 서류작업 제외(2026-09-16). 기본은 "빼지 않음" — 옛 견적서와 같은 상태다.
+    documentExcluded: false,
     // 엑셀 전용(2026-09-15 Q2). 기본은 "일반 견적서" — 옛 견적서와 같은 상태다.
     isExcelOnly: false,
     manualSupplyAmount: null,
@@ -706,6 +708,65 @@ describe("견적서 조사작업 뺌", () => {
     });
     assert.equal(updated.ok, true, JSON.stringify(updated));
     assert.equal((await readQuote(created.id)).investigationExcluded, false, "끈 결정이 남지 않았다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 견적서 서류작업 제외 (2026-09-16) — 금액만 빠지는 결정
+ * ============================================================================
+ * 통전 · 조사와 같은 성격의 **사람의 결정**이고, 뺀 금액을 담는 짝 칸은 없다
+ * (조사도 없다 — domain/quote-labor-cost.ts 머리말). 문서는 이 칸을 읽지 않는다 —
+ * 견적서의 구역은 조사 · 수리 · 통전 셋뿐이다.
+ * ============================================================================
+ */
+describe("견적서 서류작업 제외", () => {
+  test("🔴 기본은 '빼지 않음' — 이 기능이 생기기 전에 만든 견적서와 같은 상태다", async () => {
+    const created = await create();
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.documentExcluded, false);
+  });
+
+  test("켜서 만들면 그대로 적히고, 고쳐 저장하면 따라간다 — 다시 열면 켜져 있다", async () => {
+    const created = await create({ documentExcluded: true });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+    assert.equal((await readQuote(created.id)).documentExcluded, true);
+
+    const updated = await updateQuote({
+      id: created.id,
+      expectedVersion: created.version,
+      fields: fields({
+        quoteNumber: (await readQuote(created.id)).quoteNumber,
+        documentExcluded: false,
+      }),
+      actorUserId,
+    });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    assert.equal((await readQuote(created.id)).documentExcluded, false, "끈 결정이 남지 않았다");
+  });
+
+  test("🔴 셋을 함께 켠 장 — 세 결정이 서로를 지우지 않는다", async () => {
+    const created = await create({
+      laborEquipmentKind: "GENERATOR",
+      laborBaseCost: "3500000",
+      investigationExcluded: true,
+      powerTestExcluded: true,
+      laborPowerTestDeduction: "1400000",
+      documentExcluded: true,
+    });
+    assert.ok(created.ok);
+    if (!created.ok) return;
+
+    const row = await readQuote(created.id);
+    assert.equal(row.investigationExcluded, true);
+    assert.equal(row.powerTestExcluded, true);
+    assert.equal(row.documentExcluded, true);
+    // 🔴 서류에는 「그때 뺀 금액」 칸이 없다 — 통전 것만 있다(조사와 같은 수준으로 맞췄다).
+    assert.equal(Number(row.laborPowerTestDeduction), 1400000);
   });
 });
 

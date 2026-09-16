@@ -628,12 +628,23 @@ export default function QuoteEditForm({
    * 시간당 작업비)이 빠진다 — 문서에는 서류작업 구역이 없어 **금액만** 빠진다
    * (사용자 결정 2026-09-16).
    *
-   * 🔴 **상태가 아니라 저장된 값을 읽기만 한다** — 켜고 끄는 체크 상자는 뒤따르는
-   * 조각이다. 지금은 그 결정을 쓰는 곳이 없어 늘 `false` 이고, 셈법이 서류 몫을
-   * 다룰 수 있게 길만 이어 둔다(domain/quote-labor-cost.ts). 저장에도 싣지 않으므로
-   * 이 장을 저장해도 quotes.document_excluded 는 그대로 남는다.
+   * 🔴 **문서는 이 결정에 반응하지 않는다.** 견적서의 구역은 조사 · 수리 · 통전 셋뿐이라
+   * 서류작업은 적히는 자리가 없다 — 「조사작업 제외」가 문서에서 「① 조사작업」을 빼는 것과
+   * 다르다. 그래서 미리보기 · xlsx 로 넘기지 않는다(넘길 자리조차 만들지 않는다).
+   *
+   * 저장된 견적서는 그때 결정(quotes.document_excluded)을 그대로 편다. 옛 견적서는 전부
+   * 꺼짐이다 — 그때는 제외할 방법 자체가 없었다.
+   *
+   * 🔴 **`scopeTouched` 판정에는 들어가지 않는다.** 조사 제외가 그 판정에 든 까닭은 종류를
+   * 바꿀 때 **감춰 둔 조사 칸**에 양식 기본값이 사람 모르게 들어와 함께 저장되기 때문인데,
+   * 서류에는 감출 칸도 저장될 줄도 없다(작업 내역 묶음은 조사 · 수리 · 통전 셋뿐이다).
+   *
+   * 🔴 **뺀 금액은 저장하지 않는다** — 통전의 laborPowerTestDeduction 같은 짝이 없다(조사도
+   * 마찬가지다 — domain/quote-labor-cost.ts 머리말).
    */
-  const documentExcluded = quote?.documentExcluded ?? false;
+  const [documentExcluded, setDocumentExcluded] = useState<boolean>(
+    quote?.documentExcluded ?? false
+  );
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
@@ -857,7 +868,7 @@ export default function QuoteEditForm({
             }
           : null,
         // 사람이 켠 세 가지 제외. 각 몫은 **제 공수시간 × 단가**이고 서로를 보지 않는다.
-        // 「서류작업 제외」는 아직 켤 방법이 없어 저장된 값(늘 false)이 그대로 온다.
+        // 셋 다 체크 상자가 있고, 「서류작업 제외」만 문서에 닿지 않는다(금액만 빠진다).
         activeLabor
           ? {
               investigation: investigationExcluded,
@@ -875,6 +886,12 @@ export default function QuoteEditForm({
    * 🔴 저장하지 않는다 — 담을 칸이 없다(domain/quote-labor-cost.ts 머리말).
    */
   const investigationDeduction = laborSuggestion.investigationDeduction ?? null;
+  /**
+   * 「서류작업 제외」로 실제로 뺀 서류 몫(원). 켜지 않았거나 셀 수 없었으면 null —
+   * 🔴 지금 세 장비 모두 서류 공수시간이 NULL 이라 **켜도 못 빼는 길이 실제로 쓰인다**
+   * (아래 documentNotice 안내). 조사와 같이 저장하지 않는다 — 담을 칸이 없다.
+   */
+  const documentDeduction = laborSuggestion.documentDeduction ?? null;
 
   /**
    * 견적서 종류를 바꾸면 **오버홀 작업이 따라 체크·해제된다**(2026-08-31 요구).
@@ -1364,6 +1381,12 @@ export default function QuoteEditForm({
        * 사람이 [계산한 작업비 적용]으로 넣은 workCost 그대로다.
        */
       investigationExcluded,
+      /**
+       * 「서류작업 제외」 체크(2026-09-16) — **금액에만 쓰이는 결정**이다. 문서는 이 칸을
+       * 읽지 않는다(견적서에 서류작업 구역이 없다). 조사와 같이 **뺀 금액은 보내지 않는다** —
+       * 담을 칸이 없고, 청구 금액은 사람이 [계산한 작업비 적용]으로 넣은 workCost 그대로다.
+       */
+      documentExcluded,
       /**
        * 엑셀 전용 · 손으로 적은 공급가액. 공급가액은 **켜져 있을 때만** 보낸다 — 꺼진 장에
        * 값이 있으면 검증이 거절한다(validation/quote-input.ts 의 quoteExcelOnlyFieldErrors).
@@ -2289,6 +2312,24 @@ export default function QuoteEditForm({
               />
               <span className="text-zinc-800 dark:text-zinc-200">조사작업 제외</span>
             </label>
+            {/* ── 서류작업 제외 (2026-09-16 사용자 결정) ──────────────────────
+                🔴 **문서는 이것에 반응하지 않는다.** 견적서의 구역은 조사 · 수리 · 통전
+                셋뿐이라 서류작업은 적히는 자리가 없다 — 옆의 「조사작업 제외」가 문서에서
+                「① 조사작업」까지 빼는 것과 다르다. 그래서 **금액만** 빠진다는 것을 곁말로
+                적는다: 이 한 줄이 없으면 조사와 같은 일을 한다고 읽는다. */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={documentExcluded}
+                onChange={(e) => setDocumentExcluded(e.target.checked)}
+                disabled={disabled}
+                className="h-4 w-4"
+              />
+              <span className="text-zinc-800 dark:text-zinc-200">서류작업 제외</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                (견적서에는 서류작업 항목이 없어 금액만 빠집니다)
+              </span>
+            </label>
           </div>
 
           {activeLabor === null ? (
@@ -2413,6 +2454,17 @@ export default function QuoteEditForm({
                     <span className="text-zinc-500 dark:text-zinc-400">(조사작업 제외)</span>{" "}
                   </>
                 )}
+                {/* 서류 몫도 기본 작업비의 한 조각이라 같은 자리에 같은 모양으로 적는다 —
+                    빠진 것은 금액뿐이고 문서는 그대로다. */}
+                {documentDeduction !== null && (
+                  <>
+                    <span className="text-zinc-500 dark:text-zinc-400">− 서류작업 몫</span>{" "}
+                    <b className="tabular-nums text-amber-700 dark:text-amber-400">
+                      {formatAmount(documentDeduction)}
+                    </b>
+                    <span className="text-zinc-500 dark:text-zinc-400">(서류작업 제외)</span>{" "}
+                  </>
+                )}
                 + 고른 작업 {selectedTasks.length}건{" "}
                 <b className="tabular-nums">{formatAmount(laborSuggestion.tasksTotal)}</b>{" "}
                 {powerTestDeduction !== null && (
@@ -2462,6 +2514,20 @@ export default function QuoteEditForm({
               {laborSuggestion.investigationNotice === "UNKNOWN_HOURLY_RATE" && (
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                   시간당 작업비를 읽지 못해 조사작업 몫을 빼지 않았습니다 — [PO/내자] › 작업 비용에서
+                  확인해 주세요.
+                </p>
+              )}
+              {/* 🔴 서류작업 몫도 같다. 지금 세 장비 모두 서류 공수시간이 비어 있어 **이 안내가
+                  실제로 뜨는 자리**다 — 켰는데 합계가 그대로인 까닭을 여기서만 말한다. */}
+              {laborSuggestion.documentNotice === "NO_HOURS" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  {workflowKindLabels[activeLabor.equipmentKind]}의 서류 공수시간을 먼저 정해 주세요 —
+                  정하기 전까지는 서류작업 몫을 빼지 않습니다([PO/내자] › 작업 비용 › 서류 작업 비용).
+                </p>
+              )}
+              {laborSuggestion.documentNotice === "UNKNOWN_HOURLY_RATE" && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  시간당 작업비를 읽지 못해 서류작업 몫을 빼지 않았습니다 — [PO/내자] › 작업 비용에서
                   확인해 주세요.
                 </p>
               )}
