@@ -5,7 +5,7 @@
 #   - react-server 조건: `server-only` 를 불러오는 모듈을 그대로 시험할 수 있다.
 #     대신 이 조건에서는 react-dom/server 가 스스로 막힌다 — 컴포넌트를 렌더해 보는
 #     시험은 components.txt 에 적는다.
-#   - 템플릿 부트스트랩: .env.local 에서 xlsx 양식 경로 여섯 개만 골라 넣는다.
+#   - 템플릿 부트스트랩: .env.local 에서 xlsx 양식 경로 일곱 개만 골라 넣는다.
 #     DATABASE_URL 은 넣지 않는다 — 이 목록의 시험은 DB 에 닿을 길이 없어야 한다.
 #     DB 에 붙는 시험은 db.txt 에 적는다.
 #
@@ -124,6 +124,7 @@ src/lib/xlsx/sheet-patch.test.ts
 src/lib/xlsx/quote-template.test.ts
 src/lib/xlsx/oh-quote-template.test.ts
 src/lib/xlsx/matcher-quote-template.test.ts
+src/lib/xlsx/cable-quote-template.test.ts
 src/lib/xlsx/service-report-template.test.ts
 src/lib/db/test-database-safety.test.ts
 src/lib/db/test-cleanup-static-safety.test.ts

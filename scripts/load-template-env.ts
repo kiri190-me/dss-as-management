@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 // 견적서·보고서 xlsx 양식 시험은 실제 양식 파일의 경로를 환경변수로 받는다.
 // 그 값은 .env.local 에 적혀 있지만 npm test 는 어떤 설정 파일도 읽지 않아서
-// 양식 시험 71건이 통째로 잠들어 있었다. 이 로더가 그 여섯 개만 골라 넣어
+// 양식 시험 71건이 통째로 잠들어 있었다. 이 로더가 그 일곱 개만 골라 넣어
 // 깨운다.
 //
 // 🔴 dotenv.config() 를 쓰면 안 된다. 그 함수는 파일의 모든 키를 process.env
@@ -25,6 +25,7 @@ const TEMPLATE_PATH_KEYS = [
   "OH_QUOTE_TEMPLATE_PATH",
   "MATCHER_QUOTE_TEMPLATE_PATH",
   "MATCHER_OH_QUOTE_TEMPLATE_PATH",
+  "CABLE_QUOTE_TEMPLATE_PATH",
   "INSPECTION_REPORT_TEMPLATE_PATH",
   "REPAIR_REPORT_TEMPLATE_PATH",
 ] as const;

@@ -18,12 +18,20 @@ import type { QuoteKind } from "@/lib/validation/quote-input";
  * ============================================================================
  */
 
-/** 양식 넷을 가리키는 키. `장비:종류` 꼴이다. */
+/**
+ * 양식을 가리키는 키. 넷은 `장비:종류` 꼴이고, **케이블만 장비가 없다.**
+ *
+ * 🔴 케이블 견적서는 수리품과 이어지지 않는 별도 견적서라 제너레이터 · 매쳐 ·
+ * T/C 구분이 아예 없다(2026-09-16 사용자). 그래서 `장비:종류` 꼴에 억지로 끼워
+ * 맞추지 않고 **`CABLE` 한 낱말**로 둔다 — `CABLE:CABLE` 처럼 적어 두면 없는
+ * 장비가 있는 것처럼 읽히고, 언젠가 그 자리에 무엇을 넣어야 하는지 되묻게 된다.
+ */
 export type QuoteTemplateKey =
   | "GENERATOR:DOMESTIC"
   | "GENERATOR:OVERHAUL"
   | "MATCHER:DOMESTIC"
-  | "MATCHER:OVERHAUL";
+  | "MATCHER:OVERHAUL"
+  | "CABLE";
 
 /**
  * 🔴 **Total Controller(T/C) 는 제너레이터 양식을 쓴다** — T/C 전용 양식을 아직
@@ -31,6 +39,10 @@ export type QuoteTemplateKey =
  *
  * 장비 종류를 아직 안 고른 견적서(이 기능이 생기기 전에 만든 것들)도 제너레이터로
  * 본다 — 지금까지 그 양식 하나만 쓰였으니 그것이 사실에 가장 가깝다.
+ *
+ * 🔴 **`CABLE` 은 아직 여기서 나오지 않는다.** 케이블 견적서는 만들 수도 열 수도
+ * 없는 상태이고(`QUOTE_KINDS` 가 내자 · O/H 둘 그대로다), 그 문을 여는 것은 뒤
+ * 조각이다. 채우개와 양식 경로만 먼저 서 있다(xlsx/cable-quote-template.ts).
  */
 export function quoteTemplateKey(
   equipmentKind: WorkflowKind | null,

@@ -11,6 +11,7 @@ import type { WorkScopeLabels } from "@/lib/xlsx/quote-sheet-layout";
 import { QUOTE_WORK_SCOPE_LABELS } from "@/lib/xlsx/quote-template";
 import { OH_QUOTE_WORK_SCOPE_LABELS } from "@/lib/xlsx/oh-quote-template";
 import { MATCHER_WORK_SCOPE_LABELS } from "@/lib/xlsx/matcher-quote-template";
+import { CABLE_QUOTE_CELLS, CABLE_QUOTE_SHEET_NAME } from "@/lib/xlsx/cable-quote-template";
 
 /**
  * ============================================================================
@@ -187,6 +188,32 @@ const MATCHER_HEADER_CELLS = {
   bankAccount: "D20",
 } as const;
 
+/**
+ * 🔴 케이블 양식은 **회사 정보 칸까지 다르다**(2026-09-16 실측). 넷과 같은
+ * 주소로 읽으면 주소 자리에 사업자등록번호가, 전화 자리에 업태가 나온다:
+ *
+ *   구분        제너레이터 · 매쳐   케이블
+ *   주소        B5                  B7   (B5 는 사업자등록번호)
+ *   전화        B6                  B9
+ *   팩스        E6                  D9
+ *   메일        B7                  B10
+ *   홈페이지    E7                  D10
+ *   기본 문구   D15~D18 / D17~D20   C17~C20
+ */
+const CABLE_HEADER_CELLS = {
+  companyName: "B3",
+  ceoLine: "B4",
+  address: "B7",
+  tel: "B9",
+  fax: "D9",
+  email: "B10",
+  homepage: "D10",
+  defaultValidity: CABLE_QUOTE_CELLS.validity,
+  defaultDelivery: CABLE_QUOTE_CELLS.delivery,
+  defaultPayment: CABLE_QUOTE_CELLS.payment,
+  bankAccount: CABLE_QUOTE_CELLS.bankAccount,
+} as const;
+
 type TemplateVariant = {
   /** 이 양식 경로를 담은 환경변수 이름. */
   envVar: string;
@@ -201,8 +228,12 @@ type TemplateVariant = {
    * 🔴 글자를 여기 적지 않고 **xlsx 채우개가 들고 있는 것을 가져다 쓴다.** 두
    * 곳에 따로 적으면 한쪽만 고쳐지는 날이 오고, 그때 증상은 "화면에 뜨는 작업
    * 내역과 파일에 적히는 작업 내역이 다른" 것이다.
+   *
+   * 🔴 **없을 수 있다.** 케이블 양식에는 작업 범위 구역이 아예 없다(품목 표
+   * 하나뿐이다). 빈 글자를 지어내 넣으면 훑는 쪽이 「못 찾았다」와 「없다」를
+   * 가리지 못하므로 아예 두지 않는다 — 없으면 훑지 않는다(scanWorkScope).
    */
-  workScopeLabels: WorkScopeLabels;
+  workScopeLabels?: WorkScopeLabels;
 };
 
 /**
@@ -240,6 +271,21 @@ const TEMPLATE_VARIANTS: Record<string, TemplateVariant> = {
     sheetName: "견적서",
     headerCells: MATCHER_HEADER_CELLS,
     workScopeLabels: MATCHER_WORK_SCOPE_LABELS,
+  },
+  /**
+   * 🔴 다섯째는 **장비가 없다.** 케이블 견적서는 수리품과 이어지지 않는 별도
+   * 견적서라 제너레이터 · 매쳐 구분이 없고, 작업 범위 구역도 없다
+   * (domain/quote-template-variant.ts 의 `CABLE`).
+   *
+   * 회사 정보 칸도 넷과 다르다 — B5 가 주소가 아니라 사업자등록번호이고,
+   * 주소는 B7, 전화 · 팩스는 9행, 메일 · 홈페이지는 10행이다(실측). 기본 문구는
+   * 머리말 C열에 있다(유효기간 C17 · 납기 C18 · 결재조건 C19 · 계좌 C20).
+   */
+  CABLE: {
+    envVar: "CABLE_QUOTE_TEMPLATE_PATH",
+    label: "케이블 견적서",
+    sheetName: CABLE_QUOTE_SHEET_NAME,
+    headerCells: CABLE_HEADER_CELLS,
   },
 };
 
@@ -400,6 +446,16 @@ function sectionOfLabel(
  */
 export type QuoteWorkScopeSectionView = { label: string; items: string[] };
 
+/**
+ * 작업 범위 구역이 없는 양식이 내놓는 머리글. 세 묶음이 **이름도 줄도 없이**
+ * 빈 채로 나간다 — 화면은 그리지 않고, 다른 양식의 문구가 섞여 들지도 않는다.
+ */
+const NO_WORK_SCOPE_LABELS: WorkScopeLabels = {
+  INVESTIGATION: { label: "", match: "exact" },
+  REPAIR: { label: "", match: "exact" },
+  POWER_TEST: { label: "", match: "exact" },
+};
+
 function emptyWorkScopeView(labels: WorkScopeLabels): Record<
   QuoteWorkScopeSection,
   QuoteWorkScopeSectionView
@@ -417,6 +473,10 @@ async function scanWorkScope(
 ): Promise<Record<QuoteWorkScopeSection, QuoteWorkScopeSectionView>> {
   const variant = TEMPLATE_VARIANTS[templateKey];
   if (!variant) return emptyWorkScopeView(MATCHER_WORK_SCOPE_LABELS);
+
+  // 🔴 작업 범위 구역이 없는 양식(케이블)은 **파일을 열지도 않는다.** 훑어 봐야
+  // 찾을 머리글이 없고, 없는 것을 찾으려 여는 만큼 화면이 느려진다.
+  if (!variant.workScopeLabels) return emptyWorkScopeView(NO_WORK_SCOPE_LABELS);
 
   const found = emptyWorkScopeView(variant.workScopeLabels);
 
