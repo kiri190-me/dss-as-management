@@ -34,20 +34,15 @@ import { shouldServeInline } from "./inline-view";
  * 볼 자격을 먼저 확인한 뒤에 꺼낸다.
  *
  * ── 권한이 주인에 따라 갈린다 — 그래서 조회가 앞으로 왔다 ────────────────
- * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 · 견적서 중 하나다(schema/attachments.ts).
+ * 첨부의 주인은 접수 건 · 제품 모델 · 견적서 중 하나다(schema/attachments.ts).
  *
  *   접수 건 첨부     →  repairCases.files READ    (예전 그대로)
  *   모델 첨부        →  **productModels.view READ**
- *   개선 요청 첨부   →  **improvementRequests READ** (2026-09-13 — 스크린샷)
  *   견적서 첨부      →  **quotes READ** (2026-09-15 Q2 — 결재 PDF · 수기 엑셀)
  *
  * 견적서 파일은 견적서 받기(/api/quotes/{id}/xlsx)와 같은 READ 문턱이다. 그리고
  * **견적서가 휴지통에 있으면** 판정이 QUOTE_IN_TRASH(409)로 막는다 — 휴지통의 견적서는
  * 목록에도 주소에도 없는 것이고, 그 파일만 이 통로로 새어 나가면 휴지통이 뜻을 잃는다.
- *
- * 개선 요청 스크린샷을 보는 데 READ 면 되는 까닭은 모델 회로도와 같다 — 글 목록을
- * 볼 수 있는 사람은 그 글에 붙은 화면 사진도 볼 수 있어야 한다. 좁히는 것은 붙이고
- * 떼는 쪽뿐이다(WRITE + 글 한 건에 대한 판정 — 올리기 통로 · 지우기 액션).
  *
  * 모델 파일을 보는 데 productModels.files가 아니라 **view**를 쓰는 까닭:
  * 회로도를 **보는 것**은 모델 상세를 보는 일의 일부다. 영업도 모델을 볼 수
@@ -146,7 +141,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   //
   // 무엇을 묻는지는 판정 파일의 표(ATTACHMENT_OWNER_PERMISSIONS.VIEW) 한 곳이 정한다 —
   // 접수 건 repairCases.files · 모델 productModels.view(**files 가 아니다** — 파일 헤더의
-  // '권한이 주인에 따라 갈린다') · 개선 요청 improvementRequests · 견적서 quotes, 모두 READ.
+  // '권한이 주인에 따라 갈린다') · 견적서 quotes, 모두 READ.
   const access = await resolveAttachmentOwnerAccess("VIEW", (areaKey, level) =>
     hasPermission(actingUser, areaKey, level)
   );
@@ -198,7 +193,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const decision = decideAttachmentDownload({
     repairCaseId: attachment.repairCaseId,
     productModelId: attachment.productModelId,
-    improvementRequestId: attachment.improvementRequestId,
     quoteId: attachment.quoteId,
     isDeleted: attachment.isDeleted,
     // 견적서가 휴지통에 있으면 그 파일은 나가지 않는다(2026-09-15 Q2 — 조회가 견적서
@@ -276,7 +270,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       owner: {
         repairCaseId: attachment.repairCaseId,
         productModelId: attachment.productModelId,
-        improvementRequestId: attachment.improvementRequestId,
         quoteId: attachment.quoteId,
       },
       originalFileName: attachment.originalFileName,

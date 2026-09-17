@@ -13,9 +13,8 @@
  * 없었다 — 그 단계는 저장 바닥을 놓는 일이지 분류 정책을 바꾸는 일이 아니었다.
  *
  * ── 데모 파일과의 관계 — 주인 전용 분류 셋만 다르다 ───────────────────────
- * 2026-09-13 개선 요청 글에 스크린샷을 붙이면서 SCREENSHOT(「스크린샷」)이
- * 더해졌다. 이 분류는 **여기와 DB enum에만 있고 데모 파일에는 없다.** 데모는
- * 접수 건 파일 탭의 localStorage 화면이라 개선 요청과 관계가 없고, 데모
+ * 2026-09-13 SCREENSHOT(「스크린샷」)이 더해졌다. 이 분류는 **여기와 DB enum에만
+ * 있고 데모 파일에는 없다.** 데모는 접수 건 파일 탭의 localStorage 화면이고, 데모
  * 계층(src/lib/domain/local/attachments/*)은 손대지 않는 것이 지금까지의
  * 규칙이다. 2026-09-15 견적서 첨부의 두 칸(SIGNED_QUOTE_PDF · QUOTE_EXCEL)도
  * 같은 까닭으로 데모에 없다. 그래서 attachment-category.test.ts 는 「데모 목록 =
@@ -51,10 +50,11 @@ export const ATTACHMENT_CATEGORY_CODES = [
   "LOG_FILE",
   "FIRMWARE",
   "CIRCUIT_DIAGRAM",
-  // 개선 요청 글에 붙는 화면 사진이다(2026-09-13). 새 분류는 기타 **앞**에
-  // 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
-  // 데모 파일(local/attachments/attachment-types.ts)에는 없다 — 파일 헤더의
-  // '데모 파일과의 관계' 참조.
+  // 화면 사진(2026-09-13). 지금은 **어느 주인에게도 붙지 않는다**(아래
+  // OWNERLESS_ATTACHMENT_CATEGORIES) — 값은 DB enum과 이미 저장된 행에 남아 있어
+  // 지우지 않는다. 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다
+  // (attachment-category.test.ts). 데모 파일(local/attachments/attachment-types.ts)에는
+  // 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
   "SCREENSHOT",
   // 견적서(quotes)에 붙는 두 칸이다(2026-09-15) — 결재 사인이 들어간 PDF 와 손으로
   // 만든 엑셀 견적서. 둘 다 **견적서 주인 전용**이다(아래 isAttachmentCategoryAllowedForOwner).
@@ -96,30 +96,31 @@ export function isAttachmentCategory(value: string): value is AttachmentCategory
 }
 
 /**
- * ── 분류는 주인을 가린다 — 「스크린샷」은 개선 요청 전용이다 (2026-09-13) ──
- * 첨부의 주인은 셋이다(schema/attachments.ts — 접수 건 · 제품 모델 · 개선 요청).
+ * ── 분류는 주인을 가린다 ──────────────────────────────────────────────────
+ * 첨부의 주인은 셋이다(schema/attachments.ts — 접수 건 · 제품 모델 · 견적서).
  * 분류 목록은 하나라서, 목록을 그대로 도는 화면·통로에는 모든 분류가 보이고
- * 받아진다. 그런데 SCREENSHOT 은 개선 요청 글의 화면 사진 자리이고, 개선 요청
- * 글에는 거꾸로 SCREENSHOT **만** 붙는다. 그 짝을 여기 한 자리에서 정한다 —
- * 접수 건·제품 모델 파일 화면의 분류 선택지, 두 올리기 통로의 거절, 그리고
+ * 받아진다. 주인마다 쓸 수 있는 분류를 여기 한 자리에서 정한다 — 접수 건·제품
+ * 모델 파일 화면의 분류 선택지, 올리기 통로들의 거절, 그리고
  * createAttachmentRecord 의 마지막 방어선이 모두 이 함수를 본다. 규칙을 세 곳에
  * 따로 적으면 화면은 내놓는데 통로가 거절하는(또는 그 반대) 날이 온다.
  *
- * 개선 요청 쪽이 「SCREENSHOT 만」인 것은 승인된 설계다(이미지만 · 한 글에 5장).
- * 분류를 요청값으로 받지 않으므로 이 규칙은 올리기 통로가 늘 지킨다.
- *
- * ── 넷째 주인 — 견적서 (2026-09-15) ────────────────────────────────────
+ * ── 셋째 주인 — 견적서 (2026-09-15) ────────────────────────────────────
  * 견적서(quotes)에 결재 사인이 들어간 PDF 와 손으로 만든 엑셀 견적서를 붙인다.
- * 개선 요청과 같은 모양의 짝이다 — 견적서에는 SIGNED_QUOTE_PDF · QUOTE_EXCEL
- * **둘만** 붙고, 그 둘은 **견적서에만** 붙는다. 수리 건 파일 탭의 QUOTE(「견적서」)
- * 분류는 이 짝과 관계없이 그대로 수리 건 · 모델에 쓰인다(뜻을 바꾸지 않는다).
+ * 견적서에는 SIGNED_QUOTE_PDF · QUOTE_EXCEL **둘만** 붙고, 그 둘은 **견적서에만**
+ * 붙는다. 수리 건 파일 탭의 QUOTE(「견적서」) 분류는 이 짝과 관계없이 그대로
+ * 수리 건 · 모델에 쓰인다(뜻을 바꾸지 않는다).
  */
-export const ATTACHMENT_OWNER_KINDS = ["REPAIR_CASE", "PRODUCT_MODEL", "IMPROVEMENT_REQUEST", "QUOTE"] as const;
+export const ATTACHMENT_OWNER_KINDS = ["REPAIR_CASE", "PRODUCT_MODEL", "QUOTE"] as const;
 
 export type AttachmentOwnerKind = (typeof ATTACHMENT_OWNER_KINDS)[number];
 
-/** 개선 요청 글에 붙는 첨부의 분류 — 언제나 이것 하나다. 올리기 통로가 요청값으로 받지 않는다. */
-export const IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY = "SCREENSHOT" satisfies AttachmentCategory;
+/**
+ * 이제 어느 주인에게도 붙지 않는 분류. 걷어낸 기능이 쓰던 자리이고, 값 자체는
+ * **지우지 않는다** — DB enum(attachment_category)에 남아 있고 이미 그 값으로
+ * 저장된 행이 있다. 목록에서 값을 빼면 그 행들의 분류가 읽히지 않는다.
+ * 새 파일이 이 분류로 들어오는 길만 아래 함수가 막는다.
+ */
+const OWNERLESS_ATTACHMENT_CATEGORIES: readonly AttachmentCategory[] = ["SCREENSHOT"];
 
 /**
  * 견적서에 붙는 첨부의 칸 — **분류 하나가 칸 하나**이고, 칸마다 파일은 하나다
@@ -143,10 +144,9 @@ export function isAttachmentCategoryAllowedForOwner(
   category: AttachmentCategory,
   ownerKind: AttachmentOwnerKind
 ): boolean {
-  if (ownerKind === "IMPROVEMENT_REQUEST") return category === IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY;
   if (ownerKind === "QUOTE") return isQuoteAttachmentSlotCategory(category);
-  // 접수 건 · 제품 모델 — 다른 주인 전용 분류(스크린샷 · 견적서 두 칸)만 빠진다.
-  return category !== IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY && !isQuoteAttachmentSlotCategory(category);
+  // 접수 건 · 제품 모델 — 주인 없는 분류(스크린샷)와 견적서 전용 두 칸만 빠진다.
+  return !OWNERLESS_ATTACHMENT_CATEGORIES.includes(category) && !isQuoteAttachmentSlotCategory(category);
 }
 
 /**

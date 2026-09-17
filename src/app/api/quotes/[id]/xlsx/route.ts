@@ -211,7 +211,6 @@ async function sendAttachedExcel(
   const decision = decideAttachmentDownload({
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: quote.id,
     isDeleted: attachment.isDeleted,
     quoteInTrash: false,

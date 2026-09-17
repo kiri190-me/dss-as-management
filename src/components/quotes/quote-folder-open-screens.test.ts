@@ -256,7 +256,6 @@ describe("🔴 ④c — 복사는 공용 모듈 하나로", () => {
       "components/common/copy-text.ts",
       "components/customer-portal/CustomerLinkAddress.tsx",
       "components/repair-cases/detail/edit/EditSectionActions.tsx",
-      "components/settings/ImprovementRequestsScreen.tsx",
     ]);
   });
 

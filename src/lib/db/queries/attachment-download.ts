@@ -51,14 +51,7 @@ export type AttachmentForDownload = {
    */
   productModelId: string | null;
   /**
-   * 개선 요청 주인(2026-09-13). 앞의 두 칸과 **동시에 채워지지 않는다**
-   * (attachments_improvement_owner_alone CHECK). 차 있으면 라우트는
-   * improvementRequests 를 묻는다 — 보기는 READ, 미리보기 붙이기·지우기는 WRITE 에
-   * 글 한 건에 대한 판정(접수 상태인 자기 글 또는 관리 권한)을 더한다.
-   */
-  improvementRequestId: string | null;
-  /**
-   * 견적서 주인(2026-09-15 Q2). 앞의 세 칸과 **동시에 채워지지 않는다**
+   * 견적서 주인(2026-09-15 Q2). 앞의 두 칸과 **동시에 채워지지 않는다**
    * (attachments_quote_owner_alone CHECK). 차 있으면 라우트는 quotes 를 묻는다 —
    * 보기는 READ, 미리보기 붙이기·지우기·되살리기는 WRITE.
    */
@@ -92,7 +85,6 @@ export async function getAttachmentForDownload(
       id: attachments.id,
       repairCaseId: attachments.repairCaseId,
       productModelId: attachments.productModelId,
-      improvementRequestId: attachments.improvementRequestId,
       quoteId: attachments.quoteId,
       // 견적서 주인이 아니면 조인이 비어 NULL 이다 — 아래에서 false 로 접는다.
       quoteIsDeleted: quotes.isDeleted,

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import {
-  ATTACHMENT_IMPROVEMENT_REQUEST_STORED_PATH_PREFIX,
   ATTACHMENT_MODEL_STORED_PATH_PREFIX,
   ATTACHMENT_QUOTE_STORED_PATH_PREFIX,
   ATTACHMENT_STORED_PATH_PREFIX,
@@ -11,9 +10,6 @@ import {
   assertPortableStoredPath,
   buildAttachmentStoredPath,
   buildAttachmentStoredPathFromFileName,
-  buildImprovementRequestAttachmentPreviewPath,
-  buildImprovementRequestAttachmentStoredPath,
-  buildImprovementRequestAttachmentStoredPathFromFileName,
   buildProductModelAttachmentPreviewPath,
   buildProductModelAttachmentStoredPath,
   buildProductModelAttachmentStoredPathFromFileName,
@@ -445,199 +441,11 @@ test("모델 경로도 저장 루트 아래로만 해석되고 '..'로 루트를
 
 /**
  * ============================================================================
- * 개선 요청 첨부 — 세 번째 접두어 (2026-09-13)
+ * 견적서 첨부 — 세 번째 접두어 (2026-09-15)
  * ============================================================================
- * 설정 › 개선 요청 글에 스크린샷을 붙이면서 첫 마디가 셋이 됐다. 모델 때와 같은
- * 두 가지를 못박는다 — 규칙 1·2·3을 똑같이 지키는가, 그리고 셋 말고 넷째
- * 첫 마디는 여전히 거부되는가.
- * ============================================================================
- */
-
-const IMPROVEMENT_REQUEST_ID = "c4a81f07-2b3d-4e5f-9a6b-7c8d9e0f1a2b";
-
-test("개선 요청 첨부의 stored_path는 improvement-requests/{글id}/{첨부id}.{확장자}다", () => {
-  const stored = buildImprovementRequestAttachmentStoredPath({
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    attachmentId: ATTACHMENT_ID,
-    extension: "png",
-  });
-  assert.equal(stored, `improvement-requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`);
-  assert.equal(ATTACHMENT_IMPROVEMENT_REQUEST_STORED_PATH_PREFIX, "improvement-requests");
-  assert.equal(stored.split("/").length, 3);
-  assert.equal(stored.includes("\\"), false, "Linux는 역슬래시를 파일명의 일부로 읽는다");
-  assert.ok(stored.startsWith(`${ATTACHMENT_IMPROVEMENT_REQUEST_STORED_PATH_PREFIX}/`));
-  if (path.sep !== "/") {
-    assert.equal(stored.includes(path.sep), false, `OS 구분자(${path.sep})가 DB 값에 들어갔다`);
-  }
-});
-
-test("개선 요청 경로도 대문자 UUID·대문자 확장자를 소문자로 눕힌다", () => {
-  const stored = buildImprovementRequestAttachmentStoredPath({
-    improvementRequestId: IMPROVEMENT_REQUEST_ID.toUpperCase(),
-    attachmentId: ATTACHMENT_ID.toUpperCase(),
-    extension: "JPG",
-  });
-  assert.equal(stored, stored.toLowerCase());
-  assert.equal(stored, `improvement-requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.jpg`);
-});
-
-test("개선 요청 경로도 원본 파일명에서 확장자만 뽑아 소문자로 붙인다", () => {
-  const stored = buildImprovementRequestAttachmentStoredPathFromFileName({
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    attachmentId: ATTACHMENT_ID,
-    originalFileName: "화면 캡처 2026-09-13 (1).PNG",
-  });
-  assert.equal(stored, `improvement-requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`);
-  assert.equal(stored.includes("캡처"), false, "원본 이름은 디스크 경로에 들어가지 않는다");
-  assert.equal(stored.includes(" "), false);
-});
-
-test("개선 요청 첨부의 미리보기 경로는 .preview.jpg로 끝난다", () => {
-  const preview = buildImprovementRequestAttachmentPreviewPath({
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    attachmentId: ATTACHMENT_ID,
-  });
-  assert.equal(preview, `improvement-requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.preview.jpg`);
-  assert.equal(preview, preview.toLowerCase());
-  assert.equal(isPortableStoredPath(preview), true);
-});
-
-test("UUID가 아닌 글 ID·첨부 ID로는 개선 요청 경로를 만들 수 없다", () => {
-  for (const badId of ["../../etc", "local-request-1", "", "42"]) {
-    assert.throws(
-      () =>
-        buildImprovementRequestAttachmentStoredPath({
-          improvementRequestId: badId,
-          attachmentId: ATTACHMENT_ID,
-          extension: "png",
-        }),
-      AttachmentPathError,
-      badId
-    );
-  }
-  assert.throws(
-    () =>
-      buildImprovementRequestAttachmentStoredPath({
-        improvementRequestId: IMPROVEMENT_REQUEST_ID,
-        attachmentId: "local-demo-1",
-        extension: "png",
-      }),
-    AttachmentPathError
-  );
-  assert.throws(
-    () =>
-      buildImprovementRequestAttachmentPreviewPath({
-        improvementRequestId: "not-a-uuid",
-        attachmentId: ATTACHMENT_ID,
-      }),
-    AttachmentPathError
-  );
-});
-
-test("허용목록에 없는 확장자로는 개선 요청 경로도 만들 수 없다", () => {
-  for (const extension of ["exe", "webp", "", "p/ng"]) {
-    assert.throws(
-      () =>
-        buildImprovementRequestAttachmentStoredPath({
-          improvementRequestId: IMPROVEMENT_REQUEST_ID,
-          attachmentId: ATTACHMENT_ID,
-          extension,
-        }),
-      AttachmentPathError,
-      extension
-    );
-  }
-  for (const name of ["README", "trailing.", ".hidden", "weird.타입"]) {
-    assert.throws(
-      () =>
-        buildImprovementRequestAttachmentStoredPathFromFileName({
-          improvementRequestId: IMPROVEMENT_REQUEST_ID,
-          attachmentId: ATTACHMENT_ID,
-          originalFileName: name,
-        }),
-      AttachmentPathError,
-      name
-    );
-  }
-});
-
-test("assertPortableStoredPath는 세 접두어를 모두 받는다", () => {
-  const stored = [
-    buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "png" }),
-    buildProductModelAttachmentStoredPath({
-      productModelId: MODEL_ID,
-      attachmentId: ATTACHMENT_ID,
-      extension: "png",
-    }),
-    buildImprovementRequestAttachmentStoredPath({
-      improvementRequestId: IMPROVEMENT_REQUEST_ID,
-      attachmentId: ATTACHMENT_ID,
-      extension: "png",
-    }),
-  ];
-  for (const value of stored) {
-    assert.doesNotThrow(() => assertPortableStoredPath(value), value);
-    assert.equal(isPortableStoredPath(value), true, value);
-  }
-  assert.equal(new Set(stored.map((value) => value.split("/")[0])).size, 3, "첫 마디가 셋으로 갈려야 한다");
-});
-
-test("셋째 접두어를 더한 것이 '아무거나 받는다'가 되지 않았다 — 목록 밖 접두어는 여전히 거부된다", () => {
-  const rejectedPrefixes = [
-    `improvement-request/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`, // 단수형 오타
-    `improvement_requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`, // 밑줄
-    `improvement-requests-old/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`,
-    `requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`,
-    `screenshots/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`,
-    `customers/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.png`,
-  ];
-  for (const value of rejectedPrefixes) {
-    assert.equal(isPortableStoredPath(value), false, `거부돼야 한다: ${value}`);
-    assert.throws(() => assertPortableStoredPath(value), AttachmentPathError, value);
-  }
-});
-
-test("개선 요청 접두어에서도 역슬래시·절대경로·'..'·대문자는 여전히 거부된다", () => {
-  const rejected = [
-    `improvement-requests\\${IMPROVEMENT_REQUEST_ID}\\${ATTACHMENT_ID}.png`, // 규칙 1
-    "IMPROVEMENT-REQUESTS/REQ/FILE.PNG", // 규칙 2
-    `improvement-requests/${IMPROVEMENT_REQUEST_ID}/${ATTACHMENT_ID}.PNG`, // 규칙 2 — 확장자만
-    "/improvement-requests/req/file.png", // 규칙 3 — 절대경로
-    "c:/improvement-requests/req/file.png", // 규칙 3 — 드라이브 문자
-    "improvement-requests/../../windows/system32/config", // 상위 이동
-    "improvement-requests//double.png", // 빈 마디
-    "improvement-requests/./x.png", // 현재 디렉터리 마디
-  ];
-  for (const value of rejected) {
-    assert.equal(isPortableStoredPath(value), false, `거부돼야 한다: ${JSON.stringify(value)}`);
-    assert.throws(() => assertPortableStoredPath(value), AttachmentPathError, value);
-  }
-});
-
-test("개선 요청 경로도 저장 루트 아래로만 해석된다", () => {
-  const root = path.resolve(path.sep === "/" ? "/srv/dss-as-data/uploads" : "C:\\DSS-AS-DATA\\uploads");
-  const stored = buildImprovementRequestAttachmentStoredPath({
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    attachmentId: ATTACHMENT_ID,
-    extension: "jpeg",
-  });
-  const absolute = resolveAttachmentAbsolutePath(root, stored);
-  assert.ok(path.isAbsolute(absolute));
-  assert.equal(path.relative(root, absolute).startsWith(".."), false, "루트 밖으로 나가면 안 된다");
-  assert.ok(absolute.includes(`${path.sep}${ATTACHMENT_IMPROVEMENT_REQUEST_STORED_PATH_PREFIX}${path.sep}`));
-  assert.throws(
-    () => resolveAttachmentAbsolutePath(root, "improvement-requests/../../secrets.txt"),
-    AttachmentPathError
-  );
-});
-
-/**
- * ============================================================================
- * 견적서 첨부 — 네 번째 접두어 (2026-09-15)
- * ============================================================================
- * 견적서에 결재 견적서 PDF · 수기 견적서 엑셀을 붙이면서 첫 마디가 넷이 됐다.
+ * 견적서에 결재 견적서 PDF · 수기 견적서 엑셀을 붙이면서 첫 마디가 셋이 됐다.
  * 앞의 접두어들과 같은 두 가지를 못박는다 — 규칙 1·2·3을 똑같이 지키는가, 그리고
- * 넷 말고 다섯째 첫 마디는 여전히 거부되는가. 백업 스크립트(scripts/backup-attachments.ts)가
+ * 셋 말고 넷째 첫 마디는 여전히 거부되는가. 백업 스크립트(scripts/backup-attachments.ts)가
  * assertPortableStoredPath 로 전 행을 검사하므로, 여기서 quotes/… 가 통과해야 백업이
  * 첫 견적서 파일에서 멈추지 않는다.
  * ============================================================================
@@ -727,24 +535,19 @@ test("UUID가 아닌 견적서 ID·첨부 ID, 목록 밖 확장자로는 견적�
   }
 });
 
-test("assertPortableStoredPath는 네 접두어를 모두 받는다", () => {
+test("assertPortableStoredPath는 세 접두어를 모두 받는다", () => {
   const stored = [
     buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
     buildProductModelAttachmentStoredPath({ productModelId: MODEL_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
-    buildImprovementRequestAttachmentStoredPath({
-      improvementRequestId: IMPROVEMENT_REQUEST_ID,
-      attachmentId: ATTACHMENT_ID,
-      extension: "png",
-    }),
     buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension: "pdf" }),
   ];
   for (const value of stored) {
     assert.doesNotThrow(() => assertPortableStoredPath(value), value);
   }
-  assert.equal(new Set(stored.map((value) => value.split("/")[0])).size, 4, "첫 마디가 넷으로 갈려야 한다");
+  assert.equal(new Set(stored.map((value) => value.split("/")[0])).size, 3, "첫 마디가 셋으로 갈려야 한다");
 });
 
-test("넷째 접두어를 더한 것이 '아무거나 받는다'가 되지 않았다 — 목록 밖 접두어와 규칙 위반은 여전히 거부된다", () => {
+test("셋째 접두어를 더한 것이 '아무거나 받는다'가 되지 않았다 — 목록 밖 접두어와 규칙 위반은 여전히 거부된다", () => {
   const rejected = [
     `quote/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`, // 단수형 오타
     `quotes-old/${QUOTE_ID}/${ATTACHMENT_ID}.pdf`,

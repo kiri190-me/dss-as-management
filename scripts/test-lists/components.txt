@@ -32,8 +32,6 @@ src/components/quotes/quote-edit-work-scope-suppression.test.ts
 src/lib/domain/range-selection.test.ts
 src/lib/hooks/useShiftRangeSelection.test.ts
 src/components/common/shift-range-selection-screens.test.ts
-src/components/settings/improvement-request-screenshot-files.test.ts
-src/components/settings/ImprovementRequestScreenshots.test.tsx
 src/components/users/user-deletion-dialog-text.test.ts
 src/components/users/UserDeletionParts.test.tsx
 src/components/repair-cases/detail/edit/engineer-select-options.test.ts

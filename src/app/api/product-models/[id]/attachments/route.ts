@@ -138,13 +138,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (!isAttachmentCategory(category)) {
     return fail(400, "INVALID_CATEGORY", "첨부 분류가 올바르지 않습니다.");
   }
-  // 「스크린샷」은 개선 요청 글 전용이다(attachment-category.ts). 접수 건 통로와
+  // 「스크린샷」은 어느 주인에게도 붙지 않는다(attachment-category.ts). 접수 건 통로와
   // 같은 자리 · 같은 응답이다.
   if (!isAttachmentCategoryAllowedForOwner(category, "PRODUCT_MODEL")) {
     return fail(
       400,
       "CATEGORY_NOT_ALLOWED_FOR_OWNER",
-      `'${attachmentCategoryLabels[category]}' 분류는 제품 모델 파일에 쓸 수 없습니다. 개선 요청 글에만 붙입니다.`
+      `'${attachmentCategoryLabels[category]}' 분류는 제품 모델 파일에 쓸 수 없습니다.`
     );
   }
 

@@ -147,7 +147,6 @@ export async function GET(
   const decision = decideAttachmentDownload({
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: quote.id,
     isDeleted: attachment.isDeleted,
     quoteInTrash: false,

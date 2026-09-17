@@ -5,7 +5,6 @@ import {
   ATTACHMENT_CATEGORY_CODES,
   ATTACHMENT_OWNER_KINDS,
   DEFAULT_MALWARE_SCAN_STATUS,
-  IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY,
   MALWARE_SCAN_STATUS_CODES,
   QUOTE_ATTACHMENT_FILES_PER_SLOT,
   QUOTE_ATTACHMENT_SLOT_CATEGORIES,
@@ -208,28 +207,23 @@ test("목록에 없는 값은 분류로 인정되지 않는다", () => {
 
 // ─────────────────────────────────── 분류와 주인의 짝 (2026-09-13)
 
-test("주인 종류는 넷이다 — 첨부 표의 네 주인 칸(접수 건 · 제품 모델 · 개선 요청 · 견적서)", () => {
-  assert.deepEqual([...ATTACHMENT_OWNER_KINDS], ["REPAIR_CASE", "PRODUCT_MODEL", "IMPROVEMENT_REQUEST", "QUOTE"]);
+test("주인 종류는 셋이다 — 첨부 표의 세 주인 칸(접수 건 · 제품 모델 · 견적서)", () => {
+  assert.deepEqual([...ATTACHMENT_OWNER_KINDS], ["REPAIR_CASE", "PRODUCT_MODEL", "QUOTE"]);
 });
 
-test("스크린샷은 개선 요청 전용이다 — 접수 건 · 제품 모델 · 견적서에는 쓸 수 없다", () => {
-  assert.equal(IMPROVEMENT_REQUEST_ATTACHMENT_CATEGORY, "SCREENSHOT");
-  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "IMPROVEMENT_REQUEST"), true);
-  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "REPAIR_CASE"), false);
-  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "PRODUCT_MODEL"), false);
-  assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", "QUOTE"), false);
-});
-
-test("개선 요청에는 스크린샷만 붙는다 — 다른 분류는 모두 거절", () => {
-  assert.deepEqual(attachmentCategoriesForOwner("IMPROVEMENT_REQUEST"), ["SCREENSHOT"]);
-  for (const code of ATTACHMENT_CATEGORY_CODES) {
-    assert.equal(isAttachmentCategoryAllowedForOwner(code, "IMPROVEMENT_REQUEST"), code === "SCREENSHOT", code);
+test("스크린샷은 어느 주인에도 붙지 않는다 — 값은 남기고 새로 들어올 길만 막는다", () => {
+  // 값을 목록에서 빼지 않는 것은 DB enum(attachment_category)과 이미 그 값으로
+  // 저장된 행 때문이다(attachment-category.ts 의 OWNERLESS_ATTACHMENT_CATEGORIES).
+  assert.ok((ATTACHMENT_CATEGORY_CODES as readonly string[]).includes("SCREENSHOT"));
+  for (const owner of ATTACHMENT_OWNER_KINDS) {
+    assert.equal(isAttachmentCategoryAllowedForOwner("SCREENSHOT", owner), false, owner);
   }
 });
 
-test("접수 건 · 제품 모델의 선택지는 주인 전용 분류 셋만 빠진 목록이다 — 차례는 그대로", () => {
+test("접수 건 · 제품 모델의 선택지는 분류 셋만 빠진 목록이다 — 차례는 그대로", () => {
   // 화면(FilesScreen · ProductModelFilesSection)이 이 목록을 그대로 map 한다. 차례가
-  // 바뀌면 사람이 보는 고르는 차례가 바뀐다 — 빼는 것은 스크린샷과 견적서 두 칸뿐이어야 한다.
+  // 바뀌면 사람이 보는 고르는 차례가 바뀐다 — 빼는 것은 주인 없는 스크린샷과
+  // 견적서 두 칸뿐이어야 한다.
   const withoutOwnerOnly = ATTACHMENT_CATEGORY_CODES.filter(
     (code) => !["SCREENSHOT", "SIGNED_QUOTE_PDF", "QUOTE_EXCEL"].includes(code)
   );
@@ -258,11 +252,11 @@ test("견적서에는 결재 PDF · 엑셀 두 칸만 붙는다 — 다른 분�
   assert.equal(isAttachmentCategoryAllowedForOwner("OTHER", "QUOTE"), false);
 });
 
-test("견적서 두 칸은 견적서 전용이다 — 접수 건 · 제품 모델 · 개선 요청에는 쓸 수 없다", () => {
+test("견적서 두 칸은 견적서 전용이다 — 접수 건 · 제품 모델에는 쓸 수 없다", () => {
   for (const code of QUOTE_ATTACHMENT_SLOT_CATEGORIES) {
     assert.equal(isQuoteAttachmentSlotCategory(code), true, code);
     assert.equal(isAttachmentCategoryAllowedForOwner(code, "QUOTE"), true, code);
-    for (const owner of ["REPAIR_CASE", "PRODUCT_MODEL", "IMPROVEMENT_REQUEST"] as const) {
+    for (const owner of ["REPAIR_CASE", "PRODUCT_MODEL"] as const) {
       assert.equal(isAttachmentCategoryAllowedForOwner(code, owner), false, `${code} → ${owner}`);
     }
   }
@@ -271,11 +265,14 @@ test("견적서 두 칸은 견적서 전용이다 — 접수 건 · 제품 모�
   assert.equal(isQuoteAttachmentSlotCategory("OTHER"), false);
 });
 
-test("모든 분류는 적어도 한 주인에 붙는다 — 쓸 곳 없는 분류가 생기지 않는다", () => {
-  for (const code of ATTACHMENT_CATEGORY_CODES) {
-    const owners = ATTACHMENT_OWNER_KINDS.filter((owner) => isAttachmentCategoryAllowedForOwner(code, owner));
-    assert.ok(owners.length > 0, `${code} 는 어느 주인에도 붙지 않는다`);
-  }
+test("주인 없는 분류는 스크린샷 하나뿐이다 — 나머지는 모두 붙을 자리가 있다", () => {
+  // 예전에는 「모든 분류는 적어도 한 주인에 붙는다」였다. 스크린샷을 쓰던 기능이
+  // 걷히면서 그 분류만 주인을 잃었고, 값은 DB enum·기존 행 때문에 남겨 둔다.
+  // 목록으로 못박아 두면 **다른** 분류가 주인을 잃는 날 여기서 걸린다.
+  const ownerless = ATTACHMENT_CATEGORY_CODES.filter(
+    (code) => !ATTACHMENT_OWNER_KINDS.some((owner) => isAttachmentCategoryAllowedForOwner(code, owner))
+  );
+  assert.deepEqual(ownerless, ["SCREENSHOT"]);
 });
 
 test("견적서의 한 칸에는 파일 하나 — 같은 칸의 살아 있는 파일만 밀려난다", () => {

@@ -56,10 +56,6 @@ export const navItems: NavItem[] = [
   // A/S 접수 알림 메일의 자동 발송 여부·수신자·문구. 「설정」 그룹에 두는 것은
   // 사용자 관리와 나란히 "누가 무엇을 받는가"를 정하는 자리이기 때문이다.
   { key: "mailSettings", href: "/settings/mail", label: "메일 설정" },
-  // 이 시스템을 쓰다가 불편한 점을 적는 자리(2026-09-13). 누구나 적고 보며,
-  // 관리자·개발자가 진행중·해결로 옮긴다(auth/improvement-request-authorization.ts).
-  // 「설정」 그룹에 두는 것은 시스템을 운영하는 쪽으로 가는 말이기 때문이다.
-  { key: "improvementRequests", href: "/settings/improvement-requests", label: "개선 요청" },
   // 🔴 **역할별 접근 권한 설정으로는 절대 열 수 없는 유일한 항목이다.**
   // PERMISSION_AREAS 에 없으므로 listAccessibleAreaKeys 가 이 열쇠를 돌려주는
   // 일이 없고, 그래서 설정 화면에는 이 줄이 아예 나오지 않는다. 대신
@@ -190,7 +186,5 @@ export const navGroups: NavGroup[] = [
   // 곧 이 그룹의 뜻이기 때문이고, 맨 끝인 이유는 다른 셋과 달리 **역할별 접근
   // 권한 설정으로는 열 수 없는 항목**이라서다 — 노출 규칙이 다른 줄을 사이에
   // 끼워 두면 읽는 사람이 그 사실을 매번 다시 확인해야 한다.
-  // 개선 요청(2026-09-13)은 개발자 모드 **바로 앞**이다 — 개발자 모드는 맨 끝
-  // 그대로 둔다(위 주석).
-  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings", "mailSettings", "improvementRequests", "developerMode"] },
+  { key: "systemSettings", label: "설정", itemKeys: ["users", "settings", "mailSettings", "developerMode"] },
 ];

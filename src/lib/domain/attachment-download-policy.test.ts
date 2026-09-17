@@ -40,7 +40,6 @@ function healthySubject(overrides: Partial<AttachmentDownloadSubject> = {}): Att
   return {
     repairCaseId: CASE_ID,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: null,
     isDeleted: false,
     quoteInTrash: false,
@@ -63,7 +62,6 @@ function healthyModelSubject(
   return {
     repairCaseId: null,
     productModelId: MODEL_ID,
-    improvementRequestId: null,
     quoteId: null,
     isDeleted: false,
     quoteInTrash: false,
@@ -133,7 +131,7 @@ test("주인이 아무도 없는 첨부는 막는다 — 권한을 물을 대상
 });
 
 test("isDetachedAttachment 는 주인 칸이 모두 NULL 인 경우만 참이다", () => {
-  const none = { improvementRequestId: null, quoteId: null };
+  const none = { quoteId: null };
   assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: null, ...none }), true);
   assert.equal(isDetachedAttachment({ repairCaseId: CASE_ID, productModelId: null, ...none }), false);
   // 🔴 모델 첨부는 repair_case_id 가 원래 NULL 이다. 여기서 참이 되면 정상적인
@@ -145,96 +143,7 @@ test("isDetachedAttachment 는 주인 칸이 모두 NULL 인 경우만 참이다
   assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: "", ...none }), false);
 });
 
-// ─────────────────────────────────────────── 개선 요청이 주인인 첨부 (셋째 주인)
-
-const IMPROVEMENT_REQUEST_ID = "c4a81f07-0000-4000-8000-000000000003";
-
-test("isDetachedAttachment — 개선 요청만 주인이면 주인이 있다", () => {
-  // 🔴 개선 요청 스크린샷은 앞의 두 칸이 원래 NULL 이다. 여기서 참이 되면 정상적인
-  // 스크린샷이 전부 DETACHED 로 막힌다(모델 회로도 때와 같은 함정).
-  assert.equal(
-    isDetachedAttachment({
-      repairCaseId: null,
-      productModelId: null,
-      improvementRequestId: IMPROVEMENT_REQUEST_ID,
-      quoteId: null,
-    }),
-    false
-  );
-});
-
-test("isDetachedAttachment — 주인 칸이 모두 NULL 이면 주인이 없다", () => {
-  assert.equal(
-    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: null, quoteId: null }),
-    true
-  );
-});
-
-test("isDetachedAttachment — 런타임에 개선 요청 칸이 빠져 와도 NULL 과 같이 본다(닫히는 쪽)", () => {
-  // 타입으로는 필수 칸이다(S2). 그래도 타입을 거치지 않은 값이 칸 없이 오면 "없음"
-  // 으로 본다 — 앞의 두 칸이 NULL 이면 주인 없음(DETACHED)으로 막히는 쪽이다.
-  const cases: Array<{ repairCaseId: string | null; productModelId: string | null }> = [
-    { repairCaseId: null, productModelId: null },
-    { repairCaseId: CASE_ID, productModelId: null },
-    { repairCaseId: null, productModelId: MODEL_ID },
-  ];
-  for (const owner of cases) {
-    assert.equal(
-      isDetachedAttachment(owner as AttachmentOwnerRef),
-      isDetachedAttachment({ ...owner, improvementRequestId: null, quoteId: null }),
-      JSON.stringify(owner)
-    );
-  }
-  assert.equal(isDetachedAttachment({ repairCaseId: null, productModelId: null } as AttachmentOwnerRef), true);
-  // 기존 두 칸과 같은 성질 — 빈 문자열은 NULL 이 아니다.
-  assert.equal(
-    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: "", quoteId: null }),
-    false
-  );
-});
-
-test("개선 요청이 주인이면 통과한다 — 휴지통·검사 규칙은 그대로 적용된다", () => {
-  const subject: AttachmentDownloadSubject = {
-    repairCaseId: null,
-    productModelId: null,
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    quoteId: null,
-    isDeleted: false,
-    quoteInTrash: false,
-    malwareScanStatus: "CLEAN",
-  };
-  assert.equal(decideAttachmentDownload(subject).allowed, true);
-
-  const deleted = decideAttachmentDownload({ ...subject, isDeleted: true });
-  assert.equal(deleted.allowed === false && deleted.reason, "DELETED");
-
-  for (const status of MALWARE_SCAN_STATUS_CODES) {
-    const caseDecision = decideAttachmentDownload(healthySubject({ malwareScanStatus: status }));
-    const improvementDecision = decideAttachmentDownload({ ...subject, malwareScanStatus: status });
-    assert.equal(
-      improvementDecision.allowed,
-      caseDecision.allowed,
-      `${status} 의 답이 주인에 따라 갈렸다`
-    );
-  }
-});
-
-test("주인 칸이 모두 NULL 이면 DETACHED 로 막힌다 — 개선 요청이 지워져 연결이 끊긴 스크린샷", () => {
-  // 개선 요청 글을 지우면 FK(ON DELETE SET NULL)가 이 칸을 비운다. 그 스크린샷은
-  // 휴지통으로 가지만(개선 요청 삭제 mutation), 휴지통보다 먼저 주인 없음이 걸린다.
-  const decision = decideAttachmentDownload({
-    repairCaseId: null,
-    productModelId: null,
-    improvementRequestId: null,
-    quoteId: null,
-    isDeleted: false,
-    quoteInTrash: false,
-    malwareScanStatus: "CLEAN",
-  });
-  assert.equal(decision.allowed === false && decision.reason, "DETACHED");
-});
-
-// ─────────────────────────────────────────── 견적서가 주인인 첨부 (넷째 주인, 2026-09-15 Q2)
+// ─────────────────────────────────────────── 견적서가 주인인 첨부 (셋째 주인, 2026-09-15 Q2)
 
 const QUOTE_ID = "e2b61d09-0000-4000-8000-000000000004";
 
@@ -243,7 +152,6 @@ function healthyQuoteSubject(overrides: Partial<AttachmentDownloadSubject> = {})
   return {
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: QUOTE_ID,
     isDeleted: false,
     quoteInTrash: false,
@@ -253,19 +161,19 @@ function healthyQuoteSubject(overrides: Partial<AttachmentDownloadSubject> = {})
 }
 
 test("isDetachedAttachment — 견적서만 주인이면 주인이 있다(Q1 까지는 「주인 없음」으로 막혔다)", () => {
-  // 🔴 견적서 첨부는 앞의 세 칸이 원래 NULL 이다. 여기서 참이 되면 결재 PDF · 수기 엑셀이
+  // 🔴 견적서 첨부는 앞의 두 칸이 원래 NULL 이다. 여기서 참이 되면 결재 PDF · 수기 엑셀이
   // 전부 DETACHED 로 막힌다 — Q1 에서 타입으로만 막아 두었던 바로 그 상태다.
   assert.equal(
-    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: null, quoteId: QUOTE_ID }),
+    isDetachedAttachment({ repairCaseId: null, productModelId: null, quoteId: QUOTE_ID }),
     false
   );
   // 런타임에 견적서 칸이 빠져 와도 NULL 과 같이 본다(닫히는 쪽) · 빈 문자열은 NULL 이 아니다.
   assert.equal(
-    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: null } as AttachmentOwnerRef),
+    isDetachedAttachment({ repairCaseId: null, productModelId: null } as AttachmentOwnerRef),
     true
   );
   assert.equal(
-    isDetachedAttachment({ repairCaseId: null, productModelId: null, improvementRequestId: null, quoteId: "" }),
+    isDetachedAttachment({ repairCaseId: null, productModelId: null, quoteId: "" }),
     false
   );
 });
@@ -334,7 +242,6 @@ test("모델 첨부도 세 조건이 겹치면 DETACHED 가 먼저다", () => {
   const decision = decideAttachmentDownload({
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: null,
     isDeleted: true,
     quoteInTrash: false,
@@ -350,7 +257,6 @@ test("세 조건이 겹치면 DETACHED 가 먼저다 — 권한을 물을 수 �
   const decision = decideAttachmentDownload({
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: null,
     isDeleted: true,
     quoteInTrash: false,
@@ -403,7 +309,7 @@ test("DETACHED 문장이 주인의 종류를 단정하지 않는다 — 접수 �
     assert.equal(decision.reason, "DETACHED");
     assert.ok(!decision.message.includes("접수 건"), "주인이 접수 건이라고 단정하고 있다");
     assert.ok(!decision.message.includes("모델"), "주인이 모델이라고 단정하고 있다");
-    // 셋째 주인(개선 요청) · 넷째 주인(견적서)이 생긴 뒤에도 같은 원칙이다.
+    // 셋째 주인(견적서)이 생긴 뒤에도 같은 원칙이다.
     assert.ok(!decision.message.includes("개선 요청"), "주인이 개선 요청이라고 단정하고 있다");
     assert.ok(!decision.message.includes("견적서"), "주인이 견적서라고 단정하고 있다");
     // 무엇을 해야 하는지는 그대로 알려 준다 — 사실만 고치고 안내는 남긴다.
@@ -427,38 +333,29 @@ test("이유 문장에 내부 저장 경로가 담기지 않는다", () => {
 // ─────────────────────────────────────────── 주인 종류 → 물을 권한 (2026-09-13 · 견적서 2026-09-15 Q2)
 //
 // 내려받기 · 미리보기 PUT · 지우기 액션이 모두 이 두 함수로 권한을 고른다. 여기서
-// 못박는 것: 넓은 문턱은 넷 중 하나라도 있으면 넘고, 주인별 판정은 **그 주인의**
+// 못박는 것: 넓은 문턱은 셋 중 하나라도 있으면 넘고, 주인별 판정은 **그 주인의**
 // 권한만 본다(다른 주인의 권한으로 새지 않는다). 주인 없는 첨부는 예전처럼 접수 건
 // 권한으로 본다.
 
 const ALL_ACCESS: AttachmentOwnerAccess = {
   REPAIR_CASE: true,
   PRODUCT_MODEL: true,
-  IMPROVEMENT_REQUEST: true,
   QUOTE: true,
 };
 const NO_ACCESS: AttachmentOwnerAccess = {
   REPAIR_CASE: false,
   PRODUCT_MODEL: false,
-  IMPROVEMENT_REQUEST: false,
   QUOTE: false,
 };
 
-const OWNERS: Record<"REPAIR_CASE" | "PRODUCT_MODEL" | "IMPROVEMENT_REQUEST" | "QUOTE", AttachmentOwnerRef> = {
-  REPAIR_CASE: { repairCaseId: CASE_ID, productModelId: null, improvementRequestId: null, quoteId: null },
-  PRODUCT_MODEL: { repairCaseId: null, productModelId: MODEL_ID, improvementRequestId: null, quoteId: null },
-  IMPROVEMENT_REQUEST: {
-    repairCaseId: null,
-    productModelId: null,
-    improvementRequestId: IMPROVEMENT_REQUEST_ID,
-    quoteId: null,
-  },
-  QUOTE: { repairCaseId: null, productModelId: null, improvementRequestId: null, quoteId: QUOTE_ID },
+const OWNERS: Record<"REPAIR_CASE" | "PRODUCT_MODEL" | "QUOTE", AttachmentOwnerRef> = {
+  REPAIR_CASE: { repairCaseId: CASE_ID, productModelId: null, quoteId: null },
+  PRODUCT_MODEL: { repairCaseId: null, productModelId: MODEL_ID, quoteId: null },
+  QUOTE: { repairCaseId: null, productModelId: null, quoteId: QUOTE_ID },
 };
 const DETACHED_OWNER: AttachmentOwnerRef = {
   repairCaseId: null,
   productModelId: null,
-  improvementRequestId: null,
   quoteId: null,
 };
 
@@ -471,7 +368,7 @@ test("attachmentOwnerKindOf — 채워진 칸이 주인 종류다. 모두 비면
   assert.deepEqual(Object.keys(OWNERS).sort(), [...ATTACHMENT_OWNER_KINDS].sort());
 });
 
-test("넓은 문턱 — 넷 중 하나라도 있으면 넘고, 하나도 없으면 막힌다", () => {
+test("넓은 문턱 — 셋 중 하나라도 있으면 넘고, 하나도 없으면 막힌다", () => {
   assert.equal(hasAnyAttachmentOwnerAccess(NO_ACCESS), false);
   for (const kind of ATTACHMENT_OWNER_KINDS) {
     assert.equal(hasAnyAttachmentOwnerAccess({ ...NO_ACCESS, [kind]: true }), true, kind);
@@ -481,7 +378,7 @@ test("넓은 문턱 — 넷 중 하나라도 있으면 넘고, 하나도 없으�
 test("주인별 판정 — 그 주인의 권한만 본다. 다른 주인의 권한으로는 열리지 않는다(404 쪽)", () => {
   for (const [kind, owner] of Object.entries(OWNERS) as Array<[keyof typeof OWNERS, AttachmentOwnerRef]>) {
     assert.equal(isAttachmentOwnerAccessAllowed(owner, { ...NO_ACCESS, [kind]: true }), true, `${kind} 권한으로 ${kind}`);
-    // 🔴 이 주인의 권한만 빼면 나머지가 다 있어도 막힌다 — 개선 요청 스크린샷이나
+    // 🔴 이 주인의 권한만 빼면 나머지가 다 있어도 막힌다 — 모델 회로도나
     // 견적서 파일이 접수 건 파일 권한으로 열리거나 지워지면 안 된다.
     assert.equal(isAttachmentOwnerAccessAllowed(owner, { ...ALL_ACCESS, [kind]: false }), false, `${kind} 권한 없이 ${kind}`);
   }
@@ -505,13 +402,11 @@ test("다른 주인의 권한은 표로 옮기기 전과 한 글자도 같다 �
     VIEW: {
       REPAIR_CASE: { areaKey: "repairCases.files", level: "READ" },
       PRODUCT_MODEL: { areaKey: "productModels.view", level: "READ" },
-      IMPROVEMENT_REQUEST: { areaKey: "improvementRequests", level: "READ" },
       QUOTE: { areaKey: "quotes", level: "READ" },
     },
     CHANGE: {
       REPAIR_CASE: { areaKey: "repairCases.files", level: "WRITE" },
       PRODUCT_MODEL: { areaKey: "productModels.files", level: "WRITE" },
-      IMPROVEMENT_REQUEST: { areaKey: "improvementRequests", level: "WRITE" },
       QUOTE: { areaKey: "quotes", level: "WRITE" },
     },
   });
@@ -527,7 +422,7 @@ test("resolveAttachmentOwnerAccess — 표대로 묻고, 답을 그 주인의 �
   };
 
   const view = await resolveAttachmentOwnerAccess("VIEW", check);
-  assert.deepEqual(view, { REPAIR_CASE: false, PRODUCT_MODEL: false, IMPROVEMENT_REQUEST: false, QUOTE: true });
+  assert.deepEqual(view, { REPAIR_CASE: false, PRODUCT_MODEL: false, QUOTE: true });
   // 넓은 문턱은 넘고, 견적서 파일만 열린다.
   assert.equal(hasAnyAttachmentOwnerAccess(view), true);
   assert.equal(isAttachmentOwnerAccessAllowed(OWNERS.QUOTE, view), true);
@@ -542,11 +437,9 @@ test("resolveAttachmentOwnerAccess — 표대로 묻고, 답을 그 주인의 �
   assert.deepEqual(asked, [
     "repairCases.files:READ",
     "productModels.view:READ",
-    "improvementRequests:READ",
     "quotes:READ",
     "repairCases.files:WRITE",
     "productModels.files:WRITE",
-    "improvementRequests:WRITE",
     "quotes:WRITE",
   ]);
 });

@@ -36,8 +36,8 @@ import { REPAIR_CASE_XLSX_SAFETY_LIMITS } from "@/lib/xlsx/xlsx-upload-safety";
  *
  * ── 🔴 로그에 입력값을 싣지 않는다 ─────────────────────────────────────────
  * 파일에는 고객사 · S/N 이 있다. 예상 밖 오류는 이름 · PG 코드 · 제약 이름만 적는다
- * (improvement-requests.ts 의 describeErrorWithoutValues 와 같은 방식 — "use server" 파일은
- * async 함수만 내보낼 수 있어 가져오지 못하고 여기 다시 적는다).
+ * ("use server" 파일은 async 함수만 내보낼 수 있어 같은 도우미를 가져오지 못하고
+ * 여기 다시 적는다).
  * ============================================================================
  */
 

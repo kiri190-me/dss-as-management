@@ -19,7 +19,7 @@ import {
  * ============================================================================
  * 서버 액션을 부르는 쪽(UserDeletionDialog.tsx)과 나눠 둔다. 이 파일은 서버 모듈을
  * 값으로 부르지 않으므로 test:components 에서 그대로 그려 볼 수 있다
- * (UserDeletionParts.test.tsx — ImprovementRequestScreenshots.tsx 와 같은 방식).
+ * (UserDeletionParts.test.tsx).
  * ============================================================================
  */
 
@@ -74,7 +74,6 @@ function useShowModalOnMount() {
 
 /**
  * 확인 창. 이 앱의 확인 창은 전부 native `<dialog>` + `showModal()` 이다
- * (ImprovementRequestsScreen.tsx 의 DeleteImprovementRequestDialog 가 본보기).
  * Esc 는 브라우저에 맡기지 않는다 — onCancel 에서 막고 부모 상태로 닫는다. 보내는
  * 중에는 Esc 로도 닫히지 않는다.
  */

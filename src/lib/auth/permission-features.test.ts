@@ -424,32 +424,3 @@ test("설정으로 건드릴 수 없는 노드는 권한 설정 화면 하나뿐
     ["users.rolePermissions"]
   );
 });
-
-// ──────────────────────────────────────────────── 개선 요청 (2026-09-13)
-
-test("개선 요청은 모든 역할이 쓰기 이상이고, 최고관리자·관리자만 관리다", () => {
-  // 승인된 설계 — 쓰는 사람 누구나 적고, 상태를 옮기는 약속은 관리자 자리만
-  // 한다(improvement-request-authorization.ts). 🔴 permission-baseline.ts 의 case 가
-  // 빠지면 다섯 줄 전부 NONE 으로 떨어져 최고관리자까지 튕긴다 — 그 함정을 여기서 잡는다.
-  // 개발자는 여기 없다 — 역할이 아니고, 해석기가 최고관리자 급으로 올린다.
-  const expected: Record<Role, PermissionLevel> = {
-    SUPER_ADMIN: "MANAGE",
-    ADMIN: "MANAGE",
-    AS_ENGINEER: "WRITE",
-    SALES: "WRITE",
-    INVENTORY_MANAGER: "WRITE",
-  };
-  for (const role of ROLE_CODES) {
-    assert.equal(baselinePermissionLevel("improvementRequests", role), expected[role], role);
-    assert.equal(baselineLeafLevel("improvementRequests", role), expected[role], `${role} (잎)`);
-  }
-});
-
-test("개선 요청은 하위 기능 없는 잎이고, 설정이 최종 판정이다", () => {
-  // 페이지 가드와 서버 액션 넷이 설정만 본다 — 권한 설정 화면이 「넓히면 실제로
-  // 열립니다」라고 말해도 거짓이 아니다.
-  assert.equal(hasFeatures("improvementRequests"), false);
-  assert.equal(isPermissionLeafKey("improvementRequests"), true);
-  assert.equal(isSettingsEnforced("improvementRequests"), true);
-  assert.deepEqual(selectableLevelsOfLeaf("improvementRequests"), ["NONE", "READ", "WRITE", "MANAGE"]);
-});

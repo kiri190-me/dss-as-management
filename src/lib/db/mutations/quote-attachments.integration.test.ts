@@ -353,10 +353,9 @@ describe("올리기 — 견적서가 넷째 주인", () => {
     assert.deepEqual(created.displacedAttachmentIds, [], "빈 칸에 처음 올리면 밀려나는 것이 없다");
     const row = await readAttachment(created.id);
     assert.equal(row.quoteId, quote.id);
-    // 🔴 주인이 아닌 세 칸은 NULL — 여기에 값이 들어가면 사는 폴더가 정해지지 않는다.
+    // 🔴 주인이 아닌 두 칸은 NULL — 여기에 값이 들어가면 사는 폴더가 정해지지 않는다.
     assert.equal(row.repairCaseId, null);
     assert.equal(row.productModelId, null);
-    assert.equal(row.improvementRequestId, null);
     assert.equal(row.category, "SIGNED_QUOTE_PDF");
     assert.equal(row.storedPath, `quotes/${quote.id}/${created.id}.pdf`);
     assert.equal(row.mimeType, "application/pdf");
@@ -538,7 +537,6 @@ describe("조회 — 수정 화면의 칸별 파일 · 받기의 파일 고르�
         decideAttachmentDownload({
           repairCaseId: null,
           productModelId: null,
-          improvementRequestId: null,
           quoteId: excelOnly.id,
           isDeleted: source.attachment.isDeleted,
           quoteInTrash: false,
@@ -616,11 +614,11 @@ describe("내려받기 — 조회 · 판정 · 보기 권한", () => {
     assert.equal(decideAttachmentDownload(found).allowed, true, "견적서 주인은 주인 없음(DETACHED)이 아니다");
 
     assert.equal(
-      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: false, PRODUCT_MODEL: false, IMPROVEMENT_REQUEST: false, QUOTE: true }),
+      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: false, PRODUCT_MODEL: false, QUOTE: true }),
       true
     );
     assert.equal(
-      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: true, PRODUCT_MODEL: true, IMPROVEMENT_REQUEST: true, QUOTE: false }),
+      isAttachmentOwnerAccessAllowed(found, { REPAIR_CASE: true, PRODUCT_MODEL: true, QUOTE: false }),
       false,
       "🔴 다른 주인의 파일 권한으로 견적서 파일이 열리면 안 된다"
     );

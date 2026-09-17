@@ -33,25 +33,24 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  * ============================================================================
  * POST /api/quotes/{id}/attachments?fileName=&category= — 견적서에 결재 PDF · 수기 엑셀을 붙이는 통로
  * ============================================================================
- * 개선 요청 통로(api/improvement-requests/[id]/attachments/route.ts)와 **같은 순서 · 같은
+ * 접수 건 통로(api/repair-cases/[id]/attachments/route.ts)와 **같은 순서 · 같은
  * 방어**다. 서버 액션이 아니라 Route Handler 인 까닭, multipart 를 쓰지 않는 까닭,
- * 단계의 순서는 접수 건 통로(api/repair-cases/[id]/attachments/route.ts) 헤더에 있다.
+ * 단계의 순서는 그 파일 헤더에 있다.
  * 여기서는 **다른 점만** 적는다. 🔴 통로들의 상한 · 검사 순서 · 실패 응답 규칙은 함께
  * 고친다 — 한쪽만 바꾸면 동작이 갈라진다.
  *
- * ── 개선 요청 통로와 다른 점 ─────────────────────────────────────────────
- *   권한      improvementRequests WRITE  →  **quotes WRITE**(판정 파일의 표
- *             + 글 한 건에 대한 판정          ATTACHMENT_OWNER_PERMISSIONS.CHANGE.QUOTE) —
- *                                           견적서 한 장에 대한 판정은 없다
- *   대상 조회  getImprovementRequest…     →  getQuoteAttachmentUploadTarget
- *   분류      언제나 SCREENSHOT          →  **요청값(category) — 두 칸만**
- *                                           SIGNED_QUOTE_PDF(pdf) · QUOTE_EXCEL(xlsx · xls)
- *   설명      받지 않는다                →  받지 않는다(칸 이름이 곧 설명이다)
- *   상한      한 글에 5장                →  **칸마다 한 파일 — 다시 올리면 바꾼다.** 옛 파일은
- *                                           첨부 휴지통으로(mutations/attachments.ts 의
- *                                           '넷째 주인'). 거절이 아니라 교체라 409 가 없다
- *   경로      improvement-requests/…     →  quotes/{견적서id}/{첨부id}.{확장자}
- *   실패 코드  IMPROVEMENT_REQUEST_…      →  QUOTE_NOT_FOUND(404) · QUOTE_IN_TRASH(409)
+ * ── 접수 건 통로와 다른 점 ───────────────────────────────────────────────
+ *   권한      **quotes WRITE**(판정 파일의 표 ATTACHMENT_OWNER_PERMISSIONS.CHANGE.QUOTE) —
+ *             견적서 한 장에 대한 판정은 없다
+ *   대상 조회  getQuoteAttachmentUploadTarget
+ *   분류      **요청값(category) — 두 칸만**
+ *             SIGNED_QUOTE_PDF(pdf) · QUOTE_EXCEL(xlsx · xls)
+ *   설명      받지 않는다(칸 이름이 곧 설명이다)
+ *   상한      **칸마다 한 파일 — 다시 올리면 바꾼다.** 옛 파일은
+ *             첨부 휴지통으로(mutations/attachments.ts 의
+ *             '셋째 주인'). 거절이 아니라 교체라 409 가 없다
+ *   경로      quotes/{견적서id}/{첨부id}.{확장자}
+ *   실패 코드  QUOTE_NOT_FOUND(404) · QUOTE_IN_TRASH(409)
  *
  * ── 휴지통의 견적서에는 붙이지 못한다 — 두 번 본다 ───────────────────────
  *  1) 본문을 받기 **전에** — 대상 조회의 isDeleted 로. 빠른 거절일 뿐이다.

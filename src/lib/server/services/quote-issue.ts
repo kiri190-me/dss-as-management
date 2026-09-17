@@ -201,7 +201,6 @@ async function issueAttachedExcel(quote: QuoteEditData, input: IssueQuoteFileInp
   const decision = decideAttachmentDownload({
     repairCaseId: null,
     productModelId: null,
-    improvementRequestId: null,
     quoteId: quote.id,
     isDeleted: attachment.isDeleted,
     quoteInTrash: false,

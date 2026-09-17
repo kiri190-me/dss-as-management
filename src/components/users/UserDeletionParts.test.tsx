@@ -18,7 +18,7 @@ import type { UserDeletionPreviewImpact } from "@/lib/db/queries/user-deletion-i
  * RepresentativeListSection 과 UserDeletionDialog 는 서버 액션 모듈을 부르고, 그 사슬
  * 끝에 `server-only` 가 있어 이 시험 환경에서 통째로 그릴 수 없다. 그래서 그리기만
  * 하는 조각(UserDeletionParts.tsx)을 따로 그려 보고, 화면들이 조각에 무엇을 넘기는지는
- * 원본을 읽어 확인한다(ImprovementRequestScreenshots.test.tsx 와 같은 방식).
+ * 원본을 읽어 확인한다.
  * ============================================================================
  */
 

@@ -269,17 +269,6 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     description: "시스템 전반 설정",
     maxMeaningfulLevel: "READ",
   },
-  {
-    key: "improvementRequests",
-    label: "개선 요청",
-    // 세 단계가 조작과 짝이 맞는다 — 읽기(목록 보기) · 쓰기(적기, 접수 상태인
-    // 자기 글 고치기·지우기) · 관리(상태 옮기기, 남의 글 지우기). 기본값은
-    // improvement-request-authorization.ts 가 정하고(전원 쓰기, 최고관리자·관리자
-    // 관리), 개발자는 해석기가 최고관리자 급으로 올린다(permission-resolver.ts).
-    // 남의 글 **내용**을 고치는 수준은 없다 — 관리자도 못 한다(domain/improvement-request.ts).
-    description: "누구나 고칠 점을 적고, 관리자·개발자가 진행중·해결로 옮깁니다",
-    maxMeaningfulLevel: "MANAGE",
-  },
 ] as const;
 
 export type PermissionAreaKey = (typeof PERMISSION_AREAS)[number]["key"];

@@ -208,9 +208,6 @@ src/lib/domain/quote-repair-task-selection.test.ts
 src/lib/domain/quote-link-options.test.ts
 scripts/test-lists/test-list-registration.test.ts
 src/lib/domain/domestic-order-sheet-heading.test.ts
-src/lib/domain/improvement-request.test.ts
-src/lib/validation/improvement-request-input.test.ts
-src/lib/auth/improvement-request-authorization.test.ts
 src/lib/domain/user-deletion-rules.test.ts
 src/lib/validation/user-deletion-input.test.ts
 src/lib/xlsx/sheet-grid.test.ts

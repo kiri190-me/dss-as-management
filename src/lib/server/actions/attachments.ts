@@ -34,23 +34,14 @@ import {
  * 밀어 넣지는 못한다 — 그건 폴링/웹소켓이 필요한 별도 작업이다.
  *
  * ── 🔴 권한은 첨부의 **주인**을 보고 고른다 ──────────────────────────────
- * 첨부의 주인은 접수 건 · 제품 모델 · 개선 요청 중 하나다(schema/attachments.ts).
+ * 첨부의 주인은 접수 건 · 제품 모델 · 견적서 중 하나다(schema/attachments.ts).
  *
  *   접수 건 첨부     →  repairCases.files WRITE     (예전 그대로)
  *   모델 첨부        →  **productModels.files WRITE**
- *   개선 요청 첨부   →  **improvementRequests WRITE** + 글 한 건에 대한 판정
- *                       (2026-09-13 — 스크린샷)
  *   견적서 첨부      →  **quotes WRITE** (2026-09-15 Q2 — 결재 PDF · 수기 엑셀).
  *                       휴지통의 견적서에 딸린 파일은 지우지도 되살리지도 못한다 —
  *                       그 판정은 견적서 행을 잠근 mutation 이 한다(attachment-trash.ts).
- *
- * 개선 요청 스크린샷은 영역 권한만으로 끝나지 않는다 — 접수 상태인 자기 글의 글쓴이
- * 또는 관리 권한자(improvementRequests MANAGE)만 지우고 되살린다(올리기와 같은
- * 판정). 그 판정은 **글 행을 잠근** mutation 이 한다(attachment-trash.ts). 여기서는
- * MANAGE 를 계산해 `canManageImprovementRequests` 로 넘길 뿐이고, 판정에 막히면
- * mutation 이 FORBIDDEN 을 돌려준다 — NOT_FOUND 가 아닌 것은 그 사람이 개선 요청
- * 목록(스크린샷 포함)을 이미 볼 수 있어 숨길 존재가 없기 때문이다(WRITE ⊇ READ).
- *
+ * *
  * 예전에는 repairCases.files WRITE 하나만 물었다. 모델 첨부가 생긴 지금 그대로
  * 두면 **접수 건 파일 권한만 가진 사람이 모델 회로도를 지울 수 있다** — 그리고
  * 그 사실은 아무 화면에도 드러나지 않는다. 그래서 주인을 DB에서 다시 읽어
@@ -82,8 +73,6 @@ type AttachmentTrashActionTarget = {
   attachmentId: string;
   repairCaseId?: string;
   productModelId?: string;
-  /** 개선 요청 스크린샷이면 그 글의 id — 설정 › 개선 요청 화면을 다시 그린다. */
-  improvementRequestId?: string;
   /** 견적서의 결재 PDF · 수기 엑셀이면 그 견적서의 id — 견적서 수정 화면과 목록을 다시 그린다. */
   quoteId?: string;
 };
@@ -91,7 +80,7 @@ type AttachmentTrashActionTarget = {
 async function resolveWriteActor(
   attachmentId: string
 ): Promise<
-  | { ok: true; userId: string; canManageImprovementRequests: boolean }
+  | { ok: true; userId: string }
   | { ok: false; result: AttachmentTrashActionResult & { ok: false } }
 > {
   if (getRepairCaseWriteSource() !== "database" || getRepairCaseReadSource() !== "database") {
@@ -125,10 +114,8 @@ async function resolveWriteActor(
   // 않는다. 여러 번 물어도 DB는 한 번만 읽힌다(permission-resolver의 cache()).
   //
   // 무엇을 묻는지는 판정 파일의 표(ATTACHMENT_OWNER_PERMISSIONS.CHANGE) 한 곳이 정한다 —
-  // 네 주인 모두 WRITE. 개선 요청 스크린샷은 글을 적는 권한이 곧 자기 글의 스크린샷을 떼는
-  // 권한의 문턱이고 글 한 건에 대한 판정은 mutation 이 잠근 행으로 더 한다. 견적서 파일
-  // (2026-09-15 Q2)은 올리기 통로와 같은 quotes WRITE 이고, 휴지통 견적서의 파일은
-  // mutation 이 잠근 견적서 행으로 막는다(파일 헤더).
+  // 세 주인 모두 WRITE. 견적서 파일(2026-09-15 Q2)은 올리기 통로와 같은 quotes WRITE 이고,
+  // 휴지통 견적서의 파일은 mutation 이 잠근 견적서 행으로 막는다(파일 헤더).
   const access = await resolveAttachmentOwnerAccess("CHANGE", (areaKey, level) =>
     hasPermission(actingUser, areaKey, level)
   );
@@ -151,13 +138,7 @@ async function resolveWriteActor(
     return { ok: false, result: { ok: false, code: "NOT_FOUND", message: "파일을 찾을 수 없습니다." } };
   }
 
-  // 개선 요청 스크린샷일 때만 관리 권한을 묻는다 — 글 한 건에 대한 판정에 넘길 값이다.
-  const canManageImprovementRequests =
-    attachment.improvementRequestId !== null
-      ? await hasPermission(actingUser, "improvementRequests", "MANAGE")
-      : false;
-
-  return { ok: true, userId: actingUser.id, canManageImprovementRequests };
+  return { ok: true, userId: actingUser.id };
 }
 
 /**
@@ -170,10 +151,6 @@ function revalidateAfterTrashChange(target: AttachmentTrashActionTarget): void {
   }
   if (target.productModelId) {
     revalidatePath(`/product-models/${target.productModelId}`, "layout");
-  }
-  if (target.improvementRequestId) {
-    // 스크린샷은 글 목록 한 화면에 함께 그려진다(글마다 페이지가 없다).
-    revalidatePath("/settings/improvement-requests");
   }
   if (target.quoteId) {
     // 견적서 수정 화면의 첨부 칸과, 목록의 결재 PDF · 엑셀 표시(hasSignedPdf · hasExcel).
@@ -194,7 +171,6 @@ export async function softDeleteAttachmentAction(
     attachmentId: input.attachmentId,
     actorUserId: actor.userId,
     reason: reason.length > 0 ? reason.slice(0, 500) : null,
-    canManageImprovementRequests: actor.canManageImprovementRequests,
   });
 
   if (!result.ok) return { ok: false, code: result.code, message: result.message };
@@ -213,7 +189,6 @@ export async function restoreAttachmentAction(
   const result = await restoreAttachment({
     attachmentId: input.attachmentId,
     actorUserId: actor.userId,
-    canManageImprovementRequests: actor.canManageImprovementRequests,
   });
 
   if (!result.ok) return { ok: false, code: result.code, message: result.message };

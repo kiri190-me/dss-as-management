@@ -257,7 +257,6 @@ test("설정 화면은 성공 문구를 팝업으로 옮기고 그 자리에 머
     ["src/components/settings/ThemeTemplatePicker.tsx", 1],
     ["src/components/settings/ThemeTokenEditor.tsx", 1],
     ["src/components/settings/UiTextEditor.tsx", 1],
-    ["src/components/settings/ImprovementRequestsScreen.tsx", 4],
     ["src/components/users/NotificationSettings.tsx", 1],
     ["src/components/users/RolePermissionSettings.tsx", 1],
     ["src/components/users/DeveloperFlagSection.tsx", 1],

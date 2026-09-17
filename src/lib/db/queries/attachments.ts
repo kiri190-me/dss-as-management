@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { attachments, improvementRequests, productModels, quotes, repairCases, users } from "../schema";
+import { attachments, productModels, quotes, repairCases, users } from "../schema";
 import {
   QUOTE_ATTACHMENT_SLOT_CATEGORIES,
   liveQuoteAttachmentInSlot,
@@ -11,7 +11,6 @@ import {
   type MalwareScanStatus,
   type QuoteAttachmentSlotCategory,
 } from "@/lib/domain/attachment-category";
-import type { ImprovementRequestStatus } from "@/lib/domain/improvement-request";
 
 /**
  * ============================================================================
@@ -312,57 +311,10 @@ export async function getProductModelAttachmentUploadTarget(
 }
 
 /**
- * 스크린샷이 붙을 개선 요청 글(2026-09-13) — 올리기 통로와 미리보기 통로가 **본문을
- * 받기 전에** 부른다.
- *
- * 글 한 건에 대한 판정(canChangeImprovementRequestScreenshots)에 드는 두 칸
- * (status · createdBy)과 지금 살아 있는 첨부 수를 함께 준다. 🔴 **이것은 빠른 거절용일
- * 뿐 확정 판정이 아니다.** 20MB 를 받는 동안 상태가 옮겨지거나 다른 장이 먼저 들어올
- * 수 있으므로, 행을 넣는 mutation(createAttachmentRecord)이 글 행을 잠근 트랜잭션에서
- * 같은 판정과 같은 셈을 다시 한다. 여기서 막히면 한 바이트도 받지 않고 끝낼 수 있을
- * 뿐이다.
- *
- * 개선 요청 표에는 휴지통이 없다(글은 바로 지워진다) — 행이 있으면 살아 있는 글이다.
- * 첨부 수는 목록 조회(queries/improvement-requests.ts)와 **같은 정의**로 센다: 그 글이
- * 주인이고 휴지통에 없는 첨부. 부분 인덱스
- * attachments_improvement_request_id_not_deleted_idx 를 타는 모양이다.
- */
-export type ImprovementRequestAttachmentTarget = {
-  id: string;
-  status: ImprovementRequestStatus;
-  createdBy: string;
-  liveAttachmentCount: number;
-};
-
-export async function getImprovementRequestAttachmentTarget(
-  improvementRequestId: string
-): Promise<ImprovementRequestAttachmentTarget | null> {
-  if (!UUID_PATTERN.test(improvementRequestId)) return null;
-
-  const [row] = await db
-    .select({
-      id: improvementRequests.id,
-      status: improvementRequests.status,
-      createdBy: improvementRequests.createdBy,
-    })
-    .from(improvementRequests)
-    .where(eq(improvementRequests.id, improvementRequestId))
-    .limit(1);
-  if (!row) return null;
-
-  const [counted] = await db
-    .select({ value: count() })
-    .from(attachments)
-    .where(and(eq(attachments.improvementRequestId, row.id), eq(attachments.isDeleted, false)));
-
-  return { ...row, liveAttachmentCount: counted?.value ?? 0 };
-}
-
-/**
  * ============================================================================
  * 견적서의 첨부 — 결재 PDF 칸 · 수기 엑셀 칸 (2026-09-15 Q2)
  * ============================================================================
- * 넷째 주인의 조회 셋. 앞의 주인들과 같은 규율이다 — 살아 있는 첨부는
+ * 셋째 주인의 조회 셋. 앞의 주인들과 같은 규율이다 — 살아 있는 첨부는
  * `WHERE quote_id = ? AND is_deleted = false` 그대로 적어 부분 인덱스
  * (attachments_quote_id_not_deleted_idx)를 탄다.
  * ============================================================================
