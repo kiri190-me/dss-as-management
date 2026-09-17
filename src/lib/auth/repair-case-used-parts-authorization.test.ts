@@ -10,7 +10,7 @@ import {
 } from "./repair-case-used-parts-authorization";
 import { baselineLeafLevel } from "./permission-baseline";
 import { isPermissionLeafKey, isSettingsEnforced, selectableLevelsOfLeaf } from "./permission-features";
-import { ROLE_CODES, type Role } from "@/lib/domain/types";
+import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -172,6 +172,60 @@ describe("사용 부품 — 누가 적을 수 있나 (설정이 정한다)", () 
     if (permitted.ok || denied.ok) throw new Error("unreachable");
     assert.equal(permitted.message, USED_PARTS_CASE_LOCKED_MESSAGE);
     assert.equal(denied.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
+  });
+
+  /**
+   * 🔴 **거절 문구에 역할 이름이 박혀 있지 않다** (2026-09-17)
+   *
+   * 위 시험들은 전부 `assert.equal(result.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE)`
+   * — **상수를 상수와 견준다.** 그래서 문구를 아무렇게 고쳐도 하나도 안 잡힌다.
+   * 실제로 예전 문구 「사용 부품은 A/S 엔지니어와 관리자만 적을 수 있습니다」는 이
+   * 칸의 판정이 [역할별 접근 권한] 설정으로 옮겨 온 순간 **거짓말이 되었는데도**
+   * 시험이 전부 초록이었다 — 최고관리자가 영업에게 열어 주면 영업도 적을 수 있는데
+   * 화면은 여전히 둘만 적을 수 있다고 말한다.
+   *
+   * 그래서 여기서 그 자리를 지킨다: **누가 적을 수 있는가를 말하는 앞부분**에는
+   * roleLabels 다섯 중 하나도 나오지 않아야 한다. `ROLE_CODES` 를 돌므로 역할이
+   * 하나 늘면 그 이름표도 저절로 함께 막힌다.
+   *
+   * 선례를 그대로 따른 것이다 — domain/quote-document-support.test.ts 가 같은
+   * 방식으로 「거절 문장에 견적서 종류 이름이 박혀 있지 않다」를 quoteKindLabels
+   * 전체로 확인한다.
+   *
+   * 🔴 뒤 문장의 「관리자」 하나만 예외다. 그것은 *적을 수 있는 역할*이 아니라
+   * **권한을 열어 줄 사람**(요청을 받을 곳)이라 설정을 어떻게 바꿔도 틀리지 않는다.
+   * 그 한 문장을 떼어 낸 나머지를 보는 까닭이 이것이다.
+   */
+  test("🔴 거절 문구가 역할 이름을 말하지 않는다 — 설정을 넓혀도 거짓말이 되지 않는다", () => {
+    const REQUEST_SENTENCE = "관리자에게 요청해 주세요.";
+    assert.ok(
+      USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE.endsWith(REQUEST_SENTENCE),
+      "요청할 곳을 알려 주지 않으면 거절당한 사람이 다음에 할 일을 모른다"
+    );
+
+    // 요청처 한 문장을 떼어 낸 나머지 = 「누가 적을 수 있는가」를 말하는 자리.
+    const claim = USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE.slice(0, -REQUEST_SENTENCE.length);
+    assert.ok(claim.trim().length > 0, "거절 사유 자체는 말해야 한다");
+
+    for (const role of ROLE_CODES) {
+      assert.ok(
+        !claim.includes(roleLabels[role]),
+        `거절 문구가 「${roleLabels[role]}」 를 박아 두었다 — 설정을 넓히는 날 거짓말이 된다`
+      );
+    }
+
+    // 업무 규칙 둘은 애초에 사람의 성질을 말하지 않는다 — 역할 이름이 아예 없어야 한다.
+    for (const message of [
+      USED_PARTS_PART_REQUEST_HISTORY_MESSAGE,
+      USED_PARTS_CASE_LOCKED_MESSAGE,
+    ]) {
+      for (const role of ROLE_CODES) {
+        assert.ok(
+          !message.includes(roleLabels[role]),
+          `건의 사정을 말하는 문구에 「${roleLabels[role]}」 가 들어갔다`
+        );
+      }
+    }
   });
 
   test("🔴 권한을 넓혀도 B-2 의 두 규칙은 그대로다 — 업무 규칙은 설정으로 빠지지 않았다", () => {
