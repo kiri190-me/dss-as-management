@@ -338,7 +338,23 @@ export default function ProductModelListScreen({
                           </td>
                         )}
                         <td className="px-3 py-2 font-medium whitespace-nowrap text-zinc-900 dark:text-zinc-50">
-                          {row.modelName}
+                          {/* 모델명을 누르면 상세로 간다. 삭제 모드에서는 링크를 끈다 —
+                              체크하려고 누른 손이 다른 화면으로 넘어가 버리면 안 된다
+                              (바로 아래 카드가 삭제 모드에서 링크가 아닌 것과 같은 까닭이다).
+                              고객사 목록(CustomerListScreen)이 먼저 같은 규칙을 쓴다. 그쪽은
+                              이름 앞에 색 견본이 붙어 `group` + 안쪽 span 으로 밑줄을 이름
+                              글자에만 걸지만, 이 칸에는 모델명 글자뿐이라 링크에 바로
+                              hover:underline 을 건다 — 밑줄이 닿는 곳은 같고 더 짧다. */}
+                          {isDeleteMode ? (
+                            row.modelName
+                          ) : (
+                            <Link
+                              href={`/product-models/${row.id}`}
+                              className="underline-offset-2 hover:underline"
+                            >
+                              {row.modelName}
+                            </Link>
+                          )}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{kindLabel(row.kind)}</td>
                         {/* 🔴 이 칸만 whitespace-nowrap 이 없다. 고객사는 한

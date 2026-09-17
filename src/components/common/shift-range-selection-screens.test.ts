@@ -21,6 +21,9 @@ import { readFileSync } from "node:fs";
  *     있는지는 체크박스의 disabled 와 **같은 기준**이다.
  *  4. 체크박스마다 Shift 일 때 글자 선택을 막는다(누르는 요소에서만).
  *  5. 전체 선택은 손대지 않았다.
+ *  6. 🔴 **고르는 중에는 이름이 상세 링크가 아니다** — 같은 뿌리의 규칙이다.
+ *     고르려고 누른 손이 다른 화면으로 넘어가 버리면 안 된다(4번이 글자 선택을
+ *     막는 것과 같은 까닭). 파일 맨 끝 절을 보라.
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * 이 화면들은 서버 액션을 직접 import 하는 클라이언트 컴포넌트라, 그 사슬 끝의
@@ -209,4 +212,76 @@ test("전체 선택은 그대로다 — 범위 고르기와 섞지 않았다", (
   }
   // 공용 전체 선택 체크박스는 Shift 를 모른다 — 머리글 체크박스는 범위가 아니다.
   assert.ok(!readCode("src/components/common/select-all-checkbox.tsx").includes("useShiftRangeSelection"));
+});
+
+/**
+ * ============================================================================
+ * 🔴 고르는 중에는 이름이 상세 링크가 아니다 (머리말 6번)
+ * ============================================================================
+ * 목록의 이름 칸을 누르면 상세로 가는 것이 이 시스템의 규칙이다(고객사 목록이
+ * 먼저 그렇게 했다). 다만 **삭제 모드에서는 링크를 끈다** — 체크하려고 누른 손이
+ * 다른 화면으로 넘어가 버리면 안 된다. 카드 쪽은 삭제 모드에서 <Link> 가 아니라
+ * <label> 로 바뀌어 이미 그렇게 동작하므로, 표만 늘 링크로 두면 같은 화면이 두
+ * 말을 한다 — 게다가 ResponsiveList 가 폭을 재서 표와 카드 중 하나를 고르니
+ * 창 크기에 따라 동작이 달라진다(2번과 같은 함정이다).
+ *
+ * 맨 오른쪽 `상세` 칸은 사람들이 쓰던 길이라 **그대로 둔다** — 겹쳐 보여도
+ * 지우는 것은 기능 삭제다.
+ * ============================================================================
+ */
+
+/** 줄바꿈·들여쓰기 차이로 시험이 깨지지 않도록 공백을 하나로 접는다. */
+const flat = (source: string) => source.replace(/\s+/g, " ");
+
+const MODEL_HREF = "href={`/product-models/${row.id}`}";
+
+test("🔴 제품 모델 목록 — 표의 모델명이 상세 링크이고, 삭제 모드에서는 링크가 아니다", () => {
+  const code = flat(readCode("src/components/product-models/ProductModelListScreen.tsx"));
+
+  assert.match(
+    code,
+    /\{isDeleteMode \? \( row\.modelName \) : \( <Link href=\{`\/product-models\/\$\{row\.id\}`\}/,
+    "표의 모델명은 상세 링크여야 하고, 삭제 모드에서는 맨 글자여야 한다"
+  );
+  assert.ok(
+    code.includes('className="underline-offset-2 hover:underline" > {row.modelName} </Link>'),
+    "마우스를 얹으면 이름 글자에 밑줄이 생겨 누를 수 있다는 것이 보여야 한다"
+  );
+  assert.equal(
+    count(code, MODEL_HREF),
+    3,
+    "상세로 가는 길은 셋이다 — 표의 모델명, 표 맨 오른쪽 `상세`, 그리고 카드"
+  );
+  assert.ok(code.includes("> 상세 </Link>"), "🔴 맨 오른쪽 `상세` 링크는 그대로 있어야 한다");
+});
+
+test("제품 모델 목록 — 카드 쪽은 손대지 않았다 (이미 삭제 모드에서 링크가 아니다)", () => {
+  const code = flat(readCode("src/components/product-models/ProductModelListScreen.tsx"));
+
+  assert.ok(code.includes("<label key={row.id} className={"), "삭제 모드 카드는 <label> 이다");
+  assert.ok(code.includes("<Link key={row.id} " + MODEL_HREF), "평소 카드는 통째로 상세 링크다");
+  assert.equal(
+    count(code, "<ProductModelCardFields row={row} />"),
+    2,
+    "카드 두 갈래(삭제 모드·평소)가 같은 내용을 보여 준다"
+  );
+  assert.ok(
+    code.includes("{row.modelName}</span> </span> <ProductModelCardFields row={row} />"),
+    "삭제 모드 카드의 모델명은 체크상자 옆 맨 글자다 — 링크가 아니다"
+  );
+  assert.ok(
+    code.includes("{row.modelName}</span> <ProductModelCardFields row={row} />"),
+    "평소 카드의 모델명도 맨 글자다 — 카드가 통째로 링크이므로 따로 감싸지 않는다"
+  );
+});
+
+test("고객사 목록도 같은 규칙이다 — 이 규칙의 선례", () => {
+  // 두 목록이 다른 말을 하기 시작하면 사람이 화면마다 다시 배워야 한다.
+  const code = flat(readCode("src/components/customers/CustomerListScreen.tsx"));
+  assert.ok(
+    code.includes(
+      "{isDeleteMode ? ( <CustomerName row={row} /> ) : ( <Link href={`/customers/${row.id}`} className=\"group\">"
+    ),
+    "고객사 목록의 이름 칸이 선례다"
+  );
 });
