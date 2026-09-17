@@ -68,3 +68,4 @@ src/components/quotes/quote-print-cable.test.tsx
 src/components/common/copy-text.test.ts
 src/components/repair-labor/base-cost-display.test.ts
 src/components/repair-labor/repair-labor-screen-source.test.ts
+src/components/product-models/product-model-customer-source.test.ts

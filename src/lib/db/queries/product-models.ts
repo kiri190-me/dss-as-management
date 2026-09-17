@@ -13,6 +13,8 @@ import {
 import {
   listCustomersForProductModel,
   listCustomersForProductModels,
+  listRepairCaseCustomersForProductModel,
+  listRepairCaseCustomersForProductModels,
   type ProductModelCustomerOption,
 } from "./product-model-customers";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
@@ -26,9 +28,13 @@ export type ProductModelListRow = {
   kind: ProductModelKind | null;
   /** 화면에서 이 칸을 `고객사`로 바꾸는 것은 3단계다. 칼럼도 이 필드도 그대로 둔다. */
   manufacturer: string | null;
-  /** 이 모델에 붙은 고객사. 휴지통에 든 고객사는 빠져 있다
-   * (queries/product-model-customers.ts). 없으면 빈 배열이다. */
+  /** 🔴 **사람이 골라 둔 것만.** 수정 폼이 고치는 값이라 파생값을 섞으면 안 된다
+   * (domain/product-model-customer-merge.ts 머리말). 휴지통에 든 고객사는 빠져
+   * 있다(queries/product-model-customers.ts). 없으면 빈 배열이다. */
   customers: ProductModelCustomerOption[];
+  /** 접수 기록에서 나온 고객사. 읽기 전용이고 표에 저장되지 않는다 — 화면이
+   * 보여 줄 때만 위 customers 와 합친다(mergeProductModelCustomers). */
+  derivedCustomers: ProductModelCustomerOption[];
   unitCount: number;
   repairCaseCount: number;
   lastReceivedAt: string | null;
@@ -93,17 +99,24 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
     }
   }
 
-  // 모델 104개분의 고객사를 **한 번의 조회**로 가져온다. 위 Promise.all 에 넣지
-  // 않은 것은 모델 id 목록이 나와야 물어볼 수 있기 때문이고, 그래도 조회 횟수는
-  // 모델 수와 무관하게 하나다(N+1 아님).
-  const customersByModelId = await listCustomersForProductModels(modelRows.map((m) => m.id));
+  // 모델 104개분의 고객사를 **각각 한 번의 조회**로 가져온다. 위 Promise.all 에
+  // 넣지 않은 것은 모델 id 목록이 나와야 물어볼 수 있기 때문이고, 그래도 조회
+  // 횟수는 모델 수와 무관하게 둘이다(N+1 아님).
+  const modelIds = modelRows.map((m) => m.id);
+  const [customersByModelId, derivedCustomersByModelId] = await Promise.all([
+    listCustomersForProductModels(modelIds),
+    listRepairCaseCustomersForProductModels(modelIds),
+  ]);
 
   return modelRows.map((m) => ({
     id: m.id,
     modelName: m.modelName,
     kind: m.kind,
     manufacturer: m.manufacturer,
+    // 🔴 두 갈래를 여기서 합치지 않는다 — 합치는 것은 화면 직전 한 곳뿐이다
+    // (domain/product-model-customer-merge.ts).
     customers: customersByModelId.get(m.id) ?? [],
+    derivedCustomers: derivedCustomersByModelId.get(m.id) ?? [],
     unitCount: unitCounts.get(m.id) ?? 0,
     repairCaseCount: repairCaseCounts.get(m.id) ?? 0,
     lastReceivedAt: lastReceivedAt.get(m.id) ?? null,
@@ -129,9 +142,15 @@ export type ProductModelDetail = {
   kind: ProductModelKind | null;
   /** 화면에서 이 칸을 `고객사`로 바꾸는 것은 3단계다. 칼럼도 이 필드도 그대로 둔다. */
   manufacturer: string | null;
-  /** 이 모델에 붙은 고객사. 휴지통에 든 고객사는 빠져 있다
-   * (queries/product-model-customers.ts). 없으면 빈 배열이다. */
+  /** 🔴 **사람이 골라 둔 것만.** 수정 폼(ProductModelEditForm)이 이 값으로
+   * 선택칩을 시작하고 그대로 다시 저장하므로, 파생값을 섞으면 폼을 한 번 열었다
+   * 저장하는 것만으로 파생값이 표에 써진다 — 섞지 말 것
+   * (domain/product-model-customer-merge.ts 머리말). 휴지통에 든 고객사는 빠져
+   * 있다. 없으면 빈 배열이다. */
   customers: ProductModelCustomerOption[];
+  /** 접수 기록에서 나온 고객사. 읽기 전용이고 표에 저장되지 않는다 — 화면이
+   * 보여 줄 때만 위 customers 와 합친다(mergeProductModelCustomers). */
+  derivedCustomers: ProductModelCustomerOption[];
   description: string | null;
   createdAt: string;
   updatedAt: string;
@@ -171,6 +190,9 @@ export function toProductModelDetailForScreen(
     // 화면이 실제로 읽는 값이다(3단계의 `고객사` 칸). 모델 하나에 많아야 몇 줄이라
     // units 배열 같은 죽은 짐이 아니다.
     customers: detail.customers,
+    // 같은 자리에 함께 그려지지만 **따로 넘긴다.** 수정 폼은 위 customers 만
+    // 만지고, 이 배열은 읽기 전용 안내로만 쓰인다.
+    derivedCustomers: detail.derivedCustomers,
     description: detail.description,
     createdAt: detail.createdAt,
     updatedAt: detail.updatedAt,
@@ -207,14 +229,15 @@ export async function getProductModelDetailById(
     .where(and(eq(productModels.id, id), eq(productModels.isDeleted, false)));
   if (!model) return null;
 
-  // 서로 기다릴 이유가 없다. 고객사 목록은 휴지통에 든 고객사를 스스로 걸러서
-  // 돌려준다(queries/product-model-customers.ts).
-  const [productRows, modelCustomers] = await Promise.all([
+  // 서로 기다릴 이유가 없다. 고객사 목록 둘 다 휴지통에 든 고객사를 스스로
+  // 걸러서 돌려준다(queries/product-model-customers.ts).
+  const [productRows, modelCustomers, derivedModelCustomers] = await Promise.all([
     db
       .select({ id: products.id, serialNumber: products.serialNumber, lotNumber: products.lotNumber })
       .from(products)
       .where(and(eq(products.productModelId, id), eq(products.isDeleted, false))),
     listCustomersForProductModel(id),
+    listRepairCaseCustomersForProductModel(id),
   ]);
 
   const productIds = productRows.map((p) => p.id);
@@ -279,7 +302,10 @@ export async function getProductModelDetailById(
     modelName: model.modelName,
     kind: model.kind,
     manufacturer: model.manufacturer,
+    // 🔴 두 갈래를 여기서 합치지 않는다 — 합치는 것은 화면 직전 한 곳뿐이다
+    // (domain/product-model-customer-merge.ts).
     customers: modelCustomers,
+    derivedCustomers: derivedModelCustomers,
     description: model.description,
     createdAt: model.createdAt.toISOString(),
     updatedAt: model.updatedAt.toISOString(),

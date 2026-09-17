@@ -22,6 +22,10 @@ import {
   restoreProductModelsAction,
 } from "@/lib/server/actions/product-model-trash";
 import Link from "next/link";
+import {
+  mergeProductModelCustomers,
+  mergedProductModelCustomerNames,
+} from "@/lib/domain/product-model-customer-merge";
 import type { DeletedProductModelRow, ProductModelListRow } from "@/lib/db/queries/product-models";
 
 const KIND_LABELS: Record<string, string> = {
@@ -35,12 +39,15 @@ function kindLabel(kind: string | null): string {
 }
 
 /**
- * 이 모델에 붙은 고객사를 한 줄로. 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다.
- * (같은 함수가 ProductModelDetailScreen 에도 있다. kindLabel 처럼 한 줄짜리라
- * 두 화면이 각자 들고 있는 것이 이 저장소의 모양이다.)
+ * 이 모델의 고객사를 한 줄로. 사람이 골라 둔 것과 **접수 기록에서 나온 것**을
+ * 합쳐 보여 준다 — 합치는 규칙은 도메인 함수 하나가 정하고(상세 화면도 같은
+ * 것을 쓴다), 이 화면은 갈래를 따로 표시하지 않는다(칸 하나짜리 목록이다).
+ * 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다.
  */
-function customerNames(list: readonly { name: string }[]): string {
-  return list.length === 0 ? "-" : list.map((c) => c.name).join(", ");
+function customerNames(row: ProductModelListRow): string {
+  return mergedProductModelCustomerNames(
+    mergeProductModelCustomers(row.customers, row.derivedCustomers)
+  );
 }
 
 function formatDate(iso: string | null): string {
@@ -345,7 +352,7 @@ export default function ProductModelListScreen({
                             브라우저가 셀의 max-width 를 지키지 않기 때문이다. */}
                         <td className="px-3 py-2">
                           <span className="block max-w-[14rem] break-words">
-                            {customerNames(row.customers)}
+                            {customerNames(row)}
                           </span>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.unitCount}</td>
@@ -479,7 +486,7 @@ function ProductModelCardFields({ row }: { row: ProductModelListRow }) {
       <div>
         <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객사</dt>
         {/* 카드는 폭이 정해져 있어 늘어날 데가 없다 — 줄바꿈만 허용하면 된다. */}
-        <dd className="break-words">{customerNames(row.customers)}</dd>
+        <dd className="break-words">{customerNames(row)}</dd>
       </div>
       <div>
         <dt className="text-xs text-zinc-500 dark:text-zinc-500">등록 장비 수</dt>

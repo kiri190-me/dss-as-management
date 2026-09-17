@@ -75,10 +75,26 @@ const MAX_SUGGESTIONS = 8;
  *     에 있는 `새 고객사로 등록` 을 일부러 두지 않았다 — 고객사를 만드는 문을
  *     접수 화면 하나로 좁혀야 오타로 생긴 고객사가 늘지 않는다. 목록에 없는
  *     이름을 치면 아무것도 고를 수 없고, 그 사실을 입력칸 아래 한 줄이 말한다.
+ *
+ * ── 🔴 접수 기록에서 나온 고객사는 **고르는 값이 아니다** ────────────────
+ * 상세 화면의 `고객사` 칸에는 수기 설정 말고 접수 기록에서 나온 곳들도 함께
+ * 나온다(ProductModelDetailScreen 의 CustomerField). 그런데 이 폼이 만지는 것은
+ * `productModel.customers` — **수기 설정 하나뿐**이다.
+ *
+ * 파생값을 selectedCustomers 에 넣으면 안 된다. 이 폼은 "항상 전체 제출" 규약이라
+ * 고른 목록 전체가 연결의 최종 상태가 되므로, 한 번 넣는 순간 **사람이 폼을
+ * 열었다 저장하기만 해도 파생값 전부가 product_model_customers 에 수기 설정으로
+ * 써진다.** 아무도 그러라고 하지 않았는데 자료가 바뀌는 일이다
+ * (domain/product-model-customer-merge.ts 머리말).
+ *
+ * 그래서 `derivedCustomers` 는 **읽기 전용 안내 한 줄**로만 쓴다 — 칩도 아니고
+ * 후보에서 빼지도 않는다. 지울 수 없는 것이 왜 지울 수 없는지 사람이 알아야 하니
+ * 보여는 준다.
  */
 export default function ProductModelEditForm({
   productModel,
   customerOptions,
+  derivedCustomers,
   onDone,
 }: {
   productModel: ProductModelDetail;
@@ -86,6 +102,9 @@ export default function ProductModelEditForm({
    * queries/customers.ts 의 listCustomerOptions). 페이지가 수정 권한이 있는
    * 세션에만 채워 넘긴다. */
   customerOptions: ProductModelCustomerOption[];
+  /** 🔴 접수 기록에서 나온 고객사. **고르는 값이 아니다** — 안내 한 줄에만
+   * 쓰고 selectedCustomers 에 넣지 않는다(위 헤더). */
+  derivedCustomers: ProductModelCustomerOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -305,6 +324,16 @@ export default function ProductModelEditForm({
               <span>{selectedCustomers.length}곳 선택됨. 목록에서 골라 더할 수 있습니다.</span>
             )}
           </p>
+
+          {/* 🔴 지울 수 없는 것이 왜 목록에 남아 있는지 말해 주는 자리다. 칩으로
+              그리지 않는 것이 일부러다 — 칩은 고른 값처럼 보이고, 실제로 이
+              이름들은 저장 묶음에 실리지 않는다(위 헤더). */}
+          {derivedCustomers.length > 0 && (
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              접수 기록에서 자동: {derivedCustomers.map((c) => c.name).join(", ")} — A/S 접수 건에서
+              나온 고객사라 여기서 지울 수 없습니다.
+            </p>
+          )}
         </div>
 
         <div className="sm:col-span-2">

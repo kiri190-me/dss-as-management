@@ -235,3 +235,4 @@ src/lib/server/services/quote-excel-preview.test.ts
 src/app/api/quotes/*/excel-preview/route-source.test.ts
 src/lib/server/services/quote-workbook-cable.test.ts
 src/lib/domain/local/product-history-match.test.ts
+src/lib/domain/product-model-customer-merge.test.ts

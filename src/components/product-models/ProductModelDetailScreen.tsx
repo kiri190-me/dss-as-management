@@ -10,6 +10,7 @@ import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
+import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
 import ProductModelEditForm from "./ProductModelEditForm";
 import ProductModelFilesSection from "./ProductModelFilesSection";
 import ProductModelHistoryBreakdown from "./ProductModelHistoryBreakdown";
@@ -24,19 +25,59 @@ function kindLabel(kind: string | null): string {
   return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
 }
 
-/**
- * 이 모델에 붙은 고객사를 한 줄로. 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다
- * (없는 것과 빈 것을 다르게 보이게 할 이유가 없다).
- */
-function customerNames(list: readonly ProductModelCustomerOption[]): string {
-  return list.length === 0 ? "-" : list.map((c) => c.name).join(", ");
-}
-
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
       <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * `고객사` 칸. 사람이 골라 둔 것과 **접수 기록에서 나온 것**을 합쳐 보여 준다
+ * — 합치는 규칙은 도메인 함수 하나가 정한다(목록 화면도 같은 것을 쓴다).
+ *
+ * 🔴 기록에서 온 것에는 딱지를 붙인다. 딱지가 없으면 사람은 두 갈래를 구분할 수
+ * 없고, 수정 화면에서 그것이 왜 지워지지 않는지도 알 수 없다(그쪽은 수기 설정만
+ * 만진다 — ProductModelEditForm). 색만으로 구분하지 않고 글자를 함께 적는 것은
+ * UI_GUIDELINE 7의 규칙이다.
+ *
+ * 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다(없는 것과 빈 것을 다르게 보이게
+ * 할 이유가 없다).
+ */
+function CustomerField({
+  manual,
+  derived,
+}: {
+  manual: readonly ProductModelCustomerOption[];
+  derived: readonly ProductModelCustomerOption[];
+}) {
+  const merged = mergeProductModelCustomers(manual, derived);
+  return (
+    <div>
+      <dt className="text-xs text-zinc-500 dark:text-zinc-400">고객사</dt>
+      <dd className="text-sm text-zinc-900 dark:text-zinc-50">
+        {merged.length === 0 ? (
+          "-"
+        ) : (
+          <ul className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {merged.map((c) => (
+              <li key={c.id} className="flex items-center gap-1 break-words">
+                <span>{c.name}</span>
+                {c.source === "REPAIR_CASE" && (
+                  <span
+                    title="A/S 접수 기록에서 자동으로 나온 고객사입니다. 수정 화면에서 지울 수 없습니다."
+                    className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] leading-none text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300"
+                  >
+                    접수 기록
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </dd>
     </div>
   );
 }
@@ -82,6 +123,12 @@ function InfoField({ label, value }: { label: string; value: string }) {
  * 고객사로 바꾸기로 했다 — 한 모델에 **여러 곳**이 붙는다(실측 TG-100 은 4곳).
  * 값은 detail.customers 에서 오고, 그 목록은 조회가 휴지통에 든 고객사를 이미
  * 걸러 낸 것이다(queries/product-model-customers.ts).
+ *
+ * 그 위에 **접수 기록에서 나온 고객사**(detail.derivedCustomers)를 함께 그린다.
+ * 사람이 손으로 붙여 둔 모델이 104개 중 3개뿐이라 이 칸이 거의 늘 비어 있었기
+ * 때문이다. 두 갈래를 합치는 일은 화면 직전 한 곳에서만 하고
+ * (domain/product-model-customer-merge.ts) 기록 쪽에는 딱지를 붙인다 —
+ * 🔴 데이터에서 섞으면 수정 폼이 파생값을 수기 설정으로 저장해 버린다(그 파일 머리말).
  *
  * ⚠️ `product_models.manufacturer` 칼럼과 detail.manufacturer 필드는 **그대로
  * 살아 있다.** 화면에서만 뺐고, 수정 폼이 그 값을 손대지 않은 채 다시 저장한다
@@ -144,13 +191,16 @@ export default function ProductModelDetailScreen({
             <ProductModelEditForm
               productModel={detail}
               customerOptions={customerOptions}
+              // 🔴 고를 수 있는 값이 아니다. 폼은 detail.customers(수기 설정)만
+              // 만지고, 이 배열은 "여기는 손댈 수 없다"는 안내 한 줄에만 쓰인다.
+              derivedCustomers={detail.derivedCustomers}
               onDone={() => setIsEditing(false)}
             />
           ) : (
             <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <InfoField label="모델명" value={detail.modelName} />
               <InfoField label="제품 종류" value={kindLabel(detail.kind)} />
-              <InfoField label="고객사" value={customerNames(detail.customers)} />
+              <CustomerField manual={detail.customers} derived={detail.derivedCustomers} />
               <InfoField label="설명" value={detail.description ?? "-"} />
             </dl>
           )}

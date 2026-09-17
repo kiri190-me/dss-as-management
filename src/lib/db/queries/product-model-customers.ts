@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
-import { customers, productModelCustomers, productModels } from "../schema";
+import { customers, productModelCustomers, productModels, products, repairCases } from "../schema";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
 /**
@@ -90,6 +90,84 @@ export async function listCustomersForProductModel(
   productModelId: string
 ): Promise<ProductModelCustomerOption[]> {
   const byModelId = await listCustomersForProductModels([productModelId]);
+  return byModelId.get(productModelId) ?? [];
+}
+
+/**
+ * ── 접수 기록에서 나오는 고객사 (파생) ──────────────────────────────────────
+ *
+ * 위 두 함수가 읽는 product_model_customers 는 **사람이 골라 둔 설정**이다
+ * (schema/product-model-customers.ts 머리말). 접수 건이 생겼다고 해서 그 표에 줄이
+ * 저절로 늘지 않으므로, 실제로 이어졌던 고객사 대부분이 모델 마스터 화면에서 보이지
+ * 않았다 — 실측으로 수기 연결은 모델 3개뿐인데 접수 기록에는 모델 39개가 있다.
+ *
+ * 아래 두 함수는 그 기록 쪽을 읽는다. **표에 쓰지 않는다** — 읽을 때 계산해야 새
+ * 접수 건이 들어오는 순간 저절로 따라오고, 사람이 골라 둔 설정과도 섞이지 않는다.
+ * 합치는 일은 화면 직전에 도메인 함수 하나가 한다
+ * (domain/product-model-customer-merge.ts).
+ *
+ * 경로는 repair_cases → products → product_models 다(products.product_model_id).
+ * 🔴 거를 것이 셋이다 — 접수 건 · 장비 · 고객사 모두 소프트 삭제된 쪽을 뺀다.
+ * 고객사를 거르는 근거는 이 파일 머리말과 같고, 접수 건과 장비는 휴지통에 든
+ * 기록으로 고객사를 만들어 내지 않기 위해서다.
+ */
+
+/**
+ * 모델 여럿분을 **한 번의 조회**로. 목록 화면(모델 104개)이 쓰므로 모델마다 한 번씩
+ * 도는 모양(N+1)이면 안 된다 — listCustomersForProductModels 와 같은 규칙이고,
+ * 돌려주는 Map 도 같은 모양이다(연결이 있는 모델의 키만 들어 있다).
+ */
+export async function listRepairCaseCustomersForProductModels(
+  productModelIds: readonly string[]
+): Promise<Map<string, ProductModelCustomerOption[]>> {
+  // uuid 가 아닌 값이 섞이면 postgres 가 22P02 로 터진다(위 형제 함수와 같은 판단).
+  const ids = [...new Set(productModelIds.filter((id) => UUID_PATTERN.test(id)))];
+  if (ids.length === 0) return new Map();
+
+  const rows = await db
+    // 한 모델에 같은 고객사의 접수 건이 여러 건인 것이 보통이다(실측 127줄 →
+    // 모델 39개). 줄 단위로 받아 JS 에서 접는 대신 DB 가 접게 한다.
+    .selectDistinct({
+      productModelId: products.productModelId,
+      id: customers.id,
+      name: customers.name,
+    })
+    .from(repairCases)
+    .innerJoin(products, eq(repairCases.productId, products.id))
+    .innerJoin(customers, eq(repairCases.customerId, customers.id))
+    .where(
+      and(
+        inArray(products.productModelId, ids),
+        // 🔴 셋 다 걸어야 한다. 위 머리말 참조.
+        eq(repairCases.isDeleted, false),
+        eq(products.isDeleted, false),
+        eq(customers.isDeleted, false)
+      )
+    )
+    // 형제 함수와 같은 차례(이름순, 동명 대비 id). 정렬 없는 조회는 계획이 바뀌면
+    // 순서가 바뀐다.
+    .orderBy(customers.name, customers.id);
+
+  const byModelId = new Map<string, ProductModelCustomerOption[]>();
+  for (const row of rows) {
+    // product_model_id 는 nullable 이라 타입이 `string | null` 이다. 위 inArray 가
+    // 이미 null 을 걸러 내므로 여기 걸리는 줄은 없지만, 타입을 좁히는 자리다.
+    if (!row.productModelId) continue;
+    const list = byModelId.get(row.productModelId);
+    if (list) list.push({ id: row.id, name: row.name });
+    else byModelId.set(row.productModelId, [{ id: row.id, name: row.name }]);
+  }
+  return byModelId;
+}
+
+/**
+ * 모델 하나분. 위 함수에 그대로 얹는다 — 거르는 규칙과 차례를 두 곳에 따로 적어
+ * 두면 한쪽만 고쳐지는 날이 온다(listCustomersForProductModel 과 같은 모양).
+ */
+export async function listRepairCaseCustomersForProductModel(
+  productModelId: string
+): Promise<ProductModelCustomerOption[]> {
+  const byModelId = await listRepairCaseCustomersForProductModels([productModelId]);
   return byModelId.get(productModelId) ?? [];
 }
 
