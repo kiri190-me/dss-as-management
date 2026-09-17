@@ -137,6 +137,11 @@ export default async function QuotePrintPage({
     chosenRepairTaskCount: quote.repairTasks.length,
   });
 
+  /**
+   * 🔴 `...quote` 가 **종류 · 특이사항 · 품목 표 전체(itemLines)** 까지 함께 싣는다 —
+   * 케이블 견적서를 케이블 양식의 모양으로 그리는 데 쓰이는 셋이다(QuotePrintData 의 그
+   * 항목, 2026-09-17 케이블 ④). 넘기는 값을 손으로 골라 적기 시작하면 그날 그 셋이 빠진다.
+   */
   return (
     <QuotePrintView
       quote={{ ...quote, repairSectionDropped }}

@@ -1797,6 +1797,12 @@ export default function QuoteEditForm({
           // 받아 볼 문서가 손으로 만든 엑셀이기 때문이다. 일반 견적서는 아래 값으로 지금 그대로.
           isExcelOnly,
           manualSupplyAmount: isExcelOnly ? orNull(manualSupplyAmount) : null,
+          /**
+           * 🔴 종류를 넘겨야 케이블이 **케이블 양식의 모양**으로 그려진다 (2026-09-17
+           * 케이블 ④). 안 넘기면 미리보기가 내자 · OH 모양을 그리고, 그 종이에는 없는
+           * 작업 범위 · 작업비 구역이 화면에만 뜬다.
+           */
+          kind,
           quoteNumber,
           quoteDate,
           customerNameText,
@@ -1817,9 +1823,9 @@ export default function QuoteEditForm({
           investigationExcluded,
           // 저장할 때와 **같은 규칙으로** 거른다 — 여기서만 빈 줄을 남겨 두면
           // 미리보기의 줄 수와 실제 문서의 줄 수가 달라진다.
-          // 🔴 설명 줄은 넘기지 않는다 — 이 미리보기는 내자 · OH 양식을 그리는 화면이고,
-          // 그쪽은 수량 · 단가가 있는 품목 줄만 안다(queries/quotes.ts 의 items · itemLines).
-          // 케이블 견적서는 애초에 이 단추가 없다(아래 머리의 [미리보기 · PDF]).
+          // 🔴 설명 줄은 넘기지 않는다 — 내자 · OH 모양을 그리는 쪽은 수량 · 단가가 있는
+          // 품목 줄만 안다(queries/quotes.ts 의 items · itemLines). 케이블 모양은 아래
+          // itemLines 를 본다 — 두 목록이 갈리는 까닭이 그 조회의 머리말에 있다.
           items: items
             .filter((row) => row.lineKind === "ITEM")
             .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
@@ -1830,6 +1836,31 @@ export default function QuoteEditForm({
               quantity: Number(row.quantity) || 0,
               unitPrice: row.unitPrice.trim() === "" ? "0" : row.unitPrice,
             })),
+          /**
+           * 특이사항은 **케이블에만 있는 칸**이다 — 저장에 싣는 규칙(collectFields)과 같게
+           * 가른다. 종류를 되돌려도 칸의 글자는 지우지 않으므로 여기서 한 번 더 가른다.
+           */
+          remarks: isCable ? remarks : null,
+          /**
+           * 🔴 품목 표 **전체** — 설명 줄까지 **차례 그대로**. 케이블 모양이 이것을 그린다.
+           * 위 items 처럼 종류로 거르면 미리보기에서 설명 줄이 사라져, 받아 본 문서와 다른
+           * 종이가 된다. 빈 줄을 거르는 규칙은 저장과 같다(collectFields 의 그 항목).
+           */
+          itemLines: items
+            .filter((row) => row.partNameText.trim() !== "" || row.unitPrice.trim() !== "")
+            .map((row) => {
+              const isNote = row.lineKind === "NOTE";
+              return {
+                partId: row.partId,
+                kind: row.lineKind,
+                partNameText: row.partNameText,
+                partSpecText: isCable && !isNote ? row.partSpecText : null,
+                isOverhaulPart: row.isOverhaulPart,
+                // 설명 줄은 수량 · 단가가 **없다** — 0 으로 접으면 합계에 0원짜리 품목으로 섞인다.
+                quantity: isNote ? null : Number(row.quantity) || 0,
+                unitPrice: isNote ? null : row.unitPrice,
+              };
+            }),
         }}
       />
     );

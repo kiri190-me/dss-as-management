@@ -171,6 +171,27 @@ export type QuotePrintData = Pick<
    */
   isExcelOnly?: boolean;
   manualSupplyAmount?: string | null;
+  /**
+   * ==========================================================================
+   * 🔴 케이블 견적서를 그리는 데 쓰는 셋 (2026-09-17 케이블 ④)
+   * ==========================================================================
+   * 견적서 종류가 `CABLE` 이면 **앱 양식을 그리지 않고 케이블 양식의 모양**을 그린다
+   * (아래 CableQuotePreview) — 그 종이에는 작업 범위 · 작업비 구역이 아예 없고, 대신
+   * 규격 칸 · 설명 줄 · 특이사항이 있다(xlsx/cable-quote-template.ts 머리말).
+   *
+   * 🔴 **셋 다 없어도 된다** — 안 주면 지금까지와 똑같이 내자 · OH 모양을 그린다.
+   * 필수로 두면 이 타입으로 값을 짓는 자리(편집 폼 · 형제 시험들)가 전부 함께 고쳐져야
+   * 하고, 그 자리들은 케이블과 아무 상관이 없다.
+   *
+   * 🔴 `items` 가 아니라 `itemLines` 다. `items` 에는 **설명 줄이 빠져 있고 규격도
+   * 없다**(queries/quotes.ts 의 두 목록) — 그것으로 그리면 미리보기에서 설명 줄이 사라져
+   * 받아 본 문서와 다른 종이가 된다.
+   */
+  kind?: QuoteEditData["kind"];
+  /** 특이사항 — 케이블 양식 머리말 10번(quotes.remarks). 다른 두 양식에는 이 칸이 없다. */
+  remarks?: string | null;
+  /** 품목 표 **전체** — 설명 줄까지, 적힌 차례 그대로. */
+  itemLines?: QuoteEditData["itemLines"];
 };
 
 function productLine(quote: QuotePrintData): string {
@@ -278,6 +299,91 @@ export default function QuotePrintView({
     );
   }
 
+  /**
+   * ==========================================================================
+   * 도구모음과 인쇄 안내 — **종이가 무엇이든 하나다** (2026-09-17 케이블 ④)
+   * ==========================================================================
+   * 요소로 한 번 만들어 두 갈래(내자 · OH 종이, 케이블 종이)가 나눠 끼운다. 🔴 **컴포넌트로
+   * 빼지 않은 것은 일부러다** — 그리는 자리가 하나 더 생겨도 단추는 여전히 「앱 양식 하나 ·
+   * 엑셀 전용 하나」 두 벌뿐이어야 한다(quote-issue-screens.test.ts 가 그 수를 센다). 베껴
+   * 두면 권한 갈래(canIssue)나 「먼저 [저장]」 규칙을 한쪽만 고치는 날이 온다.
+   *
+   * 값이 아니라 **요소**라 요소 나무의 모양이 예전과 같다 — 시험이 나무를 걸어 단추를
+   * 찾는다(QuotePrintView.test.tsx).
+   */
+  const toolbar = (
+    <div className="qp-toolbar">
+      {onClose ? (
+        // 🔴 갈리는 기준은 **저장 여부가 아니라 어떻게 열렸나**다. `onClose` 를
+        // 받았다는 것은 폼 위에 겹쳐 뜬 미리보기라는 뜻이고, 그때 주소는
+        // `/quotes/{id}`(또는 `/quotes/new`) **그대로**다. 저장됐다는 이유로
+        // `/quotes/{id}` 링크를 그리면 지금 있는 자리로 가라는 말이라, 눌러도
+        // 주소가 안 바뀌고 미리보기가 그대로 떠 있다 — 죽은 단추가 된다.
+        // 닫아서 폼으로 돌아가면 적어 둔 값도 그대로 살아 있다.
+        <button type="button" onClick={onClose} className="qp-btn">
+          ← 편집으로 돌아가기
+        </button>
+      ) : (
+        // 독립된 미리보기 페이지(`/quotes/{id}/print`)다. 닫을 폼이 없으므로
+        // 돌아갈 곳은 주소로만 있다 — 페이지가 정해 준 `backHref`(「견적서」
+        // 탭에서 왔으면 그 건을 실은 수정 화면), 없으면 `/quotes/{id}`.
+        <Link href={backHref ?? `/quotes/${quoteId}`} className="qp-btn">
+          ← 견적서로 돌아가기
+        </Link>
+      )}
+      <div className="qp-toolbar-actions">
+        {quoteId === null ? (
+          // 🔴 Excel 은 저장된 장에서만 받을 수 있다 — 파일을 만드는 라우트가
+          // DB 의 그 줄을 읽기 때문이다. 단추를 회색으로 두기만 하면 "왜 안
+          // 눌리지"가 되므로, 왜인지를 그 자리에 적는다.
+          <span className="qp-toolbar-note">Excel 은 저장한 뒤에 받을 수 있습니다</span>
+        ) : canIssue ? (
+          // 수정 권한자 — 발행 통로(공유폴더 저장 · 엑셀 칸 교체). 결과 줄은 단추 아래, 흰 종이 색.
+          <QuoteIssueButton
+            quoteId={quoteId}
+            label="Excel 받기"
+            className="qp-btn"
+            onPaper
+            hasUnsavedChanges={hasUnsavedChanges}
+            onOutcome={onIssueOutcome}
+          />
+        ) : (
+          <a href={`/api/quotes/${quoteId}/xlsx`} className="qp-btn">
+            Excel 받기
+          </a>
+        )}
+        <button type="button" onClick={() => window.print()} className="qp-btn qp-btn-primary">
+          인쇄 · PDF로 저장
+        </button>
+      </div>
+    </div>
+  );
+
+  const printNote = (
+    <p className="qp-note">
+      인쇄 창에서 대상 <b>&ldquo;PDF로 저장&rdquo;</b>, 용지 <b>A4</b>, 배율 <b>기본(100%)</b>,
+      여백 <b>기본</b>으로 두세요. 배율 92%는 이미 반영되어 있으니 인쇄 창에서 또 줄이지 마세요.
+      머리글·바닥글(주소·날짜)은 인쇄 창의 <b>&ldquo;머리글 및 바닥글&rdquo;</b> 체크를 해제하면
+      사라집니다.
+    </p>
+  );
+
+  /**
+   * 🔴 케이블 견적서는 **다른 종이**다 — 작업 범위 · 작업비 구역이 없고 규격 칸 · 설명
+   * 줄 · 특이사항이 있다. 아래 내자 · OH 모양으로 그리면 화면과 받아 본 문서가 서로
+   * 다른 문서가 된다(xlsx/cable-quote-template.ts 머리말).
+   */
+  if (quote.kind === "CABLE") {
+    return (
+      <div className="qp-root">
+        <style>{STYLES}</style>
+        {toolbar}
+        {printNote}
+        <CableQuoteSheet quote={quote} header={header} />
+      </div>
+    );
+  }
+
   const items = quote.items.map((item) => ({
     name: item.partNameText,
     quantity: item.quantity,
@@ -323,57 +429,8 @@ export default function QuotePrintView({
     <div className="qp-root">
       <style>{STYLES}</style>
 
-      <div className="qp-toolbar">
-        {onClose ? (
-          // 🔴 갈리는 기준은 **저장 여부가 아니라 어떻게 열렸나**다. `onClose` 를
-          // 받았다는 것은 폼 위에 겹쳐 뜬 미리보기라는 뜻이고, 그때 주소는
-          // `/quotes/{id}`(또는 `/quotes/new`) **그대로**다. 저장됐다는 이유로
-          // `/quotes/{id}` 링크를 그리면 지금 있는 자리로 가라는 말이라, 눌러도
-          // 주소가 안 바뀌고 미리보기가 그대로 떠 있다 — 죽은 단추가 된다.
-          // 닫아서 폼으로 돌아가면 적어 둔 값도 그대로 살아 있다.
-          <button type="button" onClick={onClose} className="qp-btn">
-            ← 편집으로 돌아가기
-          </button>
-        ) : (
-          // 독립된 미리보기 페이지(`/quotes/{id}/print`)다. 닫을 폼이 없으므로
-          // 돌아갈 곳은 주소로만 있다 — 페이지가 정해 준 `backHref`(「견적서」
-          // 탭에서 왔으면 그 건을 실은 수정 화면), 없으면 `/quotes/{id}`.
-          <Link href={backHref ?? `/quotes/${quoteId}`} className="qp-btn">
-            ← 견적서로 돌아가기
-          </Link>
-        )}
-        <div className="qp-toolbar-actions">
-          {quoteId === null ? (
-            // 🔴 Excel 은 저장된 장에서만 받을 수 있다 — 파일을 만드는 라우트가
-            // DB 의 그 줄을 읽기 때문이다. 단추를 회색으로 두기만 하면 "왜 안
-            // 눌리지"가 되므로, 왜인지를 그 자리에 적는다.
-            <span className="qp-toolbar-note">Excel 은 저장한 뒤에 받을 수 있습니다</span>
-          ) : canIssue ? (
-            // 수정 권한자 — 발행 통로(공유폴더 저장 · 엑셀 칸 교체). 결과 줄은 단추 아래, 흰 종이 색.
-            <QuoteIssueButton
-              quoteId={quoteId}
-              label="Excel 받기"
-              className="qp-btn"
-              onPaper
-              hasUnsavedChanges={hasUnsavedChanges}
-              onOutcome={onIssueOutcome}
-            />
-          ) : (
-            <a href={`/api/quotes/${quoteId}/xlsx`} className="qp-btn">
-              Excel 받기
-            </a>
-          )}
-          <button type="button" onClick={() => window.print()} className="qp-btn qp-btn-primary">
-            인쇄 · PDF로 저장
-          </button>
-        </div>
-      </div>
-      <p className="qp-note">
-        인쇄 창에서 대상 <b>&ldquo;PDF로 저장&rdquo;</b>, 용지 <b>A4</b>, 배율 <b>기본(100%)</b>,
-        여백 <b>기본</b>으로 두세요. 배율 92%는 이미 반영되어 있으니 인쇄 창에서 또 줄이지 마세요.
-        머리글·바닥글(주소·날짜)은 인쇄 창의 <b>&ldquo;머리글 및 바닥글&rdquo;</b> 체크를 해제하면
-        사라집니다.
-      </p>
+      {toolbar}
+      {printNote}
 
       {/* 좁은 화면에서 종이를 폭에 맞춰 줄여 «보여 주는» 상자. 인쇄에는 닿지
           않는다 — `print-fit-frame.tsx` 머리말과 아래 STYLES 의 `@media screen`. */}
@@ -541,6 +598,213 @@ export default function QuotePrintView({
     </div>
   );
 }
+
+/**
+ * ============================================================================
+ * 케이블 견적서의 미리보기 — 품목 표 하나와 특이사항 (2026-09-17 케이블 ④)
+ * ============================================================================
+ * 케이블 견적서는 **수리품과 이어지지 않는 별도 견적서**라 위 내자 · OH 모양과 갈리는
+ * 곳이 넷이다(xlsx/cable-quote-template.ts 머리말):
+ *
+ *   · 🔴 **작업 범위 · 작업비 구역이 없다.** 「① 인수 조사 … ④ 서류작업」도, 「2) 작업비」
+ *     줄도 그리지 않는다 — 그 양식에 그 자리가 아예 없다. 여기에 그리면 화면에는 있는데
+ *     받아 본 문서에는 없는, 서로 다른 종이가 된다.
+ *   · **규격 칸**이 있다(표의 셋째 칸).
+ *   · **설명 줄**이 품목 사이에 낀다 — 번호 · 수량 · 단가 없이 글만 앉고, **차례가 곧
+ *     뜻**이라 품목과 섞인 그 자리에 그린다.
+ *   · **특이사항**이 머리말 맨 아래(10번)에 붙는다. 양식에서도 C21 — 품목 표 **위**다.
+ *
+ * ── 🔴 엑셀 격자를 그리지 않는다 ────────────────────────────────────────────
+ * 저장된 값으로 직접 셈해 그린다 — 위 내자 · OH 와 같은 길이다(사용자 결정). 양식 파일을
+ * 열지 않으므로 수식 칸의 낡은 캐시값(C16 · H44~H46)이 화면에 새어 나올 일이 없다.
+ *
+ * ── 로고 · 직인은 그리지 않는다 ─────────────────────────────────────────────
+ * 그림을 내주는 통로(/api/quotes/template-image)가 **내자 양식**에서 꺼낸다. 케이블 양식은
+ * 다른 파일이라, 그대로 붙이면 이 종이에 없을 수도 있는 그림을 지어내는 셈이다. 회사
+ * 정보 글자는 케이블 양식에서 읽은 것이라 그대로 그린다(storage/quote-template.ts 의
+ * CABLE_HEADER_CELLS).
+ *
+ * 🔴 **종이만 그린다** — 도구모음과 인쇄 안내는 위 QuotePrintView 가 만들어 둔 것을 그대로
+ * 쓴다(그 자리의 머리말). 여기에 베껴 두면 권한 갈래를 한쪽만 고치는 날이 온다.
+ * ============================================================================
+ */
+function CableQuoteSheet({ quote, header }: { quote: QuotePrintData; header: QuoteTemplateHeader }) {
+  const lines = quote.itemLines ?? [];
+
+  /**
+   * 🔴 합계는 **서버가 금액을 셈하는 그 함수 하나**로 낸다(domain/quote-list.ts 의
+   * quoteSupplyAmountOf — 목록 · 내자 정리 · 스냅숏이 모두 그것을 부른다). 설명 줄을 빼는
+   * 일은 그 함수가 일반 견적서의 셈을 맡기는 안쪽 한 곳에서 일어난다. 여기서 따로 더하면
+   * 설명 줄이 「0원짜리 품목」으로 섞이는 날 목록 · 편집 화면과 이 종이의 금액이 갈린다.
+   *
+   * 엑셀 전용 장은 위에서 갈라 나갔으므로 여기서는 품목 줄 합 + 작업비이고(케이블 장의
+   * 작업비는 늘 0 이다), null 은 오지 않는다 — 내자 · OH 갈래와 같은 모양이다.
+   */
+  const supply =
+    quoteSupplyAmountOf({
+      isExcelOnly: false,
+      manualSupplyAmount: null,
+      items: lines,
+      workCost: quote.workCost,
+    }) ?? 0;
+  const vat = supply * VAT_RATE;
+
+  /**
+   * 머리말 열 줄 — 양식에 박힌 이름 그대로다(실측). 🔴 열째가 **특이사항**이고, 양식에서도
+   * 품목 표 위(C21)에 있다. 유효기간 · 납기 · 결재조건 · 은행계좌는 케이블 양식에서 읽은
+   * 기본 문구로 채운다(print 페이지가 `quoteTemplateKey` 로 골라 넘긴다).
+   */
+  const infoRows: { label: string; value: string; pre?: boolean }[] = [
+    { label: "발행일자", value: formatDate(quote.quoteDate) },
+    { label: "발행번호", value: quote.quoteNumber },
+    { label: "공 급 처", value: quote.customerNameText },
+    { label: "품     명", value: quote.subject },
+    { label: "금     액", value: `${won(supply)}　(V.A.T. 별도)` },
+    { label: "유효기간", value: quote.validity ?? header.defaultValidity ?? "" },
+    { label: "납     기", value: quote.delivery ?? header.defaultDelivery ?? "" },
+    { label: "결재조건", value: quote.payment ?? header.defaultPayment ?? "" },
+    { label: "은행계좌", value: header.bankAccount ?? "" },
+    // 여러 줄로 적을 수 있는 칸이다 — 적은 줄바꿈 그대로 그린다(.qp-info-pre).
+    { label: "특이사항", value: quote.remarks ?? "", pre: true },
+  ];
+
+  // 번호는 **품목 줄만** 센다 — 설명 줄이 사이에 껴도 `1) 2) 3)` 으로 이어진다
+  // (케이블 채우개가 매기는 방식 그대로).
+  let itemNumber = 0;
+
+  return (
+    <PrintFitFrame
+        naturalWidthPx={PAGE_NATURAL_WIDTH_PX}
+        cssVariable="--qp-fit"
+        className="qp-viewport"
+      >
+        <div className="qp-page">
+          <div className="qp-sheet" style={{ width: `${SHEET_WIDTH_PT}pt` }}>
+            <header className="qp-top">
+              <h1 className="qp-title">견 적 서</h1>
+            </header>
+
+            <section className="qp-company">
+              <p className="qp-company-name">{header.companyName ?? ""}</p>
+              <p>{header.ceoLine ?? ""}</p>
+              <p>{header.address ?? ""}</p>
+              <p>
+                <span className="qp-col1">{header.tel ?? ""}</span>
+                <span>{header.fax ?? ""}</span>
+              </p>
+              <p>
+                <span className="qp-col1">{header.email ?? ""}</span>
+                <span>{header.homepage ?? ""}</span>
+              </p>
+            </section>
+
+            <div className="qp-rule-thick" />
+
+            <dl className="qp-info">
+              {infoRows.map((row, index) => (
+                <div className="qp-info-row" key={row.label}>
+                  <dt>
+                    <span className="qp-info-n">{index + 1}.</span>
+                    <span className="qp-info-label">{row.label}</span>
+                    <span className="qp-info-colon">:</span>
+                  </dt>
+                  <dd className={row.pre ? "qp-info-pre" : undefined}>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            <table className="qp-cable-items">
+              <colgroup>
+                {CABLE_COLUMN_RATIOS.map((ratio, index) => (
+                  <col key={index} style={{ width: `${SHEET_WIDTH_PT * ratio}pt` }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>번 호</th>
+                  <th>품 명</th>
+                  <th>규 격</th>
+                  <th>수 량</th>
+                  <th>단 가</th>
+                  <th>합 계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.length === 0 ? (
+                  <tr>
+                    <td />
+                    <td className="qp-muted" colSpan={5}>
+                      (품목 없음)
+                    </td>
+                  </tr>
+                ) : (
+                  lines.map((line, index) => {
+                    if (line.kind === "NOTE") {
+                      /**
+                       * 설명 줄 — 품명 칸에 글자만. 🔴 번호 · 수량 · 단가 · 합계는 **비운다**
+                       * (그 줄에는 값이 없고, DB 도 NULL 을 보증한다). 규격 칸까지 함께 쓰는
+                       * 것은 양식에서도 옆 칸이 비어 글자가 그리로 흘러 보이기 때문이다.
+                       */
+                      return (
+                        <tr key={`note-${index}`} className="qp-cable-note">
+                          <td />
+                          <td colSpan={2}>{line.partNameText}</td>
+                          <td />
+                          <td />
+                          <td />
+                        </tr>
+                      );
+                    }
+
+                    itemNumber += 1;
+                    const quantity = line.quantity ?? 0;
+                    const unitPrice = Number(line.unitPrice ?? 0);
+                    return (
+                      <tr key={`item-${index}`}>
+                        <td className="qp-cable-mark">{itemNumber})</td>
+                        <td>{line.partNameText}</td>
+                        {/* 규격이 없으면 양식과 같은 글자를 적는다 — 빈 칸은 「안 적었다」로 읽힌다. */}
+                        <td>{line.partSpecText?.trim() ? line.partSpecText : "-"}</td>
+                        <td className="qp-c-qty">{quantity}</td>
+                        <td className="qp-c-money">{won(unitPrice)}</td>
+                        <td className="qp-c-money">{won(quantity * unitPrice)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+
+            <div className="qp-rule-thick qp-rule-totals" />
+            <div className="qp-totals">
+              <div className="qp-total-row">
+                <span className="qp-total-label">공 급 가</span>
+                <span className="qp-total-value">{won(supply)}</span>
+              </div>
+              <div className="qp-total-row">
+                <span className="qp-total-label">부 가 세</span>
+                <span className="qp-total-value">{won(vat)}</span>
+              </div>
+              <div className="qp-total-row qp-total-grand">
+                <span className="qp-total-label">합　　계</span>
+                <span className="qp-total-value">{won(supply + vat)}</span>
+              </div>
+            </div>
+            <div className="qp-rule-thick" />
+          </div>
+        </div>
+    </PrintFitFrame>
+  );
+}
+
+/**
+ * 케이블 표의 여섯 칸이 차지하는 몫 — 번호 · 품명 · 규격 · 수량 · 단가 · 합계.
+ *
+ * 종이 폭(SHEET_WIDTH_PT)은 앞선 셋과 같게 두고 그 안에서 나눈다. 🔴 실측한 pt 값을
+ * 적지 않은 것은 케이블 양식의 열 너비를 재어 두지 않았기 때문이다 — 지어낸 숫자를
+ * 「실측」처럼 적어 두면 다음 사람이 그것을 근거로 삼는다.
+ */
+const CABLE_COLUMN_RATIOS = [0.072, 0.377, 0.19, 0.08, 0.135, 0.146];
 
 const EXCEL_ONLY_BUTTON_CLASS =
   "inline-block rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
@@ -1089,6 +1353,8 @@ const STYLES = `
 .qp-info-label { display: inline-block; width: 56pt; white-space: pre; }
 .qp-info-colon { display: inline-block; width: 12pt; }
 .qp-info-row dd { margin: 0; }
+/* 케이블의 특이사항 — 적은 줄바꿈 그대로(여러 줄 칸이다). */
+.qp-info-pre { white-space: pre-wrap; }
 
 .qp-items { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .qp-items th { border-top: 1.5pt solid #000; border-bottom: 1.5pt solid #000; padding: 2pt 3pt; font-weight: 400; text-align: center; }
@@ -1106,6 +1372,20 @@ const STYLES = `
 .qp-c-qty { text-align: center; }
 .qp-c-money { text-align: right; font-variant-numeric: tabular-nums; }
 .qp-muted { color: #71717a; }
+
+/* ── 케이블 견적서의 품목 표 (2026-09-17) ───────────────────────────────────
+   🔴 이 글은 그려진 종이에 그대로 실려 나간다(style 태그 안이다) — 작업 내역 묶음에
+   쓰는 동그라미 숫자를 여기 적지 말 것. 그 번호가 종이에 남지 않았는지 보는 시험이
+   글자만 훑으므로, 주석 한 줄 때문에 「번호가 남았다」로 읽힌다(실제로 겪었다).
+   위 .qp-items 와 같은 틀이지만 칸이 여섯이고 규격이 하나 더 있다. 줄과 줄 사이를
+   벌려 두는 것은 양식이 **한 줄씩 띄운 모양**이기 때문이다(그 양식의 품목 자리는
+   27 · 29 · 31 … 43 이다). 위 갈래는 이 규칙을 하나도 쓰지 않는다 — 이름이 갈린다. */
+.qp-cable-items { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.qp-cable-items th { border-top: 1.5pt solid #000; border-bottom: 1.5pt solid #000; padding: 2pt 3pt; font-weight: 400; text-align: center; }
+.qp-cable-items td { padding: 3.5pt 3pt; vertical-align: top; word-break: break-all; }
+.qp-cable-mark { text-align: center; }
+/* 설명 줄은 앞 품목에 붙는 글이다 — 위 여백을 줄여 그 묶음으로 보이게 둔다. */
+.qp-cable-note td { padding-top: 1pt; }
 
 .qp-totals { padding: 3pt 0; }
 .qp-total-row { display: flex; justify-content: flex-end; align-items: baseline; }
@@ -1131,5 +1411,6 @@ const STYLES = `
   .qp-toolbar, .qp-note { display: none !important; }
   .qp-page { border: 0; padding: 0; margin: 0; width: auto; }
   .qp-items tr { break-inside: avoid; }
+  .qp-cable-items tr { break-inside: avoid; }
 }
 `;
