@@ -24,6 +24,16 @@ import { readFileSync } from "node:fs";
  *  4. 접혀 있어도 전체 건수 문구는 남는다 — 몇 건인지는 펼치지 않고도 알아야 한다.
  *  5. 기본은 접힘이다.
  *  6. 이력 한 줄의 세 줄 구성과 정렬 규칙은 건드리지 않았다.
+ *
+ * ── 이력 줄을 누르면 팝업이 떴다가 넘어간다 (2026-09-17 요구) ───────────────
+ *  7. 저장·등록이 쓰던 showSavePopup 을 그대로 부른다 — 새 팝업·새 토스트를
+ *     만들지 않았고, 떠 있는 시간도 save-popup.ts 의 상수 몫이라 여기서 다시
+ *     재지 않는다(setTimeout 도, router.push 도 없다).
+ *  8. redirectTo 는 그 건의 주소다. null 이면 0.5초 뒤 팝업만 닫히고 누르기 전
+ *     화면이 그대로 남는다 — 상세가 서버에서 오는 데 시간이 걸리기 때문이다.
+ *  9. <Link href> 는 그대로 남아 있고, 가로채는 것은 평범한 왼쪽 클릭뿐이다 —
+ *     수식 키(⌘·Ctrl·Shift·Alt)나 왼쪽이 아닌 단추는 새 탭·새 창으로 열기라
+ *     손대지 않는다.
  * ============================================================================
  */
 
@@ -101,5 +111,47 @@ describe("제품 정보 — 과거 A/S 이력 접기", () => {
   test("정렬을 여기서 다시 하지 않는다 — 목록의 첫 줄이 곧 가장 최근 건이다", () => {
     assert.ok(!/\.sort\(/.test(code), "정렬은 조회 몫이다 (접수일 내림차순)");
     assert.ok(!/\.reverse\(/.test(code));
+  });
+});
+
+describe("제품 정보 — 이력 줄을 누르면 팝업이 떴다가 그 건으로 넘어간다", () => {
+  test("이미 있는 저장 팝업을 부른다 — 새 팝업·새 토스트를 만들지 않았다", () => {
+    assert.match(flat, /import \{ showSavePopup \} from "@\/components\/common\/SavePopup";/);
+    assert.match(flat, /showSavePopup\(\{ message: "이전 이력으로 이동합니다\.",/);
+    // 팝업을 직접 그리려 든 흔적이 없어야 한다 — 그리는 자리는 (app)/layout.tsx 하나뿐이다.
+    assert.ok(!code.includes("<dialog"), "팝업은 SavePopup.tsx 가 그린다");
+    assert.ok(!/createPortal|SavePopupHost|Toast|toast/.test(code));
+  });
+
+  test("한 곳에서만 부른다 — 펴 둔 1건과 접힌 나머지가 같은 HistoryItem 을 쓴다", () => {
+    assert.equal(code.match(/showSavePopup\(/g)?.length, 1);
+  });
+
+  test("넘어갈 곳은 그 건의 주소다 — null 이 아니다", () => {
+    assert.match(flat, /redirectTo: `\/repair-cases\/\$\{item\.id\}`,? \}\)/);
+    assert.ok(
+      !/redirectTo: null/.test(code),
+      "null 이면 팝업만 닫히고 누르기 전 화면이 그대로 남는다(상세는 서버에서 온다)"
+    );
+  });
+
+  test("0.5초를 이 파일에서 다시 재지 않는다 — 기다리는 것도 넘기는 것도 팝업 몫이다", () => {
+    assert.ok(!/setTimeout|setInterval/.test(code), "떠 있는 시간은 SAVE_POPUP_VISIBLE_MS 다");
+    assert.ok(!/SAVE_POPUP_VISIBLE_MS/.test(code));
+    assert.ok(!/router\.push|useRouter/.test(code), "넘기는 것은 팝업이 한다");
+  });
+
+  test("<Link href> 는 그대로 남아 있다", () => {
+    assert.match(flat, /<Link href=\{`\/repair-cases\/\$\{item\.id\}`\}/);
+  });
+
+  test("가로채는 것은 평범한 왼쪽 클릭뿐이다 — 수식 키·다른 단추는 그대로 둔다", () => {
+    assert.match(
+      flat,
+      /event\.button === 0 && !event\.metaKey && !event\.ctrlKey && !event\.shiftKey && !event\.altKey/
+    );
+    // 막는 것은 가로챌 때뿐이다 — 가드가 preventDefault 앞에 있다.
+    assert.match(flat, /if \(!isPlainLeftClick\(event\)\) return; event\.preventDefault\(\);/);
+    assert.equal(code.match(/preventDefault\(\)/g)?.length, 1);
   });
 });

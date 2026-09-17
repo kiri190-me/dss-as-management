@@ -1,6 +1,7 @@
-import { useId, useState } from "react";
+import { useId, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { StatusBadge, SourceBadge } from "@/components/repair-cases/badges";
+import { showSavePopup } from "@/components/common/SavePopup";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
@@ -33,6 +34,19 @@ function HistoryLine({ label, value }: { label: string; value: string | null }) 
 }
 
 /**
+ * 가로채도 되는 누름인가 — 평범한 왼쪽 클릭 하나뿐이다.
+ *
+ * 🔴 수식 키(⌘·Ctrl·Shift·Alt)를 짚었거나 왼쪽 단추가 아니면 거짓이다. 그때는
+ * preventDefault 하지 않고 <Link href> 가 하던 일을 그대로 두어야 한다 —
+ * 새 탭으로 열기·새 창으로 열기를 팝업이 뺏으면 안 된다.
+ */
+function isPlainLeftClick(event: MouseEvent): boolean {
+  return (
+    event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+  );
+}
+
+/**
  * 과거 A/S 이력 한 줄.
  *
  * 🔴 세 줄 구성(머리 줄 · 신고증상 · 조치 내용)은 눈 확인까지 끝난 모양이다.
@@ -50,8 +64,28 @@ function HistoryItem({
 }) {
   return (
     <li>
+      {/* 누르면 「이전 이력으로 이동합니다.」가 잠깐 떴다가 그 건으로 넘어간다
+          (2026-09-17 요구). 저장·등록이 쓰던 팝업을 그대로 부른다 — 부르고 끝이고,
+          기다리지도 router.push 하지도 않는다(lib/domain/save-popup.ts 머리말).
+          떠 있는 시간(0.5초)도 그 파일의 상수라 여기 다시 적지 않는다.
+
+          🔴 redirectTo 를 반드시 준다. null 이면 0.5초 뒤 팝업만 닫히는데, 수리건
+          상세는 서버에서 오는 데 시간이 걸려 팝업이 먼저 사라지고 **누르기 전 화면이
+          그대로** 남는다("안 눌렸나?"). 주소를 주면 팝업이 그 0.5초 동안 다음 화면을
+          미리 받아 두고(router.prefetch) 도착할 때까지 붙들어 준다.
+
+          🔴 href 는 지우지 않는다. 가로채는 것은 평범한 왼쪽 클릭뿐이고, 그 밖의
+          누름은 여기서 손대지 않아 <Link> 가 하던 대로 동작한다. */}
       <Link
         href={`/repair-cases/${item.id}`}
+        onClick={(event) => {
+          if (!isPlainLeftClick(event)) return;
+          event.preventDefault();
+          showSavePopup({
+            message: "이전 이력으로 이동합니다.",
+            redirectTo: `/repair-cases/${item.id}`,
+          });
+        }}
         className="flex flex-col gap-1 rounded-md border border-zinc-100 p-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
       >
         <span className="flex flex-wrap items-center justify-between gap-2">
