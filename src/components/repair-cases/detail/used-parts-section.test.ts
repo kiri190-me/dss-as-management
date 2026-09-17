@@ -4,26 +4,31 @@ import { readFileSync } from "node:fs";
 
 /**
  * ============================================================================
- * 「사용 부품」 칸 — 읽기까지 (B-1)
+ * 「사용 부품」 칸 — 읽기(B-1) + 적고 저장하기(B-2)
  * ============================================================================
- * 수리 건 상세에 그 건에서 갈아 끼운 부품을 보여 주는 칸을 냈다. **적고 저장하는
- * 길은 다음 조각(B-2)** 이고, 이 시험은 그 길이 아직 **없다는 것까지** 못 박는다.
+ * 수리 건 상세에 그 건에서 갈아 끼운 부품을 보여 주고, 줄을 더하고 · 지우고 ·
+ * 저장하는 칸이다.
  *
  * ── 왜 렌더하지 않고 원본을 글자로 읽는가 ──────────────────────────────────
  * RepairCaseDetailView 아래의 상세 화면 컴포넌트들은 서버 액션(update-repair-case
  * 등)으로 이어지는 사슬을 물고 있어서 react-server 조건 없이 도는 test:components
  * 에서는 **import 자체가 던진다.** 같은 폴더의 product-info-history-disclosure.
- * test.ts 가 쓰는 방법을 그대로 쓴다.
+ * test.ts 가 쓰는 방법을 그대로 쓴다. B-2 에서 칸이 직접 서버 액션을 물게 됐으니
+ * 더욱 그렇다.
  *
  * ── 여기서 못 박는 것 ──────────────────────────────────────────────────────
  *  1. 🔴 한 건의 부품 출처를 둘로 쪼개지 않는다 — 반출 이력이 있으면 적을 자리를
  *     그리지 않고 안내만 낸다(같은 부품을 통계가 두 번 세지 않게).
  *  2. 반출 이력이 없고 줄도 없으면 「아직 적힌 것이 없습니다」.
  *  3. 줄이 있으면 품명·수량 표.
- *  4. 🔴 이번 조각에 쓰기 길이 없다 — 입력 칸·단추·서버 액션이 하나도 없다.
+ *  4. 🔴 적을 수 있는 건인지는 **서버가 정한다**(writeGate) — 화면이 다시 따지지
+ *     않는다.
  *  5. DATABASE 소스가 아니면 조회하지 않는다(MOCK·LOCAL_DEMO 에는 이 표가 없다).
- *  6. 🔴 왕복이 늘지 않았다 — 기존 Promise.all 에 태웠다.
+ *  6. 🔴 왕복이 늘지 않았다 — 기존 Promise.all 에 태웠다(부품 마스터도 같이).
  *  7. 반출 이력으로 치는 상태 집합이 통계가 세는 집합과 같다(REJECTED·CANCELLED 제외).
+ *  8. 🔴 부품 고르개를 붙였다 — 고르면 part_id 가 붙고, 고쳐 쓰면 풀린다. 마스터에
+ *     없는 부품은 손으로 적을 수 있다.
+ *  9. 🔴 화면이 줄 번호를 보내지 않는다 — line_no 는 서버가 매긴다.
  * ============================================================================
  */
 
@@ -53,6 +58,12 @@ const queryFlat = flatten(queryCode);
 const sectionCode = stripComments(read("src/components/repair-cases/detail/UsedPartsSection.tsx"));
 const sectionFlat = flatten(sectionCode);
 
+const formCode = stripComments(read("src/components/repair-cases/detail/edit/UsedPartsEditForm.tsx"));
+const formFlat = flatten(formCode);
+
+const actionCode = stripComments(read("src/lib/server/actions/repair-case-used-parts.ts"));
+const actionFlat = flatten(actionCode);
+
 const pageCode = stripComments(read("src/app/(app)/repair-cases/[id]/page.tsx"));
 const pageFlat = flatten(pageCode);
 
@@ -81,7 +92,7 @@ describe("사용 부품 — 조회", () => {
     assert.match(queryFlat, /\.from\(inventoryPartRequests\)/);
     assert.match(queryFlat, /\.limit\(1\)/);
     assert.ok(!/count\(/.test(queryCode), "exists 로 충분하다 — 개수를 세지 않는다");
-    assert.match(queryFlat, /hasPartRequestHistory: requestProbe\.length > 0/);
+    assert.match(queryFlat, /return probe\.length > 0;/);
   });
 
   test("🔴 반출 이력으로 치는 집합이 통계가 세는 집합과 같다 — REJECTED·CANCELLED 는 빼고 본다", () => {
@@ -101,12 +112,21 @@ describe("사용 부품 — 조회", () => {
     );
   });
 
-  test("두 질의를 나란히 쏜다 — 왕복을 직렬로 늘리지 않는다", () => {
-    assert.match(queryFlat, /const \[rows, requestProbe\] = await Promise\.all\(\[/);
+  test("질의를 나란히 쏜다 — 왕복을 직렬로 늘리지 않는다", () => {
+    assert.match(
+      queryFlat,
+      /const \[rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase\] = await Promise\.all\(\[/
+    );
   });
 
   test("🔴 읽기뿐이다 — insert·update·delete 가 없다", () => {
     assert.ok(!/db\.insert|db\.update|db\.delete|\.transaction\(/.test(queryCode));
+  });
+
+  test("🔴 적을 수 있는 건인가를 **서버가** 정해 내려보낸다", () => {
+    assert.match(queryFlat, /writeGate: resolveUsedPartsWriteGate\(\{/);
+    assert.match(queryFlat, /isShipmentLocked: caseProbe\[0\]\?\.isLocked \?\? true/);
+    assert.match(queryFlat, /isLegacyImportedCase,/);
   });
 });
 
@@ -118,13 +138,13 @@ describe("사용 부품 — 칸", () => {
   });
 
   test("반출 이력이 없고 줄도 없으면 「아직 적힌 것이 없습니다」", () => {
-    assert.match(sectionFlat, /\{!hasPartRequestHistory && !hasRows && \(/);
+    assert.match(sectionFlat, /\{!hasPartRequestHistory && !hasRows && !isEditing && \(/);
     assert.ok(sectionCode.includes("아직 적힌 것이 없습니다."));
   });
 
   test("줄이 있으면 품명·수량 표를 그린다", () => {
     assert.match(sectionFlat, /const hasRows = rows\.length > 0;/);
-    assert.match(sectionFlat, /\{hasRows && \(/);
+    assert.match(sectionFlat, /\{hasRows && !isEditing && \(/);
     assert.match(sectionFlat, /<th[^>]*>품명<\/th>/);
     assert.match(sectionFlat, /<th[^>]*>수량<\/th>/);
     assert.match(sectionFlat, /\{rows\.map\(\(row\) => \(/);
@@ -136,24 +156,121 @@ describe("사용 부품 — 칸", () => {
     assert.ok(!/\.sort\(|\.reverse\(/.test(sectionCode));
   });
 
-  test("🔴 이번 조각에는 쓰기 길이 없다 — 입력 칸·단추·폼이 하나도 없다", () => {
-    for (const tag of ["<input", "<button", "<form", "<textarea", "<select"]) {
-      assert.ok(!sectionCode.includes(tag), `${tag} 는 다음 조각(B-2)이다`);
+  test("🔴 적을 수 있는지는 서버가 준 writeGate 하나로 정한다 — 화면이 다시 따지지 않는다", () => {
+    assert.match(sectionFlat, /const canEdit = writeGate\.ok;/);
+    assert.match(sectionFlat, /\{canEdit && !isEditing && \(/);
+    assert.match(sectionFlat, /\{canEdit && isEditing && \(/);
+    assert.ok(
+      !/hasPartRequestHistory \?|!hasPartRequestHistory &&\s*<|isLocked|resolveUsedPartsWriteGate/.test(sectionFlat),
+      "잠그는 판단을 화면이 다시 하지 않는다"
+    );
+  });
+
+  test("막힌 까닭을 말해 준다 — 출하 잠금 안내", () => {
+    assert.match(sectionFlat, /!writeGate\.ok && writeGate\.code === "CASE_LOCKED"/);
+    assert.match(sectionFlat, /\{writeGate\.message\}/);
+  });
+
+  test("편집 폼은 적을 수 있는 건에만 그려진다 — 폼이 스스로 판정하지 않는다", () => {
+    assert.match(sectionFlat, /<UsedPartsEditForm repairCaseId=\{repairCaseId\} version=\{version\}/);
+    assert.ok(
+      !/writeGate|hasPartRequestHistory|isLocked/.test(formCode),
+      "폼에는 인가 판단이 하나도 없다"
+    );
+  });
+});
+
+describe("사용 부품 — 적고 저장하기", () => {
+  test("서버 액션 하나만 부른다", () => {
+    assert.match(
+      formFlat,
+      /import \{ saveRepairCaseUsedPartsAction \} from "@\/lib\/server\/actions\/repair-case-used-parts";/
+    );
+    assert.equal(formCode.match(/Action\(\{/g)?.length, 1, "저장 길은 하나뿐이다");
+  });
+
+  test("🔴 줄을 더하고 지울 수 있다 — 마지막 줄까지", () => {
+    assert.match(formFlat, /줄 추가/);
+    assert.match(formFlat, /function removeLine\(key: string\) \{ setLines\(\(prev\) => prev\.filter/);
+    // 「한 줄은 남겨야 한다」는 제약이 없다 — 빈 목록 저장이 전부 걷어내는 길이다.
+    assert.ok(!/lines\.length > 1 &&|lines\.length === 1 \?/.test(formFlat));
+  });
+
+  test("🔴 부품 고르개를 붙였다 — 견적서가 쓰는 그 조각을 재사용한다", () => {
+    assert.match(
+      formFlat,
+      /import \{ QuotePartSuggestionList, filterPartOptions, partPickPatch, \} from "@\/components\/quotes\/quote-part-picker";/
+    );
+    assert.match(formFlat, /<QuotePartSuggestionList options=\{filterPartOptions\(partOptions, line\.partNameText\)\}/);
+    assert.match(formFlat, /onPick=\{\(option\) => \{ updateLine\(line\.key, partPickPatch\(option\)\);/);
+  });
+
+  test("🔴 고르면 붙고, 글자를 고치면 풀린다 — 마스터에 없는 부품은 손으로 적는다", () => {
+    assert.match(
+      formFlat,
+      /updateLine\(line\.key, \{ partNameText: e\.target\.value, partId: null \}\)/
+    );
+    assert.match(formFlat, /placeholder="부품 품명 \(마스터에 없으면 그냥 적으세요\)"/);
+  });
+
+  test("🔴 화면이 줄 번호를 보내지 않는다 — line_no 는 서버가 매긴다", () => {
+    assert.match(
+      formFlat,
+      /lines: lines\.map\(\(line\) => \(\{ partId: line\.partId, partNameText: line\.partNameText, quantity: Number\(line\.quantity\), \}\)\)/
+    );
+    assert.ok(!/lineNo/.test(formCode), "폼에 줄 번호가 없다");
+  });
+
+  test("동시 편집 — CONFLICT 면 폼을 얼리고 다시 불러오게 한다", () => {
+    assert.match(formFlat, /expectedVersion: version,/);
+    assert.match(formFlat, /if \(result\.code === "CONFLICT"\) \{ setIsConflict\(true\);/);
+    assert.match(formFlat, /const disabled = isSubmitting \|\| isConflict;/);
+    assert.match(formFlat, /<EditSectionActions/);
+  });
+
+  test("저장 뒤 목록으로 튀지 않는다 — 상세 화면에 머문다", () => {
+    assert.match(formFlat, /showSavePopup\(\{ message: "사용 부품을 저장했습니다\.", redirectTo: null \}\)/);
+    assert.match(formFlat, /router\.refresh\(\);/);
+  });
+
+  test("UUID 는 공용 함수로 만든다 — 평문 HTTP 에서도 돌아야 한다", () => {
+    assert.match(formFlat, /import \{ generateClientUuid \} from "@\/lib\/client-uuid";/);
+    assert.ok(!/crypto\.randomUUID/.test(formCode));
+  });
+});
+
+describe("사용 부품 — 서버 액션의 관문", () => {
+  test("update-repair-case 와 같은 앞부분을 같은 차례로 본다", () => {
+    assert.match(actionFlat, /^"use server";/);
+    const order = [
+      "getRepairCaseWriteSource()",
+      "getRepairCaseReadSource()",
+      "await readSession()",
+      "await resolveActingUserForSession(session)",
+      'actingUser.approvalStatus !== "APPROVED"',
+      "isValidRepairCaseId(input.repairCaseId)",
+      "isValidExpectedVersion(input.expectedVersion)",
+      "validateUsedPartLines(input.lines)",
+      "saveRepairCaseUsedParts(",
+    ];
+    let cursor = -1;
+    for (const needle of order) {
+      const next = actionFlat.indexOf(needle, cursor + 1);
+      assert.ok(next > cursor, `${needle} 가 차례에 맞게 나와야 한다`);
+      cursor = next;
     }
   });
 
-  test("🔴 서버 액션·mutation 을 부르지 않는다", () => {
-    assert.ok(!/@\/lib\/server\/actions/.test(sectionCode), "서버 액션을 부르지 않는다");
-    assert.ok(!/Action\(/.test(sectionCode));
-    assert.ok(!/useState|useTransition|useRouter|showSavePopup/.test(sectionCode), "상태도 팝업도 없다");
+  test("날 DB 오류를 브라우저로 보내지 않는다", () => {
+    assert.match(actionFlat, /code: "DATABASE_UNAVAILABLE"/);
+    assert.match(actionFlat, /console\.error\("saveRepairCaseUsedPartsAction: unexpected DB error"/);
   });
 
-  test("서버 전용 조회 모듈에서는 타입만 가져온다", () => {
-    assert.match(
-      sectionFlat,
-      /import type \{ RepairCaseUsedPartRow \} from "@\/lib\/db\/queries\/repair-case-used-parts";/
+  test("🔴 두 규칙은 액션이 아니라 mutation 이 본다 — 트랜잭션 안에서", () => {
+    assert.ok(
+      !/hasLivePartRequest|isImportedFromKyosanIntake|resolveUsedPartsWriteGate/.test(actionCode),
+      "액션이 판정을 미리 흉내 내지 않는다"
     );
-    assert.ok(!/^import \{/m.test(sectionCode.replace(/^import type .*$/gm, "")));
   });
 });
 
@@ -163,6 +280,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
       pageFlat,
       /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id\) : null/
     );
+    assert.match(pageFlat, /resolved\.source === "DATABASE" \? getPartPickerList\(\) : \[\]/);
   });
 
   test("🔴 기존 Promise.all 에 태웠다 — 왕복이 늘지 않았다", () => {
@@ -176,10 +294,12 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
       bundle.includes("getRepairCaseUsedPartsView(resolved.id)"),
       "조회가 기존 Promise.all 묶음 안에 있어야 한다"
     );
+    assert.ok(bundle.includes("getPartPickerList()"), "부품 마스터도 같은 묶음 안에 있어야 한다");
 
     // 묶음 밖에서 따로 기다리면 왕복이 하나 늘어난다.
-    assert.ok(!/await getRepairCaseUsedPartsView/.test(pageCode));
+    assert.ok(!/await getRepairCaseUsedPartsView|await getPartPickerList/.test(pageCode));
     assert.equal(pageCode.match(/getRepairCaseUsedPartsView\(/g)?.length, 1);
+    assert.equal(pageCode.match(/getPartPickerList\(/g)?.length, 1);
   });
 
   test("결과를 상세 화면으로 넘긴다", () => {
@@ -188,11 +308,14 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
       /import \{ getRepairCaseUsedPartsView \} from "@\/lib\/db\/queries\/repair-case-used-parts";/
     );
     assert.match(pageFlat, /usedParts=\{usedParts\}/);
+    assert.match(pageFlat, /usedPartOptions=\{usedPartOptions\}/);
   });
 
   test("칸은 조회 결과가 있을 때만 그려진다 — PartRequestSection 과 같은 모양", () => {
-    assert.match(viewFlat, /\{usedParts && \( <UsedPartsSection rows=\{usedParts\.rows\}/);
-    assert.match(viewFlat, /hasPartRequestHistory=\{usedParts\.hasPartRequestHistory\} \/> \)\}/);
+    assert.match(viewFlat, /\{usedParts && \( <UsedPartsSection repairCaseId=\{effective\.id\}/);
+    assert.match(viewFlat, /version=\{effective\.version\}/);
+    assert.match(viewFlat, /writeGate=\{usedParts\.writeGate\}/);
+    assert.match(viewFlat, /partOptions=\{usedPartOptions\}/);
   });
 
   test("기존 부품 요청 칸은 그대로 남아 있다", () => {

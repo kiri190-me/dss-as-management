@@ -237,3 +237,5 @@ src/lib/server/services/quote-workbook-cable.test.ts
 src/lib/domain/local/product-history-match.test.ts
 src/lib/domain/product-model-customer-merge.test.ts
 src/lib/domain/kyosan-intake-import/symptom-translation.test.ts
+src/lib/auth/repair-case-used-parts-authorization.test.ts
+src/lib/validation/repair-case-used-parts-input.test.ts

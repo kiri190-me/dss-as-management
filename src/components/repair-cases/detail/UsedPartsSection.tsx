@@ -1,4 +1,10 @@
+"use client";
+
+import { useState } from "react";
+import type { PartPickerRow } from "@/lib/db/queries/inventory";
 import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-parts";
+import type { UsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
+import UsedPartsEditForm from "@/components/repair-cases/detail/edit/UsedPartsEditForm";
 
 /**
  * ============================================================================
@@ -7,40 +13,64 @@ import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-pa
  * 왜 있는 칸인지는 schema/repair-case-used-parts.ts 와
  * queries/repair-case-used-parts.ts 머리말에 있다. 화면 쪽 규칙만 여기 적는다.
  *
- * ── 🔴 적을 자리는 한 건에 하나뿐이다 (사용자 확정 규칙) ────────────────
- * 그 건에 살아 있는 부품 요청(반출) 줄이 있으면 **적을 자리를 그리지 않고**
- * 안내 한 줄만 낸다. 요청서와 손글씨가 같은 건에 함께 있으면 통계가 같은 부품을
- * 두 번 세기 때문이다.
+ * ── 🔴 적을 수 있는 건인지는 **화면이 정하지 않는다** (B-2) ─────────────────
+ * 서버가 내린 판정(`writeGate`)만 보고 입력 칸을 그릴지 정한다. 화면이 스스로
+ * 「반출 이력이 있나」 「잠겼나」를 따지면 판정이 두 벌이 되고, 그러면 화면이 여는
+ * 조건과 서버가 받아 주는 조건이 어긋난다. 그 판정은
+ * auth/repair-case-used-parts-authorization.ts 한 곳에 있고, 저장을 받는
+ * mutation 도 같은 함수를 부른다 — 주소로 직접 부른 요청도 같은 거절을 받는다.
  *
- * ── 🔴 이 조각에는 적는 길이 없다 ───────────────────────────────────────
- * 읽기까지다. 입력 칸 · 단추 · 서버 액션이 하나도 없고, 그래서 "use client" 도
- * 필요 없다(부모 RepairCaseDetailView 가 이미 클라이언트 경계 안이라 거기 얹혀
- * 그려진다). 적고 저장하는 길은 다음 조각(B-2)이 낸다.
+ * 그래서 이 파일에는 `hasPartRequestHistory` 로 **잠그는** 줄이 없다. 그 값은
+ * 아래 안내 문구를 고르는 데만 쓴다(무엇이 막았는지 사람에게 말해 주려고).
  *
  * ── 이력과 손글씨가 겹친 건 ─────────────────────────────────────────────
  * 요청서를 **나중에** 내면 이미 적어 둔 줄이 남을 수 있다(DB 가 막지 않는다 —
  * 스키마 머리말). 그때 줄을 감추면 두 번 세어질 자료가 화면에서 사라져 아무도
  * 고칠 수 없게 되므로, 안내와 함께 **그대로 보여 주고 확인을 청한다.** 적을
- * 자리는 여전히 그리지 않는다.
+ * 자리는 여전히 그리지 않는다(서버가 이미 거절하는 건이다).
  * ============================================================================
  */
 export default function UsedPartsSection({
+  repairCaseId,
+  version,
   rows,
   hasPartRequestHistory,
+  writeGate,
+  partOptions,
 }: {
+  repairCaseId: string;
+  /** 접수 건의 version — 저장할 때 그대로 되돌려 보내 동시 편집을 막는다. */
+  version: number;
   /** `line_no` 차례대로 온다 — 여기서 다시 정렬하지 않는다(정렬은 조회 몫). */
   rows: readonly RepairCaseUsedPartRow[];
   hasPartRequestHistory: boolean;
+  /** 🔴 서버가 내린 판정. 화면은 이것만 본다(위 머리말). */
+  writeGate: UsedPartsWriteGate;
+  /** 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다. 적을 수 없는 건에는 빈 목록이 온다. */
+  partOptions: readonly PartPickerRow[];
 }) {
+  const [isEditing, setIsEditing] = useState(false);
   const hasRows = rows.length > 0;
+  const canEdit = writeGate.ok;
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">사용 부품</h2>
-        {hasRows && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">{rows.length}건</span>
-        )}
+        <div className="flex items-center gap-3">
+          {hasRows && (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">{rows.length}건</span>
+          )}
+          {canEdit && !isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            >
+              수정
+            </button>
+          )}
+        </div>
       </div>
 
       {hasPartRequestHistory && (
@@ -57,11 +87,17 @@ export default function UsedPartsSection({
         </p>
       )}
 
-      {!hasPartRequestHistory && !hasRows && (
+      {/* 출하 잠금으로 막힌 건 — 왜 「수정」이 없는지 말해 준다. 반출 이력 쪽은
+          위에서 이미 안내했으므로 겹쳐 적지 않는다. */}
+      {!writeGate.ok && writeGate.code === "CASE_LOCKED" && (
+        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">{writeGate.message}</p>
+      )}
+
+      {!hasPartRequestHistory && !hasRows && !isEditing && (
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">아직 적힌 것이 없습니다.</p>
       )}
 
-      {hasRows && (
+      {hasRows && !isEditing && (
         <div className="mt-3 overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
           <table className="w-full text-xs">
             <thead className="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -82,6 +118,16 @@ export default function UsedPartsSection({
             </tbody>
           </table>
         </div>
+      )}
+
+      {canEdit && isEditing && (
+        <UsedPartsEditForm
+          repairCaseId={repairCaseId}
+          version={version}
+          rows={rows}
+          partOptions={partOptions}
+          onDone={() => setIsEditing(false)}
+        />
       )}
     </section>
   );

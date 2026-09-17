@@ -1,7 +1,12 @@
 import "server-only";
-import { and, asc, eq, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, notInArray, sql, type SQL } from "drizzle-orm";
 import { db } from "../client";
-import { inventoryPartRequests, repairCaseUsedParts } from "../schema";
+import { inventoryPartRequests, repairCases, repairCaseUsedParts, statusChangeHistories } from "../schema";
+import { KYOSAN_INTAKE_LIST_SOURCE } from "./kyosan-intake-import";
+import {
+  resolveUsedPartsWriteGate,
+  type UsedPartsWriteGate,
+} from "@/lib/auth/repair-case-used-parts-authorization";
 
 /**
  * ============================================================================
@@ -67,6 +72,14 @@ export type RepairCaseUsedPartsView = {
    * 그리지 않고 안내만 낸다. 위 머리말의 '한 건의 부품 출처를 둘로 쪼개지 않는다'.
    */
   hasPartRequestHistory: boolean;
+  /**
+   * 🔴 **여기에 적을 수 있는 건인가 — 서버가 내린 판정이다** (B-2).
+   *
+   * 화면은 이 값만 보고 입력 칸을 그릴지 정한다. 화면이 스스로 판정하면 판정이
+   * 두 벌이 되고, 그러면 화면이 여는 조건과 서버가 받아 주는 조건이 어긋난다 —
+   * 저장을 받는 mutation 도 **같은 함수**(resolveUsedPartsWriteGate)를 부른다.
+   */
+  writeGate: UsedPartsWriteGate;
 };
 
 /**
@@ -79,15 +92,79 @@ export type RepairCaseUsedPartsView = {
 const UNCOUNTED_PART_REQUEST_STATUSES = ["REJECTED", "CANCELLED"] as const;
 
 /**
- * 「사용 부품」 칸이 필요로 하는 것 전부를 한 번에.
+ * 🔴 **반출 이력 판정의 유일한 정의.** 조회(이 파일)와 저장
+ * (mutations/repair-case-used-parts.ts)이 이 조건 하나를 함께 쓴다 — 두 벌로
+ * 적으면 한쪽만 고쳐지는 날이 오고, 그날부터 화면이 여는 건과 서버가 받아 주는
+ * 건이 달라진다.
+ */
+export function livePartRequestCondition(repairCaseId: string): SQL | undefined {
+  return and(
+    eq(inventoryPartRequests.repairCaseId, repairCaseId),
+    notInArray(inventoryPartRequests.status, [...UNCOUNTED_PART_REQUEST_STATUSES])
+  );
+}
+
+/**
+ * 🔴 **「과거 인수품 가져오기」로 들어온 건인가** — 판정의 유일한 정의.
  *
- * 두 질의를 **나란히**(Promise.all) 쏜다 — 둘 다 이 건 하나만 보는 작은 인덱스
+ * `status_change_histories` 에 그 건의 줄이 있고, action_type 이
+ * LEGACY_IMPORT_STATE_SET 이며 metadata->>'source' 가 KYOSAN_INTAKE_LIST 인 것.
+ * 그 글자는 queries/kyosan-intake-import.ts 가 이미 상수로 갖고 있어 가져다 쓴다
+ * (같은 파일 listImportedCasesNeedingBillingReview 가 쓰는 조건과 같은 모양이다).
+ */
+export function importedFromKyosanIntakeCondition(repairCaseId: string): SQL | undefined {
+  return and(
+    eq(statusChangeHistories.repairCaseId, repairCaseId),
+    eq(statusChangeHistories.actionType, "LEGACY_IMPORT_STATE_SET"),
+    sql`${statusChangeHistories.metadata} ->> 'source' = ${KYOSAN_INTAKE_LIST_SOURCE}`
+  );
+}
+
+/**
+ * `db` 도 트랜잭션도 받는다 — 저장 쪽은 자기 트랜잭션 안에서 같은 판정을 다시
+ * 해야 하고(화면이 열어 준 뒤 사이에 요청서가 생길 수 있다), 그때도 **같은
+ * 함수**여야 한다. PgTransaction 이 PgDatabase 를 상속하므로 둘 다 들어온다.
+ */
+type SelectExecutor = Pick<typeof db, "select">;
+
+/** 있나 없나만 본다 — 개수를 세지 않는다. limit(1) 이면 인덱스에서 한 줄 보고 멈춘다. */
+export async function hasLivePartRequest(
+  executor: SelectExecutor,
+  repairCaseId: string
+): Promise<boolean> {
+  const probe = await executor
+    .select({ present: sql<number>`1` })
+    .from(inventoryPartRequests)
+    .where(livePartRequestCondition(repairCaseId))
+    .limit(1);
+  return probe.length > 0;
+}
+
+/** 같은 방식 — 가져오기 흔적이 한 줄이라도 있으면 그만이다. */
+export async function isImportedFromKyosanIntake(
+  executor: SelectExecutor,
+  repairCaseId: string
+): Promise<boolean> {
+  const probe = await executor
+    .select({ present: sql<number>`1` })
+    .from(statusChangeHistories)
+    .where(importedFromKyosanIntakeCondition(repairCaseId))
+    .limit(1);
+  return probe.length > 0;
+}
+
+/**
+ * 「사용 부품」 칸이 필요로 하는 것 전부를 한 번에 — 적힌 줄과, **여기에 적을 수
+ * 있는 건인가**(B-2 의 두 규칙).
+ *
+ * 네 질의를 **나란히**(Promise.all) 쏜다 — 전부 이 건 하나만 보는 작은 인덱스
  * 조회다(`repair_case_used_parts_repair_case_id_line_no_unique` 의 선행 칼럼,
- * `inventory_part_requests_repair_case_id_idx`). 부르는 쪽도 이 함수를 자기
+ * `inventory_part_requests_repair_case_id_idx`, repair_cases 기본키,
+ * `status_change_histories` 의 건별 인덱스). 부르는 쪽도 이 함수를 자기
  * Promise.all 에 태우므로 화면이 기다리는 시간은 늘지 않는다.
  */
 export async function getRepairCaseUsedPartsView(repairCaseId: string): Promise<RepairCaseUsedPartsView> {
-  const [rows, requestProbe] = await Promise.all([
+  const [rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase] = await Promise.all([
     db
       .select({
         id: repairCaseUsedParts.id,
@@ -99,19 +176,25 @@ export async function getRepairCaseUsedPartsView(repairCaseId: string): Promise<
       .from(repairCaseUsedParts)
       .where(eq(repairCaseUsedParts.repairCaseId, repairCaseId))
       .orderBy(asc(repairCaseUsedParts.lineNo)),
-    // 있나 없나만 본다 — 개수를 세지 않는다. limit(1) 이면 인덱스에서 한 줄
-    // 보고 멈춘다.
+    hasLivePartRequest(db, repairCaseId),
     db
-      .select({ present: sql<number>`1` })
-      .from(inventoryPartRequests)
-      .where(
-        and(
-          eq(inventoryPartRequests.repairCaseId, repairCaseId),
-          notInArray(inventoryPartRequests.status, [...UNCOUNTED_PART_REQUEST_STATUSES])
-        )
-      )
+      .select({ isLocked: repairCases.isLocked })
+      .from(repairCases)
+      .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)))
       .limit(1),
+    isImportedFromKyosanIntake(db, repairCaseId),
   ]);
 
-  return { rows, hasPartRequestHistory: requestProbe.length > 0 };
+  return {
+    rows,
+    hasPartRequestHistory,
+    writeGate: resolveUsedPartsWriteGate({
+      hasPartRequestHistory,
+      // 건을 못 찾았으면(휴지통에 들어갔거나 사라졌다) **잠긴 것으로 본다** —
+      // 그래야 화면이 적을 자리를 열지 않는다. 저장 쪽은 같은 경우를 NOT_FOUND 로
+      // 돌려준다.
+      isShipmentLocked: caseProbe[0]?.isLocked ?? true,
+      isLegacyImportedCase,
+    }),
+  };
 }

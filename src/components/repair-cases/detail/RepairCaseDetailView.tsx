@@ -17,7 +17,7 @@ import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-reference
 import { editableFieldsForRoleInSection, isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import PartRequestSection from "@/components/inventory/PartRequestSection";
-import type { PartListRow } from "@/lib/db/queries/inventory";
+import type { PartListRow, PartPickerRow } from "@/lib/db/queries/inventory";
 import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
@@ -59,6 +59,7 @@ export default function RepairCaseDetailView({
   derivedServiceSummary,
   domesticOrderDueDates,
   usedParts,
+  usedPartOptions,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -95,11 +96,17 @@ export default function RepairCaseDetailView({
    */
   domesticOrderDueDates: readonly string[];
   /**
-   * 「사용 부품」 칸의 재료 — 손으로 적어 둔 줄들과 "이 건에 적을 수 있는가"
-   * (= 살아 있는 부품 요청 줄이 없는가). DATABASE 소스 건에만 있고 나머지는
-   * null 이라 칸 자체가 그려지지 않는다, see [id]/page.tsx.
+   * 「사용 부품」 칸의 재료 — 손으로 적어 둔 줄들과, **서버가 내린** "이 건에 적을
+   * 수 있는가"(writeGate). DATABASE 소스 건에만 있고 나머지는 null 이라 칸 자체가
+   * 그려지지 않는다, see [id]/page.tsx.
    */
   usedParts: RepairCaseUsedPartsView | null;
+  /**
+   * 「사용 부품」 품명 칸에서 찾아 고를 부품 마스터(B-2). 재고 · 소유구분 · 내부
+   * 비고가 없는 가벼운 조회다(queries/inventory.ts 의 getPartPickerList) — 거르기는
+   * 브라우저에서 한다. DATABASE 소스가 아니면 빈 배열이다.
+   */
+  usedPartOptions: readonly PartPickerRow[];
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -176,7 +183,14 @@ export default function RepairCaseDetailView({
       />
       <WorkflowProgress workflowType={effective.workflowType} currentWorkflowStepKey={effective.effectiveWorkflowStepKey} />
       {usedParts && (
-        <UsedPartsSection rows={usedParts.rows} hasPartRequestHistory={usedParts.hasPartRequestHistory} />
+        <UsedPartsSection
+          repairCaseId={effective.id}
+          version={effective.version}
+          rows={usedParts.rows}
+          hasPartRequestHistory={usedParts.hasPartRequestHistory}
+          writeGate={usedParts.writeGate}
+          partOptions={usedPartOptions}
+        />
       )}
       {partRequestData && partRequestData.caseContext && (
         <PartRequestSection

@@ -10,7 +10,12 @@ import { findProductHistoryMatches } from "@/lib/domain/local/product-history-ma
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { listRepairCasesByProductId } from "@/lib/db/queries/repair-cases";
-import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability } from "@/lib/db/queries/inventory";
+import {
+  getPartList,
+  getPartOwnerAvailability,
+  getPartPickerList,
+  groupPartOwnerAvailability,
+} from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
 import {
   getDerivedServiceSummariesForCases,
@@ -143,14 +148,22 @@ export default async function RepairCaseDetailPage({
   // 재료(살아 있는 부품 요청 줄이 있는가). 위 둘과 같은 이유로 DATABASE 소스에만
   // 있고(repair_case_used_parts 에 mock 대응물이 없다), **같은 Promise.all 에
   // 태워 왕복을 늘리지 않는다** — 이 건 하나만 보는 작은 인덱스 조회다.
-  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts] = await Promise.all([
-    resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
-    resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
-    relatedDatabaseCaseIds.length > 0
-      ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
-      : new Map<string, DerivedServiceSummary>(),
-    resolved.source === "DATABASE" ? getRepairCaseUsedPartsView(resolved.id) : null,
-  ]);
+  //
+  // 그 칸의 품명 입력에서 찾아 고를 부품 마스터(B-2)도 같은 묶음에 태운다 — 재고 ·
+  // 소유구분 · 내부 비고가 없는 가벼운 조회이고(getPartPickerList 머리말), 백 줄
+  // 안쪽이라 통째로 내려보내고 브라우저에서 거른다. 적을 수 없는 건인지는 화면이
+  // 아니라 위 writeGate 가 정하므로 여기서 미리 나누지 않는다 — 나누면 판정이
+  // 두 벌이 된다.
+  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts, usedPartOptions] =
+    await Promise.all([
+      resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
+      resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
+      relatedDatabaseCaseIds.length > 0
+        ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
+        : new Map<string, DerivedServiceSummary>(),
+      resolved.source === "DATABASE" ? getRepairCaseUsedPartsView(resolved.id) : null,
+      resolved.source === "DATABASE" ? getPartPickerList() : [],
+    ]);
 
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
   // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.
@@ -170,6 +183,7 @@ export default async function RepairCaseDetailPage({
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
       usedParts={usedParts}
+      usedPartOptions={usedPartOptions}
     />
   );
 }
