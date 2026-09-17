@@ -145,7 +145,13 @@ export function parseQuoteExcelFields(value: unknown): QuoteExcelReadFields | nu
   return fields;
 }
 
-const SHEET_FORMS = ["GENERATOR_DOMESTIC", "GENERATOR_OH", "MATCHER"] as const;
+const SHEET_FORMS = [
+  "GENERATOR_DOMESTIC",
+  "GENERATOR_OH",
+  "MATCHER_DOMESTIC",
+  "MATCHER_OH",
+  "MATCHER",
+] as const satisfies readonly HandwrittenQuoteSheet[];
 
 function sheetFormOrNull(value: unknown): HandwrittenQuoteSheet | null {
   return SHEET_FORMS.find((form) => form === value) ?? null;

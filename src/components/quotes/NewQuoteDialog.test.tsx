@@ -137,7 +137,10 @@ function sheetInfo(
 
 const DOMESTIC_SHEET = sheetInfo(0, "내자견적서", "GENERATOR_DOMESTIC");
 const OH_SHEET = sheetInfo(2, "OH견적서", "GENERATOR_OH");
+/** 🔴 「OH작업」 이름표를 읽지 못해 갈래가 없는 매쳐 시트(2026-09-17). */
 const MATCHER_SHEET = sheetInfo(1, "견적서", "MATCHER", false);
+/** 그 이름표로 OH 로 갈린 매쳐 시트 — 탭 이름은 똑같이 「견적서」다. */
+const MATCHER_OH_SHEET = sheetInfo(1, "견적서", "MATCHER_OH");
 
 const readState = (sheets: QuoteExcelSheetInfo[]): NewQuoteExcelReadState => ({ status: "read", sheets });
 
@@ -359,7 +362,14 @@ describe("🔴 무엇이 들어 있는지 알린다 — 알아본 시트는 늘 
     assert.ok(!html.includes(BOTH_QUOTE_SHEETS_QUESTION), html);
   });
 
-  test("매쳐 시트는 종류가 정해지지 않는다 — 있는 그대로 알리고 사람이 고른다", () => {
+  test("🔴 매쳐 OH 파일 하나 — 탭 이름이 「견적서」여도 OH 로 말하고 그 탭을 짚는다", () => {
+    const html = notice(readState([MATCHER_OH_SHEET]), "OVERHAUL");
+    assert.ok(html.includes("OH 견적서만 들어 있습니다"), html);
+    assert.ok(html.includes("바꿀 수 있습니다"), html);
+    assert.ok(html.includes("「견적서」 시트로 폼을 채웁니다"), html);
+  });
+
+  test("갈래를 못 가른 매쳐 시트는 종류가 정해지지 않는다 — 있는 그대로 알리고 사람이 고른다", () => {
     const html = notice(readState([MATCHER_SHEET]));
     assert.ok(html.includes(MATCHER_ONLY_HEADLINE), html);
     assert.ok(html.includes("견적서"), html);
@@ -385,6 +395,18 @@ describe("🔴 종류 라디오는 잠기지 않는다 — 맞춰 주기만 한�
       kind: "OVERHAUL",
       excelFile: { name: "견적.xlsx" },
       excel: readState([OH_SHEET]),
+    });
+    for (const radio of radios) assert.ok(!radio.props.disabled, `${radio.props.value} 라디오가 잠겼다`);
+    fire(radios.find((radio) => radio.props.value === "DOMESTIC")?.props.onChange);
+    assert.deepEqual(calls.kinds, ["DOMESTIC"]);
+  });
+
+  test("🔴 매쳐 OH 로 맞춰 준 뒤에도 내자로 바꿀 수 있다", () => {
+    const { radios, calls } = renderView({
+      excelOnly: true,
+      kind: "OVERHAUL",
+      excelFile: { name: "매쳐 견적.xlsx" },
+      excel: readState([MATCHER_OH_SHEET]),
     });
     for (const radio of radios) assert.ok(!radio.props.disabled, `${radio.props.value} 라디오가 잠겼다`);
     fire(radios.find((radio) => radio.props.value === "DOMESTIC")?.props.onChange);

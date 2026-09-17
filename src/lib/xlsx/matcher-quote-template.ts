@@ -116,6 +116,25 @@ const BLOCK_LABELS = {
   INVESTIGATION: "조사작업",
   REPAIR: "수리작업",
   POWER_TEST: "통전작업",
+  /**
+   * 🔴 **머리글이 아니다 — `2) 수리작업` 아래의 `-` 항목 줄이다.** 빈 OH 양식에만
+   * 인쇄돼 있고 빈 내자 양식에는 없다(2026-09-17 양식 둘의 C · D열 실측):
+   *
+   *   빈 OH 양식                    빈 내자 양식
+   *   r46 C=∅   D=수리작업           r41 C=∅   D=수리작업
+   *   r47 C=`-` D=바리콘 교환         r42 C=`-` D=고정 콘덴서 교환
+   *   r48 C=`-` D=고정 콘덴서 추가     r43 C=`-` D=VDC 개조작업
+   *   r49 C=`-` D=OH작업       ←     r44 C=∅   D=통전작업
+   *   r50 C=∅   D=통전작업
+   *
+   * 🔴 그래서 **채우개가 덮어쓴다** — `fillScopeSection` 이 수리작업 묶음의 `-` 줄
+   * 셋을 `workScope.REPAIR` 로 통째로 갈아 끼우므로, 앱이 채운 매쳐 OH 견적서에는
+   * 이 글자가 남지 않는다. 남는 것은 **사람이 손으로 쓴 견적서**뿐이다.
+   *
+   * 채우개가 찾아 쓰는 글자는 아니지만 **양식에 인쇄된 D열 글자라 여기 한 곳에
+   * 적는다**(아래 MATCHER_OVERHAUL_WORK_LABEL 머리말).
+   */
+  overhaulWork: "OH작업",
 } as const;
 
 /**
@@ -133,6 +152,30 @@ export const MATCHER_WORK_SCOPE_LABELS: WorkScopeLabels = {
   REPAIR: { label: BLOCK_LABELS.REPAIR, match: "exact" },
   POWER_TEST: { label: BLOCK_LABELS.POWER_TEST, match: "exact" },
 };
+
+/**
+ * 🔴 **매쳐 OH 양식에만 인쇄돼 있는 수리작업 항목 줄.** 내자 양식에는 이 줄이 없다 —
+ * 양식 둘을 직접 열어 확인했다(2026-09-17, 위 BLOCK_LABELS.overhaulWork 의 덤프).
+ *
+ * 수기 견적서 읽개(handwritten-quote-reader.ts)가 **매쳐 내자와 OH 를 가르는 유일한
+ * 근거**로 쓴다 — 두 양식은 시트 이름이 「견적서」로 같고 머리 칸 지도도 같아서,
+ * 시트 이름으로도 칸 자리로도 갈리지 않는다.
+ *
+ * 🔴 **어디까지 믿을 수 있나 — 제너레이터 O/H 의 OH_QUOTE_OVERHAUL_PARTS_LABEL 과는
+ * 성격이 다르다.** 그쪽은 양식에 박힌 **머리글**이라 그 양식인 한 반드시 남지만, 이쪽은
+ * `2) 수리작업` 아래의 **항목 줄**이라 지워질 수 있다:
+ *  · 사람이 손으로 쓴 매쳐 OH 견적서 — 빈 양식에 인쇄돼 있는 줄을 그대로 두므로 남는다
+ *    (사용자의 실제 견적서 둘에도 남아 있었다). **이 이름표가 듣는 자리는 여기다.**
+ *  · 🔴 앱 채우개로 만든 매쳐 OH 견적서 — `fillScopeSection` 이 수리작업 줄을 통째로
+ *    갈아 끼우므로 **남지 않는다.** 그 파일은 내자와 내용이 한 글자도 다르지 않아
+ *    어떤 읽개도 가를 수 없고, 읽개는 내자로 읽는다(2026-09-17 실측 — 읽개 시험의
+ *    `MATCHER:OVERHAUL` 왕복 항목에 그 까닭을 적어 두었다).
+ *  · 사람이 그 줄을 지우고 쓴 견적서도 마찬가지다 — 「없음」이 내자라는 보장은 아니다.
+ *
+ * 여기 한 곳에만 적는다 — 읽개가 글자를 스스로 적으면 양식이 바뀌는 날 한쪽만
+ * 고쳐진다(위 작업 내역 머리글과 같은 까닭).
+ */
+export const MATCHER_OVERHAUL_WORK_LABEL: string = BLOCK_LABELS.overhaulWork;
 
 /**
  * H열에서 찾는 합계 머리글. 양식은 `공 급 가`·`합     계` 처럼 글자 사이를

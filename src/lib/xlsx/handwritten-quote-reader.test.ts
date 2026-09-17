@@ -16,6 +16,7 @@ import {
 } from "./handwritten-quote-reader";
 import {
   fillMatcherQuoteWorkbook,
+  MATCHER_OVERHAUL_WORK_LABEL,
   MATCHER_QUOTE_CELLS,
   MATCHER_QUOTE_SHEET_NAME,
   MATCHER_WORK_SCOPE_LABELS,
@@ -228,9 +229,9 @@ function expectFailure(result: HandwrittenQuoteReadResult, code: HandwrittenQuot
   }
 }
 
-/** 매쳐 시트를 읽으면 늘 실리는 경고(견적서 종류를 비워 둔 까닭). */
+/** 🔴 **갈래 없는** 매쳐(이름표를 읽지 못한 시트)를 읽었을 때만 실리는 경고. */
 const MATCHER_KIND_WARNING =
-  "매쳐 양식은 내자 · OH 가 같은 시트 이름(견적서)이라 가를 수 없어 견적서 종류를 비워 둡니다 — 종류를 직접 골라 주세요.";
+  "매쳐 양식인데 작업 구역 이름표를 읽지 못해 내자 · OH 를 가를 수 없어 견적서 종류를 비워 둡니다 — 종류를 직접 골라 주세요.";
 
 const EMPTY_FIELDS: Omit<HandwrittenQuoteFields, "kind"> = {
   quoteNumber: null,
@@ -753,11 +754,12 @@ describe("무엇이 들어 있나 — 내자 · OH 가 한 문서에 든 견적�
       ],
     });
     const result = expectOk(readHandwrittenQuoteWorkbook(workbook));
-    assert.equal(result.sheet, "MATCHER");
+    // 매쳐 머리글로 알아본 시트라 「OH작업」이 없으면 내자다(2026-09-17).
+    assert.equal(result.sheet, "MATCHER_DOMESTIC");
     assert.equal(result.sheets[0].recognizedBy, "header");
     assert.equal(result.fields.subject, "매쳐 건명");
-    assert.equal(result.fields.kind, null);
-    assert.deepEqual(result.warnings, [MATCHER_KIND_WARNING]);
+    assert.equal(result.fields.kind, "DOMESTIC");
+    assert.deepEqual(result.warnings, []);
   });
 
   test("🔴 두 양식의 머리글이 한 시트에 같이 보이면 가르지 않는다 — 탭 이름으로 간다", () => {
@@ -796,6 +798,150 @@ describe("무엇이 들어 있나 — 내자 · OH 가 한 문서에 든 견적�
       ],
       ["조사작업", "수리작업", "통전작업"]
     );
+    // 🔴 매쳐 내자 · OH 를 가르는 이름표도 채우개(matcher-quote-template.ts)의 것이다.
+    assert.equal(MATCHER_OVERHAUL_WORK_LABEL, "OH작업");
+  });
+
+  test("🔴 읽개는 가르는 글자를 스스로 적지 않는다 — 채우개 상수만 쓴다", () => {
+    const source = readFileSync(new URL("./handwritten-quote-reader.ts", import.meta.url), "utf8");
+    const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ""); // 머리말 · 주석의 설명 글자는 뺀다
+    for (const label of [MATCHER_OVERHAUL_WORK_LABEL, OH_QUOTE_OVERHAUL_PARTS_LABEL, "수리작업"]) {
+      assert.equal(code.includes(`"${label}"`), false, `읽개가 「${label}」를 직접 적고 있다`);
+    }
+  });
+});
+
+// ───────────────────────────────── 매쳐 — 내자 · OH 가르기
+
+/**
+ * 🔴 사용자의 실제 매쳐 견적서는 저장소에 두지 않는다 — 고객 내용이다. 대신 **빈 양식 둘의
+ * 짜임**을 흉내 낸다. D열 이름표의 행 번호는 2026-09-17 에 양식 둘을 열어 읽은 자리 그대로다:
+ *
+ *              내자   OH
+ *   부품 비용    27    27
+ *   작업 비용    31    36
+ *   조사작업     34    39
+ *   수리작업     41    46
+ *   OH작업       —     49   ← 🔴 OH 양식에만 인쇄돼 있다
+ *   통전작업     44    50
+ *
+ * 🔴 **머리 칸(D10~D19)은 둘이 같은 자리다** — 줄 수가 달라 아래 구역만 어긋난다. 그래서
+ * 갈래가 갈려도 읽어 오는 값은 한 글자도 달라지면 안 된다(아래 셋째 시험).
+ */
+const MATCHER_FORM_HEADERS = {
+  DOMESTIC: [
+    [27, "부품 비용"],
+    [31, "작업 비용"],
+    [34, MATCHER_WORK_SCOPE_LABELS.INVESTIGATION.label],
+    [41, MATCHER_WORK_SCOPE_LABELS.REPAIR.label],
+    [44, MATCHER_WORK_SCOPE_LABELS.POWER_TEST.label],
+  ],
+  OVERHAUL: [
+    [27, "부품 비용"],
+    [36, "작업 비용"],
+    [39, MATCHER_WORK_SCOPE_LABELS.INVESTIGATION.label],
+    [46, MATCHER_WORK_SCOPE_LABELS.REPAIR.label],
+    [49, MATCHER_OVERHAUL_WORK_LABEL],
+    [50, MATCHER_WORK_SCOPE_LABELS.POWER_TEST.label],
+  ],
+} as const satisfies Record<string, readonly (readonly [number, string])[]>;
+
+/** 머리 칸은 둘이 똑같이 채우고, D열 이름표와 합계 줄만 양식대로 놓는다. */
+function matcherSheetCells(variant: keyof typeof MATCHER_FORM_HEADERS): string[] {
+  const cells = MATCHER_QUOTE_CELLS;
+  const laborRow = variant === "DOMESTIC" ? 31 : 36;
+  return [
+    num(cells.quoteDate, serialOf(2026, 9, 15), STYLE.date),
+    str(cells.quoteNumber, SAMPLE.quoteNumber),
+    str(cells.customerName, SAMPLE.customer),
+    str(cells.subject, SAMPLE.subject),
+    str(cells.validity, SAMPLE.validity),
+    str(cells.delivery, SAMPLE.delivery),
+    str(cells.payment, SAMPLE.payment),
+    ...formSheetCells({
+      headers: MATCHER_FORM_HEADERS[variant],
+      partRow: 28,
+      laborRow,
+      supplyRow: laborRow + 21,
+      summaryRef: cells.amount,
+      filled: true,
+    }),
+  ];
+}
+
+function readMatcher(cells: readonly string[]) {
+  return expectOk(
+    readHandwrittenQuoteWorkbook(workbookOf({ sheets: [{ name: MATCHER_QUOTE_SHEET_NAME, cells }] }))
+  );
+}
+
+/** 매쳐 양식에서 읽히는 값 — 갈래가 무엇이든 이 값이어야 한다(칸 지도가 한 벌이다). */
+const MATCHER_FIELDS: Omit<HandwrittenQuoteFields, "kind"> = {
+  quoteNumber: SAMPLE.quoteNumber,
+  quoteDate: "2026-09-15",
+  customerNameText: SAMPLE.customer,
+  subject: SAMPLE.subject,
+  // 매쳐 양식에는 `MODEL: …` 줄이 없다.
+  modelNameText: null,
+  lotNumberText: null,
+  serialNumberText: null,
+  validity: SAMPLE.validity,
+  delivery: SAMPLE.delivery,
+  payment: SAMPLE.payment,
+  manualSupplyAmount: "1500000",
+};
+
+describe("매쳐 — D열의 「OH작업」 이름표로 내자 · OH 를 가른다", () => {
+  test("🔴 「OH작업」이 있으면 OH 견적서다 — 종류가 OVERHAUL, 경고 없음", () => {
+    const result = readMatcher(matcherSheetCells("OVERHAUL"));
+    assert.equal(result.sheet, "MATCHER_OH");
+    assert.equal(result.fields.kind, "OVERHAUL");
+    assert.deepEqual(result.sheets, [
+      { index: 0, name: MATCHER_QUOTE_SHEET_NAME, form: "MATCHER_OH", recognizedBy: "header", filled: true },
+    ]);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  test("🔴 없으면 내자 견적서다 — 종류가 DOMESTIC, 경고 없음", () => {
+    const result = readMatcher(matcherSheetCells("DOMESTIC"));
+    assert.equal(result.sheet, "MATCHER_DOMESTIC");
+    assert.equal(result.fields.kind, "DOMESTIC");
+    assert.deepEqual(result.sheets, [
+      { index: 0, name: MATCHER_QUOTE_SHEET_NAME, form: "MATCHER_DOMESTIC", recognizedBy: "header", filled: true },
+    ]);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  test("🔴 갈래가 갈려도 읽어 오는 값은 같다 — 칸 지도를 잘못 고르지 않았다", () => {
+    const domestic = readMatcher(matcherSheetCells("DOMESTIC"));
+    const overhaul = readMatcher(matcherSheetCells("OVERHAUL"));
+    assert.deepEqual(domestic.fields, { kind: "DOMESTIC", ...MATCHER_FIELDS });
+    assert.deepEqual(overhaul.fields, { kind: "OVERHAUL", ...MATCHER_FIELDS });
+  });
+
+  test("🔴 갈래 없는 매쳐도 값은 그대로다 — 달라지는 것은 종류뿐이다", () => {
+    // 이름표를 하나도 못 읽어(탭 이름으로만 알아봐) 갈래가 없는 시트.
+    const bare = matcherSheetCells("DOMESTIC").filter(
+      (cell) => !/\sr="D(?:27|31|34|41|44)"/.test(cell)
+    );
+    const result = readMatcher(bare);
+    assert.equal(result.sheet, "MATCHER");
+    assert.equal(result.sheets[0].recognizedBy, "name");
+    assert.deepEqual(result.fields, { kind: null, ...MATCHER_FIELDS });
+    assert.deepEqual(result.warnings, [MATCHER_KIND_WARNING]);
+  });
+
+  test("🔴 탭 이름으로만 알아봤어도 「OH작업」이 보이면 OH 다 — 있다는 것 자체가 근거", () => {
+    // 사람이 수리작업 항목을 「수리 작업」(내자 양식의 머리글)으로 적어 두 양식이 함께 걸린다.
+    const result = readMatcher([
+      ...matcherSheetCells("OVERHAUL"),
+      str(`${LAYOUT_COLUMNS.marker}47`, "-"),
+      str("D47", QUOTE_WORK_SCOPE_LABELS.REPAIR.label),
+    ]);
+    assert.equal(result.sheets[0].recognizedBy, "name");
+    assert.equal(result.sheet, "MATCHER_OH");
+    assert.deepEqual(result.fields, { kind: "OVERHAUL", ...MATCHER_FIELDS });
+    assert.deepEqual(result.warnings, []);
   });
 });
 
@@ -1240,20 +1386,26 @@ const ROUND_TRIPS: readonly RoundTrip[] = [
     key: "MATCHER:DOMESTIC",
     envKey: "MATCHER_QUOTE_TEMPLATE_PATH",
     fill: (template) => fillMatcherQuoteWorkbook(template, matcherRoundTrip()),
-    sheet: "MATCHER",
+    // 🔴 매쳐 내자 양식에는 「OH작업」 이름표가 없다 — 그래서 내자로 갈린다(읽개 머리말).
+    sheet: "MATCHER_DOMESTIC",
     sheetName: MATCHER_QUOTE_SHEET_NAME,
-    // 🔴 매쳐는 내자 · OH 를 시트로 가를 수 없어 종류를 비워 둔다(읽개 머리말 · 경고).
-    kind: null,
+    kind: "DOMESTIC",
     hasProductLine: false,
   },
   {
     key: "MATCHER:OVERHAUL",
     envKey: "MATCHER_OH_QUOTE_TEMPLATE_PATH",
     fill: (template) => fillMatcherQuoteWorkbook(template, matcherRoundTrip()),
-    sheet: "MATCHER",
+    /**
+     * 🔴 **채워 놓고 나면 내자와 구별할 수 없다 — 그래서 여기만 내자로 읽힌다.**
+     * 빈 OH 양식의 「OH작업」(D49)은 `2) 수리작업` 아래의 **항목 줄**(C49 = `-`)이라,
+     * 채우개가 수리작업 목록을 넣을 때 그 줄을 덮어쓴다. 채운 매쳐 둘의 D열 이름표는
+     * 그러고 나면 한 글자도 다르지 않다(2026-09-17 실측) — 어떤 읽개도 가를 수 없다.
+     * 사람이 손으로 쓴 견적서에는 그 줄이 남아 있어 갈린다(아래 「빈 양식 파일 그대로」).
+     */
+    sheet: "MATCHER_DOMESTIC",
     sheetName: MATCHER_QUOTE_SHEET_NAME,
-    // 🔴 매쳐 OH 도 시트 이름이 「견적서」라 매쳐 내자와 가를 수 없다 — 종류는 null(읽개 머리말 · 경고).
-    kind: null,
+    kind: "DOMESTIC",
     hasProductLine: false,
   },
 ];
@@ -1312,8 +1464,8 @@ for (const roundTrip of ROUND_TRIPS) {
         result.warnings.some((warning) => warning.includes("저장된 계산값이 없어 공급가액을")),
         result.warnings.join("\n")
       );
-      // 매쳐 둘은 종류를 비워 둔 까닭이 경고로 실리고, 제너레이터 둘에는 그 경고가 없다.
-      assert.equal(result.warnings.includes(MATCHER_KIND_WARNING), roundTrip.sheet === "MATCHER");
+      // 🔴 양식 넷 다 종류가 갈린다 — 매쳐 둘도 이름표로 갈려 그 경고가 실리지 않는다.
+      assert.equal(result.warnings.includes(MATCHER_KIND_WARNING), false, result.warnings.join("\n"));
       // 날짜 · 모델 칸에 대한 경고가 없다 — 제자리에서 제 모양으로 읽혔다.
       assert.equal(result.warnings.some((warning) => warning.includes("발행일자")), false, result.warnings.join("\n"));
       assert.equal(result.warnings.some((warning) => warning.includes("모델 칸")), false, result.warnings.join("\n"));
@@ -1345,7 +1497,12 @@ for (const roundTrip of ROUND_TRIPS) {
  * 🔴 **빈 양식 그대로** 읽는다 — 「작성됨」으로 세면 안 되는 것들이 실제로 인쇄돼 있다
  * (내자 양식의 「1번 부품」 · 수량 1 · 모델 예시, O/H 양식의 O/H 부품 목록).
  */
-const BLANK_TEMPLATE_KEYS = ["QUOTE_TEMPLATE_PATH", "OH_QUOTE_TEMPLATE_PATH"] as const;
+const BLANK_TEMPLATE_KEYS = [
+  "QUOTE_TEMPLATE_PATH",
+  "OH_QUOTE_TEMPLATE_PATH",
+  "MATCHER_QUOTE_TEMPLATE_PATH",
+  "MATCHER_OH_QUOTE_TEMPLATE_PATH",
+] as const;
 const blankSkip = BLANK_TEMPLATE_KEYS.every((key) => process.env[key])
   ? false
   : `${BLANK_TEMPLATE_KEYS.join(" · ")} 가 설정되지 않았습니다`;
@@ -1372,5 +1529,27 @@ describe("빈 양식 파일 그대로 — 실제 양식", { skip: blankSkip }, (
     // 내자 시트는 비어 있다. ⚠️ 함께 든 O/H 시트는 양식에 작업비 240만이 인쇄돼 있어
     // 「작성됨」으로 나온다 — 읽개 머리말의 경고 그대로다.
     assert.equal(result.sheets[0].filled, false);
+  });
+
+  test("🔴 매쳐 양식 둘 — 시트 이름이 똑같은데도 「OH작업」 이름표로 갈린다", () => {
+    const domestic = read("MATCHER_QUOTE_TEMPLATE_PATH");
+    const overhaul = read("MATCHER_OH_QUOTE_TEMPLATE_PATH");
+    // 탭 이름은 둘 다 「견적서」다 — 이름으로는 가를 수 없다는 것이 이 시험의 전제다.
+    assert.deepEqual(
+      [domestic.sheetName, overhaul.sheetName],
+      [MATCHER_QUOTE_SHEET_NAME, MATCHER_QUOTE_SHEET_NAME]
+    );
+    assert.deepEqual(
+      [domestic.sheet, domestic.fields.kind, domestic.sheets[0].recognizedBy],
+      ["MATCHER_DOMESTIC", "DOMESTIC", "header"]
+    );
+    assert.deepEqual(
+      [overhaul.sheet, overhaul.fields.kind, overhaul.sheets[0].recognizedBy],
+      ["MATCHER_OH", "OVERHAUL", "header"]
+    );
+    // 종류를 가렸으니 「가를 수 없다」는 경고가 없다.
+    for (const result of [domestic, overhaul]) {
+      assert.equal(result.warnings.includes(MATCHER_KIND_WARNING), false, result.warnings.join("\n"));
+    }
   });
 });

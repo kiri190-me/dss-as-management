@@ -41,13 +41,18 @@ function sheet(
 
 const DOMESTIC = sheet(0, "내자견적서", "GENERATOR_DOMESTIC");
 const OH = sheet(2, "OH견적서", "GENERATOR_OH");
+/** 🔴 갈래 없는 매쳐 — 읽개가 「OH작업」 이름표를 읽지 못한 시트다(2026-09-17). */
 const MATCHER = sheet(1, "견적서", "MATCHER", false);
+const MATCHER_DOMESTIC = sheet(1, "견적서", "MATCHER_DOMESTIC");
+const MATCHER_OH = sheet(1, "견적서", "MATCHER_OH");
 
 describe("양식 → 종류 · 이름표", () => {
-  test("🔴 매쳐만 종류가 정해지지 않는다 — 한 장을 내자로도 OH 로도 쓴다", () => {
+  test("🔴 갈래 없는 매쳐만 종류가 정해지지 않는다 — 나머지 넷은 종류가 있다", () => {
     assert.deepEqual(QUOTE_EXCEL_SHEET_FORM_KINDS, {
       GENERATOR_DOMESTIC: "DOMESTIC",
       GENERATOR_OH: "OVERHAUL",
+      MATCHER_DOMESTIC: "DOMESTIC",
+      MATCHER_OH: "OVERHAUL",
       MATCHER: null,
     });
   });
@@ -55,12 +60,42 @@ describe("양식 → 종류 · 이름표", () => {
   test("이름표는 종류 이름표 그대로다 — 화면 두 곳이 같은 말을 쓴다", () => {
     assert.equal(quoteExcelSheetFormLabel("GENERATOR_DOMESTIC"), quoteKindLabels.DOMESTIC);
     assert.equal(quoteExcelSheetFormLabel("GENERATOR_OH"), quoteKindLabels.OVERHAUL);
+    assert.equal(quoteExcelSheetFormLabel("MATCHER_DOMESTIC"), quoteKindLabels.DOMESTIC);
+    assert.equal(quoteExcelSheetFormLabel("MATCHER_OH"), quoteKindLabels.OVERHAUL);
     assert.equal(quoteExcelSheetFormLabel("MATCHER"), MATCHER_SHEET_LABEL);
   });
 
   test("시트 한 줄 — 탭 이름 · 양식 · 「작성된 것으로 보임」", () => {
     assert.equal(quoteExcelSheetLine(DOMESTIC), `내자견적서 — 내자 견적서 · ${SHEET_FILLED_NOTE}`);
     assert.equal(quoteExcelSheetLine(MATCHER), `견적서 — ${MATCHER_SHEET_LABEL}`);
+    assert.equal(
+      quoteExcelSheetLine(MATCHER_OH),
+      `견적서 — ${quoteKindLabels.OVERHAUL} · ${SHEET_FILLED_NOTE}`
+    );
+  });
+});
+
+describe("🔴 매쳐 파일 하나 — 라디오를 맞춰 주되 잠그지 않는다", () => {
+  test("매쳐 OH 만 든 파일 → OH 로 맞춘다 · 그 탭을 읽는다", () => {
+    const sheets = [MATCHER_OH];
+    assert.deepEqual(quoteExcelSheetKinds(sheets), ["OVERHAUL"]);
+    assert.equal(quoteExcelSuggestedKind(sheets), "OVERHAUL");
+    assert.equal(quoteExcelSheetIndexForKind(sheets, "OVERHAUL"), 1);
+    const headline = quoteExcelSheetsHeadline(sheets);
+    assert.ok(headline.startsWith("OH 견적서만 들어 있습니다"), headline);
+    // 🔴 잠그지 않는다 — 바꿀 수 있다고 말한다.
+    assert.ok(headline.includes("바꿀 수 있습니다"), headline);
+  });
+
+  test("매쳐 내자만 든 파일 → 내자로 맞춘다", () => {
+    assert.equal(quoteExcelSuggestedKind([MATCHER_DOMESTIC]), "DOMESTIC");
+    assert.equal(quoteExcelSheetIndexForKind([MATCHER_DOMESTIC], "DOMESTIC"), 1);
+    assert.ok(quoteExcelSheetsHeadline([MATCHER_DOMESTIC]).startsWith("내자 견적서만 들어 있습니다"));
+  });
+
+  test("🔴 갈래를 못 가른 매쳐는 지금까지 그대로 — 맞춰 주지 않고 사람이 고른다", () => {
+    assert.equal(quoteExcelSuggestedKind([MATCHER]), null);
+    assert.equal(quoteExcelSheetsHeadline([MATCHER]), MATCHER_ONLY_HEADLINE);
   });
 });
 

@@ -1,5 +1,6 @@
 import { excelSerialToDateOnly } from "./excel-date";
 import {
+  MATCHER_OVERHAUL_WORK_LABEL,
   MATCHER_QUOTE_CELLS,
   MATCHER_QUOTE_SHEET_NAME,
   MATCHER_WORK_SCOPE_LABELS,
@@ -63,6 +64,8 @@ import { ZipArchive } from "./zip-reader";
  *    머리글은 안 바뀐다. 「OH 및 수리 작업」 · 「OH 부품 비용」 은 O/H 양식에만,
  *    「수리 작업」 은 내자 양식에만, 「조사작업 · 수리작업 · 통전작업」 은 매쳐 양식에만
  *    있다(글자는 채우개가 들고 있는 것을 가져다 쓴다 — 머리말 '칸 지도'와 같은 까닭).
+ *    매쳐는 그 안에서 한 번 더 갈린다 — 「OH작업」이 있으면 MATCHER_OH, 없으면
+ *    MATCHER_DOMESTIC 이다(아래 '견적서 종류').
  *    🔴 머리글로 **가를 수 있을 때만** 이름을 앞선다. 못 가르면(② 묶음을 지우고 발행한
  *    견적서가 그렇다) 탭 이름으로 간다 — `recognizedBy` 가 어느 쪽이었는지 말해 준다.
  *  · `filled` — **품목 · 작업 줄의 단가(H) · 금액(I) 칸에 0 이 아닌 금액이 있나.**
@@ -91,10 +94,30 @@ import { ZipArchive } from "./zip-reader";
  * 고를 길이 없었다. 그래서 위의 `sheets` · `sheetIndex` 를 더했다(2026-09-17).
  *
  * ── 견적서 종류 ─────────────────────────────────────────────────────────
- * 「내자견적서」 → DOMESTIC, 「OH견적서」 → OVERHAUL. 🔴 매쳐(「견적서」)는 **null** 이다 —
- * 내자 · OH 양식이 같은 시트 이름이라 시트로 가를 수 없고, DOMESTIC 으로 짐작하면 폼이
- * 사람이 고른 OH 를 내자로 덮을 수 있다. 모르면 비워 두고 그 사실을 경고로 싣는다
- * (2026-09-16 메인 결정 — 「못 빼는 쪽이 기본」과 같은 판단).
+ * 「내자견적서」 → DOMESTIC, 「OH견적서」 → OVERHAUL.
+ *
+ * 🔴 **매쳐(「견적서」)도 이제 갈린다**(2026-09-17 — 사용자가 실제 견적서 둘과 빈 양식
+ * 둘을 열어 확인). 내자 · OH 가 같은 시트 이름이고 머리 칸 지도(D10~D19)까지 똑같아서
+ * 시트 이름으로도 칸 자리로도 갈리지 않지만, **D열의 작업 내역 글자가 다르다** —
+ * 「OH작업」은 빈 OH 양식에만 인쇄돼 있고 내자 양식에는 없다(글자는 채우개의
+ * MATCHER_OVERHAUL_WORK_LABEL).
+ * ⚠️ 그 글자는 양식의 머리글이 아니라 `2) 수리작업` 아래의 **항목 줄**이다 — 사람이 손으로
+ * 쓴 견적서에는 인쇄된 대로 남아 있어 근거가 되지만, **앱 채우개가 만든 매쳐 OH 견적서에는
+ * 남지 않는다**(수리작업 줄을 갈아 끼운다). 그 파일은 내자와 내용이 다르지 않아 아래 규칙대로
+ * 내자로 읽힌다 — 어디까지 믿을 수 있는지는 MATCHER_OVERHAUL_WORK_LABEL 머리말에 적었다.
+ *  · 「OH작업」이 보이면 MATCHER_OH → OVERHAUL. 어느 근거로 매쳐를 알아봤든 **있다는
+ *    것 자체가 근거**다.
+ *  · 매쳐 **머리글로** 알아본 시트에 「OH작업」이 없으면 MATCHER_DOMESTIC → DOMESTIC.
+ *    그 시트의 이름표를 읽을 수 있었는데 그 가운데 OH 가 없었다는 뜻이다.
+ *  · 🔴 탭 이름으로만 알아본 시트(머리글이 두 양식에 걸려 가르지 못한 경우 등)는
+ *    그대로 MATCHER — **종류는 null** 이다. 이름표를 못 읽은 것이라 「없음」이 「내자」를
+ *    뜻하지 않는다. 짐작해 DOMESTIC 으로 적으면 폼이 사람이 고른 OH 를 내자로 덮을 수
+ *    있다(2026-09-16 메인 결정 — 「못 빼는 쪽이 기본」). 그때만 까닭을 경고로 싣는다.
+ *
+ * 🔴 매쳐 둘은 **칸 지도가 같다** — MATCHER_QUOTE_CELLS 한 벌을 셋이 나눠 쓴다. 줄 수가
+ * 달라 아래쪽 구역의 행 번호는 어긋나지만(조사작업 34 vs 39), 읽는 칸은 전부 그보다 위의
+ * 머리 칸이고 공급가 줄은 머리글로 찾는다. 그래서 갈래를 잘못 골라도 **값은 달라지지
+ * 않는다** — 달라지는 것은 종류뿐이고, 그 종류도 폼에서는 제안일 뿐 덮어쓰지 않는다.
  *
  * ── 모델 · L/N · S/N ────────────────────────────────────────────────────
  * 제너레이터 양식 D24 의 `MODEL: …, S/N:…, L/N:…` 한 줄(buildProductInfoLine 이 만드는
@@ -135,7 +158,17 @@ import { ZipArchive } from "./zip-reader";
  * ============================================================================
  */
 
-export type HandwrittenQuoteSheet = "GENERATOR_DOMESTIC" | "GENERATOR_OH" | "MATCHER";
+/**
+ * 알아본 양식. 매쳐가 셋인 까닭은 머리말 '견적서 종류' — 「OH작업」 이름표로 내자 · OH 가
+ * 갈리고, **이름표를 읽지 못한 시트만** 갈래 없는 `MATCHER` 로 남는다.
+ */
+export type HandwrittenQuoteSheet =
+  | "GENERATOR_DOMESTIC"
+  | "GENERATOR_OH"
+  | "MATCHER_DOMESTIC"
+  | "MATCHER_OH"
+  /** 매쳐인 것은 알지만 내자 · OH 를 가르지 못했다(탭 이름으로만 알아본 시트). */
+  | "MATCHER";
 
 /** 저장 쪽 QuoteKind(validation/quote-input.ts)와 같은 값. xlsx 층은 앱 층을 가져오지 않는다. */
 export type HandwrittenQuoteKind = "DOMESTIC" | "OVERHAUL";
@@ -249,22 +282,33 @@ type FieldCells = {
 };
 
 type SheetLayout = {
-  sheet: HandwrittenQuoteSheet;
-  sheetName: string;
-  /** 시트 이름으로 가를 수 없으면 null(매쳐 — 머리말 '견적서 종류'). */
+  /** 가르지 못하면 null(갈래 없는 매쳐 — 머리말 '견적서 종류'). */
   kind: HandwrittenQuoteKind | null;
   cells: FieldCells;
 };
 
-const SHEET_LAYOUTS: readonly SheetLayout[] = [
-  { sheet: "GENERATOR_DOMESTIC", sheetName: QUOTE_SHEET_NAME, kind: "DOMESTIC", cells: QUOTE_CELLS },
-  { sheet: "GENERATOR_OH", sheetName: OH_QUOTE_SHEET_NAME, kind: "OVERHAUL", cells: OH_QUOTE_CELLS },
-  {
-    sheet: "MATCHER",
-    sheetName: MATCHER_QUOTE_SHEET_NAME,
-    kind: null,
-    cells: { ...MATCHER_QUOTE_CELLS, productInfo: null },
-  },
+/** 🔴 매쳐 셋이 나눠 쓰는 한 벌. 내자 · OH 의 머리 칸은 같은 자리다(머리말 '견적서 종류'). */
+const MATCHER_CELLS: FieldCells = { ...MATCHER_QUOTE_CELLS, productInfo: null };
+
+/**
+ * 양식마다의 칸 지도와 종류. `Record` 라 양식이 하나 늘면 컴파일러가 여기를 짚는다.
+ */
+const SHEET_LAYOUTS: Record<HandwrittenQuoteSheet, SheetLayout> = {
+  GENERATOR_DOMESTIC: { kind: "DOMESTIC", cells: QUOTE_CELLS },
+  GENERATOR_OH: { kind: "OVERHAUL", cells: OH_QUOTE_CELLS },
+  MATCHER_DOMESTIC: { kind: "DOMESTIC", cells: MATCHER_CELLS },
+  MATCHER_OH: { kind: "OVERHAUL", cells: MATCHER_CELLS },
+  MATCHER: { kind: null, cells: MATCHER_CELLS },
+};
+
+/**
+ * 탭 이름 → 양식. 머리글로 가르지 못했을 때만 쓴다(머리말 '무엇이 들어 있나'). 🔴 매쳐는
+ * 갈래 없는 `MATCHER` 로 간다 — 이름표를 못 읽었으니 내자 · OH 를 알 길이 없다.
+ */
+const SHEET_NAME_FORMS: readonly { sheetName: string; form: HandwrittenQuoteSheet }[] = [
+  { sheetName: QUOTE_SHEET_NAME, form: "GENERATOR_DOMESTIC" },
+  { sheetName: OH_QUOTE_SHEET_NAME, form: "GENERATOR_OH" },
+  { sheetName: MATCHER_QUOTE_SHEET_NAME, form: "MATCHER" },
 ];
 
 /**
@@ -278,6 +322,9 @@ const SHEET_LAYOUTS: readonly SheetLayout[] = [
  *
  * 양식끼리 글자가 겹치지 않는다 — O/H 의 ② 는 「OH 및 수리 작업」, 내자는 「수리 작업」,
  * 매쳐는 띄어쓰기 없는 「수리작업」 이라 **통째로** 견주면 갈린다.
+ *
+ * 🔴 여기서 가르는 것은 **양식(판)**까지다. 매쳐 내자 · OH 는 이 셋을 똑같이 갖고 있어
+ * 여기서는 갈리지 않는다 — 「OH작업」 이름표로 뒤에 한 번 더 가른다(formFromHeaders).
  */
 const FORM_HEADERS: readonly { sheet: HandwrittenQuoteSheet; labels: readonly string[] }[] = [
   {
@@ -298,8 +345,12 @@ const FORM_HEADERS: readonly { sheet: HandwrittenQuoteSheet; labels: readonly st
 /** H열의 합계 머리글. 양식은 `공 급 가` 로 띄워 두었다 — findSpacedLabelRow 가 공백을 지우고 견준다. */
 const SUPPLY_LABEL = "공급가";
 
+/**
+ * 갈래 없는 매쳐를 읽었을 때만 싣는다 — 「OH작업」 이름표로 가른 매쳐(MATCHER_DOMESTIC ·
+ * MATCHER_OH)에는 종류가 있으니 이 말을 하지 않는다(머리말 '견적서 종류').
+ */
 const MATCHER_KIND_WARNING =
-  "매쳐 양식은 내자 · OH 가 같은 시트 이름(견적서)이라 가를 수 없어 견적서 종류를 비워 둡니다 — 종류를 직접 골라 주세요.";
+  "매쳐 양식인데 작업 구역 이름표를 읽지 못해 내자 · OH 를 가를 수 없어 견적서 종류를 비워 둡니다 — 종류를 직접 골라 주세요.";
 
 /** Excel 97-2003(.xls)은 OLE2 복합 문서다 — attachment-allowlist.ts 의 OLE2_MAGIC 과 같은 8바이트. */
 const OLE2_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] as const;
@@ -361,7 +412,9 @@ type Candidate = {
   /** 탭 차례(0부터)와 탭 이름 — 사람이 고를 때 쓰는 표지다. */
   index: number;
   name: string;
-  /** 머리글로 가른 양식(못 가르면 탭 이름의 양식)의 칸 지도. */
+  /** 머리글로 가른 양식 — 못 가르면 탭 이름의 양식이다. */
+  form: HandwrittenQuoteSheet;
+  /** 그 양식의 칸 지도 — `SHEET_LAYOUTS[form]` 을 들고 다닌다. */
   layout: SheetLayout;
   recognizedBy: HandwrittenQuoteFormSource;
   filled: boolean;
@@ -373,7 +426,7 @@ function infoOf(candidate: Candidate): HandwrittenQuoteSheetInfo {
   return {
     index: candidate.index,
     name: candidate.name,
-    form: candidate.layout.sheet,
+    form: candidate.form,
     recognizedBy: candidate.recognizedBy,
     filled: candidate.filled,
   };
@@ -408,7 +461,7 @@ function readWorkbook(
 
   const candidates: Candidate[] = [];
   for (const [index, name] of tabNames.entries()) {
-    const byName = SHEET_LAYOUTS.find((candidate) => candidate.sheetName === name);
+    const byName = SHEET_NAME_FORMS.find((candidate) => candidate.sheetName === name);
     // 이름이 같은 탭이 둘이면 뒤엣것은 같은 파트를 가리킨다 — 한 번만 담는다.
     if (!byName || candidates.some((candidate) => candidate.name === name)) continue;
 
@@ -423,12 +476,13 @@ function readWorkbook(
 
     const grid = buildSheetGrid(sheetXml, sharedStrings, date1904);
     // 양식 머리글이 탭 이름을 앞선다 — 가를 수 있을 때만(머리말 '무엇이 들어 있나').
-    const fromHeader = formFromHeaders(grid);
+    const recognized = recognizeForm(grid, byName.form);
     candidates.push({
       index,
       name,
-      layout: fromHeader === null ? byName : layoutOf(fromHeader),
-      recognizedBy: fromHeader === null ? "name" : "header",
+      form: recognized.form,
+      layout: SHEET_LAYOUTS[recognized.form],
+      recognizedBy: recognized.by,
       filled: looksFilled(grid),
       sheetXml,
       grid,
@@ -445,7 +499,7 @@ function readWorkbook(
 
   return {
     ok: true,
-    sheet: chosen.layout.sheet,
+    sheet: chosen.form,
     sheetIndex: chosen.index,
     sheetName: chosen.name,
     sheets: candidates.map(infoOf),
@@ -500,23 +554,39 @@ function readActiveTabIndex(workbookXml: string): number {
   return value === undefined ? 0 : Number(value);
 }
 
-function layoutOf(sheet: HandwrittenQuoteSheet): SheetLayout {
-  const layout = SHEET_LAYOUTS.find((candidate) => candidate.sheet === sheet);
-  // FORM_HEADERS 의 세 양식은 SHEET_LAYOUTS 에 다 있다 — 컴파일러를 달래는 자리다.
-  if (layout === undefined) throw new ReadFailure("NO_QUOTE_SHEET");
-  return layout;
+/**
+ * 이 시트가 어느 양식인가 — 양식에 인쇄된 머리글(D열)이 탭 이름(`nameForm`)을 앞선다.
+ * `by` 가 어느 근거였는지 말해 준다(머리말 '무엇이 들어 있나').
+ *
+ * 🔴 **두 양식이 함께 걸리면 머리글로 가르지 않는다.** 머리글이 앉는 D열은 품목 · 작업
+ * 이름이 적히는 열이기도 해서, 사람이 남의 양식 머리글과 똑같은 이름(「수리 작업」)을
+ * 항목으로 적을 수 있다. 짐작으로 고르면 **칸 지도가 통째로 어긋난다** — 매쳐 양식은
+ * 건명이 D14 로 제너레이터와 한 줄 다르다. 애매하면 탭 이름이라는 다른 근거로 간다.
+ *
+ * ⚠️ 매쳐 안의 내자 · OH 갈래는 늘 「OH작업」 이름표가 정한다 — `by` 는 **판(양식)**을 무엇
+ * 으로 알아봤는지이지, 그 갈래를 무엇으로 알아봤는지가 아니다. 갈래를 잘못 골라도 매쳐
+ * 셋은 칸 지도가 같아 값은 달라지지 않는다(머리말 '견적서 종류').
+ */
+function recognizeForm(
+  grid: SheetGrid,
+  nameForm: HandwrittenQuoteSheet
+): { form: HandwrittenQuoteSheet; by: HandwrittenQuoteFormSource } {
+  const labels = columnNameLabels(grid);
+  const matched = FORM_HEADERS.filter((form) => form.labels.some((label) => labels.has(label)));
+  if (matched.length === 1) {
+    const form = matched[0].sheet;
+    // 매쳐는 판만 갈린 것이다 — 「OH작업」으로 내자 · OH 를 한 번 더 가른다.
+    return { form: form === "MATCHER" ? matcherFormOf(labels) : form, by: "header" };
+  }
+
+  // 머리글로 못 갈랐다 — 탭 이름으로 간다. 매쳐면 「OH작업」이 **보일 때만** OH 로 본다:
+  // 이름표를 못 읽은 것이라 「안 보인다」가 「내자」를 뜻하지 않는다(머리말 '견적서 종류').
+  const overhaul = nameForm === "MATCHER" && labels.has(MATCHER_OVERHAUL_WORK_LABEL);
+  return { form: overhaul ? "MATCHER_OH" : nameForm, by: "name" };
 }
 
-/**
- * 양식에 인쇄된 머리글(D열)로 「어느 양식인가」를 가른다. 가르지 못하면 null —
- * 부르는 쪽이 탭 이름으로 간다(머리말 '무엇이 들어 있나').
- *
- * 🔴 **두 양식이 함께 걸리면 가르지 않는다.** 머리글이 앉는 D열은 품목 · 작업 이름이
- * 적히는 열이기도 해서, 사람이 남의 양식 머리글과 똑같은 이름(「수리 작업」)을 항목으로
- * 적을 수 있다. 짐작으로 고르면 **칸 지도가 통째로 어긋난다** — 매쳐 양식은 건명이 D14 로
- * 제너레이터와 한 줄 다르다. 애매하면 탭 이름이라는 다른 근거로 간다.
- */
-function formFromHeaders(grid: SheetGrid): HandwrittenQuoteSheet | null {
+/** D열(품목 · 작업 이름 열)에 적힌 글자들. 빈 칸 · 숫자 칸은 담지 않는다. */
+function columnNameLabels(grid: SheetGrid): Set<string> {
   const labels = new Set<string>();
   for (const row of grid.rowNumbers) {
     const cell = grid.cells(row).get(LAYOUT_COLUMNS.name);
@@ -524,8 +594,18 @@ function formFromHeaders(grid: SheetGrid): HandwrittenQuoteSheet | null {
     const text = cell.text.trim();
     if (text !== "") labels.add(text);
   }
-  const matched = FORM_HEADERS.filter((form) => form.labels.some((label) => labels.has(label)));
-  return matched.length === 1 ? matched[0].sheet : null;
+  return labels;
+}
+
+/**
+ * 매쳐 시트의 갈래. 「OH작업」이 보이면 OH, 안 보이면 내자다(머리말 '견적서 종류').
+ *
+ * 🔴 **매쳐 머리글로 알아본 시트에서만** 부른다 — 그 시트는 이름표를 읽을 수 있었다는 뜻
+ * 이라 「안 보인다」를 「내자」로 읽어도 된다. 탭 이름으로만 알아본 시트는 여기를 지나지
+ * 않고 갈래 없는 MATCHER 로 남는다.
+ */
+function matcherFormOf(labels: ReadonlySet<string>): HandwrittenQuoteSheet {
+  return labels.has(MATCHER_OVERHAUL_WORK_LABEL) ? "MATCHER_OH" : "MATCHER_DOMESTIC";
 }
 
 /**
@@ -596,7 +676,8 @@ function readFields(
   const { cells } = chosen.layout;
   const text = (ref: string) => textAt(chosen.grid, ref);
 
-  if (chosen.layout.sheet === "MATCHER") warnings.push(MATCHER_KIND_WARNING);
+  // 갈래 없는 매쳐만 — 「OH작업」으로 가른 매쳐에는 종류가 있다(머리말 '견적서 종류').
+  if (chosen.form === "MATCHER") warnings.push(MATCHER_KIND_WARNING);
   const quoteDate = readQuoteDate(chosen, readStyles, warnings);
   const product = readProductInfo(chosen, warnings);
   const manualSupplyAmount = readSupplyAmount(chosen, warnings);
