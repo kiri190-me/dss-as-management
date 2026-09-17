@@ -141,6 +141,8 @@ export type SaveRepairCaseUsedPartsResultCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  /** 🔴 이 역할은 사용 부품을 적을 수 없다(auth/repair-case-used-parts-authorization.ts). */
+  | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
   | "CASE_LOCKED"
   | "INVALID_PART"

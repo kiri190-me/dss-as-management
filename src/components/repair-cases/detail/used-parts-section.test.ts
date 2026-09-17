@@ -29,6 +29,10 @@ import { readFileSync } from "node:fs";
  *  8. 🔴 부품 고르개를 붙였다 — 고르면 part_id 가 붙고, 고쳐 쓰면 풀린다. 마스터에
  *     없는 부품은 손으로 적을 수 있다.
  *  9. 🔴 화면이 줄 번호를 보내지 않는다 — line_no 는 서버가 매긴다.
+ * 10. 🔴 역할 표가 화면에도 액션에도 없다 — 액션은 살아 있는 계정의 역할을 저장
+ *     쪽으로 **나르기만** 하고, 판정은 인가 모듈 한 곳에서 일어난다(B-3).
+ *     역할별 결과 자체는 auth/repair-case-used-parts-authorization.test.ts 가
+ *     다섯 역할 전부 못 박는다.
  * ============================================================================
  */
 
@@ -166,9 +170,23 @@ describe("사용 부품 — 칸", () => {
     );
   });
 
-  test("막힌 까닭을 말해 준다 — 출하 잠금 안내", () => {
-    assert.match(sectionFlat, /!writeGate\.ok && writeGate\.code === "CASE_LOCKED"/);
+  test("막힌 까닭을 말해 준다 — 잠긴 건 · 권한 없음(반출 이력은 위에서 이미 안내한다)", () => {
+    assert.match(sectionFlat, /!writeGate\.ok && writeGate\.code !== "PART_REQUEST_HISTORY_EXISTS"/);
     assert.match(sectionFlat, /\{writeGate\.message\}/);
+  });
+
+  test("🔴 화면에 역할 이름이 한 글자도 없다 — 역할 표는 인가 모듈 한 곳에만 있다", () => {
+    for (const [label, code] of [
+      ["UsedPartsSection.tsx", sectionCode],
+      ["UsedPartsEditForm.tsx", formCode],
+    ] as const) {
+      assert.ok(
+        !/SUPER_ADMIN|AS_ENGINEER|INVENTORY_MANAGER|"ADMIN"|'ADMIN'|"SALES"|'SALES'/.test(code),
+        `${label} 이 역할을 스스로 따지고 있다`
+      );
+    }
+    // 화면이 보는 것은 여전히 writeGate 하나뿐이다.
+    assert.match(sectionFlat, /const canEdit = writeGate\.ok;/);
   });
 
   test("편집 폼은 적을 수 있는 건에만 그려진다 — 폼이 스스로 판정하지 않는다", () => {
@@ -252,6 +270,8 @@ describe("사용 부품 — 서버 액션의 관문", () => {
       "isValidExpectedVersion(input.expectedVersion)",
       "validateUsedPartLines(input.lines)",
       "saveRepairCaseUsedParts(",
+      // 🔴 역할은 세션 토큰이 아니라 위에서 다시 읽은 살아 있는 계정에서 온다.
+      "actorRole: actingUser.role,",
     ];
     let cursor = -1;
     for (const needle of order) {
@@ -266,11 +286,15 @@ describe("사용 부품 — 서버 액션의 관문", () => {
     assert.match(actionFlat, /console\.error\("saveRepairCaseUsedPartsAction: unexpected DB error"/);
   });
 
-  test("🔴 두 규칙은 액션이 아니라 mutation 이 본다 — 트랜잭션 안에서", () => {
+  test("🔴 규칙 셋은 액션이 아니라 mutation 이 본다 — 트랜잭션 안에서", () => {
     assert.ok(
-      !/hasLivePartRequest|isImportedFromKyosanIntake|resolveUsedPartsWriteGate/.test(actionCode),
+      !/hasLivePartRequest|isImportedFromKyosanIntake|resolveUsedPartsWriteGate|canRoleWriteUsedParts|USED_PARTS_WRITE_ROLES/.test(
+        actionCode
+      ),
       "액션이 판정을 미리 흉내 내지 않는다"
     );
+    // 역할은 나르기만 한다 — 판정은 저장 쪽에서 다시 일어난다.
+    assert.match(actionFlat, /actorRole: actingUser\.role,/);
   });
 });
 
@@ -278,7 +302,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
   test("🔴 DATABASE 소스 건에만 조회한다 — MOCK·LOCAL_DEMO 에는 이 표가 없다", () => {
     assert.match(
       pageFlat,
-      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id\) : null/
+      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser\?\.role \?\? null\) : null/
     );
     assert.match(pageFlat, /resolved\.source === "DATABASE" \? getPartPickerList\(\) : \[\]/);
   });
@@ -291,7 +315,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
     assert.ok(start > 0 && end > start, "Promise.all 묶음을 찾지 못했다");
     const bundle = pageFlat.slice(start, end);
     assert.ok(
-      bundle.includes("getRepairCaseUsedPartsView(resolved.id)"),
+      bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser?.role ?? null)"),
       "조회가 기존 Promise.all 묶음 안에 있어야 한다"
     );
     assert.ok(bundle.includes("getPartPickerList()"), "부품 마스터도 같은 묶음 안에 있어야 한다");

@@ -8,6 +8,7 @@ import {
   isImportedFromKyosanIntake,
 } from "../queries/repair-case-used-parts";
 import { resolveUsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
+import type { Role } from "@/lib/domain/types";
 import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-input";
 
 /**
@@ -20,10 +21,14 @@ import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-
  *
  * ── 🔴 화면이 이미 확인했다고 믿지 않는다 ───────────────────────────────────
  * 조회(getRepairCaseUsedPartsView)가 화면에 「적을 수 있다」를 내려보낸 뒤에도
- * 그 사이에 부품 요청서가 생기거나 건이 출하되어 잠길 수 있다. 그래서 두 규칙을
+ * 그 사이에 부품 요청서가 생기거나 건이 출하되어 잠길 수 있다. 그래서 규칙 셋을
  * **이 트랜잭션 안에서 다시** 판정한다 — 조회와 **같은 함수**로
  * (hasLivePartRequest · isImportedFromKyosanIntake · resolveUsedPartsWriteGate).
  * 주소로 직접 부른 요청도 여기서 같은 거절을 받는다.
+ *
+ * 🔴 **역할도 그 셋에 든다.** 화면에서 「수정」 단추를 감추는 것만으로는 모자라다 —
+ * 권한 없는 역할이 서버 액션을 직접 불러도 이 안에서 거절된다. `actorRole` 은
+ * 서버 액션이 **살아 있는 계정에서 다시 읽은** 역할이다(세션 토큰 값이 아니다).
  *
  * ── 왜 전부 지우고 다시 넣는가 ──────────────────────────────────────────────
  * 부모에 딸린 줄 목록을 통째로 받는 저장이다 — quote_items 의 replaceItems 와
@@ -54,6 +59,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type SaveUsedPartsMutationResultCode =
   | "NOT_FOUND"
   | "CONFLICT"
+  | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
   | "CASE_LOCKED"
   | "INVALID_PART";
@@ -76,13 +82,15 @@ const VERSION_CONFLICT_MESSAGE =
  * 받은 목록 그대로 이 건의 사용 부품을 다시 적는다.
  *
  * `lines` 는 검사를 통과한 것만 들어온다(모양 · 수량 1 이상 · partId 형식).
- * 여기서 더 보는 것은 **DB 를 봐야 아는 것들**뿐이다 — 건이 살아 있는가, 두
- * 규칙에 걸리는가, 고른 부품이 실제로 있는가, version 이 맞는가.
+ * 여기서 더 보는 것은 **DB 를 봐야 아는 것들**뿐이다 — 건이 살아 있는가, 규칙
+ * 셋에 걸리는가, 고른 부품이 실제로 있는가, version 이 맞는가.
  */
 export async function saveRepairCaseUsedParts(params: {
   repairCaseId: string;
   expectedVersion: number;
   actorUserId: string;
+  /** 살아 있는 계정에서 읽은 역할. 판정은 아래 resolveUsedPartsWriteGate 가 한다. */
+  actorRole: Role;
   lines: readonly UsedPartLineInput[];
 }): Promise<SaveUsedPartsMutationResult> {
   return db.transaction(async (tx) => {
@@ -96,11 +104,16 @@ export async function saveRepairCaseUsedParts(params: {
       return { ok: false, code: "NOT_FOUND", message: "해당 접수 건을 찾을 수 없습니다." };
     }
 
-    // 🔴 조회가 쓰는 바로 그 두 판정 + 그 둘을 합치는 바로 그 함수. 트랜잭션
+    // 🔴 조회가 쓰는 바로 그 두 판정 + 그 셋을 합치는 바로 그 함수. 트랜잭션
     // 안에서 다시 본다 — 화면이 열어 준 뒤에 바뀌었을 수 있다.
+    //
+    // 역할만 먼저 보고 일찍 빠져나가지 않는다 — 그러면 판정이 두 벌이 되고,
+    // 「역할이 먼저」라는 차례가 이 파일에도 한 벌 적히게 된다. 두 probe 는 이 건
+    // 하나만 보는 인덱스 조회라 값이 싸다.
     const hasPartRequestHistory = await hasLivePartRequest(tx, params.repairCaseId);
     const isLegacyImportedCase = await isImportedFromKyosanIntake(tx, params.repairCaseId);
     const gate = resolveUsedPartsWriteGate({
+      actorRole: params.actorRole,
       hasPartRequestHistory,
       isShipmentLocked: current.isLocked,
       isLegacyImportedCase,

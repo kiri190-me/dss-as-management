@@ -154,6 +154,11 @@ export default async function RepairCaseDetailPage({
   // 안쪽이라 통째로 내려보내고 브라우저에서 거른다. 적을 수 없는 건인지는 화면이
   // 아니라 위 writeGate 가 정하므로 여기서 미리 나누지 않는다 — 나누면 판정이
   // 두 벌이 된다.
+  //
+  // 🔴 역할을 조회에 넘긴다 — 누가 적을 수 있는지도 그 writeGate 가 정하기
+  // 때문이다(auth/repair-case-used-parts-authorization.ts). 여기서 역할 이름을
+  // 비교하지 않는다. actingUser 가 null 이면(삭제 · 정지 · 세션 끊김) null 을
+  // 그대로 넘겨 닫히는 쪽으로 떨어뜨린다 — 칸 자체는 읽기로 남는다.
   const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts, usedPartOptions] =
     await Promise.all([
       resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
@@ -161,7 +166,9 @@ export default async function RepairCaseDetailPage({
       relatedDatabaseCaseIds.length > 0
         ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
         : new Map<string, DerivedServiceSummary>(),
-      resolved.source === "DATABASE" ? getRepairCaseUsedPartsView(resolved.id) : null,
+      resolved.source === "DATABASE"
+        ? getRepairCaseUsedPartsView(resolved.id, actingUser?.role ?? null)
+        : null,
       resolved.source === "DATABASE" ? getPartPickerList() : [],
     ]);
 

@@ -13,12 +13,15 @@ import UsedPartsEditForm from "@/components/repair-cases/detail/edit/UsedPartsEd
  * 왜 있는 칸인지는 schema/repair-case-used-parts.ts 와
  * queries/repair-case-used-parts.ts 머리말에 있다. 화면 쪽 규칙만 여기 적는다.
  *
- * ── 🔴 적을 수 있는 건인지는 **화면이 정하지 않는다** (B-2) ─────────────────
+ * ── 🔴 적을 수 있는지는 **화면이 정하지 않는다** (B-2 · B-3) ────────────────
  * 서버가 내린 판정(`writeGate`)만 보고 입력 칸을 그릴지 정한다. 화면이 스스로
- * 「반출 이력이 있나」 「잠겼나」를 따지면 판정이 두 벌이 되고, 그러면 화면이 여는
- * 조건과 서버가 받아 주는 조건이 어긋난다. 그 판정은
+ * 「반출 이력이 있나」 「잠겼나」 「내 역할이 되나」를 따지면 판정이 두 벌이 되고,
+ * 그러면 화면이 여는 조건과 서버가 받아 주는 조건이 어긋난다. 그 판정은
  * auth/repair-case-used-parts-authorization.ts 한 곳에 있고, 저장을 받는
  * mutation 도 같은 함수를 부른다 — 주소로 직접 부른 요청도 같은 거절을 받는다.
+ *
+ * 그래서 이 파일에는 **역할 이름이 한 글자도 없다.** 역할 목록은 위 인가 모듈의
+ * USED_PARTS_WRITE_ROLES 한 곳에만 있다.
  *
  * 그래서 이 파일에는 `hasPartRequestHistory` 로 **잠그는** 줄이 없다. 그 값은
  * 아래 안내 문구를 고르는 데만 쓴다(무엇이 막았는지 사람에게 말해 주려고).
@@ -87,9 +90,12 @@ export default function UsedPartsSection({
         </p>
       )}
 
-      {/* 출하 잠금으로 막힌 건 — 왜 「수정」이 없는지 말해 준다. 반출 이력 쪽은
-          위에서 이미 안내했으므로 겹쳐 적지 않는다. */}
-      {!writeGate.ok && writeGate.code === "CASE_LOCKED" && (
+      {/* 왜 「수정」이 없는지 말해 준다 — 「잠긴 건이라」(CASE_LOCKED) ·
+          「권한이 없어서」(ROLE_NOT_ALLOWED). 셋째 까닭인 반출 이력은 위에서 이미
+          안내했으므로 겹쳐 적지 않는다. 코드를 하나씩 세지 않고 그 하나만 빼는
+          것은, 까닭이 늘 때 안내가 조용히 사라지는 쪽으로 기울지 않게 하려는
+          것이다(새 코드는 기본으로 보인다). */}
+      {!writeGate.ok && writeGate.code !== "PART_REQUEST_HISTORY_EXISTS" && (
         <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">{writeGate.message}</p>
       )}
 

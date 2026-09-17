@@ -23,12 +23,16 @@ import { createRepairCaseWithIdempotency } from "@/lib/server/services/create-re
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { getRepairCaseUsedPartsView } from "../queries/repair-case-used-parts";
 import { saveRepairCaseUsedParts } from "./repair-case-used-parts";
+import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
  * 「사용 부품」 저장 (B-2) — 격리된 시험 DB
  * ============================================================================
  * 못 박는 것:
+ *  0. 🔴 역할 다섯이 각각 어떻게 되는지 — SUPER_ADMIN · ADMIN · AS_ENGINEER 쓰기,
+ *     SALES · INVENTORY_MANAGER 막힘. 막힌 역할은 **주소로 직접 불러도** 거절되고
+ *     한 줄도 · version 도 · 감사 이력도 남기지 못한다.
  *  1. 🔴 반출 이력이 있으면 **서버가** 거절한다(화면이 감추는 것으로는 모자라다).
  *  2. 🔴 출하 잠금 + 「과거 인수품 가져오기」로 들어온 건 → 적을 수 있다.
  *  3. 🔴 출하 잠금 + 그 밖의 건 → 막힌다.
@@ -69,6 +73,8 @@ let importedLockedCaseId: string;
 let lockedNotImportedCaseId: string;
 /** 살아 있는 부품 요청이 붙은 건. */
 let partRequestCaseId: string;
+/** 역할 시험 전용 — 다른 시험이 줄 · version 을 흔들지 않게 따로 둔다. */
+let roleCaseId: string;
 
 function intake(overrides: Partial<IntakeSubmissionInput>): IntakeSubmissionInput {
   return {
@@ -231,6 +237,9 @@ before(async () => {
     }
   );
 
+  // 역할 시험 전용 건 — 잠기지도 않고 반출 이력도 없다. 막는 것은 역할 하나뿐이다.
+  roleCaseId = await seedCase({ intakeNumber: `D${YEAR_MONTH}05`, serialNumber: `SN-${RUN}-05` });
+
   await db.insert(inventoryPartRequests).values({
     repairCaseId: partRequestCaseId,
     requestedByUserId: adminId,
@@ -273,6 +282,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "손으로 적은 부품", quantity: 2 }],
     });
 
@@ -290,6 +300,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       repairCaseId: partRequestCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "몰래 적어 본 부품", quantity: 1 }],
     });
 
@@ -300,7 +311,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
     assert.equal(await versionOf(partRequestCaseId), version, "거절된 저장은 version 도 올리지 않는다");
 
     // 조회도 같은 판정을 내려 화면이 입력 칸을 열지 않는다.
-    const view = await getRepairCaseUsedPartsView(partRequestCaseId);
+    const view = await getRepairCaseUsedPartsView(partRequestCaseId, "SUPER_ADMIN");
     assert.equal(view.hasPartRequestHistory, true);
     assert.equal(view.writeGate.ok, false);
     if (view.writeGate.ok) return;
@@ -319,6 +330,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       repairCaseId: importedLockedCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: partAId, partNameText: `${PREFIX}-PART-A`, quantity: 3 }],
     });
 
@@ -327,7 +339,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       { lineNo: 1, partId: partAId, partNameText: `${PREFIX}-PART-A`, quantity: 3 },
     ]);
 
-    const view = await getRepairCaseUsedPartsView(importedLockedCaseId);
+    const view = await getRepairCaseUsedPartsView(importedLockedCaseId, "SUPER_ADMIN");
     assert.equal(view.writeGate.ok, true, "화면도 입력 칸을 연다");
   });
 
@@ -343,6 +355,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       repairCaseId: lockedNotImportedCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "잠긴 건에 적어 본 부품", quantity: 1 }],
     });
 
@@ -352,7 +365,7 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
     assert.deepEqual(await storedLines(lockedNotImportedCaseId), []);
     assert.equal(await versionOf(lockedNotImportedCaseId), version);
 
-    const view = await getRepairCaseUsedPartsView(lockedNotImportedCaseId);
+    const view = await getRepairCaseUsedPartsView(lockedNotImportedCaseId, "SUPER_ADMIN");
     assert.equal(view.writeGate.ok, false);
     if (view.writeGate.ok) return;
     assert.equal(view.writeGate.code, "CASE_LOCKED");
@@ -363,11 +376,150 @@ describe("사용 부품 저장 — 두 인가 규칙", () => {
       repairCaseId: randomUUID(),
       expectedVersion: 1,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [],
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.code, "NOT_FOUND");
+  });
+});
+
+describe("사용 부품 저장 — 누가 적을 수 있나 (역할 다섯)", () => {
+  /**
+   * 🔴 사용자가 정한 표를 **시험이 따로 한 벌 적는다** — 제품 코드의 목록을 가져다
+   * 쓰면 그 목록이 바뀔 때 시험도 함께 움직여 아무것도 못 잡는다. `Record<Role,…>`
+   * 이라 역할이 하나 늘면 tsc 가 먼저 멈춘다.
+   */
+  const CAN_WRITE_BY_ROLE: Record<Role, boolean> = {
+    SUPER_ADMIN: true,
+    ADMIN: true,
+    AS_ENGINEER: true,
+    SALES: false,
+    INVENTORY_MANAGER: false,
+  };
+
+  test("🔴 역할 다섯을 하나씩 — 막힌 역할은 줄도 version 도 감사 이력도 남기지 못한다", async () => {
+    assert.equal(ROLE_CODES.length, 5, "역할이 늘거나 줄면 이 표부터 다시 정해야 한다");
+
+    for (const role of ROLE_CODES) {
+      const linesBefore = await storedLines(roleCaseId);
+      const version = await versionOf(roleCaseId);
+      const auditCountBefore = (await usedPartsAuditRows(roleCaseId)).length;
+
+      const result = await saveRepairCaseUsedParts({
+        repairCaseId: roleCaseId,
+        expectedVersion: version,
+        actorUserId: adminId,
+        actorRole: role,
+        lines: [{ partId: null, partNameText: `${role} 이 적은 부품`, quantity: 1 }],
+      });
+
+      assert.equal(result.ok, CAN_WRITE_BY_ROLE[role], `${role}: ${JSON.stringify(result)}`);
+
+      if (CAN_WRITE_BY_ROLE[role]) {
+        assert.deepEqual(
+          (await storedLines(roleCaseId)).map((line) => line.partNameText),
+          [`${role} 이 적은 부품`],
+          `${role} 은 적을 수 있어야 한다`
+        );
+        assert.equal(await versionOf(roleCaseId), version + 1);
+        continue;
+      }
+
+      if (result.ok) return;
+      assert.equal(result.code, "ROLE_NOT_ALLOWED", `${role} 의 거절 사유`);
+      assert.deepEqual(await storedLines(roleCaseId), linesBefore, `${role} 은 한 줄도 남기지 못한다`);
+      assert.equal(await versionOf(roleCaseId), version, `${role} 의 거절은 version 을 올리지 않는다`);
+      assert.equal(
+        (await usedPartsAuditRows(roleCaseId)).length,
+        auditCountBefore,
+        `${role} 의 거절은 감사 이력도 남기지 않는다`
+      );
+    }
+  });
+
+  test("🔴 주소로 직접 불러도 거절된다 — 화면이 「수정」을 감추는 것만으로는 모자라다", async () => {
+    // 화면 쪽: 이 역할에게는 입력 칸 자체가 열리지 않는다.
+    const view = await getRepairCaseUsedPartsView(roleCaseId, "SALES");
+    assert.equal(view.writeGate.ok, false);
+    if (view.writeGate.ok) return;
+    assert.equal(view.writeGate.code, "ROLE_NOT_ALLOWED");
+
+    // 서버 쪽: 그 화면을 거치지 않고 저장을 직접 불러도 같은 거절을 받는다.
+    const linesBefore = await storedLines(roleCaseId);
+    const result = await saveRepairCaseUsedParts({
+      repairCaseId: roleCaseId,
+      expectedVersion: await versionOf(roleCaseId),
+      actorUserId: adminId,
+      actorRole: "SALES",
+      lines: [{ partId: partAId, partNameText: `${PREFIX}-PART-A`, quantity: 1 }],
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "ROLE_NOT_ALLOWED");
+    assert.deepEqual(await storedLines(roleCaseId), linesBefore);
+  });
+
+  test("🔴 권한 없는 역할에게는 건의 사정 대신 「권한 없음」을 말한다 — 거짓 안내를 하지 않는다", async () => {
+    // 잠긴 건: 「잠겼다」고 말하면 잠금을 풀면 될 것처럼 들린다 — 이 사람은 풀어도 못 쓴다.
+    const locked = await saveRepairCaseUsedParts({
+      repairCaseId: lockedNotImportedCaseId,
+      expectedVersion: await versionOf(lockedNotImportedCaseId),
+      actorUserId: adminId,
+      actorRole: "INVENTORY_MANAGER",
+      lines: [{ partId: null, partNameText: "재고 담당자가 잠긴 건에", quantity: 1 }],
+    });
+    assert.equal(locked.ok, false);
+    if (locked.ok) return;
+    assert.equal(locked.code, "ROLE_NOT_ALLOWED");
+
+    // 반출 이력이 있는 건도 마찬가지 — 요청서를 지워도 이 사람은 여전히 못 적는다.
+    const history = await saveRepairCaseUsedParts({
+      repairCaseId: partRequestCaseId,
+      expectedVersion: await versionOf(partRequestCaseId),
+      actorUserId: adminId,
+      actorRole: "SALES",
+      lines: [{ partId: null, partNameText: "영업 담당자가 이력 있는 건에", quantity: 1 }],
+    });
+    assert.equal(history.ok, false);
+    if (history.ok) return;
+    assert.equal(history.code, "ROLE_NOT_ALLOWED");
+
+    // 쓰기 역할에게는 B-2 의 두 까닭이 그대로 온다 — 역할을 더했을 뿐이다.
+    const engineerOnLocked = await saveRepairCaseUsedParts({
+      repairCaseId: lockedNotImportedCaseId,
+      expectedVersion: await versionOf(lockedNotImportedCaseId),
+      actorUserId: adminId,
+      actorRole: "AS_ENGINEER",
+      lines: [{ partId: null, partNameText: "엔지니어가 잠긴 건에", quantity: 1 }],
+    });
+    assert.equal(engineerOnLocked.ok, false);
+    if (engineerOnLocked.ok) return;
+    assert.equal(engineerOnLocked.code, "CASE_LOCKED");
+
+    const engineerOnHistory = await saveRepairCaseUsedParts({
+      repairCaseId: partRequestCaseId,
+      expectedVersion: await versionOf(partRequestCaseId),
+      actorUserId: adminId,
+      actorRole: "AS_ENGINEER",
+      lines: [{ partId: null, partNameText: "엔지니어가 이력 있는 건에", quantity: 1 }],
+    });
+    assert.equal(engineerOnHistory.ok, false);
+    if (engineerOnHistory.ok) return;
+    assert.equal(engineerOnHistory.code, "PART_REQUEST_HISTORY_EXISTS");
+  });
+
+  test("역할에 따라 조회의 판정도 갈린다 — 화면과 저장이 같은 함수를 본다", async () => {
+    for (const role of ROLE_CODES) {
+      const view = await getRepairCaseUsedPartsView(roleCaseId, role);
+      assert.equal(view.writeGate.ok, CAN_WRITE_BY_ROLE[role], `${role} 의 화면 판정`);
+    }
+    // 계정을 읽지 못한 요청(삭제 · 정지 · 세션 끊김)은 닫히는 쪽으로 떨어진다.
+    const anonymous = await getRepairCaseUsedPartsView(roleCaseId, null);
+    assert.equal(anonymous.writeGate.ok, false);
+    if (anonymous.writeGate.ok) return;
+    assert.equal(anonymous.writeGate.code, "ROLE_NOT_ALLOWED");
   });
 });
 
@@ -378,6 +530,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [
         { partId: null, partNameText: "첫째", quantity: 1 },
         { partId: null, partNameText: "둘째", quantity: 2 },
@@ -404,6 +557,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [
         { partId: partAId, partNameText: `${PREFIX}-PART-A`, quantity: 1 },
         { partId: null, partNameText: "마스터에 없는 옛 부품", quantity: 4 },
@@ -427,6 +581,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: randomUUID(), partNameText: "없는 부품", quantity: 1 }],
     });
 
@@ -444,6 +599,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [],
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -457,6 +613,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
         repairCaseId: plainCaseId,
         expectedVersion: version,
         actorUserId: adminId,
+        actorRole: "SUPER_ADMIN",
         lines: [{ partId: null, partNameText: "0개 갈았다", quantity: 0 }],
       }),
       // drizzle 이 감싼 오류라 CHECK 이름은 cause 에 있다.
@@ -479,6 +636,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: plainCaseId,
       expectedVersion: plainVersion,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "평범한 건의 줄", quantity: 1 }],
     });
 
@@ -490,6 +648,7 @@ describe("사용 부품 저장 — 줄 다루기", () => {
       repairCaseId: importedLockedCaseId,
       expectedVersion: importedVersion,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "가져온 건의 줄", quantity: 9 }],
     });
 
@@ -510,6 +669,7 @@ describe("사용 부품 저장 — 동시 편집과 감사 이력", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version - 1,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "낡은 폼이 보낸 줄", quantity: 1 }],
     });
     assert.equal(stale.ok, false);
@@ -520,6 +680,7 @@ describe("사용 부품 저장 — 동시 편집과 감사 이력", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version + 5,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "앞선 번호", quantity: 1 }],
     });
     assert.equal(ahead.ok, false);
@@ -539,6 +700,7 @@ describe("사용 부품 저장 — 동시 편집과 감사 이력", () => {
       repairCaseId: plainCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: partAId, partNameText: `${PREFIX}-PART-A`, quantity: 7 }],
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -560,6 +722,7 @@ describe("사용 부품 저장 — 동시 편집과 감사 이력", () => {
       repairCaseId: lockedNotImportedCaseId,
       expectedVersion: await versionOf(lockedNotImportedCaseId),
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [{ partId: null, partNameText: "막힌 줄", quantity: 1 }],
     });
     assert.deepEqual(await usedPartsAuditRows(lockedNotImportedCaseId), auditBefore);
@@ -573,13 +736,14 @@ describe("사용 부품 조회 — 저장한 것이 그대로 보인다", () => 
       repairCaseId: importedLockedCaseId,
       expectedVersion: version,
       actorUserId: adminId,
+      actorRole: "SUPER_ADMIN",
       lines: [
         { partId: partBId, partNameText: `${PREFIX}-PART-B`, quantity: 1 },
         { partId: null, partNameText: "손으로 적은 것", quantity: 2 },
       ],
     });
 
-    const view = await getRepairCaseUsedPartsView(importedLockedCaseId);
+    const view = await getRepairCaseUsedPartsView(importedLockedCaseId, "SUPER_ADMIN");
     assert.deepEqual(
       view.rows.map((row) => [row.lineNo, row.partId, row.partNameText, row.quantity]),
       [

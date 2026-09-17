@@ -29,16 +29,18 @@ import {
  * 서명만 맞으면 최대 8시간 스스로 유효하므로, 삭제 · 사용 중지 · 잠김 · 세션
  * 끊김인 사람이 열어 둔 화면에서 저장할 수 있으면 안 된다.
  *
- * ── 🔴 이 칸만의 두 규칙은 여기가 아니라 mutation 이 본다 ────────────────────
- * 반출 이력과 출하 잠금은 **트랜잭션 안에서** 판정해야 한다 — 여기서 미리 봐도
- * 그 사이에 바뀔 수 있고, 무엇보다 판정이 두 벌이 된다. mutation 이 조회와 같은
- * 함수로 본다(auth/repair-case-used-parts-authorization.ts).
+ * ── 🔴 이 칸만의 규칙 셋은 여기가 아니라 mutation 이 본다 ────────────────────
+ * 역할 · 반출 이력 · 출하 잠금은 **트랜잭션 안에서** 판정해야 한다 — 여기서 미리
+ * 봐도 그 사이에 바뀔 수 있고, 무엇보다 판정이 두 벌이 된다. mutation 이 조회와
+ * 같은 함수로 본다(auth/repair-case-used-parts-authorization.ts).
  *
- * ── 🔴 역할 표를 따로 두지 않았다 ───────────────────────────────────────────
- * 접수 건 필드 편집에는 역할별 칸 표(authorizeSubmittedFields)가 있지만, 사용
- * 부품에는 사용자가 그런 표를 정하지 않았다 — 「수리건 자료 편집과 같은 앞부분」
- * 까지가 확정된 범위다. 임의로 역할을 좁히면 이 칸을 쓰라고 만든 사람이 막히므로
- * 좁히지 않았고, 대신 보고서에 적어 두었다. 좁혀야 한다면 고칠 곳은 이 파일 하나다.
+ * ── 🔴 역할은 여기서 **나르기만** 한다 ──────────────────────────────────────
+ * 이 파일이 하는 일은 살아 있는 계정을 읽어 그 역할을 mutation 에 건네주는 것
+ * 뿐이다. 「어느 역할이 적을 수 있는가」는 위 인가 모듈의 USED_PARTS_WRITE_ROLES
+ * 한 곳에만 있다 — 여기에 역할 이름을 다시 적으면 그 순간 목록이 두 벌이 된다.
+ *
+ * 역할을 세션 토큰이 아니라 resolveActingUserForSession 이 읽은 행에서 가져오는
+ * 까닭은 위 문단과 같다 — 강등된 사람이 열어 둔 화면에서 저장할 수 있으면 안 된다.
  * ============================================================================
  */
 export type SaveRepairCaseUsedPartsActionInput = {
@@ -106,6 +108,7 @@ export async function saveRepairCaseUsedPartsAction(
       repairCaseId: input.repairCaseId,
       expectedVersion: input.expectedVersion,
       actorUserId: actingUser.id,
+      actorRole: actingUser.role,
       lines: validation.lines,
     });
     return result;

@@ -7,6 +7,7 @@ import {
   resolveUsedPartsWriteGate,
   type UsedPartsWriteGate,
 } from "@/lib/auth/repair-case-used-parts-authorization";
+import type { Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -73,11 +74,14 @@ export type RepairCaseUsedPartsView = {
    */
   hasPartRequestHistory: boolean;
   /**
-   * 🔴 **여기에 적을 수 있는 건인가 — 서버가 내린 판정이다** (B-2).
+   * 🔴 **이 사람이 여기에 적을 수 있는가 — 서버가 내린 판정이다** (B-2 · B-3).
    *
    * 화면은 이 값만 보고 입력 칸을 그릴지 정한다. 화면이 스스로 판정하면 판정이
    * 두 벌이 되고, 그러면 화면이 여는 조건과 서버가 받아 주는 조건이 어긋난다 —
    * 저장을 받는 mutation 도 **같은 함수**(resolveUsedPartsWriteGate)를 부른다.
+   *
+   * 「건」만이 아니라 **역할**도 이 판정에 들어간다(B-3) — 그래서 이 함수는 보는
+   * 사람의 역할을 받는다.
    */
   writeGate: UsedPartsWriteGate;
 };
@@ -154,8 +158,11 @@ export async function isImportedFromKyosanIntake(
 }
 
 /**
- * 「사용 부품」 칸이 필요로 하는 것 전부를 한 번에 — 적힌 줄과, **여기에 적을 수
- * 있는 건인가**(B-2 의 두 규칙).
+ * 「사용 부품」 칸이 필요로 하는 것 전부를 한 번에 — 적힌 줄과, **이 사람이 여기에
+ * 적을 수 있는가**(auth/repair-case-used-parts-authorization.ts 의 규칙 셋).
+ *
+ * `actorRole` 은 살아 있는 계정에서 읽은 역할이다([id]/page.tsx 의 actingUser).
+ * 계정을 읽지 못했으면 null 을 넘긴다 — 판정이 닫히는 쪽으로 떨어진다.
  *
  * 네 질의를 **나란히**(Promise.all) 쏜다 — 전부 이 건 하나만 보는 작은 인덱스
  * 조회다(`repair_case_used_parts_repair_case_id_line_no_unique` 의 선행 칼럼,
@@ -163,7 +170,10 @@ export async function isImportedFromKyosanIntake(
  * `status_change_histories` 의 건별 인덱스). 부르는 쪽도 이 함수를 자기
  * Promise.all 에 태우므로 화면이 기다리는 시간은 늘지 않는다.
  */
-export async function getRepairCaseUsedPartsView(repairCaseId: string): Promise<RepairCaseUsedPartsView> {
+export async function getRepairCaseUsedPartsView(
+  repairCaseId: string,
+  actorRole: Role | null
+): Promise<RepairCaseUsedPartsView> {
   const [rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase] = await Promise.all([
     db
       .select({
@@ -189,6 +199,7 @@ export async function getRepairCaseUsedPartsView(repairCaseId: string): Promise<
     rows,
     hasPartRequestHistory,
     writeGate: resolveUsedPartsWriteGate({
+      actorRole,
       hasPartRequestHistory,
       // 건을 못 찾았으면(휴지통에 들어갔거나 사라졌다) **잠긴 것으로 본다** —
       // 그래야 화면이 적을 자리를 열지 않는다. 저장 쪽은 같은 경우를 NOT_FOUND 로
