@@ -125,7 +125,7 @@ test("DATABASE 건 — product_id 가 같으면 Model/L·N/S·N 표기가 달라
   );
 });
 
-test("이력 항목은 화면이 그리는 여섯 칸을 그대로 담는다", () => {
+test("이력 항목은 화면이 그리는 일곱 칸을 그대로 담는다", () => {
   const current = caseOf({ id: "now", receivedAt: "2026-06-01" });
   const earlier = caseOf({
     id: "old",
@@ -133,6 +133,7 @@ test("이력 항목은 화면이 그리는 여섯 칸을 그대로 담는다", (
     receivedAt: "2026-03-10",
     status: "SHIPMENT_COMPLETED",
     actualShipmentDate: "2026-03-25",
+    reportedSymptom: "전원이 들어오지 않음",
   });
 
   assert.deepEqual(findProductHistoryMatches([current, earlier], current), [
@@ -143,8 +144,35 @@ test("이력 항목은 화면이 그리는 여섯 칸을 그대로 담는다", (
       receivedAt: "2026-03-10",
       status: "SHIPMENT_COMPLETED",
       actualShipmentDate: "2026-03-25",
+      reportedSymptom: "전원이 들어오지 않음",
     },
   ]);
+});
+
+/**
+ * 신고증상은 접수 건 자신의 칸이라 **별도 조회 없이** 여기서 실어 보낸다
+ * (짝이 되는 `조치 내용`은 작업기록에서 도출되므로 이 자료구조에 없다 —
+ * product-history-match.ts 의 RelatedMatch 주석을 볼 것).
+ */
+test("이력 항목이 신고증상을 싣는다 — 값이 있을 때도, 비었을 때도", () => {
+  const current = caseOf({ id: "now", receivedAt: "2026-06-01" });
+  const withSymptom = caseOf({
+    id: "with",
+    receivedAt: "2026-05-01",
+    reportedSymptom: "매칭 불량 · 반사파 증가",
+  });
+  const withoutSymptom = caseOf({ id: "without", receivedAt: "2026-04-01", reportedSymptom: null });
+
+  assert.deepEqual(
+    findProductHistoryMatches([current, withSymptom, withoutSymptom], current).map((m) => [
+      m.id,
+      m.reportedSymptom,
+    ]),
+    [
+      ["with", "매칭 불량 · 반사파 증가"],
+      ["without", null],
+    ]
+  );
 });
 
 /**

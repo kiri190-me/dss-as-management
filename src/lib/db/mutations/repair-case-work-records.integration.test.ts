@@ -31,6 +31,7 @@ import { createWorkRecord, invalidateWorkRecord } from "./repair-case-work-recor
 import {
   getRecentWorkRecordsForCase,
   getWorkRecordHistoryForCase,
+  getDerivedServiceSummariesForCases,
   getDerivedServiceSummaryForCase,
 } from "../queries/repair-case-work-records";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
@@ -847,8 +848,113 @@ describe("getDerivedServiceSummaryForCase (고장 및 서비스 정보 derived s
   });
 });
 
+/**
+ * ============================================================================
+ * getDerivedServiceSummariesForCases — 「과거 A/S 이력」 줄들의 `조치 내용`
+ * ============================================================================
+ * 이력 칸은 줄마다 조치 내용을 보여 주는데, 줄마다 getDerivedServiceSummary-
+ * ForCase 를 부르면 이력 수만큼 왕복이 생긴다(N+1). 그래서 형제 함수가 여러
+ * 건을 한 번에 가져온다.
+ *
+ * 🔴 여기서 못 박는 것은 하나다 — **두 함수가 같은 건에 같은 값을 준다.**
+ * 규칙(invalidated_at IS NULL · GENERAL 제외 · created_at DESC, id DESC
+ * tie-break)이 한 쪽에서만 어긋나면 이력 줄에 보이는 글과 그 건을 눌러
+ * 들어갔을 때 본문에 보이는 글이 달라진다. 그래서 아래 시험들은 값을 직접
+ * 적어 두는 대신 **두 함수를 나란히 불러 비교**한다.
+ * ============================================================================
+ */
+describe("getDerivedServiceSummariesForCases (이력 줄의 조치 내용 — 여러 건 한 번에)", () => {
+  const EMPTY_SUMMARY = { intakeInspectionResult: null, currentDiagnosisSummary: null, nextPlannedAction: null };
+
+  /** 건마다 부른 결과와 한 번에 부른 결과가 같은지 — 이 묶음의 핵심 단언. */
+  async function assertMatchesPerCaseReads(ids: string[]) {
+    const batch = await getDerivedServiceSummariesForCases(ids);
+    for (const id of ids) {
+      const single = await getDerivedServiceSummaryForCase(id);
+      assert.deepEqual(batch.get(id) ?? EMPTY_SUMMARY, single, `건별 조회와 여러 건 조회가 어긋났다: ${id}`);
+    }
+    return batch;
+  }
+
+  test("34. several cases at once — each one matches its own per-case read, and GENERAL never leaks in", async () => {
+    const full = await createTestCase({ assignedEngineerId: engineerId });
+    const diagnosisOnly = await createTestCase({ assignedEngineerId: engineerId });
+    const empty = await createTestCase({ assignedEngineerId: engineerId });
+
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "일반 메모(무시되어야 함)", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "인수점검 결과 (구)", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "인수점검 결과 (최신)", recordKind: "INTAKE_INSPECTION_RESULT", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "진단 요약 (구)", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "진단 요약 (최신)", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: full.id, actorUserId: engineerId, memo: "다음 계획 (최신)", recordKind: "NEXT_PLANNED_ACTION", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    await createWorkRecord({ repairCaseId: diagnosisOnly.id, actorUserId: engineerId, memo: "다른 건의 진단 요약", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+
+    const ids = [full.id, diagnosisOnly.id, empty.id];
+    const batch = await assertMatchesPerCaseReads(ids);
+
+    // 건별로 최신 한 줄씩 — 한 건의 값이 다른 건으로 새지 않는다.
+    assert.deepEqual(batch.get(full.id), {
+      intakeInspectionResult: "인수점검 결과 (최신)",
+      currentDiagnosisSummary: "진단 요약 (최신)",
+      nextPlannedAction: "다음 계획 (최신)",
+    });
+    assert.deepEqual(batch.get(diagnosisOnly.id), { ...EMPTY_SUMMARY, currentDiagnosisSummary: "다른 건의 진단 요약" });
+  });
+
+  test("35. an invalidated latest record falls back the same way it does per case", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const older = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "이전 진단 요약", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const newer = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "최신 진단 요약", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(older.ok, true);
+    assert.equal(newer.ok, true);
+    if (!older.ok || !newer.ok) return;
+
+    let batch = await assertMatchesPerCaseReads([created.id]);
+    assert.equal(batch.get(created.id)?.currentDiagnosisSummary, "최신 진단 요약");
+
+    await invalidateWorkRecord({ workRecordId: newer.id, actorUserId: adminId, reason: "최신 기록 무효 처리" });
+    batch = await assertMatchesPerCaseReads([created.id]);
+    assert.equal(batch.get(created.id)?.currentDiagnosisSummary, "이전 진단 요약", "무효 처리된 줄 대신 이전 유효 줄로 물러나야 한다");
+
+    await invalidateWorkRecord({ workRecordId: older.id, actorUserId: adminId, reason: "이전 기록도 무효 처리" });
+    batch = await assertMatchesPerCaseReads([created.id]);
+    // 유효한 줄이 하나도 남지 않으면 그 건은 **열쇠 자체가 없다**(37번과 같은
+    // 약속). 부르는 쪽은 없는 열쇠를 null 로 읽어 화면에 "-" 를 그린다.
+    assert.equal(batch.has(created.id), false, "남은 유효 줄이 없으면 Map 에 열쇠가 없다");
+    assert.equal(batch.get(created.id)?.currentDiagnosisSummary ?? null, null, "화면은 '-' 를 그린다");
+  });
+
+  test("36. an exact created_at tie is broken by id DESC here too, matching the per-case read", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const tiedTimestamp = new Date("2099-11-15T00:00:00.000Z");
+
+    const [rowA, rowB] = await db
+      .insert(repairCaseWorkRecords)
+      .values([
+        { repairCaseId: created.id, authorUserId: engineerId, memo: "동시각 진단 A", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", createdAt: tiedTimestamp },
+        { repairCaseId: created.id, authorUserId: engineerId, memo: "동시각 진단 B", recordKind: "DIAGNOSIS_REPAIR_SUMMARY", createdAt: tiedTimestamp },
+      ])
+      .returning({ id: repairCaseWorkRecords.id, memo: repairCaseWorkRecords.memo });
+
+    const expectedWinner = rowA.id > rowB.id ? rowA : rowB;
+
+    const batch = await assertMatchesPerCaseReads([created.id]);
+    assert.equal(batch.get(created.id)?.currentDiagnosisSummary, expectedWinner.memo, "id 가 큰 줄이 이겨야 한다 — 건별 조회와 같은 tie-break");
+  });
+
+  test("37. a case with no work records has no map entry at all; an empty id list returns an empty map", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const batch = await getDerivedServiceSummariesForCases([created.id]);
+    assert.equal(batch.has(created.id), false, "작업기록이 없는 건은 열쇠 자체가 없다 — 부르는 쪽이 null 로 읽어 '-' 를 그린다");
+    assert.deepEqual(await getDerivedServiceSummaryForCase(created.id), EMPTY_SUMMARY);
+
+    assert.equal((await getDerivedServiceSummariesForCases([])).size, 0);
+  });
+});
+
 describe("real-data safety", () => {
-  test("34. this suite never touches the real repair cases, templates, nodes, edges, or ERROR issues", async () => {
+  test("38. this suite never touches the real repair cases, templates, nodes, edges, or ERROR issues", async () => {
     const [repairCaseCounts] = await db.select({ count: sql<number>`count(*)::int` }).from(repairCases).where(sql`intake_number not like ${"D" + TEST_YEAR_MONTH + "%"}`);
     const [templateCounts] = await db.select({ count: sql<number>`count(*)::int` }).from(procedureTemplates).where(sql`code not like ${TEST_CODE_PREFIX + "%"}`);
     const [nodeCounts] = await db

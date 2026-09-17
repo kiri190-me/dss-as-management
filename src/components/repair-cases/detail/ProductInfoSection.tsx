@@ -17,9 +17,24 @@ function Field({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+/**
+ * 이력 한 줄 안의 보조 줄(신고증상 · 조치 내용). 값이 없으면 "-" 를 그린다.
+ * 🔴 긴 글이 칸을 무너뜨리지 않게 두 줄에서 자른다 — 작업기록 메모는 길이
+ * 제한이 느슨해서 그대로 풀면 이력 한 줄이 화면을 다 먹는다.
+ */
+function HistoryLine({ label, value }: { label: string; value: string | null }) {
+  return (
+    <span className="flex gap-1.5 text-xs">
+      <span className="shrink-0 text-zinc-400 dark:text-zinc-500">{label}</span>
+      <span className="line-clamp-2 min-w-0 text-zinc-600 dark:text-zinc-300">{value ?? "-"}</span>
+    </span>
+  );
+}
+
 export default function ProductInfoSection({
   resolved,
   related,
+  relatedActionSummaries,
   editableFields,
   editingSection,
   referenceData,
@@ -28,6 +43,8 @@ export default function ProductInfoSection({
 }: {
   resolved: EffectiveRepairCase;
   related: RelatedMatch[];
+  /** 건 id → 이력 줄에 그릴 `조치 내용`(작업기록에서 도출, 없으면 null) — see RepairCaseDetailView. */
+  relatedActionSummaries: Record<string, string | null>;
   editableFields: readonly string[] | null;
   editingSection: RepairCaseEditSection | null;
   referenceData: IntakeReferenceData | null;
@@ -90,33 +107,48 @@ export default function ProductInfoSection({
             동일 장비의 이전 A/S 이력이 없습니다.
           </p>
         )}
-        <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-          데모 매칭 기준: 모의 데이터끼리는 동일 제품 ID로, 로컬 데모 데이터가
-          포함된 비교는 정규화된 Model + L/N + S/N 일치로 매칭합니다. 실제
-          운영 매칭 로직이 아닙니다.
-        </p>
+        {/* 매칭 기준 안내. DATABASE 건은 제품 개체 FK(product_id)로 맞추므로
+            예전의 "실제 운영 매칭 로직이 아닙니다" 문구는 더 이상 사실이
+            아니다 — 데모 자료(MOCK/LOCAL_DEMO)일 때만 그 문구를 보인다. */}
+        {resolved.source === "DATABASE" ? (
+          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+            매칭 기준: 등록된 같은 제품으로 접수된 건을 찾습니다. Model·L/N·S/N
+            표기가 달라도 같은 제품이면 나오고, 세 값이 같아도 다른 제품이면
+            나오지 않습니다.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+            데모 매칭 기준: 모의 데이터끼리는 동일 제품 ID로, 로컬 데모 데이터가
+            포함된 비교는 정규화된 Model + L/N + S/N 일치로 매칭합니다. 실제
+            운영 매칭 로직이 아닙니다.
+          </p>
+        )}
         {related.length > 0 && (
           <ul className="mt-2 flex flex-col gap-2">
             {related.map((item) => (
               <li key={item.id}>
                 <Link
                   href={`/repair-cases/${item.id}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-100 p-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
+                  className="flex flex-col gap-1 rounded-md border border-zinc-100 p-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
                 >
-                  <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-50">
-                    {item.intakeNumber}
-                    <SourceBadge source={item.source} />
-                  </span>
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    접수일 {item.receivedAt}
-                  </span>
-                  {item.status === "SHIPMENT_COMPLETED" && item.actualShipmentDate ? (
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      출하 완료 {item.actualShipmentDate}
+                  <span className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-50">
+                      {item.intakeNumber}
+                      <SourceBadge source={item.source} />
                     </span>
-                  ) : (
-                    <StatusBadge status={item.status} />
-                  )}
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      접수일 {item.receivedAt}
+                    </span>
+                    {item.status === "SHIPMENT_COMPLETED" && item.actualShipmentDate ? (
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        출하 완료 {item.actualShipmentDate}
+                      </span>
+                    ) : (
+                      <StatusBadge status={item.status} />
+                    )}
+                  </span>
+                  <HistoryLine label="신고증상" value={item.reportedSymptom} />
+                  <HistoryLine label="조치 내용" value={relatedActionSummaries[item.id] ?? null} />
                 </Link>
               </li>
             ))}

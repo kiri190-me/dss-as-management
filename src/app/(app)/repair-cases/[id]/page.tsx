@@ -12,7 +12,11 @@ import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references"
 import { listRepairCasesByProductId } from "@/lib/db/queries/repair-cases";
 import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability } from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
-import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
+import {
+  getDerivedServiceSummariesForCases,
+  getDerivedServiceSummaryForCase,
+  type DerivedServiceSummary,
+} from "@/lib/db/queries/repair-case-work-records";
 import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
@@ -121,15 +125,39 @@ export default async function RepairCaseDetailPage({
   // 규칙은 주간보고 `입고 요청일`과 **같은 도메인 함수**가 가져야 하고
   // (pickEarliestDueDate), 그래야 두 화면이 같은 자료를 다른 날짜로 보여 줄 수
   // 없다.
-  const [derivedServiceSummary, domesticOrderDueDates] = await Promise.all([
+  //
+  // 이력 줄들의 `조치 내용` — 같은 표, 같은 규칙, **한 번의 왕복**으로.
+  // 줄마다 getDerivedServiceSummaryForCase 를 부르면 이력 수만큼 왕복이
+  // 생기므로(N+1) 형제 함수에 id 목록을 한꺼번에 넘긴다. 이력 줄에 보이는
+  // 글과 그 건을 눌러 들어갔을 때 본문에 보이는 글은 **같은 소스**여야
+  // 하므로, repair_cases 의 옛 텍스트 칼럼이 아니라 위 본문 요약과 똑같이
+  // 작업기록에서 도출한다.
+  //
+  // MOCK/LOCAL_DEMO 건은 애초에 작업기록 표에 대응물이 없으므로 목록에서
+  // 빠진다(이력 매칭 규칙상 MOCK 건의 이력은 MOCK 뿐이라 이 목록이 통째로
+  // 비고, 조회 자체가 일어나지 않는다).
+  const relatedDatabaseCaseIds = related.filter((match) => match.source === "DATABASE").map((match) => match.id);
+
+  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId] = await Promise.all([
     resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
     resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
+    relatedDatabaseCaseIds.length > 0
+      ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
+      : new Map<string, DerivedServiceSummary>(),
   ]);
+
+  // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
+  // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.
+  // 작업기록이 없는 건은 여기서 null 이 되고, 화면은 "-" 를 그린다.
+  const relatedActionSummaries = Object.fromEntries(
+    related.map((match) => [match.id, relatedSummaryByCaseId.get(match.id)?.currentDiagnosisSummary ?? null])
+  );
 
   return (
     <RepairCaseDetailView
       resolved={resolved}
       related={related}
+      relatedActionSummaries={relatedActionSummaries}
       actingUser={actingUser}
       referenceData={referenceData}
       partRequestData={partRequestData}

@@ -50,6 +50,7 @@ import PendingBillingDecisionCard from "@/components/repair-cases/detail/Pending
 export default function RepairCaseDetailView({
   resolved,
   related,
+  relatedActionSummaries,
   actingUser,
   referenceData,
   partRequestData,
@@ -58,6 +59,13 @@ export default function RepairCaseDetailView({
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
+  /**
+   * 이력 줄의 `조치 내용` — 건 id → 작업기록에서 도출한 값(없으면 null).
+   * 접수 건의 칼럼이 아니라 상세 화면 본문과 **같은 소스**(작업기록의
+   * DIAGNOSIS_REPAIR_SUMMARY 최신 줄)에서 한 번에 가져온 것이라 RelatedMatch
+   * 안이 아니라 이 짝 지도로 온다, see [id]/page.tsx.
+   */
+  relatedActionSummaries: Record<string, string | null>;
   actingUser: ActingUser | null;
   referenceData: IntakeReferenceData | null;
   /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
@@ -141,6 +149,7 @@ export default function RepairCaseDetailView({
         <ProductInfoSection
           resolved={effective}
           related={related}
+          relatedActionSummaries={relatedActionSummaries}
           editableFields={productFields}
           editingSection={editingSection}
           referenceData={referenceData}

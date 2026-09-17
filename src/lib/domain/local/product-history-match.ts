@@ -71,9 +71,22 @@ export function findProductHistoryMatches(
     .map(toRelatedMatch);
 }
 
+/**
+ * 이력 한 줄이 그리는 값들. `reportedSymptom`(신고증상)은 접수 때 적는 값이라
+ * 이미 ResolvedRepairCase 에 실려 있으므로 여기서 옮겨 담기만 한다 — 별도
+ * 조회가 없다.
+ *
+ * ⚠️ 짝이 되는 `조치 내용`은 **여기 없다.** 그 값은 접수 건의 칼럼이 아니라
+ * 작업기록(repair_case_work_records)의 DIAGNOSIS_REPAIR_SUMMARY 최신 줄에서
+ * 도출되고(queries/repair-case-work-records.ts 의
+ * getDerivedServiceSummariesForCases), 화면은 그 결과를 건 id 로 찾아 그린다.
+ * repair_cases 의 옛 텍스트 칼럼(current_diagnosis_summary)을 여기 끼워 넣지
+ * 않는다 — 상세 화면 본문이 읽지 않는 칸이라, 이력 줄과 본문이 서로 다른 글을
+ * 보이게 된다.
+ */
 export type RelatedMatch = Pick<
   ResolvedRepairCase,
-  "id" | "source" | "intakeNumber" | "receivedAt" | "status" | "actualShipmentDate"
+  "id" | "source" | "intakeNumber" | "receivedAt" | "status" | "actualShipmentDate" | "reportedSymptom"
 >;
 
 function toRelatedMatch(c: ResolvedRepairCase): RelatedMatch {
@@ -84,5 +97,6 @@ function toRelatedMatch(c: ResolvedRepairCase): RelatedMatch {
     receivedAt: c.receivedAt,
     status: c.status,
     actualShipmentDate: c.actualShipmentDate,
+    reportedSymptom: c.reportedSymptom,
   };
 }
