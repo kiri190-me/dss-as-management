@@ -55,7 +55,7 @@ type CreateRepairCaseFailure = Extract<CreateRepairCaseResult, { ok: false }>;
  * 가져오기 흔적(LEGACY_IMPORT_STATE_SET 이력)에 importBatchId · sourceRowNumber 와 함께 적는 것
  * (과거 인수품 가져오기, 2026-09-15). 🔴 고객 이름 같은 개인정보는 넣지 않는다 — 칸이 정해져 있고
  * 서비스(server/services/create-repair-case.ts 의 validLegacyImportMetadata)가 그 칸만 받는다.
- * 원문 글자(sourceStatus · sourceBilling)는 50자 이하로 잘려 온다.
+ * 원문 글자(sourceStatus · sourceBilling · sourceReportedSymptom)는 50자 이하로 잘려 온다.
  */
 export type LegacyImportMetadata = {
   source: "KYOSAN_INTAKE_LIST";
@@ -64,6 +64,12 @@ export type LegacyImportMetadata = {
   billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID" | null;
   sourceStatus: string | null;
   sourceBilling: string | null;
+  /**
+   * 신고증상의 **원문**(L열 `客先返却理由`). 수리 건에 들어가는 신고증상은 일본어 낱말을
+   * 한글로 바꾼 글자라(domain/kyosan-intake-import/symptom-translation.ts), 바꾸기 전 글자를
+   * 증거로 남긴다. 고객사가 적어 보낸 기술 용어이고 개인정보 칸이 아니다.
+   */
+  sourceReportedSymptom: string | null;
 };
 
 class CreateRepairCaseRollback extends Error {

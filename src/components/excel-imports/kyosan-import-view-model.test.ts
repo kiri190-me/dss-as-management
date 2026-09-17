@@ -80,6 +80,7 @@ function plan(overrides: Partial<KyosanRowPlan> = {}): KyosanRowPlan {
     billingReview: false,
     billingAdjustment: null,
     sourceBilling: "有償",
+    reportedSymptom: null,
     customer: { kind: "EXISTING", id: "c1", name: "교산전기" },
     endUser: null,
     productModel: { kind: "EXISTING", id: "m1", name: "RF-100" },

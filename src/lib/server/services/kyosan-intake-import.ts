@@ -17,6 +17,7 @@ import {
 import { columnCaption, type KyosanColumnField } from "@/lib/domain/kyosan-intake-import/columns";
 import { nfkcNameKey, suggestSimilarNames } from "@/lib/domain/kyosan-intake-import/name-suggestions";
 import { parseKyosanIntakeWorkbook } from "@/lib/domain/kyosan-intake-import/parse";
+import { translateReportedSymptom } from "@/lib/domain/kyosan-intake-import/symptom-translation";
 import type {
   KyosanBillingAdjustment,
   KyosanClassifiedRow,
@@ -120,6 +121,13 @@ export type KyosanRowPlan = {
   billingReview: boolean;
   billingAdjustment: KyosanBillingAdjustment | null;
   sourceBilling: string | null;
+  /**
+   * 신고증상 — **일본어 낱말을 한글로 바꾼 뒤**의 글자(symptom-translation.ts). 원문은
+   * `raw.reportedSymptom` 에 그대로 있고, 가져오기 흔적 metadata 의 `sourceReportedSymptom`
+   * 으로도 남는다. 미리보기와 실행이 **이 한 값**을 함께 보게 하려고 계획에 담는다 —
+   * 두 길에서 따로 번역하면 한쪽만 고쳐지는 날이 온다.
+   */
+  reportedSymptom: string | null;
   customer: KyosanNameResolution;
   /** END-USER 칸이 비었으면 null. */
   endUser: KyosanNameResolution | null;
@@ -386,8 +394,14 @@ const SHORT_TEXT_FIELDS: readonly KyosanColumnField[] = [
   "reportNumber",
 ];
 
-/** 접수 검증(validateCreateRepairCaseInput)에 걸릴 길이를 미리 알린다 — 실행 때 실패하기 전에. */
-function lengthReasons(raw: KyosanRawRow): string[] {
+/**
+ * 접수 검증(validateCreateRepairCaseInput)에 걸릴 길이를 미리 알린다 — 실행 때 실패하기 전에.
+ *
+ * 신고증상은 **번역한 뒤의 글자**로 잰다. 번역은 낱말 사이에 공백을 넣기도 해서 원문보다
+ * 길어질 수 있는데, 저장되는 것은 번역한 쪽이다 — 원문 길이로 재면 미리보기는 통과시켜
+ * 놓고 실행이 검증에서 떨어지는 날이 온다.
+ */
+function lengthReasons(raw: KyosanRawRow, reportedSymptom: string | null): string[] {
   const reasons: string[] = [];
   for (const field of SHORT_TEXT_FIELDS) {
     const value = raw[field];
@@ -395,7 +409,7 @@ function lengthReasons(raw: KyosanRawRow): string[] {
       reasons.push(`${columnCaption(field)}이 너무 깁니다 — ${MAX_SHORT_TEXT}자까지 가져올 수 있습니다.`);
     }
   }
-  if (raw.reportedSymptom !== null && raw.reportedSymptom.length > MAX_LONG_TEXT) {
+  if (reportedSymptom !== null && reportedSymptom.length > MAX_LONG_TEXT) {
     reasons.push(`${columnCaption("reportedSymptom")}이 너무 깁니다 — ${MAX_LONG_TEXT}자까지 가져올 수 있습니다.`);
   }
   return reasons;
@@ -453,7 +467,10 @@ function classifyRow(
       `현재 절차(${workflowTypeLabels[row.workflowType]})에 ${row.targetStepKey} 단계가 없습니다 — 워크플로 관리에서 발행된 절차를 확인해 주세요.`
     );
   }
-  reasons.push(...lengthReasons(raw));
+  // 🔴 일본어 낱말을 한글로 바꾸는 자리는 여기 **한 곳뿐이다** — 미리보기와 실행이 같은
+  // 계획(plan.reportedSymptom)을 쓴다. 원문은 raw 에 그대로 남는다.
+  const reportedSymptom = translateReportedSymptom(raw.reportedSymptom);
+  reasons.push(...lengthReasons(raw, reportedSymptom));
 
   const customer = resolveCustomer(raw.customerName ?? "", index, reasons);
   const endUser = raw.endUserName === null ? null : resolveEndUser(raw.endUserName, customer, index, reasons);
@@ -477,6 +494,7 @@ function classifyRow(
       billingReview: row.billingReview,
       billingAdjustment: row.billingAdjustment,
       sourceBilling: row.sourceBilling,
+      reportedSymptom,
       customer,
       endUser,
       productModel,
@@ -669,7 +687,8 @@ function buildIntakeInput(raw: KyosanRawRow, plan: KyosanRowPlan): IntakeSubmiss
     accessoryList: null,
     externalConditionSummary: null,
     reasonForRemoval: null,
-    reportedSymptom: raw.reportedSymptom,
+    // 번역한 글자(classifyRow 가 한 번 만든 것). 원문은 metadata 의 sourceReportedSymptom.
+    reportedSymptom: plan.reportedSymptom,
     notes: kyosanImportNotes(plan),
     contactName: null,
     contactPhone: null,
@@ -691,6 +710,8 @@ function buildLegacyImportState(
     billingAdjustment: plan.billingAdjustment,
     sourceStatus: truncateSourceText(raw.statusText),
     sourceBilling: truncateSourceText(plan.sourceBilling),
+    // 신고증상은 일본어 낱말을 한글로 바꿔 넣는다 — 바꾸기 전 원문을 여기 남긴다(50자까지).
+    sourceReportedSymptom: truncateSourceText(raw.reportedSymptom),
   };
   return {
     targetStepKey: plan.targetStepKey,

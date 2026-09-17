@@ -244,7 +244,8 @@ function dataRow(intakeNumber: string, overrides: Cells = {}): Cells {
 // 본 가져오기 — 18행부터 30행까지 13줄.
 const MAIN_DATA: readonly Cells[] = [
   // 18: 전각 고객사명(기존 A 에 붙어야 한다) · 새 End-User · 受付 → 인수점검(from = to 흔적)
-  dataRow("D940101", { J: toFullWidth(CUSTOMER_A), K: END_USER_NEW, V: `RPT-${RUN}-01` }),
+  //     신고증상은 일본어 낱말이 섞인 실제 꼴 — 한글로 바뀌어 들어가고 원문은 metadata 에 남는다.
+  dataRow("D940101", { J: toFullWidth(CUSTOMER_A), K: END_USER_NEW, V: `RPT-${RUN}-01`, L: "FWDノイズ発生" }),
   // 19: 새 고객사 · 새 모델(MB) · 無償 · 出荷済み → 무상 매쳐 출하 완료(잠김)
   dataRow("D940102", { F: MODEL_NEW_MB, G: "MB", J: CUSTOMER_B_NEW, O: "出荷済み", S: "2094-02-01", Y: "無償" }),
   // 20: 제너레이터 出荷待ち → shipment_approved · End-User 를 전각으로(18행이 만든 것에 붙어야 한다)
@@ -309,6 +310,7 @@ async function caseState(id: string) {
       isDeleted: repairCases.isDeleted,
       actualShipmentDate: repairCases.actualShipmentDate,
       notes: repairCases.notes,
+      reportedSymptom: repairCases.reportedSymptom,
       legacyReportNumber: repairCases.legacyReportNumber,
       workflowType: workflowTemplates.code,
       stepKey: workflowSteps.key,
@@ -716,6 +718,7 @@ describe("과거 인수품 가져오기 — 미리보기 · 조각 실행", () =
     assert.equal(intake.isLocked, false);
     assert.equal(intake.legacyReportNumber, `RPT-${RUN}-01`);
     assert.equal(intake.notes, null);
+    assert.equal(intake.reportedSymptom, "FWD 노이즈 발생", "신고증상의 일본어 낱말이 한글로 들어가야 한다");
     assert.equal(intake.productModelId, modelPlainId);
     const intakeHistory = await histories(createdId(mainResults, 18));
     assert.equal(intakeHistory.length, 1);
@@ -730,6 +733,7 @@ describe("과거 인수품 가져오기 — 미리보기 · 조각 실행", () =
       billingAdjustment: null,
       sourceStatus: "受付",
       sourceBilling: "有償",
+      sourceReportedSymptom: "FWDノイズ発生",
     });
     const customerARows = await db.select({ id: customers.id }).from(customers).where(eq(customers.name, CUSTOMER_A));
     assert.equal(customerARows.length, 1);
@@ -790,6 +794,7 @@ describe("과거 인수품 가져오기 — 미리보기 · 조각 실행", () =
       billingAdjustment: "WARRANTY_PO_TO_PARTIAL_PAID",
       sourceStatus: "中断：客先待ち",
       sourceBilling: "無償",
+      sourceReportedSymptom: "출력이 나오지 않음",
     });
 
     // 23 · 24: 유/무상 확인 필요 — 메모 + metadata
@@ -952,6 +957,7 @@ describe("과거 인수품 가져오기 — 대조 규칙", () => {
       billingAdjustment: null,
       sourceStatus: "受付",
       sourceBilling: "有償",
+      sourceReportedSymptom: "FWDノイズ発生",
     };
     const bad = [
       { ...goodMetadata, customerName: CUSTOMER_A },

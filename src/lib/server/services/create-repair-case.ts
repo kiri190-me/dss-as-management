@@ -70,6 +70,7 @@ const LEGACY_IMPORT_METADATA_KEYS = new Set([
   "billingAdjustment",
   "sourceStatus",
   "sourceBilling",
+  "sourceReportedSymptom",
 ]);
 
 /** metadata 에 싣는 원문 글자의 한도. 부르는 쪽이 잘라서 넘긴다. */
@@ -101,7 +102,8 @@ function validLegacyImportMetadata(metadata: unknown): boolean {
     typeof value.billingReview === "boolean" &&
     (value.billingAdjustment === null || value.billingAdjustment === "WARRANTY_PO_TO_PARTIAL_PAID") &&
     isShortTextOrNull(value.sourceStatus) &&
-    isShortTextOrNull(value.sourceBilling)
+    isShortTextOrNull(value.sourceBilling) &&
+    isShortTextOrNull(value.sourceReportedSymptom)
   );
 }
 
