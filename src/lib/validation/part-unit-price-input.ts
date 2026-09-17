@@ -1,5 +1,3 @@
-import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/domain/inventory-types";
-
 /**
  * ============================================================================
  * 단가 입력 검증 — 형식만 본다
@@ -28,9 +26,16 @@ import { STOCK_OWNER_CODES, stockOwnerLabels, type StockOwner } from "@/lib/doma
  * 쉼표를 지우는 것은 사람이 금액을 그렇게 치기 때문이다. 지수 표기를 막는 것은
  * Number() 에 맡기면 "1e3" 이 1000 으로 조용히 통과하기 때문이다.
  *
+ * ── 🔴 단가는 부품마다 하나다 (2026-09-17 사용자 정정) ──────────────────
+ * 소유구분(owner)을 보지 않는다. 같은 부품이면 DSS 것이든 교산 것이든 청구하는
+ * 값이 같다는 것이 업무상 사실이고, 그래서 표에서도 그 축을 없앴다
+ * (schema/part-unit-prices.ts 머리말). 소유구분별로 넷을 받던 배열 검증
+ * (validatePartUnitPriceEntries)이 값 하나 검증으로 바뀐 것이 그 결과다.
+ * 🔴 **한계수량은 그대로 소유구분별이다** — 그쪽 검증은 손대지 않았다.
+ *
  * ── 오류는 칸 단위 한국어다 ─────────────────────────────────────────────
- * fieldErrors 의 키는 **소유자 코드**다. 화면이 그 키로 해당 줄의 입력칸 밑에
- * 문장을 붙인다. 소유자 자체가 잘못된 경우는 붙일 칸이 없으므로 `owner` 키를 쓴다.
+ * fieldErrors 의 키는 UNIT_PRICE_FIELD_ERROR_KEY 하나다. 화면이 그 키로 단가
+ * 입력칸 밑에 문장을 붙인다.
  * ============================================================================
  */
 
@@ -49,8 +54,9 @@ const AMOUNT_PATTERN = /^\d{1,13}(?:\.\d{1,2})?$/;
  * 한쪽만 고쳐지는 날 견적서 금액이 조용히 어긋난다 — 두 값이 같은 견적서의 같은
  * 칸으로 흘러가기 때문에 어긋나도 눈에 띄지 않는다.
  *
- * 소유구분·부품 id 같은 **줄을 가리키는 값은 여기서 보지 않는다.** 이 함수가 아는
- * 것은 금액 한 칸뿐이고, 그래서 축이 다른 두 표가 그대로 나눠 쓸 수 있다.
+ * 부품 id 같은 **줄을 가리키는 값은 여기서 보지 않는다.** 이 함수가 아는 것은
+ * 금액 한 칸뿐이고, 그래서 성격이 다른 여러 금액 칸이 그대로 나눠 쓸 수 있다
+ * (일반 단가 · O/H 단가 · 수리 작업의 시간당 단가).
  *
  * 받아들이는 값은 이 파일 머리말의 "받아들이는 값"과 같다. 쉼표를 지우는 것은
  * 사람이 금액을 그렇게 치기 때문이고, 지수 표기를 막는 것은 Number() 에 맡기면
@@ -75,33 +81,28 @@ export function parseAmountValue(
   return { ok: true, value: trimmed };
 }
 
-/** 단가 한 칸. `unitPrice: null` 은 "정하지 않음" — 저장 쪽이 그 줄을 지운다. */
-export type PartUnitPriceEntry = {
-  owner: StockOwner;
-  unitPrice: string | null;
-};
-
-export type ValidatePartUnitPricesResult =
-  | { ok: true; data: PartUnitPriceEntry[] }
+/** `unitPrice: null` 은 "정하지 않음" — 저장 쪽이 그 줄을 지운다. */
+export type ValidatePartUnitPriceResult =
+  | { ok: true; unitPrice: string | null }
   | { ok: false; fieldErrors: Record<string, string> };
 
-
 /**
- * 단가 칸의 오류 키에 붙는 접두사.
+ * 단가 칸의 오류 키.
  *
- * 한계수량 검증과 이 검증이 **둘 다 소유자 코드를 오류 키로 쓴다**(한 표에서
- * 함께 편집하기 전에는 겹칠 일이 없었다). 저장 쪽이 단가 오류에만 이 접두사를
- * 붙여 내려보내고, 화면이 그것으로 어느 칸 밑에 문장을 붙일지 가른다.
+ * 단가와 한계수량은 **같은 표, 같은 저장 단추**에서 함께 편집되고 오류도 한
+ * 뭉치로 내려온다. 한계수량 쪽 키는 소유자 코드(`DSS`…)와 `owner` 라서, 단가
+ * 키가 그 목록과 겹치지 않아야 한다 — 겹치면 단가가 틀렸는데 빨간 글씨가
+ * 한계수량 칸 밑에 붙는다.
+ *
+ * 🔴 소유구분 축이 없어지면서 단가 칸이 **하나뿐**이 되었다. 예전에는 소유자
+ * 코드에 `price:` 접두사를 붙여 갈랐지만(UNIT_PRICE_FIELD_ERROR_PREFIX), 이제는
+ * 붙일 줄 자체가 하나라 키 하나로 충분하다.
  *
  * ⚠️ **이 상수는 반드시 순수 모듈에 있어야 한다.** 화면(클라이언트 컴포넌트)이
  * 읽는 값인데 mutation 파일에 두면 그 파일의 `server-only` 와 DB 드라이버가
  * 클라이언트 번들로 끌려 들어가 빌드가 통째로 깨진다(실제로 한 번 그랬다).
  */
-export const UNIT_PRICE_FIELD_ERROR_PREFIX = "price:";
-
-export function isStockOwner(value: unknown): value is StockOwner {
-  return typeof value === "string" && (STOCK_OWNER_CODES as readonly string[]).includes(value);
-}
+export const UNIT_PRICE_FIELD_ERROR_KEY = "unitPrice";
 
 /**
  * 칸 하나분의 값. 화면도 이 함수를 그대로 불러 저장 단추를 잠그므로, 화면에서
@@ -117,51 +118,20 @@ export function parseUnitPriceValue(
 }
 
 /**
- * 화면이 한 번에 보내는 소유자 넷(또는 그 일부)을 통째로 검증한다.
+ * 화면이 보내는 단가 한 칸을 검증한다.
  *
- * 넷을 한 번에 저장하기 때문에 **하나라도 틀리면 전부 거절한다** — 반쯤 저장되면
- * 어느 단가가 살아 있는지 화면과 DB 가 달라진다. 같은 소유자가 두 번 오는 것도
- * 거절한다: 어느 쪽이 뜻인지 알 수 없고, 뒤엣것으로 덮어쓰면 화면에서 본 것과
- * 다른 값이 저장될 수 있다.
+ * 🔴 부품 하나에 단가 하나이므로 받는 것도 값 하나다. 소유자를 함께 받아 넷을
+ * 검증하던 시절에는 "하나라도 틀리면 전부 거절"이 중요한 규칙이었는데, 칸이
+ * 하나가 되면서 그 자리가 사라졌다 — 대신 **한계수량과 한 트랜잭션**이라는
+ * 규칙이 남아 있고(mutations/part-minimum-quantities.ts), 그쪽이 반쪽 저장을 막는다.
+ *
+ * 거절할 때 키를 UNIT_PRICE_FIELD_ERROR_KEY 로 고정하는 이유는 위 상수의 주석과
+ * 같다 — 한계수량 오류와 같은 뭉치로 내려가므로 겹치면 안 된다.
  */
-export function validatePartUnitPriceEntries(raw: unknown): ValidatePartUnitPricesResult {
-  const fieldErrors: Record<string, string> = {};
-
-  if (!Array.isArray(raw)) {
-    return { ok: false, fieldErrors: { owner: "단가 입력을 확인할 수 없습니다." } };
+export function validatePartUnitPrice(raw: unknown): ValidatePartUnitPriceResult {
+  const parsed = parseUnitPriceValue(raw);
+  if (!parsed.ok) {
+    return { ok: false, fieldErrors: { [UNIT_PRICE_FIELD_ERROR_KEY]: parsed.message } };
   }
-
-  const entries: PartUnitPriceEntry[] = [];
-  const seen = new Set<string>();
-
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) {
-      fieldErrors.owner = "단가 입력을 확인할 수 없습니다.";
-      continue;
-    }
-
-    const owner = (item as { owner?: unknown }).owner;
-    if (!isStockOwner(owner)) {
-      // 알 수 없는 소유자는 붙일 칸이 없다. 조용히 버리지 않는 이유는, 화면이
-      // 보낸 줄 하나가 통째로 사라지면 사람은 저장됐다고 믿기 때문이다.
-      fieldErrors.owner = "소유 구분을 확인할 수 없습니다.";
-      continue;
-    }
-    if (seen.has(owner)) {
-      fieldErrors[owner] = `${stockOwnerLabels[owner]}가 두 번 들어왔습니다.`;
-      continue;
-    }
-    seen.add(owner);
-
-    const parsed = parseUnitPriceValue((item as { unitPrice?: unknown }).unitPrice);
-    if (!parsed.ok) {
-      fieldErrors[owner] = parsed.message;
-      continue;
-    }
-
-    entries.push({ owner, unitPrice: parsed.value });
-  }
-
-  if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
-  return { ok: true, data: entries };
+  return { ok: true, unitPrice: parsed.value };
 }

@@ -9,12 +9,8 @@ import {
   validatePartMinimumQuantityEntries,
   type PartMinimumQuantityEntry,
 } from "@/lib/validation/part-minimum-quantity-input";
-import {
-  UNIT_PRICE_FIELD_ERROR_PREFIX,
-  validatePartUnitPriceEntries,
-  type PartUnitPriceEntry,
-} from "@/lib/validation/part-unit-price-input";
-import { applyOneUnitPrice } from "./part-unit-prices";
+import { validatePartUnitPrice } from "@/lib/validation/part-unit-price-input";
+import { applyPartUnitPrice } from "./part-unit-prices";
 import { stockOwnerLabels } from "@/lib/domain/inventory-types";
 
 /**
@@ -104,18 +100,9 @@ export async function savePartMinimumQuantities(
   return savePartOwnerSettings({
     partId: input.partId,
     entries: input.entries,
-    unitPriceEntries: undefined,
+    unitPrice: undefined,
     actorUserId: input.actorUserId,
   });
-}
-
-function prefixPriceFieldErrors(fieldErrors: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(fieldErrors).map(([key, message]) => [
-      `${UNIT_PRICE_FIELD_ERROR_PREFIX}${key}`,
-      message,
-    ])
-  );
 }
 
 export type SavePartOwnerSettingsInput = {
@@ -123,11 +110,17 @@ export type SavePartOwnerSettingsInput = {
   /** 한계수량. 보내지 않은 소유자는 건드리지 않는다(= 지금 값 그대로). */
   entries: unknown;
   /**
-   * 소유구분별 단가. **undefined 면 단가를 아예 건드리지 않는다** — 빈 배열과
-   * 다른 뜻이다(빈 배열도 "고칠 칸이 없다"이긴 하지만, undefined 는 "이 저장은
-   * 단가와 무관하다"는 신호다). 옛 진입점이 이 값을 주지 않는다.
+   * 그 부품의 단가 **하나**. 소유구분별이 아니다(2026-09-17 사용자 정정 —
+   * schema/part-unit-prices.ts 머리말).
+   *
+   * 🔴 **undefined 와 빈 문자열은 다른 뜻이다.**
+   *   · `undefined`  — 이 저장은 단가와 무관하다. 지금 값을 그대로 둔다.
+   *                    (단가를 함께 받지 않는 옛 진입점이 이렇게 부른다.)
+   *   · `""` · null  — 사람이 칸을 비웠다. **행을 지운다**(0 으로 저장하지 않는다).
+   * 비운 것을 0 으로 저장하면 "정하지 않음"을 다시 표현할 방법이 사라지고,
+   * 견적서가 정하지 않은 부품을 0원으로 청구하게 된다.
    */
-  unitPriceEntries?: unknown;
+  unitPrice?: unknown;
   actorUserId: string;
 };
 
@@ -135,10 +128,14 @@ export type SavePartOwnerSettingsInput = {
  * ============================================================================
  * 한계수량과 단가를 **한 트랜잭션에** 저장한다
  * ============================================================================
- * 화면(부품 상세의 소유구분 표)이 둘을 한 표에서 편집하고 저장 단추도 하나다.
+ * 화면(부품 상세의 설정 구역)이 둘을 한 구역에서 편집하고 저장 단추도 하나다.
  * 트랜잭션을 따로 열면 "한계수량은 저장됐는데 단가는 안 된" 반쪽 상태가
  * 만들어지고, 그때 화면과 DB 는 서로 다른 말을 한다 — 이 파일 머리말의 1번이
  * 소유자 넷에 대해 말한 것과 같은 이유다.
+ *
+ * 🔴 **축이 서로 다르다**(2026-09-17 사용자 정정). 한계수량은 소유구분마다 하나이고
+ * 단가는 **부품마다 하나**다 — 그래서 entries 는 배열이고 unitPrice 는 값 하나다.
+ * 같은 저장 단추를 쓴다고 해서 두 값의 축까지 같아야 하는 것은 아니다.
  *
  * 행위자 판정 · 권한(`inventory.parts` WRITE) · 부품 잠금은 여기서 **한 번만**
  * 한다. 단가에 다른 권한을 두지 않는 이유는 한계수량과 같다 — 둘 다 그 부품을
@@ -162,25 +159,27 @@ export async function savePartOwnerSettings(
     };
   }
 
-  let priceEntries: PartUnitPriceEntry[] = [];
-  if (input.unitPriceEntries !== undefined) {
-    const validatedPrices = validatePartUnitPriceEntries(input.unitPriceEntries);
-    if (!validatedPrices.ok) {
+  // 🔴 undefined 는 "단가를 건드리지 않는다"이고, null·"" 은 "비웠다(행을 지운다)"
+  // 이다. 둘을 섞으면 단가와 무관한 저장이 멀쩡한 단가를 지운다.
+  const editsUnitPrice = input.unitPrice !== undefined;
+  let unitPrice: string | null = null;
+  if (editsUnitPrice) {
+    const validatedPrice = validatePartUnitPrice(input.unitPrice);
+    if (!validatedPrice.ok) {
       return {
         ok: false,
         code: "INVALID_INPUT",
         message: "단가 입력을 확인해 주세요.",
-        // 🔴 키에 접두사를 붙인다. 두 검증 모두 **소유자 코드**를 키로 쓰기
-        // 때문에(한 표에서 편집하기 전에는 겹칠 일이 없었다), 그대로 두면 단가가
-        // 틀렸는데 빨간 글씨가 한계수량 칸 밑에 붙는다. 화면은 이 접두사로
-        // 어느 칸인지 가른다.
-        fieldErrors: prefixPriceFieldErrors(validatedPrices.fieldErrors),
+        // 🔴 키가 한계수량 쪽(소유자 코드)과 겹치지 않아야 한다 — 겹치면 단가가
+        // 틀렸는데 빨간 글씨가 한계수량 칸 밑에 붙는다. 화면은 이 키로 어느 칸인지
+        // 가른다(validation/part-unit-price-input.ts 의 UNIT_PRICE_FIELD_ERROR_KEY).
+        fieldErrors: validatedPrice.fieldErrors,
       };
     }
-    priceEntries = validatedPrices.data;
+    unitPrice = validatedPrice.unitPrice;
   }
 
-  if (validated.data.length === 0 && priceEntries.length === 0) {
+  if (validated.data.length === 0 && !editsUnitPrice) {
     return { ok: true, changedCount: 0 };
   }
 
@@ -212,11 +211,11 @@ export async function savePartOwnerSettings(
           actorUserId: actor.id,
         });
       }
-      for (const entry of priceEntries) {
-        changedCount += await applyOneUnitPrice(tx, {
+      if (editsUnitPrice) {
+        changedCount += await applyPartUnitPrice(tx, {
           partId: part.id,
           partName: part.partName,
-          entry,
+          unitPrice,
           actorUserId: actor.id,
         });
       }

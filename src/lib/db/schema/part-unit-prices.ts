@@ -1,21 +1,40 @@
 import { sql } from "drizzle-orm";
 import { check, numeric, pgTable, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { parts } from "./inventory";
-import { stockOwnerEnum } from "./inventory-enums";
 import { users } from "./users";
 
 /**
  * ============================================================================
- * 단가 — 부품 × 소유구분마다 "이건 얼마짜리인가"
+ * 단가 — 부품마다 "이건 얼마짜리인가"
  * ============================================================================
- * part_minimum_quantities 와 **구조가 같다.** 그 표가 이미 "부품 × 소유구분"
- * 축의 설정값을 담는 선례이고, 왜 그 모양이어야 하는지가 그 파일 머리말에
- * 전부 적혀 있다. 여기서는 단가에만 해당하는 것을 적는다.
+ * **부품 하나에 단가 하나다.** 소유구분(owner)은 이 값의 축이 아니다.
  *
- * ── 왜 parts 에 칸 넷을 만들지 않았나 ───────────────────────────────────
- * `단가_DSS`·`단가_교산`… 처럼 두면 소유구분이 하나 느는 순간 또 마이그레이션이고,
- * stock_owner enum 에 이미 있는 목록을 칸 이름에 다시 박아 넣게 된다. 소유구분은
- * **자료의 축**이지 부품의 속성이 아니다.
+ * ── 🔴 왜 소유구분 축을 없앴나 (2026-09-17 사용자 정정) ─────────────────
+ * 처음에는 part_minimum_quantities 를 본떠 (part_id, owner) 로 만들었다.
+ * 한계수량이 소유구분마다 다른 것은 사실이라 그 모양이 자연스러워 보였지만,
+ * **단가는 그렇지 않다는 것이 업무상 사실이다** — 같은 부품이면 DSS 것이든
+ * 교산 것이든 보수부재든 고객사에 청구하는 값은 같다. 소유구분은 그 물건이
+ * 누구 것이냐일 뿐이고, 얼마에 파느냐와는 상관이 없다.
+ *
+ * 축이 아닌 것을 축으로 두면 같은 수를 네 번 적게 되고, 그러면
+ *   · 한 줄만 고치고 나머지를 잊는 사고가 반드시 난다. 그때 어느 줄이 옳은지
+ *     DB 는 알려 주지 못한다 — 넷 다 형식상 정상이다.
+ *   · 출고 기록의 소유구분이 NULL 인 옛 요청(schema/inventory-part-requests.ts)은
+ *     붙일 단가를 고를 수 없어 견적서에 빈칸으로 들어왔다. 실제로는 단가가
+ *     정해져 있는 부품인데도 사람이 다시 찾아 적어야 했다.
+ * 이 표가 그 사고를 이미 겪었다 — 합치기 전 개발 DB 에 같은 부품의 값이 서로
+ * 다르게 두 줄씩 남아 있었다(마이그레이션 0103 의 병합 단계).
+ *
+ * 🔴 **한계수량은 그대로 소유구분별이다.** 그쪽은 축이 맞다 — DSS 재고는
+ * 스무 개를 채워 두고 시험용은 두 개면 되는 식으로 실제로 값이 갈린다.
+ * 이 표가 한계수량과 더 이상 같은 모양이 아닌 것은 그래서다.
+ *
+ * ── 🔴 왜 parts 에 칸을 더하지 않았나 ───────────────────────────────────
+ * 부품마다 하나라면 parts.unit_price 로 둘 수도 있었다. 그러지 않은 이유는
+ * part_overhaul_unit_prices 와 같다: **누가 언제 이 단가를 정했는지**를 남겨야
+ * 하는데(updated_by / updated_at), parts 에 얹으면 품명을 고친 사람이 단가를
+ * 정한 사람으로 보이고, 감사 로그에서도 "부품을 고쳤다"와 "단가를 고쳤다"가
+ * 한 줄로 섞인다. 값의 생애가 다르면 표를 나눈다.
  *
  * ── 🔴 왜 part_stock_balances 에 칸을 더하지 않았나 ─────────────────────
  * 그 표는 **입고가 있어야 행이 생긴다**. 재고가 0인 부품에는 붙일 칸 자체가
@@ -50,9 +69,14 @@ import { users } from "./users";
  * 완전삭제가 FK 오류로 막히고, 자동 정리 작업(purgeExpiredPart)이 통째로 멈춘다.
  *
  * ── 컬럼 관례 ───────────────────────────────────────────────────────────
- * part_minimum_quantities 와 같다 — 대리 키 + updated_by / updated_at. 대리 키를
- * 쓰는 이유도 같다: 감사 로그의 target_record_id 가 NOT NULL uuid 라, 누가 언제
- * 값을 바꿨는지 남기려면 행마다 uuid 하나가 있어야 한다.
+ * 형제 표들과 같다 — 대리 키 + updated_by / updated_at. 부품마다 한 줄뿐이라
+ * part_id 자체를 기본 키로 삼을 수도 있었지만 그러지 않았다(이제
+ * part_overhaul_unit_prices 와 같은 모양이고, 같은 이유다): 감사 로그의
+ * target_record_id 가 NOT NULL uuid 라, 누가 언제 값을 바꿨는지 남기려면 행마다
+ * uuid 하나가 있어야 하고, 그 uuid 는 부품 id 와 구별돼야 감사 로그에서 "부품을
+ * 고쳤다"와 "그 부품의 단가를 고쳤다"가 섞이지 않는다.
+ *
+ * "부품마다 한 줄"은 part_id 의 UNIQUE 로 DB 가 지킨다.
  * ============================================================================
  */
 export const partUnitPrices = pgTable(
@@ -62,7 +86,6 @@ export const partUnitPrices = pgTable(
     partId: uuid("part_id")
       .notNull()
       .references(() => parts.id, { onDelete: "cascade" }),
-    owner: stockOwnerEnum("owner").notNull(),
     /**
      * 원화 단가(부가세 별도). 0 이상이며 그 규칙은 아래 CHECK 가 DB 에서
      * 강제한다. 입력 검증(validation/part-unit-price-input.ts)도 같은 규칙을 따로
@@ -80,6 +103,6 @@ export const partUnitPrices = pgTable(
   },
   (table) => [
     check("part_unit_prices_not_negative", sql`${table.unitPrice} >= 0`),
-    uniqueIndex("part_unit_prices_part_owner_unique").on(table.partId, table.owner),
+    uniqueIndex("part_unit_prices_part_unique").on(table.partId),
   ]
 );

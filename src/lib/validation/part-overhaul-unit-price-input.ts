@@ -53,8 +53,9 @@ export type ValidatePartOverhaulUnitPricesResult =
  * O/H 부품 템플릿 화면은 **템플릿 칸과 단가 칸을 한 폼에서** 편집한다. 두 검증이
  * 서로 다른 것을 키로 쓰지만(템플릿은 칸 이름, 단가는 부품 id) 한 자루에 담기면
  * 화면은 어느 쪽 오류인지 가릴 수 없다. 그래서 단가 오류에만 이 접두사를 붙인다 —
- * part-unit-price-input.ts 의 UNIT_PRICE_FIELD_ERROR_PREFIX 와 같은 장치이고,
- * 그쪽이 `"price:"` 이므로 겹치지 않게 다른 글자를 쓴다.
+ * part-unit-price-input.ts 의 UNIT_PRICE_FIELD_ERROR_KEY 와 같은 장치다. 그쪽은
+ * 칸이 하나뿐이라 접두사 없이 키 하나(`"unitPrice"`)로 끝나지만, 여기는 부품마다
+ * 한 줄씩 여러 줄이라 접두사가 필요하다.
  */
 export const OVERHAUL_UNIT_PRICE_FIELD_ERROR_PREFIX = "ohPrice:";
 

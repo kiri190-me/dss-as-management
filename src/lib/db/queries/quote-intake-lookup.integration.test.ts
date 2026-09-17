@@ -197,17 +197,9 @@ describe("lookupIntakeForQuote", () => {
     assert.equal(await lookupIntakeForQuote("D999999"), null);
   });
 
-  test("그 소유구분에 정해 둔 단가가 따라온다", async () => {
+  test("그 부품에 정해 둔 단가가 따라온다 — 소유구분과 무관하다", async () => {
     const partId = await createTestPart("priced");
-    await savePartOwnerSettings({
-      partId,
-      entries: [],
-      unitPriceEntries: [
-        { owner: "DSS", unitPrice: "125000" },
-        { owner: "KYOSAN", unitPrice: "999999" },
-      ],
-      actorUserId,
-    });
+    await savePartOwnerSettings({ partId, entries: [], unitPrice: "125000", actorUserId });
     await insertIssuedRequest([{ partId, owner: "DSS", issued: 2 }]);
 
     const found = await lookupIntakeForQuote(intakeNumber);
@@ -216,7 +208,6 @@ describe("lookupIntakeForQuote", () => {
     assert.ok(used, "출고한 부품이 목록에 없다");
     assert.equal(used.owner, "DSS");
     assert.equal(used.quantity, 2);
-    // 교산 단가(999999)가 오면 **다른 소유구분의 값으로 청구**하게 된다.
     assert.equal(Number(used.unitPrice), 125000);
   });
 
@@ -233,12 +224,7 @@ describe("lookupIntakeForQuote", () => {
 
   test("0원(무상)으로 정해 둔 단가는 그대로 온다 — 정하지 않음과 다르다", async () => {
     const partId = await createTestPart("free");
-    await savePartOwnerSettings({
-      partId,
-      entries: [],
-      unitPriceEntries: [{ owner: "DSS", unitPrice: "0" }],
-      actorUserId,
-    });
+    await savePartOwnerSettings({ partId, entries: [], unitPrice: "0", actorUserId });
     await insertIssuedRequest([{ partId, owner: "DSS", issued: 1 }]);
 
     const found = await lookupIntakeForQuote(intakeNumber);
@@ -249,17 +235,11 @@ describe("lookupIntakeForQuote", () => {
     assert.equal(Number(used.unitPrice), 0);
   });
 
-  test("같은 부품이 두 소유구분으로 나가면 두 줄이다 — 단가가 다르기 때문", async () => {
+  test("같은 부품이 두 소유구분으로 나가면 두 줄이다 — 어디서 나갔는지가 남는다", async () => {
     const partId = await createTestPart("two-owners");
-    await savePartOwnerSettings({
-      partId,
-      entries: [],
-      unitPriceEntries: [
-        { owner: "DSS", unitPrice: "100" },
-        { owner: "KYOSAN", unitPrice: "200" },
-      ],
-      actorUserId,
-    });
+    // 🔴 단가는 부품마다 하나이므로 두 줄에 **같은 값**이 붙는다. 줄이 갈리는
+    // 것은 단가 때문이 아니라 소유구분을 화면에 보여 주기 위해서다.
+    await savePartOwnerSettings({ partId, entries: [], unitPrice: "100", actorUserId });
     // ⚠️ 요청 **하나**에는 같은 부품이 한 번만 들어간다
     // (inventory_part_request_items_request_part_unique). 소유구분이 다르면
     // 요청 자체가 갈린다 — 실제로도 DSS 것을 받고 나서 교산 것을 따로 청구한다.
@@ -274,18 +254,13 @@ describe("lookupIntakeForQuote", () => {
     assert.equal(rows.length, 2, "두 줄이어야 한다");
     assert.deepEqual(rows.sort(), [
       ["DSS", 1, 100],
-      ["KYOSAN", 3, 200],
+      ["KYOSAN", 3, 100],
     ]);
   });
 
-  test("소유구분이 없는 옛 요청은 단가가 붙지 않는다", async () => {
+  test("🔴 소유구분이 없는 옛 요청에도 단가가 붙는다 — 부품 하나에 값이 하나다", async () => {
     const partId = await createTestPart("no-owner");
-    await savePartOwnerSettings({
-      partId,
-      entries: [],
-      unitPriceEntries: [{ owner: "DSS", unitPrice: "555" }],
-      actorUserId,
-    });
+    await savePartOwnerSettings({ partId, entries: [], unitPrice: "555", actorUserId });
     await insertIssuedRequest([{ partId, owner: null, issued: 1 }]);
 
     const found = await lookupIntakeForQuote(intakeNumber);
@@ -293,8 +268,9 @@ describe("lookupIntakeForQuote", () => {
     const used = found.usedParts.find((p) => p.partId === partId);
     assert.ok(used);
     assert.equal(used.owner, null);
-    // DSS 단가(555)를 끌어오면 알 수 없는 소유구분에 남의 값을 붙이는 것이다.
-    assert.equal(used.unitPrice, null);
+    // 소유구분 축이 있던 시절에는 어느 줄의 값인지 고를 수 없어 빈칸이었다.
+    // 이제 고를 일이 없으므로, 사람이 다시 찾아 적지 않아도 된다.
+    assert.equal(Number(used.unitPrice), 555);
   });
 
   test("출고되지 않은 요청은 세지 않는다 — 쓰지도 않은 값을 청구하면 안 된다", async () => {

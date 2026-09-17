@@ -56,14 +56,17 @@ export async function savePartMinimumQuantitiesAction(input: {
   partId: string;
   entries: unknown;
   /**
-   * 소유구분별 단가. 화면이 한계수량과 **한 표에서** 편집하고 저장 단추도 하나라
-   * 같은 요청에 실어 보낸다 — 따로 보내면 한쪽만 저장되는 상태가 만들어진다
+   * 그 부품의 단가 **하나**. 소유구분별이 아니다(2026-09-17 사용자 정정 —
+   * schema/part-unit-prices.ts 머리말).
+   *
+   * 화면이 한계수량과 **한 구역에서** 편집하고 저장 단추도 하나라 같은 요청에
+   * 실어 보낸다 — 따로 보내면 한쪽만 저장되는 상태가 만들어진다
    * (mutations/part-minimum-quantities.ts 의 savePartOwnerSettings).
    *
-   * 넘기지 않으면 단가는 건드리지 않는다. 이 인자가 생기기 전에 이 액션을 부르던
-   * 코드가 그대로 동작한다.
+   * 🔴 넘기지 **않으면**(undefined) 단가는 건드리지 않는다. 빈 문자열은 그와
+   * 달리 "정하지 않음"이라 그 줄을 지운다.
    */
-  unitPriceEntries?: unknown;
+  unitPrice?: unknown;
 }): Promise<SavePartMinimumQuantitiesResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
@@ -73,7 +76,7 @@ export async function savePartMinimumQuantitiesAction(input: {
     savePartOwnerSettings({
       partId: input.partId,
       entries: input.entries,
-      unitPriceEntries: input.unitPriceEntries,
+      unitPrice: input.unitPrice,
       actorUserId: actorCheck.userId,
     })
   );

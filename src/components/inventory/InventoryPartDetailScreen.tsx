@@ -6,7 +6,6 @@ import TransactionHistoryList from "./TransactionHistoryList";
 import type { RepairCaseOption } from "./ConsumeStockDialog";
 import type { PartDetail, StockTransactionRow, ReturnableUseRow } from "@/lib/db/queries/inventory";
 import type { PartMinimumQuantityRow } from "@/lib/db/queries/part-minimum-quantities";
-import type { PartUnitPriceRow } from "@/lib/db/queries/part-unit-prices";
 import { STOCK_OWNER_CODES, type StockOwner } from "@/lib/domain/inventory-types";
 import type { Role } from "@/lib/domain/types";
 import type { InventoryCapabilities } from "@/lib/auth/inventory-capabilities";
@@ -15,7 +14,7 @@ export default function InventoryPartDetailScreen({
   part,
   history,
   minimumQuantities,
-  unitPrices,
+  unitPrice,
   returnableByBalanceId,
   categorySuggestions,
   itemTypeSuggestions,
@@ -28,8 +27,12 @@ export default function InventoryPartDetailScreen({
   history: StockTransactionRow[];
   /** 정해진 것만 온다 — 없는 소유자는 "정하지 않음"이다(0 이 아니다). */
   minimumQuantities: PartMinimumQuantityRow[];
-  /** 정해진 것만 온다 — 없는 소유자는 "정하지 않음"이다("0"(무상)과 다르다). */
-  unitPrices: PartUnitPriceRow[];
+  /**
+   * 이 부품의 단가. **부품마다 하나다** — 소유구분별이 아니다(2026-09-17 사용자
+   * 정정, schema/part-unit-prices.ts 머리말). null 이면 "정하지 않음"이고
+   * "0"(무상)과 다르다.
+   */
+  unitPrice: string | null;
   returnableByBalanceId: Record<string, ReturnableUseRow[]>;
   categorySuggestions: string[];
   itemTypeSuggestions: string[];
@@ -52,15 +55,13 @@ export default function InventoryPartDetailScreen({
     quantityByOwner.set(balance.owner, (quantityByOwner.get(balance.owner) ?? 0) + balance.currentQuantity);
   }
   const minimumByOwner = new Map(minimumQuantities.map((row) => [row.owner, row.minimumQuantity]));
-  const priceByOwner = new Map(unitPrices.map((row) => [row.owner, row.unitPrice]));
   // 넷을 모두 줄로 만든다 — 재고 행이 없는 소유자에도 한계수량을 걸 수 있어야 한다.
+  // 🔴 단가는 여기 없다. 소유구분 축이 아니라 부품마다 하나여서 이 표 밖으로
+  // 나갔다(2026-09-17 사용자 정정).
   const minimumQuantityRows = STOCK_OWNER_CODES.map((owner) => ({
     owner,
     currentQuantity: quantityByOwner.get(owner) ?? 0,
     minimumQuantity: minimumByOwner.get(owner) ?? null,
-    // 단가도 같은 이유로 넷을 모두 그린다 — 재고가 없는 소유구분에 단가를 적어
-    // 두는 일이 오히려 잦다(사려고, 혹은 견적을 내려고).
-    unitPrice: priceByOwner.get(owner) ?? null,
   }));
 
   return (
@@ -120,6 +121,7 @@ export default function InventoryPartDetailScreen({
       <PartMinimumQuantitySection
         partId={part.id}
         rows={minimumQuantityRows}
+        unitPrice={unitPrice}
         // 부품 정보를 고칠 수 있는 사람과 같은 판정이다(inventory.parts WRITE).
         canEdit={capabilities.parts}
       />

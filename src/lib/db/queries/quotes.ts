@@ -644,12 +644,13 @@ export type QuoteIntakeLookup = {
     owner: StockOwner | null;
     quantity: number;
     /**
-     * 그 소유구분에 정해 둔 단가. **null 이면 "정하지 않음"이고 빈칸으로 둔다** —
+     * 그 부품에 정해 둔 단가. **null 이면 "정하지 않음"이고 빈칸으로 둔다** —
      * 0 으로 바꾸면 견적서가 정하지 않은 부품을 0원으로 청구하게 된다
      * (schema/part-unit-prices.ts 머리말). "0"은 무상 부품이라는 뜻이라 그대로 쓴다.
      *
-     * 소유구분이 NULL 인 옛 요청은 붙일 단가가 없다 — 어느 소유구분의 값인지
-     * 알 수 없는데 아무거나 가져오면 **다른 소유구분의 값으로 청구**하게 된다.
+     * 🔴 **소유구분과 무관하다**(2026-09-17 사용자 정정). 그래서 소유구분이 NULL 인
+     * 옛 요청에도 단가가 붙는다 — 예전에는 어느 소유구분의 값인지 알 수 없어
+     * 빈칸으로 들어왔지만, 이제 부품 하나에 값이 하나뿐이라 고를 일이 없다.
      */
     unitPrice: string | null;
     /**
@@ -745,8 +746,9 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
       partSpec: parts.partSpec,
       owner: inventoryPartRequestItems.owner,
       issuedQuantity: inventoryPartRequestItems.issuedQuantity,
-      // 그 소유구분에 정해 둔 단가. 소유구분이 NULL 이면 조인이 붙지 않아
-      // null 이 온다 — 그때는 붙일 단가가 없는 것이 맞다(위 타입 주석).
+      // 그 부품에 정해 둔 단가. **소유구분을 보지 않는다** — 부품 하나에 단가
+      // 하나다(2026-09-17 사용자 정정). 정해 두지 않았으면 조인이 붙지 않아
+      // null 이 오고, 그것이 "정하지 않음"이다(위 타입 주석).
       unitPrice: partUnitPrices.unitPrice,
       // 작업비는 소유구분과 무관하다 — parts 에 바로 있다.
       laborCost: parts.laborCost,
@@ -757,13 +759,8 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
       eq(inventoryPartRequests.id, inventoryPartRequestItems.requestId)
     )
     .innerJoin(parts, eq(parts.id, inventoryPartRequestItems.partId))
-    .leftJoin(
-      partUnitPrices,
-      and(
-        eq(partUnitPrices.partId, inventoryPartRequestItems.partId),
-        eq(partUnitPrices.owner, inventoryPartRequestItems.owner)
-      )
-    )
+    // 부품 하나에 단가 한 줄이라(part_id UNIQUE) 이 조인이 행을 늘리지 않는다.
+    .leftJoin(partUnitPrices, eq(partUnitPrices.partId, inventoryPartRequestItems.partId))
     .where(
       and(
         eq(inventoryPartRequests.repairCaseId, row.repairCaseId),
@@ -773,10 +770,13 @@ export async function lookupIntakeForQuote(intakeNumber: string): Promise<QuoteI
     .orderBy(asc(parts.partName));
 
   /**
-   * **(부품, 소유구분)** 짝으로 묶는다. 부품 하나로만 묶지 않는 이유는 단가가
-   * 소유구분마다 다르기 때문이다 — DSS 것 하나와 교산 것 둘을 한 줄로 합치면
-   * 어느 쪽 단가로 청구할지 답할 수 없다. 같은 부품이 두 줄로 보이는 편이
-   * 정확하고, 실제로 두 소유구분에서 나간 것이 맞다.
+   * **(부품, 소유구분)** 짝으로 묶는다.
+   *
+   * 처음에는 단가가 소유구분마다 달라서 갈랐지만, 단가에서 그 축이 없어진
+   * 지금도(2026-09-17) 갈라 둔다 — 화면이 줄마다 **어느 소유구분에서 나갔는지**를
+   * 보여 주고(QuoteEditForm 의 출고 부품 목록), 사람은 그것을 보고 담을지 정한다.
+   * DSS 것 하나와 교산 것 둘을 한 줄로 합치면 그 사실이 사라진다. 합치는 것은
+   * 화면에서 지우는 일이라, 단가 축을 없애는 이번 변경에 얹지 않는다.
    */
   const byPartAndOwner = new Map<string, QuoteIntakeLookup["usedParts"][number]>();
   for (const part of usedPartRows) {
