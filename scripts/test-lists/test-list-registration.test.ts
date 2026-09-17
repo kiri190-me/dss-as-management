@@ -39,6 +39,12 @@ function walkTestFiles(dir: string, found: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      // vendor/ 는 **별도 저장소**(git submodule)가 체크아웃되는 자리다.
+      // 그쪽 시험은 그쪽이 제 플래그로 돌린다(vendor/dss-ui 는 `npm test`
+      // 하나). 여기 목록에 적으면 남의 저장소가 시험을 하나 늘릴 때마다 이
+      // 시험이 깨지고, 우리 플래그(react-server 조건 등)로 남의 시험을
+      // 돌리게 된다.
+      if (dir === ROOT && entry.name === "vendor") continue;
       walkTestFiles(path.join(dir, entry.name), found);
     } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
       found.push(path.relative(ROOT, path.join(dir, entry.name)).split(path.sep).join("/"));

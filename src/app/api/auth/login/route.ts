@@ -5,6 +5,7 @@ import {
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
 } from "@/lib/auth/session";
+import { SERVICE_MENU_COOKIE_NAME } from "@/lib/auth/service-menu-cookie";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { isDemoLoginEnabled } from "@/lib/config/demo-login";
@@ -104,6 +105,16 @@ export async function POST(request: NextRequest) {
     secure: isHttpsRequest(request),
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
+  });
+  // 이 통로로 들어온 사람에게는 서비스 메뉴바 목록이 없다(그 목록은 통합
+  // 로그인 ID 토큰에만 실려 온다). 앞사람이 통합 로그인으로 남긴 쿠키가
+  // 그대로 있으면 **남의 시스템 목록**이 이 사람 화면 위에 뜨므로 지운다.
+  response.cookies.set(SERVICE_MENU_COOKIE_NAME, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isHttpsRequest(request),
+    path: "/",
+    maxAge: 0,
   });
   return response;
 }

@@ -1,0 +1,20 @@
+/*
+ * 서비스 메뉴바의 노치 인셋 — 이 저장소에서만 켜는 값이다.
+ *
+ * 이 앱은 viewport-fit=cover 로 화면 전체를 쓴다(app/layout.tsx 의 viewport
+ * 주석). 그래서 맨 위에 오는 요소가 상태 표시줄/노치 밑으로 들어가지 않게
+ * env(safe-area-inset-top) 만큼 밀어야 하는데, 이제 맨 위는 머리말(TopBar)이
+ * 아니라 이 띠다. 같은 인셋을 **둘 다** 두면 아이폰에서 두 번 밀리므로
+ * TopBar 에서는 뺐고(띠가 없을 때만 AppShell 이 되돌려 준다), 대신 여기서
+ * 띠에 걸어 준다. @dss/ui 가 이 변수를 받게 만들어 두었다(그쪽 README 3절).
+ *
+ * 선택자가 `[data-color-scheme]` 까지 붙은 이유: @dss/ui 의 기본값
+ * (`.dss-menu { --dss-menu-inset-top: 0px }`)과 명시도가 같으면 두 CSS 의
+ * **불러온 차례**가 승부를 가른다. 그 차례는 번들러가 정하는 것이고, 어긋나도
+ * 인셋이 없는 기기(데스크톱 전부)에서는 증상이 전혀 보이지 않아 조용히
+ * 되돌아간다. data-color-scheme 은 ServiceMenuBar 가 늘 붙이는 속성이라
+ * 명시도만 한 칸 올리고 걸리는 자리는 그대로다.
+ */
+.dss-menu[data-color-scheme] {
+  --dss-menu-inset-top: env(safe-area-inset-top);
+}

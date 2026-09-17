@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SERVICE_MENU_COOKIE_NAME } from "@/lib/auth/service-menu-cookie";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { isHttpsRequest, isTrustedOrigin } from "@/lib/auth/request-guards";
 import { getLoginMode } from "@/lib/config/login-mode";
@@ -58,5 +59,9 @@ export async function POST(request: NextRequest) {
 
   const response = redirectTo(logoutDestination());
   expire(response, SESSION_COOKIE_NAME, request);
+  // 서비스 메뉴바 목록도 같이 지운다. 남겨 두면 로그아웃한 사람의 브라우저에
+  // 「이 사람이 어떤 시스템을 쓰는지」가 그대로 남는다 — 공용 PC 에서는
+  // 그것만으로도 알려 줄 이유가 없는 정보다.
+  expire(response, SERVICE_MENU_COOKIE_NAME, request);
   return response;
 }

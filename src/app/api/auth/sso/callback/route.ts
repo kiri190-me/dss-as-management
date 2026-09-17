@@ -6,6 +6,10 @@ import {
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
 } from "@/lib/auth/session";
+import {
+  createServiceMenuToken,
+  SERVICE_MENU_COOKIE_NAME,
+} from "@/lib/auth/service-menu-cookie";
 import { resolveSsoLogin } from "@/lib/auth/sso-login";
 import { verifyToken } from "@/lib/auth/token";
 import { getLoginMode } from "@/lib/config/login-mode";
@@ -165,6 +169,16 @@ export async function GET(request: NextRequest) {
   // sso-role.ts and sso-profile.ts are the only places allowed to decide what
   // these values mean.
   let profileClaims: { role?: unknown; email?: unknown; name?: unknown } = {};
+  /**
+   * 「이 사람이 들어갈 수 있는 시스템 목록」(포털의 dss_services 클레임).
+   * 위 profileClaims 와 같은 이유로 unknown 이고, 같은 payload 에서 읽으므로
+   * sub 와 **같은 서명 · 발급자 · 수신자 보증**을 받는다. 무엇을 그릴 수 있는
+   * 값으로 칠지는 service-menu-cookie.ts 와 @dss/ui 가 정한다.
+   *
+   * 🔴 포털의 그 기능은 아직 배포되지 않았다 — 지금은 **없을 수 있고**,
+   * 없어도 로그인은 예전과 똑같이 끝나야 한다(아래 쿠키만 안 구워진다).
+   */
+  let serviceMenuClaim: unknown;
   try {
     const { payload } = await jwtVerify(body.id_token, jwks(), {
       issuer: getSsoIssuer(),
@@ -190,6 +204,7 @@ export async function GET(request: NextRequest) {
       email: payload.email,
       name: payload.name,
     };
+    serviceMenuClaim = payload.dss_services;
   } catch (error) {
     console.error("[sso] id_token 검증 실패:", error);
     return fail("sso");
@@ -248,6 +263,26 @@ export async function GET(request: NextRequest) {
     secure: isHttpsRequest(request),
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
+  });
+
+  /**
+   * 서비스 메뉴바가 그릴 목록 — **세션 쿠키와 갈라** 따로 굽는다
+   * (service-menu-cookie.ts 의 파일 주석). httpOnly · sameSite · secure ·
+   * path · 수명을 바로 위 세션 쿠키와 **같은 값**으로 맞춘다: 둘의 수명이
+   * 어긋나면 세션이 살아 있는데 메뉴만 사라지거나 그 반대가 된다.
+   *
+   * 클레임이 없으면(포털이 아직 그 기능을 배포하지 않았다) 굽지 않고,
+   * **남아 있던 것을 지운다**(maxAge 0). 공용 PC 에서 앞사람의 목록이
+   * 뒷사람 화면에 남지 않게 하기 위한 것이다 — 로그인은 이 줄이 있으나
+   * 없으나 똑같이 끝난다.
+   */
+  const serviceMenuToken = createServiceMenuToken(serviceMenuClaim);
+  response.cookies.set(SERVICE_MENU_COOKIE_NAME, serviceMenuToken ?? "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isHttpsRequest(request),
+    path: "/",
+    maxAge: serviceMenuToken === null ? 0 : SESSION_MAX_AGE_SECONDS,
   });
   return response;
 }

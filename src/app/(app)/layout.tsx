@@ -1,4 +1,15 @@
 import { redirect } from "next/navigation";
+/*
+  서비스 메뉴바의 생김새. @dss/ui 는 CSS 를 스스로 부르지 않는다 — 그러면
+  번들러 없이는 그 조각을 부를 수 없게 되어 그쪽 시험이 깨진다(그쪽 README).
+  그래서 쓰는 쪽이 한 번 부른다. 로그인 전 화면(/login · /pending-approval)은
+  (app) 밖이라 이 줄이 닿지 않는다 — 띠도 거기엔 없다.
+
+  🔴 아래 인셋 파일은 이 줄 **다음**이다. 노치 인셋을 켜는 한 줄이 @dss/ui 의
+  기본값(0px)보다 나중에 와야 하고, 선택자도 한 칸 세게 두었다(그 파일 주석).
+*/
+import "@dss/ui/styles.css";
+import "./service-menu-inset.css";
 import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import SavePopupHost from "@/components/common/SavePopup";
@@ -9,7 +20,8 @@ import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
-import { getSsoPortalUrl } from "@/lib/config/sso";
+import { getSsoClientId, getSsoPortalUrl } from "@/lib/config/sso";
+import { readServiceMenu } from "@/lib/auth/service-menu-cookie";
 import { listMyNotifications } from "@/lib/db/queries/notifications";
 import { countNotificationTargetsByKind } from "@/lib/domain/notifications";
 
@@ -71,6 +83,19 @@ export default async function AppLayout({
   // 없거나 설정이 없다며 터진다.
   const portalUrl = getLoginMode() === "sso" ? getSsoPortalUrl() : null;
 
+  // 머리말 위에 앉는 서비스 메뉴바가 그릴 목록. 포털이 로그인 ID 토큰에 실어
+  // 보낸 것을 SSO 콜백이 **별도 서명 쿠키**에 구워 두었다
+  // (auth/service-menu-cookie.ts — 세션 쿠키에는 넣지 않는다).
+  //
+  // 쿠키가 없거나 못 믿을 것이면 빈 배열이고, 그때 띠는 아예 그려지지 않는다
+  // (빈 띠도 남기지 않는다 — @dss/ui 의 ServiceMenuBar 가 그렇게 동작한다).
+  // 포털의 그 기능이 배포되기 전까지는 늘 이 상태다.
+  const serviceMenu = await readServiceMenu();
+  // 「지금 여기」로 눌러 그릴 칸을 고르는 열쇠 — 이 앱의 client_id 다
+  // (= ID 토큰의 aud, rf-service-system). 목록이 있을 때만 읽는다: 데모
+  // 모드에는 SSO_CLIENT_ID 가 없고, 그때는 쿠키도 없으므로 여기 오지 않는다.
+  const currentServiceId = serviceMenu.length > 0 ? getSsoClientId() : null;
+
   // 사이드바 프로필에 찍히는 역할 이름은 저장된 문구를 따른다. 조회는 루트
   // 레이아웃에서 이미 한 번 돌았고, getUiText 는 요청 단위 cache 라 여기서
   // 다시 불러도 DB 를 또 읽지 않는다.
@@ -85,6 +110,8 @@ export default async function AppLayout({
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
         portalUrl={portalUrl}
+        services={serviceMenu}
+        currentServiceId={currentServiceId}
       >
         {children}
       </AppShell>
