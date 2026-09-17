@@ -78,9 +78,11 @@ export default function PartEditDialog({
       return;
     }
     onClose();
+    // 🔴 넘어가지 않으므로 이 refresh 가 갱신을 도맡는다 — 없으면 창을 닫은 뒤
+    // 뒤에 남은 화면에 옛 값이 그대로 보인다.
     router.refresh();
-    // 부품 자체를 고쳤으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
-    showSavePopup({ message: "부품 정보를 저장했습니다.", redirectTo: "/inventory" });
+    // 팝업만 띄우고 그 자리에 남는다(2026-09-17 사용자 요청).
+    showSavePopup({ message: "부품 정보를 저장했습니다.", redirectTo: null });
   }
 
   return (

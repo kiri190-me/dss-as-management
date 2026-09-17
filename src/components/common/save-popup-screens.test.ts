@@ -184,16 +184,28 @@ test("워크플로 발행·폐기는 도착 화면이 이미 알리므로 팝업
   assert.match(page, /DONE_MESSAGES\[done\]/);
 });
 
-test("부품 상세에서 부품 자체를 바꾸면 팝업 뒤 재고 목록으로 넘어간다", () => {
-  const toList: [string, string][] = [
+test("부품 상세에서 부품·재고를 바꿔도 팝업만 띄우고 그 자리에 남는다", () => {
+  // 2026-09-17 사용자 요청으로 이 다섯이 「팝업 뒤 /inventory 로 넘김」에서 이쪽으로
+  // 옮겨 왔다. 한 부품의 값을 몇 번 고치려고 매번 목록에서 다시 찾아 들어가지
+  // 않으려는 것이다. 문구는 그대로 두고 넘어갈 곳만 없앴다.
+  const stayOnly: [string, string][] = [
     ["PartEditDialog.tsx", '"부품 정보를 저장했습니다."'],
     ["ReceiveStockDialog.tsx", '"입고했습니다."'],
     ["ConsumeStockDialog.tsx", 'approvalRequired ? "불출 승인을 요청했습니다." : "사용 처리했습니다."'],
     ["ReturnStockDialog.tsx", '"반환했습니다."'],
     ["PartMinimumQuantitySection.tsx", '"한계수량·단가를 저장했습니다."'],
   ];
-  for (const [name, message] of toList) {
-    assert.deepEqual(popupCalls(`src/components/inventory/${name}`), [[message, '"/inventory"']], name);
+  for (const [name, message] of stayOnly) {
+    const path = `src/components/inventory/${name}`;
+    assert.deepEqual(popupCalls(path), [[message, "null"]], name);
+    // 🔴 목록으로 넘어가면 서버가 화면을 다시 그려 값이 갱신됐다. 그 자리에 남으면
+    // 그 갱신이 사라지므로, **저장이 성공한 경로에서**(실패는 그 위에서 return 한다)
+    // 화면을 다시 읽어야 한다 — 안 그러면 저장했는데 옛 값이 보인다.
+    assert.match(
+      readFileSync(path, "utf8"),
+      /if \(!result\.ok\) \{[\s\S]*?return;\s*\}\s*(?:onClose\(\);\s*)?(?:\/\/[^\n]*\n\s*)*router\.refresh\(\);\s*(?:\/\/[^\n]*\n\s*)*showSavePopup\(/,
+      name
+    );
   }
 });
 

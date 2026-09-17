@@ -172,9 +172,12 @@ export default function PartMinimumQuantitySection({
       setErrorMessage(result.message);
       return;
     }
+    // 🔴 그 자리에 남으므로 이 refresh 가 갱신을 도맡는다 — 없으면 방금 저장한
+    // 값 대신 옛 값이 그대로 보여 저장이 안 된 것처럼 읽힌다.
     router.refresh();
-    // 부품에 딸린 값을 고쳤으므로 팝업 뒤 재고 목록으로 넘어간다(common/SavePopup.tsx).
-    showSavePopup({ message: "한계수량·단가를 저장했습니다.", redirectTo: "/inventory" });
+    // 팝업만 띄우고 그 자리에 남는다(2026-09-17 사용자 요청). 예전에는 재고 목록으로
+    // 넘어갔는데, 한 부품의 값을 몇 번 고치려면 매번 목록에서 다시 찾아 들어가야 했다.
+    showSavePopup({ message: "한계수량·단가를 저장했습니다.", redirectTo: null });
   }
 
   return (

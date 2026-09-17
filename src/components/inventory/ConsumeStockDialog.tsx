@@ -119,12 +119,13 @@ export default function ConsumeStockDialog({
       return;
     }
     onClose();
+    // 🔴 넘어가지 않으므로 이 refresh 가 갱신을 도맡는다 — 없으면 창을 닫은 뒤
+    // 뒤에 남은 화면에 줄어들기 전 수량이 그대로 보인다.
     router.refresh();
-    // 부품의 재고를 바꿨으므로(승인 절차가 있으면 신청) 팝업 뒤 재고 목록으로
-    // 넘어간다(common/SavePopup.tsx).
+    // 팝업만 띄우고 그 자리에 남는다(2026-09-17 사용자 요청).
     showSavePopup({
       message: approvalRequired ? "불출 승인을 요청했습니다." : "사용 처리했습니다.",
-      redirectTo: "/inventory",
+      redirectTo: null,
     });
   }
 
