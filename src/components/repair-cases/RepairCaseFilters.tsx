@@ -97,7 +97,7 @@ export default function RepairCaseFilters({
           type="text"
           value={filters.query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="인수번호, 고객사, End-User, Model, S/N, 담당 엔지니어 검색"
+          placeholder="인수번호, 고객사, End-User, Model, S/N, L/N, 담당 엔지니어 검색"
           className="w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         />
       </div>

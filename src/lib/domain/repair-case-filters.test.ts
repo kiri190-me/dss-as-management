@@ -345,3 +345,71 @@ test("같은 고객사에 이름이 적힌 행이 하나라도 있으면 그 이
   ];
   assert.deepEqual(nameOf(collectCustomerFilterOptions(rows)), ["가온전자"]);
 });
+
+// ─────────────────────────────────────────────── 검색어
+//
+// 검색은 서버가 아니라 화면에서 건다 — 여러 칸을 한 줄로 이어 붙인 뒤 검색어가
+// 들어 있는지만 본다. 「내 담당 제품」 화면(my-active-work-filter.ts)은 진작
+// L/N 으로 찾을 수 있었는데 이 화면만 그 칸이 빠져 있었다. 아래 시험들이
+// 그 칸을 못 박고, 동시에 원래 되던 여섯 칸이 그대로인지도 지킨다.
+
+test("L/N 으로 검색하면 그 건이 나온다", () => {
+  const rows = [
+    row({ id: "hit", lotNumber: "LN-2026-0731" }),
+    row({ id: "miss", lotNumber: "LN-2026-0801" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ query: "LN-2026-0731" }))), ["hit"]);
+});
+
+test("L/N 검색은 대소문자를 가리지 않고 일부만 쳐도 찾는다", () => {
+  const rows = [row({ id: "hit", lotNumber: "LN-2026-0731" }), row({ id: "miss", lotNumber: "XX-9" })];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ query: "ln-2026" }))), ["hit"]);
+});
+
+test("L/N 이 비어 있는 건은 검색어가 있을 때 조용히 섞여 나오지 않는다", () => {
+  // lotNumber 는 타입상 string 이라(resolved-repair-case.ts) 빈 값은 null 이 아니라
+  // 빈 문자열로 온다. 그래도 Boolean(value) 로 걸러내지 않으면 join(" ")이 군더더기
+  // 빈칸을 만들어, 빈 L/N 이 검색 결과에 끼어들 여지가 생긴다.
+  const rows = [row({ id: "hit", lotNumber: "LN-2026-0731" }), row({ id: "no-lot", lotNumber: "" })];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ query: "LN-2026-0731" }))), ["hit"]);
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ query: "아무데도 없는 말" }))),
+    [],
+    "L/N 이 없는 건이라고 해서 검색을 그냥 통과하지는 않는다"
+  );
+});
+
+test("검색어가 없으면 L/N 이 비어 있는 건도 그대로 남는다", () => {
+  const rows = [row({ id: "hit", lotNumber: "LN-1" }), row({ id: "no-lot", lotNumber: "" })];
+  assert.deepEqual(idsOf(applyFilters(rows, filters())), ["hit", "no-lot"]);
+});
+
+test("원래 되던 여섯 칸 검색은 그대로다", () => {
+  const target = row({
+    id: "target",
+    intakeNumber: "D260813",
+    customerName: "가온전자",
+    endUserName: "나래반도체",
+    modelName: "TG-350",
+    serialNumber: "SN-4417",
+    engineerName: "김엔지니어",
+    lotNumber: "LN-2026-0731",
+  });
+  const other = row({
+    id: "other",
+    intakeNumber: "D260999",
+    customerName: "다온계측",
+    endUserName: "라온디스플레이",
+    modelName: "MC-100",
+    serialNumber: "SN-0002",
+    engineerName: "박엔지니어",
+    lotNumber: "LN-2026-0801",
+  });
+  const rows = [target, other];
+
+  for (const query of ["D260813", "가온전자", "나래반도체", "TG-350", "SN-4417", "김엔지니어"]) {
+    assert.deepEqual(idsOf(applyFilters(rows, filters({ query }))), ["target"], `${query} 로 찾히지 않는다`);
+  }
+  // 새로 더한 칸도 같은 자리에서 함께 동작한다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ query: "LN-2026-0731" }))), ["target"]);
+});

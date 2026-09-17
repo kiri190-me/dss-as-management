@@ -131,6 +131,7 @@ function matchesQuery(row: EffectiveRepairCase, query: string): boolean {
     row.endUserName,
     row.modelName,
     row.serialNumber,
+    row.lotNumber,
     row.engineerName,
   ]
     .filter((value): value is string => Boolean(value))
