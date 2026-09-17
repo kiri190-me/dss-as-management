@@ -255,6 +255,37 @@ function emptyNoteItem(): ItemRow {
 }
 
 /**
+ * ============================================================================
+ * 사람이 보는 번호는 **종류마다 따로 센다** (2026-09-17 사용자 요청)
+ * ============================================================================
+ * 품목 표는 품목 줄과 설명 줄이 **한 목록에 섞여** 있고 그 차례가 곧 문서의 차례다.
+ * 그래서 목록의 index 를 그대로 자리표시 · 이름표에 쓰면, 설명 줄이 하나 끼는 순간
+ * 그 밑의 품목이 죄 한 칸씩 밀려 보인다 — 손도 안 댄 「1번째 품목 품명」이 「2번째
+ * 품목 품명」이 된다(사용자가 본 그 증상).
+ *
+ * 그래서 품목은 품목끼리, 설명은 설명끼리 센다. 줄마다 미리 한 번 세어 두고 쓴다 —
+ * 그리면서 앞을 다시 세면(줄마다 `slice` + `filter`) 줄이 늘수록 느려진다.
+ *
+ * 🔴 **오류 자리는 목록 index 그대로다**(`fieldErrors["items.<index>.…"]`) — 서버가
+ *    돌려주는 자리 번호가 그것이다. 여기서 바뀌는 것은 **사람이 보는 번호뿐**이다.
+ * 🔴 내자 · OH 에는 설명 줄이 없다(케이블 전용) — 종류별로 세어도 보이는 번호는
+ *    지금과 한 글자도 다르지 않다.
+ * ============================================================================
+ */
+function lineOrdinalsOf(rows: readonly ItemRow[]): number[] {
+  let itemSoFar = 0;
+  let noteSoFar = 0;
+  return rows.map((row) => {
+    if (row.lineKind === "NOTE") {
+      noteSoFar += 1;
+      return noteSoFar;
+    }
+    itemSoFar += 1;
+    return itemSoFar;
+  });
+}
+
+/**
  * 출고 부품 목록의 한 줄을 가리키는 키. **부품 하나가 아니라 (부품, 소유구분)**
  * 이다 — 같은 부품이 DSS 것과 교산 것으로 따로 나갔으면 단가가 달라 두 줄이고,
  * 그 둘은 따로 담기고 따로 세어야 한다(queries/quotes.ts 의 같은 판단).
@@ -1356,29 +1387,32 @@ export default function QuoteEditForm({
 
   /**
    * ============================================================================
-   * 설명 줄은 **마지막 품목 줄 바로 위**에 끼운다 (2026-09-17 사용자 요청)
+   * 설명 줄은 **언제나 맨 위**에 들어간다 (2026-09-17 사용자 요청)
    * ============================================================================
    * 설명 줄은 밑에 오는 품목 묶음의 **머리글**이다(`* 20kW RFG 부속케이블 Parts 3종`) —
    * 미리보기도 완성된 문서도 그렇게 읽는다. 그런데 표 끝에 붙이면 방금 적은 품목
-   * **밑으로** 들어가, 누를 때마다 사람이 줄을 손으로 끌어 올려야 한다. 그래서 더하는
-   * 자리부터 머리글 자리로 둔다.
+   * **밑으로** 들어가, 누를 때마다 사람이 줄을 손으로 끌어 올려야 한다.
    *
-   * 품목 줄이 하나도 없으면 머리글을 얹을 것이 없으니 그냥 끝에 붙인다(설명 줄만 여럿
-   * 적어 두는 길도 막지 않는다 — 그때는 적는 차례대로 쌓인다).
+   * 처음에는 마지막 품목 줄을 찾아 그 위에 끼웠는데, 사람이 바란 규칙은 그보다 단순했다 —
+   * 「설명줄은 무조건 제일 위에 떠야 해」. 그래서 품목을 찾지 않고 **언제나 0번 자리**에
+   * 넣는다. 품목 줄이 있든 없든, 설명 줄만 여럿 적어 두든 같은 규칙이다(나중에 더한
+   * 설명 줄이 위로 온다).
    *
    * 🔴 **[+ 품목 추가]는 그대로 끝에 붙인다**(addItemRow) — 품목은 적는 차례가 곧 문서의
    *    차례라, 끼워 넣으면 방금 적은 것이 어디로 갔는지 알 수 없다.
    * 🔴 상한은 addItemRow 와 **같은 규칙**이다 — 단추를 잠그는 것과 별개로 여기서도 막는다.
-   *    끼워 넣는 길만 상한을 안 보면 아홉 줄 양식에 열째 줄이 들어가 [견적서 받기]가 던진다.
+   *    앞에 붙이는 길만 상한을 안 보면 아홉 줄 양식에 열째 줄이 들어가 [견적서 받기]가 던진다.
    * ============================================================================
    */
-  function addNoteRowAboveLastItem(row: ItemRow) {
+  function addNoteRowAtTop(row: ItemRow) {
     setItems((prev) => {
       if (prev.length >= maxItemLines) return prev;
-      const lastItemAt = prev.map((line) => line.lineKind).lastIndexOf("ITEM");
-      return lastItemAt < 0 ? [...prev, row] : [...prev.slice(0, lastItemAt), row, ...prev.slice(lastItemAt)];
+      return [row, ...prev];
     });
   }
+
+  /** 줄마다 「제 종류 안에서 몇 번째인가」 — 자리표시 · 이름표가 쓰는 번호다(lineOrdinalsOf). */
+  const lineOrdinals = lineOrdinalsOf(items);
 
   /**
    * 엑셀 전용 장에 있으면 안 되는 줄의 수 — 서버 규칙이 세는 그대로다(저장이 거르는 빈
@@ -2502,7 +2536,7 @@ export default function QuoteEditForm({
             {isCable && (
               <button
                 type="button"
-                onClick={() => addNoteRowAboveLastItem(emptyNoteItem())}
+                onClick={() => addNoteRowAtTop(emptyNoteItem())}
                 disabled={disabled || itemLinesFull}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
               >
@@ -2531,7 +2565,7 @@ export default function QuoteEditForm({
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
             품목 줄과 설명 줄을 합쳐 <b>{cableMaxLines}줄</b>까지 넣을 수 있습니다 — 양식의 품목
             자리가 그만큼입니다. 설명 줄은 글자만 적히고 <b>합계에 들어가지 않습니다</b>. 적어 둔
-            차례가 그대로 문서의 차례입니다. [+ 설명 줄 추가]는 <b>마지막 품목 줄 위</b>에
+            차례가 그대로 문서의 차례입니다. [+ 설명 줄 추가]는 <b>언제나 맨 위</b>에
             들어갑니다 — 밑에 오는 품목들의 머리글이기 때문입니다.
           </p>
         )}
@@ -2560,7 +2594,7 @@ export default function QuoteEditForm({
                     value={row.partNameText}
                     onChange={(e) => updateItem(row.key, { partNameText: e.target.value })}
                     placeholder="* 20kW RFG 부속케이블 Parts 3종"
-                    aria-label={`${index + 1}번째 설명 줄`}
+                    aria-label={`${lineOrdinals[index]}번째 설명 줄`}
                     className={editInputClass}
                     disabled={disabled}
                   />
@@ -2572,7 +2606,7 @@ export default function QuoteEditForm({
                   type="button"
                   onClick={() => removeItem(row.key)}
                   disabled={disabled}
-                  aria-label={`${index + 1}번째 설명 줄 지우기`}
+                  aria-label={`${lineOrdinals[index]}번째 설명 줄 지우기`}
                   className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
                 >
                   ×
@@ -2593,7 +2627,7 @@ export default function QuoteEditForm({
                 <input
                   value={row.partNameText}
                   onChange={(e) => updateItem(row.key, { partNameText: e.target.value, partId: null })}
-                  placeholder={`${index + 1}번째 ${isCable ? "품목 품명" : "부품 품명"}`}
+                  placeholder={`${lineOrdinals[index]}번째 ${isCable ? "품목 품명" : "부품 품명"}`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2609,7 +2643,7 @@ export default function QuoteEditForm({
                     value={row.partSpecText}
                     onChange={(e) => updateItem(row.key, { partSpecText: e.target.value })}
                     placeholder="규격 (없으면 비워 두세요)"
-                    aria-label={`${index + 1}번째 품목 규격`}
+                    aria-label={`${lineOrdinals[index]}번째 품목 규격`}
                     className={editInputClass}
                     disabled={disabled}
                   />
@@ -2623,7 +2657,7 @@ export default function QuoteEditForm({
                   value={row.quantity}
                   onChange={(e) => updateItem(row.key, { quantity: e.target.value })}
                   inputMode="numeric"
-                  aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 수량`}
+                  aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 수량`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2638,7 +2672,7 @@ export default function QuoteEditForm({
                   value={row.unitPrice}
                   onValueChange={(raw) => updateItem(row.key, { unitPrice: raw })}
                   placeholder="단가"
-                  aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 단가`}
+                  aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 단가`}
                   className={editInputClass}
                   disabled={disabled}
                 />
@@ -2661,7 +2695,7 @@ export default function QuoteEditForm({
                 type="button"
                 onClick={() => removeItem(row.key)}
                 disabled={disabled}
-                aria-label={`${index + 1}번째 ${isCable ? "품목" : "부품"} 줄 지우기`}
+                aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 줄 지우기`}
                 className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
               >
                 ×

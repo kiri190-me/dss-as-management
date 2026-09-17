@@ -120,7 +120,7 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
   test("🔴 규격 칸은 케이블에만 있고, 다른 종류에서는 저장하지도 않는다", () => {
     assert.ok(form.includes('placeholder="규격 (없으면 비워 두세요)"'), "규격 칸이 없다");
     const specCell = sliceBetween(form, "{isCable && ( <div> <input value={row.partSpecText}", "</div> )}");
-    assert.ok(specCell.includes('aria-label={`${index + 1}번째 품목 규격`}'), specCell);
+    assert.ok(specCell.includes('aria-label={`${lineOrdinals[index]}번째 품목 규격`}'), specCell);
     assert.ok(
       collect().includes("partSpecText: isCable && !isNote ? row.partSpecText : null,"),
       "규격을 종류와 무관하게 보낸다"
@@ -131,7 +131,7 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
     const noteRow = sliceBetween(form, 'row.lineKind === "NOTE" ? (', ") : (");
     assert.ok(noteRow.includes("설명 줄 </span>"), "설명 줄임을 알아볼 표시가 없다");
     assert.ok(noteRow.includes("value={row.partNameText}"), "설명 줄에 글자 칸이 없다");
-    assert.ok(noteRow.includes("aria-label={`${index + 1}번째 설명 줄`}"), "설명 줄에 이름이 없다");
+    assert.ok(noteRow.includes("aria-label={`${lineOrdinals[index]}번째 설명 줄`}"), "설명 줄에 이름이 없다");
     assert.ok(!noteRow.includes("value={row.quantity}"), "설명 줄에 수량 칸이 있다");
     assert.ok(!noteRow.includes("<AmountInput"), "설명 줄에 단가 칸이 있다");
     assert.ok(!noteRow.includes("row.partSpecText"), "설명 줄에 규격 칸이 있다");
@@ -142,7 +142,7 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
 
   test("🔴 설명 줄은 더하고 지우는 두 길뿐이다 — 줄마다 종류를 바꾸는 스위치를 두지 않았다", () => {
     assert.ok(
-      form.includes("onClick={() => addNoteRowAboveLastItem(emptyNoteItem())}"),
+      form.includes("onClick={() => addNoteRowAtTop(emptyNoteItem())}"),
       "설명 줄을 더할 길이 없다"
     );
     assert.ok(form.includes("+ 설명 줄 추가"), "설명 줄 단추 글자가 달라졌다");
@@ -153,10 +153,13 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
     assert.ok(!form.includes("updateItem(row.key, { lineKind:"), "줄 종류를 바꾸는 길이 생겼다");
   });
 
-  test("🔴 설명 줄은 **마지막 품목 줄 위**에 들어간다 — 밑에 오는 품목들의 머리글이라서", () => {
+  test("🔴 설명 줄은 **언제나 맨 위**에 들어간다 (2026-09-17 사용자 요청)", () => {
     /**
-     * 단추 둘은 서로 다른 길이다 — 설명 줄만 끼워 넣고, 품목은 지금까지처럼 끝에 붙인다.
+     * 단추 둘은 서로 다른 길이다 — 설명 줄은 앞에 붙이고, 품목은 지금까지처럼 끝에 붙인다.
      * (품목까지 끼워 넣으면 방금 적은 줄이 어디로 갔는지 알 수 없다.)
+     *
+     * 🔴 처음에는 「마지막 품목 줄 위」였다. 사용자가 바란 규칙은 그보다 단순했다 —
+     *    「설명줄은 무조건 제일 위에 떠야 해」. 자리를 고르지 **않는 것**이 규칙이다.
      */
     assert.ok(form.includes("onClick={() => addItemRow(emptyItem())}"), "품목 추가가 끝에 붙이는 길에서 벗어났다");
     assert.ok(
@@ -164,15 +167,16 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
       "끝에 붙이는 길(addItemRow)이 달라졌다"
     );
 
-    const insert = sliceBetween(form, "function addNoteRowAboveLastItem(row: ItemRow) {", "}); }");
-    // 마지막 **품목** 줄을 찾는다 — 설명 줄 뒤에 끼우면 머리글이 머리글을 설명한다.
-    assert.ok(insert.includes('const lastItemAt = prev.map((line) => line.lineKind).lastIndexOf("ITEM");'), insert);
-    // 그 자리에 끼운다 — 마지막 품목과 그 뒤 줄들은 차례 그대로 한 칸씩 밀린다.
-    assert.ok(insert.includes("[...prev.slice(0, lastItemAt), row, ...prev.slice(lastItemAt)]"), insert);
-    // 품목 줄이 하나도 없으면 얹을 것이 없다 — 그때만 끝에 붙인다.
-    assert.ok(insert.includes("lastItemAt < 0 ? [...prev, row] :"), insert);
+    const insert = sliceBetween(form, "function addNoteRowAtTop(row: ItemRow) {", "}); }");
+    // 0번 자리다 — 품목이 있든 없든, 설명 줄만 여럿이든 같은 규칙이다.
+    assert.ok(insert.includes("return [row, ...prev];"), insert);
+    // 자리를 고르는 길이 다시 생기지 않게 못 박는다.
+    assert.ok(!insert.includes('lastIndexOf("ITEM")'), "아직도 마지막 품목 줄을 찾는다");
+    assert.ok(!insert.includes("prev.slice("), "자리를 골라 끼운다 — 맨 위가 아니다");
+    assert.ok(!insert.includes("[...prev, row]"), "설명 줄을 끝에 붙인다");
     // 어디로 들어가는지 화면에서도 말한다 — 눌러 보고 나서 알게 하지 않는다.
-    assert.ok(form.includes("[+ 설명 줄 추가]는 <b>마지막 품목 줄 위</b>에"), "설명 줄 자리 안내가 없다");
+    assert.ok(form.includes("[+ 설명 줄 추가]는 <b>언제나 맨 위</b>에"), "설명 줄 자리 안내가 없다");
+    assert.ok(!form.includes("<b>마지막 품목 줄 위</b>"), "화면 안내가 옛 규칙을 말한다");
   });
 
   test("🔴 차례가 곧 뜻이다 — 품목과 설명을 종류별로 나누지 않고 한 목록으로 보낸다", () => {
@@ -221,13 +225,13 @@ describe("㉤ 아홉 줄 — 화면이 미리 막는다", () => {
       form.includes("setItems((prev) => (prev.length >= maxItemLines ? prev : [...prev, row]));"),
       "더하는 함수가 상한을 보지 않는다"
     );
-    // 🔴 끼워 넣는 길(설명 줄)도 같은 상한을 본다 — 한쪽만 새면 열째 줄이 들어가고,
+    // 🔴 앞에 붙이는 길(설명 줄)도 같은 상한을 본다 — 한쪽만 새면 열째 줄이 들어가고,
     //    그 증상은 저장은 되는데 [견적서 받기]가 던지는 것이다.
     assert.ok(
-      sliceBetween(form, "function addNoteRowAboveLastItem(row: ItemRow) {", "}); }").includes(
+      sliceBetween(form, "function addNoteRowAtTop(row: ItemRow) {", "}); }").includes(
         "if (prev.length >= maxItemLines) return prev;"
       ),
-      "설명 줄을 끼워 넣는 함수가 상한을 보지 않는다"
+      "설명 줄을 앞에 붙이는 함수가 상한을 보지 않는다"
     );
     assert.equal(form.split("disabled={disabled || itemLinesFull}").length - 1, 2, "두 단추가 다 잠기지 않는다");
     // 왜 못 넣는지 말한다 — 잠긴 단추만 두면 「왜 안 눌리지」가 된다.
@@ -337,6 +341,91 @@ describe("㉦ 모델명 · L/N · S/N · 신고증상 — 케이블에서는 그
     // 접는 조건은 `!isCable` 하나다 — 뒤집힌 조건이 붙으면 내자 · OH 에서 칸이 사라진다.
     for (const label of ["모델명", "L/N", "S/N", "신고증상"]) {
       assert.ok(!form.includes(`{isCable && ( <Field label="${label}"`), `${label} 칸이 케이블 전용이 됐다`);
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * ㉧ 자리표시 · 이름표의 번호 — 종류마다 따로 센다 (2026-09-17 사용자 요청)
+ * ============================================================================
+ * 품목 줄과 설명 줄은 **한 목록**에 섞여 있다(차례가 곧 문서의 차례라서). 그런데 사람이
+ * 보는 번호가 그 목록의 index 였다 — 그래서 [+ 설명 줄 추가]를 한 번 누르면, 손도 안 댄
+ * 「1번째 품목 품명」이 「2번째 품목 품명」으로 바뀌었다. 사용자가 본 그 증상이다.
+ *
+ * 고친 규칙은 하나다 — **품목은 품목끼리, 설명은 설명끼리 센다.** 여기서 지키는 것 넷:
+ *
+ *  ㉠ 세는 곳이 하나다(lineOrdinalsOf) — 줄마다 앞을 다시 세지 않는다.
+ *  ㉡ 번호를 쓰는 **일곱 자리가 모두** 그 규칙을 쓴다. 하나만 고쳐진 채 남으면, 낭독기가
+ *     같은 줄에서 「1번째 품목 품명」과 「3번째 품목 수량」을 읽는다.
+ *  ㉢ **오류 자리는 목록 index 그대로**다 — 서버가 돌려주는 자리 번호가 그것이다.
+ *  ㉣ 내자 · OH 는 보이는 번호가 **지금과 똑같다** — 그쪽엔 설명 줄이 없다(케이블 전용).
+ * ============================================================================
+ */
+describe("㉧ 번호 — 설명 줄이 껴도 품목 번호가 밀리지 않는다", () => {
+  /** 품목 표 한 덩이 — 바깥의 작업 내역 줄(거기는 여전히 `index + 1` 이다)과 섞지 않는다. */
+  const itemTable = sliceBetween(
+    form,
+    '<div className="mt-3 flex flex-col gap-2"> {items.map((row, index) =>',
+    "{fieldErrors.items &&"
+  );
+
+  test("🔴 세는 곳은 한 곳이다 — 줄마다 앞을 다시 세지 않는다", () => {
+    const counter = sliceBetween(
+      form,
+      "function lineOrdinalsOf(rows: readonly ItemRow[]): number[] {",
+      "function usedPartKey("
+    );
+    // 설명 줄은 설명 줄끼리 센다.
+    assert.ok(counter.includes('if (row.lineKind === "NOTE") { noteSoFar += 1; return noteSoFar; }'), counter);
+    // 품목 줄은 품목 줄끼리 센다.
+    assert.ok(counter.includes("itemSoFar += 1; return itemSoFar;"), counter);
+    // 🔴 한 번만 센다 — 그리면서 앞을 다시 세면 줄이 늘수록 그리기가 느려진다.
+    assert.ok(form.includes("const lineOrdinals = lineOrdinalsOf(items);"), "센 결과를 미리 들고 있지 않는다");
+    assert.ok(!form.includes("items.slice(0, index)"), "줄마다 앞을 다시 센다");
+  });
+
+  test("🔴 일곱 자리가 **모두** 같은 규칙을 쓴다 — 하나만 고쳐진 채 남지 않게", () => {
+    for (const marker of [
+      'placeholder={`${lineOrdinals[index]}번째 ${isCable ? "품목 품명" : "부품 품명"}`}',
+      "aria-label={`${lineOrdinals[index]}번째 품목 규격`}",
+      'aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 수량`}',
+      'aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 단가`}',
+      'aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 줄 지우기`}',
+      "aria-label={`${lineOrdinals[index]}번째 설명 줄`}",
+      "aria-label={`${lineOrdinals[index]}번째 설명 줄 지우기`}",
+    ]) {
+      assert.ok(itemTable.includes(marker), `옛 번호가 남은 자리가 있다 — ${marker}`);
+    }
+    assert.equal(itemTable.split("${lineOrdinals[index]}번째").length - 1, 7, "번호를 쓰는 자리가 일곱이 아니다");
+    assert.ok(!itemTable.includes("${index + 1}번째"), "품목 표에 목록 차례로 매기는 번호가 남아 있다");
+  });
+
+  test("🔴 오류 자리는 **목록 index 그대로**다 — 서버가 돌려주는 자리 번호가 그것이다", () => {
+    for (const field of ["partNameText", "partSpecText", "quantity", "unitPrice"]) {
+      assert.ok(itemTable.includes(`fieldErrors[\`items.\${index}.${field}\`]`), `${field} 오류 자리가 달라졌다`);
+    }
+    assert.ok(!itemTable.includes("fieldErrors[`items.${lineOrdinals"), "오류 자리까지 종류별 번호로 바꿨다");
+  });
+
+  test("🔴 내자 · OH 에서는 보이는 번호가 **지금과 똑같다** — 그쪽엔 설명 줄이 없다", () => {
+    /**
+     * 설명 줄을 만드는 길은 케이블 단추 하나뿐이다. 그래서 다른 종류의 목록은 품목 줄만이고,
+     * 품목끼리 세면 1 · 2 · 3 … 으로 목록 차례와 똑같아진다 — 고치기 전과 한 글자도 다르지 않다.
+     */
+    assert.ok(
+      form.includes('{isCable && ( <button type="button" onClick={() => addNoteRowAtTop(emptyNoteItem())}'),
+      "설명 줄 단추가 케이블 전용이 아니다"
+    );
+    assert.equal(form.split("emptyNoteItem())").length - 1, 1, "설명 줄을 만드는 길이 하나가 아니다");
+    // 이름표 글자도 그대로다 — 번호를 세는 법만 바꿨고 부르는 말은 안 건드렸다.
+    for (const marker of [
+      '${isCable ? "품목 품명" : "부품 품명"}',
+      '${isCable ? "품목" : "부품"} 수량',
+      '${isCable ? "품목" : "부품"} 단가',
+      '${isCable ? "품목" : "부품"} 줄 지우기',
+    ]) {
+      assert.ok(itemTable.includes(marker), `내자 · OH 의 이름표 글자가 달라졌다 — ${marker}`);
     }
   });
 });
