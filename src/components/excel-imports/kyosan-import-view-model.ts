@@ -79,6 +79,36 @@ export function formatKstDate(iso: string): string {
   return Number.isNaN(instant.getTime()) ? iso : toKstDateOnly(instant);
 }
 
+// ── 신고증상 — 원문과 바뀐 값 ───────────────────────────────────────────────
+
+/**
+ * 미리보기 한 칸에 보일 신고증상.
+ *  · `text` — 사람이 읽을 최종 값. 보일 것이 없으면 이웃 칸들처럼 `—`.
+ *  · `source` — **번역으로 값이 달라졌을 때만** 채워지는 원문. 안 달라졌으면 null 이다
+ *    (모든 줄에 「원문 → 바뀐 값」 화살표가 뜨면 눈이 시끄럽다).
+ */
+export type KyosanSymptomView = { text: string; source: string | null };
+
+/**
+ * 🔴 여기서 번역하지 않는다. 번역을 부르는 자리는 서버 서비스 **한 곳뿐**이고
+ * (domain/kyosan-intake-import/symptom-translation.ts 머리말), 화면은 계획에 담겨 온 값을
+ * 읽기만 한다 — 두 곳에서 부르면 미리보기와 실행이 갈린다.
+ *
+ * 🔴 `plan` 은 「가져올 것」 줄에만 있다. 제외 · 이미 있음 · 확인 필요 줄에는 번역값이 없어
+ * **원문만** 보인다(터지지 않는다).
+ */
+export function kyosanReportedSymptomView(row: Pick<KyosanPreviewRow, "raw" | "plan">): KyosanSymptomView {
+  const source = blankToNull(row.raw.reportedSymptom);
+  const translated = blankToNull(row.plan?.reportedSymptom ?? null);
+  if (translated === null || translated === source) return { text: source ?? "—", source: null };
+  return { text: translated, source: source ?? "—" };
+}
+
+/** 빈 글자 · 공백뿐인 글자는 없는 것으로 본다(읽개가 걸러도 화면이 한 번 더 막는다). */
+function blankToNull(value: string | null): string | null {
+  return value === null || value.trim() === "" ? null : value;
+}
+
 // ── 실패 문장 ──────────────────────────────────────────────────────────────
 
 const SAFETY_CODE_LABELS: Record<RepairCaseXlsxSafetyCode, string> = {

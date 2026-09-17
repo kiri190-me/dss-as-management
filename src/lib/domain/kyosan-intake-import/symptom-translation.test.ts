@@ -47,18 +47,33 @@ describe("신고증상 번역 — 사전에 있는 낱말", () => {
     assert.equal(translateReportedSymptom("発生なし"), "발생 없음");
     assert.equal(translateReportedSymptom("不良無し"), "불량 없음");
   });
+
+  test("🔴 異常 은 「이상」 · 異常なし 는 반쪽이 아니라 「이상 없음」(2026-09-17 사용자 결정)", () => {
+    assert.equal(translateReportedSymptom("異常"), "이상");
+    assert.equal(translateReportedSymptom("異常発生"), "이상 발생");
+    assert.equal(translateReportedSymptom("Reflect異常"), "Reflect 이상");
+    // 🔴 여기가 반쪽으로 남으면 뜻이 뒤집힌다 — 「이상なし」는 「이상」으로 읽힌다.
+    assert.equal(translateReportedSymptom("異常なし"), "이상 없음");
+    assert.equal(translateReportedSymptom("異常無し"), "이상 없음");
+    for (const negated of ["異常なし", "異常無し"]) {
+      const translated = translateReportedSymptom(negated) ?? "";
+      assert.ok(!/[ぁ-ゖァ-ヺ㐀-䶿一-鿿]/.test(translated), `일본어가 남았다: ${translated}`);
+    }
+  });
 });
 
 describe("신고증상 번역 — 건드리지 않는 것", () => {
   test("🔴 사전에 없는 일본어는 그대로 남는다 — 지우지 않는다", () => {
     // 사전에 한 낱말도 없는 글자는 통째로 그대로다.
-    for (const untouched of ["マッチャー調整中", "中断：客先待ち", "異常あり", "客先返却理由"]) {
+    for (const untouched of ["マッチャー調整中", "中断：客先待ち", "客先返却理由"]) {
       assert.equal(translateReportedSymptom(untouched), untouched);
     }
-    // 아는 낱말만 바뀌고 모르는 낱말(異常)은 일본어로 남아 사람 눈에 띈다.
-    const mixed = translateReportedSymptom("Reflect異常発生");
-    assert.equal(mixed, "Reflect異常 발생");
-    assert.ok(mixed !== null && mixed.includes("異常"), "모르는 일본어가 조용히 사라졌다");
+    // 아는 낱말만 바뀌고 모르는 낱말(調整)은 일본어로 남아 사람 눈에 띈다.
+    const mixed = translateReportedSymptom("Reflect調整発生");
+    assert.equal(mixed, "Reflect調整 발생");
+    assert.ok(mixed !== null && mixed.includes("調整"), "모르는 일본어가 조용히 사라졌다");
+    // 긍정 꼴 `〜あり` 는 아직 사전에 없다 — 앞 낱말만 바뀌지만 뜻은 뒤집히지 않는다.
+    assert.equal(translateReportedSymptom("異常あり"), "이상 あり");
   });
 
   test("일본어가 없는 신고증상은 한 글자도 안 달라진다", () => {
@@ -81,7 +96,7 @@ describe("신고증상 번역 — 건드리지 않는 것", () => {
 });
 
 describe("신고증상 번역 — 늘 같은 결과", () => {
-  const SAMPLES = ["FWDノイズ", "Reflect発生", "ノイズ発生なし", "出力低下", "출력이 나오지 않음", "", "電源不良"];
+  const SAMPLES = ["FWDノイズ", "Reflect発生", "ノイズ発生なし", "出力低下", "출력이 나오지 않음", "", "電源不良", "異常なし"];
 
   test("같은 입력이면 늘 같은 결과다 — 미리보기와 실행이 갈리지 않는다", () => {
     for (const sample of SAMPLES) {
@@ -124,6 +139,16 @@ describe("신고증상 번역 — 지나는 칸은 하나뿐", () => {
   test("계획 하나를 미리보기와 실행이 함께 쓴다 · 원문은 metadata 에 남는다", () => {
     assert.match(service, /reportedSymptom: plan\.reportedSymptom/, "실행은 계획에 담긴 번역 결과를 써야 한다");
     assert.match(service, /sourceReportedSymptom: truncateSourceText\(raw\.reportedSymptom\)/);
+  });
+
+  test("🔴 미리보기 화면은 따로 번역하지 않는다 — 계획에 담겨 온 값을 읽기만 한다", () => {
+    for (const path of [
+      "src/components/excel-imports/KyosanImportPreviewParts.tsx",
+      "src/components/excel-imports/kyosan-import-view-model.ts",
+      "src/components/excel-imports/KyosanIntakeImportScreen.tsx",
+    ]) {
+      assert.ok(!codeOf(path).includes("symptom-translation"), `${path} 가 번역을 따로 불렀다 — 미리보기 ≠ 실행`);
+    }
   });
 
   test("🔴 종류 대조(mapKind)가 사는 곳은 번역을 모른다", () => {

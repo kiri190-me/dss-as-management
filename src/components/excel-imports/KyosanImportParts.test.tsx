@@ -285,6 +285,49 @@ describe("줄 표", () => {
     assert.ok(tableRow(html, 31).includes("キャンセル"), html);
   });
 
+  /** 「원본 상태 · 費用 · 신고증상」 칸의 신고증상 줄 하나. */
+  function symptomLine(html: string, rowNumber: number): string {
+    const match = tableRow(html, rowNumber).match(/<div data-role="reported-symptom"[^>]*>([\s\S]*?)<\/div>/);
+    assert.ok(match, `${rowNumber}행에 신고증상 줄이 없다`);
+    return match[1];
+  }
+
+  test("🔴 신고증상 — 바뀐 값과 원문을 함께, 안 달라진 줄엔 화살표가 없다 · plan 이 없어도 그린다", () => {
+    const html = render(
+      <KyosanPreviewTable
+        rows={[
+          row(40, "IMPORTABLE", {
+            raw: raw(40, { reportedSymptom: "FWDノイズ発生" }),
+            plan: plan({ reportedSymptom: "FWD 노이즈 발생" }),
+          }),
+          row(41, "IMPORTABLE", {
+            raw: raw(41, { reportedSymptom: "출력이 나오지 않음" }),
+            plan: plan({ reportedSymptom: "출력이 나오지 않음" }),
+          }),
+          row(42, "EXCLUDED", { raw: raw(42, { reportedSymptom: "異常なし" }) }),
+          row(43, "IMPORTABLE", { raw: raw(43, { reportedSymptom: null }), plan: plan({ reportedSymptom: null }) }),
+        ]}
+      />
+    );
+    assert.ok(html.includes("원본 상태 · 費用 · 신고증상"), "머리글이 신고증상을 말하지 않는다");
+
+    const changed = symptomLine(html, 40);
+    assert.ok(changed.includes("FWDノイズ発生") && changed.includes("FWD 노이즈 발생"), changed);
+    assert.ok(changed.includes("→"), "바뀐 줄인데 원문 → 바뀐 값 화살표가 없다");
+
+    const same = symptomLine(html, 41);
+    assert.ok(same.includes("출력이 나오지 않음"), same);
+    assert.ok(!same.includes("→"), "안 달라진 줄에 화살표가 떴다");
+
+    // 🔴 plan 이 없는 줄(제외)에서도 터지지 않고 원문만 보인다.
+    const excluded = symptomLine(html, 42);
+    assert.ok(excluded.includes("異常なし") && !excluded.includes("→"), excluded);
+
+    assert.ok(symptomLine(html, 43).includes("—"), "비어 있는 신고증상이 — 로 보이지 않는다");
+    // 긴 글이 표를 무너뜨리지 않게 이웃 칸들처럼 break-words.
+    assert.ok(/<div data-role="reported-symptom" class="[^"]*break-words/.test(html), "신고증상 줄에 break-words 가 없다");
+  });
+
   test("표만 가로로 밀린다 · 줄이 없으면 안내", () => {
     const html = render(<KyosanPreviewTable rows={[row(18, "EXCLUDED")]} />);
     assert.ok(/^<div class="overflow-x-auto/.test(html), html.slice(0, 80));

@@ -22,6 +22,7 @@ import {
   importableKyosanRowNumbers,
   isKyosanRunActive,
   kyosanImportConfirmLines,
+  kyosanReportedSymptomView,
   kyosanRunDoneMessage,
   kyosanRunProgress,
   nextKyosanChunk,
@@ -484,6 +485,38 @@ describe("거르기 · 쪽 나누기", () => {
     assert.equal(paginateKyosanRows(items, 9, 50).page, 3);
     assert.equal(paginateKyosanRows(items, 0, 50).page, 1);
     assert.deepEqual(paginateKyosanRows([], 1, 50), { rows: [], page: 1, totalPages: 1 });
+  });
+
+  test("🔴 신고증상 — 바뀐 값과 원문을 함께, 안 달라지면 값 하나만", () => {
+    // 번역으로 달라진 줄: 원문이 따라붙는다.
+    assert.deepEqual(
+      kyosanReportedSymptomView(
+        row(18, "IMPORTABLE", { raw: raw(18, { reportedSymptom: "FWDノイズ発生" }), plan: plan({ reportedSymptom: "FWD 노이즈 발생" }) })
+      ),
+      { text: "FWD 노이즈 발생", source: "FWDノイズ発生" }
+    );
+    // 안 달라진 줄: 화살표를 그릴 원문이 없다.
+    assert.deepEqual(
+      kyosanReportedSymptomView(
+        row(19, "IMPORTABLE", { raw: raw(19, { reportedSymptom: "출력이 나오지 않음" }), plan: plan({ reportedSymptom: "출력이 나오지 않음" }) })
+      ),
+      { text: "출력이 나오지 않음", source: null }
+    );
+  });
+
+  test("🔴 plan 이 없는 줄(제외 · 이미 있음)은 원문만 · 비었으면 —", () => {
+    assert.deepEqual(kyosanReportedSymptomView(row(20, "EXCLUDED", { raw: raw(20, { reportedSymptom: "異常なし" }) })), {
+      text: "異常なし",
+      source: null,
+    });
+    assert.deepEqual(kyosanReportedSymptomView(row(21, "ALREADY_EXISTS", { raw: raw(21, { reportedSymptom: null }) })), {
+      text: "—",
+      source: null,
+    });
+    assert.deepEqual(kyosanReportedSymptomView(row(22, "IMPORTABLE", { raw: raw(22, { reportedSymptom: "  " }) })), {
+      text: "—",
+      source: null,
+    });
   });
 
   test("행 번호 목록 · 한국 날짜", () => {

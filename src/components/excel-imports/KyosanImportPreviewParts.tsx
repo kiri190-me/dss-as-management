@@ -20,6 +20,7 @@ import {
   REPAIR_CASE_TRASH_HREF,
   REPAIR_CASE_TRASH_LABEL,
   formatKyosanRowNumbers,
+  kyosanReportedSymptomView,
   repairCaseHref,
   type KyosanBillingFlagCounts,
   type KyosanFailureText,
@@ -341,6 +342,38 @@ function MessageList({ items, attention, prefix }: { items: readonly string[]; a
   );
 }
 
+/**
+ * 신고증상 — 원문과 한글로 바뀐 값을 한 줄에. 번역으로 값이 달라진 줄에만 화살표가 뜬다.
+ *
+ * 🔴 **칸을 새로 만들지 않고 「원본 상태 · 費用」 칸에 줄을 얹었다.**
+ *  · 표는 이미 일곱 칸이고 `min-w-[960px]` 로 가로로 밀린다. 여덟째 칸을 더하면 줄마다 폭이
+ *    더 늘어 앞의 일곱 칸을 훑기가 나빠진다 — UI_GUIDELINE 1·3(내부 업무 화면은 정보 밀도를
+ *    우선하고 목록은 표를 기본으로 한다)에 어긋난다.
+ *  · 신고증상은 상태 · 費用 과 같은 **원본 값**이고, 이 칸이 이미 원문을 보이는 자리다
+ *    (같은 파일의 「유/무상 확인 필요 — 원본 費用: …」 과 같은 결).
+ *  · 긴 글이 표를 무너뜨리지 않게 이웃 칸들처럼 `break-words`.
+ *
+ * 🔴 여기서 번역하지 않는다 — 계획(plan)에 담겨 온 값을 읽기만 한다. 그래서 미리보기와
+ * 실행이 같은 값을 본다(kyosan-import-view-model.ts 의 kyosanReportedSymptomView).
+ */
+function KyosanReportedSymptomLine({ row }: { row: KyosanPreviewRow }) {
+  const symptom = kyosanReportedSymptomView(row);
+  return (
+    <div data-role="reported-symptom" className="break-words text-xs text-zinc-500 dark:text-zinc-400">
+      {"신고증상 "}
+      {symptom.source !== null ? (
+        <>
+          <span data-role="symptom-source">{symptom.source}</span>
+          {" → "}
+        </>
+      ) : null}
+      <span data-role="symptom-text" className="text-zinc-700 dark:text-zinc-300">
+        {symptom.text}
+      </span>
+    </div>
+  );
+}
+
 function KyosanPreviewTableRow({ row }: { row: KyosanPreviewRow }) {
   const raw = row.raw;
   const looksDifferent = row.existing?.looksDifferent === true;
@@ -376,6 +409,7 @@ function KyosanPreviewTableRow({ row }: { row: KyosanPreviewRow }) {
       <td className={TD_CLASS}>
         <div className="break-words">{raw.statusText ?? "—"}</div>
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{`費用 ${raw.billingText ?? "—"}`}</div>
+        <KyosanReportedSymptomLine row={row} />
       </td>
       <td className={TD_CLASS}>
         <span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[row.status]}`}>
@@ -410,7 +444,7 @@ export function KyosanPreviewTable({ rows }: { rows: readonly KyosanPreviewRow[]
             <th scope="col" className={KYOSAN_TH_CLASS}>인수번호 · 인수일</th>
             <th scope="col" className={KYOSAN_TH_CLASS}>고객사 · End-User</th>
             <th scope="col" className={KYOSAN_TH_CLASS}>모델 · S/N</th>
-            <th scope="col" className={KYOSAN_TH_CLASS}>원본 상태 · 費用</th>
+            <th scope="col" className={KYOSAN_TH_CLASS}>원본 상태 · 費用 · 신고증상</th>
             <th scope="col" className={KYOSAN_TH_CLASS}>판정</th>
             <th scope="col" className={KYOSAN_TH_CLASS}>무엇이 되는가 · 사유</th>
           </tr>
