@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { FileDropZone, putFilesInPicker } from "@/components/common/FileDropZone";
 import { showSavePopup } from "@/components/common/SavePopup";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import {
@@ -443,6 +444,29 @@ function DatabaseFilesScreen({
     }
   }
 
+  /**
+   * 앨범에서 고르거나 폴더에서 끌어다 놓았을 때 한 번씩. 찍어 모아 둔 사진이 있으면
+   * 그쪽이 우선이라(handleUpload) 여기서 들어온 파일이 조용히 무시된다 — 그 사실을
+   * 미리 알린다. 두 길이 같은 말을 하도록 한 자리에 둔다.
+   */
+  function notePickedFiles() {
+    if (stagedPhotos.length > 0) {
+      setStatusMessage({
+        type: "error",
+        text: "찍어 둔 사진이 있어 그쪽이 먼저 올라갑니다. 앨범에서 고른 파일을 올리려면 찍은 사진을 먼저 올리거나 버려 주세요.",
+      });
+    }
+  }
+
+  /**
+   * 끌어다 놓은 파일은 **고르기 칸에 그대로 담는다**(putFilesInPicker) — [올리기]가
+   * 읽는 곳이 한 곳으로 남아야 rejectionReasonFor 도 같은 길을 지난다.
+   */
+  function receiveDroppedFiles(files: File[]) {
+    if (!putFilesInPicker(fileInputRef.current, files)) return;
+    notePickedFiles();
+  }
+
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -683,7 +707,18 @@ function DatabaseFilesScreen({
             onSubmit={handleUpload}
             className="flex flex-col gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800"
           >
-            <div className="grid gap-3 sm:grid-cols-2">
+            {/*
+              폴더에서 끌어다 놓아도 된다. 떨군 파일은 고르기 칸에 담기므로
+              [올리기] 뒤의 판정(rejectionReasonFor)까지 고르기와 **같은 길**이다.
+            */}
+            <FileDropZone
+              name="repair-case-files-upload"
+              multiple
+              disabled={isUploading}
+              hint="여기에 파일을 놓으세요 — 놓은 뒤 [올리기]"
+              onFiles={receiveDroppedFiles}
+              className="grid gap-3 rounded-md border border-dashed border-zinc-300 p-3 sm:grid-cols-2 dark:border-zinc-700"
+            >
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">분류</span>
                 <select
@@ -713,20 +748,14 @@ function DatabaseFilesScreen({
                   accept={acceptAttribute}
                   multiple
                   disabled={isUploading}
-                  onChange={() => {
-                    // 찍어 모아 둔 사진이 있으면 그쪽이 우선이라(handleUpload),
-                    // 앨범에서 고른 파일이 조용히 무시된다. 그 사실을 미리 알린다.
-                    if (stagedPhotos.length > 0) {
-                      setStatusMessage({
-                        type: "error",
-                        text: "찍어 둔 사진이 있어 그쪽이 먼저 올라갑니다. 앨범에서 고른 파일을 올리려면 찍은 사진을 먼저 올리거나 버려 주세요.",
-                      });
-                    }
-                  }}
+                  onChange={notePickedFiles}
                   className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  폴더에서 이 칸 위로 끌어다 놓아도 됩니다.
+                </span>
               </label>
-            </div>
+            </FileDropZone>
 
             {cameraSupported && (
               <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">

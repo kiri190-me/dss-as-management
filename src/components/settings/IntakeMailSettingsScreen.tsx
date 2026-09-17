@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import { showSavePopup } from "@/components/common/SavePopup";
 import type { Role } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
@@ -347,7 +348,19 @@ export default function IntakeMailSettingsScreen({
           </Field>
 
           {/* ── 이미지 ── */}
-          <div className="flex flex-col gap-2">
+          {/*
+            폴더에서 끌어다 놓아도 된다 — 떨군 그림도 고르기 칸과 **같은 uploadImage**
+            를 타므로 형식 · 크기 판정(서버의 uploadSignatureImageAction)이 같다.
+            한 번에 한 장만 받는다(고르기 칸도 multiple 이 아니다).
+          */}
+          <FileDropZone
+            name="intake-mail-signature-image"
+            multiple={false}
+            disabled={uploadPending}
+            hint="여기에 서명 이미지 하나를 놓으세요"
+            onFiles={(files) => uploadImage(files[0])}
+            className="flex flex-col gap-2"
+          >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 서명 이미지 ({initial.signatureImages.length}/{SIGNATURE_IMAGE_MAX_COUNT}장 ·
@@ -430,7 +443,7 @@ export default function IntakeMailSettingsScreen({
                 })}
               </ul>
             )}
-          </div>
+          </FileDropZone>
         </section>
 
       {/* ───── 수신자 ───── */}

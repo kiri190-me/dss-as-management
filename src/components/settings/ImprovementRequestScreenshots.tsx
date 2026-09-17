@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import { uploadPreview } from "@/components/repair-cases/files/shrink-image";
 import type { ImprovementRequestScreenshot } from "@/lib/db/queries/improvement-requests";
 import {
@@ -209,8 +210,8 @@ export function ImprovementRequestScreenshotStrip({
 
   if (screenshots.length === 0 && !canChange) return null;
 
-  return (
-    <div className="mt-2 flex flex-col gap-2">
+  const body = (
+    <>
       {screenshots.length > 0 ? (
         <ul className="flex flex-wrap gap-2" aria-label="스크린샷">
           {screenshots.map((shot) => (
@@ -262,6 +263,30 @@ export function ImprovementRequestScreenshotStrip({
           ) : null}
         </div>
       ) : null}
+    </>
+  );
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      {/*
+        바꿀 수 있는 줄에는 폴더에서 끌어다 놓아도 된다 — 떨군 장은 [스크린샷 추가]로
+        고른 것과 **같은 onAddFiles** 를 타므로 판정(screenScreenshotBatch → 형식 ·
+        빈 파일 · 20MB · 5장)이 같다. 여기서 따로 거르지 않는다.
+      */}
+      {canChange ? (
+        <FileDropZone
+          name="improvement-request-screenshots"
+          multiple
+          disabled={disabled}
+          hint="여기에 스크린샷을 놓으세요"
+          onFiles={onAddFiles}
+          className="flex flex-col gap-2"
+        >
+          {body}
+        </FileDropZone>
+      ) : (
+        body
+      )}
 
       {viewing ? <ScreenshotViewerDialog screenshot={viewing} onClose={() => setViewing(null)} /> : null}
     </div>

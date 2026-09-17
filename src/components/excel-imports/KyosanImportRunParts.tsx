@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import type { ImportedCaseNeedingBillingReview } from "@/lib/db/queries/kyosan-intake-import";
 import { billingTypeLabels } from "@/lib/domain/types";
 import type { KyosanChunkRowResult } from "@/lib/server/services/kyosan-intake-import";
@@ -60,7 +61,18 @@ export function KyosanUploadPanel({
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         {`교산 인수품 리스트(.xlsx, ${MAX_MB}MB 이하)를 골라 [미리보기]를 누르세요. 미리보기는 아무것도 저장하지 않습니다.`}
       </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/*
+        폴더에서 끌어다 놓아도 된다. 떨군 파일은 고르기 칸과 **같은 onFileChange** 를
+        타므로 판정(checkKyosanUploadFile)도 같다 — 여기서 따로 거르지 않는다.
+      */}
+      <FileDropZone
+        name="kyosan-import-upload"
+        multiple={false}
+        disabled={busy || disabled}
+        hint="여기에 .xlsx 파일 하나를 놓으세요"
+        onFiles={(files) => onFileChange(files[0])}
+        className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700"
+      >
         <label htmlFor="kyosan-import-file" className="sr-only">
           교산 인수품 리스트 파일
         </label>
@@ -82,7 +94,7 @@ export function KyosanUploadPanel({
         >
           {busy ? "읽는 중..." : "미리보기"}
         </button>
-      </div>
+      </FileDropZone>
       {fileError ? (
         <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
           {fileError}

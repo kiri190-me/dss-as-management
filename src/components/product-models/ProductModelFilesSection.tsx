@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { FileDropZone, putFilesInPicker } from "@/components/common/FileDropZone";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import AttachmentViewer from "@/components/repair-cases/files/AttachmentViewer";
@@ -485,6 +486,16 @@ export default function ProductModelFilesSection({
     }
   }
 
+  /**
+   * 폴더에서 끌어다 놓은 파일. **고르기 칸에 그대로 담는다**(putFilesInPicker) —
+   * 떨구기용 목록을 따로 두면 [올리기]가 보는 곳이 둘이 되고, 그때부터 두 길이
+   * 갈린다. 담고 나면 화면에도 고른 것과 똑같이 보이고, 같은 handleUpload 를 탄다.
+   */
+  function receiveDroppedFiles(files: File[]) {
+    if (!putFilesInPicker(fileInputRef.current, files)) return;
+    setStatusMessage(null);
+  }
+
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -608,58 +619,69 @@ export default function ProductModelFilesSection({
       </div>
 
       {canManageFiles && (
-        <form
-          onSubmit={handleUpload}
-          className="mt-3 flex flex-col gap-2 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700"
+        <FileDropZone
+          name="product-model-files-upload"
+          multiple
+          disabled={isBusy}
+          hint="여기에 파일을 놓으세요 — 놓은 뒤 [올리기]"
+          onFiles={receiveDroppedFiles}
+          className="mt-3"
         >
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-              분류
-              <select
-                value={category}
-                onChange={(event) => setCategory(event.target.value as AttachmentCategory)}
+          <form
+            onSubmit={handleUpload}
+            className="flex flex-col gap-2 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700"
+          >
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                분류
+                <select
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value as AttachmentCategory)}
+                  disabled={isBusy}
+                  className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                >
+                  {PRODUCT_MODEL_UPLOAD_CATEGORIES.map((code) => (
+                    <option key={code} value={code}>
+                      {attachmentCategoryLabels[code]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                파일
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  // 고른 분류가 받는 확장자만 파일 고르는 창에 보인다.
+                  accept={acceptAttribute}
+                  disabled={isBusy}
+                  className="min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                />
+              </label>
+
+              <button
+                type="submit"
                 disabled={isBusy}
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
               >
-                {PRODUCT_MODEL_UPLOAD_CATEGORIES.map((code) => (
-                  <option key={code} value={code}>
-                    {attachmentCategoryLabels[code]}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {uploadProgress
+                  ? `올리는 중… ${uploadProgress.current}/${uploadProgress.total}`
+                  : isUploading
+                    ? "올리는 중…"
+                    : "올리기"}
+              </button>
+            </div>
 
-            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-              파일
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                // 고른 분류가 받는 확장자만 파일 고르는 창에 보인다.
-                accept={acceptAttribute}
-                disabled={isBusy}
-                className="min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={isBusy}
-              className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
-            >
-              {uploadProgress
-                ? `올리는 중… ${uploadProgress.current}/${uploadProgress.total}`
-                : isUploading
-                  ? "올리는 중…"
-                  : "올리기"}
-            </button>
-          </div>
-
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {attachmentCategoryLabels[category]} 분류가 받는 형식:{" "}
-            {allowedExtensions.map((extension) => `.${extension}`).join(" ")} · 한 개당 20MB까지
-          </p>
-        </form>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {attachmentCategoryLabels[category]} 분류가 받는 형식:{" "}
+              {allowedExtensions.map((extension) => `.${extension}`).join(" ")} · 한 개당 20MB까지
+              {" · "}
+              폴더에서 끌어다 놓아도 됩니다
+            </p>
+          </form>
+        </FileDropZone>
       )}
 
       {statusMessage && (

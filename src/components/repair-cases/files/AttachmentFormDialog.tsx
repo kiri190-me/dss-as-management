@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import {
   getAllowedMimeTypesForExtension,
   isExtensionAllowedForCategory,
@@ -97,7 +98,17 @@ export default function AttachmentFormDialog({
   function handleFilePick(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    applyPickedFile(file);
 
+    // 메타데이터를 복사한 뒤에는 입력을 비워 파일 참조를 남기지 않는다.
+    event.target.value = "";
+  }
+
+  /**
+   * 고른 파일 · 끌어다 놓은 파일이 **함께** 지나는 한 자리. 떨구기 쪽을 따로 짜면
+   * 같은 창에서 두 가지 다른 결과가 나온다.
+   */
+  function applyPickedFile(file: File) {
     // 메타데이터(name/size/type)만 읽는다 — FileReader/arrayBuffer 등 바이트를
     // 읽는 API는 절대 호출하지 않고, File 객체 자체도 상태에 보관하지 않는다.
     setOriginalFileName(file.name);
@@ -114,9 +125,6 @@ export default function AttachmentFormDialog({
     }
     setPickerNotice(true);
     setErrors({});
-
-    // 메타데이터를 복사한 뒤에는 입력을 비워 파일 참조를 남기지 않는다.
-    event.target.value = "";
   }
 
   function focusField(key: FieldKey) {
@@ -210,7 +218,18 @@ export default function AttachmentFormDialog({
         실제 파일을 업로드하지 않습니다. 파일명·크기 등 정보만 입력합니다.
       </p>
 
-      <div className="mt-3 flex flex-col gap-1">
+      {/*
+        폴더에서 끌어다 놓아도 된다 — 떨군 파일도 같은 applyPickedFile 을 지나므로
+        채워지는 칸과 검증(validate)이 고르기와 똑같다. 한 번에 한 개만 받는다.
+      */}
+      <FileDropZone
+        name="attachment-form-file"
+        multiple={false}
+        disabled={isSubmitting}
+        hint="여기에 파일 하나를 놓으세요"
+        onFiles={(files) => applyPickedFile(files[0])}
+        className="mt-3 flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700"
+      >
         <label htmlFor="attachment-file-picker" className={labelClass}>
           파일 선택으로 자동 입력(선택 사항)
         </label>
@@ -222,14 +241,14 @@ export default function AttachmentFormDialog({
           className="w-full text-sm text-zinc-700 dark:text-zinc-300"
         />
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          파일 내용은 읽거나 전송하지 않습니다. 이름·크기·형식 정보만 복사합니다.
+          파일 내용은 읽거나 전송하지 않습니다. 이름·크기·형식 정보만 복사합니다. 폴더에서 끌어다 놓아도 됩니다.
         </p>
         {pickerNotice && !mimeType && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
             브라우저가 MIME 유형을 알려주지 않아 아래에서 직접 선택해야 합니다.
           </p>
         )}
-      </div>
+      </FileDropZone>
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">

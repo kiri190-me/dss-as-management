@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { FileDropZone } from "@/components/common/FileDropZone";
 import type { QuoteAttachmentSlotCategory } from "@/lib/domain/attachment-category";
 import {
   QUOTE_ATTACHMENT_PENDING_NOTE,
@@ -151,7 +152,19 @@ export function QuoteAttachmentSlotCard({
   const failedHold = mode === "saved" && pending !== null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+    /*
+      칸 위에 폴더에서 끌어다 놓아도 된다 — 떨군 파일은 고르기 단추와 **같은
+      onPickFile** 을 타므로 판정(quote-attachment-files.ts 의 checkQuoteAttachmentFile)도
+      같다. 칸마다 파일은 하나라 multiple 은 false 다 — 여럿을 놓으면 거절하고 알린다.
+    */
+    <FileDropZone
+      name={`quote-attachment-${definition.category}`}
+      multiple={false}
+      disabled={disabled || busy}
+      hint={`${label} 하나를 여기에 놓으세요`}
+      onFiles={(files) => onPickFile(files[0])}
+      className="flex min-w-0 flex-col gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{label}</span>
         <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -264,7 +277,7 @@ export function QuoteAttachmentSlotCard({
       </div>
 
       {details}
-    </div>
+    </FileDropZone>
   );
 }
 

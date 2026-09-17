@@ -73,3 +73,5 @@ src/components/repair-cases/detail/product-info-history-disclosure.test.ts
 src/components/repair-cases/detail/used-parts-section.test.ts
 src/components/quotes/quote-part-picker.test.tsx
 src/components/inventory/part-owner-stock-table.test.ts
+src/components/common/file-drop.test.tsx
+src/components/common/file-drop-screens.test.ts
