@@ -30,16 +30,16 @@ import {
  * 끊김인 사람이 열어 둔 화면에서 저장할 수 있으면 안 된다.
  *
  * ── 🔴 이 칸만의 규칙 셋은 여기가 아니라 mutation 이 본다 ────────────────────
- * 역할 · 반출 이력 · 출하 잠금은 **트랜잭션 안에서** 판정해야 한다 — 여기서 미리
+ * 권한 · 반출 이력 · 출하 잠금은 **트랜잭션 안에서** 판정해야 한다 — 여기서 미리
  * 봐도 그 사이에 바뀔 수 있고, 무엇보다 판정이 두 벌이 된다. mutation 이 조회와
  * 같은 함수로 본다(auth/repair-case-used-parts-authorization.ts).
  *
- * ── 🔴 역할은 여기서 **나르기만** 한다 ──────────────────────────────────────
- * 이 파일이 하는 일은 살아 있는 계정을 읽어 그 역할을 mutation 에 건네주는 것
- * 뿐이다. 「어느 역할이 적을 수 있는가」는 위 인가 모듈의 USED_PARTS_WRITE_ROLES
- * 한 곳에만 있다 — 여기에 역할 이름을 다시 적으면 그 순간 목록이 두 벌이 된다.
+ * ── 🔴 사람은 여기서 **나르기만** 한다 ──────────────────────────────────────
+ * 이 파일이 하는 일은 살아 있는 계정을 읽어 그 사람을 mutation 에 건네주는 것
+ * 뿐이다. 「누가 적을 수 있는가」는 [역할별 접근 권한]의 `repairCases.usedParts`
+ * 한 곳이 정한다 — 여기에 역할 이름을 적으면 그 순간 판정이 두 벌이 된다.
  *
- * 역할을 세션 토큰이 아니라 resolveActingUserForSession 이 읽은 행에서 가져오는
+ * 사람을 세션 토큰이 아니라 resolveActingUserForSession 이 읽은 행에서 가져오는
  * 까닭은 위 문단과 같다 — 강등된 사람이 열어 둔 화면에서 저장할 수 있으면 안 된다.
  * ============================================================================
  */
@@ -108,7 +108,7 @@ export async function saveRepairCaseUsedPartsAction(
       repairCaseId: input.repairCaseId,
       expectedVersion: input.expectedVersion,
       actorUserId: actingUser.id,
-      actorRole: actingUser.role,
+      actor: actingUser,
       lines: validation.lines,
     });
     return result;

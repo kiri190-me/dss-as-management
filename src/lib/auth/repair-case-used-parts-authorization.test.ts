@@ -5,25 +5,27 @@ import {
   USED_PARTS_CASE_LOCKED_MESSAGE,
   USED_PARTS_PART_REQUEST_HISTORY_MESSAGE,
   USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE,
-  USED_PARTS_WRITE_ROLES,
-  canRoleWriteUsedParts,
   isUsedPartsBlockedByShipmentLock,
   resolveUsedPartsWriteGate,
 } from "./repair-case-used-parts-authorization";
+import { baselineLeafLevel } from "./permission-baseline";
+import { isPermissionLeafKey, isSettingsEnforced, selectableLevelsOfLeaf } from "./permission-features";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
- * 「사용 부품」 칸의 규칙 셋 (B-2 의 둘 + B-3 의 역할)
+ * 「사용 부품」 칸의 규칙 셋 (B-2 의 둘 + 권한)
  * ============================================================================
  * 사용자가 정한 것은 이 표 둘이다.
  *
- * ① 누가 적을 수 있나 (2026-09-17 확정)
+ * ① 누가 적을 수 있나 — 2026-09-17 부터 **[역할별 접근 권한] 설정이 정한다.**
+ *    코드의 역할 목록은 걷어냈고, 아래 표는 그 설정의 **기본값**이다
+ *    (permission-baseline.ts 의 `repairCases.usedParts`).
  *
  *   SUPER_ADMIN · ADMIN · AS_ENGINEER  →  쓰기
- *   SALES · INVENTORY_MANAGER          →  못 씀
+ *   SALES · INVENTORY_MANAGER          →  없음
  *
- * ② 어느 건에 적을 수 있나
+ * ② 어느 건에 적을 수 있나 (권한과 무관한 **건의 사정** — 설정으로 빼지 않는다)
  *
  *   반출 이력   출하 잠금   가져온 건    →  적을 수 있나
  *   ─────────   ─────────   ──────────      ────────────
@@ -37,15 +39,15 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
  * ============================================================================
  */
 
-/** 역할을 적지 않은 시험은 「적을 수 있는 역할」을 뜻한다 — ② 표만 보는 시험이다. */
+/** 권한을 적지 않은 시험은 「적을 수 있는 사람」을 뜻한다 — ② 표만 보는 시험이다. */
 function gate(facts: {
-  actorRole?: Role | null;
+  canWriteUsedParts?: boolean;
   hasPartRequestHistory: boolean;
   isShipmentLocked: boolean;
   isLegacyImportedCase: boolean;
 }) {
   return resolveUsedPartsWriteGate({
-    actorRole: facts.actorRole === undefined ? "AS_ENGINEER" : facts.actorRole,
+    canWriteUsedParts: facts.canWriteUsedParts ?? true,
     hasPartRequestHistory: facts.hasPartRequestHistory,
     isShipmentLocked: facts.isShipmentLocked,
     isLegacyImportedCase: facts.isLegacyImportedCase,
@@ -66,37 +68,61 @@ const CAN_WRITE_BY_ROLE: Record<Role, boolean> = {
   INVENTORY_MANAGER: false,
 };
 
-describe("사용 부품 — 누가 적을 수 있나 (역할 다섯 전부)", () => {
-  test("🔴 다섯 역할이 각각 정해진 대로다 — 하나도 빠뜨리지 않는다", () => {
+describe("사용 부품 — 누가 적을 수 있나 (설정이 정한다)", () => {
+  test("🔴 기본값이 종전 동작 그대로다 — 다섯 역할을 하나도 빠뜨리지 않는다", () => {
     assert.equal(ROLE_CODES.length, 5, "역할이 늘거나 줄면 이 표부터 다시 정해야 한다");
+    assert.ok(isPermissionLeafKey("repairCases.usedParts"), "설정 노드가 있어야 한다");
 
     for (const role of ROLE_CODES) {
-      const expected = CAN_WRITE_BY_ROLE[role];
-      assert.equal(canRoleWriteUsedParts(role), expected, `${role} 의 쓰기 여부`);
-
-      // 잠금도 이력도 없는 평범한 건에서, 역할 하나만으로 갈린다.
-      const result = gate({
-        actorRole: role,
-        hasPartRequestHistory: false,
-        isShipmentLocked: false,
-        isLegacyImportedCase: false,
-      });
-      assert.equal(result.ok, expected, `${role} 의 판정`);
-      if (!result.ok) {
-        assert.equal(result.code, "ROLE_NOT_ALLOWED");
-        assert.equal(result.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
-      }
+      // 아무도 설정을 만지지 않았을 때의 실효 권한 = 기본값. 이 칸을 설정으로
+      // 옮기기 전 코드가 판정하던 것과 같아야 한다.
+      assert.equal(
+        baselineLeafLevel("repairCases.usedParts", role),
+        CAN_WRITE_BY_ROLE[role] ? "WRITE" : "NONE",
+        `${role} 의 기본값`
+      );
     }
   });
 
-  test("쓰기 역할 목록이 사용자가 정한 셋 그대로다", () => {
-    assert.deepEqual([...USED_PARTS_WRITE_ROLES].sort(), ["ADMIN", "AS_ENGINEER", "SUPER_ADMIN"]);
+  test("🔴 설정이 유일한 관문이다 — 넓히면 열리고 좁히면 막힌다", () => {
+    // 설정을 넓힌 사람(예: 영업에게 쓰기를 준 경우)에게는 실제로 열린다.
+    assert.deepEqual(
+      gate({
+        canWriteUsedParts: true,
+        hasPartRequestHistory: false,
+        isShipmentLocked: false,
+        isLegacyImportedCase: false,
+      }),
+      { ok: true }
+    );
+
+    // 좁힌 사람에게는 막힌다 — 기본값이 쓰기였던 역할이라도 마찬가지다.
+    const narrowed = gate({
+      canWriteUsedParts: false,
+      hasPartRequestHistory: false,
+      isShipmentLocked: false,
+      isLegacyImportedCase: false,
+    });
+    assert.equal(narrowed.ok, false);
+    if (narrowed.ok) throw new Error("unreachable");
+    assert.equal(narrowed.code, "ROLE_NOT_ALLOWED");
+    assert.equal(narrowed.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
   });
 
-  test("🔴 역할을 읽지 못했으면 막는다 — 닫히는 쪽으로 떨어진다", () => {
-    assert.equal(canRoleWriteUsedParts(null), false);
+  test("🔴 노드는 「쓴다 / 못 쓴다」 둘뿐이다 — 고를 수 없는 칸을 내밀지 않는다", () => {
+    assert.deepEqual(selectableLevelsOfLeaf("repairCases.usedParts"), ["NONE", "WRITE"]);
+  });
+
+  test("🔴 설정이 최종 판정인 노드로 표시돼 있다 — 화면이 사실대로 말한다", () => {
+    // 여기 없으면 권한 설정 화면이 "아직 코드가 최종 판정"이라고 말한다. 반대로
+    // 역할 함수를 남겨 둔 채 넣으면 "넓히면 열립니다"가 거짓말이 된다.
+    assert.equal(isSettingsEnforced("repairCases.usedParts"), true);
+  });
+
+  test("🔴 권한을 물을 수 없으면 막는다 — 닫히는 쪽으로 떨어진다", () => {
+    // 계정을 읽지 못한 요청(삭제 · 정지 · 세션 끊김)은 부르는 쪽이 false 를 넘긴다.
     const result = gate({
-      actorRole: null,
+      canWriteUsedParts: false,
       hasPartRequestHistory: false,
       isShipmentLocked: false,
       isLegacyImportedCase: false,
@@ -106,23 +132,21 @@ describe("사용 부품 — 누가 적을 수 있나 (역할 다섯 전부)", ()
     assert.equal(result.code, "ROLE_NOT_ALLOWED");
   });
 
-  test("🔴 권한 없는 역할은 건의 사정과 무관하게 막힌다 — 그리고 까닭이 역할이다", () => {
-    for (const role of ROLE_CODES.filter((candidate) => !CAN_WRITE_BY_ROLE[candidate])) {
-      for (const hasPartRequestHistory of [false, true]) {
-        for (const isShipmentLocked of [false, true]) {
-          for (const isLegacyImportedCase of [false, true]) {
-            const result = gate({
-              actorRole: role,
-              hasPartRequestHistory,
-              isShipmentLocked,
-              isLegacyImportedCase,
-            });
-            assert.equal(result.ok, false);
-            if (result.ok) throw new Error("unreachable");
-            // 🔴 「반출 이력 때문」이라고 말하면 거짓 안내다 — 요청서를 지워도 이
-            // 사람은 여전히 적을 수 없다.
-            assert.equal(result.code, "ROLE_NOT_ALLOWED", `${role} / ${hasPartRequestHistory}`);
-          }
+  test("🔴 권한 없는 사람은 건의 사정과 무관하게 막힌다 — 그리고 까닭이 권한이다", () => {
+    for (const hasPartRequestHistory of [false, true]) {
+      for (const isShipmentLocked of [false, true]) {
+        for (const isLegacyImportedCase of [false, true]) {
+          const result = gate({
+            canWriteUsedParts: false,
+            hasPartRequestHistory,
+            isShipmentLocked,
+            isLegacyImportedCase,
+          });
+          assert.equal(result.ok, false);
+          if (result.ok) throw new Error("unreachable");
+          // 🔴 「반출 이력 때문」이라고 말하면 거짓 안내다 — 요청서를 지워도 이
+          // 사람은 여전히 적을 수 없다.
+          assert.equal(result.code, "ROLE_NOT_ALLOWED", `${hasPartRequestHistory}`);
         }
       }
     }
@@ -141,37 +165,35 @@ describe("사용 부품 — 누가 적을 수 있나 (역할 다섯 전부)", ()
 
     // 같은 건, 같은 사정 — 사람만 바꾸면 안내가 바뀐다.
     const locked = { hasPartRequestHistory: false, isShipmentLocked: true, isLegacyImportedCase: false };
-    const asEngineer = gate({ actorRole: "AS_ENGINEER", ...locked });
-    const sales = gate({ actorRole: "SALES", ...locked });
-    assert.equal(asEngineer.ok, false);
-    assert.equal(sales.ok, false);
-    if (asEngineer.ok || sales.ok) throw new Error("unreachable");
-    assert.equal(asEngineer.message, USED_PARTS_CASE_LOCKED_MESSAGE);
-    assert.equal(sales.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
+    const permitted = gate({ canWriteUsedParts: true, ...locked });
+    const denied = gate({ canWriteUsedParts: false, ...locked });
+    assert.equal(permitted.ok, false);
+    assert.equal(denied.ok, false);
+    if (permitted.ok || denied.ok) throw new Error("unreachable");
+    assert.equal(permitted.message, USED_PARTS_CASE_LOCKED_MESSAGE);
+    assert.equal(denied.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
   });
 
-  test("쓰기 역할 셋에게는 B-2 의 두 규칙이 그대로다", () => {
-    for (const role of ROLE_CODES.filter((candidate) => CAN_WRITE_BY_ROLE[candidate])) {
-      assert.deepEqual(
-        gate({
-          actorRole: role,
-          hasPartRequestHistory: false,
-          isShipmentLocked: true,
-          isLegacyImportedCase: true,
-        }),
-        { ok: true },
-        `${role} — 잠긴 가져온 건에는 적을 수 있다`
-      );
-      const blocked = gate({
-        actorRole: role,
-        hasPartRequestHistory: true,
-        isShipmentLocked: false,
-        isLegacyImportedCase: false,
-      });
-      assert.equal(blocked.ok, false);
-      if (blocked.ok) throw new Error("unreachable");
-      assert.equal(blocked.code, "PART_REQUEST_HISTORY_EXISTS", `${role} — 반출 이력은 여전히 막는다`);
-    }
+  test("🔴 권한을 넓혀도 B-2 의 두 규칙은 그대로다 — 업무 규칙은 설정으로 빠지지 않았다", () => {
+    assert.deepEqual(
+      gate({
+        canWriteUsedParts: true,
+        hasPartRequestHistory: false,
+        isShipmentLocked: true,
+        isLegacyImportedCase: true,
+      }),
+      { ok: true },
+      "잠긴 가져온 건에는 적을 수 있다"
+    );
+    const blocked = gate({
+      canWriteUsedParts: true,
+      hasPartRequestHistory: true,
+      isShipmentLocked: false,
+      isLegacyImportedCase: false,
+    });
+    assert.equal(blocked.ok, false);
+    if (blocked.ok) throw new Error("unreachable");
+    assert.equal(blocked.code, "PART_REQUEST_HISTORY_EXISTS", "반출 이력은 여전히 막는다");
   });
 });
 
@@ -282,13 +304,18 @@ describe("사용 부품 — 판정이 한 벌뿐이다", () => {
     );
   });
 
-  test("🔴 역할 목록이 한 곳에만 있다 — 쓰는 쪽 어디에도 역할 이름이 없다", () => {
-    // 이 파일(인가 모듈)에만 있어야 한다.
+  test("🔴 사용 부품용 역할 목록이 코드 어디에도 없다 — 설정이 유일한 관문이다", () => {
+    // 인가 모듈 자신부터 비어 있어야 한다. 코드 목록과 설정을 둘 다 남기면
+    // 권한 설정 화면이 "넓히면 실제로 열립니다"라고 거짓말을 한다.
     const authCode = strip(read("src/lib/auth/repair-case-used-parts-authorization.ts"));
-    assert.match(authCode, /export const USED_PARTS_WRITE_ROLES: readonly Role\[\] =/);
+    assert.ok(
+      !/USED_PARTS_WRITE_ROLES|canRoleWriteUsedParts/.test(authCode),
+      "걷어낸 역할 목록이 되살아났다"
+    );
 
     const roleNames = /SUPER_ADMIN|AS_ENGINEER|INVENTORY_MANAGER|"ADMIN"|'ADMIN'|"SALES"|'SALES'/;
     const chain: [string, string][] = [
+      ["repair-case-used-parts-authorization.ts", authCode],
       ["queries/repair-case-used-parts.ts", queryCode],
       ["mutations/repair-case-used-parts.ts", mutationCode],
       ["actions/repair-case-used-parts.ts", actionCode],
@@ -297,26 +324,48 @@ describe("사용 부품 — 판정이 한 벌뿐이다", () => {
       ["repair-cases/[id]/page.tsx", pageCode],
     ];
     for (const [label, code] of chain) {
-      assert.ok(!roleNames.test(code), `${label} 이 역할 이름을 다시 적고 있다`);
+      assert.ok(!roleNames.test(code), `${label} 이 역할 이름을 적고 있다`);
+      assert.ok(
+        !/USED_PARTS_WRITE_ROLES|canRoleWriteUsedParts/.test(code),
+        `${label} 이 걷어낸 역할 목록을 부르고 있다`
+      );
     }
 
-    // 그 목록을 쓰는 곳은 판정 함수 하나뿐이다 — 각 층이 제 손으로 역할을
-    // 비교하지 않는다(그러면 차례와 예외가 층마다 갈린다).
-    for (const [label, code] of chain) {
-      assert.ok(
-        !/canRoleWriteUsedParts|USED_PARTS_WRITE_ROLES/.test(code),
-        `${label} 이 역할 판정을 따로 부르고 있다`
+    // 🔴 그 목록이 마지막으로 남는 자리는 permission-baseline.ts 의 **기본값**
+    // 하나뿐이고, 그것은 관문이 아니다(저장된 설정이 있으면 쓰이지 않는다).
+    // export 하지 않으므로 밖에서 두 번째 관문으로 쓸 수 없다.
+    const baselineCode = strip(read("src/lib/auth/permission-baseline.ts"));
+    assert.match(baselineCode, /function writesUsedPartsByDefault\(role: Role\): boolean \{/);
+    assert.ok(
+      !/export function writesUsedPartsByDefault/.test(baselineCode),
+      "기본값 함수를 export 하면 두 번째 관문이 된다"
+    );
+  });
+
+  test("🔴 조회도 저장도 설정 노드 하나를 묻는다 — 같은 키다", () => {
+    for (const [label, code] of [
+      ["queries/repair-case-used-parts.ts", queryCode],
+      ["mutations/repair-case-used-parts.ts", mutationCode],
+    ] as const) {
+      assert.match(
+        code.replace(/\s+/g, " "),
+        /hasPermission\([^)]*"repairCases\.usedParts", "WRITE"\)/,
+        `${label} 이 설정을 묻지 않는다`
       );
     }
   });
 
-  test("🔴 역할은 저장 쪽에서 다시 판정된다 — 주소로 직접 불러도 막힌다", () => {
-    // 액션은 살아 있는 계정에서 읽은 역할을 나르기만 한다.
-    assert.match(actionCode.replace(/\s+/g, " "), /actorRole: actingUser\.role,/);
+  test("🔴 권한은 저장 쪽에서 다시 판정된다 — 주소로 직접 불러도 막힌다", () => {
+    // 액션은 살아 있는 계정을 나르기만 한다.
+    assert.match(actionCode.replace(/\s+/g, " "), /actor: actingUser,/);
     // 판정 자체는 트랜잭션 안(mutation)에서 조회와 같은 함수로 일어난다.
-    assert.match(mutationCode.replace(/\s+/g, " "), /resolveUsedPartsWriteGate\(\{ actorRole: params\.actorRole,/);
+    assert.match(
+      mutationCode.replace(/\s+/g, " "),
+      /const canWriteUsedParts = await hasPermission\(params\.actor, "repairCases\.usedParts", "WRITE"\);/
+    );
+    assert.match(mutationCode.replace(/\s+/g, " "), /resolveUsedPartsWriteGate\(\{ canWriteUsedParts,/);
     assert.ok(
-      !/resolveUsedPartsWriteGate/.test(actionCode),
+      !/resolveUsedPartsWriteGate|hasPermission/.test(actionCode),
       "액션이 판정을 미리 흉내 내지 않는다 — 트랜잭션 밖에서 본 값은 바뀔 수 있다"
     );
   });

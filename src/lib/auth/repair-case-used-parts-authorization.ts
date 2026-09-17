@@ -10,26 +10,37 @@
  * (actions/repair-case-used-parts.ts)이 update-repair-case.ts 와 같은 차례로
  * 본다. 이 파일이 정하는 것은 그 위에 얹히는 **이 칸만의 규칙 셋**이다.
  *
- * ── 🔴 규칙 0 — 역할 셋만 적을 수 있다 (2026-09-17 사용자 확정) ─────────────
+ * ── 🔴 규칙 0 — 「역할별 접근 권한」 설정이 정한다 (2026-09-17 사용자 확정) ──
+ * 누가 적을 수 있는지는 **설정 노드 `repairCases.usedParts` 가 쓰기(WRITE)인가**
+ * 하나로 정해진다. 최고관리자가 [사용자 관리] → [역할별 접근 권한] 에서 바꾼다.
+ *
+ * 기본값은 종전 목록 그대로다(permission-baseline.ts 의 같은 키):
  *   · SUPER_ADMIN · ADMIN · AS_ENGINEER → 쓰기
- *   · SALES · INVENTORY_MANAGER        → 못 씀
+ *   · SALES · INVENTORY_MANAGER        → 없음
  *
- * 까닭: 「무엇을 갈았나」는 수리 내용이라 AS_ENGINEER 가 신고증상 · 외관 상태를
- * 적는 자리와 같다. SALES 는 고객 · 날짜 · 연락처 담당이고, INVENTORY_MANAGER 는
- * 수리건에서 읽기 전용이다(부품 반출 이력 쪽으로 이미 기록에 참여한다).
+ * 그 기본값의 까닭: 「무엇을 갈았나」는 수리 내용이라 AS_ENGINEER 가 신고증상 ·
+ * 외관 상태를 적는 자리와 같다. SALES 는 고객 · 날짜 · 연락처 담당이고,
+ * INVENTORY_MANAGER 는 수리건에서 읽기 전용이다(부품 반출 이력 쪽으로 이미 기록에
+ * 참여한다). **달라진 것은 그 목록을 바꿀 수 있는 사람이다** — 개발자가 코드를
+ * 고치지 않아도 된다.
  *
- * 🔴 왜 repair-case-edit-authorization.ts 의 역할 표에 넣지 않았는가 —
- * 그 표(EDITABLE_FIELDS_BY_ROLE)는 **SECTION_FIELD_NAMES 의 칸 이름**을 역할에
- * 이어 붙인다. 사용 부품은 그 세 구역의 칸이 아니라 **자식 줄 목록**이라 그 표에
- * 넣을 이름 자체가 없다. 대신 이 칸의 규칙이 이미 이 파일 하나에 모여 있으므로
- * 역할도 여기에 얹었다 — 화면 · 조회 · 저장이 지금도 이 파일의 함수 하나만 본다.
+ * 🔴 왜 이 칸은 설정으로 옮길 수 있고 접수 건 수정은 못 옮기는가 —
+ * 그쪽 정책(EDITABLE_FIELDS_BY_ROLE)은 **칸 이름 단위**라 NONE·READ·WRITE·MANAGE
+ * 네 단계에 접히지 않는다(영업은 접수 정보는 고치는데 제품 정보는 못 고친다).
+ * 사용 부품은 「쓴다 / 못 쓴다」 하나뿐이라 그 사다리에 그대로 들어간다.
  *
- * 🔴 역할 목록은 아래 USED_PARTS_WRITE_ROLES **한 곳에만** 있다. 조회 · 저장 ·
- * 화면 어디에도 역할 이름을 다시 적지 않는다(시험이 글자로 못 박는다).
+ * 🔴 **이 파일에 역할 이름이 한 글자도 없다.** 코드 목록과 설정을 둘 다 보게 두면
+ * 권한 설정 화면이 「넓히면 실제로 열립니다」라고 **거짓말을 한다**
+ * (permission-features.ts 의 SETTINGS_ENFORCED_LEAVES 주석에 적힌 그 함정 —
+ * 주간보고 · 내자 정리가 그래서 그 집합에서 빠져 있었다). 그래서 아래 판정 함수는
+ * **이미 판정된 불리언 하나**(`canWriteUsedParts`)만 받는다.
  *
- * 🔴 `isDeveloper` 승격은 보지 않는다 — 접수 건 칸 편집(authorizeSubmittedFields)
- * 과 똑같이 **날 role** 로만 판정한다. 개발자 표시로 권한이 넓어지는 곳은 설정이
- * 최종 판정인 메뉴(permission-resolver.ts)뿐이고, 이 칸은 그 가족이 아니다.
+ * 🔴 이 파일 안에서 hasPermission 을 부르지 않는다 — 비동기 · DB 라서 순수 함수가
+ * 깨진다. 부르는 쪽(조회 · 저장)이 부르고 그 답만 넘긴다.
+ *
+ * 🔴 `isDeveloper` 승격은 이제 **닿는다.** 이 칸이 설정이 최종 판정인 가족에
+ * 들어왔기 때문이다 — 승격은 permission-resolver.ts 한 곳에서만 일어나고, 부르는
+ * 쪽이 역할이 아니라 **사람**(PermissionActor)을 넘기므로 저절로 따라온다.
  *
  * ── 🔴 규칙 1 — 반출 이력이 있으면 적을 수 없다 ─────────────────────────────
  * 화면만 감추면 주소로 불러 저장할 수 있고, 그러면 같은 부품을 통계가 두 번
@@ -68,9 +79,13 @@
  * ============================================================================
  */
 
-import type { Role } from "@/lib/domain/types";
-
-/** 적을 수 없는 까닭. 서버 액션이 그대로 결과 코드로 쓴다. */
+/**
+ * 적을 수 없는 까닭. 서버 액션이 그대로 결과 코드로 쓴다.
+ *
+ * 🔴 `ROLE_NOT_ALLOWED` 라는 이름은 판정이 설정으로 옮겨 온 뒤에도 그대로 둔다 —
+ * 뜻은 처음부터 「이 사람에게는 이 칸의 권한이 없다」였고, 그 뜻이 달라지지 않았다.
+ * 이름만 바꾸면 화면 · 액션 · 시험 세 곳의 결과 코드가 함께 흔들릴 뿐이다.
+ */
 export type UsedPartsWriteBlockCode =
   | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
@@ -81,29 +96,19 @@ export type UsedPartsWriteGate =
   | { ok: false; code: UsedPartsWriteBlockCode; message: string };
 
 /**
- * 🔴 **사용 부품을 적을 수 있는 역할 — 이 목록의 유일한 자리.**
- *
- * transitions.ts 의 REQUEST_ELIGIBLE_ROLES 가 지금 우연히 같은 셋이지만 **가져다
- * 쓰지 않는다** — 그쪽은 「부품 요청을 낼 자격」이고 이쪽은 「수리 내용을 적을
- * 자격」이다. 한쪽 정책이 바뀔 때 다른 쪽이 조용히 따라 움직이면 안 된다.
- */
-export const USED_PARTS_WRITE_ROLES: readonly Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"];
-
-/** role 이 null 이면 **막는다** — 계정을 읽지 못한 요청은 닫히는 쪽으로 떨어진다. */
-export function canRoleWriteUsedParts(role: Role | null): boolean {
-  return role !== null && USED_PARTS_WRITE_ROLES.includes(role);
-}
-
-/**
  * 판정의 재료. 넷 다 **서버가 읽은 사실**이다 — 화면이 보낸 값이 하나도 없다
  * (화면이 스스로 판정하면 판정이 두 벌이 된다).
  */
 export type UsedPartsWriteGateFacts = {
   /**
-   * 지금 이 요청을 낸 사람의 역할. **살아 있는 계정에서 읽은 값**이어야 한다
-   * (세션 토큰의 역할이 아니다 — auth/acting-user.ts 머리말). 읽지 못했으면 null.
+   * 🔴 이 사람이 `repairCases.usedParts` 를 쓰기 이상으로 갖고 있는가 —
+   * **이미 내려진 판정**이다(hasPermission 의 답). 이 파일은 그 답을 받기만 한다.
+   *
+   * 부르는 쪽은 살아 있는 계정에서 읽은 사람으로 물어야 한다(세션 토큰의 역할이
+   * 아니다 — auth/acting-user.ts 머리말). 계정을 읽지 못했으면 false 를 넘긴다 —
+   * 닫히는 쪽으로 떨어뜨리는 것이 그 자리의 규칙이다.
    */
-  actorRole: Role | null;
+  canWriteUsedParts: boolean;
   /** 이 건에 살아 있는 부품 요청(반출) 줄이 있는가. REJECTED · CANCELLED 는 치지 않는다. */
   hasPartRequestHistory: boolean;
   /** repair_cases.is_locked — 출하 완료로 잠겼는가. */
@@ -144,7 +149,7 @@ export function isUsedPartsBlockedByShipmentLock(
  * 않는다.
  *
  * ── 차례 ────────────────────────────────────────────────────────────────────
- * 🔴 역할이 **맨 앞**이다. 역할은 건이 아니라 사람의 성질이라, 적을 수 없는
+ * 🔴 권한이 **맨 앞**이다. 권한은 건이 아니라 사람의 성질이라, 적을 수 없는
  * 사람에게 「반출 이력 때문」이라고 말하면 거짓 안내가 된다 — 요청서를 지워도
  * 그 사람은 여전히 적을 수 없다. 자기가 할 수 있는 일이 무엇인지 알려면 「내
  * 권한이 아니다」가 먼저 나와야 한다.
@@ -153,7 +158,7 @@ export function isUsedPartsBlockedByShipmentLock(
  * 있는 안내다(잠금은 풀 길이 있지만 반출 이력은 이 칸의 존재 이유 자체를 없앤다).
  */
 export function resolveUsedPartsWriteGate(facts: UsedPartsWriteGateFacts): UsedPartsWriteGate {
-  if (!canRoleWriteUsedParts(facts.actorRole)) {
+  if (!facts.canWriteUsedParts) {
     return {
       ok: false,
       code: "ROLE_NOT_ALLOWED",

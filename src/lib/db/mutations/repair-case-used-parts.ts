@@ -8,7 +8,7 @@ import {
   isImportedFromKyosanIntake,
 } from "../queries/repair-case-used-parts";
 import { resolveUsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
-import type { Role } from "@/lib/domain/types";
+import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
 import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-input";
 
 /**
@@ -26,9 +26,11 @@ import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-
  * (hasLivePartRequest · isImportedFromKyosanIntake · resolveUsedPartsWriteGate).
  * 주소로 직접 부른 요청도 여기서 같은 거절을 받는다.
  *
- * 🔴 **역할도 그 셋에 든다.** 화면에서 「수정」 단추를 감추는 것만으로는 모자라다 —
- * 권한 없는 역할이 서버 액션을 직접 불러도 이 안에서 거절된다. `actorRole` 은
- * 서버 액션이 **살아 있는 계정에서 다시 읽은** 역할이다(세션 토큰 값이 아니다).
+ * 🔴 **권한도 그 셋에 든다.** 화면에서 「수정」 단추를 감추는 것만으로는 모자라다 —
+ * 권한 없는 사람이 서버 액션을 직접 불러도 이 안에서 거절된다. 그 판정은 역할
+ * 이름 비교가 아니라 [역할별 접근 권한]의 `repairCases.usedParts` 조회다
+ * (hasPermission) — 조회 쪽이 화면에 내려보낼 때 묻는 바로 그 키다. `actor` 는
+ * 서버 액션이 **살아 있는 계정에서 다시 읽은** 사람이다(세션 토큰 값이 아니다).
  *
  * ── 왜 전부 지우고 다시 넣는가 ──────────────────────────────────────────────
  * 부모에 딸린 줄 목록을 통째로 받는 저장이다 — quote_items 의 replaceItems 와
@@ -89,8 +91,11 @@ export async function saveRepairCaseUsedParts(params: {
   repairCaseId: string;
   expectedVersion: number;
   actorUserId: string;
-  /** 살아 있는 계정에서 읽은 역할. 판정은 아래 resolveUsedPartsWriteGate 가 한다. */
-  actorRole: Role;
+  /**
+   * 살아 있는 계정에서 읽은 사람(역할 + 개발자 표시). 이 안에서 권한을 **다시**
+   * 묻는다 — 판정은 아래 resolveUsedPartsWriteGate 가 한다.
+   */
+  actor: PermissionActor;
   lines: readonly UsedPartLineInput[];
 }): Promise<SaveUsedPartsMutationResult> {
   return db.transaction(async (tx) => {
@@ -104,16 +109,20 @@ export async function saveRepairCaseUsedParts(params: {
       return { ok: false, code: "NOT_FOUND", message: "해당 접수 건을 찾을 수 없습니다." };
     }
 
-    // 🔴 조회가 쓰는 바로 그 두 판정 + 그 셋을 합치는 바로 그 함수. 트랜잭션
-    // 안에서 다시 본다 — 화면이 열어 준 뒤에 바뀌었을 수 있다.
+    // 🔴 조회가 쓰는 바로 그 세 재료 + 그것을 합치는 바로 그 함수. 트랜잭션
+    // 안에서 다시 본다 — 화면이 열어 준 뒤에 바뀌었을 수 있다(요청서가 생기거나,
+    // 건이 잠기거나, 관리자가 권한을 좁히거나).
     //
-    // 역할만 먼저 보고 일찍 빠져나가지 않는다 — 그러면 판정이 두 벌이 되고,
-    // 「역할이 먼저」라는 차례가 이 파일에도 한 벌 적히게 된다. 두 probe 는 이 건
-    // 하나만 보는 인덱스 조회라 값이 싸다.
+    // 권한만 먼저 보고 일찍 빠져나가지 않는다 — 그러면 판정이 두 벌이 되고,
+    // 「권한이 먼저」라는 차례가 이 파일에도 한 벌 적히게 된다. 두 probe 는 이 건
+    // 하나만 보는 인덱스 조회라 값이 싸고, 권한 조회는 요청 한 번에 한 번이다
+    // (permission-resolver 의 cache). 작업 기록 저장(mutations/repair-case-work-
+    // records.ts)도 트랜잭션 안에서 같은 창구를 부른다.
+    const canWriteUsedParts = await hasPermission(params.actor, "repairCases.usedParts", "WRITE");
     const hasPartRequestHistory = await hasLivePartRequest(tx, params.repairCaseId);
     const isLegacyImportedCase = await isImportedFromKyosanIntake(tx, params.repairCaseId);
     const gate = resolveUsedPartsWriteGate({
-      actorRole: params.actorRole,
+      canWriteUsedParts,
       hasPartRequestHistory,
       isShipmentLocked: current.isLocked,
       isLegacyImportedCase,

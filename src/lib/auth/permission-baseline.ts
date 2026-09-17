@@ -133,6 +133,28 @@ function canEditAnyRepairCaseSection(role: Role): boolean {
 }
 
 /**
+ * 「사용 부품」의 **기본값** — 2026-09-17 전까지 코드가 최종 판정으로 쓰던 역할 셋
+ * 그대로다(SUPER_ADMIN · ADMIN · AS_ENGINEER).
+ *
+ * 🔴 이 파일의 원칙은 "*-authorization.ts 를 호출해서 구한다"인데, 이 노드에는
+ * 부를 함수가 **없다.** 판정을 설정으로 옮기면서 역할 목록(USED_PARTS_WRITE_ROLES ·
+ * canRoleWriteUsedParts)을 걷어냈기 때문이다 — 코드 목록과 설정을 둘 다 남겨 두면
+ * 권한 설정 화면이 "넓히면 열립니다"라고 거짓말을 한다(permission-features.ts 의
+ * SETTINGS_ENFORCED_LEAVES 주석). 그래서 그 목록이 마지막으로 남는 자리가 여기다.
+ *
+ * 🔴 여기 적힌 것은 **관문이 아니라 기본값**이다. 실효 권한을 정하는 것은 설정이고
+ * (permission-resolver.ts), 저장된 값이 있으면 이 함수의 답은 쓰이지 않는다.
+ * 그래서 export 하지 않는다 — 밖에서 부를 수 있게 두면 그 순간 두 번째 관문이 된다.
+ *
+ * 다른 모듈의 같은 셋(transitions.ts 의 REQUEST_ELIGIBLE_ROLES, 작업 기록의 역할
+ * 함수)을 가져다 쓰지 않는 까닭도 종전과 같다 — 지금 우연히 같을 뿐이고, 한쪽
+ * 정책이 바뀔 때 이 칸의 기본값이 조용히 따라 움직이면 안 된다.
+ */
+function writesUsedPartsByDefault(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "AS_ENGINEER";
+}
+
+/**
  * 참/거짓 사다리를 수준으로 접는다. 위에서부터 처음 참인 칸이 상한이다 —
  * "관리는 되는데 읽기는 안 된다" 같은 조합은 존재하지 않으므로 순서대로 본다.
  */
@@ -367,6 +389,8 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
         write: canCreateWorkRecord(role, PERMISSIVE_WORK_RECORD),
         read: canViewWorkRecords(role),
       });
+    case "repairCases.usedParts":
+      return ladder({ write: writesUsedPartsByDefault(role), read: false });
     case "repairCases.lifecycle":
       return ladder({
         manage:

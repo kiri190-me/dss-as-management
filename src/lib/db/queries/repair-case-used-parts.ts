@@ -7,7 +7,7 @@ import {
   resolveUsedPartsWriteGate,
   type UsedPartsWriteGate,
 } from "@/lib/auth/repair-case-used-parts-authorization";
-import type { Role } from "@/lib/domain/types";
+import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
 
 /**
  * ============================================================================
@@ -80,8 +80,8 @@ export type RepairCaseUsedPartsView = {
    * 두 벌이 되고, 그러면 화면이 여는 조건과 서버가 받아 주는 조건이 어긋난다 —
    * 저장을 받는 mutation 도 **같은 함수**(resolveUsedPartsWriteGate)를 부른다.
    *
-   * 「건」만이 아니라 **역할**도 이 판정에 들어간다(B-3) — 그래서 이 함수는 보는
-   * 사람의 역할을 받는다.
+   * 「건」만이 아니라 **그 사람의 권한**도 이 판정에 들어간다 — 그래서 이 함수는
+   * 보는 사람을 받아 `repairCases.usedParts` 설정을 묻는다.
    */
   writeGate: UsedPartsWriteGate;
 };
@@ -161,20 +161,26 @@ export async function isImportedFromKyosanIntake(
  * 「사용 부품」 칸이 필요로 하는 것 전부를 한 번에 — 적힌 줄과, **이 사람이 여기에
  * 적을 수 있는가**(auth/repair-case-used-parts-authorization.ts 의 규칙 셋).
  *
- * `actorRole` 은 살아 있는 계정에서 읽은 역할이다([id]/page.tsx 의 actingUser).
- * 계정을 읽지 못했으면 null 을 넘긴다 — 판정이 닫히는 쪽으로 떨어진다.
+ * `actor` 는 살아 있는 계정에서 읽은 사람이다([id]/page.tsx 의 actingUser).
+ * 계정을 읽지 못했으면 null 을 넘긴다 — 판정이 닫히는 쪽으로 떨어진다(권한을
+ * 물을 사람이 없으면 물어보지 않고 false 로 둔다).
  *
- * 네 질의를 **나란히**(Promise.all) 쏜다 — 전부 이 건 하나만 보는 작은 인덱스
+ * 🔴 역할 이름을 여기서 비교하지 않는다. 「누가 적을 수 있는가」는 [역할별 접근
+ * 권한]의 `repairCases.usedParts` 가 정하고, 저장 쪽도 **같은 키**를 묻는다.
+ *
+ * 다섯 질의를 **나란히**(Promise.all) 쏜다 — 전부 이 건 하나만 보는 작은 인덱스
  * 조회다(`repair_case_used_parts_repair_case_id_line_no_unique` 의 선행 칼럼,
  * `inventory_part_requests_repair_case_id_idx`, repair_cases 기본키,
- * `status_change_histories` 의 건별 인덱스). 부르는 쪽도 이 함수를 자기
- * Promise.all 에 태우므로 화면이 기다리는 시간은 늘지 않는다.
+ * `status_change_histories` 의 건별 인덱스). 권한 조회는 요청 한 번에 한 번만
+ * 일어난다(permission-resolver 의 cache) — 같은 화면의 다른 칸이 이미 물었으면
+ * 왕복이 아예 없다. 부르는 쪽도 이 함수를 자기 Promise.all 에 태우므로 화면이
+ * 기다리는 시간은 늘지 않는다.
  */
 export async function getRepairCaseUsedPartsView(
   repairCaseId: string,
-  actorRole: Role | null
+  actor: PermissionActor | null
 ): Promise<RepairCaseUsedPartsView> {
-  const [rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase] = await Promise.all([
+  const [rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase, canWriteUsedParts] = await Promise.all([
     db
       .select({
         id: repairCaseUsedParts.id,
@@ -193,13 +199,14 @@ export async function getRepairCaseUsedPartsView(
       .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)))
       .limit(1),
     isImportedFromKyosanIntake(db, repairCaseId),
+    actor === null ? false : hasPermission(actor, "repairCases.usedParts", "WRITE"),
   ]);
 
   return {
     rows,
     hasPartRequestHistory,
     writeGate: resolveUsedPartsWriteGate({
-      actorRole,
+      canWriteUsedParts,
       hasPartRequestHistory,
       // 건을 못 찾았으면(휴지통에 들어갔거나 사라졌다) **잠긴 것으로 본다** —
       // 그래야 화면이 적을 자리를 열지 않는다. 저장 쪽은 같은 경우를 NOT_FOUND 로

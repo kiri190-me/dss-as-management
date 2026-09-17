@@ -118,6 +118,23 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       },
       maxMeaningfulLevel: "MANAGE",
     },
+    usedParts: {
+      // 「무엇을 갈았나」를 손으로 적는 칸이다(schema/repair-case-used-parts.ts).
+      // 부품 요청서를 낸 건은 반출 이력이 이미 통계에 잡히므로 이 칸이 잠기는데,
+      // 그것은 **권한이 아니라 건의 사정**이라 여기서 다루지 않는다 — 출하 잠금도
+      // 마찬가지다(auth/repair-case-used-parts-authorization.ts 의 규칙 1·2).
+      // 이 트리는 그중 역할 부분만 대신한다(이 파일 맨 위 '여기서 정하지 않는 것').
+      //
+      // 🔴 쓰기 하나만 둔다. 보는 일은 같은 메뉴의 '접수 건 조회'가 맡고(칸은 늘
+      // 보인다), 지우는 조작이 따로 없다 — 저장이 줄 목록을 통째로 다시 적는
+      // 방식이라 '줄을 지운다'가 곧 쓰기다. 읽기·관리를 만들어 두면 고른 사람은
+      // 무언가 달라졌다고 믿지만 실제로는 아무것도 달라지지 않는다.
+      label: "사용 부품",
+      minMeaningfulLevel: "WRITE",
+      description: "그 건에서 갈아 끼운 부품을 손으로 적습니다.",
+      levelHints: { WRITE: "사용 부품 줄을 적고, 고치고, 지웁니다" },
+      maxMeaningfulLevel: "WRITE",
+    },
     lifecycle: {
       label: "삭제·복원",
       minMeaningfulLevel: "MANAGE",
@@ -444,6 +461,15 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
 const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCases.view",
   "repairCases.workRecords",
+  // 사용 부품(2026-09-17 전환). 조회 · 저장이 모두 hasPermission("repairCases.
+  // usedParts", "WRITE") 하나를 보고, 역할 이름 목록은 코드에서 **걷어냈다** —
+  // 아래 ⚠️ 주간보고 문단이 말하는 「역할 함수 AND 설정」 상태로 두지 않았다는
+  // 뜻이다. 그래서 여기 올려도 화면이 거짓말을 하지 않는다: 넓히면 실제로 열린다.
+  //
+  // 반출 이력 · 출하 잠금은 이 집합과 겹치지 않는다 — 역할이 아니라 건 하나의
+  // 사정이라 4단계 사다리가 애초에 말할 수 없는 것이다(작업 기록의 「담당인가」와
+  // 같은 자리). 설정으로 쓰기를 주면 「적을 수 있는 건」에는 실제로 열린다.
+  "repairCases.usedParts",
   "repairCases.lifecycle",
   "repairCases.procedureExecution",
   // 첨부는 처음부터 설정만 봤다 — 올리기·내려받기·미리보기·지우기 라우트가

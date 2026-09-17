@@ -29,10 +29,10 @@ import { readFileSync } from "node:fs";
  *  8. 🔴 부품 고르개를 붙였다 — 고르면 part_id 가 붙고, 고쳐 쓰면 풀린다. 마스터에
  *     없는 부품은 손으로 적을 수 있다.
  *  9. 🔴 화면이 줄 번호를 보내지 않는다 — line_no 는 서버가 매긴다.
- * 10. 🔴 역할 표가 화면에도 액션에도 없다 — 액션은 살아 있는 계정의 역할을 저장
- *     쪽으로 **나르기만** 하고, 판정은 인가 모듈 한 곳에서 일어난다(B-3).
- *     역할별 결과 자체는 auth/repair-case-used-parts-authorization.test.ts 가
- *     다섯 역할 전부 못 박는다.
+ * 10. 🔴 역할 표가 화면에도 액션에도 없다 — 액션은 살아 있는 계정을 저장 쪽으로
+ *     **나르기만** 하고, 「누가 적을 수 있는가」는 [역할별 접근 권한]의
+ *     `repairCases.usedParts` 가 정한다(2026-09-17 전환). 기본값과 판정 차례는
+ *     auth/repair-case-used-parts-authorization.test.ts 가 못 박는다.
  * ============================================================================
  */
 
@@ -119,8 +119,14 @@ describe("사용 부품 — 조회", () => {
   test("질의를 나란히 쏜다 — 왕복을 직렬로 늘리지 않는다", () => {
     assert.match(
       queryFlat,
-      /const \[rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase\] = await Promise\.all\(\[/
+      /const \[rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase, canWriteUsedParts\] = await Promise\.all\(\[/
     );
+  });
+
+  test("🔴 누가 적을 수 있는지는 설정에 묻는다 — 역할 이름을 비교하지 않는다", () => {
+    assert.match(queryFlat, /hasPermission\(actor, "repairCases\.usedParts", "WRITE"\)/);
+    // 사람을 못 읽었으면 묻지 않고 닫는다 — 권한 조회가 없는 쪽이 곧 false 다.
+    assert.match(queryFlat, /actor === null \? false : hasPermission\(actor, "repairCases\.usedParts", "WRITE"\)/);
   });
 
   test("🔴 읽기뿐이다 — insert·update·delete 가 없다", () => {
@@ -270,8 +276,8 @@ describe("사용 부품 — 서버 액션의 관문", () => {
       "isValidExpectedVersion(input.expectedVersion)",
       "validateUsedPartLines(input.lines)",
       "saveRepairCaseUsedParts(",
-      // 🔴 역할은 세션 토큰이 아니라 위에서 다시 읽은 살아 있는 계정에서 온다.
-      "actorRole: actingUser.role,",
+      // 🔴 사람은 세션 토큰이 아니라 위에서 다시 읽은 살아 있는 계정에서 온다.
+      "actor: actingUser,",
     ];
     let cursor = -1;
     for (const needle of order) {
@@ -288,13 +294,13 @@ describe("사용 부품 — 서버 액션의 관문", () => {
 
   test("🔴 규칙 셋은 액션이 아니라 mutation 이 본다 — 트랜잭션 안에서", () => {
     assert.ok(
-      !/hasLivePartRequest|isImportedFromKyosanIntake|resolveUsedPartsWriteGate|canRoleWriteUsedParts|USED_PARTS_WRITE_ROLES/.test(
+      !/hasLivePartRequest|isImportedFromKyosanIntake|resolveUsedPartsWriteGate|hasPermission|USED_PARTS_WRITE_ROLES/.test(
         actionCode
       ),
       "액션이 판정을 미리 흉내 내지 않는다"
     );
-    // 역할은 나르기만 한다 — 판정은 저장 쪽에서 다시 일어난다.
-    assert.match(actionFlat, /actorRole: actingUser\.role,/);
+    // 사람만 나른다 — 권한 판정은 저장 쪽에서 다시 일어난다.
+    assert.match(actionFlat, /actor: actingUser,/);
   });
 });
 
@@ -302,7 +308,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
   test("🔴 DATABASE 소스 건에만 조회한다 — MOCK·LOCAL_DEMO 에는 이 표가 없다", () => {
     assert.match(
       pageFlat,
-      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser\?\.role \?\? null\) : null/
+      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser\) : null/
     );
     assert.match(pageFlat, /resolved\.source === "DATABASE" \? getPartPickerList\(\) : \[\]/);
   });
@@ -315,7 +321,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
     assert.ok(start > 0 && end > start, "Promise.all 묶음을 찾지 못했다");
     const bundle = pageFlat.slice(start, end);
     assert.ok(
-      bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser?.role ?? null)"),
+      bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser)"),
       "조회가 기존 Promise.all 묶음 안에 있어야 한다"
     );
     assert.ok(bundle.includes("getPartPickerList()"), "부품 마스터도 같은 묶음 안에 있어야 한다");

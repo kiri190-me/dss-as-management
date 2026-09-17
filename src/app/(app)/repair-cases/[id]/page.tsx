@@ -155,10 +155,11 @@ export default async function RepairCaseDetailPage({
   // 아니라 위 writeGate 가 정하므로 여기서 미리 나누지 않는다 — 나누면 판정이
   // 두 벌이 된다.
   //
-  // 🔴 역할을 조회에 넘긴다 — 누가 적을 수 있는지도 그 writeGate 가 정하기
-  // 때문이다(auth/repair-case-used-parts-authorization.ts). 여기서 역할 이름을
-  // 비교하지 않는다. actingUser 가 null 이면(삭제 · 정지 · 세션 끊김) null 을
-  // 그대로 넘겨 닫히는 쪽으로 떨어뜨린다 — 칸 자체는 읽기로 남는다.
+  // 🔴 사람을 조회에 넘긴다 — 누가 적을 수 있는지도 그 writeGate 가 정하고, 그
+  // 판정은 [역할별 접근 권한]의 `repairCases.usedParts` 를 묻는 일이기 때문이다
+  // (auth/repair-case-used-parts-authorization.ts). 여기서 역할 이름을 비교하지
+  // 않는다. actingUser 가 null 이면(삭제 · 정지 · 세션 끊김) null 을 그대로 넘겨
+  // 닫히는 쪽으로 떨어뜨린다 — 칸 자체는 읽기로 남는다.
   const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts, usedPartOptions] =
     await Promise.all([
       resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
@@ -167,7 +168,7 @@ export default async function RepairCaseDetailPage({
         ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
         : new Map<string, DerivedServiceSummary>(),
       resolved.source === "DATABASE"
-        ? getRepairCaseUsedPartsView(resolved.id, actingUser?.role ?? null)
+        ? getRepairCaseUsedPartsView(resolved.id, actingUser)
         : null,
       resolved.source === "DATABASE" ? getPartPickerList() : [],
     ]);

@@ -188,6 +188,28 @@ test("삭제·복원 세 조작은 역할 집합이 같아서 한 노드로 접�
   }
 });
 
+test("사용 부품은 「쓴다/못 쓴다」 하나라 설정으로 옮길 수 있었다", () => {
+  // 접수 건 수정(아래 시험)과 갈리는 지점이다 — 그쪽은 칸마다 역할이 달라 4단계
+  // 사다리에 접히지 않지만, 이쪽은 조작이 하나뿐이라 그대로 들어간다.
+  assert.deepEqual(selectableLevelsOfLeaf("repairCases.usedParts"), ["NONE", "WRITE"]);
+  assert.equal(isSettingsEnforced("repairCases.usedParts"), true);
+
+  // 🔴 기본값이 옮기기 전 코드가 판정하던 셋 그대로여야 한다 — 설정을 아무도
+  // 만지지 않은 상태에서 동작이 달라지면 안 된다.
+  assert.equal(baselineLeafLevel("repairCases.usedParts", "SUPER_ADMIN"), "WRITE");
+  assert.equal(baselineLeafLevel("repairCases.usedParts", "ADMIN"), "WRITE");
+  assert.equal(baselineLeafLevel("repairCases.usedParts", "AS_ENGINEER"), "WRITE");
+  assert.equal(baselineLeafLevel("repairCases.usedParts", "SALES"), "NONE");
+  assert.equal(baselineLeafLevel("repairCases.usedParts", "INVENTORY_MANAGER"), "NONE");
+});
+
+test("전체 A/S 현황은 아직 메뉴째로 전환되지 않았다 — 접수 건 수정이 남아 있다", () => {
+  // 사용 부품을 SETTINGS_ENFORCED_LEAVES 에 넣어도 메뉴 전체가 전환된 것으로
+  // 보이면 안 된다. 하나라도 남아 있으면 화면은 "아직 코드가 최종 판정"이라고
+  // 말해야 한다(isSettingsEnforced 의 '전부 전환됐을 때만').
+  assert.equal(isSettingsEnforced("repairCases"), false);
+});
+
 test("접수 건 수정은 구간마다 역할이 달라서 한 노드로 접을 수 없다", () => {
   // 영업은 접수·고장 정보는 고치지만 제품 정보는 못 고친다. repairCases.edit을
   // 설정으로 옮기지 않은 이유이고(EDITABLE_FIELDS_BY_ROLE는 필드 단위라 4단계

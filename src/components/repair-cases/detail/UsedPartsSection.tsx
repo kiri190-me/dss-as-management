@@ -15,13 +15,13 @@ import UsedPartsEditForm from "@/components/repair-cases/detail/edit/UsedPartsEd
  *
  * ── 🔴 적을 수 있는지는 **화면이 정하지 않는다** (B-2 · B-3) ────────────────
  * 서버가 내린 판정(`writeGate`)만 보고 입력 칸을 그릴지 정한다. 화면이 스스로
- * 「반출 이력이 있나」 「잠겼나」 「내 역할이 되나」를 따지면 판정이 두 벌이 되고,
+ * 「반출 이력이 있나」 「잠겼나」 「내 권한이 되나」를 따지면 판정이 두 벌이 되고,
  * 그러면 화면이 여는 조건과 서버가 받아 주는 조건이 어긋난다. 그 판정은
  * auth/repair-case-used-parts-authorization.ts 한 곳에 있고, 저장을 받는
  * mutation 도 같은 함수를 부른다 — 주소로 직접 부른 요청도 같은 거절을 받는다.
  *
- * 그래서 이 파일에는 **역할 이름이 한 글자도 없다.** 역할 목록은 위 인가 모듈의
- * USED_PARTS_WRITE_ROLES 한 곳에만 있다.
+ * 그래서 이 파일에는 **역할 이름이 한 글자도 없다.** 누가 적을 수 있는지는
+ * [사용자 관리] → [역할별 접근 권한]의 `repairCases.usedParts` 가 정한다.
  *
  * 그래서 이 파일에는 `hasPartRequestHistory` 로 **잠그는** 줄이 없다. 그 값은
  * 아래 안내 문구를 고르는 데만 쓴다(무엇이 막았는지 사람에게 말해 주려고).
