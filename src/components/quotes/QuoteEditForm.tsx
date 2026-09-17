@@ -75,6 +75,7 @@ import {
   ExcelOnlySwitch,
   QuoteExcelAutofillNotice,
 } from "@/components/quotes/QuoteAttachmentParts";
+import { takeNewQuoteExcelHandoff } from "@/components/quotes/new-quote-excel-handoff";
 import { createLatestQuoteExcelReader, type QuoteExcelReadFields } from "@/components/quotes/quote-excel-parse";
 import {
   planQuoteExcelAutofill,
@@ -151,6 +152,12 @@ import type { QuoteFolderOpenOutcome } from "@/components/quotes/quote-folder-op
  * 엑셀과 다르면 덮지 않고 「엑셀과 다른 칸」 목록 · [엑셀 값으로 바꾸기]를 칸 곁에 보인다. 종류도
  * 제안만 하고, 바꿀 때는 종류 select 와 같은 함수(changeKind)를 탄다. 엑셀 전용이 아니면 읽지
  * 않는다. 두 번 고르면 마지막에 고른 파일의 결과만 쓴다(createLatestQuoteExcelReader).
+ *
+ * ── [새 견적서] 팝업이 건네준 엑셀 (견적서 ⑤b) ──────────────────────────
+ * 팝업에서 엑셀을 올리고 어떤 견적서인지 고른 뒤 [만들기]를 누르면, 파일이 작은 상자로 건너온다
+ * (new-quote-excel-handoff.ts). 첫 그림에서 꺼내 **사람이 칸에 고른 것과 같은 길**(pickFile)에
+ * 태우고, 팝업이 고른 시트 차례를 첫 읽기에 실어 준다. 🔴 상자가 비어 있으면(새로고침 · 주소
+ * 직접 입력 · 뒤로가기) 지금까지와 똑같다 — 칸에 직접 붙이면 된다.
  * ============================================================================
  */
 
@@ -888,6 +895,13 @@ export default function QuoteEditForm({
    */
   const [excelAutofill, setExcelAutofill] = useState<ExcelAutofillState | null>(null);
   const [excelReader] = useState(() => createLatestQuoteExcelReader());
+  /**
+   * [새 견적서] 팝업이 건네준 **시트 차례**(견적서 ⑤b — new-quote-excel-handoff.ts). 팝업에서
+   * 고른 종류에 짝지어지는 탭이고, 첫 읽기 한 번에만 쓰고 비운다 — 그다음에 사람이 다른 엑셀을
+   * 고르면 그 파일은 지금까지처럼 통로가 혼자 고른 시트로 읽는다. 상자가 비어 있었으면 undefined
+   * 라, 지금까지와 한 글자도 다르지 않은 요청이다.
+   */
+  const handoffSheetIndex = useRef<number | undefined>(undefined);
 
   /** 저장된 견적서 — 수정 화면의 그 장, 또는 이 화면에서 방금 만든 장. 없으면 새 견적서. */
   const savedQuote = quote ? { id: quote.id, version: quote.version } : createdQuote;
@@ -1370,6 +1384,40 @@ export default function QuoteEditForm({
   }, [quote, initialIntakeNumber]);
 
   /**
+   * ============================================================================
+   * [새 견적서] 팝업이 건네준 수기 견적서 엑셀 (견적서 ⑤b)
+   * ============================================================================
+   * 팝업에서 엑셀 전용을 켜고 엑셀을 올린 뒤 [만들기]를 누르면, 파일은 주소에 실리지 못하므로
+   * 작은 상자로 건너온다(new-quote-excel-handoff.ts). 여기서 꺼내 **사람이 「수기 견적서
+   * 엑셀」 칸에 파일을 고른 것과 똑같은 길**(attachments.pickFile)에 태운다 — 붙이기도 읽기도
+   * 그 한 길이 한다. 팝업이 골라 둔 시트 차례는 위 handoffSheetIndex 가 첫 읽기에 실어 준다.
+   *
+   * 🔴 **비어 있는 것이 보통이다.** 새로고침 · 주소 직접 입력 · 뒤로가기로 들어오면 상자는
+   * 비어 있고, 그때 이 폼은 지금까지와 완전히 같다 — 사람이 칸에 직접 붙이면 된다.
+   * 🔴 상자는 꺼내는 순간 비워지므로(take), 그 주소를 다시 열어도 엉뚱한 파일이 붙지 않는다.
+   *
+   * 효과 본문에서 곧바로 부르지 않고 한 틱 미루는 까닭 · 깃발을 타이머 안에서 세우는 까닭은
+   * 바로 위 자동 불러오기와 같다(그 머리말). 고치기(quote !== null)에는 상자를 건드리지 않는다.
+   * ============================================================================
+   */
+  const didTakeExcelHandoff = useRef(false);
+  useEffect(() => {
+    if (quote !== null) return;
+    const timer = setTimeout(() => {
+      if (didTakeExcelHandoff.current) return;
+      didTakeExcelHandoff.current = true;
+      const handoff = takeNewQuoteExcelHandoff();
+      if (handoff === null) return;
+      handoffSheetIndex.current = handoff.sheetIndex ?? undefined;
+      attachments.pickFile("QUOTE_EXCEL", handoff.file);
+    }, 0);
+    return () => clearTimeout(timer);
+    // attachments 는 매 렌더 새로 만들어진다 — 넣으면 매번 다시 돈다(위 깃발이 한 번을 보장하지만
+    // 타이머를 세웠다 지우기를 되풀이한다). 첫 그림의 것으로 충분하다 — 그때가 상자를 꺼낼 때다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote]);
+
+  /**
    * 출고 부품을 부품 줄에 담는다. 하나든 여럿이든 이 함수 하나를 쓴다 —
    * 일괄 담기가 하나씩 담기를 여러 번 부르면 setItems 가 여러 번 돌아 "빈 첫 줄"
    * 처리가 중간 상태에 걸린다.
@@ -1528,7 +1576,10 @@ export default function QuoteEditForm({
    */
   async function readPickedExcel(file: File) {
     setExcelAutofill({ status: "reading" });
-    const result = await excelReader.read(file);
+    // [새 견적서] 팝업이 골라 둔 시트 — **한 번 쓰고 비운다**(위 handoffSheetIndex).
+    const sheetIndex = handoffSheetIndex.current;
+    handoffSheetIndex.current = undefined;
+    const result = await excelReader.read(file, { sheetIndex });
     if (result === null) return;
     if (!result.ok) {
       setExcelAutofill({ status: "failed", reason: result.reason, code: result.code });

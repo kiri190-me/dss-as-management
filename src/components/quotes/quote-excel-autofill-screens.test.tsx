@@ -104,7 +104,7 @@ describe("🔴 (b) 두 번 고르면 마지막 결과만 · 결과가 온 순간
   test("늦게 온 옛 결과(null)는 칸을 건드리기 전에 버린다", () => {
     assert.ok(form.includes("const [excelReader] = useState(() => createLatestQuoteExcelReader());"));
     const discard = indexOrFail(readFn, "if (result === null) return;");
-    assert.ok(indexOrFail(readFn, "const result = await excelReader.read(file);") < discard);
+    assert.ok(indexOrFail(readFn, "const result = await excelReader.read(file, { sheetIndex });") < discard);
     assert.ok(discard < indexOrFail(readFn, "applyExcelValue(change)"));
     assert.ok(discard < indexOrFail(readFn, 'setExcelAutofill({ status: "failed"'));
     assert.ok(discard < indexOrFail(readFn, 'setExcelAutofill({ status: "read"'));
@@ -134,6 +134,48 @@ describe("🔴 (b) 두 번 고르면 마지막 결과만 · 결과가 온 순간
       assert.ok(values.includes(` ${name},`), `${name} 가 없다`);
     }
     assert.ok(!values.includes("faultDescriptionText"), "신고증상을 채운다");
+  });
+});
+
+/**
+ * ============================================================================
+ * [새 견적서] 팝업이 건네준 엑셀 — 상자를 꺼내 **사람이 고른 것과 같은 길**에 태운다 (견적서 ⑤b)
+ * ============================================================================
+ * 상자와 그 규칙은 new-quote-excel-handoff.ts · new-quote-excel-sheets.ts 에 있고 값으로
+ * 시험한다(new-quote-excel-sheets.test.ts · NewQuoteDialog.test.tsx). 여기서는 폼이 그것을
+ * 제자리에서 부르는가만 원본으로 본다.
+ * ============================================================================
+ */
+describe("🔴 (e) 인계 상자 — 비어도 망가지지 않고, 꺼낸 파일은 엑셀 칸의 그 길로 간다", () => {
+  const effect = sliceBetween(form, "const didTakeExcelHandoff = useRef(false);", "function addUsedParts(");
+
+  test("🔴 상자가 비어 있으면 곧바로 돌아간다 — 그때 폼은 지금까지와 똑같다", () => {
+    const take = indexOrFail(effect, "const handoff = takeNewQuoteExcelHandoff();");
+    assert.ok(take < indexOrFail(effect, "if (handoff === null) return;"), effect);
+    assert.ok(
+      indexOrFail(effect, "if (handoff === null) return;") < indexOrFail(effect, 'attachments.pickFile("QUOTE_EXCEL", handoff.file);'),
+      "상자가 비었는데 칸을 건드린다"
+    );
+    // 새 견적서에서만 꺼낸다 — 고치기 화면은 상자를 건드리지 않는다.
+    assert.ok(indexOrFail(effect, "if (quote !== null) return;") < take, effect);
+  });
+
+  test("🔴 꺼낸 파일은 사람이 칸에 고른 것과 **같은 길**(pickFile)을 탄다 — 붙이기도 읽기도 그 한 길이다", () => {
+    assert.equal(count(form, "takeNewQuoteExcelHandoff()"), 1, "상자를 꺼내는 곳이 둘이다");
+    assert.equal(count(form, 'attachments.pickFile("QUOTE_EXCEL"'), 1);
+    // 폼이 읽기를 따로 부르지 않는다 — pickFile 이 훅을 지나 handleExcelPicked 를 부른다.
+    assert.equal(count(form, "readPickedExcel("), 2, "상자 때문에 읽는 곳이 하나 늘었다");
+  });
+
+  test("🔴 팝업이 고른 시트 차례는 **첫 읽기 한 번**만 쓰고 비운다", () => {
+    const readFn = sliceBetween(form, "async function readPickedExcel(file: File) {", "function applyExcelValue(");
+    assert.ok(
+      indexOrFail(readFn, "const sheetIndex = handoffSheetIndex.current; handoffSheetIndex.current = undefined;") <
+        indexOrFail(readFn, "const result = await excelReader.read(file, { sheetIndex });"),
+      readFn
+    );
+    assert.equal(count(form, "handoffSheetIndex.current ="), 2, "시트 차례를 쓰는 곳이 담기 · 비우기 둘이 아니다");
+    assert.ok(effect.includes("handoffSheetIndex.current = handoff.sheetIndex ?? undefined;"), effect);
   });
 });
 

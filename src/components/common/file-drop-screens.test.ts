@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 /**
  * ============================================================================
- * 끌어다 놓기 — 일곱 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
+ * 끌어다 놓기 — 여덟 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
  * ============================================================================
  * 이 화면들은 서버 액션 · 브라우저 API 를 끌고 와 통째로 그려 볼 수 없다. 그래서
  * 이웃 시험(quote-attachment-screens.test.ts · save-popup-screens.test.ts)과 같은
@@ -20,7 +20,7 @@ const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n")
 const flat = (path: string) => read(path).replace(/\s+/g, " ");
 
 /**
- * 파일을 올리는 일곱 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
+ * 파일을 올리는 여덟 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
  * 칸이 타는 식이다 — **두 줄에 같은 함수 이름이 있어야 한다**(같은 길이라는 뜻).
  */
 const SITES: {
@@ -56,6 +56,14 @@ const SITES: {
     why: "견적서 첨부 — 판정은 부르는 쪽의 checkQuoteAttachmentFile",
   },
   {
+    file: "src/components/quotes/NewQuoteDialog.tsx",
+    zone: 'name="new-quote-excel"',
+    multiple: false,
+    drop: "onFiles={(files) => onPickExcel(files[0])}",
+    picker: "onFile={onPickExcel}",
+    why: "[새 견적서] 팝업의 수기 견적서 엑셀 — 판정은 폼의 엑셀 칸과 같은 checkQuoteAttachmentFile",
+  },
+  {
     file: "src/components/repair-cases/files/AttachmentFormDialog.tsx",
     zone: 'name="attachment-form-file"',
     multiple: false,
@@ -89,14 +97,14 @@ const SITES: {
   },
 ];
 
-describe("🔴 파일을 올리는 일곱 자리가 모두 끌어다 놓기를 받는다", () => {
+describe("🔴 파일을 올리는 여덟 자리가 모두 끌어다 놓기를 받는다", () => {
   for (const site of SITES) {
     test(`${site.file} — ${site.why}`, () => {
       const source = flat(site.file);
 
       assert.ok(
         source.includes('from "@/components/common/FileDropZone"'),
-        "공통 조각을 부르지 않는다 — 자리마다 따로 짜면 일곱 번 틀릴 자리가 생긴다"
+        "공통 조각을 부르지 않는다 — 자리마다 따로 짜면 여덟 번 틀릴 자리가 생긴다"
       );
       assert.ok(source.includes("<FileDropZone"), "떨구는 자리가 없다");
       assert.ok(source.includes(site.zone), `자리 이름(${site.zone})이 없다`);
@@ -122,10 +130,10 @@ describe("🔴 파일을 올리는 일곱 자리가 모두 끌어다 놓기를 �
     }
   });
 
-  test("일곱 자리 말고는 늘어나지 않았다 — 자리 이름은 저마다 다르다", () => {
+  test("여덟 자리 말고는 늘어나지 않았다 — 자리 이름은 저마다 다르다", () => {
     const names = SITES.map((site) => site.zone);
     assert.equal(new Set(names).size, names.length, "자리 이름이 겹친다");
-    assert.equal(SITES.length, 7);
+    assert.equal(SITES.length, 8);
   });
 });
 
@@ -167,7 +175,13 @@ describe("🔴 앱 안 카메라는 대상이 아니다", () => {
 });
 
 describe("기존 고르기 칸은 그대로다", () => {
-  test("일곱 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
+  test("여덟 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
+    // [새 견적서] 팝업은 견적서 첨부 칸의 **고르기 단추 조각**을 그대로 쓴다 — 그 조각 안에
+    // 숨긴 `type="file"` 칸이 있다(QuoteAttachmentParts 의 QuoteAttachmentFilePicker).
+    assert.ok(
+      read("src/components/quotes/NewQuoteDialog.tsx").includes("<QuoteAttachmentFilePicker"),
+      "src/components/quotes/NewQuoteDialog.tsx: 고르기 단추가 사라졌다"
+    );
     const withPicker = [
       "src/components/excel-imports/KyosanImportRunParts.tsx",
       "src/components/product-models/ProductModelFilesSection.tsx",

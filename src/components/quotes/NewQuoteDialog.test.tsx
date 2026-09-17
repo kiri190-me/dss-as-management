@@ -9,11 +9,23 @@ import NewQuoteDialog, {
   type ModalDialogLike,
   NEW_QUOTE_DEFAULT_KIND,
   NEW_QUOTE_DIALOG_TITLE_ID,
+  NEW_QUOTE_EXCEL_LABEL,
   NEW_QUOTE_EXCEL_ONLY_NOTE,
   NEW_QUOTE_EXCEL_ONLY_NOTE_ID,
+  NEW_QUOTE_EXCEL_PICK_NOTE,
   NewQuoteDialogView,
+  NewQuoteExcelNotice,
   type NewQuoteDialogViewProps,
+  type NewQuoteExcelReadState,
 } from "./NewQuoteDialog";
+import { takeNewQuoteExcelHandoff } from "./new-quote-excel-handoff";
+import {
+  BOTH_QUOTE_SHEETS_QUESTION,
+  MATCHER_ONLY_HEADLINE,
+  SHEET_FILLED_NOTE,
+} from "./new-quote-excel-sheets";
+import type { QuoteExcelSheetInfo } from "./quote-excel-parse";
+import { QUOTE_EXCEL_READING_TEXT } from "./quote-excel-autofill";
 import {
   newQuoteHrefForRepairCase,
   parseNewQuoteLink,
@@ -67,17 +79,32 @@ function fire(handler: unknown, ...args: unknown[]): void {
   (handler as (...a: unknown[]) => void)(...args);
 }
 
-function renderView(overrides: Partial<Pick<NewQuoteDialogViewProps, "baseHref" | "kind" | "excelOnly">> = {}) {
-  const calls = { cancel: 0, kinds: [] as string[], excelOnly: [] as boolean[] };
+function renderView(
+  overrides: Partial<
+    Pick<NewQuoteDialogViewProps, "baseHref" | "kind" | "excelOnly" | "excelFile" | "excel" | "handoff">
+  > = {}
+) {
+  const calls = {
+    cancel: 0,
+    kinds: [] as string[],
+    excelOnly: [] as boolean[],
+    picked: [] as (File | undefined)[],
+  };
   const dialog = NewQuoteDialogView({
     baseHref: "/quotes/new",
     kind: NEW_QUOTE_DEFAULT_KIND,
     excelOnly: false,
+    excelFile: null,
+    excel: null,
+    handoff: null,
     onKindChange: (kind) => {
       calls.kinds.push(kind);
     },
     onExcelOnlyChange: (value) => {
       calls.excelOnly.push(value);
+    },
+    onPickExcel: (file) => {
+      calls.picked.push(file);
     },
     onCancel: () => {
       calls.cancel += 1;
@@ -93,8 +120,26 @@ function renderView(overrides: Partial<Pick<NewQuoteDialogViewProps, "baseHref" 
     assert.equal(found.length, 1, `[${name}] 단추가 하나가 아니다`);
     return found[0];
   };
-  return { dialog, radios, checkboxes, links, button, calls };
+  /** 엑셀 전용일 때만 있는 떨구는 자리(공통 조각 FileDropZone). 없으면 undefined. */
+  const dropZone = elements.find((element) => element.props.name === "new-quote-excel");
+  return { dialog, elements, radios, checkboxes, links, button, dropZone, calls };
 }
+
+/** 알아본 시트 하나 — 시험이 쓰는 것만 채운다. */
+function sheetInfo(
+  index: number,
+  name: string,
+  form: QuoteExcelSheetInfo["form"],
+  filled = true
+): QuoteExcelSheetInfo {
+  return { index, name, form, recognizedBy: "header", filled };
+}
+
+const DOMESTIC_SHEET = sheetInfo(0, "내자견적서", "GENERATOR_DOMESTIC");
+const OH_SHEET = sheetInfo(2, "OH견적서", "GENERATOR_OH");
+const MATCHER_SHEET = sheetInfo(1, "견적서", "MATCHER", false);
+
+const readState = (sheets: QuoteExcelSheetInfo[]): NewQuoteExcelReadState => ({ status: "read", sheets });
 
 /** 정적 렌더의 `<태그 …>` 들. 속성은 글자로 본다. */
 const inputTags = (html: string) => html.match(/<input [^>]*>/g) ?? [];
@@ -226,8 +271,164 @@ describe("[만들기] — newQuoteHref 에 두 값을 덧붙인 주소로 간다
 
   test("[만들기]는 창을 닫는 길(onCancel)을 부르지 않는다 — 고른 값을 실은 주소로 갈 뿐이다", () => {
     const { links, calls } = renderView();
-    assert.equal(links[0].props.onClick, undefined, "[만들기]에 따로 붙은 처리기가 있다");
+    // 붙은 처리기는 인계 상자 하나뿐이다(아래 「인계 상자」) — 창을 닫지 않는다.
+    fire(links[0].props.onClick);
     assert.equal(calls.cancel, 0);
+    assert.equal(calls.kinds.length, 0);
+  });
+});
+
+// ───────────────────────────── 엑셀 전용 — 팝업 안에서 엑셀을 올린다 (견적서 ⑤b)
+
+describe("🔴 파일 칸은 엑셀 전용을 켤 때만 나온다", () => {
+  test("꺼져 있으면 떨구는 자리도 고르기 단추도 없다", () => {
+    const { dropZone } = renderView({ excelOnly: false });
+    assert.equal(dropZone, undefined, "엑셀 전용이 아닌데 파일 자리가 있다");
+    const html = renderToStaticMarkup(<NewQuoteDialog baseHref="/quotes/new" onCancel={() => {}} />);
+    assert.ok(!html.includes('data-file-drop="new-quote-excel"'), html);
+    assert.ok(!inputTags(html).some((tag) => tag.includes('type="file"')), html);
+  });
+
+  test("🔴 켜면 떨구는 자리 · 고르기 칸이 나타난다 — 하나만 받는다", () => {
+    const { dropZone } = renderView({ excelOnly: true });
+    assert.ok(dropZone, "엑셀 전용인데 파일 자리가 없다");
+    assert.equal(dropZone.props.multiple, false, "여럿을 받는 자리로 그렸다");
+    const html = renderToStaticMarkup(
+      <NewQuoteDialogView
+        baseHref="/quotes/new"
+        kind="DOMESTIC"
+        excelOnly
+        excelFile={null}
+        excel={null}
+        handoff={null}
+        onKindChange={() => {}}
+        onExcelOnlyChange={() => {}}
+        onPickExcel={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    assert.ok(html.includes('data-file-drop="new-quote-excel"'), html);
+    assert.ok(inputTags(html).some((tag) => tag.includes('type="file"')), "고르기 칸이 없다");
+    assert.ok(html.includes(NEW_QUOTE_EXCEL_LABEL), html);
+    assert.ok(html.includes(NEW_QUOTE_EXCEL_PICK_NOTE), html);
+  });
+
+  test("🔴 떨구기와 고르기가 같은 길을 탄다 — 둘 다 onPickExcel", () => {
+    const { dropZone, elements, calls } = renderView({ excelOnly: true });
+    const file = new File(["x"], "견적.xlsx");
+    fire(dropZone?.props.onFiles, [file]);
+    const picker = elements.find((element) => typeof element.props.onFile === "function");
+    assert.ok(picker, "고르기 단추가 없다");
+    fire(picker.props.onFile, file);
+    assert.deepEqual(calls.picked, [file, file]);
+  });
+
+  test("파일을 고르면 이름이 보이고 [다른 파일로] 로 바뀐다", () => {
+    const { elements } = renderView({ excelOnly: true, excelFile: { name: "수기 견적.xlsx" } });
+    const texts = elements.map((element) => textOf(element.props.children));
+    assert.ok(texts.some((text) => text.includes("수기 견적.xlsx")), "고른 파일 이름이 없다");
+    const picker = elements.find((element) => typeof element.props.onFile === "function");
+    assert.equal(picker?.props.label, "다른 파일로");
+  });
+});
+
+describe("🔴 무엇이 들어 있는지 알린다 — 알아본 시트는 늘 다 싣는다", () => {
+  const notice = (excel: NewQuoteExcelReadState, kind: NewQuoteDialogViewProps["kind"] = "DOMESTIC") =>
+    renderToStaticMarkup(<NewQuoteExcelNotice excel={excel} kind={kind} />);
+
+  test("🔴 둘 다 든 파일은 **둘 다** 알리고 어느 것으로 저장할지 묻는다 — 하나로 줄이지 않는다", () => {
+    const html = notice(readState([DOMESTIC_SHEET, MATCHER_SHEET, OH_SHEET]));
+    assert.ok(html.includes(BOTH_QUOTE_SHEETS_QUESTION), html);
+    for (const sheet of [DOMESTIC_SHEET, MATCHER_SHEET, OH_SHEET]) {
+      assert.ok(html.includes(sheet.name), `${sheet.name} 줄이 없다: ${html}`);
+    }
+  });
+
+  test("🔴 `filled` 가 거짓인 시트도 목록에 있다 — 거르는 막이 아니다", () => {
+    const empty = sheetInfo(3, "빈 OH견적서", "GENERATOR_OH", false);
+    const html = notice(readState([DOMESTIC_SHEET, empty]));
+    assert.ok(html.includes("빈 OH견적서"), html);
+    // 「작성된 것으로 보임」은 filled 인 줄에만 붙는다.
+    assert.equal(html.split(SHEET_FILLED_NOTE).length - 1, 1, html);
+  });
+
+  test("하나만 들어 있으면 그 종류를 말하고, 읽을 탭을 짚어 준다", () => {
+    const html = notice(readState([DOMESTIC_SHEET]));
+    assert.ok(html.includes("내자 견적서만 들어 있습니다"), html);
+    assert.ok(html.includes("「내자견적서」 시트로 폼을 채웁니다"), html);
+    assert.ok(!html.includes(BOTH_QUOTE_SHEETS_QUESTION), html);
+  });
+
+  test("매쳐 시트는 종류가 정해지지 않는다 — 있는 그대로 알리고 사람이 고른다", () => {
+    const html = notice(readState([MATCHER_SHEET]));
+    assert.ok(html.includes(MATCHER_ONLY_HEADLINE), html);
+    assert.ok(html.includes("견적서"), html);
+  });
+
+  test("읽는 중 · 못 읽은 까닭 — 통로가 준 문장 그대로", () => {
+    assert.ok(notice({ status: "reading" }).includes(QUOTE_EXCEL_READING_TEXT));
+    const reason = "견적서 시트(내자견적서 · OH견적서 · 견적서)를 찾지 못했습니다.";
+    const failed = notice({ status: "failed", reason });
+    assert.ok(failed.includes(reason), failed);
+    assert.ok(failed.includes('role="alert"'), failed);
+  });
+
+  test("고르기 전에는 아무 말도 하지 않는다", () => {
+    assert.equal(renderToStaticMarkup(<NewQuoteExcelNotice excel={null} kind="DOMESTIC" />), "");
+  });
+});
+
+describe("🔴 종류 라디오는 잠기지 않는다 — 맞춰 주기만 한다", () => {
+  test("엑셀을 읽은 뒤에도 셋 다 고를 수 있다", () => {
+    const { radios, calls } = renderView({
+      excelOnly: true,
+      kind: "OVERHAUL",
+      excelFile: { name: "견적.xlsx" },
+      excel: readState([OH_SHEET]),
+    });
+    for (const radio of radios) assert.ok(!radio.props.disabled, `${radio.props.value} 라디오가 잠겼다`);
+    fire(radios.find((radio) => radio.props.value === "DOMESTIC")?.props.onChange);
+    assert.deepEqual(calls.kinds, ["DOMESTIC"]);
+  });
+});
+
+describe("🔴 인계 상자 — [만들기]가 파일과 고른 시트 차례를 건넨다", () => {
+  test("🔴 엑셀을 골랐으면 파일과 시트 차례가 담긴다", () => {
+    const file = new File(["x"], "둘 다.xlsx");
+    const { links } = renderView({
+      excelOnly: true,
+      kind: "OVERHAUL",
+      excelFile: file,
+      excel: readState([DOMESTIC_SHEET, OH_SHEET]),
+      handoff: { file, sheetIndex: OH_SHEET.index },
+    });
+    fire(links[0].props.onClick);
+    const taken = takeNewQuoteExcelHandoff();
+    assert.equal(taken?.file, file);
+    assert.equal(taken?.sheetIndex, OH_SHEET.index, "고른 종류(OH)의 탭 차례가 아니다");
+  });
+
+  test("🔴 한 번 꺼내면 비워진다 — 그 주소를 다시 열어도 엉뚱한 파일이 붙지 않는다", () => {
+    const file = new File(["x"], "한 번만.xlsx");
+    const { links } = renderView({ excelOnly: true, excelFile: file, handoff: { file, sheetIndex: 0 } });
+    fire(links[0].props.onClick);
+    assert.ok(takeNewQuoteExcelHandoff() !== null, "담기지 않았다");
+    assert.equal(takeNewQuoteExcelHandoff(), null, "두 번째에도 파일이 남아 있다");
+  });
+
+  test("🔴 빈 상자를 꺼내도 아무 일이 없다 — 새로고침 · 주소 직접 입력 · 뒤로가기의 보통 상태다", () => {
+    assert.equal(takeNewQuoteExcelHandoff(), null);
+    assert.equal(takeNewQuoteExcelHandoff(), null);
+  });
+
+  test("🔴 담을 것이 없으면 [만들기]가 상자를 **비우고** 간다 — 고르다 만 파일이 따라가지 않게", () => {
+    const stale = new File(["x"], "앞서 고른 것.xlsx");
+    const first = renderView({ excelOnly: true, excelFile: stale, handoff: { file: stale, sheetIndex: 1 } });
+    fire(first.links[0].props.onClick);
+    // 엑셀 전용을 껐다(또는 파일을 고르지 않았다) — 담을 것이 없다.
+    const second = renderView({ excelOnly: false, handoff: null });
+    fire(second.links[0].props.onClick);
+    assert.equal(takeNewQuoteExcelHandoff(), null, "앞서 고른 파일이 상자에 남았다");
   });
 });
 
