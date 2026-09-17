@@ -1,7 +1,16 @@
 import "server-only";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "../client";
-import { parts, partStockBalances, stockTransactions, inventoryPartRequestItems, repairCases, users } from "../schema";
+import {
+  parts,
+  partStockBalances,
+  partUnitPrices,
+  partOverhaulUnitPrices,
+  stockTransactions,
+  inventoryPartRequestItems,
+  repairCases,
+  users,
+} from "../schema";
 import { computeReturnableQuantity } from "@/lib/domain/inventory-return-rules";
 import { groupPartOwnerAvailability, type StockOwner, type StockTransactionType } from "@/lib/domain/inventory-types";
 
@@ -132,6 +141,62 @@ export async function getPartPickerList(): Promise<PartPickerRow[]> {
     .from(parts)
     .where(eq(parts.isDeleted, false))
     .orderBy(parts.partName);
+}
+
+/**
+ * 고르개가 **함께 받아 두는** 단가 한 줄. 부품마다 값이 둘이다 — 일반 단가와 O/H 단가
+ * (domain/quote-part-price.ts 머리말). 둘 다 소유구분을 보지 않는다(2026-09-17 사용자 정정).
+ *
+ * 🔴 **null 은 "정하지 않았다"이고 `"0"` 은 "무상 부품"이다.** 행이 없는 것을 `"0"` 으로
+ * 채워 돌려주면 그 구분이 화면에 닿기 전에 사라지고, 견적서가 그 부품을 0원으로 청구한다
+ * (queries/part-unit-prices.ts 의 같은 규약).
+ */
+export type PartPickerPriceRow = {
+  partId: string;
+  /** 부품 상세에 적어 둔 일반 단가. 정해 두지 않았으면 null. */
+  unitPrice: string | null;
+  /** O/H 단가. 정해 두지 않았으면 null — 🔴 그때 일반 단가로 때우지 않는다. */
+  overhaulUnitPrice: string | null;
+};
+
+/**
+ * 부품을 고를 때 단가 칸까지 채우기 위한 **단가 목록**.
+ *
+ * ── 🔴 왜 목록을 통째로 미리 받는가 ─────────────────────────────────────────
+ * 단가가 적혀 있는 부품은 통틀어 열몇이다(개발 DB 기준 일반 3 · O/H 12). 고를 때마다
+ * 서버를 한 번씩 다녀오면 고른 순간과 칸이 채워지는 순간이 어긋나고, 빨리 고쳐 치면
+ * 늦게 온 응답이 사람이 적은 금액을 덮을 수도 있다. 목록이 이렇게 작으니 페이지가 한 번
+ * 실어 보내고 브라우저에서 찾는 편이 싸고 안전하다(getPartPickerList 의 같은 판단).
+ *
+ * ── 🔴 단가가 있는 부품만 돌아온다 ──────────────────────────────────────────
+ * 둘 다 없는 부품은 아예 빠진다 — 부품 76개 중 단가가 있는 것은 열몇뿐이라 그만큼만
+ * 실어 보낸다. **없는 것을 "0" 으로 채우지 않는다**(위 형의 그 규칙). 고르개에서 줄이
+ * 없다는 것은 곧 "정하지 않았다"이고, 그때는 단가 칸을 비워 둔다.
+ *
+ * ── 🔴 재고는 여기에도 오지 않는다 ──────────────────────────────────────────
+ * 조인하는 것은 단가 표 둘뿐이다. part_stock_balances 를 건드리지 않고, 소유구분 ·
+ * 내부 비고도 담지 않는다(getPartPickerList 머리말의 그 경계 그대로다).
+ *
+ * numeric 은 Drizzle 이 **문자열로 읽는다**. 화면까지 문자열로 옮긴다 — Number 를 거치면
+ * 오차가 쌓이고, 그 오차가 견적서 합계와 세금계산서 사이의 1원 차이가 된다
+ * (queries/part-overhaul-unit-prices.ts 의 같은 이유).
+ */
+export async function getPartPickerUnitPrices(): Promise<PartPickerPriceRow[]> {
+  return db
+    .select({
+      partId: parts.id,
+      unitPrice: partUnitPrices.unitPrice,
+      overhaulUnitPrice: partOverhaulUnitPrices.unitPrice,
+    })
+    .from(parts)
+    .leftJoin(partUnitPrices, eq(partUnitPrices.partId, parts.id))
+    .leftJoin(partOverhaulUnitPrices, eq(partOverhaulUnitPrices.partId, parts.id))
+    .where(
+      and(
+        eq(parts.isDeleted, false),
+        or(isNotNull(partUnitPrices.unitPrice), isNotNull(partOverhaulUnitPrices.unitPrice))
+      )
+    );
 }
 
 /**

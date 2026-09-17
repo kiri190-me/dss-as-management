@@ -1,6 +1,7 @@
 "use client";
 
-import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { PartPickerPriceRow, PartPickerRow } from "@/lib/db/queries/inventory";
+import { toPriceFieldValue } from "@/lib/domain/quote-part-price";
 
 /**
  * ============================================================================
@@ -21,6 +22,9 @@ import type { PartPickerRow } from "@/lib/db/queries/inventory";
  * 것으로는 모자란다 — 조회가 이미 실어 보낸 뒤이기 때문이다. 그래서 가벼운 형제
  * 조회를 따로 두었고(같은 파일의 getPartList 는 손대지 않았다), 이 조각은 그
  * 형제가 주는 다섯 칸(id + 네 가지)만 안다.
+ *
+ * 단가도 같은 경계 안이다 — 나중에 더한 「고르면 단가도 채운다」는 **단가만 담은 별도
+ * 목록**(getPartPickerUnitPrices)을 받고, 그 목록에도 재고 · 소유구분 · 비고가 없다.
  *
  * ── 🔴 손으로 적는 길은 그대로다 ────────────────────────────────────────────
  * 고르면 붙고(partId), 글자를 고치면 풀린다(partId = null). 마스터에 없는 부품 ·
@@ -59,15 +63,85 @@ export function filterPartOptions(
 }
 
 /**
- * 고른 부품을 줄에 적을 값. **품명과 재고 연결 둘뿐이다** — 수량 · 단가는 사람이 정하고,
- * 규격 칸(케이블)도 건드리지 않는다(적어 둔 것을 말없이 덮지 않는다).
+ * ============================================================================
+ * 고를 때 단가도 함께 채운다 (2026-09-17 사용자 요청) — 🔴 **주면** 채운다
+ * ============================================================================
+ * 단가에 필요한 것은 전부 **선택**이다. 안 주면 지금까지 그대로 품명과 연결 둘만
+ * 채운다 — 수리 건 상세의 사용 부품 칸(components/repair-cases/detail/edit/
+ * UsedPartsEditForm.tsx)이 같은 고르개를 쓰는데, 거기에는 단가 칸이 없다. 이것을
+ * 필수로 만들면 그 화면이 컴파일에서 깨진다.
+ *
+ * ── 🔴 금액이 고객사로 나가는 자리라 지키는 것 셋 ───────────────────────────
+ *  ㉠ **적혀 있으면 덮지 않는다** — 사람이 조정해 둔 금액이 고른 순간 말없이 바뀌면,
+ *     바뀐 줄 모르고 그대로 나간다. 빈칸일 때만 채운다.
+ *  ㉡ **정하지 않은 것을 0 으로 채우지 않는다** — null 은 빈칸으로 두고, `"0"` 은
+ *     0 으로 채운다(무상 부품이라는 실제 값이다. domain/quote-part-price.ts 머리말).
+ *  ㉢ **O/H 줄에 일반 단가를 대신 쓰지 않는다** — O/H 단가가 없으면 안 채운다. 대신
+ *     채우면 틀린 금액이 견적서에 박히고, 빈칸과 달리 아무도 눈치채지 못한다.
+ * ============================================================================
+ */
+export type PartPickPriceContext = {
+  /**
+   * 단가가 적혀 있는 부품들(queries/inventory.ts 의 getPartPickerUnitPrices).
+   * **안 주면 단가를 채우지 않는다.** 여기 없는 부품은 "단가를 정하지 않았다"이다.
+   */
+  prices?: readonly PartPickerPriceRow[];
+  /** 이 줄이 `2) OH 부품 비용` 칸으로 갈 줄인가 — 그러면 O/H 단가를 본다. */
+  isOverhaulPart?: boolean;
+  /** 지금 단가 칸에 적혀 있는 글자. 🔴 비어 있지 않으면 채우지 않는다. */
+  currentUnitPrice?: string;
+};
+
+/**
+ * 이 부품을 고른 줄의 단가 칸에 **넣을 글자**. 넣지 않을 때는 null 이다.
+ *
+ * null 을 돌려주는 경우 넷 — 셋은 일부러 그런 것이고 하나는 줄 데이터가 없는 것이다:
+ *
+ *  · 단가 칸에 이미 값이 있다(㉠ 덮지 않는다)
+ *  · 단가 목록을 받지 못했다(고르개를 단가 없이 쓰는 화면)
+ *  · 그 부품에 줄이 없다 = 일반 · O/H 둘 다 정하지 않았다(㉡)
+ *  · 볼 쪽 단가가 null 이다 — 🔴 O/H 줄인데 O/H 단가가 없으면 **여기서 끝난다**.
+ *    일반 단가로 넘어가지 않는다(㉢)
+ */
+export function partPickUnitPrice(partId: string, context: PartPickPriceContext = {}): string | null {
+  const { prices, isOverhaulPart = false, currentUnitPrice = "" } = context;
+  // ㉠ 사람이 적어 둔 금액이 먼저다. 목록을 보기도 전에 돌아선다.
+  if (currentUnitPrice.trim() !== "") return null;
+  if (!prices) return null;
+
+  const row = prices.find((price) => price.partId === partId);
+  if (!row) return null;
+
+  // 🔴 줄의 출처가 아니라 **줄에 붙은 OH 표시**가 고른다 — 한 견적서 안에 두 종류가
+  // 섞여 있고, 사람이 그 표시를 손으로 켜고 끈다(domain/quote-part-price.ts 머리말).
+  const price = isOverhaulPart ? row.overhaulUnitPrice : row.unitPrice;
+  if (price === null) return null;
+
+  const text = toPriceFieldValue(price);
+  // toPriceFieldValue 는 숫자로 읽히지 않는 값을 빈 글자로 돌려준다. 빈 글자를 넣는 것은
+  // 아무것도 안 하는 것과 같으니 애초에 안 넣는다("0" 은 "0" 으로 남는다 — ㉡).
+  return text === "" ? null : text;
+}
+
+/**
+ * 고른 부품을 줄에 적을 값. **품명과 재고 연결**은 언제나 채우고, 단가는 위 규칙에
+ * 맞을 때만 얹는다. 수량과 규격 칸(케이블)은 건드리지 않는다.
+ *
+ * 🔴 `unitPrice` 키는 **채울 때만 생긴다.** 부르는 쪽이 이 값을 줄에 덮어쓰기로 붓기
+ * 때문에(`{ ...row, ...patch }`), null 이나 빈 글자를 넣어 돌려주면 적혀 있던 금액이
+ * 지워진다. 키가 없으면 그 칸은 손대지 않은 채로 남는다.
  *
  * 품명은 마스터의 품명 그대로다 — 부품 요청 칸이 장바구니에 담는 값과 같게 둔다
  * (PartRequestSection 의 addToCart). 담긴 뒤에는 손으로 고칠 수 있고, 고치면 연결이
  * 풀린다(그 규칙은 폼의 onChange 에 있다).
  */
-export function partPickPatch(option: PartPickerRow): { partNameText: string; partId: string } {
-  return { partNameText: option.partName, partId: option.id };
+export function partPickPatch(
+  option: PartPickerRow,
+  context: PartPickPriceContext = {}
+): { partNameText: string; partId: string; unitPrice?: string } {
+  const picked = { partNameText: option.partName, partId: option.id };
+  const unitPrice = partPickUnitPrice(option.id, context);
+  return unitPrice === null ? picked : { ...picked, unitPrice };
 }
 
 /**

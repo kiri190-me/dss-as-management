@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
-import { getPartPickerList } from "@/lib/db/queries/inventory";
+import { getPartPickerList, getPartPickerUnitPrices } from "@/lib/db/queries/inventory";
 import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
@@ -83,11 +83,15 @@ export default async function NewQuotePage({
   // 부품 마스터는 품명 칸에서 찾아 고르는 데 쓴다 — **재고 · 소유구분이 없는 가벼운
   // 조회**다(queries/inventory.ts 의 getPartPickerList 머리말). 이미 나란히 도는
   // Promise.all 에 태워 왕복을 늘리지 않는다.
-  const [repairLabor, printHeaders, workScopeDefaults, partOptions] = await Promise.all([
+  // 단가는 **부품을 고를 때 단가 칸까지 채우는** 데 쓴다 — 단가가 적힌 부품만 열몇 줄이라
+  // 같은 묶음에 하나 더 태운다(getPartPickerUnitPrices 머리말). 고를 때마다 서버를 다시
+  // 부르지 않는 쪽이다.
+  const [repairLabor, printHeaders, workScopeDefaults, partOptions, partPrices] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
     readAllQuoteWorkSectionDefaults(),
     getPartPickerList(),
+    getPartPickerUnitPrices(),
   ]);
 
   const query = searchParams ? await searchParams : undefined;
@@ -100,6 +104,7 @@ export default async function NewQuotePage({
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
       partOptions={partOptions}
+      partPrices={partPrices}
       /**
        * 케이블 견적서의 줄 수 상한 — **채우개의 상수를 그대로 내려보낸다**(케이블 ③).
        * 그 파일은 `node:fs`·`node:zlib` 를 끌고 와 클라이언트 번들에 들어갈 수 없어서,

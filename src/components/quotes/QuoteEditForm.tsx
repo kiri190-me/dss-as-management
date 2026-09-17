@@ -57,7 +57,7 @@ import {
 } from "@/components/quotes/quote-part-picker";
 /* 조회 자체는 서버 것이지만 줄의 생김새는 여기서도 알아야 한다 — 형 선언만 가져오므로
    번들에는 아무것도 실리지 않는다(PartRequestSection 이 PartListRow 를 받는 것과 같다). */
-import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { PartPickerPriceRow, PartPickerRow } from "@/lib/db/queries/inventory";
 import type {
   QuoteTemplateHeader,
   QuoteWorkScopeSectionView,
@@ -508,6 +508,7 @@ export default function QuoteEditForm({
   defaultQuoteDate,
   repairLabor,
   partOptions,
+  partPrices,
   cableMaxLines,
   printHeaders,
   workScopeDefaults,
@@ -537,6 +538,18 @@ export default function QuoteEditForm({
    * 서버를 부를 까닭이 없다(quote-part-picker.tsx 의 filterPartOptions).
    */
   partOptions: PartPickerRow[];
+  /**
+   * 단가가 적혀 있는 부품들(queries/inventory.ts 의 getPartPickerUnitPrices) — 부품을
+   * 고르면 **단가 칸도 함께 채우는** 데 쓴다.
+   *
+   * 🔴 부품 목록과 **따로** 오는 까닭: 단가가 적힌 부품은 통틀어 열몇이고(부품은 일흔몇),
+   * 그 열몇 줄만 실으면 된다. 고를 때마다 서버를 다녀오지 않는 것은 부품 목록과 같은
+   * 판단이다 — 늦게 온 응답이 사람이 그새 적은 금액을 덮는 일이 없다.
+   *
+   * 채우는 규칙(덮지 않는다 · null 은 빈칸 · O/H 는 O/H 단가로만)은 고르개에 있다
+   * (quote-part-picker.tsx 의 partPickUnitPrice).
+   */
+  partPrices: PartPickerPriceRow[];
   /**
    * 케이블 견적서 한 장에 담을 수 있는 줄 수 — **품목 줄 + 설명 줄을 합쳐서**다
    * (xlsx/cable-quote-template.ts 의 `CABLE_QUOTE_MAX_LINES`). 넘치면 생성기가
@@ -2693,8 +2706,26 @@ export default function QuoteEditForm({
                   <QuotePartSuggestionList
                     options={filterPartOptions(partOptions, row.partNameText)}
                     listLabel={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 후보`}
+                    /**
+                     * 🔴 고르면 **단가도 함께** 채운다(2026-09-17 사용자 요청). 규칙은 전부
+                     * 고르개 쪽에 있다(quote-part-picker.tsx 의 partPickUnitPrice) — 여기서는
+                     * 그 판단에 필요한 세 가지를 건넨다:
+                     *
+                     *  · `prices` — 단가가 적힌 부품들(페이지가 한 번 실어 보낸 그 목록)
+                     *  · `isOverhaulPart` — 🔴 **`2) OH 부품 비용` 칸으로 갈 줄일 때만** true 다.
+                     *    OH 표시는 O/H 견적서에만 그리고, 저장도 그때만 싣는다(collectFields 의
+                     *    같은 식) — 종류를 바꿔 표시가 사라진 줄은 일반 단가로 청구된다.
+                     *  · `currentUnitPrice` — 적혀 있으면 덮지 않는다(사람이 조정해 둔 금액이다)
+                     */
                     onPick={(option) => {
-                      updateItem(row.key, partPickPatch(option));
+                      updateItem(
+                        row.key,
+                        partPickPatch(option, {
+                          prices: partPrices,
+                          isOverhaulPart: kind === "OVERHAUL" && row.isOverhaulPart,
+                          currentUnitPrice: row.unitPrice,
+                        })
+                      );
                       setPartPickerKey(null);
                     }}
                   />
