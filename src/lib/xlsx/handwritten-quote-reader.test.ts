@@ -18,11 +18,24 @@ import {
   fillMatcherQuoteWorkbook,
   MATCHER_QUOTE_CELLS,
   MATCHER_QUOTE_SHEET_NAME,
+  MATCHER_WORK_SCOPE_LABELS,
   type MatcherQuoteInput,
 } from "./matcher-quote-template";
-import { fillOhQuoteWorkbook, OH_QUOTE_CELLS, OH_QUOTE_SHEET_NAME } from "./oh-quote-template";
+import {
+  fillOhQuoteWorkbook,
+  OH_QUOTE_CELLS,
+  OH_QUOTE_OVERHAUL_PARTS_LABEL,
+  OH_QUOTE_SHEET_NAME,
+  OH_QUOTE_WORK_SCOPE_LABELS,
+} from "./oh-quote-template";
 import { findSpacedLabelRow, LAYOUT_COLUMNS } from "./quote-sheet-layout";
-import { fillQuoteWorkbook, QUOTE_CELLS, QUOTE_SHEET_NAME, type GeneratorQuoteInput } from "./quote-template";
+import {
+  fillQuoteWorkbook,
+  QUOTE_CELLS,
+  QUOTE_SHEET_NAME,
+  QUOTE_WORK_SCOPE_LABELS,
+  type GeneratorQuoteInput,
+} from "./quote-template";
 import { parseSheetRows } from "./sheet-rows";
 import { createCellTextReader } from "./sheet-text";
 import { resolveSheetPart, SHARED_STRINGS_PART } from "./workbook-parts";
@@ -462,6 +475,327 @@ describe("시트 고르기 — 발행번호 → 활성 시트 → 탭 순서", (
     assert.equal(result.fields.kind, null);
     assert.equal(result.fields.quoteNumber, "DSS 2096-020");
     assert.deepEqual(result.warnings, [MATCHER_KIND_WARNING]);
+  });
+});
+
+// ─────────────────────────────── 무엇이 들어 있나 · 어느 시트를 읽나
+
+/**
+ * 🔴 사용자의 실제 파일(내자 · OH 가 한 문서에 든 견적서)은 저장소에 두지 않는다 — 고객
+ * 내용이다. 대신 **같은 짜임**을 zip-writer 로 흉내 낸다:
+ *  · 탭 셋 — 내자견적서 · OH견적서 · 알아보지 못하는 이름(Sheet1)
+ *  · OH 시트의 발행번호 · 공급처 · 건명은 내자 칸을 따라가는 수식(`내자견적서!D11&"-1"`)이고
+ *    Excel 이 저장한 계산값이 붙어 있어 **빈 양식에서도 채워져 보인다**
+ *  · `activeTab` 이 없다 — 그래서 읽개가 혼자 고르면 늘 첫 시트(내자)로 떨어진다
+ *
+ * 머리글 · 품목 줄의 자리는 실제 양식에서 읽은 행 번호 그대로다(2026-09-17 실측). 🔴 빈
+ * 양식에도 부품 이름 예시 · 수량 1 · 모델 예시가 인쇄돼 있다 — 「작성됐나」를 단가 · 금액
+ * 으로만 가르는 까닭이 이것이다.
+ */
+const DUPLEX = {
+  quoteNumber: "DSS 2096-100",
+  ohQuoteNumber: "DSS 2096-100-1",
+  subject: "TST-500X 수리 견적",
+  ohSubject: "TST-500X 수리 견적 + OH",
+} as const;
+
+/** 글자를 돌려주는 수식 칸(`t="str"`). Excel 로 저장한 파일에는 계산값이 함께 있다. */
+function fmlText(ref: string, formula: string, cached: string): string {
+  return `<c r="${ref}" t="str"><f>${escapeXml(formula)}</f><v>${escapeXml(cached)}</v></c>`;
+}
+
+/** 행 → D열 머리글. 실제 양식의 자리다(내자 26·33·36·41·43 / OH 26·36·50·53·58·60). */
+const DOMESTIC_FORM_HEADERS: readonly (readonly [number, string])[] = [
+  [26, "부품 비용"],
+  [33, "작업비 (조사,수리,개조,통전,출하검사)"],
+  [36, "인수 조사"],
+  [41, "수리 작업"],
+  [43, "통전검사[출하검사]"],
+];
+const OH_FORM_HEADERS: readonly (readonly [number, string])[] = [
+  [26, "부품 비용"],
+  [36, "OH 부품 비용"],
+  [50, "작업비 (조사,수리,개조,통전,출하검사)"],
+  [53, "인수 조사"],
+  [58, "OH 및 수리 작업"],
+  [60, "통전검사[출하검사]"],
+];
+
+/** 표 머리글 · 부품 한 줄 · 작업비 줄 · 합계 줄. `filled` 면 단가 · 금액이 든다. */
+function formSheetCells(options: {
+  headers: readonly (readonly [number, string])[];
+  partRow: number;
+  laborRow: number;
+  supplyRow: number;
+  summaryRef: string;
+  filled: boolean;
+}): string[] {
+  const { partRow, laborRow, supplyRow, filled } = options;
+  const at = (column: string, row: number) => `${column}${row}`;
+  const supplyRef = at(LAYOUT_COLUMNS.amount, supplyRow);
+  const total = filled ? 1_500_000 : 0;
+
+  return [
+    // 표 머리글 — 빈 양식에도 있다. H · I 에 **글자**가 든 줄이라 금액으로 세면 안 된다.
+    str(at(LAYOUT_COLUMNS.name, 20), "품 명"),
+    str(at(LAYOUT_COLUMNS.quantity, 20), "수 량"),
+    str(at(LAYOUT_COLUMNS.unitPrice, 20), "단 가"),
+    str(at(LAYOUT_COLUMNS.amount, 20), "합 계"),
+    ...options.headers.map(([row, label]) => str(at(LAYOUT_COLUMNS.name, row), label)),
+    // 부품 한 줄 — 🔴 줄임표 · 이름 · 수량 1 은 빈 양식에도 인쇄돼 있다.
+    str(at(LAYOUT_COLUMNS.marker, partRow), "-"),
+    str(at(LAYOUT_COLUMNS.name, partRow), "1번 부품"),
+    num(at(LAYOUT_COLUMNS.quantity, partRow), 1, STYLE.general),
+    num(at(LAYOUT_COLUMNS.unitPrice, partRow), filled ? 150_000 : 0),
+    fml(at(LAYOUT_COLUMNS.amount, partRow), `G${partRow}*H${partRow}`, filled ? 300_000 : 0),
+    // 작업비 줄
+    num(at(LAYOUT_COLUMNS.quantity, laborRow), 1, STYLE.general),
+    num(at(LAYOUT_COLUMNS.unitPrice, laborRow), filled ? 1_200_000 : 0),
+    fml(at(LAYOUT_COLUMNS.amount, laborRow), `H${laborRow}*G${laborRow}`, filled ? 1_200_000 : 0),
+    // 합계 줄
+    str(at(LAYOUT_COLUMNS.unitPrice, supplyRow), "공 급 가"),
+    fml(supplyRef, `SUM(I${partRow}:I${supplyRow - 1})`, total),
+    fml(options.summaryRef, supplyRef, total),
+  ];
+}
+
+function domesticSheetCells(filled: boolean): string[] {
+  return [
+    str(QUOTE_CELLS.validity, SAMPLE.validity),
+    str(QUOTE_CELLS.delivery, SAMPLE.delivery),
+    str(QUOTE_CELLS.payment, SAMPLE.payment),
+    // 🔴 빈 양식에도 인쇄돼 있는 예시다.
+    str(QUOTE_CELLS.productInfo, `MODEL: ${SAMPLE.model}, S/N:${SAMPLE.serial}, L/N:${SAMPLE.lot}`),
+    ...(filled
+      ? [
+          num(QUOTE_CELLS.quoteDate, serialOf(2026, 9, 15), STYLE.date),
+          str(QUOTE_CELLS.quoteNumber, DUPLEX.quoteNumber),
+          str(QUOTE_CELLS.customerName, SAMPLE.customer),
+          str(QUOTE_CELLS.subject, DUPLEX.subject),
+        ]
+      : []),
+    ...formSheetCells({
+      headers: DOMESTIC_FORM_HEADERS,
+      partRow: 27,
+      laborRow: 33,
+      supplyRow: 55,
+      summaryRef: QUOTE_CELLS.amount,
+      filled,
+    }),
+  ];
+}
+
+/** 🔴 머리 칸이 내자 시트를 따라가는 수식이다 — 빈 양식에서도 「-1」 이 채워져 보인다. */
+function ohSheetCells(filled: boolean): string[] {
+  const from = (ref: string) => `${QUOTE_SHEET_NAME}!${ref}`;
+  return [
+    str(OH_QUOTE_CELLS.validity, SAMPLE.validity),
+    str(OH_QUOTE_CELLS.delivery, SAMPLE.delivery),
+    str(OH_QUOTE_CELLS.payment, SAMPLE.payment),
+    str(OH_QUOTE_CELLS.productInfo, `MODEL: ${SAMPLE.model}, S/N:${SAMPLE.serial}, L/N:${SAMPLE.lot}`),
+    fml(OH_QUOTE_CELLS.quoteDate, from(QUOTE_CELLS.quoteDate), serialOf(2026, 9, 15), STYLE.date),
+    fmlText(
+      OH_QUOTE_CELLS.quoteNumber,
+      `${from(QUOTE_CELLS.quoteNumber)}&"-1"`,
+      filled ? DUPLEX.ohQuoteNumber : "-1"
+    ),
+    fmlText(OH_QUOTE_CELLS.customerName, from(QUOTE_CELLS.customerName), filled ? SAMPLE.customer : ""),
+    fmlText(
+      OH_QUOTE_CELLS.subject,
+      `${from(QUOTE_CELLS.subject)}&" + OH"`,
+      filled ? DUPLEX.ohSubject : " + OH"
+    ),
+    ...formSheetCells({
+      headers: OH_FORM_HEADERS,
+      partRow: 27,
+      laborRow: 50,
+      supplyRow: 72,
+      summaryRef: OH_QUOTE_CELLS.amount,
+      filled,
+    }),
+  ];
+}
+
+function duplexWorkbook(
+  options: { names?: readonly [string, string]; domesticFilled?: boolean; ohFilled?: boolean } = {}
+): Buffer {
+  const [domesticName, ohName] = options.names ?? [QUOTE_SHEET_NAME, OH_QUOTE_SHEET_NAME];
+  return workbookOf({
+    // 🔴 activeTab 을 주지 않는다 — 사용자의 파일이 그렇다.
+    sheets: [
+      { name: domesticName, cells: domesticSheetCells(options.domesticFilled ?? true) },
+      { name: ohName, cells: ohSheetCells(options.ohFilled ?? true) },
+      { name: "Sheet1", cells: [str("A1", "메모")] },
+    ],
+  });
+}
+
+describe("무엇이 들어 있나 — 내자 · OH 가 한 문서에 든 견적서", () => {
+  test("🔴 두 시트가 다 「있다」고 나온다 — 양식은 머리글로, 작성 여부는 금액으로", () => {
+    const result = expectOk(readHandwrittenQuoteWorkbook(duplexWorkbook()));
+    assert.deepEqual(result.sheets, [
+      { index: 0, name: QUOTE_SHEET_NAME, form: "GENERATOR_DOMESTIC", recognizedBy: "header", filled: true },
+      { index: 1, name: OH_QUOTE_SHEET_NAME, form: "GENERATOR_OH", recognizedBy: "header", filled: true },
+    ]);
+  });
+
+  test("🔴 지정 없이 부르면 지금까지와 똑같다 — 첫 시트(내자)를 읽는다", () => {
+    const result = expectOk(readHandwrittenQuoteWorkbook(duplexWorkbook()));
+    assert.equal(result.sheet, "GENERATOR_DOMESTIC");
+    assert.equal(result.sheetIndex, 0);
+    assert.equal(result.sheetName, QUOTE_SHEET_NAME);
+    assert.equal(result.fields.kind, "DOMESTIC");
+    assert.equal(result.fields.quoteNumber, DUPLEX.quoteNumber);
+    assert.equal(result.fields.subject, DUPLEX.subject);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  test("🔴 OH 를 지정하면 OH 시트를 읽는다 — 지금까지는 길이 없던 일이다", () => {
+    const result = expectOk(readHandwrittenQuoteWorkbook(duplexWorkbook(), { sheetIndex: 1 }));
+    assert.equal(result.sheet, "GENERATOR_OH");
+    assert.equal(result.sheetIndex, 1);
+    assert.equal(result.sheetName, OH_QUOTE_SHEET_NAME);
+    assert.equal(result.fields.kind, "OVERHAUL");
+    assert.equal(result.fields.quoteNumber, DUPLEX.ohQuoteNumber);
+    assert.equal(result.fields.subject, DUPLEX.ohSubject);
+    assert.equal(result.fields.quoteDate, "2026-09-15");
+    assert.equal(result.fields.manualSupplyAmount, "1500000");
+    assert.deepEqual(result.warnings, []);
+  });
+
+  test("🔴 양식은 탭 이름이 아니라 머리글로 가른다 — 두 탭의 이름을 맞바꿔도 같은 답", () => {
+    const swapped = duplexWorkbook({ names: [OH_QUOTE_SHEET_NAME, QUOTE_SHEET_NAME] });
+    const result = expectOk(readHandwrittenQuoteWorkbook(swapped, { sheetIndex: 1 }));
+    assert.deepEqual(
+      result.sheets.map((sheet) => [sheet.name, sheet.form, sheet.recognizedBy]),
+      [
+        [OH_QUOTE_SHEET_NAME, "GENERATOR_DOMESTIC", "header"],
+        [QUOTE_SHEET_NAME, "GENERATOR_OH", "header"],
+      ]
+    );
+    // 탭 이름은 「내자견적서」인데 읽은 것은 O/H 견적서다.
+    assert.equal(result.sheetName, QUOTE_SHEET_NAME);
+    assert.equal(result.sheet, "GENERATOR_OH");
+    assert.equal(result.fields.kind, "OVERHAUL");
+    assert.equal(result.fields.quoteNumber, DUPLEX.ohQuoteNumber);
+  });
+
+  test("🔴 빈 양식은 「작성됨」이 아니다 — 발행번호가 수식이라 차 있어도(「-1」) 세지 않는다", () => {
+    const workbook = duplexWorkbook({ domesticFilled: false, ohFilled: false });
+    const result = expectOk(readHandwrittenQuoteWorkbook(workbook));
+    assert.deepEqual(
+      result.sheets.map((sheet) => sheet.filled),
+      [false, false]
+    );
+    // 그 시트의 발행번호 칸은 비어 있지 않다 — 그래서 발행번호로 가르면 안 된다.
+    const oh = expectOk(readHandwrittenQuoteWorkbook(workbook, { sheetIndex: 1 }));
+    assert.equal(oh.fields.quoteNumber, "-1");
+  });
+
+  test("한쪽만 작성한 문서 — 작성된 쪽만 「있다」", () => {
+    const result = expectOk(readHandwrittenQuoteWorkbook(duplexWorkbook({ domesticFilled: false })));
+    assert.deepEqual(
+      result.sheets.map((sheet) => [sheet.form, sheet.filled]),
+      [
+        ["GENERATOR_DOMESTIC", false],
+        ["GENERATOR_OH", true],
+      ]
+    );
+  });
+
+  test("🔴 지정한 시트가 없으면 까닭 있는 실패 — 조용히 딴 시트를 읽지 않는다", () => {
+    // 2번 탭은 「Sheet1」이다 — 알아보는 견적서 시트가 아니다.
+    for (const sheetIndex of [2, 3, -1, 1.5, Number.NaN]) {
+      expectFailure(readHandwrittenQuoteWorkbook(duplexWorkbook(), { sheetIndex }), "SHEET_NOT_FOUND");
+    }
+  });
+
+  test("작성됐나 — 글자로 적은 금액도 세고, 양식에 인쇄된 머리글 · 수량은 세지 않는다", () => {
+    const blank = [
+      str(`${LAYOUT_COLUMNS.unitPrice}20`, "단 가"),
+      str(`${LAYOUT_COLUMNS.amount}20`, "합 계"),
+      str(`${LAYOUT_COLUMNS.unitPrice}55`, "공 급 가"),
+      num(`${LAYOUT_COLUMNS.quantity}27`, 1, STYLE.general),
+      num(`${LAYOUT_COLUMNS.amount}27`, 0),
+    ];
+    const filledOf = (cells: readonly string[]) =>
+      expectOk(readHandwrittenQuoteWorkbook(workbookOf({ sheets: [{ name: QUOTE_SHEET_NAME, cells }] }))).sheets[0]
+        .filled;
+
+    assert.equal(filledOf(blank), false);
+    assert.equal(filledOf([...blank, str(`${LAYOUT_COLUMNS.unitPrice}27`, "150,000")]), true);
+    assert.equal(filledOf([...blank, num(`${LAYOUT_COLUMNS.amount}27`, 300_000)]), true);
+  });
+
+  test("머리글로 가르지 못하면 탭 이름으로 간다 — recognizedBy 가 말해 준다", () => {
+    const workbook = workbookOf({
+      sheets: [{ name: OH_QUOTE_SHEET_NAME, cells: [str(OH_QUOTE_CELLS.quoteNumber, "DSS 2096-010-1")] }],
+    });
+    const result = expectOk(readHandwrittenQuoteWorkbook(workbook));
+    assert.deepEqual(result.sheets, [
+      { index: 0, name: OH_QUOTE_SHEET_NAME, form: "GENERATOR_OH", recognizedBy: "name", filled: false },
+    ]);
+  });
+
+  test("🔴 매쳐 머리글이면 탭 이름이 「내자견적서」여도 매쳐 양식의 칸 지도로 읽는다", () => {
+    const workbook = workbookOf({
+      sheets: [
+        {
+          name: QUOTE_SHEET_NAME,
+          cells: [
+            str("D34", "조사작업"),
+            str(MATCHER_QUOTE_CELLS.quoteNumber, "DSS 2096-020"),
+            // 제너레이터는 건명이 D13, 매쳐는 D14 다 — 어느 지도로 읽었는지 여기서 갈린다.
+            str(MATCHER_QUOTE_CELLS.subject, "매쳐 건명"),
+            str(QUOTE_CELLS.subject, "제너레이터 건명"),
+          ],
+        },
+      ],
+    });
+    const result = expectOk(readHandwrittenQuoteWorkbook(workbook));
+    assert.equal(result.sheet, "MATCHER");
+    assert.equal(result.sheets[0].recognizedBy, "header");
+    assert.equal(result.fields.subject, "매쳐 건명");
+    assert.equal(result.fields.kind, null);
+    assert.deepEqual(result.warnings, [MATCHER_KIND_WARNING]);
+  });
+
+  test("🔴 두 양식의 머리글이 한 시트에 같이 보이면 가르지 않는다 — 탭 이름으로 간다", () => {
+    // 매쳐 견적서의 수리작업 항목을 사람이 「수리 작업」(내자 양식의 머리글)이라고 적었다.
+    // 짐작으로 내자 지도를 쓰면 건명을 D13 에서 읽어 딴 값을 채운다.
+    const workbook = workbookOf({
+      sheets: [
+        {
+          name: MATCHER_QUOTE_SHEET_NAME,
+          cells: [
+            str("D34", "조사작업"),
+            str("D41", "수리작업"),
+            str(`${LAYOUT_COLUMNS.marker}42`, "-"),
+            str("D42", "수리 작업"),
+            str(MATCHER_QUOTE_CELLS.subject, "매쳐 건명"),
+            str(QUOTE_CELLS.subject, "제너레이터 건명"),
+          ],
+        },
+      ],
+    });
+    const result = expectOk(readHandwrittenQuoteWorkbook(workbook));
+    assert.equal(result.sheets[0].recognizedBy, "name");
+    assert.equal(result.sheet, "MATCHER");
+    assert.equal(result.fields.subject, "매쳐 건명");
+  });
+
+  test("가르는 머리글은 채우개가 들고 있는 글자 그대로다", () => {
+    assert.equal(OH_QUOTE_OVERHAUL_PARTS_LABEL, "OH 부품 비용");
+    assert.equal(OH_QUOTE_WORK_SCOPE_LABELS.REPAIR.label, "OH 및 수리 작업");
+    assert.equal(QUOTE_WORK_SCOPE_LABELS.REPAIR.label, "수리 작업");
+    assert.deepEqual(
+      [
+        MATCHER_WORK_SCOPE_LABELS.INVESTIGATION.label,
+        MATCHER_WORK_SCOPE_LABELS.REPAIR.label,
+        MATCHER_WORK_SCOPE_LABELS.POWER_TEST.label,
+      ],
+      ["조사작업", "수리작업", "통전작업"]
+    );
   });
 });
 
@@ -990,5 +1324,53 @@ for (const roundTrip of ROUND_TRIPS) {
       assert.equal(result.fields.manualSupplyAmount, "3500000");
       assert.equal(result.warnings.some((warning) => warning.includes("공급가")), false, result.warnings.join("\n"));
     });
+
+    test("🔴 양식을 **머리글로** 갈랐고, 값이 든 견적서로 보인다", () => {
+      const result = expectOk(readHandwrittenQuoteWorkbook(filled()));
+      assert.deepEqual(
+        result.sheets.find((sheet) => sheet.index === result.sheetIndex),
+        {
+          index: result.sheetIndex,
+          name: roundTrip.sheetName,
+          form: roundTrip.sheet,
+          recognizedBy: "header",
+          filled: true,
+        }
+      );
+    });
   });
 }
+
+/**
+ * 🔴 **빈 양식 그대로** 읽는다 — 「작성됨」으로 세면 안 되는 것들이 실제로 인쇄돼 있다
+ * (내자 양식의 「1번 부품」 · 수량 1 · 모델 예시, O/H 양식의 O/H 부품 목록).
+ */
+const BLANK_TEMPLATE_KEYS = ["QUOTE_TEMPLATE_PATH", "OH_QUOTE_TEMPLATE_PATH"] as const;
+const blankSkip = BLANK_TEMPLATE_KEYS.every((key) => process.env[key])
+  ? false
+  : `${BLANK_TEMPLATE_KEYS.join(" · ")} 가 설정되지 않았습니다`;
+
+describe("빈 양식 파일 그대로 — 실제 양식", { skip: blankSkip }, () => {
+  const read = (envKey: (typeof BLANK_TEMPLATE_KEYS)[number]) =>
+    expectOk(readHandwrittenQuoteWorkbook(readFileSync(process.env[envKey] as string)));
+
+  test("🔴 제너레이터 O/H 빈 양식 — 부품 이름 예시가 인쇄돼 있어도 「작성됨」이 아니다", () => {
+    assert.deepEqual(read("OH_QUOTE_TEMPLATE_PATH").sheets, [
+      { index: 0, name: OH_QUOTE_SHEET_NAME, form: "GENERATOR_OH", recognizedBy: "header", filled: false },
+    ]);
+  });
+
+  test("제너레이터 내자 양식 파일에는 내자 · OH 두 시트가 들어 있다 — 둘 다 머리글로 갈린다", () => {
+    const result = read("QUOTE_TEMPLATE_PATH");
+    assert.deepEqual(
+      result.sheets.map((sheet) => [sheet.name, sheet.form, sheet.recognizedBy]),
+      [
+        [QUOTE_SHEET_NAME, "GENERATOR_DOMESTIC", "header"],
+        [OH_QUOTE_SHEET_NAME, "GENERATOR_OH", "header"],
+      ]
+    );
+    // 내자 시트는 비어 있다. ⚠️ 함께 든 O/H 시트는 양식에 작업비 240만이 인쇄돼 있어
+    // 「작성됨」으로 나온다 — 읽개 머리말의 경고 그대로다.
+    assert.equal(result.sheets[0].filled, false);
+  });
+});

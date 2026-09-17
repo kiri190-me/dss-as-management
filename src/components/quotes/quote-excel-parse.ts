@@ -1,5 +1,9 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
-import type { HandwrittenQuoteFields } from "@/lib/xlsx/handwritten-quote-reader";
+import type {
+  HandwrittenQuoteFields,
+  HandwrittenQuoteSheet,
+  HandwrittenQuoteSheetInfo,
+} from "@/lib/xlsx/handwritten-quote-reader";
 
 /**
  * ============================================================================
@@ -29,6 +33,13 @@ import type { HandwrittenQuoteFields } from "@/lib/xlsx/handwritten-quote-reader
  * 올려 놓고 거절당할 까닭이 없다). 이름은 .xlsx 인데 속이 옛 형식이면 통로가 415 XLS_LEGACY 로
  * 돌려준다 — 둘 다 같은 문장(QUOTE_EXCEL_LEGACY_XLS_TEXT)이다.
  *
+ * ── 어떤 견적서가 들어 있나 · 어느 시트를 읽나 ───────────────────────────────
+ * 한 통합문서에 내자 · OH 두 견적서가 든 파일이 있다. 성공 응답은 **알아본 시트 전부**를
+ * `sheets` 로 함께 준다(탭 차례 · 이름 · 양식 · 작성된 것으로 보이나 — 읽개의
+ * HandwrittenQuoteSheetInfo). 사람이 그 가운데 하나를 고르면 `{ sheetIndex }` 로 다시
+ * 불러 그 시트를 읽는다(통로는 `?sheet=1`). 🔴 고른 시트가 없으면 통로가 422
+ * SHEET_NOT_FOUND 로 거절한다 — 조용히 딴 시트를 읽지 않는다.
+ *
  * ── 마지막에 고른 파일만 ───────────────────────────────────────────────────
  * 두 번 고르면 앞 요청의 늦은 응답이 뒤를 덮으면 안 된다. createLatestQuoteExcelReader 가 차례를
  * 세고, 새로 읽기 시작했거나 멈춘(cancel) 뒤에 온 결과는 null 로 돌려준다 — 부르는 쪽은 버린다.
@@ -49,8 +60,20 @@ export const QUOTE_EXCEL_PARSE_URL = "/api/quotes/parse-excel";
 /** 읽은 값 — 이름 · 모양은 읽개(xlsx/handwritten-quote-reader.ts)의 것 그대로다. 모두 null 일 수 있다. */
 export type QuoteExcelReadFields = HandwrittenQuoteFields;
 
+/** 통합문서에 든 견적서 시트 하나의 표지 — 읽개의 것 그대로다. */
+export type QuoteExcelSheetInfo = HandwrittenQuoteSheetInfo;
+
 export type QuoteExcelParseResult =
-  | { ok: true; fields: QuoteExcelReadFields; warnings: string[] }
+  | {
+      ok: true;
+      fields: QuoteExcelReadFields;
+      warnings: string[];
+      /** 읽은 시트의 양식 · 탭 차례. 응답이 그 칸을 알아볼 수 없으면 null 이다. */
+      sheet: HandwrittenQuoteSheet | null;
+      sheetIndex: number | null;
+      /** 알아본 견적서 시트 전부, 탭 순서대로. 모양이 이상한 줄은 버린다. */
+      sheets: QuoteExcelSheetInfo[];
+    }
   | { ok: false; reason: string; status: number | null; code: string | null };
 
 /** 옛 .xls 를 골랐을 때 — 파일은 그대로 붙고, 칸만 채우지 못했다(2026-09-16 사용자 결정 문장). */
@@ -122,19 +145,59 @@ export function parseQuoteExcelFields(value: unknown): QuoteExcelReadFields | nu
   return fields;
 }
 
+const SHEET_FORMS = ["GENERATOR_DOMESTIC", "GENERATOR_OH", "MATCHER"] as const;
+
+function sheetFormOrNull(value: unknown): HandwrittenQuoteSheet | null {
+  return SHEET_FORMS.find((form) => form === value) ?? null;
+}
+
+/** 탭 차례 — 0 이상의 정수만. 그 밖이면 null. */
+function sheetIndexOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * 응답의 `sheets` → 시트 표지들. 배열이 아니면 빈 배열이고, 칸 하나라도 모양이 틀린 줄은
+ * **그 줄만** 버린다 — 고를 수 없는 줄을 화면에 올리는 것보다 없는 편이 낫다.
+ */
+export function parseQuoteExcelSheets(value: unknown): QuoteExcelSheetInfo[] {
+  if (!Array.isArray(value)) return [];
+  const sheets: QuoteExcelSheetInfo[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const index = sheetIndexOrNull(entry.index);
+    const name = textOrNull(entry.name);
+    const form = sheetFormOrNull(entry.form);
+    const recognizedBy = entry.recognizedBy === "header" || entry.recognizedBy === "name" ? entry.recognizedBy : null;
+    if (index === null || name === null || form === null || recognizedBy === null) continue;
+    if (typeof entry.filled !== "boolean") continue;
+    sheets.push({ index, name, form, recognizedBy, filled: entry.filled });
+  }
+  return sheets;
+}
+
 /** 응답의 `warnings` → 사람이 읽는 문장들. 배열이 아니면 빈 배열, 글자가 아닌 것은 버린다. */
 function parseWarnings(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((warning): warning is string => typeof warning === "string" && warning.trim() !== "");
 }
 
+/** 읽을 시트를 지정할 때의 주소. 지정이 없으면 통로 주소 그대로다(지금까지와 같은 요청). */
+export function quoteExcelParseUrl(sheetIndex?: number): string {
+  return sheetIndex === undefined ? QUOTE_EXCEL_PARSE_URL : `${QUOTE_EXCEL_PARSE_URL}?sheet=${sheetIndex}`;
+}
+
 /**
  * 수기 견적서 엑셀 하나를 읽기 통로로 보내 칸의 값을 받는다. 던지지 않는다.
  * 옛 .xls(이름)는 보내지 않고 곧바로 XLS_LEGACY 를 돌려준다.
+ *
+ * `options.sheetIndex` 를 주면 그 탭을 읽는다(응답의 `sheets[].index`). 안 주면 통로가
+ * 혼자 고른다 — 지금까지와 같은 요청이다.
  */
 export async function readHandwrittenQuoteExcel(
   file: File,
-  fetchImpl: QuoteExcelParseFetch = browserFetch
+  fetchImpl: QuoteExcelParseFetch = browserFetch,
+  options: { sheetIndex?: number } = {}
 ): Promise<QuoteExcelParseResult> {
   if (isLegacyXlsFileName(file.name)) {
     return { ok: false, reason: QUOTE_EXCEL_LEGACY_XLS_TEXT, status: null, code: QUOTE_EXCEL_LEGACY_XLS_CODE };
@@ -142,7 +205,7 @@ export async function readHandwrittenQuoteExcel(
 
   let response: ParseResponse;
   try {
-    response = await fetchImpl(QUOTE_EXCEL_PARSE_URL, { method: "POST", body: file });
+    response = await fetchImpl(quoteExcelParseUrl(options.sheetIndex), { method: "POST", body: file });
   } catch {
     return { ok: false, reason: NETWORK_FAILED_REASON, status: null, code: null };
   }
@@ -169,15 +232,22 @@ export async function readHandwrittenQuoteExcel(
   if (fields === null) {
     return { ok: false, reason: UNREADABLE_RESPONSE_REASON, status: response.status, code: null };
   }
-  return { ok: true, fields, warnings: parseWarnings(record?.warnings) };
+  return {
+    ok: true,
+    fields,
+    warnings: parseWarnings(record?.warnings),
+    sheet: sheetFormOrNull(record?.sheet),
+    sheetIndex: sheetIndexOrNull(record?.sheetIndex),
+    sheets: parseQuoteExcelSheets(record?.sheets),
+  };
 }
 
 export type LatestQuoteExcelReader = {
   /**
    * 읽는다. 기다리는 사이 다른 파일을 읽기 시작했거나 cancel 됐으면 **null** — 늦게 온 옛 결과다,
-   * 부르는 쪽은 버린다.
+   * 부르는 쪽은 버린다. 같은 파일을 다른 시트로 다시 읽을 때는 `{ sheetIndex }` 를 준다.
    */
-  read(file: File): Promise<QuoteExcelParseResult | null>;
+  read(file: File, options?: { sheetIndex?: number }): Promise<QuoteExcelParseResult | null>;
   /** 읽고 있는 것의 결과를 버린다(엑셀 전용을 껐다). */
   cancel(): void;
 };
@@ -187,14 +257,15 @@ export type LatestQuoteExcelReader = {
  * `readImpl` 은 시험이 바꿔 끼운다 — 기본은 브라우저 fetch 로 읽기 통로를 부르는 것.
  */
 export function createLatestQuoteExcelReader(
-  readImpl: (file: File) => Promise<QuoteExcelParseResult> = (file) => readHandwrittenQuoteExcel(file)
+  readImpl: (file: File, options?: { sheetIndex?: number }) => Promise<QuoteExcelParseResult> = (file, options) =>
+    readHandwrittenQuoteExcel(file, undefined, options)
 ): LatestQuoteExcelReader {
   let latest = 0;
   return {
-    async read(file) {
+    async read(file, options) {
       latest += 1;
       const ticket = latest;
-      const result = await readImpl(file);
+      const result = await readImpl(file, options);
       return ticket === latest ? result : null;
     },
     cancel() {

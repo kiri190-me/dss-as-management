@@ -39,11 +39,19 @@ import {
  * 권한이 WRITE 인 까닭: 이 값은 견적서 편집 폼에 채우는 것이고, 폼을 저장할 수 있는
  * 사람만 부를 이유가 있다. 서버에서 믿을 수 없는 파일을 푸는 일이라 문턱을 낮추지 않는다.
  *
+ * ── 어느 시트를 읽나 — `?sheet=` ────────────────────────────────────────
+ * 한 통합문서에 내자 · OH 두 견적서가 든 파일이 있다. 그래서 200 응답이 **알아본 시트
+ * 전부**(`sheets` — 탭 차례 · 이름 · 양식 · 작성된 것으로 보이나)를 함께 내주고, 폼이
+ * 사람이 고른 탭 차례를 `?sheet=1` 로 돌려주면 그 시트를 읽는다. 값은 읽개에 그대로
+ * 넘긴다 — 숫자가 아니거나 그 자리에 견적서 시트가 없으면 422 SHEET_NOT_FOUND 다.
+ * 🔴 여기서 조용히 딴 시트로 바꾸지 않는다.
+ *
  * ── 응답 ────────────────────────────────────────────────────────────────
- *  · 200 `{ sheet, fields, warnings }` — 칸이 비거나 이상해도 200 이다(그 칸만 null, 까닭은
- *    warnings). 모양은 handwritten-quote-reader.ts 의 HandwrittenQuoteFields.
- *  · 실패 `{ error, code }` — 415 옛 .xls · xlsx 아님 / 422 알아볼 시트 없음 / 413 너무 큼
- *    (본문 또는 풀어 본 내용). 실패 응답과 로그에 파일의 값을 싣지 않는다.
+ *  · 200 `{ sheet, sheetIndex, sheetName, sheets, fields, warnings }` — 칸이 비거나 이상해도
+ *    200 이다(그 칸만 null, 까닭은 warnings). 모양은 handwritten-quote-reader.ts 의
+ *    HandwrittenQuoteFields · HandwrittenQuoteSheetInfo.
+ *  · 실패 `{ error, code }` — 415 옛 .xls · xlsx 아님 / 422 알아볼 시트 없음 · 고른 시트
+ *    없음 / 413 너무 큼(본문 또는 풀어 본 내용). 실패 응답과 로그에 파일의 값을 싣지 않는다.
  * ============================================================================
  */
 
@@ -68,7 +76,11 @@ const STATUS_BY_READ_FAILURE: Record<HandwrittenQuoteReadFailureCode, number> = 
   NOT_XLSX: 415,
   NO_QUOTE_SHEET: 422,
   CONTENT_TOO_LARGE: 413,
+  SHEET_NOT_FOUND: 422,
 };
+
+/** `?sheet=1` — 읽을 시트의 탭 차례. 없으면 undefined(읽개가 혼자 고른다). */
+const SHEET_QUERY = "sheet";
 
 const FILE_TOO_LARGE_MESSAGE = "파일이 20MB를 넘습니다.";
 
@@ -134,9 +146,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ── 6) 읽개 — 메모리에서만 읽는다(머리말 '읽기 전용') ──────────────────
+  // `?sheet=` 를 준 값 그대로 읽개에 넘긴다. 숫자가 아니거나 그 자리에 견적서 시트가
+  // 없으면 읽개가 SHEET_NOT_FOUND 로 돌려준다 — 여기서 조용히 딴 시트로 바꾸지 않는다.
+  const sheetParam = request.nextUrl.searchParams.get(SHEET_QUERY);
   let result: HandwrittenQuoteReadResult;
   try {
-    result = readHandwrittenQuoteWorkbook(received.bytes);
+    result = readHandwrittenQuoteWorkbook(received.bytes, {
+      sheetIndex: sheetParam === null ? undefined : sheetIndexOf(sheetParam),
+    });
   } catch (error) {
     // 읽개는 내용 때문에 던지지 않는다. 여기로 오면 결함이다 — 오류 이름만 남긴다.
     console.error("[quote-parse-excel] 엑셀을 읽다 멈췄다", { error: errorNameOf(error) });
@@ -148,7 +165,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ── 7) JSON ─────────────────────────────────────────────────────────
   return NextResponse.json(
-    { sheet: result.sheet, fields: result.fields, warnings: result.warnings },
+    {
+      sheet: result.sheet,
+      sheetIndex: result.sheetIndex,
+      sheetName: result.sheetName,
+      sheets: result.sheets,
+      fields: result.fields,
+      warnings: result.warnings,
+    },
     {
       status: 200,
       // 고객 정보가 담긴 응답이다. 중간 캐시에 남지 않게 한다.
@@ -177,6 +201,15 @@ async function readBodyWithinLimit(
     chunks.push(value);
   }
   return { ok: true, bytes: Buffer.concat(chunks, total) };
+}
+
+/**
+ * `?sheet=` 의 값 → 탭 차례. 숫자가 아니거나 비었으면 NaN 을 그대로 넘긴다 — 읽개가
+ * SHEET_NOT_FOUND 로 거절한다. 여기서 undefined 로 바꾸면 사람이 고른 것과 상관없는
+ * 시트를 조용히 읽게 된다.
+ */
+function sheetIndexOf(value: string): number {
+  return value.trim() === "" ? Number.NaN : Number(value);
 }
 
 /** 로그에 남길 짧은 표지 — 오류 이름만. message 에는 파일의 값이 섞일 수 있다. */

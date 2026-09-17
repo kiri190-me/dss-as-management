@@ -1,8 +1,17 @@
 import { excelSerialToDateOnly } from "./excel-date";
-import { MATCHER_QUOTE_CELLS, MATCHER_QUOTE_SHEET_NAME } from "./matcher-quote-template";
-import { OH_QUOTE_CELLS, OH_QUOTE_SHEET_NAME } from "./oh-quote-template";
+import {
+  MATCHER_QUOTE_CELLS,
+  MATCHER_QUOTE_SHEET_NAME,
+  MATCHER_WORK_SCOPE_LABELS,
+} from "./matcher-quote-template";
+import {
+  OH_QUOTE_CELLS,
+  OH_QUOTE_OVERHAUL_PARTS_LABEL,
+  OH_QUOTE_SHEET_NAME,
+  OH_QUOTE_WORK_SCOPE_LABELS,
+} from "./oh-quote-template";
 import { findSpacedLabelRow, LAYOUT_COLUMNS } from "./quote-sheet-layout";
-import { QUOTE_CELLS, QUOTE_SHEET_NAME } from "./quote-template";
+import { QUOTE_CELLS, QUOTE_SHEET_NAME, QUOTE_WORK_SCOPE_LABELS } from "./quote-template";
 import { findCell } from "./sheet-patch";
 import {
   buildSheetGrid,
@@ -32,9 +41,10 @@ import { ZipArchive } from "./zip-reader";
  * 화면 · DB · 저장소를 모른다. 입력은 파일 바이트 하나다.
  *
  * ── 결과는 두 갈래, 내용 때문에 던지지 않는다 ──────────────────────────────
- *  · `{ ok: true, sheet, fields, warnings }` — 칸이 비거나 이상하면 그 칸만 null 이고
- *    까닭은 warnings 에 사람이 읽는 문장으로 싣는다.
- *  · `{ ok: false, code, message }` — 옛 .xls · xlsx 가 아님 · 알아볼 시트 없음 · 너무 큼.
+ *  · `{ ok: true, sheet, sheetIndex, sheetName, sheets, fields, warnings }` — 칸이 비거나
+ *    이상하면 그 칸만 null 이고 까닭은 warnings 에 사람이 읽는 문장으로 싣는다.
+ *  · `{ ok: false, code, message }` — 옛 .xls · xlsx 가 아님 · 알아볼 시트 없음 · 너무 큼 ·
+ *    지정한 시트 없음.
  * 깨진 파일이 어디서 터지든 맨 바깥에서 받아 NOT_XLSX 로 돌려준다.
  *
  * ── 칸 지도는 채우개의 것을 그대로 쓴다 ────────────────────────────────────
@@ -43,16 +53,42 @@ import { ZipArchive } from "./zip-reader";
  * 양식이 바뀌는 날 한쪽만 고쳐진다. 공급가 줄도 채우개와 같은 방법(H열의 띄어 쓴
  * 「공 급 가」 를 공백을 지우고 견준다 — findSpacedLabelRow)으로 찾는다.
  *
- * ── 시트 고르기 ─────────────────────────────────────────────────────────
- * 알아보는 시트는 「내자견적서」 · 「OH견적서」 · 「견적서」다. 제너레이터 내자 양식은 한
- * 통합문서에 내자 · OH 두 시트를 다 갖고, OH 시트의 발행번호 칸은 내자 칸을 따라가는
- * 수식(`…&"-1"`)이라 **둘 다 채워져 보이는 것이 보통**이다.
+ * ── 무엇이 들어 있나 — `sheets` ─────────────────────────────────────────
+ * 알아보는 시트 이름은 「내자견적서」 · 「OH견적서」 · 「견적서」다. 그 시트마다 표지를
+ * 하나씩 `sheets` 에 싣는다(탭 순서대로): `{ index, name, form, recognizedBy, filled }`.
+ * 부르는 쪽은 이 목록을 사람에게 보이고, 사람이 고른 `index` 를 아래 `sheetIndex` 로
+ * 돌려주면 된다.
+ *
+ *  · `form` — **양식에 인쇄된 머리글(D열)로 가른다.** 탭 이름은 사람이 바꿀 수 있지만
+ *    머리글은 안 바뀐다. 「OH 및 수리 작업」 · 「OH 부품 비용」 은 O/H 양식에만,
+ *    「수리 작업」 은 내자 양식에만, 「조사작업 · 수리작업 · 통전작업」 은 매쳐 양식에만
+ *    있다(글자는 채우개가 들고 있는 것을 가져다 쓴다 — 머리말 '칸 지도'와 같은 까닭).
+ *    🔴 머리글로 **가를 수 있을 때만** 이름을 앞선다. 못 가르면(② 묶음을 지우고 발행한
+ *    견적서가 그렇다) 탭 이름으로 간다 — `recognizedBy` 가 어느 쪽이었는지 말해 준다.
+ *  · `filled` — **품목 · 작업 줄의 단가(H) · 금액(I) 칸에 0 이 아닌 금액이 있나.**
+ *    🔴 발행번호를 근거로 쓰지 않는다. O/H 시트의 발행번호는 내자 칸을 따라가는
+ *    수식(`내자견적서!D11&"-1"`)이라 **언제나 채워져 보인다.** 품명 · 부품 이름도 쓰지
+ *    않는다 — 빈 양식에 예시가 인쇄돼 있다(내자 양식의 「1번 부품」, O/H 양식의 O/H 부품
+ *    목록). 빈 양식의 그 칸들은 비어 있거나 0 이다(2026-09-17 양식 넷을 실측).
+ *    ⚠️ 「작성됐나」는 사람이 고를 때의 **참고**다 — 가름막이 아니라서 목록에는 늘 다 싣는다.
+ *    실제로 제너레이터 내자 양식 파일에 함께 든 O/H 시트는 빈 양식인데도 작업비 240만이
+ *    인쇄돼 있어 `filled` 가 true 다(그 240만은 진짜로 적혀 있는 금액이다).
+ *
+ * ── 어느 시트를 읽나 ────────────────────────────────────────────────────
+ * `options.sheetIndex` 를 주면 **그 탭을 읽는다**(위 `sheets[].index`). 그 자리에 알아보는
+ * 견적서 시트가 없으면 조용히 딴 것을 읽지 않고 SHEET_NOT_FOUND 로 돌려준다.
+ *
+ * 안 주면 지금까지 하던 대로 혼자 고른다. 제너레이터 내자 양식은 한 통합문서에 내자 ·
+ * OH 두 시트를 다 갖고, OH 시트의 발행번호 칸은 위에서 본 수식이라 **둘 다 채워져 보이는
+ * 것이 보통**이다.
  *  1) 발행번호 칸이 채워진 시트가 하나면 그것.
  *  2) 여럿이면 통합문서의 활성 시트(workbook.xml 의 workbookView@activeTab — 없으면 0,
  *     첫 탭)가 그 가운데 있으면 그것. 사람이 마지막으로 보던 탭이 그 사람이 쓴 견적서다.
  *  3) 그래도 못 가르면 **탭 순서의 첫 시트**를 고르고 경고를 싣는다.
  *  4) 하나도 안 채워졌으면 활성 시트가 견적서 시트면 그것(경고 없음 — 칸이 비어 있을
  *     뿐이다), 아니면 탭 순서의 첫 견적서 시트 + 경고.
+ * 🔴 이 네 갈래는 `activeTab` 이 없는 파일에서 **늘 내자 시트로 떨어진다** — 사람이 OH 를
+ * 고를 길이 없었다. 그래서 위의 `sheets` · `sheetIndex` 를 더했다(2026-09-17).
  *
  * ── 견적서 종류 ─────────────────────────────────────────────────────────
  * 「내자견적서」 → DOMESTIC, 「OH견적서」 → OVERHAUL. 🔴 매쳐(「견적서」)는 **null** 이다 —
@@ -129,12 +165,38 @@ export type HandwrittenQuoteReadFailureCode =
   | "XLS_LEGACY"
   | "NOT_XLSX"
   | "NO_QUOTE_SHEET"
-  | "CONTENT_TOO_LARGE";
+  | "CONTENT_TOO_LARGE"
+  | "SHEET_NOT_FOUND";
+
+/** 그 시트의 양식을 무엇으로 갈랐나 — 양식에 인쇄된 머리글인가, 탭 이름인가(머리말). */
+export type HandwrittenQuoteFormSource = "header" | "name";
+
+/**
+ * 통합문서에 든 견적서 시트 하나의 표지(머리말 '무엇이 들어 있나'). 값을 읽지는 않는다 —
+ * 「어떤 견적서가 들어 있나」를 사람에게 보여 주고 고르게 하려고 싣는다.
+ */
+export type HandwrittenQuoteSheetInfo = {
+  /** 탭 차례(0부터). 이 값을 그대로 `options.sheetIndex` 로 돌려주면 그 시트를 읽는다. */
+  index: number;
+  /** 탭 이름. */
+  name: string;
+  /** 어느 양식인가. 머리글로 가른 것이 먼저고, 못 가르면 탭 이름이다. */
+  form: HandwrittenQuoteSheet;
+  recognizedBy: HandwrittenQuoteFormSource;
+  /** 작성된 것으로 보이나 — 품목 · 작업 줄에 0 이 아닌 금액이 있나(머리말). */
+  filled: boolean;
+};
 
 export type HandwrittenQuoteReadResult =
   | {
       ok: true;
+      /** 읽은 시트의 양식. */
       sheet: HandwrittenQuoteSheet;
+      /** 읽은 시트의 탭 차례(0부터) · 탭 이름. */
+      sheetIndex: number;
+      sheetName: string;
+      /** 알아본 견적서 시트 전부, 탭 순서대로. 읽은 것 하나만 있는 것이 아니다. */
+      sheets: HandwrittenQuoteSheetInfo[];
       fields: HandwrittenQuoteFields;
       warnings: string[];
     }
@@ -166,6 +228,8 @@ export const HANDWRITTEN_QUOTE_FAILURE_MESSAGES: Record<HandwrittenQuoteReadFail
     "견적서 시트(내자견적서 · OH견적서 · 견적서)를 찾지 못했습니다. 앱 양식을 바탕으로 만든 견적서 엑셀인지 확인해 주세요.",
   CONTENT_TOO_LARGE:
     "엑셀 파일 안의 내용이 너무 커서 읽지 않았습니다. 견적서 시트만 남긴 파일로 다시 올려 주세요.",
+  SHEET_NOT_FOUND:
+    "고르신 시트를 엑셀에서 찾지 못했습니다. 파일이 바뀌었을 수 있습니다 — 파일을 다시 고른 뒤 시트를 골라 주세요.",
 };
 
 // ── 양식 셋의 칸 지도 — 채우개의 것을 그대로 ─────────────────────────────
@@ -203,6 +267,34 @@ const SHEET_LAYOUTS: readonly SheetLayout[] = [
   },
 ];
 
+/**
+ * 🔴 **양식을 가르는 머리글**(D열, 통째로 견준다). 머리말 '무엇이 들어 있나'.
+ *
+ * 글자는 채우개가 들고 있는 것을 가져다 쓴다 — 여기 다시 적으면 양식이 바뀌는 날 한쪽만
+ * 고쳐진다(머리말 '칸 지도'와 같은 까닭).
+ *
+ * ⚠️ 여기 없는 것: 두 양식이 함께 쓰는 「인수 조사」 · 「통전검사」 · 「부품 비용」 —
+ * 있어도 어느 양식인지 말해 주지 않는다. 가를 수 없으면 탭 이름으로 간다.
+ *
+ * 양식끼리 글자가 겹치지 않는다 — O/H 의 ② 는 「OH 및 수리 작업」, 내자는 「수리 작업」,
+ * 매쳐는 띄어쓰기 없는 「수리작업」 이라 **통째로** 견주면 갈린다.
+ */
+const FORM_HEADERS: readonly { sheet: HandwrittenQuoteSheet; labels: readonly string[] }[] = [
+  {
+    sheet: "GENERATOR_OH",
+    labels: [OH_QUOTE_WORK_SCOPE_LABELS.REPAIR.label, OH_QUOTE_OVERHAUL_PARTS_LABEL],
+  },
+  { sheet: "GENERATOR_DOMESTIC", labels: [QUOTE_WORK_SCOPE_LABELS.REPAIR.label] },
+  {
+    sheet: "MATCHER",
+    labels: [
+      MATCHER_WORK_SCOPE_LABELS.INVESTIGATION.label,
+      MATCHER_WORK_SCOPE_LABELS.REPAIR.label,
+      MATCHER_WORK_SCOPE_LABELS.POWER_TEST.label,
+    ],
+  },
+];
+
 /** H열의 합계 머리글. 양식은 `공 급 가` 로 띄워 두었다 — findSpacedLabelRow 가 공백을 지우고 견준다. */
 const SUPPLY_LABEL = "공급가";
 
@@ -233,7 +325,14 @@ class ReadFailure extends Error {
 
 export function readHandwrittenQuoteWorkbook(
   input: Uint8Array,
-  options: { limits?: Partial<HandwrittenQuoteReadLimits> } = {}
+  options: {
+    limits?: Partial<HandwrittenQuoteReadLimits>;
+    /**
+     * 읽을 시트의 탭 차례(0부터 — 결과의 `sheets[].index`). 안 주면 읽개가 혼자 고른다
+     * (머리말 '어느 시트를 읽나'). 그 자리에 견적서 시트가 없으면 SHEET_NOT_FOUND 다.
+     */
+    sheetIndex?: number;
+  } = {}
 ): HandwrittenQuoteReadResult {
   const limits: HandwrittenQuoteReadLimits = { ...HANDWRITTEN_QUOTE_READ_LIMITS, ...options.limits };
   const bytes = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
@@ -242,7 +341,7 @@ export function readHandwrittenQuoteWorkbook(
   if (!startsWith(bytes, ZIP_LOCAL_SIGNATURE)) return failure("NOT_XLSX");
 
   try {
-    return readWorkbook(bytes, limits);
+    return readWorkbook(bytes, limits, options.sheetIndex);
   } catch (error) {
     // 깨진 zip · 깨진 XML 이 어디서 터졌든 여기서 멈춘다(머리말 '던지지 않는다').
     return failure(error instanceof ReadFailure ? error.code : "NOT_XLSX");
@@ -259,12 +358,32 @@ function startsWith(bytes: Buffer, signature: readonly number[]): boolean {
 }
 
 type Candidate = {
+  /** 탭 차례(0부터)와 탭 이름 — 사람이 고를 때 쓰는 표지다. */
+  index: number;
+  name: string;
+  /** 머리글로 가른 양식(못 가르면 탭 이름의 양식)의 칸 지도. */
   layout: SheetLayout;
+  recognizedBy: HandwrittenQuoteFormSource;
+  filled: boolean;
   sheetXml: string;
   grid: SheetGrid;
 };
 
-function readWorkbook(bytes: Buffer, limits: HandwrittenQuoteReadLimits): HandwrittenQuoteReadResult {
+function infoOf(candidate: Candidate): HandwrittenQuoteSheetInfo {
+  return {
+    index: candidate.index,
+    name: candidate.name,
+    form: candidate.layout.sheet,
+    recognizedBy: candidate.recognizedBy,
+    filled: candidate.filled,
+  };
+}
+
+function readWorkbook(
+  bytes: Buffer,
+  limits: HandwrittenQuoteReadLimits,
+  sheetIndex: number | undefined
+): HandwrittenQuoteReadResult {
   let archive: ZipArchive;
   try {
     archive = ZipArchive.fromBuffer(bytes);
@@ -288,9 +407,10 @@ function readWorkbook(bytes: Buffer, limits: HandwrittenQuoteReadLimits): Handwr
   const tabNames = readSheetNames(workbookXml);
 
   const candidates: Candidate[] = [];
-  for (const name of tabNames) {
-    const layout = SHEET_LAYOUTS.find((candidate) => candidate.sheetName === name);
-    if (!layout || candidates.some((candidate) => candidate.layout === layout)) continue;
+  for (const [index, name] of tabNames.entries()) {
+    const byName = SHEET_LAYOUTS.find((candidate) => candidate.sheetName === name);
+    // 이름이 같은 탭이 둘이면 뒤엣것은 같은 파트를 가리킨다 — 한 번만 담는다.
+    if (!byName || candidates.some((candidate) => candidate.name === name)) continue;
 
     let part: string;
     try {
@@ -300,17 +420,35 @@ function readWorkbook(bytes: Buffer, limits: HandwrittenQuoteReadLimits): Handwr
     }
     const sheetXml = readPart(part);
     if (sheetXml === null) continue;
-    candidates.push({ layout, sheetXml, grid: buildSheetGrid(sheetXml, sharedStrings, date1904) });
+
+    const grid = buildSheetGrid(sheetXml, sharedStrings, date1904);
+    // 양식 머리글이 탭 이름을 앞선다 — 가를 수 있을 때만(머리말 '무엇이 들어 있나').
+    const fromHeader = formFromHeaders(grid);
+    candidates.push({
+      index,
+      name,
+      layout: fromHeader === null ? byName : layoutOf(fromHeader),
+      recognizedBy: fromHeader === null ? "name" : "header",
+      filled: looksFilled(grid),
+      sheetXml,
+      grid,
+    });
   }
   if (candidates.length === 0) throw new ReadFailure("NO_QUOTE_SHEET");
 
   const warnings: string[] = [];
   const activeName = tabNames[readActiveTabIndex(workbookXml)] ?? null;
-  const chosen = chooseSheet(candidates, activeName, warnings);
+  const chosen =
+    sheetIndex === undefined
+      ? chooseSheet(candidates, activeName, warnings)
+      : pickSheet(candidates, sheetIndex);
 
   return {
     ok: true,
     sheet: chosen.layout.sheet,
+    sheetIndex: chosen.index,
+    sheetName: chosen.name,
+    sheets: candidates.map(infoOf),
     fields: readFields(chosen, () => readPart(STYLES_PART), warnings),
     warnings,
   };
@@ -362,28 +500,88 @@ function readActiveTabIndex(workbookXml: string): number {
   return value === undefined ? 0 : Number(value);
 }
 
-/** 머리말 '시트 고르기' 의 규칙 그대로. */
+function layoutOf(sheet: HandwrittenQuoteSheet): SheetLayout {
+  const layout = SHEET_LAYOUTS.find((candidate) => candidate.sheet === sheet);
+  // FORM_HEADERS 의 세 양식은 SHEET_LAYOUTS 에 다 있다 — 컴파일러를 달래는 자리다.
+  if (layout === undefined) throw new ReadFailure("NO_QUOTE_SHEET");
+  return layout;
+}
+
+/**
+ * 양식에 인쇄된 머리글(D열)로 「어느 양식인가」를 가른다. 가르지 못하면 null —
+ * 부르는 쪽이 탭 이름으로 간다(머리말 '무엇이 들어 있나').
+ *
+ * 🔴 **두 양식이 함께 걸리면 가르지 않는다.** 머리글이 앉는 D열은 품목 · 작업 이름이
+ * 적히는 열이기도 해서, 사람이 남의 양식 머리글과 똑같은 이름(「수리 작업」)을 항목으로
+ * 적을 수 있다. 짐작으로 고르면 **칸 지도가 통째로 어긋난다** — 매쳐 양식은 건명이 D14 로
+ * 제너레이터와 한 줄 다르다. 애매하면 탭 이름이라는 다른 근거로 간다.
+ */
+function formFromHeaders(grid: SheetGrid): HandwrittenQuoteSheet | null {
+  const labels = new Set<string>();
+  for (const row of grid.rowNumbers) {
+    const cell = grid.cells(row).get(LAYOUT_COLUMNS.name);
+    if (cell === undefined || cell.kind !== "text") continue;
+    const text = cell.text.trim();
+    if (text !== "") labels.add(text);
+  }
+  const matched = FORM_HEADERS.filter((form) => form.labels.some((label) => labels.has(label)));
+  return matched.length === 1 ? matched[0].sheet : null;
+}
+
+/**
+ * 「작성된 것으로 보이나」 — 단가(H) · 금액(I) 칸에 0 이 아닌 금액이 하나라도 있나.
+ * 🔴 발행번호 · 품명 · 부품 이름은 보지 않는다(머리말 '무엇이 들어 있나'의 까닭 셋).
+ */
+function looksFilled(grid: SheetGrid): boolean {
+  for (const row of grid.rowNumbers) {
+    const cells = grid.cells(row);
+    if (hasNonZeroAmount(cells.get(LAYOUT_COLUMNS.unitPrice))) return true;
+    if (hasNonZeroAmount(cells.get(LAYOUT_COLUMNS.amount))) return true;
+  }
+  return false;
+}
+
+/**
+ * 그 칸에 0 이 아닌 금액이 들어 있나. 글자로 적은 금액(「3,500,000」)도 센다 — 양식에
+ * 인쇄된 머리글(「단 가」 · 「합 계」 · 「공 급 가」)은 금액 모양이 아니라 걸리지 않는다.
+ */
+function hasNonZeroAmount(cell: GridCell | undefined): boolean {
+  if (cell === undefined) return false;
+  if (cell.kind === "number") return cell.value !== 0;
+  const found = AMOUNT_TEXT.exec(cell.text.trim());
+  return found !== null && /[1-9]/.test(`${found[1]}${found[2] ?? ""}`);
+}
+
+/** 사람이 고른 시트. 그 자리에 견적서 시트가 없으면 조용히 딴 것을 읽지 않는다(머리말). */
+function pickSheet(candidates: readonly Candidate[], sheetIndex: number): Candidate {
+  if (!Number.isInteger(sheetIndex)) throw new ReadFailure("SHEET_NOT_FOUND");
+  const chosen = candidates.find((candidate) => candidate.index === sheetIndex);
+  if (chosen === undefined) throw new ReadFailure("SHEET_NOT_FOUND");
+  return chosen;
+}
+
+/** 머리말 '어느 시트를 읽나' 의 네 갈래 그대로 — 사람이 시트를 지정하지 않았을 때다. */
 function chooseSheet(candidates: readonly Candidate[], activeName: string | null, warnings: string[]): Candidate {
   if (candidates.length === 1) return candidates[0];
 
-  const active = candidates.find((candidate) => candidate.layout.sheetName === activeName);
+  const active = candidates.find((candidate) => candidate.name === activeName);
   const filled = candidates.filter(
     (candidate) => textAt(candidate.grid, candidate.layout.cells.quoteNumber) !== null
   );
-  const names = (list: readonly Candidate[]) => list.map((candidate) => candidate.layout.sheetName).join(" · ");
+  const names = (list: readonly Candidate[]) => list.map((candidate) => candidate.name).join(" · ");
 
   if (filled.length === 1) return filled[0];
   if (filled.length > 1) {
     if (active !== undefined && filled.includes(active)) return active;
     warnings.push(
-      `발행번호가 채워진 견적서 시트가 여럿(${names(filled)})이고 활성 시트로도 가를 수 없어, 탭 순서의 첫 시트 「${filled[0].layout.sheetName}」를 읽었습니다 — 맞는 시트인지 확인해 주세요.`
+      `발행번호가 채워진 견적서 시트가 여럿(${names(filled)})이고 활성 시트로도 가를 수 없어, 탭 순서의 첫 시트 「${filled[0].name}」를 읽었습니다 — 맞는 시트인지 확인해 주세요.`
     );
     return filled[0];
   }
 
   if (active !== undefined) return active;
   warnings.push(
-    `견적서 시트가 여럿(${names(candidates)})인데 발행번호가 모두 비어 있어, 탭 순서의 첫 시트 「${candidates[0].layout.sheetName}」를 읽었습니다.`
+    `견적서 시트가 여럿(${names(candidates)})인데 발행번호가 모두 비어 있어, 탭 순서의 첫 시트 「${candidates[0].name}」를 읽었습니다.`
   );
   return candidates[0];
 }

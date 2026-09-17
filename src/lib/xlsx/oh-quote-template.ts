@@ -126,6 +126,14 @@ const BLOCK_LABELS = {
  */
 export const OH_QUOTE_WORK_SCOPE_LABELS: WorkScopeLabels = BLOCK_LABELS.workScope;
 
+/**
+ * 🔴 **이 양식에만 있는 머리글.** 내자 양식에는 `2) OH 부품 비용` 칸이 없다 —
+ * 수기 견적서 읽개(handwritten-quote-reader.ts)가 「이 시트가 어느 양식인가」를
+ * 탭 이름이 아니라 이 글자로 가른다(탭 이름은 사람이 바꿀 수 있다).
+ * 여기 한 곳에만 적는다 — 위 작업 내역 머리글과 같은 까닭이다.
+ */
+export const OH_QUOTE_OVERHAUL_PARTS_LABEL: string = BLOCK_LABELS.overhaulParts;
+
 const TOTAL_LABELS = { supply: "공급가", vat: "부가세", total: "합계" } as const;
 
 /** 만원 단위 내림 사슬이 시작하는 자리를 가리키는 G열의 글자. */

@@ -5,6 +5,8 @@ import {
   QUOTE_EXCEL_PARSE_URL,
   createLatestQuoteExcelReader,
   parseQuoteExcelFields,
+  parseQuoteExcelSheets,
+  quoteExcelParseUrl,
   readHandwrittenQuoteExcel,
   type QuoteExcelParseFetch,
   type QuoteExcelParseResult,
@@ -101,12 +103,115 @@ describe("성공 — 본문은 파일 그대로, 칸과 경고를 돌려준다",
     assert.equal(calls[0].url, "/api/quotes/parse-excel");
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].body, file);
-    assert.deepEqual(result, { ok: true, fields: READ_FIELDS, warnings: ["경고 한 줄"] });
+    assert.deepEqual(result, {
+      ok: true,
+      fields: READ_FIELDS,
+      warnings: ["경고 한 줄"],
+      sheet: "GENERATOR_OH",
+      sheetIndex: null,
+      sheets: [],
+    });
   });
 
   test("칸이 모두 null 이어도 성공이다 — 채울 것이 없을 뿐", async () => {
     const { fetchImpl } = fakeFetch([{ status: 200, json: { sheet: "MATCHER", fields: ALL_NULL, warnings: [] } }]);
-    assert.deepEqual(await readHandwrittenQuoteExcel(xlsx(), fetchImpl), { ok: true, fields: ALL_NULL, warnings: [] });
+    assert.deepEqual(await readHandwrittenQuoteExcel(xlsx(), fetchImpl), {
+      ok: true,
+      fields: ALL_NULL,
+      warnings: [],
+      sheet: "MATCHER",
+      sheetIndex: null,
+      sheets: [],
+    });
+  });
+});
+
+// ─────────────────────────────────── 어떤 견적서가 들어 있나 · 어느 시트를 읽나
+
+describe("시트 목록 · 시트 지정", () => {
+  const SHEETS = [
+    { index: 0, name: "내자견적서", form: "GENERATOR_DOMESTIC", recognizedBy: "header", filled: true },
+    { index: 1, name: "OH견적서", form: "GENERATOR_OH", recognizedBy: "header", filled: true },
+  ];
+
+  test("응답의 sheets · sheetIndex 를 그대로 돌려준다", async () => {
+    const { fetchImpl } = fakeFetch([
+      {
+        status: 200,
+        json: { sheet: "GENERATOR_DOMESTIC", sheetIndex: 0, sheets: SHEETS, fields: ALL_NULL, warnings: [] },
+      },
+    ]);
+    const result = await readHandwrittenQuoteExcel(xlsx(), fetchImpl);
+    assert.equal(result.ok && result.sheetIndex, 0);
+    assert.deepEqual(result.ok && result.sheets, SHEETS);
+  });
+
+  test("🔴 시트를 지정하면 주소에 ?sheet= 가 붙는다 — 지정이 없으면 지금까지와 같은 주소", async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      { status: 200, json: { sheet: "GENERATOR_OH", sheetIndex: 1, sheets: SHEETS, fields: ALL_NULL, warnings: [] } },
+      { status: 200, json: { sheet: "GENERATOR_DOMESTIC", sheetIndex: 0, sheets: SHEETS, fields: ALL_NULL, warnings: [] } },
+    ]);
+    await readHandwrittenQuoteExcel(xlsx(), fetchImpl, { sheetIndex: 1 });
+    await readHandwrittenQuoteExcel(xlsx(), fetchImpl);
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      ["/api/quotes/parse-excel?sheet=1", "/api/quotes/parse-excel"]
+    );
+    assert.equal(quoteExcelParseUrl(0), "/api/quotes/parse-excel?sheet=0");
+    assert.equal(quoteExcelParseUrl(), QUOTE_EXCEL_PARSE_URL);
+  });
+
+  test("모양이 이상한 줄만 버린다 — 나머지는 남는다", () => {
+    assert.deepEqual(
+      parseQuoteExcelSheets([
+        SHEETS[0],
+        { index: 1, name: "OH견적서", form: "OH", recognizedBy: "header", filled: true }, // 모르는 양식
+        { index: -1, name: "내자견적서", form: "MATCHER", recognizedBy: "name", filled: true }, // 차례가 음수
+        { index: 2, name: "  ", form: "MATCHER", recognizedBy: "name", filled: false }, // 이름이 빈 글자
+        { index: 3, name: "견적서", form: "MATCHER", recognizedBy: "짐작", filled: false }, // 모르는 근거
+        { index: 4, name: "견적서", form: "MATCHER", recognizedBy: "name" }, // filled 가 없다
+        SHEETS[1],
+      ]),
+      [SHEETS[0], SHEETS[1]]
+    );
+  });
+
+  test("sheets 가 배열이 아니거나 없으면 빈 목록이다", async () => {
+    assert.deepEqual(parseQuoteExcelSheets(undefined), []);
+    assert.deepEqual(parseQuoteExcelSheets({ 0: SHEETS[0] }), []);
+    const { fetchImpl } = fakeFetch([
+      { status: 200, json: { sheet: "MATCHER", sheetIndex: "첫째", sheets: "내자견적서", fields: ALL_NULL, warnings: [] } },
+    ]);
+    const result = await readHandwrittenQuoteExcel(xlsx(), fetchImpl);
+    assert.deepEqual(result.ok && result.sheets, []);
+    assert.equal(result.ok && result.sheetIndex, null);
+  });
+
+  test("🔴 고른 시트가 없으면 통로의 까닭을 그대로 보인다(조용히 딴 시트를 읽지 않는다)", async () => {
+    const { fetchImpl } = fakeFetch([
+      {
+        status: 422,
+        json: { error: "고르신 시트를 엑셀에서 찾지 못했습니다. …", code: "SHEET_NOT_FOUND" },
+      },
+    ]);
+    const result = await readHandwrittenQuoteExcel(xlsx(), fetchImpl, { sheetIndex: 9 });
+    assert.deepEqual(result, {
+      ok: false,
+      reason: "고르신 시트를 엑셀에서 찾지 못했습니다. …",
+      status: 422,
+      code: "SHEET_NOT_FOUND",
+    });
+  });
+
+  test("마지막에 고른 것만 돌려주는 읽개도 시트 지정을 넘긴다", async () => {
+    const seen: (number | undefined)[] = [];
+    const reader = createLatestQuoteExcelReader(async (_file, options) => {
+      seen.push(options?.sheetIndex);
+      return { ok: true, fields: ALL_NULL, warnings: [], sheet: null, sheetIndex: null, sheets: [] };
+    });
+    await reader.read(xlsx());
+    await reader.read(xlsx(), { sheetIndex: 1 });
+    assert.deepEqual(seen, [undefined, 1]);
   });
 });
 
@@ -250,7 +355,14 @@ describe("🔴 두 번 고르면 마지막에 고른 파일의 결과만", () =>
         pending.set(file.name, resolve);
       });
     const finish = (name: string, quoteNumber: string) =>
-      pending.get(name)?.({ ok: true, fields: { ...ALL_NULL, quoteNumber }, warnings: [] });
+      pending.get(name)?.({
+        ok: true,
+        fields: { ...ALL_NULL, quoteNumber },
+        warnings: [],
+        sheet: null,
+        sheetIndex: null,
+        sheets: [],
+      });
     return { readImpl, finish, started };
   }
 

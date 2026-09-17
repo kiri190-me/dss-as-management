@@ -1,13 +1,6 @@
 import "server-only";
 
-import {
-  HANDWRITTEN_QUOTE_READ_LIMITS,
-  readHandwrittenQuoteWorkbook,
-  type HandwrittenQuoteSheet,
-} from "@/lib/xlsx/handwritten-quote-reader";
-import { MATCHER_QUOTE_SHEET_NAME } from "@/lib/xlsx/matcher-quote-template";
-import { OH_QUOTE_SHEET_NAME } from "@/lib/xlsx/oh-quote-template";
-import { QUOTE_SHEET_NAME } from "@/lib/xlsx/quote-template";
+import { HANDWRITTEN_QUOTE_READ_LIMITS, readHandwrittenQuoteWorkbook } from "@/lib/xlsx/handwritten-quote-reader";
 import {
   readSheetPrintGrid,
   resolveWorkbookThemePart,
@@ -123,13 +116,6 @@ export const QUOTE_EXCEL_PREVIEW_FAILURE_MESSAGES: Record<QuoteExcelPreviewFailu
     "엑셀 시트에 쓰인 범위가 너무 넓어 미리보기를 그리지 않았습니다 — [견적서 받기]로 받아 확인해 주세요",
 };
 
-/** ①a 가 고른 시트 → 그 시트의 이름(채우개의 상수 그대로). */
-const SHEET_NAMES: Record<HandwrittenQuoteSheet, string> = {
-  GENERATOR_DOMESTIC: QUOTE_SHEET_NAME,
-  GENERATOR_OH: OH_QUOTE_SHEET_NAME,
-  MATCHER: MATCHER_QUOTE_SHEET_NAME,
-};
-
 /**
  * ①a 의 경고 가운데 **시트를 고른 까닭**의 표지. 그 두 문장(발행번호가 채워진 시트가 여럿 ·
  * 모두 비어 있음)만 이 말을 담는다 — 시험이 ①a 의 실제 문장으로 이 짝을 확인한다.
@@ -189,9 +175,14 @@ export function buildQuoteExcelPreview(
   const warnings: string[] = [];
   let sheetName: string | null = null;
   if (recognized.ok) {
-    sheetName = SHEET_NAMES[recognized.sheet];
+    // ①a 가 고른 **탭 이름** 그대로다. 양식 이름(GENERATOR_OH …)으로 되짚지 않는다 —
+    // ①a 는 탭 이름이 아니라 양식 머리글로 양식을 가르므로, 탭 이름을 바꾼 파일에서는
+    // 둘이 어긋난다(그러면 없는 시트를 그리려 든다).
+    sheetName = recognized.sheetName;
     warnings.push(...recognized.warnings.filter((warning) => warning.includes(SHEET_CHOICE_WARNING_MARK)));
-  } else if (recognized.code !== "NO_QUOTE_SHEET") {
+  } else if (recognized.code !== "NO_QUOTE_SHEET" && recognized.code !== "SHEET_NOT_FOUND") {
+    // SHEET_NOT_FOUND 는 읽을 시트를 **지정했을 때만** 나온다. 미리보기는 지정하지 않으므로
+    // 올 일이 없지만, 오더라도 「알아본 견적서 시트 없음」과 같이 첫 시트를 그린다.
     return failure(recognized.code);
   }
 

@@ -57,7 +57,7 @@ describe("수기 견적서 엑셀 읽기 통로 — 소스로 지킨다", () => 
       'hasPermission(actingUser, "quotes", "WRITE")',
       "declaredLength > MAX_ATTACHMENT_SIZE_BYTES",
       "readBodyWithinLimit(body, MAX_ATTACHMENT_SIZE_BYTES)",
-      "readHandwrittenQuoteWorkbook(received.bytes)",
+      "readHandwrittenQuoteWorkbook(received.bytes, {",
       "NextResponse.json(",
     ];
     let previous = -1;
@@ -116,6 +116,7 @@ describe("수기 견적서 엑셀 읽기 통로 — 소스로 지킨다", () => 
       NOT_XLSX: 415,
       NO_QUOTE_SHEET: 422,
       CONTENT_TOO_LARGE: 413,
+      SHEET_NOT_FOUND: 422,
     };
     assert.deepEqual(Object.keys(HANDWRITTEN_QUOTE_FAILURE_MESSAGES).sort(), Object.keys(expected).sort());
     for (const [code, status] of Object.entries(expected)) {
@@ -125,10 +126,22 @@ describe("수기 견적서 엑셀 읽기 통로 — 소스로 지킨다", () => 
     assert.ok(postBody.includes("fail(STATUS_BY_READ_FAILURE[result.code], result.code, result.message)"));
   });
 
-  test("성공 — 200 { sheet, fields, warnings } · 캐시하지 않는다", () => {
-    assert.ok(postBody.includes("{ sheet: result.sheet, fields: result.fields, warnings: result.warnings }"));
+  test("성공 — 200 { sheet, sheetIndex, sheetName, sheets, fields, warnings } · 캐시하지 않는다", () => {
+    for (const key of ["sheet", "sheetIndex", "sheetName", "sheets", "fields", "warnings"]) {
+      assert.ok(postBody.includes(`      ${key}: result.${key},`), `응답에 ${key} 가 없다`);
+    }
     assert.ok(postBody.includes("status: 200"));
     assert.ok(postBody.includes('"Cache-Control": "no-store"'));
+  });
+
+  test("🔴 `?sheet=` 를 읽개에 그대로 넘긴다 — 없는 시트를 조용히 딴 것으로 바꾸지 않는다", () => {
+    assert.ok(postBody.includes("request.nextUrl.searchParams.get(SHEET_QUERY)"));
+    assert.ok(postBody.includes("sheetIndex: sheetParam === null ? undefined : sheetIndexOf(sheetParam)"));
+    // 숫자가 아니거나 빈 값이면 NaN 을 그대로 넘긴다 — 읽개가 SHEET_NOT_FOUND 로 거절한다.
+    assert.ok(route.includes('return value.trim() === "" ? Number.NaN : Number(value);'));
+    for (const guess of ["?? 0", "|| 0"]) {
+      assert.equal(route.includes(guess), false, `없는 시트를 짐작으로 채운다: ${guess}`);
+    }
   });
 
   test("로그에 파일의 값을 싣지 않는다 — console 은 한 번, 오류 이름만", () => {
