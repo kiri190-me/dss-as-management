@@ -1355,6 +1355,32 @@ export default function QuoteEditForm({
   }
 
   /**
+   * ============================================================================
+   * 설명 줄은 **마지막 품목 줄 바로 위**에 끼운다 (2026-09-17 사용자 요청)
+   * ============================================================================
+   * 설명 줄은 밑에 오는 품목 묶음의 **머리글**이다(`* 20kW RFG 부속케이블 Parts 3종`) —
+   * 미리보기도 완성된 문서도 그렇게 읽는다. 그런데 표 끝에 붙이면 방금 적은 품목
+   * **밑으로** 들어가, 누를 때마다 사람이 줄을 손으로 끌어 올려야 한다. 그래서 더하는
+   * 자리부터 머리글 자리로 둔다.
+   *
+   * 품목 줄이 하나도 없으면 머리글을 얹을 것이 없으니 그냥 끝에 붙인다(설명 줄만 여럿
+   * 적어 두는 길도 막지 않는다 — 그때는 적는 차례대로 쌓인다).
+   *
+   * 🔴 **[+ 품목 추가]는 그대로 끝에 붙인다**(addItemRow) — 품목은 적는 차례가 곧 문서의
+   *    차례라, 끼워 넣으면 방금 적은 것이 어디로 갔는지 알 수 없다.
+   * 🔴 상한은 addItemRow 와 **같은 규칙**이다 — 단추를 잠그는 것과 별개로 여기서도 막는다.
+   *    끼워 넣는 길만 상한을 안 보면 아홉 줄 양식에 열째 줄이 들어가 [견적서 받기]가 던진다.
+   * ============================================================================
+   */
+  function addNoteRowAboveLastItem(row: ItemRow) {
+    setItems((prev) => {
+      if (prev.length >= maxItemLines) return prev;
+      const lastItemAt = prev.map((line) => line.lineKind).lastIndexOf("ITEM");
+      return lastItemAt < 0 ? [...prev, row] : [...prev.slice(0, lastItemAt), row, ...prev.slice(lastItemAt)];
+    });
+  }
+
+  /**
    * 엑셀 전용 장에 있으면 안 되는 줄의 수 — 서버 규칙이 세는 그대로다(저장이 거르는 빈
    * 줄은 세지 않는다). 하나라도 있으면 켜기 전에 묻는다.
    */
@@ -2165,32 +2191,55 @@ export default function QuoteEditForm({
             </div>
           )}
         </Field>
-        <Field label="모델명" error={fieldErrors.modelNameText}>
-          <input value={modelNameText} onChange={(e) => setModelNameText(e.target.value)} className={editInputClass} disabled={disabled} />
-        </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="L/N" error={fieldErrors.lotNumberText}>
-            <input value={lotNumberText} onChange={(e) => setLotNumberText(e.target.value)} className={editInputClass} disabled={disabled} />
+        {/* ── 물건 정보 — 내자 · OH 에만 있다 (2026-09-17 사용자 요청) ────────
+            케이블 견적서 양식에는 모델명 · L/N · S/N · 신고증상 칸이 **없다.** 고칠 물건이
+            아니라 파는 케이블을 적는 장이라 적을 자리가 없어, 케이블에서는 그리지 않는다
+            (인수번호로 불러오기 구역을 접는 것과 같은 까닭이다).
+
+            🔴 **감추기만 하고 지우지는 않는다** — 아래 작업비 구역과 일부러 다르다.
+            그쪽은 감춘 값이 합계에 섞이므로 collectFields 가 비워 보내지만, 이 네 값은
+            섞일 합계가 없다. 게다가 엑셀 자동 채우기가 이 칸들을 채우고
+            (quote-excel-autofill 의 fills), 종류를 케이블로 바꿨다 되돌리면 적어 둔 것이
+            그대로 돌아와야 한다. 그래서 상태도 저장도 한 글자도 건드리지 않았다.
+
+            🔴 네 덩이를 하나로 묶지 않은 까닭 — 묶으면 `{!isCable && ( <>` 가 두 벌이 되어,
+            작업 구역이 접히는지 원본 글자로 보는 시험(quote-edit-cable ㉡)이 작업 구역
+            대신 이 덩이를 집는다. 덩이마다 조건을 붙이면 그 시험이 제자리를 가리킨다. */}
+        {!isCable && (
+          <Field label="모델명" error={fieldErrors.modelNameText}>
+            <input value={modelNameText} onChange={(e) => setModelNameText(e.target.value)} className={editInputClass} disabled={disabled} />
           </Field>
-          <Field label="S/N" error={fieldErrors.serialNumberText}>
-            <input value={serialNumberText} onChange={(e) => setSerialNumberText(e.target.value)} className={editInputClass} disabled={disabled} />
-          </Field>
-        </div>
-        <div className="sm:col-span-2">
-          {/* S/N 에 생산 연월이 들어 있어 O/H 4년 기준을 볼 수 있다.
-              형식이 다른 S/N 이면 아무것도 그리지 않는다(domain/overhaul.ts). */}
-          <OverhaulBadge serialNumber={serialNumberText} referenceDate={new Date()} />
-        </div>
-        <div className="sm:col-span-2">
-          <Field label="신고증상" error={fieldErrors.faultDescriptionText}>
-            <textarea
-              value={faultDescriptionText}
-              onChange={(e) => setFaultDescriptionText(e.target.value)}
-              className={`${editInputClass} min-h-20 resize-y`}
-              disabled={disabled}
-            />
-          </Field>
-        </div>
+        )}
+        {!isCable && (
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="L/N" error={fieldErrors.lotNumberText}>
+              <input value={lotNumberText} onChange={(e) => setLotNumberText(e.target.value)} className={editInputClass} disabled={disabled} />
+            </Field>
+            <Field label="S/N" error={fieldErrors.serialNumberText}>
+              <input value={serialNumberText} onChange={(e) => setSerialNumberText(e.target.value)} className={editInputClass} disabled={disabled} />
+            </Field>
+          </div>
+        )}
+        {/* S/N 에 생산 연월이 들어 있어 O/H 4년 기준을 볼 수 있다.
+            형식이 다른 S/N 이면 아무것도 그리지 않는다(domain/overhaul.ts).
+            🔴 S/N 칸과 함께 접는다 — 칸이 없으면 근거가 화면에 없는 딱지가 된다. */}
+        {!isCable && (
+          <div className="sm:col-span-2">
+            <OverhaulBadge serialNumber={serialNumberText} referenceDate={new Date()} />
+          </div>
+        )}
+        {!isCable && (
+          <div className="sm:col-span-2">
+            <Field label="신고증상" error={fieldErrors.faultDescriptionText}>
+              <textarea
+                value={faultDescriptionText}
+                onChange={(e) => setFaultDescriptionText(e.target.value)}
+                className={`${editInputClass} min-h-20 resize-y`}
+                disabled={disabled}
+              />
+            </Field>
+          </div>
+        )}
         <Field label="유효기간" error={fieldErrors.validity} hint="비우면 양식 문구(발행일로부터 4주)">
           <input value={validity} onChange={(e) => setValidity(e.target.value)} className={editInputClass} disabled={disabled} />
         </Field>
@@ -2453,7 +2502,7 @@ export default function QuoteEditForm({
             {isCable && (
               <button
                 type="button"
-                onClick={() => addItemRow(emptyNoteItem())}
+                onClick={() => addNoteRowAboveLastItem(emptyNoteItem())}
                 disabled={disabled || itemLinesFull}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
               >
@@ -2482,7 +2531,8 @@ export default function QuoteEditForm({
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
             품목 줄과 설명 줄을 합쳐 <b>{cableMaxLines}줄</b>까지 넣을 수 있습니다 — 양식의 품목
             자리가 그만큼입니다. 설명 줄은 글자만 적히고 <b>합계에 들어가지 않습니다</b>. 적어 둔
-            차례가 그대로 문서의 차례입니다.
+            차례가 그대로 문서의 차례입니다. [+ 설명 줄 추가]는 <b>마지막 품목 줄 위</b>에
+            들어갑니다 — 밑에 오는 품목들의 머리글이기 때문입니다.
           </p>
         )}
         {/* 🔴 상한에 닿으면 **까닭을 적는다.** 단추만 잠가 두면 「왜 안 눌리지」가 된다. */}

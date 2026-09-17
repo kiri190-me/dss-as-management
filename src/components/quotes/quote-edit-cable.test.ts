@@ -141,13 +141,38 @@ describe("㉢ 품목 표 — 규격 · 설명 줄 · 차례", () => {
   });
 
   test("🔴 설명 줄은 더하고 지우는 두 길뿐이다 — 줄마다 종류를 바꾸는 스위치를 두지 않았다", () => {
-    assert.ok(form.includes("onClick={() => addItemRow(emptyNoteItem())}"), "설명 줄을 더할 길이 없다");
+    assert.ok(
+      form.includes("onClick={() => addNoteRowAboveLastItem(emptyNoteItem())}"),
+      "설명 줄을 더할 길이 없다"
+    );
     assert.ok(form.includes("+ 설명 줄 추가"), "설명 줄 단추 글자가 달라졌다");
     // 빈 설명 줄은 수량 · 단가를 비운 채 시작한다(품목 줄은 수량 1 로 시작한다).
     const empty = sliceBetween(form, "function emptyNoteItem(): ItemRow {", "}");
     assert.ok(empty.includes('lineKind: "NOTE",'), empty);
     assert.ok(empty.includes('quantity: "",') && empty.includes('unitPrice: "",'), empty);
     assert.ok(!form.includes("updateItem(row.key, { lineKind:"), "줄 종류를 바꾸는 길이 생겼다");
+  });
+
+  test("🔴 설명 줄은 **마지막 품목 줄 위**에 들어간다 — 밑에 오는 품목들의 머리글이라서", () => {
+    /**
+     * 단추 둘은 서로 다른 길이다 — 설명 줄만 끼워 넣고, 품목은 지금까지처럼 끝에 붙인다.
+     * (품목까지 끼워 넣으면 방금 적은 줄이 어디로 갔는지 알 수 없다.)
+     */
+    assert.ok(form.includes("onClick={() => addItemRow(emptyItem())}"), "품목 추가가 끝에 붙이는 길에서 벗어났다");
+    assert.ok(
+      form.includes("setItems((prev) => (prev.length >= maxItemLines ? prev : [...prev, row]));"),
+      "끝에 붙이는 길(addItemRow)이 달라졌다"
+    );
+
+    const insert = sliceBetween(form, "function addNoteRowAboveLastItem(row: ItemRow) {", "}); }");
+    // 마지막 **품목** 줄을 찾는다 — 설명 줄 뒤에 끼우면 머리글이 머리글을 설명한다.
+    assert.ok(insert.includes('const lastItemAt = prev.map((line) => line.lineKind).lastIndexOf("ITEM");'), insert);
+    // 그 자리에 끼운다 — 마지막 품목과 그 뒤 줄들은 차례 그대로 한 칸씩 밀린다.
+    assert.ok(insert.includes("[...prev.slice(0, lastItemAt), row, ...prev.slice(lastItemAt)]"), insert);
+    // 품목 줄이 하나도 없으면 얹을 것이 없다 — 그때만 끝에 붙인다.
+    assert.ok(insert.includes("lastItemAt < 0 ? [...prev, row] :"), insert);
+    // 어디로 들어가는지 화면에서도 말한다 — 눌러 보고 나서 알게 하지 않는다.
+    assert.ok(form.includes("[+ 설명 줄 추가]는 <b>마지막 품목 줄 위</b>에"), "설명 줄 자리 안내가 없다");
   });
 
   test("🔴 차례가 곧 뜻이다 — 품목과 설명을 종류별로 나누지 않고 한 목록으로 보낸다", () => {
@@ -196,6 +221,14 @@ describe("㉤ 아홉 줄 — 화면이 미리 막는다", () => {
       form.includes("setItems((prev) => (prev.length >= maxItemLines ? prev : [...prev, row]));"),
       "더하는 함수가 상한을 보지 않는다"
     );
+    // 🔴 끼워 넣는 길(설명 줄)도 같은 상한을 본다 — 한쪽만 새면 열째 줄이 들어가고,
+    //    그 증상은 저장은 되는데 [견적서 받기]가 던지는 것이다.
+    assert.ok(
+      sliceBetween(form, "function addNoteRowAboveLastItem(row: ItemRow) {", "}); }").includes(
+        "if (prev.length >= maxItemLines) return prev;"
+      ),
+      "설명 줄을 끼워 넣는 함수가 상한을 보지 않는다"
+    );
     assert.equal(form.split("disabled={disabled || itemLinesFull}").length - 1, 2, "두 단추가 다 잠기지 않는다");
     // 왜 못 넣는지 말한다 — 잠긴 단추만 두면 「왜 안 눌리지」가 된다.
     assert.ok(form.includes("{isCable && itemLinesFull && ("), "상한 안내가 없다");
@@ -214,9 +247,13 @@ describe("㉥ 특이사항 · 아직 안 되는 일", () => {
     assert.ok(collect().includes("remarks: isCable ? remarks : null,"), "다른 종류에서도 특이사항을 보낸다");
   });
 
-  test("🔴 케이블에는 [미리보기] · [견적서 받기]가 없다 — 그 통로가 아직 다른 양식을 만든다", () => {
-    // 🔴 판정은 서버 통로들과 **같은 함수 하나**다(domain/quote-document-support.ts) —
-    // 그래서 엑셀 전용 케이블 장은 열려 있다(그 장의 문서는 손으로 만든 엑셀이다).
+  test("🔴 [미리보기] · [견적서 받기]의 열고 닫음은 화면이 정하지 않는다 — 함수 하나가 정한다", () => {
+    /**
+     * 🔴 판정은 서버 통로들과 **같은 함수 하나**다(domain/quote-document-support.ts) —
+     * 케이블도 2026-09-17(케이블 ④)부터 미리보기와 받기가 **된다.** 화면은 그 함수가
+     * 돌려준 값만 보고 단추를 그리고, 안 되는 종류에는 서버가 쓰는 그 문장을 그대로 적는다.
+     * 화면이 종류를 다시 따지기 시작하면 서버와 갈라져, 눌렀는데 거절당하는 단추가 생긴다.
+     */
     assert.ok(form.includes("const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });"), "판정이 화면 것이다");
     assert.ok(form.includes('{canGetDocument && ( <button type="button" onClick={() => setShowPreview(true)}'), "미리보기 단추가 그대로 있다");
     assert.ok(form.includes("{savedQuote && canGetDocument && ( <QuoteIssueButton"), "받기 단추가 그대로 있다");
@@ -237,5 +274,69 @@ describe("㉥ 특이사항 · 아직 안 되는 일", () => {
       ),
       "품명 짓는 규칙이 바뀌었다"
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * ㉦ 물건 정보 네 칸 — 감추는 것과 지우는 것은 다르다 (2026-09-17)
+ * ============================================================================
+ * 케이블 견적서 양식에는 모델명 · L/N · S/N · 신고증상 칸이 **없다.** 그래서 화면도
+ * 그리지 않는다. 그런데 ㉡ 의 작업 값들과 **정반대로 저장은 그대로 둔다** — 그 둘을
+ * 가르는 것이 이 묶음의 일이다.
+ *
+ *  · 작업 값은 감추면 **비워 보내야** 한다 — 안 그러면 보이지 않는 금액이 합계에 남는다.
+ *  · 이 네 값은 합계에 섞이지 않는다. 오히려 엑셀 자동 채우기가 이 칸들을 채우고
+ *    (quote-excel-autofill-screens 의 「지금 값」 목록), 종류를 케이블로 바꿨다 되돌리면
+ *    적어 둔 것이 돌아와야 한다. 비워 보내는 순간 그 둘이 다 깨진다.
+ * ============================================================================
+ */
+describe("㉦ 모델명 · L/N · S/N · 신고증상 — 케이블에서는 그리지 않는다", () => {
+  test("🔴 네 칸과 O/H 딱지가 케이블에서는 그려지지 않는다", () => {
+    for (const [what, marker] of [
+      ["모델명", '{!isCable && ( <Field label="모델명"'],
+      ["L/N · S/N", '{!isCable && ( <div className="grid grid-cols-2 gap-4"> <Field label="L/N"'],
+      // O/H 딱지는 S/N 에서 생산 연월을 읽는다 — 칸이 없으면 근거가 화면에 없는 딱지다.
+      ["O/H 딱지", '{!isCable && ( <div className="sm:col-span-2"> <OverhaulBadge serialNumber={serialNumberText}'],
+      ["신고증상", '{!isCable && ( <div className="sm:col-span-2"> <Field label="신고증상"'],
+    ] as const) {
+      assert.ok(form.includes(marker), `케이블인데 ${what} 칸을 그린다`);
+    }
+    // 같은 자리의 이웃들은 건드리지 않았다 — 케이블 양식에도 있는 칸들이다.
+    for (const label of ["공급처", "품명(건명)", "유효기간", "납기", "결재조건"]) {
+      assert.ok(form.includes(`<Field label="${label}"`), `${label} 칸이 사라졌다`);
+      assert.ok(!form.includes(`{!isCable && ( <Field label="${label}"`), `${label} 칸까지 접었다`);
+    }
+  });
+
+  test("🔴 감출 뿐 지우지 않는다 — 네 값은 케이블에서도 저장에 그대로 실린다", () => {
+    // 🔴 작업 값들처럼 `isCable ? … : …` 로 비워 보내면 안 된다(위 머리말).
+    assert.ok(
+      collect().includes("modelNameText, lotNumberText, serialNumberText, faultDescriptionText,"),
+      "네 값을 그대로 보내지 않는다"
+    );
+    for (const name of ["modelNameText", "lotNumberText", "serialNumberText", "faultDescriptionText"]) {
+      assert.ok(!collect().includes(`${name}: isCable`), `${name} 를 케이블에서 비워 보낸다`);
+    }
+    // 상태를 지우는 길도 없다 — 종류를 되돌리면 적어 둔 것이 돌아와야 한다.
+    for (const setter of ["setModelNameText(", "setLotNumberText(", "setSerialNumberText(", "setFaultDescriptionText("]) {
+      assert.ok(!collect().includes(setter), `저장이 ${setter} 로 화면 상태를 지운다`);
+      assert.ok(!form.includes(`if (isCable) ${setter}`), `종류를 바꾸며 ${setter} 로 지운다`);
+    }
+  });
+
+  test("🔴 내자 · OH 에서는 그대로 있다 — 조건만 붙였고 칸 속은 한 글자도 안 달라졌다", () => {
+    for (const [what, marker] of [
+      ["모델명", "<input value={modelNameText} onChange={(e) => setModelNameText(e.target.value)}"],
+      ["L/N", "<input value={lotNumberText} onChange={(e) => setLotNumberText(e.target.value)}"],
+      ["S/N", "<input value={serialNumberText} onChange={(e) => setSerialNumberText(e.target.value)}"],
+      ["신고증상", "<textarea value={faultDescriptionText} onChange={(e) => setFaultDescriptionText(e.target.value)}"],
+    ] as const) {
+      assert.ok(form.includes(marker), `${what} 칸의 속이 달라졌다`);
+    }
+    // 접는 조건은 `!isCable` 하나다 — 뒤집힌 조건이 붙으면 내자 · OH 에서 칸이 사라진다.
+    for (const label of ["모델명", "L/N", "S/N", "신고증상"]) {
+      assert.ok(!form.includes(`{isCable && ( <Field label="${label}"`), `${label} 칸이 케이블 전용이 됐다`);
+    }
   });
 });
