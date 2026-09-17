@@ -30,6 +30,7 @@ export * from "./part-overhaul-unit-prices";
 export * from "./repair-labor";
 export * from "./oh-part-templates";
 export * from "./repair-case-work-records";
+export * from "./repair-case-used-parts";
 export * from "./repair-case-flowcharts";
 export * from "./repair-case-flowchart-nodes";
 export * from "./repair-case-flowchart-edges";
