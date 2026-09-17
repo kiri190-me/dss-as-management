@@ -50,6 +50,14 @@ import {
 } from "@/lib/validation/quote-input";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 import QuotePrintView, { type QuoteWorkSections } from "@/components/quotes/QuotePrintView";
+import {
+  QuotePartSuggestionList,
+  filterPartOptions,
+  partPickPatch,
+} from "@/components/quotes/quote-part-picker";
+/* 조회 자체는 서버 것이지만 줄의 생김새는 여기서도 알아야 한다 — 형 선언만 가져오므로
+   번들에는 아무것도 실리지 않는다(PartRequestSection 이 PartListRow 를 받는 것과 같다). */
+import type { PartPickerRow } from "@/lib/db/queries/inventory";
 import type {
   QuoteTemplateHeader,
   QuoteWorkScopeSectionView,
@@ -497,6 +505,7 @@ export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
   repairLabor,
+  partOptions,
   cableMaxLines,
   printHeaders,
   workScopeDefaults,
@@ -515,6 +524,17 @@ export default function QuoteEditForm({
    * 셋 다 온다 — 사람이 장비 종류를 골라 그 목록에서 체크한다.
    */
   repairLabor: RepairLaborKindRow[];
+  /**
+   * 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다(queries/inventory.ts 의 getPartPickerList).
+   *
+   * 🔴 **재고 · 소유구분 · 내부 비고가 없는 가벼운 목록이다.** 그 값들은 재고 담당의
+   * 정보라 견적서 화면으로 내보내지 않는다 — 그래서 재고를 조인하는 getPartList 대신
+   * 형제 조회를 따로 두었다(그 함수의 머리말).
+   *
+   * 통째로 한 번 받아 **브라우저에서 거른다** — 부품 마스터가 백 줄 안쪽이라 글자마다
+   * 서버를 부를 까닭이 없다(quote-part-picker.tsx 의 filterPartOptions).
+   */
+  partOptions: PartPickerRow[];
   /**
    * 케이블 견적서 한 장에 담을 수 있는 줄 수 — **품목 줄 + 설명 줄을 합쳐서**다
    * (xlsx/cable-quote-template.ts 의 `CABLE_QUOTE_MAX_LINES`). 넘치면 생성기가
@@ -664,6 +684,14 @@ export default function QuoteEditForm({
         }))
       : (newQuoteStart?.lines.items ?? [emptyItem()])
   );
+
+  /**
+   * 부품 후보 목록을 지금 펴 둔 줄(ItemRow.key). null 이면 아무 줄도 안 펴 둔 것이다.
+   *
+   * 🔴 **줄마다 두지 않고 한 값으로 둔다** — 여러 줄의 목록이 한꺼번에 떠 서로를
+   * 가리면 어느 줄을 고르는지 알 수 없다. 칸에 들어가면 그 줄이 열리고, 나오면 닫힌다.
+   */
+  const [partPickerKey, setPartPickerKey] = useState<string | null>(null);
 
   const [usedParts, setUsedParts] = useState<QuoteIntakeLookup["usedParts"]>([]);
   /**
@@ -2554,6 +2582,14 @@ export default function QuoteEditForm({
           </div>
         </div>
 
+        {/* 찾아 고르는 길이 생긴 것을 칸만 보고는 알 수 없다 — 지금까지 자유 글자였기
+            때문이다. 손으로 적는 길이 그대로라는 것도 함께 적는다. */}
+        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+          품명 칸에 글자를 치면 재고의 부품을 <b>품명 / 품명2 / 도번 / 교산 품번</b>으로 찾아
+          고를 수 있습니다. 고르면 그 줄이 재고의 부품과 이어지고, 이름을 손으로 고치면 이어짐이
+          풀립니다 — 재고에 없는 {isCable ? "품목" : "부품"}은 지금처럼 그냥 적으면 됩니다.
+        </p>
+
         {kind === "OVERHAUL" && (
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
             <b>OH</b> 를 체크한 줄은 양식의 <b>2) OH 부품 비용</b> 칸으로, 체크하지 않은 줄은
@@ -2623,14 +2659,44 @@ export default function QuoteEditForm({
                     : "sm:grid-cols-[1fr_5rem_8rem_auto]"
               }`}
             >
-              <div>
+              {/* 🔴 `relative` — 부품 후보 목록이 이 칸 **바로 밑에 떠야** 한다. 흐름 안에
+                  두면 목록이 뜰 때마다 밑의 줄들이 통째로 밀려 내려가, 고르려던 자리가
+                  눈앞에서 움직인다. */}
+              <div className="relative">
                 <input
                   value={row.partNameText}
-                  onChange={(e) => updateItem(row.key, { partNameText: e.target.value, partId: null })}
+                  /**
+                   * 🔴 글자를 치면 재고 연결을 **푼다**(partId: null). 고른 뒤 이름만 고쳤는데
+                   * part_id 가 남아 있으면 화면의 글자와 통계가 세는 부품이 서로 다른 것을
+                   * 가리킨다. 마스터에 없는 부품을 손으로 적는 길이 그대로 남는 까닭이기도
+                   * 하다 — 고르면 붙고, 고쳐 쓰면 풀린다.
+                   */
+                  onChange={(e) => {
+                    updateItem(row.key, { partNameText: e.target.value, partId: null });
+                    setPartPickerKey(row.key);
+                  }}
+                  onFocus={() => setPartPickerKey(row.key)}
+                  /* 다른 줄을 이미 펴 두었으면 그것을 닫지 않는다 — 닫는 것은 제 줄뿐이다. */
+                  onBlur={() => setPartPickerKey((prev) => (prev === row.key ? null : prev))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setPartPickerKey(null);
+                  }}
                   placeholder={`${lineOrdinals[index]}번째 ${isCable ? "품목 품명" : "부품 품명"}`}
                   className={editInputClass}
                   disabled={disabled}
+                  /* 브라우저가 제 기억으로 만든 목록이 부품 후보 위에 겹쳐 뜨지 않게. */
+                  autoComplete="off"
                 />
+                {partPickerKey === row.key && !disabled && (
+                  <QuotePartSuggestionList
+                    options={filterPartOptions(partOptions, row.partNameText)}
+                    listLabel={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 후보`}
+                    onPick={(option) => {
+                      updateItem(row.key, partPickPatch(option));
+                      setPartPickerKey(null);
+                    }}
+                  />
+                )}
                 {fieldErrors[`items.${index}.partNameText`] && (
                   <p className={editErrorClass}>{fieldErrors[`items.${index}.partNameText`]}</p>
                 )}

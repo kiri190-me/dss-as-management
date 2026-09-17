@@ -84,6 +84,56 @@ export async function getPartList(filters: PartListFilters = {}): Promise<PartLi
   return rows.map((row) => ({ ...row, hasLedgerHistory: withHistory.has(row.id) }));
 }
 
+// ---- 부품 고르기 목록 (견적서의 품명 칸이 쓰는 가벼운 형제) ----
+
+/**
+ * 부품을 **알아보는 데 필요한 것만** 담은 한 줄. 견적서의 품명 칸이 쓰는 네 가지다 —
+ * 품명 · 품명2(규격) · 도번 · 교산 품번(getPartList 가 검색하는 네 칸과 같다).
+ */
+export type PartPickerRow = {
+  id: string;
+  partName: string;
+  partSpec: string | null;
+  drawingNo: string | null;
+  kyosanPartNo: string | null;
+};
+
+/**
+ * 부품 마스터를 **고르기 위해서만** 읽는 목록. 견적서 화면(QuoteEditForm)의
+ * 「부품 비용」 품명 칸이 이 목록 위에서 거른다 — 부품 마스터가 백 줄 안쪽이라
+ * 통째로 한 번 내려보내고 브라우저에서 거르는 편이 글자마다 서버를 부르는 것보다
+ * 빠르다(components/inventory/PartRequestSection.tsx 의 같은 판단).
+ *
+ * ── 🔴 getPartList 를 쓰지 않고 형제를 따로 둔 까닭 ─────────────────────────
+ * getPartList 는 part_stock_balances 를 조인해 **재고 수량**을 함께 싣고, 그 곁의
+ * getPartOwnerAvailability 는 **소유구분별 가용량**을 싣는다. 수리 건 상세가 그
+ * 두 조회를 부품 요청 쓰기 권한(inventory.requests WRITE) 뒤에 감춰 둔 까닭이
+ * 그것이다 — 재고와 소유구분은 재고 담당의 정보지, 견적서를 쓰는 사람이 보라고
+ * 내보내는 값이 아니다.
+ *
+ * 견적서 화면은 **부품의 이름과 번호만** 있으면 된다. 그래서:
+ *
+ *  - 조인이 없다 — part_stock_balances 를 아예 건드리지 않는다(재고가 흘러갈 길
+ *    자체를 없앤다. "화면에서 안 그리면 된다"는 조회가 이미 실어 보낸 뒤다).
+ *  - notes(내부 비고)를 담지 않는다 — 부품 상세에서만 읽는 내부 메모다.
+ *  - 지워진 부품은 빼고(is_deleted = false), 품명 차례로 돌려준다.
+ *
+ * getPartList 는 한 글자도 건드리지 않았다 — 재고 화면이 쓰는 그 조회는 그대로다.
+ */
+export async function getPartPickerList(): Promise<PartPickerRow[]> {
+  return db
+    .select({
+      id: parts.id,
+      partName: parts.partName,
+      partSpec: parts.partSpec,
+      drawingNo: parts.drawingNo,
+      kyosanPartNo: parts.kyosanPartNo,
+    })
+    .from(parts)
+    .where(eq(parts.isDeleted, false))
+    .orderBy(parts.partName);
+}
+
 /**
  * 입출고 이력이나 부품 요청이 한 번이라도 걸린 부품 id.
  *

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
+import { getPartPickerList } from "@/lib/db/queries/inventory";
 import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
@@ -85,11 +86,14 @@ export default async function QuoteDetailPage({
   // 작업 내역을 그려야 저장 전과 후가 같은 문서로 보인다.
   // 결재 PDF · 수기 엑셀 두 칸 — 칸마다 지금 붙어 있는 파일(휴지통 것은 빼고). 내부 경로는
   // 싣지 않는 조회다(queries/attachments.ts 의 listQuoteAttachmentSlots).
-  const [repairLabor, printHeaders, workScopeDefaults, attachmentSlots] = await Promise.all([
+  // 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다. 새 견적서 페이지의 같은 항목이고,
+  // 재고 · 소유구분이 없는 가벼운 조회다(getPartPickerList 머리말).
+  const [repairLabor, printHeaders, workScopeDefaults, attachmentSlots, partOptions] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
     readAllQuoteWorkSectionDefaults(),
     listQuoteAttachmentSlots(quote.id),
+    getPartPickerList(),
   ]);
 
   // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
@@ -101,6 +105,7 @@ export default async function QuoteDetailPage({
       quote={quote}
       defaultQuoteDate={toKstDateOnly(new Date())}
       repairLabor={repairLabor}
+      partOptions={partOptions}
       /* 케이블 견적서의 줄 수 상한 — 채우개의 상수를 그대로 내려보낸다(새 견적서 페이지의 같은 항목). */
       cableMaxLines={CABLE_QUOTE_MAX_LINES}
       printHeaders={printHeaders}

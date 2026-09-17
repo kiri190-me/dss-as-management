@@ -356,7 +356,7 @@ describe("㉦ 모델명 · L/N · S/N · 신고증상 — 케이블에서는 그
  * 고친 규칙은 하나다 — **품목은 품목끼리, 설명은 설명끼리 센다.** 여기서 지키는 것 넷:
  *
  *  ㉠ 세는 곳이 하나다(lineOrdinalsOf) — 줄마다 앞을 다시 세지 않는다.
- *  ㉡ 번호를 쓰는 **일곱 자리가 모두** 그 규칙을 쓴다. 하나만 고쳐진 채 남으면, 낭독기가
+ *  ㉡ 번호를 쓰는 **여덟 자리가 모두** 그 규칙을 쓴다. 하나만 고쳐진 채 남으면, 낭독기가
  *     같은 줄에서 「1번째 품목 품명」과 「3번째 품목 수량」을 읽는다.
  *  ㉢ **오류 자리는 목록 index 그대로**다 — 서버가 돌려주는 자리 번호가 그것이다.
  *  ㉣ 내자 · OH 는 보이는 번호가 **지금과 똑같다** — 그쪽엔 설명 줄이 없다(케이블 전용).
@@ -385,9 +385,11 @@ describe("㉧ 번호 — 설명 줄이 껴도 품목 번호가 밀리지 않는�
     assert.ok(!form.includes("items.slice(0, index)"), "줄마다 앞을 다시 센다");
   });
 
-  test("🔴 일곱 자리가 **모두** 같은 규칙을 쓴다 — 하나만 고쳐진 채 남지 않게", () => {
+  test("🔴 여덟 자리가 **모두** 같은 규칙을 쓴다 — 하나만 고쳐진 채 남지 않게", () => {
     for (const marker of [
       'placeholder={`${lineOrdinals[index]}번째 ${isCable ? "품목 품명" : "부품 품명"}`}',
+      // 품명 칸 밑에 뜨는 부품 후보 목록의 이름표(2026-09-17 부품 찾아 고르기).
+      'listLabel={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 후보`}',
       "aria-label={`${lineOrdinals[index]}번째 품목 규격`}",
       'aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 수량`}',
       'aria-label={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 단가`}',
@@ -397,7 +399,7 @@ describe("㉧ 번호 — 설명 줄이 껴도 품목 번호가 밀리지 않는�
     ]) {
       assert.ok(itemTable.includes(marker), `옛 번호가 남은 자리가 있다 — ${marker}`);
     }
-    assert.equal(itemTable.split("${lineOrdinals[index]}번째").length - 1, 7, "번호를 쓰는 자리가 일곱이 아니다");
+    assert.equal(itemTable.split("${lineOrdinals[index]}번째").length - 1, 8, "번호를 쓰는 자리가 여덟이 아니다");
     assert.ok(!itemTable.includes("${index + 1}번째"), "품목 표에 목록 차례로 매기는 번호가 남아 있다");
   });
 
