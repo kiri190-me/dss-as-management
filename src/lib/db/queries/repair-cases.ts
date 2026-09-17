@@ -173,6 +173,28 @@ export async function listRepairCasesByProductModelId(productModelId: string): P
   return rows.map((row) => mapRepairCaseRow(row));
 }
 
+/**
+ * 「이 제품의 과거 A/S 이력」 for the repair case detail page
+ * (/repair-cases/[id]) — same shared join/mapper as listRepairCases/
+ * getRepairCaseById/listRepairCasesByCustomerId, scoped by
+ * repair_cases.product_id (index repair_cases_product_id_idx), so this can
+ * never drift from what the case list/detail pages themselves show for the
+ * same rows.
+ *
+ * 모델 마스터(listRepairCasesByProductModelId)가 아니라 제품 **개체**를
+ * 기준으로 좁히는 이유: 이 화면이 묻는 것은 "같은 모델이 몇 번 들어왔나"가
+ * 아니라 "지금 눈앞의 이 물건이 전에도 들어왔나"이기 때문이다. 현재 건
+ * 자기 자신 제외·접수일 비교·정렬은 여기서 하지 않고, mock/local 경로와
+ * 같은 규칙을 쓰도록 domain/local/product-history-match.ts가 맡는다.
+ */
+export async function listRepairCasesByProductId(productId: string): Promise<ResolvedRepairCase[]> {
+  const rows = await selectRepairCaseJoin()
+    .where(and(eq(repairCases.isDeleted, false), eq(repairCases.productId, productId)))
+    .orderBy(desc(repairCases.receivedAt));
+
+  return rows.map((row) => mapRepairCaseRow(row));
+}
+
 // Deliberately permissive UUID matcher (any RFC-4122-shaped hex string, not
 // version-pinned) — its only job is to reject obviously-non-UUID input
 // before it reaches Postgres, so a malformed :id route param returns a

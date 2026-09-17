@@ -6,11 +6,17 @@ import type { ResolvedRepairCase } from "./resolved-repair-case";
  *    (기존 모의 데이터 결과와 100% 동일 — 모의 제품 9종은 모두 서로 다른
  *    model/L·N/S·N 조합이라 productId 일치와 정규화 3필드 일치가 항상
  *    같은 결과를 낸다).
+ *  - 두 건 모두 DATABASE 소스이면 repair_cases.product_id 정확 일치로 비교한다
+ *    (products 표의 제품 개체 FK). 실제 운영 데이터에서는 같은 물건이
+ *    재접수돼도 Model/L·N/S·N 문자열이 표기 차이로 어긋날 수 있고, 반대로
+ *    서로 다른 개체가 같은 세 값을 가질 수도 있다 — FK 가 유일하게 믿을 수
+ *    있는 동일성 기준이다.
  *  - 비교 대상 중 하나라도 LOCAL_DEMO(local 임베디드 스냅샷, productId 없음)이면
  *    정규화된 Model + L/N + S/N 세 값이 모두 일치할 때만 매칭한다.
  * 이 로직을 임의로 전부 정규화-3필드 비교로 바꾸지 않는다 — mock-to-mock
  * 경로는 기존 productId 매칭을 그대로 유지해 기존 상세 페이지 결과가
- * 바뀌지 않도록 한다.
+ * 바뀌지 않도록 한다. 반대로 정규화-3필드 폴백도 지우지 않는다 — 소스가
+ * 섞인(LOCAL_DEMO 가 낀) 비교에는 여전히 이것뿐이다.
  */
 function normalize(value: string): string {
   return value.trim().toUpperCase();
@@ -29,6 +35,13 @@ function matchesNormalizedTriple(
 
 function isSameProduct(current: ResolvedRepairCase, candidate: ResolvedRepairCase): boolean {
   if (current.source === "MOCK" && candidate.source === "MOCK") {
+    return (
+      current.productId !== null &&
+      candidate.productId !== null &&
+      current.productId === candidate.productId
+    );
+  }
+  if (current.source === "DATABASE" && candidate.source === "DATABASE") {
     return (
       current.productId !== null &&
       candidate.productId !== null &&

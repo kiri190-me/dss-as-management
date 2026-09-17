@@ -9,6 +9,7 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { listRepairCasesByProductId } from "@/lib/db/queries/repair-cases";
 import { getPartList, getPartOwnerAvailability, groupPartOwnerAvailability } from "@/lib/db/queries/inventory";
 import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
 import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
@@ -49,12 +50,22 @@ export default async function RepairCaseDetailPage({
     notFound();
   }
 
-  // 서버 컴포넌트이므로 로컬 데이터에 접근할 수 없다 — mock 전용 병합 목록으로
-  // 과거 이력을 조회한다(mock-to-mock은 productId로 매칭되므로 결과는 기존과
-  // 동일하다). DATABASE 소스 건은 정규화 3필드(Model+L/N+S/N) 비교로 대체
-  // 매칭된다(product-history-match.ts의 기존 폴백 경로, 이 배치에서 변경하지
-  // 않음).
-  const related = findProductHistoryMatches(resolveAllRepairCases([]), resolved);
+  // 「이 제품의 과거 A/S 이력」 후보 목록.
+  //
+  // ── 🔴 DATABASE 건은 DB 에서 직접 가져온다 ──────────────────────────
+  // 예전에는 소스와 무관하게 `resolveAllRepairCases([])`(= mock 전용 병합
+  // 목록)를 넘겼다. 시스템이 실제 DB 로 넘어온 뒤로 DATABASE 소스 건은
+  // 후보에 단 하나도 들어가지 못해 **언제나 "이력 없음"** 이었다. 같은
+  // product_id 로 재접수된 건을 목록/상세와 같은 join·mapper 로 가져온다.
+  //
+  // MOCK/LOCAL_DEMO 는 서버 컴포넌트에서 로컬 데이터(localStorage)에 닿을 수
+  // 없으므로 종전 그대로 mock 전용 병합 목록을 쓴다 — mock-to-mock 은
+  // productId 로 매칭되므로 그 경로의 결과는 한 줄도 달라지지 않는다.
+  const historyCandidates =
+    resolved.source === "DATABASE" && resolved.productId !== null
+      ? await listRepairCasesByProductId(resolved.productId)
+      : resolveAllRepairCases([]);
+  const related = findProductHistoryMatches(historyCandidates, resolved);
 
   // Section editing only ever targets a DATABASE-sourced row (the update
   // Server Action itself independently re-checks both this and the write-
