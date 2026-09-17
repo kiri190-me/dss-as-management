@@ -70,3 +70,4 @@ src/components/repair-labor/base-cost-display.test.ts
 src/components/repair-labor/repair-labor-screen-source.test.ts
 src/components/product-models/product-model-customer-source.test.ts
 src/components/repair-cases/detail/product-info-history-disclosure.test.ts
+src/components/repair-cases/detail/used-parts-section.test.ts

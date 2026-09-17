@@ -18,6 +18,7 @@ import {
   type DerivedServiceSummary,
 } from "@/lib/db/queries/repair-case-work-records";
 import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
+import { getRepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 
@@ -138,12 +139,17 @@ export default async function RepairCaseDetailPage({
   // 비고, 조회 자체가 일어나지 않는다).
   const relatedDatabaseCaseIds = related.filter((match) => match.source === "DATABASE").map((match) => match.id);
 
-  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId] = await Promise.all([
+  // 「사용 부품」 칸 — 그 건에 손으로 적어 둔 부품 줄과, "여기에 적을 건인가"의
+  // 재료(살아 있는 부품 요청 줄이 있는가). 위 둘과 같은 이유로 DATABASE 소스에만
+  // 있고(repair_case_used_parts 에 mock 대응물이 없다), **같은 Promise.all 에
+  // 태워 왕복을 늘리지 않는다** — 이 건 하나만 보는 작은 인덱스 조회다.
+  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts] = await Promise.all([
     resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
     resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
     relatedDatabaseCaseIds.length > 0
       ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
       : new Map<string, DerivedServiceSummary>(),
+    resolved.source === "DATABASE" ? getRepairCaseUsedPartsView(resolved.id) : null,
   ]);
 
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
@@ -163,6 +169,7 @@ export default async function RepairCaseDetailPage({
       partRequestData={partRequestData}
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
+      usedParts={usedParts}
     />
   );
 }

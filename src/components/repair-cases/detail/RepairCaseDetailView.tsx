@@ -22,6 +22,8 @@ import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inv
 import type { StockOwner } from "@/lib/domain/inventory-types";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
 import PendingBillingDecisionCard from "@/components/repair-cases/detail/PendingBillingDecisionCard";
+import UsedPartsSection from "@/components/repair-cases/detail/UsedPartsSection";
+import type { RepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
 
 /**
  * mock(서버 조회)과 local(클라이언트 조회) 두 경로가 모두 이 컴포넌트 하나로
@@ -56,6 +58,7 @@ export default function RepairCaseDetailView({
   partRequestData,
   derivedServiceSummary,
   domesticOrderDueDates,
+  usedParts,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -91,6 +94,12 @@ export default function RepairCaseDetailView({
    * 보여 준다.
    */
   domesticOrderDueDates: readonly string[];
+  /**
+   * 「사용 부품」 칸의 재료 — 손으로 적어 둔 줄들과 "이 건에 적을 수 있는가"
+   * (= 살아 있는 부품 요청 줄이 없는가). DATABASE 소스 건에만 있고 나머지는
+   * null 이라 칸 자체가 그려지지 않는다, see [id]/page.tsx.
+   */
+  usedParts: RepairCaseUsedPartsView | null;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -166,6 +175,9 @@ export default function RepairCaseDetailView({
         onDone={handleDone}
       />
       <WorkflowProgress workflowType={effective.workflowType} currentWorkflowStepKey={effective.effectiveWorkflowStepKey} />
+      {usedParts && (
+        <UsedPartsSection rows={usedParts.rows} hasPartRequestHistory={usedParts.hasPartRequestHistory} />
+      )}
       {partRequestData && partRequestData.caseContext && (
         <PartRequestSection
           repairCaseId={partRequestData.caseContext.id}
