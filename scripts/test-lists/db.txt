@@ -111,3 +111,4 @@ src/lib/db/mutations/user-deletion.integration.test.ts
 src/lib/server/services/kyosan-intake-import.integration.test.ts
 src/lib/server/services/quote-issue.integration.test.ts
 src/lib/db/mutations/repair-case-used-parts.integration.test.ts
+src/lib/db/mutations/quote-approvals.integration.test.ts

@@ -240,3 +240,4 @@ src/lib/auth/service-menu-cookie.test.ts
 src/app/api/auth/sso/callback/route-source.test.ts
 src/components/layout/service-menu-bar.test.ts
 src/lib/db/schema/quote-approvals-safety.test.ts
+src/lib/domain/quote-approval-rules.test.ts
