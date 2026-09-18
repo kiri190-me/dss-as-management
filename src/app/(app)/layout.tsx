@@ -3,13 +3,14 @@ import { redirect } from "next/navigation";
   서비스 메뉴바의 생김새. @dss/ui 는 CSS 를 스스로 부르지 않는다 — 그러면
   번들러 없이는 그 조각을 부를 수 없게 되어 그쪽 시험이 깨진다(그쪽 README).
   그래서 쓰는 쪽이 한 번 부른다. 로그인 전 화면(/login · /pending-approval)은
-  (app) 밖이라 이 줄이 닿지 않는다 — 띠도 거기엔 없다.
+  (app) 밖이라 이 줄이 닿지 않는다 — 메뉴바도 거기엔 없다.
 
-  🔴 아래 인셋 파일은 이 줄 **다음**이다. 노치 인셋을 켜는 한 줄이 @dss/ui 의
-  기본값(0px)보다 나중에 와야 하고, 선택자도 한 칸 세게 두었다(그 파일 주석).
+  여기 한때 있던 `./service-menu-inset.css` 는 **지웠다**. 그 파일은 메뉴바가
+  화면 맨 위에 회색 띠로 앉아 있을 때 노치 인셋을 띠로 옮기던 것인데, 이제
+  메뉴바가 머리말 안으로 들어와 맨 위 요소가 다시 머리말이라 인셋도 머리말이
+  갖는다(TopBar.tsx). 인셋을 가진 요소는 언제나 하나여야 한다.
 */
 import "@dss/ui/styles.css";
-import "./service-menu-inset.css";
 import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import SavePopupHost from "@/components/common/SavePopup";
@@ -83,12 +84,12 @@ export default async function AppLayout({
   // 없거나 설정이 없다며 터진다.
   const portalUrl = getLoginMode() === "sso" ? getSsoPortalUrl() : null;
 
-  // 머리말 위에 앉는 서비스 메뉴바가 그릴 목록. 포털이 로그인 ID 토큰에 실어
-  // 보낸 것을 SSO 콜백이 **별도 서명 쿠키**에 구워 두었다
+  // 머리말 **안**에 앉는 서비스 메뉴바가 그릴 목록. 포털이 로그인 ID 토큰에
+  // 실어 보낸 것을 SSO 콜백이 **별도 서명 쿠키**에 구워 두었다
   // (auth/service-menu-cookie.ts — 세션 쿠키에는 넣지 않는다).
   //
-  // 쿠키가 없거나 못 믿을 것이면 빈 배열이고, 그때 띠는 아예 그려지지 않는다
-  // (빈 띠도 남기지 않는다 — @dss/ui 의 ServiceMenuBar 가 그렇게 동작한다).
+  // 쿠키가 없거나 못 믿을 것이면 빈 배열이고, 그때 목록은 아예 그려지지 않는다
+  // (빈 자리도 남기지 않는다 — @dss/ui 의 ServiceMenuBar 가 그렇게 동작한다).
   // 포털의 그 기능이 배포되기 전까지는 늘 이 상태다.
   const serviceMenu = await readServiceMenu();
   // 「지금 여기」로 눌러 그릴 칸을 고르는 열쇠 — 이 앱의 client_id 다

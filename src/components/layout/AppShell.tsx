@@ -2,11 +2,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import {
-  ServiceMenuBar,
-  isSafeServiceUrl,
-  type ServiceMenuEntry,
-} from "@dss/ui";
+import { ServiceMenuBar, type ServiceMenuEntry } from "@dss/ui";
 import { navItems } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
 import type { NotificationItem } from "@/lib/domain/notifications";
@@ -60,9 +56,9 @@ type AppShellProps = {
    */
   notifications?: readonly NotificationItem[];
   /**
-   * 머리말 **위에** 앉는 서비스 메뉴바가 그릴 사내 시스템 목록
+   * 머리말 **안에** 앉는 서비스 메뉴바가 그릴 사내 시스템 목록
    * (layout.tsx 가 별도 서명 쿠키를 풀어 넘긴다 —
-   * auth/service-menu-cookie.ts). 비어 있으면 띠 자체가 그려지지 않는다.
+   * auth/service-menu-cookie.ts). 비어 있으면 목록 자체가 그려지지 않는다.
    *
    * 권한 판정이 **아니다**: 포털이 알려 준 목록을 그대로 그릴 뿐이고,
    * 여기 있는 링크는 전부 다른 앱으로 나가는 주소다.
@@ -125,13 +121,6 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
   const activeItem = navItems.find((item) => item.href === pathname);
   const title = activeItem?.label ?? "";
 
-  // 띠가 실제로 그려지는가. ServiceMenuBar 는 그릴 수 없는 주소를 스스로 한 번
-  // 더 걸러 내고 남는 것이 없으면 아무것도 그리지 않으므로(null), 같은 기준으로
-  // 여기서도 센다 — 아래 노치 인셋이 이 값으로 갈린다. `services.length` 로
-  // 세면 목록에 그릴 수 없는 칸만 든 날 띠도 없고 인셋도 없는 상태가 된다.
-  const drawableServices = services.filter((service) => isSafeServiceUrl(service.url));
-  const hasServiceMenu = drawableServices.length > 0;
-
   return (
     // min-h-0 lets this root shrink to body's now-capped h-full height
     // instead of growing to fit its own content (the classic flex "min-
@@ -140,35 +129,43 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
     // internally rather than inflating the whole page.
     <div className="flex min-h-0 flex-1 flex-col">
       {/*
-        사내 시스템 오가기 띠(@dss/ui). 머리말 **안**이 아니라 **위**에 독립된
-        띠로 앉는다 — 머리말은 폰 360px 에서 넘치지 않으려고 오른쪽에 아이콘
-        하나만 두기로 못 박아 둔 자리라(TopBar.tsx 주석), 칸이 여럿 붙는 목록을
-        끼워 넣으면 그 선이 무너진다. 그래서 머리말의 구조는 그대로 두고 —
-        TopBar 에서 고친 것은 아래 노치 인셋 한 줄뿐이다 — 위에 따로 앉혔다.
-
-        목록이 비면 이 조각이 스스로 null 을 돌려준다 — 빈 띠도 남지 않는다.
-        shrink-0 은 세로 flex 안에서 눌리지 않게, print:hidden 은 이 저장소가
-        화면을 종이로 뽑기 때문이다(@dss/ui 의 CSS 도 @media print 로 스스로
-        감추지만, 그 CSS 가 안 실린 상태에서도 종이에 나오지 않게 두 겹으로).
+        머리말. 노치 인셋(env(safe-area-inset-top))은 **맨 위 요소 하나만**
+        가지는데, 서비스 메뉴바가 이 머리말 **안**으로 들어오면서 맨 위 요소는
+        다시 <header> 자신이 되었다 — 그래서 그 패딩은 TopBar 로 돌아갔고,
+        여기서 거는 것은 아무것도 없다(한때 띠가 맨 위였을 때만 이 자리에
+        `[&>header]:pt-…` 가 있었다).
       */}
-      <ServiceMenuBar
-        services={drawableServices}
-        currentServiceId={currentServiceId}
-        className="shrink-0 print:hidden"
-      />
-      {/*
-        노치 인셋(env(safe-area-inset-top))은 **맨 위 요소 하나만** 가진다.
-        띠가 있으면 띠가 가지고((app)/service-menu-inset.css), 없으면 예전처럼
-        머리말이 가진다 — 그 값을 TopBar 에서 여기로 옮겼다. 둘 다 두면
-        아이폰에서 노치 높이만큼 두 번 밀린다.
+      <div className="print:hidden">
+        <TopBar
+          title={title}
+          onMenuClick={() => setMobileNavOpen(true)}
+          notifications={notifications}
+          serviceMenu={
+            /*
+              사내 시스템 오가기 목록(@dss/ui). 머리말 **안**에 제목과 알림종
+              사이로 앉는다(variant="inline") — 위에 회색 띠로 따로 앉히면
+              화면 맨 위가 두 층이 되어 답답하고 본문이 한 줄만큼 줄어든다는
+              사용자 지적(2026-09-18) 때문이다. 그 모습은 바탕도 아래 테두리도
+              없이 머리말 위에 그대로 얹히고, 지금 있는 서비스는 굵기·글자색·
+              2px 밑줄로 알린다(회색 띠일 때의 「흰 칸으로 띄우기」는 흰 머리말
+              위에서 보이지 않는다).
 
-        `[&>header]:` 로 머리말 자신에게 거는 이유: 이 감싼 <div> 에 패딩을
-        주면 밀려난 자리가 머리말의 흰 바탕이 아니라 본문 바탕색으로 비친다
-        (다크 모드에서 눈에 띈다). 예전과 픽셀 단위로 같게 두려면 패딩이
-        <header> 에 있어야 한다.
-      */}
-      <div className={hasServiceMenu ? "print:hidden" : "print:hidden [&>header]:pt-[env(safe-area-inset-top)]"}>
-        <TopBar title={title} onMenuClick={() => setMobileNavOpen(true)} notifications={notifications} />
+              🔴 머리말이 폰에서 넘치지 않게 지키는 장치는 TopBar 안에 있다
+              (그 파일의 min-w-0 래퍼와 주석). 여기서는 아무 폭도 주지 않는다.
+
+              목록이 비면 이 조각이 스스로 null 을 돌려준다 — 빈 자리도 남지
+              않는다. print:hidden 은 이 저장소가 화면을 종이로 뽑기 때문이다
+              (@dss/ui 의 CSS 도 @media print 로 스스로 감추지만, 그 CSS 가
+              안 실린 상태에서도 종이에 나오지 않게 두 겹으로).
+            */
+            <ServiceMenuBar
+              services={services}
+              currentServiceId={currentServiceId}
+              variant="inline"
+              className="print:hidden"
+            />
+          }
+        />
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden print:overflow-visible">
         {/*
