@@ -27,7 +27,9 @@ import {
   quoteArchiveYearFolderName,
   type QuoteArchiveNamingInput,
 } from "@/lib/domain/quote-archive-naming";
-import { QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE } from "@/lib/domain/quote-document-support";
+// 🔴 quote-document-support 를 여기서 부르지 않는다 — 표가 내줄 수 있는 세 종류가
+// 모두 열려 있어 이 층에서는 그 거절을 만들 수 없다(아래 케이블 묶음 머리말).
+// 판정과 거절 문장은 domain/quote-document-support.test.ts 가 지킨다.
 import { buildQuoteFileName } from "@/lib/domain/quote-file-name";
 import { QUOTE_ISSUE_RESULT_HEADER } from "@/lib/domain/quote-issue-result";
 import { createLocalFileSystemStorageAdapter } from "@/lib/storage/local-fs-adapter";
@@ -68,6 +70,15 @@ const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreads
 
 const templatesReady = Boolean(process.env.QUOTE_TEMPLATE_PATH?.trim() && process.env.OH_QUOTE_TEMPLATE_PATH?.trim());
 const skipRender = templatesReady ? false : "QUOTE_TEMPLATE_PATH · OH_QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
+
+/**
+ * 🔴 케이블 양식은 **다른 파일이라 다른 열쇠를 쓴다**(`CABLE_QUOTE_TEMPLATE_PATH` —
+ * xlsx/cable-quote-template.ts 가 그 값을 읽는다). 위 skipRender 에 묶으면 내자 · OH
+ * 양식만 있는 환경에서 케이블 채우기가 TEMPLATE_UNAVAILABLE 로 터진다.
+ */
+const skipCableRender = process.env.CABLE_QUOTE_TEMPLATE_PATH?.trim()
+  ? false
+  : "CABLE_QUOTE_TEMPLATE_PATH 가 설정되지 않았습니다";
 
 const repoUrl = new URL("../../../../", import.meta.url);
 const readSource = (relativePath: string) =>
@@ -645,24 +656,46 @@ describe("없는 견적서 · 휴지통 견적서 — NOT_FOUND(404 뜻), 아무
   });
 });
 
-// ─────────────────────────────────────────────────── 아직 양식이 없는 종류(케이블)
+// ─────────────────────────────────────────────────── 케이블 견적서
 
 /**
  * ============================================================================
- * 🔴 케이블 견적서는 **발행되지 않는다** (2026-09-16 케이블 ③)
+ * 케이블 견적서 — **제 양식으로 발행된다** (2026-09-17 케이블 ④)
  * ============================================================================
- * 이 통로는 만든 파일을 공유폴더와 첨부 칸에 **남긴다.** 케이블 장을 그대로 채우면
- * 거절되는 것이 아니라 **내자 양식에 케이블 값이 채워진 문서**가 만들어져 사람의
- * 서류함에까지 들어간다. 그래서 채우기 전에 멈춘다(domain/quote-document-support.ts).
+ * 🔴 **이 묶음은 원래 「케이블은 거절된다」를 지키고 있었다**(2026-09-16 케이블 ③).
+ * 그때는 케이블 양식이 없어서, 이 통로로 케이블 장을 흘려보내면 거절이 아니라
+ * **내자 양식에 케이블 값이 채워진 문서**가 만들어져 공유폴더와 첨부 칸에 남았다.
+ * 그래서 채우기 전에 멈췄다(domain/quote-document-support.ts 의 canRenderQuoteDocument).
  *
- * 여기서 보는 것은 셋이다: 거절 코드 · **아무것도 쓰지 않았다**(공유폴더 · 첨부 · 감사) ·
- * 그리고 **엑셀 전용 케이블 장은 그대로 된다**(그 장의 문서는 손으로 만든 엑셀이다).
+ * 케이블 ④(`b91ae46`)에서 **케이블 양식과 채우개가 붙어 그 문이 열렸다** —
+ * APP_TEMPLATE_KINDS 에 `"CABLE"` 이 들어갔다. 그날 test:db 를 돌리지 않아 이 묶음이
+ * 낡은 채로 묻혀 있었고(2026-09-18 발견), **코드가 아니라 이 시험이 낡은 것**이다.
+ *
+ * ── 🔴 거절을 검사하던 자리는 왜 여기서 사라졌나 ────────────────────────
+ * 표의 `quote_kind` 가 내줄 수 있는 종류가 셋(DOMESTIC · OVERHAUL · CABLE)인데
+ * **셋이 다 열려 있다.** 그래서 이 층에서는 KIND_NOT_SUPPORTED 를 만들 방법이
+ * 아예 없다 — 억지로 만들려면 표에 없는 종류를 손으로 꽂아야 하고, 그것은 실제로
+ * 일어날 수 없는 상태를 시험하는 것이다.
+ *
+ * **그 자물쇠는 사라지지 않았고, 있어야 할 층에서 지켜진다** —
+ * domain/quote-document-support.test.ts 가 (ㄱ) 목록에 없는 종류를 넣어 거절하는지,
+ * (ㄴ) 막는 다섯 자리가 실제로 그 판정을 부르는지를 본다. 넷째 종류가 생기는 날
+ * 그 시험이 먼저 소리를 낸다.
+ *
+ * ── 그래서 지금 여기서 보는 것 ──────────────────────────────────────────
+ * 뒤집힌 쪽이다: 케이블 장도 **공유폴더 · 첨부 칸 · 감사 셋에 제대로 남는가.**
+ * 그 셋은 원래 이 묶음이 「하나도 남지 않는다」로 지키던 바로 그 셋이고, 케이블
+ * 채우기(services/quote-workbook.ts 의 케이블 갈래)가 이 통로를 끝까지 지나는지를
+ * 보는 자리는 저장소에서 여기뿐이다.
+ * 그리고 **엑셀 전용 케이블 장**은 앱 양식을 쓰지 않는다는 것도 그대로 본다.
  * ============================================================================
  */
-describe("케이블 견적서 — 앱 양식이 없어 거절한다(잘못된 문서가 나가지 않게)", () => {
-  test("🔴 KIND_NOT_SUPPORTED — 공유폴더 · 첨부 칸 · 감사에 아무것도 남지 않는다", async () => {
-    const quote = await createTestQuote(
-      quoteFields("CABLE", {
+describe("케이블 견적서 — 제 양식으로 발행되고 세 곳에 남는다", () => {
+  test(
+    "🔴 채우기 → 공유폴더 → 첨부 칸 → 감사 — 케이블 장도 끝까지 지나간다",
+    { skip: skipCableRender },
+    async () => {
+      const fields = quoteFields("CABLE", {
         kind: "CABLE",
         items: [
           {
@@ -675,22 +708,48 @@ describe("케이블 견적서 — 앱 양식이 없어 거절한다(잘못된 �
             unitPrice: "10000.00",
           },
         ],
-      })
-    );
-    const archiveRoot = await makeTempRoot("dss-qi-cable-");
+      });
+      const quote = await createTestQuote(fields);
+      const archiveRoot = await makeTempRoot("dss-qi-cable-");
+      const naming = namingOf(fields);
+      const folder = `${YEAR_FOLDER}/${quoteArchiveFolderName(naming)}`;
+      // 🔴 케이블은 이름에 아무 표시도 붙이지 않는다(OH 의 `(OH포함)` 과 다르다) —
+      // 이름 규칙은 domain/quote-archive-naming.ts 한 곳이므로 여기서 글자로 적지
+      // 않고 그 함수에 물어본다.
+      const fileName = quoteArchiveFileName(naming, { extension: "xlsx" });
 
-    const outcome = await issue(quote.id, archiveRoot);
+      const issued = expectIssued(await issue(quote.id, archiveRoot));
 
-    assert.equal(outcome.ok, false);
-    assert.equal(outcome.ok === false && outcome.code, "KIND_NOT_SUPPORTED");
-    // 사람이 까닭을 안다 — 화면 · GET 통로와 같은 문장 하나다.
-    assert.equal(outcome.ok === false && outcome.message, QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE);
-    assert.deepEqual(await readdir(archiveRoot), [], "공유폴더에 파일이 생겼다");
-    assert.equal((await quoteAttachmentRows(quote.id)).length, 0, "첨부 칸에 파일이 올라갔다");
-    assert.equal(await exportAuditCount(quote.id), 0, "나가지 않은 문서의 감사가 남았다");
-  });
+      assert.deepEqual(issued.result, {
+        archive: { status: "saved", relativePath: `${folder}/${fileName}`, multipleFolderMatches: false },
+        attachment: { status: "replaced", displacedCount: 0 },
+      });
+      assert.equal(issued.contentType, XLSX_CONTENT_TYPE);
 
-  test("🔴 엑셀 전용 케이블 장은 그대로 발행된다 — 그 문서는 앱 양식이 아니라 붙인 엑셀이다", async () => {
+      // 🔴 **내자 양식이 아니라 케이블 양식으로 채워졌다** — GET 받기와 같은 함수의
+      // 바이트와 맞대어 본다. 종류를 잘못 고르면 여기서 갈린다.
+      const edit = await getQuoteForEdit(quote.id);
+      assert.ok(edit);
+      assert.ok(issued.bytes.equals(await renderQuoteWorkbook(edit)), "GET 의 채우기와 다른 바이트");
+
+      // ① 공유폴더에 남는다.
+      const archived = await readFile(absoluteIn(archiveRoot, `${folder}/${fileName}`));
+      assert.ok(issued.bytes.equals(archived), "공유폴더 파일이 돌려준 바이트와 다르다");
+
+      // ② 첨부 칸에 올라간다.
+      const [row, ...rest] = await liveExcel(quote.id);
+      assert.equal(rest.length, 0);
+      assert.equal(row.originalFileName, fileName, "원래 이름은 공유폴더에 쓴 파일 이름");
+      assert.equal(row.mimeType, canonicalMimeTypeForExtension("xlsx"));
+      assert.equal(row.checksumSha256, sha256(issued.bytes));
+      assert.ok(issued.bytes.equals(await readStored(row.storedPath)), "첨부 파일이 돌려준 바이트와 다르다");
+
+      // ③ 감사에 남는다 — 직인 찍힌 문서가 나갔다는 사실이다.
+      assert.equal(await exportAuditCount(quote.id), 1, "EXCEL_EXPORT 감사가 남는다");
+    }
+  );
+
+  test("🔴 엑셀 전용 케이블 장은 붙인 엑셀 그대로 나간다 — 앱 양식을 쓰지 않는다", async () => {
     const quote = await createTestQuote(
       quoteFields("CABLE-EXCEL", { kind: "CABLE", isExcelOnly: true, manualSupplyAmount: "40000.00", items: [], workCost: "0" })
     );
@@ -700,7 +759,9 @@ describe("케이블 견적서 — 앱 양식이 없어 거절한다(잘못된 �
 
     const outcome = await issue(quote.id, archiveRoot);
 
-    // 종류가 아니라 **엑셀 전용인가**가 가른다 — 거절 코드가 나오면 안 된다.
+    // 🔴 위 시험과 **같은 종류인데 다른 바이트**가 나온다 — 엑셀 전용 장은 앱
+    // 양식을 채우지 않고 사람이 붙인 엑셀을 그대로 흘려보내기 때문이다. 그래서
+    // 이 시험만은 양식 파일이 없어도 돈다(skip 이 붙지 않은 까닭).
     const issued = expectIssued(outcome);
     assert.equal(sha256(new Uint8Array(issued.bytes)), sha256(content));
   });
