@@ -74,3 +74,4 @@ src/components/inventory/part-owner-stock-table.test.ts
 src/components/common/file-drop.test.tsx
 src/components/common/file-drop-screens.test.ts
 src/components/quotes/new-quote-excel-sheets.test.ts
+src/components/quotes/quote-approval-screen.test.tsx
