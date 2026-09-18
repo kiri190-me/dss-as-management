@@ -7,6 +7,7 @@ import {
   DELETED_REPAIR_CASE_SUBJECT,
   NOTIFICATION_KINDS,
   PART_ISSUE_APPROVAL_LABEL,
+  QUOTE_APPROVAL_LABEL,
   approvalOutcomeNotificationWindowStart,
   buildApprovalGrantedNotification,
   buildApprovalNotification,
@@ -14,6 +15,7 @@ import {
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
+  buildQuoteApprovalNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
   previewApprovalRejectionReason,
@@ -22,6 +24,7 @@ import {
 } from "./notifications";
 import { inventoryPartRequestStatusLabels, stockOwnerLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS } from "./local/workflow/shipment-approval-checklist";
+import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
 import { checkNotificationAcknowledgementKey } from "./notification-acknowledgement";
@@ -106,7 +109,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·새 수리 의뢰·불출 승인 대기·승인 완료·반려됨 일곱이다", () => {
+test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·새 수리 의뢰·불출 승인 대기·견적서 결재 대기·승인 완료·반려됨 여덟이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -133,6 +136,13 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
   // 그 단계에 지정된 사람과 최고관리자). 결재 요청과 같은 (가)형이라 역할로
   // 거르지 않는다(아래 레지스트리 시험이 그것을 못 박는다).
   //
+  // QUOTE_APPROVAL_PENDING도 새 판정을 세우지 않고 **이미 있는 판정**을 그대로
+  // 쓴다: 결재를 실제로 막는 decideQuoteApproval 과 같은 지정 관문
+  // mayDecideAssignedApproval(그 단계에 지정된 사람과 최고관리자) —
+  // queries/quote-approvals-pending.ts. 불출 승인 대기와 같은 (가)형이라 역할로
+  // 거르지 않는다. 오히려 그 둘보다 **좁다**: 견적서 결재 요청은 언제나 결재선을
+  // 타므로 지정이 NULL 인(누구에게나 보이는) 행이 생기지 않는다.
+  //
   // APPROVAL_GRANTED·APPROVAL_REJECTED는 판정을 새로 세웠다: **요청자 본인**
   // (queries/approval-outcome-notifications.ts 의 `requested_by_user_id = 나`). 남의
   // 결재 결과를 요구할 입구가 없고, 역할로 거르지 않는 (가)형이다. 할 일이 아니라
@@ -145,6 +155,7 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
       "PART_STOCK_BELOW_MINIMUM",
       "CUSTOMER_REPAIR_REQUEST_NEW",
       "PART_ISSUE_APPROVAL_PENDING",
+      "QUOTE_APPROVAL_PENDING",
       "APPROVAL_GRANTED",
       "APPROVAL_REJECTED",
     ]
@@ -405,6 +416,69 @@ test("🔴 결재 배지는 불출 승인 대기를 세지 않는다 — 사이�
   assert.equal(counts.PART_REQUEST_PENDING, 0);
 });
 
+// ──────────────────────────────────────────── 견적서 결재 대기 알림
+
+const QUOTE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+function quoteApprovalItem(overrides: Partial<Parameters<typeof buildQuoteApprovalNotification>[0]> = {}) {
+  return buildQuoteApprovalNotification({
+    quoteId: QUOTE_ID,
+    quoteNumber: "Q-2609-001",
+    routeStepOrder: 2,
+    requestedByName: "박영업",
+    ...overrides,
+  });
+}
+
+test("견적서 결재 알림은 발행번호를 굵게, 결재선 단계와 요청자를 detail 에 내고, 그 견적서 화면으로 링크한다", () => {
+  const item = quoteApprovalItem();
+  assert.equal(item.kind, "QUOTE_APPROVAL_PENDING");
+  assert.equal(item.id, `QUOTE_APPROVAL_PENDING:${QUOTE_ID}`);
+  assert.equal(item.targetKey, QUOTE_ID, "한 장에 열린 요청은 하나라 견적서 단위로 센다");
+  assert.equal(item.subject, "Q-2609-001");
+  assert.equal(item.detail, "결재선 2단계 · 요청자 박영업");
+  // 🔴 주소를 손으로 적지 않는다 — 목록이 한 줄을 열 때 쓰는 헬퍼와 같은 값이어야 한다.
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
+  assert.equal(item.href, `/quotes/${QUOTE_ID}`);
+});
+
+test("견적서 결재 알림의 detail 에는 종류 이름(「견적서 결재 대기」)을 다시 적지 않는다", () => {
+  // 종류 이름은 종 패널이 이 줄 위에 따로 적는다 — 여기 또 적으면 잘리는 자리의
+  // 폭만 먹는다(불출 승인 대기와 같은 갈림).
+  assert.ok(!quoteApprovalItem().detail.includes("견적서"));
+});
+
+test("결재선을 타지 않는 행이면 단계 없이 요청자만 적는다", () => {
+  assert.equal(quoteApprovalItem({ routeStepOrder: null }).detail, "요청자 박영업");
+});
+
+test("견적서가 여러 장이면 id 가 서로 달라 한 줄도 사라지지 않고, 배지는 견적서 단위로 센다", () => {
+  const first = quoteApprovalItem({ quoteId: "quote-1" });
+  const second = quoteApprovalItem({ quoteId: "quote-2" });
+  assert.notEqual(first.id, second.id);
+  assert.equal(countNotificationTargetsByKind([first, second]).QUOTE_APPROVAL_PENDING, 2);
+});
+
+test("🔴 같은 견적서의 같은 요청은 한 줄이다 — 알림이 불어나지 않는다", () => {
+  // 사슬이 나아가도 열린 행은 한 장에 하나뿐이고(표의 부분 유니크), targetKey 가
+  // 견적서 id 라 단계가 바뀌어도 배지는 1이다.
+  const step1 = quoteApprovalItem({ routeStepOrder: 1 });
+  const step2 = quoteApprovalItem({ routeStepOrder: 2 });
+  assert.equal(step1.id, step2.id);
+  assert.equal(countNotificationTargetsByKind([step1, step2]).QUOTE_APPROVAL_PENDING, 1);
+});
+
+test("🔴 결재 배지·불출 배지는 견적서 결재를 세지 않는다 — 종류별로 갈라 센다", () => {
+  const counts = countNotificationTargetsByKind([
+    approvalItem("case-1", "REPAIR_INSPECTION"),
+    partIssueItem({ issueRequestId: "issue-1", intakeNumber: "D2609001" }),
+    quoteApprovalItem(),
+  ]);
+  assert.equal(counts.REPAIR_CASE_APPROVAL, 1);
+  assert.equal(counts.PART_ISSUE_APPROVAL_PENDING, 1);
+  assert.equal(counts.QUOTE_APPROVAL_PENDING, 1);
+});
+
 // ─────────────────────────── 레지스트리 — 불출 승인 대기는 역할로 거르지 않는다
 
 /**
@@ -453,6 +527,36 @@ test("🔴 불출 승인 대기는 판정을 새로 적지 않고 [승인 요청
   );
 });
 
+test("🔴 견적서 결재 대기도 역할로 거르지 않는다 — 결재선에는 역할 제한이 없다", () => {
+  const block = registryBlockFor("QUOTE_APPROVAL_PENDING");
+  assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
+  assert.ok(!block.includes("actorRole"), "견적서 결재 대기 load 가 역할을 본다");
+  assert.ok(!/canReceive\w*\(/.test(block), "견적서 결재 대기 load 가 역할 판정 함수를 부른다");
+});
+
+test("🔴 견적서 결재 대기는 판정을 새로 적지 않고 지정 관문을 쓰는 조회를 부른다", () => {
+  // 알림에는 뜨는데 눌러도 거절되는(또는 그 반대의) 어긋남을 막는다 — 결재를 실제로
+  // 막는 decideQuoteApproval 과 같은 mayDecideAssignedApproval 을 그 조회가 부른다.
+  const block = registryBlockFor("QUOTE_APPROVAL_PENDING");
+  assert.ok(block.includes("listQuoteApprovalsPendingMyApproval(actorUserId)"), "같은 조회를 부르지 않는다");
+  assert.ok(block.includes("buildQuoteApprovalNotification("), "모양 변환은 도메인의 build 함수가 한다");
+  assert.match(
+    registrySource,
+    /import \{[^}]*\blistQuoteApprovalsPendingMyApproval\b[^}]*\} from "\.\/quote-approvals-pending"/,
+    "견적서 결재 대기 조회를 그 파일에서 가져오지 않는다"
+  );
+  const pendingSource = readFileSync(
+    new URL("../db/queries/quote-approvals-pending.ts", import.meta.url),
+    "utf8"
+  );
+  assert.ok(
+    pendingSource.includes("mayDecideAssignedApproval("),
+    "지정 관문을 부르지 않는다 — 판정이 두 벌이 된다"
+  );
+  // 🔴 처리된 건은 뜨지 않는다 — 후보가 아직 결정되지 않은 행뿐이다.
+  assert.ok(pendingSource.includes('eq(quoteApprovals.status, "REQUESTED")'), "열린 요청으로 좁히지 않는다");
+});
+
 // ═════════════════════════════════════ 결재 결과 — 승인 완료 · 반려됨
 
 const CASE_ID = "11111111-1111-4111-8111-111111111111";
@@ -481,9 +585,56 @@ function issueTarget(overrides: Partial<Extract<ApprovalOutcomeTarget, { source:
   };
 }
 
+const QUOTE_APPROVAL_ID = "66666666-6666-4666-8666-666666666666";
+
+function quoteTarget(overrides: Partial<Extract<ApprovalOutcomeTarget, { source: "QUOTE" }>> = {}): ApprovalOutcomeTarget {
+  return {
+    source: "QUOTE",
+    approvalId: QUOTE_APPROVAL_ID,
+    quoteId: QUOTE_ID,
+    quoteNumber: "Q-2609-001",
+    ...overrides,
+  };
+}
+
 test("부품 불출 결재의 이름은 용도 이름표에서 만든 「부품 불출 승인」이다 — 글자를 새로 쓰지 않는다", () => {
   assert.equal(PART_ISSUE_APPROVAL_LABEL, "부품 불출 승인");
   assert.ok(PART_ISSUE_APPROVAL_LABEL.startsWith(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE));
+});
+
+test("견적서 결재의 이름도 용도 이름표 그대로다 — 「승인」을 덧붙이지 않는다", () => {
+  assert.equal(QUOTE_APPROVAL_LABEL, "견적서 승인");
+  assert.equal(QUOTE_APPROVAL_LABEL, SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE);
+  assert.ok(!QUOTE_APPROVAL_LABEL.includes("승인 승인"));
+});
+
+test("승인 완료(견적서) — 발행번호를 굵게, 결재 이름·결정자를 detail 에, 그 견적서 화면으로 링크한다", () => {
+  const item = buildApprovalGrantedNotification({ ...quoteTarget(), decidedByName: "김결재" });
+  assert.equal(item.kind, "APPROVAL_GRANTED");
+  assert.equal(item.id, `APPROVAL_GRANTED:qa:${QUOTE_APPROVAL_ID}`);
+  assert.equal(item.targetKey, item.id, "사건 하나가 한 건이다");
+  assert.equal(item.subject, "Q-2609-001");
+  assert.equal(item.detail, "견적서 승인 · 김결재");
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
+});
+
+test("반려됨(견적서) — 사유를 detail 에 적고, 고쳐서 다시 올리는 그 견적서 화면으로 링크한다", () => {
+  const item = buildApprovalRejectedNotification({ ...quoteTarget(), decisionReason: "단가 근거 누락" });
+  assert.equal(item.kind, "APPROVAL_REJECTED");
+  assert.equal(item.id, `APPROVAL_REJECTED:qa:${QUOTE_APPROVAL_ID}`);
+  assert.equal(item.subject, "Q-2609-001");
+  assert.equal(item.detail, "견적서 승인 · 사유: 단가 근거 누락");
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
+});
+
+test("세 표의 결재 행 id 가 우연히 같아도 결과 알림의 키는 겹치지 않는다", () => {
+  const sameId = "77777777-7777-4777-8777-777777777777";
+  const keys = [
+    buildApprovalGrantedNotification({ ...caseTarget(), approvalId: sameId, decidedByName: "a" }).id,
+    buildApprovalGrantedNotification({ ...issueTarget(), approvalId: sameId, decidedByName: "a" }).id,
+    buildApprovalGrantedNotification({ ...quoteTarget(), approvalId: sameId, decidedByName: "a" }).id,
+  ];
+  assert.equal(new Set(keys).size, keys.length, keys.join(" / "));
 });
 
 test("창은 7일이고 결정 시각으로 잰다 — 시작 시각은 지금에서 정확히 7일 전이다", () => {
@@ -589,12 +740,14 @@ test("반려 사유가 비어 있으면 「사유:」를 빈 채로 적지 않�
   }
 });
 
-test("🔴 결재 결과 알림의 id 는 네 갈래 모두 확인 키 검증을 통과한다 — 눌러도 조용히 거절되지 않는다", () => {
+test("🔴 결재 결과 알림의 id 는 여섯 갈래 모두 확인 키 검증을 통과한다 — 눌러도 조용히 거절되지 않는다", () => {
   const items = [
     buildApprovalGrantedNotification({ ...caseTarget(), decidedByName: "김결재" }),
     buildApprovalGrantedNotification({ ...issueTarget(), decidedByName: "김결재" }),
+    buildApprovalGrantedNotification({ ...quoteTarget(), decidedByName: "김결재" }),
     buildApprovalRejectedNotification({ ...caseTarget(), decisionReason: "사유" }),
     buildApprovalRejectedNotification({ ...issueTarget({ partRequestId: PART_REQUEST_ID }), decisionReason: "사유" }),
+    buildApprovalRejectedNotification({ ...quoteTarget(), decisionReason: "사유" }),
   ];
   for (const item of items) {
     const checked = checkNotificationAcknowledgementKey(item.id);
@@ -604,7 +757,7 @@ test("🔴 결재 결과 알림의 id 는 네 갈래 모두 확인 키 검증을
       assert.equal(checked.kind, item.kind);
     }
   }
-  assert.equal(new Set(items.map((item) => item.id)).size, items.length, "네 갈래의 id 가 서로 겹친다");
+  assert.equal(new Set(items.map((item) => item.id)).size, items.length, "여섯 갈래의 id 가 서로 겹친다");
 });
 
 test("같은 행 id 여도 두 표(접수 건 결재·불출 결재)의 키는 겹치지 않는다", () => {

@@ -93,6 +93,11 @@ import { ROLE_CODES, type Role } from "./types";
  * 쓰므로 한 칸 비켜 선다). rose는 red와, teal은 emerald와, indigo는 violet과
  * 너무 붙어서 고르지 않았다.
  *
+ * 견적서 결재 대기는 불출 승인 대기와 같은 「눌러 처리하면 없어지는 결재 줄」이라
+ * 다시 색을 나눠 쓸 수 없다. 남은 색 중 **이미 쓰는 일곱 색 모두에서 가장 멀리
+ * 떨어진** fuchsia 를 준다 — violet(불출)과도 pink(반려)와도 색상환에서 한참
+ * 벌어져 있고, 그 사이의 purple·rose 처럼 이웃에 붙어 보이지 않는다.
+ *
  * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
  * 색약이신 분에게는 amber와 red가 붙어 보이고, 흑백으로 인쇄하면 셋 다 같은
  * 회색이 된다. 그래서 화면은 이 색과 **함께 label을 글자로도** 그린다
@@ -144,9 +149,15 @@ export const NOTIFICATION_KIND_META: Record<
       "내가 결재해야 할 부품 불출 신청입니다. 실제로 누구에게 가는지는 부품 불출 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
     toneClassName: "text-violet-700 dark:text-violet-400",
   },
+  QUOTE_APPROVAL_PENDING: {
+    label: "견적서 결재 대기",
+    description:
+      "내가 결재해야 할 견적서입니다. 실제로 누구에게 가는지는 견적서 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 견적서 승인 절차가 없으면 결재를 올릴 수 없으므로 이 알림도 뜨지 않습니다(그때는 결재 없이 발행합니다). 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
+    toneClassName: "text-fuchsia-700 dark:text-fuchsia-400",
+  },
   APPROVAL_GRANTED: {
     label: "승인 완료",
-    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·부품 불출 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·부품 불출 승인·견적서 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
     toneClassName: "text-lime-700 dark:text-lime-400",
   },
   APPROVAL_REJECTED: {
@@ -204,6 +215,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "PART_STOCK_BELOW_MINIMUM":
     case "CUSTOMER_REPAIR_REQUEST_NEW":
     case "PART_ISSUE_APPROVAL_PENDING":
+    case "QUOTE_APPROVAL_PENDING":
     case "APPROVAL_GRANTED":
     case "APPROVAL_REJECTED":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
@@ -256,6 +268,16 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 없이 누구든 올릴 수 있으므로(영업도 된다), 여기서 어느 역할을 빼면 그
       // 순간 자기 차례인 결재자인데 알림을 못 받는 사람이 생긴다 — 그 실패는
       // 화면에 아무 표시도 남기지 않는다.
+      return true;
+
+    case "QUOTE_APPROVAL_PENDING":
+      // 불출 승인 대기와 **글자 그대로 같은 이유**로 다섯 역할 전부 받음이다 —
+      // 누가 받는지는 역할이 아니라 결재선 지정(과 최고관리자 비상구)이 정하고,
+      // 그 판정은 조회 안의 지정 관문(queries/quote-approvals-pending.ts)이 한다.
+      // 견적서 결재선에도 역할 제한이 없고(listSelectableApproverCandidates),
+      // 결재를 막는 decideQuoteApproval 은 아예 권한 영역을 묻지 않는다 — 여기서
+      // 어느 역할을 빼면 관리자가 「지정은 됐는데 알림은 못 받는」 결재자를 만들 수
+      // 있게 되고, 그 실패는 화면에 아무 표시도 남기지 않는다.
       return true;
 
     case "APPROVAL_GRANTED":

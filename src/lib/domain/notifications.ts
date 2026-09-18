@@ -27,6 +27,7 @@
 
 import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
+import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
 
@@ -41,6 +42,7 @@ export const NOTIFICATION_KINDS = [
   "PART_STOCK_BELOW_MINIMUM",
   "CUSTOMER_REPAIR_REQUEST_NEW",
   "PART_ISSUE_APPROVAL_PENDING",
+  "QUOTE_APPROVAL_PENDING",
   "APPROVAL_GRANTED",
   "APPROVAL_REJECTED",
 ] as const;
@@ -288,6 +290,61 @@ export function buildPartIssueApprovalNotification(input: {
   };
 }
 
+/**
+ * 견적서 결재의 이름 — 「견적서 승인」.
+ *
+ * 글자로 새로 적지 않고 결재선 용도 이름표에서 가져온다(PART_ISSUE_APPROVAL_LABEL 과
+ * 같은 자리·같은 이유). 🔴 뒤에 「 승인」을 붙이지 않는 것은 그 이름표가 이미
+ * 「승인」으로 끝나기 때문이다 — 붙이면 「견적서 승인 승인」이 된다. 이름표 쪽 주석이
+ * 왜 그렇게 끝맺었는지를 적고 있다.
+ */
+export const QUOTE_APPROVAL_LABEL = SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE;
+
+/**
+ * "지금 내 차례인 견적서 결재" 알림 한 줄.
+ *
+ * ── subject 는 발행번호다 ──────────────────────────────────────────────
+ * 견적서를 가리키는 말 중 사람이 먼저 찾는 것이고, 목록·인쇄물·결재 화면이 모두
+ * 그 번호로 한 장을 부른다. 제목(`subject` 칸)이 아니라 번호를 굵게 두는 것은
+ * 접수 건 결재가 인수번호를 굵게 두는 것과 같은 갈림이다.
+ *
+ * ── detail 은 몇 단계의 결재인가 + 요청자 ──────────────────────────────
+ * 「견적서 결재 대기」라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다
+ * (NOTIFICATION_KIND_META). 여기 또 적으면 잘리는 자리의 폭만 먹는다 — 불출 승인
+ * 대기와 같은 갈림이고, 말의 모양도 그쪽과 맞춘다. 「요청자」라는 말은 결재 탭의
+ * 같은 칸이 이미 쓰고 있다(QuoteApprovalPanel 의 Field label).
+ *
+ * 🔴 **견적서 결재는 언제나 결재선을 탄다** — 판이 없거나 단계가 0개면 요청 자체가
+ * 거절된다(domain/quote-approval-rules.ts 의 isQuoteApprovalRouteInForce). 그래도
+ * 단계 번호를 `null` 로 받을 수 있게 두는 것은 불출 알림과 같은 이유다: 표의 CHECK 이
+ * 「판과 단계는 한 쌍」만 요구하므로 둘 다 비어 있는 행을 타입이 막지 못한다.
+ *
+ * ── href 는 그 견적서 화면이다 ────────────────────────────────────────
+ * 🔴 [견적서 결재] 탭까지 열지는 **못한다.** 그 탭은 브라우저 상태(useState)라
+ * 주소로 가리킬 수 없다(components/quotes/QuoteEditTabs.tsx). 주소를 여기서 손으로
+ * 적지도 않는다 — 목록이 한 줄을 열 때 쓰는 헬퍼 하나를 그대로 부른다.
+ *
+ * targetKey 는 견적서 id 다. 한 견적서에 살아 있는 요청은 언제나 하나뿐이고
+ * (quote_approvals_one_active_request 부분 유니크), 사람에게도 「그 한 장」이다.
+ */
+export function buildQuoteApprovalNotification(input: {
+  quoteId: string;
+  quoteNumber: string;
+  /** 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
+  routeStepOrder: number | null;
+  requestedByName: string;
+}): NotificationItem {
+  const step = input.routeStepOrder !== null ? `결재선 ${input.routeStepOrder}단계 · ` : "";
+  return {
+    id: `QUOTE_APPROVAL_PENDING:${input.quoteId}`,
+    kind: "QUOTE_APPROVAL_PENDING",
+    targetKey: input.quoteId,
+    subject: input.quoteNumber,
+    detail: `${step}요청자 ${input.requestedByName}`,
+    href: quoteEditHref({ quoteId: input.quoteId, repairCaseId: null }),
+  };
+}
+
 // ═════════════════════════════════════ 결재 결과 — 요청자에게 가는 정보성 알림
 
 /**
@@ -349,6 +406,9 @@ export function previewApprovalRejectionReason(reason: string | null): string {
  *  · PART_ISSUE — `inventory_part_issue_approvals` 의 한 행(부품 불출 승인). 무엇에
  *    대한 신청인가는 「불출 승인 대기」 알림과 같은 규칙으로 고른다(인수번호 → 사용처
  *    → 삭제된 접수 건). `partRequestId` 가 있으면 요청 기반, 없으면 직접 사용이다.
+ *  · QUOTE — `quote_approvals` 의 한 행(견적서 승인). 견적서가 없거나 휴지통에 간
+ *    결재는 조회가 애초에 내놓지 않으므로 발행번호가 언제나 있다(접수 건 결재와
+ *    같은 처리다 — 누르면 갈 화면이 없는 결재는 알리지 않는다).
  */
 export type ApprovalOutcomeTarget =
   | {
@@ -366,6 +426,12 @@ export type ApprovalOutcomeTarget =
       partRequestId: string | null;
       intakeNumber: string | null;
       destinationNote: string | null;
+    }
+  | {
+      source: "QUOTE";
+      approvalId: string;
+      quoteId: string;
+      quoteNumber: string;
     };
 
 /**
@@ -376,6 +442,7 @@ export type ApprovalOutcomeTarget =
 const APPROVAL_OUTCOME_KEY_TABLE_TAG: Record<ApprovalOutcomeTarget["source"], string> = {
   REPAIR_CASE: "rca",
   PART_ISSUE: "pia",
+  QUOTE: "qa",
 };
 
 function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
@@ -384,11 +451,24 @@ function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
 
 function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
   if (target.source === "REPAIR_CASE") return target.intakeNumber;
+  if (target.source === "QUOTE") return target.quoteNumber;
   return target.intakeNumber ?? target.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT;
 }
 
 function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
-  return target.source === "REPAIR_CASE" ? APPROVAL_TYPE_LABELS[target.approvalType] : PART_ISSUE_APPROVAL_LABEL;
+  if (target.source === "REPAIR_CASE") return APPROVAL_TYPE_LABELS[target.approvalType];
+  if (target.source === "QUOTE") return QUOTE_APPROVAL_LABEL;
+  return PART_ISSUE_APPROVAL_LABEL;
+}
+
+/**
+ * 결과 알림을 누르면 갈 곳. 🔴 **승인 완료와 반려됨이 서로 다르다** — 승인은
+ * 「결과를 확인하는 자리」이고 반려는 「다시 올리는 자리」라서, 불출만 두 갈래로
+ * 갈린다. 견적서는 승인이든 반려든 그 장 하나이므로 한 주소다(그 화면의 [견적서
+ * 결재] 탭에서 다시 올린다 — 탭은 주소로 열지 못한다: buildQuoteApprovalNotification).
+ */
+function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { source: "QUOTE" }>): string {
+  return quoteEditHref({ quoteId: target.quoteId, repairCaseId: null });
 }
 
 /**
@@ -408,6 +488,8 @@ function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
  * ── href 는 결과를 확인하는 자리 ────────────────────────────────────────
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(결재 대기 알림과 같은 헬퍼).
  *  · 부품 불출 → [승인 요청건] 탭. 승인이 끝난 신청이 「실행 대기」로 보이는 곳이다.
+ *  · 견적서 → 그 견적서 화면. [견적서 결재] 탭에 결재 이력이 있지만 탭은 주소로
+ *    열지 못한다(buildQuoteApprovalNotification 의 주석).
  */
 export function buildApprovalGrantedNotification(
   input: ApprovalOutcomeTarget & { decidedByName: string }
@@ -419,7 +501,12 @@ export function buildApprovalGrantedNotification(
     targetKey: id,
     subject: approvalOutcomeSubject(input),
     detail: `${approvalOutcomeName(input)} · ${input.decidedByName}`,
-    href: input.source === "REPAIR_CASE" ? repairCaseDetailHrefs(input.repairCaseId).approval : "/inventory/approvals",
+    href:
+      input.source === "REPAIR_CASE"
+        ? repairCaseDetailHrefs(input.repairCaseId).approval
+        : input.source === "QUOTE"
+          ? approvalOutcomeQuoteHref(input)
+          : "/inventory/approvals",
   };
 }
 
@@ -437,6 +524,7 @@ export function buildApprovalGrantedNotification(
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(재요청 단추가 거기 있다).
  *  · 요청 기반 불출 → 부품 요청 관리 목록(반려된 요청을 거기서 다시 불출 신청한다).
  *  · 직접 사용 불출 → 재고 목록(직접 사용은 품목의 [사용]에서 다시 시작한다).
+ *  · 견적서 → 그 견적서 화면([견적서 수정]에서 고치고 [견적서 결재]에서 다시 올린다).
  */
 export function buildApprovalRejectedNotification(
   input: ApprovalOutcomeTarget & { decisionReason: string | null }
@@ -453,8 +541,10 @@ export function buildApprovalRejectedNotification(
     href:
       input.source === "REPAIR_CASE"
         ? repairCaseDetailHrefs(input.repairCaseId).approval
-        : input.partRequestId !== null
-          ? "/inventory/requests"
-          : "/inventory",
+        : input.source === "QUOTE"
+          ? approvalOutcomeQuoteHref(input)
+          : input.partRequestId !== null
+            ? "/inventory/requests"
+            : "/inventory",
   };
 }

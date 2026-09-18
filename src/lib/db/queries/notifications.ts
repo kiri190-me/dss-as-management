@@ -13,6 +13,7 @@ import {
   type NotificationKind,
   buildCustomerRepairRequestNotification,
   buildPartIssueApprovalNotification,
+  buildQuoteApprovalNotification,
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
 } from "@/lib/domain/notifications";
@@ -20,6 +21,7 @@ import type { Role } from "@/lib/domain/types";
 import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
 import { listNewCustomerRepairRequests } from "./customer-portal";
 import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-requests";
+import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
 
@@ -35,7 +37,8 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *       사람 단위(대표 자격·위임)라 SQL 안에서 정해지고, 사용자 id 하나면
  *       충분하다(repair-case-approvals-pending.ts). 불출 승인 대기도 같은 모양이다
  *       — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
- *       (inventory-part-issue-requests.ts).
+ *       (inventory-part-issue-requests.ts). 견적서 결재 대기도 그 모양 그대로다
+ *       (quote-approvals-pending.ts).
  *  (나) load가 **역할로** 먼저 거른다 — 부품 요청 알림이 그렇다. 대상이 사람이
  *       아니라 역할이고, 조회 자체는 "지금 처리 대기 중인 요청 전부"라 누가
  *       봐도 같은 결과다. 그래서 조회를 부르기 **전에** 역할을 보고, 아니면
@@ -209,6 +212,28 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           issueRequestId: item.issueRequestId,
           intakeNumber: item.intakeNumber,
           destinationNote: item.destinationNote,
+          routeStepOrder: item.routeStepOrder,
+          requestedByName: item.requestedByName,
+        })
+      );
+    },
+  },
+  {
+    kind: "QUOTE_APPROVAL_PENDING",
+    load: async (actorUserId) => {
+      // 결재 요청·불출 승인 대기와 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다.
+      // 역할로 먼저 거르지 않는다: 결재선에는 역할 제한 없이 누구든 올라갈 수 있어서
+      // (listSelectableApproverCandidates), 여기서 역할을 보는 순간 자기 차례인
+      // 결재자가 알림을 못 받는다. 결재를 실제로 막는 decideQuoteApproval 도 같은
+      // 이유로 권한 영역을 묻지 않는다(mutations/quote-approvals.ts 머리말).
+      //
+      // 판정도 새로 적지 않는다 — 지정 관문(지정된 사람 + 최고관리자 비상구)을 그대로
+      // 쓰는 조회 하나를 부르고, 여기서 하는 일은 모양 변환뿐이다.
+      const pending = await listQuoteApprovalsPendingMyApproval(actorUserId);
+      return pending.map((item) =>
+        buildQuoteApprovalNotification({
+          quoteId: item.quoteId,
+          quoteNumber: item.quoteNumber,
           routeStepOrder: item.routeStepOrder,
           requestedByName: item.requestedByName,
         })

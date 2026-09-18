@@ -112,3 +112,4 @@ src/lib/server/services/kyosan-intake-import.integration.test.ts
 src/lib/server/services/quote-issue.integration.test.ts
 src/lib/db/mutations/repair-case-used-parts.integration.test.ts
 src/lib/db/mutations/quote-approvals.integration.test.ts
+src/lib/db/queries/quote-approvals-notifications.integration.test.ts

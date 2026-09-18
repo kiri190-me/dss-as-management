@@ -6,6 +6,8 @@ import {
   inventoryPartIssueApprovals,
   inventoryPartIssueRequests,
   inventoryPartRequests,
+  quoteApprovals,
+  quotes,
   repairCaseApprovals,
   repairCases,
   users,
@@ -17,13 +19,15 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  * ============================================================================
  * 내가 요청한 결재의 결과 — 종 알림 「승인 완료」·「반려됨」의 원본
  * ============================================================================
- * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 세 가지고
- * 표는 둘이다:
+ * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 네 가지고
+ * 표는 셋이다:
  *   · repair_case_approvals           — 수리 검수 승인 · 최종 출하 승인
  *   · inventory_part_issue_approvals  — 부품 불출 승인
- * 두 표 모두 「단계마다 요청 행 하나, 앞 행을 결정한 뒤 다음 행을 넣는」 사슬 모양이고
- * (mutations/repair-case-approvals.ts · mutations/inventory-part-issue-requests.ts 의
- * 사슬 잇는 자리), 요청자(`requested_by_user_id`)는 사슬 내내 처음 올린 사람 그대로다.
+ *   · quote_approvals                 — 견적서 승인
+ * 세 표 모두 「단계마다 요청 행 하나, 앞 행을 결정한 뒤 다음 행을 넣는」 사슬 모양이고
+ * (mutations/repair-case-approvals.ts · mutations/inventory-part-issue-requests.ts ·
+ * mutations/quote-approvals.ts 의 사슬 잇는 자리), 요청자(`requested_by_user_id`)는
+ * 사슬 내내 처음 올린 사람 그대로다.
  *
  * 🔴 **이 파일은 아무것도 쓰지 않는다.** 결재·출하·불출 mutation 을 한 줄도 건드리지
  * 않고, 이미 쌓인 결재 기록에서 결과 사건을 골라 읽기만 한다.
@@ -79,6 +83,11 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  *    접수 건을 LEFT JOIN 으로만 붙여 거르지 않는다. 불출 신청은 재고 기록이라 접수
  *    건보다 오래 살고, 누르면 가는 곳도 재고 화면이다. 인수번호가 없으면 사용처,
  *    둘 다 없으면 「삭제된 접수 건」으로 적는다(domain/notifications.ts).
+ *  · 견적서: 접수 건 결재와 같다 — `quotes` 에 INNER JOIN 하고 휴지통(`is_deleted`)을
+ *    뺀다. 완전 삭제로 `quote_id` 가 NULL 이 된 행은 조인에서 떨어진다. 누르면 갈
+ *    화면이 없는 결과를 알리지 않는다는 같은 이유다(queries/quote-approvals-pending.ts).
+ *    🔴 견적서에는 접수 건의 `is_locked` 같은 잠금이 없다 — 결재는 발행을 막지 않고
+ *    (2026-09-18 사용자 결정) 발행도 결재를 막지 않으므로, 뺄 상태가 애초에 없다.
  *
  * ── 순서 ────────────────────────────────────────────────────────────────
  * 결정이 늦은 것부터(같은 시각이면 행 id 로 동점을 깬다 — 실행마다 흔들리지 않게).
@@ -91,6 +100,7 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
 const decider = alias(users, "outcome_decider");
 const laterCaseApproval = alias(repairCaseApprovals, "later_case_approval");
 const laterIssueApproval = alias(inventoryPartIssueApprovals, "later_issue_approval");
+const laterQuoteApproval = alias(quoteApprovals, "later_quote_approval");
 /** 헤더가 가리키는 접수 건과, 부품 요청이 가리키는 접수 건을 따로 읽는다(불출 조회와 같다). */
 const directCase = alias(repairCases, "outcome_direct_repair_case");
 const requestCase = alias(repairCases, "outcome_part_request_repair_case");
@@ -286,10 +296,99 @@ async function listPartIssueApprovalOutcomes(
   });
 }
 
+// ────────────────────────────────────────────────────────────────── 견적서
+
+/**
+ * 견적서 승인의 결과. 접수 건 결재와 **같은 모양**이다 — 사슬이 같고, 견적서에
+ * INNER JOIN 해 휴지통·완전 삭제를 뺀다.
+ *
+ * 🔴 「최종 승인」의 묶음은 **견적서 하나**다. 접수 건 결재는 (건, 결재 종류)로 묶지만
+ * 이 표에는 승인 종류 칸이 없다 — 견적서에 붙는 결재가 한 가지뿐이라 가를 것이 없다고
+ * 표가 정해 두었다(schema/quote-approvals.ts).
+ *
+ * 🔴 **낡은 승인(APPROVED_OUTDATED)을 여기서 가리지 않는다.** 승인 뒤 견적서가 바뀌어
+ * 그 승인이 「지금 내용에 대한 것」이 아니게 되어도, 그 시각에 승인이 났다는 **사건**은
+ * 일어난 그대로다. 이 알림은 할 일이 아니라 사건을 알리는 것이고, 창(7일) 안에서 한 번
+ * 뜬 뒤 눌러 확인하면 사라진다. 「다시 올려야 한다」는 지금 상태는 그 장의 [견적서 결재]
+ * 탭이 배지와 문장으로 말한다(components/quotes/quote-approval-texts.ts 의
+ * QUOTE_APPROVAL_OUTDATED_NOTICE) — 견적서를 고칠 때마다 종에 줄이 하나 서는 쪽이
+ * 아니라.
+ */
+async function listQuoteApprovalOutcomes(
+  requesterUserId: string,
+  status: CaseOutcomeStatus,
+  since: Date
+): Promise<ApprovalOutcome[]> {
+  const rows = await db
+    .select({
+      approvalId: quoteApprovals.id,
+      quoteId: quotes.id,
+      quoteNumber: quotes.quoteNumber,
+      decidedByName: decider.name,
+      decidedAt: quoteApprovals.decidedAt,
+      decisionReason: quoteApprovals.decisionReason,
+    })
+    .from(quoteApprovals)
+    // INNER JOIN — quote_id 가 NULL 인(완전 삭제된 견적서의) 행이 여기서 떨어진다.
+    .innerJoin(quotes, eq(quotes.id, quoteApprovals.quoteId))
+    .leftJoin(decider, eq(decider.id, quoteApprovals.decidedByUserId))
+    .where(
+      and(
+        // 🔴 요청자 본인 — 이 조건이 빠지면 남의 결재 결과가 내 종에 뜬다. 결재 행의
+        // 요청자는 사슬 내내 처음 올린 사람 그대로다(mutations/quote-approvals.ts 가
+        // 다음 단계 행에 물려준다).
+        eq(quoteApprovals.requestedByUserId, requesterUserId),
+        eq(quoteApprovals.status, status),
+        // 🔴 결정자가 요청자 본인이면 알리지 않는다. 견적서 결재에서는 요청 경로가
+        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 정상적으로는
+        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이다.
+        ne(quoteApprovals.decidedByUserId, requesterUserId),
+        gte(quoteApprovals.decidedAt, since),
+        eq(quotes.isDeleted, false),
+        ...(status === "APPROVED"
+          ? [
+              // 🔴 최종 승인 — 같은 견적서에 이 행보다 늦게 요청된 행이 없다.
+              // getQuoteApprovalProgress 의 「가장 최근 행」과 같은 정의다(그쪽은 한
+              // 장을 requested_at 내림차순으로 읽어 맨 앞 행을 고른다).
+              notExists(
+                db
+                  .select({ one: sql`1` })
+                  .from(laterQuoteApproval)
+                  .where(
+                    and(
+                      eq(laterQuoteApproval.quoteId, quoteApprovals.quoteId),
+                      gt(laterQuoteApproval.requestedAt, quoteApprovals.requestedAt)
+                    )
+                  )
+              ),
+            ]
+          : [])
+      )
+    )
+    .orderBy(desc(quoteApprovals.decidedAt), desc(quoteApprovals.id));
+
+  return rows.flatMap((row) =>
+    // 결정된 행은 decided_at 이 언제나 있다(표 CHECK). 타입을 좁히려는 것뿐이다.
+    row.decidedAt === null
+      ? []
+      : [
+          {
+            source: "QUOTE" as const,
+            approvalId: row.approvalId,
+            quoteId: row.quoteId,
+            quoteNumber: row.quoteNumber,
+            decidedByName: row.decidedByName ?? "",
+            decidedAt: row.decidedAt,
+            decisionReason: row.decisionReason,
+          },
+        ]
+  );
+}
+
 // ──────────────────────────────────────────────────────────────── 바깥 입구
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 세 결재 모두, 결정이 늦은
+ * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 네 결재 모두, 결정이 늦은
  * 것부터.
  */
 export async function listMyGrantedApprovalOutcomes(
@@ -297,15 +396,16 @@ export async function listMyGrantedApprovalOutcomes(
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, partIssues] = await Promise.all([
+  const [cases, partIssues, quoteOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "APPROVED", since),
     listPartIssueApprovalOutcomes(requesterUserId, "APPROVED", since),
+    listQuoteApprovalOutcomes(requesterUserId, "APPROVED", since),
   ]);
-  return [...cases, ...partIssues].sort(byDecisionNewestFirst);
+  return [...cases, ...partIssues, ...quoteOutcomes].sort(byDecisionNewestFirst);
 }
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 세 결재 모두,
+ * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 네 결재 모두,
  * 결정이 늦은 것부터. 내가 스스로 닫은 것(취소·자기 결정)은 빠진다.
  */
 export async function listMyRejectedApprovalOutcomes(
@@ -313,9 +413,10 @@ export async function listMyRejectedApprovalOutcomes(
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, partIssues] = await Promise.all([
+  const [cases, partIssues, quoteOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "REJECTED", since),
     listPartIssueApprovalOutcomes(requesterUserId, "REJECTED", since),
+    listQuoteApprovalOutcomes(requesterUserId, "REJECTED", since),
   ]);
-  return [...cases, ...partIssues].sort(byDecisionNewestFirst);
+  return [...cases, ...partIssues, ...quoteOutcomes].sort(byDecisionNewestFirst);
 }

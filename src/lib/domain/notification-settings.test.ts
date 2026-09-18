@@ -74,6 +74,15 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     // 누구든 올라간다. 역할을 하나라도 빼면 자기 차례인 결재자가 알림을 못 받는다.
     return true;
   }
+  if (kind === "QUOTE_APPROVAL_PENDING") {
+    // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
+    // 적는다 — 다섯 역할 전부. 불출 승인 대기와 같은 이유다: 누가 받는지는
+    // 역할이 아니라 견적서 승인 결재선의 지정(과 최고관리자 비상구)이 정하고,
+    // 그 결재선에도 역할 제한이 없다. 결재를 막는 decideQuoteApproval 은 아예
+    // 권한 영역을 묻지 않으므로, 역할을 하나라도 빼면 「지정은 됐는데 알림은 못
+    // 받는」 결재자가 생긴다.
+    return true;
+  }
   if (kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
     // 적는다 — 다섯 역할 전부. 요청자 본인에게만 가는 사람 단위 알림이라(조회가
@@ -170,6 +179,36 @@ test("불출 승인 대기는 결재 대기와 이름·색이 갈라진다 — �
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
   const hues = NOTIFICATION_KINDS.map((kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName));
   assert.equal(new Set(hues).size, hues.length, `색상 이름이 겹친다: ${hues.join(" / ")}`);
+});
+
+test("🔴 견적서 결재 대기의 기본값도 켜짐·다섯 역할 전부 받음이다 — 누가 받는지는 결재선 지정이 정한다", () => {
+  for (const role of ROLE_CODES) {
+    assert.equal(defaultRoleReceivesNotification("QUOTE_APPROVAL_PENDING", role), true, role);
+    assert.equal(deliversNotification("QUOTE_APPROVAL_PENDING", role, NO_NOTIFICATION_SETTINGS), true, role);
+  }
+  assert.equal(defaultNotificationKindEnabled("QUOTE_APPROVAL_PENDING"), true, "켜진 채로 태어난다");
+});
+
+test("견적서 결재 대기는 다른 두 결재 대기와 이름·색이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
+  const quote = NOTIFICATION_KIND_META.QUOTE_APPROVAL_PENDING;
+  assert.equal(quote.label, "견적서 결재 대기");
+  assert.notEqual(quote.label, NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL.label);
+  assert.notEqual(quote.label, NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.label);
+  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 기존 일곱 색
+  // 어느 것도 다시 쓰지 않는다는 것만 못 박는다.
+  const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
+  const existing = ["amber", "sky", "red", "emerald", "violet", "lime", "pink"];
+  const quoteHue = hueOf(quote.toneClassName);
+  assert.ok(quoteHue && !existing.includes(quoteHue), `견적서 결재 대기가 기존 색(${quoteHue})을 쓴다`);
+});
+
+test("견적서 결재 대기의 설명은 누가 받는지와 절차가 없을 때를 함께 적는다", () => {
+  // 관리자가 이 설명만 읽고 무엇을 끄는지 알아야 한다. 특히 「절차가 없으면 이
+  // 알림도 없다」는 견적서에만 있는 사실이라 적어 두지 않으면 고장으로 읽힌다.
+  const description = NOTIFICATION_KIND_META.QUOTE_APPROVAL_PENDING.description;
+  assert.ok(description.includes("지정된"), description);
+  assert.ok(description.includes("최고관리자"), description);
+  assert.ok(description.includes("절차"), description);
 });
 
 test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 요청자 본인에게만 가는 알림이다", () => {

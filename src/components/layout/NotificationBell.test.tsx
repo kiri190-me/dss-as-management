@@ -19,6 +19,7 @@ import {
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
+  buildQuoteApprovalNotification,
   type NotificationItem,
 } from "@/lib/domain/notifications";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
@@ -67,6 +68,12 @@ function oneOfEachKind() {
       destinationNote: null,
       routeStepOrder: 2,
       requestedByName: "홍길동",
+    }),
+    buildQuoteApprovalNotification({
+      quoteId: "quote-1",
+      quoteNumber: "Q-9705-001",
+      routeStepOrder: 1,
+      requestedByName: "박영업",
     }),
     grantedItem(),
     rejectedItem(),
