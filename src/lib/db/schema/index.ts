@@ -45,6 +45,7 @@ export * from "./domestic-order-sheet-settings";
 export * from "./weekly-report-goals";
 export * from "./weekly-report-deliveries";
 export * from "./quotes";
+export * from "./quote-approvals";
 export * from "./customer-portal";
 export * from "./intake-mail";
 export * from "./service-reports";

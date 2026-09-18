@@ -38,7 +38,8 @@ function context(overrides: Partial<ApprovalSuccessorContext> = {}): ApprovalSuc
   };
 }
 
-const NO_ROUTES = { FINAL_SHIPMENT: null, PART_ISSUE: null } as const;
+// 용도를 하나 더하면 여기가 컴파일 오류로 잡힌다(Record 라서) — 그것이 의도다.
+const NO_ROUTES = { FINAL_SHIPMENT: null, PART_ISSUE: null, QUOTE: null } as const;
 
 function routeRow(overrides: Partial<OpenApprovalFacts> = {}): OpenApprovalFacts {
   return {
@@ -179,7 +180,11 @@ test("승인 종류 → 결재선 용도 — 검수는 결재선을 타지 않�
   assert.equal(routeScopeForApprovalKind("REPAIR_INSPECTION"), null);
 });
 
-const CURRENT = { FINAL_SHIPMENT: "route-current", PART_ISSUE: "part-current" } as const;
+const CURRENT = {
+  FINAL_SHIPMENT: "route-current",
+  PART_ISSUE: "part-current",
+  QUOTE: "quote-current",
+} as const;
 
 test("사슬 — 지울 사람과 관계없으면 NONE", () => {
   const row = routeRow({ routeSteps: [{ stepOrder: 1, approverUserId: "a" }, { stepOrder: 2, approverUserId: "b" }] });

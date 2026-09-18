@@ -45,8 +45,22 @@
  *
  * 'PART_ISSUE' 는 부품 불출 승인이 쓴다(domain/inventory-part-issue-rules.ts 의
  * PART_ISSUE_APPROVAL_ROUTE_SCOPE 가 그 값에 이름을 붙여 둔 자리다).
+ *
+ * 'QUOTE' 는 견적서 승인이 쓴다(결재 기록은 db/schema/quote-approvals.ts).
+ * 🔴 **다른 둘과 성격이 하나 다르다: 이 절차는 아무것도 막지 않는다**
+ * (2026-09-18 사용자 결정). 출하·불출은 절차가 켜져 있으면 그 문이 닫히지만,
+ * 견적서는 결재가 끝나기 전에도 발행할 수 있다 — 여기서 남기는 것은 「누가 언제
+ * 승인했나」라는 기록뿐이다. 견적서 결재선을 출하와 갈라 둔 까닭은 **결재하는
+ * 사람이 다를 수 있기 때문**이다.
+ *
+ * 🔴 **새 용도는 맨 끝에 적는다** — 표의 enum 은 ALTER TYPE ... ADD VALUE 로
+ * 뒤에 붙고, 이 파일의 시험이 순서까지 맞대어 본다.
  */
-export const SHIPMENT_APPROVAL_ROUTE_SCOPES = ["FINAL_SHIPMENT", "PART_ISSUE"] as const;
+export const SHIPMENT_APPROVAL_ROUTE_SCOPES = [
+  "FINAL_SHIPMENT",
+  "PART_ISSUE",
+  "QUOTE",
+] as const;
 export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
 
 /**
@@ -64,6 +78,10 @@ export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)
 export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteScope, string> = {
   FINAL_SHIPMENT: "최종 출하 승인",
   PART_ISSUE: "부품 불출",
+  // 🔴 「승인」으로 끝맺는 것은 일부러다. 편집 화면의 설명 문장이 이름표 뒤에
+  // 조사 「을」을 붙인다(`${scopeLabel}을 여러 사람이 순서대로 결재하도록…`).
+  // 받침 없는 말로 끝나면 그 자리에서 「견적서 결재을」이 된다.
+  QUOTE: "견적서 승인",
 };
 
 /**
@@ -82,6 +100,10 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteS
 export const SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES: Record<ShipmentApprovalRouteScope, string> = {
   FINAL_SHIPMENT: "지금은 출하 대표로 지정된 사용자가 최종 출하 승인을 처리합니다.",
   PART_ISSUE: "지금은 재고 담당자가 그 자리에서 바로 불출합니다.",
+  // 🔴 견적서는 절차가 있든 없든 **발행이 막히지 않는다.** 그래서 이 문장은
+  // 「무엇이 대신 처리하는가」가 아니라 「무엇이 남지 않는가」를 말한다 —
+  // 절차가 비면 승인 기록 자체가 생기지 않는다.
+  QUOTE: "지금은 결재 없이 견적서를 발행하며, 승인 기록도 남지 않습니다.",
 };
 
 /**

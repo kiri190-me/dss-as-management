@@ -25,7 +25,8 @@ import { users } from "./users";
  * ── 🔴 표 이름은 옛것이고, 지금은 scope 칸이 뜻을 정한다 ────────────────
  * 이름에 남은 `shipment` 는 **처음 쓰임새의 흔적일 뿐이다**(2026-09-10). 지금 이
  * 표는 출하 전용이 아니고, 어느 절차인지는 `scope` 칸 하나가 정한다 —
- * 'FINAL_SHIPMENT'(최종 출하 승인) · 'PART_ISSUE'(부품 불출 승인). 표·코드 이름을
+ * 'FINAL_SHIPMENT'(최종 출하 승인) · 'PART_ISSUE'(부품 불출 승인) ·
+ * 'QUOTE'(견적서 승인). 표·코드 이름을
  * 바꾸지 않은 것은 의도다: 표 이름 바꾸기는 db:preflight 가 보지 못하는 종류의
  * 위험한 변경이고(자료가 사라지지는 않지만 적용 도중 끊기면 앱이 통째로 멈춘다),
  * 지금 얻을 것보다 잃을 것이 크다. **다음 사람은 이름이 아니라 scope 를 보고
@@ -82,13 +83,21 @@ import { users } from "./users";
  * 두 벌이 갈라지지 않도록 domain/shipment-approval-route.test.ts 가 둘을 맞춰
  * 본다.
  *
- * 'PART_ISSUE' 는 **아직 쓰는 코드가 없다** — 부품 불출 승인이 다음 조각에서
- * 이 절차를 탄다. enum 값은 나중에 뺄 수 없으므로 미리 넣어 두는 것이 값을
- * 두 번 더하는 마이그레이션보다 낫다.
+ * 'QUOTE' 는 **견적서 결재**다 — 결재 기록은 quote_approvals 에 쌓인다
+ * (db/schema/quote-approvals.ts). 🔴 **이 절차는 발행을 막지 않는다**(2026-09-18
+ * 사용자 결정): 결재가 끝나기 전에도 견적서는 나갈 수 있고, 이 절차가 남기는
+ * 것은 「누가 언제 승인했나」뿐이다. 출하·불출과 갈라 둔 것은 **결재하는 사람이
+ * 다를 수 있기 때문**이다.
+ *
+ * 값 순서는 **실제 DB 의 순서와 같아야 한다** — ALTER TYPE ... ADD VALUE 는
+ * 언제나 뒤에 붙으므로 새 용도는 **맨 끝에** 적는다. 어긋나면 다음 db:generate
+ * 가 있지도 않은 차이를 감지한다(domain/shipment-approval-route.test.ts 가
+ * 순서까지 맞대어 본다).
  */
 export const shipmentApprovalRouteScopeEnum = pgEnum("shipment_approval_route_scope", [
   "FINAL_SHIPMENT",
   "PART_ISSUE",
+  "QUOTE",
 ]);
 
 /**

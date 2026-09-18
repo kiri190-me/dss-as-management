@@ -736,6 +736,13 @@
       "when": 1789634659934,
       "tag": "0104_foamy_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1789693499181,
+      "tag": "0105_quote_approval_foundation",
+      "breakpoints": true
     }
   ]
 }
