@@ -52,6 +52,30 @@ function links(node: unknown, found: RenderedElement[] = []): RenderedElement[] 
 const repoFile = (relativePath: string) =>
   readFileSync(join(process.cwd(), relativePath), "utf8").replace(/\r\n/g, "\n");
 
+/**
+ * `@media …` 한 덩어리를 **중괄호 짝을 세어** 통째로 떼어낸다.
+ *
+ * 정규식으로 `@media …\{[\s\S]*?\}` 를 잡으면 안쪽 규칙의 첫 `}` 에서 끊긴다.
+ * 이 시험이 보려는 것은 「그 media 안에 무엇이 있고 **무엇이 없는가**」라
+ * (예: 폰에서 감추는 것이 단추 이름뿐이고 목록 이름은 아니라는 것) 블록
+ * 전체가 정확히 필요하다.
+ */
+function mediaBlock(css: string, header: string): string {
+  const at = css.indexOf(header);
+  assert.ok(at >= 0, `CSS 에서 ${header} 를 찾지 못했다`);
+  const open = css.indexOf("{", at);
+  assert.ok(open > at, `${header} 뒤에 블록이 없다`);
+  let depth = 0;
+  for (let i = open; i < css.length; i += 1) {
+    if (css[i] === "{") depth += 1;
+    else if (css[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(open + 1, i);
+    }
+  }
+  throw new Error(`${header} 블록이 닫히지 않았다`);
+}
+
 /** 주석 안의 말(이 저장소는 주석이 길다)이 아래 단언에 걸리지 않게 걷어낸다. */
 const withoutComments = (source: string) =>
   source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -115,14 +139,34 @@ test("🔴 메뉴바는 머리말 **안**에 앉는다 — 제목 다음, 알림
   assert.ok(menuAt < bellAt, "알림종보다 뒤에 그린다");
 });
 
-test("🔴 폰에서 햄버거와 알림종이 밀려나지 않는다 — 메뉴바는 남는 자리만 쓴다", () => {
+test("🔴 폰에서 햄버거와 알림종이 밀려나지 않는다 — 줄어드는 것은 시스템 이름 하나뿐이다", () => {
   const bare = withoutComments(topBar);
 
-  // `flex-1`(= flex: 1 1 0%)은 기준 폭이 0 이라 햄버거·제목·종이 제 폭을 먼저
-  // 가져간 **뒤 남은 만큼만** 차지한다. `min-w-0` 은 안의 목록이 길어도 이 칸이
-  // 제 내용 폭까지 부풀지 못하게 막는다(목록은 자기 안에서 가로로 굴러간다).
-  // 둘 중 하나라도 빠지면 목록이 길어질 때 오른쪽 종부터 화면 밖으로 밀린다.
-  assert.match(bare, /<div className="min-w-0 flex-1">\{serviceMenu\}<\/div>/);
+  // 🔴 `shrink-0` 이다. 여기 한때 `min-w-0 flex-1` 이 있었는데, 그것은 **가로로
+  // 늘어선 목록**에 남는 자리를 다 내주던 장치였다(기준 폭 0 + 남는 자리 다
+  // 갖기). 메뉴바가 드롭다운이 되면서(@dss/ui 730780c) 이 칸에 들어오는 것은
+  // **단추 하나**라 늘려 줄 까닭이 없고, 늘려 두면 「여기 늘어나는 무언가가
+  // 있다」는 틀린 신호가 된다. 펼친 목록은 이 칸 밖으로 떠서(absolute) 그려져
+  // 줄 폭을 한 톨도 먹지 않는다.
+  assert.match(bare, /<div className="shrink-0">\{serviceMenu\}<\/div>/);
+
+  // 🔴 그래서 이 줄에서 **눌릴 수 있는 것은 시스템 이름 글자 하나뿐**이어야
+  // 한다. 아이콘 버튼 셋(햄버거 · 메뉴 단추 · 알림종)이 전부 shrink-0 이라야
+  // 폭이 모자랄 때 글자가 … 로 줄 뿐, 버튼이 손가락에 안 잡히는 크기로
+  // 깎이거나 화면 밖으로 밀려나지 않는다(TopBar.tsx 머리말 주석의 사고).
+  const hamburger = bare.match(/aria-label="메뉴 열기"[\s\S]{0,400}?className="([^"]*)"/);
+  assert.ok(hamburger, "햄버거 버튼을 찾지 못했다");
+  assert.ok(
+    hamburger[1].split(/\s+/).includes("shrink-0"),
+    "햄버거가 shrink-0 이 아니다 — 좁은 폭에서 w-9 가 깎여 손가락에 안 잡힌다"
+  );
+  // 알림종은 제 파일에서 `ml-auto shrink-0` 을 갖는다(래퍼를 여기 두면 펼침
+  // 패널의 기준이 두 겹이 되므로 이 머리말은 감싸지 않는다).
+  assert.match(
+    repoFile("src/components/layout/NotificationBell.tsx"),
+    /className="[^"]*\bml-auto\b[^"]*\bshrink-0\b[^"]*"/,
+    "알림종이 ml-auto shrink-0 을 잃었다 — 오른쪽 끝에 붙지 않거나 눌려 깎인다"
+  );
 
   // 이 머리말의 못 박힌 선: 메뉴바 뒤(오른쪽)에 놓이는 것은 아이콘 버튼
   // 하나뿐이다. 글자 묶음이 다시 들어오면 폰에서 햄버거가 안 눌린다
@@ -133,48 +177,101 @@ test("🔴 폰에서 햄버거와 알림종이 밀려나지 않는다 — 메뉴
   assert.deepEqual(tagsAfterMenu, ["NotificationBell"]);
 });
 
-test("🔴 폰에서는 이름을 감추고 아이콘만 보인다 — 칸 하나가 아이콘 하나 폭이다", () => {
-  // 그 동작은 @dss/ui 가 CSS 로 한다(그쪽 시험이 자세히 본다). 여기서는 이
-  // 저장소가 기대는 그 규칙이 실제로 실려 있는지만 확인한다 — 없으면 폰에서
-  // 칸마다 이름까지 싣고 머리말 자리를 다투게 된다.
-  const css = repoFile("vendor/dss-ui/src/service-menu/service-menu.css");
+test("🔴 펼친 목록이 잘리지 않는다 — 머리말과 그 조상에 overflow: hidden 이 없다", () => {
+  // 드롭다운 목록은 단추 아래로 **떠서**(position:absolute) 그려진다. 감싸는
+  // 머리말이나 그 조상에 overflow: hidden 이 한 줄이라도 있으면 목록이 잘려
+  // 아무것도 고를 수 없게 된다(@dss/ui README 3절 「붙일 때 챙길 것」).
+  const header = topBar.match(/<header className="([^"]*)"/);
+  assert.ok(header, "TopBar 의 <header> 를 찾지 못했다");
+  assert.equal(
+    /\boverflow-(hidden|clip)\b/.test(header[1]),
+    false,
+    "머리말이 제 안을 잘라낸다 — 펼친 목록이 머리말 높이에서 잘린다"
+  );
 
-  assert.match(css, /@media not all and \(min-width: 768px\)/);
-  assert.match(css, /\.dss-menu--inline \.dss-menu__name \{/);
-  // 이름은 눈에서만 감춘다 — 낭독기는 그대로 읽어야 한다.
-  assert.match(css, /clip-path: inset\(50%\)/);
+  // AppShell 에서 머리말을 감싸는 칸은 <div className="print:hidden"> 하나이고,
+  // overflow-hidden 은 그 **형제**인 본문 줄에 걸려 있다(목록은 그 줄을 덮고
+  // 그려진다). 머리말 쪽 래퍼에 그것이 옮겨 붙으면 여기서 걸린다.
+  assert.match(withoutComments(appShell), /<div className="print:hidden">\s*<TopBar/);
+
+  // 쌓임 맥락: @dss/ui 가 목록에 주는 z-index: 50 은 **가장 가까운 쌓임 맥락**
+  // 안에서만 뜻이 있다. 머리말이나 그 위 칸이 z-index·transform·filter·
+  // isolate 로 제 맥락을 만들면 목록이 본문 밑으로 내려갈 수 있다.
+  assert.equal(
+    /\b(z-\[?\d|transform|isolate|filter|backdrop-)/.test(header[1]),
+    false,
+    "머리말이 제 쌓임 맥락을 만든다 — 펼친 목록의 z-index 가 그 안에 갇힌다"
+  );
 });
 
-test("🔴 폰에서는 시스템 이름도 감춘다 — 그 자리가 메뉴바로 간다", () => {
-  // 위 「아이콘만」 규칙까지 걸어도 폰에서 메뉴 칸이 잘려 보였다(사용자 폰
-  // 사진). 남는 자리를 실제로 먹던 것은 머리말의 시스템 이름 글자라, 같은
-  // 폭에서 그것도 감춘다.
+test("🔴 폰에서 감추는 것은 **단추**의 이름뿐이다 — 펼친 목록의 이름은 폰에서도 보인다", () => {
+  // 🔴 이 시험은 한때 「폰에서는 칸마다 아이콘만 보인다」였다. 그 말은 메뉴바가
+  // 머리말 안에서 **칸을 가로로 늘어놓던** 때의 이야기이고, 드롭다운이 된
+  // 지금(@dss/ui 730780c)은 거짓이다 — 감추는 판단이 **단추 하나**
+  // (.dss-menu__summary 의 .dss-menu__label)로 옮겨 갔고, 펼친 목록의 이름
+  // (.dss-menu__name)은 폰에서도 그대로 보인다. 목록은 머리말 폭을 다투지
+  // 않고 떠서 그려지며, 이모지만 늘어선 목록은 고를 수가 없기 때문이다.
+  //
+  // 겨냥을 옮기지 않아도 예전 정규식은 여전히 통과했다 —
+  // `.dss-menu--inline .dss-menu__name {` 이 새 CSS 에도 있지만 그것은 폰에서
+  // 감추는 규칙이 아니라 긴 이름을 … 로 끊는 규칙이다. 그래서 여기서는
+  // **media 블록 안**을 본다.
+  const css = repoFile("vendor/dss-ui/src/service-menu/service-menu.css");
+  const phone = mediaBlock(css, "@media not all and (min-width: 768px)");
+
+  // 단추의 이름은 **눈에서만** 감춘다 — 낭독기는 그대로 읽어야 한다.
+  assert.match(
+    phone,
+    /\.dss-menu--inline \.dss-menu__label \{[^}]*clip-path: inset\(50%\)/,
+    "폰에서 드롭다운 단추의 이름을 감추지 않는다 — 단추가 이름까지 싣고 머리말 자리를 다툰다"
+  );
+  assert.equal(
+    /\.dss-menu__name/.test(phone),
+    false,
+    "펼친 목록의 이름까지 폰에서 감춘다 — 이모지만 남은 목록에서는 고를 수가 없다"
+  );
+
+  // 아이콘은 선택값이라, 아이콘이 없는 서비스에 있으면 단추가 🔗 하나가 된다.
+  // 그때만 이름 첫 글자가 대신 켜진다(@dss/ui 의 serviceInitial).
+  assert.match(phone, /\.dss-menu__summary\[data-has-icon="false"\] \.dss-menu__initial/);
+});
+
+test("🔴 폰에서도 시스템 이름이 보인다 — 메뉴가 단추 하나로 줄어 자리가 났다", () => {
+  // 🔴 이 시험은 한때 정반대(「폰에서는 시스템 이름도 감춘다」)였다. 감췄던
+  // 이유는 오직 자리다 — 가로로 늘어선 메뉴 칸 셋(아이콘만 해도 ~123px)이
+  // 폰에서 잘려 보였고(2026-09-18 사용자 폰 사진), 그 자리를 실제로 먹던 것이
+  // 이름 글자였다. 메뉴가 드롭다운 단추 하나가 되면서 그 이유가 사라졌다:
+  // 360px 기준 32(px-4) + 36(햄버거) + ~133(이름) + ~57(단추) + 36(종)
+  // + 36(gap-3 × 3) ≈ 330px — 30px 이 남는다(TopBar.tsx 의 계산 주석).
   const bare = withoutComments(topBar);
   const nameSpan = bare.match(/<span className="([^"]*)">\s*DSS A\/S 관리 시스템\s*<\/span>/);
   assert.ok(nameSpan, "머리말에서 시스템 이름을 그리는 <span> 을 찾지 못했다");
   const classes = nameSpan[1].split(/\s+/);
 
-  // 좁은 화면: 눈에서 감춘다.
-  assert.ok(classes.includes("sr-only"), "좁은 화면에서 이름이 그대로 보인다 — 메뉴 칸이 잘린다");
-  // 넓은 화면: 그대로 보인다(지금까지의 모습).
-  assert.ok(classes.includes("md:not-sr-only"), "넓은 화면에서 이름이 되돌아오지 않는다");
-
-  // 🔴 마크업에서 사라지지는 않는다 — 낭독기와 검색에는 남아야 한다.
-  // hidden(=display:none) 계열이면 링크도 제목도 없는 머리말이 된다.
-  assert.equal(classes.includes("hidden"), false, "display:none 으로 지웠다 — 낭독기에서도 사라진다");
-  assert.ok(
-    bare.includes("DSS A/S 관리 시스템"),
-    "이름 글자를 마크업에서 통째로 뺐다"
+  assert.equal(
+    classes.includes("sr-only"),
+    false,
+    "폰에서 이름을 다시 감춘다 — 감출 이유였던 가로 목록은 이제 없다"
   );
+  assert.equal(classes.includes("hidden"), false, "display:none 으로 지웠다 — 낭독기에서도 사라진다");
+
+  // 🔴 되돌리면서 함께 건 안전장치. 위 계산은 글꼴 폴백(한글은 Geist 에 없다)에
+  // 기대고 있으므로, 이 줄에서 **줄어들어도 되는 것은 이 글자 하나**로 정하고
+  // (나머지는 전부 shrink-0) 모자라면 … 로 끊는다. 이것이 빠지면 좁은 기기에서
+  // 다시 아이콘 버튼이 밀려나 안 눌리는 옛 사고로 돌아간다.
+  assert.ok(classes.includes("truncate"), "이름이 넘칠 때 … 로 끊기지 않는다 — 버튼이 밀려난다");
+  assert.ok(classes.includes("min-w-0"), "min-w-0 이 없으면 flex 항목이 제 글자 폭 밑으로 줄지 않아 truncate 가 동하지 않는다");
+
+  assert.ok(bare.includes("DSS A/S 관리 시스템"), "이름 글자를 마크업에서 통째로 뺐다");
 });
 
-test("🔴 이름을 감추는 기준점이 메뉴바의 「아이콘만」 기준점과 같다", () => {
-  // 어긋나면 그 사이 폭에서 「이름은 없는데 메뉴는 글자」인 어정쩡한 상태가
-  // 생긴다. 머리말 쪽은 Tailwind 의 `md:`(=min-width: 768px), 메뉴바 쪽은
-  // 그 여집합인 `not all and (min-width: 768px)` 이라 둘이 정확히 맞물린다.
+test("🔴 메뉴 단추가 아이콘만 되는 기준점이 이 저장소의 `md` 와 같다", () => {
+  // 어긋나면 그 사이 폭에서 머리말과 단추가 서로 다른 화면 크기를 가정한다.
+  // 메뉴바 쪽은 `not all and (min-width: 768px)` — Tailwind `md:` 의 정확한
+  // 여집합이라 0.5px 틈이 생기지 않는다.
   const css = repoFile("vendor/dss-ui/src/service-menu/service-menu.css");
   const menuBreakpoint = css.match(/@media not all and \(min-width: (\d+)px\)/);
-  assert.ok(menuBreakpoint, "메뉴바의 「아이콘만」 기준점을 찾지 못했다");
+  assert.ok(menuBreakpoint, "메뉴 단추의 「아이콘만」 기준점을 찾지 못했다");
   assert.equal(menuBreakpoint[1], "768", "메뉴바 기준점이 768px 이 아니다");
 
   // 머리말이 쓰는 `md:` 가 그 768px 인지 — Tailwind 기본값을 이 저장소가
@@ -183,9 +280,12 @@ test("🔴 이름을 감추는 기준점이 메뉴바의 「아이콘만」 기�
   const overridden = /--breakpoint-md:\s*(?!768px)/.test(globals);
   assert.equal(overridden, false, "이 저장소가 md 기준점을 768px 이 아닌 값으로 덮었다");
 
+  // 머리말에서 같은 폭을 쓰는 것: 햄버거를 감추는 곳(md:hidden)과 「/ 화면이름」
+  // 을 되살리는 곳(md:inline). 🔴 시스템 이름은 더 이상 이 목록에 없다 —
+  // 폰에서도 보이기 때문이다(위 시험).
   const bare = withoutComments(topBar);
-  // 이름을 되돌리는 것도, 「/ 화면이름」을 보이는 것도 같은 `md:` 다.
-  assert.match(bare, /className="[^"]*\bmd:not-sr-only\b[^"]*">\s*DSS A\/S 관리 시스템/);
+  assert.match(bare, /aria-label="메뉴 열기"[\s\S]{0,400}?className="[^"]*\bmd:hidden\b/);
+  assert.match(bare, /className="[^"]*\bmd:inline\b[^"]*">\s*\{title\}/);
 });
 
 test("🔴 layout 이 목록과 「지금 여기」를 서버에서 풀어 내려보낸다", () => {

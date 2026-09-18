@@ -151,12 +151,22 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
               위에서 보이지 않는다).
 
               🔴 머리말이 폰에서 넘치지 않게 지키는 장치는 TopBar 안에 있다
-              (그 파일의 min-w-0 래퍼와 주석). 여기서는 아무 폭도 주지 않는다.
+              (그 파일의 shrink-0 래퍼와 주석). 여기서는 아무 폭도 주지 않는다.
 
               목록이 비면 이 조각이 스스로 null 을 돌려준다 — 빈 자리도 남지
               않는다. print:hidden 은 이 저장소가 화면을 종이로 뽑기 때문이다
               (@dss/ui 의 CSS 도 @media print 로 스스로 감추지만, 그 CSS 가
               안 실린 상태에서도 종이에 나오지 않게 두 겹으로).
+            */
+            /*
+              🔴 2026-09-18 두 번째 변경: 그 조각이 머리말 안에서 **드롭다운
+              단추 하나**가 되었다(@dss/ui 730780c). 이 줄이 메뉴에 내주는 폭이
+              서비스 수와 **무관**해졌고, 펼친 목록은 단추 아래로 떠서
+              (position:absolute · z-index 50) 본문을 덮고 그려진다 — 이 파일에서
+              머리말을 감싼 칸에 `overflow-hidden` 이 붙으면 그 목록이 잘려
+              아무것도 고를 수 없게 된다. 아래 본문 줄의 overflow-hidden 은
+              머리말의 **형제**라 상관없다(service-menu-bar.test.ts 가 이 둘을
+              갈라 못 박는다).
             */
             <ServiceMenuBar
               services={services}
