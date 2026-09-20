@@ -18,7 +18,7 @@ import {
   serviceReportOccurredOnModeEnum,
   serviceReports,
   serviceReportLines,
-} from "./service-reports";
+} from "@/lib/db/schema";
 
 /**
  * ============================================================================

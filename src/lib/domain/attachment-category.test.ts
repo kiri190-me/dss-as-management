@@ -22,7 +22,7 @@ import {
   ATTACHMENT_CATEGORY_CODES as DEMO_CATEGORY_CODES,
   attachmentCategoryLabels as demoCategoryLabels,
 } from "./local/attachments/attachment-types";
-import { attachmentCategoryEnum, malwareScanStatusEnum } from "@/lib/db/schema/attachments";
+import { attachmentCategoryEnum, malwareScanStatusEnum } from "@/lib/db/schema";
 
 /**
  * ============================================================================

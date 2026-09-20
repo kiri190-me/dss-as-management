@@ -24,7 +24,11 @@
       // 저장소 안의 소스라 Next 가 제 앱 코드처럼 컴파일한다 —
       // transpilePackages 도 Tailwind @source 도 필요 없다(그쪽 README 5절).
       "@dss/ui": ["./vendor/dss-ui/src/index.ts"],
-      "@dss/ui/styles.css": ["./vendor/dss-ui/src/service-menu/service-menu.css"]
+      "@dss/ui/styles.css": ["./vendor/dss-ui/src/service-menu/service-menu.css"],
+      // 서브모듈로 들어온 사내 공용 DB 스키마(vendor/dss-core, 별도 저장소).
+      // A/S 와 PO 사이트가 같은 dss_as 를 **같은 타입**으로 본다 —
+      // 손으로 베낀 복제본이 아니라 한 벌이라 컴파일러가 어긋남을 잡아 준다.
+      "@dss/core/schema": ["./vendor/dss-core/src/schema/index.ts"]
     }
   },
   "include": [

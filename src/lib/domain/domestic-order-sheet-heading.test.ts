@@ -274,8 +274,15 @@ describe("DB CHECK 와 검증이 같은 수를 쓴다", () => {
   test("스키마의 char_length 상한이 도메인 상수와 같다", () => {
     // 스키마 파일은 drizzle-kit 이 따로 읽어 `@/` 를 import 하지 않으므로 숫자를
     // 글자로 적어 둔다 — 한쪽만 바뀌면 여기서 걸린다.
+    //
+    // 🔴 표 정의는 서브모듈 vendor/dss-core 로 옮겨갔다(설계서 E-2). 여기는
+    // import 가 아니라 **파일 내용을 글자로 읽는** 자리라, 묶음(@/lib/db/schema)
+    // 으로는 대신할 수 없다 — 새 자리를 그대로 가리킨다.
     const schemaSource = readFileSync(
-      new URL("../db/schema/domestic-order-sheet-settings.ts", import.meta.url),
+      new URL(
+        "../../../vendor/dss-core/src/schema/domestic-order-sheet-settings.ts",
+        import.meta.url
+      ),
       "utf8"
     );
     assert.ok(

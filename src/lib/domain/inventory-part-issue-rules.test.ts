@@ -12,7 +12,7 @@ import {
   type InventoryPartIssueRequestStatus,
 } from "./inventory-part-issue-rules";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPES } from "./shipment-approval-route";
-import { inventoryPartIssueRequestStatusEnum } from "@/lib/db/schema/inventory-part-issue-requests";
+import { inventoryPartIssueRequestStatusEnum } from "@/lib/db/schema";
 
 /**
  * ============================================================================

@@ -5,9 +5,12 @@ import { test } from "node:test";
 import { getTableColumns } from "drizzle-orm";
 
 import { findDestructiveOperations } from "../migration-safety";
-import { quoteApprovals, quoteApprovalStatusEnum } from "./quote-approvals";
-import { approvalStatusEnum } from "./repair-case-approvals";
-import { shipmentApprovalRouteScopeEnum } from "./shipment-approval-routes";
+import {
+  approvalStatusEnum,
+  quoteApprovals,
+  quoteApprovalStatusEnum,
+  shipmentApprovalRouteScopeEnum,
+} from "@/lib/db/schema";
 
 /**
  * ============================================================================

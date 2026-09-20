@@ -7,7 +7,7 @@ import type { ServiceReportCause } from "@/lib/xlsx/service-report-template";
 import type {
   serviceReportLineSectionEnum,
   serviceReportOccurredOnModeEnum,
-} from "@/lib/db/schema/service-reports";
+} from "@/lib/db/schema";
 
 /**
  * ============================================================================

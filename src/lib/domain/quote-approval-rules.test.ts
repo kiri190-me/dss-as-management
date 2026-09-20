@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { quoteApprovalStatusEnum } from "@/lib/db/schema/quote-approvals";
+import { quoteApprovalStatusEnum } from "@/lib/db/schema";
 import {
   QUOTE_APPROVAL_ROUTE_SCOPE,
   QUOTE_APPROVAL_STATUSES,

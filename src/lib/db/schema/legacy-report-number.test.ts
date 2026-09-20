@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { repairCases } from "./repair-cases";
+import { repairCases } from "@/lib/db/schema";
 
 test("0038 adds only the nullable legacy report number column", () => {
   const sql = readFileSync("drizzle/0038_legacy_report_number.sql", "utf8").trim();

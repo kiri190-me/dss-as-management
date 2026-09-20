@@ -1,56 +1,24 @@
-export * from "./users";
-export * from "./customers";
-export * from "./product-models";
-export * from "./product-model-customers";
-export * from "./products";
-export * from "./workflow";
-export * from "./repair-cases";
-export * from "./repair-case-billing-decision-histories";
-export * from "./intake-sequences";
-export * from "./idempotency-keys";
-export * from "./status-change-histories";
-export * from "./repair-case-approvals";
-export * from "./shipment-approval-delegations";
-export * from "./representative-change-history";
-export * from "./procedure-templates";
-export * from "./procedure-template-nodes";
-export * from "./procedure-template-edges";
-export * from "./procedure-checklist";
-export * from "./procedure-troubleshooting";
-export * from "./procedure-template-validation-issues";
-export * from "./procedure-reference-items";
-export * from "./procedure-validation-resolution-history";
-export * from "./procedure-template-edit-history";
-export * from "./procedure-case-execution";
-export * from "./inventory";
-export * from "./inventory-part-requests";
-export * from "./part-minimum-quantities";
-export * from "./part-unit-prices";
-export * from "./part-overhaul-unit-prices";
-export * from "./repair-labor";
-export * from "./oh-part-templates";
-export * from "./repair-case-work-records";
-export * from "./repair-case-used-parts";
-export * from "./repair-case-flowcharts";
-export * from "./repair-case-flowchart-nodes";
-export * from "./repair-case-flowchart-edges";
-export * from "./repair-case-flowchart-edit-history";
-export * from "./audit-logs";
-export * from "./role-permissions";
-export * from "./notification-settings";
-export * from "./attachments";
-export * from "./domestic-orders";
-export * from "./domestic-order-due-dates";
-export * from "./domestic-order-sheet-settings";
-export * from "./weekly-report-goals";
-export * from "./weekly-report-deliveries";
-export * from "./quotes";
-export * from "./quote-approvals";
-export * from "./customer-portal";
-export * from "./intake-mail";
-export * from "./service-reports";
-export * from "./ui-theme-tokens";
-export * from "./ui-text-overrides";
-export * from "./shipment-approval-routes";
-export * from "./inventory-part-issue-requests";
-export * from "./notification-acknowledgements";
+/**
+ * ============================================================================
+ * DB 스키마로 들어가는 **하나뿐인 문**
+ * ============================================================================
+ * 표 정의는 더 이상 이 폴더에 없다. 서브모듈 `vendor/dss-core`(별도 저장소)에
+ * 한 벌로 있고, A/S 와 PO 사이트가 그 한 벌을 **같은 타입**으로 나눠 본다.
+ * 까닭은 `PO_DOMESTIC_SPLIT_DESIGN.md` E-2 절에 있다 — 두 앱이 같은 `dss_as`
+ * 를 보는데 스키마가 두 벌이면 손으로 맞춰야 하고, 어긋나는 날 컴파일러는
+ * 아무 말도 해 주지 않는다.
+ *
+ * 🔴 **이 파일이 남아 있는 까닭**: 스키마를 부르는 곳이 217개다. 그 217개는
+ * 전부 묶음(`@/lib/db/schema` · `../schema` · `../../db/schema`)으로 부른다.
+ * 여기서 한 줄로 되넘겨 주면 **217개를 한 글자도 고치지 않는다.** 나중에
+ * 서브모듈 쪽 파일 배치가 바뀌어도 고칠 곳은 이 한 줄뿐이다.
+ *
+ * 🔴 원본과 **내보내는 것이 완전히 같다.** 원래 이 파일은 56줄의 단순
+ * re-export 였고, `inventory-enums.ts` 는 그때도 여기서 내보내지 않았다.
+ * 서브모듈의 `src/schema/index.ts` 가 그 56줄을 그대로 물려받았으므로
+ * (파일이 바이트 단위로 같다) 이 한 줄이 그 목록을 그대로 재현한다.
+ *
+ * 마이그레이션(`drizzle/`)과 `drizzle.config.ts` 는 **A/S 가 계속 소유**한다.
+ * 칸을 더하거나 고치는 일은 언제나 여기서 한다(설계서 E-2).
+ */
+export * from "@dss/core/schema";

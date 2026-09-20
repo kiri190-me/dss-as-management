@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { statusChangeActionTypeEnum } from "./status-change-histories";
+import { statusChangeActionTypeEnum } from "@/lib/db/schema";
 
 /**
  * 0037(legacy-import-state-set.test.ts)이 세운 선례를 그대로 따른다 — enum

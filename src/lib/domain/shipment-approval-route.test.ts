@@ -16,7 +16,7 @@ import {
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
 } from "./shipment-approval-route";
-import { shipmentApprovalRouteScopeEnum } from "@/lib/db/schema/shipment-approval-routes";
+import { shipmentApprovalRouteScopeEnum } from "@/lib/db/schema";
 
 /**
  * ============================================================================
