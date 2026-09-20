@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업 기록 — 2026-09-20 · DSS 사내 시스템</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --dim: #6b6b66;
+    --line: #e3e3df;
+    --accent: #1d6f5c;
+    --warn: #b3441e;
+    --soft: #f4f4f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1f2023;
+      --ink: #e8e8e4;
+      --dim: #9a9a94;
+      --line: #32343a;
+      --accent: #63c3a6;
+      --warn: #e58a63;
+      --soft: #26282c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.75 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2.5rem; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .sub { color: var(--dim); font-size: .95rem; margin: 0; }
+  h2 {
+    font-size: 1.3rem; margin: 3rem 0 1rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--line); letter-spacing: -.01em;
+  }
+  h3 { font-size: 1.05rem; margin: 1.75rem 0 .5rem; }
+  p { margin: .7rem 0; }
+  .lede { font-size: 1.05rem; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; margin: 1.5rem 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: .6rem; padding: .9rem 1rem; }
+  .card .n { font-size: 1.6rem; font-weight: 700; line-height: 1.2; letter-spacing: -.03em; }
+  .card .l { color: var(--dim); font-size: .85rem; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; padding: .55rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: .85rem; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  code, .sha {
+    font-family: "Cascadia Mono", Consolas, monospace; font-size: .86em;
+    background: var(--soft); padding: .1rem .35rem; border-radius: .25rem;
+  }
+  .done { color: var(--accent); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+
+  .box { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: .4rem; padding: .9rem 1.1rem; margin: 1.25rem 0; }
+  .box.alert { border-left-color: var(--warn); }
+  .box h4 { margin: 0 0 .4rem; font-size: .98rem; }
+  .box p:last-child { margin-bottom: 0; }
+
+  ol.next { padding-left: 0; list-style: none; counter-reset: s; }
+  ol.next li { counter-increment: s; position: relative; padding: .8rem 0 .8rem 2.6rem; border-bottom: 1px solid var(--line); }
+  ol.next li::before {
+    content: counter(s); position: absolute; left: 0; top: .85rem;
+    width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--soft); border: 1px solid var(--line);
+    display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: var(--dim);
+  }
+  ol.next li b { display: block; }
+  ol.next li span { color: var(--dim); font-size: .92rem; }
+
+  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .85rem; }
+
+  @media print {
+    body { background: #fff; color: #000; padding: 0; font-size: 11pt; }
+    h2 { page-break-after: avoid; }
+    .box, table, ol.next li { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>작업 기록 — 2026-09-20</h1>
+  <p class="sub">DSS 사내 시스템 · 저장소 넷을 함께 다룬 세션</p>
+</header>
+
+<p class="lede">
+  개선요청 사이트에 기능 둘을 붙이고, 연락서 자동 입력의 방향을 정하고,
+  <b>PO/내자를 별도 사이트로 떼어내는 일의 첫 조각</b>을 끝냈습니다.
+  모든 작업이 커밋·푸시되어 이 PC 가 고장 나도 잃을 것이 없습니다.
+</p>
+
+<div class="cards">
+  <div class="card"><div class="n">8</div><div class="l">커밋</div></div>
+  <div class="card"><div class="n">1</div><div class="l">새 저장소</div></div>
+  <div class="card"><div class="n">0</div><div class="l">미푸시</div></div>
+  <div class="card"><div class="n">0</div><div class="l">미커밋</div></div>
+</div>
+
+<h2>1. 개선요청 사이트 — 두 가지를 붙였습니다</h2>
+
+<h3>끌어다 놓기</h3>
+<p>
+  스크린샷을 <b>글 위로 끌어다 놓아</b> 올릴 수 있게 됐습니다. 새 글 쓰는 칸과 목록의 글 줄,
+  두 자리 모두입니다. A/S 시스템에 있던 것을 옮겨 왔습니다.
+</p>
+<p>
+  처음에는 사진 띠만 과녁으로 삼았는데, 사진이 없는 줄에서는 그것이 단추 한 줄 높이(26px)뿐이라
+  <b>줄의 80%가 과녁 밖</b>이었습니다. 순수 함수 시험 21개가 전부 통과하는데도 화면에서는 아무 일도
+  일어나지 않았습니다. 지금은 <b>줄 전체</b>가 과녁이고, 같은 실수를 막는 배선 시험을 함께 넣었습니다.
+</p>
+
+<h3>파일 찾기가 사진 폴더에서 열립니다</h3>
+<p>
+  「가끔 파일 찾기가 늦게 뜬다」고 알려주신 건, 윈도가 <b>마지막에 쓴 폴더</b>를 훑기 때문이었습니다.
+  그것이 OneDrive 폴더면 클라우드 목록을 받아오느라 몇 초 걸립니다. 이제 사진 폴더에서 시작합니다
+  — 이 PC 의 사진 폴더는 로컬이라 기다릴 일이 없습니다.
+</p>
+
+<div class="box alert">
+  <h4>🔴 진짜 원인은 따로 있었습니다 — 버튼이 전부 죽어 있었습니다</h4>
+  <p>
+    「끌어다 놓기가 안 된다」에 이어 「[스크린샷 추가] 버튼도 안 눌린다」고 알려주신 것이 결정적이었습니다.
+    그건 우리가 만들지 않은 버튼이었으니까요.
+  </p>
+  <p>
+    원인은 이 PC 의 Wi-Fi 주소가 <code>192.168.35.215</code> 인데 설정에는 <code>192.168.0.*</code> 와
+    <code>192.168.1.*</code> 만 적혀 있던 것이었습니다. 그러면 Next 가 개발용 자산을 막고,
+    <b>화면은 멀쩡히 뜨는데 React 가 붙지 않아 모든 버튼이 죽습니다.</b>
+    대역 전체(<code>192.168.*.*</code>)로 넓혀 해결했습니다.
+  </p>
+</div>
+
+<h2>2. 연락서 판독기 — 방향을 정하고 첫 도구를 만들었습니다</h2>
+
+<h3>먼저 「보여줘도 되는가」를 따졌습니다</h3>
+<p>
+  이 계정은 <b>Claude Team</b> 이라 상업 약관이 적용됩니다. 대화 내용이 <b>모델 학습에는 쓰이지 않습니다.</b>
+  다만 「안 보낸다」는 아닙니다 — 30일간 서버에 남고, 이 PC 에도 평문으로 30일 쌓입니다.
+  그래서 <b>판본별 대표 샘플 몇 장만</b> 보기로 정하셨습니다.
+</p>
+
+<h3>450장을 다 보는 대신 판독기를 만듭니다</h3>
+<p>
+  연락서가 450장이라 제가 눈으로 읽는 방식은 <b>검증이 불가능</b>합니다. 한 장을 잘못 옮겨도 아무도 모르고,
+  다음 달 새 연락서가 오면 처음부터 다시입니다. 판독기는 시험으로 검증되고 NAS 에서 혼자 돕니다.
+</p>
+
+<div class="box">
+  <h4>고객 내용이 자동으로 걸러지는 규칙 하나</h4>
+  <p>
+    판본 조사 도구를 만들었습니다. 글자를 그대로 적는 기준은 하나입니다 —
+    <b>서로 다른 파일 여러 장에 똑같이 나온 것만.</b>
+    양식 라벨은 모든 파일에 공통이라 남고, 고객 고유값(모델·S/N·증상)은 그 파일에만 나오니
+    자동으로 가려집니다. <b>450장 중 449장은 내용이 제게 오지 않습니다.</b>
+  </p>
+  <p>
+    이 PC 의 3장으로 시험해 <b>판본 2가지</b>를 갈랐습니다(매처 15시트 · 제너레이터 26시트).
+    같은 라벨이 판본마다 <b>21행 아래로는 거의 전부 어긋난다</b>는 것도 실측으로 확인했습니다 —
+    판독기가 칸 주소가 아니라 라벨 글자로 찾아야 하는 근거입니다.
+  </p>
+</div>
+
+<h2>3. PO/내자 분리 — 가장 큰 일의 첫 조각</h2>
+
+<p>
+  메뉴 그룹 「PO / 내자」(내자 정리 · 견적서 · 작업 비용, <b>약 73,000줄</b>)를 별도 사이트로 떼어냅니다.
+  조사 넷을 돌려 설계서를 쓰고, 첫 조각을 끝냈습니다.
+</p>
+
+<h3>정한 것</h3>
+<table>
+  <tr><th style="width:11rem">항목</th><th>결정</th></tr>
+  <tr><td>범위</td><td>메뉴 그룹 전부 — 내자 정리 + 견적서 + 작업 비용</td></tr>
+  <tr><td>DB</td><td><b>같은 DB 를 둘이 본다.</b> 나누면 수리건 연계 17곳이 깨진다</td></tr>
+  <tr><td>스키마</td><td>서브모듈로 한 벌만 둔다 — 복사본은 컴파일러가 안 지켜준다</td></tr>
+  <tr><td>결재선 설정</td><td>A/S 에 그대로 두고, 새 사이트에서는 링크로 넘어간다</td></tr>
+  <tr><td>결재 알림(종)</td><td>A/S 종에 계속 — 사람은 종 하나만 보면 된다</td></tr>
+  <tr><td>수리건의 [견적서] 탭</td><td>지금 모습 그대로. 서브모듈에 한 벌을 두고 나눠 쓴다</td></tr>
+</table>
+
+<div class="box alert">
+  <h4>🔴 이것은 예외입니다 — 새 시스템은 API 로 잇습니다</h4>
+  <p>
+    DB 를 함께 보는 것은 이번만입니다. 내자는 <b>화면 자체가 표 다섯 개를 조인한 결과</b>라
+    나눌 수 없어서 그렇습니다. 앞으로 생길 시스템이 정보 일부를 주고받을 때는 API 를 씁니다.
+  </p>
+  <p>
+    DB 를 계속 합치면 <b>마이그레이션과 배포가 묶입니다</b> — 칸 하나 고치자고 다섯 번 배포하게 됩니다.
+    검색·정렬이 필요하면 <b>필요한 조각만 자기 DB 에 사본으로</b> 두는 가운데 길이 있습니다.
+  </p>
+</div>
+
+<h3>끝낸 조각 — 스키마 이사</h3>
+<p>
+  A/S 안에 있던 <b>DB 설계도 58개 파일</b>이 <code>dss-core</code> 라는 새 저장소로 나가고,
+  A/S 는 그것을 서브모듈로 끌어다 씁니다. 나중에 PO/내자 사이트도 같은 것을 쓰면
+  <b>두 사이트가 같은 설계도 한 벌</b>을 보게 됩니다.
+</p>
+
+<table>
+  <tr><th style="width:14rem">확인</th><th>결과</th></tr>
+  <tr><td>DB 설계도가 달라졌나</td><td class="done">「바뀐 것 없음」 — 마이그레이션 106개 그대로</td></tr>
+  <tr><td>단위 시험</td><td class="done">3,996 중 3,995 통과 · 실패 0 (작업 전과 동일)</td></tr>
+  <tr><td>화면 시험</td><td class="done">1,314 통과</td></tr>
+  <tr><td>DB 시험</td><td class="done">1,836 통과 (실패 3개는 작업 전부터)</td></tr>
+  <tr><td>컴파일 · 검사</td><td class="done">오류 0</td></tr>
+  <tr><td>실제 빌드</td><td class="done">성공 — 운영에 올라갈 형태까지</td></tr>
+  <tr><td>다른 파일 영향</td><td class="done">스키마를 부르는 224개 파일을 한 글자도 안 고침</td></tr>
+</table>
+
+<h2>4. 오늘 잡은 함정</h2>
+
+<table>
+  <tr><th style="width:13rem">무엇</th><th>왜 위험했나</th></tr>
+  <tr>
+    <td>개발 주소 대역</td>
+    <td>화면은 멀쩡한데 버튼만 전부 죽어, 원인을 코드에서 찾게 만듭니다</td>
+  </tr>
+  <tr>
+    <td>파일 찾기의 <code>id</code> 옵션</td>
+    <td>주면 브라우저가 마지막 폴더를 기억해 사진 폴더 설정을 무시합니다.
+        문서에는 어느 쪽이 이기는지 안 나와 있어 규격 원문과 브라우저 소스를 직접 읽어 갈랐습니다.
+        <b>시험으로는 절대 안 잡히는 종류입니다</b></td>
+  </tr>
+  <tr>
+    <td>스키마를 글자로 읽던 자리</td>
+    <td>파일을 <code>import</code> 가 아니라 <b>내용으로 읽는</b> 시험이 하나 있었습니다.
+        import 만 세면 안 보입니다</td>
+  </tr>
+  <tr>
+    <td>두 번째 drizzle 설정</td>
+    <td>한쪽만 고치면, 누가 그걸로 마이그레이션을 만드는 날
+        <b>「표를 전부 지우는」 SQL</b> 이 나올 수 있었습니다</td>
+  </tr>
+  <tr>
+    <td>판본 지문 규칙</td>
+    <td>제 첫 지시서대로였다면 450장에서 <b>판본이 450가지</b>로 갈렸을 것입니다</td>
+  </tr>
+  <tr>
+    <td>비밀값 평문 파일</td>
+    <td>포털 접속 비밀값이 든 백업 파일이 디스크에 남아 있었습니다. 지웠습니다</td>
+  </tr>
+</table>
+
+<h2>5. 다음에 할 일</h2>
+
+<ol class="next">
+  <li>
+    <b>PO/내자 조각 0b — <code>dss-po</code> 저장소 뼈대</b>
+    <span>로그인하면 빈 화면이 뜨는 데까지. 개선요청 사이트를 본보기로 베낍니다.
+    포트 3600. 이어서 0c(포털 등록) → 1(작업 비용, 가장 깨끗한 화면).
+    설계서에 조각 아홉의 차례가 전부 있습니다.</span>
+  </li>
+  <li>
+    <b>연락서 S1 — 판독기 (NAS 연결 대기)</b>
+    <span>NAS 가 붙으면 판본 조사 도구를 450장에 돌려 판본 지도를 먼저 봅니다.
+    그걸 보고 판독기를 설계합니다. NAS 없이는 시작할 수 없습니다.</span>
+  </li>
+  <li>
+    <b>시험 DB 비우기</b>
+    <span>감사 로그가 65,798줄까지 쌓여 DB 시험 3개가 실패합니다.
+    오늘 작업과 무관하고 원래부터 그랬습니다.</span>
+  </li>
+  <li>
+    <b>계측기(<code>njlee</code>)의 같은 주소 대역 문제</b>
+    <span>개선요청과 똑같은 설정이라 사내망 주소로 열면 버튼이 죽을 것입니다.
+    한 줄 고치면 됩니다.</span>
+  </li>
+  <li>
+    <b>개선요청 첨부 휴지통</b>
+    <span>지운 첨부를 되살릴 길이 지금 <b>아예 없습니다</b> — 행도 파일도 남아 있는데
+    꺼낼 화면이 없습니다. 스키마 칸은 이미 있어 되살리기만 만들면 됩니다.</span>
+  </li>
+  <li>
+    <b>피드백 경로 막기 (연락서 작업 전에)</b>
+    <span><code>/feedback</code> 은 5년, 세션 설문의 「대화 기록 봐도 되나요」에 Yes 는 6개월 보관입니다.
+    막으면 Claude Code 자체의 문제를 신고할 길이 없어지니, 그 값을 감수할지 정하셔야 합니다.</span>
+  </li>
+</ol>
+
+<h2>6. 기억해 두실 것</h2>
+
+<div class="box alert">
+  <h4>🔴 클론할 때 <code>--recurse-submodules</code></h4>
+  <p>
+    이제 A/S 저장소에 서브모듈이 <b>둘</b>입니다 — <code>vendor/dss-ui</code>(메뉴바)와
+    <code>vendor/dss-core</code>(DB 설계도). 빠뜨리면 빈 폴더가 되어 <b>빌드가 크게 실패</b>합니다.
+    조용히 옛 코드가 쓰이지는 않으니 알아채기는 쉽습니다.
+  </p>
+</div>
+
+<div class="box">
+  <h4>포털에 localhost 가 등록됐습니다</h4>
+  <p>
+    개선요청 사이트에 사내망 주소와 <code>localhost</code> 둘 다 등록했습니다.
+    <b>보안 컨텍스트가 필요한 기능</b>(파일 찾기 시작 폴더 · 클립보드 · 카메라 같은 것)은
+    HTTPS 나 localhost 에서만 동작하므로, 이게 없으면 개발 PC 에서 영영 시험할 수 없습니다.
+  </p>
+  <p>
+    다만 <code>.env.local</code> 의 <code>SSO_REDIRECT_URI</code> 를 잠시 바꿔야 하는 번거로움이 남습니다.
+    <code>auto</code> 가 「지금 접속한 주소」를 따라가게 만들면 그 왔다 갔다 가 없어집니다 — 나중 과제입니다.
+  </p>
+</div>
+
+<h2>7. 올라간 것</h2>
+
+<table>
+  <tr><th style="width:12rem">저장소</th><th>커밋</th></tr>
+  <tr>
+    <td><b>dss-core</b><br><span style="color:var(--dim);font-size:.85rem">새로 만듦</span></td>
+    <td class="num"><span class="sha">e826add</span> 사내 시스템이 나눠 쓰는 DB 스키마 묶음</td>
+  </tr>
+  <tr>
+    <td><b>RF_Service_System</b></td>
+    <td class="num">
+      <span class="sha">5d36b27</span> 스키마를 서브모듈로 옮긴다<br>
+      <span class="sha">9ddb599</span> PO / 내자 분리 설계서<br>
+      <span class="sha">8110d8f</span> 연락서 판본을 세는 도구
+    </td>
+  </tr>
+  <tr>
+    <td><b>dss-improvements</b></td>
+    <td class="num">
+      <span class="sha">1afe603</span> 파일 찾기를 사진 폴더에서 연다<br>
+      <span class="sha">42581fa</span> 스크린샷을 끌어다 놓아 올린다<br>
+      <span class="sha">fee95c6</span> 개발 주소 허용 대역을 넓힌다<br>
+      <span class="sha">f121652</span> 낡은 CLAUDE.md 문장을 고친다
+    </td>
+  </tr>
+</table>
+
+<p><b>여덟 저장소 전부 미푸시 0 · 미커밋 0.</b></p>
+
+<footer>
+  작업 기록 · 2026-09-20 세션 · 설계서는 <code>RF_Service_System/PO_DOMESTIC_SPLIT_DESIGN.md</code>
+</footer>
+
+</main>
+</body>
+</html>
