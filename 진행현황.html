@@ -86,20 +86,40 @@
 
 <header>
   <h1>DSS 사내 시스템 — 진행 현황판</h1>
-  <p class="stamp">갱신 2026-09-21 · <b>다섯이 한꺼번에 끝났습니다</b> — 연락서 S4 · 주간보고 고르개 ·
-  PO 3a · 휴가 버튼 · 알림 6a. 돌고 있는 것 없음 · <b>전부 커밋 전</b></p>
+  <p class="stamp">갱신 2026-09-21 · <b>다섯 커밋 완료 · A/S 는 올림</b>(커밋 13개) ·
+  셋 진행 중(연락서 한글화 · PO 메뉴바 · 종 붙이기)</p>
 </header>
 
 
 <div class="live">
-  <h3>⏹ 지금 돌고 있는 것 — 없습니다</h3>
-  <p><b>다섯이 한꺼번에 끝났습니다</b> — 연락서 S4 · 주간보고 고르개 · PO 조각 3a ·
-  휴가 「통합 로그인으로」 · 알림 조각 6a. <b>다섯 다 커밋 전</b>이고, 넷은 눈 확인을 기다립니다
-  (알림 6a 는 화면이 없는 통로라 눈으로 볼 것이 없습니다).</p>
+  <h3>🔵 지금 돌고 있는 것 — 셋</h3>
+  <table>
+    <tr><th>어디</th><th>무엇</th><th>왜</th></tr>
+    <tr>
+      <td>A/S</td>
+      <td><b>연락서 한글화 + 수리 보고서 보기</b></td>
+      <td>일본어로 남은 값을 한글로. 딸려 온 보고서를 <b>기존 보고서처럼</b> 미리보기·엑셀 받기.
+          🔴 번역은 <b>사전으로</b> 합니다 — 고객명이 든 문서라 외부 번역기에 보낼 수 없습니다</td>
+    </tr>
+    <tr>
+      <td><code>dss-po</code></td>
+      <td><b>메뉴바 + 첫 화면</b></td>
+      <td>세 화면(내자 정리 · 견적서 · 작업 비용)을 단추로 오가게. 들어오면 내자 정리가 뜨게</td>
+    </tr>
+    <tr>
+      <td><code>dss-improvements</code></td>
+      <td><b>조각 6b — 종 붙이기(첫 사이트)</b></td>
+      <td>🔴 <b>포털이 죽어도 사이트는 떠야 합니다</b> — 알림 하나로 사이트 전체를 못 쓰게 되면 안 됩니다.
+          여기서 만든 배선을 <b>남은 넷이 따라 합니다</b></td>
+    </tr>
+  </table>
+  <p style="margin-top:10px"><b>✅ 다섯 다 눈 확인 받고 커밋했습니다</b> —
+  연락서 S4 · 주간보고 고르개 · PO 조각 3a · 휴가 「통합 로그인으로」 · 알림 6a.
+  <b>A/S 는 올렸습니다</b>(커밋 13개). 나머지 네 저장소는 커밋만 되어 있습니다.</p>
 </div>
 
 <div class="todo">
-  <h3>⏸ 방금 끝난 넷 — 눈으로 봐 주실 곳</h3>
+  <h3>✅ 눈으로 확인받았습니다 (2026-09-21) — 아래 넷 다 커밋했습니다</h3>
   <table>
     <tr><th>무엇</th><th>주소</th><th>볼 곳</th></tr>
     <tr>
@@ -344,20 +364,31 @@
 </div>
 
 
-<h2>커밋 현황 — 🔴 아직 아무것도 올리지 않았습니다</h2>
+<h2>커밋 현황 <span class="pct">(2026-09-21 실측)</span></h2>
 
 <table>
   <tr><th>저장소</th><th class="c">올릴 커밋</th><th>무엇</th></tr>
-  <tr><td>A/S <code>RF_Service_System</code></td><td class="c"><b>8</b></td><td>시험 · 설계서 · 연락서 변환·판독기·짝짓기 · 파비콘 · 알림 통로 · 문서</td></tr>
-  <tr><td><code>dss-auth</code> (포털)</td><td class="c"><b>3</b></td><td>알림 창구 · 알림 설정 화면 · <b>표 다듬기</b></td></tr>
-  <tr><td><code>dss-po</code></td><td class="c"><b>2</b></td><td>작업 비용 · <b>내자 정리</b> 옮기기</td></tr>
-  <tr class="fin"><td><code>dss-leave</code> (휴가)</td><td class="c">0</td><td>✅ <b>올렸습니다</b> — 연동 · 직급 · 메뉴바 · 개발 주소 (<code>kiri190-me/dss-leave</code>)</td></tr>
+  <tr class="fin"><td>A/S <code>RF_Service_System</code></td><td class="c">0</td>
+      <td>✅ <b>올렸습니다 — 커밋 13개</b>. 시험 · 설계서 · 연락서 변환·판독기·짝짓기·저장·화면 ·
+          파비콘 · 알림 통로 · 주간보고 고르개 · 문서</td></tr>
+  <tr><td><code>dss-auth</code> (포털)</td><td class="c"><b>4</b></td><td>알림 창구 · 알림 설정 화면 · 표 다듬기 · <b>사이트용 알림 통로</b></td></tr>
+  <tr><td><code>dss-po</code></td><td class="c"><b>4</b></td><td>작업 비용 · 내자 정리 · 가로폭 · <b>견적서</b></td></tr>
+  <tr><td><code>dss-leave</code> (휴가)</td><td class="c"><b>1</b></td><td><b>「통합 로그인으로」 단추</b></td></tr>
   <tr><td><code>njlee</code></td><td class="c"><b>2</b></td><td>개발 주소 · 파비콘</td></tr>
   <tr><td><code>dss-improvements</code></td><td class="c"><b>3</b></td><td>첨부 휴지통 · 파비콘 · 주소 판정 강화</td></tr>
   <tr><td><code>dss-home</code></td><td class="c"><b>1</b></td><td>파비콘</td></tr>
-  <tr class="fin"><td><code>dss-ui</code> (묶음)</td><td class="c">0</td><td>✅ <b>올렸습니다</b> — 종이 들어갔습니다. 이제 각 사이트가 붙일 수 있습니다</td></tr>
-  <tr><td><code>dss-core</code></td><td class="c">0</td><td>변경 없음 (조각 3a 가 건드리는 중)</td></tr>
+  <tr class="fin"><td><code>dss-ui</code> (묶음)</td><td class="c">0</td><td>✅ <b>올렸습니다</b> — 종이 들어갔습니다</td></tr>
+  <tr><td><code>dss-core</code> (묶음)</td><td class="c"><b>1</b></td><td><b>견적서 목록 화면</b>. 🔴 <b>이것을 먼저 올려야</b> <code>dss-po</code> 가 가리키는 자리가 생깁니다</td></tr>
 </table>
+
+<div class="warn">
+  <p><strong>🔴 <code>dss-core</code> 가 이 PC 에 두 벌 있습니다 — 정리해야 합니다.</strong></p>
+  <p><code>Development\dss-core</code>(원본)와 <code>dss-po\vendor\dss-core</code>(서브모듈)가
+  <b>같은 원격의 서로 다른 클론</b>입니다. 견적서 작업이 양쪽에 같은 변경을 남겼고,
+  <b>서브모듈 쪽에서만 커밋했습니다</b>(그래야 <code>dss-po</code> 의 포인터가 바로 맞습니다).</p>
+  <p>지금 원본 클론에는 <b>커밋되지 않은 같은 변경이 그대로 남아 있습니다.</b>
+  올린 뒤에 그쪽을 버리고 받아 와야 합니다 — 안 하면 <b>같은 내용의 커밋이 둘</b> 생깁니다.</p>
+</div>
 
 <div class="warn">
   <p><strong>🔴 PO 조각 2·3 전에 정해야 할 것 — 시험용 DB</strong></p>
