@@ -18,7 +18,10 @@ import {
   readServiceReportTemplate,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
-import { validateServiceReportFields } from "@/lib/validation/service-report-input";
+import {
+  describeServiceReportBlockers,
+  validateServiceReportFields,
+} from "@/lib/validation/service-report-input";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
 import {
   readSheetPrintGrid,
@@ -180,10 +183,12 @@ export default async function ServiceReportPrintPage({
      * 본문이 한 줄도 없는 장이 실제로 저장돼 있을 수 있고, 그 장은 문서로 만들 수
      * 없다. 화면을 죽이는 대신 왜 못 그리는지 알려 주고 돌아갈 길을 남긴다.
      *
-     * 🔴 칸별 오류 메시지를 그대로 내보내지 않는다 — 셀 주소가 섞인 개발자용
-     * 문장이다(UI_GUIDELINE 11).
+     * 🔴 칸별 오류 **메시지**는 그대로 내보내지 않는다 — 숫자가 섞인 개발자용
+     * 문장이다(UI_GUIDELINE 11). 대신 **막힌 칸의 이름**을 말한다: 예전에는 무엇이
+     * 막혔든 "확인내용이나 조치를 적어 주세요"라고만 해서, 보고서 번호가 없어 막힌
+     * 사람이 멀쩡한 본문을 다시 적었다(`describeServiceReportBlockers` 머리말).
      */
-    notice = "아직 문서로 만들 수 없는 보고서입니다. 확인내용이나 조치를 한 줄이라도 적어 주세요.";
+    notice = describeServiceReportBlockers(validated.fieldErrors);
   } else {
     kindLabel = screenTitle(SERVICE_REPORT_TITLES[validated.data.kind]);
     try {

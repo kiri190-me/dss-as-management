@@ -474,14 +474,7 @@ test("입력 검사: 빈 고객사명·잘못된 날짜·없는 원인은 던진
     () => validateServiceReportInput({ ...INSPECTION_INPUT, issuedOn: new Date("bad") }),
     /발행일이\(가\) 유효한 날짜가 아닙니다/
   );
-  assert.throws(
-    () =>
-      validateServiceReportInput({
-        ...INSPECTION_INPUT,
-        reportNumber: { ...INSPECTION_INPUT.reportNumber, middle: "" },
-      }),
-    /보고서 번호\(중간\)/
-  );
+  // 🔴 보고서 번호는 여기 없다 — 비어도 된다(바로 아래 시험이 그것을 못 박는다).
   assert.throws(
     () =>
       validateServiceReportInput({
@@ -501,6 +494,52 @@ test("입력 검사: 빈 고객사명·잘못된 날짜·없는 원인은 던진
         body: { findings: [], actions: [] },
       }),
     /본문이 한 줄도 없습니다/
+  );
+});
+
+/**
+ * ============================================================================
+ * 🔴 보고서 번호는 **없어도 문서가 된다**(2026-09-21 사용자 결정)
+ * ============================================================================
+ * 예전에는 이 검사가 번호(중간·뒤) 두 칸을 필수로 봐서 빈 칸이면 던졌다. 그런데
+ * **교산 연락서에서 자동으로 만든 A/S 보고서는 그 칸을 일부러 비워 둔다** —
+ * 교산 쪽 번호를 우리 발행번호 자리에 넣으면 *우리가 발행한 척*이 되기
+ * 때문이다(`kyosan/report-save-values.ts`). 그래서 그 보고서들이 미리보기·인쇄·
+ * 엑셀에서 통째로 막혀 있었다.
+ *
+ * 사용자 판단은 **번호 없이도 보게 한다**이다. 번호를 지어내지 않는다 —
+ * 아직 우리가 발행한 문서가 아니니 **빈 칸이 사실에 맞다**. 그 칸이 정말 빈 채로
+ * 찍히는지는 아래 「빈 채로 찍힌다」 시험이 실제 양식을 채워서 본다. 여기서는
+ * **던지지 않는다**까지만 본다.
+ * ============================================================================
+ */
+test("🔴 입력 검사: 보고서 번호가 비어 있어도 던지지 않는다", () => {
+  const cases: ServiceReportInput["reportNumber"][] = [
+    // 중간만 빈 것 · 뒤만 빈 것 · 둘 다 빈 것.
+    { prefix: "T900", middle: "", tail: "7788" },
+    { prefix: "T900", middle: "Q11A1", tail: "" },
+    { prefix: "T900", middle: "", tail: "" },
+    // 앞 칸까지 통째로 없는 것 — 교산에서 들어온 보고서의 실제 모습이다.
+    { middle: "", tail: "" },
+    // 공백만 적힌 것도 빈 것으로 본다(채우개가 `.trim()` 한 뒤 칸을 비운다).
+    { middle: "   ", tail: " " },
+  ];
+  for (const reportNumber of cases) {
+    assert.doesNotThrow(
+      () => validateServiceReportInput({ ...INSPECTION_INPUT, reportNumber }),
+      `보고서 번호 ${JSON.stringify(reportNumber)} 를 막았다`
+    );
+  }
+
+  // 🔴 무르게 한 것은 **번호 하나뿐**이다 — 나머지 필수 검사는 그대로 산다.
+  assert.throws(
+    () =>
+      validateServiceReportInput({
+        ...INSPECTION_INPUT,
+        reportNumber: { middle: "", tail: "" },
+        customerName: "  ",
+      }),
+    /고객사명이 비어 있습니다/
   );
 });
 
@@ -878,6 +917,44 @@ test("검사 보고서: 머리·체크·본문이 준 대로 들어간다", { sk
   assert.equal(filled.text("H62"), undefined);
 
   assertUntouchedParts(inspectionPath as string, filled);
+});
+
+/**
+ * 🔴 **「던지지 않는다」만으로는 모자라다.** 검사를 통과해도 채우개가 그 칸에
+ * `undefined` 나 `No. - ` 같은 찌꺼기를 박으면 사람이 그것을 발행번호로 읽는다.
+ * 그래서 실제 양식을 채워 **칸에 무엇이 남았는지** 본다.
+ *
+ * 양식 견본(AM13·AQ13)에는 실제로 발행된 보고서의 번호가 박혀 있다. 빈 값을
+ * 주면 그 옛 값까지 지워져야 한다 — 남으면 남의 번호를 달고 나간다.
+ */
+test("🔴 보고서 번호가 비면 그 칸은 빈 채로 찍힌다", { skip: skipInspection }, () => {
+  const filled = fill(inspectionPath as string, {
+    ...INSPECTION_INPUT,
+    // 공백만 준 쪽도 함께 본다 — 다듬은 뒤 비워야 한다.
+    reportNumber: { prefix: "T900", middle: "", tail: "  " },
+  });
+  assertSheetIsSound(filled);
+
+  assert.equal(
+    filled.text(SERVICE_REPORT_CELLS.reportNumberMiddle),
+    undefined,
+    "보고서 번호(중간) 칸에 무언가 남았다 — 양식의 옛 번호이거나 찌꺼기다"
+  );
+  assert.equal(
+    filled.text(SERVICE_REPORT_CELLS.reportNumberTail),
+    undefined,
+    "보고서 번호(뒤) 칸에 무언가 남았다 — 양식의 옛 번호이거나 찌꺼기다"
+  );
+  // 🔴 칸이 사라지는 것이 아니라 **값만** 빈다. 서식이 날아가면 나중에 사람이
+  //    번호를 적어 넣었을 때 글꼴·테두리가 다른 칸이 된다.
+  assert.match(filled.sheetXml, /<c r="AM13"[^>]*\/>/, "AM13 셀 자체가 사라졌다");
+  assert.match(filled.sheetXml, /<c r="AQ13"[^>]*\/>/, "AQ13 셀 자체가 사라졌다");
+
+  // 번호 줄이 통째로 비는 것은 아니다 — 앞 칸은 준 대로 찍힌다.
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.reportNumberPrefix), "No. T900 - ");
+  // 나머지 머리 칸도 평소대로다.
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.customerName), "테스트 반도체(주)");
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.issuedOn), "2026-09-01");
 });
 
 test("수리 보고서: 제목·조치 완료·정리가 이 종류에만 들어간다", { skip: skipRepair }, () => {

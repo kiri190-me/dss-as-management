@@ -21,7 +21,10 @@ import {
   readServiceReportTemplate,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
-import { validateServiceReportFields } from "@/lib/validation/service-report-input";
+import {
+  describeServiceReportBlockers,
+  validateServiceReportFields,
+} from "@/lib/validation/service-report-input";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
 import {
   fillServiceReportWorkbook,
@@ -343,16 +346,16 @@ export async function GET(
      * 저장은 **적다 만 보고서도 받는다**(`validation/service-report-save-input.ts`).
      * 본문이 한 줄도 없는 장이 실제로 저장돼 있고, 그 장은 문서로 만들 수 없다.
      *
-     * 🔴 칸별 오류(`validated.fieldErrors`)는 **싣지 않는다.** 셀 주소가 섞인
-     * 개발자용 문장이고(UI_GUIDELINE 11 · 미리보기 화면의 같은 판단), 이 응답은
-     * 링크를 누른 사람의 브라우저에 **날것 그대로** 보인다. POST 쪽이 그것을
-     * 싣는 것은 받는 쪽이 화면이라 칸마다 붙여 줄 수 있기 때문이다.
+     * 🔴 칸별 오류 **메시지**(`validated.fieldErrors` 의 값)는 여전히 싣지 않는다.
+     * 숫자가 섞인 개발자용 문장이고(UI_GUIDELINE 11 · 미리보기 화면의 같은 판단),
+     * 이 응답은 링크를 누른 사람의 브라우저에 **날것 그대로** 보인다. POST 쪽이
+     * 그것을 싣는 것은 받는 쪽이 화면이라 칸마다 붙여 줄 수 있기 때문이다.
+     *
+     * 🔴 대신 **막힌 칸의 이름**은 말한다. 예전에는 무엇이 막혔든 "확인내용이나
+     * 조치를 적어 주세요"라고만 해서, 보고서 번호가 없어 막힌 사람이 멀쩡한 본문을
+     * 다시 적었다(`describeServiceReportBlockers` 머리말).
      */
-    return fail(
-      400,
-      "INVALID_INPUT",
-      "아직 문서로 만들 수 없는 보고서입니다. 보고서를 열어 확인내용이나 조치를 한 줄이라도 적어 주세요."
-    );
+    return fail(400, "INVALID_INPUT", describeServiceReportBlockers(validated.fieldErrors));
   }
   const input = validated.data;
 

@@ -256,6 +256,25 @@ describe("경계에서만 바꾼다 — 숫자와 날짜", () => {
     assert.ok(result.fieldErrors.issuedOn);
   });
 
+  /**
+   * 🔴 **저장의 문턱은 문서의 문턱과 따로다.** 저장은 `validateServiceReportFields`
+   * 를 부르지 않는다 — 부르는 곳은 xlsx 라우트와 인쇄 미리보기 셋뿐이다
+   * (`validation/service-report-input.ts` 머리말). 그래서 문서 쪽 규칙이 바뀌어도
+   * 여기 문턱은 움직이지 않아야 하고, 이 시험이 그것을 못 박는다.
+   *
+   * 보고서 번호는 **예전부터** 저장을 막은 적이 없다(화면의 지우기 확인창도
+   * "번호 세 칸은 다 비운 채로도 저장되므로"라고 적어 두었다). 2026-09-21 에
+   * 문서 쪽 필수를 푼 것은 이 성질과 상관없다.
+   */
+  test("🔴 보고서 번호가 다 비어도 저장은 받는다 — 문서 쪽 규칙과 따로다", () => {
+    const columns = convert(
+      filled({ reportNumberPrefix: "", reportNumberMiddle: "", reportNumberTail: "" })
+    ).columns;
+    assert.equal(columns.reportNumberPrefix, null);
+    assert.equal(columns.reportNumberMiddle, "");
+    assert.equal(columns.reportNumberTail, "");
+  });
+
   test("달력에 없는 날은 거절한다 — 그대로 두면 문서에 찍힌다", () => {
     const result = toServiceReportColumns(filled({ receivedOn: "2026-02-30" }));
     assert.equal(result.ok, false);

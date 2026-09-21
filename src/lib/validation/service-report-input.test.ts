@@ -6,6 +6,7 @@ import {
   validateServiceReportInput as assertFillerAccepts,
 } from "@/lib/xlsx/service-report-template";
 import {
+  describeServiceReportBlockers,
   SERVICE_REPORT_BODY_ROW_LAYOUT,
   SERVICE_REPORT_MAX_REMARK_ROWS,
   validateServiceReportFields,
@@ -75,8 +76,35 @@ test("필수 칸이 비면 칸마다 한국어로 알려 준다", () => {
   const errors = expectErrors({ kind: "REPAIR", body: { findings: ["a"], actions: [], summary: [] } });
   assert.ok(errors.customerName);
   assert.ok(errors.issuedOn);
-  assert.ok(errors["reportNumber.middle"]);
-  assert.ok(errors["reportNumber.tail"]);
+});
+
+// ── 보고서 번호 — 없어도 문서가 된다(2026-09-21 사용자 결정) ─────────────
+
+test("🔴 보고서 번호가 세 칸 다 비어도 통과한다 — 교산 연락서에서 만든 장이 그렇다", () => {
+  for (const reportNumber of [
+    { prefix: "", middle: "", tail: "" },
+    { middle: "", tail: "" },
+    {},
+    undefined,
+  ]) {
+    const data = expectOk(baseRequest({ reportNumber }));
+    assert.deepEqual(data.reportNumber, { prefix: undefined, middle: "", tail: "" });
+    // 🔴 여기를 지난 값은 채우개도 받아야 한다 — 아니면 400 대신 500 이 나간다.
+    assertFillerAccepts(data);
+  }
+});
+
+test("🔴 번호를 지어내지 않는다 — 적어 보낸 번호는 그대로, 공백만 다듬는다", () => {
+  const data = expectOk(baseRequest({ reportNumber: { prefix: " Z000 ", middle: " TEST1 ", tail: " 0001 " } }));
+  assert.deepEqual(data.reportNumber, { prefix: "Z000", middle: "TEST1", tail: "0001" });
+});
+
+test("번호 칸의 모양과 길이는 여전히 본다 — 무르게 한 것은 「비어도 되는가」뿐이다", () => {
+  assert.ok(expectErrors(baseRequest({ reportNumber: { middle: 7, tail: "0001" } }))["reportNumber.middle"]);
+  assert.ok(
+    expectErrors(baseRequest({ reportNumber: { middle: "A", tail: "가".repeat(201) } }))["reportNumber.tail"]
+  );
+  assert.ok(expectErrors(baseRequest({ reportNumber: "Z000-TEST1-0001" })).reportNumber);
 });
 
 // ── 날짜 ─────────────────────────────────────────────────────────────────
@@ -378,4 +406,52 @@ test("🔴 여기를 통과한 값은 채우개의 검사도 통과한다", () =
     // 던지지 않으면 통과다. 여기서 던지면 사용자는 400 대신 500 을 받는다.
     assertFillerAccepts(expectOk(raw));
   }
+});
+
+// ── 막힌 칸의 이름을 말한다 ──────────────────────────────────────────────
+
+test("🔴 막힌 칸의 이름을 말한다 — 번호가 없어 막혔는데 본문을 탓하지 않는다", () => {
+  const notice = describeServiceReportBlockers({ "reportNumber.tail": "보고서 번호(뒤)를 입력해 주세요." });
+  assert.match(notice, /보고서 번호\(뒤\)/);
+  assert.doesNotMatch(notice, /확인내용|조치/);
+});
+
+test("본문이 비어 막혔으면 「본문」이라고 말한다", () => {
+  assert.match(describeServiceReportBlockers({ body: "본문이 한 줄도 없습니다." }), /본문/);
+});
+
+test("🔴 칸별 오류 메시지의 내용은 한 글자도 싣지 않는다 — 고객사 사정이 섞인다", () => {
+  const notice = describeServiceReportBlockers({
+    "body.findings.2": "확인내용 3번째 줄이 1000자를 넘습니다.",
+  });
+  assert.match(notice, /확인내용/);
+  assert.doesNotMatch(notice, /3번째|1000/);
+});
+
+test("줄 번호가 붙은 키는 한 이름으로 모은다", () => {
+  const notice = describeServiceReportBlockers({
+    "body.findings.0": "x",
+    "body.findings.5": "x",
+    "causes.1": "x",
+  });
+  assert.equal(notice.match(/확인내용/gu)?.length, 1);
+  assert.match(notice, /원인/);
+});
+
+test("이름이 많으면 넷까지만 부르고 나머지는 「외 N곳」이다", () => {
+  const notice = describeServiceReportBlockers({
+    customerName: "x",
+    issuedOn: "x",
+    "reportNumber.middle": "x",
+    "reportNumber.tail": "x",
+    body: "x",
+    remark: "x",
+  });
+  assert.match(notice, /외 2곳/);
+});
+
+test("모르는 칸뿐이면 일반 문장으로 떨어진다 — 안내가 통째로 사라지지 않는다", () => {
+  const notice = describeServiceReportBlockers({ _: "보고서 내용을 확인할 수 없습니다." });
+  assert.match(notice, /아직 문서로 만들 수 없는 보고서입니다\./);
+  assert.match(notice, /보고서를 열어 내용을 확인해 주세요\./);
 });

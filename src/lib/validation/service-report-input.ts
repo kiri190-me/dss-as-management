@@ -57,6 +57,28 @@ import {
  * 값은 `" ・ 수리의뢰"` 처럼 글머리표가 붙은 채고(양식의 드롭다운 원본이
  * 그렇다 — `xlsx/service-report-choices.ts`), 본문 줄의 들여쓰기는 사람이 뜻을
  * 담아 넣은 것이다. 채우개도 이 칸들만은 다듬지 않고 그대로 적는다.
+ *
+ * ── 🔴 여기는 「보는 것」의 사전이다. 「저장하는 것」은 딴 파일이다 ──────
+ * 이 함수를 부르는 곳은 **문서를 만드는 셋뿐**이다:
+ *
+ *   · `POST /api/repair-cases/{건}/service-report/xlsx` — 화면이 적고 있는 값으로 xlsx
+ *   · `GET  …/service-report/xlsx?id=` — 저장된 장으로 xlsx
+ *   · `…/report/service-report/print` — 저장된 장으로 인쇄 미리보기
+ *
+ * **저장은 이 사전을 지나지 않는다.** 저장이 받는 값은
+ * `validation/service-report-save-input.ts` 의 `toServiceReportColumns` 가 혼자
+ * 본다(모양이 틀린 날짜·숫자만 막는다 — 적다 만 보고서도 저장돼야 하기
+ * 때문이다). 그래서 여기서 무엇을 무르게 해도 **저장의 문턱은 움직이지 않는다.**
+ * 반대로, 저장에서만 막아야 하는 것을 여기에 적으면 그것은 아무도 막지 않는다.
+ *
+ * ── 🔴 보고서 번호는 없어도 문서가 된다(2026-09-21 사용자 결정) ─────────
+ * 예전에는 번호(중간·뒤)를 필수로 봤다. 그래서 **교산 연락서에서 만든 보고서**가
+ * 미리보기·인쇄·엑셀에서 통째로 막혔다 — 이식은 그 칸을 일부러 비워 두기
+ * 때문이다("우리가 발행한 척이 되면 안 된다", `kyosan/report-save-values.ts`).
+ *
+ * 사용자 판단은 **번호 없이도 보게 한다**이다. 번호 칸은 **빈 채로 찍힌다** —
+ * 아직 우리가 발행한 문서가 아니니 그것이 사실에 맞다(채우개도 빈 글자를 받으면
+ * 그 칸을 비운다). 번호를 지어내지 않는다.
  * ============================================================================
  */
 
@@ -273,18 +295,19 @@ export function validateServiceReportFields(raw: unknown): ValidateServiceReport
     fieldErrors.reportNumber = "보고서 번호를 확인할 수 없습니다.";
   }
   const reportPrefix = optionalText(reportNumberRecord, "prefix", "reportNumber.prefix", "보고서 번호(앞)");
-  const reportMiddle = reportNumberRecord.middle;
-  const reportTail = reportNumberRecord.tail;
-  if (typeof reportMiddle !== "string" || reportMiddle.trim() === "") {
-    fieldErrors["reportNumber.middle"] = "보고서 번호(중간)를 입력해 주세요.";
-  } else if (reportMiddle.length > MAX_SHORT_TEXT) {
-    fieldErrors["reportNumber.middle"] = `보고서 번호(중간)는 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
-  }
-  if (typeof reportTail !== "string" || reportTail.trim() === "") {
-    fieldErrors["reportNumber.tail"] = "보고서 번호(뒤)를 입력해 주세요.";
-  } else if (reportTail.length > MAX_SHORT_TEXT) {
-    fieldErrors["reportNumber.tail"] = `보고서 번호(뒤)는 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
-  }
+  /**
+   * 🔴 세 칸 다 **없어도 된다** — 위 머리말의 '보고서 번호는 없어도 문서가 된다'.
+   * 그래도 모양(글자인가)과 길이는 여전히 본다: 숫자나 객체가 넘어오면 채우개가
+   * `.trim()` 을 부르다 죽고, 200자를 넘으면 그 칸을 뚫고 나간다. 무르게 한 것은
+   * **비어 있어도 되는가** 하나뿐이다.
+   *
+   * 앞 칸과 달리 `undefined` 를 그대로 둘 수 없다 — `ServiceReportInput` 의
+   * `middle`·`tail` 은 `string` 이고, 채우개는 빈 글자를 받으면 그 칸을 비운다.
+   */
+  const reportMiddle =
+    optionalText(reportNumberRecord, "middle", "reportNumber.middle", "보고서 번호(중간)") ?? "";
+  const reportTail =
+    optionalText(reportNumberRecord, "tail", "reportNumber.tail", "보고서 번호(뒤)") ?? "";
 
   const customer = optionalText(root, "customer", "customer", "고객");
   const receivedOn = optionalDate(root, "receivedOn", "receivedOn", "접수일");
@@ -441,11 +464,8 @@ export function validateServiceReportFields(raw: unknown): ValidateServiceReport
     customerName,
     // 위에서 없으면 오류를 담았으므로 여기 오면 반드시 있다.
     issuedOn: issuedOn as Date,
-    reportNumber: {
-      prefix: reportPrefix,
-      middle: (reportMiddle as string).trim(),
-      tail: (reportTail as string).trim(),
-    },
+    // `optionalText` 가 이미 다듬었다(없으면 빈 글자다 — 위 '없어도 된다').
+    reportNumber: { prefix: reportPrefix, middle: reportMiddle, tail: reportTail },
     customer,
     receivedOn,
     occurrencePlace,
@@ -488,6 +508,102 @@ export function validateServiceReportFields(raw: unknown): ValidateServiceReport
       body: { findings, findingsIntro, actions },
     },
   };
+}
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 「왜 이 보고서는 문서가 안 되나」를 **실제로 막힌 칸의 이름으로** 말한다
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 **이 함수가 생긴 까닭은 엉뚱한 곳을 탓하고 있었기 때문이다.** 미리보기
+ * 화면과 내려받기 라우트는 검증이 무엇을 짚었든 늘 "확인내용이나 조치를 한
+ * 줄이라도 적어 주세요"라고 말했다. 보고서 번호가 없어서 막힌 사람은 본문이
+ * 비었다고 읽고 멀쩡한 본문을 다시 적는다 — 고쳐야 할 칸은 화면 맨 위에 있는데.
+ *
+ * 🔴 **칸별 오류 메시지(`fieldErrors` 의 값)는 그대로 내보내지 않는다.**
+ * "본문이 79줄입니다" 처럼 숫자가 섞이고, 부르는 쪽이 사람에게 그대로 보이는
+ * 자리(주소창에 뜨는 JSON · 안내판)라 칸마다 붙여 줄 수도 없다(UI_GUIDELINE 11).
+ * 여기서 쓰는 것은 **칸 이름(키)** 뿐이고, 그것을 화면에서 찾을 수 있는 한국어
+ * 이름으로 바꾼다. 본문 내용은 한 글자도 실리지 않는다.
+ *
+ * ⚠️ 모르는 키는 **조용히 지나간다.** 칸이 하나 늘었는데 아래 표를 안 고치면
+ * 그 칸만 이름 없이 빠지고 나머지는 그대로 나온다 — 안내가 통째로 사라지는
+ * 것보다 낫다. 하나도 못 알아보면 아래 일반 문장으로 떨어진다.
+ */
+const SERVICE_REPORT_BLOCKED_PREFIX = "아직 문서로 만들 수 없는 보고서입니다.";
+
+/** 한 줄이 길어지지 않게 이만큼만 세고 나머지는 「외 N곳」으로 줄인다. */
+const MAX_BLOCKER_LABELS = 4;
+
+/**
+ * 칸 이름(`fieldErrors` 의 키) → 사람이 보고서 화면에서 찾을 수 있는 이름.
+ *
+ * 줄 번호가 붙는 키(`body.findings.3` · `causes.0` · `remark.2`)는 뒤의 숫자를
+ * 떼고 찾는다 — 사람에게는 「확인내용」이면 충분하다.
+ */
+const SERVICE_REPORT_FIELD_LABELS: Record<string, string> = {
+  kind: "보고서 종류",
+  customerName: "고객사명",
+  issuedOn: "발행일",
+  reportNumber: "보고서 번호",
+  "reportNumber.prefix": "보고서 번호(앞)",
+  "reportNumber.middle": "보고서 번호(중간)",
+  "reportNumber.tail": "보고서 번호(뒤)",
+  customer: "고객",
+  receivedOn: "접수일",
+  occurrencePlace: "발생 장소",
+  occurrencePlaceDetail: "발생 장소 상세",
+  occurredOn: "발생 년월일",
+  productName: "품명",
+  productCategory: "품명 구분",
+  modelName: "형식",
+  manufacturedYear: "제조 년",
+  manufacturedMonth: "제조 월",
+  lotNumber: "L/N",
+  serialNumber: "S/N",
+  usedYears: "사용 년수",
+  usedMonths: "사용 개월수",
+  repairNumber: "수리 번호",
+  situation: "상황",
+  "situation.request": "상황(의뢰 종류)",
+  "situation.detail": "상황(내용)",
+  causes: "원인",
+  remark: "비고",
+  disposition: "조치 구역",
+  "disposition.onSiteRepair": "현지수리",
+  "disposition.replacementDelivery": "대품납입",
+  "disposition.goodsReceipt": "현품 인수",
+  "disposition.goodsReceipt.on": "현품 인수 날짜",
+  "disposition.goodsReceipt.number": "현품 인수 번호",
+  "disposition.completion": "조치 완료",
+  "disposition.completion.on": "조치 완료 날짜",
+  body: "본문",
+  "body.findingsIntro": "확인내용 머리글",
+  "body.findings": "확인내용",
+  "body.actions": "조치",
+  "body.summary": "정리",
+};
+
+/** 줄 번호가 붙은 키에서 번호를 뗀다 — `body.findings.3` → `body.findings`. */
+function blockerLabelKey(fieldKey: string): string {
+  return fieldKey.replace(/\.\d+$/u, "");
+}
+
+export function describeServiceReportBlockers(fieldErrors: Record<string, string>): string {
+  const labels: string[] = [];
+  for (const key of Object.keys(fieldErrors)) {
+    const label = SERVICE_REPORT_FIELD_LABELS[blockerLabelKey(key)];
+    // 같은 구역의 줄이 여러 개 막혀도 이름은 한 번만 부른다.
+    if (label !== undefined && !labels.includes(label)) labels.push(label);
+  }
+
+  if (labels.length === 0) {
+    return `${SERVICE_REPORT_BLOCKED_PREFIX} 보고서를 열어 내용을 확인해 주세요.`;
+  }
+
+  const shown = labels.slice(0, MAX_BLOCKER_LABELS);
+  const hidden = labels.length - shown.length;
+  const list = shown.map((label) => `「${label}」`).join("·") + (hidden > 0 ? ` 외 ${hidden}곳` : "");
+  return `${SERVICE_REPORT_BLOCKED_PREFIX} 보고서를 열어 ${list}을(를) 확인해 주세요.`;
 }
 
 // ── 조각들 ───────────────────────────────────────────────────────────────

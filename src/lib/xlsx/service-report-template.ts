@@ -779,16 +779,22 @@ export function validateServiceReportInput(input: ServiceReportInput): void {
   }
   if (input.customerName.trim() === "") throw new Error("고객사명이 비어 있습니다.");
   assertDate(input.issuedOn, "발행일");
-  /**
-   * 🔴 **보고서 번호는 비어 있어도 된다**(2026-09-21 사용자 결정). 예전에는 중간·뒤
-   * 두 칸이 비면 여기서 던졌다. 그런데 **교산 연락서에서 만든 보고서**는 그 칸을
-   * 일부러 비워 둔다 — 교산 쪽 번호를 우리 발행번호 자리에 넣으면 우리가 발행한
-   * 척이 되기 때문이다(`kyosan/report-save-values.ts`). 아직 우리가 발행한 문서가
-   * 아니니 **빈 칸이 사실에 맞다.** 아래 채우개가 빈 글자를 받으면 그 칸을 비운다
-   * (`setInlineString` 의 빈 글자 → `clearCell`).
-   *
-   * 번호를 여기서 지어내지 않는다. 사람이 나중에 적는다.
-   */
+
+  // ── 🔴 여기에 「보고서 번호」 검사가 없다 — 빠뜨린 것이 아니라 없앤 것이다 ──
+  //
+  // **보고서 번호는 비어 있어도 된다**(2026-09-21 사용자 결정). 예전에는 중간·뒤
+  // 두 칸이 비면 여기서 던졌다. 그런데 **교산 연락서에서 만든 보고서**는 그 칸을
+  // 일부러 비워 둔다 — 교산 쪽 번호를 우리 발행번호 자리에 넣으면 우리가 발행한
+  // 척이 되기 때문이다(`kyosan/report-save-values.ts`). 아직 우리가 발행한 문서가
+  // 아니니 **빈 칸이 사실에 맞다.** 아래 채우개가 빈 글자를 받으면 그 칸을 비운다
+  // (`setInlineString` 의 빈 글자 → `clearCell`).
+  //
+  // 번호를 여기서 지어내지 않는다. 사람이 나중에 적는다.
+  //
+  // 🔴 도로 넣지 마라 — 넣으면 교산에서 들어온 보고서가 미리보기·인쇄·엑셀에서
+  // 통째로 막힌다. 시험 둘이 이 자리를 지킨다(`service-report-template.test.ts`
+  // 의 「보고서 번호가 비어 있어도 던지지 않는다」·「빈 채로 찍힌다」).
+  // ───────────────────────────────────────────────────────────────────────
 
   if (input.receivedOn !== undefined) assertDate(input.receivedOn, "접수일");
   if (input.occurredOn !== undefined && typeof input.occurredOn !== "string") {
