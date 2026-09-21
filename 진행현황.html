@@ -45,7 +45,6 @@
   .done { color: var(--accent); }
   .run  { color: var(--run); }
   .wait { color: var(--dim); }
-  .hold { color: var(--wait); }
   tr.now td { background: color-mix(in srgb, var(--run) 10%, transparent); }
   tr.fin td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 
@@ -86,266 +85,199 @@
 
 <header>
   <h1>DSS 사내 시스템 — 진행 현황판</h1>
-  <p class="stamp">갱신 2026-09-21 · 🔔 <b>종이 실제로 울립니다</b> — 개선요청에서 A/S 알림을 보고 눌러 건너갑니다 ·
-  A/S 는 올림(커밋 13개) · 셋 진행 중</p>
+  <p class="stamp">갱신 2026-09-21 (저녁) · 네 가지가 동시에 돌고 있습니다 ·
+  올리지 않은 커밋 <b>12개</b></p>
 </header>
 
 
-<div class="live">
-  <h3>⏸ 둘이 도중에 멈췄습니다 — 오늘 쓸 수 있는 양을 다 썼습니다</h3>
-  <p><b>오후 7시에 풀립니다.</b> 멈춘 둘은 <b>하던 자리가 파일에 그대로 남아 있어</b> 이어서 할 수 있습니다.
-  🔴 <b>커밋하지 않았습니다</b> — 중간 상태라 그대로 담으면 안 됩니다.</p>
-  <table>
-    <tr><th>어디</th><th>어디까지 갔나</th></tr>
-    <tr>
-      <td><code>dss-leave</code><br>결재선 설정</td>
-      <td>미리보기 조각과 설정 화면을 만들던 중. 🔴 <b>값진 것을 하나 잡았습니다</b> —
-          A/S 에서 색 이름을 베껴 왔더니 이 사이트에서는 <b>투명으로 풀렸습니다</b>(글자가 안 보이는 상태).
-          제가 경고했던 「오류 없이 조용히 색이 안 나는」 바로 그 일이 <b>실제로 일어났고 잡혔습니다.</b>
-          쓸 수 있는 이름으로 바꾼 뒤 폰 폭 확인을 하던 중이었습니다</td>
-    </tr>
-    <tr>
-      <td>A/S<br>번호 없이 보고서 보기</td>
-      <td>검증을 <b>보는 것</b>과 <b>저장하는 것</b>으로 가르고, 그 경계를 못 박는 시험을 쓰던 중.
-          ⚠️ 검증 파일이 중간 상태라 <b>이어서 끝내야</b> 합니다</td>
-    </tr>
-  </table>
-</div>
+<h2>지금 돌고 있는 것</h2>
 
-<div class="live">
-  <h3>✅ 방금 커밋한 셋</h3>
-  <table>
-    <tr><th>어디</th><th>무엇</th><th>눈으로 봐 주실 곳</th></tr>
-    <tr>
-      <td><code>dss-po</code></td>
-      <td><b>맨 위가 한 층이 되고 지금 보는 곳이 짙게</b></td>
-      <td><code>192.168.1.132:3600/</code> — 한 줄짜리 머리말과 짙게 칠해진 「내자 정리」.
-          <b>로그아웃했다 다시 로그인</b>도 한 번 봐 주십시오(기계가 대신 못 한 유일한 것)</td>
-    </tr>
-    <tr>
-      <td><code>dss-improvements</code></td>
-      <td><b>머리말에 알림 종</b> 🔔</td>
-      <td><code>localhost:3500</code> 머리말 오른쪽 끝. 열면 A/S 알림이 보이고
-          누르면 건너갑니다. <b>알림이 0건이면 종 자체가 안 보입니다</b>(묶음 쪽 결정)</td>
-    </tr>
-    <tr>
-      <td>A/S</td>
-      <td><b>연락서 양식 말을 한글로</b></td>
-      <td><code>localhost:3000/excel-imports/kyosan-report</code> — 연락서를 올리고
-          「무엇이 들어가는가」 표에서 <b>현품 인수 · 교체 없음</b>과 회색 「일본어 원문」 딱지</td>
-    </tr>
-  </table>
-  <p style="margin-top:10px"><b>앞서 커밋한 다섯</b> — 연락서 S4 · 주간보고 고르개 ·
-  PO 견적서 · 휴가 「통합 로그인으로」 · 알림 6a. <b>A/S 는 올렸습니다</b>(커밋 13개).</p>
-</div>
+<table>
+  <tr><th>무엇</th><th>어디</th><th>지금</th></tr>
+  <tr class="now">
+    <td><b>연락서 내용을<br>제자리 칸으로</b></td>
+    <td>A/S</td>
+    <td>확인내용·조치를 <b>보고서에 몰아넣지 않고</b> 수리 건 상세의 알맞은 칸에 나눠 넣습니다.
+        <b>어느 칸이 알맞은지 대응표를 만드는 중</b>입니다 — 짐작으로 지시서를 쓰면 틀립니다</td>
+  </tr>
+  <tr class="now">
+    <td><b>일본어를<br>전부 한글로</b></td>
+    <td>A/S</td>
+    <td>「원본이 남지 않도록」이 목표입니다. <b>고유 문장이 몇 개인지 재는 중</b>입니다 —
+        그 숫자가 방식을 가릅니다(몇백이면 전부, 수천이면 많이 나오는 것부터)</td>
+  </tr>
+  <tr class="now">
+    <td><b>견적서 3b</b></td>
+    <td><code>dss-po</code></td>
+    <td>편집 폼 옮기기. <b>무엇이 딸려 오는지 세는 중</b>입니다 —
+        3a 때 그냥 옮겼으면 99파일 23,433줄이 따라올 뻔했습니다.
+        🔴 <b>시험용 DB 를 먼저 정해야 합니다</b>(아래)</td>
+  </tr>
+  <tr class="now">
+    <td><b>휴가 결재선을<br>사람 순서로</b></td>
+    <td><code>dss-leave</code></td>
+    <td><b>만드는 중</b>입니다. 직급별 갈래를 없애고 <b>사람 목록 하나</b>로 바꿉니다(아래 설계)</td>
+  </tr>
+</table>
+
+
+<h2>확인·커밋을 기다리는 것</h2>
 
 <div class="todo">
-  <h3>✅ 눈으로 확인받았습니다 (2026-09-21) — 아래 넷 다 커밋했습니다</h3>
+  <h3>👀 눈으로 봐 주실 곳 둘</h3>
   <table>
-    <tr><th>무엇</th><th>주소</th><th>볼 곳</th></tr>
+    <tr><th>어디</th><th>볼 곳</th></tr>
     <tr>
-      <td><b>연락서 올리기</b></td>
-      <td><code>localhost:3000/excel-imports/kyosan-report</code></td>
-      <td>엑셀 한 장을 고르면 <b>넣을 내용을 먼저 보여주고</b>, 눌러야 들어갑니다.
-          🔴 짝 후보가 여럿이면 경고가 뜹니다(아직 저장 안 됨 — S4b 에서 풉니다)</td>
+      <td><code>localhost:3300</code><br>계측기</td>
+      <td rowspan="2">머리말 <b>오른쪽 끝에 알림 종</b>.
+          🔴 <b>계측기는 폰 폭으로도</b> 한 번 봐 주십시오 — 알림이 있으면 종이 아랫줄
+          오른쪽에 섭니다(폰에서 오른쪽 정렬을 일부러 꺼 둔 곳이라 자리를 따로 잡아 줬습니다).
+          <b>PO 종에는 A/S 의 견적서 결재 알림</b>이 뜹니다.
+          <span class="pct">알림이 0건이면 종 자체가 안 보입니다 — 그게 정상입니다</span></td>
     </tr>
-    <tr>
-      <td><b>주간보고 고르개</b></td>
-      <td><code>localhost:3000/dashboard/weekly-report</code></td>
-      <td>제목 아래 단추 셋(<b>전체 · RFG 만 · MB 만</b>).
-          ① <b>「전체」가 전과 똑같은지</b> ② <b>「RFG 만」</b> 을 눌러 파란 안내 줄이 읽히는지
-          ③ 🔴 <b>한 칸이 폭을 다 쓰는 모양</b> — 예전 두 칸이 익숙하시면 되돌릴 수 있습니다
-          ④ <code>Ctrl+P</code> 에서 단추는 빠지고 안내 줄은 남는지</td>
-    </tr>
-    <tr>
-      <td><b>PO 견적서 목록</b></td>
-      <td><code>192.168.1.132:3600/quotes</code></td>
-      <td>목록·카드·휴지통이 A/S 와 같은지. 🔴 <b>요약 줄과 인수번호가 아직 링크가 아닙니다</b>
-          — 수정 화면은 다음 조각, 수리 건 상세는 A/S 화면이라 일부러 비웠습니다</td>
-    </tr>
-    <tr>
-      <td><b>휴가 「통합 로그인으로」</b></td>
-      <td><code>localhost:3700</code></td>
-      <td>머리말 <b>오른쪽 끝</b>, 「로그아웃」 왼쪽. 🔴 눌러서 포털 앱 목록이 뜨고
-          <b>뒤로 왔을 때 다시 로그인하라고 하지 않아야</b> 합니다(로그아웃과 갈렸다는 증거)</td>
-    </tr>
+    <tr><td><code>192.168.1.132:3600</code><br>PO / 내자</td></tr>
   </table>
+  <p class="pct">시험은 통과했습니다 — 계측기 76개 · PO 581개. 보시고 나면 커밋합니다.</p>
 </div>
 
-<div class="todo">
-  <h3>⏸ 한 가지만 직접 봐 주셔야 합니다 — PO 로그아웃 → 재로그인</h3>
-  <p><b><code>http://192.168.1.132:3600/</code></b> 에서 <b>로그아웃했다가 다시 로그인</b>해 보시고,
-  들어오자마자 <b>내자 정리</b>가 뜨는지만 봐 주십시오.</p>
-  <p class="pct">이것만 기계가 대신 못 했습니다 — 로그아웃 단추를 누르면 포털 세션까지 끊겨서
-  비밀번호를 넣어야 하는데, 그건 사람이 할 일입니다. 대신 쿠키 없는 요청으로 같은 길을
-  지나는 것은 확인했습니다(303 → 로그인 통로, 무한 되돌기 없음).</p>
+<div class="live">
+  <h3>✅ 치워 뒀던 것을 전부 되살렸습니다 — A/S 는 커밋까지</h3>
+  <p>저녁에 화면 결함의 원인을 잘못 짚어 되돌렸던 것들입니다.
+  <b>원인은 코드가 아니었으므로</b>(아래) 그대로 되살렸습니다.</p>
+  <table>
+    <tr><th>무엇</th><th class="c">지금</th></tr>
+    <tr class="fin"><td><b>번호 없이도 보고서를 문서로</b> + <b>막힌 칸 이름 말하기</b> +
+        🔴 <b>빨간 불이던 시험 수리</b></td><td class="c"><b>커밋 <code>4f0f5b6</code></b></td></tr>
+    <tr class="fin"><td><b>연락서 S4b</b> — 짝이 여럿일 때 고른 것을 저장까지</td>
+        <td class="c"><b>커밋 <code>448c920</code></b></td></tr>
+    <tr><td><b>알림 종</b> — 계측기 · PO</td><td class="c">되살림 · <b>눈 확인 대기</b></td></tr>
+  </table>
+  <p class="pct">A/S 전체 시험 <b>4,283개 fail 0</b> · 타입 검사 통과. 아직 올리지는 않았습니다.</p>
+</div>
+
+<div class="warn">
+  <p><strong>🔴 오늘 배운 것 — 메뉴바·종이 사라지면 코드를 의심하기 전에 재로그인</strong></p>
+  <p>저녁에 <b>메뉴바 드롭다운과 알림 종이 사라졌습니다.</b> 저는 제 작업이 원인이라고 보고
+  <b>저녁 작업을 전부 되돌렸는데, 되돌린 뒤에도 증상이 그대로였습니다.</b>
+  <b>다시 로그인하니 돌아왔습니다.</b></p>
+  <p><b>왜 그런가:</b> 메뉴바 목록은 각 사이트가 만드는 것이 아니라 <b>포털이 로그인할 때
+  내려 주는 값</b>이고, 사이트는 그것을 쿠키에 담아 뒀다가 그립니다. 쿠키 수명 = 로그인 수명이라
+  <b>서버를 전부 내렸다 올리면</b> 목록이 비고, 그러면 드롭다운이 <b>자리째 안 그려집니다</b>.
+  종도 같은 길로 옵니다. 화면에는 「기능이 사라진 것」처럼 보입니다.</p>
+  <p>🔴 <b>앞으로 같은 증상이 나오면 로그아웃 → 재로그인부터 해 보십시오.</b></p>
 </div>
 
 
-<h2>큰 일 셋 — 어디까지 왔나</h2>
+<h2>큰 일 — 어디까지 왔나</h2>
 
 <div class="grid">
   <div class="card">
     <h4>통합 알림 · 사용자 관리</h4>
-    <div class="bar"><span style="width:67%"></span></div>
-    <div class="n">6<span class="sub"> / 9 조각</span></div>
-    <div class="sub">종까지 만듦 · 남은 건 붙이기</div>
+    <div class="bar"><span style="width:72%"></span></div>
+    <div class="n">6.5<span class="sub"> / 9 조각</span></div>
+    <div class="sub">넷 중 둘에 종을 달았습니다</div>
   </div>
   <div class="card">
     <h4>연락서 판독기</h4>
     <div class="bar"><span style="width:88%"></span></div>
-    <div class="n">S4<span class="sub"> 까지</span></div>
-    <div class="sub">읽고 · 짝짓고 · 저장하고 · 화면까지</div>
+    <div class="n">S4<span class="sub"> + 되돌린 S4b</span></div>
+    <div class="sub">넣는 자리를 바꾸는 중</div>
   </div>
   <div class="card">
     <h4>PO / 내자 분리</h4>
     <div class="bar"><span style="width:56%"></span></div>
     <div class="n">5<span class="sub"> / 9 조각</span></div>
-    <div class="sub">다음은 견적서(가장 큰 덩어리)</div>
+    <div class="sub">3b 견적서 편집 폼 조사 중</div>
   </div>
   <div class="card">
-    <h4>휴가 관리 연동</h4>
-    <div class="bar"><span style="width:100%"></span></div>
-    <div class="n">완료<span class="sub"> · 올림</span></div>
-    <div class="sub">🔴 직원 추가가 실제로 됩니다</div>
+    <h4>휴가 관리</h4>
+    <div class="bar"><span style="width:85%"></span></div>
+    <div class="n">연동 완료<span class="sub"> · 결재선 진행</span></div>
+    <div class="sub">사람 순서로 바꾸는 중</div>
   </div>
 </div>
 
 
 <h3>① 통합 알림 · 사용자 관리</h3>
 
-<p>설계서 <code>NOTIFICATION_AND_IDENTITY_DESIGN.md</code> (커밋 <code>18422c2</code>).
-<b>미결 항목 없음</b> — 구현만 남았습니다.</p>
+<p>설계서 <code>NOTIFICATION_AND_IDENTITY_DESIGN.md</code>. <b>미결 항목 없음</b> — 구현만 남았습니다.</p>
 
 <table>
   <tr><th class="c">조각</th><th>내용</th><th class="c">상태</th></tr>
-  <tr class="fin"><td class="c">0</td><td>설계 확정</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">1</td><td>로그인 후 <b>원래 주소로 복귀</b> — 판정(<code>27113ed</code>) + 입구(<code>0623502</code>)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">2</td><td>A/S 가 <b>알림·설정 통로</b>를 연다 (<code>88d99df</code>)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">3</td><td>포털이 <b>알림을 모아 주는 창구</b> (<code>d367e71</code>). 🔴 <b>A/S 와 실제 왕복 성공 — 진짜 알림 25줄</b></td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">4</td><td>포털에 <b>알림 설정 화면</b> (<code>d4cd40a</code>) — 🔴 <b>저장이 통째로 거절될 버그를 미리 막음</b>(아래)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">5</td><td>종을 <code>@dss/ui</code> 로 (<code>8a17da8</code>) — 🔴 <b>색을 표가 아니라 셈으로</b> 풀었습니다(아래)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">6a</td><td>🔴 <b>포털에 「사이트가 부르는」 통로</b> — 지금까지는 방향이 반대였습니다.
-      실제로 왕복시켜 봤습니다: <b>개선요청이 되어 물으니 A/S 알림을 합쳐 돌려줬습니다</b>.
-      🔴 <b>부른 사이트 자신의 알림은 빼고</b> 줍니다 — 안 그러면 방금 처리한 줄이 바로 그 화면에 30초 남습니다</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">6b</td><td><b>첫 사이트에 종을 달았습니다</b>(개선요청) — 🔴 <b>실제로 됩니다</b>:
-      종을 열면 A/S 알림이 보이고, 줄을 누르니 <b>그 일을 처리하는 화면</b>으로 건너갔습니다.
-      🔴 <b>포털을 끊어 놓고도 확인</b>했습니다 — 화면은 평소처럼 즉시 뜨고 종만 없습니다.
-      머리말·본문이 먼저 뜨고 <b>종만 나중에 흘러 들어옵니다</b>(왕복 2초 상한)</td><td class="c st done">✅ 끝</td></tr>
-  <tr><td class="c">6c</td><td>남은 넷에도 붙이기 — A/S · PO · 계측기 · 휴가. <b>따라 할 순서를 문서로 남겼습니다</b></td><td class="c st wait">⬜</td></tr>
+  <tr class="fin"><td class="c">0~5</td>
+      <td>설계 · 로그인 후 원래 주소로 복귀 · A/S 알림 통로 · 포털 알림 창구 ·
+          포털 알림 설정 화면 · 종을 <code>@dss/ui</code> 묶음으로</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">6a</td>
+      <td>포털에 <b>사이트가 부르는</b> 통로 — 방향이 반대인 새 문.
+          🔴 <b>부른 사이트 자신의 알림은 빼고</b> 줍니다(안 그러면 방금 처리한 줄이 그 화면에 30초 남습니다)</td>
+      <td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">6b</td>
+      <td><b>개선요청에 종</b> — 🔔 실제로 울립니다. 열면 A/S 알림이 보이고 눌러 건너갑니다.
+          포털을 끊어 놓아도 화면은 평소처럼 뜹니다</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="now"><td class="c">6c</td>
+      <td><b>남은 넷에도</b> — <b>계측기 · PO 완료</b>(눈 확인 대기) ·
+          <b>A/S · 휴가 남음</b>.
+          🔴 A/S 는 <b>자체 종이 있어</b> 받은 알림을 이어 붙이고 개수도 더해야 합니다</td>
+      <td class="c st run">🔵 절반</td></tr>
   <tr><td class="c">7</td><td>A/S 알림 탭 걷어내고 이름을 <b>「권한 · 승인 설정」</b>으로</td><td class="c st wait">⬜</td></tr>
   <tr><td class="c">8</td><td>권한 회수가 세션을 끊게 한다</td><td class="c st wait">⬜</td></tr>
 </table>
-
-<p class="pct">확정된 것: 알림은 포털이 <b>모으기만</b> 하고 저장 안 함 · 설정은 <b>화면만</b> 이사 ·
-<b>역할 단위로 충분</b>(조각 2~4 가 DB 를 안 건드림) · 사용자 관리에서 떠나는 건 <b>알림 탭 하나뿐</b></p>
 
 
 <h3>② 연락서 판독기</h3>
 
 <table>
   <tr><th class="c">단계</th><th>내용</th><th class="c">상태</th></tr>
-  <tr class="fin"><td class="c">준비</td><td>NAS 접속 · 자료 전수 파악 · 옛 <code>.xls</code> 143장 변환 · 판본 지도</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">S1</td><td><b>판독기</b> — 엑셀 한 장 → 수리 건 내용 (<code>8f251b8</code>). <b>469장 실측 검증</b></td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">S3a</td><td><b>짝짓기 + 미리보기</b> (<code>46373cc</code>) — 🔴 <b>접수번호만 믿었다면 12장이 잘못 붙었을 것</b>을 검증이 잡아냄</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">S3b</td><td><b>저장</b> (<code>88e75c3</code>) — 🔴 <b>개발 DB 는 전후가 완전히 같습니다</b> · 시험은 시험 DB 에서만</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="now"><td class="c">S4</td><td>올리기 화면 — 엑셀을 고르면 넣을 내용을 먼저 보여주고, 사람이 눌러야 들어갑니다.
-      🔴 <b>결정이 필요합니다</b> — 짝 후보가 여럿일 때 사람이 골라도 <b>지금은 저장되지 않습니다</b>(아래)</td><td class="c st run">🔵 눈 확인 대기</td></tr>
-  <tr class="fin"><td class="c">한글</td><td><b>양식 말을 한글로</b> — 원인 10가지 · 처치 4가지 · 「교체 없음」.
-      🔴 <b>469장을 다 읽어 빈도를 세고</b> 채웠습니다(추측 0). 그 열넷이 469장 전부에 한 글자도
-      다르지 않게 나와 <b>닫힌 목록</b>임이 확인됐습니다.
-      자유 문장은 원문을 뒀습니다 — 낱말 사전을 대 보니 <b>열에 넷이 「終段AMP 기판의 소손」 꼴
-      반쪽 번역</b>이 됐습니다</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="now"><td class="c">번호</td><td><b>번호 없이도 보고서 보기</b> — 연락서로 만든 보고서는
-      미리보기·엑셀 단추가 이미 붙는데 <b>번호 칸이 비어</b> 막혔습니다. 번호를 비운 건 <b>일부러</b>입니다
-      (채우면 우리가 발행한 척이 됩니다). 🔴 그때 뜨던 말이 <b>「확인내용이나 조치를 적어 주세요」</b>라
-      엉뚱한 곳을 탓했습니다 — 모든 보고서에 해당하는 기존 결함입니다</td><td class="c st run">🔵 진행</td></tr>
-  <tr class="now"><td class="c">번역</td><td><b>자유 문장까지 전부 한글로</b>(사용자 요청) —
-      지금 <b>고유 문장이 몇 개인지</b> 세고 있습니다. 몇백이면 전부 옮기고, 수천이면 많이 나오는
-      것부터 덮습니다</td><td class="c st run">🔵 재는 중</td></tr>
-  <tr><td class="c">S4b</td><td>짝이 여럿일 때 <b>고른 것을 저장까지</b> — 위 빨간 상자의 결정</td><td class="c st wait">⬜</td></tr>
+  <tr class="fin"><td class="c">준비<br>~S3b</td>
+      <td>NAS 자료 전수 파악 · 옛 <code>.xls</code> 143장 변환 · <b>판독기</b>(469장 실측) ·
+          <b>짝짓기</b> · <b>저장</b> · <b>올리기 화면</b> · <b>양식 말 한글화</b></td>
+      <td class="c st done">✅ 끝</td></tr>
+  <tr class="now"><td class="c">자리</td>
+      <td>🔴 <b>넣는 자리를 바꿉니다</b>(2026-09-21 사용자 지시) — 확인내용·조치를
+          <b>보고서에 몰아넣지 않고</b> 수리 건 상세의 알맞은 칸에 나눠 넣습니다.
+          어느 칸이 알맞은지 <b>대응표를 만드는 중</b>입니다</td><td class="c st run">🔵 조사</td></tr>
+  <tr class="now"><td class="c">번역</td>
+      <td>🔴 <b>일본어 원본이 남지 않도록</b>(2026-09-21 사용자 지시).
+          고유 문장 수를 <b>재는 중</b>입니다. 자유 기술 줄 2,262개 중 일본어가 든 것 2,086개인데,
+          <b>중복을 뺀 수</b>가 방식을 가릅니다</td><td class="c st run">🔵 재는 중</td></tr>
+  <tr class="fin"><td class="c">번호</td>
+      <td><b>번호 없이도 보고서를 문서로</b>. 번호 자리는 <b>빈 칸</b>으로 찍힙니다.
+          🔴 <b>보는 것과 저장하는 것은 갈라 두었습니다</b> — 손으로 만드는 보고서의 저장 문턱은 그대로입니다.
+          오류 문구도 이제 <b>막힌 칸의 이름</b>을 말합니다</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">S4b</td>
+      <td>짝이 여럿일 때 <b>고른 것을 저장까지</b>. 🔴 <b>화면의 말을 믿지 않습니다</b> —
+          서버가 짝짓기를 다시 돌려 후보 목록에 없으면 거절하고, 고른 짝은 저장 직전
+          <b>모델·S/N</b> 을 대조합니다</td><td class="c st done">✅ 끝</td></tr>
   <tr><td class="c">S5</td><td>일괄 처리 — ⚠️ 20MB 넘는 연락서가 몇 장인지 먼저 세야 합니다</td><td class="c st wait">⬜</td></tr>
-  <tr><td class="c">S2</td><td>원인 사전 — 🔴 <b>전제가 바뀌어 설계를 다시 해야 합니다</b>(아래). 뒤로 미룹니다</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">S2</td><td>원인 사전 — 전제가 바뀌어 설계를 다시 해야 합니다(아래). 뒤로 미룹니다</td><td class="c st wait">⬜</td></tr>
 </table>
 
 <div class="warn">
-  <p><strong>번역을 어떻게 하는가 — 외부 번역기를 쓰지 않습니다</strong></p>
-  <p>연락서에는 <b>고객 이름 · 모델 · 기계 번호</b>가 들어 있습니다. 구글이나 DeepL 같은 곳에
-  보내면 그 내용이 남의 서버에 남습니다. 그래서 <b>번역한 말을 파일에 적어 두고 그것을 쓰는</b>
-  방식입니다.</p>
-  <p><b>이 방식이 주는 것:</b> 번역이 눈에 보이는 파일로 남아 <b>틀린 것을 찾으면 고칠 수 있고,
-  고치면 이미 넣은 것까지 함께 바뀝니다.</b> 원문도 버리지 않아 언제든 되짚을 수 있습니다.</p>
-  <p><b>치르는 값:</b> 🔴 <b>앞으로 새 연락서에 없던 문장이 오면 그건 원문으로 남습니다.</b>
-  그때마다 보태는 방식이 됩니다.</p>
-</div>
-
-<table>
-  <tr><th>준비된 자료</th><th class="c">장수</th><th class="c">판본</th></tr>
-  <tr><td><code>.xlsm</code> (2022년 이후)</td><td class="c">326</td><td class="c">184가지</td></tr>
-  <tr><td><code>.xls</code> → 변환 (2021년 전후)</td><td class="c">143</td><td class="c">44가지</td></tr>
-  <tr><td><b>합계</b></td><td class="c"><b>469</b></td><td class="c">—</td></tr>
-</table>
-
-<div class="warn">
-  <p><strong>🔴 판본이 이렇게 흩어져 있어 고정 위치로는 못 읽습니다.</strong>
-  라벨 글자를 찾아 그 옆칸을 읽어야 합니다. 양식도 두 갈래입니다
-  (시트 이름 <code>Card</code> 159장 / 반각 <code>ｶｰﾄﾞ</code> 167장).</p>
-  <p>⚠️ 사본 <b>928 MB</b> 가 임시 폴더에 있습니다. 재부팅·디스크 정리로 날아갈 수 있어,
-  작업이 길어지면 옮기는 편이 안전합니다.</p>
+  <p><strong>🔴 바꾸지 않는 원칙 둘</strong></p>
+  <p><b>① 이미 등록된 수리 건에만 이식합니다.</b> 연락서를 보고 수리 건을 새로 만들지 않습니다.
+  짝이 없으면 넣지 않습니다. 접수번호가 실제로 겹치므로(41장, 최대 3장) <b>사람이 고르는 경우가
+  반드시 생깁니다.</b> 잘못 짝지어 남의 수리 건에 남의 자료가 들어가는 것이 가장 나쁩니다.</p>
+  <p><b>② 외부 번역기를 쓰지 않습니다.</b> 연락서에는 <b>고객 이름 · 모델 · 기계 번호</b>가
+  들어 있습니다. 번역한 말을 <b>파일에 적어 두고 그것을 쓰는</b> 방식이고, 치르는 값은
+  <b>새 문장이 오면 원문으로 남는 것</b>입니다.</p>
 </div>
 
 <div class="warn">
-  <p><strong>🔴 정해진 정책 (2026-09-21) — 이미 등록된 수리건에만 이식한다</strong></p>
-  <p><b>연락서를 보고 수리 건을 새로 만들지 않습니다.</b> 사람이 먼저 수리 건을 등록해 두었을 때만,
-  그 건에 연락서 내용을 채워 넣습니다. <b>짝이 없으면 넣지 않습니다.</b></p>
-  <p>그래서 S3a 의 핵심은 <b>짝짓기</b>입니다 — 접수번호가 실제로 겹치므로(41장, 최대 3장)
-  「짝이 여럿」인 경우가 반드시 생기고, 그때는 <b>사람이 골라야</b> 합니다.
-  잘못 짝지어 남의 수리 건에 남의 자료가 들어가는 것이 가장 나쁩니다.</p>
+  <p><strong>🔴 판독기가 469장에서 알아낸 것 — 설계의 전제입니다</strong></p>
+  <table>
+    <tr><th>발견</th><th>영향</th></tr>
+    <tr><td><b>양식의 「원인」 분류는 실제로 안 쓰입니다</b> — ○ 표시의 88%가 「기타」</td>
+        <td>원인 사전은 ○ 가 아니라 <b>일본어 자유 기술</b>에서 캐야 합니다</td></tr>
+    <tr><td><b>접수번호로 중복을 막으면 안 됩니다</b> — 겹치는 번호 20개가 41장에.
+            반면 <b>파일 해시는 469장 전부 다릅니다</b></td>
+        <td>「같은 파일 두 번」만 해시로 막고, 「같은 건 두 장」은 사람이 판단</td></tr>
+    <tr><td><b>접수번호만 믿었다면 469장 중 12장이 엉뚱한 건에 붙었을 것</b></td>
+        <td>저장 직전 신원 검사를 살려 둔 까닭입니다</td></tr>
+    <tr><td>사진 16,224개(장당 평균 29장). 그중 2,474개는 양식 아이콘·도장</td>
+        <td>크기와 시트 이름으로 걸러야 합니다</td></tr>
+  </table>
+  <p class="pct">⚠️ 연락서 사본 <b>928 MB</b> 가 임시 폴더에 있습니다. 재부팅·디스크 정리로 날아갈 수 있습니다.</p>
 </div>
-
-<div class="warn">
-  <p><strong>🔴 S4 에서 드러난 결정거리 — 「골라도 저장되지 않습니다」</strong></p>
-  <p>화면은 짝 후보를 나란히 보여주고 사람이 하나를 고를 수 있게 만들었습니다.
-  그런데 <b>고른 뒤 저장 단추를 눌러도 들어가지 않습니다.</b>
-  저장 쪽(S3b)이 <b>「짝이 하나로 확정된 것만 받는다」</b>로 닫혀 있기 때문입니다 —
-  사람이 고른 값은 「사람이 본 것과 저장 직전 판정이 같은지 확인하는 자물쇠」로만 쓰이고,
-  <b>후보를 하나로 좁히는 통로가 아닙니다.</b></p>
-  <p>이건 제 설계 실수입니다. S3b 를 만들 때 그 통로를 넣지 않았습니다.</p>
-  <p><b>왜 그냥 열지 않았는가:</b> S3a 실측에서 <b>접수번호만 믿었다면 12장이 엉뚱한 수리 건에
-  붙었을 것</b>이 드러났고, 지금 그것을 막고 있는 것이 바로 이 닫힌 문입니다.
-  여는 것은 <b>저장 정책을 바꾸는 일</b>이라 승인 없이 손대지 않았습니다.</p>
-  <p><b>✅ 결정 (2026-09-21) — 「받되 신원을 다시 본다」</b><br>
-  사람이 고르면 저장까지 갑니다. 다만 저장 직전의 검사를
-  <b>「접수번호가 같은가」 → 「고른 수리 건의 모델·시리얼번호가 연락서와 맞는가」</b>로 바꿉니다.
-  안 맞으면 그대로 거절합니다 — <b>12장을 잡아낸 그 검증은 살아 있고</b>,
-  사람이 눈으로 고른 경우에만 문이 열립니다. (조각 S4b)</p>
-</div>
-
-<h4>S1 이 469장에서 알아낸 것 — S2·S3 의 전제가 바뀌었습니다</h4>
-
-<table>
-  <tr><th>발견</th><th>어디에 영향</th></tr>
-  <tr>
-    <td>🔴 <b>양식의 「원인」 분류는 실제로 쓰이지 않습니다.</b> ○ 표시의 88%가 「기타」이고
-        나머지 아홉 보기는 사실상 0입니다</td>
-    <td><b>S2</b> — 원인 사전은 ○ 가 아니라 <b>일본어 자유 기술</b>
-        (사내 확인 결과 419건 · 고장 부위 687건 · 교체 부품 721건)에서 캐야 합니다</td>
-  </tr>
-  <tr>
-    <td>🔴 <b>접수번호로 중복을 막으면 안 됩니다.</b> 겹치는 번호 20개가 41장에 걸쳐 있고
-        최대 3장까지 겹칩니다. 반면 <b>원본 파일 해시는 469장 전부 다릅니다</b></td>
-    <td><b>S3</b> — 「같은 파일 두 번 넣기」만 해시로 막고,
-        「같은 수리 건 두 장」은 사람이 판단하게 둡니다</td>
-  </tr>
-  <tr>
-    <td>사진이 서로 다른 것만 <b>16,224개</b>(장당 평균 29장). 그중 2,474개는 양식 아이콘·도장</td>
-    <td><b>S3</b> — 크기와 시트 이름으로 걸러야 합니다</td>
-  </tr>
-  <tr>
-    <td>잘 뽑히는 항목: 고객사·모델·L/N·S/N <b>98.9%</b> · 접수번호 97.9% · 불량현상 87.4%</td>
-    <td>못 뽑은 항목 대부분은 <b>칸이 원래 비어 있는 것</b>이지 판독기 결함이 아닙니다</td>
-  </tr>
-</table>
 
 
 <h3>③ PO / 내자 분리</h3>
@@ -354,219 +286,154 @@
 
 <table>
   <tr><th class="c">조각</th><th>내용</th><th class="c">상태</th></tr>
-  <tr class="fin"><td class="c">0a</td><td>스키마를 <code>vendor/dss-core</code> 서브모듈로</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">0b</td><td><b>저장소 뼈대</b> — 로그인하면 빈 화면까지 (<code>f67e7c8</code>)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">0c</td><td><b>포털에 <code>dss-po</code> 등록</b> — 권한 부여 방식 · 📋 · 순서 15. 로그인·메뉴바 눈 확인 완료</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">1</td><td><b>작업 비용</b> 옮기기 (<code>e58722a</code>) — 43파일. 🔴 <b>권한을 베끼지 않고 실제 표를 읽은 것이 옳았다</b>(아래) · 눈 확인 완료</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">2</td><td><b>내자 정리</b> (<code>51f1597</code>) — 61파일 17,431줄. 시험 517 통과 · 눈 확인 완료</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">3a</td><td><b>견적서 — 목록·휴지통</b>. 🔴 목록 화면은 <b>공유 묶음(<code>dss-core</code>)</b>으로 — A/S 도 쓰는 화면입니다.
-      그대로 옮기면 <b>99파일 23,433줄</b>이 따라와서, 새 견적서·파일 딱지·발행·인쇄 자리를 <b>비워 두고</b> 끊었습니다.
-      시험 542 통과 · 눈 확인 완료</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">첫화면</td><td><b>들어오면 내자 정리가 뜬다</b> — 🔴 루트에 같은 화면을 <b>또 그리지 않고 되돌립니다</b>.
-      그리면 내자 정리에서 저장했을 때 <b>루트로 들어온 사람은 고치기 전 값</b>을 봅니다(무효화가 한 주소에만 걸려 있습니다).
-      권한이 없으면 <b>그 사람이 볼 수 있는 첫 화면</b>으로 가고, 하나도 없으면 되돌리지 않습니다 —
-      갈 곳 없는데 보내면 그게 무한 되돌기입니다. 시험 549 통과</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">메뉴</td><td><b>맨 위 두 층을 한 층으로</b> — 🔴 단추는 <b>이미 있었습니다</b>(제 지시서가 틀렸습니다).
-      휴가 관리처럼 <b>알약 모양</b>이 되고 <b>지금 보는 화면이 짙게</b> 칠해집니다(전에는 표시가 아예 없었습니다).
-      🔴 <b>휴가 쪽 색을 그대로 베끼지 않았습니다</b> — 이 저장소에 사내 강조색이 이미 있어서,
-      베꼈으면 <b>아무도 모르는 채 같은 화면에 짙은 색이 두 가지</b>가 될 뻔했습니다.
-      폰 360px 에서 <b>글자가 접히지 않는 것</b>을 실측으로 확인. 시험 557 통과</td><td class="c st done">✅ 끝</td></tr>
-  <tr><td class="c">3b~3f</td><td>견적서 — 편집 폼 → 엑셀·발행 → 첨부 → 결재 → 인쇄 (51,681줄 중 나머지)</td><td class="c st wait">⬜</td></tr>
-  <tr><td class="c">4</td><td>A/S 정리 — 메뉴에서 빼고 남은 참조를 링크로</td><td class="c st wait">⬜</td></tr>
-  <tr><td class="c">5</td><td>배포</td><td class="c st wait">⬜</td></tr>
-</table>
-
-
-<h2>오늘 마친 독립 작업</h2>
-
-<table>
-  <tr><th>무엇</th><th>어디</th><th>한 줄</th></tr>
-  <tr><td><b>계측기 개발 주소</b></td><td><code>njlee</code></td><td>대역이 바뀌면 버튼이 전부 죽던 것</td></tr>
-  <tr><td><b>시험 빨간 불 3개</b></td><td>A/S</td><td>ID 6만 개를 한 질의에 싣다 터지던 것 → 지문 견주기</td></tr>
-  <tr><td><b>첨부 휴지통</b></td><td><code>dss-improvements</code></td><td>지운 첨부를 되살릴 길이 아예 없었다</td></tr>
-  <tr><td><b>파비콘 통일</b></td><td>여섯 저장소</td><td>셋은 제각각, 셋은 Next 기본값이었다</td></tr>
-  <tr><td><b>연락서 143장 변환</b></td><td>A/S</td><td>사진 6,286장 보존 · NAS 원본 무사</td></tr>
-  <tr><td><b>🔴 보이지 않는 글자 하나 빼내기</b></td><td>A/S</td>
-      <td><code>report-preview.ts</code> 에 <b>NUL 바이트</b>가 박혀 git 이 이 파일만
-          그림처럼 다뤘습니다(무엇이 바뀌었는지 볼 수 없는 상태). 동작은 그대로 두고
-          글자 표현만 고쳤습니다 — <b>이제 diff 가 보입니다</b></td></tr>
-  <tr><td><b>돌아갈 주소 판정 강화</b></td><td><code>dss-improvements</code></td><td>🔴 실제 취약점 — 탭 한 글자로 남의 사이트에 나가던 것 · 한글 주소 500</td></tr>
+  <tr class="fin"><td class="c">0a~0c</td><td>스키마를 <code>vendor/dss-core</code> 로 · 저장소 뼈대 · 포털 등록</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">1 · 2</td><td><b>작업 비용</b>(43파일) · <b>내자 정리</b>(61파일 17,431줄)</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">3a</td>
+      <td><b>견적서 목록·휴지통</b>. 🔴 목록 화면은 <b>공유 묶음</b>으로 — A/S 도 쓰는 화면입니다.
+          그대로 옮기면 <b>99파일 23,433줄</b>이 따라와서 새 견적서·발행·인쇄 자리를 <b>비워 두고</b> 끊었습니다</td>
+      <td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">첫화면<br>메뉴</td>
+      <td>들어오면 내자 정리가 뜹니다(<b>또 그리지 않고 되돌립니다</b> — 그리면 저장한 값이 루트에 안 보입니다) ·
+          맨 위 두 층을 한 층으로</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="now"><td class="c">3b</td><td><b>견적서 편집 폼</b> — 무엇이 딸려 오는지 조사 중</td><td class="c st run">🔵 조사</td></tr>
+  <tr><td class="c">3c~3f</td><td>엑셀·발행 → 첨부 → 결재 → 인쇄 (51,681줄 중 나머지)</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">4 · 5</td><td>A/S 정리(메뉴에서 빼고 남은 참조를 링크로) · 배포</td><td class="c st wait">⬜</td></tr>
 </table>
 
 <div class="warn">
-  <p><strong>🔴 방금 막은 구멍이 어떤 것이었나.</strong> 브라우저는 주소에서 <b>탭·줄바꿈을
-  조용히 지웁니다.</b> <code>/</code>+탭+<code>/evil.example</code> 은 지우고 나면
-  <code>//evil.example</code> 이 되어 <b>다른 사이트로 나갑니다.</b> 눈으로 보면 슬래시가
-  하나뿐이라 안전해 보이는 것이 이 구멍이 오래 사는 까닭입니다.</p>
-  <p>공격자가 그런 값을 붙인 <b>우리 회사 주소</b> 링크를 뿌리면, 받는 사람은 진짜 로그인을
-  정상으로 마친 뒤 공격자 사이트로 떨어집니다. 거기 똑같이 생긴 로그인 화면이 있으면
-  「한 번 더 뜨네」 하고 비밀번호를 넣습니다.</p>
-  <p>같은 판정이 <b>PO 사이트와 개선요청 둘 다에 들어갔고 글자 그대로 같습니다.</b>
-  한쪽을 고치면 나머지도 봐야 한다고 주석에 서로를 가리켜 두었습니다.</p>
-</div>
-
-
-<h2>커밋 현황 <span class="pct">(2026-09-21 실측)</span></h2>
-
-<table>
-  <tr><th>저장소</th><th class="c">올릴 커밋</th><th>무엇</th></tr>
-  <tr class="fin"><td>A/S <code>RF_Service_System</code></td><td class="c">0</td>
-      <td>✅ <b>올렸습니다 — 커밋 13개</b>. 시험 · 설계서 · 연락서 변환·판독기·짝짓기·저장·화면 ·
-          파비콘 · 알림 통로 · 주간보고 고르개 · 문서</td></tr>
-  <tr><td><code>dss-auth</code> (포털)</td><td class="c"><b>4</b></td><td>알림 창구 · 알림 설정 화면 · 표 다듬기 · <b>사이트용 알림 통로</b></td></tr>
-  <tr><td><code>dss-po</code></td><td class="c"><b>4</b></td><td>작업 비용 · 내자 정리 · 가로폭 · <b>견적서</b></td></tr>
-  <tr><td><code>dss-leave</code> (휴가)</td><td class="c"><b>1</b></td><td><b>「통합 로그인으로」 단추</b></td></tr>
-  <tr><td><code>njlee</code></td><td class="c"><b>2</b></td><td>개발 주소 · 파비콘</td></tr>
-  <tr><td><code>dss-improvements</code></td><td class="c"><b>3</b></td><td>첨부 휴지통 · 파비콘 · 주소 판정 강화.
-      ⏸ <b>알림 종</b>은 커밋 전입니다 — 🔴 <b>서브모듈 포인터가 함께 올라가야</b> 다른 PC 에서 빌드가 깨지지 않습니다</td></tr>
-  <tr><td><code>dss-home</code></td><td class="c"><b>1</b></td><td>파비콘</td></tr>
-  <tr class="fin"><td><code>dss-ui</code> (묶음)</td><td class="c">0</td><td>✅ <b>올렸습니다</b> — 종이 들어갔습니다</td></tr>
-  <tr><td><code>dss-core</code> (묶음)</td><td class="c"><b>1</b></td><td><b>견적서 목록 화면</b>. 🔴 <b>이것을 먼저 올려야</b> <code>dss-po</code> 가 가리키는 자리가 생깁니다</td></tr>
-</table>
-
-<div class="warn">
-  <p><strong>🔴 <code>dss-core</code> 가 이 PC 에 두 벌 있습니다 — 정리해야 합니다.</strong></p>
-  <p><code>Development\dss-core</code>(원본)와 <code>dss-po\vendor\dss-core</code>(서브모듈)가
-  <b>같은 원격의 서로 다른 클론</b>입니다. 견적서 작업이 양쪽에 같은 변경을 남겼고,
-  <b>서브모듈 쪽에서만 커밋했습니다</b>(그래야 <code>dss-po</code> 의 포인터가 바로 맞습니다).</p>
-  <p>지금 원본 클론에는 <b>커밋되지 않은 같은 변경이 그대로 남아 있습니다.</b>
-  올린 뒤에 그쪽을 버리고 받아 와야 합니다 — 안 하면 <b>같은 내용의 커밋이 둘</b> 생깁니다.</p>
-</div>
-
-<div class="warn">
-  <p><strong>🔴 PO 조각 2·3 전에 정해야 할 것 — 시험용 DB</strong></p>
+  <p><strong>🔴 3b 전에 정해야 합니다 — 시험용 DB</strong></p>
   <p>작업 비용을 옮기면서 <b>통합 시험 1,871줄을 못 가져왔습니다.</b> 그건 <b>진짜 DB 에 쓰는</b>
   시험인데, PO 사이트엔 시험용 DB 장치가 없고 <b>여기 DB 는 A/S 와 같은 <code>dss_as</code></b> 라
   장치 없이 붙이면 <b>시험이 실제 업무 자료를 건드립니다.</b></p>
-  <p>지금은 A/S 가 같은 시험을 갖고 있어 덮여 있습니다. 다만
-  <b>조각 2(내자 정리)·3(견적서)은 쓰기 시험이 훨씬 많습니다.</b> 그 전에 시험용 DB 를
-  세울지 정해야 합니다.</p>
+  <p>지금은 A/S 가 같은 시험을 갖고 있어 덮여 있습니다. 다만 <b>3b 는 편집 폼이라 쓰기가 핵심</b>이라
+  이 문제가 정면으로 걸립니다(못 온 쓰기 시험 1,428줄).
+  <b>지금 도는 조사가 선택지를 만들어 옵니다</b> — 그걸 보고 정하시면 됩니다.</p>
 </div>
 
 
-<div class="todo">
-  <h3>⏸ 사람이 해야 하는 일</h3>
-  <p><b>지금은 없습니다.</b> <code>dss-po</code> 저장소를 만들어 주셔서 커밋 넷을 올렸습니다.</p>
-  <p class="pct">앞으로 <b>새 저장소를 만들 때마다</b> 같은 부탁을 드리게 됩니다 —
-  이 PC 에는 <code>gh</code> 명령이 없어 저장소 생성만은 웹에서 해야 합니다.
-  올리는 것은 제가 합니다.</p>
-</div>
-
-
-<h2>④ 휴가 관리(<code>dss-leave</code>) 통합로그인 연동</h2>
+<h3>④ 휴가 관리</h3>
 
 <p>이남준 님이 만든 사내 휴가 신청·결재 시스템. 받아 와서 <b>우리가 통합로그인에 붙이고
-우리 저장소에 올립니다</b>(2026-09-21 방침 변경 — 아래).</p>
-
-<h3>단계</h3>
+우리 저장소에 올립니다</b>. 원본은 <code>upstream</code> 으로 남겨 두었습니다.</p>
 
 <table>
   <tr><th class="c">단계</th><th>내용</th><th class="c">상태</th></tr>
-  <tr class="fin"><td class="c">0</td><td>저장소를 받아 조사 — 걸림돌 넷을 찾아냄</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">1</td><td><b>포트 3300 → 3700</b> · DB 5448. 🔴 <code>Dockerfile</code> 도 함께 (안 고치면 NAS 이미지만 3300)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">2</td><td><b>통합로그인 붙이기</b> — 인증 3파일 + 라우트 3개 (<code>62013f4</code>)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">3</td><td><b>돌아갈 주소 판정</b> 고치기 — 탭 한 글자로 남의 사이트에 나가던 것</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">4</td><td><b>포털에 등록</b> — 🌴 · 전 직원 공개 · 메뉴 순서 30</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">5</td><td><b>메뉴바</b> (<code>fb4c661</code>) — 🔴 <b>실제 로그인으로 다섯 시스템이 펼쳐지는 것 확인</b></td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">6</td><td><b>직급 기본 자료</b> — 🔴 <b>사용자가 1분 뒤 직접 직원을 등록했습니다</b>(막힘이 풀린 증거)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">7</td><td>개발 주소 한 줄 (<code>7ed6335</code>) — 안 고치면 버튼이 전부 죽습니다. 별표는 <b>네 칸</b></td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">8</td><td>✅ <b>올렸습니다</b> — <code>github.com/kiri190-me/dss-leave</code> (커밋 셋)</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">9</td><td>🔴 <b>「통합 로그인으로」 버튼</b> — 메뉴바와 다른 것이었습니다(아래). 눈 확인 완료 · 커밋됨</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="fin"><td class="c">10</td><td>로그인 <b>눈 확인</b> — 확인받았습니다</td><td class="c st done">✅ 끝</td></tr>
-  <tr class="now"><td class="c">11</td><td><b>결재선 설정 화면을 A/S 것으로</b> — A/S <code>/users</code> 의 「승인 절차」 절이 본보기입니다.
-      🔴 <b>결재자를 직급이 아니라 사람으로 고르게</b> 바꿉니다(2026-09-21 사용자 지시).
-      A/S 가 원래 사람을 고르는 화면이라 본보기와 오히려 가까워졌습니다.
-      ⚠️ 칸이나 표가 필요하면 <b>만들지 말고 먼저 보고</b>하라고 했습니다</td><td class="c st run">🔵 진행</td></tr>
+  <tr class="fin"><td class="c">1~10</td>
+      <td>포트 3700 · <b>통합로그인 붙이기</b> · 돌아갈 주소 판정 · 포털 등록 · <b>메뉴바</b> ·
+          직급 기본 자료 · 개발 주소 · 저장소 올리기 · <b>「통합 로그인으로」 단추</b> · 로그인 눈 확인</td>
+      <td class="c st done">✅ 끝</td></tr>
+  <tr class="now"><td class="c">11</td>
+      <td>🔴 <b>결재선을 사람 순서로</b> — 아래 설계대로 만드는 중</td><td class="c st run">🔵 진행</td></tr>
 </table>
 
-<h3>걸림돌 넷 — 어떻게 됐나</h3>
+<div class="warn">
+  <p><strong>🔴 결재선 설계 (2026-09-21 사용자 결정) — 직급별 갈래를 없앱니다</strong></p>
+  <p><b>결재선은 「순서 있는 사람 목록」 하나입니다.</b> 예: <code>김대리 → 박과장 → 이부장 → 최대표</code></p>
+  <ul>
+    <li><b>신청자가 목록 안에 있으면, 자기 뒤의 사람들에게만</b> 결재를 받습니다.
+        박과장이 신청하면 <b>이부장·최대표</b>만 결재합니다</li>
+    <li><b>맨 끝 사람이 신청하면 결재자가 없습니다</b> — 바로 확정됩니다</li>
+    <li><b>목록에 없는 사람이 신청하면 전원</b>에게 받습니다</li>
+    <li>🔴 <b>「어떤 직급이 신청했나」에 따라 갈리던 구조를 통째로 없앱니다</b></li>
+  </ul>
+  <p><b>함께 정한 것 둘</b></p>
+  <ol>
+    <li><b>결재 대기 중에 그 사람이 퇴사하면, 관리자가 「이 단계 건너뛰기」</b>를 하고 기록에 남깁니다.
+        직급 기반은 같은 직급의 다른 사람이 대신할 수 있었는데, 사람으로 고정하면 그 안전망이
+        사라지기 때문입니다 — <b>막힌 신청을 살리는 유일한 출구</b>입니다</li>
+    <li><b>휴가 사유 열람은 지금 그대로</b> — 결재권 있는 직급이면 봅니다.
+        <b>개인정보 경계라 이번에 건드리지 않습니다</b></li>
+  </ol>
+  <p><b>반드시 지킬 것:</b> ① <b>이미 결재 대기 중인 신청의 결재자가 바뀌면 안 됩니다</b> —
+  결재선은 신청하는 순간 굳혀 박고, 설정을 바꿔도 이미 박힌 것은 손대지 않습니다
+  ② <b>「없음(바로 등록)」의 뜻</b>을 잃지 않습니다 ③ 퇴사자는 신청 시점에 아예 빠집니다
+  ④ <b>「여럿이 동시에 대기」 동작을 바꾸지 않습니다.</b></p>
+  <p class="pct">🔴 <b>표를 더하는 일이라 마이그레이션이 생깁니다.</b> 만들기만 하고 <b>적용은
+  보여 드린 뒤에</b> 합니다. 기존 자료를 바꾸거나 지우지 않습니다.</p>
+</div>
+
+
+<h2>커밋 현황 <span class="pct">(2026-09-21 저녁 실측)</span></h2>
 
 <table>
-  <tr><th>처음에 찾은 것</th><th>지금</th></tr>
-  <tr><td>🔴 연동 코드가 하나도 없다</td>
-      <td class="c"><b>✅ 넣었습니다</b> — 인증 3파일 + 라우트 3개. 스키마는 <b>한 글자도 안 바꿨습니다</b></td></tr>
-  <tr><td>🔴 포트 3300 이 계측기와 충돌</td>
-      <td class="c"><b>✅ 3700 으로</b> — 저장소 문서 두 곳의 낡은 정보도 바로잡음</td></tr>
-  <tr><td>🔴 우리에게 푸시 권한이 없다</td>
-      <td class="c"><b>✅ 새 저장소로</b> — 원본은 <code>upstream</code> 으로 남김</td></tr>
-  <tr><td>🔴 기존 계정이 전부 끊긴다</td>
-      <td class="c"><b>➖ 해당 없음</b> — 우리 DB 는 <b>새로 만든 빈 것</b>이라 이행할 자료가 없습니다.
-      원본 자료는 이남준 님 PC 에 그대로 있습니다</td></tr>
+  <tr><th>저장소</th><th class="c">올릴 커밋</th><th class="c">커밋 안 한 파일</th><th>무엇</th></tr>
+  <tr><td>A/S <code>RF_Service_System</code></td><td class="c"><b>6</b></td><td class="c">0</td>
+      <td>현황판 셋 · 연락서 한글화 · <b>번호 없이 보고서</b>(<code>4f0f5b6</code>) ·
+          <b>연락서 S4b</b>(<code>448c920</code>).
+          <span class="pct">빨간 불이던 시험은 고쳐졌습니다 — 4,283개 fail 0</span></td></tr>
+  <tr><td><code>dss-po</code></td><td class="c"><b>5</b></td><td class="c"><b>알림 종</b></td>
+      <td>작업 비용 · 내자 정리 · 가로폭 · 견적서 · 머리말 한 층으로.
+          <span class="pct">추적 안 되는 <code>AGENTS.md</code>·<code>CLAUDE.md</code> 는 담지 않습니다</span></td></tr>
+  <tr><td><code>dss-leave</code> (휴가)</td><td class="c"><b>1</b></td><td class="c"><b>결재선</b></td>
+      <td>「통합 로그인으로」 단추 · 결재선 작업 진행 중</td></tr>
+  <tr><td><code>njlee</code> (계측기)</td><td class="c"><b>2</b></td><td class="c"><b>알림 종</b></td>
+      <td>개발 주소 · 북마크 아이콘</td></tr>
+  <tr class="fin"><td><code>dss-auth</code> (포털)</td><td class="c">0</td><td class="c">0</td>
+      <td>✅ 알림 창구 · 설정 화면 · 사이트용 통로</td></tr>
+  <tr class="fin"><td><code>dss-improvements</code></td><td class="c">0</td><td class="c">0</td>
+      <td>✅ 알림 종 · 첨부 휴지통 · 주소 판정 · 아이콘</td></tr>
+  <tr class="fin"><td><code>dss-home</code> · <code>dss-ui</code> · <code>dss-core</code></td>
+      <td class="c">0</td><td class="c">0</td>
+      <td>✅ 아이콘 · 종 묶음 · 견적서 목록 화면</td></tr>
 </table>
 
-<h3>지금 설정값</h3>
-
-<table>
-  <tr><th>항목</th><th>값</th></tr>
-  <tr><td>포털 식별자</td><td><code>dss-leave</code> · 🌴 · 메뉴 순서 30</td></tr>
-  <tr><td>접근</td><td><b>전 직원 공개</b> — 휴가 신청은 모두가 하는 일이라 권한을 한 명씩 줄 수 없습니다</td></tr>
-  <tr><td>역할</td><td><code>MEMBER</code> · <code>LEAVE_ADMIN</code> — 🔴 다른 시스템의 <code>ADMIN</code> 을 쓰면 그 사람만 못 들어옵니다</td></tr>
-  <tr><td>개발 서버</td><td><b>3700</b></td></tr>
-  <tr><td>DB</td><td><b>5448</b> (<code>dss-leave-postgres-dev</code>) — 새 상자, 비어 있음</td></tr>
-  <tr><td>세션</td><td>서버 저장형 그대로 — 포털이 「이 사람 끊어라」 할 때 채울 칸이 <b>이미 있었습니다</b></td></tr>
-  <tr><td>임시 로그인</td><td><b>남겨 둠</b>(기본 꺼짐) — SSO 가 막혔을 때 들어갈 길</td></tr>
-</table>
+<p class="pct">🔴 이 PC 에만 있는 커밋이 <b>12개</b>입니다(A/S 4 · PO 5 · 계측기 2 · 휴가 1).
+저녁에 21개 중 9개를 올렸습니다. <b>PC 가 고장 나면 남은 12개를 잃습니다.</b>
+🔴 PO 를 올릴 때는 <b>서브모듈을 먼저</b> — <code>dss-core</code> 는 이미 올렸습니다.</p>
 
 <div class="warn">
-  <p><strong>🔄 방침이 바뀌었습니다 (2026-09-21) — 우리가 직접 붙입니다</strong></p>
-  <p>안내서를 만들어 전달하는 방식이 번거로워, <b>받아 온 코드를 우리가 고쳐
-  우리 저장소에 올리기로</b> 했습니다.</p>
-  <ul>
-    <li>새 저장소 <code>github.com/kiri190-me/dss-leave</code> 로 올립니다</li>
-    <li>원본은 <code>upstream</code> 으로 남겨 두었습니다 — 나중에 이남준 님 변경을 가져올 수 있습니다</li>
-    <li>⚠️ 원본이 계속 바뀌고 있어 <b>두 갈래를 합치기는 어려워집니다.</b>
-        이남준 님께 「연동은 이쪽에서 한다」고 알려 두시는 편이 좋습니다</li>
-  </ul>
-  <p>앞서 만든 안내서(<code>휴가관리-통합로그인-연동안내.html</code>)는 <b>그대로 둡니다</b> —
-  우리 작업의 근거이자, 이남준 님이 나중에 보실 수도 있는 자료입니다.</p>
+  <p><strong>🔴 <code>dss-core</code> 가 이 PC 에 두 벌 있습니다 — 아직 정리 안 했습니다</strong></p>
+  <p><code>Development\dss-core</code>(원본)와 <code>dss-po\vendor\dss-core</code>(서브모듈)가
+  <b>같은 원격의 서로 다른 클론</b>입니다. <b>서브모듈 쪽은 올렸고</b>, 원본 클론에는
+  <b>커밋되지 않은 같은 변경</b>이 남아 있습니다. 버리고 받아 와야 합니다 —
+  안 하면 <b>같은 내용의 커밋이 둘</b> 생깁니다.
+  🔴 <b>버리는 일이라 먼저 여쭙겠습니다.</b></p>
 </div>
 
-<div class="warn">
-  <p><strong>🔴 「통합 로그인으로」 버튼 — 메뉴바와 다른 것이었습니다</strong></p>
-  <p>둘을 같은 것으로 보고 메뉴바만 붙였는데, <b>서로 다른 길</b>이었습니다:</p>
-  <ul>
-    <li>🌴 <b>메뉴바</b> — 다른 <b>시스템</b>으로 건너가기(A/S · PO · 계측기 · 개선요청). ✅ 붙였습니다</li>
-    <li><b>「통합 로그인으로」</b> — 포털의 <b>앱 목록 화면</b>으로 가기. ❌ 빠졌습니다</li>
-  </ul>
-  <p>🔴 <b>포털은 자기 자신을 시스템 목록에 넣지 않습니다.</b> 그래서 메뉴바 어디에도
-  포털로 가는 길이 없었습니다. 개선요청은 그 버튼을 <b>머리말에 따로</b> 두고 있는데,
-  제 지시서에 그 항목이 없어 빠졌습니다.</p>
-</div>
-
-<div class="warn">
-  <p><strong>✅ 직급 문제는 풀렸습니다 — 그리고 바로 쓰이고 있습니다</strong></p>
-  <p><code>web_ranks</code> 가 <b>0행</b>이라 직원 추가 화면에서 고를 것이 없었습니다.
-  시드에 직급이 <b>이미 있었는데 돌리지 않은 상태</b>였고, 그 스크립트는 <b>가짜 사람 이름까지</b>
-  넣어서 그대로 돌리면 안 됐습니다.</p>
-  <p><b>직급(기본 자료)과 사람(실제 자료)을 갈라</b> 직급만 넣는 길을 만들었습니다 —
-  사원 · 대리 · 과장 · 부장 · 대표(과장 이상 결재권). 여러 번 돌려도 안전합니다.</p>
-  <p>🔴 <b>직급을 넣은 1분 뒤 사용자가 직접 직원을 등록했습니다.</b> 막힘이 실제로 풀렸다는
-  가장 확실한 증거입니다.</p>
-</div>
 
 <h2>다음에 할 일</h2>
 
 <ol>
-  <li><b>돌고 있는 셋이 끝나면 커밋</b> — 연락서 번호·규모 / PO 메뉴바 / 휴가 결재선</li>
-  <li>🔴 <b>자유 문장 번역</b> — 지금 재고 있는 <b>고유 문장 수</b>를 보고 방식을 정합니다.
-      몇백이면 전부, 수천이면 많이 나오는 것부터</li>
-  <li><b>종을 남은 넷에도</b> — A/S · PO · 계측기 · 휴가.
-      <span class="pct">첫 사이트에서 따라 할 순서를 문서로 남겼습니다</span></li>
-  <li><b>연락서 S4b</b> — 짝이 여럿일 때 고른 것을 저장까지
-      <span class="pct">(결정은 끝났습니다 — 「받되 신원을 다시 본다」)</span></li>
-  <li><b>PO 조각 3b~3f</b> — 견적서 나머지(편집 폼 → 엑셀·발행 → 첨부 → 결재 → 인쇄)
-      <span class="pct">🔴 그 전에 시험용 DB 를 정해야 합니다 — 쓰기 시험 1,428줄이 못 왔습니다</span></li>
-  <li><b>알림 조각 7·8</b> — A/S 알림 탭 걷어내고 <b>「권한 · 승인 설정」</b>으로 · 권한 회수 구멍 막기</li>
+  <li>🔴 <b>깨진 시험 하나 고치고 A/S 올리기</b> — 고친 판은 <code>stash</code> 에 있습니다</li>
+  <li><b>알림 종 눈 확인 → 커밋</b>(계측기 · PO) → <b>A/S · 휴가에도 달기</b>.
+      <span class="pct">A/S 는 자체 종과 이어 붙여야 합니다</span></li>
+  <li><b>돌고 있는 조사 셋의 결과를 보고 지시서로</b> — 연락서 자리 · 번역 방식 · PO 3b</li>
+  <li><b>남은 커밋 12개 올리기</b></li>
+  <li><b>연락서 「번호 없이 보고서 보기」 마무리</b>(미커밋 5) · <b>S4b 되살리기</b></li>
+  <li><b>PO 3c~3f</b> — 엑셀·발행 → 첨부 → 결재 → 인쇄</li>
+  <li><b>알림 조각 7·8</b> — A/S 알림 탭을 「권한 · 승인 설정」으로 · 권한 회수 구멍 막기</li>
   <li>계측기 · 개선요청에 <b>홈 화면 아이콘</b>
       <span class="pct">(폰으로 여는 시스템인데 지금은 흐린 확대본이 뜹니다)</span></li>
-  <li>🔴 <b><code>dss-core</code> 두 벌 정리</b> — 올린 뒤 원본 클론을 버리고 받아 오기
-      <span class="pct">(안 하면 같은 내용의 커밋이 둘 생깁니다)</span></li>
-  <li><b>「전부 끄기」에 PO·휴가 더하기</b> — 지금은 켜지는데 안 꺼집니다</li>
+  <li>🔴 <b><code>dss-core</code> 원본 클론 정리</b> — 버리는 일이라 먼저 여쭙겠습니다</li>
+  <li>🔴 <b>「전부 끄기」 고치기</b> — 오늘 두 가지가 드러났습니다:
+      <b>PO·휴가를 아예 모르고</b>, <b>개선요청·포털은 떠 있는데 「이미 꺼져 있음」이라고 넘어갑니다.</b>
+      「분명히 껐는데 켜져 있다」가 생길 자리입니다</li>
 </ol>
 
 
+<h2>미뤄 둔 것 · 알려진 결함</h2>
+
+<table>
+  <tr><th>무엇</th><th>어디</th><th>내용</th></tr>
+  <tr><td>첨부 되살리기 상한</td><td>개선요청</td>
+      <td>지웠다 되살리면 <b>다섯 장 상한을 다시 세야</b> 합니다 — 안 그러면 여섯 장이 됩니다</td></tr>
+  <tr><td>알림 설정 30초</td><td>포털</td><td>설정을 바꿔도 다른 사이트 종에는 최대 30초 옛 값이 뜹니다. 한 줄이면 고쳐집니다</td></tr>
+  <tr><td>시험 DB 묵은 실패 3건</td><td>A/S</td>
+      <td><code>audit_logs</code> 가 65,798줄까지 쌓여 정리 질의가 Postgres 한계를 넘습니다.
+          시험 DB 재건으로 사라질 성격입니다</td></tr>
+  <tr><td><code>purgeExpiredPart</code></td><td>A/S</td>
+      <td>두 곳의 참조를 안 세어 오류로 터집니다</td></tr>
+  <tr><td>복사 단추 네 벌</td><td>여럿</td>
+      <td>공용 모듈로 묶을 것. 🔴 NAS 는 http 라 브라우저 복사 기능이 없어 <b>두 갈래</b>가 필요합니다</td></tr>
+  <tr><td><code>SSO_REDIRECT_URI=auto</code></td><td>공통</td>
+      <td>지금은 접속 주소가 굳어, <code>localhost</code> 로 시험하려면 설정을 고치고 서버를 껐다 켜야 합니다.
+          로그인 코드라 다른 작업과 겹치지 않을 때 따로 합니다</td></tr>
+</table>
+
+
 <footer>
-  <p>이 문서는 <b>살아 있는 현황판</b>입니다 — 작업이 끝날 때마다 갱신합니다.
+  <p>이 문서는 <b>살아 있는 현황판</b>입니다 — 작업이 끝날 때마다 갱신하고, 끝난 확인·커밋 기록은
+  걷어내 <b>지금 살아 있는 것만</b> 남깁니다.
   자세한 배경은 같은 폴더의 <code>설명-2026-09-21.html</code> ·
   <code>알림설정-이사-2026-09-21.html</code> · <code>권장안-2026-09-21.html</code> 에 있습니다.</p>
 </footer>
