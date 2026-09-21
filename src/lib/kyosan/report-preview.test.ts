@@ -91,7 +91,13 @@ function caseOf(overrides: Partial<KyosanCaseCandidate> = {}): KyosanCaseCandida
 }
 
 function stateOf(overrides: Partial<KyosanCaseState> = {}): KyosanCaseState {
-  return { repairCaseId: "case-1", serviceReportCount: 0, importedSourceSha256: [], ...overrides };
+  return {
+    repairCaseId: "case-1",
+    serviceReportCount: 0,
+    hasReportedSymptom: false,
+    importedSourceSha256: [],
+    ...overrides,
+  };
 }
 
 function previewOf(
@@ -213,10 +219,21 @@ describe("연락서 미리보기", () => {
     assert.ok(preview.plan);
   });
 
-  test("🔴 그 건에 이미 보고서가 있으면 알린다 — 막지는 않는다(유니크 제약이 없다)", () => {
+  test("🔴 신고 증상에 이미 값이 있으면 알린다 — 막지는 않는다(덮지 않고 작업 기록으로)", () => {
+    const preview = previewOf(reportOf(), caseOf(), stateOf({ hasReportedSymptom: true }));
+    assert.ok(preview.plan, "신고 증상이 차 있다고 막지는 않는다");
+    assert.ok(preview.warnings.some((warning) => /신고 증상 칸에 이미 값이 있습니다/.test(warning)));
+    assert.ok(preview.warnings.some((warning) => /작업 기록으로 넣습니다/.test(warning)));
+  });
+
+  test("🔴 보고서가 있어도 더 이상 알리지 않는다 — 이식이 보고서를 만들지 않기 때문이다", () => {
     const preview = previewOf(reportOf(), caseOf(), stateOf({ serviceReportCount: 2 }));
-    assert.ok(preview.plan, "보고서가 있다고 막지는 않는다");
-    assert.ok(preview.warnings.some((warning) => /이미 보고서가 2장/.test(warning)));
+    assert.ok(preview.plan);
+    assert.equal(
+      preview.warnings.some((warning) => /보고서/.test(warning)),
+      false,
+      "이식이 보고서를 만들지 않으므로 「한 장이 더 쌓인다」는 문장은 거짓말이다"
+    );
   });
 
   test("🔴 휴지통의 건에는 넣지 않는다", () => {

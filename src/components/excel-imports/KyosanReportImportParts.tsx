@@ -7,10 +7,13 @@ import {
   KYOSAN_AGREEMENT_LABEL,
   KYOSAN_AMBIGUOUS_TEXT,
   KYOSAN_CHOICE_CAUTION,
+  KYOSAN_DESTINATION_LABEL,
+  KYOSAN_DESTINATION_NOTE,
   KYOSAN_PART_KIND_LABEL,
   KYOSAN_REPORT_UPLOAD_MAX_BYTES,
-  KYOSAN_SECTION_LABEL,
   KYOSAN_UNMATCHED_TEXT,
+  kyosanReportLineDestination,
+  kyosanReportPartDestination,
   kyosanRepairCaseHref,
   type KyosanReportPreviewReady,
   type KyosanReportSaveOffer,
@@ -65,8 +68,8 @@ function blank(value: string | null): string {
  *  · 사람이 손으로 적은 일본어                        → 원문 그대로 + 「일본어 원문」 표시.
  *  · 그 밖(한글 · 영문 · 숫자)                        → 그대로.
  *
- * 🔴 여기서 **저장값이 달라지지 않는다.** 보고서에 들어가는 글자는 연락서 원문
- * 그대로이고(`kyosan/report-save-values.ts`), 이 조각은 사람이 넣기 전에 눈으로
+ * 🔴 여기서 **저장값이 달라지지 않는다.** 상세 칸에 들어가는 글자는 연락서 원문
+ * 그대로이고(`kyosan/report-detail-values.ts`), 이 조각은 사람이 넣기 전에 눈으로
  * 읽으라고 한글을 곁들일 뿐이다 — 번역이 틀렸을 때 원문으로 되짚을 수 있다.
  */
 function KyosanText({ value }: { value: string }) {
@@ -289,6 +292,8 @@ function KyosanReportTargetRow({
   const notes: string[] = [];
   if (target.isDeleted) notes.push("휴지통");
   if (target.alreadyImported) notes.push("이 연락서를 이미 넣음");
+  // 🔴 이식이 실제로 건드리는 단일 값 칸 하나 — 「덮지 않는다」를 미리 말한다.
+  if (target.hasReportedSymptom) notes.push("신고 증상 있음(덮지 않음)");
   if (target.serviceReportCount > 0) notes.push(`보고서 ${target.serviceReportCount}장 있음`);
 
   return (
@@ -341,14 +346,23 @@ function KyosanReportTargetRow({
 
 // ── 3. 무엇이 들어가는가 ──────────────────────────────────────────────────
 
+/**
+ * 🔴 **무엇이 「어디에」 들어가는지**를 보여 준다. 사람이 이 표를 보고 [이식]을
+ * 누르므로, 자리 이름이 틀리면 화면이 거짓말을 한 것이 된다. 자리는 저장이 쓰는
+ * 그 순수 함수(`kyosanReportLineDestination`)가 그대로 정한다.
+ */
 export function KyosanReportContentPanel({ preview }: { preview: KyosanReportPreviewReady }) {
   const { content } = preview;
+  const partDestination = kyosanReportPartDestination();
   return (
     <section data-role="kyosan-report-content" className={REPORT_SECTION_CLASS}>
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">3. 무엇이 들어가는가</h2>
+      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">3. 무엇이 어디에 들어가는가</h2>
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-        {`보고서 줄 ${content.lines.length}개 · 교체 부품 ${content.parts.length}건 · 원인 ○ ${content.causeMarks.length}개 · 처치 ○ ${content.actionMarks.length}개 · 사진 ${content.photoCount}장` +
+        {`내용 줄 ${content.lines.length}개 · 교체 부품 ${content.parts.length}건 · 원인 ○ ${content.causeMarks.length}개 · 처치 ○ ${content.actionMarks.length}개 · 사진 ${content.photoCount}장` +
           (content.formAssetCount > 0 ? ` (양식 그림 ${content.formAssetCount}장은 걸러 냈습니다)` : "")}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        🔴 보고서를 만들지 않습니다 — 아래 「들어갈 자리」의 수리 건 상세 칸에 그대로 넣습니다.
       </p>
 
       {content.lines.length === 0 && content.parts.length === 0 && content.photoCount === 0 ? (
@@ -361,32 +375,53 @@ export function KyosanReportContentPanel({ preview }: { preview: KyosanReportPre
         <table className="mt-3 w-full table-auto text-sm">
           <thead>
             <tr>
-              <th className={TH_CLASS}>구역</th>
+              <th className={TH_CLASS}>들어갈 자리</th>
               <th className={TH_CLASS}>연락서 항목</th>
               <th className={TH_CLASS}>들어갈 글자</th>
             </tr>
           </thead>
           <tbody>
-            {content.lines.map((line) => (
-              <tr key={`${line.section}-${line.origin}-${line.text}`} data-role="kyosan-report-line">
-                <td className={`${TD_CLASS} whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400`}>
-                  {KYOSAN_SECTION_LABEL[line.section]}
-                </td>
-                <td className={`${TD_CLASS} whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400`}>
-                  {line.origin}
-                </td>
-                <td className={`${TD_CLASS} whitespace-pre-wrap text-zinc-800 dark:text-zinc-200`}>
-                  <KyosanText value={line.text} />
-                </td>
-              </tr>
-            ))}
+            {content.lines.map((line) => {
+              const destination = kyosanReportLineDestination(line);
+              const note = KYOSAN_DESTINATION_NOTE[destination];
+              return (
+                <tr
+                  key={`${line.section}-${line.origin}-${line.text}`}
+                  data-role="kyosan-report-line"
+                  data-destination={destination}
+                >
+                  <td className={`${TD_CLASS} text-xs`}>
+                    <span
+                      className={
+                        destination === "NOT_IMPORTED"
+                          ? "text-amber-700 dark:text-amber-300"
+                          : "text-zinc-700 dark:text-zinc-300"
+                      }
+                    >
+                      {KYOSAN_DESTINATION_LABEL[destination]}
+                    </span>
+                    {note === null ? null : (
+                      <span className="block text-[11px] text-zinc-400 dark:text-zinc-500">{note}</span>
+                    )}
+                  </td>
+                  <td className={`${TD_CLASS} whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400`}>
+                    {line.origin}
+                  </td>
+                  <td className={`${TD_CLASS} whitespace-pre-wrap text-zinc-800 dark:text-zinc-200`}>
+                    <KyosanText value={line.text} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       ) : null}
 
       {content.parts.length > 0 ? (
         <div className="mt-3">
-          <h3 className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">교체 부품</h3>
+          <h3 className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+            {`교체 부품 — 사용 부품 칸 + ${KYOSAN_DESTINATION_LABEL[partDestination]}`}
+          </h3>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-zinc-800 dark:text-zinc-200">
             {content.parts.map((part) => (
               <li key={`${part.kind}-${part.text}`} data-role="kyosan-report-part">
@@ -533,7 +568,15 @@ export function KyosanReportConfirmDialogView({
         {`수리 건 ${target.intakeNumber} 에 연락서를 넣습니다`}
       </h2>
       <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-zinc-800 dark:text-zinc-200">
-        <li>{`보고서 한 장 · 줄 ${content.lines.length}개 · 교체 부품 ${content.parts.length}건 · 사진 ${content.photoCount}장`}</li>
+        <li>{`내용 줄 ${content.lines.length}개 · 교체 부품 ${content.parts.length}건 · 사진 ${content.photoCount}장`}</li>
+        <li data-role="kyosan-report-confirm-destination">
+          🔴 보고서는 만들지 않습니다 — 신고 증상(비어 있을 때만)과 작업 기록으로 들어갑니다.
+        </li>
+        <li>
+          {target.hasReportedSymptom
+            ? "이 건의 신고 증상에는 이미 값이 있어 덮지 않고 작업 기록으로 넣습니다."
+            : "이 건의 신고 증상 칸이 비어 있어 고객 고장 상황을 그 칸에 넣습니다."}
+        </li>
         <li>연락서 원본 파일도 이 수리 건의 첨부로 남습니다.</li>
         <li>넣은 뒤에는 이 화면에서 되돌릴 수 없습니다.</li>
       </ul>
@@ -586,7 +629,9 @@ export function KyosanReportResultPanel({
         {`수리 건 ${result.intakeNumber} 에 넣었습니다`}
       </h2>
       <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-        {`보고서 줄 ${result.lineCount}개 · 원인 ${result.causeCount}개 · 사용 부품 ${result.usedPartCount}줄 · 첨부 ${result.attachmentIds.length}개(사진 ${result.photoCount}장)`}
+        {`내용 줄 ${result.lineCount}개 · 작업 기록 ${result.workRecordIds.length}건 · ` +
+          `신고 증상 ${result.reportedSymptomFilled ? "채움" : "그대로 둠"} · ` +
+          `사용 부품 ${result.usedPartCount}줄 · 첨부 ${result.attachmentIds.length}개(사진 ${result.photoCount}장)`}
       </p>
       <p className="mt-2 text-sm">
         <Link href={kyosanRepairCaseHref(result.repairCaseId)} className={LINK_CLASS}>

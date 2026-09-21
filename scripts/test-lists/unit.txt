@@ -255,6 +255,7 @@ src/lib/kyosan/report-preview.test.ts
 src/lib/kyosan/report-causes.test.ts
 src/lib/kyosan/report-terms.test.ts
 src/lib/kyosan/report-save-values.test.ts
+src/lib/kyosan/report-detail-values.test.ts
 src/lib/domain/kyosan-report-import/preview-view.test.ts
 src/lib/server/actions/kyosan-report-import.test.ts
 src/lib/domain/weekly-report-kind-filter.test.ts

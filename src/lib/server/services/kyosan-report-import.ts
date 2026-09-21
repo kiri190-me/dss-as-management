@@ -14,7 +14,10 @@ import {
 } from "@/lib/db/schema";
 import { createAttachmentRecordInTx } from "@/lib/db/mutations/attachments";
 import { insertAuditLog } from "@/lib/db/mutations/audit-logs";
-import { createServiceReportInTx } from "@/lib/db/mutations/service-reports";
+import {
+  CreateWorkRecordMutationError,
+  createWorkRecordInTx,
+} from "@/lib/db/mutations/repair-case-work-records";
 import {
   KYOSAN_REPORT_SOURCE,
   loadKyosanReportLinkTargets,
@@ -38,7 +41,7 @@ import {
   buildAttachmentStoredPath,
   buildServerOriginAttachmentStoredPath,
 } from "@/lib/domain/attachment-path";
-import { toKstDateOnly } from "@/lib/domain/date-only";
+import type { WorkRecordKind } from "@/lib/domain/types";
 import type { KyosanReport } from "@/lib/kyosan/kyosan-report";
 import {
   checkKyosanIdentity,
@@ -49,8 +52,8 @@ import {
   type KyosanReportIdentity,
 } from "@/lib/kyosan/report-match";
 import { splitKyosanPhotos } from "@/lib/kyosan/report-photo-filter";
+import { buildKyosanDetailValues } from "@/lib/kyosan/report-detail-values";
 import { buildKyosanReportPreview, type KyosanImportPlan } from "@/lib/kyosan/report-preview";
-import { buildKyosanServiceReportValues } from "@/lib/kyosan/report-save-values";
 import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/storage-adapter";
 import { ZipArchive } from "@/lib/xlsx/zip-reader";
 
@@ -62,10 +65,35 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  * 내용을 시스템에 이식한다.」 그러므로 이 파일에는 **수리 건을 만드는 줄이
  * 하나도 없다.** 짝이 없으면 답은 「넣지 않는다」이고, 왜 안 넣었는지만 돌려준다.
  *
+ * ── 🔴 보고서를 만들지 않는다 (2026-09-21 사용자 결정, 조각 S5) ──────
+ * 「확인내용이나 조치를 보고서에다가 넣지 말고, 상세 페이지 곳곳에 알맞는 칸들이
+ * 있을 거야 거기에다가 넣어줘.」 … 「보고서 안 만들어도 돼」
+ *
+ * 그래서 이 파일에는 **`service_reports` 를 만드는 줄이 하나도 없다.** 내용은
+ * 수리 건 상세의 제자리 칸으로 간다:
+ *
+ *   고객 고장 상황                  → `repair_cases.reported_symptom`
+ *                                     🔴 **비어 있을 때만.** 값이 있으면 덮지
+ *                                     않고 작업 기록으로 보낸다
+ *   사내 확인 결과 · 고장 부위 ·    → 작업 기록 `INTAKE_INSPECTION_RESULT`
+ *   불량 현상 상세 · 반품 사유 상세    (기본 정보 > 인수점검 결과로 파생)
+ *   처치 ○ · 원인 ○ · 원인 상세 ·   → 작업 기록 `DIAGNOSIS_REPAIR_SUMMARY`
+ *   교체 부품 요약                     (기본 정보 > 현재 진단/조치 요약으로 파생)
+ *   교체 부품                       → `repair_case_used_parts` (지금 그대로)
+ *   사진 · 원본 `.xlsm`             → `attachments` (지금 그대로)
+ *   비고                            → 🔴 넣지 않는다(`report-detail-values.ts`)
+ *
+ * 어느 줄이 어디로 가는가는 **순수 함수**(`kyosan/report-detail-values.ts`)가
+ * 정하고, 미리보기 화면이 그 **같은 함수**로 사람에게 미리 보여 준다 — 화면이
+ * 말한 자리와 실제로 들어간 자리가 갈라질 길이 없다.
+ *
+ * 🔴 보고서를 짓던 `kyosan/report-save-values.ts` 는 **지우지 않고** 남겨 두었다
+ * (되돌릴 수 있어야 한다 — 그 파일 머리말).
+ *
  * ── 무엇을 다시 쓰는가 (복제하지 않는다) ─────────────────────────────
  *  · 짝짓기 · 미리보기  `kyosan/report-match.ts` · `report-preview.ts` (S3a)
  *  · 사진 거르기        `kyosan/report-photo-filter.ts` (S3a)
- *  · 보고서 한 장       `db/mutations/service-reports.ts` 의 `…InTx`
+ *  · 작업 기록 한 줄    `db/mutations/repair-case-work-records.ts` 의 `…InTx`
  *  · 첨부 한 줄         `db/mutations/attachments.ts` 의 `…InTx`
  *  · 사용 부품 규칙     `auth/repair-case-used-parts-authorization.ts` 의 판정
  *                       + `db/queries/repair-case-used-parts.ts` 의 두 probe
@@ -106,8 +134,8 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  * 믿는 것이 아니라, 서버가 다시 만든 후보 목록으로 확인한다.
  *
  * ── 한 트랜잭션 · 그리고 파일 ────────────────────────────────────────
- * 보고서 한 장 + 줄 + 원인 + 사용 부품 + 첨부 행 + 이식 흔적이 **한
- * 트랜잭션**이다. 중간에 실패하면 DB 에는 아무것도 남지 않는다.
+ * 신고 증상 + 작업 기록 + 사용 부품 + 첨부 행 + 이식 흔적이 **한 트랜잭션**이다.
+ * 중간에 실패하면 DB 에는 아무것도 남지 않는다.
  *
  * ⚠️ **디스크의 파일은 트랜잭션에 들어가지 않는다.** 그래서 올리기 통로 ·
  * 견적서 발행과 **같은 차례**를 쓴다: 파일을 먼저 놓고 → DB 를 쓰고 → DB 가
@@ -168,7 +196,7 @@ export type KyosanReportImportFailureCode =
   | "SOURCE_TOO_LARGE"
   /** 파일을 저장소에 놓지 못했다. */
   | "STORAGE_FAILED"
-  /** 보고서 한 장을 만들지 못했다(자료 규칙). */
+  /** 상세 칸에 넣지 못했다(자료 규칙 · 작업 기록 규칙). */
   | "SAVE_REJECTED";
 
 export type KyosanReportImportResult =
@@ -176,10 +204,12 @@ export type KyosanReportImportResult =
       ok: true;
       repairCaseId: string;
       intakeNumber: string;
-      serviceReportId: string;
-      /** 저장한 보고서 줄 수(구역 합계). */
+      /** 🔴 **보고서는 만들지 않는다.** 새로 남긴 작업 기록의 id 들이다. */
+      workRecordIds: readonly string[];
+      /** 🔴 신고 증상 칸을 실제로 채웠는가(비어 있었을 때만 참). */
+      reportedSymptomFilled: boolean;
+      /** 연락서에서 뽑아 어딘가에 넣은 줄 수. */
       lineCount: number;
-      causeCount: number;
       /** `repair_case_used_parts` 에 **새로 붙인** 줄 수. 0 이면 아래 사유가 있다. */
       usedPartCount: number;
       attachmentIds: readonly string[];
@@ -307,22 +337,9 @@ export async function importKyosanReport(
     };
   }
 
-  // ── 2. 보고서 저장값 (순수 함수) ──
-  const built = buildKyosanServiceReportValues({
-    plan,
-    card: report.card,
-    causeMarks: plan.causeMarks,
-    today: input.today ?? toKstDateOnly(new Date()),
-  });
-  if (built.unmappedCauseMarks.length > 0) {
-    warnings.push(
-      `원인 보기 ${built.unmappedCauseMarks.length}가지가 우리 원인 목록에 없어 「기타」로 넣었습니다 ` +
-        "(원문은 보고서 줄에 그대로 남습니다)."
-    );
-  }
-  if (built.issuedOnOrigin === "오늘") {
-    warnings.push("연락서에서 날짜를 하나도 읽지 못해 발행일을 오늘 날짜로 넣었습니다.");
-  }
+  // ── 2. 🔴 상세 칸 값은 **트랜잭션 안에서** 만든다 ──
+  //    「신고 증상이 비어 있는가」는 잠금 안에서 방금 읽은 값으로 물어야 한다 —
+  //    여기서 미리 정하면 그 사이에 사람이 적은 글자를 덮을 수 있다.
 
   // ── 3. 파일을 먼저 디스크에 놓는다 (DB 보다 먼저 — 위 머리말의 ⚠️) ──
   const placed: PlacedFile[] = [];
@@ -350,14 +367,40 @@ export async function importKyosanReport(
         basis: matched.basis,
       });
 
-      const created = await createServiceReportInTx(tx, {
+      // 🔴 여기서 비로소 「무엇을 어느 칸에 넣을지」가 정해진다 — 잠금 안에서
+      //    방금 읽은 신고 증상을 보고 덮을지 말지를 가른다.
+      const detail = buildKyosanDetailValues({
+        plan,
+        currentReportedSymptom: locked.reportedSymptom,
+      });
+
+      const reportedSymptomFilled = await fillReportedSymptom(tx, {
         repairCaseId: plan.repairCaseId,
-        values: built.values,
+        value: detail.reportedSymptom,
         actorUserId: input.actorUserId,
       });
-      if (!created.ok) {
-        throw new ImportAbort("SAVE_REJECTED", created.message);
+      if (detail.symptomDivertedReason !== null) {
+        warnings.push(
+          `고객 고장 상황을 신고 증상 칸에 넣지 않았습니다(${detail.symptomDivertedReason}) — ` +
+            "덮어쓰지 않고 작업 기록으로 남겼습니다."
+        );
       }
+      if (detail.didSplitForLength) {
+        warnings.push(
+          "내용이 작업 기록 한 건의 상한(4000자)을 넘어 여러 건으로 나눠 넣었습니다 — 잘라낸 글자는 없습니다."
+        );
+      }
+      if (detail.skippedOrigins.length > 0) {
+        warnings.push(
+          `연락서의 ${detail.skippedOrigins.join(" · ")} 항목은 넣지 않았습니다 — 원본 첨부에 그대로 남습니다.`
+        );
+      }
+
+      const workRecordIds = await appendWorkRecords(tx, {
+        repairCaseId: plan.repairCaseId,
+        drafts: detail.workRecords,
+        actorUserId: input.actorUserId,
+      });
 
       const usedParts = await appendUsedParts(tx, {
         repairCaseId: plan.repairCaseId,
@@ -399,9 +442,9 @@ export async function importKyosanReport(
           source: KYOSAN_REPORT_SOURCE,
           sourceSha256: report.sourceSha256,
           // 🔴 우리 표의 id 와 개수만. 파일 이름·고객 내용은 담지 않는다(머리말).
-          serviceReportId: created.id,
+          workRecordIds,
+          reportedSymptomFilled,
           lineCount: plan.lines.length,
-          causeCount: built.values.causes.length,
           usedPartCount: usedParts.insertedCount,
           attachmentCount: attachmentIds.length,
           photoCount: plan.photoCount,
@@ -413,9 +456,9 @@ export async function importKyosanReport(
         ok: true as const,
         repairCaseId: plan.repairCaseId,
         intakeNumber: plan.intakeNumber,
-        serviceReportId: created.id,
+        workRecordIds,
+        reportedSymptomFilled,
         lineCount: plan.lines.length,
-        causeCount: built.values.causes.length,
         usedPartCount: usedParts.insertedCount,
         attachmentIds,
         photoCount: attachmentIds.length - 1,
@@ -444,6 +487,11 @@ export type KyosanLockedCase = {
   isLocked: boolean;
   workflowVersionId: string;
   currentWorkflowStepId: string;
+  /**
+   * 🔴 잠금 안에서 방금 읽은 신고 증상. **덮어쓰기를 막는 근거**다 — 미리보기
+   * 때 읽은 값이 아니라 이 값으로 「비어 있는가」를 묻는다.
+   */
+  reportedSymptom: string | null;
 };
 
 /**
@@ -480,6 +528,7 @@ export async function lockAndReconfirm(
       customerId: repairCases.customerId,
       workflowVersionId: repairCases.workflowVersionId,
       currentWorkflowStepId: repairCases.currentWorkflowStepId,
+      reportedSymptom: repairCases.reportedSymptom,
     })
     .from(repairCases)
     .where(eq(repairCases.id, params.repairCaseId))
@@ -568,7 +617,114 @@ export async function lockAndReconfirm(
     isLocked: current.isLocked,
     workflowVersionId: current.workflowVersionId,
     currentWorkflowStepId: current.currentWorkflowStepId,
+    reportedSymptom: current.reportedSymptom,
   };
+}
+
+// ─────────────────────────────────────────────── 신고 증상 (🔴 비어 있을 때만)
+
+/**
+ * 🔴 **사람이 적은 글자를 지우지 않는다.** DB 실측에서 217건 중 213건에 이미
+ * 값이 있었다 — 그냥 쓰면 그 글자가 말없이 사라진다.
+ *
+ * `value` 가 `null` 이면 아무것도 하지 않는다(순수 함수가 이미 「쓰면 안 된다」고
+ * 판정했다 — 값이 있거나, 뽑을 것이 없거나, 4000자를 넘었다).
+ *
+ * 🔴 UPDATE 의 WHERE 에 **「지금도 비어 있는가」를 한 번 더 적는다.** 위에서
+ * `FOR UPDATE` 로 잠갔으니 사이에 끼어들 수는 없지만, 이 칸은 잘못 쓰면 남의
+ * 글자가 사라지는 자리라 조건을 SQL 에도 남긴다. 0줄이 바뀌면 **던진다** —
+ * 조용히 넘어가면 「썼다고 말했는데 안 썼다」가 된다.
+ */
+async function fillReportedSymptom(
+  tx: Tx,
+  params: { repairCaseId: string; value: string | null; actorUserId: string }
+): Promise<boolean> {
+  if (params.value === null) return false;
+
+  const updated = await tx
+    .update(repairCases)
+    .set({
+      reportedSymptom: params.value,
+      // 사용 부품 이식과 같은 번호를 올린다 — 화면이 열어 둔 폼은 다음 저장에서
+      // CONFLICT 를 받고 다시 불러온다(그것이 맞는 신호다).
+      version: sql`${repairCases.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(repairCases.id, params.repairCaseId),
+        sql`coalesce(btrim(${repairCases.reportedSymptom}), '') = ''`
+      )
+    )
+    .returning({ id: repairCases.id });
+
+  if (updated.length === 0) {
+    throw new ImportAbort(
+      "SAVE_REJECTED",
+      "신고 증상 칸에 그 사이 값이 생겨 넣지 않았습니다 — 다시 확인해 주세요."
+    );
+  }
+
+  await insertAuditLog(tx, {
+    actorUserId: params.actorUserId,
+    actionType: "UPDATE",
+    targetEntity: "repair_cases",
+    targetRecordId: params.repairCaseId,
+    previousValue: { reportedSymptom: null },
+    newValue: { reportedSymptom: params.value, source: KYOSAN_REPORT_SOURCE },
+  });
+
+  return true;
+}
+
+// ─────────────────────────────────────────────── 작업 기록 (덧붙인다)
+
+/**
+ * 작업 기록을 **덧붙인다**. 🔴 `createWorkRecordInTx` 를 그대로 부른다 — 이
+ * 파일에 INSERT 를 다시 적지 않는다(적으면 멱등 판정 · 절차 항목 검사 · 살아
+ * 있는 계정 확인이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다).
+ *
+ * 🔴 `origin: "server-import"` 는 **역할 권한과 담당 여부 둘만** 건너뛴다. 이
+ * 통로는 화면 칸이 아니라 서버가 도는 이식이고, 누가 이식할 수 있는지는 액션이
+ * 더 무거운 권한(`kyosanIntakeImport` MANAGE)으로 이미 판정했다. 나머지 검사는
+ * 그대로 받는다 — 유·무상이 확정되지 않은 건이면 **이식 전체가 막힌다**(그때는
+ * 사람이 유·무상을 정한 뒤에 다시 넣는다).
+ *
+ * 🔴 막히면 **되돌린다** — 사용 부품과 다르다. 부품은 보고서 줄로도 들어가 잃는
+ * 것이 없었지만, 작업 기록은 이제 연락서 본문이 갈 **유일한 자리**다. 반쪽만
+ * 들어가면 첨부만 남고 내용은 없는 건이 된다.
+ */
+async function appendWorkRecords(
+  tx: Tx,
+  params: {
+    repairCaseId: string;
+    drafts: readonly { recordKind: WorkRecordKind; memo: string }[];
+    actorUserId: string;
+  }
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const draft of params.drafts) {
+    try {
+      const created = await createWorkRecordInTx(tx, {
+        repairCaseId: params.repairCaseId,
+        actorUserId: params.actorUserId,
+        memo: draft.memo,
+        recordKind: draft.recordKind,
+        relatedProcedureExecutionNodeId: null,
+        // 이식마다 새 열쇠다 — 같은 연락서를 두 번 넣는 것은 `sourceSha256`
+        // 흔적이 막고, 이쪽은 한 이식 안의 줄들이 서로 부딪히지 않게만 한다.
+        clientRequestId: randomUUID().toLowerCase(),
+        origin: "server-import",
+      });
+      ids.push(created.id);
+    } catch (error) {
+      if (error instanceof CreateWorkRecordMutationError) {
+        throw new ImportAbort("SAVE_REJECTED", error.result.message);
+      }
+      throw error;
+    }
+  }
+  return ids;
 }
 
 // ─────────────────────────────────────────────── 사용 부품 (붙인다 — 갈아 끼우지 않는다)
@@ -588,9 +744,10 @@ export async function lockAndReconfirm(
  * 가진 것을 그대로 부른다. 특히 **반출 이력이 있으면 적지 않는다** — 같은 부품을
  * 통계가 두 번 세는 것을 막는 규칙이고, 이식이라고 예외일 이유가 없다.
  *
- * 🔴 막히면 **이식 전체를 실패시키지 않는다.** 교체 부품은 보고서 줄로도 들어가
- * 있어서(`report-save-values.ts`) 잃는 내용이 없고, 반출 이력이 있는 건은 흔해서
- * 막을 경우 그 건의 연락서를 영영 못 넣게 된다. 대신 사유를 경고로 올린다.
+ * 🔴 막히면 **이식 전체를 실패시키지 않는다.** 교체 부품 글자는 「진단/조치」
+ * 작업 기록에도 함께 들어가(`report-detail-values.ts`) 잃는 내용이 없고, 반출
+ * 이력이 있는 건은 흔해서 막을 경우 그 건의 연락서를 영영 못 넣게 된다. 대신
+ * 사유를 경고로 올린다.
  *
  * 권한은 보지 않는다 — 이 통로는 사람이 칸에 적는 화면이 아니라 서버가 도는
  * 이식이고, 누가 이식을 할 수 있는지는 부르는 쪽(S4 의 화면·라우트)이 본다.

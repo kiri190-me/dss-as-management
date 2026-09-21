@@ -543,9 +543,27 @@ describe("createWorkRecord: idempotency", () => {
 });
 
 describe("work-record immutability", () => {
-  test("17. the mutation module exposes exactly createWorkRecord and invalidateWorkRecord — no edit/update mutation exists", () => {
+  test("17. the mutation module exposes exactly createWorkRecord(+InTx) and invalidateWorkRecord — no edit/update mutation exists", () => {
     const exportedFunctionNames = Object.keys(workRecordMutations).sort();
-    assert.deepEqual(exportedFunctionNames, ["createWorkRecord", "invalidateWorkRecord"]);
+    // 🔴 2026-09-21 — createWorkRecord 의 **몸통**을 createWorkRecordInTx 로 뽑았다
+    //    (교산 연락서 이식이 첨부 · 사용 부품 · 이식 흔적과 한 트랜잭션으로 작업
+    //    기록을 넣어야 한다). 쓰기의 수는 그대로 둘이고, 뽑은 함수는 같은 INSERT
+    //    다. 오류 클래스는 그 던짐을 부르는 쪽이 제 결과로 바꾸기 위해 열었다.
+    assert.deepEqual(exportedFunctionNames, [
+      "CreateWorkRecordMutationError",
+      "createWorkRecord",
+      "createWorkRecordInTx",
+      "invalidateWorkRecord",
+    ]);
+    // 🔴 이 시험이 지키는 것은 「작업 기록을 **고치는** mutation 이 없다」이다 —
+    //    이름이 늘어도 그 규칙은 한 글자도 느슨해지지 않는다.
+    for (const name of exportedFunctionNames) {
+      assert.equal(
+        /update|edit/i.test(name),
+        false,
+        `${name} — 작업 기록을 고치는 mutation 은 있으면 안 된다`
+      );
+    }
   });
 });
 

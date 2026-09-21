@@ -6,6 +6,11 @@ import type {
   KyosanIntakeNumberStatus,
   KyosanMatch,
 } from "@/lib/kyosan/report-match";
+import {
+  kyosanLineDestination,
+  kyosanPartDestination,
+  type KyosanDetailDestination,
+} from "@/lib/kyosan/report-detail-values";
 import type {
   KyosanCaseState,
   KyosanPreviewLine,
@@ -20,6 +25,12 @@ import type { KyosanReportImportFailureCode } from "@/lib/server/services/kyosan
  * 🔴 **순수 함수만 있다.** DB 도 `server-only` 도 React 도 모른다. 서버(미리보기
  * 서비스)와 화면(클라이언트 묶음)이 **같은 타입 한 벌**을 쓰기 위한 자리이고,
  * 저장 단추를 열지 말지를 정하는 판단이 여기에 있어 Node 시험으로 돌아간다.
+ *
+ * ── 🔴 「무엇이 어디로 가는가」는 저장과 **같은 함수**로 말한다 (S5) ──
+ * 이식은 보고서를 만들지 않는다(사용자 결정 2026-09-21). 줄마다 상세의 어느
+ * 칸으로 가는지는 `kyosan/report-detail-values.ts` 의 `kyosanLineDestination`
+ * 하나가 정하고, **저장도 화면도 그것을 부른다** — 화면에만 있는 이름표를 따로
+ * 적으면 「보여 준 자리」와 「들어간 자리」가 갈라진다.
  *
  * ── 🔴 여기에 plan 을 만들지 않는다 ──────────────────────────────────
  * 저장 함수(`server/services/kyosan-report-import.ts`)는 **미리보기 결과를 받지
@@ -74,8 +85,17 @@ export type KyosanReportTarget = {
   lotNumber: string | null;
   /** 항목마다 `agree` · `differ` · `unknown`(S3a 의 `checkKyosanIdentity`). */
   identity: KyosanIdentityCheck;
-  /** 이 건에 이미 있는(지워지지 않은) 보고서 수. */
+  /**
+   * 이 건에 이미 있는(지워지지 않은) 보고서 수. 🔴 **이식은 보고서를 만들지
+   * 않는다** — 이 수는 건의 사실을 곁들이는 것일 뿐, 이식이 한 장을 더한다는
+   * 뜻이 아니다.
+   */
   serviceReportCount: number;
+  /**
+   * 🔴 이 건의 신고 증상 칸에 이미 값이 있는가. 있으면 이식은 그 칸을 **덮지
+   * 않고** 고객 고장 상황을 작업 기록으로 보낸다.
+   */
+  hasReportedSymptom: boolean;
   /** 🔴 이 연락서(같은 원본 파일)를 이 건에 이미 넣었는가. */
   alreadyImported: boolean;
 };
@@ -171,6 +191,7 @@ export function buildKyosanReportTargets(
       lotNumber: view.candidate.lotNumber ?? null,
       identity: view.identity,
       serviceReportCount: state?.serviceReportCount ?? 0,
+      hasReportedSymptom: state?.hasReportedSymptom ?? false,
       alreadyImported: state?.importedSourceSha256.includes(sourceSha256) ?? false,
     };
   });
@@ -277,13 +298,44 @@ export const KYOSAN_IMPORT_FAILURE_TEXT: Readonly<Record<KyosanReportImportFailu
   SAVE_REJECTED: "저장하지 못했습니다.",
 };
 
-/** 보고서 줄이 들어가는 구역 이름표. */
-export const KYOSAN_SECTION_LABEL: Readonly<Record<KyosanPreviewLine["section"], string>> = {
-  FINDINGS: "확인 내용",
-  ACTIONS: "조치 내용",
-  SUMMARY: "요약",
-  REMARK: "비고",
+/**
+ * 🔴 **줄이 실제로 들어갈 자리의 이름표** (2026-09-21, 조각 S5).
+ *
+ * 예전에는 보고서 양식의 구역 이름(`확인 내용` · `조치 내용` · `요약` · `비고`)을
+ * 보여 주었다. 이식이 보고서를 만들지 않게 된 지금 그 이름들은 **상세에 없는
+ * 칸**이라, 그대로 두면 화면이 거짓말을 한다. 이름표는 상세의 진짜 자리를
+ * 가리키고, 그 자리를 정하는 함수는 저장이 쓰는 것과 **같은 순수 함수**다
+ * (`kyosan/report-detail-values.ts` 의 `kyosanLineDestination`).
+ */
+export const KYOSAN_DESTINATION_LABEL: Readonly<Record<KyosanDetailDestination, string>> = {
+  REPORTED_SYMPTOM: "신고 증상",
+  INTAKE_INSPECTION_RESULT: "작업 기록 · 인수점검 결과",
+  DIAGNOSIS_REPAIR_SUMMARY: "작업 기록 · 진단/조치",
+  WORK_RECORD_GENERAL: "작업 기록 · 일반",
+  NOT_IMPORTED: "넣지 않음",
 };
+
+/** 이름표만으로는 모자란 자리에 곁들이는 한 마디. 없으면 `null`. */
+export const KYOSAN_DESTINATION_NOTE: Readonly<Record<KyosanDetailDestination, string | null>> = {
+  REPORTED_SYMPTOM: "비어 있을 때만 — 값이 있으면 덮지 않고 작업 기록으로",
+  INTAKE_INSPECTION_RESULT: "기본 정보의 「인수점검 결과」로 보입니다",
+  DIAGNOSIS_REPAIR_SUMMARY: "기본 정보의 「현재 진단/조치 요약」으로 보입니다",
+  WORK_RECORD_GENERAL: "작업 이력에만 남습니다",
+  NOT_IMPORTED: "원본 첨부에만 남습니다",
+};
+
+/**
+ * 줄 하나가 어디로 가는가. 🔴 **저장이 쓰는 함수를 그대로 다시 쓴다** — 화면이
+ * 따로 계산하면 「보여 준 자리」와 「들어간 자리」가 갈라진다.
+ */
+export function kyosanReportLineDestination(line: KyosanPreviewLine): KyosanDetailDestination {
+  return kyosanLineDestination(line);
+}
+
+/** 교체 부품 줄의 자리. 사용 부품 칸과 **둘 다** 간다. */
+export function kyosanReportPartDestination(): KyosanDetailDestination {
+  return kyosanPartDestination();
+}
 
 export const KYOSAN_PART_KIND_LABEL: Readonly<Record<KyosanPreviewPart["kind"], string>> = {
   fault: "고장분",

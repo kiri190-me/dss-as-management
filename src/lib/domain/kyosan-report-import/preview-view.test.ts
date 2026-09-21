@@ -61,6 +61,7 @@ function target(overrides: Partial<KyosanReportTarget> = {}): KyosanReportTarget
     lotNumber: null,
     identity: ALL_AGREE,
     serviceReportCount: 0,
+    hasReportedSymptom: false,
     alreadyImported: false,
     ...overrides,
   };
@@ -238,6 +239,7 @@ describe("buildKyosanReportTargets", () => {
     return {
       repairCaseId: candidate().repairCaseId,
       serviceReportCount: 0,
+      hasReportedSymptom: false,
       importedSourceSha256: [],
       ...overrides,
     };
@@ -254,10 +256,16 @@ describe("buildKyosanReportTargets", () => {
         warnings: [],
       },
     };
-    const built = buildKyosanReportTargets(match, [state({ serviceReportCount: 2 })], sha);
+    const built = buildKyosanReportTargets(
+      match,
+      [state({ serviceReportCount: 2, hasReportedSymptom: true })],
+      sha
+    );
 
     assert.equal(built.length, 1);
     assert.equal(built[0].serviceReportCount, 2);
+    // 🔴 이식이 덮지 않는다는 것을 화면이 말할 수 있어야 한다.
+    assert.equal(built[0].hasReportedSymptom, true);
     assert.equal(built[0].alreadyImported, false);
     assert.deepEqual(built[0].identity, ALL_AGREE);
   });
@@ -300,6 +308,7 @@ describe("buildKyosanReportTargets", () => {
     assert.equal(built[1].identity.customer, "differ");
     // 상태를 못 읽은 건은 0 · false 로 둔다(없는 것을 있는 것처럼 말하지 않는다).
     assert.equal(built[0].serviceReportCount, 0);
+    assert.equal(built[0].hasReportedSymptom, false);
     assert.equal(built[0].alreadyImported, false);
   });
 

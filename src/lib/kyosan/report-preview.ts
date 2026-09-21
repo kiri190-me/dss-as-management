@@ -26,8 +26,8 @@ import { splitKyosanPhotos } from "./report-photo-filter";
  *     「같은 파일을 두 번 넣는 것」이라는 뜻이 된다.
  *
  * **알리는 것** — 넣을 수는 있지만 사람이 알아야 하는 것이다.
- *   · 🔴 **그 건에 이미 보고서가 있다** — `service_reports` 에는 유니크 제약이
- *     하나도 없어 두 번 넣으면 아무 소리 없이 두 장이 쌓인다.
+ *   · 🔴 **신고 증상 칸에 이미 값이 있다** — 덮지 않고 작업 기록으로 보낸다
+ *     (`report-detail-values.ts` 의 덮어쓰기 정책).
  *   · 모델 · S/N · L/N · 고객사가 수리 건과 다르다(`report-match.ts`)
  *   · 넣을 내용이 하나도 없다
  *
@@ -55,8 +55,18 @@ export type KyosanPreviewPart = {
 /** 짝지은 수리 건이 지금 어떤 상태인가. 질의가 읽어서 넣어 준다. */
 export type KyosanCaseState = {
   repairCaseId: string;
-  /** 지워지지 않은 보고서 수. 0 이 아니면 알린다(머리말). */
+  /**
+   * 지워지지 않은 보고서 수. 🔴 **이식은 보고서를 만들지 않는다**(2026-09-21
+   * 사용자 결정) — 그래서 이 수는 더 이상 경고를 만들지 않고, 화면이 「이 건에는
+   * 보고서가 이만큼 있다」는 사실을 곁들여 보여 주는 데만 쓴다.
+   */
   serviceReportCount: number;
+  /**
+   * 🔴 `repair_cases.reported_symptom` 에 이미 사람이 적은 글자가 있는가.
+   * 있으면 이식은 그 칸을 **덮지 않고** 고객 고장 상황을 작업 기록으로 보낸다
+   * (`report-detail-values.ts`). 화면이 그 사실을 미리 말한다.
+   */
+  hasReportedSymptom: boolean;
   /** 이 건에 이미 들어간 연락서 원본 해시들. */
   importedSourceSha256: readonly string[];
 };
@@ -109,6 +119,14 @@ function caption(map: Map<string, string>, key: string): string {
   return map.get(key) ?? key;
 }
 
+/**
+ * ○ 가 찍힌 보기 줄의 `origin`. 🔴 **글자를 여기 한 벌만 둔다** — 어느 칸으로
+ * 갈지를 정하는 `report-detail-values.ts` 가 이 값으로 줄을 가르기 때문에, 두
+ * 벌로 적으면 한쪽만 고쳐지는 날 내용이 조용히 엉뚱한 칸으로 간다.
+ */
+export const KYOSAN_CAUSE_MARK_ORIGIN = "원인(○ 표시)";
+export const KYOSAN_ACTION_MARK_ORIGIN = "처치(○ 표시)";
+
 /** 연락서 한 장에서 보고서 줄을 뽑는다. 같은 구역 안에서 같은 글자는 한 번만. */
 export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine[] {
   const lines: KyosanPreviewLine[] = [];
@@ -131,8 +149,8 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
     const value = report.card.fields[key].value;
     if (value !== null) push(section, caption(FIELD_CAPTION, key), value);
   }
-  for (const marked of report.cause.marked) push("FINDINGS", "원인(○ 표시)", marked);
-  for (const marked of report.action.marked) push("ACTIONS", "처치(○ 표시)", marked);
+  for (const marked of report.cause.marked) push("FINDINGS", KYOSAN_CAUSE_MARK_ORIGIN, marked);
+  for (const marked of report.action.marked) push("ACTIONS", KYOSAN_ACTION_MARK_ORIGIN, marked);
 
   return lines;
 }
@@ -206,10 +224,12 @@ export function buildKyosanReportPreview(
     if (caseState.importedSourceSha256.includes(report.sourceSha256)) {
       blockers.push("이미 넣은 연락서입니다(원본 파일이 같습니다) — 다시 넣지 않습니다.");
     }
-    if (caseState.serviceReportCount > 0) {
+    // 🔴 예전에는 「이 건에 보고서가 N장 있다 — 한 장이 더 쌓인다」를 알렸다.
+    //    이식이 보고서를 만들지 않게 된 뒤로 그 문장은 **거짓말**이라 걷어냈다.
+    //    대신 이 통로가 실제로 건드리는 단일 값 칸 하나를 알린다.
+    if (caseState.hasReportedSymptom) {
       warnings.push(
-        `이 수리 건에는 이미 보고서가 ${caseState.serviceReportCount}장 있습니다 — ` +
-          "service_reports 에는 유니크 제약이 없어 넣으면 한 장이 더 쌓입니다."
+        "이 수리 건의 신고 증상 칸에 이미 값이 있습니다 — 덮지 않고, 고객 고장 상황을 작업 기록으로 넣습니다."
       );
     }
   }

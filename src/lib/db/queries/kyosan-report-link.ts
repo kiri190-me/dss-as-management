@@ -140,7 +140,15 @@ export async function loadCasesBySerialKey(
   return result;
 }
 
-/** 건마다 「보고서가 몇 장인가 · 어떤 연락서를 이미 넣었는가」. */
+/**
+ * 건마다 「보고서가 몇 장인가 · 🔴 신고 증상 칸이 차 있는가 · 어떤 연락서를
+ * 이미 넣었는가」.
+ *
+ * 🔴 신고 증상을 함께 읽는 까닭: 이식은 그 칸을 **비어 있을 때만** 채운다
+ * (`kyosan/report-detail-values.ts`). 화면이 누르기 전에 「덮지 않고 작업
+ * 기록으로 갑니다」를 말할 수 있어야 한다. **글자는 읽지 않는다** — 비었는지만
+ * 본다(고객 내용을 미리보기 응답에 싣지 않는다).
+ */
 export async function loadKyosanCaseStates(
   repairCaseIds: readonly string[]
 ): Promise<Map<string, KyosanCaseState>> {
@@ -149,7 +157,24 @@ export async function loadKyosanCaseStates(
   if (unique.length === 0) return result;
 
   for (const repairCaseId of unique) {
-    result.set(repairCaseId, { repairCaseId, serviceReportCount: 0, importedSourceSha256: [] });
+    result.set(repairCaseId, {
+      repairCaseId,
+      serviceReportCount: 0,
+      hasReportedSymptom: false,
+      importedSourceSha256: [],
+    });
+  }
+
+  const symptomRows = await db
+    .select({
+      repairCaseId: repairCases.id,
+      hasReportedSymptom: sql<boolean>`coalesce(btrim(${repairCases.reportedSymptom}), '') <> ''`,
+    })
+    .from(repairCases)
+    .where(inArray(repairCases.id, unique));
+  for (const row of symptomRows) {
+    const state = result.get(row.repairCaseId);
+    if (state) result.set(row.repairCaseId, { ...state, hasReportedSymptom: row.hasReportedSymptom });
   }
 
   const [reportRows, importedRows] = await Promise.all([

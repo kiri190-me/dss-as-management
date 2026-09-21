@@ -60,6 +60,7 @@ function target(overrides: Partial<KyosanReportTarget> = {}): KyosanReportTarget
     lotNumber: null,
     identity: ALL_AGREE,
     serviceReportCount: 0,
+    hasReportedSymptom: false,
     alreadyImported: false,
     ...overrides,
   };
@@ -301,7 +302,7 @@ describe("짝이 하나로 확정됐을 때", () => {
 describe("미리보기가 무엇을 보여 주는가", () => {
   test("줄 · 부품 · 사진 수와 걸러 낸 양식 그림 수가 보인다", () => {
     const markup = render(<KyosanReportContentPanel preview={preview()} />);
-    assert.match(markup, /보고서 줄 1개/);
+    assert.match(markup, /내용 줄 1개/);
     assert.match(markup, /사진 2장/);
     assert.match(markup, /양식 그림 5장은 걸러 냈습니다/);
     assert.ok(markup.includes("값-고장내용"), "들어갈 글자가 그대로 보여야 한다");
@@ -310,6 +311,46 @@ describe("미리보기가 무엇을 보여 주는가", () => {
     // 태그가 낀다 — 분류만 견주고 글자는 따로 본다(조각 S5).
     assert.match(markup, /\[고장분\] /);
     assert.ok(markup.includes("값-부품"), "부품 글자가 그대로 보여야 한다");
+  });
+
+  /**
+   * 🔴 사람이 이 표를 보고 [이식]을 누른다. 자리 이름이 틀리면 화면이 거짓말을
+   * 한 것이 된다 — 그래서 「보고서」라는 말이 한 군데도 남아 있으면 안 된다.
+   */
+  test("🔴 줄마다 **상세의 어느 칸**으로 가는지 보여 준다 — 보고서를 만든다고 말하지 않는다", () => {
+    const markup = render(
+      <KyosanReportContentPanel
+        preview={preview({
+          content: {
+            lines: [
+              { section: "FINDINGS", text: "값-증상", origin: "고객 고장 상황" },
+              { section: "FINDINGS", text: "값-확인", origin: "사내 확인 결과" },
+              { section: "ACTIONS", text: "現品引取", origin: "처치(○ 표시)" },
+              { section: "REMARK", text: "값-비고", origin: "비고" },
+            ],
+            parts: [],
+            causeMarks: [],
+            actionMarks: [],
+            photoCount: 0,
+            formAssetCount: 0,
+          },
+        })}
+      />
+    );
+
+    assert.match(markup, /data-destination="REPORTED_SYMPTOM"/);
+    assert.match(markup, /data-destination="INTAKE_INSPECTION_RESULT"/);
+    assert.match(markup, /data-destination="DIAGNOSIS_REPAIR_SUMMARY"/);
+    assert.match(markup, /data-destination="NOT_IMPORTED"/);
+
+    assert.ok(markup.includes("신고 증상"), "상세의 칸 이름이 보여야 한다");
+    assert.ok(markup.includes("비어 있을 때만"), "덮지 않는다는 사실을 미리 말해야 한다");
+    assert.ok(markup.includes("넣지 않음"), "비고는 넣지 않는다고 말해야 한다");
+    assert.ok(markup.includes("보고서를 만들지 않습니다"));
+
+    // 🔴 「보고서 줄」·「확인 내용」 같은 옛 이름표가 남아 있으면 안 된다.
+    assert.equal(/보고서 줄/.test(markup), false);
+    assert.equal(/>확인 내용</.test(markup), false);
   });
 
   test("🔴 양식의 고정 보기는 한글로, 원문은 옆에 남는다(조각 S5)", () => {
@@ -383,9 +424,9 @@ describe("결과", () => {
       ok: true,
       repairCaseId: FIRST_ID,
       intakeNumber: "D250101",
-      serviceReportId: "33333333-3333-4333-8333-333333333333",
+      workRecordIds: ["33333333-3333-4333-8333-333333333333"],
+      reportedSymptomFilled: true,
       lineCount: 4,
-      causeCount: 1,
       usedPartCount: 2,
       attachmentIds: ["a", "b"],
       photoCount: 1,
@@ -394,6 +435,10 @@ describe("결과", () => {
     const markup = render(<KyosanReportResultPanel result={ok} failureText="" />);
     assert.match(markup, /data-ok="true"/);
     assert.match(markup, /수리 건 D250101 에 넣었습니다/);
+    // 🔴 보고서가 아니라 상세 칸에 들어갔다고 말해야 한다(조각 S5).
+    assert.match(markup, /작업 기록 1건/);
+    assert.match(markup, /신고 증상 채움/);
+    assert.equal(/보고서/.test(markup), false);
     assert.ok(markup.includes(`/repair-cases/${FIRST_ID}`));
     assert.match(markup, /data-role="kyosan-report-result-warnings"/);
   });
