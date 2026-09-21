@@ -15,6 +15,11 @@ import {
 import { WEEKLY_REPORT_KINDS, type WeeklyReportKind } from "@/lib/domain/weekly-report";
 import { buildGoalPrefix, formatGoalLine, weekLabel } from "@/lib/domain/weekly-report-goal";
 import {
+  visibleWeeklyReportKinds,
+  weeklyReportHref,
+  type WeeklyReportKindFilter,
+} from "@/lib/domain/weekly-report-kind-filter";
+import {
   copyWeeklyReportGoalsAction,
   createWeeklyReportGoalAction,
   deleteWeeklyReportGoalAction,
@@ -49,6 +54,16 @@ import {
  * 여기서 useState 로 주를 바꾸면 화면은 바뀌는데 자료는 그대로다. 이상한 값이
  * 와도 page.tsx 의 normalizeWeekStart 가 월요일로 접거나 이번 주로 떨어뜨린다.
  *
+ * ── 🔴 종류 고르개(`?kind=`)도 이 상자까지 온다 ──────────────────────────
+ * 이 상자도 `RFG 금주 목표` · `MB 금주 목표` 두 칸이라, 화면 위의 고르개가 여기
+ * 오지 않으면 집계는 RFG 만인데 목표는 둘 다 남는다(WeeklyReportScreen 헤더).
+ * 그래서 두 가지를 이 값으로 한다:
+ *   - 그릴 상자를 고른다(visibleKinds).
+ *   - 🔴 **주 이동 링크 셋이 고른 종류를 그대로 들고 간다**(weeklyReportHref).
+ *     주소를 `?week=` 만으로 적으면 주를 한 번 넘긴 순간 조용히 전체로 돌아간다.
+ * 주소를 만드는 일은 이 파일이 하지 않는다 — domain 의 weeklyReportHref 하나가
+ * 하고, 위 고르개 단추도 같은 함수를 쓴다.
+ *
  * ── '지금 이 순간'을 말해 준다 ──────────────────────────────────────────
  * 집계(고객사 블록·총합)는 **언제나 지금의 진행 상황**이다. 과거를 남기지
  * 않는다. 그런데 목표 상자만 지난주를 보고 있으면, 사람은 집계도 그 주의
@@ -74,19 +89,6 @@ import {
  * WeeklyReportScreen 헤더). 폼 · 버튼의 크기는 그 목록에 없어 그대로 둔다.
  * ============================================================================
  */
-
-/** 주 이동 링크가 가리키는 곳. 상대 주소를 쓰지 않는 이유는 아래 weekHref 주석. */
-const WEEKLY_REPORT_PATH = "/dashboard/weekly-report";
-
-/**
- * 그 주를 보여 주는 주소.
- *
- * `?week=...` 만 적는 상대 주소도 동작하지만, 전체 경로를 적어 두면 이 상자가
- * 다른 화면에 놓이더라도 링크가 엉뚱한 곳을 가리키지 않는다.
- */
-function weekHref(weekStart: string): string {
-  return `${WEEKLY_REPORT_PATH}?week=${weekStart}`;
-}
 
 /**
  * 상자 소제목의 색. `PO 발행 현황`(자홍)·총합(연두)과 마찬가지로 **고객사가
@@ -565,6 +567,7 @@ export default function WeeklyReportGoalsPanel({
   canEdit,
   repairCaseOptions,
   gridClass,
+  kindFilter,
 }: {
   /** 지금 보고 있는 주의 월요일 — 주소의 `?week=` 이 이미 접힌 값이다. */
   weekStart: string;
@@ -587,6 +590,15 @@ export default function WeeklyReportGoalsPanel({
    * 한 곳에 둔다(그 상수 주석). 여기 따로 적으면 한쪽만 고쳐진다.
    */
   gridClass: string;
+  /**
+   * 🔴 `전체 / RFG 만 / MB 만` 중 고른 것 — 주소의 `?kind=` 을 page.tsx 가 이미
+   * 접어 준 값이다. 이 상자가 이 값을 받는 이유는 둘이다:
+   *   1. 이 상자도 **종류 두 칸**이다. 고르개가 여기까지 오지 않으면 위 집계는
+   *      RFG 만인데 목표는 둘 다 남는다(WeeklyReportScreen 헤더).
+   *   2. 주 이동 링크가 **고른 종류를 들고 가야 한다.** 안 그러면 주를 넘긴 순간
+   *      조용히 전체로 돌아간다(weeklyReportHref).
+   */
+  kindFilter: WeeklyReportKindFilter;
 }) {
   const router = useRouter();
   const [deleteTarget, setDeleteTarget] = useState<WeeklyReportGoalRow | null>(null);
@@ -623,6 +635,11 @@ export default function WeeklyReportGoalsPanel({
     for (const row of goals) buckets.get(row.kind)?.push(row);
     return buckets;
   }, [goals]);
+
+  // 🔴 그릴 상자 — 고르개가 정한다. **가르는 일은 위에서 두 종류 다 해 둔다**:
+  // 여기서 걸러도 버킷은 그대로라, 고르개를 되돌리면 같은 값이 그대로 다시
+  // 나온다(여기서 세는 것이 하나도 없다).
+  const visibleKinds = visibleWeeklyReportKinds(kindFilter);
 
   function requestDelete(row: WeeklyReportGoalRow) {
     setDeleteTarget(row);
@@ -720,7 +737,7 @@ export default function WeeklyReportGoalsPanel({
             화면(/repair-cases/...)으로 떠나는 링크라 맨 위에서 시작하는 게 맞다. */}
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href={weekHref(previousWeekStart)}
+            href={weeklyReportHref({ weekStart: previousWeekStart, kind: kindFilter })}
             scroll={false}
             className={smallButtonClass}
           >
@@ -731,7 +748,11 @@ export default function WeeklyReportGoalsPanel({
           <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">
             {weekLabel(weekStart)}
           </h2>
-          <Link href={weekHref(nextWeekStart)} scroll={false} className={smallButtonClass}>
+          <Link
+            href={weeklyReportHref({ weekStart: nextWeekStart, kind: kindFilter })}
+            scroll={false}
+            className={smallButtonClass}
+          >
             다음주 ▶
           </Link>
         </div>
@@ -762,7 +783,7 @@ export default function WeeklyReportGoalsPanel({
           {/* 이 링크도 주 이동이라 scroll={false} 다 — 위 주 고르개와 같은 이유이고,
               셋 중 하나만 다르게 움직이면 오히려 더 헷갈린다. */}
           <Link
-            href={weekHref(currentWeekStart)}
+            href={weeklyReportHref({ weekStart: currentWeekStart, kind: kindFilter })}
             scroll={false}
             className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200"
           >
@@ -800,6 +821,16 @@ export default function WeeklyReportGoalsPanel({
               {isAddOpen ? "－ 줄 추가 닫기" : "＋ 줄 추가"}
             </button>
           </div>
+          {/* 🔴 걸러져 있을 때만. 어느 상자로 갈지는 **수리 건의 종류가 정하므로**
+              (GoalBox 헤더), 지금 감춰 둔 종류의 건을 고르면 적은 줄이 곧바로
+              보이지 않는다 — 저장은 됐는데 사라진 것으로 읽힌다. 고르개를 여기서
+              바꿀 수 있게 하지는 않는다: 고르개는 화면에 하나뿐이어야 한다. */}
+          {isAddOpen && kindFilter !== "ALL" && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              지금은 {kindFilter} 만 보고 있습니다 — 다른 종류의 수리 건을 고르면 적은 줄이 이
+              화면에 나타나지 않습니다.
+            </p>
+          )}
           {isAddOpen && (
             <GoalAddForm
               formId={addFormId}
@@ -812,7 +843,7 @@ export default function WeeklyReportGoalsPanel({
       )}
 
       <div className={gridClass}>
-        {WEEKLY_REPORT_KINDS.map((kind) => (
+        {visibleKinds.map((kind) => (
           <GoalBox
             key={kind}
             kind={kind}

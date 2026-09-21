@@ -16,6 +16,10 @@ import {
   keepSelectedRepairCaseOption,
 } from "@/lib/domain/repair-case-link-search";
 import { WEEKLY_REPORT_KINDS, type WeeklyReportKind } from "@/lib/domain/weekly-report";
+import {
+  visibleWeeklyReportKinds,
+  type WeeklyReportKindFilter,
+} from "@/lib/domain/weekly-report-kind-filter";
 import { buildGoalPrefix } from "@/lib/domain/weekly-report-goal";
 import {
   createWeeklyReportDeliveryAction,
@@ -649,6 +653,7 @@ export default function WeeklyReportDeliveriesPanel({
   canEdit,
   repairCaseOptions,
   gridClass,
+  kindFilter,
 }: {
   /**
    * 지금 보고 있는 주의 월요일 — 주소의 `?week=` 이 이미 접힌 값이고, **위 금주
@@ -667,6 +672,15 @@ export default function WeeklyReportDeliveriesPanel({
    * 한 곳에 둔다(그 상수 주석). 여기 따로 적으면 한쪽만 고쳐진다.
    */
   gridClass: string;
+  /**
+   * 🔴 `전체 / RFG 만 / MB 만` 중 고른 것 — 주소의 `?kind=` 을 page.tsx 가 이미
+   * 접어 준 값이다. 이 상자도 **종류 두 칸**이라, 고르개가 여기까지 오지 않으면
+   * 위 집계는 RFG 만인데 납입 예정은 둘 다 남는다(WeeklyReportScreen 헤더).
+   *
+   * 주 이동 링크는 여기 없다 — 주 고르개는 금주 목표 상자의 그것 하나뿐이고,
+   * 고른 종류를 링크에 싣는 일도 그쪽이 한다(파일 헤더).
+   */
+  kindFilter: WeeklyReportKindFilter;
 }) {
   const router = useRouter();
   const [deleteTarget, setDeleteTarget] = useState<WeeklyReportDeliveryRow | null>(null);
@@ -697,6 +711,10 @@ export default function WeeklyReportDeliveriesPanel({
     for (const row of deliveries) buckets.get(row.kind)?.push(row);
     return buckets;
   }, [deliveries]);
+
+  // 🔴 그릴 상자 — 고르개가 정한다. 가르는 일은 위에서 두 종류 다 해 두므로
+  // 고르개를 되돌리면 같은 값이 그대로 다시 나온다(금주 목표 상자와 같은 규칙).
+  const visibleKinds = visibleWeeklyReportKinds(kindFilter);
 
   function requestDelete(row: WeeklyReportDeliveryRow) {
     setDeleteTarget(row);
@@ -766,6 +784,15 @@ export default function WeeklyReportDeliveriesPanel({
               {isAddOpen ? "－ 줄 추가 닫기" : "＋ 줄 추가"}
             </button>
           </div>
+          {/* 🔴 걸러져 있을 때만. 어느 상자로 갈지는 수리 건의 종류가 정하므로
+              (DeliveryBox 헤더), 감춰 둔 종류의 건을 고르면 적은 줄이 곧바로
+              보이지 않는다 — 금주 목표 상자와 같은 한 줄이다. */}
+          {isAddOpen && kindFilter !== "ALL" && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              지금은 {kindFilter} 만 보고 있습니다 — 다른 종류의 수리 건을 고르면 적은 줄이 이
+              화면에 나타나지 않습니다.
+            </p>
+          )}
           {isAddOpen && (
             <DeliveryAddForm
               formId={addFormId}
@@ -778,7 +805,7 @@ export default function WeeklyReportDeliveriesPanel({
       )}
 
       <div className={gridClass}>
-        {WEEKLY_REPORT_KINDS.map((kind) => (
+        {visibleKinds.map((kind) => (
           <DeliveryBox
             key={kind}
             kind={kind}

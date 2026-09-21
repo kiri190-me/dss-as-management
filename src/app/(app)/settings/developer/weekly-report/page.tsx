@@ -92,6 +92,10 @@ export default async function DeveloperWeeklyReportPage() {
                 repairCaseOptions: [],
               }}
               deliveries={sample.deliveries}
+              // 크기를 보는 자리라 **늘 전체**다 — 한쪽만 보이면 좌우 두 칸이
+              // 갈리는 폭(@6xl)을 볼 수가 없다. 여기에 고르개를 두지 않는 것도
+              // 같은 이유이고, 고르개는 실제 주간보고 화면에 하나뿐이어야 한다.
+              kindFilter="ALL"
             />
           }
         />

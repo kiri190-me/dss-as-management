@@ -14,6 +14,10 @@ import { listWeeklyReportDeliveries } from "@/lib/db/queries/weekly-report-deliv
 import { listWeeklyReportGoals } from "@/lib/db/queries/weekly-report-goals";
 import { buildWeeklyReport } from "@/lib/domain/weekly-report";
 import { weekStartOfKst } from "@/lib/domain/weekly-report-goal";
+import {
+  WEEKLY_REPORT_KIND_PARAM,
+  normalizeWeeklyReportKindFilter,
+} from "@/lib/domain/weekly-report-kind-filter";
 import { normalizeWeekStart } from "@/lib/validation/weekly-report-goal-input";
 
 export const metadata: Metadata = {
@@ -42,11 +46,19 @@ export const dynamic = "force-dynamic";
  *
  * 집계(고객사 블록·총합)는 `?week=` 과 무관하게 **언제나 지금의 진행 상황**이다.
  * 그 사실을 사람에게 말해 주는 일은 상자가 한다(WeeklyReportGoalsPanel).
+ *
+ * ── 🔴 무엇만 볼지도 주소가 정한다 — `?kind=RFG` ────────────────────────
+ * `전체 / RFG 만 / MB 만` 고르개다. 주와 **같은 자리(주소)** 에 두는 이유도 같다:
+ * 새로고침해도 유지되고, 링크로 건넬 수 있고, 🔴 **인쇄가 그대로 된다**(서버가
+ * 고른 칸만 그려 내려보내므로 종이에도 고른 칸만 찍힌다). 이상한 값은
+ * normalizeWeeklyReportKindFilter 가 전체로 떨어뜨린다 — 주를 접는 규칙과 같은
+ * 자리, 같은 방식이다. 그 값이 화면의 어디까지 미치는지는 WeeklyReportScreen
+ * 헤더에 있고, 🔴 **셈은 한 글자도 바뀌지 않는다**(도메인이 이미 센 값을 고를 뿐).
  */
 export default async function WeeklyReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string | string[] }>;
+  searchParams: Promise<{ week?: string | string[]; kind?: string | string[] }>;
 }) {
   // 역할별 접근 권한(사용자 관리 > 역할별 접근 권한)에서 이 메뉴가 꺼져 있으면
   // 주소를 직접 입력해도 들어올 수 없다 — 사이드바에서 감추는 것만으로는
@@ -68,9 +80,15 @@ export default async function WeeklyReportPage({
   // 같은 이름이 두 번 올 수 있는 자리라(?week=a&week=b) 배열이 올 수 있다.
   // 그때는 고르지 않고 통째로 버린다 — 어느 쪽을 고르든 근거가 없고,
   // normalizeWeekStart 가 이번 주로 떨어뜨려 준다.
-  const { week } = await searchParams;
+  const params = await searchParams;
+  const week = params.week;
   const currentWeekStart = weekStartOfKst();
   const weekStart = (typeof week === "string" ? normalizeWeekStart(week) : null) ?? currentWeekStart;
+
+  // 🔴 `?kind=` 을 여기서 한 번만 접는다. 배열(같은 이름 두 번)도 모르는 값도
+  // **전체로 떨어진다** — 위 `?week=` 과 같은 규칙이고, 판단은 도메인의 한 함수에
+  // 있다(normalizeWeeklyReportKindFilter). 화면은 접힌 값만 받는다.
+  const kindFilter = normalizeWeeklyReportKindFilter(params[WEEKLY_REPORT_KIND_PARAM]);
 
   // 역할 정책과 관리자 설정을 둘 다 본다 — 서버 액션이 쓰는 것과 같은 두 관문
   // 이라 화면과 저장 가부가 어긋나지 않는다. 인증이 DB 모드가 아니면 액션이
@@ -149,6 +167,7 @@ export default async function WeeklyReportPage({
       // 주·권한·고르개 목록은 goals 가 실어 간 것을 그대로 나눠 쓴다 — 두 구역이
       // 한 주를 함께 보고 한 권한으로 열린다(WeeklyReportScreen 의 deliveries 주석).
       deliveries={deliveryRows}
+      kindFilter={kindFilter}
     />
   );
 }

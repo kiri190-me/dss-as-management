@@ -1088,7 +1088,11 @@ const EXPECTED_WEEKLY_REPORT_CLASS_COUNTS: Record<WeeklyReportComponentFile, Rec
       "text-wr-meta": 4, // 종류 설명 · 소제목 총 대수 줄 · 상세표 해당 없음 · PO 현황 해당 없음
       "p-wr-block": 1, // 고객사 블록
       "p-wr-section": 2, // 종류별 총합 · PO 발행 현황 구역
-      "gap-wr-block-gap": 2, // SIDE_BY_SIDE_GRID · 고객사 줄 목록
+      // SIDE_BY_SIDE_GRID · SINGLE_COLUMN_GRID · 고객사 줄 목록.
+      // 격자 상수가 둘인 것은 `RFG 만 / MB 만` 고르개 때문이다 — 한 종류만 볼 때는
+      // 한 칸이 폭을 다 쓴다(그 화면 헤더). 빈틈은 두 상수가 **같은 값**이라야
+      // 하므로, 여기 숫자가 3 인 것이 곧 「두 격자의 빈틈이 같다」는 확인이다.
+      "gap-wr-block-gap": 3,
       "px-wr-cell-x": 17, // 머리 8 + 해당 없음 1 + 본문 8
       "py-wr-cell-y": 16, // 머리 8 + 본문 8 (해당 없음 줄은 py-3 그대로)
       "min-h-wr-table-min": 1, // 상세표 래퍼
