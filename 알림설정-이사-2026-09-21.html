@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>알림 설정을 어디까지 옮길 수 있나 — 2026-09-21</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --dim: #6b6b66;
+    --line: #e3e3df;
+    --accent: #1d6f5c;
+    --warn: #b3441e;
+    --soft: #f4f4f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1f2023;
+      --ink: #e8e8e4;
+      --dim: #9a9a94;
+      --line: #32343a;
+      --accent: #63c3a6;
+      --warn: #e58a63;
+      --soft: #26282c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.75 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2.5rem; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .sub { color: var(--dim); font-size: .95rem; margin: 0; }
+
+  h2 {
+    font-size: 1.3rem; margin: 3.5rem 0 1rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--line); letter-spacing: -.01em;
+  }
+  h2 .n {
+    display: inline-block; background: var(--accent); color: #fff;
+    font-size: .8rem; padding: .1rem .55rem; border-radius: 999px;
+    margin-right: .55rem; vertical-align: .12em; letter-spacing: 0;
+  }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; }
+  p { margin: .7rem 0; }
+  ul, ol { margin: .7rem 0; padding-left: 1.3rem; }
+  li { margin: .35rem 0; }
+  code {
+    background: var(--soft); padding: .1rem .35rem; border-radius: 4px;
+    font: .9em/1.4 "Cascadia Mono", Consolas, monospace;
+  }
+
+  .pick {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .pick strong { color: var(--accent); }
+
+  .warn {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .warn strong { color: var(--warn); }
+
+  .ask {
+    background: var(--soft); border: 2px dashed var(--accent);
+    padding: 1.1rem 1.3rem; border-radius: 8px; margin: 1.6rem 0;
+  }
+  .ask h4 { margin: 0 0 .6rem; font-size: 1rem; color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: .55rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  tr.best td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  tr.best td:first-child { font-weight: 700; }
+  .yes { color: var(--accent); font-weight: 700; }
+  .no { color: var(--warn); font-weight: 700; }
+
+  .mock {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1.1rem 1.2rem; margin: 1.2rem 0;
+    font: .86rem/1.8 "Cascadia Mono", Consolas, monospace;
+    white-space: pre; overflow-x: auto; color: var(--dim);
+  }
+  .mock b { color: var(--ink); font-weight: 600; }
+  .mock i { color: var(--accent); font-style: normal; font-weight: 600; }
+  .mock u { color: var(--warn); text-decoration: none; font-weight: 600; }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+  @media (max-width: 40rem) { .two { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem;
+  }
+  .card h4 { margin: 0 0 .5rem; font-size: 1rem; }
+  .card.good { border-top: 3px solid var(--accent); }
+  .card.bad { border-top: 3px solid var(--warn); }
+  .card p { font-size: .93rem; margin: .45rem 0; }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+    color: var(--dim); font-size: .88rem;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>알림 설정을 어디까지 옮길 수 있나</h1>
+  <p class="sub">2026-09-21 · 「사용자 관리를 빼려던 이유가 알림이었다」를 듣고 다시 쓴 답</p>
+</header>
+
+<div class="pick">
+  <p><strong>먼저 —</strong> 앞서 드린 권장안(「이름만 바꾸자」)은 <b>의도를 모르고 쓴 것</b>입니다.
+  「알림 때문」이라는 것을 알고 나니 답이 달라집니다. 이 문서가 새 답입니다.</p>
+</div>
+
+
+<h2><span class="n">1</span>알림 설정만 밖으로 뺄 수 있나</h2>
+
+<h3>지금 알림 설정이 무엇에 묶여 있는지</h3>
+
+<p>설정이 두 벌인데, <b>둘 다 A/S 고유의 것에 붙어 있습니다.</b></p>
+
+<table>
+  <tr><th>설정</th><th>무엇에 묶여 있나</th></tr>
+  <tr>
+    <td><b>알림 종류를 켜고 끄기</b></td>
+    <td>A/S 의 알림 <b>8가지</b> — 접수건 결재 · 부품 요청 대기 · 재고 부족 · 새 수리 의뢰 ·
+        불출 승인 대기 · 견적서 결재 대기 · 승인 완료 · 반려됨. <b>전부 A/S 업무 이름입니다</b></td>
+  </tr>
+  <tr>
+    <td><b>어느 역할이 받나</b></td>
+    <td>A/S 의 역할 <b>5가지</b>. 계측기는 2가지, 개선요청도 2가지인데
+        <b>이름이 겹치는 게 하나도 없습니다</b>(<code>ADMIN</code> 만 글자가 같고 뜻이 다릅니다)</td>
+  </tr>
+</table>
+
+<h3>그래서 「자료를 옮기는 것」은 안 됩니다</h3>
+
+<div class="two">
+  <div class="card bad">
+    <h4 class="no">✗ 자료를 포털로 옮기면</h4>
+    <p>포털이 A/S 의 알림 8가지가 무엇인지, 역할 5가지가 무엇인지 <b>전부 알아야</b> 합니다.</p>
+    <p>계측기에 알림이 생기면 그것도, PO 에 생기면 그것도 알아야 합니다.</p>
+    <p><b>시스템이 늘 때마다 포털을 고쳐서 다시 배포</b>해야 합니다. 통합로그인이 회사 업무를
+    전부 아는 덩어리가 됩니다.</p>
+  </div>
+  <div class="card good">
+    <h4 class="yes">✓ 화면만 포털에 두면</h4>
+    <p>자료는 각 시스템이 그대로 갖고, <b>포털은 물어보고 보여주기만</b> 합니다.</p>
+    <p>포털은 「A/S 야, 네 알림 설정 목록 내놔」라고만 하면 됩니다. 그 안에 뭐가 들었는지
+    <b>알 필요가 없습니다.</b></p>
+    <p>새 시스템이 붙어도 <b>포털은 안 고칩니다.</b></p>
+  </div>
+</div>
+
+<div class="pick">
+  <p><strong>답 —</strong> 「알림 설정만 밖으로 뺀다」는 <b>맞는 방향입니다.</b>
+  다만 <b>빼는 것은 자료가 아니라 화면</b>입니다. 관리자가 보는 곳은 한 군데가 되고,
+  실제 설정값은 각 시스템이 계속 갖습니다.</p>
+</div>
+
+<h3>그리고 시점을 앞당겨야 합니다</h3>
+
+<p>앞서 저는 「알림이 A/S 하나뿐이니 창구는 나중에」라고 했습니다.
+<b>그 판단을 바꿉니다.</b> 통합 알림을 만들면 <b>다른 시스템에도 알림이 생길 것</b>이고
+(개선요청의 「내 요청에 답이 달렸다」 같은), 그때 설정이 여기저기 흩어집니다.</p>
+
+<p>👉 <b>통합 알림을 만드는 그 작업 안에 설정 창구를 함께 넣습니다.</b>
+나중에 따로 만드는 것보다 훨씬 쌉니다.</p>
+
+
+<h2><span class="n">2</span>사용자 관리를 포털 안으로 이사하는 건</h2>
+
+<h3>먼저, 「이사」가 세 가지 뜻입니다</h3>
+
+<table>
+  <tr><th>뜻</th><th>무엇을 옮기나</th><th>가능한가</th></tr>
+  <tr>
+    <td><b>ⓐ 자료 이사</b></td>
+    <td>표를 포털 데이터베이스로 옮긴다</td>
+    <td class="no">✗ 위와 같은 이유</td>
+  </tr>
+  <tr class="best">
+    <td><b>ⓑ 화면 이사</b></td>
+    <td>포털 화면에서 각 시스템 자료를 보고 고친다. <b>주인은 그대로</b></td>
+    <td class="yes">✓ <b>이게 원하시는 것으로 보입니다</b></td>
+  </tr>
+  <tr>
+    <td><b>ⓒ 링크만</b></td>
+    <td>A/S 화면에 「포털에서 하세요」 안내만 둔다</td>
+    <td>가장 싸지만 통합은 아님</td>
+  </tr>
+</table>
+
+<h3>탭 하나하나 따져보면</h3>
+
+<table>
+  <tr><th>지금 A/S 탭</th><th>포털로 옮길 수 있나</th><th>왜</th></tr>
+  <tr>
+    <td><b>알림 설정</b></td>
+    <td class="yes">✓ 화면만</td>
+    <td>관리자가 여러 시스템을 오가야 하는 유일한 것</td>
+  </tr>
+  <tr>
+    <td>출하 대표자 · 위임</td>
+    <td class="no">✗</td>
+    <td>「누가 출하를 승인하나」는 A/S 업무입니다</td>
+  </tr>
+  <tr>
+    <td>승인 절차(결재선)</td>
+    <td class="no">✗</td>
+    <td>출하 · 불출 · 견적서 결재선. 전부 A/S 업무</td>
+  </tr>
+  <tr>
+    <td>역할별 접근 권한</td>
+    <td class="no">✗</td>
+    <td>A/S 화면 21군데에 대한 권한입니다. 포털이 알 수 없습니다</td>
+  </tr>
+  <tr>
+    <td>개발자 표시 · 계정 삭제</td>
+    <td class="no">✗</td>
+    <td>A/S 안에서 권한을 올리고, A/S 일감을 후임에게 넘기는 일</td>
+  </tr>
+</table>
+
+<div class="pick">
+  <p><strong>답 —</strong> <b>알림 설정 하나만 창구를 포털로 옮기면 됩니다.</b>
+  나머지는 전부 A/S 업무라 옮길 데가 없습니다. 그리고 그 하나가 바로
+  <b>처음에 불편을 느끼신 그것</b>입니다.</p>
+</div>
+
+<h3>옮긴 뒤 포털 화면은 이런 모습이 됩니다</h3>
+
+<div class="mock"><b>통합로그인 포털  ›  관리  ›  알림 설정</b>
+──────────────────────────────────────────────────────────────
+ <i>A/S 관리 시스템</i>
+   접수건 결재 대기      [켬]   받는 역할: 관리자 · 최고관리자
+   재고 부족            [켬]   받는 역할: 재고담당 · 관리자
+   견적서 결재 대기      [켬]   받는 역할: 영업 · 관리자
+   …
+
+ <i>개선요청</i>
+   (알림 없음)
+
+ <i>계측기</i>
+   (알림 없음 — 월간 메일은 따로)
+──────────────────────────────────────────────────────────────
+ <u>※ 저장하면 각 시스템에 그대로 전달됩니다. 값의 주인은 각 시스템입니다.</u></div>
+
+
+<h2><span class="n">3</span>🔴 먼저 정해야 할 것 — 지금 설정에는 「사람」이 없습니다</h2>
+
+<div class="warn">
+  <p><strong>이것이 가장 중요합니다.</strong> 지금 A/S 의 알림 설정은
+  <b>사람이 아니라 역할</b>에 걸려 있습니다. 「영업 역할이 견적서 알림을 받는다」는 있어도
+  <b>「홍길동의 알림 설정」이라는 것은 존재하지 않습니다.</b></p>
+</div>
+
+<p>그래서 <b>「포털 사용자 관리 안으로」가 어느 모습인지</b>에 따라 일이 달라집니다.
+두 가지가 있습니다.</p>
+
+<div class="two">
+  <div class="card good">
+    <h4>ⓐ 관리자 관점 — 지금 구조 그대로</h4>
+    <div class="mock" style="margin:.6rem 0; font-size:.8rem"><b>포털 › 알림 설정</b>
+ A/S
+   재고 부족 [켬]
+     ☑ 재고담당  ☑ 관리자
+     ☐ 영업      ☐ AS엔지니어</div>
+    <p><b>「어느 역할이 무슨 알림을 받나」</b>를 정합니다.
+    지금 있는 것을 <b>자리만 옮기는</b> 것이라 <b>추가 작업이 적습니다.</b></p>
+  </div>
+  <div class="card">
+    <h4>ⓑ 사람 관점 — 새로 만들어야</h4>
+    <div class="mock" style="margin:.6rem 0; font-size:.8rem"><b>포털 › 사용자 › 홍길동</b>
+ 받는 알림
+   A/S      재고 부족    [켬]
+   A/S      견적서 결재  [켬]
+   개선요청  새 요청      [끔]</div>
+    <p><b>「이 사람이 무슨 알림을 받나」</b>를 봅니다. 사용자 관리 화면과 자연스럽게 붙습니다.</p>
+    <p>🔴 다만 <b>사람별 설정 표를 새로 만들어야</b> 합니다(데이터베이스 변경).</p>
+  </div>
+</div>
+
+<div class="pick">
+  <h4 style="margin:0 0 .5rem; font-size:1rem; color:var(--accent)">✅ 정해졌습니다 (2026-09-21)</h4>
+  <p><strong>「지금처럼 역할 단위면 충분하다」 →  ⓐ 관리자 관점으로 갑니다.</strong></p>
+  <p>사람별 설정 표를 <b>만들지 않습니다.</b> 지금 있는 것을 <b>자리만 옮깁니다.</b>
+  덕분에 이 조각은 <b>데이터베이스를 한 글자도 건드리지 않습니다</b> —
+  마이그레이션도, 새 표도 없습니다. 되돌리기도 쉽습니다.</p>
+  <p>나중에 「사람마다 끄고 싶다」가 생기면 그때 더하면 됩니다.
+  그때도 지금 만드는 통로를 그대로 쓸 수 있게 설계하겠습니다.</p>
+</div>
+
+
+<h2><span class="n">4</span>정리 — 바뀐 권장안</h2>
+
+<table>
+  <tr><th></th><th>앞서 드린 답</th><th>바꾼 답</th></tr>
+  <tr>
+    <td><b>알림 설정</b></td>
+    <td>각 시스템에 그대로, 창구는 나중에</td>
+    <td class="yes"><b>창구를 포털에. 통합 알림과 같은 시점에</b></td>
+  </tr>
+  <tr>
+    <td><b>사용자 관리</b></td>
+    <td>이름만 바꾸고 링크</td>
+    <td>그대로 유효 — <b>다만 알림 탭은 포털로 떠납니다</b></td>
+  </tr>
+  <tr>
+    <td><b>옮기는 것</b></td>
+    <td>—</td>
+    <td><b>화면만. 자료는 각 시스템이 계속 갖습니다</b></td>
+  </tr>
+</table>
+
+<p>사용자 관리 화면의 <b>새 이름</b>은 여전히 골라 주셔야 합니다.
+알림 탭이 빠지면 남는 것은 출하 대표 · 결재선 · 역할별 권한 · 개발자 표시 넷이라,
+<b>「권한 · 승인 설정」</b>이 더 정확해집니다.</p>
+
+
+<footer>
+  <p>작성 2026-09-21 · 위 질문에 답을 주시면
+  <code>NOTIFICATION_AND_IDENTITY_DESIGN.md</code> 의 D절·G절·H절을 고쳐
+  조각 순서를 확정하겠습니다.</p>
+</footer>
+
+</main>
+</body>
+</html>

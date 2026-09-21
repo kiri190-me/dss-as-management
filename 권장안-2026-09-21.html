@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>권장안 — 2026-09-21 · 알림 설정 자리 · 사용자 관리 화면</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --dim: #6b6b66;
+    --line: #e3e3df;
+    --accent: #1d6f5c;
+    --warn: #b3441e;
+    --soft: #f4f4f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1f2023;
+      --ink: #e8e8e4;
+      --dim: #9a9a94;
+      --line: #32343a;
+      --accent: #63c3a6;
+      --warn: #e58a63;
+      --soft: #26282c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.75 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2.5rem; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .sub { color: var(--dim); font-size: .95rem; margin: 0; }
+
+  h2 {
+    font-size: 1.3rem; margin: 3.5rem 0 1rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--line); letter-spacing: -.01em;
+  }
+  h2 .n {
+    display: inline-block; background: var(--accent); color: #fff;
+    font-size: .8rem; padding: .1rem .55rem; border-radius: 999px;
+    margin-right: .55rem; vertical-align: .12em; letter-spacing: 0;
+  }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; }
+  p { margin: .7rem 0; }
+  ul, ol { margin: .7rem 0; padding-left: 1.3rem; }
+  li { margin: .35rem 0; }
+  code {
+    background: var(--soft); padding: .1rem .35rem; border-radius: 4px;
+    font: .9em/1.4 "Cascadia Mono", Consolas, monospace;
+  }
+
+  .pick {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .pick strong { color: var(--accent); }
+
+  .warn {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .warn strong { color: var(--warn); }
+
+  .ask {
+    background: var(--soft); border: 2px dashed var(--accent);
+    padding: 1.1rem 1.3rem; border-radius: 8px; margin: 1.6rem 0;
+  }
+  .ask h4 { margin: 0 0 .6rem; font-size: 1rem; color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: .55rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  tr.best td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  tr.best td:first-child { font-weight: 700; }
+  .yes { color: var(--accent); font-weight: 700; }
+  .no { color: var(--warn); font-weight: 700; }
+
+  .mock {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1.1rem 1.2rem; margin: 1.2rem 0;
+    font: .88rem/1.8 "Cascadia Mono", Consolas, monospace;
+    white-space: pre; overflow-x: auto; color: var(--dim);
+  }
+  .mock b { color: var(--ink); font-weight: 600; }
+  .mock i { color: var(--accent); font-style: normal; font-weight: 600; }
+  .mock u { color: var(--warn); text-decoration: none; font-weight: 600; }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+    color: var(--dim); font-size: .88rem;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>권장안 — 2026-09-21</h1>
+  <p class="sub">두 가지에 대한 제 권장안입니다. ① 알림 설정을 어디서 할 것인가 · ② A/S 「사용자 관리」 화면을 어떻게 할 것인가</p>
+</header>
+
+<div class="pick">
+  <p><strong>먼저 정해 주신 것 —</strong> 「종을 열면 모든 시스템의 알림이 한 자리에 보이고,
+  알림을 누르면 그것을 해소할 화면으로 이동한다.」 <b>가만히 있어도 알림창이 뜨는 것은 필요 없다</b>는
+  뜻으로 이해했습니다. 그래서 브라우저 알림 권한 문제는 이번 설계에서 빠집니다 — <b>일이 많이 줄었습니다.</b></p>
+  <p>대신 <b>새로 챙길 것이 하나 생겼습니다</b>: 다른 시스템으로 건너갈 때 로그인을 거쳐도
+  <b>원래 가려던 화면으로 도착</b>해야 합니다. 마지막 절에 적었습니다.</p>
+</div>
+
+
+<h2><span class="n">1</span>알림 설정을 어디서 할 것인가</h2>
+
+<div class="warn">
+  <p><strong>⚠️ 이 절은 같은 날 늦게 바뀌었습니다.</strong>
+  「사용자 관리를 빼려던 주된 이유가 알림이었다」는 말씀을 듣고 결론이 달라졌습니다 —
+  <b>「지금은 각 시스템에 그대로」가 아니라 「포털에 설정 화면을 둔다」</b>로 바뀌었습니다.</p>
+  <p>최신 내용은 <b><code>알림설정-이사-2026-09-21.html</code></b> 에 있습니다.
+  아래는 <b>그 판단에 이르는 배경</b>으로 읽어 주세요 — 사실관계(설정이 무엇에 묶여 있는지,
+  포털로 자료를 옮기면 안 되는 까닭)는 그대로 유효합니다.</p>
+</div>
+
+<h3>먼저, 지금 「알림 설정」이 무엇인지</h3>
+
+<p>이름 때문에 오해하기 쉬운데, 지금 A/S 의 알림 설정은 <b>개인 설정이 아니라 관리자가 정하는 전사 정책</b>입니다.</p>
+
+<table>
+  <tr><th>무엇을 정하나</th><th>누가</th></tr>
+  <tr><td><b>이 종류의 알림을 아예 쓸 것인가</b> (예: 「재고 부족」 알림을 켤까 말까)</td><td>관리자</td></tr>
+  <tr><td><b>어느 역할이 그 알림을 받는가</b> (예: 「재고 부족」은 재고담당자와 관리자만)</td><td>관리자</td></tr>
+</table>
+
+<p>🔴 <b>개인이 스스로 끄는 길은 지금 없습니다.</b> 「나는 재고 부족 알림 안 보고 싶다」는 불가능합니다.
+최고관리자는 아예 끌 수 없게 막혀 있습니다.</p>
+
+<h3>후보 셋</h3>
+
+<table>
+  <tr><th>후보</th><th>방식</th><th>판정</th></tr>
+  <tr class="best">
+    <td>ⓐ</td>
+    <td><b>각 시스템에 그대로 둔다.</b> 지금 모습 그대로</td>
+    <td class="yes">✅ 지금은 이것</td>
+  </tr>
+  <tr>
+    <td>ⓑ</td>
+    <td><b>포털에 「창구」 화면을 만든다.</b> 포털이 각 시스템에 물어 한 화면에 모아 보여주고,
+        저장도 각 시스템으로 되돌려 보낸다. <b>주인은 여전히 각 시스템</b></td>
+    <td>나중에 — 아래 조건이 되면</td>
+  </tr>
+  <tr>
+    <td>ⓒ</td>
+    <td>설정을 <b>포털로 옮긴다</b></td>
+    <td class="no">❌ 안 됩니다</td>
+  </tr>
+</table>
+
+<h3>ⓒ 를 버리는 까닭</h3>
+
+<p>포털이 <b>모든 시스템의 알림 종류를 알아야 합니다.</b> A/S 의 「견적서 결재 대기」, 계측기의
+「교정 기한 임박」… 시스템이 늘 때마다 <b>포털을 고쳐서 다시 배포</b>해야 합니다.
+역할 이름도 시스템마다 달라서(A/S 는 5가지, 계측기는 2가지, 겹치는 게 하나도 없습니다)
+포털이 그걸 다 알아야 합니다.</p>
+
+<p>이건 포털이 스스로 선언한 원칙을 깨는 일입니다 — 포털은 <b>「이 사람이 누구인가」만 답하는</b> 곳입니다.</p>
+
+<h3>왜 지금은 ⓐ 인가 — 모을 것이 아직 없습니다</h3>
+
+<div class="warn">
+  <p><strong>알림이 있는 시스템은 A/S 하나뿐입니다.</strong> 포털에도, 개선요청에도 알림이 없습니다.
+  계측기에 있는 것은 <b>월 1회 단체 메일</b>이라 성격이 다릅니다(개인별 종이 아닙니다).</p>
+  <p>지금 창구 화면을 만들면 <b>한 곳을 모으는 창구</b>가 됩니다. 만들 이유가 아직 없습니다.</p>
+</div>
+
+<h3>다만 지금 해 둘 것이 있습니다 — 이게 핵심입니다</h3>
+
+<p>통합 알림을 만들 때 <b>알림을 내주는 통로</b>를 각 시스템에 하나씩 뚫게 됩니다.
+그때 <b>설정을 읽고 쓰는 통로도 같은 모양으로 함께 뚫어 두면</b>, 나중에 ⓑ 를 만들 때
+<b>화면만 그리면 됩니다.</b> 지금 추가 비용은 거의 없고, 나중에 크게 아낍니다.</p>
+
+<p>두 번째 시스템에 알림이 생기는 날 ⓑ 를 만듭니다. 그때가 창구가 실제로 필요해지는 시점입니다.</p>
+
+<div class="ask">
+  <h4>정해 주실 것</h4>
+  <p><b>개인이 알림을 끌 수 있어야 합니까?</b></p>
+  <ul>
+    <li><b>지금처럼 역할 단위면 충분</b> → 추가 작업 없음</li>
+    <li><b>개인이 끌 수 있어야 한다</b> → 표를 하나 더 만들어야 합니다(데이터베이스 변경).
+        시스템이 늘어 알림이 많아지면 필요해질 수 있습니다</li>
+  </ul>
+  <p>지금 당장 만들 필요는 없지만, <b>필요해질 것 같으면 미리 말씀해 주시는 편이</b>
+  통로 모양을 그에 맞게 잡을 수 있어 좋습니다.</p>
+</div>
+
+
+<h2><span class="n">2</span>A/S 「사용자 관리」 화면을 어떻게 할 것인가</h2>
+
+<h3>지금 그 화면에 무엇이 있는지</h3>
+
+<table>
+  <tr><th>탭</th><th>실제 내용</th><th>「사용자 관리」인가</th></tr>
+  <tr><td>1</td><td>출하 대표자 지정 · 대리승인(위임) · <b>계정 삭제</b></td><td>절반만</td></tr>
+  <tr><td>2</td><td><b>승인 절차</b> — 결재선(출하 · 불출 · 견적서)</td><td class="no">✗ 업무 설정</td></tr>
+  <tr><td>3</td><td>역할별 접근 권한 — 5역할 × 21영역</td><td>권한 정책</td></tr>
+  <tr><td>4</td><td><b>알림 설정</b></td><td class="no">✗ 알림 정책</td></tr>
+  <tr><td>5</td><td>개발자 표시</td><td>사용자</td></tr>
+</table>
+
+<p>그리고 <b>정작 사용자 관리로 기대할 일들이 거기서 안 됩니다</b>:</p>
+
+<ul>
+  <li>사람 새로 추가하기 <span class="no">✗</span> (로그인하면 저절로 생깁니다)</li>
+  <li>이름·이메일·<b>역할</b> 고치기 <span class="no">✗</span> (포털이 매번 덮어씁니다)</li>
+  <li>승인·정지 <span class="no">✗</span></li>
+  <li>부서·사번 <span class="no">✗</span> (A/S 에 그 칸 자체가 없습니다)</li>
+</ul>
+
+<div class="warn">
+  <p><strong>그래서 「밖으로 뺀다」가 답이 아닙니다.</strong> 뺄 사용자 관리가 거기 거의 없습니다.
+  진짜 사용자 관리는 <b>이미 포털에 있습니다.</b> 문제는 <b>이름이 틀려서 관리자가 엉뚱한 데서 찾는 것</b>입니다.</p>
+</div>
+
+<h3>후보 셋</h3>
+
+<table>
+  <tr><th>후보</th><th>방식</th><th>판정</th></tr>
+  <tr class="best">
+    <td>ⓐ</td>
+    <td><b>이름을 바꾸고 포털 안내를 붙인다.</b> 탭 구성은 그대로</td>
+    <td class="yes">✅ 권장</td>
+  </tr>
+  <tr>
+    <td>ⓑ</td>
+    <td>둘로 가른다 — 「사람」(대표·위임·개발자·삭제) / 「정책」(결재선·권한·알림)</td>
+    <td>지금은 과함</td>
+  </tr>
+  <tr>
+    <td>ⓒ</td>
+    <td>탭 다섯을 각각 독립 메뉴로 올린다</td>
+    <td class="no">❌ 메뉴가 복잡해집니다</td>
+  </tr>
+</table>
+
+<h3>ⓐ 를 권하는 까닭</h3>
+
+<p>각 탭이 <b>왜 거기 모였는지는 코드 주석에 다 적혀 있고, 그 판단은 틀리지 않았습니다.</b>
+예를 들어 결재선이 첫 탭 옆에 있는 이유는 「누가 출하를 승인하는가」라는 <b>같은 물음</b>을 다루기 때문이고,
+역할별 권한이 거기 있는 이유는 계정을 보다가 「이 역할은 어디까지 되지?」를 확인하는 흐름이라서입니다.</p>
+
+<p>탭을 흩으면 <b>그 흐름이 끊깁니다.</b> 바꿔야 할 것은 배치가 아니라 <b>간판</b>입니다.</p>
+
+<h3>새 이름 — 셋 중에 골라 주세요</h3>
+
+<table>
+  <tr><th>후보</th><th>느낌</th></tr>
+  <tr class="best"><td><b>권한 · 승인 설정</b></td><td>다섯 탭이 전부 <b>「누가 무엇을 할 수 있나」</b>를 다룹니다. 가장 정확합니다</td></tr>
+  <tr><td><b>운영 설정</b></td><td>넓고 안전합니다. 나중에 다른 것이 들어와도 이름이 안 틀립니다</td></tr>
+  <tr><td><b>사용자 · 권한</b></td><td>지금 이름과 가깝습니다. 다만 「사용자」 기대가 또 생길 수 있습니다</td></tr>
+</table>
+
+<h3>같이 넣을 것 — 이게 진짜 문제를 풉니다</h3>
+
+<p>첫 탭 맨 위에 <b>포털로 가는 안내 한 줄</b>을 둡니다.</p>
+
+<div class="mock"><b>권한 · 승인 설정</b>
+─────────────────────────────────────────────────────────
+<i>ℹ 사람을 새로 추가하거나, 역할을 바꾸거나, 계정을 정지하려면
+   통합로그인 포털에서 합니다.              [ 포털 열기 → ]</i>
+─────────────────────────────────────────────────────────
+ [출하 대표자]  [승인 절차]  [역할별 권한]  [알림]  [개발자]</div>
+
+<p>지금은 관리자가 A/S 에서 사람을 추가하려다 <b>못 찾고 헤맵니다.</b> 한 줄이 그것을 없앱니다.
+PO/내자 설계에서 결재선 설정에 쓰기로 한 방법과 같습니다 — <b>자리는 그대로 두고 링크로 보냅니다.</b></p>
+
+<h3>하나 더 — 「계정 삭제」가 오해를 부릅니다</h3>
+
+<div class="warn">
+  <p><strong>A/S 의 「삭제」는 차단이 아닙니다.</strong> 목록에서 치우고 맡은 일을 후임에게 넘기는 것이고,
+  <b>그 사람이 포털로 다시 들어오면 같은 계정이 되살아납니다</b>(2026-09-13에 그렇게 정하셨습니다).</p>
+  <p>그런데 화면에는 그 설명이 없습니다. 관리자가 「삭제했으니 이제 못 들어온다」고 믿기 쉽습니다.
+  <b>버튼 옆에 한 줄</b>을 적어 두기를 권합니다 — 「진짜 차단은 포털에서 권한을 회수하는 것입니다.」</p>
+</div>
+
+
+<h2><span class="n">+</span>1번 답이 새로 만든 숙제 하나</h2>
+
+<p>「알림을 누르면 그것을 해소할 화면으로 이동」을 고르셨습니다. 그러면 이런 일이 생깁니다.</p>
+
+<div class="mock">A/S 에서 종을 연다
+      ↓
+<b>PO 사이트</b>의 「견적서 결재 대기」 알림을 누른다
+      ↓
+PO 사이트로 건너간다 — <u>그런데 오늘 PO 에 처음 간다면?</u>
+      ↓
+통합로그인이 한 번 돈다 (자동이지만 주소가 바뀐다)
+      ↓
+<i>여기서 「PO 첫 화면」이 아니라 「그 견적서 결재 화면」으로 도착해야 한다</i></div>
+
+<p>로그인을 거치고 나면 원래 가려던 주소를 <b>잊어버리기 쉽습니다.</b> 흔한 실수이고,
+「알림을 눌렀는데 엉뚱한 첫 화면이 떴다」로 나타납니다.</p>
+
+<p>어려운 일은 아닙니다. <b>알고 설계하면 되는 것</b>이라 설계 문서에 항목으로 넣어 두겠습니다.
+지금 만들고 있는 PO 사이트에도 이 처리가 필요합니다.</p>
+
+
+<footer>
+  <p>작성 2026-09-21 · 결정하시면 <code>NOTIFICATION_AND_IDENTITY_DESIGN.md</code> 에 반영하고
+  조각 순서를 확정하겠습니다. 「권한 회수 구멍」은 말씀대로 <b>사용자 관리 화면을 고친 뒤</b>로 미뤄 두었습니다.</p>
+</footer>
+
+</main>
+</body>
+</html>

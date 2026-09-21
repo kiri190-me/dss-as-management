@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>설명 — 2026-09-21 · PO 사이트 로그인 정책과 권한 회수 구멍</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --dim: #6b6b66;
+    --line: #e3e3df;
+    --accent: #1d6f5c;
+    --warn: #b3441e;
+    --soft: #f4f4f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1f2023;
+      --ink: #e8e8e4;
+      --dim: #9a9a94;
+      --line: #32343a;
+      --accent: #63c3a6;
+      --warn: #e58a63;
+      --soft: #26282c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.75 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.25rem; margin-bottom: 2.5rem; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .sub { color: var(--dim); font-size: .95rem; margin: 0; }
+
+  h2 {
+    font-size: 1.3rem; margin: 3.5rem 0 1rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--line); letter-spacing: -.01em;
+  }
+  h2 .n {
+    display: inline-block; background: var(--accent); color: #fff;
+    font-size: .8rem; padding: .1rem .55rem; border-radius: 999px;
+    margin-right: .55rem; vertical-align: .12em; letter-spacing: 0;
+  }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; }
+  p { margin: .7rem 0; }
+  ul, ol { margin: .7rem 0; padding-left: 1.3rem; }
+  li { margin: .35rem 0; }
+  code {
+    background: var(--soft); padding: .1rem .35rem; border-radius: 4px;
+    font: .9em/1.4 "Cascadia Mono", Consolas, monospace;
+  }
+
+  .lead {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .lead strong { color: var(--accent); }
+
+  .warn {
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn);
+    padding: 1rem 1.2rem; border-radius: 6px; margin: 1.2rem 0;
+  }
+  .warn strong { color: var(--warn); }
+
+  .ask {
+    background: var(--soft); border: 2px dashed var(--accent);
+    padding: 1.1rem 1.3rem; border-radius: 8px; margin: 1.6rem 0;
+  }
+  .ask h4 { margin: 0 0 .6rem; font-size: 1rem; color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: .55rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  td.ok { color: var(--accent); }
+  td.no { color: var(--warn); }
+
+  .story {
+    counter-reset: step; list-style: none; padding-left: 0;
+    margin: 1.2rem 0;
+  }
+  .story li {
+    counter-increment: step; position: relative;
+    padding: .7rem .9rem .7rem 3rem; margin: .5rem 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .story li::before {
+    content: counter(step); position: absolute; left: .85rem; top: .7rem;
+    width: 1.5rem; height: 1.5rem; border-radius: 50%;
+    background: var(--ink); color: var(--bg);
+    font-size: .8rem; line-height: 1.5rem; text-align: center; font-weight: 700;
+  }
+  .story li.bad { border-color: var(--warn); }
+  .story li.bad::before { background: var(--warn); }
+
+  .diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1.1rem 1.2rem; margin: 1.2rem 0;
+    font: .88rem/1.7 "Cascadia Mono", Consolas, monospace;
+    white-space: pre; overflow-x: auto; color: var(--dim);
+  }
+  .diagram b { color: var(--ink); font-weight: 600; }
+  .diagram i { color: var(--warn); font-style: normal; font-weight: 600; }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+    color: var(--dim); font-size: .88rem;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>설명 — 2026-09-21</h1>
+  <p class="sub">두 가지를 풀어 씁니다. ① 새 PO 사이트가 사람 명단을 「읽기만」 하는 까닭 · ② 권한을 뺏어도 안 나가지는 구멍</p>
+</header>
+
+
+<h2><span class="n">1</span>PO 사이트가 사람 명단을 「읽기만」 하는 까닭</h2>
+
+<div class="lead">
+  <p><strong>한 줄 요약 —</strong> A/S 와 새 PO 사이트가 <b>같은 사람 명단 한 벌</b>을 나눠 쓰는데,
+  포털은 두 사이트에 <b>서로 다른 역할</b>을 알려줍니다. 두 사이트가 모두 명단에 역할을 적으면
+  <b>나중에 로그인한 쪽이 앞의 것을 지웁니다.</b></p>
+</div>
+
+<h3>먼저, 지금 구조</h3>
+
+<p>PO/내자 사이트는 A/S 에서 떼어내는 것이라 <b>데이터베이스를 함께 봅니다</b>(그렇게 결정하셨고,
+연계를 유지하려면 그 방법뿐이었습니다). 사람 명단도 당연히 한 벌입니다.</p>
+
+<div class="diagram">  통합로그인 포털  ──  "이 사람은 누구인가" 만 답한다
+        │
+        ├──→  <b>A/S 관리 시스템</b>   ─┐
+        │                              ├─→  <b>같은 데이터베이스 (dss_as)</b>
+        └──→  <b>PO / 내자 (새것)</b>  ─┘      └ 사람 명단도 <i>한 벌</i></div>
+
+<h3>그런데 역할은 사이트마다 다릅니다</h3>
+
+<p>포털은 「이 사람이 A/S 에서 무엇인지」와 「PO 에서 무엇인지」를 <b>따로</b> 갖고 있습니다.
+한 사람이 A/S 에서는 최고관리자인데 계측기에서는 단순 열람자일 수 있습니다. 당연하고 옳은 설계입니다.</p>
+
+<p>문제는 <b>적히는 칸이 하나</b>라는 데 있습니다. A/S 는 로그인할 때마다
+포털이 알려준 역할을 사람 명단에 적어 둡니다. PO 도 똑같이 하면 어떻게 될까요.</p>
+
+<ol class="story">
+  <li><b>아침</b> — A/S 에 로그인합니다. 명단의 역할 칸에 <code>최고관리자</code> 가 적힙니다.</li>
+  <li><b>점심 무렵</b> — 견적서를 보려고 PO 사이트에 로그인합니다. 포털은 PO 용 역할인
+      <code>일반</code> 을 알려줍니다. PO 가 그걸 <b>같은 칸에</b> 적습니다.</li>
+  <li class="bad"><b>오후</b> — A/S 로 돌아옵니다. <b>최고관리자 권한이 사라져 있습니다.</b>
+      결재도 못 하고 설정 화면도 안 열립니다. 아무도 아무것도 안 건드렸는데 그렇습니다.</li>
+</ol>
+
+<div class="warn">
+  <p><strong>이것은 가정이 아닙니다.</strong> 코드를 그대로 베꼈다면 실제로 일어날 일이었습니다.
+  설계 문서에도 안 적혀 있던 함정이고, 구현을 맡은 쪽이 먼저 알아차려 알려 왔습니다.</p>
+</div>
+
+<h3>그래서 이렇게 막았습니다</h3>
+
+<p><b>PO 사이트는 사람 명단에 아무것도 적지 않습니다.</b> 로그인한 사람이 누구인지 찾아보기만 하고,
+역할·이름·이메일을 고치지 않습니다. 적는 일은 A/S 하나만 합니다.</p>
+
+<p>지금은 이 방법이 가장 안전합니다. 나중에 「사이트마다 따로 적는 칸」을 만들 수도 있지만,
+그건 데이터베이스 구조를 바꾸는 일이라 지금 할 일은 아닙니다.</p>
+
+<h3>대신 치르는 값 — 이것을 승인해 주셔야 합니다</h3>
+
+<table>
+  <tr><th>생기는 일</th><th>실제로 문제가 될까</th></tr>
+  <tr>
+    <td><b>A/S 에 계정이 없는 사람은 PO 사이트에 못 들어옵니다.</b><br>
+        「A/S 에 한 번 로그인한 뒤 다시 오세요」 안내가 뜹니다.</td>
+    <td>PO·내자·견적서를 쓰는 분들은 모두 A/S 사용자라 실제로 막히는 분은 없을 것으로 봤습니다.
+        <b>맞는지 확인 부탁드립니다.</b></td>
+  </tr>
+  <tr>
+    <td><b>승인 대기 상태인 계정도 거절됩니다.</b></td>
+    <td>A/S 는 들여보내고 「승인을 기다리세요」 화면을 보여주는데, PO 사이트에는 아직 그 화면이 없습니다.
+        나중에 만들 수 있습니다.</td>
+  </tr>
+  <tr>
+    <td><b>포털에서 로그아웃하면 두 사이트에서 함께 나가집니다.</b></td>
+    <td>이건 오히려 맞는 동작으로 보입니다. PO 사이트의 로그아웃 단추는 자기 것만 지웁니다.</td>
+  </tr>
+</table>
+
+<div class="ask">
+  <h4>확인 부탁드립니다</h4>
+  <p>PO·내자·견적서를 쓰실 분 중에 <b>A/S 계정이 없는 분</b>이 있습니까?
+  있다면 그분을 위한 길을 따로 만들어야 합니다.</p>
+</div>
+
+
+<h2><span class="n">2</span>권한을 뺏어도 이미 들어온 사람은 안 나갑니다</h2>
+
+<div class="lead">
+  <p><strong>한 줄 요약 —</strong> 포털에서 「이 사람 A/S 못 쓰게 해」를 눌러도,
+  그 사람이 <b>이미 열어 둔 A/S 는 최대 8시간 동안 멀쩡히 돌아갑니다.</b></p>
+</div>
+
+<h3>「막기」가 두 종류인데 동작이 다릅니다</h3>
+
+<table>
+  <tr><th></th><th>계정 정지</th><th>접근 권한 회수</th></tr>
+  <tr>
+    <td><b>뜻</b></td>
+    <td>이 사람은 이제 회사 사람이 아니다<br>(퇴사 등)</td>
+    <td>회사 사람은 맞는데<br><b>이 시스템만</b> 못 쓴다</td>
+  </tr>
+  <tr>
+    <td><b>각 시스템에 「나가게 해」 통보</b></td>
+    <td class="ok">✅ 간다</td>
+    <td class="no">❌ <b>안 간다</b></td>
+  </tr>
+  <tr>
+    <td><b>이미 들어와 있는 사람</b></td>
+    <td class="ok">즉시 튕겨 나간다</td>
+    <td class="no">A/S 최대 <b>8시간</b> 그대로<br>계측기는 설정된 시간만큼</td>
+  </tr>
+  <tr>
+    <td><b>다음에 다시 로그인하면</b></td>
+    <td class="ok">막힌다</td>
+    <td class="ok">막힌다</td>
+  </tr>
+</table>
+
+<p>정지에는 각 시스템에 통보를 보내는 장치가 붙어 있는데, <b>권한 회수에는 그 장치가 안 붙어 있습니다.</b>
+빠뜨린 것으로 보입니다.</p>
+
+<h3>실제로 어떤 상황에서 문제가 되나</h3>
+
+<ul>
+  <li><b>퇴사자</b> — 보통 「정지」를 쓰실 테니 괜찮습니다. 제대로 끊깁니다.</li>
+  <li><b>부서를 옮겨 A/S 권한만 뺏은 경우</b> — 그분은 <b>그날 남은 시간 동안 A/S 를 계속 씁니다.</b>
+      다음 날 다시 들어오려 하면 그때 막힙니다.</li>
+  <li><b>실수로 준 권한을 급히 되돌릴 때</b> — 즉시 끊기지 않습니다.</li>
+</ul>
+
+<div class="warn">
+  <p><strong>진짜 위험은 「뺏었으니 끝났다」고 믿는 것입니다.</strong>
+  관리자가 권한을 회수하고 화면을 닫으면 조치가 끝났다고 생각하기 쉽습니다.
+  실제로는 그 사람이 아직 안에 있습니다.</p>
+</div>
+
+<h3>얼마나 위험한가 — 솔직하게</h3>
+
+<p><b>크지 않습니다.</b> 사내망 안이고, 길어야 8시간이고, 다시 로그인하면 막힙니다.
+다만 <b>고치는 값이 매우 싸서</b> 안 고칠 이유가 없습니다.</p>
+
+<h3>고치는 법</h3>
+
+<p>권한을 회수하는 자리에서 <b>정지가 이미 쓰고 있는 통보 장치를 똑같이 한 번 부르면</b> 끝납니다.
+새로 만들 것이 없습니다. 이미 있는 길을 한 줄 더 쓰는 일입니다.</p>
+
+<h3>같이 봐야 할 것 하나</h3>
+
+<p>계측기와 개선요청은 <b>전 직원 공개</b>로 등록돼 있습니다. 이 시스템들은 애초에
+<b>「권한 회수」라는 개념이 없습니다.</b> 누군가를 못 쓰게 하려면 <b>포털 계정 자체를 정지</b>하는 방법뿐입니다.
+지금은 그래도 괜찮지만, 「이 사람만 계측기를 못 보게」가 필요해지면 그때 구조를 바꿔야 합니다.</p>
+
+<div class="ask">
+  <h4>정해 주실 것</h4>
+  <p>이 구멍을 <b>지금 고칠까요</b>, 아니면 <b>알림 시스템 설계가 끝난 뒤에</b> 함께 고칠까요?
+  포털 코드를 건드리는 일이라 다른 작업과 겹치지 않을 때 하는 편이 낫습니다.</p>
+</div>
+
+
+<h2><span class="n">+</span>덤으로 발견한 것 둘</h2>
+
+<p>사용자·권한을 조사하다가 나온 것입니다. 급하지는 않지만 알고 계시는 편이 좋습니다.</p>
+
+<h3>① 등록 명령을 다시 돌리면 「전 직원 공개」가 조용히 닫힙니다</h3>
+
+<p>포털에 시스템을 등록하는 명령이 있습니다. 대부분의 설정은 <b>「안 적으면 원래 값 유지」</b>인데,
+<b>「전 직원 공개」 설정만은 예외</b>라서 안 적으면 <b>매번 「닫힘」으로 돌아갑니다.</b></p>
+
+<p>그래서 「역할 하나만 추가하자」고 그 명령을 다시 돌리면, 전 직원이 쓰던 시스템이
+<b>그 순간 전원 차단</b>됩니다. 계측기와 개선요청이 이 상태에 해당합니다.</p>
+
+<p>기록을 보니 이미 한 번 겪으신 일입니다. 나중에 등록 명령을 다시 쓸 일이 생기면
+<b>「전 직원 공개」 옵션을 반드시 함께 적어야</b> 합니다.</p>
+
+<h3>② 계정 삭제가 시스템마다 정반대입니다</h3>
+
+<table>
+  <tr><th>시스템</th><th>지운 계정으로 다시 로그인하면</th></tr>
+  <tr><td><b>A/S</b></td><td>계정이 <b>되살아납니다</b> (2026-09-13 결정 — 「진짜 차단은 포털에서 한다」)</td></tr>
+  <tr><td><b>계측기 · 개선요청</b></td><td><b>거절합니다</b></td></tr>
+</table>
+
+<p>둘 다 나름의 이유가 있어 <b>지금 당장 틀린 것은 아닙니다.</b>
+다만 관리자가 「지웠다」고 할 때 <b>시스템마다 뜻이 다르다</b>는 점은 알고 계셔야 합니다.</p>
+
+
+<footer>
+  <p>작성 2026-09-21 · 조사 근거는 같은 날 돌린 읽기 전용 조사 둘(알림 현황 · 사용자와 권한 현황)입니다.
+  이 문서는 <b>설명용</b>이고, 결정하신 내용은 설계 문서에 따로 남깁니다.</p>
+</footer>
+
+</main>
+</body>
+</html>
