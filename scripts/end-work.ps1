@@ -36,6 +36,10 @@
     안 올린 것이 있어도 멈추지 않고 끝까지 끈다. 오늘 남긴 것을 알고 있고
     그대로 두기로 정했을 때만.
 
+    🔴 백업 쪽은 이 인자와 상관없다. 뜻이 "안 올린 것이 있어도 끈다"이지
+    "백업 없이 끈다"가 아니기 때문이다. 백업에 실패했거나 docker가 대답하지
+    않아 DB 상태를 모를 때는 -Force를 줘도 멈춘다.
+
 .PARAMETER DryRun
     무엇을 할지 보여 주기만 하고 실제로는 아무것도 끄거나 만들지 않는다.
 
@@ -190,8 +194,39 @@ if (Test-Path $handoffFile) {
 
 # ── 2. DB 백업 ────────────────────────────────────────────────────────────
 Write-Step "DB 백업"
-$running    = (Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`"").Output
+$ps         = Invoke-Native "docker ps --filter name=^/$Container`$ --format `"{{.Names}}`""
+$running    = $ps.Output
 $backupMade = $false
+
+# 🔴 docker가 대답하지 않은 것을 "DB가 꺼져 있다"로 읽으면 안 된다 (2026-09-22).
+# 여태 ExitCode를 버리고 출력 글자만 견주었기 때문에, docker가 실패하면 그 오류
+# 글자가 "이름이 다르다" → "이미 꺼져 있음"이 됐다. 이 자리에서 잘못 읽으면
+# 결과가 이 스크립트에서 가장 나쁘다 — 멀쩡히 도는 DB를 꺼져 있다고 보고
+# **백업을 통째로 건너뛴 뒤**, 사람에게는 "DB가 꺼져 있어서"라고 말한다.
+# 그 말은 이상하게 들리지 않아 그냥 넘어가게 되고, 하루치 수리 접수와 사진이
+# 백업 없이 지나간다. 2026-09-22에 실제로 그렇게 찍히는 것을 확인했다.
+#
+# 그래서 모르면 멈춘다. "DB가 꺼져 있다"와 "docker가 대답하지 않는다"는 다른
+# 상황이고, 뒤쪽은 **백업해야 할 자료가 있는데 못 하고 있는 것**이다.
+#
+# -Force로도 넘어가지 않는다. 그 인자의 뜻은 "안 올린 것이 있어도 끈다"이지
+# "백업 없이 끈다"가 아니다. 아래 백업 실패 자리도 원래 -Force를 보지 않고
+# 그냥 멈춘다 — 같은 규칙을 여기에도 쓴다.
+#
+# 연습 모드에서도 멈춘다. 연습은 "실제로 돌리면 어떻게 되는가"를 보는 것이라,
+# 여기서만 조용히 지나가면 정작 진짜 실행에서 처음 알게 된다.
+if ($ps.ExitCode -ne 0) {
+    Write-Warn2 "docker에 물어보지 못했습니다 — DB가 켜져 있는지조차 알 수 없습니다."
+    if ($ps.Output) { Write-Info $ps.Output }
+    Write-Host ""
+    Write-Host "════ 종료를 멈췄습니다 ════" -ForegroundColor Yellow
+    Write-Host "  백업을 떠야 하는데 DB가 켜져 있는지 알 수 없어, 아무것도 끄지 않았습니다." -ForegroundColor Yellow
+    Write-Host "  Docker Desktop이 켜져 있는지 보고 다시 실행해 주세요:" -ForegroundColor Gray
+    Write-Host "    docker ps          ← 이것이 먼저 대답해야 합니다" -ForegroundColor DarkGray
+    Write-Host "    npm run work:end" -ForegroundColor DarkGray
+    Write-Host ""
+    exit 1
+}
 
 if ($running -ne $Container) {
     Write-Warn2 "DB가 이미 꺼져 있어 백업을 건너뜁니다."
@@ -328,7 +363,15 @@ if ($blockers.Count -gt 0) {
 Write-Step "개발 서버 종료"
 $listener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $listener) {
-    Write-Ok "이미 꺼져 있음"
+    # 🔴 표가 비었다고 꺼진 것이 아니다 (2026-09-22). 실제로 두드려 본다 —
+    # 2026-09-21에 떠 있는 3500·3100을 "이미 꺼져 있음"이라고 넘어간 적이 있다.
+    $stillAlive = Test-StillAlive 3000
+    if ($stillAlive) {
+        Write-Warn2 "포트 목록에는 없는데 아직 응답합니다 ($stillAlive) — 끄지 못했습니다."
+        Write-Info "손으로 끄려면: netstat -ano -p tcp | findstr :3000  →  taskkill /PID <번호> /F"
+    } else {
+        Write-Ok "이미 꺼져 있음"
+    }
 } else {
     $proc = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
     if ($proc -and $proc.ProcessName -notin @('node', 'next-server')) {
