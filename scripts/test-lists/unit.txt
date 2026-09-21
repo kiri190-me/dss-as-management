@@ -249,3 +249,6 @@ src/lib/auth/portal-service-token.test.ts
 src/lib/domain/notification-links.test.ts
 src/lib/server/integration/portal-notifications.test.ts
 src/app/api/integration/route-source.test.ts
+src/lib/kyosan/report-photo-filter.test.ts
+src/lib/kyosan/report-match.test.ts
+src/lib/kyosan/report-preview.test.ts
