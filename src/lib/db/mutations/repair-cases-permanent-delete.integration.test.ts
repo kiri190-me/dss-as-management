@@ -28,6 +28,7 @@ import {
   stockTransactions,
   users,
 } from "../schema";
+import { guardPreexistingRows, type PreexistingRowsGuard } from "../test-cleanup-guard";
 import { createRepairCase, permanentlyDeleteRepairCase, restoreRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { createRepairCaseFlowchart } from "./repair-case-flowcharts";
 import { createRepairCaseFlowchartNode, createRepairCaseFlowchartEdge } from "./repair-case-flowchart-graph";
@@ -87,12 +88,26 @@ const createdWorkRecordIds: string[] = [];
 const createdStatusHistoryIds: string[] = [];
 const createdApprovalIds: string[] = [];
 const createdIssueRequestIds: string[] = [];
-let protectedAuditLogIds: string[] = [];
-let protectedIdempotencyKeys: string[] = [];
+// Cleanup below must never delete a row this suite did not create. The
+// guard fingerprints the rows that already existed (count + digest, both
+// computed in Postgres) instead of replaying every id back as a bind
+// parameter — see ../test-cleanup-guard.ts.
+let protectedAuditLogs: PreexistingRowsGuard;
+let protectedIdempotencyKeys: PreexistingRowsGuard;
 
 before(async () => {
-  protectedAuditLogIds = (await db.select({ id: auditLogs.id }).from(auditLogs)).map((row) => row.id);
-  protectedIdempotencyKeys = (await db.select({ id: repairCaseIdempotencyKeys.idempotencyKey }).from(repairCaseIdempotencyKeys)).map((row) => row.id);
+  protectedAuditLogs = await guardPreexistingRows({
+    label: "audit_logs",
+    table: auditLogs,
+    idColumn: auditLogs.id,
+    createdAtColumn: auditLogs.createdAt,
+  });
+  protectedIdempotencyKeys = await guardPreexistingRows({
+    label: "repair_case_idempotency_keys",
+    table: repairCaseIdempotencyKeys,
+    idColumn: repairCaseIdempotencyKeys.idempotencyKey,
+    createdAtColumn: repairCaseIdempotencyKeys.createdAt,
+  });
   const customer = await db
     .insert(customers)
     .values({ name: `${TEST_CUSTOMER_NAME_PREFIX}${randomUUID().slice(0, 8)}` })
@@ -206,14 +221,10 @@ after(async () => {
   }
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
   await db.delete(customers).where(eq(customers.id, customerId));
-  if (protectedAuditLogIds.length > 0) {
-    const preserved = await db.select({ id: auditLogs.id }).from(auditLogs).where(inArray(auditLogs.id, protectedAuditLogIds));
-    assert.deepEqual(preserved.map((row) => row.id).sort(), [...protectedAuditLogIds].sort());
-  }
-  if (protectedIdempotencyKeys.length > 0) {
-    const preserved = await db.select({ id: repairCaseIdempotencyKeys.idempotencyKey }).from(repairCaseIdempotencyKeys).where(inArray(repairCaseIdempotencyKeys.idempotencyKey, protectedIdempotencyKeys));
-    assert.deepEqual(preserved.map((row) => row.id).sort(), [...protectedIdempotencyKeys].sort());
-  }
+  const preservedAuditLogs = await protectedAuditLogs.current();
+  const preservedIdempotencyKeys = await protectedIdempotencyKeys.current();
+  assert.deepEqual(preservedAuditLogs, protectedAuditLogs.baseline, "cleanup must preserve every audit log that existed before this suite");
+  assert.deepEqual(preservedIdempotencyKeys, protectedIdempotencyKeys.baseline, "cleanup must preserve every idempotency key that existed before this suite");
   await pgClient.end({ timeout: 5 });
 });
 

@@ -24,6 +24,7 @@ import {
   stockTransactions,
   users,
 } from "../schema";
+import { guardPreexistingRows, type PreexistingRowsGuard } from "../test-cleanup-guard";
 import { createRepairCase, restoreRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { createRepairCaseFlowchart } from "./repair-case-flowcharts";
 import { createRepairCaseFlowchartNode } from "./repair-case-flowchart-graph";
@@ -72,7 +73,13 @@ const createdFlowchartIds = new Set<string>();
 const createdFlowchartNodeIds = new Set<string>();
 let ownsIntakeSequence = false;
 let unrelatedAuditLogId: string;
-let preexistingAuditLogIds: string[] = [];
+// Cleanup below must never delete an audit log this suite did not create.
+// The guard fingerprints the rows that already existed (count + digest,
+// both computed in Postgres) instead of replaying every id back as a bind
+// parameter — see ../test-cleanup-guard.ts. It is taken before the
+// unrelated sentinel below is inserted, so that row stays outside the
+// guarded window and keeps its own separate assertion.
+let preexistingAuditLogs: PreexistingRowsGuard;
 
 before(async () => {
   const [existingSequence] = await db
@@ -82,7 +89,12 @@ before(async () => {
   assert.equal(existingSequence, undefined, `${TEST_YEAR_MONTH} intake sequence must be unused before this isolated suite`);
   ownsIntakeSequence = true;
 
-  preexistingAuditLogIds = (await db.select({ id: auditLogs.id }).from(auditLogs)).map((row) => row.id);
+  preexistingAuditLogs = await guardPreexistingRows({
+    label: "audit_logs",
+    table: auditLogs,
+    idColumn: auditLogs.id,
+    createdAtColumn: auditLogs.createdAt,
+  });
 
   const [unrelatedAuditLog] = await db
     .insert(auditLogs)
@@ -197,10 +209,7 @@ after(async () => {
   }
 
   const [unrelatedAuditLog] = await db.select({ id: auditLogs.id }).from(auditLogs).where(eq(auditLogs.id, unrelatedAuditLogId));
-  const preservedPreexistingAuditIds =
-    preexistingAuditLogIds.length === 0
-      ? []
-      : (await db.select({ id: auditLogs.id }).from(auditLogs).where(inArray(auditLogs.id, preexistingAuditLogIds))).map((row) => row.id);
+  const preservedPreexistingAuditLogs = await preexistingAuditLogs.current();
 
   const residue = {
     repairCases: caseIds.length === 0 ? [] : await db.select({ id: repairCases.id }).from(repairCases).where(inArray(repairCases.id, caseIds)),
@@ -229,7 +238,7 @@ after(async () => {
   await pgClient.end({ timeout: 5 });
 
   assert.ok(unrelatedAuditLog, "cleanup must preserve an unrelated repair_cases audit log");
-  assert.deepEqual(new Set(preservedPreexistingAuditIds), new Set(preexistingAuditLogIds), "cleanup must preserve every audit log that existed before this suite");
+  assert.deepEqual(preservedPreexistingAuditLogs, preexistingAuditLogs.baseline, "cleanup must preserve every audit log that existed before this suite");
   assert.deepEqual(residue, {
     repairCases: [],
     products: [],

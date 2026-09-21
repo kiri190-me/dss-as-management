@@ -15,6 +15,7 @@ import {
   products,
   users,
 } from "../schema";
+import { guardPreexistingRows, type PreexistingRowsGuard } from "../test-cleanup-guard";
 import { createRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { getRepairCaseById, listRepairCases } from "../queries/repair-cases";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
@@ -49,14 +50,33 @@ let engineerId: string;
 const createdCaseIds = new Set<string>();
 const createdProductIds = new Set<string>();
 const createdWorkRecordIds = new Set<string>();
-let protectedAuditLogIds: string[] = [];
-let protectedWorkRecordIds: string[] = [];
-let protectedIdempotencyKeys: string[] = [];
+// Cleanup below must never delete a row this suite did not create. The
+// guard fingerprints the rows that already existed (count + digest, both
+// computed in Postgres) instead of replaying every id back as a bind
+// parameter — see ../test-cleanup-guard.ts.
+let protectedAuditLogs: PreexistingRowsGuard;
+let protectedWorkRecords: PreexistingRowsGuard;
+let protectedIdempotencyKeys: PreexistingRowsGuard;
 
 before(async () => {
-  protectedAuditLogIds = (await db.select({ id: auditLogs.id }).from(auditLogs)).map((row) => row.id);
-  protectedWorkRecordIds = (await db.select({ id: repairCaseWorkRecords.id }).from(repairCaseWorkRecords)).map((row) => row.id);
-  protectedIdempotencyKeys = (await db.select({ id: repairCaseIdempotencyKeys.idempotencyKey }).from(repairCaseIdempotencyKeys)).map((row) => row.id);
+  protectedAuditLogs = await guardPreexistingRows({
+    label: "audit_logs",
+    table: auditLogs,
+    idColumn: auditLogs.id,
+    createdAtColumn: auditLogs.createdAt,
+  });
+  protectedWorkRecords = await guardPreexistingRows({
+    label: "repair_case_work_records",
+    table: repairCaseWorkRecords,
+    idColumn: repairCaseWorkRecords.id,
+    createdAtColumn: repairCaseWorkRecords.createdAt,
+  });
+  protectedIdempotencyKeys = await guardPreexistingRows({
+    label: "repair_case_idempotency_keys",
+    table: repairCaseIdempotencyKeys,
+    idColumn: repairCaseIdempotencyKeys.idempotencyKey,
+    createdAtColumn: repairCaseIdempotencyKeys.createdAt,
+  });
   const customer = await db
     .insert(customers)
     .values({ name: `${TEST_CUSTOMER_NAME_PREFIX}${randomUUID().slice(0, 8)}` })
@@ -99,12 +119,12 @@ after(async () => {
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
   await db.delete(customers).where(eq(customers.id, customerId));
 
-  const preservedAuditIds = protectedAuditLogIds.length === 0 ? [] : (await db.select({ id: auditLogs.id }).from(auditLogs).where(inArray(auditLogs.id, protectedAuditLogIds))).map((row) => row.id);
-  const preservedWorkRecordIds = protectedWorkRecordIds.length === 0 ? [] : (await db.select({ id: repairCaseWorkRecords.id }).from(repairCaseWorkRecords).where(inArray(repairCaseWorkRecords.id, protectedWorkRecordIds))).map((row) => row.id);
-  const preservedIdempotencyKeys = protectedIdempotencyKeys.length === 0 ? [] : (await db.select({ id: repairCaseIdempotencyKeys.idempotencyKey }).from(repairCaseIdempotencyKeys).where(inArray(repairCaseIdempotencyKeys.idempotencyKey, protectedIdempotencyKeys))).map((row) => row.id);
-  assert.deepEqual(new Set(preservedAuditIds), new Set(protectedAuditLogIds));
-  assert.deepEqual(new Set(preservedWorkRecordIds), new Set(protectedWorkRecordIds));
-  assert.deepEqual(new Set(preservedIdempotencyKeys), new Set(protectedIdempotencyKeys));
+  const preservedAuditLogs = await protectedAuditLogs.current();
+  const preservedWorkRecords = await protectedWorkRecords.current();
+  const preservedIdempotencyKeys = await protectedIdempotencyKeys.current();
+  assert.deepEqual(preservedAuditLogs, protectedAuditLogs.baseline, "cleanup must preserve every audit log that existed before this suite");
+  assert.deepEqual(preservedWorkRecords, protectedWorkRecords.baseline, "cleanup must preserve every work record that existed before this suite");
+  assert.deepEqual(preservedIdempotencyKeys, protectedIdempotencyKeys.baseline, "cleanup must preserve every idempotency key that existed before this suite");
   await pgClient.end({ timeout: 5 });
 });
 
