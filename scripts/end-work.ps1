@@ -16,8 +16,9 @@
     커밋도 푸시도 하지 않는다. 알려만 준다 — 무엇을 남길지는 사람이 정한다.
     컨테이너는 stop만 하고 지우지 않는다. `docker compose down -v`는 볼륨을
     지워 DB를 통째로 날리므로 이 스크립트는 그 명령을 쓰지 않는다.
-    DB 컨테이너(dss-pg-app)는 계측기 관리 시스템과 공용이다. 저쪽 서버가 아직
-    떠 있으면 끄지 않고 둔다 — 마지막에 나가는 쪽이 끈다.
+    DB 컨테이너(dss-pg-app)는 계측기 관리 시스템·PO/내자와 공용이다 — 2026-09-21에
+    PO/내자가 이 시스템과 같은 dss_as를 보기 시작해 셋이 됐다. 저쪽 서버가
+    하나라도 아직 떠 있으면 끄지 않고 둔다 — 마지막에 나가는 쪽이 끈다.
 
     ── 대신 멈춘다 ─────────────────────────────────────────────────────────
     경고는 읽히지 않는다. 창이 닫히면 더더욱. 그래서 안 올린 것이 있으면
@@ -66,10 +67,14 @@ $RepoRoot   = Split-Path -Parent $PSScriptRoot
 # 2026-09-17까지 되돌리기용으로만 남아 있고 이 스크립트는 더 건드리지 않는다.
 $Container  = 'dss-pg-app'
 $Database   = 'dss_as'
-# 같은 인스턴스를 계측기 관리 시스템도 쓴다. 저쪽 서버(3300)가 아직 떠 있으면
-# 컨테이너를 끄지 않는다 — 끄면 저쪽이 한창 일하다 DB를 잃는다. 마지막에
-# 나가는 쪽이 끈다.
-$PeerPort   = 3300
+# 같은 인스턴스를 계측기 관리 시스템과 PO/내자도 쓴다 — 셋이 나눠 쓴다.
+# PO/내자(3600)는 2026-09-21부터 이 시스템과 **같은 dss_as**를 본다. 저쪽 서버가
+# 하나라도 아직 떠 있으면 컨테이너를 끄지 않는다 — 끄면 저쪽이 한창 일하다 DB를
+# 잃는다. 마지막에 나가는 쪽이 끈다.
+$Peers      = @(
+    [pscustomobject]@{ Name = '계측기 관리 시스템'; Port = 3300 },
+    [pscustomobject]@{ Name = 'PO/내자';           Port = 3600 }
+)
 # 이 프로젝트는 이미 자료 폴더 규약을 갖고 있다 — .env의 BACKUPS_DIR이 가리키는
 # C:\DSS-AS-DATA 아래에 backups\postgres, backups\uploads, logs, uploads가
 # 미리 잡혀 있고 2026-08-18 백업도 거기 들어 있다. 새 자리를 만들면 백업이 두 곳으로
@@ -91,6 +96,37 @@ function Write-Step([string]$Text)  { Write-Host ""; Write-Host "▶ $Text" -For
 function Write-Ok([string]$Text)    { Write-Host "  ✔ $Text" -ForegroundColor Green }
 function Write-Warn2([string]$Text) { Write-Host "  ⚠ $Text" -ForegroundColor Yellow }
 function Write-Info([string]$Text)  { Write-Host "    $Text" -ForegroundColor DarkGray }
+
+# 상대(같은 상자를 쓰는 다른 시스템)가 아직 도는지 본다. 포트 표
+# (Get-NetTCPConnection)는 CIM을 거쳐 읽는데, 그 길이 한 번 막히면
+# -ErrorAction SilentlyContinue가 오류를 삼켜 결과가 빈 목록이 된다 —
+# "안 떠 있다"와 "못 봤다"가 똑같이 생긴다(2026-09-21에 실제로 겪었다).
+# 그래서 표에서 못 봐도 소켓을 직접 열어 한 번 더 본다. 🔴 의심스러우면
+# "쓰고 있다" 쪽으로 판단한다 — 잘못 끄면 남이 일하는 중에 DB를 뺏는다.
+function Test-StillAlive([int]$Port) {
+    $client    = New-Object System.Net.Sockets.TcpClient
+    $reachable = $false
+    try {
+        $iar = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+        if ($iar.AsyncWaitHandle.WaitOne(800)) { $client.EndConnect($iar); $reachable = $true }
+    } catch {
+    } finally { $client.Close() }
+    if (-not $reachable) { return $null }
+
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 3 -MaximumRedirection 0 -ErrorAction Stop
+        return "HTTP $([int]$r.StatusCode)"
+    } catch {
+        $resp = $_.Exception.Response
+        if ($resp) { return "HTTP $([int]$resp.StatusCode)" }
+        return 'TCP 연결됨(HTTP 응답 없음)'
+    }
+}
+
+function Test-PeerBusy([int]$Port) {
+    if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1) { return $true }
+    return ($null -ne (Test-StillAlive $Port))
+}
 
 Set-Location $RepoRoot
 Write-Host ""
@@ -307,14 +343,15 @@ if (-not $listener) {
 }
 
 # ── 4. 컨테이너 정지 (자료는 그대로 남는다) ───────────────────────────────
-# 공용 인스턴스라 혼자 쓰는 것이 아니다. 계측기 서버가 아직 떠 있으면 그대로
-# 두고, 저쪽 종료 스크립트가 같은 확인을 거쳐 끈다.
+# 공용 인스턴스라 혼자 쓰는 것이 아니다. 계측기나 PO/내자 서버가 하나라도 떠
+# 있으면 그대로 두고, 저쪽 종료 스크립트가 같은 확인을 거쳐 끈다.
 Write-Step "DB 컨테이너 정지 ($Container)"
-$peerUp = $null -ne (Get-NetTCPConnection -LocalPort $PeerPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
+$busyPeers = @($Peers | Where-Object { Test-PeerBusy $_.Port })
+$busyNames = ($busyPeers | ForEach-Object { '{0}({1})' -f $_.Name, $_.Port }) -join ', '
 if ($running -ne $Container) {
     Write-Ok "이미 꺼져 있음"
-} elseif ($peerUp) {
-    Write-Ok "계측기 관리 시스템($PeerPort)이 아직 쓰고 있어 켜 둡니다 — 저쪽 종료가 끕니다"
+} elseif ($busyPeers.Count -gt 0) {
+    Write-Ok "$($busyNames)이(가) 아직 쓰고 있어 켜 둡니다 — 저쪽 종료가 끕니다"
 } elseif ($DryRun) {
     Write-Info "실행할 명령: docker stop $Container"
 } else {
