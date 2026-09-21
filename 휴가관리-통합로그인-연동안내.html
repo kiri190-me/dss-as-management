@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSS 휴가 관리 — 통합로그인 연동 안내</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --panel: #ffffff; --ink: #1c1c1a; --dim: #6b6b66;
+    --line: #e3e3df; --accent: #1d6f5c; --warn: #b3441e; --soft: #f4f4f1;
+    --code: #f0efec; --wait: #b8862a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --panel: #1f2023; --ink: #e8e8e4; --dim: #9a9a94;
+      --line: #32343a; --accent: #63c3a6; --warn: #e58a63; --soft: #26282c;
+      --code: #101114; --wait: #e0b463;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 6rem;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.75 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 54rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.2rem; margin-bottom: 2rem; }
+  h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .sub { color: var(--dim); font-size: .95rem; margin: 0; }
+
+  h2 { font-size: 1.28rem; margin: 3.2rem 0 1rem; padding-top: 1.2rem; border-top: 1px solid var(--line); }
+  h2 .n { display: inline-block; background: var(--accent); color: #fff; font-size: .8rem;
+          padding: .1rem .55rem; border-radius: 999px; margin-right: .55rem; vertical-align: .12em; }
+  h3 { font-size: 1.04rem; margin: 1.9rem 0 .5rem; }
+  h4 { font-size: .98rem; margin: 1.3rem 0 .4rem; }
+  p { margin: .65rem 0; }
+  ul, ol { margin: .65rem 0; padding-left: 1.3rem; }
+  li { margin: .3rem 0; }
+  code { background: var(--code); padding: .08rem .34rem; border-radius: 4px;
+         font: .88em/1.4 "Cascadia Mono", Consolas, monospace; }
+
+  pre {
+    background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.1rem; overflow-x: auto; margin: .8rem 0;
+    font: .85rem/1.6 "Cascadia Mono", Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .prompt { border-left: 4px solid var(--accent); }
+  .prompt-label {
+    font-size: .82rem; color: var(--accent); font-weight: 700;
+    margin: 1.4rem 0 .3rem; letter-spacing: .02em;
+  }
+
+  .alert { background: var(--panel); border: 1px solid var(--line);
+           border-left: 4px solid var(--warn); padding: 1rem 1.2rem;
+           border-radius: 6px; margin: 1.1rem 0; }
+  .alert strong { color: var(--warn); }
+  .tip { background: var(--panel); border: 1px solid var(--line);
+         border-left: 4px solid var(--accent); padding: 1rem 1.2rem;
+         border-radius: 6px; margin: 1.1rem 0; }
+  .tip strong { color: var(--accent); }
+  .ask { background: var(--soft); border: 2px dashed var(--wait);
+         padding: 1rem 1.2rem; border-radius: 8px; margin: 1.3rem 0; }
+  .ask h4 { margin: 0 0 .5rem; color: var(--wait); }
+
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { border: 1px solid var(--line); padding: .5rem .65rem; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  td.c { text-align: center; white-space: nowrap; }
+
+  .check { list-style: none; padding-left: 0; counter-reset: step; }
+  .check > li {
+    counter-increment: step; position: relative;
+    padding: .8rem 1rem .8rem 3.1rem; margin: .55rem 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .check > li::before {
+    content: counter(step); position: absolute; left: .9rem; top: .8rem;
+    width: 1.55rem; height: 1.55rem; border-radius: 50%;
+    background: var(--ink); color: var(--bg);
+    font-size: .82rem; line-height: 1.55rem; text-align: center; font-weight: 700;
+  }
+  .check > li.hot { border-color: var(--warn); }
+  .check > li.hot::before { background: var(--warn); }
+  .check b.t { display: block; margin-bottom: .2rem; }
+
+  footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+           color: var(--dim); font-size: .87rem; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>DSS 휴가 관리 — 통합로그인 연동 안내</h1>
+  <p class="sub">이남준 님께 · 2026-09-21 · A/S · 계측기 · 개선요청 · PO 를 붙이며 겪은 것을 정리했습니다</p>
+</header>
+
+<p>저장소를 받아 살펴보았습니다. <b>연동에 필요한 것과, 저희가 실제로 밟았던 함정</b>을 적습니다.
+코드는 건드리지 않았습니다(푸시 권한도 없고, 같은 파일을 둘이 고치면 충돌해서입니다).</p>
+
+<div class="tip">
+  <p><strong>좋은 소식부터 —</strong> 생각보다 붙이기 쉬운 구조입니다.</p>
+  <ul>
+    <li><code>jose</code> 가 <b>이미 설치</b>돼 있습니다</li>
+    <li><code>web_users.auth_sub</code> 칸이 <b>이미 있습니다</b> — 포털 id 를 담을 자리가 준비돼 있습니다</li>
+    <li><b>스키마를 안 바꿔도 됩니다</b>(아래 3번 참조)</li>
+    <li><code>dev-login.ts</code> 첫 줄에 「dss-auth OIDC 연결 시 폐기 대상」이라고 적어 두셔서, 갈아끼울 자리가 이미 정해져 있습니다</li>
+  </ul>
+</div>
+
+
+<h2><span class="n">0</span>🔴 먼저 아셔야 할 것 — 지금 계정이 전부 새로 만들어집니다</h2>
+
+<div class="alert">
+  <p><strong>이것이 이 문서에서 가장 중요합니다.</strong></p>
+  <p>지금 <code>dev-login.ts</code> 는 <b>이름을 해시해서 가짜 UUID</b> 를 만들어 <code>auth_sub</code> 에 넣습니다
+  (<code>fakeSubFor()</code>). 통합로그인의 진짜 <code>sub</code> 는 포털이 발급한 <b>완전히 다른 값</b>입니다.</p>
+  <p>그래서 그냥 갈아끼우면 <b>기존 계정이 하나도 이어지지 않습니다.</b> 전원이 첫 로그인에서
+  <b>새 행</b>으로 만들어지고, 새 행은 <code>employee_id</code> 가 비어 있어
+  <b>모두 <code>/pending</code> 화면으로 갑니다.</b> 관리자가 한 사람씩 다시 연결해야 합니다.</p>
+</div>
+
+<p><b>피하는 길은 있습니다.</b> 사람의 실체는 <code>web_employees</code> 쪽이고 <code>web_users</code> 는
+로그인 껍데기이므로, <b>기존 <code>web_users</code> 행의 <code>auth_sub</code> 만 진짜 sub 로 갈아끼우면</b>
+<code>employee_id</code> 도 휴가 신청 이력도 그대로 살아남습니다.</p>
+
+<p>그러려면 <b>「누가 포털의 어느 계정인가」를 먼저 짝지어야</b> 합니다. 포털 관리자 화면에서
+사람 목록(이름·이메일·사번)을 볼 수 있으니, 지금 <code>web_users</code> 의 이름과 맞춰 이행 스크립트를
+한 번 돌리는 방식입니다.</p>
+
+<div class="ask">
+  <h4>정하셔야 할 것</h4>
+  <p><b>ⓐ 이행한다</b> — 이름으로 짝지어 <code>auth_sub</code> 를 갈아끼웁니다. 기존 자료가 살아남습니다.
+  사람 수가 적으면 손으로 SQL 몇 줄이면 됩니다.<br>
+  <b>ⓑ 새로 시작한다</b> — 전원이 다시 연결합니다. 지금 인원이 적고 자료가 얼마 없다면 이쪽이 단순합니다.</p>
+  <p>어느 쪽인지에 따라 아래 7번(이행) 단계가 들어가고 빠집니다.</p>
+</div>
+
+
+<h2><span class="n">1</span>🔴 포트를 먼저 정해야 합니다</h2>
+
+<div class="alert">
+  <p><strong><code>dss-leave</code> 와 계측기(<code>njlee</code>)가 둘 다 3300 입니다.</strong>
+  지금 3300에 떠 있는 것을 확인해 보니 계측기였습니다. <b>둘 중 하나는 못 뜹니다.</b></p>
+  <p>🔴 저장소 안 문서 두 곳(<code>.env.example</code> · <code>CLAUDE.md</code>)이 <b>「계측기는 3200」</b>이라고
+  적고 있는데 <b>낡은 정보</b>입니다. 3200은 회사 홈페이지입니다.</p>
+</div>
+
+<p>로그인 왕복을 시험하려면 <b>포털(3100)·휴가 관리가 동시에</b> 떠 있어야 하고,
+메뉴바까지 보려면 다른 시스템도 함께 띄우게 됩니다. 그래서 겹치면 작업 자체가 막힙니다.</p>
+
+<table>
+  <tr><th>포트</th><th>쓰는 곳</th></tr>
+  <tr><td>3000</td><td>A/S 관리</td></tr>
+  <tr><td>3100</td><td>통합 로그인 포털</td></tr>
+  <tr><td>3200</td><td>회사 홈페이지</td></tr>
+  <tr><td><b>3300</b></td><td><b>계측기 관리</b> ← 지금 겹칩니다</td></tr>
+  <tr><td>3400</td><td>시너지 출석부</td></tr>
+  <tr><td>3500</td><td>개선요청</td></tr>
+  <tr><td>3600</td><td>PO / 내자</td></tr>
+  <tr><td><b>3700</b></td><td><b>비어 있음 — 휴가 관리에 권합니다</b></td></tr>
+</table>
+
+<p>바꿀 곳: <code>package.json</code> 의 <code>dev</code> 스크립트 · <code>.env</code> 의 <code>PORT</code> ·
+README · <code>CLAUDE.md</code>. 그리고 <b>포털에 등록하는 주소도 같은 번호</b>여야 합니다.</p>
+
+
+<h2><span class="n">2</span>더해야 할 것 — 목록</h2>
+
+<p>개선요청(<code>dss-improvements</code>)이 가장 최근에 붙인 사이트라 그쪽을 본보기로 삼으시면 됩니다.
+필요하시면 저희가 그 저장소를 보여 드릴 수 있습니다.</p>
+
+<table>
+  <tr><th>파일</th><th>줄 수</th><th>하는 일</th></tr>
+  <tr><td><code>src/lib/auth/oidc.ts</code></td><td class="c">371</td><td>포털과 이야기하는 <b>유일한</b> 파일. OIDC 왕복 전부</td></tr>
+  <tr><td><code>src/lib/auth/sso-login.ts</code></td><td class="c">131</td><td>ID 토큰의 사람을 <code>web_users</code> 와 잇는다</td></tr>
+  <tr><td><code>src/lib/auth/return-to.ts</code></td><td class="c">199</td><td>로그인 후 돌아갈 주소 검증 (🔴 4번 참조)</td></tr>
+  <tr><td><code>src/lib/lan-address.ts</code></td><td class="c">129</td><td><code>auto</code> 를 쓸 때 사내망 IP 찾기</td></tr>
+  <tr><td><code>src/app/api/auth/sso/start/route.ts</code></td><td class="c">53</td><td>로그인 시작</td></tr>
+  <tr><td><code>src/app/api/auth/sso/callback/route.ts</code></td><td class="c">114</td><td>포털이 돌려보낸 것 받기</td></tr>
+  <tr><td><code>src/app/api/auth/sso/backchannel-logout/route.ts</code></td><td class="c">69</td><td>포털이 「이 사람 끊어라」 통보</td></tr>
+  <tr><td><code>src/lib/auth/service-menu-cookie.ts</code></td><td class="c">165</td><td>메뉴바 목록 나르기 (선택)</td></tr>
+</table>
+
+<p><b>환경변수 6개</b> — 🔴 <code>.env.example</code> 에 주석으로 <code>OIDC_</code> 접두사로 적혀 있는데,
+붙은 네 사이트는 전부 <b><code>SSO_</code> 접두사</b>로 통일돼 있습니다. 이름을 맞추시는 편이 좋습니다
+(Wi-Fi 가 바뀌면 여러 시스템을 같은 방식으로 고치게 됩니다).</p>
+
+<pre>SSO_ISSUER           포털 주소. ID 토큰 iss 와 문자 단위 일치. 끝에 / 금지. auto 가능
+SSO_CLIENT_ID        포털에 등록된 식별자 (= ID 토큰 aud)
+SSO_CLIENT_SECRET    등록할 때 한 번만 보이는 값
+SSO_REDIRECT_URI     포털이 결과를 돌려보낼 주소. 등록값과 문자 단위 일치. auto 가능
+SSO_TX_SECRET        로그인 왕복 쿠키 서명 키. 32자 이상
+AUTH_SESSION_SECRET  세션 서명 키. 32자 이상, SSO_TX_SECRET 과 다른 값</pre>
+
+<p>🔴 또 <code>.env.example</code> 의 <code>OIDC_REDIRECT_URI</code> 경로가 <code>/api/auth/callback</code> 인데,
+실제 규약은 <b><code>/api/auth/sso/callback</code></b> 입니다.</p>
+
+<h3>쿠키 이름</h3>
+<p><code>leave_session</code> 을 이미 잘 갈라 두셨습니다. 나머지도 같은 결로:
+<b><code>leave_sso_tx</code></b> · <b><code>leave_service_menu</code></b></p>
+
+<div class="alert">
+  <p><strong>🔴 쿠키는 포트를 가리지 않습니다.</strong> <code>localhost:3300</code> 과
+  <code>localhost:3700</code> 은 <b>같은 쿠키 통</b>을 씁니다. 다른 시스템과 이름이 겹치면
+  <b>한쪽 로그인이 다른 쪽을 덮어씁니다.</b> 저희가 A/S 에서 실제로 겪은 구멍입니다.</p>
+</div>
+
+
+<h2><span class="n">3</span>🔴 좋은 소식 — 세션 방식을 바꾸지 않아도 됩니다</h2>
+
+<p>개선요청은 <b>서명 토큰</b>(서버에 세션 표 없음) 방식이고, 휴가 관리는 <b>서버 저장형</b>
+(<code>web_sessions</code> 표)입니다. <b>바꾸실 필요 없습니다.</b></p>
+
+<p>포털이 「이 사람 로그아웃」이라고 통보할 때, 개선요청은 <code>sessions_valid_from</code> 이라는
+<b>칸을 새로 만들어야</b> 했지만 — 휴가 관리는 <b>이미 <code>web_sessions.revoked_at</code> 을 갖고 있습니다.</b>
+그 행에 시각을 쓰면 끝입니다. <code>getSessionUser</code> 의 검사도 이미 있습니다.</p>
+
+<div class="tip">
+  <p><strong>결론: 스키마 변경 0.</strong> <code>session.ts</code> 도 거의 손댈 것이 없습니다.
+  바꿀 것은 <code>destroySession</code> 이 <b>포털 로그아웃까지 가게</b> 하는 것 정도입니다.</p>
+  <p>덤으로 <code>web_sessions</code> 의 <code>ip</code>·<code>user_agent</code>·「지금 몇 곳에서 로그인해 있나」가
+  살아남습니다 — 개선요청은 서명 토큰으로 가면서 그걸 잃었습니다.</p>
+</div>
+
+
+<h2><span class="n">4</span>🔴 지금 코드에 있는 취약점 하나 — 저희도 오늘 고쳤습니다</h2>
+
+<p><code>src/lib/auth/guards.ts</code> 의 <code>safeReturnTo</code> 가 <b>네 줄짜리 판정</b>입니다.
+저희 개선요청에도 <b>똑같은 네 줄</b>이 있었고, <b>오늘(2026-09-21) 고쳤습니다.</b>
+같은 뿌리에서 나온 코드라 같은 구멍을 갖고 있습니다.</p>
+
+<h4>구멍 둘</h4>
+<ul>
+  <li>🔴 <b>제어문자를 안 막습니다.</b> 브라우저는 주소에서 <b>탭·줄바꿈을 조용히 지웁니다.</b>
+      <code>/</code>+탭+<code>/evil.example</code> 은 지우고 나면 <code>//evil.example</code> 이 되어
+      <b>다른 사이트로 나갑니다.</b> 눈으로 보면 슬래시가 하나뿐이라 안전해 보이는 것이 이 구멍이 오래 사는 까닭입니다</li>
+  <li>🔴 <b>한글이 든 주소면 로그인이 500 으로 죽습니다.</b> 응답 헤더는 한글을 못 담는데
+      그대로 넣고 있습니다</li>
+</ul>
+
+<p>첫 번째가 왜 위험하냐면 — 공격자가 그런 값을 붙인 <b>회사 주소</b> 링크를 뿌리면, 받는 사람은
+<b>진짜 통합로그인으로 정상 로그인을 마친 뒤</b> 공격자 사이트로 떨어집니다. 거기 똑같이 생긴
+로그인 화면이 있으면 「한 번 더 뜨네」 하고 비밀번호를 넣습니다.</p>
+
+<p>저희가 고친 판(199줄, 시험 13개 포함)이 개선요청과 PO 두 곳에 같은 내용으로 들어가 있습니다.
+<b>그대로 가져다 쓰시면 됩니다.</b> 순수 함수라 의존성이 하나도 없습니다.</p>
+
+
+<h2><span class="n">5</span>체크리스트 — 이 순서대로</h2>
+
+<ol class="check">
+  <li class="hot">
+    <b class="t">포트를 3700 으로 옮긴다</b>
+    <code>package.json</code> · <code>.env</code> · README · <code>CLAUDE.md</code>.
+    안 옮기면 계측기와 둘 중 하나가 못 뜹니다.
+  </li>
+  <li class="hot">
+    <b class="t">기존 계정을 이행할지 정한다 (0번)</b>
+    이행한다면 <b>포털 계정과 짝짓는 표</b>를 먼저 만들어 두세요.
+  </li>
+  <li>
+    <b class="t">인증 파일을 넣는다</b>
+    <code>oidc.ts</code> · <code>sso-login.ts</code> · <code>return-to.ts</code> · <code>lan-address.ts</code> ·
+    라우트 3개. 개선요청 것을 본보기로.
+  </li>
+  <li>
+    <b class="t">환경변수를 <code>SSO_</code> 이름으로 넣는다</b>
+    <code>.env.local</code> 에. <code>SSO_CLIENT_SECRET</code> 은 아직 비워 둡니다.
+  </li>
+  <li>
+    <b class="t">DSS 쪽에 등록을 요청한다</b>
+    포털 DB 등록은 <b>DSS 담당이 합니다.</b> 저희에게 말씀해 주시면 등록하고
+    <b>비밀키를 안전하게 전달</b>해 드립니다. 🔴 <b>채팅·메일로 주고받지 않습니다.</b>
+  </li>
+  <li>
+    <b class="t">비밀키를 <code>.env.local</code> 에 넣고 로그인을 시험한다</b>
+    포털(3100)이 함께 떠 있어야 합니다.
+  </li>
+  <li>
+    <b class="t">(이행하기로 했다면) <code>auth_sub</code> 를 갈아끼운다</b>
+    한 사람이 먼저 로그인해서 진짜 sub 를 확인한 뒤, 나머지를 맞춰 넣는 방식이 안전합니다.
+  </li>
+  <li>
+    <b class="t"><code>dev-login</code> 을 정리한다</b>
+    바로 지우지 마시고 <b>기본 꺼짐으로 한동안 남겨 두시길</b> 권합니다 — SSO 가 막혔을 때
+    들어갈 길이 하나는 있어야 합니다. 구조상 나란히 둘 수 있습니다(둘 다 <code>createSession</code> 에서 만납니다).
+  </li>
+  <li>
+    <b class="t">(선택) 메뉴바를 붙인다</b>
+    다른 시스템으로 건너다니는 띠입니다. 서브모듈 한 줄 + 설정 두 줄 + 화면 한 줄.
+  </li>
+</ol>
+
+
+<h2><span class="n">6</span>Claude Code 프롬프트 — 복사해서 쓰세요</h2>
+
+<p>저장소에 <code>CLAUDE.md</code> 가 있으신 걸 보니 Claude Code 를 쓰시는 것 같아,
+<b>그대로 붙여 넣을 수 있는 형태</b>로 적었습니다. <b>한 번에 하나씩</b> 돌리시길 권합니다 —
+한꺼번에 시키면 무엇이 잘못됐는지 가리기 어렵습니다.</p>
+
+<div class="prompt-label">① 포트 옮기기 (가장 먼저)</div>
+<pre class="prompt">이 저장소의 개발 포트를 3300 에서 3700 으로 옮겨줘.
+
+까닭: 사내 계측기 관리 시스템(njlee)이 이미 3300 을 쓰고 있어서 둘 중 하나가 못 뜬다.
+통합로그인 연동을 시험하려면 포털(3100)과 이 사이트가 동시에 떠 있어야 하는데,
+계측기까지 함께 띄우는 일이 생기므로 겹치면 작업이 막힌다.
+
+고칠 곳: package.json 의 dev/start 스크립트 · .env 계열의 PORT · README · CLAUDE.md.
+
+🔴 그리고 .env.example 과 CLAUDE.md 에 "계측기는 3200" 이라고 적힌 줄이 있는데 그건
+낡은 정보다. 3200 은 회사 홈페이지이고 계측기는 3300 이다. 그 줄도 바로잡아줘.
+
+지금 사내 포트 배치:
+  3000 A/S · 3100 통합로그인 · 3200 홈페이지 · 3300 계측기 ·
+  3400 출석부 · 3500 개선요청 · 3600 PO/내자 · 3700 (비어 있음, 이 시스템)</pre>
+
+<div class="prompt-label">② 돌아갈 주소 판정 고치기 (독립적 · 지금 해도 됨)</div>
+<pre class="prompt">src/lib/auth/guards.ts 의 safeReturnTo 에 보안 구멍이 둘 있다. 고쳐줘.
+
+지금은 네 줄이다 — '/' 로 시작하는가 · '//' 로 시작하지 않는가 · 역슬래시가 없는가.
+
+🔴 구멍 1 — 제어문자를 안 막는다.
+브라우저는 주소에서 탭·줄바꿈·복귀를 조용히 지운다. "/" + 탭 + "/evil.example" 은
+지우고 나면 "//evil.example" 이 되어 다른 사이트로 나간다. 눈으로 보면 슬래시가
+하나뿐이라 안전해 보이는 것이 이 구멍이 오래 사는 까닭이다.
+공격자가 그런 값을 ?returnTo= 에 붙인 우리 회사 주소 링크를 뿌리면, 받는 사람은
+진짜 로그인을 정상으로 마친 뒤 공격자 사이트로 떨어진다. 거기 똑같이 생긴 로그인
+화면이 있으면 비밀번호를 한 번 더 넣는다.
+
+🔴 구멍 2 — 한글이 든 주소면 로그인이 500 으로 죽는다.
+응답 머리말 값은 ByteString(0~255)이라 "결" 같은 글자를 그대로 넣으면 Response 를
+만드는 자리에서 TypeError 가 난다. 퍼센트 인코딩으로 정규화해서 내보내야 한다.
+
+더할 것 넷:
+  1. 한 겹 푼 형태도 같은 규칙으로 검사 — "/%2F%2Fevil.example" 은 풀면 "///evil"
+  2. 길이 상한 (정규화를 마친 뒤의 길이에 건다. 한글 한 글자가 9자로 부푼다)
+  3. 로그인 통로 자기 참조 거절 — 무한 되돌기 방지
+  4. 머리말에 실을 수 있는 형태로 정규화
+
+판정은 import 가 하나도 없는 순수 함수로 따로 빼라(src/lib/auth/return-to.ts).
+guards.ts 는 그것을 다시 내보내서 부르는 쪽을 안 고쳐도 되게 하라.
+
+시험을 반드시 붙여라. 거절해야 할 값을 하나하나 확인할 것:
+  //evil.example · https://evil.example/x · javascript:alert(1)
+  "/" + 탭 + "/evil.example" · "/" + 줄바꿈 + "/evil.example"
+  /%2F%2Fevil.example · /%0A/evil.example · /%09/evil.example
+  역슬래시가 든 값 · 길이 초과 · 로그인 통로를 가리키는 값
+그리고 한글이 든 주소가 정규화되어 나오는지(그대로 나오면 500 이 난다).
+
+🔴 역슬래시와 제어문자를 시험 소스에 글자로 적지 마라. String.fromCharCode 로 만들어라 —
+도구를 거치며 한 겹이 조용히 사라지면, 막으려던 것이 아닌 값을 시험하면서 통과한다.</pre>
+
+<div class="prompt-label">③ 통합로그인 붙이기 (본체)</div>
+<pre class="prompt">이 시스템을 DSS 통합로그인(OIDC)에 붙여줘. 지금은 dev-login 만 있다.
+
+## 전제
+- 포털은 dss-auth, 개발 주소는 http://{사내망IP}:3100
+- 프로토콜은 표준 OIDC Authorization Code + PKCE(S256), scope "openid profile email"
+- 포털 엔드포인트: /api/oidc/authorize · /api/oidc/token · /.well-known/jwks.json
+  · /api/oidc/logout · /apps
+- jose 는 이미 설치돼 있다
+
+## 만들 것
+  src/lib/auth/oidc.ts                             OIDC 왕복 전부 (이 파일만 포털을 안다)
+  src/lib/auth/sso-login.ts                        ID 토큰의 사람을 web_users 와 잇기
+  src/lib/lan-address.ts                           auto 를 쓸 때 사내망 IPv4 찾기
+  src/app/api/auth/sso/start/route.ts              로그인 시작
+  src/app/api/auth/sso/callback/route.ts           포털이 돌려보낸 것 받기
+  src/app/api/auth/sso/backchannel-logout/route.ts 포털의 "이 사람 끊어라" 통보
+
+## 환경변수 (SSO_ 접두사로 — 사내 네 시스템이 같은 이름을 쓴다)
+  SSO_ISSUER · SSO_CLIENT_ID · SSO_CLIENT_SECRET · SSO_REDIRECT_URI
+  · SSO_TX_SECRET · AUTH_SESSION_SECRET
+🔴 .env.example 에 OIDC_ 접두사로 적힌 주석 줄이 있는데 이름을 SSO_ 로 바꿔라.
+🔴 그 주석의 리다이렉트 경로가 /api/auth/callback 인데 규약은 /api/auth/sso/callback 이다.
+
+## 쿠키 이름 — 🔴 쿠키는 포트를 가리지 않는다
+localhost:3700 과 localhost:3000 은 같은 쿠키 통을 쓴다. 이름이 겹치면 한쪽 로그인이
+다른 쪽을 덮어쓴다. 이 시스템 몫:
+  leave_session (이미 있음) · leave_sso_tx · leave_service_menu
+왕복 쿠키(leave_sso_tx)는 path 를 /api/auth/sso 로 좁혀라 — 나머지 요청에 안 딸려 나가게.
+
+## 🔴 세션 방식은 바꾸지 마라
+지금 web_sessions(서버 저장형)를 쓰고 있고 그대로 두면 된다. 백채널 로그아웃은
+그 사람의 web_sessions 행에 revoked_at 을 쓰면 끝이다 — 그 칸도, getSessionUser 의
+검사도 이미 있다. 스키마를 건드릴 필요가 없다.
+바꿀 것은 destroySession 이 포털 로그아웃(/api/oidc/logout)까지 가게 하는 것뿐이다.
+까닭: 이 사이트 쿠키만 지우면 포털 세션이 살아 있어, 로그인 버튼 한 번으로 누구인지
+다시 묻지도 않고 들어온다. 공용 PC 에서는 그것이 곧 로그아웃이 안 된 것이다.
+
+## 🔴 반드시 지킬 것
+1. role 클레임이 **없으면 유지(KEEP)**, **모르는 값이면 거절(REJECT)**.
+   없다고 거절하면 부여 행이 없는 사람이 아무도 못 들어온다. 유지하면 안전한 쪽으로
+   실패하지 않는다 — 관리자를 일반으로 내리려다 이름을 잘못 적으면 관리자로 남는다.
+   이 시스템의 역할 값은 MEMBER · LEAVE_ADMIN 이다.
+2. 이메일이 안 오면 기존 값을 지우지 마라. 카카오에서 이메일은 선택 동의라 있다가
+   없어질 수 있다 — "말하지 않았다"와 "비웠다"는 다르다.
+3. 🔴 이메일로 사람을 잇지 마라. auth_sub(포털 sub) 하나로만 잇는다.
+   이메일은 바뀌는 값이고, 바뀌는 값으로 사람을 이으면 언젠가 남의 계정이 된다.
+4. sub 가 UUID 형식이 아니면 먼저 거절해라 — auth_sub 가 uuid 열이라 insert 가 터진다.
+5. 삭제된 계정도 함께 찾아라. auth_sub 유일 색인에 조건이 없어서 못 본 척하면
+   새로 만들려다 색인 충돌로 터지고, 내보낸 사람이 조용히 새 계정으로 돌아오는 것이
+   더 나쁘다.
+6. 로그인 시작 통로에서 메뉴바 쿠키를 지워라 — 공용 PC 에서 앞사람 목록이 뒷사람
+   화면에 뜬다. 로그아웃에서도 지우되 redirect 앞에서 지워라(redirect 는 예외를 던진다).
+7. 백채널 로그아웃 창구는 인증 없이 누구나 두드릴 수 있다. 서명 검증이 그 파일의
+   전부다. 로그아웃 토큰에 nonce 가 있으면 거절해라 — ID 토큰을 들이밀어 남을
+   로그아웃시키는 길을 막는 것이다. 끊을 게 없어도 성공(204)으로 답해라.
+8. jwtVerify 는 서명·iss·aud·exp 까지만 본다. 🔴 nonce 는 따로 봐야 한다 —
+   건너뛰면 예전 ID 토큰을 다시 들이미는 길이 열린 채 남는다.
+9. issuer 끝의 슬래시를 떼라. "http://x/" 와 "http://x" 가 섞이면 iss 대조가
+   실패하는데 원인을 찾기 가장 어려운 종류의 버그다.
+10. 리다이렉트 주소를 request.url 에서 만들지 마라. 환경변수로 둬라 —
+    LAN 으로 들어온 요청인데 서버 자신의 바인딩 주소(localhost)가 보이는 경우가
+    실측되었다. 만들어 쓰면 "어떤 망에서는 되고 어떤 망에서는 안 되는" 형태로 실패한다.
+11. JWKS 는 지연 생성 + 캐시로. 요청마다 만들면 포털을 두드린다. 그리고 파일을
+    불러오는 것만으로 환경변수를 요구하면 next build 가 .env 없이 못 돈다.
+12. /login 화면은 남겨라 — 거절됐을 때 이유를 보여줄 자리가 필요하고, 거기서
+    자동으로 다시 보내면 무한 왕복이 된다. 다만 거절 사유를 자세히 적지 마라 —
+    그러면 그 화면이 "누가 이 시스템 사용자인지" 확인해 주는 조회 도구가 된다.
+
+## 🔴 dev-login 은 지우지 마라
+기본 꺼짐으로 남겨 둔다. SSO 가 막혔을 때 들어갈 길이 하나는 있어야 한다.
+두 길은 결국 createSession(userId) 하나에서 만나므로 나란히 둘 수 있다.
+
+## 하지 말 것
+- 스키마 변경·마이그레이션 (위 "세션 방식" 참조)
+- 기존 기능 삭제
+- commit / push (사람이 확인한 뒤에)</pre>
+
+<div class="prompt-label">④ 메뉴바 붙이기 (선택 · 나중에)</div>
+<pre class="prompt">사내 시스템들이 나눠 쓰는 메뉴바(@dss/ui)를 붙여줘.
+로그인한 사람이 접근할 수 있는 다른 시스템으로 건너가는 띠다.
+
+## 붙이는 법
+  git submodule add https://github.com/kiri190-me/dss-ui.git vendor/dss-ui
+  tsconfig.json paths 에:
+    "@dss/ui": ["./vendor/dss-ui/src/index.ts"]
+    "@dss/ui/styles.css": ["./vendor/dss-ui/src/service-menu/service-menu.css"]
+  eslint globalIgnores 에: "vendor/dss-ui/**"
+  최상위 layout.tsx 에: import "@dss/ui/styles.css";
+  보호 구간 layout 에서 머리말 안에 <ServiceMenuBar services={…} currentServiceId={…} variant="inline" />
+
+목록은 로그인할 때 ID 토큰의 dss_services 클레임으로 오고, 세션과 **별도인 서명 쿠키**로
+나른다(leave_service_menu). 세션 쿠키에 넣지 않는 까닭은 그것이 인가 판정에 쓰이는
+보안 자료이고, 메뉴 목록은 그리는 데만 쓰는 값이라 성격이 다르기 때문이다.
+
+## 🔴 함정
+- 노치 인셋은 맨 위 요소 하나만 갖는다. 머리말 안(inline)으로 들였으면 머리말이
+  갖고 띠는 아무것도 안 한다. 둘 다 두면 아이폰에서 노치 높이만큼 두 번 밀린다.
+- 펼친 목록은 머리말 밖으로 나온다(position:absolute). 조상에 overflow:hidden 이
+  있으면 잘린다.
+- 로그인 전 화면에는 넣지 마라.
+- Tailwind dark: 유틸리티를 쓰지 마라. 이 묶음은 쓰지 않는다 — 쓰면 OS 가 어두운
+  사람에게 "이 띠 하나만" 까맣게 뜬다.
+- 클레임이 없으면 띠를 그리지 마라(쿠키도 굽지 마라). 포털에 등록되기 전이나
+  그 기능이 배포되기 전에도 머리말이 예전과 같아야 한다.
+- layout 이나 머리말에 "use client" 를 붙이지 마라. 딸려 오는 클라이언트 조각이
+  prop 을 하나도 안 받아 서버에서 그려도 된다.
+- 폰(360px)에서 머리말이 넘칠 수 있다. 시스템 이름·사용자명을 sr-only 로 감추거나
+  flex-wrap 을 쓰는 식으로 자리를 만들어야 한다 — 저장소마다 답이 다르다.
+- 🔴 클론할 때 --recurse-submodules 를 빠뜨리면 vendor/dss-ui 가 빈 폴더가 되어
+  빌드가 크게 실패한다.
+- 🔴 묶음을 먼저 올리고 이 저장소의 포인터 커밋을 올려라. 순서를 바꾸면 남의
+  컴퓨터에서 체크아웃이 안 된다.</pre>
+
+
+<h2><span class="n">7</span>🔴 저희가 실제로 밟은 함정들</h2>
+
+<table>
+  <tr><th>증상</th><th>원인</th></tr>
+  <tr>
+    <td><b>로그인하고 돌아왔는데 다시 로그인 화면</b>. 오류도 안 뜬다</td>
+    <td><code>SESSION_COOKIE_SECURE=true</code> 인데 http 로 접속. 쿠키가 <b>조용히</b> 저장되지 않습니다</td>
+  </tr>
+  <tr>
+    <td><b>로그인이 이유 없이 「만료」로 끝난다</b></td>
+    <td>돌아갈 주소가 너무 길어 왕복 쿠키가 4096바이트를 넘음. 저장이 조용히 실패합니다</td>
+  </tr>
+  <tr>
+    <td><b>폰·동료 PC 에서만 로그인이 막힌다</b></td>
+    <td>🔴 2026-09-13 실제 사고 — 포털 주소가 <b>Windows 모바일 핫스팟</b> 주소로 떴습니다.
+        <code>auto</code> 를 쓸 때 사내망 IP 를 고르는 판정이 시스템마다 <b>같아야</b> 합니다</td>
+  </tr>
+  <tr>
+    <td><b>iss 대조 실패인데 원인을 못 찾겠다</b></td>
+    <td>issuer 끝의 슬래시. <code>http://x/</code> 와 <code>http://x</code> 가 섞였습니다</td>
+  </tr>
+  <tr>
+    <td><b>포털에서 로그아웃했는데 이 사이트는 계속 열려 있다</b></td>
+    <td>백채널 로그아웃 주소를 등록하지 않았거나, 받아서 아무 일도 안 하고 있습니다.
+        <b>조용히 깨지는 종류라 더 위험합니다</b></td>
+  </tr>
+  <tr>
+    <td><b>등록 명령을 다시 돌렸더니 전 직원이 차단됐다</b></td>
+    <td>🔴 <code>--open-to-all</code> 은 <b>다른 인자와 달리</b> 안 주면 매번 기본값(닫힘)으로 돌아갑니다.
+        아이콘 하나 고치려고 재실행해도 닫힙니다. <b>재실행할 때마다 다시 붙여야</b> 합니다</td>
+  </tr>
+  <tr>
+    <td><b>공용 PC 에서 앞사람의 시스템 목록이 뜬다</b></td>
+    <td>로그인 시작 통로에서 메뉴바 쿠키를 안 지웠습니다</td>
+  </tr>
+  <tr>
+    <td><b>도커 안에서 주소를 못 찾는다</b></td>
+    <td><code>auto</code> 와 <code>{lan}</code> 은 컨테이너 안에서 통하지 않습니다 —
+        컨테이너 자신의 주소(172.17.x.x)를 집습니다</td>
+  </tr>
+  <tr>
+    <td><b>등록값이 깨졌다</b></td>
+    <td>중괄호를 <b>작은따옴표로 감싸지</b> 않아 셸이 건드렸습니다</td>
+  </tr>
+  <tr>
+    <td><b><code>localhost</code> 로는 되는데 사내망 주소로는 안 된다</b></td>
+    <td>등록할 때 <b>둘 다</b> 넣어야 합니다. 펼쳐진 값과 문자가 달라 대조에 걸립니다</td>
+  </tr>
+</table>
+
+
+<h2><span class="n">8</span>저희가 해 드릴 것</h2>
+
+<ul>
+  <li><b>포털 등록</b> — 말씀만 주시면 등록하고 비밀키를 안전하게 전달해 드립니다.
+      🔴 등록은 「누가 우리 로그인에 붙을 수 있는가」라는 보안 결정이라 <b>사람이 직접</b> 합니다</li>
+  <li><b>본보기 코드</b> — 개선요청(<code>dss-improvements</code>)의 <code>src/lib/auth/</code> 를
+      보시면 가장 최근 판입니다. 필요하시면 통째로 공유해 드립니다</li>
+  <li><b>돌아갈 주소 판정</b>(4번) — 오늘 고친 판을 그대로 드릴 수 있습니다. 시험 13개 포함,
+      의존성 0</li>
+  <li><b>막히는 곳</b> — 로그인 왕복은 눈에 안 보이는 데서 깨지는 일이 많습니다.
+      증상만 알려 주셔도 위 표에서 짚어 드릴 수 있습니다</li>
+</ul>
+
+<div class="ask">
+  <h4>저희가 확인하지 못한 것</h4>
+  <ul>
+    <li><b>지금 휴가 시스템에 사람이 몇 분이나 등록돼 있는지</b> — 0번(이행) 판단에 필요합니다</li>
+    <li><b>DB 가 같은 기계에 있는지</b> — <code>.env.example</code> 은 <code>localhost:5432</code> 인데
+        README 는 이남준 님 PC 의 PostgreSQL 을 가리킵니다. A/S 개발 DB 와 포트가 겹치는데,
+        <b>다른 PC 라면 문제가 없습니다</b></li>
+  </ul>
+</div>
+
+
+<footer>
+  <p>작성 2026-09-21 · DSS A/S 시스템 담당 · 이 문서의 내용은 A/S · 계측기 · 개선요청 · PO
+  네 시스템을 통합로그인에 붙이며 실제로 겪은 것을 정리한 것입니다.
+  틀린 곳이나 더 필요한 것이 있으면 말씀해 주세요.</p>
+</footer>
+
+</main>
+</body>
+</html>

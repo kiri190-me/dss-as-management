@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSS 사내 시스템 — 진행 현황판</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --panel: #ffffff; --ink: #1c1c1a; --dim: #6b6b66;
+    --line: #e3e3df; --accent: #1d6f5c; --warn: #b3441e; --soft: #f4f4f1;
+    --run: #1f6feb; --wait: #b8862a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --panel: #1f2023; --ink: #e8e8e4; --dim: #9a9a94;
+      --line: #32343a; --accent: #63c3a6; --warn: #e58a63; --soft: #26282c;
+      --run: #6ea8ff; --wait: #e0b463;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.7 -apple-system, "Segoe UI", "Malgun Gothic", "맑은 고딕", sans-serif;
+    word-break: keep-all;
+  }
+  main { max-width: 56rem; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.1rem; margin-bottom: 2rem; }
+  h1 { font-size: 1.7rem; margin: 0 0 .3rem; letter-spacing: -.02em; }
+  .stamp { color: var(--dim); font-size: .9rem; margin: 0; }
+
+  h2 { font-size: 1.25rem; margin: 2.8rem 0 .9rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.02rem; margin: 1.6rem 0 .5rem; }
+  p { margin: .6rem 0; }
+  code { background: var(--soft); padding: .08rem .32rem; border-radius: 4px;
+         font: .88em/1.4 "Cascadia Mono", Consolas, monospace; }
+
+  table { border-collapse: collapse; width: 100%; margin: .9rem 0; font-size: .93rem; }
+  th, td { border: 1px solid var(--line); padding: .48rem .65rem; text-align: left; vertical-align: top; }
+  th { background: var(--soft); font-weight: 600; }
+  td.c { text-align: center; white-space: nowrap; }
+
+  .st { font-weight: 700; white-space: nowrap; }
+  .done { color: var(--accent); }
+  .run  { color: var(--run); }
+  .wait { color: var(--dim); }
+  .hold { color: var(--wait); }
+  tr.now td { background: color-mix(in srgb, var(--run) 10%, transparent); }
+  tr.fin td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+
+  .bar { height: 9px; background: var(--soft); border-radius: 99px; overflow: hidden;
+         border: 1px solid var(--line); margin: .35rem 0 .2rem; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .pct { color: var(--dim); font-size: .85rem; }
+
+  .live {
+    background: var(--panel); border: 2px solid var(--run); border-radius: 8px;
+    padding: 1rem 1.2rem; margin: 1.2rem 0;
+  }
+  .live h3 { margin-top: 0; color: var(--run); }
+
+  .todo {
+    background: var(--soft); border: 2px dashed var(--wait);
+    padding: 1rem 1.2rem; border-radius: 8px; margin: 1.2rem 0;
+  }
+  .todo h3 { margin-top: 0; color: var(--wait); }
+
+  .warn { background: var(--panel); border: 1px solid var(--line);
+          border-left: 4px solid var(--warn); padding: .9rem 1.1rem;
+          border-radius: 6px; margin: 1rem 0; }
+  .warn strong { color: var(--warn); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .8rem; margin: 1rem 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .85rem 1rem; }
+  .card h4 { margin: 0 0 .3rem; font-size: .98rem; }
+  .card .n { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; }
+  .card .sub { color: var(--dim); font-size: .85rem; }
+
+  footer { margin-top: 3.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line);
+           color: var(--dim); font-size: .86rem; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>DSS 사내 시스템 — 진행 현황판</h1>
+  <p class="stamp">갱신 2026-09-21 · <b>휴가 관리 연동 안내서 완성</b> 시점 · 작업이 끝날 때마다 이 문서를 고칩니다</p>
+</header>
+
+
+<div class="live">
+  <h3>🔵 지금 돌고 있는 것 — 없음</h3>
+  <p class="pct">서브에이전트가 전부 끝났습니다. 다음 조각을 고르면 됩니다.</p>
+</div>
+
+
+<h2>큰 일 셋 — 어디까지 왔나</h2>
+
+<div class="grid">
+  <div class="card">
+    <h4>통합 알림 · 사용자 관리</h4>
+    <div class="bar"><span style="width:33%"></span></div>
+    <div class="n">3<span class="sub"> / 9 조각</span></div>
+    <div class="sub">설계 · 조각 1 · 조각 2 완료</div>
+  </div>
+  <div class="card">
+    <h4>연락서 판독기</h4>
+    <div class="bar"><span style="width:33%"></span></div>
+    <div class="n">S1<span class="sub"> / S5</span></div>
+    <div class="sub">469장 실측 검증 끝</div>
+  </div>
+  <div class="card">
+    <h4>PO / 내자 분리</h4>
+    <div class="bar"><span style="width:33%"></span></div>
+    <div class="n">3<span class="sub"> / 9 조각</span></div>
+    <div class="sub">0a · 0b · 0c 완료</div>
+  </div>
+  <div class="card">
+    <h4>휴가 관리 연동</h4>
+    <div class="bar"><span style="width:100%"></span></div>
+    <div class="n">안내서<span class="sub"> 완성</span></div>
+    <div class="sub">이남준 님께 전달만 남음</div>
+  </div>
+</div>
+
+
+<h3>① 통합 알림 · 사용자 관리</h3>
+
+<p>설계서 <code>NOTIFICATION_AND_IDENTITY_DESIGN.md</code> (커밋 <code>18422c2</code>).
+<b>미결 항목 없음</b> — 구현만 남았습니다.</p>
+
+<table>
+  <tr><th class="c">조각</th><th>내용</th><th class="c">상태</th></tr>
+  <tr class="fin"><td class="c">0</td><td>설계 확정</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">1</td><td>로그인 후 <b>원래 주소로 복귀</b> — 판정(<code>27113ed</code>) + 입구(<code>0623502</code>)</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">2</td><td>A/S 가 <b>알림·설정 통로</b>를 연다 (<code>88d99df</code>)</td><td class="c st done">✅ 끝</td></tr>
+  <tr><td class="c">3</td><td>포털이 <b>알림을 모아 주는 창구</b></td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">4</td><td>포털에 <b>알림 설정 화면</b></td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">5</td><td>종을 <code>@dss/ui</code> 로 옮긴다</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">6</td><td>각 사이트가 그 종을 붙인다</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">7</td><td>A/S 알림 탭 걷어내고 이름을 <b>「권한 · 승인 설정」</b>으로</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">8</td><td>권한 회수가 세션을 끊게 한다</td><td class="c st wait">⬜</td></tr>
+</table>
+
+<p class="pct">확정된 것: 알림은 포털이 <b>모으기만</b> 하고 저장 안 함 · 설정은 <b>화면만</b> 이사 ·
+<b>역할 단위로 충분</b>(조각 2~4 가 DB 를 안 건드림) · 사용자 관리에서 떠나는 건 <b>알림 탭 하나뿐</b></p>
+
+
+<h3>② 연락서 판독기</h3>
+
+<table>
+  <tr><th class="c">단계</th><th>내용</th><th class="c">상태</th></tr>
+  <tr class="fin"><td class="c">준비</td><td>NAS 접속 · 자료 전수 파악 · 옛 <code>.xls</code> 143장 변환 · 판본 지도</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">S1</td><td><b>판독기</b> — 엑셀 한 장 → 수리 건 내용 (<code>8f251b8</code>). <b>469장 실측 검증</b></td><td class="c st done">✅ 끝</td></tr>
+  <tr><td class="c">S2</td><td>원인 사전 — 🔴 <b>전제가 바뀌었습니다</b>(아래)</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">S3</td><td>저장 (DB 연결) — 🔴 <b>겹침 판정 방식이 정해졌습니다</b>(아래)</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">S4</td><td>올리기 화면</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">S5</td><td>일괄 처리</td><td class="c st wait">⬜</td></tr>
+</table>
+
+<table>
+  <tr><th>준비된 자료</th><th class="c">장수</th><th class="c">판본</th></tr>
+  <tr><td><code>.xlsm</code> (2022년 이후)</td><td class="c">326</td><td class="c">184가지</td></tr>
+  <tr><td><code>.xls</code> → 변환 (2021년 전후)</td><td class="c">143</td><td class="c">44가지</td></tr>
+  <tr><td><b>합계</b></td><td class="c"><b>469</b></td><td class="c">—</td></tr>
+</table>
+
+<div class="warn">
+  <p><strong>🔴 판본이 이렇게 흩어져 있어 고정 위치로는 못 읽습니다.</strong>
+  라벨 글자를 찾아 그 옆칸을 읽어야 합니다. 양식도 두 갈래입니다
+  (시트 이름 <code>Card</code> 159장 / 반각 <code>ｶｰﾄﾞ</code> 167장).</p>
+  <p>⚠️ 사본 <b>928 MB</b> 가 임시 폴더에 있습니다. 재부팅·디스크 정리로 날아갈 수 있어,
+  작업이 길어지면 옮기는 편이 안전합니다.</p>
+</div>
+
+<h4>S1 이 469장에서 알아낸 것 — S2·S3 의 전제가 바뀌었습니다</h4>
+
+<table>
+  <tr><th>발견</th><th>어디에 영향</th></tr>
+  <tr>
+    <td>🔴 <b>양식의 「원인」 분류는 실제로 쓰이지 않습니다.</b> ○ 표시의 88%가 「기타」이고
+        나머지 아홉 보기는 사실상 0입니다</td>
+    <td><b>S2</b> — 원인 사전은 ○ 가 아니라 <b>일본어 자유 기술</b>
+        (사내 확인 결과 419건 · 고장 부위 687건 · 교체 부품 721건)에서 캐야 합니다</td>
+  </tr>
+  <tr>
+    <td>🔴 <b>접수번호로 중복을 막으면 안 됩니다.</b> 겹치는 번호 20개가 41장에 걸쳐 있고
+        최대 3장까지 겹칩니다. 반면 <b>원본 파일 해시는 469장 전부 다릅니다</b></td>
+    <td><b>S3</b> — 「같은 파일 두 번 넣기」만 해시로 막고,
+        「같은 수리 건 두 장」은 사람이 판단하게 둡니다</td>
+  </tr>
+  <tr>
+    <td>사진이 서로 다른 것만 <b>16,224개</b>(장당 평균 29장). 그중 2,474개는 양식 아이콘·도장</td>
+    <td><b>S3</b> — 크기와 시트 이름으로 걸러야 합니다</td>
+  </tr>
+  <tr>
+    <td>잘 뽑히는 항목: 고객사·모델·L/N·S/N <b>98.9%</b> · 접수번호 97.9% · 불량현상 87.4%</td>
+    <td>못 뽑은 항목 대부분은 <b>칸이 원래 비어 있는 것</b>이지 판독기 결함이 아닙니다</td>
+  </tr>
+</table>
+
+
+<h3>③ PO / 내자 분리</h3>
+
+<p>설계서 <code>PO_DOMESTIC_SPLIT_DESIGN.md</code>. 약 73,000줄을 아홉 조각으로 나눠 옮깁니다.</p>
+
+<table>
+  <tr><th class="c">조각</th><th>내용</th><th class="c">상태</th></tr>
+  <tr class="fin"><td class="c">0a</td><td>스키마를 <code>vendor/dss-core</code> 서브모듈로</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">0b</td><td><b>저장소 뼈대</b> — 로그인하면 빈 화면까지 (<code>f67e7c8</code>)</td><td class="c st done">✅ 끝</td></tr>
+  <tr class="fin"><td class="c">0c</td><td><b>포털에 <code>dss-po</code> 등록</b> — 권한 부여 방식 · 📋 · 순서 15. 로그인·메뉴바 눈 확인 완료</td><td class="c st done">✅ 끝</td></tr>
+  <tr><td class="c">1</td><td><b>작업 비용</b> 옮기기 (5,395줄) — 첫 실물 화면</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">2</td><td>내자 정리 (16,100줄)</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">3</td><td>견적서 (51,681줄, 여섯 조각으로 나뉨)</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">4</td><td>A/S 정리 — 메뉴에서 빼고 남은 참조를 링크로</td><td class="c st wait">⬜</td></tr>
+  <tr><td class="c">5</td><td>배포</td><td class="c st wait">⬜</td></tr>
+</table>
+
+
+<h2>오늘 마친 독립 작업</h2>
+
+<table>
+  <tr><th>무엇</th><th>어디</th><th>한 줄</th></tr>
+  <tr><td><b>계측기 개발 주소</b></td><td><code>njlee</code></td><td>대역이 바뀌면 버튼이 전부 죽던 것</td></tr>
+  <tr><td><b>시험 빨간 불 3개</b></td><td>A/S</td><td>ID 6만 개를 한 질의에 싣다 터지던 것 → 지문 견주기</td></tr>
+  <tr><td><b>첨부 휴지통</b></td><td><code>dss-improvements</code></td><td>지운 첨부를 되살릴 길이 아예 없었다</td></tr>
+  <tr><td><b>파비콘 통일</b></td><td>여섯 저장소</td><td>셋은 제각각, 셋은 Next 기본값이었다</td></tr>
+  <tr><td><b>연락서 143장 변환</b></td><td>A/S</td><td>사진 6,286장 보존 · NAS 원본 무사</td></tr>
+  <tr><td><b>돌아갈 주소 판정 강화</b></td><td><code>dss-improvements</code></td><td>🔴 실제 취약점 — 탭 한 글자로 남의 사이트에 나가던 것 · 한글 주소 500</td></tr>
+</table>
+
+<div class="warn">
+  <p><strong>🔴 방금 막은 구멍이 어떤 것이었나.</strong> 브라우저는 주소에서 <b>탭·줄바꿈을
+  조용히 지웁니다.</b> <code>/</code>+탭+<code>/evil.example</code> 은 지우고 나면
+  <code>//evil.example</code> 이 되어 <b>다른 사이트로 나갑니다.</b> 눈으로 보면 슬래시가
+  하나뿐이라 안전해 보이는 것이 이 구멍이 오래 사는 까닭입니다.</p>
+  <p>공격자가 그런 값을 붙인 <b>우리 회사 주소</b> 링크를 뿌리면, 받는 사람은 진짜 로그인을
+  정상으로 마친 뒤 공격자 사이트로 떨어집니다. 거기 똑같이 생긴 로그인 화면이 있으면
+  「한 번 더 뜨네」 하고 비밀번호를 넣습니다.</p>
+  <p>같은 판정이 <b>PO 사이트와 개선요청 둘 다에 들어갔고 글자 그대로 같습니다.</b>
+  한쪽을 고치면 나머지도 봐야 한다고 주석에 서로를 가리켜 두었습니다.</p>
+</div>
+
+
+<h2>커밋 현황 — 🔴 아직 아무것도 올리지 않았습니다</h2>
+
+<table>
+  <tr><th>저장소</th><th class="c">올릴 커밋</th><th>무엇</th></tr>
+  <tr><td>A/S <code>RF_Service_System</code></td><td class="c"><b>6</b></td><td>시험 · 설계서 · 연락서 변환 · 파비콘 · <b>알림 통로</b> · <b>연락서 판독기</b></td></tr>
+  <tr><td><code>njlee</code></td><td class="c"><b>2</b></td><td>개발 주소 · 파비콘</td></tr>
+  <tr><td><code>dss-improvements</code></td><td class="c"><b>3</b></td><td>첨부 휴지통 · 파비콘 · 주소 판정 강화</td></tr>
+  <tr><td><code>dss-home</code></td><td class="c"><b>1</b></td><td>파비콘</td></tr>
+  <tr class="fin"><td><code>dss-po</code></td><td class="c">0</td><td>✅ <b>올렸습니다</b> — 저장소가 생겨 커밋 넷을 푸시 (<code>github.com/kiri190-me/dss-po</code>)</td></tr>
+  <tr><td><code>dss-auth</code> · <code>dss-ui</code> · <code>dss-core</code></td><td class="c">0</td><td>변경 없음</td></tr>
+</table>
+
+
+<div class="todo">
+  <h3>⏸ 사람이 해야 하는 일</h3>
+  <p><b>지금은 없습니다.</b> <code>dss-po</code> 저장소를 만들어 주셔서 커밋 넷을 올렸습니다.</p>
+  <p class="pct">앞으로 <b>새 저장소를 만들 때마다</b> 같은 부탁을 드리게 됩니다 —
+  이 PC 에는 <code>gh</code> 명령이 없어 저장소 생성만은 웹에서 해야 합니다.
+  올리는 것은 제가 합니다.</p>
+</div>
+
+
+<h2>④ 휴가 관리(<code>dss-leave</code>) 통합로그인 연동</h2>
+
+<p>이남준 님이 만든 사내 휴가 신청·결재 시스템. 오늘까지도 활발히 작업 중입니다.
+<b>우리가 직접 고치는 대신 안내서를 만들어 전달</b>하기로 했습니다(푸시 권한이 없고, 같은 파일을
+둘이 고치면 충돌합니다).</p>
+
+<table>
+  <tr><th>걸림돌</th><th>내용</th></tr>
+  <tr><td>🔴 연동 코드 없음</td><td>자체 로그인만 있고 SSO 라우트·OIDC 코드가 하나도 없습니다. <b>포털에 등록만 하면 로그인이 안 됩니다</b></td></tr>
+  <tr><td>🔴 포트 충돌</td><td><b>3300을 계측기와 함께 쓰고 있습니다.</b> 둘 중 하나는 못 뜹니다 → <b>3700</b> 을 권합니다</td></tr>
+  <tr><td>🔴 푸시 권한 없음</td><td>읽기만 됩니다(403)</td></tr>
+  <tr><td>🔴 <b>기존 계정이 전부 끊긴다</b></td><td>지금 로그인은 <b>이름을 해시해 가짜 UUID</b> 를 만들어 씁니다.
+      포털의 진짜 id 와 달라, 그냥 갈아끼우면 <b>전원이 새 계정</b>이 되고 직원 연결이 끊겨
+      <b>모두 승인 대기 화면으로</b> 갑니다</td></tr>
+</table>
+
+<div class="warn">
+  <p><strong>✅ 안내서를 만들었습니다 — <code>휴가관리-통합로그인-연동안내.html</code></strong></p>
+  <p>담은 것: 🔴 기존 계정이 끊기는 문제와 피하는 길 · 포트 합의 · 더해야 할 파일 목록 ·
+  <b>단계별 체크리스트 9개</b> · <b>Claude Code 에 그대로 붙여 쓸 프롬프트 4개</b> ·
+  저희가 실제로 밟은 함정 10가지 · 저희가 도울 것.</p>
+  <p>뜻밖의 좋은 소식도 있었습니다 — <b>스키마를 안 바꿔도 됩니다.</b> 그쪽은 서버 저장형 세션을
+  쓰는데 포털이 「이 사람 끊어라」 할 때 채울 칸(<code>revoked_at</code>)이 <b>이미 있습니다.</b></p>
+</div>
+
+<h2>다음에 할 일</h2>
+
+<ol>
+  <li><b>휴가 관리 연동 안내서</b> 만들기 — 체크리스트 · Claude 프롬프트 · 함정 목록</li>
+  <li><b>조각 3</b> — 포털이 알림을 모아 주는 창구</li>
+  <li><b>연락서 S2</b> — 원인 사전 <span class="pct">(전제가 바뀌었습니다 — 위 표 참조)</span></li>
+  <li>계측기 · 개선요청에 <b>홈 화면 아이콘</b> 붙이기
+      <span class="pct">(폰으로 여는 시스템인데 지금은 흐린 확대본이 뜹니다)</span></li>
+  <li>덩어리가 끝나면 <b>저장소마다 따로 올리기</b></li>
+</ol>
+
+
+<footer>
+  <p>이 문서는 <b>살아 있는 현황판</b>입니다 — 작업이 끝날 때마다 갱신합니다.
+  자세한 배경은 같은 폴더의 <code>설명-2026-09-21.html</code> ·
+  <code>알림설정-이사-2026-09-21.html</code> · <code>권장안-2026-09-21.html</code> 에 있습니다.</p>
+</footer>
+
+</main>
+</body>
+</html>
