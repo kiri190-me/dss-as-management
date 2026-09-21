@@ -122,18 +122,16 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">「작업 종료」 남은 결함 셋</span>
-      <span class="chip">바탕화면 · A/S · PO</span>
+      <span class="now-title">🔴 A/S 종료가 DB 백업을 건너뛰는 것</span>
+      <span class="chip">A/S</span>
       <span class="chip run">진행 중</span>
     </div>
-    <p class="now-body">① <code>docker ps</code> 명령이 실패했을 때 <b>「DB 가 꺼져 있다」고 잘못 읽는 것</b>을
-    나머지 넷에서도 고칩니다.<br>
-    ② 🔴 A/S 와 계측기는 <b>PO 도 같은 DB 를 쓴다는 것을 모릅니다.</b>
-    그래서 <b>PO 가 아직 쓰고 있는데 DB 를 꺼 버릴 수 있습니다.</b><br>
-    ③ <code>dss-po</code> 에만 무시 목록 설정이 빠져 있어, 종료할 때
-    <b>「올리지 않은 파일이 있다」며 매번 멈춥니다.</b></p>
-    <p class="now-note">②를 고치려면 A/S 파일을 한 줄 수정해야 해서, 앞서 「A/S 는 읽기만」이라고
-    한 제한을 풀었습니다.</p>
+    <p class="now-body">같은 <code>docker ps</code> 버그가 A/S 에도 있는데, 여기서는 결과가 훨씬 나쁩니다.
+    <b>docker 가 대답하지 못하면 「DB 가 꺼져 있다」고 판단해 백업을 건너뜁니다.</b>
+    사진 백업도 함께 건너뜁니다.</p>
+    <p class="now-note">경고가 뜨긴 하지만 「DB 가 꺼져 있어서」라고 나오기 때문에, 그 말을 본 사람은
+    이상하게 여기지 않습니다. 그날의 수리 접수와 사진이 백업되지 않은 채 지나갑니다.
+    이제는 건너뛰지 않고 멈추게 합니다.</p>
   </div>
 
 </div>
@@ -141,6 +139,21 @@
 <h3>방금 끝난 것</h3>
 
 <div class="now-list">
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">DB 를 셋이 함께 쓰는 것을 서로 알게 했다</span>
+      <span class="chip">A/S · 계측기 · PO</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body">A/S 와 계측기는 <b>PO 도 같은 DB 를 쓴다는 것을 몰랐습니다.</b>
+    그래서 PO 가 아직 쓰고 있는데 DB 를 꺼 버릴 수 있었습니다.
+    이제 셋이 서로를 모두 확인하고, <b>마지막에 나가는 쪽만</b> DB 를 끕니다.</p>
+    <p class="now-note">상대가 살아 있는지 볼 때 포트 목록에서 못 찾아도 실제로 접속해 봅니다 —
+    잘못 판단해서 남이 쓰는 DB 를 끄는 쪽이 훨씬 나쁘기 때문입니다.
+    <code>dss-po</code> 가 종료할 때마다 멈추던 것도 함께 고쳤습니다.</p>
+  </div>
 
   <div class="now-item fin">
     <div class="now-head">
@@ -184,17 +197,6 @@
     그중 두 가지는 <b>오류 메시지도 없이 잘못된 결과만 남았습니다.</b></p>
     <p class="now-note">앞으로 결재 종류가 늘어도 빠뜨리지 않도록, 종류를 나열하는 두 곳을
     표로 바꿔 빠진 항목을 컴파일 단계에서 잡게 했습니다.</p>
-  </div>
-
-  <div class="now-item fin">
-    <div class="now-head">
-      <span class="now-mark">✔</span>
-      <span class="now-title">견적서 편집 폼</span>
-      <span class="chip">PO / 내자</span>
-      <span class="chip fin">올림</span>
-    </div>
-    <p class="now-body">목록에서 <b>줄을 누르면 편집 폼이 열리고 저장됩니다</b>(조각 3b-1).</p>
-    <p class="now-note">종류를 바꿔도 작업 내역이 아직 자동으로 안 채워집니다 — 조각 3c 에서 살아납니다.</p>
   </div>
 
 </div>
