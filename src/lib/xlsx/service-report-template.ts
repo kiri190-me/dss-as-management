@@ -489,6 +489,23 @@ export const SERVICE_REPORT_CAUSE_LABELS: Record<ServiceReportCause, string> =
   ) as Record<ServiceReportCause, string>;
 
 /**
+ * 조치 네 가지의 한글 이름 — 위 `SERVICE_REPORT_CAUSE_LABELS` 와 **같은 까닭**으로
+ * `DISPOSITION_CELLS` 에서 뽑아낸다(베껴 적지 않는다).
+ *
+ * 쓰는 곳은 지금 시험 하나뿐이다 — `kyosan/report-terms.test.ts` 가 교산 연락서의
+ * `処置` 보기 넷(`現地修理`·`現品引取`·`代品納入`·`処置完了`)을 한글로 옮긴 사전이
+ * **우리 양식의 이름과 어긋나지 않는지** 여기에 대 본다. 두 곳에 따로 적어 두면
+ * 양식의 라벨이 바뀐 날 한쪽만 고쳐지고, 그때 증상은 아무 오류 없이 화면과
+ * 문서가 서로 다른 이름을 부르는 것이다(위 머리말과 같은 사고).
+ */
+export const SERVICE_REPORT_DISPOSITION_LABELS: Record<
+  keyof typeof DISPOSITION_CELLS,
+  string
+> = Object.fromEntries(
+  Object.entries(DISPOSITION_CELLS).map(([key, cell]) => [key, cell.label])
+) as Record<keyof typeof DISPOSITION_CELLS, string>;
+
+/**
  * 「비　고」 라벨 칸. 이 칸의 병합 범위(`C60:G63`)가 비고가 몇 줄이고 내용이
  * 어느 열에서 시작하는지를 알려 준다(`findLabelledBlock`).
  */
@@ -762,8 +779,16 @@ export function validateServiceReportInput(input: ServiceReportInput): void {
   }
   if (input.customerName.trim() === "") throw new Error("고객사명이 비어 있습니다.");
   assertDate(input.issuedOn, "발행일");
-  if (input.reportNumber.middle.trim() === "") throw new Error("보고서 번호(중간)가 비어 있습니다.");
-  if (input.reportNumber.tail.trim() === "") throw new Error("보고서 번호(뒤)가 비어 있습니다.");
+  /**
+   * 🔴 **보고서 번호는 비어 있어도 된다**(2026-09-21 사용자 결정). 예전에는 중간·뒤
+   * 두 칸이 비면 여기서 던졌다. 그런데 **교산 연락서에서 만든 보고서**는 그 칸을
+   * 일부러 비워 둔다 — 교산 쪽 번호를 우리 발행번호 자리에 넣으면 우리가 발행한
+   * 척이 되기 때문이다(`kyosan/report-save-values.ts`). 아직 우리가 발행한 문서가
+   * 아니니 **빈 칸이 사실에 맞다.** 아래 채우개가 빈 글자를 받으면 그 칸을 비운다
+   * (`setInlineString` 의 빈 글자 → `clearCell`).
+   *
+   * 번호를 여기서 지어내지 않는다. 사람이 나중에 적는다.
+   */
 
   if (input.receivedOn !== undefined) assertDate(input.receivedOn, "접수일");
   if (input.occurredOn !== undefined && typeof input.occurredOn !== "string") {

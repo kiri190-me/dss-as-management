@@ -17,6 +17,7 @@ import {
   type KyosanReportTarget,
 } from "@/lib/domain/kyosan-report-import/preview-view";
 import type { KyosanAgreement } from "@/lib/kyosan/report-match";
+import { viewKyosanText } from "@/lib/kyosan/report-terms";
 import type { KyosanReportImportResult } from "@/lib/server/services/kyosan-report-import";
 
 /**
@@ -55,6 +56,49 @@ const AGREEMENT_CLASS: Readonly<Record<KyosanAgreement, string>> = {
 
 function blank(value: string | null): string {
   return value === null || value.trim() === "" ? "—" : value;
+}
+
+/**
+ * 연락서에서 온 글자 한 줄. 🔴 **원문을 지우지 않는다**(`kyosan/report-terms.ts`).
+ *
+ *  · 양식의 고정 보기(原因 열 · 処置 넷 · `交換無し`)  → 한글을 보이고 원문을 옆에 작게.
+ *  · 사람이 손으로 적은 일본어                        → 원문 그대로 + 「일본어 원문」 표시.
+ *  · 그 밖(한글 · 영문 · 숫자)                        → 그대로.
+ *
+ * 🔴 여기서 **저장값이 달라지지 않는다.** 보고서에 들어가는 글자는 연락서 원문
+ * 그대로이고(`kyosan/report-save-values.ts`), 이 조각은 사람이 넣기 전에 눈으로
+ * 읽으라고 한글을 곁들일 뿐이다 — 번역이 틀렸을 때 원문으로 되짚을 수 있다.
+ */
+function KyosanText({ value }: { value: string }) {
+  const view = viewKyosanText(value);
+
+  if (view.korean !== null) {
+    return (
+      <span data-role="kyosan-text" data-translated="true">
+        <span className="text-zinc-800 dark:text-zinc-200">{view.korean}</span>
+        <span
+          data-role="kyosan-text-original"
+          className="ml-1.5 text-xs text-zinc-400 dark:text-zinc-500"
+        >
+          {`(${view.original})`}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span data-role="kyosan-text" data-japanese={view.isJapaneseOriginal ? "true" : undefined}>
+      <span className="text-zinc-800 dark:text-zinc-200">{view.original}</span>
+      {view.isJapaneseOriginal ? (
+        <span
+          data-role="kyosan-text-japanese-badge"
+          className="ml-1.5 whitespace-nowrap rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+        >
+          일본어 원문
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function AgreementBadge({ value }: { value: KyosanAgreement }) {
@@ -329,7 +373,9 @@ export function KyosanReportContentPanel({ preview }: { preview: KyosanReportPre
                 <td className={`${TD_CLASS} whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400`}>
                   {line.origin}
                 </td>
-                <td className={`${TD_CLASS} whitespace-pre-wrap text-zinc-800 dark:text-zinc-200`}>{line.text}</td>
+                <td className={`${TD_CLASS} whitespace-pre-wrap text-zinc-800 dark:text-zinc-200`}>
+                  <KyosanText value={line.text} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -342,7 +388,8 @@ export function KyosanReportContentPanel({ preview }: { preview: KyosanReportPre
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-zinc-800 dark:text-zinc-200">
             {content.parts.map((part) => (
               <li key={`${part.kind}-${part.text}`} data-role="kyosan-report-part">
-                {`[${KYOSAN_PART_KIND_LABEL[part.kind]}] ${part.text}`}
+                {`[${KYOSAN_PART_KIND_LABEL[part.kind]}] `}
+                <KyosanText value={part.text} />
               </li>
             ))}
           </ul>

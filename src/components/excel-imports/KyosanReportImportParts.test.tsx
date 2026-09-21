@@ -306,7 +306,50 @@ describe("미리보기가 무엇을 보여 주는가", () => {
     assert.match(markup, /양식 그림 5장은 걸러 냈습니다/);
     assert.ok(markup.includes("값-고장내용"), "들어갈 글자가 그대로 보여야 한다");
     assert.ok(markup.includes("お客様不具合"), "어느 항목에서 왔는지 보여야 한다");
-    assert.match(markup, /\[고장분\] 값-부품/);
+    // 분류와 부품 글자가 한 줄에 있다. 글자는 `KyosanText` 가 감싸므로 사이에
+    // 태그가 낀다 — 분류만 견주고 글자는 따로 본다(조각 S5).
+    assert.match(markup, /\[고장분\] /);
+    assert.ok(markup.includes("값-부품"), "부품 글자가 그대로 보여야 한다");
+  });
+
+  test("🔴 양식의 고정 보기는 한글로, 원문은 옆에 남는다(조각 S5)", () => {
+    const markup = render(
+      <KyosanReportContentPanel
+        preview={preview({
+          content: {
+            lines: [{ section: "ACTIONS", text: "現品引取", origin: "처치(○ 표시)" }],
+            parts: [{ kind: "fault", text: "交換無し" }],
+            causeMarks: [],
+            actionMarks: ["現品引取"],
+            photoCount: 0,
+            formAssetCount: 0,
+          },
+        })}
+      />
+    );
+    assert.ok(markup.includes("현품 인수"), "고정 보기는 한글로 보여야 한다");
+    assert.ok(markup.includes("(現品引取)"), "🔴 원문을 버리지 않는다");
+    assert.ok(markup.includes("교체 없음"), "부품 칸의 상태값도 한글로 보여야 한다");
+    assert.ok(markup.includes("(交換無し)"), "🔴 부품 칸의 원문도 남는다");
+  });
+
+  test("🔴 사람이 적은 일본어는 원문 그대로 두고 그렇게 표시한다(조각 S5)", () => {
+    const markup = render(
+      <KyosanReportContentPanel
+        preview={preview({
+          content: {
+            lines: [{ section: "FINDINGS", text: "焼損・煙・異臭発生", origin: "고객 고장 상황" }],
+            parts: [],
+            causeMarks: [],
+            actionMarks: [],
+            photoCount: 0,
+            formAssetCount: 0,
+          },
+        })}
+      />
+    );
+    assert.ok(markup.includes("焼損・煙・異臭発生"), "🔴 자유 기술은 원문 그대로다");
+    assert.ok(markup.includes("일본어 원문"), "일본어 원문임을 알려야 한다");
   });
 
   test("뽑은 것이 하나도 없으면 그렇게 말한다", () => {
