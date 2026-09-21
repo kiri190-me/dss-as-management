@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import { invalidateSessionsForSsoSubject } from "@/lib/db/queries/users";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { getSsoClientId, getSsoIssuer } from "@/lib/config/sso";
+import { portalJwks } from "@/lib/auth/portal-service-token";
 
 /**
  * 통합 로그인이 "이 사람 세션 끊어라"라고 알려 오는 곳
@@ -26,14 +27,12 @@ import { getSsoClientId, getSsoIssuer } from "@/lib/config/sso";
  * 콜백 라우트와 같은 이유로 한 번 만들어 재사용한다 — jose가 JWKS 캐시와
  * 키 교체를 알아서 처리한다. 요청마다 만들면 포털을 두드리게 되고 그 캐시가
  * 무의미해진다.
+ *
+ * 그 한 벌은 이제 auth/portal-service-token.ts 에 있다 — 포털이 서명한 토큰을
+ * 받는 통로가 둘이 되었고(통합 알림), 두 벌로 나누면 캐시도 두 벌이 된다.
+ * 판정은 이 파일에 그대로 남는다(로그아웃 토큰의 규격 요구가 다르다).
  */
-let jwksCache: ReturnType<typeof createRemoteJWKSet> | null = null;
-function jwks() {
-  jwksCache ??= createRemoteJWKSet(
-    new URL(`${getSsoIssuer()}/.well-known/jwks.json`)
-  );
-  return jwksCache;
-}
+const jwks = portalJwks;
 
 /** 규격이 정한 표시. 이것이 없으면 로그아웃 통보가 아니다. */
 const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
