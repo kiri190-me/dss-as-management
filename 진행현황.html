@@ -122,13 +122,14 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">「작업 종료」 수리</span>
-      <span class="chip">바탕화면</span>
+      <span class="now-title">「작업 종료」 남은 결함 셋</span>
+      <span class="chip">바탕화면 · A/S · PO</span>
       <span class="chip run">진행 중</span>
     </div>
-    <p class="now-body">PO·휴가도 꺼지게 하고, <b>끈 뒤에 정말 꺼졌는지 확인</b>합니다.</p>
-    <p class="now-note">지금은 그 둘을 아예 몰라 사람이 직접 껐고,
-    떠 있는데 「이미 꺼져 있음」이라고 넘어간 적이 있습니다.</p>
+    <p class="now-body">① <b><code>docker ps</code> 실패를 「꺼져 있음」으로 읽는 것</b>을 나머지 넷에도 ·
+    ② 🔴 <b>DB 상자를 셋이 쓰는데 A/S·계측기가 PO 를 몰라</b> 발밑에서 꺼질 수 있는 것 ·
+    ③ <code>dss-po</code> 만 무시 목록이 없어 <b>매번 안 꺼지는 것</b></p>
+    <p class="now-note">②를 위해 「A/S 는 읽기만」 지시를 거뒀습니다 — 그 한 줄은 고쳐야 합니다.</p>
   </div>
 
 </div>
@@ -136,6 +137,20 @@
 <h3>방금 끝난 것</h3>
 
 <div class="now-list">
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">「작업 종료」가 일곱을 다 끈다</span>
+      <span class="chip">바탕화면</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body"><b>PO·휴가 종료 스크립트를 새로 만들었습니다</b> — 그 둘은 종료 절차 자체가 없어
+    사람이 직접 껐습니다. 그리고 <b>「이미 꺼져 있음」이라고 말하기 전에 한 번 더 두드려 봅니다.</b></p>
+    <p class="now-note">🔴 원인 하나를 찾았습니다 — <code>docker ps</code> 가 실패했을 때의 오류 글자도
+    「이름이 다르다」로 읽혀 「꺼져 있음」이 됐습니다. 끝에 일곱 포트와 상자 다섯을 훑어
+    <b>일부러 남긴 것과 모르고 남은 것을 갈라</b> 알립니다.</p>
+  </div>
 
   <div class="now-item fin">
     <div class="now-head">
@@ -171,17 +186,6 @@
     </div>
     <p class="now-body">목록에서 <b>줄을 누르면 편집 폼이 열리고 저장됩니다</b>(조각 3b-1).</p>
     <p class="now-note">종류를 바꿔도 작업 내역이 아직 자동으로 안 채워집니다 — 조각 3c 에서 살아납니다.</p>
-  </div>
-
-  <div class="now-item fin">
-    <div class="now-head">
-      <span class="now-mark">✔</span>
-      <span class="now-title">연락서를 상세의 제자리 칸으로</span>
-      <span class="chip">A/S</span>
-      <span class="chip fin">올림</span>
-    </div>
-    <p class="now-body">보고서에 몰아넣지 않고 <b>신고 증상과 작업 기록</b>으로 나눠 넣습니다.
-    <b>보고서는 만들지 않습니다.</b></p>
   </div>
 
 </div>
