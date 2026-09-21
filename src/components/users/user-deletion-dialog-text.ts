@@ -1,4 +1,5 @@
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "@/lib/domain/shipment-approval-route";
+import { totalPendingApprovals } from "@/lib/domain/user-deletion-rules";
 import { USER_DELETION_REASON_MAX_LENGTH } from "@/lib/validation/user-deletion-input";
 import type {
   UserDeletionBlocker,
@@ -92,12 +93,15 @@ export function describeUserDeletionImpact(impact: UserDeletionPreviewImpact): U
     approvalItems.push(`결재선 자리 ${impact.routeSlots.length}곳(${where})`);
   }
   const pending = impact.pendingApprovals;
-  const pendingTotal = pending.finalShipment + pending.repairInspection + pending.partIssue;
+  // 🔴 칸을 손으로 더하지 않는다. 예전에는 여기가 세 칸을 글자로 더했고, 견적서 결재가
+  // 붙자 **타입 오류 하나 없이** 확인 창이 조용히 빠뜨린 건수를 말했다.
+  const pendingTotal = totalPendingApprovals(pending);
   if (pendingTotal > 0) {
     const parts = [
       pending.finalShipment > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.FINAL_SHIPMENT} ${pending.finalShipment}건` : null,
       pending.repairInspection > 0 ? `수리 검수 승인 ${pending.repairInspection}건` : null,
       pending.partIssue > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} ${pending.partIssue}건` : null,
+      pending.quote > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE} ${pending.quote}건` : null,
     ].filter((part): part is string => part !== null);
     approvalItems.push(`대기 결재 ${pendingTotal}건(${parts.join(", ")})`);
   }

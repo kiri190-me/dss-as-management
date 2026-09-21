@@ -10,6 +10,7 @@ import {
   replaceApproverInRouteSteps,
   resolveUserDeletionRequirements,
   routeScopeForApprovalKind,
+  totalPendingApprovals,
   type ApprovalSuccessorContext,
   type ApprovalSuccessorFacts,
   type OpenApprovalFacts,
@@ -122,7 +123,7 @@ test("담당 이어받을 사람 — 자기 자신 · 계정 조건 · 역할이
 
 const NOTHING = {
   routeSlotCount: 0,
-  pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0 },
+  pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 },
   isLastRepresentative: false,
   openAssignedCaseCount: 0,
 };
@@ -135,12 +136,14 @@ test("필요한가 — 아무것도 없으면 둘 다 필요 없다", () => {
   });
 });
 
-test("필요한가 — 결재선 자리 · 대기 결재 셋 · 마지막 대표는 각각 결재 쪽을 요구한다", () => {
+test("필요한가 — 결재선 자리 · 대기 결재 넷 · 마지막 대표는 각각 결재 쪽을 요구한다", () => {
   const cases = [
     { ...NOTHING, routeSlotCount: 1 },
-    { ...NOTHING, pendingApprovals: { finalShipment: 1, repairInspection: 0, partIssue: 0 } },
-    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 1, partIssue: 0 } },
-    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 1 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 1, repairInspection: 0, partIssue: 0, quote: 0 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 1, partIssue: 0, quote: 0 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 1, quote: 0 } },
+    // 🔴 견적서 결재만 걸린 사람 — 예전에는 세 칸만 더해 이어받을 사람 없이 삭제됐다.
+    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 1 } },
     { ...NOTHING, isLastRepresentative: true },
   ];
   for (const facts of cases) {
@@ -158,10 +161,17 @@ test("필요한가 — 검수 역할은 검수 수동 지정이 있을 때만 �
   assert.equal(
     resolveUserDeletionRequirements({
       ...NOTHING,
-      pendingApprovals: { finalShipment: 0, repairInspection: 2, partIssue: 0 },
+      pendingApprovals: { finalShipment: 0, repairInspection: 2, partIssue: 0, quote: 0 },
     }).approvalSuccessorMustInspect,
     true
   );
+  // 견적서 결재는 검수 역할을 요구하지 않는다 — 결재는 요구한다.
+  const quoteOnly = resolveUserDeletionRequirements({
+    ...NOTHING,
+    pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 3 },
+  });
+  assert.equal(quoteOnly.approvalSuccessorMustInspect, false);
+  assert.equal(quoteOnly.approvalSuccessor, true);
 });
 
 test("필요한가 — 열린 담당 건이 있으면 담당 쪽만 요구한다", () => {
@@ -177,6 +187,7 @@ test("필요한가 — 열린 담당 건이 있으면 담당 쪽만 요구한다
 test("승인 종류 → 결재선 용도 — 검수는 결재선을 타지 않는다", () => {
   assert.equal(routeScopeForApprovalKind("FINAL_SHIPMENT"), "FINAL_SHIPMENT");
   assert.equal(routeScopeForApprovalKind("PART_ISSUE"), "PART_ISSUE");
+  assert.equal(routeScopeForApprovalKind("QUOTE"), "QUOTE");
   assert.equal(routeScopeForApprovalKind("REPAIR_INSPECTION"), null);
 });
 
@@ -229,6 +240,31 @@ test("사슬 — 부품 불출은 부품 불출의 현재 판과 견준다", () 
   assert.deepEqual(planOpenApproval(crossed, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
     action: "STOP",
     code: "IN_FLIGHT_ON_OLD_ROUTE",
+  });
+});
+
+test("🔴 사슬 — 견적서 결재도 견적서의 현재 판과 견준다(REPIN · STOP)", () => {
+  // 견적서 결재선은 아무 문도 잠그지 않지만(schema/quote-approvals.ts), 사슬을 따라가는
+  // 방식은 다른 둘과 같다 — 이 판정이 빠져 있던 동안 견적서 사슬은 아예 보이지 않았다.
+  const onCurrent = routeRow({ kind: "QUOTE", routeId: "quote-current" });
+  assert.deepEqual(planOpenApproval(onCurrent, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
+    action: "REPIN",
+    reassign: false,
+  });
+  const onOld = routeRow({ kind: "QUOTE", routeId: "quote-old" });
+  assert.deepEqual(planOpenApproval(onOld, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
+    action: "STOP",
+    code: "IN_FLIGHT_ON_OLD_ROUTE",
+  });
+  // 열린 단계가 지울 사람이고 뒤에도 있으면 옮기면서 지정까지 바꾼다.
+  const assignedAndAhead = routeRow({
+    kind: "QUOTE",
+    routeId: "quote-current",
+    assignedApproverUserId: TARGET,
+  });
+  assert.deepEqual(planOpenApproval(assignedAndAhead, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
+    action: "REPIN",
+    reassign: true,
   });
 });
 
@@ -358,8 +394,19 @@ test("대기 결재 — 지울 사람에게 지정된 것만 종류별로 센다
       { kind: "PART_ISSUE", assignedApproverUserId: TARGET },
       { kind: "PART_ISSUE", assignedApproverUserId: TARGET },
       { kind: "PART_ISSUE", assignedApproverUserId: null },
+      { kind: "QUOTE", assignedApproverUserId: TARGET },
+      { kind: "QUOTE", assignedApproverUserId: "a" },
     ],
     TARGET
   );
-  assert.deepEqual(counts, { finalShipment: 1, repairInspection: 1, partIssue: 2 });
+  // 🔴 견적서가 제 칸으로 간다 — 예전 `else counts.partIssue += 1` 이면 partIssue 가 3이었다.
+  assert.deepEqual(counts, { finalShipment: 1, repairInspection: 1, partIssue: 2, quote: 1 });
+});
+
+test("🔴 대기 결재 합 — 칸을 손으로 더하지 않는다(종류가 늘어도 따라온다)", () => {
+  // 확인 창의 「대기 결재 N건」과 「이어받을 사람이 필요한가」가 둘 다 이 함수를 본다.
+  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 }), 0);
+  assert.equal(totalPendingApprovals({ finalShipment: 1, repairInspection: 2, partIssue: 3, quote: 4 }), 10);
+  // 견적서 한 건만 있어도 0 이 아니다 — 세 칸만 더하던 시절의 구멍이다.
+  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 1 }), 1);
 });

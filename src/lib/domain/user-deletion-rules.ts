@@ -165,7 +165,20 @@ export type UserDeletionPendingApprovalCounts = {
   finalShipment: number;
   repairInspection: number;
   partIssue: number;
+  quote: number;
 };
+
+/**
+ * 종류를 가리지 않은 대기 결재의 합.
+ *
+ * 🔴 **칸을 손으로 더하지 않는다.** 예전에는 부르는 쪽마다 세 칸을 글자로 더했고
+ * (`finalShipment + repairInspection + partIssue`), 그래서 종류가 늘어도 타입 오류가
+ * 나지 않은 채 확인 창이 **조용히 빠뜨린 건수**를 말할 수 있었다. 여기 한 곳에서
+ * 값들을 훑으면 새 칸이 저절로 따라온다.
+ */
+export function totalPendingApprovals(counts: UserDeletionPendingApprovalCounts): number {
+  return Object.values(counts).reduce((total, count) => total + count, 0);
+}
 
 export type UserDeletionRequirementFacts = {
   /** 지울 사람이 올라 있는 **현재 판**의 수(용도별로 하나까지). */
@@ -195,7 +208,9 @@ export type UserDeletionRequirements = {
  */
 export function resolveUserDeletionRequirements(facts: UserDeletionRequirementFacts): UserDeletionRequirements {
   const pending = facts.pendingApprovals;
-  const hasPending = pending.finalShipment + pending.repairInspection + pending.partIssue > 0;
+  // 🔴 칸을 손으로 더하지 않는다(totalPendingApprovals 주석). 예전에는 여기가 세 칸을
+  // 글자로 더했고, 그래서 **견적서 결재만 걸린 사람이 이어받을 사람 없이 삭제됐다.**
+  const hasPending = totalPendingApprovals(pending) > 0;
   return {
     approvalSuccessor: facts.routeSlotCount > 0 || hasPending || facts.isLastRepresentative,
     engineerSuccessor: facts.openAssignedCaseCount > 0,
@@ -209,8 +224,8 @@ export function resolveUserDeletionRequirements(facts: UserDeletionRequirementFa
  * ============================================================================
  */
 
-/** 넘겨받을 수 있는 결재 대기의 종류 — 접수 건 승인 둘과 부품 불출. */
-export const OPEN_APPROVAL_KINDS = ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "PART_ISSUE"] as const;
+/** 넘겨받을 수 있는 결재 대기의 종류 — 접수 건 승인 둘과 부품 불출 · 견적서. */
+export const OPEN_APPROVAL_KINDS = ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "PART_ISSUE", "QUOTE"] as const;
 export type OpenApprovalKind = (typeof OPEN_APPROVAL_KINDS)[number];
 
 /**
@@ -223,6 +238,10 @@ const ROUTE_SCOPE_BY_APPROVAL_KIND: Record<OpenApprovalKind, ShipmentApprovalRou
   FINAL_SHIPMENT: "FINAL_SHIPMENT",
   REPAIR_INSPECTION: null,
   PART_ISSUE: "PART_ISSUE",
+  // 견적서 결재는 결재선을 탄다. 🔴 그 절차가 **발행을 막지 않는다**는 것과는 별개다
+  // (schema/quote-approvals.ts 머리말) — 여기서 보는 것은 「이 행의 뒤 단계가 지울
+  // 사람에게 가는가」뿐이고, 그 판정은 다른 둘과 글자 그대로 같다.
+  QUOTE: "QUOTE",
 };
 
 export function routeScopeForApprovalKind(kind: OpenApprovalKind): ShipmentApprovalRouteScope | null {
@@ -354,17 +373,36 @@ export function replaceApproverInRouteSteps(
     .map((step) => (step.approverUserId === targetUserId ? successorUserId : step.approverUserId));
 }
 
+/**
+ * 승인 종류 → 그 종류를 세는 칸.
+ *
+ * 🔴 **Record 로 둔다 — 여기가 예전에 `else counts.partIssue += 1` 이었다.** 그
+ * 모양은 넷째 종류가 생겨도 타입 오류를 내지 않고, 견적서 결재 대기를 조용히
+ * 「부품 불출 N건」으로 화면에 띄웠다. 표로 바꿔 두면 종류를 더하는 순간 빠진
+ * 자리를 컴파일러가 잡는다(ROUTE_SCOPE_BY_APPROVAL_KIND 와 같은 까닭).
+ */
+const COUNT_KEY_BY_APPROVAL_KIND: Record<OpenApprovalKind, keyof UserDeletionPendingApprovalCounts> = {
+  FINAL_SHIPMENT: "finalShipment",
+  REPAIR_INSPECTION: "repairInspection",
+  PART_ISSUE: "partIssue",
+  QUOTE: "quote",
+};
+
 /** 지울 사람에게 지정된 결재 대기를 승인 종류별로 센다. */
 export function countPendingApprovalsAssignedTo(
   rows: readonly Pick<OpenApprovalFacts, "kind" | "assignedApproverUserId">[],
   targetUserId: string
 ): UserDeletionPendingApprovalCounts {
-  const counts: UserDeletionPendingApprovalCounts = { finalShipment: 0, repairInspection: 0, partIssue: 0 };
+  // 칸 이름을 적은 리터럴이라 칸이 늘면 여기서도 컴파일러가 잡는다.
+  const counts: UserDeletionPendingApprovalCounts = {
+    finalShipment: 0,
+    repairInspection: 0,
+    partIssue: 0,
+    quote: 0,
+  };
   for (const row of rows) {
     if (row.assignedApproverUserId !== targetUserId) continue;
-    if (row.kind === "FINAL_SHIPMENT") counts.finalShipment += 1;
-    else if (row.kind === "REPAIR_INSPECTION") counts.repairInspection += 1;
-    else counts.partIssue += 1;
+    counts[COUNT_KEY_BY_APPROVAL_KIND[row.kind]] += 1;
   }
   return counts;
 }

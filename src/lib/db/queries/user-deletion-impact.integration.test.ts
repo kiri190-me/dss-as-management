@@ -20,6 +20,8 @@ import {
   procedureTemplateNodes,
   procedureTemplates,
   products,
+  quoteApprovals,
+  quotes,
   repairCaseApprovals,
   repairCaseIntakeSequences,
   repairCases,
@@ -63,6 +65,10 @@ const TEST_MODEL_PREFIX = "USERDELPREV-TEST-";
 const TEST_TEMPLATE_PREFIX = "test-userdelprev-exec-";
 const TEST_YEAR_MONTH = "9712";
 const TEST_INTAKE_PREFIX = "D9712%";
+// 🔴 quotes_quote_number_not_deleted_unique 때문에 번호가 겹치면 두 번째 실행이 깨진다 —
+// 접두어로 이 파일의 장만 골라 걷고, 뒤에는 행마다 다른 값을 붙인다.
+const TEST_QUOTE_NUMBER_PREFIX = "UDPREV-TEST-";
+const TEST_QUOTE_DATE = "2097-12-10";
 const TEST_RECEIVED_AT = "2097-12-10";
 const TEST_SHIPMENT_DATE = "2097-12-20";
 
@@ -212,6 +218,44 @@ async function insertPartIssueApproval(params: {
   });
 }
 
+/** Arrange-only: 견적서 한 장. 필수 칸 넷만 채운다(수리 건 · 고객사 없이도 만든다). */
+async function insertQuote(): Promise<{ id: string; quoteNumber: string }> {
+  const quoteNumber = `${TEST_QUOTE_NUMBER_PREFIX}${randomUUID().slice(0, 8)}`;
+  const [row] = await db
+    .insert(quotes)
+    .values({
+      quoteNumber,
+      quoteDate: TEST_QUOTE_DATE,
+      customerNameText: "미리보기 시험 공급처",
+      subject: "계정 삭제 미리보기 시험 견적",
+    })
+    .returning({ id: quotes.id });
+  return { id: row.id, quoteNumber };
+}
+
+/** Arrange-only: 견적서 결재 행 하나. */
+async function insertQuoteApproval(params: {
+  quoteId: string;
+  assignedApproverUserId: string | null;
+  routeId: string | null;
+  routeStepOrder: number | null;
+  requestedByUserId?: string;
+}): Promise<string> {
+  const [row] = await db
+    .insert(quoteApprovals)
+    .values({
+      quoteId: params.quoteId,
+      status: "REQUESTED",
+      requestedByUserId: params.requestedByUserId ?? engineerId,
+      assignedApproverUserId: params.assignedApproverUserId,
+      routeId: params.routeId,
+      routeStepOrder: params.routeStepOrder,
+      quoteVersionAtRequest: 1,
+    })
+    .returning({ id: quoteApprovals.id });
+  return row.id;
+}
+
 async function preview(targetUserId: string, actorUserId: string = superAdminId): Promise<OkPreview> {
   const result = await getUserDeletionPreview(targetUserId, actorUserId);
   assert.equal(result.ok, true, `preview failed: ${JSON.stringify(result)}`);
@@ -311,6 +355,19 @@ async function removePerTestFixtures(userIds: readonly string[]): Promise<void> 
     await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.repairCaseId, caseIds));
   }
   await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.requestedByUserId, ids));
+
+  // 견적서 결재 → 견적서 순서다(quote_approvals.quote_id 는 SET NULL 이지만, 사람 ·
+  // 판 참조가 RESTRICT 라 이 행이 남으면 아래 판 · 사람 삭제가 막힌다).
+  const quoteIds = (
+    await db.select({ id: quotes.id }).from(quotes).where(like(quotes.quoteNumber, `${TEST_QUOTE_NUMBER_PREFIX}%`))
+  ).map((row) => row.id);
+  if (quoteIds.length > 0) {
+    await db.delete(quoteApprovals).where(inArray(quoteApprovals.quoteId, quoteIds));
+  }
+  await db.delete(quoteApprovals).where(inArray(quoteApprovals.requestedByUserId, ids));
+  if (quoteIds.length > 0) {
+    await db.delete(quotes).where(inArray(quotes.id, quoteIds));
+  }
 
   const routeIds = (
     await db
@@ -493,7 +550,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     });
     assert.deepEqual(result.impact, {
       routeSlots: [],
-      pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0 },
+      pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 },
       chainsToRepin: 0,
       isRepresentative: false,
       isLastRepresentative: false,
@@ -568,7 +625,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.deepEqual(result.blockers, []);
   });
 
-  test("대기 결재 셋 · 옮길 사슬 — 결정된 행과 끝난 신청은 세지 않는다, 사슬 요청자 · 검수 자격 미달은 후보가 아니다", async () => {
+  test("대기 결재 넷 · 옮길 사슬 — 결정된 행과 끝난 신청은 세지 않는다, 사슬 요청자 · 검수 자격 미달은 후보가 아니다", async () => {
     const target = await createTestUser("대기 결재 대상");
     const stepA = await createTestUser("대기 결재 1단계");
     const inventoryManager = await createTestUser("대기 결재 재고 담당", { role: "INVENTORY_MANAGER" });
@@ -576,6 +633,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
 
     const shipmentRoute = await saveRoute("FINAL_SHIPMENT", [stepA, target]);
     const partIssueRoute = await saveRoute("PART_ISSUE", [target, stepA]);
+    const quoteRoute = await saveRoute("QUOTE", [target, stepA]);
 
     // 출하: 현재 판 2단계가 대상에게 열려 있다 → 넘김.
     const assignedCase = await createTestCase();
@@ -627,9 +685,36 @@ describe("건수 · 필요한 이어받을 사람", () => {
       routeStepOrder: 1,
       assignedApproverUserId: target,
     });
+    // 🔴 견적서: 1단계가 대상에게 열려 있다 → 넘김. 예전에는 이 행이 수집 단계부터
+    // 빠져 있어 건수도 0, 이어받을 사람도 요구되지 않았다.
+    const openQuote = await insertQuote();
+    await insertQuoteApproval({
+      quoteId: openQuote.id,
+      routeId: quoteRoute,
+      routeStepOrder: 1,
+      assignedApproverUserId: target,
+    });
+    // 이미 결정된 견적서 결재는 세지 않는다.
+    const decidedQuote = await insertQuote();
+    await db.insert(quoteApprovals).values({
+      quoteId: decidedQuote.id,
+      status: "APPROVED",
+      requestedByUserId: engineerId,
+      assignedApproverUserId: target,
+      routeId: quoteRoute,
+      routeStepOrder: 1,
+      decidedByUserId: target,
+      decidedAt: new Date(),
+      quoteVersionAtRequest: 1,
+    });
 
     const result = await preview(target);
-    assert.deepEqual(result.impact.pendingApprovals, { finalShipment: 1, repairInspection: 1, partIssue: 1 });
+    assert.deepEqual(result.impact.pendingApprovals, {
+      finalShipment: 1,
+      repairInspection: 1,
+      partIssue: 1,
+      quote: 1,
+    });
     assert.equal(result.impact.chainsToRepin, 1);
     assert.deepEqual(result.requires, {
       approvalSuccessor: true,
@@ -701,6 +786,89 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.equal(partIssueBlock.issueRequestId, oldIssue);
     assert.ok(partIssueBlock.label.includes(oldIssue.slice(0, 8)), "불출 신청 식별자가 이름에 없다");
     assert.ok(partIssueBlock.message.includes(oldIssue.slice(0, 8)));
+  });
+
+  test("🔴 견적서 결재만 걸린 사람도 이어받을 사람이 필요하다 — 결재선 없이 지정만 된 행", async () => {
+    // 이 사람에게는 결재선 자리도 · 대표도 · 담당 건도 없다. 걸린 것은 견적서 결재 한
+    // 건뿐이다. 예전에는 그 한 건이 수집에서 빠지고 합계에서도 빠져 **이어받을 사람
+    // 없이 삭제**됐고, 그 결재는 죽은 사람에게 남았다.
+    const target = await createTestUser("견적서 전용 대상");
+    const quote = await insertQuote();
+    await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: target,
+      routeId: null,
+      routeStepOrder: null,
+    });
+
+    const result = await preview(target);
+    assert.deepEqual(result.impact.routeSlots, []);
+    assert.deepEqual(result.impact.pendingApprovals, {
+      finalShipment: 0,
+      repairInspection: 0,
+      partIssue: 0,
+      quote: 1,
+    });
+    assert.deepEqual(result.requires, {
+      approvalSuccessor: true,
+      engineerSuccessor: false,
+      approvalSuccessorMustInspect: false,
+    });
+    assert.deepEqual(result.blockers, []);
+  });
+
+  test("🔴 견적서 사슬 — 대상이 현재 판의 뒤 단계면 옮길 사슬로 센다", async () => {
+    const target = await createTestUser("견적서 REPIN 대상");
+    const stepA = await createTestUser("견적서 REPIN 1단계");
+    const quoteRoute = await saveRoute("QUOTE", [stepA, target]);
+
+    const quote = await insertQuote();
+    await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: stepA,
+      routeId: quoteRoute,
+      routeStepOrder: 1,
+    });
+
+    const result = await preview(target);
+    assert.deepEqual(result.impact.routeSlots, [{ scope: "QUOTE", routeVersion: 1, stepOrder: 2 }]);
+    // 지정은 A 에게 있으므로 대기 결재는 0 이고, 옮길 사슬이 1 이다.
+    assert.equal(result.impact.pendingApprovals.quote, 0);
+    assert.equal(result.impact.chainsToRepin, 1);
+    assert.equal(result.requires.approvalSuccessor, true);
+    assert.deepEqual(result.blockers, []);
+    // 사슬 요청자는 결재 이어받을 후보가 아니다 — 그 판정이 견적서에도 닿는다.
+    const candidateIds = new Set(result.candidates.approvalSuccessors.map((candidate) => candidate.id));
+    assert.ok(!candidateIds.has(engineerId), "견적서 사슬의 요청자가 결재 후보에 있다");
+    assert.ok(!candidateIds.has(stepA), "같은 판의 사람이 결재 후보에 있다");
+  });
+
+  test("🔴 견적서 사슬이 옛 판을 따라가면 blockers — 이름에 견적서번호를 싣는다", async () => {
+    const target = await createTestUser("견적서 STOP 대상");
+    const stepA = await createTestUser("견적서 STOP 1단계");
+    const stepB = await createTestUser("견적서 STOP 새 2단계");
+
+    const oldQuoteRoute = await saveRoute("QUOTE", [stepA, target]);
+    const quote = await insertQuote();
+    await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: stepA,
+      routeId: oldQuoteRoute,
+      routeStepOrder: 1,
+    });
+    // 관리자가 견적서 절차를 바꿨다 — 대상은 현재 판에 없다.
+    await saveRoute("QUOTE", [stepA, stepB]);
+
+    const result = await preview(target);
+    assert.deepEqual(result.impact.routeSlots, []);
+    assert.equal(result.impact.chainsToRepin, 0);
+    assert.equal(result.blockers.length, 1, JSON.stringify(result.blockers));
+
+    const blocker = result.blockers[0];
+    assert.ok(blocker.code === "IN_FLIGHT_ON_OLD_ROUTE");
+    assert.equal(blocker.kind, "QUOTE");
+    assert.equal(blocker.label, `${quote.quoteNumber} 견적서 승인`);
+    assert.ok(blocker.message.includes(quote.quoteNumber), "사람이 알아볼 견적서번호가 사유에 없다");
   });
 
   test("새 판이 거절할 사람이 같은 판의 다른 단계에 있으면 ROUTE_UPDATE_REJECTED", async () => {

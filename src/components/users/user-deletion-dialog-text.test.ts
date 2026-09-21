@@ -32,7 +32,7 @@ const ENGINEER = "44444444-4444-4444-8444-444444444444";
 function zeroImpact(overrides: Partial<UserDeletionPreviewImpact> = {}): UserDeletionPreviewImpact {
   return {
     routeSlots: [],
-    pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0 },
+    pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 },
     chainsToRepin: 0,
     isRepresentative: false,
     isLastRepresentative: false,
@@ -105,7 +105,7 @@ describe("영향 건수 문장", () => {
           { scope: "FINAL_SHIPMENT", routeVersion: 3, stepOrder: 2 },
           { scope: "PART_ISSUE", routeVersion: 1, stepOrder: 1 },
         ],
-        pendingApprovals: { finalShipment: 2, repairInspection: 0, partIssue: 1 },
+        pendingApprovals: { finalShipment: 2, repairInspection: 0, partIssue: 1, quote: 0 },
         openAssignedCases: 4,
       })
     );
@@ -115,15 +115,33 @@ describe("영향 건수 문장", () => {
     ]);
     assert.deepEqual(text.keeps, []);
     const all = text.changes.join("\n");
-    for (const absent of ["수리 검수", "위임", "개발자", "메일", "노드", "대표", "0건", "0곳"]) {
+    for (const absent of ["수리 검수", "견적서", "위임", "개발자", "메일", "노드", "대표", "0건", "0곳"]) {
       assert.ok(!all.includes(absent), `0 인 항목 「${absent}」이 문장에 들어갔다: ${all}`);
     }
+  });
+
+  test("🔴 견적서 결재도 합계와 갈래에 들어간다 — 세 칸만 더하던 시절에는 조용히 빠졌다", () => {
+    // 합계가 네 건이어야 한다. 예전에는 「대기 결재 3건(… 견적서 승인 1건)」처럼
+    // 갈래와 합계가 어긋나거나, 갈래마저 없이 사라졌다.
+    const text = describeUserDeletionImpact(
+      zeroImpact({ pendingApprovals: { finalShipment: 1, repairInspection: 1, partIssue: 1, quote: 1 } })
+    );
+    assert.deepEqual(text.changes, [
+      "결재 이어받을 사람에게 대기 결재 4건(최종 출하 승인 1건, 수리 검수 승인 1건, 부품 불출 1건, 견적서 승인 1건)을 넘깁니다.",
+    ]);
+  });
+
+  test("🔴 견적서 결재만 있어도 문장이 나온다", () => {
+    const text = describeUserDeletionImpact(
+      zeroImpact({ pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 2 } })
+    );
+    assert.deepEqual(text.changes, ["결재 이어받을 사람에게 대기 결재 2건(견적서 승인 2건)을 넘깁니다."]);
   });
 
   test("대표 · 위임 · 개발자 표시 · 메일 수신 · 절차 노드 · 옮기는 결재", () => {
     const text = describeUserDeletionImpact(
       zeroImpact({
-        pendingApprovals: { finalShipment: 0, repairInspection: 1, partIssue: 0 },
+        pendingApprovals: { finalShipment: 0, repairInspection: 1, partIssue: 0, quote: 0 },
         isRepresentative: true,
         isLastRepresentative: true,
         chainsToRepin: 2,

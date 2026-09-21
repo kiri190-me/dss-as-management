@@ -8,6 +8,8 @@ import {
   inventoryPartRequests,
   procedureCaseExecutionNodes,
   procedureCaseExecutions,
+  quoteApprovals,
+  quotes,
   repairCaseApprovals,
   repairCases,
   shipmentApprovalDelegations,
@@ -63,7 +65,9 @@ import type { Role } from "@/lib/domain/types";
  * 결재 결정이 잡는 순서에 맞춘다 — 결재 행 → 위임 행 → 사용자 행
  * (mutations/repair-case-approvals.ts 의 decideRepairCaseApproval). 부품 불출은 신청
  * 헤더를 결재 행보다 먼저 잠근다(decidePartIssueRequestApproval · cancel 과 같은
- * 순서). 순서가 어긋나면 삭제와 결재가 서로를 기다리는 교착이 난다. 결재선 판은
+ * 순서). 견적서는 결재 행 하나만 잠근다 — decideQuoteApproval 도 견적서 행은 잠그지
+ * 않고 결재 행만 FOR UPDATE 로 잡으므로 같은 순서다(그 함수의 🔴 주석).
+ * 순서가 어긋나면 삭제와 결재가 서로를 기다리는 교착이 난다. 결재선 판은
  * 잠그지 않는다 — 부르는 쪽이 결재선 잠금(acquireShipmentApprovalRouteLock)을 먼저
  * 건다.
  *
@@ -126,10 +130,15 @@ export type UserDeletionOpenApproval = {
     repairCaseId: string | null;
     /** 부품 불출이면 그 신청. */
     issueRequestId: string | null;
+    /** 견적서 결재면 그 장. 견적서가 영구 삭제되면 결재 행에서 연결이 끊겨(SET NULL) null 이다. */
+    quoteId: string | null;
     /** 사람이 알아보는 접수번호. 접수 건이 없거나 영구 삭제됐으면 null. */
     intakeNumber: string | null;
   };
-  /** 사람이 알아볼 이름 — 「D260901 최종 출하 승인」 · 「부품 불출 신청 3f2a1b4c」. */
+  /**
+   * 사람이 알아볼 이름 — 「D260901 최종 출하 승인」 · 「부품 불출 신청 3f2a1b4c」 ·
+   * 「DSS 2026-077 견적서 승인」.
+   */
   label: string;
 };
 
@@ -159,15 +168,24 @@ function nonNull<T>(value: T | null | undefined): value is T {
   return value !== null && value !== undefined;
 }
 
-function approvalLabel(kind: OpenApprovalKind, intakeNumber: string | null, issueRequestId: string | null): string {
+function approvalLabel(
+  kind: OpenApprovalKind,
+  subject: { intakeNumber?: string | null; issueRequestId?: string | null; quoteNumber?: string | null }
+): string {
   if (kind === "PART_ISSUE") {
     // 불출 신청에는 사람이 읽는 번호가 없다 — id 앞 여덟 자를 쓰고, 접수 건에 매인
     // 신청이면 접수번호를 곁들인다.
-    const short = (issueRequestId ?? "").slice(0, 8);
+    const short = (subject.issueRequestId ?? "").slice(0, 8);
     const base = `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} 신청 ${short}`;
-    return intakeNumber ? `${base} (${intakeNumber})` : base;
+    return subject.intakeNumber ? `${base} (${subject.intakeNumber})` : base;
   }
-  const caseLabel = intakeNumber ?? "(영구 삭제된 접수 건)";
+  if (kind === "QUOTE") {
+    // 견적서 번호는 사람이 손으로 적는 값이라 그대로가 가장 알아보기 쉽다
+    // (「DSS 2026-077」). 견적서가 영구 삭제되면 결재 행의 연결이 끊기므로
+    // (quote_approvals.quote_id 는 ON DELETE SET NULL) 그때는 접수 건과 같은 말을 쓴다.
+    return `${subject.quoteNumber ?? "(영구 삭제된 견적서)"} ${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE}`;
+  }
+  const caseLabel = subject.intakeNumber ?? "(영구 삭제된 접수 건)";
   return kind === "FINAL_SHIPMENT"
     ? `${caseLabel} ${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.FINAL_SHIPMENT}`
     : `${caseLabel} 수리 검수 승인`;
@@ -298,9 +316,34 @@ export async function collectUserDeletionImpact(
     (row) => headerById.get(row.issueRequestId)?.status === "PENDING_APPROVAL"
   );
 
+  // 4b. 견적서 결재 대기 — 3번과 같은 모양이다(지정됐거나, 지울 사람이 있는 판을 따라가는 것).
+  //     🔴 불출과 달리 헤더를 먼저 잠글 것이 없다 — 견적서는 결재가 끝나기 전에도 발행되므로
+  //     「지금 결재 중인가」라는 상태 칸이 quotes 에 없다(schema/quote-approvals.ts 머리말).
+  //     REQUESTED 인 결재 행 자신이 곧 「살아 있는 요청」이다.
+  const quoteCondition =
+    routeIdsWithTarget.length > 0
+      ? or(eq(quoteApprovals.assignedApproverUserId, targetId), inArray(quoteApprovals.routeId, routeIdsWithTarget))
+      : eq(quoteApprovals.assignedApproverUserId, targetId);
+  const quoteQuery = executor
+    .select({
+      id: quoteApprovals.id,
+      quoteId: quoteApprovals.quoteId,
+      assignedApproverUserId: quoteApprovals.assignedApproverUserId,
+      requestedByUserId: quoteApprovals.requestedByUserId,
+      routeId: quoteApprovals.routeId,
+      routeStepOrder: quoteApprovals.routeStepOrder,
+    })
+    .from(quoteApprovals)
+    .where(and(eq(quoteApprovals.status, "REQUESTED"), quoteCondition));
+  const quoteRows = lock ? await quoteQuery.for("update") : await quoteQuery;
+
   // 5. 붙잡은 판의 단계들 — 「현재 판」이 아니라 행에 적힌 판이다.
   const pinnedRouteIds = unique(
-    [...repairRows.map((row) => row.routeId), ...awaitingIssueRows.map((row) => row.routeId)].filter(nonNull)
+    [
+      ...repairRows.map((row) => row.routeId),
+      ...awaitingIssueRows.map((row) => row.routeId),
+      ...quoteRows.map((row) => row.routeId),
+    ].filter(nonNull)
   );
   const stepsByRoute = new Map<string, RouteStepAssignment[]>();
   for (const routeId of pinnedRouteIds) {
@@ -339,6 +382,17 @@ export async function collectUserDeletionImpact(
       .where(inArray(repairCases.id, caseIds));
     for (const row of rows) intakeById.set(row.id, row.intakeNumber);
   }
+  // 견적서번호 — 휴지통에 있는 장도 그대로 읽는다. 결재는 그 장이 지워져도 남으므로
+  // (quote_approvals 에는 소프트삭제 칸이 없다) 여기서 걸러 내면 이름표만 사라진다.
+  const quoteIds = unique(quoteRows.map((row) => row.quoteId).filter(nonNull));
+  const quoteNumberById = new Map<string, string>();
+  if (quoteIds.length > 0) {
+    const rows = await executor
+      .select({ id: quotes.id, quoteNumber: quotes.quoteNumber })
+      .from(quotes)
+      .where(inArray(quotes.id, quoteIds));
+    for (const row of rows) quoteNumberById.set(row.id, row.quoteNumber);
+  }
 
   const openApprovals: UserDeletionOpenApproval[] = [];
   const pushIfRelevant = (entry: Omit<UserDeletionOpenApproval, "plan">) => {
@@ -357,8 +411,8 @@ export async function collectUserDeletionImpact(
         routeStepOrder: row.routeStepOrder,
         routeSteps: row.routeId ? (stepsByRoute.get(row.routeId) ?? []) : [],
       },
-      subject: { repairCaseId: row.repairCaseId, issueRequestId: null, intakeNumber },
-      label: approvalLabel(row.approvalType, intakeNumber, null),
+      subject: { repairCaseId: row.repairCaseId, issueRequestId: null, quoteId: null, intakeNumber },
+      label: approvalLabel(row.approvalType, { intakeNumber }),
     });
   }
   for (const row of awaitingIssueRows) {
@@ -374,8 +428,26 @@ export async function collectUserDeletionImpact(
         routeStepOrder: row.routeStepOrder,
         routeSteps: row.routeId ? (stepsByRoute.get(row.routeId) ?? []) : [],
       },
-      subject: { repairCaseId, issueRequestId: row.issueRequestId, intakeNumber },
-      label: approvalLabel("PART_ISSUE", intakeNumber, row.issueRequestId),
+      subject: { repairCaseId, issueRequestId: row.issueRequestId, quoteId: null, intakeNumber },
+      label: approvalLabel("PART_ISSUE", { intakeNumber, issueRequestId: row.issueRequestId }),
+    });
+  }
+  for (const row of quoteRows) {
+    const quoteNumber = row.quoteId ? (quoteNumberById.get(row.quoteId) ?? null) : null;
+    pushIfRelevant({
+      approvalId: row.id,
+      facts: {
+        kind: "QUOTE",
+        assignedApproverUserId: row.assignedApproverUserId,
+        requestedByUserId: row.requestedByUserId,
+        routeId: row.routeId,
+        routeStepOrder: row.routeStepOrder,
+        routeSteps: row.routeId ? (stepsByRoute.get(row.routeId) ?? []) : [],
+      },
+      // 견적서 결재는 접수 건에 매이지 않는다(수리 없이 부품만 파는 장이 있다) —
+      // repairCaseId · intakeNumber 는 싣지 않는다.
+      subject: { repairCaseId: null, issueRequestId: null, quoteId: row.quoteId, intakeNumber: null },
+      label: approvalLabel("QUOTE", { quoteNumber }),
     });
   }
 

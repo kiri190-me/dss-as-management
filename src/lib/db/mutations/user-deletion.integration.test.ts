@@ -20,6 +20,8 @@ import {
   procedureTemplateNodes,
   procedureTemplates,
   products,
+  quoteApprovals,
+  quotes,
   repairCaseApprovals,
   repairCaseIntakeSequences,
   repairCases,
@@ -72,6 +74,10 @@ const TEST_MODEL_PREFIX = "USERDEL-TEST-";
 const TEST_TEMPLATE_PREFIX = "test-userdel-exec-";
 const TEST_YEAR_MONTH = "9501";
 const TEST_INTAKE_PREFIX = "D9501%";
+// 🔴 quotes_quote_number_not_deleted_unique 때문에 번호가 겹치면 두 번째 실행이 깨진다 —
+// 접두어로 이 파일의 장만 골라 걷고, 뒤에는 행마다 다른 값을 붙인다.
+const TEST_QUOTE_NUMBER_PREFIX = "UDEL-TEST-";
+const TEST_QUOTE_DATE = "2095-01-10";
 const TEST_RECEIVED_AT = "2095-01-10";
 const TEST_SHIPMENT_DATE = "2095-01-20";
 
@@ -314,6 +320,59 @@ async function insertPartIssueApproval(params: {
   return row.id;
 }
 
+/** Arrange-only: 견적서 한 장. 필수 칸 넷만 채운다(수리 건 · 고객사 없이도 만든다). */
+async function insertQuote(): Promise<{ id: string; quoteNumber: string }> {
+  const quoteNumber = `${TEST_QUOTE_NUMBER_PREFIX}${randomUUID().slice(0, 8)}`;
+  const [row] = await db
+    .insert(quotes)
+    .values({
+      quoteNumber,
+      quoteDate: TEST_QUOTE_DATE,
+      customerNameText: "계정 삭제 시험 공급처",
+      subject: "계정 삭제 시험 견적",
+    })
+    .returning({ id: quotes.id });
+  return { id: row.id, quoteNumber };
+}
+
+/** Arrange-only: 견적서 결재 행 하나. */
+async function insertQuoteApproval(params: {
+  quoteId: string;
+  assignedApproverUserId: string | null;
+  routeId: string | null;
+  routeStepOrder: number | null;
+  requestedByUserId?: string;
+}): Promise<string> {
+  const [row] = await db
+    .insert(quoteApprovals)
+    .values({
+      quoteId: params.quoteId,
+      status: "REQUESTED",
+      requestedByUserId: params.requestedByUserId ?? engineerId,
+      assignedApproverUserId: params.assignedApproverUserId,
+      routeId: params.routeId,
+      routeStepOrder: params.routeStepOrder,
+      quoteVersionAtRequest: 1,
+    })
+    .returning({ id: quoteApprovals.id });
+  return row.id;
+}
+
+/** 그 견적서 결재 행 하나 — 지정 · 판 · 단계 · 상태. */
+async function quoteApprovalRow(approvalId: string) {
+  const [row] = await db
+    .select({
+      assignedApproverUserId: quoteApprovals.assignedApproverUserId,
+      routeId: quoteApprovals.routeId,
+      routeStepOrder: quoteApprovals.routeStepOrder,
+      status: quoteApprovals.status,
+    })
+    .from(quoteApprovals)
+    .where(eq(quoteApprovals.id, approvalId));
+  assert.ok(row, `견적서 결재 ${approvalId} 가 없다`);
+  return row;
+}
+
 /** 최소 단일 작업 절차를 발행해 그 접수 건에서 실행을 시작하고, 작업 · 종료 노드 id 를 돌려준다. */
 async function startExecutionFixture(repairCaseId: string): Promise<{ taskNodeId: string; endNodeId: string }> {
   const code = `${TEST_TEMPLATE_PREFIX}${randomUUID().slice(0, 8)}`;
@@ -405,6 +464,19 @@ async function removePerTestFixtures(userIds: readonly string[]): Promise<void> 
     await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.repairCaseId, caseIds));
   }
   await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.requestedByUserId, ids));
+
+  // 견적서 결재 → 견적서 순서다(quote_approvals.quote_id 는 SET NULL 이지만, 사람 ·
+  // 판 참조가 RESTRICT 라 이 행이 남으면 아래 판 · 사람 삭제가 막힌다).
+  const quoteIds = (
+    await db.select({ id: quotes.id }).from(quotes).where(like(quotes.quoteNumber, `${TEST_QUOTE_NUMBER_PREFIX}%`))
+  ).map((row) => row.id);
+  if (quoteIds.length > 0) {
+    await db.delete(quoteApprovals).where(inArray(quoteApprovals.quoteId, quoteIds));
+  }
+  await db.delete(quoteApprovals).where(inArray(quoteApprovals.requestedByUserId, ids));
+  if (quoteIds.length > 0) {
+    await db.delete(quotes).where(inArray(quotes.id, quoteIds));
+  }
 
   const routeIds = (
     await db
@@ -802,6 +874,126 @@ describe("삭제가 하는 일", () => {
       kind: "USER_DELETION",
       deletedUserId: target,
     });
+  });
+
+  test("🔴 견적서 결재 넘김 — 지정된 행이 이어받을 사람에게 가고, 감사는 quote_approvals 에 남는다", async () => {
+    // 🔴 이 사람에게는 견적서 결재 한 건 말고는 아무것도 걸려 있지 않다. 예전에는 그
+    // 행이 수집 단계부터 빠져 **이어받을 사람을 요구하지도 않고** 삭제가 성공했고,
+    // 결재는 지워진 사람에게 남아 최고관리자만 풀 수 있었다.
+    const target = await createTestUser("견적서 넘김 대상");
+    const successor = await createTestUser("견적서 넘김 이어받을 사람");
+
+    const quote = await insertQuote();
+    const approvalId = await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: target,
+      routeId: null,
+      routeStepOrder: null,
+    });
+
+    // 견적서 결재만으로도 결재 이어받을 사람이 필요하다.
+    expectFail(await del(target), "APPROVAL_SUCCESSOR_REQUIRED");
+
+    const summary = expectOk(await del(target, { approvalSuccessorUserId: successor }));
+    assert.deepEqual(summary.routeVersions, [], "결재선 자리가 없으니 새 판을 얹을 일이 없다");
+    assert.equal(summary.reassignedApprovals, 1);
+    assert.equal(summary.repinnedApprovals, 0);
+
+    assert.deepEqual(await quoteApprovalRow(approvalId), {
+      assignedApproverUserId: successor,
+      routeId: null,
+      routeStepOrder: null,
+      status: "REQUESTED",
+    });
+
+    // 🔴 감사의 표 이름 — 삼항식 시절이라면 repair_case_approvals 로 적혔거나 0행 쓰기로
+    // CONFLICT 가 났다.
+    const approvalAudit = await auditRowsFor("quote_approvals", approvalId);
+    assert.equal(approvalAudit.length, 1);
+    assert.deepEqual(approvalAudit[0].previousValue, {
+      assignedApproverUserId: target,
+      routeId: null,
+      routeStepOrder: null,
+    });
+    assert.deepEqual(approvalAudit[0].newValue, {
+      assignedApproverUserId: successor,
+      routeId: null,
+      routeStepOrder: null,
+      cause: { kind: "USER_DELETION", deletedUserId: target },
+    });
+    // 삭제 한 줄 요약에도 그 id 가 견적서 칸으로 담긴다.
+    const deletionAudit = (await auditRowsFor("users", target)).filter((row) => row.actionType === "SOFT_DELETE");
+    assert.equal(deletionAudit.length, 1);
+    assert.deepEqual((deletionAudit[0].newValue as { reassignedApprovalIds: unknown }).reassignedApprovalIds, {
+      repairCase: [],
+      partIssue: [],
+      quote: [approvalId],
+    });
+  });
+
+  test("🔴 견적서 사슬 옮기기 — 현재 판 뒤 단계의 견적서 결재는 새 판으로 옮겨지고 단계 번호는 그대로다", async () => {
+    const target = await createTestUser("견적서 옮기기 대상");
+    const stepA = await createTestUser("견적서 옮기기 1단계");
+    const successor = await createTestUser("견적서 옮기기 이어받을 사람");
+
+    const oldQuoteRoute = await saveRoute("QUOTE", [stepA, target]);
+    const quote = await insertQuote();
+    const approvalId = await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: stepA,
+      routeId: oldQuoteRoute,
+      routeStepOrder: 1,
+    });
+
+    const summary = expectOk(await del(target, { approvalSuccessorUserId: successor }));
+    assert.deepEqual(summary.routeVersions, [{ scope: "QUOTE", version: 2 }]);
+    assert.equal(summary.reassignedApprovals, 0, "열린 단계는 A 의 것이라 지정은 그대로다");
+    assert.equal(summary.repinnedApprovals, 1);
+
+    const newQuoteRoute = await currentRoute("QUOTE");
+    assert.deepEqual(newQuoteRoute.approverIds, [stepA, successor], "자리만 바뀐 새 판이어야 한다");
+    assert.deepEqual(await quoteApprovalRow(approvalId), {
+      assignedApproverUserId: stepA,
+      routeId: newQuoteRoute.id,
+      // 🔴 번호를 그대로 두는 것이 route_columns_together CHECK 와 사슬 잇기의 전제다.
+      routeStepOrder: 1,
+      status: "REQUESTED",
+    });
+
+    const approvalAudit = await auditRowsFor("quote_approvals", approvalId);
+    assert.equal(approvalAudit.length, 1);
+    assert.deepEqual(approvalAudit[0].newValue, {
+      assignedApproverUserId: stepA,
+      routeId: newQuoteRoute.id,
+      routeStepOrder: 1,
+      cause: { kind: "USER_DELETION", deletedUserId: target },
+    });
+  });
+
+  test("🔴 견적서 사슬이 옛 판을 따라가면 IN_FLIGHT_ON_OLD_ROUTE — 조용히 삭제되지 않는다", async () => {
+    // 🔴 넷 중 가장 조용한 사고였다: 멈춰야 하는데 삭제가 그냥 성공했다.
+    const target = await createTestUser("견적서 옛 판 대상");
+    const stepA = await createTestUser("견적서 옛 판 1단계");
+    const stepB = await createTestUser("견적서 옛 판 새 2단계");
+    const successor = await createTestUser("견적서 옛 판 이어받을 사람");
+
+    const oldQuoteRoute = await saveRoute("QUOTE", [stepA, target]);
+    const quote = await insertQuote();
+    const approvalId = await insertQuoteApproval({
+      quoteId: quote.id,
+      assignedApproverUserId: stepA,
+      routeId: oldQuoteRoute,
+      routeStepOrder: 1,
+    });
+    await saveRoute("QUOTE", [stepA, stepB]);
+
+    const before = await userRow(target);
+    const rowBefore = await quoteApprovalRow(approvalId);
+    const message = expectFail(await del(target, { approvalSuccessorUserId: successor }), "IN_FLIGHT_ON_OLD_ROUTE");
+    assert.ok(message.includes(quote.quoteNumber), `사유에 견적서번호가 없다: ${message}`);
+    assert.deepEqual(await userRow(target), before);
+    assert.equal(await routeCount("QUOTE"), 2, "거절됐는데 새 판이 얹혔다");
+    assert.deepEqual(await quoteApprovalRow(approvalId), rowBefore);
   });
 
   test("옛 판을 따라가는 사슬에 대상이 뒤 단계로 남으면 IN_FLIGHT_ON_OLD_ROUTE — 아무것도 바뀌지 않는다", async () => {

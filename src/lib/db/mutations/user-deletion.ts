@@ -5,6 +5,7 @@ import {
   intakeMailRecipients,
   inventoryPartIssueApprovals,
   procedureCaseExecutionNodes,
+  quoteApprovals,
   repairCaseApprovals,
   repairCases,
   shipmentApprovalDelegations,
@@ -38,6 +39,7 @@ import {
   replaceApproverInRouteSteps,
   resolveUserDeletionRequirements,
   routeScopeForApprovalKind,
+  type OpenApprovalKind,
 } from "@/lib/domain/user-deletion-rules";
 import { validateUserDeletionInput } from "@/lib/validation/user-deletion-input";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
@@ -159,6 +161,111 @@ const CONFLICT_MESSAGE = "다른 사용자가 이 계정이나 관련된 일을 
 
 /** 삭제 네 칸에 적는 원인 — 결재선 판 · 개발자 표시 · 재지정 감사에 함께 싣는다. */
 type DeletionCause = { kind: "USER_DELETION"; deletedUserId: string };
+
+type TransactionExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 넘긴 · 옮긴 결재 id 를 표별로 갈라 담는 바구니. 감사 기록이 이 모양을 그대로 싣고
+ * (「어느 표의 어느 행을 건드렸나」), 요약은 합만 쓴다.
+ */
+type ApprovalIdBuckets = { repairCase: string[]; partIssue: string[]; quote: string[] };
+
+function emptyApprovalIdBuckets(): ApprovalIdBuckets {
+  return { repairCase: [], partIssue: [], quote: [] };
+}
+
+/** 🔴 칸을 손으로 더하지 않는다 — 바구니가 늘어도 합이 저절로 따라온다. */
+function countApprovalIds(buckets: ApprovalIdBuckets): number {
+  return Object.values(buckets).reduce((total, ids) => total + ids.length, 0);
+}
+
+type OpenApprovalWrite = {
+  approvalId: string;
+  assignedApproverUserId: string | null;
+  routeId: string | null;
+  now: Date;
+};
+
+type OpenApprovalWriteTarget = {
+  /** 감사 기록의 targetEntity — **표 이름 그대로**(세 갈래가 같은 규약). */
+  targetEntity: string;
+  /** reassignedApprovalIds · repinnedApprovalIds 의 어느 칸에 담는가. */
+  bucket: keyof ApprovalIdBuckets;
+  /** 지정 · 판을 그 표에 쓴다. 아직 REQUESTED 인 행만 — 바꾼 행 수를 돌려준다. */
+  write: (tx: TransactionExecutor, params: OpenApprovalWrite) => Promise<number>;
+};
+
+/** 접수 건 결재는 최종 출하 · 수리 검수가 **같은 표**를 쓴다(approval_type 으로 갈린다). */
+const REPAIR_CASE_APPROVAL_WRITE_TARGET: OpenApprovalWriteTarget = {
+  targetEntity: "repair_case_approvals",
+  bucket: "repairCase",
+  write: async (tx, params) =>
+    (
+      await tx
+        .update(repairCaseApprovals)
+        .set({
+          assignedApproverUserId: params.assignedApproverUserId,
+          routeId: params.routeId,
+          updatedAt: params.now,
+        })
+        .where(and(eq(repairCaseApprovals.id, params.approvalId), eq(repairCaseApprovals.status, "REQUESTED")))
+        .returning({ id: repairCaseApprovals.id })
+    ).length,
+};
+
+/**
+ * 🔴 **승인 종류 → 어디에 쓰고 어느 이름으로 남기는가.** 예전에는 이 자리가
+ * `isPartIssue ? … : …` 삼항식이었다. 그 모양은 셋째 종류가 생겨도 타입 오류를 내지
+ * 않고 **부품 불출이 아닌 모든 것을 접수 건 결재로 써 버린다** — 견적서 결재 행을
+ * repair_case_approvals 에서 찾다가 0행이 되고, 감사에는 남의 표 이름이 적힌다.
+ * Record 로 두면 종류를 더하는 순간 빠진 자리를 컴파일러가 잡는다
+ * (domain/user-deletion-rules.ts 의 ROUTE_SCOPE_BY_APPROVAL_KIND 와 같은 까닭).
+ *
+ * 🔴 route_step_order 는 어느 갈래도 건드리지 않는다. 옮길 때(REPIN) 새 판은 지울
+ * 사람 자리만 바뀐 것이라 같은 번호가 같은 자리를 가리키고, quote_approvals 의
+ * route_columns_together CHECK 도 그래서 그대로 유지된다.
+ */
+const OPEN_APPROVAL_WRITE_TARGETS: Record<OpenApprovalKind, OpenApprovalWriteTarget> = {
+  FINAL_SHIPMENT: REPAIR_CASE_APPROVAL_WRITE_TARGET,
+  REPAIR_INSPECTION: REPAIR_CASE_APPROVAL_WRITE_TARGET,
+  PART_ISSUE: {
+    targetEntity: "inventory_part_issue_approvals",
+    bucket: "partIssue",
+    write: async (tx, params) =>
+      (
+        await tx
+          .update(inventoryPartIssueApprovals)
+          .set({
+            assignedApproverUserId: params.assignedApproverUserId,
+            routeId: params.routeId,
+            updatedAt: params.now,
+          })
+          .where(
+            and(
+              eq(inventoryPartIssueApprovals.id, params.approvalId),
+              eq(inventoryPartIssueApprovals.status, "REQUESTED")
+            )
+          )
+          .returning({ id: inventoryPartIssueApprovals.id })
+      ).length,
+  },
+  QUOTE: {
+    targetEntity: "quote_approvals",
+    bucket: "quote",
+    write: async (tx, params) =>
+      (
+        await tx
+          .update(quoteApprovals)
+          .set({
+            assignedApproverUserId: params.assignedApproverUserId,
+            routeId: params.routeId,
+            updatedAt: params.now,
+          })
+          .where(and(eq(quoteApprovals.id, params.approvalId), eq(quoteApprovals.status, "REQUESTED")))
+          .returning({ id: quoteApprovals.id })
+      ).length,
+  },
+};
 
 export async function deleteUserAccount(params: DeleteUserAccountParams): Promise<DeleteUserAccountResult> {
   // 서버 액션이 이미 봤지만 이 함수는 직접 불릴 수 있다 — 형식은 한 번 더 본다(순수 함수).
@@ -340,8 +447,8 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
       }
 
       // (2) 진행 중 결재 — 넘기거나 새 판으로 옮긴다(planOpenApproval 의 결과대로).
-      const reassignedApprovalIds = { repairCase: [] as string[], partIssue: [] as string[] };
-      const repinnedApprovalIds = { repairCase: [] as string[], partIssue: [] as string[] };
+      const reassignedApprovalIds = emptyApprovalIdBuckets();
+      const repinnedApprovalIds = emptyApprovalIdBuckets();
       for (const entry of snapshot.openApprovals) {
         const plan = entry.plan;
         if (plan.action !== "REASSIGN" && plan.action !== "REPIN") continue;
@@ -358,31 +465,21 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
           nextRouteId = newRouteId;
         }
         const nextAssignedApproverUserId = reassign ? successor.id : entry.facts.assignedApproverUserId;
-        const isPartIssue = entry.facts.kind === "PART_ISSUE";
+        const target = OPEN_APPROVAL_WRITE_TARGETS[entry.facts.kind];
 
-        const updated = isPartIssue
-          ? await tx
-              .update(inventoryPartIssueApprovals)
-              .set({ assignedApproverUserId: nextAssignedApproverUserId, routeId: nextRouteId, updatedAt: now })
-              .where(
-                and(
-                  eq(inventoryPartIssueApprovals.id, entry.approvalId),
-                  eq(inventoryPartIssueApprovals.status, "REQUESTED")
-                )
-              )
-              .returning({ id: inventoryPartIssueApprovals.id })
-          : await tx
-              .update(repairCaseApprovals)
-              .set({ assignedApproverUserId: nextAssignedApproverUserId, routeId: nextRouteId, updatedAt: now })
-              .where(and(eq(repairCaseApprovals.id, entry.approvalId), eq(repairCaseApprovals.status, "REQUESTED")))
-              .returning({ id: repairCaseApprovals.id });
+        const updatedRows = await target.write(tx, {
+          approvalId: entry.approvalId,
+          assignedApproverUserId: nextAssignedApproverUserId,
+          routeId: nextRouteId,
+          now,
+        });
         // 3 에서 잠갔으므로 닿지 않는 가지다. 0행 쓰기를 조용히 성공으로 넘기지 않는다.
-        if (updated.length === 0) reject("CONFLICT", CONFLICT_MESSAGE);
+        if (updatedRows === 0) reject("CONFLICT", CONFLICT_MESSAGE);
 
         await insertAuditLog(tx, {
           actorUserId: actor.id,
           actionType: "UPDATE",
-          targetEntity: isPartIssue ? "inventory_part_issue_approvals" : "repair_case_approvals",
+          targetEntity: target.targetEntity,
           targetRecordId: entry.approvalId,
           previousValue: {
             assignedApproverUserId: entry.facts.assignedApproverUserId,
@@ -397,9 +494,8 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
           },
         });
 
-        const bucket = isPartIssue ? "partIssue" : "repairCase";
-        if (reassign) reassignedApprovalIds[bucket].push(entry.approvalId);
-        if (plan.action === "REPIN") repinnedApprovalIds[bucket].push(entry.approvalId);
+        if (reassign) reassignedApprovalIds[target.bucket].push(entry.approvalId);
+        if (plan.action === "REPIN") repinnedApprovalIds[target.bucket].push(entry.approvalId);
       }
 
       // (3) 출하 대표 — 지울 사람은 끄고, 마지막 활성 대표였으면 결재 이어받을 사람을 세운다.
@@ -595,8 +691,8 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
         ok: true,
         summary: {
           routeVersions: routeVersions.map(({ scope, version }) => ({ scope, version })),
-          reassignedApprovals: reassignedApprovalIds.repairCase.length + reassignedApprovalIds.partIssue.length,
-          repinnedApprovals: repinnedApprovalIds.repairCase.length + repinnedApprovalIds.partIssue.length,
+          reassignedApprovals: countApprovalIds(reassignedApprovalIds),
+          repinnedApprovals: countApprovalIds(repinnedApprovalIds),
           representativeHandedTo,
           revokedDelegations: revokedDelegationIds.length,
           reassignedRepairCases: openCases.length,
