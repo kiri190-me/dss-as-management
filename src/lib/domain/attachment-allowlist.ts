@@ -91,6 +91,73 @@ export const ATTACHMENT_EXTENSION_RULES: readonly AttachmentExtensionRule[] = [
 
 const EXTENSION_RULE_MAP = new Map(ATTACHMENT_EXTENSION_RULES.map((rule) => [rule.extension, rule]));
 
+/**
+ * ============================================================================
+ * 🔴 서버가 스스로 만든 파일에만 쓰는 확장자 (2026-09-21 — 교산 연락서 원본)
+ * ============================================================================
+ * **`ATTACHMENT_EXTENSION_RULES` 에 넣지 않는 것이 요점이다.** 거기에 한 줄을
+ * 더하면 세 올리기 통로(`api/{repair-cases|product-models|quotes}/…/attachments`)가
+ * 맨 먼저 보는 `isAllowedExtension` 이 통과하고, 그러면 **제한 목록이 없는 분류
+ * 전부**(INTAKE_PHOTO · CUSTOMER_DOCUMENT · OTHER …)에 그 확장자가 함께 열린다.
+ * `.xlsm` 은 매크로가 들어 있는 엑셀이라 그것은 열어 줄 수 없다.
+ *
+ * 그래서 목록을 **따로** 둔다. 이 목록은 아래 두 함수로만 읽히고, 그 둘을 부르는
+ * 곳은 서버가 **자기가 이미 손에 쥔 바이트**를 첨부로 남기는 자리뿐이다
+ * (`server/services/kyosan-report-import.ts` — 판독기가 이미 통합문서로 열어 본
+ * 파일이다). 사람이 올리는 통로는 이 목록을 **쳐다보지도 않는다**:
+ *
+ *   · `isAllowedExtension(...)`            — 그대로. `xlsm` 은 여전히 false.
+ *   · `isExtensionAllowedForCategory(...)` — 그대로. 목록 자체가 안 바뀌었다.
+ *   · `isContentCompatibleWithExtension(...)` — 그대로. 허용목록 밖이면 false.
+ *   · 화면의 `ALL_EXTENSIONS`(FilesScreen · ProductModelFilesSection)도 그대로.
+ *
+ * 🔴 **느슨해진 검사가 하나도 없다.** 새로 생긴 것은 「서버가 저 바이트를 저
+ * 확장자로 적어도 되는가」를 묻는 창구 하나뿐이고, 그 창구는 내용 대조
+ * (`isServerOriginContentCompatible`)를 그대로 요구한다.
+ * ============================================================================
+ */
+export type ServerOriginExtensionRule = {
+  extension: string;
+  /** DB 의 mime_type 칸에 적을 정본. 브라우저가 보낸 값이 아니다. */
+  mimeType: string;
+};
+
+export const SERVER_ORIGIN_EXTENSION_RULES: readonly ServerOriginExtensionRule[] = [
+  /**
+   * 교산 연락서 원본(2026-09-18 사용자 결정 — 원본도 첨부로 남긴다). 규격상
+   * xlsx 와 같은 ZIP 컨테이너이고, 저장하기 전에 판독기가 이미 통합문서로 열어
+   * 읽은 파일이다.
+   */
+  {
+    extension: "xlsm",
+    mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  },
+];
+
+const SERVER_ORIGIN_RULE_MAP = new Map(
+  SERVER_ORIGIN_EXTENSION_RULES.map((rule) => [rule.extension, rule])
+);
+
+/** 서버가 스스로 만든 파일에만 허용되는 확장자인가. 올리기 통로는 부르지 않는다. */
+export function isServerOriginExtension(extension: string): boolean {
+  return SERVER_ORIGIN_RULE_MAP.has(extension);
+}
+
+export function serverOriginMimeTypeForExtension(extension: string): string | null {
+  return SERVER_ORIGIN_RULE_MAP.get(extension)?.mimeType ?? null;
+}
+
+/**
+ * 서버 출처 확장자의 앞머리 대조. 🔴 **면제가 아니다** — `xlsm` 은 규격상 ZIP
+ * 이므로 ZIP 서명을 그대로 요구한다. 허용목록에 있는 확장자를 넘기면 false 다
+ * (그쪽은 `isContentCompatibleWithExtension` 이 본다 — 창구를 섞지 않는다).
+ */
+export function isServerOriginContentCompatible(extension: string, header: Uint8Array): boolean {
+  if (!isServerOriginExtension(extension)) return false;
+  if (header.length === 0) return false;
+  return isZip(header);
+}
+
 export const PREVIEW_CAPABLE_EXTENSIONS: ReadonlySet<string> = new Set(
   ATTACHMENT_EXTENSION_RULES.filter((rule) => rule.previewCapable).map((rule) => rule.extension)
 );

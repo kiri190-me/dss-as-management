@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { isAllowedExtension, normalizeFileExtension } from "./attachment-allowlist";
+import { isAllowedExtension, isServerOriginExtension, normalizeFileExtension } from "./attachment-allowlist";
 
 /**
  * ============================================================================
@@ -155,6 +155,37 @@ export function buildAttachmentStoredPathFromFileName(params: {
     attachmentId: params.attachmentId,
     extension,
   });
+}
+
+/**
+ * 서버가 스스로 만든/받은 파일의 접수 건 첨부 경로 (2026-09-21 — 교산 연락서 원본).
+ *
+ * `buildAttachmentStoredPath` 와 **글자 하나까지 같은 규칙**이고(UUID 확인 ·
+ * 소문자 · `/` 구분자 · 첫 마디), 다른 것은 확장자를 어느 목록에서 보는가 하나다:
+ * 여기는 `isServerOriginExtension` 만 받는다. 허용목록(`isAllowedExtension`)의
+ * 확장자는 **여기로 오면 안 된다** — 그쪽은 위 함수의 몫이고, 두 창구가 서로의
+ * 확장자를 받아 주면 「어느 길로 들어왔나」가 경로에서 사라진다.
+ *
+ * 🔴 기존 함수에 「예외를 허용하는 인자」를 더하지 않은 까닭: 그런 인자는
+ * 올리기 통로에서도 부를 수 있고, 한 번 그렇게 되면 목록이 둘이라는 사실이
+ * 아무 뜻도 없어진다. 나란히 새로 두는 것은 위 두 벌(모델 · 견적서)과 같은
+ * 판단이다.
+ */
+export function buildServerOriginAttachmentStoredPath(params: {
+  repairCaseId: string;
+  attachmentId: string;
+  /** `SERVER_ORIGIN_EXTENSION_RULES` 의 확장자만. 그 밖에는 던진다. */
+  extension: string;
+}): string {
+  const repairCaseId = requireUuid("접수 건 ID", params.repairCaseId);
+  const attachmentId = requireUuid("첨부 ID", params.attachmentId);
+
+  const extension = params.extension.trim().toLowerCase();
+  if (!isServerOriginExtension(extension)) {
+    throw new AttachmentPathError(`서버 출처 확장자가 아닙니다: ${extension || "(없음)"}`);
+  }
+
+  return `${ATTACHMENT_STORED_PATH_PREFIX}/${repairCaseId}/${attachmentId}.${extension}`;
 }
 
 /**

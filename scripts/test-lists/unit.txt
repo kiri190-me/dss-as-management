@@ -252,3 +252,5 @@ src/app/api/integration/route-source.test.ts
 src/lib/kyosan/report-photo-filter.test.ts
 src/lib/kyosan/report-match.test.ts
 src/lib/kyosan/report-preview.test.ts
+src/lib/kyosan/report-causes.test.ts
+src/lib/kyosan/report-save-values.test.ts

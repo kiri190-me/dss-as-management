@@ -177,6 +177,29 @@ export async function createServiceReport(params: {
   values: ServiceReportSaveValues;
   actorUserId: string;
 }): Promise<ServiceReportMutationResult> {
+  return db.transaction((tx) => createServiceReportInTx(tx, params));
+}
+
+/**
+ * 위 함수의 **알맹이** — 이미 열린 트랜잭션 안에서 도는 모양이다 (2026-09-21).
+ *
+ * 🔴 갈라 둔 까닭: 교산 연락서 이식(`server/services/kyosan-report-import.ts`)은
+ * 보고서 한 장 · 사용 부품 · 첨부 · 이식 흔적을 **한 트랜잭션**에 넣어야 한다.
+ * `db.transaction` 은 풀에서 새 연결을 잡으므로, 위 함수를 그대로 부르면 바깥
+ * 트랜잭션과 **다른 트랜잭션**이 된다 — 바깥이 되돌아가도 보고서만 남는다.
+ * 그것이 「절반만 들어간 보고서」이고, 이 조각이 가장 피해야 하는 결과다.
+ *
+ * 🔴 **동작은 한 글자도 달라지지 않았다.** 위 함수는 이 함수를 트랜잭션으로 감싼
+ * 것이 전부이고, 기존 통합 시험이 그 사실을 그대로 검증한다.
+ */
+export async function createServiceReportInTx(
+  tx: Tx,
+  params: {
+    repairCaseId: string;
+    values: ServiceReportSaveValues;
+    actorUserId: string;
+  }
+): Promise<ServiceReportMutationResult> {
   const converted = toServiceReportColumns(params.values);
   if (!converted.ok) {
     return {
@@ -188,42 +211,40 @@ export async function createServiceReport(params: {
   }
   const record = converted.data;
 
-  return db.transaction(async (tx): Promise<ServiceReportMutationResult> => {
-    if (!(await repairCaseExists(tx, params.repairCaseId))) {
-      return {
-        ok: false,
-        code: "VALIDATION_ERROR",
-        fieldErrors: { repairCaseId: UNKNOWN_REPAIR_CASE_MESSAGE },
-        message: UNKNOWN_REPAIR_CASE_MESSAGE,
-      };
-    }
+  if (!(await repairCaseExists(tx, params.repairCaseId))) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { repairCaseId: UNKNOWN_REPAIR_CASE_MESSAGE },
+      message: UNKNOWN_REPAIR_CASE_MESSAGE,
+    };
+  }
 
-    const [inserted] = await tx
-      .insert(serviceReports)
-      .values({
-        ...record.columns,
-        repairCaseId: params.repairCaseId,
-        createdBy: params.actorUserId,
-        // 만든 사람이 곧 마지막으로 고친 사람이다. 비워 두면 "누가 마지막으로
-        // 손댔는가"가 첫 수정 전까지 빈칸으로 남는다.
-        updatedBy: params.actorUserId,
-      })
-      .returning({ id: serviceReports.id, version: serviceReports.version });
+  const [inserted] = await tx
+    .insert(serviceReports)
+    .values({
+      ...record.columns,
+      repairCaseId: params.repairCaseId,
+      createdBy: params.actorUserId,
+      // 만든 사람이 곧 마지막으로 고친 사람이다. 비워 두면 "누가 마지막으로
+      // 손댔는가"가 첫 수정 전까지 빈칸으로 남는다.
+      updatedBy: params.actorUserId,
+    })
+    .returning({ id: serviceReports.id, version: serviceReports.version });
 
-    await replaceLines(tx, inserted.id, record);
-    await replaceCauses(tx, inserted.id, record);
+  await replaceLines(tx, inserted.id, record);
+  await replaceCauses(tx, inserted.id, record);
 
-    await insertAuditLog(tx, {
-      actorUserId: params.actorUserId,
-      actionType: "CREATE",
-      targetEntity: "service_reports",
-      targetRecordId: inserted.id,
-      // 만들기라 이전 값이 없다.
-      newValue: { repairCaseId: params.repairCaseId, ...auditSnapshot(record.columns) },
-    });
-
-    return { ok: true, id: inserted.id, version: inserted.version };
+  await insertAuditLog(tx, {
+    actorUserId: params.actorUserId,
+    actionType: "CREATE",
+    targetEntity: "service_reports",
+    targetRecordId: inserted.id,
+    // 만들기라 이전 값이 없다.
+    newValue: { repairCaseId: params.repairCaseId, ...auditSnapshot(record.columns) },
   });
+
+  return { ok: true, id: inserted.id, version: inserted.version };
 }
 
 /** 있는 보고서 한 장. 위 '동시 수정은 version 으로 막는다' 순서를 그대로 따른다. */

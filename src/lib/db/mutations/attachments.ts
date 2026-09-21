@@ -271,6 +271,26 @@ function ownerAuditValue(owner: AttachmentOwnerInput): Record<string, unknown> {
 export async function createAttachmentRecord(
   input: CreateAttachmentRecordInput
 ): Promise<CreateAttachmentRecordResult> {
+  return db.transaction((tx) => createAttachmentRecordInTx(tx, input));
+}
+
+/**
+ * 위 함수의 **알맹이** — 이미 열린 트랜잭션 안에서 도는 모양이다 (2026-09-21).
+ *
+ * 🔴 갈라 둔 까닭은 `mutations/service-reports.ts` 의 `createServiceReportInTx`
+ * 와 같다: 교산 연락서 이식은 보고서 · 사용 부품 · 첨부 · 이식 흔적을 **한
+ * 트랜잭션**에 넣어야 하는데, `db.transaction` 은 풀에서 새 연결을 잡아 바깥
+ * 트랜잭션과 갈라선다. 그러면 바깥이 되돌아가도 첨부 행만 남고, 그 행은 화면에서
+ * 눌러도 주인이 없는 파일을 가리킨다.
+ *
+ * 🔴 **검사는 하나도 줄지 않았다.** 경로 검사 · 분류와 주인의 짝 · 견적서 잠금 ·
+ * 칸 교체 · 감사 로그가 전부 그대로이고, 위 함수는 이것을 트랜잭션으로 감싼 것이
+ * 전부다.
+ */
+export async function createAttachmentRecordInTx(
+  tx: Tx,
+  input: CreateAttachmentRecordInput
+): Promise<CreateAttachmentRecordResult> {
   // 마지막 방어선. 여기까지 온 값은 buildAttachmentStoredPath가 만든 것이지만,
   // 이 함수만 따로 불려도 옮길 수 없는 경로가 표에 들어가지는 않아야 한다.
   assertPortableStoredPath(input.storedPath);
@@ -284,81 +304,79 @@ export async function createAttachmentRecord(
     throw new Error(`'${input.category}' 분류는 이 주인(${owner.kind})의 첨부에 쓸 수 없습니다.`);
   }
 
-  return db.transaction(async (tx) => {
-    let displacedAttachmentIds: string[] = [];
+  let displacedAttachmentIds: string[] = [];
 
-    if (owner.kind === "QUOTE") {
-      // 견적서 행을 잠그고 판정 — 있는가 · 휴지통이 아닌가(파일 헤더의 '셋째 주인').
-      const guard = await guardQuoteAttachmentChange(tx, owner.quoteId);
-      if (!guard.ok) {
-        throw new QuoteAttachmentRejectedError(guard.code, guard.message);
-      }
-      // 같은 잠금 안에서 같은 칸의 옛 파일을 첨부 휴지통으로 — 새 행을 넣기 **전에**.
-      displacedAttachmentIds = await trashDisplacedQuoteAttachments(tx, {
-        quoteId: owner.quoteId,
-        category: input.category,
-        replacedByAttachmentId: input.id,
-        actorUserId: input.uploadedBy,
-      });
+  if (owner.kind === "QUOTE") {
+    // 견적서 행을 잠그고 판정 — 있는가 · 휴지통이 아닌가(파일 헤더의 '셋째 주인').
+    const guard = await guardQuoteAttachmentChange(tx, owner.quoteId);
+    if (!guard.ok) {
+      throw new QuoteAttachmentRejectedError(guard.code, guard.message);
     }
-
-    const [row] = await tx
-      .insert(attachments)
-      .values({
-        id: input.id,
-        // 주인이 아닌 쪽은 언제나 NULL이다. 세 컬럼을 판별자 하나에서 함께
-        // 계산하므로 "둘 이상 찬 행"은 이 코드로는 만들어지지 않는다.
-        repairCaseId: owner.kind === "REPAIR_CASE" ? owner.repairCaseId : null,
-        productModelId: owner.kind === "PRODUCT_MODEL" ? owner.productModelId : null,
-        quoteId: owner.kind === "QUOTE" ? owner.quoteId : null,
-        category: input.category,
-        originalFileName: input.originalFileName,
-        storedPath: input.storedPath,
-        // 미리보기는 브라우저가 따로 만들어 보낸다(api/attachments/[id]/preview).
-        // 행이 생기는 순간에는 늘 NULL이다.
-        previewPath: null,
-        mimeType: input.mimeType,
-        fileSize: input.fileSize,
-        checksumSha256: input.checksumSha256,
-        // 검사 엔진이 없으므로 모든 행이 '미검사'로 시작한다. 그것이
-        // "검사하지 않았다"는 사실의 기록이다(attachment-category.ts 주석).
-        malwareScanStatus: DEFAULT_MALWARE_SCAN_STATUS,
-        description: input.description,
-        uploadedBy: input.uploadedBy,
-      })
-      .returning({ id: attachments.id, storedPath: attachments.storedPath, uploadedAt: attachments.uploadedAt });
-
-    await insertAuditLog(tx, {
+    // 같은 잠금 안에서 같은 칸의 옛 파일을 첨부 휴지통으로 — 새 행을 넣기 **전에**.
+    displacedAttachmentIds = await trashDisplacedQuoteAttachments(tx, {
+      quoteId: owner.quoteId,
+      category: input.category,
+      replacedByAttachmentId: input.id,
       actorUserId: input.uploadedBy,
-      actionType: "FILE_UPLOAD",
-      targetEntity: "attachments",
-      targetRecordId: row.id,
-      // previousValue는 없다 — 새로 생긴 파일이라 이전 상태가 존재하지 않는다.
-      newValue: {
-        // 어느 주인인지를 먼저 적고, 그 주인의 ID **만** 싣는다. 키를 늘 함께
-        // 실으면 모델 첨부의 기록에 `repairCaseId: null`이 남고, 나중에 그 줄만
-        // 읽는 사람은 무슨 파일이었는지 알 수 없다.
-        ...ownerAuditValue(owner),
-        category: input.category,
-        // 원본 파일명은 사람이 자유롭게 적는 값이라 고객사명이 섞일 수 있다
-        // (schema/attachments.ts의 PII 주석). 그래도 여기에는 남긴다 —
-        // 감사 기록에서 "무슨 파일이 들어왔는지"를 뺄 수는 없기 때문이다.
-        // 밖으로 내보내는 로그·오류 응답에 그대로 싣지 않는 것이 그 주석의 뜻이다.
-        originalFileName: input.originalFileName,
-        storedPath: input.storedPath,
-        mimeType: input.mimeType,
-        fileSize: input.fileSize,
-        checksumSha256: input.checksumSha256,
-        // 견적서 칸 교체로 밀려난 옛 파일(없으면 빈 배열). 다른 주인의 기록 모양은 그대로다.
-        ...(owner.kind === "QUOTE" ? { displacedAttachmentIds } : {}),
-      },
     });
+  }
 
-    return {
-      id: row.id,
-      storedPath: row.storedPath,
-      uploadedAt: row.uploadedAt.toISOString(),
-      displacedAttachmentIds,
-    };
+  const [row] = await tx
+    .insert(attachments)
+    .values({
+      id: input.id,
+      // 주인이 아닌 쪽은 언제나 NULL이다. 세 컬럼을 판별자 하나에서 함께
+      // 계산하므로 "둘 이상 찬 행"은 이 코드로는 만들어지지 않는다.
+      repairCaseId: owner.kind === "REPAIR_CASE" ? owner.repairCaseId : null,
+      productModelId: owner.kind === "PRODUCT_MODEL" ? owner.productModelId : null,
+      quoteId: owner.kind === "QUOTE" ? owner.quoteId : null,
+      category: input.category,
+      originalFileName: input.originalFileName,
+      storedPath: input.storedPath,
+      // 미리보기는 브라우저가 따로 만들어 보낸다(api/attachments/[id]/preview).
+      // 행이 생기는 순간에는 늘 NULL이다.
+      previewPath: null,
+      mimeType: input.mimeType,
+      fileSize: input.fileSize,
+      checksumSha256: input.checksumSha256,
+      // 검사 엔진이 없으므로 모든 행이 '미검사'로 시작한다. 그것이
+      // "검사하지 않았다"는 사실의 기록이다(attachment-category.ts 주석).
+      malwareScanStatus: DEFAULT_MALWARE_SCAN_STATUS,
+      description: input.description,
+      uploadedBy: input.uploadedBy,
+    })
+    .returning({ id: attachments.id, storedPath: attachments.storedPath, uploadedAt: attachments.uploadedAt });
+
+  await insertAuditLog(tx, {
+    actorUserId: input.uploadedBy,
+    actionType: "FILE_UPLOAD",
+    targetEntity: "attachments",
+    targetRecordId: row.id,
+    // previousValue는 없다 — 새로 생긴 파일이라 이전 상태가 존재하지 않는다.
+    newValue: {
+      // 어느 주인인지를 먼저 적고, 그 주인의 ID **만** 싣는다. 키를 늘 함께
+      // 실으면 모델 첨부의 기록에 `repairCaseId: null`이 남고, 나중에 그 줄만
+      // 읽는 사람은 무슨 파일이었는지 알 수 없다.
+      ...ownerAuditValue(owner),
+      category: input.category,
+      // 원본 파일명은 사람이 자유롭게 적는 값이라 고객사명이 섞일 수 있다
+      // (schema/attachments.ts의 PII 주석). 그래도 여기에는 남긴다 —
+      // 감사 기록에서 "무슨 파일이 들어왔는지"를 뺄 수는 없기 때문이다.
+      // 밖으로 내보내는 로그·오류 응답에 그대로 싣지 않는 것이 그 주석의 뜻이다.
+      originalFileName: input.originalFileName,
+      storedPath: input.storedPath,
+      mimeType: input.mimeType,
+      fileSize: input.fileSize,
+      checksumSha256: input.checksumSha256,
+      // 견적서 칸 교체로 밀려난 옛 파일(없으면 빈 배열). 다른 주인의 기록 모양은 그대로다.
+      ...(owner.kind === "QUOTE" ? { displacedAttachmentIds } : {}),
+    },
   });
+
+  return {
+    id: row.id,
+    storedPath: row.storedPath,
+    uploadedAt: row.uploadedAt.toISOString(),
+    displacedAttachmentIds,
+  };
 }
