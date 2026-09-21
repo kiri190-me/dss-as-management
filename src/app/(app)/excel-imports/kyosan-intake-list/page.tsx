@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import KyosanIntakeImportScreen from "@/components/excel-imports/KyosanIntakeImportScreen";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -39,7 +40,20 @@ export default async function KyosanIntakeImportPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">과거 인수품 가져오기</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">과거 인수품 가져오기</h1>
+        {/*
+          연락서 가져오기(조각 S4)는 사이드바에 줄을 더하지 않았다 — 메뉴 항목은 권한
+          영역 열쇠로 걸러지므로 새 줄을 만들면 권한 영역을 하나 늘려야 한다. 같은 권한
+          (kyosanIntakeImport 관리)으로 여는 화면이라 여기서 건너간다.
+        */}
+        <Link
+          href="/excel-imports/kyosan-report"
+          className="text-sm text-zinc-600 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+        >
+          연락서 가져오기로
+        </Link>
+      </div>
       <KyosanIntakeImportScreen billingReviewItems={billingReviewItems} />
     </div>
   );

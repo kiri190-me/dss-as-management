@@ -1,0 +1,370 @@
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import type { KyosanIdentityCheck } from "@/lib/kyosan/report-match";
+import type {
+  KyosanReportPreviewReady,
+  KyosanReportTarget,
+} from "@/lib/domain/kyosan-report-import/preview-view";
+import {
+  canImportKyosanReport,
+  kyosanReportSaveOffer,
+} from "@/lib/domain/kyosan-report-import/preview-view";
+import type { KyosanReportImportResult } from "@/lib/server/services/kyosan-report-import";
+import {
+  KyosanReportContentPanel,
+  KyosanReportImportBar,
+  KyosanReportMatchPanel,
+  KyosanReportNotices,
+  KyosanReportResultPanel,
+} from "./KyosanReportImportParts";
+
+/**
+ * ============================================================================
+ * 연락서 한 장 넣기 — **무엇이 그려지는가** (조각 S4)
+ * ============================================================================
+ * `KyosanReportImportScreen` 은 서버 액션을 부르고 그 사슬 끝에 `server-only` 가
+ * 있어 여기서 통째로 그릴 수 없다. 그리기만 하는 조각을 따로 그려 본다
+ * (`KyosanImportParts.test.tsx` 와 같은 방식).
+ *
+ * 🔴 여기서 못 박는 것:
+ *  · 짝이 없으면 **[이식] 단추가 화면에 없다**.
+ *  · 짝이 여럿이면 라디오가 그려지고, **고르기 전에는 단추를 누를 수 없다**.
+ *  · 무엇이 어긋나는지(모델 · S/N · L/N · 고객사) 항목마다 보인다.
+ *  · 🔴 「수리 건 새로 만들기」 단추가 어디에도 없다.
+ * ============================================================================
+ */
+
+const noop = () => {};
+const render = (element: React.ReactElement) => renderToStaticMarkup(element);
+
+const ALL_AGREE: KyosanIdentityCheck = {
+  model: "agree",
+  serialNumber: "agree",
+  lotNumber: "unknown",
+  customer: "agree",
+};
+
+const FIRST_ID = "11111111-1111-4111-8111-111111111111";
+const SECOND_ID = "22222222-2222-4222-8222-222222222222";
+
+function target(overrides: Partial<KyosanReportTarget> = {}): KyosanReportTarget {
+  return {
+    repairCaseId: FIRST_ID,
+    intakeNumber: "D250101",
+    isDeleted: false,
+    customerName: "값-고객사",
+    modelName: "값-모델",
+    serialNumber: "값-시리얼",
+    lotNumber: null,
+    identity: ALL_AGREE,
+    serviceReportCount: 0,
+    alreadyImported: false,
+    ...overrides,
+  };
+}
+
+function preview(overrides: Partial<KyosanReportPreviewReady> = {}): KyosanReportPreviewReady {
+  return {
+    ok: true,
+    sourceSha256: "a".repeat(64),
+    formFamily: "card",
+    intakeNumberStatus: "found",
+    reportIdentity: {
+      rawIntakeNumber: "D250101",
+      intakeNumber: "D250101",
+      model: "값-모델",
+      serialNumber: "값-시리얼",
+      lotNumber: "값-로트",
+      customer: "값-고객사",
+    },
+    match: { kind: "matched" },
+    targets: [target()],
+    confirmedRepairCaseId: FIRST_ID,
+    content: {
+      lines: [{ section: "FINDINGS", text: "값-고장내용", origin: "お客様不具合" }],
+      parts: [{ kind: "fault", text: "값-부품" }],
+      causeMarks: ["値-원인"],
+      actionMarks: [],
+      photoCount: 2,
+      formAssetCount: 5,
+    },
+    blockers: [],
+    warnings: [],
+    problems: [],
+    ...overrides,
+  };
+}
+
+/** 미리보기 하나를 실제 판단 함수에 태워 그대로 그린다(화면과 같은 길). */
+function renderBar(ready: KyosanReportPreviewReady, selected: string | null): string {
+  return render(
+    <KyosanReportImportBar
+      saveOffer={kyosanReportSaveOffer(ready)}
+      canImport={canImportKyosanReport(ready, selected)}
+      busy={false}
+      onImport={noop}
+    />
+  );
+}
+
+// ══════════════════════════════════════════════ 짝이 없을 때
+
+describe("🔴 짝이 없으면 저장 단추가 없다", () => {
+  const unmatched = preview({
+    match: { kind: "unmatched", reason: "intake-number-not-found" },
+    targets: [],
+    confirmedRepairCaseId: null,
+    blockers: ["짝이 없습니다 — 그 접수번호로 등록된 수리 건이 없습니다. 넣지 않습니다."],
+  });
+
+  test("[이식] 단추가 화면에 아예 없다", () => {
+    const markup = renderBar(unmatched, null);
+    assert.ok(
+      !markup.includes('data-role="kyosan-report-import"'),
+      "🔴 짝이 없는데 눌러 볼 단추가 있으면 안 된다"
+    );
+    assert.match(markup, /data-offer="none"/);
+    assert.match(markup, /넣을 수 없습니다/);
+  });
+
+  test("까닭을 갈라 보여 주고, 수리 건을 새로 만드는 길은 없다", () => {
+    const markup = render(
+      <KyosanReportMatchPanel
+        preview={unmatched}
+        saveOffer="none"
+        selectedRepairCaseId={null}
+        disabled={false}
+        onSelect={noop}
+      />
+    );
+    assert.match(markup, /data-match="unmatched"/);
+    assert.match(markup, /그 접수번호로 등록된 수리 건이 없습니다/);
+    assert.match(markup, /수리 건을 새로 만들지 않습니다/);
+    assert.ok(!markup.includes('data-role="kyosan-report-target-radio"'), "고를 후보가 없어야 한다");
+    assert.ok(!/새로 만들기|건 만들기|create/i.test(markup), "🔴 수리 건을 만드는 단추가 있으면 안 된다");
+  });
+
+  for (const [reason, text] of [
+    ["intake-number-missing", "접수번호를 읽지 못했습니다"],
+    ["intake-number-malformed", "번호 꼴"],
+    ["intake-number-not-found", "등록된 수리 건이 없습니다"],
+  ] as const) {
+    test(`까닭 ${reason} 이 그대로 보인다`, () => {
+      const markup = render(
+        <KyosanReportMatchPanel
+          preview={preview({ match: { kind: "unmatched", reason }, targets: [], confirmedRepairCaseId: null })}
+          saveOffer="none"
+          selectedRepairCaseId={null}
+          disabled={false}
+          onSelect={noop}
+        />
+      );
+      assert.ok(markup.includes(text), `${reason}: "${text}" 가 보여야 한다`);
+    });
+  }
+});
+
+// ══════════════════════════════════════════════ 짝이 여럿일 때
+
+describe("🔴 짝이 여럿이면 고르기 전에는 저장할 수 없다", () => {
+  const many = preview({
+    match: { kind: "ambiguous", reason: "identity-candidates" },
+    intakeNumberStatus: "missing",
+    targets: [
+      target(),
+      target({
+        repairCaseId: SECOND_ID,
+        intakeNumber: "D240707",
+        modelName: "값-다른모델",
+        identity: { model: "differ", serialNumber: "agree", lotNumber: "unknown", customer: "differ" },
+        serviceReportCount: 1,
+      }),
+    ],
+    confirmedRepairCaseId: null,
+    blockers: ["접수번호로 짝을 못 정했습니다. S/N 으로 찾은 후보가 2건 있습니다 — 사람이 골라야 합니다."],
+  });
+
+  test("고르기 전 — 단추는 있지만 눌리지 않는다", () => {
+    const markup = renderBar(many, null);
+    assert.match(markup, /data-offer="choose"/);
+    assert.match(markup, /data-role="kyosan-report-import"[^>]*\sdisabled=""/);
+    assert.match(markup, /넣을 수리 건을 먼저 골라 주세요/);
+  });
+
+  test("고른 뒤 — 단추가 열린다", () => {
+    const markup = renderBar(many, SECOND_ID);
+    assert.match(markup, /data-role="kyosan-report-import"/);
+    assert.ok(
+      !/data-role="kyosan-report-import"[^>]*\sdisabled=""/.test(markup),
+      "고른 뒤에는 누를 수 있어야 한다"
+    );
+  });
+
+  test("후보마다 라디오가 있고 처음에는 아무것도 골라져 있지 않다", () => {
+    const markup = render(
+      <KyosanReportMatchPanel
+        preview={many}
+        saveOffer="choose"
+        selectedRepairCaseId={null}
+        disabled={false}
+        onSelect={noop}
+      />
+    );
+    const radios = markup.match(/data-role="kyosan-report-target-radio"/g) ?? [];
+    assert.equal(radios.length, 2);
+    assert.ok(!/data-checked="true"/.test(markup), "🔴 미리 골라 두면 사람이 고르지 않고 누른다");
+    assert.match(markup, /data-match="ambiguous"/);
+    assert.match(markup, /사람이 골라야 합니다/);
+  });
+
+  test("🔴 무엇이 맞고 무엇이 다른지 항목마다 보인다", () => {
+    const markup = render(
+      <KyosanReportMatchPanel
+        preview={many}
+        saveOffer="choose"
+        selectedRepairCaseId={null}
+        disabled={false}
+        onSelect={noop}
+      />
+    );
+    // 네 항목 × 후보 2건 = 배지 8개.
+    const badges = markup.match(/data-role="kyosan-agreement"/g) ?? [];
+    assert.equal(badges.length, 8);
+    assert.match(markup, /data-agreement="differ"/);
+    assert.match(markup, /data-agreement="agree"/);
+    assert.match(markup, /data-agreement="unknown"/);
+    // 연락서에 적힌 값과 나란히 볼 수 있어야 고를 수 있다.
+    assert.match(markup, /data-role="kyosan-report-identity-row"/);
+    assert.ok(markup.includes("값-로트"), "연락서의 L/N 이 보여야 한다");
+  });
+
+  test("휴지통 · 이미 넣은 건은 고를 수 없다(라디오가 잠긴다)", () => {
+    const blocked = preview({
+      match: { kind: "ambiguous", reason: "identity-candidates" },
+      targets: [target({ isDeleted: true }), target({ repairCaseId: SECOND_ID, alreadyImported: true })],
+      confirmedRepairCaseId: null,
+    });
+    const markup = render(
+      <KyosanReportMatchPanel
+        preview={blocked}
+        saveOffer="choose"
+        selectedRepairCaseId={null}
+        disabled={false}
+        onSelect={noop}
+      />
+    );
+    const locked = markup.match(/data-role="kyosan-report-target-radio"[^>]*\sdisabled=""/g) ?? [];
+    assert.equal(locked.length, 2, "두 후보 모두 잠겨 있어야 한다");
+    assert.match(markup, /휴지통/);
+    assert.match(markup, /이 연락서를 이미 넣음/);
+  });
+});
+
+// ══════════════════════════════════════════════ 짝이 하나일 때
+
+describe("짝이 하나로 확정됐을 때", () => {
+  test("[이식] 단추가 열리고 「확정」으로 보인다", () => {
+    const one = preview();
+    const markup = renderBar(one, FIRST_ID);
+    assert.match(markup, /data-offer="confirm"/);
+    assert.ok(!/data-role="kyosan-report-import"[^>]*\sdisabled=""/.test(markup));
+
+    const panel = render(
+      <KyosanReportMatchPanel
+        preview={one}
+        saveOffer="confirm"
+        selectedRepairCaseId={FIRST_ID}
+        disabled={false}
+        onSelect={noop}
+      />
+    );
+    assert.match(panel, /data-match="matched"/);
+    assert.match(panel, /확정/);
+    assert.ok(!panel.includes('data-role="kyosan-report-target-radio"'), "고를 것이 없으면 라디오도 없다");
+  });
+
+  test("🔴 막는 것이 있으면 단추가 사라진다", () => {
+    const blocked = preview({
+      confirmedRepairCaseId: null,
+      targets: [target({ alreadyImported: true })],
+      blockers: ["이미 넣은 연락서입니다(원본 파일이 같습니다) — 다시 넣지 않습니다."],
+    });
+    const markup = renderBar(blocked, FIRST_ID);
+    assert.ok(!markup.includes('data-role="kyosan-report-import"'));
+  });
+});
+
+// ══════════════════════════════════════════════ 무엇이 들어가는가 · 알림 · 결과
+
+describe("미리보기가 무엇을 보여 주는가", () => {
+  test("줄 · 부품 · 사진 수와 걸러 낸 양식 그림 수가 보인다", () => {
+    const markup = render(<KyosanReportContentPanel preview={preview()} />);
+    assert.match(markup, /보고서 줄 1개/);
+    assert.match(markup, /사진 2장/);
+    assert.match(markup, /양식 그림 5장은 걸러 냈습니다/);
+    assert.ok(markup.includes("값-고장내용"), "들어갈 글자가 그대로 보여야 한다");
+    assert.ok(markup.includes("お客様不具合"), "어느 항목에서 왔는지 보여야 한다");
+    assert.match(markup, /\[고장분\] 값-부품/);
+  });
+
+  test("뽑은 것이 하나도 없으면 그렇게 말한다", () => {
+    const empty = preview({
+      content: { lines: [], parts: [], causeMarks: [], actionMarks: [], photoCount: 0, formAssetCount: 0 },
+    });
+    assert.match(render(<KyosanReportContentPanel preview={empty} />), /하나도 뽑지 못했습니다/);
+  });
+
+  test("막는 것 · 알리는 것 · 읽다가 만난 문제를 갈라 보여 준다", () => {
+    const noticed = preview({
+      blockers: ["막-하나"],
+      warnings: ["알림-하나"],
+      problems: ["문제-하나"],
+    });
+    const markup = render(<KyosanReportNotices preview={noticed} />);
+    assert.match(markup, /data-role="kyosan-report-blockers"/);
+    assert.match(markup, /data-role="kyosan-report-warnings"/);
+    assert.match(markup, /data-role="kyosan-report-problems"/);
+    assert.match(markup, /막-하나/);
+  });
+
+  test("아무 알림도 없으면 빈 상자를 그리지 않는다", () => {
+    assert.equal(render(<KyosanReportNotices preview={preview()} />), "");
+  });
+});
+
+describe("결과", () => {
+  test("성공하면 무엇이 들어갔는지와 수리 건 링크가 보인다", () => {
+    const ok: KyosanReportImportResult = {
+      ok: true,
+      repairCaseId: FIRST_ID,
+      intakeNumber: "D250101",
+      serviceReportId: "33333333-3333-4333-8333-333333333333",
+      lineCount: 4,
+      causeCount: 1,
+      usedPartCount: 2,
+      attachmentIds: ["a", "b"],
+      photoCount: 1,
+      warnings: ["연락서에서 날짜를 하나도 읽지 못해 발행일을 오늘 날짜로 넣었습니다."],
+    };
+    const markup = render(<KyosanReportResultPanel result={ok} failureText="" />);
+    assert.match(markup, /data-ok="true"/);
+    assert.match(markup, /수리 건 D250101 에 넣었습니다/);
+    assert.ok(markup.includes(`/repair-cases/${FIRST_ID}`));
+    assert.match(markup, /data-role="kyosan-report-result-warnings"/);
+  });
+
+  test("실패하면 까닭과 막는 문장들이 그대로 보인다", () => {
+    const failed: KyosanReportImportResult = {
+      ok: false,
+      code: "NOT_IMPORTABLE",
+      message: "이 연락서는 넣을 수 없습니다.",
+      blockers: ["짝이 없습니다 — 넣지 않습니다."],
+    };
+    const markup = render(<KyosanReportResultPanel result={failed} failureText="넣지 않았습니다." />);
+    assert.match(markup, /data-ok="false"/);
+    assert.match(markup, /넣지 않았습니다\./);
+    assert.match(markup, /짝이 없습니다/);
+  });
+});
