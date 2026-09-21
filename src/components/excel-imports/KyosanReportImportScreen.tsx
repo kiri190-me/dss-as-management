@@ -37,9 +37,13 @@ import {
  * `KyosanReportImportParts.tsx` 에 있다. 이 파일은 상태를 들고 서버 액션 둘을
  * 부르는 일만 한다(서버 액션을 부르므로 시험에서 통째로 그릴 수 없다).
  *
- * ── 🔴 서버로 보내는 것은 둘뿐이다 ───────────────────────────────────
- *   · `file`         올린 연락서 원본 (미리보기에 쓴 바로 그 File)
- *   · `repairCaseId` 사람이 고른(또는 확인한) 수리 건
+ * ── 🔴 서버로 보내는 것은 셋뿐이다 ───────────────────────────────────
+ *   · `file`               올린 연락서 원본 (미리보기에 쓴 바로 그 File)
+ *   · `repairCaseId`       이 화면이 저장하려는 수리 건 (서버의 **자물쇠**)
+ *   · `chosenRepairCaseId` 후보가 여럿이라(`choose`) **사람이 고른** 경우에만
+ * 🔴 셋째는 `saveOffer === "choose"` 일 때만 싣는다. 접수번호로 확정된 짝을
+ * 「사람이 골랐다」고 말하면 서버의 저장 직전 검사가 접수번호 대신 모델·S/N 을
+ * 보게 되어 갈래가 뒤바뀐다.
  * 미리보기 결과 · 넣을 줄 · 부품 목록은 **보내지 않는다.** 저장 함수가 파일에서
  * 처음부터 다시 만든다 — 화면이 계산한 것을 보내는 순간 「사람이 본 것」과
  * 「들어간 것」이 갈라진다(services/kyosan-report-import.ts 머리말).
@@ -123,10 +127,11 @@ export default function KyosanReportImportScreen() {
     setImportPending(true);
     setFailureMessage(null);
     try {
-      // 🔴 보내는 것은 이 둘뿐이다 — 파일과 고른 수리 건 id.
+      // 🔴 보내는 것은 이것뿐이다 — 파일 · 자물쇠 · (골랐을 때만) 고르기.
       const formData = new FormData();
       formData.append("file", preview.file);
       formData.append("repairCaseId", selectedRepairCaseId);
+      if (saveOffer === "choose") formData.append("chosenRepairCaseId", selectedRepairCaseId);
       const outcome = await importKyosanReportAction(formData);
 
       // 문 앞에서 막힌 것(권한 · 파일 · 일시 장애)은 「저장 결과」가 아니다 — 따로 보인다.

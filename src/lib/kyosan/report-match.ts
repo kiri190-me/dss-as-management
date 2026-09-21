@@ -23,7 +23,9 @@ import type { CardFields } from "./card-fields";
  * 짝지으면 **지난번 수리 건에 이번 자료를 넣는다.**
  *
  * ── 세 갈래 ───────────────────────────────────────────────────────────
- *  · `matched`   — 접수번호로 찾았고, 신원이 어긋나지 않는다. 붙일 수 있다.
+ *  · `matched`   — 붙일 수 있다. **어떻게 정해졌는지**를 `basis` 가 나른다:
+ *      · `intake-number` 접수번호로 찾았고 신원이 어긋나지 않는다(자동).
+ *      · `human-choice`  후보 목록에서 **사람이 고른 것**이다(아래).
  *  · `ambiguous` — 🔴 **사람이 골라야 한다.** 둘 중 하나다:
  *      · `identity-conflict`  접수번호는 맞는데 **모델도 S/N 도 다르다**.
  *        번호를 잘못 읽었거나 잘못 적힌 것이다. 그냥 붙이면 남의 건에 남의
@@ -43,6 +45,18 @@ import type { CardFields } from "./card-fields";
  * 🔴 고객사는 **경고만** 낸다. 연락서의 `客先` 은 교산의 고객이고 우리 DB 의
  * 고객사는 교산인 판이 흔하다 — 이것으로 짝을 깨면 전부 깨진다.
  * 모델과 S/N 이 **둘 다** 어긋날 때만 짝을 사람에게 넘긴다.
+ *
+ * ── 🔴 사람이 고른 것을 받아들인다 (2026-09-21, 조각 S4b) ────────────
+ * 사용자 결정: 「짝이 여럿일 때 사람이 고르면 저장까지 받아들인다.」 그래서
+ * `chosenRepairCaseId` 를 받는다. 다만 **아무 건이나 받지 않는다**:
+ *   · `identity-candidates`(= S/N 으로 찾은 후보 목록) 안에 있는 건만 올린다.
+ *     화면이 보여 준 적 없는 건은 그대로 `ambiguous` 로 남는다.
+ *   · `identity-conflict`(접수번호는 맞는데 모델도 S/N 도 다르다)은 **올리지
+ *     않는다** — 그것은 「고를 후보」가 아니라 「번호가 틀렸다」는 신호다.
+ *   · 접수번호로 이미 확정된 짝(`matched`)에는 고르기가 끼어들지 않는다.
+ * 올라간 짝은 `basis: "human-choice"` 로 표시된다. 저장 직전 검사가 이 표시를
+ * 보고 갈라진다(`server/services/kyosan-report-import.ts` 의 `lockAndReconfirm`)
+ * — 자동 짝은 접수번호 동일성, 사람이 고른 짝은 모델·S/N 대조다.
  * ============================================================================
  */
 
@@ -70,8 +84,18 @@ export type KyosanCandidateView = {
   identity: KyosanIdentityCheck;
 };
 
+/**
+ * 짝이 **어떻게** 정해졌는가. 🔴 저장 직전 검사가 이것으로 갈라지므로
+ * (`lockAndReconfirm`) 값을 늘리거나 뜻을 바꿀 때는 그쪽을 함께 본다.
+ */
+export type KyosanMatchBasis =
+  /** 접수번호로 자동 확정. 저장 직전에 **접수번호가 그대로인지** 다시 본다. */
+  | "intake-number"
+  /** 후보 목록에서 사람이 골랐다. 저장 직전에 **모델·S/N 을 대조**한다. */
+  | "human-choice";
+
 export type KyosanMatchOutcome =
-  | ({ kind: "matched"; warnings: readonly string[] } & KyosanCandidateView)
+  | ({ kind: "matched"; basis: KyosanMatchBasis; warnings: readonly string[] } & KyosanCandidateView)
   | {
       kind: "ambiguous";
       reason: "identity-conflict" | "identity-candidates";
@@ -190,6 +214,12 @@ export type KyosanMatchInput = {
    * 비어 있어도 된다 — 그러면 「짝 없음」이다.
    */
   identityCandidates?: readonly KyosanCaseCandidate[];
+  /**
+   * 🔴 사람이 화면에서 고른 수리 건 id (조각 S4b). **후보 목록 안에 있을
+   * 때만** 쓰인다 — 목록 밖의 id 는 조용히 무시되고 결과는 `ambiguous` 그대로다.
+   * 접수번호로 이미 확정된 짝에는 끼어들지 않는다(머리말).
+   */
+  chosenRepairCaseId?: string | null;
 };
 
 /**
@@ -220,12 +250,24 @@ export function matchKyosanReport(input: KyosanMatchInput): KyosanMatch {
     const check = checkKyosanIdentity(identity, candidate);
     if (isIdentityConflict(check)) {
       // 번호는 맞는데 물건이 다르다 — 그대로 붙이면 남의 건에 남의 자료가 간다.
+      // 🔴 여기서는 고르기를 받지 않는다. 「고를 후보」가 아니라 「번호가 틀렸다」이다.
       return {
         ...base,
         outcome: { kind: "ambiguous", reason: "identity-conflict", candidates: [{ candidate, identity: check }] },
       };
     }
-    return { ...base, outcome: { kind: "matched", candidate, identity: check, warnings: identityWarnings(check) } };
+    // 🔴 접수번호로 정해진 짝에는 고르기가 끼어들지 않는다(basis 가 바뀌면 저장
+    //    직전 검사가 접수번호 대신 모델·S/N 을 보게 되어 안전장치가 느슨해진다).
+    return {
+      ...base,
+      outcome: {
+        kind: "matched",
+        basis: "intake-number",
+        candidate,
+        identity: check,
+        warnings: identityWarnings(check),
+      },
+    };
   }
 
   // 접수번호로 못 찾았다 — S/N 후보를 보여 주기만 한다(사람이 고른다).
@@ -238,6 +280,23 @@ export function matchKyosanReport(input: KyosanMatchInput): KyosanMatch {
           .filter((view) => view.identity.serialNumber === "agree" && view.identity.model !== "differ");
 
   if (views.length > 0) {
+    // 🔴 사람이 고른 건이 **이 목록 안에 있을 때만** 짝으로 올린다.
+    //    목록 밖의 id 는 화면이 보여 준 적 없는 건이므로 받아들이지 않는다.
+    const chosen = input.chosenRepairCaseId ?? null;
+    const picked =
+      chosen === null ? undefined : views.find((view) => view.candidate.repairCaseId === chosen);
+    if (picked !== undefined) {
+      return {
+        ...base,
+        outcome: {
+          kind: "matched",
+          basis: "human-choice",
+          candidate: picked.candidate,
+          identity: picked.identity,
+          warnings: identityWarnings(picked.identity),
+        },
+      };
+    }
     return { ...base, outcome: { kind: "ambiguous", reason: "identity-candidates", candidates: views } };
   }
 

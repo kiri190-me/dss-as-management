@@ -16,9 +16,11 @@ import { join } from "node:path";
  *     화면을 그릴 때만 돈다.
  *  2. 🔴 권한은 **이미 있는 판정을 그대로 쓴다**(`kyosanIntakeImport` 관리) —
  *     흉내 낸 검사를 새로 적지 않았다.
- *  3. 🔴 액션이 FormData 에서 읽는 것은 `file` 과 `repairCaseId` **뿐**이다 —
- *     화면이 계산한 미리보기(plan)를 받지 않는다.
- *  4. 🔴 수리 건을 새로 만드는 길이 없다.
+ *  3. 🔴 액션이 FormData 에서 읽는 것은 `file` · `repairCaseId` ·
+ *     `chosenRepairCaseId` **뿐**이다 — 화면이 계산한 미리보기(plan)를 받지 않는다.
+ *  4. 🔴 **자물쇠와 고르기는 서로 다른 통로다**(조각 S4b) — `expectedRepairCaseId`
+ *     에 고르기의 뜻을 겹쳐 싣지 않는다.
+ *  5. 🔴 수리 건을 새로 만드는 길이 없다.
  * ============================================================================
  */
 
@@ -85,15 +87,27 @@ describe("🔴 액션이 권한을 다시 판정한다", () => {
   });
 });
 
-describe("🔴 화면이 보내는 것은 파일과 고른 건 id 뿐이다", () => {
-  test("액션이 FormData 에서 읽는 이름은 둘뿐이다", () => {
+describe("🔴 화면이 보내는 것은 파일 · 자물쇠 · 고르기 뿐이다", () => {
+  // 🔴 셋째(`chosenRepairCaseId`)는 조각 S4b 에서 늘었다 — 사람이 고른 것을
+  //    나르는 **새 통로**다. 자물쇠(`repairCaseId`)에 뜻을 겹쳐 싣지 않기 위해서다.
+  const ALLOWED_FIELDS = ["chosenRepairCaseId", "file", "repairCaseId"];
+
+  test("액션이 FormData 에서 읽는 이름은 이 셋뿐이다", () => {
     const names = [...actionCode.matchAll(/formData\.get\("([^"]+)"\)/g)].map((match) => match[1]);
-    assert.deepEqual([...new Set(names)].sort(), ["file", "repairCaseId"]);
+    assert.deepEqual([...new Set(names)].sort(), ALLOWED_FIELDS);
   });
 
-  test("화면이 FormData 에 담는 이름도 둘뿐이다", () => {
+  test("화면이 FormData 에 담는 이름도 이 셋뿐이다", () => {
     const names = [...screenCode.matchAll(/formData\.append\("([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual([...new Set(names)].sort(), ["file", "repairCaseId"]);
+    assert.deepEqual([...new Set(names)].sort(), ALLOWED_FIELDS);
+  });
+
+  test("🔴 고르기는 사람이 실제로 고른 경우에만 실린다(`choose`)", () => {
+    assert.match(
+      screenCode,
+      /if \(saveOffer === "choose"\) formData\.append\("chosenRepairCaseId"/,
+      "접수번호로 확정된 짝을 「골랐다」고 보내면 저장 직전 검사의 갈래가 뒤바뀐다"
+    );
   });
 
   test("🔴 화면이 미리보기 결과(plan · 줄 · 부품)를 서버로 되돌려 보내지 않는다", () => {
@@ -105,11 +119,26 @@ describe("🔴 화면이 보내는 것은 파일과 고른 건 id 뿐이다", ()
     }
   });
 
-  test("액션은 고른 건 id 를 저장 함수의 `expectedRepairCaseId` 로만 넘긴다", () => {
+  test("액션은 화면이 보여 준 건을 저장 함수의 `expectedRepairCaseId`(자물쇠)로 넘긴다", () => {
     const body = exportedBody(actionCode, "importKyosanReportAction");
     assert.match(body, /expectedRepairCaseId: repairCaseId,/);
     // 미리보기 결과를 저장 함수에 넘기는 줄이 있으면 안 된다.
     assert.ok(!/plan:/.test(body), "저장 함수에 plan 을 넘기면 안 된다");
+  });
+
+  test("🔴 고르기는 자물쇠와 **다른 매개변수**로 넘어간다", () => {
+    const body = exportedBody(actionCode, "importKyosanReportAction");
+    assert.match(body, /const chosenRepairCaseId = formData\.get\("chosenRepairCaseId"\);/);
+    assert.match(body, /chosenRepairCaseId,/, "고르기를 저장 함수까지 이어야 한다");
+    assert.ok(
+      !/chosenRepairCaseId: repairCaseId|expectedRepairCaseId: chosenRepairCaseId/.test(body),
+      "🔴 자물쇠와 고르기의 뜻을 겹치면 자물쇠가 자물쇠 구실을 못 한다"
+    );
+  });
+
+  test("실려 온 고르기는 자물쇠와 같은 건이어야 한다", () => {
+    const body = exportedBody(actionCode, "importKyosanReportAction");
+    assert.match(body, /chosenRepairCaseId !== null && chosenRepairCaseId !== repairCaseId/);
   });
 
   test("id 가 UUID 꼴이 아니면 문 앞에서 막는다", () => {

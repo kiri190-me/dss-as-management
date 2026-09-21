@@ -231,3 +231,94 @@ describe("연락서 ↔ 수리 건 짝짓기", () => {
     assert.equal(match.outcome.candidate.isDeleted, true);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 사람이 고른 것을 받아들인다 (조각 S4b)
+ * ============================================================================
+ * 사용자 결정(2026-09-21): 「짝이 여럿일 때 사람이 고르면 저장까지 받아들인다.」
+ * 여기서 못 박는 것은 **받아들이는 범위**다 — 후보 목록 안의 건만, 그리고 자동
+ * 으로 정해진 짝과 **구별할 수 있게**(`basis`). 저장 직전 검사가 그 구별에 기댄다.
+ * ============================================================================
+ */
+describe("🔴 후보 중에서 사람이 고른 것", () => {
+  const CHOOSE_CARD = cardOf({ model: "FAKE-100", serialNumber: "SN-0001" });
+  const CANDIDATES = [
+    caseOf({ repairCaseId: "case-1", intakeNumber: "D210105" }),
+    caseOf({ repairCaseId: "case-2", intakeNumber: "D230207" }),
+  ];
+
+  test("고른 건이 후보 목록 안에 있으면 `matched` 가 된다 — basis 는 human-choice", () => {
+    const match = matchKyosanReport({
+      identity: readKyosanIdentity(CHOOSE_CARD),
+      caseByIntakeNumber: null,
+      identityCandidates: CANDIDATES,
+      chosenRepairCaseId: "case-2",
+    });
+    assert.equal(match.outcome.kind, "matched");
+    if (match.outcome.kind !== "matched") return;
+    assert.equal(match.outcome.candidate.repairCaseId, "case-2");
+    assert.equal(match.outcome.basis, "human-choice", "🔴 자동으로 정해진 짝과 구별돼야 한다");
+    assert.equal(match.outcome.identity.serialNumber, "agree");
+  });
+
+  test("🔴 후보 목록 **밖**의 건을 고르면 받지 않는다 — 화면이 보여 준 적 없는 건이다", () => {
+    const match = matchKyosanReport({
+      identity: readKyosanIdentity(CHOOSE_CARD),
+      caseByIntakeNumber: null,
+      identityCandidates: CANDIDATES,
+      chosenRepairCaseId: "case-밖에있는것",
+    });
+    assert.equal(match.outcome.kind, "ambiguous");
+    if (match.outcome.kind !== "ambiguous") return;
+    assert.equal(match.outcome.reason, "identity-candidates");
+    assert.equal(match.outcome.candidates.length, 2);
+  });
+
+  test("🔴 S/N 이 달라 후보로도 안 친 건은 골라도 받지 않는다", () => {
+    const match = matchKyosanReport({
+      identity: readKyosanIdentity(CHOOSE_CARD),
+      caseByIntakeNumber: null,
+      // 목록으로 넘어오기는 했지만 모델이 달라 후보에서 걸러지는 건이다.
+      identityCandidates: [caseOf({ repairCaseId: "case-3", modelName: "OTHER-9" })],
+      chosenRepairCaseId: "case-3",
+    });
+    assert.equal(match.outcome.kind, "unmatched", "후보가 아닌 것은 고르기로도 살아나지 않는다");
+  });
+
+  test("🔴 접수번호로 정해진 짝에는 고르기가 끼어들지 않는다 — basis 는 intake-number", () => {
+    const match = matchKyosanReport({
+      identity: readKyosanIdentity(CARD),
+      caseByIntakeNumber: caseOf(),
+      chosenRepairCaseId: "case-2",
+    });
+    assert.equal(match.outcome.kind, "matched");
+    if (match.outcome.kind !== "matched") return;
+    assert.equal(match.outcome.candidate.repairCaseId, "case-1", "고르기가 짝을 바꾸면 안 된다");
+    assert.equal(match.outcome.basis, "intake-number");
+  });
+
+  test("🔴 identity-conflict 는 골라도 올라가지 않는다 — 「번호가 틀렸다」는 신호다", () => {
+    const conflicting = caseOf({ modelName: "OTHER-9", serialNumber: "SN-9999" });
+    const match = matchKyosanReport({
+      identity: readKyosanIdentity(CARD),
+      caseByIntakeNumber: conflicting,
+      chosenRepairCaseId: conflicting.repairCaseId,
+    });
+    assert.equal(match.outcome.kind, "ambiguous");
+    if (match.outcome.kind !== "ambiguous") return;
+    assert.equal(match.outcome.reason, "identity-conflict");
+  });
+
+  test("고르지 않으면(빈 값) 그대로 `ambiguous` 다", () => {
+    for (const chosen of [null, undefined]) {
+      const match = matchKyosanReport({
+        identity: readKyosanIdentity(CHOOSE_CARD),
+        caseByIntakeNumber: null,
+        identityCandidates: CANDIDATES,
+        chosenRepairCaseId: chosen,
+      });
+      assert.equal(match.outcome.kind, "ambiguous", `chosen=${String(chosen)}`);
+    }
+  });
+});

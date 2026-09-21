@@ -55,6 +55,8 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  5. 원인이 대응 없는 값이면 「기타」로 들어가고, 원문은 보고서 줄에 그대로 남는다.
  *  6. 원본 `.xlsm` 이 첨부로 남는다 — 허용목록을 넓히지 않고.
  *  7. 🔴 **수리 건을 새로 만들지 않는다.**
+ *  8. 🔴 (조각 S4b) 후보가 여럿일 때 **사람이 고른 것은 들어가되**, 목록 밖의
+ *     건은 거절되고, 고른 짝도 저장 직전에 **모델·S/N 대조**를 받는다.
  *
  * ── 🔴 시험용 연락서는 전부 손으로 지은 가짜다 ───────────────────────
  * `kyosan/kyosan-report.test.ts` 와 같은 규율이다 — 실제 연락서에는 고객명 ·
@@ -656,6 +658,124 @@ describe("🔴 짝이 하나로 정해지지 않으면 한 줄도 남기지 않�
   });
 });
 
+// ══════════════════════════════════════════════ 사람이 골랐을 때 (조각 S4b)
+
+/**
+ * 🔴 사용자 결정(2026-09-21): 「짝이 여럿일 때 사람이 고르면 저장까지 받아들이되,
+ * 저장 직전 검사를 「접수번호가 같은가」 → 「고른 건의 모델·S/N 이 연락서와
+ * 맞는가」로 바꾼다.」 **안전장치를 없앤 것이 아니라 갈래를 나눈 것**이므로,
+ * 여기서 못 박는 것은 「고르면 들어간다」와 「고른 것도 검사를 받는다」 둘이다.
+ */
+describe("🔴 후보가 여럿일 때 사람이 고른 것은 저장한다", () => {
+  test("후보에서 고른 건에 들어간다 — 연락서에 접수번호가 없어도", async () => {
+    const target = await seedCase();
+    // 접수번호를 안 적고 모델·S/N 만 맞춘다 → 자동으로는 `ambiguous` 다.
+    const fake = fakeReport({
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      salt: "고르기",
+    });
+
+    // 고르지 않으면 지금까지처럼 거절된다.
+    const without = await importOf(fake);
+    assert.equal(without.ok, false);
+    if (!without.ok) assert.equal(without.code, "NOT_IMPORTABLE");
+    await assertNothingSaved(target.id, "고르기 전");
+
+    // 사람이 고르면 저장된다.
+    const chosen = await importOf(fake, {
+      expectedRepairCaseId: target.id,
+      chosenRepairCaseId: target.id,
+    });
+    assert.equal(chosen.ok, true, JSON.stringify(chosen));
+    if (!chosen.ok) return;
+    assert.equal(chosen.repairCaseId, target.id);
+    assert.equal(chosen.intakeNumber, target.intakeNumber);
+    assert.equal((await readReports(target.id)).length, 1);
+    assert.equal((await readTrace(target.id)).length, 1);
+    assert.deepEqual(await listImportedKyosanSourceHashes(target.id), [fake.report.sourceSha256]);
+  });
+
+  test("🔴 후보 목록 밖의 건을 고르면 거절된다 — 화면이 보여 준 적 없는 건이다", async () => {
+    const target = await seedCase();
+    const outsider = await seedCase();
+    const fake = fakeReport({
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      salt: "목록밖",
+    });
+
+    const result = await importOf(fake, {
+      expectedRepairCaseId: outsider.id,
+      chosenRepairCaseId: outsider.id,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_IMPORTABLE");
+    await assertNothingSaved(target.id, "목록 밖 고르기(후보)");
+    await assertNothingSaved(outsider.id, "목록 밖 고르기(고른 건)");
+  });
+
+  test("🔴 고른 짝도 저장 직전에 검사한다 — 모델·S/N 이 어긋나면 막는다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      salt: "고르기재판정",
+    });
+    const identity = readKyosanIdentity(fake.report.card);
+    assert.equal(identity.intakeNumber, null, "이 갈래에는 견줄 접수번호가 없다");
+
+    const [row] = await db
+      .select({ productId: repairCases.productId })
+      .from(repairCases)
+      .where(eq(repairCases.id, target.id));
+
+    // 미리보기와 저장 사이에 S/N 이 바뀌었다고 치자 — 고른 건이라도 막아야 한다.
+    await db.update(products).set({ serialNumber: "SN-CHANGED" }).where(eq(products.id, row.productId));
+    await assert.rejects(
+      db.transaction((tx) =>
+        lockAndReconfirm(tx, {
+          repairCaseId: target.id,
+          identity,
+          sourceSha256: fake.report.sourceSha256,
+          basis: "human-choice",
+        })
+      ),
+      /모델·S\/N 이 연락서와 맞지 않습니다/u
+    );
+
+    // 되돌리면 통과한다 — 이 검사가 늘 막기만 하는 것이 아니라는 증거.
+    await db
+      .update(products)
+      .set({ serialNumber: target.serialNumber })
+      .where(eq(products.id, row.productId));
+    const confirmed = await db.transaction((tx) =>
+      lockAndReconfirm(tx, {
+        repairCaseId: target.id,
+        identity,
+        sourceSha256: fake.report.sourceSha256,
+        basis: "human-choice",
+      })
+    );
+    assert.equal(confirmed.repairCaseId, target.id);
+
+    // 🔴 그리고 **자동 갈래의 접수번호 검사는 그대로 산다** — 같은 연락서를
+    //    `intake-number` 로 넘기면 견줄 번호가 없어 여기서 막힌다.
+    await assert.rejects(
+      db.transaction((tx) =>
+        lockAndReconfirm(tx, {
+          repairCaseId: target.id,
+          identity,
+          sourceSha256: fake.report.sourceSha256,
+          basis: "intake-number",
+        })
+      ),
+      /접수번호가 그 사이에 바뀌었습니다/u
+    );
+  });
+});
+
 describe("🔴 같은 연락서를 두 번 넣지 않는다", () => {
   test("같은 `sourceSha256` 두 번째는 거절되고, 보고서는 한 장 그대로다", async () => {
     const target = await seedCase();
@@ -718,7 +838,12 @@ describe("🔴 저장 직전에 다시 판정한다", () => {
 
     await assert.rejects(
       db.transaction((tx) =>
-        lockAndReconfirm(tx, { repairCaseId: target.id, identity, sourceSha256: fake.report.sourceSha256 })
+        lockAndReconfirm(tx, {
+          repairCaseId: target.id,
+          identity,
+          sourceSha256: fake.report.sourceSha256,
+          basis: "intake-number",
+        })
       ),
       /모델도 S\/N 도/u
     );
@@ -729,7 +854,12 @@ describe("🔴 저장 직전에 다시 판정한다", () => {
       .set({ modelName: target.modelName, serialNumber: target.serialNumber })
       .where(eq(products.id, row.productId));
     const confirmed = await db.transaction((tx) =>
-      lockAndReconfirm(tx, { repairCaseId: target.id, identity, sourceSha256: fake.report.sourceSha256 })
+      lockAndReconfirm(tx, {
+        repairCaseId: target.id,
+        identity,
+        sourceSha256: fake.report.sourceSha256,
+        basis: "intake-number",
+      })
     );
     assert.equal(confirmed.repairCaseId, target.id);
     assert.equal(confirmed.intakeNumber, target.intakeNumber);
@@ -752,7 +882,12 @@ describe("🔴 저장 직전에 다시 판정한다", () => {
 
     await assert.rejects(
       db.transaction((tx) =>
-        lockAndReconfirm(tx, { repairCaseId: target.id, identity, sourceSha256: fake.report.sourceSha256 })
+        lockAndReconfirm(tx, {
+          repairCaseId: target.id,
+          identity,
+          sourceSha256: fake.report.sourceSha256,
+          basis: "intake-number",
+        })
       ),
       /접수번호가 그 사이에 바뀌었습니다/u
     );
@@ -773,7 +908,12 @@ describe("🔴 저장 직전에 다시 판정한다", () => {
     await db.update(repairCases).set({ isDeleted: true, deletedAt: new Date() }).where(eq(repairCases.id, target.id));
     await assert.rejects(
       db.transaction((tx) =>
-        lockAndReconfirm(tx, { repairCaseId: target.id, identity, sourceSha256: fake.report.sourceSha256 })
+        lockAndReconfirm(tx, {
+          repairCaseId: target.id,
+          identity,
+          sourceSha256: fake.report.sourceSha256,
+          basis: "intake-number",
+        })
       ),
       /사라졌거나 휴지통/u
     );

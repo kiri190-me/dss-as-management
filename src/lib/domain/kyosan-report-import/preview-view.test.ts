@@ -5,6 +5,7 @@ import { MAX_ATTACHMENT_SIZE_BYTES } from "@/lib/domain/attachment-allowlist";
 import type { KyosanCaseCandidate, KyosanIdentityCheck, KyosanMatch } from "@/lib/kyosan/report-match";
 import type { KyosanCaseState } from "@/lib/kyosan/report-preview";
 import {
+  KYOSAN_CHOICE_CAUTION,
   KYOSAN_REPORT_UPLOAD_MAX_BYTES,
   buildKyosanReportTargets,
   canImportKyosanReport,
@@ -162,6 +163,17 @@ describe("🔴 짝이 여럿이면 고르기 전에는 저장할 수 없다", ()
     assert.equal(kyosanReportSaveOffer(trashed), "none");
   });
 
+  test("🔴 고르면 어떻게 되는지를 갈래마다 다르게 말한다(조각 S4b)", () => {
+    // 후보에서 고른 것은 이제 저장까지 간다 — 다만 모델·S/N 을 다시 대조한다.
+    assert.match(KYOSAN_CHOICE_CAUTION["identity-candidates"], /모델·S\/N/u);
+    assert.ok(
+      !/저장되지 않습니다/u.test(KYOSAN_CHOICE_CAUTION["identity-candidates"]),
+      "후보 고르기는 이제 저장까지 받아들인다(2026-09-21 사용자 결정)"
+    );
+    // 번호가 틀린 것(conflict)은 여전히 골라도 저장되지 않는다 — 숨기지 않는다.
+    assert.match(KYOSAN_CHOICE_CAUTION["identity-conflict"], /저장되지 않습니다/u);
+  });
+
   test("접수번호가 맞아도 모델·S/N 이 둘 다 다르면 사람이 고른다(identity-conflict)", () => {
     const conflict = preview({
       match: { kind: "ambiguous", reason: "identity-conflict" },
@@ -234,7 +246,13 @@ describe("buildKyosanReportTargets", () => {
   test("matched — 한 건, 상태가 함께 실린다", () => {
     const match: KyosanMatch = {
       ...base,
-      outcome: { kind: "matched", candidate: candidate(), identity: ALL_AGREE, warnings: [] },
+      outcome: {
+        kind: "matched",
+        basis: "intake-number",
+        candidate: candidate(),
+        identity: ALL_AGREE,
+        warnings: [],
+      },
     };
     const built = buildKyosanReportTargets(match, [state({ serviceReportCount: 2 })], sha);
 
@@ -247,7 +265,13 @@ describe("buildKyosanReportTargets", () => {
   test("🔴 같은 원본 해시가 그 건에 있으면 alreadyImported 다", () => {
     const match: KyosanMatch = {
       ...base,
-      outcome: { kind: "matched", candidate: candidate(), identity: ALL_AGREE, warnings: [] },
+      outcome: {
+        kind: "matched",
+        basis: "intake-number",
+        candidate: candidate(),
+        identity: ALL_AGREE,
+        warnings: [],
+      },
     };
     const built = buildKyosanReportTargets(match, [state({ importedSourceSha256: [sha] })], sha);
     assert.equal(built[0].alreadyImported, true);
@@ -294,6 +318,7 @@ describe("buildKyosanReportTargets", () => {
       ...base,
       outcome: {
         kind: "matched",
+        basis: "intake-number",
         candidate: { ...candidate(), lotNumber: undefined },
         identity: ALL_AGREE,
         warnings: [],

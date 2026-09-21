@@ -246,17 +246,25 @@ export const KYOSAN_AMBIGUOUS_TEXT: Readonly<
 };
 
 /**
- * 🔴 후보를 골라도 저장 함수가 거절할 수 있다는 것을 **미리** 알린다.
+ * 🔴 고르면 어떻게 되는지를 **미리** 말한다. 두 갈래의 답이 다르다(조각 S4b).
  *
- * 저장 함수(S3b)는 고른 id 를 받아 짝짓기를 처음부터 다시 돌리고, 그 결과가
- * `matched`(= 접수번호로 확정) 가 아니면 넣지 않는다. 사람이 골랐다는 사실은
- * 저장 함수에 전해지지 않는다 — 이것은 이번 조각(S4)이 고칠 수 있는 것이
- * 아니라 저장 정책이므로, 화면은 **숨기지 않고 미리 말한다.**
+ *  · `identity-candidates` — 사용자 결정(2026-09-21)에 따라 **사람이 고르면
+ *    저장까지 받아들인다.** 다만 저장 직전에 서버가 고른 건의 모델·S/N 을
+ *    연락서와 다시 대조하고, 맞지 않으면 넣지 않는다.
+ *  · `identity-conflict`  — 골라도 저장되지 않는다. 접수번호로 찾은 건과 모델도
+ *    S/N 도 달라 「번호가 틀렸다」는 뜻이고, 그것은 사람이 자료를 고쳐야 한다.
+ *    화면은 그 사실을 **숨기지 않고 미리 말한다.**
  */
-export const KYOSAN_CHOICE_CAUTION =
-  "지금 판본에서는 접수번호로 짝이 확정된 연락서만 저장됩니다. " +
-  "후보를 골라 [이식]을 눌러도 저장 함수가 다시 판정해 거절할 수 있습니다 — " +
-  "그때는 수리 건 또는 연락서의 접수번호를 먼저 바로잡아 주세요.";
+export const KYOSAN_CHOICE_CAUTION: Readonly<
+  Record<Extract<KyosanReportMatchView, { kind: "ambiguous" }>["reason"], string>
+> = {
+  "identity-conflict":
+    "이 경우에는 후보를 골라 [이식]을 눌러도 저장되지 않습니다 — " +
+    "수리 건 또는 연락서의 접수번호를 먼저 바로잡아 주세요.",
+  "identity-candidates":
+    "고른 수리 건에 저장합니다. 저장 직전에 서버가 고른 건의 모델·S/N 을 연락서와 다시 " +
+    "대조하고, 맞지 않으면 넣지 않습니다 — 고르기 전에 아래 표를 눈으로 확인해 주세요.",
+};
 
 /** 저장이 실패했을 때 사람에게 보일 첫 문장. 자세한 것은 서버 문구가 잇는다. */
 export const KYOSAN_IMPORT_FAILURE_TEXT: Readonly<Record<KyosanReportImportFailureCode, string>> = {

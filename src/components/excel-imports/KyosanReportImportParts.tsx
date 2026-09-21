@@ -219,7 +219,9 @@ export function KyosanReportMatchPanel({
             {`후보가 ${targets.length}건입니다 — 사람이 골라야 합니다.`}
           </p>
           <p className="text-xs text-zinc-600 dark:text-zinc-400">{KYOSAN_AMBIGUOUS_TEXT[match.reason]}</p>
-          <p className="text-xs text-amber-700 dark:text-amber-300">{KYOSAN_CHOICE_CAUTION}</p>
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {KYOSAN_CHOICE_CAUTION[match.reason]}
+          </p>
         </div>
       ) : null}
 

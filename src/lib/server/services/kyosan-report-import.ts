@@ -45,6 +45,7 @@ import {
   matchKyosanReport,
   readKyosanIdentity,
   type KyosanCaseCandidate,
+  type KyosanMatchBasis,
   type KyosanReportIdentity,
 } from "@/lib/kyosan/report-match";
 import { splitKyosanPhotos } from "@/lib/kyosan/report-photo-filter";
@@ -78,16 +79,31 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  * 접수 건 행을 잠근 뒤 **한 번 더** 본다:
  *
  *   1. 그 건이 아직 있는가 · 휴지통이 아닌가
- *   2. 접수번호가 그대로인가
+ *   2. 🔴 **짝이 정해진 방식에 맞는 검사**(아래 갈래)
  *   3. 모델도 S/N 도 어긋나지 않는가(`checkKyosanIdentity` — 둘 다 어긋나면 깬다)
  *   4. 같은 `sourceSha256` 이 이미 들어 있지 않은가
  *
  * 잠금이 이것들을 줄 세운다 — 같은 연락서를 두 번 동시에 올려도 뒤쪽은 앞쪽이
  * 남긴 흔적을 보고 거절된다.
  *
+ * ── 🔴 저장 직전 검사는 두 갈래다 (2026-09-21, 조각 S4b) ─────────────
+ * 사용자 결정: 「짝이 여럿일 때 사람이 고르면 저장까지 받아들이되, 저장 직전
+ * 검사를 「접수번호가 같은가」 → 「고른 건의 모델·S/N 이 연락서와 맞는가」로
+ * 바꾼다.」 **안전장치를 없앤 것이 아니라 갈래를 나눈 것이다**:
+ *   · `basis: "intake-number"`(자동으로 정해진 짝) → 지금까지와 똑같이
+ *     **접수번호 동일성**을 본다. 실측에서 이 검사가 없었다면 469장 중 12장이
+ *     엉뚱한 건에 붙었을 것이다.
+ *   · `basis: "human-choice"`(사람이 후보에서 고른 짝) → 연락서에 접수번호가
+ *     없거나 그 번호의 건이 없어 견줄 것이 없다. 대신 **잠금 안에서 다시 읽은
+ *     제품 행의 모델·S/N** 을 연락서와 대조한다 — 후보가 될 때 쓴 바로 그 규칙
+ *     (S/N 이 같고 모델이 어긋나지 않는다)을 저장 직전에 한 번 더 확인한다.
+ * 🔴 어느 쪽도 무검사로 통과하지 않는다.
+ *
  * ── 🔴 `matched` 가 아니면 저장하지 않는다 ───────────────────────────
- * `ambiguous`(사람이 골라야 한다)도 저장 금지다. 사람이 고르는 화면은 S4 이고,
- * 그 화면이 생겨도 이 함수는 **고른 뒤의 건 id 를 받아 다시 판정**한다.
+ * `ambiguous`(사람이 골라야 한다)도 저장 금지다. 사람이 고른 것은
+ * `chosenRepairCaseId` 로 들어와 **이 함수가 다시 돌린 짝짓기 안에서** 후보
+ * 목록에 있을 때만 `matched` 가 된다 — 화면이 「골랐다」고 말한 것을 그대로
+ * 믿는 것이 아니라, 서버가 다시 만든 후보 목록으로 확인한다.
  *
  * ── 한 트랜잭션 · 그리고 파일 ────────────────────────────────────────
  * 보고서 한 장 + 줄 + 원인 + 사용 부품 + 첨부 행 + 이식 흔적이 **한
@@ -187,11 +203,21 @@ export type KyosanReportImportInput = {
   /** 🔴 판독기에 넘긴 것과 **같은 바이트**. 첨부로 남기고 사진도 여기서 꺼낸다. */
   sourceBytes: Buffer;
   /**
-   * 🔴 사람이(또는 미리보기가) 고른 수리 건. 주면 **다시 판정한 건과 같은지
-   * 확인**하고, 다르면 `TARGET_CHANGED` 로 거절한다 — 미리보기와 저장 사이에
+   * 🔴 **자물쇠다.** 화면이 보여 준 건과 저장 직전에 다시 판정한 건이 같은지
+   * 확인하고, 다르면 `TARGET_CHANGED` 로 거절한다 — 미리보기와 저장 사이에
    * 자료가 바뀐 것을 잡아내는 자리다.
+   *
+   * ⚠️ 「사람이 고른 것」을 나르는 통로가 **아니다.** 그 통로는 아래
+   * `chosenRepairCaseId` 이고, 둘을 겹쳐 쓰면 자물쇠가 제 구실을 못 한다.
    */
   expectedRepairCaseId?: string | null;
+  /**
+   * 🔴 후보가 여럿(`identity-candidates`)일 때 **사람이 화면에서 고른** 수리 건
+   * (조각 S4b). 이 함수가 **다시 돌린** 짝짓기의 후보 목록 안에 있을 때만 짝으로
+   * 올라가고(`basis: "human-choice"`), 목록 밖이면 그냥 무시되어 `ambiguous` 로
+   * 남는다 — 화면이 보여 준 적 없는 건에는 넣지 않는다.
+   */
+  chosenRepairCaseId?: string | null;
   actorUserId: string;
   storage: StorageAdapter;
   /** 발행일을 하나도 못 읽었을 때 쓸 날짜. 시험이 오늘에 흔들리지 않게 받는다. */
@@ -244,19 +270,19 @@ export async function importKyosanReport(
     caseByIntakeNumber:
       identity.intakeNumber === null ? null : (targets.casesByIntakeNumber.get(identity.intakeNumber) ?? null),
     identityCandidates: serialKey === null ? [] : (targets.casesBySerialKey.get(serialKey) ?? []),
+    // 🔴 사람이 고른 것은 **여기서 다시 만든 후보 목록** 안에 있을 때만 쓰인다.
+    chosenRepairCaseId: input.chosenRepairCaseId ?? null,
   });
 
   // 🔴 `matched` 가 아니면 여기서 끝난다. `ambiguous` 도 저장 금지다.
+  const matched = match.outcome.kind === "matched" ? match.outcome : null;
   const caseState =
-    match.outcome.kind === "matched"
-      ? (targets.caseStates.get(match.outcome.candidate.repairCaseId) ?? null)
-      : null;
+    matched === null ? null : (targets.caseStates.get(matched.candidate.repairCaseId) ?? null);
   const preview = buildKyosanReportPreview(report, match, caseState);
 
-  if (preview.plan === null) {
+  if (preview.plan === null || matched === null) {
     const alreadyImported =
-      match.outcome.kind === "matched" &&
-      (caseState?.importedSourceSha256.includes(report.sourceSha256) ?? false);
+      matched !== null && (caseState?.importedSourceSha256.includes(report.sourceSha256) ?? false);
     return {
       ok: false,
       code: alreadyImported ? "ALREADY_IMPORTED" : "NOT_IMPORTABLE",
@@ -320,6 +346,8 @@ export async function importKyosanReport(
         repairCaseId: plan.repairCaseId,
         identity,
         sourceSha256: report.sourceSha256,
+        // 🔴 화면이 보낸 말이 아니라 **방금 다시 돌린 짝짓기**가 내놓은 근거다.
+        basis: matched.basis,
       });
 
       const created = await createServiceReportInTx(tx, {
@@ -422,12 +450,25 @@ export type KyosanLockedCase = {
  * 🔴 접수 건 행을 `FOR UPDATE` 로 잠그고 **네 가지를 다시 본다**(머리말).
  * 막히면 던진다 — 트랜잭션이 통째로 되돌아가야 하기 때문이다.
  *
+ * ── 🔴 `basis` 가 둘째 검사를 가른다 (조각 S4b) ──────────────────────
+ *  · `intake-number` — **접수번호가 그대로인가**(지금까지의 검사 그대로).
+ *  · `human-choice`  — 접수번호로 정해진 짝이 아니라 견줄 번호가 없다. 대신
+ *    **잠금 안에서 다시 읽은 제품 행의 모델·S/N** 을 연락서와 대조한다:
+ *    S/N 이 `agree` 여야 하고 모델이 `differ` 이면 안 된다(후보가 될 때 쓴 규칙).
+ * 🔴 어느 쪽도 그냥 통과시키지 않는다.
+ *
  * ⚠️ 잠금은 `repair_cases` 한 표에만 건다. 고객사는 LEFT JOIN 이라 함께 잠그면
  * Postgres 가 「바깥 조인의 nullable 쪽은 잠글 수 없다」로 거절한다.
  */
 export async function lockAndReconfirm(
   tx: Tx,
-  params: { repairCaseId: string; identity: KyosanReportIdentity; sourceSha256: string }
+  params: {
+    repairCaseId: string;
+    identity: KyosanReportIdentity;
+    sourceSha256: string;
+    /** 🔴 짝이 어떻게 정해졌는가 — 짝짓기가 내놓은 값을 그대로 넘긴다. */
+    basis: KyosanMatchBasis;
+  }
 ): Promise<KyosanLockedCase> {
   const [current] = await tx
     .select({
@@ -451,7 +492,9 @@ export async function lockAndReconfirm(
       "짝지은 수리 건이 사라졌거나 휴지통으로 갔습니다 — 넣지 않았습니다."
     );
   }
-  if (current.intakeNumber !== params.identity.intakeNumber) {
+  // 🔴 자동으로 정해진 짝만 접수번호를 견준다. 사람이 고른 짝은 애초에 그 번호로
+  //    정해진 것이 아니라 견줄 것이 없고, 대신 아래에서 모델·S/N 을 대조한다.
+  if (params.basis === "intake-number" && current.intakeNumber !== params.identity.intakeNumber) {
     throw new ImportAbort(
       "TARGET_CHANGED",
       "짝지은 수리 건의 접수번호가 그 사이에 바뀌었습니다 — 넣지 않았습니다."
@@ -506,6 +549,16 @@ export async function lockAndReconfirm(
     throw new ImportAbort(
       "TARGET_CHANGED",
       "짝지은 수리 건의 모델도 S/N 도 연락서와 다릅니다 — 사람이 확인해야 합니다. 넣지 않았습니다."
+    );
+  }
+
+  // 🔴 사람이 고른 짝은 여기가 접수번호 검사를 대신한다 — 후보가 될 때 쓴 규칙
+  //    (S/N 이 같고 모델이 어긋나지 않는다)을 **잠금 안에서 다시 읽은 값**으로
+  //    한 번 더 본다. 모델·S/N 이 그 사이에 바뀌었으면 여기서 막힌다.
+  if (params.basis === "human-choice" && (check.serialNumber !== "agree" || check.model === "differ")) {
+    throw new ImportAbort(
+      "TARGET_CHANGED",
+      "고른 수리 건의 모델·S/N 이 연락서와 맞지 않습니다 — 사람이 확인해야 합니다. 넣지 않았습니다."
     );
   }
 
