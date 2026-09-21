@@ -63,6 +63,40 @@
         border-left: 4px solid var(--accent); padding: .8rem 1rem;
         border-radius: 6px; margin: 1rem 0; }
 
+  /* ── 「지금 하고 있는 것」 카드 ───────────────────────────────── */
+  .now-list { display: grid; gap: .75rem; margin: 1.1rem 0 1.6rem; }
+  .now-item {
+    position: relative; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: .95rem 1.15rem .95rem 1.5rem; overflow: hidden;
+  }
+  .now-item::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+    background: var(--run);
+  }
+  .now-item.fin::before { background: var(--accent); }
+  .now-item.fin { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+
+  .now-head { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; }
+  .now-mark { font-size: .95rem; line-height: 1; }
+  .now-item.now  .now-mark { color: var(--run); }
+  .now-item.fin  .now-mark { color: var(--accent); }
+  .now-title { font-weight: 700; font-size: 1.04rem; letter-spacing: -.01em; }
+
+  .chip {
+    font-size: .76rem; padding: .12rem .55rem; border-radius: 99px;
+    background: var(--soft); color: var(--dim);
+    border: 1px solid var(--line); white-space: nowrap;
+  }
+  .chip.run { color: var(--run); border-color: color-mix(in srgb, var(--run) 35%, var(--line));
+              background: color-mix(in srgb, var(--run) 9%, transparent); }
+  .chip.fin { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+              background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+  .now-body { margin: .4rem 0 0; font-size: .94rem; }
+  .now-body b { font-weight: 600; }
+  .now-note { margin: .3rem 0 0; color: var(--dim); font-size: .86rem; }
+
   footer { margin-top: 3.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line);
            color: var(--dim); font-size: .86rem; }
 </style>
@@ -83,26 +117,74 @@
 
 <h2>지금 하고 있는 것</h2>
 
-<table>
-  <tr><th>무엇</th><th>어디</th><th>끝나면</th></tr>
-  <tr class="now">
-    <td><b>결재를 순차로</b></td>
-    <td>휴가</td>
-    <td>한 명씩 차례로 결재하고 <b>「n/m 단계 · 지금 ○○○ 차례」</b>가 보입니다.
-        승인 절차 설명 글도 함께 고칩니다</td>
-  </tr>
-  <tr class="now">
-    <td><b>계정 삭제 구멍</b></td>
-    <td>A/S</td>
-    <td>계정을 지울 때 <b>견적서 결재</b>도 다른 사람에게 넘어갑니다.
-        지금은 통째로 빠져 있어 네 군데가 샙니다</td>
-  </tr>
-  <tr class="now">
-    <td><b>「작업 종료」 수리</b></td>
-    <td>바탕화면</td>
-    <td>PO·휴가도 꺼지고, <b>끈 뒤에 정말 꺼졌는지 확인</b>합니다</td>
-  </tr>
-</table>
+<div class="now-list">
+
+  <div class="now-item now">
+    <div class="now-head">
+      <span class="now-mark">●</span>
+      <span class="now-title">「작업 종료」 수리</span>
+      <span class="chip">바탕화면</span>
+      <span class="chip run">진행 중</span>
+    </div>
+    <p class="now-body">PO·휴가도 꺼지게 하고, <b>끈 뒤에 정말 꺼졌는지 확인</b>합니다.</p>
+    <p class="now-note">지금은 그 둘을 아예 몰라 사람이 직접 껐고,
+    떠 있는데 「이미 꺼져 있음」이라고 넘어간 적이 있습니다.</p>
+  </div>
+
+</div>
+
+<h3>방금 끝난 것</h3>
+
+<div class="now-list">
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">결재를 한 명씩 차례로</span>
+      <span class="chip">휴가</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body">첫 사람만 차례가 오고, <b>그 사람이 처리해야 다음으로</b> 넘어갑니다.
+    결재함과 내 휴가에 <b>「n/m 단계 · 지금 ○○○ 차례」</b>가 보입니다.</p>
+    <p class="now-note">「승인 절차」 설명 글도 다시 썼습니다 —
+    옛 글은 「결재는 동시에 간다」로 끝나 거짓이 됐습니다.</p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">계정을 지울 때 견적서 결재도 넘긴다</span>
+      <span class="chip">A/S</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body">견적서 결재가 계정 삭제 경로에 <b>통째로 빠져 있어 네 군데가 샜습니다.</b>
+    그중 둘은 오류도 없이 조용히 새던 것입니다.</p>
+    <p class="now-note">종류를 더하면 컴파일러가 빈 자리를 잡도록 두 곳을 표로 바꿨습니다.</p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">견적서 편집 폼</span>
+      <span class="chip">PO / 내자</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body">목록에서 <b>줄을 누르면 편집 폼이 열리고 저장됩니다</b>(조각 3b-1).</p>
+    <p class="now-note">종류를 바꿔도 작업 내역이 아직 자동으로 안 채워집니다 — 조각 3c 에서 살아납니다.</p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">연락서를 상세의 제자리 칸으로</span>
+      <span class="chip">A/S</span>
+      <span class="chip fin">올림</span>
+    </div>
+    <p class="now-body">보고서에 몰아넣지 않고 <b>신고 증상과 작업 기록</b>으로 나눠 넣습니다.
+    <b>보고서는 만들지 않습니다.</b></p>
+  </div>
+
+</div>
 
 
 <h2>큰 일 넷 — 어디까지 왔나</h2>
@@ -128,9 +210,9 @@
   </div>
   <div class="card">
     <h4>휴가 관리</h4>
-    <div class="bar"><span style="width:88%"></span></div>
-    <div class="n">13<span class="sub"> / 15 단계</span></div>
-    <div class="sub">순차 결재 진행 중</div>
+    <div class="bar"><span style="width:93%"></span></div>
+    <div class="n">14<span class="sub"> / 15 단계</span></div>
+    <div class="sub">남은 것: 결재 알림</div>
   </div>
 </div>
 
@@ -203,8 +285,8 @@
   <tr class="fin"><td class="c">11</td><td>🔴 <b>결재선을 직급이 아니라 사람으로</b> — 순서 있는 사람 목록 하나</td><td class="c st done">✅</td></tr>
   <tr class="fin"><td class="c">12</td><td><b>알림 종</b></td><td class="c st done">✅</td></tr>
   <tr class="fin"><td class="c">13</td><td><b>직급 순서</b>를 화면에서 걷어내기</td><td class="c st done">✅</td></tr>
-  <tr class="now"><td class="c">14</td><td><b>결재를 순차로</b> — 한 명씩 차례로</td><td class="c st run">🔵 진행</td></tr>
-  <tr><td class="c">15</td><td><b>결재 알림</b> — 「내가 결재할 차례다」</td><td class="c st wait">⬜</td></tr>
+  <tr class="fin"><td class="c">14</td><td><b>결재를 한 명씩 차례로</b> — 앞사람이 처리해야 다음으로</td><td class="c st done">✅</td></tr>
+  <tr><td class="c">15</td><td><b>결재 알림</b> — 「내가 결재할 차례다」. 설계는 끝났습니다</td><td class="c st wait">⬜</td></tr>
 </table>
 
 <p class="pct"><b>결재선 규칙</b>: 순서 있는 사람 목록 하나 · 신청자가 목록에 있으면 자기 뒤 사람만 ·
@@ -235,8 +317,9 @@
 <h2>다음에 할 일</h2>
 
 <ol>
-  <li><b>돌고 있는 셋 마무리</b> — 휴가 순차 결재 · 계정 삭제 구멍 · 「작업 종료」 수리</li>
-  <li><b>A/S 에 알림 종</b> — 자체 종을 묶음 종으로 (알림 조각 6e)</li>
+  <li><b>「작업 종료」 수리 마무리</b> — 돌고 있습니다</li>
+  <li><b>A/S 에 알림 종</b> — 자체 종을 묶음 종으로 (알림 조각 6e).
+      <span class="pct">묶음 쪽 자리 넷은 이미 올라가 있어 바로 할 수 있습니다</span></li>
   <li><b>연락서 3건 재이식</b> — 지우고 새 방식으로 다시</li>
   <li><b>일본어 번역</b> — A(85) → B(329) → C(130) → D(135).
       그 전에 번역이 저장값에 닿도록 배선</li>
