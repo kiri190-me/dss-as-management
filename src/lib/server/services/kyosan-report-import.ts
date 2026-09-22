@@ -800,8 +800,12 @@ async function appendUsedParts(
     //    모양(`part_id` 가 null)으로 넣는다.
     partId: null,
     partNameText: part.text,
-    // 연락서에 수량이 적히는 자리가 없다. 표의 CHECK 가 0 이하를 막으므로 1 이다.
-    quantity: 1,
+    // 🔴 수량은 연락서의 `交換部品詳細` 시트 `数量` 칸에서 온다(`parts-detail-sheet.ts`).
+    //    (예전 주석은 「연락서에 수량이 적히는 자리가 없다」였는데 **거짓이었다** —
+    //    Card 시트에는 없지만 그 시트에는 있다. 실측 1,315줄 중 1,285줄에 수가 적혀
+    //    있었고, 30줄이 비어 있었다.) 적히지 않은 줄과 Card 시트에만 있는 부품은
+    //    1 로 둔다 — 표의 CHECK 가 0 이하를 막는다.
+    quantity: part.quantity ?? 1,
   }));
 
   await tx.insert(repairCaseUsedParts).values(nextLines);

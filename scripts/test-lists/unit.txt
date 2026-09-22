@@ -244,6 +244,7 @@ src/lib/domain/quote-approval-rules.test.ts
 src/lib/kyosan/card-grid.test.ts
 src/lib/kyosan/card-fields.test.ts
 src/lib/kyosan/report-marks.test.ts
+src/lib/kyosan/parts-detail-sheet.test.ts
 src/lib/kyosan/kyosan-report.test.ts
 src/lib/auth/portal-service-token.test.ts
 src/lib/domain/notification-links.test.ts

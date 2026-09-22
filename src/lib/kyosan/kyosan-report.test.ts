@@ -233,6 +233,66 @@ describe("판독 결과 — 항목·원인·해시", () => {
   });
 });
 
+/** 판본 C 의 교체부품상세 — 실측 머리글(16행) 배치 그대로, 값만 가짜. */
+const PARTS_DETAIL_CELLS: Record<string, string | number> = {
+  H1: "故障・修理",
+  A15: "交換部品（故障・予防措置）",
+  B16: "部品名 / 型式",
+  D16: "仕様書番号 / 型式",
+  G16: "数量",
+  H16: "状況",
+  A17: "①",
+  B17: "값-상세부품1",
+  D17: "값-상세규격1",
+  G17: 4,
+  H17: "故障・修理",
+};
+
+describe("🔴 交換部品詳細 시트도 함께 읽는다", () => {
+  test("Card 시트 밖의 교체 부품이 실려 온다 — 수량과 함께", () => {
+    const result = readKyosanReport(
+      workbookOf([
+        { name: "Card", cells: CARD_CELLS },
+        { name: "交換部品詳細", cells: PARTS_DETAIL_CELLS },
+        { name: "Repair_Report", cells: REPORT_CELLS },
+      ])
+    );
+    assert.ok(result.ok);
+    assert.deepEqual(
+      result.report.detailParts.map((part) => [part.name, part.quantity, part.sheetName]),
+      [["값-상세부품1", 4, "交換部品詳細"]]
+    );
+    assert.deepEqual(result.report.problems, []);
+  });
+
+  test("🔴 (RF)/(DC) 두 장짜리 판본은 두 시트가 이어 붙는다 — 실측 167장", () => {
+    const result = readKyosanReport(
+      workbookOf([
+        { name: "Card", cells: CARD_CELLS },
+        { name: "交換部品詳細(RF)", cells: PARTS_DETAIL_CELLS },
+        { name: "交換部品詳細(DC)", cells: { ...PARTS_DETAIL_CELLS, B17: "값-상세부품2", G17: 1 } },
+      ])
+    );
+    assert.ok(result.ok);
+    assert.deepEqual(
+      result.report.detailParts.map((part) => [part.name, part.sheetName]),
+      [
+        ["값-상세부품1", "交換部品詳細(RF)"],
+        ["값-상세부품2", "交換部品詳細(DC)"],
+      ]
+    );
+  });
+
+  test("🔴 그 시트가 없는 장에서 던지지 않고 빈 목록이 된다", () => {
+    const result = readKyosanReport(
+      workbookOf([{ name: "Card", cells: CARD_CELLS }, { name: "Repair_Report", cells: REPORT_CELLS }])
+    );
+    assert.ok(result.ok);
+    assert.deepEqual(result.report.detailParts, []);
+    assert.deepEqual(result.report.problems, []);
+  });
+});
+
 describe("🔴 같은 그림이 여러 시트에 있으면 한 번만 센다", () => {
   /** 실측: 1KB 짜리 아이콘 하나가 `Card` 30번 · `交換部品詳細` 30번 놓여 있었다. */
   const icon = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);

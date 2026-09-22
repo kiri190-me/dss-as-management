@@ -6,6 +6,11 @@ import { decodeXmlCharacterData } from "../xlsx/xml-entities";
 import { ZipArchive } from "../xlsx/zip-reader";
 import { readCardFields, type CardFields } from "./card-fields";
 import { normalizeKey } from "./card-grid";
+import {
+  pickPartsDetailSheetNames,
+  readPartsDetailSheet,
+  type KyosanDetailPart,
+} from "./parts-detail-sheet";
 import { pickRepairReportSheetName, readMarkGroup, type MarkGroup } from "./report-marks";
 import { collectPhotos, type KyosanPhoto } from "./report-photos";
 
@@ -35,7 +40,10 @@ import { collectPhotos, type KyosanPhoto } from "./report-photos";
  * 🔴 `Repair_Record` 시트는 읽지 않는다. 그 시트는 Card 를 **한 줄 어긋나게**
  * 참조한다(Card 의 라벨 줄을 값 줄로 본다). 거기서 읽으면 모든 항목이 한 칸씩
  * 밀린 채 그럴듯하게 채워진다 — 비어 있는 것보다 나쁜 결과다.
- * 읽는 곳은 **Card 계열 시트**와, ○ 표시를 읽는 **수리보고서 시트**뿐이다.
+ * 읽는 곳은 **Card 계열 시트**와, ○ 표시를 읽는 **수리보고서 시트**와,
+ * 교체 부품을 읽는 **`交換部品詳細` 계열 시트**다(2026-09-22 로 하나 늘었다 —
+ * Card 시트의 `５．処置` 머리글이 「나머지는 그 시트에 적으라」고 지시하고 있고,
+ * 그것을 읽지 않아 교체 부품이 절반 이상 빠지고 있었다. `parts-detail-sheet.ts`).
  *
  * ── 원본 파일 해시 ─────────────────────────────────────────────────────
  * 🔴 `sourceSha256` 은 나중에 **같은 연락서를 두 번 넣는 것**을 막는 데 쓴다.
@@ -63,6 +71,11 @@ export type KyosanReport = {
   cause: MarkGroup;
   /** 수리보고서 시트의 `処　置` 보기들과 ○ 가 찍힌 것. */
   action: MarkGroup;
+  /**
+   * `交換部品詳細` 계열 시트의 교체 부품 줄들. 시트가 없으면 빈 배열이다
+   * (`parts-detail-sheet.ts`). (RF)/(DC) 두 장짜리 판본은 두 시트가 이어 붙는다.
+   */
+  detailParts: readonly KyosanDetailPart[];
   photos: readonly KyosanPhoto[];
   /** 읽다가 만난 문제들. 고객 내용은 담지 않는다. */
   problems: readonly string[];
@@ -166,6 +179,22 @@ export function readKyosanReport(fileBytes: Buffer): KyosanReadResult {
     }
   }
 
+  // 🔴 이 시트가 없는 장에서 던지지 않는다 — 실측 469장에는 전부 있지만, 없는
+  //    판본이 나오더라도 「교체 부품 없음」으로 지나가야 이식이 멈추지 않는다.
+  const detailParts: KyosanDetailPart[] = [];
+  for (const detailSheetName of pickPartsDetailSheetNames(sheetNames)) {
+    try {
+      const detailGrid = readSheetGrid(archive, detailSheetName);
+      if (detailGrid) {
+        detailParts.push(...readPartsDetailSheet(detailGrid, detailSheetName));
+      } else {
+        problems.push("교체부품상세 시트 파트를 찾지 못했다");
+      }
+    } catch (error) {
+      problems.push(`교체부품상세 시트를 읽지 못했다 — ${errorMessage(error)}`);
+    }
+  }
+
   const photoScan = collectPhotos(archive, sheetNames);
   problems.push(...photoScan.problems);
 
@@ -180,6 +209,7 @@ export function readKyosanReport(fileBytes: Buffer): KyosanReadResult {
       card,
       cause,
       action,
+      detailParts,
       photos: photoScan.photos,
       problems,
     },

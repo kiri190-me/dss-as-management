@@ -11,6 +11,7 @@ import {
   type CardListValue,
 } from "./card-fields";
 import type { KyosanReport } from "./kyosan-report";
+import type { KyosanDetailPart } from "./parts-detail-sheet";
 import { matchKyosanReport, readKyosanIdentity, type KyosanCaseCandidate } from "./report-match";
 import { KYOSAN_FORM_ASSET_SHA256 } from "./report-photo-filter";
 import type { KyosanPhoto } from "./report-photos";
@@ -71,6 +72,7 @@ function reportOf(overrides: Partial<KyosanReport> = {}): KyosanReport {
     ),
     cause: { sectionAddress: "C30", options: ["製作不良", "部品不良"], marked: ["部品不良"] },
     action: { sectionAddress: "C28", options: ["現品引取", "部品交換"], marked: ["部品交換"] },
+    detailParts: [],
     photos: [photoOf("a".repeat(64), 30_000), photoOf("b".repeat(64), 1_161)],
     problems: [],
     ...overrides,
@@ -271,5 +273,104 @@ describe("연락서 미리보기", () => {
   test("미리보기는 원본 해시를 그대로 달고 다닌다 — S3b 가 중복을 막을 열쇠다", () => {
     const preview = previewOf(reportOf(), caseOf(), stateOf());
     assert.equal(preview.sourceSha256, SOURCE_SHA);
+  });
+});
+
+/**
+ * 🔴 실측(2026-09-22, 연락서 472장): Card 시트와 `交換部品詳細` 시트에 **같은
+ * 부품을 둘 다 적는 일이 흔하다** — 281장이 그렇고 겹친 짝이 929건이다. 그리고
+ * **45장은 Card 가 텅 비었는데 詳細에만 부품이 있었다**(그 장들은 부품이 하나도
+ * 안 들어가고 있었다). 아래 시험이 그 두 가지를 값으로 못 박는다.
+ */
+function detailPartOf(overrides: Partial<KyosanDetailPart> = {}): KyosanDetailPart {
+  return {
+    name: "값-부품A",
+    spec: null,
+    kind: "fault",
+    quantity: null,
+    status: null,
+    measure: null,
+    sheetName: "交換部品詳細",
+    address: "C8",
+    ...overrides,
+  };
+}
+
+describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친다", () => {
+  test("🔴 두 시트에 같은 부품이 있으면 두 번 들어가지 않는다 — 수량만 詳細에서 온다", () => {
+    const report = reportOf({
+      detailParts: [detailPartOf({ name: "값-부품A", quantity: 4 })],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A", quantity: 4 },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
+  });
+
+  test("🔴 詳細 시트에만 있는 부품이 뒤에 이어 붙는다", () => {
+    const report = reportOf({
+      detailParts: [
+        detailPartOf({ name: "값-부품C", quantity: 2, kind: "fault" }),
+        detailPartOf({ name: "값-부품D", quantity: 1, kind: "preventive", sheetName: "交換部品詳細(DC)" }),
+      ],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A" },
+      { kind: "preventive", text: "값-부품B" },
+      { kind: "fault", text: "값-부품C", quantity: 2 },
+      { kind: "preventive", text: "값-부품D", quantity: 1 },
+    ]);
+  });
+
+  test("🔴 Card 가 텅 비어도 詳細 시트만으로 부품이 들어간다 — 실측 45장이 그 꼴이다", () => {
+    const report = reportOf({
+      card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
+      detailParts: [detailPartOf({ name: "값-호스", quantity: 1 })],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-호스", quantity: 1 }]);
+  });
+
+  test("🔴 같은 이름이 詳細 시트에 두 줄이면 한 번만, 수량은 첫 줄에서", () => {
+    const report = reportOf({
+      card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
+      detailParts: [
+        detailPartOf({ name: "값-부품E", quantity: 3, sheetName: "交換部品詳細(RF)" }),
+        detailPartOf({ name: "값-부품E", quantity: 9, sheetName: "交換部品詳細(DC)" }),
+      ],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-부품E", quantity: 3 }]);
+  });
+
+  test("🔴 수량이 없는 줄은 열쇠가 아예 없다 — 넣는 쪽이 1 로 본다", () => {
+    const report = reportOf({
+      card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
+      detailParts: [detailPartOf({ name: "값-부품F", quantity: null })],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-부품F" }]);
+  });
+
+  test("詳細 시트가 비면 지금까지와 똑같다 — Card 시트만으로 뽑는다", () => {
+    const preview = previewOf(reportOf({ detailParts: [] }), caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A" },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
   });
 });

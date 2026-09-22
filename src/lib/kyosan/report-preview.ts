@@ -50,6 +50,13 @@ export type KyosanPreviewLine = {
 export type KyosanPreviewPart = {
   kind: "fault" | "preventive";
   text: string;
+  /**
+   * 🔴 `交換部品詳細` 시트의 `数量` 칸에서 읽은 수. **연락서에 수량이 적혀
+   * 있을 때만** 값이 있다 — 없으면 이 열쇠가 아예 없고, 넣는 쪽이 1 로 본다
+   * (`kyosan-report-import.ts` 의 `appendUsedParts`). Card 시트에만 있는 부품은
+   * 수량 칸이 없는 자리라 언제나 열쇠가 없다.
+   */
+  quantity?: number;
 };
 
 /** 짝지은 수리 건이 지금 어떤 상태인가. 질의가 읽어서 넣어 준다. */
@@ -155,21 +162,52 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
   return lines;
 }
 
-/** 교체 부품 — 고장분 · 예방분. 같은 글자는 한 번만. */
+/**
+ * 교체 부품 — 고장분 · 예방분. 같은 글자는 한 번만.
+ *
+ * ── 🔴 두 시트에서 모은다 ──────────────────────────────────────────────
+ * 연락서 양식이 「주원인 부품만 Card 에 고르고 **나머지는 `交換部品詳細` 시트에**
+ * 적으라」고 지시한다. 그래서 Card 시트만 읽으면 부품이 절반 이상 빠진다 —
+ * 실측 472장에서 Card 쪽이 1,129건, 詳細 쪽이 1,128건이고, **45장은 Card 가
+ * 텅 비었는데 詳細에만 부품이 있었다**(그 장들은 지금까지 부품이 하나도 안 들어갔다).
+ *
+ * ── 🔴 겹침을 어떻게 가리는가 ──────────────────────────────────────────
+ * 두 시트에 **같은 부품을 둘 다 적는 일이 흔하다** — 실측 472장 중 281장이
+ * 그렇고, 겹친 짝이 929건이다. 가리지 않으면 그만큼 두 번 들어간다.
+ * 가리는 열쇠는 **부품 이름 글자 그대로**다(기존 규칙과 같다). `normalizeKey` 로
+ * 눌러 견주어도 실측에서 **한 건도 더 잡히지 않아**(929 → 929) 기존 규칙을
+ * 바꾸지 않았다.
+ *
+ * 차례는 **Card 시트가 먼저**다(지금까지 나온 차례를 흩지 않는다). 다만 같은
+ * 이름이 詳細 시트에도 있으면 **수량만 그쪽에서 가져온다** — 수량 칸은 詳細
+ * 시트에만 있기 때문이다. 詳細에만 있는 이름은 뒤에 이어 붙인다.
+ */
 export function buildKyosanPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
+  // 같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다(뒤 줄은 겹침이다).
+  const quantityByText = new Map<string, number>();
+  for (const part of report.detailParts) {
+    const text = part.name.trim();
+    if (text === "" || part.quantity === null || quantityByText.has(text)) continue;
+    quantityByText.set(text, part.quantity);
+  }
+
   const parts: KyosanPreviewPart[] = [];
   const seen = new Set<string>();
+  const push = (kind: KyosanPreviewPart["kind"], text: string): void => {
+    if (text === "" || seen.has(text)) return;
+    seen.add(text);
+    const quantity = quantityByText.get(text);
+    parts.push(quantity === undefined ? { kind, text } : { kind, text, quantity });
+  };
+
   for (const [key, kind] of [
     ["faultParts", "fault"],
     ["preventiveParts", "preventive"],
   ] as const) {
-    for (const value of report.card.lists[key].values) {
-      const text = value.trim();
-      if (text === "" || seen.has(text)) continue;
-      seen.add(text);
-      parts.push({ kind, text });
-    }
+    for (const value of report.card.lists[key].values) push(kind, value.trim());
   }
+  for (const part of report.detailParts) push(part.kind, part.name.trim());
+
   return parts;
 }
 
