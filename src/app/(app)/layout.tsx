@@ -11,6 +11,13 @@ import { redirect } from "next/navigation";
   갖는다(TopBar.tsx). 인셋을 가진 요소는 언제나 하나여야 한다.
 */
 import "@dss/ui/styles.css";
+/*
+  머리말의 알림 종(@dss/ui 의 NotificationBell)의 생김새. 🔴 위 메뉴바의
+  `styles.css` 와 **다른 파일**이다 — 묶음은 조각마다 스타일시트를 한 장씩
+  따로 내준다(CSS 에서 @import 로 묶는 것을 그쪽 시험이 막는다). 둘 다 있어야
+  하고, 이 줄이 빠지면 종이 모양 없이 뜬다.
+*/
+import "@dss/ui/notification-bell.css";
 import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import SavePopupHost from "@/components/common/SavePopup";

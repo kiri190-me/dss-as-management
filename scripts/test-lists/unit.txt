@@ -260,3 +260,4 @@ src/lib/domain/kyosan-report-import/preview-view.test.ts
 src/lib/server/actions/kyosan-report-import.test.ts
 src/lib/domain/weekly-report-kind-filter.test.ts
 src/components/dashboard/weekly-report-kind-filter-screen.test.ts
+src/lib/domain/notification-bell-items.test.ts

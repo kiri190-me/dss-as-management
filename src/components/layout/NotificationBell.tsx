@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
+import { useState, useSyncExternalStore } from "react";
+import { NotificationBell as SharedNotificationBell } from "@dss/ui";
+import type { NotificationBellItem } from "@dss/ui";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
-import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
+import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
@@ -18,44 +19,54 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
 
 /**
  * ============================================================================
- * 헤더의 종 알림
+ * 헤더의 종 알림 — 겉은 공용 묶음(@dss/ui), 속은 A/S 의 사정
  * ============================================================================
  * 사이드바의 결재 배지는 **숫자 하나**라 "3건 있다"까지만 말한다. 무엇인지
  * 보려면 목록 페이지를 열어서 다시 찾아야 한다. 종은 건별로 펼쳐 보여 주고
  * 그 건의 상세로 바로 보낸다.
  *
+ * ── 🔴 그리는 일은 묶음이 한다 ──────────────────────────────────────────
+ * 사내 시스템이 여섯인데(A/S · 포털 · 계측기 · 개선요청 · PO/내자 · 휴가) 종은
+ * A/S 에만 있었다. 「어느 시스템에 있든 종 하나를 열면 모든 시스템의 알림이
+ * 보인다」로 가기로 해서, 종의 겉모습은 @dss/ui 로 뺐고 다른 네 사이트가 이미
+ * 같은 것을 달았다. 이 파일은 그 묶음 종의 **껍데기**다 — 단추도, 펼침 패널도,
+ * 목록 마크업도 여기 없다.
+ *
+ * 묶음 종은 <details>/<summary> 라 여닫기를 **브라우저가** 한다. 그래서 여기
+ * 있던 isOpen 상태와 바깥 클릭·Esc 닫기 효과가 사라졌다(묶음의 BellBehavior 가
+ * 한다). 덤으로 정적 렌더 시험이 **펼친 속까지** 그대로 본다.
+ *
  * ── 종류를 모른다 ───────────────────────────────────────────────────────
  * 이 컴포넌트에는 "결재"라는 말이 한 군데도 없고, 종류를 보고 갈라지는 분기도
- * 없다. NotificationItem 한 모양만 그리므로, 알림 종류가 늘어도 여기는 고치지
- * 않는다 — 종류는 db/queries/notifications.ts의 레지스트리에 등록한다.
+ * 없다. 알림 종류가 늘어도 여기는 고치지 않는다 — 종류는
+ * db/queries/notifications.ts 의 레지스트리에 등록한다.
  *
- * 그 규칙은 NotificationBell.test.tsx가 이 파일의 소스를 직접 읽어 지킨다.
+ * 그 규칙은 NotificationBell.test.tsx 가 이 파일의 소스를 직접 읽어 지킨다.
  *
- * 종류마다 다른 **이름과 색**은 화면이 정하지 않고 도메인의
- * NOTIFICATION_KIND_META를 **읽기만** 한다(표 조회이지 분기가 아니다). 종류가
- * 늘면 그 표를 채우는 것으로 끝나고, 빠뜨리면 notification-settings.test.ts가
- * 잡는다.
+ * 종류마다 다른 **이름**은 도메인의 NOTIFICATION_KIND_META 를 읽어 옮겨 담는
+ * 자리(domain/notification-bell-items.ts)가 싣는다. **색**은 더 이상 이쪽이
+ * 정하지 않는다 — 묶음이 종류 코드를 해시해 제 색 칸을 고른다. 클래스 이름을
+ * 그대로 건네면 Tailwind v4 가 node_modules 를 훑지 않아 색이 조용히 사라진다.
  *
  * ── 눌러서 확인하는 알림 ────────────────────────────────────────────────
  * 결재 결과처럼 처리할 것이 없는 정보성 알림은 줄을 누르면 「확인함」을 적고 종에서
- * 뺀다. 어느 줄이 그런 줄인지도 화면이 정하지 않는다 — 도메인 판정
- * (isAcknowledgeableNotificationKind) **한 곳**을 부른다(handleNotificationPicked).
- * 이동은 확인 저장을 기다리지 않고, 저장이 실패해도 막히지 않는다 — 실패하면 그
- * 줄이 다시 나타날 뿐이다.
+ * 뺀다. 🔴 묶음은 **모든 줄에서** 확인 함수를 부른다 — 「눌러서 확인하는 줄인가」는
+ * 묶음이 알 수 없는 A/S 안쪽 사정이라, 도메인 판정
+ * (isAcknowledgeableNotificationKind) **한 곳**으로 여기서 가린다
+ * (handleNotificationPicked). 이동은 평범한 <a href> 가 하므로 확인 저장을
+ * 기다리지 않고, 저장이 실패해도 막히지 않는다 — 실패하면 그 줄이 다시 나타날 뿐이다.
  *
- * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
- * 색약이신 분에게는 색 차이가 사라지고 흑백 인쇄에는 아무것도 남지 않는다.
- * 그래서 종류 **이름을 글자로도** 한 줄 위에 함께 적는다. 이름을 지금 줄
- * (`대상 · 상세`) 안에 끼워 넣지 않고 윗줄로 올린 이유는 truncate 때문이다 —
- * 상세가 이미 잘릴 수 있는 자리라, 같은 줄에 글자를 더하면 그만큼 상세가 먼저
- * 잘린다. 윗줄로 올리면 지금 줄의 폭이 한 글자도 줄지 않는다.
+ * ── 묶음에 올 수 없는 것은 footer 로 넣는다 ─────────────────────────────
+ * 브라우저 알림 권한 안내와 「시험 알림」 단추는 `navigator`·사람마다 갈라 쓰는
+ * localStorage·이 사이트의 아이콘 경로를 문다. 묶음은 제 시험으로 그것들을
+ * 금지하므로(그쪽 no-network.test.ts), 자리(`footer`)만 내주고 사이트가 제 것을
+ * 끼워 넣는다. 🔴 함수가 아니라 **노드**를 넘긴다.
  *
  * ── 모바일 폭 ───────────────────────────────────────────────────────────
- * TopBar.tsx의 주석에 적힌 사고(오른쪽 묶음이 폰에서 헤더를 가로로 넘치게
- * 만들어 햄버거조차 누르기 어려웠던 일) 때문에, 종은 햄버거와 같은 h-9 w-9
- * 아이콘 버튼 하나를 넘지 않는다. 펼침 패널도 화면 밖으로 나가지 않게 폭을
- * `min(20rem, 100vw - 2rem)`로 잡는다 — 오른쪽 끝에 붙어 왼쪽으로 펼쳐지므로
- * 좁은 화면에서는 뷰포트 안쪽에 좌우 여백을 남기고 멈춘다.
+ * TopBar.tsx 의 주석에 적힌 사고(오른쪽 묶음이 폰에서 헤더를 가로로 넘치게
+ * 만들어 햄버거조차 누르기 어려웠던 일) 때문에, 종은 햄버거와 같은 아이콘 버튼
+ * 하나를 넘지 않고 `ml-auto shrink-0` 으로 오른쪽 끝에 붙어 눌리지 않는다.
+ * 펼침 패널이 화면 밖으로 나가지 않게 폭을 제한하는 일은 묶음의 CSS 가 한다.
  * ============================================================================
  */
 
@@ -71,27 +82,35 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
 export type AcknowledgeNotification = (input: { notificationKey: string }) => Promise<{ ok: boolean }>;
 
 /**
- * 줄 하나를 눌렀을 때 이동 **전에** 할 일. 이동 자체는 Link 가 한다.
+ * 확인을 가르고 적는 데 필요한 **최소한의 모양**.
  *
- * 🔴 확인할지 말지는 도메인 판정 한 곳이 정한다 — 종류 이름을 여기 적거나 종류로
- * 갈라지지 않는다(이 파일 머리말). 할 일 알림은 이 판정에서 거짓이라 확인 액션이
- * 불리지 않고, 동작이 이 기능 전과 한 글자도 다르지 않다(onNavigate 만 부른다).
+ * A/S 의 NotificationItem 과 묶음이 돌려주는 NotificationBellItem 이 둘 다 이것을
+ * 만족한다(옮겨 담을 때 id 와 kind 를 그대로 싣는다 — notification-bell-items.ts).
+ * 그래서 아래 두 함수는 어느 쪽을 받아도 같은 판단을 한다.
+ */
+export type PickedNotification = { id: string; kind: string };
+
+/**
+ * 줄 하나를 눌렀을 때 할 일. **이동은 하지 않는다** — 묶음의 줄은 평범한
+ * <a href> 라 브라우저가 알아서 나간다.
+ *
+ * 🔴 묶음은 **모든 줄에서** 이 경로로 들어온다. 확인할지 말지는 도메인 판정 한
+ * 곳이 정한다 — 종류 이름을 여기 적거나 종류로 갈라지지 않는다(이 파일 머리말).
+ * 할 일 알림은 이 판정에서 거짓이라 확인 액션이 불리지 않는다.
  *
  * 🔴 확인은 기다리지 않는다 — onAcknowledge 는 저장을 **시작만** 하고 곧바로
  * 돌아오고, 그것이 던져도 이동은 그대로 간다.
  */
 export function handleNotificationPicked(
-  item: NotificationItem,
-  handlers: { onAcknowledge?: (item: NotificationItem) => void; onNavigate: () => void }
+  item: PickedNotification,
+  handlers: { onAcknowledge?: (item: PickedNotification) => void }
 ): void {
-  if (handlers.onAcknowledge && isAcknowledgeableNotificationKind(item.kind)) {
-    try {
-      handlers.onAcknowledge(item);
-    } catch {
-      // 확인을 못 적어도 이동은 막지 않는다 — 알림이 종에 남을 뿐이다.
-    }
+  if (!handlers.onAcknowledge || !isAcknowledgeableNotificationKind(item.kind)) return;
+  try {
+    handlers.onAcknowledge(item);
+  } catch {
+    // 확인을 못 적어도 이동은 막지 않는다 — 알림이 종에 남을 뿐이다.
   }
-  handlers.onNavigate();
 }
 
 /**
@@ -103,10 +122,16 @@ export function handleNotificationPicked(
  * 종에 방금 누른 줄이 잠깐 남는다. 저장이 성사되면 서버 액션이 종을 다시 계산하게
  * 하므로(revalidatePath) 그 뒤로는 서버가 준 목록에도 그 줄이 없다.
  *
+ * 🔴 묶음 종으로 갈아끼운 뒤로는 **누른 줄이 눈에서 곧바로 사라지지는 않는다.**
+ * 이동이 <a href> 라 브라우저가 곧장 다음 화면으로 넘어가기 때문이다(상태를 고쳐도
+ * 그릴 틈이 없다). 그래도 이 갈래를 그대로 두는 이유는 두 가지다 — 확인 기록을
+ * 적는 일 자체가 여기서 시작되고, 같은 화면에 머무는 경우(같은 주소를 다시 누르는
+ * 등)에는 여전히 이 목록 거르기가 종과 배지를 맞춰 준다.
+ *
  * 결과를 기다리지 않고 곧바로 돌아온다 — 이동을 붙잡지 않기 위해서다.
  */
 export function acknowledgeInBackground(
-  item: NotificationItem,
+  item: PickedNotification,
   acknowledge: AcknowledgeNotification,
   view: { hide: (id: string) => void; restore: (id: string) => void }
 ): void {
@@ -124,60 +149,39 @@ export function acknowledgeInBackground(
   }, restore);
 }
 
-/**
- * 패널 안의 목록. 펼침 상태와 무관하게 정적 렌더로 검사할 수 있도록 따로
- * 두었다(이 저장소의 컴포넌트 테스트는 renderToStaticMarkup만 쓴다).
- */
-export function NotificationList({
-  items,
-  onNavigate,
-  onAcknowledge,
-}: {
-  items: readonly NotificationItem[];
-  onNavigate: () => void;
-  /** 눌러서 확인하는 줄을 눌렀을 때. 없으면 확인하지 않고 이동만 한다. */
-  onAcknowledge?: (item: NotificationItem) => void;
-}) {
-  if (items.length === 0) {
-    return (
-      <p className="px-3 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-        처리할 알림이 없습니다.
-      </p>
-    );
-  }
+/** 창처럼 사건을 던질 수 있는 것. 시험에서는 진짜 EventTarget 을 넣는다. */
+export type NotificationPanelAnnounceHost = { dispatchEvent(event: Event): boolean };
 
-  return (
-    <ul className="max-h-[60vh] overflow-y-auto py-1">
-      {items.map((item) => {
-        // 종류별 분기가 아니라 표 조회다 — 종류가 늘어도 이 줄은 그대로다.
-        const meta = NOTIFICATION_KIND_META[item.kind];
-        return (
-          <li key={item.id}>
-            <Link
-              href={item.href}
-              onClick={() => handleNotificationPicked(item, { onAcknowledge, onNavigate })}
-              className="block px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            >
-              <span className={`block truncate text-[11px] font-medium ${meta.toneClassName}`}>
-                {meta.label}
-              </span>
-              <span className="flex items-baseline gap-1.5">
-                <span className="shrink-0 text-sm font-medium text-zinc-900 dark:text-zinc-50">{item.subject}</span>
-                <span aria-hidden="true" className="text-zinc-400 dark:text-zinc-600">
-                  ·
-                </span>
-                <span className="truncate text-sm text-zinc-600 dark:text-zinc-400">{item.detail}</span>
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
-  );
+/**
+ * 🔴 종을 여는 순간 "지금 다시 세라"고 알린다.
+ *
+ * 여기 그려지는 목록은 서버 렌더 때 한 번 계산돼 내려온 값이라, 그대로 두면
+ * 마지막으로 센 뒤에 생긴 알림이 안 보인다. 종을 여는 것은 **사람이 지금 알림을
+ * 보겠다는 행동**이므로 그 자리에서 한 번 다시 세게 한다.
+ *
+ * 실제로 다시 세는 일은 BrowserNotifications 가 한다 — 화면의 다른 가지에 있어
+ * 이 state 가 닿지 않으므로 창 전체 신호로 잇는다(권한 신호와 같은 방법이고,
+ * 이름은 도메인에 한 번만 적혀 있다). 그쪽은 이 신호를 **권한과 무관하게**
+ * 듣는다: 브라우저 알림을 안 받는 사람도 종은 보기 때문이다.
+ *
+ * 🔴 **닫을 때는 불리지 않는다.** 그것을 가리는 일은 이제 묶음이 한다 — 묶음의
+ * `onOpen` 은 펼쳐진 순간에만 불린다(접는 것은 다 봤다는 행동이라 서버를 두드릴
+ * 이유가 없다). 여닫기를 연달아 해도 듣는 쪽의 최소 간격이 막는다.
+ *
+ * 🔴 묶음도 제 창 사건(BELL_OPENED_EVENT)을 같은 순간에 던지지만, **그것을 듣는
+ * 코드는 A/S 에 없다.** 여기는 이미 있는 신호를 그대로 쓴다 — 듣는 쪽
+ * (BrowserNotifications)을 고치지 않기 위해서다.
+ */
+export function announceNotificationPanelOpened(host: NotificationPanelAnnounceHost): void {
+  try {
+    host.dispatchEvent(new Event(NOTIFICATION_PANEL_OPENED_EVENT));
+  } catch {
+    // 신호를 못 보내도 지금 있는 목록은 그대로 보인다 — 다음 주기에 따라잡는다.
+  }
 }
 
 /**
- * 패널 맨 아래 — 컴퓨터·폰 알림창을 쓸 수 있는지, 못 쓴다면 왜인지.
+ * 펼친 칸 맨 아래 — 컴퓨터·폰 알림창을 쓸 수 있는지, 못 쓴다면 왜인지.
  *
  * 상태 → 문구/단추 판정은 도메인(notification-toast.ts)에 있고 여기는 그대로
  * 그린다. 그래서 정적 렌더로 상태마다 따로 검사할 수 있다.
@@ -267,6 +271,32 @@ export function NotificationSelfTest({
 }
 
 /**
+ * 묶음 종의 `footer` 자리에 들어가는 A/S 의 것 — 위 둘을 **이 차례로** 묶는다.
+ *
+ * 둘이 한꺼번에 보이는 상태는 없다(권한 안내는 아직 못 띄우는 상태에서, 시험
+ * 단추는 띄울 수 있는 상태에서만 그린다). 그래도 한 조각으로 묶어 두는 것은,
+ * 묶음이 내주는 자리가 **하나**이고 그 안의 차례를 여기서 정해야 하기 때문이다.
+ */
+export function NotificationBellFooter({
+  status,
+  onAsk,
+  onTest,
+  selfTestResult,
+}: {
+  status: BrowserNotificationStatus;
+  onAsk: () => void;
+  onTest: () => void;
+  selfTestResult: string | null;
+}) {
+  return (
+    <>
+      <BrowserNotificationNotice status={status} onAsk={onAsk} />
+      <NotificationSelfTest status={status} onTest={onTest} result={selfTestResult} />
+    </>
+  );
+}
+
+/**
  * 이 브라우저가 지금 알림을 띄울 수 있는가 — 서버 렌더와 어긋나지 않게 알아내는 방법.
  *
  * 렌더 중에 `Notification`을 직접 만지면 서버에서 터진다(이 파일은 클라이언트
@@ -293,6 +323,9 @@ function readBrowserNotificationStatus(): BrowserNotificationStatus {
 
 const unknownOnServer = (): BrowserNotificationStatus => "UNKNOWN";
 
+/** 알림이 하나도 없을 때 펼친 칸에 적는 말. 🔴 묶음은 기본값을 두지 않는다. */
+const EMPTY_LABEL = "처리할 알림이 없습니다.";
+
 export default function NotificationBell({
   items = [],
   acknowledge,
@@ -304,7 +337,6 @@ export default function NotificationBell({
    */
   acknowledge?: AcknowledgeNotification;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   /**
    * 눌러서 확인했고 저장이 진행 중이거나 끝난 줄. 서버가 준 목록이 다시 계산되기
    * 전까지 여기 든 줄은 그리지도 세지도 않는다(acknowledgeInBackground 주석).
@@ -313,9 +345,6 @@ export default function NotificationBell({
   const [acknowledgedIds, setAcknowledgedIds] = useState<ReadonlySet<string>>(() => new Set());
   const visibleItems =
     acknowledgedIds.size === 0 ? items : items.filter((item) => !acknowledgedIds.has(item.id));
-  const containerRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
 
   const detectedStatus = useSyncExternalStore(
     subscribeToNothing,
@@ -332,11 +361,13 @@ export default function NotificationBell({
   /** `시험 알림`을 눌러 본 결과. 아직 안 눌렀으면 null. */
   const [selfTestResult, setSelfTestResult] = useState<string | null>(null);
 
-  // 세는 규칙은 여기서 정하지 않는다 — 사이드바 배지와 같은 순수 헬퍼를 쓴다.
-  // 방금 눌러 확인한 줄은 세지 않는다(목록과 배지가 같은 말을 해야 한다).
+  // 🔴 세는 규칙은 묶음이 모른다 — 받은 숫자를 그대로 찍는다. 그래서 **옮겨 담기
+  // 전 원본**에서 여기가 센다(묶음 타입에는 targetKey 가 없다). 사이드바 배지와
+  // 같은 순수 헬퍼를 쓰므로 두 배지가 다른 말을 할 수 없다. 방금 눌러 확인한
+  // 줄은 세지 않는다(목록과 배지가 같은 말을 해야 한다).
   const count = countNotificationTargets(visibleItems.map((item) => item.targetKey));
 
-  function handleAcknowledge(item: NotificationItem) {
+  function handleAcknowledge(item: PickedNotification) {
     if (!acknowledge) return;
     acknowledgeInBackground(item, acknowledge, {
       hide: (id) => setAcknowledgedIds((prev) => new Set(prev).add(id)),
@@ -348,55 +379,6 @@ export default function NotificationBell({
         }),
     });
   }
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handlePointerDown(event: PointerEvent) {
-      // 종 버튼 자체를 다시 누른 것은 아래 onClick 토글이 처리한다.
-      if (event.target instanceof Node && containerRef.current?.contains(event.target)) return;
-      setIsOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setIsOpen(false);
-      // 키보드로 닫았으면 포커스가 사라진 패널 안에 남지 않게 종으로 돌려준다.
-      buttonRef.current?.focus();
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen]);
-
-  /**
-   * 🔴 종을 여는 순간 "지금 다시 세라"고 알린다.
-   *
-   * 여기 그려지는 목록은 서버 렌더 때 한 번 계산돼 내려온 값이라, 그대로 두면
-   * 마지막으로 센 뒤에 생긴 알림이 안 보인다. 종을 여는 것은 **사람이 지금 알림을
-   * 보겠다는 행동**이므로 그 자리에서 한 번 다시 세게 한다.
-   *
-   * 실제로 다시 세는 일은 BrowserNotifications가 한다 — 화면의 다른 가지에 있어
-   * 이 state가 닿지 않으므로 창 전체 신호로 잇는다(권한 신호와 같은 방법이고,
-   * 이름은 도메인에 한 번만 적혀 있다). 그쪽은 이 신호를 **권한과 무관하게**
-   * 듣는다: 브라우저 알림을 안 받는 사람도 종은 보기 때문이다.
-   *
-   * 닫을 때는 보내지 않는다(`isOpen`일 때만). 닫는 것은 보겠다는 행동이 아니라
-   * 다 봤다는 행동이라 서버를 두드릴 이유가 없다. 여닫기를 연달아 해도 저쪽의
-   * 최소 간격이 막는다.
-   */
-  useEffect(() => {
-    if (!isOpen) return;
-    try {
-      window.dispatchEvent(new Event(NOTIFICATION_PANEL_OPENED_EVENT));
-    } catch {
-      // 신호를 못 보내도 지금 있는 목록은 그대로 보인다 — 다음 주기에 따라잡는다.
-    }
-  }, [isOpen]);
 
   /**
    * 🔴 권한은 **사람이 이 단추를 눌렀을 때만** 묻는다.
@@ -443,64 +425,37 @@ export default function NotificationBell({
   }
 
   return (
-    <div ref={containerRef} className="relative ml-auto shrink-0">
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-label={count > 0 ? `알림 ${count}건` : "알림"}
-        aria-expanded={isOpen}
-        aria-haspopup="menu"
-        aria-controls={isOpen ? panelId : undefined}
-        className="relative flex h-9 w-9 items-center justify-center rounded-md text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
-        {/* 0건이면 배지를 그리지 않는다 — "0"이라고 적힌 배지는 할 일이 있는
-            것처럼 눈에 띄기만 한다(사이드바 배지와 같은 규칙). */}
-        {count > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-amber-500 px-1 text-center text-[10px] font-semibold leading-4 text-white tabular-nums dark:bg-amber-600">
-            {count}
-          </span>
-        )}
-      </button>
-
-      {isOpen && (
-        <div
-          id={panelId}
-          className="absolute right-0 top-full z-30 mt-1 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <div className="border-b border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-            알림
-          </div>
-          <NotificationList
-            items={visibleItems}
-            onNavigate={() => setIsOpen(false)}
-            onAcknowledge={acknowledge ? handleAcknowledge : undefined}
-          />
-          <BrowserNotificationNotice
-            status={notificationStatus}
-            onAsk={() => void handleAskForNotificationPermission()}
-          />
-          <NotificationSelfTest
-            status={notificationStatus}
-            onTest={() => void handleNotificationSelfTest()}
-            result={selfTestResult}
-          />
-        </div>
-      )}
-    </div>
+    <SharedNotificationBell
+      items={toNotificationBellItems(visibleItems)}
+      count={count}
+      // 🔴 `ml-auto shrink-0` 은 묶음 종에 **그대로** 건넨다. TopBar 에 래퍼를
+      //    하나 더 두면 펼침 패널의 기준(position: relative)이 두 겹이 된다
+      //    (TopBar.tsx 의 그 자리 주석). shrink-0 이 빠지면 좁은 폭에서 아이콘이
+      //    깎여 손가락에 안 잡힌다 — 그 선은 service-menu-bar.test.ts 가 지킨다.
+      className="ml-auto shrink-0"
+      // 🔴 colorScheme 은 넘기지 않는다. 기본값 "host" 가 사이트를 따라가는데,
+      //    A/S 의 다크는 <html class="dark"> 라 그것이 정확히 맞는 값이다.
+      //
+      // 🔴 알림이 0건이어도 종을 그린다 — 묶음의 기본값(그리지 않음)과 다르다.
+      //    머리말의 아이콘 자리가 들쭉날쭉하면 안 되고, 아래 footer 는 알림이
+      //    없을 때도 보여야 한다(권한 안내가 바로 그 자리다).
+      showWhenEmpty
+      emptyLabel={EMPTY_LABEL}
+      onOpen={() => announceNotificationPanelOpened(window)}
+      // 🔴 묶음은 **모든 줄에서** 이것을 부른다. 가리는 일은 A/S 가 한다.
+      onAcknowledge={(picked: NotificationBellItem) =>
+        handleNotificationPicked(picked, {
+          onAcknowledge: acknowledge ? handleAcknowledge : undefined,
+        })
+      }
+      footer={
+        <NotificationBellFooter
+          status={notificationStatus}
+          onAsk={() => void handleAskForNotificationPermission()}
+          onTest={() => void handleNotificationSelfTest()}
+          selfTestResult={selfTestResult}
+        />
+      }
+    />
   );
 }

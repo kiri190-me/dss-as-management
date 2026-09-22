@@ -25,6 +25,9 @@
       // transpilePackages 도 Tailwind @source 도 필요 없다(그쪽 README 5절).
       "@dss/ui": ["./vendor/dss-ui/src/index.ts"],
       "@dss/ui/styles.css": ["./vendor/dss-ui/src/service-menu/service-menu.css"],
+      // 🔴 조각마다 스타일시트가 한 장씩이다 — 종은 메뉴바와 **다른 파일**이다
+      // (묶음이 CSS 에서 @import 로 묶는 것을 제 시험으로 막는다).
+      "@dss/ui/notification-bell.css": ["./vendor/dss-ui/src/notification-bell/notification-bell.css"],
       // 서브모듈로 들어온 사내 공용 DB 스키마(vendor/dss-core, 별도 저장소).
       // A/S 와 PO 사이트가 같은 dss_as 를 **같은 타입**으로 본다 —
       // 손으로 베낀 복제본이 아니라 한 벌이라 컴파일러가 어긋남을 잡아 준다.
