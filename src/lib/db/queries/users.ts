@@ -127,6 +127,38 @@ export async function getUserBySsoSubject(subject: string): Promise<UserRow | nu
 }
 
 /**
+ * 이 사람의 **포털 쪽 id**(`users.sso_subject`). 머리말의 종이 포털에 「다른
+ * 시스템들의 알림」을 물을 때 `sub` 으로 보내는 값이고, 그 통로는 사람을 이
+ * 값으로만 가리킨다(dss-auth/docs/사이트-알림-통로.md).
+ *
+ * 🔴 **없는 것이 정상이다.** A/S 는 포털 계정 없이 만든 로컬 계정을 허용하고
+ * (설계서 F-3) 그 사람은 포털에 물을 수 없다 — 자기 알림만 보게 된다. 그래서
+ * null 은 오류가 아니라 「묻지 않는다」는 답이다.
+ *
+ * ── 🔴 왜 UserRow 에 칸을 더하지 않는가 ─────────────────────────────────
+ * 그 타입은 거의 모든 요청의 인가 판정이 지나는 자리이고, 삭제 · 감사 기록은
+ * 포털 쪽 식별자를 **일부러 싣지 않는다**(mutations/user-deletion.ts 와 그
+ * 시험: 「감사 기록에 sso_subject 가 실렸다」). 거기에 칸을 더하면 그 값이
+ * 로그와 미리보기에 딸려 나갈 길이 열린다. 읽는 곳은 머리말 하나뿐이라 그 한
+ * 곳만 따로 읽는다.
+ *
+ * 걸러 내는 조건은 getUserBySsoSubject 와 같은 줄이다(소프트 삭제 제외).
+ * 비활성 · 잠금을 여기서 다시 보지 않는 이유는 부르는 쪽이 이미 살아 있는
+ * 계정을 확인했기 때문이다((app)/layout.tsx 의 resolveActingUserForSession).
+ */
+export async function getSsoSubjectForUser(id: string): Promise<string | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+  const [row] = await db
+    .select({ ssoSubject: users.ssoSubject })
+    .from(users)
+    .where(and(eq(users.id, id), eq(users.isDeleted, false)))
+    .limit(1);
+  return row?.ssoSubject ?? null;
+}
+
+/**
  * One-time link of an existing local account to a DSS subject, used on a
  * user's first SSO login when their account predates SSO.
  *

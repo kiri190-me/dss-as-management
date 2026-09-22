@@ -31,6 +31,8 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getSsoClientId, getSsoPortalUrl } from "@/lib/config/sso";
 import { readServiceMenu } from "@/lib/auth/service-menu-cookie";
 import { listMyNotifications } from "@/lib/db/queries/notifications";
+import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { fetchPortalNotificationInbox } from "@/lib/server/integration/portal-inbox";
 import { countNotificationTargetsByKind } from "@/lib/domain/notifications";
 
 export default async function AppLayout({
@@ -86,6 +88,31 @@ export default async function AppLayout({
   const notifications = getRepairCaseReadSource() === "database" ? await listMyNotifications(user.id, user.role) : [];
   const myPendingApprovalCount = countNotificationTargetsByKind(notifications).REPAIR_CASE_APPROVAL;
 
+  // 같은 종에 실리는 **다른 시스템들의** 알림(개선요청 · 계측기 · PO/내자 ·
+  // 휴가). 합치는 일은 포털이 한다 — A/S 는 「이 사람의 다른 시스템 알림」을 한
+  // 번 물어 자기 목록 **뒤에** 이어 붙인다(포털은 부른 사이트 자신에게는 묻지
+  // 않는다 — dss-auth/docs/사이트-알림-통로.md).
+  //
+  // 🔴 물어볼 수 없는 경우가 둘이고, 둘 다 **정상이다**:
+  //  - 데모 모드(LOGIN_MODE≠sso) — 포털이 아예 없다. 포털 주소·자격증명도 없다.
+  //  - 포털 계정에 이어지지 않은 로컬 계정(sso_subject 가 비어 있다, 설계서
+  //    F-3) — 그 사람은 자기 알림만 본다.
+  // 그때는 묻지 않고 약속도 만들지 않는다(종은 예전과 똑같이 자기 것만 그린다).
+  const portalSubject = getLoginMode() === "sso" ? await getSsoSubjectForUser(user.id) : null;
+  //
+  // 🔴🔴 **여기에 `await` 를 붙이지 마라.** 이 레이아웃은 이 앱의 모든 화면에
+  // 딸려 오므로, 기다리면 **모든 화면 이동이 포털 왕복만큼 느려진다**(포털이
+  // 느리면 더). 약속을 그대로 내려보내면 머리말 · 본문 · A/S 자신의 알림은
+  // 예전과 같은 시점에 뜨고, 포털 목록만 도착한 뒤에 이어 붙는다 — 푸는 자리와
+  // 그 까닭은 components/layout/NotificationBell.tsx 의
+  // usePortalNotificationInbox 주석에 있다.
+  //
+  // 🔴 이 약속은 **깨지지 않는다** — fetchPortalNotificationInbox 가 거절 ·
+  // 시간 초과 · 설정 누락 · 이상한 JSON 을 전부 삼키고 빈 목록을 돌려준다.
+  // 그래서 이 자리에 error boundary 도, try 도 없다. 받는 쪽이 한 겹 더 거르는
+  // 것은 「값의 모양」을 못 믿기 때문이지 「깨질까 봐」가 아니다.
+  const portalInbox = portalSubject ? fetchPortalNotificationInbox(portalSubject) : undefined;
+
   // 통합 로그인으로 들어온 경우에만 포털로 돌아가는 길을 보여준다. 데모
   // 모드에는 갈 곳이 없고, 그 상태에서 링크만 떠 있으면 눌러도 아무 일이
   // 없거나 설정이 없다며 터진다.
@@ -117,6 +144,7 @@ export default async function AppLayout({
         canEnterDeveloperMode={canEnterDeveloperMode}
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
+        portalInbox={portalInbox}
         portalUrl={portalUrl}
         services={serviceMenu}
         currentServiceId={currentServiceId}

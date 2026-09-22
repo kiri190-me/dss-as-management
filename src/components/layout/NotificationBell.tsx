@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { NotificationBell as SharedNotificationBell } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
 import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
+import {
+  EMPTY_PORTAL_INBOX,
+  asPortalNotificationInbox,
+  type PortalNotificationInbox,
+} from "@/lib/domain/portal-notification-inbox";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
   NOTIFICATION_PERMISSION_CHANGED_EVENT,
@@ -62,6 +67,13 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * 금지하므로(그쪽 no-network.test.ts), 자리(`footer`)만 내주고 사이트가 제 것을
  * 끼워 넣는다. 🔴 함수가 아니라 **노드**를 넘긴다.
  *
+ * ── 🔴 다른 시스템들의 알림도 이 종에 실린다 ─────────────────────────────
+ * 포털(dss-auth)이 개선요청 · 계측기 · PO/내자 · 휴가에 물어 합쳐 준 목록이
+ * **자기 목록 뒤에** 이어 붙고 개수도 더해진다. 포털은 부른 사이트 자신에게는
+ * 묻지 않으므로(되돌기 · 30초 캐시 — dss-auth/docs/사이트-알림-통로.md) 두
+ * 목록은 겹치지 않는다. 그 값이 어떻게 여기까지 오는지는 아래
+ * `usePortalNotificationInbox` 주석에 있다.
+ *
  * ── 모바일 폭 ───────────────────────────────────────────────────────────
  * TopBar.tsx 의 주석에 적힌 사고(오른쪽 묶음이 폰에서 헤더를 가로로 넘치게
  * 만들어 햄버거조차 누르기 어려웠던 일) 때문에, 종은 햄버거와 같은 아이콘 버튼
@@ -87,8 +99,13 @@ export type AcknowledgeNotification = (input: { notificationKey: string }) => Pr
  * A/S 의 NotificationItem 과 묶음이 돌려주는 NotificationBellItem 이 둘 다 이것을
  * 만족한다(옮겨 담을 때 id 와 kind 를 그대로 싣는다 — notification-bell-items.ts).
  * 그래서 아래 두 함수는 어느 쪽을 받아도 같은 판단을 한다.
+ *
+ * 🔴 `sourceId` 는 「어느 시스템에서 온 줄인가」다. **A/S 자신의 알림은 빈
+ * 문자열**이고(notification-bell-items.ts 가 그렇게 싣는다), 포털을 거쳐 온 줄만
+ * 값이 있다. A/S 안쪽 모양(NotificationItem)에는 이 칸이 아예 없어서 물음표가
+ * 붙어 있다 — 없는 것은 「자기 것」으로 읽는다.
  */
-export type PickedNotification = { id: string; kind: string };
+export type PickedNotification = { id: string; kind: string; sourceId?: string };
 
 /**
  * 줄 하나를 눌렀을 때 할 일. **이동은 하지 않는다** — 묶음의 줄은 평범한
@@ -105,6 +122,12 @@ export function handleNotificationPicked(
   item: PickedNotification,
   handlers: { onAcknowledge?: (item: PickedNotification) => void }
 ): void {
+  // 🔴 **포털에서 온 줄은 여기서 끝난다.** 「확인했다」를 적을 수 있는 곳은 그
+  //    알림을 만든 시스템뿐이고, 포털에 그 통로는 아직 없다. 이 갈래가 없으면
+  //    남의 시스템 알림 id(`IMPROVEMENT:7` 같은 것)로 A/S 의 확인 기록이 쌓인다
+  //    — 아무 오류도 없이, 그 줄은 그대로 남은 채. 줄을 누르면 그 시스템의
+  //    화면으로 건너가고, 거기서 일을 마치면 다음 왕복에서 목록이 줄어든다.
+  if (item.sourceId) return;
   if (!handlers.onAcknowledge || !isAcknowledgeableNotificationKind(item.kind)) return;
   try {
     handlers.onAcknowledge(item);
@@ -326,9 +349,20 @@ const unknownOnServer = (): BrowserNotificationStatus => "UNKNOWN";
 /** 알림이 하나도 없을 때 펼친 칸에 적는 말. 🔴 묶음은 기본값을 두지 않는다. */
 const EMPTY_LABEL = "처리할 알림이 없습니다.";
 
-export default function NotificationBell({
+/**
+ * 종의 **속** — 포털 목록을 이미 풀린 **값으로** 받아 그린다.
+ *
+ * 겉(아래 기본 내보내기)과 갈라 둔 까닭이 둘이다:
+ *  1. 약속을 푸는 일과 그리는 일은 서로 다른 관심사다. 겉은 값이 도착하는 길만
+ *     알고, 여기는 「자기 것 앞 · 받은 것 뒤 · 개수는 더한다」만 안다.
+ *  2. 🔴 **시험이 그림을 볼 수 있다.** 정적 렌더(renderToStaticMarkup)는
+ *     약속을 기다려 주지 않으므로, 겉만 있으면 「이어 붙인 목록」과 「더한
+ *     배지」를 마크업으로 확인할 길이 없다.
+ */
+export function NotificationBellWithInbox({
   items = [],
   acknowledge,
+  inbox = EMPTY_PORTAL_INBOX,
 }: {
   items?: readonly NotificationItem[];
   /**
@@ -336,6 +370,8 @@ export default function NotificationBell({
    * 종에서 빠지지 않는다(저장하지 않은 것을 뺀 것처럼 보이게 하지 않는다).
    */
   acknowledge?: AcknowledgeNotification;
+  /** 포털이 모아 준 **다른 시스템들의** 알림. 아직 못 받았으면 빈 것이다. */
+  inbox?: PortalNotificationInbox;
 }) {
   /**
    * 눌러서 확인했고 저장이 진행 중이거나 끝난 줄. 서버가 준 목록이 다시 계산되기
@@ -365,7 +401,13 @@ export default function NotificationBell({
   // 전 원본**에서 여기가 센다(묶음 타입에는 targetKey 가 없다). 사이드바 배지와
   // 같은 순수 헬퍼를 쓰므로 두 배지가 다른 말을 할 수 없다. 방금 눌러 확인한
   // 줄은 세지 않는다(목록과 배지가 같은 말을 해야 한다).
-  const count = countNotificationTargets(visibleItems.map((item) => item.targetKey));
+  //
+  // 🔴 포털에서 받은 개수는 **그대로 더한다 — 다시 세지 않는다.** 세는 규칙이
+  // 시스템마다 다르다(A/S 는 같은 대상을 한 번만 센다. 한 건에 결재가 둘 걸려
+  // 있어도 1이다). 받은 줄 수로 다시 세면 그 시스템의 종과 이 종이 서로 다른
+  // 숫자를 말한다(domain/portal-notification-inbox.ts 의 count 주석).
+  const count =
+    countNotificationTargets(visibleItems.map((item) => item.targetKey)) + inbox.count;
 
   function handleAcknowledge(item: PickedNotification) {
     if (!acknowledge) return;
@@ -426,7 +468,10 @@ export default function NotificationBell({
 
   return (
     <SharedNotificationBell
-      items={toNotificationBellItems(visibleItems)}
+      // 🔴 **자기 것 앞, 포털에서 온 것 뒤.** 지금 이 시스템에서 일하는 사람의
+      //    할 일이 먼저 보여야 하고, 받은 목록은 **다시 섞지 않는다** — 포털이
+      //    정한 차례가 있다(시스템 순서 · 그 안의 차례).
+      items={[...toNotificationBellItems(visibleItems), ...inbox.items]}
       count={count}
       // 🔴 `ml-auto shrink-0` 은 묶음 종에 **그대로** 건넨다. TopBar 에 래퍼를
       //    하나 더 두면 펼침 패널의 기준(position: relative)이 두 겹이 된다
@@ -442,7 +487,9 @@ export default function NotificationBell({
       showWhenEmpty
       emptyLabel={EMPTY_LABEL}
       onOpen={() => announceNotificationPanelOpened(window)}
-      // 🔴 묶음은 **모든 줄에서** 이것을 부른다. 가리는 일은 A/S 가 한다.
+      // 🔴 묶음은 **모든 줄에서** 이것을 부른다. 가리는 일은 A/S 가 한다 —
+      //    눌러서 확인하는 종류인가(도메인 판정)와, 애초에 **우리 줄인가**
+      //    (sourceId)를 그 함수 한 곳에서 본다.
       onAcknowledge={(picked: NotificationBellItem) =>
         handleNotificationPicked(picked, {
           onAcknowledge: acknowledge ? handleAcknowledge : undefined,
@@ -458,4 +505,95 @@ export default function NotificationBell({
       }
     />
   );
+}
+
+/**
+ * 🔴 서버에서 넘어온 **약속**을 푼다 — 기다리지 않는다.
+ *
+ * ── 왜 값이 아니라 약속으로 받나 ─────────────────────────────────────────
+ * 포털에 묻는 일은 서버에서만 할 수 있다(자격이 client_secret 이다 —
+ * server/integration/portal-inbox.ts). 그런데 그 왕복을 (app)/layout.tsx 가
+ * `await` 하면 **모든 화면 이동이 그만큼 느려진다** — 머리말은 이 앱의 모든
+ * 화면에 딸려 오기 때문이다. 그래서 레이아웃은 값이 아니라 약속을 내려보내고,
+ * 이 갈래가 도착한 뒤에 목록을 이어 붙인다. 머리말 · 본문 · **A/S 자신의
+ * 알림**은 예전과 똑같은 시점에 뜨고, 포털이 느리거나 죽어도 사람이 기다리는
+ * 시간은 늘지 않는다.
+ *
+ * ── 🔴 왜 `use()` + `<Suspense>` 가 아닌가 ──────────────────────────────
+ * 계측기 사이트는 그 길을 골랐다(njlee 의 PortalNotificationBell). 그 사이트에는
+ * **자체 알림이 없어** 종이 통째로 늦게 떠도 잃는 것이 없다. A/S 는 다르다:
+ *  1. `use()` 로 풀면 Suspense 경계가 `<SharedNotificationBell>` 을 감싸야
+ *     하고(목록과 개수를 넘기는 자리가 거기 하나다), 그러면 **자기 알림도 함께
+ *     늦어지거나**(fallback 이 빈 것일 때) 도착하는 순간 종이 **다시 만들어진다**
+ *     (fallback 에 종을 둘 때 — 펼쳐 둔 패널이 눈앞에서 닫힌다. 여닫기는
+ *     <details> 가 들고 있어 자리가 바뀌면 그대로 접힌다).
+ *  2. `use()` 는 약속이 깨지면 **그것을 다시 던진다.** 그러면 error boundary 가
+ *     없는 이 머리말에서 사이트 전체가 빈 화면이 된다. 여기서는 `.then` 의 두
+ *     갈래를 다 받아 **깨져도 빈 것**으로 친다 — 그것이
+ *     asPortalNotificationInbox 주석이 못 박은 계약이다.
+ * 그래서 이 조각에는 Suspense 경계가 **없다.** 아무것도 지연(suspend)되지
+ * 않으므로 둘 곳도 없다 — 머리말이 포털을 기다리지 않는다는 성질은 「경계를
+ * 잘 두었다」가 아니라 **약속을 아예 붙잡지 않는다**에서 나온다.
+ *
+ * 값은 첫 렌더에서 빈 것이다(EMPTY_PORTAL_INBOX — 그 상수를 돌려쓰는 이유가
+ * 이것이다: 렌더마다 새 객체면 참조가 매번 달라진다). 그래서 서버 렌더와
+ * 하이드레이션 때의 그림이 같고, 포털 줄은 그 뒤에 한 번 더 그려져 들어온다.
+ *
+ * ── 다시 묻는 주기를 두지 않는다 ────────────────────────────────────────
+ * 포털이 30초 캐시를 들고 있어 더 자주 물으면 **같은 답**을 받는다. 약속은
+ * 레이아웃이 만든 것이라 화면을 옮겨 다니는 동안 그대로이고(레이아웃은 다시
+ * 그려지지 않는다), 새로 열거나 서버가 종을 다시 계산할 때 새 약속이 온다.
+ */
+function usePortalNotificationInbox(
+  portalInbox: Promise<unknown> | undefined
+): PortalNotificationInbox {
+  const [inbox, setInbox] = useState<PortalNotificationInbox>(EMPTY_PORTAL_INBOX);
+
+  useEffect(() => {
+    if (!portalInbox) return;
+    // 늦게 도착한 답이 이미 떠난 화면에 setState 하지 않게 한다.
+    let alive = true;
+    // 🔴 **두 갈래를 다 받는다.** 두 번째 인자가 없으면 약속이 깨지는 순간
+    //    「처리되지 않은 거절」이 되고, 개발 중에는 화면에 오류판이 뜬다.
+    //    포털에 묻는 함수는 어떤 거절도 삼키므로 실제로 여기 오지 않지만,
+    //    이 값은 모든 화면의 머리말에 실린다 — 두 겹으로 막는다.
+    portalInbox.then(
+      (value) => {
+        if (alive) setInbox(asPortalNotificationInbox(value));
+      },
+      () => {
+        if (alive) setInbox(EMPTY_PORTAL_INBOX);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [portalInbox]);
+
+  return inbox;
+}
+
+/**
+ * 머리말이 그리는 종 — 겉. 약속을 푸는 일만 하고 그리는 일은 속에 맡긴다.
+ *
+ * 🔴 `portalInbox` 가 없는 것은 **정상**이다: 데모 모드(포털이 없다)와 포털
+ * 계정에 이어지지 않은 계정((app)/layout.tsx 의 그 자리 주석)에서는 묻지 않고
+ * 자기 알림만 그린다 — 예전과 완전히 같은 종이다.
+ */
+export default function NotificationBell({
+  items = [],
+  acknowledge,
+  portalInbox,
+}: {
+  items?: readonly NotificationItem[];
+  acknowledge?: AcknowledgeNotification;
+  /**
+   * 포털이 모아 준 다른 시스템들의 알림. 🔴 **서버에서 넘어오는 약속**이고
+   * (값이 아니다) 풀린 값은 못 믿을 것으로 보고 한 겹 더 거른다
+   * (asPortalNotificationInbox) — 그 안의 글자는 남의 시스템이 만든 것이다.
+   */
+  portalInbox?: Promise<unknown>;
+}) {
+  const inbox = usePortalNotificationInbox(portalInbox);
+  return <NotificationBellWithInbox items={items} acknowledge={acknowledge} inbox={inbox} />;
 }

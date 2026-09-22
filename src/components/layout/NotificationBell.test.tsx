@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NotificationBell as SharedNotificationBell } from "@dss/ui";
+import { NotificationBell as SharedNotificationBell, type NotificationBellItem } from "@dss/ui";
 import NotificationBell, {
   BrowserNotificationNotice,
   NotificationBellFooter,
+  NotificationBellWithInbox,
   NotificationSelfTest,
   acknowledgeInBackground,
   announceNotificationPanelOpened,
@@ -643,4 +644,191 @@ test("🔴 헤더(TopBar)가 종에 확인 서버 액션을 실제로 넘긴다 
   const bells = source.match(/<NotificationBell\b[^>]*>/g) ?? [];
   assert.equal(bells.length, 1, "TopBar 가 그리는 종이 하나가 아니다 — 아래 단언이 엉뚱한 종을 볼 수 있다");
   assert.match(bells[0], /\backnowledge=\{acknowledgeNotificationAction\}/, "종에 확인 액션을 넘기지 않는다");
+});
+
+// ───────────────────── 다른 시스템들의 알림(포털이 모아 준 것)을 이어 붙인다
+
+/**
+ * 포털을 거쳐 온 한 줄. 🔴 A/S 자신의 줄과 갈라지는 칸이 `sourceId` 다 —
+ * 자기 알림은 빈 문자열이고(notification-bell-items.ts) 여기는 값이 있다.
+ */
+function portalRow(overrides: Partial<NotificationBellItem> = {}): NotificationBellItem {
+  return {
+    key: "dss-improvements:IMPROVEMENT:7",
+    sourceId: "dss-improvements",
+    sourceName: "DSS 개선요청",
+    id: "IMPROVEMENT:7",
+    kind: "IMPROVEMENT",
+    kindLabel: "검토 대기",
+    subject: "IMP-2026-0031",
+    detail: "검토를 기다리고 있습니다.",
+    href: "http://192.168.1.132:3300/improvements/7",
+    ...overrides,
+  };
+}
+
+test("🔴 자기 알림이 앞, 포털에서 온 것이 뒤 — 차례가 섞이지 않는다", () => {
+  const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
+  const received = [
+    portalRow(),
+    portalRow({ key: "njlee:CAL:3", sourceId: "njlee", sourceName: "DSS 계측기", subject: "NJ-3" }),
+  ];
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox items={mine} inbox={{ items: received, count: 2, degraded: false }} />
+  );
+
+  const order = [
+    "D9705-012",
+    grantedItem().subject,
+    "IMP-2026-0031",
+    "NJ-3",
+  ].map((needle) => ({ needle, at: html.indexOf(needle) }));
+  for (const { needle, at } of order) {
+    assert.ok(at > 0, `${needle} 이 목록에 없다`);
+  }
+  assert.deepEqual(
+    [...order].sort((left, right) => left.at - right.at).map((one) => one.needle),
+    order.map((one) => one.needle),
+    "자기 것과 받은 것의 차례가 섞였다"
+  );
+  // 받은 줄에는 어느 시스템에서 왔는지가 보인다 — 자기 줄에는 그 칸이 없다.
+  assert.ok(html.includes("DSS 개선요청"), "받은 줄에 시스템 이름이 없다");
+  assert.ok(html.includes("DSS 계측기"));
+});
+
+test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 세지 않는다", () => {
+  // 받은 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
+  // 배지는 자기 1건 + 7 = 8 이어야 한다 — 줄 수(2)로 다시 세면 3이 된다.
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
+      inbox={{ items: [portalRow(), portalRow({ key: "x:1" })], count: 7, degraded: false }}
+    />
+  );
+  assert.ok(html.includes(">알림 8건</span>"), "배지가 자기 개수 + 받은 개수가 아니다");
+});
+
+test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대도 같다", () => {
+  const onlyReceived = renderToStaticMarkup(
+    <NotificationBellWithInbox items={[]} inbox={{ items: [portalRow()], count: 3, degraded: false }} />
+  );
+  assert.ok(onlyReceived.includes(">알림 3건</span>"));
+  assert.ok(onlyReceived.includes("IMP-2026-0031"));
+
+  const onlyMine = renderToStaticMarkup(
+    <NotificationBellWithInbox items={[grantedItem()]} inbox={{ items: [], count: 0, degraded: false }} />
+  );
+  assert.ok(onlyMine.includes(">알림 1건</span>"));
+});
+
+test("🔴 포털에서 온 줄에서는 확인을 부르지 않는다 — 남의 시스템 id 로 기록을 적으면 안 된다", () => {
+  // 「확인했다」를 적을 수 있는 곳은 그 알림을 만든 시스템뿐이고, 포털에 그
+  // 통로가 아직 없다. 🔴 묶음은 **모든 줄에서** 확인 함수를 부르므로, 이 갈래가
+  // 없으면 `IMPROVEMENT:7` 같은 남의 id 로 A/S 에 확인 기록이 쌓인다.
+  for (const kind of NOTIFICATION_KINDS) {
+    // 최악의 경우 — 종류 코드까지 A/S 의 「눌러서 확인하는」 종류와 같을 때.
+    const acknowledged: string[] = [];
+    handleNotificationPicked(portalRow({ kind }), {
+      onAcknowledge: (picked) => acknowledged.push(picked.id),
+    });
+    assert.deepEqual(acknowledged, [], `${kind}: 포털에서 온 줄로 확인을 불렀다`);
+  }
+
+  // 대조 — 같은 종류라도 자기 줄(sourceId 가 빈 문자열)에서는 부른다.
+  const mine: string[] = [];
+  handleNotificationPicked(toNotificationBellItems([grantedItem()])[0], {
+    onAcknowledge: (picked) => mine.push(picked.id),
+  });
+  assert.deepEqual(mine, [grantedItem().id], "자기 줄에서 확인이 사라졌다");
+});
+
+test("🔴 머리말은 포털을 기다리지 않는다 — 끝나지 않는 약속이어도 자기 알림은 곧바로 그려진다", () => {
+  // 이 자리에 `await`(또는 use() + Suspense)가 있었다면 이 렌더는 목록 대신
+  // 빈 것을 내놓거나 아예 돌아오지 못한다. 그림이 나온다는 것 자체가 단언이다.
+  const html = renderToStaticMarkup(
+    <NotificationBell
+      items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
+      portalInbox={new Promise(() => {})}
+    />
+  );
+
+  assert.ok(html.includes("D9705-012"), "자기 알림이 포털을 기다리느라 안 그려졌다");
+  assert.ok(html.includes(">알림 1건</span>"), "배지가 포털을 기다린다");
+  // 🔴 종이 **통째로** 늦게 뜨는 것이 아니다(Suspense fallback 으로 대체되지
+  //    않았다) — 그 건의 화면으로 가는 줄이 마크업에 그대로 있다.
+  assert.ok(html.includes('href="/repair-cases/case-1/approval"'), "종이 빈 자리로 대체됐다");
+  assert.ok(!html.includes("처리할 알림이 없습니다."), "알림이 있는데 빈 칸 문구가 나왔다");
+});
+
+test("포털 목록을 안 넘기면 예전과 똑같은 종이다 — 데모 모드 · 포털에 이어지지 않은 계정", () => {
+  const withoutInbox = renderToStaticMarkup(<NotificationBell items={[grantedItem()]} />);
+  const withEmptyInbox = renderToStaticMarkup(
+    <NotificationBellWithInbox items={[grantedItem()]} inbox={{ items: [], count: 0, degraded: true }} />
+  );
+  assert.equal(withoutInbox, withEmptyInbox, "포털을 못 물어본 종이 예전 종과 다르게 그려졌다");
+});
+
+test("🔴 포털 줄의 그릴 수 없는 주소는 **그 줄만** 빠진다", () => {
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={[grantedItem()]}
+      inbox={{
+        items: [portalRow({ href: "javascript:alert(1)" }), portalRow({ key: "ok:1", subject: "NJ-9" })],
+        count: 2,
+        degraded: false,
+      }}
+    />
+  );
+
+  assert.ok(!html.includes("javascript:"), "그릴 수 없는 주소가 마크업에 실렸다");
+  assert.ok(!html.includes("IMP-2026-0031"), "그 줄이 빠지지 않았다");
+  assert.ok(html.includes("NJ-9"), "다른 줄까지 사라졌다");
+  assert.ok(html.includes(grantedItem().subject), "자기 줄까지 사라졌다");
+});
+
+test("🔴 약속을 여기까지 지나 보내는 길이 이어져 있다 — layout → AppShell → TopBar → 종", () => {
+  // 이 사슬 어디가 끊겨도 화면에는 흔적이 없다: 종은 자기 알림만 그리고 아무
+  // 오류도 나지 않는다(포털을 못 물어본 것과 구분되지 않는다). 그래서 원본으로
+  // 붙잡는다 — 이 파일들은 server-only 사슬을 물고 있어 정적 렌더로 가져올 수 없다.
+  const layout = readFileSync(new URL("../../app/(app)/layout.tsx", import.meta.url), "utf8");
+  const appShell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
+  const topBar = readFileSync(new URL("./TopBar.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    layout,
+    /const portalInbox = portalSubject \? fetchPortalNotificationInbox\(portalSubject\) : undefined;/,
+    "레이아웃이 포털에 묻지 않는다"
+  );
+  // 🔴 여기에 await 가 붙는 순간 **모든 화면 이동**이 포털 왕복만큼 느려진다.
+  assert.ok(
+    !/await\s+fetchPortalNotificationInbox/.test(layout),
+    "레이아웃이 포털을 기다린다 — 모든 화면이 그만큼 느려진다"
+  );
+  assert.match(layout, /portalInbox=\{portalInbox\}/, "레이아웃이 껍데기에 넘기지 않는다");
+
+  for (const [name, source] of [
+    ["AppShell", appShell],
+    ["TopBar", topBar],
+  ] as const) {
+    assert.match(source, /portalInbox\?: Promise<unknown>;/, `${name} 이 약속을 받지 않는다`);
+    assert.match(source, /portalInbox,/, `${name} 이 약속을 꺼내지 않는다`);
+    assert.match(source, /portalInbox=\{portalInbox\}/, `${name} 이 약속을 지나 보내지 않는다`);
+  }
+
+  // 종이 실제로 받는 자리 — 위 시험이 TopBar 의 종을 하나로 못 박아 두었다.
+  const bells = topBar.match(/<NotificationBell\b[^>]*>/g) ?? [];
+  assert.equal(bells.length, 1);
+  assert.match(bells[0], /portalInbox=\{portalInbox\}/, "종에 약속을 넘기지 않는다");
+});
+
+test("🔴 종은 포털 목록을 값으로도, 약속으로도 **다시 묻지 않는다** — 되풀이 장치가 없다", () => {
+  // 포털이 30초 캐시를 들고 있어 더 자주 물으면 같은 답을 받는다. 그 장치를
+  // 붙이는 순간 브라우저에서 부를 중계 통로가 필요해지고, 그것은 시크릿을
+  // 다루는 자리를 하나 더 만드는 일이다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.ok(!source.includes("setInterval"), "종에 되풀이 장치가 생겼다");
+  assert.ok(!source.includes("setTimeout"), "종에 되풀이 장치가 생겼다");
+  // 포털 주소를 종이 알아서는 안 된다 — 부르는 자리는 서버 하나뿐이다.
+  assert.ok(!source.includes("/api/integration/"), "종이 포털을 직접 부른다");
+  assert.ok(!source.includes("fetch("), "종이 직접 망을 탄다");
 });

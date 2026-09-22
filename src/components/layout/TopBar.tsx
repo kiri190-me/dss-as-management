@@ -13,6 +13,16 @@ type TopBarProps = {
    */
   notifications?: readonly NotificationItem[];
   /**
+   * 포털이 모아 준 **다른 시스템들의** 알림(개선요청 · 계측기 · PO/내자 · 휴가).
+   *
+   * 🔴 값이 아니라 **약속**이다. 서버가 `await` 하지 않고 그대로 내려보내므로 이
+   * 머리말은 포털을 기다리지 않는다 — 푸는 일과 그 까닭은 종 안에 있다
+   * (NotificationBell.tsx 의 usePortalNotificationInbox). 여기는 지나 보내기만
+   * 한다. 없으면(데모 모드 · 포털 계정에 이어지지 않은 사람) 종은 자기 알림만
+   * 그린다.
+   */
+  portalInbox?: Promise<unknown>;
+  /**
    * 사내 시스템 오가기 목록(@dss/ui 의 ServiceMenuBar). AppShell이 만들어
    * 내려보내고, 이 머리말이 **제목과 알림종 사이**에 그린다.
    *
@@ -65,7 +75,7 @@ type TopBarProps = {
  * 글자고 그 글자는 truncate 로 … 가 될 뿐이다. 아이콘 버튼이 잘려 손가락에
  * 안 잡히는 위 사고는 이 구조에서 다시 생길 수 없다.
  */
-export default function TopBar({ title, onMenuClick, notifications = [], serviceMenu = null }: TopBarProps) {
+export default function TopBar({ title, onMenuClick, notifications = [], portalInbox, serviceMenu = null }: TopBarProps) {
   return (
     // `h-14`가 `min-h-14`로 바뀐 것은 pt 인셋 때문이다: 고정 높이
     // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
@@ -179,7 +189,7 @@ export default function TopBar({ title, onMenuClick, notifications = [], service
       <div className="shrink-0">{serviceMenu}</div>
       {/* ml-auto는 NotificationBell 자신이 갖는다 — 여기 래퍼를 하나 더 두면
           펼침 패널의 기준(position: relative)이 두 겹이 된다. */}
-      <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} />
+      <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} />
     </header>
   );
 }

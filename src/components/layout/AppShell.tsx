@@ -56,6 +56,15 @@ type AppShellProps = {
    */
   notifications?: readonly NotificationItem[];
   /**
+   * 포털이 모아 준 **다른 시스템들의** 알림 — 🔴 값이 아니라 **약속**이다.
+   *
+   * 위 `notifications` 와 달리 레이아웃이 `await` 하지 않고 그대로 내려보낸다.
+   * 그래야 머리말과 본문이 포털 왕복을 기다리지 않는다 — 까닭은 종 안에 적혀
+   * 있다(NotificationBell.tsx 의 usePortalNotificationInbox). 이 껍데기는
+   * 머리말까지 지나 보내는 일만 한다.
+   */
+  portalInbox?: Promise<unknown>;
+  /**
    * 머리말 **안에** 앉는 서비스 메뉴바가 그릴 사내 시스템 목록
    * (layout.tsx 가 별도 서명 쿠키를 풀어 넘긴다 —
    * auth/service-menu-cookie.ts). 비어 있으면 목록 자체가 그려지지 않는다.
@@ -87,7 +96,7 @@ function isKeyboardFocus(element: HTMLElement): boolean {
   }
 }
 
-export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
@@ -140,6 +149,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
           title={title}
           onMenuClick={() => setMobileNavOpen(true)}
           notifications={notifications}
+          portalInbox={portalInbox}
           serviceMenu={
             /*
               사내 시스템 오가기 목록(@dss/ui). 머리말 **안**에 제목과 알림종
