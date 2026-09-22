@@ -47,9 +47,20 @@ import type { WorkRecordKind } from "@/lib/domain/types";
  *                                            못 넣으면 작업 기록 GENERAL
  *   사내 확인 결과 · 고장 부위 ·           → 작업 기록 INTAKE_INSPECTION_RESULT
  *   불량 현상 상세 · 반품 사유 상세
- *   처치 ○ · 원인 ○ · 원인 상세 ·          → 작업 기록 DIAGNOSIS_REPAIR_SUMMARY
- *   교체 부품 요약
+ *   원인 상세 · 교체 부품 요약             → 작업 기록 DIAGNOSIS_REPAIR_SUMMARY
+ *   처치 ○ · 원인 ○                        → 작업 기록 GENERAL(🔴 아래)
  *   비고                                   → 🔴 넣지 않는다(아래)
+ *
+ * ── 🔴 처치 ○ · 원인 ○ 를 「현재 진단/조치 요약」에서 뺀 까닭 ────────────
+ * 사용자 지시(2026-09-22): 「현품인수, 조치 완료 등은 내용으로 넣지 않아도 돼」.
+ * 실측이 그것을 뒷받침한다 — 처치 ○ 는 **469장 전부가 `現品引取`** 이고
+ * **466장이 `処置完了`** 다. 원인 ○ 도 **88%가 `その他`**(기타)다. 요약 칸에
+ * 그것만 뜨면 사람이 「현재 진단/조치」를 보러 와서 정보량 0 인 문장을 읽는다.
+ *
+ * 🔴 그렇다고 **버리지는 않는다**(`NOT_IMPORTED` 를 쓰지 않는다). 정보량이
+ * 적어도 그것은 **이식했다는 사실의 기록**이고, 한 번 버리면 되돌릴 수 없다.
+ * `GENERAL` 로 보내면 「작업 이력」 탭에서는 계속 읽히고, 나중에 필요해지면
+ * 거기서 찾을 수 있다.
  *
  * 🔴 **비고를 넣지 않는 까닭**(사용자 결정): 실측 469장 중 **0장**에만 값이 있다.
  * 받을 만한 단일 값 칸은 `repair_cases.notes` 뿐인데 그 칸은 사람이 쓰는 자리라
@@ -114,11 +125,16 @@ const DESTINATION_BY_ORIGIN = new Map<string, KyosanDetailDestination>([
   [fieldCaption("situationDetail"), "INTAKE_INSPECTION_RESULT"],
   [fieldCaption("requirementDetail"), "INTAKE_INSPECTION_RESULT"],
 
-  [KYOSAN_ACTION_MARK_ORIGIN, "DIAGNOSIS_REPAIR_SUMMARY"],
-  [KYOSAN_CAUSE_MARK_ORIGIN, "DIAGNOSIS_REPAIR_SUMMARY"],
-  // 🔴 지시서의 대응표에 없던 줄이다. 469장 중 1장뿐이라 빠뜨리기 쉬운데,
-  //    빠뜨리면 그 한 장의 내용이 **아무 칸에도 안 들어간다.** 원인 보기(○)와
-  //    같은 뜻의 자유 기술이라 같은 기록으로 보낸다.
+  // 🔴 **요약 칸으로 보내지 않는다** — 정보량이 0 이다(머리말의 실측: 처치 ○ 는
+  //    469장 전부 `現品引取`, 466장 `処置完了`, 원인 ○ 는 88%가 `その他`).
+  //    그래도 `NOT_IMPORTED` 로 버리지 않고 `WORK_RECORD_GENERAL` 로 남긴다:
+  //    **이식했다는 사실의 기록**이고 버리면 되돌릴 수 없으므로, 작업 이력에서
+  //    계속 읽히는 쪽을 고른다(사용자 지시 2026-09-22).
+  [KYOSAN_ACTION_MARK_ORIGIN, "WORK_RECORD_GENERAL"],
+  [KYOSAN_CAUSE_MARK_ORIGIN, "WORK_RECORD_GENERAL"],
+  // 🔴 469장 중 값이 있는 것이 1장뿐이라 빠뜨리기 쉬운데, 빠뜨리면 그 한 장의
+  //    내용이 **아무 칸에도 안 들어간다.** 보기(○)와 달리 이것은 사람이 손으로
+  //    적은 자유 기술이라 정보량이 있다 — 요약 칸에 남긴다.
   [fieldCaption("causeDetail"), "DIAGNOSIS_REPAIR_SUMMARY"],
 
   // 🔴 머리말의 「비고를 넣지 않는 까닭」.

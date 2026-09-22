@@ -137,7 +137,7 @@ const HEADER_MIN_LABELS = 2;
 const PARTS_BLOCK_MAX_ROWS = 200;
 
 /**
- * 🔴 `部品名` 칸에 부품 이름 대신 적히는 **상태값**들. 「바꾼 것이 없다」는 뜻이라
+ * 🔴 부품 이름 칸에 이름 대신 적히는 **상태값**들. 「바꾼 것이 없다」는 뜻이라
  * 부품 줄로 만들지 않는다. 실측 187줄이 `交換無し` 이고, 나머지는 같은 뜻의
  * 표기 변이에 대비한 것이다. `report-terms.ts` 의 「상태값」 절과 같은 낱말이다.
  */
@@ -146,6 +146,20 @@ const STATE_ONLY_NAMES: ReadonlySet<string> = new Set([
   normalizeKey("交換なし"),
   normalizeKey("交換無"),
 ]);
+
+/**
+ * 부품 이름 칸의 글자가 **상태값**인가 — 「바꾼 것이 없다」는 뜻이라 부품이 아니다.
+ *
+ * 🔴 **목록을 한 곳에만 둔다** (2026-09-22). 이 시트에는 걸려 있었는데 Card 시트
+ * 경로(`card-fields.ts` 의 `交換部品` 목록)에는 걸려 있지 않아, **실측 469장 중
+ * 165장**에서 `交換無し` 가 교체 부품 줄로 들어가고 있었다(화면에
+ * 「[예방분] 교체 없음 (交換無し)」으로 보였고 사용자가 그것을 짚었다).
+ * 그래서 판정을 두 벌로 적는 대신 이 함수를 두 경로가 **함께 쓴다** — 두 벌로
+ * 적으면 한쪽만 고쳐지는 날 같은 결함이 되돌아온다.
+ */
+export function isKyosanStateOnlyPartName(name: string): boolean {
+  return STATE_ONLY_NAMES.has(normalizeKey(name));
+}
 
 /** 예방분을 가리키는 앞머리. `措置=予防⑤` 는 NFKC 로 `予防5` 가 된다. */
 const PREVENTIVE_PREFIX = normalizeKey("予防");
@@ -278,8 +292,8 @@ export function readPartsDetailSheet(grid: GridLike, sheetName: string): KyosanD
       const spec = firstText(grid, row, specColumns);
       // 품명도 규격도 없으면 사람이 안 적은 줄이다(양식이 미리 그려 둔 빈 줄).
       if (name === null && spec === null) continue;
-      // 🔴 「交換無し」 는 부품이 아니다(위 머리말).
-      if (name !== null && STATE_ONLY_NAMES.has(normalizeKey(name))) continue;
+      // 🔴 「交換無し」 는 부품이 아니다(위 머리말). Card 시트 경로와 같은 판정이다.
+      if (name !== null && isKyosanStateOnlyPartName(name)) continue;
 
       const measure = cellText(grid, row, measureColumn);
       const status = cellText(grid, row, statusColumn);

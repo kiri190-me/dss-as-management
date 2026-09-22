@@ -5,6 +5,7 @@ import {
   type GridLike,
   type LabelMatcher,
 } from "./card-grid";
+import { isKyosanStateOnlyPartName } from "./parts-detail-sheet";
 
 /**
  * ============================================================================
@@ -166,6 +167,17 @@ export type CardListSpec = {
   labels: readonly LabelMatcher[];
   /** 🔴 2010년대 양식 되돌림 — 라벨 하나 아래 `①②③` 칸이 늘어선다. */
   legacyLabels: readonly LabelMatcher[];
+  /**
+   * 🔴 **부품 이름 칸**인가 (2026-09-22). 부품 칸에는 이름 대신 「바꾼 것이
+   * 없다」는 **상태값**(`交換無し`)이 적히는 일이 흔해서, 그 값은 목록에서
+   * 걸러야 한다 — 실측 469장 중 **165장**이 그것을 부품 줄로 들여보내고 있었다.
+   *
+   * 판정은 `parts-detail-sheet.ts` 의 `isKyosanStateOnlyPartName` **하나뿐**이다.
+   * `交換部品詳細` 시트 경로가 쓰던 바로 그 함수다(목록을 두 벌로 적지 않는다).
+   * 증상·고장 부위 같은 자유 기술 목록에는 켜지 않는다 — 거기서는 `交換無し` 가
+   * 사람이 쓴 문장의 일부일 수 있다.
+   */
+  isPartNameList?: true;
 };
 
 export const CARD_LISTS: readonly CardListSpec[] = [
@@ -194,12 +206,14 @@ export const CARD_LISTS: readonly CardListSpec[] = [
     // 🔴 `[①-⑳]` 가 아니라 `\d` 다 — 위 머리말 「동그라미 번호는 보통 숫자가 된다」.
     labels: [/^故障\d/],
     legacyLabels: ["交換部品("],
+    isPartNameList: true,
   },
   {
     key: "preventiveParts",
     caption: "교체 부품(예방)",
     labels: [/^予防措置\d/],
     legacyLabels: ["予防措置("],
+    isPartNameList: true,
   },
 ];
 
@@ -257,18 +271,26 @@ export function readCardField(
   return firstLabelAddress === null ? MISSING : { ...MISSING, labelAddress: firstLabelAddress };
 }
 
-/** 목록 항목 하나를 읽는다. 주 라벨이 하나도 없으면 옛 양식 되돌림을 쓴다. */
+/**
+ * 목록 항목 하나를 읽는다. 주 라벨이 하나도 없으면 옛 양식 되돌림을 쓴다.
+ *
+ * 🔴 라벨을 **찾은 수**(`labelCount`)는 거른 값과 무관하게 센다 — 「그 판본에
+ * 그 묶음이 있었나」를 말하는 수이므로, `交換無し` 만 적힌 장에서도 0 이 되면
+ * 안 된다(옛 양식 되돌림이 잘못 켜진다).
+ */
 export function readCardList(grid: GridLike, spec: CardListSpec): CardListValue {
-  const primary = collect(grid, spec.labels);
+  const dropStateOnly = spec.isPartNameList === true;
+  const primary = collect(grid, spec.labels, dropStateOnly);
   if (primary.labelCount > 0) return { ...primary, usedLegacy: false };
 
-  const legacy = collect(grid, spec.legacyLabels);
+  const legacy = collect(grid, spec.legacyLabels, dropStateOnly);
   return { ...legacy, usedLegacy: legacy.labelCount > 0 };
 }
 
 function collect(
   grid: GridLike,
-  matchers: readonly LabelMatcher[]
+  matchers: readonly LabelMatcher[],
+  dropStateOnly: boolean
 ): { values: string[]; labelCount: number } {
   const values: string[] = [];
   const seen = new Set<string>();
@@ -278,6 +300,9 @@ function collect(
     for (const label of findLabelCells(grid, matcher)) {
       labelCount += 1;
       for (const found of readValuesFor(grid, label)) {
+        // 🔴 부품 칸의 「交換無し」 는 부품 이름이 아니라 상태값이다(`CardListSpec`
+        //    의 `isPartNameList`). `交換部品詳細` 시트 경로와 **같은 판정**을 쓴다.
+        if (dropStateOnly && isKyosanStateOnlyPartName(found.text)) continue;
         // 같은 글자가 RF부(C)와 DC부(F)에 한 번씩 적히는 판본이 있다. 보고서 줄로
         // 쓸 것이므로 **같은 글자는 한 번만** 남긴다.
         if (seen.has(found.text)) continue;

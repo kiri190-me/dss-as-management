@@ -134,6 +134,16 @@ function caption(map: Map<string, string>, key: string): string {
 export const KYOSAN_CAUSE_MARK_ORIGIN = "원인(○ 표시)";
 export const KYOSAN_ACTION_MARK_ORIGIN = "처치(○ 표시)";
 
+/**
+ * 교체 부품 줄의 겹침 열쇠 — 🔴 **갈래가 들어간다.** 같은 부품이 고장분에도
+ * 예방분에도 있으면 두 줄로 남아야 하고, 수량도 갈래별로 짝지어야 한다
+ * (`buildKyosanPreviewParts` 의 머리말). `\u0000` 은 부품 이름에 나올 수 없는
+ * 글자라 갈래와 이름이 섞이지 않는다.
+ */
+function partKey(kind: KyosanPreviewPart["kind"], text: string): string {
+  return `${kind}\u0000${text}`;
+}
+
 /** 연락서 한 장에서 보고서 줄을 뽑는다. 같은 구역 안에서 같은 글자는 한 번만. */
 export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine[] {
   const lines: KyosanPreviewLine[] = [];
@@ -163,7 +173,7 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
 }
 
 /**
- * 교체 부품 — 고장분 · 예방분. 같은 글자는 한 번만.
+ * 교체 부품 — 고장분 · 예방분. **같은 갈래 안에서** 같은 글자는 한 번만.
  *
  * ── 🔴 두 시트에서 모은다 ──────────────────────────────────────────────
  * 연락서 양식이 「주원인 부품만 Card 에 고르고 **나머지는 `交換部品詳細` 시트에**
@@ -171,32 +181,59 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
  * 실측 472장에서 Card 쪽이 1,129건, 詳細 쪽이 1,128건이고, **45장은 Card 가
  * 텅 비었는데 詳細에만 부품이 있었다**(그 장들은 지금까지 부품이 하나도 안 들어갔다).
  *
- * ── 🔴 겹침을 어떻게 가리는가 ──────────────────────────────────────────
+ * ── 🔴 겹침 열쇠에 **갈래**가 들어간다 (2026-09-22) ────────────────────
  * 두 시트에 **같은 부품을 둘 다 적는 일이 흔하다** — 실측 472장 중 281장이
- * 그렇고, 겹친 짝이 929건이다. 가리지 않으면 그만큼 두 번 들어간다.
- * 가리는 열쇠는 **부품 이름 글자 그대로**다(기존 규칙과 같다). `normalizeKey` 로
- * 눌러 견주어도 실측에서 **한 건도 더 잡히지 않아**(929 → 929) 기존 규칙을
- * 바꾸지 않았다.
+ * 그렇고 겹친 짝이 929건이다. 가리지 않으면 그만큼 두 번 들어간다. 그래서
+ * 겹침을 가리는 것 자체는 그대로 둔다. 문제는 **무엇을 겹침으로 볼 것인가**였다.
+ *
+ * 열쇠가 부품 이름뿐이던 동안, **같은 부품이 고장분에도 예방분에도 정당하게
+ * 적힌 장**에서 먼저 넣은 갈래가 자리를 차지해 나머지 갈래가 통째로 사라졌다.
+ * 사용자가 화면에서 그것을 짚었다(`kyosan-xlsm/0357.xlsm` — 고장 3枚 · 예방 7枚
+ * 인 부품 셋이 고장분으로만 남고 예방분 세 줄이 없어졌다).
+ *
+ * 🔴 실측(2026-09-22, 연락서 469장): 같은 이름이 고장·예방 양쪽에 있는 장이
+ * **84장**, 그렇게 삼켜진 줄이 **164줄**이다(`交換無し` 를 뺀 실물 부품만 센 수).
+ * 그래서 열쇠를 `갈래 + 이름` 으로 바꾼다 — **같은 글자가 양쪽에 있으면 두 줄로
+ * 남는다.**
+ *
+ * ⚠️ **같은 갈래 안의 겹침은 그대로 한 번만** 넣는다(실측 예: `終段AMPゲート基板`
+ * 이 `予防③`·`予防⑩` 두 줄). 화면이 `` `${kind}-${text}` `` 를 React key 로 쓰므로
+ * (`KyosanReportImportParts.tsx`) 같은 갈래에서 두 줄을 내면 열쇠가 부딪친다.
+ *
+ * 열쇠 글자는 **이름 글자 그대로**다. `normalizeKey` 로 눌러 견주어도 실측에서
+ * 한 건도 더 잡히지 않아 기존 규칙을 바꾸지 않았다.
+ *
+ * ── 🔴 수량도 갈래별로 짝짓는다 ────────────────────────────────────────
+ * 수량 칸은 `交換部品詳細` 시트에만 있고, 그 시트는 `措置` 칸(`故障①`/`予防④`)으로
+ * 갈래를 알려 준다(`parts-detail-sheet.ts` 의 `toPartKind`). 열쇠가 이름뿐이던
+ * 동안에는 **첫 줄의 수량**이 갈래와 상관없이 쓰여, 고장 3개짜리 줄의 수량이
+ * 예방 7개짜리 줄에 붙거나 그 반대가 됐다. 이제 수량 지도도 `갈래 + 이름` 으로
+ * 열쇠를 잡는다 — 갈래가 같은 줄의 수량만 붙는다.
  *
  * 차례는 **Card 시트가 먼저**다(지금까지 나온 차례를 흩지 않는다). 다만 같은
- * 이름이 詳細 시트에도 있으면 **수량만 그쪽에서 가져온다** — 수량 칸은 詳細
- * 시트에만 있기 때문이다. 詳細에만 있는 이름은 뒤에 이어 붙인다.
+ * 갈래·같은 이름이 詳細 시트에도 있으면 **수량만 그쪽에서 가져온다**. 詳細에만
+ * 있는 (갈래, 이름)은 뒤에 이어 붙인다.
  */
 export function buildKyosanPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
-  // 같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다(뒤 줄은 겹침이다).
-  const quantityByText = new Map<string, number>();
+  // 같은 갈래·같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다
+  // (그것이 같은 갈래 안의 겹침이다 — 위 머리말).
+  const quantityByKindAndText = new Map<string, number>();
   for (const part of report.detailParts) {
     const text = part.name.trim();
-    if (text === "" || part.quantity === null || quantityByText.has(text)) continue;
-    quantityByText.set(text, part.quantity);
+    if (text === "" || part.quantity === null) continue;
+    const key = partKey(part.kind, text);
+    if (quantityByKindAndText.has(key)) continue;
+    quantityByKindAndText.set(key, part.quantity);
   }
 
   const parts: KyosanPreviewPart[] = [];
   const seen = new Set<string>();
   const push = (kind: KyosanPreviewPart["kind"], text: string): void => {
-    if (text === "" || seen.has(text)) return;
-    seen.add(text);
-    const quantity = quantityByText.get(text);
+    if (text === "") return;
+    const key = partKey(kind, text);
+    if (seen.has(key)) return;
+    seen.add(key);
+    const quantity = quantityByKindAndText.get(key);
     parts.push(quantity === undefined ? { kind, text } : { kind, text, quantity });
   };
 

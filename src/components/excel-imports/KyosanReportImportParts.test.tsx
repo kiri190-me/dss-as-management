@@ -327,6 +327,7 @@ describe("미리보기가 무엇을 보여 주는가", () => {
             lines: [
               { section: "FINDINGS", text: "값-증상", origin: "고객 고장 상황" },
               { section: "FINDINGS", text: "값-확인", origin: "사내 확인 결과" },
+              { section: "FINDINGS", text: "값-원인상세", origin: "원인 상세" },
               { section: "ACTIONS", text: "現品引取", origin: "처치(○ 표시)" },
               { section: "REMARK", text: "값-비고", origin: "비고" },
             ],
@@ -344,10 +345,16 @@ describe("미리보기가 무엇을 보여 주는가", () => {
     assert.match(markup, /data-destination="INTAKE_INSPECTION_RESULT"/);
     assert.match(markup, /data-destination="DIAGNOSIS_REPAIR_SUMMARY"/);
     assert.match(markup, /data-destination="NOT_IMPORTED"/);
+    // 🔴 **뜻을 다시 정했다**(2026-09-22): 처치 ○ · 원인 ○ 는 「현재 진단/조치
+    //    요약」이 아니라 「작업 이력」으로 간다(정보량 0 — 실측 469장 전부
+    //    `現品引取`). 화면도 그 자리를 그대로 말해야 한다. 그리고 버리지 않으므로
+    //    `NOT_IMPORTED` 로 보여서는 **안 된다** — 요약 칸 몫은 「원인 상세」가 맡는다.
+    assert.match(markup, /data-destination="WORK_RECORD_GENERAL"/);
 
     assert.ok(markup.includes("신고 증상"), "상세의 칸 이름이 보여야 한다");
     assert.ok(markup.includes("비어 있을 때만"), "덮지 않는다는 사실을 미리 말해야 한다");
     assert.ok(markup.includes("넣지 않음"), "비고는 넣지 않는다고 말해야 한다");
+    assert.ok(markup.includes("작업 이력에만 남습니다"), "처치 ○ 가 어디로 가는지 말해야 한다");
     assert.ok(markup.includes("보고서를 만들지 않습니다"));
 
     // 🔴 「보고서 줄」·「확인 내용」 같은 옛 이름표가 남아 있으면 안 된다.
@@ -355,6 +362,15 @@ describe("미리보기가 무엇을 보여 주는가", () => {
     assert.equal(/>확인 내용</.test(markup), false);
   });
 
+  /**
+   * ⚠️ 여기의 `交換無し` 는 **판독기가 더 이상 만들지 않는 값**이다(2026-09-22) —
+   * 「바꾼 것이 없다」는 상태값이라 Card 시트 경로에서도 걸러진다
+   * (`card-fields.ts` 의 `isPartNameList` · 실측 165장). 그래도 이 단언을 남겨
+   * 두는 까닭은 **화면이 모르는 글자를 조용히 지우지 않는다**는 규칙을 못 박기
+   * 때문이다: 사전에 있는 낱말은 한글로 보여 주고 **원문을 함께** 남긴다.
+   * 🔴 화면에 「[예방분] 교체 없음」이 다시 뜨면 그것은 판독기가 새는 것이지
+   * 이 시험이 시킨 일이 아니다 — 판독기 쪽 시험은 `card-fields.test.ts` 다.
+   */
   test("🔴 양식의 고정 보기는 한글로, 원문은 옆에 남는다(조각 S5)", () => {
     const markup = render(
       <KyosanReportContentPanel

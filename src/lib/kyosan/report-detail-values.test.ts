@@ -20,13 +20,15 @@ import {
  * ============================================================================
  * 연락서 내용 → **수리 건 상세의 제자리 칸** (조각 S5)
  * ============================================================================
- * 못 박는 것은 다섯이다.
+ * 못 박는 것은 여섯이다.
  *  1. 🔴 **줄마다 갈 자리가 정해져 있다** — 「확인 내용」·「조치」 같은 보고서
  *     칸이 아니라 상세의 진짜 칸이다.
  *  2. 🔴 **신고 증상은 비어 있을 때만 쓴다** — 사람이 적은 글자를 지우지 않는다.
  *  3. 🔴 **못 넣은 내용을 잃지 않는다** — 칸에 못 넣으면 작업 기록으로 간다.
  *  4. 🔴 **4000자를 말없이 자르지 않는다** — 나눠 넣고, 종류를 단 조각은 하나다.
  *  5. 🔴 **원문을 고치지 않는다** — 머리글만 따로 끼운다.
+ *  6. 🔴 **정보량 0 인 보기(처치 ○ · 원인 ○)는 요약 칸을 차지하지 않는다** —
+ *     그렇다고 버리지도 않는다(「작업 이력」에 남는다). 2026-09-22 사용자 지시.
  * ============================================================================
  */
 
@@ -68,12 +70,52 @@ describe("🔴 줄마다 갈 자리가 정해져 있다", () => {
       assert.equal(kyosanLineDestination(line(origin, "값")), "INTAKE_INSPECTION_RESULT", origin);
     }
 
-    for (const origin of [KYOSAN_ACTION_MARK_ORIGIN, KYOSAN_CAUSE_MARK_ORIGIN, "원인 상세"]) {
-      assert.equal(kyosanLineDestination(line(origin, "값")), "DIAGNOSIS_REPAIR_SUMMARY", origin);
-    }
+    // 🔴 사람이 손으로 적은 자유 기술만 요약 칸으로 간다.
+    assert.equal(kyosanLineDestination(line("원인 상세", "값")), "DIAGNOSIS_REPAIR_SUMMARY");
 
     // 🔴 비고는 넣지 않는다(실측 469장 중 0장). 화면이 「넣지 않음」으로 보여 준다.
     assert.equal(kyosanLineDestination(line("비고", "값", "REMARK")), "NOT_IMPORTED");
+  });
+
+  /**
+   * 🔴 **뜻을 다시 정한 시험** (2026-09-22). 예전에는 처치 ○ · 원인 ○ 가
+   * `DIAGNOSIS_REPAIR_SUMMARY` 로 간다고 못 박혀 있었다. 사용자 지시
+   * (「현품인수, 조치 완료 등은 내용으로 넣지 않아도 돼」)와 실측이 그 규칙을
+   * 뒤집었다 — 처치 ○ 는 469장 전부가 `現品引取`, 466장이 `処置完了` 이고
+   * 원인 ○ 는 88%가 `その他` 다. 정보량 0 인 문장이 「현재 진단/조치 요약」을
+   * 차지하면 안 된다.
+   *
+   * 🔴 그러나 **버리지도 않는다** — 새 규칙은 「요약 칸에서 빼고 작업 이력에
+   * 남긴다」이지 「없앤다」가 아니다. 아래 두 단언이 그 둘을 함께 못 박는다.
+   */
+  test("🔴 처치 ○ · 원인 ○ 는 요약 칸이 아니라 「일반」 작업 기록으로 간다 — 버리지는 않는다", () => {
+    for (const origin of [KYOSAN_ACTION_MARK_ORIGIN, KYOSAN_CAUSE_MARK_ORIGIN]) {
+      const destination = kyosanLineDestination(line(origin, "값"));
+      assert.equal(destination, "WORK_RECORD_GENERAL", origin);
+      // 🔴 `NOT_IMPORTED` 로 바꾸면 화면에서 영구히 사라진다 — 그러면 안 된다.
+      assert.notEqual(destination, "NOT_IMPORTED", `${origin} 를 버리면 안 된다`);
+    }
+  });
+
+  test("🔴 처치 ○ 와 원인 ○ 의 원문은 작업 기록에 그대로 남는다 — 요약 칸에는 없다", () => {
+    const result = build(
+      planOf({
+        lines: [
+          line(KYOSAN_CAUSE_MARK_ORIGIN, "部品不良"),
+          line(KYOSAN_ACTION_MARK_ORIGIN, "現品引取", "ACTIONS"),
+        ],
+      })
+    );
+    assert.deepEqual(
+      result.workRecords.map((draft) => draft.recordKind),
+      ["GENERAL"],
+      "🔴 요약 칸으로 파생되는 기록을 만들면 안 된다"
+    );
+    const memo = memoOf(result, "GENERAL");
+    assert.ok(memo.includes("[원인(○ 표시)]\n部品不良"), memo);
+    assert.ok(memo.includes("[처치(○ 표시)]\n現品引取"), memo);
+    // 🔴 넣지 않은 항목으로 세지도 않는다 — 넣었으니까.
+    assert.deepEqual(result.skippedOrigins, []);
   });
 
   test("🔴 모르는 항목은 버리지 않고 「일반」 작업 기록으로 간다", () => {
@@ -87,7 +129,7 @@ describe("🔴 줄마다 갈 자리가 정해져 있다", () => {
   test("🔴 상세에 없는 레거시 칸을 가리키지 않는다", () => {
     const result = build(
       planOf({
-        lines: [line("사내 확인 결과", "값-확인"), line(KYOSAN_CAUSE_MARK_ORIGIN, "部品不良")],
+        lines: [line("사내 확인 결과", "값-확인"), line("원인 상세", "값-원인상세")],
       })
     );
     // 상세가 읽는 것은 작업 기록의 파생값이다. 여기서 만드는 것도 작업 기록뿐이다.

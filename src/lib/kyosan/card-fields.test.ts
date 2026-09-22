@@ -192,6 +192,44 @@ describe("목록 항목", () => {
     );
     assert.deepEqual(both.lists.faultParts.values, ["값-부품1", "값-부품2"]);
   });
+
+  /**
+   * 🔴 `交換無し`(교체 없음)는 **부품 이름이 아니라 「바꾼 것이 없다」는 상태값**
+   * 이다. `交換部品詳細` 시트 경로에는 이 필터가 있었는데 Card 시트 경로에는
+   * 없어서, **실측 469장 중 165장**이 그것을 교체 부품 줄로 들여보내고 있었다
+   * (화면에 「[예방분] 교체 없음 (交換無し)」으로 보였고 사용자가 짚었다).
+   *
+   * 🔴 판정은 `parts-detail-sheet.ts` 의 `isKyosanStateOnlyPartName` **하나**다 —
+   * 목록을 두 벌로 적으면 한쪽만 고쳐지는 날 같은 결함이 되돌아온다.
+   */
+  test("🔴 부품 칸의 `交換無し` 는 상태값이라 부품으로 만들지 않는다 — 실측 165장", () => {
+    const stateOnly = readCardFields(
+      gridOf({
+        B71: "故障①/⑥",
+        C71: "交換無し",
+        B72: "故障②/⑦",
+        C72: "값-부품2",
+        B80: "予防措置①/⑪",
+        C80: "交換なし",
+      }),
+      false
+    );
+    assert.deepEqual(stateOnly.lists.faultParts.values, ["값-부품2"]);
+    assert.deepEqual(stateOnly.lists.preventiveParts.values, []);
+    // 🔴 라벨을 **찾은 수**는 거른 값과 무관하다 — 0 이 되면 옛 양식 되돌림이
+    //    잘못 켜져서 남의 칸을 부품으로 읽는다.
+    assert.equal(stateOnly.lists.preventiveParts.labelCount, 1);
+    assert.equal(stateOnly.lists.preventiveParts.usedLegacy, false);
+  });
+
+  /**
+   * 🔴 같은 낱말이 **자유 기술 목록**에 나오면 걸러서는 안 된다 — 거기서는
+   * 사람이 쓴 문장이다. 필터는 부품 칸에만 켜진다(`CardListSpec.isPartNameList`).
+   */
+  test("🔴 증상·고장 부위 목록에서는 `交換無し` 를 거르지 않는다", () => {
+    const free = readCardFields(gridOf({ B53: "客先故障状況①", C53: "交換無し" }), false);
+    assert.deepEqual(free.lists.customerFaults.values, ["交換無し"]);
+  });
 });
 
 describe("옛 양식 되돌림 — 라벨 하나 아래 ①②③ 칸이 늘어선다", () => {

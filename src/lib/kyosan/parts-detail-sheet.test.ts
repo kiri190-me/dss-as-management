@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 
 import { buildSheetGrid } from "../xlsx/sheet-grid";
 import {
+  isKyosanStateOnlyPartName,
   isPartsDetailSheetName,
   pickPartsDetailSheetNames,
   readPartsDetailSheet,
@@ -304,6 +305,21 @@ describe("交換部品詳細 판독 — 판본 B (머리글 7행 + 40행)", () =
       readPartsDetailSheet(grid, "交換部品詳細").map((part) => part.name),
       ["값-부품A"]
     );
+  });
+
+  /**
+   * 🔴 같은 판정을 **Card 시트 경로도 함께 쓴다**(`card-fields.ts` 의
+   * `CardListSpec.isPartNameList`). 예전에는 이 시트에만 걸려 있어서 실측 469장
+   * 중 165장이 Card 쪽으로 `交換無し` 를 들여보냈다. 목록을 두 벌로 적지 않는
+   * 대신 이 함수를 내보내 둔다 — 그래서 함수 자체에 시험이 붙어야 한다.
+   */
+  test("🔴 상태값 판정은 내보낸 함수 하나다 — 표기 변이와 반각·전각을 함께 흡수한다", () => {
+    for (const name of ["交換無し", "交換なし", "交換無", " 交換無し "]) {
+      assert.equal(isKyosanStateOnlyPartName(name), true, name);
+    }
+    for (const name of ["값-부품A", "交換無しで返却", "交換部品"]) {
+      assert.equal(isKyosanStateOnlyPartName(name), false, name);
+    }
   });
 });
 

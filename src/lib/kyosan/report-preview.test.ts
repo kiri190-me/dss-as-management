@@ -281,6 +281,11 @@ describe("연락서 미리보기", () => {
  * 부품을 둘 다 적는 일이 흔하다** — 281장이 그렇고 겹친 짝이 929건이다. 그리고
  * **45장은 Card 가 텅 비었는데 詳細에만 부품이 있었다**(그 장들은 부품이 하나도
  * 안 들어가고 있었다). 아래 시험이 그 두 가지를 값으로 못 박는다.
+ *
+ * 🔴 그리고 겹침 열쇠에는 **갈래가 들어간다**(2026-09-22). 같은 부품이 고장분과
+ * 예방분에 둘 다 적힌 장이 실측 **84장**이고, 갈래를 안 보던 동안 **164줄**이
+ * 삼켜졌다. 갈래가 다르면 **두 줄**, 갈래가 같으면 **한 줄**이다 — 그 둘을
+ * 각각의 시험이 못 박는다.
  */
 function detailPartOf(overrides: Partial<KyosanDetailPart> = {}): KyosanDetailPart {
   return {
@@ -297,9 +302,17 @@ function detailPartOf(overrides: Partial<KyosanDetailPart> = {}): KyosanDetailPa
 }
 
 describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친다", () => {
-  test("🔴 두 시트에 같은 부품이 있으면 두 번 들어가지 않는다 — 수량만 詳細에서 온다", () => {
+  /**
+   * 🔴 **뜻을 다시 정한 시험** (2026-09-22). 예전 제목은 「두 시트에 같은 부품이
+   * 있으면 두 번 들어가지 않는다」였는데, 그 규칙이 **갈래를 보지 않아서**
+   * 고장분·예방분에 같은 부품이 적힌 장에서 한쪽 갈래를 통째로 삼켰다.
+   * 새 규칙은 「**같은 갈래**에서 두 번 들어가지 않는다」다 — 아래 시험이 같은
+   * 자료로 그 뜻을 못 박고, 갈래가 다를 때는 `갈래가 다르면 두 줄로 남는다`
+   * 시험이 못 박는다.
+   */
+  test("🔴 두 시트에 같은 갈래·같은 부품이 있으면 두 번 들어가지 않는다 — 수량만 詳細에서 온다", () => {
     const report = reportOf({
-      detailParts: [detailPartOf({ name: "값-부품A", quantity: 4 })],
+      detailParts: [detailPartOf({ name: "값-부품A", quantity: 4, kind: "fault" })],
     });
     const preview = previewOf(report, caseOf(), stateOf());
     assert.ok(preview.plan);
@@ -307,6 +320,59 @@ describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친�
     assert.deepEqual(preview.plan.parts, [
       { kind: "fault", text: "값-부품A", quantity: 4 },
       { kind: "preventive", text: "값-부품B" },
+    ]);
+  });
+
+  /**
+   * 🔴 사용자가 화면에서 짚은 결함이다(2026-09-22, `kyosan-xlsm/0357.xlsm`).
+   * 부품 셋이 **고장분(3枚)에도 예방분(7枚)에도 정당하게** 적혀 있었는데, 겹침
+   * 열쇠에 갈래가 없어서 먼저 들어간 고장분이 자리를 차지하고 **예방분 세 줄이
+   * 통째로 사라졌다.** 수량도 고장분 쪽 3 만 남아 예방 7 을 잃었다.
+   *
+   * 🔴 실측(연락서 469장): 같은 이름이 양쪽에 있는 장이 **84장**, 그렇게 삼켜진
+   * 줄이 **164줄**이다.
+   */
+  test("🔴 같은 부품이 고장분에도 예방분에도 있으면 두 줄로 남는다 — 수량도 갈래별로", () => {
+    const report = reportOf({
+      card: cardOf(
+        { intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" },
+        { faultParts: ["값-양쪽부품"], preventiveParts: ["값-양쪽부품"] }
+      ),
+      detailParts: [
+        detailPartOf({ name: "값-양쪽부품", kind: "fault", quantity: 3 }),
+        detailPartOf({ name: "값-양쪽부품", kind: "preventive", quantity: 7 }),
+      ],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-양쪽부품", quantity: 3 },
+      { kind: "preventive", text: "값-양쪽부품", quantity: 7 },
+    ]);
+  });
+
+  /**
+   * 🔴 수량을 **글자만으로** 짝지으면 갈래가 뒤바뀐 수량이 붙는다. Card 시트에는
+   * 수량 칸이 없으므로, Card 로 들어온 줄의 수량은 **같은 갈래의 詳細 줄**에서만
+   * 와야 한다.
+   */
+  test("🔴 Card 로 들어온 줄에 다른 갈래의 수량이 붙지 않는다", () => {
+    const report = reportOf({
+      card: cardOf(
+        { intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" },
+        { faultParts: ["값-수량없는부품"] }
+      ),
+      // 詳細 시트에는 **예방분**으로만 적혀 있다 — 수량 7 은 예방분의 것이다.
+      detailParts: [detailPartOf({ name: "값-수량없는부품", kind: "preventive", quantity: 7 })],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      // 🔴 고장분 줄에는 수량 열쇠가 아예 없어야 한다(넣는 쪽이 1 로 본다).
+      { kind: "fault", text: "값-수량없는부품" },
+      { kind: "preventive", text: "값-수량없는부품", quantity: 7 },
     ]);
   });
 
@@ -339,12 +405,18 @@ describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친�
     assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-호스", quantity: 1 }]);
   });
 
-  test("🔴 같은 이름이 詳細 시트에 두 줄이면 한 번만, 수량은 첫 줄에서", () => {
+  /**
+   * ⚠️ 이 규칙은 **바뀌지 않았다.** 같은 갈래 안의 겹침은 지금처럼 한 번만
+   * 넣는다(실측 예: `終段AMPゲート基板` 이 `予防③`·`予防⑩` 두 줄). 화면이
+   * `` `${kind}-${text}` `` 를 React key 로 쓰므로 같은 갈래에서 두 줄을 내면
+   * 열쇠가 부딪친다.
+   */
+  test("🔴 같은 갈래에서 같은 이름이 詳細 시트에 두 줄이면 한 번만, 수량은 첫 줄에서", () => {
     const report = reportOf({
       card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
       detailParts: [
-        detailPartOf({ name: "값-부품E", quantity: 3, sheetName: "交換部品詳細(RF)" }),
-        detailPartOf({ name: "값-부품E", quantity: 9, sheetName: "交換部品詳細(DC)" }),
+        detailPartOf({ name: "값-부품E", quantity: 3, kind: "fault", sheetName: "交換部品詳細(RF)" }),
+        detailPartOf({ name: "값-부품E", quantity: 9, kind: "fault", sheetName: "交換部品詳細(DC)" }),
       ],
     });
     const preview = previewOf(report, caseOf(), stateOf());

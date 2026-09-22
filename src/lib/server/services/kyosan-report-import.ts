@@ -77,8 +77,13 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  *                                     않고 작업 기록으로 보낸다
  *   사내 확인 결과 · 고장 부위 ·    → 작업 기록 `INTAKE_INSPECTION_RESULT`
  *   불량 현상 상세 · 반품 사유 상세    (기본 정보 > 인수점검 결과로 파생)
- *   처치 ○ · 원인 ○ · 원인 상세 ·   → 작업 기록 `DIAGNOSIS_REPAIR_SUMMARY`
- *   교체 부품 요약                     (기본 정보 > 현재 진단/조치 요약으로 파생)
+ *   원인 상세 · 교체 부품 요약      → 작업 기록 `DIAGNOSIS_REPAIR_SUMMARY`
+ *                                     (기본 정보 > 현재 진단/조치 요약으로 파생)
+ *   처치 ○ · 원인 ○                 → 작업 기록 `GENERAL` (작업 이력에만)
+ *                                     🔴 2026-09-22 사용자 지시. 정보량이 0 이라
+ *                                     요약 칸을 차지하지 않는다 — 실측으로 처치 ○
+ *                                     는 469장 전부 `現品引取` 다. 그래도 버리지
+ *                                     않는다(`report-detail-values.ts` 머리말)
  *   교체 부품                       → `repair_case_used_parts` (지금 그대로)
  *   사진 · 원본 `.xlsm`             → `attachments` (지금 그대로)
  *   비고                            → 🔴 넣지 않는다(`report-detail-values.ts`)

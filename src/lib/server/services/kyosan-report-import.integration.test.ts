@@ -491,11 +491,15 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     const symptom = await readSymptom(target.id);
     assert.equal(symptom, `${KYOSAN_IMPORT_MARK}\n\n값-고객이-말한-증상`);
 
-    // 🔴 작업 기록 — 인수점검 결과 · 진단/조치 두 건.
+    // 🔴 작업 기록 — 인수점검 결과 · 진단/조치 · 일반 세 건.
+    //    「일반」이 늘어난 것은 2026-09-22 사용자 지시 때문이다: 원인 ○ · 처치 ○ 는
+    //    정보량이 0 이라(실측 469장 전부 `現品引取`) 「현재 진단/조치 요약」을
+    //    차지하지 않고 **작업 이력에만** 남는다. 버리는 것이 아니라 옮긴 것이므로
+    //    기록 수가 하나 늘어난다(`kyosan/report-detail-values.ts` 의 대응표).
     const records = await readImportedWorkRecords(target.id);
     assert.deepEqual(
       [...records.map((row) => row.recordKind)].sort(),
-      ["DIAGNOSIS_REPAIR_SUMMARY", "INTAKE_INSPECTION_RESULT"]
+      ["DIAGNOSIS_REPAIR_SUMMARY", "GENERAL", "INTAKE_INSPECTION_RESULT"]
     );
     assert.deepEqual([...result.workRecordIds].sort(), records.map((row) => row.id).sort());
     for (const row of records) assert.equal(row.authorUserId, actorUserId);
@@ -506,10 +510,17 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     assert.ok(intake.memo.includes("[사내 확인 결과]"), intake.memo);
     assert.ok(intake.memo.includes("값-사내-확인-결과"), intake.memo);
 
-    // 🔴 ○ 가 찍힌 보기의 **원문**이 진단/조치 기록에 그대로 남는다 — 번역하지 않는다.
+    // 🔴 ○ 가 찍힌 보기의 **원문**이 그대로 남는다 — 번역하지도 버리지도 않는다.
+    //    다만 자리가 「일반」 작업 기록이다(위 주석). 요약 칸에는 **없어야** 한다.
+    const general = records.find((row) => row.recordKind === "GENERAL");
+    assert.ok(general);
+    assert.ok(general.memo.includes("部品不良"), general.memo);
+
+    // 🔴 요약 칸 몫은 사람이 손으로 적은 자유 기술(원인 상세)이 맡는다.
     const diagnosis = records.find((row) => row.recordKind === "DIAGNOSIS_REPAIR_SUMMARY");
     assert.ok(diagnosis);
-    assert.ok(diagnosis.memo.includes("部品不良"), diagnosis.memo);
+    assert.ok(diagnosis.memo.includes("[원인 상세]"), diagnosis.memo);
+    assert.equal(diagnosis.memo.includes("部品不良"), false, "🔴 정보량 0 인 보기가 요약 칸을 차지하면 안 된다");
 
     // 🔴 그리고 그 둘이 기본 정보 탭의 요약 칸으로 **파생된다**.
     const derived = await getDerivedServiceSummaryForCase(target.id);
@@ -601,7 +612,7 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     assert.ok(photo.originalFileName.startsWith("연락서-"), photo.originalFileName);
   });
 
-  test("🔴 우리 사전에 없는 원인 보기도 원문 그대로 진단/조치 기록에 남는다", async () => {
+  test("🔴 우리 사전에 없는 원인 보기도 원문 그대로 작업 기록에 남는다", async () => {
     const target = await seedCase();
     const fake = fakeReport({
       intakeNumber: target.intakeNumber,
@@ -616,10 +627,13 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     if (!result.ok) return;
 
     const records = await readImportedWorkRecords(target.id);
-    const diagnosis = records.find((row) => row.recordKind === "DIAGNOSIS_REPAIR_SUMMARY");
-    assert.ok(diagnosis);
+    // 🔴 **뜻을 다시 정했다**(2026-09-22): 원인 ○ 의 자리가 「진단/조치」에서
+    //    「일반」으로 옮겨졌다. 못 박는 뜻은 바뀌지 않았다 — **사전에 없어도
+    //    원문은 남아야 한다.** 자리만 작업 이력이다.
+    const general = records.find((row) => row.recordKind === "GENERAL");
+    assert.ok(general);
     assert.ok(
-      diagnosis.memo.includes("謎の原因"),
+      general.memo.includes("謎の原因"),
       "🔴 사전에 없어도 원문은 남아야 한다 — 잃는 것이 없어야 한다"
     );
     // 🔴 우리 원인 목록(`service_report_causes`)으로 옮기는 일 자체가 없어졌다.
