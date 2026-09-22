@@ -801,6 +801,23 @@ export default function QuoteEditForm({
     quote?.documentExcluded ?? false
   );
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
+  /**
+   * 직전 불러오기가 **값 없이 끝났는가**(2026-09-22). 인수번호를 못 찾았거나 조회가
+   * 오류로 끝나 위 세 사본(usedParts · ohTemplateCode · ohTemplateParts)을 비운
+   * 경우다. O/H 구역의 빈 상태 문구가 이 값을 읽어 「인수번호를 못 불러왔다」와
+   * 「찾았는데 이 모델에 템플릿이 없다」를 갈라 말한다 — 고쳐야 할 자리가 다르다.
+   *
+   * 🔴 **왜 상태를 하나 더 두는가.** `lookupMessage` 로는 가릴 수 없다. 그 값은
+   * 찾았을 때도 채워지고(「불러왔습니다. …」) 오류일 때는 서버가 준 글자가 그대로
+   * 들어온다 — 글자를 견줘 가리면 문구를 한 자 고치는 순간 조용히 틀린 안내가
+   * 뜬다. `ohTemplateCode === null` 로도 가릴 수 없다: 「못 찾아 비운 것」과
+   * 「찾았는데 모델에 템플릿이 안 이어져 있는 것」이 둘 다 null 이다.
+   *
+   * 🔴 **불러오기를 시작할 때는 내리지 않는다.** 시작할 때 내리면 기다리는 동안
+   * (세 사본은 아직 앞 건의 것이다) 문구가 「모델에 템플릿이 없다」로 되돌아가
+   * 깜빡인다. 결과가 온 세 갈래(오류 · 못 찾음 · 찾음)에서만 세우거나 내린다.
+   */
+  const [lookupMissed, setLookupMissed] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -1302,6 +1319,25 @@ export default function QuoteEditForm({
       const result = await lookupIntakeForQuoteAction({ intakeNumber });
       if (!result.ok) {
         setLookupMessage(result.message);
+        /**
+         * 🔴 **오류로 끝나도 조회가 받아 온 세 사본은 함께 비운다** — 아래 「못 찾음」
+         * 갈래와 **같은 논리**다(2026-09-22). 출고 부품(usedParts)과 O/H 부품
+         * 템플릿(ohTemplateCode · ohTemplateParts)은 사람이 칠 수 없고 **직전
+         * 불러오기가 서버에서 받아 온 것을 담아 둔 사본**이며, 그 사본에는 어느
+         * 인수번호의 것인지가 적혀 있지 않다. 인수번호를 고쳐 다시 눌렀는데 조회가
+         * 오류로 끝나면, 화면에 남은 두 목록은 **지금 칸에 적힌 번호와 아무 상관이
+         * 없는 앞 건의 부품**이 된다. 사본은 받아 온 근거가 없어지면 함께 없어져야
+         * 한다 — 비우지 않으면 [담기] 단추가 그대로 살아 있고, 담으면 관계없는
+         * 부품이 O/H 템플릿 단가까지 달고 청구 줄로 들어간다.
+         *
+         * 🔴 **사람이 칠 수 있는 칸은 하나도 건드리지 않는다**(아래 갈래와 같다) —
+         * 고객사명 · 모델명 · L/N · S/N · 신고증상 · 품명 · 종류 · 부품 줄 · 작업
+         * 내역. 조회가 오류로 끝났다고 손으로 다듬어 둔 값을 지우면 안 된다.
+         */
+        setUsedParts([]);
+        setOhTemplateCode(null);
+        setOhTemplateParts([]);
+        setLookupMissed(true);
         return;
       }
       if (!result.found) {
@@ -1330,6 +1366,14 @@ export default function QuoteEditForm({
         setUsedParts([]);
         setOhTemplateCode(null);
         setOhTemplateParts([]);
+        /**
+         * 비운 까닭을 남긴다. 이것이 없으면 O/H 구역의 빈 상태 문구가 **「이 모델에
+         * O/H 부품 템플릿이 이어져 있지 않습니다」**를 띄운다 — 사실은 인수번호를
+         * 못 찾은 것인데 사람을 재고 관리 화면으로 보내는 거짓 안내다(2026-09-22).
+         * `repairCaseId` 는 사람이 칠 수 있는 칸이라 일부러 안 비우므로 그 값으로는
+         * 갈라낼 수 없다.
+         */
+        setLookupMissed(true);
         return;
       }
 
@@ -1357,6 +1401,9 @@ export default function QuoteEditForm({
       setUsedParts(found.usedParts);
       setOhTemplateCode(found.ohTemplateCode);
       setOhTemplateParts(found.ohTemplateParts);
+      // 받아 온 근거가 다시 생겼다 — 앞서 못 찾아 세워 둔 깃발을 내린다. 안 내리면
+      // 이번엔 제대로 찾았는데도 「인수번호를 불러오지 못했다」는 문구가 남는다.
+      setLookupMissed(false);
       setLookupMessage(
         found.usedParts.length > 0
           ? `불러왔습니다. 이 건에 출고된 부품 ${found.usedParts.length}종이 아래 참고 목록에 있습니다.`
@@ -2496,14 +2543,29 @@ export default function QuoteEditForm({
             )}
           </h2>
           {ohTemplateParts.length === 0 ? (
-            // 못 담는 이유가 셋이고 **고쳐야 할 자리가 다 다르다.** 한 문장으로
+            // 못 담는 이유가 넷이고 **고쳐야 할 자리가 다 다르다.** 한 문장으로
             // 뭉치면 사람이 어디로 가야 하는지 알 수 없다.
+            //
+            // 🔴 **「직전 불러오기가 값 없이 끝났다」를 맨 앞에서 본다**(2026-09-22).
+            // 못 찾거나 오류로 끝나면 세 사본을 비우는데 `repairCaseId` 는 사람이 칠
+            // 수 있는 칸이라 앞 건의 값이 남는다 — 그러면 아래 둘째 갈래가 열려
+            // 「모델에 템플릿이 이어져 있지 않습니다」를 띄우고, 사람이 재고 관리
+            // 화면을 헛되게 뒤진다. 처음 연 폼에서 없는 번호를 불러 본 경우
+            // (`repairCaseId` 도 null)에도 「먼저 불러오세요」보다 이 문구가 사실에
+            // 가깝다 — 이미 눌렀고 못 찾은 것이다.
+            //
+            // 오류 갈래도 **같은 문구**를 쓴다. 두 경우 모두 사람이 할 일이 「위
+            // 인수번호 칸의 안내를 보고 다시 불러오기」로 같고, 오류 쪽의 까닭(서버가
+            // 준 글자)은 그 칸에 이미 그대로 적혀 있다. 여기서 둘을 갈라 적으면 같은
+            // 지시를 두 번 다르게 말하게 된다.
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-              {repairCaseId === null
-                ? "인수번호를 먼저 불러오면 그 장비의 기종에 맞는 O/H 부품을 여기서 담을 수 있습니다."
-                : ohTemplateCode === null
-                  ? "이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 › O/H 부품 템플릿에서 모델을 이어 주세요."
-                  : `기종 ${ohTemplateCode} 템플릿에 담긴 부품이 없습니다 — 재고 관리 › O/H 부품 템플릿에서 부품을 넣어 주세요.`}
+              {lookupMissed
+                ? "인수번호를 불러오지 못해 O/H 부품을 가져오지 못했습니다 — 위 인수번호 칸의 안내를 확인하고 번호를 고친 뒤 [불러오기]를 다시 눌러 주세요."
+                : repairCaseId === null
+                  ? "인수번호를 먼저 불러오면 그 장비의 기종에 맞는 O/H 부품을 여기서 담을 수 있습니다."
+                  : ohTemplateCode === null
+                    ? "이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 › O/H 부품 템플릿에서 모델을 이어 주세요."
+                    : `기종 ${ohTemplateCode} 템플릿에 담긴 부품이 없습니다 — 재고 관리 › O/H 부품 템플릿에서 부품을 넣어 주세요.`}
             </p>
           ) : (
             <>

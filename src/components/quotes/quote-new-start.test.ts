@@ -414,6 +414,89 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     assert.ok(form.includes('{kind === "OVERHAUL" && ('), "O/H 템플릿 구역의 그리는 조건이 바뀌었다");
   });
 
+  test("🔴 조회가 오류로 끝난 갈래도 받아 온 세 사본을 비운다 — 사람이 칠 수 있는 칸은 그대로", () => {
+    const lookup = sliceBetween(form, "async function handleLookup() {", "const didAutoLookup = useRef(false);");
+    const failed = sliceBetween(lookup, "if (!result.ok) {", "if (!result.found) {");
+    // 🔴 「못 찾음」과 **같은 결함**이 이 갈래에 남아 있었다(2026-09-22). D111 을 불러온 뒤
+    // 인수번호를 고쳐 다시 눌렀는데 조회가 DB 오류로 끝나면, 앞 건의 출고 부품 · O/H
+    // 템플릿이 [담기] 단추까지 살아서 남았다 — 담으면 지금 인수번호와 무관한 부품이
+    // 청구 줄로 들어간다. 사본은 받아 온 근거가 없어지면 함께 없어져야 한다.
+    assert.ok(failed.includes("setUsedParts([]);"), failed);
+    assert.ok(failed.includes("setOhTemplateCode(null);"), failed);
+    assert.ok(failed.includes("setOhTemplateParts([]);"), failed);
+    // 서버가 준 까닭은 그대로 보여 준다 — 지금까지의 동작이다.
+    assert.ok(failed.includes("setLookupMessage(result.message);"), failed);
+    // 비운 까닭을 남긴다(아래 빈 상태 문구가 읽는다).
+    assert.ok(failed.includes("setLookupMissed(true);"), failed);
+    // 🔴 여기서도 **사람이 적는 칸은 그대로 둔다** — 비우는 것은 조회 결과의 사본뿐이다.
+    for (const setter of [
+      "setRepairCaseId(",
+      "setCustomerId(",
+      "setCustomerNameText(",
+      "setModelNameText(",
+      "setLotNumberText(",
+      "setSerialNumberText(",
+      "setFaultDescriptionText(",
+      "setSubject(",
+      "setKind(",
+      "setIsExcelOnly(",
+      "setItems(",
+      "setScopeLines(",
+      "setScopeTouched(",
+      "setTaskQuantities(",
+    ]) {
+      assert.ok(!failed.includes(setter), `오류 갈래가 ${setter} 를 부른다`);
+    }
+  });
+
+  test("🔴 못 불러온 까닭은 깃발로 남긴다 — 결과가 온 세 갈래에서만, 찾았으면 내린다", () => {
+    assert.ok(form.includes("const [lookupMissed, setLookupMissed] = useState(false);"), "깃발 상태가 없다");
+    const lookup = sliceBetween(form, "async function handleLookup() {", "const didAutoLookup = useRef(false);");
+    // 🔴 세우거나 내리는 곳은 결과가 온 세 갈래(오류 · 못 찾음 · 찾음)뿐이다.
+    assert.equal(lookup.split("setLookupMissed(").length - 1, 3, lookup);
+    // 🔴 **불러오기를 시작할 때는 손대지 않는다** — 기다리는 동안 세 사본은 아직 앞 건의
+    // 것이라, 여기서 내리면 문구가 「모델에 템플릿이 없다」로 되돌아가 깜빡인다.
+    const beforeResult = sliceBetween(lookup, "setIsLookingUp(true);", "if (!result.ok) {");
+    assert.ok(!beforeResult.includes("setLookupMissed("), beforeResult);
+    // 찾았으면 내린다 — 안 내리면 제대로 찾은 뒤에도 못 불러왔다는 문구가 남는다.
+    const found = sliceBetween(lookup, "const found = result.found;", "} finally {");
+    assert.ok(found.includes("setLookupMissed(false);"), found);
+  });
+
+  test("🔴 O/H 빈 상태 문구는 갈래가 넷 — 못 찾음 · 오류 뒤에는 재고 관리가 아니라 인수번호를 가리킨다", () => {
+    const empty = sliceBetween(form, "{ohTemplateParts.length === 0 ? (", "단가는 <b>O/H 템플릿에 적어 둔 값</b>");
+    // 🔴 「직전 불러오기가 값 없이 끝났다」를 **맨 앞에서** 본다. 못 찾음 · 오류 갈래는
+    // 세 사본만 비우고 `repairCaseId` 는 사람이 칠 수 있는 칸이라 앞 건의 값이 남으므로,
+    // 이 갈래가 없으면 「이 모델에 O/H 부품 템플릿이 이어져 있지 않습니다」가 떠서 사람이
+    // 재고 관리 화면을 헛되게 뒤진다(2026-09-22).
+    const at = (marker: string) => indexOrFail(empty, marker);
+    assert.ok(at("{lookupMissed") < at("repairCaseId === null"), empty);
+    assert.ok(at("repairCaseId === null") < at("ohTemplateCode === null"), empty);
+    assert.ok(
+      empty.includes(
+        '? "인수번호를 불러오지 못해 O/H 부품을 가져오지 못했습니다 — 위 인수번호 칸의 안내를 확인하고 번호를 고친 뒤 [불러오기]를 다시 눌러 주세요."'
+      ),
+      empty
+    );
+    // 예전 세 갈래의 문구는 한 자도 바뀌지 않았다 — 고쳐야 할 자리가 저마다 다르다.
+    assert.ok(
+      empty.includes('"인수번호를 먼저 불러오면 그 장비의 기종에 맞는 O/H 부품을 여기서 담을 수 있습니다."'),
+      empty
+    );
+    assert.ok(
+      empty.includes(
+        '"이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 › O/H 부품 템플릿에서 모델을 이어 주세요."'
+      ),
+      empty
+    );
+    assert.ok(
+      empty.includes(
+        "`기종 ${ohTemplateCode} 템플릿에 담긴 부품이 없습니다 — 재고 관리 › O/H 부품 템플릿에서 부품을 넣어 주세요.`"
+      ),
+      empty
+    );
+  });
+
   test("엑셀 전용이면 품목(부품) 구역이 없다 — 접는 조건이 부품 비용 구역 앞에서 열린다", () => {
     const open = indexOrFail(form, "{isExcelOnly ? (");
     // 구역의 제목은 2026-09-16(케이블 ③)부터 종류에 따라 갈린다 — 케이블이면 「품목」이다.
