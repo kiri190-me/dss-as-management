@@ -15,7 +15,12 @@ import type { KyosanDetailPart } from "./parts-detail-sheet";
 import { matchKyosanReport, readKyosanIdentity, type KyosanCaseCandidate } from "./report-match";
 import { KYOSAN_FORM_ASSET_SHA256 } from "./report-photo-filter";
 import type { KyosanPhoto } from "./report-photos";
-import { buildKyosanReportPreview, type KyosanCaseState } from "./report-preview";
+import {
+  buildKyosanReportPreview,
+  mergeKyosanPartsForUsedParts,
+  type KyosanCaseState,
+  type KyosanPreviewPart,
+} from "./report-preview";
 
 /** 🔴 실제 연락서도 실제 수리 건도 쓰지 않는다 — 전부 손으로 지은 가짜다. */
 
@@ -444,5 +449,139 @@ describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친�
       { kind: "fault", text: "값-부품A" },
       { kind: "preventive", text: "값-부품B" },
     ]);
+  });
+});
+
+/**
+ * 🔴 사용자 지시(2026-09-22, 화면을 보고): 「교체 부품이 고장분과 예방분이 잘
+ * 나눠졌는데 **사용부품 칸에 내용을 넣을 때는 그 구분 없이 부품명대로 수량을
+ * 넣어 줘.**」 — 자리마다 담는 모양이 다르다는 뜻이다.
+ *
+ *   「교체 부품」 미리보기 · 작업 기록 메모 → 갈래별로 그대로(위 describe 가 지킨다)
+ *   🔴 `repair_case_used_parts`            → 이름으로 묶고 수량을 더한다(여기)
+ *
+ * 🔴 이 수는 **청구 금액에 닿는다**(`repair_case_used_parts.quantity`). 그래서
+ * 값으로 시험이 붙는 순수 함수로 두었고, **수량 합계 보존**을 따로 못 박는다.
+ */
+describe("사용 부품 칸 — 갈래 없이 부품 이름으로 묶는다", () => {
+  /** 묶기 전/후의 수량 합. 수량이 없는 줄은 1 로 센다(넣는 쪽의 규칙). */
+  function quantitySum(parts: readonly KyosanPreviewPart[]): number {
+    return parts.reduce((sum, part) => sum + (part.quantity ?? 1), 0);
+  }
+
+  /**
+   * 🔴 사용자가 짚은 그 장이다(`kyosan-xlsm/0357.xlsm`) — 부품 셋이 고장 3枚 ·
+   * 예방 7枚 로 두 줄인데, 사용 부품 칸에는 **수량 10 한 줄**이어야 한다.
+   */
+  test("🔴 같은 부품이 고장·예방 양쪽에 있으면 한 줄이고 수량은 합이다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      { kind: "fault", text: "終段AMP基板", quantity: 3 },
+      { kind: "preventive", text: "終段AMP基板", quantity: 7 },
+    ]);
+    assert.deepEqual(merged, [{ text: "終段AMP基板", quantity: 10 }]);
+  });
+
+  /**
+   * 🔴 **같은 자료로 양쪽을 함께 본다.** 「교체 부품」 목록과 작업 기록 메모는
+   * 갈래별로 **두 줄 그대로**여야 하고(이 조각이 되돌리면 안 되는 것), 사용 부품
+   * 칸만 한 줄이어야 한다. 한 시험 안에 두 단언을 나란히 둔 까닭은, 둘 중 한쪽만
+   * 고치는 변경이 여기서 걸리게 하려는 것이다.
+   */
+  test("🔴 같은 자료에서 「교체 부품」은 두 줄 그대로 · 사용 부품만 한 줄", () => {
+    const report = reportOf({
+      card: cardOf(
+        { intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" },
+        { faultParts: ["값-양쪽부품"], preventiveParts: ["값-양쪽부품"] }
+      ),
+      detailParts: [
+        detailPartOf({ name: "값-양쪽부품", kind: "fault", quantity: 3 }),
+        detailPartOf({ name: "값-양쪽부품", kind: "preventive", quantity: 7 }),
+      ],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+
+    // 🔴 미리보기 · 작업 기록이 쓰는 목록 — 갈래별로 두 줄이다.
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-양쪽부품", quantity: 3 },
+      { kind: "preventive", text: "값-양쪽부품", quantity: 7 },
+    ]);
+
+    // 🔴 사용 부품 칸 몫 — 한 줄, 수량 10.
+    assert.deepEqual(mergeKyosanPartsForUsedParts(preview.plan.parts), [
+      { text: "값-양쪽부품", quantity: 10 },
+    ]);
+  });
+
+  test("🔴 수량이 없는 줄은 1 로 세어 더한다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      // 둘 다 수량 열쇠가 없다 — 1 + 1.
+      { kind: "fault", text: "값-부품A" },
+      { kind: "preventive", text: "값-부품A" },
+      // 한쪽만 없다 — 4 + 1.
+      { kind: "fault", text: "값-부품B", quantity: 4 },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
+    assert.deepEqual(merged, [
+      { text: "값-부품A", quantity: 2 },
+      { text: "값-부품B", quantity: 5 },
+    ]);
+  });
+
+  test("다른 부품끼리는 묶이지 않는다 — 이름 글자가 한 글자라도 다르면 따로다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      { kind: "fault", text: "값-부품A", quantity: 2 },
+      { kind: "fault", text: "값-부품A ", quantity: 3 },
+      { kind: "preventive", text: "값-부품B", quantity: 5 },
+    ]);
+    assert.deepEqual(merged, [
+      { text: "값-부품A", quantity: 2 },
+      { text: "값-부품A ", quantity: 3 },
+      { text: "값-부품B", quantity: 5 },
+    ]);
+  });
+
+  /**
+   * 차례는 **먼저 나온 자리**를 지킨다. 고장분이 앞에 오므로 「교체 부품」에
+   * 보이는 차례와 같아지고, 예방분에만 있는 부품이 그 뒤에 붙는다.
+   */
+  test("차례는 먼저 나온 자리를 지킨다 — 뒤에 합쳐진 줄이 앞으로 오지 않는다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      { kind: "fault", text: "값-첫째", quantity: 1 },
+      { kind: "fault", text: "값-둘째", quantity: 1 },
+      { kind: "preventive", text: "값-첫째", quantity: 9 },
+      { kind: "preventive", text: "값-셋째", quantity: 2 },
+    ]);
+    assert.deepEqual(merged, [
+      { text: "값-첫째", quantity: 10 },
+      { text: "값-둘째", quantity: 1 },
+      { text: "값-셋째", quantity: 2 },
+    ]);
+  });
+
+  /**
+   * 🔴 **묶는 것이므로 합계는 변하면 안 된다.** 실측 469장에서도 1,327줄 →
+   * 1,163줄로 줄었지만 수량 합계 2,990 은 전후가 같았다.
+   */
+  test("🔴 수량 합계가 보존된다 — 줄 수만 줄어든다", () => {
+    const parts: readonly KyosanPreviewPart[] = [
+      { kind: "fault", text: "값-부품A", quantity: 3 },
+      { kind: "preventive", text: "값-부품A", quantity: 7 },
+      { kind: "fault", text: "값-부품B" },
+      { kind: "preventive", text: "값-부품B", quantity: 6 },
+      { kind: "fault", text: "값-부품C", quantity: 1 },
+    ];
+    const merged = mergeKyosanPartsForUsedParts(parts);
+    assert.equal(merged.length, 3, "다섯 줄이 세 줄이 된다");
+    assert.equal(
+      merged.reduce((sum, line) => sum + line.quantity, 0),
+      quantitySum(parts)
+    );
+    assert.equal(quantitySum(parts), 18);
+  });
+
+  test("부품이 없으면 빈 목록이다", () => {
+    assert.deepEqual(mergeKyosanPartsForUsedParts([]), []);
   });
 });

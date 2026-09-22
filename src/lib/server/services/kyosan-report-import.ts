@@ -53,7 +53,11 @@ import {
 } from "@/lib/kyosan/report-match";
 import { splitKyosanPhotos } from "@/lib/kyosan/report-photo-filter";
 import { buildKyosanDetailValues } from "@/lib/kyosan/report-detail-values";
-import { buildKyosanReportPreview, type KyosanImportPlan } from "@/lib/kyosan/report-preview";
+import {
+  buildKyosanReportPreview,
+  mergeKyosanPartsForUsedParts,
+  type KyosanImportPlan,
+} from "@/lib/kyosan/report-preview";
 import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/storage-adapter";
 import { ZipArchive } from "@/lib/xlsx/zip-reader";
 
@@ -84,7 +88,11 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  *                                     요약 칸을 차지하지 않는다 — 실측으로 처치 ○
  *                                     는 469장 전부 `現品引取` 다. 그래도 버리지
  *                                     않는다(`report-detail-values.ts` 머리말)
- *   교체 부품                       → `repair_case_used_parts` (지금 그대로)
+ *   교체 부품                       → `repair_case_used_parts`
+ *                                     🔴 2026-09-22 사용자 지시. **이 칸에만**
+ *                                     갈래(고장분/예방분)를 버리고 **부품 이름으로
+ *                                     묶어 수량을 더한다**(`appendUsedParts` 머리말).
+ *                                     미리보기와 작업 기록은 갈래별로 그대로다
  *   사진 · 원본 `.xlsm`             → `attachments` (지금 그대로)
  *   비고                            → 🔴 넣지 않는다(`report-detail-values.ts`)
  *
@@ -757,6 +765,18 @@ async function appendWorkRecords(
  * 권한은 보지 않는다 — 이 통로는 사람이 칸에 적는 화면이 아니라 서버가 도는
  * 이식이고, 누가 이식을 할 수 있는지는 부르는 쪽(S4 의 화면·라우트)이 본다.
  * 그래서 `canWriteUsedParts` 자리에는 `true` 를 넣고, **나머지 두 규칙만** 본다.
+ *
+ * ── 🔴 여기서만 갈래를 버리고 이름으로 묶는다 (2026-09-22) ──────────────
+ * 받는 `params.parts` 는 **갈래별로 갈라진** 목록이다(고장분·예방분이 따로 줄을
+ * 이룬다). 그 모양이 미리보기 화면과 작업 기록 메모가 쓰는 모양이고, 그 둘은
+ * 그대로 둔다. 🔴 **사용 부품 칸만** 사용자 지시대로 「구분 없이 부품명대로
+ * 수량을」 담는다 — 묶는 규칙은 `mergeKyosanPartsForUsedParts` 한 곳에 있다
+ * (값으로 시험이 붙는 순수 함수다 — 이 수가 청구 금액에 닿는다).
+ *
+ * 그래서 **줄 수가 `params.parts.length` 보다 적을 수 있다**(실측 469장에서
+ * 1,327줄 → 1,163줄). 🔴 **수량 합계는 그대로다** — 더해 담기 때문이다.
+ * 되돌려 주는 `insertedCount` 는 **실제로 넣은 줄 수**라 묶은 뒤의 수다
+ * (화면이 「사용 부품 N줄」로 보여 주고, 이식 흔적의 `usedPartCount` 도 그 수다).
  */
 async function appendUsedParts(
   tx: Tx,
@@ -780,6 +800,9 @@ async function appendUsedParts(
   if (!gate.ok) {
     return {
       insertedCount: 0,
+      // 🔴 세는 것은 **묶기 전 「교체 부품」 건수**다(묶은 줄 수가 아니다). 이 문장을
+      //    읽는 사람은 바로 위 미리보기에서 그 수를 세고 있고, 못 들어간 것은 그
+      //    목록 전체이기 때문이다.
       skippedReason: `교체 부품 ${params.parts.length}건을 사용 부품 칸에 적지 않았습니다 — ${gate.message}`,
     };
   }
@@ -795,22 +818,28 @@ async function appendUsedParts(
     .where(eq(repairCaseUsedParts.repairCaseId, params.repairCaseId))
     .orderBy(asc(repairCaseUsedParts.lineNo));
 
+  // 🔴 **갈래를 버리고 부품 이름으로 묶는다**(사용자 지시 2026-09-22 — 위 머리말).
+  //    수량이 안 적힌 줄을 1 로 세어 더하는 것도 그 함수 안이다. 그래서 여기서는
+  //    `?? 1` 을 다시 하지 않는다 — 두 곳에 두면 한쪽만 고쳐지는 날이 온다.
+  const usedPartLines = mergeKyosanPartsForUsedParts(params.parts);
+
   // 🔴 차례는 있는 것 **뒤에** 이어 붙인다(유니크 인덱스가 건 + line_no 다).
   let nextLineNo = previousLines.reduce((max, line) => Math.max(max, line.lineNo), 0);
-  const nextLines = params.parts.map((part) => ({
+  const nextLines = usedPartLines.map((line) => ({
     repairCaseId: params.repairCaseId,
     lineNo: (nextLineNo += 1),
     // 🔴 부품 대장과 이어 붙이지 않는다 — 연락서의 글자는 교산 쪽 품명이라
     //    우리 `parts` 와 같은 물건인지 확인된 바가 없다. 손으로 적은 줄과 같은
     //    모양(`part_id` 가 null)으로 넣는다.
     partId: null,
-    partNameText: part.text,
+    partNameText: line.text,
     // 🔴 수량은 연락서의 `交換部品詳細` 시트 `数量` 칸에서 온다(`parts-detail-sheet.ts`).
     //    (예전 주석은 「연락서에 수량이 적히는 자리가 없다」였는데 **거짓이었다** —
     //    Card 시트에는 없지만 그 시트에는 있다. 실측 1,315줄 중 1,285줄에 수가 적혀
     //    있었고, 30줄이 비어 있었다.) 적히지 않은 줄과 Card 시트에만 있는 부품은
-    //    1 로 둔다 — 표의 CHECK 가 0 이하를 막는다.
-    quantity: part.quantity ?? 1,
+    //    1 로 센다 — 표의 CHECK 가 0 이하를 막는다. 같은 이름이 고장분·예방분에
+    //    둘 다 있으면 **그 둘을 더한 수**가 여기 들어간다.
+    quantity: line.quantity,
   }));
 
   await tx.insert(repairCaseUsedParts).values(nextLines);

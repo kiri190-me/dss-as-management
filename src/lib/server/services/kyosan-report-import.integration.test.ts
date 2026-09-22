@@ -27,6 +27,7 @@ import { createWorkRecord, createWorkRecordInTx } from "@/lib/db/mutations/repai
 import { getDerivedServiceSummaryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { KYOSAN_IMPORT_MARK, KYOSAN_MEMO_LIMIT } from "@/lib/kyosan/report-detail-values";
 import { readKyosanReport, type KyosanReport } from "@/lib/kyosan/kyosan-report";
+import { buildKyosanPreviewParts } from "@/lib/kyosan/report-preview";
 import {
   KYOSAN_REPORT_TRACE_REASON,
   importKyosanReport,
@@ -218,6 +219,11 @@ type FakeReportOptions = {
   serialNumber?: string | null;
   customer?: string | null;
   faultPart?: string | null;
+  /**
+   * 예방분 교체 부품. 🔴 **고장분과 같은 이름을 줄 수 있어야** 「사용 부품 칸은
+   * 갈래 없이 묶는다」를 DB 까지 확인할 수 있다(2026-09-22 사용자 지시).
+   */
+  preventivePart?: string | null;
   /** 🔴 고객 고장 상황 — 신고 증상 칸으로 가는(또는 밀려나는) 그 항목이다. */
   customerFault?: string | null;
   /** 사내 확인 결과 — 「인수점검 결과」 작업 기록으로 간다. */
@@ -252,6 +258,14 @@ function fakeReport(options: FakeReportOptions = {}): { bytes: Buffer; report: K
   if (options.internalFinding != null) card.C50 = options.internalFinding;
   if (options.notes != null) card.C55 = options.notes;
   if (options.faultPart != null) card.C71 = options.faultPart;
+  if (options.preventivePart != null) {
+    // 🔴 라벨도 함께 놓는다 — 라벨이 없으면 그 판본에 그 항목이 아예 없는 것이 되어
+    //    값을 읽지 않는다. `①` 은 열쇠에서 `1` 이 되므로(NFKC) `/^予防措置\d/` 에
+    //    맞는다(`card-fields.ts` 머리말). 🔴 **부르지 않은 시험의 라벨 수를 건드리지
+    //    않으려고** 이 두 칸은 값이 있을 때만 놓는다.
+    card.B73 = "予防措置①";
+    card.C73 = options.preventivePart;
+  }
   if (options.salt != null) card.C88 = options.salt;
 
   // 원인 — 보기의 **왼쪽** 칸에 ○ 가 있다(`report-marks.ts`).
@@ -585,6 +599,61 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     assert.ok(diagnosis, "교체 부품 요약이 들어갈 진단/조치 기록이 있어야 한다");
     assert.ok(diagnosis.memo.includes("[교체 부품(고장)]"), diagnosis.memo);
     assert.ok(diagnosis.memo.includes("값-부품1"), diagnosis.memo);
+  });
+
+  /**
+   * 🔴 사용자 지시(2026-09-22, 화면을 보고): 「교체 부품이 고장분과 예방분이 잘
+   * 나눠졌는데 **사용부품 칸에 내용을 넣을 때는 그 구분 없이 부품명대로 수량을
+   * 넣어 줘.**」 — 그래서 **자리마다 담는 모양이 다르다.** 위 시험이 갈래가
+   * 하나일 때를 보고, 이 시험이 **양쪽에 같은 이름이 있을 때**를 본다.
+   *
+   * 묶는 규칙은 순수 함수 하나에 있고(`mergeKyosanPartsForUsedParts`) 값 시험이
+   * 거기 붙어 있다. 🔴 이 시험이 더 보는 것은 **그 결과가 실제 표에 그 모양으로
+   * 들어가는가**다 — `repair_case_used_parts.quantity` 는 청구 금액에 닿는다.
+   */
+  test("🔴 같은 부품이 고장분·예방분 양쪽에 있으면 — 작업 기록은 두 줄, 사용 부품은 한 줄(수량 합)", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "값-양쪽부품",
+      preventivePart: "값-양쪽부품",
+      salt: "양쪽부품",
+    });
+
+    // 🔴 미리보기(화면이 보는 것)는 **갈래별로 두 줄**이어야 한다 — 그것을 되돌리는
+    //    조각이 아니다.
+    assert.deepEqual(buildKyosanPreviewParts(fake.report), [
+      { kind: "fault", text: "값-양쪽부품" },
+      { kind: "preventive", text: "값-양쪽부품" },
+    ]);
+
+    const result = await importOf(fake);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    // 🔴 넣은 줄은 **한 줄**이다(두 줄이 아니다). 화면이 「사용 부품 1줄」로 말한다.
+    assert.equal(result.usedPartCount, 1);
+
+    const used = await db
+      .select({
+        lineNo: repairCaseUsedParts.lineNo,
+        partId: repairCaseUsedParts.partId,
+        partNameText: repairCaseUsedParts.partNameText,
+        quantity: repairCaseUsedParts.quantity,
+      })
+      .from(repairCaseUsedParts)
+      .where(eq(repairCaseUsedParts.repairCaseId, target.id));
+    // 🔴 수량은 **합**이다 — Card 시트에는 수량 칸이 없어 양쪽이 1 로 세어져 2 가 된다.
+    assert.deepEqual(used, [{ lineNo: 1, partId: null, partNameText: "값-양쪽부품", quantity: 2 }]);
+
+    // 🔴 작업 기록 메모는 **갈래별로 그대로** 두 머리글을 낸다.
+    const records = await readImportedWorkRecords(target.id);
+    const diagnosis = records.find((row) => row.recordKind === "DIAGNOSIS_REPAIR_SUMMARY");
+    assert.ok(diagnosis);
+    assert.ok(diagnosis.memo.includes("[교체 부품(고장)]"), diagnosis.memo);
+    assert.ok(diagnosis.memo.includes("[교체 부품(예방)]"), diagnosis.memo);
   });
 
   test("사진은 미리보기가 걸러 준 것만 첨부로 들어간다", async () => {

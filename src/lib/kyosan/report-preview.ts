@@ -248,6 +248,68 @@ export function buildKyosanPreviewParts(report: KyosanReport): KyosanPreviewPart
   return parts;
 }
 
+/**
+ * 사용 부품 칸에 들어갈 한 줄. `repair_case_used_parts` 의 세 칸 중 이식이 정하는
+ * 둘뿐이다 — `part_id` 는 언제나 `null` 이고(부품 대장과 이어 붙이지 않는다),
+ * `line_no` 는 있는 줄 뒤에 이어 붙이는 쪽이 매긴다.
+ *
+ * 🔴 **갈래(`kind`)가 없다.** 없는 것이 이 타입의 요점이다 — 아래 머리말.
+ */
+export type KyosanUsedPartLine = {
+  text: string;
+  /** 🔴 언제나 값이 있다. 수량이 안 적힌 줄은 **1로 세어** 더했다. */
+  quantity: number;
+};
+
+/**
+ * 「교체 부품」 줄들을 **사용 부품 칸에 넣을 줄**로 묶는다 (2026-09-22).
+ *
+ * ── 🔴 자리마다 담는 모양이 다르다 ─────────────────────────────────────
+ * 사용자가 화면을 보고 정했다: 「교체 부품이 고장분과 예방분이 잘 나눠졌는데
+ * **사용부품 칸에 내용을 넣을 때는 그 구분 없이 부품명대로 수량을 넣어 줘.**」
+ *
+ *   「교체 부품」 미리보기 · 작업 기록 메모 → **갈래별로 그대로**(두 줄)
+ *   🔴 `repair_case_used_parts`            → **이름으로 묶고 수량을 더한다**(한 줄)
+ *
+ * 그래서 이 함수는 `buildKyosanPreviewParts` 가 갈라 놓은 것을 **되돌리지
+ * 않는다.** 갈라 놓은 목록은 그대로 두고, 그것을 원본으로 삼아 **사용 부품 칸
+ * 몫만** 따로 만든다. 두 규칙이 한 파일에 나란히 있어야 어느 날 겹침 열쇠를
+ * 고치는 사람이 **양쪽을 함께** 보게 된다 — 그래서 여기 둔다.
+ *
+ * ── 열쇠 · 차례 · 수량 ─────────────────────────────────────────────────
+ * · **열쇠는 부품 이름 글자 그대로**다. 겹침 판정과 같은 규칙이고, 눌러서
+ *   견주지 않는다(`normalizeKey` 로 눌러도 실측 469장에서 한 건도 더 안 잡혔다).
+ * · **차례는 먼저 나온 자리를 지킨다.** 고장분이 앞에 오므로 「교체 부품」에
+ *   보이는 차례와 같은 차례가 되고, 예방분에만 있는 부품이 그 뒤에 붙는다.
+ *   `Map` 이 넣은 차례를 지키므로 따로 정렬하지 않는다.
+ * · **수량을 더한다. 수량이 안 적힌 줄은 1** 이다 — 넣는 쪽이 `?? 1` 로 그렇게
+ *   다뤄 왔고(`kyosan-report-import.ts` 의 `appendUsedParts`), 그 규칙을 여기로
+ *   옮겨만 왔다. 🔴 **그러므로 수량 합계가 달라지지 않는다** — 줄 수만 줄어든다.
+ *
+ * 🔴 곁 값을 고를 일이 없다. 미리보기 줄이 가진 것은 `kind` · `text` ·
+ * `quantity` 뿐이고, `交換部品詳細` 시트의 `spec`(형식번호)은 미리보기가 이미
+ * 버린다(`KyosanPreviewPart`). 받는 표에도 그 칸이 없다. 묶을 때 **버리는 것은
+ * `kind` 하나**이고, 그것이 사용자가 버리라고 한 값이다.
+ *
+ * 🔴 실측(2026-09-22, 연락서 469장): 「교체 부품」 1,327줄 → 사용 부품 **1,163줄**
+ * (-164줄, 84장에서 줄어든다). **수량 합계 2,990 은 전후가 같다.** 사례의
+ * `0357.xlsm` 은 10줄 → **7줄**이고, 고장 3 · 예방 7 이던 부품 셋이 각각
+ * **수량 10 한 줄**이 된다.
+ */
+export function mergeKyosanPartsForUsedParts(
+  parts: readonly KyosanPreviewPart[]
+): KyosanUsedPartLine[] {
+  const byText = new Map<string, KyosanUsedPartLine>();
+  for (const part of parts) {
+    const found = byText.get(part.text);
+    // 🔴 `?? 1` — 수량이 안 적힌 줄을 1로 센다. 넣는 쪽의 규칙 그대로다.
+    const quantity = part.quantity ?? 1;
+    if (found === undefined) byText.set(part.text, { text: part.text, quantity });
+    else found.quantity += quantity;
+  }
+  return [...byText.values()];
+}
+
 const UNMATCHED_BLOCKER: Readonly<Record<string, string>> = {
   "intake-number-missing":
     "짝이 없습니다 — 연락서에서 접수번호를 읽지 못했습니다. 넣지 않습니다(수리 건을 새로 만들지 않습니다).",
