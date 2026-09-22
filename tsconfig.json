@@ -31,7 +31,13 @@
       // 서브모듈로 들어온 사내 공용 DB 스키마(vendor/dss-core, 별도 저장소).
       // A/S 와 PO 사이트가 같은 dss_as 를 **같은 타입**으로 본다 —
       // 손으로 베낀 복제본이 아니라 한 벌이라 컴파일러가 어긋남을 잡아 준다.
-      "@dss/core/schema": ["./vendor/dss-core/src/schema/index.ts"]
+      "@dss/core/schema": ["./vendor/dss-core/src/schema/index.ts"],
+      // 화면 조각은 **깊은 경로**로 하나씩 들여온다. 배럴(`index.ts`) 한 줄로 묶지
+      // 않는 까닭: 그 묶음에는 `"use client"` 파일과 순수 함수가 섞여 있고, 배럴을
+      // 두면 서버 화면이 순수 함수 하나를 부르려다 화면 조각 전부를 딸려 오게 된다.
+      // 시험 러너(node --test)에서도 같은 일이 생겨, 쓰지도 않는 `next/navigation`
+      // 을 읽다 터진다(그쪽 README 3절 · PO tsconfig 의 같은 줄).
+      "@dss/core/ui/*": ["./vendor/dss-core/src/ui/*"]
     }
   },
   "include": [

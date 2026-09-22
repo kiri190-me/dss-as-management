@@ -13,6 +13,9 @@ import {
 } from "../schema";
 import { computeReturnableQuantity } from "@/lib/domain/inventory-return-rules";
 import { groupPartOwnerAvailability, type StockOwner, type StockTransactionType } from "@/lib/domain/inventory-types";
+/* 아래 조회 둘의 반환형. 재수출은 제자리(부품 고르기 목록 구역)에 따로 적어 두었다 —
+   형만 빌리므로 번들에는 아무것도 실리지 않는다. */
+import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
  * Phase 5B-2 — read queries for the core inventory ledger. Same convention
@@ -96,16 +99,16 @@ export async function getPartList(filters: PartListFilters = {}): Promise<PartLi
 // ---- 부품 고르기 목록 (견적서의 품명 칸이 쓰는 가벼운 형제) ----
 
 /**
- * 부품을 **알아보는 데 필요한 것만** 담은 한 줄. 견적서의 품명 칸이 쓰는 네 가지다 —
- * 품명 · 품명2(규격) · 도번 · 교산 품번(getPartList 가 검색하는 네 칸과 같다).
+ * ── 🔴 줄의 모양은 서브모듈이 갖는다 ────────────────────────────────────────
+ * `PartPickerRow` · `PartPickerPriceRow` 는 부품 고르개(한 벌 —
+ * `@dss/core/ui/inventory/part-picker.tsx`)와 짝이라 그 곁에 있다. 여기서 다시 적지
+ * 않고 **재수출한다** — 부르는 쪽(폼 둘 · 상세 화면 둘)이 지금까지 하던 대로 이
+ * 파일에서 타입을 가져올 수 있게, 그리고 이 사이트 안에서 정의가 두 벌이 되지 않게.
+ * (queries/quotes.ts 의 목록 줄이 PO 쪽에서 같은 방식을 쓴다.)
+ *
+ * 아래 조회 둘은 그대로 여기 있다 — 이 묶음은 DB 에 접속하지 않는다.
  */
-export type PartPickerRow = {
-  id: string;
-  partName: string;
-  partSpec: string | null;
-  drawingNo: string | null;
-  kyosanPartNo: string | null;
-};
+export type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
  * 부품 마스터를 **고르기 위해서만** 읽는 목록. 견적서 화면(QuoteEditForm)의
@@ -143,21 +146,8 @@ export async function getPartPickerList(): Promise<PartPickerRow[]> {
     .orderBy(parts.partName);
 }
 
-/**
- * 고르개가 **함께 받아 두는** 단가 한 줄. 부품마다 값이 둘이다 — 일반 단가와 O/H 단가
- * (domain/quote-part-price.ts 머리말). 둘 다 소유구분을 보지 않는다(2026-09-17 사용자 정정).
- *
- * 🔴 **null 은 "정하지 않았다"이고 `"0"` 은 "무상 부품"이다.** 행이 없는 것을 `"0"` 으로
- * 채워 돌려주면 그 구분이 화면에 닿기 전에 사라지고, 견적서가 그 부품을 0원으로 청구한다
- * (queries/part-unit-prices.ts 의 같은 규약).
- */
-export type PartPickerPriceRow = {
-  partId: string;
-  /** 부품 상세에 적어 둔 일반 단가. 정해 두지 않았으면 null. */
-  unitPrice: string | null;
-  /** O/H 단가. 정해 두지 않았으면 null — 🔴 그때 일반 단가로 때우지 않는다. */
-  overhaulUnitPrice: string | null;
-};
+/** 단가 줄의 모양도 고르개 곁에 있다 — 위 재수출의 그 까닭이다. */
+export type { PartPickerPriceRow } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
  * 부품을 고를 때 단가 칸까지 채우기 위한 **단가 목록**.

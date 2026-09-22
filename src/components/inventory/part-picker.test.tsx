@@ -5,19 +5,28 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   MAX_PART_SUGGESTIONS,
-  QuotePartSuggestionList,
+  PartSuggestionList,
   filterPartOptions,
   partOptionDetail,
   partPickPatch,
   partPickUnitPrice,
-} from "./quote-part-picker";
+} from "@dss/core/ui/inventory/part-picker";
 import type { PartPickerPriceRow, PartPickerRow } from "@/lib/db/queries/inventory";
 
 /**
  * ============================================================================
- * 견적서 품명 칸에서 부품을 찾아 고른다 (2026-09-17 사용자 요청)
+ * 품명 칸에서 부품을 찾아 고른다 (2026-09-17 사용자 요청)
  * ============================================================================
- * 거르기 · 고른 값 · 후보 목록의 생김새는 **실제로 돌려 본다**(quote-part-picker.tsx 는
+ * 🔴 **재는 대상은 2026-09-22 부터 서브모듈(vendor/dss-core)의 파일이다.** 고르개를
+ *    공용 묶음으로 옮겼다 — 견적서도 수리 건 상세도 쓰는 조각이라 A/S 안에 두면
+ *    PO/내자가 붙이는 날 사본이 생긴다. **시험은 이 저장소에 남겨 둔다**: 그쪽 묶음에는
+ *    시험 러너가 없고(그쪽 README 5절), A/S 의 시험 등록 검사가 최상위 `vendor/` 를
+ *    건너뛰어 옮기면 아무 소리 없이 안 돌게 된다. 여기 두면 `npm run test:components`
+ *    가 **이 사이트에서 실제로 도는 그 코드**를 본다(PO 의 responsive-list.test.ts 가
+ *    먼저 쓴 방식이다). 형 선언을 이 파일에서 재수출로 가져오는 것도 같은 뜻이다 —
+ *    A/S 조회가 내보내는 그 형으로 견준다.
+ *
+ * 거르기 · 고른 값 · 후보 목록의 생김새는 **실제로 돌려 본다**(part-picker.tsx 는
  * 서버 것을 하나도 끌고 오지 않는다 — 형 선언만 빌려 쓴다). 폼과 두 페이지는 서버
  * 액션을 부르는 클라이언트 컴포넌트라 이 환경에서 그려 볼 수 없어서, 이웃 시험
  * (quote-edit-cable.test.ts · quote-attachment-screens.test.ts)과 같이 **원본 글자**를
@@ -59,6 +68,10 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
 
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 const inventory = flat(read("src/lib/db/queries/inventory.ts"));
+/* 🔴 줄의 모양(형 둘)은 2026-09-22 부터 고르개 곁 — 서브모듈에 있다. 조회는 그대로
+   이 사이트가 갖고 있으므로, 아래 ㉢ 은 **두 파일**을 견준다: 형은 여기서, 조회는
+   inventory.ts 에서. */
+const pickerRows = flat(read("vendor/dss-core/src/ui/inventory/part-picker-rows.ts"));
 const newPage = flat(read("src/app/(app)/quotes/new/page.tsx"));
 const editPage = flat(read("src/app/(app)/quotes/[id]/page.tsx"));
 
@@ -144,7 +157,7 @@ describe("㉡ 고르면 붙고, 고쳐 쓰면 풀린다", () => {
   });
 
   test("후보 목록은 **제 줄**에서만 펴진다 — 여러 줄이 한꺼번에 뜨면 서로를 가린다", () => {
-    assert.ok(form.includes("{partPickerKey === row.key && !disabled && ( <QuotePartSuggestionList"));
+    assert.ok(form.includes("{partPickerKey === row.key && !disabled && ( <PartSuggestionList"));
     assert.ok(form.includes("options={filterPartOptions(partOptions, row.partNameText)}"));
   });
 
@@ -161,11 +174,11 @@ describe("㉡ 고르면 붙고, 고쳐 쓰면 풀린다", () => {
 });
 
 describe("㉢ 🔴 재고 · 소유구분 · 내부 비고가 화면 쪽으로 가지 않는다", () => {
-  const pickerType = sliceBetween(inventory, "export type PartPickerRow = {", "};");
+  const pickerType = sliceBetween(pickerRows, "export type PartPickerRow = {", "};");
   const pickerQuery = sliceBetween(
     inventory,
     "export async function getPartPickerList(",
-    "export type PartPickerPriceRow = {"
+    "export type { PartPickerPriceRow }"
   );
 
   test("돌려주는 줄은 다섯 칸뿐이다 — id + 네 가지", () => {
@@ -203,7 +216,7 @@ describe("㉢ 🔴 재고 · 소유구분 · 내부 비고가 화면 쪽으로 �
 
   test("🔴 그려 본 후보 목록에 재고 · 소유구분 · 비고가 없다", () => {
     const html = renderToStaticMarkup(
-      <QuotePartSuggestionList options={rows} onPick={() => {}} listLabel="1번째 부품 후보" />
+      <PartSuggestionList options={rows} onPick={() => {}} listLabel="1번째 부품 후보" />
     );
     // 있어야 할 것 — 네 가지가 눈에 보인다.
     for (const shown of ["마그네트론", "2M244-M1", "DWG-1001", "KY-7788", "서큘레이터", "RG-393 3m"]) {
@@ -217,7 +230,7 @@ describe("㉢ 🔴 재고 · 소유구분 · 내부 비고가 화면 쪽으로 �
 
   test("후보가 없으면 아무것도 그리지 않는다 — 빈 상자가 칸 밑에 남지 않게", () => {
     assert.equal(
-      renderToStaticMarkup(<QuotePartSuggestionList options={[]} onPick={() => {}} listLabel="1번째 부품 후보" />),
+      renderToStaticMarkup(<PartSuggestionList options={[]} onPick={() => {}} listLabel="1번째 부품 후보" />),
       ""
     );
   });
@@ -245,7 +258,7 @@ describe("㉣ 마스터에 없는 이름도 그대로 적고 저장된다", () =
 
   test("설명 줄(케이블)에는 부품 후보를 달지 않는다 — 그 줄은 부품이 아니라 머리글이다", () => {
     const noteRow = sliceBetween(form, "> 설명 줄 </span>", "번째 설명 줄 지우기");
-    assert.ok(!noteRow.includes("QuotePartSuggestionList"), "설명 줄에 부품 후보가 붙었다");
+    assert.ok(!noteRow.includes("PartSuggestionList"), "설명 줄에 부품 후보가 붙었다");
     assert.ok(
       noteRow.includes("onChange={(e) => updateItem(row.key, { partNameText: e.target.value })}"),
       "설명 줄의 입력이 바뀌었다"
@@ -345,7 +358,7 @@ describe("㉥ 고르면 단가도 채운다", () => {
   });
 
   test("🔴 고르개의 단가 입력 셋이 모두 물음표(선택)다 — 단가 칸 없는 화면도 같은 고르개를 쓴다", () => {
-    const picker = flat(read("src/components/quotes/quote-part-picker.tsx"));
+    const picker = flat(read("vendor/dss-core/src/ui/inventory/part-picker.tsx"));
     const context = sliceBetween(picker, "export type PartPickPriceContext = {", "};");
     for (const optional of ["prices?:", "isOverhaulPart?:", "currentUnitPrice?:"]) {
       assert.ok(context.includes(optional), `${optional} 가 선택이 아니다`);
@@ -383,7 +396,7 @@ describe("㉥ 고르면 단가도 채운다", () => {
   });
 
   test("돌려주는 단가 줄은 세 칸뿐이다 — 부품 id + 값 둘", () => {
-    const priceType = sliceBetween(inventory, "export type PartPickerPriceRow = {", "};");
+    const priceType = sliceBetween(pickerRows, "export type PartPickerPriceRow = {", "};");
     for (const field of ["partId:", "unitPrice:", "overhaulUnitPrice:"]) {
       assert.ok(priceType.includes(field), `${field} 가 없다`);
     }

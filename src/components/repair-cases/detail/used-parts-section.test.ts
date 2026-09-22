@@ -221,11 +221,14 @@ describe("사용 부품 — 적고 저장하기", () => {
   });
 
   test("🔴 부품 고르개를 붙였다 — 견적서가 쓰는 그 조각을 재사용한다", () => {
+    // 🔴 2026-09-22 고르개가 공용 묶음으로 옮겨 갔다(A/S 안의 사본이 아니라 서브모듈의
+    //    한 벌이다). 견적서 폼도 **같은 경로**에서 같은 이름을 부른다 — 여기서 경로를
+    //    글자로 박아 두는 까닭이 그것이다.
     assert.match(
       formFlat,
-      /import \{ QuotePartSuggestionList, filterPartOptions, partPickPatch, \} from "@\/components\/quotes\/quote-part-picker";/
+      /import \{ PartSuggestionList, filterPartOptions, partPickPatch, \} from "@dss\/core\/ui\/inventory\/part-picker";/
     );
-    assert.match(formFlat, /<QuotePartSuggestionList options=\{filterPartOptions\(partOptions, line\.partNameText\)\}/);
+    assert.match(formFlat, /<PartSuggestionList options=\{filterPartOptions\(partOptions, line\.partNameText\)\}/);
     assert.match(formFlat, /onPick=\{\(option\) => \{ updateLine\(line\.key, partPickPatch\(option\)\);/);
   });
 

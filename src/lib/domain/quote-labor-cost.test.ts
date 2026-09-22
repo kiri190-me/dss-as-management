@@ -7,7 +7,10 @@ import { sumQuoteLaborCost, type BaseLaborHours, type SelectedRepairTask } from 
 // 부품 단가 넣기)이라 함께 읽히는 편이 낫고, package.json 의 시험 목록을 건드리지
 // 않아도 이 파일은 이미 등록돼 있다(두 세션이 같은 저장소를 쓰는 동안 그 줄을
 // 건드리면 서로 섞인다).
-import { isPriceUnset, toPriceFieldValue } from "./quote-part-price";
+// 🔴 2026-09-22 이 둘은 공용 묶음으로 옮겨 갔다(부품 고르개의 유일한 값 의존이라
+// 함께 갔다). 시험은 여기 남는다 — 아래 까닭 그대로 파일을 더 만들 수 없고, 그쪽
+// 묶음에는 시험 러너가 없다.
+import { isPriceUnset, toPriceFieldValue } from "@dss/core/ui/inventory/part-price-field";
 // 이것도 같은 파일에 둔다: 「통전작업 제외」가 **작업비**에 하는 일(위 차감)과
 // **문서의 작업 내역**에 하는 일(③ 을 뺀다)이라 한 신호의 두 얼굴이다. 그리고
 // 🔴 package.json 의 `test` 줄이 Windows 명령줄 한도(cmd.exe 8191자)에 닿아, 파일을

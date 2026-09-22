@@ -32,7 +32,7 @@ import {
 } from "@/lib/domain/quote-repair-task-selection";
 import { workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { RepairLaborKindRow } from "@/lib/db/queries/repair-labor";
-import { isPriceUnset, toPriceFieldValue } from "@/lib/domain/quote-part-price";
+import { isPriceUnset, toPriceFieldValue } from "@dss/core/ui/inventory/part-price-field";
 import { buildQuoteSubject } from "@/lib/domain/quote-subject";
 import {
   isInvestigationScopeEmptied,
@@ -51,10 +51,10 @@ import {
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 import QuotePrintView, { type QuoteWorkSections } from "@/components/quotes/QuotePrintView";
 import {
-  QuotePartSuggestionList,
+  PartSuggestionList,
   filterPartOptions,
   partPickPatch,
-} from "@/components/quotes/quote-part-picker";
+} from "@dss/core/ui/inventory/part-picker";
 /* 조회 자체는 서버 것이지만 줄의 생김새는 여기서도 알아야 한다 — 형 선언만 가져오므로
    번들에는 아무것도 실리지 않는다(PartRequestSection 이 PartListRow 를 받는 것과 같다). */
 import type { PartPickerPriceRow, PartPickerRow } from "@/lib/db/queries/inventory";
@@ -325,7 +325,7 @@ function ohTemplatePartKey(index: number): string {
  * 출고 부품 한 줄 → 견적서 부품 줄.
  *
  * 단가는 **부품 상세에 적어 둔 일반 단가**다. 실제로 나간 물건이라 O/H 단가가
- * 아니라 이 값으로 청구한다(domain/quote-part-price.ts 의 '출처가 정한다').
+ * 아니라 이 값으로 청구한다(@dss/core/ui/inventory/part-price-field.ts 의 '출처가 정한다').
  *
  * `isOverhaulPart` 는 false — 양식의 `1) 부품 비용` 칸으로 간다.
  */
@@ -542,7 +542,7 @@ export default function QuoteEditForm({
    * 형제 조회를 따로 두었다(그 함수의 머리말).
    *
    * 통째로 한 번 받아 **브라우저에서 거른다** — 부품 마스터가 백 줄 안쪽이라 글자마다
-   * 서버를 부를 까닭이 없다(quote-part-picker.tsx 의 filterPartOptions).
+   * 서버를 부를 까닭이 없다(part-picker.tsx 의 filterPartOptions).
    */
   partOptions: PartPickerRow[];
   /**
@@ -554,7 +554,7 @@ export default function QuoteEditForm({
    * 판단이다 — 늦게 온 응답이 사람이 그새 적은 금액을 덮는 일이 없다.
    *
    * 채우는 규칙(덮지 않는다 · null 은 빈칸 · O/H 는 O/H 단가로만)은 고르개에 있다
-   * (quote-part-picker.tsx 의 partPickUnitPrice).
+   * (part-picker.tsx 의 partPickUnitPrice).
    */
   partPrices: PartPickerPriceRow[];
   /**
@@ -2838,12 +2838,12 @@ export default function QuoteEditForm({
                   autoComplete="off"
                 />
                 {partPickerKey === row.key && !disabled && (
-                  <QuotePartSuggestionList
+                  <PartSuggestionList
                     options={filterPartOptions(partOptions, row.partNameText)}
                     listLabel={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 후보`}
                     /**
                      * 🔴 고르면 **단가도 함께** 채운다(2026-09-17 사용자 요청). 규칙은 전부
-                     * 고르개 쪽에 있다(quote-part-picker.tsx 의 partPickUnitPrice) — 여기서는
+                     * 고르개 쪽에 있다(part-picker.tsx 의 partPickUnitPrice) — 여기서는
                      * 그 판단에 필요한 세 가지를 건넨다:
                      *
                      *  · `prices` — 단가가 적힌 부품들(페이지가 한 번 실어 보낸 그 목록)

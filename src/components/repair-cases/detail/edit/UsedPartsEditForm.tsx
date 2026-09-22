@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { generateClientUuid } from "@/lib/client-uuid";
 import {
-  QuotePartSuggestionList,
+  PartSuggestionList,
   filterPartOptions,
   partPickPatch,
-} from "@/components/quotes/quote-part-picker";
+} from "@dss/core/ui/inventory/part-picker";
 import type { PartPickerRow } from "@/lib/db/queries/inventory";
 import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-parts";
 import { saveRepairCaseUsedPartsAction } from "@/lib/server/actions/repair-case-used-parts";
@@ -27,7 +27,7 @@ import type { SectionEditConflictError } from "./useSectionEditSubmit";
  * ── 🔴 고르면 붙고, 고쳐 쓰면 풀린다 ────────────────────────────────────────
  * 이 칸의 목적이 통계라 **같은 부품이 같은 것으로 묶여야** 한다(`RF 모듈` ·
  * `RF모듈` 이 서로 다른 조각이 되면 원이 부스러진다). 그래서 견적서가 쓰는 그
- * 부품 고르개(quotes/quote-part-picker.tsx)를 그대로 재사용하고, 고르면 partId 가
+ * 부품 고르개(@dss/core/ui/inventory/part-picker.tsx)를 그대로 재사용하고, 고르면 partId 가
  * 붙는다.
  *
  * 다만 **마스터에 없는 부품은 손으로 적을 수 있어야 한다** — 옛 건에는 지금
@@ -199,7 +199,7 @@ export default function UsedPartsEditForm({
                   autoComplete="off"
                 />
                 {pickerKey === line.key && !disabled && (
-                  <QuotePartSuggestionList
+                  <PartSuggestionList
                     options={filterPartOptions(partOptions, line.partNameText)}
                     listLabel={`${index + 1}번째 부품 후보`}
                     onPick={(option) => {
