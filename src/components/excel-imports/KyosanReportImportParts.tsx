@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { FileDropZone } from "@/components/common/FileDropZone";
+import { KyosanText } from "@/components/kyosan/KyosanText";
 import {
   KYOSAN_AGREEMENT_LABEL,
   KYOSAN_AMBIGUOUS_TEXT,
@@ -20,7 +21,6 @@ import {
   type KyosanReportTarget,
 } from "@/lib/domain/kyosan-report-import/preview-view";
 import type { KyosanAgreement } from "@/lib/kyosan/report-match";
-import { viewKyosanText } from "@/lib/kyosan/report-terms";
 import type { KyosanReportImportResult } from "@/lib/server/services/kyosan-report-import";
 
 /**
@@ -62,48 +62,11 @@ function blank(value: string | null): string {
 }
 
 /**
- * 연락서에서 온 글자 한 줄. 🔴 **원문을 지우지 않는다**(`kyosan/report-terms.ts`).
- *
- *  · 양식의 고정 보기(原因 열 · 処置 넷 · `交換無し`)  → 한글을 보이고 원문을 옆에 작게.
- *  · 사람이 손으로 적은 일본어                        → 원문 그대로 + 「일본어 원문」 표시.
- *  · 그 밖(한글 · 영문 · 숫자)                        → 그대로.
- *
- * 🔴 여기서 **저장값이 달라지지 않는다.** 상세 칸에 들어가는 글자는 연락서 원문
- * 그대로이고(`kyosan/report-detail-values.ts`), 이 조각은 사람이 넣기 전에 눈으로
- * 읽으라고 한글을 곁들일 뿐이다 — 번역이 틀렸을 때 원문으로 되짚을 수 있다.
+ * 🔴 연락서에서 온 글자 한 줄을 그리던 `KyosanText` 는
+ * **`@/components/kyosan/KyosanText` 로 옮겼다**(2026-09-22). 상세 화면의 작업
+ * 기록·요약 칸도 같은 규칙으로 그려야 해서, 두 벌이 되지 않도록 공용 자리에 뒀다.
+ * 여기서 그리는 모양은 옮기기 전과 한 글자도 다르지 않다.
  */
-function KyosanText({ value }: { value: string }) {
-  const view = viewKyosanText(value);
-
-  if (view.korean !== null) {
-    return (
-      <span data-role="kyosan-text" data-translated="true">
-        <span className="text-zinc-800 dark:text-zinc-200">{view.korean}</span>
-        <span
-          data-role="kyosan-text-original"
-          className="ml-1.5 text-xs text-zinc-400 dark:text-zinc-500"
-        >
-          {`(${view.original})`}
-        </span>
-      </span>
-    );
-  }
-
-  return (
-    <span data-role="kyosan-text" data-japanese={view.isJapaneseOriginal ? "true" : undefined}>
-      <span className="text-zinc-800 dark:text-zinc-200">{view.original}</span>
-      {view.isJapaneseOriginal ? (
-        <span
-          data-role="kyosan-text-japanese-badge"
-          className="ml-1.5 whitespace-nowrap rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-        >
-          일본어 원문
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function AgreementBadge({ value }: { value: KyosanAgreement }) {
   return (
     <span

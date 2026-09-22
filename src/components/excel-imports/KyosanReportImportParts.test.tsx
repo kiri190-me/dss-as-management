@@ -12,6 +12,8 @@ import {
   kyosanReportSaveOffer,
 } from "@/lib/domain/kyosan-report-import/preview-view";
 import type { KyosanReportImportResult } from "@/lib/server/services/kyosan-report-import";
+import { KyosanMemoText, KyosanText } from "@/components/kyosan/KyosanText";
+import { KYOSAN_IMPORT_MARK, kyosanOriginHeading } from "@/lib/kyosan/report-detail-values";
 import {
   KyosanReportContentPanel,
   KyosanReportImportBar,
@@ -454,5 +456,129 @@ describe("결과", () => {
     assert.match(markup, /data-ok="false"/);
     assert.match(markup, /넣지 않았습니다\./);
     assert.match(markup, /짝이 없습니다/);
+  });
+});
+
+// ══════════════════════════════════════════════ 공용 조각 (2026-09-22)
+
+/**
+ * ============================================================================
+ * `@/components/kyosan/KyosanText` — 옮겨 온 공용 조각
+ * ============================================================================
+ * 미리보기 안에만 있던 `KyosanText` 를 공용 자리로 **옮겼다**(베낀 것이 아니다).
+ * 상세 화면의 작업 기록·요약 칸도 같은 조각으로 그린다.
+ *
+ * 🔴 여기서 못 박는 것:
+ *  · 미리보기의 마크업이 **옮기기 전과 한 글자도 다르지 않다.**
+ *  · 여러 줄 덩어리에서 머리글 줄은 **번역되지 않는다.**
+ *  · 🔴 원문·앞뒤 공백·빈 줄이 **하나도 사라지지 않는다.**
+ *  · 덩어리 조각은 **바깥 요소를 만들지 않는다** — 색·취소선을 물려받아야 한다.
+ * ============================================================================
+ */
+
+const TONE = 'class="text-zinc-800 dark:text-zinc-200"';
+
+describe("공용 조각 — 연락서 글자 한 줄", () => {
+  test("🔴 고정 보기 — 마크업이 옮기기 전과 같다(한글을 크게, 원문을 옆에 작게)", () => {
+    assert.equal(
+      render(<KyosanText value="現品引取" />),
+      '<span data-role="kyosan-text" data-translated="true">' +
+        `<span ${TONE}>현품 인수</span>` +
+        '<span data-role="kyosan-text-original" class="ml-1.5 text-xs text-zinc-400 dark:text-zinc-500">(現品引取)</span>' +
+        "</span>"
+    );
+  });
+
+  test("🔴 사전에 없는 일본어 — 마크업이 옮기기 전과 같다(원문 + 「일본어 원문」)", () => {
+    assert.equal(
+      render(<KyosanText value="焼損・煙・異臭発生" />),
+      '<span data-role="kyosan-text" data-japanese="true">' +
+        `<span ${TONE}>焼損・煙・異臭発生</span>` +
+        '<span data-role="kyosan-text-japanese-badge" class="ml-1.5 whitespace-nowrap rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">일본어 원문</span>' +
+        "</span>"
+    );
+  });
+
+  test("한국어 줄에는 아무 표시도 붙지 않는다", () => {
+    assert.equal(
+      render(<KyosanText value="출력이 나오지 않습니다" />),
+      `<span data-role="kyosan-text"><span ${TONE}>출력이 나오지 않습니다</span></span>`
+    );
+  });
+
+  test("색을 감싸는 곳에 맡길 수 있다(무효 처리된 작업 기록의 회색·취소선)", () => {
+    const markup = render(<KyosanText value="출력이 나오지 않습니다" toneClassName={null} />);
+    assert.equal(markup, '<span data-role="kyosan-text">출력이 나오지 않습니다</span>');
+    assert.equal(markup.includes("text-zinc-800"), false, "🔴 바깥이 정한 색을 덮으면 안 된다");
+  });
+});
+
+describe("공용 조각 — 연락서 여러 줄 덩어리", () => {
+  /** 이식이 작업 기록 `memo` 한 칸에 실제로 넣는 모양(`report-detail-values.ts`). */
+  const MEMO = [
+    KYOSAN_IMPORT_MARK,
+    "",
+    kyosanOriginHeading("사내 확인 결과"),
+    "不具合内容 その１",
+    "  前置きの空白も残す  ",
+    "",
+    kyosanOriginHeading("처치(○ 표시)"),
+    "現品引取",
+    "출력이 나오지 않습니다",
+  ].join("\n");
+
+  const markup = render(<KyosanMemoText value={MEMO} />);
+
+  test("🔴 머리글 줄은 번역되지도 「일본어 원문」이 되지도 않는다", () => {
+    assert.ok(
+      markup.includes(`<span data-role="kyosan-memo-heading">${KYOSAN_IMPORT_MARK}</span>`),
+      "🔴 우리가 붙인 한글 이름이지 연락서 원문이 아니다"
+    );
+    assert.ok(markup.includes('<span data-role="kyosan-memo-heading">[사내 확인 결과]</span>'));
+    assert.ok(markup.includes('<span data-role="kyosan-memo-heading">[처치(○ 표시)]</span>'));
+    // 머리글은 셋뿐이고, 하나도 글자 줄로 떨어지지 않았다.
+    assert.equal((markup.match(/data-role="kyosan-memo-heading"/g) ?? []).length, 3);
+  });
+
+  test("고정 보기 줄은 한글과 원문이 둘 다 나온다", () => {
+    assert.ok(markup.includes("현품 인수"), "한글이 보여야 한다");
+    assert.ok(markup.includes("(現品引取)"), "🔴 원문을 버리지 않는다");
+    assert.match(markup, /data-translated="true"/);
+  });
+
+  test("🔴 사전에 없는 일본어 줄은 원문 그대로 + 「일본어 원문」 표시", () => {
+    assert.ok(markup.includes("不具合内容 その１"), "🔴 자유 기술은 원문 그대로다");
+    assert.ok(markup.includes("일본어 원문"));
+    // 일본어 줄은 둘이다 — 불량 내용과 앞뒤 공백이 붙은 줄.
+    assert.equal((markup.match(/data-japanese="true"/g) ?? []).length, 2);
+  });
+
+  test("한국어 줄에는 아무 표시도 안 붙는다", () => {
+    assert.ok(
+      markup.includes('<span data-role="kyosan-text">출력이 나오지 않습니다</span>'),
+      "한국어 줄은 감싸는 것 말고는 아무것도 붙지 않아야 한다"
+    );
+  });
+
+  test("🔴 앞뒤 공백이 살아 있다 — 저장 쪽이 일부러 남긴 것이다", () => {
+    assert.ok(markup.includes(">  前置きの空白も残す  <"), "앞뒤 공백이 그대로 있어야 한다");
+  });
+
+  test("🔴 빈 줄이 살아 있다 — 덩어리 사이 간격이 사라지면 안 된다", () => {
+    assert.equal((markup.match(/\n/g) ?? []).length, 8, "줄 아홉이면 줄바꿈은 여덟이다");
+    assert.match(markup, /<\/span>\n\n<span data-role="kyosan-memo-heading">\[사내 확인 결과\]/);
+  });
+
+  test("🔴 바깥 요소를 만들지 않는다 — 쓰는 쪽의 글자 크기·색·취소선을 물려받는다", () => {
+    assert.equal(markup.includes("text-zinc-800"), false, "🔴 바깥이 정한 색을 덮으면 안 된다");
+    assert.equal(markup.startsWith("<span data-role=\"kyosan-memo-heading\""), true, "<p>·<dd> 는 쓰는 쪽 것이다");
+  });
+
+  test("연락서와 상관없는 보통 기록은 아무것도 달라지지 않는다", () => {
+    const plain = render(<KyosanMemoText value={"점검 완료\n이상 없음"} />);
+    assert.equal(
+      plain,
+      '<span data-role="kyosan-text">점검 완료</span>\n<span data-role="kyosan-text">이상 없음</span>'
+    );
   });
 });

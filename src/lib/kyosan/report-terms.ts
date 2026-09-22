@@ -165,3 +165,71 @@ export function viewKyosanText(value: string): KyosanTextView {
 export function knownKyosanFormTerms(): readonly string[] {
   return Object.keys(KYOSAN_FORM_TERMS);
 }
+
+// ─────────────────────────────────────────────── 여러 줄 덩어리 (2026-09-22)
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 **덩어리를 통째로 태우면 아무것도 안 된다.**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 이식은 연락서 여러 항목을 작업 기록 `memo` **한 덩어리**로 묶는다
+ * (`report-detail-values.ts`). 실제로 저장된 모양은 이렇다:
+ *
+ *     [교산 연락서]          ← 사람이 적은 기록과 구별하는 표시
+ *                            ← 빈 줄
+ *     [사내 확인 결과]       ← 연락서의 항목 이름 머리글
+ *     不具合内容 その１      ← 🔴 연락서 원문 그대로
+ *
+ * `viewKyosanText` 는 **글자 통째로** 견주므로 이 덩어리를 그대로 넘기면 언제나
+ * `korean === null` 이다. **줄로 갈라 줄마다** 태워야 한다 — 그것이 이 함수다.
+ *
+ * ── 🔴 머리글 줄은 번역하지 않는다 ──────────────────────────────────
+ * 대괄호 줄은 **우리가 붙인 한글 이름**이지 연락서 원문이 아니다
+ * (`report-detail-values.ts:148` — 「대괄호는 연락서 원문에 나오지 않는 글자다」).
+ * 사전에 걸릴 일도 「일본어 원문」으로 표시될 일도 없어야 한다.
+ *
+ * ── 🔴 앞뒤 공백을 지우지 않는다 ────────────────────────────────────
+ * 저장 쪽이 연락서 칸의 공백을 **일부러 남긴다**(`"  前置きの空白も残す"`).
+ * 여기서 `trim()` 을 부르면 그 결정을 화면이 뒤집는 것이 된다. 빈 줄도 그대로
+ * 돌려준다 — 덩어리 사이 간격이 사라지면 어디까지가 한 항목인지 못 읽는다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export type KyosanMemoLine =
+  /** 대괄호 머리글 줄. 🔴 번역하지 않고 글자 그대로 보여 준다. */
+  | { kind: "heading"; text: string }
+  /** 빈 줄. 항목과 항목 사이의 간격이다. */
+  | { kind: "blank" }
+  /** 그 밖의 모든 줄. 한 줄이 무엇을 보여 줄지는 `view` 가 정한다. */
+  | { kind: "text"; view: KyosanTextView };
+
+/**
+ * 머리글 줄의 모양. 저장 쪽(`report-detail-values.ts`)이 만드는 것은 둘뿐이다:
+ *
+ *     [사내 확인 결과]                 `kyosanOriginHeading(origin)`
+ *     [교산 연락서] (2/3) 이어짐        4000자를 넘어 조각으로 나뉜 첫 줄
+ *
+ * ⚠️ 지시서는 「대괄호로 시작하고 **끝나는** 줄」이라고 적었지만 실제 코드는
+ * 이어짐 표시를 대괄호 **뒤에** 붙인다 — `]` 로 끝나지 않는다. 실제 코드를 따른다.
+ *
+ * 🔴 일부러 좁게 잡았다. 작업 기록에는 사람이 손으로 적은 글도 들어오는데,
+ * `[불량] 出力異常` 같은 줄까지 머리글로 보면 그 줄이 「일본어 원문」 표시를
+ * 잃는다. 모양이 안 맞으면 그냥 보통 줄로 떨어질 뿐이라 잃는 것이 없다.
+ */
+const KYOSAN_HEADING_LINE = /^\[[^\][\r\n]*\](?:\s*\(\d+\/\d+\)(?:\s*이어짐)?)?$/u;
+
+export function isKyosanHeadingLine(line: string): boolean {
+  return KYOSAN_HEADING_LINE.test(line);
+}
+
+/**
+ * 여러 줄 덩어리를 줄마다 「무엇을 보여 줄지」로 바꾼다. 순수 함수다.
+ *
+ * 줄 가름은 `\r\n` 도 받는다 — 줄을 나누는 글자일 뿐이라 내용이 달라지지 않는다.
+ */
+export function viewKyosanMemoLines(memo: string): readonly KyosanMemoLine[] {
+  return memo.split(/\r?\n/).map((line): KyosanMemoLine => {
+    if (line === "") return { kind: "blank" };
+    if (isKyosanHeadingLine(line)) return { kind: "heading", text: line };
+    return { kind: "text", view: viewKyosanText(line) };
+  });
+}

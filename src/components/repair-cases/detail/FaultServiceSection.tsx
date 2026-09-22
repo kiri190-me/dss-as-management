@@ -2,12 +2,30 @@ import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
 import FaultServiceEditForm from "./edit/FaultServiceEditForm";
+import { KyosanMemoText } from "@/components/kyosan/KyosanText";
 
+/**
+ * 🔴 `whitespace-pre-wrap` 은 **원래 없던 결함을 고친 것**이다(2026-09-22). 이 칸에
+ * 들어오는 값은 전부 여러 줄이 될 수 있는 자유 기술인데(신고 증상 · 작업 기록에서
+ * 파생된 요약 셋 · 비고), 없으면 줄바꿈이 죽어 `[교산 연락서] [사내 확인 결과]
+ * 不具合内容 … 電源基板` 처럼 한 줄로 뭉개져 읽을 수 없었다.
+ *
+ * 🔴 `KyosanMemoText` 는 **보여 주는 층에서만** 한글을 곁들인다 — 교산 연락서를
+ * 넣은 값에는 일본어 원문이 그대로 들어 있고, 저장된 글자는 한 글자도 바뀌지
+ * 않는다(`lib/kyosan/report-detail-values.ts` 의 「원문을 고치지 않는다」).
+ * 사람이 손으로 적은 값은 줄마다 그대로 보인다.
+ *
+ * ⚠️ 이 `Field` 는 **읽기 전용 자리**에만 쓴다. 사람이 고치는 자리
+ * (`edit/FaultServiceEditForm.tsx`)에는 걸지 않는다 — 고칠 글자와 보이는 글자가
+ * 달라지면 안 된다.
+ */
 function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
-      <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value ?? "-"}</dd>
+      <dd className="whitespace-pre-wrap text-sm text-zinc-900 dark:text-zinc-50">
+        {value === null ? "-" : <KyosanMemoText value={value} />}
+      </dd>
     </div>
   );
 }

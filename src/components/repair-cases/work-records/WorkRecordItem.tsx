@@ -1,5 +1,6 @@
 import type { WorkRecordRow } from "@/lib/db/queries/repair-case-work-records";
 import { useUiText } from "@/components/providers/UiTextProvider";
+import { KyosanMemoText } from "@/components/kyosan/KyosanText";
 
 const badgeClass =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
@@ -49,8 +50,16 @@ export default function WorkRecordItem({
         <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">{formatDateTime(record.createdAt)}</span>
       </div>
 
+      {/*
+        🔴 교산 연락서를 넣은 기록은 이 칸에 **일본어 원문**이 그대로 들어 있다
+        (저장은 원문 그대로가 계약이다 — `lib/kyosan/report-detail-values.ts`).
+        `KyosanMemoText` 가 **보여 주는 층에서만** 한글을 곁들인다. 저장된 글자는
+        한 글자도 바뀌지 않고, 사람이 손으로 적은 보통 기록은 그대로 보인다.
+        🔴 `whitespace-pre-wrap` 은 여기 있어야 한다 — 줄바꿈과 앞뒤 공백을 그대로
+        흘려보낸다. 색·취소선도 이 `<p>` 것이 그대로 물려진다(무효 처리된 기록).
+      */}
       <p className={`mt-2 whitespace-pre-wrap text-sm ${record.isInvalidated ? "text-zinc-400 line-through dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-50"}`}>
-        {record.memo}
+        <KyosanMemoText value={record.memo} />
       </p>
 
       {record.isInvalidated && (
