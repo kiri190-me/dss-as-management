@@ -369,6 +369,51 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     assert.equal(form.split("setIsExcelOnly(").length - 1, 1, "엑셀 전용을 바꾸는 곳이 스위치 판정 하나가 아니다");
   });
 
+  test("🔴 못 찾은 인수번호 — 조회가 받아 온 두 목록(출고 부품 · O/H 템플릿)을 비운다", () => {
+    const lookup = sliceBetween(form, "async function handleLookup() {", "const didAutoLookup = useRef(false);");
+    const notFound = sliceBetween(lookup, "if (!result.found) {", "const found = result.found;");
+    // 🔴 실사용 결함(2026-09-22): D111(OH 건)을 불러온 뒤 인수번호를 없는 번호로 고쳐
+    // 다시 부르면, 출고 부품 목록은 사라지는데 O/H 템플릿 목록은 앞 건 기종의 것이
+    // 그대로 남고 [담기] 단추도 살아 있었다 — 담으면 지금 인수번호와 무관한 부품이
+    // O/H 템플릿 단가를 달고 청구 줄로 들어간다. 못 찾음 갈래가 둘 다 비워야 한다.
+    assert.ok(notFound.includes("setOhTemplateCode(null);"), notFound);
+    assert.ok(notFound.includes("setOhTemplateParts([]);"), notFound);
+    // 출고 부품을 비우는 지금까지의 동작도 살아 있다.
+    assert.ok(notFound.includes("setUsedParts([]);"), notFound);
+    // 🔴 같은 자리에서 **사람이 적는 칸은 그대로 둔다** — 비우는 것은 조회 결과의 사본뿐이다.
+    // (종류 · 엑셀 전용 · 줄은 위 시험이 handleLookup 전체에 대해 못 박는다.)
+    for (const setter of [
+      "setRepairCaseId(",
+      "setCustomerId(",
+      "setCustomerNameText(",
+      "setModelNameText(",
+      "setLotNumberText(",
+      "setSerialNumberText(",
+      "setFaultDescriptionText(",
+      "setSubject(",
+      "setKind(",
+      "setIsExcelOnly(",
+      "setItems(",
+      "setScopeLines(",
+      "setScopeTouched(",
+      "setTaskQuantities(",
+    ]) {
+      assert.ok(!notFound.includes(setter), `못 찾음 갈래가 ${setter} 를 부른다`);
+    }
+    // 찾았을 때의 갈래는 그대로다 — 받아 온 값으로 셋을 덮어쓴다.
+    assert.ok(
+      lookup.includes(
+        "setUsedParts(found.usedParts); setOhTemplateCode(found.ohTemplateCode); setOhTemplateParts(found.ohTemplateParts);"
+      ),
+      lookup
+    );
+    // 왜 O/H 쪽만 눈에 남았는가 — 출고 부품 구역은 목록이 비면 구역째 안 그리지만,
+    // O/H 구역은 종류가 OH 이기만 하면 값과 무관하게 그린다. 값을 비우는 것만이
+    // 그 부품 줄과 [담기] 단추를 없앤다.
+    assert.ok(form.includes("{!isCable && usedParts.length > 0 && ("), "출고 부품 구역의 그리는 조건이 바뀌었다");
+    assert.ok(form.includes('{kind === "OVERHAUL" && ('), "O/H 템플릿 구역의 그리는 조건이 바뀌었다");
+  });
+
   test("엑셀 전용이면 품목(부품) 구역이 없다 — 접는 조건이 부품 비용 구역 앞에서 열린다", () => {
     const open = indexOrFail(form, "{isExcelOnly ? (");
     // 구역의 제목은 2026-09-16(케이블 ③)부터 종류에 따라 갈린다 — 케이블이면 「품목」이다.
