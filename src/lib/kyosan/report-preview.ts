@@ -1,4 +1,5 @@
 import { CARD_FIELDS, CARD_LISTS, type CardFieldKey, type CardListKey } from "./card-fields";
+import type { KyosanEstimatedRepairBlock } from "./estimated-repair-block";
 import type { KyosanReport } from "./kyosan-report";
 import type { KyosanMatch } from "./report-match";
 import { splitKyosanPhotos } from "./report-photo-filter";
@@ -135,6 +136,21 @@ export const KYOSAN_CAUSE_MARK_ORIGIN = "원인(○ 표시)";
 export const KYOSAN_ACTION_MARK_ORIGIN = "처치(○ 표시)";
 
 /**
+ * 🔴 **O/H 로 「권한다」고 적은 줄**의 `origin`. 이 줄들은 **부품 줄로 넣지
+ * 않는다** — 사용자에게 「O/H 로 권한 부품이 실제로 교체됐습니까」를 물었고 답이
+ * **「건마다 다르다」**였다(2026-09-22). 그러니 수량에 넣으면 청구 금액이
+ * 부풀고, 버리면 연락서가 무엇을 권했는지가 사라진다. 그래서 **원문을 작업
+ * 이력에 남긴다** — 「처치 ○」를 `WORK_RECORD_GENERAL` 로 보낸 통로 그대로다
+ * (`report-detail-values.ts`).
+ *
+ * 근거: 두 출처는 이름이 83% 짝지을 수 없는데도(앞 조사) O/H 권유만 빼면 수량
+ * 합이 **2,874 ↔ 추정수리내용을 안 쓰던 때의 2,990** 으로 맞아떨어진다.
+ * ⚠️ 「권한다」를 **전부** 빼면 과잉이다 — 앞 조사 실측으로 양쪽에 다 있는
+ * 274장 중 173장은 권유형인데도 수량이 실제 기록과 같았다.
+ */
+export const KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN = "추정 수리 내용(O/H 권유)";
+
+/**
  * 교체 부품 줄의 겹침 열쇠 — 🔴 **갈래가 들어간다.** 같은 부품이 고장분에도
  * 예방분에도 있으면 두 줄로 남아야 하고, 수량도 갈래별로 짝지어야 한다
  * (`buildKyosanPreviewParts` 의 머리말). `\u0000` 은 부품 이름에 나올 수 없는
@@ -168,6 +184,10 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
   }
   for (const marked of report.cause.marked) push("FINDINGS", KYOSAN_CAUSE_MARK_ORIGIN, marked);
   for (const marked of report.action.marked) push("ACTIONS", KYOSAN_ACTION_MARK_ORIGIN, marked);
+  // 🔴 O/H 권유는 **부품 줄이 아니라 작업 이력**으로 간다(위 origin 머리말).
+  for (const text of report.estimatedRepair?.overhaulRecommendations ?? []) {
+    push("ACTIONS", KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN, text);
+  }
 
   return lines;
 }
@@ -213,8 +233,79 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
  * 차례는 **Card 시트가 먼저**다(지금까지 나온 차례를 흩지 않는다). 다만 같은
  * 갈래·같은 이름이 詳細 시트에도 있으면 **수량만 그쪽에서 가져온다**. 詳細에만
  * 있는 (갈래, 이름)은 뒤에 이어 붙인다.
+ *
+ * ── 🔴 세 번째 출처 · **장 단위로 갈아탄다** (2026-09-22) ─────────────
+ * 위의 두 출처는 이름이 **부품 대장에서 고른 것**이다. 사용자가 화면을 보고
+ * 두 번 짚었다 — 「`終段AMPデバイス基板` 이라고 적혀 있어야 해」. 사람이 손으로
+ * 적은 이름은 `推定修理内容` 블록에만 있다(`estimated-repair-block.ts`).
+ *
+ * 🔴 **한 장에서 두 출처를 섞지 않는다.** 이름 계통이 달라서
+ * (`終段AMP基板（AMP-DEH基板）` 대 `終段AMPデバイス基板`) 한 목록에 섞이면 같은
+ * 물건이 두 줄로 보이고 수량도 두 번 들어간다. 그래서 **장 단위로 고른다**:
+ *
+ *   `推定修理内容` 이 **부품 줄을 냈으면** → 추정수리내용만 쓴다 (실측 278장)
+ *   내지 못했으면                       → Card + `交換部品詳細` 를 그대로 (85장)
+ *
+ * 🔴 「냈으면」은 **O/H 권유를 뺀 뒤**를 뜻한다. 지시서의 글은 「O/H 권유만
+ * 적힌 장은 빈 장으로 떨어진다」였는데, 그러면 그 19장에서 `交換部品詳細` 에
+ * 적혀 있는 부품이 **통째로 사라진다**(그중 16장에 부품이 있다). 실측 기대값
+ * 「부품 0건 장 106」도 되돌리는 쪽에서만 맞는다 — 떨어뜨리면 122장이 된다.
+ * 그래서 **되돌린다**.
+ *
+ * ⚠️ 되돌린 장에서는 사용 부품 칸이 대장 이름이고 작업 이력의 O/H 권유 원문은
+ * 손글씨 이름이다. **부품 목록 안에서는 계통이 섞이지 않으므로** 괜찮다 —
+ * 섞이면 안 되는 것은 한 목록 안의 이름들이다.
+ *
+ * ⚠️ 그래서 `交換部品詳細`·Card 판독은 **지우지 않는다** — 추정수리내용이 부품을
+ * 내지 못한 장에서 계속 쓰인다.
+ *
+ * ── 🔴 추정수리내용 쪽은 **같은 이름의 수량을 더한다** ────────────────
+ * 두 출처를 섞던 겹침 규칙(먼저 나온 줄의 수량만 쓴다)을 여기 그대로 쓰면 안
+ * 된다. 저쪽의 겹침은 **같은 사실을 두 시트에 두 번 적은 것**이지만, 추정수리
+ * 내용의 두 줄은 **서로 다른 두 번의 기술**이다(`…3枚(右側内4，5)` 과
+ * `…1枚(左側外1)`). 먼저 나온 줄만 남기면 뒤 줄의 수량이 사라진다. 그래서
+ * 같은 갈래·같은 이름이면 **수량을 더한다** — 화면 React 열쇠
+ * (`${kind}-${text}`)도 그대로 하나만 남는다.
  */
 export function buildKyosanPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
+  const estimated = report.estimatedRepair;
+  if (estimated !== null) {
+    const parts = estimatedPreviewParts(estimated);
+    if (parts.length > 0) return parts;
+  }
+  return legacyPreviewParts(report);
+}
+
+/**
+ * `推定修理内容` 블록의 부품 줄 → 미리보기 줄. 같은 갈래·같은 이름은 한 줄로
+ * 묶고 **수량을 더한다**(위 머리말). 수량이 한 줄도 안 적혀 있으면 열쇠 자체를
+ * 두지 않는다 — 넣는 쪽이 1로 센다(`kyosan-report-import.ts`).
+ */
+function estimatedPreviewParts(block: KyosanEstimatedRepairBlock): KyosanPreviewPart[] {
+  const parts: KyosanPreviewPart[] = [];
+  const byKey = new Map<string, KyosanPreviewPart>();
+  for (const part of block.parts) {
+    const text = part.name.trim();
+    if (text === "") continue;
+    const key = partKey(part.kind, text);
+    const found = byKey.get(key);
+    if (found === undefined) {
+      const fresh: KyosanPreviewPart =
+        part.quantity === null
+          ? { kind: part.kind, text }
+          : { kind: part.kind, text, quantity: part.quantity };
+      byKey.set(key, fresh);
+      parts.push(fresh);
+      continue;
+    }
+    // 🔴 수량을 더한다. 안 적힌 줄은 1로 센다 — 넣는 쪽의 `?? 1` 과 같은 규칙이다.
+    found.quantity = (found.quantity ?? 1) + (part.quantity ?? 1);
+  }
+  return parts;
+}
+
+/** Card 시트 + `交換部品詳細` — 추정수리내용이 빈 장에서 쓰는 지금까지의 길. */
+function legacyPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
   // 같은 갈래·같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다
   // (그것이 같은 갈래 안의 겹침이다 — 위 머리말).
   const quantityByKindAndText = new Map<string, number>();
@@ -276,9 +367,26 @@ export type KyosanUsedPartLine = {
  * 몫만** 따로 만든다. 두 규칙이 한 파일에 나란히 있어야 어느 날 겹침 열쇠를
  * 고치는 사람이 **양쪽을 함께** 보게 된다 — 그래서 여기 둔다.
  *
- * ── 열쇠 · 차례 · 수량 ─────────────────────────────────────────────────
- * · **열쇠는 부품 이름 글자 그대로**다. 겹침 판정과 같은 규칙이고, 눌러서
- *   견주지 않는다(`normalizeKey` 로 눌러도 실측 469장에서 한 건도 더 안 잡혔다).
+ * ── 🔴 열쇠는 **눌러 묶는다** (2026-09-22, 사용자 승인) ─────────────────
+ * 손으로 적은 이름은 같은 물건이 표기만 달라지는 일이 흔하다. 그래서 열쇠로
+ * `NFKC` + **공백 제거** + **장음류 제거**(`ー` `―` `‐` `−` `-`)한 값을 쓴다.
+ * 붙는 묶음은 실측 전수 **11개**이고, **서로 다른 부품이 잘못 붙는 경우는 0건**이다:
+ *   `終段AMPコンデンサ基板`/`終段AMPコンデンサー基板`/`終段AMPｺﾝﾃﾞﾝｻ基板` ·
+ *   `終段AMPゲート基板`/`終段AMPｹﾞｰﾄ基板` · `スプリッタ基板`/`スプリッター基板`/
+ *   `スプリッタ―基板` · `真空コンデンサ(フィルターボックス内)`/`内）` ·
+ *   `オーバホール部品(一式)`/`オーバーホール部品（一式）` ·
+ *   `RF コントロール パネル`/`RFコントロールパネル` · `出力バー（B）`/`出力バー(B)` 등.
+ *
+ * 🔴 **보이는 이름은 그 묶음에서 가장 많이 쓰인 표기**다(열쇠는 누른 값, 표시는
+ * 원형). 누른 값을 그대로 보여 주면 `RFコントロルパネル` 처럼 **연락서에 없는
+ * 글자**가 사용 부품 칸에 적힌다.
+ *
+ * ⚠️ 이 눌림으로 실제로 줄어드는 것은 **1줄뿐**이다 — 변이가 **한 장 안에서**
+ * 만나야 줄어들고, 실측 469장에서 그런 짝은 `スプリッタ―基板`/`スプリッター基板`
+ * 하나뿐이었다. 그래도 넣는다 — 앞으로 들어올 연락서에서 같은 물건이 갈라지지
+ * 않게.
+ *
+ * ── 차례 · 수량 ────────────────────────────────────────────────────────
  * · **차례는 먼저 나온 자리를 지킨다.** 고장분이 앞에 오므로 「교체 부품」에
  *   보이는 차례와 같은 차례가 되고, 예방분에만 있는 부품이 그 뒤에 붙는다.
  *   `Map` 이 넣은 차례를 지키므로 따로 정렬하지 않는다.
@@ -291,23 +399,69 @@ export type KyosanUsedPartLine = {
  * 버린다(`KyosanPreviewPart`). 받는 표에도 그 칸이 없다. 묶을 때 **버리는 것은
  * `kind` 하나**이고, 그것이 사용자가 버리라고 한 값이다.
  *
- * 🔴 실측(2026-09-22, 연락서 469장): 「교체 부품」 1,327줄 → 사용 부품 **1,163줄**
- * (-164줄, 84장에서 줄어든다). **수량 합계 2,990 은 전후가 같다.** 사례의
- * `0357.xlsm` 은 10줄 → **7줄**이고, 고장 3 · 예방 7 이던 부품 셋이 각각
- * **수량 10 한 줄**이 된다.
+ * 🔴 실측(2026-09-22, 연락서 469장, `推定修理内容` 을 세 번째 출처로 들인 뒤):
+ * 「교체 부품」 **1,235줄** → 사용 부품 **1,085줄**(-150줄). **수량 합계 2,874 는
+ * 전후가 같다.** 사례의 `0357.xlsm` 은 10줄 → **7줄**이고, 고장 3 · 예방 7 이던
+ * 부품 셋이 각각 **수량 10 한 줄**이 된다.
+ * (`推定修理内容` 을 들이기 전의 같은 실측은 1,327줄 → 1,163줄 · 수량 2,990 이었고,
+ * 추정 블록을 떼고 재면 지금 코드로도 그 값이 그대로 나온다.)
  */
 export function mergeKyosanPartsForUsedParts(
   parts: readonly KyosanPreviewPart[]
 ): KyosanUsedPartLine[] {
-  const byText = new Map<string, KyosanUsedPartLine>();
+  type Bucket = { line: KyosanUsedPartLine; spellings: Map<string, number> };
+  const byKey = new Map<string, Bucket>();
   for (const part of parts) {
-    const found = byText.get(part.text);
+    const key = kyosanUsedPartKey(part.text);
     // 🔴 `?? 1` — 수량이 안 적힌 줄을 1로 센다. 넣는 쪽의 규칙 그대로다.
     const quantity = part.quantity ?? 1;
-    if (found === undefined) byText.set(part.text, { text: part.text, quantity });
-    else found.quantity += quantity;
+    const found = byKey.get(key);
+    if (found === undefined) {
+      byKey.set(key, {
+        line: { text: part.text, quantity },
+        spellings: new Map([[part.text, 1]]),
+      });
+      continue;
+    }
+    found.line.quantity += quantity;
+    found.spellings.set(part.text, (found.spellings.get(part.text) ?? 0) + 1);
   }
-  return [...byText.values()];
+
+  return [...byKey.values()].map((bucket) => ({
+    // 🔴 가장 많이 쓰인 표기를 보여 준다. 같은 수면 **먼저 나온 것**이 남는다
+    //    (`Map` 이 넣은 차례를 지키므로 따로 정렬하지 않는다).
+    text: mostUsedSpelling(bucket.spellings),
+    quantity: bucket.line.quantity,
+  }));
+}
+
+/**
+ * 🔴 **장음류** — 같은 물건이 표기만 달라지는 자리다. `NFKC` 를 지난 뒤의
+ * 글자들로 적는다: `ー`(U+30FC) · `―`(U+2015) · `‐`(U+2010) · `−`(U+2212) ·
+ * `-`(U+002D, 전각 `－` 가 NFKC 로 여기 내려온다). 반각 `ｰ`(U+FF70)는 NFKC 가
+ * `ー` 로 옮겨 주므로 따로 적지 않는다.
+ */
+const LONG_VOWEL_MARKS = /[ー―‐−-]/g;
+
+/**
+ * 사용 부품 칸에서 **같은 부품으로 볼 것인가**를 정하는 열쇠(위 머리말).
+ * 🔴 이 값은 **견주는 데만** 쓴다 — 화면과 DB 에 적히는 글자는 원형이다.
+ */
+export function kyosanUsedPartKey(text: string): string {
+  return text.normalize("NFKC").replace(/\s+/g, "").replace(LONG_VOWEL_MARKS, "");
+}
+
+/** 묶음 안에서 가장 많이 쓰인 표기. 같은 수면 먼저 나온 것. */
+function mostUsedSpelling(spellings: ReadonlyMap<string, number>): string {
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [text, count] of spellings) {
+    if (best === null || count > bestCount) {
+      best = text;
+      bestCount = count;
+    }
+  }
+  return best ?? "";
 }
 
 const UNMATCHED_BLOCKER: Readonly<Record<string, string>> = {

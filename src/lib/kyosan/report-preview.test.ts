@@ -10,6 +10,10 @@ import {
   type CardListKey,
   type CardListValue,
 } from "./card-fields";
+import type {
+  KyosanEstimatedPart,
+  KyosanEstimatedRepairBlock,
+} from "./estimated-repair-block";
 import type { KyosanReport } from "./kyosan-report";
 import type { KyosanDetailPart } from "./parts-detail-sheet";
 import { matchKyosanReport, readKyosanIdentity, type KyosanCaseCandidate } from "./report-match";
@@ -18,6 +22,7 @@ import type { KyosanPhoto } from "./report-photos";
 import {
   buildKyosanReportPreview,
   mergeKyosanPartsForUsedParts,
+  KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN,
   type KyosanCaseState,
   type KyosanPreviewPart,
 } from "./report-preview";
@@ -78,6 +83,9 @@ function reportOf(overrides: Partial<KyosanReport> = {}): KyosanReport {
     cause: { sectionAddress: "C30", options: ["製作不良", "部品不良"], marked: ["部品不良"] },
     action: { sectionAddress: "C28", options: ["現品引取", "部品交換"], marked: ["部品交換"] },
     detailParts: [],
+    // 🔴 **옵셔널로 두지 않았다.** 이 도움 함수가 기본값을 정하는 유일한 자리다 —
+    //    새 출처를 안 태우는 경로가 조용히 생기지 않게 리터럴에 적는다.
+    estimatedRepair: null,
     photos: [photoOf("a".repeat(64), 30_000), photoOf("b".repeat(64), 1_161)],
     problems: [],
     ...overrides,
@@ -529,17 +537,56 @@ describe("사용 부품 칸 — 갈래 없이 부품 이름으로 묶는다", ()
     ]);
   });
 
-  test("다른 부품끼리는 묶이지 않는다 — 이름 글자가 한 글자라도 다르면 따로다", () => {
+  test("다른 부품끼리는 묶이지 않는다", () => {
     const merged = mergeKyosanPartsForUsedParts([
       { kind: "fault", text: "값-부품A", quantity: 2 },
-      { kind: "fault", text: "값-부품A ", quantity: 3 },
+      { kind: "fault", text: "값-부품AA", quantity: 3 },
       { kind: "preventive", text: "값-부품B", quantity: 5 },
     ]);
     assert.deepEqual(merged, [
       { text: "값-부품A", quantity: 2 },
-      { text: "값-부품A ", quantity: 3 },
+      { text: "값-부품AA", quantity: 3 },
       { text: "값-부품B", quantity: 5 },
     ]);
+  });
+
+  /**
+   * 🔴 **표기 변이는 눌러 묶는다** (2026-09-22, 사용자 승인). 손으로 적은 이름은
+   * 같은 물건이 표기만 달라지는 일이 흔하다 — 실측 전수 11묶음이고 **서로 다른
+   * 부품이 잘못 붙는 경우는 0건**이다.
+   *
+   * 🔴 여기 쓰는 세 글자는 **실측 글자 그대로**다(`report-preview.ts` 머리말의
+   * 목록에 있는 것). 자리표로 바꾸면 장음류가 무엇인지 시험이 못 말한다.
+   */
+  test("🔴 표기 변이는 한 줄로 묶인다 — 장음류와 공백을 눌러 견준다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      { kind: "fault", text: "スプリッタ基板", quantity: 1 },
+      { kind: "fault", text: "スプリッター基板", quantity: 2 },
+      // `―`(U+2015) 를 장음 대신 쓴 것. 실측에 있는 표기다.
+      { kind: "preventive", text: "スプリッタ―基板", quantity: 4 },
+      // 공백만 다른 것. NFKC + 공백 제거로 같아진다.
+      { kind: "preventive", text: "RF コントロール パネル", quantity: 1 },
+      { kind: "fault", text: "RFコントロールパネル", quantity: 2 },
+    ]);
+    assert.deepEqual(merged, [
+      { text: "スプリッタ基板", quantity: 7 },
+      { text: "RF コントロール パネル", quantity: 3 },
+    ]);
+  });
+
+  /**
+   * 🔴 **보이는 이름은 그 묶음에서 가장 많이 쓰인 표기**다. 누른 값을 그대로
+   * 보여 주면 `RFコントロルパネル` 처럼 **연락서에 없는 글자**가 사용 부품 칸에
+   * 적힌다.
+   */
+  test("🔴 보이는 이름은 가장 많이 쓰인 표기다 — 누른 값이 아니다", () => {
+    const merged = mergeKyosanPartsForUsedParts([
+      { kind: "fault", text: "スプリッタ―基板", quantity: 1 },
+      { kind: "fault", text: "スプリッター基板", quantity: 2 },
+      { kind: "preventive", text: "スプリッター基板", quantity: 3 },
+    ]);
+    // 먼저 나온 것이 아니라 **두 번 나온 표기**가 남는다.
+    assert.deepEqual(merged, [{ text: "スプリッター基板", quantity: 6 }]);
   });
 
   /**
@@ -561,8 +608,10 @@ describe("사용 부품 칸 — 갈래 없이 부품 이름으로 묶는다", ()
   });
 
   /**
-   * 🔴 **묶는 것이므로 합계는 변하면 안 된다.** 실측 469장에서도 1,327줄 →
-   * 1,163줄로 줄었지만 수량 합계 2,990 은 전후가 같았다.
+   * 🔴 **묶는 것이므로 합계는 변하면 안 된다.** 실측 469장에서도 1,235줄 →
+   * 1,085줄로 줄었지만 수량 합계 2,874 는 전후가 같았다(2026-09-22,
+   * `推定修理内容` 을 세 번째 출처로 들인 뒤. 들이기 전에는 1,327 → 1,163 ·
+   * 수량 2,990 이었고, 추정 블록을 떼고 재면 지금 코드로도 그 값이 나온다).
    */
   test("🔴 수량 합계가 보존된다 — 줄 수만 줄어든다", () => {
     const parts: readonly KyosanPreviewPart[] = [
@@ -583,5 +632,171 @@ describe("사용 부품 칸 — 갈래 없이 부품 이름으로 묶는다", ()
 
   test("부품이 없으면 빈 목록이다", () => {
     assert.deepEqual(mergeKyosanPartsForUsedParts([]), []);
+  });
+});
+
+// ── 推定修理内容 — 세 번째 출처 · 장 단위 갈아타기 ────────────────────────
+
+function estimatedPartOf(
+  overrides: Partial<KyosanEstimatedPart> = {}
+): KyosanEstimatedPart {
+  return {
+    name: "값-손글씨부품",
+    kind: "fault",
+    quantity: 1,
+    group: "fault",
+    mood: "will",
+    sheetName: "進捗状況連絡書",
+    address: "A131",
+    sourceLine: "・값-손글씨부품の交換…1個",
+    ...overrides,
+  };
+}
+
+function estimatedOf(
+  overrides: Partial<KyosanEstimatedRepairBlock> = {}
+): KyosanEstimatedRepairBlock {
+  return {
+    sheetName: "進捗状況連絡書",
+    labelAddress: "A130",
+    endAddress: "A150",
+    parts: [],
+    overhaulRecommendations: [],
+    ...overrides,
+  };
+}
+
+/**
+ * 🔴 `reportOf()` 의 기본값에는 Card 목록의 `값-부품A`(고장) · `값-부품B`(예방)가
+ * 들어 있다. 아래 시험들은 그것이 **나타나는가/사라지는가**로 갈아타기를 잰다.
+ */
+describe("推定修理内容 — 🔴 장 단위로 갈아탄다", () => {
+  test("🔴 추정수리내용이 부품을 냈으면 그 이름만 쓴다 — 대장 이름은 섞이지 않는다", () => {
+    const report = reportOf({
+      detailParts: [detailPartOf({ name: "값-대장부품", quantity: 4, kind: "fault" })],
+      estimatedRepair: estimatedOf({
+        parts: [
+          estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: 3 }),
+          estimatedPartOf({ name: "값-손글씨B", kind: "preventive", quantity: 7 }),
+        ],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    // Card 의 `값-부품A`·`값-부품B` 도, 詳細의 `값-대장부품` 도 들어오지 않는다.
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-손글씨A", quantity: 3 },
+      { kind: "preventive", text: "값-손글씨B", quantity: 7 },
+    ]);
+  });
+
+  test("추정수리내용이 부품을 못 냈으면 지금까지의 길을 그대로 쓴다", () => {
+    const report = reportOf({
+      detailParts: [detailPartOf({ name: "값-부품A", quantity: 4, kind: "fault" })],
+      estimatedRepair: estimatedOf({ parts: [] }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A", quantity: 4 },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
+  });
+
+  /**
+   * 🔴 지시서의 글은 「O/H 권유만 적힌 장은 빈 장으로 떨어진다」였는데, 그러면
+   * 그 19장에서 `交換部品詳細` 에 적혀 있는 부품이 통째로 사라진다(그중 16장에
+   * 부품이 있다). 실측 기대값 「부품 0건 장 106」도 되돌리는 쪽에서만 맞는다 —
+   * 떨어뜨리면 122장이 된다. 그래서 **되돌린다.**
+   */
+  test("🔴 O/H 권유만 있는 장은 대장 쪽으로 되돌린다 — 부품을 통째로 잃지 않는다", () => {
+    const report = reportOf({
+      detailParts: [detailPartOf({ name: "값-부품A", quantity: 4, kind: "fault" })],
+      estimatedRepair: estimatedOf({
+        parts: [],
+        overhaulRecommendations: ["O/Hとして以下の作業を推奨致します。", "・값-오버홀부품の交換…7枚"],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A", quantity: 4 },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
+    // 🔴 O/H 권유는 **수량에 안 들어가고** 원문이 줄로 남는다.
+    assert.equal(
+      preview.plan.parts.some((part) => part.text === "값-오버홀부품"),
+      false
+    );
+  });
+
+  test("같은 갈래·같은 이름이 두 줄이면 **수량을 더한다** — 뒤 줄을 잃지 않는다", () => {
+    const report = reportOf({
+      estimatedRepair: estimatedOf({
+        parts: [
+          estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: 3 }),
+          estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: 1 }),
+          // 수량이 안 적힌 줄은 1 로 센다.
+          estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: null }),
+        ],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-손글씨A", quantity: 5 }]);
+  });
+
+  test("수량이 한 줄도 없으면 열쇠 자체를 두지 않는다 — 넣는 쪽이 1 로 센다", () => {
+    const report = reportOf({
+      estimatedRepair: estimatedOf({
+        parts: [estimatedPartOf({ name: "값-손글씨A", quantity: null })],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-손글씨A" }]);
+  });
+});
+
+describe("推定修理内容 — 🔴 O/H 권유 원문은 작업 이력으로", () => {
+  test("원문이 미리보기 줄로 나온다 — 항목 이름이 그것을 말한다", () => {
+    const report = reportOf({
+      estimatedRepair: estimatedOf({
+        parts: [estimatedPartOf({ name: "값-손글씨A", quantity: 3 })],
+        overhaulRecommendations: ["O/Hとして以下の作業を推奨致します。", "・값-오버홀부품の交換…7枚"],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(
+      preview.plan.lines
+        .filter((line) => line.origin === KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN)
+        .map((line) => [line.section, line.text]),
+      [
+        ["ACTIONS", "O/Hとして以下の作業を推奨致します。"],
+        ["ACTIONS", "・값-오버홀부품の交換…7枚"],
+      ]
+    );
+  });
+
+  // 🔴 그 줄이 **어느 칸으로 가는가**는 `report-detail-values.test.ts` 가 못 박는다.
+
+  test("권유가 없으면 줄도 없다", () => {
+    const report = reportOf({
+      estimatedRepair: estimatedOf({ parts: [estimatedPartOf({ name: "값-손글씨A" })] }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.equal(
+      preview.plan.lines.some((line) => line.origin === KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN),
+      false
+    );
   });
 });

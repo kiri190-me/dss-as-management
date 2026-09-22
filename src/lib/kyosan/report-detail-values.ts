@@ -2,6 +2,7 @@ import { CARD_FIELDS, CARD_LISTS, type CardFieldKey, type CardListKey } from "./
 import {
   KYOSAN_ACTION_MARK_ORIGIN,
   KYOSAN_CAUSE_MARK_ORIGIN,
+  KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN,
   type KyosanImportPlan,
   type KyosanPreviewLine,
 } from "./report-preview";
@@ -132,6 +133,10 @@ const DESTINATION_BY_ORIGIN = new Map<string, KyosanDetailDestination>([
   //    계속 읽히는 쪽을 고른다(사용자 지시 2026-09-22).
   [KYOSAN_ACTION_MARK_ORIGIN, "WORK_RECORD_GENERAL"],
   [KYOSAN_CAUSE_MARK_ORIGIN, "WORK_RECORD_GENERAL"],
+  // 🔴 **O/H 로 「권한다」고 적은 줄** — 수량에 넣지 않고 원문만 남긴다
+  //    (사용자 결정 2026-09-22: 「건마다 다르다」). 「처치 ○」와 **같은 통로**다.
+  //    `NOT_IMPORTED` 로 버리면 연락서가 무엇을 권했는지가 사라진다.
+  [KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN, "WORK_RECORD_GENERAL"],
   // 🔴 469장 중 값이 있는 것이 1장뿐이라 빠뜨리기 쉬운데, 빠뜨리면 그 한 장의
   //    내용이 **아무 칸에도 안 들어간다.** 보기(○)와 달리 이것은 사람이 손으로
   //    적은 자유 기술이라 정보량이 있다 — 요약 칸에 남긴다.

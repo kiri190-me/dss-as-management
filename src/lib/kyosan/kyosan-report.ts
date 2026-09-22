@@ -7,6 +7,11 @@ import { ZipArchive } from "../xlsx/zip-reader";
 import { readCardFields, type CardFields } from "./card-fields";
 import { normalizeKey } from "./card-grid";
 import {
+  pickEstimatedRepairSheetNames,
+  readEstimatedRepairBlock,
+  type KyosanEstimatedRepairBlock,
+} from "./estimated-repair-block";
+import {
   pickPartsDetailSheetNames,
   readPartsDetailSheet,
   type KyosanDetailPart,
@@ -44,6 +49,9 @@ import { collectPhotos, type KyosanPhoto } from "./report-photos";
  * 교체 부품을 읽는 **`交換部品詳細` 계열 시트**다(2026-09-22 로 하나 늘었다 —
  * Card 시트의 `５．処置` 머리글이 「나머지는 그 시트에 적으라」고 지시하고 있고,
  * 그것을 읽지 않아 교체 부품이 절반 이상 빠지고 있었다. `parts-detail-sheet.ts`).
+ * 🔴 2026-09-22 로 하나 더 늘었다 — **`推定修理内容` 블록**(진척상황연락서 시트)이다.
+ * `交換部品詳細` 의 이름은 부품 대장에서 고른 것이고, 사람이 **손으로 적은** 이름은
+ * 거기에만 있다(`estimated-repair-block.ts`). 사용자가 화면에서 두 번 짚었다.
  *
  * ── 원본 파일 해시 ─────────────────────────────────────────────────────
  * 🔴 `sourceSha256` 은 나중에 **같은 연락서를 두 번 넣는 것**을 막는 데 쓴다.
@@ -76,6 +84,15 @@ export type KyosanReport = {
    * (`parts-detail-sheet.ts`). (RF)/(DC) 두 장짜리 판본은 두 시트가 이어 붙는다.
    */
   detailParts: readonly KyosanDetailPart[];
+  /**
+   * 🔴 `推定修理内容` 블록 — **사람이 손으로 적은** 부품 이름이 여기 있다
+   * (`estimated-repair-block.ts`). 블록을 못 찾았으면 null 이다.
+   *
+   * 🔴 **옵셔널로 두지 않는다.** 옵셔널이면 이 칸을 안 싣는 경로가 조용히
+   * 생기고, 그 경로에서만 부품 이름이 대장 이름으로 되돌아간다 — 오류 없이
+   * 화면에서만 드러나는 종류의 결함이다.
+   */
+  estimatedRepair: KyosanEstimatedRepairBlock | null;
   photos: readonly KyosanPhoto[];
   /** 읽다가 만난 문제들. 고객 내용은 담지 않는다. */
   problems: readonly string[];
@@ -195,6 +212,24 @@ export function readKyosanReport(fileBytes: Buffer): KyosanReadResult {
     }
   }
 
+  // 🔴 `推定修理内容` 블록. 실측 469장에 전부 있지만, 없는 판본이 나와도
+  //    「추정 수리 내용 없음」으로 지나가야 한다 — 그때는 `交換部品詳細` 와
+  //    Card 를 쓰는 지금 경로가 그대로 남는다(`report-preview.ts`).
+  let estimatedRepair: KyosanEstimatedRepairBlock | null = null;
+  for (const estimatedSheetName of pickEstimatedRepairSheetNames(sheetNames)) {
+    if (estimatedRepair !== null) break;
+    try {
+      const estimatedGrid = readSheetGrid(archive, estimatedSheetName);
+      if (estimatedGrid) {
+        estimatedRepair = readEstimatedRepairBlock(estimatedGrid, estimatedSheetName);
+      } else {
+        problems.push("진척상황연락서 시트 파트를 찾지 못했다");
+      }
+    } catch (error) {
+      problems.push(`진척상황연락서 시트를 읽지 못했다 — ${errorMessage(error)}`);
+    }
+  }
+
   const photoScan = collectPhotos(archive, sheetNames);
   problems.push(...photoScan.problems);
 
@@ -210,6 +245,7 @@ export function readKyosanReport(fileBytes: Buffer): KyosanReadResult {
       cause,
       action,
       detailParts,
+      estimatedRepair,
       photos: photoScan.photos,
       problems,
     },

@@ -360,3 +360,63 @@ describe("열지 못하는 파일은 던지지 않고 사유를 돌려준다", (
     assert.equal(result.reason, "no-card-sheet");
   });
 });
+
+/** 「推定修理内容」 블록 — 양식의 구역 라벨과 머리글 문장만 실측에서 가져왔다. */
+const ESTIMATED_CELLS: Record<string, string | number> = {
+  A130: "推定修理内容",
+  A131: "修理として以下の作業をお勧めます。",
+  A132: "・값-손글씨부품の交換…3枚(右側内4，5)",
+  A134: "O/Hとして以下の作業を推奨致します。",
+  A135: "・값-오버홀부품の交換…7枚",
+  A156: "必須事項",
+  A157: "・값-필수줄の交換…9枚",
+};
+
+describe("🔴 推定修理内容 블록도 함께 읽는다", () => {
+  test("진척상황연락서 시트에서 **손으로 적은** 부품 이름이 실려 온다", () => {
+    const result = readKyosanReport(
+      workbookOf([
+        { name: "Card", cells: CARD_CELLS },
+        { name: "交換部品詳細", cells: PARTS_DETAIL_CELLS },
+        { name: "進捗状況連絡書", cells: ESTIMATED_CELLS },
+      ])
+    );
+    assert.ok(result.ok);
+    const estimated = result.report.estimatedRepair;
+    assert.ok(estimated);
+    assert.equal(estimated.sheetName, "進捗状況連絡書");
+    assert.equal(estimated.labelAddress, "A130");
+    // 🔴 `必須事項` 에서 끊겼다 — 뒤 구역의 `값-필수줄` 이 들어오지 않는다.
+    assert.equal(estimated.endAddress, "A156");
+    assert.deepEqual(
+      estimated.parts.map((part) => [part.name, part.kind, part.quantity]),
+      [["값-손글씨부품", "fault", 3]]
+    );
+    // 🔴 O/H 권유는 부품이 아니라 원문으로만 남는다.
+    assert.deepEqual(estimated.overhaulRecommendations, [
+      "O/Hとして以下の作業を推奨致します。",
+      "・값-오버홀부품の交換…7枚",
+    ]);
+    // 🔴 `交換部品詳細` 판독은 **그대로 살아 있다** — 갈아타기는 미리보기가 한다.
+    assert.deepEqual(result.report.detailParts.map((part) => part.name), ["값-상세부품1"]);
+    assert.deepEqual(result.report.problems, []);
+  });
+
+  test("`Progress_Information` 판본도 읽는다 — 실측 222장", () => {
+    const result = readKyosanReport(
+      workbookOf([
+        { name: "Card", cells: CARD_CELLS },
+        { name: "Progress_Information", cells: ESTIMATED_CELLS },
+      ])
+    );
+    assert.ok(result.ok);
+    assert.equal(result.report.estimatedRepair?.sheetName, "Progress_Information");
+  });
+
+  test("🔴 그 시트가 없는 장에서 던지지 않고 null 이 된다", () => {
+    const result = readKyosanReport(workbookOf([{ name: "Card", cells: CARD_CELLS }]));
+    assert.ok(result.ok);
+    assert.equal(result.report.estimatedRepair, null);
+    assert.deepEqual(result.report.problems, []);
+  });
+});

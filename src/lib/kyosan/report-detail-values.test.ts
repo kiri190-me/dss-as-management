@@ -12,6 +12,7 @@ import {
 import {
   KYOSAN_ACTION_MARK_ORIGIN,
   KYOSAN_CAUSE_MARK_ORIGIN,
+  KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN,
   type KyosanImportPlan,
   type KyosanPreviewLine,
 } from "./report-preview";
@@ -115,6 +116,37 @@ describe("🔴 줄마다 갈 자리가 정해져 있다", () => {
     assert.ok(memo.includes("[원인(○ 표시)]\n部品不良"), memo);
     assert.ok(memo.includes("[처치(○ 표시)]\n現品引取"), memo);
     // 🔴 넣지 않은 항목으로 세지도 않는다 — 넣었으니까.
+    assert.deepEqual(result.skippedOrigins, []);
+  });
+
+  /**
+   * 🔴 **O/H 권유는 수량에 넣지 않고 원문만 남긴다** (사용자 결정 2026-09-22 —
+   * 「O/H 로 권한 부품이 실제로 교체됐습니까」에 「건마다 다르다」). 수량에 넣으면
+   * 청구 금액이 부풀고, 버리면 연락서가 무엇을 권했는지가 사라진다. 그래서
+   * 「처치 ○」와 **같은 통로**로 작업 이력에 남긴다.
+   */
+  test("🔴 O/H 권유 원문은 「일반」 작업 기록으로 간다 — 버리지 않는다", () => {
+    const destination = kyosanLineDestination(
+      line(KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN, "O/Hとして以下の作業を推奨致します。", "ACTIONS")
+    );
+    assert.equal(destination, "WORK_RECORD_GENERAL");
+    assert.notEqual(destination, "NOT_IMPORTED", "🔴 버리면 되돌릴 수 없다");
+  });
+
+  test("🔴 O/H 권유 원문이 작업 기록 글자에 그대로 들어간다", () => {
+    const result = build(
+      planOf({
+        lines: [
+          line(KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN, "O/Hとして以下の作業を推奨致します。", "ACTIONS"),
+          line(KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN, "・값-오버홀부품の交換…7枚", "ACTIONS"),
+        ],
+        parts: [],
+      })
+    );
+    const memo = memoOf(result, "GENERAL");
+    assert.ok(memo.includes(`[${KYOSAN_OVERHAUL_RECOMMENDATION_ORIGIN}]`), memo);
+    assert.ok(memo.includes("O/Hとして以下の作業を推奨致します。"), memo);
+    assert.ok(memo.includes("・값-오버홀부품の交換…7枚"), memo);
     assert.deepEqual(result.skippedOrigins, []);
   });
 
