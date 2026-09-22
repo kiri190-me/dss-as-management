@@ -48,7 +48,20 @@ function setMode(next: ThemeMode) {
 }
 
 type ThemeToggleProps = {
-  /** Icon-only buttons stacked vertically — for the collapsed sidebar footer, where a horizontal 3-label group doesn't fit. Same mode state/logic either way, only the rendering changes. */
+  /**
+   * 아이콘만 있는 **가로 한 줄** — 지금 이것을 쓰는 곳은 머리말 오른쪽
+   * 묶음(TopBar.tsx)이다. 글자 모양(밝게 · 어둡게 · 시스템 설정)은 ~190px 이라
+   * 폰 한 줄에서 「포털」· 「로그아웃」· 종과 같이 서지 못한다.
+   *
+   * 🔴 2026-09-22 까지 이 모양은 **세로**였다(`flex-col`) — 접힌 사이드바의
+   * 좁은 세로줄이 유일한 호출부였기 때문이다. 그 넷이 머리말로 올라오면서
+   * (TopBar.tsx 의 2026-09-22 주석) 세로로 쌓을 자리가 없어졌다: 세로면
+   * 8px 짜리 아이콘 셋이 96px 높이가 되어 56px 짜리 머리말을 깨뜨린다.
+   *
+   * 상태와 동작은 두 모양이 완전히 같다 — 바뀌는 것은 그리는 모습뿐이고,
+   * 어느 쪽이든 고른 것은 `aria-pressed` 와 배경색으로, 각 단추가 무엇인지는
+   * `title`/`aria-label` 로 알린다.
+   */
   compact?: boolean;
 };
 
@@ -70,7 +83,11 @@ export default function ThemeToggle({ compact = false }: ThemeToggleProps) {
     <div
       role="group"
       aria-label="테마 선택"
-      className={compact ? "flex flex-col items-center gap-1" : "flex items-center gap-1 rounded-md border border-zinc-200 p-1 dark:border-zinc-700"}
+      // compact 는 **가로 한 줄**이다(2026-09-22 이전에는 flex-col 이었다 —
+      // 위 prop 주석). 테두리도 안쪽 여백도 두지 않는다: 머리말에서는 옆의
+      // 「포털」· 「로그아웃」 단추가 이미 테두리를 갖고 있어, 여기에 테두리를
+      // 한 겹 더 두면 세 덩이가 서로 다른 크기의 상자로 보인다.
+      className={compact ? "flex items-center gap-1" : "flex items-center gap-1 rounded-md border border-zinc-200 p-1 dark:border-zinc-700"}
     >
       {options.map((option) => (
         <button

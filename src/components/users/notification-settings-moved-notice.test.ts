@@ -76,7 +76,8 @@ describe("㉠ 이사 안내 한 줄", () => {
   });
 
   test("새 탭으로 열지 않는다 — 이 저장소의 포털 링크 관행이다", () => {
-    // layout/SidebarFooter.tsx 의 「통합 로그인으로」도 같은 창에서 연다.
+    // 머리말 오른쪽의 「통합 로그인으로」도 같은 창에서 연다
+    // (layout/TopBar.tsx — 2026-09-22 에 SidebarFooter 에서 그리로 올라갔다).
     assert.ok(!/target="_blank"/.test(screenCode), "포털 링크만 새 탭으로 연다");
   });
 });

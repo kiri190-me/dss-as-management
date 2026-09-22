@@ -239,6 +239,13 @@ src/lib/validation/repair-case-used-parts-input.test.ts
 src/lib/auth/service-menu-cookie.test.ts
 src/app/api/auth/sso/callback/route-source.test.ts
 src/components/layout/service-menu-bar.test.ts
+# 머리말 오른쪽 묶음(사용자 · 테마 · 「통합 로그인으로」· 「로그아웃」)이 폰에서
+# 넘치지 않게 하는 장치를 못 박는다. 🔴 unit 에 적은 이유: 원본을 **글자로 읽는**
+# 시험이라 렌더가 필요 없고(미디어 쿼리는 렌더해도 풀리지 않는다), 바로 위
+# service-menu-bar.test.ts 가 **같은 머리말**의 다른 면을 같은 방식으로 지키고 있다 —
+# 머리말을 고친 사람이 돌릴 목록이 하나여야 한다. DB · 환경변수 · server-only 모듈을
+# 쓰지 않으므로 이 목록의 제약에 걸릴 것이 없다.
+src/components/layout/header-account-cluster.test.ts
 src/lib/db/schema/quote-approvals-safety.test.ts
 src/lib/domain/quote-approval-rules.test.ts
 src/lib/kyosan/card-grid.test.ts

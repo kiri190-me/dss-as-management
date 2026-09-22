@@ -1,10 +1,6 @@
 "use client";
 
-import ThemeToggle from "./ThemeToggle";
-import { LogoutIcon } from "./FooterIcons";
-
 type SidebarFooterProps = {
-  user: { name: string; roleLabel: string };
   /**
    * **모양만** 정한다 — 좁은 아이콘 세로줄로 그릴지(true), 넓은 모양으로
    * 그릴지(false). "지금 사이드바가 눈에 보이는가"를 따르므로, 마우스
@@ -24,61 +20,51 @@ type SidebarFooterProps = {
    * false 로 두면 폰에서 ☰ 의 말이 뒤집힌다.
    */
   isPinnedOpen?: boolean;
-  /** Omitted for the mobile drawer (which has no collapse concept of its own — it's already always "expanded" and closes via its own backdrop/close button) — the ☰ toggle row only renders when this is provided. */
-  onToggleCollapsed?: () => void;
   /**
-   * 통합 로그인 앱 목록 주소. null이면(데모 모드) 링크를 아예 그리지 않는다.
+   * Omitted for the mobile drawer (which has no collapse concept of its own
+   * — it's already always "expanded" and closes via its own backdrop/close
+   * button).
    *
-   * 이 시스템 밖으로 나가는 링크라 next/link가 아니라 평범한 <a>다.
+   * 🔴 2026-09-22 부터 이 조각에 남은 것이 ☰ 한 줄뿐이라, 이것을 넘기지
+   * 않는 호출부에서는 **아무것도 그리지 않는다**(null). 아래 파일 주석 참조.
    */
-  portalUrl?: string | null;
+  onToggleCollapsed?: () => void;
 };
 
-/** First character of a label — kept for the user avatar badge only (unchanged from the prior pass); logout/theme now use FooterIcons.tsx's real icons instead of this same convention. */
-function glyph(label: string): string {
-  return label.trim().charAt(0) || "?";
-}
-
 /**
- * Bottom utility area of BOTH the desktop <aside> and the mobile drawer
- * (Sidebar.tsx now mounts this unconditionally). Houses what used to live
- * in TopBar's top-right corner (user/role, 로그아웃, ThemeToggle's
- * 밝게/어둡게/시스템 설정) plus, on desktop only, the sidebar's own
- * expand/collapse control (`onToggleCollapsed` omitted on mobile — see
- * this prop's own doc comment). TopBar no longer renders that cluster at
- * all (removed, not just hidden) — this is now the SINGLE place those
- * controls live, at every viewport width, never duplicated.
+ * 사이드바(데스크톱 <aside> · 모바일 드로어) 맨 아래 — 지금은 **☰ 접기/펼치기
+ * 한 줄뿐이다.**
  *
- * Mobile-bug note: TopBar's old `md:hidden` right-side cluster (this exact
- * content) measured ~386px on its own, alongside a ~208px left cluster
- * (hamburger + app title) — a combined ~594px minimum that never fit a
- * real phone viewport (typically 360-430px) and had no wrap/shrink
- * handling, so the header silently overflowed horizontally on every real
- * mobile device. That overflow is what made the hamburger menu (and so
- * every drawer link, including A/S 접수) unreliable to reach on mobile.
- * Removing the cluster from TopBar (this checkpoint) fixes that at the
- * root — TopBar's header is now just the hamburger + title, comfortably
- * under any real phone's width.
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 2026-09-22 — 여기 있던 넷이 머리말로 올라갔다
+ * ════════════════════════════════════════════════════════════════════════
+ * 사용자 정보(이름 · 역할) · 테마(밝게 · 어둡게 · 시스템 설정) ·
+ * 「통합 로그인으로」 · 「로그아웃」 넷이 **머리말 오른쪽 끝**(TopBar.tsx)으로
+ * 옮겨 갔다 — 다른 사내 시스템들(PO 3600 · 계측기 3200)이 전부 그 자리에
+ * 두고 있어서 같은 자리로 모으라는 사용자 지시였고, 사이드바 아래는
+ * **비우는 쪽**으로 사용자가 정했다.
  *
- * Compact mode (desktop-narrow only — mobile drawer is never compact)
- * keeps every control present (this file's own compact padding,
- * ThemeToggle's own `compact` mode using FooterIcons.tsx, and
- * `title`/`aria-label` throughout) — nothing is hidden outright, per the
- * "keep the bottom utility area usable" requirement; only the
- * presentation shrinks to fit the narrow column. Wide mode (desktop
- * expanded AND mobile drawer, identical rendering) centers the theme
- * control group (`justify-center` wrapper) with 로그아웃 directly below
- * it.
+ * 🔴 **그 넷을 여기로 되돌리지 마라.** 되돌리면 같은 것이 머리말과 사이드바
+ * 두 곳에 생긴다(로그아웃 단추가 둘이 되는 것은 그 자체로 결함이다). 머리말
+ * 쪽이 폰에서 넘치는 것이 걱정이라면 TopBar.tsx 의 2026-09-22 주석에 폭을
+ * 지키는 장치 넷과 실측값이 적혀 있다 — 그것을 고치는 것이 맞는 자리다.
+ *
+ * 그래서 이 조각은 `onToggleCollapsed` 를 받지 못하면 **null 을 돌려준다.**
+ * 그 값을 넘기지 않는 호출부는 모바일 드로어 하나이고(드로어에는 접는 개념이
+ * 없다), 예전에는 그 드로어에도 이 아래쪽에 넷이 그려져 있었다. 지금 그
+ * 자리에 남을 것은 아무것도 없으므로 **위 구분선(border-t)과 여백까지 함께**
+ * 사라져야 한다 — 남기면 드로어 맨 아래에 까닭 없는 회색 선 한 줄과 빈 칸이
+ * 남는다.
  *
  * ── 값이 **둘**인 이유 (`isCompact` vs `isPinnedOpen`) ─────────────────
  * 한때 이 둘은 `isCollapsed` 하나였다. 서로 다른 질문이라 갈랐다. 다시
  * 합치지 마라 — 합치면 아래 둘 중 하나가 반드시 깨진다.
  *
  *  - `isCompact` = "지금 사이드바가 눈에 안 보이는가" → **모양**을 정한다
- *    (패딩, 좁은 세로줄 대 넓은 목록, ☰ 행의 정렬, ☰ 옆 글자의 유무).
- *    사이드바는 마우스를 올리거나 초점이 들어오면 폭이 늘어 펼쳐지는데,
- *    그때 메뉴는 넓게 그려지므로 하단 유틸도 같이 넓어야 한다. 안 그러면
- *    펼쳐진 사이드바의 아래쪽만 아이콘 세로줄로 남는다.
+ *    (☰ 행의 정렬, ☰ 옆 글자의 유무). 사이드바는 마우스를 올리거나 초점이
+ *    들어오면 폭이 늘어 펼쳐지는데, 그때 메뉴는 넓게 그려지므로 이 줄도
+ *    같이 넓어야 한다. 안 그러면 펼쳐진 사이드바의 아래쪽만 아이콘
+ *    하나로 남는다.
  *
  *  - `isPinnedOpen` = "☰ 로 **고정 펼침**이 켜져 있는가" → ☰ 의 **말**을
  *    정한다(라벨 · title · aria-expanded · 옆 글자의 **내용**). 단추의 말은
@@ -91,85 +77,30 @@ function glyph(label: string): string {
  * 눌리고, 눌리면 오히려 펼쳐 고정되어 본문이 오른쪽으로 밀린다 — 적힌
  * 말과 정반대로 움직인다. aria-expanded 도 같은 이유로 고정 여부를 따른다.
  */
-export default function SidebarFooter({ user, isCompact, isPinnedOpen = true, onToggleCollapsed, portalUrl = null }: SidebarFooterProps) {
-  return (
-    <div className={`flex flex-col gap-2 border-t border-zinc-200 dark:border-zinc-800 ${isCompact ? "p-2" : "p-3"}`}>
-      {isCompact ? (
-        <div className="flex flex-col items-center gap-2">
-          <span
-            title={`${user.name}님 · ${user.roleLabel}`}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
-          >
-            {glyph(user.name)}
-          </span>
-          <ThemeToggle compact />
-          {portalUrl && (
-            <a
-              href={portalUrl}
-              title="통합 로그인으로"
-              aria-label="통합 로그인으로"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <span aria-hidden="true" className="text-sm">
-                ⌂
-              </span>
-            </a>
-          )}
-          <form action="/api/auth/logout" method="post">
-            <button
-              type="submit"
-              title="로그아웃"
-              aria-label="로그아웃"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <LogoutIcon className="h-4 w-4" />
-            </button>
-          </form>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className="truncate text-sm text-zinc-700 dark:text-zinc-300" title={`${user.name}님 · ${user.roleLabel}`}>
-            {user.name}님 · {user.roleLabel}
-          </p>
-          <div className="flex justify-center">
-            <ThemeToggle />
-          </div>
-          {portalUrl && (
-            <a
-              href={portalUrl}
-              className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-center text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              통합 로그인으로
-            </a>
-          )}
-          <form action="/api/auth/logout" method="post">
-            <button
-              type="submit"
-              className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              로그아웃
-            </button>
-          </form>
-        </div>
-      )}
+export default function SidebarFooter({ isCompact, isPinnedOpen = true, onToggleCollapsed }: SidebarFooterProps) {
+  // 🔴 그릴 것이 ☰ 뿐이라, 그 단추가 없는 호출부(모바일 드로어)에서는 이
+  // 조각 자체가 사라진다 — 구분선도 여백도 남기지 않는다(위 파일 주석).
+  if (!onToggleCollapsed) {
+    return null;
+  }
 
-      {onToggleCollapsed && (
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          title={isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}
-          aria-label={isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}
-          aria-expanded={isPinnedOpen}
-          className={`flex items-center rounded-md px-2 py-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 ${isCompact ? "justify-center" : "gap-2"}`}
-        >
-          <span aria-hidden="true">☰</span>
-          {/* 글자의 **존재**는 모양(isCompact)을, 글자의 **내용**은 고정
-              여부(isPinnedOpen)를 따른다. 존재까지 고정 여부를 따르게 하면
-              머무름으로 펼친 동안 이 줄만 글자 없이 아이콘 하나로 남아,
-              글자가 있는 테마·로그아웃 줄 옆에서 거기만 휑하다. */}
-          {!isCompact && <span className="text-xs">{isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}</span>}
-        </button>
-      )}
+  return (
+    <div className={`flex flex-col border-t border-zinc-200 dark:border-zinc-800 ${isCompact ? "p-2" : "p-3"}`}>
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        title={isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}
+        aria-label={isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}
+        aria-expanded={isPinnedOpen}
+        className={`flex items-center rounded-md px-2 py-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 ${isCompact ? "justify-center" : "gap-2"}`}
+      >
+        <span aria-hidden="true">☰</span>
+        {/* 글자의 **존재**는 모양(isCompact)을, 글자의 **내용**은 고정
+            여부(isPinnedOpen)를 따른다. 좁은 세로줄에서는 글자를 놓을 폭이
+            없어 아이콘 하나로 그린다(그때도 title/aria-label 로 같은 말이
+            남는다). */}
+        {!isCompact && <span className="text-xs">{isPinnedOpen ? "사이드바 접기" : "사이드바 펼치기"}</span>}
+      </button>
     </div>
   );
 }

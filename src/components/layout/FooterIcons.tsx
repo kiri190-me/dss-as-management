@@ -9,13 +9,20 @@ const STROKE_PROPS = {
 };
 
 /**
- * Small hand-authored inline SVG icons for the sidebar footer's collapsed
- * theme/logout controls — same convention as
+ * Small hand-authored inline SVG icons — same convention as
  * procedures/visual/ProcedureNodeIcons.tsx (this project has no icon
  * library dependency installed, and 4 glyphs doesn't justify adding one).
  * All use `currentColor` so they inherit whatever text color the
  * surrounding button sets (active/inactive state, light/dark theme — both
  * handled by the caller, never here).
+ *
+ * 🔴 부르는 곳은 2026-09-22 에 바뀌었다. 해·달·화면 셋은 ThemeToggle 이
+ * 쓰고(그 조각은 이제 사이드바가 아니라 **머리말 오른쪽**에 앉는다 —
+ * TopBar.tsx), LogoutIcon 은 지금 **부르는 곳이 없다**: 사이드바 맨 아래의
+ * 아이콘만 있던 로그아웃 단추가 사라지고, 머리말에서는 「로그아웃」이라는
+ * 말을 온전히 적기 때문이다(그 말만은 줄이지 않는다는 선 — TopBar.tsx).
+ * 지우지 않고 남겨 둔다: 좁은 자리에 로그아웃을 다시 놓을 일이 생기면
+ * 그때 쓸 것이고, 없애는 판단은 사용자의 몫이다.
  */
 
 export function SunIcon({ className }: IconProps) {

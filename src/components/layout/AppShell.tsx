@@ -15,10 +15,17 @@ type AppShellProps = {
   // resolves and validates the acting user before ever rendering this
   // component, redirecting to /login otherwise. A shell without a known
   // user must never render, so the logout control can never be silently
-  // hidden. `role` drives Sidebar's nav-item visibility filter only — a
-  // UX convenience, never the enforcement boundary (every gated page
-  // re-checks the same predicate server-side regardless of what this
-  // shell renders).
+  // hidden.
+  //
+  // 🔴 그 로그아웃이 그려지는 자리는 2026-09-22 부터 **머리말 오른쪽**이다
+  // (예전에는 사이드바 맨 아래 SidebarFooter). 그래서 `name`·`roleLabel` 은
+  // 이제 TopBar 로 내려간다.
+  //
+  // `role` 은 이 껍데기가 **읽지 않는다.** 메뉴 노출은 accessibleAreaKeys 와
+  // canEnterDeveloperMode 가 정하고(그 둘의 주석), 역할 이름은 레이아웃이
+  // 이미 `roleLabel` 로 풀어서 넘긴다. 모양에 남겨 둔 것은 호출부가 한 덩이로
+  // 만들어 넘기기 때문이고, 어느 쪽이든 **인가 경계가 아니다** — 막는 일은
+  // 페이지마다 서버에서 다시 한다.
   user: { name: string; roleLabel: string; role: Role };
   /** 통합 로그인(dss-auth) 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
   portalUrl?: string | null;
@@ -148,6 +155,14 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
         <TopBar
           title={title}
           onMenuClick={() => setMobileNavOpen(true)}
+          // 🔴 2026-09-22: 사용자 정보와 포털 주소가 **머리말로** 간다.
+          // 예전에는 둘 다 Sidebar → SidebarFooter 로 내려가 사이드바 맨
+          // 아래에 그려졌다(그래서 TopBar 주석에 「user prop 은 이제 필요
+          // 없다」고 적혀 있었다 — 그 줄은 그 파일에서 갱신했다). 지금은
+          // 「이름님 · 역할」· 테마 · 「통합 로그인으로」· 「로그아웃」이
+          // 다른 사내 시스템들과 같은 자리, 머리말 오른쪽 끝에 있다.
+          user={user}
+          portalUrl={portalUrl}
           notifications={notifications}
           portalInbox={portalInbox}
           serviceMenu={
@@ -230,7 +245,6 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
         >
           <Sidebar
             activeHref={pathname}
-            user={user}
             accessibleAreaKeys={accessibleAreaKeys}
             // 🔴 아래 모바일 드로어에도 **같은 값**을 넘긴다. 두 곳이 갈리면
             // 폰과 컴퓨터가 서로 다른 메뉴를 그린다(같은 파일 안의 두 호출부라
@@ -248,7 +262,6 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
             isPinnedOpen={isSidebarPinnedOpen}
             onToggleCollapsed={() => setIsSidebarPinnedOpen((prev) => !prev)}
             myPendingApprovalCount={myPendingApprovalCount}
-            portalUrl={portalUrl}
           />
         </aside>
 
@@ -261,10 +274,15 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
               className="absolute inset-0 bg-black/40"
             />
             {/*
-              모바일 드로어는 화면 높이를 꽉 채우고 그 맨 아래에
-              SidebarFooter(사용자 정보·테마·로그아웃)가 붙는다. 인셋 패딩이
-              없으면 로그아웃 버튼이 홈 인디케이터/제스처 바에 겹쳐 눌리지
+              모바일 드로어는 화면 높이를 꽉 채운다. 아래쪽 인셋 패딩이 없으면
+              **맨 아래 메뉴 링크**가 홈 인디케이터/제스처 바에 겹쳐 눌리지
               않는다. 인셋이 없는 기기에서는 0이므로 기존과 동일하다.
+
+              🔴 2026-09-22 까지 그 자리에 있던 것은 SidebarFooter(사용자
+              정보 · 테마 · 로그아웃)였다. 그 넷은 머리말로 올라가고 드로어의
+              SidebarFooter 는 null 이 되었지만(☰ 를 넘기지 않는 호출부다),
+              이 패딩은 **그대로 남는다** — 이제 그 자리에 닿는 것이 메뉴
+              링크이고, 눌리지 않으면 곤란한 것은 마찬가지다.
             */}
             <aside className="relative z-50 flex min-h-0 w-64 flex-col border-r border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-zinc-800 dark:bg-zinc-900">
               {/* 🔴 accessibleAreaKeys 를 여기에도 넘긴다. 빠뜨렸던 동안 모바일
@@ -276,12 +294,10 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
                   두었다. */}
               <Sidebar
                 activeHref={pathname}
-                user={user}
                 accessibleAreaKeys={accessibleAreaKeys}
                 canEnterDeveloperMode={canEnterDeveloperMode}
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
-                portalUrl={portalUrl}
               />
             </aside>
           </div>

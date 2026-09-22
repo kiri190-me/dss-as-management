@@ -8,7 +8,6 @@ import SidebarFooter from "./SidebarFooter";
 
 type SidebarProps = {
   activeHref: string;
-  user: { name: string; roleLabel: string };
   onNavigate?: () => void;
   /**
    * Whole-sidebar narrow/icon-only mode (distinct from per-group collapse
@@ -56,9 +55,15 @@ type SidebarProps = {
    * 일어난 일). 빠뜨리면 컴파일이 실패하게 둔다.
    */
   canEnterDeveloperMode: boolean;
-  /** 통합 로그인 앱 목록 주소. 데모 모드에서는 null이라 링크를 그리지 않는다. */
-  portalUrl?: string | null;
-  /** Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle row when this is provided (see SidebarFooter.tsx's doc comment). The footer itself (account/theme/logout) always renders regardless, for both desktop and mobile. */
+  /**
+   * Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle
+   * row when this is provided (see SidebarFooter.tsx's doc comment).
+   *
+   * 🔴 2026-09-22 부터 그 ☰ 가 아래쪽에 남은 **유일한** 것이라, 이것을
+   * 넘기지 않으면 SidebarFooter 자체가 null 이다. 사용자 정보 · 테마 ·
+   * 「통합 로그인으로」· 「로그아웃」은 머리말로 올라갔다 — 그래서 이 조각은
+   * 더 이상 `user` 도 `portalUrl` 도 받지 않는다(받아서 넘길 곳이 없다).
+   */
   onToggleCollapsed?: () => void;
   /**
    * 로그인한 사용자가 결재해야 할 A/S 건수 — 서버가 세션에서 푼 사용자 id로
@@ -155,7 +160,7 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, user, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, portalUrl = null }: SidebarProps) {
+export default function Sidebar({ activeHref, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0 }: SidebarProps) {
   const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys, canEnterDeveloperMode);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   /** 좁은 모양으로 그릴지. prop 을 넘기지 않는 모바일 드로어는 늘 넓다. */
@@ -307,9 +312,14 @@ export default function Sidebar({ activeHref, user, onNavigate, isCollapsed, isP
         )}
       </nav>
 
-      {/* 하단 유틸의 모양은 메뉴와 같은 값(isNarrow)을 따르고, ☰ 의 말만
-          고정 여부(isPinnedOpen)를 따른다 — 두 prop 의 주석 참조. */}
-      <SidebarFooter user={user} isCompact={isNarrow} isPinnedOpen={isPinnedOpen} onToggleCollapsed={onToggleCollapsed} portalUrl={portalUrl} />
+      {/* 맨 아래에 남은 것은 ☰ 접기/펼치기 한 줄뿐이다 — 사용자 정보 · 테마 ·
+          「통합 로그인으로」· 「로그아웃」은 2026-09-22 에 머리말 오른쪽으로
+          올라갔다(SidebarFooter.tsx · TopBar.tsx 의 그 날짜 주석). 그래서 이
+          조각은 ☰ 가 없는 호출부(모바일 드로어)에서는 아무것도 그리지 않는다.
+
+          모양은 메뉴와 같은 값(isNarrow)을 따르고, ☰ 의 말만 고정
+          여부(isPinnedOpen)를 따른다 — 두 prop 의 주석 참조. */}
+      <SidebarFooter isCompact={isNarrow} isPinnedOpen={isPinnedOpen} onToggleCollapsed={onToggleCollapsed} />
     </div>
   );
 }

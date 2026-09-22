@@ -168,13 +168,56 @@ test("🔴 폰에서 햄버거와 알림종이 밀려나지 않는다 — 줄어
     "알림종이 ml-auto shrink-0 을 잃었다 — 오른쪽 끝에 붙지 않거나 눌려 깎인다"
   );
 
-  // 이 머리말의 못 박힌 선: 메뉴바 뒤(오른쪽)에 놓이는 것은 아이콘 버튼
-  // 하나뿐이다. 글자 묶음이 다시 들어오면 폰에서 햄버거가 안 눌린다
-  // (TopBar.tsx 머리말 주석의 사고).
-  const tagsAfterMenu = [...bare.slice(bare.indexOf("{serviceMenu}")).matchAll(/<([A-Za-z][\w.]*)/g)].map(
-    (m) => m[1]
+  // 🔴 이 선은 한때 「메뉴바 뒤(오른쪽)에 놓이는 것은 **아이콘 버튼 하나**뿐,
+  // 글자 묶음은 사이드바 아래에만 둔다」였다. 2026-09-22 에 사용자 지시로 그
+  // 글자 묶음(사용자 · 테마 · 「통합 로그인으로」· 「로그아웃」)이 다른 사내
+  // 시스템들과 같은 자리 — 이 줄의 오른쪽 끝 — 으로 올라왔으므로 그 문장은
+  // 더 이상 참이 아니다.
+  //
+  // 🔴 **약하게 만드는 것이 아니다.** 원래 사고의 원인은 「묶음이 여기 있었다」가
+  // 아니라 「wrap/shrink 장치가 없었다」였다. 그래서 겨냥을 「무엇이 놓이는가」
+  // 에서 **「넘치지 않게 하는 장치가 그대로 있는가」**로 옮긴다:
+  //
+  //  ㉠ 머리말이 `flex-wrap` 이다 — 한 줄에 안 들어가면 줄을 바꾼다.
+  //  ㉡ 오른쪽 묶음은 폰에서 `w-full`, ≥640px 에서 `sm:w-auto` 다 — 폰에서는
+  //     제 줄을 통째로 가져가므로 첫 줄에는 햄버거 · 이름 · 메뉴 단추만 남는다.
+  //  ㉢ 묶음 안쪽에도 `flex-wrap` 이 있다(글꼴이 큰 기기를 위한 안전망).
+  //
+  // 셋 중 하나라도 빠지면 폰에서 머리말이 가로로 넘치고, 넘친 것을 손가락으로
+  // 누를 수 없다 — 그것이 정확히 예전 버그였다(TopBar.tsx 의 그 주석).
+  const headerTag = bare.match(/<header className="([^"]*)"/);
+  assert.ok(headerTag, "TopBar 의 <header> 를 찾지 못했다");
+  assert.ok(
+    headerTag[1].split(/\s+/).includes("flex-wrap"),
+    "머리말이 줄을 바꾸지 못한다 — 폰에서 오른쪽 묶음이 화면 밖으로 밀린다"
   );
-  assert.deepEqual(tagsAfterMenu, ["NotificationBell"]);
+
+  const afterMenu = bare.slice(bare.indexOf("{serviceMenu}") + "{serviceMenu}".length);
+  const clusterOpen = afterMenu.match(/<div className="([^"]*)"/);
+  assert.ok(clusterOpen, "메뉴바 뒤에 오른쪽 묶음(<div>)이 없다");
+  const clusterClasses = clusterOpen[1].split(/\s+/);
+  for (const needed of ["ml-auto", "flex", "flex-wrap", "w-full", "sm:w-auto"]) {
+    assert.ok(
+      clusterClasses.includes(needed),
+      `오른쪽 묶음에 ${needed} 가 없다 — 폰에서 제 줄을 못 갖거나 가로로 넘친다`
+    );
+  }
+
+  // 🔴 종은 그 묶음의 **마지막**이다. 종이 줄 오른쪽 끝에 서지 않으면 펼침
+  // 패널(종에 오른쪽 끝을 맞춰 왼쪽으로 펼친다)의 왼쪽이 화면 밖으로 잘린다.
+  const tagsAfterMenu = [...afterMenu.matchAll(/<([A-Za-z][\w.]*)/g)].map((m) => m[1]);
+  assert.equal(
+    tagsAfterMenu.at(-1),
+    "NotificationBell",
+    "종이 오른쪽 묶음의 맨 끝이 아니다 — 펼침 패널 왼쪽이 화면 밖으로 잘린다"
+  );
+  // 그리고 종은 **종만 감싸는 래퍼** 없이 그 묶음의 형제로 놓인다(래퍼를 두면
+  // 펼침 패널의 기준이 두 겹이 된다 — NotificationBell.tsx 의 그 주석).
+  assert.match(
+    afterMenu,
+    /<NotificationBell [^>]*\/>\s*<\/div>/,
+    "종을 감싸는 래퍼가 하나 더 있다 — 펼침 패널의 기준이 두 겹이 된다"
+  );
 });
 
 test("🔴 펼친 목록이 잘리지 않는다 — 머리말과 그 조상에 overflow: hidden 이 없다", () => {
@@ -335,8 +378,16 @@ test("🔴 노치 인셋은 머리말이 **혼자** 갖는다 — 둘이 가지�
   // 패딩이 여기로 돌아왔다.
   const header = topBar.match(/<header className="([^"]*)"/);
   assert.ok(header, "TopBar 의 <header> 를 찾지 못했다");
-  assert.ok(
-    header[1].includes("pt-[env(safe-area-inset-top)]"),
+  // 🔴 2026-09-22 부터 그 패딩은 `pt-[calc(0.5rem+env(safe-area-inset-top))]` 다.
+  // 머리말이 `flex-wrap` 이 되면서 폰에서 줄이 둘이 될 수 있고, 그때 위아래
+  // 패딩이 0 이면 줄이 화면 맨 위와 테두리에 딱 붙는다. `py-2` 를 따로 걸면
+  // 같은 padding-top 을 두 클래스가 다투고(이기는 쪽은 Tailwind 가 CSS 를 찍는
+  // 차례에 달렸다) 지면 **인셋이 조용히 사라진다** — 그래서 한 클래스 안에서
+  // 더한다. 여기서 지키는 뜻은 그대로다: 위쪽 인셋을 이 머리말이 **혼자**,
+  // **한 번** 갖는다.
+  assert.match(
+    header[1],
+    /\bpt-\[(env\(safe-area-inset-top\)|calc\([^\]]*env\(safe-area-inset-top\)[^\]]*\))\]/,
     "머리말이 인셋을 갖지 않는다 — 아이폰에서 제목이 노치 밑으로 들어간다"
   );
   assert.equal(
