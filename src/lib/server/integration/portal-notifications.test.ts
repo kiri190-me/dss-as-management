@@ -11,7 +11,7 @@ import {
 } from "./portal-notifications";
 import { buildApprovalNotification, type NotificationItem } from "@/lib/domain/notifications";
 import { buildNotificationSettingsScreenData, NO_NOTIFICATION_SETTINGS } from "@/lib/domain/notification-settings";
-import { roleLabels, type Role } from "@/lib/domain/types";
+import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -137,12 +137,15 @@ describe("buildPortalNotificationFeed", () => {
 
 describe("알림 설정 읽기", () => {
   const loadView = async () => buildNotificationSettingsScreenData(NO_NOTIFICATION_SETTINGS);
+  /** 문구를 하나도 바꾸지 않은 회사 — 코드 기본값 그대로다. */
+  const loadRoleText = async () => roleLabels;
 
   test("🔴 역할 목록을 함께 내준다 — 포털은 A/S 의 역할을 모른다", async () => {
     const result = await readPortalNotificationSettings({
       subject: SUBJECT,
       findActor: async () => actor(),
       loadView,
+      loadRoleText,
     });
     assert.equal(result.ok, true);
     if (!result.ok) return;
@@ -156,11 +159,65 @@ describe("알림 설정 읽기", () => {
     assert.equal(result.value.roles[1].editable, true);
   });
 
+  test("🔴 역할 이름은 **관리자가 바꿔 둔 문구**로 나간다 — 코드 기본값이 아니다", async () => {
+    // 「관리자」를 「매니저」로 바꿔 둔 회사. 예전에는 창구가 roleLabels 를 그대로
+    // 보내서 포털의 알림 설정만 옛 이름으로 보였다(A/S 탭이 있던 동안에는 그
+    // 탭이 제대로 보여 주고 있어 가려져 있었다).
+    const custom = { ...roleLabels, ADMIN: "매니저", AS_ENGINEER: "기술지원" };
+    const result = await readPortalNotificationSettings({
+      subject: SUBJECT,
+      findActor: async () => actor(),
+      loadView,
+      loadRoleText: async () => custom,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const byCode = new Map(result.value.roles.map((one) => [one.code, one.label]));
+    assert.equal(byCode.get("ADMIN"), "매니저");
+    assert.equal(byCode.get("AS_ENGINEER"), "기술지원");
+    // 바꾸지 않은 역할은 코드 기본값 그대로다.
+    assert.equal(byCode.get("SALES"), roleLabels.SALES);
+  });
+
+  test("🔴 문구를 읽지 못하면 던지지 않고 코드 기본값으로 답한다", async () => {
+    // 표가 아직 없는 DB·잠깐 흔들리는 DB 에서 포털의 알림 설정 화면 전체가
+    // 죽으면 안 된다. 이 기능을 넣기 전의 동작이 정확히 코드 기본값이다.
+    const result = await readPortalNotificationSettings({
+      subject: SUBJECT,
+      findActor: async () => actor(),
+      loadView,
+      loadRoleText: async () => {
+        throw new Error("ui_text_overrides 를 읽을 수 없다");
+      },
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    for (const one of result.value.roles) {
+      assert.equal(one.label, roleLabels[one.code]);
+    }
+  });
+
+  test("🔴 자격이 없으면 문구도 읽지 않는다 — 거절할 사람 때문에 표를 읽지 않는다", async () => {
+    let read = false;
+    const result = await readPortalNotificationSettings({
+      subject: SUBJECT,
+      findActor: async () => actor({ role: "SALES" }),
+      loadView,
+      loadRoleText: async () => {
+        read = true;
+        return roleLabels;
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(read, false);
+  });
+
   test("종류마다 사람이 읽는 이름·설명과 기본값이 함께 나간다", async () => {
     const result = await readPortalNotificationSettings({
       subject: SUBJECT,
       findActor: async () => actor(),
       loadView,
+      loadRoleText,
     });
     assert.ok(result.ok);
     if (!result.ok) return;
@@ -183,6 +240,7 @@ describe("알림 설정 읽기", () => {
         loaded = true;
         return buildNotificationSettingsScreenData(NO_NOTIFICATION_SETTINGS);
       },
+      loadRoleText,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.status, 403);
@@ -194,6 +252,7 @@ describe("알림 설정 읽기", () => {
       subject: SUBJECT,
       findActor: async () => null,
       loadView,
+      loadRoleText,
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.status, 403);
@@ -204,6 +263,7 @@ describe("알림 설정 읽기", () => {
       subject: SUBJECT,
       findActor: async () => actor({ role: "AS_ENGINEER", isDeveloper: true }),
       loadView,
+      loadRoleText,
     });
     assert.equal(result.ok, true);
   });
@@ -305,8 +365,24 @@ describe("parseNotificationSettingsChanges", () => {
 
 describe("portalNotificationRoles", () => {
   test("코드와 이름이 한 쌍으로 나간다", () => {
-    for (const role of portalNotificationRoles()) {
+    for (const role of portalNotificationRoles(roleLabels)) {
       assert.equal(role.label, roleLabels[role.code]);
     }
+  });
+
+  test("🔴 이름표는 받은 문구에서 나온다 — 코드 표를 스스로 읽지 않는다", () => {
+    const renamed = Object.fromEntries(
+      ROLE_CODES.map((code) => [code, `${code}-바꾼이름`])
+    ) as Record<Role, string>;
+    for (const role of portalNotificationRoles(renamed)) {
+      assert.equal(role.label, `${role.code}-바꾼이름`);
+    }
+  });
+
+  test("넘어온 표에 그 역할이 없으면 코드 기본값으로 떨어진다", () => {
+    const partial = { ADMIN: "매니저" } as Record<Role, string>;
+    const byCode = new Map(portalNotificationRoles(partial).map((one) => [one.code, one.label]));
+    assert.equal(byCode.get("ADMIN"), "매니저");
+    assert.equal(byCode.get("SALES"), roleLabels.SALES);
   });
 });

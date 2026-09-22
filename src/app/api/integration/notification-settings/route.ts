@@ -11,6 +11,7 @@ import { getLoginMode } from "@/lib/config/login-mode";
 import { getUserBySsoSubject } from "@/lib/db/queries/users";
 import { buildNotificationSettingsView } from "@/lib/db/queries/notification-settings";
 import { saveNotificationSettings } from "@/lib/db/mutations/notification-settings";
+import { getUiText } from "@/lib/server/ui-text";
 import {
   parseNotificationSettingsChanges,
   readPortalNotificationSettings,
@@ -74,6 +75,12 @@ export async function GET(request: NextRequest) {
     subject: verified.subject,
     findActor: getUserBySsoSubject,
     loadView: buildNotificationSettingsView,
+    // 🔴 역할 이름은 **관리자가 바꿔 둔 문구**로 내준다 — 코드 표를 여기서 읽지
+    // 않는다(2026-09-22). 서버가 문구를 읽는 자리는 getUiText 하나이고, 화면
+    // (useUiText)과 같은 병합을 쓴다 — 창구가 자기 나름대로 한 번 더 손보면
+    // 같은 역할이 A/S 와 포털에서 다른 이름으로 보이는 날이 온다.
+    // 읽지 못하면 던지지 않고 코드 기본값으로 떨어진다(그쪽 함수의 주석).
+    loadRoleText: async () => (await getUiText()).role,
   });
   if (!result.ok) {
     return NextResponse.json(

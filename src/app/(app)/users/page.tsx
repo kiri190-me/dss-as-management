@@ -5,6 +5,8 @@ import RepresentativeManagementScreen from "@/components/users/RepresentativeMan
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { getLoginMode } from "@/lib/config/login-mode";
+import { getSsoIssuer } from "@/lib/config/sso";
 import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@/lib/db/queries/shipment-delegations";
 import {
   getCurrentShipmentApprovalRoute,
@@ -19,7 +21,6 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { mayManageDeveloperFlag } from "@/lib/auth/developer-flag-authorization";
 import { buildRolePermissionViews } from "@/lib/auth/role-permission-views";
-import { buildNotificationSettingsView } from "@/lib/db/queries/notification-settings";
 
 export const metadata: Metadata = {
   title: "사용자 관리 | DSS A/S 관리 시스템",
@@ -86,22 +87,34 @@ export default async function UsersPage() {
   ) as ShipmentApprovalRoutesByScope;
 
   // 관리자 미만에게는 아예 내려보내지 않는다. 화면에서 탭을 감추는 것만으로는
-  // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다. 알림 설정도
-  // 같다 — 어느 역할이 무엇을 받는지는 그 자체가 조직 구성 정보다.
+  // 다른 역할의 권한 구성이 HTML에 실려 나가는 것을 막지 못한다.
   // 대표 지정·위임 판정은 화면에서 계산할 수 없다 — hasPermission 은 서버 전용이고
   // await 가 필요한데 저 화면은 클라이언트 컴포넌트다. 그래서 여기서 계산해
   // 내려보낸다. 🔴 서버 mutation 세 곳(shipment-representatives.ts,
   // shipment-delegations.ts 의 생성·철회)이 **같은 영역 열쇠·같은 수준**으로
   // 판정한다 — 다르게 적으면 개발자에게만 화면과 서버의 답이 갈린다.
-  const [rolePermissions, notificationSettings, canManageRepresentatives] = await Promise.all([
+  const [rolePermissions, canManageRepresentatives] = await Promise.all([
     actorMay(actingUser, canManageRolePermissions)
       ? buildRolePermissionViews({ actorRole: actingUser.role, actorIsDeveloper: actingUser.isDeveloper })
       : Promise.resolve(null),
-    actorMay(actingUser, canManageNotificationSettings)
-      ? buildNotificationSettingsView()
-      : Promise.resolve(null),
     hasPermission(actingUser, "users.shipmentRepresentatives", "MANAGE"),
   ]);
+
+  // 알림 설정은 2026-09-22 에 통합 로그인 포털로 떠났다(그 화면의 머리말에 경위가
+  // 적혀 있다). 자료는 여전히 A/S 가 갖고, 포털이 통로로 읽고 쓴다
+  // (api/integration/notification-settings). 여기 남은 것은 **어디서 고치는지
+  // 알려 주는 한 줄**뿐이다 — 탭이 조용히 사라지면 관리자는 찾을 길이 없다.
+  //
+  // 🔴 보이는 조건은 **탭이 보였던 조건과 같다**(관리자 이상). 권한 없는 사람에게
+  // 갈 수 없는 곳을 알려 주지 않는다. 그리고 통합 로그인 모드가 아니면 애초에 갈
+  // 곳이 없다 — 데모 모드에서 링크만 떠 있으면 눌러도 아무 일이 없거나 설정이
+  // 없다며 터진다((app)/layout.tsx 가 포털 링크에 같은 줄을 긋는다).
+  // 🔴 주소를 글자로 박지 않는다 — 포털 주소는 환경마다 다르고(개발 PC · NAS),
+  // 그 값을 아는 곳은 config/sso.ts 하나다.
+  const notificationSettingsPortalUrl =
+    getLoginMode() === "sso" && actorMay(actingUser, canManageNotificationSettings)
+      ? `${getSsoIssuer()}/admin/notifications`
+      : null;
 
   // 🔴 개발자 표시 판정만은 actorMay / hasPermission 을 쓰지 않는다 — **진짜
   // 최고관리자만**이다. 이 값이 권한을 최고관리자급으로 올리는 스위치 그 자체라서,
@@ -125,7 +138,7 @@ export default async function UsersPage() {
       users={users}
       delegations={delegations}
       rolePermissions={rolePermissions}
-      notificationSettings={notificationSettings}
+      notificationSettingsPortalUrl={notificationSettingsPortalUrl}
       shipmentApprovalRoutes={shipmentApprovalRoutes}
       approverCandidates={approverCandidates}
       canManageRepresentatives={canManageRepresentatives}

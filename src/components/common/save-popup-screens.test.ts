@@ -257,7 +257,8 @@ test("설정 화면은 성공 문구를 팝업으로 옮기고 그 자리에 머
     ["src/components/settings/ThemeTemplatePicker.tsx", 1],
     ["src/components/settings/ThemeTokenEditor.tsx", 1],
     ["src/components/settings/UiTextEditor.tsx", 1],
-    ["src/components/users/NotificationSettings.tsx", 1],
+    // 알림 설정 화면은 2026-09-22 에 통합 로그인 포털로 떠나 이 저장소에서
+    // 사라졌다(자료와 저장 통로는 그대로 남아 있다).
     ["src/components/users/RolePermissionSettings.tsx", 1],
     ["src/components/users/DeveloperFlagSection.tsx", 1],
     ["src/components/users/RepresentativeListSection.tsx", 1],
@@ -279,7 +280,6 @@ test("설정 화면은 성공 문구를 팝업으로 옮기고 그 자리에 머
     "src/components/settings/UiTextEditor.tsx",
     "src/components/settings/MainColorPicker.tsx",
     "src/components/settings/ThemeTemplatePicker.tsx",
-    "src/components/users/NotificationSettings.tsx",
     "src/components/users/RolePermissionSettings.tsx",
   ]) {
     // 상태 타입 선언(`{ type: "success" | "error"; … }`)은 남는다 — 보는 것은 **적는 호출**뿐이다.

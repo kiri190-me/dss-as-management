@@ -4,13 +4,11 @@ import { useState } from "react";
 import RepresentativeListSection from "./RepresentativeListSection";
 import DelegationSection from "./DelegationSection";
 import RolePermissionSettings, { type RolePermissionScreenData } from "./RolePermissionSettings";
-import NotificationSettings from "./NotificationSettings";
 import DeveloperFlagSection from "./DeveloperFlagSection";
 import ShipmentApprovalRouteSection, {
   type ShipmentApprovalRoutesByScope,
 } from "./ShipmentApprovalRouteSection";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import type { NotificationSettingsScreenData } from "@/lib/domain/notification-settings";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
 import type { SelectableApproverCandidate } from "@/lib/db/queries/shipment-approval-routes";
 
@@ -27,14 +25,19 @@ import type { SelectableApproverCandidate } from "@/lib/db/queries/shipment-appr
  * rolePermissions가 null이면 탭 자체를 그리지 않는다 — 관리자 미만에게는
  * 서버가 아예 자료를 내려주지 않으므로, 화면에 감추는 것이 아니라 없는 것이다.
  *
- * 2026-08-27: 알림 설정이 세 번째 탭으로 들어왔다. 같은 방식이다 —
- * notificationSettings가 null이면 그 탭을 아예 그리지 않는다. 두 자료를 따로
- * 받는 이유는, 지금은 두 탭의 권한이 같지만 갈라지는 날에 화면이 한쪽만 감출
- * 수 있어야 하기 때문이다(각자 자기 자료가 있으면 보이고, 없으면 없다).
+ * 2026-08-27 ~ 2026-09-22: 알림 설정이 세 번째 탭으로 들어왔다가 **통합 로그인
+ * 포털(dss-auth)의 /admin/notifications 로 떠났다.** 까닭은 알림 설정이 A/S 만의
+ * 일이 아니게 된 것이다 — 여섯 시스템이 각자 「누가 무엇을 받는가」를 따로 갖고
+ * 있으면 관리자가 여섯 화면을 돌아야 하고, 어디를 안 고쳤는지도 알 수 없다.
+ * 🔴 **자료는 여전히 A/S 가 갖는다**(알림 종류 8가지도 역할 5가지도 A/S 고유의
+ * 것이다). 포털은 통로(api/integration/notification-settings)로 읽고 쓴다.
+ * 이 화면에는 그 대신 **맨 아래 이사 안내 한 줄**이 남았다 — 탭이 조용히
+ * 사라지면 관리자는 어디서 고치는지 모른다. 안내를 탭으로 만들지 않은 이유는
+ * 탭을 눌러야 보이는 안내가 탭을 남기는 것과 같기 때문이다.
  *
  * 2026-09-07: 「개발자 표시」가 네 번째 탭으로 들어왔다. 자료가 아니라 판정 하나
  * (canManageDeveloperFlag)로 여닫는다 — 목록 자체는 대표 탭과 같은 `users` 를
- * 쓰기 때문이다. 거짓이면 탭을 아예 그리지 않는다(위 두 탭과 같은 방식).
+ * 쓰기 때문이다. 거짓이면 탭을 아예 그리지 않는다(권한 탭과 같은 방식).
  *
  * 2026-09-10: 그 탭이 「승인 절차」가 됐다 — 부품 불출도 같은 결재선 제도를 타게
  * 되면서, 이름에 「출하」가 붙어 있으면 재고 담당자의 절차를 여기서 정한다는 것을
@@ -46,18 +49,18 @@ import type { SelectableApproverCandidate } from "@/lib/db/queries/shipment-appr
  * 첫 탭 바로 다음이다 — 「누가 출하를 승인하는가」라는 같은 물음을 다루고,
  * 절차가 「출하 대표」를 대신하게 될 것이므로 둘을 떨어뜨려 두면 관리자가 두
  * 설정이 서로 무관하다고 오해한다. 🔴 **이 탭만은 자료로 여닫지 않고 항상
- * 보인다** — 위 세 탭은 자료가 null 이면 「감추는 것이 아니라 없는 것」이지만,
- * 절차는 판이 하나도 없는 상태(=지금 대표 방식으로 돈다)를 화면이 **말해 줘야**
- * 하는 종류의 자료라 비어 있어도 그릴 것이 있다. 고치는 단추만
+ * 보인다** — 위의 여닫는 탭들은 자료가 null 이면 「감추는 것이 아니라 없는 것」
+ * 이지만, 절차는 판이 하나도 없는 상태(=지금 대표 방식으로 돈다)를 화면이
+ * **말해 줘야** 하는 종류의 자료라 비어 있어도 그릴 것이 있다. 고치는 단추만
  * canManageRepresentatives 로 가른다. 그래서 탭 줄 자체도 이제 늘 그려진다
- * (탭이 언제나 둘 이상이다) — 기존 세 탭의 노출 조건은 그대로다.
+ * (탭이 언제나 둘 이상이다) — 나머지 탭의 노출 조건은 그대로다.
  */
 export default function RepresentativeManagementScreen({
   actingUser,
   users,
   delegations,
   rolePermissions,
-  notificationSettings,
+  notificationSettingsPortalUrl,
   shipmentApprovalRoutes,
   approverCandidates,
   canManageRepresentatives,
@@ -69,8 +72,16 @@ export default function RepresentativeManagementScreen({
   delegations: ShipmentDelegationRow[];
   /** 관리자 이상일 때만 내려온다. null이면 권한 설정 탭이 없다. */
   rolePermissions: RolePermissionScreenData | null;
-  /** 관리자 이상일 때만 내려온다. null이면 알림 설정 탭이 없다. */
-  notificationSettings: NotificationSettingsScreenData | null;
+  /**
+   * 포털의 알림 설정 화면 주소. null 이면 맨 아래 이사 안내를 그리지 않는다.
+   *
+   * 🔴 판정을 화면에서 하지 않는다 — 서버 페이지가 **탭이 보이던 것과 같은
+   * 조건**(관리자 이상, canManageNotificationSettings)으로 계산해 내려보내고,
+   * 통합 로그인 모드가 아니면 갈 곳이 없으므로 그때도 null 이다. 권한 없는
+   * 사람에게 갈 수 없는 곳을 알려 주지 않는다. 주소를 글자로 박지 않는 것도
+   * 같은 자리의 판단이다(포털 주소는 환경마다 다르다 — config/sso.ts).
+   */
+  notificationSettingsPortalUrl: string | null;
   /**
    * **용도별** 현재 승인 절차(그 용도 안에서 version 이 가장 큰 판). 값이 전부
    * null 이어도 탭은 있다 — 「아직 절차가 없어 예전 방식으로 돈다」가 화면이
@@ -117,7 +128,7 @@ export default function RepresentativeManagementScreen({
 }) {
   const representatives = users.filter((u) => u.isShipmentRepresentative);
   const [activeTab, setActiveTab] = useState<
-    "representatives" | "approvalRoute" | "permissions" | "notifications" | "developer"
+    "representatives" | "approvalRoute" | "permissions" | "developer"
   >("representatives");
 
   return (
@@ -130,8 +141,8 @@ export default function RepresentativeManagementScreen({
       </div>
 
       {/* 🔴 탭 줄은 이제 조건 없이 그린다 — 「출하 승인 절차」가 자료와 무관하게
-          늘 있으므로 탭이 언제나 둘 이상이다. 안쪽 세 탭의 노출 조건은 그대로다.
-          가로로 넘칠 수 있어(탭 다섯) 이 줄 안에서만 밀리게 한다. */}
+          늘 있으므로 탭이 언제나 둘 이상이다. 안쪽 탭들의 노출 조건은 그대로다.
+          가로로 넘칠 수 있어(탭 넷) 이 줄 안에서만 밀리게 한다. */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800">
         <button
           type="button"
@@ -168,19 +179,6 @@ export default function RepresentativeManagementScreen({
             역할별 접근 권한
           </button>
         )}
-        {notificationSettings && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("notifications")}
-            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
-              activeTab === "notifications"
-                ? "border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-            }`}
-          >
-            알림 설정
-          </button>
-        )}
         {canManageDeveloperFlag && (
           <button
             type="button"
@@ -198,12 +196,10 @@ export default function RepresentativeManagementScreen({
 
       {rolePermissions && activeTab === "permissions" ? (
         <RolePermissionSettings actingRole={actingUser.role} data={rolePermissions} />
-      ) : notificationSettings && activeTab === "notifications" ? (
-        <NotificationSettings data={notificationSettings} />
       ) : canManageDeveloperFlag && activeTab === "developer" ? (
         <DeveloperFlagSection users={users} canManageDeveloperFlag={canManageDeveloperFlag} />
       ) : activeTab === "approvalRoute" ? (
-        // 위 셋과 달리 자료를 앞에 두고 여닫지 않는다 — 판이 없는 것(=지금 예전
+        // 위의 둘과 달리 자료를 앞에 두고 여닫지 않는다 — 판이 없는 것(=지금 예전
         // 방식으로 돈다)도 화면이 말해 줘야 하는 상태라 그릴 것이 늘 있다.
         <ShipmentApprovalRouteSection
           routes={shipmentApprovalRoutes}
@@ -233,6 +229,22 @@ export default function RepresentativeManagementScreen({
             delegations={delegations}
           />
         </>
+      )}
+
+      {/* 🔴 이사 안내 — 탭 **밖**이라 어느 탭을 보고 있어도 늘 보인다.
+          탭으로 만들면 눌러야 보이는 안내가 되어 탭을 남기는 것과 같다.
+          새 탭으로 열지 않는다 — 이 저장소의 포털 링크 관행이다
+          (layout/SidebarFooter.tsx 의 「통합 로그인으로」도 같은 창에서 연다). */}
+      {notificationSettingsPortalUrl && (
+        <p className="border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          알림 설정은 통합 로그인 포털로 이사했습니다 — 여섯 시스템을 한 곳에서 고칩니다.{" "}
+          <a
+            href={notificationSettingsPortalUrl}
+            className="font-medium text-zinc-700 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
+          >
+            알림 설정 열기
+          </a>
+        </p>
       )}
     </div>
   );

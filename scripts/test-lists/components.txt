@@ -76,3 +76,9 @@ src/components/common/file-drop-screens.test.ts
 src/components/quotes/new-quote-excel-sheets.test.ts
 src/components/quotes/quote-approval-screen.test.tsx
 src/components/excel-imports/KyosanReportImportParts.test.tsx
+# 원본을 글자로 읽는 시험이라 세 목록 어디서든 돌지만, 같은 두 파일
+# (RepresentativeManagementScreen.tsx · users/page.tsx)을 읽는 이웃
+# (approval-route-section.test.ts:27 · UserDeletionParts.test.tsx:36)이 이미 여기 있다 —
+# 화면 원본을 지키는 시험이 한 목록에 모여 있으면 화면을 고친 사람이 돌릴 목록이 하나다.
+# DB 도 환경변수도 server-only 모듈도 쓰지 않으므로 이 목록의 제약에 걸릴 것이 없다.
+src/components/users/notification-settings-moved-notice.test.ts

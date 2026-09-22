@@ -129,6 +129,39 @@ export type PortalNotificationRole = {
   editable: boolean;
 };
 
+/**
+ * 🔴 역할 이름을 **사용자 지정 문구로** 읽어 오는 통로.
+ *
+ * 왜 인자로 받는가: 이 파일은 DB 를 모른다(머리말). 그리고 A/S 화면은 이 문구를
+ * 「시스템 설정 › 문구」에서 바꾼 것으로 보여 주는데(uiText.role[role]), 창구가
+ * 코드 기본값(roleLabels)을 보내면 **「관리자」를 「매니저」로 바꿔 둔 회사에서
+ * 포털의 알림 설정만 「관리자」로 보인다.** 2026-09-22 에 A/S 의 알림 설정 탭을
+ * 걷어내면서 그 어긋남이 가려 줄 화면조차 없어졌다 — 그래서 창구가 같은 문구를
+ * 거쳐 내준다(서버가 읽는 자리는 server/ui-text.ts 의 getUiText 하나다).
+ */
+export type LoadPortalRoleText = () => Promise<Readonly<Record<Role, string>>>;
+
+/**
+ * 🔴 문구를 읽지 못하면 **던지지 않고 코드 기본값으로 떨어진다.**
+ *
+ * 이 창구는 포털이 요청마다 부르는 자리다. 문구 표가 아직 없는 DB(마이그레이션
+ * 전, 다른 개발자 PC)나 DB 가 잠깐 흔들리는 사이에 500 을 내면 포털의 알림 설정
+ * 화면 전체가 죽는다 — 바꿔 놓은 이름이 안 보이는 것보다 훨씬 나쁘고, 무엇보다
+ * **이 기능을 넣기 전의 동작이 정확히 코드 기본값**이다. 잃는 것이 없다.
+ * (queries/ui-text-overrides.ts 의 loadUiTextOverrides 가 「표 없음」을 삼키는
+ * 것과 같은 판단이고, 여기서는 그 위의 실패까지 한 번 더 받는다.)
+ */
+async function resolvePortalRoleText(
+  loadRoleText: LoadPortalRoleText
+): Promise<Readonly<Record<Role, string>>> {
+  try {
+    return await loadRoleText();
+  } catch (error) {
+    console.error("[integration] 역할 이름 문구를 읽지 못해 코드 기본값으로 답합니다:", error);
+    return roleLabels;
+  }
+}
+
 export type PortalNotificationSettings = {
   roles: PortalNotificationRole[];
   kinds: NotificationSettingsScreenData["kinds"];
@@ -138,11 +171,20 @@ export type PortalSettingsResult<T> =
   | { ok: true; value: T }
   | { ok: false; status: 403 | 400; message: string };
 
-/** 포털이 그릴 역할 목록. 순서는 언제나 ROLE_CODES 그대로다. */
-export function portalNotificationRoles(): PortalNotificationRole[] {
+/**
+ * 포털이 그릴 역할 목록. 순서는 언제나 ROLE_CODES 그대로다.
+ *
+ * 🔴 이름표는 **받은 문구**에서 나온다 — 코드 표(roleLabels)를 여기서 직접 읽지
+ * 않는다. 인자를 선택으로 두지 않은 것이 그 규칙을 지키는 장치다: 빠뜨리면
+ * 컴파일이 통과하지 않는다(실제로 한 번 빠뜨려서 포털에만 옛 이름이 나갔다).
+ * 넘어온 표에 그 역할이 없을 때만 코드 기본값으로 떨어진다.
+ */
+export function portalNotificationRoles(
+  roleText: Readonly<Record<Role, string>>
+): PortalNotificationRole[] {
   return ROLE_CODES.map((code) => ({
     code,
-    label: roleLabels[code],
+    label: roleText[code] ?? roleLabels[code],
     editable: isRoleEditableInNotificationSettings(code),
   }));
 }
@@ -159,6 +201,8 @@ export async function readPortalNotificationSettings(params: {
   subject: string;
   findActor: FindActorBySsoSubject;
   loadView: () => Promise<NotificationSettingsScreenData>;
+  /** 역할 이름 문구(위 LoadPortalRoleText 의 주석이 까닭이다). */
+  loadRoleText: LoadPortalRoleText;
 }): Promise<PortalSettingsResult<PortalNotificationSettings>> {
   const actor = await resolveActor(params.subject, params.findActor);
   if (!actor) {
@@ -167,7 +211,13 @@ export async function readPortalNotificationSettings(params: {
   if (!actorMay(actor, canManageNotificationSettings)) {
     return { ok: false, status: 403, message: "관리자 이상만 알림 설정을 볼 수 있습니다." };
   }
-  return { ok: true, value: { roles: portalNotificationRoles(), kinds: (await params.loadView()).kinds } };
+  // 자격을 본 **뒤에** 읽는다 — 거절할 사람 때문에 표를 두 번 읽을 이유가 없다.
+  // 서로를 모르는 두 읽기라 나란히 보낸다(server/ui-text.ts 가 같은 판단을 한다).
+  const [view, roleText] = await Promise.all([
+    params.loadView(),
+    resolvePortalRoleText(params.loadRoleText),
+  ]);
+  return { ok: true, value: { roles: portalNotificationRoles(roleText), kinds: view.kinds } };
 }
 
 /**
@@ -207,8 +257,9 @@ export async function writePortalNotificationSettings(params: {
 
 /**
  * 포털이 보낸 저장 요청의 모양 확인. 서버 액션이 화면에서 온 값을 확인하는 것과
- * 같은 층위다(server/actions/notification-settings.ts) — 모르는 종류·역할을
- * 걸러 내는 것은 그 뒤 저장 함수의 몫이고, 여기서는 모양만 본다.
+ * 같은 층위다(server/actions/role-permissions.ts 가 그 본보기다 — 알림 설정의
+ * 서버 액션은 2026-09-22 에 화면과 함께 사라졌고, 이제 이 창구가 그 자리다).
+ * 모르는 종류·역할을 걸러 내는 것은 그 뒤 저장 함수의 몫이고, 여기서는 모양만 본다.
  */
 export function parseNotificationSettingsChanges(
   body: unknown

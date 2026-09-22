@@ -109,6 +109,19 @@ describe("알림 설정 통로", () => {
     }
   });
 
+  test("🔴 역할 이름은 사용자 지정 문구를 거쳐 나간다 — 코드 표를 라우트가 읽지 않는다", () => {
+    // 2026-09-22: A/S 의 알림 설정 탭을 걷어냈다. 그 탭이 uiText.role 로 바꿔 둔
+    // 이름을 보여 주고 있어서, 창구가 코드 기본값을 보내는 어긋남이 가려져
+    // 있었다 — 탭이 없어지면 포털에만 옛 이름이 보인다.
+    assert.match(settings, /loadRoleText: async \(\) => \(await getUiText\(\)\)\.role/);
+    assert.match(settings, /from "@\/lib\/server\/ui-text"/);
+    // 서버가 문구를 읽는 자리는 getUiText 하나다 — 창구가 코드 표를 직접 읽거나
+    // 자기 나름대로 병합하면 같은 역할이 A/S 와 포털에서 다른 이름으로 보인다.
+    for (const forbidden of ["roleLabels", "resolveUiText", "buildUiText"]) {
+      assert.ok(!settings.includes(forbidden), `라우트가 문구를 직접 다룬다: ${forbidden}`);
+    }
+  });
+
   test("스키마를 건드리지 않는다 — 사람별 설정을 만들지 않는다", () => {
     for (const forbidden of ["notification_user_settings", "userSettings", "insert("]) {
       assert.ok(!settings.includes(forbidden), `새 저장 자리가 생겼다: ${forbidden}`);
