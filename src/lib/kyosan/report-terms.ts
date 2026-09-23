@@ -1,4 +1,5 @@
 import { kyosanCauseKey } from "./report-causes";
+import { translateKyosanFreeTextTerm } from "./report-free-text-terms";
 
 /**
  * ============================================================================
@@ -43,6 +44,14 @@ import { kyosanCauseKey } from "./report-causes";
  * 않는다(`report-save-values.ts` 가 만드는 줄은 그대로다). `viewKyosanText` 가
  * 한글과 원문을 **둘 다** 돌려주고, 화면이 나란히 보인다 — 번역이 틀렸을 때
  * 되짚을 수 있어야 하고, 사전에 없는 말이 나중에 늘 수 있기 때문이다.
+ *
+ * ── 🔴 보여 주는 층이 둘이다 — 화면과 **문서** ──────────────────────
+ * 사람이 받는 엑셀 보고서도 보여 주는 층이다. 그쪽은 병기하지 않고 **한글만**
+ * 찍는다(사용자 결정 2026-09-22) — 아래 `koreanKyosanDocumentText` 가 그 일을
+ * 하고, 부르는 곳은 채우개 하나뿐이다(`xlsx/service-report-template.ts` 의
+ * `fillServiceReportWorkbook`). 두 층이 같은 사전·같은 줄 가름을 쓰면서 **결과만**
+ * 다르다. 한 글자가 두 층을 함께 지나가는 일은 없다 — 화면은 DB 에서 읽은 줄을
+ * 그리고, 문서는 보고서 폼의 값을 찍는다.
  *
  * ── 견줌은 눌러서 ───────────────────────────────────────────────────
  * `report-causes.ts` 의 `kyosanCauseKey`(NFKC + 공백 제거)를 **그대로 가져다
@@ -96,8 +105,11 @@ export const KYOSAN_FORM_TERMS: Readonly<Record<string, string>> = Object.freeze
    * 뜻이지 물건 이름이 아니다. 실측 187줄(고장분 42 · 예방분 145)로,
    * 교체 부품 줄 1,129개 중 가장 많이 나온 글자다.
    *
-   * 🔴 부품 **이름**은 사전에 넣지 않는다(`終段AMP基板` 따위 115가지) — 제품마다
-   * 다른 기술 낱말이라 닫힌 목록이 아니고, 틀리게 옮기면 엉뚱한 부품이 된다.
+   * 🔴 부품 **이름**은 이 표에 넣지 않는다 — 제품마다 다른 기술 낱말이라 닫힌
+   * 목록이 아니고, 이 표는 「우리 양식의 칸 이름과 짝이 맞는가」로 시험된다.
+   * ⚠️ **다른 파일로 갔다**(2026-09-22): 되풀이되는 부품 이름은 실측 빈도를
+   * 근거로 `report-free-text-terms.ts` 에 열린 목록으로 모은다. 그 판단의 까닭은
+   * 그 파일 머리말의 '예전 판단을 뒤집었다' 칸에 적혀 있다.
    */
   "交換無し": "교체 없음",
 });
@@ -133,6 +145,27 @@ export function translateKyosanFormTerm(value: string): string | null {
   return TERM_BY_KEY.get(kyosanCauseKey(value)) ?? null;
 }
 
+/**
+ * 🔴 **사전 둘을 차례로 본다** — 양식의 고정 보기가 먼저, 그다음 자유 기술
+ * (`report-free-text-terms.ts`).
+ *
+ * ── 왜 둘로 갈라 두고 여기서 합치는가 ───────────────────────────────
+ * 위 열다섯은 **닫힌 목록**이고 우리 엑셀 양식의 칸 이름과 짝이 맞아야 한다
+ * (`report-terms.test.ts` 가 개수와 짝을 못 박는다). 자유 기술은 **열린 목록**이고
+ * 근거가 실측 빈도다. 한 표에 섞으면 그 단언이 무너지고 두 근거가 뒤섞인다.
+ * 그래서 표는 둘, **찾는 문은 하나**다.
+ *
+ * 🔴 **차례가 뜻을 갖는다.** `交換無し` 는 양식 쪽에 있고, 자유 기술 쪽에는 같은
+ * 글자를 넣지 않았다 — 나중에 실수로 두 쪽에 다 들어가도 **양식 쪽이 이긴다.**
+ * 그쪽 값이 우리 엑셀 양식의 칸 이름이라, 문서의 다른 자리와 같은 낱말이 된다.
+ *
+ * `viewKyosanText` 가 이 함수를 쓴다 — 그래서 화면 셋과 문서가 **같은 사전**을
+ * 본다. 층마다 다른 사전을 보면 화면에서 한글이던 줄이 문서에서 일본어로 나간다.
+ */
+export function translateKyosanTerm(value: string): string | null {
+  return translateKyosanFormTerm(value) ?? translateKyosanFreeTextTerm(value);
+}
+
 export type KyosanTextView = {
   /** 🔴 연락서에서 온 글자 그대로. 언제나 채워진다 — 버리지 않는다. */
   original: string;
@@ -153,7 +186,8 @@ export type KyosanTextView = {
  *   · 그 밖           → `original` 그대로
  */
 export function viewKyosanText(value: string): KyosanTextView {
-  const korean = translateKyosanFormTerm(value);
+  // 🔴 사전 **둘 다** 본다 — `translateKyosanTerm` 의 '왜 둘로 갈라 두고' 참조.
+  const korean = translateKyosanTerm(value);
   return {
     original: value,
     korean,
@@ -226,10 +260,62 @@ export function isKyosanHeadingLine(line: string): boolean {
  *
  * 줄 가름은 `\r\n` 도 받는다 — 줄을 나누는 글자일 뿐이라 내용이 달라지지 않는다.
  */
+/**
+ * 줄 하나가 무엇인가. 🔴 **가름의 규칙은 여기 한 곳뿐이다** — 아래
+ * `viewKyosanMemoLines`(화면)와 `koreanKyosanDocumentText`(문서)가 이것을 함께
+ * 쓴다. 두 벌로 적으면 「머리글은 번역하지 않는다」가 한쪽에서만 지켜지는 날이 온다.
+ */
+function classifyKyosanMemoLine(line: string): KyosanMemoLine {
+  if (line === "") return { kind: "blank" };
+  if (isKyosanHeadingLine(line)) return { kind: "heading", text: line };
+  return { kind: "text", view: viewKyosanText(line) };
+}
+
 export function viewKyosanMemoLines(memo: string): readonly KyosanMemoLine[] {
-  return memo.split(/\r?\n/).map((line): KyosanMemoLine => {
-    if (line === "") return { kind: "blank" };
-    if (isKyosanHeadingLine(line)) return { kind: "heading", text: line };
-    return { kind: "text", view: viewKyosanText(line) };
-  });
+  return memo.split(/\r?\n/).map(classifyKyosanMemoLine);
+}
+
+// ──────────────────────────────────────── 문서에 찍히는 글자 (2026-09-22)
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 **문서는 한글만 찍는다 — 병기하지 않는다**(사용자 결정 2026-09-22)
+ * ────────────────────────────────────────────────────────────────────────────
+ * 화면(`components/kyosan/KyosanText.tsx`)은 한글 옆에 원문을 작게 함께 보인다.
+ * 번역이 틀렸을 때 되짚을 자리가 화면에는 있어야 하기 때문이다. **문서는 다르다** —
+ * 고객사로 나가는 종이에 `현품 인수(現品引取)` 라고 찍히면 그것은 두 나라 말이
+ * 섞인 문서다. 그래서 문서 쪽은 `korean` 만 쓴다.
+ *
+ * 🔴 **사전에 없는 줄은 원문 그대로 나간다.** 사용자가 「사전에 없는 문장은
+ * 일본어가 그대로 나와 한글과 섞여 보일 수 있습니다」라는 경고를 듣고 고른 것이다
+ * (2026-09-22). 억지로 채우거나 빈 칸으로 만들지 않는다 — 빈 칸이 되면 연락서에
+ * 적혀 있던 사실이 문서에서 사라진다.
+ *
+ * ── 🔴 줄바꿈 글자를 고치지 않는다 ──────────────────────────────────
+ * 줄로 갈랐다가 `\n` 으로 다시 이으면 `\r\n` 이 조용히 `\n` 이 된다. 그것은
+ * 번역이 아니라 **글자 바꾸기**다. 그래서 줄바꿈을 **갈라낸 채로 그대로 끼워**
+ * 돌려준다(`split` 의 괄호가 그 일을 한다 — 짝수 칸이 줄, 홀수 칸이 줄바꿈).
+ *
+ * ── 🔴 앞뒤 공백도 그대로 ───────────────────────────────────────────
+ * 양식의 글머리표가 앞 공백이고(`xlsx/service-report-template.ts` 의 '상황·본문·
+ * 비고는 다듬지 않는다'), 저장 쪽도 연락서 칸의 공백을 일부러 남긴다. 사전이
+ * 맞을 때만 그 줄이 한글로 바뀌고, 나머지 줄은 손대지 않는다.
+ *
+ * ⚠️ 사전이 맞아 한글이 된 줄은 **눌린 열쇠로** 맞은 것이라(NFKC + 공백 제거)
+ * 앞뒤 공백이 함께 사라진다. 그 자리에 들어가는 것은 우리 양식의 한글 이름이고,
+ * 그것은 공백이 붙지 않은 낱말이다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export function koreanKyosanDocumentText(value: string): string {
+  return value
+    .split(/(\r?\n)/u)
+    .map((piece, index) => {
+      // 홀수 칸은 줄바꿈 글자 그대로다 — 위 '줄바꿈 글자를 고치지 않는다'.
+      if (index % 2 === 1) return piece;
+      const line = classifyKyosanMemoLine(piece);
+      // 빈 줄과 머리글 줄은 손대지 않는다(머리글은 우리가 붙인 한글 이름이다).
+      if (line.kind !== "text") return piece;
+      return line.view.korean ?? piece;
+    })
+    .join("");
 }

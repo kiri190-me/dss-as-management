@@ -1,4 +1,5 @@
 import { wrapTextToWidth } from "@/lib/domain/text-wrap";
+import { koreanKyosanDocumentText } from "@/lib/kyosan/report-terms";
 
 import { ZipArchive } from "./zip-reader";
 import { writeZip, type ZipEntryInput } from "./zip-writer";
@@ -669,12 +670,94 @@ export type ServiceReportInput =
     });
 
 /**
+ * ============================================================================
+ * 🔴 연락서에서 온 일본어를 **문서에 찍기 전에** 한글로 (2026-09-22)
+ * ============================================================================
+ * 「한글만, 병기하지 않는다」는 사용자 결정이고 그 셈은 사전 쪽에 있다
+ * (`kyosan/report-terms.ts` 의 `koreanKyosanDocumentText`). 여기서는 **어느 칸이
+ * 그 문을 지나는가**만 정한다.
+ *
+ * ── 🔴 왜 채우개인가 (세 갈래 중 이것을 골랐다) ─────────────────────
+ * 문서가 밖으로 나가는 길이 셋인데 **셋이 모두 이 함수를 지난다**:
+ *
+ *   작성 화면의 내려받기   POST  api/repair-cases/[id]/service-report/xlsx
+ *   저장된 장의 내려받기   GET   같은 라우트
+ *   미리보기 · PDF         .../report/service-report/print  ← 채운 통합문서를
+ *                          **다시 읽어** 화면에 그린다(그 화면 머리말 참조)
+ *
+ * 그래서 한 곳만 고치면 **미리보기와 파일이 같은 말을 한다.** 한 단계 앞
+ * (`domain/service-report-form.ts` 의 `buildServiceReportRequestBody`)에 걸 수도
+ * 있지만 그것은 **브라우저에서도 돌아서**, 번역된 글자가 그물을 타고 서버 검증까지
+ * 흘러간다 — 「무엇을 검증했나」와 「무엇을 찍었나」가 갈라진다.
+ *
+ * 🔴 한 단계 더 앞(폼 씨앗 `createServiceReportFormValues`)은 **안 된다.** 그
+ * 값은 저장 액션으로 그대로 흘러 `service_reports` 에 **저장된다** — 저장되는
+ * 글자를 바꾸지 않는다는 규율이 거기서 깨진다. 이 함수는 DB 를 모르고, 돌려주는
+ * 것은 버퍼 하나뿐이라 저장될 자리가 구조적으로 없다.
+ *
+ * ── 🔴 이중 번역이 없다 ─────────────────────────────────────────────
+ * 화면 셋(`KyosanText`·`KyosanMemoText`)은 **DB 에서 읽은 작업 기록·미리보기
+ * 줄**을 그린다. 이 함수가 받는 것은 **보고서 폼의 값**이다. 한 글자가 두 층을
+ * 함께 지나가는 길이 없다 — 보고서 폼에는 번역을 걸지 않는다(사람이 고치는 자리라
+ * 화면과 다른 글자를 보여 주면 무엇을 고치는지 모르게 된다 — `KyosanText.tsx` 의
+ * '사람이 고치는 자리에는 쓰지 않는다').
+ *
+ * ── 🔴 지나가는 칸 — **여러 줄 자유 기술만** ────────────────────────
+ * 확인내용 · 조치 · 정리 · 비고 · 「상황」 아랫칸. 사람이 문장을 적는 자리이고,
+ * 연락서 글자가 실제로 흘러드는 자리다(신고 증상 → 폼의 `situationDetail`).
+ *
+ * 머리 칸(고객사명 · 담당자 · 품명 · 형식 · LOT · S/N · 번호들)은 **지나가지
+ * 않는다.** 이름과 번호라 옮길 짝이 없고, 사전은 완전일치라 걸릴 일도 없지만
+ * — 「어느 칸이 번역되는가」를 좁게 못 박아 두는 편이 낫다. 「상황」 윗칸
+ * (`situationRequest`)도 빠진다: 그것은 **우리 양식의 드롭다운에서 고른 한글**이라
+ * 애초에 연락서 글자가 아니다.
+ * ============================================================================
+ */
+function koreanServiceReportInput(input: ServiceReportInput): ServiceReportInput {
+  const line = koreanKyosanDocumentText;
+
+  const situation =
+    input.situation === undefined
+      ? undefined
+      : {
+          // 🔴 윗칸은 우리 양식의 드롭다운 값이다 — 위 '지나가는 칸' 참조.
+          request: input.situation.request,
+          detail: input.situation.detail === undefined ? undefined : line(input.situation.detail),
+        };
+  const remark = input.remark?.map(line);
+
+  // 🔴 「안 줌(`undefined`)」과 「비움(`''`)」을 가르는 값이다. `undefined` 를
+  //    빈 글자로 눌러 버리면 사람이 지운 정형 문구가 되살아난다(`findingsLines`).
+  const findingsIntro =
+    input.body.findingsIntro === undefined ? undefined : line(input.body.findingsIntro);
+  const findings = input.body.findings.map(line);
+  const actions = input.body.actions.map(line);
+
+  return input.kind === "REPAIR"
+    ? {
+        ...input,
+        situation,
+        remark,
+        body: { findingsIntro, findings, actions, summary: input.body.summary.map(line) },
+      }
+    : { ...input, situation, remark, body: { findingsIntro, findings, actions } };
+}
+
+/**
  * 값을 채운 통합문서를 **새 버퍼로** 돌려준다. 원본은 읽기만 한다.
  */
 export function fillServiceReportWorkbook(
   templateXlsx: Buffer,
-  input: ServiceReportInput
+  rawInput: ServiceReportInput
 ): Buffer {
+  /**
+   * 🔴 **이 아래로는 한글만 흐른다.** 줄 수를 세기도 전에 옮겨 적는다 — 줄 폭에
+   * 맞춰 다시 나누는 셈(`splitBodyLine`)과 본문 줄 수 상한 검사가 **문서에 실제로
+   * 찍히는 글자**를 봐야 하기 때문이다. 줄 수 자체는 달라지지 않는다(줄 통째로
+   * 바꾸므로)
+   */
+  const input = koreanServiceReportInput(rawInput);
+
   // 파일을 열기 전에 던진다 — 반쯤 채워진 문서가 만들어질 자리를 아예 없앤다.
   validateServiceReportInput(input);
 

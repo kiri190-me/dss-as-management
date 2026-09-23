@@ -13,6 +13,7 @@ import {
   WORKBOOK_PART,
 } from "./workbook-parts";
 import { textDisplayWidth } from "@/lib/domain/text-wrap";
+import { translateKyosanTerm } from "@/lib/kyosan/report-terms";
 import {
   clearDrawingTextInRows,
   fillServiceReportWorkbook,
@@ -2115,4 +2116,135 @@ test("양식이 바뀌어 라벨이 어긋나면 엉뚱한 칸을 채우는 대�
     () => fillServiceReportWorkbook(writeZip(entries), INSPECTION_INPUT),
     /양식이 바뀐 것 같습니다: J27/
   );
+});
+
+// ── 🔴 연락서 일본어가 문서에서 한글로 나온다 (2026-09-22) ─────────────────
+
+/**
+ * 🔴 「사전에 없는 일본어」 본보기 — **가짜 글자를 쓴다.**
+ *
+ * 2026-09-23 에 이 아래 시험이 깨졌다. 본보기로 `焼損・煙・異臭発生` 이라는 **실제
+ * 연락서 문장**(실측 139줄)을 써 두었는데, 자유 기술 사전이 192줄로 자라면서 그
+ * 글자가 **사전 안으로 들어왔기** 때문이다. 제품이 망가진 것이 아니라 본보기가
+ * 낡은 것이었다.
+ *
+ * 실제 연락서 문장은 사전이 자랄 때마다 이 자리를 깨뜨린다. 41자 넘는 문장을
+ * 가져다 쓰는 것도 안 된다 — 그 무리에는 고객사명·모델명이 박혀 있다
+ * (`kyosan/report-free-text-lines.fixture.ts` 머리말). 그래서 **시험용임이 글자에서
+ * 드러나는 가짜 일본어**를 쓴다.
+ *
+ * ⚠️ `kyosan/report-terms.test.ts` · `components/excel-imports/
+ * KyosanReportImportParts.test.tsx` 와 **같은 글자**다. 파일마다 따로 지으면 다음에
+ * 또 여기저기서 깨진다.
+ */
+const 사전에_없는_일본어 = "試験用ダミー故障";
+
+/**
+ * 🔴 **지킴이.** 다음 사람이 이 글자를 사전에 넣는 날 **여기서** 잡힌다 — 아래
+ * 시험들이 엉뚱한 자리에서 깨지는 대신이다. 깨지면 사전을 되돌리지 말고
+ * **본보기 글자를 바꿔라.**
+ *
+ * ⚠️ `translateKyosanTerm` 은 사전 **둘 다**(양식 · 자유 기술)를 지나는 문이다.
+ * 한쪽만 보면 다른 쪽에 들어갔을 때 놓친다.
+ */
+test("🔴 본보기가 아직 사전 밖에 있다 — 들어갔으면 다른 글자로 바꿔라", () => {
+  assert.equal(translateKyosanTerm(사전에_없는_일본어), null);
+});
+
+/**
+ * ============================================================================
+ * 🔴 문서는 **한글만** 찍는다 — 병기하지 않는다
+ * ============================================================================
+ * 사용자 결정(2026-09-22)이다. 화면은 한글 옆에 원문을 작게 함께 보이지만
+ * (`components/kyosan/KyosanText.tsx`), 고객사로 나가는 종이에 두 나라 말이 섞여
+ * 찍히면 안 된다.
+ *
+ * 못 박는 것은 다섯이다.
+ *  1. 🔴 사전에 있는 줄은 **한글만** 나온다(`(現品引取)` 가 따라붙지 않는다).
+ *  2. 🔴 사전에 없는 줄은 **원문 그대로** 나간다 — 억지로 채우거나 비우지 않는다
+ *     (사용자가 「한글과 섞여 보일 수 있다」는 경고를 듣고 고른 것이다).
+ *  3. 🔴 대괄호 머리글은 **우리가 붙인 한글 이름**이라 손대지 않는다.
+ *  4. 🔴 빈 줄과 줄 자리가 그대로다 — 줄 통째로 바꾸므로 줄 수가 달라지지 않는다.
+ *  5. 지나가는 칸은 **여러 줄 자유 기술만**이다 — 머리 칸(이름·번호)은 그대로.
+ * ============================================================================
+ */
+test("🔴 연락서 고정 보기는 문서에서 한글로, 사전에 없는 줄은 원문 그대로", { skip: skipRepair }, () => {
+  const filled = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    // 「상황」 아랫칸 — 신고 증상(`repair_cases.reported_symptom`)이 폼의
+    // `situationDetail` 을 거쳐 문서에 들어오는 그 길이다.
+    situation: { request: " ・수리의뢰", detail: "現品引取" },
+    body: {
+      findingsIntro: "",
+      findings: [
+        // 저장 쪽(`kyosan/report-detail-values.ts`)이 실제로 만드는 모양이다.
+        "[교산 연락서]",
+        "",
+        "[처치(○ 표시)]",
+        "現品引取",
+        // 🔴 앞뒤 공백이 붙어 있어도 눌린 열쇠(NFKC+공백 제거)로 맞는다.
+        "  交換無し  ",
+        // 🔴 사전에 없는 자유 기술 — 원문 그대로 나간다.
+        사전에_없는_일본어,
+      ],
+      actions: ["その他"],
+      summary: ["処置完了"],
+    },
+    remark: ["再現せず", "기존 한글 줄은 그대로"],
+  });
+  assertSheetIsSound(filled);
+
+  // 「상황」 아랫칸.
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.situationDetail), "현품 인수");
+
+  // 확인내용 — 32행부터. 🔴 줄 자리가 하나도 밀리지 않았다.
+  assert.equal(REPAIR_FINDINGS_ROW, 32, "수리 양식의 「확인내용」 자리가 바뀌었다");
+  assert.equal(filled.text("H32"), "[교산 연락서]", "머리글이 번역됐다");
+  assert.equal(filled.text("H33"), undefined, "빈 줄이 사라졌다");
+  assert.equal(filled.text("H34"), "[처치(○ 표시)]", "머리글이 번역됐다");
+  assert.equal(filled.text("H35"), "현품 인수");
+  assert.equal(filled.text("H36"), "교체 없음");
+  assert.equal(filled.text("H37"), 사전에_없는_일본어, "사전에 없는 줄이 손대졌다");
+
+  // 조치 · 정리 · 비고도 같은 문을 지난다.
+  assert.equal(filled.text(`H${REPAIR_ACTIONS_ROW}`), "기타");
+  assert.equal(filled.text(`H${REPAIR_SUMMARY_ROW}`), "조치 완료");
+  assert.equal(filled.text("H60"), "재현 안됨");
+  assert.equal(filled.text("H61"), "기존 한글 줄은 그대로");
+
+  // 🔴 머리 칸은 지나가지 않는다 — 이름·번호를 옮길 짝은 없다.
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.customerName), "테스트 반도체(주)");
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.modelName), "TEST300FH-AD1");
+  // 「상황」 윗칸은 우리 양식의 드롭다운 값이라 손대지 않는다(앞 공백도 그대로).
+  assert.equal(filled.text(SERVICE_REPORT_CELLS.situationRequest), " ・수리의뢰");
+});
+
+/**
+ * 🔴 **번역이 줄 수를 바꾸지 않는다.** 줄 통째로 갈아 끼우므로 같은 줄 수여야
+ * 하고, 그래야 화면이 미리 센 「남은 줄 수」와 문서가 어긋나지 않는다
+ * (`domain/service-report-form.ts` 의 `countServiceReportBodyRows`).
+ */
+test("🔴 번역해도 줄 자리가 그대로다 — 일본어 판과 한글 판의 줄 수가 같다", { skip: skipRepair }, () => {
+  const lines = ["現品引取", "交換無し", 사전에_없는_일본어];
+  const japanese = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: { findingsIntro: "", findings: lines, actions: ["その他"], summary: ["処置完了"] },
+  });
+  const korean = fill(repairPath as string, {
+    ...REPAIR_INPUT,
+    body: {
+      findingsIntro: "",
+      findings: ["현품 인수", "교체 없음", 사전에_없는_일본어],
+      actions: ["기타"],
+      summary: ["조치 완료"],
+    },
+  });
+
+  for (let row = REPAIR_FINDINGS_ROW; row <= REPAIR_SUMMARY_ROW; row += 1) {
+    assert.equal(
+      japanese.text(`H${row}`),
+      korean.text(`H${row}`),
+      `H${row} 이 일본어 판과 한글 판에서 다르다`
+    );
+  }
 });

@@ -12,7 +12,9 @@ import {
   hasJapaneseCharacter,
   isKyosanHeadingLine,
   knownKyosanFormTerms,
+  koreanKyosanDocumentText,
   translateKyosanFormTerm,
+  translateKyosanTerm,
   viewKyosanMemoLines,
   viewKyosanText,
   type KyosanMemoLine,
@@ -37,8 +39,67 @@ import type { KyosanImportPlan } from "./report-preview";
  * ============================================================================
  */
 
+/**
+ * ============================================================================
+ * 🔴 「사전에 없는 일본어」 본보기 — **가짜 글자를 쓴다**
+ * ============================================================================
+ * 2026-09-23 에 이 자리 때문에 시험 **여덟 개가 한꺼번에 깨졌다.** 본보기로
+ * `焼損・煙・異臭発生`(실측 139줄) 과 `出力異常`(18줄) 이라는 **실제 연락서 문장**을
+ * 써 두었는데, 자유 기술 사전이 192줄로 자라면서 그 둘이 **사전 안으로 들어왔기**
+ * 때문이다. 제품이 망가진 것이 아니라 본보기가 낡은 것이었다.
+ *
+ * 🔴 그래서 **실제 연락서 문장을 본보기로 쓰지 않는다.** 사전은 앞으로도 자란다.
+ * 41자 넘는 실제 문장을 가져다 쓰는 것도 안 된다 — 그 무리에는 고객사명·모델명이
+ * 박혀 있어 저장소에 둘 수 없다(`report-free-text-lines.fixture.ts` 머리말).
+ * 남는 길은 **시험용임이 글자에서 드러나는 가짜 일본어**뿐이다.
+ *
+ * ⚠️ 세 파일이 **같은 글자**를 쓴다 — 여기와 `xlsx/service-report-template.test.ts`,
+ * `components/excel-imports/KyosanReportImportParts.test.tsx`. 파일마다 따로 지으면
+ * 다음에 또 여기저기서 깨진다.
+ * ============================================================================
+ */
+
+/** 🔴 사전에 **없어야** 하는 본보기. 가나(`ダミー`)와 한자가 섞인 보통 꼴이다. */
+const 사전에_없는_일본어 = "試験用ダミー故障";
+
+/**
+ * 🔴 사전에 **없어야** 하는 본보기 가운데 **가나가 한 글자도 없는** 것.
+ *
+ * 위 `사전에_없는_일본어` 를 이 자리에 쓸 수 없다 — `ダミー` 가 가나라서
+ * 「가나 없이 한자만 있는 줄도 일본어로 본다」는 시험이 **재려던 것을 못 재게**
+ * 된다. 그 시험은 한자만 있는 줄(`出力異常` 같은 꼴)이 일본어 표시를 받는지를
+ * 보는 자리이고, 가나가 섞이면 가나 덕에 통과해 버린다.
+ */
+const 사전에_없는_한자만_일본어 = "試験用漢字列";
+
+describe("🔴 시험용 본보기 — 사전 밖에 있어야 한다", () => {
+  /**
+   * 🔴 **이 지킴이가 이 파일의 본보기 여덟 자리를 대신 지킨다.** 다음 사람이 이
+   * 글자를 사전에 넣는 날 **여기 한 곳에서** 잡힌다 — 여덟 군데가 한꺼번에
+   * 깨지는 대신이다. 깨지면 사전을 되돌리지 말고 **본보기 글자를 바꿔라.**
+   *
+   * ⚠️ `translateKyosanTerm` 으로 본다 — 사전 **둘 다**(양식 · 자유 기술)를
+   * 지나는 문이다. 한쪽만 보면 다른 쪽에 들어갔을 때 놓친다.
+   */
+  test("본보기가 아직 사전 밖에 있다 — 들어갔으면 다른 글자로 바꿔라", () => {
+    assert.equal(translateKyosanTerm(사전에_없는_일본어), null);
+    assert.equal(translateKyosanTerm(사전에_없는_한자만_일본어), null);
+  });
+
+  test("본보기가 일본어로 보인다 — 「일본어 원문」 표시를 받을 수 있어야 한다", () => {
+    assert.equal(hasJapaneseCharacter(사전에_없는_일본어), true);
+    assert.equal(hasJapaneseCharacter(사전에_없는_한자만_일본어), true);
+  });
+
+  test("🔴 한자만인 본보기에는 가나가 한 글자도 없다 — 그래야 재려던 것을 잰다", () => {
+    assert.equal(/[぀-ゟ゠-ヿ]/u.test(사전에_없는_한자만_일본어), false);
+  });
+});
+
 describe("연락서 고정 보기 사전", () => {
-  test("열넷이다 — 原因 열 · 処置 넷 · 상태값 하나", () => {
+  // ⚠️ 제목이 「열넷」이었다 — 상태값(`交換無し`)이 늘었을 때 단언만 15로 고쳐지고
+  //    제목은 그대로 남아 있었다(2026-09-22 고침).
+  test("열다섯이다 — 原因 열 · 処置 넷 · 상태값 하나", () => {
     assert.equal(knownKyosanFormTerms().length, 15);
   });
 
@@ -92,7 +153,7 @@ describe("연락서 고정 보기 사전", () => {
   });
 
   test("사전에 없는 글자는 null — 지우지도 비슷한 것으로 바꾸지도 않는다", () => {
-    assert.equal(translateKyosanFormTerm("焼損・煙・異臭発生"), null);
+    assert.equal(translateKyosanFormTerm(사전에_없는_일본어), null);
     assert.equal(translateKyosanFormTerm(""), null);
   });
 });
@@ -107,15 +168,20 @@ describe("화면 한 줄이 보여 줄 것", () => {
   });
 
   test("🔴 일본어 자유 기술 — 원문 그대로 두고 「일본어 원문」으로 표시한다", () => {
-    assert.deepEqual(viewKyosanText("焼損・煙・異臭発生"), {
-      original: "焼損・煙・異臭発生",
+    assert.deepEqual(viewKyosanText(사전에_없는_일본어), {
+      original: 사전에_없는_일본어,
       korean: null,
       isJapaneseOriginal: true,
     });
   });
 
+  /**
+   * 🔴 본보기에 **가나가 없어야** 이 시험이 뜻을 갖는다 — 가나가 섞이면 한자
+   * 범위를 안 봐도 통과해 버린다. 위 `사전에_없는_한자만_일본어` 의 주석 참조.
+   * 실측에서도 `出力異常` 처럼 가나 없이 한자만인 자유 기술이 흔하다.
+   */
   test("가나가 없고 한자만 있는 줄도 일본어로 본다(実測: 出力異常 같은 꼴이 흔하다)", () => {
-    assert.equal(viewKyosanText("出力異常").isJapaneseOriginal, true);
+    assert.equal(viewKyosanText(사전에_없는_한자만_일본어).isJapaneseOriginal, true);
   });
 
   test("영문·숫자만인 줄은 원문 표시를 붙이지 않는다", () => {
@@ -313,5 +379,133 @@ describe("🔴 저장 쪽이 만든 덩어리와 화면이 어긋나지 않는�
       .flatMap((memo) => viewKyosanMemoLines(memo))
       .flatMap((line) => (line.kind === "text" && line.view.korean !== null ? [line.view.korean] : []));
     assert.deepEqual(koreans, ["현품 인수"]);
+  });
+});
+
+// ══════════════════════════════════════ 문서에 찍히는 글자 (2026-09-22)
+
+/**
+ * ============================================================================
+ * 🔴 문서는 **한글만** — 병기하지 않는다 (사용자 결정 2026-09-22)
+ * ============================================================================
+ * 화면(`KyosanText`)과 문서(`xlsx/service-report-template.ts` 의 채우개)가 **같은
+ * 사전 · 같은 줄 가름**을 쓰면서 결과만 다르다. 화면은 원문을 옆에 남기고, 문서는
+ * 한글만 찍는다 — 고객사로 나가는 종이에 두 나라 말이 섞이면 안 된다.
+ *
+ * 못 박는 것은 다섯이다.
+ *  1. 🔴 사전에 있는 줄은 **한글만** 나온다(원문이 따라붙지 않는다).
+ *  2. 🔴 사전에 없는 줄은 **원문 그대로** 나간다 — 채우거나 비우지 않는다.
+ *  3. 🔴 대괄호 머리글은 손대지 않는다(우리가 붙인 한글 이름이다).
+ *  4. 🔴 빈 줄 · 줄 수 · 줄바꿈 글자(`\r\n`)가 그대로다.
+ *  5. 🔴 손대지 않은 줄은 **한 글자도** 달라지지 않는다(앞뒤 공백 포함).
+ * ============================================================================
+ */
+describe("문서에 찍히는 글자 — 한글만", () => {
+  test("🔴 고정 보기는 한글만 나온다 — 원문을 괄호로 붙이지 않는다", () => {
+    assert.equal(koreanKyosanDocumentText("現品引取"), "현품 인수");
+    assert.equal(koreanKyosanDocumentText("その他"), "기타");
+    assert.equal(koreanKyosanDocumentText("交換無し"), "교체 없음");
+  });
+
+  test("🔴 사전에 없는 일본어는 원문 그대로 나간다 — 빈 칸으로 만들지 않는다", () => {
+    assert.equal(koreanKyosanDocumentText(사전에_없는_일본어), 사전에_없는_일본어);
+    assert.equal(koreanKyosanDocumentText("その他の不具合"), "その他の不具合");
+  });
+
+  test("한글·영문·빈 글자는 아무것도 달라지지 않는다", () => {
+    assert.equal(koreanKyosanDocumentText("전원부 퓨즈 단선 확인"), "전원부 퓨즈 단선 확인");
+    assert.equal(koreanKyosanDocumentText("AMP IMBALANCE"), "AMP IMBALANCE");
+    assert.equal(koreanKyosanDocumentText(""), "");
+  });
+
+  test("🔴 여러 줄 덩어리 — 머리글·빈 줄·앞뒤 공백이 그대로이고 줄 수도 그대로다", () => {
+    const memo = [
+      KYOSAN_IMPORT_MARK,
+      "",
+      kyosanOriginHeading("처치(○ 표시)"),
+      "現品引取",
+      "  交換無し  ",
+      사전에_없는_일본어,
+    ].join("\n");
+
+    assert.equal(
+      koreanKyosanDocumentText(memo),
+      [
+        KYOSAN_IMPORT_MARK,
+        "",
+        "[처치(○ 표시)]",
+        "현품 인수",
+        // ⚠️ 사전이 맞은 줄은 눌린 열쇠로 맞은 것이라 앞뒤 공백이 함께 사라진다 —
+        //    들어가는 값이 우리 양식의 한글 이름이고 그것은 공백이 안 붙은 낱말이다.
+        "교체 없음",
+        사전에_없는_일본어,
+      ].join("\n")
+    );
+    assert.equal(
+      koreanKyosanDocumentText(memo).split("\n").length,
+      memo.split("\n").length,
+      "줄 수가 달라졌다"
+    );
+  });
+
+  test("🔴 사전이 맞지 않는 줄의 앞뒤 공백은 살아 있다", () => {
+    assert.equal(koreanKyosanDocumentText("  前置きの空白も残す  "), "  前置きの空白も残す  ");
+  });
+
+  test("🔴 CRLF 줄바꿈을 LF 로 고치지 않는다 — 번역이 아니라 글자 바꾸기다", () => {
+    assert.equal(koreanKyosanDocumentText("現品引取\r\nその他"), "현품 인수\r\n기타");
+    assert.equal(koreanKyosanDocumentText("한글\r\n\r\n한글"), "한글\r\n\r\n한글");
+  });
+
+  /**
+   * ⚠️ `[불량] 出力異常` 은 **일부러 남겼다.** `出力異常` 은 이제 자유 기술 사전에
+   * 있지만(실측 18줄) 이 줄은 **통째로는** 사전에 없다 — 그래서 한 글자도 안
+   * 바뀐다. 사전에 든 낱말을 품고도 안 바뀌는 것이 「글자 통째로만 맞는다」의
+   * 증거라, 사전이 자랄수록 오히려 세지는 자리다.
+   * 🔴 이 줄은 사전에 들어올 수 없다 — `[불량]` 은 **사람이 적은 한글 머리표**이고
+   * 연락서 원문에는 나오지 않는다(사전은 연락서 문장으로만 자란다).
+   */
+  test("🔴 사전에 하나도 안 걸리는 덩어리는 한 글자도 달라지지 않는다", () => {
+    const memo = `점검 완료\r\n\r\n  ${사전에_없는_일본어}  \n[불량] 出力異常`;
+    assert.equal(koreanKyosanDocumentText(memo), memo);
+  });
+
+  test("🔴 저장 쪽이 실제로 만든 덩어리에서 한글이 나온다", () => {
+    // 위 「저장 쪽이 만든 덩어리」 시험과 같은 자료 — 손으로 적은 흉내가 아니다.
+    const plan: KyosanImportPlan = {
+      repairCaseId: "22222222-2222-4222-8222-222222222222",
+      intakeNumber: "D250102",
+      lines: [
+        { section: "FINDINGS", text: "不具合内容 その１", origin: "사내 확인 결과" },
+        { section: "ACTIONS", text: "現品引取", origin: "처치(○ 표시)" },
+        { section: "ACTIONS", text: "処置完了", origin: "처치(○ 표시)" },
+      ],
+      parts: [],
+      causeMarks: [],
+      actionMarks: [],
+      photoCount: 0,
+      formAssetCount: 0,
+    };
+
+    const drafts = buildKyosanDetailValues({ plan, currentReportedSymptom: null }).workRecords;
+    // ⚠️ 덩어리가 종류별로 갈라져 나온다(처치 ○ 는 GENERAL, 사내 확인 결과는
+    //    INTAKE_INSPECTION_RESULT) — 줄 검사는 덩어리마다, 글자 검사는 통째로.
+    for (const draft of drafts) {
+      assert.equal(
+        koreanKyosanDocumentText(draft.memo).split("\n").length,
+        draft.memo.split("\n").length,
+        "줄 수가 달라졌다"
+      );
+    }
+
+    const document = drafts.map((draft) => koreanKyosanDocumentText(draft.memo)).join("\n");
+    // 🔴 문서에는 한글이 들어가고 원문은 따라붙지 않는다.
+    assert.equal(document.includes("현품 인수"), true, "한글이 안 들어갔다");
+    assert.equal(document.includes("조치 완료"), true, "한글이 안 들어갔다");
+    assert.equal(document.includes("現品引取"), false, "원문이 남았다");
+    // 🔴 사전에 없는 줄은 그대로 남는다 — 억지로 채우거나 비우지 않는다.
+    assert.equal(document.includes("不具合内容 その１"), true, "사전에 없는 줄이 사라졌다");
+    // 🔴 머리글은 손대지 않는다.
+    assert.equal(document.includes(KYOSAN_IMPORT_MARK), true, "머리글이 바뀌었다");
   });
 });

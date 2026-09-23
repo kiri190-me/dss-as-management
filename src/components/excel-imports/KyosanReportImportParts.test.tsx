@@ -14,6 +14,7 @@ import {
 import type { KyosanReportImportResult } from "@/lib/server/services/kyosan-report-import";
 import { KyosanMemoText, KyosanText } from "@/components/kyosan/KyosanText";
 import { KYOSAN_IMPORT_MARK, kyosanOriginHeading } from "@/lib/kyosan/report-detail-values";
+import { translateKyosanTerm } from "@/lib/kyosan/report-terms";
 import {
   KyosanReportContentPanel,
   KyosanReportImportBar,
@@ -40,6 +41,36 @@ import {
 
 const noop = () => {};
 const render = (element: React.ReactElement) => renderToStaticMarkup(element);
+
+/**
+ * 🔴 「사전에 없는 일본어」 본보기 — **가짜 글자를 쓴다.**
+ *
+ * 2026-09-23 에 이 파일의 시험 둘이 깨졌다. 본보기로 `焼損・煙・異臭発生` 이라는
+ * **실제 연락서 문장**(실측 139줄)을 써 두었는데, 자유 기술 사전이 192줄로
+ * 자라면서 그 글자가 **사전 안으로 들어왔기** 때문이다. 제품이 망가진 것이 아니라
+ * 본보기가 낡은 것이었다.
+ *
+ * 실제 연락서 문장은 사전이 자랄 때마다 이 자리를 깨뜨린다. 41자 넘는 문장을
+ * 가져다 쓰는 것도 안 된다 — 그 무리에는 고객사명·모델명이 박혀 있다
+ * (`lib/kyosan/report-free-text-lines.fixture.ts` 머리말).
+ *
+ * ⚠️ `lib/kyosan/report-terms.test.ts` · `lib/xlsx/service-report-template.test.ts`
+ * 와 **같은 글자**다. 파일마다 따로 지으면 다음에 또 여기저기서 깨진다.
+ */
+const 사전에_없는_일본어 = "試験用ダミー故障";
+
+/**
+ * 🔴 **지킴이.** 다음 사람이 이 글자를 사전에 넣는 날 **여기서** 잡힌다 — 아래
+ * 두 시험이 마크업 비교로 깨지는 대신이다(마크업이 틀린 것처럼 보여 한참 헤맨다).
+ * 깨지면 사전을 되돌리지 말고 **본보기 글자를 바꿔라.**
+ *
+ * ⚠️ `translateKyosanTerm` 은 사전 **둘 다**(양식 · 자유 기술)를 지나는 문이다.
+ * 이 파일이 이미 `KyosanText` 를 들여오고 그 조각이 같은 사전을 보므로, 여기서
+ * 사전을 들여다보는 것은 겉돌지 않는다 — 같은 사슬이다.
+ */
+test("🔴 본보기가 아직 사전 밖에 있다 — 들어갔으면 다른 글자로 바꿔라", () => {
+  assert.equal(translateKyosanTerm(사전에_없는_일본어), null);
+});
 
 const ALL_AGREE: KyosanIdentityCheck = {
   model: "agree",
@@ -397,7 +428,7 @@ describe("미리보기가 무엇을 보여 주는가", () => {
       <KyosanReportContentPanel
         preview={preview({
           content: {
-            lines: [{ section: "FINDINGS", text: "焼損・煙・異臭発生", origin: "고객 고장 상황" }],
+            lines: [{ section: "FINDINGS", text: 사전에_없는_일본어, origin: "고객 고장 상황" }],
             parts: [],
             causeMarks: [],
             actionMarks: [],
@@ -407,7 +438,7 @@ describe("미리보기가 무엇을 보여 주는가", () => {
         })}
       />
     );
-    assert.ok(markup.includes("焼損・煙・異臭発生"), "🔴 자유 기술은 원문 그대로다");
+    assert.ok(markup.includes(사전에_없는_일본어), "🔴 자유 기술은 원문 그대로다");
     assert.ok(markup.includes("일본어 원문"), "일본어 원문임을 알려야 한다");
   });
 
@@ -507,9 +538,9 @@ describe("공용 조각 — 연락서 글자 한 줄", () => {
 
   test("🔴 사전에 없는 일본어 — 마크업이 옮기기 전과 같다(원문 + 「일본어 원문」)", () => {
     assert.equal(
-      render(<KyosanText value="焼損・煙・異臭発生" />),
+      render(<KyosanText value={사전에_없는_일본어} />),
       '<span data-role="kyosan-text" data-japanese="true">' +
-        `<span ${TONE}>焼損・煙・異臭発生</span>` +
+        `<span ${TONE}>${사전에_없는_일본어}</span>` +
         '<span data-role="kyosan-text-japanese-badge" class="ml-1.5 whitespace-nowrap rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">일본어 원문</span>' +
         "</span>"
     );
