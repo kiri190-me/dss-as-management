@@ -1,5 +1,6 @@
 import { kyosanCauseKey } from "./report-causes";
 import { translateKyosanFreeTextTerm } from "./report-free-text-terms";
+import { translateKyosanSentence } from "./report-word-terms";
 
 /**
  * ============================================================================
@@ -26,6 +27,19 @@ import { translateKyosanFreeTextTerm } from "./report-free-text-terms";
  * 것이라 긴 서술 문장에는 맞지 않는다. 그래서 자유 기술은 **원문 그대로 두고**,
  * 화면이 「일본어 원문」이라고 알려 주기만 한다(`isJapaneseOriginal`).
  * 기계 번역은 부르지 않는다 — 연락서에는 실제 고객 내용이 있다(CLAUDE.md 보안 규칙).
+ *
+ * ── 🔴 위 기각을 2026-09-23 에 **다시 풀었다** (문구는 지우지 않는다) ─────
+ * 위 44.5%는 **그때의 사실**이다. 사전이 **25개**였고, 낱말을 그냥 갈아 끼우면
+ * 열에 넷이 반쪽이 됐다. 그 뒤 두 가지가 달라졌다 — 사전이 **207개**(15+192)로
+ * 자랐고, 바꿔치기에 울타리 둘을 세웠다(`report-word-terms.ts`):
+ *   1. **긴 것부터 맞춘다(최장 일치)** — `終段AMP入力保護用ヒューズ` 가
+ *      `ヒューズ` 보다 먼저 걸려 `…用퓨즈` 같은 반쪽이 **구조적으로** 안 나온다.
+ *   2. 🔴 **전부 바뀔 때만 바꾼다(all-or-nothing)** — 결과에 일본어가 한 글자라도
+ *      남으면 **원문을 그대로** 내보낸다. 44.5%가 무서웠던 그 반쪽이 나갈 길이
+ *      아예 없다.
+ * 그래서 ②(자유 기술)는 이제 **두 걸음**을 밟는다 — 글자 통째로가 먼저,
+ * 안 되면 낱말 바꿔치기, 그것도 반쪽이면 **원문 그대로**. 이 파일의 두 사전과
+ * `translateKyosanTerm` 은 **한 글자도 바뀌지 않았다.**
  *
  * ── 🔴 왜 ①은 사전이 맞는가 (실측) ──────────────────────────────────
  * 같은 469장에서 `原　因` 보기는 **열 가지가 469장 전부에 한 글자도 다르지 않게**
@@ -187,7 +201,18 @@ export type KyosanTextView = {
  */
 export function viewKyosanText(value: string): KyosanTextView {
   // 🔴 사전 **둘 다** 본다 — `translateKyosanTerm` 의 '왜 둘로 갈라 두고' 참조.
-  const korean = translateKyosanTerm(value);
+  //
+  // ⚠️ 2026-09-23 부터 한 걸음이 더 있다. `translateKyosanSentence` 가 **먼저**
+  //    `translateKyosanTerm`(글자 통째로)을 보고, 거기서 못 찾은 줄만 **낱말
+  //    바꿔치기**로 떨어뜨린다(`report-word-terms.ts`). 사전에 통째로 없는 긴
+  //    줄이 문서에 일본어로 나가던 것을 막으려는 것이다.
+  //    🔴 `translateKyosanTerm` 자체는 한 글자도 바뀌지 않았다 — 부르는 쪽인
+  //    여기가 떨어질 자리를 하나 더 가진 것뿐이다. 낱말 바꿔치기는 **전부
+  //    한글이 될 때만** 답을 주므로(all-or-nothing), 반쪽짜리가 `korean` 에
+  //    들어오는 일은 없다.
+  //    🔴 문서 쪽(`koreanKyosanDocumentText`)도 이 함수를 지나므로 **화면과 문서가
+  //    여전히 같은 사전·같은 판정**을 본다(위 '층마다 다른 사전을 보면 안 된다').
+  const korean = translateKyosanSentence(value);
   return {
     original: value,
     korean,
