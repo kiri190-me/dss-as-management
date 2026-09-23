@@ -3,6 +3,7 @@ import Link from "next/link";
 import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
 import WeeklyReportNotesCell from "./WeeklyReportNotesCell";
+import WeeklyReportWidthFrame from "./WeeklyReportWidthFrame";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
 import type { WeeklyReportGoalRow } from "@/lib/db/queries/weekly-report-goals";
@@ -841,195 +842,201 @@ export default function WeeklyReportScreen({
   const gridClass = visibleGridClass(view.kinds.length);
 
   return (
-    // 이 화면이 실제로 차지한 폭이 좌우 배치의 기준이다(파일 헤더).
-    <div className="@container flex flex-col gap-4">
-      <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-wr-title font-semibold text-zinc-900 dark:text-zinc-50">주간보고</h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">갱신 일 {asOfDate}</p>
-        </div>
-        {/* 🔴 고르개는 화면 맨 위, 제목 바로 아래다 — 이 화면의 숫자가 무엇의
-            합인지를 정하는 값이라, 다 내려가 본 뒤에 찾는 자리에 두면 안 된다.
-            종이에는 나오지 않는다(KindFilterTabs). */}
-        <KindFilterTabs current={view.filter} weekStart={goals.weekStart} />
-        {/* 🔴 걸러져 있을 때만, 그리고 **종이에도** 나온다(KindFilterBanner). */}
-        {view.isFiltered && <KindFilterBanner view={view} />}
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          출하 완료된 건은 빠지고, 진행 중인 {view.counts.total}대만 고객사·종류별로 묶여 있습니다.
-          총 대수는 상태 6칸의 합이며, {WEEKLY_REPORT_PO_ISSUED_LABEL}는 그 위에 겹쳐 세는 값이라
-          총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행 일시가 있으면 세어집니다.
-        </p>
-        {/* 빨간 볼드가 무슨 뜻인지 적는 **한 곳**이다. 블록마다 적지 않는 이유는
-            파일 헤더에 있다(블록이 58개다). */}
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          상세표에서 <span className={LONG_PENDING_PO_TONE}>견적서 발행일</span>이 빨간 글씨인 줄은{" "}
-          {LONG_PENDING_PO_LABEL}입니다 — 견적서를 낸 지 두 달이 지나도록 발주가 나지 않은 건이며,
-          전체 A/S 현황의 `{LONG_PENDING_PO_LABEL}만 보기` 와 같은 판정입니다.
-        </p>
-      </section>
+    // 🔴 걸러 볼 때(`RFG 만` · `MB 만`)만 가로폭 조절 바가 붙고, 이 화면 전체가
+    //    그 폭 안으로 함께 들어간다 — 구역마다 따로 좁히지 않는다(아래 집계의
+    //    max-w-3xl 경위와 같은 까닭). `전체` 일 때는 감싸개가 children 을 그대로
+    //    돌려주어 DOM 이 한 칸도 늘지 않는다(WeeklyReportWidthFrame).
+    <WeeklyReportWidthFrame isFiltered={view.isFiltered}>
+      {/* 이 화면이 실제로 차지한 폭이 좌우 배치의 기준이다(파일 헤더). */}
+      <div className="@container flex flex-col gap-4">
+        <section className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h1 className="text-wr-title font-semibold text-zinc-900 dark:text-zinc-50">주간보고</h1>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">갱신 일 {asOfDate}</p>
+          </div>
+          {/* 🔴 고르개는 화면 맨 위, 제목 바로 아래다 — 이 화면의 숫자가 무엇의
+              합인지를 정하는 값이라, 다 내려가 본 뒤에 찾는 자리에 두면 안 된다.
+              종이에는 나오지 않는다(KindFilterTabs). */}
+          <KindFilterTabs current={view.filter} weekStart={goals.weekStart} />
+          {/* 🔴 걸러져 있을 때만, 그리고 **종이에도** 나온다(KindFilterBanner). */}
+          {view.isFiltered && <KindFilterBanner view={view} />}
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            출하 완료된 건은 빠지고, 진행 중인 {view.counts.total}대만 고객사·종류별로 묶여 있습니다.
+            총 대수는 상태 6칸의 합이며, {WEEKLY_REPORT_PO_ISSUED_LABEL}는 그 위에 겹쳐 세는 값이라
+            총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행 일시가 있으면 세어집니다.
+          </p>
+          {/* 빨간 볼드가 무슨 뜻인지 적는 **한 곳**이다. 블록마다 적지 않는 이유는
+              파일 헤더에 있다(블록이 58개다). */}
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            상세표에서 <span className={LONG_PENDING_PO_TONE}>견적서 발행일</span>이 빨간 글씨인 줄은{" "}
+            {LONG_PENDING_PO_LABEL}입니다 — 견적서를 낸 지 두 달이 지나도록 발주가 나지 않은 건이며,
+            전체 A/S 현황의 `{LONG_PENDING_PO_LABEL}만 보기` 와 같은 판정입니다.
+          </p>
+        </section>
 
-      {/* 🔴 걸렀으면 **보이는 종류의** 분류 안 됨만 센다. 전체 수를 그대로 두면
-          RFG 만 보는 화면에 MB 의 분류 안 됨까지 적혀, 아무리 찾아도 그 건이
-          상세표에 없다. 숫자는 여기서 세지 않는다 — 도메인이 이미 센 값이다. */}
-      {view.counts.unclassified > 0 && (
-        <p
-          role="status"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-        >
-          6칸 어느 쪽에도 들어가지 않는 접수 건이 {view.counts.unclassified}건 있습니다. 워크플로에
-          새 단계가 생겼을 수 있습니다 — 그 건들은 상세표의 `현 상태`에 {UNCLASSIFIED_LABEL}으로
-          표시됩니다.
-        </p>
-      )}
-
-      {customerRows.length === 0 ? (
-        <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-          진행 중인 접수 건이 없습니다.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-wr-block-gap">
-          {customerRows.map((row) => (
-            // 고객사 한 줄 = 왼쪽 RFG · 오른쪽 MB. 좁아지면 위아래로 쌓이고,
-            // 그때도 같은 고객사의 둘은 붙어 있다(한 격자 안이라 갈릴 수 없다).
-            //
-            // **relative 를 떼지 말 것 — 떼면 세로 스크롤바가 다시 둘로 보인다.**
-            // 바로 아래 sr-only h2 는 position:absolute 다(Tailwind 의 sr-only 가
-            // 그렇다). 이 <section> 에 relative 가 없으면 그 h2 들의 컨테이닝 블록을
-            // 만들어 주는 조상이 하나도 없어 기준이 최상위(문서)가 된다. overflow 는
-            // **자기보다 바깥에 컨테이닝 블록을 둔 절대위치 자손을 자르지 못하므로**,
-            // 고객사 29줄의 h2 가 AppShell <main> 의 자르기를 그대로 빠져나가 문서
-            // 바닥에 자리를 주장한다. 그러면 <main> 스크롤과 별개로 창(문서) 스크롤이
-            // 생기고, 그 창 스크롤을 내리면 파란 헤더와 사이드바까지 밀려 올라간다.
-            // 실측: relative 없이 html.scrollHeight 16214(뷰포트 911), sr-only 를
-            // 숨기면 911 로 떨어졌다. 높이가 1px 이라 눈에도 진단에도 안 걸린다.
-            //
-            // relative 는 좌표를 주지 않으면 아무것도 옮기지 않고 z-index:auto 라
-            // 쌓임 맥락도 만들지 않는다 — 기준점만 준다. SIDE_BY_SIDE_GRID 상수에
-            // 넣지 않는 것은 그 값이 "어느 폭에서 좌우로 갈리는가"만 뜻하고 아래
-            // 종류별 총합·PO 발행 현황도 같이 쓰기 때문이다(그 둘의 h2 는 눈에
-            // 보이는 글자라 이 문제가 없다).
-            <section key={row.key} className={`${gridClass} relative`}>
-              {/* 눈으로는 두 소제목에 이미 고객사명이 적혀 있어 겹치지만, 화면
-                  낭독기에는 29개 고객사를 건너뛸 발판이 필요하다 — 없으면 블록
-                  58개를 한 줄씩 지나야 다음 고객사에 닿는다. */}
-              <h2 className="sr-only">{row.customerName}</h2>
-              {/* 🔴 고른 종류만 그린다. 짝(rfg·mb)은 그대로 두고 **어느 칸을
-                  꺼낼지만** 고른다 — 전체일 때 차례가 늘 왼쪽 RFG 인 것은
-                  view.kinds 가 WEEKLY_REPORT_KINDS 차례 그대로라서다. */}
-              {view.kinds.map((kind) => (
-                <ReportBlock
-                  key={kind}
-                  block={weeklyReportPairBlock(row, kind)}
-                  canEditNotes={canEditNotes}
-                />
-              ))}
-            </section>
-          ))}
-        </div>
-      )}
-
-      {/* RFG 총합 · MB 총합 — 엑셀에도 있는 줄이고, 위와 같은 자리(왼쪽 RFG ·
-          오른쪽 MB)에 둔다. 블록을 다 훑지 않고도 두 줄의 규모를 볼 수 있어야 한다.
-          집계 칸도 고객사 블록과 **같은 자리·같은 차례**다(PO 발행 완료 포함) —
-          두 곳을 눈으로 견주는 것이 이 줄의 쓸모라서다(파일 헤더). */}
-      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
-        {/* 🔴 고르개는 이 구역에도 미친다 — `RFG 만` 이면 `MB 총합` 은 감춘다.
-            감춰도 남은 숫자의 뜻이 흔들리지 않는 까닭: 남은 블록의 소제목이
-            **`총합 RFG`** 라고 스스로 적고 있어, 그 숫자가 무엇의 합인지 블록
-            자신이 말한다. 감추지 않으면 그 반대가 문제다 — 고객사 블록에는 RFG 만
-            있는데 아래에 MB 총합이 남아, 두 줄을 더해 전체라고 읽게 된다. 빠진
-            대수는 머리말의 KindFilterBanner 가 대수까지 적어 둔다(파일 헤더). */}
-        <div className={gridClass}>
-          {view.totalsByKind.map(({ kind, counts }) => (
-            <div key={kind} className="flex min-w-0 flex-col gap-1">
-              <BlockHeading
-                name="총합"
-                kind={kind}
-                total={counts.total}
-                toneClass={SECTION_HEADING_TONE}
-              />
-              {/* PO 발행 완료 칸의 숫자는 여기서 새로 세지 않는다 — 도메인이 이미
-                  센 totalsByKind 의 poIssued 다. 그 값은 그 종류 블록들의 PO 발행
-                  완료 합이고(도메인 시험이 못 박는다), 아래 PO 발행 현황의 합계와도
-                  같은 값이다. */}
-              <CountsSummary counts={counts} toneClass={TOTALS_CELL_TONE} />
-            </div>
-          ))}
-        </div>
-        {/* 6칸의 합과 총 대수가 다르면 분류 안 된 건이 있다는 뜻이다. 같을 때는
-            아무 말도 하지 않는다 — 늘 보이는 확인 문구는 읽히지 않는다.
-            🔴 걸렀으면 **보이는 종류의** 값끼리 견준다(위 분류 안 됨 경고와 같은
-            이유). 전체 값을 그대로 두면 RFG 만 보는 화면에서 MB 의 분류 안 됨
-            때문에 늘 어긋난 것으로 적힌다. */}
-        {sumWeeklyReportStatusCounts(view.counts) !== view.counts.total && (
-          <p className="text-xs text-red-700 dark:text-red-300">
-            전체 {view.counts.total}대 중 6칸에 들어간 것은{" "}
-            {sumWeeklyReportStatusCounts(view.counts)}대입니다.
+        {/* 🔴 걸렀으면 **보이는 종류의** 분류 안 됨만 센다. 전체 수를 그대로 두면
+            RFG 만 보는 화면에 MB 의 분류 안 됨까지 적혀, 아무리 찾아도 그 건이
+            상세표에 없다. 숫자는 여기서 세지 않는다 — 도메인이 이미 센 값이다. */}
+        {view.counts.unclassified > 0 && (
+          <p
+            role="status"
+            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          >
+            6칸 어느 쪽에도 들어가지 않는 접수 건이 {view.counts.unclassified}건 있습니다. 워크플로에
+            새 단계가 생겼을 수 있습니다 — 그 건들은 상세표의 `현 상태`에 {UNCLASSIFIED_LABEL}으로
+            표시됩니다.
           </p>
         )}
-      </section>
 
-      {/* PO 발행 현황 — 원본 아래쪽의 구역. 종류별로 고객사별 발행 완료 건수를
-          늘어놓는다. 숫자는 위 블록의 PO 발행 완료 칸과 같은 계산에서 나온다. */}
-      <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
-        {/* 원본은 좌우 두 칸에 각각 "PO 발행 현황"을 적어 둔다. 바깥 제목이 같은
-            글자인 것은 그래서다 — 두 칸의 소제목이 원본의 글자고, 이 h2 는 화면
-            낭독기가 이 구역을 하나로 집을 수 있게 하는 발판이다. */}
-        <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">{PO_ISSUANCE_SECTION_LABEL}</h2>
-        {/* 🔴 이 구역도 **종류로 갈려 있다** — 두 칸의 소제목이 `PO 발행 현황 RFG`
-            와 `PO 발행 현황 MB` 이고, 고객사별 숫자도 그 종류의 블록에서 온다
-            (summarizeWeeklyReportPoIssuance). 그러니 걸러도 뜻이 흐려지지 않고,
-            오히려 남겨 두면 `RFG 만` 화면에 MB 의 PO 발행 고객사가 늘어서서
-            상세표에 없는 건을 찾게 된다. */}
-        <div className={gridClass}>
-          {view.poIssuance.map((issuance) => (
-            <PoIssuanceBlock key={issuance.kind} issuance={issuance} />
-          ))}
-        </div>
-      </section>
+        {customerRows.length === 0 ? (
+          <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            진행 중인 접수 건이 없습니다.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-wr-block-gap">
+            {customerRows.map((row) => (
+              // 고객사 한 줄 = 왼쪽 RFG · 오른쪽 MB. 좁아지면 위아래로 쌓이고,
+              // 그때도 같은 고객사의 둘은 붙어 있다(한 격자 안이라 갈릴 수 없다).
+              //
+              // **relative 를 떼지 말 것 — 떼면 세로 스크롤바가 다시 둘로 보인다.**
+              // 바로 아래 sr-only h2 는 position:absolute 다(Tailwind 의 sr-only 가
+              // 그렇다). 이 <section> 에 relative 가 없으면 그 h2 들의 컨테이닝 블록을
+              // 만들어 주는 조상이 하나도 없어 기준이 최상위(문서)가 된다. overflow 는
+              // **자기보다 바깥에 컨테이닝 블록을 둔 절대위치 자손을 자르지 못하므로**,
+              // 고객사 29줄의 h2 가 AppShell <main> 의 자르기를 그대로 빠져나가 문서
+              // 바닥에 자리를 주장한다. 그러면 <main> 스크롤과 별개로 창(문서) 스크롤이
+              // 생기고, 그 창 스크롤을 내리면 파란 헤더와 사이드바까지 밀려 올라간다.
+              // 실측: relative 없이 html.scrollHeight 16214(뷰포트 911), sr-only 를
+              // 숨기면 911 로 떨어졌다. 높이가 1px 이라 눈에도 진단에도 안 걸린다.
+              //
+              // relative 는 좌표를 주지 않으면 아무것도 옮기지 않고 z-index:auto 라
+              // 쌓임 맥락도 만들지 않는다 — 기준점만 준다. SIDE_BY_SIDE_GRID 상수에
+              // 넣지 않는 것은 그 값이 "어느 폭에서 좌우로 갈리는가"만 뜻하고 아래
+              // 종류별 총합·PO 발행 현황도 같이 쓰기 때문이다(그 둘의 h2 는 눈에
+              // 보이는 글자라 이 문제가 없다).
+              <section key={row.key} className={`${gridClass} relative`}>
+                {/* 눈으로는 두 소제목에 이미 고객사명이 적혀 있어 겹치지만, 화면
+                    낭독기에는 29개 고객사를 건너뛸 발판이 필요하다 — 없으면 블록
+                    58개를 한 줄씩 지나야 다음 고객사에 닿는다. */}
+                <h2 className="sr-only">{row.customerName}</h2>
+                {/* 🔴 고른 종류만 그린다. 짝(rfg·mb)은 그대로 두고 **어느 칸을
+                    꺼낼지만** 고른다 — 전체일 때 차례가 늘 왼쪽 RFG 인 것은
+                    view.kinds 가 WEEKLY_REPORT_KINDS 차례 그대로라서다. */}
+                {view.kinds.map((kind) => (
+                  <ReportBlock
+                    key={kind}
+                    block={weeklyReportPairBlock(row, kind)}
+                    canEditNotes={canEditNotes}
+                  />
+                ))}
+              </section>
+            ))}
+          </div>
+        )}
 
-      {/* 금주 목표 — 화면의 **맨 아래**다. 원본 엑셀은 이 상자를 집계 위에 두었지만
-          사용자가 아래로 내리기로 정했다: 매주 넘겨 보는 문서라 위쪽은 "지금 어디까지
-          왔는가"(집계)로 시작하고, 손으로 적는 일은 다 보고 난 뒤 아래에서 한다.
+        {/* RFG 총합 · MB 총합 — 엑셀에도 있는 줄이고, 위와 같은 자리(왼쪽 RFG ·
+            오른쪽 MB)에 둔다. 블록을 다 훑지 않고도 두 줄의 규모를 볼 수 있어야 한다.
+            집계 칸도 고객사 블록과 **같은 자리·같은 차례**다(PO 발행 완료 포함) —
+            두 곳을 눈으로 견주는 것이 이 줄의 쓸모라서다(파일 헤더). */}
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
+          {/* 🔴 고르개는 이 구역에도 미친다 — `RFG 만` 이면 `MB 총합` 은 감춘다.
+              감춰도 남은 숫자의 뜻이 흔들리지 않는 까닭: 남은 블록의 소제목이
+              **`총합 RFG`** 라고 스스로 적고 있어, 그 숫자가 무엇의 합인지 블록
+              자신이 말한다. 감추지 않으면 그 반대가 문제다 — 고객사 블록에는 RFG 만
+              있는데 아래에 MB 총합이 남아, 두 줄을 더해 전체라고 읽게 된다. 빠진
+              대수는 머리말의 KindFilterBanner 가 대수까지 적어 둔다(파일 헤더). */}
+          <div className={gridClass}>
+            {view.totalsByKind.map(({ kind, counts }) => (
+              <div key={kind} className="flex min-w-0 flex-col gap-1">
+                <BlockHeading
+                  name="총합"
+                  kind={kind}
+                  total={counts.total}
+                  toneClass={SECTION_HEADING_TONE}
+                />
+                {/* PO 발행 완료 칸의 숫자는 여기서 새로 세지 않는다 — 도메인이 이미
+                    센 totalsByKind 의 poIssued 다. 그 값은 그 종류 블록들의 PO 발행
+                    완료 합이고(도메인 시험이 못 박는다), 아래 PO 발행 현황의 합계와도
+                    같은 값이다. */}
+                <CountsSummary counts={counts} toneClass={TOTALS_CELL_TONE} />
+              </div>
+            ))}
+          </div>
+          {/* 6칸의 합과 총 대수가 다르면 분류 안 된 건이 있다는 뜻이다. 같을 때는
+              아무 말도 하지 않는다 — 늘 보이는 확인 문구는 읽히지 않는다.
+              🔴 걸렀으면 **보이는 종류의** 값끼리 견준다(위 분류 안 됨 경고와 같은
+              이유). 전체 값을 그대로 두면 RFG 만 보는 화면에서 MB 의 분류 안 됨
+              때문에 늘 어긋난 것으로 적힌다. */}
+          {sumWeeklyReportStatusCounts(view.counts) !== view.counts.total && (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              전체 {view.counts.total}대 중 6칸에 들어간 것은{" "}
+              {sumWeeklyReportStatusCounts(view.counts)}대입니다.
+            </p>
+          )}
+        </section>
 
-          ⚠️ 주 이동 줄(`◀ 지난주 | 다음주 ▶`)이 이 상자 안에 있어 함께 내려와 있다 —
-          그게 맞다. 그 줄은 이 두 구역에만 걸리고 집계와는 무관하다(집계는
-          언제나 '지금 이 순간'이다). 화면 위쪽으로 따로 빼지 말 것.
+        {/* PO 발행 현황 — 원본 아래쪽의 구역. 종류별로 고객사별 발행 완료 건수를
+            늘어놓는다. 숫자는 위 블록의 PO 발행 완료 칸과 같은 계산에서 나온다. */}
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
+          {/* 원본은 좌우 두 칸에 각각 "PO 발행 현황"을 적어 둔다. 바깥 제목이 같은
+              글자인 것은 그래서다 — 두 칸의 소제목이 원본의 글자고, 이 h2 는 화면
+              낭독기가 이 구역을 하나로 집을 수 있게 하는 발판이다. */}
+          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">{PO_ISSUANCE_SECTION_LABEL}</h2>
+          {/* 🔴 이 구역도 **종류로 갈려 있다** — 두 칸의 소제목이 `PO 발행 현황 RFG`
+              와 `PO 발행 현황 MB` 이고, 고객사별 숫자도 그 종류의 블록에서 온다
+              (summarizeWeeklyReportPoIssuance). 그러니 걸러도 뜻이 흐려지지 않고,
+              오히려 남겨 두면 `RFG 만` 화면에 MB 의 PO 발행 고객사가 늘어서서
+              상세표에 없는 건을 찾게 된다. */}
+          <div className={gridClass}>
+            {view.poIssuance.map((issuance) => (
+              <PoIssuanceBlock key={issuance.kind} issuance={issuance} />
+            ))}
+          </div>
+        </section>
 
-          좌우 배치는 이 화면의 다른 줄과 **같은 값**을 쓴다 — 같은 폭에서 같이
-          갈리지 않으면 목표 상자만 위아래로 쌓인 채 위 블록은 좌우로 남는다
-          (SIDE_BY_SIDE_GRID 주석). 값을 상자 쪽에 따로 적지 않고 넘기는 것이
-          그래서다.
+        {/* 금주 목표 — 화면의 **맨 아래**다. 원본 엑셀은 이 상자를 집계 위에 두었지만
+            사용자가 아래로 내리기로 정했다: 매주 넘겨 보는 문서라 위쪽은 "지금 어디까지
+            왔는가"(집계)로 시작하고, 손으로 적는 일은 다 보고 난 뒤 아래에서 한다.
 
-          🔴 kindFilter 도 같은 이유로 넘긴다. 이 상자도 `RFG 금주 목표` ·
-          `MB 금주 목표` 두 칸이라(그 파일 헤더) 고르개가 여기까지 오지 않으면
-          집계는 RFG 만인데 목표는 둘 다 남는다 — 종이로 뽑으면 무엇을 뽑은
-          종이인지 알 수 없다. 주 이동 링크가 고른 종류를 들고 가는 일도 이 값으로
-          한다(weeklyReportHref). */}
-      <WeeklyReportGoalsPanel
-        weekStart={goals.weekStart}
-        currentWeekStart={goals.currentWeekStart}
-        goals={goals.rows}
-        canEdit={goals.canEdit}
-        repairCaseOptions={goals.repairCaseOptions}
-        gridClass={gridClass}
-        kindFilter={view.filter}
-      />
+            ⚠️ 주 이동 줄(`◀ 지난주 | 다음주 ▶`)이 이 상자 안에 있어 함께 내려와 있다 —
+            그게 맞다. 그 줄은 이 두 구역에만 걸리고 집계와는 무관하다(집계는
+            언제나 '지금 이 순간'이다). 화면 위쪽으로 따로 빼지 말 것.
 
-      {/* 납입 예정 건 — 금주 목표 바로 아래, 화면의 마지막이다. 두 구역은 **붙어
-          있어야 한다**: 한 주의 계획과 그 주에 내보낼 것이 한 덩어리고, 주 고르개도
-          위 상자의 그것 하나가 둘의 주를 함께 정한다(그 파일 헤더). 여기 주 이동
-          줄을 또 두지 않는 이유가 그것이다. 좌우 배치와 종류 고르개도 같은 값을
-          그대로 넘긴다. */}
-      <WeeklyReportDeliveriesPanel
-        weekStart={goals.weekStart}
-        deliveries={deliveries}
-        canEdit={goals.canEdit}
-        repairCaseOptions={goals.repairCaseOptions}
-        gridClass={gridClass}
-        kindFilter={view.filter}
-      />
-    </div>
+            좌우 배치는 이 화면의 다른 줄과 **같은 값**을 쓴다 — 같은 폭에서 같이
+            갈리지 않으면 목표 상자만 위아래로 쌓인 채 위 블록은 좌우로 남는다
+            (SIDE_BY_SIDE_GRID 주석). 값을 상자 쪽에 따로 적지 않고 넘기는 것이
+            그래서다.
+
+            🔴 kindFilter 도 같은 이유로 넘긴다. 이 상자도 `RFG 금주 목표` ·
+            `MB 금주 목표` 두 칸이라(그 파일 헤더) 고르개가 여기까지 오지 않으면
+            집계는 RFG 만인데 목표는 둘 다 남는다 — 종이로 뽑으면 무엇을 뽑은
+            종이인지 알 수 없다. 주 이동 링크가 고른 종류를 들고 가는 일도 이 값으로
+            한다(weeklyReportHref). */}
+        <WeeklyReportGoalsPanel
+          weekStart={goals.weekStart}
+          currentWeekStart={goals.currentWeekStart}
+          goals={goals.rows}
+          canEdit={goals.canEdit}
+          repairCaseOptions={goals.repairCaseOptions}
+          gridClass={gridClass}
+          kindFilter={view.filter}
+        />
+
+        {/* 납입 예정 건 — 금주 목표 바로 아래, 화면의 마지막이다. 두 구역은 **붙어
+            있어야 한다**: 한 주의 계획과 그 주에 내보낼 것이 한 덩어리고, 주 고르개도
+            위 상자의 그것 하나가 둘의 주를 함께 정한다(그 파일 헤더). 여기 주 이동
+            줄을 또 두지 않는 이유가 그것이다. 좌우 배치와 종류 고르개도 같은 값을
+            그대로 넘긴다. */}
+        <WeeklyReportDeliveriesPanel
+          weekStart={goals.weekStart}
+          deliveries={deliveries}
+          canEdit={goals.canEdit}
+          repairCaseOptions={goals.repairCaseOptions}
+          gridClass={gridClass}
+          kindFilter={view.filter}
+        />
+      </div>
+    </WeeklyReportWidthFrame>
   );
 }
