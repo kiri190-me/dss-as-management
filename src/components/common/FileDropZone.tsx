@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createFileDropHandlers, installFileDropGuard } from "./file-drop";
+import { createFileDropHandlers, droppedFilesText, installFileDropGuard } from "./file-drop";
 
 /**
  * ============================================================================
@@ -15,6 +15,14 @@ import { createFileDropHandlers, installFileDropGuard } from "./file-drop";
  * 검사를 새로 짜면 고르기와 두 길이 갈린다.
  *
  * 기존 고르기 칸은 **그대로 둔다** — 이 조각은 더하기만 한다.
+ *
+ * ── 🔴 받은 파일의 이름을 적는다 (2026-09-23) ────────────────────────────
+ * 떨군 파일은 고르기 칸에 **안 보인다** — 「선택된 파일 없음」은 브라우저가 그리는
+ * 글자라 바꿀 수 없다. 그래서 사람은 들어갔는지조차 모르고, 엉뚱한 파일이 들어가도
+ * 눈치채지 못한다. 받은 이름과 크기를 한 줄 적는다(file-drop.ts 의 droppedFilesText).
+ *
+ * 🔴 고르기 칸을 쓰면 이 줄을 **지운다.** 안 지우면 「놓은 파일」이 실제로 보낼
+ * 파일과 달라져서, 없던 것보다 나쁜 거짓말이 화면에 남는다.
  * ============================================================================
  */
 
@@ -48,6 +56,8 @@ export function FileDropZone({
   const [depth] = useState(() => ({ current: 0 }));
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** 방금 받은 파일을 사람에게 되읽어 주는 한 줄(위 머리말). */
+  const [received, setReceived] = useState<string | null>(null);
 
   // 떨구는 자리가 하나라도 떠 있는 동안 창 전체의 기본 동작을 막는다 — 빗나간
   // 자리에 떨궈도 브라우저가 파일을 열지 않게(file-drop.ts 의 installFileDropGuard).
@@ -57,8 +67,16 @@ export function FileDropZone({
     depth,
     disabled,
     multiple,
-    onFiles,
-    onNotice: setNotice,
+    // 🔴 받은 것을 부르는 쪽에 넘기는 일은 그대로다 — 되읽어 줄 한 줄만 더 든다.
+    onFiles: (files) => {
+      setReceived(droppedFilesText(files));
+      onFiles(files);
+    },
+    onNotice: (next) => {
+      setNotice(next);
+      // 못 받았다고 말하는 순간, 지난번에 받은 것을 적어 둔 줄은 거짓이 된다.
+      if (next !== null) setReceived(null);
+    },
     setDragging,
   });
 
@@ -70,6 +88,13 @@ export function FileDropZone({
       onDragOver={handlers.onDragOver}
       onDragLeave={handlers.onDragLeave}
       onDrop={handlers.onDrop}
+      // 안쪽 고르기 칸을 쓰면 「놓은 파일」 줄을 지운다 — 그 순간 보낼 파일이
+      // 바뀌므로(위 머리말). 떨군 것을 칸에 담는 putFilesInPicker 는 change 를
+      // 일으키지 않으므로 그 두 자리의 줄은 그대로 남는다.
+      onChangeCapture={(event) => {
+        const target = event.target as HTMLInputElement | null;
+        if (target?.type === "file") setReceived(null);
+      }}
       className={`relative ${className}`}
     >
       {children}
@@ -87,8 +112,23 @@ export function FileDropZone({
         </span>
       ) : null}
 
+      {/*
+        🔴 받았다는 영수증. `w-full` 은 멋이 아니다 — 떨구는 자리 대부분이
+        `flex flex-wrap` 이라, 없으면 이 줄이 단추 옆에 끼어 눌려 버린다.
+        `role="status"` 로 화면 낭독기에도 들린다.
+      */}
+      {received ? (
+        <p
+          role="status"
+          data-role="file-drop-received"
+          className="mt-2 w-full text-xs text-zinc-600 dark:text-zinc-400"
+        >
+          {received}
+        </p>
+      ) : null}
+
       {notice ? (
-        <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 w-full text-xs text-red-600 dark:text-red-400">
           {notice}
         </p>
       ) : null}

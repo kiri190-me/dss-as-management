@@ -1,10 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * ============================================================================
- * 끌어다 놓기 — 일곱 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
+ * 끌어다 놓기 — 여덟 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
  * ============================================================================
  * 이 화면들은 서버 액션 · 브라우저 API 를 끌고 와 통째로 그려 볼 수 없다. 그래서
  * 이웃 시험(quote-attachment-screens.test.ts · save-popup-screens.test.ts)과 같은
@@ -19,9 +19,25 @@ import { readFileSync } from "node:fs";
 const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 const flat = (path: string) => read(path).replace(/\s+/g, " ");
 
+/** `src/` 아래의 `.tsx` 전부. 슬래시 경로로 돌려준다(윈도에서도 같은 글자). */
+function tsxFilesUnder(directory: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...tsxFilesUnder(path));
+    else if (entry.name.endsWith(".tsx")) found.push(path);
+  }
+  return found;
+}
+
 /**
- * 파일을 올리는 일곱 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
+ * 파일을 올리는 여덟 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
  * 칸이 타는 식이다 — **두 줄에 같은 함수 이름이 있어야 한다**(같은 길이라는 뜻).
+ *
+ * 🔴 연락서 한 장 넣기(`kyosan-report-upload`)는 이 목록에 **빠져 있었다**
+ * (2026-09-23 에 찾았다). 일곱 자리를 붙인 뒤에 생긴 자리라, 「고르기와 같은 길인가」를
+ * 아무도 보고 있지 않았다. 실제로 「끌어다 놓으면 연락서를 못 읽는다」는 신고가 온 자리가
+ * 바로 여기다 — 길이 같다는 것은 확인했고(같은 `onFileChange`), 다시 갈리지 않게 못 박는다.
  */
 const SITES: {
   file: string;
@@ -38,6 +54,14 @@ const SITES: {
     drop: "onFiles={(files) => onFileChange(files[0])}",
     picker: "onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}",
     why: "과거 인수품 엑셀 — 판정은 부르는 쪽의 checkKyosanUploadFile",
+  },
+  {
+    file: "src/components/excel-imports/KyosanReportImportParts.tsx",
+    zone: 'name="kyosan-report-upload"',
+    multiple: false,
+    drop: "onFiles={(files) => onFileChange(files[0])}",
+    picker: "onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}",
+    why: "연락서 한 장 — 판정은 부르는 쪽의 checkKyosanReportFile",
   },
   {
     file: "src/components/product-models/ProductModelFilesSection.tsx",
@@ -89,7 +113,7 @@ const SITES: {
   },
 ];
 
-describe("🔴 파일을 올리는 일곱 자리가 모두 끌어다 놓기를 받는다", () => {
+describe("🔴 파일을 올리는 여덟 자리가 모두 끌어다 놓기를 받는다", () => {
   for (const site of SITES) {
     test(`${site.file} — ${site.why}`, () => {
       const source = flat(site.file);
@@ -122,10 +146,25 @@ describe("🔴 파일을 올리는 일곱 자리가 모두 끌어다 놓기를 �
     }
   });
 
-  test("일곱 자리 말고는 늘어나지 않았다 — 자리 이름은 저마다 다르다", () => {
+  test("🔴 떨구는 자리를 새로 만들면 이 목록에도 적어야 한다 — 빠지면 아무도 안 본다", () => {
     const names = SITES.map((site) => site.zone);
     assert.equal(new Set(names).size, names.length, "자리 이름이 겹친다");
-    assert.equal(SITES.length, 7);
+
+    // `src/` 를 훑어 `<FileDropZone` 을 그리는 파일을 모두 찾아 목록과 맞춘다.
+    // (2026-09-23 이전에는 개수만 세고 있어 연락서 자리가 조용히 빠져 있었다.)
+    const zoneFiles = tsxFilesUnder("src").filter(
+      (path) =>
+        path !== "src/components/common/FileDropZone.tsx" &&
+        !path.endsWith(".test.tsx") &&
+        read(path).includes("<FileDropZone")
+    );
+
+    assert.deepEqual(
+      [...zoneFiles].sort(),
+      [...new Set(SITES.map((site) => site.file))].sort(),
+      "떨구는 자리가 목록과 다르다 — 새로 만든 자리를 SITES 에 적어라"
+    );
+    assert.equal(SITES.length, 8);
   });
 });
 
@@ -166,7 +205,7 @@ describe("🔴 앱 안 카메라는 대상이 아니다", () => {
 });
 
 describe("기존 고르기 칸은 그대로다", () => {
-  test("일곱 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
+  test("여덟 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
     // [새 견적서] 팝업은 견적서 첨부 칸의 **고르기 단추 조각**을 그대로 쓴다 — 그 조각 안에
     // 숨긴 `type="file"` 칸이 있다(QuoteAttachmentParts 의 QuoteAttachmentFilePicker).
     assert.ok(
@@ -175,6 +214,7 @@ describe("기존 고르기 칸은 그대로다", () => {
     );
     const withPicker = [
       "src/components/excel-imports/KyosanImportRunParts.tsx",
+      "src/components/excel-imports/KyosanReportImportParts.tsx",
       "src/components/product-models/ProductModelFilesSection.tsx",
       "src/components/quotes/QuoteAttachmentParts.tsx",
       "src/components/repair-cases/files/AttachmentFormDialog.tsx",

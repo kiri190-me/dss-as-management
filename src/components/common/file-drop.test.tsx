@@ -1,11 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FileDropZone } from "./FileDropZone";
 import {
   FOLDER_ONLY_NOTICE,
   createFileDropHandlers,
   dragCarriesFiles,
+  droppedFilesText,
+  fileSizeText,
   folderSkippedNotice,
   installFileDropGuard,
   isDroppedFolder,
@@ -250,6 +253,64 @@ describe("끌어오는 중임이 보인다", () => {
   });
 });
 
+// ───────────────────────────── 받았다고 말해 준다
+
+describe("🔴 놓은 파일의 이름을 되읽어 준다", () => {
+  test("크기는 사람이 탐색기에서 보는 단위로 — B · KB · MB", () => {
+    assert.equal(fileSizeText(0), "0B");
+    assert.equal(fileSizeText(1023), "1023B");
+    assert.equal(fileSizeText(1024), "1KB");
+    assert.equal(fileSizeText(312 * 1024), "312KB");
+    assert.equal(fileSizeText(1024 * 1024 - 1), "1024KB");
+    assert.equal(fileSizeText(1024 * 1024), "1.0MB");
+    assert.equal(fileSizeText(3.25 * 1024 * 1024), "3.3MB");
+  });
+
+  test("🔴 하나면 이름과 크기를 함께 적는다 — 같은 이름의 다른 판을 가르려면 크기가 있어야 한다", () => {
+    assert.equal(
+      droppedFilesText([{ name: "연락서.xlsm", size: 312 * 1024 }]),
+      "놓은 파일: 연락서.xlsm (312KB)"
+    );
+  });
+
+  test("여럿이면 개수와 이름을 적고, 많으면 외 N개로 줄인다", () => {
+    assert.equal(
+      droppedFilesText([
+        { name: "a.png", size: 1024 },
+        { name: "b.png", size: 1024 },
+      ]),
+      "놓은 파일 2개: a.png · b.png"
+    );
+    const many = Array.from({ length: 7 }, (_, index) => ({ name: `${index}.png`, size: 1024 }));
+    assert.equal(droppedFilesText(many), "놓은 파일 7개: 0.png · 1.png · 2.png · 3.png · 4.png 외 2개");
+  });
+
+  test("받은 것이 없으면 적지 않는다", () => {
+    assert.equal(droppedFilesText([]), null);
+  });
+
+  test("🔴 부르는 쪽에 넘기는 것은 그대로다 — 되읽어 주는 줄이 길을 바꾸지 않는다", () => {
+    const zone = handlers({ multiple: false });
+    zone.onDrop(dragEvent([file("연락서.xlsm", 4096)]));
+    assert.deepEqual(
+      zone.record.files.map((batch) => batch.map((entry) => entry.name)),
+      [["연락서.xlsm"]]
+    );
+  });
+
+  test("🔴 못 받았다고 말할 때는 지난번 영수증을 지운다 — 거짓이 화면에 남지 않게", () => {
+    const zone = readFileSync("src/components/common/FileDropZone.tsx", "utf8").replace(/\s+/g, " ");
+    assert.ok(zone.includes("setReceived(droppedFilesText(files));"), "받은 것을 적지 않는다");
+    assert.ok(zone.includes("if (next !== null) setReceived(null);"), "못 받았을 때 지우지 않는다");
+    assert.ok(
+      zone.includes('if (target?.type === "file") setReceived(null);'),
+      "고르기 칸을 쓸 때 지우지 않는다 — 보낼 파일과 적힌 파일이 갈린다"
+    );
+    assert.ok(zone.includes('data-role="file-drop-received"'), "되읽어 주는 줄을 그리지 않는다");
+    assert.ok(zone.includes('role="status"'), "화면 낭독기에 들리지 않는다");
+  });
+});
+
 // ───────────────────────────── 그려지는 모양
 
 describe("떨구는 자리의 모양", () => {
@@ -264,5 +325,7 @@ describe("떨구는 자리의 모양", () => {
     assert.ok(!html.includes('type="file"'), "공통 조각이 파일 칸을 새로 만들었다");
     // 처음에는 끌어오는 중이 아니다.
     assert.ok(!html.includes("data-dragging"), html);
+    // 아직 받은 것이 없으니 영수증도 없다.
+    assert.ok(!html.includes("file-drop-received"), html);
   });
 });

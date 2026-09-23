@@ -72,6 +72,45 @@ export function tooManyFilesNotice(count: number): string {
   return `파일 하나만 놓을 수 있습니다 — ${count}개를 놓았습니다. 하나만 다시 놓아 주세요.`;
 }
 
+// ────────────────────────────────────────────────── 받았다고 말해 주는 한 줄
+
+/**
+ * 🔴 **떨군 것은 고르기 칸에 안 보인다.** `<input type="file">` 옆의 「선택된 파일
+ * 없음」은 브라우저가 그리는 글자라 프로그램이 바꿀 수 없고, 떨구기는 그 칸을
+ * 건드리지 않는 자리가 더 많다(담는 자리는 둘뿐 — FileDropZone 의 putFilesInPicker).
+ *
+ * 그래서 **받았다는 말이 화면 어디에도 없었다.** 사람은 들어갔는지조차 모른 채
+ * 다음 단추를 누르고, 엉뚱한 파일이 들어가도 눈치채지 못한다(2026-09-23 실제
+ * 신고 — 「업로드가 안 된다」였는데 실은 들어갔고 읽는 데 실패한 것이었다).
+ *
+ * 이름만으로는 모자란다 — 같은 이름의 다른 판이 흔하다. **크기를 함께 적는다.**
+ */
+export function fileSizeText(size: number): string {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/** 이름을 몇 개까지 적는가. 넘으면 「외 N개」로 줄인다. */
+const NAMED_FILE_LIMIT = 5;
+
+/**
+ * 받은 파일을 사람이 읽을 한 줄로. 하나도 없으면 null(적을 것이 없다).
+ *
+ * 🔴 이것은 **알림이 아니라 영수증**이다 — 못 받은 까닭(`notice`)과 자리를 나눠
+ * 쓴다. 둘을 한 줄에 섞으면 「폴더는 건너뛰고 파일 하나는 받았다」를 말할 수 없다.
+ */
+export function droppedFilesText(files: readonly DroppedFileLike[]): string | null {
+  if (files.length === 0) return null;
+  if (files.length === 1) {
+    return `놓은 파일: ${files[0].name} (${fileSizeText(files[0].size)})`;
+  }
+  const named = files.slice(0, NAMED_FILE_LIMIT).map((file) => file.name);
+  const rest = files.length - named.length;
+  const list = rest > 0 ? `${named.join(" · ")} 외 ${rest}개` : named.join(" · ");
+  return `놓은 파일 ${files.length}개: ${list}`;
+}
+
 // ────────────────────────────────────────────────── 한 번 떨군 것을 어떻게 할까
 
 export type FileDropPlan<T> = {
