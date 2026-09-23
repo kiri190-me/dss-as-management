@@ -173,6 +173,42 @@ describe("🔴 글자 통째로가 이긴다", () => {
   });
 });
 
+/**
+ * 🔴 2026-09-23 **사용 부품 표 실측**에서 나온 줄. 이식된 7줄 가운데 사전이 못 읽던
+ * 유일한 줄이 `通信基板`(접수 `D210102`)이었고, 그래서 `通信基板` 과 낱말 `通信` 을
+ * 함께 더했다. 이 시험은 그 둘 중 하나가 빠지는 날 곧바로 깨진다.
+ */
+describe("🔴 사용 부품 표에서 나온 줄 (2026-09-23 실측)", () => {
+  /**
+   * 🔴 `通信` 만 있으면 `통신` + `기판` 이 조립되어 **`통신기판`**(붙음)이 나온다.
+   * 띄어쓰기를 맞추려고 긴 짝 `通信基板` 을 함께 두었고, 후보가 길이 내림차순이라
+   * 4자인 그것이 2자인 `通信` 보다 먼저 걸린다. 여기가 그 최장 일치를 재는 자리다.
+   */
+  test("🔴 `通信基板` → `통신 기판` — 긴 짝이 낱말보다 먼저 걸린다", () => {
+    assert.equal(translateKyosanSentence("通信基板"), "통신 기판");
+    assert.notEqual(translateKyosanSentence("通信基板"), "통신기판", "낱말 조립이 긴 짝을 이겼다");
+  });
+
+  test("🔴 `通信` 홀로는 `통신` — 꼬리 공백이 붙지 않는다", () => {
+    // 낱말 값에 공백을 두지 않는 까닭이다. 사용 부품 칸의 글자가 통계의 묶는 열쇠라
+    // `"통신 "` 과 `"통신"` 이 갈리면 같은 부품이 두 조각이 된다.
+    assert.equal(translateKyosanSentence("通信"), "통신");
+  });
+
+  test("🔴 통째 사전의 `通信異常` 은 그대로다 — 긴 것이 먼저 걸린다", () => {
+    // 낱말 `通信` 이 `通信異常` 을 반쪽(`통신異常`)으로 만들지 않는다.
+    assert.equal(translateKyosanSentence("通信異常"), "통신 이상");
+  });
+
+  test("사용 부품 표의 나머지 다섯 줄은 예전부터 사전이 알던 것이다", () => {
+    assert.equal(translateKyosanSentence("終段AMP入力保護用ヒューズ"), "종단 AMP 입력 보호용 퓨즈");
+    assert.equal(translateKyosanSentence("終段AMP基板（AMP-DEH基板）"), "종단 AMP 기판(AMP-DEH 기판)");
+    assert.equal(translateKyosanSentence("終段AMPコンデンサ基板（AMP-DEH用）"), "종단 AMP 콘덴서 기판(AMP-DEH용)");
+    assert.equal(translateKyosanSentence("終段AMPゲート基板(AMP-DEH-G基板)"), "종단 AMP 게이트 기판(AMP-DEH-G 기판)");
+    assert.equal(translateKyosanSentence("スプリッタ基板"), "스플리터 기판");
+  });
+});
+
 describe("🔴 낱말 사전 자체", () => {
   test("🔴 값이 모두 한글이다 — 옮기다 만 줄이 없다", () => {
     for (const [japanese, korean] of Object.entries(KYOSAN_WORD_TERMS)) {

@@ -656,6 +656,105 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     assert.ok(diagnosis.memo.includes("[교체 부품(예방)]"), diagnosis.memo);
   });
 
+  /**
+   * ── 🔴 사용 부품 칸은 **한글로 저장된다** (2026-09-23 사용자 결정) ──────────
+   * 사용자가 수리 건 상세의 「사용 부품」 표에서 일본어 품명을 잡아냈다. 이 칸만
+   * **저장할 때** `translateKyosanSentence` 를 지난다(`appendUsedParts` 의 주석에
+   * 까닭 셋이 적혀 있다 — 사람이 고치는 칸이고, 통계의 묶는 열쇠이고, 미리보기는
+   * 이미 한글을 보여 주고 있었다).
+   *
+   * ⚠️ 바로 위 두 시험의 본보기(`값-부품1` · `값-양쪽부품`)는 **한글 가짜 이름**이라
+   * 사전에 걸리지 않는다 — 그래서 저 시험들은 이 변경에 한 줄도 안 깨진다. 이
+   * 시험이 **일본어가 들어오는 자리**를 따로 맡는다.
+   *
+   * 🔴 여기서 쓰는 일본어는 둘 다 기술 낱말이라 고객 내용이 아니다:
+   *   · `スプリッタ基板` — 자유 기술 사전에 있는 부품 이름(실제 사용 부품 표에 있었다)
+   *   · `試験用ダミー故障` — `report-terms.test.ts` · `report-word-terms.test.ts` 와
+   *     **같은 가짜 글자**다. `故障` 만 바뀌어 반쪽이 되는 자리라 all-or-nothing 을
+   *     재기에 알맞다.
+   */
+  test("🔴 일본어 부품 이름은 **한글로 저장**되고, 사전에 없는 것은 원문 그대로다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "スプリッタ基板",
+      preventivePart: "試験用ダミー故障",
+      salt: "일본어부품",
+    });
+
+    // 🔴 미리보기(순수 함수)는 **원문 그대로**다 — 번역은 저장할 때만 건다.
+    assert.deepEqual(buildKyosanPreviewParts(fake.report), [
+      { kind: "fault", text: "スプリッタ基板" },
+      { kind: "preventive", text: "試験用ダミー故障" },
+    ]);
+
+    const result = await importOf(fake);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.usedPartCount, 2);
+
+    const used = await db
+      .select({
+        lineNo: repairCaseUsedParts.lineNo,
+        partId: repairCaseUsedParts.partId,
+        partNameText: repairCaseUsedParts.partNameText,
+        quantity: repairCaseUsedParts.quantity,
+      })
+      .from(repairCaseUsedParts)
+      .where(eq(repairCaseUsedParts.repairCaseId, target.id))
+      .orderBy(asc(repairCaseUsedParts.lineNo));
+    assert.deepEqual(used, [
+      // 🔴 사전이 아는 일본어 → **한글**. 일본어가 DB 에 남지 않는다.
+      { lineNo: 1, partId: null, partNameText: "스플리터 기판", quantity: 1 },
+      // 🔴 사전이 모르는 일본어 → **원문 그대로**(all-or-nothing). 반쪽(`試験用ダミー고장`)이
+      //    고객 기록에 들어가는 길이 없다.
+      { lineNo: 2, partId: null, partNameText: "試験用ダミー故障", quantity: 1 },
+    ]);
+
+    // 🔴 원문은 작업 기록 메모에 그대로 남는다 — 되짚을 자리가 있다.
+    const records = await readImportedWorkRecords(target.id);
+    const diagnosis = records.find((row) => row.recordKind === "DIAGNOSIS_REPAIR_SUMMARY");
+    assert.ok(diagnosis);
+    assert.ok(diagnosis.memo.includes("スプリッタ基板"), diagnosis.memo);
+  });
+
+  /**
+   * 🔴 **번역이 묶기를 망가뜨리지 않았다**는 증거. 같은 일본어 이름이 고장분·예방분
+   * 양쪽에 있으면 여전히 **한 줄 · 수량 합**이어야 하고, 그 한 줄의 글자가 한글이다.
+   * (묶기는 연락서 표기로 하고 번역은 그 **뒤**에 건다 — 자리를 잘못 잡으면 여기서
+   * 두 줄이 되거나 `report-preview.test.ts` 가 깨진다.)
+   */
+  test("🔴 번역해도 수량 합산과 줄 차례가 그대로다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "スプリッタ基板",
+      preventivePart: "スプリッタ基板",
+      salt: "일본어양쪽",
+    });
+
+    const result = await importOf(fake);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.usedPartCount, 1, "🔴 묶기가 살아 있어야 한 줄이다");
+
+    const used = await db
+      .select({
+        lineNo: repairCaseUsedParts.lineNo,
+        partId: repairCaseUsedParts.partId,
+        partNameText: repairCaseUsedParts.partNameText,
+        quantity: repairCaseUsedParts.quantity,
+      })
+      .from(repairCaseUsedParts)
+      .where(eq(repairCaseUsedParts.repairCaseId, target.id))
+      .orderBy(asc(repairCaseUsedParts.lineNo));
+    assert.deepEqual(used, [{ lineNo: 1, partId: null, partNameText: "스플리터 기판", quantity: 2 }]);
+  });
+
   test("사진은 미리보기가 걸러 준 것만 첨부로 들어간다", async () => {
     const target = await seedCase();
     const fake = fakeReport({

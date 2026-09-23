@@ -58,6 +58,7 @@ import {
   mergeKyosanPartsForUsedParts,
   type KyosanImportPlan,
 } from "@/lib/kyosan/report-preview";
+import { translateKyosanSentence } from "@/lib/kyosan/report-word-terms";
 import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/storage-adapter";
 import { ZipArchive } from "@/lib/xlsx/zip-reader";
 
@@ -833,7 +834,32 @@ async function appendUsedParts(
     //    우리 `parts` 와 같은 물건인지 확인된 바가 없다. 손으로 적은 줄과 같은
     //    모양(`part_id` 가 null)으로 넣는다.
     partId: null,
-    partNameText: line.text,
+    // ── 🔴 사용 부품 칸만 **저장할 때** 한글로 바꾼다 (2026-09-23 사용자 결정) ──
+    //    까닭 셋:
+    //     1. **사람이 고칠 수 있는 칸이다.** `UsedPartsEditForm` 이 이 글자를 그대로
+    //        입력칸에 넣는다. 보여 줄 때만 바꾸면 표엔 한글, 「수정」을 누르면 일본어가
+    //        떠서, 그대로 저장하면 일본어가 되돌아온다.
+    //     2. **통계의 축이다.** `part_id` 가 거의 다 null 이라(바로 위 주석) 같은
+    //        부품인지 가르는 열쇠가 사실상 이 글자다. 일본어 표기와 한글 표기가 섞이면
+    //        같은 부품이 두 조각으로 갈라진다.
+    //     3. **미리보기가 이미 한글을 보여 준다**(`KyosanReportImportParts`). 지금까지는
+    //        미리보기가 한글을 보여 주고 일본어를 넣고 있었다 — 여기서 바꿔야 미리보기와
+    //        실제가 맞는다.
+    //
+    //    🔴 **묶은 뒤에 건다**(`mergeKyosanPartsForUsedParts` 안이 아니다). 묶는 열쇠는
+    //    연락서 표기여야 하고, `report-preview.test.ts` 가 묶은 결과의 글자를
+    //    `終段AMP基板` · `スプリッタ基板` 같은 **일본어 그대로** 못 박고 있다. 묶는 함수
+    //    안에서 바꾸면 그 단언들이 깨진다.
+    //
+    //    🔴 `translateKyosanSentence` 는 **all-or-nothing** 이다 — 바꾼 결과에 일본어가
+    //    한 글자라도 남으면 `null` 이라 `?? line.text` 로 원문이 그대로 들어간다. 그래서
+    //    고객 기록에 **완전한 한글이거나 원문 그대로**만 남고, 반쪽이 생기지 않는다.
+    //
+    //    🔴 **일본어 원문은 이 표에 남지 않는다**(원문 칸을 새로 만들지 않는 것이 사용자
+    //    결정이다). 그래도 잃는 내용이 없다 — 같은 이식이 만드는 작업 기록 메모
+    //    (`report-detail-values.ts`)에 교체 부품 글자가 **원문 그대로** 들어가고, 연락서
+    //    원본 `.xlsm` 도 같은 건의 첨부로 남는다. 되짚을 자리가 둘 있다.
+    partNameText: translateKyosanSentence(line.text) ?? line.text,
     // 🔴 수량은 연락서의 `交換部品詳細` 시트 `数量` 칸에서 온다(`parts-detail-sheet.ts`).
     //    (예전 주석은 「연락서에 수량이 적히는 자리가 없다」였는데 **거짓이었다** —
     //    Card 시트에는 없지만 그 시트에는 있다. 실측 1,315줄 중 1,285줄에 수가 적혀

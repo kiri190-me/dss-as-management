@@ -59,6 +59,14 @@ import { translateKyosanSentence } from "./report-word-terms";
  * 한글과 원문을 **둘 다** 돌려주고, 화면이 나란히 보인다 — 번역이 틀렸을 때
  * 되짚을 수 있어야 하고, 사전에 없는 말이 나중에 늘 수 있기 때문이다.
  *
+ * 🔴 **사용 부품 칸은 예외다 (2026-09-23 사용자 결정).** 위 문장은 다른 모든 곳에서
+ * 여전히 참이지만, `repair_case_used_parts.part_name_text` **한 칸만은** 연락서를
+ * 이식할 때 `translateKyosanSentence` 를 지나 **한글로 저장된다**
+ * (`server/services/kyosan-report-import.ts` 의 `appendUsedParts`). 사람이 고칠 수
+ * 있는 칸이라 보여 줄 때만 바꾸면 수정 폼에 일본어가 되살아나고, `part_id` 가 거의
+ * 다 null 이라 그 글자 자체가 통계의 묶는 열쇠이기 때문이다. 그 칸의 일본어 원문은
+ * 같은 이식이 남기는 작업 기록 메모와 첨부된 연락서 원본에 그대로 있다.
+ *
  * ── 🔴 보여 주는 층이 둘이다 — 화면과 **문서** ──────────────────────
  * 사람이 받는 엑셀 보고서도 보여 주는 층이다. 그쪽은 병기하지 않고 **한글만**
  * 찍는다(사용자 결정 2026-09-22) — 아래 `koreanKyosanDocumentText` 가 그 일을
