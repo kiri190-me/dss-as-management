@@ -58,6 +58,20 @@
         border-left: 4px solid var(--accent); padding: .8rem 1rem;
         border-radius: 6px; margin: 1rem 0; }
 
+  /* 갈래별 진행률 — 끝난 조각 / 전체 조각 */
+  .bar { height: .55rem; background: var(--soft); border: 1px solid var(--line);
+         border-radius: 99px; overflow: hidden; margin: .5rem 0 .25rem; display: flex; }
+  .bar > i { display: block; height: 100%; }
+  .bar > i.d { background: var(--accent); }
+  .bar > i.r { background: var(--run); }
+  .barnote { color: var(--dim); font-size: .85rem; margin: 0 0 1rem; }
+  .barnote b { color: var(--ink); font-weight: 700; }
+
+  /* 조각 표 — 진행된 것 · 진행중인 것 · 진행할 것 */
+  table.slices td:first-child { white-space: nowrap; font-weight: 600; }
+  tr.todo td { background: transparent; }
+  tr.todo td:first-child { color: var(--dim); }
+
   .now-list { display: grid; gap: .75rem; margin: 1.1rem 0 1.6rem; }
   .now-item {
     position: relative; background: var(--panel);
@@ -108,14 +122,14 @@
 
 <header>
   <h1>DSS 사내 시스템 — 개발 진행 현황</h1>
-  <p class="stamp">2026-09-23</p>
+  <p class="stamp">2026-09-25</p>
 </header>
 
 <div class="ok">
-  <b>아홉 저장소 전부 미푸시 0.</b> 오늘 아홉 조각을 끝내 전부 올렸습니다.<br>
-  🔴 <b>연락서 일본어가 사실상 사라졌습니다</b> — 문서·화면·사용 부품 칸까지.<br>
-  🔴 <b>개선요청에 알림 종이 생겼습니다</b> — 새 요청이 오면 관리자에게 뜨고, 창에 들어오면 사라집니다.<br>
-  🔴 <b>PO 가 첨부 도메인을 다 받았습니다</b>(3d-0 · 3d-1a · 3d-1b). 다음이 실제 「받기」입니다.
+  <b>열 저장소 전부 미푸시 0.</b> 잃을 것이 없는 상태입니다.<br>
+  🔴 <b>연락서 판독기는 다 됐습니다</b> — 남은 것은 <b>469장을 한 번에 넣는 일</b> 하나입니다.<br>
+  🔴 <b>PO 이사는 절반을 넘었습니다</b> — 견적서 첨부의 「받기」까지 왔고, 다음이 「올리기」입니다.<br>
+  🔴 <b>오늘 확인한 것</b>: 끌어다 놓기는 눈으로 통과 · 팝업이 한 줄로 흐르던 결함은 고쳤습니다.
 </div>
 
 <h2>지금 하고 있는 것</h2>
@@ -125,39 +139,184 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">끌어다 놓은 파일 — 🔴 <b>마지막 확인 하나</b></span>
+      <span class="now-title">연락서 <b>469장 일괄 이식</b>(S5) — 설계 중</span>
       <span class="chip">A/S</span>
-      <span class="chip run">눈 확인 대기</span>
+      <span class="chip run">착수 전</span>
     </div>
     <p class="now-body">
-      이제 놓으면 <code>놓은 파일: 연락서.xlsm (312KB)</code> 한 줄이 뜬다.
-      🔴 <b>그 이름·크기를 [파일 선택]으로 골랐을 때와 견주면 원인이 확정된다.</b>
+      판독기는 다 됐고 <b>한 장씩</b>은 화면에서 넣을 수 있다. 남은 것은 <b>여러 장을 도는 통로</b>다 —
+      🔴 <b>그 통로가 아직 없다</b>(2026-09-25 조사로 확정. <code>importKyosanReport</code> 를
+      부르는 스크립트가 0개).
     </p>
     <p class="now-note">
-      다르면 「다른 파일이 들어갔다」가 확정이고, 같으면 File 을 직접 재는 길로 간다.
+      🔴 착수 전에 정할 것 셋: <b>되돌리기</b>(지금 없다) · <b>이미 넣은 4건</b>을 어떻게 할지 ·
+      원본 503장이 <b>지워질 수 있는 자리</b>에만 있는 것. 아래 「연락서 판독기」 절 참조.
     </p>
   </div>
 
-  <div class="now-item now">
+  <div class="now-item fin">
     <div class="now-head">
-      <span class="now-mark">●</span>
-      <span class="now-title">견적서 받기 실패 팝업</span>
+      <span class="now-mark">✔</span>
+      <span class="now-title">받기 실패 팝업이 <b>한 줄로 흐르던 것</b> — 고쳤다</span>
       <span class="chip">PO</span>
-      <span class="chip run">눈 확인 대기</span>
+      <span class="chip fin">눈 확인 부탁</span>
     </div>
     <p class="now-body">
-      「엑셀 없음」 줄의 [견적서 받기] 를 누르면 <b>가운데 모달</b>이 까닭을 말한다.
-      전에는 날 JSON 이 브라우저에 떴다.
+      팝업 글이 줄바꿈되지 않고 한 줄로 늘어나 <b>가로 스크롤</b>이 생겼다.
+      팝업이 <b>표의 칸 안에서</b> 만들어지는데 그 칸에 「줄바꿈하지 말라」가 걸려 있고,
+      🔴 <b>줄바꿈 설정은 팝업이 뜬 위치가 아니라 만들어진 자리에서 물려받기 때문</b>이다.
     </p>
     <p class="now-note">
-      함께 볼 것: 「엑셀 없음」이 <b>없는</b> 줄은 예전 그대로 파일이 내려오는지 ·
-      [삭제] 단추가 모든 줄에서 같은 자리인지.
+      실측: 상자 448px 은 제값인데 <b>안쪽 내용이 1070px</b> · 글 한 줄(20px) →
+      고친 뒤 <b>내용 446px · 세 줄(60px) · 넘침 없음</b>.
+      표 쪽은 안 건드렸다 — 그 칸의 설정은 옳고, 다섯 사이트가 나눠 쓰는 묶음이다.
+    </p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">끌어다 놓은 파일 — <b>잘 동작한다</b></span>
+      <span class="chip">A/S</span>
+      <span class="chip fin">끝</span>
+    </div>
+    <p class="now-body">
+      놓았을 때와 [파일 선택]으로 골랐을 때를 사용자가 눈으로 견줬다 —
+      <b>「잘 동작했다」</b>(2026-09-25 사용자). 🔴 <b>오래 끌던 문제가 여기서 닫혔다.</b>
+    </p>
+    <p class="now-note">
+      🔴 <b>닫히기까지 조사가 두 번 틀렸다</b> — ① 합성 이벤트로 「멀쩡하다」고 했다가
+      ② 「파일이 깨진다」고 했다. 끝낸 것은 <b>화면에 이름·크기를 찍어 사람이 견주게 한 것</b>이다.
+      다음에 비슷한 것이 오면 <b>재는 자리를 화면으로 끌어내는 편이 빠르다</b>.
     </p>
   </div>
 
 </div>
 
-<h2>오늘 끝낸 것</h2>
+<h2>갈래 ① 연락서 판독기 (A/S)</h2>
+
+<p>
+  일본 교산에서 오는 <b>연락서</b> 엑셀을 읽어, 이미 등록된 수리 건에 내용·부품·사진을 채우는 일.
+  <b>사람이 옮겨 적던 것을 기계가 한다.</b>
+</p>
+
+<div class="bar">
+  <i class="d" style="width:83.3%"></i><i class="r" style="width:5.6%"></i>
+</div>
+<p class="barnote">
+  일감 <b>15개 끝</b> · <b>1개 진행 중</b> · <b>2개 남음</b> —
+  🔴 <b>읽는 일은 다 됐고, 남은 것은 「한 번에 넣기」다.</b>
+</p>
+
+<h3>진행된 것</h3>
+<table class="slices">
+  <tr><th>무엇</th><th class="c">언제</th><th>결과</th></tr>
+  <tr class="fin"><td>판본 세기 도구</td><td class="c">09-20</td><td>양식이 몇 가지인지 · 고객 내용은 안 내보낸다</td></tr>
+  <tr class="fin"><td>옛 143장 형식 변환</td><td class="c">09-21</td><td>옛 <code>.xls</code> 를 읽히는 형식으로. NAS 원본은 읽기만</td></tr>
+  <tr class="fin"><td><b>S1 판독기</b></td><td class="c">09-21</td><td>엑셀 한 장에서 내용을 뽑는다 (DB 안 건드림)</td></tr>
+  <tr class="fin"><td>짝짓기</td><td class="c">09-21</td><td>접수번호·모델·S/N 으로 수리 건을 찾는다. <b>짝이 없으면 안 넣는다</b></td></tr>
+  <tr class="fin"><td><b>S3 저장</b></td><td class="c">09-21</td><td>한 트랜잭션으로 전부 쓰거나 전부 안 쓴다</td></tr>
+  <tr class="fin"><td><b>S4 올리기 화면</b></td><td class="c">09-21</td><td>넣을 내용을 먼저 보여주고, 눌러야 들어간다</td></tr>
+  <tr class="fin"><td>S4b 짝이 여럿일 때</td><td class="c">09-21</td><td>사람이 고른 것을 저장. 신원을 다시 본다</td></tr>
+  <tr class="fin"><td>양식 말 한글화</td><td class="c">09-21</td><td>469장을 다 읽어 세고 채웠다</td></tr>
+  <tr class="fin"><td>보고서가 아니라 상세 칸으로</td><td class="c">09-21</td><td>🔴 <b>보고서는 만들지 않는다</b>(사용자 결정)</td></tr>
+  <tr class="fin"><td>상세 화면 한글</td><td class="c">09-22</td><td>저장된 글자는 그대로 두고 보일 때만</td></tr>
+  <tr class="fin"><td>「교체부품상세」 시트</td><td class="c">09-22</td><td>부품 <b>199건</b>·수량 <b>921개</b>가 빠지고 있었다</td></tr>
+  <tr class="fin"><td>손글씨 부품(推定修理内容)</td><td class="c">09-22</td><td>사람이 적은 이름도 사용 부품 칸으로</td></tr>
+  <tr class="fin"><td>문장 사전 182개</td><td class="c">09-23</td><td>고정 표를 <b>100%</b> 덮는다</td></tr>
+  <tr class="fin"><td>낱말 단위 바꿔치기</td><td class="c">09-23</td><td>사전에 통째로 없는 줄도. <b>전부 한글이 될 때만</b> 바꾼다</td></tr>
+  <tr class="fin"><td>사용 부품 품명 한글 저장</td><td class="c">09-23</td><td>이 칸만은 <b>저장할 때</b> 바꾼다 (통계의 묶는 열쇠라서)</td></tr>
+</table>
+
+<h3>진행 중</h3>
+<table class="slices">
+  <tr><th>무엇</th><th class="c">상태</th><th>지금 어디까지</th></tr>
+  <tr class="now"><td><b>S5 469장 일괄</b></td><td class="c"><span class="st run">설계 중</span></td>
+      <td>조사 완료(09-25). 🔴 <b>러너가 없어 만들어야 한다</b> · 되돌리기·백업을 먼저 정한다</td></tr>
+</table>
+
+<h3>진행할 것</h3>
+<table class="slices">
+  <tr><th>무엇</th><th class="c">상태</th><th>먼저 정할 것</th></tr>
+  <tr class="todo"><td>S2 원인 사전</td><td class="c"><span class="st wait">보류</span></td>
+      <td>전제가 바뀌어 <b>설계부터 다시</b></td></tr>
+  <tr class="todo"><td>주인 없는 잔해 치우기</td><td class="c"><span class="st wait">승인 대기</span></td>
+      <td>첨부 133개 · 작업 기록 179줄 · 🔴 <b>디스크 파일도 남아 있다</b></td></tr>
+</table>
+
+<h3>🔴 S5 착수 전에 정해야 하는 것 넷 (2026-09-25 조사·실측)</h3>
+
+<table>
+  <tr><th>무엇</th><th>지금 상태</th></tr>
+  <tr><td><b>① 여러 장을 도는 통로</b></td>
+      <td>🔴 <b>없다.</b> 이식 함수를 부르는 스크립트가 0개다. 화면은 <b>한 장씩</b>만 받는다
+          (<code>multiple={false}</code>). 가장 가까운 골격은 <code>scripts/match-kyosan-reports.ts</code>
+          — 폴더를 훑고 짝짓기·미리보기까지 이미 한다</td></tr>
+  <tr><td><b>② 이미 넣은 것들</b></td>
+      <td>🔴 <b>DB 를 읽어 확정했다 — 흔적이 8행이다.</b>
+          살아 있는 4건(<code>D210101</code>·<code>D210102</code>·<code>D210103</code>·<code>D260403</code>)과
+          <b>주인 없는 4행</b>(수리 건이 하드 삭제되어 연결이 끊겼다).
+          중복은 <b>(수리 건 + 파일 내용)</b>으로 막으므로 살아 있는 4건은 <b>건너뛰어진다</b> —
+          앞 세션의 우려가 맞았다. 주인 없는 4행은 <b>아무것도 막지 못한다</b></td></tr>
+  <tr><td><b>③ 되돌리기</b></td>
+      <td>🔴 <b>없다.</b> 잘못 들어가도 지우는 길이 만들어져 있지 않다.
+          🔴 <b>사용 부품 칸이 가장 약하다</b> — 그 줄에는 「이식으로 생겼다」는 표시가 없어
+          손으로 적은 줄과 구별되지 않는다(감사 기록의 스냅샷으로만 복원 가능)</td></tr>
+  <tr><td><b>④ 원본 파일 자리</b></td>
+      <td>🔴 <b>503장이 임시 폴더에만 있다</b>(<code>%TEMP%</code>). 윈도우가 지울 수 있는 자리다.
+          마스터는 NAS 에 있다. 돌리기 전에 안전한 곳으로 옮기는 편이 낫다</td></tr>
+</table>
+
+<h2>갈래 ② PO 시스템 이사</h2>
+
+<p>
+  견적·발주·내자를 A/S 에서 <b>따로 선 사이트</b>로 옮기는 일. 🔴 <b>DB 는 나누지 않는다</b> —
+  같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
+</p>
+
+<div class="bar"><i class="d" style="width:69.6%"></i></div>
+<p class="barnote">
+  조각 <b>16개 끝</b> · <b>7개 남음</b> — 🔴 <b>첨부의 「받기」까지 왔다. 다음이 「올리기」다.</b>
+</p>
+
+<h3>진행된 것</h3>
+<table class="slices">
+  <tr><th>조각</th><th>무엇</th><th class="c">언제</th></tr>
+  <tr class="fin"><td>0a</td><td><code>dss-core</code> 공용 스키마 저장소를 만들고 A/S 스키마를 옮긴다</td><td class="c">09-20</td></tr>
+  <tr class="fin"><td>0b</td><td>사이트 뼈대 — 로그인하면 빈 화면까지</td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>0c</td><td>포털에 등록 · 로그인 입구 · 메뉴바 · 알림 종</td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>1</td><td><b>작업 비용</b> — 첫 실물 화면</td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>2</td><td><b>내자 정리</b></td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>3a</td><td>견적서 <b>목록·휴지통</b></td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>3b-1</td><td>견적서 <b>편집 폼</b> — 줄을 누르면 열리고 저장된다</td><td class="c">09-21</td></tr>
+  <tr class="fin"><td>3b-2</td><td>[새 견적서] — 팝업 없이 빈 폼으로</td><td class="c">09-22</td></tr>
+  <tr class="fin"><td>3b-3</td><td>인수번호로 불러오기 · 부품 고르개 · 담기</td><td class="c">09-22</td></tr>
+  <tr class="fin"><td>3c-1</td><td>엑셀 양식을 읽어 작업 내역 기본값을 채운다</td><td class="c">09-22</td></tr>
+  <tr class="fin"><td>3c-2</td><td>견적서를 <b>엑셀로 받는다</b></td><td class="c">09-22</td></tr>
+  <tr class="fin"><td>3d-0</td><td>목록 파일 딱지 — 결재 PDF · 엑셀 없음</td><td class="c">09-23</td></tr>
+  <tr class="fin"><td>3d-1a</td><td>첨부 분류 · 내려받기 판정</td><td class="c">09-23</td></tr>
+  <tr class="fin"><td>3d-1b</td><td>받을 확장자 · 저장 경로</td><td class="c">09-23</td></tr>
+  <tr class="fin"><td>3d-2</td><td>🔴 <b>A/S 에서 붙인 엑셀을 PO 에서 내려받는다</b></td><td class="c">09-23</td></tr>
+  <tr class="fin"><td>3d-5</td><td>받기에 실패하면 날 JSON 대신 팝업으로 · <b>줄바꿈 결함까지 고침</b></td><td class="c">09-23<br>09-25</td></tr>
+</table>
+
+<h3>진행할 것</h3>
+<table class="slices">
+  <tr><th>조각</th><th>무엇</th><th class="c">규모</th><th>걸려 있는 것</th></tr>
+  <tr class="todo"><td>3d-3</td><td><b>올리기·지우기 통로</b> — 다음 조각</td><td class="c">1,330줄</td>
+      <td>🔴 <b>CSRF 결정이 여기</b> · 지우기·덮어쓰기를 막는 것 16가지를 지시서에 실을 것</td></tr>
+  <tr class="todo"><td>3d-4</td><td>폼의 첨부 구역</td><td class="c">1,400줄</td><td>3d-3 뒤</td></tr>
+  <tr class="todo"><td>3c-3</td><td>견적서 <b>발행</b></td><td class="c">—</td>
+      <td>🔴 <b>3d-3 이 필요하다</b> — 아래 「앞 기록이 틀렸던 곳」 참조</td></tr>
+  <tr class="todo"><td>3e</td><td>수기 엑셀로 칸 채우기</td><td class="c">1,930줄</td><td>3d 에서 떼어냈다</td></tr>
+  <tr class="todo"><td>3f</td><td>인쇄 · 미리보기</td><td class="c">—</td><td>견적서의 마지막 조각</td></tr>
+  <tr class="todo"><td>4</td><td><b>A/S 정리</b> — 메뉴에서 빼고 남은 참조를 링크로</td><td class="c">—</td>
+      <td>🔴 <b>HIGH</b> · 이때까지 두 곳에 같은 화면이 있다</td></tr>
+  <tr class="todo"><td>5</td><td><b>배포</b> — compose · env · 백업 · 런북</td><td class="c">—</td>
+      <td>🔴 <b>HIGH</b> · 양식 5키와 <code>UPLOADS_DIR</code> 이 함께 가야 한다</td></tr>
+</table>
+
+<h2>9월 23일에 끝낸 것</h2>
 
 <table>
   <tr><th>무엇</th><th class="c">어디</th><th>결과</th></tr>
@@ -292,7 +451,10 @@
 <p class="now-note">
   PO 에서 만든 <code>NoticePopup.tsx</code> 를 <b>파일째 옮기고</b> A/S 의 보기 권한자 갈래에
   같은 판정(<code>isExcelOnly &amp;&amp; !hasExcel</code>)을 넣으면 된다. 그래서 그 조각을
-  견적서와 무관하게 · 같은 경로 · 같은 이름으로 만들어 두었다.
+  견적서와 무관하게 · 같은 경로 · 같은 이름으로 만들어 두었다.<br>
+  🔴 <b>2026-09-25 에 그 파일이 한 번 더 좋아졌다</b> — 표 칸의 「줄바꿈 금지」를 끊는
+  <code>whitespace-normal</code> 이 들어갔다. <b>지금 옮기면 A/S 는 같은 결함을 겪지 않는다.</b>
+  옮긴 뒤 A/S 에서도 <b>팝업이 표 칸 안에서 그려지는지</b> 한 번 보라 — 그렇다면 그 한 줄이 값을 한다.
 </p>
 
 <h3>🔴 저장 팝업(<code>SavePopup</code>)은 알림에 쓸 수 없다</h3>
@@ -313,15 +475,15 @@
 <table>
   <tr><th>저장소</th><th class="c">포트</th><th class="c">상태</th><th>지금</th></tr>
   <tr><td><b>A/S</b> 관리 시스템</td><td class="c">3000</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>연락서 판독기 — 다음은 <b>469장 일괄 이식</b></td></tr>
+      <td>연락서 판독기 <b>완료</b> — 남은 것은 <b>469장 일괄</b>(갈래 ①)</td></tr>
   <tr><td><b>통합 로그인</b>(포털)</td><td class="c">3100</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>알림 통로를 가진 시스템 둘 → 개선요청이 <b>셋째</b></td></tr>
+      <td>알림 통로 <b>셋</b>(A/S · 휴가 · 개선요청) · 타일 빨간 점 연결 완료</td></tr>
   <tr><td><b>계측기</b> 관리</td><td class="c">3300</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>홈 화면 아이콘이 아직 없다</td></tr>
+      <td>홈 화면 아이콘이 아직 없다 · 알림 종도 없다</td></tr>
   <tr><td><b>개선요청</b></td><td class="c">3500</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>알림 종 완성 · 포털 연결이 남았다</td></tr>
+      <td>알림 종 · 포털 연결까지 <b>완료</b></td></tr>
   <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st run">개발 중</span></td>
-      <td>첨부 도메인 완료 · 받기 구현 중 · <b>아직 미배포</b></td></tr>
+      <td>첨부 <b>받기</b>까지 완료 · 다음은 <b>올리기</b>(3d-3) · <b>아직 미배포</b></td></tr>
   <tr><td><b>휴가 관리</b></td><td class="c">—</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 통로 있음</td></tr>
   <tr><td><b>회사 홈페이지</b></td><td class="c">3200</td><td class="c"><span class="st wait">배포 대기</span></td>
@@ -332,22 +494,25 @@
       <td>A/S · PO 가 같은 커밋을 가리킨다</td></tr>
 </table>
 
-<h2>다음에 할 일</h2>
+<h2>두 갈래 밖의 할 일</h2>
+
+<p class="barnote" style="margin-top:-.2rem">
+  연락서·PO 는 위 두 절에 있습니다. 여기는 그 밖의 것입니다.
+</p>
 
 <table>
   <tr><th>무엇</th><th class="c">어디</th><th>먼저 확인할 것</th></tr>
-  <tr><td><b>연락서 469장 일괄 이식</b> (S5)</td><td class="c">A/S</td>
-      <td>🔴 이미 넣은 4건이 <b>낡은 판독</b>을 담고 있는데, 중복 검사가 막아 건너뛸 수 있다(확정 아님)</td></tr>
-  <tr><td><b>포털 타일에 빨간 점</b> (개선요청 조각 3)</td><td class="c">포털</td>
-      <td>포털에는 종이 없다 — 점은 <b>시스템 타일 위</b>에. 상수 한 줄 등록도 함께</td></tr>
-  <tr><td><b>PO 3d-3</b> 올리기·지우기 통로</td><td class="c">PO</td>
-      <td>CSRF 결정이 여기 있다</td></tr>
-  <tr><td><b>PO 3d-4</b> 폼의 첨부 구역 → 그 뒤 <b>3c-3 발행</b></td><td class="c">PO</td>
-      <td>3c-3 은 위 「앞 기록이 틀렸던 곳」 참조</td></tr>
-  <tr><td><b>주인 없는 잔해 치우기</b></td><td class="c">A/S</td>
-      <td>첨부 133개 · 작업 기록 179줄. 🔴 <b>디스크 파일도 남아 있다</b> — 백업 + 승인 필요</td></tr>
+  <tr><td><b>A/S 의 「날 JSON」 구멍</b> 메우기</td><td class="c">A/S</td>
+      <td>🔴 <b>가장 값싼 다음 걸음.</b> PO 에서 만든 <code>NoticePopup.tsx</code> 를 파일째 옮긴다 —
+          <b>줄바꿈 고침까지 들어 있으니 지금 옮기면 같은 결함을 안 물려받는다</b></td></tr>
   <tr><td><b>엑셀 기초 여섯을 공용 묶음으로</b></td><td class="c">A/S · PO</td>
       <td>두 벌로 남은 유일한 덩이(1,378줄). 묶음에 시험 러너가 없다</td></tr>
+  <tr><td><b>계측기 · PO 에 알림 통로</b></td><td class="c">계측기 · PO</td>
+      <td>그 둘에서는 <b>종 자체가 안 뜬다</b>. 개선요청 알림을 거기서도 보려면 각각 통로가 필요</td></tr>
+  <tr><td><b>계측기 · 개선요청 홈 화면 아이콘</b></td><td class="c">포털</td>
+      <td>—</td></tr>
+  <tr><td><code>dss-core</code> <b>원본 클론 정리</b></td><td class="c">—</td>
+      <td>미커밋 4개가 남아 있다. 🔴 <b>지우지 말고 <code>git stash</code> 로 치워 둔다</b> — 치운 것이 곧 백업</td></tr>
 </table>
 
 <footer>
