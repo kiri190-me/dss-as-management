@@ -126,10 +126,11 @@
 </header>
 
 <div class="ok">
-  <b>열 저장소 전부 미푸시 0.</b> 잃을 것이 없는 상태입니다.<br>
-  🔴 <b>연락서 판독기는 다 됐습니다</b> — 남은 것은 <b>469장을 한 번에 넣는 일</b> 하나입니다.<br>
-  🔴 <b>PO 이사는 절반을 넘었습니다</b> — 견적서 첨부의 「받기」까지 왔고, 다음이 「올리기」입니다.<br>
-  🔴 <b>오늘 확인한 것</b>: 끌어다 놓기는 눈으로 통과 · 팝업이 한 줄로 흐르던 결함은 고쳤습니다.
+  <b>2026-09-25 에 커밋 다섯.</b> A/S 1 · PO 4. 🔴 <b>아직 올리지 않았습니다.</b><br>
+  🔴 <b>연락서 S5 의 무대가 운영으로 정해졌습니다</b> — 개발 DB 에서는 469장 중 <b>3장</b>만
+  들어갑니다(실측). 짝지을 과거 수리 건이 개발에는 없습니다.<br>
+  🔴 <b>PO 첨부 「지우기」 통로가 열렸습니다</b> — 3d-3 을 일곱으로 쪼개 <b>셋</b>을 끝냈습니다.<br>
+  🔴 <b>끌어다 놓기는 닫혔습니다</b> — 사용자 눈 확인으로 「잘 동작한다」.
 </div>
 
 <h2>지금 하고 있는 것</h2>
@@ -139,18 +140,37 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">연락서 <b>469장 일괄 이식</b>(S5) — 설계 중</span>
-      <span class="chip">A/S</span>
-      <span class="chip run">착수 전</span>
+      <span class="now-title">PO <b>3d-3 첨부 올리기·지우기</b> — 일곱 중 셋</span>
+      <span class="chip">PO</span>
+      <span class="chip run">진행 중</span>
     </div>
     <p class="now-body">
-      판독기는 다 됐고 <b>한 장씩</b>은 화면에서 넣을 수 있다. 남은 것은 <b>여러 장을 도는 통로</b>다 —
-      🔴 <b>그 통로가 아직 없다</b>(2026-09-25 조사로 확정. <code>importKyosanReport</code> 를
-      부르는 스크립트가 0개).
+      🔴 <b>다음은 3d-3b(서버 붙이기)</b> — 남은 것 중 가장 크고, CSRF 문지기의 <b>첫 사용자</b>가 된다.
     </p>
     <p class="now-note">
-      🔴 착수 전에 정할 것 셋: <b>되돌리기</b>(지금 없다) · <b>이미 넣은 4건</b>을 어떻게 할지 ·
-      원본 503장이 <b>지워질 수 있는 자리</b>에만 있는 것. 아래 「연락서 판독기」 절 참조.
+      🔴 <b>3d-3b 가 넘겨받은 숙제 하나</b>: <code>guardQuoteAttachmentChange</code> 가 지금
+      <code>attachment-trash.ts</code> 에 임시로 있다(저쪽에서는 올리기 파일에 있는데 이 사이트에
+      그 파일이 아직 없어서). 3d-3b 가 <code>mutations/attachments.ts</code> 를 가져오면
+      <b>그쪽으로 옮기고 지우기 쪽은 불러 쓸 것</b> — 두 벌로 두면 견적서 잠금이 두 곳에서 갈린다.
+    </p>
+  </div>
+
+  <div class="now-item">
+    <div class="now-head">
+      <span class="now-mark">●</span>
+      <span class="now-title">연락서 <b>S5 일괄 이식</b> — 설계 끝 · <b>운영을 기다린다</b></span>
+      <span class="chip">A/S</span>
+      <span class="chip">보류</span>
+    </div>
+    <p class="now-body">
+      🔴 <b>개발 DB 에서는 3장뿐이다</b>(2026-09-25 실측). 연락서 469장이 가리키는 과거 수리 건이
+      개발에는 없기 때문이고, 이 시스템은 <b>수리 건을 새로 만들지 않는다</b>(사용자 결정).
+      <b>운영(NAS)에는 그 건들이 있다</b>(사용자 확인) — 그래서 S5 는 원래 <b>운영에서 돌릴 일</b>이다.
+    </p>
+    <p class="now-note">
+      NAS 에 닿는 날 세 조각으로 간다: <b>S5-0</b> 원본을 안전한 곳으로 ·
+      <b>S5-1</b> 러너(<code>--apply</code> 없이는 한 글자도 안 쓴다) ·
+      <b>S5-2</b> 되돌리기. 🔴 <b>되돌리기 없이 운영에 손대지 않는다.</b>
     </p>
   </div>
 
@@ -228,12 +248,35 @@
   <tr class="fin"><td>사용 부품 품명 한글 저장</td><td class="c">09-23</td><td>이 칸만은 <b>저장할 때</b> 바꾼다 (통계의 묶는 열쇠라서)</td></tr>
 </table>
 
-<h3>진행 중</h3>
+<h3>진행 중 — 🔴 운영을 기다린다</h3>
 <table class="slices">
   <tr><th>무엇</th><th class="c">상태</th><th>지금 어디까지</th></tr>
-  <tr class="now"><td><b>S5 469장 일괄</b></td><td class="c"><span class="st run">설계 중</span></td>
-      <td>조사 완료(09-25). 🔴 <b>러너가 없어 만들어야 한다</b> · 되돌리기·백업을 먼저 정한다</td></tr>
+  <tr class="now"><td><b>S5 일괄 이식</b></td><td class="c"><span class="st wait">설계 끝</span></td>
+      <td>조사·설계 완료(09-25). 🔴 <b>무대가 운영으로 정해졌다</b> — 개발에서는 3장뿐이라
+          러너를 만들어도 검증밖에 못 한다. NAS 에 닿는 날 S5-0 → S5-1 → S5-2 로 간다</td></tr>
 </table>
+
+<h3>🔴 2026-09-25 실측 — 「469장」이라는 이름이 규모를 잘못 말하고 있었다</h3>
+
+<p>
+  읽기 전용 실측 도구(<code>scripts/match-kyosan-reports.ts</code>)를 개발 DB 에 대고 돌린 결과다.
+  DB 는 읽기만 했고 개인정보는 한 글자도 찍히지 않았다.
+</p>
+
+<table>
+  <tr><th>갈래</th><th class="c">장수</th><th class="c">비율</th></tr>
+  <tr><td>연락서 읽힘 (파일 503개 중)</td><td class="c">469장</td><td class="c">—</td></tr>
+  <tr class="fin"><td><b>넣을 수 있음</b></td><td class="c"><b>3장</b></td><td class="c"><b>0.6%</b></td></tr>
+  <tr><td>사람이 골라야 함</td><td class="c">16장</td><td class="c">3.4%</td></tr>
+  <tr><td><b>짝 없음</b></td><td class="c"><b>450장</b></td><td class="c"><b>95.9%</b></td></tr>
+</table>
+
+<p class="now-note">
+  짝이 없는 까닭의 <b>93%가 하나</b>다 — 「그 접수번호로 등록된 수리 건이 없다」(436장).
+  개발 DB 의 수리 건은 <b>217건</b>(D21 셋 · D25 84 · D26 130)뿐인데 연락서는
+  <b>서로 다른 접수번호 434개</b>를 담고 있다. 대부분이 그보다 오래된 건이라 짝지을 상대가 없다.<br>
+  🔴 <b>운영에는 그 건들이 있다</b>(2026-09-25 사용자 확인). <b>그래서 S5 는 운영에서 돌릴 일이다.</b>
+</p>
 
 <h3>진행할 것</h3>
 <table class="slices">
@@ -274,9 +317,12 @@
   같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
 </p>
 
-<div class="bar"><i class="d" style="width:69.6%"></i></div>
+<div class="bar"><i class="d" style="width:63.3%"></i><i class="r" style="width:3.3%"></i></div>
 <p class="barnote">
-  조각 <b>16개 끝</b> · <b>7개 남음</b> — 🔴 <b>첨부의 「받기」까지 왔다. 다음이 「올리기」다.</b>
+  조각 <b>19개 끝</b> · <b>1개 진행 중</b> · <b>10개 남음</b> —
+  🔴 <b>첨부의 「지우기」까지 왔다. 다음이 「붙이기」다.</b><br>
+  ⚠️ 앞 판(09-23)에는 「16개 끝 / 7개 남음」으로 적혀 있었다. <b>뒤로 간 것이 아니다</b> —
+  3d-3 한 덩이가 실측 결과 2,700줄로 드러나 <b>여덟으로 쪼갰기</b> 때문에 분모가 늘었다.
 </p>
 
 <h3>진행된 것</h3>
@@ -298,13 +344,36 @@
   <tr class="fin"><td>3d-1b</td><td>받을 확장자 · 저장 경로</td><td class="c">09-23</td></tr>
   <tr class="fin"><td>3d-2</td><td>🔴 <b>A/S 에서 붙인 엑셀을 PO 에서 내려받는다</b></td><td class="c">09-23</td></tr>
   <tr class="fin"><td>3d-5</td><td>받기에 실패하면 날 JSON 대신 팝업으로 · <b>줄바꿈 결함까지 고침</b></td><td class="c">09-23<br>09-25</td></tr>
+  <tr class="fin"><td>3d-3a</td><td><b>같은 출처 문지기</b>(CSRF) — A/S 것과 바이트 단위로 동일</td><td class="c">09-25</td></tr>
+  <tr class="fin"><td>3d-3a2</td><td>받침돌 둘 — 용량 표시 · 발행 결과 (순수 파일)</td><td class="c">09-25</td></tr>
+  <tr class="fin"><td>3d-3c</td><td><b>서버: 지우기·되살리기</b> — 실물 파일은 안 지운다</td><td class="c">09-25</td></tr>
 </table>
 
-<h3>진행할 것</h3>
+<h3>진행할 것 — 3d-3 의 남은 다섯</h3>
+
+<p class="barnote" style="margin-top:-.2rem">
+  🔴 <b>앞 넷은 멈춰도 시스템이 그대로 돈다.</b> 통로만 열리고 부르는 화면이 없는 상태라 어디서 끊어도
+  안전하다. 사용자 눈에 보이는 것은 <b>맨 끝 3d-3g 하나</b>다.
+</p>
+
+<table class="slices">
+  <tr><th>조각</th><th>무엇</th><th>걸려 있는 것</th></tr>
+  <tr class="todo"><td>3d-3b</td><td><b>서버: 붙이기</b> — 라우트 · 기록 · 슬롯 조회</td>
+      <td>🔴 <b>다음 차례.</b> CSRF 문지기의 첫 사용자 ·
+          <code>guardQuoteAttachmentChange</code> 를 제자리로 옮기는 숙제가 딸려 있다</td></tr>
+  <tr class="todo"><td>3d-3d</td><td>화면의 순수 조각</td>
+      <td>🔴 <b>b·c 뒤여야 한다</b>(09-25 에 확인) · 여기서 「3d 가 오기 전까지」 울타리를 푼다</td></tr>
+  <tr class="todo"><td>3d-3e</td><td><code>components</code> 시험 목록 만들기</td>
+      <td>🔴 <b>f 앞에 반드시</b> — 없으면 <code>.test.tsx</code> 하나가 목록 검사를 깬다.
+          🔴 <b>빈 목록으로 먼저 만들지 않는다</b>(「0개인데 통과」가 된다) — f 와 묶는다</td></tr>
+  <tr class="todo"><td>3d-3f</td><td>그리는 조각</td><td>d · e 뒤</td></tr>
+  <tr class="todo"><td>3d-3g</td><td><b>배선</b> — 여기서 처음 화면에 보인다</td>
+      <td>전부 뒤 · <code>.env.example</code> 문구 갱신이 딸린 일</td></tr>
+</table>
+
+<h3>진행할 것 — 3d-3 다음</h3>
 <table class="slices">
   <tr><th>조각</th><th>무엇</th><th class="c">규모</th><th>걸려 있는 것</th></tr>
-  <tr class="todo"><td>3d-3</td><td><b>올리기·지우기 통로</b> — 다음 조각</td><td class="c">1,330줄</td>
-      <td>🔴 <b>CSRF 결정이 여기</b> · 지우기·덮어쓰기를 막는 것 16가지를 지시서에 실을 것</td></tr>
   <tr class="todo"><td>3d-4</td><td>폼의 첨부 구역</td><td class="c">1,400줄</td><td>3d-3 뒤</td></tr>
   <tr class="todo"><td>3c-3</td><td>견적서 <b>발행</b></td><td class="c">—</td>
       <td>🔴 <b>3d-3 이 필요하다</b> — 아래 「앞 기록이 틀렸던 곳」 참조</td></tr>
@@ -315,6 +384,43 @@
   <tr class="todo"><td>5</td><td><b>배포</b> — compose · env · 백업 · 런북</td><td class="c">—</td>
       <td>🔴 <b>HIGH</b> · 양식 5키와 <code>UPLOADS_DIR</code> 이 함께 가야 한다</td></tr>
 </table>
+
+<h2>9월 25일에 끝낸 것</h2>
+
+<table>
+  <tr><th>무엇</th><th class="c">어디</th><th>결과</th></tr>
+  <tr class="fin"><td><b>알림 팝업이 표 칸의 「줄바꿈 금지」를 물려받던 것</b></td><td class="c">PO</td>
+      <td>내용 1070px·한 줄 → 446px·세 줄 (<code>fc2d759</code>) · <b>눈 확인 통과</b></td></tr>
+  <tr class="fin"><td><b>같은 출처 문지기</b>(CSRF) — 3d-3a</td><td class="c">PO</td>
+      <td>A/S 것과 바이트 단위 동일 · 시험 855 → 875 (<code>449325c</code>)</td></tr>
+  <tr class="fin"><td><b>받침돌 둘</b> — 용량 표시 · 발행 결과 — 3d-3a2</td><td class="c">PO</td>
+      <td>875 → 927 (<code>106495b</code>)</td></tr>
+  <tr class="fin"><td><b>첨부 지우기·되살리기 서버 통로</b> — 3d-3c</td><td class="c">PO</td>
+      <td>DB 시험 53 → 66 · 실물 파일은 안 지운다 (<code>344d4ca</code>)</td></tr>
+  <tr class="fin"><td><b>현황판에 두 갈래의 전체 흐름</b></td><td class="c">A/S</td>
+      <td>305 → 521줄 (<code>0ea3039</code>)</td></tr>
+  <tr class="fin"><td><b>연락서 S5 조사·실측·설계</b></td><td class="c">A/S</td>
+      <td>코드 0줄. 🔴 <b>무대가 운영으로 정해졌다</b> — 위 실측 표</td></tr>
+</table>
+
+<h3>🔴 오늘 지시서가 세 번 틀렸다 — 셋 다 서브에이전트가 멈춰서 살렸다</h3>
+
+<table>
+  <tr><th>무엇이 틀렸나</th><th>어떻게 드러났나</th></tr>
+  <tr><td>연락서 이식 본체의 <b>파일 경로</b>를 <code>lib/kyosan/</code> 아래로 적었다</td>
+      <td>그런 파일이 없었다. 실제는 <code>lib/server/services/</code></td></tr>
+  <tr><td>3d-3d 를 <b>「독립 조각」</b>이라고 적었다</td>
+      <td>받침돌 둘이 없고, PO 의 기존 시험이 그 import 를 막고 있었다.
+          🔴 <b>착수 전에 멈춰서 보고</b> — 코드 변경 0</td></tr>
+  <tr><td>3d-3c 의 <b>시험 원본 파일</b>을 잘못 지목 · <code>guardQuoteAttachmentChange</code> 를 빠뜨림</td>
+      <td>지목한 파일에 견적서 내용이 사실상 없었고(<code>quote</code> 1건 vs 249건),
+          빠진 함수가 없으면 <b>견적서 잠금이 통째로 사라진다</b></td></tr>
+</table>
+
+<p class="now-note">
+  🔴 <b>배운 것</b>: 지시서에 「막히면 직접 하지 말고 멈추고 보고하라」를 넣는 것이 값을 한다.
+  셋 다 그 한 줄 덕에 손해 없이 지나갔다. 남은 조각에도 계속 넣는다.
+</p>
 
 <h2>9월 23일에 끝낸 것</h2>
 
