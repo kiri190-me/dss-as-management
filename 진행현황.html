@@ -126,12 +126,13 @@
 </header>
 
 <div class="ok">
-  <b>2026-09-28 에 커밋 둘.</b> A/S 1 · PO 1. 🔴 <b>아직 올리지 않았습니다.</b><br>
-  🔴 <b>S5 를 지금 돌렸으면 사용 부품을 되돌릴 수 없었습니다</b> — 표에 출처 칸이 없고 흔적에도
-  id 가 <b>0행</b>이었습니다. 먼저 막았습니다(S5-A).<br>
-  🔴 <b>연락서 원본 1.8GB 를 임시 폴더 밖으로 옮겼습니다</b>(S5-0) — 개수·바이트·해시 대조 완료.<br>
-  🔴 <b>PO 첨부 「올리기」 통로가 열렸습니다</b> — 3d-3 일곱 중 <b>넷</b>을 끝냈습니다.<br>
-  🔴 <b>A/S 로그인 404 는 코드가 아니었습니다</b> — dev 서버가 통로를 안 만든 것. 코드 변경 0줄.
+  <b>2026-09-28 에 커밋 16개.</b> PO 8 · A/S 8. 🔴 <b>아직 올리지 않았습니다.</b><br>
+  🔴 <b>연락서 이식은 코드가 다 끝났습니다</b> — 원본 안전 확보 · 되돌리기 준비 · 되돌리기 도구 ·
+  일괄 러너. 남은 것은 <b>운영 배포와 실행</b>뿐입니다.<br>
+  🔴 <b>PO 에 첨부 칸이 화면에 섰고 [새 견적서] 팝업이 뜹니다</b> — 둘 다 눈 확인 통과.
+  시험 927 → <b>1,236</b>(단위) · 0 → <b>110</b>(컴포넌트).<br>
+  🔴 <b>배포는 PO 가 다 끝난 뒤 한 창구에서</b> 합니다(사용자 결정). 연락서 먼저, 확인 뒤 PO.<br>
+  🔴 <b>새로 들어온 일 — 견적서 결재</b>(승인 절차). 로드맵에 없던 것이고 지금 조사 중입니다.
 </div>
 
 <h2>지금 하고 있는 것</h2>
@@ -141,80 +142,81 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">연락서 <b>S5 일괄 이식</b> — <b>되돌리기를 만드는 중</b></span>
-      <span class="chip">A/S</span>
+      <span class="now-title">PO <b>견적서 결재</b> — 새로 들어온 일. 조사 중</span>
+      <span class="chip">PO</span>
       <span class="chip run">진행 중</span>
     </div>
     <p class="now-body">
-      🔴 <b>조사에서 큰 구멍이 나왔다</b>: 지금 469장을 돌리면 <b>사용 부품을 되돌릴 수 없다.</b>
-      <code>repair_case_used_parts</code> 에 「어느 줄이 이식에서 왔는지」 알려 주는 칸이 없고
-      (칸 여덟 개 전부 확인), 이식 흔적에도 id 가 없었다(실측 <b>0행</b>).
-      사람이 손으로 적는 줄도 <code>part_id</code> 가 비어 있어 그것으로도 못 가른다.
+      2026-09-28 사용자가 짚어 주었다 — <b>로드맵에 없던 일</b>이다.
+      「승인 절차」는 A/S 에 이미 있고 <b>결재선을 범위로 가른다</b>(실측:
+      <code>FINAL_SHIPMENT</code> 1·2·3판 · <code>PART_ISSUE</code> 1·2·3판 ·
+      <b><code>QUOTE</code> 1판 2단계</b>).
     </p>
     <p class="now-note">
-      순서: <b>S5-0</b> 원본을 임시 폴더 밖으로 ✔ · <b>S5-A</b> 흔적에 id 싣기 ✔ ·
-      <b>S5-B</b> 되돌리기(지금) · <b>S5-C</b> 러너.
-      🔴 <b>S5-A 를 러너보다 먼저 둔 것이 이 설계의 핵심</b> — 러너를 먼저 만들면
-      되돌릴 수 없는 이식을 돌릴 수 있게 된다.
-      <b>되돌리기 없이 운영에 손대지 않는다.</b>
-    </p>
-  </div>
-
-  <div class="now-item">
-    <div class="now-head">
-      <span class="now-mark">●</span>
-      <span class="now-title">PO <b>3d-3 첨부 올리기·지우기</b> — 일곱 중 <b>넷</b></span>
-      <span class="chip">PO</span>
-      <span class="chip">다음</span>
-    </div>
-    <p class="now-body">
-      <b>3d-3b(서버 붙이기)가 끝났다</b> — 남은 것 중 가장 컸다. 🔴 <b>다음은 3d-3d(화면 순수 조각)</b>.
-    </p>
-    <p class="now-note">
-      🔴 <b>3d-3d 를 「독립」으로 보지 마라</b> — 기존 시험
-      (<code>quote-list-screen-source.test.ts</code>)의 금지 목록이
-      <code>queries/attachments</code>·<code>attachment-allowlist</code> 를 막고 있고,
-      A/S 원본이 그 둘을 쓴다. <b>그 울타리를 푸는 것이 3d-3d 의 일</b>이다.
-      그 뒤 <b>3d-3e+3d-3f</b>(시험, 묶어서) → <b>3d-3g</b>(배선, 여기서 처음 화면에 보인다).
+      🔴 <b>결재선 설정은 A/S 에서만 한다</b>(사용자 결정). PO 는 그 결재선을 <b>읽어서 돌리기만</b>
+      한다 — 옮길 설정 화면이 없다.
+      표들이 공용 묶음에 있어 <b>자료는 이미 하나</b>다.
+      옮길 몫은 「돌리는 쪽」 약 <b>1,735줄</b> + 알림 사슬(사용자가 알림까지 하기로 선택).
+      🔴 <b>결재와 발행(3c-3)의 순서</b>가 조각 순서를 정한다 — 조사가 그것을 가린다.
     </p>
   </div>
 
   <div class="now-item fin">
     <div class="now-head">
       <span class="now-mark">✔</span>
-      <span class="now-title">A/S 로그인이 <b>404 로 끝나던 것</b> — 고쳤다</span>
+      <span class="now-title">연락서 <b>일괄 이식 — 코드 완료</b></span>
       <span class="chip">A/S</span>
+      <span class="chip fin">배포 대기</span>
+    </div>
+    <p class="now-body">
+      네 조각이 다 끝났다 — 원본 1.8GB 안전 확보(S5-0) · 흔적에 id 싣기(S5-A) ·
+      되돌리기 도구(S5-B) · 일괄 러너(S5-C). <b>개발의 시험 이식 4건을 실제로 되돌려</b>
+      도구가 동작하는 것을 확인했다.
+    </p>
+    <p class="now-note">
+      🔴 <b>지금 돌렸으면 사용 부품을 되돌릴 수 없었다</b> — 표에 출처 칸이 없고 흔적에도 id 가
+      <b>0행</b>이었다. S5-A 가 그것을 막았고, 그래서 <b>러너보다 먼저</b> 두었다.<br>
+      🔴 <b>남은 것은 운영 배포와 실행뿐이다.</b> 운영 DB 는 이 PC 에서 못 닿는다 —
+      러너가 <code>dss-as-tools</code> 이미지에 들어가야 한다.
+    </p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">PO <b>첨부 칸</b>과 <b>[새 견적서] 팝업</b> — 눈 확인 통과</span>
+      <span class="chip">PO</span>
       <span class="chip fin">끝</span>
     </div>
     <p class="now-body">
-      사슬은 <code>/</code> → <code>/dashboard</code> → <code>/login</code> →
-      <code>/api/auth/sso/start</code> 였고 마지막에서 404 가 났다.
-      🔴 <b>코드 문제가 아니었다</b> — 그날 아침에 뜬 dev 서버가 <code>sso/</code> 아래 세 통로를
-      끝내 컴파일하지 않은 것이다. 파일 시각만 바꿔 다시 컴파일시키자 <b>즉시 302</b>로 돌아왔다.
+      견적서 수정 화면에 <b>「견적서 파일」 구역</b>이 서서 올리기·보기·내려받기·바꾸기·지우기가
+      된다(3d-4). 목록의 <b>[새 견적서]가 팝업을 띄워</b> 종류와 엑셀 전용을 먼저 고르게 한다(3e-3).
+      둘 다 사용자가 눈으로 확인했다.
     </p>
     <p class="now-note">
-      🔴 <b>가른 한 가지는 404 의 「본문」이었다.</b> 그 통로가 내는 404 는 JSON 인데 실제로 온 것은
-      <b>HTML</b>(없는 주소에 주는 기본 404) — 형식이 다르면 <b>통로가 등록조차 안 된 것</b>이다.
-      상태 코드만 보면 이 차이가 안 보인다. <b>운영(NAS)은 해당 없다</b> — 미리 빌드한 이미지다.
+      🔴 <b>팝업에서 올린 엑셀은 칸 채우기까지만 되고 [저장] 때 파일은 안 붙는다.</b>
+      새 견적서 화면에 첨부 칸이 아직 없어서다 — 3d-4 가 「만든 직후 올리기」 배선이 없어
+      일부러 안 세웠다(세웠으면 고른 파일이 말없이 사라진다).
+      다음 조각이 <code>handleSubmit</code> 의 빈 자리 하나만 채우면 붙는다.
     </p>
   </div>
 
   <div class="now-item fin">
     <div class="now-head">
       <span class="now-mark">✔</span>
-      <span class="now-title">A/S 안의 PO·견적서는 <b>없어질 것</b> — 결정</span>
-      <span class="chip">A/S</span>
+      <span class="now-title">배포는 <b>PO 가 끝난 뒤 한 창구에서</b> — 결정</span>
+      <span class="chip">전체</span>
       <span class="chip fin">결정</span>
     </div>
     <p class="now-body">
-      2026-09-28 사용자 확인 — 「<b>a/s쪽의 po는 나중에는 없어질 시스템이니까 크게 신경쓰지 않아도 돼.</b>」
-      옮기기가 끝나면 A/S 에서 걷어낸다(조각 4).
+      2026-09-28 사용자 결정 — 「<b>po시스템까지 다 끝나면 한꺼번에 배포하도록 하자.</b>」
+      둘 다 NAS 배포가 필요해서, 두 번 하면 백업·점검·런북이 두 벌이 된다.
     </p>
     <p class="now-note">
-      🔴 <b>그래서 A/S 의 PO·견적서 쪽은 이제 베껴 오는 원본으로 읽기만 한다.</b>
-      거기서 결함을 찾아도 고치지 않는다 — 없어질 화면에 고친 것은 통째로 버려진다.
-      실제로 이날 「날 JSON 구멍」을 고치자고 제안했다가 이 말을 들었다.
-      (A/S <b>본업</b> — 접수·수리·보고서·부품 — 은 해당 없다. 그쪽은 계속 산다.)
+      🔴 <b>같은 날 하되 같은 단계로 묶지 않는다.</b> 한 단계로 합치면 문제가 났을 때 어느 쪽
+      탓인지 못 가린다. <b>순서는 연락서 먼저</b> — 그때는 PO 가 아직 안 떠 있어 움직이는 것이
+      적고, 되돌리기가 개발에서 이미 검증됐다.
+      절차 일곱 단계는 <code>2026-09-28-결정할것.html</code> 에 있다.
     </p>
   </div>
 
@@ -228,12 +230,10 @@
 </p>
 
 <div class="bar">
-  <i class="d" style="width:89.5%"></i><i class="r" style="width:5.3%"></i>
+  <i class="d" style="width:100%"></i>
 </div>
 <p class="barnote">
-  일감 <b>17개 끝</b> · <b>1개 진행 중</b> · <b>1개 남음</b> —
-  🔴 <b>읽는 일은 다 됐고, 남은 것은 「한 번에 넣기」다.</b>
-  S5 를 네 조각으로 쪼개면서 분모가 늘었다(되돌리기가 없다는 것이 드러나서).
+  일감 <b>19개 전부 끝</b> — 🔴 <b>코드는 다 됐다. 남은 것은 운영 배포와 실행뿐이다.</b>
 </p>
 
 <h3>진행된 것</h3>
@@ -256,23 +256,32 @@
   <tr class="fin"><td>사용 부품 품명 한글 저장</td><td class="c">09-23</td><td>이 칸만은 <b>저장할 때</b> 바꾼다 (통계의 묶는 열쇠라서)</td></tr>
 </table>
 
-<h3>진행 중 — S5 를 네 조각으로 나눠 간다</h3>
+<h3>S5 일괄 이식 — 네 조각 전부 끝났다</h3>
 <table class="slices">
-  <tr><th>무엇</th><th class="c">상태</th><th>지금 어디까지</th></tr>
+  <tr><th>무엇</th><th class="c">상태</th><th>결과</th></tr>
   <tr class="fin"><td><b>S5-0</b> 원본을 임시 폴더 밖으로</td><td class="c"><span class="st">끝</span></td>
-      <td>09-28. 503장 + 변환 전 143장 + 지도 = <b>1.8GB</b> 를
-          <code>_백업\2026-09-28-연락서원본</code> 으로. 개수·총 바이트 세 폴더 전부 일치,
-          무작위 9장 해시 일치. 임시 폴더 것은 지우지 않았다</td></tr>
+      <td>503장 + 변환 전 143장 + 지도 = <b>1.8GB</b> 를 <code>_백업\2026-09-28-연락서원본</code> 으로.
+          개수·총 바이트 세 폴더 전부 일치, 무작위 9장 해시 일치</td></tr>
   <tr class="fin"><td><b>S5-A</b> 흔적에 id 싣기</td><td class="c"><span class="st">끝</span></td>
-      <td>09-28 (<code>99b860d</code>). 🔴 <b>되돌리기의 전제</b> — 이것 없이 469장을 돌리면
-          사용 부품이 영영 안 지워진다. 스키마·마이그레이션 0</td></tr>
-  <tr class="now"><td><b>S5-B</b> 되돌리기</td><td class="c"><span class="st wait">진행 중</span></td>
-      <td><code>--apply</code> 없이는 한 글자도 안 쓴다 · 파일은 지우지 않고 <b>치워 둔다</b> ·
-          개수가 어긋나면 멈춘다. 첫 사용은 개발의 4건</td></tr>
-  <tr class="todo"><td><b>S5-C</b> 러너</td><td class="c"><span class="st">다음</span></td>
-      <td>B 뒤. 🔴 <b>순서를 바꾸지 마라</b> — 러너가 먼저 나오면 되돌릴 수 없는 이식을
-          돌릴 수 있게 된다</td></tr>
+      <td><code>99b860d</code>. 🔴 <b>되돌리기의 전제</b> — 이것 없이 돌리면 사용 부품이 영영
+          안 지워진다. 그래서 러너보다 먼저 두었다. 마이그레이션 0</td></tr>
+  <tr class="fin"><td><b>S5-B</b> 되돌리기 도구</td><td class="c"><span class="st">끝</span></td>
+      <td><code>d6dd859</code>. 안전장치 열. <code>--apply</code> 없이는 한 글자도 안 쓰고,
+          파일은 지우지 않고 <b>격리 폴더로 치운다</b>. 개수가 어긋나면 그 흔적을 통째로 건너뛴다.
+          🔴 <b>개발의 4건에 실제로 써서 동작을 확인했다</b></td></tr>
+  <tr class="fin"><td><b>S5-C</b> 일괄 러너</td><td class="c"><span class="st">끝</span></td>
+      <td><code>70b582f</code>. 한 회차에 번호 하나 → <code>revert --batch</code> 로 통째로 되돌린다.
+          🔴 <b>부품 건너뛰기 장수를 따로 센다</b>(잠긴 건에서 말없이 건너뛰므로)</td></tr>
 </table>
+
+<div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#fef2f2;
+     border-left:3px solid #991b1b;border-radius:0 .3rem .3rem 0;font-size:.9rem">
+  🔴 <b>운영에서 남은 것</b> — 운영 DB 는 이 PC 에서 못 닿는다(NAS compose 가 포트를 일부러
+  안 열어 뒀다). 러너가 <code>dss-as-tools</code> 이미지에 들어가야 하고, 연락서 원본을 붙일
+  볼륨도 지금 마운트에 없다. 절차 일곱 단계는 <code>2026-09-28-결정할것.html</code> 3번.<br>
+  🔴 <b>배포 전에 할 것 하나</b> — <b>출하 잠금 갈래의 시험</b>. 그 갈래에서 부품이 빈 배열을
+  돌려준다는 보장이 지금은 코드 읽기로만 선다.
+</div>
 
 <p class="now-note">
   🔴 <b>운영에서 돌리는 것은 별개의 일이다.</b> NAS 의 운영 DB 는 이 PC 에서 못 닿는다 —
@@ -312,27 +321,24 @@
       <td>첨부 133개 · 작업 기록 179줄 · 🔴 <b>디스크 파일도 남아 있다</b></td></tr>
 </table>
 
-<h3>🔴 S5 착수 전에 정해야 하는 것 넷 (2026-09-25 조사·실측)</h3>
+<h3>착수 전에 정해야 했던 넷 — <b>전부 해결됐다</b> (2026-09-28)</h3>
 
 <table>
-  <tr><th>무엇</th><th>지금 상태</th></tr>
-  <tr><td><b>① 여러 장을 도는 통로</b></td>
-      <td>🔴 <b>없다.</b> 이식 함수를 부르는 스크립트가 0개다. 화면은 <b>한 장씩</b>만 받는다
-          (<code>multiple={false}</code>). 가장 가까운 골격은 <code>scripts/match-kyosan-reports.ts</code>
-          — 폴더를 훑고 짝짓기·미리보기까지 이미 한다</td></tr>
-  <tr><td><b>② 이미 넣은 것들</b></td>
-      <td>🔴 <b>DB 를 읽어 확정했다 — 흔적이 8행이다.</b>
-          살아 있는 4건(<code>D210101</code>·<code>D210102</code>·<code>D210103</code>·<code>D260403</code>)과
-          <b>주인 없는 4행</b>(수리 건이 하드 삭제되어 연결이 끊겼다).
-          중복은 <b>(수리 건 + 파일 내용)</b>으로 막으므로 살아 있는 4건은 <b>건너뛰어진다</b> —
-          앞 세션의 우려가 맞았다. 주인 없는 4행은 <b>아무것도 막지 못한다</b></td></tr>
-  <tr><td><b>③ 되돌리기</b></td>
-      <td>🔴 <b>없다.</b> 잘못 들어가도 지우는 길이 만들어져 있지 않다.
-          🔴 <b>사용 부품 칸이 가장 약하다</b> — 그 줄에는 「이식으로 생겼다」는 표시가 없어
-          손으로 적은 줄과 구별되지 않는다(감사 기록의 스냅샷으로만 복원 가능)</td></tr>
-  <tr><td><b>④ 원본 파일 자리</b></td>
-      <td>🔴 <b>503장이 임시 폴더에만 있다</b>(<code>%TEMP%</code>). 윈도우가 지울 수 있는 자리다.
-          마스터는 NAS 에 있다. 돌리기 전에 안전한 곳으로 옮기는 편이 낫다</td></tr>
+  <tr><th style="width:26%">무엇</th><th>어떻게 풀렸나</th></tr>
+  <tr class="fin"><td><b>① 여러 장을 도는 통로</b></td>
+      <td>러너(S5-C)를 만들었다. 계획은 <b>이식기와 같은 읽기 경로</b>를 간다 — 별도 판정 규칙을
+          새로 지으면 계획이 거짓말을 한다</td></tr>
+  <tr class="fin"><td><b>② 이미 넣은 4건</b></td>
+      <td>사용자 결정으로 <b>지우고 다시 넣기로</b> 했고, <b>실제로 되돌렸다.</b>
+          흔적 8 → 4(주인 없는 4만 남음) · 4건의 작업 기록 9 → 0 · 부품 6 → 0 · 첨부 84 → 0.
+          🔴 <b>보고서 1장과 남의 부품 1줄은 그대로</b>다</td></tr>
+  <tr class="fin"><td><b>③ 되돌리기</b></td>
+      <td>S5-A 가 흔적에 id 를 싣고 S5-B 가 도구를 만들었다.
+          🔴 옛 흔적은 한글 백필 때문에 대조가 안 맞았는데, <b>백필이 쓴 그 함수로 되짚어</b> 풀었다
+          — 느슨하게 만든 것이 아니다</td></tr>
+  <tr class="fin"><td><b>④ 원본 파일 자리</b></td>
+      <td>1.8GB 를 임시 폴더 밖으로 옮기고 개수·바이트·해시를 대조했다.
+          되돌린 4건의 원본도 따로 챙겼다</td></tr>
 </table>
 
 <h2>갈래 ② PO 시스템 이사</h2>
@@ -342,10 +348,12 @@
   같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
 </p>
 
-<div class="bar"><i class="d" style="width:66.7%"></i></div>
+<div class="bar"><i class="d" style="width:81.5%"></i><i class="r" style="width:3.7%"></i></div>
 <p class="barnote">
-  조각 <b>20개 끝</b> · <b>10개 남음</b> —
-  🔴 <b>첨부의 「붙이기」까지 왔다. 서버 쪽은 이것으로 끝이고, 남은 것은 화면이다.</b><br>
+  조각 <b>22개 끝</b> · <b>1개 진행 중</b> · <b>4개 남음</b> —
+  🔴 <b>첨부와 수기 엑셀이 끝났다. 남은 큰 것은 결재 · 발행 · 인쇄 셋이다.</b><br>
+  ⚠️ 9월 28일에 「10개 남음」이라 적혀 있었다. <b>줄어든 것이 아니라 세는 법이 바뀌었다</b> —
+  3d-3 의 남은 넷을 넷으로 끝냈고, 3e 를 셋으로 끝냈고, <b>결재가 새로 들어왔다</b>.<br>
   ⚠️ 앞 판(09-23)에는 「16개 끝 / 7개 남음」으로 적혀 있었다. <b>뒤로 간 것이 아니다</b> —
   3d-3 한 덩이가 실측 결과 2,700줄로 드러나 <b>여덟으로 쪼갰기</b> 때문에 분모가 늘었다.
 </p>
@@ -373,42 +381,49 @@
   <tr class="fin"><td>3d-3a2</td><td>받침돌 둘 — 용량 표시 · 발행 결과 (순수 파일)</td><td class="c">09-25</td></tr>
   <tr class="fin"><td>3d-3c</td><td><b>서버: 지우기·되살리기</b> — 실물 파일은 안 지운다</td><td class="c">09-25</td></tr>
   <tr class="fin"><td>3d-3b</td><td>🔴 <b>서버: 붙이기</b> — 본문 전 확인 열셋 · 크기 두 겹 ·
-      내용 앞머리로 종류 판정 · 칸 교체는 잠금 안에서. 넘겨받은 숙제(잠금 함수 이사)도 끝냈다</td><td class="c">09-28</td></tr>
+      내용 앞머리로 종류 판정 · 칸 교체는 잠금 안에서</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3d-3d</td><td>화면의 순수 조각 + <b>시험 울타리 풀기</b> —
+      12칸을 파일별 지도로 바꿔 둘만 풀고 <b>「타입 전용으로만」</b>으로 메웠다</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3d-3e·f</td><td><code>components</code> 시험 통로 · 끌어다 놓기 · 고르기 · 지우기 창</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3d-4</td><td>🔴 <b>첨부 칸이 화면에 선다</b> — 내려받기 라우트 + 칸 + 배선.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3d-6a</td><td>팝업이 고른 엑셀을 작성 화면으로 나르는 상자</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3e-1</td><td>수기 엑셀 <b>읽개 사슬 넷</b>(1,333줄) + 읽기 통로.
+      🔴 실제 양식 파일 넷을 열고 통과했다</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3e-2</td><td>엑셀을 읽어 폼을 채우는 층(831줄)</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3e-3</td><td>🔴 <b>[새 견적서] 팝업이 뜬다</b> — 종류 · 엑셀 전용을 먼저 고른다.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
 </table>
 
-<h3>진행할 것 — 3d-3 의 남은 넷</h3>
-
-<p class="barnote" style="margin-top:-.2rem">
-  🔴 <b>앞 셋은 멈춰도 시스템이 그대로 돈다.</b> 통로만 열리고 부르는 화면이 없는 상태라 어디서 끊어도
-  안전하다. 사용자 눈에 보이는 것은 <b>맨 끝 3d-3g 하나</b>다.
-</p>
-
+<h3>🔴 진행할 것 — 실측한 규모</h3>
 <table class="slices">
-  <tr><th>조각</th><th>무엇</th><th>걸려 있는 것</th></tr>
-  <tr class="todo"><td>3d-3d</td><td>화면의 순수 조각</td>
-      <td>🔴 <b>다음 차례.</b> b·c 가 끝나 받침돌이 다 깔렸다 ·
-          여기서 「3d 가 오기 전까지」 울타리를 푼다</td></tr>
-  <tr class="todo"><td>3d-3e</td><td><code>components</code> 시험 목록 만들기</td>
-      <td>🔴 <b>f 앞에 반드시</b> — 없으면 <code>.test.tsx</code> 하나가 목록 검사를 깬다.
-          🔴 <b>빈 목록으로 먼저 만들지 않는다</b>(「0개인데 통과」가 된다) — f 와 묶는다</td></tr>
-  <tr class="todo"><td>3d-3f</td><td>그리는 조각</td><td>d · e 뒤</td></tr>
-  <tr class="todo"><td>3d-3g</td><td><b>배선</b> — 여기서 처음 화면에 보인다</td>
-      <td>전부 뒤 · <code>.env.example</code> 문구 갱신이 딸린 일</td></tr>
-</table>
-
-<h3>진행할 것 — 3d-3 다음</h3>
-<table class="slices">
-  <tr><th>조각</th><th>무엇</th><th class="c">규모</th><th>걸려 있는 것</th></tr>
-  <tr class="todo"><td>3d-4</td><td>폼의 첨부 구역</td><td class="c">1,400줄</td><td>3d-3 뒤</td></tr>
-  <tr class="todo"><td>3c-3</td><td>견적서 <b>발행</b></td><td class="c">—</td>
-      <td>🔴 <b>3d-3 이 필요하다</b> — 아래 「앞 기록이 틀렸던 곳」 참조</td></tr>
-  <tr class="todo"><td>3e</td><td>수기 엑셀로 칸 채우기</td><td class="c">1,930줄</td><td>3d 에서 떼어냈다</td></tr>
-  <tr class="todo"><td>3f</td><td>인쇄 · 미리보기</td><td class="c">—</td><td>견적서의 마지막 조각</td></tr>
-  <tr class="todo"><td>4</td><td><b>A/S 정리</b> — 메뉴에서 빼고 남은 참조를 링크로</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · 이때까지 두 곳에 같은 화면이 있다</td></tr>
+  <tr><th>조각</th><th>무엇</th><th class="c">코드</th><th>걸려 있는 것</th></tr>
+  <tr class="now"><td><b>결재</b></td><td>견적서 <b>승인 절차</b> — 요청 · 순차 승인 · 이력 · 알림</td>
+      <td class="c"><b>~1,735</b><br>+ 알림</td>
+      <td>🔴 <b>지금 조사 중.</b> 로드맵에 없던 일이다(2026-09-28 사용자).
+          <b>결재선 설정은 A/S 에서만</b> 하므로 PO 는 읽어서 돌리기만 한다</td></tr>
+  <tr class="todo"><td>3c-3</td><td>견적서 <b>발행</b> — 파일을 만들어 공유폴더에 놓고 첨부 칸에 꽂는다</td>
+      <td class="c"><b>1,698</b></td>
+      <td>🔴 <b>결재와의 순서를 먼저 정해야 한다</b> — 결재가 끝나야 발행인가?</td></tr>
+  <tr class="todo"><td>3f</td><td>인쇄 · 미리보기</td><td class="c"><b>1,637</b><br>시험 1,415</td>
+      <td>견적서의 마지막 조각</td></tr>
+  <tr class="todo"><td>작은 것</td><td>보안 헤더 · 새 견적서 첨부 칸 · 낡은 주석 두 줄</td>
+      <td class="c">작음</td>
+      <td>🔴 <b>보안 헤더는 배포 전 필수</b> — 아래 참조</td></tr>
+  <tr class="todo"><td>4</td><td><b>A/S 정리</b> — 메뉴에서 빼고 걷어내기</td><td class="c">—</td>
+      <td>🔴 <b>HIGH</b> · 파괴적 작업 · 이때까지 두 곳에 같은 화면이 있다</td></tr>
   <tr class="todo"><td>5</td><td><b>배포</b> — compose · env · 백업 · 런북</td><td class="c">—</td>
       <td>🔴 <b>HIGH</b> · 양식 5키와 <code>UPLOADS_DIR</code> 이 함께 가야 한다</td></tr>
 </table>
+
+<div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#fef2f2;
+     border-left:3px solid #991b1b;border-radius:0 .3rem .3rem 0;font-size:.9rem">
+  🔴 <b>PO 에 보안 헤더가 한 줄도 없다</b>(2026-09-28 실측). A/S 는 여섯을 모든 주소에 건다.
+  오늘 3d-4 가 <b>PDF 를 새 탭에서 여는 길을 처음 열었으므로</b> 노출면이 늘었다 —
+  이 조각이 만든 위험은 아니고 원래 없던 것이다.
+  ⚠️ 함정 하나: 전역 헤더와 라우트 헤더의 <b>이름이 겹치면 라우트 것이 조용히 버려진다.</b>
+  내려받기 통로가 <code>nosniff</code> 를 스스로 내고 있어 확인이 필요하다.
+</div>
 
 <h2>9월 28일에 끝낸 것</h2>
 
@@ -424,26 +439,85 @@
       <td><code>usedPartIds</code>·<code>attachmentIds</code>·<code>importBatchId</code>.
           <b>스키마·마이그레이션 0</b>(<code>metadata</code> 가 이미 jsonb).
           시험 <b>32 통과</b> · 단언은 개수가 아니라 <b>id 로 대조</b> (<code>99b860d</code>)</td></tr>
+  <tr class="fin"><td><b>되돌리기 도구</b> — S5-B</td><td class="c">A/S</td>
+      <td>안전장치 열. <code>--apply</code> 없이는 한 글자도 안 쓰고 <b>파일은 지우지 않고 치운다</b>.
+          옛 흔적 대조가 한글 백필 때문에 안 맞던 것을 <b>백필이 쓴 그 함수로 되짚어</b> 풀었다
+          (<code>d6dd859</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>개발의 시험 이식 4건을 실제로 되돌렸다</b></td><td class="c">A/S</td>
+      <td>지우기 전에 백업 64KB. 흔적 8 → <b>4</b> · 작업 기록 9 → <b>0</b> · 부품 6 → <b>0</b> ·
+          첨부 84 → <b>0</b>. 🔴 <b>보고서 1장과 남의 부품 1줄은 그대로</b>.
+          파일 104개는 격리 폴더로</td></tr>
+  <tr class="fin"><td><b>일괄 이식 러너</b> — S5-C</td><td class="c">A/S</td>
+      <td>회차 번호 하나로 묶어 <code>revert --batch</code> 로 통째로 되돌린다.
+          🔴 <b>부품 건너뛰기 장수를 따로 센다</b>. 계획은 이식기와 <b>같은 읽기 경로</b>를 간다
+          (<code>70b582f</code>)</td></tr>
+  <tr class="fin"><td><b>첨부 화면 순수 조각 + 울타리</b> — 3d-3d</td><td class="c">PO</td>
+      <td>12칸 금지를 <b>파일별 지도</b>로 바꿔 둘만 풀고 <b>「<code>import type</code> 으로만」</b>으로
+          메웠다. 🔴 옛 금지는 「화면이 첨부를 세러 내려가는 것」을 <b>재고 있지 않았다</b> —
+          이번에 그 구멍을 메웠다 (<code>1c4388e</code>)</td></tr>
+  <tr class="fin"><td><b>컴포넌트 시험 통로 + 그리는 조각</b> — 3d-3e·f</td><td class="c">PO</td>
+      <td>목록과 <code>package.json</code> 스크립트를 <b>함께</b> 만들었다 — 목록만 만들면
+          그 시험을 아무도 안 돌린 채 통과한다 (<code>5755a54</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>첨부 칸이 화면에 선다</b> — 3d-4</td><td class="c">PO</td>
+      <td>내려받기 라우트 + 칸 + 배선을 <b>한 조각으로</b>. 따로 하면 눌러도 404 인 링크가 선다.
+          <b>눈 확인 통과</b>. 단위 1011 · 컴포넌트 45 (<code>8b10625</code>)</td></tr>
+  <tr class="fin"><td><b>수기 엑셀 읽개 + 읽기 통로</b> — 3e-1</td><td class="c">PO</td>
+      <td>1,333줄을 A/S 와 <b>바이트 동일</b>로. 🔴 읽개 시험이 <b>실제 양식 파일 넷을 열고</b>
+          통과했다(skipped 0) — 두 사이트가 같은 양식을 같게 읽는다는 뜻.
+          통로는 <b>DB 에 한 줄도 안 쓴다</b> (<code>5ac940f</code>)</td></tr>
+  <tr class="fin"><td><b>엑셀로 폼 채우기</b> — 3e-2</td><td class="c">PO</td>
+      <td>831줄, 삭제줄 0. 거짓이 된 곁말 다섯을 <b>지우지 않고 덧붙여</b> 고쳤다
+          (<code>1bf6181</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>[새 견적서] 팝업이 뜬다</b> — 3e-3</td><td class="c">PO</td>
+      <td>2026-09-22 에 미뤄 둔 자리. <b>눈 확인 통과</b>.
+          수리 건 오가기(Ⓐ)는 빼고 팝업 몫만 가져왔다 — 🔴 시험이 <b>「Ⓐ 의 이름이 이 저장소
+          어디에도 없다」</b>를 잰다. 단위 1,236 · 컴포넌트 110 (<code>3d1f724</code>)</td></tr>
   <tr class="fin"><td><b>A/S 로그인 404</b></td><td class="c">A/S</td>
       <td>코드 아님 — dev 서버가 <code>sso/</code> 세 통로를 컴파일하지 않았다. 다시 컴파일 → 302.
           코드 변경 <b>0줄</b></td></tr>
+  <tr class="fin"><td><b>문서 둘</b> — 결정할 것 · 돌아가기 링크 설명</td><td class="c">A/S</td>
+      <td>사람이 정해야 하는 것만 추려 권장안과 함께. 전부 권장안대로 가기로 했다</td></tr>
 </table>
 
 <h3>🔴 오늘 알게 된 것</h3>
 
 <table>
-  <tr><th>무엇</th><th>어떻게 드러났나</th></tr>
+  <tr><th style="width:34%">무엇</th><th>어떻게 드러났나</th></tr>
+  <tr><td>못 읽는 31장은 <b>OneDrive 자리표시자</b>다</td>
+      <td>🔴 <b>엑셀 잠금 파일</b>이었다(<code>~$</code> 로 시작, 31장 전부 확인).
+          <b>나중에 받아도 영영 연락서가 아니다.</b> 실제 대상은 503 − 31 − 3 = <b>469장</b></td></tr>
+  <tr><td>되돌린 4장은 <b>503장 중에 없다</b></td>
+      <td>바이트로는 맞지만 <b>같은 연락서가 다른 판본으로 들어 있다</b>(지도로 확인:
+          <code>0001</code>·<code>0002</code>·<code>0003</code>·<code>0328</code>).
+          둘 다 돌리면 <b>세 건이 두 번 들어간다</b> → 503장만 돌린다</td></tr>
+  <tr><td>같은 이름 140쌍이 <b>내용이 달라 위험하다</b></td>
+      <td>위험이 아니었다. 두 폴더의 <b>원본 경로가 한 개도 안 겹친다</b> —
+          이름이 폴더별 일련번호라 번호만 우연히 겹친 것</td></tr>
+  <tr><td>A/S 로그인 404 는 <b>설정 문제</b>일 것이다</td>
+      <td>코드도 설정도 멀쩡했다. <b>dev 서버가 그 통로를 컴파일하지 않은 것</b>.
+          404 의 <b>본문</b>을 봐야 갈린다 — HTML 이면 통로가 등록조차 안 된 것.
+          <code>touch</code> 로 다시 컴파일시키면 풀린다</td></tr>
+  <tr><td>팝업은 <b>1,950줄짜리 작은 일</b>이다</td>
+      <td>🔴 실제로는 11개 파일 <b>약 3,100줄</b>이고, 그 사슬이 곧 <b>로드맵의 「3e 수기 엑셀」</b>
+          이었다. 팝업은 별개 기능이 아니라 <b>3e 위에 얹히는 마지막 단계</b>였다</td></tr>
+  <tr><td>읽기 통로에 <b>확장자 검사</b>가 있을 것이다</td>
+      <td>A/S 원본에 없었다 — 그 통로는 <b>파일 이름을 아예 안 받는다</b>(저장하지 않으니
+          이름이 쓰일 자리가 없다). 판정은 내용 앞머리로만 한다.
+          🔴 <b>없는 방어를 지어내지 않고 원본대로 두었다</b></td></tr>
+  <tr><td>🔴 <b>견적서 결재</b>가 로드맵에 없었다</td>
+      <td>2026-09-28 사용자가 짚어 주었다. 「승인 절차」는 A/S 에 이미 있고
+          결재선을 <b>범위로 가른다</b>(<code>QUOTE</code> 1판 2단계가 실제로 등록돼 있다)</td></tr>
+  <tr><td>A/S 견적서의 <b>날 JSON 구멍을 고치자</b></td>
+      <td>🔴 <b>고치지 않는다.</b> A/S 안의 PO·견적서는 옮긴 뒤 걷어낸다 —
+          없어질 화면에 고친 것은 버려진다(2026-09-28 사용자)</td></tr>
   <tr><td><b>사용 부품을 되돌릴 수 없었다</b></td>
       <td><code>repair_case_used_parts</code> 칸 여덟 개에 출처 표시가 없고, 흔적에도 id 가
           <b>0행</b>이었다. 🔴 그대로 469장을 돌렸으면 <b>1,000줄대가 되돌릴 수 없게</b> 들어갔다.
           S5-A 가 이것을 막았다</td></tr>
-  <tr><td><b>「같은 이름 140쌍이 위험하다」는 조사 결론이 틀렸다</b></td>
-      <td>지도 파일로 대조하니 두 폴더의 <b>원본 경로가 한 개도 안 겹쳤다</b>(360 대 143, 겹침 0).
-          파일 이름이 <code>0001.xlsm</code> 꼴 <b>폴더별 일련번호</b>라 번호만 우연히 겹친 것 —
-          <b>503장은 전부 서로 다른 연락서</b>다</td></tr>
-  <tr><td><b>못 읽던 31장의 정체</b></td>
-      <td>전부 <b>165바이트 OneDrive 자리표시자</b>다. 503 − 31 = 472 로 기록의 「469장」과 맞는다.
-          ⚠️ <code>find -size -1k</code> 는 올림을 해서 0 으로 나온다 — <b>바이트 단위</b>로 재야 한다</td></tr>
+  <tr><td><b>못 읽던 31장을 재는 법</b></td>
+      <td>⚠️ <code>find -size -1k</code> 는 <b>올림을 해서 0 으로 나온다</b> — 165바이트 파일을
+          못 찾는다. <b>바이트 단위</b>(<code>-size -1000c</code>)로 재야 한다.
+          (그 31장의 정체는 위 표 참조 — <b>엑셀 잠금 파일</b>이었다)</td></tr>
   <tr><td><b>운영 DB 는 이 PC 에서 못 닿는다</b></td>
       <td>NAS compose 가 DB 에 포트를 <b>일부러 안 열어 뒀다</b>. 운영에서 돌리려면
           <code>dss-as-tools</code> 컨테이너에 스크립트가 들어가야 하고, 그것은 <b>새 이미지 배포</b>다.
@@ -667,8 +741,8 @@
   <tr><td><b>개선요청</b></td><td class="c">3500</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 종 · 포털 연결까지 <b>완료</b></td></tr>
   <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st run">개발 중</span></td>
-      <td>첨부 <b>올리기·지우기 서버 통로까지 완료</b> · 다음은 <b>화면</b>(3d-3d 부터) ·
-          <b>아직 미배포</b></td></tr>
+      <td>첨부 칸 · <b>[새 견적서] 팝업</b> · 수기 엑셀 읽기까지 완료(둘 다 눈 확인) ·
+          다음은 <b>결재 · 발행 · 인쇄</b> · 🔴 <b>아직 미배포</b></td></tr>
   <tr><td><b>휴가 관리</b></td><td class="c">—</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 통로 있음</td></tr>
   <tr><td><b>회사 홈페이지</b></td><td class="c">3200</td><td class="c"><span class="st wait">배포 대기</span></td>
