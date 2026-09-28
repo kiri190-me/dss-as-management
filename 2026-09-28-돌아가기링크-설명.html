@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[수리 건으로 돌아가기]가 무엇인가 — PO 팝업 조각 전에 정할 것</title>
+<style>
+  :root{
+    --ink:#18181b; --dim:#52525b; --faint:#a1a1aa; --line:#e4e4e7; --bg:#fafafa;
+    --as:#1d4ed8; --asbg:#eff6ff; --asline:#bfdbfe;
+    --po:#7c3aed; --pobg:#f5f3ff; --poline:#ddd6fe;
+    --rec:#065f46; --recbg:#ecfdf5; --recline:#a7f3d0;
+    --dang:#991b1b; --dangbg:#fef2f2; --dangline:#fecaca;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:2.2rem 1.2rem 5rem;
+    font:15px/1.75 -apple-system,"Segoe UI","Malgun Gothic",sans-serif;
+    color:var(--ink);background:var(--bg)}
+  .wrap{max-width:62rem;margin:0 auto}
+  header{margin-bottom:2rem;padding-bottom:1.2rem;border-bottom:2px solid var(--ink)}
+  h1{margin:0 0 .4rem;font-size:1.45rem;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:.92rem}
+  h2{margin:2.6rem 0 .9rem;font-size:1.12rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+  h2 .n{display:inline-block;min-width:1.6rem;height:1.6rem;line-height:1.6rem;margin-right:.5rem;
+    text-align:center;border-radius:.4rem;background:var(--ink);color:#fff;font-size:.82rem;font-weight:700}
+  h3{margin:1.6rem 0 .5rem;font-size:1rem}
+  code{background:#f4f4f5;padding:.08rem .3rem;border-radius:.25rem;font:.88em ui-monospace,Consolas,monospace}
+
+  /* 화면 그림 */
+  .screen{border:1px solid var(--line);border-radius:.5rem;background:#fff;margin:.9rem 0;overflow:hidden}
+  .screen .bar{background:#f4f4f5;border-bottom:1px solid var(--line);padding:.35rem .7rem;
+    font:.78rem ui-monospace,Consolas,monospace;color:var(--dim)}
+  .screen .body{padding:.9rem}
+  .screen.as .bar{background:var(--asbg);border-bottom-color:var(--asline);color:var(--as)}
+  .screen.po .bar{background:var(--pobg);border-bottom-color:var(--poline);color:var(--po)}
+  .tabs{display:flex;gap:.3rem;margin-bottom:.7rem;flex-wrap:wrap}
+  .tabs span{padding:.2rem .6rem;border:1px solid var(--line);border-radius:.3rem;font-size:.82rem;color:var(--dim)}
+  .tabs span.on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600}
+  .btn{display:inline-block;padding:.25rem .7rem;border:1px solid var(--ink);border-radius:.35rem;
+    font-size:.85rem;font-weight:600;background:#fff}
+  .btn.p{background:var(--ink);color:#fff}
+  .muted{color:var(--faint);font-size:.85rem}
+
+  /* 흐름 */
+  .flow{margin:1rem 0}
+  .step{display:flex;gap:.8rem;align-items:flex-start;padding:.6rem 0}
+  .step .no{flex:0 0 1.7rem;height:1.7rem;line-height:1.7rem;text-align:center;border-radius:50%;
+    background:var(--ink);color:#fff;font-size:.78rem;font-weight:700}
+  .step .txt{flex:1}
+  .step .txt b{display:block;margin-bottom:.1rem}
+  .step .txt .why{color:var(--dim);font-size:.9rem}
+  .arrow{margin-left:.72rem;color:var(--faint);font-size:1.1rem;line-height:1}
+  .step.hl .no{background:var(--dang)}
+  .step.hl .txt b{color:var(--dang)}
+
+  .card{background:#fff;border:1px solid var(--line);border-radius:.55rem;padding:1rem 1.15rem;margin:.7rem 0}
+  .card.rec{background:var(--recbg);border-color:var(--recline)}
+  .card.dang{background:var(--dangbg);border-color:var(--dangline)}
+  .card h4{margin:0 0 .45rem;font-size:.98rem}
+  .card p{margin:.35rem 0}
+  .why{color:var(--dim);font-size:.92rem}
+  .tag{display:inline-block;padding:.1rem .5rem;border-radius:.3rem;font-size:.72rem;font-weight:700;
+    margin-right:.45rem;vertical-align:.1em}
+  .tag.rec{background:var(--rec);color:#fff}
+  .tag.alt{background:#e4e4e7;color:var(--dim)}
+  table{border-collapse:collapse;width:100%;margin:.8rem 0;font-size:.92rem;background:#fff}
+  th,td{border:1px solid var(--line);padding:.42rem .6rem;text-align:left;vertical-align:top}
+  th{background:#f4f4f5;font-weight:600;font-size:.86rem}
+  td.c{text-align:center}
+  .fact{margin:.8rem 0;padding:.7rem .9rem;background:#f4f4f5;border-left:3px solid var(--faint);
+    border-radius:0 .3rem .3rem 0;font-size:.9rem;color:var(--dim)}
+  .fact b{color:var(--ink)}
+  footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--faint);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>[수리 건으로 돌아가기]가 무엇인가</h1>
+  <p class="sub">
+    PO 의 <b>[새 견적서] 팝업</b>을 만들기 전에 정해야 할 것 하나를 설명합니다.
+    낱말만으로는 알기 어려워서 화면과 단계로 풀었습니다.
+  </p>
+</header>
+
+<!-- ═══ 1 ═══ -->
+<h2><span class="n">1</span>어떤 상황에서 쓰이나 — A/S 의 실제 흐름</h2>
+
+<p>
+  A/S 에서 견적서를 만드는 입구는 <b>둘</b>입니다. 그중 <b>둘째</b>가 이 링크를 씁니다.
+</p>
+
+<h3>입구 ①  견적서 목록에서 만들기 — <span class="muted">돌아갈 곳이 없다</span></h3>
+<div class="screen as">
+  <div class="bar">/quotes &nbsp;— 견적서 목록</div>
+  <div class="body">
+    <span class="btn p">+ 새 견적서</span>
+    <span class="muted"> &nbsp;→ 팝업이 뜨고 → 빈 작성 화면. 저장하면 목록으로 돌아감.</span>
+  </div>
+</div>
+
+<h3>입구 ②  <b>수리 건 안에서</b> 만들기 — <span class="muted">여기가 「돌아가기」다</span></h3>
+<div class="screen as">
+  <div class="bar">/repair-cases/{건 id}/quotes &nbsp;— 수리 건 상세의 「견적서」 탭</div>
+  <div class="body">
+    <div class="tabs">
+      <span>접수 정보</span><span>작업 기록</span><span class="on">견적서</span>
+      <span>보고서</span><span>첨부</span>
+    </div>
+    <p class="muted" style="margin:.2rem 0 .6rem">인수번호 <code>D260403</code> · 이 건에 딸린 견적서 목록</p>
+    <span class="btn p">+ 새 견적서</span>
+    <span class="muted"> &nbsp;← <b>이 단추를 누른 상황</b></span>
+  </div>
+</div>
+
+<div class="fact">
+  <b>요점</b> — 사람은 지금 <b>어떤 수리 건을 보고 있는 중</b>입니다. 그 건의 견적서를 만들러 갔다가,
+  다 만들면 <b>보던 그 건으로 되돌아와야</b> 자연스럽습니다.
+  「돌아가기」는 그 되돌아오는 길입니다.
+</div>
+
+<!-- ═══ 2 ═══ -->
+<h2><span class="n">2</span>어떤 단계로 진행되나</h2>
+
+<div class="flow">
+  <div class="step">
+    <div class="no">1</div>
+    <div class="txt">
+      <b>수리 건 <code>D260403</code> 의 「견적서」 탭에서 [+ 새 견적서]를 누른다</b>
+      <span class="why">지금 보고 있는 건이 무엇인지 화면은 알고 있습니다.</span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="no">2</div>
+    <div class="txt">
+      <b>주소에 <u>두 값</u>을 실어 작성 화면으로 간다</b>
+      <span class="why">
+        <code>/quotes/new?intakeNumber=D260403&amp;repairCaseId=dc46…</code><br>
+        · <b>인수번호</b> — 폼이 기존의 「인수번호로 불러오기」를 그대로 타서 고객사·모델을 채웁니다<br>
+        · <b>건 id</b> — <b>돌아갈 곳을 기억하기 위한 것</b>입니다
+      </span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="no">3</div>
+    <div class="txt">
+      <b>작성 화면이 열리고, 사람이 채워 [저장]</b>
+      <span class="why">화면 위 [취소]에도 같은 「돌아갈 곳」이 걸립니다.</span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step hl">
+    <div class="no">4</div>
+    <div class="txt">
+      <b>🔴 보던 수리 건으로 되돌아온다 — 여기가 「돌아가기」다</b>
+      <span class="why">
+        <code>/repair-cases/dc46…/quotes</code> 로 돌아갑니다.
+        견적서 목록이 아니라 <b>아까 그 건의 견적서 탭</b>입니다.
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="fact">
+  🔴 <b>주소를 통째로 싣지 않고 「건 id」만 싣는 까닭</b> — 돌아갈 주소를 그대로 받아 쓰면,
+  남이 만든 링크가 사람을 <b>바깥 사이트로 보낼 수 있습니다</b>. 그래서 id 만 받아
+  <b>주소는 우리가 만듭니다.</b> 이것이 그 파일이 하는 일의 절반입니다.
+</div>
+
+<!-- ═══ 3 ═══ -->
+<h2><span class="n">3</span>PO 에서 무엇이 문제인가</h2>
+
+<div class="screen po">
+  <div class="bar">PO(3600) 의 화면 목록 — 실측 2026-09-28</div>
+  <div class="body">
+    <div class="tabs">
+      <span>국내발주</span><span class="on">견적서</span><span>작업비</span>
+      <span style="border-style:dashed;color:#c00">수리 건 ✗ 없음</span>
+    </div>
+    <p class="why" style="margin:.4rem 0 0">
+      PO 에는 <b>수리 건 화면이 아예 없습니다.</b> A/S 의 일 가운데 견적·발주·내자만
+      옮겨 오는 중이고, 접수·수리는 A/S 에 남습니다.
+    </p>
+  </div>
+</div>
+
+<p>
+  그런데 그 파일이 만드는 돌아갈 주소는 <code>/repair-cases/{id}/quotes</code> 입니다.
+  <b>PO 에 그 화면이 없으니 그대로 베끼면 눌러도 아무 데도 없는 링크가 됩니다.</b>
+  오늘 첨부 조각에서 똑같은 일이 한 번 있었습니다 — 그때는 라우트를 함께 가져와 해결했습니다.
+</p>
+
+<h3>다행히 그 파일은 두 가지 일을 한다</h3>
+<table>
+  <tr><th style="width:42%">그 파일이 하는 일</th><th class="c" style="width:16%">팝업에 필요?</th><th>수리 건 화면 필요?</th></tr>
+  <tr>
+    <td><b>Ⓐ 수리 건 ↔ 견적서 오가기</b><br>
+        <span class="why">건 id 싣기 · 돌아갈 주소 만들기 · 취소로 돌아가기</span></td>
+    <td class="c">❌ 아니오</td>
+    <td>🔴 <b>필요합니다</b></td>
+  </tr>
+  <tr>
+    <td><b>Ⓑ 팝업이 고른 값 나르기</b><br>
+        <span class="why">「견적서 종류 · 엑셀 전용」을 주소에 실어 작성 화면을 연다</span></td>
+    <td class="c">✅ <b>예</b></td>
+    <td>❌ 아니오</td>
+  </tr>
+</table>
+
+<div class="fact">
+  <b>즉</b> — 팝업이 실제로 쓰는 것은 <b>Ⓑ 하나뿐</b>입니다.
+  Ⓐ 는 같은 파일에 들어 있을 뿐 팝업과 상관이 없습니다.
+</div>
+
+<!-- ═══ 4 ═══ -->
+<h2><span class="n">4</span>그래서 어떻게 할까 — 세 가지 길</h2>
+
+<div class="card rec">
+  <h4><span class="tag rec">권장</span>Ⓑ 만 가져오고 Ⓐ 는 뺀다</h4>
+  <p>
+    팝업이 쓰는 부분만 옮기고, 「수리 건에서 건너오고 돌아가기」는 두고 옵니다.
+  </p>
+  <p class="why">
+    · <b>오늘 목표인 팝업이 뜹니다.</b> 눌러도 아무 데도 없는 링크가 안 생깁니다<br>
+    · PO 의 [새 견적서]는 지금도 <b>견적서 목록에서만</b> 눌립니다(입구 ①). 그 흐름에는
+      돌아갈 수리 건이 애초에 없습니다 — <b>지금 빠지는 기능이 없습니다</b><br>
+    · Ⓐ 는 <b>조각 4·5</b>(A/S 정리 · 배포) 때 무대가 정해집니다. 그때
+      「PO 에서 수리 건을 어떻게 다룰지」가 함께 정해지므로 그 자리가 맞습니다.
+      앞 조각들도 같은 까닭으로 미뤄 둔 자리입니다
+  </p>
+</div>
+
+<div class="card">
+  <h4><span class="tag alt">다른 길</span>돌아갈 때 A/S 의 수리 건으로 보낸다</h4>
+  <p class="why">
+    PO 에 수리 건 화면이 없으니 링크를 <b>A/S 쪽 주소</b>로 보냅니다.<br>
+    · 사이트를 건너가는 주소라 <b>설정값이 하나 늘고</b>, 운영·개발 주소가 달라 틀리면
+      조용히 깨집니다<br>
+    · 기존 시험이 「<b>사이트를 건너가는 주소를 이 사이트가 지어내지 않는다</b>」를 막고 있어
+      그 울타리도 함께 풀어야 합니다<br>
+    · 🔴 게다가 <b>A/S 의 견적서 화면은 나중에 걷어냅니다</b>(조각 4). 걷어낸 뒤 그 링크가
+      어디를 가리킬지 다시 정해야 합니다 — <b>두 번 일하게 됩니다</b>
+  </p>
+</div>
+
+<div class="card">
+  <h4><span class="tag alt">다른 길</span>PO 에 수리 건 화면을 만든다</h4>
+  <p class="why">
+    가장 완성도가 높지만, A/S 의 수리 건 상세를 통째로 옮겨야 하고 그것이 또
+    접수·작업기록·보고서를 끌고 옵니다. <b>오늘 안에는 못 끝냅니다.</b>
+    그리고 이 시스템의 설계상 <b>접수·수리는 A/S 에 남기기로</b> 되어 있습니다.
+  </p>
+</div>
+
+<!-- ═══ 5 ═══ -->
+<h2><span class="n">5</span>권장안대로 가면 오늘 이렇게 됩니다</h2>
+
+<div class="screen po">
+  <div class="bar">/quotes &nbsp;— PO 견적서 목록 (다음 조각 뒤)</div>
+  <div class="body">
+    <span class="btn p">+ 새 견적서</span>
+    <span class="muted"> &nbsp;← 누르면</span>
+    <div style="margin:.8rem 0 .3rem;padding:.8rem;border:1px solid var(--poline);
+                border-radius:.4rem;background:var(--pobg);max-width:26rem">
+      <b style="font-size:.95rem">새 견적서</b>
+      <p class="why" style="margin:.5rem 0 .3rem">견적서 종류</p>
+      <span class="btn">내자</span> <span class="btn">OH</span>
+      <p class="why" style="margin:.7rem 0 .3rem">수기 엑셀로 만들기 <span class="muted">(선택)</span></p>
+      <span class="btn">엑셀 고르기</span>
+      <div style="margin-top:.8rem;text-align:right">
+        <span class="btn">취소</span> <span class="btn p">만들기</span>
+      </div>
+    </div>
+    <span class="muted">→ 고른 값이 채워진 작성 화면이 열립니다.</span>
+  </div>
+</div>
+
+<p>
+  이것이 사용자가 「A/S 처럼 팝업이 안 뜬다」고 하신 바로 그 화면입니다.
+  <b>돌아가기(Ⓐ)는 이 흐름에 나오지 않습니다</b> — 목록에서 눌렀으니 돌아갈 수리 건이 없습니다.
+</p>
+
+<div class="card dang">
+  <h4>빠지는 것을 정직하게 적으면</h4>
+  <p class="why">
+    나중에 PO 에서 <b>수리 건을 보다가 견적서를 만드는 길</b>을 열 때 Ⓐ 가 필요합니다.
+    그 길은 <b>지금도 PO 에 없습니다</b>(수리 건 화면 자체가 없으므로).
+    그래서 <b>이번에 Ⓐ 를 빼도 오늘 잃는 기능은 없습니다.</b>
+  </p>
+</div>
+
+<footer>
+  2026-09-28 · 근거는 <code>RF_Service_System/src/lib/domain/quote-new-link.ts</code> 머리말과
+  그것을 쓰는 화면 일곱 곳을 읽어 정리했습니다.
+  전체 진행 상황은 <code>진행현황.html</code>, 그 밖의 결정은 <code>2026-09-28-결정할것.html</code> 에 있습니다.
+</footer>
+
+</div>
+</body>
+</html>
