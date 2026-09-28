@@ -126,15 +126,27 @@
 </header>
 
 <div class="ok">
-  <b>2026-09-28 에 커밋 28개.</b> PO 17 · A/S 11. 🔴 <b>아직 올리지 않았습니다.</b><br>
-  🔴 <b>연락서 이식은 코드가 다 끝났습니다</b> — 원본 안전 확보 · 되돌리기 준비 · 되돌리기 도구 ·
-  일괄 러너. 남은 것은 <b>운영 배포와 실행</b>뿐입니다.<br>
-  🔴 <b>PO 의 견적서가 통째로 끝났습니다</b> — 첨부 · [새 견적서] 팝업 · 수기 엑셀 · <b>결재</b> ·
-  <b>발행</b> · <b>미리보기·인쇄</b> · <b>폴더 열기</b> · <b>보안 헤더</b>. 전부 눈으로 확인했습니다.
-  시험 927 → <b>1,676</b>(단위) · 0 → <b>293</b>(컴포넌트) · 66 → <b>142</b>(DB).<br>
-  🔴 <b>남은 것은 넷</b> — 작은 것 둘(새 견적서 화면의 첨부 칸 · 두 사이트를 잇는 링크 주소),
-  그리고 큰 둘(<b>A/S 쪽 견적서·내자 걷어내기</b> · <b>배포</b>). 큰 둘은 HIGH 입니다.<br>
-  🔴 <b>배포는 PO 가 다 끝난 뒤 한 창구에서</b> 합니다(사용자 결정). 연락서 먼저, 확인 뒤 PO.
+  <b>2026-09-28 에 커밋 48개.</b> PO 21 · A/S 11 · 배포 15 · 포털 1.
+  <b>전부 올렸습니다.</b><br>
+  🔴 <b>PO 의 코드가 다 끝났습니다.</b> 견적서(첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 ·
+  미리보기·인쇄 · 폴더 열기 · 보안 헤더) · 두 사이트를 잇는 링크 · 새 견적서 화면의 첨부 칸 ·
+  운영 이미지를 굽는 <b>Dockerfile</b> 까지. 전부 눈으로 확인했습니다.
+  시험 927 → <b>1,691</b>(단위) · 0 → <b>293</b>(컴포넌트) · 66 → <b>142</b>(DB).<br>
+  🔴 <b>연락서 이식도 코드가 다 끝났습니다</b> — 원본 안전 확보 · 되돌리기 도구 · 일괄 러너.<br>
+  🔴 <b>그래서 남은 것은 「배포」 하나뿐입니다.</b> 이미지 넷을 이미 구웠고
+  (<code>dss-as:1.7</code> · <code>dss-as-tools:1</code> · <code>dss-po:0.1</code> ·
+  <code>dss-auth:1.5</code>), 런북 · 점검표 · 업데이트 소식 글까지 준비했습니다.<br>
+  🔴 <b>A/S 쪽 견적서·내자는 이번에 걷어내지 않습니다</b>(2026-09-28 결정) —
+  PO 가 운영에서 도는 것을 보고 정합니다. 당분간 두 곳에 같은 화면이 함께 섭니다.
+</div>
+
+<div class="ok" style="background:#f5f3ff;border-color:#ddd6fe">
+  <b>📘 배포하는 날 볼 문서</b> — 전부 <code>dss-deploy/runbook/</code> 에 있습니다.<br>
+  · <b><code>11-배포-점검표.html</code></b> — 🔴 <b>이것 하나로 끝까지 갑니다.</b>
+    단계마다 체크 · 명령마다 복사 단추 · 막히는 곳 풀이와 프롬프트가 접혀 있습니다<br>
+  · <code>09-연락서-이식.md</code> · <code>08-PO-배포.md</code> — 까닭과 배경<br>
+  · <code>10-업데이트소식-초안.html</code> — 직원이 읽을 글(이미 저장소에 넣었습니다)<br>
+  · <code>nas/setup/11-deploy.sh</code> — NAS 에서 돌리는 검사·배포 스크립트
 </div>
 
 <h2>지금 하고 있는 것</h2>
@@ -369,15 +381,16 @@
   같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
 </p>
 
-<div class="bar"><i class="d" style="width:89.7%"></i></div>
+<div class="bar"><i class="d" style="width:97.5%"></i></div>
 <p class="barnote">
-  조각 <b>35개 끝</b> · <b>4개 남음</b> —
-  🔴 <b>견적서가 통째로 끝났다.</b> 결재 · 발행 · 인쇄 · 폴더 열기 · 보안 헤더가 9월 28일 하루에 들어왔다.<br>
-  🔴 <b>남은 넷 가운데 둘은 작은 것이고, 큰 둘(A/S 정리 · 배포)은 HIGH 다.</b>
-  코드로 할 일은 사실상 끝났고, 남은 것은 <b>걷어내기와 배포</b>다.<br>
-  ⚠️ 앞 판(09-28 낮)에는 「22개 끝 / 1개 진행 중 / 4개 남음」이라 적혀 있었다.
-  <b>분모가 늘었다</b> — 결재가 셋으로 쪼개졌고, 3c-3 이 둘이 됐고, 폴더 열기와 보안 헤더가
-  조사에서 새로 드러나 들어왔다.
+  조각 <b>39개 끝</b> · <b>1개 남음(배포)</b> —
+  🔴 <b>코드는 끝났다.</b> 견적서 전부 · 두 사이트를 잇는 링크 · 새 견적서 화면의 첨부 칸 ·
+  운영 이미지를 굽는 Dockerfile 까지 9월 28일 하루에 들어왔다.<br>
+  🔴 <b>A/S 정리(옛 조각 4)는 이 분모에서 뺐다</b> — 2026-09-28 결정으로 <b>이번에 하지 않는다.</b>
+  PO 가 운영에서 도는 것을 보고 따로 정한다(자료가 같은 DB 라 두 곳에 같은 화면이 있어도
+  갈라지지 않는다).<br>
+  ⚠️ 앞 판(09-28 저녁)에는 「35개 끝 / 4개 남음」이라 적혀 있었다. 남은 넷 중
+  <b>작은 것 둘은 끝냈고</b>(3i · 3k), <b>A/S 정리는 뺐으며</b>, Dockerfile(5a)이 새로 들어왔다.
 </p>
 
 <h3>진행된 것</h3>
@@ -428,24 +441,55 @@
       <b>설정 두 줄을 넣어 실제로 열리는 것까지 확인</b></td><td class="c">09-28</td></tr>
   <tr class="fin"><td>3h</td><td><b>보안 헤더 여섯</b>을 모든 응답에 — A/S 목록 그대로.
       뒤집어 뒀던 시험 단언 셋도 되돌렸다</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3i</td><td>🔴 <b>인수번호를 누르면 A/S 의 수리 건으로</b> — 내자·견적서 두 화면.
+      <code>AS_APP_BASE_URL</code> 이 없으면 링크 대신 글자만.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3j</td><td>견적서 목록 줄마다 <b>[미리보기 · PDF]</b> — A/S 와 11줄=11줄.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3k</td><td>🔴 <b>새 견적서 화면에도 첨부 칸</b> — 만든 직후 올린다.
+      지시서에 없던 한 줄 어긋남(<code>quoteId</code>)을 찾아 고쳤다.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>5a</td><td>🔴 <b>운영 이미지를 굽는 Dockerfile</b> — A/S 것에서 넷을 뺐다
+      (public · tools · psql · drizzle). 실제로 구워 401MB 확인</td><td class="c">09-28</td></tr>
 </table>
 
 <h3>🔴 진행할 것 — 실측한 규모</h3>
 <table class="slices">
   <tr><th>조각</th><th>무엇</th><th class="c">코드</th><th>걸려 있는 것</th></tr>
-  <tr class="todo"><td>작은 것 ①</td><td><b>새 견적서 화면의 첨부 칸</b> — 아직 저장된 뒤에만 붙는다</td>
-      <td class="c">작음</td>
-      <td><code>handleSubmit</code> 의 빈 자리 하나(만든 견적서 id · 미리 고른 파일)를 채우면 붙는다</td></tr>
-  <tr class="todo"><td>작은 것 ②</td><td><b>두 사이트를 잇는 링크 주소</b> — 양쪽 설정 한 줄씩</td>
-      <td class="c">작음</td>
-      <td>PO 의 <code>/repair-cases/{id}</code> 링크가 지금 PO 자기 주소로 간다(깨진 링크).
-          낡아 버린 주석 두 곳도 이때 함께 고친다</td></tr>
-  <tr class="todo"><td>4</td><td><b>A/S 정리</b> — 메뉴에서 빼고 걷어내기</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · 파괴적 작업 · 이때까지 두 곳에 같은 화면이 있다.
-          지우지 말 목록을 먼저 못 박는다(<code>master-data-purge.ts</code> 의 견적서·내자 회차 등)</td></tr>
-  <tr class="todo"><td>5</td><td><b>배포</b> — compose · env · 백업 · 런북</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · 양식 5키 · <code>UPLOADS_DIR</code> · 🔴 <b>공유폴더 두 키</b>가 함께 가야 한다.
-          <b>연락서 이식과 같은 창구에서, 연락서 먼저</b></td></tr>
+  <tr class="now"><td><b>5</b></td><td><b>배포</b> — 연락서 이식 + PO 첫 배포</td><td class="c">—</td>
+      <td>🔴 <b>HIGH</b> · <b>지금 여기다.</b> 코드·이미지·문서는 다 됐고
+          <b>NAS 에서 사람이 하는 일</b>만 남았다. 점검표
+          <code>dss-deploy/runbook/11-배포-점검표.html</code> 하나로 간다</td></tr>
+  <tr class="todo"><td>뒤로 미룸</td><td><b>A/S 쪽 견적서·내자 걷어내기</b>(옛 조각 4)</td><td class="c">3.7만 줄</td>
+      <td>🔴 <b>이번에 하지 않는다</b>(2026-09-28 결정). PO 가 운영에서 도는 것을 보고 정한다.
+          지우면 돌아갈 곳이 없고, 같은 DB 라 두 곳에 있어도 자료가 갈라지지 않는다.
+          그때 지우지 말 목록을 먼저 못 박는다(<code>master-data-purge.ts</code> 의
+          견적서·내자 회차 등)</td></tr>
+</table>
+
+<h3>🔴 배포 — 어디까지 됐나 (2026-09-28 저녁)</h3>
+<table class="slices">
+  <tr><th class="c" style="width:8%">상태</th><th style="width:34%">무엇</th><th>비고</th></tr>
+  <tr class="fin"><td class="c">끝</td><td>이미지 넷을 구웠다</td>
+      <td><code>dss-as:1.7</code> · <code>dss-as-tools:1</code> · <code>dss-po:0.1</code> ·
+          <code>dss-auth:1.5</code> — 합쳐 515MB</td></tr>
+  <tr class="fin"><td class="c">끝</td><td>업데이트 소식 글을 넣었다</td>
+      <td>네 시스템 몫. 포털 <code>package.json</code> 도 1.5 로</td></tr>
+  <tr class="fin"><td class="c">끝</td><td>포털에 <code>dss-po</code> 등록</td>
+      <td>해시 길이 64 확인</td></tr>
+  <tr class="fin"><td class="c">끝</td><td>런북 · 점검표 · 소식 초안</td>
+      <td><code>dss-deploy/runbook/</code> 08 · 09 · 10 · 11</td></tr>
+  <tr class="now"><td class="c">다음</td><td>🔴 <b>PO 접근 권한 주기</b></td>
+      <td><b>이걸 안 하면 아무도 못 들어간다</b>(<code>requires_grant=true</code>).
+          <code>11-deploy.sh --grant</code> 로 한다</td></tr>
+  <tr class="todo"><td class="c">남음</td><td>tar 넷을 <code>/volume1/dss/images/</code> 로</td>
+      <td><code>scp -O</code> 로. 🔴 <code>-O</code> 없으면 DSM 에서 실패한다</td></tr>
+  <tr class="todo"><td class="c">남음</td><td>변환본 143장을 NAS 로</td>
+      <td><code>scp -O -r</code> · 436,850,078 바이트 대조</td></tr>
+  <tr class="todo"><td class="c">남음</td><td><code>po.env</code> · compose 네 군데 · DNS · 프록시</td>
+      <td>점검표 2단계</td></tr>
+  <tr class="todo"><td class="c">남음</td><td>백업 → 연락서 → <b>확인 게이트</b> → PO → 포털</td>
+      <td>점검표 3~7단계</td></tr>
 </table>
 
 <div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#ecfdf5;
@@ -806,9 +850,10 @@
   <tr><td><b>개선요청</b></td><td class="c">3500</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 종 · 포털 연결까지 <b>완료</b></td></tr>
   <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st run">개발 중</span></td>
-      <td>🔴 <b>견적서가 통째로 끝났다</b> — 첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 · 인쇄 ·
-          폴더 열기 · 보안 헤더(전부 눈 확인). 남은 것은 <b>작은 것 둘 · A/S 정리 · 배포</b> ·
-          🔴 <b>아직 미배포</b></td></tr>
+      <td>🔴 <b>코드가 다 끝났다</b> — 견적서 전부(첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 ·
+          인쇄 · 폴더 열기 · 보안 헤더) · 두 사이트 링크 · 새 견적서 첨부 칸 · Dockerfile.
+          전부 눈 확인. 🔴 <b>남은 것은 배포뿐</b> — 이미지 <code>dss-po:0.1</code> 을 이미 구웠고
+          포털 등록도 끝났다</td></tr>
   <tr><td><b>휴가 관리</b></td><td class="c">—</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 통로 있음</td></tr>
   <tr><td><b>회사 홈페이지</b></td><td class="c">3200</td><td class="c"><span class="st wait">배포 대기</span></td>
