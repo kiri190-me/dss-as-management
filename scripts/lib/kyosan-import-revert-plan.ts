@@ -420,6 +420,28 @@ export type QuarantineFileTarget = {
   previewPath: string | null;
 };
 
+/**
+ * 🔴 되돌리기가 **실제로 옮길 디스크 파일 수**. 첨부 **행** 수가 아니다 —
+ * `attachments.preview_path` 가 있는 행은 실물이 **둘**이다(원본 + 썸네일).
+ *
+ * ⚠️ 2026-09-28 실측에서 어긋났다: 계획은 「디스크 파일 19개」라 적었는데 실제로
+ * 옮겨진 것은 **37개**였다. 계획 출력은 **사람이 그 수를 보고 승인하는 자리**라
+ * 수가 다르면 판단이 흐려진다. (같은 날 개발 DB 실측: 연락서 첨부 84행 +
+ * 미리보기 20개 = 실물 104개.)
+ *
+ * 🔴 되돌리기 **동작은 옳다** — 고친 것은 세는 것뿐이다. 이 함수는
+ * `kyosan-import-revert.ts` 의 `quarantineAttachmentFiles` 가 도는
+ * `[storedPath, previewPath]` 두 칸과 **같은 규칙**으로 센다(빈 칸은 건너뛴다).
+ */
+export function countQuarantineFiles(files: readonly QuarantineFileTarget[]): number {
+  return files.reduce((sum, file) => sum + (file.previewPath === null ? 1 : 2), 0);
+}
+
+/** 그 가운데 미리보기(썸네일) 실물의 수. 계획 출력이 「왜 행 수보다 많은가」를 밝힌다. */
+export function countQuarantinePreviewFiles(files: readonly QuarantineFileTarget[]): number {
+  return files.reduce((sum, file) => sum + (file.previewPath === null ? 0 : 1), 0);
+}
+
 export type TraceRevertDecision =
   | {
       kind: "skip";

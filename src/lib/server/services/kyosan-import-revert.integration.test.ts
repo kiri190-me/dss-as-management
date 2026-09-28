@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -35,11 +35,13 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
 import { importKyosanReport } from "./kyosan-report-import";
 import {
   applyKyosanRevert,
+  formatRevertPlan,
   loadKyosanRevertPlan,
   readKyosanRevertPlan,
   type KyosanRevertPlan,
   type RevertSelector,
 } from "../../../../scripts/lib/kyosan-import-revert";
+import { countQuarantineFiles } from "../../../../scripts/lib/kyosan-import-revert-plan";
 
 /**
  * ============================================================================
@@ -758,6 +760,83 @@ describe("🔴 되돌리면 이식이 만든 여섯이 사라지고 남의 것�
       .where(eq(repairCases.id, target.id));
     assert.equal(caseRow.reportedSymptom, null);
     assert.equal(await exists(inRoot(storageRoot, humanFile.storedPath)), true);
+  });
+});
+
+// ══════════════════════════════════════════════ 🔴 계획이 적는 파일 수 = 실제로 옮기는 수
+
+describe("🔴 계획이 적는 디스크 파일 수가 실제로 옮긴 수와 같다 (S5-C ②)", () => {
+  test("미리보기(썸네일)가 있는 첨부는 파일이 둘 — 계획이 그 수를 적는다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "값-미리보기",
+      withPhoto: true,
+      salt: "미리보기세기",
+    });
+    const imported = await importKyosanReport({
+      report: fake.report,
+      sourceFileName: "연락서.xlsm",
+      sourceBytes: fake.bytes,
+      actorUserId,
+      storage,
+      today: TODAY,
+    });
+    assert.equal(imported.ok, true, JSON.stringify(imported));
+    assert.ok(imported.ok);
+    assert.equal(imported.attachmentIds.length, 2, "원본 1 + 사진 1");
+
+    // 🔴 사진 첨부에 미리보기를 달고 **실물도 둔다** — 되돌리기는 그 둘을 다 옮긴다.
+    const [photoRow] = await db
+      .select({ id: attachments.id, storedPath: attachments.storedPath })
+      .from(attachments)
+      .where(
+        and(
+          inArray(attachments.id, [...imported.attachmentIds]),
+          eq(attachments.description, "교산 연락서에서 꺼낸 사진")
+        )
+      );
+    assert.ok(photoRow, "사진 첨부를 못 찾았다");
+    const previewPath = `${photoRow.storedPath.replace(/\.[^./]+$/, "")}-preview.jpg`;
+    const previewAbs = inRoot(storageRoot, previewPath);
+    await mkdir(path.dirname(previewAbs), { recursive: true });
+    await writeFile(previewAbs, Buffer.from("preview"));
+    await db.update(attachments).set({ previewPath }).where(eq(attachments.id, photoRow.id));
+
+    const plan = await readKyosanRevertPlan({ kind: "case", intakeNumber: target.intakeNumber });
+    assert.equal(plan.decisions.length, 1);
+    const decision = plan.decisions[0];
+    assert.equal(decision.kind, "revert", JSON.stringify(decision));
+    assert.ok(decision.kind === "revert");
+
+    // 🔴 첨부 **행**은 둘인데 실물은 셋이다. 2026-09-28 에 이 자리가 어긋나 있었다.
+    assert.equal(decision.files.length, 2);
+    assert.equal(countQuarantineFiles(decision.files), 3);
+    const text = formatRevertPlan(plan);
+    assert.ok(text.includes("미리보기 1개"), `계획이 미리보기를 밝히지 않는다:\n${text}`);
+    assert.ok(
+      /디스크 파일\s+3개/.test(text),
+      `계획이 적은 파일 수가 3 이 아니다:\n${text}`
+    );
+
+    const runLabel = `kyrev-preview-${randomUUID().slice(0, 8)}`;
+    const record = await applyPlan(plan, runLabel);
+    assert.equal(record.reverted.length, 1);
+    // 🔴 계획이 적은 수와 **실제로 옮긴 수**가 같다.
+    assert.equal(record.reverted[0].files.length, countQuarantineFiles(decision.files));
+    assert.equal(
+      record.reverted[0].files.every((file) => file.state === "moved"),
+      true,
+      JSON.stringify(record.reverted[0].files)
+    );
+    assert.equal(await exists(previewAbs), false, "미리보기 실물이 원래 자리에 남아 있다");
+    assert.equal(
+      await exists(path.join(quarantineRoot, runLabel, decision.traceId, ...previewPath.split("/"))),
+      true,
+      "미리보기 실물이 격리 폴더에 없다"
+    );
   });
 });
 

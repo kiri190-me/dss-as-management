@@ -65,6 +65,8 @@ import { insertAuditLog } from "../../src/lib/db/mutations/audit-logs";
 import { resolveAttachmentAbsolutePath } from "../../src/lib/domain/attachment-path";
 import {
   KYOSAN_REPORT_SOURCE,
+  countQuarantineFiles,
+  countQuarantinePreviewFiles,
   decideTraceRevert,
   legacyUsedPartLinesFromAudit,
   readKyosanTraceMetadata,
@@ -365,7 +367,17 @@ export function formatRevertPlan(plan: KyosanRevertPlan): string {
           : `되돌린다 → ${decision.reportedSymptom.restoreTo === null ? "빈 칸" : `${decision.reportedSymptom.restoreTo.length}자`}`
       }`
     );
-    lines.push(formatCount("디스크 파일", decision.files.length, "개를 격리 폴더로 옮긴다"));
+    // 🔴 **행 수가 아니라 실물 수**다 — 미리보기(썸네일)가 있는 첨부는 파일이 둘이다
+    //    (`countQuarantineFiles` 머리말의 2026-09-28 실측: 계획 19 ↔ 실제 37).
+    const previewFiles = countQuarantinePreviewFiles(decision.files);
+    lines.push(
+      formatCount(
+        "디스크 파일",
+        countQuarantineFiles(decision.files),
+        "개를 격리 폴더로 옮긴다" +
+          (previewFiles > 0 ? ` (첨부 ${decision.files.length}행 + 미리보기 ${previewFiles}개)` : "")
+      )
+    );
     lines.push(formatCount("이식 흔적", 1, "줄"));
     for (const note of decision.notes) lines.push(`      ⚠ ${note}`);
   });
@@ -390,10 +402,16 @@ export function formatRevertPlan(plan: KyosanRevertPlan): string {
   total("사용 부품", reverts.reduce((sum, d) => sum + d.usedPartIds.length, 0), "줄");
   total("첨부 행", reverts.reduce((sum, d) => sum + d.attachmentIds.length, 0), "장");
   total("신고 증상", reverts.filter((d) => d.reportedSymptom !== null).length, "건");
+  // 🔴 여기도 실물 수다. 합계가 「실제로 옮길 개수」와 같아야 사람이 그 수를 보고
+  //    승인할 수 있다.
+  const totalPreviewFiles = reverts.reduce((sum, d) => sum + countQuarantinePreviewFiles(d.files), 0);
   total(
     "디스크 파일",
-    reverts.reduce((sum, d) => sum + d.files.length, 0),
-    "개 (지우지 않고 격리 폴더로 옮긴다)"
+    reverts.reduce((sum, d) => sum + countQuarantineFiles(d.files), 0),
+    "개 (지우지 않고 격리 폴더로 옮긴다" +
+      (totalPreviewFiles > 0
+        ? ` — 첨부 ${reverts.reduce((sum, d) => sum + d.files.length, 0)}행 + 미리보기 ${totalPreviewFiles}개)`
+        : ")")
   );
   lines.push("  🔴 service_reports · quotes 는 한 줄도 건드리지 않는다.");
 

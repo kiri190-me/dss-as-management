@@ -281,3 +281,11 @@ src/lib/server/integration/portal-inbox.test.ts
 # 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 이식기의 상수와
 # 갈라지지 않았는지 **글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
 scripts/lib/kyosan-import-revert-plan.test.ts
+
+# 연락서 **일괄 이식 러너**(scripts/import-kyosan-reports.ts)의 가려내는 규칙·세는 규칙.
+# DB 없이 값으로 돈다 — 165바이트 엑셀 잠금 파일을 오류가 아니라 「문서 아님」으로 가리는가 ·
+# 계획의 판정이 이식기의 네 줄과 같은가 · 부품 건너뛰기 경고를 놓치지 않는가 ·
+# 같은 내용(sha256)을 이름이 아니라 내용으로 가리는가.
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 이식기·러너가 갈라지지
+# 않았는지 **파일의 글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
+scripts/lib/kyosan-import-run-plan.test.ts

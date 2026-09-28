@@ -6,6 +6,8 @@ import { describe, test } from "node:test";
 import {
   KYOSAN_PHOTO_ATTACHMENT_DESCRIPTION,
   KYOSAN_SOURCE_ATTACHMENT_DESCRIPTION,
+  countQuarantineFiles,
+  countQuarantinePreviewFiles,
   decideTraceRevert,
   kyosanPhotoNamePrefix,
   legacyUsedPartLinesFromAudit,
@@ -141,6 +143,77 @@ describe("🔴 이식기와 같은 글자를 쓴다", () => {
       "이식기가 사진 이름을 짓는 모양이 바뀌었다 — 옛 흔적의 사진을 못 고른다"
     );
     assert.equal(kyosanPhotoNamePrefix(SHA), "연락서-1f84fed1-사진");
+  });
+});
+
+// ══════════════════════════════════════════════ 🔴 디스크 파일을 몇 개 옮기는가
+
+describe("🔴 계획이 적는 디스크 파일 수가 실제로 옮길 수와 같다 (S5-C ②)", () => {
+  /**
+   * ⚠️ 2026-09-28 실측에서 어긋났다 — 계획은 「19개」라 적었는데 실제로 옮겨진
+   * 것은 **37개**였다. 까닭은 **미리보기(썸네일)** 다: `attachments.preview_path`
+   * 가 있는 행은 실물이 둘인데 계획이 **첨부 행 수**를 세고 있었다.
+   * 계획 출력은 사람이 그 수를 보고 승인하는 자리라, 수가 다르면 판단이 흐려진다.
+   */
+  const target = (id: string, previewPath: string | null) => ({
+    attachmentId: id,
+    storedPath: `repair-cases/${CASE_ID}/${id}.png`,
+    previewPath,
+  });
+
+  test("미리보기가 없으면 첨부 행 수와 같다", () => {
+    const files = [target("a", null), target("b", null)];
+    assert.equal(countQuarantineFiles(files), 2);
+    assert.equal(countQuarantinePreviewFiles(files), 0);
+  });
+
+  test("🔴 미리보기가 있는 행은 파일이 둘이다", () => {
+    const files = [
+      target("a", null),
+      target("b", `repair-cases/${CASE_ID}/b-preview.png`),
+      target("c", `repair-cases/${CASE_ID}/c-preview.png`),
+    ];
+    assert.equal(files.length, 3, "첨부 행은 셋");
+    assert.equal(countQuarantineFiles(files), 5, "🔴 실물은 다섯(원본 3 + 미리보기 2)");
+    assert.equal(countQuarantinePreviewFiles(files), 2);
+  });
+
+  test("2026-09-28 실측의 수 — 첨부 84행 + 미리보기 20개 = 실물 104개", () => {
+    const files = Array.from({ length: 84 }, (_unused, index) =>
+      target(`a${index}`, index < 20 ? `repair-cases/${CASE_ID}/a${index}-preview.png` : null)
+    );
+    assert.equal(countQuarantineFiles(files), 104);
+  });
+
+  test("빈 목록은 0", () => {
+    assert.equal(countQuarantineFiles([]), 0);
+    assert.equal(countQuarantinePreviewFiles([]), 0);
+  });
+
+  test("🔴 판정이 내놓은 `files` 를 그대로 세면 옮길 파일 수가 나온다", () => {
+    const decision = expectRevert(
+      baseInput({
+        metadata: {
+          source: "KYOSAN_REPORT",
+          sourceSha256: SHA,
+          workRecordIds: [],
+          reportedSymptomFilled: false,
+          usedPartCount: 0,
+          attachmentCount: 2,
+          attachmentIds: ["aaaa1111-0000-4000-8000-000000000001", "dddd4444-0000-4000-8000-000000000004"],
+          photoCount: 1,
+        },
+        attachmentRows: [
+          attachmentRow({ id: "aaaa1111-0000-4000-8000-000000000001" }),
+          {
+            ...photoRow("dddd4444-0000-4000-8000-000000000004", 1),
+            previewPath: `repair-cases/${CASE_ID}/dddd4444-preview.png`,
+          },
+        ],
+      })
+    );
+    assert.equal(decision.files.length, 2, "첨부 행은 둘");
+    assert.equal(countQuarantineFiles(decision.files), 3, "🔴 실물은 셋 — 사진에 미리보기가 있다");
   });
 });
 

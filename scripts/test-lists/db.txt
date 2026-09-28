@@ -120,3 +120,11 @@ src/lib/server/services/kyosan-report-import.integration.test.ts
 # 안 바뀌는가를 본다. 🔴 격리 이름: 접수 월 "9312" · 고객사 "AS-TEST-KYREV-" ·
 # 제품 모델 "KYREV-TEST-" (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더.
 src/lib/server/services/kyosan-import-revert.integration.test.ts
+
+# 연락서 **일괄 이식 러너**(scripts/import-kyosan-reports.ts · scripts/lib/kyosan-import-run.ts).
+# 폴더 하나를 실제로 돌려 본다 — `--apply` 없이는 DB 도 저장 루트도 한 글자 안 바뀌는가,
+# 회차 번호가 넣은 흔적 전부에 같은 값으로 들어가 `--batch` 로 한 번에 골라지는가,
+# 한 장이 막혀도(문서 아님·못 읽음·짝 없음) 나머지가 계속되는가, 두 번째 회차가
+# ALREADY_IMPORTED 로 세어지는가. 🔴 격리 이름: 접수 월 "9412" · 고객사 "AS-TEST-KYRUN-" ·
+# 제품 모델 "KYRUN-TEST-" (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더.
+src/lib/server/services/kyosan-report-import-run.integration.test.ts
