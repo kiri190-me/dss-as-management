@@ -122,17 +122,19 @@
 
 <header>
   <h1>DSS 사내 시스템 — 개발 진행 현황</h1>
-  <p class="stamp">2026-09-25</p>
+  <p class="stamp">2026-09-28</p>
 </header>
 
 <div class="ok">
-  <b>2026-09-28 에 커밋 16개.</b> PO 8 · A/S 8. 🔴 <b>아직 올리지 않았습니다.</b><br>
+  <b>2026-09-28 에 커밋 28개.</b> PO 17 · A/S 11. 🔴 <b>아직 올리지 않았습니다.</b><br>
   🔴 <b>연락서 이식은 코드가 다 끝났습니다</b> — 원본 안전 확보 · 되돌리기 준비 · 되돌리기 도구 ·
   일괄 러너. 남은 것은 <b>운영 배포와 실행</b>뿐입니다.<br>
-  🔴 <b>PO 에 첨부 칸이 화면에 섰고 [새 견적서] 팝업이 뜹니다</b> — 둘 다 눈 확인 통과.
-  시험 927 → <b>1,236</b>(단위) · 0 → <b>110</b>(컴포넌트).<br>
-  🔴 <b>배포는 PO 가 다 끝난 뒤 한 창구에서</b> 합니다(사용자 결정). 연락서 먼저, 확인 뒤 PO.<br>
-  🔴 <b>새로 들어온 일 — 견적서 결재</b>(승인 절차). 로드맵에 없던 것이고 지금 조사 중입니다.
+  🔴 <b>PO 의 견적서가 통째로 끝났습니다</b> — 첨부 · [새 견적서] 팝업 · 수기 엑셀 · <b>결재</b> ·
+  <b>발행</b> · <b>미리보기·인쇄</b> · <b>폴더 열기</b> · <b>보안 헤더</b>. 전부 눈으로 확인했습니다.
+  시험 927 → <b>1,676</b>(단위) · 0 → <b>293</b>(컴포넌트) · 66 → <b>142</b>(DB).<br>
+  🔴 <b>남은 것은 넷</b> — 작은 것 둘(새 견적서 화면의 첨부 칸 · 두 사이트를 잇는 링크 주소),
+  그리고 큰 둘(<b>A/S 쪽 견적서·내자 걷어내기</b> · <b>배포</b>). 큰 둘은 HIGH 입니다.<br>
+  🔴 <b>배포는 PO 가 다 끝난 뒤 한 창구에서</b> 합니다(사용자 결정). 연락서 먼저, 확인 뒤 PO.
 </div>
 
 <h2>지금 하고 있는 것</h2>
@@ -142,22 +144,41 @@
   <div class="now-item now">
     <div class="now-head">
       <span class="now-mark">●</span>
-      <span class="now-title">PO <b>견적서 결재</b> — 새로 들어온 일. 조사 중</span>
+      <span class="now-title">PO <b>남은 작은 것 둘</b> — 그다음은 A/S 정리와 배포</span>
       <span class="chip">PO</span>
-      <span class="chip run">진행 중</span>
+      <span class="chip run">다음</span>
     </div>
     <p class="now-body">
-      2026-09-28 사용자가 짚어 주었다 — <b>로드맵에 없던 일</b>이다.
-      「승인 절차」는 A/S 에 이미 있고 <b>결재선을 범위로 가른다</b>(실측:
-      <code>FINAL_SHIPMENT</code> 1·2·3판 · <code>PART_ISSUE</code> 1·2·3판 ·
-      <b><code>QUOTE</code> 1판 2단계</b>).
+      견적서 기능은 <b>다 끝났다.</b> 남은 것은 손이 적게 가는 둘이다 —
+      ① <b>새 견적서 화면의 첨부 칸</b>(아래 참조), ② <b>두 사이트를 잇는 링크 주소</b>.
     </p>
     <p class="now-note">
-      🔴 <b>결재선 설정은 A/S 에서만 한다</b>(사용자 결정). PO 는 그 결재선을 <b>읽어서 돌리기만</b>
-      한다 — 옮길 설정 화면이 없다.
-      표들이 공용 묶음에 있어 <b>자료는 이미 하나</b>다.
-      옮길 몫은 「돌리는 쪽」 약 <b>1,735줄</b> + 알림 사슬(사용자가 알림까지 하기로 선택).
-      🔴 <b>결재와 발행(3c-3)의 순서</b>가 조각 순서를 정한다 — 조사가 그것을 가린다.
+      🔴 ② 는 지금 <b>깨진 링크</b>다 — PO 의 내자 화면에서 수리 건을 누르면 PO 자기 주소로 간다.
+      양쪽에 설정 한 줄씩(<code>PO_APP_BASE_URL</code> · <code>AS_APP_BASE_URL</code>)을 두고
+      그 값으로 링크를 만들어야 한다. <b>배포 때도 그 두 줄이 함께 간다.</b><br>
+      전역 보안 헤더가 생기면서 <b>거짓이 된 주석 두 곳</b>(첨부 내려받기 통로와 그 시험)도
+      이때 함께 고친다 — 지금 「이 사이트에는 전역 헤더가 없다」고 적혀 있다.
+    </p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">PO <b>견적서 결재 · 발행 · 인쇄 · 폴더 열기</b> — 눈 확인 통과</span>
+      <span class="chip">PO</span>
+      <span class="chip fin">끝</span>
+    </div>
+    <p class="now-body">
+      2026-09-28 사용자가 짚어 준 <b>로드맵에 없던 일</b>이었는데 하루에 다 들어왔다.
+      결재는 A/S 의 승인 절차를 그대로 따른다(<code>QUOTE</code> 1판 2단계).
+      🔴 <b>결재선 설정은 A/S 에서만 한다</b>(사용자 결정) — PO 는 읽어서 돌리기만 하므로
+      옮길 설정 화면이 없다. 표는 공용 묶음에 있어 <b>자료가 이미 하나</b>다.
+    </p>
+    <p class="now-note">
+      🔴 두 사이트가 같은 결재선 표를 동시에 고치지 않도록 <b>잠금 열쇠를 A/S 와 글자까지
+      맞췄다</b> — 한 글자만 달라도 잠금이 서로를 못 보고, <b>증상이 없다.</b><br>
+      🔴 발행에서 <b>조용한 고장</b>을 하나 찾아 고쳤다(3c-3b) — 결재 PDF 가 DB 기록만 남고
+      공유폴더에는 놓이지 않고 있었다.
     </p>
   </div>
 
@@ -348,14 +369,15 @@
   같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
 </p>
 
-<div class="bar"><i class="d" style="width:81.5%"></i><i class="r" style="width:3.7%"></i></div>
+<div class="bar"><i class="d" style="width:89.7%"></i></div>
 <p class="barnote">
-  조각 <b>22개 끝</b> · <b>1개 진행 중</b> · <b>4개 남음</b> —
-  🔴 <b>첨부와 수기 엑셀이 끝났다. 남은 큰 것은 결재 · 발행 · 인쇄 셋이다.</b><br>
-  ⚠️ 9월 28일에 「10개 남음」이라 적혀 있었다. <b>줄어든 것이 아니라 세는 법이 바뀌었다</b> —
-  3d-3 의 남은 넷을 넷으로 끝냈고, 3e 를 셋으로 끝냈고, <b>결재가 새로 들어왔다</b>.<br>
-  ⚠️ 앞 판(09-23)에는 「16개 끝 / 7개 남음」으로 적혀 있었다. <b>뒤로 간 것이 아니다</b> —
-  3d-3 한 덩이가 실측 결과 2,700줄로 드러나 <b>여덟으로 쪼갰기</b> 때문에 분모가 늘었다.
+  조각 <b>35개 끝</b> · <b>4개 남음</b> —
+  🔴 <b>견적서가 통째로 끝났다.</b> 결재 · 발행 · 인쇄 · 폴더 열기 · 보안 헤더가 9월 28일 하루에 들어왔다.<br>
+  🔴 <b>남은 넷 가운데 둘은 작은 것이고, 큰 둘(A/S 정리 · 배포)은 HIGH 다.</b>
+  코드로 할 일은 사실상 끝났고, 남은 것은 <b>걷어내기와 배포</b>다.<br>
+  ⚠️ 앞 판(09-28 낮)에는 「22개 끝 / 1개 진행 중 / 4개 남음」이라 적혀 있었다.
+  <b>분모가 늘었다</b> — 결재가 셋으로 쪼개졌고, 3c-3 이 둘이 됐고, 폴더 열기와 보안 헤더가
+  조사에서 새로 드러나 들어왔다.
 </p>
 
 <h3>진행된 것</h3>
@@ -393,36 +415,56 @@
   <tr class="fin"><td>3e-2</td><td>엑셀을 읽어 폼을 채우는 층(831줄)</td><td class="c">09-28</td></tr>
   <tr class="fin"><td>3e-3</td><td>🔴 <b>[새 견적서] 팝업이 뜬다</b> — 종류 · 엑셀 전용을 먼저 고른다.
       <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>결재-A</td><td>결재선을 <b>읽는</b> 토대 — 설정은 A/S 에서만 한다</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>결재-B</td><td>결재의 <b>서버 쪽</b> — 요청 · 순차 승인 · 반려 · 이력</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>결재-C</td><td>🔴 <b>결재 탭이 화면에 선다</b> — 올리고 승인·반려한다.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3c-3</td><td>🔴 <b>견적서 발행</b> — 받으면서 공유폴더에 놓고 엑셀 칸에 꽂는다.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3c-3b</td><td>결재 PDF 를 공유폴더에 잇는다 — <b>조용한 고장</b>이었다</td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3f</td><td>🔴 <b>미리보기 · 인쇄</b> — [미리보기 · PDF] 단추가 선다.
+      <b>눈 확인 통과</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3g</td><td>🔴 <b>[폴더 열기]</b> — 사내 공유폴더를 탐색기로 연다.
+      <b>설정 두 줄을 넣어 실제로 열리는 것까지 확인</b></td><td class="c">09-28</td></tr>
+  <tr class="fin"><td>3h</td><td><b>보안 헤더 여섯</b>을 모든 응답에 — A/S 목록 그대로.
+      뒤집어 뒀던 시험 단언 셋도 되돌렸다</td><td class="c">09-28</td></tr>
 </table>
 
 <h3>🔴 진행할 것 — 실측한 규모</h3>
 <table class="slices">
   <tr><th>조각</th><th>무엇</th><th class="c">코드</th><th>걸려 있는 것</th></tr>
-  <tr class="now"><td><b>결재</b></td><td>견적서 <b>승인 절차</b> — 요청 · 순차 승인 · 이력 · 알림</td>
-      <td class="c"><b>~1,735</b><br>+ 알림</td>
-      <td>🔴 <b>지금 조사 중.</b> 로드맵에 없던 일이다(2026-09-28 사용자).
-          <b>결재선 설정은 A/S 에서만</b> 하므로 PO 는 읽어서 돌리기만 한다</td></tr>
-  <tr class="todo"><td>3c-3</td><td>견적서 <b>발행</b> — 파일을 만들어 공유폴더에 놓고 첨부 칸에 꽂는다</td>
-      <td class="c"><b>1,698</b></td>
-      <td>🔴 <b>결재와의 순서를 먼저 정해야 한다</b> — 결재가 끝나야 발행인가?</td></tr>
-  <tr class="todo"><td>3f</td><td>인쇄 · 미리보기</td><td class="c"><b>1,637</b><br>시험 1,415</td>
-      <td>견적서의 마지막 조각</td></tr>
-  <tr class="todo"><td>작은 것</td><td>보안 헤더 · 새 견적서 첨부 칸 · 낡은 주석 두 줄</td>
+  <tr class="todo"><td>작은 것 ①</td><td><b>새 견적서 화면의 첨부 칸</b> — 아직 저장된 뒤에만 붙는다</td>
       <td class="c">작음</td>
-      <td>🔴 <b>보안 헤더는 배포 전 필수</b> — 아래 참조</td></tr>
+      <td><code>handleSubmit</code> 의 빈 자리 하나(만든 견적서 id · 미리 고른 파일)를 채우면 붙는다</td></tr>
+  <tr class="todo"><td>작은 것 ②</td><td><b>두 사이트를 잇는 링크 주소</b> — 양쪽 설정 한 줄씩</td>
+      <td class="c">작음</td>
+      <td>PO 의 <code>/repair-cases/{id}</code> 링크가 지금 PO 자기 주소로 간다(깨진 링크).
+          낡아 버린 주석 두 곳도 이때 함께 고친다</td></tr>
   <tr class="todo"><td>4</td><td><b>A/S 정리</b> — 메뉴에서 빼고 걷어내기</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · 파괴적 작업 · 이때까지 두 곳에 같은 화면이 있다</td></tr>
+      <td>🔴 <b>HIGH</b> · 파괴적 작업 · 이때까지 두 곳에 같은 화면이 있다.
+          지우지 말 목록을 먼저 못 박는다(<code>master-data-purge.ts</code> 의 견적서·내자 회차 등)</td></tr>
   <tr class="todo"><td>5</td><td><b>배포</b> — compose · env · 백업 · 런북</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · 양식 5키와 <code>UPLOADS_DIR</code> 이 함께 가야 한다</td></tr>
+      <td>🔴 <b>HIGH</b> · 양식 5키 · <code>UPLOADS_DIR</code> · 🔴 <b>공유폴더 두 키</b>가 함께 가야 한다.
+          <b>연락서 이식과 같은 창구에서, 연락서 먼저</b></td></tr>
 </table>
 
-<div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#fef2f2;
-     border-left:3px solid #991b1b;border-radius:0 .3rem .3rem 0;font-size:.9rem">
-  🔴 <b>PO 에 보안 헤더가 한 줄도 없다</b>(2026-09-28 실측). A/S 는 여섯을 모든 주소에 건다.
-  오늘 3d-4 가 <b>PDF 를 새 탭에서 여는 길을 처음 열었으므로</b> 노출면이 늘었다 —
-  이 조각이 만든 위험은 아니고 원래 없던 것이다.
-  ⚠️ 함정 하나: 전역 헤더와 라우트 헤더의 <b>이름이 겹치면 라우트 것이 조용히 버려진다.</b>
-  내려받기 통로가 <code>nosniff</code> 를 스스로 내고 있어 확인이 필요하다.
+<div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#ecfdf5;
+     border-left:3px solid #065f46;border-radius:0 .3rem .3rem 0;font-size:.9rem">
+  ✅ <b>보안 헤더는 들어왔다</b>(조각 3h, 09-28). 여섯 값이 A/S 와 글자까지 같다.
+  함정이었던 「전역 헤더와 이름이 겹치면 라우트 것이 조용히 버려진다」도 실측으로 확인했다 —
+  겹치는 자리는 둘(<code>attachments/[id]/download</code> · <code>quotes/[id]/xlsx</code>)인데
+  둘 다 값이 <code>nosniff</code> 로 같아 <b>나가는 응답이 달라지지 않는다.</b>
+  이름이 안 겹치는 <code>Content-Disposition</code> · <code>Cache-Control</code> 은 그대로 살아남는다.
+</div>
+
+<div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#fffbeb;
+     border-left:3px solid #92400e;border-radius:0 .3rem .3rem 0;font-size:.9rem">
+  🔴 <b>배포 때 가져가야 할 설정이 하나 늘었다</b> — 공유폴더 두 키
+  (<code>QUOTE_ARCHIVE_DIR</code> · <code>QUOTE_ARCHIVE_UNC_ROOT</code>).
+  이것이 없으면 [폴더 열기]가 「공유폴더 저장이 꺼져 있습니다」로 끝나고,
+  <b>[견적서 받기]가 공유폴더에 파일을 놓는 것도 안 된다.</b>
+  개발 PC 에서 두 줄을 넣어 실제로 탐색기가 열리는 것까지 확인했다(09-28) —
+  자세한 것은 <code>2026-09-28-폴더열기-왜-못해보나.html</code>.
 </div>
 
 <h2>9월 28일에 끝낸 것</h2>
@@ -477,6 +519,29 @@
           코드 변경 <b>0줄</b></td></tr>
   <tr class="fin"><td><b>문서 둘</b> — 결정할 것 · 돌아가기 링크 설명</td><td class="c">A/S</td>
       <td>사람이 정해야 하는 것만 추려 권장안과 함께. 전부 권장안대로 가기로 했다</td></tr>
+  <tr class="fin"><td>🔴 <b>견적서 결재</b> — 결재-A · B · C</td><td class="c">PO</td>
+      <td>로드맵에 없던 일이었다. <b>결재선 설정은 A/S 에서만</b> 하고 PO 는 읽어 돌린다 —
+          두 사이트가 같은 표를 고치지 않도록 <b>잠금 열쇠를 글자까지 맞췄다</b>.
+          <b>눈 확인 통과</b> (<code>38a6107</code> · <code>9cd3f6f</code> · <code>6f41ced</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>견적서 발행</b> — 3c-3 · 3c-3b</td><td class="c">PO</td>
+      <td>받으면서 공유폴더에 놓고 엑셀 칸에 꽂는다. 이어서 <b>결재 PDF 도 공유폴더에</b> 잇는
+          <b>조용한 고장</b>을 고쳤다 — 기록만 남고 파일이 안 놓이고 있었다.
+          <b>눈 확인 통과</b> (<code>db442d3</code> · <code>3c9455c</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>미리보기 · 인쇄</b> — 3f</td><td class="c">PO</td>
+      <td>지시서가 <b>2,214줄이라 했는데 실제로 3,252줄이 더 필요했다</b>(147%) — 에이전트가
+          밀어붙이지 않고 멈춰 보고했다. 목록의 <code>key</code> 경고도 함께 고쳤다(서버 경계가
+          씌우는 껍데기 탓). <b>눈 확인 통과</b> (<code>39df0ed</code> · <code>aeac0c4</code>)</td></tr>
+  <tr class="fin"><td>🔴 <b>[폴더 열기]</b> — 3g</td><td class="c">PO</td>
+      <td>09-20 설계서가 통째로 빠뜨린 1,812줄. 도우미 주소(<code>dss-folder://</code>) ·
+          설치 명령 · 네 갈래 화면. 🔴 <b>설정 두 줄을 넣어 탐색기가 실제로 열리는 것까지
+          확인했다</b> (<code>a936c23</code>)</td></tr>
+  <tr class="fin"><td><b>보안 헤더 여섯</b> — 3h</td><td class="c">PO</td>
+      <td>A/S 목록을 값도 곁말도 그대로. 뒤집어 뒀던 시험 단언 셋을 되돌리고,
+          <b>일부러 한 줄을 빼서 셋이 실제로 실패하는 것을 봤다</b>.
+          단위 <b>1,676</b> · 컴포넌트 <b>293</b> · DB <b>142</b> (<code>0cf0cf3</code>)</td></tr>
+  <tr class="fin"><td><b>PO 이사에서 빠뜨린 것 조사</b> + 문서 둘</td><td class="c">A/S</td>
+      <td>여섯을 찾아 전부 결정했다(다크 모드는 안 하기로). 이어서
+          <b>폴더 열기를 왜 못 해보나</b>를 실측해 문서로 — 막던 것은 설정 두 줄뿐이었다</td></tr>
 </table>
 
 <h3>🔴 오늘 알게 된 것</h3>
@@ -741,8 +806,9 @@
   <tr><td><b>개선요청</b></td><td class="c">3500</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 종 · 포털 연결까지 <b>완료</b></td></tr>
   <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st run">개발 중</span></td>
-      <td>첨부 칸 · <b>[새 견적서] 팝업</b> · 수기 엑셀 읽기까지 완료(둘 다 눈 확인) ·
-          다음은 <b>결재 · 발행 · 인쇄</b> · 🔴 <b>아직 미배포</b></td></tr>
+      <td>🔴 <b>견적서가 통째로 끝났다</b> — 첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 · 인쇄 ·
+          폴더 열기 · 보안 헤더(전부 눈 확인). 남은 것은 <b>작은 것 둘 · A/S 정리 · 배포</b> ·
+          🔴 <b>아직 미배포</b></td></tr>
   <tr><td><b>휴가 관리</b></td><td class="c">—</td><td class="c"><span class="st done">운영 중</span></td>
       <td>알림 통로 있음</td></tr>
   <tr><td><b>회사 홈페이지</b></td><td class="c">3200</td><td class="c"><span class="st wait">배포 대기</span></td>

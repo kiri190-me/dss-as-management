@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PO 의 [폴더 열기]를 실제로 눌러 보지 못한 까닭 — 2026-09-28</title>
+<style>
+  :root{
+    --ink:#18181b; --dim:#52525b; --faint:#a1a1aa; --line:#e4e4e7; --bg:#fafafa;
+    --as:#1d4ed8; --asbg:#eff6ff; --asline:#bfdbfe;
+    --po:#7c3aed; --pobg:#f5f3ff; --poline:#ddd6fe;
+    --ok:#065f46; --okbg:#ecfdf5; --okline:#a7f3d0;
+    --dang:#991b1b; --dangbg:#fef2f2; --dangline:#fecaca;
+    --warn:#92400e; --warnbg:#fffbeb; --warnline:#fde68a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:2.2rem 1.2rem 5rem;
+    font:15px/1.75 -apple-system,"Segoe UI","Malgun Gothic",sans-serif;
+    color:var(--ink);background:var(--bg)}
+  .wrap{max-width:62rem;margin:0 auto}
+  header{margin-bottom:2rem;padding-bottom:1.2rem;border-bottom:2px solid var(--ink)}
+  h1{margin:0 0 .4rem;font-size:1.45rem;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:.92rem}
+  h2{margin:2.6rem 0 .9rem;font-size:1.12rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+  h2 .n{display:inline-block;min-width:1.6rem;height:1.6rem;line-height:1.6rem;margin-right:.5rem;
+    text-align:center;border-radius:.4rem;background:var(--ink);color:#fff;font-size:.82rem;font-weight:700}
+  h3{margin:1.6rem 0 .5rem;font-size:1rem}
+  code{background:#f4f4f5;padding:.08rem .3rem;border-radius:.25rem;font:.88em ui-monospace,Consolas,monospace}
+  pre{background:#18181b;color:#e4e4e7;padding:.8rem 1rem;border-radius:.45rem;overflow-x:auto;
+    font:.84rem/1.6 ui-monospace,Consolas,monospace;margin:.7rem 0}
+  pre .c{color:#a1a1aa}
+
+  .screen{border:1px solid var(--line);border-radius:.5rem;background:#fff;margin:.9rem 0;overflow:hidden}
+  .screen .bar{background:#f4f4f5;border-bottom:1px solid var(--line);padding:.35rem .7rem;
+    font:.78rem ui-monospace,Consolas,monospace;color:var(--dim)}
+  .screen .body{padding:.9rem}
+  .screen.po .bar{background:var(--pobg);border-bottom-color:var(--poline);color:var(--po)}
+  .screen.as .bar{background:var(--asbg);border-bottom-color:var(--asline);color:var(--as)}
+  .btn{display:inline-block;padding:.25rem .7rem;border:1px solid var(--ink);border-radius:.35rem;
+    font-size:.85rem;font-weight:600;background:#fff}
+  .btn.p{background:var(--ink);color:#fff}
+  .btn.off{border-color:var(--line);color:var(--faint);background:#fafafa}
+  .note{display:block;margin-top:.5rem;padding:.4rem .7rem;border-radius:.35rem;font-size:.86rem}
+  .note.warn{background:var(--warnbg);border:1px solid var(--warnline);color:var(--warn)}
+  .muted{color:var(--faint);font-size:.85rem}
+
+  .flow{margin:1rem 0}
+  .step{display:flex;gap:.8rem;align-items:flex-start;padding:.55rem 0}
+  .step .no{flex:0 0 1.7rem;height:1.7rem;line-height:1.7rem;text-align:center;border-radius:50%;
+    background:var(--ink);color:#fff;font-size:.78rem;font-weight:700}
+  .step .txt{flex:1}
+  .step .txt b{display:block;margin-bottom:.1rem}
+  .step .txt .why{color:var(--dim);font-size:.9rem}
+  .arrow{margin-left:.72rem;color:var(--faint);font-size:1.1rem;line-height:1}
+  .step.hl .no{background:var(--dang)}
+  .step.hl .txt b{color:var(--dang)}
+
+  .card{background:#fff;border:1px solid var(--line);border-radius:.55rem;padding:1rem 1.15rem;margin:.7rem 0}
+  .card.ok{background:var(--okbg);border-color:var(--okline)}
+  .card.dang{background:var(--dangbg);border-color:var(--dangline)}
+  .card.warn{background:var(--warnbg);border-color:var(--warnline)}
+  .card h4{margin:0 0 .45rem;font-size:.98rem}
+  .card p{margin:.35rem 0}
+  .why{color:var(--dim);font-size:.92rem}
+  table{border-collapse:collapse;width:100%;margin:.8rem 0;font-size:.92rem;background:#fff}
+  th,td{border:1px solid var(--line);padding:.42rem .6rem;text-align:left;vertical-align:top}
+  th{background:#f4f4f5;font-weight:600;font-size:.86rem}
+  td.c{text-align:center}
+  .y{color:var(--ok);font-weight:700}
+  .n2{color:var(--dang);font-weight:700}
+  .fact{margin:.8rem 0;padding:.7rem .9rem;background:#f4f4f5;border-left:3px solid var(--faint);
+    border-radius:0 .3rem .3rem 0;font-size:.9rem;color:var(--dim)}
+  .fact b{color:var(--ink)}
+  ul{margin:.4rem 0 .4rem 1.1rem;padding:0}
+  li{margin:.25rem 0}
+  footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--faint);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>PO 의 [폴더 열기]를 실제로 눌러 보지 못한 까닭</h1>
+  <p class="sub">
+    2026-09-28 · 조각 PO 3g(폴더 열기 이식) 뒤에 실측한 내용입니다.
+    결론부터 쓰면 — <b>PO 쪽 설정 파일에 두 줄이 없어서</b>입니다. 코드 문제가 아니고,
+    도우미 설치 문제도 아닙니다.
+  </p>
+</header>
+
+<!-- ═══ 1 ═══ -->
+<h2><span class="n">1</span>[폴더 열기]가 실제로 하는 일</h2>
+
+<p>
+  브라우저는 웹 페이지에서 Windows 탐색기를 직접 열 수 없습니다.
+  그래서 이 단추는 세 군데를 거칩니다.
+</p>
+
+<div class="flow">
+  <div class="step">
+    <div class="no">1</div>
+    <div class="txt">
+      <b>서버가 공유폴더에서 그 견적서의 폴더를 찾는다</b>
+      <span class="why">
+        <code>GET /api/quotes/{id}/archive-folder</code> 가 공유폴더 뿌리에서
+        <code>연도 폴더 / 견적서 폴더</code> 를 찾아, <b>뿌리 기준 상대 경로만</b> 돌려줍니다.
+        서버 안의 실제 경로는 응답에 싣지 않습니다.
+      </span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="no">2</div>
+    <div class="txt">
+      <b>화면이 도우미 주소를 만든다</b>
+      <span class="why">
+        <code>dss-folder://open/?p=…</code> — 상대 경로를 base64url 로 싸서 붙입니다.
+      </span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="no">3</div>
+    <div class="txt">
+      <b>그 PC 에 설치된 도우미가 탐색기를 연다</b>
+      <span class="why">
+        PC 마다 한 번 설치하는 PowerShell 스크립트(<code>open-dss-folder.ps1</code>)가
+        그 주소를 받아, 자기 안에 박힌 공유폴더 뿌리에 상대 경로를 붙여 탐색기로 엽니다.
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="fact">
+  <b>그래서 눌러 보려면 조건이 셋입니다.</b>
+  ① 서버에 공유폴더 설정이 있을 것 · ② 그 견적서의 폴더가 실제로 만들어져 있을 것 ·
+  ③ 그 PC 에 도우미가 설치돼 있을 것.
+</div>
+
+<!-- ═══ 2 ═══ -->
+<h2><span class="n">2</span>세 조건을 실제로 재 봤습니다</h2>
+
+<table>
+  <tr>
+    <th style="width:16%">조건</th>
+    <th style="width:26%">무엇</th>
+    <th class="c" style="width:12%">A/S</th>
+    <th class="c" style="width:12%">PO</th>
+    <th>실측</th>
+  </tr>
+  <tr>
+    <td rowspan="2">①<br>서버 설정</td>
+    <td><code>QUOTE_ARCHIVE_DIR</code><br><span class="muted">서버가 보는 경로</span></td>
+    <td class="c y">있음</td>
+    <td class="c n2">없음</td>
+    <td>A/S 쪽 값은 실제로 <b>닿습니다</b>(폴더가 열립니다).</td>
+  </tr>
+  <tr>
+    <td><code>QUOTE_ARCHIVE_UNC_ROOT</code><br><span class="muted">사람이 보는 주소</span></td>
+    <td class="c y">있음</td>
+    <td class="c n2">없음</td>
+    <td>[위치 복사]에 쓰는 값입니다. 없어도 폴더 열기 자체는 돌지만, PO 에는 <b>둘 다</b> 없습니다.</td>
+  </tr>
+  <tr>
+    <td>②<br>폴더</td>
+    <td>그 견적서의 폴더가 공유폴더에 있는가</td>
+    <td class="c y" colspan="2">있음 (4건)</td>
+    <td>
+      뿌리 아래 연도 폴더 1개, 그 안에 견적서 폴더 4개, 각 폴더에 <code>.xlsx</code> 1장.
+      A/S 와 PO 는 <b>같은 DB</b> 를 보므로 PO 에서도 그 4건이 보입니다.
+    </td>
+  </tr>
+  <tr>
+    <td>③<br>도우미</td>
+    <td>이 PC 에 <code>dss-folder</code> 가 설치돼 있는가</td>
+    <td class="c y" colspan="2">설치됨</td>
+    <td>
+      <code>%LOCALAPPDATA%\DSS\open-dss-folder.ps1</code> — 2026-09-16 · 175줄,
+      <code>HKCU\Software\Classes\dss-folder</code> 등록됨.
+    </td>
+  </tr>
+</table>
+
+<div class="card ok">
+  <h4>막고 있는 것은 ① 하나뿐입니다</h4>
+  <p class="why">
+    ②(폴더)와 ③(도우미)은 이미 갖춰져 있습니다. PO 의 <code>.env.local</code> 에
+    설정 두 줄이 없어서 <b>1단계에서 끝나는</b> 것입니다.
+  </p>
+</div>
+
+<!-- ═══ 3 ═══ -->
+<h2><span class="n">3</span>그래서 지금 화면에 뜨는 것</h2>
+
+<p>
+  서버는 공유폴더 뿌리 설정이 없으면 <code>{ status: "disabled" }</code> 를 돌려줍니다.
+  화면은 그것을 이렇게 보여 줍니다.
+</p>
+
+<div class="screen po">
+  <div class="bar">PO · /quotes/{id} — 견적서 편집 화면</div>
+  <div class="body">
+    <span class="btn off">폴더 열기</span>
+    <span class="note warn">공유폴더 저장이 꺼져 있습니다</span>
+  </div>
+</div>
+
+<p class="why">
+  이것은 <b>고장이 아니라 설계된 응답</b>입니다. 설정을 켜지 않은 환경(예: 공유폴더에
+  닿지 않는 서버)에서 단추가 오류를 뱉지 않고 꺼져 있다고 알리도록 되어 있고,
+  A/S 도 같은 방식입니다.
+</p>
+
+<h3>설정을 켜면 이렇게 갈립니다</h3>
+<table>
+  <tr><th style="width:26%">서버 응답</th><th>화면</th></tr>
+  <tr>
+    <td><code>found</code></td>
+    <td>도우미 주소를 열고, 탐색기가 뜹니다. 함께 [위치 복사]도 쓸 수 있습니다.</td>
+  </tr>
+  <tr>
+    <td><code>not-found</code></td>
+    <td>「아직 공유폴더에 이 견적서의 폴더가 없습니다 — [견적서 받기]를 먼저 눌러 주세요」</td>
+  </tr>
+  <tr>
+    <td><code>disabled</code></td>
+    <td>「공유폴더 저장이 꺼져 있습니다」 <span class="muted">← 지금 이것</span></td>
+  </tr>
+  <tr>
+    <td><code>failed</code></td>
+    <td>까닭을 그대로 보여 줍니다(폴더 이름에 도우미가 열 수 없는 글자가 있는 경우 등).</td>
+  </tr>
+</table>
+
+<!-- ═══ 4 ═══ -->
+<h2><span class="n">4</span>제가 켜지 않은 까닭</h2>
+
+<div class="card warn">
+  <h4>설정 파일은 제가 손대지 않습니다</h4>
+  <p class="why">
+    <code>.env.local</code> 은 프로젝트 규칙상 <b>내용을 출력하지도, 고치지도 않는</b> 파일입니다.
+    이 문서에도 실제 경로 값은 한 글자도 적지 않았습니다 — 「있다 · 없다 · 닿는다」만 적었습니다.
+    또 그 두 줄은 사내 NAS 주소라서, 값을 넣는 일은 사용자가 직접 하는 편이 맞습니다.
+  </p>
+</div>
+
+<div class="card dang">
+  <h4>도우미가 없는 화면은 이 PC 에서 재현할 수 없습니다</h4>
+  <p class="why">
+    「이 PC 에 폴더 열기 도우미가 없는 것 같습니다 — [설치 명령 복사]를 …」 화면은
+    도우미가 <b>설치돼 있지 않은</b> PC 에서만 뜹니다. 이 PC 에는 2026-09-16 에 이미 설치돼 있어서,
+    그 화면을 보려면 레지스트리 등록(<code>HKCU\Software\Classes\dss-folder</code>)을 지워야 합니다.
+    그것은 A/S 쪽 폴더 열기까지 함께 망가뜨리므로 <b>하지 않았습니다.</b>
+  </p>
+</div>
+
+<!-- ═══ 5 ═══ -->
+<h2><span class="n">5</span>실제로 눌러 보시려면</h2>
+
+<p>아래 두 단계면 됩니다. 코드는 건드리지 않습니다.</p>
+
+<div class="flow">
+  <div class="step">
+    <div class="no">1</div>
+    <div class="txt">
+      <b>A/S 의 <code>.env.local</code> 에서 두 줄을 그대로 복사해 PO 의 <code>.env.local</code> 에 붙여넣기</b>
+      <span class="why">
+        <code>RF_Service_System/.env.local</code> → <code>dss-po/.env.local</code>.
+        옮길 줄은 <code>QUOTE_ARCHIVE_DIR=…</code> 와 <code>QUOTE_ARCHIVE_UNC_ROOT=…</code> 둘입니다.
+        <br>⚠️ 같은 이름이 이미 아래쪽에 또 있으면 <b>나중 줄이 이깁니다</b> — 중복이 없는지 확인해 주세요.
+      </span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="no">2</div>
+    <div class="txt">
+      <b>PO 개발 서버를 껐다 켜기</b>
+      <span class="why"><code>.env.local</code> 은 서버가 뜰 때 한 번만 읽습니다. 켠 채로 고치면 안 먹습니다.</span>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step hl">
+    <div class="no">3</div>
+    <div class="txt">
+      <b>폴더가 이미 있는 견적서를 열고 [폴더 열기]</b>
+      <span class="why">
+        아무 견적서나 누르면 <code>not-found</code> 가 뜹니다 — 폴더는 <b>[견적서 받기]가 만들기</b> 때문입니다.
+        공유폴더에 폴더가 있는 것은 지금 <b>4건</b>(견적서 번호 2026-077 · 078 · 079 및 1건)입니다.
+        그 4건 중 하나를 열면 탐색기가 떠야 정상입니다.
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h4>되돌리려면</h4>
+  <p class="why">붙여넣은 두 줄을 지우고 서버를 다시 켜면 원래대로 「꺼져 있습니다」로 돌아갑니다.
+    DB 나 공유폴더에는 아무것도 쓰이지 않습니다 — 이 통로는 <b>읽기만</b> 합니다(폴더를 만들지도, 감사 기록을 남기지도 않습니다).</p>
+</div>
+
+<!-- ═══ 6 ═══ -->
+<h2><span class="n">6</span>그럼 무엇은 확인된 것인가</h2>
+
+<p>
+  실기로 못 본 것은 <b>탐색기가 실제로 뜨는 마지막 한 걸음</b>뿐입니다.
+  그 앞은 A/S 에서 이미 쓰이고 있는 코드를 글자 그대로 옮긴 것이고, 시험으로 확인했습니다.
+</p>
+
+<table>
+  <tr><th style="width:30%">무엇</th><th class="c" style="width:16%">확인 방법</th><th>내용</th></tr>
+  <tr>
+    <td>주소 만들기 · 되읽기</td>
+    <td class="c">단위 시험</td>
+    <td>base64url 싸기, 절대 경로 · <code>..</code> · 금지 글자 · 끝의 점/공백 거절</td>
+  </tr>
+  <tr>
+    <td>서버 통로의 순서</td>
+    <td class="c">소스 시험</td>
+    <td>세션 → 권한 → id → 견적서 → 뿌리 → 찾기 순서와, 결재 표를 읽지 않는다는 것</td>
+  </tr>
+  <tr>
+    <td>네 갈래 화면</td>
+    <td class="c">컴포넌트 시험</td>
+    <td>found · not-found · disabled · failed 각각의 문구와 단추</td>
+  </tr>
+  <tr>
+    <td>도우미 스크립트 규칙</td>
+    <td class="c">단위 시험</td>
+    <td>화면 쪽 규칙과 PowerShell 쪽 규칙이 <b>같은지</b> 맞춰 봅니다</td>
+  </tr>
+  <tr>
+    <td>탐색기가 실제로 뜨는 것</td>
+    <td class="c n2">못 함</td>
+    <td>위 5절을 하면 볼 수 있습니다</td>
+  </tr>
+</table>
+
+<div class="fact">
+  <b>A/S 에서는 이미 돌고 있는 기능입니다.</b> 2026-09-16 에 A/S 에 들어갔고,
+  이 PC 의 도우미도 그때 설치된 것입니다. PO 로 옮긴 코드는 문지기 한 자리(세션 확인 방식)만
+  다르고 나머지는 같습니다.
+</div>
+
+<footer>
+  2026-09-28 작성 · 측정값은 이 PC 에서 직접 잰 것입니다.
+  실제 경로 · 공유폴더 주소 · 고객명은 규칙에 따라 이 문서에 적지 않았습니다.
+</footer>
+
+</div>
+</body>
+</html>
