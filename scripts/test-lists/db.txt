@@ -114,3 +114,9 @@ src/lib/db/mutations/repair-case-used-parts.integration.test.ts
 src/lib/db/mutations/quote-approvals.integration.test.ts
 src/lib/db/queries/quote-approvals-notifications.integration.test.ts
 src/lib/server/services/kyosan-report-import.integration.test.ts
+# 연락서 이식 **되돌리기**(scripts/revert-kyosan-import.ts · scripts/lib/kyosan-import-revert.ts).
+# 넣기 → 되돌리기를 실제로 돌려 여섯(작업 기록·사용 부품·첨부·신고 증상·흔적·파일)이
+# 사라지는가, 사람이 올린 첨부·보고서·사람이 적은 줄이 남는가, `--apply` 없이는 한 줄도
+# 안 바뀌는가를 본다. 🔴 격리 이름: 접수 월 "9312" · 고객사 "AS-TEST-KYREV-" ·
+# 제품 모델 "KYREV-TEST-" (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더.
+src/lib/server/services/kyosan-import-revert.integration.test.ts

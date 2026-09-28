@@ -275,3 +275,9 @@ src/lib/domain/weekly-report-table-width.test.ts
 src/lib/domain/notification-bell-items.test.ts
 src/lib/domain/portal-notification-inbox.test.ts
 src/lib/server/integration/portal-inbox.test.ts
+# 연락서 이식 되돌리기(scripts/revert-kyosan-import.ts)의 **고르는 규칙**. DB 없이 값으로
+# 돈다 — 사람이 올린 「설명 없음」 첨부가 안 걸리는가 · 개수가 어긋나면 건너뛰는가 ·
+# 옛 흔적의 사용 부품을 (line_no·품명·수량)으로만 맞추는가 · 주인 없는 흔적이 빠지는가.
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 이식기의 상수와
+# 갈라지지 않았는지 **글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
+scripts/lib/kyosan-import-revert-plan.test.ts
