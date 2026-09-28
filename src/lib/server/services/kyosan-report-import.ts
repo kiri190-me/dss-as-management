@@ -266,6 +266,14 @@ export type KyosanReportImportInput = {
   storage: StorageAdapter;
   /** 발행일을 하나도 못 읽었을 때 쓸 날짜. 시험이 오늘에 흔들리지 않게 받는다. */
   today?: string;
+  /**
+   * 🔴 **한 회차의 일괄 이식을 묶는 번호**(S5). 화면에서 사람이 한 장씩 넣을 때는
+   * 주지 않는다 — 그때는 이식 흔적에 `null` 로 들어간다. 여러 장을 한 번에 도는
+   * 러너가 같은 값을 주면, 그 회차가 만든 흔적만 골라 한 번에 되짚을 수 있다.
+   *
+   * 🔴 우리가 만든 번호다 — 연락서에서 읽은 글자가 아니다(고객 내용이 아니다).
+   */
+  importBatchId?: string;
 };
 
 /** 트랜잭션 핸들 — `db.transaction` 이 넘겨주는 것과 같은 타입. */
@@ -455,14 +463,26 @@ export async function importKyosanReport(
         metadata: {
           source: KYOSAN_REPORT_SOURCE,
           sourceSha256: report.sourceSha256,
-          // 🔴 우리 표의 id 와 개수만. 파일 이름·고객 내용은 담지 않는다(머리말).
+          // 🔴 우리 표의 id 와 개수만. 파일 이름·부품 이름·고객 내용은 담지 않는다(머리말).
           workRecordIds,
           reportedSymptomFilled,
           lineCount: plan.lines.length,
+          // 🔴 **개수 칸을 지우지 않는다.** 이 칸이 생기기 전에 들어간 흔적에는 id
+          //    칸이 없고, 그때 무엇이 들어갔는지 아는 단서가 개수뿐이다 — 되돌리기
+          //    도구가 「id 가 없는 옛 흔적」도 다룰 수 있어야 한다. 새 흔적에서는
+          //    `usedPartCount === usedPartIds.length` 가 언제나 참이다.
           usedPartCount: usedParts.insertedCount,
+          // 🔴 이식이 **새로 붙인** 사용 부품 줄의 id. `repair_case_used_parts` 에는
+          //    이식에서 온 줄임을 알려 주는 칸이 없고(`part_id` 가 null 인 것은 사람이
+          //    손으로 적은 줄도 같다) 이 목록이 되돌릴 수 있는 유일한 단서다.
+          usedPartIds: usedParts.insertedIds,
           attachmentCount: attachmentIds.length,
+          // 🔴 이식이 새로 만든 첨부 행의 id(원본 한 장 + 꺼낸 사진들).
+          attachmentIds,
           photoCount: plan.photoCount,
           formFamily: report.formFamily,
+          // 🔴 일괄 이식 한 회차를 묶는 번호. 화면에서 한 장씩 넣으면 `null` 이다.
+          importBatchId: input.importBatchId ?? null,
         },
       });
 
@@ -779,6 +799,15 @@ async function appendWorkRecords(
  * 때문이다.
  * 되돌려 주는 `insertedCount` 는 **실제로 넣은 줄 수**라 묶은 뒤의 수다
  * (화면이 「사용 부품 N줄」로 보여 주고, 이식 흔적의 `usedPartCount` 도 그 수다).
+ *
+ * ── 🔴 넣은 줄의 id 를 함께 돌려준다 (되돌리기를 위해) ──────────────────
+ * `repair_case_used_parts` 에는 **어느 줄이 이식에서 왔는지 알려 주는 칸이
+ * 없다.** `part_id IS NULL` 로도 못 가른다 — 사람이 손으로 적는 줄도 비어
+ * 있기 때문이다. 그래서 넣은 줄의 id 를 이식 흔적에 실어 두는 것이 **한 회차를
+ * 되돌릴 수 있는 유일한 단서**다(`usedPartIds`).
+ *
+ * 🔴 `insertedCount` 는 `insertedIds.length` 로만 센다 — 세는 길을 둘로 두면
+ * 한쪽만 고쳐지는 날이 온다. 안 넣고 건너뛰는 갈래에서는 둘 다 빈 값이다.
  */
 async function appendUsedParts(
   tx: Tx,
@@ -788,8 +817,8 @@ async function appendUsedParts(
     actorUserId: string;
     isShipmentLocked: boolean;
   }
-): Promise<{ insertedCount: number; skippedReason: string | null }> {
-  if (params.parts.length === 0) return { insertedCount: 0, skippedReason: null };
+): Promise<{ insertedCount: number; insertedIds: string[]; skippedReason: string | null }> {
+  if (params.parts.length === 0) return { insertedCount: 0, insertedIds: [], skippedReason: null };
 
   const hasPartRequestHistory = await hasLivePartRequest(tx, params.repairCaseId);
   const isLegacyImportedCase = await isImportedFromKyosanIntake(tx, params.repairCaseId);
@@ -802,6 +831,8 @@ async function appendUsedParts(
   if (!gate.ok) {
     return {
       insertedCount: 0,
+      // 🔴 한 줄도 넣지 않은 갈래다 — id 도 없다(빈 배열이어야 한다).
+      insertedIds: [],
       // 🔴 세는 것은 **묶기 전 「교체 부품」 건수**다(묶은 줄 수가 아니다). 이 문장을
       //    읽는 사람은 바로 위 미리보기에서 그 수를 세고 있고, 못 들어간 것은 그
       //    목록 전체이기 때문이다.
@@ -869,7 +900,13 @@ async function appendUsedParts(
     quantity: line.quantity,
   }));
 
-  await tx.insert(repairCaseUsedParts).values(nextLines);
+  // 🔴 넣은 줄의 id 를 **같은 트랜잭션 안에서** 받아 온다 — 이식 흔적에 실어야
+  //    나중에 그 회차만 골라 되돌릴 수 있다(위 머리말).
+  const insertedRows = await tx
+    .insert(repairCaseUsedParts)
+    .values(nextLines)
+    .returning({ id: repairCaseUsedParts.id });
+  const insertedIds = insertedRows.map((row) => row.id);
 
   // 건의 version 을 올린다 — 사용 부품 저장이 쓰는 바로 그 번호다. 화면이 열어 둔
   // 폼은 다음 저장에서 CONFLICT 를 받고 다시 불러온다(그것이 맞는 신호다).
@@ -898,7 +935,9 @@ async function appendUsedParts(
     },
   });
 
-  return { insertedCount: nextLines.length, skippedReason: null };
+  // 🔴 세는 길은 하나다 — `insertedIds.length`. 넣은 줄 수와 id 개수가 어긋날
+  //    길을 남기지 않는다(`nextLines.length` 와 같은 수다).
+  return { insertedCount: insertedIds.length, insertedIds, skippedReason: null };
 }
 
 // ─────────────────────────────────────────────── 파일 (원본 · 사진)

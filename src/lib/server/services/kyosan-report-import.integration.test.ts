@@ -401,6 +401,19 @@ async function readAttachments(repairCaseId: string) {
     .orderBy(asc(attachments.uploadedAt), asc(attachments.storedPath));
 }
 
+/**
+ * 이 건의 사용 부품 줄 **id** — 이식 흔적의 `usedPartIds` 를 **개수가 아니라 id 로**
+ * 대조하려고 읽는다. 개수만 세면 「다른 줄의 id 가 실렸다」를 못 잡는다.
+ */
+async function readUsedPartIds(repairCaseId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: repairCaseUsedParts.id })
+    .from(repairCaseUsedParts)
+    .where(eq(repairCaseUsedParts.repairCaseId, repairCaseId))
+    .orderBy(asc(repairCaseUsedParts.lineNo));
+  return rows.map((row) => row.id);
+}
+
 async function readTrace(repairCaseId: string) {
   return db
     .select({ id: statusChangeHistories.id, reason: statusChangeHistories.reason, metadata: statusChangeHistories.metadata })
@@ -570,7 +583,67 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     // 🔴 과거 인수품 가져오기의 표시를 달지 않는다.
     assert.equal("billingReview" in metadata, false);
 
+    // ── 🔴 되돌리기의 단서 — 넣은 줄의 id 가 흔적에 실린다 (조각 S5-A) ──
+    //    이 셋이 없으면 일괄 이식 469장을 **되돌릴 방법이 없다**:
+    //    `repair_case_used_parts` 에는 이식에서 왔음을 알려 주는 칸이 없고
+    //    (`part_id` 가 null 인 것은 사람이 손으로 적은 줄도 같다), 첨부도 마찬가지다.
+    assert.equal("usedPartIds" in metadata, true, "🔴 사용 부품 줄 id 가 흔적에 있어야 한다");
+    assert.equal("attachmentIds" in metadata, true, "🔴 첨부 id 가 흔적에 있어야 한다");
+    assert.equal("importBatchId" in metadata, true, "🔴 회차 번호 칸이 있어야 한다");
+
+    // 🔴 **개수 칸을 지우지 않았다** — 옛 흔적(id 없음)을 다룰 단서가 그것뿐이다.
+    assert.equal("usedPartCount" in metadata, true);
+    assert.equal("attachmentCount" in metadata, true);
+
+    // 이 연락서에는 교체 부품이 없다 — 둘 다 0 이고, 그래도 어긋나지 않는다.
+    assert.deepEqual(metadata.usedPartIds, []);
+    assert.equal(metadata.usedPartCount, 0);
+    assert.deepEqual(metadata.usedPartIds, await readUsedPartIds(target.id));
+
+    // 🔴 첨부는 **실제로 넣은 행과 id 로** 맞아야 한다(개수만 세지 않는다).
+    assert.deepEqual(
+      [...(metadata.attachmentIds as string[])].sort(),
+      files.map((file) => file.id).sort()
+    );
+    assert.deepEqual([...(metadata.attachmentIds as string[])].sort(), [...result.attachmentIds].sort());
+
+    // 🔴 개수 칸과 id 칸이 **언제나 같은 수**여야 한다.
+    assert.equal(metadata.usedPartCount, (metadata.usedPartIds as string[]).length);
+    assert.equal(metadata.attachmentCount, (metadata.attachmentIds as string[]).length);
+
+    // 🔴 화면에서 한 장씩 넣을 때는 회차 번호를 주지 않는다 — `null` 이다.
+    assert.equal(metadata.importBatchId, null);
+
     assert.deepEqual(await listImportedKyosanSourceHashes(target.id), [fake.report.sourceSha256]);
+  });
+
+  /**
+   * 🔴 S5 러너가 503장을 돌 때 **한 회차를 한 번에 되돌리려면** 회차 번호가 흔적에
+   * 그대로 남아야 한다. 값은 우리가 만든 번호다(연락서에서 읽은 글자가 아니다).
+   */
+  test("🔴 `importBatchId` 를 주면 이식 흔적에 그 값이 그대로 들어간다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "값-부품회차",
+      salt: "회차",
+    });
+
+    const importBatchId = randomUUID();
+    const result = await importOf(fake, { importBatchId });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const trace = await readTrace(target.id);
+    assert.equal(trace.length, 1);
+    const metadata = trace[0].metadata as Record<string, unknown>;
+    assert.equal(metadata.importBatchId, importBatchId);
+
+    // 회차 번호를 준다고 다른 것이 달라지지 않는다 — id 는 여전히 실제 줄과 맞는다.
+    assert.deepEqual(metadata.usedPartIds, await readUsedPartIds(target.id));
+    assert.equal(metadata.usedPartCount, (metadata.usedPartIds as string[]).length);
   });
 
   test("🔴 교체 부품은 진단/조치 작업 기록과 `repair_case_used_parts` 둘 다에 들어간다", async () => {
@@ -593,6 +666,17 @@ describe("짝이 하나로 정해지면 들어간다", () => {
       .from(repairCaseUsedParts)
       .where(eq(repairCaseUsedParts.repairCaseId, target.id));
     assert.deepEqual(used, [{ lineNo: 1, partId: null, partNameText: "값-부품1", quantity: 1 }]);
+
+    // 🔴 넣은 줄의 id 가 흔적에 실린다 — **개수가 아니라 id 로** 실제 줄과 맞춘다.
+    //    되돌리기 도구가 「어느 줄을 지울지」 아는 단서가 이것뿐이다(조각 S5-A).
+    const trace = await readTrace(target.id);
+    assert.equal(trace.length, 1);
+    const metadata = trace[0].metadata as Record<string, unknown>;
+    const usedPartIds = await readUsedPartIds(target.id);
+    assert.equal(usedPartIds.length, 1);
+    assert.deepEqual(metadata.usedPartIds, usedPartIds);
+    assert.equal(metadata.usedPartCount, usedPartIds.length);
+    assert.equal(metadata.importBatchId, null, "회차 번호를 주지 않았으면 null 이다");
 
     const records = await readImportedWorkRecords(target.id);
     const diagnosis = records.find((row) => row.recordKind === "DIAGNOSIS_REPAIR_SUMMARY");
@@ -778,6 +862,17 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     assert.equal(photo.mimeType, "image/png");
     // 🔴 파일 이름에 고객 내용을 담지 않는다.
     assert.ok(photo.originalFileName.startsWith("연락서-"), photo.originalFileName);
+
+    // 🔴 흔적의 `attachmentIds` 가 **두 장 다** — 원본과 사진 — 실제 행과 맞는다.
+    //    사진까지 실려야 되돌릴 때 남는 파일이 없다(조각 S5-A).
+    const trace = await readTrace(target.id);
+    assert.equal(trace.length, 1);
+    const metadata = trace[0].metadata as Record<string, unknown>;
+    assert.deepEqual(
+      [...(metadata.attachmentIds as string[])].sort(),
+      files.map((file) => file.id).sort()
+    );
+    assert.equal(metadata.attachmentCount, (metadata.attachmentIds as string[]).length);
   });
 
   test("🔴 우리 사전에 없는 원인 보기도 원문 그대로 작업 기록에 남는다", async () => {
