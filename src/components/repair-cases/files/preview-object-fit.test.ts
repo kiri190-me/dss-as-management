@@ -10,11 +10,17 @@ import { readFileSync } from "node:fs";
  * 사진은 흠집이 양 끝에서 사라져서 무엇을 찍은 것인지 목록에서 알아볼 수 없다.
  * 그래서 네 자리를 `object-contain`(맞춰 넣기)으로 못박는다.
  *
- * 🔴 **함께 못박는 반대쪽**: InAppCamera 는 여전히 `object-cover` 여야 한다.
- * 거기 video 는 「카메라에 지금 찍히는 범위」를 그리는 것이라 잘라 채우는 것이
- * 맞고, 그 파일 주석(177·183·677·705행)이 `contain` 이 만드는 검은 여백 때문에
- * 배율 계산이 어떻게 어긋나는지를 길게 설명하고 있다. 「미리보기를 contain 으로」
- * 하는 다음 사람이 한 번에 싹 바꿔 버리는 것을 이 시험이 막는다.
+ * 🔴 **함께 못박는 반대쪽**: InAppCamera 의 video 는 여전히 `object-cover` 여야
+ * 한다. 거기 video 는 「카메라에 지금 찍히는 범위」를 그리는 것이라 잘라 채우는
+ * 것이 맞고, 그 파일 주석(177·183·677·705행)이 `contain` 이 만드는 검은 여백
+ * 때문에 배율 계산이 어떻게 어긋나는지를 길게 설명하고 있다. 「미리보기를 contain
+ * 으로」 하는 다음 사람이 한 번에 싹 바꿔 버리는 것을 이 시험이 막는다.
+ *
+ * 🔴 **그 파일 안에서 딱 한 자리만 예외다**: 카메라 화면 아래 왼쪽의 「방금 찍은
+ * 사진」 썸네일은 `object-contain` 이다(2026-09-29). 지금 찍히는 범위가 아니라
+ * 이미 찍힌 결과물이고 배율 계산과도 무관해서, 위의 「전체 모습이 보여야 한다」가
+ * 그대로 걸린다. 그래서 이 시험은 **cover 와 contain 을 자리별로 둘 다** 못박는다
+ * — 한쪽만 보면 파일을 통째로 뒤집어도 통과해 버린다.
  *
  * 🔴 **빈 자리에는 바탕색이 있어야 한다.** contain 은 칸 안에 남는 자리를 만든다.
  * 그 자리가 비면 「그림이 덜 그려졌다」로 읽히므로 네 자리 모두 바탕을 깐다.
@@ -140,7 +146,7 @@ describe("🔴 미리보기 넷은 잘리지 않는다 — object-contain", () =
   });
 });
 
-describe("🔴 반대쪽 — 카메라 미리보기는 잘라 채우는 것이 맞다", () => {
+describe("🔴 반대쪽 — 카메라 영상은 잘라 채우는 것이 맞다", () => {
   test("InAppCamera 는 여전히 object-cover 를 쓴다", () => {
     assert.ok(
       code(camera).includes("object-cover"),
@@ -157,12 +163,38 @@ describe("🔴 반대쪽 — 카메라 미리보기는 잘라 채우는 것이 �
     );
   });
 
-  test("방금 찍은 것 썸네일도 object-cover 그대로다", () => {
+  test("object-cover 를 쓰는 자리는 그 영상 하나뿐이다", () => {
+    assert.equal(
+      code(camera).match(/object-cover/g)?.length ?? 0,
+      1,
+      "🔴 잘라 채워도 되는 것은 카메라 영상뿐이다 — 자리가 늘었다면 그것도 「지금 찍히는 범위」인지 따져야 한다"
+    );
+  });
+});
+
+describe("🔴 카메라 안에서도 방금 찍은 사진은 잘리지 않는다 — object-contain", () => {
+  test("방금 찍은 것 썸네일이 object-contain 이다", () => {
     assert.ok(
       flat(camera).includes(
-        `<img src={lastShotUrl} alt="방금 찍은 사진" className="h-full w-full object-cover" />`
+        `<img src={lastShotUrl} alt="방금 찍은 사진" className="h-full w-full object-contain" />`
       ),
-      "카메라 화면 안쪽이라 이번 변경 범위가 아니다 — 함께 바꿔 버리지 않았는지 본다"
+      "🔴 이미 찍힌 결과물이라 전체가 보여야 한다 — 잘린 가운데만 보고는 다시 찍을지를 못 고른다"
+    );
+  });
+
+  test("방금 찍은 것 썸네일에 object-cover 가 남아 있지 않다", () => {
+    assert.ok(
+      !flat(code(camera)).includes(`alt="방금 찍은 사진" className="h-full w-full object-cover"`),
+      "이 자리는 카메라 영상이 아니다 — 파일을 통째로 cover 로 되돌리지 않았는지 본다"
+    );
+  });
+
+  test("방금 찍은 것 썸네일은 바탕색과 칸 크기가 그대로다", () => {
+    assert.ok(
+      flat(camera).includes(
+        `className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-white/40 bg-white/10"`
+      ),
+      "🔴 contain 이 만드는 빈 자리는 바깥 상자의 bg-white/10 이 받는다 — 칸 크기(h-14 w-14)도 흔들리면 안 된다"
     );
   });
 });

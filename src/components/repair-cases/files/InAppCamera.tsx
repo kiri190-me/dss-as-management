@@ -845,11 +845,17 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
             : "absolute inset-x-0 bottom-0 flex h-36 items-center justify-around gap-4 bg-gradient-to-t from-black/80 to-transparent pb-[env(safe-area-inset-bottom)]"
         }
       >
-        {/* 방금 찍은 것 */}
+        {/*
+          방금 찍은 것. 이 파일에서 여기만 object-contain이다 — 위의 video와 달리
+          「지금 찍히는 범위」가 아니라 이미 찍힌 결과물이고, 상자를 재서 쓰는 배율
+          계산(previewBox·scale)과도 상관이 없다. 잘라 채우면 방금 무엇을 찍었는지
+          가운데만 보여서 다시 찍을지 말지를 여기서 못 고른다. 맞춰 넣어 남는 자리는
+          바깥 상자의 bg-white/10이 받는다(칸 크기는 h-14 w-14 그대로).
+        */}
         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-white/40 bg-white/10">
           {lastShotUrl && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={lastShotUrl} alt="방금 찍은 사진" className="h-full w-full object-cover" />
+            <img src={lastShotUrl} alt="방금 찍은 사진" className="h-full w-full object-contain" />
           )}
         </div>
 
