@@ -229,7 +229,9 @@ import {
  * **무슨 뜻인지는 맨 위 머리말에 한 번만 적는다.** 블록이 58개라 상자마다 적으면
  * 그 문장이 화면의 절반을 차지하고, 결국 아무도 읽지 않는다. 색만으로 뜻이
  * 전해지지 않는 자리(색을 못 보는 사람·흑백 인쇄)를 위해 그 칸에 title 을 붙인다 —
- * sr-only 를 새로 넣지 않는 이유는 파일 아래 relative 주석에 있다.
+ * sr-only 를 새로 넣지 않는 이유는 파일 아래 relative 주석에 있다. `인수 번호` 칸의
+ * sr-only 는 그 경우가 아니다: 그 `<Link>` 자신이 relative 라 기준을 제 안에 둔다
+ * (IntakeNumberLink 주석).
  *
  * ── 분류 안 된 건은 감추지 않는다 ──────────────────────────────────────
  * 6칸 어디에도 안 맞는 건이 있으면 맨 위에 몇 건인지 적고, 그 블록의 집계에도
@@ -519,6 +521,49 @@ function BlockHeading({
 }
 
 /**
+ * 상세표의 `인수 번호` 한 칸 — 그 수리 건 상세로 가는 링크.
+ *
+ * 이 화면에는 인수번호가 셋 있고 **셋이 한 장에 함께 보인다**: 여기와 금주 목표
+ * 상자(WeeklyReportGoalsPanel 의 GoalPrefix) · 납입 예정 건 표
+ * (WeeklyReportDeliveriesPanel 의 IntakeNumberLink). 그래서 주소도 꾸밈도
+ * **먼저 있던 둘과 같은 값**을 쓴다 — 한 화면에서 같은 것이 자리마다 다르게
+ * 보이면 사람은 그 차이를 뜻으로 읽는다.
+ *
+ * 수리 건 id 는 `row.id` 다. 조회가 repair_cases.id 를 그대로 실어 오고
+ * (queries/weekly-report.ts), 같은 줄의 `비고` 칸도 이 값을 repairCaseId 로
+ * 넘긴다(WeeklyReportNotesCell) — 링크 때문에 조회를 고칠 것이 없다.
+ *
+ * ── 인수번호가 빈 줄은 링크로 만들지 않는다 ─────────────────────────────
+ * 금주 목표 상자와 같은 판단이다(GoalPrefix). 누를 글자가 없으면 밑줄만 남아
+ * 어디로 가는 것인지 알 수 없고, 낭독기에는 이름 없는 링크가 된다. 보이는
+ * 글자는 지금까지와 한 글자도 다르지 않게 `row.intakeNumber` 그대로 둔다 —
+ * 여기서 dash 를 새로 씌우면 링크와 상관없는 자리가 같이 바뀐다.
+ * (intake_number 는 NOT NULL 에 형식 검사까지 걸려 있어 실제로는 오지 않는
+ * 줄이다. 그래도 링크 하나 때문에 줄이 사라지는 것보다 글자로 두는 편이 낫다.)
+ *
+ * ⚠️ **relative 를 떼지 말 것** — 안의 sr-only 는 position:absolute 다(Tailwind 의
+ * sr-only 가 그렇다). 기준이 되는 조상이 없으면 그 span 이 AppShell <main> 의
+ * 자르기를 빠져나가 문서 바닥에 자리를 주장하고, 세로 스크롤바가 둘로 보인다 —
+ * 이 저장소가 실제로 겪은 고장이고 실측은 아래 고객사 줄 주석에 있다.
+ */
+function IntakeNumberLink({ row }: { row: WeeklyReportRow }) {
+  if (row.intakeNumber.trim() === "") return <>{row.intakeNumber}</>;
+
+  return (
+    <Link
+      href={`/repair-cases/${row.id}`}
+      className="relative text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+    >
+      {row.intakeNumber}
+      {/* 낭독기가 읽을 이름을 **내용 + 용도**로 합성한다. 차례가 내용 먼저인 것은
+          표를 읽어 내려가는 사람에게 그 칸의 값이 먼저 와야 해서다 — 먼저 있던
+          두 인수번호 링크와 같은 글자 · 같은 차례다. */}
+      <span className="sr-only"> 수리 건 상세로 이동</span>
+    </Link>
+  );
+}
+
+/**
  * 블록 하나 — 소제목 · 집계 8칸 · 상세표 8칼럼. 엑셀의 한 덩어리 그대로다.
  * 소제목과 집계 칸은 그 고객사의 색으로 칠한다(파일 헤더).
  *
@@ -584,8 +629,10 @@ function ReportBlock({
                   key={row.id}
                   className="border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800"
                 >
+                  {/* 칸의 꾸밈은 그대로 둔다 — 링크 색·밑줄은 안쪽 <Link> 에만
+                      붙어, 줄 높이도 칸 너비도 달라지지 않는다(IntakeNumberLink). */}
                   <td className="px-wr-cell-x py-wr-cell-y font-medium text-zinc-900 dark:text-zinc-50">
-                    {row.intakeNumber}
+                    <IntakeNumberLink row={row} />
                   </td>
                   <td className="px-wr-cell-x py-wr-cell-y">{dash(row.modelName)}</td>
                   <td className="px-wr-cell-x py-wr-cell-y">{dash(row.serialNumber)}</td>
