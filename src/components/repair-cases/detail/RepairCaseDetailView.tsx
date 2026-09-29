@@ -25,7 +25,7 @@ import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-re
 import PendingBillingDecisionCard from "@/components/repair-cases/detail/PendingBillingDecisionCard";
 import UsedPartsSection from "@/components/repair-cases/detail/UsedPartsSection";
 import type { RepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
-import type { RepairCaseDomesticOrderRow } from "@/lib/domain/repair-case-domestic-order-dates";
+import type { RepairCaseDomesticOrderIssueDateRow } from "@/lib/domain/domestic-order-issue-date-edit";
 
 /**
  * mock(서버 조회)과 local(클라이언트 조회) 두 경로가 모두 이 컴포넌트 하나로
@@ -61,6 +61,7 @@ export default function RepairCaseDetailView({
   derivedServiceSummary,
   domesticOrderDueDates,
   domesticOrderIssueDates,
+  canWriteDomesticOrderIssueDates,
   usedParts,
   usedPartOptions,
 }: {
@@ -111,8 +112,19 @@ export default function RepairCaseDetailView({
    * ⚠️ 여기서 하나로 접지 않는다 — domesticOrderDueDates 와 같은 이유다(위 주석).
    * 어느 줄을 그릴지는 domain/repair-case-domestic-order-dates.ts 가 주간보고와
    * 같은 pickWeeklyReportOrderDates 로 정한다.
+   *
+   * 한 줄에는 그릴 두 날짜 말고 **고칠 대상을 가리키는 셋**(id · 내자 줄의
+   * version · quoteId)이 함께 실려 온다(2026-09-29) — 화면에 그리는 값이 아니라
+   * 저장이 어느 줄을 어떻게 다룰지 정하는 재료다.
    */
-  domesticOrderIssueDates: readonly RepairCaseDomesticOrderRow[] | null;
+  domesticOrderIssueDates: readonly RepairCaseDomesticOrderIssueDateRow[] | null;
+  /**
+   * 「내자 정리 발행일」의 두 날짜를 **고칠 수 있는 사람인가**(domesticOrders
+   * WRITE). 🔴 위 목록을 볼 수 있는가(READ)와 **다른 축**이라 따로 받는다 —
+   * 거짓이면 구역은 그려지되 수정 단추가 없다. 판정은 [id]/page.tsx 가 하고,
+   * 화면이 감춘 것은 경계가 아니다(서버 액션이 다시 묻는다).
+   */
+  canWriteDomesticOrderIssueDates: boolean;
   /**
    * 「사용 부품」 칸의 재료 — 손으로 적어 둔 줄들과, **서버가 내린** "이 건에 적을
    * 수 있는가"(writeGate). DATABASE 소스 건에만 있고 나머지는 null 이라 칸 자체가
@@ -197,7 +209,13 @@ export default function RepairCaseDetailView({
           위 격자 안에 세 번째 칸으로 넣지 않은 이유: 격자가 2열이라 오른쪽에 빈
           칸이 생기고, 칸 둘뿐인 이 구역이 제품 정보와 높이를 맞추느라 늘어난다.
           🔴 null 이면 아예 없다 — 내자 자료를 볼 수 없는 세션이다(위 prop 주석). */}
-      {domesticOrderIssueDates && <DomesticOrderDatesSection rows={domesticOrderIssueDates} />}
+      {domesticOrderIssueDates && (
+        <DomesticOrderDatesSection
+          repairCaseId={effective.id}
+          rows={domesticOrderIssueDates}
+          canEdit={canWriteDomesticOrderIssueDates}
+        />
+      )}
       <FaultServiceSection
         resolved={effective}
         editableFields={faultServiceFields}

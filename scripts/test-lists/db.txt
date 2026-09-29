@@ -128,3 +128,14 @@ src/lib/server/services/kyosan-import-revert.integration.test.ts
 # ALREADY_IMPORTED 로 세어지는가. 🔴 격리 이름: 접수 월 "9412" · 고객사 "AS-TEST-KYRUN-" ·
 # 제품 모델 "KYRUN-TEST-" (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더.
 src/lib/server/services/kyosan-report-import-run.integration.test.ts
+
+# 수리 건 상세 「내자 정리 발행일」 저장(2026-09-29) — 두 칸만 고치고, 줄이 없으면
+# 그 자리에서 만든다. 🔴 이 조각의 안전선이 여기 있다: **줄이 있을 때 저장해도 다른
+# 칸(금액·입금·납품일·세금계산서·견적서 연결·납기요청일)이 그대로인가**를 칼럼마다
+# 하나씩 대조한다 — 기존 updateDomesticOrder 는 줄 전체를 SET 하므로 그 길로 저장하면
+# 전부 지워진다. 그 밖에: 줄이 둘 이상이면 거절 · 견적서가 붙은 줄의 견적발행일 거절
+# (발주발행일은 받는다) · version 이 어긋나면 거절 · 쓰기 권한이 없으면 거절 ·
+# 동시 첫 저장에도 줄은 하나.
+# 🔴 격리 이름: 접수 월 "9502" · 고객사 "AS-TEST-DO-ISSUE-DATE-" · 제품 모델
+# "DO-ISSUE-DATE-TEST-" · 계정 이메일 "doissuedate-test-" (다른 스위트와 겹치지 않는다).
+src/lib/db/mutations/domestic-order-issue-dates.integration.test.ts

@@ -28,6 +28,20 @@ import {
  *     이름으로 불리면 사람이 다른 값으로 읽는다.
  *  5. 세 경우(0개·1개·N개)가 화면에서 실제로 갈린다.
  *  6. 🔴 화면이 제 손으로 고르지 않는다 — sort 도 filter 도 없다.
+ *
+ * ── 2026-09-29: 여기서 **고칠 수 있게** 됐다 ─────────────────────────────
+ * 그래서 넷이 더 붙었다. 전부 "열려서는 안 되는 자리가 닫혀 있는가"이고,
+ * 화면이 감춘 것은 경계가 아니므로 서버 쪽 같은 판정은 DB 시험이 본다
+ * (db/mutations/domestic-order-issue-dates.integration.test.ts).
+ *
+ *  7. 🔴 **쓰기는 읽기와 다른 축**이다 — 볼 수만 있는 사람에게는 구역이
+ *     그려지되 수정 단추가 없다(domesticOrders WRITE 를 따로 묻는다).
+ *  8. 🔴 **줄이 둘 이상이면 수정 단추가 없다** — 접어서 그린 값이 어느 줄의
+ *     것인지 말할 수 없는 상태에서 저장을 받으면 안 된다.
+ *  9. 🔴 **견적서가 붙은 줄의 견적일 칸은 입력칸이 열리지 않는다** — 판정을
+ *     베껴 적지 않고 도메인 함수가 낸 값을 쓴다.
+ * 10. 저장 알림은 **성공 전용**이고, 읽어야 하는 말(충돌 · 거절)은 폼 안에
+ *     남는다(SavePopup 은 0.5초 뒤 저절로 닫힌다).
  * ============================================================================
  */
 
@@ -86,11 +100,41 @@ describe("🔴 내자 자료를 볼 수 없는 사람에게는 구역이 안 그
   });
 
   test("화면은 null 이면 구역을 통째로 그리지 않는다 — 빈 배열과 뜻이 다르다", () => {
+    assert.match(viewFlat, /\{domesticOrderIssueDates && \( <DomesticOrderDatesSection /);
     assert.match(
       viewFlat,
-      /\{domesticOrderIssueDates && <DomesticOrderDatesSection rows=\{domesticOrderIssueDates\} \/>\}/
+      /domesticOrderIssueDates: readonly RepairCaseDomesticOrderIssueDateRow\[\] \| null;/
     );
-    assert.match(viewFlat, /domesticOrderIssueDates: readonly RepairCaseDomesticOrderRow\[\] \| null;/);
+  });
+});
+
+// ── ①-2 🔴 쓰기는 읽기와 다른 축이다 ────────────────────────────────────
+
+describe("🔴 볼 수 있다고 고칠 수 있는 것은 아니다", () => {
+  test("고치기는 domesticOrders **WRITE** 를 따로 묻는다 — 내자 정리 저장과 같은 관문", () => {
+    assert.match(
+      pageFlat,
+      /const canWriteDomesticOrders = canReadDomesticOrders && actingUser !== null && \(await hasPermission\(actingUser, "domesticOrders", "WRITE"\)\);/
+    );
+  });
+
+  test("볼 수 없으면 고칠 수도 없다 — 읽기 판정을 먼저 건다", () => {
+    // 구역 자체가 안 그려지므로 뒤 판정을 물을 일도 없다.
+    assert.match(pageFlat, /canWriteDomesticOrders = canReadDomesticOrders &&/);
+  });
+
+  test("그 판정이 화면까지 그대로 간다 — 구역은 제 손으로 권한을 셈하지 않는다", () => {
+    assert.match(pageFlat, /canWriteDomesticOrderIssueDates=\{canWriteDomesticOrders\}/);
+    assert.match(viewFlat, /canEdit=\{canWriteDomesticOrderIssueDates\}/);
+    assert.match(sectionFlat, /const editable = canEdit && plan\.kind !== "BLOCKED_MULTIPLE";/);
+    assert.ok(
+      !/hasPermission|hasAreaAccess|isFieldEditable/.test(sectionCode),
+      "구역이 제 손으로 권한을 판정하고 있다"
+    );
+  });
+
+  test("🔴 권한이 없으면 수정 단추가 없다 — 단추는 editable 뒤에만 그려진다", () => {
+    assert.match(sectionFlat, /\{editable && !isEditing && \( <button/);
   });
 });
 
@@ -176,9 +220,65 @@ test("🔴 구역에 sort/filter/slice 가 없다 — 고르는 일은 도메인
   );
 });
 
-test("🔴 이 구역에 수정 단추가 없다 — 고치는 길은 다음 조각이다", () => {
-  assert.ok(!sectionCode.includes("수정"), "수정 단추는 다음 조각의 일이다");
-  assert.ok(!/onStartEdit|editableFields|editingSection/.test(sectionCode));
-  // 부모도 이 구역에는 편집 관련 값을 한 개도 넘기지 않는다.
-  assert.match(viewFlat, /<DomesticOrderDatesSection rows=\{domesticOrderIssueDates\} \/>/);
+// ── ⑥ 🔴 고치기 — 열려서는 안 되는 자리가 닫혀 있는가 ──────────────────
+
+describe("🔴 고칠 수 있게 된 뒤에도 닫혀 있어야 하는 것", () => {
+  test("🔴 줄이 둘 이상이면 수정 단추가 없다 — 어느 줄인지 말할 수 없다", () => {
+    // 접어서 그린 값이 다른 줄의 것일 수 있고, 그대로 저장하면 그 날짜가 이
+    // 줄에 박제된다(domain/domestic-order-cell-edit.ts 의 함정 ②).
+    assert.match(sectionFlat, /const editable = canEdit && plan\.kind !== "BLOCKED_MULTIPLE";/);
+    // 저장하는 길도 같은 판정 뒤에 있다 — 단추만 감추면 경계가 아니다.
+    assert.match(sectionFlat, /if \(disabled \|\| plan\.kind === "BLOCKED_MULTIPLE"\) return;/);
+  });
+
+  test("🔴 판정은 서버와 **같은 함수** 하나다 — 화면이 줄 수를 다시 세지 않는다", () => {
+    assert.match(sectionFlat, /const plan = resolveDomesticOrderIssueDateEditPlan\(rows\);/);
+    assert.ok(!/rows\.length/.test(sectionCode), "화면이 줄 수를 제 손으로 셌다");
+  });
+
+  test("🔴 견적서가 붙은 줄은 그 칸의 입력칸이 열리지 않는다", () => {
+    assert.match(sectionFlat, /const quoteLocked = plan\.kind === "UPDATE" && plan\.quoteIssuedDateLocked;/);
+    // 잠긴 칸에는 <input> 대신 지금 값과 까닭이 그려진다.
+    assert.match(sectionFlat, /\{quoteLocked \? \(/);
+    assert.match(sectionFlat, /\{DOMESTIC_ORDER_ISSUE_DATE_QUOTE_LOCK_MESSAGE\}/);
+    // 잠금 판정을 화면이 새로 적지 않는다.
+    assert.ok(!/quoteId/.test(sectionCode), "화면이 견적서 연결을 제 손으로 보고 있다");
+  });
+
+  test("🔴 낙관적 잠금은 **내자 줄의 version** 이다 — 수리 건의 것이 아니다", () => {
+    assert.match(
+      sectionFlat,
+      /expectedVersion: plan\.kind === "UPDATE" \? plan\.version : null,/
+    );
+    assert.ok(
+      !/effective\.version|resolved\.version/.test(sectionCode),
+      "수리 건의 version 을 내자 줄의 잠금 토큰으로 썼다"
+    );
+  });
+
+  test("두 날짜를 **함께** 보낸다 — 그래야 「안 보냈다」와 「지웠다」가 갈린다", () => {
+    assert.match(sectionFlat, /quoteIssuedDate: quoteLocked \? \(dates\.quoteIssuedDate \?\? ""\) : quoteValue, orderIssuedDate: orderValue,/);
+  });
+
+  test("날짜는 달력 입력으로 받는다 — 사람이 제 표기로 쳐서 매번 거절당하지 않게", () => {
+    assert.equal((sectionCode.match(/type="date"/g) ?? []).length, 2);
+  });
+});
+
+// ── ⑦ 알림 — 성공 전용 팝업, 읽어야 하는 말은 폼 안에 ───────────────────
+
+describe("저장 뒤에 무엇이 뜨는가", () => {
+  test("성공했을 때만 팝업을 띄운다 — 0.5초 뒤 저절로 닫히는 상자다", () => {
+    // 팝업을 부르는 자리는 하나뿐이고, 그 앞줄이 성공 분기다.
+    assert.equal((sectionCode.match(/showSavePopup\(/g) ?? []).length, 1);
+    assert.match(sectionFlat, /router\.refresh\(\); setIsEditing\(false\); .*showSavePopup\(\{/);
+    assert.match(sectionFlat, /redirectTo: null,/);
+  });
+
+  test("🔴 충돌·거절은 폼 안에 남는다 — 사라지는 상자에 담지 않는다", () => {
+    assert.match(sectionFlat, /setIsConflict\(true\); setSubmitError\(result\.message\);/);
+    assert.match(sectionFlat, /setFieldErrors\(result\.fieldErrors \?\? \{\}\);/);
+    // 얼리고 「최신 정보 다시 불러오기」로 바꾸는 일은 기존 편집칸과 같은 것을 쓴다.
+    assert.match(sectionFlat, /<EditSectionActions isSubmitting=\{isSubmitting\} isConflict=\{isConflict\}/);
+  });
 });

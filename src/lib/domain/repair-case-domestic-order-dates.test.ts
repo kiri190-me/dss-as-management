@@ -27,9 +27,13 @@ import { pickWeeklyReportOrderDates } from "./weekly-report";
  *  2. 🔴 **접는 일을 pickWeeklyReportOrderDates 가 한다** — 규칙을 베껴 적은
  *     구현으로 바뀌면 이 대조가 그 자리에서 깨져야 한다. 주간보고 상세표와 같은
  *     자료를 다른 날짜로 보여 주면 어느 쪽도 믿을 수 없게 된다.
- *  3. 🔴 **이 값이 어떤 저장 payload 에도 들어가지 않는다** — 두 날짜의 집은
- *     domestic_orders 이고 고치는 자리는 내자 정리 화면이다. 계산된 값을 원본
- *     칸에 옮겨 담으면 그 줄에 박제된다(domestic-order-cell-edit.ts 의 함정 ②).
+ *  3. 🔴 **접는 함수가 저장하는 쪽으로 새어 들어가지 않는다** — 2026-09-29 부터
+ *     이 구역에서 두 날짜를 고칠 수 있지만, 저장 payload 에 실리는 값은 화면이
+ *     **그 줄 하나**에서 읽은 값이어야 한다. 접은 값이 다른 줄에 저장되면 그 줄에
+ *     박제된다(domestic-order-cell-edit.ts 의 함정 ②). 그래서 (a) mutation ·
+ *     검증 · 서버 액션이 이 모듈을 불러 쓰지 않고, (b) 편집은 줄이 **하나거나
+ *     없을 때만** 열린다 — 그 판정은 domain/domestic-order-issue-date-edit.ts 의
+ *     몫이고 화면과 서버가 함께 부른다.
  *  4. 화면에 적히는 글자가 서로 어긋나지 않는가(안내 문장 ↔ 링크 글자).
  *
  * 여기서 확인하지 않는 것: **권한이 없으면 구역이 안 그려지는가**와 이름표가
@@ -176,7 +180,12 @@ test("🔴 저장하는 쪽은 이 모듈을 쓰지 않는다 — 계산된 값�
   assert.deepEqual(offenders, [], "저장하는 쪽이 그릴 값을 불러 쓰고 있다");
 });
 
-test("🔴 그리는 구역에 입력칸도 폼도 없다 — 여기서는 고칠 수 없다", () => {
+test("🔴 접은 값이 실려 가는 곳은 **바로 그 줄**뿐이다 — 줄이 여럿이면 폼이 안 열린다", () => {
+  // 2026-09-29 부터 이 구역에서 두 날짜를 고친다. 편집칸을 채우는 것은 위
+  // resolve… 가 **여럿 중 하나를 골라 접은** 값이라, 줄이 여럿일 때 저장을
+  // 받으면 다른 줄의 날짜가 이 줄에 복사되어 굳는다(함정 ②). 그래서 편집은
+  // 「줄이 하나」이거나 「줄이 없다」일 때만 열리고, 그 판정은 이 파일이 아니라
+  // domestic-order-issue-date-edit.ts 가 갖는다 — 서버도 같은 함수를 부른다.
   const repoUrl = new URL("../../../", import.meta.url);
   const source = readFileSync(
     new URL("src/components/repair-cases/detail/DomesticOrderDatesSection.tsx", repoUrl),
@@ -184,10 +193,16 @@ test("🔴 그리는 구역에 입력칸도 폼도 없다 — 여기서는 고�
   );
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "");
 
-  assert.ok(!/<form|<input|<select|<textarea/.test(code), "고치는 자리는 내자 정리 화면이다");
-  assert.ok(!/defaultValue|onChange|onSubmit/.test(code), "그리는 값이 편집칸의 초기값으로 흘렀다");
-  assert.ok(!/Action\b/.test(code), "서버 액션을 부르고 있다 — 이 조각에 쓰기는 없다");
-  assert.ok(!code.includes("수정"), "🔴 수정 단추는 다음 조각의 일이다");
+  assert.match(code, /const plan = resolveDomesticOrderIssueDateEditPlan\(rows\);/);
+  assert.match(code, /const editable = canEdit && plan\.kind !== "BLOCKED_MULTIPLE";/);
+  // 접은 값으로 편집칸을 채우는 자리는 그 판정 뒤에만 있다.
+  assert.match(code, /setQuoteValue\(dates\.quoteIssuedDate \?\? ""\);/);
+  assert.match(code, /setOrderValue\(dates\.orderIssuedDate \?\? ""\);/);
+  // 🔴 화면이 제 손으로 줄을 고르지 않는다 — 그러면 규칙이 두 벌이 된다.
+  assert.ok(
+    !/\.sort\(|\.filter\(|\.slice\(|\.reduce\(|\.map\(/.test(code),
+    "화면이 줄을 골라 내고 있다"
+  );
 });
 
 // ── ④ 화면에 적히는 글자 ────────────────────────────────────────────────

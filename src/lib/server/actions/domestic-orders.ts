@@ -22,6 +22,8 @@ import {
   type DomesticOrderTrashResult,
 } from "@/lib/db/mutations/domestic-orders-trash";
 import { saveDomesticOrderSheetHeading } from "@/lib/db/mutations/domestic-order-sheet-settings";
+import { saveRepairCaseDomesticOrderIssueDates } from "@/lib/db/mutations/domestic-order-issue-dates";
+import { normalizeDomesticOrderIssueDateInput } from "@/lib/domain/domestic-order-issue-date-edit";
 import {
   validateDomesticOrderSheetHeadingInput,
   type DomesticOrderSheetHeadingFieldErrors,
@@ -491,6 +493,111 @@ export async function saveDomesticOrderSheetHeadingAction(input: {
   } catch (err) {
     const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
     console.error("saveDomesticOrderSheetHeadingAction: unexpected DB error", { code });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * ============================================================================
+ * 수리 건 상세 「내자 정리 발행일」 — 두 날짜만 저장 (2026-09-29)
+ * ============================================================================
+ * 관문은 **행 추가·수정과 똑같다**(resolveAuthorizedActingUser —
+ * domesticOrders WRITE). 고치는 것이 이 표의 칸이므로 상한을 따로 올리거나
+ * 내리지 않는다. 🔴 역할 이름을 여기서 비교하지 않는다 — 이 파일의 다른
+ * 액션들과 같이 설정 축 하나만 묻는다.
+ *
+ * 🔴 **화면이 수정 단추를 감춘 것은 경계가 아니다.** 이 액션은 화면이 무엇을
+ * 보여 줬든 상관없이 매번 처음부터 다시 검사하고, 줄이 여럿인가 · 견적서가
+ * 붙었는가 · version 이 맞는가는 mutation 이 **트랜잭션 안에서 다시 읽은 줄**로
+ * 한 번 더 판정한다(db/mutations/domestic-order-issue-dates.ts).
+ *
+ * ⚠️ 저장하는 곳은 updateDomesticOrderAction 이 아니라 **전용 경로**다. 그쪽은
+ * 줄 전체를 SET 하므로, 두 칸만 들고 있는 이 화면이 쓰면 그 줄의 금액·입금·
+ * 납품일·세금계산서가 지워진다(그 mutation 파일 헤더).
+ * ============================================================================
+ */
+
+export type RepairCaseDomesticOrderIssueDatesResultCode =
+  | DomesticOrderActionResultCode
+  /** 줄이 둘 이상이라 여기서는 고칠 수 없다 — 내자 정리로 보낸다. */
+  | "MULTIPLE_ROWS"
+  /** 견적서가 연결된 줄이라 견적서 발행일을 바꿀 수 없다. */
+  | "QUOTE_LOCKED";
+
+export type RepairCaseDomesticOrderIssueDatesActionResult =
+  | { ok: true; id: string; version: number; created: boolean }
+  | {
+      ok: false;
+      code: RepairCaseDomesticOrderIssueDatesResultCode;
+      /** 키는 화면의 칸 이름 그대로(quoteIssuedDate · orderIssuedDate)다. */
+      fieldErrors?: Record<string, string>;
+      message: string;
+    };
+
+export async function saveRepairCaseDomesticOrderIssueDatesAction(input: {
+  repairCaseId: string;
+  /**
+   * 화면이 보고 있던 **내자 줄의 version**. 🔴 repair_cases.version 이 아니다.
+   * 줄이 아직 없다고 본 화면은 null 을 보낸다.
+   */
+  expectedVersion: number | null;
+  /** 둘 다 **언제나 함께** 온다. 빈 문자열·null 은 "지웠다"이고, 키 없음은 거절이다. */
+  quoteIssuedDate: string | null;
+  orderIssuedDate: string | null;
+}): Promise<RepairCaseDomesticOrderIssueDatesActionResult> {
+  const auth = await resolveAuthorizedActingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  // 수리 건 id 도 UUID 다 — 같은 형식 검사를 쓴다(이 파일의 다른 액션과 같다).
+  if (!isValidDomesticOrderId(input.repairCaseId)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { repairCaseId: "수리 건을 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // null 은 "줄이 없다고 보고 왔다"는 뜻이라 정상이다. 그 밖에는 1 이상의 정수여야 한다.
+  if (input.expectedVersion !== null && !isValidExpectedVersion(input.expectedVersion)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { expectedVersion: "수정 시점 정보를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+
+  const quote = normalizeDomesticOrderIssueDateInput(input.quoteIssuedDate);
+  const order = normalizeDomesticOrderIssueDateInput(input.orderIssuedDate);
+  if (!quote.ok || !order.ok) {
+    const fieldErrors: Record<string, string> = {};
+    if (!quote.ok) fieldErrors.quoteIssuedDate = quote.message;
+    if (!order.ok) fieldErrors.orderIssuedDate = order.message;
+    return { ok: false, code: "VALIDATION_ERROR", fieldErrors, message: VALIDATION_MESSAGE };
+  }
+
+  try {
+    const result = await saveRepairCaseDomesticOrderIssueDates({
+      repairCaseId: input.repairCaseId,
+      quoteIssuedDate: quote.value,
+      orderIssuedDate: order.value,
+      expectedVersion: input.expectedVersion,
+      actorUserId: auth.actingUser.id,
+    });
+    if (!result.ok) {
+      // EMPTY 는 "적은 것이 없다"라 입력 문제로 접는다. 나머지는 코드가 그대로 나간다.
+      return {
+        ok: false,
+        code: result.code === "EMPTY" ? "VALIDATION_ERROR" : result.code,
+        message: result.message,
+      };
+    }
+    // 같은 줄이 내자 정리 목록에도 보인다 — 다른 탭의 낡은 캐시를 지운다.
+    revalidatePath(DOMESTIC_ORDERS_PATH);
+    return { ok: true, id: result.id, version: result.version, created: result.created };
+  } catch (err) {
+    // 값 자체는 로그에 담지 않는다(이 파일의 다른 액션과 같은 이유).
+    console.error("saveRepairCaseDomesticOrderIssueDatesAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

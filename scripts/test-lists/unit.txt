@@ -315,3 +315,12 @@ scripts/lib/kyosan-import-run-plan.test.ts
 # 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 저장 쪽을 훑는 부분은
 # 파일의 글자를 읽는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
 src/lib/domain/repair-case-domestic-order-dates.test.ts
+
+# 수리 건 상세 「내자 정리 발행일」을 **고칠 때**의 판정(2026-09-29). 줄 0개·1개·N개가
+# 각각 만들기·고치기·막기로 갈리는가 · 🔴 잠금 토큰이 **내자 줄의 version** 인가 ·
+# 🔴 견적서 잠금을 내자 정리 표와 **같은 함수**로 판정하는가(베껴 적지 않았는가) ·
+# 그리는 판정(위 repair-case-domestic-order-dates)과 어긋나지 않는가 ·
+# 🔴 「안 보냈다」와 「지웠다」가 갈리는가. 화면과 서버가 **둘 다 부르는** 판정이라
+# 여기서 깨지면 두 곳이 함께 깨진다.
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없다. 격리 이름 없음(DB 안 씀).
+src/lib/domain/domestic-order-issue-date-edit.test.ts

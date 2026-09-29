@@ -23,7 +23,7 @@ import {
   resolveDomesticOrderDeliveredDate,
   resolveDomesticOrderValue,
 } from "@/lib/domain/domestic-order-list";
-import type { RepairCaseDomesticOrderRow } from "@/lib/domain/repair-case-domestic-order-dates";
+import type { RepairCaseDomesticOrderIssueDateRow } from "@/lib/domain/domestic-order-issue-date-edit";
 
 /**
  * ============================================================================
@@ -728,12 +728,29 @@ export async function listDomesticOrderDueDatesForRepairCase(
  * 고르므로 받은 차례와 상관이 없고, 고를 날짜가 완전히 같은 줄이 둘 이상일
  * 때에만 어느 줄이 잡히는지가 갈린다 — 그 자리를 여기서만 못 박으면 두 조회가
  * 서로 다른 줄을 고르게 된다.
+ *
+ * ── 🔴 날짜 둘 말고 셋을 더 싣는다 — 고칠 때 쓴다 (2026-09-29) ──────────
+ * 그 구역에서 두 날짜를 **고칠 수 있게** 되면서 id · version · quote_id 가
+ * 함께 온다(domain/domestic-order-issue-date-edit.ts 의
+ * RepairCaseDomesticOrderIssueDateRow). 셋 다 화면에 그리는 값이 아니다:
+ *
+ *   - `id` — 고칠 줄을 가리킨다.
+ *   - `version` — 🔴 **내자 줄의** 낙관적 잠금 토큰이다(수리 건의 것이 아니다).
+ *     PO 시스템(dss-po)이 같은 표를 같은 DB 에서 고치므로 형식이 아니다.
+ *   - `quote_id` — 견적서가 붙은 줄은 견적발행일이 잠긴다(같은 파일).
+ *
+ * **그리는 두 칸은 그대로 원본 칼럼이다** — 위 '주간보고와 같은 두 칼럼'을
+ * 지킨다. quote_id 를 싣는 것은 잠금 판정에 쓰기 위해서이지, 여기서 견적서
+ * 값으로 해소하려는 것이 아니다.
  */
 export async function listDomesticOrderIssueDatesForRepairCase(
   repairCaseId: string
-): Promise<RepairCaseDomesticOrderRow[]> {
+): Promise<RepairCaseDomesticOrderIssueDateRow[]> {
   return db
     .select({
+      id: domesticOrders.id,
+      version: domesticOrders.version,
+      quoteId: domesticOrders.quoteId,
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
       orderIssuedDate: domesticOrders.orderIssuedDate,
     })

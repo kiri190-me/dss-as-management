@@ -70,7 +70,15 @@ export type DomesticOrderMutationResult =
       message: string;
     };
 
-const VERSION_CONFLICT_MESSAGE =
+/**
+ * 충돌했을 때 사람에게 보이는 말.
+ *
+ * `export` 인 이유는 **같은 표를 고치는 다른 경로가 같은 문장을 써야 하기**
+ * 때문이다(mutations/domestic-order-issue-dates.ts — 수리 건 상세에서 두 날짜만
+ * 고치는 길). 한 글자라도 다르게 적으면 같은 일이 화면마다 다른 말로 설명된다.
+ * 🔴 내보내는 것은 이 문장뿐이고, 이 파일의 함수들이 하는 일은 그대로다.
+ */
+export const VERSION_CONFLICT_MESSAGE =
   "다른 사용자가 이 항목을 먼저 수정했습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.";
 
 const NOT_FOUND_MESSAGE = "해당 내자 정리 항목을 찾을 수 없습니다.";

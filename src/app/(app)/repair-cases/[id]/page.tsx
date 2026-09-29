@@ -171,6 +171,23 @@ export default async function RepairCaseDetailPage({
     actingUser.approvalStatus === "APPROVED" &&
     (await hasAreaAccess("domesticOrders", actingUser));
 
+  // 그 두 날짜를 **고칠 수 있는가**(2026-09-29).
+  //
+  // 🔴 보기와 **다른 축**이다. 위는 READ(목록 화면과 같은 열쇠)이고 여기는
+  // WRITE 라, 볼 수만 있는 사람에게는 구역이 그려지되 수정 단추가 없다. 묻는
+  // 것은 내자 정리의 행 추가·수정 액션과 **같은 관문**이다
+  // (server/actions/domestic-orders.ts 의 hasPermission("domesticOrders",
+  // "WRITE")) — 같은 표의 같은 칸을 고치는 일이라 상한을 따로 두지 않는다.
+  //
+  // 🔴 여기서도 역할 이름을 비교하지 않는다. 설정 축 하나만 묻는다.
+  //
+  // 볼 수 없으면 고칠 수도 없다(canReadDomesticOrders 를 먼저 건다) — 구역이
+  // 아예 안 그려지므로 뒤 판정을 물을 일도 없다.
+  const canWriteDomesticOrders =
+    canReadDomesticOrders &&
+    actingUser !== null &&
+    (await hasPermission(actingUser, "domesticOrders", "WRITE"));
+
   // 「사용 부품」 칸 — 그 건에 손으로 적어 둔 부품 줄과, "여기에 적을 건인가"의
   // 재료(살아 있는 부품 요청 줄이 있는가). 위 둘과 같은 이유로 DATABASE 소스에만
   // 있고(repair_case_used_parts 에 mock 대응물이 없다), **같은 Promise.all 에
@@ -229,6 +246,7 @@ export default async function RepairCaseDetailPage({
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
       domesticOrderIssueDates={domesticOrderIssueDates}
+      canWriteDomesticOrderIssueDates={canWriteDomesticOrders}
       usedParts={usedParts}
       usedPartOptions={usedPartOptions}
     />
