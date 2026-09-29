@@ -533,6 +533,7 @@ describe("일반 견적서 — 채우기 → 공유폴더 → 첨부 칸 → 감
         throw Object.assign(new Error(`디스크 오류 ${secret}`), { code: "EIO" });
       },
       commit: (tempPath, relPath) => storage.commit(tempPath, relPath),
+      stash: (relPath) => storage.stash(relPath),
       discard: (tempPath) => storage.discard(tempPath),
       read: (relPath) => storage.read(relPath),
       delete: (relPath) => storage.delete(relPath),

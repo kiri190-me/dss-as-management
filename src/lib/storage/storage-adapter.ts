@@ -92,6 +92,26 @@ export interface StorageAdapter {
   /** 검증을 통과한 임시 파일을 최종 자리로 옮긴다. 부모 폴더는 필요하면 만든다. */
   commit(tempPath: string, relPath: string): Promise<void>;
 
+  /**
+   * 최종 자리의 파일을 **임시 자리로 물린다.** 돌려주는 값은 commit 에 그대로
+   * 되돌려 줄 수 있는 임시 손잡이이고, 그 자리에 파일이 없었으면 null 이다.
+   *
+   * ── 🔴 무엇을 위한 자리인가 — 덮어쓰기를 되돌릴 수 있게 하는 것 ─────────
+   * commit 은 이미 파일이 있는 자리를 **일부러 거절한다**(AttachmentAlreadyStoredError) —
+   * 남의 파일을 조용히 지우는 것보다 올리기 하나가 실패하는 편이 낫다는 판단이다.
+   * 그 판단은 그대로 둔다. 다만 「화면에서 돌린 사진을 원본에 저장」처럼 **덮어쓰는
+   * 것이 요구사항인** 통로가 생겼고, 거기서 `delete` 뒤에 `commit` 을 하면 그 사이
+   * 무엇이 실패하는 순간 **원본이 영영 사라진다.**
+   *
+   * 그래서 지우지 않고 **치워 둔다.** 새 파일을 놓다가, 또는 그 뒤 DB 기록이
+   * 실패하면 치워 둔 것을 같은 자리로 되돌린다(attachment-file-swap.ts). 옮기기는
+   * 같은 저장 루트 안이라 이름 바꾸기 한 번이다.
+   *
+   * 되돌릴 일이 없으면 부르는 쪽이 `discard` 로 치운다 — 그때까지는 임시 폴더에
+   * 남고, 프로세스가 죽어 남겨진 것은 `sweepTemp` 가 걷는다.
+   */
+  stash(relPath: string): Promise<string | null>;
+
   /** 검증에 실패한 임시 파일을 버린다. 이미 없으면 조용히 넘어간다. */
   discard(tempPath: string): Promise<void>;
 

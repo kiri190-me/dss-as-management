@@ -33,8 +33,10 @@ import {
   hasActiveFilters,
   type AttachmentListFilters,
 } from "@/lib/domain/attachment-list-filters";
+import type { ImageOrientation } from "@/lib/domain/image-orientation";
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
 import AttachmentViewer from "./AttachmentViewer";
+import { saveRotatedAttachment } from "./rotate-image";
 import ShrinkDownloadDialog from "./ShrinkDownloadDialog";
 import {
   decideAutoPreviewBackfill,
@@ -108,8 +110,21 @@ function isViewableImage(mimeType: string): boolean {
   return mimeType === "image/jpeg" || mimeType === "image/png";
 }
 
-function previewUrlOf(id: string): string {
-  return `/api/attachments/${encodeURIComponent(id)}/download?view=thumb`;
+/**
+ * 목록의 작은 그림. 🔴 **파일의 지문(체크섬 앞머리)을 주소에 붙인다.**
+ *
+ * 응답은 `Cache-Control: private, no-store` 라 브라우저가 저장해 두지는 않지만,
+ * **이미 그려 놓은 `<img>` 는 주소가 그대로면 다시 받지 않는다.** 「돌린 대로
+ * 저장」 뒤 목록을 다시 그려도 눈에는 옛 방향이 남아 있게 되고, 사용자는 그것을
+ * 「저장이 안 됐다」로 읽는다.
+ *
+ * 체크섬은 파일 내용이 바뀌면 함께 바뀌므로(돌려 저장하면 반드시 바뀐다) 주소가
+ * 달라져 새 그림을 받아 온다. 서버는 이 인자를 **보지 않는다** — 무엇을 줄지는
+ * `view=thumb` 하나가 정한다.
+ */
+function previewUrlOf(item: RepairCaseAttachmentListItem): string {
+  const fingerprint = item.checksumSha256.slice(0, 12);
+  return `/api/attachments/${encodeURIComponent(item.id)}/download?view=thumb&v=${fingerprint}`;
 }
 
 function downloadUrlOf(id: string): string {
@@ -237,7 +252,7 @@ function Thumbnail({
   const image = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={previewUrlOf(item.id)}
+      src={previewUrlOf(item)}
       alt={item.originalFileName}
       // 화면에 들어온 것만 받는다. 미리보기가 없는 옛 사진은 원본이 오므로
       // 이 한 줄이 그때 특히 값이 크다.
@@ -525,6 +540,39 @@ export default function StoredAttachmentList({
   function openViewer(item: RepairCaseAttachmentListItem) {
     const position = viewable.findIndex((candidate) => candidate.id === item.id);
     if (position >= 0) setViewerIndex(position);
+  }
+
+  /**
+   * 🔴 **크게 보기에서 돌린 그대로 원본에 저장한다 — 되돌릴 수 없다**
+   * (사용자 결정 2026-09-29).
+   *
+   * ── 이 함수가 있고 없고가 곧 권한이다 ─────────────────────────────────
+   * `canManage` 일 때만 뷰어에 넘긴다. 그 값은 서버 페이지가
+   * `repairCases.files WRITE` 로 계산한 것이고(app/(app)/repair-cases/[id]/files/page.tsx),
+   * **지금 이 첨부를 지울 수 있는 사람과 같은 기준**이다 — 새 권한을 만들지
+   * 않았다. 넘기지 않으면 뷰어에 단추가 아예 없다. 실제 차단은 서버가 다시
+   * 한다(rotation 라우트가 같은 판정 함수를 부른다).
+   *
+   * ── 돌려주는 값 ──────────────────────────────────────────────────────
+   * 막혔으면 **서버가 준 문장**을 그대로 올려보낸다. 확인 창이 닫히지 않고 그
+   * 문장을 보여 준다 — 화면이 따로 문장을 지으면 서버가 검사를 넓히는 날 둘이
+   * 갈라진다.
+   *
+   * 성공하면 목록을 다시 그린다. 새 체크섬이 내려와 썸네일 주소가 바뀌므로
+   * (previewUrlOf) 작은 그림도 그 자리에서 새 방향이 된다.
+   */
+  async function saveOrientation(
+    item: RepairCaseAttachmentListItem,
+    orientation: ImageOrientation
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const result = await saveRotatedAttachment({ attachmentId: item.id, orientation });
+    if (!result.ok) return result;
+    try {
+      router.refresh();
+    } catch {
+      // 화면을 떠났을 수 있다 — 다음에 열 때 보인다.
+    }
+    return { ok: true };
   }
 
   // 화면에 보이는 것만 고른 것으로 친다. 조건을 바꾸면 가려진 것은 선택에서도
@@ -1290,6 +1338,8 @@ export default function StoredAttachmentList({
           initialIndex={viewerIndex}
           onClose={() => setViewerIndex(null)}
           onShrinkDownload={(item) => setShrinkTargets([item])}
+          /* 🔴 파일을 고칠 수 있는 사람에게만 길을 준다 — 없으면 단추가 없다. */
+          onSaveOrientation={canManage ? saveOrientation : undefined}
         />
       )}
 

@@ -45,6 +45,17 @@ import type { AttachmentCategory } from "./attachment-category";
  */
 export const MAX_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 
+/**
+ * 미리보기(썸네일) 파일의 상한. 브라우저가 긴 변 480px 안팎으로 만들어 보내므로
+ * 보통 30~60KB 이고, 이 값은 넉넉한 쪽이다. 이보다 크면 미리보기가 아니라 원본을
+ * 보낸 것이니 거절한다 — 목록을 빠르게 하려고 만든 자리가 원본을 한 벌 더 쌓는
+ * 자리가 되면 안 된다.
+ *
+ * 미리보기를 받는 통로가 둘(붙이기 PUT …/preview · 돌린 사진 저장 PUT …/rotation)
+ * 이라 값을 여기 하나로 둔다 — 라우트마다 적으면 한쪽만 고쳐져 갈라진다.
+ */
+export const MAX_ATTACHMENT_PREVIEW_BYTES = 512 * 1024; // 512KB
+
 export type AttachmentExtensionRule = {
   extension: string;
   allowedMimeTypes: readonly string[];

@@ -158,6 +158,33 @@ class LocalFileSystemStorageAdapter implements StorageAdapter {
     }
   }
 
+  /**
+   * 최종 자리의 파일을 임시 자리로 물린다(인터페이스 주석 참조). 없으면 null.
+   *
+   * commit 과 **정확히 반대 방향의 같은 동작**이다 — 같은 루트 안의 이름
+   * 바꾸기 한 번이고, 볼륨이 갈린 경우에만 복사로 돌아간다. 돌려준 손잡이를
+   * commit 에 그대로 넘기면 원래 자리로 되돌아간다.
+   */
+  async stash(relPath: string): Promise<string | null> {
+    const source = this.absolute(relPath);
+    if (!(await pathExists(source))) return null;
+
+    await mkdir(this.tempDirectory, { recursive: true });
+    const tempPath = path.join(
+      this.tempDirectory,
+      `${randomUUID().toLowerCase()}${TEMP_FILE_SUFFIX}`
+    );
+
+    try {
+      await rename(source, tempPath);
+    } catch (error) {
+      if (!isCrossDeviceError(error)) throw error;
+      await copyFile(source, tempPath);
+      await unlink(source).catch(() => undefined);
+    }
+    return tempPath;
+  }
+
   async discard(tempPath: string): Promise<void> {
     await unlink(tempPath).catch(() => undefined);
   }

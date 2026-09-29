@@ -108,8 +108,13 @@ export const QUOTE_ATTACHMENT_SLOT_OCCUPIED_MESSAGE =
  * 사람이 **"주인이 없었다"와 "기록이 빠졌다"를 구분**할 수 있어야 한다.
  * `ownerType` 키가 아예 없는 줄은 이 코드가 생기기 전(2-C 이전)의 기록이고,
  * `"NONE"` 은 기록하는 순간 주인이 실제로 없었다는 **사실의 기록**이다.
+ *
+ * ── 이 파일 밖에서도 부른다 ──────────────────────────────────────────────
+ * 돌린 사진을 원본에 저장하는 기록(mutations/attachment-rotation.ts)도 이것을
+ * 쓴다. 베껴 적으면 주인이 하나 더 느는 날 한쪽만 고쳐지고, 그 종류의 첨부만
+ * 조용히 다른 모양으로 기록된다.
  */
-function ownerAuditFields(owner: {
+export function ownerAuditFields(owner: {
   repairCaseId: string | null;
   productModelId: string | null;
   /** 셋째 주인(2026-09-15 Q2). */

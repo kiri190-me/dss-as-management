@@ -23,6 +23,11 @@ src/components/procedures/procedure-publish-flow.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx
+# 「돌린 대로 저장」 단추가 있어야 할 때만 있는가(2026-09-29). 🔴 원본을 덮어쓰는
+# 단추라 권한이 없으면 · 사진이 아니면 · 돌린 것이 없으면 **처음부터 없어야** 한다.
+# 그려 보는 것과 원본을 글자로 읽는 것을 함께 쓴다 — 뷰어의 방향은 안쪽 상태라
+# 인자로 「돌려 놓은 화면」을 만들 수 없다. 서버 쪽은 unit 목록의 네 줄이 본다.
+src/components/repair-cases/files/attachment-rotation-save.test.tsx
 src/components/repair-cases/approval/approval-screen-layout.test.tsx
 src/components/inventory/part-issue-approval-screen.test.tsx
 src/components/users/approval-route-section.test.ts
@@ -83,3 +88,4 @@ src/components/excel-imports/KyosanReportImportParts.test.tsx
 # 화면 원본을 지키는 시험이 한 목록에 모여 있으면 화면을 고친 사람이 돌릴 목록이 하나다.
 # DB 도 환경변수도 server-only 모듈도 쓰지 않으므로 이 목록의 제약에 걸릴 것이 없다.
 src/components/users/notification-settings-moved-notice.test.ts
+

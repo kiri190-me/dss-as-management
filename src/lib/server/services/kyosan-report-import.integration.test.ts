@@ -1498,6 +1498,7 @@ describe("🔴 한 트랜잭션 — 중간에 실패하면 아무것도 안 남�
         placedPaths.push(relPath);
         return storage.commit(tempPath, relPath);
       },
+      stash: (relPath) => storage.stash(relPath),
       discard: (tempPath) => storage.discard(tempPath),
       read: (relPath) => storage.read(relPath),
       delete: (relPath) => storage.delete(relPath),

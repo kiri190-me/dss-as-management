@@ -4,6 +4,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isTrustedOrigin } from "@/lib/auth/request-guards";
 import { readSession } from "@/lib/auth/session";
+import { MAX_ATTACHMENT_PREVIEW_BYTES } from "@/lib/domain/attachment-allowlist";
 import {
   buildAttachmentPreviewPath,
   buildProductModelAttachmentPreviewPath,
@@ -71,11 +72,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 썸네일 상한. 브라우저가 400px 안팎으로 만들어 보내므로 넉넉하다. 이보다 크면
- * 미리보기가 아니라 원본을 보낸 것이니 거절한다 — 목록을 빠르게 하려고 만든
- * 통로가 원본을 한 벌 더 쌓는 자리가 되면 안 된다.
+ * 썸네일 상한. 값은 도메인(attachment-allowlist.ts)에 있다 — 돌린 사진을
+ * 저장하는 통로(PUT …/rotation)도 같은 값을 쓰므로, 라우트마다 적어 두면 한쪽만
+ * 고쳐져 갈라진다. 숫자는 예전과 한 바이트도 다르지 않다(512KB).
  */
-const MAX_PREVIEW_BYTES = 512 * 1024;
+const MAX_PREVIEW_BYTES = MAX_ATTACHMENT_PREVIEW_BYTES;
 
 type FailureCode =
   | "UNTRUSTED_ORIGIN"

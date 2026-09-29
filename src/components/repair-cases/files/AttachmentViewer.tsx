@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  IDENTITY_ORIENTATION,
+  isIdentityOrientation,
+  isQuarterTurned,
+  type ImageOrientation,
+  type ViewerRotation,
+} from "@/lib/domain/image-orientation";
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
+import SaveRotationDialog from "./SaveRotationDialog";
 
 /**
  * ============================================================================
@@ -52,18 +60,17 @@ import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments"
 // 전부 "지금 상태 → 다음 상태" 함수로 적어 두면 Node 단위 시험이 그대로 돌고,
 // 「확대 중에는 스와이프가 먹지 않는다」 같은 규칙을 손가락 없이 못박을 수 있다.
 
-/** 90° 단위로만 돈다. 그림 파일의 방향(EXIF)도 이 네 값뿐이다. */
-export type ViewerRotation = 0 | 90 | 180 | 270;
-
 /**
- * **그림 자체의 방향.** 나중에 원본에 저장하게 되면 서버로 넘어갈 값이 이것
- * 하나다 — 그래서 확대·이동과 한 덩어리로 섞지 않고 따로 모아 둔다.
+ * **그림 자체의 방향.** 확대·이동과 한 덩어리로 섞지 않고 따로 모아 둔 값이고,
+ * 이제 **실제로 서버까지 간다** — 「돌린 대로 저장」이 이 값을 주소에 싣고,
+ * 캔버스가 이 값으로 원본을 다시 그린다.
+ *
+ * 🔴 그래서 **정본은 lib/domain/image-orientation.ts 로 옮겼다.** 같은 값이
+ * 화면(CSS) · 주소(?rotate=90) · 캔버스 세 자리를 지나는데, 타입과 판정이 화면
+ * 파일에 있으면 서버 쪽에서 베껴 쓰게 되고 그때부터 갈라진다. 여기서는 그대로
+ * 다시 내보낸다 — 이 파일에서 가져다 쓰던 쪽(시험 포함)은 달라지지 않는다.
  */
-export type ImageOrientation = {
-  rotate: ViewerRotation;
-  flipX: boolean;
-  flipY: boolean;
-};
+export type { ImageOrientation, ViewerRotation };
 
 /** 방향 + 지금 화면에서의 배율·이동. 뒤의 둘은 저장 대상이 아니다. */
 export type ViewerTransform = {
@@ -80,7 +87,7 @@ export type ViewerState = {
   transform: ViewerTransform;
 };
 
-export const IDENTITY_ORIENTATION: ImageOrientation = { rotate: 0, flipX: false, flipY: false };
+export { IDENTITY_ORIENTATION, isQuarterTurned };
 
 export const IDENTITY_TRANSFORM: ViewerTransform = {
   orientation: IDENTITY_ORIENTATION,
@@ -243,11 +250,6 @@ export function rotateViewer(transform: ViewerTransform, quarterTurns: number): 
   };
 }
 
-/** 90°·270° 로 돌아가 있으면 그림의 가로축이 화면에서는 세로축이다. */
-export function isQuarterTurned(orientation: ImageOrientation): boolean {
-  return orientation.rotate === 90 || orientation.rotate === 270;
-}
-
 /**
  * 🔴 **화면에서** 좌우로 뒤집는다.
  *
@@ -294,10 +296,37 @@ export function isViewerTransformIdentity(transform: ViewerTransform): boolean {
     transform.scale === VIEWER_MIN_SCALE &&
     transform.offsetX === 0 &&
     transform.offsetY === 0 &&
-    transform.orientation.rotate === 0 &&
-    !transform.orientation.flipX &&
-    !transform.orientation.flipY
+    isIdentityOrientation(transform.orientation)
   );
+}
+
+/**
+ * 「돌린 대로 저장」 단추를 내밀어야 하는가. 🔴 **셋이 모두 참일 때만이다.**
+ *
+ *  1. **부르는 쪽이 저장하는 길을 줬는가**(`hasHandler`). 이것이 곧 권한이다 —
+ *     화면이 역할을 보고 스스로 판단하지 않는다. 지금 이 첨부를 지울 수 있는
+ *     사람(repairCases.files WRITE)에게만 부모가 이 길을 넘긴다. 권한이 없으면
+ *     눌렀다가 거절당하는 것이 아니라 **처음부터 단추가 없다.**
+ *  2. **사진인가.** PDF·압축 파일에는 아예 없다. 뷰어에 들어오는 목록이 이미
+ *     사진만 걸러져 있지만, 거르는 쪽이 넓어지는 날 되돌릴 수 없는 단추가
+ *     조용히 따라 넓어지면 안 된다.
+ *  3. **돌리거나 뒤집은 것이 있는가.** 그대로인 것을 저장하면 원본을 아무 뜻
+ *     없이 다시 인코딩해 화질만 잃는다(서버도 NO_CHANGE 로 거절한다).
+ *
+ * 확대·이동은 보는 사람의 화면 사정이라 여기 끼지 않는다 — 키워 놓기만 한
+ * 상태에서는 단추가 나오지 않는다.
+ *
+ * 화면 안에 이 조건을 흩어 두지 않고 함수 하나로 뽑은 까닭은 시험이 그것을
+ * 못박을 수 있게 하려는 것이다(previewAffordanceOf 와 같은 방식).
+ */
+export function canOfferOrientationSave(params: {
+  hasHandler: boolean;
+  mimeType: string;
+  orientation: ImageOrientation;
+}): boolean {
+  if (!params.hasHandler) return false;
+  if (params.mimeType !== "image/jpeg" && params.mimeType !== "image/png") return false;
+  return !isIdentityOrientation(params.orientation);
 }
 
 /**
@@ -384,6 +413,21 @@ type AttachmentViewerProps = {
   onClose: () => void;
   /** 지금 보고 있는 사진을 줄여서 받는다. 부모가 창을 띄운다. */
   onShrinkDownload?: (item: RepairCaseAttachmentListItem) => void;
+  /**
+   * 🔴 **돌린 대로 원본에 저장한다 — 되돌릴 수 없다.**
+   *
+   * **넘기지 않으면 단추가 아예 없다.** 그것이 권한을 다루는 방식이다 — 지금 이
+   * 첨부를 지울 수 있는 사람에게만 부모가 이 길을 넘긴다(수리 건 상세는
+   * repairCases.files WRITE). 화면이 역할을 보고 스스로 판단하지 않는다.
+   *
+   * 확인 창은 **이 컴포넌트가** 띄운다(돌린 방향을 아는 것이 여기라서다).
+   * 부모가 하는 일은 실제로 보내는 것뿐이고, 막히면 사람이 읽을 문장을 돌려준다 —
+   * 창은 그동안 닫히지 않고 그 문장을 보여 준다.
+   */
+  onSaveOrientation?: (
+    item: RepairCaseAttachmentListItem,
+    orientation: ImageOrientation
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 };
 
 function formatBytes(bytes: number): string {
@@ -431,12 +475,20 @@ export default function AttachmentViewer({
   initialIndex,
   onClose,
   onShrinkDownload,
+  onSaveOrientation,
 }: AttachmentViewerProps) {
   const [state, setState] = useState<ViewerState>({
     index: initialIndex,
     transform: IDENTITY_TRANSFORM,
   });
   const { index, transform } = state;
+
+  /** 「돌린 대로 저장」 확인 창이 떠 있는가. */
+  const [isSaveOpen, setIsSaveOpen] = useState(false);
+  /** 저장이 도는 중 — 그동안 단추가 잠긴다. */
+  const [isSaving, setIsSaving] = useState(false);
+  /** 막혔을 때 서버가 준 문장. 창을 닫지 않고 그 안에 보여 준다. */
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   /** 사진이 놓이는 칸. 확대 기준점과 이동 한계를 이 칸의 크기로 잰다. */
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -470,15 +522,21 @@ export default function AttachmentViewer({
 
   // 키보드로 넘기고 닫는다. PC에서 여러 장을 훑을 때 마우스를 옮기지 않아도
   // 되고, Escape는 겹쳐 뜬 화면을 닫는 일반적인 약속이다.
+  //
+  // 🔴 **확인 창이 떠 있는 동안에는 아무것도 하지 않는다.** 그 창은 맨 위 층에
+  //    떠 있지만 이 listener 는 window 에 달려 있어 그대로 듣는다 — Escape 로
+  //    크게 보기가 통째로 닫히거나, 방향키로 사진이 넘어가(방향이 초기화되어)
+  //    확인 창이 "이제 없는 방향"을 저장하려는 상태가 된다.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (isSaveOpen) return;
       if (event.key === "Escape") onClose();
       else if (event.key === "ArrowRight") step(1);
       else if (event.key === "ArrowLeft") step(-1);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, step]);
+  }, [isSaveOpen, onClose, step]);
 
   // 뒤 페이지가 스크롤되지 않게 한다 — 사진을 보며 손가락을 끌면 뒤 목록이
   // 밀려, 닫았을 때 엉뚱한 자리에 가 있다.
@@ -502,6 +560,39 @@ export default function AttachmentViewer({
   const hasPrevious = index > 0;
   const hasNext = index < count - 1;
   const zoomed = isViewerZoomed(transform);
+
+  /**
+   * 「돌린 대로 저장」 단추를 그리는가. 판정은 위의 순수 함수 하나가 한다 —
+   * 길이 없거나(권한), 사진이 아니거나, 돌린 것이 없으면 단추 자체가 없다.
+   */
+  const canSaveOrientation = canOfferOrientationSave({
+    hasHandler: Boolean(onSaveOrientation),
+    mimeType: current.mimeType,
+    orientation: transform.orientation,
+  });
+
+  async function confirmSaveOrientation() {
+    if (!onSaveOrientation) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const result = await onSaveOrientation(current, transform.orientation);
+      if (!result.ok) {
+        setSaveError(result.message);
+        return;
+      }
+      // 🔴 성공하면 **크게 보기를 닫는다.** 파일 자체가 이제 그 방향이므로 화면의
+      //    CSS 회전을 그대로 두면 한 번 더 돌아간 것처럼 보이고, 회전만 풀면
+      //    브라우저가 이미 그려 둔 옛 그림이 그대로 남아 반대로 보인다. 목록으로
+      //    돌아가면 부모가 새로 그리고, 다시 열면 원본을 새로 받아 온다.
+      setIsSaveOpen(false);
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "저장하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   /** 무대 한가운데를 원점으로 한 좌표 — 확대의 기준점은 이 자리로 잰다. */
   function anchorOf(clientX: number, clientY: number): { x: number; y: number } {
@@ -828,6 +919,29 @@ export default function AttachmentViewer({
           >
             원래대로
           </button>
+          {/*
+            🔴 **되돌릴 수 없는 단추다 — 그래서 있을 때와 없을 때가 분명하다.**
+            길이 없으면(권한) · 사진이 아니면 · 돌린 것이 없으면 그리지 않는다
+            (canOfferOrientationSave). 눌러 놓고 거절당하는 자리가 아니다.
+
+            색을 다르게 두는 것도 그 때문이다 — 옆의 보기 단추들과 같은 회색이면
+            「보기만 바꾸는 것」으로 읽힌다. 실제로 누르는 순간 벌어지는 일은
+            확인 창이 한 번 더 말한다.
+          */}
+          {canSaveOrientation && (
+            <button
+              type="button"
+              onClick={() => {
+                setSaveError(null);
+                setIsSaveOpen(true);
+              }}
+              disabled={isSaving}
+              aria-label="돌린 대로 저장"
+              className="flex h-10 items-center justify-center rounded-full bg-red-600 px-3 text-xs font-medium text-white disabled:opacity-40"
+            >
+              {isSaving ? "저장 중..." : "돌린 대로 저장"}
+            </button>
+          )}
         </div>
 
         {/*
@@ -903,6 +1017,25 @@ export default function AttachmentViewer({
             : "휠·손가락 두 개로 확대, 두 번 누르면 원래대로"}
         </p>
       </div>
+
+      {/*
+        확인 창은 저장할 길이 있을 때만 붙인다 — 권한이 없는 사람의 화면에는
+        열릴 수 없는 창이 DOM 에 남아 있지도 않다.
+      */}
+      {onSaveOrientation && (
+        <SaveRotationDialog
+          isOpen={isSaveOpen}
+          displayName={current.originalFileName}
+          orientation={transform.orientation}
+          isSubmitting={isSaving}
+          errorMessage={saveError}
+          onConfirm={() => void confirmSaveOrientation()}
+          onCancel={() => {
+            setIsSaveOpen(false);
+            setSaveError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

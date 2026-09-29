@@ -147,6 +147,24 @@ src/lib/domain/zip-entry-names.test.ts
 src/lib/domain/image-header.test.ts
 src/lib/domain/attachment-list-filters.test.ts
 src/lib/domain/attachment-gallery-zoom.test.ts
+
+# 화면에서 돌린 사진을 원본에 저장하기(2026-09-29) — 서버·저장소 쪽 네 줄.
+# 🔴 원본을 덮어쓰는 통로라 되돌릴 수 없다. 그래서 「무엇을 거절하는가」와
+# 「하나만 바뀌는 길이 없는가」를 값과 바이트로 못박는다.
+#  · image-orientation      화면(CSS) · 주소 인자 · 캔버스 셋이 같은 뜻인가
+#  · split-stream           한 본문에 실린 [썸네일][원본]이 섞이지 않는가
+#  · attachment-file-swap   🔴 기록이 실패하면 두 파일이 모두 옛 내용으로 돌아오는가
+#                           (임시 폴더를 루트로 삼은 진짜 어댑터로 바이트를 읽어 본다)
+#  · rotation-payload       사진이 아닌 것을 **앞머리 바이트로** 거절하는가
+# 🔴 unit 에 적은 이유: 넷 다 DB 도 세션도 없이 돈다. swap 시험은 node:fs 를 쓰지만
+# 임시 폴더 안에서만이고, `server-only` 는 이 목록의 --conditions=react-server 가 푼다
+# (components 목록에는 그 조건이 없어 거기 적으면 불러오는 순간 던진다).
+# 🔴 라우트 폴더의 `[id]` 는 `*` 로 적는다 — 그대로 적으면 node 가 글롭 문자클래스로
+# 읽어 tests 0 인데 fail 0 으로 통과처럼 보인다(이웃 download/route.test.ts 와 같다).
+src/lib/domain/image-orientation.test.ts
+src/lib/storage/split-stream.test.ts
+src/lib/storage/attachment-file-swap.test.ts
+src/app/api/attachments/*/rotation/rotation-payload.test.ts
 src/lib/domain/camera-zoom.test.ts
 src/lib/domain/edit-draft-text.test.ts
 src/lib/domain/text-wrap.test.ts
