@@ -28,6 +28,14 @@ src/components/repair-cases/files/AttachmentViewer.test.tsx
 # 그려 보는 것과 원본을 글자로 읽는 것을 함께 쓴다 — 뷰어의 방향은 안쪽 상태라
 # 인자로 「돌려 놓은 화면」을 만들 수 없다. 서버 쪽은 unit 목록의 네 줄이 본다.
 src/components/repair-cases/files/attachment-rotation-save.test.tsx
+# 미리보기 사진이 잘리지 않는가(2026-09-29). 네 자리를 object-contain 으로 못박고,
+# 🔴 반대로 InAppCamera 는 object-cover 로 남아 있는지를 함께 본다 — 「미리보기를
+# contain 으로」 하는 다음 사람이 카메라까지 싹 바꾸면 보이는 것과 찍히는 것이 달라진다.
+# 그려 볼 수 없어(서버 액션·카메라·objectURL 에 묶인 클라이언트 컴포넌트) 원본을 글자로
+# 읽는다. 그런 시험은 세 목록 어디서든 돌지만, 같은 파일을 읽는 이웃 셋
+# (StoredAttachmentList.test.tsx · AttachmentViewer.test.tsx · attachment-rotation-save.test.tsx)이
+# 바로 위에 있다 — 이 화면을 고친 사람이 돌릴 목록이 하나여야 한다.
+src/components/repair-cases/files/preview-object-fit.test.ts
 src/components/repair-cases/approval/approval-screen-layout.test.tsx
 src/components/inventory/part-issue-approval-screen.test.tsx
 src/components/users/approval-route-section.test.ts

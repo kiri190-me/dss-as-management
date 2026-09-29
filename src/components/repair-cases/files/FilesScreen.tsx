@@ -862,7 +862,13 @@ function DatabaseFilesScreen({
                             <img
                               src={photo.previewUrl}
                               alt={`찍은 사진 ${index + 1}장째`}
-                              className="aspect-square w-full bg-zinc-100 object-cover dark:bg-zinc-800"
+                              // object-contain이다 — 잘라 채우면 파형 눈금과 외관
+                              // 흠집이 양 끝에서 사라진다. 여기는 올릴지 뺄지를
+                              // 고르는 자리라, 잘린 가운데만 보고 고르면 정작
+                              // 찍으려던 것이 빠진 사진을 올리게 된다. 맞춰 넣어
+                              // 남는 자리는 bg-zinc-100/800 이 받는다(칸 크기는
+                              // aspect-square w-full 그대로).
+                              className="aspect-square w-full bg-zinc-100 object-contain dark:bg-zinc-800"
                             />
                             <span className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px] text-zinc-600 dark:text-zinc-400">
                               <span>{photo.selected ? "올림" : "제외"}</span>

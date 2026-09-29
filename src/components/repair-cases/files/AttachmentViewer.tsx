@@ -977,7 +977,15 @@ export default function AttachmentViewer({
                     // 장치가 같은 파일명을 두 번 말한다.
                     alt=""
                     loading="lazy"
-                    className="h-full w-full object-cover"
+                    // object-contain이다 — 잘라 채우면 파형 눈금과 외관 흠집이
+                    // 양 끝에서 사라져, 어느 사진을 고르는 것인지 썸네일만 보고
+                    // 가릴 수 없다. 여기는 고르는 자리라 전체 모습이 보여야 한다.
+                    // 맞춰 넣으면 정사각 칸에 남는 자리가 생기므로 바탕을 깐다.
+                    // 🔴 zinc-100(거의 흰색)이 아니라 bg-white/15 다 — 이 뷰어는
+                    // 검은 바탕(769행 bg-black) 위라 밝은 회색은 튄다. white/15 는
+                    // 이 화면의 단추들이 이미 쓰는 색(762·784·918·1000행)이라
+                    // 남는 자리가 「덜 그려진 곳」이 아니라 단추 제 바닥으로 읽힌다.
+                    className="h-full w-full bg-white/15 object-contain"
                   />
                 </button>
               );

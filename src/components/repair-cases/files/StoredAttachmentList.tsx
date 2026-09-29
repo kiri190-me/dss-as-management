@@ -258,7 +258,11 @@ function Thumbnail({
       // 이 한 줄이 그때 특히 값이 크다.
       loading="lazy"
       decoding="async"
-      className={`${box} bg-zinc-100 object-cover dark:bg-zinc-800`}
+      // object-contain이다 — 잘라 채우면 파형 눈금과 외관 흠집이 양 끝에서
+      // 사라져, 무엇을 찍은 것인지 목록에서 알아볼 수 없다. 맞춰 넣으면 정사각
+      // 칸에 남는 자리가 생기는데, 그 자리는 bg-zinc-100/800 이 받는다(칸 크기는
+      // 그대로다 — box 가 정하는 h/w·aspect 는 건드리지 않았다).
+      className={`${box} bg-zinc-100 object-contain dark:bg-zinc-800`}
     />
   );
 

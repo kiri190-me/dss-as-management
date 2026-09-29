@@ -229,7 +229,10 @@ function Thumbnail({
       // 줄이 그때 특히 값이 크다.
       loading="lazy"
       decoding="async"
-      className="aspect-square w-full bg-zinc-100 object-cover dark:bg-zinc-800"
+      // object-contain이다 — 잘라 채우면 도면·명판처럼 가로로 긴 그림의 양 끝이
+      // 사라져 무엇인지 알아볼 수 없다. 맞춰 넣어 남는 자리는 bg-zinc-100/800 이
+      // 받는다(칸 크기는 aspect-square w-full 그대로).
+      className="aspect-square w-full bg-zinc-100 object-contain dark:bg-zinc-800"
     />
   );
 
