@@ -56,6 +56,23 @@ export function estimateTotalBytes(target: ShrinkTarget, originalSizes: readonly
 }
 
 /**
+ * 합계를 한 장 평균으로 — 화면에 쓰는 값이다.
+ *
+ * 목표는 처음부터 **한 장 기준**인데(resolveTargetBytes 가 사진마다 따로 잰다)
+ * 화면이 합계만 보여 주는 바람에 "총합 기준이구나"로 읽혔다. 500KB 를 고르고
+ * 3장을 고르면 예상이 1.46MB 로 떠서 그렇게 보인다 — 실제로는 500KB×3 이다.
+ * 그래서 화면이 평균을 앞에 세우는데, 그 나누기를 화면에서 직접 하면 **고른
+ * 것이 0장인 순간**을 자리마다 따로 막아야 하고 한 곳이 반드시 빠진다. 빠진
+ * 자리에는 NaN 이 떠서 "용량을 못 읽는다"로 보인다.
+ *
+ * 그 판단을 여기 한 곳이 갖는다 — **0장이면 0이다.**
+ */
+export function averagePerImageBytes(totalBytes: number, count: number): number {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.round(totalBytes / count);
+}
+
+/**
  * 줄인 파일의 이름.
  *
  * 원본 이름을 그대로 쓰면 원본과 줄인 것이 같은 이름으로 섞인다. PNG는 줄일 때

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   MIN_TARGET_BYTES,
   SHRINK_RATIO_PRESETS,
+  averagePerImageBytes,
   estimateTotalBytes,
   formatBytes,
   parseTargetBytes,
@@ -71,6 +72,56 @@ test("이미 작은 장은 줄지 않는 것으로 세어, 예상이 실제보�
 
 test("빈 목록의 예상은 0이다", () => {
   assert.equal(estimateTotalBytes({ kind: "ratio", ratio: 0.5 }, []), 0);
+});
+
+// ─────────────────────────────────────────── 한 장 평균(화면이 읽히는 방식)
+
+/**
+ * 여기부터는 **계산이 아니라 읽히는 방식**을 지킨다(2026-09-29).
+ *
+ * 목표는 처음부터 한 장 기준이었는데 화면이 합계만 보여 주어 "총합 기준"으로
+ * 읽혔다. 화면이 평균을 앞세우게 바꿨고, 그 나누기는 여기 한 함수가 한다.
+ */
+
+test("한 장 평균은 합계를 장수로 나눈 값이다", () => {
+  assert.equal(averagePerImageBytes(3 * 1024 * 1024, 3), 1024 * 1024);
+  assert.equal(averagePerImageBytes(1_500_000, 2), 750_000);
+});
+
+test("★ 0장이면 0이다 — 0으로 나누기를 화면마다 따로 막지 않게 한다", () => {
+  // 화면에서 직접 나누면 자리마다 "0장인가"를 붙여야 하고 한 곳이 반드시 빠진다.
+  // 빠진 자리에는 NaN 이 떠서 사용자에게는 "용량을 못 읽는다"로 보인다.
+  assert.equal(averagePerImageBytes(0, 0), 0);
+  assert.equal(averagePerImageBytes(1234, 0), 0);
+  assert.equal(averagePerImageBytes(1234, -1), 0, "음수 장수도 0이다");
+  assert.equal(averagePerImageBytes(1234, Number.NaN), 0, "장수가 NaN 이어도 숫자를 돌려준다");
+});
+
+test("나누어떨어지지 않으면 반올림한다 — 바이트라 표시에만 쓴다", () => {
+  assert.equal(averagePerImageBytes(1000, 3), 333);
+  assert.equal(averagePerImageBytes(1001, 3), 334);
+});
+
+test("★ 장수가 늘어도 한 장당 목표는 그대로다 — 목표는 합계 기준이 아니다", () => {
+  // 사용자가 "총합 기준 아니냐"고 읽은 자리가 바로 여기다. 한 장당 500KB 를
+  // 고르고 3장을 고르면 예상이 1.46MB 로 뜨는데, 그것은 500KB×3 이지
+  // "전부 합쳐 500KB"가 아니다. 평균으로 되돌리면 다시 500KB 가 나온다.
+  const target = { kind: "bytes", bytes: 500 * 1024 } as const;
+  const one = estimateTotalBytes(target, [4_000_000]);
+  const three = estimateTotalBytes(target, [4_000_000, 4_000_000, 4_000_000]);
+
+  assert.equal(one, 500 * 1024);
+  assert.equal(three, 3 * 500 * 1024);
+  assert.equal(averagePerImageBytes(three, 3), 500 * 1024, "한 장 평균이 곧 한 장당 목표다");
+});
+
+test("비율도 마찬가지다 — 한 장 평균은 원본 한 장 평균의 그 비율이다", () => {
+  const sizes = [4_000_000, 2_000_000];
+  const originalAverage = averagePerImageBytes(6_000_000, sizes.length);
+  const estimate = estimateTotalBytes({ kind: "ratio", ratio: 0.5 }, sizes);
+
+  assert.equal(originalAverage, 3_000_000);
+  assert.equal(averagePerImageBytes(estimate, sizes.length), 1_500_000);
 });
 
 // ─────────────────────────────────────────── 파일 이름

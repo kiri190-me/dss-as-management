@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   SHRINK_RATIO_PRESETS,
+  averagePerImageBytes,
   estimateTotalBytes,
   formatBytes,
   parseTargetBytes,
@@ -60,6 +61,30 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
     mode === "ratio" ? { kind: "ratio", ratio } : parsedBytes === null ? null : { kind: "bytes", bytes: parsedBytes };
 
   const estimated = target ? estimateTotalBytes(target, originalSizes) : null;
+
+  /**
+   * 화면의 숫자는 **한 장 기준으로 먼저** 읽혀야 한다.
+   *
+   * 목표는 처음부터 사진마다 따로 맞춘다(아래 resolveTargetBytes(target,
+   * item.fileSize)). 그런데 화면이 합계만 보여 주던 때는 "한 장당 500KB"로 정하고
+   * 3장을 고르면 예상이 1.46MB 로 떠서 총합 기준으로 읽혔다. 합계를 지우지는
+   * 않는다 — 메일에 붙일 때 전체가 얼마인지도 필요하다. 앞뒤 순서만 바꾼다.
+   */
+  const originalAverage = averagePerImageBytes(originalTotal, items.length);
+
+  /**
+   * 예상 줄의 앞머리 — **한 장에 무엇을 하는지**를 말한다.
+   *
+   * 두 기준이 같은 문장을 쓰면 "50%가 합계의 절반인가"라는 오해가 그대로
+   * 돌아온다. 비율은 장마다 원본 대비이고, 목표 용량은 장마다 그 값 이하다.
+   */
+  const perImageTarget =
+    target === null
+      ? null
+      : target.kind === "ratio"
+        ? `원본의 ${Math.round(target.ratio * 100)}%`
+        : `${formatBytes(target.bytes)} 이하`;
+
   const isBusy = progress !== null;
 
   async function run() {
@@ -128,7 +153,8 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
           <div>
             <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">줄여서 내려받기</h2>
             <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              사진 {items.length}장 · 원본 합계 {formatBytes(originalTotal)}
+              사진 {items.length}장 · 원본 한 장 평균 {formatBytes(originalAverage)} (합계{" "}
+              {formatBytes(originalTotal)})
             </p>
           </div>
           <button
@@ -168,6 +194,14 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
 
         {mode === "ratio" ? (
           <div className="flex flex-col gap-2">
+            {/*
+              비율에는 "한 장당"이라는 말이 붙을 자리가 없어(목표 용량 쪽은 입력칸
+              앞뒤에 "한 장당 … 이하"가 있다) 50%가 합계의 절반인지 장마다 절반인지
+              화면만으로 알 수 없었다. 그 한 줄을 여기서 밝힌다.
+            */}
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              사진 <strong>한 장마다</strong> 원본의 이 비율로 줄입니다 — 합계를 나누는 것이 아닙니다.
+            </p>
             <div className="grid grid-cols-4 gap-2">
               {SHRINK_RATIO_PRESETS.map((preset) => (
                 <button
@@ -244,10 +278,11 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
           ) : (
             <>
               <p className="text-sm text-zinc-900 dark:text-zinc-50">
-                예상 용량 <strong>{formatBytes(estimated ?? 0)}</strong>
+                한 장당 <strong>{perImageTarget}</strong>
                 <span className="text-zinc-500 dark:text-zinc-400">
                   {" "}
-                  (원본 {formatBytes(originalTotal)})
+                  · 예상 {items.length}장 합계 {formatBytes(estimated ?? 0)} (원본 합계{" "}
+                  {formatBytes(originalTotal)})
                 </span>
               </p>
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -266,8 +301,11 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
         {outcome && (
           <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-400">
             <p>
-              {outcome.savedCount}장을 받았습니다 · 실제 합계{" "}
-              <strong>{formatBytes(outcome.totalBytes)}</strong>
+              {outcome.savedCount}장을 받았습니다 · 실제 한 장 평균{" "}
+              <strong>
+                {formatBytes(averagePerImageBytes(outcome.totalBytes, outcome.savedCount))}
+              </strong>{" "}
+              (합계 {formatBytes(outcome.totalBytes)})
             </p>
             {outcome.missedTarget > 0 && (
               <p className="mt-1 text-xs">
