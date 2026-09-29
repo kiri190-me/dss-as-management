@@ -49,7 +49,21 @@ import {
 const TEST_EMAIL_PREFIX = "sheethead-test-";
 
 let salesId: string;
-let engineerId: string;
+/**
+ * 🔴 **내자 정리를 고칠 수 없는 사람의 표본.** 지키는 것은 「엔지니어가 막힌다」가
+ * 아니라 「**내자 정리를 고칠 수 없는 사람은 이 머리말도 못 고친다**」이므로,
+ * 정책이 바뀌면 지키는 대상은 그대로 두고 표본만 갈아 끼운다.
+ *
+ * 2026-09-29 까지는 A/S 엔지니어가 그 표본이었다. 그날 사용자 결정으로 내자 정리
+ * 보기·고치기가 엔지니어까지 열리면서(auth/domestic-order-authorization.ts 의
+ * canViewDomesticOrders) 엔지니어는 더 이상 막히는 쪽이 아니다 — 그래서 재고
+ * 담당자로 바꿨다. ⚠️ **되돌리지 말 것**: 엔지니어로 되돌리면 이 묶음이 "막힌다"를
+ * 시험한다고 말하면서 실제로는 통과하는 저장을 보게 된다.
+ *
+ * 표본이 맞는지는 아래 before() 가 hasPermission 으로 **먼저 확인한다** — 정책이
+ * 또 넓어지면 인가 시험이 조용히 뒤집히지 않고 거기서 멈춘다.
+ */
+let inventoryManagerId: string;
 let pendingSalesId: string;
 let deletedSalesId: string;
 const createdTestUserIds: string[] = [];
@@ -154,7 +168,10 @@ before(async () => {
   );
 
   salesId = await createTestUser({ role: "SALES", name: "SheetHeading 영업" });
-  engineerId = await createTestUser({ role: "AS_ENGINEER", name: "SheetHeading 엔지니어" });
+  inventoryManagerId = await createTestUser({
+    role: "INVENTORY_MANAGER",
+    name: "SheetHeading 재고 담당",
+  });
   pendingSalesId = await createTestUser({ approvalStatus: "PENDING", name: "SheetHeading 승인 대기 영업" });
   deletedSalesId = await createTestUser({
     isDeleted: true,
@@ -162,17 +179,25 @@ before(async () => {
     name: "SheetHeading 삭제된 영업",
   });
 
-  // 전제: 시험 DB 의 권한 설정이 기본 정책과 같다(영업 = 내자 정리 쓰기, 엔지니어 = 없음).
-  // 여기서 어긋나면 아래 인가 시험이 엉뚱한 이유로 실패하므로 먼저 알린다.
+  // 전제: 시험 DB 의 권한 설정이 기본 정책과 같다 — 영업은 내자 정리를 고칠 수
+  // 있고, 재고 담당자는 못 고친다. 여기서 어긋나면 아래 인가 시험이 엉뚱한 이유로
+  // 실패하므로 먼저 알린다.
+  //
+  // 🔴 막히는 쪽 표본이 2026-09-29 에 A/S 엔지니어 → 재고 담당자로 바뀌었다
+  // (그날 내자 정리가 엔지니어까지 열렸다 — 위 inventoryManagerId 주석).
   assert.equal(
     await hasPermission({ role: "SALES", isDeveloper: false }, "domesticOrders", "WRITE"),
     true,
     "전제가 깨졌다: 시험 DB 에서 영업이 내자 정리를 고칠 수 없다"
   );
   assert.equal(
-    await hasPermission({ role: "AS_ENGINEER", isDeveloper: false }, "domesticOrders", "WRITE"),
+    await hasPermission(
+      { role: "INVENTORY_MANAGER", isDeveloper: false },
+      "domesticOrders",
+      "WRITE"
+    ),
     false,
-    "전제가 깨졌다: 시험 DB 에서 A/S 엔지니어가 내자 정리를 고칠 수 있다"
+    "전제가 깨졌다: 시험 DB 에서 재고 담당자가 내자 정리를 고칠 수 있다 — 막히는 역할을 다시 골라야 한다"
   );
 });
 
@@ -331,12 +356,12 @@ describe("saveDomesticOrderSheetHeading", () => {
 
   // ──────────────────────────────────────────────────────────── 인가
 
-  test("5. 내자 정리를 고칠 수 없는 사람(A/S 엔지니어)은 거절된다 — 행도 기록도 없다", async () => {
+  test("5. 내자 정리를 고칠 수 없는 사람(재고 담당자)은 거절된다 — 행도 기록도 없다", async () => {
     const auditBefore = await sheetAuditCount();
     const result = await saveDomesticOrderSheetHeading({
       greetingText: CUSTOM_GREETING,
       internalMemo: CUSTOM_MEMO,
-      actorUserId: engineerId,
+      actorUserId: inventoryManagerId,
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
@@ -361,7 +386,7 @@ describe("saveDomesticOrderSheetHeading", () => {
     assert.equal((await storedRows()).length, 0);
   });
 
-  test("5c. 기본 문구로 되돌리기도 같은 관문이다 — 엔지니어는 남의 문구를 지울 수 없다", async () => {
+  test("5c. 기본 문구로 되돌리기도 같은 관문이다 — 못 고치는 사람은 남의 문구를 지울 수 없다", async () => {
     await saveDomesticOrderSheetHeading({
       greetingText: CUSTOM_GREETING,
       internalMemo: CUSTOM_MEMO,
@@ -369,7 +394,7 @@ describe("saveDomesticOrderSheetHeading", () => {
     });
     const result = await saveDomesticOrderSheetHeading({
       ...DEFAULT_DOMESTIC_ORDER_SHEET_HEADING,
-      actorUserId: engineerId,
+      actorUserId: inventoryManagerId,
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
