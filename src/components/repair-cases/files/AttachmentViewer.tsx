@@ -9,6 +9,11 @@ import {
   type ImageOrientation,
   type ViewerRotation,
 } from "@/lib/domain/image-orientation";
+import {
+  preventShiftClickTextSelection,
+  shiftKeyOf,
+  useShiftRangeSelection,
+} from "@/lib/hooks/useShiftRangeSelection";
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
 import SaveRotationDialog, {
   type SaveRotationOutcome,
@@ -402,7 +407,14 @@ export function pickedCountOf(picked: PickedOrientations): number {
   return Object.keys(picked).length;
 }
 
-/** 썸네일을 눌렀다 — 고른 것이면 빼고, 아니면 **그대로인 방향**으로 넣는다. */
+/**
+ * 썸네일 한 장을 눌렀다 — 고른 것이면 빼고, 아니면 **그대로인 방향**으로 넣는다.
+ *
+ * 화면은 이제 이 함수를 직접 부르지 않는다. Shift 로 사이를 한꺼번에 고르는
+ * 길이 생기면서 **한 장 누르기도 같은 규칙(planRangeToggle)을 지나가게** 했고,
+ * 그 규칙이 내놓는 「이 id 들을 이 상태로 맞춰라」를 아래 setPickedIds 가 받는다
+ * (id 하나짜리가 곧 한 장 누르기다). 규칙이 두 군데로 갈리지 않게 하려는 것이다.
+ */
 export function togglePicked(
   picked: PickedOrientations,
   id: string,
@@ -414,6 +426,37 @@ export function togglePicked(
     return next;
   }
   return { ...picked, [id]: orientation };
+}
+
+/**
+ * **여러 장을 한 번에 같은 상태로 맞춘다** — Shift 로 잡은 범위가 이리로 온다.
+ * 공용 규칙(lib/domain/range-selection.ts)의 `setIdsChecked` 와 같은 자리이고,
+ * 다른 것은 우리가 Set 이 아니라 **사진마다 방향을 들고 있다**는 점뿐이다.
+ *
+ * 🔴 **이미 걸어 둔 방향은 지킨다.** 범위가 이미 고른 사진을 덮을 때 「그대로」로
+ * 다시 넣으면, 조금 전에 돌려 둔 것이 눌렀다는 이유만으로 풀린다. 새로 들어오는
+ * 것만 「그대로」로 시작한다.
+ *
+ * 바뀐 것이 없으면 받은 것을 그대로 돌려준다 — 괜히 다시 그리지 않는다.
+ */
+export function setPickedIds(
+  picked: PickedOrientations,
+  ids: Iterable<string>,
+  checked: boolean
+): PickedOrientations {
+  const next: Record<string, ImageOrientation> = { ...picked };
+  let changed = false;
+  for (const id of ids) {
+    if (checked) {
+      if (isPickedId(next, id)) continue;
+      next[id] = IDENTITY_ORIENTATION;
+      changed = true;
+    } else if (isPickedId(next, id)) {
+      delete next[id];
+      changed = true;
+    }
+  }
+  return changed ? next : picked;
 }
 
 /**
@@ -552,6 +595,79 @@ export function thumbnailPressAction(params: {
 }
 
 /**
+ * 🔴 **아래 썸네일 한 칸이 지금 어느 방향으로 보여야 하는가** — 저장하기 전의
+ * 미리보기다. 돌리는 순간 그 썸네일도 함께 돌아야, 무엇을 어떻게 저장하려는
+ * 것인지 **누르기 전에** 눈으로 셀 수 있다.
+ *
+ * 세 가지뿐이다:
+ *
+ *  1. **고른 것이면 그 사진에 걸어 둔 방향.** 묶음이 한 방향을 나눠 쓰지 않으므로
+ *     (PickedOrientations) 같은 묶음 안에서도 칸마다 다르게 보일 수 있다 —
+ *     「전부 가로로」가 이미 가로인 것을 건드리지 않았기 때문이고, 그것이 그대로
+ *     보여야 맞다.
+ *  2. **지금 보고 있는 한 장이고 안 골랐으면 화면의 방향.** 고르기를 쓰지 않는
+ *     지금까지의 길이 여기다 — 위에서 돌리면 아래 그 칸도 같이 돈다.
+ *  3. **그 밖에는 없다**(null). 손대지 않은 사진을 돌려 보여 줄 까닭이 없다.
+ *
+ * 고르기가 꺼져 있으면 1번은 보지 않는다 — 꺼질 때 고른 것을 비우므로 실제로는
+ * 비어 있지만, 화면이 「꺼져 있으면 고른 표시를 그리지 않는다」와 같은 기준으로
+ * 판단하게 둔다.
+ *
+ * **파일은 한 글자도 바뀌지 않는다.** 저장은 「돌린 대로 저장」이 따로 한다.
+ */
+export function thumbnailOrientationOf(params: {
+  id: string;
+  /** 지금 크게 보고 있는 그 사진인가. */
+  isCurrent: boolean;
+  isPicking: boolean;
+  picked: PickedOrientations;
+  /** 크게 보기 쪽의 지금 방향(ViewerTransform.orientation). */
+  currentOrientation: ImageOrientation;
+}): ImageOrientation | null {
+  const chosen = params.isPicking ? pickedOrientationOf(params.picked, params.id) : null;
+  if (chosen) return chosen;
+  return params.isCurrent ? params.currentOrientation : null;
+}
+
+/**
+ * 위에서 고른 방향을 CSS 로. 🔴 **방향만이다** — orientationCss 를 지나가므로
+ * 배율·이동이 섞일 길이 없다(그쪽 주석). 걸 것이 없으면 빈 문자열이다.
+ */
+export function thumbnailTransformCss(params: {
+  id: string;
+  isCurrent: boolean;
+  isPicking: boolean;
+  picked: PickedOrientations;
+  currentOrientation: ImageOrientation;
+}): string {
+  const orientation = thumbnailOrientationOf(params);
+  return orientation ? orientationCss(orientation) : "";
+}
+
+/**
+ * **방향만** CSS 로 — 회전과 뒤집기뿐이다. 그대로인 방향이면 **빈 문자열**이다.
+ *
+ * 🔴 **확대·이동이 여기 들어오지 않는 것이 요점이다.** 아래 썸네일 줄도 지금
+ * 걸린 방향을 미리 보여 주는데, 거기에 배율(scale)까지 실으면 8배로 키워 둔
+ * 순간 작은 그림이 제 칸을 뚫고 나간다. 이동(translate)은 크게 보는 무대의
+ * 좌표라 56px 짜리 칸에서는 뜻 자체가 없다.
+ *
+ * 🔴 **크게 보기와 썸네일이 이 함수 하나를 나눠 쓴다**(viewerTransformCss 가
+ * 이것을 부른다). 두 자리가 저마다 회전 CSS 를 적으면 한쪽만 고쳐지는 날
+ * 화면과 썸네일이 서로 다른 방향으로 보인다 — 무엇을 저장하려는 것인지 알 수
+ * 없게 된다.
+ *
+ * 차례(회전 → 좌우 → 상하)는 아래 viewerTransformCss 의 주석이 말하는 그대로다.
+ */
+export function orientationCss(orientation: ImageOrientation): string {
+  const parts: string[] = [];
+  if (orientation.rotate !== 0) parts.push(`rotate(${orientation.rotate}deg)`);
+  if (orientation.flipX) parts.push("scaleX(-1)");
+  if (orientation.flipY) parts.push("scaleY(-1)");
+  return parts.join(" ");
+}
+
+/**
  * CSS `transform` 값. 🔴 **차례가 뜻을 바꾼다.**
  *
  * CSS 는 적힌 순서대로 행렬을 곱하므로 점에는 **오른쪽 것이 먼저** 걸린다.
@@ -562,17 +678,18 @@ export function thumbnailPressAction(params: {
  *
  * 뒤집기가 맨 끝인 것도 같은 이유다. 그림 자신의 축에 먼저 걸려야 저장해 둔
  * flipX/flipY 의 뜻이 "그림의 좌우"로 유지된다.
+ *
+ * 뒤쪽 절반(회전·뒤집기)은 **orientationCss 가 만든다** — 썸네일 줄이 같은
+ * 함수를 쓴다(그쪽 주석).
  */
 export function viewerTransformCss(transform: ViewerTransform): string {
   const round = (value: number) => Math.round(value * 100) / 100;
-  const parts = [
+  const placement = [
     `translate(${round(transform.offsetX)}px, ${round(transform.offsetY)}px)`,
     `scale(${round(transform.scale)})`,
-  ];
-  if (transform.orientation.rotate !== 0) parts.push(`rotate(${transform.orientation.rotate}deg)`);
-  if (transform.orientation.flipX) parts.push("scaleX(-1)");
-  if (transform.orientation.flipY) parts.push("scaleY(-1)");
-  return parts.join(" ");
+  ].join(" ");
+  const orientation = orientationCss(transform.orientation);
+  return orientation ? `${placement} ${orientation}` : placement;
 }
 
 /**
@@ -768,6 +885,31 @@ export default function AttachmentViewer({
   const [isPicking, setIsPicking] = useState(false);
   /** 고른 사진들과 각자의 방향. 열쇠가 있다는 것이 곧 「골랐다」다. */
   const [picked, setPicked] = useState<PickedOrientations>(NO_PICKS);
+
+  /**
+   * 🔴 **Shift 로 사이를 한꺼번에 고른다**(사용자 결정 2026-09-29) — 한 장을
+   * 그냥 누르면 그것이 기준점이 되고, 다른 장을 Shift 로 누르면 **그 사이가 전부**
+   * 골라진다. 파일 탐색기와 같은 손이다.
+   *
+   * 🔴 **규칙을 여기 새로 적지 않는다.** 이 시스템의 목록 여덟 곳이 이미 같은
+   * 규칙 한 곳(lib/domain/range-selection.ts)을 쓰고 있다 — 기준점은 **Shift 없이
+   * 누른 마지막 것**이고(Shift 로 누른 것은 기준점을 옮기지 않아 범위를 늘렸다
+   * 줄였다 할 수 있다), 범위는 **지금 보이는 순서**로 잡히며, 범위가 이미 고른
+   * 것을 덮어도 **빠지지 않는다**(누른 쪽의 새 상태로 맞추므로, 고르는 방향으로
+   * 눌렀으면 전부 고름으로 통일된다). 화면마다 따로 적으면 「여기서는 끄기도
+   * 번지는데 저기서는 켜기만 번지는」 차이가 생긴다.
+   *
+   * 🔴 **폰에는 Shift 가 없다.** shiftKey 가 거짓이면 규칙이 한 장만 뒤집는다 —
+   * 한 장씩 누르던 지금까지의 길이 그대로 살아 있다.
+   *
+   * 우리만 다른 것은 선택을 Set 이 아니라 **사진마다 방향**으로 들고 있다는
+   * 점뿐이라, 얹는 자리(apply)만 setPickedIds 로 바꿔 끼운다.
+   */
+  const pickRange = useShiftRangeSelection({
+    orderedIds: items.map((item) => item.id),
+    isSelected: (id) => isPickedId(picked, id),
+    apply: (ids, checked) => setPicked((previous) => setPickedIds(previous, ids, checked)),
+  });
 
   /** 사진이 놓이는 칸. 확대 기준점과 이동 한계를 이 칸의 크기로 잰다. */
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -984,6 +1126,11 @@ export default function AttachmentViewer({
    * 꺼진 뒤에도 살아 있는 선택은 사람이 확인할 방법이 없는 되돌릴 수 없는
    * 폭탄이 된다. 비우는 대가는 다시 고르는 수고뿐이다.
    *
+   * 🔴 **기준점도 함께 비운다**(resetAnchor). 고른 것만 비우고 기준점을 남겨
+   * 두면, 다시 켜고 **첫 누르기부터 Shift** 로 누를 때 지난번에 눌러 둔 자리를
+   * 기준으로 범위가 잡힌다 — 눈에 보이지도 않던 자리에서 여러 장이 한꺼번에
+   * 골라진다. 비우는 것이 둘(고른 것·기준점)이어야 짝이 맞는다.
+   *
    * 켤 때, 지금 보는 사진을 이미 돌려 놓았다면 **그 사진부터 고른 것으로
    * 옮긴다.** 그러지 않으면 화면에는 돌아간 사진이 보이는데 저장 대상은 고른
    * 것들뿐이라, 눈앞의 그 사진만 조용히 빠진다. 옮긴 뒤 화면 쪽 방향을 지우는
@@ -993,6 +1140,7 @@ export default function AttachmentViewer({
     if (isPicking) {
       setIsPicking(false);
       setPicked(NO_PICKS);
+      pickRange.resetAnchor();
       return;
     }
     setIsPicking(true);
@@ -1002,15 +1150,24 @@ export default function AttachmentViewer({
     }
   }
 
-  /** 아래 썸네일을 눌렀다. 무슨 일이 일어나는지는 순수 함수가 정한다. */
-  function pressThumbnail(item: RepairCaseAttachmentListItem, itemIndex: number) {
+  /**
+   * 아래 썸네일을 눌렀다. 무슨 일이 일어나는지는 순수 함수가 정한다.
+   *
+   * 고르는 가지는 공용 Shift 규칙을 지나간다(pickRange 주석) — shiftKey 가
+   * 거짓이면 한 장만, 참이면 기준점부터 여기까지다.
+   */
+  function pressThumbnail(
+    item: RepairCaseAttachmentListItem,
+    itemIndex: number,
+    shiftKey: boolean
+  ) {
     const action = thumbnailPressAction({ isPicking, isSaving });
     if (action === "ignore") return;
     if (action === "navigate") {
       go(itemIndex);
       return;
     }
-    setPicked((previous) => togglePicked(previous, item.id));
+    pickRange.toggle(item.id, shiftKey);
   }
 
   /**
@@ -1483,13 +1640,27 @@ export default function AttachmentViewer({
             {items.map((item, itemIndex) => {
               const isCurrent = itemIndex === index;
               const isChosen = isPicking && isPickedId(picked, item.id);
+              /**
+               * 🔴 저장하기 전의 **방향 미리보기**. 돌리는 순간 이 칸도 함께
+               * 돈다 — 배율·이동은 들어오지 않는다(thumbnailTransformCss).
+               */
+              const thumbTransform = thumbnailTransformCss({
+                id: item.id,
+                isCurrent,
+                isPicking,
+                picked,
+                currentOrientation: transform.orientation,
+              });
               return (
                 <button
                   key={item.id}
                   type="button"
                   ref={isCurrent ? currentThumbRef : null}
                   // 🔴 고르기가 꺼져 있으면 지금까지와 똑같이 그 사진으로 넘어간다.
-                  onClick={() => pressThumbnail(item, itemIndex)}
+                  onClick={(event) => pressThumbnail(item, itemIndex, shiftKeyOf(event))}
+                  // Shift+누르기를 브라우저가 「여기까지 글자 선택 늘리기」로도
+                  // 읽는다. 누르는 이 단추에서만 막는다(전역은 건드리지 않는다).
+                  onMouseDown={preventShiftClickTextSelection}
                   aria-label={
                     isPicking ? `${item.originalFileName} 고르기` : `${item.originalFileName} 보기`
                   }
@@ -1535,6 +1706,13 @@ export default function AttachmentViewer({
                     // 이 화면의 단추들이 이미 쓰는 색(762·784·918·1000행)이라
                     // 남는 자리가 「덜 그려진 곳」이 아니라 단추 제 바닥으로 읽힌다.
                     className="h-full w-full bg-white/15 object-contain"
+                    // 🔴 **방향만** 걸린다. 이 <img> 는 칸을 가득 채운 **정사각**
+                    // 이라(h-full w-full 안의 h-14 w-14) 한가운데를 축으로 90°
+                    // 돌아도 제자리에 그대로 들어맞는다 — 잘리지도, 칸을 뚫고
+                    // 나가지도 않는다. 그림은 object-contain 으로 그 정사각 안에
+                    // 맞춰져 있으므로 가로세로가 바뀌어도 전체가 보인다(남는
+                    // 자리만 위아래에서 좌우로 옮겨 간다).
+                    style={thumbTransform ? { transform: thumbTransform } : undefined}
                   />
                   {isChosen && (
                     <span

@@ -35,6 +35,12 @@ src/components/repair-cases/files/attachment-rotation-save.test.tsx
 # 실패했을 때 성공·실패 수가 사람에게 보이는가. 위 이웃과 같은 방식으로 순수
 # 판정은 그대로 부르고, 화면이 그 판정을 쓰는지는 원본을 글자로 읽는다.
 src/components/repair-cases/files/attachment-multi-rotate.test.tsx
+# 아래 썸네일 줄에 둘을 더했다(2026-09-29). 🔴 「보이는 것과 고르는 방식」만 바뀌지만
+# 그 끝이 되돌릴 수 없는 저장이라, 못박는 것은 **넘어오면 안 되는 것이 안 넘어오는가**다 —
+# 썸네일은 방향만 받고 배율·이동은 못 받는가(8배로 키우면 칸을 뚫고 나간다), 방향 CSS 를
+# 만드는 자리가 크게 보기와 같은 하나인가, Shift 는 한 장씩 누르던 길을 대신하지 않는가
+# (폰에는 Shift 가 없다). 위 이웃 셋과 같은 파일을 읽으므로 같은 목록에 둔다.
+src/components/repair-cases/files/attachment-thumbnail-strip.test.ts
 # 미리보기 사진이 잘리지 않는가(2026-09-29). 네 자리를 object-contain 으로 못박고,
 # 🔴 반대로 InAppCamera 는 object-cover 로 남아 있는지를 함께 본다 — 「미리보기를
 # contain 으로」 하는 다음 사람이 카메라까지 싹 바꾸면 보이는 것과 찍히는 것이 달라진다.

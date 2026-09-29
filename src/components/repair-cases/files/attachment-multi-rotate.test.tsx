@@ -125,8 +125,11 @@ describe("🔴 고르기가 꺼져 있을 때의 동작은 달라지지 않았�
   });
 
   test("🔴 화면이 그 판정을 그대로 쓴다 — 넘어가는 길이 그대로 남아 있다", () => {
+    // 2026-09-29: 고르는 가지가 공용 Shift 규칙을 지나게 되면서 부르는 자리가
+    // `togglePicked` 에서 `pickRange.toggle` 로 바뀌었다. 못박는 것은 그대로다 —
+    // 넘어가는 길과 고르는 길이 둘 다 있고, 판정은 순수 함수가 한다.
     assert.ok(
-      viewerSource.includes("onClick={() => pressThumbnail(item, itemIndex)}"),
+      viewerSource.includes("onClick={(event) => pressThumbnail(item, itemIndex, shiftKeyOf(event))}"),
       "썸네일이 pressThumbnail 을 부르지 않는다"
     );
     const start = viewerSource.indexOf("function pressThumbnail(");
@@ -137,7 +140,7 @@ describe("🔴 고르기가 꺼져 있을 때의 동작은 달라지지 않았�
       "판정을 순수 함수에서 받아 오지 않는다"
     );
     assert.ok(block.includes("go(itemIndex)"), "넘어가는 길이 사라졌다");
-    assert.ok(block.includes("togglePicked(previous, item.id)"), "고르는 길이 없다");
+    assert.ok(block.includes("pickRange.toggle(item.id, shiftKey)"), "고르는 길이 없다");
   });
 });
 

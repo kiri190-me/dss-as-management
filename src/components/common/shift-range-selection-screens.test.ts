@@ -69,6 +69,13 @@ const TOGGLE_SITES: { file: string; sites: number; why: string }[] = [
   },
   { file: "src/components/repair-cases/files/StoredAttachmentList.tsx", sites: 3, why: "첨부 표·카드·격자" },
   { file: "src/components/repair-cases/files/FilesScreen.tsx", sites: 1, why: "찍은 사진 격자" },
+  // 2026-09-29: 크게 보기에서 여러 장을 골라 한꺼번에 돌려 저장하는 길이 생겼다.
+  // 🔴 그 끝이 **원본 여러 장 덮어쓰기**라, 고르는 손이 다른 목록과 같아야 한다.
+  {
+    file: "src/components/repair-cases/files/AttachmentViewer.tsx",
+    sites: 1,
+    why: "크게 보기 아래 썸네일 줄",
+  },
 ];
 
 for (const { file, sites, why } of TOGGLE_SITES) {
@@ -152,6 +159,15 @@ const OWNERS: { file: string; hooks: number; expects: string[] }[] = [
     hooks: 1,
     expects: ["orderedIds: stagedPhotos.map((photo) => photo.id)"],
   },
+  {
+    // 선택을 Set 이 아니라 **사진마다 방향**으로 들고 있는 유일한 자리다
+    // (PickedOrientations) — 얹는 자리만 setPickedIds 로 바꿔 끼웠고, 규칙은
+    // 그대로 공용 한 곳을 지나간다. 더 자세한 것은
+    // repair-cases/files/attachment-thumbnail-strip.test.ts.
+    file: "src/components/repair-cases/files/AttachmentViewer.tsx",
+    hooks: 1,
+    expects: ["orderedIds: items.map((item) => item.id)", "setPickedIds(previous, ids, checked)"],
+  },
 ];
 
 for (const { file, hooks, expects } of OWNERS) {
@@ -165,6 +181,36 @@ for (const { file, hooks, expects } of OWNERS) {
     assert.ok(!code.includes("if (next.has(id)) next.delete(id);"), "옛 한 개 토글이 남아 있다");
   });
 }
+
+/**
+ * 🔴 **기준점 비우기(resetAnchor)는 더해진 길이다** (2026-09-29).
+ *
+ * 크게 보기의 「고르기」는 끌 때 고른 것을 **전부 비운다**. 그때 기준점만 훅 안에
+ * 남으면, 다시 켜고 첫 누르기부터 Shift 로 누를 때 지난번 자리를 기준으로 범위가
+ * 잡힌다 — 그래서 훅에 비우는 길을 더했다.
+ *
+ * 여기서 못박는 것은 **나머지 화면이 그 길을 부르지 않는다**는 것이다. 부르지
+ * 않으면 기준점은 예전과 똑같이 「Shift 없이 누른 마지막 것」으로만 바뀐다 —
+ * 즉 이 화면들의 동작은 한 글자도 달라지지 않는다.
+ */
+test("🔴 기준점을 비우는 길을 부르는 화면은 하나뿐이다 — 나머지는 동작이 그대로다", () => {
+  const CLEARS_ANCHOR = "src/components/repair-cases/files/AttachmentViewer.tsx";
+  for (const { file } of OWNERS) {
+    const code = readCode(file);
+    if (file === CLEARS_ANCHOR) {
+      assert.equal(
+        count(code, "resetAnchor()"),
+        1,
+        "선택을 통째로 비우는 화면은 기준점도 함께 비워야 한다"
+      );
+      continue;
+    }
+    assert.ok(
+      !code.includes("resetAnchor"),
+      `${file}: 기준점을 비우기 시작하면 이 화면의 Shift 동작이 달라진다`
+    );
+  }
+});
 
 test("🔴 접수 건: 표와 카드가 같은 처리기를 받는다 — 창 크기에 따라 된다 안 된다 하지 않는다", () => {
   const code = readCode("src/components/repair-cases/RepairCaseListPage.tsx");
