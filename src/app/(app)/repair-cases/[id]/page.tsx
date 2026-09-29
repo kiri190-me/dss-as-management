@@ -4,6 +4,7 @@ import { findOhTemplateForRepairCase } from "@/lib/db/queries/oh-part-templates"
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { hasAreaAccess } from "@/lib/auth/area-guard";
 import { resolveAllRepairCases } from "@/lib/domain/local/resolved-repair-case";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
@@ -22,7 +23,10 @@ import {
   getDerivedServiceSummaryForCase,
   type DerivedServiceSummary,
 } from "@/lib/db/queries/repair-case-work-records";
-import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
+import {
+  listDomesticOrderDueDatesForRepairCase,
+  listDomesticOrderIssueDatesForRepairCase,
+} from "@/lib/db/queries/domestic-orders";
 import { getRepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
@@ -144,6 +148,29 @@ export default async function RepairCaseDetailPage({
   // 비고, 조회 자체가 일어나지 않는다).
   const relatedDatabaseCaseIds = related.filter((match) => match.source === "DATABASE").map((match) => match.id);
 
+  // 「내자 정리 발행일」 구역(견적서 발행일 · PO 발행일)을 그릴 것인가.
+  //
+  // ── 🔴 수리 건을 볼 수 있다고 내자 자료를 볼 수 있는 것은 아니다 ──────
+  // 열쇠는 **내자 정리 목록 화면이 스스로를 지키는 것과 같다** —
+  // (app)/domestic-orders/page.tsx 의 requireAreaAccessForCurrentUser
+  // ("domesticOrders") 가 하는 일이 「승인된 계정 + domesticOrders READ」다.
+  // 저쪽은 못 들어오는 사람을 /no-access 로 보내지만 여기서 막을 것은 화면 한
+  // 조각뿐이라, 같은 판정의 리다이렉트 없는 짝을 쓴다(auth/area-guard.ts 의
+  // hasAreaAccess — inventory/approvals/page.tsx 가 같은 자리에서 쓰는 방법).
+  //
+  // 🔴 역할 이름을 여기서 비교하지 않는다. 내자 인가는 **관리자가 설정한 값**이
+  // 최종 판정이고(permission-resolver.ts), 설정이 없을 때만 역할 기반 기본값으로
+  // 떨어진다. 설정을 켜는 것만으로 열려야 하므로 묻는 것은 설정 축 하나뿐이다.
+  //
+  // domestic_orders 는 DATABASE 소스에만 있으므로 아래 형제 조회들과 같은
+  // 조건을 함께 건다. 거짓이면 조회가 아예 돌지 않고 화면도 null 을 받아 구역을
+  // 그리지 않는다 — 볼 수 없는 자료를 브라우저로 실어 보내지 않는다.
+  const canReadDomesticOrders =
+    resolved.source === "DATABASE" &&
+    actingUser !== null &&
+    actingUser.approvalStatus === "APPROVED" &&
+    (await hasAreaAccess("domesticOrders", actingUser));
+
   // 「사용 부품」 칸 — 그 건에 손으로 적어 둔 부품 줄과, "여기에 적을 건인가"의
   // 재료(살아 있는 부품 요청 줄이 있는가). 위 둘과 같은 이유로 DATABASE 소스에만
   // 있고(repair_case_used_parts 에 mock 대응물이 없다), **같은 Promise.all 에
@@ -160,18 +187,29 @@ export default async function RepairCaseDetailPage({
   // (auth/repair-case-used-parts-authorization.ts). 여기서 역할 이름을 비교하지
   // 않는다. actingUser 가 null 이면(삭제 · 정지 · 세션 끊김) null 을 그대로 넘겨
   // 닫히는 쪽으로 떨어뜨린다 — 칸 자체는 읽기로 남는다.
-  const [derivedServiceSummary, domesticOrderDueDates, relatedSummaryByCaseId, usedParts, usedPartOptions] =
-    await Promise.all([
-      resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
-      resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
-      relatedDatabaseCaseIds.length > 0
-        ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
-        : new Map<string, DerivedServiceSummary>(),
-      resolved.source === "DATABASE"
-        ? getRepairCaseUsedPartsView(resolved.id, actingUser)
-        : null,
-      resolved.source === "DATABASE" ? getPartPickerList() : [],
-    ]);
+  const [
+    derivedServiceSummary,
+    domesticOrderDueDates,
+    domesticOrderIssueDates,
+    relatedSummaryByCaseId,
+    usedParts,
+    usedPartOptions,
+  ] = await Promise.all([
+    resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
+    resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
+    // 「내자 정리 발행일」 구역의 재료. 위 canReadDomesticOrders 가 거짓이면
+    // null 이고, 그때 화면은 구역 자체를 그리지 않는다(빈 배열과 뜻이 다르다 —
+    // RepairCaseDetailView 의 그 prop 주석). 왕복을 하나 더 만들지 않도록 같은
+    // 묶음에 태운다 — 이 건 하나만 보는 작은 인덱스 조회다.
+    canReadDomesticOrders ? listDomesticOrderIssueDatesForRepairCase(resolved.id) : null,
+    relatedDatabaseCaseIds.length > 0
+      ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
+      : new Map<string, DerivedServiceSummary>(),
+    resolved.source === "DATABASE"
+      ? getRepairCaseUsedPartsView(resolved.id, actingUser)
+      : null,
+    resolved.source === "DATABASE" ? getPartPickerList() : [],
+  ]);
 
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
   // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.
@@ -190,6 +228,7 @@ export default async function RepairCaseDetailPage({
       partRequestData={partRequestData}
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
+      domesticOrderIssueDates={domesticOrderIssueDates}
       usedParts={usedParts}
       usedPartOptions={usedPartOptions}
     />

@@ -307,3 +307,11 @@ scripts/lib/kyosan-import-revert-plan.test.ts
 # 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 이식기·러너가 갈라지지
 # 않았는지 **파일의 글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
 scripts/lib/kyosan-import-run-plan.test.ts
+
+# 수리 건 상세 「기본 정보」의 내자 정리 발행일 구역(2026-09-29). 0개·1개·N개를 가르는
+# 판정과, 여럿을 하나로 접는 일을 **주간보고와 같은 함수**(pickWeeklyReportOrderDates)가
+# 하는가를 값으로 대조한다. 계산된 값이 저장 payload 로 새지 않는지도 여기서 본다 —
+# mutations · validation · server/actions 폴더를 훑어 이 모듈을 불러 쓰는 곳이 없음을 확인한다.
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 저장 쪽을 훑는 부분은
+# 파일의 글자를 읽는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
+src/lib/domain/repair-case-domestic-order-dates.test.ts

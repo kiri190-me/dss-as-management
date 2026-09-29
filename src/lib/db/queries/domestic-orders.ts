@@ -23,6 +23,7 @@ import {
   resolveDomesticOrderDeliveredDate,
   resolveDomesticOrderValue,
 } from "@/lib/domain/domestic-order-list";
+import type { RepairCaseDomesticOrderRow } from "@/lib/domain/repair-case-domestic-order-dates";
 
 /**
  * ============================================================================
@@ -694,6 +695,50 @@ export async function listDomesticOrderDueDatesForRepairCase(
     );
 
   return rows.map((row) => row.dueDate);
+}
+
+/**
+ * 그 수리 건에 붙어 있는 내자 줄들의 **견적발행일 · 발주발행일**. 없으면 빈 배열이다.
+ *
+ * 수리 건 상세 「기본 정보」의 내자 발행일 구역이 그릴 재료다. 위
+ * listDomesticOrderDueDatesForRepairCase 와 같은 이유로 이 파일에 있다 — 읽는
+ * 표가 내자 정리의 것이고, **그 표를 어떤 조건으로 읽어야 하는지를 이 파일이 한
+ * 곳에서 갖는다.**
+ *
+ * ── 고르는 일은 여기서 하지 않는다 ──────────────────────────────────────
+ * 한 수리 건에 내자 줄이 여럿일 수 있고(분할 발주 — repair_case_id 에 유일
+ * 제약이 없다), 칸은 둘뿐이다. 그 여럿을 하나로 접는 규칙은 도메인이 갖는다
+ * (domain/repair-case-domestic-order-dates.ts 가 주간보고와 **같은**
+ * pickWeeklyReportOrderDates 를 부른다). SQL 의 min() 으로 접으면 그 규칙이 두
+ * 벌이 되고, 주간보고 상세표와 조용히 어긋날 수 있다 — 바로 위 형제 함수와 같은
+ * 판단이다.
+ *
+ * ── 🔴 주간보고와 **같은 두 칼럼**을 읽는다 ─────────────────────────────
+ * 목록 조회(mapDomesticOrderRow)는 연결된 견적서가 있으면 그쪽 발행일을 쓰지만
+ * (`연결된 견적서가 이긴다`), 주간보고 상세표는 그 해소를 하지 않고
+ * `domestic_orders.quote_issued_date` 를 그대로 읽는다
+ * (queries/weekly-report.ts 의 loadOrderDatesByCaseId). 맞출 상대가 주간보고이므로
+ * 여기서도 칼럼을 그대로 읽는다 — 한쪽만 견적서로 해소하면 같은 건의 같은 칸이
+ * 두 화면에서 다른 날짜가 된다.
+ *
+ * `is_deleted = false` 인 줄만 본다(주간보고·납기일 조회와 같은 규칙) — 화면에서
+ * 지운 줄이 다른 화면의 값을 정하면 안 된다.
+ *
+ * ⚠️ 차례를 정하지 않는 것도 주간보고와 맞춘 것이다. 고르는 함수는 날짜로
+ * 고르므로 받은 차례와 상관이 없고, 고를 날짜가 완전히 같은 줄이 둘 이상일
+ * 때에만 어느 줄이 잡히는지가 갈린다 — 그 자리를 여기서만 못 박으면 두 조회가
+ * 서로 다른 줄을 고르게 된다.
+ */
+export async function listDomesticOrderIssueDatesForRepairCase(
+  repairCaseId: string
+): Promise<RepairCaseDomesticOrderRow[]> {
+  return db
+    .select({
+      quoteIssuedDate: domesticOrders.quoteIssuedDate,
+      orderIssuedDate: domesticOrders.orderIssuedDate,
+    })
+    .from(domesticOrders)
+    .where(and(eq(domesticOrders.isDeleted, false), eq(domesticOrders.repairCaseId, repairCaseId)));
 }
 
 /**

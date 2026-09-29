@@ -126,3 +126,12 @@ src/components/users/notification-settings-moved-notice.test.ts
 # 그런 시험은 세 목록 어디서든 돌지만, 이웃(weekly-report-kind-filter-screen.test.ts)은
 # unit 에 있다 — 이쪽은 화면 원본을 지키는 시험이 모여 있는 이 목록에 둔다(위 주석).
 src/components/dashboard/weekly-report-intake-link.test.ts
+
+# 수리 건 상세 「기본 정보」 내자 정리 발행일 구역의 화면 쪽(2026-09-29).
+# 🔴 내자 자료를 볼 수 없는 세션에는 구역이 아예 안 그려지는가(설정 축 열쇠 —
+# 역할 이름 비교가 새로 들어오지 않았는가) · 조회가 기존 Promise.all 에 탔는가 ·
+# 이름표가 주간보고 상세표의 머리말과 **같은 글자**인가 · 화면이 제 손으로 줄을
+# 고르지 않는가 · 수정 단추가 없는가.
+# 화면을 통째로 렌더할 수 없어(서버 컴포넌트 + server-only) 원본을 글자로 읽는다 —
+# 그런 시험이 모여 있는 목록이 여기다(위 notification-settings-moved-notice 주석).
+src/components/repair-cases/detail/domestic-order-dates-section.test.ts

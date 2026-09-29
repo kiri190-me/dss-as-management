@@ -266,7 +266,7 @@ export function sumWeeklyReportStatusCounts(counts: WeeklyReportCounts): number 
 export type WeeklyReportOrderDates = {
   /** domestic_orders.quote_issued_date — 상세표의 `견적서 발행일`. */
   quoteIssuedDate: string | null;
-  /** domestic_orders.order_issued_date — 상세표의 `PO 발행 일시`. */
+  /** domestic_orders.order_issued_date — 상세표의 `PO 발행일`. */
   orderIssuedDate: string | null;
 };
 
@@ -316,7 +316,7 @@ export function pickWeeklyReportOrderDates(
  *
  * 여기서 보는 orderIssuedDate 는 pickWeeklyReportOrderDates 가 고른 줄의 값이고,
  * 그 함수의 불변식 덕분에 "하나라도 있는가"와 뜻이 같다. 그래서 이 판정은
- * **상세표에 실제로 적히는 `PO 발행 일시`와 언제나 같은 것을 본다** — 칸의 숫자와
+ * **상세표에 실제로 적히는 `PO 발행일`과 언제나 같은 것을 본다** — 칸의 숫자와
  * 표의 날짜가 어긋날 자리가 없다.
  */
 export function hasWeeklyReportPoIssued(row: WeeklyReportOrderDates): boolean {

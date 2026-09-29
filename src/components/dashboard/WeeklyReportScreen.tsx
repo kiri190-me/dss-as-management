@@ -606,7 +606,7 @@ function ReportBlock({
               <th className="px-wr-cell-x py-wr-cell-y">L/N</th>
               <th className="px-wr-cell-x py-wr-cell-y">견적서 발행일</th>
               <th className="px-wr-cell-x py-wr-cell-y">현 상태</th>
-              <th className="px-wr-cell-x py-wr-cell-y">PO 발행 일시</th>
+              <th className="px-wr-cell-x py-wr-cell-y">PO 발행일</th>
               <th className="px-wr-cell-x py-wr-cell-y">비고</th>
             </tr>
           </thead>
@@ -910,7 +910,7 @@ export default function WeeklyReportScreen({
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             출하 완료된 건은 빠지고, 진행 중인 {view.counts.total}대만 고객사·종류별로 묶여 있습니다.
             총 대수는 상태 6칸의 합이며, {WEEKLY_REPORT_PO_ISSUED_LABEL}는 그 위에 겹쳐 세는 값이라
-            총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행 일시가 있으면 세어집니다.
+            총 대수에 더해지지 않습니다 — 어느 칸에 있든 PO 발행일이 있으면 세어집니다.
           </p>
           {/* 빨간 볼드가 무슨 뜻인지 적는 **한 곳**이다. 블록마다 적지 않는 이유는
               파일 헤더에 있다(블록이 58개다). */}
