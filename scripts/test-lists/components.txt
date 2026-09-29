@@ -22,6 +22,7 @@ src/components/repair-cases/work-history/DatabaseWorkHistoryScreen.test.tsx
 src/components/procedures/procedure-publish-flow.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
+src/components/repair-cases/files/AttachmentViewer.test.tsx
 src/components/repair-cases/approval/approval-screen-layout.test.tsx
 src/components/inventory/part-issue-approval-screen.test.tsx
 src/components/users/approval-route-section.test.ts
