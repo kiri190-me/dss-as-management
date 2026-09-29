@@ -67,7 +67,15 @@ let stepBId: string;
 let outsiderId: string;
 /** 판을 저장하는 사람 + 「언제나 처리할 수 있는」 비상구. */
 let superAdminId: string;
-/** 🔴 견적서 권한이 없는 역할(AS_ENGINEER 기본값) — 요청이 막혀야 한다. */
+/**
+ * 🔴 견적서 권한이 없는 역할(INVENTORY_MANAGER 기본값) — 요청이 막혀야 한다.
+ *
+ * 2026-09-28 까지는 AS_ENGINEER 였다. 2026-09-29 에 사용자가 엔지니어에게
+ * 내자 정리·견적서를 읽기/쓰기로 열면서(domestic-order-authorization.ts) 그
+ * 역할은 더 이상 「권한이 없는 역할」이 아니다. 단언은 그대로 두고 **표본만**
+ * 지금도 권한이 없는 역할로 바꿨다 — 이 시험이 지키는 것은 「엔지니어가
+ * 막힌다」가 아니라 「견적서를 못 고치는 사람은 결재를 못 올린다」다.
+ */
 let noQuotePermissionId: string;
 
 const createdTestUserIds: string[] = [];
@@ -245,7 +253,7 @@ before(async () => {
   stepBId = await createTestUser("견적결재시험 2단계");
   outsiderId = await createTestUser("견적결재시험 제삼자");
   superAdminId = await createTestUser("견적결재시험 최고관리자", { role: "SUPER_ADMIN" });
-  noQuotePermissionId = await createTestUser("견적결재시험 엔지니어", { role: "AS_ENGINEER" });
+  noQuotePermissionId = await createTestUser("견적결재시험 재고담당", { role: "INVENTORY_MANAGER" });
 });
 
 afterEach(async () => {

@@ -158,8 +158,11 @@ test("지금 못 보는 화면은 상한이 접근 불가다", () => {
     if (!canViewMyActiveWork(role)) {
       assert.equal(baselinePermissionLevel("myActiveWork", role), "NONE", `${role} 내 담당 제품`);
     }
-    // 금액·입금 정보가 있는 화면이라 엔지니어·재고 담당자에게 닫혀 있다.
-    // 상한이 열려 있으면 설정으로 그 둘에게 금액을 열어 줄 수 있게 된다.
+    // 🔴 2026-09-29 에 엔지니어가 열렸다(사용자 결정 —
+    // domestic-order-authorization.ts). 지금 닫혀 있는 것은 재고 담당자뿐이고,
+    // 그 역할의 상한이 열려 있으면 설정으로 금액·입금 정보를 열어 줄 수 있게 된다.
+    // 여기 단언은 역할 이름을 적지 않고 술어를 그대로 쓰므로, 정책이 또 바뀌어도
+    // "못 보는 역할에게는 상한도 없다"는 불변식만 지킨다.
     if (!canViewDomesticOrders(role)) {
       assert.equal(baselinePermissionLevel("domesticOrders", role), "NONE", `${role} 내자 정리`);
     }

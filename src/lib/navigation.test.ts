@@ -81,9 +81,14 @@ const ALL_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MA
  * SALES shape as canViewCustomers (see product-model-authorization.ts).
  *
  * 내자 정리 1단계는 "domesticOrders"를 더한다 — 그 술어
- * (canViewDomesticOrders)는 SUPER_ADMIN/ADMIN/SALES 로, 이 목록에서 처음
- * 나오는 모양이다. 금액과 입금 정보가 있는 화면이라 고객사·제품 모델과 달리
- * AS_ENGINEER 까지 빠진다(domestic-order-authorization.ts).
+ * (canViewDomesticOrders)는 처음에는 SUPER_ADMIN/ADMIN/SALES 였다. 금액과 입금
+ * 정보가 있는 화면이라 고객사·제품 모델과 달리 AS_ENGINEER 까지 뺐던 것이다.
+ *
+ * 🔴 2026-09-29 에 **사용자가 엔지니어를 열었다**(「엔지니어도 PO/내자에 모두
+ * 읽기/쓰기 할 수 있어야 해」). 그래서 지금은 SUPER_ADMIN/ADMIN/SALES/
+ * AS_ENGINEER 이고, 고객사·제품 모델과 같은 모양이 됐다 — 빠지는 것은
+ * INVENTORY_MANAGER 하나다(domestic-order-authorization.ts). 견적서·작업 비용도
+ * 같은 술어를 타고 함께 열렸다.
  *
  * 주간보고(2026-08-25)는 "weeklyReport"를 더한다 — **역할 술어가 없는** 항목이다.
  * 대시보드의 하위메뉴이고, 볼 수 있는 역할을 대시보드와 같게 두기로 승인됐다.
@@ -123,9 +128,13 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
   const expected: Record<string, string[]> = {
     SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
     ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
+    // 🔴 2026-09-29 — domesticOrders · quotes · repairLabor 가 이 목록에서
+    // **빠졌다.** 항목이 사라진 것이 아니라 엔지니어에게 **보이게 된 것**이다
+    // (사용자 결정, domestic-order-authorization.ts). 다시 적어 넣으면 그 결정을
+    // 되돌리는 것이므로 사용자에게 먼저 물을 것.
     AS_ENGINEER: navItems
       .map((i) => i.key)
-      .filter((k) => !["domesticOrders", "quotes", "repairLabor", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)),
+      .filter((k) => !["mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)),
     SALES: navItems
       .map((i) => i.key)
       .filter(
@@ -289,22 +298,38 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER / SALES see the p
   assert.equal(filterNavItemsForRole(navItems, "INVENTORY_MANAGER").some((i) => i.key === "productModels"), false);
 });
 
-test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / SALES see the domesticOrders entry; AS_ENGINEER / INVENTORY_MANAGER do not", () => {
-  // 금액(VAT별도)과 입금완료 여부가 있는 화면이다 — 고객사·제품 모델과 달리
-  // 엔지니어까지 빠지는 유일한 항목이라 여기서 못 박아 둔다.
-  for (const role of ["SUPER_ADMIN", "ADMIN", "SALES"] as const) {
+test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / SALES / AS_ENGINEER see the domesticOrders entry; INVENTORY_MANAGER does not", () => {
+  // 금액(VAT별도)과 입금완료 여부가 있는 화면이다. 🔴 2026-09-29 에 사용자가
+  // 엔지니어에게 이 화면을 열었다(「엔지니어도 PO/내자에 모두 읽기/쓰기」) —
+  // 그래서 엔지니어가 **아래 목록에서 빠지지 않고 위로 올라왔다.** 단언이
+  // 사라진 것이 아니라 뒤집힌 것이다. 되돌리려면 사용자에게 다시 물을 것.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "SALES", "AS_ENGINEER"] as const) {
     assert.ok(filterNavItemsForRole(navItems, role).some((i) => i.key === "domesticOrders"), `expected domesticOrders visible for ${role}`);
   }
-  for (const role of ["AS_ENGINEER", "INVENTORY_MANAGER"] as const) {
+  for (const role of ["INVENTORY_MANAGER"] as const) {
     assert.equal(filterNavItemsForRole(navItems, role).some((i) => i.key === "domesticOrders"), false, `expected domesticOrders hidden for ${role}`);
   }
 });
 
+test("filterNavItemsForRole: 작업 비용도 내자 정리를 따라 엔지니어에게 보인다", () => {
+  // repairLabor 은 견적서 보기(canViewQuotes)를 그대로 읽는다
+  // (permission-baseline.ts). 2026-09-29 의 결정이 여기까지 닿은 것을 못 박는다.
+  for (const role of ["SUPER_ADMIN", "ADMIN", "SALES", "AS_ENGINEER"] as const) {
+    assert.ok(filterNavItemsForRole(navItems, role).some((i) => i.key === "repairLabor"), `expected repairLabor visible for ${role}`);
+  }
+  assert.equal(
+    filterNavItemsForRole(navItems, "INVENTORY_MANAGER").some((i) => i.key === "repairLabor"),
+    false,
+    "expected repairLabor hidden for INVENTORY_MANAGER"
+  );
+});
+
 test("filterNavItemsForRole: 견적서는 내자 정리와 정확히 같은 역할에게 보인다", () => {
   // 견적서에는 부품 단가·작업비·합계가 그대로 들어 있다. 금액이 이유가 되어
-  // 엔지니어·재고 담당자가 빠지는 것은 내자 정리와 같은 판단이라, 술어도
+  // 재고 담당자가 빠지는 것은 내자 정리와 같은 판단이라, 술어도
   // canViewDomesticOrders 를 그대로 부른다(quote-authorization.ts). 두 항목이
-  // 갈라지면 그쪽에서 판단이 바뀐 것이므로 여기서 걸린다.
+  // 갈라지면 그쪽에서 판단이 바뀐 것이므로 여기서 걸린다 — 2026-09-29 에
+  // 엔지니어가 열린 것도 이 짝 맺음을 타고 함께 왔다.
   for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
     const visible = filterNavItemsForRole(navItems, role);
     assert.equal(
@@ -470,7 +495,10 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 두 역할에서 감춰지는 항목이 하나씩 더 늘었다.
     // 메일 설정(2026-08-31)은 관리자 이상만 본다 — 아래 세 역할에서 하나씩 늘었다.
     // 과거 인수품 가져오기(2026-09-15)도 관리자 이상만 본다 — 아래 세 역할에서 하나씩 더 늘었다.
-    AS_ENGINEER: 6, // domesticOrders + quotes + repairLabor + mailSettings + kyosanIntakeImport + developerMode
+    // 🔴 2026-09-29 — 엔지니어에게 내자 정리·견적서·작업 비용이 열리면서 그 줄이
+    // 6 에서 3 으로 **줄었다**(사용자 결정, domestic-order-authorization.ts).
+    // 감춰지는 항목이 줄었다는 것은 보이는 항목이 늘었다는 뜻이다.
+    AS_ENGINEER: 3, // mailSettings + kyosanIntakeImport + developerMode
     SALES: 6, // myActiveWork + technicalProcedures + workflows + mailSettings + kyosanIntakeImport + developerMode
     // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
     // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
