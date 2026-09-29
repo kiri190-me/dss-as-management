@@ -5,11 +5,15 @@ import {
   IDENTITY_ORIENTATION,
   isIdentityOrientation,
   isQuarterTurned,
+  orientedPixelSize,
   type ImageOrientation,
   type ViewerRotation,
 } from "@/lib/domain/image-orientation";
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
-import SaveRotationDialog from "./SaveRotationDialog";
+import SaveRotationDialog, {
+  type SaveRotationOutcome,
+  type SaveRotationTarget,
+} from "./SaveRotationDialog";
 
 /**
  * ============================================================================
@@ -31,6 +35,12 @@ import SaveRotationDialog from "./SaveRotationDialog";
  *
  * 두 주소 모두 **감사 로그를 남기지 않는다** — 화면에서 보는 것과 파일을
  * 가져가는 것은 다른 일이고, 기록해야 하는 것은 뒤쪽이다(라우트 주석 참조).
+ *
+ * 🔴 **두 주소에는 파일의 지문(체크섬 앞 12자)이 `v` 로 붙는다**
+ * (attachmentFingerprintSuffix). 「돌린 대로 저장」 뒤에도 이 화면의 그림이 옛
+ * 방향으로 남아 있던 까닭이 그것이 없어서였다 — 응답이 `no-store` 라도 이미
+ * 그려 놓은 `<img>` 는 주소가 같으면 다시 받지 않는다. 목록의 작은 그림이 쓰는
+ * 규칙과 **같은 함수**다.
  *
  * ── 앞뒤로 넘긴다 ────────────────────────────────────────────────────────
  * 사진은 한 장만 보는 일이 드물다. 한 건에 여러 장을 찍어 두고 비교하므로,
@@ -239,50 +249,61 @@ export function clampViewerPan(
   return { ...transform, offsetX, offsetY };
 }
 
-/** 90°씩 돈다. 1이 오른쪽(시계 방향), -1이 왼쪽이다. */
-export function rotateViewer(transform: ViewerTransform, quarterTurns: number): ViewerTransform {
-  if (!Number.isFinite(quarterTurns)) return transform;
+/**
+ * 90°씩 돈다 — **방향 값 하나만** 받는다. 1이 오른쪽(시계 방향), -1이 왼쪽이다.
+ *
+ * 🔴 여러 장을 한꺼번에 돌리는 길이 생기면서 「돌린다」의 셈이 두 군데로 갈릴
+ * 뻔했다. 배율·이동까지 들고 있는 ViewerTransform 을 거치지 않는 이 함수가
+ * 정본이고, 아래 rotateViewer 와 고른 것들에 거는 mapPicked·orientPickedTo 가
+ * 모두 이것을 부른다 — 한쪽만 고치면 화면과 저장이 갈라진다.
+ */
+export function rotateOrientation(
+  orientation: ImageOrientation,
+  quarterTurns: number
+): ImageOrientation {
+  if (!Number.isFinite(quarterTurns)) return orientation;
   const turns = Math.round(quarterTurns);
-  const degrees = (((transform.orientation.rotate + turns * 90) % 360) + 360) % 360;
-  return {
-    ...transform,
-    orientation: { ...transform.orientation, rotate: degrees as ViewerRotation },
-  };
+  const degrees = (((orientation.rotate + turns * 90) % 360) + 360) % 360;
+  return { ...orientation, rotate: degrees as ViewerRotation };
 }
 
 /**
- * 🔴 **화면에서** 좌우로 뒤집는다.
+ * 🔴 **화면에서** 좌우로 뒤집는다 — 방향 값 하나만 받는다.
  *
  * 저장해 둔 flipX·flipY 는 **그림 자신의 축** 기준이다(그래야 나중에 파일에
  * 그대로 적을 수 있다). 그런데 90° 돌려 놓은 상태에서는 그림의 가로축이 화면의
  * 세로축이라, flipX 를 그냥 켜면 눌러 놓고 위아래가 뒤집힌다. 돌아가 있을 때는
  * 반대쪽 값을 켜야 화면에서 좌우가 뒤집힌다.
  */
-export function flipViewerAcrossScreenX(transform: ViewerTransform): ViewerTransform {
-  return isQuarterTurned(transform.orientation)
-    ? toggleFlipY(transform)
-    : toggleFlipX(transform);
+export function flipOrientationAcrossScreenX(orientation: ImageOrientation): ImageOrientation {
+  return isQuarterTurned(orientation)
+    ? { ...orientation, flipY: !orientation.flipY }
+    : { ...orientation, flipX: !orientation.flipX };
 }
 
 /** 화면에서 상하로 뒤집는다. 까닭은 위와 같다. */
+export function flipOrientationAcrossScreenY(orientation: ImageOrientation): ImageOrientation {
+  return isQuarterTurned(orientation)
+    ? { ...orientation, flipX: !orientation.flipX }
+    : { ...orientation, flipY: !orientation.flipY };
+}
+
+/** 90°씩 돈다. 1이 오른쪽(시계 방향), -1이 왼쪽이다. */
+export function rotateViewer(transform: ViewerTransform, quarterTurns: number): ViewerTransform {
+  const orientation = rotateOrientation(transform.orientation, quarterTurns);
+  // 같은 값이 돌아오면(알아들을 수 없는 인자) 상태를 그대로 둔다 — 괜히 다시 그리지 않는다.
+  if (orientation === transform.orientation) return transform;
+  return { ...transform, orientation };
+}
+
+/** 화면에서 좌우로 뒤집는다(위 flipOrientationAcrossScreenX 주석). */
+export function flipViewerAcrossScreenX(transform: ViewerTransform): ViewerTransform {
+  return { ...transform, orientation: flipOrientationAcrossScreenX(transform.orientation) };
+}
+
+/** 화면에서 상하로 뒤집는다. */
 export function flipViewerAcrossScreenY(transform: ViewerTransform): ViewerTransform {
-  return isQuarterTurned(transform.orientation)
-    ? toggleFlipX(transform)
-    : toggleFlipY(transform);
-}
-
-function toggleFlipX(transform: ViewerTransform): ViewerTransform {
-  return {
-    ...transform,
-    orientation: { ...transform.orientation, flipX: !transform.orientation.flipX },
-  };
-}
-
-function toggleFlipY(transform: ViewerTransform): ViewerTransform {
-  return {
-    ...transform,
-    orientation: { ...transform.orientation, flipY: !transform.orientation.flipY },
-  };
+  return { ...transform, orientation: flipOrientationAcrossScreenY(transform.orientation) };
 }
 
 /** 방향도 배율도 처음으로. 「원래대로」 단추가 부른다. */
@@ -323,10 +344,211 @@ export function canOfferOrientationSave(params: {
   hasHandler: boolean;
   mimeType: string;
   orientation: ImageOrientation;
+  /**
+   * 「고르기」로 골라 둔 것 가운데 **저장할 것이 몇 장인가**(pickedSaveTargets).
+   *
+   * 🔴 여러 장 모드에서는 **지금 보고 있는 한 장이 그대로여도** 단추가 나와야
+   * 한다 — 다른 사진들을 돌려 놓고 아직 안 돌린 사진을 보고 있는 중일 수 있다.
+   * 넘기지 않으면 0 이라, 지금까지 이 함수를 부르던 자리의 판정은 한 글자도
+   * 달라지지 않는다(셋째 조건 「돌린 것이 있는가」가 그대로 마지막에 남는다).
+   */
+  pickedCount?: number;
 }): boolean {
   if (!params.hasHandler) return false;
   if (params.mimeType !== "image/jpeg" && params.mimeType !== "image/png") return false;
+  if ((params.pickedCount ?? 0) > 0) return true;
   return !isIdentityOrientation(params.orientation);
+}
+
+// ══════════════════════════════════ 여러 장을 골라 한꺼번에 — 순수 계산부
+//
+// 🔴 **원본을 여러 장 한꺼번에 덮어쓰는 길이다.** 그래서 「무엇을 고쳤는가」와
+// 「무엇을 저장하는가」의 셈을 전부 이 아래의 순수 함수로 빼 두었다 — 손가락
+// 없이 시험이 못박을 수 있어야 한다.
+
+/**
+ * 고른 사진들과 **각자의 방향**. 열쇠가 있다는 것이 곧 「골랐다」는 표시이고,
+ * 값이 그 사진에 걸어 둔 방향이다.
+ *
+ * 🔴 **한 방향 값을 모두가 나눠 쓰지 않는다.** 「전부 가로로」는 이미 가로인
+ * 것을 건드리지 않으므로 같은 묶음 안에서도 사진마다 방향이 갈린다. 하나로
+ * 뭉쳐 두면 그 순간 이미 맞는 사진까지 같이 돌아간다.
+ */
+export type PickedOrientations = Readonly<Record<string, ImageOrientation>>;
+
+/** 아무것도 고르지 않은 상태. 「고르기」를 끌 때 이 값으로 되돌린다. */
+export const NO_PICKS: PickedOrientations = {};
+
+/** 그림의 가로·세로(px). 원본 파일을 읽어야 알 수 있는 값이다. */
+export type PixelSize = { width: number; height: number };
+
+/** 「전부 ○○로」가 맞추려는 쪽. */
+export type OrientationTarget = "landscape" | "portrait";
+
+/** 고른 것인가. `in` 으로 묻는다 — 값이 「그대로인 방향」이라 거짓처럼 보이지 않게. */
+export function isPickedId(picked: PickedOrientations, id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(picked, id);
+}
+
+/** 고른 것이면 그 방향, 아니면 null. */
+export function pickedOrientationOf(
+  picked: PickedOrientations,
+  id: string
+): ImageOrientation | null {
+  return isPickedId(picked, id) ? picked[id] : null;
+}
+
+export function pickedCountOf(picked: PickedOrientations): number {
+  return Object.keys(picked).length;
+}
+
+/** 썸네일을 눌렀다 — 고른 것이면 빼고, 아니면 **그대로인 방향**으로 넣는다. */
+export function togglePicked(
+  picked: PickedOrientations,
+  id: string,
+  orientation: ImageOrientation = IDENTITY_ORIENTATION
+): PickedOrientations {
+  if (isPickedId(picked, id)) {
+    const next = { ...picked };
+    delete next[id];
+    return next;
+  }
+  return { ...picked, [id]: orientation };
+}
+
+/**
+ * 저장에 성공한 것들을 뺀다. 🔴 **남는 것이 곧 「다시 시도할 것」이다** — 일부만
+ * 실패했을 때 사람이 다시 고르지 않아도 되게.
+ */
+export function dropPicked(
+  picked: PickedOrientations,
+  ids: readonly string[]
+): PickedOrientations {
+  const next = { ...picked };
+  let changed = false;
+  for (const id of ids) {
+    if (isPickedId(next, id)) {
+      delete next[id];
+      changed = true;
+    }
+  }
+  return changed ? next : picked;
+}
+
+/** 고른 것 **전부에 같은 값**을 건다 — 회전·뒤집기 단추가 이리로 온다. */
+export function mapPicked(
+  picked: PickedOrientations,
+  change: (orientation: ImageOrientation) => ImageOrientation
+): PickedOrientations {
+  const next: Record<string, ImageOrientation> = {};
+  for (const [id, orientation] of Object.entries(picked)) next[id] = change(orientation);
+  return next;
+}
+
+/** 고른 것들의 방향을 전부 「그대로」로 되돌린다 — 「원래대로」가 부른다. */
+export function resetPicked(picked: PickedOrientations): PickedOrientations {
+  return mapPicked(picked, () => IDENTITY_ORIENTATION);
+}
+
+/** 고른 것 가운데 돌리거나 뒤집어 둔 것이 있는가. */
+export function hasPickedRotation(picked: PickedOrientations): boolean {
+  return Object.values(picked).some((orientation) => !isIdentityOrientation(orientation));
+}
+
+/**
+ * 🔴 **지금 이 사진은 가로인가 세로인가.** 두 가지를 합쳐야 맞다.
+ *
+ *  1. **원본의 가로세로** — 그림을 읽어야 안다(naturalWidth·naturalHeight).
+ *  2. **화면에서 이미 돌려 둔 것** — 원본이 세로라도 90°·270° 로 돌려 놓았으면
+ *     **그것은 이미 가로다.**
+ *
+ * 하나만 보면 이미 맞는 사진을 또 돌린다. 합치는 셈은 이미 있는
+ * `orientedPixelSize` 하나가 한다(90°·270° 면 가로·세로를 맞바꾼다) — 저장할 때
+ * 캔버스 크기를 정하는 그 함수와 **같은 것**이라 화면과 파일이 갈라지지 않는다.
+ *
+ * 정사각이거나 크기를 모르면 null 이다. 돌려도 가로가 되지 않으므로 「맞출 수
+ * 없다」가 답이고, 그런 사진은 건드리지 않는다.
+ */
+export function shownOrientationOf(
+  size: PixelSize,
+  orientation: ImageOrientation
+): OrientationTarget | null {
+  if (!(size.width > 0) || !(size.height > 0)) return null;
+  const shown = orientedPixelSize(size, orientation);
+  if (shown.width === shown.height) return null;
+  return shown.width > shown.height ? "landscape" : "portrait";
+}
+
+/**
+ * 「전부 가로로」·「전부 세로로」. 🔴 **방향만 바꾼다 — 파일은 한 글자도 건드리지
+ * 않는다.** 저장은 「돌린 대로 저장」이 따로 한다.
+ *
+ * 🔴 **이미 그쪽인 것은 건드리지 않는다.** 90° 더 돌리면 맞던 사진이 어긋난다.
+ * 크기를 모르는 사진(그림을 아직 못 읽었거나 깨진 것)도 그대로 둔다 — 짐작해서
+ * 돌리면 되돌릴 수 없는 저장이 그 짐작 위에 얹힌다.
+ *
+ * 돌리는 쪽은 **오른쪽(시계 방향) 하나로 통일**한다. 왼쪽으로 도는 길을 섞으면
+ * 같은 묶음 안에서 사진마다 위아래가 반대로 눕는다. 오른쪽을 고른 까닭은 확인
+ * 창이 방향을 「오른쪽으로 90도 회전」으로 읽어 주기 때문이다
+ * (describeOrientation) — 글자와 실제로 도는 쪽이 같아야 한다.
+ */
+export function orientPickedTo(
+  picked: PickedOrientations,
+  target: OrientationTarget,
+  sizeOf: (id: string) => PixelSize | null
+): PickedOrientations {
+  const next: Record<string, ImageOrientation> = {};
+  let changed = false;
+  for (const [id, orientation] of Object.entries(picked)) {
+    const size = sizeOf(id);
+    const shown = size ? shownOrientationOf(size, orientation) : null;
+    if (shown === null || shown === target) {
+      next[id] = orientation;
+      continue;
+    }
+    next[id] = rotateOrientation(orientation, 1);
+    changed = true;
+  }
+  return changed ? next : picked;
+}
+
+/**
+ * 실제로 저장할 것들 — 고른 것 가운데 **그대로가 아닌 것**만, **화면에 보이는
+ * 차례대로**.
+ *
+ * 그대로인 것을 보내면 원본을 뜻 없이 다시 인코딩해 화질만 잃고, 서버도
+ * NO_CHANGE 로 거절한다(canOfferOrientationSave 의 셋째 조건과 같은 판단).
+ * 「전부 가로로」가 손대지 않은 사진이 여기서 빠지는 것도 같은 이유다.
+ */
+export function pickedSaveTargets<T extends { id: string }>(
+  items: readonly T[],
+  picked: PickedOrientations
+): { item: T; orientation: ImageOrientation }[] {
+  const targets: { item: T; orientation: ImageOrientation }[] = [];
+  for (const item of items) {
+    const orientation = pickedOrientationOf(picked, item.id);
+    if (!orientation || isIdentityOrientation(orientation)) continue;
+    targets.push({ item, orientation });
+  }
+  return targets;
+}
+
+/**
+ * 아래 썸네일을 눌렀을 때 무슨 일이 일어나는가.
+ *
+ * 🔴 **고르기가 꺼져 있으면 지금까지와 똑같이 「그 사진으로 넘어가기」다.** 이
+ * 규칙을 화면 안 삼항식에 흩어 두지 않고 함수 하나로 뽑은 까닭은, 「꺼져 있을
+ * 때의 동작이 한 글자도 달라지지 않았다」를 시험이 못박을 수 있게 하려는 것이다.
+ *
+ * 저장이 도는 동안에는 아무 일도 하지 않는다 — 한 장씩 차례로 덮어쓰는 중에
+ * 대상이 바뀌면 무엇이 저장됐는지 알 수 없게 된다.
+ */
+export function thumbnailPressAction(params: {
+  isPicking: boolean;
+  isSaving: boolean;
+}): "navigate" | "pick" | "ignore" {
+  if (params.isSaving) return "ignore";
+  return params.isPicking ? "pick" : "navigate";
 }
 
 /**
@@ -385,17 +607,51 @@ export function swipeViewerIndex(state: ViewerState, deltaX: number, count: numb
 
 // ───────────────────────────────────────────────────────────── 주소 세 가지
 
+/**
+ * 주소에 붙이는 **파일의 지문** — 체크섬 앞 12자. 인자 이름은 `v` 다.
+ *
+ * 🔴 **응답이 `no-store` 라도 이미 그려 놓은 `<img>` 는 주소가 그대로면 다시
+ * 받지 않는다.** 「돌린 대로 저장」은 파일 내용을 바꾸므로 체크섬이 반드시
+ * 달라지는데, 주소가 그대로면 브라우저는 옛 그림을 계속 쓴다 — 저장은 됐는데
+ * 눈에는 옛 방향이 남고, 사람은 그것을 「저장이 안 됐다」로 읽는다.
+ *
+ * 🔴 **이 규칙이 한 군데인 것이 요점이다.** 목록의 작은 그림
+ * (StoredAttachmentList 의 previewUrlOf)도 이 함수를 쓴다. 두 곳이 저마다
+ * 붙이면 한쪽만 고쳐지는 날 목록과 크게 보기가 서로 다른 그림을 보여 준다.
+ *
+ * 서버는 이 인자를 **보지 않는다** — 무엇을 줄지는 `view` 하나가 정한다.
+ */
+export const ATTACHMENT_FINGERPRINT_LENGTH = 12;
+
+/**
+ * 주소 뒤에 이어 붙일 조각. 지문을 알 수 없으면(체크섬이 빈 값) **빈 문자열**
+ * 이라 예전과 한 글자도 같은 주소가 된다 — 지문이 없다고 그림이 안 보이게
+ * 되는 쪽이 더 나쁘다.
+ */
+export function attachmentFingerprintSuffix(checksumSha256: string | null | undefined): string {
+  const fingerprint = (checksumSha256 ?? "").slice(0, ATTACHMENT_FINGERPRINT_LENGTH);
+  return fingerprint ? `&v=${fingerprint}` : "";
+}
+
+/**
+ * 주소를 만드는 데 필요한 만큼만. 목록 항목 전체
+ * (RepairCaseAttachmentListItem)가 그대로 들어맞는다.
+ */
+export type ViewerUrlTarget = { id: string; checksumSha256?: string | null };
+
 /** 크게 보는 자리. **원본**이다 — 파일 머리말의 사고가 이 값에 걸려 있다. */
-export function viewerFullUrl(id: string): string {
-  return `/api/attachments/${encodeURIComponent(id)}/download?view=full`;
+export function viewerFullUrl(item: ViewerUrlTarget): string {
+  const fingerprint = attachmentFingerprintSuffix(item.checksumSha256);
+  return `/api/attachments/${encodeURIComponent(item.id)}/download?view=full${fingerprint}`;
 }
 
 /**
  * 아래쪽 썸네일 줄. 미리보기가 있으면 그것을, 없으면 원본을 준다.
  * 🔴 여기에 `full` 을 쓰면 한 건의 사진 전부가 원본으로 한꺼번에 내려온다.
  */
-export function viewerThumbUrl(id: string): string {
-  return `/api/attachments/${encodeURIComponent(id)}/download?view=thumb`;
+export function viewerThumbUrl(item: ViewerUrlTarget): string {
+  const fingerprint = attachmentFingerprintSuffix(item.checksumSha256);
+  return `/api/attachments/${encodeURIComponent(item.id)}/download?view=thumb${fingerprint}`;
 }
 
 /** 실제로 가져가는 길. view 값이 없고, **이 경로만 감사 로그를 남긴다.** */
@@ -423,6 +679,10 @@ type AttachmentViewerProps = {
    * 확인 창은 **이 컴포넌트가** 띄운다(돌린 방향을 아는 것이 여기라서다).
    * 부모가 하는 일은 실제로 보내는 것뿐이고, 막히면 사람이 읽을 문장을 돌려준다 —
    * 창은 그동안 닫히지 않고 그 문장을 보여 준다.
+   *
+   * 🔴 **여러 장을 고르면 이 길을 한 장씩 여러 번 부른다**(2026-09-29). 묶어서
+   * 받는 통로를 새로 만들지 않았다 — 한 요청으로 묶으면 하나가 막힐 때 전부
+   * 되돌아가지만, 한 장씩이면 앞서 저장된 것은 살아남는다(confirmSaveOrientation).
    */
   onSaveOrientation?: (
     item: RepairCaseAttachmentListItem,
@@ -489,6 +749,25 @@ export default function AttachmentViewer({
   const [isSaving, setIsSaving] = useState(false);
   /** 막혔을 때 서버가 준 문장. 창을 닫지 않고 그 안에 보여 준다. */
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** 여러 장을 저장하는 중 어디까지 갔는지. 한 장짜리에서는 쓰지 않는다. */
+  const [saveProgress, setSaveProgress] = useState<{ current: number; total: number } | null>(null);
+  /**
+   * 🔴 **일부만 실패했을 때의 결과.** 「5장 중 3장 저장, 2장 실패」를 어느 사진이
+   * 왜 막혔는지와 함께 보여 준다 — 되돌릴 수 없는 일을 반만 해 놓고 조용히
+   * 넘어가지 않는다.
+   */
+  const [saveOutcome, setSaveOutcome] = useState<SaveRotationOutcome | null>(null);
+
+  /**
+   * 🔴 **「고르기」가 켜져 있는가** — 켜면 아래 썸네일을 누르는 것이 **선택**이
+   * 된다(사용자 결정 2026-09-29: 단추로 켜고 끈다).
+   *
+   * 꺼져 있을 때의 동작은 지금까지와 한 글자도 다르지 않다 — 썸네일을 누르면
+   * 그 사진으로 넘어간다(thumbnailPressAction).
+   */
+  const [isPicking, setIsPicking] = useState(false);
+  /** 고른 사진들과 각자의 방향. 열쇠가 있다는 것이 곧 「골랐다」다. */
+  const [picked, setPicked] = useState<PickedOrientations>(NO_PICKS);
 
   /** 사진이 놓이는 칸. 확대 기준점과 이동 한계를 이 칸의 크기로 잰다. */
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -500,6 +779,19 @@ export default function AttachmentViewer({
   const lastTouchEndAtRef = useRef(0);
   /** 지금 보고 있는 썸네일 단추. 넘길 때 줄이 따라 움직이게 하려고 들고 있다. */
   const currentThumbRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * 썸네일이 실려 온 뒤 알게 된 **그림의 가로·세로**. 「전부 가로로」가 이것을 읽는다.
+   *
+   * 🔴 **크기를 알자고 사진을 한 번 더 받아 오지 않는다.** 아래 썸네일 줄의
+   * `<img>` 가 실리는 그 자리에서 적는다. `?view=thumb` 은 줄인 그림이지만
+   * **가로세로 비율이 원본과 같아서** 가로냐 세로냐를 가리는 데는 모자람이 없다.
+   * 고르려면 그 썸네일을 눌러야 하고, 누를 수 있다는 것은 화면에 들어와 이미
+   * 실렸다는 뜻이다(loading="lazy"). 그래도 모르는 것은 **건드리지 않는다**
+   * (orientPickedTo).
+   *
+   * 그리는 데 쓰이지 않으므로 상태가 아니라 ref 다.
+   */
+  const naturalSizesRef = useRef<Map<string, PixelSize>>(new Map());
 
   const count = items.length;
   const current = items[index];
@@ -562,36 +854,191 @@ export default function AttachmentViewer({
   const zoomed = isViewerZoomed(transform);
 
   /**
+   * 화면에 실제로 걸 변환. 🔴 **고른 사진은 그 묶음에 걸어 둔 방향이 이긴다** —
+   * 여러 장을 한꺼번에 돌렸을 때 그 결과가 눈에 보여야 무엇을 저장하려는 것인지
+   * 알 수 있다. 배율·이동은 언제나 지금 보고 있는 사람의 것이라 그대로 둔다.
+   */
+  const currentPickedOrientation = isPicking ? pickedOrientationOf(picked, current.id) : null;
+  const shownTransform = currentPickedOrientation
+    ? { ...transform, orientation: currentPickedOrientation }
+    : transform;
+
+  /**
+   * 🔴 **「고르기」 단추 자체를 그리는가.** 둘이 모두 참일 때만이다.
+   *
+   *  1. **저장할 길이 있는가**(권한). 없으면 골라 봐야 저장할 수가 없으므로
+   *     「고르기」도 「전부 가로로」도 **처음부터 없다** — 「돌린 대로 저장」과
+   *     같은 규칙이다.
+   *  2. **사진이 여러 장인가.** 한 장뿐이면 아래 썸네일 줄 자체를 안 그리므로
+   *     고를 자리가 없고, 「고르기」는 뜻이 없다.
+   */
+  const canPickMany = Boolean(onSaveOrientation) && count > 1;
+  const pickedTotal = pickedCountOf(picked);
+  /** 고른 것 가운데 실제로 저장할 것들 — 그대로인 것은 빠진다. */
+  const pickedTargets = isPicking ? pickedSaveTargets(items, picked) : [];
+
+  /**
    * 「돌린 대로 저장」 단추를 그리는가. 판정은 위의 순수 함수 하나가 한다 —
    * 길이 없거나(권한), 사진이 아니거나, 돌린 것이 없으면 단추 자체가 없다.
+   * 고른 것이 있으면 그쪽이 앞선다(pickedCount 주석).
    */
   const canSaveOrientation = canOfferOrientationSave({
     hasHandler: Boolean(onSaveOrientation),
     mimeType: current.mimeType,
     orientation: transform.orientation,
+    pickedCount: pickedTargets.length,
   });
 
+  /**
+   * 확인 창과 저장이 실제로 다루는 것들. **고른 것이 있으면 그것들, 없으면 지금
+   * 보는 한 장** — 고르기를 꺼 두면 언제나 뒤쪽이라 지금까지와 같다.
+   */
+  const saveTargets: { item: RepairCaseAttachmentListItem; orientation: ImageOrientation }[] =
+    pickedTargets.length > 0
+      ? pickedTargets
+      : [{ item: current, orientation: transform.orientation }];
+  const dialogTargets: SaveRotationTarget[] = saveTargets.map(({ item, orientation }) => ({
+    id: item.id,
+    displayName: item.originalFileName,
+    orientation,
+  }));
+
+  /**
+   * 🔴 **한 장씩 차례로 저장한다.**
+   *
+   * ── 왜 한 요청으로 묶지 않는가 ────────────────────────────────────────
+   * 이미 있는 통로(PUT …/rotation)를 **여러 번 부른다.** 새 통로를 만들지
+   * 않았다. 한 요청으로 묶으면 하나가 막힐 때 **전부 되돌아간다** — 열 장 가운데
+   * 아홉 장이 멀쩡히 돌아갔는데 마지막 한 장 때문에 처음부터 다시 하게 된다.
+   * 한 장씩이면 앞서 저장된 것은 살아남고, 실패한 것만 다시 시도하면 된다.
+   *
+   * ── 🔴 일부만 실패한 것을 숨기지 않는다 ───────────────────────────────
+   * 「5장 중 3장 저장, 2장 실패」를 어느 사진이 왜 막혔는지와 함께 창 안에
+   * 보여 준다. 저장된 것은 고른 것에서 빼고 **실패한 것은 고른 채로 남겨** 그대로
+   * 다시 누를 수 있게 한다.
+   *
+   * 한 장짜리(고르기를 안 쓴 지금까지의 길)는 예전 그대로다 — 서버가 준 문장을
+   * 창 안에 보여 주고, 성공하면 크게 보기를 닫는다.
+   */
   async function confirmSaveOrientation() {
     if (!onSaveOrientation) return;
+    const targets = saveTargets;
+    if (targets.length === 0) return;
+
     setIsSaving(true);
     setSaveError(null);
+    setSaveOutcome(null);
+    const savedIds: string[] = [];
+    const failures: { name: string; message: string }[] = [];
     try {
-      const result = await onSaveOrientation(current, transform.orientation);
-      if (!result.ok) {
-        setSaveError(result.message);
-        return;
+      for (const [position, target] of targets.entries()) {
+        setSaveProgress({ current: position + 1, total: targets.length });
+        try {
+          const result = await onSaveOrientation(target.item, target.orientation);
+          if (result.ok) savedIds.push(target.item.id);
+          else failures.push({ name: target.item.originalFileName, message: result.message });
+        } catch (error) {
+          // 한 장이 던져도 나머지는 그대로 이어 간다 — 여기서 멈추면 뒤엣것이
+          // 시도조차 되지 않은 채 「실패」로 뭉뚱그려진다.
+          failures.push({
+            name: target.item.originalFileName,
+            message: error instanceof Error ? error.message : "저장하지 못했습니다.",
+          });
+        }
       }
-      // 🔴 성공하면 **크게 보기를 닫는다.** 파일 자체가 이제 그 방향이므로 화면의
-      //    CSS 회전을 그대로 두면 한 번 더 돌아간 것처럼 보이고, 회전만 풀면
-      //    브라우저가 이미 그려 둔 옛 그림이 그대로 남아 반대로 보인다. 목록으로
-      //    돌아가면 부모가 새로 그리고, 다시 열면 원본을 새로 받아 온다.
-      setIsSaveOpen(false);
-      onClose();
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
+      setSaveProgress(null);
     }
+
+    // 저장된 것은 고른 것에서 뺀다 — 다시 누르면 **실패한 것만** 다시 시도한다.
+    if (savedIds.length > 0) setPicked((previous) => dropPicked(previous, savedIds));
+
+    if (failures.length === 0) {
+      // 🔴 성공하면 **크게 보기를 닫는다**(사용자 결정 2026-09-29 — 이 동작은
+      //    그대로 둔다). 파일 자체가 이제 그 방향이므로 화면의 CSS 회전을 그대로
+      //    두면 한 번 더 돌아간 것처럼 보이기 때문이다.
+      //
+      //    옛 그림이 남는 문제는 이제 없다 — 주소에 지문이 붙어 있어 저장 뒤
+      //    목록이 새로 그려지면(부모의 router.refresh) 체크섬이 달라진 주소로
+      //    바뀌고 브라우저가 새 그림을 받아 온다. 일부만 실패해 창이 열린 채로
+      //    남는 아래 길이 그것에 기대고 있다.
+      setIsSaveOpen(false);
+      onClose();
+      return;
+    }
+    if (targets.length === 1) {
+      // 한 장짜리는 지금까지와 한 글자도 다르지 않다.
+      setSaveError(failures[0].message);
+      return;
+    }
+    setSaveOutcome({ total: targets.length, saved: savedIds.length, failures });
+  }
+
+  /**
+   * 「고르기」를 켜고 끈다.
+   *
+   * 🔴 **끄면 고른 것을 비운다.** 켜 둔 채 잊고 다른 사진을 보다 「돌린 대로
+   * 저장」을 누르면, 눈에 보이지도 않는 사진 여러 장의 원본이 덮어써진다.
+   * 고른 표시도 걸어 둔 방향도 **고르기가 켜져 있을 때만 화면에 나타나므로**,
+   * 꺼진 뒤에도 살아 있는 선택은 사람이 확인할 방법이 없는 되돌릴 수 없는
+   * 폭탄이 된다. 비우는 대가는 다시 고르는 수고뿐이다.
+   *
+   * 켤 때, 지금 보는 사진을 이미 돌려 놓았다면 **그 사진부터 고른 것으로
+   * 옮긴다.** 그러지 않으면 화면에는 돌아간 사진이 보이는데 저장 대상은 고른
+   * 것들뿐이라, 눈앞의 그 사진만 조용히 빠진다. 옮긴 뒤 화면 쪽 방향을 지우는
+   * 것은 같은 방향이 두 군데 남지 않게 하려는 것이다(보이는 모습은 그대로다).
+   */
+  function togglePicking() {
+    if (isPicking) {
+      setIsPicking(false);
+      setPicked(NO_PICKS);
+      return;
+    }
+    setIsPicking(true);
+    if (!isIdentityOrientation(transform.orientation)) {
+      setPicked({ [current.id]: transform.orientation });
+      applyTransform((t) => ({ ...t, orientation: IDENTITY_ORIENTATION }));
+    }
+  }
+
+  /** 아래 썸네일을 눌렀다. 무슨 일이 일어나는지는 순수 함수가 정한다. */
+  function pressThumbnail(item: RepairCaseAttachmentListItem, itemIndex: number) {
+    const action = thumbnailPressAction({ isPicking, isSaving });
+    if (action === "ignore") return;
+    if (action === "navigate") {
+      go(itemIndex);
+      return;
+    }
+    setPicked((previous) => togglePicked(previous, item.id));
+  }
+
+  /**
+   * 회전·뒤집기를 **어디에** 거는가 — 고른 것이 있으면 그 **전부에** 같은 값을,
+   * 없으면 지금 보는 한 장에. 뒤쪽이 지금까지의 동작 그대로다.
+   */
+  function applyOrientation(change: (orientation: ImageOrientation) => ImageOrientation) {
+    if (isPicking && pickedTotal > 0) {
+      setPicked((previous) => mapPicked(previous, change));
+      return;
+    }
+    applyTransform((t) => {
+      const orientation = change(t.orientation);
+      return orientation === t.orientation ? t : { ...t, orientation };
+    });
+  }
+
+  /** 「전부 가로로」·「전부 세로로」. 🔴 방향만 바꾼다 — 저장은 하지 않는다. */
+  function orientPicked(target: OrientationTarget) {
+    setPicked((previous) =>
+      orientPickedTo(previous, target, (id) => naturalSizesRef.current.get(id) ?? null)
+    );
+  }
+
+  /** 「원래대로」. 고른 것이 있으면 그것들의 방향까지 함께 푼다. */
+  function resetEverything() {
+    applyTransform(resetViewerTransform);
+    if (isPicking && pickedTotal > 0) setPicked((previous) => resetPicked(previous));
   }
 
   /** 무대 한가운데를 원점으로 한 좌표 — 확대의 기준점은 이 자리로 잰다. */
@@ -760,6 +1207,18 @@ export default function AttachmentViewer({
 
   const toolButtonClass =
     "flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-base leading-none text-white disabled:opacity-40";
+  /** 고르기 줄의 글자 단추 — 위 줄보다 한 칸 작게 두어 「보는 단추」와 갈린다. */
+  const pickToolClass =
+    "flex h-9 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-medium text-white disabled:opacity-40";
+
+  /** 몇 장을 덮어쓰려는 것인지 단추에서부터 말한다 — 확인 창이 한 번 더 말한다. */
+  const saveButtonLabel =
+    saveTargets.length > 1 ? `${saveTargets.length}장 돌린 대로 저장` : "돌린 대로 저장";
+  /** 여러 장이라 시간이 걸린다 — 어디까지 갔는지 단추에도 보인다. */
+  const saveButtonBusyLabel =
+    saveProgress && saveProgress.total > 1
+      ? `저장 중… ${saveProgress.current}/${saveProgress.total}`
+      : "저장 중...";
 
   return (
     <div
@@ -814,14 +1273,18 @@ export default function AttachmentViewer({
           // key를 주어 넘길 때마다 새로 그리게 한다 — 안 그러면 앞 사진이
           // 남아 있다가 바뀌어 무엇을 보고 있는지 잠깐 헷갈린다.
           key={current.id}
-          src={viewerFullUrl(current.id)}
+          // 🔴 주소에 **파일의 지문**이 붙는다(attachmentFingerprintSuffix).
+          // 돌려 저장하면 체크섬이 달라져 주소가 바뀌고, 그래야 브라우저가 이미
+          // 그려 둔 옛 그림을 버리고 새 방향을 받아 온다.
+          src={viewerFullUrl(current)}
           alt={current.originalFileName}
           // 끌기는 우리가 계산한다. 브라우저의 그림 끌어놓기가 먼저 잡으면
           // 손가락·커서를 따라가다 말고 "파일을 옮기는 중" 모양이 된다.
           draggable={false}
           className="max-h-full max-w-full object-contain select-none"
           style={{
-            transform: viewerTransformCss(transform),
+            // 고른 사진이면 그 묶음의 방향으로 그린다(shownTransform 주석).
+            transform: viewerTransformCss(shownTransform),
             cursor: zoomed ? "grab" : "default",
           }}
         />
@@ -860,34 +1323,43 @@ export default function AttachmentViewer({
           원본이다(그 저장 기능은 다음에 붙는다).
         */}
         <div className="flex flex-wrap items-center justify-center gap-1.5 px-4">
+          {/*
+            🔴 이 넷은 **고른 것이 있으면 고른 것 전부에** 같은 값을 건다
+            (applyOrientation). 고르기가 꺼져 있으면 지금까지처럼 보고 있는
+            한 장에만 걸린다.
+          */}
           <button
             type="button"
-            onClick={() => applyTransform((t) => rotateViewer(t, -1))}
+            onClick={() => applyOrientation((o) => rotateOrientation(o, -1))}
             aria-label="왼쪽으로 90도 회전"
+            disabled={isSaving}
             className={toolButtonClass}
           >
             ↺
           </button>
           <button
             type="button"
-            onClick={() => applyTransform((t) => rotateViewer(t, 1))}
+            onClick={() => applyOrientation((o) => rotateOrientation(o, 1))}
             aria-label="오른쪽으로 90도 회전"
+            disabled={isSaving}
             className={toolButtonClass}
           >
             ↻
           </button>
           <button
             type="button"
-            onClick={() => applyTransform(flipViewerAcrossScreenX)}
+            onClick={() => applyOrientation(flipOrientationAcrossScreenX)}
             aria-label="좌우 뒤집기"
+            disabled={isSaving}
             className={toolButtonClass}
           >
             ⇄
           </button>
           <button
             type="button"
-            onClick={() => applyTransform(flipViewerAcrossScreenY)}
+            onClick={() => applyOrientation(flipOrientationAcrossScreenY)}
             aria-label="상하 뒤집기"
+            disabled={isSaving}
             className={toolButtonClass}
           >
             ⇅
@@ -912,9 +1384,9 @@ export default function AttachmentViewer({
           </button>
           <button
             type="button"
-            onClick={() => applyTransform(resetViewerTransform)}
+            onClick={resetEverything}
             aria-label="원래대로"
-            disabled={isViewerTransformIdentity(transform)}
+            disabled={isSaving || (isViewerTransformIdentity(transform) && !hasPickedRotation(picked))}
             className="flex h-10 items-center justify-center rounded-full bg-white/15 px-3 text-xs font-medium text-white disabled:opacity-40"
           >
             원래대로
@@ -933,16 +1405,68 @@ export default function AttachmentViewer({
               type="button"
               onClick={() => {
                 setSaveError(null);
+                setSaveOutcome(null);
                 setIsSaveOpen(true);
               }}
               disabled={isSaving}
               aria-label="돌린 대로 저장"
               className="flex h-10 items-center justify-center rounded-full bg-red-600 px-3 text-xs font-medium text-white disabled:opacity-40"
             >
-              {isSaving ? "저장 중..." : "돌린 대로 저장"}
+              {isSaving ? saveButtonBusyLabel : saveButtonLabel}
             </button>
           )}
         </div>
+
+        {/*
+          🔴 **여러 장을 골라 한꺼번에 돌리는 자리**(사용자 결정 2026-09-29).
+
+          저장할 길이 없거나(권한) 사진이 한 장뿐이면 이 줄 자체가 없다
+          (canPickMany) — 골라 봐야 저장할 수 없고, 한 장이면 아래 썸네일 줄이
+          아예 안 그려져 고를 자리도 없다.
+        */}
+        {canPickMany && (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 px-4">
+            <button
+              type="button"
+              onClick={togglePicking}
+              aria-pressed={isPicking}
+              disabled={isSaving}
+              className={`flex h-9 items-center justify-center rounded-full px-3 text-xs font-medium disabled:opacity-40 ${
+                // 켜져 있는 동안은 색을 뒤집는다 — 썸네일을 누르는 뜻이 「보기」에서
+                // 「고르기」로 바뀌어 있다는 것이 한눈에 보여야 한다.
+                isPicking ? "bg-white text-zinc-900" : "bg-white/15 text-white"
+              }`}
+            >
+              고르기
+            </button>
+            {isPicking && (
+              <>
+                <span className="text-xs text-white/80 tabular-nums">{pickedTotal}장 선택</span>
+                {/*
+                  🔴 **방향만 바꾼다 — 누른다고 파일이 바뀌지 않는다.** 저장은
+                  옆의 「돌린 대로 저장」이 한다. 이미 그쪽인 사진은 건드리지
+                  않는다(orientPickedTo).
+                */}
+                <button
+                  type="button"
+                  onClick={() => orientPicked("landscape")}
+                  disabled={isSaving || pickedTotal === 0}
+                  className={pickToolClass}
+                >
+                  전부 가로로
+                </button>
+                <button
+                  type="button"
+                  onClick={() => orientPicked("portrait")}
+                  disabled={isSaving || pickedTotal === 0}
+                  className={pickToolClass}
+                >
+                  전부 세로로
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/*
           썸네일 줄 — 한 장뿐이면 아예 그리지 않는다. 자기 사진 한 장을 밑에 또
@@ -958,25 +1482,50 @@ export default function AttachmentViewer({
           >
             {items.map((item, itemIndex) => {
               const isCurrent = itemIndex === index;
+              const isChosen = isPicking && isPickedId(picked, item.id);
               return (
                 <button
                   key={item.id}
                   type="button"
                   ref={isCurrent ? currentThumbRef : null}
-                  onClick={() => go(itemIndex)}
-                  aria-label={`${item.originalFileName} 보기`}
+                  // 🔴 고르기가 꺼져 있으면 지금까지와 똑같이 그 사진으로 넘어간다.
+                  onClick={() => pressThumbnail(item, itemIndex)}
+                  aria-label={
+                    isPicking ? `${item.originalFileName} 고르기` : `${item.originalFileName} 보기`
+                  }
                   aria-current={isCurrent ? "true" : undefined}
-                  className={`h-14 w-14 shrink-0 overflow-hidden rounded-md border-2 ${
-                    isCurrent ? "border-white" : "border-transparent opacity-50"
+                  aria-pressed={isPicking ? isChosen : undefined}
+                  className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-md border-2 ${
+                    // 고른 것은 테두리 색과 밝기로 눈에 띈다. 고르지 않았어도 지금
+                    // 보고 있는 것은 흰 테두리 그대로다 — 둘이 겹치면 고른 쪽이 이긴다.
+                    isChosen
+                      ? "border-sky-400"
+                      : isCurrent
+                        ? "border-white"
+                        : "border-transparent opacity-50"
                   }`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={viewerThumbUrl(item.id)}
+                    // 🔴 여기도 **지문이 붙는다** — 돌려 저장한 사진이 이 줄에
+                    // 옛 방향으로 남아 있던 것이 바로 그것이 없어서였다.
+                    src={viewerThumbUrl(item)}
                     // 단추에 이름표가 붙어 있다. 여기에 또 적으면 읽어 주는
                     // 장치가 같은 파일명을 두 번 말한다.
                     alt=""
                     loading="lazy"
+                    // 🔴 실려 온 김에 **그림의 가로·세로**를 적어 둔다 — 「전부
+                    // 가로로」가 읽는 값이고, 이 한 줄이 있어 크기를 알자고 사진을
+                    // 다시 받아 오지 않는다(naturalSizesRef 주석).
+                    onLoad={(event) => {
+                      const image = event.currentTarget;
+                      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                        naturalSizesRef.current.set(item.id, {
+                          width: image.naturalWidth,
+                          height: image.naturalHeight,
+                        });
+                      }
+                    }}
                     // object-contain이다 — 잘라 채우면 파형 눈금과 외관 흠집이
                     // 양 끝에서 사라져, 어느 사진을 고르는 것인지 썸네일만 보고
                     // 가릴 수 없다. 여기는 고르는 자리라 전체 모습이 보여야 한다.
@@ -987,6 +1536,17 @@ export default function AttachmentViewer({
                     // 남는 자리가 「덜 그려진 곳」이 아니라 단추 제 바닥으로 읽힌다.
                     className="h-full w-full bg-white/15 object-contain"
                   />
+                  {isChosen && (
+                    <span
+                      // 테두리 색만으로는 색을 가리기 어려운 사람이 고른 것을
+                      // 구별할 수 없다. 읽어 주는 장치에는 aria-pressed 가 이미
+                      // 말하고 있으므로 이 표는 눈에만 보이면 된다.
+                      aria-hidden="true"
+                      className="absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-bl-md bg-sky-400 text-[10px] font-bold text-zinc-900"
+                    >
+                      ✓
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -1020,9 +1580,11 @@ export default function AttachmentViewer({
         </div>
 
         <p className="mt-2 text-center text-[11px] text-white/40">
-          {count > 1
-            ? "좌우로 밀거나 방향키로 넘길 수 있습니다 · 휠·손가락 두 개로 확대, 두 번 누르면 원래대로"
-            : "휠·손가락 두 개로 확대, 두 번 누르면 원래대로"}
+          {isPicking
+            ? "고르기가 켜져 있습니다 — 아래 썸네일을 누르면 골라집니다 · 고르기를 끄면 고른 것이 비워집니다"
+            : count > 1
+              ? "좌우로 밀거나 방향키로 넘길 수 있습니다 · 휠·손가락 두 개로 확대, 두 번 누르면 원래대로"
+              : "휠·손가락 두 개로 확대, 두 번 누르면 원래대로"}
         </p>
       </div>
 
@@ -1033,14 +1595,16 @@ export default function AttachmentViewer({
       {onSaveOrientation && (
         <SaveRotationDialog
           isOpen={isSaveOpen}
-          displayName={current.originalFileName}
-          orientation={transform.orientation}
+          targets={dialogTargets}
           isSubmitting={isSaving}
+          progress={saveProgress}
           errorMessage={saveError}
+          outcome={saveOutcome}
           onConfirm={() => void confirmSaveOrientation()}
           onCancel={() => {
             setIsSaveOpen(false);
             setSaveError(null);
+            setSaveOutcome(null);
           }}
         />
       )}

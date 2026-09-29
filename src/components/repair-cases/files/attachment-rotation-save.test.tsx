@@ -218,12 +218,15 @@ describe("화면이 판정을 그대로 쓴다", () => {
 // ───────────────────────────────── 확인 창
 
 describe("확인 창", () => {
+  /**
+   * 대상은 이제 언제나 **목록**이다(여러 장을 골라 저장하는 길이 생겼다).
+   * 여기서는 길이 1 — 한 장짜리 문장이 한 글자도 달라지지 않았는지 보는 자리다.
+   */
   function renderDialog(orientation: ImageOrientation, errorMessage: string | null = null): string {
     return renderToStaticMarkup(
       <SaveRotationDialog
         isOpen
-        displayName="외관.jpg"
-        orientation={orientation}
+        targets={[{ id: "att-1", displayName: "외관.jpg", orientation }]}
         isSubmitting={false}
         errorMessage={errorMessage}
         onConfirm={() => {}}

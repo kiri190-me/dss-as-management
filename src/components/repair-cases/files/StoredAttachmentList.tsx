@@ -35,7 +35,7 @@ import {
 } from "@/lib/domain/attachment-list-filters";
 import type { ImageOrientation } from "@/lib/domain/image-orientation";
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
-import AttachmentViewer from "./AttachmentViewer";
+import AttachmentViewer, { attachmentFingerprintSuffix } from "./AttachmentViewer";
 import { saveRotatedAttachment } from "./rotate-image";
 import ShrinkDownloadDialog from "./ShrinkDownloadDialog";
 import {
@@ -121,10 +121,15 @@ function isViewableImage(mimeType: string): boolean {
  * 체크섬은 파일 내용이 바뀌면 함께 바뀌므로(돌려 저장하면 반드시 바뀐다) 주소가
  * 달라져 새 그림을 받아 온다. 서버는 이 인자를 **보지 않는다** — 무엇을 줄지는
  * `view=thumb` 하나가 정한다.
+ *
+ * 🔴 **지문을 붙이는 규칙은 여기서 짓지 않는다.** 크게 보기의 두 주소
+ * (viewerThumbUrl · viewerFullUrl)도 같은 것을 붙이므로, 규칙이 두 군데 적혀
+ * 있으면 한쪽만 고쳐지는 날 목록과 크게 보기가 서로 다른 그림을 보여 준다.
+ * 정본은 attachmentFingerprintSuffix 하나다.
  */
 function previewUrlOf(item: RepairCaseAttachmentListItem): string {
-  const fingerprint = item.checksumSha256.slice(0, 12);
-  return `/api/attachments/${encodeURIComponent(item.id)}/download?view=thumb&v=${fingerprint}`;
+  const fingerprint = attachmentFingerprintSuffix(item.checksumSha256);
+  return `/api/attachments/${encodeURIComponent(item.id)}/download?view=thumb${fingerprint}`;
 }
 
 function downloadUrlOf(id: string): string {

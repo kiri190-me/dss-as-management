@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import AttachmentViewer, {
   IDENTITY_TRANSFORM,
@@ -20,6 +21,8 @@ import AttachmentViewer, {
   stepViewerIndex,
   swipeViewerIndex,
   toggleViewerZoom,
+  attachmentFingerprintSuffix,
+  viewerDownloadUrl,
   viewerFullUrl,
   viewerThumbUrl,
   viewerTransformCss,
@@ -33,7 +36,7 @@ import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments"
  * ============================================================================
  * 크게 보기 — 확대·회전·아래 썸네일 줄
  * ============================================================================
- * 여기서 못박는 것은 넷이다. 전부 실제로 어긋나기 쉬운 자리다.
+ * 여기서 못박는 것은 다섯이다. 전부 실제로 어긋나기 쉬운 자리다.
  *
  *  1. **확대 중에는 스와이프가 먹지 않는다.** 키운 사진의 오른쪽을 보려고 왼쪽
  *     으로 끄는 것과, 다음 장으로 넘기려고 미는 것은 손가락만 보면 같다. 둘 다
@@ -44,6 +47,14 @@ import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments"
  *     사고(파일 머리말)의 정반대 방향으로 같은 실수를 하는 것이다.
  *  4. **한 장이면 썸네일 줄을 그리지 않는다.** 자기 사진 한 장을 밑에 또 깔면
  *     사진 볼 자리만 좁아진다.
+ *  5. **두 주소에 파일의 지문(체크섬 앞 12자)이 `v` 로 붙는다**(2026-09-29).
+ *     이것이 없어서 「돌린 대로 저장」 뒤에도 이 화면의 그림이 옛 방향으로 남아
+ *     있었다 — 응답이 `no-store` 라도 이미 그려 놓은 `<img>` 는 주소가 같으면
+ *     다시 받지 않는다. 지문을 붙이는 규칙은 목록의 작은 그림과 **같은 함수**
+ *     (attachmentFingerprintSuffix)여야 하고, 그것도 여기서 못박는다.
+ *
+ * 🔴 **5번이 3번을 무르지 않는다.** 지문이 붙어도 아래 줄은 `thumb`, 크게 보는
+ *    자리는 `full` 이다 — 그 둘이 갈려 있는지를 아래에서 여전히 글자로 본다.
  *
  * 손가락도 브라우저도 없이 이것을 못박을 수 있는 까닭은, 화면에서 벌어지는 일을
  * 전부 "지금 상태 → 다음 상태" 순수 함수로 갈라 두었기 때문이다. 그려진 화면
@@ -87,6 +98,16 @@ function render(
 
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
+}
+
+/**
+ * 🔴 `renderToStaticMarkup` 은 속성값의 `&` 를 `&amp;` 로 적는다(HTML 규칙대로다).
+ * 주소에 지문이 `…?view=thumb&v=…` 로 붙으면서 그린 글자와 주소 문자열이 더는
+ * 같지 않게 되었다 — 주소로 견주는 자리에서만 되돌려 놓는다. 그린 화면이 아니라
+ * **주소가 맞는가**를 보려는 것이므로 이쪽이 뜻에 맞다.
+ */
+function withRawAmpersands(html: string): string {
+  return html.replace(/&amp;/g, "&");
 }
 
 /** 돌리고 키우고 옮겨 둔 상태 — "건드려 놓은 것"의 대표. */
@@ -163,14 +184,17 @@ test("끝에서는 더 가지 않고, 그대로일 때는 돌려 놓은 것을 �
 // ───────────────────────────── 3·4. 아래 썸네일 줄
 
 test("🔴 썸네일 줄은 ?view=thumb 을 쓴다 — 원본은 크게 보는 자리 하나뿐이다", () => {
-  const html = render([
-    attachment({ id: "a1", originalFileName: "앞.jpg" }),
-    attachment({ id: "a2", originalFileName: "뒤.jpg" }),
-    attachment({ id: "a3", originalFileName: "옆.jpg" }),
-  ]);
+  // 지문이 붙고 나서도 이 판정이 살아 있어야 하므로, 사진마다 체크섬을 다르게
+  // 두어 「주소가 섞였다」와 「지문만 같다」가 구별되게 한다.
+  const items = [
+    attachment({ id: "a1", originalFileName: "앞.jpg", checksumSha256: "1".repeat(64) }),
+    attachment({ id: "a2", originalFileName: "뒤.jpg", checksumSha256: "2".repeat(64) }),
+    attachment({ id: "a3", originalFileName: "옆.jpg", checksumSha256: "3".repeat(64) }),
+  ];
+  const html = withRawAmpersands(render(items));
 
   assert.equal(occurrences(html, "download?view=thumb"), 3, "사진마다 썸네일이 하나씩");
-  assert.ok(html.includes(viewerThumbUrl("a2")), "썸네일 주소가 thumb 이어야 한다");
+  assert.ok(html.includes(viewerThumbUrl(items[1])), "썸네일 주소가 thumb 이어야 한다");
 
   // 🔴 원본은 딱 한 장 — 지금 보는 것뿐이다. 썸네일 줄이 full 로 새면 원본
   // 수십 장이 한꺼번에 내려온다.
@@ -179,20 +203,24 @@ test("🔴 썸네일 줄은 ?view=thumb 을 쓴다 — 원본은 크게 보는 �
   // 사진에 <link rel="preload" as="image"> 를 하나 얹는다. 그래서 주소만 세면
   // a1 이 두 번 나온다(미리 받기 + <img>). 썸네일들은 loading="lazy" 라 그
   // 목록에 얹히지 않는다 — 원본을 미리 받는 것은 크게 보는 한 장뿐이다.
-  assert.equal(occurrences(html, `src="${viewerFullUrl("a1")}"`), 1, "크게 보는 자리는 원본");
-  for (const id of ["a2", "a3"]) {
+  assert.equal(occurrences(html, `src="${viewerFullUrl(items[0])}"`), 1, "크게 보는 자리는 원본");
+  for (const item of [items[1], items[2]]) {
     assert.ok(
-      !html.includes(viewerFullUrl(id)),
-      `지금 보지 않는 ${id} 가 원본으로 샜다 — 썸네일 줄은 thumb 이어야 한다`
+      !html.includes(viewerFullUrl(item)),
+      `지금 보지 않는 ${item.id} 가 원본으로 샜다 — 썸네일 줄은 thumb 이어야 한다`
     );
   }
+  // 🔴 지문이 붙었다고 `view` 가 흐려지면 안 된다 — 아래 줄에 full 이 하나라도
+  //    섞이면 원본 수십 장이 한꺼번에 내려온다.
+  assert.equal(occurrences(html, "view=full"), 2, "크게 보는 한 장(미리 받기 + <img>)뿐이다");
 });
 
 test("🔴 사진이 한 장이면 썸네일 줄을 아예 안 그린다", () => {
-  const html = render([attachment({ id: "only", originalFileName: "한장.jpg" })]);
+  const only = attachment({ id: "only", originalFileName: "한장.jpg" });
+  const html = withRawAmpersands(render([only]));
   assert.ok(!html.includes("view=thumb"), "한 장짜리에 썸네일 줄이 생겼다");
   assert.ok(!html.includes("이 건의 사진 목록"), "빈 줄이 자리만 차지한다");
-  assert.ok(html.includes(viewerFullUrl("only")), "사진 자체는 그대로 크게 보인다");
+  assert.ok(html.includes(viewerFullUrl(only)), "사진 자체는 그대로 크게 보인다");
 });
 
 test("지금 보는 것이 썸네일 줄에 표시된다 — 누를 곳도 하나씩 있다", () => {
@@ -206,6 +234,78 @@ test("지금 보는 것이 썸네일 줄에 표시된다 — 누를 곳도 하�
   assert.equal(occurrences(html, 'aria-current="true"'), 1, "표시는 지금 것 하나뿐");
   assert.ok(html.includes('aria-label="앞.jpg 보기"'), "썸네일마다 눌러 갈 수 있어야 한다");
   assert.ok(html.includes('aria-label="뒤.jpg 보기"'));
+});
+
+// ───────────────────────── 5. 주소의 지문 — 돌려 저장한 뒤 새 그림을 받는다
+//
+// 🔴 실제로 겪은 결함이다(2026-09-29): 사진을 세로로 돌려 저장했는데 **뷰어 아래
+// 썸네일 줄은 처음 올린 가로 모양 그대로** 남아 있었다. 목록의 작은 그림만
+// 지문을 달고 있었고 뷰어의 두 주소에는 없었던 탓이다 — 응답이 `no-store` 라도
+// 이미 그려 놓은 `<img>` 는 주소가 같으면 다시 받지 않는다.
+
+test("🔴 두 주소에 파일의 지문이 붙는다 — 체크섬 앞 12자, 인자 이름은 v", () => {
+  const item = attachment({ id: "a1", checksumSha256: `abcdef012345${"0".repeat(52)}` });
+  assert.equal(viewerThumbUrl(item), "/api/attachments/a1/download?view=thumb&v=abcdef012345");
+  assert.equal(viewerFullUrl(item), "/api/attachments/a1/download?view=full&v=abcdef012345");
+});
+
+test("🔴 지문이 붙어도 thumb 과 full 은 여전히 갈려 있다", () => {
+  const item = attachment({ id: "a1", checksumSha256: "f".repeat(64) });
+  assert.ok(viewerThumbUrl(item).includes("?view=thumb"), "아래 줄이 thumb 을 잃었다");
+  assert.ok(
+    !viewerThumbUrl(item).includes("view=full"),
+    "🔴 썸네일 줄이 원본을 부른다 — 한 건의 사진 수십 장이 한꺼번에 내려온다"
+  );
+  assert.ok(viewerFullUrl(item).includes("?view=full"), "크게 보는 자리가 full 을 잃었다");
+  assert.ok(
+    !viewerFullUrl(item).includes("view=thumb"),
+    "🔴 크게 보기가 480px 썸네일이 된다 — 파형 눈금을 확인할 수 없다(파일 머리말의 사고)"
+  );
+});
+
+test("🔴 체크섬이 다르면 주소가 다르다 — 돌려 저장하면 새 그림을 받는다", () => {
+  const before = attachment({ id: "a1", checksumSha256: "1".repeat(64) });
+  const after = attachment({ id: "a1", checksumSha256: "2".repeat(64) });
+  assert.notEqual(viewerThumbUrl(before), viewerThumbUrl(after), "썸네일이 옛 그림에 묶인다");
+  assert.notEqual(viewerFullUrl(before), viewerFullUrl(after), "크게 보기가 옛 그림에 묶인다");
+  // 같은 파일이면 주소도 같아야 한다 — 그리기만 해도 매번 다시 받는 주소가 되면
+  // 스무 장짜리 건을 열 때마다 원본을 통째로 다시 내려받는다.
+  assert.equal(viewerThumbUrl(before), viewerThumbUrl(attachment({ id: "a1", checksumSha256: "1".repeat(64) })));
+});
+
+test("지문을 알 수 없으면 지문 없이 — 예전과 한 글자도 같은 주소다", () => {
+  const unknown = attachment({ id: "a1", checksumSha256: "" });
+  assert.equal(viewerThumbUrl(unknown), "/api/attachments/a1/download?view=thumb");
+  assert.equal(viewerFullUrl(unknown), "/api/attachments/a1/download?view=full");
+  assert.equal(attachmentFingerprintSuffix(null), "");
+  assert.equal(attachmentFingerprintSuffix(undefined), "");
+  assert.equal(attachmentFingerprintSuffix("0123456789abcdef"), "&v=0123456789ab");
+});
+
+test("🔴 그려진 화면에도 지문이 실린다 — 크게 보는 한 장과 아래 썸네일 전부", () => {
+  const items = [
+    attachment({ id: "a1", checksumSha256: "1".repeat(64) }),
+    attachment({ id: "a2", checksumSha256: "2".repeat(64) }),
+  ];
+  const html = withRawAmpersands(render(items));
+
+  assert.ok(html.includes(`src="${viewerFullUrl(items[0])}"`), "크게 보는 사진에 지문이 없다");
+  for (const item of items) {
+    assert.ok(html.includes(`src="${viewerThumbUrl(item)}"`), `${item.id} 썸네일에 지문이 없다`);
+  }
+  assert.equal(occurrences(html, "&v=222222222222"), 1, "a2 는 아래 썸네일 한 자리뿐이다");
+});
+
+test("🔴 지문 붙이는 규칙이 한 군데다 — 목록의 작은 그림도 같은 함수를 쓴다", () => {
+  const listSource = readFileSync(new URL("./StoredAttachmentList.tsx", import.meta.url), "utf8");
+  assert.ok(
+    listSource.includes("attachmentFingerprintSuffix(item.checksumSha256)"),
+    "목록이 지문을 따로 짓고 있다 — 한쪽만 고쳐지는 날 목록과 크게 보기가 갈린다"
+  );
+  assert.ok(
+    !listSource.includes("checksumSha256.slice("),
+    "목록이 체크섬을 직접 잘라 쓴다 — 자르는 길이가 두 군데에 적히면 갈라진다"
+  );
 });
 
 // ───────────────────────────── 기존에 있던 것들이 그대로 있는가
@@ -224,7 +324,9 @@ test("🔴 닫기·좌우 넘김·내려받기·줄여받기가 그대로 있다
   assert.ok(html.includes('aria-label="이전 사진"'), "왼쪽 화살표가 사라졌다");
   assert.ok(html.includes('aria-label="다음 사진"'), "오른쪽 화살표가 사라졌다");
   assert.ok(html.includes("줄여서 받기"), "줄여받기가 사라졌다");
-  assert.ok(html.includes(`href="${viewerFullUrl("a2").replace("?view=full", "")}"`), "내려받기 링크");
+  // 🔴 내려받기는 `view` 도 지문도 없는 **맨 주소**다 — 이 경로만 감사 로그를
+  //    남긴다. 지문을 붙이면 같은 행위가 다른 주소로 두 가지가 된다.
+  assert.ok(html.includes(`href="${viewerDownloadUrl("a2")}"`), "내려받기 링크");
   assert.ok(html.includes('aria-label="뒤.jpg 크게 보기"'), "창 이름표가 사라졌다");
   assert.ok(html.includes("2 / 3"), "몇 번째인지 그대로 보여야 한다");
 });

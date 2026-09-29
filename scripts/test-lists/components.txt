@@ -28,6 +28,13 @@ src/components/repair-cases/files/AttachmentViewer.test.tsx
 # 그려 보는 것과 원본을 글자로 읽는 것을 함께 쓴다 — 뷰어의 방향은 안쪽 상태라
 # 인자로 「돌려 놓은 화면」을 만들 수 없다. 서버 쪽은 unit 목록의 네 줄이 본다.
 src/components/repair-cases/files/attachment-rotation-save.test.tsx
+# 여러 장을 골라 한꺼번에 돌려 저장한다(2026-09-29). 🔴 원본을 **여러 장** 덮어쓰는
+# 길이라 못박는 것이 「되는가」가 아니라 「안 건드려야 할 것을 안 건드리는가」다 —
+# 고르기가 꺼져 있을 때의 동작이 그대로인가, 「전부 가로로」가 이미 가로인 것
+# (화면에서 돌려 둔 것 포함)을 그냥 두는가, 확인 창에 장수가 나오는가, 일부만
+# 실패했을 때 성공·실패 수가 사람에게 보이는가. 위 이웃과 같은 방식으로 순수
+# 판정은 그대로 부르고, 화면이 그 판정을 쓰는지는 원본을 글자로 읽는다.
+src/components/repair-cases/files/attachment-multi-rotate.test.tsx
 # 미리보기 사진이 잘리지 않는가(2026-09-29). 네 자리를 object-contain 으로 못박고,
 # 🔴 반대로 InAppCamera 는 object-cover 로 남아 있는지를 함께 본다 — 「미리보기를
 # contain 으로」 하는 다음 사람이 카메라까지 싹 바꾸면 보이는 것과 찍히는 것이 달라진다.
