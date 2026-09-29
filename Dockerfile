@@ -68,6 +68,14 @@ COPY --chown=node:node package.json tsconfig.json drizzle.config.ts ./
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node src ./src
 
+# ⚠️ vendor 도 담는다. 이 스테이지는 builder 와 달리 `COPY . .` 가 아니라 폴더를
+#    골라 담기 때문에, tsconfig.json 의 paths 가 가리키는 곳을 하나라도 빠뜨리면
+#    tsx 가 모듈을 못 찾는다. 실제로 스키마를 vendor/dss-core 로 옮긴 뒤
+#    (2026-09-21) 운영에서 `Cannot find module '@dss/core/schema'` 로 도구가 전부
+#    죽었다 — 연락서 이식·db:migrate·db:preflight·야간 완전삭제 모두.
+#    앞으로 코드를 서브모듈로 더 옮기면, 옮긴 곳이 여기 담기는지 먼저 본다.
+COPY --chown=node:node vendor ./vendor
+
 # 볼륨이 붙지 않아도 드러나게 빈 폴더를 만들어 둔다 — 붙이는 것을 잊으면
 # db:preflight 가 "마이그레이션 0건" 이라고 답하지 "폴더가 없다"고 하지 않는다.
 RUN mkdir -p /app/drizzle && chown node:node /app/drizzle
