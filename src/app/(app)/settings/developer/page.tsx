@@ -172,7 +172,7 @@ export default async function DeveloperModePage() {
           <DeveloperMenuCard
             href="/settings/developer/weekly-report"
             title="주간보고"
-            description="주간보고의 글자 크기 8개와 상자 크기 7개를 표본 자료로 그린 미리보기를 보며 정합니다. 다른 화면은 바뀌지 않고, 브라우저 인쇄에도 반영됩니다."
+            description="주간보고의 글자 크기 8개와 상자 크기 8개를 표본 자료로 그린 미리보기를 보며 정합니다. 다른 화면은 바뀌지 않고, 브라우저 인쇄에도 반영됩니다."
             changedCount={weeklyReportCount}
           />
         ) : (

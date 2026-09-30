@@ -30,7 +30,7 @@ export const WEEKLY_REPORT_FONT_TOKENS: readonly UiThemeToken[] = WEEKLY_REPORT_
   (token) => token.kind === "fontSize"
 );
 
-/** 상자 크기 묶음(지금 7개) — 여백·간격·최소 높이. */
+/** 상자 크기 묶음(지금 8개) — 여백·간격·최소 높이. */
 export const WEEKLY_REPORT_BOX_TOKENS: readonly UiThemeToken[] = WEEKLY_REPORT_SIZE_TOKENS.filter(
   (token) => token.kind === "spacing"
 );
