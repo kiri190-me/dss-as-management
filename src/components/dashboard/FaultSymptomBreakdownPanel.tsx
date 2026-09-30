@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import PieChart from "@/components/common/PieChart";
+import { repairCasesReportedSymptomHref } from "@/lib/domain/reported-symptom-param";
 import {
   buildFaultSymptomBreakdowns,
   formatFaultSymptomPeriodLabel,
@@ -217,40 +219,131 @@ function FaultSymptomKindCard({
 }
 
 /**
+ * 펼친 자리에 그리는 줄 하나. 결과 묶음과 '인수점검 전'을 같은 모양으로 만들어
+ * 한 <ul> 에 이어 붙인다 — 둘이 **같은 분모**로 센 비율이라(도메인 파일의
+ * FaultSymptomIntakeInspectionResult 머리말) 다른 모양으로 그리면 다 더해 100%
+ * 라는 사실이 눈에 보이지 않는다.
+ */
+type SliceDetailRow = {
+  key: string;
+  /** '인수점검 전' 줄이면 null — 화면이 다른 글자를 적는다. */
+  result: string | null;
+  count: number;
+  percentage: number;
+};
+
+function toDetailRows(slice: FaultSymptomSlice): SliceDetailRow[] {
+  const rows: SliceDetailRow[] = slice.intakeInspectionResults.map((group) => ({
+    // 결과 원문을 그대로 key 로 쓰지 않는다 — '인수점검 전'이라고 **적힌 진짜
+    // 결과**가 들어오면 아래 줄과 겹친다. 조각 key 가 성격을 앞에 붙이는 것과
+    // 같은 까닭이다.
+    key: `RESULT:${group.result}`,
+    result: group.result,
+    count: group.count,
+    percentage: group.percentage,
+  }));
+  if (slice.intakeInspectionPendingCount > 0) {
+    rows.push({
+      key: "PENDING",
+      result: null,
+      count: slice.intakeInspectionPendingCount,
+      percentage: slice.intakeInspectionPendingPercentage,
+    });
+  }
+  return rows;
+}
+
+/** 링크일 때와 아닐 때가 **같은 칸 나눔**이어야 숫자 열이 흔들리지 않는다. */
+const DETAIL_ROW_CLASS = "flex w-full items-start justify-between gap-3 py-1 text-left";
+
+function SliceDetailRowBody({ row }: { row: SliceDetailRow }) {
+  return (
+    <>
+      {/* 인수점검 결과는 자유 입력이라 여러 줄이 들어 있을 수 있다. */}
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200">
+        {row.result ?? "인수점검 전"}
+      </span>
+      <span className="shrink-0 text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
+        {row.count}건
+      </span>
+      <span className="w-14 shrink-0 text-right text-sm tabular-nums text-zinc-500 dark:text-zinc-400">
+        {row.percentage}%
+      </span>
+    </>
+  );
+}
+
+/**
  * 고른 조각 하나를 펼친 자리.
  *
  * 묶음이 하나도 없는 경우는 그리지 않는다 — 건수 0 인 조각은 애초에 만들어지지
  * 않고, 건이 있으면 그 건은 반드시 어느 결과 묶음이거나 '인수점검 전'이라
  * 둘 다 비는 일이 없다.
+ *
+ * ── 🔴 어느 줄을 눌러도 같은 목록이다 ───────────────────────────────────
+ * 사용자 결정(2026-09-30)이다. 인수점검 결과로는 **더 좁히지 않는다** — 그래서
+ * 주소도 조각 하나에 **하나뿐**이고, 줄마다 만들지 않는다. 코드 모양이 그 결정을
+ * 그대로 담고 있어야 다음 사람이 "결과별로도 걸어 주자"로 되돌리지 않는다.
+ * 그 사실은 누르기 **전에** 글로 알린다(아래 안내 문구) — 안 그러면 눌러 보고
+ * "왜 점검 결과가 안 걸렸지" 한다.
+ *
+ * ── 누를 수 없는 조각이 있다 ────────────────────────────────────────────
+ * `미입력`은 증상이 비어 있는 건들이고 `기타`는 여러 증상을 접은 것이라, 신고
+ * 증상 **하나**로 걸 수가 없다. 자유 입력이라 주소에 실을 수 없는 증상도 있다
+ * (reported-symptom-param.ts). 그때는 링크를 만들지 않고 까닭을 한 줄 적는다 —
+ * 눌러도 아무 일이 없는 링크를 두는 것보다 낫다.
  */
 function SelectedSliceDetail({ slice }: { slice: FaultSymptomSlice }) {
+  const isSymptomSlice = slice.sliceKind === "SYMPTOM";
+  const href = isSymptomSlice ? repairCasesReportedSymptomHref(slice.label) : null;
+  const rows = toDetailRows(slice);
+
   return (
     <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-800/40">
       <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
         {formatFaultSymptomSliceLabel(slice)} — {slice.count}건
       </h4>
-      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">인수점검 결과</p>
+      {/* 🔴 분모를 밝힌다. '인수점검 전'이 따로 나오고 있어서, 무엇을 100%로
+          본 값인지 적지 않으면 숫자가 안 맞는 것처럼 보인다. */}
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        인수점검 결과 · 비율은 인수점검 전을 포함한 이 증상 {slice.count}건을 100%로 본 값입니다.
+        소수 첫째 자리에서 반올림하므로 다 더해 100%가 되지 않을 수 있습니다.
+      </p>
+      {/* 누르기 전에 어디로 가는지 알려 준다 — 누른 뒤에 알면 늦다. */}
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        {href
+          ? `아래 어느 줄을 눌러도 신고 증상이 '${slice.label}'인 수리 건 전체를 봅니다 — 인수점검 결과로는 더 좁히지 않습니다.`
+          : isSymptomSlice
+            ? "이 증상은 글자가 너무 길거나 줄바꿈이 섞여 있어 목록 주소에 실을 수 없습니다. 아래 줄은 눌러도 목록으로 가지 않습니다."
+            : "이 조각은 신고 증상 하나로 좁힐 수 없어, 아래 줄은 눌러도 목록으로 가지 않습니다."}
+      </p>
 
       <ul className="mt-2 space-y-1">
-        {slice.intakeInspectionResults.map((group) => (
+        {rows.map((row) => (
           <li
-            key={group.result}
-            className="flex items-start justify-between gap-3 border-b border-zinc-200 py-1 last:border-b-0 dark:border-zinc-700/60"
+            key={row.key}
+            className="border-b border-zinc-200 last:border-b-0 dark:border-zinc-700/60"
           >
-            {/* 인수점검 결과는 자유 입력이라 여러 줄이 들어 있을 수 있다. */}
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200">
-              {group.result}
-            </span>
-            <span className="shrink-0 text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
-              {group.count}건
-            </span>
+            {href ? (
+              // 🔴 누르는 자리는 링크여야 한다. <li> 에 onClick 만 달면 키보드로
+              //    닿지 못하고 낭독기도 누를 것이 있다는 사실을 말하지 못한다.
+              <Link
+                href={href}
+                // relative 를 떼지 말 것 — 안의 sr-only 는 절대 배치라, 기준이 되는
+                // 조상이 없으면 그 span 이 화면 바닥에 자리를 주장해 세로 스크롤바가
+                // 둘이 된다(주간보고의 인수번호 링크에서 실제로 겪은 일).
+                className={`${DETAIL_ROW_CLASS} relative -mx-1 rounded px-1 hover:bg-zinc-100 dark:hover:bg-zinc-700/40`}
+              >
+                <SliceDetailRowBody row={row} />
+                <span className="sr-only">이 신고 증상의 수리 건 목록으로 이동</span>
+              </Link>
+            ) : (
+              <div className={DETAIL_ROW_CLASS}>
+                <SliceDetailRowBody row={row} />
+              </div>
+            )}
           </li>
         ))}
-        {slice.intakeInspectionPendingCount > 0 ? (
-          <li className="pt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            인수점검 전 {slice.intakeInspectionPendingCount}건
-          </li>
-        ) : null}
       </ul>
     </div>
   );

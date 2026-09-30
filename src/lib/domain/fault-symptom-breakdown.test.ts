@@ -7,6 +7,7 @@ import {
   FAULT_SYMPTOM_TOP_SLICE_LIMIT,
   FAULT_SYMPTOM_UNSPECIFIED_LABEL,
   buildFaultSymptomBreakdowns,
+  faultSymptomSharePercentage,
   formatFaultSymptomPeriodLabel,
   formatFaultSymptomSliceLabel,
   listFaultSymptomYears,
@@ -277,10 +278,10 @@ test("조각마다 인수점검 결과가 같은 글끼리 묶이고, 비어 있
 
   const slice = requireSlice(breakdown, "전원 인가 불가");
   assert.equal(slice.count, 5);
-  // 건수 많은 순 → 이름 오름차순.
+  // 건수 많은 순 → 이름 오름차순. 비율의 분모는 조각의 총 건수 5 다(점검 전 포함).
   assert.deepEqual(slice.intakeInspectionResults, [
-    { result: "메인 PCB 소손", count: 2 },
-    { result: "퓨즈 단선", count: 1 },
+    { result: "메인 PCB 소손", count: 2, percentage: 40 },
+    { result: "퓨즈 단선", count: 1, percentage: 20 },
   ]);
   // null 과 공백뿐인 값은 묶음에 섞이지 않고 '점검 전'으로만 세어진다.
   assert.equal(slice.intakeInspectionPendingCount, 2);
@@ -307,11 +308,16 @@ test("기타 · 미입력 조각도 인수점검 결과를 갖는다 — 접힌 
 
   const other = requireSlice(breakdown, FAULT_SYMPTOM_OTHER_LABEL);
   assert.equal(other.foldedSymptomCount, 2);
-  assert.deepEqual(other.intakeInspectionResults, [{ result: "커넥터 접촉 불량", count: 2 }]);
+  // 기타 조각은 3건(증상 9 하나 + 증상 10 둘)이라 2/3 → 66.7 이다.
+  assert.deepEqual(other.intakeInspectionResults, [
+    { result: "커넥터 접촉 불량", count: 2, percentage: 66.7 },
+  ]);
   assert.equal(other.intakeInspectionPendingCount, 1);
 
   const unspecified = requireSlice(breakdown, FAULT_SYMPTOM_UNSPECIFIED_LABEL);
-  assert.deepEqual(unspecified.intakeInspectionResults, [{ result: "외관 파손", count: 1 }]);
+  assert.deepEqual(unspecified.intakeInspectionResults, [
+    { result: "외관 파손", count: 1, percentage: 50 },
+  ]);
   assert.equal(unspecified.intakeInspectionPendingCount, 1);
 });
 
@@ -625,4 +631,115 @@ test("걸린 기간은 사람이 읽는 한 마디로 나간다", () => {
   assert.equal(formatFaultSymptomPeriodLabel({ year: 2026, month: null }), "2026년");
   assert.equal(formatFaultSymptomPeriodLabel({ year: 2026, month: 3 }), "2026년 3월");
   assert.equal(formatFaultSymptomPeriodLabel({ year: 2026, month: 12 }), "2026년 12월");
+});
+
+// ───────────────────────────────── 인수점검 결과의 비율(2026-09-30)
+
+/**
+ * 분모는 **그 증상 조각의 총 건수**다 — 인수점검이 끝난 건만이 아니다.
+ * `인수점검 전`에도 같은 분모로 비율을 붙이므로 조각 안의 모든 줄을 다 더하면
+ * 100% 가 된다(반올림 오차 빼고). 화면은 그 분모를 한 줄로 적는다.
+ */
+test("비율의 분모는 인수점검 전까지 포함한 그 증상의 총 건수다", () => {
+  const breakdown = byKind(
+    buildFaultSymptomBreakdowns([
+      rfg("전원 인가 불가", "콘덴서 불량"),
+      rfg("전원 인가 불가", "콘덴서 불량"),
+      rfg("전원 인가 불가", "커넥터 접촉 불량"),
+      rfg("전원 인가 불가", null),
+    ]),
+    "RFG"
+  );
+  const slice = requireSlice(breakdown, "전원 인가 불가");
+
+  assert.equal(slice.count, 4);
+  assert.deepEqual(
+    slice.intakeInspectionResults.map((group) => [group.result, group.count, group.percentage]),
+    [
+      ["콘덴서 불량", 2, 50],
+      ["커넥터 접촉 불량", 1, 25],
+    ]
+  );
+  // 🔴 인수점검 전도 같은 분모로 센다. 이 줄만 빠지면 합이 75% 가 되어, 옆에
+  //    따로 적히는 건수와 견주던 사람이 "숫자가 안 맞는다"로 읽는다.
+  assert.equal(slice.intakeInspectionPendingCount, 1);
+  assert.equal(slice.intakeInspectionPendingPercentage, 25);
+
+  const sum =
+    slice.intakeInspectionResults.reduce((acc, group) => acc + group.percentage, 0) +
+    slice.intakeInspectionPendingPercentage;
+  assert.equal(sum, 100);
+});
+
+test("🔴 반올림 때문에 합이 100 이 아닐 수 있다 — 억지로 맞추지 않는다", () => {
+  const breakdown = byKind(
+    buildFaultSymptomBreakdowns([
+      rfg("소음", "베어링 마모"),
+      rfg("소음", "팬 불량"),
+      rfg("소음", null),
+    ]),
+    "RFG"
+  );
+  const slice = requireSlice(breakdown, "소음");
+
+  // 1/3 = 33.333… → 소수 첫째 자리에서 반올림하면 33.3 이다. 셋을 더하면 99.9 —
+  // 맞추려면 어느 한 줄의 숫자를 거짓으로 적어야 하므로 그대로 둔다. 원 조각의
+  // %(pie-slices.ts)가 이미 같은 규칙이고, 화면이 그 사실을 한 줄로 적는다.
+  assert.deepEqual(
+    slice.intakeInspectionResults.map((group) => group.percentage),
+    [33.3, 33.3]
+  );
+  assert.equal(slice.intakeInspectionPendingPercentage, 33.3);
+
+  const sum =
+    slice.intakeInspectionResults.reduce((acc, group) => acc + group.percentage, 0) +
+    slice.intakeInspectionPendingPercentage;
+  assert.equal(Math.round(sum * 10) / 10, 99.9);
+});
+
+test("인수점검 전이 없으면 그 줄의 비율은 0 이다 — 결과들만 100% 를 채운다", () => {
+  const breakdown = byKind(
+    buildFaultSymptomBreakdowns([rfg("과열", "냉각팬 고장"), rfg("과열", "냉각팬 고장")]),
+    "RFG"
+  );
+  const slice = requireSlice(breakdown, "과열");
+
+  assert.equal(slice.intakeInspectionPendingCount, 0);
+  assert.equal(slice.intakeInspectionPendingPercentage, 0);
+  assert.deepEqual(
+    slice.intakeInspectionResults.map((group) => group.percentage),
+    [100]
+  );
+});
+
+test("🔴 총 건수가 0 이면 0 이다 — 0 으로 나눠 NaN% 가 화면에 찍히지 않는다", () => {
+  // 지금은 건수 0 인 조각이 만들어지지 않지만(buildPieSlices), 그것은 저쪽의
+  // 성질이지 이 계산의 성질이 아니다. 여기서 막아 두면 저쪽이 바뀌어도 화면에
+  // NaN 이 새지 않는다.
+  assert.equal(faultSymptomSharePercentage(0, 0), 0);
+  assert.equal(faultSymptomSharePercentage(3, 0), 0);
+  assert.equal(faultSymptomSharePercentage(1, -1), 0);
+  assert.ok(Number.isFinite(faultSymptomSharePercentage(0, 0)));
+});
+
+test("기타로 접힌 조각도 합쳐진 총 건수를 분모로 쓴다", () => {
+  // 상위 8개 밖으로 밀려난 증상들이 기타 하나로 뭉치면, 그 조각의 인수점검
+  // 결과도 함께 합쳐진다. 비율은 **뭉친 뒤의 건수**를 분모로 해야 그 조각
+  // 안에서 다 더해 100% 가 된다.
+  const rows: FaultSymptomCase[] = [];
+  for (let i = 0; i < FAULT_SYMPTOM_TOP_SLICE_LIMIT; i += 1) {
+    rows.push(rfg(`증상${i}`, "점검 결과 A"), rfg(`증상${i}`, "점검 결과 A"));
+  }
+  rows.push(rfg("밀려난 증상 1", "점검 결과 B"));
+  rows.push(rfg("밀려난 증상 2", null));
+
+  const breakdown = byKind(buildFaultSymptomBreakdowns(rows), "RFG");
+  const other = requireSlice(breakdown, FAULT_SYMPTOM_OTHER_LABEL);
+
+  assert.equal(other.count, 2);
+  assert.deepEqual(
+    other.intakeInspectionResults.map((group) => [group.result, group.percentage]),
+    [["점검 결과 B", 50]]
+  );
+  assert.equal(other.intakeInspectionPendingPercentage, 50);
 });

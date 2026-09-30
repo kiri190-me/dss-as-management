@@ -749,6 +749,11 @@ export default function RepairCaseListPage({
             onMyPendingApprovalOnlyChange={(value) => updateFilters({ myPendingApprovalOnly: value })}
             canFilterLongPendingPo={canFilterLongPendingPo}
             onLongPendingPoOnlyChange={(value) => updateFilters({ longPendingPoOnly: value })}
+            /* 대시보드에서 `?reportedSymptom=` 을 달고 들어왔을 때 그것만 푸는
+               길. 다른 조건은 그대로 둔다(RepairCaseFilters 의 prop 주석).
+               주소는 그대로 남지만 화면의 필터 상태가 곧 목록이라, 다시 걸리지
+               않는다 — parseInitialFilters 는 처음 한 번만 읽는다. */
+            onClearReportedSymptom={() => updateFilters({ reportedSymptom: null })}
             onReset={handleReset}
           />
 

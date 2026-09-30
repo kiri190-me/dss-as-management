@@ -41,12 +41,25 @@ type RepairCaseFiltersProps = {
    */
   canFilterLongPendingPo?: boolean;
   onLongPendingPoOnlyChange?: (value: boolean) => void;
+  /**
+   * 신고 증상 필터만 푼다. 「필터 초기화」와 따로 둔 이유가 둘이다.
+   *
+   *   · 이 조건은 대시보드에서 눌러 들어올 때만 걸리는데, 그 사람은 보통
+   *     고객사·기간 같은 다른 조건을 이미 걸어 둔 채다. 증상 하나만 풀려고
+   *     전부를 날리게 하면 다시 걸어야 한다.
+   *   · 좁은 화면에서는 「필터 초기화」가 **상세 조건이 걸려 있을 때만** 보인다
+   *     (FilterDisclosure). 신고 증상은 그 셈에 들어가지 않으므로(아래
+   *     countHiddenActiveFilters 주석) 그것만 걸린 상태에서는 풀 단추가 하나도
+   *     보이지 않게 된다.
+   */
+  onClearReportedSymptom?: () => void;
   onReset: () => void;
 };
 
 /**
  * 접혔을 때 감춰지는 조건 중 지금 걸려 있는 개수. 검색어는 늘 보이므로 세지
- * 않고, shipmentMonth도 카드 아래 자기 안내 문구가 따로 있으므로 뺀다.
+ * 않고, shipmentMonth와 reportedSymptom도 카드 아래 자기 안내 문구가 따로
+ * 있으므로 뺀다 — 접혀 있어도 그 두 줄은 보인다.
  */
 export function countHiddenActiveFilters(filters: Filters): number {
   let count = 0;
@@ -79,6 +92,7 @@ export default function RepairCaseFilters({
   onMyPendingApprovalOnlyChange,
   canFilterLongPendingPo = false,
   onLongPendingPoOnlyChange,
+  onClearReportedSymptom,
   onReset,
 }: RepairCaseFiltersProps) {
   // 🔴 고르는 값(value)은 언제나 코드다. 저장된 문구는 **보여 줄 글자**만
@@ -263,6 +277,25 @@ export default function RepairCaseFilters({
           이번 달 출하 완료 필터 적용됨: {formatShipmentMonthLabel(filters.shipmentMonth)}{" "}
           (필터 초기화로 해제할 수 있습니다)
         </p>
+      )}
+
+      {/* 대시보드 「신고 증상별 현황」에서 눌러 들어오면 이 줄이 뜬다. 걸린
+          것이 안 보이면 사람이 "건이 왜 이것밖에 없지" 하고, 그 자리에서 풀
+          수 없으면 목록을 떠났다 돌아와야 한다. 접기(FilterDisclosure) 바깥에
+          두어 좁은 화면에서도 늘 보인다. */}
+      {filters.reportedSymptom !== null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 break-words text-xs text-zinc-600 dark:text-zinc-400">
+            신고 증상 필터 적용됨: {filters.reportedSymptom}
+          </p>
+          <button
+            type="button"
+            onClick={onClearReportedSymptom}
+            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            신고 증상 필터 해제
+          </button>
+        </div>
       )}
     </div>
   );

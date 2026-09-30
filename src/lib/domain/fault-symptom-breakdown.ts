@@ -97,6 +97,36 @@ export type IntakeInspectionResultGroup = {
 };
 
 /**
+ * ── 인수점검 결과의 비율(%) ─────────────────────────────────────────────
+ * **분모는 그 증상 조각의 총 건수(count)다** — 인수점검이 끝난 건만이 아니다.
+ * 끝난 건만을 분모로 삼으면 옆에 따로 적히는 `인수점검 전 N건`이 어느 셈에도
+ * 들어가지 않아, 사람이 두 숫자를 견주다 "합이 안 맞는다"로 읽는다. 총 건수를
+ * 분모로 두고 **인수점검 전에도 같은 규칙으로 비율을 붙이면** 조각 안의 모든
+ * 줄이 다 더해 100%가 되어 따로 설명할 것이 없다.
+ *
+ * 반올림은 소수 첫째 자리에서 한다 — 원 조각의 %와 같은 규칙(pie-slices.ts)이다.
+ * 그래서 **다 더해도 100.0 이 아닐 수 있고, 억지로 맞추지 않는다**. 맞추려면 어느
+ * 한 줄의 숫자를 거짓으로 적어야 한다. 대신 화면이 분모가 무엇인지를 한 줄로
+ * 적어, 읽는 사람이 99.9 를 고장으로 보지 않게 한다.
+ */
+export type FaultSymptomIntakeInspectionResult = IntakeInspectionResultGroup & {
+  /** 그 증상 조각의 총 건수를 100 으로 본 비율. 소수 첫째 자리에서 반올림한다. */
+  percentage: number;
+};
+
+/**
+ * 조각 안의 한 줄이 차지하는 비율(%).
+ *
+ * 🔴 **총 건수가 0 이면 0 을 돌려준다** — 0 으로 나누면 NaN 이 되고, 화면에는
+ * `NaN%` 라는 글자가 조용히 찍힌다. 지금은 건수 0 인 조각이 만들어지지 않지만
+ * (buildPieSlices), 그 사실은 이 함수가 아니라 저쪽의 성질이라 여기서 막는다.
+ */
+export function faultSymptomSharePercentage(count: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((count / total) * 1000) / 10;
+}
+
+/**
  * 조각이 달고 다니는 인수점검 결과 누적기 — 밖으로 나가기 전에
  * toIntakeInspectionResultGroups 로 편다.
  *
@@ -184,13 +214,19 @@ export type FaultSymptomSlice = {
    */
   foldedSymptomCount: number;
   /** 건수 많은 순 → 이름 오름차순. 조각과 같은 규칙이다. 접지 않는다. */
-  intakeInspectionResults: IntakeInspectionResultGroup[];
+  intakeInspectionResults: FaultSymptomIntakeInspectionResult[];
   /**
    * 인수점검 결과가 아직 없는 건수. 묶음에 섞지 않는 이유: "결과가 비어 있다"는
    * 결과의 한 종류가 아니라 **아직 점검 전**이라는 뜻이라서, 섞으면 그 조각에서
    * 가장 흔한 결과가 빈칸이 되는 일이 생긴다.
    */
   intakeInspectionPendingCount: number;
+  /**
+   * 인수점검 전 건이 그 조각에서 차지하는 비율(%). 결과 묶음과 **같은 분모**
+   * (조각의 총 건수)를 쓴다 — 그래서 결과 줄과 이 줄을 다 더하면 100%다
+   * (반올림 오차 빼고). 위 FaultSymptomIntakeInspectionResult 의 머리말 참조.
+   */
+  intakeInspectionPendingPercentage: number;
 };
 
 export type FaultSymptomKindBreakdown = {
@@ -240,8 +276,17 @@ function buildKindBreakdown(
       startAngle: slice.startAngle,
       sweepAngle: slice.sweepAngle,
       foldedSymptomCount: slice.foldedGroupCount,
-      intakeInspectionResults: toIntakeInspectionResultGroups(slice.detail),
+      // 비율은 여기서 붙인다 — toIntakeInspectionResultGroups 는 제품 모델 상세의
+      // 그래프도 함께 쓰는 함수라(product-model-breakdown.ts) 총 건수를 모른다.
+      intakeInspectionResults: toIntakeInspectionResultGroups(slice.detail).map((group) => ({
+        ...group,
+        percentage: faultSymptomSharePercentage(group.count, slice.count),
+      })),
       intakeInspectionPendingCount: slice.detail.pendingCount,
+      intakeInspectionPendingPercentage: faultSymptomSharePercentage(
+        slice.detail.pendingCount,
+        slice.count
+      ),
     };
   });
 

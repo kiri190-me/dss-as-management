@@ -413,3 +413,85 @@ test("원래 되던 여섯 칸 검색은 그대로다", () => {
   // 새로 더한 칸도 같은 자리에서 함께 동작한다.
   assert.deepEqual(idsOf(applyFilters(rows, filters({ query: "LN-2026-0731" }))), ["target"]);
 });
+
+// ─────────────────────────────── 신고 증상 필터(2026-09-30)
+
+/**
+ * 대시보드 「신고 증상별 현황」에서 인수점검 결과 줄을 누르면
+ * `/repair-cases?reportedSymptom=...` 로 들어온다. 이 목록이 그 값을 읽어 거른다.
+ *
+ * 🔴 판정은 이 파일이 하지 않는다 — reported-symptom-param.ts 하나가 한다.
+ * 여기서 못 박는 것은 **그 판정 결과가 실제로 목록에 걸리는가**와, 걸 수 없는
+ * 값이 왔을 때 **아무것도 걸리지 않고 화면이 멀쩡한가**다.
+ */
+
+test("처음 상태에서는 신고 증상 필터가 걸려 있지 않다", () => {
+  assert.equal(DEFAULT_FILTERS.reportedSymptom, null);
+});
+
+test("주소에서 신고 증상을 읽어 건다", () => {
+  const parsed = parseInitialFilters(new URLSearchParams("?reportedSymptom=전원 인가 불가"));
+  assert.equal(parsed.reportedSymptom, "전원 인가 불가");
+});
+
+test("🔴 읽을 수 없는 값이면 걸지 않는다 — 오류가 아니라 전체 목록이다", () => {
+  for (const search of [
+    "",
+    "?reportedSymptom=",
+    "?reportedSymptom=%20%20",
+    // 같은 이름이 두 번 — 어느 쪽을 고르든 근거가 없다.
+    "?reportedSymptom=소음&reportedSymptom=과열",
+    // 아주 긴 값.
+    `?reportedSymptom=${"증".repeat(201)}`,
+  ]) {
+    assert.equal(parseInitialFilters(new URLSearchParams(search)).reportedSymptom, null, search);
+  }
+});
+
+test("🔴 이상한 값이 와도 목록이 그대로 나온다 — 한 건도 사라지지 않는다", () => {
+  const rows = [
+    row({ id: "a", reportedSymptom: "전원 인가 불가" }),
+    row({ id: "b", reportedSymptom: null }),
+  ];
+  const parsed = parseInitialFilters(new URLSearchParams("?reportedSymptom=소음&reportedSymptom=과열"));
+  assert.deepEqual(idsOf(applyFilters(rows, { ...filters(), ...parsed })), ["a", "b"]);
+});
+
+test("글자가 똑같은 건만 남는다 — 앞뒤 공백은 양쪽 다 걷어낸 뒤 견준다", () => {
+  const rows = [
+    row({ id: "exact", reportedSymptom: "전원 인가 불가" }),
+    row({ id: "padded", reportedSymptom: "  전원 인가 불가  " }),
+    row({ id: "other", reportedSymptom: "소음" }),
+    row({ id: "partial", reportedSymptom: "전원 인가 불가 및 소음" }),
+  ];
+  // 대시보드가 증상을 묶는 규칙과 같아야 두 화면의 건수가 맞는다
+  // (fault-symptom-breakdown.ts 의 '글자 그대로 묶는다').
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ reportedSymptom: "전원 인가 불가" }))),
+    ["exact", "padded"]
+  );
+});
+
+test("신고 증상이 비어 있는 건은 어떤 값으로도 걸리지 않는다", () => {
+  // 대시보드의 '미입력' 조각은 증상 하나로 좁힐 수 없어 링크가 되지 않는다.
+  // 그래도 주소를 손으로 쳐서 들어올 수 있으므로, 빈 증상이 엉뚱하게 남지
+  // 않는다는 것을 여기서 못 박는다.
+  const rows = [
+    row({ id: "null", reportedSymptom: null }),
+    row({ id: "blank", reportedSymptom: "   " }),
+    row({ id: "filled", reportedSymptom: "소음" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ reportedSymptom: "소음" }))), ["filled"]);
+});
+
+test("다른 조건과 함께 걸린다 — 신고 증상만 남기고 나머지를 지우지 않는다", () => {
+  const rows = [
+    row({ id: "match", reportedSymptom: "소음", customerId: "cust-1" }),
+    row({ id: "other-customer", reportedSymptom: "소음", customerId: "cust-2" }),
+    row({ id: "other-symptom", reportedSymptom: "과열", customerId: "cust-1" }),
+  ];
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ reportedSymptom: "소음", customerId: "cust-1" }))),
+    ["match"]
+  );
+});

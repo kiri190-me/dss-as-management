@@ -9,6 +9,7 @@ import {
   type RepairStatus,
 } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
+import { reportedSymptomFromSearchParams } from "./reported-symptom-param";
 
 /**
  * ── 워크플로 유형 대신 제품군 + 유·무상 ─────────────────────────────────
@@ -57,6 +58,20 @@ export type Filters = {
    * 않는다 — 근거 없이 전부 통과시키면 필터 이름이 거짓이 된다.
    */
   longPendingPoOnly: boolean;
+  /**
+   * 신고 증상 하나로 좁히기. null 이면 걸지 않는다.
+   *
+   * 다른 조건과 달리 **고르는 칸이 없다.** 신고 증상은 자유 입력 칸이라 고를
+   * 수 있는 목록이 없고, 이 조건은 대시보드 「신고 증상별 현황」에서 인수점검
+   * 결과 줄을 눌러 들어올 때만 걸린다(`/repair-cases?reportedSymptom=...`).
+   * 그래서 화면은 <select> 대신 **걸려 있다는 안내 한 줄과 해제 단추**를 둔다 —
+   * 거른 채로 아무 표시가 없으면 사람이 "건이 왜 이것밖에 없지" 한다.
+   *
+   * 값은 앞뒤 공백을 걷어낸 원문이다(reported-symptom-param.ts). 세는 쪽
+   * (fault-symptom-breakdown.ts)이 증상을 묶을 때 쓰는 규칙과 같아야 대시보드가
+   * 센 건수와 이 목록의 건수가 맞는다.
+   */
+  reportedSymptom: string | null;
 };
 
 export const DEFAULT_FILTERS: Filters = {
@@ -70,6 +85,7 @@ export const DEFAULT_FILTERS: Filters = {
   shipmentMonth: null,
   myPendingApprovalOnly: false,
   longPendingPoOnly: false,
+  reportedSymptom: null,
 };
 
 const SHIPMENT_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -121,6 +137,11 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
     shipmentMonth: isValidShipmentMonth(shipmentMonth) ? shipmentMonth : null,
     myPendingApprovalOnly: myApproval === "1" || myApproval === "true",
     longPendingPoOnly: longPendingPo === "1" || longPendingPo === "true",
+    // 대시보드 「신고 증상별 현황」에서 누르고 들어오는 딥링크가 이 자리다.
+    // 🔴 판정을 여기 옮겨 적지 않는다 — 링크를 **짓는** 쪽과 같은 문을 지나야
+    // "링크는 만들어졌는데 눌러 보면 안 걸리는" 어긋남이 생기지 않는다.
+    // 읽을 수 없는 값은 null 이 되어 **아무것도 거르지 않는다**(오류가 아니다).
+    reportedSymptom: reportedSymptomFromSearchParams(searchParams),
   };
 }
 
@@ -184,6 +205,15 @@ export function applyFilters(
     if (filters.customerId !== "ALL" && row.customerId !== filters.customerId) return false;
     if (filters.priority !== "ALL" && row.priority !== filters.priority) return false;
     if (filters.overdueOnly && !row.effectiveIsOverdue) return false;
+    // 앞뒤 공백을 걷어내고 글자 그대로 견준다 — 대시보드가 증상을 묶을 때 쓰는
+    // 규칙과 같다(fault-symptom-breakdown.ts). 증상이 비어 있는 행은 어떤 값과도
+    // 같아지지 않으므로, 이 조건이 걸린 채로는 '미입력' 건이 남지 않는다.
+    if (
+      filters.reportedSymptom !== null &&
+      (row.reportedSymptom?.trim() ?? "") !== filters.reportedSymptom
+    ) {
+      return false;
+    }
     if (filters.shipmentMonth && !matchesShipmentMonth(row, filters.shipmentMonth)) return false;
     if (query && !matchesQuery(row, query)) return false;
     return true;
