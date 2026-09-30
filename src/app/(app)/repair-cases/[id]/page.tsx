@@ -10,7 +10,10 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { findProductHistoryMatches } from "@/lib/domain/local/product-history-match";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
-import { listRepairCasesByProductId } from "@/lib/db/queries/repair-cases";
+import {
+  getProductModelIdForProduct,
+  listRepairCasesByProductId,
+} from "@/lib/db/queries/repair-cases";
 import {
   getPartList,
   getPartOwnerAvailability,
@@ -80,6 +83,31 @@ export default async function RepairCaseDetailPage({
       ? await listRepairCasesByProductId(resolved.productId)
       : resolveAllRepairCases([]);
   const related = findProductHistoryMatches(historyCandidates, resolved);
+
+  // 제품 정보의 `Model` 글자를 눌러 그 모델의 상세로 가는 링크의 목적지
+  // (2026-09-30 요구). null 이면 화면은 링크를 만들지 않고 **지금처럼 글자로
+  // 둔다** — 누를 수 없는 링크나 막다른 주소를 만들지 않는다.
+  //
+  // 🔴 여기서 권한을 한 번 더 묻는다. 고객사 상세는 같은 링크를 걸면서 묻지
+  // 않는데(customers/[id]/page.tsx), 그 근거는 "그 화면에 들어온 사람은 반드시
+  // 모델도 볼 수 있다"(canViewCustomers 와 canViewProductModels 의 역할 집합이
+  // 같다)이다. **이 화면에는 그 근거가 없다** — 수리 건 상세는 역할로 막혀 있지
+  // 않아 INVENTORY_MANAGER 도 들어오는데, 그 역할은 제품 모델을 아예 못 본다
+  // (auth/product-model-authorization.ts). 묻지 않으면 그 사람에게만 눌러서
+  // 「접근할 권한이 없습니다」로 가는 링크가 생긴다.
+  //
+  // 역할 이름을 비교하지 않고 설정 축(hasPermission)을 묻는 것은 이 파일의 다른
+  // 판정들과 같다. 🔴 이것은 **링크를 그릴지 말지**일 뿐 관문이 아니다 — 주소를
+  // 직접 치면 /product-models/[id] 가 같은 판정을 스스로 한다(「견적서」 탭을
+  // 그릴지 정하는 [id]/layout.tsx 와 같은 자리의 같은 방법).
+  //
+  // MOCK/LOCAL_DEMO 건에는 제품 모델 마스터가 없으므로 조회 자체가 돌지 않는다.
+  const canOpenProductModelDetail =
+    actingUser !== null && (await hasPermission(actingUser, "productModels.view", "READ"));
+  const productModelLinkId =
+    canOpenProductModelDetail && resolved.source === "DATABASE" && resolved.productId !== null
+      ? await getProductModelIdForProduct(resolved.productId)
+      : null;
 
   // Section editing only ever targets a DATABASE-sourced row (the update
   // Server Action itself independently re-checks both this and the write-
@@ -240,6 +268,7 @@ export default async function RepairCaseDetailPage({
       resolved={resolved}
       related={related}
       relatedActionSummaries={relatedActionSummaries}
+      productModelLinkId={productModelLinkId}
       actingUser={actingUser}
       referenceData={referenceData}
       partRequestData={partRequestData}

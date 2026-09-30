@@ -55,6 +55,7 @@ export default function RepairCaseDetailView({
   resolved,
   related,
   relatedActionSummaries,
+  productModelLinkId,
   actingUser,
   referenceData,
   partRequestData,
@@ -74,6 +75,13 @@ export default function RepairCaseDetailView({
    * 안이 아니라 이 짝 지도로 온다, see [id]/page.tsx.
    */
   relatedActionSummaries: Record<string, string | null>;
+  /**
+   * 제품 정보의 `Model` 을 눌러 갈 제품 모델 상세의 id. **null 이면 링크를 만들지
+   * 않고 글자 그대로 둔다** — 모델 마스터가 안 붙은 개체 · 휴지통에 든 모델 ·
+   * 데모 건(MOCK/LOCAL_DEMO) · 제품 모델을 볼 권한이 없는 세션이 전부 여기서
+   * null 이다. 판정도 조회도 [id]/page.tsx 가 하고, 화면은 있고 없고만 본다.
+   */
+  productModelLinkId: string | null;
   actingUser: ActingUser | null;
   referenceData: IntakeReferenceData | null;
   /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
@@ -196,6 +204,7 @@ export default function RepairCaseDetailView({
           resolved={effective}
           related={related}
           relatedActionSummaries={relatedActionSummaries}
+          productModelLinkId={productModelLinkId}
           editableFields={productFields}
           editingSection={editingSection}
           referenceData={referenceData}

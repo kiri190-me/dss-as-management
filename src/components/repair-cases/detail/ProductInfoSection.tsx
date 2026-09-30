@@ -10,11 +10,54 @@ import { workflowKindLabels, workflowKindOf } from "@/lib/domain/workflow-kind";
 import ProductInfoEditForm from "./edit/ProductInfoEditForm";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 
-function Field({ label, value }: { label: string; value: string | null }) {
+/**
+ * 제품 정보의 칸 하나. 기본은 지금까지와 똑같이 **글자만** 그린다.
+ *
+ * href 를 주면 그 값이 링크가 된다(지금은 `Model` 한 칸만 준다). 🔴 선택
+ * 인자라 주지 않은 나머지 칸들은 한 글자도 달라지지 않는다 — 이 화면은 이
+ * 함수를 일곱 곳에서 쓴다.
+ *
+ * 🔴 href 가 null 이면 링크를 만들지 않는다. "누를 수 없는 링크"나 막다른
+ * 주소를 만들지 않기 위해서고, 그 판정(모델 마스터가 있는가 · 볼 수 있는가)은
+ * 서버가 이미 끝내서 id 로 내려 준다 — 여기서 다시 묻지 않는다.
+ */
+function Field({
+  label,
+  value,
+  href = null,
+  linkLabel,
+}: {
+  label: string;
+  value: string | null;
+  /** 값이 가리킬 곳. null 이면(대부분) 지금까지처럼 글자로 둔다. */
+  href?: string | null;
+  /**
+   * 화면 낭독기가 읽을 링크 이름. 값 글자(모델명)만으로는 **어디로 가는
+   * 링크인지** 알 수 없어서 따로 준다 — 눈으로 보는 사람에게는 이름표(dt)가
+   * 그 일을 하지만, 링크만 훑어 읽을 때는 그 이름표가 함께 읽히지 않는다.
+   */
+  linkLabel?: string;
+}) {
   return (
     <div>
       <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
-      <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value ?? "-"}</dd>
+      <dd className="text-sm text-zinc-900 dark:text-zinc-50">
+        {href && value ? (
+          /* 🔴 밑줄을 **늘** 둔다(hover 때만이 아니다). 이 칸은 표도 목록도 아니고
+             글자들이 줄지어 선 자리라, 눌러 보기 전에는 여기만 누를 수 있다는 것을
+             알 길이 없다. 같은 화면의 형제 구역이 쓰는 모양이다
+             (DomesticOrderDatesSection 의 안내 줄 링크). */
+          <Link
+            href={href}
+            aria-label={linkLabel}
+            className="font-medium underline underline-offset-2 hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            {value}
+          </Link>
+        ) : (
+          (value ?? "-")
+        )}
+      </dd>
     </div>
   );
 }
@@ -113,6 +156,7 @@ export default function ProductInfoSection({
   resolved,
   related,
   relatedActionSummaries,
+  productModelLinkId,
   editableFields,
   editingSection,
   referenceData,
@@ -123,6 +167,13 @@ export default function ProductInfoSection({
   related: RelatedMatch[];
   /** 건 id → 이력 줄에 그릴 `조치 내용`(작업기록에서 도출, 없으면 null) — see RepairCaseDetailView. */
   relatedActionSummaries: Record<string, string | null>;
+  /**
+   * `Model` 을 눌러 갈 제품 모델 상세의 id(2026-09-30 요구). **null 이면 링크를
+   * 만들지 않고 글자 그대로 둔다** — 모델 마스터가 안 붙은 개체 · 휴지통에 든
+   * 모델 · 데모 건 · 제품 모델을 볼 권한이 없는 세션이 전부 null 이다.
+   * 판정도 조회도 [id]/page.tsx 몫이다, see RepairCaseDetailView.
+   */
+  productModelLinkId: string | null;
   editableFields: readonly string[] | null;
   editingSection: RepairCaseEditSection | null;
   referenceData: IntakeReferenceData | null;
@@ -181,7 +232,15 @@ export default function ProductInfoSection({
       ) : (
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
           <Field label="종류" value={workflowKindLabels[workflowKindOf(resolved.workflowType)]} />
-          <Field label="Model" value={resolved.modelName} />
+          {/* 모델명을 누르면 그 제품 모델의 상세로 간다(2026-09-30 요구).
+              🔴 id 가 없으면 href 가 null 이라 예전 그대로 글자만 남는다 —
+              갈 곳이 없을 때 링크를 만들지 않는다. */}
+          <Field
+            label="Model"
+            value={resolved.modelName}
+            href={productModelLinkId ? `/product-models/${productModelLinkId}` : null}
+            linkLabel={`제품 모델 상세로 이동: ${resolved.modelName}`}
+          />
           <Field label="L/N" value={resolved.lotNumber} />
           <Field label="S/N" value={resolved.serialNumber} />
           {/* O/H 대상 표시. S/N 에 생산 연월이 들어 있어 4년 기준을 볼 수 있다

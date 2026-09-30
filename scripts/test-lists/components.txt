@@ -173,3 +173,9 @@ src/components/workflows/workflow-publish-dialog-text.test.tsx
 # 통째로 그릴 수 없어 원본을 글자로 읽는다 — 같은 사정을 같은 방법으로 푼 것이 이
 # 목록의 weekly-report-intake-link.test.ts 다.
 src/components/dashboard/fault-symptom-result-link.test.ts
+
+# 수리 건 상세의 모델명을 눌러 제품 모델 상세로 가는 링크(2026-09-30 요구) — id 가 있을
+# 때만 링크가 되고 없으면 글자 그대로인가 · 주소가 맞는가 · 제품 모델을 볼 수 없는
+# 세션에 링크가 새지 않는가. 서버 컴포넌트 판정과 서버 액션 사슬이 섞여 있어 통째로
+# 그릴 수 없다 — 이웃 product-info-history-disclosure.test.ts 와 같은 방법이다.
+src/components/repair-cases/detail/product-info-model-link.test.ts

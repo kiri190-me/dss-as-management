@@ -6,6 +6,7 @@ import {
   customers,
   endUsers,
   exceptionStatuses,
+  productModels,
   products,
   repairCases,
   users,
@@ -212,6 +213,42 @@ export async function getRepairCaseById(id: string): Promise<ResolvedRepairCase 
 
   const row = rows[0];
   return row ? mapRepairCaseRow(row) : null;
+}
+
+/**
+ * 이 제품 **개체**가 속한 제품 모델 마스터의 id — 수리 건 상세의 `Model` 글자를
+ * /product-models/[id] 로 잇기 위한 것 하나뿐이다(2026-09-30 요구).
+ *
+ * ResolvedRepairCase 는 모델 **이름**(products.model_name, 그 개체가 제 손으로
+ * 적어 둔 글자)만 들고 있고 마스터 id 는 들고 있지 않다. 이름으로 마스터를
+ * 되찾으면 나중에 모델명을 고치는 날 링크가 조용히 끊기므로, 화면이 필요한
+ * 곳에서 FK(products.product_model_id, migration 0030)를 직접 묻는다 —
+ * listRepairCasesByProductModelId 가 이름 비교를 피한 것과 같은 이유다.
+ *
+ * null 이 되는 경우가 둘이고, 둘 다 정상이다:
+ *  - products.product_model_id 가 NULL 이다. 이 칸은 nullable 이고(products.ts
+ *    의 주석), 아직 마스터로 풀리지 않은 개체가 실제로 있다.
+ *  - 붙어 있는 마스터가 **휴지통에 있다**. 모델을 버리면 그 모델의 개체까지
+ *    함께 소프트 삭제되지만(mutations/product-models-trash.ts), 그 개체를 물고
+ *    있는 수리 건은 상세 화면에 그대로 남는다(selectRepairCaseJoin 은 제품의
+ *    is_deleted 를 보지 않는다). 그 상태에서 마스터 주소로 보내면 막다른 길이라
+ *    여기서 걸러 null 로 떨어뜨린다.
+ *
+ * 부르는 쪽이 null 을 받으면 링크를 만들지 않고 글자로 둔다.
+ */
+export async function getProductModelIdForProduct(productId: string): Promise<string | null> {
+  if (!UUID_PATTERN.test(productId)) {
+    return null;
+  }
+
+  const rows = await db
+    .select({ productModelId: productModels.id })
+    .from(products)
+    .innerJoin(productModels, eq(products.productModelId, productModels.id))
+    .where(and(eq(products.id, productId), eq(productModels.isDeleted, false)))
+    .limit(1);
+
+  return rows[0]?.productModelId ?? null;
 }
 
 export type RepairCaseEditGuard = { id: string; isLocked: boolean };
