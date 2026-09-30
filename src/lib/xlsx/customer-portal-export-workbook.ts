@@ -50,6 +50,27 @@ import { writeZip } from "./zip-writer";
  *   **엉뚱한 시트**를 가리킨다. `<workbookView activeTab>` 도 같이 민다(열었을 때
  *   보이던 탭이 그대로 보이게).
  *
+ * ── 🔴 하루에 한 탭 — 같은 날 다시 저장하면 **갈아 끼운다** ────────────────
+ * 탭 이름은 만든 날짜(`YYMMDD`)다. 저장할 때마다 탭을 더하면 같은 날 두 번 누른 순간
+ * `260930` 탭이 둘이 되는데, **엑셀은 같은 이름의 탭을 허용하지 않는다** — 그 파일은
+ * 열리지 않거나 「복구할 수 없는 내용」이 뜬다(2026-09-30 실측: 세 번 저장한 파일의
+ * 앞 세 탭이 전부 `260930` 이었다).
+ *
+ * 그래서 오늘 날짜 탭이 **이미 있으면** 더하지 않고 그 탭을 본으로 삼아 **그 자리에서**
+ * 갈아 끼운다. 자리(맨 앞)도 이름도 그대로고, 옛 탭은 여전히 한 바이트도 바뀌지 않는다.
+ * 사람이 쌓아 온 것은 주 1회 한 장씩이다 — 하루에 여러 장이 필요했던 적이 없다.
+ *
+ * ── 🔴 이미 깨진 파일은 **거절한다** ─────────────────────────────────────
+ * 직전 파일에 이름이 겹치는 탭이 있으면 읽지 않고 사람에게 알린다. 고치지도 지우지도
+ * 않는다:
+ *   · 겹친 탭 가운데 **어느 것이 진짜인지 우리가 모른다.** 엑셀이 열지 못하는 파일이라
+ *     사람도 아직 본 적이 없다.
+ *   · 조용히 하나만 쓰면 나머지 겹침이 그 파일에 그대로 남고, **깨진 파일이 공유폴더에
+ *     있다는 사실을 사람이 영영 모른다.** 그 파일은 이미 고객사로 나갔을 수도 있다.
+ *   · 탭을 지우는 것은 `definedName` 의 자리번호 · 수식을 함께 고쳐야 하는 수술이고,
+ *     실패하면 두 번째 깨진 파일이 생긴다. 「직전 파일이 없습니다」와 같은 갈래로
+ *     사람에게 돌려준다(services/customer-portal-export.ts 머리말).
+ *
  * ── 어떤 칸으로 적는가 ──────────────────────────────────────────────────
  * 값은 도메인이 «글자 · 숫자 · 날짜 · 빈칸» 으로만 알려 준다. 실제로 어떤 칸이 되는지는
  * **그 자리에 원래 있던 칸의 서식**이 정한다:
@@ -138,8 +159,13 @@ export function buildCustomerPortalExportWorkbook(
 
   const sheets = parseWorkbookSheets(workbookXml);
   if (sheets.length === 0) throw new CustomerPortalExportError("직전 파일에 시트가 하나도 없습니다.");
+  assertPreviousSheetNamesAreUnique(sheets);
 
-  const model = pickModelSheet(sheets, input.spec);
+  // 🔴 같은 날 두 번째 저장이면 탭을 **더하지 않고** 오늘 탭을 갈아 끼운다(머리말).
+  const sameDaySheet = findSameDaySheet(sheets, input.spec, input.stamp);
+  const placementKind: PlacementKind = sameDaySheet === null ? input.spec.placement.kind : "REPLACE";
+
+  const model = sameDaySheet ?? pickModelSheet(sheets, input.spec);
   const modelPart = resolvePartForRelId(archive, workbookRelsXml, model.relId, model.name);
   const modelSheetXml = archive.readText(modelPart);
 
@@ -159,7 +185,7 @@ export function buildCustomerPortalExportWorkbook(
     today: input.today,
   });
 
-  const newSheetName = input.spec.placement.kind === "REPLACE" ? model.name : sheetNameFromStamp(input.stamp);
+  const newSheetName = placementKind === "REPLACE" ? model.name : sheetNameFromStamp(input.stamp);
 
   const replacements = new Map<string, Buffer>();
   const additions: { name: string; data: Buffer }[] = [];
@@ -167,7 +193,7 @@ export function buildCustomerPortalExportWorkbook(
   let nextContentTypesXml = contentTypesXml;
   let nextWorkbookRelsXml = workbookRelsXml;
 
-  if (input.spec.placement.kind === "PREPEND_COPY") {
+  if (placementKind === "PREPEND_COPY") {
     // 🔴 본 파트는 건드리지 않는다 — 새 파트를 하나 만들어 맨 앞 탭으로 끼운다.
     const newPart = unusedWorksheetPart(archive);
     const newRelId = unusedRelationshipId(workbookRelsXml);
@@ -183,14 +209,14 @@ export function buildCustomerPortalExportWorkbook(
     });
   } else {
     replacements.set(modelPart, Buffer.from(rebuilt.xml, "utf8"));
-    if (input.spec.placement.kind === "REPLACE_AND_RENAME" && newSheetName !== model.name) {
+    if (placementKind === "REPLACE_AND_RENAME" && newSheetName !== model.name) {
       nextWorkbookXml = renameSheet(workbookXml, model, newSheetName);
     }
   }
 
   // 자동 필터의 숨은 이름(_xlnm._FilterDatabase)을 새 범위 · 새 이름에 맞춘다.
   // 🔴 탭을 앞에 끼웠으면 그 이름들의 시트 자리번호가 하나씩 밀려 있다(위 머리말).
-  if (input.spec.placement.kind === "PREPEND_COPY") {
+  if (placementKind === "PREPEND_COPY") {
     nextWorkbookXml = shiftDefinedNameLocalSheetIds(nextWorkbookXml, 1);
     nextWorkbookXml = shiftActiveTab(nextWorkbookXml, 1);
   } else if (rebuilt.autoFilterRef !== null) {
@@ -208,6 +234,10 @@ export function buildCustomerPortalExportWorkbook(
   if (nextWorkbookRelsXml !== workbookRelsXml) {
     replacements.set(WORKBOOK_RELS_PART, Buffer.from(nextWorkbookRelsXml, "utf8"));
   }
+
+  // 🔴 나가는 파일에 같은 이름의 탭이 없는가. 있으면 엑셀이 열지 못한다 — 여기서 멈추는
+  //    편이 그 파일이 공유폴더에 쌓이는 것보다 낫다(이 버그가 실제로 일어났다).
+  assertBuiltSheetNamesAreUnique(nextWorkbookXml);
 
   return {
     bytes: repackage(archive, replacements, additions),
@@ -257,6 +287,62 @@ export function parseWorkbookSheets(workbookXml: string): WorkbookSheet[] {
     });
   }
   return sheets;
+}
+
+type PlacementKind = CustomerPortalExportSpec["placement"]["kind"];
+
+/**
+ * 🔴 **같은 날 두 번째 저장인가** — 오늘 날짜(`stamp`) 탭이 이미 있으면 그 탭을 돌려준다.
+ *
+ * 있으면 부르는 쪽이 탭을 더하지 않고 **그 탭을 그 자리에서** 갈아 끼운다(머리말).
+ * 이름으로 찾는다 — 자리로 찾지 않는다. 사람이 탭 차례를 손봤어도 오늘 탭은 하나뿐이다.
+ *
+ * 탭을 쌓지 않는 양식(ICD · INVENIA)은 볼 것이 없다: ICD 는 이름 고정 탭 하나를 늘 덮어
+ * 쓰고, INVENIA 는 탭 하나의 이름을 오늘 날짜로 바꿀 뿐이라 같은 날 다시 저장해도
+ * 이름이 이미 오늘이라 그대로 덮어쓰인다. 애초에 이 버그가 없다(실측 확인).
+ */
+function findSameDaySheet(
+  sheets: readonly WorkbookSheet[],
+  spec: CustomerPortalExportSpec,
+  stamp: string
+): WorkbookSheet | null {
+  if (spec.placement.kind !== "PREPEND_COPY") return null;
+  const todayName = sheetNameFromStamp(stamp);
+  return sheets.find((sheet) => sheet.name === todayName) ?? null;
+}
+
+/** 이름이 겹치는 탭들. 엑셀은 같은 이름의 탭을 허용하지 않는다 — 있으면 그 파일은 깨진 것이다. */
+function duplicateSheetNames(sheets: readonly WorkbookSheet[]): string[] {
+  const seen = new Set<string>();
+  const duplicated = new Set<string>();
+  for (const sheet of sheets) {
+    if (seen.has(sheet.name)) duplicated.add(sheet.name);
+    seen.add(sheet.name);
+  }
+  return [...duplicated];
+}
+
+/**
+ * 🔴 이미 깨진 직전 파일은 **읽지 않고 거절한다.** 까닭은 머리말 「이미 깨진 파일」.
+ * 고치지도 지우지도 않고, 사람이 읽을 수 있는 사유 하나만 들고 나온다.
+ */
+function assertPreviousSheetNamesAreUnique(sheets: readonly WorkbookSheet[]): void {
+  const duplicated = duplicateSheetNames(sheets);
+  if (duplicated.length === 0) return;
+  throw new CustomerPortalExportError(
+    `직전 파일에 이름이 같은 탭이 둘 이상 있습니다(${duplicated.join(" · ")}) — 엑셀이 열지 못하는 파일입니다. ` +
+      "그 파일을 공유폴더에서 치운 뒤(지우지 마시고 OLD 폴더 등으로 옮겨 주세요) 다시 시도해 주세요. " +
+      "저희가 고치거나 지우지는 않습니다."
+  );
+}
+
+/** 🔴 나가는 파일의 불변식. 여기서 걸리면 우리 잘못이라 사람이 할 수 있는 일이 없다. */
+function assertBuiltSheetNamesAreUnique(workbookXml: string): void {
+  const duplicated = duplicateSheetNames(parseWorkbookSheets(workbookXml));
+  if (duplicated.length === 0) return;
+  throw new CustomerPortalExportError(
+    `만드는 중에 이름이 같은 탭이 생겨(${duplicated.join(" · ")}) 파일을 만들지 않았습니다 — 관리자에게 알려 주세요.`
+  );
 }
 
 function pickModelSheet(sheets: readonly WorkbookSheet[], spec: CustomerPortalExportSpec): WorkbookSheet {

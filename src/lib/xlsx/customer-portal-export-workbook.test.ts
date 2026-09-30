@@ -522,6 +522,221 @@ describe("JUSUNG — 탭을 하나 더한다", () => {
   });
 });
 
+// ── 🔴 JUSUNG — 하루에 한 탭 (같은 날 다시 저장) ─────────────────────────
+
+/** 탭 이름들만. 겹침을 보는 시험들이 쓴다. */
+function sheetNamesOf(bytes: Buffer): string[] {
+  return parseWorkbookSheets(ZipArchive.fromBuffer(bytes).readText(WORKBOOK_PART)).map(
+    (sheet) => sheet.name
+  );
+}
+
+/** 저장 한 번. 나온 바이트를 그대로 다시 넣어 «같은 날 두 번째 저장»을 흉내 낸다. */
+function saveJusung(previousBytes: Buffer, items: readonly PortalExportItem[]): Buffer {
+  return buildCustomerPortalExportWorkbook({
+    previousBytes,
+    form: JUSUNG_FORM,
+    spec: JUSUNG_SPEC,
+    rows: buildPortalExportRows(JUSUNG_FORM, items),
+    stamp: STAMP,
+    today: TODAY,
+  }).bytes;
+}
+
+const JUSUNG_WORKSHEET_PARTS = ["xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml", "xl/worksheets/sheet3.xml"];
+
+describe("🔴 JUSUNG — 하루에 한 탭 (같은 날 다시 저장)", () => {
+  test("두 번째 저장은 탭을 더하지 않고 오늘 탭을 그 자리에서 갈아 끼운다", () => {
+    const first = saveJusung(jusungWorkbook(), [item(), item(), item()]);
+    assert.deepEqual(sheetNamesOf(first), [STAMP, "260929", "260922", "260915"]);
+
+    const second = saveJusung(first, [item(), item()]);
+    // 탭 수 · 이름 · 차례가 그대로다 — 오늘 탭은 여전히 맨 앞이고 이름도 그대로다.
+    assert.deepEqual(sheetNamesOf(second), [STAMP, "260929", "260922", "260915"]);
+  });
+
+  test("🔴 몇 번을 저장해도 같은 이름의 탭이 생기지 않는다", () => {
+    let bytes = jusungWorkbook();
+    for (let round = 1; round <= 5; round += 1) {
+      bytes = saveJusung(bytes, [item(), item()]);
+      const names = sheetNamesOf(bytes);
+      assert.equal(
+        new Set(names).size,
+        names.length,
+        `${round}번째 저장에서 탭 이름이 겹친다: ${names.join(" ")}`
+      );
+      assert.equal(names.length, 4, `${round}번째 저장에서 탭 수가 늘었다: ${names.join(" ")}`);
+    }
+  });
+
+  test("🔴 두 번째 저장에서도 옛 탭은 한 바이트도 바뀌지 않는다", () => {
+    const first = saveJusung(jusungWorkbook(), [item(), item(), item()]);
+    const before = ZipArchive.fromBuffer(first);
+    const after = ZipArchive.fromBuffer(saveJusung(first, [item()]));
+
+    for (const part of JUSUNG_WORKSHEET_PARTS) {
+      const original = before.readEntry(part);
+      const now = after.readEntry(part);
+      assert.notEqual(now, null, `${part} 가 사라졌다`);
+      assert.equal(original!.equals(now!), true, `${part} 가 바뀌었다`);
+    }
+    // 탭 파트가 늘지 않았고, 오늘 탭(넷째 파트)만 갈아 끼워졌다.
+    assert.equal(after.list().filter((name) => name.startsWith("xl/worksheets/")).length, 4);
+    const today = "xl/worksheets/sheet4.xml";
+    assert.equal(
+      before.readEntry(today)!.equals(after.readEntry(today)!),
+      false,
+      "오늘 탭이 갈아 끼워지지 않았다"
+    );
+  });
+
+  test("갈아 끼운 탭에는 이번 값만 남는다(옛 줄이 남지 않는다)", () => {
+    const first = saveJusung(jusungWorkbook(), [
+      item({ endUserName: "첫 번째 저장" }),
+      item(),
+      item(),
+    ]);
+    const second = saveJusung(first, [item({ endUserName: "두 번째 저장" })]);
+
+    const { grid } = gridOf(second, STAMP);
+    assert.deepEqual(grid.cells(5).get("C"), { kind: "text", text: "두 번째 저장" });
+    assert.equal(grid.cells(6).get("B"), undefined, "줄이 셋에서 하나로 줄지 않았다");
+  });
+
+  test("🔴 탭을 더하지 않았으니 숨은 이름의 자리번호도 다시 밀리지 않는다", () => {
+    const first = saveJusung(jusungWorkbook(), [item(), item()]);
+    const second = saveJusung(first, [item(), item()]);
+
+    const firstXml = ZipArchive.fromBuffer(first).readText(WORKBOOK_PART);
+    const secondXml = ZipArchive.fromBuffer(second).readText(WORKBOOK_PART);
+    assert.match(firstXml, /_xlnm\._FilterDatabase"[^>]*localSheetId="3"/);
+    assert.match(secondXml, /_xlnm\._FilterDatabase"[^>]*localSheetId="3"/);
+    assert.match(secondXml, /<workbookView[^>]*activeTab="1"/);
+  });
+
+  test("탭을 안 쌓는 양식은 같은 날 다시 저장해도 그대로다(ICD · INVENIA)", () => {
+    const icdFirst = buildCustomerPortalExportWorkbook({
+      previousBytes: icdWorkbook(),
+      form: ICD_FORM,
+      spec: ICD_SPEC,
+      rows: buildPortalExportRows(ICD_FORM, [item(), item()]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    const icdSecond = buildCustomerPortalExportWorkbook({
+      previousBytes: icdFirst,
+      form: ICD_FORM,
+      spec: ICD_SPEC,
+      rows: buildPortalExportRows(ICD_FORM, [item()]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    assert.deepEqual(sheetNamesOf(icdSecond), [ICD_SHEET_NAME]);
+
+    const inveniaFirst = buildCustomerPortalExportWorkbook({
+      previousBytes: inveniaWorkbook(),
+      form: INVENIA_FORM,
+      spec: INVENIA_SPEC,
+      rows: buildPortalExportRows(INVENIA_FORM, [item(), item()]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    const inveniaSecond = buildCustomerPortalExportWorkbook({
+      previousBytes: inveniaFirst,
+      form: INVENIA_FORM,
+      spec: INVENIA_SPEC,
+      rows: buildPortalExportRows(INVENIA_FORM, [item()]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    // 이미 이름이 오늘 날짜라 이름은 그대로고 탭도 늘지 않는다.
+    assert.deepEqual(sheetNamesOf(inveniaSecond), [STAMP]);
+  });
+});
+
+// ── 🔴 이미 깨진 파일 — 고치지도 지우지도 않고 거절한다 ──────────────────
+
+describe("🔴 이미 깨진 파일 — 이름이 같은 탭이 둘 있으면 거절한다", () => {
+  function jusungSheet(name: string, sheetId: number): FixtureSheet {
+    return {
+      name,
+      sheetId,
+      xml: formSheetXml({
+        headerRow: 4,
+        headers: labelsOf(JUSUNG_FORM),
+        dataRowCount: 3,
+        dateColumns: ["J", "K", "L"],
+        aboveHeader: [{ reference: "N1", style: 1 }],
+        lastColumn: "N",
+      }),
+    };
+  }
+
+  /** 같은 날 세 번 저장해 오늘 탭이 셋이 된 파일 — 2026-09-30 공유폴더에서 실측한 모양. */
+  function brokenWorkbook(): Buffer {
+    return buildFixtureWorkbook({
+      sheets: [
+        jusungSheet(STAMP, 91),
+        jusungSheet(STAMP, 90),
+        jusungSheet(STAMP, 89),
+        jusungSheet("260929", 88),
+      ],
+      activeTab: 0,
+    });
+  }
+
+  test("사람이 읽는 사유로 끝나고, 겹친 탭 이름을 알려 준다", () => {
+    assert.throws(
+      () => saveJusung(brokenWorkbook(), [item()]),
+      (error: unknown) =>
+        error instanceof CustomerPortalExportError &&
+        error.message.includes("이름이 같은 탭") &&
+        error.message.includes(STAMP)
+    );
+  });
+
+  test("🔴 조용히 하나만 고치지 않는다 — 파일을 아예 만들지 않는다", () => {
+    let madeSomething = false;
+    try {
+      saveJusung(brokenWorkbook(), [item()]);
+      madeSomething = true;
+    } catch {
+      // 기대한 갈래다.
+    }
+    assert.equal(madeSomething, false, "깨진 파일을 바탕으로 파일을 만들어 버렸다");
+  });
+
+  test("겹침은 어느 양식에서든 막는다(오늘 날짜가 아닌 이름이어도)", () => {
+    const brokenIcd = buildFixtureWorkbook({
+      sheets: [
+        {
+          name: ICD_SHEET_NAME,
+          sheetId: 1,
+          xml: formSheetXml({ headerRow: 5, headers: labelsOf(ICD_FORM), dataRowCount: 2, lastColumn: "M" }),
+        },
+        {
+          name: ICD_SHEET_NAME,
+          sheetId: 2,
+          xml: formSheetXml({ headerRow: 5, headers: labelsOf(ICD_FORM), dataRowCount: 2, lastColumn: "M" }),
+        },
+      ],
+    });
+    assert.throws(
+      () =>
+        buildCustomerPortalExportWorkbook({
+          previousBytes: brokenIcd,
+          form: ICD_FORM,
+          spec: ICD_SPEC,
+          rows: buildPortalExportRows(ICD_FORM, [item()]),
+          stamp: STAMP,
+          today: TODAY,
+        }),
+      (error: unknown) =>
+        error instanceof CustomerPortalExportError && error.message.includes(ICD_SHEET_NAME)
+    );
+  });
+});
+
 // ── 공통 — 값 · 머리글 · 자동 필터 ───────────────────────────────────────
 
 describe("값이 제자리에 들어간다", () => {
