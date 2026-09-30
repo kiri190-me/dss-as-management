@@ -35,15 +35,25 @@ const VERSION_CONFLICT_MESSAGE =
  *
  * `expectedVersion`이 null 이면 "아직 행이 없다"는 뜻이라 새로 만든다. 그
  * 순간에 다른 사람이 먼저 만들었다면 unique 가 막고 CONFLICT 로 돌려준다.
+ *
+ * ■ 🔴 `formValues` 를 안 넘기는 것과 `{}` 를 넘기는 것은 다르다
+ *
+ * 고객사 양식 표에서 손으로 적는 값들이다. **넘기지 않으면(undefined) 있던
+ * 값을 그대로 둔다.** 기본 9열 표의 저장은 이 값을 모르는 채로 오므로, 안
+ * 넘긴 것을 "비우라"로 읽으면 담당자가 기본 보기에서 비고 한 줄을 고칠 때마다
+ * 옆 보기에 적어 둔 값이 통째로 사라진다 — 아무 오류도 없이.
+ * `{}` 를 넘기면 그때는 "다 지웠다"는 뜻이라 그대로 비운다.
  */
 export async function setCustomerStatus(params: {
   repairCaseId: string;
   statusOptionId: string | null;
   note: string | null;
+  /** 고객사 양식에서 손으로 적은 값들. `undefined` = 건드리지 않음. */
+  formValues?: Record<string, string>;
   expectedVersion: number | null;
   actorUserId: string;
 }): Promise<MutationResult<{ version: number }>> {
-  const { repairCaseId, statusOptionId, note, expectedVersion, actorUserId } =
+  const { repairCaseId, statusOptionId, note, formValues, expectedVersion, actorUserId } =
     params;
 
   if (statusOptionId) {
@@ -68,7 +78,14 @@ export async function setCustomerStatus(params: {
     if (expectedVersion === null) {
       const inserted = await tx
         .insert(repairCaseCustomerStatus)
-        .values({ repairCaseId, statusOptionId, note, updatedBy: actorUserId })
+        .values({
+          repairCaseId,
+          statusOptionId,
+          note,
+          // 새로 만드는 줄에는 안 넘긴 것과 빈 것이 같다 — 어차피 없던 값이다.
+          formValues: formValues ?? {},
+          updatedBy: actorUserId,
+        })
         // 그사이 남이 먼저 만들었으면 조용히 넘어가고 아래에서 0행으로 잡힌다.
         .onConflictDoNothing({ target: repairCaseCustomerStatus.repairCaseId })
         .returning({ version: repairCaseCustomerStatus.version });
@@ -86,7 +103,7 @@ export async function setCustomerStatus(params: {
         actionType: "CREATE",
         targetEntity: "repair_case_customer_status",
         targetRecordId: repairCaseId,
-        newValue: { statusOptionId, note },
+        newValue: { statusOptionId, note, formValues: formValues ?? {} },
       });
 
       return { ok: true as const, value: { version: inserted[0].version } };
@@ -96,6 +113,7 @@ export async function setCustomerStatus(params: {
       .select({
         statusOptionId: repairCaseCustomerStatus.statusOptionId,
         note: repairCaseCustomerStatus.note,
+        formValues: repairCaseCustomerStatus.formValues,
       })
       .from(repairCaseCustomerStatus)
       .where(eq(repairCaseCustomerStatus.repairCaseId, repairCaseId));
@@ -105,6 +123,10 @@ export async function setCustomerStatus(params: {
       .set({
         statusOptionId,
         note,
+        // 🔴 안 넘겼으면 `.set()` 에 키 자체를 넣지 않는다. `formValues: undefined`
+        //    를 넣어도 drizzle 이 빼 주기는 하지만, 그 사실에 기대면 다음 사람이
+        //    `?? null` 한 글자를 붙이는 순간 남의 값이 지워진다.
+        ...(formValues === undefined ? {} : { formValues }),
         updatedBy: actorUserId,
         updatedAt: sql`now()`,
         version: sql`${repairCaseCustomerStatus.version} + 1`,
@@ -140,7 +162,9 @@ export async function setCustomerStatus(params: {
       targetEntity: "repair_case_customer_status",
       targetRecordId: repairCaseId,
       previousValue: previous ?? null,
-      newValue: { statusOptionId, note },
+      // 안 넘긴 것은 안 바뀐 것이라 새 값에도 적지 않는다 — 적으면 감사 기록이
+      // "이번에 비웠다"로 읽힌다.
+      newValue: { statusOptionId, note, ...(formValues === undefined ? {} : { formValues }) },
     });
 
     return { ok: true as const, value: { version: updated[0].version } };

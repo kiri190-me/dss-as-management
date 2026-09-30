@@ -16,7 +16,14 @@ import {
   revokeCustomerLink,
   setCustomerStatus,
 } from "@/lib/db/mutations/customer-portal";
-import { getActiveLinkCipher } from "@/lib/db/queries/customer-portal";
+import {
+  getActiveLinkCipher,
+  getCustomerNameForRepairCase,
+} from "@/lib/db/queries/customer-portal";
+import {
+  findPortalFormForCustomerName,
+  sanitizeManualValues,
+} from "@/lib/domain/customer-portal-forms";
 import {
   createStatusOption,
   updateStatusOption,
@@ -62,11 +69,24 @@ async function requireActor() {
   return { ok: true as const, actingUser };
 }
 
-/** 고객에게 보이는 상태·비고를 정한다. */
+/**
+ * 고객에게 보이는 상태·비고를 정한다.
+ *
+ * ■ 고객사 양식의 손으로 적는 칸도 **같은 저장 한 번**으로 간다
+ *
+ * `formValues` 를 따로 저장하는 액션으로 나누지 않았다. 나누면 한 줄을 고치는
+ * 데 저장이 둘이 되고, 그 둘이 각각 version 을 올린다 — 첫 저장이 올린 version
+ * 때문에 둘째 저장이 "다른 사람이 먼저 고쳤습니다"로 막힌다. 한 번에 보내면
+ * 낙관적 잠금은 예전과 똑같이 한 번만 돈다.
+ *
+ * 🔴 `formValues` 를 **안 보내면 있던 값을 그대로 둔다**(mutation 주석 참조).
+ * 기본 9열 표의 저장은 이 값을 모르는 채로 온다.
+ */
 export async function setCustomerStatusAction(input: {
   repairCaseId: string;
   statusOptionId: string | null;
   note: string | null;
+  formValues?: Record<string, string>;
   expectedVersion: number | null;
 }): Promise<ActionResult> {
   const gate = await requireActor();
@@ -85,10 +105,32 @@ export async function setCustomerStatusAction(input: {
     return { ok: false, message: "비고는 1000자까지 적을 수 있습니다." };
   }
 
+  /*
+   * 손으로 적는 칸을 거른다.
+   *
+   * 🔴 양식은 **서버가 접수에서 거슬러 올라가 찾은 고객사 이름**으로 고른다.
+   * 화면이 "나는 ICD 양식이다"라고 말하게 두면 그 말이 곧 허가가 된다.
+   *
+   * 양식이 없는 고객사면 적을 칸 자체가 없으므로 `undefined` 로 둔다 — `{}` 로
+   * 두면 "다 지워라"가 되어, 양식이 잠깐 빠진 사이의 저장 한 번이 그 고객사의
+   * 적어 둔 값을 전부 날린다.
+   */
+  let formValues: Record<string, string> | undefined;
+  if (input.formValues !== undefined) {
+    const customerName = await getCustomerNameForRepairCase(input.repairCaseId);
+    const form = findPortalFormForCustomerName(customerName);
+    if (form) {
+      const sanitized = sanitizeManualValues(form, input.formValues);
+      if (!sanitized.ok) return { ok: false, message: sanitized.message };
+      formValues = sanitized.values;
+    }
+  }
+
   const result = await setCustomerStatus({
     repairCaseId: input.repairCaseId,
     statusOptionId: input.statusOptionId || null,
     note,
+    formValues,
     expectedVersion: input.expectedVersion,
     actorUserId: gate.actingUser.id,
   });

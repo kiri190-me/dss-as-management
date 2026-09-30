@@ -658,6 +658,69 @@ async function loadDueDatesByOrderId(
 }
 
 /**
+ * 접수 건 **여럿**의 내자 납기요청일을 한 번에. 고객 안내 현황의 고객사 양식
+ * 표가 「납품 요청일」 칸에 그린다(사용자 결정 2026-09-30 — 「납품 요청일은
+ * 수리건 상세의 내자 납기 요청일을 가져오면 돼」).
+ *
+ * ── 🔴 옛 칸(`domestic_orders.requested_due_date`)을 읽지 않는다 ─────────
+ * 그 칸은 이 딸린 표로 옮겨졌고 조회·저장·화면이 전부 이 표만 본다
+ * (schema/domestic-order-due-dates.ts). 옛 칸을 읽으면 분할 납기의 둘째 날짜
+ * 부터가 통째로 안 보인다.
+ *
+ * ── 왜 접지 않고 전부 돌려주는가 ────────────────────────────────────────
+ * 한 접수에 내자 줄이 여럿이고 줄마다 날짜가 또 여럿이라 값이 여럿일 수 있다.
+ * **여기서 하나로 접지 않는다** — 접는 규칙(무엇을 어떻게 한 칸에 그리는가)은
+ * 내자 정리 목록이 이미 갖고 있고(domain/domestic-order-list.ts 의
+ * formatDomesticOrderDueDateLines — 옆이 아니라 아래로 늘린다), 고객사 양식
+ * 표도 **그 함수를 그대로 부른다.** 여기서 한 줄로 이어 붙여 내보내면 두 화면의
+ * 같은 값이 서로 다른 모양이 된다.
+ *
+ * 차례와 `is_deleted` 규칙은 loadDueDatesByOrderId · 아래 형제 함수와 같다.
+ * 줄이 복제되는 것도 아래 형제 함수와 같은 이유로 문제가 되지 않는다 —
+ * 세는 질의가 아니라 모으는 질의다.
+ */
+export async function listDomesticOrderDueDatesForRepairCases(
+  repairCaseIds: string[]
+): Promise<Map<string, DomesticOrderDueDate[]>> {
+  const grouped = new Map<string, DomesticOrderDueDate[]>();
+  if (repairCaseIds.length === 0) return grouped;
+
+  const rows = await db
+    .select({
+      id: domesticOrderDueDates.id,
+      repairCaseId: domesticOrders.repairCaseId,
+      dueDate: domesticOrderDueDates.dueDate,
+      note: domesticOrderDueDates.note,
+      displayOrder: domesticOrderDueDates.displayOrder,
+    })
+    .from(domesticOrderDueDates)
+    .innerJoin(domesticOrders, eq(domesticOrderDueDates.domesticOrderId, domesticOrders.id))
+    .where(
+      and(
+        eq(domesticOrders.isDeleted, false),
+        inArray(domesticOrders.repairCaseId, repairCaseIds)
+      )
+    )
+    .orderBy(asc(domesticOrderDueDates.displayOrder), asc(domesticOrderDueDates.dueDate));
+
+  for (const row of rows) {
+    // repair_case_id 는 비어 있을 수 있는 칸이라 타입이 nullable 이다. 위
+    // inArray 가 이미 걸러 주지만 tsc 는 그것을 모른다.
+    if (!row.repairCaseId) continue;
+    const item: DomesticOrderDueDate = {
+      id: row.id,
+      dueDate: row.dueDate,
+      note: row.note,
+      displayOrder: row.displayOrder,
+    };
+    const bucket = grouped.get(row.repairCaseId);
+    if (bucket) bucket.push(item);
+    else grouped.set(row.repairCaseId, [item]);
+  }
+  return grouped;
+}
+
+/**
  * 그 수리 건에 붙어 있는 **내자 납기요청일 전부**. 없으면 빈 배열이다.
  *
  * 수리 건 상세정보의 `고객 요청 납기일` 이 비어 있을 때 대신 그릴 날짜를
@@ -960,6 +1023,15 @@ export type RepairCaseQuoteInfo = {
   repairCaseId: string;
   quoteNumber: string | null;
   quoteIssuedDate: string | null;
+  /**
+   * 발주발행일. 고객사 엑셀의 「ICD PO 발행일」 · 「P.O 발행 일」이 가리키는
+   * 값이다(고객사 양식 — domain/customer-portal-forms.ts).
+   *
+   * 어느 줄을 고르는지는 위 둘과 **같다** — 견적발행일이 가장 늦은 줄. 여기서만
+   * 따로 "발주발행일이 가장 늦은 줄"을 고르면 한 줄에 다른 줄의 번호와 다른
+   * 줄의 날짜가 섞여 나온다. 같은 줄에서 나온 값이라는 것이 이 칸들의 전제다.
+   */
+  orderIssuedDate: string | null;
 };
 
 export async function listQuoteInfoForRepairCases(
@@ -975,6 +1047,7 @@ export async function listQuoteInfoForRepairCases(
       repairCaseId: domesticOrders.repairCaseId,
       quoteNumber: domesticOrders.quoteNumber,
       quoteIssuedDate: domesticOrders.quoteIssuedDate,
+      orderIssuedDate: domesticOrders.orderIssuedDate,
       linkedQuoteNumber: linkedQuotes.quoteNumber,
       linkedQuoteDate: linkedQuotes.quoteDate,
     })
@@ -1012,6 +1085,8 @@ export async function listQuoteInfoForRepairCases(
         repairCaseId: row.repairCaseId,
         quoteNumber,
         quoteIssuedDate,
+        // 이긴 그 줄의 발주발행일이다 — 위 주석대로 줄을 갈라 고르지 않는다.
+        orderIssuedDate: row.orderIssuedDate,
       });
     }
   }

@@ -8,8 +8,12 @@ import {
   customerStatusOptions,
   customers,
   repairCaseCustomerStatus,
+  repairCases,
 } from "../schema";
-import { listQuoteInfoForRepairCases } from "./domestic-orders";
+import {
+  listDomesticOrderDueDatesForRepairCases,
+  listQuoteInfoForRepairCases,
+} from "./domestic-orders";
 import { listRepairCasesByCustomerId } from "./repair-cases";
 
 /**
@@ -32,7 +36,15 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  */
 export const PENDING_INTAKE_LABEL = "접수 대기 중";
 
-/** 고객에게 보여줄 한 줄. 화면과 스냅샷이 그대로 쓴다. */
+/**
+ * 고객에게 보여줄 한 줄. 화면과 스냅샷이 그대로 쓴다.
+ *
+ * 🔴 **이 타입에 칸이 늘어도 고객에게 나가는 것은 늘지 않는다.** 밖으로
+ * 보내는 자리(server/services/customer-portal-sync.ts)는 이 줄을 펼치지 않고
+ * 보낼 칸을 하나씩 적어 옮긴다. 아래 「고객사 양식」 쪽 칸 셋(endUserName ·
+ * orderIssuedDate · formValues)이 그 목록에 없는 것은 **일부러**다 — 담당자가
+ * 사내에서 쓰는 표에만 쓴다.
+ */
 export type CustomerPortalItem = {
   /** 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지. */
   sourceKind: "CASE" | "REQUEST";
@@ -49,7 +61,54 @@ export type CustomerPortalItem = {
   quoteIssuedDate: string | null;
   /** 상태를 고칠 때 쓰는 낙관적 잠금 값. 행이 없으면 null. */
   statusVersion: number | null;
+
+  // ───── 아래 셋은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
+
+  /**
+   * End-User 이름. 고객사 엑셀의 「Site명」이 가리키는 것이 이것이다
+   * (사용자 확인 2026-09-30).
+   */
+  endUserName: string | null;
+  /** 발주발행일 — 엑셀의 「ICD PO 발행일」 · 「P.O 발행 일」. */
+  orderIssuedDate: string | null;
+  /**
+   * 내자 정리의 **납기요청일 전부** — JUSUNG 표의 「납품 요청일」.
+   *
+   * 🔴 하나로 접어 두지 않는다. 분할 발주·분할 납품이라 여럿일 수 있고, 그리는
+   * 규칙은 내자 정리 목록이 이미 갖고 있다(formatDomesticOrderDueDateLines).
+   * 여기서 접으면 같은 값이 두 화면에서 다른 모양이 된다.
+   */
+  deliveryRequestDates: { dueDate: string; note: string | null }[];
+  /**
+   * 그 고객사 양식에서 **사람이 줄마다 손으로 적은 값들**(키 → 글자).
+   * 아직 아무것도 안 적었으면 빈 객체다. 어느 키가 뜻이 있는지는 양식이
+   * 정한다(domain/customer-portal-forms.ts).
+   */
+  formValues: Record<string, string>;
 };
+
+/**
+ * jsonb 에서 읽은 것을 「키 → 글자」로 눕힌다.
+ *
+ * jsonb 는 무엇이든 담을 수 있는 칸이라(배열 · 숫자 · 중첩 객체 · null) 읽는
+ * 첫 자리에서 모양을 확정해 둔다. 여기서 확정하지 않으면 화면이 문자열인 줄
+ * 알고 쓰다가 숫자를 만나 깨진다.
+ *
+ * 🔴 **어느 키가 뜻이 있는지는 여기서 판단하지 않는다.** 그것은 고객사 양식이
+ * 아는 일이고(domain/customer-portal-forms.ts 의 readManualValues), 양식을
+ * 아는 것은 이 조회가 아니라 화면이다. 여기서 한 벌 더 걸러 두면 양식이 바뀔
+ * 때 두 곳을 고쳐야 한다.
+ */
+function toStringMap(value: unknown): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return result;
+  }
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "string") result[key] = raw;
+  }
+  return result;
+}
 
 /**
  * 한 고객사가 볼 목록.
@@ -77,13 +136,18 @@ export async function listPortalItemsForCustomer(
   // 여기가 "출하 완료 제외"의 유일한 근거다.
   const cases = allCases.filter((row) => row.status !== "SHIPMENT_COMPLETED");
 
-  const quoteInfo = await listQuoteInfoForRepairCases(cases.map((c) => c.id));
+  const caseIds = cases.map((c) => c.id);
+  const quoteInfo = await listQuoteInfoForRepairCases(caseIds);
+  // 「납품 요청일」 — 접수마다 따로 읽으면 줄 수만큼 왕복이 생긴다. 한 번에 읽고
+  // 접수별로 묶어 둔다(위 견적 정보와 같은 방식).
+  const dueDatesByCase = await listDomesticOrderDueDatesForRepairCases(caseIds);
 
   const statusRows = await db
     .select({
       repairCaseId: repairCaseCustomerStatus.repairCaseId,
       label: customerStatusOptions.label,
       note: repairCaseCustomerStatus.note,
+      formValues: repairCaseCustomerStatus.formValues,
       version: repairCaseCustomerStatus.version,
     })
     .from(repairCaseCustomerStatus)
@@ -110,6 +174,13 @@ export async function listPortalItemsForCustomer(
       quoteNumber: quote?.quoteNumber ?? null,
       quoteIssuedDate: quote?.quoteIssuedDate ?? null,
       statusVersion: status?.version ?? null,
+      endUserName: row.endUserName,
+      orderIssuedDate: quote?.orderIssuedDate ?? null,
+      deliveryRequestDates: (dueDatesByCase.get(row.id) ?? []).map((due) => ({
+        dueDate: due.dueDate,
+        note: due.note,
+      })),
+      formValues: toStringMap(status?.formValues),
     };
   });
 
@@ -119,6 +190,7 @@ export async function listPortalItemsForCustomer(
       productModelName: customerRepairRequests.productModelName,
       lotNumber: customerRepairRequests.lotNumber,
       serialNumber: customerRepairRequests.serialNumber,
+      endUser: customerRepairRequests.endUser,
       submittedAt: customerRepairRequests.submittedAt,
     })
     .from(customerRepairRequests)
@@ -155,6 +227,17 @@ export async function listPortalItemsForCustomer(
     quoteNumber: null,
     quoteIssuedDate: null,
     statusVersion: null,
+    /**
+     * 고객이 의뢰서에 적어 보낸 End-User 를 「Site명」 자리에 그대로 둔다.
+     * 접수로 만들 때 담당자가 마스터의 End-User 로 고쳐 잡으므로 그때부터는
+     * 접수 쪽 값이 보인다.
+     */
+    endUserName: row.endUser,
+    // 접수가 아직 없으니 발주도, 손으로 적을 자리도 없다. 그 자리는
+    // repair_case_customer_status 가 갖고 있고 그 표는 접수를 가리킨다.
+    orderIssuedDate: null,
+    deliveryRequestDates: [],
+    formValues: {},
   }));
 
   // 접수 전 의뢰가 위, 그다음 접수를 접수일 최신순으로.
@@ -259,6 +342,30 @@ export async function getActiveLinkCipher(
     )
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * 이 접수가 어느 고객사의 것인가 — **이름으로**.
+ *
+ * 고객사 양식은 이름으로 가려진다(domain/customer-portal-forms.ts). 저장할 때
+ * "이 줄에 적어도 되는 칸이 무엇인가"를 판정하려면 그 이름이 필요한데, 🔴 그
+ * 이름을 **화면이 보낸 값으로 받으면 안 된다** — 보내는 쪽이 남의 고객사
+ * 이름을 대면 그 양식의 칸을 이 접수에 적을 수 있게 된다. 서버가 접수에서
+ * 거슬러 올라가 직접 읽는다.
+ *
+ * 지워진 고객사도 그대로 돌려준다. 접수는 남아 있고, 그 접수를 고치는 일이
+ * 고객사가 지워졌다는 이유로 막힐 까닭이 없다.
+ */
+export async function getCustomerNameForRepairCase(
+  repairCaseId: string
+): Promise<string | null> {
+  const [row] = await db
+    .select({ name: customers.name })
+    .from(repairCases)
+    .innerJoin(customers, eq(repairCases.customerId, customers.id))
+    .where(eq(repairCases.id, repairCaseId))
+    .limit(1);
+  return row?.name ?? null;
 }
 
 /** 드롭다운에 뜨는 상태 목록. 비활성은 빠진다. */

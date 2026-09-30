@@ -229,6 +229,12 @@ export async function pushSnapshots(): Promise<
           quoteIssuedDate: item.quoteIssuedDate,
           // 금액과 사내 진단 내용은 여기 없다. 나가지 않는다는 약속을
           // 지키는 방법은 애초에 담지 않는 것이다.
+          //
+          // 🔴 「고객사 양식」 표가 쓰는 칸 셋(endUserName · orderIssuedDate ·
+          // formValues)도 여기 없다. CustomerPortalItem 에는 있지만 이 목록에
+          // 적지 않았으므로 나가지 않는다 — 줄을 통째로 펼치지 않고 하나씩
+          // 옮겨 적는 이 모양이 그 약속을 지키는 장치다. 아래
+          // pushSnapshotForLink 의 목록도 **같아야 한다.**
         })),
       },
     });
@@ -274,6 +280,8 @@ export async function pushSnapshotForLink(linkId: string): Promise<number> {
         statusNote: item.statusNote,
         quoteNumber: item.quoteNumber,
         quoteIssuedDate: item.quoteIssuedDate,
+        // 🔴 위 pushSnapshots 와 **같은 목록이어야 한다.** 고객사 양식 쪽 칸
+        // 셋(endUserName · orderIssuedDate · formValues)은 양쪽 다 없다.
       })),
     },
   });

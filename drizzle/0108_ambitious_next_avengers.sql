@@ -1,0 +1,1 @@
+ALTER TABLE "repair_case_customer_status" ADD COLUMN "form_values" jsonb DEFAULT '{}'::jsonb NOT NULL;
