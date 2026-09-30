@@ -122,8 +122,20 @@
 
 <header>
   <h1>DSS 사내 시스템 — 개발 진행 현황</h1>
-  <p class="stamp">2026-09-29</p>
+  <p class="stamp">2026-09-30</p>
 </header>
+
+<div class="ok" style="background:#ecfdf5;border-color:#6ee7b7">
+  <b>🎉 2026-09-30 오전 9시 30분 — 열한째 배포. A/S 와 PO 를 함께 올렸습니다.</b><br>
+  A/S <code>1.7</code> → <b><code>1.8</code></b> · PO <code>0.2</code> → <b><code>0.3</code></b>.
+  <b>멈춘 시간은 18초</b>였고 배포 검사 <b>118개가 전부 통과</b>했습니다(실패 0).
+  🔴 <b>DB 는 건드리지 않았습니다</b> — 마이그레이션 0개입니다.<br>
+  <b>나머지 네 사이트는 한 번도 안 멈췄습니다</b> — 포털 · 계측기 · 개선요청 · 휴가.<br>
+  배포 뒤 여섯 사이트: 포털 <code>1.5</code> · <b>A/S <code>1.8</code></b> · 계측기 <code>1.3</code> ·
+  개선요청 <code>0.3</code> · <b>PO <code>0.3</code></b> · 휴가 <code>0.1</code>.<br>
+  9월 29일 낮 배포 이후 쌓여 있던 <b>커밋 18개</b>(A/S 16 · PO 2)가 전부 운영에 나갔습니다 —
+  바로 아래 세 장(🔑 · 📋 · 📷)에 적힌 것이 <b>이번 판에 담겨 나간 것</b>입니다.
+</div>
 
 <div class="ok" style="background:#fef2f2;border-color:#fca5a5">
   <b>🔑 2026-09-29 밤 — 엔지니어도 내자 정리와 견적서를 쓸 수 있게 했습니다.</b><br>
@@ -136,8 +148,13 @@
   <b>관리자 이상 그대로</b>입니다. 재고 담당자는 한 글자도 안 바뀌었습니다.<br>
   <b>A/S 와 PO 두 사이트를 함께 고쳤습니다</b> — 같은 자료를 보는 사이트라 한쪽만 열면
   같은 사람이 여기서는 되고 저기서는 안 되는 상태가 됩니다.<br>
+  <span style="color:#065f46">✅ <b>2026-09-30 오전 운영에 나갔습니다</b>
+  (A/S <code>1.8</code> · PO <code>0.3</code>).</span><br>
   <span style="color:#b45309">⚠️ 관리자가 [역할별 접근 권한] 화면에서 그 칸을 <b>한 번이라도
-  저장한 적이 있으면</b> 그 값이 이깁니다 — 그때는 화면에서 올려 주셔야 합니다.</span>
+  저장한 적이 있으면</b> 그 값이 이깁니다 — 🔴 <b>실제로 그랬습니다.</b> 견적서와 작업 비용은
+  <b>2026-09-11 에 관리자가 그 화면에서 저장해 둔 값</b>이 이미 있어서 <b>진작 열려
+  있었습니다.</b> 그래서 이번에 <b>새로 열린 것은 「내자 정리」 하나</b>입니다.
+  사장님이 화면에서 눈으로 확인하셨고 이상 없었습니다.</span>
 </div>
 
 <div class="ok" style="background:#eff6ff;border-color:#93c5fd">
@@ -161,7 +178,8 @@
   발행일은 열립니다).<br>
   <span style="color:#b45309">⚠️ 저장은 <b>그 두 날짜만</b> 건드립니다 — 같은 줄의 금액 ·
   입금 · 납품일 · 세금계산서 · 납기요청일은 한 글자도 바뀌지 않습니다. 그 사이 내자 정리나
-  PO 시스템에서 누가 먼저 고쳤으면 <b>덮어쓰지 않고</b> 「다시 불러오기」를 띄웁니다.</span>
+  PO 시스템에서 누가 먼저 고쳤으면 <b>덮어쓰지 않고</b> 「다시 불러오기」를 띄웁니다.</span><br>
+  <span style="color:#065f46">✅ <b>2026-09-30 오전 운영에 나갔습니다</b>(A/S <code>1.8</code>).</span>
 </div>
 
 <div class="ok" style="background:#eff6ff;border-color:#93c5fd">
@@ -182,8 +200,8 @@
   이와 함께 <b>미리보기 사진이 더 이상 잘리지 않습니다</b> — 도면이나 명판처럼 가로로 긴
   사진의 양 끝이 사라지던 것을 고쳤습니다. <b>주간보고의 인수번호</b>를 누르면 그 수리 건으로
   바로 넘어갑니다.<br>
-  <span style="color:#b45309">⚠️ 아직 <b>운영(NAS)에는 나가지 않았습니다.</b> 개발 PC 에서
-  눈으로 확인했고 코드는 올려 두었습니다 — 다음 배포 때 함께 나갑니다.</span>
+  <span style="color:#065f46">✅ <b>2026-09-30 오전 운영(NAS)에 나갔습니다</b>(A/S <code>1.8</code>).
+  9월 29일에는 개발 PC 에서 눈으로만 확인한 상태였는데, 열한째 배포로 함께 나갔습니다.</span>
 </div>
 
 <div class="ok" style="background:#ecfdf5;border-color:#6ee7b7">
@@ -208,8 +226,9 @@
 
 <div class="ok" style="background:#ecfdf5;border-color:#6ee7b7">
   <b>🎉 그날 낮 — 배포를 세 번. 다섯 사이트가 최신이 됐습니다.</b><br>
-  지금 도는 것: 포털 <code>1.5</code> · A/S <code>1.7</code> · 계측기 <code>1.3</code> ·
-  개선요청 <code>0.3</code> · <b>PO <code>0.2</code></b>.<br>
+  그때 도는 것이 된 판: 포털 <code>1.5</code> · A/S <code>1.7</code> · 계측기 <code>1.3</code> ·
+  개선요청 <code>0.3</code> · <b>PO <code>0.2</code></b>.
+  (지금 도는 판은 맨 위 카드에 있습니다.)<br>
   🔴 <b>알림 종이 다섯 사이트에서 똑같이 돕니다.</b> 개선요청·계측기가 9월 18일 판에
   멈춰 있어서, 포털이 알림을 물어도 <b>조용히 빈 목록</b>을 받고 있었습니다. 이제
   어느 사이트에 있든 같은 알림을 보고, 눌러서 그 시스템으로 건너갈 수 있습니다.<br>
@@ -268,10 +287,12 @@
 </div>
 
 <div class="ok" style="background:#eff6ff;border-color:#93c5fd">
-  <b>🔵 다음 — 여섯째 사이트, 휴가 시스템 배포</b><br>
+  <b>🔵 (9월 29일 오전에 쓴 글) 다음 — 여섯째 사이트, 휴가 시스템 배포</b><br>
   코드는 9월 22일에 끝났습니다(3700번). <b>배포 준비는 아직 없습니다</b> —
   런북 · 설정 파일 · 이미지 · 주소 · 백업 등록을 만들어야 합니다.
-  개선요청을 세울 때와 거의 같은 모양이고, 파일 첨부가 없어 그때보다 간단합니다.
+  개선요청을 세울 때와 거의 같은 모양이고, 파일 첨부가 없어 그때보다 간단합니다.<br>
+  <span style="color:#065f46">✅ <b>그날 저녁에 실제로 배포돼 운영에 섰습니다</b> —
+  위의 🎉 휴가 카드를 봐 주세요. 이 글은 그 전에 쓴 기록입니다.</span>
 </div>
 
 <hr style="margin:2rem 0;border:0;border-top:2px solid #e5e7eb">
@@ -304,21 +325,41 @@
 
 <div class="now-list">
 
-  <div class="now-item now">
+  <div class="now-item fin">
     <div class="now-head">
-      <span class="now-mark">●</span>
-      <span class="now-title">PO <b>남은 작은 것 둘</b> — 그다음은 A/S 정리와 배포</span>
-      <span class="chip">PO</span>
-      <span class="chip run">다음</span>
+      <span class="now-mark">✔</span>
+      <span class="now-title"><b>열한째 배포</b> — A/S <code>1.8</code> · PO <code>0.3</code></span>
+      <span class="chip">전체</span>
+      <span class="chip fin">끝</span>
     </div>
     <p class="now-body">
-      견적서 기능은 <b>다 끝났다.</b> 남은 것은 손이 적게 가는 둘이다 —
-      ① <b>새 견적서 화면의 첨부 칸</b>(아래 참조), ② <b>두 사이트를 잇는 링크 주소</b>.
+      2026-09-30 오전 9시 30분. A/S 와 PO 를 <b>함께</b> 올렸다.
+      <b>정지 18초</b> · 배포 검사 <b>통과 118 · 실패 0</b> · <b>마이그레이션 0개</b>(DB 는 안 건드렸다).
+      나머지 네 사이트(포털 · 계측기 · 개선요청 · 휴가)는 <b>안 멈췄다.</b>
     </p>
     <p class="now-note">
-      🔴 ② 는 지금 <b>깨진 링크</b>다 — PO 의 내자 화면에서 수리 건을 누르면 PO 자기 주소로 간다.
+      9월 29일 낮 배포 이후 쌓여 있던 <b>커밋 18개</b>(A/S 16 · PO 2)가 전부 나갔다 —
+      엔지니어 권한 · 사진 손보기 · 내자 정리 발행일 구역 · 「PO 발행일」 이름 통일 ·
+      주간보고 인수번호 링크 · 「줄여서 받기」 숫자. 자세한 것은 <b>맨 위 세 장</b>에 있다.
+    </p>
+  </div>
+
+  <div class="now-item fin">
+    <div class="now-head">
+      <span class="now-mark">✔</span>
+      <span class="now-title">PO <b>남은 작은 것 둘</b> — 둘 다 끝났다</span>
+      <span class="chip">PO</span>
+      <span class="chip fin">끝</span>
+    </div>
+    <p class="now-body">
+      견적서 기능은 <b>다 끝났다.</b> 남아 있던 둘도 <b>09-28 에 들어왔다</b> —
+      ① <b>새 견적서 화면의 첨부 칸</b>(조각 3k), ② <b>두 사이트를 잇는 링크 주소</b>(조각 3i).
+    </p>
+    <p class="now-note">
+      🔴 ② 는 그전까지 <b>깨진 링크</b>였다 — PO 의 내자 화면에서 수리 건을 누르면 PO 자기 주소로 갔다.
       양쪽에 설정 한 줄씩(<code>PO_APP_BASE_URL</code> · <code>AS_APP_BASE_URL</code>)을 두고
-      그 값으로 링크를 만들어야 한다. <b>배포 때도 그 두 줄이 함께 간다.</b><br>
+      그 값으로 링크를 만든다 — <b>설정이 없으면 링크 대신 글자만</b> 보인다.
+      <b>배포 때도 그 두 줄이 함께 간다.</b><br>
       전역 보안 헤더가 생기면서 <b>거짓이 된 주석 두 곳</b>(첨부 내려받기 통로와 그 시험)도
       이때 함께 고친다 — 지금 「이 사이트에는 전역 헤더가 없다」고 적혀 있다.
     </p>
@@ -348,9 +389,9 @@
   <div class="now-item fin">
     <div class="now-head">
       <span class="now-mark">✔</span>
-      <span class="now-title">연락서 <b>일괄 이식 — 코드 완료</b></span>
+      <span class="now-title">연락서 <b>일괄 이식 — 운영에서 돌았다</b></span>
       <span class="chip">A/S</span>
-      <span class="chip fin">배포 대기</span>
+      <span class="chip fin">운영 완료</span>
     </div>
     <p class="now-body">
       네 조각이 다 끝났다 — 원본 1.8GB 안전 확보(S5-0) · 흔적에 id 싣기(S5-A) ·
@@ -360,8 +401,9 @@
     <p class="now-note">
       🔴 <b>지금 돌렸으면 사용 부품을 되돌릴 수 없었다</b> — 표에 출처 칸이 없고 흔적에도 id 가
       <b>0행</b>이었다. S5-A 가 그것을 막았고, 그래서 <b>러너보다 먼저</b> 두었다.<br>
-      🔴 <b>남은 것은 운영 배포와 실행뿐이다.</b> 운영 DB 는 이 PC 에서 못 닿는다 —
-      러너가 <code>dss-as-tools</code> 이미지에 들어가야 한다.
+      🔴 <b>9월 29일 오전에 운영에서 돌았다</b> — 연락서 469장 · 첨부 13,693개 ·
+      사용 부품 1,110건이 들어갔다. 운영 DB 는 이 PC 에서 못 닿아서, 러너를
+      <code>dss-as-tools</code> 이미지에 담아 그날 배포와 함께 내보냈다.
     </p>
   </div>
 
@@ -417,7 +459,9 @@
   <i class="d" style="width:100%"></i>
 </div>
 <p class="barnote">
-  일감 <b>19개 전부 끝</b> — 🔴 <b>코드는 다 됐다. 남은 것은 운영 배포와 실행뿐이다.</b>
+  일감 <b>19개 전부 끝</b> — 🔴 <b>9월 29일 오전에 운영에서 돌았다</b>
+  (469장 · 첨부 13,693개 · 사용 부품 1,110건). 남은 것은
+  「사람이 골라야 하는」 <b>18장</b>뿐이다(화면에서 한 장씩).
 </p>
 
 <h3>진행된 것</h3>
@@ -460,18 +504,19 @@
 
 <div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#fef2f2;
      border-left:3px solid #991b1b;border-radius:0 .3rem .3rem 0;font-size:.9rem">
-  🔴 <b>운영에서 남은 것</b> — 운영 DB 는 이 PC 에서 못 닿는다(NAS compose 가 포트를 일부러
-  안 열어 뒀다). 러너가 <code>dss-as-tools</code> 이미지에 들어가야 하고, 연락서 원본을 붙일
-  볼륨도 지금 마운트에 없다. 절차 일곱 단계는 <code>2026-09-28-결정할것.html</code> 3번.<br>
-  🔴 <b>배포 전에 할 것 하나</b> — <b>출하 잠금 갈래의 시험</b>. 그 갈래에서 부품이 빈 배열을
+  🔴 <b>운영에서 남았던 것 — 9월 29일에 풀렸다.</b> 운영 DB 는 이 PC 에서 못 닿고(NAS compose 가
+  포트를 일부러 안 열어 뒀다) 러너가 <code>dss-as-tools</code> 이미지에 들어가야 했는데,
+  그 이미지를 배포하고 연락서 원본 볼륨을 붙여 <b>그날 오전에 실제로 돌렸다.</b>
+  절차 일곱 단계는 <code>2026-09-28-결정할것.html</code> 3번.<br>
+  🔴 <b>아직 안 한 것 하나</b> — <b>출하 잠금 갈래의 시험</b>. 그 갈래에서 부품이 빈 배열을
   돌려준다는 보장이 지금은 코드 읽기로만 선다.
 </div>
 
 <p class="now-note">
-  🔴 <b>운영에서 돌리는 것은 별개의 일이다.</b> NAS 의 운영 DB 는 이 PC 에서 못 닿는다 —
-  compose 가 포트를 일부러 안 열어 뒀다. 러너가 <code>dss-as-tools</code> 컨테이너에 들어가야 하고
-  그것은 <b>새 이미지 배포</b>다. 연락서 원본을 붙일 볼륨도 지금 마운트에 없다.
-  그 앞에 <b>운영 백업</b>이 반드시 온다.
+  🔴 <b>운영에서 돌리는 것은 별개의 일이었다.</b> NAS 의 운영 DB 는 이 PC 에서 못 닿는다 —
+  compose 가 포트를 일부러 안 열어 뒀다. 러너가 <code>dss-as-tools</code> 컨테이너에 들어가야 했고
+  그것은 <b>새 이미지 배포</b>였다. 연락서 원본을 붙일 볼륨도 함께 붙였다.
+  그 앞에 <b>운영 백업</b>을 먼저 떴다. <b>9월 29일 오전에 그렇게 해서 돌았다.</b>
 </p>
 
 <h3>🔴 2026-09-25 실측 — 「469장」이라는 이름이 규모를 잘못 말하고 있었다</h3>
@@ -532,10 +577,11 @@
   같은 DB 를 둘이 본다(설계서 B-2. 이것은 예외이고, 새로 생기는 시스템은 이렇게 하지 않는다).
 </p>
 
-<div class="bar"><i class="d" style="width:97.5%"></i></div>
+<div class="bar"><i class="d" style="width:100%"></i></div>
 <p class="barnote">
-  조각 <b>39개 끝</b> · <b>1개 남음(배포)</b> —
-  🔴 <b>코드는 끝났다.</b> 견적서 전부 · 두 사이트를 잇는 링크 · 새 견적서 화면의 첨부 칸 ·
+  조각 <b>40개 전부 끝</b> — 🔴 <b>배포까지 끝났다.</b> PO 는 9월 29일 오전에 운영에 섰고
+  (<code>0.1</code> 첫 설치), 9월 30일 열한째 배포로 <b><code>0.3</code></b> 이 되었다.
+  코드는 견적서 전부 · 두 사이트를 잇는 링크 · 새 견적서 화면의 첨부 칸 ·
   운영 이미지를 굽는 Dockerfile 까지 9월 28일 하루에 들어왔다.<br>
   🔴 <b>A/S 정리(옛 조각 4)는 이 분모에서 뺐다</b> — 2026-09-28 결정으로 <b>이번에 하지 않는다.</b>
   PO 가 운영에서 도는 것을 보고 따로 정한다(자료가 같은 DB 라 두 곳에 같은 화면이 있어도
@@ -607,10 +653,10 @@
 <h3>🔴 진행할 것 — 실측한 규모</h3>
 <table class="slices">
   <tr><th>조각</th><th>무엇</th><th class="c">코드</th><th>걸려 있는 것</th></tr>
-  <tr class="now"><td><b>5</b></td><td><b>배포</b> — 연락서 이식 + PO 첫 배포</td><td class="c">—</td>
-      <td>🔴 <b>HIGH</b> · <b>지금 여기다.</b> 코드·이미지·문서는 다 됐고
-          <b>NAS 에서 사람이 하는 일</b>만 남았다. 점검표
-          <code>dss-deploy/runbook/11-배포-점검표.html</code> 하나로 간다</td></tr>
+  <tr class="fin"><td><b>5</b></td><td><b>배포</b> — 연락서 이식 + PO 첫 배포</td><td class="c">—</td>
+      <td>🔴 <b>끝났다</b>(9월 29일 오전). 점검표
+          <code>dss-deploy/runbook/11-배포-점검표.html</code> 하나로 갔다.
+          그 뒤로 PO 는 <code>0.2</code> → <b><code>0.3</code></b>(9월 30일 열한째 배포)</td></tr>
   <tr class="todo"><td>뒤로 미룸</td><td><b>A/S 쪽 견적서·내자 걷어내기</b>(옛 조각 4)</td><td class="c">3.7만 줄</td>
       <td>🔴 <b>이번에 하지 않는다</b>(2026-09-28 결정). PO 가 운영에서 도는 것을 보고 정한다.
           지우면 돌아갈 곳이 없고, 같은 DB 라 두 곳에 있어도 자료가 갈라지지 않는다.
@@ -642,6 +688,11 @@
   <tr class="todo"><td class="c">남음</td><td>백업 → 연락서 → <b>확인 게이트</b> → PO → 포털</td>
       <td>점검표 3~7단계</td></tr>
 </table>
+
+<p class="now-note">
+  ✅ <b>이 표는 2026-09-28 저녁에 적은 기록입니다.</b> 위의 「다음」·「남음」 다섯 줄은
+  <b>9월 29일 오전 배포에서 전부 끝났습니다</b>(맨 위 카드 참조). 기록이라 지우지 않고 둡니다.
+</p>
 
 <div class="fact" style="margin:.8rem 0;padding:.7rem .9rem;background:#ecfdf5;
      border-left:3px solid #065f46;border-radius:0 .3rem .3rem 0;font-size:.9rem">
@@ -984,8 +1035,9 @@
 
 <h3>🔴 운영(NAS) 배포 때 함께 가는 것</h3>
 <p>
-  개선요청 마이그레이션 <code>0003</code>(확인 기록 표)이 <b>다음 배포 때 운영에서도 돈다</b>.
-  새 표를 만들 뿐이라 파괴적이지는 않지만, <b>배포 전에 운영 백업</b>을 뜬다.
+  개선요청 마이그레이션 <code>0003</code>(확인 기록 표)이 <b>2026-09-29 오후 배포에서 운영에도 들어갔다</b>
+  (개선요청 <code>0.2</code>와 함께 4줄). 새 표를 만들 뿐이라 파괴적이지 않았고, 배포 전에 운영 백업을 떴다.<br>
+  <span style="color:#065f46">✅ 이 글은 그 전에 쓴 기록이다 — 지금은 끝난 일이다.</span>
 </p>
 
 <h2>시스템 현황</h2>
@@ -993,20 +1045,22 @@
 <table>
   <tr><th>저장소</th><th class="c">포트</th><th class="c">상태</th><th>지금</th></tr>
   <tr><td><b>A/S</b> 관리 시스템</td><td class="c">3000</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>연락서 판독기 <b>완료</b> — 남은 것은 <b>469장 일괄</b>(갈래 ①)</td></tr>
+      <td><b>운영 판 <code>1.8</code></b> · 연락서 판독기 <b>완료</b> —
+          469장 일괄도 9월 29일에 돌았다(갈래 ①)</td></tr>
   <tr><td><b>통합 로그인</b>(포털)</td><td class="c">3100</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>알림 통로 <b>셋</b>(A/S · 휴가 · 개선요청) · 타일 빨간 점 연결 완료</td></tr>
+      <td><b>운영 판 <code>1.5</code></b> · 알림 통로 <b>셋</b>(A/S · 휴가 · 개선요청) ·
+          타일 빨간 점 연결 완료</td></tr>
   <tr><td><b>계측기</b> 관리</td><td class="c">3300</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>홈 화면 아이콘이 아직 없다 · 알림 종도 없다</td></tr>
+      <td><b>운영 판 <code>1.3</code></b> · 홈 화면 아이콘이 아직 없다 · 알림 종도 없다</td></tr>
   <tr><td><b>개선요청</b></td><td class="c">3500</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>알림 종 · 포털 연결까지 <b>완료</b></td></tr>
-  <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st run">개발 중</span></td>
-      <td>🔴 <b>코드가 다 끝났다</b> — 견적서 전부(첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 ·
+      <td><b>운영 판 <code>0.3</code></b> · 알림 종 · 포털 연결까지 <b>완료</b></td></tr>
+  <tr><td><b>PO</b> 견적·발주</td><td class="c">3600</td><td class="c"><span class="st done">운영 중</span></td>
+      <td><b>운영 판 <code>0.3</code></b> · 🔴 <b>9월 29일 오전에 운영에 섰다</b>
+          (첫 설치 <code>0.1</code>). 견적서 전부(첨부 · 팝업 · 수기 엑셀 · 결재 · 발행 ·
           인쇄 · 폴더 열기 · 보안 헤더) · 두 사이트 링크 · 새 견적서 첨부 칸 · Dockerfile.
-          전부 눈 확인. 🔴 <b>남은 것은 배포뿐</b> — 이미지 <code>dss-po:0.1</code> 을 이미 구웠고
-          포털 등록도 끝났다</td></tr>
+          전부 눈 확인. 9월 30일 <code>0.3</code> 부터 <b>엔지니어도 내자 정리를 쓴다</b></td></tr>
   <tr><td><b>휴가 관리</b></td><td class="c">—</td><td class="c"><span class="st done">운영 중</span></td>
-      <td>알림 통로 있음</td></tr>
+      <td><b>운영 판 <code>0.1</code></b> · 알림 통로 있음</td></tr>
   <tr><td><b>회사 홈페이지</b></td><td class="c">3200</td><td class="c"><span class="st wait">배포 대기</span></td>
       <td>Vercel 준비 중</td></tr>
   <tr><td><b>@dss/ui</b> 공용 묶음</td><td class="c">—</td><td class="c"><span class="st done">쓰는 중</span></td>
@@ -1027,7 +1081,8 @@
       <td>🔴 <b>하지 않기로 했다</b>(2026-09-28 사용자) — A/S 안의 PO·견적서는 옮긴 뒤 걷어낸다.
           없어질 화면에 고친 것은 버려진다. 위 「날 JSON」 절 참조</td></tr>
   <tr><td><b>출하 잠금 갈래의 시험</b> — 연락서 이식</td><td class="c">A/S</td>
-      <td>🔴 <b>469장을 돌리기 전에.</b> 잠긴 건에서 부품이 <b>말없이 건너뛰어진다</b>(실패가 아니라
+      <td>🔴 <b>469장은 9월 29일에 이미 돌았다</b> — 이 시험을 못 갖춘 채로 갔다.
+          잠긴 건에서 부품이 <b>말없이 건너뛰어진다</b>(실패가 아니라
           경고만). 그 갈래가 빈 배열을 돌려준다는 보장이 지금은 <b>코드 읽기로만</b> 선다 —
           되돌리기가 기대는 자리다</td></tr>
   <tr><td><b>주인 없는 잔해</b> 치우기</td><td class="c">A/S</td>
