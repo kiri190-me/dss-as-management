@@ -10,10 +10,7 @@ import {
   repairCaseCustomerStatus,
   repairCases,
 } from "../schema";
-import {
-  listDomesticOrderDueDatesForRepairCases,
-  listQuoteInfoForRepairCases,
-} from "./domestic-orders";
+import { listQuoteInfoForRepairCases } from "./domestic-orders";
 import { listRepairCasesByCustomerId } from "./repair-cases";
 
 /**
@@ -72,13 +69,13 @@ export type CustomerPortalItem = {
   /** 발주발행일 — 엑셀의 「ICD PO 발행일」 · 「P.O 발행 일」. */
   orderIssuedDate: string | null;
   /**
-   * 내자 정리의 **납기요청일 전부** — JUSUNG 표의 「납품 요청일」.
+   * 접수 건의 **고객 요청 납기일** — JUSUNG 표의 「납품 요청일」.
    *
-   * 🔴 하나로 접어 두지 않는다. 분할 발주·분할 납품이라 여럿일 수 있고, 그리는
-   * 규칙은 내자 정리 목록이 이미 갖고 있다(formatDomesticOrderDueDateLines).
-   * 여기서 접으면 같은 값이 두 화면에서 다른 모양이 된다.
+   * ⚠️ 내자 정리의 납기요청일(domestic_order_due_dates)이 **아니다**
+   * (2026-09-30 사용자 확인 — 까닭은 domain/customer-portal-forms.ts 의
+   * PortalSystemField 주석에).
    */
-  deliveryRequestDates: { dueDate: string; note: string | null }[];
+  customerRequestedDueDate: string | null;
   /**
    * 그 고객사 양식에서 **사람이 줄마다 손으로 적은 값들**(키 → 글자).
    * 아직 아무것도 안 적었으면 빈 객체다. 어느 키가 뜻이 있는지는 양식이
@@ -136,11 +133,7 @@ export async function listPortalItemsForCustomer(
   // 여기가 "출하 완료 제외"의 유일한 근거다.
   const cases = allCases.filter((row) => row.status !== "SHIPMENT_COMPLETED");
 
-  const caseIds = cases.map((c) => c.id);
-  const quoteInfo = await listQuoteInfoForRepairCases(caseIds);
-  // 「납품 요청일」 — 접수마다 따로 읽으면 줄 수만큼 왕복이 생긴다. 한 번에 읽고
-  // 접수별로 묶어 둔다(위 견적 정보와 같은 방식).
-  const dueDatesByCase = await listDomesticOrderDueDatesForRepairCases(caseIds);
+  const quoteInfo = await listQuoteInfoForRepairCases(cases.map((c) => c.id));
 
   const statusRows = await db
     .select({
@@ -176,10 +169,8 @@ export async function listPortalItemsForCustomer(
       statusVersion: status?.version ?? null,
       endUserName: row.endUserName,
       orderIssuedDate: quote?.orderIssuedDate ?? null,
-      deliveryRequestDates: (dueDatesByCase.get(row.id) ?? []).map((due) => ({
-        dueDate: due.dueDate,
-        note: due.note,
-      })),
+      // 「납품 요청일」 — 접수 건에 붙은 값이라 따로 읽을 것이 없다.
+      customerRequestedDueDate: row.customerRequestedDueDate,
       formValues: toStringMap(status?.formValues),
     };
   });
@@ -236,7 +227,7 @@ export async function listPortalItemsForCustomer(
     // 접수가 아직 없으니 발주도, 손으로 적을 자리도 없다. 그 자리는
     // repair_case_customer_status 가 갖고 있고 그 표는 접수를 가리킨다.
     orderIssuedDate: null,
-    deliveryRequestDates: [],
+    customerRequestedDueDate: null,
     formValues: {},
   }));
 

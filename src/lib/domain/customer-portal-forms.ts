@@ -61,6 +61,18 @@ import { classifyRfProductByModelName } from "./rf-product-kind";
  *
  * `orderIssuedDate` 는 내자 정리의 **발주발행일**(domestic_orders.order_issued_date)
  * 이다 — 엑셀의 「ICD PO 발행일」 · 「P.O 발행 일」이 가리키는 것이 이것이다.
+ *
+ * 🔴 `customerRequestedDueDate` 는 접수 건의 **「고객 요청 납기일」**
+ * (repair_cases.customer_requested_due_date)이다 — JUSUNG 표의 「납품 요청일」이
+ * 가리키는 것이 이것이다(사용자 확인 2026-09-30 — 「납품 요청일이 내자 정리의
+ * 납기 요청일을 따라가고 있지 못하고 있어. 수리건 상세에 있는 [고객 요청
+ * 납기일]을 가져오게 해봐」).
+ *
+ * ⚠️ **내자 정리의 납기요청일(domestic_order_due_dates)이 아니다.** 처음에는
+ * 그쪽으로 만들었다가 사용자가 실제 화면을 보고 바로잡았다. 이름이 비슷해
+ * 다음 사람이 「내자 쪽이 맞지 않나」 하고 되돌리기 쉬운 자리다 — 되돌리기
+ * 전에 위 문장을 읽을 것. 접수 건에 붙은 값이라 한 건에 하나뿐이고, 그래서
+ * 여러 줄로 늘일 일도 없다.
  */
 export type PortalSystemField =
   | "intakeNumber"
@@ -71,7 +83,8 @@ export type PortalSystemField =
   | "receivedAt"
   | "quoteNumber"
   | "quoteIssuedDate"
-  | "orderIssuedDate";
+  | "orderIssuedDate"
+  | "customerRequestedDueDate";
 
 /**
  * 계산해서 내는 값의 이름.
@@ -80,19 +93,6 @@ export type PortalSystemField =
  * (partsNameFromModelName). 🔴 모르는 모델명은 **빈칸**이다.
  */
 export type PortalDerivedField = "partsName";
-
-/**
- * 시스템이 아는 값인데 **한 칸에 여러 줄**일 수 있는 것.
- *
- * `deliveryRequestDates` 는 내자 정리의 납기요청일이다(사용자 결정 2026-09-30 —
- * 「납품 요청일은 수리건 상세의 내자 납기 요청일을 가져오면 돼」). 분할 발주 ·
- * 분할 납품이라 한 접수에 날짜가 여럿일 수 있고, 🔴 그 여럿을 **접지 않고 아래로
- * 늘린다** — 내자 정리 목록이 이미 그렇게 그린다
- * (domain/domestic-order-list.ts 의 formatDomesticOrderDueDateLines, 그 함수
- * 주석에 "옆이 아니라 아래로"의 까닭이 있다). 주성 엑셀에도 한 칸에 여러 줄을
- * 적은 자리가 실제로 있다.
- */
-export type PortalSystemLinesField = "deliveryRequestDates";
 
 /** 손으로 적는 칸이 받는 것. 날짜 칸은 화면이 날짜 고르개를 준다. */
 export type PortalManualValueKind = "text" | "date";
@@ -110,7 +110,6 @@ export type PortalEmptyMark = "SLASH";
 export type PortalFormColumn =
   | { key: string; label: string; kind: "ROW_NUMBER" }
   | { key: string; label: string; kind: "SYSTEM"; field: PortalSystemField }
-  | { key: string; label: string; kind: "SYSTEM_LINES"; field: PortalSystemLinesField }
   | { key: string; label: string; kind: "DERIVED"; derived: PortalDerivedField }
   | { key: string; label: string; kind: "STATUS" }
   | { key: string; label: string; kind: "NOTE" }
@@ -258,8 +257,10 @@ const JUSUNG_FORM: CustomerPortalForm = {
     {
       key: "deliveryRequestDate",
       label: "납품 요청일",
-      kind: "SYSTEM_LINES",
-      field: "deliveryRequestDates",
+      kind: "SYSTEM",
+      // 🔴 접수 건의 「고객 요청 납기일」이다 — 내자 정리의 납기요청일이 아니다.
+      //    까닭은 PortalSystemField 주석에 있다(2026-09-30 사용자 확인).
+      field: "customerRequestedDueDate",
     },
     {
       key: "repairRequestDate",
@@ -312,21 +313,26 @@ export function findPortalFormForCustomerName(
 /**
  * ICD 표의 「Parts 명」 — 모델명에서 계산한다. 모르는 모델명은 null(빈칸).
  *
- * ■ 🔴 엑셀에 실제로 적힌 글자를 그대로 쓴다
+ * ■ 네 갈래다 — 사용자가 준 표기 그대로(2026-09-30)
  *
- * ICD 현황표의 그 칸에는 「RF Gen. (B/S)」·「RF Matching Box (B/S)」가 적혀
- * 있다(실측). 모델명 앞 세 글자가 말해 주는 것은 **제너레이터인가 매쳐인가**
- * 까지고(rf-product-kind.ts), 뒤의 `(B/S)` 는 엑셀에 붙어 있는 글자 그대로다.
+ *   매쳐 · 소스        RF Matching Box (S)
+ *   매쳐 · 바이어스    RF Matching Box (B)
+ *   제너레이터 · 소스  RF Gen. (S)
+ *   제너레이터 · 바이어스  RF Gen. (B)
  *
- * 접두사는 Source 인지 Bias 인지까지 알려 주지만 **그 정보로 `(B/S)` 를
- * `(S)`·`(B)` 로 바꾸지 않는다.** 엑셀이 실제로 그렇게 적는지 확인된 바가 없고,
- * 여기서 짐작하면 고객사 표에 우리가 지어낸 글자가 적힌다. 확인되면 이 함수
- * 한 곳만 고치면 된다 — 분류 자체는 이미 band 까지 갖고 있다.
+ * 종류(RFG/MB)도 주파수 쪽(Source/Bias)도 **모델명 앞 세 글자**가 말해 준다
+ * (rf-product-kind.ts). 처음에는 `(B/S)` 로 두었는데 — 엑셀에서 그 글자를 봤고
+ * 가르는 근거가 확인되지 않아 짐작하지 않았다 — 사용자가 위 네 가지를 확정해
+ * 주어 band 로 가른다.
+ *
+ * 🔴 모르는 모델명은 그대로 빈칸이다. 짐작해 채우면 고객사 표에 우리가 지어낸
+ * 글자가 아무 오류 없이 적힌다.
  */
 export function partsNameFromModelName(modelName: string | null | undefined): string | null {
   const classified = classifyRfProductByModelName(modelName);
   if (!classified) return null;
-  return classified.kind === "RFG" ? "RF Gen. (B/S)" : "RF Matching Box (B/S)";
+  const base = classified.kind === "RFG" ? "RF Gen." : "RF Matching Box";
+  return `${base} (${classified.band === "SOURCE" ? "S" : "B"})`;
 }
 
 /** 이 양식에서 손으로 적는 칸들. 차례는 열 차례 그대로다. */

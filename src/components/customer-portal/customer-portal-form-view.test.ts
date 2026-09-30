@@ -95,7 +95,7 @@ describe("🔴 1. 고객에게 나가는 것이 안 바뀌었다", () => {
     for (const leaked of [
       "item.endUserName",
       "item.orderIssuedDate",
-      "item.deliveryRequestDates",
+      "item.customerRequestedDueDate",
       "item.formValues",
     ]) {
       assert.ok(!body.includes(leaked), `${leaked} 가 고객 쪽으로 샌다`);
@@ -321,7 +321,15 @@ describe("표를 그리는 일은 양식 정의만 보고 한다", () => {
     assert.ok(body.includes("readManualValues(form, item.formValues)"));
   });
 
-  test("여러 납기일은 내자 정리와 **같은 함수**로 그린다", () => {
-    assert.ok(body.includes("formatDomesticOrderDueDateLines(item.deliveryRequestDates)"));
+  test("🔴 「납품 요청일」은 접수 건의 고객 요청 납기일을 그대로 그린다", () => {
+    assert.ok(
+      body.includes("case \"customerRequestedDueDate\": return item.customerRequestedDueDate;"),
+      "그 칸을 그리는 자리가 사라졌다"
+    );
+    // 내자 납기요청일로 되돌아가면 이 화면이 그 함수를 다시 부르게 된다.
+    assert.ok(
+      !code(screen).includes("formatDomesticOrderDueDateLines"),
+      "내자 정리의 납기요청일로 되돌아갔다 — 2026-09-30 사용자 확인을 먼저 읽을 것"
+    );
   });
 });

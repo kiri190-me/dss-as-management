@@ -15,7 +15,6 @@ import {
   type CustomerPortalForm,
   type PortalSystemField,
 } from "@/lib/domain/customer-portal-forms";
-import { formatDomesticOrderDueDateLines } from "@/lib/domain/domestic-order-list";
 import CustomerLinkAddress from "./CustomerLinkAddress";
 import {
   issueCustomerLinkAction,
@@ -592,6 +591,8 @@ function systemValueOf(item: CustomerPortalItem, field: PortalSystemField): stri
       return item.quoteIssuedDate;
     case "orderIssuedDate":
       return item.orderIssuedDate;
+    case "customerRequestedDueDate":
+      return item.customerRequestedDueDate;
   }
 }
 
@@ -649,20 +650,6 @@ function FormItemRow({
             );
           case "SYSTEM":
             return <Cell key={column.key} value={systemValueOf(item, column.field)} />;
-          case "SYSTEM_LINES": {
-            // 지금 이 갈래의 칸은 「납품 요청일」 하나다. 여럿이면 아래로 늘린다 —
-            // 접는 규칙은 내자 정리 목록과 **같은 함수**가 정한다.
-            const lines = formatDomesticOrderDueDateLines(item.deliveryRequestDates);
-            return (
-              <td key={column.key} className="px-3 py-2 whitespace-nowrap text-zinc-700">
-                {lines.length === 0 ? (
-                  <span className="text-zinc-400">-</span>
-                ) : (
-                  lines.map((line) => <div key={line}>{line}</div>)
-                )}
-              </td>
-            );
-          }
           case "DERIVED":
             // 지금 이 갈래의 칸은 ICD 의 「Parts 명」 하나다. 모르는 모델명은 빈칸.
             return <Cell key={column.key} value={partsNameFromModelName(item.modelName)} />;

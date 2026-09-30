@@ -162,10 +162,15 @@ describe("🔴 손으로 적는 칸은 확정된 여섯뿐이다", () => {
     );
   });
 
-  test("「납품 요청일」은 내자 납기요청일이라 손으로 적지 않는다", () => {
+  test("🔴 「납품 요청일」은 접수 건의 **고객 요청 납기일**이다 — 내자 납기요청일이 아니다", () => {
     const column = formOf("JUSUNG").columns.find((c) => c.label === "납품 요청일");
     assert.ok(column);
-    assert.equal(column.kind, "SYSTEM_LINES");
+    assert.equal(column.kind, "SYSTEM", "손으로 적거나 여러 줄로 그리는 칸이 아니다");
+    assert.equal(
+      column.kind === "SYSTEM" ? column.field : null,
+      "customerRequestedDueDate",
+      "내자 정리의 납기요청일로 되돌아갔다 — 2026-09-30 사용자 확인을 먼저 읽을 것"
+    );
   });
 
   test("「Parts 명」은 모델명에서 계산한다 — 손으로 적지 않는다", () => {
@@ -369,17 +374,29 @@ describe("읽을 때도 지금 양식만 본다", () => {
   });
 });
 
-describe("🔴 Parts 명 — 모르는 모델명은 빈칸", () => {
-  test("제너레이터 접두사 셋", () => {
-    for (const model of ["RFK500FH-JS", "CFK300FH-IC", "KFK120M-AD"]) {
-      assert.equal(partsNameFromModelName(model), "RF Gen. (B/S)");
-    }
-  });
+describe("🔴 Parts 명 — 네 갈래, 모르는 모델명은 빈칸", () => {
+  /**
+   * 사용자가 준 표기 그대로다(2026-09-30). 🔴 여섯 접두사를 **각각** 값으로
+   * 못박는다 — 「RF 로 시작한다」 같은 느슨한 단언으로 바꾸면 소스와 바이어스가
+   * 뒤집혀도 시험이 통과한다.
+   */
+  const EXPECTED: Record<string, string> = {
+    "RFK500FH-JS": "RF Gen. (S)",
+    "CFK300FH-IC": "RF Gen. (B)",
+    "KFK120M-AD": "RF Gen. (B)",
+    "MBK500M-JS": "RF Matching Box (S)",
+    "CMK300M-IC": "RF Matching Box (B)",
+    "KMK120M-AD": "RF Matching Box (B)",
+  };
 
-  test("매쳐 접두사 셋", () => {
-    for (const model of ["MBK500M-JS", "CMK300M-IC", "KMK120M-AD"]) {
-      assert.equal(partsNameFromModelName(model), "RF Matching Box (B/S)");
-    }
+  for (const [model, expected] of Object.entries(EXPECTED)) {
+    test(`${model} → ${expected}`, () => {
+      assert.equal(partsNameFromModelName(model), expected);
+    });
+  }
+
+  test("🔴 소스와 바이어스가 실제로 갈린다 — 네 가지가 모두 나온다", () => {
+    assert.deepEqual(new Set(Object.values(EXPECTED)).size, 4);
   });
 
   test("모르는 모델명은 null — 짐작해 채우지 않는다", () => {
