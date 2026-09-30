@@ -96,7 +96,16 @@ export async function previewCustomerFormExportAction(input: {
 
 export type CustomerFormExportSaveResult =
   /** 🔴 `status` 를 화면까지 가져간다 — 화면이 「새로 만듦」과 「덮어씀」을 다른 결로 낸다. */
-  | { ok: true; message: string; fileName: string; status: "saved" | "replaced" | "unchanged" }
+  | {
+      ok: true;
+      message: string;
+      fileName: string;
+      status: "saved" | "replaced" | "unchanged";
+      /** `OLD` 로 옮긴 옛 파일 수. 0 이면 화면이 그 말을 하지 않는다. */
+      movedToOldCount: number;
+      /** 🔴 옮기지 못한 파일 이름 — 저장은 끝났고 이것만 사람이 손으로 옮기면 된다. */
+      moveFailedFileNames: string[];
+    }
   | { ok: false; message: string };
 
 /**
@@ -113,6 +122,11 @@ export type CustomerFormExportSaveResult =
  * 문장만이 아니라 `status` 도 함께 올린다 — 화면이 덮어쓴 경우만 눈에 띄게 낸다
  * (CustomerFormExportPanel: 경고 결).
  * 🔴 견적서 저장은 이 규칙과 무관하다 — 그쪽은 그대로 ` (2)` 로 넘어간다.
+ *
+ * ── 🔴 저장한 뒤 옛 파일이 `OLD` 로 간 결과도 함께 올린다 (2026-09-30) ─────
+ * 사내 공유폴더의 **파일이 움직인 일**이라 조용히 넘어가지 않는다. 몇 개를 옮겼는지와
+ * 옮기지 못한 파일 이름을 그대로 올려 화면이 저장 문장 아래에 얹는다. 🔴 옮기기가
+ * 실패해도 **저장은 성공이다** — `ok: false` 로 뒤집지 않는다(사람이 손으로 옮기면 된다).
  * ============================================================================
  */
 export async function saveCustomerFormExportAction(input: {
@@ -135,6 +149,8 @@ export async function saveCustomerFormExportAction(input: {
     fileName: saved.fileName,
     status: saved.status,
     message: saveMessage(saved.status, saved.fileName),
+    movedToOldCount: saved.archived.movedCount,
+    moveFailedFileNames: saved.archived.failedFileNames,
   };
 }
 

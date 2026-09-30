@@ -40,6 +40,12 @@ type CustomerFormExportPreview = Extract<
  * 사라지므로, **「새로 만듦」 · 「덮어씀」 · 「내용이 같아 그대로 둠」을 다른 문장으로**
  * 내고 덮어쓴 경우만 경고 결(호박색)로 낸다. 조용히 넘어가지 않는다.
  *
+ * ── 🔴 저장한 뒤 날짜가 지난 파일은 `OLD` 로 간다 (사용자 요청 2026-09-30) ──
+ * 지금까지 사람이 손으로 옮기던 일이다. 공유폴더의 **파일이 움직이는** 일이라 저장 문장
+ * 아래에 몇 개를 옮겼는지 얹고, 옮기지 못한 것이 있으면 이름과 함께 경고 결로 낸다.
+ * 🔴 옮기기가 실패해도 **저장은 성공이다** — 「저장은 끝났지만…」으로 말해 사람이 저장을
+ * 다시 누르지 않게 한다. 옮긴 것이 0개면 그 줄을 아예 내지 않는다.
+ *
  * ── [폴더 열기]는 **이미 설치된 도우미**를 쓴다 · 설치도 여기서 한다 ───────
  * 견적서 화면의 그 도우미다(레지스트리 `dss-folder`). PC 마다 한 벌뿐이라 **새 도우미를
  * 만들지 않는다** — 여기서 내미는 [설치 명령 복사]는 견적서 화면과 **똑같은 한 벌**을
@@ -102,6 +108,23 @@ export const PORTAL_FOLDER_UNC_COPIED_TEXT =
 
 export const PORTAL_FOLDER_UNC_COPY_BLOCKED_TEXT =
   "이 브라우저에서는 자동 복사가 막혀 있습니다 — 아래 주소를 직접 긁어 복사해 주세요.";
+
+/**
+ * 🔴 저장한 뒤 **공유폴더의 파일이 움직였다**는 사실을 말한다(사용자 요청 2026-09-30).
+ * 지금까지 사람이 손으로 옮기던 일이라, 조용히 해 두면 사람은 파일이 없어졌다고 생각한다.
+ * 옮긴 것이 0개면 이 줄 자체를 내지 않는다 — 늘 나는 줄은 읽히지 않는다.
+ */
+export function movedToOldText(count: number): string {
+  return `날짜가 지난 파일 ${count}개를 OLD 폴더로 옮겼습니다.`;
+}
+
+/**
+ * 🔴 **저장은 끝났다**는 말을 먼저 하고, 사람이 손으로 할 일을 짚는다. 옮기기가 막히는 것은
+ * 그 파일을 엑셀이 열어 두고 있을 때다 — 저장이 잘못된 것으로 읽히면 사람이 다시 누른다.
+ */
+export function moveFailedText(fileNames: readonly string[]): string {
+  return `저장은 끝났지만 OLD 폴더로 옮기지 못한 파일이 ${fileNames.length}개 있습니다 — 엑셀에서 열려 있지 않은지 확인하고 공유폴더에서 손으로 옮겨 주세요: ${fileNames.join(", ")}`;
+}
 
 /** 숨은 iframe 을 늦게 치운다 — 곧바로 떼면 주소 넘기기가 취소될 수 있다. */
 const HIDDEN_FRAME_RELEASE_MS = 10_000;
@@ -174,7 +197,18 @@ export default function CustomerFormExportPanel({
       const result = await saveCustomerFormExportAction({ customerId });
       // 🔴 덮어썼을 때는 경고 결로 낸다 — 사람이 손으로 고쳐 둔 내용이 사라졌을 수 있다.
       if (!result.ok) return [{ text: result.message, tone: "warning" as const }];
-      return [{ text: result.message, tone: result.status === "replaced" ? "warning" : "normal" }];
+      const lines: Notice[] = [
+        { text: result.message, tone: result.status === "replaced" ? "warning" : "normal" },
+      ];
+      // 옮긴 것이 0개면 아무 말도 하지 않는다 — 늘 나는 줄은 읽히지 않는다.
+      if (result.movedToOldCount > 0) {
+        lines.push({ text: movedToOldText(result.movedToOldCount), tone: "muted" });
+      }
+      // 🔴 저장은 이미 끝났다. 못 옮긴 것이 있어도 실패로 말하지 않고, 사람이 할 일만 짚는다.
+      if (result.moveFailedFileNames.length > 0) {
+        lines.push({ text: moveFailedText(result.moveFailedFileNames), tone: "warning" });
+      }
+      return lines;
     });
 
   const handleOpenFolder = () =>

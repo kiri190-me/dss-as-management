@@ -139,3 +139,71 @@ describe("🔴 이 화면에서 도우미를 설치할 수 있다", () => {
     assert.ok(panel.includes('import { copyText } from "@/components/common/copy-text";'));
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 저장 뒤 **공유폴더의 파일이 움직인 일**을 화면이 말하는가 (2026-09-30)
+ * ============================================================================
+ * 「공유폴더에 저장을 눌렀을 때, 파일의 날짜가 다른 파일은 OLD 파일을 만들어서 거기로
+ * 옮겨가도록 해줘.」 지금까지 사람이 손으로 하던 일을 자동으로 한다.
+ *
+ * 실제로 파일을 옮기는 것과 그 안전(무엇을 옮기고 무엇을 안 옮기는가 · 저장이 실패하면
+ * 안 옮긴다 · 어떤 경우에도 파일이 사라지지 않는다)은 unit 목록의
+ * lib/storage/customer-portal-archive.test.ts 가 값으로 지킨다. 여기서 못 박는 것은
+ * **화면이 그 일을 사람에게 어떻게 말하는가**다:
+ *
+ *  1. 몇 개를 옮겼는지 말한다. 옮긴 것이 0개면 그 줄을 **아예 내지 않는다**(늘 나는 줄은
+ *     읽히지 않는다).
+ *  2. 🔴 못 옮긴 파일이 있으면 **이름과 함께** 경고 결로 내고, 「저장은 끝났다」를 먼저
+ *     말한다 — 저장이 잘못된 것으로 읽히면 사람이 저장을 다시 누른다.
+ *  3. 🔴 옮기기가 실패해도 **저장은 성공이다** — 통로가 `ok: false` 로 뒤집지 않는다.
+ * ============================================================================
+ */
+describe("🔴 저장 뒤 파일이 OLD 로 간 것을 화면이 말한다", () => {
+  test("저장 문장이 그대로 첫 줄이다 — 옮긴 이야기가 그것을 밀어내지 않는다", () => {
+    assert.ok(
+      panelFlat.includes(
+        'const lines: Notice[] = [ { text: result.message, tone: result.status === "replaced" ? "warning" : "normal" }, ];'
+      ),
+      "저장 결과 문장이 첫 줄이 아니다"
+    );
+  });
+
+  test("몇 개를 옮겼는지 말한다 — 0개면 그 줄을 내지 않는다", () => {
+    assert.ok(panelFlat.includes("if (result.movedToOldCount > 0) {"), "옮긴 것이 0개여도 줄을 낸다");
+    assert.ok(
+      panelFlat.includes('lines.push({ text: movedToOldText(result.movedToOldCount), tone: "muted" });')
+    );
+    const at = panel.indexOf("export function movedToOldText");
+    assert.ok(at >= 0, "옮긴 개수를 말하는 문장이 없다");
+    const body = panel.slice(at, panel.indexOf("\n}", at));
+    assert.ok(body.includes("${count}개"), body);
+    assert.ok(body.includes("OLD 폴더로 옮겼습니다"), body);
+  });
+
+  test("🔴 못 옮긴 파일은 이름과 함께 경고 결로 낸다 — 「저장은 끝났다」를 먼저 말한다", () => {
+    assert.ok(panelFlat.includes("if (result.moveFailedFileNames.length > 0) {"));
+    assert.ok(
+      panelFlat.includes(
+        'lines.push({ text: moveFailedText(result.moveFailedFileNames), tone: "warning" });'
+      ),
+      "못 옮긴 파일을 경고 결로 내지 않는다"
+    );
+    const at = panel.indexOf("export function moveFailedText");
+    assert.ok(at >= 0, "못 옮긴 파일을 말하는 문장이 없다");
+    const body = panel.slice(at, panel.indexOf("\n}", at));
+    assert.ok(body.includes("저장은 끝났"), body);
+    assert.ok(body.includes("손으로 옮겨"), "사람이 할 일을 짚지 않는다");
+    assert.ok(body.includes("fileNames.join"), "못 옮긴 파일 이름을 말하지 않는다");
+  });
+
+  test("🔴 옮기기가 실패해도 저장은 성공이다 — 통로가 ok: false 로 뒤집지 않는다", () => {
+    assert.ok(actionFlat.includes("movedToOldCount: saved.archived.movedCount"), "옮긴 개수를 올리지 않는다");
+    assert.ok(
+      actionFlat.includes("moveFailedFileNames: saved.archived.failedFileNames"),
+      "못 옮긴 이름을 올리지 않는다"
+    );
+    // 옮기기 결과를 보고 성패를 가르는 곳이 없다 — 저장이 성공이면 그대로 성공이다.
+    assert.equal(actionFlat.includes("failedFileNames.length"), false, "옮기기 실패로 저장을 뒤집는다");
+  });
+});

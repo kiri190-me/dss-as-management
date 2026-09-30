@@ -22,6 +22,7 @@ import {
   findLatestPortalExportFile,
   resolveCustomerPortalArchiveRoot,
   savePortalExportFile,
+  type PortalArchiveMoveOutcome,
 } from "@/lib/storage/customer-portal-archive";
 
 /**
@@ -198,14 +199,24 @@ export type CustomerPortalExportSaveOutcome =
    * 🔴 `status` 를 그대로 올려 보낸다 — 「새로 만듦(saved)」 · 「덮어씀(replaced)」 ·
    * 「내용이 같아 손대지 않음(unchanged)」. 덮어쓰면 사람이 그 파일을 손으로 고쳐 둔 내용이
    * 사라지므로, 화면이 그 셋을 **다른 문장으로** 말해야 한다(actions/customer-portal-export.ts).
+   * `archived` 는 그 뒤에 옛 파일을 `OLD` 로 치운 결과다 — **저장의 성패와 무관하다.**
    */
-  | { ok: true; status: "saved" | "replaced" | "unchanged"; fileName: string }
+  | {
+      ok: true;
+      status: "saved" | "replaced" | "unchanged";
+      fileName: string;
+      archived: PortalArchiveMoveOutcome;
+    }
   | CustomerPortalExportFailure;
 
 /**
- * 만든 통합문서를 공유폴더에 **오늘 이름으로** 저장한다.
+ * 만든 통합문서를 공유폴더에 **오늘 이름으로** 저장하고, 그 뒤에 날짜가 다른 옛 파일을
+ * `OLD` 로 치운다(사용자 요청 2026-09-30 — 지금까지 사람이 손으로 하던 일이다).
  * 🔴 같은 이름이 있으면 덮어쓴다(storage/customer-portal-archive.ts 머리말) — 견적서 쪽은
- * 그대로 ` (2)` 로 넘어간다(storage/quote-archive.ts, 이번에 건드리지 않았다).
+ * 그대로 ` (2)` 로 넘어가고 옮기기도 없다(storage/quote-archive.ts, 이번에 건드리지 않았다).
+ *
+ * 🔴 옮기는 차례와 실패 처리는 **storage 안에** 있다 — 저장이 실패하면 아무것도 옮기지 않고,
+ * 옮기기가 실패해도 저장은 그대로 살아 있다. 여기서는 그 결과를 나르기만 한다.
  */
 export async function saveCustomerPortalExport(
   plan: CustomerPortalExportPlan
@@ -213,9 +224,15 @@ export async function saveCustomerPortalExport(
   const root = resolveCustomerPortalArchiveRoot();
   if (root === null) return failure("DISABLED", DISABLED_MESSAGE);
 
-  const saved = await savePortalExportFile({ root, fileName: plan.fileName, bytes: plan.bytes });
+  const saved = await savePortalExportFile({
+    root,
+    // 🔴 옮길 파일을 **그 고객사의 것으로만** 가린다 — 한 폴더에 세 고객사가 산다.
+    spec: plan.spec,
+    fileName: plan.fileName,
+    bytes: plan.bytes,
+  });
   if (saved.status === "failed") return failure("READ_FAILED", saved.reason);
-  return { ok: true, status: saved.status, fileName: saved.fileName };
+  return { ok: true, status: saved.status, fileName: saved.fileName, archived: saved.archived };
 }
 
 // ── 폴더 열기 ────────────────────────────────────────────────────────────
