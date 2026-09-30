@@ -1,0 +1,1 @@
+ALTER TABLE "attachments" ADD COLUMN "original_modified_at" timestamp with time zone;

@@ -179,3 +179,15 @@ src/components/dashboard/fault-symptom-result-link.test.ts
 # 세션에 링크가 새지 않는가. 서버 컴포넌트 판정과 서버 액션 사슬이 섞여 있어 통째로
 # 그릴 수 없다 — 이웃 product-info-history-disclosure.test.ts 와 같은 방법이다.
 src/components/repair-cases/detail/product-info-model-link.test.ts
+
+# 제품 모델 파일 목록의 「원본 수정일」 — 올린 날짜 **옆**에 원본 파일이 마지막으로
+# 저장된 때를 보인다(사용자 요청 2026-09-30). 값 판정은 unit 목록의
+# attachment-original-modified-at.test.ts 가 본다. 여기서 못 박는 것은 **화면과 통로가
+# 그 값을 실제로 그렇게 쓰는가**다: 🔴 모르는 파일을 올린 날짜로 메우는 길이 없는가
+# (메우면 아무 오류 없이 거짓이 표에 적힌다) · 🔴 옛 「올린 날짜」 표시가 그대로인가 ·
+# 🔴 보내는 쪽과 받는 쪽이 같은 함수를 지나는가 · 🔴 이 값 때문에 업로드가 막히는 길이
+# 없는가 · 🔴 접수 건 · 견적서 통로는 안 열렸는가 · 열이 하나 는 것이 표 폭 판정
+# (measureKey)에 들어가는가. 클라이언트 컴포넌트가 서버 액션을 직접 부르고 통로는
+# server-only 라 통째로 그릴 수 없다 — 이웃 product-model-customer-source.test.ts 와
+# 같은 방법으로 원본을 글자로 읽는다.
+src/components/product-models/product-model-file-modified-date.test.ts

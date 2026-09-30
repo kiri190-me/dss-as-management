@@ -25,6 +25,10 @@ import {
 } from "@/lib/domain/attachment-category";
 import { ATTACHMENT_KIND_LABELS, attachmentKindOf } from "@/lib/domain/attachment-list-filters";
 import {
+  ORIGINAL_MODIFIED_AT_PARAM,
+  originalModifiedAtParamValue,
+} from "@/lib/domain/attachment-original-modified-at";
+import {
   restoreAttachmentAction,
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
@@ -82,6 +86,18 @@ import {
  *
  * 올리기 폼과 휴지통은 전환 장치 **밖**에 둔다 — 보기 방식과 상관없이 늘 같은
  * 자리에 있어야 한다.
+ *
+ * ── 날짜가 둘이다 — 🔴 뜻을 섞지 말 것 (2026-09-30) ──────────────────────
+ *   올린 날짜    우리 시스템에 들어온 때(attachments.uploaded_at). 서버가 잰 값.
+ *   원본 수정일  **올린 사람 PC 에서 그 파일을 마지막으로 저장한 때.** 브라우저의
+ *                `File.lastModified` 를 올릴 때 함께 실어 보낸 값이다
+ *                (attachments.original_modified_at).
+ *
+ * 사장님이 이 열을 보는 까닭은 「이 양식이 언제 갱신된 것인가」이지 「언제
+ * 올렸는가」가 아니다(사용자 요청). 🔴 **모르는 파일은 빈칸으로 둔다** — 이 칸이
+ * 생기기 전에 올라온 파일은 전부 그렇고, 올린 날짜로 메우면 화면이 아무 오류 없이
+ * 거짓을 말한다. 못 믿을 값을 거르는 판정은 화면이 하지 않는다: 보내는 쪽도 받는
+ * 쪽도 domain/attachment-original-modified-at.ts 하나를 지난다.
  *
  * ── 권한 ─────────────────────────────────────────────────────────────────
  * `canManageFiles`(productModels.files WRITE)가 없으면 올리기 칸도 지우기 단추도
@@ -143,6 +159,17 @@ function formatTimestamp(iso: string): string {
   if (Number.isNaN(parsed.getTime())) return iso;
   return parsed.toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
 }
+
+/**
+ * 원본 수정일을 모르는 파일의 칸(2026-09-30).
+ *
+ * 이 칸이 생기기 전에 올라온 파일은 전부 이것이다 — 그 값을 받은 적이 없기
+ * 때문이다. 🔴 **올린 날짜로 대신 채우지 않는다**(사용자 결정): 그러면 화면은
+ * 아무 오류 없이 거짓을 말하고, 읽는 사람은 그 날짜를 보고 "이 양식은 최신이다"를
+ * 판단한다. 아주 비워 두지 않고 줄표를 적는 것은, 빈 칸이 "열이 한 칸 밀렸나"로
+ * 읽히기 때문이다.
+ */
+const UNKNOWN_ORIGINAL_MODIFIED_AT = "—";
 
 /** 화면 안에서 그대로 볼 수 있는 형식인가 — 서버(download 라우트)의 판정과 같은 목록이다. */
 function isViewableImage(mimeType: string): boolean {
@@ -297,6 +324,7 @@ function FilesTable({
   attachments,
   canManageFiles,
   hasPreviewable,
+  hasOriginalModifiedAt,
   isBusy,
   onDelete,
   onOpenImage,
@@ -312,6 +340,16 @@ function FilesTable({
    * measureKey 에도 함께 들어간다.
    */
   hasPreviewable: boolean;
+  /**
+   * 원본 수정일을 아는 파일이 목록에 하나라도 있는가(2026-09-30).
+   *
+   * 하나도 없으면 열 자체를 그리지 않는다 — 위 hasPreviewable 과 **같은 규칙이고
+   * 같은 까닭**이다. 이 칸이 생기기 전에 올라온 파일은 전부 모르는 값이라, 조건 없이
+   * 그리면 **예전 모델의 표가 전부 줄표만 늘어선 열 하나만큼 넓어진다.** 그 폭이
+   * ResponsiveList 의 "표가 지금 폭에 들어가는가" 판정을 밀어, 여태 표로 보이던
+   * 목록이 미리보기로 튕긴다. 그래서 이 값도 아래 measureKey 에 함께 들어간다.
+   */
+  hasOriginalModifiedAt: boolean;
   isBusy: boolean;
   onDelete: (item: ProductModelAttachmentListItem) => void;
   /**
@@ -331,6 +369,13 @@ function FilesTable({
           <th scope="col" className="px-3 py-2 text-right font-medium">크기</th>
           <th scope="col" className="px-3 py-2 font-medium">올린 사람</th>
           <th scope="col" className="px-3 py-2 font-medium">올린 날짜</th>
+          {/*
+            「올린 날짜」 **바로 옆**이다(사용자 요청 2026-09-30). 두 날짜가 붙어
+            있어야 "우리에게 들어온 때"와 "그 파일이 만들어진 때"를 한눈에 견준다.
+            이름을 「수정일」로 줄이지 않는 것은, 무엇이 수정됐는지가 흐려지기
+            때문이다 — 우리 시스템에서 고친 때로 읽히면 정반대의 뜻이 된다.
+          */}
+          {hasOriginalModifiedAt && <th scope="col" className="px-3 py-2 font-medium">원본 수정일</th>}
           {hasPreviewable && <th scope="col" className="px-3 py-2 font-medium">미리보기</th>}
           <th scope="col" className="px-3 py-2 font-medium">내려받기</th>
           {canManageFiles && <th scope="col" className="px-3 py-2 font-medium">지우기</th>}
@@ -360,6 +405,15 @@ function FilesTable({
             <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-700 dark:text-zinc-300">
               {formatTimestamp(item.uploadedAt)}
             </td>
+            {hasOriginalModifiedAt && (
+              // 옆 칸(올린 날짜)과 같은 꾸밈이다 — 나란히 놓고 견주는 두 값이라
+              // 자릿수(tabular-nums)도 줄바꿈 금지도 같아야 눈이 바로 비교한다.
+              <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-700 dark:text-zinc-300">
+                {item.originalModifiedAt
+                  ? formatTimestamp(item.originalModifiedAt)
+                  : UNKNOWN_ORIGINAL_MODIFIED_AT}
+              </td>
+            )}
             {hasPreviewable && (
               // 단추가 셋(미리보기·내려받기·지우기)까지 늘어난 줄이다. 좁은
               // 화면에서 글자가 반으로 접히지 않게 칸마다 nowrap 을 둔다.
@@ -471,6 +525,15 @@ export default function ProductModelFilesSection({
     [attachments]
   );
 
+  /**
+   * 표에 `원본 수정일` 열을 그릴지 — 아는 파일이 하나라도 있을 때만이다. 위
+   * hasPreviewable 과 같은 규칙이고, 까닭은 FilesTable 의 같은 이름 인자 주석에 있다.
+   */
+  const hasOriginalModifiedAt = useMemo(
+    () => attachments.some((item) => item.originalModifiedAt !== null),
+    [attachments]
+  );
+
   function openViewer(item: ProductModelAttachmentListItem) {
     const position = viewable.findIndex((candidate) => candidate.id === item.id);
     if (position >= 0) setViewerIndex(position);
@@ -481,6 +544,16 @@ export default function ProductModelFilesSection({
     try {
       // 본문은 파일 바이트 그 자체이고 메타데이터는 쿼리 문자열이다(파일 상단).
       const query = new URLSearchParams({ category, fileName: file.name });
+      // 이 PC 에서 그 파일을 마지막으로 저장한 시각도 함께 싣는다(2026-09-30).
+      // 브라우저만 아는 값이라 여기서 보내지 않으면 서버가 알 길이 아예 없다.
+      //
+      // 🔴 **실을 수 없는 값이면 아예 보내지 않는다.** 시계가 틀린 PC 가 주는 값을
+      // 거르는 판정은 서버와 **같은 함수** 하나다
+      // (domain/attachment-original-modified-at.ts) — 여기서 따로 판단하면 "보냈는데
+      // 서버가 버리는" 어긋남이 생기고 그때는 아무 오류도 나지 않는다. 그리고 보내든
+      // 말든 **업로드는 그대로 간다**: 이 값은 실패의 근거가 아니다.
+      const modifiedAt = originalModifiedAtParamValue(file.lastModified);
+      if (modifiedAt !== null) query.set(ORIGINAL_MODIFIED_AT_PARAM, modifiedAt);
       const response = await fetch(
         `/api/product-models/${encodeURIComponent(productModelId)}/attachments?${query.toString()}`,
         { method: "POST", body: file }
@@ -736,13 +809,14 @@ export default function ProductModelFilesSection({
                 {attachments.length}건
               </span>
             }
-            /* 줄 수와 `지우기`·`미리보기` 열의 유무가 표의 필요 폭을 바꾼다. */
-            measureKey={[attachments.length, canManageFiles, hasPreviewable]}
+            /* 줄 수와 `지우기`·`미리보기`·`원본 수정일` 열의 유무가 표의 필요 폭을 바꾼다. */
+            measureKey={[attachments.length, canManageFiles, hasPreviewable, hasOriginalModifiedAt]}
             table={
               <FilesTable
                 attachments={attachments}
                 canManageFiles={canManageFiles}
                 hasPreviewable={hasPreviewable}
+                hasOriginalModifiedAt={hasOriginalModifiedAt}
                 isBusy={isBusy}
                 onDelete={setPendingDelete}
                 /* 격자의 썸네일이 부르는 것과 **같은 함수**다 — 두 벌로 만들지 않는다. */
@@ -772,6 +846,21 @@ export default function ProductModelFilesSection({
                       <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
                         {item.uploadedByName} · {formatTimestamp(item.uploadedAt)}
                       </span>
+                      {/*
+                        원본 수정일 — 올린 날짜 **바로 다음 줄**이다(2026-09-30).
+                        표와 달리 여기에는 열 제목이 없으므로 이름을 값 앞에 적고,
+                        같은 줄에 잇지 않는다: 이 칸은 넓어야 4열 격자의 1/4 폭이라
+                        한 줄에 두 날짜를 넣으면 글자가 접혀 어느 쪽 날짜인지 못 읽는다.
+                        🔴 모르는 파일에는 **줄 자체를 그리지 않는다** — 표에는 열
+                        머리글이 있어 줄표가 "모른다"로 읽히지만, 여기서는 「원본
+                        수정일 —」 이 모든 칸에 붙는 군더더기가 된다. 이 칸이 생기기
+                        전에 올라온 파일의 미리보기는 예전과 한 글자도 같다.
+                      */}
+                      {item.originalModifiedAt && (
+                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                          원본 수정일 {formatTimestamp(item.originalModifiedAt)}
+                        </span>
+                      )}
                       {item.description && (
                         <span className="truncate text-[11px] text-zinc-600 dark:text-zinc-300">
                           {item.description}

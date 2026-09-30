@@ -19,6 +19,7 @@ import {
   isAttachmentCategory,
   isAttachmentCategoryAllowedForOwner,
 } from "@/lib/domain/attachment-category";
+import { originalModifiedAtFromSearchParams } from "@/lib/domain/attachment-original-modified-at";
 import { buildProductModelAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getProductModelAttachmentUploadTarget } from "@/lib/db/queries/attachments";
@@ -51,6 +52,20 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  *   잠금 확인  is_locked 확인            →  **없다** (모델에 잠금 개념이 없다)
  *   경로      buildAttachmentStoredPath →  buildProductModelAttachmentStoredPath
  *   실패 코드  CASE_NOT_FOUND/CASE_LOCKED → **MODEL_NOT_FOUND** (잠금 코드 없음)
+ *   원본 수정일 없다                      →  **?lastModified= 를 받아 적는다**
+ *
+ * ── 원본 수정일은 이쪽에만 있다 (2026-09-30) ─────────────────────────────
+ * 모델 상세의 파일 목록이 「올린 날짜」 옆에 **올린 사람 PC 에서 그 파일을 마지막
+ * 으로 저장한 시각**을 함께 보여 준다(사용자 요청). 그 값을 나르는 것이
+ * `?lastModified=`(에포크 밀리초, 브라우저의 `File.lastModified`)다.
+ *
+ * 🔴 **위 '함께 고쳐야 한다'를 어긴 것이 아니다.** 그 문장이 가리키는 것은
+ * 상한 · 검사 순서 · 실패 응답 규칙이고, 이 값은 그 셋 가운데 아무것도 건드리지
+ * 않는다 — **새 실패 코드가 없다.** 값이 없거나 터무니없으면 그냥 빈칸으로 적고
+ * 업로드는 그대로 성공한다(사용자 결정: 날짜 하나 때문에 회로도를 못 올리면 안
+ * 된다). 칸(attachments.original_modified_at)은 주인을 가리지 않으므로, 접수 건 ·
+ * 견적서 통로도 같은 한 줄로 넓힐 수 있다. 이번 요청이 모델 상세 화면이라
+ * 여기만 연다.
  *
  * ── 순서는 그대로다 ──────────────────────────────────────────────────────
  *  1) 본문을 **받기 전에** 출처·세션·승인상태·권한·모델 존재를 확인한다.
@@ -174,6 +189,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const rawDescription = (searchParams.get("description") ?? "").trim();
   const description = rawDescription.length > 0 ? rawDescription.slice(0, MAX_DESCRIPTION_LENGTH) : null;
 
+  // 원본 파일이 올린 사람 PC 에서 마지막으로 저장된 시각(파일 머리말).
+  //
+  // 🔴 **이 줄 뒤에 fail(...) 이 붙는 일은 없다.** 브라우저가 주는 못 믿을 값이라
+  // 판정은 하지만, 걸러진 결과는 거절이 아니라 `null`(빈칸)이다. 판정 규칙과 그
+  // 근거는 전부 attachment-original-modified-at.ts 에 있고, 올리는 화면도 값을
+  // 실을 때 **같은 판정**을 지난다.
+  const originalModifiedAt = originalModifiedAtFromSearchParams(searchParams);
+
   // 브라우저가 알려 준 크기로 미리 자른다. 이 값은 믿을 수 없지만(진짜 판정은
   // 아래 writeTemp가 센 바이트로 한다) 맞을 때는 20MB를 받아 놓고 버리는 일을
   // 통째로 아낀다.
@@ -248,6 +271,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       fileSize: written.size,
       checksumSha256: written.sha256,
       description,
+      // 없거나 터무니없으면 null 이다 — 그때도 행은 그대로 만들어진다.
+      originalModifiedAt,
       uploadedBy: actingUser.id,
     });
   } catch (error) {

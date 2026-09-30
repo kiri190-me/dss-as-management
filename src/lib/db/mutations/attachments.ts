@@ -107,6 +107,21 @@ export type CreateAttachmentRecordInput = {
   /** 받은 바이트의 SHA-256(소문자 hex). */
   checksumSha256: string;
   description: string | null;
+  /**
+   * 원본 파일이 **올린 사람 PC 에서 마지막으로 저장된 시각**(2026-09-30). 우리
+   * 시스템에 들어온 때(uploadedAt)가 아니다 — 「이 양식이 언제 갱신된 것인가」에
+   * 답하는 값이다.
+   *
+   * **넘기지 않아도 된다.** 지금 실어 보내는 것은 제품 모델 통로 하나뿐이고
+   * (사용자 요청이 모델 상세 화면이었다), 접수 건 · 견적서 통로와 교산 연락서
+   * 이식은 이 값을 모른 채 예전 그대로 부른다. 그때 칸은 NULL 이고 화면은 빈칸으로
+   * 둔다 — **올린 날짜로 대신 채우지 않는다**(그건 거짓이 된다).
+   *
+   * 🔴 값은 브라우저가 준 것이라 믿을 수 없다. 여기까지 오는 것은 이미 걸러진
+   * 값이고(domain/attachment-original-modified-at.ts), 걸러진 결과는 거절이 아니라
+   * null 이다 — 이 값 때문에 업로드가 막히는 길은 어디에도 없다.
+   */
+  originalModifiedAt?: Date | null;
   uploadedBy: string;
 };
 
@@ -343,6 +358,10 @@ export async function createAttachmentRecordInTx(
       // "검사하지 않았다"는 사실의 기록이다(attachment-category.ts 주석).
       malwareScanStatus: DEFAULT_MALWARE_SCAN_STATUS,
       description: input.description,
+      // 모르면 NULL 이다. 넘기지 않는 통로들(접수 건 · 견적서 · 교산 이식)에서는
+      // 늘 이 자리이고, 그 빈칸이 곧 "그 파일이 언제 저장된 것인지 모른다"는 사실의
+      // 기록이다.
+      originalModifiedAt: input.originalModifiedAt ?? null,
       uploadedBy: input.uploadedBy,
     })
     .returning({ id: attachments.id, storedPath: attachments.storedPath, uploadedAt: attachments.uploadedAt });
@@ -368,6 +387,12 @@ export async function createAttachmentRecordInTx(
       mimeType: input.mimeType,
       fileSize: input.fileSize,
       checksumSha256: input.checksumSha256,
+      // 원본 수정일은 **받았을 때만** 싣는다. 모르는 통로의 기록에 `null` 을 적어
+      // 두면 "값이 없다"와 "그런 것을 재지 않던 때다"가 한 글자로 뭉개진다. 넘기지
+      // 않는 통로들의 감사 기록 모양은 이 줄이 생기기 전과 한 글자도 같다.
+      ...(input.originalModifiedAt
+        ? { originalModifiedAt: input.originalModifiedAt.toISOString() }
+        : {}),
       // 견적서 칸 교체로 밀려난 옛 파일(없으면 빈 배열). 다른 주인의 기록 모양은 그대로다.
       ...(owner.kind === "QUOTE" ? { displacedAttachmentIds } : {}),
     },

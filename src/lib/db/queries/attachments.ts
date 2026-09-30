@@ -168,9 +168,24 @@ export async function listTrashedAttachmentsForRepairCase(
  * 필드를 복제하지 않고 타입 별칭으로 둔다. 복제해 두면 한쪽만 바뀌는 날 두
  * 화면이 다른 것을 보여 주게 되고, 같은 타입이어야 사진 크게 보기
  * (AttachmentViewer)를 고치지 않고 그대로 쓸 수 있다.
+ *
+ * ── 한 칸만 **더** 얹는다 — 원본 수정일 (2026-09-30) ─────────────────────
+ * 별칭에 교집합으로 한 칸을 더한다. 접수 건 쪽 타입에 넣지 않는 것은, 그러면
+ * 접수 건 조회 둘도 그 칸을 함께 실어야 하는데 **그 화면은 이 값을 쓰지 않기**
+ * 때문이다 — 쓰지 않는 값을 매번 실어 오는 것은 이 파일 머리말의 "자주 쓰이는
+ * 쪽에 비용을 얹지 않는다"와 정면으로 어긋난다. 더하는 쪽이라 위의 "복제하면
+ * 갈라진다"에는 걸리지 않고, AttachmentViewer 에 그대로 넘기는 것도 그대로다.
+ * 접수 건에도 보이기로 하는 날 이 교집합을 별칭 본체로 옮기면 된다.
  * ============================================================================
  */
-export type ProductModelAttachmentListItem = RepairCaseAttachmentListItem;
+export type ProductModelAttachmentListItem = RepairCaseAttachmentListItem & {
+  /**
+   * 원본 파일이 **올린 사람 PC 에서 마지막으로 저장된 시각**. 모르면 null 이고,
+   * 화면은 그때 빈칸으로 둔다 — 올린 날짜로 대신 채우지 않는다(거짓이 된다).
+   * 이 칸이 생기기(2026-09-30) 전에 올라온 파일은 전부 null 이다.
+   */
+  originalModifiedAt: string | null;
+};
 
 export async function listAttachmentsForProductModel(
   productModelId: string
@@ -192,6 +207,7 @@ export async function listAttachmentsForProductModel(
       uploadedById: attachments.uploadedBy,
       uploadedByName: users.name,
       uploadedAt: attachments.uploadedAt,
+      originalModifiedAt: attachments.originalModifiedAt,
     })
     .from(attachments)
     .innerJoin(users, eq(users.id, attachments.uploadedBy))
@@ -201,6 +217,9 @@ export async function listAttachmentsForProductModel(
   return rows.map((row) => ({
     ...row,
     uploadedAt: row.uploadedAt.toISOString(),
+    // 모르는 파일은 null 그대로 내려보낸다. 여기서 uploadedAt 으로 메우면 화면은
+    // 그것이 원본 수정일인 줄 알고 적는다 — 아무 오류 없이 거짓이 된다.
+    originalModifiedAt: row.originalModifiedAt?.toISOString() ?? null,
   }));
 }
 

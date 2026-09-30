@@ -750,6 +750,13 @@
       "when": 1790740601641,
       "tag": "0106_product_model_basic_doc_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1790744272721,
+      "tag": "0107_clever_firebird",
+      "breakpoints": true
     }
   ]
 }
