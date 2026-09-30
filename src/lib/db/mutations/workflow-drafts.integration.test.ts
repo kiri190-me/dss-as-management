@@ -2,9 +2,13 @@ import "../../../../scripts/load-env";
 
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  auditLogs,
+  customers,
+  products,
+  repairCases,
   users,
   workflowSteps,
   workflowTemplates,
@@ -255,5 +259,201 @@ describe("workflow drafts", () => {
     const result = await discardWorkflowDraft({ versionId: current.id, actorUserId: adminId });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_A_DRAFT");
+  });
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 발행 시 접수 건 이관 (2026-09-30)
+ * ────────────────────────────────────────────────────────────────────────
+ * 접수 건 넷을 같은 옛 버전에 세워 두고 **한 번만 발행한 뒤** 넷의 행방을
+ * 각각 확인한다. 넷을 따로 발행해 보지 않는 이유는, 실제로 위험한 것이
+ * "하나를 옮기는가"가 아니라 **한 번의 발행이 옮겨도 되는 것만 골라 옮기는가**
+ * 이기 때문이다 — 섞여 있을 때만 드러나는 실수다.
+ *
+ * 접수 건은 createRepairCase를 거치지 않고 직접 넣는다. 여기서 필요한 것은
+ * "특정 버전의 특정 단계에 서 있는 행"뿐이고, 접수 경로는 항상 current
+ * 버전의 시작 단계에만 건을 놓으므로 옛 버전에 세울 수가 없다.
+ *
+ * 정리 규칙은 다른 통합 테스트와 같다 — 접수번호 접두사 "D9703"과 모델 접두사
+ * 하나만 쓰고, 옛 버전에 끼워 넣은 단계까지 직접 지운다.
+ */
+
+const MIGRATION_INTAKE_PREFIX = "D9703";
+const MIGRATION_MODEL_PREFIX = "WFMIGRATE-TEST-";
+/** 옛 버전에만 있는 단계. 초안을 복제한 **뒤에** 끼워 넣어야 새 버전에 없다. */
+const OLD_ONLY_STEP_KEY = "wfmigrate_test_only_step";
+
+describe("발행 시 진행 중인 접수 건 이관", () => {
+  let oldVersionId: string;
+  let newVersionId: string;
+  let oldOnlyStepId: string;
+  let oldIntakeStepId: string;
+  let oldShipmentStepId: string;
+  let inFlightCaseId: string;
+  let shippedCaseId: string;
+  let deletedCaseId: string;
+  let strandedCaseId: string;
+  let publishResult: Awaited<ReturnType<typeof publishWorkflowDraft>>;
+
+  async function makeCase(params: {
+    sequence: string;
+    stepId: string;
+    deleted?: boolean;
+  }): Promise<string> {
+    const [customer] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(eq(customers.isDeleted, false))
+      .limit(1);
+    assert.ok(customer, "삭제되지 않은 고객이 최소 1건 필요합니다");
+
+    const [product] = await db
+      .insert(products)
+      .values({ modelName: `${MIGRATION_MODEL_PREFIX}${params.sequence}` })
+      .returning({ id: products.id });
+
+    const [row] = await db
+      .insert(repairCases)
+      .values({
+        intakeNumber: `${MIGRATION_INTAKE_PREFIX}${params.sequence}`,
+        customerId: customer.id,
+        productId: product.id,
+        workflowVersionId: oldVersionId,
+        currentWorkflowStepId: params.stepId,
+        receivedAt: "2097-03-10",
+        isDeleted: params.deleted ?? false,
+        deletedAt: params.deleted ? new Date() : null,
+      })
+      .returning({ id: repairCases.id });
+    return row.id;
+  }
+
+  async function fetchCase(id: string) {
+    const [row] = await db
+      .select({
+        workflowVersionId: repairCases.workflowVersionId,
+        currentWorkflowStepId: repairCases.currentWorkflowStepId,
+      })
+      .from(repairCases)
+      .where(eq(repairCases.id, id));
+    assert.ok(row, "접수 건이 있어야 한다");
+    return row;
+  }
+
+  before(async () => {
+    const [current] = await db
+      .select({ id: workflowVersions.id })
+      .from(workflowVersions)
+      .where(and(eq(workflowVersions.workflowTemplateId, templateId), eq(workflowVersions.isCurrent, true)));
+    assert.ok(current, "현재 발행 버전이 있어야 합니다");
+    oldVersionId = current.id;
+
+    // 초안(= 새 버전이 될 것)을 **먼저** 복제한다.
+    const draft = await makeDraft();
+    newVersionId = draft.versionId;
+
+    // 복제가 끝난 뒤에 옛 버전에만 있는 단계를 끼워 넣는다. 순서를 바꾸면
+    // 이 단계가 초안에도 복사되어 "갈 곳 없는 건"을 만들 수 없다.
+    const [oldOnly] = await db
+      .insert(workflowSteps)
+      .values({
+        workflowVersionId: oldVersionId,
+        stepOrder: 9901,
+        key: OLD_ONLY_STEP_KEY,
+        label: "이관 테스트 전용 단계",
+        repairStatus: "IN_REPAIR",
+        category: "TECHNICAL",
+      })
+      .returning({ id: workflowSteps.id });
+    oldOnlyStepId = oldOnly.id;
+
+    const oldSteps = await db
+      .select({ id: workflowSteps.id, key: workflowSteps.key })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.workflowVersionId, oldVersionId));
+    const oldStepIdByKey = new Map(oldSteps.map((s) => [s.key, s.id]));
+    const intake = oldStepIdByKey.get("intake_inspection");
+    const shipment = oldStepIdByKey.get("shipment_completed");
+    assert.ok(intake, "옛 버전에 intake_inspection 단계가 있어야 합니다");
+    assert.ok(shipment, "옛 버전에 shipment_completed 단계가 있어야 합니다");
+    oldIntakeStepId = intake;
+    oldShipmentStepId = shipment;
+
+    inFlightCaseId = await makeCase({ sequence: "01", stepId: oldIntakeStepId });
+    shippedCaseId = await makeCase({ sequence: "02", stepId: oldShipmentStepId });
+    deletedCaseId = await makeCase({ sequence: "03", stepId: oldIntakeStepId, deleted: true });
+    strandedCaseId = await makeCase({ sequence: "04", stepId: oldOnlyStepId });
+
+    publishResult = await publishWorkflowDraft({ versionId: newVersionId, actorUserId: adminId });
+  });
+
+  after(async () => {
+    await db.delete(repairCases).where(like(repairCases.intakeNumber, `${MIGRATION_INTAKE_PREFIX}%`));
+    await db.delete(products).where(like(products.modelName, `${MIGRATION_MODEL_PREFIX}%`));
+    // 옛 버전은 파일 맨 아래 after가 지우는 목록에 들어 있을 수도, 아닐 수도
+    // 있다(앞 테스트가 무엇을 발행했느냐에 달렸다). 끼워 넣은 것은 직접 치운다.
+    if (oldOnlyStepId) await db.delete(workflowSteps).where(eq(workflowSteps.id, oldOnlyStepId));
+  });
+
+  test("진행 중인 건이 새 판으로 옮겨진다", async () => {
+    assert.equal(publishResult.ok, true, JSON.stringify(publishResult));
+
+    const moved = await fetchCase(inFlightCaseId);
+    assert.equal(moved.workflowVersionId, newVersionId, "묶인 버전이 새 버전이어야 한다");
+    assert.notEqual(moved.currentWorkflowStepId, oldIntakeStepId, "단계 행도 새 버전의 것으로 갈려야 한다");
+
+    const [newStep] = await db
+      .select({ key: workflowSteps.key, versionId: workflowSteps.workflowVersionId })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, moved.currentWorkflowStepId));
+    assert.equal(newStep.versionId, newVersionId);
+    assert.equal(newStep.key, "intake_inspection", "key가 같은 단계로만 옮겨져야 한다 — label로 짝지으면 안 된다");
+  });
+
+  test("출하 완료된 건은 안 옮겨진다", async () => {
+    const stayed = await fetchCase(shippedCaseId);
+    assert.equal(stayed.workflowVersionId, oldVersionId, "끝난 건의 기록을 흔들면 안 된다");
+    assert.equal(stayed.currentWorkflowStepId, oldShipmentStepId);
+  });
+
+  test("삭제된 건은 안 옮겨진다", async () => {
+    const stayed = await fetchCase(deletedCaseId);
+    assert.equal(stayed.workflowVersionId, oldVersionId);
+    assert.equal(stayed.currentWorkflowStepId, oldIntakeStepId);
+  });
+
+  test("key가 새 판에 없는 건은 옛 판에 남고, 발행은 성공한다", async () => {
+    assert.equal(publishResult.ok, true, "단계 하나를 없앴다고 발행을 막으면 워크플로를 영영 못 고친다");
+
+    const stayed = await fetchCase(strandedCaseId);
+    assert.equal(stayed.workflowVersionId, oldVersionId);
+    assert.equal(stayed.currentWorkflowStepId, oldOnlyStepId);
+
+    if (publishResult.ok) {
+      assert.ok(
+        publishResult.strandedCaseCount >= 1,
+        `남은 건이 세어져야 한다: ${publishResult.strandedCaseCount}`
+      );
+    }
+  });
+
+  test("감사 로그에 옮긴 건수가 남는다", async () => {
+    assert.equal(publishResult.ok, true);
+    if (!publishResult.ok) return;
+    assert.ok(publishResult.migratedCaseCount >= 1, `옮긴 건이 세어져야 한다: ${publishResult.migratedCaseCount}`);
+
+    const [log] = await db
+      .select({ newValue: auditLogs.newValue })
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "workflow_versions"), eq(auditLogs.targetRecordId, newVersionId)))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+    assert.ok(log, "발행 감사 로그가 있어야 한다");
+
+    const recorded = log.newValue as { status?: string; migratedCaseCount?: number; strandedCaseCount?: number };
+    assert.equal(recorded.status, "PUBLISHED", "발행 로그를 집은 것이 맞는지 확인한다");
+    assert.equal(recorded.migratedCaseCount, publishResult.migratedCaseCount);
+    assert.equal(recorded.strandedCaseCount, publishResult.strandedCaseCount);
   });
 });

@@ -56,7 +56,19 @@ export async function publishWorkflowDraftAction(versionId: string): Promise<Wor
   const session = await requireSession();
   if (!session.ok) return session;
   const result = await publishWorkflowDraft({ versionId, actorUserId: session.userId });
-  if (result.ok) return { ok: true, message: `v${result.versionNumber}을(를) 발행했습니다.` };
+  if (result.ok) {
+    // 옮긴 건이 없으면 그 얘기는 아예 하지 않는다 — "0건을 옮겼습니다"는 읽는
+    // 사람에게 아무것도 알려 주지 않으면서 문장만 길게 만든다. 남은 건은
+    // 사람이 손으로 처리해야 하는 일이므로 있을 때만, 그리고 이유와 함께 알린다.
+    const parts = [`v${result.versionNumber}을(를) 발행했습니다.`];
+    if (result.migratedCaseCount > 0) {
+      parts.push(`진행 중인 접수 건 ${result.migratedCaseCount}건을 새 버전으로 옮겼습니다.`);
+    }
+    if (result.strandedCaseCount > 0) {
+      parts.push(`현재 단계가 새 버전에 없는 ${result.strandedCaseCount}건은 이전 버전에 그대로 두었습니다.`);
+    }
+    return { ok: true, message: parts.join(" ") };
+  }
   return { ok: false, message: result.message, issues: result.issues };
 }
 
