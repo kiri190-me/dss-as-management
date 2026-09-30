@@ -6,7 +6,8 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   buildQuoteFolderHelperInlineInstallCommand,
-  resolveQuoteFolderHelperRoot,
+  quoteFolderHelperRootsInput,
+  resolveQuoteFolderHelperInstallRoots,
 } from "@/lib/server/quote-folder-helper";
 
 /**
@@ -19,16 +20,21 @@ import {
  * 설치 파일 통로(installer)는 그대로 살아 있다(차단 해제로 쓰는 사람이 있다).
  *
  * ── 🔴 본문은 요청마다 만든다 ─────────────────────────────────────────────
- * 명령 안에는 사람이 탐색기에서 보는 공유폴더 루트(UNC — QUOTE_ARCHIVE_UNC_ROOT)가 base64 로
- * 싸여 들어간다. 파일로 만들어 두면 그 값이 저장소 · 이미지에 남는다. 그래서 부를 때마다
- * 환경변수로 만든다. 값은 로그 · 오류 응답에 싣지 않는다(설정이 비었거나 틀렸다는 사실만).
+ * 명령 안에는 사람이 탐색기에서 보는 공유폴더 루트(UNC)가 base64 로 싸여 들어간다. 파일로
+ * 만들어 두면 그 값이 저장소 · 이미지에 남는다. 그래서 부를 때마다 환경변수로 만든다.
+ * 값은 로그 · 오류 응답에 싣지 않는다(설정이 비었거나 틀렸다는 사실만).
+ *
+ * ── 루트는 여럿일 수 있다 (2026-09-30) ────────────────────────────────────
+ * 견적서 루트와 고객사 현황표 루트(그리고 각각의 _ALT)를 한 벌에 함께 심는다 — 까닭과 고르는
+ * 규칙은 installer 라우트 · server/quote-folder-helper.ts 와 같다(도우미는 PC 당 한 벌).
  *
  * ── 순서 ────────────────────────────────────────────────────────────────
  *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(quotes READ)
- *  → 4) UNC 루트(비었거나 틀리면 409) → 5) 명령 한 줄(JSON)
+ *  → 4) UNC 루트(하나도 없거나 견적서 루트가 틀리면 409) → 5) 명령 한 줄(JSON)
  *
- * 권한이 READ 인 까닭은 installer 라우트와 같다 — 도우미는 견적서 폴더를 **여는** 도구이고,
+ * 권한이 READ 인 까닭은 installer 라우트와 같다 — 도우미는 공유폴더를 **여는** 도구이고,
  * 견적서를 볼 수 있는 사람이 [폴더 열기]를 누른다. 아무것도 바꾸지 않으므로 감사를 남기지 않는다.
+ * 🔴 현황표 루트가 더해져도 `quotes` READ 그대로다(installer 라우트 머리말의 까닭과 같다).
  *
  * ── 응답 ────────────────────────────────────────────────────────────────
  *  · 200 `{ command }` — 붙여넣는 한 줄. `Cache-Control: no-store`
@@ -76,15 +82,15 @@ export async function GET(): Promise<NextResponse> {
   }
 
   // ── 4) UNC 루트 — 값은 설치 명령 본문에만 들어간다 ─────────────────────
-  const helperRoot = resolveQuoteFolderHelperRoot();
-  if (helperRoot.status === "unset") {
+  const helperRoots = resolveQuoteFolderHelperInstallRoots();
+  if (helperRoots.status === "unset") {
     return fail(409, "HELPER_ROOT_NOT_CONFIGURED", "관리자가 공유폴더 주소를 설정해야 합니다.");
   }
-  if (helperRoot.status === "invalid") {
+  if (helperRoots.status === "invalid") {
     return fail(409, "HELPER_ROOT_INVALID", "공유폴더 주소 설정이 올바르지 않습니다. 관리자에게 문의해 주세요.");
   }
 
   // ── 5) 명령 한 줄 — 사람이 복사해 붙여넣는다 ───────────────────────────
-  const command = buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt });
+  const command = buildQuoteFolderHelperInlineInstallCommand(quoteFolderHelperRootsInput(helperRoots.roots));
   return NextResponse.json({ command }, { status: 200, headers: { "Cache-Control": "no-store" } });
 }

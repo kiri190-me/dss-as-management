@@ -55,10 +55,10 @@ describe("도우미 설치 명령 통로 — 소스로 지킨다", () => {
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
       'hasPermission(actingUser, "quotes", "READ")',
-      "resolveQuoteFolderHelperRoot()",
-      'helperRoot.status === "unset"',
-      'helperRoot.status === "invalid"',
-      "buildQuoteFolderHelperInlineInstallCommand({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt })",
+      "resolveQuoteFolderHelperInstallRoots()",
+      'helperRoots.status === "unset"',
+      'helperRoots.status === "invalid"',
+      "buildQuoteFolderHelperInlineInstallCommand(quoteFolderHelperRootsInput(helperRoots.roots))",
     ];
     let previous = -1;
     for (const mark of marks) {
@@ -87,10 +87,10 @@ describe("도우미 설치 명령 통로 — 소스로 지킨다", () => {
     }
   });
 
-  test("루트 값은 명령을 만드는 자리 한 번뿐 — 오류 · 로그에 없다", () => {
-    assert.equal(getBody.match(/helperRoot\.root/g)?.length, 1);
+  test("루트 값은 명령을 만드는 자리 한 번뿐 — 오류 · 로그에 없다(루트가 여럿이어도)", () => {
+    assert.equal(getBody.match(/helperRoots\.roots/g)?.length, 1);
     for (const call of [...getBody.matchAll(/fail\([^)]*\)/g)].map((match) => match[0])) {
-      assert.equal(call.includes("helperRoot.root"), false, call);
+      assert.equal(call.includes("helperRoots.roots"), false, call);
     }
     assert.equal(route.includes("console."), false);
     assert.equal(route.includes("process.env"), false);

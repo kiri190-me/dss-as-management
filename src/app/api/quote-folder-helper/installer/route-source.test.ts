@@ -52,10 +52,10 @@ describe("도우미 설치 파일 통로 — 소스로 지킨다", () => {
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
       'hasPermission(actingUser, "quotes", "READ")',
-      "resolveQuoteFolderHelperRoot()",
-      'helperRoot.status === "unset"',
-      'helperRoot.status === "invalid"',
-      "buildQuoteFolderHelperInstaller({ uncRoot: helperRoot.root, uncRootAlt: helperRoot.alt })",
+      "resolveQuoteFolderHelperInstallRoots()",
+      'helperRoots.status === "unset"',
+      'helperRoots.status === "invalid"',
+      "buildQuoteFolderHelperInstaller(quoteFolderHelperRootsInput(helperRoots.roots))",
     ];
     let previous = -1;
     for (const mark of marks) {
@@ -70,10 +70,10 @@ describe("도우미 설치 파일 통로 — 소스로 지킨다", () => {
   test("루트가 비었거나 틀리면 409 와 사람이 읽는 문장 — 값은 싣지 않는다", () => {
     assert.ok(getBody.includes('fail(409, "HELPER_ROOT_NOT_CONFIGURED", "관리자가 공유폴더 주소를 설정해야 합니다.")'));
     assert.ok(getBody.includes('fail(409, "HELPER_ROOT_INVALID",'));
-    // 루트 값은 설치 파일을 만드는 자리 한 번만 나온다(오류 · 로그에 없다).
-    assert.equal(getBody.match(/helperRoot\.root/g)?.length, 1);
+    // 루트 값은 설치 파일을 만드는 자리 한 번만 나온다(루트가 여럿이어도 — 오류 · 로그에 없다).
+    assert.equal(getBody.match(/helperRoots\.roots/g)?.length, 1);
     for (const call of [...getBody.matchAll(/fail\([^)]*\)/g)].map((match) => match[0])) {
-      assert.equal(call.includes("helperRoot.root"), false, call);
+      assert.equal(call.includes("helperRoots.roots"), false, call);
     }
     assert.equal(route.includes("console."), false);
     assert.equal(route.includes("process.env"), false);

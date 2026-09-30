@@ -22,17 +22,20 @@ import {
  *
  * ── 🔴 불변식 넷 ─────────────────────────────────────────────────────────
  * 이 도우미는 **다른 웹사이트도 부를 수 있는 입구**다.
- *   (a) 루트 아래의 **폴더만** 연다 — 파일 · 프로그램은 열거나 실행하지 않는다.
+ *   (a) 루트(들) 아래의 **폴더만** 연다 — 파일 · 프로그램은 열거나 실행하지 않는다.
  *       스크립트가 주소를 풀어 domain/quote-folder-link.ts 와 **같은 규칙**으로 상대 경로를 거절하고,
  *       루트와 이어 GetFullPath 로 편 뒤 「루트 + \」 로 시작하는지(대소문자 무시) 보고, 폴더인지
  *       (Test-Path -PathType Container) 보고, 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭
  *       링크 — 루트 밖을 가리킬 수 있다)가 있으면 열지 않는다. explorer.exe 에는 그 폴더 경로만,
  *       끝에 `\` 를 붙여 넘긴다(폴더로만 읽힌다).
+ *       🔴 루트가 여럿이어도 이 검사들은 **루트마다 따로** 한다 — 어느 루트 아래도 아닌 경로는
+ *       어느 루트로도 열리지 않는다(requireRoots · 스크립트의 (e~f) 고리).
  *   (b) 주소가 명령줄로 삽입되지 않는다 — 레지스트리 명령은 `-File "…" "%1"` 이다. `-Command` 로
  *       주소를 이어 붙이지 않는다. `-File` 뒤의 것은 전부 스크립트 인자이고, 스크립트는 인자가
  *       **정확히 하나**가 아니면(따옴표를 깨고 인자를 늘린 주소) 끝낸다. 주소의 몸통은 base64url 이다.
  *   (c) 루트(UNC)는 저장소 · 빌드 결과에 남지 않는다 — 설치 파일 · 설치 명령 본문에만 들어가고,
- *       그 본문은 요청마다 환경변수 QUOTE_ARCHIVE_UNC_ROOT 로 만든다. 로그에도 찍지 않는다.
+ *       그 본문은 요청마다 환경변수(QUOTE_ARCHIVE_UNC_ROOT · CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT 와
+ *       각각의 _ALT — resolveQuoteFolderHelperInstallRoots)로 만든다. 로그에도 찍지 않는다.
  *       (견적서 폴더의 전체 주소를 사람에게 복사해 주는 통로는 아래 「전체 주소」 절.)
  *   (d) 공유폴더 저장 동작은 이 모듈과 무관하다(storage/quote-archive.ts).
  *
@@ -69,6 +72,16 @@ export const QUOTE_FOLDER_HELPER_ROOT_ENV = "QUOTE_ARCHIVE_UNC_ROOT";
  * 도우미가 첫째로 못 열면 이것으로 한 번 더 해 본다 — 이름 풀이가 안 되는 PC 가 있기 때문이다.
  */
 export const QUOTE_FOLDER_HELPER_ROOT_ALT_ENV = "QUOTE_ARCHIVE_UNC_ROOT_ALT";
+/**
+ * 🔴 **다른 폴더**의 루트 — 고객사 현황표 공유폴더(견적서 루트 아래가 아니다).
+ * 도우미는 PC 마다 한 벌만 설치되므로(레지스트리 `dss-folder` · `%LOCALAPPDATA%\DSS\…ps1` 자리가
+ * 하나뿐이다) 현황표용 도우미를 따로 설치할 수 없다 — 그러면 그 PC 의 견적서 [폴더 열기]가 죽는다.
+ * 그래서 **한 벌에 루트를 여럿** 심고 차례로 시도한다. 불변식 (a) 는 루트마다 그대로 산다.
+ * 없어도 된다 — 없으면 견적서 루트만 심는다(지금까지와 같다).
+ */
+export const CUSTOMER_PORTAL_FOLDER_HELPER_ROOT_ENV = "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT";
+/** 위 현황표 루트를 가리키는 **다른 주소**(이름 ↔ IP). 없어도 된다 — 까닭은 견적서 _ALT 와 같다. */
+export const CUSTOMER_PORTAL_FOLDER_HELPER_ROOT_ALT_ENV = "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT";
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";
 /** 이 값이 "1" 이면 스크립트가 탐색기를 여는 대신 결과를 표준출력에 적고 끝낸다(시험용). */
@@ -156,14 +169,25 @@ export type QuoteFolderHelperRootResolution =
   | { status: "ok"; root: string; alt?: string };
 
 /**
- * 도우미를 만드는 함수들이 함께 받는 것. `uncRootAlt` 는 **같은 공유폴더를 가리키는 다른 주소**다
- * (이름 ↔ IP). 도우미가 첫째로 못 열면 둘째로 한 번 더 해 본다.
+ * 도우미를 만드는 함수들이 함께 받는 것. 도우미는 여기 적힌 차례 그대로 시도한다.
+ *  · `uncRoot`    — 반드시 있어야 한다.
+ *  · `uncRootAlt` — **같은 공유폴더를 가리키는 다른 주소**(이름 ↔ IP). 없어도 된다.
+ *  · `extraRoots` — 🔴 **다른 폴더**의 루트들(현황표 공유폴더처럼 견적서 루트 아래가 아닌 곳).
+ *                   없어도 된다. 담김 검사는 여기 것들도 **루트마다 따로** 한다.
  */
-export type QuoteFolderHelperRootsInput = { uncRoot: string; uncRootAlt?: string };
+export type QuoteFolderHelperRootsInput = {
+  uncRoot: string;
+  uncRootAlt?: string;
+  extraRoots?: readonly string[];
+};
 
 /**
- * 환경변수 QUOTE_ARCHIVE_UNC_ROOT 를 **부르는 시점에** 읽는다. 값 자체는 로그로 찍지 않는다
- * (보안 규칙: .env 내용은 출력하지 않는다).
+ * 환경변수 QUOTE_ARCHIVE_UNC_ROOT(와 _ALT)를 **부르는 시점에** 읽는다. 값 자체는 로그로 찍지
+ * 않는다(보안 규칙: .env 내용은 출력하지 않는다).
+ *
+ * 이것은 **견적서 루트 한 벌**이다 — 「전체 주소」(resolveQuoteFolderHelperUncPath)가 이 루트로
+ * 견적서 폴더의 주소를 만든다. 설치 파일에 심을 **루트 전부**는 아래
+ * resolveQuoteFolderHelperInstallRoots 가 모은다.
  */
 export function resolveQuoteFolderHelperRoot(): QuoteFolderHelperRootResolution {
   const configured = process.env.QUOTE_ARCHIVE_UNC_ROOT;
@@ -178,6 +202,64 @@ export function resolveQuoteFolderHelperRoot(): QuoteFolderHelperRootResolution 
       ? (normalizeQuoteFolderHelperRoot(configuredAlt) ?? undefined)
       : undefined;
   return alt === undefined ? { status: "ok", root } : { status: "ok", root, alt };
+}
+
+export type QuoteFolderHelperInstallRootsResolution =
+  | { status: "unset" }
+  | { status: "invalid" }
+  | { status: "ok"; roots: readonly [string, ...string[]] };
+
+/**
+ * ============================================================================
+ * 설치 파일 · 설치 명령에 심을 **루트 전부** — 부르는 시점에 읽는다
+ * ============================================================================
+ * 차례: 견적서 루트 → 견적서 다른 주소 → 현황표 루트 → 현황표 다른 주소.
+ * 견적서를 먼저 두는 것은 **지금까지 설치된 것과 같은 차례**를 지키기 위해서다 — 설정이 예전
+ * 그대로인 PC 에서는 목록이 예전과 글자 하나 다르지 않다.
+ *
+ * ── 일부만 설정됐을 때 ────────────────────────────────────────────────────
+ *  · 견적서 루트가 **틀리면** invalid — 지금까지와 같다. 첫째 루트의 오타는 크게 울어야 한다.
+ *  · 나머지(견적서 _ALT · 현황표 · 현황표 _ALT)가 틀리면 **없는 셈** 친다. 곁다리 설정 하나
+ *    때문에 [폴더 열기]가 통째로 죽으면 안 된다(견적서 _ALT 가 이미 그렇게 정해져 있다).
+ *    🔴 특히 현황표 루트의 오타로 **견적서 [폴더 열기]가 죽는 일이 없어야 한다.**
+ *  · 하나도 설정되지 않으면 unset — 설치 파일을 받을 수 없다(지금까지와 같다).
+ *  · 견적서 루트가 비고 현황표 루트만 있으면 현황표 루트 하나로 만든다. 도우미는 자기 루트
+ *    아래만 여는 물건이라, 루트가 하나든 둘이든 규칙은 같다.
+ *
+ * 값은 돌려주기만 하고 로그 · 오류에 싣지 않는다.
+ * ============================================================================
+ */
+export function resolveQuoteFolderHelperInstallRoots(): QuoteFolderHelperInstallRootsResolution {
+  const quote = resolveQuoteFolderHelperRoot();
+  if (quote.status === "invalid") return { status: "invalid" };
+
+  const roots: string[] = [];
+  if (quote.status === "ok") {
+    roots.push(quote.root);
+    if (quote.alt !== undefined) roots.push(quote.alt);
+  }
+  // 곁다리 루트 — 비었거나 규칙 밖이면 없는 셈 친다(위 머리말).
+  for (const configured of [
+    process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT,
+    process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT,
+  ]) {
+    if (!configured || configured.trim().length === 0) continue;
+    const normalized = normalizeQuoteFolderHelperRoot(configured);
+    if (normalized !== null) roots.push(normalized);
+  }
+
+  if (roots.length === 0) return { status: "unset" };
+  const [first, ...rest] = roots;
+  return { status: "ok", roots: [first, ...rest] };
+}
+
+/**
+ * 모은 루트 목록을 도우미를 만드는 함수들의 입력으로 바꾼다 — 첫째가 `uncRoot`, 나머지가
+ * `extraRoots` 다(중복은 requireRoots 가 줄인다). 부르는 쪽(통로)이 루트 값을 여러 자리에서
+ * 만지지 않게 하려고 한 함수로 둔다.
+ */
+export function quoteFolderHelperRootsInput(roots: readonly [string, ...string[]]): QuoteFolderHelperRootsInput {
+  return { uncRoot: roots[0], extraRoots: roots.slice(1) };
 }
 
 /** PowerShell 작은따옴표 문자열 — 작은따옴표(와 닮은꼴)는 두 번. 루트 검사가 이미 막지만 한 겹 더. */
@@ -196,22 +278,32 @@ function requireRoot(uncRoot: string): string {
 }
 
 /**
- * 도우미가 **차례로 시도할** 루트들. 첫째는 반드시 있어야 하고, 둘째(`uncRootAlt`)는 없어도 된다.
+ * 도우미가 **차례로 시도할** 루트들. 첫째는 반드시 있어야 하고, 나머지(`uncRootAlt` ·
+ * `extraRoots`)는 없어도 된다.
  *
- * 왜 둘인가 — 같은 공유폴더를 가리키는 주소가 PC 마다 다르게 닿는다. 이름(`\\DSS-NAS\…`)은
- * 이름 풀이가 되는 PC 에서만 열리고, IP(`\\192.168.0.222\…`)는 이름 풀이와 무관하지만 NAS 주소가
- * 바뀌면 죽는다. 하나만 두면 그 하나가 안 되는 PC 에서는 [폴더 열기]가 통째로 먹통이 된다.
+ * 왜 여럿인가 — 두 가지 까닭이 겹쳐 있다.
+ *  1) **같은 폴더의 다른 주소**(`uncRootAlt`): 같은 공유폴더를 가리키는 주소가 PC 마다 다르게
+ *     닿는다. 이름(`\\DSS-NAS\…`)은 이름 풀이가 되는 PC 에서만 열리고, IP(`\\192.168.0.222\…`)는
+ *     이름 풀이와 무관하지만 NAS 주소가 바뀌면 죽는다. 하나만 두면 그 하나가 안 되는 PC 에서는
+ *     [폴더 열기]가 통째로 먹통이 된다.
+ *  2) **다른 폴더**(`extraRoots`): 고객사 현황표 공유폴더는 견적서 루트 아래가 아니다(실측
+ *     2026-09-30). 도우미는 PC 당 한 벌이라 따로 설치할 수 없으므로 한 벌에 함께 심는다.
  *
  * 🔴 불변식 (a) 는 그대로다 — 루트는 **설치 때 정해지고** 웹 페이지가 바꿀 수 없으며, 열 수 있는
- *    것은 그 루트들 **아래의 폴더**뿐이다. 담김 검사는 시도하는 루트마다 따로 한다.
- * 같은 값이 둘 들어오면 하나로 줄인다 — 없는 서버를 두 번 기다리지 않게.
+ *    것은 그 루트들 **아래의 폴더**뿐이다. 담김 검사는 시도하는 루트마다 따로 한다(스크립트 (e)).
+ * 같은 값이 둘 들어오면 하나로 줄인다(대소문자 무시) — 없는 서버를 두 번 기다리지 않게.
  */
 function requireRoots(input: QuoteFolderHelperRootsInput): string[] {
   const roots = [requireRoot(input.uncRoot)];
-  const alt = input.uncRootAlt?.trim();
-  if (alt !== undefined && alt.length > 0) {
-    const normalized = requireRoot(alt);
-    if (normalized.toLowerCase() !== roots[0].toLowerCase()) roots.push(normalized);
+  const seen = new Set([roots[0].toLowerCase()]);
+  for (const candidate of [input.uncRootAlt, ...(input.extraRoots ?? [])]) {
+    const trimmed = candidate?.trim();
+    if (trimmed === undefined || trimmed.length === 0) continue;
+    // 🔴 여기서도 루트 검사를 그대로 거친다 — 규칙 밖 값은 스크립트에 박히지 않는다.
+    const normalized = requireRoot(trimmed);
+    if (seen.has(normalized.toLowerCase())) continue;
+    seen.add(normalized.toLowerCase());
+    roots.push(normalized);
   }
   return roots;
 }
@@ -243,8 +335,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 # 공유폴더 루트 — 설치 때 정해졌습니다. 웹 페이지(주소)는 이 값을 바꿀 수 없습니다.
-# 같은 폴더를 가리키는 주소가 여럿이면 차례로 해 보고, 처음으로 실제 있는 것을 엽니다
-# (이름으로 안 닿는 PC 에서는 IP 로, 그 반대도 마찬가지).
+# 여럿이면 차례로 해 보고, 처음으로 실제 있는 폴더를 엽니다. 여럿인 까닭은 둘입니다:
+#  · 같은 폴더를 가리키는 주소가 여럿(이름으로 안 닿는 PC 에서는 IP 로, 그 반대도).
+#  · 서로 다른 공유폴더가 여럿(견적서 · 고객사 현황표).
+# 어느 루트로 시도하든 「그 루트 아래인가」는 아래 (e) 에서 **루트마다 따로** 봅니다.
 $Roots = @(${roots.map((r) => powerShellSingleQuoted(r)).join(", ")})
 $Prefix = '${QUOTE_FOLDER_LINK_PREFIX}'
 $MaxRelativeLength = ${QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH}
@@ -364,7 +458,8 @@ try {
     if ((Test-FolderState $full) -ne 'found') { continue }
 
     # 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다 — 열지 않는다.
-    # 다음 루트로 넘기지 않는다: 같은 폴더를 다른 주소로 열어도 같은 바로 가기다.
+    # 다음 루트로 넘기지 않고 여기서 멈춘다(안전한 쪽). 같은 폴더를 다른 주소로 열어도 같은 바로
+    # 가기이고, 루트가 서로 다른 폴더일 때도 «수상한 것을 봤으면 열지 않는다»가 낫다.
     if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }
 
     $target = $full

@@ -30,7 +30,9 @@ import {
   quoteFolderHelperInlinePayloadReaderPs,
   quoteFolderHelperInstallCommand,
   quoteFolderHelperInteractiveStatements,
+  quoteFolderHelperRootsInput,
   quoteFolderHelperScriptBytes,
+  resolveQuoteFolderHelperInstallRoots,
   resolveQuoteFolderHelperRoot,
   resolveQuoteFolderHelperUncPath,
 } from "./quote-folder-helper";
@@ -540,6 +542,238 @@ describe("🔴 루트 둘 — 차례로 해 보고 처음으로 있는 것을 �
       () => buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC, uncRootAlt: "\\\\TESTNAS\\it's" }),
       (error: unknown) => error instanceof QuoteFolderHelperRootError && !String(error).includes("it's")
     );
+  });
+});
+
+// ── 서로 다른 폴더의 루트를 함께 ────────────────────────────────────────────
+
+/**
+ * ============================================================================
+ * 🔴 루트가 **서로 다른 폴더**일 때 — 각각 아래가 열리고, 어느 쪽 아래도 아니면 안 열린다
+ * ============================================================================
+ * 고객사 현황표 폴더는 견적서 루트 **아래가 아니다**(2026-09-30 실측). 도우미는 PC 당 한 벌만
+ * 설치되므로(레지스트리 자리가 하나) 따로 설치할 수 없다 — 한 벌에 루트를 여럿 심는다.
+ *
+ * 여기서 지키는 것은 위 「루트 둘」과 같다: **불변식 (a) 가 루트마다 그대로 산다.** 루트가
+ * 늘었다고 (1) 루트 밖이 열려서도, (2) 바로 가기 폴더가 열려서도 안 되고, (3) 견적서 루트만
+ * 설정된 PC 는 **예전과 글자 하나 다르지 않아야** 한다.
+ * ============================================================================
+ */
+describe("🔴 루트가 여럿 — 서로 다른 공유폴더를 한 도우미가 안다", { skip: WINDOWS_ONLY, concurrency: 2 }, () => {
+  const YEAR = "21. 2026 내자견적서";
+  const QUOTE = "DSS 2026-089 (주)한국 & 제어 100%";
+  const PORTAL = "3. 업체별 수리품현황";
+  let parent = "";
+  let quoteRoot = "";
+  let portalRoot = "";
+  let outside = "";
+  let scriptPath = "";
+  let quoteOnlyScriptPath = "";
+
+  before(async () => {
+    parent = await mkdtemp(path.join(os.tmpdir(), "dss-folder-helper-many-"));
+    quoteRoot = path.join(parent, "견적 공유폴더");
+    portalRoot = path.join(parent, "수리품 목록");
+    outside = path.join(parent, "바깥 폴더");
+    await mkdir(path.join(quoteRoot, YEAR, QUOTE), { recursive: true });
+    await mkdir(path.join(portalRoot, PORTAL), { recursive: true });
+    await mkdir(path.join(outside, "안쪽"), { recursive: true });
+    // 둘째 루트 아래의 정션 — 루트 밖을 가리킨다.
+    await symlink(outside, path.join(portalRoot, "바로가기"), "junction");
+
+    scriptPath = path.join(parent, "open-many.ps1");
+    await writeFile(scriptPath, quoteFolderHelperScriptBytes({ uncRoot: quoteRoot, extraRoots: [portalRoot] }));
+    // 견적서만 설정된 PC — 설정을 바꾸지 않은 곳이 예전 그대로인지 본다.
+    quoteOnlyScriptPath = path.join(parent, "open-quote-only.ps1");
+    await writeFile(quoteOnlyScriptPath, quoteFolderHelperScriptBytes({ uncRoot: quoteRoot }));
+  });
+
+  after(async () => {
+    if (parent) await rm(parent, { recursive: true, force: true });
+  });
+
+  function runScript(file: string, link: string): Promise<RunResult> {
+    return runPowerShell(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file, link], {
+      env: { DSS_FOLDER_DRY_RUN: "1" },
+    });
+  }
+
+  test("첫째 루트 아래의 폴더가 열린다 — 견적서", async () => {
+    const result = await runScript(scriptPath, linkOf(`${YEAR}/${QUOTE}`));
+    assert.equal(result.stdout.trim(), `OPEN ${path.join(quoteRoot, YEAR, QUOTE)}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  test("🔴 둘째 루트 아래의 폴더도 열린다 — 현황표(견적서 루트 아래가 아니다)", async () => {
+    const result = await runScript(scriptPath, linkOf(PORTAL));
+    assert.equal(result.stdout.trim(), `OPEN ${path.join(portalRoot, PORTAL)}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  test("🔴 어느 루트 아래도 아닌 경로는 거절 — 담김 검사는 루트마다 따로 산다", async () => {
+    // 규칙을 거치지 않고 싼 주소 — 다른 웹사이트가 만든 주소 흉내다.
+    for (const escape of [
+      "..",
+      "../바깥 폴더",
+      `${PORTAL}/../../바깥 폴더`,
+      `${YEAR}/../../수리품 목록/${PORTAL}`,
+      outside,
+      path.join(outside, "안쪽"),
+    ]) {
+      const result = await runScript(scriptPath, rawLink(escape));
+      assert.equal(result.stdout.includes("OPEN"), false, escape);
+      assert.equal(result.code, 3, escape);
+    }
+  });
+
+  test("🔴 바로 가기 폴더가 낀 경로는 거절 — 둘째 루트 아래여도", async () => {
+    for (const relativePath of ["바로가기", "바로가기/안쪽"]) {
+      const result = await runScript(scriptPath, linkOf(relativePath));
+      assert.equal(result.stdout.trim(), "REJECT reparse-point", result.stderr);
+      assert.equal(result.code, 3);
+    }
+  });
+
+  test("🔴 견적서만 설정된 PC 는 예전 그대로 — 견적서는 열리고 현황표는 NOT-FOUND", async () => {
+    const opened = await runScript(quoteOnlyScriptPath, linkOf(`${YEAR}/${QUOTE}`));
+    assert.equal(opened.stdout.trim(), `OPEN ${path.join(quoteRoot, YEAR, QUOTE)}`, opened.stderr);
+    assert.equal(opened.code, 0);
+    const missing = await runScript(quoteOnlyScriptPath, linkOf(PORTAL));
+    assert.equal(missing.stdout.trim(), "NOT-FOUND");
+    assert.equal(missing.code, 4);
+  });
+
+  test("셋 이상도 적은 차례 그대로 심는다 — 같은 값은 하나로 줄인다", () => {
+    const script = buildQuoteFolderHelperScript({
+      uncRoot: FAKE_UNC,
+      uncRootAlt: "\\\\10.0.0.9\\archive",
+      extraRoots: ["\\\\TESTNAS\\현황표", ` ${FAKE_UNC.toLowerCase()} `, "", "\\\\10.0.0.9\\현황표"],
+    });
+    assert.ok(
+      script.includes(
+        `$Roots = @('${FAKE_UNC}', '\\\\10.0.0.9\\archive', '\\\\TESTNAS\\현황표', '\\\\10.0.0.9\\현황표')\r\n`
+      )
+    );
+  });
+
+  test("더한 루트가 규칙 밖이면 만들지 않는다 — 오류에 값이 실리지 않는다", () => {
+    assert.throws(
+      () => buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC, extraRoots: ["\\\\TESTNAS\\it's"] }),
+      (error: unknown) => error instanceof QuoteFolderHelperRootError && !String(error).includes("it's")
+    );
+  });
+});
+
+// ── 설치에 심을 루트를 모으는 자리 ──────────────────────────────────────────
+
+/**
+ * 🔴 설정이 **일부만** 있을 때 무엇이 심기는지 — 견적서만 설정된 PC 가 실제로 있다.
+ * 견적서 루트의 오타는 크게 울고(invalid), 곁다리(둘째 주소 · 현황표)의 오타는 없는 셈 친다 —
+ * 곁다리 하나 때문에 견적서 [폴더 열기]가 죽으면 안 된다.
+ */
+describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots)", () => {
+  const KEYS = [
+    "QUOTE_ARCHIVE_UNC_ROOT",
+    "QUOTE_ARCHIVE_UNC_ROOT_ALT",
+    "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT",
+    "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT",
+  ] as const;
+  const PORTAL_UNC = "\\\\TESTNAS\\현황표";
+
+  /** 네 칸을 그대로 세워 두고 돌린 뒤 되돌린다 — 다른 시험의 환경을 건드리지 않게. */
+  function withEnv(values: Partial<Record<(typeof KEYS)[number], string>>, body: () => void): void {
+    const original = KEYS.map((key) => [key, process.env[key]] as const);
+    try {
+      for (const key of KEYS) {
+        const value = values[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      body();
+    } finally {
+      for (const [key, value] of original) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  test("하나도 없으면 unset — 설치 파일을 받을 수 없다(지금까지와 같다)", () => {
+    withEnv({}, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "unset" });
+    });
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: "   ", CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: "  " }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "unset" });
+    });
+  });
+
+  test("🔴 견적서만 설정된 PC 는 견적서 루트 하나 — 예전 그대로다", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: ` ${FAKE_UNC}\\ ` }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+    });
+  });
+
+  test("넷 다 설정되면 견적서 · 견적서 다른 주소 · 현황표 · 현황표 다른 주소 차례로", () => {
+    withEnv(
+      {
+        QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC,
+        QUOTE_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\archive",
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: PORTAL_UNC,
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\현황표",
+      },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), {
+          status: "ok",
+          roots: [FAKE_UNC, "\\\\10.0.0.9\\archive", PORTAL_UNC, "\\\\10.0.0.9\\현황표"],
+        });
+      }
+    );
+  });
+
+  test("🔴 현황표 루트가 틀리면 없는 셈 친다 — 견적서 [폴더 열기]가 죽지 않는다", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: "/mnt/portal" }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+    });
+    withEnv(
+      { QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT: "\\\\TESTNAS\\it's" },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+      }
+    );
+  });
+
+  test("🔴 견적서 루트가 틀리면 invalid — 현황표가 멀쩡해도(첫째의 오타는 크게 운다)", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: "/mnt/archive", CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: PORTAL_UNC }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "invalid" });
+    });
+  });
+
+  test("견적서 루트가 비고 현황표만 있으면 현황표 하나로 만든다", () => {
+    withEnv({ CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: PORTAL_UNC }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [PORTAL_UNC] });
+    });
+  });
+
+  test("모은 목록은 그대로 입력이 된다 — 첫째가 uncRoot, 나머지가 extraRoots", () => {
+    assert.deepEqual(quoteFolderHelperRootsInput([FAKE_UNC]), { uncRoot: FAKE_UNC, extraRoots: [] });
+    assert.deepEqual(quoteFolderHelperRootsInput([FAKE_UNC, PORTAL_UNC]), {
+      uncRoot: FAKE_UNC,
+      extraRoots: [PORTAL_UNC],
+    });
+    // 🔴 그 입력으로 만든 스크립트에 둘 다 심긴다.
+    assert.ok(
+      buildQuoteFolderHelperScript(quoteFolderHelperRootsInput([FAKE_UNC, PORTAL_UNC])).includes(
+        `$Roots = @('${FAKE_UNC}', '${PORTAL_UNC}')\r\n`
+      )
+    );
+  });
+
+  test("🔴 오류에는 값이 실리지 않는다 — 어느 칸이 틀렸든", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: "/mnt/archive/비밀 폴더" }, () => {
+      const resolution = resolveQuoteFolderHelperInstallRoots();
+      assert.equal(JSON.stringify(resolution).includes("비밀"), false);
+      assert.equal(new QuoteFolderHelperRootError().message.includes("비밀"), false);
+    });
   });
 });
 
