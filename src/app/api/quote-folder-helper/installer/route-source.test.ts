@@ -45,13 +45,13 @@ describe("도우미 설치 파일 통로 — 소스로 지킨다", () => {
     assert.ok(route.includes('export const dynamic = "force-dynamic";'));
   });
 
-  test("🔴 순서: 저장 모드 → 세션 → 살아 있는 계정 · 승인 → quotes READ → UNC 루트 → 설치 파일", () => {
+  test("🔴 순서: 저장 모드 → 세션 → 살아 있는 계정 · 승인 → 설치 권한 → UNC 루트 → 설치 파일", () => {
     const marks = [
       'getAuthSource() !== "database"',
       "await readSession()",
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
-      'hasPermission(actingUser, "quotes", "READ")',
+      'mayInstallQuoteFolderHelper((areaKey) => hasPermission(actingUser, areaKey, "READ"))',
       "resolveQuoteFolderHelperInstallRoots()",
       'helperRoots.status === "unset"',
       'helperRoots.status === "invalid"',
@@ -65,6 +65,25 @@ describe("도우미 설치 파일 통로 — 소스로 지킨다", () => {
       previous = at;
     }
     assert.equal(getBody.match(/hasPermission\(/g)?.length, 1);
+    assert.equal(getBody.match(/mayInstallQuoteFolderHelper\(/g)?.length, 1);
+  });
+
+  /**
+   * 🔴 2026-09-30 — 설치 통로가 `quotes` READ **하나**에서 「`quotes` 또는 `customerPortal`
+   * READ」로 넓어졌다. 뜻이 약해지지 않게 이 시험이 세 가지를 함께 못 박는다:
+   *  · 통로가 **스스로 영역 이름을 적지 않는다** — 목록은 한 곳(server/quote-folder-helper.ts)이고,
+   *    그 목록이 무엇인지와 「둘 다 없으면 거짓」은 quote-folder-helper.test.ts 가 값으로 본다.
+   *  · 묻는 수준은 여전히 **READ 뿐**이다(WRITE 로 올리지도, 아예 빼지도 않았다).
+   *  · 🔴 권한을 통과하지 못하면 그대로 403 — 「누구나」로 가는 길이 없다.
+   */
+  test("🔴 설치 권한은 한 곳에서 판단한다 — 통로가 영역 이름을 스스로 적지 않고, 막히면 403", () => {
+    for (const hardcoded of ['"quotes"', '"customerPortal"', '"WRITE"', '"MANAGE"']) {
+      assert.equal(getBody.includes(hardcoded), false, `통로가 ${hardcoded} 를 직접 적는다`);
+    }
+    assert.ok(route.includes("mayInstallQuoteFolderHelper,"), "설치 권한 판단을 가져오지 않는다");
+    const permissionAt = getBody.indexOf("mayInstallQuoteFolderHelper(");
+    const rejected = getBody.indexOf('fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.")');
+    assert.ok(permissionAt >= 0 && rejected > permissionAt, "권한을 통과하지 못했을 때 403 이 아니다");
   });
 
   test("루트가 비었거나 틀리면 409 와 사람이 읽는 문장 — 값은 싣지 않는다", () => {

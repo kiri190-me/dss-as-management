@@ -48,13 +48,13 @@ describe("도우미 설치 명령 통로 — 소스로 지킨다", () => {
     assert.ok(route.includes('export const dynamic = "force-dynamic";'));
   });
 
-  test("🔴 순서: 저장 모드 → 세션 → 살아 있는 계정 · 승인 → quotes READ → UNC 루트 → 명령", () => {
+  test("🔴 순서: 저장 모드 → 세션 → 살아 있는 계정 · 승인 → 설치 권한 → UNC 루트 → 명령", () => {
     const marks = [
       'getAuthSource() !== "database"',
       "await readSession()",
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
-      'hasPermission(actingUser, "quotes", "READ")',
+      'mayInstallQuoteFolderHelper((areaKey) => hasPermission(actingUser, areaKey, "READ"))',
       "resolveQuoteFolderHelperInstallRoots()",
       'helperRoots.status === "unset"',
       'helperRoots.status === "invalid"',
@@ -68,7 +68,26 @@ describe("도우미 설치 명령 통로 — 소스로 지킨다", () => {
       previous = at;
     }
     assert.equal(getBody.match(/hasPermission\(/g)?.length, 1);
+    assert.equal(getBody.match(/mayInstallQuoteFolderHelper\(/g)?.length, 1);
     assert.equal(getBody.includes('"WRITE"'), false);
+  });
+
+  /** 설치 파일 통로와 **같은 잣대**(installer/route-source.test.ts 의 같은 이름 시험). */
+  test("🔴 설치 권한은 한 곳에서 판단한다 — 통로가 영역 이름을 스스로 적지 않고, 막히면 403", () => {
+    for (const hardcoded of ['"quotes"', '"customerPortal"', '"WRITE"', '"MANAGE"']) {
+      assert.equal(getBody.includes(hardcoded), false, `통로가 ${hardcoded} 를 직접 적는다`);
+    }
+    assert.ok(route.includes("mayInstallQuoteFolderHelper,"), "설치 권한 판단을 가져오지 않는다");
+    const permissionAt = getBody.indexOf("mayInstallQuoteFolderHelper(");
+    const rejected = getBody.indexOf('fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.")');
+    assert.ok(permissionAt >= 0 && rejected > permissionAt, "권한을 통과하지 못했을 때 403 이 아니다");
+  });
+
+  /** 🔴 두 통로의 문지기가 갈라지지 않게 — 권한 줄이 **글자 그대로** 같아야 한다. */
+  test("🔴 설치 권한 줄이 설치 파일 통로와 글자 그대로 같다", () => {
+    const line = 'if (!(await mayInstallQuoteFolderHelper((areaKey) => hasPermission(actingUser, areaKey, "READ")))) {';
+    assert.ok(getBody.includes(line), getBody.slice(0, 400));
+    assert.ok(installerRoute.includes(line), "설치 파일 통로의 권한 줄이 다르다");
   });
 
   test("🔴 문지기가 설치 파일 통로와 같다 — 실패 코드 · 사유 문장이 글자 그대로 같다", () => {

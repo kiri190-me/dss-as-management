@@ -95,12 +95,25 @@ export async function previewCustomerFormExportAction(input: {
 }
 
 export type CustomerFormExportSaveResult =
-  | { ok: true; message: string; fileName: string; unchanged: boolean }
+  /** 🔴 `status` 를 화면까지 가져간다 — 화면이 「새로 만듦」과 「덮어씀」을 다른 결로 낸다. */
+  | { ok: true; message: string; fileName: string; status: "saved" | "replaced" | "unchanged" }
   | { ok: false; message: string };
 
 /**
- * 공유폴더에 **새 이름으로** 저장한다. 🔴 덮어쓰지 않는다 — 같은 이름이 있으면
- * ` (2)` 로 넘어가고, 바이트가 똑같으면 새로 쓰지 않고 그 파일을 가리킨다.
+ * ============================================================================
+ * 공유폴더에 **오늘 이름으로** 저장한다 — 같은 이름이 있으면 덮어쓴다
+ * ============================================================================
+ * 🔴 **덮어쓰면 사람이 그 파일을 손으로 고쳐 둔 내용이 사라진다.** 조용히 넘어가면 사람은
+ * 자기 수정이 없어진 것을 모른 채 그 파일을 고객사에 보낸다. 그래서 세 문장을 **가른다**:
+ *
+ *   saved     공유폴더에 새로 만들었습니다 — …
+ *   replaced  🔴 같은 이름의 파일을 덮어썼습니다 — … (손으로 고쳐 둔 내용이 있었다면 …)
+ *   unchanged 내용이 같은 파일이 이미 있어 그대로 두었습니다 — …
+ *
+ * 문장만이 아니라 `status` 도 함께 올린다 — 화면이 덮어쓴 경우만 눈에 띄게 낸다
+ * (CustomerFormExportPanel: 경고 결).
+ * 🔴 견적서 저장은 이 규칙과 무관하다 — 그쪽은 그대로 ` (2)` 로 넘어간다.
+ * ============================================================================
  */
 export async function saveCustomerFormExportAction(input: {
   customerId: string;
@@ -120,12 +133,20 @@ export async function saveCustomerFormExportAction(input: {
   return {
     ok: true,
     fileName: saved.fileName,
-    unchanged: saved.status === "unchanged",
-    message:
-      saved.status === "unchanged"
-        ? `내용이 같은 파일이 이미 있어 새로 만들지 않았습니다 — ${saved.fileName}`
-        : `공유폴더에 저장했습니다 — ${saved.fileName}`,
+    status: saved.status,
+    message: saveMessage(saved.status, saved.fileName),
   };
+}
+
+function saveMessage(status: "saved" | "replaced" | "unchanged", fileName: string): string {
+  switch (status) {
+    case "replaced":
+      return `같은 이름의 파일이 있어 덮어썼습니다 — ${fileName}. 그 파일을 손으로 고쳐 두셨다면 그 내용은 사라졌습니다.`;
+    case "unchanged":
+      return `내용이 같은 파일이 이미 있어 그대로 두었습니다 — ${fileName}`;
+    case "saved":
+      return `공유폴더에 새로 저장했습니다 — ${fileName}`;
+  }
 }
 
 export type CustomerFormExportFolderResult =

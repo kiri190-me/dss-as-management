@@ -262,6 +262,52 @@ export function quoteFolderHelperRootsInput(roots: readonly [string, ...string[]
   return { uncRoot: roots[0], extraRoots: roots.slice(1) };
 }
 
+/**
+ * ============================================================================
+ * 🔴 설치 파일 · 설치 명령을 **받을 수 있는 사람** (2026-09-30 사용자 결정)
+ * ============================================================================
+ * [폴더 열기]가 있는 화면이 둘이 되었다 — 견적서 편집 화면과 고객사 현황표 패널
+ * (components/customer-portal/CustomerFormExportPanel.tsx). 사용자가 「[폴더 열기] 버튼이 있는
+ * 곳 어디서든 설치할 수 있도록」이라고 정했으므로, 설치 통로는 **둘 중 하나의 READ** 로 연다.
+ *
+ * ── 왜 넓혀야 했나 ───────────────────────────────────────────────────────
+ * 기본 정책에서는 `quotes` 를 볼 수 있는 역할과 `customerPortal` 을 볼 수 있는 역할이 같은
+ * 집합이라(SUPER_ADMIN · ADMIN · SALES · AS_ENGINEER — auth/permission-baseline.ts) 지금은
+ * 공백이 없다. 하지만 관리자가 [역할별 접근 권한]에서 어떤 역할의 `quotes` 를 NONE 으로 낮추고
+ * `customerPortal` 은 READ 로 두면, 그 역할은 **현황표를 보면서도 설치 파일을 못 받는다.**
+ * 그 구멍을 막는 것이 이 함수다.
+ *
+ * ── 🔴 무엇이 넓어지고 무엇이 안 넓어지는가 ───────────────────────────────
+ * 넓어지는 것은 **누가 설치 파일 · 설치 명령을 받을 수 있나**뿐이다.
+ * 🔴 도우미가 **열 수 있는 폴더는 한 뼘도 넓어지지 않는다** — 루트는 설치할 때 본문에 박히고
+ * (resolveQuoteFolderHelperInstallRoots), 도우미는 그 루트 아래의 폴더만 연다(머리말 불변식 (a)).
+ * 설치 파일을 더 많은 사람이 받아도 그 사람의 PC 가 열 수 있는 폴더 목록은 똑같다.
+ *
+ * ── 🔴 「누구나」가 되지 않는다 ───────────────────────────────────────────
+ * 둘 **다** NONE 인 사람은 여전히 거절이다(403). 이 함수는 목록을 돌며 하나라도 통과하면
+ * 참이고, 하나도 통과하지 못하면 거짓이다 — 빈 목록이 될 수 없게 상수를 튜플로 못 박는다.
+ * 저장 모드 · 세션 · 살아 있는 계정 · 승인은 이 앞에서 이미 걸렀다(통로의 순서).
+ * ============================================================================
+ */
+export const QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS: readonly [string, ...string[]] = [
+  "quotes",
+  "customerPortal",
+];
+
+/**
+ * 이 사람이 설치 파일 · 설치 명령을 받을 수 있는가. 권한을 **묻는 방법**은 부르는 쪽이 준다
+ * (`canRead`) — 이 모듈이 세션 · DB 를 끌어들이지 않게, 그리고 시험이 값으로 볼 수 있게.
+ * 하나라도 참이면 참, 하나도 없으면 **거짓**이다.
+ */
+export async function mayInstallQuoteFolderHelper(
+  canRead: (areaKey: string) => Promise<boolean>
+): Promise<boolean> {
+  for (const areaKey of QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS) {
+    if ((await canRead(areaKey)) === true) return true;
+  }
+  return false;
+}
+
 /** PowerShell 작은따옴표 문자열 — 작은따옴표(와 닮은꼴)는 두 번. 루트 검사가 이미 막지만 한 겹 더. */
 function powerShellSingleQuoted(value: string): string {
   let out = "";

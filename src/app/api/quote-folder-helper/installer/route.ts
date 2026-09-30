@@ -7,6 +7,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import {
   QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME,
   buildQuoteFolderHelperInstaller,
+  mayInstallQuoteFolderHelper,
   quoteFolderHelperRootsInput,
   resolveQuoteFolderHelperInstallRoots,
 } from "@/lib/server/quote-folder-helper";
@@ -32,14 +33,16 @@ import {
  * resolveQuoteFolderHelperInstallRoots 가 가리고, 이 통로는 그 목록을 그대로 넘긴다.
  *
  * ── 순서 ────────────────────────────────────────────────────────────────
- *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(quotes READ)
+ *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(quotes 또는 customerPortal READ)
  *  → 4) UNC 루트(하나도 없거나 견적서 루트가 틀리면 409) → 5) 설치 파일(첨부)
  *
- * 권한이 READ 인 까닭: 도우미는 공유폴더를 **여는** 도구이고, 견적서를 볼 수 있는 사람이
+ * 권한이 READ 인 까닭: 도우미는 공유폴더를 **여는** 도구이고, 그 폴더를 볼 수 있는 사람이
  * [폴더 열기]를 누른다. 아무것도 바꾸지 않으므로 감사를 남기지 않는다.
- * 🔴 현황표 루트가 더해져도 `quotes` READ 그대로다 — 기본값에서 「고객 안내 현황을 볼 수 있는
- * 역할」과 「견적서를 볼 수 있는 역할」이 같은 집합이고(SUPER_ADMIN · ADMIN · SALES ·
- * AS_ENGINEER — auth/permission-baseline.ts), 권한을 넓히는 일은 사용자 승인 사항이다.
+ * 🔴 **둘 중 하나**인 까닭(2026-09-30 사용자 결정): [폴더 열기]가 있는 화면이 둘이 되었다 —
+ * 견적서 편집 화면과 고객사 현황표 패널. 판단은 server/quote-folder-helper.ts 의
+ * mayInstallQuoteFolderHelper 한 곳에 있고, 그 머리말이 **무엇이 넓어지고 무엇이 안 넓어지는지**를
+ * 적는다: 넓어지는 것은 「누가 설치 파일을 받을 수 있나」뿐이고, 🔴 **도우미가 열 수 있는 폴더는
+ * 넓어지지 않는다**(루트는 설치할 때 본문에 박힌다). 둘 다 NONE 인 사람은 그대로 403 이다.
  * ============================================================================
  */
 
@@ -77,8 +80,8 @@ export async function GET(): Promise<NextResponse> {
     return fail(403, "ACCOUNT_NOT_APPROVED", "계정이 아직 승인되지 않았습니다.");
   }
 
-  // ── 3) 권한 ──────────────────────────────────────────────────────────
-  if (!(await hasPermission(actingUser, "quotes", "READ"))) {
+  // ── 3) 권한 — 견적서 · 현황표 가운데 **하나라도** READ. 둘 다 없으면 거절이다. ──
+  if (!(await mayInstallQuoteFolderHelper((areaKey) => hasPermission(actingUser, areaKey, "READ")))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 

@@ -206,3 +206,16 @@ src/components/product-models/product-model-file-modified-date.test.ts
 # 통로는 server-only 라 통째로 그릴 수 없다 — 이웃 product-model-file-modified-date.test.ts
 # 와 같은 방법으로 원본을 글자로 읽는다.
 src/components/customer-portal/customer-portal-form-view.test.ts
+
+# 고객사 현황표 엑셀 패널(사용자 요청 2026-09-30: ① 같은 제목이면 덮어쓴다 ② [폴더 열기]가
+# 있는 곳 어디서든 도우미를 설치한다). 값 판정은 unit 목록이 본다 — 덮어쓰기 자체는
+# lib/storage/customer-portal-archive.test.ts, 설치 권한은 lib/server/quote-folder-helper.test.ts
+# 와 두 route-source 시험. 여기서 못 박는 것은 **화면이 그 결과를 어떻게 말하는가**다:
+# 🔴 「덮어썼다」를 사람이 읽는 문장으로 말하는가(조용히 덮어쓰면 손으로 고쳐 둔 내용이 사라진
+# 것을 모른 채 고객사에 보낸다) · 세 갈래(새로 만듦 · 덮어씀 · 그대로 둠)가 서로 다른 문장이고
+# 덮어쓴 경우만 경고 결인가 · 🔴 이 화면에서 설치할 수 있는가(안내가 이 화면의 단추를 가리키고
+# 「예전 설치본이면 한 번 더」가 견적서 화면과 어긋나지 않는가) · 🔴 새 도우미를 만들지 않고
+# 견적서 쪽 흐름 하나를 부르는가 · 설치 명령 본문을 화면 · 콘솔에 쏟지 않는가. 클라이언트
+# 컴포넌트가 서버 액션을 직접 부르고 통로는 server-only 라 통째로 그릴 수 없다 — 이웃
+# customer-portal-form-view.test.ts 와 같은 방법으로 원본을 글자로 읽는다.
+src/components/customer-portal/customer-form-export-panel.test.ts

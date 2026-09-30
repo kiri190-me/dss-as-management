@@ -17,6 +17,7 @@ import {
   QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE,
   QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME,
   QUOTE_FOLDER_HELPER_INSTALLER_PATH_ENV,
+  QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS,
   QUOTE_FOLDER_HELPER_INSTALL_EXIT_PS,
   QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE,
   QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS,
@@ -26,6 +27,7 @@ import {
   buildQuoteFolderHelperInstaller,
   buildQuoteFolderHelperScript,
   buildQuoteFolderHelperUncPath,
+  mayInstallQuoteFolderHelper,
   normalizeQuoteFolderHelperRoot,
   quoteFolderHelperInlinePayloadReaderPs,
   quoteFolderHelperInstallCommand,
@@ -774,6 +776,73 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
       assert.equal(JSON.stringify(resolution).includes("비밀"), false);
       assert.equal(new QuoteFolderHelperRootError().message.includes("비밀"), false);
     });
+  });
+});
+
+// ── 설치 권한 ──────────────────────────────────────────────────────────────
+
+/**
+ * ============================================================================
+ * 🔴 누가 설치 파일 · 설치 명령을 받을 수 있는가 (2026-09-30 사용자 결정)
+ * ============================================================================
+ * [폴더 열기]가 있는 화면이 둘이 되어(견적서 편집 화면 · 고객사 현황표 패널) 설치 통로가
+ * `quotes` READ **하나**에서 「`quotes` 또는 `customerPortal` READ」로 넓어졌다.
+ * 여기서 값으로 못 박는 것은 셋이다:
+ *  1. `quotes` 만 있는 사람이 받는다 — **지금까지와 같다**(견적서만 쓰는 사람이 막히면 안 된다).
+ *  2. `customerPortal` 만 있는 사람도 받는다 — 이번에 막은 구멍이다.
+ *  3. 🔴 **둘 다 없는 사람은 못 받는다** — 넓혔지 「누구나」로 열지 않았다.
+ * 통로가 이 함수를 그 자리에서 부르는지는 두 route-source 시험이 본다.
+ * ============================================================================
+ */
+describe("🔴 설치 권한 — 견적서 · 현황표 가운데 하나라도 READ", () => {
+  /** 이 영역들만 READ 인 사람. 물어본 영역을 그대로 적어 두어 **무엇을 물었는지**까지 본다. */
+  function actorWith(...areas: string[]): { canRead: (areaKey: string) => Promise<boolean>; asked: string[] } {
+    const asked: string[] = [];
+    return {
+      asked,
+      canRead: async (areaKey: string) => {
+        asked.push(areaKey);
+        return areas.includes(areaKey);
+      },
+    };
+  }
+
+  test("물어보는 영역은 견적서와 현황표 둘뿐이다", () => {
+    assert.deepEqual([...QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS], ["quotes", "customerPortal"]);
+  });
+
+  test("견적서만 볼 수 있는 사람이 받는다 — 지금까지와 같다", async () => {
+    const actor = actorWith("quotes");
+    assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), true);
+    // 첫째에서 통과하면 더 묻지 않는다(조회 한 번이면 끝난다).
+    assert.deepEqual(actor.asked, ["quotes"]);
+  });
+
+  test("🔴 현황표만 볼 수 있는 사람도 받는다 — 이번에 막은 구멍", async () => {
+    const actor = actorWith("customerPortal");
+    assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), true);
+    assert.deepEqual(actor.asked, ["quotes", "customerPortal"]);
+  });
+
+  test("둘 다 볼 수 있는 사람도 받는다(기본값의 네 역할)", async () => {
+    assert.equal(await mayInstallQuoteFolderHelper(actorWith("quotes", "customerPortal").canRead), true);
+  });
+
+  test("🔴 둘 다 없는 사람은 못 받는다 — 「누구나」가 아니다", async () => {
+    const actor = actorWith();
+    assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), false);
+    assert.deepEqual(actor.asked, ["quotes", "customerPortal"], "묻지 않고 통과시킨 영역이 있다");
+  });
+
+  test("🔴 다른 영역을 아무리 많이 가져도 받지 못한다", async () => {
+    const actor = actorWith("repairCases", "inventory", "users", "settings", "productModels");
+    assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), false);
+  });
+
+  test("🔴 참이 아닌 값은 참으로 치지 않는다", async () => {
+    // 물음이 던지는 것이 아니라 이상한 값을 돌려줄 때 — 닫히는 쪽으로 틀린다.
+    const sloppy = async () => undefined as unknown as boolean;
+    assert.equal(await mayInstallQuoteFolderHelper(sloppy), false);
   });
 });
 

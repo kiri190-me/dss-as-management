@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { copyText } from "@/components/common/copy-text";
 import PrintFitFrame from "@/components/common/print-fit-frame";
 import { PX_PER_MM, SheetPrintGridView, planPaper } from "@/components/print-grid/SheetPrintGridView";
+import { runQuoteFolderHelperInstallCommandCopy } from "@/components/quotes/quote-folder-open";
 import {
   customerFormExportFolderAction,
   previewCustomerFormExportAction,
@@ -33,18 +34,21 @@ type CustomerFormExportPreview = Extract<
  * 견적서 미리보기와 같은 조각 — components/print-grid/SheetPrintGridView).
  * 미리보기용으로 따로 그리지 않는다.
  *
- * ── 🔴 저장은 덮어쓰지 않는다 ────────────────────────────────────────────
- * 언제나 **오늘 날짜가 붙은 새 이름**으로 쓴다. 같은 이름이 있으면 ` (2)` 로 넘어가고,
- * 내용이 똑같으면 새로 쓰지 않는다 — 그 사실을 문장으로 알린다.
+ * ── 🔴 저장은 같은 이름을 덮어쓴다 (사용자 결정 2026-09-30) ────────────────
+ * 언제나 **오늘 날짜가 붙은 이름**으로 쓴다. 그 이름의 파일이 이미 있으면 덮어쓴다 —
+ * 예전처럼 ` (2)` 로 넘어가지 않는다. 덮어쓰면 사람이 그 파일을 손으로 고쳐 둔 내용이
+ * 사라지므로, **「새로 만듦」 · 「덮어씀」 · 「내용이 같아 그대로 둠」을 다른 문장으로**
+ * 내고 덮어쓴 경우만 경고 결(호박색)로 낸다. 조용히 넘어가지 않는다.
  *
- * ── [폴더 열기]는 **이미 설치된 도우미**를 쓴다 ───────────────────────────
- * 견적서 화면의 그 도우미다(레지스트리 `dss-folder`). 이 화면은 도우미를 설치하지
- * 않는다 — 설치 자리가 하나뿐이라, 여기서 따로 설치하면 견적서 [폴더 열기]가 그 PC
- * 에서 죽는다. 도우미가 없으면 아무 일도 일어나지 않으므로, 그때 무엇을 하면 되는지
- * 글로 함께 낸다(견적서 화면에서 한 번 설치 → 이 단추가 그대로 동작).
+ * ── [폴더 열기]는 **이미 설치된 도우미**를 쓴다 · 설치도 여기서 한다 ───────
+ * 견적서 화면의 그 도우미다(레지스트리 `dss-folder`). PC 마다 한 벌뿐이라 **새 도우미를
+ * 만들지 않는다** — 여기서 내미는 [설치 명령 복사]는 견적서 화면과 **똑같은 한 벌**을
+ * 설치한다(components/quotes/quote-folder-open.ts 의 runQuoteFolderHelperInstallCommandCopy).
  * 🔴 그 한 벌에 현황표 공유폴더의 루트도 함께 심긴다(2026-09-30 — 현황표 폴더는 견적서
  * 루트 아래가 아니다). 루트는 **설치할 때 박히므로**, 그 설정이 생기기 전에 설치한 PC 는
  * 설치를 한 번 더 해야 이 단추가 동작한다 — 아래 안내 문장이 그 말을 한다.
+ * 🔴 설치가 늘려 주는 것은 **누가 설치 파일을 받을 수 있나**뿐이다 — 도우미가 열 수 있는
+ * 폴더는 설치할 때 박힌 루트 아래 그대로다(api/quote-folder-helper/*).
  * ============================================================================
  */
 
@@ -57,16 +61,41 @@ const NOTICE_CLASS: Record<NoticeTone, string> = {
   muted: "text-zinc-500",
 };
 
+/** 견적서 쪽 설치 흐름이 돌려주는 줄. 타입도 **되짚어** 쓴다(미리보기와 같은 방법). */
+type HelperNoticeLine = Awaited<ReturnType<typeof runQuoteFolderHelperInstallCommandCopy>>[number];
+
 /**
- * 도우미가 없을 때 · **옛 설치본일 때** 사람이 할 수 있는 일 — 설치 길은 견적서 화면 하나뿐이다.
+ * 그쪽 결을 이 화면의 결로 옮긴다. 지금은 두 이름이 같지만 손으로 가른다 — 저쪽에 결이
+ * 하나 늘면 **여기서 tsc 가 멈춘다**(조용히 다른 색으로 새지 않게).
+ */
+function noticeToneOf(tone: HelperNoticeLine["tone"]): NoticeTone {
+  switch (tone) {
+    case "warning":
+      return "warning";
+    case "muted":
+      return "muted";
+    case "normal":
+      return "normal";
+  }
+}
+
+/**
+ * 도우미가 없을 때 · **옛 설치본일 때** 사람이 할 수 있는 일 — 이제 이 화면에서 바로 설치한다
+ * (사용자 요청 2026-09-30: 「[폴더 열기] 버튼이 있는 곳 어디서든 설치할 수 있도록」).
  *
- * 🔴 「다시 설치」를 함께 적는 까닭: 도우미는 설치될 때 루트가 박힌다(그 값이 저장소에 남지
- * 않게 요청마다 만든다). 그래서 현황표 폴더의 루트를 관리자가 뒤에 설정했다면, 그 전에 설치한
- * PC 의 도우미는 그 폴더를 **모른 채** "폴더를 찾을 수 없습니다"로 끝난다 — 설치를 한 번 더
- * 해야 알게 된다. 이 문장이 없으면 사람은 「도우미는 깔았는데 왜 안 되지」에서 멈춘다.
+ * 🔴 「이미 설치했더라도 한 번 더」를 함께 적는 까닭: 도우미는 설치될 때 루트가 박힌다(그 값이
+ * 저장소에 남지 않게 요청마다 만든다). 그래서 현황표 폴더의 루트를 관리자가 뒤에 설정했다면,
+ * 그 전에 설치한 PC 의 도우미는 그 폴더를 **모른 채** "폴더를 찾을 수 없습니다"로 끝난다 —
+ * 설치를 한 번 더 해야 알게 된다. 이 문장이 없으면 사람은 「도우미는 깔았는데 왜 안 되지」에서
+ * 멈춘다. 견적서 화면의 같은 자리 문장(QUOTE_FOLDER_HELPER_MISSING_TEXT)과 뜻이 어긋나지 않게
+ * 「관리자 권한은 필요 없습니다」까지 같은 말로 맞춘다 — 설치되는 것이 **똑같은 한 벌**이다.
  */
 export const PORTAL_FOLDER_HELPER_HINT_TEXT =
-  "탐색기가 열리지 않으면 이 PC 에 폴더 열기 도우미가 없거나 예전 설치본입니다 — 견적서 화면의 [폴더 열기]에서 설치를 한 번(이미 설치했더라도 다시 한 번) 하면 이 단추도 함께 동작합니다.";
+  "탐색기가 열리지 않으면 이 PC 에 폴더 열기 도우미가 없거나 예전 설치본입니다 — [설치 명령 복사]를 눌러 PowerShell 창에 붙여넣어 주세요(이미 설치했더라도 한 번 더 하면 이 폴더까지 알게 됩니다). 관리자 권한은 필요 없습니다.";
+
+/** 설치 단추에 마우스를 올리면 보이는 설명 — 새 도우미가 아니라는 것을 분명히 한다. */
+export const PORTAL_FOLDER_HELPER_INSTALL_BUTTON_TITLE =
+  "견적서 화면과 같은 폴더 열기 도우미 한 벌을 이 PC 에 설치하는 명령을 복사합니다 — PowerShell 창에 붙여넣으면 됩니다";
 
 export const PORTAL_FOLDER_UNC_COPIED_TEXT =
   "폴더 위치를 복사했습니다 — 탐색기 주소창에 붙여넣고 Enter 를 눌러 주세요.";
@@ -104,6 +133,12 @@ export default function CustomerFormExportPanel({
   const [pending, startTransition] = useTransition();
   const [notices, setNotices] = useState<Notice[]>([]);
   const [uncPath, setUncPath] = useState<string | null>(null);
+  /**
+   * [폴더 열기]가 한 번이라도 통한 뒤에만 설치 안내를 낸다 — 견적서 화면의
+   * `offerHelperInstall` 과 같은 결이다. 공유폴더 설정이 없어 열 수조차 없을 때
+   * 설치부터 시키면 사람이 헛일을 한다.
+   */
+  const [offerHelperInstall, setOfferHelperInstall] = useState(false);
   const [preview, setPreview] = useState<CustomerFormExportPreview | null>(null);
 
   const run = (work: () => Promise<Notice[]>) => {
@@ -137,7 +172,9 @@ export default function CustomerFormExportPanel({
   const handleSave = () =>
     run(async () => {
       const result = await saveCustomerFormExportAction({ customerId });
-      return [{ text: result.message, tone: result.ok ? "normal" : "warning" }];
+      // 🔴 덮어썼을 때는 경고 결로 낸다 — 사람이 손으로 고쳐 둔 내용이 사라졌을 수 있다.
+      if (!result.ok) return [{ text: result.message, tone: "warning" as const }];
+      return [{ text: result.message, tone: result.status === "replaced" ? "warning" : "normal" }];
     });
 
   const handleOpenFolder = () =>
@@ -145,9 +182,11 @@ export default function CustomerFormExportPanel({
       const result = await customerFormExportFolderAction();
       if (!result.ok) {
         setUncPath(null);
+        setOfferHelperInstall(false);
         return [{ text: result.message, tone: "warning" as const }];
       }
       setUncPath(result.uncPath ?? null);
+      setOfferHelperInstall(true);
       try {
         openHelperLink(result.link);
       } catch {
@@ -169,6 +208,17 @@ export default function CustomerFormExportPanel({
             { text: PORTAL_FOLDER_UNC_COPY_BLOCKED_TEXT, tone: "warning" as const },
             { text: uncPath, tone: "muted" as const },
           ];
+    });
+
+  /**
+   * [설치 명령 복사] — 견적서 화면과 **같은 흐름 · 같은 문장**을 그대로 쓴다
+   * (runQuoteFolderHelperInstallCommandCopy). 🔴 설치 명령 본문은 어디에도 싣지 않는다 —
+   * 사내 공유폴더 주소가 들어 있고 길이도 약 10,300자다.
+   */
+  const handleCopyInstallCommand = () =>
+    run(async () => {
+      const lines = await runQuoteFolderHelperInstallCommandCopy();
+      return lines.map((line) => ({ text: line.text, tone: noticeToneOf(line.tone) }));
     });
 
   return (
@@ -206,6 +256,18 @@ export default function CustomerFormExportPanel({
             className="rounded-lg border border-zinc-300 px-4 py-2 text-xs text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-50"
           >
             위치 복사
+          </button>
+        ) : null}
+        {offerHelperInstall ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={handleCopyInstallCommand}
+            title={PORTAL_FOLDER_HELPER_INSTALL_BUTTON_TITLE}
+            data-portal-folder-helper-install-command=""
+            className="rounded-lg border border-zinc-300 px-4 py-2 text-xs text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-50"
+          >
+            설치 명령 복사
           </button>
         ) : null}
         {preview !== null ? (

@@ -34,7 +34,7 @@ import {
  *        → 줄 자료(listPortalItemsForCustomer)
  *        → 공유폴더의 **직전 파일**(storage/customer-portal-archive)
  *        → 통합문서 만들기(xlsx/customer-portal-export-workbook)
- *        → 미리보기(sheet-print-grid) 또는 새 이름으로 저장
+ *        → 미리보기(sheet-print-grid) 또는 오늘 이름으로 저장
  *
  * ── 🔴 미리보기와 저장은 **같은 바이트**에서 나온다 ────────────────────────
  * 둘 다 `prepareCustomerPortalExport` 가 만든 통합문서 하나를 쓴다. 미리보기용으로
@@ -194,10 +194,19 @@ export function buildCustomerPortalExportGrid(
 }
 
 export type CustomerPortalExportSaveOutcome =
-  | { ok: true; status: "saved" | "unchanged"; fileName: string }
+  /**
+   * 🔴 `status` 를 그대로 올려 보낸다 — 「새로 만듦(saved)」 · 「덮어씀(replaced)」 ·
+   * 「내용이 같아 손대지 않음(unchanged)」. 덮어쓰면 사람이 그 파일을 손으로 고쳐 둔 내용이
+   * 사라지므로, 화면이 그 셋을 **다른 문장으로** 말해야 한다(actions/customer-portal-export.ts).
+   */
+  | { ok: true; status: "saved" | "replaced" | "unchanged"; fileName: string }
   | CustomerPortalExportFailure;
 
-/** 만든 통합문서를 공유폴더에 **새 이름으로** 저장한다. 덮어쓰지 않는다. */
+/**
+ * 만든 통합문서를 공유폴더에 **오늘 이름으로** 저장한다.
+ * 🔴 같은 이름이 있으면 덮어쓴다(storage/customer-portal-archive.ts 머리말) — 견적서 쪽은
+ * 그대로 ` (2)` 로 넘어간다(storage/quote-archive.ts, 이번에 건드리지 않았다).
+ */
 export async function saveCustomerPortalExport(
   plan: CustomerPortalExportPlan
 ): Promise<CustomerPortalExportSaveOutcome> {

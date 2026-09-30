@@ -6,6 +6,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   buildQuoteFolderHelperInlineInstallCommand,
+  mayInstallQuoteFolderHelper,
   quoteFolderHelperRootsInput,
   resolveQuoteFolderHelperInstallRoots,
 } from "@/lib/server/quote-folder-helper";
@@ -29,12 +30,14 @@ import {
  * 규칙은 installer 라우트 · server/quote-folder-helper.ts 와 같다(도우미는 PC 당 한 벌).
  *
  * ── 순서 ────────────────────────────────────────────────────────────────
- *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(quotes READ)
+ *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(quotes 또는 customerPortal READ)
  *  → 4) UNC 루트(하나도 없거나 견적서 루트가 틀리면 409) → 5) 명령 한 줄(JSON)
  *
  * 권한이 READ 인 까닭은 installer 라우트와 같다 — 도우미는 공유폴더를 **여는** 도구이고,
- * 견적서를 볼 수 있는 사람이 [폴더 열기]를 누른다. 아무것도 바꾸지 않으므로 감사를 남기지 않는다.
- * 🔴 현황표 루트가 더해져도 `quotes` READ 그대로다(installer 라우트 머리말의 까닭과 같다).
+ * 그 폴더를 볼 수 있는 사람이 [폴더 열기]를 누른다. 아무것도 바꾸지 않으므로 감사를 남기지 않는다.
+ * 🔴 **둘 중 하나**인 것도 installer 라우트와 같다(2026-09-30) — 판단은
+ * mayInstallQuoteFolderHelper 한 곳이고, 넓어지는 것은 「누가 받을 수 있나」뿐이다.
+ * 도우미가 열 수 있는 폴더는 넓어지지 않고, 둘 다 NONE 인 사람은 그대로 403 이다.
  *
  * ── 응답 ────────────────────────────────────────────────────────────────
  *  · 200 `{ command }` — 붙여넣는 한 줄. `Cache-Control: no-store`
@@ -76,8 +79,8 @@ export async function GET(): Promise<NextResponse> {
     return fail(403, "ACCOUNT_NOT_APPROVED", "계정이 아직 승인되지 않았습니다.");
   }
 
-  // ── 3) 권한 ──────────────────────────────────────────────────────────
-  if (!(await hasPermission(actingUser, "quotes", "READ"))) {
+  // ── 3) 권한 — 견적서 · 현황표 가운데 **하나라도** READ. 둘 다 없으면 거절이다. ──
+  if (!(await mayInstallQuoteFolderHelper((areaKey) => hasPermission(actingUser, areaKey, "READ")))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 
