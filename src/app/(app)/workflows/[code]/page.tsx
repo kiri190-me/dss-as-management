@@ -10,6 +10,7 @@ import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
 import WorkflowDraftEntry from "@/components/workflows/WorkflowDraftEntry";
 import { getWorkflowTemplateDetail } from "@/lib/db/queries/workflow-templates";
 import { loadWorkflowRules } from "@/lib/db/queries/workflow-rules";
+import { workflowPublishCaseSentencesFromParams } from "@/lib/domain/workflow-publish-counts-param";
 import { db } from "@/lib/db/client";
 import { getUiText } from "@/lib/server/ui-text";
 
@@ -48,6 +49,12 @@ const ACTION_LABELS: Record<string, string> = {
  * done 쿼리는 초안 편집기에서 폐기·발행 후 이동해 올 때만 붙는다. 그 조작들은
  * 화면을 떠나며 끝나므로 편집기 쪽 메시지가 함께 사라지고, 그러면 "됐나?"를
  * 알 수 없다 — 결과를 도착 화면에서 한 번 더 말해 준다.
+ *
+ * 발행에는 고정 문구 뒤에 **건수 문장**이 이어 붙는다(`?moved=` · `?stranded=`).
+ * 발행 한 번에 진행 중인 접수 건 수십 건이 새 버전으로 옮겨지는데, 그 사실이
+ * 어디에도 안 보이면 사람이 모른 채 지나간다. 주소에서 온 값은 믿지 않고
+ * domain/workflow-publish-counts-param.ts 가 걸러 준다 — 이상하면 그 문장만
+ * 빠지고 고정 문구는 그대로 나온다(오류 화면을 띄울 일이 아니다).
  */
 const DONE_MESSAGES: Record<string, string> = {
   published: "초안을 발행했습니다. 아래 버전 이력에서 새 버전이 '현재'인지 확인하세요.",
@@ -59,10 +66,19 @@ export default async function WorkflowDetailPage({
   searchParams,
 }: {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ done?: string }>;
+  searchParams: Promise<{ done?: string; moved?: string | string[]; stranded?: string | string[] }>;
 }) {
   const { code } = await params;
-  const { done } = await searchParams;
+  const search = await searchParams;
+  const { done } = search;
+  const doneMessage =
+    done && DONE_MESSAGES[done]
+      ? [
+          DONE_MESSAGES[done],
+          // 건수는 발행에만 붙는다 — 폐기는 접수 건을 옮기지 않는다.
+          ...(done === "published" ? workflowPublishCaseSentencesFromParams(search) : []),
+        ].join(" ")
+      : null;
 
   const session = await readSession();
   if (!session) redirect("/login");
@@ -95,12 +111,12 @@ export default async function WorkflowDetailPage({
         <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-500">{detail.code}</p>
       </div>
 
-      {done && DONE_MESSAGES[done] && (
+      {doneMessage && (
         <p
           role="status"
           className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
         >
-          {DONE_MESSAGES[done]}
+          {doneMessage}
         </p>
       )}
 

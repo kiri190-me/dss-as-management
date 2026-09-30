@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { REPAIR_STATUS_CODES } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import { STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
+import { workflowPublishDoneHref } from "@/lib/domain/workflow-publish-counts-param";
 import type { DraftValidationResult } from "@/lib/domain/workflow-draft-validation";
 import type {
   WorkflowDraftStepView,
@@ -83,10 +84,14 @@ export default function WorkflowDraftEditor({
    * 동시에 refresh가 **방금 사라진 초안 페이지**를 다시 그리려 하고, 그
    * 페이지는 초안이 없으면 notFound()이기 때문이다. 이동하는 경우에는 목적지
    * 화면이 알아서 새로 읽으므로 refresh 자체가 불필요하다.
+   *
+   * navigateTo 는 글자로도, **결과를 받는 함수로도** 줄 수 있다. 발행처럼 서버가
+   * 센 수(옮긴 건수·남은 건수)를 도착 화면에 넘겨야 하는 조작 때문이다 — 떠나는
+   * 화면의 메시지는 사람이 읽기 전에 사라지므로 주소에 실어 보낸다.
    */
-  function run(
-    action: () => Promise<{ ok: boolean; message?: string }>,
-    options?: { navigateTo?: string }
+  function run<T extends { ok: boolean; message?: string }>(
+    action: () => Promise<T>,
+    options?: { navigateTo?: string | ((result: T) => string) }
   ) {
     setMessage(null);
     startTransition(async () => {
@@ -95,8 +100,10 @@ export default function WorkflowDraftEditor({
         setMessage({ type: "error", text: result.message ?? "처리하지 못했습니다." });
         return;
       }
-      if (options?.navigateTo) {
-        router.push(options.navigateTo);
+      const navigateTo =
+        typeof options?.navigateTo === "function" ? options.navigateTo(result) : options?.navigateTo;
+      if (navigateTo) {
+        router.push(navigateTo);
         return;
       }
       if (result.message) setMessage({ type: "success", text: result.message });
@@ -489,8 +496,15 @@ export default function WorkflowDraftEditor({
           const kind = confirming;
           setConfirming(null);
           if (kind === "publish") {
+            // 발행은 진행 중인 접수 건 수십 건을 새 버전으로 옮긴다. 그 수를
+            // 주소에 실어 도착 화면이 말하게 한다 — 여기서 띄우면 곧바로
+            // 이동하면서 사라진다.
             run(() => publishWorkflowDraftAction(versionId), {
-              navigateTo: `/workflows/${templateCode}?done=published`,
+              navigateTo: (result) =>
+                workflowPublishDoneHref(templateCode, {
+                  migrated: result.ok ? result.migratedCaseCount : null,
+                  stranded: result.ok ? result.strandedCaseCount : null,
+                }),
             });
           } else if (kind === "discard") {
             run(() => discardWorkflowDraftAction(versionId), {

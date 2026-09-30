@@ -18,6 +18,7 @@ import {
   upsertWorkflowDraftTransition,
 } from "@/lib/db/mutations/workflow-draft-transitions";
 import { STEP_CATEGORY_CODES, type StepCategory } from "@/lib/domain/local/workflow/step-category";
+import { workflowPublishCaseSentences } from "@/lib/domain/workflow-publish-counts-param";
 import type { DraftValidationIssue } from "@/lib/domain/workflow-draft-validation";
 
 /**
@@ -28,6 +29,17 @@ import type { DraftValidationIssue } from "@/lib/domain/workflow-draft-validatio
 
 export type WorkflowDraftActionResult =
   | { ok: true; message?: string }
+  | { ok: false; message: string; issues?: DraftValidationIssue[] };
+
+/**
+ * 발행만 결과 형태가 다르다 — 옮긴 건수·남은 건수를 **숫자 그대로** 함께
+ * 돌려준다. 발행을 누른 화면은 곧바로 떠나므로 메시지를 그 자리에서 띄울 수
+ * 없고, 편집기가 이 두 수를 도착 화면 주소에 실어 보내야 하기 때문이다
+ * (domain/workflow-publish-counts-param.ts). 문자열 메시지에서 숫자를 다시
+ * 뽑아내는 길은 만들지 않는다.
+ */
+export type WorkflowPublishActionResult =
+  | { ok: true; message: string; migratedCaseCount: number; strandedCaseCount: number }
   | { ok: false; message: string; issues?: DraftValidationIssue[] };
 
 async function requireSession(): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
@@ -52,22 +64,27 @@ export async function createWorkflowDraftAction(templateCode: string): Promise<W
   return result.ok ? { ok: true } : { ok: false, message: result.message };
 }
 
-export async function publishWorkflowDraftAction(versionId: string): Promise<WorkflowDraftActionResult> {
+export async function publishWorkflowDraftAction(versionId: string): Promise<WorkflowPublishActionResult> {
   const session = await requireSession();
   if (!session.ok) return session;
   const result = await publishWorkflowDraft({ versionId, actorUserId: session.userId });
   if (result.ok) {
-    // 옮긴 건이 없으면 그 얘기는 아예 하지 않는다 — "0건을 옮겼습니다"는 읽는
-    // 사람에게 아무것도 알려 주지 않으면서 문장만 길게 만든다. 남은 건은
-    // 사람이 손으로 처리해야 하는 일이므로 있을 때만, 그리고 이유와 함께 알린다.
-    const parts = [`v${result.versionNumber}을(를) 발행했습니다.`];
-    if (result.migratedCaseCount > 0) {
-      parts.push(`진행 중인 접수 건 ${result.migratedCaseCount}건을 새 버전으로 옮겼습니다.`);
-    }
-    if (result.strandedCaseCount > 0) {
-      parts.push(`현재 단계가 새 버전에 없는 ${result.strandedCaseCount}건은 이전 버전에 그대로 두었습니다.`);
-    }
-    return { ok: true, message: parts.join(" ") };
+    // 건수 문장은 여기서 짓지 않고 도착 화면과 **같은 함수**를 부른다 — 0건을
+    // 말하지 않는 규칙도 그 함수 하나가 가진다. 베껴 적으면 한쪽만 고쳐지는
+    // 날이 오고, 그때 증상은 "화면마다 건수 문장이 다르다"라서 찾기 어렵다.
+    const parts = [
+      `v${result.versionNumber}을(를) 발행했습니다.`,
+      ...workflowPublishCaseSentences({
+        migrated: result.migratedCaseCount,
+        stranded: result.strandedCaseCount,
+      }),
+    ];
+    return {
+      ok: true,
+      message: parts.join(" "),
+      migratedCaseCount: result.migratedCaseCount,
+      strandedCaseCount: result.strandedCaseCount,
+    };
   }
   return { ok: false, message: result.message, issues: result.issues };
 }

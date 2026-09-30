@@ -178,7 +178,12 @@ test("진단 Flowchart·초안을 만들면 그릴 차례라 편집 화면으로
 
 test("워크플로 발행·폐기는 도착 화면이 이미 알리므로 팝업을 더하지 않는다", () => {
   const editor = readFileSync("src/components/workflows/WorkflowDraftEditor.tsx", "utf8");
-  assert.match(editor, /navigateTo: `\/workflows\/\$\{templateCode\}\?done=published`/);
+  // 폐기는 여전히 글자 그대로의 주소다.
+  assert.match(editor, /navigateTo: `\/workflows\/\$\{templateCode\}\?done=discarded`/);
+  // 🔴 발행만 주소를 함수가 만든다 — 옮긴 건수·남은 건수를 실어야 하기 때문이다.
+  //    주소를 짓는 규칙(`?done=published` 포함)은 그 함수 하나가 가진다:
+  //    src/lib/domain/workflow-publish-counts-param.test.ts 가 값으로 본다.
+  assert.match(editor, /navigateTo: \(result\) =>\s*workflowPublishDoneHref\(templateCode, \{/);
   assert.doesNotMatch(editor, /showSavePopup/);
   const page = readFileSync("src/app/(app)/workflows/[code]/page.tsx", "utf8");
   assert.match(page, /DONE_MESSAGES\[done\]/);
