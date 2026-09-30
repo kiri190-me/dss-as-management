@@ -16,6 +16,16 @@ export type WorkflowDraftConfirmKind = "publish" | "discard";
  * 다르기 때문이다 — 파일을 나누면 같은 다이얼로그 뼈대가 두 벌이 된다.
  * 발행은 되돌리기가 번거로운 조작이라(현재 화면에 "이전 버전으로" 기능이 없다)
  * 무엇이 일어나는지 문구로 분명히 적는다.
+ *
+ * 🔴 발행 문구는 2026-09-30에 **정반대로** 고쳐졌다. 그전에는 "진행 중인 접수
+ * 건은 옛 판을 그대로 따라가므로 영향이 없다"는 뜻이었는데, 같은 날 발행이 진행
+ * 중인 건을 새 버전으로 함께 옮기기 시작하면서(mutations/workflow-drafts.ts의
+ * migrateInFlightCasesToVersion) 그 문장이 거짓이 됐다. 옛 문장을 여기 그대로
+ * 옮겨 적지는 않는다 — 그 글자가 파일에 남아 있으면 "되살아나지 않았는가"를
+ * 글자로 지키는 시험이 무뎌진다.
+ * 이 창은 되돌릴 수 없는 조작 직전에 읽는 마지막 설명이므로, 이관 규칙이 또
+ * 바뀌면 여기 문구부터 함께 고친다 — workflow-publish-dialog-text.test.ts가
+ * 옛 문장이 되살아나지 못하게 막는다.
  */
 export default function WorkflowDraftConfirmDialog({
   isOpen,
@@ -63,8 +73,13 @@ export default function WorkflowDraftConfirmDialog({
       {isPublish ? (
         <>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            발행하면 <strong>이후 접수되는 건부터</strong> 이 구성이 적용됩니다. 진행 중인 접수 건은 접수 당시
-            버전을 그대로 따라가므로 영향을 받지 않습니다.
+            발행하면 이후 접수되는 건뿐 아니라 <strong>진행 중인 접수 건도 이 구성으로 옮겨집니다</strong>. 각
+            건은 지금 서 있던 단계와 <strong>같은 단계</strong>에 그대로 섭니다 — 단계가 앞으로 가거나 뒤로
+            가지 않습니다.
+          </p>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            출하 완료된 건은 움직이지 않고, 현재 단계가 새 버전에 없는 건은 이전 버전에 남습니다. 몇 건이
+            옮겨졌는지는 발행한 뒤 도착 화면이 알려 줍니다.
           </p>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             지금 발행본은 &ldquo;보관됨&rdquo;으로 내려갑니다. 되돌리려면 새 초안을 만들어 이전 내용으로 다시

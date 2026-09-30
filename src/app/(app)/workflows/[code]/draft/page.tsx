@@ -47,9 +47,21 @@ export default async function WorkflowDraftPage({ params }: { params: Promise<{ 
         <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           초안 편집 (v{draft.versionNumber})
         </h1>
+        {/*
+          제목 아래 한 줄짜리 설명이다 — 자세한 것은 발행을 누를 때 확인 창이
+          다시 말하므로(WorkflowDraftConfirmDialog) 여기서 되풀이하지 않는다.
+          🔴 2026-09-30까지 뒷문장은 "진행 중인 건은 옛 판을 그대로 따라간다"는
+          뜻이었는데, 같은 날 발행이 진행 중인 건을 함께 옮기기 시작하면서
+          거짓이 됐다. 옛 문장을 여기 그대로 옮겨 적지는 않는다 — 그 글자가
+          파일에 남아 있으면 "되살아나지 않았는가"를 원본으로 지키는 시험이
+          무뎌진다. 이관 규칙이 또 바뀌면 이 줄과 확인 창을 함께 고친다
+          (components/workflows/workflow-publish-dialog-text.test.tsx가 두
+          자리를 같이 지킨다).
+        */}
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          발행하기 전까지는 어떤 접수 건에도 영향이 없습니다. 발행하면 <strong>그 이후 접수되는 건부터</strong> 이
-          구성이 적용되며, 진행 중인 건은 접수 당시 버전을 그대로 따라갑니다.
+          발행하기 전까지는 어떤 접수 건에도 영향이 없습니다. 발행하면 이후 접수되는 건뿐 아니라{" "}
+          <strong>진행 중인 접수 건도</strong> 이 구성으로 옮겨집니다 — 각 건은 지금 서 있던 단계와 같은
+          단계에 섭니다.
         </p>
       </div>
 

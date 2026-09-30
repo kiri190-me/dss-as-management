@@ -150,3 +150,14 @@ src/components/repair-cases/detail/domestic-order-dates-section.test.ts
 # (서버 컴포넌트 + server-only + 서버 액션) 원본을 글자로 읽는다 — 그런 시험이
 # 모여 있는 목록이 여기다(위 notification-settings-moved-notice 주석).
 src/components/workflows/workflow-apply-current-version.test.ts
+
+# 발행이 무엇을 하는지 화면이 사실대로 말하는가(2026-09-30). 🔴 발행이 진행 중인
+# 건을 함께 옮기기 시작한 뒤에도 두 자리가 「영향을 받지 않는다」고 말하고 있었다 —
+# 확인 창과, 초안 편집 화면 제목 아래의 한 줄 설명이다. 되돌릴 수 없는 조작 직전의
+# 마지막 설명이 거짓이면 그 말을 믿고 누른다. 한쪽만 지키면 다음에 또 한쪽만 고쳐져
+# 같은 화면에서 두 글이 반대말을 하므로 **두 자리를 이 한 파일이 함께** 본다.
+# 옛 문장이 되살아나지 못하게 막고, 🔴 **그 규칙이 정말 그러한지**(발행이 이관을
+# 부르는지)까지 원본으로 이어 본다 — 문구만 검사하면 정책이 바뀌어도 조용히 통과한다.
+# 창을 실제로 그려(react-dom/server) 글자를 읽으므로 react-server 조건을 끄는 이
+# 목록이라야 돈다. 화면 쪽은 서버 컴포넌트라 그려 볼 수 없어 원본을 글자로 읽는다.
+src/components/workflows/workflow-publish-dialog-text.test.tsx
