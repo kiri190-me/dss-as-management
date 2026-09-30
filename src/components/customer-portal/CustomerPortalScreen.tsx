@@ -15,6 +15,7 @@ import {
   type CustomerPortalForm,
   type PortalSystemField,
 } from "@/lib/domain/customer-portal-forms";
+import CustomerFormExportPanel from "./CustomerFormExportPanel";
 import CustomerLinkAddress from "./CustomerLinkAddress";
 import {
   issueCustomerLinkAction,
@@ -344,6 +345,17 @@ export default function CustomerPortalScreen({
                 )}
               </p>
             </section>
+          ) : null}
+
+          {/* ───── 고객사 양식 엑셀 내보내기 ─────
+              양식 보기에서만 보인다. 기본 보기는 «고객이 보는 그대로»의 화면이고,
+              내보내는 것은 고객사 양식 표라서 그 보기에 붙는 것이 맞다. */}
+          {showForm && form && selected ? (
+            <CustomerFormExportPanel
+              customerId={selected.customerId}
+              formLabel={form.label}
+              canSave={canEdit}
+            />
           ) : null}
 
           {/* ───── 고객이 보는 목록 ───── */}
