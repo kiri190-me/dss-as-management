@@ -111,9 +111,11 @@ const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
  * 전용이라 빠진다(attachment-category.ts 의 isAttachmentCategoryAllowedForOwner —
  * 올리기 통로도 같은 함수로 거절한다).
  *
- * 🔴 **목록을 손으로 적지 않는다.** 그래서 2026-09-30 에 더한 모델 전용 셋(파라미터 ·
- * 통전검사 · 점검표)은 이 화면을 고치지 않아도 저절로 나타났고, 접수 건 파일 탭에는
- * 같은 함수가 같은 까닭으로 내놓지 않는다.
+ * 🔴 **목록을 손으로 적지 않는다.** 그래서 2026-09-30 에 더한 모델 기본 자료 셋
+ * (파라미터 · 통전검사 · 점검표)은 이 화면을 고치지 않아도 저절로 나타났다.
+ * 같은 날 「점검표」만 접수 건에도 열렸는데(모델 것은 빈 양식, 접수 건 것은 채워
+ * 인쇄한 기록), 그때도 두 화면 모두 고칠 것이 없었다 — 규칙은
+ * isAttachmentCategoryAllowedForOwner 한 자리에만 있다.
  */
 const PRODUCT_MODEL_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("PRODUCT_MODEL");
 

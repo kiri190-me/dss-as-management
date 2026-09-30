@@ -17,9 +17,11 @@
  * 있고 데모 파일에는 없다.** 데모는 접수 건 파일 탭의 localStorage 화면이고, 데모
  * 계층(src/lib/domain/local/attachments/*)은 손대지 않는 것이 지금까지의
  * 규칙이다. 2026-09-15 견적서 첨부의 두 칸(SIGNED_QUOTE_PDF · QUOTE_EXCEL)도
- * 같은 까닭으로 데모에 없다. 2026-09-30 제품 모델 전용 셋(PARAMETER ·
- * POWER_TEST · CHECKLIST)도 마찬가지다 — 데모는 접수 건 화면이고 그 셋은
- * 접수 건에 아예 붙지 않는다. 그래서 attachment-category.test.ts 는 「데모 목록 =
+ * 같은 까닭으로 데모에 없다. 2026-09-30 모델 기본 자료 셋(PARAMETER ·
+ * POWER_TEST · CHECKLIST)도 마찬가지다 — 앞의 둘은 접수 건에 아예 붙지 않고,
+ * 점검표는 접수 건에도 붙지만 **데모 계층을 손대지 않는다**는 규칙이 그대로라
+ * 데모에는 넣지 않았다(데모는 localStorage 뿐인 옛 화면이고, 실기 화면은
+ * StoredAttachmentList 쪽이다). 그래서 attachment-category.test.ts 는 「데모 목록 =
  * 이 목록에서 그 여섯을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
  * 여전히 걸린다.
  *
@@ -64,10 +66,17 @@ export const ATTACHMENT_CATEGORY_CODES = [
   // 바꾸지 않는다. 기타 **앞**에 둔다(기타는 언제나 맨 끝). 데모 파일에는 없다.
   "SIGNED_QUOTE_PDF",
   "QUOTE_EXCEL",
-  // 제품 모델에만 붙는 기본 자료 셋(2026-09-30 사용자) — 파라미터 · 통전검사 ·
-  // 점검표. **수리 건의 「파일관리」에는 나오지 않는다**(아래
-  // PRODUCT_MODEL_ONLY_CATEGORIES). 모델마다 한 벌 두는 자료라 건마다 다시
-  // 올리는 것이 아니고, 건에 붙는 분류 목록에 섞이면 사람이 둘을 구별할 수 없다.
+  // 제품 모델의 기본 자료 셋(2026-09-30 사용자) — 파라미터 · 통전검사 · 점검표.
+  // 모델마다 한 벌 두는 자료라 건마다 다시 올리는 것이 아니다.
+  //
+  // 🔴 **주인이 셋 다 같지는 않다.** 파라미터 · 통전검사는 **제품 모델 전용**이고
+  // (아래 PRODUCT_MODEL_ONLY_CATEGORIES), **점검표만 수리 건에도 붙는다** —
+  // 같은 분류가 주인에 따라 다른 것을 담기 때문이다(2026-09-30 사용자 정정):
+  //   · 제품 모델의 점검표 = 그 모델의 **빈 양식**(기본 자료)
+  //   · 수리 건의 점검표   = 그 건에서 **실제로 채워 인쇄한 것**(기록)
+  // 둘은 같은 서류의 양식과 기록이라 분류를 둘로 쪼개지 않는다 — 쪼개면 목록에
+  // 「점검표(양식)」와 「점검표(기록)」가 나란히 서고, 사람은 그 둘을 구별해 고를
+  // 이유가 없다(어느 화면에 있느냐가 이미 그것을 말한다).
   //
   // 영문 코드는 이 저장소가 이미 쓰는 말을 그대로 가져왔다 — 「통전검사」는
   // xlsx/oh-quote-template.ts 의 `POWER_TEST: { label: "통전검사" }` 이고,
@@ -160,18 +169,29 @@ export function isQuoteAttachmentSlotCategory(category: AttachmentCategory): cat
 }
 
 /**
- * 제품 모델에만 붙는 분류 (2026-09-30) — 파라미터 · 통전검사 · 점검표.
+ * 제품 모델에만 붙는 분류 (2026-09-30) — 파라미터 · 통전검사 **둘뿐이다.**
  *
- * 🔴 **수리 건에는 붙지 않는다.** 사용자가 명시적으로 가른 것이다: "이건 각
- * 모델들에 따른 기본 자료고, [파일관리]에 입력되는 자료가 아니야." 모델마다 한 벌
- * 두는 자료라 접수 건 파일 탭의 분류 목록에 섞이면 두 성격이 구별되지 않는다.
+ * 🔴 **점검표(CHECKLIST)가 여기 없는 것은 빠뜨린 것이 아니다.** 되돌리지 말 것.
+ *
+ * 처음에는 셋이었다. 사용자가 모델 기본 자료를 말하며 "이건 각 모델들에 따른 기본
+ * 자료고, [파일관리]에 입력되는 자료가 아니야"라고 가른 대로 셋 다 여기 넣었는데,
+ * 같은 날 하나를 정정했다 — **"수리건 상세의 [파일관리]에도 점검표 항목은 있었으면
+ * 좋겠어. 이건 실제로 인쇄한 점검표를 기록차원에서 올려놓는 자리야."**
+ *
+ * 그래서 점검표만 두 주인에 붙는다. 같은 분류가 주인에 따라 다른 것을 담는다:
+ *   · 제품 모델의 점검표 = 그 모델의 **빈 양식**(기본 자료 — 모델마다 한 벌)
+ *   · 수리 건의 점검표   = 그 건에서 **실제로 채워 인쇄한 것**(기록 — 건마다)
+ *
+ * 파라미터 · 통전검사는 정정되지 않았다 — 그 둘은 **모델 전용 그대로**다. 셋을
+ * 한 덩어리로 보고 점검표를 여기 도로 넣으면 수리 건 파일 탭에서 점검표가 사라지고,
+ * 그것은 사용자가 명시적으로 요청한 것을 되돌리는 일이다.
  *
  * 견적서 전용 두 칸(QUOTE_ATTACHMENT_SLOT_CATEGORIES)과 **같은 방식**이다 —
  * 목록은 하나고, 주인을 가리는 규칙만 이 파일 한 자리에 모여 있다. 화면의 분류
  * 선택지 · 올리기 통로의 거절 · createAttachmentRecord 의 마지막 방어선이 모두
  * 아래 isAttachmentCategoryAllowedForOwner 하나를 본다.
  */
-export const PRODUCT_MODEL_ONLY_CATEGORIES = ["PARAMETER", "POWER_TEST", "CHECKLIST"] as const satisfies readonly AttachmentCategory[];
+export const PRODUCT_MODEL_ONLY_CATEGORIES = ["PARAMETER", "POWER_TEST"] as const satisfies readonly AttachmentCategory[];
 
 export type ProductModelOnlyCategory = (typeof PRODUCT_MODEL_ONLY_CATEGORIES)[number];
 

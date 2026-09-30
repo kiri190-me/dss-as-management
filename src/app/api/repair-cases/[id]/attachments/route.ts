@@ -147,10 +147,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const extension = normalizeFileExtension(originalFileName);
-  // 전체 허용목록(14종) 관문. 형식을 가리지 않는 분류만 이 관문을 지나지 않는다
-  // (attachment-allowlist.ts 의 ANY_EXTENSION_CATEGORIES). ⚠️ **접수 건에서는 그런
-  // 분류가 나올 수 없다** — 셋 다 제품 모델 전용이라 위 주인 확인에서 이미
-  // 거절된다. 그래도 같은 줄을 적는 것은 세 통로가 한 벌이기 때문이다(파일 상단).
+  // 전체 허용목록(14종) 관문. 🔴 **형식을 가리지 않는 분류는 이 관문을 지나지
+  // 않는다** — 그 판정은 바로 아래 isExtensionAllowedForCategory 하나가 한다
+  // (attachment-allowlist.ts 의 ANY_EXTENSION_CATEGORIES).
+  //
+  // ⚠️ **접수 건에서 실제로 지나가는 분류가 있다** — 「점검표」(CHECKLIST)다
+  // (2026-09-30 사용자 정정: 실제로 인쇄한 점검표를 기록으로 올리는 자리). 처음
+  // 이 줄을 적을 때는 모델 전용 셋뿐이라 여기 닿을 수 없었지만 지금은 아니다.
+  // 형식 규칙은 주인과 무관하게 분류가 정하므로, 모델에서 올리든 수리 건에서
+  // 올리든 점검표가 받는 형식은 똑같다.
   if (!extension || (!isCategoryOpenToAnyExtension(category) && !isAllowedExtension(extension))) {
     return fail(415, "EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 형식입니다.");
   }

@@ -224,9 +224,18 @@ export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, re
  * 쓰는 것이지 아무거나 쓰는 것이 아니다. 그래서 「넓히는 쪽」은 목록을 따로 둔다 —
  * 위 목록은 **한 글자도 고치지 않았다.**
  *
- * 🔴 **다른 분류는 하나도 안 열렸다.** 아래 두 이름에 들어 있는 것은 이 셋뿐이고,
- * 셋은 전부 제품 모델 전용이다(attachment-category.ts 의
- * PRODUCT_MODEL_ONLY_CATEGORIES) — 접수 건 · 견적서 통로는 이 길에 닿지 못한다.
+ * 🔴 **다른 분류는 하나도 안 열렸다.** 아래 이름에 들어 있는 것은 이 셋뿐이다.
+ *
+ * ── 주인은 셋이 같지 않다 · 형식 규칙은 같다 ─────────────────────────────
+ * 파라미터 · 통전검사는 제품 모델 전용이고, **점검표는 수리 건에도 붙는다**
+ * (attachment-category.ts 의 PRODUCT_MODEL_ONLY_CATEGORIES 머리말 — 모델의 것은
+ * 빈 양식, 수리 건의 것은 채워 인쇄한 기록이다). 그래도 **형식 규칙은 주인과
+ * 무관하게 하나다** — 같은 분류가 어느 화면에서 올리느냐에 따라 받는 형식이
+ * 달라지면 "점검표는 무엇을 받는가"에 답이 둘이 된다. 그래서 이 목록은 분류만
+ * 보고 주인을 보지 않는다.
+ *
+ * 🔴 그러므로 **접수 건 통로도 이 길을 지난다**(2026-09-30 정정 이후). 견적서
+ * 통로만 여전히 닿지 못한다 — 견적서에 붙는 것은 결재 PDF · 수기 엑셀 두 칸뿐이다.
  *
  * ── 크기 상한은 그대로 20MB 다 ───────────────────────────────────────────
  * 형식을 연 것이지 크기를 연 것이 아니다. MAX_ATTACHMENT_SIZE_BYTES 는 손대지
@@ -292,6 +301,37 @@ export function isExecutableExtension(extension: string): boolean {
   return EXECUTABLE_EXTENSION_SET.has(extension);
 }
 
+/**
+ * 확장자의 **모양** — 소문자 영숫자 1~16자. normalizeFileExtension 과 이
+ * 상수 하나를 함께 본다(따로 적으면 갈라진다). 점·경로 구분자·".." ·윈도우
+ * 예약 문자가 확장자로 둔갑해 디스크 경로를 만드는 일을 이 모양이 막는다.
+ */
+const EXTENSION_SHAPE_PATTERN = /^[a-z0-9]{1,16}$/;
+
+/**
+ * 🔴 **저장 경로의 확장자 자리에 놓아도 되는가** — attachment-path.ts 의 세 경로
+ * 생성기가 부른다.
+ *
+ * 경로 생성기가 묻는 것은 「이 분류가 이 확장자를 받아도 되는가」가 아니라
+ * **「옮길 수 있는 경로가 되는가」**다(attachment-path.ts 견적서 벌의 머리말:
+ * "PDF · 엑셀로 좁히는 것은 여기가 아니라 분류 허용목록이 맡는다 — 경로 함수는
+ * '옮길 수 있는 경로인가'만 본다"). 그래서 여기서 보는 것은 **모양과 실행 파일
+ * 둘뿐**이다.
+ *
+ * ⚠️ 예전에는 경로 생성기가 `isAllowedExtension` 을 대신 썼다. 그때는 허용목록
+ * 14종이 곧 "올라올 수 있는 확장자 전부"라 두 물음의 답이 같았기 때문이다.
+ * 형식을 가리지 않는 분류가 생기면서 그 전제가 깨졌다 — `.hwp` 를 올리면 통로는
+ * 전부 통과하고 **경로를 만들다 던진다.** 그러면 임시 파일이 남은 채 500 이
+ * 나간다. 그 자리를 이 함수가 메운다.
+ *
+ * 🔴 **느슨해진 것이 없다.** 실행 파일(74종)은 여전히 거절이고, 모양 검사가
+ * 경로를 깨는 글자를 전부 막는다. 어느 분류가 어느 확장자를 받는지는 통로가
+ * 이미 `isExtensionAllowedForCategory` 로 판정한 뒤다.
+ */
+export function isStorableExtension(extension: string): boolean {
+  return EXTENSION_SHAPE_PATTERN.test(extension) && !isExecutableExtension(extension);
+}
+
 /** 이 분류는 형식을 가리지 않는가(실행 파일만 거절). */
 export function isCategoryOpenToAnyExtension(category: AttachmentCategory): boolean {
   return ANY_EXTENSION_CATEGORIES.includes(category);
@@ -314,7 +354,9 @@ export function normalizeFileExtension(fileName: string): string | null {
   const lastDot = trimmed.lastIndexOf(".");
   if (lastDot <= 0 || lastDot === trimmed.length - 1) return null;
   const extension = trimmed.slice(lastDot + 1).toLowerCase();
-  if (!/^[a-z0-9]{1,16}$/.test(extension)) return null;
+  // 모양 규칙은 EXTENSION_SHAPE_PATTERN 하나를 본다 — isStorableExtension 과
+  // 같은 상수라야 두 자리가 갈리지 않는다.
+  if (!EXTENSION_SHAPE_PATTERN.test(extension)) return null;
   return extension;
 }
 

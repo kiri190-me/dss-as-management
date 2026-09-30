@@ -34,6 +34,7 @@ import {
 import {
   ATTACHMENT_EXTENSION_RULES,
   MAX_ATTACHMENT_SIZE_BYTES,
+  isCategoryOpenToAnyExtension,
   isExtensionAllowedForCategory,
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
@@ -126,12 +127,27 @@ const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
 
 /**
  * 올리기 칸의 분류 선택지 — 접수 건 파일이 받는 분류만. 「스크린샷」은 개선 요청 글
- * 전용이라 빠진다(attachment-category.ts 의 isAttachmentCategoryAllowedForOwner —
- * 올리기 통로도 같은 함수로 거절한다).
+ * 전용이라, 「파라미터」·「통전검사」는 제품 모델 전용이라 빠진다
+ * (attachment-category.ts 의 isAttachmentCategoryAllowedForOwner — 올리기 통로도
+ * 같은 함수로 거절한다).
+ *
+ * 🔴 **「점검표」는 여기 있다**(2026-09-30 사용자). 모델 쪽 점검표가 빈 양식이라면
+ * 여기 것은 그 건에서 실제로 채워 인쇄한 기록이다. 목록을 손으로 적지 않으므로
+ * 이 화면은 고칠 것이 없었다.
  */
 const REPAIR_CASE_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("REPAIR_CASE");
 
-function allowedExtensionsFor(category: AttachmentCategory): string[] {
+/**
+ * 이 분류가 받는 확장자 — **셀 수 있을 때만**. 형식을 가리지 않는 분류는 목록으로
+ * 적을 수가 없어 null 이다.
+ *
+ * 🔴 **접수 건에도 그런 분류가 있다**(2026-09-30) — 「점검표」다. 실제로 인쇄한
+ * 점검표를 기록으로 올리는 자리라 장비·양식마다 형식이 다르고, 그래서 실행 파일만
+ * 빼고 다 받는다(attachment-allowlist.ts 의 ANY_EXTENSION_CATEGORIES). 모델 쪽
+ * 화면(ProductModelFilesSection)의 같은 이름 함수와 한 벌이다.
+ */
+function allowedExtensionsFor(category: AttachmentCategory): string[] | null {
+  if (isCategoryOpenToAnyExtension(category)) return null;
   return ALL_EXTENSIONS.filter((extension) => isExtensionAllowedForCategory(extension, category));
 }
 
@@ -284,8 +300,13 @@ function DatabaseFilesScreen({
   }
 
   const allowedExtensions = useMemo(() => allowedExtensionsFor(category), [category]);
+  /**
+   * 형식을 가리지 않는 분류에서는 **undefined** 다 — 빈 문자열이 아니다. 빈
+   * 문자열을 넣으면 브라우저가 "받는 형식이 없다"로 읽어 고르는 창이 아무것도
+   * 내놓지 않는 날이 있다. 속성을 아예 달지 않아야 모든 파일이 보인다.
+   */
   const acceptAttribute = useMemo(
-    () => allowedExtensions.map((extension) => `.${extension}`).join(","),
+    () => allowedExtensions?.map((extension) => `.${extension}`).join(","),
     [allowedExtensions]
   );
   /**
@@ -294,9 +315,12 @@ function DatabaseFilesScreen({
    * 촬영으로 들어오는 파일은 브라우저가 정하고(보통 jpg), 확장자를 고를 수
    * 없다. 그래서 사진을 아예 안 받는 분류(펌웨어·로그 등)에 촬영 버튼을 두면
    * 찍는 순간까지 갔다가 거절당한다 — 그 앞에서 감춘다.
+   *
+   * 형식을 가리지 않는 분류(점검표)는 **참**이다 — jpg 도 받으므로 찍어서 올릴 수
+   * 있고, 인쇄한 점검표를 폰으로 찍어 올리는 것이 그 분류의 실제 쓰임이다.
    */
   const cameraSupported = useMemo(
-    () => allowedExtensions.includes("jpg") || allowedExtensions.includes("jpeg"),
+    () => allowedExtensions === null || allowedExtensions.includes("jpg") || allowedExtensions.includes("jpeg"),
     [allowedExtensions]
   );
   const totalBytes = useMemo(
@@ -917,7 +941,9 @@ function DatabaseFilesScreen({
 
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               최대 {formatBytes(MAX_ATTACHMENT_SIZE_BYTES)} · 허용 형식{" "}
-              {allowedExtensions.map((extension) => `.${extension}`).join(", ")}
+              {allowedExtensions === null
+                ? "실행 파일을 뺀 모든 형식"
+                : allowedExtensions.map((extension) => `.${extension}`).join(", ")}
             </p>
 
             <div className="flex justify-end">

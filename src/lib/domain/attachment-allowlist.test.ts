@@ -16,6 +16,7 @@ import {
   isExtensionAllowedForCategory,
   isExtensionMimeCompatible,
   isPreviewCapableExtension,
+  isStorableExtension,
   isUploadContentCompatible,
   normalizeFileExtension,
 } from "./attachment-allowlist";
@@ -124,15 +125,19 @@ test("제한이 없는 분류는 허용목록 전체를 쓸 수 있다 — 그 �
 
 // ─────────────── 형식을 가리지 않는 분류 (2026-09-30 — 모델 기본 자료 셋)
 
-test("형식을 가리지 않는 분류는 모델 전용 셋 그대로다 — 다른 분류는 하나도 안 열렸다", () => {
+test("형식을 가리지 않는 분류는 모델 기본 자료 셋 그대로다 — 다른 분류는 하나도 안 열렸다", () => {
   assert.deepEqual([...ANY_EXTENSION_CATEGORIES], ["PARAMETER", "POWER_TEST", "CHECKLIST"]);
-  // 주인이 제품 모델 하나뿐인 분류여야 한다. 접수 건 · 견적서 통로는 이 길에
-  // 닿지 못한다 — 닿게 되는 날 여기서 걸린다.
+  // 셋 다 제품 모델에는 붙는다. 견적서에는 셋 다 안 붙는다 — 거기 붙는 것은
+  // 결재 PDF · 수기 엑셀 두 칸뿐이라 견적서 통로는 이 길에 닿지 못한다.
   for (const category of ANY_EXTENSION_CATEGORIES) {
     assert.equal(isAttachmentCategoryAllowedForOwner(category, "PRODUCT_MODEL"), true, category);
-    assert.equal(isAttachmentCategoryAllowedForOwner(category, "REPAIR_CASE"), false, category);
     assert.equal(isAttachmentCategoryAllowedForOwner(category, "QUOTE"), false, category);
   }
+  // 🔴 접수 건은 갈린다 — 점검표만 지난다(2026-09-30 정정). 형식 규칙은 주인과
+  // 무관하게 분류가 정하므로, 수리 건에서 올리는 점검표도 같은 형식 규칙을 받는다.
+  assert.equal(isAttachmentCategoryAllowedForOwner("CHECKLIST", "REPAIR_CASE"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("PARAMETER", "REPAIR_CASE"), false);
+  assert.equal(isAttachmentCategoryAllowedForOwner("POWER_TEST", "REPAIR_CASE"), false);
   // 나머지 분류는 전부 닫힌 채다.
   const open = ATTACHMENT_CATEGORY_CODES.filter((code) => isCategoryOpenToAnyExtension(code));
   assert.deepEqual(open, ["PARAMETER", "POWER_TEST", "CHECKLIST"]);
@@ -200,6 +205,35 @@ test("펌웨어 확장자(bin · hex)는 실행 파일로 보지 않는다", () 
   // 생기면 그 분류가 조용히 좁아진다.
   for (const rule of ATTACHMENT_EXTENSION_RULES) {
     assert.equal(isExecutableExtension(rule.extension), false, `.${rule.extension} 이 실행 파일이 됐다`);
+  }
+});
+
+test("🔴 저장 경로에 놓을 수 있는 확장자 — 모양과 실행 파일만 본다", () => {
+  // attachment-path.ts 의 세 경로 생성기가 이것을 본다. 예전에는 거기서
+  // isAllowedExtension 을 봤는데, 형식을 가리지 않는 분류가 생기면서 정상적으로
+  // 올라온 .hwp 가 **경로를 만들다 던지는** 자리가 됐다(임시 파일이 남은 채 500).
+  //
+  // 허용목록 14종은 당연히 된다.
+  for (const rule of ATTACHMENT_EXTENSION_RULES) {
+    assert.equal(isStorableExtension(rule.extension), true, `.${rule.extension} 이 막혔다`);
+  }
+  // 목록 밖이어도 형식을 가리지 않는 분류가 받는 것이면 된다.
+  for (const extension of ["hwp", "dwg", "dxf", "par", "prm", "json", "7z"]) {
+    assert.equal(isStorableExtension(extension), true, `.${extension} 이 막혔다`);
+  }
+  // 🔴 실행 파일은 여전히 안 된다 — 통로를 거치지 않고 이 함수만 불러도 그렇다.
+  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "apk", "dll", "xlsm", "so"]) {
+    assert.equal(isStorableExtension(extension), false, `실행 파일 .${extension} 이 통과했다`);
+  }
+  // 🔴 경로를 깨는 모양은 전부 거절 — 규칙 1·2(attachment-path.ts 머리말)를 지킨다.
+  for (const extension of ["", "   ", "p/df", "p\\df", "..", "a.b", "JPG", "한글", "toolongextension17"]) {
+    assert.equal(isStorableExtension(extension), false, `모양이 틀린 "${extension}" 이 통과했다`);
+  }
+  // 모양 규칙은 normalizeFileExtension 과 같은 상수를 본다 — 뽑아낸 것은 반드시 놓을 수 있다.
+  for (const name of ["보고서.HWP", "도면.dwg", "자료.par", "사진.JPEG"]) {
+    const extension = normalizeFileExtension(name);
+    assert.ok(extension, name);
+    assert.equal(isStorableExtension(extension), true, `${name} → .${extension} 이 막혔다`);
   }
 });
 

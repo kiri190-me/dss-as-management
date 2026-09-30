@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { isAllowedExtension, isServerOriginExtension, normalizeFileExtension } from "./attachment-allowlist";
+import { isServerOriginExtension, isStorableExtension, normalizeFileExtension } from "./attachment-allowlist";
 
 /**
  * ============================================================================
@@ -96,8 +96,15 @@ function requireUuid(label: string, value: string): string {
 /**
  * DB의 stored_path에 넣을 값을 만든다. **여기서 나온 문자열만이 저장 경로다.**
  *
- * extension은 허용목록에서 정규화한 소문자만 붙는다 — 목록 밖 확장자는 던진다.
- * 확장자 자리에 임의 문자열이 들어오면 규칙 1·2가 그 자리에서 깨진다.
+ * extension은 정규화된 소문자 영숫자만 붙는다(isStorableExtension) — 모양이
+ * 아니거나 실행 파일이면 던진다. 확장자 자리에 임의 문자열이 들어오면 규칙 1·2가
+ * 그 자리에서 깨진다.
+ *
+ * ⚠️ 여기서 **허용목록(isAllowedExtension)을 보지 않는다**(2026-09-30). 형식을
+ * 가리지 않는 분류가 생겨 `.hwp` 같은 목록 밖 확장자가 정상적으로 올라오기
+ * 때문이다. 어느 분류가 어느 확장자를 받는지는 **통로가 이미 판정한 뒤**이고
+ * (isExtensionAllowedForCategory), 이 함수의 물음은 "옮길 수 있는 경로인가"
+ * 하나다 — 아래 견적서 벌의 머리말에 같은 말이 적혀 있다.
  */
 export function buildAttachmentStoredPath(params: {
   repairCaseId: string;
@@ -109,7 +116,7 @@ export function buildAttachmentStoredPath(params: {
   const attachmentId = requireUuid("첨부 ID", params.attachmentId);
 
   const extension = params.extension.trim().toLowerCase();
-  if (!isAllowedExtension(extension)) {
+  if (!isStorableExtension(extension)) {
     throw new AttachmentPathError(`허용되지 않은 확장자입니다: ${extension || "(없음)"}`);
   }
 
@@ -196,16 +203,17 @@ export function buildServerOriginAttachmentStoredPath(params: {
  * 파일을 다루고 있는 코드라 서명을 바꾸면 업로드 통로까지 함께 흔들린다. 두 벌을
  * 하나로 합칠지는 모델 첨부의 실제 쓰임을 본 다음에 판단할 일이다.
  *
- * 검사 규칙은 위쪽과 **글자 하나까지 같다** — UUID 형식 확인, 확장자 허용목록,
- * 소문자 눕히기, path.join 금지. 다른 것은 첫 마디뿐이다.
+ * 검사 규칙은 위쪽과 **글자 하나까지 같다** — UUID 형식 확인, 확장자 모양 확인
+ * (isStorableExtension), 소문자 눕히기, path.join 금지. 다른 것은 첫 마디뿐이다.
  * ============================================================================
  */
 
 /**
  * 제품 모델 첨부의 stored_path. `product-models/{모델id}/{첨부id}.{확장자}`
  *
- * buildAttachmentStoredPath와 같은 규칙을 따른다 — 확장자는 허용목록에서
- * 정규화한 소문자만 붙고, 목록 밖 확장자는 던진다.
+ * buildAttachmentStoredPath와 같은 규칙을 따른다 — 확장자는 정규화된 소문자
+ * 영숫자만 붙고(isStorableExtension), 모양이 아니거나 실행 파일이면 던진다.
+ * 허용목록을 보지 않는 까닭은 그쪽 주석에 있다.
  */
 export function buildProductModelAttachmentStoredPath(params: {
   productModelId: string;
@@ -217,7 +225,7 @@ export function buildProductModelAttachmentStoredPath(params: {
   const attachmentId = requireUuid("첨부 ID", params.attachmentId);
 
   const extension = params.extension.trim().toLowerCase();
-  if (!isAllowedExtension(extension)) {
+  if (!isStorableExtension(extension)) {
     throw new AttachmentPathError(`허용되지 않은 확장자입니다: ${extension || "(없음)"}`);
   }
 
@@ -265,8 +273,11 @@ export function buildProductModelAttachmentStoredPathFromFileName(params: {
  * 견적서에 붙는 결재 견적서 PDF · 수기 견적서 엑셀의 자리다. 앞의 두 벌과 같은
  * 까닭으로 **건드리지 않고 나란히 새로 둔다** — 서명도 본문도 그대로다.
  *
- * 검사 규칙은 앞의 두 벌과 **글자 하나까지 같다** — UUID 형식 확인, 확장자 허용목록,
- * 소문자 눕히기, path.join 금지. 다른 것은 첫 마디뿐이다. PDF · 엑셀로 좁히는 것은
+ * 검사 규칙은 앞의 두 벌과 **글자 하나까지 같다** — UUID 형식 확인, 확장자 모양 확인
+ * (isStorableExtension), 소문자 눕히기, path.join 금지. 다른 것은 첫 마디뿐이다.
+ *
+ * 🔴 이 벌의 머리말에 적힌 다음 한 줄이 2026-09-30 에 세 벌 모두의 근거가 됐다 —
+ * PDF · 엑셀로 좁히는 것은
  * 여기가 아니라 분류 허용목록(CATEGORY_EXTENSION_ALLOWLIST의 SIGNED_QUOTE_PDF ·
  * QUOTE_EXCEL)이 맡는다 — 경로 함수는 "옮길 수 있는 경로인가"만 본다.
  * ============================================================================
@@ -275,8 +286,8 @@ export function buildProductModelAttachmentStoredPathFromFileName(params: {
 /**
  * 견적서 첨부의 stored_path. `quotes/{견적서id}/{첨부id}.{확장자}`
  *
- * buildAttachmentStoredPath와 같은 규칙을 따른다 — 확장자는 허용목록에서
- * 정규화한 소문자만 붙고, 목록 밖 확장자는 던진다.
+ * buildAttachmentStoredPath와 같은 규칙을 따른다 — 확장자는 정규화된 소문자
+ * 영숫자만 붙고(isStorableExtension), 모양이 아니거나 실행 파일이면 던진다.
  */
 export function buildQuoteAttachmentStoredPath(params: {
   quoteId: string;
@@ -288,7 +299,7 @@ export function buildQuoteAttachmentStoredPath(params: {
   const attachmentId = requireUuid("첨부 ID", params.attachmentId);
 
   const extension = params.extension.trim().toLowerCase();
-  if (!isAllowedExtension(extension)) {
+  if (!isStorableExtension(extension)) {
     throw new AttachmentPathError(`허용되지 않은 확장자입니다: ${extension || "(없음)"}`);
   }
 

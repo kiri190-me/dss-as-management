@@ -120,15 +120,44 @@ test("stored_path는 상대 경로이고 드라이브 문자가 붙지 않는다
 
 // ─────────────────────────────────────── 만들 수 없는 값은 만들어지지 않는다
 
-test("허용목록에 없는 확장자로는 경로를 만들 수 없다", () => {
-  assert.throws(
-    () =>
-      buildAttachmentStoredPath({
-        repairCaseId: CASE_ID,
-        attachmentId: ATTACHMENT_ID,
-        extension: "exe",
-      }),
-    AttachmentPathError
+test("실행 파일 확장자로는 경로를 만들 수 없다", () => {
+  // 예전 이름은 「허용목록에 없는 확장자로는」이었다. 2026-09-30 에 경로 생성기가
+  // 보는 것이 허용목록에서 **모양 + 실행 파일**(isStorableExtension)로 바뀌었다 —
+  // 형식을 가리지 않는 분류가 생겨 목록 밖 확장자가 정상적으로 올라오기 때문이다.
+  // 🔴 **거절하는 예시는 하나도 줄지 않았다** — exe 는 여전히 던진다.
+  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "xlsm", "", "p/df", "타입"]) {
+    assert.throws(
+      () =>
+        buildAttachmentStoredPath({
+          repairCaseId: CASE_ID,
+          attachmentId: ATTACHMENT_ID,
+          extension,
+        }),
+      AttachmentPathError,
+      `"${extension}" 으로 경로가 만들어졌다`
+    );
+  }
+});
+
+test("🔴 허용목록 밖이어도 형식을 가리지 않는 분류가 받는 확장자면 경로가 만들어진다", () => {
+  // 🔴 이것이 없으면 「모델 기본 자료 셋은 목록 밖 형식도 받는다」가 **거짓말**이 된다.
+  // 통로의 확장자 검사·내용 대조를 전부 지난 파일이 경로를 만들다 던지면, 임시 파일이
+  // 남은 채 500 이 나가고 사용자는 무엇이 막혔는지 알 수 없다. 실제로 그렇게 깨져
+  // 있었다(2026-09-30 발견 — 단위 시험이 경로 생성기를 안 지나갔다).
+  for (const extension of ["hwp", "dwg", "par", "prm", "json"]) {
+    assert.equal(
+      buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension }),
+      `repair-cases/${CASE_ID}/${ATTACHMENT_ID}.${extension}`
+    );
+    assert.equal(
+      buildProductModelAttachmentStoredPath({ productModelId: MODEL_ID, attachmentId: ATTACHMENT_ID, extension }),
+      `product-models/${MODEL_ID}/${ATTACHMENT_ID}.${extension}`
+    );
+  }
+  // 대문자로 들어와도 눕는다 — 규칙 2 는 그대로다.
+  assert.equal(
+    buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "HWP" }),
+    `repair-cases/${CASE_ID}/${ATTACHMENT_ID}.hwp`
   );
 });
 
@@ -340,16 +369,19 @@ test("UUID가 아닌 모델 ID·첨부 ID로는 모델 경로를 만들 수 없�
   );
 });
 
-test("허용목록에 없는 확장자로는 모델 경로도 만들 수 없다", () => {
-  assert.throws(
-    () =>
-      buildProductModelAttachmentStoredPath({
-        productModelId: MODEL_ID,
-        attachmentId: ATTACHMENT_ID,
-        extension: "exe",
-      }),
-    AttachmentPathError
-  );
+test("실행 파일 확장자로는 모델 경로도 만들 수 없다", () => {
+  for (const extension of ["exe", "bat", "sh", "jar", "xlsm", "", "p/df"]) {
+    assert.throws(
+      () =>
+        buildProductModelAttachmentStoredPath({
+          productModelId: MODEL_ID,
+          attachmentId: ATTACHMENT_ID,
+          extension,
+        }),
+      AttachmentPathError,
+      `"${extension}" 으로 모델 경로가 만들어졌다`
+    );
+  }
   for (const name of ["README", "trailing.", ".hidden", "weird.타입"]) {
     assert.throws(
       () =>
