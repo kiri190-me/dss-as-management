@@ -9,8 +9,9 @@ import {
   MAX_ATTACHMENT_SIZE_BYTES,
   canonicalMimeTypeForExtension,
   isAllowedExtension,
-  isContentCompatibleWithExtension,
+  isCategoryOpenToAnyExtension,
   isExtensionAllowedForCategory,
+  isUploadContentCompatible,
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
 import {
@@ -146,7 +147,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const extension = normalizeFileExtension(originalFileName);
-  if (!extension || !isAllowedExtension(extension)) {
+  // 전체 허용목록(14종) 관문. 형식을 가리지 않는 분류만 이 관문을 지나지 않는다
+  // (attachment-allowlist.ts 의 ANY_EXTENSION_CATEGORIES). ⚠️ **접수 건에서는 그런
+  // 분류가 나올 수 없다** — 셋 다 제품 모델 전용이라 위 주인 확인에서 이미
+  // 거절된다. 그래도 같은 줄을 적는 것은 세 통로가 한 벌이기 때문이다(파일 상단).
+  if (!extension || (!isCategoryOpenToAnyExtension(category) && !isAllowedExtension(extension))) {
     return fail(415, "EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 형식입니다.");
   }
   if (!isExtensionAllowedForCategory(extension, category)) {
@@ -193,7 +198,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     await storage.discard(written.tempPath);
     return fail(400, "EMPTY_BODY", "빈 파일은 올릴 수 없습니다.");
   }
-  if (!isContentCompatibleWithExtension(extension, written.header)) {
+  if (!isUploadContentCompatible(extension, category, written.header)) {
     await storage.discard(written.tempPath);
     return fail(
       415,

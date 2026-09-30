@@ -17,8 +17,10 @@
  * 있고 데모 파일에는 없다.** 데모는 접수 건 파일 탭의 localStorage 화면이고, 데모
  * 계층(src/lib/domain/local/attachments/*)은 손대지 않는 것이 지금까지의
  * 규칙이다. 2026-09-15 견적서 첨부의 두 칸(SIGNED_QUOTE_PDF · QUOTE_EXCEL)도
- * 같은 까닭으로 데모에 없다. 그래서 attachment-category.test.ts 는 「데모 목록 =
- * 이 목록에서 그 셋을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
+ * 같은 까닭으로 데모에 없다. 2026-09-30 제품 모델 전용 셋(PARAMETER ·
+ * POWER_TEST · CHECKLIST)도 마찬가지다 — 데모는 접수 건 화면이고 그 셋은
+ * 접수 건에 아예 붙지 않는다. 그래서 attachment-category.test.ts 는 「데모 목록 =
+ * 이 목록에서 그 여섯을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
  * 여전히 걸린다.
  *
  * ── 순수 파일이다 ─────────────────────────────────────────────────────────
@@ -62,6 +64,21 @@ export const ATTACHMENT_CATEGORY_CODES = [
   // 바꾸지 않는다. 기타 **앞**에 둔다(기타는 언제나 맨 끝). 데모 파일에는 없다.
   "SIGNED_QUOTE_PDF",
   "QUOTE_EXCEL",
+  // 제품 모델에만 붙는 기본 자료 셋(2026-09-30 사용자) — 파라미터 · 통전검사 ·
+  // 점검표. **수리 건의 「파일관리」에는 나오지 않는다**(아래
+  // PRODUCT_MODEL_ONLY_CATEGORIES). 모델마다 한 벌 두는 자료라 건마다 다시
+  // 올리는 것이 아니고, 건에 붙는 분류 목록에 섞이면 사람이 둘을 구별할 수 없다.
+  //
+  // 영문 코드는 이 저장소가 이미 쓰는 말을 그대로 가져왔다 — 「통전검사」는
+  // xlsx/oh-quote-template.ts 의 `POWER_TEST: { label: "통전검사" }` 이고,
+  // quote_work_scope_section · repair_labor_scope 두 DB enum 도 통전을
+  // POWER_TEST 로 적는다. 새 말을 만들지 않는다.
+  //
+  // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
+  // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
+  "PARAMETER",
+  "POWER_TEST",
+  "CHECKLIST",
   "OTHER",
 ] as const;
 
@@ -88,6 +105,9 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   SCREENSHOT: "스크린샷",
   SIGNED_QUOTE_PDF: "결재 견적서 PDF",
   QUOTE_EXCEL: "수기 견적서 엑셀",
+  PARAMETER: "파라미터",
+  POWER_TEST: "통전검사",
+  CHECKLIST: "점검표",
   OTHER: "기타",
 };
 
@@ -139,12 +159,34 @@ export function isQuoteAttachmentSlotCategory(category: AttachmentCategory): cat
   return (QUOTE_ATTACHMENT_SLOT_CATEGORIES as readonly AttachmentCategory[]).includes(category);
 }
 
+/**
+ * 제품 모델에만 붙는 분류 (2026-09-30) — 파라미터 · 통전검사 · 점검표.
+ *
+ * 🔴 **수리 건에는 붙지 않는다.** 사용자가 명시적으로 가른 것이다: "이건 각
+ * 모델들에 따른 기본 자료고, [파일관리]에 입력되는 자료가 아니야." 모델마다 한 벌
+ * 두는 자료라 접수 건 파일 탭의 분류 목록에 섞이면 두 성격이 구별되지 않는다.
+ *
+ * 견적서 전용 두 칸(QUOTE_ATTACHMENT_SLOT_CATEGORIES)과 **같은 방식**이다 —
+ * 목록은 하나고, 주인을 가리는 규칙만 이 파일 한 자리에 모여 있다. 화면의 분류
+ * 선택지 · 올리기 통로의 거절 · createAttachmentRecord 의 마지막 방어선이 모두
+ * 아래 isAttachmentCategoryAllowedForOwner 하나를 본다.
+ */
+export const PRODUCT_MODEL_ONLY_CATEGORIES = ["PARAMETER", "POWER_TEST", "CHECKLIST"] as const satisfies readonly AttachmentCategory[];
+
+export type ProductModelOnlyCategory = (typeof PRODUCT_MODEL_ONLY_CATEGORIES)[number];
+
+export function isProductModelOnlyCategory(category: AttachmentCategory): category is ProductModelOnlyCategory {
+  return (PRODUCT_MODEL_ONLY_CATEGORIES as readonly AttachmentCategory[]).includes(category);
+}
+
 /** 이 분류를 이 주인의 첨부에 쓸 수 있는가. */
 export function isAttachmentCategoryAllowedForOwner(
   category: AttachmentCategory,
   ownerKind: AttachmentOwnerKind
 ): boolean {
   if (ownerKind === "QUOTE") return isQuoteAttachmentSlotCategory(category);
+  // 모델 전용 셋은 제품 모델에만 — 접수 건에는 나오지도, 받아지지도 않는다.
+  if (isProductModelOnlyCategory(category)) return ownerKind === "PRODUCT_MODEL";
   // 접수 건 · 제품 모델 — 주인 없는 분류(스크린샷)와 견적서 전용 두 칸만 빠진다.
   return !OWNERLESS_ATTACHMENT_CATEGORIES.includes(category) && !isQuoteAttachmentSlotCategory(category);
 }

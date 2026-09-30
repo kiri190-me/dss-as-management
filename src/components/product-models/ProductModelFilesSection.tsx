@@ -15,6 +15,7 @@ import type {
 } from "@/lib/db/queries/attachments";
 import {
   ATTACHMENT_EXTENSION_RULES,
+  isCategoryOpenToAnyExtension,
   isExtensionAllowedForCategory,
 } from "@/lib/domain/attachment-allowlist";
 import {
@@ -106,18 +107,26 @@ const DEFAULT_CATEGORY: AttachmentCategory = "CIRCUIT_DIAGRAM";
 const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
 
 /**
- * 이 분류가 받는 확장자. **손으로 적지 않는다** — 허용목록
- * (CATEGORY_EXTENSION_ALLOWLIST)이 정본이고, 그것이 넓어지거나 좁아지는 날
- * 파일 고르는 창이 저절로 따라와야 한다.
- */
-/**
  * 올리기 칸의 분류 선택지 — 제품 모델 파일이 받는 분류만. 「스크린샷」은 개선 요청 글
  * 전용이라 빠진다(attachment-category.ts 의 isAttachmentCategoryAllowedForOwner —
  * 올리기 통로도 같은 함수로 거절한다).
+ *
+ * 🔴 **목록을 손으로 적지 않는다.** 그래서 2026-09-30 에 더한 모델 전용 셋(파라미터 ·
+ * 통전검사 · 점검표)은 이 화면을 고치지 않아도 저절로 나타났고, 접수 건 파일 탭에는
+ * 같은 함수가 같은 까닭으로 내놓지 않는다.
  */
 const PRODUCT_MODEL_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("PRODUCT_MODEL");
 
-function allowedExtensionsFor(category: AttachmentCategory): string[] {
+/**
+ * 이 분류가 받는 확장자 — **셀 수 있을 때만**. 형식을 가리지 않는 분류(파라미터 ·
+ * 통전검사 · 점검표)는 목록으로 적을 수가 없어 null 이다. 그때 파일 고르는 창에는
+ * `accept` 를 아예 걸지 않고(= 모든 파일), 안내 글도 목록 대신 한 문장을 쓴다.
+ *
+ * 🔴 **손으로 적지 않는다** — 정본(CATEGORY_EXTENSION_ALLOWLIST ·
+ * ANY_EXTENSION_CATEGORIES)이 넓어지거나 좁아지는 날 이 화면이 저절로 따라와야 한다.
+ */
+function allowedExtensionsFor(category: AttachmentCategory): string[] | null {
+  if (isCategoryOpenToAnyExtension(category)) return null;
   return ALL_EXTENSIONS.filter((extension) => isExtensionAllowedForCategory(extension, category));
 }
 
@@ -435,8 +444,13 @@ export default function ProductModelFilesSection({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const allowedExtensions = useMemo(() => allowedExtensionsFor(category), [category]);
+  /**
+   * 형식을 가리지 않는 분류에서는 **undefined** 다 — 빈 문자열이 아니다. 빈
+   * 문자열을 넣으면 브라우저가 "받는 형식이 없다"로 읽어 고르는 창이 아무것도
+   * 내놓지 않는 날이 있다. 속성을 아예 달지 않아야 모든 파일이 보인다.
+   */
   const acceptAttribute = useMemo(
-    () => allowedExtensions.map((extension) => `.${extension}`).join(","),
+    () => allowedExtensions?.map((extension) => `.${extension}`).join(","),
     [allowedExtensions]
   );
 
@@ -657,7 +671,8 @@ export default function ProductModelFilesSection({
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  // 고른 분류가 받는 확장자만 파일 고르는 창에 보인다.
+                  // 고른 분류가 받는 확장자만 파일 고르는 창에 보인다. 형식을
+                  // 가리지 않는 분류에서는 undefined 라 모든 파일이 보인다.
                   accept={acceptAttribute}
                   disabled={isBusy}
                   className="min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
@@ -679,7 +694,10 @@ export default function ProductModelFilesSection({
 
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {attachmentCategoryLabels[category]} 분류가 받는 형식:{" "}
-              {allowedExtensions.map((extension) => `.${extension}`).join(" ")} · 한 개당 20MB까지
+              {allowedExtensions === null
+                ? "실행 파일을 뺀 모든 형식"
+                : allowedExtensions.map((extension) => `.${extension}`).join(" ")}{" "}
+              · 한 개당 20MB까지
               {" · "}
               폴더에서 끌어다 놓아도 됩니다
             </p>

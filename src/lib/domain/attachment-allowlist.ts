@@ -211,6 +211,93 @@ export const CATEGORY_EXTENSION_ALLOWLIST: Partial<Record<AttachmentCategory, re
 };
 
 /**
+ * ============================================================================
+ * 🔴 형식을 가리지 않는 분류 (2026-09-30 — 제품 모델의 기본 자료 셋)
+ * ============================================================================
+ * 파라미터 · 통전검사 · 점검표는 **실행 파일만 빼고 무엇이든** 받는다(사용자
+ * 결정). 장비마다 도구가 달라 어떤 형식으로 나올지 미리 셀 수 없기 때문이다 —
+ * .hwp · .dwg · .par · 벤더 전용 확장자가 실제로 온다.
+ *
+ * ── 왜 CATEGORY_EXTENSION_ALLOWLIST 에 적지 않는가 ───────────────────────
+ * 위 목록은 「이 분류는 이 확장자만」을 적는 자리라 **좁히는 쪽으로만** 쓸 수
+ * 있다. 거기에 없는 분류는 전체 허용목록(ATTACHMENT_EXTENSION_RULES · 14종)을
+ * 쓰는 것이지 아무거나 쓰는 것이 아니다. 그래서 「넓히는 쪽」은 목록을 따로 둔다 —
+ * 위 목록은 **한 글자도 고치지 않았다.**
+ *
+ * 🔴 **다른 분류는 하나도 안 열렸다.** 아래 두 이름에 들어 있는 것은 이 셋뿐이고,
+ * 셋은 전부 제품 모델 전용이다(attachment-category.ts 의
+ * PRODUCT_MODEL_ONLY_CATEGORIES) — 접수 건 · 견적서 통로는 이 길에 닿지 못한다.
+ *
+ * ── 크기 상한은 그대로 20MB 다 ───────────────────────────────────────────
+ * 형식을 연 것이지 크기를 연 것이 아니다. MAX_ATTACHMENT_SIZE_BYTES 는 손대지
+ * 않았다(파일 머리말의 '크기 상한만 일부러 다르다').
+ * ============================================================================
+ */
+export const ANY_EXTENSION_CATEGORIES: readonly AttachmentCategory[] = [
+  "PARAMETER",
+  "POWER_TEST",
+  "CHECKLIST",
+];
+
+/**
+ * 🔴 **실행 파일로 보는 확장자.** 형식을 가리지 않는 분류에서만 쓰이는 거절
+ * 목록이다(다른 분류는 애초에 14종 허용목록 밖을 받지 않으므로 이것을 볼 일이
+ * 없다).
+ *
+ * 고른 기준은 **"두 번 눌러서, 또는 한 줄 명령으로 코드가 도는 것"** 이다. 사내에서
+ * 서로 나누는 자리라 한 번 잘못 올라가면 그대로 퍼진다.
+ *
+ *   · 윈도 실행체·설치본   exe com scr pif msi msp msix appx appxbundle application
+ *   · 윈도 적재 모듈       dll ocx cpl sys drv        (rundll32 한 줄이면 돈다)
+ *   · 윈도 스크립트        bat cmd ps1 psm1 psd1 vbs vbe js jse wsf wsh hta
+ *   · 윈도 손잡이·설정     lnk scf inf reg msc gadget (누르면 다른 것을 실행한다)
+ *   · 유닉스/맥           sh bash zsh ksh csh fish run out elf so dylib app
+ *                         command pkg dmg deb rpm appimage
+ *   · 해석기 스크립트      py pyc pyo pyw rb pl pm php lua ahk vb ws
+ *   · 자바/안드로이드      jar apk class dex
+ *   · 매크로 오피스        xlsm xlsb xlam xla docm dotm pptm potm ppam sldm
+ *
+ * ⚠️ **bin · hex 는 여기 없다.** 펌웨어·계측 덤프의 확장자이고(전체 허용목록에
+ * 이미 있다), 윈도도 리눅스도 그 이름만으로 실행하지 않는다. 파라미터 파일이
+ * .bin 으로 나오는 장비가 실제로 있어 막으면 이 기능의 뜻이 없어진다. 실행 파일
+ * 서명(MZ · ELF)은 아래 내용 대조가 확장자와 무관하게 따로 막는다.
+ *
+ * ⚠️ 매크로 오피스를 넣은 것은 xlsm 을 사람 통로에서 막아 온 이 저장소의 결정과
+ * 같은 줄이다(위 SERVER_ORIGIN_EXTENSION_RULES 머리말) — 매크로는 코드다.
+ */
+export const EXECUTABLE_EXTENSIONS: readonly string[] = [
+  // 윈도 실행체·설치본
+  "exe", "com", "scr", "pif", "msi", "msp", "msix", "appx", "appxbundle", "application",
+  // 윈도 적재 모듈
+  "dll", "ocx", "cpl", "sys", "drv",
+  // 윈도 스크립트
+  "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta",
+  // 윈도 손잡이·설정 — 스스로 코드는 아니지만 누르면 다른 것을 실행한다
+  "lnk", "scf", "inf", "reg", "msc", "gadget",
+  // 유닉스·맥
+  "sh", "bash", "zsh", "ksh", "csh", "fish", "run", "out", "elf", "so", "dylib",
+  "app", "command", "pkg", "dmg", "deb", "rpm", "appimage",
+  // 해석기 스크립트
+  "py", "pyc", "pyo", "pyw", "rb", "pl", "pm", "php", "lua", "ahk", "vb", "ws",
+  // 자바·안드로이드
+  "jar", "apk", "class", "dex",
+  // 매크로가 들어가는 오피스 형식 — 매크로는 코드다
+  "xlsm", "xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm",
+];
+
+const EXECUTABLE_EXTENSION_SET: ReadonlySet<string> = new Set(EXECUTABLE_EXTENSIONS);
+
+/** 실행 파일로 보는 확장자인가. 이름은 이미 소문자로 눕혀진 것을 넘긴다. */
+export function isExecutableExtension(extension: string): boolean {
+  return EXECUTABLE_EXTENSION_SET.has(extension);
+}
+
+/** 이 분류는 형식을 가리지 않는가(실행 파일만 거절). */
+export function isCategoryOpenToAnyExtension(category: AttachmentCategory): boolean {
+  return ANY_EXTENSION_CATEGORIES.includes(category);
+}
+
+/**
  * 사용자가 올린 이름에서 확장자만 뽑아 소문자로 정규화한다.
  *
  * 소문자로 고정하는 이유는 NAS 이식 때문이다 — Windows는 "A.JPG"와 "a.jpg"를
@@ -256,6 +343,13 @@ export function isExtensionMimeCompatible(extension: string, mimeType: string): 
 }
 
 export function isExtensionAllowedForCategory(extension: string, category: AttachmentCategory): boolean {
+  // 형식을 가리지 않는 분류는 **전체 허용목록을 거치지 않는다** — 실행 파일만
+  // 거절한다(위 ANY_EXTENSION_CATEGORIES 머리말). 빈 확장자는 애초에
+  // normalizeFileExtension 이 null 로 돌려보내므로 여기에 오지 않지만, 이 함수만
+  // 따로 불러도 열리지 않게 한 번 더 본다.
+  if (isCategoryOpenToAnyExtension(category)) {
+    return extension.length > 0 && !isExecutableExtension(extension);
+  }
   const restricted = CATEGORY_EXTENSION_ALLOWLIST[category];
   if (!restricted) return isAllowedExtension(extension);
   return restricted.includes(extension);
@@ -384,4 +478,39 @@ export function isContentCompatibleWithExtension(extension: string, header: Uint
     default:
       return false;
   }
+}
+
+/**
+ * ============================================================================
+ * 올리기 통로가 부르는 내용 대조 — 분류까지 함께 본다 (2026-09-30)
+ * ============================================================================
+ * 세 통로(`api/{repair-cases|product-models|quotes}/…/attachments`)가 이것 하나를
+ * 부른다. 🔴 **느슨해진 것이 하나도 없다** — 형식을 가리지 않는 분류가 생기면서
+ * 갈라진 자리가 하나 생겼을 뿐이다:
+ *
+ *   · 여느 분류            `isContentCompatibleWithExtension` **그대로**.
+ *                          허용목록 밖 확장자는 여전히 false 다.
+ *   · 형식을 안 가리는 분류
+ *       - 허용목록 안 확장자 → **역시 `isContentCompatibleWithExtension`.**
+ *         `.pdf` 라고 적었으면 여전히 PDF 여야 한다. 분류가 열렸다고 해서
+ *         이름만 바꾼 파일이 들어오지는 않는다.
+ *       - 허용목록 밖 확장자 → 대조할 서명이 없다(.hwp · .dwg · 벤더 전용).
+ *         펌웨어(bin/hex)의 UNCHECKED 와 같은 자리이고, 같은 방식으로
+ *         **실행 파일 서명(MZ · ELF)만** 되돌려 보낸다. 이름을 `.par` 로 바꾼
+ *         exe 는 여기서 걸린다.
+ *
+ * 빈 파일은 어느 쪽에서도 통과하지 않는다.
+ * ============================================================================
+ */
+export function isUploadContentCompatible(
+  extension: string,
+  category: AttachmentCategory,
+  header: Uint8Array
+): boolean {
+  if (header.length === 0) return false;
+  if (!isCategoryOpenToAnyExtension(category)) {
+    return isContentCompatibleWithExtension(extension, header);
+  }
+  if (isAllowedExtension(extension)) return isContentCompatibleWithExtension(extension, header);
+  return !startsWith(header, WINDOWS_EXECUTABLE) && !startsWith(header, ELF_EXECUTABLE);
 }

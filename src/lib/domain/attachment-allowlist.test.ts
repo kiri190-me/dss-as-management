@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ANY_EXTENSION_CATEGORIES,
   ATTACHMENT_EXTENSION_RULES,
   CATEGORY_EXTENSION_ALLOWLIST,
   CONTENT_SNIFF_BYTES,
@@ -9,10 +10,13 @@ import {
   canonicalMimeTypeForExtension,
   getAllowedMimeTypesForExtension,
   isAllowedExtension,
+  isCategoryOpenToAnyExtension,
   isContentCompatibleWithExtension,
+  isExecutableExtension,
   isExtensionAllowedForCategory,
   isExtensionMimeCompatible,
   isPreviewCapableExtension,
+  isUploadContentCompatible,
   normalizeFileExtension,
 } from "./attachment-allowlist";
 import {
@@ -20,7 +24,10 @@ import {
   CATEGORY_EXTENSION_ALLOWLIST as DEMO_CATEGORY_ALLOWLIST,
   MAX_ATTACHMENT_SIZE_BYTES as DEMO_MAX_ATTACHMENT_SIZE_BYTES,
 } from "./local/attachments/allowlist";
-import { ATTACHMENT_CATEGORY_CODES } from "./attachment-category";
+import {
+  ATTACHMENT_CATEGORY_CODES,
+  isAttachmentCategoryAllowedForOwner,
+} from "./attachment-category";
 
 /**
  * ============================================================================
@@ -94,13 +101,111 @@ test("분류별 제한에 쓰인 확장자는 전부 전체 허용목록 안에 
   }
 });
 
-test("제한이 없는 분류는 허용목록 전체를 쓸 수 있다", () => {
-  const unrestricted = ATTACHMENT_CATEGORY_CODES.filter((code) => !(code in CATEGORY_EXTENSION_ALLOWLIST));
+test("제한이 없는 분류는 허용목록 전체를 쓸 수 있다 — 그 밖은 여전히 못 쓴다", () => {
+  // 형식을 가리지 않는 분류(파라미터 · 통전검사 · 점검표)는 여기서 뺀다 — 그쪽은
+  // "허용목록 전체"가 아니라 "실행 파일만 빼고 전부"라 아래 전용 시험이 따로 본다.
+  const unrestricted = ATTACHMENT_CATEGORY_CODES.filter(
+    (code) => !(code in CATEGORY_EXTENSION_ALLOWLIST) && !isCategoryOpenToAnyExtension(code)
+  );
   assert.ok(unrestricted.length > 0, "비교 대상이 있어야 한다");
   for (const category of unrestricted) {
     assert.equal(isExtensionAllowedForCategory("pdf", category), true);
     assert.equal(isExtensionAllowedForCategory("exe", category), false);
+    // 🔴 이 셋이 열린 것이 다른 분류를 함께 열지 않았다 — 허용목록 밖은 그대로 막힌다.
+    for (const extension of ["hwp", "dwg", "par", "webp"]) {
+      assert.equal(
+        isExtensionAllowedForCategory(extension, category),
+        false,
+        `${category} 에 .${extension} 이 통과했다`
+      );
+    }
   }
+});
+
+// ─────────────── 형식을 가리지 않는 분류 (2026-09-30 — 모델 기본 자료 셋)
+
+test("형식을 가리지 않는 분류는 모델 전용 셋 그대로다 — 다른 분류는 하나도 안 열렸다", () => {
+  assert.deepEqual([...ANY_EXTENSION_CATEGORIES], ["PARAMETER", "POWER_TEST", "CHECKLIST"]);
+  // 주인이 제품 모델 하나뿐인 분류여야 한다. 접수 건 · 견적서 통로는 이 길에
+  // 닿지 못한다 — 닿게 되는 날 여기서 걸린다.
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    assert.equal(isAttachmentCategoryAllowedForOwner(category, "PRODUCT_MODEL"), true, category);
+    assert.equal(isAttachmentCategoryAllowedForOwner(category, "REPAIR_CASE"), false, category);
+    assert.equal(isAttachmentCategoryAllowedForOwner(category, "QUOTE"), false, category);
+  }
+  // 나머지 분류는 전부 닫힌 채다.
+  const open = ATTACHMENT_CATEGORY_CODES.filter((code) => isCategoryOpenToAnyExtension(code));
+  assert.deepEqual(open, ["PARAMETER", "POWER_TEST", "CHECKLIST"]);
+  // 좁히는 목록(CATEGORY_EXTENSION_ALLOWLIST)은 한 글자도 안 건드렸다.
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    assert.equal(category in CATEGORY_EXTENSION_ALLOWLIST, false, `${category} 가 좁히는 목록에 들어갔다`);
+  }
+});
+
+test("모델 기본 자료 셋은 허용목록 밖 형식도 받는다 — 장비마다 도구가 다르다", () => {
+  // 전체 허용목록(14종) 안팎을 가리지 않는다. 여기 적은 것은 현장에서 실제로
+  // 나오는 이름들이고, 목록으로 셀 수 없다는 것이 이 분류의 요점이다.
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    for (const extension of ["pdf", "xlsx", "csv", "txt", "jpg", "zip", "bin", "hex"]) {
+      assert.equal(isExtensionAllowedForCategory(extension, category), true, `${category} 에 .${extension} 이 막혔다`);
+    }
+    for (const extension of ["hwp", "dwg", "dxf", "par", "prm", "cfg", "ini", "json", "xml", "rtf", "7z", "webp"]) {
+      assert.equal(isExtensionAllowedForCategory(extension, category), true, `${category} 에 .${extension} 이 막혔다`);
+    }
+  }
+});
+
+test("🔴 모델 기본 자료 셋에 실행 파일은 못 올라간다 — 윈도 · 리눅스 · 스크립트 · 매크로", () => {
+  // 사내에서 서로 나누는 자리라 한 번 잘못 올라가면 그대로 퍼진다(2026-09-30 사용자).
+  const executables = [
+    // 윈도 실행체·설치본·적재 모듈
+    "exe", "com", "scr", "pif", "msi", "msix", "dll", "ocx", "cpl", "sys",
+    // 윈도 스크립트·손잡이
+    "bat", "cmd", "ps1", "vbs", "js", "wsf", "hta", "lnk", "reg", "inf",
+    // 유닉스·맥
+    "sh", "bash", "run", "out", "elf", "so", "dylib", "app", "pkg", "dmg", "deb", "rpm", "appimage",
+    // 해석기 스크립트
+    "py", "pyc", "rb", "pl", "php", "lua", "ahk",
+    // 자바·안드로이드
+    "jar", "apk", "class", "dex",
+    // 매크로가 들어가는 오피스 — 매크로는 코드다
+    "xlsm", "xlsb", "docm", "pptm", "xlam",
+  ];
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    for (const extension of executables) {
+      assert.equal(
+        isExtensionAllowedForCategory(extension, category),
+        false,
+        `${category} 에 실행 파일 .${extension} 이 통과했다`
+      );
+    }
+  }
+  // 목록에 적은 것은 전부 거절 함수가 알아야 한다.
+  for (const extension of executables) {
+    assert.equal(isExecutableExtension(extension), true, `.${extension} 이 실행 파일 목록에 없다`);
+  }
+  // 확장자가 없는 이름은 애초에 normalizeFileExtension 이 null 이지만, 이 함수만
+  // 따로 불러도 열리지 않아야 한다.
+  assert.equal(isExtensionAllowedForCategory("", "PARAMETER"), false);
+});
+
+test("펌웨어 확장자(bin · hex)는 실행 파일로 보지 않는다", () => {
+  // 계측·펌웨어 덤프의 이름이고, 윈도도 리눅스도 그 이름만으로 실행하지 않는다.
+  // 파라미터가 .bin 으로 나오는 장비가 실제로 있다. 실행 파일 서명은 아래 내용
+  // 대조가 확장자와 무관하게 따로 막는다.
+  assert.equal(isExecutableExtension("bin"), false);
+  assert.equal(isExecutableExtension("hex"), false);
+  assert.equal(isExtensionAllowedForCategory("bin", "PARAMETER"), true);
+  // 기존 허용목록 14종 가운데 실행 파일로 분류된 것은 하나도 없다 — 하나라도
+  // 생기면 그 분류가 조용히 좁아진다.
+  for (const rule of ATTACHMENT_EXTENSION_RULES) {
+    assert.equal(isExecutableExtension(rule.extension), false, `.${rule.extension} 이 실행 파일이 됐다`);
+  }
+});
+
+test("크기 상한은 열리지 않았다 — 형식만 열었다", () => {
+  // 승인된 20MB 다. 형식을 가리지 않는 분류라고 더 큰 파일을 받지 않는다.
+  assert.equal(MAX_ATTACHMENT_SIZE_BYTES, 20 * 1024 * 1024);
 });
 
 test("제한이 있는 분류는 그 목록 밖 확장자를 거부한다", () => {
@@ -328,4 +433,55 @@ test("옛 Office 확장자는 OLE2와 ZIP 둘 다 받는다 — 이름만 바꾼
 
 test("대조에 쓰는 앞머리 크기는 PDF 규격(1024바이트)을 담는다", () => {
   assert.equal(CONTENT_SNIFF_BYTES, 1024);
+});
+
+// ─────── 통로가 부르는 내용 대조 — 분류까지 함께 본다 (2026-09-30)
+
+test("여느 분류에서는 통로의 내용 대조가 예전 그대로다", () => {
+  // isUploadContentCompatible 이 생겼다고 해서 느슨해진 자리가 하나도 없다.
+  for (const [extension, header, expected] of [
+    ["jpg", JPEG_HEADER, true],
+    ["png", JPEG_HEADER, false],
+    ["pdf", PDF_HEADER, true],
+    ["xlsx", ZIP_HEADER, true],
+    ["txt", TEXT_HEADER, true],
+    ["jpg", WINDOWS_EXE_HEADER, false],
+    // 허용목록 밖은 내용이 무엇이든 거절이다.
+    ["hwp", TEXT_HEADER, false],
+    ["exe", TEXT_HEADER, false],
+  ] as const) {
+    // 분류가 무엇이든 — 열리지 않은 분류에서는 예전 함수와 글자 그대로 같은 답이다.
+    for (const category of ["CIRCUIT_DIAGRAM", "OTHER", "FIRMWARE", "INTAKE_PHOTO"] as const) {
+      assert.equal(isUploadContentCompatible(extension, category, header), expected, `${category} / ${extension}`);
+    }
+    assert.equal(isContentCompatibleWithExtension(extension, header), expected, `예전 함수 / ${extension}`);
+  }
+});
+
+test("🔴 모델 기본 자료 셋에서도 이름만 바꾼 실행 파일은 못 들어온다", () => {
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    // 허용목록 밖 확장자 — 대조할 서명이 없어 실행 파일 서명만 본다.
+    for (const extension of ["hwp", "dwg", "par", "prm"]) {
+      assert.equal(isUploadContentCompatible(extension, category, TEXT_HEADER), true, `.${extension}`);
+      assert.equal(
+        isUploadContentCompatible(extension, category, WINDOWS_EXE_HEADER),
+        false,
+        `MZ 실행 파일이 .${extension} 으로 통과했다`
+      );
+      assert.equal(
+        isUploadContentCompatible(extension, category, ELF_HEADER),
+        false,
+        `ELF 실행 파일이 .${extension} 으로 통과했다`
+      );
+    }
+    // 허용목록 **안** 확장자는 앞머리 바이트 대조를 그대로 받는다 — 분류가 열렸다고
+    // .pdf 로 이름만 바꾼 파일이 들어오지는 않는다.
+    assert.equal(isUploadContentCompatible("pdf", category, PDF_HEADER), true);
+    assert.equal(isUploadContentCompatible("pdf", category, ZIP_HEADER), false, "PDF 가 아닌 것이 .pdf 로 통과했다");
+    assert.equal(isUploadContentCompatible("png", category, JPEG_HEADER), false);
+    assert.equal(isUploadContentCompatible("xlsx", category, WINDOWS_EXE_HEADER), false);
+    // 빈 파일은 어느 쪽에서도 통과하지 않는다.
+    assert.equal(isUploadContentCompatible("par", category, new Uint8Array(0)), false);
+    assert.equal(isUploadContentCompatible("pdf", category, new Uint8Array(0)), false);
+  }
 });
