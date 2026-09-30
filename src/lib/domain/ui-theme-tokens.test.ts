@@ -65,12 +65,12 @@ const FONT_SIZE_TOKEN = tokenByKey("text-sm");
 
 // ───────────────────────────────────────────── 등록부 자기 정합성
 
-test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 61이다", () => {
+test("등록부의 키와 CSS 변수 이름이 전부 고유하고 개수가 62이다", () => {
   const keys = UI_THEME_TOKENS.map((token) => token.key);
   const cssVars = UI_THEME_TOKENS.map((token) => token.cssVar);
 
-  // 앱 전체 46(색 35 · 모서리 5 · 글자 크기 6) + 주간보고 전용 15(글자 8 · 상자 7).
-  assert.equal(UI_THEME_TOKENS.length, 61);
+  // 앱 전체 46(색 35 · 모서리 5 · 글자 크기 6) + 주간보고 전용 16(글자 8 · 상자 8).
+  assert.equal(UI_THEME_TOKENS.length, 62);
   assert.equal(new Set(keys).size, keys.length, "논리 키가 겹친다");
   assert.equal(new Set(cssVars).size, cssVars.length, "CSS 변수 이름이 겹친다");
 
@@ -271,11 +271,11 @@ function weeklyReportSizesFromGlobalsCss(): Map<string, string> {
   return found;
 }
 
-test("globals.css 의 주간보고 크기 15개와 등록부의 기본값이 글자까지 같다", () => {
+test("globals.css 의 주간보고 크기 16개와 등록부의 기본값이 글자까지 같다", () => {
   const css = weeklyReportSizesFromGlobalsCss();
 
-  assert.equal(WEEKLY_REPORT_TOKENS.length, 15, "등록부의 주간보고 토큰이 15개가 아니다");
-  assert.equal(css.size, 15, `globals.css 의 주간보고 크기 변수가 15개가 아니다: ${css.size}`);
+  assert.equal(WEEKLY_REPORT_TOKENS.length, 16, "등록부의 주간보고 토큰이 16개가 아니다");
+  assert.equal(css.size, 16, `globals.css 의 주간보고 크기 변수가 16개가 아니다: ${css.size}`);
 
   for (const token of WEEKLY_REPORT_TOKENS) {
     assert.equal(
@@ -293,7 +293,7 @@ test("globals.css 의 주간보고 크기 15개와 등록부의 기본값이 글
   }
 });
 
-test("주간보고 토큰의 모양 — 키는 변수 이름에서 -- 를 뗀 것, 글자 8 · 상자 7, 공용 스코프", () => {
+test("주간보고 토큰의 모양 — 키는 변수 이름에서 -- 를 뗀 것, 글자 8 · 상자 8, 공용 스코프", () => {
   for (const token of WEEKLY_REPORT_TOKENS) {
     assert.equal(token.cssVar, `--${token.key}`, `${token.key}의 변수 이름이 키와 짝이 아니다`);
     assert.equal(token.scoped, false, `${token.key}가 라이트/다크로 나뉘어 있다`);
@@ -306,7 +306,7 @@ test("주간보고 토큰의 모양 — 키는 변수 이름에서 -- 를 뗀 �
     }
   }
   assert.equal(WEEKLY_REPORT_TOKENS.filter((token) => token.kind === "fontSize").length, 8);
-  assert.equal(WEEKLY_REPORT_TOKENS.filter((token) => token.kind === "spacing").length, 7);
+  assert.equal(WEEKLY_REPORT_TOKENS.filter((token) => token.kind === "spacing").length, 8);
 
   // 반대 방향 — 주간보고 변수 이름인데 표시가 빠진 토큰이 있으면 「모서리 · 글자
   // 크기」 화면이 그 값을 자기 몫으로 센다.
@@ -319,7 +319,7 @@ test("주간보고 토큰의 모양 — 키는 변수 이름에서 -- 를 뗀 �
 
 test("상자 크기(spacing)는 주간보고 전용이고 전부 범위가 있다 — 범위는 그 종류에만 있다", () => {
   const spacing = UI_THEME_TOKENS.filter((token) => token.kind === "spacing");
-  assert.equal(spacing.length, 7);
+  assert.equal(spacing.length, 8);
 
   for (const token of UI_THEME_TOKENS) {
     if (token.kind === "spacing") {
@@ -344,6 +344,7 @@ test("상자 크기(spacing)는 주간보고 전용이고 전부 범위가 있�
     "spacing-wr-block-gap": { min: 0, max: 2 },
     "spacing-wr-cell-x": { min: 0, max: 1 },
     "spacing-wr-cell-y": { min: 0, max: 1 },
+    "spacing-wr-po-tag-y": { min: 0, max: 1 },
     "spacing-wr-table-min": { min: 0, max: 20 },
     "spacing-wr-box-min": { min: 0, max: 16 },
   });
@@ -358,7 +359,7 @@ test("화면 가르기 — 등록부를 남김없이 셋으로 가르고, 주간
   for (const token of UI_THEME_TOKENS) byScreen[uiThemeTokenScreen(token)].push(token.key);
 
   assert.equal(byScreen.colors.length, 35);
-  assert.equal(byScreen.weeklyReport.length, 15);
+  assert.equal(byScreen.weeklyReport.length, 16);
   assert.equal(
     byScreen.colors.length + byScreen.shapes.length + byScreen.weeklyReport.length,
     UI_THEME_TOKENS.length,
@@ -443,21 +444,21 @@ function sourceOfFunction(source: string, name: string): string {
   return next < 0 ? source.slice(start) : source.slice(start, next);
 }
 
-test("주간보고 편집 화면이 그리는 토큰은 주간보고 몫 15개뿐이다 — 글자 8 · 상자 7, 그 밖 0", () => {
+test("주간보고 편집 화면이 그리는 토큰은 주간보고 몫 16개뿐이다 — 글자 8 · 상자 8, 그 밖 0", () => {
   assert.deepEqual(
     WEEKLY_REPORT_SIZE_TOKENS.map((token) => token.key),
     UI_THEME_TOKENS.filter((token) => uiThemeTokenScreen(token) === "weeklyReport").map((token) => token.key)
   );
-  assert.equal(WEEKLY_REPORT_SIZE_TOKENS.length, 15);
+  assert.equal(WEEKLY_REPORT_SIZE_TOKENS.length, 16);
   assert.equal(WEEKLY_REPORT_FONT_TOKENS.length, 8);
-  assert.equal(WEEKLY_REPORT_BOX_TOKENS.length, 7);
+  assert.equal(WEEKLY_REPORT_BOX_TOKENS.length, 8);
   assert.equal(WEEKLY_REPORT_OTHER_TOKENS.length, 0);
   // 두 묶음이 겹치지 않고 합이 전부다 — 한 칸이 두 번 그려지거나 빠지지 않는다.
   assert.deepEqual(
     [...WEEKLY_REPORT_FONT_TOKENS, ...WEEKLY_REPORT_BOX_TOKENS].map((token) => token.key).sort(),
     WEEKLY_REPORT_SIZE_TOKENS.map((token) => token.key).sort()
   );
-  // 전부 공용 스코프라 편집 칸도 정확히 15칸이다(편집기의 GROUP_SLOTS.weeklyReport).
+  // 전부 공용 스코프라 편집 칸도 정확히 16칸이다(편집기의 GROUP_SLOTS.weeklyReport).
   for (const token of WEEKLY_REPORT_SIZE_TOKENS) assert.equal(token.scoped, false, token.key);
   // 앱 전체 토큰은 한 칸도 섞이지 않는다.
   for (const token of WEEKLY_REPORT_SIZE_TOKENS) assert.equal(token.area, "weeklyReport", token.key);
@@ -532,7 +533,7 @@ test("주간보고 숫자 칸은 원문을 그대로 들고, 비우면 형식 �
   assert.equal(normalizeUiThemeValue(tokenByKey("spacing-wr-block"), remValueFromText("0")), "0");
 });
 
-test("미리보기 style 은 주간보고 CSS 변수 15개를 전부, 편집 중인 값으로 건다", () => {
+test("미리보기 style 은 주간보고 CSS 변수 16개를 전부, 편집 중인 값으로 건다", () => {
   const values: Record<string, string> = {};
   for (const token of UI_THEME_TOKENS) values[token.key] = `값-${token.key}`;
   const style = weeklyReportPreviewStyle(values);

@@ -1018,6 +1018,7 @@ const EXPECTED_WEEKLY_REPORT_SIZE_VARIABLES: Readonly<Record<string, string>> = 
   "--spacing-wr-block-gap": "0.75rem", // gap-3
   "--spacing-wr-cell-x": "0.375rem", // px-1.5
   "--spacing-wr-cell-y": "0.25rem", // py-1
+  "--spacing-wr-po-tag-y": "0.125rem", // py-0.5
   "--spacing-wr-table-min": "8rem", // min-h-32
   "--spacing-wr-box-min": "4rem", // min-h-16
 };
@@ -1071,7 +1072,7 @@ test("주간보고 컴포넌트가 쓰는 전용 클래스는 전부 globals.css
 });
 
 /**
- * 옮긴 자리마다 전용 클래스가 몇 번 쓰였는가 — 15개 항목이 놓인 자리의 목록이다.
+ * 옮긴 자리마다 전용 클래스가 몇 번 쓰였는가 — 16개 항목이 놓인 자리의 목록이다.
  * 자리를 하나 더하거나 빼면 이 표를 함께 고친다(그게 이 표의 쓸모다: 옮긴 줄
  * 하나가 조용히 옛 클래스로 돌아가면 여기서 수가 어긋난다).
  */
@@ -1095,6 +1096,7 @@ const EXPECTED_WEEKLY_REPORT_CLASS_COUNTS: Record<WeeklyReportComponentFile, Rec
       "gap-wr-block-gap": 3,
       "px-wr-cell-x": 17, // 머리 8 + 해당 없음 1 + 본문 8
       "py-wr-cell-y": 16, // 머리 8 + 본문 8 (해당 없음 줄은 py-3 그대로)
+      "py-wr-po-tag-y": 1, // PO 발행 현황의 고객사 이름표
       "min-h-wr-table-min": 1, // 상세표 래퍼
     },
     goals: {

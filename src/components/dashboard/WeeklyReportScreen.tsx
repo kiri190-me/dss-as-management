@@ -706,9 +706,14 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
         // 🔴 가로 스크롤 상자는 없앴다. overflow · 높이 · flex-1 을 다시 붙이지 말 것.
         //
         // 이름표 하나하나는 전처럼 눌리지 않는다. <li> 의 shrink-0 이 있어서 이름표는
-        // 자기 글자 폭(max-content) 그대로 서고, 모자라면 **다음 줄로 넘어간다** —
+        // 자기 글자 폭(max-content) 아래로는 줄지 않고, 모자라면 **다음 줄로 넘어간다** —
         // 이름이 두 줄로 접히거나 잘리지 않는다. 이름 칸의 whitespace-nowrap 을 뺀
         // 것은 아래 드문 경우 하나를 위해서이고, 보통은 이름이 한 줄로 선다.
+        //
+        // 그 위에 grow 를 얹어 **줄에 남은 자리를 이름표들이 똑같이 나눠 갖는다**
+        // (2026-09-30 요청: 이름표 폭의 합이 구역 폭과 맞아야 한다). flex 의 성질상
+        // 채워지지 않은 마지막 줄도 함께 늘어난다 — 고객사가 두세 곳뿐인 종류에서
+        // 이름표가 아주 넓어지는 것은 그래서이고, 고장이 아니다.
         //
         // 드문 경우 — 이름 하나가 칸 폭보다 길 때. 그 이름표는 줄을 바꿔도 안
         // 들어가고, 가로 스크롤 상자가 없으니 넘친 만큼 화면 전체(body)가 좌우로
@@ -722,7 +727,7 @@ function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
           {issuance.customers.map((entry) => (
             <li
               key={entry.key}
-              className={`inline-flex max-w-full shrink-0 items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
+              className={`inline-flex max-w-full shrink-0 grow items-baseline gap-1.5 rounded border border-zinc-200 px-1.5 py-wr-po-tag-y dark:border-zinc-800 ${customerRowColorClass(entry.customerRowColor)}`}
               style={customerRowColorStyle(entry.customerRowColor)}
             >
               <span className="text-wr-label wrap-anywhere text-zinc-600 dark:text-zinc-400">

@@ -618,7 +618,7 @@ export const UI_THEME_TOKENS: readonly UiThemeToken[] = [
     defaultDark: "1.5rem",
   },
 
-  // ── 주간보고 전용 — 글자 8 · 상자 7 ──────────────────────────────────
+  // ── 주간보고 전용 — 글자 8 · 상자 8 ──────────────────────────────────
   //
   // 주간보고 세 컴포넌트(WeeklyReportScreen · WeeklyReportGoalsPanel ·
   // WeeklyReportDeliveriesPanel)만 읽는 변수다. 그 화면의 글자·상자 크기만 따로
@@ -794,6 +794,18 @@ export const UI_THEME_TOKENS: readonly UiThemeToken[] = [
     usage: "상세표 · 납입 예정 표의 칸 안 위·아래 여백(줄 간격이 여기서 정해진다)",
     defaultLight: "0.25rem",
     defaultDark: "0.25rem",
+    area: "weeklyReport",
+    rangeRem: { min: 0, max: 1 },
+  },
+  {
+    key: "spacing-wr-po-tag-y",
+    cssVar: "--spacing-wr-po-tag-y",
+    kind: "spacing",
+    scoped: false,
+    label: "PO 발행 현황 이름표 위아래 여백",
+    usage: "PO 발행 현황 구역에 줄줄이 놓이는 고객사 이름표의 위·아래 여백(이름표 높이가 여기서 정해진다)",
+    defaultLight: "0.125rem",
+    defaultDark: "0.125rem",
     area: "weeklyReport",
     rangeRem: { min: 0, max: 1 },
   },

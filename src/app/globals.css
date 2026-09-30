@@ -57,7 +57,7 @@
 }
 
 /*
- * 주간보고 전용 크기 — 글자 8 · 상자 7.
+ * 주간보고 전용 크기 — 글자 8 · 상자 8.
  *
  * ── 왜 전역 text-xs · p-2 를 그대로 쓰지 않는가 ─────────────────────────
  * 주간보고는 매주 넘겨 보는 문서라 그 화면의 글자·상자 크기만 따로 고르고 싶다는
@@ -110,6 +110,7 @@
   --spacing-wr-block-gap: 0.75rem; /* 블록 사이 간격 ← gap-3 */
   --spacing-wr-cell-x: 0.375rem; /* 표 칸 좌우 여백 ← px-1.5 */
   --spacing-wr-cell-y: 0.25rem; /* 표 칸 위아래 여백 ← py-1 */
+  --spacing-wr-po-tag-y: 0.125rem; /* PO 발행 현황 이름표 위아래 여백 ← py-0.5 */
   --spacing-wr-table-min: 8rem; /* 상세표 최소 높이 ← min-h-32 */
   --spacing-wr-box-min: 4rem; /* 목표 · 납입 상자 최소 높이 ← min-h-16 */
 }
