@@ -103,6 +103,43 @@ test("🔴 건수 문장이 한 곳에만 있다 — 서버 액션과 도착 화
   }
 });
 
+test("적용도 같은 주소를 쓴다 — `?done=applied` 만 다르다", () => {
+  assert.equal(
+    workflowPublishDoneHref("REPAIR", { migrated: 27, stranded: 2 }, "applied"),
+    "/workflows/REPAIR?done=applied&moved=27&stranded=2"
+  );
+  // 0은 여기서도 싣지 않는다 — 규칙이 조작마다 달라지면 안 된다.
+  assert.equal(
+    workflowPublishDoneHref("REPAIR", { migrated: 27, stranded: 0 }, "applied"),
+    "/workflows/REPAIR?done=applied&moved=27"
+  );
+  assert.equal(workflowPublishDoneHref("REPAIR", { migrated: 0, stranded: 0 }, "applied"), "/workflows/REPAIR?done=applied");
+  // 생략하면 발행이다 — 발행 쪽 호출을 한 글자도 고치지 않기 위해서다.
+  assert.equal(workflowPublishDoneHref("REPAIR", { migrated: 1, stranded: 0 }), "/workflows/REPAIR?done=published&moved=1");
+});
+
+test("🔴 도착 화면이 applied 를 알고, 건수 문장도 같은 함수로 붙인다", () => {
+  const page = readFileSync(join(process.cwd(), "src/app/(app)/workflows/[code]/page.tsx"), "utf8");
+  assert.match(page, /applied: "/, "DONE_MESSAGES 에 applied 가 있어야 도착 화면이 말을 한다");
+  // 건수 문장이 붙는 조작 목록에 applied 가 들어 있어야 한다 — 발행에만 붙는
+  // 조건을 그대로 두면 적용은 "몇 건 옮겼는지"를 말하지 않는다.
+  assert.match(page, /DONE_WITH_CASE_COUNTS = new Set\(\["published", "applied"\]\)/);
+  assert.match(page, /DONE_WITH_CASE_COUNTS\.has\(done\)/);
+});
+
+test("🔴 적용 액션·단추도 숫자를 그대로 나른다 — 문장을 베껴 적지 않는다", () => {
+  const action = readFileSync(join(process.cwd(), "src/lib/server/actions/workflow-drafts.ts"), "utf8");
+  assert.match(action, /applyCurrentWorkflowVersionAction/);
+  const button = readFileSync(
+    join(process.cwd(), "src/components/workflows/WorkflowApplyCurrentVersion.tsx"),
+    "utf8"
+  );
+  assert.match(button, /workflowPublishDoneHref\(/, "주소를 손으로 짓지 않는다");
+  assert.match(button, /"applied"/);
+  assert.doesNotMatch(button, /새 버전으로 옮겼습니다/);
+  assert.doesNotMatch(button, /이전 버전에 그대로 두었습니다/);
+});
+
 test("🔴 발행 액션이 숫자를 그대로 돌려준다 — 화면이 문자열에서 뽑아내지 않는다", () => {
   const action = readFileSync(join(process.cwd(), "src/lib/server/actions/workflow-drafts.ts"), "utf8");
   assert.match(action, /migratedCaseCount: result\.migratedCaseCount/);

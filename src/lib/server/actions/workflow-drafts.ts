@@ -2,6 +2,7 @@
 
 import { readSession } from "@/lib/auth/session";
 import {
+  applyCurrentWorkflowVersionToCases,
   createWorkflowDraft,
   discardWorkflowDraft,
   publishWorkflowDraft,
@@ -87,6 +88,35 @@ export async function publishWorkflowDraftAction(versionId: string): Promise<Wor
     };
   }
   return { ok: false, message: result.message, issues: result.issues };
+}
+
+/**
+ * 워크플로를 고치지 않고, 옛 판에 남아 있는 진행 중인 접수 건만 지금 판으로
+ * 옮긴다. 발행과 결과 모양이 같다(같은 두 수를 만든다) — 화면도 같은 방식으로
+ * 도착 주소에 실어 보내므로 타입을 나누지 않는다.
+ */
+export async function applyCurrentWorkflowVersionAction(
+  templateCode: string
+): Promise<WorkflowPublishActionResult> {
+  const session = await requireSession();
+  if (!session.ok) return session;
+  const result = await applyCurrentWorkflowVersionToCases({ templateCode, actorUserId: session.userId });
+  if (result.ok) {
+    const parts = [
+      `현재 버전 v${result.versionNumber}을(를) 적용했습니다.`,
+      ...workflowPublishCaseSentences({
+        migrated: result.migratedCaseCount,
+        stranded: result.strandedCaseCount,
+      }),
+    ];
+    return {
+      ok: true,
+      message: parts.join(" "),
+      migratedCaseCount: result.migratedCaseCount,
+      strandedCaseCount: result.strandedCaseCount,
+    };
+  }
+  return { ok: false, message: result.message };
 }
 
 export async function discardWorkflowDraftAction(versionId: string): Promise<WorkflowDraftActionResult> {

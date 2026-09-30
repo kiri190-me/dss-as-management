@@ -197,9 +197,27 @@ export async function createWorkflowDraft(params: {
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * 발행 직후, 옛 버전에 묶인 채 아직 흐르고 있는 접수 건을 새 버전으로 옮긴다
- * (2026-09-30 사용자 요청). 반드시 발행과 **같은 트랜잭션**에서 부른다 —
- * 발행이 뒤집히면 이관도 함께 뒤집혀야 한다.
+ * 읽기만 하는 헬퍼가 트랜잭션 핸들과 최상위 db 양쪽을 받기 위한 타입.
+ * queries/workflow-rules.ts 가 같은 이유로 같은 모양을 쓴다.
+ */
+type DbOrTx = Tx | typeof db;
+
+type InFlightCaseMigrationPlan = {
+  /** 옮길 건들을 목적지 단계별로 모은 것. 실제로 쓰는 쪽만 본다. */
+  caseIdsByNewStepId: Map<string, string[]>;
+  /** 옮길 수 있는 건 수 = 옮기면 실제로 옮겨지는 수. 미리 보기가 쓰는 수도 이것이다. */
+  migratableCaseCount: number;
+  /** 현재 단계의 key가 대상 버전에 없어 옛 버전에 남는 건 수. */
+  strandedCaseCount: number;
+};
+
+/**
+ * 옛 버전에 묶인 채 아직 흐르고 있는 접수 건 가운데 **어느 건을 어느 단계로
+ * 옮길 것인가**를 정한다(2026-09-30 사용자 요청).
+ *
+ * 🔴 **이관 조건이 정의되는 단 한 곳이다.** 세는 쪽(미리 보기)과 옮기는 쪽이
+ * 모두 이 함수를 지난다 — 조건을 양쪽에 적으면 언젠가 하나만 고쳐지고, 그때
+ * 증상은 "단추에 27건이라 써 놓고 25건만 옮긴다"라서 오류 없이 조용히 틀린다.
  *
  * 짝은 **단계의 key로만** 짓는다. label은 판마다 바뀔 수 있으므로 label로
  * 짝지으면 이름만 손본 버전에서 건이 엉뚱한 단계로 간다.
@@ -220,29 +238,23 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  *    그 건 하나를 위해 단계를 끼워 넣은 사본이다(case-workflow-steps.ts).
  *    템플릿 버전으로 끌어오면 그 건만을 위해 넣은 단계가 조용히 사라진다.
  *
- * 현재 단계의 key가 새 버전에 없는 건은 **옛 버전에 그대로 두고 수만 센다.**
- * 여기서 발행을 막으면 단계를 하나라도 없앨 때 그 워크플로를 영영 고치지
- * 못하게 된다.
+ * 현재 단계의 key가 대상 버전에 없는 건은 **옛 버전에 그대로 두고 수만 센다.**
+ * 여기서 막으면 단계를 하나라도 없앨 때 그 워크플로를 영영 고치지 못하게 된다.
  *
- * status_change_histories에는 **건별 기록을 남기지 않는다** — 단계가 바뀐 것이
- * 아니라 같은 단계(key)의 새 버전 행으로 옮겨간 것이다. 이동으로 적으면
- * "그때 단계가 바뀌었다"는 거짓 이력이 남는다. 발행 감사 로그 한 줄에 수만
- * 요약한다.
+ * `lockForUpdate` 는 쓰기 직전에만 켠다. 읽기 전용(미리 보기)에서 잠그면 화면을
+ * 열어 두기만 해도 발행이 기다리게 된다.
  */
-async function migrateInFlightCasesToVersion(
-  tx: Tx,
-  params: { templateId: string; newVersionId: string }
-): Promise<{ migratedCaseCount: number; strandedCaseCount: number }> {
-  const newSteps = await tx
+async function planInFlightCaseMigration(
+  runner: DbOrTx,
+  params: { templateId: string; targetVersionId: string; lockForUpdate: boolean }
+): Promise<InFlightCaseMigrationPlan> {
+  const newSteps = await runner
     .select({ id: workflowSteps.id, key: workflowSteps.key })
     .from(workflowSteps)
-    .where(eq(workflowSteps.workflowVersionId, params.newVersionId));
+    .where(eq(workflowSteps.workflowVersionId, params.targetVersionId));
   const newStepIdByKey = new Map(newSteps.map((step) => [step.key, step.id]));
 
-  // 대상 행을 먼저 잠근다(of: repairCases — 읽기만 하는 버전·단계 표까지 잠글
-  // 이유는 없다). 잠그지 않으면 고른 뒤 쓰기 전까지의 틈에서 다른 트랜잭션이
-  // 그 건의 단계를 옮길 수 있고, 그러면 그 이동을 이 쓰기가 덮어 버린다.
-  const candidates = await tx
+  const selection = runner
     .select({ caseId: repairCases.id, stepKey: workflowSteps.key })
     .from(repairCases)
     .innerJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
@@ -250,18 +262,22 @@ async function migrateInFlightCasesToVersion(
     .where(
       and(
         eq(workflowVersions.workflowTemplateId, params.templateId),
-        ne(workflowVersions.id, params.newVersionId),
+        ne(workflowVersions.id, params.targetVersionId),
         eq(workflowVersions.isCaseScoped, false),
         eq(repairCases.isDeleted, false),
         isNull(repairCases.deletedAt),
         or(isNull(workflowSteps.repairStatus), ne(workflowSteps.repairStatus, "SHIPMENT_COMPLETED"))
       )
-    )
-    .for("update", { of: repairCases });
+    );
 
-  // 같은 단계로 갈 건들을 모아 한 번에 쓴다 — 건마다 UPDATE를 날리면 수백 건
-  // 짜리 발행에서 왕복이 그만큼 늘어난다.
+  // 쓰기 직전이면 대상 행을 먼저 잠근다(of: repairCases — 읽기만 하는 버전·단계
+  // 표까지 잠글 이유는 없다). 잠그지 않으면 고른 뒤 쓰기 전까지의 틈에서 다른
+  // 트랜잭션이 그 건의 단계를 옮길 수 있고, 그러면 그 이동을 이 쓰기가 덮는다.
+  const candidates = params.lockForUpdate ? await selection.for("update", { of: repairCases }) : await selection;
+
+  // 같은 단계로 갈 건들을 모아 둔다 — 쓰는 쪽이 한 번에 UPDATE 하기 위해서다.
   const caseIdsByNewStepId = new Map<string, string[]>();
+  let migratableCaseCount = 0;
   let strandedCaseCount = 0;
   for (const candidate of candidates) {
     const newStepId = newStepIdByKey.get(candidate.stepKey);
@@ -272,7 +288,47 @@ async function migrateInFlightCasesToVersion(
     const bucket = caseIdsByNewStepId.get(newStepId);
     if (bucket) bucket.push(candidate.caseId);
     else caseIdsByNewStepId.set(newStepId, [candidate.caseId]);
+    migratableCaseCount += 1;
   }
+
+  return { caseIdsByNewStepId, migratableCaseCount, strandedCaseCount };
+}
+
+/**
+ * 미리 보기 — "지금 이 버전으로 옮길 수 있는 건이 몇이고, 갈 곳이 없어 남을 건이
+ * 몇인가". 🔴 옮기기와 **같은 함수**(planInFlightCaseMigration)를 지나므로 이
+ * 수는 실제로 옮겨지는 수와 같다. 읽기 전용이라 잠그지 않는다.
+ *
+ * 워크플로 상세 화면이 단추에 수를 적기 위해 부른다(queries/workflow-templates.ts).
+ */
+export async function countInFlightCasesForVersion(params: {
+  templateId: string;
+  targetVersionId: string;
+}): Promise<{ migratableCaseCount: number; strandedCaseCount: number }> {
+  const plan = await planInFlightCaseMigration(db, { ...params, lockForUpdate: false });
+  return { migratableCaseCount: plan.migratableCaseCount, strandedCaseCount: plan.strandedCaseCount };
+}
+
+/**
+ * 고른 건들을 실제로 새 버전으로 옮긴다. 반드시 그 이동을 일으킨 조작과 **같은
+ * 트랜잭션**에서 부른다 — 발행이 뒤집히면 이관도 함께 뒤집혀야 한다.
+ *
+ * 무엇을 옮기고 무엇을 두는지는 planInFlightCaseMigration의 머리말에 있다.
+ * 여기서는 그 계획을 쓰기로 옮길 뿐이며, 조건을 다시 적지 않는다.
+ *
+ * status_change_histories에는 **건별 기록을 남기지 않는다** — 단계가 바뀐 것이
+ * 아니라 같은 단계(key)의 새 버전 행으로 옮겨간 것이다. 이동으로 적으면
+ * "그때 단계가 바뀌었다"는 거짓 이력이 남는다. 감사 로그 한 줄에 수만 요약한다.
+ */
+async function migrateInFlightCasesToVersion(
+  tx: Tx,
+  params: { templateId: string; newVersionId: string }
+): Promise<{ migratedCaseCount: number; strandedCaseCount: number }> {
+  const { caseIdsByNewStepId, strandedCaseCount } = await planInFlightCaseMigration(tx, {
+    templateId: params.templateId,
+    targetVersionId: params.newVersionId,
+    lockForUpdate: true,
+  });
 
   let migratedCaseCount = 0;
   for (const [newStepId, caseIds] of caseIdsByNewStepId) {
@@ -428,6 +484,107 @@ export async function publishWorkflowDraft(params: {
       versionId: draft.id,
       versionNumber: draft.versionNumber,
       archivedVersionId: currentPublished?.id ?? null,
+      migratedCaseCount,
+      strandedCaseCount,
+    };
+  });
+}
+
+/**
+ * 감사 로그에서 "적용"을 골라내는 이름. 🔴 발행 로그에는 이 칸이 없고
+ * `status: "PUBLISHED"` 가 있다 — 나중에 로그를 읽을 때 둘을 섞지 않기 위해
+ * **서로 다른 칸**으로 갈라 둔다. 감사 로그의 actionType은 고정 열거형이라
+ * (audit-logs.ts) 새 값을 만들 수 없어, 구별은 newValue 안에서 짓는다.
+ */
+export const WORKFLOW_APPLY_AUDIT_ACTION = "APPLY_CURRENT_VERSION_TO_IN_FLIGHT_CASES";
+
+/**
+ * 워크플로를 고치지 않고, 옛 판에 남아 있는 진행 중인 접수 건만 **지금 판**으로
+ * 옮긴다(2026-09-30 사용자 요청 — "편집으로 인한 배포 이외에도 적용할 수 있도록").
+ *
+ * 발행(publishWorkflowDraft)이 하는 이관과 **같은 함수**를 부른다. 그래야
+ * "발행할 때만 옮겨진다"는 제약만 풀리고 옮기는 규칙은 한 벌로 남는다.
+ *
+ * 권한은 발행과 같은 workflows.publish MANAGE다 — 수십 건의 접수 건이 한 번에
+ * 움직이는 일이라 워크플로를 바꾸는 것과 같은 무게로 다룬다.
+ *
+ * 지금 판을 FOR UPDATE로 잠그는 이유: 잠그지 않으면 고른 뒤 옮기기 전까지의
+ * 틈에 다른 발행이 끼어들어 그 판을 ARCHIVED로 내릴 수 있고, 그러면 이미
+ * 보관된 판으로 건을 밀어 넣게 된다. 반대로 그 발행이 먼저 커밋되면 이 조회는
+ * (READ COMMITTED에서) 새 current를 보지 못하고 아무 행도 잡지 못한다 —
+ * 그때는 옮기지 않고 NO_PUBLISHED_VERSION으로 거절한다. 엉뚱한 판으로 옮기느니
+ * 한 번 더 누르게 하는 편이 안전하다.
+ */
+export async function applyCurrentWorkflowVersionToCases(params: {
+  templateCode: string;
+  actorUserId: string;
+}): Promise<
+  WorkflowDraftResult<{
+    versionId: string;
+    versionNumber: number;
+    /** 지금 판으로 옮긴 진행 중 접수 건 수. */
+    migratedCaseCount: number;
+    /** 현재 단계의 key가 지금 판에 없어 옛 판에 그대로 둔 접수 건 수. */
+    strandedCaseCount: number;
+  }>
+> {
+  const actor = await resolveActor(params.actorUserId);
+  if (!actor || actor.approvalStatus !== "APPROVED" || !(await hasPermission(actor, "workflows.publish", "MANAGE"))) {
+    return { ok: false, code: "FORBIDDEN", message: "워크플로를 발행할 권한이 없습니다." };
+  }
+
+  return db.transaction(async (tx) => {
+    const [template] = await tx
+      .select({ id: workflowTemplates.id, code: workflowTemplates.code })
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.code, params.templateCode as WorkflowType));
+    if (!template) return { ok: false as const, code: "NOT_FOUND" as const, message: "워크플로를 찾을 수 없습니다." };
+
+    const [current] = await tx
+      .select({ id: workflowVersions.id, versionNumber: workflowVersions.versionNumber })
+      .from(workflowVersions)
+      .where(
+        and(
+          eq(workflowVersions.workflowTemplateId, template.id),
+          eq(workflowVersions.status, "PUBLISHED"),
+          eq(workflowVersions.isCurrent, true)
+        )
+      )
+      .for("update");
+    if (!current) {
+      return {
+        ok: false as const,
+        code: "NO_PUBLISHED_VERSION" as const,
+        message: "적용할 현재 발행 버전이 없습니다.",
+      };
+    }
+
+    const { migratedCaseCount, strandedCaseCount } = await migrateInFlightCasesToVersion(tx, {
+      templateId: template.id,
+      newVersionId: current.id,
+    });
+
+    await insertAuditLog(tx, {
+      actorUserId: actor.id,
+      actionType: "UPDATE",
+      targetEntity: "workflow_versions",
+      targetRecordId: current.id,
+      previousValue: null,
+      newValue: {
+        action: WORKFLOW_APPLY_AUDIT_ACTION,
+        templateCode: template.code,
+        versionNumber: current.versionNumber,
+        // 건별 이력을 남기지 않기로 한 대신, 이 한 줄이 "그 적용이 몇 건을
+        // 움직였는가"에 답하는 유일한 기록이다.
+        migratedCaseCount,
+        strandedCaseCount,
+      },
+    });
+
+    return {
+      ok: true as const,
+      versionId: current.id,
+      versionNumber: current.versionNumber,
       migratedCaseCount,
       strandedCaseCount,
     };

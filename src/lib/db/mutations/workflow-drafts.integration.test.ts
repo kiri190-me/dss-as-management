@@ -2,13 +2,14 @@ import "../../../../scripts/load-env";
 
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { and, desc, eq, inArray, like } from "drizzle-orm";
+import { and, count, desc, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   auditLogs,
   customers,
   products,
   repairCases,
+  statusChangeHistories,
   users,
   workflowSteps,
   workflowTemplates,
@@ -16,11 +17,14 @@ import {
   workflowVersions,
 } from "../schema";
 import {
+  WORKFLOW_APPLY_AUDIT_ACTION,
+  applyCurrentWorkflowVersionToCases,
   createWorkflowDraft,
   discardWorkflowDraft,
   findWorkflowDraft,
   publishWorkflowDraft,
 } from "./workflow-drafts";
+import { getWorkflowTemplateDetail } from "../queries/workflow-templates";
 
 /**
  * 발행은 이 프로젝트에서 가장 위험한 쓰기다 — 잘못 나가면 그 워크플로의 접수
@@ -455,5 +459,336 @@ describe("발행 시 진행 중인 접수 건 이관", () => {
     assert.equal(recorded.status, "PUBLISHED", "발행 로그를 집은 것이 맞는지 확인한다");
     assert.equal(recorded.migratedCaseCount, publishResult.migratedCaseCount);
     assert.equal(recorded.strandedCaseCount, publishResult.strandedCaseCount);
+  });
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 발행 없이 「기존 건을 현재 버전으로 적용」 (2026-09-30)
+ * ────────────────────────────────────────────────────────────────────────
+ * 앞 묶음이 고정한 이관 규칙을 **발행이 아닌 경로**로 다시 밟는다. 조건은 한
+ * 곳(planInFlightCaseMigration)에만 있으므로, 여기서 확인하는 것은 "그 한 곳을
+ * 정말로 지나는가"다.
+ *
+ * 🔴 가장 중요한 시험은 **미리 보기 수 = 실제로 옮긴 수**다. 단추에 적히는 수
+ * (화면이 getWorkflowTemplateDetail 로 받는 값)와 mutation 이 실제로 옮긴 수가
+ * 다르면 두 곳이 조건을 따로 갖고 있다는 뜻이고, 그 증상은 "27건이라 써 놓고
+ * 25건만 옮겼다"라서 오류 없이 조용히 틀린다.
+ *
+ * 무대는 판 셋이다:
+ *   · **지금 판**   — 앞 묶음이 발행해 둔 current.
+ *   · **옛 판**     — 지금 판을 복제해 만든 뒤 보관으로 내린 것. 여기에만 있는
+ *                     단계를 하나 끼워 넣어 "갈 곳 없는 건"을 만든다.
+ *   · **건 전용 판** — 단계 구성이 지금 판과 **똑같은** 복제본이다. 그래서 이 판에
+ *                     묶인 건이 움직이지 않는 이유는 오직 is_case_scoped 하나다 —
+ *                     그 조건이 빠지면 이 건이 따라 움직여 바로 잡힌다.
+ */
+
+const APPLY_INTAKE_PREFIX = "D9704";
+const APPLY_MODEL_PREFIX = "WFAPPLY-TEST-";
+/** 옛 판에만 있는 단계. 복제한 **뒤에** 끼워 넣어야 지금 판에 없다. */
+const APPLY_OLD_ONLY_STEP_KEY = "wfapply_test_only_step";
+
+describe("적용 — 발행하지 않고 지금 판으로 옮기기", () => {
+  let currentVersionId: string;
+  let currentVersionNumber: number;
+  let oldVersionId: string;
+  let caseScopedVersionId: string;
+
+  let oldIntakeStepId: string;
+  let oldShipmentStepId: string;
+  let oldOnlyStepId: string;
+  let caseScopedIntakeStepId: string;
+
+  let inFlightCaseId: string;
+  let shippedCaseId: string;
+  let deletedCaseId: string;
+  let strandedCaseId: string;
+  let caseScopedCaseId: string;
+
+  /** 적용 직전에 화면이 보게 될 수 — 단추에 적히는 값과 같은 길로 읽는다. */
+  let preview: { migratableCaseCount: number; strandedCaseCount: number } | null;
+  let forbiddenResult: Awaited<ReturnType<typeof applyCurrentWorkflowVersionToCases>>;
+  let caseAfterForbidden: { workflowVersionId: string; currentWorkflowStepId: string };
+  let applyResult: Awaited<ReturnType<typeof applyCurrentWorkflowVersionToCases>>;
+  let historyCountBefore: number;
+  let historyCountAfter: number;
+
+  async function makeCase(params: {
+    sequence: string;
+    versionId: string;
+    stepId: string;
+    deleted?: boolean;
+  }): Promise<string> {
+    const [customer] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(eq(customers.isDeleted, false))
+      .limit(1);
+    assert.ok(customer, "삭제되지 않은 고객이 최소 1건 필요합니다");
+
+    const [product] = await db
+      .insert(products)
+      .values({ modelName: `${APPLY_MODEL_PREFIX}${params.sequence}` })
+      .returning({ id: products.id });
+
+    const [row] = await db
+      .insert(repairCases)
+      .values({
+        intakeNumber: `${APPLY_INTAKE_PREFIX}${params.sequence}`,
+        customerId: customer.id,
+        productId: product.id,
+        workflowVersionId: params.versionId,
+        currentWorkflowStepId: params.stepId,
+        receivedAt: "2097-04-10",
+        isDeleted: params.deleted ?? false,
+        deletedAt: params.deleted ? new Date() : null,
+      })
+      .returning({ id: repairCases.id });
+    return row.id;
+  }
+
+  async function fetchCase(id: string) {
+    const [row] = await db
+      .select({
+        workflowVersionId: repairCases.workflowVersionId,
+        currentWorkflowStepId: repairCases.currentWorkflowStepId,
+      })
+      .from(repairCases)
+      .where(eq(repairCases.id, id));
+    assert.ok(row, "접수 건이 있어야 한다");
+    return row;
+  }
+
+  async function stepIdByKey(versionId: string, key: string): Promise<string> {
+    const [step] = await db
+      .select({ id: workflowSteps.id })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.workflowVersionId, versionId), eq(workflowSteps.key, key)));
+    assert.ok(step, `그 버전에 ${key} 단계가 있어야 합니다`);
+    return step.id;
+  }
+
+  async function countStatusHistories(): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(statusChangeHistories);
+    return Number(row.n);
+  }
+
+  before(async () => {
+    const [current] = await db
+      .select({ id: workflowVersions.id, versionNumber: workflowVersions.versionNumber })
+      .from(workflowVersions)
+      .where(and(eq(workflowVersions.workflowTemplateId, templateId), eq(workflowVersions.isCurrent, true)));
+    assert.ok(current, "현재 발행 버전이 있어야 합니다");
+    currentVersionId = current.id;
+    currentVersionNumber = current.versionNumber;
+
+    // 옛 판 — 지금 판의 복제본을 보관 상태로 내린다. 단계 key 가 같으므로
+    // 여기 선 건은 "짝이 있는 건"이 된다.
+    const oldDraft = await makeDraft();
+    oldVersionId = oldDraft.versionId;
+    await db
+      .update(workflowVersions)
+      .set({ status: "ARCHIVED", isCurrent: false })
+      .where(eq(workflowVersions.id, oldVersionId));
+
+    // 건 전용 판 — 단계 구성은 지금 판과 똑같다. 움직이지 않을 이유가
+    // is_case_scoped 하나뿐이어야 시험이 그 조건을 겨눈다.
+    const scopedDraft = await makeDraft();
+    caseScopedVersionId = scopedDraft.versionId;
+    await db
+      .update(workflowVersions)
+      .set({ status: "PUBLISHED", isCurrent: false, isCaseScoped: true, publishedAt: new Date() })
+      .where(eq(workflowVersions.id, caseScopedVersionId));
+
+    // 복제가 모두 끝난 뒤에 끼워 넣는다 — 순서를 바꾸면 지금 판에도 생긴다.
+    const [oldOnly] = await db
+      .insert(workflowSteps)
+      .values({
+        workflowVersionId: oldVersionId,
+        stepOrder: 9902,
+        key: APPLY_OLD_ONLY_STEP_KEY,
+        label: "적용 시험 전용 단계",
+        repairStatus: "IN_REPAIR",
+        category: "TECHNICAL",
+      })
+      .returning({ id: workflowSteps.id });
+    oldOnlyStepId = oldOnly.id;
+
+    oldIntakeStepId = await stepIdByKey(oldVersionId, "intake_inspection");
+    oldShipmentStepId = await stepIdByKey(oldVersionId, "shipment_completed");
+    caseScopedIntakeStepId = await stepIdByKey(caseScopedVersionId, "intake_inspection");
+
+    inFlightCaseId = await makeCase({ sequence: "01", versionId: oldVersionId, stepId: oldIntakeStepId });
+    shippedCaseId = await makeCase({ sequence: "02", versionId: oldVersionId, stepId: oldShipmentStepId });
+    deletedCaseId = await makeCase({
+      sequence: "03",
+      versionId: oldVersionId,
+      stepId: oldIntakeStepId,
+      deleted: true,
+    });
+    strandedCaseId = await makeCase({ sequence: "04", versionId: oldVersionId, stepId: oldOnlyStepId });
+    caseScopedCaseId = await makeCase({
+      sequence: "05",
+      versionId: caseScopedVersionId,
+      stepId: caseScopedIntakeStepId,
+    });
+    await db
+      .update(workflowVersions)
+      .set({ repairCaseId: caseScopedCaseId })
+      .where(eq(workflowVersions.id, caseScopedVersionId));
+
+    // 권한 없는 사람이 먼저 눌러 본다 — 거절이 **쓰기 전에** 일어나는지를
+    // 성공 적용보다 앞에서 봐야 "그 건이 그대로인가"를 물을 수 있다.
+    forbiddenResult = await applyCurrentWorkflowVersionToCases({
+      templateCode: TEMPLATE_CODE,
+      actorUserId: salesId,
+    });
+    caseAfterForbidden = await fetchCase(inFlightCaseId);
+
+    // 🔴 화면이 단추에 적을 수를 **실제 적용 직전에** 읽는다.
+    const detail = await getWorkflowTemplateDetail(TEMPLATE_CODE);
+    assert.ok(detail, "워크플로 상세를 읽을 수 있어야 한다");
+    preview = detail.inFlightCases;
+
+    historyCountBefore = await countStatusHistories();
+    applyResult = await applyCurrentWorkflowVersionToCases({
+      templateCode: TEMPLATE_CODE,
+      actorUserId: adminId,
+    });
+    historyCountAfter = await countStatusHistories();
+  });
+
+  after(async () => {
+    await db.delete(repairCases).where(like(repairCases.intakeNumber, `${APPLY_INTAKE_PREFIX}%`));
+    await db.delete(products).where(like(products.modelName, `${APPLY_MODEL_PREFIX}%`));
+    if (oldOnlyStepId) await db.delete(workflowSteps).where(eq(workflowSteps.id, oldOnlyStepId));
+  });
+
+  test("🔴 미리 보기에 적힌 수가 실제로 옮긴 수와 같다", () => {
+    assert.ok(preview, "현재 발행 버전이 있으므로 미리 보기 수가 있어야 한다");
+    assert.equal(applyResult.ok, true, JSON.stringify(applyResult));
+    if (!applyResult.ok || !preview) return;
+
+    // 이 파일에서 가장 중요한 두 줄이다 — 세는 조건과 옮기는 조건이 갈라지면
+    // 여기서 잡힌다.
+    assert.equal(
+      preview.migratableCaseCount,
+      applyResult.migratedCaseCount,
+      "단추에 적은 수와 실제로 옮긴 수가 다르다 — 조건이 두 곳에 생겼다는 뜻이다"
+    );
+    assert.equal(
+      preview.strandedCaseCount,
+      applyResult.strandedCaseCount,
+      "남을 것으로 센 수와 실제로 남은 수가 다르다"
+    );
+    assert.ok(preview.migratableCaseCount >= 1, `옮길 건이 있어야 한다: ${preview.migratableCaseCount}`);
+    assert.ok(preview.strandedCaseCount >= 1, `남을 건이 있어야 한다: ${preview.strandedCaseCount}`);
+  });
+
+  test("진행 중인 건이 지금 판의 같은 단계로 옮겨진다", async () => {
+    const moved = await fetchCase(inFlightCaseId);
+    assert.equal(moved.workflowVersionId, currentVersionId, "묶인 버전이 지금 판이어야 한다");
+    assert.notEqual(moved.currentWorkflowStepId, oldIntakeStepId, "단계 행도 지금 판의 것으로 갈려야 한다");
+
+    const [newStep] = await db
+      .select({ key: workflowSteps.key, versionId: workflowSteps.workflowVersionId })
+      .from(workflowSteps)
+      .where(eq(workflowSteps.id, moved.currentWorkflowStepId));
+    assert.equal(newStep.versionId, currentVersionId);
+    assert.equal(newStep.key, "intake_inspection", "key 가 같은 단계로만 옮겨져야 한다");
+  });
+
+  test("출하 완료된 건·삭제된 건은 안 옮겨진다", async () => {
+    const shipped = await fetchCase(shippedCaseId);
+    assert.equal(shipped.workflowVersionId, oldVersionId, "끝난 건의 기록을 흔들면 안 된다");
+    assert.equal(shipped.currentWorkflowStepId, oldShipmentStepId);
+
+    const deleted = await fetchCase(deletedCaseId);
+    assert.equal(deleted.workflowVersionId, oldVersionId);
+    assert.equal(deleted.currentWorkflowStepId, oldIntakeStepId);
+  });
+
+  test("🔴 건 전용 판에 묶인 건은 안 옮겨진다 — 그 건만을 위해 넣은 단계가 사라진다", async () => {
+    const stayed = await fetchCase(caseScopedCaseId);
+    assert.equal(
+      stayed.workflowVersionId,
+      caseScopedVersionId,
+      "단계 구성이 지금 판과 같아도 건 전용 판은 끌어오지 않는다"
+    );
+    assert.equal(stayed.currentWorkflowStepId, caseScopedIntakeStepId);
+  });
+
+  test("key 가 지금 판에 없는 건은 남고, 적용 자체는 성공한다", async () => {
+    assert.equal(applyResult.ok, true, "단계 하나가 없다고 적용을 통째로 막으면 안 된다");
+    const stayed = await fetchCase(strandedCaseId);
+    assert.equal(stayed.workflowVersionId, oldVersionId);
+    assert.equal(stayed.currentWorkflowStepId, oldOnlyStepId);
+    if (applyResult.ok) {
+      assert.ok(applyResult.strandedCaseCount >= 1, `남은 건이 세어져야 한다: ${applyResult.strandedCaseCount}`);
+    }
+  });
+
+  test("단계 이동 이력은 한 줄도 남기지 않는다 — 단계가 바뀐 것이 아니다", () => {
+    assert.equal(historyCountAfter, historyCountBefore, "status_change_histories 에 적으면 거짓 이력이 된다");
+  });
+
+  test("권한이 없으면 거절되고, 건은 그대로 있다", () => {
+    assert.equal(forbiddenResult.ok, false, "영업 담당자는 적용할 수 없어야 한다");
+    if (!forbiddenResult.ok) assert.equal(forbiddenResult.code, "FORBIDDEN");
+    assert.equal(caseAfterForbidden.workflowVersionId, oldVersionId, "거절됐는데 건이 움직이면 안 된다");
+    assert.equal(caseAfterForbidden.currentWorkflowStepId, oldIntakeStepId);
+  });
+
+  test("🔴 감사 로그가 남고, 발행 로그와 구별된다", async () => {
+    assert.equal(applyResult.ok, true);
+    if (!applyResult.ok) return;
+
+    const logs = await db
+      .select({ newValue: auditLogs.newValue })
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "workflow_versions"), eq(auditLogs.targetRecordId, currentVersionId)))
+      .orderBy(desc(auditLogs.createdAt));
+
+    type LoggedValue = {
+      action?: string;
+      status?: string;
+      versionNumber?: number;
+      migratedCaseCount?: number;
+      strandedCaseCount?: number;
+    };
+    const values = logs.map((log) => (log.newValue ?? {}) as LoggedValue);
+
+    const applied = values.filter((value) => value.action === WORKFLOW_APPLY_AUDIT_ACTION);
+    assert.equal(applied.length, 1, "적용 한 번에 로그 한 줄이어야 한다");
+    assert.equal(applied[0].migratedCaseCount, applyResult.migratedCaseCount);
+    assert.equal(applied[0].strandedCaseCount, applyResult.strandedCaseCount);
+    assert.equal(applied[0].versionNumber, currentVersionNumber);
+    // 🔴 발행과 섞이지 않는다: 적용 로그에는 발행이 쓰는 status 칸이 없고,
+    // 발행 로그에는 적용이 쓰는 action 칸이 없다. 나중에 로그를 읽는 사람이
+    // "이건 발행이었나 적용이었나"를 한 칸으로 가를 수 있어야 한다.
+    assert.equal(applied[0].status, undefined, "적용 로그가 발행과 같은 칸을 쓰면 구별할 수 없다");
+    for (const value of values.filter((v) => v.status === "PUBLISHED")) {
+      assert.equal(value.action, undefined, "발행 로그에 적용 표시가 붙으면 안 된다");
+    }
+  });
+
+  test("지금 판이 없으면 거절된다", async () => {
+    // 현재 발행본을 잠깐 내렸다가 반드시 되돌린다 — 이 파일의 다른 시험도,
+    // 이 DB 의 다른 통합 시험도 current 가 하나 있다는 것을 전제한다.
+    await db.update(workflowVersions).set({ isCurrent: false }).where(eq(workflowVersions.id, currentVersionId));
+    try {
+      const result = await applyCurrentWorkflowVersionToCases({
+        templateCode: TEMPLATE_CODE,
+        actorUserId: adminId,
+      });
+      assert.equal(result.ok, false, "옮길 목적지가 없으면 적용해서는 안 된다");
+      if (!result.ok) assert.equal(result.code, "NO_PUBLISHED_VERSION");
+    } finally {
+      await db
+        .update(workflowVersions)
+        .set({ status: "PUBLISHED", isCurrent: true })
+        .where(eq(workflowVersions.id, currentVersionId));
+    }
   });
 });

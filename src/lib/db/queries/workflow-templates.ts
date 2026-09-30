@@ -10,6 +10,7 @@ import {
   workflowTransitions,
   workflowVersions,
 } from "../schema";
+import { countInFlightCasesForVersion } from "../mutations/workflow-drafts";
 import { WORKFLOW_TYPE_CODES, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 import {
@@ -130,6 +131,18 @@ export type WorkflowTemplateDetail = {
    * — 빠진 번호가 사라진 것이 아님을 알리기 위해 수만 함께 넘긴다.
    */
   caseScopedVersionCount: number;
+  /**
+   * "기존 건을 현재 버전으로 적용" 단추가 누르기 전에 보여 줄 규모.
+   *
+   * 🔴 이 수는 화면에 적을 안내문이 아니라 **실제로 옮겨질 건수**다 — 세는 일과
+   * 옮기는 일이 같은 함수(mutations/workflow-drafts.ts의
+   * planInFlightCaseMigration)를 지나기 때문이다. 조건을 이 파일에 베껴 적으면
+   * 안 된다.
+   *
+   * 현재 발행 버전이 없으면 **null**(해당 없음)이다 — 옮길 목적지가 없는 상태를
+   * 0건과 같은 모양으로 보여 주면 "옮길 것이 없다"로 잘못 읽힌다.
+   */
+  inFlightCases: { migratableCaseCount: number; strandedCaseCount: number } | null;
 };
 
 export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowTemplateDetail | null> {
@@ -165,10 +178,19 @@ export async function getWorkflowTemplateDetail(code: string): Promise<WorkflowT
     .from(workflowVersions)
     .where(and(eq(workflowVersions.workflowTemplateId, template.id), eq(workflowVersions.isCaseScoped, true)));
 
+  // 목록은 이미 건 전용 변주를 걸러 냈고, 그 변주는 current가 되지 않는다
+  // (case-workflow-steps.ts가 isCurrent: false로 만든다) — 화면이 "현재 버전"을
+  // 고르는 방식과 같은 줄을 쓴다.
+  const current = versions.find((v) => v.isCurrent && v.status === "PUBLISHED") ?? null;
+  const inFlightCases = current
+    ? await countInFlightCasesForVersion({ templateId: template.id, targetVersionId: current.id })
+    : null;
+
   return {
     code: template.code as WorkflowType,
     name: template.name,
     caseScopedVersionCount: Number(caseScoped?.n ?? 0),
+    inFlightCases,
     versions: versions.map((v) => ({
       id: v.id,
       versionNumber: v.versionNumber,

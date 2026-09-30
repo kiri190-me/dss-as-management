@@ -84,14 +84,27 @@ export function workflowPublishCaseSentences(counts: {
 }
 
 /**
+ * 접수 건을 옮기는 조작 둘. 둘 다 같은 두 수를 만들고 같은 문장을 쓰므로 주소도
+ * 이 파일 하나가 만든다 — 다른 것은 `?done=` 값과 도착 화면의 고정 문구뿐이다.
+ *
+ *   · `published` — 초안을 발행했다(워크플로 구성이 바뀌었다).
+ *   · `applied`   — 구성은 그대로 두고, 옛 판에 남아 있던 건만 지금 판으로 옮겼다.
+ */
+export type WorkflowCaseMoveDone = "published" | "applied";
+
+/**
  * 도착 화면의 주소. 말할 것이 없는 수는 아예 싣지 않는다 — `?moved=0` 은 주소만
  * 길게 만들고 도착 화면에서 어차피 빠진다.
+ *
+ * `done` 을 생략하면 발행이다 — 이 함수가 먼저 발행 하나만을 위해 생겼고, 그때
+ * 쓰던 자리(WorkflowDraftEditor)를 고치지 않기 위해서다.
  */
 export function workflowPublishDoneHref(
   templateCode: string,
-  counts: { migrated: number | null | undefined; stranded: number | null | undefined }
+  counts: { migrated: number | null | undefined; stranded: number | null | undefined },
+  done: WorkflowCaseMoveDone = "published"
 ): string {
-  const query = new URLSearchParams({ done: "published" });
+  const query = new URLSearchParams({ done });
   if (isCountToTell(counts.migrated)) query.set(MOVED_PARAM, String(counts.migrated));
   if (isCountToTell(counts.stranded)) query.set(STRANDED_PARAM, String(counts.stranded));
   return `/workflows/${templateCode}?${query.toString()}`;

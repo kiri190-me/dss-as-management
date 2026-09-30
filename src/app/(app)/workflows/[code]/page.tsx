@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/workflow-template-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { findWorkflowDraft } from "@/lib/db/mutations/workflow-drafts";
+import WorkflowApplyCurrentVersion from "@/components/workflows/WorkflowApplyCurrentVersion";
 import WorkflowDraftEntry from "@/components/workflows/WorkflowDraftEntry";
 import { getWorkflowTemplateDetail } from "@/lib/db/queries/workflow-templates";
 import { loadWorkflowRules } from "@/lib/db/queries/workflow-rules";
@@ -55,11 +56,19 @@ const ACTION_LABELS: Record<string, string> = {
  * 어디에도 안 보이면 사람이 모른 채 지나간다. 주소에서 온 값은 믿지 않고
  * domain/workflow-publish-counts-param.ts 가 걸러 준다 — 이상하면 그 문장만
  * 빠지고 고정 문구는 그대로 나온다(오류 화면을 띄울 일이 아니다).
+ *
+ * `applied` 는 이 화면의 "기존 건을 현재 버전으로 적용" 단추가 돌아오는 자리다.
+ * 구성을 고치지 않고 건만 옮기므로 고정 문구가 다르고, 뒤에 붙는 건수 문장은
+ * 발행과 **같은 것**을 쓴다 — 같은 두 수이기 때문이다.
  */
 const DONE_MESSAGES: Record<string, string> = {
   published: "초안을 발행했습니다. 아래 버전 이력에서 새 버전이 '현재'인지 확인하세요.",
   discarded: "초안을 폐기했습니다. 구성은 발행본 그대로입니다.",
+  applied: "기존 접수 건을 현재 버전으로 적용했습니다.",
 };
+
+/** 접수 건을 옮기는 조작들 — 이것들만 뒤에 건수 문장이 붙는다(폐기는 아니다). */
+const DONE_WITH_CASE_COUNTS = new Set(["published", "applied"]);
 
 export default async function WorkflowDetailPage({
   params,
@@ -75,8 +84,8 @@ export default async function WorkflowDetailPage({
     done && DONE_MESSAGES[done]
       ? [
           DONE_MESSAGES[done],
-          // 건수는 발행에만 붙는다 — 폐기는 접수 건을 옮기지 않는다.
-          ...(done === "published" ? workflowPublishCaseSentencesFromParams(search) : []),
+          // 건수는 건을 옮긴 조작에만 붙는다 — 폐기는 접수 건을 옮기지 않는다.
+          ...(DONE_WITH_CASE_COUNTS.has(done) ? workflowPublishCaseSentencesFromParams(search) : []),
         ].join(" ")
       : null;
 
@@ -88,6 +97,10 @@ export default async function WorkflowDetailPage({
   // 초안은 편집 권한이 있는 사람에게만 읽어 온다 — 아래에서 두 번 쓰이므로
   // 한 번만 묻는다.
   const mayEditDraft = await hasPermission(actingUser, "workflows.editDraft", "WRITE");
+  // "기존 건을 현재 버전으로 적용"은 발행과 같은 무게다 — 수십 건의 접수 건이
+  // 한 번에 움직인다. 🔴 화면에서 감추는 것만으로는 막은 것이 아니므로,
+  // mutation(applyCurrentWorkflowVersionToCases)이 같은 권한을 다시 판정한다.
+  const mayPublish = await hasPermission(actingUser, "workflows.publish", "MANAGE");
 
   const detail = await getWorkflowTemplateDetail(code);
   if (!detail) notFound();
@@ -172,6 +185,19 @@ export default async function WorkflowDetailPage({
             </tbody>
           </table>
         </div>
+        {/*
+          위 표의 "접수 건" 칸이 옛 버전에 남아 있는 건을 이미 보여 준다 — 그것을
+          지금 판으로 끌어오는 단추를 바로 아래에 둔다. 권한이 없거나 현재 발행
+          버전이 없으면 아예 그리지 않는다(적용할 목적지가 없다).
+        */}
+        {mayPublish && currentVersion && detail.inFlightCases && (
+          <WorkflowApplyCurrentVersion
+            templateCode={detail.code}
+            versionNumber={currentVersion.versionNumber}
+            migratableCaseCount={detail.inFlightCases.migratableCaseCount}
+            strandedCaseCount={detail.inFlightCases.strandedCaseCount}
+          />
+        )}
         {detail.caseScopedVersionCount > 0 && (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             이 워크플로를 바탕으로 만든 <strong>접수 건 전용 변주</strong>가 {detail.caseScopedVersionCount}건 있습니다.
