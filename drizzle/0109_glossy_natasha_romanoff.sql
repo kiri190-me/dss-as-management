@@ -1,0 +1,1 @@
+ALTER TYPE "public"."attachment_category" ADD VALUE 'PASS_SLIP' BEFORE 'OTHER';

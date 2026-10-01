@@ -21,8 +21,10 @@
  * POWER_TEST · CHECKLIST)도 마찬가지다 — 앞의 둘은 접수 건에 아예 붙지 않고,
  * 점검표는 접수 건에도 붙지만 **데모 계층을 손대지 않는다**는 규칙이 그대로라
  * 데모에는 넣지 않았다(데모는 localStorage 뿐인 옛 화면이고, 실기 화면은
- * StoredAttachmentList 쪽이다). 그래서 attachment-category.test.ts 는 「데모 목록 =
- * 이 목록에서 그 여섯을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
+ * StoredAttachmentList 쪽이다). 2026-10-01 통문증(PASS_SLIP)도 같은 까닭으로
+ * 데모에 없다 — 수리 건 전용 분류이고, 데모 계층을 손대지 않는 규칙은 그대로다.
+ * 그래서 attachment-category.test.ts 는 「데모 목록 =
+ * 이 목록에서 그 일곱을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
  * 여전히 걸린다.
  *
  * ── 순수 파일이다 ─────────────────────────────────────────────────────────
@@ -88,6 +90,26 @@ export const ATTACHMENT_CATEGORY_CODES = [
   "PARAMETER",
   "POWER_TEST",
   "CHECKLIST",
+  // 통문증(2026-10-01 사용자) — 고객사 주성엔지니어링이 발행하는 반출·환입
+  // 서류이고, 장비와 함께 들어온다. 지금은 이 사진을 올릴 마땅한 분류가 없었다.
+  //
+  // 🔴 **고객사를 가리지 않는다.** 주성 통문증이 대표적일 뿐 다른 고객사도 통문증을
+  // 쓴다(2026-10-01 사용자: "다른 고객사도 통문증을 사용하기는 해"). 그러니 이
+  // 분류는 **모든 수리 건에 열려 있는 것이 맞다** — 「주성 건에서만 보이게」 좁히지
+  // 말 것. 주성에만 해당하는 것은 통문번호를 OCR 로 읽어 고객 안내 표에 채우는
+  // 일이고, 그것은 분류가 아니라 **다음 조각**의 일이다.
+  //
+  // 🔴 **수리 건 전용이다**(아래 REPAIR_CASE_ONLY_CATEGORIES) — 들어온 그 건의
+  // 서류라 모델마다 한 벌 두는 자료가 아니고(제품 모델 ✕), 견적서에 붙는 두 칸과도
+  // 관계가 없다(견적서 ✕).
+  //
+  // 영문 코드는 이 저장소가 이미 쓰는 말을 그대로 가져왔다 — 통문번호를
+  // customer-portal-forms.ts 가 `passNumber`(「통문번호」)로 적는다. 새 말을
+  // 만들지 않는다(바로 위 POWER_TEST 와 같은 까닭이다).
+  //
+  // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
+  // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
+  "PASS_SLIP",
   "OTHER",
 ] as const;
 
@@ -117,6 +139,7 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   PARAMETER: "파라미터",
   POWER_TEST: "통전검사",
   CHECKLIST: "점검표",
+  PASS_SLIP: "통문증",
   OTHER: "기타",
 };
 
@@ -199,6 +222,40 @@ export function isProductModelOnlyCategory(category: AttachmentCategory): catego
   return (PRODUCT_MODEL_ONLY_CATEGORIES as readonly AttachmentCategory[]).includes(category);
 }
 
+/**
+ * 접수 건(수리 건)에만 붙는 분류 (2026-10-01) — 지금은 통문증 하나다.
+ *
+ * ── 왜 이 자리를 새로 만들었나 ────────────────────────────────────────────
+ * 여기에는 「제품 모델 전용」(바로 위 PRODUCT_MODEL_ONLY_CATEGORIES)과 「견적서
+ * 전용」(QUOTE_ATTACHMENT_SLOT_CATEGORIES) 두 자리만 있었다. 그래서 **접수 건
+ * 하나에만 붙는 분류를 적을 곳이 없었다** — 그대로 두면 통문증이 아래
+ * isAttachmentCategoryAllowedForOwner 의 마지막 줄("접수 건 · 제품 모델")에 걸려
+ * 제품 모델 파일 화면에도 함께 나온다. 앞의 두 자리와 **대칭이 되게** 셋째 자리를
+ * 만든 것이고, 주인을 가리는 규칙은 여전히 이 파일 한 자리에 모여 있다.
+ *
+ * 통문증이 접수 건 전용인 까닭: 고객사 주성엔지니어링이 발행하는 반출·환입
+ * 서류이고 **그 장비와 함께 그 건으로 들어온다.** 모델마다 한 벌 두는 기본 자료가
+ * 아니고(제품 모델 ✕), 견적서에 붙는 결재 PDF · 수기 엑셀 두 칸과도 무관하다
+ * (견적서 ✕).
+ *
+ * 🔴 **「접수 건 전용」은 주인을 가린다는 뜻이지 고객사를 가린다는 뜻이 아니다.**
+ * 주성 통문증이 대표적일 뿐 다른 고객사도 통문증을 쓴다(2026-10-01 사용자). 이
+ * 목록에 고객사 조건을 들이지 말 것 — 이 저장소에는 고객사별 양식을 이름으로
+ * 가르는 구조가 따로 있어서(customer-portal-forms.ts) 「주성 건에서만 이 분류를
+ * 보이게」가 자연스러운 오해로 들어오기 쉽다. 주성에만 해당하는 것은 통문번호를
+ * 읽어 고객 안내 표에 채우는 일이고, 그것은 분류가 아니라 **다음 조각**의 일이다.
+ *
+ * 목록으로 둔 것은 하나뿐이어서가 아니다 — 다음에 접수 건 전용 분류가 더 생기면
+ * 여기 한 줄을 더하는 일이 되고, 함수를 또 고치지 않는다.
+ */
+export const REPAIR_CASE_ONLY_CATEGORIES = ["PASS_SLIP"] as const satisfies readonly AttachmentCategory[];
+
+export type RepairCaseOnlyCategory = (typeof REPAIR_CASE_ONLY_CATEGORIES)[number];
+
+export function isRepairCaseOnlyCategory(category: AttachmentCategory): category is RepairCaseOnlyCategory {
+  return (REPAIR_CASE_ONLY_CATEGORIES as readonly AttachmentCategory[]).includes(category);
+}
+
 /** 이 분류를 이 주인의 첨부에 쓸 수 있는가. */
 export function isAttachmentCategoryAllowedForOwner(
   category: AttachmentCategory,
@@ -207,6 +264,8 @@ export function isAttachmentCategoryAllowedForOwner(
   if (ownerKind === "QUOTE") return isQuoteAttachmentSlotCategory(category);
   // 모델 전용 셋은 제품 모델에만 — 접수 건에는 나오지도, 받아지지도 않는다.
   if (isProductModelOnlyCategory(category)) return ownerKind === "PRODUCT_MODEL";
+  // 접수 건 전용(통문증)은 그 반대다 — 제품 모델 파일 화면에는 나오지 않는다.
+  if (isRepairCaseOnlyCategory(category)) return ownerKind === "REPAIR_CASE";
   // 접수 건 · 제품 모델 — 주인 없는 분류(스크린샷)와 견적서 전용 두 칸만 빠진다.
   return !OWNERLESS_ATTACHMENT_CATEGORIES.includes(category) && !isQuoteAttachmentSlotCategory(category);
 }

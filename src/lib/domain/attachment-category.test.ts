@@ -9,6 +9,7 @@ import {
   PRODUCT_MODEL_ONLY_CATEGORIES,
   QUOTE_ATTACHMENT_FILES_PER_SLOT,
   QUOTE_ATTACHMENT_SLOT_CATEGORIES,
+  REPAIR_CASE_ONLY_CATEGORIES,
   attachmentCategoriesForOwner,
   attachmentCategoryLabels,
   isAttachmentCategory,
@@ -16,6 +17,7 @@ import {
   isMalwareScanStatus,
   isProductModelOnlyCategory,
   isQuoteAttachmentSlotCategory,
+  isRepairCaseOnlyCategory,
   liveQuoteAttachmentInSlot,
   malwareScanStatusLabels,
   quoteAttachmentIdsDisplacedBy,
@@ -51,10 +53,11 @@ import { attachmentCategoryEnum, malwareScanStatusEnum } from "@/lib/db/schema";
 // ─────────────────────────────────────────── 데모 화면 목록과 어긋나지 않는가
 
 // SCREENSHOT(개선 요청 스크린샷, 2026-09-13)과 견적서 두 칸 SIGNED_QUOTE_PDF ·
-// QUOTE_EXCEL(2026-09-15), 그리고 제품 모델 전용 셋 PARAMETER · POWER_TEST ·
-// CHECKLIST(2026-09-30)는 정본과 DB enum 에만 있고 데모에는 없다 — 데모 계층은
+// QUOTE_EXCEL(2026-09-15), 제품 모델 전용 셋 PARAMETER · POWER_TEST ·
+// CHECKLIST(2026-09-30), 그리고 수리 건 전용 PASS_SLIP(통문증, 2026-10-01)은
+// 정본과 DB enum 에만 있고 데모에는 없다 — 데모 계층은
 // 손대지 않는다(attachment-category.ts 헤더의 '데모 파일과의 관계'). 그래서 아래 두
-// 대조는 「정본에서 그 여섯을 뺀 것 = 데모」를 본다. 빼는 것은 그 여섯 값뿐이라, 다른
+// 대조는 「정본에서 그 일곱을 뺀 것 = 데모」를 본다. 빼는 것은 그 일곱 값뿐이라, 다른
 // 한 줄이라도 어긋나면 여전히 걸린다.
 const DEMO_ABSENT_CATEGORIES: readonly string[] = [
   "SCREENSHOT",
@@ -63,6 +66,7 @@ const DEMO_ABSENT_CATEGORIES: readonly string[] = [
   "PARAMETER",
   "POWER_TEST",
   "CHECKLIST",
+  "PASS_SLIP",
 ];
 
 test("분류 코드가 데모 파일 목록과 순서까지 정확히 같다 — 주인 전용 분류 셋만 빼고", () => {
@@ -112,7 +116,7 @@ test("검사 상태 기본값은 DB enum에 실재하는 값이다", () => {
 
 // ───────────────────────────────────────────────────── 목록 자체의 무결성
 
-test("분류 코드는 21종이고 중복이 없다", () => {
+test("분류 코드는 22종이고 중복이 없다", () => {
   // 개수를 적어 두는 이유는 **DB enum과 함께 움직이기 때문**이다. 코드에만
   // 더하고 마이그레이션을 잊으면 화면에서는 고를 수 있는데 저장할 때 서버가
   // 거절한다 — 그 어긋남이 이 줄에서 먼저 걸린다.
@@ -122,8 +126,9 @@ test("분류 코드는 21종이고 중복이 없다", () => {
   // 15 → 16: 스크린샷을 더했다(마이그레이션 0097 — 개선 요청 글의 화면 사진).
   // 16 → 18: 결재 견적서 PDF · 수기 견적서 엑셀을 더했다(마이그레이션 0099 — 견적서 첨부).
   // 18 → 21: 파라미터 · 통전검사 · 점검표를 더했다(2026-09-30 — 제품 모델 전용 기본 자료).
-  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 21);
-  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 21);
+  // 21 → 22: 통문증을 더했다(마이그레이션 0109 — 주성 통문증 사진).
+  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 22);
+  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 22);
 });
 
 test("스크린샷은 회로도 뒤에 있고 이름표는 「스크린샷」이다", () => {
@@ -163,7 +168,9 @@ test("모델 기본 자료 셋은 수기 견적서 엑셀 뒤·기타 앞에 파
   assert.equal(ATTACHMENT_CATEGORY_CODES[index - 1], "QUOTE_EXCEL");
   assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "POWER_TEST");
   assert.equal(ATTACHMENT_CATEGORY_CODES[index + 2], "CHECKLIST");
-  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 3], "OTHER");
+  // 점검표 바로 뒤는 2026-10-01 부터 기타가 아니라 통문증이다(아래 시험). 기타는
+  // 여전히 맨 끝이고, 그것은 '기타는 언제나 목록의 맨 끝이다' 가 따로 못박는다.
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 3], "PASS_SLIP");
   // 자리는 셋이 나란하다 — 주인이 갈리는 것과 목록의 차례는 다른 이야기다.
   for (const code of ["PARAMETER", "POWER_TEST", "CHECKLIST"] as const) {
     assert.ok(attachmentCategoryEnum.enumValues.includes(code), `DB enum 에 ${code} 가 없다`);
@@ -193,12 +200,14 @@ test("🔴 파라미터 · 통전검사는 제품 모델에만 붙는다 — 수
     assert.equal(repairCaseChoices.includes(code), false, `수리 건 선택지에 ${code} 가 있다`);
     assert.equal(productModelChoices.includes(code), true, `모델 선택지에 ${code} 가 없다`);
   }
-  // 다른 분류는 하나도 안 움직였다 — 두 목록의 차이가 정확히 이 **둘**뿐이어야 한다.
+  // 다른 분류는 하나도 안 움직였다 — 모델에만 있는 것이 정확히 이 **둘**뿐이어야 한다.
   assert.deepEqual(
     productModelChoices.filter((code) => !repairCaseChoices.includes(code)),
     ["PARAMETER", "POWER_TEST"]
   );
-  assert.deepEqual(repairCaseChoices.filter((code) => !productModelChoices.includes(code)), []);
+  // 반대 방향은 2026-10-01 에 비지 않게 됐다 — 수리 건 전용 통문증이 생겼다(아래 시험).
+  // 빈 배열로 두면 통문증이 모델 화면에 새어 나가도 여기서 안 걸린다.
+  assert.deepEqual(repairCaseChoices.filter((code) => !productModelChoices.includes(code)), ["PASS_SLIP"]);
 });
 
 test("🔴 점검표는 두 주인 모두에 붙는다 — 모델은 빈 양식, 수리 건은 채워 인쇄한 기록", () => {
@@ -217,11 +226,57 @@ test("🔴 점검표는 두 주인 모두에 붙는다 — 모델은 빈 양식,
   // 두 화면의 선택지에 **모두** 나온다 — 화면은 이 목록을 그대로 map 한다.
   assert.ok(attachmentCategoriesForOwner("REPAIR_CASE").includes("CHECKLIST"), "수리 건 선택지에 점검표가 없다");
   assert.ok(attachmentCategoriesForOwner("PRODUCT_MODEL").includes("CHECKLIST"), "모델 선택지에 점검표가 없다");
-  // 두 목록에서 자리(차례)도 같다 — 기타 바로 앞이다.
-  for (const owner of ["REPAIR_CASE", "PRODUCT_MODEL"] as const) {
-    const choices = attachmentCategoriesForOwner(owner);
-    assert.equal(choices[choices.indexOf("CHECKLIST") + 1], "OTHER", owner);
-  }
+  // 두 목록에서 자리(차례)도 목록 맨 끝 쪽 그대로다. 2026-10-01 통문증(수리 건 전용)이
+  // 점검표와 기타 사이에 들어오면서 **수리 건에서만** 점검표 바로 뒤가 기타가 아니게
+  // 됐다 — 모델 쪽은 통문증이 걸러지므로 점검표 다음이 그대로 기타다. 자리를 느슨하게
+  // 보지 않고 주인마다 끝 꼬리를 통째로 못박는다.
+  assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE").slice(-3), ["CHECKLIST", "PASS_SLIP", "OTHER"]);
+  assert.deepEqual(attachmentCategoriesForOwner("PRODUCT_MODEL").slice(-2), ["CHECKLIST", "OTHER"]);
+});
+
+// ─────────────────────── 통문증 (2026-10-01)
+
+test("통문증은 점검표 뒤·기타 앞에 있고 이름표는 「통문증」이다", () => {
+  // 새 분류를 끝에 붙이지 않는다(아래 '기타는 언제나 목록의 맨 끝이다'). 0109 가
+  // `ADD VALUE ... BEFORE 'OTHER'` 로 더한다 — DB enum 과 같은 차례인지는 위 enum
+  // 대조가 따로 본다. 화면의 고르는 차례가 이 배열 순서이므로 자리가 곧 사람이 보는
+  // 목록의 자리다.
+  assert.equal(attachmentCategoryLabels.PASS_SLIP, "통문증");
+  const index = ATTACHMENT_CATEGORY_CODES.indexOf("PASS_SLIP");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index - 1], "CHECKLIST");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "OTHER");
+  assert.ok(attachmentCategoryEnum.enumValues.includes("PASS_SLIP"));
+});
+
+test("🔴 통문증은 수리 건에만 붙는다 — 제품 모델 · 견적서에는 나오지 않는다", () => {
+  // 고객사 주성엔지니어링이 발행하는 반출·환입 서류이고 **그 장비와 함께 그 건으로**
+  // 들어온다(2026-10-01 사용자). 모델마다 한 벌 두는 기본 자료가 아니고, 견적서에 붙는
+  // 결재 PDF · 수기 엑셀 두 칸과도 무관하다. 화면의 선택지도 올리기 통로의 거절도
+  // createAttachmentRecord 의 마지막 방어선도 전부 이 함수 하나를 본다.
+  //
+  // 🔴 **여기서 가리는 것은 주인(수리 건)이지 고객사가 아니다.** 주성 통문증이
+  // 대표적일 뿐 다른 고객사도 통문증을 쓴다(2026-10-01 사용자) — 그래서 아래 단언은
+  // 고객사를 묻지 않고 **모든 수리 건**에 대해 참이어야 한다. 주성에만 해당하는 것은
+  // 통문번호를 읽어 고객 안내 표에 채우는 일이고, 그것은 다음 조각의 일이다.
+  //
+  // 🔴 이 자리(REPAIR_CASE_ONLY_CATEGORIES)는 통문증 때문에 새로 생겼다 — 그 전에는
+  // 「제품 모델 전용」과 「견적서 전용」만 있었다. 목록을 못박아 두면 다음 사람이 그 자리를
+  // 거두거나 통문증을 거기서 빼도 여기서 걸린다.
+  assert.deepEqual([...REPAIR_CASE_ONLY_CATEGORIES], ["PASS_SLIP"]);
+  assert.equal(isRepairCaseOnlyCategory("PASS_SLIP"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("PASS_SLIP", "REPAIR_CASE"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("PASS_SLIP", "PRODUCT_MODEL"), false, "통문증이 모델에 열렸다");
+  assert.equal(isAttachmentCategoryAllowedForOwner("PASS_SLIP", "QUOTE"), false, "통문증이 견적서에 열렸다");
+  // 다른 분류가 수리 건 전용으로 끌려 들어가지 않았다 — 두 전용 목록은 서로 겹치지 않는다.
+  assert.equal(isRepairCaseOnlyCategory("CHECKLIST"), false);
+  assert.equal(isRepairCaseOnlyCategory("OTHER"), false);
+  assert.equal(isProductModelOnlyCategory("PASS_SLIP"), false);
+  assert.equal(isQuoteAttachmentSlotCategory("PASS_SLIP"), false);
+
+  // 화면이 그대로 map 하는 목록에서도 갈린다 — 한쪽에만 있으면 화면과 서버가 갈라진다.
+  assert.ok(attachmentCategoriesForOwner("REPAIR_CASE").includes("PASS_SLIP"), "수리 건 선택지에 통문증이 없다");
+  assert.equal(attachmentCategoriesForOwner("PRODUCT_MODEL").includes("PASS_SLIP"), false);
+  assert.equal(attachmentCategoriesForOwner("QUOTE").includes("PASS_SLIP"), false);
 });
 
 test("「통전검사」 코드는 이 저장소가 이미 쓰는 말이다 — POWER_TEST", () => {
@@ -319,14 +374,17 @@ test("접수 건 · 제품 모델의 선택지는 정해진 것만 빠진 목록
   // 바뀌면 사람이 보는 고르는 차례가 바뀐다.
   //
   // 빼는 것은 주인 없는 스크린샷과 견적서 두 칸 — 그리고 접수 건에서는 모델 전용
-  // 셋이 더 빠진다(2026-09-30). 제품 모델 쪽에서 빠지는 것은 여전히 셋뿐이다.
+  // 둘이, 제품 모델에서는 수리 건 전용 통문증이 더 빠진다(2026-09-30 · 2026-10-01).
   const ownerless = ["SCREENSHOT", "SIGNED_QUOTE_PDF", "QUOTE_EXCEL"];
   // 🔴 **둘이다** — 점검표는 수리 건에도 붙으므로 여기 없다(2026-09-30 정정).
   const modelOnly = ["PARAMETER", "POWER_TEST"];
+  // 2026-10-01 — 반대쪽이 생겼다. 통문증은 수리 건에만 붙으므로 **모델 쪽에서** 빠진다.
+  const repairCaseOnly = ["PASS_SLIP"];
 
-  const productModelExpected = ATTACHMENT_CATEGORY_CODES.filter((code) => !ownerless.includes(code));
-  const repairCaseExpected = productModelExpected.filter((code) => !modelOnly.includes(code));
-  assert.equal(productModelExpected.length, ATTACHMENT_CATEGORY_CODES.length - 3);
+  const shared = ATTACHMENT_CATEGORY_CODES.filter((code) => !ownerless.includes(code));
+  const productModelExpected = shared.filter((code) => !repairCaseOnly.includes(code));
+  const repairCaseExpected = shared.filter((code) => !modelOnly.includes(code));
+  assert.equal(productModelExpected.length, ATTACHMENT_CATEGORY_CODES.length - 4);
   assert.equal(repairCaseExpected.length, ATTACHMENT_CATEGORY_CODES.length - 5);
   assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE"), repairCaseExpected);
   assert.deepEqual(attachmentCategoriesForOwner("PRODUCT_MODEL"), productModelExpected);
