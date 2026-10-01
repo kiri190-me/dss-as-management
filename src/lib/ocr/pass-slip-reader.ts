@@ -1,13 +1,16 @@
 /**
  * ============================================================================
- * 통문증에서 통문번호 읽기 — **브라우저 안에서만** 도는 한 벌
+ * 통문증에서 세 칸 읽기 — **브라우저 안에서만** 도는 한 벌
  * ============================================================================
- * 사진 한 장을 받아 통문번호를 돌려주기까지의 흐름을 여기서 엮는다.
+ * 사진 한 장을 받아 **통문번호 · PRV No. · Q코드** 를 돌려주기까지를 엮는다.
  *
  *   1. 첨부 통로에서 **원본** 사진을 받는다 (권한 검사는 그 통로가 한다)
- *   2. Web Worker 가 전처리한다 (pass-slip-worker.ts)
+ *   2. Web Worker 가 전처리한다 — 🔴 **사진을 펼치는 것은 한 번**이고 두 영역이
+ *      그 픽셀을 나눠 쓴다 (pass-slip-worker.ts)
  *   3. tesseract.js 가 글자를 읽는다 (제 워커에서 돈다)
- *   4. 글자에서 통문번호를 뽑고 날짜로 검산한다 (pass-slip-number.ts)
+ *      - 통문정보 띠 1패스(psm 6) → 통문번호 + 날짜 검산 (pass-slip-number.ts)
+ *      - 물품정보 표 3패스(psm 4) → 투표해서 PRV · Q코드 (pass-slip-goods.ts)
+ *   4. 한 장에 1패스 0.65초 + 3패스 1.23초 ≈ **1.9초** (2026-10-01 측정)
  *
  * ── 🔴 고객 자료가 이 PC 를 떠나지 않는다 ───────────────────────────────
  * 글자 인식기도 언어 데이터도 **우리 서버에서** 내려온다(`/ocr/…`). 클라우드
@@ -25,8 +28,22 @@
  * ============================================================================
  */
 
+import {
+  checkSerialAgainstDocument,
+  decidePrvNumber,
+  decideQCode,
+  parseGoodsPass,
+  type GoodsPassReading,
+  type PrvDecision,
+  type QCodeDecision,
+  type SerialCheck,
+} from "./pass-slip-goods";
 import { readPassSlipNumber } from "./pass-slip-number";
-import { PASS_SLIP_PAGE_SEG_MODE } from "./pass-slip-preprocess";
+import {
+  PASS_SLIP_GOODS_PASS_NAMES,
+  PASS_SLIP_PASSES,
+  type PassSlipPassName,
+} from "./pass-slip-preprocess";
 import type { PassSlipPrepareRequest, PassSlipPrepareResponse } from "./pass-slip-worker";
 
 /** 글자 인식기 한 벌이 사는 자리. `public/ocr/` 이 그대로 나간다. */
@@ -42,18 +59,46 @@ export function passSlipImageUrl(attachmentId: string): string {
   return `/api/attachments/${encodeURIComponent(attachmentId)}/download?view=full`;
 }
 
+/** 통문번호 한 칸의 결과. 날짜 검산이 붙는다. */
+export type PassNumberDecision =
+  | { state: "READ"; value: string; dateVerified: boolean; writtenDates: string[] }
+  | { state: "UNREAD"; value: null; dateVerified: false; writtenDates: string[] };
+
+/** 어느 칸을 읽어 달라는가. 🔴 **이미 적힌 칸은 false** 로 와야 한다. */
+export type PassSlipWanted = {
+  passNumber: boolean;
+  prvNumber: boolean;
+  qCode: boolean;
+};
+
+export type PassSlipReadRequest = {
+  attachmentId: string;
+  /** 🔴 그 건의 S/N — PRV 가 **어느 항번 줄의 것인가**를 가르는 열쇠다. */
+  serialNumber: string | null;
+  /** 그 고객사에 이미 저장돼 있던 Q코드들(아는 값인지 보는 데만 쓴다). */
+  knownQCodes: ReadonlySet<string> | null;
+  wanted: PassSlipWanted;
+};
+
 export type PassSlipReadOutcome =
+  | { status: "FAILED"; message: string }
   | {
-      status: "VERIFIED";
-      passNumber: string;
-      writtenDates: string[];
-    }
-  | {
-      status: "UNVERIFIED";
-      passNumber: string;
-      writtenDates: string[];
-    }
-  | { status: "FAILED"; message: string };
+      status: "DONE";
+      /** 읽어 달라고 하지 않은 칸은 null 이다(= 이미 적혀 있던 칸). */
+      passNumber: PassNumberDecision | null;
+      prvNumber: PrvDecision | null;
+      qCode: QCodeDecision | null;
+      /**
+       * 🔴 이 통문증이 **정말 이 건의 것인가**(서류의 S/N ↔ 그 건의 S/N).
+       *
+       * S/N 은 물품정보 표에 있으므로 **그 세 패스를 돌렸을 때만** 알 수 있다.
+       * 통문번호만 읽는 줄(PRV · Q코드가 이미 적혀 있는 줄)에서는 null 이다 —
+       * 그 한 칸 때문에 세 패스를 더 돌리면 한 줄에 1.2초가 더 든다.
+       */
+      serialCheck: SerialCheck | null;
+      /** 이 한 장에 걸린 시간(ms). 화면이 「몇 초쯤」을 말할 때 쓴다. */
+      ms: number;
+    };
 
 /* ────────────────────────────────────────────────────────────────────────── *
  * tesseract.js — 꾸러미가 아니라 전역으로 들어온다. 쓰는 만큼만 적는다.
@@ -121,7 +166,7 @@ export type PassSlipReader = {
    */
   prepare(): Promise<void>;
   /** 한 장을 읽는다. 던지지 않는다 — 실패도 결과의 한 갈래다. */
-  read(attachmentId: string): Promise<PassSlipReadOutcome>;
+  read(request: PassSlipReadRequest): Promise<PassSlipReadOutcome>;
   /** 워커 둘을 정리한다. 화면을 떠날 때 부른다. */
   dispose(): void;
 };
@@ -158,11 +203,14 @@ export function createPassSlipReader(): PassSlipReader {
     return worker;
   }
 
-  function prepareInWorker(image: Blob): Promise<PassSlipPrepareResponse> {
+  function prepareInWorker(
+    image: Blob,
+    passes: PassSlipPassName[]
+  ): Promise<PassSlipPrepareResponse> {
     const worker = ensurePrepareWorker();
     const id = nextRequestId;
     nextRequestId += 1;
-    const request: PassSlipPrepareRequest = { id, image };
+    const request: PassSlipPrepareRequest = { id, image, passes };
     return new Promise<PassSlipPrepareResponse>((resolve, reject) => {
       pending.set(id, { resolve, reject });
       worker.postMessage(request);
@@ -202,8 +250,9 @@ export function createPassSlipReader(): PassSlipReader {
           console.error("[pass-slip-ocr] tesseract", error);
         },
       });
-      // 6 = 「하나의 균일한 글자 덩어리」. 띠 하나를 잘라 넘기므로 이것이 맞는다.
-      await worker.setParameters({ tessedit_pageseg_mode: PASS_SLIP_PAGE_SEG_MODE });
+      // 🔴 쪽 나눔 방식(psm)은 **읽기 직전에 패스마다** 정한다 — 통문정보 띠는 6,
+      //    물품정보 표는 4 다. 여기서 한 번 정해 두면 둘 가운데 하나가 반드시
+      //    틀린 설정으로 읽힌다(psm 6 으로 읽은 물품정보는 Q코드가 7/14 였다).
       tesseractWorker = worker;
       return worker;
     })().catch((error: unknown) => {
@@ -214,7 +263,26 @@ export function createPassSlipReader(): PassSlipReader {
     return tesseractWorkerPromise;
   }
 
-  async function read(attachmentId: string): Promise<PassSlipReadOutcome> {
+  async function read(request: PassSlipReadRequest): Promise<PassSlipReadOutcome> {
+    const { attachmentId, serialNumber, knownQCodes, wanted } = request;
+    const startedAt = Date.now();
+    /** 물품정보(PRV · Q코드)는 **둘 중 하나만 비어 있어도** 세 패스를 돌린다. */
+    const wantGoods = wanted.prvNumber || wanted.qCode;
+    const passes: PassSlipPassName[] = [
+      ...(wanted.passNumber ? (["BAND_A"] as PassSlipPassName[]) : []),
+      ...(wantGoods ? PASS_SLIP_GOODS_PASS_NAMES : []),
+    ];
+    if (passes.length === 0) {
+      return {
+        status: "DONE",
+        passNumber: null,
+        prvNumber: null,
+        qCode: null,
+        serialCheck: null,
+        ms: 0,
+      };
+    }
+
     try {
       const response = await fetch(passSlipImageUrl(attachmentId), {
         credentials: "same-origin",
@@ -230,21 +298,60 @@ export function createPassSlipReader(): PassSlipReader {
       }
       const image = await response.blob();
 
-      const prepared = await prepareInWorker(image);
+      // 🔴 사진을 펼치는 일은 여기서 **한 번**이다(워커 안에서). 네 가지 전처리가
+      //    그 픽셀을 나눠 쓴다.
+      const prepared = await prepareInWorker(image, passes);
       if (!prepared.ok) return { status: "FAILED", message: prepared.message };
 
       const worker = await ensureTesseractWorker();
-      if (disposed) return { status: "FAILED", message: "읽기를 멈췄습니다." };
-      const recognized = await worker.recognize(prepared.png);
 
-      const reading = readPassSlipNumber(recognized.data.text);
-      if (!reading.passNumber) {
-        return { status: "FAILED", message: "사진에서 통문번호를 찾지 못했습니다." };
+      const texts = new Map<PassSlipPassName, string>();
+      for (const made of prepared.images) {
+        if (disposed) return { status: "FAILED", message: "읽기를 멈췄습니다." };
+        const pass = PASS_SLIP_PASSES[made.name];
+        await worker.setParameters({ tessedit_pageseg_mode: pass.pageSegMode });
+        const recognized = await worker.recognize(made.png);
+        texts.set(made.name, recognized.data.text);
       }
+
+      let passNumber: PassNumberDecision | null = null;
+      if (wanted.passNumber) {
+        const reading = readPassSlipNumber(texts.get("BAND_A") ?? "");
+        passNumber = reading.passNumber
+          ? {
+              state: "READ",
+              value: reading.passNumber,
+              dateVerified: reading.dateVerified,
+              writtenDates: reading.writtenDates,
+            }
+          : {
+              state: "UNREAD",
+              value: null,
+              dateVerified: false,
+              writtenDates: reading.writtenDates,
+            };
+      }
+
+      let prvNumber: PrvDecision | null = null;
+      let qCode: QCodeDecision | null = null;
+      let serialCheck: SerialCheck | null = null;
+      if (wantGoods) {
+        const readings: GoodsPassReading[] = PASS_SLIP_GOODS_PASS_NAMES.map((name) =>
+          parseGoodsPass(texts.get(name) ?? "")
+        );
+        if (wanted.qCode) qCode = decideQCode(readings, knownQCodes);
+        if (wanted.prvNumber) prvNumber = decidePrvNumber(readings, serialNumber);
+        // 🔴 판정과 **따로** 본다 — 맞춰보기는 표시만 바꾸고 값은 그대로 채운다.
+        serialCheck = checkSerialAgainstDocument(readings, serialNumber);
+      }
+
       return {
-        status: reading.dateVerified ? "VERIFIED" : "UNVERIFIED",
-        passNumber: reading.passNumber,
-        writtenDates: reading.writtenDates,
+        status: "DONE",
+        passNumber,
+        prvNumber,
+        qCode,
+        serialCheck,
+        ms: Date.now() - startedAt,
       };
     } catch (error) {
       return {

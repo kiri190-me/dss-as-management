@@ -19,10 +19,13 @@ import CustomerFormExportPanel from "./CustomerFormExportPanel";
 import CustomerLinkAddress from "./CustomerLinkAddress";
 import PassSlipOcrPanel, {
   PassSlipRowNotice,
-  passSlipColumnOf,
+  passSlipColumnsOf,
   portalRowKey,
-  type PassSlipRowOutcome,
 } from "./PassSlipOcrPanel";
+import {
+  applyPassSlipSuggestions,
+  type PassSlipRowOutcome,
+} from "./pass-slip-suggestions";
 import {
   issueCustomerLinkAction,
   revokeCustomerLinkAction,
@@ -126,14 +129,17 @@ export default function CustomerPortalScreen({
   const showForm = form !== null && storedView === PORTAL_VIEW_FORM;
 
   /**
-   * [통문증에서 통문번호 읽기]가 내놓은 줄별 결과(줄 열쇠 → 색과 글자).
+   * [통문증에서 읽기]가 내놓은 결과(줄 열쇠 → 칸 키 → 색과 글자).
    *
    * 🔴 **저장된 값이 아니다.** 읽은 값을 칸에 채워 보여 줄 뿐이고, 저장은 예전
    * 그대로 줄마다 [저장] 단추가 한다. 그래서 여기 머물고 새로고침하면 사라진다.
    */
   const [passSlipResults, setPassSlipResults] = useState<Record<string, PassSlipRowOutcome>>({});
-  /** 「통문번호」 칸이 있는 양식에서만 단추를 그린다. 기본 보기·ICD·INVENIA 에는 없다. */
-  const passSlipColumn = form ? passSlipColumnOf(form) : null;
+  /**
+   * 통문증에서 읽어 채울 수 있는 칸들(통문번호 · PRV No. · Q코드)이 있는 양식에서만
+   * 단추를 그린다. 기본 보기·ICD·INVENIA 에는 그 칸이 없다.
+   */
+  const passSlipColumns = form ? passSlipColumnsOf(form) : [];
 
   function run(action: () => Promise<{ ok: boolean; message: string; url?: string }>) {
     startTransition(async () => {
@@ -374,17 +380,12 @@ export default function CustomerPortalScreen({
             />
           ) : null}
 
-          {/* ───── 통문증에서 통문번호 읽기 ─────
-              🔴 양식 보기이고 · 그 양식에 「통문번호」 칸이 있고 · 고칠 권한이
+          {/* ───── 통문증에서 읽기 ─────
+              🔴 양식 보기이고 · 그 양식에 읽을 수 있는 칸이 있고 · 고칠 권한이
               있을 때만 보인다. 읽은 값을 **칸에 채워만** 두므로, 고칠 수 없는
               사람에게 보이면 누를 수는 있는데 아무 일도 일어나지 않는다. */}
-          {showForm && form && passSlipColumn && canEdit ? (
-            <PassSlipOcrPanel
-              form={form}
-              items={items}
-              columnLabel={passSlipColumn.label}
-              onResults={setPassSlipResults}
-            />
+          {showForm && form && passSlipColumns.length > 0 && canEdit ? (
+            <PassSlipOcrPanel form={form} items={items} onResults={setPassSlipResults} />
           ) : null}
 
           {/* ───── 고객이 보는 목록 ───── */}
@@ -532,6 +533,11 @@ function ItemRow({
   );
 }
 
+/**
+ * 시스템이 아는 값 한 칸. 🔴 **여기에는 통문증 알림을 붙이지 않는다** — 붙였더니
+ * 그 열이 넓어지고 밀린 폭을 마지막 열([저장])이 뒤집어써 글자가 세로로 쪼개졌다
+ * (사용자 지적 2026-10-01). 통문증 알림은 **값이 들어가는 입력 칸 밑**에만 붙는다.
+ */
 function Cell({ value }: { value: string | null }) {
   return (
     <td className="px-3 py-2 whitespace-nowrap text-zinc-700">
@@ -589,9 +595,12 @@ function CustomerFormTable({
               </th>
             ))}
             {/* 엑셀에는 없는 칸이다. 적은 것을 저장하는 단추 자리 — 열이 열 개를
-                넘어 비고 옆에 끼워 넣으면 어느 줄의 단추인지 알기 어렵다. */}
+                넘어 비고 옆에 끼워 넣으면 어느 줄의 단추인지 알기 어렵다.
+                🔴 **줄어들지 않는 열이다.** 다른 열이 넓어질 때 표가 희생시키는 것은
+                언제나 마지막 열이라, 여기가 눌리면 「저장」 두 글자가 세로로 쪼개진다
+                (사용자 지적 2026-10-01). 폭을 못 박고 줄바꿈을 막는다. */}
             {canEdit ? (
-              <th scope="col" className="px-3 py-2">
+              <th scope="col" className="w-20 px-3 py-2 whitespace-nowrap">
                 저장
               </th>
             ) : null}
@@ -672,26 +681,23 @@ function FormItemRow({
   const [typedValues, setTypedValues] = useState<Record<string, string>>(initialValues);
 
   /**
-   * 통문증에서 읽은 값을 칸에 **얹는다**(저장하지 않는다 · 상태로 옮겨 담지도 않는다).
+   * 통문증에서 읽은 값들을 칸에 **얹는다**(저장하지 않는다 · 상태로 옮겨 담지도 않는다).
    *
    * 🔴 **아직 손대지 않은 칸에만 얹는다.** 「비었는가」가 아니라 「그 키가 있는가」로
    * 가리는 까닭 둘 — 저장된 값이 있으면 키가 있으므로 덮지 않고, 사람이 적었다가
    * **지운** 칸도 키가 남으므로 다시 채워 넣지 않는다(지운 값이 되살아나면
-   * 지운 사람은 영문을 모른다).
+   * 지운 사람은 영문을 모른다). 🔴 **칸마다 따로** 본다 — 통문번호는 적혀 있고
+   * PRV 는 비었으면 PRV 만 얹힌다.
    *
    * 상태로 옮겨 담지 않고 그릴 때마다 얹는 까닭: 읽은 값은 화면에 잠시 떠 있는
    * **제안**이다. 상태에 넣으면 그 순간 「사람이 적은 값」과 구별할 수 없어진다.
    * 얹히면 아래 dirty 가 참이 되어 그 줄의 [저장] 단추가 저절로 나타나고,
    * 저장 방식은 예전 그대로다(줄마다 한 번 · expectedVersion).
+   *
+   * 🔴 **서류의 S/N 이 이 건과 다른 줄은 애초에 값이 오지 않는다**(읽기 쪽이
+   * 걸러 낸다 — pass-slip-suggestions.ts). 그래서 여기서 막을 것이 없다.
    */
-  const passSlipColumnKey = passSlipColumnOf(form)?.key ?? null;
-  const passSlipFilled = passSlipOutcome?.value ?? null;
-  const values =
-    passSlipColumnKey &&
-    passSlipFilled &&
-    !Object.prototype.hasOwnProperty.call(typedValues, passSlipColumnKey)
-      ? { ...typedValues, [passSlipColumnKey]: passSlipFilled }
-      : typedValues;
+  const values = applyPassSlipSuggestions(typedValues, passSlipOutcome);
 
   // 접수 전 의뢰는 아직 접수가 아니라 값을 붙일 자리가 없다(기본 보기와 같다).
   const pending = item.sourceKind === "REQUEST";
@@ -769,8 +775,7 @@ function FormItemRow({
             const slashWhenEmpty = column.emptyMark === "SLASH" && !value;
             // 통문증 알림은 그 값이 들어가는 칸 **바로 밑**에 붙인다. 표 밖에 모아
             // 두면 열이 열셋인 표에서 어느 줄의 말인지 알 수 없다.
-            const notice =
-              passSlipOutcome && passSlipColumnKey === column.key ? passSlipOutcome : null;
+            const notice = passSlipOutcome?.[column.key] ?? null;
             return (
               <td key={column.key} className="px-3 py-2">
                 {pending ? (
@@ -796,7 +801,8 @@ function FormItemRow({
         }
       })}
       {canEdit ? (
-        <td className="px-3 py-2">
+        // 🔴 머리글과 같은 폭·같은 줄바꿈 금지(까닭은 그 주석에).
+        <td className="w-20 px-3 py-2 whitespace-nowrap">
           {dirty ? (
             <button
               type="button"
@@ -813,7 +819,7 @@ function FormItemRow({
                   })
                 )
               }
-              className="rounded bg-primary-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="rounded bg-primary-900 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-white disabled:opacity-50"
             >
               저장
             </button>

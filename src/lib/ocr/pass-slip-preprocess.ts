@@ -542,6 +542,129 @@ export const PRESET_BAND_A: Required<
 /** 글자 인식기에 주는 쪽 나눔 방식. 6 = 「하나의 균일한 글자 덩어리」. */
 export const PASS_SLIP_PAGE_SEG_MODE = "6";
 
+/* ────────────────────────────────────────────────────────────────────────── *
+ * 7-나. 물품정보 표 — PRV No. · Q코드
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * 🔴 **물품정보 표의 자리.** 통문증 14장 측정으로 고른 값이다(2026-10-01).
+ *
+ * 「항번 + Part No./모델명 + 품명 및 규격」 세 칸까지만 담고 **비고 칸은 자른다** —
+ * 비고까지 넣으면 글줄이 길어져 psm 4 가 한 줄로 묶지 못한다.
+ *
+ * 🔴 **파주 양식과 구미 양식이 이 한 좌표로 둘 다 된다.** 사업장별로 가르지 마라 —
+ * 가르는 순간 「어느 사업장인가」를 먼저 알아내야 하는데, 그것을 알 길이 사진
+ * 안에 확실히 있지 않다.
+ */
+export const PASS_SLIP_GOODS_REGION: CropRegion = {
+  l: 0.035,
+  t: 0.385,
+  w: 0.65,
+  h: 0.15,
+};
+
+/**
+ * 🔴 **물품정보 표는 psm 4 로 읽는다. 이것이 핵심이었다.**
+ *
+ * 같은 그림을 psm 6 으로 읽으면 Q코드 7/14, psm 4 로 읽으면 **14/14** 다
+ * (2026-10-01 측정). psm 6 은 「하나의 균일한 글자 덩어리」라 표의 가로 테두리를
+ * 글줄에 섞어 **첫 줄을 통째로 깨뜨린다.** 4 는 「크기가 제각각인 글줄이 한 단에
+ * 늘어선 것」이라 표의 줄을 줄대로 읽는다. 바꾸지 마라.
+ *
+ * 통문정보 띠(PASS_SLIP_PAGE_SEG_MODE = 6)와 **다르다** — 띠는 테두리가 없는
+ * 글자 덩어리라 6 이 맞는다. 둘을 하나로 맞추려 들지 마라.
+ */
+export const PASS_SLIP_GOODS_PAGE_SEG_MODE = "4";
+
+/** 전처리 설정 한 벌 + 그것으로 읽을 때의 쪽 나눔 방식. */
+export type PassSlipPass = {
+  /** 기록·시험에서 부르는 이름. */
+  name: string;
+  options: PreprocessOptions;
+  pageSegMode: string;
+};
+
+/**
+ * 🔴 **물품정보는 설정이 다른 세 번을 읽어 투표한다.** 한 번만 읽으면 글자 하나가
+ * 틀려도 그대로 칸에 들어간다. 셋 가운데 둘 이상이 같은 값을 냈을 때만 쓴다
+ * (판정은 pass-slip-goods.ts).
+ *
+ * 세 설정이 **일부러 서로 다르다** — 같은 설정을 세 번 돌리면 글자 인식기가
+ * 결정적이라 **언제나 같은 답**이 나와 투표가 아무 일도 하지 않는다. 크기(1800 ·
+ * 3000 · 2400)와 선명화 유무를 바꾼 것이 측정에서 서로 다른 오독을 냈다.
+ *
+ * 🔴 대비정규화가 통문번호 띠(`{min, max}`)와 **다르다**(`{1, max}`). 측정에 쓴
+ * 그대로다 — 맞추려 들지 마라.
+ */
+export const PASS_SLIP_GOODS_PASSES: readonly PassSlipPass[] = [
+  {
+    name: "A1800",
+    options: {
+      region: PASS_SLIP_GOODS_REGION,
+      width: 1800,
+      kernel: "lanczos3",
+      gray: "vips",
+      normalise: { lower: 1, upper: "max" },
+      sharpen: { sigma: 1.2 },
+    },
+    pageSegMode: PASS_SLIP_GOODS_PAGE_SEG_MODE,
+  },
+  {
+    name: "B3000n",
+    options: {
+      region: PASS_SLIP_GOODS_REGION,
+      width: 3000,
+      kernel: "lanczos3",
+      gray: "vips",
+      normalise: { lower: 1, upper: "max" },
+      sharpen: null,
+    },
+    pageSegMode: PASS_SLIP_GOODS_PAGE_SEG_MODE,
+  },
+  {
+    name: "C2400",
+    options: {
+      region: PASS_SLIP_GOODS_REGION,
+      width: 2400,
+      kernel: "lanczos3",
+      gray: "vips",
+      normalise: { lower: 1, upper: "max" },
+      sharpen: { sigma: 1.2 },
+    },
+    pageSegMode: PASS_SLIP_GOODS_PAGE_SEG_MODE,
+  },
+];
+
+/** 통문번호 띠 한 패스. 위 물품정보 세 패스와 같은 모양으로 묶어 둔다. */
+export const PASS_SLIP_BAND_A_PASS: PassSlipPass = {
+  name: "BAND_A",
+  options: PRESET_BAND_A,
+  pageSegMode: PASS_SLIP_PAGE_SEG_MODE,
+};
+
+/**
+ * 전처리 워커에 「무엇을 만들어 달라」고 말할 때 쓰는 이름.
+ *
+ * 🔴 사진 한 장을 **한 번만 펼쳐**(JPEG 디코드) 네 가지 전처리가 나눠 쓰기 위한
+ * 것이다. 영역마다 따로 부르면 디코드가 네 번 돌아 한 장이 몇 배로 느려진다.
+ */
+export type PassSlipPassName = "BAND_A" | "A1800" | "B3000n" | "C2400";
+
+/** 이름 → 그 패스. 워커가 이 표로만 설정을 고른다(화면이 설정을 보내지 않는다). */
+export const PASS_SLIP_PASSES: Record<PassSlipPassName, PassSlipPass> = {
+  BAND_A: PASS_SLIP_BAND_A_PASS,
+  A1800: PASS_SLIP_GOODS_PASSES[0],
+  B3000n: PASS_SLIP_GOODS_PASSES[1],
+  C2400: PASS_SLIP_GOODS_PASSES[2],
+};
+
+/** 물품정보 세 패스의 이름만. 화면·시험이 차례를 그대로 쓴다. */
+export const PASS_SLIP_GOODS_PASS_NAMES: readonly PassSlipPassName[] = [
+  "A1800",
+  "B3000n",
+  "C2400",
+];
+
 /**
  * 자르기 → 확대 → 회색조 → 대비정규화 → 선명화. 결과는 회색 1바이트/픽셀.
  */

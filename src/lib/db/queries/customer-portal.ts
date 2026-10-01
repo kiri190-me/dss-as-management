@@ -11,6 +11,7 @@ import {
   repairCaseCustomerStatus,
   repairCases,
 } from "../schema";
+import { Q_CODE_SHAPE } from "../../ocr/pass-slip-goods";
 import { listQuoteInfoForRepairCases } from "./domestic-orders";
 import { listRepairCasesByCustomerId } from "./repair-cases";
 
@@ -41,8 +42,8 @@ export const PENDING_INTAKE_LABEL = "접수 대기 중";
  * 보내는 자리(server/services/customer-portal-sync.ts)는 이 줄을 펼치지 않고
  * 보낼 칸을 하나씩 적어 옮긴다. 아래 「고객사 양식」 쪽 칸들(endUserName ·
  * orderIssuedDate · customerRequestedDueDate · formValues ·
- * passSlipAttachmentIds)이 그 목록에 없는 것은 **일부러**다 — 담당자가 사내에서
- * 쓰는 표에만 쓴다.
+ * passSlipAttachmentIds · knownQCodes)이 그 목록에 없는 것은 **일부러**다 —
+ * 담당자가 사내에서 쓰는 표에만 쓴다.
  */
 export type CustomerPortalItem = {
   /** 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지. */
@@ -61,7 +62,7 @@ export type CustomerPortalItem = {
   /** 상태를 고칠 때 쓰는 낙관적 잠금 값. 행이 없으면 null. */
   statusVersion: number | null;
 
-  // ───── 아래 다섯은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
+  // ───── 아래 여섯은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
 
   /**
    * End-User 이름. 고객사 엑셀의 「Site명」이 가리키는 것이 이것이다
@@ -96,7 +97,44 @@ export type CustomerPortalItem = {
    * 그 건의 통문증이다. 휴지통에 있는 것은 빠진다.
    */
   passSlipAttachmentIds: string[];
+  /**
+   * 🔴 **그 고객사에 이미 저장돼 있는 Q코드들.** 줄마다 같은 목록이 실린다
+   * (한 벌을 만들어 모든 줄이 **같은 배열을 가리킨다** — 베껴 담지 않는다).
+   *
+   * 통문증에서 읽은 Q코드가 **글자 하나 틀린 채** 투표를 통과한 일이 측정에서
+   * 140회 중 2회 있었다(`QDAC28594` → `QDAG28594`, 두 패스가 같은 실수를 했다).
+   * 읽은 값이 이 목록에 있으면 초록, 없으면 「확인 필요(노랑)」로 보인다 —
+   * 🔴 **값을 고치지도, 채우기를 거절하지도 않는다.** 목록이 얇은 처음에도
+   * 기능이 서야 하고(개발 DB 는 건이 3개다), 목록이 쌓일수록 저절로 안전해진다.
+   *
+   * 🔴 **고객에게 나가는 값이 아니다** — 바로 위 다섯 칸과 같다. 밖으로 보내는
+   * 자리(server/services/customer-portal-sync.ts)는 줄을 펼치지 않고 보낼 칸을
+   * 하나씩 적어 옮기므로, 그 목록에 적지 않은 이 칸은 나가지 않는다.
+   */
+  knownQCodes: string[];
 };
+
+/**
+ * 「Q코드」의 꼴 — 🔴 **읽는 쪽과 같은 하나를 쓴다**(lib/ocr/pass-slip-goods.ts).
+ *
+ * 여기서 칸 이름(`qCode`)으로 고르지 않고 **값의 꼴**로 고르는 까닭: 어느 키가
+ * 무슨 뜻인지는 고객사 양식이 아는 일이고 이 조회가 아니다(바로 위 toStringMap
+ * 주석과 같은 이유). 꼴로 고르면 양식에서 칸 이름이 바뀌어도 목록이 비지 않는다.
+ */
+function collectKnownQCodes(
+  rows: { repairCaseId: string; formValues: unknown }[],
+  caseIds: Set<string>
+): string[] {
+  const found = new Set<string>();
+  for (const row of rows) {
+    if (!caseIds.has(row.repairCaseId)) continue;
+    for (const value of Object.values(toStringMap(row.formValues))) {
+      const normalized = value.trim().toUpperCase();
+      if (Q_CODE_SHAPE.test(normalized)) found.add(normalized);
+    }
+  }
+  return [...found].sort();
+}
 
 /**
  * jsonb 에서 읽은 것을 「키 → 글자」로 눕힌다.
@@ -209,6 +247,15 @@ export async function listPortalItemsForCustomer(
 
   const passSlipsByCase = await listPassSlipAttachmentIds(cases.map((c) => c.id));
 
+  /**
+   * 🔴 **출하 완료까지 포함한 그 고객사 전부**(`allCases`)에서 모은다 — 위에서
+   * 걸러 낸 진행 중인 건만 보면 목록이 그만큼 얇아지는데, 지난 건에 적어 둔
+   * Q코드야말로 「우리가 아는 값」이다. 다른 고객사의 값은 섞이지 않는다
+   * (statusRows 는 표 전체를 읽으므로 **반드시 이 집합으로 거른다**).
+   */
+  const customerCaseIds = new Set(allCases.map((row) => row.id));
+  const knownQCodes = collectKnownQCodes(statusRows, customerCaseIds);
+
   const caseItems: CustomerPortalItem[] = cases.map((row) => {
     const status = statusByCase.get(row.id);
     const quote = quoteInfo.get(row.id);
@@ -231,6 +278,8 @@ export async function listPortalItemsForCustomer(
       customerRequestedDueDate: row.customerRequestedDueDate,
       formValues: toStringMap(status?.formValues),
       passSlipAttachmentIds: passSlipsByCase.get(row.id) ?? [],
+      // 줄마다 **같은 배열**을 가리킨다(베껴 담지 않는다 — 건이 수십 개다).
+      knownQCodes,
     };
   });
 
@@ -290,6 +339,8 @@ export async function listPortalItemsForCustomer(
     formValues: {},
     // 접수가 없으니 첨부가 걸릴 자리도 없다(attachments 는 접수를 가리킨다).
     passSlipAttachmentIds: [],
+    // 접수 전 의뢰 줄은 읽기의 대상이 아니다(입력 칸 자체가 없다).
+    knownQCodes: [],
   }));
 
   // 접수 전 의뢰가 위, 그다음 접수를 접수일 최신순으로.

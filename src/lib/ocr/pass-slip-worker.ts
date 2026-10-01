@@ -1,10 +1,10 @@
 /**
  * ============================================================================
- * 통문증 전처리 **Web Worker** — 사진 한 장을 받아 회색 PNG 를 돌려준다.
+ * 통문증 전처리 **Web Worker** — 사진 한 장을 받아 회색 PNG 들을 돌려준다.
  * ============================================================================
  * 하는 일은 둘뿐이다.
- *   1. JPEG → RGBA 픽셀 배열 (환경에 기대는 **유일한** 단계)
- *   2. pass-slip-preprocess.ts 의 순수 계산 → 회색 PNG 바이트
+ *   1. JPEG → RGBA 픽셀 배열 (환경에 기대는 **유일한** 단계. 🔴 한 장에 한 번)
+ *   2. pass-slip-preprocess.ts 의 순수 계산 → 회색 PNG 바이트 (요청한 수만큼)
  *
  * ── 🔴 왜 워커인가 ──────────────────────────────────────────────────────
  * 전처리는 한 장에 0.2초쯤 걸리는 **통짜 계산**이다(1800px 로 늘린 뒤 가우시안을
@@ -25,7 +25,12 @@
  * ============================================================================
  */
 
-import { PRESET_BAND_A, encodeGrayPNG, prepare } from "./pass-slip-preprocess";
+import {
+  PASS_SLIP_PASSES,
+  encodeGrayPNG,
+  prepare,
+  type PassSlipPassName,
+} from "./pass-slip-preprocess";
 
 /** 메인 스레드 → 워커. */
 export type PassSlipPrepareRequest = {
@@ -33,6 +38,23 @@ export type PassSlipPrepareRequest = {
   id: number;
   /** 원본 사진. Blob 은 구조화 복제로 그대로 건너간다. */
   image: Blob;
+  /**
+   * 만들어 달라는 전처리들(이름만 보낸다 — 설정은 워커가 표에서 고른다).
+   *
+   * 🔴 **사진을 펼치는 일(JPEG 디코드)은 한 번뿐**이고 여기 적은 전처리들이
+   * 그 픽셀을 나눠 쓴다. 영역마다 따로 부르면 디코드가 그 횟수만큼 돌아,
+   * 한 장에 0.2초씩 더 든다.
+   */
+  passes: PassSlipPassName[];
+};
+
+/** 전처리 한 벌의 결과. */
+export type PassSlipPreparedImage = {
+  name: PassSlipPassName;
+  /** 글자 인식기에 그대로 넘기는 회색 PNG 바이트. */
+  png: Uint8Array;
+  width: number;
+  height: number;
 };
 
 /** 워커 → 메인 스레드. */
@@ -40,10 +62,8 @@ export type PassSlipPrepareResponse =
   | {
       id: number;
       ok: true;
-      /** 글자 인식기에 그대로 넘기는 회색 PNG 바이트. */
-      png: Uint8Array;
-      width: number;
-      height: number;
+      /** 요청한 차례 그대로. */
+      images: PassSlipPreparedImage[];
       decodeMs: number;
       prepareMs: number;
     }
@@ -93,19 +113,32 @@ scope.addEventListener("message", (event: MessageEvent) => {
       const startedAt = Date.now();
       const rgba = await decodeToRgba(request.image);
       const decodedAt = Date.now();
-      const gray = prepare(rgba, PRESET_BAND_A);
-      const png = encodeGrayPNG(gray.data, gray.width, gray.height);
+      const images: PassSlipPreparedImage[] = [];
+      for (const name of request.passes) {
+        const pass = PASS_SLIP_PASSES[name];
+        // 화면이 보낸 이름이 표에 없으면 조용히 건너뛴다 — 답이 한 칸 비는 것은
+        // 읽는 쪽이 「못 읽음」으로 다룬다(없는 설정을 지어내지 않는다).
+        if (!pass) continue;
+        const gray = prepare(rgba, pass.options);
+        images.push({
+          name,
+          png: encodeGrayPNG(gray.data, gray.width, gray.height),
+          width: gray.width,
+          height: gray.height,
+        });
+      }
       const response: PassSlipPrepareResponse = {
         id: request.id,
         ok: true,
-        png,
-        width: gray.width,
-        height: gray.height,
+        images,
         decodeMs: decodedAt - startedAt,
         prepareMs: Date.now() - decodedAt,
       };
       // 바이트를 복사하지 않고 넘긴다 — 한 장이 1MB 쯤 된다.
-      scope.postMessage(response, [png.buffer as ArrayBuffer]);
+      scope.postMessage(
+        response,
+        images.map((image) => image.png.buffer as ArrayBuffer)
+      );
     } catch (error) {
       const response: PassSlipPrepareResponse = {
         id: request.id,
