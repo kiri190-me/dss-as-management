@@ -1,7 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
+  attachments,
   customerPortalSyncLog,
   customerRepairLinks,
   customerRepairRequests,
@@ -38,9 +39,10 @@ export const PENDING_INTAKE_LABEL = "접수 대기 중";
  *
  * 🔴 **이 타입에 칸이 늘어도 고객에게 나가는 것은 늘지 않는다.** 밖으로
  * 보내는 자리(server/services/customer-portal-sync.ts)는 이 줄을 펼치지 않고
- * 보낼 칸을 하나씩 적어 옮긴다. 아래 「고객사 양식」 쪽 칸 셋(endUserName ·
- * orderIssuedDate · formValues)이 그 목록에 없는 것은 **일부러**다 — 담당자가
- * 사내에서 쓰는 표에만 쓴다.
+ * 보낼 칸을 하나씩 적어 옮긴다. 아래 「고객사 양식」 쪽 칸들(endUserName ·
+ * orderIssuedDate · customerRequestedDueDate · formValues ·
+ * passSlipAttachmentIds)이 그 목록에 없는 것은 **일부러**다 — 담당자가 사내에서
+ * 쓰는 표에만 쓴다.
  */
 export type CustomerPortalItem = {
   /** 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지. */
@@ -59,7 +61,7 @@ export type CustomerPortalItem = {
   /** 상태를 고칠 때 쓰는 낙관적 잠금 값. 행이 없으면 null. */
   statusVersion: number | null;
 
-  // ───── 아래 셋은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
+  // ───── 아래 다섯은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
 
   /**
    * End-User 이름. 고객사 엑셀의 「Site명」이 가리키는 것이 이것이다
@@ -82,6 +84,18 @@ export type CustomerPortalItem = {
    * 정한다(domain/customer-portal-forms.ts).
    */
   formValues: Record<string, string>;
+  /**
+   * 이 건에 **「통문증」 분류로 올라간 첨부**의 id 들. 없으면 빈 배열이다.
+   *
+   * 주성 양식 표의 [통문증에서 통문번호 읽기]가 이 id 로 사진을 받아 브라우저에서
+   * 글자를 읽는다. 🔴 **사진도 주소도 여기 담지 않는다** — id 하나면 기존 첨부
+   * 통로(api/attachments/{id}/download)가 권한을 다시 묻고 내준다.
+   *
+   * 🔴 **가장 나중에 올린 것이 앞**이다. 한 건에 통문증이 여러 장일 수 있는데
+   * (다시 찍어 올리거나 반출·환입이 따로 있다), 사람이 마지막에 올린 것이 지금
+   * 그 건의 통문증이다. 휴지통에 있는 것은 빠진다.
+   */
+  passSlipAttachmentIds: string[];
 };
 
 /**
@@ -105,6 +119,48 @@ function toStringMap(value: unknown): Record<string, string> {
     if (typeof raw === "string") result[key] = raw;
   }
   return result;
+}
+
+/**
+ * 접수 건들에 걸린 **「통문증」 첨부**를 건별로 모은다 — 건 id → 첨부 id 목록.
+ *
+ * 🔴 **가장 나중에 올린 것이 앞**이다. 올린 시각이 같은 행이 있을 수 있어
+ * (한 번에 여러 장을 올리면 실제로 같아진다) id 를 둘째 기준으로 둔다 — 안 두면
+ * 새로고침할 때마다 차례가 바뀌어 "어제는 잘 읽혔는데" 가 된다.
+ *
+ * 🔴 휴지통에 있는 것은 뺀다. 지운 통문증을 읽어 칸을 채우면, 사람이 "지웠다"고
+ * 믿는 사진의 값이 표에 적힌다.
+ *
+ * 질의를 건마다 쏘지 않고 한 번에 읽는다. 한 고객사의 진행 중인 건이 수십 개라
+ * 건마다 한 번이면 그만큼 왕복한다 — 이 파일의 다른 조회들과 같은 방식이다.
+ */
+async function listPassSlipAttachmentIds(
+  repairCaseIds: string[]
+): Promise<Map<string, string[]>> {
+  const byCase = new Map<string, string[]>();
+  if (repairCaseIds.length === 0) return byCase;
+
+  const rows = await db
+    .select({ id: attachments.id, repairCaseId: attachments.repairCaseId })
+    .from(attachments)
+    .where(
+      and(
+        inArray(attachments.repairCaseId, repairCaseIds),
+        eq(attachments.category, "PASS_SLIP"),
+        eq(attachments.isDeleted, false)
+      )
+    )
+    .orderBy(desc(attachments.uploadedAt), desc(attachments.id));
+
+  for (const row of rows) {
+    // repairCaseId 는 NULL 을 허용하는 칸이다(접수를 영구 삭제하면 끊긴다).
+    // inArray 로 걸렀으므로 여기 올 수 없지만, 타입이 말하는 대로 지키고 넘어간다.
+    if (!row.repairCaseId) continue;
+    const found = byCase.get(row.repairCaseId);
+    if (found) found.push(row.id);
+    else byCase.set(row.repairCaseId, [row.id]);
+  }
+  return byCase;
 }
 
 /**
@@ -151,6 +207,8 @@ export async function listPortalItemsForCustomer(
 
   const statusByCase = new Map(statusRows.map((row) => [row.repairCaseId, row]));
 
+  const passSlipsByCase = await listPassSlipAttachmentIds(cases.map((c) => c.id));
+
   const caseItems: CustomerPortalItem[] = cases.map((row) => {
     const status = statusByCase.get(row.id);
     const quote = quoteInfo.get(row.id);
@@ -172,6 +230,7 @@ export async function listPortalItemsForCustomer(
       // 「납품 요청일」 — 접수 건에 붙은 값이라 따로 읽을 것이 없다.
       customerRequestedDueDate: row.customerRequestedDueDate,
       formValues: toStringMap(status?.formValues),
+      passSlipAttachmentIds: passSlipsByCase.get(row.id) ?? [],
     };
   });
 
@@ -229,6 +288,8 @@ export async function listPortalItemsForCustomer(
     orderIssuedDate: null,
     customerRequestedDueDate: null,
     formValues: {},
+    // 접수가 없으니 첨부가 걸릴 자리도 없다(attachments 는 접수를 가리킨다).
+    passSlipAttachmentIds: [],
   }));
 
   // 접수 전 의뢰가 위, 그다음 접수를 접수일 최신순으로.

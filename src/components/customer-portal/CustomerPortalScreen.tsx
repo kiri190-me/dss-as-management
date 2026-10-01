@@ -17,6 +17,12 @@ import {
 } from "@/lib/domain/customer-portal-forms";
 import CustomerFormExportPanel from "./CustomerFormExportPanel";
 import CustomerLinkAddress from "./CustomerLinkAddress";
+import PassSlipOcrPanel, {
+  PassSlipRowNotice,
+  passSlipColumnOf,
+  portalRowKey,
+  type PassSlipRowOutcome,
+} from "./PassSlipOcrPanel";
 import {
   issueCustomerLinkAction,
   revokeCustomerLinkAction,
@@ -118,6 +124,16 @@ export default function CustomerPortalScreen({
    */
   const storedView = useStoredChoice(PORTAL_VIEW_STORAGE_KEY);
   const showForm = form !== null && storedView === PORTAL_VIEW_FORM;
+
+  /**
+   * [통문증에서 통문번호 읽기]가 내놓은 줄별 결과(줄 열쇠 → 색과 글자).
+   *
+   * 🔴 **저장된 값이 아니다.** 읽은 값을 칸에 채워 보여 줄 뿐이고, 저장은 예전
+   * 그대로 줄마다 [저장] 단추가 한다. 그래서 여기 머물고 새로고침하면 사라진다.
+   */
+  const [passSlipResults, setPassSlipResults] = useState<Record<string, PassSlipRowOutcome>>({});
+  /** 「통문번호」 칸이 있는 양식에서만 단추를 그린다. 기본 보기·ICD·INVENIA 에는 없다. */
+  const passSlipColumn = form ? passSlipColumnOf(form) : null;
 
   function run(action: () => Promise<{ ok: boolean; message: string; url?: string }>) {
     startTransition(async () => {
@@ -358,6 +374,19 @@ export default function CustomerPortalScreen({
             />
           ) : null}
 
+          {/* ───── 통문증에서 통문번호 읽기 ─────
+              🔴 양식 보기이고 · 그 양식에 「통문번호」 칸이 있고 · 고칠 권한이
+              있을 때만 보인다. 읽은 값을 **칸에 채워만** 두므로, 고칠 수 없는
+              사람에게 보이면 누를 수는 있는데 아무 일도 일어나지 않는다. */}
+          {showForm && form && passSlipColumn && canEdit ? (
+            <PassSlipOcrPanel
+              form={form}
+              items={items}
+              columnLabel={passSlipColumn.label}
+              onResults={setPassSlipResults}
+            />
+          ) : null}
+
           {/* ───── 고객이 보는 목록 ───── */}
           {items.length === 0 ? (
             <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-6 py-12 text-center text-sm text-zinc-500">
@@ -370,6 +399,7 @@ export default function CustomerPortalScreen({
               statusOptions={statusOptions}
               canEdit={canEdit}
               onSave={run}
+              passSlipResults={passSlipResults}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -538,12 +568,15 @@ function CustomerFormTable({
   statusOptions,
   canEdit,
   onSave,
+  passSlipResults,
 }: {
   form: CustomerPortalForm;
   items: CustomerPortalItem[];
   statusOptions: { id: string; label: string }[];
   canEdit: boolean;
   onSave: (action: () => Promise<{ ok: boolean; message: string }>) => void;
+  /** 통문증에서 읽은 줄별 결과. 아무것도 안 읽었으면 빈 객체다. */
+  passSlipResults: Record<string, PassSlipRowOutcome>;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -574,6 +607,7 @@ function CustomerFormTable({
               statusOptions={statusOptions}
               canEdit={canEdit}
               onSave={onSave}
+              passSlipOutcome={passSlipResults[portalRowKey(item)] ?? null}
             />
           ))}
         </tbody>
@@ -615,6 +649,7 @@ function FormItemRow({
   statusOptions,
   canEdit,
   onSave,
+  passSlipOutcome,
 }: {
   form: CustomerPortalForm;
   item: CustomerPortalItem;
@@ -622,6 +657,8 @@ function FormItemRow({
   statusOptions: { id: string; label: string }[];
   canEdit: boolean;
   onSave: (action: () => Promise<{ ok: boolean; message: string }>) => void;
+  /** 통문증에서 읽은 이 줄의 결과. 안 읽었으면 null. */
+  passSlipOutcome: PassSlipRowOutcome | null;
 }) {
   const currentOption = statusOptions.find((o) => o.label === item.statusLabel);
   const [optionId, setOptionId] = useState(currentOption?.id ?? "");
@@ -632,7 +669,29 @@ function FormItemRow({
    * 값을 다음 저장이 그대로 다시 써 넣는다.
    */
   const initialValues = readManualValues(form, item.formValues);
-  const [values, setValues] = useState<Record<string, string>>(initialValues);
+  const [typedValues, setTypedValues] = useState<Record<string, string>>(initialValues);
+
+  /**
+   * 통문증에서 읽은 값을 칸에 **얹는다**(저장하지 않는다 · 상태로 옮겨 담지도 않는다).
+   *
+   * 🔴 **아직 손대지 않은 칸에만 얹는다.** 「비었는가」가 아니라 「그 키가 있는가」로
+   * 가리는 까닭 둘 — 저장된 값이 있으면 키가 있으므로 덮지 않고, 사람이 적었다가
+   * **지운** 칸도 키가 남으므로 다시 채워 넣지 않는다(지운 값이 되살아나면
+   * 지운 사람은 영문을 모른다).
+   *
+   * 상태로 옮겨 담지 않고 그릴 때마다 얹는 까닭: 읽은 값은 화면에 잠시 떠 있는
+   * **제안**이다. 상태에 넣으면 그 순간 「사람이 적은 값」과 구별할 수 없어진다.
+   * 얹히면 아래 dirty 가 참이 되어 그 줄의 [저장] 단추가 저절로 나타나고,
+   * 저장 방식은 예전 그대로다(줄마다 한 번 · expectedVersion).
+   */
+  const passSlipColumnKey = passSlipColumnOf(form)?.key ?? null;
+  const passSlipFilled = passSlipOutcome?.value ?? null;
+  const values =
+    passSlipColumnKey &&
+    passSlipFilled &&
+    !Object.prototype.hasOwnProperty.call(typedValues, passSlipColumnKey)
+      ? { ...typedValues, [passSlipColumnKey]: passSlipFilled }
+      : typedValues;
 
   // 접수 전 의뢰는 아직 접수가 아니라 값을 붙일 자리가 없다(기본 보기와 같다).
   const pending = item.sourceKind === "REQUEST";
@@ -644,7 +703,7 @@ function FormItemRow({
       valuesChanged);
 
   function setValue(key: string, next: string) {
-    setValues((previous) => ({ ...previous, [key]: next }));
+    setTypedValues((previous) => ({ ...previous, [key]: next }));
   }
 
   return (
@@ -708,21 +767,28 @@ function FormItemRow({
           case "MANUAL": {
             const value = values[column.key] ?? "";
             const slashWhenEmpty = column.emptyMark === "SLASH" && !value;
+            // 통문증 알림은 그 값이 들어가는 칸 **바로 밑**에 붙인다. 표 밖에 모아
+            // 두면 열이 열셋인 표에서 어느 줄의 말인지 알 수 없다.
+            const notice =
+              passSlipOutcome && passSlipColumnKey === column.key ? passSlipOutcome : null;
             return (
               <td key={column.key} className="px-3 py-2">
                 {pending ? (
                   <span className="text-zinc-400">-</span>
                 ) : (
-                  <input
-                    type={column.valueKind === "date" ? "date" : "text"}
-                    value={value}
-                    disabled={!canEdit}
-                    maxLength={PORTAL_MANUAL_VALUE_MAX_LENGTH}
-                    aria-label={column.label}
-                    style={slashWhenEmpty ? EMPTY_SLASH_STYLE : undefined}
-                    onChange={(e) => setValue(column.key, e.target.value)}
-                    className="h-9 w-32 rounded border border-zinc-300 px-2 text-sm disabled:bg-zinc-100"
-                  />
+                  <>
+                    <input
+                      type={column.valueKind === "date" ? "date" : "text"}
+                      value={value}
+                      disabled={!canEdit}
+                      maxLength={PORTAL_MANUAL_VALUE_MAX_LENGTH}
+                      aria-label={column.label}
+                      style={slashWhenEmpty ? EMPTY_SLASH_STYLE : undefined}
+                      onChange={(e) => setValue(column.key, e.target.value)}
+                      className="h-9 w-32 rounded border border-zinc-300 px-2 text-sm disabled:bg-zinc-100"
+                    />
+                    {notice ? <PassSlipRowNotice outcome={notice} /> : null}
+                  </>
                 )}
               </td>
             );
