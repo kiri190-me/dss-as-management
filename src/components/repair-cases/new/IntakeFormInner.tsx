@@ -28,9 +28,11 @@ import { previewNextIntakeNumberAction } from "@/lib/server/actions/intake-numbe
 import { linkRequestToRepairCaseAction } from "@/lib/server/actions/customer-portal-requests";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import type { NameplateFields } from "@/lib/qr/nameplate-code";
 import DerivedProductFields from "./DerivedProductFields";
 import ClearDraftDialog from "./ClearDraftDialog";
 import DraftStatusLine from "./DraftStatusLine";
+import NameplateQrPicker from "./NameplateQrPicker";
 
 type FieldKey =
   | "customerId"
@@ -326,6 +328,22 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
 
   function handleCreateNewProductModel() {
     updateDraft({ productModelCreateNew: true });
+  }
+
+  /**
+   * 명판 QR 로 읽은 값을 **빈칸에만** 넣는다(어느 칸을 채울지는
+   * `planNameplateFill` 이 이미 골라 두었다 — 여기 오는 조각에는 채울 칸만 있다).
+   *
+   * 🔴 모델명은 반드시 `handleModelNameChange` 를 지난다. 그래야 등록된
+   * Model 과 글자 그대로 맞을 때만 productModelId 가 붙고, 없는 이름이면
+   * 「새 모델로 등록」 안내가 그대로 뜬다 — **QR 이 새 모델을 만들지 않는다.**
+   */
+  function handleNameplateFill(patch: Partial<NameplateFields>) {
+    if (patch.modelName !== undefined) handleModelNameChange(patch.modelName);
+    const rest: Partial<IntakeDraftData> = {};
+    if (patch.lotNumber !== undefined) rest.lotNumber = patch.lotNumber;
+    if (patch.serialNumber !== undefined) rest.serialNumber = patch.serialNumber;
+    if (Object.keys(rest).length > 0) updateDraft(rest);
   }
 
   function handleWorkflowKindChange(kind: WorkflowKind) {
@@ -859,6 +877,15 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">제품 정보</h2>
+        <NameplateQrPicker
+          fields={{
+            modelName: draft.modelName,
+            lotNumber: draft.lotNumber,
+            serialNumber: draft.serialNumber,
+          }}
+          onFill={handleNameplateFill}
+          disabled={isSubmitting}
+        />
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="modelName" className={labelClass}>Model *</label>

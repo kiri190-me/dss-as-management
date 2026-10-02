@@ -39,6 +39,7 @@
     "@types/nodemailer": "^8.0.1",
     "@types/sanitize-html": "^2.16.1",
     "@xyflow/react": "^12.11.2",
+    "@zxing/library": "^0.23.0",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.10",
     "next": "16.2.12",
