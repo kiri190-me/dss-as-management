@@ -771,6 +771,13 @@
       "when": 1790818680100,
       "tag": "0109_glossy_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1790904940508,
+      "tag": "0110_futuristic_calypso",
+      "breakpoints": true
     }
   ]
 }

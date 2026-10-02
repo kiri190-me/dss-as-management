@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   isValidUuid,
   isValidOptionalUuid,
@@ -91,4 +92,44 @@ test("validateInvalidationReason trims and rejects over-length reasons", () => {
 
   const overLong = validateInvalidationReason("가".repeat(2001));
   assert.equal(overLong.ok, false);
+});
+
+// ───────────────────────────── 고치기도 남길 때와 같은 검사를 지난다 (2026-10-02)
+
+/** 주석은 걷어내고 읽는다 — 「이렇게 한다」고 적어 둔 주석이 코드로 잘못 잡히면 안 된다. */
+function readSourceWithoutComments(url: URL): string {
+  return readFileSync(url, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+}
+
+test("🔴 작업 기록 고치기가 남길 때와 **같은** 글·구분 검사를 지난다", () => {
+  const action = readSourceWithoutComments(
+    new URL("../server/actions/repair-case-work-records.ts", import.meta.url)
+  );
+  const editAction = action.slice(action.indexOf("export async function editWorkRecordAction"));
+  assert.ok(editAction.length > 0, "editWorkRecordAction 이 있어야 한다");
+  assert.ok(
+    editAction.includes("validateWorkRecordMemo(input.memo)"),
+    "글은 남길 때와 같은 validateWorkRecordMemo 를 지나야 한다 — 빈 글 금지는 표의 memo_not_blank 검사와 짝이다"
+  );
+  assert.ok(
+    editAction.includes("validateWorkRecordKind(input.recordKind)"),
+    "기록 구분도 남길 때와 같은 validateWorkRecordKind 를 지나야 한다"
+  );
+  // 🔴 고칠 때만 따로 다듬는 길(소문자화·치환·자르기 등)이 끼어들면 교산
+  //    연락서의 일본어 원문이 저장된 글자와 달라진다. 다듬기는 앞뒤 공백
+  //    제거뿐이어야 하고, 그 규칙은 위 두 검사 함수 안에만 있어야 한다.
+  assert.ok(
+    !/input\.memo\s*\.\s*(replace|toLowerCase|normalize|slice|substring)/.test(editAction),
+    "고치는 길에서 글을 따로 손대면 안 된다 — 저장은 사람이 친 글자 그대로다"
+  );
+});
+
+test("🔴 빈 글로는 고칠 수 없다 — 남길 때와 같은 거절이다", () => {
+  for (const value of ["", "   ", null, undefined]) {
+    assert.equal(validateWorkRecordMemo(value).ok, false);
+  }
 });

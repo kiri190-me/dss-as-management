@@ -123,3 +123,26 @@ export type InvalidateWorkRecordActionResultCode =
 export type InvalidateWorkRecordActionResult =
   | { ok: true; id: string; invalidatedAt: string }
   | { ok: false; code: InvalidateWorkRecordActionResultCode; message: string };
+
+/**
+ * 작업 기록 고치기(2026-10-02). 글과 기록 구분은 **남길 때와 똑같은**
+ * validateWorkRecordMemo / validateWorkRecordKind 를 지난다 — 빈 글 금지는
+ * 표의 `repair_case_work_records_memo_not_blank` 검사와 짝이다. 고칠 때만
+ * 느슨한 입력 규칙을 따로 두면 저장된 글의 모양이 두 가지가 된다.
+ *
+ * NO_CHANGE 는 거절이 아니라 「바뀐 것이 없다」다 — 빈 이력 줄을 쌓지 않으려고
+ * mutation 이 돌려보낸다(화면은 창을 열어 둔 채 그대로 알린다).
+ */
+export type EditWorkRecordActionResultCode =
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "ALREADY_INVALIDATED"
+  | "BILLING_DECISION_REQUIRED"
+  | "NO_CHANGE"
+  | "DATABASE_UNAVAILABLE";
+
+export type EditWorkRecordActionResult =
+  | { ok: true; id: string; editedAt: string }
+  | { ok: false; code: EditWorkRecordActionResultCode; message: string };

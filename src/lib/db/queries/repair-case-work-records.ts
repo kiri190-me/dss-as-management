@@ -25,6 +25,15 @@ export async function getWorkRecordCaseContext(repairCaseId: string): Promise<Wo
   return row ?? null;
 }
 
+/** 고치기 전의 한 판본(2026-10-02). 새것부터 늘어선다 — 아래 previousVersions 주석. */
+export type WorkRecordPreviousVersion = {
+  memo: string;
+  recordKind: WorkRecordKind;
+  /** ISO 8601 (UTC, `Z` 접미사) — createdAt 과 같은 형식. */
+  editedAt: string;
+  editedByName: string;
+};
+
 export type WorkRecordRow = {
   id: string;
   memo: string;
@@ -40,7 +49,47 @@ export type WorkRecordRow = {
   invalidatedByUserId: string | null;
   invalidatedByName: string | null;
   invalidationReason: string | null;
+  /** 고친 횟수. 0 이면 한 번도 안 고쳐진 기록이다 — 본 표에 칸을 두지 않고 이력 줄 수로 센다. */
+  editCount: number;
+  lastEditedAt: string | null;
+  lastEditedByName: string | null;
+  /** 고치기 전 판본들, **새것부터**. previousVersions[0] 이 가장 최근에 덮인 값이다. */
+  previousVersions: WorkRecordPreviousVersion[];
 };
+
+/** DB 가 돌려주는 날것 — edited_at 은 Postgres 가 찍은 글자라 아래에서 ISO(Z)로 맞춘다. */
+type PreviousVersionJson = { memo: string; recordKind: WorkRecordKind; editedAt: string; editedByName: string };
+
+/**
+ * 한 기록의 고친 이력 전부를 **그 줄과 함께** 가져오는 상관 하위질의
+ * (2026-10-02). 목록이 20줄이므로 기록마다 따로 묻지 않는다 — 이것을
+ * selectWorkRecordColumns 에 끼워 두면 기존 조회가 왕복 수를 하나도 늘리지
+ * 않고 이력까지 싣는다(최근 5건 조회도 공짜로 함께 받는다).
+ *
+ * 🔴 표/칸 이름을 글자로 적는다 — drizzle 의 alias() 객체를 sql 템플릿의
+ * FROM 자리에 끼우면 별칭이 제대로 풀리지 않는다. 이 저장소에 이미 같은
+ * 방식이 여럿 있다(`sql\`client_request_id is not null\`` 등). 바깥 줄과의
+ * 연결만 drizzle 칼럼 참조로 적어, 바깥 질의가 어떤 별칭을 쓰든 맞게 풀린다.
+ *
+ * 새것부터(edited_at DESC, id DESC) — 다른 모든 작업 기록 조회와 같은
+ * tie-break 다. 줄이 없으면 json_agg 가 NULL 이라 `'[]'::json` 으로 받는다.
+ */
+function previousVersionsSubquery() {
+  return sql<PreviousVersionJson[]>`coalesce((
+    select json_agg(
+      json_build_object(
+        'memo', e.previous_memo,
+        'recordKind', e.previous_record_kind,
+        'editedAt', e.edited_at,
+        'editedByName', eu.name
+      )
+      order by e.edited_at desc, e.id desc
+    )
+    from repair_case_work_record_edits e
+    join users eu on eu.id = e.edited_by
+    where e.work_record_id = ${repairCaseWorkRecords.id}
+  ), '[]'::json)`;
+}
 
 function selectWorkRecordColumns() {
   return {
@@ -57,6 +106,7 @@ function selectWorkRecordColumns() {
     invalidatedByUserId: repairCaseWorkRecords.invalidatedBy,
     invalidatedByName: invalidatedByUser.name,
     invalidationReason: repairCaseWorkRecords.invalidationReason,
+    previousVersions: previousVersionsSubquery(),
   };
 }
 
@@ -85,7 +135,16 @@ function toWorkRecordRow(row: {
   invalidatedByUserId: string | null;
   invalidatedByName: string | null;
   invalidationReason: string | null;
+  previousVersions: PreviousVersionJson[] | null;
 }): WorkRecordRow {
+  // Postgres 가 json 으로 찍어 준 시각은 "+00:00" 꼴이라, 다른 모든 시각 칸과
+  // 같은 ISO(Z) 형식으로 맞춘다 — 화면이 형식을 가려 쓰지 않아도 되게.
+  const previousVersions: WorkRecordPreviousVersion[] = (row.previousVersions ?? []).map((version) => ({
+    memo: version.memo,
+    recordKind: version.recordKind,
+    editedAt: new Date(version.editedAt).toISOString(),
+    editedByName: version.editedByName,
+  }));
   return {
     id: row.id,
     memo: row.memo,
@@ -100,6 +159,11 @@ function toWorkRecordRow(row: {
     invalidatedByUserId: row.invalidatedByUserId,
     invalidatedByName: row.invalidatedByName,
     invalidationReason: row.invalidationReason,
+    // 「고쳐졌는가」는 이력 줄이 있는가로만 안다 — 본 표에 칸을 두지 않았다.
+    editCount: previousVersions.length,
+    lastEditedAt: previousVersions[0]?.editedAt ?? null,
+    lastEditedByName: previousVersions[0]?.editedByName ?? null,
+    previousVersions,
   };
 }
 

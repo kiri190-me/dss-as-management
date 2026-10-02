@@ -2,7 +2,7 @@
 
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { createWorkRecord, invalidateWorkRecord } from "@/lib/db/mutations/repair-case-work-records";
+import { createWorkRecord, editWorkRecord, invalidateWorkRecord } from "@/lib/db/mutations/repair-case-work-records";
 import {
   isValidRepairCaseId,
   isValidOptionalUuid,
@@ -11,6 +11,7 @@ import {
   validateWorkRecordKind,
   validateInvalidationReason,
   type CreateWorkRecordActionResult,
+  type EditWorkRecordActionResult,
   type InvalidateWorkRecordActionResult,
 } from "@/lib/validation/repair-case-work-record-input";
 
@@ -112,6 +113,53 @@ export async function invalidateWorkRecordAction(input: {
   } catch (err) {
     const code = isPgErrorLike(err) ? err.code : undefined;
     console.error("invalidateWorkRecordAction: unexpected DB error", { code });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
+/**
+ * 작업 기록 고치기(2026-10-02). 바로 위 invalidateWorkRecordAction 과 같은
+ * 모양·같은 오류 처리다 — 세션만 확인하고 입력 모양을 검사한 뒤 mutation 에
+ * 넘긴다. 작성자 본인 여부 · 담당 여부 · 권한은 **전부 mutation 이 다시**
+ * 판정한다(이 층은 승인된 세션이 있는지만 본다).
+ *
+ * 🔴 글은 남길 때와 **같은** validateWorkRecordMemo 를 지난다 — 교산 연락서가
+ * 들어간 기록이면 일본어 원문이 그대로 오고, 그대로 저장된다(보여 줄 때만
+ * KyosanMemoText 가 한글을 곁들인다). 다듬기는 앞뒤 공백 제거뿐이라 원문의
+ * 글자가 바뀌지 않는다.
+ */
+export async function editWorkRecordAction(input: {
+  workRecordId: string;
+  memo: string;
+  /** Omitted/null/"" all default to GENERAL — see validateWorkRecordKind. */
+  recordKind?: string | null;
+}): Promise<EditWorkRecordActionResult> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return { ok: false, code: "UNAUTHORIZED", message: actorCheck.result.message };
+
+  if (!isValidUuid(input.workRecordId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "작업 기록을 확인할 수 없습니다." };
+  }
+  const memoValidation = validateWorkRecordMemo(input.memo);
+  if (!memoValidation.ok) {
+    return { ok: false, code: "VALIDATION_ERROR", message: memoValidation.error };
+  }
+  const kindValidation = validateWorkRecordKind(input.recordKind);
+  if (!kindValidation.ok) {
+    return { ok: false, code: "VALIDATION_ERROR", message: kindValidation.error };
+  }
+
+  try {
+    const result = await editWorkRecord({
+      workRecordId: input.workRecordId,
+      actorUserId: actorCheck.userId,
+      memo: memoValidation.memo,
+      recordKind: kindValidation.recordKind,
+    });
+    return result;
+  } catch (err) {
+    const code = isPgErrorLike(err) ? err.code : undefined;
+    console.error("editWorkRecordAction: unexpected DB error", { code });
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요." };
   }
 }

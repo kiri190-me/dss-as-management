@@ -4,11 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { WorkRecordRow } from "@/lib/db/queries/repair-case-work-records";
-import type { InvalidateWorkRecordActionResult } from "@/lib/validation/repair-case-work-record-input";
+import type {
+  EditWorkRecordActionResult,
+  InvalidateWorkRecordActionResult,
+} from "@/lib/validation/repair-case-work-record-input";
+import type { WorkRecordKind } from "@/lib/domain/types";
 import type { WorkflowHistoryEntry } from "@/lib/db/queries/workflow-history";
 import DatabaseWorkflowHistoryList from "@/components/repair-cases/workflow/DatabaseWorkflowHistoryList";
 import WorkRecordList from "@/components/repair-cases/work-records/WorkRecordList";
 import InvalidateWorkRecordDialog from "@/components/repair-cases/work-records/InvalidateWorkRecordDialog";
+import EditWorkRecordDialog from "@/components/repair-cases/work-records/EditWorkRecordDialog";
 
 /**
  * Phase 5C-2 — DATABASE-sourced "작업 이력" tab: work records as the
@@ -30,6 +35,13 @@ import InvalidateWorkRecordDialog from "@/components/repair-cases/work-records/I
  * The invalidate action is injected as a prop rather than imported here so
  * this screen stays a plain renderable component (the page owns the
  * server-action import, as it owns the permission check).
+ *
+ * 🔴 2026-10-02 — **고치기도 이 탭에만 붙는다.** 엔지니어가 자기가 쓴 기록의
+ * 글과 기록 구분을 고친다. 무효화와 똑같은 방식으로 배선했다: 페이지가 권한을
+ * 판정해 `canEditOwnRecords` · `currentUserId` · `editAction` 을 내려주고,
+ * 서버 액션은 자기 검사를 따로 한다(여기 것은 단추를 보일지만 정한다).
+ * 「작업내용」 탭의 WorkRecordsSection 은 건드리지 않았다 — 그 탭은 새로
+ * 남기는 자리다.
  */
 export default function DatabaseWorkHistoryScreen({
   repairCaseId,
@@ -40,6 +52,9 @@ export default function DatabaseWorkHistoryScreen({
   workflowHistory,
   canInvalidate,
   invalidateAction,
+  canEditOwnRecords,
+  currentUserId,
+  editAction,
 }: {
   repairCaseId: string;
   records: WorkRecordRow[];
@@ -49,12 +64,23 @@ export default function DatabaseWorkHistoryScreen({
   workflowHistory: WorkflowHistoryEntry[];
   canInvalidate: boolean;
   invalidateAction: (input: { workRecordId: string; reason: string }) => Promise<InvalidateWorkRecordActionResult>;
+  /** 역할·권한상 자기가 쓴 기록을 고칠 수 있는가(repairCases.workRecords WRITE + canEditWorkRecord). */
+  canEditOwnRecords: boolean;
+  currentUserId: string | null;
+  editAction: (input: { workRecordId: string; memo: string; recordKind: string }) => Promise<EditWorkRecordActionResult>;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const router = useRouter();
   const [invalidateTargetId, setInvalidateTargetId] = useState<string | null>(null);
   const [isSubmittingInvalidate, setIsSubmittingInvalidate] = useState(false);
   const [invalidateError, setInvalidateError] = useState<string | null>(null);
+  const [editTargetId, setEditTargetId] = useState<string | null>(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // 지금 고치는 중인 줄. 고치기 창은 하나이고 어느 줄을 고치는지는 id 로만
+  // 들고 있으므로, 창에 실을 값은 늘 **지금 조회한 줄**에서 찾아 쓴다.
+  const editTarget = editTargetId === null ? null : records.find((record) => record.id === editTargetId) ?? null;
 
   async function handleInvalidateConfirm(reason: string) {
     if (!invalidateTargetId || isSubmittingInvalidate) return;
@@ -67,6 +93,22 @@ export default function DatabaseWorkHistoryScreen({
       return;
     }
     setInvalidateTargetId(null);
+    router.refresh();
+  }
+
+  async function handleEditConfirm(next: { memo: string; recordKind: WorkRecordKind }) {
+    if (!editTargetId || isSubmittingEdit) return;
+    setIsSubmittingEdit(true);
+    setEditError(null);
+    const result = await editAction({ workRecordId: editTargetId, memo: next.memo, recordKind: next.recordKind });
+    setIsSubmittingEdit(false);
+    if (!result.ok) {
+      // 거절이면 창을 열어 둔 채 까닭을 창 안에 보인다 — 창이 떠 있는 동안
+      // 뒤 화면의 글은 읽을 수 없다(NO_CHANGE 도 여기로 온다).
+      setEditError(result.message);
+      return;
+    }
+    setEditTargetId(null);
     router.refresh();
   }
 
@@ -88,6 +130,16 @@ export default function DatabaseWorkHistoryScreen({
             canInvalidate={canInvalidate}
             onInvalidate={canInvalidate ? (id) => setInvalidateTargetId(id) : undefined}
             emptyMessage="아직 작업 기록이 없습니다."
+            canEditOwnRecords={canEditOwnRecords}
+            currentUserId={currentUserId}
+            onEdit={
+              canEditOwnRecords
+                ? (id) => {
+                    setEditError(null);
+                    setEditTargetId(id);
+                  }
+                : undefined
+            }
           />
         </div>
 
@@ -135,6 +187,24 @@ export default function DatabaseWorkHistoryScreen({
           isSubmitting={isSubmittingInvalidate}
           onConfirm={(reason) => void handleInvalidateConfirm(reason)}
           onCancel={() => setInvalidateTargetId(null)}
+        />
+      )}
+
+      {/*
+        🔴 고칠 줄이 정해진 뒤에야 창을 만든다 — 창은 열릴 때 지금 값을 싣는데
+        (EditWorkRecordDialog 의 useEffect), 실을 값이 없는 채로 미리 붙어
+        있으면 첫 번째로 고치는 줄의 글이 빈 칸으로 열린다.
+      */}
+      {canEditOwnRecords && editTarget && (
+        <EditWorkRecordDialog
+          key={editTarget.id}
+          isOpen
+          isSubmitting={isSubmittingEdit}
+          initialMemo={editTarget.memo}
+          initialRecordKind={editTarget.recordKind}
+          errorMessage={editError}
+          onConfirm={(next) => void handleEditConfirm(next)}
+          onCancel={() => setEditTargetId(null)}
         />
       )}
     </div>

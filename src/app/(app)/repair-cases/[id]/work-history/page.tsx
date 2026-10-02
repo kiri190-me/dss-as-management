@@ -5,9 +5,11 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import DatabaseWorkHistoryScreen from "@/components/repair-cases/work-history/DatabaseWorkHistoryScreen";
-import { invalidateWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
-import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
+import { editWorkRecordAction, invalidateWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
+import { getWorkRecordCaseContext, getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { getWorkflowHistoryForCase } from "@/lib/db/queries/workflow-history";
+import { canEditWorkRecord } from "@/lib/auth/repair-case-work-record-authorization";
+import { actorMay } from "@/lib/auth/developer-promotion";
 
 const WORK_HISTORY_PAGE_SIZE = 20;
 
@@ -46,9 +48,12 @@ export default async function WorkHistoryPage({
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
 
-  const [{ rows, total }, workflowHistory] = await Promise.all([
+  const [{ rows, total }, workflowHistory, caseContext] = await Promise.all([
     getWorkRecordHistoryForCase(resolved.id, { limit: WORK_HISTORY_PAGE_SIZE, offset: (page - 1) * WORK_HISTORY_PAGE_SIZE }),
     getWorkflowHistoryForCase(resolved.id),
+    // 고치기 권한 판정에 쓰는 건 맥락(담당 엔지니어·잠금) — 서버 액션도
+    // 같은 값을 제 트랜잭션에서 다시 읽고 다시 판정한다.
+    getWorkRecordCaseContext(resolved.id),
   ]);
 
   /**
@@ -65,6 +70,29 @@ export default async function WorkHistoryPage({
     ? await hasPermission(actingUser, "repairCases.workRecords", "MANAGE")
     : false;
 
+  /**
+   * 자기가 쓴 작업 기록을 고칠 수 있는가(2026-10-02).
+   *
+   * 🔴 권한 축은 **WRITE** 다 — manage(무효 처리)가 아니다. 수정은 제 규칙을
+   * 가진 별개의 일이고, 관리자가 그 역할을 READ 로 낮추면 남기기와 함께
+   * 막혀야 한다(canEditWorkRecord 주석).
+   *
+   * 여기서 보는 것은 「이 역할이 **자기 것**을 고칠 수 있는가」까지다
+   * (isAuthor: true 를 넣어 묻는다). 「이 줄이 정말 내 것인가」는 화면이
+   * currentUserId 로 줄마다 가리고, 서버 액션이 제 트랜잭션에서 다시 판정한다.
+   */
+  const isAssignedToCase = actingUser !== null && caseContext?.assignedEngineerId === actingUser.id;
+  const canEditOwnRecords =
+    actingUser !== null &&
+    actorMay(actingUser, (role) =>
+      canEditWorkRecord(role, {
+        isAuthor: true,
+        isAssignedToCase,
+        isCaseLocked: caseContext?.isLocked ?? false,
+      })
+    ) &&
+    (await hasPermission(actingUser, "repairCases.workRecords", "WRITE"));
+
   return (
     <DatabaseWorkHistoryScreen
       repairCaseId={resolved.id}
@@ -75,6 +103,9 @@ export default async function WorkHistoryPage({
       workflowHistory={workflowHistory}
       canInvalidate={canInvalidate}
       invalidateAction={invalidateWorkRecordAction}
+      canEditOwnRecords={canEditOwnRecords}
+      currentUserId={actingUser?.id ?? null}
+      editAction={editWorkRecordAction}
     />
   );
 }

@@ -12,6 +12,7 @@ import {
   repairCases,
   repairCaseIntakeSequences,
   repairCaseWorkRecords,
+  repairCaseWorkRecordEdits,
   procedureTemplates,
   procedureTemplateNodes,
   procedureTemplateEdges,
@@ -27,7 +28,7 @@ import { createDraftProcedureTemplateFromImport, publishProcedureTemplate } from
 import { startProcedureExecution } from "./procedure-case-execution";
 import { transitionWorkflow } from "./workflow-transitions";
 import * as workRecordMutations from "./repair-case-work-records";
-import { createWorkRecord, invalidateWorkRecord } from "./repair-case-work-records";
+import { createWorkRecord, editWorkRecord, invalidateWorkRecord } from "./repair-case-work-records";
 import {
   getRecentWorkRecordsForCase,
   getWorkRecordHistoryForCase,
@@ -543,26 +544,31 @@ describe("createWorkRecord: idempotency", () => {
 });
 
 describe("work-record immutability", () => {
-  test("17. the mutation module exposes exactly createWorkRecord(+InTx) and invalidateWorkRecord — no edit/update mutation exists", () => {
+  test("17. the mutation module exposes exactly createWorkRecord(+InTx), invalidateWorkRecord, editWorkRecord — and nothing else", () => {
     const exportedFunctionNames = Object.keys(workRecordMutations).sort();
     // 🔴 2026-09-21 — createWorkRecord 의 **몸통**을 createWorkRecordInTx 로 뽑았다
     //    (교산 연락서 이식이 첨부 · 사용 부품 · 이식 흔적과 한 트랜잭션으로 작업
-    //    기록을 넣어야 한다). 쓰기의 수는 그대로 둘이고, 뽑은 함수는 같은 INSERT
-    //    다. 오류 클래스는 그 던짐을 부르는 쪽이 제 결과로 바꾸기 위해 열었다.
+    //    기록을 넣어야 한다). 뽑은 함수는 같은 INSERT 다. 오류 클래스는 그 던짐을
+    //    부르는 쪽이 제 결과로 바꾸기 위해 열었다.
+    //
+    // 🔴 2026-10-02 — 이 시험은 예전에 「고치는 mutation 이 **없다**」를 지켰다
+    //    (이름에 update/edit 이 들어가면 실패시켰다). 사용자 결정으로 작업 기록의
+    //    글과 기록 구분을 고칠 수 있게 되면서 그 불변식이 바뀌었다. 느슨해진
+    //    것이 아니라 **다른 불변식으로 바뀐 것**이고, 지금 지키는 것은 이것이다:
+    //      · 쓰기의 이름이 이 셋뿐이다(아무도 네 번째 길을 몰래 더하지 못한다).
+    //      · 고치기는 memo 와 record_kind **두 칸만** 손댄다 — 아래 39~48 번이
+    //        작성자 · 작성 시각 · 맥락 칸 · 무효 처리 칸이 그대로임을 값으로 본다.
     assert.deepEqual(exportedFunctionNames, [
       "CreateWorkRecordMutationError",
       "createWorkRecord",
       "createWorkRecordInTx",
+      "editWorkRecord",
       "invalidateWorkRecord",
     ]);
-    // 🔴 이 시험이 지키는 것은 「작업 기록을 **고치는** mutation 이 없다」이다 —
-    //    이름이 늘어도 그 규칙은 한 글자도 느슨해지지 않는다.
+    // 「무엇이든 덮어쓰는」 범용 update 는 여전히 있으면 안 된다 — 고치기는
+    // editWorkRecord 하나로만, 정해진 두 칸에만 일어난다.
     for (const name of exportedFunctionNames) {
-      assert.equal(
-        /update|edit/i.test(name),
-        false,
-        `${name} — 작업 기록을 고치는 mutation 은 있으면 안 된다`
-      );
+      assert.equal(/update/i.test(name), false, `${name} — 범용 update mutation 은 있으면 안 된다`);
     }
   });
 });
@@ -968,6 +974,242 @@ describe("getDerivedServiceSummariesForCases (이력 줄의 조치 내용 — �
     assert.deepEqual(await getDerivedServiceSummaryForCase(created.id), EMPTY_SUMMARY);
 
     assert.equal((await getDerivedServiceSummariesForCases([])).size, 0);
+  });
+});
+
+describe("editWorkRecord (작업 기록 고치기 — 2026-10-02)", () => {
+  test("39. 작성자 본인만 고친다 — 관리자도 남의 기록은 못 고치고, 엔지니어는 자기 담당 건의 자기 기록을 고친다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "엔지니어가 쓴 기록", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    // 🔴 남이 쓴 기록은 누구도 못 고친다 — 무효 처리 권한을 가진 관리자도.
+    for (const actorId of [adminId, superAdminId, engineer2Id, salesId, inventoryManagerId]) {
+      const denied = await editWorkRecord({ workRecordId: record.id, actorUserId: actorId, memo: "남이 고친 글", recordKind: "GENERAL" });
+      assert.equal(denied.ok, false, `${actorId} 는 남의 기록을 고칠 수 없어야 한다`);
+      if (!denied.ok) assert.equal(denied.code, "FORBIDDEN");
+    }
+
+    // 작성자 본인(담당 엔지니어)은 고친다.
+    const allowed = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "본인이 고친 글", recordKind: "DIAGNOSIS_REPAIR_SUMMARY" });
+    assert.equal(allowed.ok, true, JSON.stringify(allowed));
+
+    const [row] = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+    assert.equal(row.memo, "본인이 고친 글");
+    assert.equal(row.recordKind, "DIAGNOSIS_REPAIR_SUMMARY");
+  });
+
+  test("40. 🔴 AS_ENGINEER 는 담당이 자기가 아닌 건에서는 자기가 쓴 기록도 못 고친다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "담당일 때 쓴 기록", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    // 담당이 다른 엔지니어로 넘어갔다.
+    await db.update(repairCases).set({ assignedEngineerId: engineer2Id }).where(eq(repairCases.id, created.id));
+
+    const denied = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "담당이 바뀐 뒤 고치기", recordKind: "GENERAL" });
+    assert.equal(denied.ok, false);
+    if (!denied.ok) assert.equal(denied.code, "FORBIDDEN");
+
+    const [row] = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+    assert.equal(row.memo, "담당일 때 쓴 기록", "거절당한 고치기가 글을 바꿔서는 안 된다");
+  });
+
+  test("41. 🔴 고치기는 memo 와 record_kind 만 바꾼다 — 작성자 · 작성 시각 · 맥락 칸 · 무효 처리 칸은 그대로다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const fixture = await createPublishedTemplateAndExecution(created.id, superAdminId);
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "고치기 전", recordKind: "GENERAL", relatedProcedureExecutionNodeId: fixture.nodeId, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    const [before] = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+
+    const result = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "고친 뒤", recordKind: "NEXT_PLANNED_ACTION" });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [after1] = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+    assert.equal(after1.memo, "고친 뒤");
+    assert.equal(after1.recordKind, "NEXT_PLANNED_ACTION");
+    assert.equal(after1.authorUserId, before.authorUserId, "작성자가 바뀌면 안 된다");
+    assert.deepEqual(after1.createdAt, before.createdAt, "작성 시각이 바뀌면 안 된다");
+    assert.equal(after1.relatedWorkflowStepId, before.relatedWorkflowStepId, "작성 당시의 단계가 바뀌면 안 된다");
+    assert.equal(after1.relatedProcedureExecutionNodeId, before.relatedProcedureExecutionNodeId, "연결한 절차 항목이 바뀌면 안 된다");
+    assert.equal(after1.clientRequestId, before.clientRequestId, "요청 식별자가 바뀌면 안 된다");
+    assert.equal(after1.invalidatedAt, null);
+    assert.equal(after1.invalidatedBy, null);
+    assert.equal(after1.invalidationReason, null);
+  });
+
+  test("42. 고치기 전 값이 이력 표에 한 줄씩 쌓인다 — 두 번 고치면 두 줄, 새것부터 읽힌다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "1판", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    assert.equal((await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "2판", recordKind: "INTAKE_INSPECTION_RESULT" })).ok, true);
+    assert.equal((await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "3판", recordKind: "DIAGNOSIS_REPAIR_SUMMARY" })).ok, true);
+
+    const edits = await db
+      .select()
+      .from(repairCaseWorkRecordEdits)
+      .where(eq(repairCaseWorkRecordEdits.workRecordId, record.id));
+    assert.equal(edits.length, 2, "두 번 고쳤으면 이력 줄도 둘이다");
+    const memos = edits.map((e) => e.previousMemo).sort();
+    assert.deepEqual(memos, ["1판", "2판"], "남는 것은 **고치기 전** 값이다");
+    for (const edit of edits) assert.equal(edit.editedBy, engineerId);
+
+    const { rows } = await getWorkRecordHistoryForCase(created.id, { limit: 20, offset: 0 });
+    const row = rows.find((r) => r.id === record.id);
+    assert.ok(row);
+    assert.equal(row!.memo, "3판", "본문은 가장 최근 값이다");
+    assert.equal(row!.editCount, 2);
+    assert.equal(row!.lastEditedByName !== null, true);
+    assert.deepEqual(
+      row!.previousVersions.map((v) => v.memo),
+      ["2판", "1판"],
+      "이전 판본은 새것부터 늘어선다"
+    );
+    assert.deepEqual(
+      row!.previousVersions.map((v) => v.recordKind),
+      ["INTAKE_INSPECTION_RESULT", "GENERAL"],
+      "그때의 기록 구분도 함께 남는다"
+    );
+    for (const version of row!.previousVersions) {
+      assert.ok(version.editedAt.endsWith("Z"), `editedAt 은 다른 시각 칸과 같은 ISO(Z) 형식이어야 한다: ${version.editedAt}`);
+    }
+  });
+
+  test("43. 🔴 글과 구분이 둘 다 그대로면 NO_CHANGE — 빈 이력 줄을 쌓지 않는다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "그대로 둘 글", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    const result = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "그대로 둘 글", recordKind: "GENERAL" });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NO_CHANGE");
+
+    const edits = await db.select().from(repairCaseWorkRecordEdits).where(eq(repairCaseWorkRecordEdits.workRecordId, record.id));
+    assert.equal(edits.length, 0, "바뀐 것이 없으면 이력 줄도 없다");
+
+    // 구분만 바꿔도 고치기다 — 글이 같다고 거절하면 안 된다.
+    const kindOnly = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "그대로 둘 글", recordKind: "NEXT_PLANNED_ACTION" });
+    assert.equal(kindOnly.ok, true, JSON.stringify(kindOnly));
+    assert.equal((await db.select().from(repairCaseWorkRecordEdits).where(eq(repairCaseWorkRecordEdits.workRecordId, record.id))).length, 1);
+  });
+
+  test("44. 🔴 이미 무효 처리된 기록은 고칠 수 없다 — 글도 이력 줄도 그대로다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "무효 처리될 글", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    assert.equal((await invalidateWorkRecord({ workRecordId: record.id, actorUserId: adminId, reason: "오기입" })).ok, true);
+
+    const result = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "무효 처리 뒤 고치기", recordKind: "GENERAL" });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "ALREADY_INVALIDATED");
+
+    const [row] = await db.select().from(repairCaseWorkRecords).where(eq(repairCaseWorkRecords.id, record.id));
+    assert.equal(row.memo, "무효 처리될 글");
+    assert.equal(row.invalidationReason, "오기입");
+    assert.equal((await db.select().from(repairCaseWorkRecordEdits).where(eq(repairCaseWorkRecordEdits.workRecordId, record.id))).length, 0);
+  });
+
+  test("45. 유·무상 미확정 건에서는 고칠 수 없다 — 무효 처리와 같은 코드·같은 문구", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "확정 전 글", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    await db.update(repairCases).set({ billingType: "PENDING_DECISION" }).where(eq(repairCases.id, created.id));
+
+    const edited = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "확정 전에 고치기", recordKind: "GENERAL" });
+    const invalidated = await invalidateWorkRecord({ workRecordId: record.id, actorUserId: adminId, reason: "확정 전에 무효 처리" });
+    assert.equal(edited.ok, false);
+    assert.equal(invalidated.ok, false);
+    if (!edited.ok && !invalidated.ok) {
+      assert.equal(edited.code, "BILLING_DECISION_REQUIRED");
+      assert.equal(edited.message, invalidated.message, "같은 조건을 막는 두 길이 서로 다른 말을 하면 안 된다");
+      assert.equal(edited.message, "유·무상을 확정한 후 작업 기록을 변경할 수 있습니다.");
+    }
+  });
+
+  test("46. 출하 잠금(shipment lock)은 고치기를 막지 않는다 — 남기기 · 무효 처리와 같다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "잠금 전 작성", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    await lockCase(created.id);
+    const result = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "잠금 뒤 고치기", recordKind: "GENERAL" });
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("47. 🔴 기록 구분을 고치면 「고장 및 서비스 정보」 요약이 함께 따라 움직인다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "분해 결과 코일 단선 확인", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    // GENERAL 은 어느 요약에도 안 들어간다.
+    let summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.currentDiagnosisSummary, null);
+
+    // 구분을 바로잡으면 요약이 그 글을 집는다 — 구분도 고칠 수 있어야 하는 까닭이다.
+    assert.equal((await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "분해 결과 코일 단선 확인", recordKind: "DIAGNOSIS_REPAIR_SUMMARY" })).ok, true);
+    summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.currentDiagnosisSummary, "분해 결과 코일 단선 확인");
+
+    // 글을 고치면 요약도 새 글이 된다(요약은 늘 지금 값을 읽는다).
+    assert.equal((await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "코일 교체 완료", recordKind: "DIAGNOSIS_REPAIR_SUMMARY" })).ok, true);
+    summary = await getDerivedServiceSummaryForCase(created.id);
+    assert.equal(summary.currentDiagnosisSummary, "코일 교체 완료");
+    const perCase = await getDerivedServiceSummariesForCases([created.id]);
+    assert.equal(perCase.get(created.id)?.currentDiagnosisSummary, "코일 교체 완료", "여러 건 한 번에 읽는 쪽도 같은 답이어야 한다");
+  });
+
+  test("48. 한 번도 안 고친 기록은 editCount 0 · previousVersions 빈 배열로 읽힌다 — 조회가 기록마다 따로 묻지 않는다", async () => {
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const untouched = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "안 고친 기록", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    const edited = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "고칠 기록", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(untouched.ok, true);
+    assert.equal(edited.ok, true);
+    if (!untouched.ok || !edited.ok) return;
+
+    assert.equal((await editWorkRecord({ workRecordId: edited.id, actorUserId: engineerId, memo: "고친 기록", recordKind: "GENERAL" })).ok, true);
+
+    // 최근 목록 쪽도 같은 값을 준다 — 두 조회가 같은 열을 쓴다.
+    const recent = await getRecentWorkRecordsForCase(created.id, 10);
+    const recentUntouched = recent.find((r) => r.id === untouched.id);
+    const recentEdited = recent.find((r) => r.id === edited.id);
+    assert.ok(recentUntouched && recentEdited);
+    assert.equal(recentUntouched!.editCount, 0);
+    assert.deepEqual(recentUntouched!.previousVersions, []);
+    assert.equal(recentUntouched!.lastEditedAt, null);
+    assert.equal(recentUntouched!.lastEditedByName, null);
+    assert.equal(recentEdited!.editCount, 1);
+    assert.equal(recentEdited!.previousVersions[0].memo, "고칠 기록");
+    assert.equal(recentEdited!.lastEditedAt, recentEdited!.previousVersions[0].editedAt);
+  });
+
+  test("49. 없는 기록 · 지워진 접수 건의 기록은 NOT_FOUND", async () => {
+    const missing = await editWorkRecord({ workRecordId: randomUUID(), actorUserId: engineerId, memo: "아무 글", recordKind: "GENERAL" });
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, "NOT_FOUND");
+
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const record = await createWorkRecord({ repairCaseId: created.id, actorUserId: engineerId, memo: "건이 지워질 기록", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() });
+    assert.equal(record.ok, true);
+    if (!record.ok) return;
+
+    await db.update(repairCases).set({ isDeleted: true }).where(eq(repairCases.id, created.id));
+    const softDeleted = await editWorkRecord({ workRecordId: record.id, actorUserId: engineerId, memo: "지워진 건의 기록 고치기", recordKind: "GENERAL" });
+    assert.equal(softDeleted.ok, false);
+    if (!softDeleted.ok) assert.equal(softDeleted.code, "NOT_FOUND");
+    await db.update(repairCases).set({ isDeleted: false }).where(eq(repairCases.id, created.id));
   });
 });
 
