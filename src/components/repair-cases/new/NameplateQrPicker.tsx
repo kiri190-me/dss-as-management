@@ -14,6 +14,10 @@ import {
   type NameplateDecoder,
 } from "@/lib/qr/nameplate-scan";
 
+import type { RegisteredProduct } from "@/lib/ocr/nameplate-text";
+
+import NameplateRegionPicker from "./NameplateRegionPicker";
+
 /**
  * ============================================================================
  * 명판 사진을 골라 **`Model` · `L/N` · `S/N` 세 칸을 채운다**
@@ -34,35 +38,61 @@ import {
  * 보인다). 🔴 실패는 `NoticePopup` 이다. `showSavePopup` 으로 바꿔 끼우면
  * 아무 오류 없이 0.5초 만에 사라져 사람이 글을 못 읽는다.
  *
- * ── 왜 「흐릿합니다」인가 ─────────────────────────────────────────────
- * 실측에서 못 읽은 여덟 장은 둘로 나뉜다 — 2013년 구 양식(QR 이 인쇄돼 있지
- * 않다)과, QR 은 있으나 사진이 작아 안 풀리는 것(읽힌 것 중 가장 작은 QR 이
- * 65px 이었다). 화면이 그 둘을 가릴 방법은 없고, 사람이 할 수 있는 일은 둘 다
- * 「가까이서 다시 찍기」뿐이라 한 문장으로 말한다.
+ * ── 🔴 QR 이 안 읽히면 **곧바로 네모 치기 창을 연다** ──────────────────
+ * 전에는 ①「사진이 흐릿합니다」 팝업 → ②닫기 → ③「글자로 읽어 보기」 누르기,
+ * 세 번을 거쳤다. 사용자가 그것을 **「너무 번거롭다」**고 했다(2026-10-02).
+ *
+ * 멈춰 세울 까닭이 없었다 — **QR 이 안 읽히면 할 일은 하나뿐**이다. 2013년
+ * 구 양식 장비가 실제로 많이 들어오는데 그 명판에는 QR 이 **아예 없어** 다시
+ * 찍어도 영영 안 읽힌다. 고를 것이 없는 자리에서 팝업을 띄우는 것은 손만
+ * 더 가게 한다. 그래서 그 자리에서 `NameplateRegionPicker` 를 바로 띄우고,
+ * **왜 열렸는지는 창 머리에 한 줄로** 적는다.
+ *
+ * 🔴 **QR 로 읽은 값과 글자로 읽은 값을 화면에서 가른다.** QR 은 회색 한 줄,
+ * 글자는 **노랑 바탕 + 「확인 필요」**다. QR 에는 오류 검출 부호가 있어 읽혔으면
+ * 맞지만 글자 인식에는 그런 장치가 없다 — 둘이 같은 모양으로 보이면 사람이
+ * 어느 쪽을 검산해야 하는지 알 수 없다.
  * ============================================================================
  */
-
-/** 못 읽었을 때 띄우는 글. 지시서에 적힌 문장 그대로다. */
-const BLURRY_MESSAGE = "사진이 흐릿합니다. 다시 찍어주세요.";
 
 type Phase =
   | { kind: "IDLE" }
   | { kind: "READING" }
   | { kind: "DONE"; line: string }
-  | { kind: "NOTICE"; title: string; lines: string[] };
+  | { kind: "NOTICE"; title: string; lines: string[] }
+  /** 글자로 읽어 채운 뒤. 🔴 QR 성공(`DONE`)과 **다르게** 보여야 한다. */
+  | { kind: "TEXT"; line: string };
 
 export default function NameplateQrPicker({
   fields,
+  models,
+  lookupBySerial,
   onFill,
   disabled = false,
 }: {
   /** 지금 칸에 적혀 있는 값. 비어 있는 칸만 채우기 위해 본다. */
   fields: NameplateFields;
+  /**
+   * 등록된 Model 이름들. 글자로 읽을 때 **대조에만** 쓴다 — 글자 인식이 틀리게
+   * 읽은 모델명을 등록된 이름으로 바로잡기 위한 것이고, 새 모델을 만들지 않는다.
+   */
+  models: readonly string[];
+  /** S/N 으로 등록된 장비를 찾아 주는 길. 그대로 아래로 넘긴다. */
+  lookupBySerial?: (serial: string) => Promise<RegisteredProduct[]>;
   /** 채울 칸만 담은 조각. 비어 있으면 부르지 않는다. */
   onFill: (patch: Partial<NameplateFields>) => void;
   disabled?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: "IDLE" });
+  /** QR 이 실패한 사진. 🔴 저장하지 않는다 — 글자로 다시 읽기 위해 메모리에만 둔다. */
+  const [fallbackFile, setFallbackFile] = useState<File | null>(null);
+  const [regionOpen, setRegionOpen] = useState(false);
+  /**
+   * 🔴 **QR 이 채운 칸들.** 글자 인식이 다시 읽어도 이 칸은 덮지 않는다 —
+   * QR 에는 오류 정정 부호가 있어 읽혔으면 맞고, 글자 인식에는 그런 장치가
+   * 없다. 확실한 것을 불확실한 것으로 덮는 것은 어느 쪽으로도 득이 없다.
+   */
+  const [filledByQr, setFilledByQr] = useState<(keyof NameplateFields)[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   /** 해독기는 한 번만 만든다 — 꾸러미를 다시 내려받지 않게. */
   const decoderRef = useRef<Promise<NameplateDecoder> | null>(null);
@@ -97,15 +127,24 @@ export default function NameplateQrPicker({
         const now = latestRef.current;
         const patch = planNameplateFill(outcome.code, now.fields);
         if (Object.keys(patch).length > 0) now.onFill(patch);
+        setFilledByQr(Object.keys(patch) as (keyof NameplateFields)[]);
+        setFallbackFile(null);
         setPhase({ kind: "DONE", line: summarizeNameplateFill(patch) });
         return;
       }
       if (outcome.status === "UNREAD") {
-        setPhase({
-          kind: "NOTICE",
-          title: "QR 을 읽지 못했습니다",
-          lines: [BLURRY_MESSAGE, "명판의 QR 이 사진에 크게 담기도록 가까이서 찍어주세요."],
-        });
+        /*
+         * 🔴 **팝업을 띄우지 않고 곧바로 네모 치기 창을 연다**(2026-10-02
+         * 사용자 요청: 「너무 번거롭다」).
+         *
+         * 전에는 ①실패 팝업 → ②닫기 → ③「글자로 읽어 보기」 누르기, 세 번을
+         * 거쳐야 했다. 그런데 **QR 이 안 읽히면 할 일은 하나뿐**이다 — 표에
+         * 네모를 치는 것. 고를 것이 없는 자리에서 멈춰 세울 까닭이 없다.
+         * 왜 창이 열렸는지는 창 머리에 한 줄로 적는다.
+         */
+        setFallbackFile(file);
+        setRegionOpen(true);
+        setPhase({ kind: "IDLE" });
         return;
       }
       setPhase({
@@ -132,35 +171,97 @@ export default function NameplateQrPicker({
   const reading = phase.kind === "READING";
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <input
-        ref={inputRef}
-        id="nameplateQrPhoto"
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => void handlePicked(e.target.files?.[0])}
-      />
-      <button
-        type="button"
-        disabled={disabled || reading}
-        onClick={() => inputRef.current?.click()}
-        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-300"
-      >
-        {reading ? "QR 읽는 중…" : "명판 사진에서 QR 읽기"}
-      </button>
-      <p aria-live="polite" className="text-xs text-zinc-500 dark:text-zinc-400">
-        {reading
-          ? "사진을 읽고 있습니다. 잠시만 기다려 주세요."
-          : phase.kind === "DONE"
-            ? phase.line
-            : "명판 사진을 고르면 Model · L/N · S/N 의 빈칸을 채웁니다. 사진은 저장되지 않습니다."}
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <input
+          ref={inputRef}
+          id="nameplateQrPhoto"
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => void handlePicked(e.target.files?.[0])}
+        />
+        <button
+          type="button"
+          disabled={disabled || reading}
+          onClick={() => inputRef.current?.click()}
+          className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-300"
+        >
+          {reading ? "사진 읽는 중…" : "명판 사진 읽기"}
+        </button>
+        {/*
+          QR 이 안 읽히면 창이 **저절로** 열린다. 이 단추는 그 창을 닫은 뒤
+          같은 사진으로 **다시 열고 싶을 때**만 쓴다.
+        */}
+        {fallbackFile && !regionOpen && !reading && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setRegionOpen(true)}
+            className="rounded-md border border-amber-500 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:border-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            같은 사진으로 다시 네모 치기
+          </button>
+        )}
+        <p aria-live="polite" className="text-xs text-zinc-500 dark:text-zinc-400">
+          {reading
+            ? "사진을 읽고 있습니다. 잠시만 기다려 주세요."
+            : phase.kind === "DONE"
+              ? phase.line
+              : fallbackFile
+                ? "QR 이 없는 명판이라 글자로 읽는 창이 열립니다."
+                : "Model · L/N · S/N 의 빈칸을 채웁니다. 사진은 저장되지 않습니다."}
+        </p>
+      </div>
+
+      {/*
+        🔴 **사진을 어떻게 찍어 와야 하는지**를 고르기 전에 말한다.
+        지금까지 잰 것 가운데 성적을 가장 잘 설명한 것이 **사진 속 명판의
+        크기**였다 — 표본 다섯 중 넷이 메신저로 1440px 이하로 줄어든 것이고,
+        유일한 원본 화질 한 장이 제일 잘 읽혔다. 흔들림은 해상도보다 더
+        치명적이다(통문증 때 측정). 사진을 받고 나서 다듬는 것보다 **처음에
+        제대로 받는 쪽이 훨씬 싸다.** 문장은 2026-10-02 사용자가 적어 준 그대로다.
+      */}
+      <p className="mt-1 text-xs font-medium text-amber-800">
+        명판 표가 화면을 가득 채우게 가까이서, 흔들리지 않은 사진을 보여주세요.
       </p>
+
+      {/* 🔴 글자로 읽어 채운 값은 QR 과 **눈에 띄게 다르게** 남긴다. */}
+      {phase.kind === "TEXT" && (
+        <div
+          aria-live="polite"
+          className="mt-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2"
+        >
+          <p className="text-xs font-semibold text-amber-900">{phase.line}</p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            글자 인식에는 QR 같은 오류 검사가 없습니다 — 채워진 값을 명판과 맞춰 보고 다르면
+            고쳐 주세요.
+          </p>
+        </div>
+      )}
+
       {phase.kind === "NOTICE" && (
         <NoticePopup
           title={phase.title}
           lines={phase.lines}
           onClose={() => setPhase({ kind: "IDLE" })}
+        />
+      )}
+
+      {regionOpen && fallbackFile && (
+        <NameplateRegionPicker
+          // 다른 사진으로 바뀌면 통째로 갈아 끼운다 — 네모와 읽은 결과가 앞
+          // 사진의 것으로 남아 있지 않게. (사진 주소 자체는 안쪽 effect 가
+          // `file` 을 보고 다시 만들므로 이 key 가 없어도 깨지지는 않는다.)
+          key={`${fallbackFile.name}:${fallbackFile.size}:${fallbackFile.lastModified}`}
+          file={fallbackFile}
+          models={models}
+          fields={fields}
+          lockedByQr={filledByQr}
+          lookupBySerial={lookupBySerial}
+          onFill={onFill}
+          onResult={(line) => setPhase({ kind: "TEXT", line })}
+          onClose={() => setRegionOpen(false)}
         />
       )}
     </div>

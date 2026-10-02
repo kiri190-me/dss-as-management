@@ -25,6 +25,7 @@ import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validati
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
 import { previewNextIntakeNumberAction } from "@/lib/server/actions/intake-number-preview";
+import { findProductBySerialAction } from "@/lib/server/actions/product-by-serial";
 import { linkRequestToRepairCaseAction } from "@/lib/server/actions/customer-portal-requests";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -229,6 +230,17 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
   const productModelSuggestions = useMemo(
     () => rankSimilarNames(draft.modelName, productModelOptions).slice(0, MAX_SUGGESTIONS),
     [draft.modelName, productModelOptions]
+  );
+  /**
+   * 명판을 **글자로** 읽을 때 대조할 등록 Model 이름들 — 🔴 **전부** 넘긴다.
+   *
+   * 위 `productModelSuggestions` 는 이미 적힌 글자와 닮은 여덟 개만 추린
+   * 것이라 여기 쓸 수 없다. 글자 인식은 칸이 **비어 있을 때** 돌고, 그때
+   * 닮은 이름을 고를 기준 자체가 없다.
+   */
+  const productModelNames = useMemo(
+    () => productModelOptions.map((m) => m.name),
+    [productModelOptions]
   );
 
   /**
@@ -883,6 +895,8 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             lotNumber: draft.lotNumber,
             serialNumber: draft.serialNumber,
           }}
+          models={productModelNames}
+          lookupBySerial={findProductBySerialAction}
           onFill={handleNameplateFill}
           disabled={isSubmitting}
         />

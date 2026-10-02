@@ -139,3 +139,15 @@ src/lib/server/services/kyosan-report-import-run.integration.test.ts
 # 🔴 격리 이름: 접수 월 "9502" · 고객사 "AS-TEST-DO-ISSUE-DATE-" · 제품 모델
 # "DO-ISSUE-DATE-TEST-" · 계정 이메일 "doissuedate-test-" (다른 스위트와 겹치지 않는다).
 src/lib/db/mutations/domestic-order-issue-dates.integration.test.ts
+
+# ── S/N 으로 등록된 장비 찾기 (명판을 글자로 읽을 때 쓴다) ──────────────────
+# 세 칸 가운데 S/N 이 제일 잘 읽히니(5장 중 4장) 그 한 칸으로 `products` 를 찾아
+# Model·L/N 을 **보여 준다**(🔴 채우지는 않는다 — 고르는 것은 사람이다).
+# 🔴 **S/N 은 고유키가 아니다.** 같은 S/N 에 다른 모델·다른 L/N 인 장비가 실제로 있다
+# (개발 DB: 2210294 에 모델 셋 · 2210149 에 L/N 둘, 우리 시험 표본에도 1307006 이 둘).
+# 그래서 이 조회는 **반드시 배열**을 돌려준다 — `limit(1)` 을 걸거나 한 대로 가정하면
+# 부르는 쪽이 아무거나 집어 **남의 장비 값**을 적게 된다. 그 밖에 보는 것:
+# 앞뒤 공백 떼기 · 대소문자 안 가리기 · 🔴 지워진 장비 제외 · 🔴 빈 S/N 으로는 안 찾기
+# (안 막으면 S/N 없는 장비가 통째로 걸려 나온다) · Model 과 L/N 이 짝으로 오는가.
+# 격리: S/N 이 `ZZTEST` 로 시작하는 행만 만들고 끝나면 그 행만 지운다.
+src/lib/db/queries/products.integration.test.ts
