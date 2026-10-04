@@ -10,19 +10,25 @@ import { canManageRolePermissions } from "./role-permission-authorization";
  * ── 질문을 셋으로 나눈 이유 ─────────────────────────────────────────────
  * 지금은 답이 겹치는 것도 있지만, 세 가지는 위험의 크기가 다르다:
  *
- *  보기      고객이 무엇을 보는지 확인한다. 위험이 없다.
- *  안내 정하기  **고객 화면에 곧바로 나가는 글**을 정한다. 잘못 적으면 회사 밖에
- *            그대로 뜬다.
- *  링크 관리   **주소를 발급·회수**한다. 발급은 그 회사의 A/S 현황 전체를 볼 수
- *            있는 열쇠를 만드는 일이고, 회수는 고객이 쓰던 주소를 끊는 일이다.
+ *  보기      고객사에 무엇이 나가는지 확인한다. 위험이 없다.
+ *  안내 정하기  **고객사에 보내는 엑셀에 그대로 적히는 글**을 정한다. 잘못 적으면
+ *            회사 밖으로 그대로 나간다.
+ *  목록 관리   **고를 수 있는 상태 말 자체**를 늘리고 줄인다. 여기서 정한 말이
+ *            모든 담당자의 드롭다운에 서고, 그대로 고객사에 나간다.
  *
- * 한 함수로 합쳐 두면 나중에 "영업도 안내 문구는 적게 하되 링크는 못 만들게"
+ * 한 함수로 합쳐 두면 나중에 "영업도 안내 문구는 적게 하되 목록은 못 고치게"
  * 같은 요구가 왔을 때 고칠 자리가 없다.
+ *
+ * ⚠️ 2026-10-04 에 고객사 전용 주소를 걷어내면서 canManageCustomerLinks(주소
+ * 발급·회수)와 canReceiveCustomerRepairRequestNotifications(새 수리 의뢰 알림)가
+ * 없어졌다. 🔴 **권한 영역 `customerPortal` 과 그 세 단계는 그대로다** — 운영
+ * DB 의 role_permissions 에 저장된 값이 있을 수 있어, 단계를 없애면 그 값이
+ * 조용히 무효가 된다. 「관리」가 뜻하는 일만 상태 목록 하나로 줄었다.
  */
 
 /** 고객 안내 현황 화면을 볼 수 있는가. */
 export function canViewCustomerPortal(role: Role): boolean {
-  // 접수를 만들 수 있는 역할이면 고객에게 뭐라고 안내되는지도 볼 수 있어야
+  // 접수를 만들 수 있는 역할이면 고객사에 뭐라고 안내되는지도 볼 수 있어야
   // 한다 — 전화를 받는 사람과 접수를 넣는 사람이 같기 때문이다.
   return (
     role === "SUPER_ADMIN" ||
@@ -40,33 +46,15 @@ export function canEditCustomerStatus(role: Role): boolean {
 }
 
 /**
- * 고객사 주소를 발급·회수할 수 있는가 — **관리자 이상.**
- *
- * 발급은 그 고객사의 A/S 현황 전체를 볼 수 있는 열쇠를 만드는 일이다. 주소
- * 하나가 곧 권한이고, 한번 나가면 회수 전까지 누구에게 전달됐는지 우리가 알
- * 수 없다. 그래서 여기만 좁게 둔다.
- */
-export function canManageCustomerLinks(role: Role): boolean {
-  return canManageRolePermissions(role);
-}
-
-/**
  * 고객 안내 상태 목록(설정)을 관리할 수 있는가 — **관리자 이상.**
  *
- * 여기서 정한 말이 그대로 고객 화면에 뜬다. 목록을 아무나 늘리면 비슷한 말이
- * 여럿 쌓이고("수리중"·"수리 중"·"수리중.."), 그게 전부 고객에게 보인다.
+ * 여기서 정한 말이 그대로 고객사에 보내는 표에 적힌다. 목록을 아무나 늘리면
+ * 비슷한 말이 여럿 쌓이고("수리중"·"수리 중"·"수리중.."), 그게 전부 밖으로
+ * 나간다.
+ *
+ * 🔴 권한 영역 `customerPortal` 의 「관리」가 뜻하는 일이 이것 하나다
+ * (permission-baseline.ts 가 이 함수를 그대로 부른다).
  */
 export function canManageCustomerStatusOptions(role: Role): boolean {
   return canManageRolePermissions(role);
-}
-
-/**
- * 새 수리 의뢰 알림을 받는가.
- *
- * 알림은 "누가 이 일을 할 수 있는가"가 아니라 "누가 밀린 일을 봐야 하는가"다.
- * 이 저장소가 canReceivePartRequestNotifications를 처리 권한과 갈라 둔 것과
- * 같은 구분이라 이름을 따로 둔다.
- */
-export function canReceiveCustomerRepairRequestNotifications(role: Role): boolean {
-  return canViewCustomerPortal(role);
 }

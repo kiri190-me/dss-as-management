@@ -35,12 +35,17 @@ import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route"
  * 등록된 알림 종류. 새 종류를 붙일 때 손대는 곳은 이 배열과
  * `db/queries/notifications.ts`의 소스 목록 둘뿐이고, 화면은 고치지 않는다 —
  * NotificationItem 한 모양만 그리기 때문이다.
+ *
+ * 🔴 **종류를 빼도 DB 는 건드리지 않는다.** 알림 설정은 `kind_key` 글자로
+ * `notification_kind_settings` · `notification_role_settings` 에 저장돼 있어,
+ * 여기서 빠진 종류의 행은 **읽히지 않을 뿐**이다(isNotificationKind 가 거른다).
+ * 2026-10-04 에 CUSTOMER_REPAIR_REQUEST_NEW 를 이렇게 뺐다 — 고객이 의뢰를 넣던
+ * 길(전용 주소)이 없어져 그 알림이 뜰 수 없게 됐다.
  */
 export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
   "PART_REQUEST_PENDING",
   "PART_STOCK_BELOW_MINIMUM",
-  "CUSTOMER_REPAIR_REQUEST_NEW",
   "PART_ISSUE_APPROVAL_PENDING",
   "QUOTE_APPROVAL_PENDING",
   "APPROVAL_GRANTED",
@@ -209,35 +214,6 @@ export function buildPartStockBelowMinimumNotification(input: {
     subject: input.partName,
     detail: `${stockOwnerLabels[input.owner]} · ${input.currentQuantity} / 한계 ${input.minimumQuantity}`,
     href: `/inventory/${input.partId}`,
-  };
-}
-
-/**
- * "고객사가 새 수리 의뢰를 보냈다" 알림 한 줄.
- *
- * subject 는 고객사 이름이다 — 이 알림에서 사람이 먼저 찾는 것은 "어디서
- * 왔나"다. 접수번호는 아직 없다(접수로 만들기 전이라 존재하지 않는다).
- *
- * detail 에 모델명과 S/N 을 함께 둔다. 같은 고객사가 여러 건을 보냈을 때
- * 목록에서 구별되어야 하고, 담당자가 상세를 열기 전에 "내가 아는 그 물건"
- * 인지 알아볼 수 있어야 한다.
- *
- * targetKey 는 의뢰 id 다. 의뢰 하나가 곧 처리해야 할 일 하나이므로 배지도
- * 그렇게 센다.
- */
-export function buildCustomerRepairRequestNotification(input: {
-  requestId: string;
-  customerName: string;
-  productModelName: string;
-  serialNumber: string;
-}): NotificationItem {
-  return {
-    id: `CUSTOMER_REPAIR_REQUEST_NEW:${input.requestId}`,
-    kind: "CUSTOMER_REPAIR_REQUEST_NEW",
-    targetKey: input.requestId,
-    subject: input.customerName,
-    detail: `${input.productModelName} · S/N ${input.serialNumber}`,
-    href: "/customer-portal/requests",
   };
 }
 

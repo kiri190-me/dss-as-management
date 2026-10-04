@@ -88,7 +88,6 @@ src/lib/db/queries/long-pending-po.integration.test.ts
 src/lib/db/mutations/weekly-report-deliveries.integration.test.ts
 src/lib/db/queries/weekly-report-deliveries.integration.test.ts
 src/lib/db/queries/intake-number-preview.integration.test.ts
-src/lib/db/mutations/customer-portal-link-cipher.integration.test.ts
 src/lib/server/services/send-intake-mail.integration.test.ts
 src/lib/db/mutations/service-reports.integration.test.ts
 src/lib/db/queries/service-reports.integration.test.ts

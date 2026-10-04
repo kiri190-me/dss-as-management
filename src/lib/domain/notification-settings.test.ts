@@ -51,22 +51,9 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   if (kind === "PART_STOCK_BELOW_MINIMUM") {
     return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
   }
-  if (kind === "CUSTOMER_REPAIR_REQUEST_NEW") {
-    // 재고 부족과 같이 재현할 옛 동작이 없어 **그때 내린 결정**을 손으로
-    // 적는다 — 접수를 만들 수 있는 넷(최고관리자·관리자·A/S 엔지니어·영업).
-    // 재고관리자만 빠지는 이유: 이 알림은 "고객이 기다리고 있다"는 신호인데
-    // 그 사람에게는 접수를 만들 수단이 없다. 손댈 수 없는 사람에게 보내는
-    // 알림은 끌 수도 없는 소음이 된다.
-    //
-    // 여전히 canReceiveCustomerRepairRequestNotifications를 부르지 않는 것이
-    // 요점이다 — 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다.
-    return (
-      role === "SUPER_ADMIN" ||
-      role === "ADMIN" ||
-      role === "AS_ENGINEER" ||
-      role === "SALES"
-    );
-  }
+  // CUSTOMER_REPAIR_REQUEST_NEW(「새 수리 의뢰」)는 2026-10-04 에 종류 자체가
+  // 빠졌다 — 고객이 의뢰를 넣던 길(전용 주소)이 없어졌다. 되살아나면 아래
+  // throw 가 잡는다(판정을 다시 세우지 않고는 못 지나간다).
   if (kind === "PART_ISSUE_APPROVAL_PENDING") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
     // 적는다 — 다섯 역할 전부. 결재 대기와 같은 이유다: 누가 받는지는 역할이

@@ -221,7 +221,6 @@ describe("acknowledgeNotification / listAcknowledgedNotificationKeys", () => {
       `REPAIR_CASE_APPROVAL:${randomUUID()}:FINAL_SHIPMENT`,
       `PART_REQUEST_PENDING:${randomUUID()}`,
       `PART_STOCK_BELOW_MINIMUM:${randomUUID()}:DSS`,
-      `CUSTOMER_REPAIR_REQUEST_NEW:${randomUUID()}`,
       `PART_ISSUE_APPROVAL_PENDING:${randomUUID()}`,
       `SOME_FUTURE_KIND:${randomUUID()}`,
     ];

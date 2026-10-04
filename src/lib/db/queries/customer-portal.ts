@@ -1,11 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
 import {
   attachments,
-  customerPortalSyncLog,
-  customerRepairLinks,
-  customerRepairRequests,
   customerStatusOptions,
   customers,
   repairCaseCustomerStatus,
@@ -34,26 +31,31 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  * 전에는 **전용 주소가 발급된 고객사**가 화면 단추였다. 그 기능을 걷어내면서
  * 근거가 고객사 양식(domain/customer-portal-forms.ts)으로 옮겨 왔다 — 한 회사가
  * 여러 이름으로 등록돼 있어도 **한 표로 합쳐** 보인다.
+ *
+ * ── 밖으로 내보내는 길이 없다 (2026-10-04) ──────────────────────────────
+ * 고객사에 발급하던 전용 주소와 5분 주기 동기화를 걷어냈다. 이 파일을 읽는
+ * 곳은 사내 화면과 그 화면이 저장하는 고객사 엑셀뿐이다 — 이 줄이 바깥
+ * 사이트로 나가는 길은 없다. 링크 목록·암호문 조회와 고객이 보낸 의뢰를 읽던
+ * 조회도 함께 없앴다(표 자체는 그대로 둔다).
  * ============================================================================
  */
 
 /**
  * 고객에게 보여줄 한 줄. 화면과 스냅샷이 그대로 쓴다.
  *
- * 🔴 **이 타입에 칸이 늘어도 고객에게 나가는 것은 늘지 않는다.** 밖으로
- * 보내는 자리(server/services/customer-portal-sync.ts)는 이 줄을 펼치지 않고
- * 보낼 칸을 하나씩 적어 옮긴다. 아래 「고객사 양식」 쪽 칸들(endUserName ·
- * orderIssuedDate · customerRequestedDueDate · formValues ·
- * passSlipAttachmentIds · knownQCodes)이 그 목록에 없는 것은 **일부러**다 —
- * 담당자가 사내에서 쓰는 표에만 쓴다.
+ * 🔴 **이 줄 전체가 사내용이다.** 2026-10-04 에 바깥 사이트로 내보내던 길을
+ * 걷어냈으므로, 이 타입에 칸이 늘어도 회사 밖으로 나가는 자리는 없다. 고객사에
+ * 보내는 엑셀은 양식(domain/customer-portal-forms.ts)이 고른 열만 적는다 —
+ * 칸을 늘릴 때 보아야 할 곳은 그 양식이다.
  */
 export type CustomerPortalItem = {
   /**
    * 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지.
    *
    * ⚠️ 2026-10-04 부터 이 파일이 내는 줄은 **전부 CASE 다** — 고객이 의뢰를 넣던
-   * 길(전용 주소)이 없어졌다. 갈래를 하나로 좁히지 않고 그대로 둔다: 서버 쪽에
-   * 아직 의뢰를 다루는 코드가 남아 있고, 그것을 걷어내는 일은 따로 한다.
+   * 길(전용 주소)이 없어졌다. 갈래를 하나로 좁히지 않고 그대로 둔다: 받아 둔
+   * 지난 의뢰가 `customer_repair_requests` 표에 남아 있고, 화면 쪽 코드도 아직
+   * 이 갈래로 줄을 가린다(PassSlipOcrPanel).
    */
   sourceKind: "CASE" | "REQUEST";
   sourceId: string;
@@ -70,7 +72,7 @@ export type CustomerPortalItem = {
   /** 상태를 고칠 때 쓰는 낙관적 잠금 값. 행이 없으면 null. */
   statusVersion: number | null;
 
-  // ───── 아래 여섯은 「고객사 양식」 표만 쓴다. 밖으로 나가지 않는다. ─────
+  // ───── 아래 여섯은 「고객사 양식」 표만 쓴다. ─────
 
   /**
    * End-User 이름. 고객사 엑셀의 「Site명」이 가리키는 것이 이것이다
@@ -115,9 +117,9 @@ export type CustomerPortalItem = {
    * 🔴 **값을 고치지도, 채우기를 거절하지도 않는다.** 목록이 얇은 처음에도
    * 기능이 서야 하고(개발 DB 는 건이 3개다), 목록이 쌓일수록 저절로 안전해진다.
    *
-   * 🔴 **고객에게 나가는 값이 아니다** — 바로 위 다섯 칸과 같다. 밖으로 보내는
-   * 자리(server/services/customer-portal-sync.ts)는 줄을 펼치지 않고 보낼 칸을
-   * 하나씩 적어 옮기므로, 그 목록에 적지 않은 이 칸은 나가지 않는다.
+   * 🔴 **고객에게 나가는 값이 아니다** — 바로 위 다섯 칸과 같다. 고객사에 보내는
+   * 엑셀은 양식이 고른 열만 적으므로(domain/customer-portal-forms.ts), 양식에
+   * 없는 이 칸은 저장되는 파일에 들어가지 않는다.
    */
   knownQCodes: string[];
 };
@@ -213,21 +215,21 @@ async function listPassSlipAttachmentIds(
  * 한 고객사의 목록.
  *
  * 🔴 **출하 완료 제외 · 상태 · 견적 · 통문증 첨부가 모두 이 한 함수를 지난다.**
- * 양식 표(listPortalItemsForForm)도 밖으로 내보내는 스냅샷도 이것을 거쳐 간다 —
- * 조건을 한 군데에 모아 두지 않으면 같은 건이 화면마다 다르게 보인다.
+ * 화면의 양식 표도 고객사 엑셀도 listPortalItemsForForm 을 지나 이것을 거쳐
+ * 간다 — 조건을 한 군데에 모아 두지 않으면 같은 건이 화면마다 다르게 보인다.
  *
  * ■ 출하 완료를 직접 판정하지 않는다
  *
  * `listRepairCases()`가 이미 `resolveRepairStatusFromStep()`을 거쳐 상태를
  * 확정해 준다. 여기서 `actual_shipment_date`를 보거나 워크플로 단계를 직접
- * 읽으면 판정이 두 벌이 되고, 언젠가 한쪽만 고쳐져 **출하된 물건이 고객
- * 화면에 남는다.**
+ * 읽으면 판정이 두 벌이 되고, 언젠가 한쪽만 고쳐져 **출하된 물건이 고객사에
+ * 보내는 표에 남는다.**
  *
  * ■ 접수 전 의뢰 줄은 내지 않는다 (2026-10-04)
  *
  * 고객이 의뢰를 넣던 길(전용 주소)이 없어졌으므로 「접수 대기 중」 줄도 없다.
- * `customer_repair_requests` 표와 그것을 읽는 다른 조회는 그대로 둔다 —
- * 지난 자료이고, 걷어내는 일은 따로 한다.
+ * `customer_repair_requests` 표는 그대로 둔다 — 받아 둔 지난 자료다(사용자
+ * 결정 2026-10-04: 표와 칸은 건드리지 않는다).
  */
 export async function listPortalItemsForCustomer(
   customerId: string
@@ -368,106 +370,6 @@ export async function listPortalItemsForForm(
   return sortPortalRowsByReceivedAt(merged);
 }
 
-/** 고객사 한 곳의 링크 상태. 화면이 「발급 / 재발급 / 회수」를 그릴 때 쓴다. */
-export type CustomerLinkInfo = {
-  id: string;
-  customerId: string;
-  customerName: string;
-  label: string | null;
-  createdAt: Date;
-  lastSyncedAt: Date | null;
-  lastSyncedCount: number | null;
-};
-
-/**
- * 살아 있는 링크 목록.
- *
- * 주소 자체는 여기서 내지 않는다. 이 목록은 페이지가 통째로 브라우저에
- * 내려보내는 값이라, 여기에 주소를 담으면 **화면을 연 것만으로 모든 고객사의
- * 주소가 HTML 에 실려 나간다.** 주소는 고객사를 고른 순간 그 하나만
- * revealCustomerLinkUrlAction 으로 따로 가져온다.
- */
-export async function listActiveLinks(): Promise<CustomerLinkInfo[]> {
-  const links = await db
-    .select({
-      id: customerRepairLinks.id,
-      customerId: customerRepairLinks.customerId,
-      customerName: customers.name,
-      label: customerRepairLinks.label,
-      createdAt: customerRepairLinks.createdAt,
-    })
-    .from(customerRepairLinks)
-    .innerJoin(customers, eq(customerRepairLinks.customerId, customers.id))
-    .where(isNull(customerRepairLinks.revokedAt))
-    .orderBy(asc(customers.name));
-
-  if (links.length === 0) return [];
-
-  /*
-   * 마지막 내보낸 기록은 조회를 나눠 붙인다.
-   *
-   * "링크마다 가장 늦은 한 줄"을 조인 하나로 잡으려면 상관 서브쿼리나
-   * DISTINCT ON 이 필요한데, 링크는 고객사 수만큼(지금 37곳 이하)이라
-   * 두 번 읽고 붙이는 편이 읽기 쉽고 결과도 같다. 여기서 아껴야 할 만큼
-   * 큰 자료가 아니다.
-   */
-  const logs = await db
-    .select({
-      customerLinkId: customerPortalSyncLog.customerLinkId,
-      syncedAt: customerPortalSyncLog.syncedAt,
-      itemCount: customerPortalSyncLog.itemCount,
-    })
-    .from(customerPortalSyncLog)
-    .orderBy(desc(customerPortalSyncLog.syncedAt));
-
-  // 내림차순이므로 링크마다 처음 만난 것이 가장 늦은 것이다.
-  const latest = new Map<string, { syncedAt: Date; itemCount: number }>();
-  for (const log of logs) {
-    if (!latest.has(log.customerLinkId)) {
-      latest.set(log.customerLinkId, {
-        syncedAt: log.syncedAt,
-        itemCount: log.itemCount,
-      });
-    }
-  }
-
-  return links.map((link) => {
-    const log = latest.get(link.id);
-    return {
-      ...link,
-      lastSyncedAt: log?.syncedAt ?? null,
-      lastSyncedCount: log?.itemCount ?? null,
-    };
-  });
-}
-
-
-/**
- * 살아 있는 링크 하나의 **보관된 주소 사본**을 꺼낸다(암호문 그대로).
- *
- * 복호화는 여기서 하지 않는다 — 키를 쓰는 곳을 한 군데
- * (server/customer-link-token-cipher.ts)로 모아 두면 "어디서 풀리는가"를
- * grep 한 번으로 다 볼 수 있다. 조회 계층은 암호문을 나르기만 한다.
- *
- * 회수된 링크는 내주지 않는다. 회수한 주소를 다시 보여 주면 "끊었다"는 말이
- * 무색해지고, 실수로 그 주소를 다시 전달하는 길이 생긴다.
- */
-export async function getActiveLinkCipher(
-  linkId: string
-): Promise<{ customerId: string; tokenCipher: string | null } | null> {
-  const [row] = await db
-    .select({
-      customerId: customerRepairLinks.customerId,
-      tokenCipher: customerRepairLinks.tokenCipher,
-    })
-    .from(customerRepairLinks)
-    .where(
-      and(eq(customerRepairLinks.id, linkId), isNull(customerRepairLinks.revokedAt))
-    )
-    .limit(1);
-  return row ?? null;
-}
-
 /**
  * 이 접수가 어느 고객사의 것인가 — **이름으로**.
  *
@@ -516,57 +418,4 @@ export async function listAllStatusOptions(): Promise<
     })
     .from(customerStatusOptions)
     .orderBy(asc(customerStatusOptions.displayOrder), asc(customerStatusOptions.label));
-}
-
-/** 아직 처리하지 않은 의뢰 — 목록 화면과 알림이 함께 쓴다. */
-export async function listNewCustomerRepairRequests(): Promise<
-  {
-    id: string;
-    customerName: string;
-    productModelName: string;
-    serialNumber: string;
-    submittedAt: Date;
-  }[]
-> {
-  return db
-    .select({
-      id: customerRepairRequests.id,
-      customerName: customers.name,
-      productModelName: customerRepairRequests.productModelName,
-      serialNumber: customerRepairRequests.serialNumber,
-      submittedAt: customerRepairRequests.submittedAt,
-    })
-    .from(customerRepairRequests)
-    .innerJoin(customers, eq(customerRepairRequests.customerId, customers.id))
-    .where(eq(customerRepairRequests.status, "NEW"))
-    .orderBy(desc(customerRepairRequests.submittedAt));
-}
-
-/**
- * 수리 의뢰 전부 — 목록 화면이 쓴다.
- *
- * 처리 대기와 처리됨을 한 번에 읽는다. 나눠 읽으면 화면이 조회를 두 번 하고,
- * 그 사이에 한 건이 처리되면 양쪽에 동시에 보이거나 양쪽에서 사라진다.
- */
-export async function listAllCustomerRepairRequests() {
-  return db
-    .select({
-      id: customerRepairRequests.id,
-      customerName: customers.name,
-      companyName: customerRepairRequests.companyName,
-      contactName: customerRepairRequests.contactName,
-      contactPhone: customerRepairRequests.contactPhone,
-      productModelName: customerRepairRequests.productModelName,
-      lotNumber: customerRepairRequests.lotNumber,
-      serialNumber: customerRepairRequests.serialNumber,
-      endUser: customerRepairRequests.endUser,
-      symptomDescription: customerRepairRequests.symptomDescription,
-      alarmName: customerRepairRequests.alarmName,
-      submittedAt: customerRepairRequests.submittedAt,
-      status: customerRepairRequests.status,
-      convertedRepairCaseId: customerRepairRequests.convertedRepairCaseId,
-    })
-    .from(customerRepairRequests)
-    .innerJoin(customers, eq(customerRepairRequests.customerId, customers.id))
-    .orderBy(desc(customerRepairRequests.submittedAt));
 }

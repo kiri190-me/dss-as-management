@@ -12,8 +12,9 @@ import { CUSTOMER_PORTAL_FORMS } from "../domain/customer-portal-forms";
  * pass-slip-goods). 여기서 못 박는 것은 그 기능이 화면·통로에 붙은 **모양**이다.
  * 전부 조용히 깨지는 것들이라 오류로는 드러나지 않는다.
  *
- *  1. 🔴 **통문증 첨부 id 와 아는 Q코드 목록이 고객에게 나가지 않는다.** 화면과
- *     고객 화면이 같은 조회를 쓰므로, 내보내는 자리에 칸 이름이 한 줄 끼면 샌다.
+ *  1. 🔴 **통문증 첨부 id 와 아는 Q코드 목록은 조회의 타입에만 있다.** 2026-10-04
+ *     에 바깥으로 내보내던 길(전용 주소·동기화)이 없어져 샐 자리 자체가 없어졌다 —
+ *     남은 것은 그 두 칸이 **사내 표가 쓰는 값으로 그대로 있는가**다.
  *  2. 🔴 조회가 **휴지통을 빼고** · 「통문증」 분류만 보고 · **최신순**으로 준다.
  *  3. 🔴 양식 쪽 칸 키와 읽기 쪽 칸 키가 **같다.** 한쪽만 바뀌면 그 칸이 조용히
  *     읽기 대상에서 빠지고 아무도 모른다. 🔴 **Q4.Level 은 대상이 아니다.**
@@ -46,7 +47,6 @@ const code = (source: string) =>
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
 const query = read("src/lib/db/queries/customer-portal.ts");
-const sync = read("src/lib/server/services/customer-portal-sync.ts");
 const screen = read("src/components/customer-portal/CustomerPortalScreen.tsx");
 const panel = read("src/components/customer-portal/PassSlipOcrPanel.tsx");
 const reader = read("src/lib/ocr/pass-slip-reader.ts");
@@ -54,20 +54,13 @@ const worker = read("src/lib/ocr/pass-slip-worker.ts");
 const goods = read("src/lib/ocr/pass-slip-goods.ts");
 const suggestions = read("src/components/customer-portal/pass-slip-suggestions.ts");
 
-describe("🔴 1. 통문증 첨부 id 와 아는 Q코드 목록이 고객에게 나가지 않는다", () => {
-  test("내보내는 자리에 칸 이름이 없다", () => {
-    assert.ok(
-      !code(sync).includes("passSlipAttachmentIds"),
-      "통문증 첨부 id 가 고객 쪽으로 샌다"
+describe("🔴 1. 통문증 첨부 id 와 아는 Q코드 목록은 사내 표만 쓴다", () => {
+  test("밖으로 내보내던 자리가 저장소에 없다 — 샐 길이 없어졌다", () => {
+    assert.equal(
+      fs.existsSync(new URL("src/lib/server/services/customer-portal-sync.ts", repoUrl)),
+      false,
+      "동기화가 되살아났다 — 그러면 이 두 칸이 나가지 않는지 다시 봐야 한다"
     );
-    assert.ok(
-      !code(sync).includes("knownQCodes"),
-      "그 고객사가 쓰던 Q코드 목록이 고객 쪽으로 샌다"
-    );
-  });
-
-  test("줄을 통째로 펼치지 않는다 — 펼치는 순간 앞으로 늘 칸이 전부 새어 나간다", () => {
-    assert.ok(!/\.\.\.item\b/.test(code(sync)));
   });
 
   test("조회의 타입에는 있다 — 사내 표가 그것으로 읽는다", () => {

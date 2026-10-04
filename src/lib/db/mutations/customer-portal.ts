@@ -1,18 +1,20 @@
 import "server-only";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import { insertAuditLog } from "./audit-logs";
-import {
-  customerPortalSyncLog,
-  customerRepairLinks,
-  customerRepairRequests,
-  customerStatusOptions,
-  repairCaseCustomerStatus,
-} from "../schema";
+import { customerStatusOptions, repairCaseCustomerStatus } from "../schema";
 
 /**
  * ============================================================================
  * 고객 안내 창구 — 기록
+ * ============================================================================
+ *
+ * 남은 것은 setCustomerStatus 하나다. 고객사 전용 주소를 발급·회수하고 밖에서
+ * 당겨온 의뢰를 넣던 기록 넷(issueCustomerLink · revokeCustomerLink ·
+ * insertPulledRequests · recordPortalSync)은 2026-10-04 에 걷어냈다 — 그 기능이
+ * 운영에서 한 번도 돈 적이 없다. 🔴 표(`customer_repair_links` ·
+ * `customer_repair_requests` · `customer_portal_sync_log`)와 그 안의 행은
+ * 그대로 둔다(사용자 결정 2026-10-04).
  * ============================================================================
  */
 
@@ -169,128 +171,4 @@ export async function setCustomerStatus(params: {
 
     return { ok: true as const, value: { version: updated[0].version } };
   });
-}
-
-/**
- * 고객사 링크를 발급한다.
- *
- * **평문 토큰은 돌려주기만 하고 저장하지 않는다.** 부르는 쪽이 화면에 한 번
- * 띄우고 밖으로 밀어 넣는다. 우리 DB에는 sha256 만 남으므로, 잃어버리면
- * 재발급뿐이고 복구는 원리상 불가능하다.
- *
- * 같은 고객사에 살아 있는 링크가 이미 있으면 그것을 먼저 회수한다 — 재발급이
- * 곧 "옛 주소를 못 쓰게 만들기"여야 유출됐을 때 한 번의 조작으로 끝난다.
- */
-export async function issueCustomerLink(params: {
-  customerId: string;
-  tokenHash: string;
-  /** 주소를 다시 보여 주기 위한 암호화 사본. 키가 없는 환경이면 null 이고, 그래도 발급은 그대로 된다. */
-  tokenCipher: string | null;
-  label: string | null;
-  actorUserId: string;
-}): Promise<{ linkId: string; revokedPreviousId: string | null }> {
-  return db.transaction(async (tx) => {
-    const [previous] = await tx
-      .update(customerRepairLinks)
-      .set({ revokedAt: sql`now()`, revokedBy: params.actorUserId })
-      .where(
-        and(
-          eq(customerRepairLinks.customerId, params.customerId),
-          isNull(customerRepairLinks.revokedAt)
-        )
-      )
-      .returning({ id: customerRepairLinks.id });
-
-    const [created] = await tx
-      .insert(customerRepairLinks)
-      .values({
-        customerId: params.customerId,
-        tokenHash: params.tokenHash,
-        tokenCipher: params.tokenCipher,
-        label: params.label,
-        createdBy: params.actorUserId,
-      })
-      .returning({ id: customerRepairLinks.id });
-
-    await insertAuditLog(tx, {
-      actorUserId: params.actorUserId,
-      actionType: "CREATE",
-      targetEntity: "customer_repair_links",
-      targetRecordId: created.id,
-      // 토큰은 남기지 않는다. 감사 로그에 남으면 저장하지 않기로 한 의미가
-      // 사라진다 — 로그를 읽을 수 있는 사람이 곧 주소를 아는 사람이 된다.
-      newValue: { customerId: params.customerId, label: params.label },
-      previousValue: previous ? { revokedLinkId: previous.id } : null,
-    });
-
-    return { linkId: created.id, revokedPreviousId: previous?.id ?? null };
-  });
-}
-
-export async function revokeCustomerLink(params: {
-  linkId: string;
-  actorUserId: string;
-}): Promise<MutationResult> {
-  return db.transaction(async (tx) => {
-    const revoked = await tx
-      .update(customerRepairLinks)
-      .set({ revokedAt: sql`now()`, revokedBy: params.actorUserId })
-      .where(
-        and(
-          eq(customerRepairLinks.id, params.linkId),
-          isNull(customerRepairLinks.revokedAt)
-        )
-      )
-      .returning({ id: customerRepairLinks.id });
-
-    if (revoked.length === 0) {
-      return {
-        ok: false as const,
-        code: "NOT_FOUND" as const,
-        message: "이미 회수되었거나 없는 링크입니다.",
-      };
-    }
-
-    await insertAuditLog(tx, {
-      actorUserId: params.actorUserId,
-      actionType: "UPDATE",
-      targetEntity: "customer_repair_links",
-      targetRecordId: params.linkId,
-      newValue: { revoked: true },
-    });
-
-    return { ok: true as const, value: undefined };
-  });
-}
-
-/**
- * 밖에서 당겨온 의뢰를 넣는다.
- *
- * 이미 있는 `sourceId`는 조용히 넘어간다 — 당겨오기는 "받았다"고 알려주기 전에
- * 죽으면 같은 건을 다시 받게 만들어져 있고(잃는 것보다 겹치는 편이 낫다),
- * 그 겹침을 여기서 흡수한다. 그래서 스크립트를 몇 번을 돌려도 안전하다.
- *
- * 넣은 개수가 아니라 **실제로 새로 들어간 id 목록**을 돌려준다. 부르는 쪽이
- * "몇 건이 새로 왔다"를 정확히 말할 수 있어야 하기 때문이다.
- */
-export async function insertPulledRequests(
-  rows: (typeof customerRepairRequests.$inferInsert)[]
-): Promise<string[]> {
-  if (rows.length === 0) return [];
-
-  const inserted = await db
-    .insert(customerRepairRequests)
-    .values(rows)
-    .onConflictDoNothing({ target: customerRepairRequests.sourceId })
-    .returning({ sourceId: customerRepairRequests.sourceId });
-
-  return inserted.map((row) => row.sourceId);
-}
-
-/** 밖으로 내보낸 기록. 화면이 "마지막으로 언제 나갔나"를 보여주는 데 쓴다. */
-export async function recordPortalSync(params: {
-  customerLinkId: string;
-  itemCount: number;
-}): Promise<void> {
-  await db.insert(customerPortalSyncLog).values(params);
 }

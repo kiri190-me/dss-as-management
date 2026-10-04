@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   CUSTOMER_PORTAL_FORMS,
   manualColumnsOf,
@@ -14,11 +14,9 @@ import {
  * unit 목록의 lib/domain/customer-portal-forms.test.ts 가 본다. 여기서 못 박는
  * 것은 그 값이 **화면과 저장 통로에서 어떻게 쓰이는가**다:
  *
- *  1. 🔴 **고객에게 나가는 것이 안 바뀌었다.** 이 화면의 목록과 고객이 보는
- *     목록은 같은 함수에서 나오는데, 이번에 그 함수의 줄에 칸 넷이 늘었다.
- *     밖으로 보내는 자리가 줄을 통째로 펼치지 않고 하나씩 옮겨 적는지,
- *     그 목록이 **예전 그대로 열한 개**인지 본다. 새 칸이 하나라도 그 목록에
- *     들어가면 고객 화면에 사내 값이 샌다.
+ *  1. (없어짐) 밖으로 내보내던 자리가 **무엇을 보내는가**를 보던 묶음이었다.
+ *     2026-10-04 에 서버 쪽 동기화(services/customer-portal-sync.ts)를 걷어내면서
+ *     보낼 자리 자체가 없어졌다 — 번호는 아래 차례를 흔들지 않으려고 비워 둔다.
  *  2. 🔴 **기본 9열 표와 보기 전환이 없어졌다**(사용자 요청 2026-10-04 —
  *     「[기본보기]도 없애주고 각사별 양식만 남겨줘」). 남은 표는 양식 표 하나다.
  *  3. 🔴 **낙관적 잠금이 그대로다** — 저장이 여전히 expectedVersion 을 싣고,
@@ -55,68 +53,49 @@ const code = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 const screen = read("src/components/customer-portal/CustomerPortalScreen.tsx");
-const sync = read("src/lib/server/services/customer-portal-sync.ts");
 const action = read("src/lib/server/actions/customer-portal.ts");
 const mutation = read("src/lib/db/mutations/customer-portal.ts");
 const query = read("src/lib/db/queries/customer-portal.ts");
 
-describe("🔴 1. 고객에게 나가는 것이 안 바뀌었다", () => {
-  /**
-   * 밖으로 보내는 body 는 두 자리에 있다(pushSnapshots · pushSnapshotForLink).
-   * 둘 다 `items.map((item) => ({ ... }))` 꼴이라 그 안의 `item.<칸>` 을 센다.
-   */
-  const sentFieldGroups = [...code(sync).matchAll(/items\.map\(\(item\) => \(\{([\s\S]*?)\}\)\)/g)].map(
-    (match) => [...match[1].matchAll(/(\w+): item\.(\w+)/g)].map((m) => m[2])
-  );
+describe("🔴 1. 밖으로 내보내던 길이 통째로 없어졌다 (2026-10-04)", () => {
+  const existsInRepo = (relativePath: string) =>
+    existsSync(new URL(relativePath, repoUrl));
 
-  const EXPECTED_SENT = [
-    "sourceKind",
-    "sourceId",
-    "intakeNumber",
-    "modelName",
-    "lotNumber",
-    "serialNumber",
-    "receivedAt",
-    "statusLabel",
-    "statusNote",
-    "quoteNumber",
-    "quoteIssuedDate",
-  ];
-
-  test("밖으로 내보내는 자리가 둘 다 있다", () => {
-    assert.equal(sentFieldGroups.length, 2, "내보내는 자리의 개수가 달라졌다");
-  });
-
-  test("🔴 두 자리 모두 예전 그대로 열한 개를 보낸다", () => {
-    for (const fields of sentFieldGroups) {
-      assert.deepEqual(fields, EXPECTED_SENT);
-    }
-  });
-
-  test("🔴 고객사 양식 쪽 새 칸 넷이 밖으로 나가지 않는다", () => {
-    const body = code(sync);
-    for (const leaked of [
-      "item.endUserName",
-      "item.orderIssuedDate",
-      "item.customerRequestedDueDate",
-      "item.formValues",
+  test("동기화 서비스와 그 실행 스크립트가 저장소에 없다", () => {
+    for (const gone of [
+      "src/lib/server/services/customer-portal-sync.ts",
+      "scripts/sync-customer-portal.ts",
     ]) {
-      assert.ok(!body.includes(leaked), `${leaked} 가 고객 쪽으로 샌다`);
+      assert.equal(existsInRepo(gone), false, `되살아났다: ${gone}`);
     }
   });
 
-  test("🔴 줄을 통째로 펼치지 않는다 — 그 순간 앞으로 늘 칸이 전부 새어 나간다", () => {
-    assert.ok(
-      !/\.\.\.item\b/.test(code(sync)),
-      "items 를 펼쳐 보내면 칸이 늘 때마다 고객 화면에 새로 나타난다"
-    );
+  test("🔴 액션에 밖으로 미는 자리가 하나도 없다 — 되살리려면 이 시험을 먼저 본다", () => {
+    const body = code(action);
+    for (const gone of [
+      "issueCustomerLinkAction",
+      "revealCustomerLinkUrlAction",
+      "revokeCustomerLinkAction",
+      "syncNowAction",
+      "DSS_HOME_URL",
+    ]) {
+      assert.ok(!body.includes(gone), `전용 주소 쪽 자취가 남았다: ${gone}`);
+    }
   });
 
-  test("화면과 고객이 여전히 같은 조회를 쓴다", () => {
-    assert.ok(code(sync).includes("listPortalItemsForCustomer"));
+  test("남은 액션은 상태 저장과 상태 목록 셋뿐이다", () => {
+    const exported = [...code(action).matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+    assert.deepEqual(exported, [
+      "setCustomerStatusAction",
+      "createStatusOptionAction",
+      "updateStatusOptionAction",
+    ]);
+  });
+
+  test("조회는 그대로 남아 화면과 엑셀이 함께 쓴다", () => {
     assert.ok(
       code(query).includes("export async function listPortalItemsForCustomer"),
-      "조회 이름이 바뀌면 둘이 갈릴 자리가 생긴다"
+      "조회 이름이 바뀌면 화면과 엑셀이 갈릴 자리가 생긴다"
     );
   });
 });
@@ -154,6 +133,10 @@ describe("🔴 2. 기본 9열 표와 보기 전환이 없어졌다", () => {
   });
 
   test("🔴 전용 주소에 매달린 것들이 화면에서 사라졌다", () => {
+    // 「고객이 보낸 수리 의뢰」 목록으로 가던 주소는 여기서 글자로 세지 않는다 —
+    // 2026-10-04 에 **저장소 어디에도 없게** 만들었고(src·scripts 전부), 그 주소를
+    // 적어 두면 그 사실을 확인하는 grep 이 이 시험 파일에 걸린다. 서버 쪽이
+    // 되살아나지 않는 것은 위 「1.」 묶음이 지킨다.
     for (const gone of [
       "CustomerLinkAddress",
       "issueCustomerLinkAction",
@@ -161,7 +144,6 @@ describe("🔴 2. 기본 9열 표와 보기 전환이 없어졌다", () => {
       "syncNowAction",
       "customersWithoutLink",
       "canManageLinks",
-      "/customer-portal/requests",
     ]) {
       assert.ok(!body.includes(gone), `전용 주소 쪽 자취가 남았다: ${gone}`);
     }

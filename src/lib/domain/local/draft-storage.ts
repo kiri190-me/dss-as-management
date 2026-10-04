@@ -79,8 +79,12 @@ export type IntakeDraftData = {
 };
 
 /**
- * @param overrides 미리 채워 둘 값. 고객이 보낸 수리 의뢰를 접수로 옮길 때
- *   쓴다(`/repair-cases/new?fromRequestId=…`).
+ * @param overrides 미리 채워 둘 값.
+ *
+ *   ⚠️ 2026-10-04 현재 **이 인자를 넘기는 화면은 없다.** 고객이 보낸 수리
+ *   의뢰를 접수로 옮기던 길(`/repair-cases/new?fromRequestId=…`)이 전용 주소와
+ *   함께 걷혔다. 인자 자체는 남겨 둔다 — 특정 화면에 묶인 장치가 아니라
+ *   「기본값 위에 아는 값을 얹는다」는 일반적인 길이고, 시험이 그 규칙을 지킨다.
  *
  *   **덮어쓰기는 맨 마지막에 한 번만 일어난다** — 기본값을 다 만들고 그 위에
  *   얹는다. 그래야 `internalTargetInspectionCompletionDate` 처럼 `receivedAt`

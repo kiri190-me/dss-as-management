@@ -191,7 +191,6 @@ src/lib/domain/requested-due-date-link.test.ts
 src/lib/domain/fault-symptom-breakdown.test.ts
 src/lib/domain/pie-slices.test.ts
 src/lib/domain/product-model-breakdown.test.ts
-src/lib/server/customer-link-token-cipher.test.ts
 src/lib/domain/intake-mail-body.test.ts
 src/lib/domain/mail-signature-html.test.ts
 src/lib/xlsx/service-report-choices.test.ts

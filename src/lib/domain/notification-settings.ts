@@ -1,5 +1,4 @@
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
-import { canReceiveCustomerRepairRequestNotifications } from "@/lib/auth/customer-portal-authorization";
 import { APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, NOTIFICATION_KINDS, type NotificationKind } from "./notifications";
 import { ROLE_CODES, type Role } from "./types";
 
@@ -93,6 +92,10 @@ import { ROLE_CODES, type Role } from "./types";
  * 쓰므로 한 칸 비켜 선다). rose는 red와, teal은 emerald와, indigo는 violet과
  * 너무 붙어서 고르지 않았다.
  *
+ * ⚠️ 2026-10-04 에 「새 수리 의뢰」(emerald)가 빠지면서 emerald 가 비었다. 위에
+ * 적은 고른 까닭은 **그때의 이웃 관계**이므로 그대로 둔다 — 지금 쓰는 색끼리
+ * 갈라지는지는 notification-settings.test.ts 가 본다.
+ *
  * 견적서 결재 대기는 불출 승인 대기와 같은 「눌러 처리하면 없어지는 결재 줄」이라
  * 다시 색을 나눠 쓸 수 없다. 남은 색 중 **이미 쓰는 일곱 색 모두에서 가장 멀리
  * 떨어진** fuchsia 를 준다 — violet(불출)과도 pink(반려)와도 색상환에서 한참
@@ -136,12 +139,6 @@ export const NOTIFICATION_KIND_META: Record<
     description:
       "품목 상세에서 소유 구분마다 정해 둔 한계수량보다 재고가 적어진 것입니다. 한계수량을 정하지 않은 품목은 이 알림에 잡히지 않습니다.",
     toneClassName: "text-red-700 dark:text-red-400",
-  },
-  CUSTOMER_REPAIR_REQUEST_NEW: {
-    label: "새 수리 의뢰",
-    description:
-      "고객사가 전용 주소에서 보낸 수리 의뢰 중 아직 접수로 만들지도, 반려하지도 않은 것입니다. 접수를 만들 수 있는 쪽이 받습니다.",
-    toneClassName: "text-emerald-700 dark:text-emerald-400",
   },
   PART_ISSUE_APPROVAL_PENDING: {
     label: "불출 승인 대기",
@@ -213,7 +210,6 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "REPAIR_CASE_APPROVAL":
     case "PART_REQUEST_PENDING":
     case "PART_STOCK_BELOW_MINIMUM":
-    case "CUSTOMER_REPAIR_REQUEST_NEW":
     case "PART_ISSUE_APPROVAL_PENDING":
     case "QUOTE_APPROVAL_PENDING":
     case "APPROVAL_GRANTED":
@@ -254,11 +250,6 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 반대로 이쪽은 명단을 이 파일에 적었다 — 재현할 옛 동작이 없고, 부품
       // 요청과는 다른 질문이기 때문이다(이 파일 머리말).
       return canReceiveLowStockNotifications(role);
-
-    case "CUSTOMER_REPAIR_REQUEST_NEW":
-      // 명단을 옮겨 적지 않고 저쪽 함수를 부른다 — 고객 안내 창구를 볼 수
-      // 있는 사람이 곧 그 의뢰를 접수로 만들 사람이다.
-      return canReceiveCustomerRepairRequestNotifications(role);
 
     case "PART_ISSUE_APPROVAL_PENDING":
       // 새로 태어나는 종류라 재현할 옛 동작은 없지만, 답은 결재 대기와 같은

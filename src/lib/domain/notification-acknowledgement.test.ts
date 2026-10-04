@@ -12,7 +12,6 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
-  buildCustomerRepairRequestNotification,
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
@@ -110,12 +109,6 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       owner: "DSS",
       currentQuantity: 1,
       minimumQuantity: 3,
-    }),
-    buildCustomerRepairRequestNotification({
-      requestId: randomUUID(),
-      customerName: "고객사",
-      productModelName: "모델",
-      serialNumber: "SN-1",
     }),
     buildPartIssueApprovalNotification({
       issueRequestId: randomUUID(),

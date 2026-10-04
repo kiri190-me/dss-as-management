@@ -32,8 +32,7 @@
     "test:components": "node scripts/run-test-list.mjs components -- --import tsx --test",
     "check:sso": "node --conditions=react-server --import tsx scripts/check-sso-provision.ts",
     "sso:link": "tsx scripts/link-sso-subject.ts",
-    "seed:customer-status": "tsx scripts/seed-customer-status-options.ts",
-    "portal:sync": "node --conditions=react-server --import tsx scripts/sync-customer-portal.ts"
+    "seed:customer-status": "tsx scripts/seed-customer-status-options.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

@@ -67,7 +67,7 @@ import {
 import { canManageRolePermissions } from "./role-permission-authorization";
 import {
   canEditCustomerStatus,
-  canManageCustomerLinks,
+  canManageCustomerStatusOptions,
   canViewCustomerPortal,
 } from "./customer-portal-authorization";
 import {
@@ -198,8 +198,13 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       // 세 단계가 실제 조작과 짝이 맞는다(permission-areas.ts 의 같은 항목).
       // 표로 옮겨 적지 않고 *-authorization.ts 를 **불러서** 구한다 — 기본값이
       // 바뀌면 저쪽 한 곳만 고치면 된다.
+      //
+      // 🔴 2026-10-04 에 전용 주소가 없어지면서 「관리」가 가리키는 일이 상태
+      // 목록 하나로 줄었다. 부르는 함수는 canManageCustomerLinks 에서
+      // canManageCustomerStatusOptions 로 바뀌었지만 **답은 한 역할도 달라지지
+      // 않는다** — 둘 다 canManageRolePermissions(관리자 이상)였다.
       return ladder({
-        manage: canManageCustomerLinks(role),
+        manage: canManageCustomerStatusOptions(role),
         write: canEditCustomerStatus(role),
         read: canViewCustomerPortal(role),
       });

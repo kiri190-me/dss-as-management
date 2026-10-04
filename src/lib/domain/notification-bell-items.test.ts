@@ -9,7 +9,6 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
-  buildCustomerRepairRequestNotification,
   buildPartIssueApprovalNotification,
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
@@ -45,12 +44,6 @@ function oneOfEachKind(): NotificationItem[] {
       owner: "DSS",
       currentQuantity: 15,
       minimumQuantity: 30,
-    }),
-    buildCustomerRepairRequestNotification({
-      requestId: "req-c1",
-      customerName: "주성 엔지니어링",
-      productModelName: "MBK200-JS3",
-      serialNumber: "1708075",
     }),
     buildPartIssueApprovalNotification({
       issueRequestId: "issue-1",

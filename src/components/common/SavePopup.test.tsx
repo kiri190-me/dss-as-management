@@ -44,7 +44,10 @@ test("팝업은 앱 틀에 한 번 붙는다", () => {
 test("A/S 접수는 등록 팝업을 띄우고 목록으로 넘어간다 — 상세로 가지 않는다", () => {
   const source = readFileSync("src/components/repair-cases/new/IntakeFormInner.tsx", "utf8");
   assert.match(source, /showSavePopup\(\{/);
-  assert.match(source, /redirectTo: fromRequestId \? "\/customer-portal\/requests" : "\/repair-cases"/);
+  // 2026-10-04 에 「고객이 보낸 수리 의뢰에서 옮겨 오기」가 걷히면서 갈래가
+  // 없어졌다 — 어디서 들어왔든 접수 목록 한 곳으로 간다.
+  assert.match(source, /redirectTo: "\/repair-cases",/);
+  assert.doesNotMatch(source, /customer-portal\/requests/);
   // 아무도 읽지 않던 표시였다(2026-09-15 조사) — 팝업이 그 자리를 대신한다.
   assert.doesNotMatch(source, /registered=1/);
 });
