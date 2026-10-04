@@ -150,3 +150,17 @@ src/lib/db/mutations/domestic-order-issue-dates.integration.test.ts
 # (안 막으면 S/N 없는 장비가 통째로 걸려 나온다) · Model 과 L/N 이 짝으로 오는가.
 # 격리: S/N 이 `ZZTEST` 로 시작하는 행만 만들고 끝나면 그 행만 지운다.
 src/lib/db/queries/products.integration.test.ts
+
+# ── 주간보고 `현 상태` 를 그 자리에서 바꾼다 (2026-10-04) ────────────────────
+# 화면이 보내는 것은 단계 키가 아니라 **분류 하나**다. 서버가 그것을 「가장 가까운
+# 단계」로 번역해 기존 단계 직접 변경 경로(STEP_SET_MANUALLY)로 옮기므로, 여기서
+# 재는 것은 그 번역이 실제 DB 에서 성립하는가다: 단계가 정말 옮겨 가고 그 단계가
+# 다시 그 분류로 계산되는가(분류는 classifyWeeklyReportStatus 로 **다시 재서**
+# 본다 — 단계 키를 박아 두면 워크플로를 고친 날 뜻 없이 깨진다) · 🔴 이력이
+# 남는가(사유 null, from·to·행위자) · 되돌리기도 되는가 · 🔴 영업은 막히고
+# **아무 흔적도 남기지 않는가** · 없는 건은 NOT_FOUND · 낡은 버전은 CONFLICT.
+# 고르는 규칙 자체(가장 가까운·동점이면 앞·승인 게이트 제외)는 unit 목록의
+# weekly-report-status-step.test.ts 가 값으로 본다.
+# 🔴 격리 이름: 접수 월 "9310" · 제품 모델 "WR-STATUS-TEST-" (다른 스위트와 겹치지
+# 않는다). 고객사·사용자·워크플로는 읽기만 한다.
+src/lib/db/mutations/weekly-report-status.integration.test.ts

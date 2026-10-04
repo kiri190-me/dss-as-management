@@ -84,6 +84,9 @@ export default async function DeveloperWeeklyReportPage() {
               report={sample.report}
               asOfDate={sample.asOfDate}
               canEditNotes={false}
+              // 글자 크기를 보는 미리보기라 `현 상태` 도 고르개로 열지 않는다 —
+              // 여기서 실제 접수 건의 단계가 옮겨지면 안 된다(비고와 같은 까닭).
+              canEditStatus={false}
               goals={{
                 weekStart: sample.weekStart,
                 currentWeekStart: sample.weekStart,

@@ -3,6 +3,7 @@ import Link from "next/link";
 import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
 import WeeklyReportNotesCell from "./WeeklyReportNotesCell";
+import WeeklyReportStatusCell from "./WeeklyReportStatusCell";
 import WeeklyReportWidthFrame from "./WeeklyReportWidthFrame";
 import type { RepairCaseLinkOption } from "@/lib/db/queries/domestic-orders";
 import type { WeeklyReportDeliveryRow } from "@/lib/db/queries/weekly-report-deliveries";
@@ -39,11 +40,11 @@ import {
  * 주간보고 — 손으로 만들던 엑셀 현황판을 그대로 옮긴 화면
  * ============================================================================
  * **집계는 조회 전용이다.** 고객사 블록·총합·PO 발행 현황의 숫자는 어디서도 고칠
- * 수 없다 — 세어서 나오는 값이라 고칠 것이 없다. 누를 것이 있는 자리는 셋이다:
+ * 수 없다 — 세어서 나오는 값이라 고칠 것이 없다. 누를 것이 있는 자리는 넷이다:
  * `금주 목표` 와 `납입 예정 건` 은 각각 통째로 WeeklyReportGoalsPanel ·
  * WeeklyReportDeliveriesPanel(클라이언트 컴포넌트)에 들어 있고 이 파일은 그 둘을
- * **놓을 자리만** 준다. 셋째가 상세표의 `비고` 칸이다(아래 '비고 한 칸만 고칠 수
- * 있다').
+ * **놓을 자리만** 준다. 나머지 둘이 상세표의 `비고` 칸과 `현 상태` 칸이다(아래
+ * '비고 한 칸만 고칠 수 있다' · '현 상태 도 바꿀 수 있다').
  *
  * 그 둘이 화면의 어디에 오는지는 이 헤더에 적지 않는다 — 자리는 아래 반환 트리가
  * 정하고 한 번 바뀐 적이 있다(원래는 집계 위였다). 자리를 말이 아니라 코드로만
@@ -82,6 +83,19 @@ import {
  * canEditNotes 는 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 실제 저장은
  * server/actions/update-repair-case.ts 가 세션·역할·필드를 처음부터 다시 확인한다
  * (page.tsx 의 canEditGoals 와 같은 규칙).
+ *
+ * ── `현 상태` 도 바꿀 수 있다 — 다만 그것은 **단계를 옮기는 일**이다 ──────
+ * 상세표의 `현 상태`(6칸 중 하나)는 저장된 값이 아니라 그 접수 건이 지금 서 있는
+ * 워크플로 단계에서 계산되는 값이다(domain/weekly-report.ts). 그래서 이 칸을
+ * 바꾸면 **단계가 실제로 옮겨 가고 변경 이력이 남는다** — 저장은 작업내용 탭의
+ * 「현재 단계 직접 변경」과 **같은 길**(STEP_SET_MANUALLY)로 나가고, 어느 단계로
+ * 갈지는 서버가 정한다(지금 단계에서 가장 가까운 단계). 규칙과 근거는 전부
+ * WeeklyReportStatusCell 과 domain/weekly-report-status-step.ts 에 있다.
+ *
+ * 이 파일이 정하는 것은 비고 칸과 똑같이 **어디에 놓는가**와 **누구에게 그리는가**
+ * 둘뿐이고, canEditStatus 가 거짓이면 지금까지와 똑같이 글자만 그린다. 🔴 두
+ * 권한은 **같은 값이 아니다** — 비고는 수리 건의 필드 권한이고 현 상태는 단계를
+ * 옮기는 자격이다.
  *
  * ── 갱신 일은 서버가 정한다 ────────────────────────────────────────────
  * 머리말의 날짜를 클라이언트에서 new Date() 로 만들면 서버가 그린 것과 달라져
@@ -297,6 +311,14 @@ function dash(value: string | null | undefined): string {
 /** 어느 칸에도 안 맞는 건의 `현 상태`에 적는 말. 화면과 시험이 같은 글자를 쓴다. */
 const UNCLASSIFIED_LABEL = "분류 안 됨";
 
+/**
+ * 그 빨간 딱지의 옷. 상수로 뺀 것은 아래 StatusCell 이 **두 자리**에서 같은 딱지를
+ * 그리기 때문이다 — 고칠 수 있는 줄에도 그대로 붙는다(바꿀 수 있게 되었다고 분류가
+ * 안 됐다는 사실이 사라지지는 않는다). 두 곳에 각각 적으면 언젠가 한쪽만 고쳐진다.
+ */
+const UNCLASSIFIED_BADGE_TONE =
+  "rounded bg-red-100 px-1 py-0.5 text-[10px] leading-none font-medium text-red-900 dark:bg-red-950 dark:text-red-200";
+
 /** 빨간 볼드가 뜻하는 것. 머리말과 그 칸의 title 이 같은 글자를 쓴다. */
 const LONG_PENDING_PO_LABEL = "장기 PO 미발행";
 
@@ -317,16 +339,36 @@ const PO_ISSUANCE_SECTION_LABEL = "PO 발행 현황";
  */
 const LONG_PENDING_PO_TONE = "font-bold text-red-700 dark:text-red-300";
 
-/** 상세표의 `현 상태` 한 칸. 분류 안 된 건은 빨갛게 드러난다. */
-function StatusCell({ row }: { row: WeeklyReportRow }) {
-  if (row.reportStatus === null) {
-    return (
-      <span className="rounded bg-red-100 px-1 py-0.5 text-[10px] leading-none font-medium text-red-900 dark:bg-red-950 dark:text-red-200">
-        {UNCLASSIFIED_LABEL}
-      </span>
-    );
+/**
+ * 상세표의 `현 상태` 한 칸. 분류 안 된 건은 빨갛게 드러난다.
+ *
+ * 바꿀 수 있는 사람에게는 그 자리가 **고르개**가 된다(WeeklyReportStatusCell).
+ * 못 바꾸는 사람에게는 지금까지와 한 글자도 다르지 않게 글자만 그린다 — 줄마다
+ * 클라이언트 컴포넌트를 붙이지 않는 까닭은 비고 칸과 같다(파일 헤더).
+ *
+ * 🔴 **분류 안 됨 줄도 고를 수 있다.** 오히려 고쳐야 할 줄이라, 빨간 딱지는
+ * 그대로 두고 그 옆에 고르개를 둔다.
+ */
+function StatusCell({ row, canEdit }: { row: WeeklyReportRow; canEdit: boolean }) {
+  if (!canEdit) {
+    if (row.reportStatus === null) {
+      return <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>;
+    }
+    return <>{weeklyReportStatusLabels[row.reportStatus]}</>;
   }
-  return <>{weeklyReportStatusLabels[row.reportStatus]}</>;
+
+  return (
+    <span className="flex flex-col items-start gap-1">
+      {row.reportStatus === null && (
+        <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>
+      )}
+      <WeeklyReportStatusCell
+        repairCaseId={row.id}
+        version={row.version}
+        reportStatus={row.reportStatus}
+      />
+    </span>
+  );
 }
 
 /**
@@ -573,10 +615,13 @@ function IntakeNumberLink({ row }: { row: WeeklyReportRow }) {
 function ReportBlock({
   block,
   canEditNotes,
+  canEditStatus,
 }: {
   block: WeeklyReportBlock;
   /** `비고` 칸에 `수정` 을 그릴 것인가. 관문이 아니다(파일 헤더). */
   canEditNotes: boolean;
+  /** `현 상태` 칸에 고르개를 그릴 것인가. 이것도 관문이 아니다(파일 헤더). */
+  canEditStatus: boolean;
 }) {
   const toneClass = customerRowColorClass(block.customerRowColor);
   // 직접 고른 색이면 위 클래스가 읽을 CSS 변수. 팔레트 색·없음이면 undefined 다.
@@ -647,10 +692,11 @@ function ReportBlock({
                     {dash(row.quoteIssuedDate)}
                   </td>
                   <td className="px-wr-cell-x py-wr-cell-y">
-                    <StatusCell row={row} />
+                    <StatusCell row={row} canEdit={canEditStatus} />
                   </td>
                   <td className="px-wr-cell-x py-wr-cell-y tabular-nums">{dash(row.orderIssuedDate)}</td>
-                  {/* 이 표에서 유일하게 고칠 수 있는 칸이다(파일 헤더).
+                  {/* 이 표에서 고칠 수 있는 두 칸 중 하나다(파일 헤더 — 나머지
+                      하나가 위 `현 상태` 다).
                       whitespace-pre-line 은 그대로 둔다 — 이 값에는 여러 줄이
                       들어 있고, 못 고치는 사람에게 보이는 모양이 지금까지와
                       한 글자도 달라지면 안 된다. */}
@@ -847,6 +893,7 @@ export default function WeeklyReportScreen({
   report,
   asOfDate,
   canEditNotes,
+  canEditStatus,
   goals,
   deliveries,
   kindFilter,
@@ -863,6 +910,15 @@ export default function WeeklyReportScreen({
    * 합치면 목표는 못 적는데 남의 수리 건 비고는 고치는 사람이 생긴다.
    */
   canEditNotes: boolean;
+  /**
+   * 상세표의 `현 상태` 를 바꿀 수 있는가. 거짓이면 그 칸도 지금까지와 똑같은
+   * 글자만 그린다 — 역시 화면을 그리기 위한 값일 뿐 관문이 아니다(파일 헤더).
+   *
+   * **canEditNotes 와도 goals.canEdit 과도 다른 값이다.** 이쪽은 워크플로 단계를
+   * 직접 옮기는 자격(checkManualStepSetEligibility 의 역할 축)이라, 셋을 하나로
+   * 합치면 비고만 고칠 수 있어야 할 사람이 단계까지 옮기게 된다.
+   */
+  canEditStatus: boolean;
   goals: WeeklyReportGoalsPanelData;
   /**
    * 그 주의 납입 예정 줄 전부. 이 파일은 한 줄도 읽지 않는다 — 무엇을 그릴지는
@@ -979,6 +1035,7 @@ export default function WeeklyReportScreen({
                     key={kind}
                     block={weeklyReportPairBlock(row, kind)}
                     canEditNotes={canEditNotes}
+                    canEditStatus={canEditStatus}
                   />
                 ))}
               </section>

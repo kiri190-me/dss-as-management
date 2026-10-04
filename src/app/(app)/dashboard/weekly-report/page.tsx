@@ -6,6 +6,8 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
+import { checkManualStepSetEligibility } from "@/lib/domain/local/workflow/permissions";
+import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { listRepairCaseLinkOptions } from "@/lib/db/queries/domestic-orders";
@@ -27,6 +29,20 @@ export const metadata: Metadata = {
 // 매 요청 시점의 진행 상황을 세는 화면이라 정적 캐시 대상이 아니다 —
 // 대시보드(/dashboard)와 같은 이유, 같은 정책이다.
 export const dynamic = "force-dynamic";
+
+/**
+ * `현 상태` 고르개를 그릴지 정할 때 쓰는 보류 상태. 이 화면은 줄마다의 보류
+ * 여부를 읽지 않으므로(그러려면 250줄치 이력 조회가 하나 더 붙는다) **역할 축만**
+ * 보려고 보류 아님을 넣는다. 진짜 판정은 서버가 그 건의 이력을 다시 읽어 한다
+ * (아래 canEditStatus 주석).
+ */
+const NOT_ON_HOLD_FOR_UI_HINT: HoldState = {
+  isOnHold: false,
+  reason: null,
+  startedByUserId: null,
+  startedByNameSnapshot: null,
+  startedAt: null,
+};
 
 /**
  * 주간보고 — 대시보드의 하위메뉴(navigation.ts 의 parentKey).
@@ -117,6 +133,23 @@ export default async function WeeklyReportPage({
   // 다시 확인한다.
   const canEditNotes = actingUser !== null && isFieldEditable(actingUser.role, "notes");
 
+  // 상세표의 `현 상태` 는 **또 다른 권한**으로 열린다. 그 칸을 바꾸는 일은 곧
+  // 워크플로 단계를 직접 옮기는 일이라(domain/weekly-report-status-step.ts),
+  // 판정도 작업내용 탭의 「현재 단계 직접 변경」이 쓰는 그 함수를 그대로 부른다 —
+  // 여기에 역할 목록(SUPER_ADMIN·ADMIN·AS_ENGINEER)을 베껴 적으면 같은 동작에
+  // 규칙이 둘 생기고, 한쪽만 고쳐지는 날이 온다.
+  //
+  // ⚠️ 보류 중인지·출하 완료로 잠겼는지는 **줄마다 다른 값**이라 여기서 볼 수
+  // 없다. 그래서 보류 아님을 가정하고 **역할 축만** 본다 — 실제로 보류 중이거나
+  // 잠긴 줄은 서버가 막고(transitionWorkflow 가 DB 를 다시 읽는다), 화면은 그
+  // 오류 문구를 그 줄에 그대로 보여 준다(WeeklyReportStatusCell). 주간보고 목록은
+  // 출하 완료된 건을 애초에 제외하므로 잠김은 거의 나오지 않는다.
+  //
+  // canEditNotes 와 마찬가지로 **화면을 그리기 위한 값일 뿐 관문이 아니다.**
+  const canEditStatus =
+    actingUser !== null &&
+    checkManualStepSetEligibility(actingUser, NOT_ON_HOLD_FOR_UI_HINT).allowed;
+
   const [cases, goalRows, deliveryRows, repairCaseOptions] = await Promise.all([
     listWeeklyReportCases(),
     listWeeklyReportGoals(weekStart),
@@ -157,6 +190,7 @@ export default async function WeeklyReportPage({
       report={report}
       asOfDate={asOfDate}
       canEditNotes={canEditNotes}
+      canEditStatus={canEditStatus}
       goals={{
         weekStart,
         currentWeekStart,
