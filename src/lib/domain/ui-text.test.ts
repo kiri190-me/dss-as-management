@@ -66,7 +66,7 @@ test("기본값은 types.ts 의 표와 글자 하나까지 같다 — 워크플�
   });
 });
 
-test("기본값은 types.ts 의 표와 글자 하나까지 같다 — 수리 진행 상태 11", () => {
+test("기본값은 types.ts 의 표와 글자 하나까지 같다 — 수리 진행 상태 12", () => {
   assert.deepEqual(DEFAULT_UI_TEXT.repairStatus, {
     WAITING_INTAKE_INSPECTION: "인수점검 대기",
     INTAKE_INSPECTION_IN_PROGRESS: "인수점검 중",
@@ -76,6 +76,7 @@ test("기본값은 types.ts 의 표와 글자 하나까지 같다 — 수리 진
     WAITING_PARTS_SUPPLY: "부품 수급 대기",
     WAITING_REPAIR: "수리 대기",
     IN_REPAIR: "수리 중",
+    REPAIR_COMPLETED: "수리 완료",
     WAITING_SHIPMENT_APPROVAL: "출하 승인 대기",
     WAITING_SHIPMENT: "출하 대기",
     SHIPMENT_COMPLETED: "출하 완료",

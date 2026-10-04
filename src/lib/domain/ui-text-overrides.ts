@@ -173,6 +173,7 @@ export const UI_TEXT_GROUPS: readonly UiTextGroup[] = [
       { key: "WAITING_PARTS_SUPPLY", defaultText: repairStatusLabels.WAITING_PARTS_SUPPLY },
       { key: "WAITING_REPAIR", defaultText: repairStatusLabels.WAITING_REPAIR },
       { key: "IN_REPAIR", defaultText: repairStatusLabels.IN_REPAIR },
+      { key: "REPAIR_COMPLETED", defaultText: repairStatusLabels.REPAIR_COMPLETED },
       {
         key: "WAITING_SHIPMENT_APPROVAL",
         defaultText: repairStatusLabels.WAITING_SHIPMENT_APPROVAL,

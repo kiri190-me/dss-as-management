@@ -191,7 +191,7 @@ export function isExcludedFromWeeklyReport(row: { status: RepairStatus | null })
  *   수리 대기      WAITING_PARTS_SUPPLY + WAITING_REPAIR
  *   수리 중        IN_REPAIR
  *   PO 대기 중     WAITING_PO 전부 (단계 키를 보지 않는다)
- *   출하 대기      WAITING_SHIPMENT + WAITING_SHIPMENT_APPROVAL
+ *   출하 대기      REPAIR_COMPLETED + WAITING_SHIPMENT + WAITING_SHIPMENT_APPROVAL
  *
  * PO 발행 완료는 이 표에 없다 — 상태가 아니라 발주발행일로 갈리는, 겹쳐 세는
  * 값이다(hasWeeklyReportPoIssued).
@@ -223,12 +223,22 @@ export function classifyWeeklyReportStatus(
       // 단계 키를 보지 않는다 — waiting_po 든 po_received 든 아직 PO 를
       // 기다리는 자리이고, PO 가 실제로 났는지는 발주발행일이 답한다.
       return "PO_WAITING";
+    case "REPAIR_COMPLETED":
+      // 수리가 끝났으니 그 장비가 다음에 기다리는 것은 출하다. 이 칸이 이미
+      // '출하 승인 대기'와 '출하 대기'를 함께 세고 있어 결이 맞는다
+      // (사용자 결정 2026-10-04).
+      return "SHIPMENT_WAITING";
     case "WAITING_SHIPMENT":
     case "WAITING_SHIPMENT_APPROVAL":
       return "SHIPMENT_WAITING";
     default:
       // SHIPMENT_COMPLETED 는 여기까지 오지 않는다(위 isExcludedFromWeeklyReport
       // 가 먼저 걸러 낸다). null 과 앞으로 늘어날 상태가 이 자리로 온다.
+      //
+      // **상태를 새로 더하는 사람에게**: 여기로 떨어져도 타입 오류가 나지 않고
+      // 시험도 그대로 통과한다 — 총 대수에는 들어가는데 6칸 합계와만 어긋나는
+      // 모양으로 조용히 틀린다. REPAIR_COMPLETED 가 실제로 그랬다. 상태를
+      // 더하면 위 매핑표와 case 를 **함께** 고친다.
       return null;
   }
 }

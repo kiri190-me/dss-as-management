@@ -215,6 +215,51 @@ test("교산 회신 대기는 점검 중, 출하 승인 대기는 출하 대기�
   );
 });
 
+test("수리 완료는 출하 대기 칸에서 세어진다 — 분류 안 됨으로 떨어지지 않는다", () => {
+  // 수리가 끝났으니 그 장비가 다음에 기다리는 것은 출하다(사용자 결정 2026-10-04).
+  // 이 칸이 '출하 승인 대기'와 '출하 대기'를 이미 함께 세고 있던 자리다.
+  //
+  // 이 시험이 꼭 필요한 까닭: 분류가 switch + default 라, 상태만 늘리고 여기를
+  // 빠뜨려도 **타입 오류가 나지 않는다.** 그러면 그 건은 총 대수에는 들어가면서
+  // 6칸 어디에도 안 들어가, 숫자가 그럴듯한 채로 칸 합계와만 어긋난다.
+  assert.equal(
+    classifyWeeklyReportStatus({
+      // 전용 단계 키는 없다 — 분류는 단계 키를 보지 않으므로 수리 단계 그대로 둔다.
+      status: "REPAIR_COMPLETED",
+      currentWorkflowStepKey: "repair_in_progress",
+      hasIntakeInspectionRecord: true,
+    }),
+    "SHIPMENT_WAITING"
+  );
+
+  // 함수만이 아니라 **칸의 숫자로도** 확인한다 — 셋이 한 칸에 모인다.
+  const report = buildAsOf([
+    makeCase({ status: "REPAIR_COMPLETED", currentWorkflowStepKey: "repair_in_progress" }),
+    makeCase({
+      status: "WAITING_SHIPMENT_APPROVAL",
+      currentWorkflowStepKey: "waiting_kyosan_shipment_approval",
+    }),
+    makeCase({ status: "WAITING_SHIPMENT", currentWorkflowStepKey: "waiting_shipment" }),
+  ]);
+
+  assert.equal(report.total.byStatus.SHIPMENT_WAITING, 3, "셋이 출하 대기 한 칸으로 모인다");
+  assert.equal(report.total.unclassified, 0, "분류 안 됨이 하나도 없어야 한다");
+  assert.equal(report.total.total, 3);
+  assert.equal(sumWeeklyReportStatusCounts(report.total), 3, "총 대수 = 6칸의 합");
+});
+
+test("수리 완료 건은 보고서에서 빠지지 않는다 — 아직 출하 전이다", () => {
+  // 빠지는 것은 출하 완료뿐이다. 수리 완료를 함께 거르면 총 대수가 조용히 줄어든다.
+  assert.equal(isExcludedFromWeeklyReport({ status: "REPAIR_COMPLETED" }), false);
+
+  const report = buildAsOf([
+    makeCase({ status: "REPAIR_COMPLETED", currentWorkflowStepKey: "repair_in_progress" }),
+  ]);
+  assert.equal(report.total.total, 1, "총 대수에 남는다");
+  assert.equal(report.blocks[0].rows.length, 1, "상세표에도 남는다");
+  assert.equal(report.blocks[0].rows[0].reportStatus, "SHIPMENT_WAITING");
+});
+
 // ─────────────────────────────────────────────────── PO 발행 완료 (겹쳐 세는 값)
 
 test("PO 발행 완료는 발주발행일 유무로만 갈린다 — 상태와 무관하다", () => {

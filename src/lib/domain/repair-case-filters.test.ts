@@ -5,8 +5,10 @@ import {
   collectCustomerFilterOptions,
   DEFAULT_FILTERS,
   parseInitialFilters,
+  sortRows,
   type Filters,
 } from "./repair-case-filters";
+import { REPAIR_STATUS_CODES } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
 /**
@@ -494,4 +496,42 @@ test("다른 조건과 함께 걸린다 — 신고 증상만 남기고 나머지
     idsOf(applyFilters(rows, filters({ reportedSymptom: "소음", customerId: "cust-1" }))),
     ["match"]
   );
+});
+
+// ─────────────────────────────────────────────── 상태 차례
+
+/**
+ * 상태 정렬은 REPAIR_STATUS_CODES 의 **자리**를 그대로 쓴다(sortRows 의 "status").
+ * 그래서 배열에 값을 끝에 붙이면 화면 차례가 업무 차례와 어긋난다 — 아래 두
+ * 시험이 그것을 막는다. 2026-10-04 에 "수리 완료"를 "수리 중" 다음에 끼워 넣었다.
+ */
+test("수리 완료는 배열에서 수리 중 바로 다음, 출하 승인 대기 바로 앞이다", () => {
+  const inRepair = REPAIR_STATUS_CODES.indexOf("IN_REPAIR");
+  const repairCompleted = REPAIR_STATUS_CODES.indexOf("REPAIR_COMPLETED");
+  const waitingShipmentApproval = REPAIR_STATUS_CODES.indexOf("WAITING_SHIPMENT_APPROVAL");
+
+  assert.notEqual(repairCompleted, -1, "REPAIR_COMPLETED 가 목록에 없다");
+  assert.equal(repairCompleted, inRepair + 1, "수리 완료가 수리 중 바로 다음이 아니다");
+  assert.equal(
+    waitingShipmentApproval,
+    repairCompleted + 1,
+    "출하 승인 대기가 수리 완료 바로 다음이 아니다"
+  );
+});
+
+test("상태순 정렬에서 수리 완료는 수리 중과 출하 승인 대기 사이에 놓인다", () => {
+  // 끝에 붙여 놓았다면 shipment-approval 뒤로 밀려 이 시험이 깨진다.
+  const rows = [
+    row({ id: "shipment-approval", effectiveStatus: "WAITING_SHIPMENT_APPROVAL" }),
+    row({ id: "shipment-completed", effectiveStatus: "SHIPMENT_COMPLETED" }),
+    row({ id: "repair-completed", effectiveStatus: "REPAIR_COMPLETED" }),
+    row({ id: "in-repair", effectiveStatus: "IN_REPAIR" }),
+  ];
+
+  assert.deepEqual(idsOf(sortRows(rows, { column: "status", direction: "asc" })), [
+    "in-repair",
+    "repair-completed",
+    "shipment-approval",
+    "shipment-completed",
+  ]);
 });

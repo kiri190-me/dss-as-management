@@ -78,10 +78,10 @@ test("묶음마다 관리자가 읽을 한글 이름과 쓰임새가 있다", ()
   }
 });
 
-test("🔴 묶음이 7개이고 문구가 모두 42개다", () => {
+test("🔴 묶음이 7개이고 문구가 모두 43개다", () => {
   assert.equal(UI_TEXT_GROUPS.length, 7);
   const total = UI_TEXT_GROUPS.reduce((sum, group) => sum + group.items.length, 0);
-  assert.equal(total, 42);
+  assert.equal(total, 43);
 });
 
 test("🔴 묶음마다 types.ts 의 표와 항목 키·기본 문구가 정확히 같다 — 빠진 문구가 없다", () => {
