@@ -57,6 +57,9 @@ const TEST_YEAR_MONTH = "9904";
 
 let customerId: string;
 let engineerId: string;
+/** 두 번째 승인 AS_ENGINEER. 「담당이 아닌 엔지니어」 표본용이며, 개발 DB에
+ *  엔지니어가 한 명뿐이면 null이 된다(그때는 배정 없는 건으로만 잰다 — 19-1). */
+let otherEngineerId: string | null = null;
 let adminId: string;
 let salesId: string;
 let matcherWorkflowVersionId: string;
@@ -70,13 +73,15 @@ before(async () => {
   assert.ok(customer, "expected at least one non-deleted customer in the dev DB");
   customerId = customer.id;
 
-  const [engineer] = await db
+  const approvedEngineers = await db
     .select({ id: users.id })
     .from(users)
     .where(and(eq(users.role, "AS_ENGINEER"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false)))
-    .limit(1);
+    .limit(2);
+  const [engineer] = approvedEngineers;
   assert.ok(engineer, "expected at least one approved AS_ENGINEER in the dev DB");
   engineerId = engineer.id;
+  otherEngineerId = approvedEngineers[1]?.id ?? null;
 
   const [admin] = await db
     .select({ id: users.id })
@@ -441,14 +446,40 @@ describe("transitionWorkflow", () => {
     assert.equal(history.reason, "고객 요청으로 단계 조정");
   });
 
-  test("15. manual step set: 사유가 없으면 REASON_REQUIRED (되돌리기·보류와 달리 항상 필수)", async () => {
+  // 2026-10-04 완화: 단계 직접 변경의 사유가 필수에서 선택으로 바뀌었다. 이
+  // 자리는 원래 "사유가 없으면 REASON_REQUIRED"를 고정하던 시험이며, 보류
+  // 쪽(10번)과 같은 방식으로 완화된 동작을 그대로 뒤집어 고정한다 — 사유를
+  // 다시 필수로 되돌리면 이 시험이 실패하므로 의도치 않은 재강화도 걸린다.
+  test("15. manual step set: 사유가 없어도 성공하고, 이력에는 사유만 null로 남는다", async () => {
     const created = await createTestCase();
-    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, null, "waiting_kyosan_reply");
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "REASON_REQUIRED");
+    const target = "waiting_kyosan_reply";
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, null, target);
+    assert.equal(result.ok, true, `manual set without reason failed: ${JSON.stringify(result)}`);
+    if (!result.ok) return;
+    assert.equal(result.currentWorkflowStepKey, target);
 
-    const rows = await db.select().from(statusChangeHistories).where(eq(statusChangeHistories.repairCaseId, created.id));
-    assert.equal(rows.length, 0, "거부된 시도는 이력을 남기지 않는다");
+    const row = await fetchRow(created.id);
+    assert.equal(row.currentWorkflowStepId, await stepIdForKey(target), "사유가 없어도 단계는 실제로 바뀐다");
+
+    const [history] = await db
+      .select({
+        actionType: statusChangeHistories.actionType,
+        reason: statusChangeHistories.reason,
+        actorUserId: statusChangeHistories.actorUserId,
+        fromStepId: statusChangeHistories.fromStepId,
+        toStepId: statusChangeHistories.toStepId,
+        createdAt: statusChangeHistories.createdAt,
+      })
+      .from(statusChangeHistories)
+      .where(eq(statusChangeHistories.repairCaseId, created.id));
+    assert.equal(history.actionType, "STEP_SET_MANUALLY");
+    assert.equal(history.reason, null, "사유를 적지 않으면 빈 문자열이 아니라 null로 기록되어야 한다");
+    // 🔴 사유가 비어도 추적은 그대로 남는다 — 누가·언제·어느 단계에서 어느
+    // 단계로. 이것까지 사라지면 이 경로를 되짚을 길이 아예 없어진다.
+    assert.equal(history.actorUserId, adminId, "행위자가 기록되지 않았다");
+    assert.equal(history.fromStepId, await stepIdForKey("intake_inspection"), "출발 단계가 기록되지 않았다");
+    assert.equal(history.toStepId, await stepIdForKey(target), "도착 단계가 기록되지 않았다");
+    assert.ok(history.createdAt, "이동 시각이 기록되지 않았다");
   });
 
   test("16. manual step set: 승인 게이트 단계로는 이동할 수 없다 (승인 우회 차단)", async () => {
@@ -475,15 +506,49 @@ describe("transitionWorkflow", () => {
     if (!result.ok) assert.equal(result.code, "INVALID_TRANSITION");
   });
 
-  test("19. manual step set: 담당 엔지니어 본인은 가능하고, 담당이 아닌 역할(SALES)은 FORBIDDEN", async () => {
+  test("19. manual step set: 엔지니어는 가능하고, 허용 목록 밖의 역할(SALES)은 FORBIDDEN", async () => {
     const engineerCase = await createTestCase();
     const byEngineer = await transitionWorkflow(engineerCase.id, 1, "STEP_SET_MANUALLY", engineerId, "현장 판단", "waiting_kyosan_reply");
     assert.equal(byEngineer.ok, true, `assigned engineer manual set failed: ${JSON.stringify(byEngineer)}`);
 
+    // 🔴 2026-10-04에 푼 것은 「엔지니어 중에서도 담당만」이라는 조건뿐이다.
+    // 역할 허용 목록(SUPER_ADMIN/ADMIN/AS_ENGINEER)은 넓히지 않았다.
     const salesCase = await createTestCase();
     const bySales = await transitionWorkflow(salesCase.id, 1, "STEP_SET_MANUALLY", salesId, "영업 판단", "waiting_kyosan_reply");
     assert.equal(bySales.ok, false, "SALES는 단계를 임의로 옮길 수 없다");
     if (!bySales.ok) assert.equal(bySales.code, "FORBIDDEN");
+  });
+
+  // 2026-10-04 완화: 담당 엔지니어 제약이 풀렸다. 전에는 아래 두 표본이 각각
+  // "이 접수 건에는 담당 엔지니어가 배정되어 있지 않습니다" /
+  // "담당 엔지니어만 단계를 직접 변경할 수 있습니다"로 FORBIDDEN이 났다.
+  test("19-1. manual step set: 담당이 아닌 엔지니어도 단계를 직접 변경할 수 있다", async (t) => {
+    // (가) 담당 엔지니어가 배정되지 않은 건 — 개발 DB 구성과 무관하게 항상 돈다.
+    const unassigned = await createTestCase({ assignedEngineerId: null });
+    const onUnassigned = await transitionWorkflow(
+      unassigned.id, 1, "STEP_SET_MANUALLY", engineerId, "배정 전 조정", "waiting_kyosan_reply"
+    );
+    assert.equal(onUnassigned.ok, true, `unassigned case manual set failed: ${JSON.stringify(onUnassigned)}`);
+
+    // (나) 남이 담당인 건. 승인된 AS_ENGINEER가 둘 이상일 때만 잴 수 있다 —
+    // 한 명뿐인 DB에서는 (가)가 같은 제약을 이미 증명한다. 어느 쪽이 돌았는지
+    // 출력에 남긴다(조용히 건너뛰고 통과한 것처럼 보이지 않게).
+    t.diagnostic(
+      otherEngineerId
+        ? "19-1: (가) 배정 없음 + (나) 남의 담당 건 둘 다 쟀다"
+        : "19-1: 승인된 AS_ENGINEER가 한 명뿐이라 (가) 배정 없는 건만 쟀다"
+    );
+    if (otherEngineerId) {
+      const othersCase = await createTestCase({ assignedEngineerId: otherEngineerId });
+      const byNonAssigned = await transitionWorkflow(
+        othersCase.id, 1, "STEP_SET_MANUALLY", engineerId, "남의 건 조정", "waiting_kyosan_reply"
+      );
+      assert.equal(
+        byNonAssigned.ok,
+        true,
+        `non-assigned engineer manual set failed: ${JSON.stringify(byNonAssigned)}`
+      );
+    }
   });
 
   test("20. manual step set: 보류 중에는 거부된다", async () => {
@@ -495,6 +560,16 @@ describe("transitionWorkflow", () => {
     const result = await transitionWorkflow(created.id, held.version, "STEP_SET_MANUALLY", adminId, "그래도 옮기기", "waiting_kyosan_reply");
     assert.equal(result.ok, false, "보류 중 다른 작업 금지 규칙이 이 경로에도 적용되어야 한다");
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+  });
+
+  test("20-1. manual step set: 출하 완료로 잠긴 건은 CASE_LOCKED로 막힌다", async () => {
+    const created = await createTestCase();
+    // 13번과 같은 arrange 전용 직접 SQL — 이 묶음에서 진짜 잠금에 닿는 경로가 없다.
+    await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, created.id));
+
+    const result = await transitionWorkflow(created.id, 1, "STEP_SET_MANUALLY", adminId, "그래도 옮기기", "waiting_kyosan_reply");
+    assert.equal(result.ok, false, "출하 완료 잠금은 단계 직접 변경에도 그대로 적용되어야 한다");
+    if (!result.ok) assert.equal(result.code, "CASE_LOCKED");
   });
 
   test("21. manual step set: 버전이 어긋나면 CONFLICT", async () => {

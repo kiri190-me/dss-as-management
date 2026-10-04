@@ -274,18 +274,23 @@ export async function transitionWorkflow(
           return { ok: false, code: "VALIDATION_ERROR", message: "변경할 단계를 선택해 주세요." };
         }
 
-        // 사유는 항상 필수다(2026-08-18 사용자 결정). 되돌리기·보류의 사유가
-        // 선택으로 완화된 것과 의도적으로 다르다 — 규칙을 우회하는 경로라
-        // 사유가 유일한 추적 수단이기 때문이다.
-        if (!reason) {
-          return {
-            ok: false,
-            code: "REASON_REQUIRED",
-            message: "단계를 직접 변경하려면 사유를 입력해야 합니다.",
-          };
-        }
+        // 2026-10-04 완화: 단계 직접 변경의 사유가 필수에서 선택으로 바뀌었다.
+        // 여기 있던 `if (!reason) REASON_REQUIRED` 반환을 제거한 것이 그 완화의
+        // 전부다 — 보류 쪽(아래 분기)이 2026-08-18에 같은 방식으로 완화된 것과
+        // 같은 꼴이다. 이전 결정은 「사유는 항상 필수다(2026-08-18) — 규칙을
+        // 우회하는 경로라 사유가 유일한 추적 수단이기 때문이다」였고, 그것이
+        // 2026-10-04 사용자 결정으로 뒤집혔다.
+        //
+        // 🔴 추적 자체는 사라지지 않는다. 사유를 적지 않으면
+        // status_change_histories.reason만 null로 남고, 그 행의 나머지 —
+        // 행위자(actor_user_id)·시각(created_at)·from_step_id·to_step_id·
+        // action_type="STEP_SET_MANUALLY" — 는 전과 똑같이 기록된다. 사유를
+        // 적으면 이전과 동일하게 그 문구가 함께 남는다.
+        //
+        // 이 완화는 이 분기(STEP_SET_MANUALLY)에만 적용된다. 정규 전이의
+        // requiresReason(출하 완료 메모 등)은 위 분기에서 그대로 강제된다.
 
-        const eligibility = checkManualStepSetEligibility(actingUser, current.assignedEngineerId, holdState);
+        const eligibility = checkManualStepSetEligibility(actingUser, holdState);
         if (!eligibility.allowed) {
           return { ok: false, code: "FORBIDDEN", message: eligibility.reason };
         }

@@ -13,17 +13,22 @@ function isApprovedAccount(user: ActingUser): boolean {
 
 /**
  * ============================================================================
- * 🔴 이 파일의 역할 비교는 두 종류다 — 방향을 틀리면 정반대가 된다
+ * 🔴 이 파일의 역할 비교는 방향이 있다 — 틀리면 정반대가 된다
  * ============================================================================
  * 자리마다 물어야 한다: **이 비교가 문을 「여는」 것인가 「조이는」 것인가.**
  *
  *  - 여는 자리 — 「최고관리자·관리자면 담당 검사를 건너뛴다」.
  *    승격은 개발자가 그 문을 **통과하게** 한다 → `maySkipAssignmentCheck`
  *  - 조이는 자리 — 「엔지니어일 뿐이면 담당 조건을 더 건다」.
- *    승격은 개발자가 그 제약에 **걸리지 않게** 한다 → `isEngineerOnly`
+ *    **지금 이 파일에는 조이는 자리가 없다.** 마지막 하나였던 단계 직접
+ *    변경의 담당 엔지니어 제약이 2026-10-04 사용자 결정으로 풀리면서, 그
+ *    자리에만 쓰이던 `isEngineerOnly` 헬퍼도 함께 걷어냈다
+ *    (checkManualStepSetEligibility 주석 참조).
  *
- * 조이는 자리에 순진하게 `actorMay` 를 씌우면 방향이 뒤집혀 **개발자에게
- * 제약이 더 붙는다.** 그래서 두 창구를 이름으로 갈라 둔다.
+ * 조이는 자리를 다시 만들 일이 생기면 순진하게 `actorMay` 를 씌우지 말 것 —
+ * 방향이 뒤집혀 **개발자에게 제약이 더 붙는다.** 그때는 「최고관리자로도 볼 수
+ * 없는 사람일 때만 참」인 판정(예전 `isEngineerOnly`:
+ * `!actorMay(user, (role) => role !== "AS_ENGINEER")`)을 따로 세워야 한다.
  *
  * ⚠️ 배정 **사실**은 어느 쪽에서도 손대지 않는다. `assignedEngineerId` ·
  * `actingUser.id` 비교는 그대로다 — 바뀌는 것은 「배정이 요구되는가」라는
@@ -40,16 +45,6 @@ function isApprovedAccount(user: ActingUser): boolean {
  */
 function maySkipAssignmentCheck(user: ActingUser): boolean {
   return actorMay(user, (role) => role === "SUPER_ADMIN" || role === "ADMIN");
-}
-
-/**
- * 제약을 **조이는** 쪽: 「엔지니어일 뿐인가」. 최고관리자로도 볼 수 없는
- * 사람일 때만 참이다 — 그래서 개발자 엔지니어에게는 추가 제약이 붙지 않는다.
- *
- * 표시가 꺼진 계정의 답은 예전 `role === "AS_ENGINEER"` 와 한 톨도 다르지 않다.
- */
-function isEngineerOnly(user: ActingUser): boolean {
-  return !actorMay(user, (role) => role !== "AS_ENGINEER");
 }
 
 /**
@@ -190,12 +185,19 @@ export function checkTransitionEligibility(
  * 작업내용 탭의 "현재 단계 직접 변경"(STEP_SET_MANUALLY) 자격 판정이다.
  * 정규 전이가 아니므로 TransitionDefinition 행이 존재하지 않고, 따라서
  * checkTransitionEligibility를 재사용할 수 없다 — 대신 그 함수와 같은 순서
- * (역할 → 담당 엔지니어 → 보류)로 같은 성격의 검사를 수행한다.
+ * (역할 → 보류)로 같은 성격의 검사를 수행한다.
  *
- * 허용 역할은 SUPER_ADMIN/ADMIN/AS_ENGINEER이며(2026-08-18 승인), AS_ENGINEER는
- * 자신이 담당으로 배정된 접수 건만 변경할 수 있다 — 교정 반환(STEP_RETURNED)에
- * 적용한 것과 동일한 제약이다. SALES/INVENTORY_MANAGER는 단계 자체를 임의로
- * 옮길 수 없다(정규 전이에서 각자 담당 구간을 진행하는 것은 그대로 가능하다).
+ * 허용 역할은 SUPER_ADMIN/ADMIN/AS_ENGINEER이며(2026-08-18 승인) 이 목록은
+ * 그대로다 — SALES/INVENTORY_MANAGER는 여전히 단계를 임의로 옮길 수 없다
+ * (정규 전이에서 각자 담당 구간을 진행하는 것은 그대로 가능하다).
+ *
+ * 담당 엔지니어 제약은 2026-10-04 사용자 결정으로 풀렸다. 그 전에는
+ * AS_ENGINEER가 자신이 담당으로 배정된 접수 건만 바꿀 수 있었고(2026-08-18,
+ * 교정 반환과 같은 제약), 그래서 이 함수가 assignedEngineerId를 인자로 받았다.
+ * 이제 승인된 AS_ENGINEER는 배정 여부와 상관없이 어느 접수 건에서도 단계를
+ * 직접 바꿀 수 있으므로 그 인자 자체를 없앴다 — 받기만 하고 보지 않으면 읽는
+ * 사람이 배정이 아직 작용한다고 오해한다. 정규 전이의
+ * requiresAssignedEngineer(되돌리기 포함)는 이 변경과 무관하게 그대로다.
  *
  * 잠금(is_locked)은 여기서 보지 않는다 — 호출부가 전이와 동일하게 가장 먼저,
  * 무조건 검사한다(workflow-transitions.ts / DatabaseWorkflowControlPanel의
@@ -204,7 +206,6 @@ export function checkTransitionEligibility(
  */
 export function checkManualStepSetEligibility(
   actingUser: ActingUser,
-  assignedEngineerId: string | null,
   holdState: HoldState
 ): PermissionCheckResult {
   if (!isApprovedAccount(actingUser)) {
@@ -212,6 +213,8 @@ export function checkManualStepSetEligibility(
   }
   // 문을 **여는** 자리 — 세 역할에게 열린 허용 목록을 부정형으로 적은 것이다.
   // 승격은 개발자가 이 문을 통과하게 한다.
+  // 🔴 이 목록은 넓히지 않는다. 2026-10-04에 푼 것은 「엔지니어 중에서도 담당만」
+  // 이라는 조건뿐이고, 영업·재고 담당자는 전과 똑같이 막힌다.
   if (
     !actorMay(
       actingUser,
@@ -219,17 +222,6 @@ export function checkManualStepSetEligibility(
     )
   ) {
     return { allowed: false, reason: "현재 역할로는 단계를 직접 변경할 수 없습니다." };
-  }
-  // 🔴 여기는 제약을 **조이는** 자리다 — 「엔지니어일 뿐이면 자기 담당 건만」.
-  // 순진하게 actorMay 를 씌우면 개발자에게 제약이 하나 더 붙는다(정반대).
-  // 최고관리자로도 볼 수 없는 사람일 때만 들어가야 한다 — isEngineerOnly.
-  if (isEngineerOnly(actingUser)) {
-    if (!assignedEngineerId) {
-      return { allowed: false, reason: "이 접수 건에는 담당 엔지니어가 배정되어 있지 않습니다." };
-    }
-    if (assignedEngineerId !== actingUser.id) {
-      return { allowed: false, reason: "담당 엔지니어만 단계를 직접 변경할 수 있습니다." };
-    }
   }
   return checkNotOnHold(holdState, false);
 }

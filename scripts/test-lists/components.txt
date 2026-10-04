@@ -219,3 +219,15 @@ src/components/customer-portal/customer-portal-form-view.test.ts
 # 컴포넌트가 서버 액션을 직접 부르고 통로는 server-only 라 통째로 그릴 수 없다 — 이웃
 # customer-portal-form-view.test.ts 와 같은 방법으로 원본을 글자로 읽는다.
 src/components/customer-portal/customer-form-export-panel.test.ts
+
+# 「현재 단계 직접 변경」의 사유가 선택 입력이 되었다(사용자 요청 2026-10-04). 세 겹을
+# 함께 풀어야 하는 변경이라 화면만 되돌아가면 「서버는 받아 주는데 단추가 안 눌린다」가
+# 된다 — 그래서 못 박는 것이 셋이다: 제출 판정이 사유를 더 보지 않는가 · 🔴 입력칸과
+# 보내는 길은 그대로인가(없애면 적고 싶은 사람이 못 적는다) · 화면 글자가 사실과
+# 맞는가(별표와 「반드시 남겨야 합니다」). 🔴 함께 풀리면 안 되는 출하 완료 잠금이
+# 여전히 가장 먼저 막는지도 같은 파일에서 본다. 서버 쪽 같은 판정은 db 목록의
+# workflow-transitions.integration.test.ts(15번)가, 자격 판정은 unit 목록의
+# manual-step-set-permission.test.ts 가 본다. 클라이언트 컴포넌트가 서버 액션을 직접
+# 부르고 그 통로가 server-only 라 통째로 그릴 수 없다 — 위 이웃들과 같은 방법으로
+# 원본을 글자로 읽는다.
+src/components/repair-cases/workflow/manual-step-set-reason-optional.test.ts

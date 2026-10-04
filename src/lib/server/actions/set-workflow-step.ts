@@ -67,18 +67,14 @@ export async function setWorkflowStepAction(
     return { ok: false, code: "VALIDATION_ERROR", message: "변경할 단계를 선택해 주세요." };
   }
 
+  // 형식 검사(길이 상한 등)는 그대로다. 여기 있던 「사유가 비면 거절」은
+  // 2026-10-04 사용자 결정으로 제거했다 — 사유는 선택 입력이 되었고, 빈 값은
+  // validateReasonFormat가 null로 정규화해 그대로 mutation에 넘긴다
+  // (status_change_histories.reason에 null로 남는다). 사유 유무와 무관하게
+  // 누가·언제·어느 단계에서 어느 단계로 옮겼는지는 계속 기록된다.
   const reasonValidation = validateReasonFormat(input.reason);
   if (!reasonValidation.ok) {
     return { ok: false, code: "VALIDATION_ERROR", message: reasonValidation.error };
-  }
-  // 사유 필수는 mutation에서도 다시 검사한다. 여기서 먼저 걸러 주는 것은
-  // 왕복 한 번을 아끼기 위한 것일 뿐, 이 검사가 없어도 서버는 안전하다.
-  if (!reasonValidation.reason) {
-    return {
-      ok: false,
-      code: "VALIDATION_ERROR",
-      message: "단계를 직접 변경하려면 사유를 입력해야 합니다.",
-    };
   }
 
   try {

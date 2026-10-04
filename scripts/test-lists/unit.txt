@@ -91,6 +91,7 @@ src/lib/domain/date-only.test.ts
 src/lib/domain/my-active-work-sort.test.ts
 src/lib/domain/my-active-work-filter.test.ts
 src/lib/domain/local/workflow/workflow-action-availability.test.ts
+src/lib/domain/local/workflow/manual-step-set-permission.test.ts
 src/lib/domain/local/workflow/shipment-approval-checklist.test.ts
 src/lib/auth/technical-procedure-template-authorization.test.ts
 src/lib/domain/procedure-template-edit-history-fold.test.ts

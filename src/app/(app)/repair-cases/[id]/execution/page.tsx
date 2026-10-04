@@ -174,7 +174,6 @@ export default async function RepairCaseExecutionPage({
         currentStepKey={resolved.currentWorkflowStepKey}
         options={manualStepOptions}
         actingUser={actingUser}
-        assignedEngineerId={resolved.assignedEngineerId}
         holdState={{
           isOnHold: holdState.isOnHold,
           reason: holdState.reason,

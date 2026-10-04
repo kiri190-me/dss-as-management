@@ -27,7 +27,6 @@ export default function ManualStepSetPanel({
   currentStepKey,
   options,
   actingUser,
-  assignedEngineerId,
   holdState,
   isCaseLocked,
 }: {
@@ -38,9 +37,6 @@ export default function ManualStepSetPanel({
    *  listManuallySelectableStepsFromRules가 산출한다. */
   options: WorkflowRuleStep[];
   actingUser: ActingUser | null;
-  /** 접수 건의 담당 엔지니어(없으면 null). AS_ENGINEER 본인 확인용 UI 힌트이며,
-   *  최종 판정은 서버가 DB 값으로 다시 한다. */
-  assignedEngineerId: string | null;
   holdState: HoldState;
   isCaseLocked: boolean;
 }) {
@@ -59,13 +55,16 @@ export default function ManualStepSetPanel({
     : !actingUser
       ? "사용자 정보를 확인할 수 없습니다."
       : (() => {
-          const eligibility = checkManualStepSetEligibility(actingUser, assignedEngineerId, holdState);
+          const eligibility = checkManualStepSetEligibility(actingUser, holdState);
           return eligibility.allowed ? null : eligibility.reason;
         })();
 
   const isUnchanged = selectedStepKey === currentStepKey;
-  const isReasonEmpty = reason.trim() === "";
-  const canSubmit = !unavailableReason && !isUnchanged && !isReasonEmpty && !isSubmitting;
+  // 사유는 2026-10-04 사용자 결정으로 선택 입력이 되었다 — 비어 있어도 제출을
+  // 막지 않는다. 입력창은 그대로 두고(적고 싶은 사람은 적는다), 빈 값은 아래에서
+  // null로 넘겨 status_change_histories.reason에 null로 남긴다. 누가·언제·어느
+  // 단계에서 어느 단계로 옮겼는지는 사유와 무관하게 계속 기록된다.
+  const canSubmit = !unavailableReason && !isUnchanged && !isSubmitting;
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -118,7 +117,7 @@ export default function ManualStepSetPanel({
       <div className="flex flex-col gap-3 border-t border-amber-200 p-4 dark:border-amber-900">
         <p className="text-xs text-zinc-600 dark:text-zinc-400">
           정규 워크플로 순서를 따르지 않고 현재 단계를 바로 지정합니다. 변경 이력에 &ldquo;단계 직접
-          변경&rdquo;으로 따로 기록되며, 사유는 반드시 남겨야 합니다. 승인이 필요한 단계(출하 완료 등)는
+          변경&rdquo;으로 따로 기록되며, 사유는 선택 입력입니다. 승인이 필요한 단계(출하 완료 등)는
           목록에 나오지 않습니다 — 승인 절차를 거쳐 진행해 주세요.
         </p>
 
@@ -150,7 +149,7 @@ export default function ManualStepSetPanel({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="manual-step-reason" className="text-xs text-zinc-500 dark:text-zinc-400">
-          변경 사유 *
+          변경 사유 (선택)
         </label>
         <textarea
           id="manual-step-reason"
@@ -179,9 +178,6 @@ export default function ManualStepSetPanel({
       <div className="flex items-center justify-end gap-2">
         {!unavailableReason && isUnchanged && (
           <span className="text-xs text-zinc-500 dark:text-zinc-400">현재와 다른 단계를 선택해 주세요.</span>
-        )}
-        {!unavailableReason && !isUnchanged && isReasonEmpty && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">변경 사유를 입력해 주세요.</span>
         )}
         <button
           type="button"

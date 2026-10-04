@@ -542,42 +542,32 @@ test("🔴 개발자 엔지니어는 어느 분류의 단계에서도 보류를 
 test("🔴 개발자 엔지니어는 단계를 직접 변경할 수 있다 — 조건이 더 붙지 않는다", () => {
   const dev = engineer({ isDeveloper: true });
 
-  // 🔴 부정형 함정이 있던 자리. 「AS_ENGINEER 면 담당 조건을 더 건다」는 제약을
-  // **조이는** 비교라, 순진하게 승격을 씌웠다면 개발자에게 제약이 하나 더 붙어
-  // 바로 여기서 막힌다.
-  assert.deepEqual(
-    checkManualStepSetEligibility(dev, OTHER_ENGINEER_ID, RELEASED_HOLD_STATE),
-    { allowed: true }
-  );
-  assert.deepEqual(checkManualStepSetEligibility(dev, null, RELEASED_HOLD_STATE), { allowed: true });
+  // 2026-10-04 완화로 담당 엔지니어 제약이 사라져 이 함수는 더 이상
+  // assignedEngineerId를 받지 않는다. 승격이 영향을 주는 자리는 역할 관문
+  // 하나로 줄었고, 그 관문이 **여는** 비교라는 점은 그대로다.
+  assert.deepEqual(checkManualStepSetEligibility(dev, RELEASED_HOLD_STATE), { allowed: true });
 
   // 최고관리자가 실제로 그렇게 지나간다.
   assert.deepEqual(
-    checkManualStepSetEligibility(actorWithRole("SUPER_ADMIN"), OTHER_ENGINEER_ID, RELEASED_HOLD_STATE),
+    checkManualStepSetEligibility(actorWithRole("SUPER_ADMIN"), RELEASED_HOLD_STATE),
     { allowed: true }
   );
 
-  // 표시가 꺼진 엔지니어는 예전 그대로 자기 담당 건만.
-  assert.deepEqual(checkManualStepSetEligibility(engineer(), "u-eng", RELEASED_HOLD_STATE), { allowed: true });
-  assert.equal(checkManualStepSetEligibility(engineer(), OTHER_ENGINEER_ID, RELEASED_HOLD_STATE).allowed, false);
-  assert.equal(checkManualStepSetEligibility(engineer(), null, RELEASED_HOLD_STATE).allowed, false);
+  // 표시가 꺼진 엔지니어도 통과한다(담당 여부를 보지 않는다).
+  assert.deepEqual(checkManualStepSetEligibility(engineer(), RELEASED_HOLD_STATE), { allowed: true });
 
   // 역할 관문 자체도 열린다 — 영업 개발자는 최고관리자로 지난다.
   assert.deepEqual(
-    checkManualStepSetEligibility(
-      actorWithRole("SALES", { isDeveloper: true }),
-      OTHER_ENGINEER_ID,
-      RELEASED_HOLD_STATE
-    ),
+    checkManualStepSetEligibility(actorWithRole("SALES", { isDeveloper: true }), RELEASED_HOLD_STATE),
     { allowed: true }
   );
   assert.equal(
-    checkManualStepSetEligibility(actorWithRole("SALES"), OTHER_ENGINEER_ID, RELEASED_HOLD_STATE).allowed,
+    checkManualStepSetEligibility(actorWithRole("SALES"), RELEASED_HOLD_STATE).allowed,
     false
   );
 
   // 보류 검사는 승격 대상이 아니다.
-  assert.equal(checkManualStepSetEligibility(dev, OTHER_ENGINEER_ID, ON_HOLD_STATE).allowed, false);
+  assert.equal(checkManualStepSetEligibility(dev, ON_HOLD_STATE).allowed, false);
 });
 
 test("🔴 승인되지 않은 개발자는 배정 관문 어디서도 통과하지 못한다", () => {
@@ -586,7 +576,7 @@ test("🔴 승인되지 않은 개발자는 배정 관문 어디서도 통과하
 
   assert.equal(checkHoldEligibilityForCategory("TECHNICAL", pending, "u-eng").allowed, false);
   assert.equal(checkHoldEligibilityForCategory(null, pending, "u-eng").allowed, false);
-  assert.equal(checkManualStepSetEligibility(pending, "u-eng", RELEASED_HOLD_STATE).allowed, false);
+  assert.equal(checkManualStepSetEligibility(pending, RELEASED_HOLD_STATE).allowed, false);
   assert.equal(checkRoleEligibility(transitionAllowing(["SUPER_ADMIN"]), pending).allowed, false);
   assert.equal(
     checkTransitionEligibility(
@@ -624,17 +614,10 @@ function legacyHold(
   return true;
 }
 
-function legacyManualStepSet(
-  user: ActingUser,
-  assignedEngineerId: string | null,
-  holdState: HoldState
-): boolean {
+function legacyManualStepSet(user: ActingUser, holdState: HoldState): boolean {
   if (user.approvalStatus !== "APPROVED") return false;
   if (user.role !== "SUPER_ADMIN" && user.role !== "ADMIN" && user.role !== "AS_ENGINEER") return false;
-  if (user.role === "AS_ENGINEER") {
-    if (!assignedEngineerId) return false;
-    if (assignedEngineerId !== user.id) return false;
-  }
+  // 담당 엔지니어 제약은 2026-10-04에 풀렸다 — 역할과 보류만 본다.
   return !holdState.isOnHold;
 }
 
@@ -643,7 +626,9 @@ const CATEGORIES: readonly (StepCategory | null)[] = [null, ...STEP_CATEGORY_COD
 const HOLD_STATES: readonly HoldState[] = [RELEASED_HOLD_STATE, ON_HOLD_STATE];
 const APPROVALS: readonly AccountApprovalStatus[] = ["APPROVED", "PENDING"];
 
-test("🔴 개발자 표시가 꺼진 계정의 답은 배정 관문 세 곳 전부 예전과 같다 — 다섯 역할", () => {
+// 「관문 세 곳」은 checkAssignedEngineer · 보류 · 단계 직접 변경이다. 세 번째는
+// 2026-10-04부터 배정을 보지 않지만, 승격이 지나가는 관문이라는 점은 같다.
+test("🔴 개발자 표시가 꺼진 계정의 답은 관문 세 곳 전부 예전과 같다 — 다섯 역할", () => {
   // 남에게 권한이 새지 않는다. 다른 역할의 정책이 한 톨이라도 바뀌면 여기서 걸린다.
   const needsAssignee = transitionAllowing([...ROLE_CODES], { requiresAssignedEngineer: true });
 
@@ -663,19 +648,21 @@ test("🔴 개발자 표시가 꺼진 계정의 답은 배정 관문 세 곳 전
             `${role}/${approvalStatus}/${category}/${assignedEngineerId}: 보류 판정이 달라졌다`
           );
         }
-        for (const holdState of HOLD_STATES) {
-          assert.equal(
-            checkManualStepSetEligibility(user, assignedEngineerId, holdState).allowed,
-            legacyManualStepSet(user, assignedEngineerId, holdState),
-            `${role}/${approvalStatus}/${assignedEngineerId}/보류=${holdState.isOnHold}: 단계 직접 변경 판정이 달라졌다`
-          );
-        }
+      }
+      // 단계 직접 변경은 2026-10-04부터 배정을 보지 않으므로 ASSIGNEES 루프
+      // 바깥에 둔다 — 안에 두면 같은 단언을 세 번 되풀이할 뿐이다.
+      for (const holdState of HOLD_STATES) {
+        assert.equal(
+          checkManualStepSetEligibility(user, holdState).allowed,
+          legacyManualStepSet(user, holdState),
+          `${role}/${approvalStatus}/보류=${holdState.isOnHold}: 단계 직접 변경 판정이 달라졌다`
+        );
       }
     }
   }
 });
 
-test("🔴 개발자의 답은 배정 관문 세 곳 전부 「진짜 역할 ∪ 최고관리자」다 — 다섯 역할", () => {
+test("🔴 개발자의 답은 관문 세 곳 전부 「진짜 역할 ∪ 최고관리자」다 — 다섯 역할", () => {
   // 더하기의 정확한 정의를 그대로 단언한다: 같은 사람(같은 id)이 최고관리자였다면
   // 되는 일은 개발자에게도 되고, 그 이상은 열리지 않는다.
   const needsAssignee = transitionAllowing([...ROLE_CODES], { requiresAssignedEngineer: true });
@@ -701,14 +688,15 @@ test("🔴 개발자의 답은 배정 관문 세 곳 전부 「진짜 역할 ∪
             `${role}/${approvalStatus}/${category}/${assignedEngineerId}: 보류가 더하기가 아니다`
           );
         }
-        for (const holdState of HOLD_STATES) {
-          assert.equal(
-            checkManualStepSetEligibility(dev, assignedEngineerId, holdState).allowed,
-            checkManualStepSetEligibility(plain, assignedEngineerId, holdState).allowed ||
-              checkManualStepSetEligibility(asSuperAdmin, assignedEngineerId, holdState).allowed,
-            `${role}/${approvalStatus}/${assignedEngineerId}/보류=${holdState.isOnHold}: 단계 직접 변경이 더하기가 아니다`
-          );
-        }
+      }
+      // 배정을 보지 않으므로 ASSIGNEES 루프 바깥(위 시험과 같은 이유).
+      for (const holdState of HOLD_STATES) {
+        assert.equal(
+          checkManualStepSetEligibility(dev, holdState).allowed,
+          checkManualStepSetEligibility(plain, holdState).allowed ||
+            checkManualStepSetEligibility(asSuperAdmin, holdState).allowed,
+          `${role}/${approvalStatus}/보류=${holdState.isOnHold}: 단계 직접 변경이 더하기가 아니다`
+        );
       }
     }
   }
