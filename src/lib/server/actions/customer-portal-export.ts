@@ -26,10 +26,11 @@ import {
  *  · 공유폴더에 저장   → `customerPortal` WRITE. 사내 공유폴더에 **파일을 만든다** —
  *    줄마다의 값을 고치는 것과 같은 무게로 본다.
  *
- * ── 🔴 양식 · 파일 이름 · 폴더를 화면에서 받지 않는다 ─────────────────────
- * 들어오는 것은 고객사 id 하나뿐이다. 양식은 서버가 고객사 이름으로 고르고
- * (setCustomerStatusAction 과 같은 규칙), 파일 이름은 공유폴더의 직전 파일에서 나오고,
- * 폴더는 환경변수에서 나온다. 화면이 「어디에 무엇으로 저장할지」를 정하지 못한다.
+ * ── 🔴 고객사 · 파일 이름 · 폴더를 화면에서 받지 않는다 ───────────────────
+ * 들어오는 것은 **양식 식별자** 하나뿐이다(2026-10-04 — 전에는 고객사 id 였다).
+ * 서버가 그 식별자를 실제 양식 목록과 맞춰 보고, 어느 고객사의 건을 모을지는 그
+ * 양식이 정한다. 파일 이름은 공유폴더의 직전 파일에서 나오고, 폴더는 환경변수에서
+ * 나온다. 화면이 「누구 것을 어디에 무엇으로 저장할지」를 정하지 못한다.
  * ============================================================================
  */
 
@@ -68,7 +69,7 @@ export type CustomerFormExportPreviewResult =
 
 /** 만들어 볼 뿐 — 디스크에 아무것도 쓰지 않는다. */
 export async function previewCustomerFormExportAction(input: {
-  customerId: string;
+  formId: string;
 }): Promise<CustomerFormExportPreviewResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
@@ -76,7 +77,7 @@ export async function previewCustomerFormExportAction(input: {
     return { ok: false, message: "고객 안내 현황을 볼 권한이 없습니다." };
   }
 
-  const prepared = await prepareCustomerPortalExport(input.customerId);
+  const prepared = await prepareCustomerPortalExport(input.formId);
   if (!prepared.ok) return { ok: false, message: prepared.message };
 
   const drawn = buildCustomerPortalExportGrid(prepared.plan);
@@ -130,7 +131,7 @@ export type CustomerFormExportSaveResult =
  * ============================================================================
  */
 export async function saveCustomerFormExportAction(input: {
-  customerId: string;
+  formId: string;
 }): Promise<CustomerFormExportSaveResult> {
   const gate = await requireActor();
   if (!gate.ok) return gate;
@@ -138,7 +139,7 @@ export async function saveCustomerFormExportAction(input: {
     return { ok: false, message: "공유폴더에 저장할 권한이 없습니다." };
   }
 
-  const prepared = await prepareCustomerPortalExport(input.customerId);
+  const prepared = await prepareCustomerPortalExport(input.formId);
   if (!prepared.ok) return { ok: false, message: prepared.message };
 
   const saved = await saveCustomerPortalExport(prepared.plan);

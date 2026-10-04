@@ -50,6 +50,24 @@ const panelCode = withoutComments(panel);
 const action = read(ACTION);
 const actionFlat = flat(action);
 
+/**
+ * 🔴 2026-10-04 — 넘기는 것이 **고객사 id 에서 양식 식별자로** 바뀌었다. 화면 표와
+ * 이 패널이 같은 집합을 보게 하려면 둘이 같은 것으로 대상을 가리켜야 한다. 각자
+ * 모으면 담당자가 본 표와 저장된 파일이 갈리고, 그 어긋남은 아무도 눈치채지
+ * 못한 채 굳는다(화면 쪽은 customer-portal-form-view.test.ts 가 함께 본다).
+ */
+describe("🔴 넘기는 것은 양식 식별자 하나뿐이다", () => {
+  test("두 단추가 양식 식별자로 통로를 부른다", () => {
+    assert.ok(panelFlat.includes("previewCustomerFormExportAction({ formId })"));
+    assert.ok(panelFlat.includes("saveCustomerFormExportAction({ formId })"));
+  });
+
+  test("🔴 고객사 id 를 더는 쥐지 않는다 — 화면이 「누구 것을」 정하지 못한다", () => {
+    assert.equal(panelCode.includes("customerId"), false, "아직 고객사 id 를 나른다");
+    assert.equal(actionFlat.includes("input.customerId"), false, "통로가 고객사 id 를 받는다");
+  });
+});
+
 describe("🔴 덮어쓴 사실을 화면이 말한다", () => {
   test("세 갈래가 서로 다른 문장이다 — 새로 만듦 · 덮어씀 · 그대로 둠", () => {
     const messages = ["saved", "replaced", "unchanged"].map((status) => {

@@ -26,8 +26,13 @@ type CustomerFormExportPreview = Extract<
  * ============================================================================
  * 고객사 양식 표를 **엑셀로** — [미리보기] · [공유폴더에 저장] · [폴더 열기]
  * ============================================================================
- * 「고객 안내 현황」의 양식 보기에서만 보인다. 서버가 공유폴더의 **직전 파일**을 바탕으로
+ * 「고객 안내 현황」의 양식 표 위에 늘 붙는다. 서버가 공유폴더의 **직전 파일**을 바탕으로
  * 통합문서를 만들고, 이 조각은 그 결과를 보여 주고 저장을 시킨다.
+ *
+ * ── 🔴 화면 표와 **같은 조회**에서 나온다 (2026-10-04) ───────────────────
+ * 건네는 것은 **양식 식별자** 하나뿐이고, 서버는 그것으로 화면 표와 같은 조회
+ * (listPortalItemsForForm)를 돈다. 각자 모으면 담당자가 본 표와 저장된 파일이 갈리고,
+ * 그 어긋남은 아무도 눈치채지 못한 채 굳는다.
  *
  * ── 🔴 미리보기는 저장될 그 파일이다 ─────────────────────────────────────
  * 보여 주는 격자는 서버가 만든 **그 통합문서**를 다시 읽어 그린 것이다(보고서 · 수기
@@ -144,11 +149,16 @@ function openHelperLink(link: string): void {
 }
 
 export default function CustomerFormExportPanel({
-  customerId,
+  formId,
   formLabel,
   canSave,
 }: {
-  customerId: string;
+  /**
+   * 🔴 **고객사가 아니라 양식**이다(2026-10-04). 화면 표와 이 패널이 같은 집합을
+   * 보게 하려면 둘이 같은 것으로 대상을 가리켜야 한다 — 서버는 이 값이 실제
+   * 양식 목록에 있는지 다시 확인한 뒤 그 양식의 건을 스스로 모은다.
+   */
+  formId: string;
   formLabel: string;
   /** `customerPortal` WRITE 가 있는가. 없으면 [공유폴더에 저장]이 잠긴다. */
   canSave: boolean;
@@ -172,7 +182,7 @@ export default function CustomerFormExportPanel({
 
   const handlePreview = () =>
     run(async () => {
-      const result = await previewCustomerFormExportAction({ customerId });
+      const result = await previewCustomerFormExportAction({ formId });
       if (!result.ok) {
         setPreview(null);
         return [{ text: result.message, tone: "warning" as const }];
@@ -194,7 +204,7 @@ export default function CustomerFormExportPanel({
 
   const handleSave = () =>
     run(async () => {
-      const result = await saveCustomerFormExportAction({ customerId });
+      const result = await saveCustomerFormExportAction({ formId });
       // 🔴 덮어썼을 때는 경고 결로 낸다 — 사람이 손으로 고쳐 둔 내용이 사라졌을 수 있다.
       if (!result.ok) return [{ text: result.message, tone: "warning" as const }];
       const lines: Notice[] = [

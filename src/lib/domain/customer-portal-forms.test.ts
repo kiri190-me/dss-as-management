@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import {
   CUSTOMER_PORTAL_FORMS,
   PORTAL_MANUAL_VALUE_MAX_LENGTH,
+  comparePortalRowsByReceivedAt,
   findPortalFormById,
   findPortalFormForCustomerName,
+  groupCustomersByPortalForm,
   isEnteredPerRow,
   manualColumnsOf,
   partsNameFromModelName,
   readManualValues,
   sanitizeManualValues,
+  sortPortalRowsByReceivedAt,
   type CustomerPortalForm,
+  type PortalRowOrderKey,
 } from "./customer-portal-forms";
 
 /**
@@ -25,8 +29,9 @@ import {
  *
  *  1. 🔴 세 고객사의 **열 이름과 차례가 엑셀 그대로**다. 열 하나가 조용히
  *     빠지거나 자리를 바꾸면 담당자가 다른 칸에 값을 적는다.
- *  2. 🔴 **정의가 없는 고객사는 null** 이다 — 그 화면은 기존 9열 표를 그대로
- *     쓴다. 부분 일치로 남의 양식이 걸리지 않는 것까지 본다.
+ *  2. 🔴 **정의가 없는 고객사는 null** 이다 — 2026-10-04 부터 그런 고객사는
+ *     「고객 안내 현황」에 아예 나오지 않는다. 부분 일치로 남의 양식이 걸리지
+ *     않는 것까지 본다.
  *  3. 🔴 **모르는 키는 저장되지 않는다.** 오류를 내지 않고 조용히 버린다.
  *  4. 🔴 **모르는 모델명의 Parts 명은 빈칸**이다 — 짐작해 채우면 고객사 표에
  *     거짓이 적힌다.
@@ -218,7 +223,7 @@ describe("🔴 고객사를 이름으로 가린다", () => {
     assert.equal(findPortalFormForCustomerName("invenia co.,ltd")?.id, "INVENIA");
   });
 
-  test("🔴 정의가 없는 고객사는 null — 그 화면은 기존 9열 표 그대로다", () => {
+  test("🔴 정의가 없는 고객사는 null — 그 고객사는 화면에 나오지 않는다", () => {
     for (const name of [
       "대성RF시스템",
       "동해정밀",
@@ -403,5 +408,165 @@ describe("🔴 Parts 명 — 네 갈래, 모르는 모델명은 빈칸", () => {
     for (const model of [null, undefined, "", "XYZ-1", "제너레이터"]) {
       assert.equal(partsNameFromModelName(model), null);
     }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 양식으로 고객사를 묶는다 — 「고객 안내 현황」의 단추가 서는 근거
+ * ============================================================================
+ * 2026-10-04 전에는 **전용 주소가 발급된 고객사**가 단추였다. 그 기능을 화면에서
+ * 걷어내면서 근거가 양식으로 옮겨 왔다(사용자 요청 — 「각사별 양식만 남겨줘」).
+ *
+ * 🔴 여기서 못 박는 것은 **합치기**다. 고객사 마스터에 같은 회사가 여러 이름으로
+ * 등록돼 있다(실측 2026-09-30: `INVENIA` 와 `INVENIA Co.,Ltd` 가 둘 다 살아 있고
+ * 양쪽 다 접수 건이 있다). 합치지 않으면 같은 회사의 표가 둘로 갈리는데, 빠진
+ * 쪽은 아무 오류 없이 영영 안 보인다.
+ * ============================================================================
+ */
+describe("🔴 양식으로 고객사 묶기", () => {
+  const CUSTOMERS = [
+    { id: "c-icd", name: "ICD Co.,Ltd." },
+    { id: "c-inv-1", name: "INVENIA" },
+    { id: "c-inv-2", name: "INVENIA Co.,Ltd" },
+    { id: "c-jusung-1", name: "JUSUNG" },
+    { id: "c-jusung-2", name: "주성 엔지니어링" },
+    { id: "c-other", name: "이름 없는 어느 회사" },
+  ];
+
+  test("🔴 여러 이름으로 등록된 한 회사가 **한 묶음**이 된다", () => {
+    const groups = groupCustomersByPortalForm(CUSTOMERS);
+    const invenia = groups.find((group) => group.form.id === "INVENIA");
+    assert.deepEqual(invenia?.customerIds, ["c-inv-1", "c-inv-2"]);
+    const jusung = groups.find((group) => group.form.id === "JUSUNG");
+    assert.deepEqual(jusung?.customerIds, ["c-jusung-1", "c-jusung-2"]);
+  });
+
+  test("양식이 없는 고객사는 어느 묶음에도 들어가지 않는다", () => {
+    const groups = groupCustomersByPortalForm(CUSTOMERS);
+    for (const group of groups) {
+      assert.ok(!group.customerIds.includes("c-other"), "양식 없는 고객사가 끼었다");
+    }
+  });
+
+  test("🔴 묶인 고객사가 하나도 없는 양식은 목록에서 빠진다 — 빈 단추를 그리지 않는다", () => {
+    const groups = groupCustomersByPortalForm([{ id: "c-icd", name: "ICD" }]);
+    assert.deepEqual(
+      groups.map((group) => group.form.id),
+      ["ICD"]
+    );
+  });
+
+  test("차례는 CUSTOMER_PORTAL_FORMS 그대로다 — 고객사 이름 차례가 아니다", () => {
+    // 일부러 거꾸로 넣어 본다.
+    const groups = groupCustomersByPortalForm([
+      { id: "c-jusung", name: "JUSUNG" },
+      { id: "c-inv", name: "INVENIA" },
+      { id: "c-icd", name: "ICD Co.,Ltd." },
+    ]);
+    assert.deepEqual(
+      groups.map((group) => group.form.id),
+      CUSTOMER_PORTAL_FORMS.map((form) => form.id)
+    );
+  });
+
+  test("하나도 안 묶이면 빈 목록이다", () => {
+    assert.deepEqual(groupCustomersByPortalForm([]), []);
+    assert.deepEqual(groupCustomersByPortalForm([{ id: "x", name: "어디 회사" }]), []);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「반출일」 오름차순 — 오래된 것이 위, 값이 없으면 맨 뒤
+ * ============================================================================
+ * 사용자 요청(2026-10-04): 「반출일을 기준으로 오름차순으로 표가 정렬되게 해줘.」
+ *
+ * 🔴 「반출일」은 **우리에게 들어온 날**(`receivedAt`)이다 — 이름만 반출일이다
+ * (customer-portal-forms.ts 머리말). 🔴 값이 없는 줄을 맨 뒤로 보내는 것이 이
+ * 시험의 핵심이다: 빈 값은 글자 비교에서 어느 날짜보다 앞서므로, 그냥 두면 날짜를
+ * 아직 못 적은 줄이 표 맨 위에 조용히 모인다.
+ * ============================================================================
+ */
+describe("🔴 반출일 오름차순", () => {
+  const row = (
+    receivedAt: string | null,
+    intakeNumber: string | null,
+    sourceId = `id-${intakeNumber ?? receivedAt ?? "x"}`
+  ): PortalRowOrderKey => ({ receivedAt, intakeNumber, sourceId });
+
+  test("오래된 것이 위로 온다", () => {
+    const sorted = sortPortalRowsByReceivedAt([
+      row("2026-09-30", "AS-3"),
+      row("2026-01-02", "AS-1"),
+      row("2026-05-15", "AS-2"),
+    ]);
+    assert.deepEqual(
+      sorted.map((item) => item.intakeNumber),
+      ["AS-1", "AS-2", "AS-3"]
+    );
+  });
+
+  test("🔴 반출일이 없는 줄은 **맨 뒤**다 — 조용히 맨 앞에 오면 표가 이상해진다", () => {
+    const sorted = sortPortalRowsByReceivedAt([
+      row(null, "AS-없음1"),
+      row("2026-03-01", "AS-2"),
+      row("", "AS-없음2"),
+      row("2026-01-01", "AS-1"),
+    ]);
+    assert.deepEqual(
+      sorted.map((item) => item.intakeNumber),
+      ["AS-1", "AS-2", "AS-없음1", "AS-없음2"]
+    );
+  });
+
+  test("같은 날짜끼리는 접수번호로 못 박는다 — 차례가 흔들리지 않게", () => {
+    const sorted = sortPortalRowsByReceivedAt([
+      row("2026-02-02", "AS-0003"),
+      row("2026-02-02", "AS-0001"),
+      row("2026-02-02", "AS-0002"),
+    ]);
+    assert.deepEqual(
+      sorted.map((item) => item.intakeNumber),
+      ["AS-0001", "AS-0002", "AS-0003"]
+    );
+  });
+
+  test("날짜도 접수번호도 같으면 줄 id 로 가른다", () => {
+    const sorted = sortPortalRowsByReceivedAt([
+      row("2026-02-02", null, "id-b"),
+      row("2026-02-02", null, "id-a"),
+    ]);
+    assert.deepEqual(
+      sorted.map((item) => item.sourceId),
+      ["id-a", "id-b"]
+    );
+  });
+
+  test("받은 배열을 건드리지 않는다", () => {
+    const original = [row("2026-09-30", "AS-2"), row("2026-01-02", "AS-1")];
+    const copy = [...original];
+    sortPortalRowsByReceivedAt(original);
+    assert.deepEqual(original, copy);
+  });
+
+  test("🔴 여러 고객사에서 모은 줄이 **한 표**로 세워진다", () => {
+    // 양식 하나에 고객사 둘(INVENIA · INVENIA Co.,Ltd)이 묶인 꼴.
+    const fromInvenia = [row("2026-04-01", "AS-INV-1"), row("2026-01-10", "AS-INV-2")];
+    const fromInveniaCoLtd = [row("2026-02-20", "AS-CO-1"), row("2026-06-05", "AS-CO-2")];
+    const sorted = sortPortalRowsByReceivedAt([...fromInvenia, ...fromInveniaCoLtd]);
+    assert.deepEqual(
+      sorted.map((item) => item.intakeNumber),
+      ["AS-INV-2", "AS-CO-1", "AS-INV-1", "AS-CO-2"],
+      "두 고객사의 줄이 한 표에서 날짜 차례로 섞이지 않는다"
+    );
+  });
+
+  test("견주는 함수 자체가 -1 · 0 · 1 을 낸다", () => {
+    assert.equal(comparePortalRowsByReceivedAt(row("2026-01-01", "A"), row("2026-02-01", "B")), -1);
+    assert.equal(comparePortalRowsByReceivedAt(row("2026-02-01", "B"), row("2026-01-01", "A")), 1);
+    assert.equal(comparePortalRowsByReceivedAt(row("2026-01-01", "A"), row("2026-01-01", "A")), 0);
+    assert.equal(comparePortalRowsByReceivedAt(row(null, "A"), row("2026-01-01", "B")), 1);
+    assert.equal(comparePortalRowsByReceivedAt(row("2026-01-01", "B"), row(null, "A")), -1);
   });
 });

@@ -135,13 +135,13 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
   }
 });
 
-test("고객 안내 현황·수리 의뢰는 목록 화면이라 팝업만 띄우고 머문다", () => {
+test("고객 안내 현황은 목록 화면이라 팝업만 띄우고 머문다", () => {
+  // 「고객이 보낸 수리 의뢰」 화면은 2026-10-04 에 전용 주소 기능과 함께
+  // 걷혔다(고객이 의뢰를 넣을 길이 없어졌다) — 그 화면의 단언도 함께 사라졌다.
   const portal = readFileSync("src/components/customer-portal/CustomerPortalScreen.tsx", "utf8");
   assert.deepEqual(popupCalls("src/components/customer-portal/CustomerPortalScreen.tsx"), [["result.message", "null"]]);
   // 거절 이유만 화면에 남는다.
   assert.match(portal, /if \(!result\.ok\) \{\s*setMessage\(\{ ok: false, text: result\.message \}\);\s*return;\s*\}/);
-  const requests = readFileSync("src/components/customer-portal/CustomerRequestListScreen.tsx", "utf8");
-  assert.match(requests, /onDone=\{\(text\) => showSavePopup\(\{ message: text, redirectTo: null \}\)\}/);
 });
 
 test("진단 Flowchart·초안을 만들면 그릴 차례라 편집 화면으로 넘어간다 — 팝업이 넘긴다", () => {

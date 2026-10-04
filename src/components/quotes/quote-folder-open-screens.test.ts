@@ -251,10 +251,11 @@ describe("🔴 ④c — 복사는 공용 모듈 하나로", () => {
       .filter((file) => /navigator\.clipboard\.writeText\(/.test(readFileSync(file, "utf8")))
       .map(relativeToSrc)
       .sort();
-    // 🔴 아래 셋을 공용 모듈로 모으는 일은 회귀 위험이 있어 별도 조각으로 남겼다(2026-09-16).
+    // 🔴 아래 둘을 공용 모듈로 모으는 일은 회귀 위험이 있어 별도 조각으로 남겼다(2026-09-16).
+    //    셋이었는데 하나가 줄었다 — CustomerLinkAddress 는 2026-10-04 에 전용 주소
+    //    기능을 화면에서 걷어내면서 파일째 사라졌다.
     assert.deepEqual(copiers, [
       "components/common/copy-text.ts",
-      "components/customer-portal/CustomerLinkAddress.tsx",
       "components/repair-cases/detail/edit/EditSectionActions.tsx",
     ]);
   });

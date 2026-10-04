@@ -1,6 +1,6 @@
 import "server-only";
 
-import { listActiveLinks, listPortalItemsForCustomer } from "@/lib/db/queries/customer-portal";
+import { listPortalItemsForForm } from "@/lib/db/queries/customer-portal";
 import {
   buildPortalExportRows,
   findPortalExportSpec,
@@ -9,7 +9,7 @@ import {
   type CustomerPortalExportSpec,
 } from "@/lib/domain/customer-portal-export";
 import {
-  findPortalFormForCustomerName,
+  findPortalFormById,
   type CustomerPortalForm,
 } from "@/lib/domain/customer-portal-forms";
 import { buildQuoteFolderLink } from "@/lib/domain/quote-folder-link";
@@ -31,8 +31,8 @@ import {
  * ============================================================================
  * 한 번의 일이 지나는 길:
  *
- *   고객사 → 양식(customer-portal-forms) → 내보내기 규칙(customer-portal-export)
- *        → 줄 자료(listPortalItemsForCustomer)
+ *   양식(customer-portal-forms) → 내보내기 규칙(customer-portal-export)
+ *        → 줄 자료(listPortalItemsForForm — 🔴 **화면 표와 같은 조회**)
  *        → 공유폴더의 **직전 파일**(storage/customer-portal-archive)
  *        → 통합문서 만들기(xlsx/customer-portal-export-workbook)
  *        → 미리보기(sheet-print-grid) 또는 오늘 이름으로 저장
@@ -55,7 +55,7 @@ import {
 export type CustomerPortalExportFailureCode =
   /** 공유폴더 설정이 비어 있다 — 이 기능만 꺼진 상태다. */
   | "DISABLED"
-  /** 그 고객사에는 양식이 없다(기본 9열 표만 쓴다). */
+  /** 그런 양식이 없다 — 화면이 보낸 식별자가 양식 목록에 없다. */
   | "NO_FORM"
   /** 이름 규칙에 맞는 직전 파일이 폴더에 없다. */
   | "NO_PREVIOUS_FILE"
@@ -91,7 +91,7 @@ export type CustomerPortalExportPlan = {
   previousRowCount: number;
 };
 
-const NO_FORM_MESSAGE = "이 고객사는 고객사 양식이 없어 엑셀로 내보낼 수 없습니다.";
+const NO_FORM_MESSAGE = "그 고객사 양식을 찾지 못해 엑셀로 내보낼 수 없습니다.";
 const DISABLED_MESSAGE = "공유폴더 저장이 꺼져 있습니다 — 관리자에게 문의해 주세요.";
 const NO_PREVIOUS_FILE_MESSAGE =
   "공유폴더에 이 고객사의 직전 파일이 없습니다 — 기준이 될 현황표 파일을 폴더에 넣어 주세요. 양식을 새로 만들지는 않습니다.";
@@ -101,24 +101,23 @@ function failure(code: CustomerPortalExportFailureCode, message: string): Custom
 }
 
 /**
- * 고객사 하나의 현황표 통합문서를 만든다(디스크에 쓰지 않는다).
+ * 고객사 양식 하나의 현황표 통합문서를 만든다(디스크에 쓰지 않는다).
+ *
+ * 🔴 **화면이 보낸 값을 그대로 믿지 않는다.** 받는 것은 양식 식별자 하나뿐이고,
+ * 그것이 실제 양식 목록(CUSTOMER_PORTAL_FORMS)에 있는지 여기서 확인한다. 어느
+ * 고객사의 건을 모을지는 그 양식이 정한다 — 화면이 고객사를 지목하지 못한다.
  *
  * `today` 를 받는 것은 시험이 날짜를 고정하기 위해서다 — 안 주면 그 서버의 지금 날짜다.
  */
 export async function prepareCustomerPortalExport(
-  customerId: string,
+  formId: string,
   options: { today?: Date } = {}
 ): Promise<{ ok: true; plan: CustomerPortalExportPlan } | CustomerPortalExportFailure> {
-  if (typeof customerId !== "string" || customerId === "") {
-    return failure("NO_FORM", "고객사를 확인할 수 없습니다.");
+  if (typeof formId !== "string" || formId === "") {
+    return failure("NO_FORM", "고객사 양식을 확인할 수 없습니다.");
   }
 
-  // 🔴 양식은 **서버가 고른다.** 화면이 보낸 양식 id 를 믿지 않는다(설정 액션과 같은 규칙).
-  const links = await listActiveLinks();
-  const link = links.find((candidate) => candidate.customerId === customerId);
-  if (!link) return failure("NO_FORM", "고객 안내 주소가 발급된 고객사가 아닙니다.");
-
-  const form = findPortalFormForCustomerName(link.customerName);
+  const form = findPortalFormById(formId);
   if (form === null) return failure("NO_FORM", NO_FORM_MESSAGE);
   const spec = findPortalExportSpec(form.id);
   if (spec === null) return failure("NO_FORM", NO_FORM_MESSAGE);
@@ -132,7 +131,9 @@ export async function prepareCustomerPortalExport(
     return failure("READ_FAILED", `공유폴더를 읽지 못했습니다 — ${previous.reason}`);
   }
 
-  const items = await listPortalItemsForCustomer(customerId);
+  // 🔴 화면 표와 **같은 조회**다. 여기서 따로 모으면 담당자가 본 표와 저장된
+  //    파일이 갈리고, 그 어긋남은 아무도 눈치채지 못한 채 굳는다.
+  const items = await listPortalItemsForForm(form.id);
   const rows = buildPortalExportRows(form, items);
   const today = options.today ?? new Date();
 

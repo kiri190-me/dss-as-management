@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../client";
 import {
   attachments,
@@ -12,6 +12,11 @@ import {
   repairCases,
 } from "../schema";
 import { Q_CODE_SHAPE } from "../../ocr/pass-slip-goods";
+import {
+  findPortalFormById,
+  groupCustomersByPortalForm,
+  sortPortalRowsByReceivedAt,
+} from "../../domain/customer-portal-forms";
 import { listQuoteInfoForRepairCases } from "./domestic-orders";
 import { listRepairCasesByCustomerId } from "./repair-cases";
 
@@ -20,20 +25,17 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  * 고객 안내 창구 — 조회
  * ============================================================================
  *
- * 담당자가 보는 「고객 안내 현황」 화면과, 밖으로 내보낼 스냅샷이 이 파일을
- * 읽는다. **둘이 같은 함수를 쓴다** — 화면이 미리보기를 겸하려면 그래야 한다.
- * 각자 조회를 가지면 담당자가 본 것과 고객이 보는 것이 갈리고, 그 어긋남은
- * 아무도 눈치채지 못한 채 굳는다.
+ * 담당자가 보는 「고객 안내 현황」 화면과, 그 화면이 내보내는 고객사 엑셀이 이
+ * 파일을 읽는다. 🔴 **둘이 같은 함수를 쓴다**(listPortalItemsForForm). 각자
+ * 조회를 가지면 담당자가 본 표와 저장된 파일이 갈리고, 그 어긋남은 아무도
+ * 눈치채지 못한 채 굳는다.
+ *
+ * ── 단추의 근거는 「양식」이다 (2026-10-04) ──────────────────────────────
+ * 전에는 **전용 주소가 발급된 고객사**가 화면 단추였다. 그 기능을 걷어내면서
+ * 근거가 고객사 양식(domain/customer-portal-forms.ts)으로 옮겨 왔다 — 한 회사가
+ * 여러 이름으로 등록돼 있어도 **한 표로 합쳐** 보인다.
  * ============================================================================
  */
-
-/**
- * 아직 접수로 만들지 않은 의뢰가 고객 화면에서 갖는 상태.
- *
- * 상태 목록에 넣지 않고 여기 상수로 둔다 — 관리자가 고칠 값이 아니라
- * 시스템이 아는 사실이기 때문이다(자세한 이유는 쓰는 자리 주석에 있다).
- */
-export const PENDING_INTAKE_LABEL = "접수 대기 중";
 
 /**
  * 고객에게 보여줄 한 줄. 화면과 스냅샷이 그대로 쓴다.
@@ -46,7 +48,13 @@ export const PENDING_INTAKE_LABEL = "접수 대기 중";
  * 담당자가 사내에서 쓰는 표에만 쓴다.
  */
 export type CustomerPortalItem = {
-  /** 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지. */
+  /**
+   * 접수(CASE)인지 아직 접수 전 의뢰(REQUEST)인지.
+   *
+   * ⚠️ 2026-10-04 부터 이 파일이 내는 줄은 **전부 CASE 다** — 고객이 의뢰를 넣던
+   * 길(전용 주소)이 없어졌다. 갈래를 하나로 좁히지 않고 그대로 둔다: 서버 쪽에
+   * 아직 의뢰를 다루는 코드가 남아 있고, 그것을 걷어내는 일은 따로 한다.
+   */
   sourceKind: "CASE" | "REQUEST";
   sourceId: string;
   intakeNumber: string | null;
@@ -202,7 +210,11 @@ async function listPassSlipAttachmentIds(
 }
 
 /**
- * 한 고객사가 볼 목록.
+ * 한 고객사의 목록.
+ *
+ * 🔴 **출하 완료 제외 · 상태 · 견적 · 통문증 첨부가 모두 이 한 함수를 지난다.**
+ * 양식 표(listPortalItemsForForm)도 밖으로 내보내는 스냅샷도 이것을 거쳐 간다 —
+ * 조건을 한 군데에 모아 두지 않으면 같은 건이 화면마다 다르게 보인다.
  *
  * ■ 출하 완료를 직접 판정하지 않는다
  *
@@ -211,10 +223,11 @@ async function listPassSlipAttachmentIds(
  * 읽으면 판정이 두 벌이 되고, 언젠가 한쪽만 고쳐져 **출하된 물건이 고객
  * 화면에 남는다.**
  *
- * ■ 접수 전 의뢰도 함께 낸다
+ * ■ 접수 전 의뢰 줄은 내지 않는다 (2026-10-04)
  *
- * 고객이 방금 넣은 의뢰가 목록에 없으면 "안 들어갔나" 하고 다시 넣거나
- * 전화한다. 아직 접수번호가 없을 뿐 그 사람이 맡긴 물건이다.
+ * 고객이 의뢰를 넣던 길(전용 주소)이 없어졌으므로 「접수 대기 중」 줄도 없다.
+ * `customer_repair_requests` 표와 그것을 읽는 다른 조회는 그대로 둔다 —
+ * 지난 자료이고, 걷어내는 일은 따로 한다.
  */
 export async function listPortalItemsForCustomer(
   customerId: string
@@ -283,68 +296,76 @@ export async function listPortalItemsForCustomer(
     };
   });
 
-  const pending = await db
-    .select({
-      id: customerRepairRequests.id,
-      productModelName: customerRepairRequests.productModelName,
-      lotNumber: customerRepairRequests.lotNumber,
-      serialNumber: customerRepairRequests.serialNumber,
-      endUser: customerRepairRequests.endUser,
-      submittedAt: customerRepairRequests.submittedAt,
-    })
-    .from(customerRepairRequests)
-    .where(
-      and(
-        eq(customerRepairRequests.customerId, customerId),
-        // 접수로 바뀐 것은 접수 쪽 줄로 이미 보인다. 반려된 것은 보이지 않는다.
-        sql`${customerRepairRequests.status} IN ('NEW', 'CONVERTING')`
-      )
-    )
-    .orderBy(desc(customerRepairRequests.submittedAt));
+  return caseItems;
+}
 
-  const pendingItems: CustomerPortalItem[] = pending.map((row) => ({
-    sourceKind: "REQUEST",
-    sourceId: row.id,
-    intakeNumber: null,
-    modelName: row.productModelName,
-    lotNumber: row.lotNumber,
-    serialNumber: row.serialNumber,
-    // 접수일이 아직 없다. 고객이 보낸 날을 그 자리에 둔다.
-    receivedAt: row.submittedAt.toISOString().slice(0, 10),
-    /**
-     * 접수 전 의뢰의 상태는 정해진 한 가지뿐이다 — 아직 담당자가 보지 않았거나
-     * 보는 중이다. 여기를 비워 `-`로 내보내면 고객은 "보냈는데 아무 일도
-     * 일어나지 않았다"로 읽는다. 그러면 다시 넣거나 전화한다.
-     *
-     * 상태 목록(customer_status_options)에서 고르지 않고 글자를 박아 두는
-     * 이유: 이건 담당자가 정하는 값이 아니라 **사실**이다. 목록에 두면
-     * 관리자가 지우거나 이름을 바꿀 수 있게 되는데, 그러면 접수 전 의뢰의
-     * 상태가 사라지거나 엉뚱한 말이 된다.
-     */
-    statusLabel: PENDING_INTAKE_LABEL,
-    statusNote: null,
-    quoteNumber: null,
-    quoteIssuedDate: null,
-    statusVersion: null,
-    /**
-     * 고객이 의뢰서에 적어 보낸 End-User 를 「Site명」 자리에 그대로 둔다.
-     * 접수로 만들 때 담당자가 마스터의 End-User 로 고쳐 잡으므로 그때부터는
-     * 접수 쪽 값이 보인다.
-     */
-    endUserName: row.endUser,
-    // 접수가 아직 없으니 발주도, 손으로 적을 자리도 없다. 그 자리는
-    // repair_case_customer_status 가 갖고 있고 그 표는 접수를 가리킨다.
-    orderIssuedDate: null,
-    customerRequestedDueDate: null,
-    formValues: {},
-    // 접수가 없으니 첨부가 걸릴 자리도 없다(attachments 는 접수를 가리킨다).
-    passSlipAttachmentIds: [],
-    // 접수 전 의뢰 줄은 읽기의 대상이 아니다(입력 칸 자체가 없다).
-    knownQCodes: [],
+/** 화면 단추 하나 — 양식 하나와, 그 양식에 묶인 고객사 ids. */
+export type CustomerPortalFormGroup = {
+  formId: string;
+  /** 🔴 하나가 아니다 — 같은 회사가 여러 이름으로 등록돼 있을 수 있다. */
+  customerIds: string[];
+};
+
+/**
+ * 「고객 안내 현황」에 단추로 설 양식들.
+ *
+ * 지워진 고객사는 세지 않는다 — 그 고객사의 건은 표에도 나오지 않아야 하고,
+ * 그것만으로 단추가 서면 누를 때마다 빈 표가 나온다.
+ *
+ * 가르는 규칙(이름 맞추기 · 여러 이름 합치기 · 빈 양식 빼기 · 차례)은 전부
+ * domain/customer-portal-forms.ts 의 groupCustomersByPortalForm 이 갖는다.
+ * 여기서 한 벌 더 적으면 시험이 붙은 규칙과 실제로 도는 규칙이 갈린다.
+ */
+export async function listPortalFormGroups(): Promise<CustomerPortalFormGroup[]> {
+  const rows = await db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.isDeleted, false))
+    .orderBy(asc(customers.name));
+
+  return groupCustomersByPortalForm(rows).map((group) => ({
+    formId: group.form.id,
+    customerIds: group.customerIds,
   }));
+}
 
-  // 접수 전 의뢰가 위, 그다음 접수를 접수일 최신순으로.
-  return [...pendingItems, ...caseItems];
+/**
+ * 양식 하나의 표에 들어갈 줄 전부.
+ *
+ * 🔴 **그 양식에 묶인 고객사를 모두 모아 한 배열로 낸다** — `INVENIA` 와
+ * `INVENIA Co.,Ltd` 처럼 같은 회사가 둘로 등록돼 있어도 한 표다.
+ *
+ * 🔴 차례는 **「반출일」 오름차순**(오래된 것이 위, 값이 없으면 맨 뒤)이다 —
+ * 규칙과 그 까닭은 domain/customer-portal-forms.ts 의
+ * sortPortalRowsByReceivedAt 에 있다. 합친 뒤에 한 번만 정렬한다.
+ *
+ * 🔴 **아는 Q코드 목록은 묶음 전체에서 모은다.** 이제 표가 회사 하나를 뜻하므로,
+ * `JUSUNG` 에 적어 둔 Q코드를 `주성 엔지니어링` 줄에서도 「아는 값」으로 봐야
+ * 한다 — 아니면 같은 회사인데 줄마다 색이 달라진다.
+ */
+export async function listPortalItemsForForm(
+  formId: string
+): Promise<CustomerPortalItem[]> {
+  const form = findPortalFormById(formId);
+  if (form === null) return [];
+
+  const groups = await listPortalFormGroups();
+  const group = groups.find((candidate) => candidate.formId === form.id);
+  if (group === undefined) return [];
+
+  const lists = await Promise.all(
+    group.customerIds.map((customerId) => listPortalItemsForCustomer(customerId))
+  );
+  const items = lists.flat();
+
+  // 한 벌을 만들어 **모든 줄이 같은 배열을 가리킨다**(베껴 담지 않는다).
+  const knownQCodes = [...new Set(items.flatMap((item) => item.knownQCodes))].sort();
+  const merged =
+    group.customerIds.length > 1
+      ? items.map((item) => ({ ...item, knownQCodes }))
+      : items;
+
+  return sortPortalRowsByReceivedAt(merged);
 }
 
 /** 고객사 한 곳의 링크 상태. 화면이 「발급 / 재발급 / 회수」를 그릴 때 쓴다. */

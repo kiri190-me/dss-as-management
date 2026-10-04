@@ -19,16 +19,19 @@ import {
  *     밖으로 보내는 자리가 줄을 통째로 펼치지 않고 하나씩 옮겨 적는지,
  *     그 목록이 **예전 그대로 열한 개**인지 본다. 새 칸이 하나라도 그 목록에
  *     들어가면 고객 화면에 사내 값이 샌다.
- *  2. 🔴 **기존 9열 표가 그대로 있다**(사용자: 「기존에 이 표는 그대로 사용하면서」).
+ *  2. 🔴 **기본 9열 표와 보기 전환이 없어졌다**(사용자 요청 2026-10-04 —
+ *     「[기본보기]도 없애주고 각사별 양식만 남겨줘」). 남은 표는 양식 표 하나다.
  *  3. 🔴 **낙관적 잠금이 그대로다** — 저장이 여전히 expectedVersion 을 싣고,
  *     mutation 이 version 을 조건으로 건다. 그리고 한 줄의 저장이 **한 번**이다
  *     (나누면 첫 저장이 올린 version 때문에 둘째가 충돌로 막힌다).
- *  4. 🔴 **안 보낸 formValues 가 있던 값을 지우지 않는다** — 기본 보기의 저장은
- *     이 값을 모르는 채로 온다. 지우면 아무 오류 없이 적어 둔 값이 사라진다.
+ *  4. 🔴 **안 보낸 formValues 가 있던 값을 지우지 않는다** — 양식을 모르는 다른
+ *     저장 길이 이 값을 싣지 않고 온다. 지우면 아무 오류 없이 적어 둔 값이 사라진다.
  *  5. 🔴 저장할 때 **서버가 스스로 고객사를 찾아** 양식을 고른다 — 화면이 보낸
  *     이름을 믿으면 남의 양식 칸을 이 접수에 적을 수 있다.
- *  6. 전환 단추는 **양식이 있는 고객사에서만** 보이고, 고른 보기를 글자로 말한다.
+ *  6. 단추는 **양식**이고(고객사가 아니다), 지금 어느 양식을 보는지 글자로 말한다.
  *  7. 가로 스크롤을 **표를 감싼 상자가** 소유한다(표가 페이지를 밀지 않게).
+ *  8. 🔴 화면 표와 엑셀이 **같은 조회**를 쓴다(2026-10-04) — 각자 모으면 담당자가
+ *     본 표와 저장된 파일이 갈리고, 그 어긋남은 아무도 눈치채지 못한 채 굳는다.
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * CustomerPortalScreen 은 서버 액션(actions/customer-portal)을 직접 import 하는
@@ -118,48 +121,74 @@ describe("🔴 1. 고객에게 나가는 것이 안 바뀌었다", () => {
   });
 });
 
-describe("🔴 2. 기존 9열 표가 그대로 있다", () => {
-  const headers = flat(screen);
+describe("🔴 2. 기본 9열 표와 보기 전환이 없어졌다", () => {
+  const body = flat(code(screen));
 
-  test("아홉 개 머리글이 차례 그대로 남아 있다", () => {
-    const pattern = [
-      "접수번호",
-      "Model",
-      "L/N",
-      "S/N",
-      "접수일",
-      "현재 상태",
-      "비고",
-      "견적서번호",
-      "견적발행일",
-    ]
-      .map((label) => `<th className="px-3 py-2">${label}</th>`)
-      .join(" ");
-    assert.ok(headers.includes(pattern), "기본 표의 머리글이 바뀌었다");
+  test("아홉 개 머리글이 화면에 없다", () => {
+    const headers = flat(screen);
+    for (const label of ["접수번호", "접수일", "현재 상태", "견적서번호", "견적발행일"]) {
+      assert.ok(
+        !headers.includes(`<th className="px-3 py-2">${label}</th>`),
+        `기본 9열 표의 머리글이 남아 있다: ${label}`
+      );
+    }
   });
 
-  test("기본 표를 그리는 ItemRow 가 그대로 있다", () => {
-    assert.ok(code(screen).includes("function ItemRow("));
-    assert.ok(flat(code(screen)).includes("<ItemRow"));
+  test("기본 표를 그리던 ItemRow 가 사라졌다", () => {
+    assert.ok(!code(screen).includes("function ItemRow("));
+    assert.ok(!body.includes("<ItemRow"));
   });
 
-  test("기본 표의 저장은 formValues 를 보내지 않는다", () => {
-    const itemRow = code(screen).slice(
-      code(screen).indexOf("function ItemRow("),
-      code(screen).indexOf("function Cell(")
-    );
-    assert.ok(itemRow.includes("setCustomerStatusAction("), "기본 표의 저장이 사라졌다");
-    assert.ok(
-      !itemRow.includes("formValues"),
-      "기본 보기가 formValues 를 보내면 그 값이 덮이거나 지워진다"
+  test("🔴 보기 전환 장치가 통째로 사라졌다 — 고를 것이 하나면 전환은 뜻을 잃는다", () => {
+    for (const gone of [
+      "PORTAL_VIEW_STORAGE_KEY",
+      "PORTAL_VIEW_FORM",
+      "PORTAL_VIEW_DEFAULT",
+      "useStoredChoice",
+      "setStoredChoice",
+      "showForm",
+      "기본 보기",
+    ]) {
+      assert.ok(!body.includes(gone), `보기 전환의 자취가 남았다: ${gone}`);
+    }
+  });
+
+  test("🔴 전용 주소에 매달린 것들이 화면에서 사라졌다", () => {
+    for (const gone of [
+      "CustomerLinkAddress",
+      "issueCustomerLinkAction",
+      "revokeCustomerLinkAction",
+      "syncNowAction",
+      "customersWithoutLink",
+      "canManageLinks",
+      "/customer-portal/requests",
+    ]) {
+      assert.ok(!body.includes(gone), `전용 주소 쪽 자취가 남았다: ${gone}`);
+    }
+  });
+
+  test("🔴 거짓이 될 문구를 지웠다 — 고객 화면이 없다", () => {
+    const text = flat(screen);
+    assert.ok(!text.includes("고객 화면도 비어 있습니다"));
+    assert.ok(!text.includes("고객 화면으로 나가지 않습니다"));
+    assert.ok(!text.includes("고객사가 전용 주소로 들어왔을 때"));
+  });
+
+  test("남은 표는 양식 표 하나다", () => {
+    assert.ok(body.includes("<CustomerFormTable"), "양식 표가 사라졌다");
+    assert.equal(
+      (body.match(/<table /g) ?? []).length,
+      1,
+      "표가 하나가 아니다 — 기본 표가 남았거나 표가 더 늘었다"
     );
   });
 });
 
 describe("🔴 3. 낙관적 잠금이 그대로다", () => {
-  test("두 표의 저장 모두 expectedVersion 을 싣는다", () => {
+  test("양식 표의 저장이 expectedVersion 을 싣는다", () => {
     const calls = [...code(screen).matchAll(/setCustomerStatusAction\(\{([\s\S]*?)\}\)/g)];
-    assert.equal(calls.length, 2, "저장하는 자리가 둘이 아니다");
+    // 2026-10-04 에 기본 9열 표가 없어지면서 저장하는 자리가 둘에서 하나로 줄었다.
+    assert.equal(calls.length, 1, "저장하는 자리가 하나가 아니다");
     for (const call of calls) {
       assert.ok(
         /expectedVersion: item\.statusVersion/.test(call[1]),
@@ -242,43 +271,91 @@ describe("🔴 5. 저장할 때 양식은 서버가 고른다", () => {
   });
 });
 
-describe("🔴 6. 보기 전환", () => {
+describe("🔴 6. 단추는 고객사가 아니라 양식이다", () => {
   const body = flat(code(screen));
+  const page = read("src/app/(app)/customer-portal/page.tsx");
 
-  test("양식이 있을 때만 단추가 그려진다", () => {
+  test("페이지가 양식 묶음을 읽어 넘긴다 — 링크 목록이 아니다", () => {
+    const pageBody = flat(code(page));
+    assert.ok(pageBody.includes("listPortalFormGroups()"), "양식 묶음을 읽지 않는다");
     assert.ok(
-      body.includes("const form = findPortalFormForCustomerName(selected?.customerName)"),
-      "고른 고객사의 양식을 찾는 자리가 사라졌다"
+      pageBody.includes("listPortalItemsForForm(group.formId)"),
+      "양식 단위로 목록을 읽지 않는다"
     );
-    assert.ok(body.includes("{form ? ("), "양식이 없을 때도 단추가 보인다");
+    assert.ok(!pageBody.includes("listActiveLinks"), "아직 발급된 주소로 화면을 만든다");
   });
 
-  test("고른 보기를 이 저장소의 저장 장치에 기억한다", () => {
-    assert.ok(body.includes("useStoredChoice(PORTAL_VIEW_STORAGE_KEY)"));
-    assert.ok(body.includes("setStoredChoice(PORTAL_VIEW_STORAGE_KEY"));
+  test("🔴 고른 식별자를 양식 정의로 되짚는다 — 화면 글자를 그대로 믿지 않는다", () => {
     assert.ok(
-      /const PORTAL_VIEW_STORAGE_KEY = "[\w-]+:[\w-]+";/.test(body),
-      "키가 「무엇:어디」 꼴이 아니다(common/responsive-list.tsx 의 관례)"
+      body.includes("const form = findPortalFormById(selectedFormId)"),
+      "고른 양식을 되짚는 자리가 사라졌다"
+    );
+    assert.ok(body.includes("{form ? ("), "양식이 없을 때도 표가 보인다");
+  });
+
+  test("🔴 단추 글자는 짧은 양식 식별자다 — `form.label` 은 「ICD 양식」이라 길다", () => {
+    assert.ok(body.includes("formIds.map((formId) => ("), "양식 목록을 돌지 않는다");
+    assert.ok(body.includes("aria-pressed={formId === selectedFormId}"));
+    assert.ok(body.includes("> {formId} </button>"), "단추 글자가 식별자가 아니다");
+  });
+
+  test("처음 고르는 것은 첫 양식이다", () => {
+    assert.ok(body.includes("useState<string | null>( formIds[0] ?? null )"));
+  });
+
+  test("지금 어느 양식을 보고 있는지 글자로 말한다 — 양식마다 열이 다르다", () => {
+    assert.ok(
+      body.includes('지금 <strong className="text-zinc-900">{form.label}</strong>으로 보고'),
+      "어느 양식인지 말하는 문장이 사라졌다"
+    );
+  });
+});
+
+describe("🔴 8. 화면 표와 엑셀이 같은 조회를 쓴다", () => {
+  const service = read("src/lib/server/services/customer-portal-export.ts");
+  const exportAction = read("src/lib/server/actions/customer-portal-export.ts");
+  const panel = read("src/components/customer-portal/CustomerFormExportPanel.tsx");
+
+  test("내보내기가 양식 단위 조회를 그대로 쓴다", () => {
+    assert.ok(
+      flat(code(service)).includes("listPortalItemsForForm(form.id)"),
+      "엑셀이 화면 표와 다른 집합을 모은다"
+    );
+    assert.ok(
+      !code(service).includes("listActiveLinks"),
+      "내보내기가 아직 발급된 주소로 대상을 정한다"
     );
   });
 
-  test("🔴 양식이 없으면 기억한 값과 무관하게 기본 보기다", () => {
-    assert.ok(
-      body.includes("const showForm = form !== null && storedView === PORTAL_VIEW_FORM"),
-      "양식 없는 고객사에서 양식 보기로 떨어질 수 있다"
+  test("🔴 양식은 서버가 목록과 맞춰 본다 — 화면이 보낸 글자를 그대로 쓰지 않는다", () => {
+    assert.ok(flat(code(service)).includes("const form = findPortalFormById(formId)"));
+    assert.ok(flat(code(service)).includes("if (form === null) return failure(\"NO_FORM\""));
+  });
+
+  test("화면 → 통로 → 서비스가 모두 양식 식별자 하나를 나른다", () => {
+    const panelBody = flat(code(panel));
+    assert.ok(panelBody.includes("previewCustomerFormExportAction({ formId })"));
+    assert.ok(panelBody.includes("saveCustomerFormExportAction({ formId })"));
+    assert.ok(!panelBody.includes("customerId"), "아직 고객사 id 를 나른다");
+    const actionBody = flat(code(exportAction));
+    assert.equal(
+      (actionBody.match(/prepareCustomerPortalExport\(input\.formId\)/g) ?? []).length,
+      2,
+      "미리보기 · 저장 둘 다 양식 식별자로 부르지 않는다"
     );
+    assert.ok(!actionBody.includes("input.customerId"), "통로가 아직 고객사 id 를 받는다");
   });
 
-  test("어느 보기를 보고 있는지 글자로 말한다", () => {
-    assert.ok(body.includes("지금 <strong className=\"text-zinc-900\">기본 보기</strong>로 보고"));
-    assert.ok(body.includes("aria-pressed={showForm}"));
-    assert.ok(body.includes("aria-pressed={!showForm}"));
-  });
-
-  test("두 표를 동시에 그리지 않는다 — 갈아 끼운다", () => {
+  test("🔴 조회가 그 양식에 묶인 고객사를 **전부** 모은다 — 같은 회사의 표가 둘로 갈리지 않게", () => {
+    const body = flat(code(query));
+    assert.ok(body.includes("export async function listPortalItemsForForm"));
     assert.ok(
-      body.includes("showForm && form ? ( <CustomerFormTable"),
-      "두 표를 위아래로 쌓으면 같은 건이 두 번 나온다"
+      body.includes("group.customerIds.map((customerId) => listPortalItemsForCustomer(customerId))"),
+      "한 고객사만 보고 있다 — INVENIA 와 INVENIA Co.,Ltd 가 갈린다"
+    );
+    assert.ok(
+      body.includes("sortPortalRowsByReceivedAt(merged)"),
+      "합친 뒤 반출일 차례로 세우지 않는다"
     );
   });
 });

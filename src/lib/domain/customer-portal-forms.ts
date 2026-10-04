@@ -23,8 +23,10 @@ import { classifyRfProductByModelName } from "./rf-product-kind";
  * **이름 목록**을 둔다. 비교는 DB 의 유일 색인과 같은 정규화를 쓴다
  * (normalizeEntityName — 앞뒤 공백 제거 · 연속 공백 하나로 · 소문자).
  *
- * 이름이 바뀌면 그 고객사는 양식을 잃고 기본 9열 표로 떨어진다. 값이 지워지는
- * 것은 아니고(값은 접수 건에 붙어 있다) 이 목록에 이름을 한 줄 더하면 돌아온다.
+ * 🔴 이름이 바뀌면 그 고객사는 양식을 잃고 **「고객 안내 현황」 화면에서 사라진다**
+ * (2026-10-04 — 전용 주소를 걷어내면서 양식이 곧 그 화면의 단추가 됐다). 값이
+ * 지워지는 것은 아니고(값은 접수 건에 붙어 있다) 이 목록에 이름을 한 줄 더하면
+ * 돌아온다.
  *
  * ── 열 하나가 아는 것 ───────────────────────────────────────────────────
  * 키(영문, 안정적) · 화면에 보일 이름 · 차례(배열 순서) · **어디서 오는가**.
@@ -274,9 +276,9 @@ const JUSUNG_FORM: CustomerPortalForm = {
 };
 
 /**
- * 지금 정의된 양식 전부. 🔴 여기 없는 고객사는 **기존 9열 표**를 그대로 쓴다 —
- * 그것이 기본값이고, 양식이 생긴다는 것은 기본값에 더해 고를 것이 하나 는다는
- * 뜻이지 기본값이 사라진다는 뜻이 아니다.
+ * 지금 정의된 양식 전부. 🔴 **여기 없는 고객사는 「고객 안내 현황」에 나오지
+ * 않는다** — 2026-10-04 에 전용 주소와 기본 9열 표를 걷어내면서, 그 화면이 그리는
+ * 것은 이 목록의 양식 표뿐이 됐다. 이 배열의 차례가 곧 화면 단추의 차례다.
  */
 export const CUSTOMER_PORTAL_FORMS: readonly CustomerPortalForm[] = [
   ICD_FORM,
@@ -291,7 +293,7 @@ export function findPortalFormById(id: string | null | undefined): CustomerPorta
 }
 
 /**
- * 고객사 이름으로 양식을 찾는다. 없으면 null(= 기본 9열 표).
+ * 고객사 이름으로 양식을 찾는다. 없으면 null(= 그 고객사는 양식 표가 없다).
  *
  * 🔴 부분 일치로 찾지 않는다. `INVENIA` 가 `INVENIA Co.,Ltd` 의 부분 문자열이라
  * 부분 일치를 허용하면 어느 쪽이 먼저 걸리느냐로 답이 달라지고, 더 나쁘게는
@@ -308,6 +310,94 @@ export function findPortalFormForCustomerName(
       form.customerNames.some((name) => normalizeEntityName(name) === target)
     ) ?? null
   );
+}
+
+/** 양식을 가리는 데 필요한 고객사의 두 칸. 조회가 내는 줄이 이 꼴을 만족한다. */
+export type PortalFormCustomer = { id: string; name: string };
+
+/** 양식 하나와, 그 양식에 묶인 고객사들. */
+export type PortalFormCustomerGroup = {
+  form: CustomerPortalForm;
+  /** 그 양식에 묶인 고객사 id 들. 받은 차례 그대로다. */
+  customerIds: string[];
+};
+
+/**
+ * 고객사 목록을 **양식별로 가른다** — 「고객 안내 현황」의 단추가 서는 근거다
+ * (2026-10-04 전까지는 전용 주소가 발급된 고객사가 그 근거였다).
+ *
+ * 🔴 **한 회사가 여러 이름으로 등록돼 있으면 한 묶음으로 합친다**(실측: `INVENIA`
+ * 와 `INVENIA Co.,Ltd` 가 둘 다 살아 있고 양쪽 다 접수 건이 있다). 합치지 않으면
+ * 같은 회사의 표가 둘로 갈리는데, 담당자는 자기가 보는 표에 그 회사의 건이 다
+ * 들어 있다고 믿는다 — 빠진 쪽은 아무 오류 없이 영영 안 보인다.
+ *
+ * 🔴 **묶인 고객사가 하나도 없는 양식은 뺀다.** 누르면 빈 표만 나오는 단추를
+ * 그리지 않는다.
+ *
+ * 차례는 고객사 이름이 아니라 `CUSTOMER_PORTAL_FORMS` 의 차례다 — 고객사 마스터에
+ * 이름 하나가 늘었다고 단추 자리가 바뀌면 사람이 매번 다시 찾는다.
+ */
+export function groupCustomersByPortalForm(
+  customers: readonly PortalFormCustomer[]
+): PortalFormCustomerGroup[] {
+  const byFormId = new Map<string, string[]>();
+  for (const customer of customers) {
+    const form = findPortalFormForCustomerName(customer.name);
+    if (form === null) continue;
+    const found = byFormId.get(form.id);
+    if (found) found.push(customer.id);
+    else byFormId.set(form.id, [customer.id]);
+  }
+  return CUSTOMER_PORTAL_FORMS.flatMap((form) => {
+    const customerIds = byFormId.get(form.id);
+    return customerIds === undefined ? [] : [{ form, customerIds }];
+  });
+}
+
+/**
+ * 표의 차례를 정하는 데 쓰는 칸들만.
+ *
+ * 조회가 내는 줄(`CustomerPortalItem`)이 이 꼴을 만족한다. 그 타입을 여기서
+ * 가져오지 않는 까닭: 저쪽은 `server-only` 와 DB 연결을 끌고 오는 파일이라 단위
+ * 시험이 부를 수 없고, 그러면 **차례 규칙에 시험을 붙일 수 없다.**
+ */
+export type PortalRowOrderKey = {
+  receivedAt: string | null;
+  intakeNumber: string | null;
+  sourceId: string;
+};
+
+/**
+ * 「반출일」 **오름차순** — 오래된 것이 위다(사용자 요청 2026-10-04).
+ * 🔴 값은 `receivedAt`(우리에게 들어온 날)이다 — 까닭은 이 파일 맨 위 주석에.
+ *
+ * 🔴 **값이 없는 줄은 맨 뒤로** 보낸다. 빈 값은 글자 비교에서 어느 날짜보다
+ * 앞서므로, 그냥 두면 날짜를 아직 못 적은 줄이 표 맨 위에 조용히 모인다.
+ *
+ * 같은 날짜끼리는 **접수번호 → 줄 id** 로 못 박는다. 둘째 기준이 없으면 여러
+ * 고객사의 목록을 합치는 차례가 바뀔 때마다 표의 줄 순서가 흔들린다.
+ */
+export function comparePortalRowsByReceivedAt(
+  a: PortalRowOrderKey,
+  b: PortalRowOrderKey
+): number {
+  if (a.receivedAt !== b.receivedAt) {
+    if (a.receivedAt === null || a.receivedAt === "") return 1;
+    if (b.receivedAt === null || b.receivedAt === "") return -1;
+    return a.receivedAt < b.receivedAt ? -1 : 1;
+  }
+  const aNumber = a.intakeNumber ?? "";
+  const bNumber = b.intakeNumber ?? "";
+  if (aNumber !== bNumber) return aNumber < bNumber ? -1 : 1;
+  if (a.sourceId === b.sourceId) return 0;
+  return a.sourceId < b.sourceId ? -1 : 1;
+}
+
+/** 줄들을 「반출일」 오름차순으로. 받은 배열은 건드리지 않는다. */
+export function sortPortalRowsByReceivedAt<T extends PortalRowOrderKey>(
+  rows: readonly T[]
+): T[] {
+  return [...rows].sort(comparePortalRowsByReceivedAt);
 }
 
 /**

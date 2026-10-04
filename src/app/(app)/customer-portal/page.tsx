@@ -8,12 +8,11 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
-  listActiveLinks,
   listActiveStatusOptions,
-  listPortalItemsForCustomer,
+  listPortalFormGroups,
+  listPortalItemsForForm,
   type CustomerPortalItem,
 } from "@/lib/db/queries/customer-portal";
-import { listCustomerOptions } from "@/lib/db/queries/domestic-orders";
 
 export const metadata: Metadata = {
   title: "고객 안내 현황 | DSS A/S 관리 시스템",
@@ -24,11 +23,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 /**
- * 고객 안내 현황.
+ * 고객 안내 현황 — **고객사별 양식 표** 한 장씩.
  *
- * 고객사가 전용 주소로 들어왔을 때 보게 될 목록을 담당자가 그대로 보고,
- * 거기서 상태와 비고를 정한다. **미리보기를 겸하는 것이 이 화면의 요점이다** —
- * 담당자가 딴 화면을 상상하며 값을 정하지 않게 된다.
+ * 담당자가 그 회사와 주고받는 현황표를 그대로 보고, 거기서 상태 · 비고 · 손으로
+ * 적는 칸을 정한 뒤 엑셀로 내보낸다. 🔴 단추의 근거는 **양식**이다 — 2026-10-04
+ * 에 전용 주소를 걷어내면서 「주소가 발급된 고객사」에서 옮겨 왔다.
  */
 export default async function CustomerPortalPage() {
   // 역할별 접근 권한에서 이 메뉴가 꺼져 있으면 주소를 직접 입력해도 들어올 수
@@ -58,34 +57,24 @@ export default async function CustomerPortalPage() {
     );
   }
 
-  const [links, statusOptions, allCustomers] = await Promise.all([
-    listActiveLinks(),
+  const [formGroups, statusOptions] = await Promise.all([
+    listPortalFormGroups(),
     listActiveStatusOptions(),
-    listCustomerOptions(),
   ]);
 
-  // 고객사마다 목록을 미리 읽어 둔다. 화면에서 고객사를 바꿀 때마다 서버를
-  // 다시 부르지 않게 하려는 것인데, 지금 링크가 한 자릿수라 감당된다.
-  // 링크가 수십 개로 늘면 고른 고객사만 읽도록 바꿔야 한다.
-  const itemsByCustomer: Record<string, CustomerPortalItem[]> = {};
-  for (const link of links) {
-    itemsByCustomer[link.customerId] = await listPortalItemsForCustomer(
-      link.customerId
-    );
+  // 양식마다 목록을 미리 읽어 둔다. 화면에서 양식을 바꿀 때마다 서버를 다시
+  // 부르지 않게 하려는 것인데, 양식이 셋이라 감당된다. 양식이 수십 개로 늘면
+  // 고른 양식만 읽도록 바꿔야 한다.
+  const itemsByForm: Record<string, CustomerPortalItem[]> = {};
+  for (const group of formGroups) {
+    itemsByForm[group.formId] = await listPortalItemsForForm(group.formId);
   }
-
-  const linkedCustomerIds = new Set(links.map((l) => l.customerId));
-  const customersWithoutLink = allCustomers.filter(
-    (c) => !linkedCustomerIds.has(c.id)
-  );
 
   return (
     <CustomerPortalScreen
-      links={links}
-      itemsByCustomer={itemsByCustomer}
+      formIds={formGroups.map((group) => group.formId)}
+      itemsByForm={itemsByForm}
       statusOptions={statusOptions}
-      customersWithoutLink={customersWithoutLink}
-      canManageLinks={await hasPermission(actingUser, "customerPortal", "MANAGE")}
       canEdit={await hasPermission(actingUser, "customerPortal", "WRITE")}
     />
   );
