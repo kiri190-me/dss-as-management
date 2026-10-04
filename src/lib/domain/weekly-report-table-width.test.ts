@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT,
+  WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT,
+  WEEKLY_REPORT_WIDTH_GRID_PERCENT,
   WEEKLY_REPORT_WIDTH_PERCENT_RANGE,
-  WEEKLY_REPORT_WIDTH_STEP_PERCENT,
   WEEKLY_REPORT_WIDTH_STORAGE_KEY,
   canNarrowWeeklyReport,
   canWidenWeeklyReport,
@@ -33,6 +34,9 @@ import {
  * 4. **저장소에서 읽은 값이 무엇이든 화면이 살아 있다.** 사생활 보호 창에서는
  *    localStorage 를 읽는 것만으로 던지고, 그때 여기서 던지면 가로폭 하나 때문에
  *    주간보고 전체를 못 보게 된다.
+ * 5. 🔴 **격자(1%)와 단추 한 번(5%)은 다른 수다.** 한 상수가 둘을 겸했을 때
+ *    슬라이더가 13칸으로 끊겼다. 갈라 둔 뒤로는 끌면 1% 씩 · 단추는 5% 씩이고,
+ *    **이미 저장된 5의 배수는 한 칸도 안 움직인다**(5는 1의 배수다).
  * ============================================================================
  */
 
@@ -74,11 +78,24 @@ test("🔴 위 한계가 100% 다 — 넓히는 기능이 아니라 좁히는 �
   assert.equal(clampWeeklyReportWidth(100_000), 100);
 });
 
-test("기본값은 범위 안이고 단계 격자 위에 있다", () => {
+test("기본값은 범위 안이고 격자 위에 있다", () => {
   assert.ok(DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT >= min && DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT <= max);
-  assert.equal((DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT - min) % WEEKLY_REPORT_WIDTH_STEP_PERCENT, 0);
-  // 한계도 격자 위에 있어야 `−`를 계속 눌러 최소에 정확히 닿는다.
-  assert.equal((max - min) % WEEKLY_REPORT_WIDTH_STEP_PERCENT, 0);
+  assert.equal((DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT - min) % WEEKLY_REPORT_WIDTH_GRID_PERCENT, 0);
+  assert.equal((max - min) % WEEKLY_REPORT_WIDTH_GRID_PERCENT, 0);
+  // 범위가 단추 한 번으로도 나누어떨어져야 `−`를 계속 눌러 최소에 정확히 닿는다.
+  assert.equal((max - min) % WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT, 0);
+});
+
+test("🔴 격자와 단추 한 번은 다른 수다 — 한 상수가 둘을 겸해서 슬라이더가 끊겼다", () => {
+  assert.equal(WEEKLY_REPORT_WIDTH_GRID_PERCENT, 1, "끌 때 앉는 자리");
+  assert.equal(WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT, 5, "`−`/`+` 한 번의 이동량");
+  assert.notEqual(
+    WEEKLY_REPORT_WIDTH_GRID_PERCENT,
+    WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT,
+    "둘이 같아지면 슬라이더가 13칸으로 끊기거나 단추를 60번 눌러야 한다"
+  );
+  // 끌 수 있는 칸이 60개다 — 13칸이던 때가 뚝뚝 끊기던 그 화면이다.
+  assert.equal((max - min) / WEEKLY_REPORT_WIDTH_GRID_PERCENT, 60);
 });
 
 test("범위 밖 값은 한계 안으로 접힌다 — 아래로도 위로도", () => {
@@ -99,28 +116,54 @@ test("NaN·Infinity는 기본값으로 되돌린다 — 이 값의 '원래대로
   assert.equal(clampWeeklyReportWidth(Number.NEGATIVE_INFINITY), DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT);
 });
 
-test("격자에서 벗어난 값은 가장 가까운 단계에 붙는다 — 안 붙이면 한계에 영영 못 닿는다", () => {
-  // 47 은 45 와 50 사이에서 45 쪽이 가깝다(단계 5).
-  assert.equal(clampWeeklyReportWidth(47), 45);
-  assert.equal(clampWeeklyReportWidth(48), 50);
-  assert.equal(clampWeeklyReportWidth(63), 65);
-  for (const value of [41, 47, 63, 78.4, 99]) {
+test("🔴 1% 단위가 그대로 산다 — 끌어서 멈춘 자리가 5% 로 되돌려지지 않는다", () => {
+  // 전에는 63 이 65 로 튀었다. 그 되돌림이 슬라이더가 뚝뚝 끊기던 진짜 까닭이다.
+  assert.equal(clampWeeklyReportWidth(63), 63);
+  assert.equal(clampWeeklyReportWidth(47), 47);
+  assert.equal(clampWeeklyReportWidth(48), 48);
+  assert.equal(clampWeeklyReportWidth(99), 99);
+  // 40~100 의 정수가 하나도 빠짐없이 제 값으로 남는다.
+  for (let value = min; value <= max; value += 1) {
+    assert.equal(clampWeeklyReportWidth(value), value, `${value} 가 제자리에 안 남았다`);
+  }
+});
+
+test("🔴 이미 저장된 5의 배수는 그대로다 — 쓰던 사람의 화면이 안 바뀐다", () => {
+  // 격자가 5% 이던 때 저장된 값들이다. 5는 1의 배수라 한 칸도 움직이지 않는다.
+  for (let value = min; value <= max; value += WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT) {
+    assert.equal(clampWeeklyReportWidth(value), value, `${value}% 로 쓰던 사람의 폭이 바뀌었다`);
+  }
+  assert.equal(clampWeeklyReportWidth(75), 75);
+  assert.equal(parseWeeklyReportWidth("75"), 75, "저장소에 남아 있던 글자로도 그대로다");
+});
+
+test("소수는 가장 가까운 정수에 붙는다 — 폭은 퍼센트 정수라는 약속이다", () => {
+  assert.equal(clampWeeklyReportWidth(78.4), 78);
+  assert.equal(clampWeeklyReportWidth(78.6), 79);
+  for (const value of [41.2, 47.5, 63.9, 78.4, 99.1]) {
     assert.equal(
-      (clampWeeklyReportWidth(value) - min) % WEEKLY_REPORT_WIDTH_STEP_PERCENT,
+      (clampWeeklyReportWidth(value) - min) % WEEKLY_REPORT_WIDTH_GRID_PERCENT,
       0,
       `${value} 가 격자에 안 붙었다`
     );
+    assert.ok(Number.isInteger(clampWeeklyReportWidth(value)), `${value} 가 정수가 아니다`);
   }
 });
 
 // ─────────────────────────────────────────────── `−` / `+`
 
-test("`+`와 `−`는 한 번에 한 단계씩 움직인다", () => {
+test("🔴 `+`와 `−`는 격자가 1% 가 된 뒤에도 한 번에 5% 씩 움직인다", () => {
   const start = 70;
-  assert.equal(stepWeeklyReportWidth(start, 1), start + WEEKLY_REPORT_WIDTH_STEP_PERCENT);
-  assert.equal(stepWeeklyReportWidth(start, -1), start - WEEKLY_REPORT_WIDTH_STEP_PERCENT);
+  assert.equal(stepWeeklyReportWidth(start, 1), 75);
+  assert.equal(stepWeeklyReportWidth(start, -1), 65);
+  assert.equal(stepWeeklyReportWidth(start, 1), start + WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT);
+  assert.equal(stepWeeklyReportWidth(start, -1), start - WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT);
   // 한 단계 좁혔다 넓히면 제자리다.
   assert.equal(stepWeeklyReportWidth(stepWeeklyReportWidth(start, -1), 1), start);
+  // 끌어서 5의 배수가 아닌 자리에 멈췄어도 단추는 거기서 5% 를 간다 — 1% 가
+  // 아니다(1% 면 40 에서 100 까지 60번을 눌러야 한다).
+  assert.equal(stepWeeklyReportWidth(63, 1), 68);
+  assert.equal(stepWeeklyReportWidth(63, -1), 58);
 });
 
 test("한계에서는 더 나가지 않는다", () => {
@@ -164,7 +207,8 @@ test("좁혀 둔 값은 퍼센트 그대로 style 이 된다 — 고정 px 이 �
   assert.deepEqual(weeklyReportWidthStyle(70), { maxWidth: "70%" });
   assert.deepEqual(weeklyReportWidthStyle(min), { maxWidth: `${min}%` });
   assert.deepEqual(weeklyReportWidthStyle(-5), { maxWidth: `${min}%` }, "범위 밖(아래)");
-  assert.deepEqual(weeklyReportWidthStyle(47), { maxWidth: "45%" }, "격자에 붙은 뒤의 값이다");
+  assert.deepEqual(weeklyReportWidthStyle(63), { maxWidth: "63%" }, "1% 자리도 그대로 쓴다");
+  assert.deepEqual(weeklyReportWidthStyle(78.4), { maxWidth: "78%" }, "격자에 붙은 뒤의 값이다");
 });
 
 test("🔴 style 은 `maxWidth` 하나만 정한다 — 가운데 정렬은 상자의 mx-auto 가 한다", () => {
@@ -224,7 +268,8 @@ test("적혀 있던 글자가 쓰레기여도 쓸 수 있는 값이 나온다 �
     ["12.7", min, "범위 밖(아래)인 소수"],
     ["99999", max, "범위 밖(위)"],
     ["-5", min, "음수"],
-    ["67", 65, "격자 밖"],
+    ["78.4", 78, "소수는 가장 가까운 정수로"],
+    ["67", 67, "1% 자리도 그대로 산다"],
     ["70", 70, "제대로 적혀 있으면 그대로"],
   ] as const) {
     assert.doesNotThrow(() => parseWeeklyReportWidth(raw), String(why));
@@ -256,8 +301,14 @@ test("적을 때도 범위 밖 값은 접혀서 들어간다 — 저장소에 �
   writeWeeklyReportWidth(store, WEEKLY_REPORT_WIDTH_STORAGE_KEY, Number.NaN);
   assert.equal(store.saved, String(DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT));
 
-  writeWeeklyReportWidth(store, WEEKLY_REPORT_WIDTH_STORAGE_KEY, 47);
-  assert.equal(store.saved, "45", "격자에 붙은 값이 들어간다");
+  writeWeeklyReportWidth(store, WEEKLY_REPORT_WIDTH_STORAGE_KEY, 78.4);
+  assert.equal(store.saved, "78", "격자에 붙은 값이 들어간다");
+
+  // 🔴 끌어서 멈춘 1% 자리가 저장에서 5% 로 되돌려지지 않는다 — 되돌리던 것이
+  //    슬라이더가 뚝뚝 끊기던 진짜 까닭이었다.
+  writeWeeklyReportWidth(store, WEEKLY_REPORT_WIDTH_STORAGE_KEY, 63);
+  assert.equal(store.saved, "63");
+  assert.equal(readWeeklyReportWidth(store, WEEKLY_REPORT_WIDTH_STORAGE_KEY), 63);
 });
 
 test("🔴 못 쓰는 저장소에서도 안 터진다(저장 공간이 꽉 찬 경우 포함)", () => {

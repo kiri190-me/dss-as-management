@@ -65,11 +65,16 @@ export type WeeklyReportKindFilter = (typeof WEEKLY_REPORT_KIND_FILTERS)[number]
 /**
  * 고르개 단추에 적는 말. Record 로 적은 것은 일부러다 — 값이 하나 늘면 이 표가
  * 컴파일되지 않아, 이름 없는 단추가 화면에 나가는 일이 없다.
+ *
+ * 🔴 **여기는 보이는 글자뿐이다.** 값(`ALL` · `RFG` · `MB`)과 주소 인자
+ * (`?kind=RFG`)는 이 표와 아무 상관이 없다 — 링크로 주고받는 값이라 한 가지
+ * 모양만 남겨야 하고, 그 규칙은 아래 normalizeWeeklyReportKindFilter 에 걸려
+ * 있다. 글자를 줄여도(`RFG 만` → `RFG`) 주소는 한 글자도 달라지지 않는다.
  */
 export const weeklyReportKindFilterLabels: Record<WeeklyReportKindFilter, string> = {
   ALL: "전체",
-  RFG: "RFG 만",
-  MB: "MB 만",
+  RFG: "RFG",
+  MB: "MB",
 };
 
 /**

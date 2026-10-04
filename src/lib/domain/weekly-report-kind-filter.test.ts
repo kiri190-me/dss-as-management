@@ -140,8 +140,16 @@ describe("주소의 `?kind=` 을 접는다", () => {
   test("고르개는 셋뿐이고 이름이 다 있다", () => {
     assert.deepEqual([...WEEKLY_REPORT_KIND_FILTERS], ["ALL", "RFG", "MB"]);
     assert.equal(weeklyReportKindFilterLabels.ALL, "전체");
-    assert.equal(weeklyReportKindFilterLabels.RFG, "RFG 만");
-    assert.equal(weeklyReportKindFilterLabels.MB, "MB 만");
+    assert.equal(weeklyReportKindFilterLabels.RFG, "RFG");
+    assert.equal(weeklyReportKindFilterLabels.MB, "MB");
+  });
+
+  test("🔴 이름을 줄여도 값과 주소는 그대로다 — 보이는 글자만 바뀐 것이다", () => {
+    // 2026-10-04 에 `RFG 만` → `RFG` 로 줄였다. 그때 값까지 따라 바뀌면 전에
+    // 건넨 링크가 조용히 전체 화면으로 떨어진다.
+    assert.equal(normalizeWeeklyReportKindFilter("RFG"), "RFG");
+    assert.equal(normalizeWeeklyReportKindFilter("MB"), "MB");
+    assert.equal(weeklyReportHref({ weekStart: "2026-10-05", kind: "RFG" }).includes("kind=RFG"), true);
   });
 });
 

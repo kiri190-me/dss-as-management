@@ -48,13 +48,36 @@ export const WEEKLY_REPORT_WIDTH_PERCENT_RANGE: { min: number; max: number } = {
 };
 
 /**
- * `−`/`+` 한 번에 움직이는 폭. 5% 다.
+ * ── 🔴 격자와 단추 이동량은 **다른 수**다 ───────────────────────────────
  *
- * 한 번 눌러 달라진 것이 눈에 보일 만큼은 되고, 끝에서 끝까지 12번이라 큰
- * 이동은 슬라이더가 · 미세 조정은 단추가 맡는 모양이 된다(미리보기 크기 조절
- * 바와 같은 갈래다).
+ * 한동안 이 둘을 `WEEKLY_REPORT_WIDTH_STEP_PERCENT` 하나가 겸했다. 그래서
+ * 슬라이더를 끌면 40~100% 가 **13칸**으로만 끊겨 뚝뚝 튀었고, 그 수를 줄이면
+ * 이번엔 `−`/`+` 가 1% 씩 움직여 끝에서 끝까지 60번을 눌러야 했다. 한쪽을
+ * 고치면 다른 쪽이 망가지는 자리라, 이름을 둘로 갈라 둔다.
+ *
+ * 값이 자리잡는 격자 — **1%** 다.
+ *
+ * clampWeeklyReportWidth 가 들어오는 값을 여기에 붙이고, 슬라이더의 `step` 도
+ * 이 수를 쓴다. 끌면 60칸이라 손이 가는 대로 따라온다.
+ *
+ * 🔴 **1% 격자는 지금까지 저장된 값을 그대로 받는다.** 예전 값은 전부 5의
+ * 배수인데 5는 1의 배수라 한 칸도 움직이지 않는다 — 쓰던 사람이 열었을 때
+ * 화면이 바뀌면 안 되고, 그것을 시험이 못 박는다.
  */
-export const WEEKLY_REPORT_WIDTH_STEP_PERCENT = 5;
+export const WEEKLY_REPORT_WIDTH_GRID_PERCENT = 1;
+
+/**
+ * `−`/`+` **단추 한 번**에 움직이는 폭. 5% 다.
+ *
+ * 🔴 위의 격자와 섞지 말 것. 이것은 「한 번 눌러 얼마나 가는가」이고, 격자는
+ * 「값이 어디에 앉는가」다. 한 번 눌러 달라진 것이 눈에 보일 만큼은 되고,
+ * 끝에서 끝까지 12번이라 큰 이동은 슬라이더가 · 미세 조정은 단추가 맡는 모양이
+ * 된다(미리보기 크기 조절 바와 같은 갈래다).
+ *
+ * 범위(60%)가 이 수로 나누어떨어져야 `−`를 계속 눌러 40% 에 정확히 닿는다
+ * (시험이 그 나눗셈을 확인한다).
+ */
+export const WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT = 5;
 
 /**
  * 아무것도 안 고른 사람이 보는 가로폭 — **100%, 지금 화면 그대로다.**
@@ -79,12 +102,15 @@ export const DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT = 100;
 export const WEEKLY_REPORT_WIDTH_STORAGE_KEY = "weekly-report-table-width:dashboard";
 
 /**
- * 범위 안으로 접고, **단계 격자에 붙인다.**
+ * 범위 안으로 접고, **1% 격자에 붙인다**(WEEKLY_REPORT_WIDTH_GRID_PERCENT).
  *
- * 격자에 붙이는 것이 핵심이다. 어디선가 67 같은 값이 들어오면(저장소에 남은 옛
- * 값, 손으로 고친 값) 그 뒤로 `−`/`+` 가 62→57 로 흐르고 한계인 40 에는 영영
- * 정확히 닿지 못한다. 들어오는 자리에서 한 번 붙여 두면 그 뒤의 모든 계산이
- * 격자 위에서만 논다.
+ * 격자에 붙이는 것이 핵심이다. 폭은 퍼센트 **정수**라는 것이 이 파일의 약속인데
+ * (머리말), 슬라이더가 내놓는 값이나 저장소에 남은 글자는 78.4 처럼 들어올 수
+ * 있다. 들어오는 자리에서 한 번 붙여 두면 그 뒤의 모든 계산이 정수 위에서만
+ * 논다 — 저장했다 읽는 사이에 오차가 끼어들지 않는다.
+ *
+ * 🔴 격자가 1% 라 **전에 저장된 값(5의 배수)은 한 칸도 움직이지 않는다.**
+ * 단추 한 번의 이동량(5%)은 여기가 아니라 stepWeeklyReportWidth 가 정한다.
  *
  * NaN·Infinity 는 기본값(100%)으로 되돌린다. 이 값에는 「원래대로」가 분명히
  * 있고 그것이 기본값이라, 값이 성립하지 않을 때 돌아갈 곳도 거기다.
@@ -96,13 +122,15 @@ export function clampWeeklyReportWidth(value: number): number {
   if (value <= min) return min;
   if (value >= max) return max;
 
-  const steps = Math.round((value - min) / WEEKLY_REPORT_WIDTH_STEP_PERCENT);
-  const snapped = min + steps * WEEKLY_REPORT_WIDTH_STEP_PERCENT;
+  const steps = Math.round((value - min) / WEEKLY_REPORT_WIDTH_GRID_PERCENT);
+  const snapped = min + steps * WEEKLY_REPORT_WIDTH_GRID_PERCENT;
   return snapped > max ? max : snapped;
 }
 
 /**
- * 한 단계 옮긴다. `+`(넓히기)는 1, `−`(좁히기)는 -1 이다.
+ * 단추를 한 번 눌러 옮긴다. `+`(넓히기)는 1, `−`(좁히기)는 -1 이다. **한 번에
+ * 5%** 이고(WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT), 그 수는 값이 앉는 1% 격자와
+ * 별개다 — 단추까지 1% 로 움직이면 40% 에서 100% 까지 60번을 눌러야 한다.
  *
  * 한계 밖으로는 나가지 않는다(clamp 가 막는다) — 화면에서는 그때 단추가 눌리지
  * 않게 되지만, 키보드나 다른 길로 한 번 더 들어와도 값이 새지 않아야 한다.
@@ -110,7 +138,9 @@ export function clampWeeklyReportWidth(value: number): number {
 export function stepWeeklyReportWidth(percent: number, steps: number): number {
   const current = clampWeeklyReportWidth(percent);
   if (!Number.isFinite(steps)) return current;
-  return clampWeeklyReportWidth(current + Math.round(steps) * WEEKLY_REPORT_WIDTH_STEP_PERCENT);
+  return clampWeeklyReportWidth(
+    current + Math.round(steps) * WEEKLY_REPORT_WIDTH_BUTTON_STEP_PERCENT
+  );
 }
 
 /** `+`(넓히기)를 누를 수 있는가. 못 누를 때 단추를 죽여 두는 데 쓴다. */

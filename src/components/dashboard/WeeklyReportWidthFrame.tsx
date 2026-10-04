@@ -4,8 +4,8 @@ import { useSyncExternalStore, type ReactNode } from "react";
 
 import {
   DEFAULT_WEEKLY_REPORT_WIDTH_PERCENT,
+  WEEKLY_REPORT_WIDTH_GRID_PERCENT,
   WEEKLY_REPORT_WIDTH_PERCENT_RANGE,
-  WEEKLY_REPORT_WIDTH_STEP_PERCENT,
   WEEKLY_REPORT_WIDTH_STORAGE_KEY,
   canNarrowWeeklyReport,
   canWidenWeeklyReport,
@@ -166,12 +166,17 @@ function FilteredWeeklyReportWidthFrame({ children }: { children: ReactNode }) {
           </button>
           {/* 키보드로도 조절된다 — `<input type="range">` 는 방향키를 저절로 받는다.
               지금 몇 %인지는 aria-valuetext 로 낭독기에 전해진다(오른쪽 글자는
-              그래서 aria-hidden 이다 — 안 그러면 같은 값을 두 번 읽는다). */}
+              그래서 aria-hidden 이다 — 안 그러면 같은 값을 두 번 읽는다).
+
+              🔴 `step` 은 **격자(1%)** 다. 단추의 5% 가 아니다 — 여기에 5 를 주면
+              끌 때 60칸이 13칸으로 끊겨 뚝뚝 튄다. 부드러움은 이 수가 정한다.
+              (CSS transition 으로 메우려 들면 끌고 있는 동안 늦게 따라와 오히려
+              더 뻑뻑해진다.) */}
           <input
             type="range"
             min={WEEKLY_REPORT_WIDTH_PERCENT_RANGE.min}
             max={WEEKLY_REPORT_WIDTH_PERCENT_RANGE.max}
-            step={WEEKLY_REPORT_WIDTH_STEP_PERCENT}
+            step={WEEKLY_REPORT_WIDTH_GRID_PERCENT}
             value={percent}
             onChange={(event) => setWeeklyReportWidth(Number(event.target.value))}
             aria-label="주간보고 가로폭"
