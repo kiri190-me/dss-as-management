@@ -24,10 +24,10 @@ import { buildWeeklyReportPreviewSample } from "./weekly-report-preview-sample";
  * 이 파일이 지키려는 것은 둘이다 — **승인된 매핑표가 코드와 같다**, 그리고
  * **총 대수는 언제나 6칸의 합이다.**
  *
- * 6칸 중 하나는 상태만으로 갈리지 않고(점검 대기/점검 중은 인수점검 기록으로
- * 갈린다), PO 발행 완료는 아예 칸이 아니라 **그 위에 겹쳐 세는 값**이다. 이
- * 두 가지가 조용히 뒤집히면 화면의 숫자는 여전히 그럴듯해 보이는데 뜻이
- * 달라지므로, 칸마다 한 건씩 못 박아 둔다.
+ * 6칸은 **상태 하나로** 갈린다(2026-10-04 부터 — 그전에는 점검 대기/점검 중만
+ * 인수점검 기록으로 갈랐다). PO 발행 완료는 아예 칸이 아니라 **그 위에 겹쳐
+ * 세는 값**이다. 이 두 가지가 조용히 뒤집히면 화면의 숫자는 여전히 그럴듯해
+ * 보이는데 뜻이 달라지므로, 칸마다 한 건씩 못 박아 둔다.
  */
 
 /**
@@ -65,7 +65,6 @@ function makeCase(overrides: Partial<WeeklyReportCase> = {}): WeeklyReportCase {
     workflowType: "PAID_MATCHER",
     status: "IN_REPAIR",
     currentWorkflowStepKey: "repair_in_progress",
-    hasIntakeInspectionRecord: false,
     modelName: "RFG-1000",
     serialNumber: "SN-1",
     lotNumber: "LN-1",
@@ -85,15 +84,15 @@ test("매핑표의 6칸이 칸마다 한 건씩 그대로 나온다", () => {
       row: makeCase({
         status: "WAITING_INTAKE_INSPECTION",
         currentWorkflowStepKey: "intake_inspection",
-        hasIntakeInspectionRecord: false,
       }),
     },
     {
       expected: "INSPECTION_IN_PROGRESS",
+      // 점검 중은 **상태가** 말한다 — 같은 단계에 앉아 있어도 상태가 다르다
+      // (2026-10-04 부터. 그전에는 점검 기록 유무로 갈랐다).
       row: makeCase({
-        status: "WAITING_INTAKE_INSPECTION",
+        status: "INTAKE_INSPECTION_IN_PROGRESS",
         currentWorkflowStepKey: "intake_inspection",
-        hasIntakeInspectionRecord: true,
       }),
     },
     {
@@ -138,23 +137,50 @@ test("PO 발행 완료는 상태 칸이 아니다 — 6칸 목록에 없다", ()
   );
 });
 
-test("점검 대기와 점검 중은 인수점검 기록 하나로 갈린다", () => {
-  const base = {
-    status: "WAITING_INTAKE_INSPECTION" as RepairStatus,
-    currentWorkflowStepKey: "intake_inspection",
-  };
+test("점검 대기와 점검 중은 상태로만 갈린다 — 인수점검 기록을 보지 않는다", () => {
+  // 2026-10-04 에 바뀐 규칙이다. 그전에는 같은 WAITING_INTAKE_INSPECTION 이라도
+  // 인수점검 결과 기록이 하나라도 있으면 '점검 중'이었다. 이제 두 칸은 단계가
+  // 들고 있는 상태가 가르고, 기록은 분류에 들어오지 않는다.
   assert.equal(
-    classifyWeeklyReportStatus({ ...base, hasIntakeInspectionRecord: false }),
+    classifyWeeklyReportStatus({
+      status: "WAITING_INTAKE_INSPECTION",
+      currentWorkflowStepKey: "intake_inspection",
+    }),
     "INSPECTION_WAITING"
   );
   assert.equal(
-    classifyWeeklyReportStatus({ ...base, hasIntakeInspectionRecord: true }),
+    classifyWeeklyReportStatus({
+      status: "INTAKE_INSPECTION_IN_PROGRESS",
+      currentWorkflowStepKey: "intake_inspection",
+    }),
     "INSPECTION_IN_PROGRESS"
   );
 });
 
+test("점검 기록이 있어도 인수점검 대기면 점검 대기다 — 기록이 칸을 바꾸지 못한다", () => {
+  // 걷어낸 입력을 **억지로 실어** 확인한다. 객체 리터럴을 그대로 넘기면 타입이
+  // 먼저 막으므로(없는 값) 변수에 담아 넘긴다 — 누군가 점검 기록 조건을 다시
+  // 넣으면 이 시험이 먼저 깨진다.
+  const withRecord = {
+    status: "WAITING_INTAKE_INSPECTION" as RepairStatus,
+    currentWorkflowStepKey: "intake_inspection",
+    hasIntakeInspectionRecord: true,
+  };
+  assert.equal(classifyWeeklyReportStatus(withRecord), "INSPECTION_WAITING");
+
+  // 칸의 숫자로도 확인한다 — 개발 DB 의 84건이 이 변경으로 옮겨간 자리다.
+  const report = buildAsOf([
+    makeCase({ status: "WAITING_INTAKE_INSPECTION", currentWorkflowStepKey: "intake_inspection" }),
+    makeCase({ status: "WAITING_INTAKE_INSPECTION", currentWorkflowStepKey: "intake_inspection" }),
+  ]);
+  assert.equal(report.total.byStatus.INSPECTION_WAITING, 2, "둘 다 점검 대기 칸이다");
+  assert.equal(report.total.byStatus.INSPECTION_IN_PROGRESS, 0, "점검 중 칸은 비어 있다");
+  assert.equal(report.total.unclassified, 0);
+  assert.equal(sumWeeklyReportStatusCounts(report.total), 2, "총 대수 = 6칸의 합");
+});
+
 test("waiting_po 와 po_received 는 둘 다 PO 대기 중이다 — 단계 키로 가르지 않는다", () => {
-  const base = { status: "WAITING_PO" as RepairStatus, hasIntakeInspectionRecord: true };
+  const base = { status: "WAITING_PO" as RepairStatus };
   for (const stepKey of ["waiting_po", "po_received", "po_partially_received"]) {
     assert.equal(
       classifyWeeklyReportStatus({ ...base, currentWorkflowStepKey: stepKey }),
@@ -169,11 +195,7 @@ test("부품 수급 대기와 수리 대기는 둘 다 수리 대기 칸으로 �
   // 여기가 없으면 수리 대기 건이 조용히 사라지지는 않아도 분류 안 됨으로 떨어진다.
   for (const status of ["WAITING_PARTS_SUPPLY", "WAITING_REPAIR"] as const) {
     assert.equal(
-      classifyWeeklyReportStatus({
-        status,
-        currentWorkflowStepKey: "parts_supply",
-        hasIntakeInspectionRecord: true,
-      }),
+      classifyWeeklyReportStatus({ status, currentWorkflowStepKey: "parts_supply" }),
       "REPAIR_WAITING",
       `${status} 는 수리 대기 칸이어야 한다`
     );
@@ -184,13 +206,9 @@ test("인수점검 중·인수점검 완료는 둘 다 점검 중 칸으로 간�
   // 점검이 끝나 다음 지시를 기다리는 자리도 점검 중에 접기로 정했다(매핑표).
   for (const status of ["INTAKE_INSPECTION_IN_PROGRESS", "INTAKE_INSPECTION_COMPLETED"] as const) {
     assert.equal(
-      classifyWeeklyReportStatus({
-        status,
-        currentWorkflowStepKey: "intake_inspection",
-        hasIntakeInspectionRecord: false,
-      }),
+      classifyWeeklyReportStatus({ status, currentWorkflowStepKey: "intake_inspection" }),
       "INSPECTION_IN_PROGRESS",
-      `${status} 는 점검 중 칸이어야 한다 — 점검 기록이 아직 없어도 그렇다`
+      `${status} 는 점검 중 칸이어야 한다`
     );
   }
 });
@@ -200,7 +218,6 @@ test("교산 회신 대기는 점검 중, 출하 승인 대기는 출하 대기�
     classifyWeeklyReportStatus({
       status: "WAITING_KYOSAN_REPLY",
       currentWorkflowStepKey: "waiting_kyosan_reply",
-      hasIntakeInspectionRecord: false,
     }),
     "INSPECTION_IN_PROGRESS",
     "교산 회신을 기다리는 동안에도 그 장비는 점검대에 있다"
@@ -209,15 +226,14 @@ test("교산 회신 대기는 점검 중, 출하 승인 대기는 출하 대기�
     classifyWeeklyReportStatus({
       status: "WAITING_SHIPMENT_APPROVAL",
       currentWorkflowStepKey: "waiting_kyosan_shipment_approval",
-      hasIntakeInspectionRecord: true,
     }),
     "SHIPMENT_WAITING"
   );
 });
 
-test("수리 완료는 출하 대기 칸에서 세어진다 — 분류 안 됨으로 떨어지지 않는다", () => {
-  // 수리가 끝났으니 그 장비가 다음에 기다리는 것은 출하다(사용자 결정 2026-10-04).
-  // 이 칸이 '출하 승인 대기'와 '출하 대기'를 이미 함께 세고 있던 자리다.
+test("수리 완료는 수리 중 칸에서 세어진다 — 출하 대기 숫자에는 들어가지 않는다", () => {
+  // 같은 날 낮에 한 번 '출하 대기'로 정했다가 사용자가 '수리 중'으로 바꿨다
+  // (2026-10-04).
   //
   // 이 시험이 꼭 필요한 까닭: 분류가 switch + default 라, 상태만 늘리고 여기를
   // 빠뜨려도 **타입 오류가 나지 않는다.** 그러면 그 건은 총 대수에는 들어가면서
@@ -227,14 +243,15 @@ test("수리 완료는 출하 대기 칸에서 세어진다 — 분류 안 됨�
       // 전용 단계 키는 없다 — 분류는 단계 키를 보지 않으므로 수리 단계 그대로 둔다.
       status: "REPAIR_COMPLETED",
       currentWorkflowStepKey: "repair_in_progress",
-      hasIntakeInspectionRecord: true,
     }),
-    "SHIPMENT_WAITING"
+    "IN_REPAIR"
   );
 
-  // 함수만이 아니라 **칸의 숫자로도** 확인한다 — 셋이 한 칸에 모인다.
+  // 함수만이 아니라 **칸의 숫자로도** 확인한다 — 수리 중과 한 칸에 모이고,
+  // 출하 대기 쪽 둘과는 섞이지 않는다.
   const report = buildAsOf([
     makeCase({ status: "REPAIR_COMPLETED", currentWorkflowStepKey: "repair_in_progress" }),
+    makeCase({ status: "IN_REPAIR", currentWorkflowStepKey: "repair_in_progress" }),
     makeCase({
       status: "WAITING_SHIPMENT_APPROVAL",
       currentWorkflowStepKey: "waiting_kyosan_shipment_approval",
@@ -242,10 +259,11 @@ test("수리 완료는 출하 대기 칸에서 세어진다 — 분류 안 됨�
     makeCase({ status: "WAITING_SHIPMENT", currentWorkflowStepKey: "waiting_shipment" }),
   ]);
 
-  assert.equal(report.total.byStatus.SHIPMENT_WAITING, 3, "셋이 출하 대기 한 칸으로 모인다");
+  assert.equal(report.total.byStatus.IN_REPAIR, 2, "둘이 수리 중 한 칸으로 모인다");
+  assert.equal(report.total.byStatus.SHIPMENT_WAITING, 2, "출하 대기에는 원래 둘만 남는다");
   assert.equal(report.total.unclassified, 0, "분류 안 됨이 하나도 없어야 한다");
-  assert.equal(report.total.total, 3);
-  assert.equal(sumWeeklyReportStatusCounts(report.total), 3, "총 대수 = 6칸의 합");
+  assert.equal(report.total.total, 4);
+  assert.equal(sumWeeklyReportStatusCounts(report.total), 4, "총 대수 = 6칸의 합");
 });
 
 test("수리 완료 건은 보고서에서 빠지지 않는다 — 아직 출하 전이다", () => {
@@ -257,7 +275,7 @@ test("수리 완료 건은 보고서에서 빠지지 않는다 — 아직 출하
   ]);
   assert.equal(report.total.total, 1, "총 대수에 남는다");
   assert.equal(report.blocks[0].rows.length, 1, "상세표에도 남는다");
-  assert.equal(report.blocks[0].rows[0].reportStatus, "SHIPMENT_WAITING");
+  assert.equal(report.blocks[0].rows[0].reportStatus, "IN_REPAIR");
 });
 
 // ─────────────────────────────────────────────────── PO 발행 완료 (겹쳐 세는 값)
@@ -297,9 +315,8 @@ test("총 대수는 6칸의 합이고, PO 발행 완료는 거기 들어가지 �
   const report = buildAsOf([
     makeCase({ status: "WAITING_INTAKE_INSPECTION", currentWorkflowStepKey: "intake_inspection" }),
     makeCase({
-      status: "WAITING_INTAKE_INSPECTION",
+      status: "INTAKE_INSPECTION_IN_PROGRESS",
       currentWorkflowStepKey: "intake_inspection",
-      hasIntakeInspectionRecord: true,
     }),
     makeCase({ status: "WAITING_KYOSAN_REPLY", currentWorkflowStepKey: "waiting_kyosan_reply" }),
     makeCase({ status: "WAITING_PARTS_SUPPLY", currentWorkflowStepKey: "parts_supply" }),

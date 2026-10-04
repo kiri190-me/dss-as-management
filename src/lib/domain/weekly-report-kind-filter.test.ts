@@ -56,7 +56,6 @@ function makeCase(overrides: Partial<WeeklyReportCase> = {}): WeeklyReportCase {
     workflowType: "PAID_MATCHER",
     status: "IN_REPAIR",
     currentWorkflowStepKey: "repair_in_progress",
-    hasIntakeInspectionRecord: false,
     modelName: "RFG-1000",
     serialNumber: "SN-1",
     lotNumber: "LN-1",

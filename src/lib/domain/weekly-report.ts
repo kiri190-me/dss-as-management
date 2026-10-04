@@ -32,10 +32,13 @@ import type { RepairStatus, WorkflowType } from "./types";
  * 어느 칸에 놓인 건이든 그 접수 건에 발주발행일이 있으면 세어진다. **총 대수에는
  * 더하지 않는다.**
  *
- * ── 여섯 칸도 상태 하나로는 갈리지 않는다 ───────────────────────────────
- * 점검 대기 / 점검 중 은 둘 다 WAITING_INTAKE_INSPECTION 이고 **인수점검 기록이
- * 남았는가**로 갈린다. 그래서 이 파일의 입력에는 상태 말고 점검 기록 유무가 함께
- * 온다.
+ * ── 여섯 칸은 상태 하나로 갈린다 ────────────────────────────────────────
+ * 2026-10-04 까지는 아니었다. 점검 대기 / 점검 중 이 둘 다
+ * WAITING_INTAKE_INSPECTION 이라 **인수점검 기록이 남았는가**로 갈라 왔는데,
+ * 그것은 상태가 둘을 가르지 못하던 때의 대용이었다. 이제 워크플로의 「인수점검」
+ * 단계가 '인수점검 중' 상태를 들게 되어 상태만으로 갈린다 — 그 단계를 고치는
+ * 일은 사람이 워크플로 편집기에서 한다(사용자 결정 2026-10-04). 그래서 이
+ * 파일의 입력에서 점검 기록 유무를 걷어냈고, 조회도 그 질의를 하지 않는다.
  *
  * WAITING_PO 는 **워크플로 단계와 무관하게 전부 PO 대기 중**이다. 예전에는
  * waiting_po / po_received 두 단계 키로 'PO 대기 중'과 'PO 발행 완료'를 갈랐는데,
@@ -163,8 +166,6 @@ export type WeeklyReportClassifiable = {
    * 단서이고, 시험이 "두 PO 단계가 모두 한 칸으로 간다"를 이 값으로 못 박는다.
    */
   currentWorkflowStepKey: string;
-  /** 이 건에 인수점검 결과 기록(record_kind = INTAKE_INSPECTION_RESULT)이 하나라도 있는가. */
-  hasIntakeInspectionRecord: boolean;
 };
 
 /**
@@ -184,14 +185,13 @@ export function isExcludedFromWeeklyReport(row: { status: RepairStatus | null })
  * 기본값을 지어내지 않는다(파일 헤더).
  *
  * 매핑표(승인된 그대로):
- *   점검 대기      WAITING_INTAKE_INSPECTION 이고 점검 기록 없음
- *   점검 중        WAITING_INTAKE_INSPECTION 이고 점검 기록 있음
- *                  + INTAKE_INSPECTION_IN_PROGRESS + INTAKE_INSPECTION_COMPLETED
+ *   점검 대기      WAITING_INTAKE_INSPECTION 전부 (점검 기록을 보지 않는다)
+ *   점검 중        INTAKE_INSPECTION_IN_PROGRESS + INTAKE_INSPECTION_COMPLETED
  *                  + WAITING_KYOSAN_REPLY 전부
  *   수리 대기      WAITING_PARTS_SUPPLY + WAITING_REPAIR
- *   수리 중        IN_REPAIR
+ *   수리 중        IN_REPAIR + REPAIR_COMPLETED
  *   PO 대기 중     WAITING_PO 전부 (단계 키를 보지 않는다)
- *   출하 대기      REPAIR_COMPLETED + WAITING_SHIPMENT + WAITING_SHIPMENT_APPROVAL
+ *   출하 대기      WAITING_SHIPMENT + WAITING_SHIPMENT_APPROVAL
  *
  * PO 발행 완료는 이 표에 없다 — 상태가 아니라 발주발행일로 갈리는, 겹쳐 세는
  * 값이다(hasWeeklyReportPoIssued).
@@ -201,9 +201,14 @@ export function classifyWeeklyReportStatus(
 ): WeeklyReportStatus | null {
   switch (row.status) {
     case "WAITING_INTAKE_INSPECTION":
-      // 점검 기록이 하나라도 남았으면 점검이 시작된 것이다. 상태는 아직
-      // 인수점검 단계에 머물러 있어도, 사람이 보는 사실은 '점검 중'이다.
-      return row.hasIntakeInspectionRecord ? "INSPECTION_IN_PROGRESS" : "INSPECTION_WAITING";
+      // **점검 기록을 보지 않는다.** 2026-10-04 까지는 인수점검 결과 기록이
+      // 하나라도 있으면 '점검 중'으로 보냈는데, 그것은 상태가 점검 대기와
+      // 점검 중을 가르지 못하던 때의 대용이었다. 이제 두 칸은 **단계가
+      // 가른다** — 점검을 시작한 건은 워크플로의 「인수점검」 단계가 아래
+      // INTAKE_INSPECTION_IN_PROGRESS 를 들고 있어 그 분기로 간다. 단계의
+      // 상태를 바꾸는 일은 사람이 워크플로 편집기에서 한다
+      // (사용자 결정 2026-10-04).
+      return "INSPECTION_WAITING";
     case "INTAKE_INSPECTION_IN_PROGRESS":
     case "INTAKE_INSPECTION_COMPLETED":
       // 점검이 끝나 다음 지시를 기다리는 자리도 여기다 — 아래 교산 회신
@@ -218,16 +223,15 @@ export function classifyWeeklyReportStatus(
       // 서로 다르지만, 엑셀의 '수리 대기' 한 칸이 원래 그 둘을 함께 세던 자리다.
       return "REPAIR_WAITING";
     case "IN_REPAIR":
+    case "REPAIR_COMPLETED":
+      // 수리 완료도 **'수리 중' 칸에서 센다.** 같은 날 낮에 한 번 '출하 대기'로
+      // 정했다가 사용자가 바꾼 것이다(2026-10-04) — 수리를 마쳤다는 사실은
+      // 수리 쪽이 말하는 것이고, 출하 칸은 출하 승인을 기다리기 시작한 뒤부터다.
       return "IN_REPAIR";
     case "WAITING_PO":
       // 단계 키를 보지 않는다 — waiting_po 든 po_received 든 아직 PO 를
       // 기다리는 자리이고, PO 가 실제로 났는지는 발주발행일이 답한다.
       return "PO_WAITING";
-    case "REPAIR_COMPLETED":
-      // 수리가 끝났으니 그 장비가 다음에 기다리는 것은 출하다. 이 칸이 이미
-      // '출하 승인 대기'와 '출하 대기'를 함께 세고 있어 결이 맞는다
-      // (사용자 결정 2026-10-04).
-      return "SHIPMENT_WAITING";
     case "WAITING_SHIPMENT":
     case "WAITING_SHIPMENT_APPROVAL":
       return "SHIPMENT_WAITING";
