@@ -44,6 +44,10 @@ import {
  * 왼쪽에 붙기 때문이다. 「가운데 중심을 유지해야 한다」는 요구가 그것을 가리킨
  * 것이고, mx-auto 가 그 한 줄이다.
  *
+ * ⚠️ **폭과 mx-auto 는 본문 쪽에만 건다.** 조절 바에까지 같이 걸었다가 끌 수 없는
+ * 조절 바가 된 적이 있다 — 폭이 줄면 조절 바가 같이 좁아지며 가운데로 끌려와,
+ * 손잡이가 커서 밑에서 달아난다(2026-10-04 실측, 아래 조절 바 주석).
+ *
  * ── 🔴 종이에서는 원래 폭으로 돌아간다 ─────────────────────────────────
  * 조절 바는 print:hidden 이고(고르개와 같은 이유 — 눌리지 않는 단추가 종이에
  * 찍히면 안 된다), 감싼 상자는 `print:!max-w-none` 으로 한계를 푼다. 인라인
@@ -149,10 +153,22 @@ function FilteredWeeklyReportWidthFrame({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* 조절 바도 본문과 같은 폭 안에 둔다 — 화면을 좁혀 놓았는데 조절 바만
-          저 멀리 오른쪽 끝에 남아 있으면 무엇을 조절하는 바인지 흐려진다.
+      {/* 🔴 조절 바에는 본문의 폭(widthStyle)을 걸지 않는다. 화면 폭을 그대로
+          쓰고, 안쪽의 justify-end 가 오른쪽 위에 붙여 둔다 — 폭을 바꿔도 조절 바는
+          제자리에 있다.
+
+          예전에는 본문과 같은 폭 안에 두었다(「좁혀 놓았는데 조절 바만 저 멀리
+          오른쪽 끝에 남으면 무엇을 조절하는 바인지 흐려진다」). 뜻은 옳았지만
+          **끌 수 없는 조절 바**라는 값을 치렀다 — 폭이 줄면 조절 바도 같이 좁아지며
+          가운데로 끌려와, 끌고 있는 손잡이가 커서 밑에서 달아난다. 2026-10-04 에
+          마우스로 끌어 잰 값: 100%에서 왼쪽으로 20px 끌었는데 트랙이 반대로 99px
+          달아나 89%로 튀었고(있어야 할 값은 92~93%), 40%에서 125px 끌면 한 번에
+          100%까지 갔다. 그래서 떼어냈다 — 본문 폭에 맞춰 되돌리지 말 것.
+
+          🔴 화면에 붙박는 것(fixed · sticky)도 아니다. 필요한 것은 「폭이 바뀌어도
+          움직이지 않는 것」뿐이고, 스크롤을 따라다니게 만들면 인쇄와 배치에 번진다.
           🔴 종이에는 나오지 않는다(고르개와 같은 이유). */}
-      <div className="mx-auto w-full print:hidden" style={widthStyle}>
+      <div className="w-full print:hidden">
         <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
           <span className="text-xs text-zinc-500 dark:text-zinc-400">가로폭</span>
           <button
