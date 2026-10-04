@@ -583,7 +583,16 @@ src/components/repair-cases/new/NameplateRegionPicker.test.ts
 # 가장 가까운 단계 · 🔴 거리가 같으면 앞(order 큰 쪽) · 뒤로도 간다 · 🔴 지금 단계는
 # 후보에서 뺀다(빼지 않으면 거리 0 으로 늘 이겨 '이미 해당 단계'로 막힌다) ·
 # 🔴 승인 게이트 단계를 뺀 목록을 주면 그 단계로는 가지 않는다(승인 우회로가 되지
-# 않는 근거다). 분류 판정은 classifyWeeklyReportStatus 를 빌려 쓰므로 여기서 다시
-# 재지 않는다. 서버가 실제로 그 단계로 옮기고 이력을 남기는지는 db 목록의
-# weekly-report-status.integration.test.ts 가 본다.
+# 않는 근거다) · 🔴 고른 칸과 간 단계의 칸이 같다('수리 중'을 고르면 수리 완료
+# 단계가 후보에서 빠진다 — 거르는 자가 아래 classifyWeeklyReportRowStatus 다).
+# 판정은 빌려 쓰므로 여기서 다시 재지 않는다. 서버가 실제로 그 단계로 옮기고
+# 이력을 남기는지는 db 목록의 weekly-report-status.integration.test.ts 가 본다.
 src/lib/domain/weekly-report-status-step.test.ts
+
+# ── 상세표 한 칸이 보여 주는 상태는 **집계 6칸과 다르다**(7칸) ───────────────
+# 2026-10-04 사용자 요청. 수리 완료인 건은 집계에서 '수리 중' 숫자에 들어가면서
+# 상세표에는 '수리 완료'로 적힌다. 글자·고르개·갈 단계 고르기 셋이 전부 이 한
+# 함수를 봐야 「고른 값과 표에 적히는 값」이 갈라지지 않는다. 🔴 이 시험의 핵심은
+# **집계가 안 바뀌었다는 확인**이다 — 6칸의 합과 총 대수가 그대로 맞고, 6칸짜리
+# 이름표도 늘어나지 않았다(집계 블록이 그 표를 돈다).
+src/lib/domain/weekly-report-row-status.test.ts

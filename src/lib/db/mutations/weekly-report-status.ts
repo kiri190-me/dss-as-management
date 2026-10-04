@@ -9,16 +9,20 @@ import {
 } from "../queries/workflow-rules";
 import { transitionWorkflow, type TransitionMutationResult } from "./workflow-transitions";
 import { pickNearestStepForWeeklyReportStatus } from "@/lib/domain/weekly-report-status-step";
-import { weeklyReportStatusLabels, type WeeklyReportStatus } from "@/lib/domain/weekly-report";
+import {
+  weeklyReportRowStatusLabels,
+  type WeeklyReportRowStatus,
+} from "@/lib/domain/weekly-report-row-status";
 
 /**
  * ============================================================================
- * 주간보고 상세표의 `현 상태` 를 바꾼다 — **분류 하나를 받아 단계로 옮긴다**
+ * 주간보고 상세표의 `현 상태` 를 바꾼다 — **칸 하나를 받아 단계로 옮긴다**
  * ============================================================================
- * 화면이 보내는 것은 단계 키가 아니라 **주간보고 분류 6칸 중 하나**다. 그 칸은
- * 저장되는 값이 아니라 지금 서 있는 단계에서 계산되는 값이라(domain/
- * weekly-report.ts), 바꾸려면 **그 분류로 계산되는 단계로 옮기는 수밖에** 없다.
- * 이 파일이 하는 일은 딱 그 번역이다: 분류 → 갈 단계.
+ * 화면이 보내는 것은 단계 키가 아니라 **상세표 고르개의 7칸 중 하나**다(집계
+ * 블록의 6칸에 '수리 완료'가 하나 더 붙은 목록 —
+ * domain/weekly-report-row-status.ts). 그 칸은 저장되는 값이 아니라 지금 서 있는
+ * 단계에서 계산되는 값이라, 바꾸려면 **그 칸으로 계산되는 단계로 옮기는 수밖에**
+ * 없다. 이 파일이 하는 일은 딱 그 번역이다: 칸 → 갈 단계.
  *
  * ── 🔴 쓰기는 한 글자도 하지 않는다 ─────────────────────────────────────
  * 여기에는 UPDATE 도 INSERT 도 없다. 읽어서 갈 단계를 정한 뒤
@@ -44,14 +48,14 @@ import { weeklyReportStatusLabels, type WeeklyReportStatus } from "@/lib/domain/
  * 못한다(그래서 이 읽기는 트랜잭션 밖이어도 안전하다).
  *
  * ── 갈 곳이 없으면 분명히 말한다 ────────────────────────────────────────
- * 그 워크플로에 해당 분류의 단계가 하나도 없을 수 있다. 조용히 아무 일도 하지
- * 않으면 사람이 두 번 세 번 누르므로, 어느 분류가 없는지 적어 돌려준다.
+ * 그 워크플로에 해당 칸의 단계가 하나도 없을 수 있다. 조용히 아무 일도 하지
+ * 않으면 사람이 두 번 세 번 누르므로, 어느 칸이 없는지 적어 돌려준다.
  * ============================================================================
  */
 export async function setWeeklyReportStatus(
   repairCaseId: string,
   expectedVersion: number,
-  targetStatus: WeeklyReportStatus,
+  targetStatus: WeeklyReportRowStatus,
   actorUserId: string
 ): Promise<TransitionMutationResult> {
   // 지금 서 있는 단계의 **순서**가 거리의 기준이다. 상태는 보지 않는다 —
@@ -88,7 +92,7 @@ export async function setWeeklyReportStatus(
     return {
       ok: false,
       code: "INVALID_TRANSITION",
-      message: `이 워크플로에는 '${weeklyReportStatusLabels[targetStatus]}'에 해당하는 단계가 없습니다.`,
+      message: `이 워크플로에는 '${weeklyReportRowStatusLabels[targetStatus]}'에 해당하는 단계가 없습니다.`,
     };
   }
 

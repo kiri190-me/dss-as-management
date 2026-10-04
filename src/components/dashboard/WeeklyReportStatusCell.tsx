@@ -4,12 +4,12 @@ import { useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { setWeeklyReportStatusAction } from "@/lib/server/actions/set-weekly-report-status";
-import { isWeeklyReportStatus } from "@/lib/domain/weekly-report-status-step";
 import {
-  WEEKLY_REPORT_STATUSES,
-  weeklyReportStatusLabels,
-  type WeeklyReportStatus,
-} from "@/lib/domain/weekly-report";
+  WEEKLY_REPORT_ROW_STATUSES,
+  isWeeklyReportRowStatus,
+  weeklyReportRowStatusLabels,
+  type WeeklyReportRowStatus,
+} from "@/lib/domain/weekly-report-row-status";
 
 /**
  * ============================================================================
@@ -26,13 +26,21 @@ import {
  *    띄워 요청을 보내도 서버가 세션·역할·보류·잠금·버전을 처음부터 다시 읽어
  *    막는다(server/actions/set-weekly-report-status.ts).
  *
- * ── 보내는 것은 **분류**이지 단계가 아니다 ───────────────────────────────
- * 이 칸이 보여 주는 6칸은 저장되는 값이 아니라 지금 서 있는 워크플로 단계에서
- * 계산되는 값이다. 그래서 고른 분류를 그대로 보내고, **어느 단계로 갈지는
+ * ── 보내는 것은 **칸**이지 단계가 아니다 ─────────────────────────────────
+ * 이 칸이 보여 주는 7칸은 저장되는 값이 아니라 지금 서 있는 워크플로 단계에서
+ * 계산되는 값이다. 그래서 고른 칸을 그대로 보내고, **어느 단계로 갈지는
  * 서버가 정한다**(지금 단계에서 가장 가까운 단계 —
  * domain/weekly-report-status-step.ts). 화면이 단계를 고르게 하면 이 표를 보는
- * 사람이 단계 20개를 알아야 하고, 그것은 이 칸이 분류 6칸으로 접혀 있는 뜻과
- * 정면으로 어긋난다.
+ * 사람이 단계 20개를 알아야 하고, 그것은 이 칸이 7칸으로 접혀 있는 뜻과 정면으로
+ * 어긋난다.
+ *
+ * ── 🔴 고르개의 7칸은 **집계 블록의 6칸이 아니다** ───────────────────────
+ * 위 집계는 수리 완료를 '수리 중'에 합쳐 6칸으로 세지만, 이 줄에는 '수리 완료'가
+ * 그대로 적힌다(사용자 결정 2026-10-04). 목록도 이름표도
+ * domain/weekly-report-row-status.ts 의 7칸짜리를 쓴다 — 6칸짜리
+ * WEEKLY_REPORT_STATUSES 를 쓰면 수리 완료인 건에서 **고른 값과 표에 적히는
+ * 값이 달라진다**(그 값을 고를 수조차 없다). 바로 그것이 이 칸을 7칸으로 늘린
+ * 까닭이다.
  *
  * ── `수정` 버튼이 없고, 고르면 곧바로 나간다 ─────────────────────────────
  * 비고 칸이 `수정` 을 달지 않은 것과 같은 까닭이다 — 250줄짜리 표의 오른쪽이
@@ -56,28 +64,31 @@ import {
 export default function WeeklyReportStatusCell({
   repairCaseId,
   version,
-  reportStatus,
+  rowStatus,
 }: {
   repairCaseId: string;
   /** repair_cases.version — 낙관적 잠금 값(조회가 줄마다 실어 온다). */
   version: number;
   /**
-   * 서버가 방금 계산해 그려 준 분류. **null 이면 분류 안 됨**이고, 그 줄도
-   * 바꿀 수 있어야 한다 — 오히려 바꿔야 할 줄이다. 빨간 딱지는 부르는 쪽이
-   * 그대로 그린다(WeeklyReportScreen).
+   * 서버가 방금 계산해 그려 준 **이 줄의 칸**(7칸 중 하나 —
+   * classifyWeeklyReportRowStatus). 글자만 보는 사람이 읽는 값과 **같은 값**이라,
+   * 수리 완료인 건은 '수리 완료'가 골라져 있다.
+   *
+   * **null 이면 분류 안 됨**이고, 그 줄도 바꿀 수 있어야 한다 — 오히려 바꿔야
+   * 할 줄이다. 빨간 딱지는 부르는 쪽이 그대로 그린다(WeeklyReportScreen).
    */
-  reportStatus: WeeklyReportStatus | null;
+  rowStatus: WeeklyReportRowStatus | null;
 }) {
   const router = useRouter();
-  const [selected, setSelected] = useState<WeeklyReportStatus | "">(reportStatus ?? "");
+  const [selected, setSelected] = useState<WeeklyReportRowStatus | "">(rowStatus ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleChange(event: ChangeEvent<HTMLSelectElement>) {
     const next = event.target.value;
     // 분류 안 된 줄의 빈 자리(아래 placeholder)를 도로 고른 경우. 보낼 값이 없다.
-    if (!isWeeklyReportStatus(next)) return;
-    if (next === reportStatus || isSubmitting) return;
+    if (!isWeeklyReportRowStatus(next)) return;
+    if (next === rowStatus || isSubmitting) return;
 
     setSelected(next);
     setError(null);
@@ -91,7 +102,7 @@ export default function WeeklyReportStatusCell({
       if (!result.ok) {
         // 서버가 막았으면 고르개도 사실대로 되돌린다 — 바뀌지 않은 값을 골라 둔
         // 채로 두면 다음에 이 화면을 보는 사람이 바뀐 줄로 읽는다.
-        setSelected(reportStatus ?? "");
+        setSelected(rowStatus ?? "");
         setError(result.message);
         return;
       }
@@ -118,13 +129,13 @@ export default function WeeklyReportStatusCell({
         // 종이가 된다. appearance-none 이 함께 있어야 화살표까지 사라진다.
         className="max-w-full rounded border border-zinc-300 bg-white px-1 py-0.5 text-wr-body text-zinc-900 disabled:opacity-50 print:appearance-none print:border-0 print:bg-transparent print:px-0 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
       >
-        {/* 분류 안 된 줄에만 있는 빈 자리. 6칸 중 어느 것도 지금 값이 아니므로
+        {/* 분류 안 된 줄에만 있는 빈 자리. 7칸 중 어느 것도 지금 값이 아니므로
             고를 것이 없는 상태를 그대로 보여 준다 — 아무 칸이나 골라 둔 것처럼
-            그리면 이미 그 분류인 줄로 읽힌다. */}
-        {reportStatus === null && <option value="">선택</option>}
-        {WEEKLY_REPORT_STATUSES.map((status) => (
+            그리면 이미 그 칸인 줄로 읽힌다. */}
+        {rowStatus === null && <option value="">선택</option>}
+        {WEEKLY_REPORT_ROW_STATUSES.map((status) => (
           <option key={status} value={status}>
-            {weeklyReportStatusLabels[status]}
+            {weeklyReportRowStatusLabels[status]}
           </option>
         ))}
       </select>

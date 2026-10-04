@@ -4,7 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { setWeeklyReportStatus } from "@/lib/db/mutations/weekly-report-status";
-import { isWeeklyReportStatus } from "@/lib/domain/weekly-report-status-step";
+import { isWeeklyReportRowStatus } from "@/lib/domain/weekly-report-row-status";
 import {
   isValidExpectedVersion,
   isValidRepairCaseId,
@@ -14,7 +14,7 @@ import {
 export type SetWeeklyReportStatusActionInput = {
   repairCaseId: string;
   expectedVersion: number;
-  /** 주간보고 분류 6칸 중 하나. **단계 키가 아니다.** */
+  /** 상세표 고르개의 7칸 중 하나. **단계 키가 아니다.** */
   status: string;
 };
 
@@ -22,9 +22,9 @@ export type SetWeeklyReportStatusActionInput = {
  * Server Action: 주간보고 상세표의 `현 상태` 칸 직접 변경(2026-10-04 사용자 요청).
  *
  * set-workflow-step.ts 와 **같은 결**로 짰고, 합치지 않은 이유도 그 파일과 같다 —
- * 들어오는 값의 종류가 다르다. 저쪽은 단계 키를 받고 이쪽은 **분류**를 받는다.
- * 한 입구로 합치면 "단계 키 아니면 분류"라는 느슨한 입력이 생기고, 그 느슨함이
- * 곧 우회로가 된다. 그래서 액션 코드와 마찬가지로 **입구부터 분리**한다.
+ * 들어오는 값의 종류가 다르다. 저쪽은 단계 키를 받고 이쪽은 **상세표의 칸**을
+ * 받는다. 한 입구로 합치면 "단계 키 아니면 칸"이라는 느슨한 입력이 생기고, 그
+ * 느슨함이 곧 우회로가 된다. 그래서 액션 코드와 마찬가지로 **입구부터 분리**한다.
  *
  * 이 파일이 하는 일은 다른 Server Action 들과 같은 층위의 일뿐이다 — 모드 확인 +
  * 세션 + 입력 형식 검증 + 오류 은닉. 실제 판정(권한·자격·보류·잠금·버전 충돌)은
@@ -60,9 +60,11 @@ export async function setWeeklyReportStatusAction(
   if (!isValidExpectedVersion(input.expectedVersion)) {
     return { ok: false, code: "VALIDATION_ERROR", message: "버전 정보를 확인할 수 없습니다." };
   }
-  // 받은 값이 실제로 6칸 중 하나인가. 목록은 도메인의 WEEKLY_REPORT_STATUSES
-  // 하나뿐이다 — 여기 베껴 적으면 칸이 바뀔 때 한쪽만 따라간다.
-  if (!isWeeklyReportStatus(input.status)) {
+  // 받은 값이 실제로 7칸 중 하나인가. 목록은 도메인의
+  // WEEKLY_REPORT_ROW_STATUSES 하나뿐이다 — 여기 베껴 적으면 칸이 바뀔 때 한쪽만
+  // 따라간다. 🔴 **넓어진 것은 받는 값의 범위뿐이고 검증은 그대로다** —
+  // 7칸 중 하나가 아니면 여전히 거절한다.
+  if (!isWeeklyReportRowStatus(input.status)) {
     return { ok: false, code: "VALIDATION_ERROR", message: "변경할 상태를 확인할 수 없습니다." };
   }
 

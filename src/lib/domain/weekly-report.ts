@@ -367,8 +367,11 @@ export type WeeklyReportCase = WeeklyReportClassifiable &
     serialNumber: string | null;
     lotNumber: string | null;
     /**
-     * 상세표의 `비고` — repair_cases.notes. 이 표에서 **유일하게 고칠 수 있는
-     * 칸**이다(권한이 있을 때만). 여러 줄이 들어 있을 수 있어 화면이
+     * 상세표의 `비고` — repair_cases.notes. 이 표에서 화면으로 바로 고칠 수 있는
+     * 칸 **둘 중 하나**다(권한이 있을 때만). 나머지 하나는 `현 상태` 이고, 그
+     * 둘은 고치는 길도 권한도 다르다 — 비고는 수리 건의 필드를 그대로 저장하고,
+     * 현 상태는 워크플로 **단계를 옮긴다**(2026-10-04 부터. 그전에는 비고가
+     * 유일하게 고칠 수 있는 칸이었다). 여러 줄이 들어 있을 수 있어 화면이
      * whitespace-pre-line 으로 그리고, 편집칸도 textarea 다.
      */
     notes: string | null;

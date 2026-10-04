@@ -34,6 +34,10 @@ import {
   type WeeklyReportRow,
   type WeeklyReportStatus,
 } from "@/lib/domain/weekly-report";
+import {
+  classifyWeeklyReportRowStatus,
+  weeklyReportRowStatusLabels,
+} from "@/lib/domain/weekly-report-row-status";
 
 /**
  * ============================================================================
@@ -85,9 +89,10 @@ import {
  * (page.tsx 의 canEditGoals 와 같은 규칙).
  *
  * ── `현 상태` 도 바꿀 수 있다 — 다만 그것은 **단계를 옮기는 일**이다 ──────
- * 상세표의 `현 상태`(6칸 중 하나)는 저장된 값이 아니라 그 접수 건이 지금 서 있는
- * 워크플로 단계에서 계산되는 값이다(domain/weekly-report.ts). 그래서 이 칸을
- * 바꾸면 **단계가 실제로 옮겨 가고 변경 이력이 남는다** — 저장은 작업내용 탭의
+ * 상세표의 `현 상태`(7칸 중 하나 — 🔴 **위 집계 블록의 6칸과 다르다**, 아래
+ * StatusCell)는 저장된 값이 아니라 그 접수 건이 지금 서 있는 워크플로 단계에서
+ * 계산되는 값이다(domain/weekly-report-row-status.ts). 그래서 이 칸을 바꾸면
+ * **단계가 실제로 옮겨 가고 변경 이력이 남는다** — 저장은 작업내용 탭의
  * 「현재 단계 직접 변경」과 **같은 길**(STEP_SET_MANUALLY)로 나가고, 어느 단계로
  * 갈지는 서버가 정한다(지금 단계에서 가장 가까운 단계). 규칙과 근거는 전부
  * WeeklyReportStatusCell 과 domain/weekly-report-status-step.ts 에 있다.
@@ -343,30 +348,33 @@ const LONG_PENDING_PO_TONE = "font-bold text-red-700 dark:text-red-300";
  * 상세표의 `현 상태` 한 칸. 분류 안 된 건은 빨갛게 드러난다.
  *
  * 바꿀 수 있는 사람에게는 그 자리가 **고르개**가 된다(WeeklyReportStatusCell).
- * 못 바꾸는 사람에게는 지금까지와 한 글자도 다르지 않게 글자만 그린다 — 줄마다
- * 클라이언트 컴포넌트를 붙이지 않는 까닭은 비고 칸과 같다(파일 헤더).
+ * 못 바꾸는 사람에게는 지금까지와 같은 자리에 글자만 그린다 — 줄마다 클라이언트
+ * 컴포넌트를 붙이지 않는 까닭은 비고 칸과 같다(파일 헤더).
+ *
+ * 🔴 **이 칸만 7칸이다.** 위 집계 블록은 row.reportStatus(6칸)를 세지만, 이 줄에
+ * 적히는 글자는 classifyWeeklyReportRowStatus 가 정한다 — 수리 완료인 건이 집계
+ * 에서는 '수리 중'에 들어가면서 여기에는 '수리 완료'로 적힌다(사용자 결정
+ * 2026-10-04). 🔴 **글자와 고르개가 같은 함수를 본다** — 한쪽만 7칸으로 늘리면
+ * 영업이 읽는 표와 엔지니어가 고르는 값이 갈라진다.
  *
  * 🔴 **분류 안 됨 줄도 고를 수 있다.** 오히려 고쳐야 할 줄이라, 빨간 딱지는
- * 그대로 두고 그 옆에 고르개를 둔다.
+ * 그대로 두고 그 옆에 고르개를 둔다. (null 이 되는 조합은 6칸 분류와 똑같다 —
+ * 이 칸이 7칸이 되었다고 분류 안 됨이 늘거나 줄지 않는다.)
  */
 function StatusCell({ row, canEdit }: { row: WeeklyReportRow; canEdit: boolean }) {
+  const rowStatus = classifyWeeklyReportRowStatus(row);
+
   if (!canEdit) {
-    if (row.reportStatus === null) {
+    if (rowStatus === null) {
       return <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>;
     }
-    return <>{weeklyReportStatusLabels[row.reportStatus]}</>;
+    return <>{weeklyReportRowStatusLabels[rowStatus]}</>;
   }
 
   return (
     <span className="flex flex-col items-start gap-1">
-      {row.reportStatus === null && (
-        <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>
-      )}
-      <WeeklyReportStatusCell
-        repairCaseId={row.id}
-        version={row.version}
-        reportStatus={row.reportStatus}
-      />
+      {rowStatus === null && <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>}
+      <WeeklyReportStatusCell repairCaseId={row.id} version={row.version} rowStatus={rowStatus} />
     </span>
   );
 }
