@@ -18,6 +18,7 @@ import {
   attachmentCategoryLabels,
   isAttachmentCategory,
   isAttachmentCategoryAllowedForOwner,
+  type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
@@ -76,8 +77,13 @@ import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/stor
  * 저장된 파일을 다시 올리게 된다. 대신 **무슨 일이 있었는지 응답에 싣는다**
  * (`contactFolderCopy`) — 화면이 「시스템에는 저장했지만 공유폴더에는 …」을 낸다.
  *
- * 🔴 **폴더를 만들지 않는다.** 없으면 `no-folder` 로 건너뛴다 — 폴더 만들기는 사람이
+ * 🔴 **연락서 폴더를 만들지 않는다.** 없으면 `no-folder` 로 건너뛴다 — 폴더 만들기는 사람이
  * [폴더 만들고 열기]를 누른 그때뿐이고, 폴더가 늘어나는 것은 사람이 보고 정할 일이다.
+ *
+ * 🔴 **그 안의 분류 폴더는 만든다** (2026-10-05 조각 11) — `연락서폴더/인수 사진/…` 처럼
+ * 그 파일의 **한글 이름표**로 된 하위 폴더에 꽂는다. 쓰는 분류만 그때그때 생기고, 만들지
+ * 못하면(같은 이름의 파일이 막고 있다) 폴더 바로 아래에 꽂은 뒤 그 사실을 응답에 싣는다.
+ * 규율 전부는 storage/contact-folder-archive.ts 에 있다 — 이 통로는 분류만 넘긴다.
  *
  * 🔴 **설정(CONTACT_FOLDER_ARCHIVE_DIR)이 비면 아무 일도 하지 않는다** — 기능이 꺼진
  * 환경에서는 DB 조회도 파일 읽기도 하지 않고 응답에 그 칸이 아예 붙지 않는다.
@@ -126,13 +132,26 @@ const MAX_DESCRIPTION_LENGTH = 500;
  * 설정이 비어 기능이 꺼져 있으면 이 칸 자체가 응답에 붙지 않는다(null).
  */
 type ContactFolderCopyNote =
-  | { status: "copied"; fileName: string }
-  | { status: "unchanged"; fileName: string }
+  | ({ status: "copied"; fileName: string } & ContactFolderCopyPlaceNote)
+  | ({ status: "unchanged"; fileName: string } & ContactFolderCopyPlaceNote)
   /** 🔴 연락서 폴더가 아직 없다 — 만들지 않고 건너뛰었다. */
   | { status: "no-folder" }
   /** 맞는 폴더가 여럿이라 어디에 넣을지 앱이 고르지 않았다. */
   | { status: "multiple" }
   | { status: "failed"; reason: string };
+
+/**
+ * **어느 분류 폴더에** 꽂았는가 (조각 11). 🔴 여기에도 경로가 없다 — 나가는 것은 분류
+ * 이름표 한 조각뿐이고, 연락서 폴더 이름도 루트도 담지 않는다.
+ *
+ * `categoryFolderName` 이 null 이면 **연락서 폴더 바로 아래**에 꽂혔다는 뜻이고,
+ * `categoryFolderBlockedByFile` 이 참이면 같은 이름의 **파일**이 그 자리를 막고 있었다는
+ * 뜻이다(사람이 탐색기에서 치워야 한다).
+ */
+type ContactFolderCopyPlaceNote = {
+  categoryFolderName: string | null;
+  categoryFolderBlockedByFile: boolean;
+};
 
 const CONTACT_FOLDER_COPY_CASE_GONE_REASON = "수리 건 정보를 읽지 못해 연락서 폴더를 찾을 수 없습니다.";
 const CONTACT_FOLDER_COPY_UNEXPECTED_REASON = "공유폴더에 사본을 넣는 중 문제가 발생했습니다.";
@@ -151,6 +170,8 @@ async function copyToContactFolder(input: {
   repairCaseId: string;
   storedPath: string;
   originalFileName: string;
+  /** 🔴 분류 — 그 **한글 이름표**로 된 하위 폴더에 꽂힌다(조각 11). */
+  category: AttachmentCategory;
 }): Promise<ContactFolderCopyNote | null> {
   // 🔴 기능이 꺼진 환경에서는 올리기가 한 글자도 달라지지 않는다 — DB 도 디스크도 보지 않는다.
   if (resolveContactFolderArchiveRoot() === null) return null;
@@ -163,12 +184,19 @@ async function copyToContactFolder(input: {
     const bytes = new Uint8Array(await new Response(await input.storage.read(input.storedPath)).arrayBuffer());
     const result = await copyIntoContactFolder({
       intakeNumber: key.intakeNumber,
+      category: input.category,
       originalFileName: input.originalFileName,
       bytes,
     });
 
-    if (result.status === "copied") return { status: "copied", fileName: result.fileName };
-    if (result.status === "unchanged") return { status: "unchanged", fileName: result.fileName };
+    if (result.status === "copied" || result.status === "unchanged") {
+      return {
+        status: result.status,
+        fileName: result.fileName,
+        categoryFolderName: result.categoryFolderName,
+        categoryFolderBlockedByFile: result.categoryFolderBlockedByFile,
+      };
+    }
     if (result.status === "no-folder") return { status: "no-folder" };
     if (result.status === "multiple") return { status: "multiple" };
     // 루트를 먼저 보았으므로 disabled 에 닿지 않지만, 상태가 하나 늘면 컴파일러가 짚게 둔다.
@@ -351,6 +379,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     repairCaseId: target.id,
     storedPath,
     originalFileName,
+    category,
   });
 
   return NextResponse.json(

@@ -3,8 +3,11 @@ import "server-only";
 import { mkdir, open, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import type { AttachmentCategory } from "@/lib/domain/attachment-category";
 import {
+  CONTACT_FOLDER_DATA_FOLDER_NAME,
   CONTACT_FOLDER_MAX_NUMBERED_COPIES,
+  contactFolderCategoryFolderName,
   contactFolderCopyFileName,
   contactFolderName,
   numberedContactFolderFileName,
@@ -42,6 +45,10 @@ import {
  *                 간다 — 존재 확인과 쓰기 사이에 틈이 없다(조각 6)
  *   · `readdir` — 폴더 안의 파일 이름을 **한 번** 읽는다(NFC/NFD 접어 견주기 · 빈 번호 고르기)
  *   · `stat` · `readFile` — 같은 내용의 파일이 이미 있는지 본다(크기가 같을 때만 읽는다)
+ *
+ * 🔴 **2026-10-05 조각 11** — 만드는 폴더가 셋이 되었다(연락서 폴더 · 그 안의 `DATA` ·
+ * 올린 파일의 분류 폴더). 그래도 **`mkdir` 을 부르는 자리는 `makeOneFolder` 하나**다 —
+ * 세 자리에 흩어 적으면 `recursive` 가 하나에만 붙는 날이 온다.
  *
  * 🔴 **`unlink` · `rm` · `rmdir` · `rename` · `truncate` · `cp` 는 여전히 한 글자도 없다.**
  * 앱은 사람의 서류함에서 파일을 지우지도 옮기지도 않는다. 그 사실을
@@ -240,12 +247,11 @@ async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<
 
   const target = path.join(root, folderName);
   assertInsideShareFolderRoot(root, target, OUTSIDE_ROOT_ON_CREATE);
-  try {
-    // recursive 없이 — 부모(= 루트)가 없으면 만들지 않고 실패해야 한다.
-    await mkdir(target);
+  if (await makeOneFolder(target)) {
+    // 🔴 **이번에 만들었을 때만** DATA 를 함께 둔다 — 이미 있던 폴더에는 만들지 않는다.
+    //    곁다리라 결과를 보지 않는다(아래 makeDataFolder 머리말).
+    await makeDataFolder(root, target);
     return { status: "created", folderName };
-  } catch (error) {
-    if (shareFolderErrorCode(error) !== "EEXIST") throw error;
   }
 
   // EEXIST — 둘이 동시에 눌렀거나, 같은 이름의 **파일**이 자리를 막고 있다.
@@ -260,6 +266,52 @@ async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<
 }
 
 /**
+ * 폴더 **하나**를 만든다 — 만들었으면 `true`, 자리가 이미 차 있으면(`EEXIST`) `false`.
+ *
+ * 🔴 **이 모듈에서 `mkdir` 을 부르는 자리는 여기 하나뿐이다.** 연락서 폴더 · `DATA` ·
+ * 분류 폴더 셋이 전부 이리로 들어온다. 세 자리에 흩어 적으면 `recursive` 가 하나에만
+ * 붙거나 `EEXIST` 를 하나만 잡는 날이 온다(contact-folder-archive-source.test.ts 가
+ * 「부르는 자리는 하나」를 원본 글자로 본다).
+ *
+ * 🔴 **`recursive` 를 주지 않는다** — 부모가 없으면 만들지 않고 실패해야 한다(루트를
+ * 만들지 않는다는 규율이 거기에 걸려 있다).
+ *
+ * 자리를 막은 것이 **폴더인지 파일인지는 가리지 않는다** — 서류함마다 할 일이 달라서
+ * (연락서 폴더는 `failed`, 분류 폴더는 바로 아래로 비켜 간다) 부르는 쪽이 정한다.
+ */
+async function makeOneFolder(target: string): Promise<boolean> {
+  try {
+    await mkdir(target);
+    return true;
+  } catch (error) {
+    if (shareFolderErrorCode(error) === "EEXIST") return false;
+    throw error;
+  }
+}
+
+/**
+ * 방금 만든 연락서 폴더 안에 **빈 `DATA` 폴더**를 함께 둔다 (조각 11 — 사용자 요청).
+ * 사람이 측정 자료 같은 것을 넣는 자리다.
+ *
+ * 🔴 **새로 만든 폴더에만** 부른다 — 이미 있던 폴더에는 만들지 않는다. 운영 공유폴더의
+ * 660 여 개에 우리가 폴더를 한꺼번에 늘리면 안 된다.
+ *
+ * 🔴 **곁다리다 — 실패해도 폴더 만들기는 성공이다.** 그래서 무엇이든 여기서 삼킨다.
+ * `DATA` 가 없다고 「폴더를 못 만들었습니다」라고 답하면 감사 기록이 없는 폴더가 하나
+ * 남고, 사람은 이미 생긴 폴더를 다시 만들려 든다. 없으면 사람이 탐색기에서 만든다.
+ */
+async function makeDataFolder(root: string, folder: string): Promise<void> {
+  try {
+    const target = path.join(folder, CONTACT_FOLDER_DATA_FOLDER_NAME);
+    assertInsideShareFolderRoot(root, target, OUTSIDE_ROOT_ON_CREATE);
+    // 이미 있으면(사람이 만들어 둔 경우) `false` 가 돌아온다 — 🔴 그대로 둔다.
+    await makeOneFolder(target);
+  } catch {
+    // 삼킨다 — 위 머리말의 「곁다리」.
+  }
+}
+
+/**
  * ============================================================================
  * 🔴 **이미 있는 연락서 폴더에 사본을 꽂는다** (연락서 조각 6)
  * ============================================================================
@@ -268,10 +320,26 @@ async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<
  * 꽂는다. 2026-10-05 사용자가 「양방향」을 고른 결과이고, 같은 파일이 두 곳에 있게 되는
  * 것을 **알고 고른 것**이다(그래야 공유폴더 목록의 [열기]로 그 파일을 열 수 있다).
  *
- * ── 🔴 폴더를 만들지 않는다 ─────────────────────────────────────────────
+ * ── 🔴 연락서 폴더를 만들지 않는다 ──────────────────────────────────────
  * 이 길은 **이미 있는 폴더에만** 꽂는다. 폴더가 없으면 `no-folder` 로 조용히 끝난다 —
  * 폴더를 만드는 일은 사람이 [폴더 만들고 열기]를 누르는 그때뿐이고(조각 5), 올리기가
  * 지나가며 폴더를 늘리면 폴더가 늘어난 것을 사람이 볼 기회가 없다.
+ *
+ * ── 🔴 분류 폴더 안에 꽂는다 (조각 11) ──────────────────────────────────
+ * 연락서 폴더 **바로 아래**가 아니라 `연락서폴더/인수 사진/…` 처럼 **그 파일의 분류
+ * 이름표로 된 하위 폴더** 안에 꽂는다. 폴더 이름은 사람이 보는 한글 이름표다
+ * (`INTAKE_PHOTO` 가 아니라 `인수 사진` — domain/contact-folder-naming.ts 의
+ * contactFolderCategoryFolderName).
+ *
+ *  · 🔴 **쓰는 분류만 그때그때 만든다** — 분류 전부를 미리 만들지 않는다.
+ *  · 🔴 **없으면 만들고 있으면 쓴다**(`EEXIST` 면 그대로 진행).
+ *  · 🔴 **같은 이름의 파일이 그 자리를 막고 있으면**(사람의 서류함에 `견적서` 라는
+ *    **파일**이 있을 수 있다) 실패로 끝내지 않고 **연락서 폴더 바로 아래**에 꽂은 뒤
+ *    그 사실을 결과에 싣는다. 🔴 막은 파일을 지우지도 옮기지도 않는다.
+ *  · 분류 이름표를 다듬은 결과가 빈 문자열이면(그런 분류는 없다) 역시 바로 아래다.
+ *
+ * 분류 폴더가 한 겹 들어가면서 **파일 이름 상한이 95 → 84 자로 내려갔다** — 계산은
+ * domain/contact-folder-naming.ts 의 CONTACT_FOLDER_FILE_MAX_NAME_LENGTH 주석에 있다.
  *
  * ── 🔴 덮어쓰지 않는다 ──────────────────────────────────────────────────
  * `open(…, "wx")` 로만 연다. 이미 있으면 ` (2)` 로 비켜 간다 — 현황표(견적서 쪽 덮어쓰기
@@ -305,6 +373,11 @@ const TOO_MANY_COPIES_REASON = `같은 이름의 파일이 너무 많습니다($
 export type CopyIntoContactFolderInput = {
   /** 🔴 찾는 열쇠. 이것 하나로만 찾는다(만들기 · 찾기와 같다). */
   intakeNumber: string;
+  /**
+   * 🔴 그 파일의 분류. **한글 이름표**로 된 하위 폴더에 꽂는다(`인수 사진` · `견적서` …).
+   * 이름표는 domain/attachment-category.ts 한 자리에만 있다.
+   */
+  category: AttachmentCategory;
   /** 올린 파일의 원본 이름. 다듬어서 **사람이 읽는 이름**으로 꽂는다. */
   originalFileName: string;
   /** 꽂을 내용. 시스템 창고에 이미 들어간 그 파일의 바이트다. */
@@ -315,11 +388,26 @@ export type CopyIntoContactFolderInput = {
   timeoutMs?: number;
 };
 
+/**
+ * 사본을 **어디에** 꽂았는가 (조각 11).
+ *
+ *  · `categoryFolderName` 이 있으면 그 **분류 폴더 안**이다.
+ *  · `null` 이면 **연락서 폴더 바로 아래**다 — 까닭은 둘뿐이고,
+ *    `categoryFolderBlockedByFile` 이 참이면 같은 이름의 **파일**이 자리를 막은 것이다
+ *    (거짓이면 분류 이름표를 다듬은 결과가 비었다는 뜻 — 그런 분류는 지금 없다).
+ *
+ * 🔴 **경로를 담지 않는다** — 담는 것은 폴더 이름 한 조각뿐이다(사유 규율과 같다).
+ */
+export type ContactFolderCopyPlace = {
+  categoryFolderName: string | null;
+  categoryFolderBlockedByFile: boolean;
+};
+
 export type ContactFolderCopy =
   /** 이번에 새로 꽂았다. `fileName` 은 디스크에 실제로 쓴 이름(번호가 붙었을 수 있다). */
-  | { status: "copied"; folderName: string; fileName: string }
+  | ({ status: "copied"; folderName: string; fileName: string } & ContactFolderCopyPlace)
   /** 같은 내용의 파일이 이미 있어 **쓰지 않았다.** */
-  | { status: "unchanged"; folderName: string; fileName: string }
+  | ({ status: "unchanged"; folderName: string; fileName: string } & ContactFolderCopyPlace)
   /** 🔴 연락서 폴더가 아직 없다 — **만들지 않는다.** 사람이 [폴더 만들고 열기]로 만든다. */
   | { status: "no-folder" }
   /** 맞는 폴더가 여럿이다 — 🔴 어디에 넣을지 앱이 고르지 않는다. */
@@ -372,7 +460,9 @@ export async function copyIntoContactFolder(input: CopyIntoContactFolderInput): 
 
   try {
     // ── 2) 꽂는다 — 🔴 상한 없이. 끊어도 쓰기는 뒤에서 끝나 파일이 생긴다 ──
-    return await put(root, picked.folderName, fileName, input.bytes);
+    //    분류 폴더 이름은 domain 이 짓는다(한글 이름표 · 다듬기). 못 지으면 null 이고,
+    //    그때는 연락서 폴더 바로 아래에 꽂는다.
+    return await put(root, picked.folderName, contactFolderCategoryFolderName(input.category), fileName, input.bytes);
   } catch (error) {
     return {
       status: "failed",
@@ -381,10 +471,20 @@ export async function copyIntoContactFolder(input: CopyIntoContactFolderInput): 
   }
 }
 
-async function put(root: string, folderName: string, fileName: string, bytes: Uint8Array): Promise<ContactFolderCopy> {
+async function put(
+  root: string,
+  folderName: string,
+  categoryFolderName: string | null,
+  fileName: string,
+  bytes: Uint8Array
+): Promise<ContactFolderCopy> {
   // 이을 때는 **디스크의 실제 이름**을 쓴다(look 이 돌려준 그대로).
-  const directory = path.join(root, folderName);
-  assertInsideShareFolderRoot(root, directory, OUTSIDE_ROOT_ON_COPY);
+  const folder = path.join(root, folderName);
+  assertInsideShareFolderRoot(root, folder, OUTSIDE_ROOT_ON_COPY);
+
+  // ── 🔴 분류 폴더 — 없으면 만들고, 있으면 쓰고, 막혀 있으면 바로 아래로 비켜 간다 ──
+  const place = await openCategoryFolder(root, folder, categoryFolderName);
+  const directory = place.categoryFolderName === null ? folder : path.join(folder, place.categoryFolderName);
 
   // 🔴 폴더를 **한 번만** 읽는다 — NAS 너머라 왕복 한 번이 비싸다. 이 한 벌로 「같은 내용이
   //    있는가」와 「빈 번호가 어디인가」를 둘 다 푼다.
@@ -392,11 +492,57 @@ async function put(root: string, folderName: string, fileName: string, bytes: Ui
 
   const same = await findSameContentFile(root, directory, existing, fileName, bytes);
   if (same !== null) {
-    return { status: "unchanged", folderName, fileName: same };
+    return { status: "unchanged", folderName, fileName: same, ...place };
   }
 
   const written = await writeNewFile(root, directory, existing, fileName, bytes);
-  return { status: "copied", folderName, fileName: written };
+  return { status: "copied", folderName, fileName: written, ...place };
+}
+
+/**
+ * 분류 폴더를 **없으면 만들고 있으면 쓴다.** 🔴 **실패로 끝내지 않는다** — 분류 폴더 하나
+ * 때문에 올린 파일이 공유폴더에서 통째로 빠지면 안 된다. 쓸 수 없으면 **연락서 폴더 바로
+ * 아래**를 돌려주고 그 까닭을 함께 싣는다.
+ *
+ * 🔴 자리를 **파일**이 막고 있어도 그 파일을 지우지 · 옮기지 않는다. 사람이 손으로 넣은
+ * `견적서` 라는 파일이 실제로 있을 수 있다.
+ */
+async function openCategoryFolder(
+  root: string,
+  folder: string,
+  categoryFolderName: string | null
+): Promise<ContactFolderCopyPlace> {
+  // 이름표를 다듬은 결과가 비었다 — 그런 분류는 없지만 조용히 깨지면 안 된다.
+  if (categoryFolderName === null) {
+    return { categoryFolderName: null, categoryFolderBlockedByFile: false };
+  }
+
+  const target = path.join(folder, categoryFolderName);
+  assertInsideShareFolderRoot(root, target, OUTSIDE_ROOT_ON_COPY);
+
+  // 🔴 recursive 없이 — 연락서 폴더가 없으면 여기서 실패해야 한다(이 길은 폴더를
+  //    만들지 않는다). 다만 그 앞의 look 이 이미 폴더가 있는 것을 보았다.
+  if (await makeOneFolder(target)) {
+    return { categoryFolderName, categoryFolderBlockedByFile: false };
+  }
+
+  // EEXIST — 폴더면 그대로 쓰고, 폴더가 아니면(= 같은 이름의 파일) 바로 아래로 비켜 간다.
+  if (await isExistingDirectory(target)) {
+    return { categoryFolderName, categoryFolderBlockedByFile: false };
+  }
+  return { categoryFolderName: null, categoryFolderBlockedByFile: true };
+}
+
+/**
+ * 그 자리가 **폴더**인가. 읽지 못하면(권한 · 사라짐) 「폴더가 아님」으로 친다 — 분류 폴더를
+ * 쓰지 않고 바로 아래에 꽂는 쪽으로 틀린다(그래야 파일이 어딘가에는 들어간다).
+ */
+async function isExistingDirectory(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**

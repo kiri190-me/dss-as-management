@@ -245,6 +245,10 @@ src/lib/storage/contact-folder-create.test.ts
 # 그 폴더에 **파일을 꽂는** 쪽(조각 6) — 덮어쓰지 않기 · NFC/NFD · 길이 상한(글자 수와
 # 바이트 수) · 폴더가 없으면 건너뛰기. 역시 임시 폴더(mkdtemp)에서만 돈다.
 src/lib/storage/contact-folder-copy.test.ts
+# 그 폴더 **안의 하위 폴더**(조각 11) — 새로 만들 때만 생기는 `DATA` · 쓰는 분류만 그때그때
+# 만드는 분류 폴더 · 같은 이름의 파일이 막으면 바로 아래로 비켜 가기 · 길이 상한 다시 뽑기.
+# 역시 임시 폴더(mkdtemp)에서만 돈다.
+src/lib/storage/contact-folder-subfolders.test.ts
 src/lib/storage/contact-folder-entries.test.ts
 src/lib/storage/contact-folder-entries-source.test.ts
 # 연락서 폴더 위치 통로. `[id]` 칸은 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가

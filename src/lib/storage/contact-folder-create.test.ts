@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
-import { contactFolderName, type ContactFolderNamingInput } from "@/lib/domain/contact-folder-naming";
+import {
+  CONTACT_FOLDER_DATA_FOLDER_NAME,
+  contactFolderName,
+  type ContactFolderNamingInput,
+} from "@/lib/domain/contact-folder-naming";
 import { createContactFolder, type ContactFolderCreation } from "./contact-folder-archive";
 
 /*
@@ -26,6 +30,11 @@ import { createContactFolder, type ContactFolderCreation } from "./contact-folde
  *  · 둘이 **동시에** 눌러도 폴더는 하나다(EEXIST 면 다시 찾는다)
  * 찾기 쪽 규율은 contact-folder-archive.test.ts 가, 이름 규칙은
  * domain/contact-folder-naming.test.ts 가 본다.
+ *
+ * ── 🔴 2026-10-05 조각 11 — 만들 때 `DATA` 빈 폴더가 함께 생긴다 ────────
+ * 그래서 아래 snapshot 기대값에 `…/DATA/` 가 한 줄씩 늘었다. 🔴 **「이미 있으면 만들지
+ * 않는다」쪽 기대값은 한 글자도 바뀌지 않았다** — 이미 있던 폴더에는 DATA 를 만들지 않기
+ * 때문이고, 그것을 못 박는 것이 이웃 contact-folder-subfolders.test.ts 다.
  * ============================================================================
  */
 
@@ -101,7 +110,8 @@ test("빈 루트에 폴더 하나를 만든다 — 이름은 domain 이 지은 �
   const result = await create(root);
 
   assert.deepEqual(result, { status: "created", folderName: NAME });
-  assert.deepEqual(await snapshot(root), [`${NAME}/`]);
+  // 🔴 조각 11 — 새로 만들 때 `DATA` 빈 폴더가 함께 생긴다.
+  assert.deepEqual(await snapshot(root), [`${NAME}/`, `${NAME}/${CONTACT_FOLDER_DATA_FOLDER_NAME}/`]);
   assert.equal(NAME, "D260908 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청");
 });
 
@@ -205,7 +215,10 @@ test("🔴 S/N · 모델 · L/N 이 다 같은 폴더가 있어도 **새 인수�
   // 🔴 조각 5 는 여기서 멈췄다(S/N 훑기). 2026-10-05 그 장치를 걷어냈다 — 새 인수번호에는
   //    새 폴더가 있어야 한다. 가르는 기준은 인수번호 하나뿐이다.
   assert.deepEqual(result, { status: "created", folderName: NAME });
-  assert.deepEqual(await snapshot(root), [`${NAME}/`, `${lastTime}/`, `${noNumber}/`].sort());
+  assert.deepEqual(
+    await snapshot(root),
+    [`${NAME}/`, `${NAME}/${CONTACT_FOLDER_DATA_FOLDER_NAME}/`, `${lastTime}/`, `${noNumber}/`].sort()
+  );
   // 🔴 옆 폴더는 한 글자도 건드리지 않았다.
   assert.equal(await exists(path.join(root, lastTime)), true);
   assert.equal(await exists(path.join(root, noNumber)), true);
@@ -235,7 +248,11 @@ test("🔴 둘이 동시에 눌러도 폴더는 하나다 — EEXIST 면 다시 
       assert.equal(result.folderName, NAME);
     }
   }
-  assert.deepEqual(await snapshot(root), [`${NAME}/`], "폴더가 둘이 되었다");
+  assert.deepEqual(
+    await snapshot(root),
+    [`${NAME}/`, `${NAME}/${CONTACT_FOLDER_DATA_FOLDER_NAME}/`],
+    "폴더가 둘이 되었다"
+  );
 });
 
 test("인수번호가 비면 failed — 디스크를 보지 않는다", async () => {
