@@ -1,6 +1,10 @@
 import "server-only";
 
 import {
+  QUOTE_FOLDER_FILE_LINK_PREFIX,
+  QUOTE_FOLDER_OPENABLE_EXTENSIONS,
+} from "@/lib/domain/quote-folder-file-link";
+import {
   QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH,
   QUOTE_FOLDER_LINK_PREFIX,
   QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH,
@@ -22,12 +26,41 @@ import {
  *
  * ── 🔴 불변식 넷 ─────────────────────────────────────────────────────────
  * 이 도우미는 **다른 웹사이트도 부를 수 있는 입구**다.
- *   (a) 루트(들) 아래의 **폴더만** 연다 — 파일 · 프로그램은 열거나 실행하지 않는다.
- *       스크립트가 주소를 풀어 domain/quote-folder-link.ts 와 **같은 규칙**으로 상대 경로를 거절하고,
- *       루트와 이어 GetFullPath 로 편 뒤 「루트 + \」 로 시작하는지(대소문자 무시) 보고, 폴더인지
- *       (Test-Path -PathType Container) 보고, 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭
- *       링크 — 루트 밖을 가리킬 수 있다)가 있으면 열지 않는다. explorer.exe 에는 그 폴더 경로만,
- *       끝에 `\` 를 붙여 넘긴다(폴더로만 읽힌다).
+ *   (a) 루트(들) 아래의 **폴더**를 탐색기로 열고, 루트(들) 아래의 **허용 목록에 든 확장자의
+ *       파일 하나**를 그 PC 의 연결 프로그램으로 연다. 주소의 접두어가 어느 쪽인지를 가른다
+ *       (`open/` → 폴더 · `openfile/` → 파일).
+ *
+ *       ── 🔴 2026-10-05 에 **무엇이 · 왜 바뀌었나** ──────────────────────
+ *       예전 이 자리에는 「**폴더만** 연다 — 파일 · 프로그램은 열거나 실행하지 않는다」가
+ *       적혀 있었다. [파일 관리] 탭의 공유폴더 목록에서 **파일 이름을 눌러 바로 열고 싶다**는
+ *       것이 이 기능 전체에서 사용자가 가장 원한 것이었고, 사용자가 **아래 「남는 위험」을
+ *       설명 듣고 「바로 열린다」를 골랐다**(2026-10-05). 파일을 「그 PC 의 프로그램으로」 여는
+ *       것은 셸 연결 실행이다 — 그래서 없어진 「파일은 안 연다」 한 줄의 자리를 **검사 일곱**이
+ *       메운다. 스크립트가 **하나도 건너뛰지 않고** 다시 한다(서버가 이미 했어도 다시 한다 —
+ *       주소는 우리 화면이 아니라 아무 웹페이지나 만들 수 있다):
+ *         1. 상대 경로 규칙 — domain/quote-folder-link.ts 와 **같은 규칙**(Test-RelativePath)
+ *         2. 루트 담김 — 루트와 이어 GetFullPath 로 편 뒤 「루트 + \」 로 시작하는지(대소문자 무시)
+ *         3. 마디마다 바로 가기(정션 · 심볼릭 링크 — 루트 밖을 가리킬 수 있다) 없음
+ *            (Test-NoReparsePoint — 마지막 마디인 **파일 자신**까지 본다)
+ *         4. 🔴 **확장자 허용 목록**(Test-OpenableFileName · $OpenableExtensions) — 거절 목록이
+ *            아니다. 목록 밖은 전부 거절. `.exe` 류를 세는 방식은 Windows 가 실행하는 확장자를
+ *            하나라도 빠뜨리면 끝난다(`.lnk` · `.scf` · `.pif` · PATHEXT 로 늘어나는 것들 …)
+ *         5. 🔴 **폴더가 아니라 파일인지**([System.IO.File]::Exists · Directory::Exists 가 참이면
+ *            거절) — 폴더에 `.pdf` 이름을 붙여 둔 함정
+ *         6. 🔴 **확장자 없는 것 거절**(`문서` 처럼 점이 없는 이름 — 4번 함수 안)
+ *         7. 실행 — `Start-Process -FilePath <전체경로>`. **인자는 그 경로 하나뿐**이고
+ *            명령줄을 문자열로 조립하지 않는다(`-ArgumentList` 가 없다)
+ *       폴더 쪽(`open/`)은 **한 글자도 바뀌지 않았다** — explorer.exe 에 그 폴더 경로만, 끝에
+ *       `\` 를 붙여 넘긴다(폴더로만 읽힌다).
+ *
+ *       ── 🔴 남는 위험 — 숨기지 않는다 ───────────────────────────────────
+ *       `dss-folder://` 는 **아무 웹페이지나 부를 수 있다.** 그러므로 악성 페이지가 이 주소를
+ *       불러 **공유폴더 안의 문서를 열게 할 수 있다**(그 사람이 이미 열 수 있는 문서이고, 경로를
+ *       알아맞혀야 하지만, 0 은 아니다). 막은 것은 **실행 파일 · 바로 가기 · 스크립트**(목록 밖)와
+ *       **루트 밖 · 바로 가기를 지나는 경로**다. 막지 못한 것은 **허용 목록에 든 문서 형식 자체의
+ *       위험**이다 — `.xlsm` 매크로, 문서 뷰어의 취약점은 이 도우미가 걸러 주지 않는다.
+ *       (허용 목록에 `.xlsm` 을 일부러 넣은 까닭은 domain/quote-folder-file-link.ts 머리말.)
+ *
  *       🔴 루트가 여럿이어도 이 검사들은 **루트마다 따로** 한다 — 어느 루트 아래도 아닌 경로는
  *       어느 루트로도 열리지 않는다(requireRoots · 스크립트의 (e~f) 고리).
  *   (b) 주소가 명령줄로 삽입되지 않는다 — 레지스트리 명령은 `-File "…" "%1"` 이다. `-Command` 로
@@ -367,9 +400,9 @@ function requireRoots(input: QuoteFolderHelperRootsInput): string[] {
 /**
  * open-dss-folder.ps1 의 본문(줄 끝 CRLF). 할 일과 거절 규칙은 머리말 (a) · (b).
  *
- * 표준출력 형식(DSS_FOLDER_DRY_RUN=1 일 때만): `OPEN <폴더 전체 경로>` · `NOT-FOUND` ·
- * `REJECT <까닭>`. 끝남 코드: 0 열었음 · 2 주소 모양 · 3 경로 규칙 · 루트 밖 · 바로 가기 폴더 ·
- * 4 폴더 없음 · 9 그 밖의 오류.
+ * 표준출력 형식(DSS_FOLDER_DRY_RUN=1 일 때만): `OPEN <폴더 전체 경로>` ·
+ * `OPEN-FILE <파일 전체 경로>` · `NOT-FOUND` · `REJECT <까닭>`. 끝남 코드: 0 열었음 ·
+ * 2 주소 모양 · 3 경로 규칙 · 루트 밖 · 바로 가기 · 확장자 · 파일 아님 · 4 없음 · 9 그 밖의 오류.
  */
 export function buildQuoteFolderHelperScript(input: QuoteFolderHelperRootsInput): string {
   const roots = requireRoots(input);
@@ -379,8 +412,11 @@ export function buildQuoteFolderHelperScript(input: QuoteFolderHelperRootsInput)
 # 설치 파일(${QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME})이 이 PC 의 현재 사용자에게 만든 파일입니다.
 # 손으로 고치지 마세요. 공유폴더 주소가 바뀌면 설치 파일을 새로 받아 다시 실행하면 됩니다.
 #
-# 브라우저의 dss-folder:// 주소를 받아, 아래 루트 아래의 폴더만 Windows 탐색기로 엽니다.
-# 파일 · 프로그램은 열거나 실행하지 않습니다. 기록(로그) · 네트워크 · 다른 명령이 없습니다.
+# 브라우저의 dss-folder:// 주소를 받아, 아래 루트 아래의 것만 엽니다.
+#   dss-folder://open/?p=...     폴더를 Windows 탐색기로
+#   dss-folder://openfile/?p=... 파일 하나를 이 PC 의 연결 프로그램으로(아래 허용 목록의 확장자만)
+# 허용 목록 밖 확장자 · 확장자 없는 이름 · 폴더에 파일 이름을 붙인 것 · 바로 가기(정션 · 심볼릭)를
+# 지나는 경로 · 루트 밖은 열지 않습니다. 기록(로그) · 네트워크 · 다른 명령이 없습니다.
 #
 # 지우려면:
 #   reg delete "HKCU\Software\Classes\dss-folder" /f
@@ -397,6 +433,11 @@ Set-StrictMode -Version 2.0
 # 어느 루트로 시도하든 「그 루트 아래인가」는 아래 (e) 에서 **루트마다 따로** 봅니다.
 $Roots = @(${roots.map((r) => powerShellSingleQuoted(r)).join(", ")})
 $Prefix = '${QUOTE_FOLDER_LINK_PREFIX}'
+$FilePrefix = '${QUOTE_FOLDER_FILE_LINK_PREFIX}'
+
+# 🔴 열 수 있는 확장자 — **허용 목록**입니다. 여기 없는 것은 전부 거절합니다(거절 목록이
+# 아닙니다). 서버의 domain/quote-folder-file-link.ts 와 글자 그대로 같은 한 벌입니다.
+$OpenableExtensions = @(${QUOTE_FOLDER_OPENABLE_EXTENSIONS.map((e) => `'${e}'`).join(", ")})
 $MaxRelativeLength = ${QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH}
 $MaxEncodedLength = ${QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH}
 $DryRun = ($env:${QUOTE_FOLDER_HELPER_DRY_RUN_ENV} -eq '1')
@@ -439,7 +480,39 @@ function Test-FolderState([string]$Path) {
   }
 }
 
-# 루트부터 그 폴더까지 마디마다 바로 가기(정션 · 심볼릭 링크)가 없는가.
+# 🔴 (검사 5) 파일이 있나 — 'found' · 'directory' · 'missing' · 'unreachable'.
+# 'directory' 는 **폴더에 .pdf 같은 이름을 붙여 둔 함정**입니다. File::Exists 는 폴더에 $false 를
+# 주지만, 「없다」와 섞어 버리면 다음 루트로 넘어가 조용히 끝납니다 — 따로 가려 거절합니다.
+# try/catch 가 있는 까닭은 Test-FolderState 와 같습니다(못 닿는 서버 이름은 던진다).
+function Test-FileState([string]$Path) {
+  try {
+    if ([System.IO.Directory]::Exists($Path)) { return 'directory' }
+    if ([System.IO.File]::Exists($Path)) { return 'found' }
+    return 'missing'
+  } catch {
+    return 'unreachable'
+  }
+}
+
+# 🔴 (검사 4 · 6) 이 이름을 열어도 되는가 — 허용 목록에 든 확장자인가.
+#  · 점이 없으면(「문서」) 거절합니다. 점이 맨 앞이어도(「.pdf」) 거절합니다 — 확장자가 없는
+#    것으로 봅니다(검사 6).
+#  · 확장자는 접어서 봅니다(「.PDF」도 같은 것, 「.EXE」도 당연히 거절). ToLowerInvariant 로
+#    접고 -ceq 로 맞춥니다 — 지역 설정이 비교를 바꾸지 못하게.
+#  · 끝에 점 · 공백이 붙은 이름(「보고서.pdf.」 · 「보고서.pdf 」— Windows 가 조용히 뗍니다)은
+#    Test-RelativePath 가 **먼저** 막습니다.
+function Test-OpenableFileName([string]$Name) {
+  $dot = $Name.LastIndexOf([char]'.')
+  if ($dot -lt 1) { return $false }
+  if ($dot -ge ($Name.Length - 1)) { return $false }
+  $extension = $Name.Substring($dot + 1).ToLowerInvariant()
+  foreach ($allowed in $OpenableExtensions) {
+    if ($extension -ceq $allowed) { return $true }
+  }
+  return $false
+}
+
+# 루트부터 그 폴더(또는 파일)까지 마디마다 바로 가기(정션 · 심볼릭 링크)가 없는가.
 # 읽다가 실패하면 $false — 확인하지 못한 것은 열지 않는다(안전한 쪽으로).
 function Test-NoReparsePoint([string]$RootFull, [string]$Relative) {
   try {
@@ -480,10 +553,20 @@ try {
   if ($args.Count -ne 1) { Stop-Helper 'REJECT argument-count' 2 }
   $link = [string]$args[0]
 
-  # (b) dss-folder://open/?p= 모양이 아니면 끝.
-  if ($link.Length -gt ($Prefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
-  if (-not $link.StartsWith($Prefix, [System.StringComparison]::Ordinal)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
-  $encoded = $link.Substring($Prefix.Length)
+  # (b) dss-folder://open/?p= (폴더) · dss-folder://openfile/?p= (파일) 모양이 아니면 끝.
+  #     🔴 접두어가 **동작을 가릅니다.** 폴더 쪽은 예전과 한 글자도 다르지 않습니다.
+  $Mode = 'folder'
+  $NotAFile = $false
+  if ($link.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
+    if ($link.Length -gt ($Prefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
+    $encoded = $link.Substring($Prefix.Length)
+  } elseif ($link.StartsWith($FilePrefix, [System.StringComparison]::Ordinal)) {
+    if ($link.Length -gt ($FilePrefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
+    $Mode = 'file'
+    $encoded = $link.Substring($FilePrefix.Length)
+  } else {
+    Stop-Helper 'REJECT not-a-folder-link' 2
+  }
   if ($encoded.Length -eq 0 -or ($encoded.Length % 4) -eq 1) { Stop-Helper 'REJECT bad-encoding' 2 }
   if ($encoded -cnotmatch '^[A-Za-z0-9_-]+\z') { Stop-Helper 'REJECT bad-encoding' 2 }
 
@@ -496,24 +579,40 @@ try {
   $strictUtf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false, $true
   try { $relative = $strictUtf8.GetString($bytes) } catch { Stop-Helper 'REJECT bad-encoding' 2 }
 
-  # (d) 상대 경로 규칙.
+  # (d) 상대 경로 규칙 — 🔴 검사 1. 폴더든 파일이든 **같은 규칙**이다.
   if (-not (Test-RelativePath $relative)) { Stop-Helper 'REJECT bad-path' 3 }
 
-  # (e~f) 루트를 차례로 — 담김 검사는 **루트마다 따로** 하고, 처음으로 실제 있는 폴더를 고른다.
+  # (d-2) 🔴 검사 4 · 6 — 파일일 때만. 허용 목록 밖 · 확장자 없는 이름은 여기서 끝난다.
+  #       맨 뒤 마디(파일 이름)만 본다 — 가운데 폴더 이름에는 확장자 규칙이 없다.
+  if ($Mode -ceq 'file') {
+    $segments = $relative.Split([char]'/')
+    if (-not (Test-OpenableFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }
+  }
+
+  # (e~f) 루트를 차례로 — 담김 검사는 **루트마다 따로** 하고, 처음으로 실제 있는 것을 고른다.
   $target = $null
   $contained = $false
   $reparse = $false
   foreach ($candidateRoot in $Roots) {
-    # (e) 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
+    # (e) 🔴 검사 2 — 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
     $rootFull = [System.IO.Path]::GetFullPath($candidateRoot).TrimEnd('\')
     $full = [System.IO.Path]::GetFullPath($rootFull + '\' + $relative.Replace('/', '\'))
     if (-not $full.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
     $contained = $true
 
-    # (f) 폴더가 아니면(없음 · 파일 · 서버에 못 닿음) 다음 루트로.
-    if ((Test-FolderState $full) -ne 'found') { continue }
+    if ($Mode -ceq 'file') {
+      # (f-2) 🔴 검사 5 — 파일인가. 폴더에 파일 이름을 붙여 둔 것이면 다음 루트로 넘기지 않고
+      #       여기서 멈춘다(안전한 쪽) — 수상한 것을 봤으면 열지 않는다.
+      $state = Test-FileState $full
+      if ($state -ceq 'directory') { $NotAFile = $true; break }
+      if ($state -cne 'found') { continue }
+    } else {
+      # (f) 폴더가 아니면(없음 · 파일 · 서버에 못 닿음) 다음 루트로.
+      if ((Test-FolderState $full) -ne 'found') { continue }
+    }
 
-    # 루트 아래 마디 가운데 바로 가기 폴더(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다 — 열지 않는다.
+    # 🔴 검사 3 — 루트 아래 마디 가운데 바로 가기(정션 · 심볼릭 링크)는 루트 밖을 가리킬 수 있다.
+    # 파일일 때는 **마지막 마디(파일 자신)까지** 본다. 열지 않는다.
     # 다음 루트로 넘기지 않고 여기서 멈춘다(안전한 쪽). 같은 폴더를 다른 주소로 열어도 같은 바로
     # 가기이고, 루트가 서로 다른 폴더일 때도 «수상한 것을 봤으면 열지 않는다»가 낫다.
     if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }
@@ -523,22 +622,43 @@ try {
   }
 
   if ($reparse) {
-    Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.'
+    # 🔴 폴더 쪽 문구는 예전 그대로다 — 파일 쪽만 따로 적는다.
+    if ($Mode -ceq 'file') { Show-Message '이 파일은 바로 가기라 열 수 없습니다.' }
+    else { Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.' }
     Stop-Helper 'REJECT reparse-point' 3
+  }
+
+  if ($NotAFile) {
+    Show-Message '이것은 파일이 아니라 폴더입니다 — 열지 않았습니다.'
+    Stop-Helper 'REJECT not-a-file' 3
   }
 
   # 어느 루트 아래에도 들지 않는 경로 — 규칙 위반이다(없는 폴더와 구별한다).
   if (-not $contained) { Stop-Helper 'REJECT outside-root' 3 }
 
   if ($null -eq $target) {
-    Show-Message ('폴더를 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 견적서 폴더가 옮겨졌는지 확인해 주세요.')
+    # 🔴 폴더 쪽 문구는 예전 그대로다 — 파일 쪽만 따로 적는다.
+    if ($Mode -ceq 'file') { Show-Message ('파일을 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 파일이 옮겨졌는지 확인해 주세요.') }
+    else { Show-Message ('폴더를 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 견적서 폴더가 옮겨졌는지 확인해 주세요.') }
     Stop-Helper 'NOT-FOUND' 4
   }
   $full = $target
 
+  if ($DryRun -and ($Mode -ceq 'file')) { Stop-Helper ('OPEN-FILE ' + $full) 0 }
   if ($DryRun) { Stop-Helper ('OPEN ' + $full) 0 }
 
-  # (g) 탐색기에 그 폴더 경로만 넘긴다. 끝의 '\' 는 폴더로만 읽히게 한다. 파일 · 프로그램은 열지 않는다.
+  # (g-2) 🔴 검사 7 — 이 PC 의 연결 프로그램으로 **그 파일 하나**를 연다.
+  #       인자는 그 전체 경로 하나뿐입니다 — 인자 목록을 따로 넘기지 않고, 명령줄을 문자열로
+  #       조립하지도 않습니다.
+  #       여기까지 오려면 검사 1~6 을 모두 지났다. 마지막으로 한 번 더 「파일인가」를 본다.
+  if ($Mode -ceq 'file') {
+    if ([System.IO.Directory]::Exists($full)) { Stop-Helper 'REJECT not-a-file' 3 }
+    if (-not [System.IO.File]::Exists($full)) { Stop-Helper 'NOT-FOUND' 4 }
+    Start-Process -FilePath $full
+    exit 0
+  }
+
+  # (g) 탐색기에 그 폴더 경로만 넘긴다. 끝의 '\' 는 폴더로만 읽히게 한다.
   if (-not [System.IO.Directory]::Exists($full)) { Stop-Helper 'NOT-FOUND' 4 }
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = Join-Path $env:SystemRoot 'explorer.exe'
@@ -645,9 +765,13 @@ export function buildQuoteFolderHelperInstaller(input: QuoteFolderHelperRootsInp
     "rem         powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden",
     // rem 줄에도 cmd 가 해석할 수 있는 글자(< > | &)를 두지 않는다.
     `rem           -ExecutionPolicy Bypass -File "[helper]" "[link]"`,
-    "rem  The helper opens ONLY folders under the share root fixed at install time,",
-    "rem  in Windows Explorer. It never opens or runs files.",
+    "rem  The helper only works under the share roots fixed at install time:",
+    "rem    - dss-folder://open/...     opens a folder in Windows Explorer",
+    "rem    - dss-folder://openfile/... opens ONE file with its associated program,",
+    "rem      and only when its extension is on the allow list inside the helper.",
+    "rem  It never runs programs, scripts or shortcuts.",
     "rem  Run this file again to repair the helper or to apply a new share root.",
+    "rem  Older helpers do not know openfile - run this again to add it.",
     "rem",
     "rem  Uninstall (Command Prompt):",
     'rem    reg delete "HKCU\\Software\\Classes\\dss-folder" /f',

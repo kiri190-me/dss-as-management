@@ -7,6 +7,11 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import {
+  QUOTE_FOLDER_FILE_LINK_PREFIX,
+  QUOTE_FOLDER_OPENABLE_EXTENSIONS,
+  buildQuoteFolderFileLink,
+} from "@/lib/domain/quote-folder-file-link";
+import {
   QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH,
   QUOTE_FOLDER_LINK_PREFIX,
   QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH,
@@ -212,16 +217,25 @@ describe("도우미 스크립트 본문", () => {
     assert.equal(Buffer.from(bytes.slice(3)).toString("utf8"), script);
   });
 
-  test("🔴 탐색기 말고는 아무것도 부르지 않는다 — 셸 실행 · 코드 실행 · 네트워크 · 파일 쓰기가 없다", () => {
+  /**
+   * 🔴 2026-10-05 — 이 시험의 금지 목록에서 `Start-Process` 를 **일부러 뺐다.**
+   * 조각 4 가 불변식 (a) 를 바꿨다: 도우미가 `openfile/` 주소를 받으면 허용 목록에 든
+   * 확장자의 파일 하나를 **연결 프로그램으로 연다**(사용자가 위험을 설명 듣고 고름).
+   * 그 자리를 검사 일곱이 메우므로, 여기서는 「없다」 대신 **있는 것이 딱 그 모양인지**를 센다:
+   *  · `Start-Process` 는 **정확히 한 번**, `-FilePath $full` 로만 — 인자가 그 경로 하나뿐이다.
+   *  · `-ArgumentList` 가 없다 — 명령줄을 문자열로 조립하지 않는다.
+   *  · 폴더 쪽(explorer.exe)은 **한 글자도 바뀌지 않았다**.
+   */
+  test("🔴 탐색기와 연결 프로그램 말고는 아무것도 부르지 않는다 — 코드 실행 · 네트워크 · 파일 쓰기가 없다", () => {
     for (const forbidden of [
       "Invoke-Expression",
       "iex ",
       "Invoke-Item",
-      "Start-Process",
       "Invoke-Command",
       "ScriptBlock",
       "-Command",
       "-EncodedCommand",
+      "-Verb",
       "cmd.exe",
       "Invoke-WebRequest",
       "Invoke-RestMethod",
@@ -240,10 +254,18 @@ describe("도우미 스크립트 본문", () => {
     ]) {
       assert.equal(script.includes(forbidden), false, forbidden);
     }
+    // 폴더 — 예전 그대로.
     assert.equal(script.match(/Process\]::Start\(/g)?.length, 1);
     assert.ok(script.includes("$start.FileName = Join-Path $env:SystemRoot 'explorer.exe'"));
     assert.ok(script.includes("$start.UseShellExecute = $false"));
     assert.ok(script.includes(`$start.Arguments = '"' + $full + '\\"'`));
+    // 🔴 파일 — 인자는 그 경로 하나뿐이다. 명령줄을 문자열로 조립하지 않는다.
+    assert.equal(script.match(/Start-Process/g)?.length, 1);
+    assert.ok(script.includes("Start-Process -FilePath $full\r\n"));
+    // `-ArgumentList` 는 스크립트에 딱 한 번 있고, 그것은 UTF-8 읽개를 만드는 자리다 —
+    // 🔴 Start-Process 쪽에는 없다(인자 목록을 넘기면 그것이 곧 명령줄 조립이다).
+    assert.equal(script.match(/-ArgumentList/g)?.length, 1);
+    assert.ok(script.includes("New-Object System.Text.UTF8Encoding -ArgumentList $false, $true"));
   });
 
   test("거절 · 확인 단계가 순서대로 있다 — 인자 수 → 모양 → 인코딩 → 규칙 → 루트 안 → 폴더 → 바로 가기 → 탐색기", () => {
@@ -426,6 +448,311 @@ describe("🔴 도우미 스크립트 — DSS_FOLDER_DRY_RUN=1 로 실제로 돌
   test("길이 — 규칙 상한의 경로가 Windows 경로 한도를 넘으면 오류로 끝난다(열지 않는다)", async () => {
     const longest = "가".repeat(QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH);
     await assertOutcome([linkOf(longest)], "REJECT error", 9);
+  });
+});
+
+// ── 🔴 파일 열기(openfile) ─────────────────────────────────────────────────
+
+/**
+ * ============================================================================
+ * 🔴 조각 4 — `dss-folder://openfile/?p=…` 는 **검사 일곱**을 모두 지나야 연다
+ * ============================================================================
+ * 불변식 (a) 가 2026-10-05 에 바뀌었다(사용자가 위험을 설명 듣고 「바로 열린다」를 골랐다).
+ * 없어진 「파일은 안 연다」 한 줄의 자리를 메우는 것이 이 블록이다 — **거절 쪽을 훨씬 많이**
+ * 본다. 스크립트를 실제로 돌려(DSS_FOLDER_DRY_RUN=1) 표준출력을 값으로 읽는다.
+ * ============================================================================
+ */
+
+/** 규칙을 거치지 않고 아무 문자열이나 **파일** 주소로 싼다 — 다른 사이트가 만든 주소 흉내. */
+function rawFileLink(text: string): string {
+  return `${QUOTE_FOLDER_FILE_LINK_PREFIX}${Buffer.from(text, "utf8").toString("base64url")}`;
+}
+
+function fileLinkOf(relativePath: string): string {
+  const link = buildQuoteFolderFileLink(relativePath);
+  assert.ok(link !== null, relativePath);
+  return link;
+}
+
+describe("🔴 파일 열기 — TS 의 허용 목록과 PS 안의 목록이 글자 그대로 같은가", () => {
+  const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC });
+
+  test("스크립트에 박힌 목록을 도로 꺼내 TS 의 목록과 맞춘다", () => {
+    const head = "$OpenableExtensions = @(";
+    const line = script.split("\r\n").find((candidate) => candidate.startsWith(head));
+    assert.ok(line, "$OpenableExtensions 줄이 없다");
+    assert.ok(line.endsWith(")"), line);
+    const embedded = line
+      .slice(head.length, -1)
+      .split(", ")
+      .map((token) => {
+        assert.ok(token.startsWith("'") && token.endsWith("'"), token);
+        return token.slice(1, -1);
+      });
+    // 🔴 값도 차례도 같아야 한다 — 한쪽만 고치면 화면과 도우미가 다른 말을 한다.
+    assert.deepEqual(embedded, [...QUOTE_FOLDER_OPENABLE_EXTENSIONS]);
+  });
+
+  test("🔴 허용 목록은 사용자가 정한 열여덟 개 — .xlsm 이 일부러 들어 있다", () => {
+    assert.deepEqual(
+      [...QUOTE_FOLDER_OPENABLE_EXTENSIONS],
+      "xlsx xls xlsm pdf docx doc pptx ppt hwp hwpx jpg jpeg png gif bmp txt csv zip".split(" ")
+    );
+    // 연락서 원본이 .xlsm 이다 — 못 열면 이 기능의 뜻이 없다(올리기 허용목록과는 다른 판단).
+    assert.ok(QUOTE_FOLDER_OPENABLE_EXTENSIONS.includes("xlsm"));
+    // 🔴 실행되는 것은 하나도 없다.
+    for (const dangerous of [
+      "exe", "bat", "cmd", "ps1", "vbs", "js", "lnk", "url", "scf", "msi",
+      "reg", "hta", "com", "scr", "jar", "pif", "cpl", "msc", "wsf", "jse",
+    ]) {
+      assert.equal(QUOTE_FOLDER_OPENABLE_EXTENSIONS.includes(dangerous), false, dangerous);
+    }
+    // 소문자로만 적는다 — 비교는 접어서 한다.
+    for (const extension of QUOTE_FOLDER_OPENABLE_EXTENSIONS) {
+      assert.equal(extension, extension.toLowerCase(), extension);
+      assert.equal(extension.startsWith("."), false, extension);
+    }
+  });
+
+  test("🔴 검사 일곱이 스크립트 안에 있다 — 하나도 서버에 맡기지 않았다", () => {
+    assert.ok(script.includes(`$FilePrefix = '${QUOTE_FOLDER_FILE_LINK_PREFIX}'\r\n`));
+    for (const mark of [
+      // 1 상대 경로 규칙(폴더와 같은 함수) · 2 루트 담김 · 3 바로 가기
+      "if (-not (Test-RelativePath $relative)) { Stop-Helper 'REJECT bad-path' 3 }",
+      "$full.StartsWith($rootFull + '\\', [System.StringComparison]::OrdinalIgnoreCase)",
+      "if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }",
+      // 4 · 6 확장자 허용 목록 · 확장자 없는 것
+      "function Test-OpenableFileName([string]$Name) {",
+      "if (-not (Test-OpenableFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }",
+      "$extension = $Name.Substring($dot + 1).ToLowerInvariant()",
+      "if ($dot -lt 1) { return $false }",
+      // 5 폴더가 아니라 파일인가
+      "function Test-FileState([string]$Path) {",
+      "if ([System.IO.Directory]::Exists($Path)) { return 'directory' }",
+      "if ([System.IO.File]::Exists($Path)) { return 'found' }",
+      "if ($state -ceq 'directory') { $NotAFile = $true; break }",
+      "Stop-Helper 'REJECT not-a-file' 3",
+      // 7 실행 — 인자는 경로 하나뿐
+      "Start-Process -FilePath $full",
+    ]) {
+      assert.ok(script.includes(mark), `없다: ${mark}`);
+    }
+  });
+});
+
+describe("🔴 파일 열기 — DSS_FOLDER_DRY_RUN=1 로 실제로 돌린다", { skip: WINDOWS_ONLY, concurrency: 4 }, () => {
+  const FOLDER = "D260908 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  let parent = "";
+  let root = "";
+  let outside = "";
+  let scriptPath = "";
+  let canary = "";
+
+  before(async () => {
+    parent = await mkdtemp(path.join(os.tmpdir(), "dss-folder-openfile-test-"));
+    root = path.join(parent, "연락서 공유폴더");
+    outside = path.join(parent, "바깥 폴더");
+    await mkdir(path.join(root, FOLDER), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, "비밀 문서.pdf"), "바깥");
+
+    // 허용 목록의 확장자마다 한 장씩.
+    for (const extension of QUOTE_FOLDER_OPENABLE_EXTENSIONS) {
+      await writeFile(path.join(root, FOLDER, `연락서.${extension}`), "x");
+    }
+    await writeFile(path.join(root, FOLDER, "D260908 연락서 (주)한국 & 제어 100%.xlsm"), "x");
+    await writeFile(path.join(root, FOLDER, "사진.JPG"), "x");
+    // 목록 밖 · 확장자 없는 이름 — **디스크에 실제로 있어도** 열리지 않아야 한다.
+    for (const name of ["설치.exe", "실행.BAT", "문서", "바로가기.lnk"]) {
+      await writeFile(path.join(root, FOLDER, name), "x");
+    }
+    // 🔴 폴더에 .pdf 이름을 붙인 함정.
+    await mkdir(path.join(root, FOLDER, "함정.pdf"), { recursive: true });
+    // 🔴 루트 밖을 가리키는 정션 — 그 아래 파일도 열리면 안 된다.
+    await symlink(outside, path.join(root, FOLDER, "바로가기"), "junction");
+
+    scriptPath = path.join(parent, "open-dss-folder.ps1");
+    await writeFile(scriptPath, quoteFolderHelperScriptBytes({ uncRoot: root }));
+    canary = path.join(parent, "injected.txt");
+  });
+
+  after(async () => {
+    if (parent) await rm(parent, { recursive: true, force: true });
+  });
+
+  function runHelper(args: readonly string[]): Promise<RunResult> {
+    return runPowerShell(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args], {
+      env: { DSS_FOLDER_DRY_RUN: "1" },
+    });
+  }
+
+  async function assertOutcome(args: readonly string[], expected: string, code: number): Promise<void> {
+    const result = await runHelper(args);
+    assert.equal(result.stdout.trim(), expected, `stderr: ${result.stderr}`);
+    assert.equal(result.code, code);
+    if (!expected.startsWith("OPEN")) assert.equal(result.stdout.includes("OPEN"), false);
+  }
+
+  // ── 통과해야 하는 것 ─────────────────────────────────────────────────────
+
+  test("허용 목록의 확장자마다 열린다 — 특히 .xlsm", async () => {
+    for (const extension of QUOTE_FOLDER_OPENABLE_EXTENSIONS) {
+      const relative = `${FOLDER}/연락서.${extension}`;
+      await assertOutcome([fileLinkOf(relative)], `OPEN-FILE ${path.join(root, FOLDER, `연락서.${extension}`)}`, 0);
+    }
+  });
+
+  test("한글 · 공백 · & · % · 괄호가 든 이름도 열린다", async () => {
+    const name = "D260908 연락서 (주)한국 & 제어 100%.xlsm";
+    await assertOutcome([fileLinkOf(`${FOLDER}/${name}`)], `OPEN-FILE ${path.join(root, FOLDER, name)}`, 0);
+  });
+
+  test("🔴 확장자는 접어서 본다 — .JPG 도 열린다", async () => {
+    await assertOutcome([fileLinkOf(`${FOLDER}/사진.JPG`)], `OPEN-FILE ${path.join(root, FOLDER, "사진.JPG")}`, 0);
+  });
+
+  test("레지스트리 명령과 같은 모양으로 불러도 연다", async () => {
+    const link = fileLinkOf(`${FOLDER}/연락서.pdf`);
+    const tail = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${scriptPath}" "${link}"`;
+    const result = await runPowerShell([tail], { env: { DSS_FOLDER_DRY_RUN: "1" }, verbatim: true });
+    assert.equal(result.stdout.trim(), `OPEN-FILE ${path.join(root, FOLDER, "연락서.pdf")}`, result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  // ── 🔴 거절 ─────────────────────────────────────────────────────────────
+
+  const FORBIDDEN_EXTENSIONS = [
+    "exe", "bat", "cmd", "ps1", "vbs", "js", "lnk", "url",
+    "scf", "msi", "reg", "hta", "com", "scr", "jar", "pif",
+  ];
+  for (const extension of FORBIDDEN_EXTENSIONS) {
+    test(`🔴 허용 목록 밖은 거절 — .${extension}`, async () => {
+      await assertOutcome([rawFileLink(`${FOLDER}/무언가.${extension}`)], "REJECT bad-extension", 3);
+    });
+  }
+
+  test("🔴 디스크에 실제로 있는 실행 파일도 거절 — 있다고 열리지 않는다", async () => {
+    for (const name of ["설치.exe", "실행.BAT", "바로가기.lnk"]) {
+      await assertOutcome([rawFileLink(`${FOLDER}/${name}`)], "REJECT bad-extension", 3);
+    }
+    assert.equal(existsSync(path.join(root, FOLDER, "설치.exe")), true, "시험 준비가 틀렸다");
+  });
+
+  test("🔴 대문자 확장자도 거절 — 접어서 본다", async () => {
+    for (const name of ["무언가.EXE", "무언가.Exe", "무언가.PS1", "무언가.LnK"]) {
+      await assertOutcome([rawFileLink(`${FOLDER}/${name}`)], "REJECT bad-extension", 3);
+    }
+  });
+
+  test("🔴 확장자 없는 이름은 거절 — 점이 없는 것 · 점이 맨 앞인 것", async () => {
+    for (const name of ["문서", "연락서사본", ".pdf", ".xlsm"]) {
+      await assertOutcome([rawFileLink(`${FOLDER}/${name}`)], "REJECT bad-extension", 3);
+    }
+  });
+
+  test("🔴 끝에 점 · 공백이 붙은 이름은 거절 — Windows 가 조용히 떼어 다른 것을 연다", async () => {
+    for (const name of ["보고서.pdf.", "보고서.pdf ", "보고서.pdf. ", "보고서.exe."]) {
+      await assertOutcome([rawFileLink(`${FOLDER}/${name}`)], "REJECT bad-path", 3);
+    }
+  });
+
+  test("🔴 폴더에 .pdf 이름을 붙인 것은 거절 — 열리는 것은 파일뿐이다", async () => {
+    await assertOutcome([fileLinkOf(`${FOLDER}/함정.pdf`)], "REJECT not-a-file", 3);
+  });
+
+  test("🔴 루트 자체 · 중간 폴더를 파일로 열려 해도 거절", async () => {
+    // 확장자가 없으니 확장자 검사에서, 폴더 이름에 점이 있어도 허용 목록 밖이다.
+    await assertOutcome([rawFileLink(FOLDER)], "REJECT bad-extension", 3);
+  });
+
+  test("🔴 바로 가기(정션)를 지나는 파일은 거절 — 루트 밖을 가리킬 수 있다", async () => {
+    await assertOutcome([fileLinkOf(`${FOLDER}/바로가기/비밀 문서.pdf`)], "REJECT reparse-point", 3);
+  });
+
+  test("🔴 루트 밖은 거절 — .. · 절대 경로 · 다른 드라이브 · 다른 UNC", async () => {
+    for (const relative of [
+      "../바깥 폴더/비밀 문서.pdf",
+      `${FOLDER}/../../바깥 폴더/비밀 문서.pdf`,
+      "C:/Windows/win.ini",
+      "/Windows/win.ini",
+      "\\\\OTHERNAS\\share\\문서.pdf",
+      "//OTHERNAS/share/문서.pdf",
+      `${FOLDER}\\연락서.pdf`,
+      `${FOLDER}/연락서.pdf:stream`,
+      `${FOLDER}/연락\n서.pdf`,
+      `${FOLDER}//연락서.pdf`,
+    ]) {
+      await assertOutcome([rawFileLink(relative)], "REJECT bad-path", 3);
+    }
+    // 규칙은 통과하지만 어느 루트 아래도 아닌 절대 경로 — outside-root 로 갈라 센다.
+    await assertOutcome([rawFileLink(path.join(outside, "비밀 문서.pdf").replace(/\\/g, "/"))], "REJECT bad-path", 3);
+  });
+
+  test("🔴 base64 가 비표준이거나 깨졌으면 거절", async () => {
+    const body = fileLinkOf(`${FOLDER}/연락서.pdf`).slice(QUOTE_FOLDER_FILE_LINK_PREFIX.length);
+    for (const encoded of [
+      "",
+      `${body}=`,
+      `${body}+`,
+      "YR",
+      "A",
+      Buffer.from([0xff]).toString("base64url"),
+      Buffer.from([0xed, 0xa0, 0x80]).toString("base64url"),
+    ]) {
+      await assertOutcome([`${QUOTE_FOLDER_FILE_LINK_PREFIX}${encoded}`], "REJECT bad-encoding", 2);
+    }
+  });
+
+  test("🔴 모양 아닌 주소는 거절 — 접두어가 조금만 달라도", async () => {
+    const body = fileLinkOf(`${FOLDER}/연락서.pdf`).slice(QUOTE_FOLDER_FILE_LINK_PREFIX.length);
+    for (const link of [
+      `dss-folder://openfile/?q=${body}`,
+      `DSS-FOLDER://openfile/?p=${body}`,
+      `dss-folder://openFile/?p=${body}`,
+      `dss-folder://open-file/?p=${body}`,
+      `dss-file://openfile/?p=${body}`,
+      `${QUOTE_FOLDER_FILE_LINK_PREFIX}${"A".repeat(QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH + 4)}`,
+    ]) {
+      await assertOutcome([link], "REJECT not-a-folder-link", 2);
+    }
+  });
+
+  test("🔴 인자가 없거나 둘 이상이면 거절 — 끼워 넣은 명령이 돌지 않는다", async () => {
+    const link = fileLinkOf(`${FOLDER}/연락서.pdf`);
+    await assertOutcome([], "REJECT argument-count", 2);
+    await assertOutcome([link, link], "REJECT argument-count", 2);
+    const plant = `New-Item -ItemType File -Path '${canary}'`;
+    const tail = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${scriptPath}" "${QUOTE_FOLDER_FILE_LINK_PREFIX}QQ" -Command "${plant}"`;
+    const result = await runPowerShell([tail], { env: { DSS_FOLDER_DRY_RUN: "1" }, verbatim: true });
+    assert.equal(result.stdout.trim(), "REJECT argument-count", result.stderr);
+    assert.equal(result.code, 2);
+    assert.equal(existsSync(canary), false, "🔴 끼워 넣은 명령이 돌았다");
+  });
+
+  test("🔴 삽입 시도 — 인자 하나 안의 따옴표 · 세미콜론 · $( ) 는 문자열일 뿐이다", async () => {
+    const plant = `New-Item -ItemType File -Path '${canary}'`;
+    await assertOutcome([`${QUOTE_FOLDER_FILE_LINK_PREFIX}QQ"; ${plant}; "`], "REJECT bad-encoding", 2);
+    await assertOutcome([`${QUOTE_FOLDER_FILE_LINK_PREFIX}$(${plant})`], "REJECT bad-encoding", 2);
+    assert.equal(existsSync(canary), false, "🔴 끼워 넣은 명령이 돌았다");
+  });
+
+  test("없는 파일은 NOT-FOUND — 지어내지 않는다", async () => {
+    await assertOutcome([fileLinkOf(`${FOLDER}/없는 파일.pdf`)], "NOT-FOUND", 4);
+  });
+
+  // ── 🔴 폴더 쪽(open/)은 한 글자도 바뀌지 않았다 ──────────────────────────
+
+  test("🔴 폴더 주소는 예전 그대로 — 폴더는 열리고, 파일을 가리키면 NOT-FOUND", async () => {
+    await assertOutcome([linkOf(FOLDER)], `OPEN ${path.join(root, FOLDER)}`, 0);
+    await assertOutcome([linkOf(`${FOLDER}/연락서.pdf`)], "NOT-FOUND", 4);
+    await assertOutcome([linkOf(`${FOLDER}/설치.exe`)], "NOT-FOUND", 4);
+  });
+
+  test("🔴 파일 주소로 폴더를 열 수 없고, 폴더 주소로 파일을 열 수 없다", async () => {
+    // 폴더 이름에 허용 확장자를 붙여도(함정.pdf) 파일이 아니라 거절이다.
+    await assertOutcome([fileLinkOf(`${FOLDER}/함정.pdf`)], "REJECT not-a-file", 3);
+    // 거꾸로, 폴더 주소에 파일 경로를 넣으면 「폴더가 없다」로 끝난다.
+    await assertOutcome([linkOf(`${FOLDER}/연락서.xlsm`)], "NOT-FOUND", 4);
   });
 });
 

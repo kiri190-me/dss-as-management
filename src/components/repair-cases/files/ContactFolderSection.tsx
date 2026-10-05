@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 
 import ContactFolderOpenButton from "@/components/repair-cases/detail/ContactFolderOpenButton";
+import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
 import { formatBytes } from "@/lib/domain/image-shrink";
+import ContactFolderEntryOpenButton from "./ContactFolderEntryOpenButton";
 
 /**
  * ============================================================================
@@ -12,10 +14,15 @@ import { formatBytes } from "@/lib/domain/image-shrink";
  * 수리 건 하나당 사내 공유폴더에 연락서 폴더가 하나 있다. 그 안에 무엇이 들어 있는지
  * 보려고 탐색기를 따로 열던 것을, 이 자리에서 그대로 보여 준다.
  *
- * ── 🔴 보여 주기만 한다 ─────────────────────────────────────────────────
- * 폴더를 만들지도, 파일을 올리지도, 열지도, 지우지도 않는다. 줄마다 [열기]를 두지 않는 것도
- * 그래서다(뒤 조각이다). 지금 누를 수 있는 것은 맨 아래 [폴더 열기] 하나뿐이고, 그것은
- * 조각 2 가 만든 단추를 **그대로** 쓴다(components/repair-cases/detail/ContactFolderOpenButton).
+ * ── 🔴 만들지도 올리지도 지우지도 않는다 — 여는 것만 는다(조각 4) ─────────
+ * 폴더를 만들지도, 파일을 올리지도, 지우지도 않는다. 🔴 **서버가 파일을 중계하는 길도 없다** —
+ * 이 구역이 부르는 통로는 목록 하나뿐이다. 조각 4 에서 **줄마다 [열기]** 가 붙었고, 그것은
+ * 그 PC 의 도우미에게 주소를 넘길 뿐이다(ContactFolderEntryOpenButton).
+ *  · 🔴 [열기]는 **허용 목록에 든 확장자의 파일 줄에만** 그린다 — 폴더 줄 · 확장자 없는 이름 ·
+ *    목록 밖 확장자(`.exe` 등)에는 **단추가 아예 없다**(isOpenableQuoteFolderFileName).
+ *  · 하위 폴더로 내려가는 길은 없다 — 폴더 줄은 이름만 보인다.
+ * 맨 아래 [폴더 열기]는 조각 2 가 만든 단추를 **그대로** 쓴다
+ * (components/repair-cases/detail/ContactFolderOpenButton).
  *
  * ── 🔴 서버 컴포넌트에서 읽지 않는다 ─────────────────────────────────────
  * 이 탭의 페이지(app/(app)/repair-cases/[id]/files/page.tsx)는 이미 DB 를 두 번 때리는
@@ -207,21 +214,38 @@ export function entryMetaText(entry: ContactFolderEntryView): string {
   return pieces.join(" · ");
 }
 
-function EntryList({ entries }: { entries: readonly ContactFolderEntryView[] }) {
+/**
+ * 🔴 이 줄에 [열기]를 그릴 것인가 — **폴더는 아니고**, 이름이 허용 목록에 든 확장자인가.
+ * 판단은 순수 함수 하나(domain/quote-folder-file-link.ts)에만 있다 — 화면이 확장자를 따로
+ * 세지 않는다. `.exe` 가 목록에 섞여 있어도 누를 단추가 없어야 한다.
+ */
+export function canOpenContactFolderEntry(entry: ContactFolderEntryView): boolean {
+  return !entry.isDirectory && isOpenableQuoteFolderFileName(entry.name);
+}
+
+function EntryList({ entries, folderName }: { entries: readonly ContactFolderEntryView[]; folderName: string }) {
   return (
     <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-      {entries.map((entry) => (
-        <li
-          key={`${entry.isDirectory ? "d" : "f"}:${entry.name}`}
-          className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-1.5"
-        >
-          <span className="min-w-0 break-all text-sm text-zinc-700 dark:text-zinc-300">
-            {entry.isDirectory ? "📁 " : ""}
-            {entry.name}
-          </span>
-          <span className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{entryMetaText(entry)}</span>
-        </li>
-      ))}
+      {entries.map((entry) => {
+        const openable = folderName !== "" && canOpenContactFolderEntry(entry);
+        return (
+          <li
+            key={`${entry.isDirectory ? "d" : "f"}:${entry.name}`}
+            data-contact-folder-entry-openable={openable ? "" : undefined}
+            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-1.5"
+          >
+            <span className="min-w-0 break-all text-sm text-zinc-700 dark:text-zinc-300">
+              {entry.isDirectory ? "📁 " : ""}
+              {entry.name}
+            </span>
+            <span className="flex shrink-0 items-baseline gap-2">
+              <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{entryMetaText(entry)}</span>
+              {/* 🔴 폴더 줄 · 허용 목록 밖 줄에는 아무것도 두지 않는다(단추 자리 자체가 없다). */}
+              {openable && <ContactFolderEntryOpenButton folderName={folderName} fileName={entry.name} />}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -288,7 +312,7 @@ export function ContactFolderSectionView({
           <p className={MUTED_CLASS}>{CONTACT_FOLDER_SECTION_EMPTY_TEXT}</p>
         ) : (
           <div className="flex flex-col gap-1">
-            <EntryList entries={state.entries} />
+            <EntryList entries={state.entries} folderName={state.folderName} />
             {state.truncated && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
                 {truncatedText(state.entries.length, state.totalCount)}

@@ -252,6 +252,11 @@ src/lib/xlsx/handwritten-quote-reader.test.ts
 src/app/api/quotes/parse-excel/route-source.test.ts
 src/lib/xlsx/number-format.test.ts
 src/lib/domain/quote-folder-link.test.ts
+# 「파일 열기」 주소 `dss-folder://openfile/?p=…` 와 🔴 **확장자 허용 목록**(2026-10-05 조각 4).
+# 도우미가 폴더만 열던 것을 파일까지 열게 바꾼 조각이라, 여기서 값으로 못 박는 것은 **거절**이다 —
+# 허용 목록 밖 · 확장자 없는 이름 · 끝에 점 · 공백이 붙은 이름 · 폴더 주소와 섞이지 않는가.
+# 같은 목록이 PowerShell 도우미 안에도 글자 그대로 박히는지는 바로 아래 줄이 본다.
+src/lib/domain/quote-folder-file-link.test.ts
 src/lib/server/quote-folder-helper.test.ts
 src/app/api/quotes/*/archive-folder/route-source.test.ts
 src/app/api/quote-folder-helper/installer/route-source.test.ts

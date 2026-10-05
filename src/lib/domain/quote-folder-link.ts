@@ -130,6 +130,14 @@ export function buildQuoteFolderLink(relativePath: string): string | null {
   return `${QUOTE_FOLDER_LINK_PREFIX}${encoded}`;
 }
 
+/**
+ * 🔴 **아래 둘은 동작이 한 글자도 바뀌지 않았다 — 내보내기만 더했다**(2026-10-05).
+ * 「파일 열기」 주소(domain/quote-folder-file-link.ts)가 **같은 base64url 한 벌**을 쓰게 하려는
+ * 것이다. 새 모듈이 제 손으로 base64url 을 적으면 두 벌이 갈라지고, 갈라진 쪽이 받아들이는
+ * 비표준 표기가 생긴다 — 이 주소는 아무 웹페이지나 부를 수 있으므로 그것이 곧 구멍이다.
+ */
+export { bytesToBase64Url as quoteFolderLinkEncodeBytes, base64UrlToBytes as quoteFolderLinkDecodeBytes };
+
 /** 도우미 주소 → 상대 경로. 모양 · 인코딩 · 경로 규칙 가운데 하나라도 어긋나면 null. */
 export function parseQuoteFolderLink(link: unknown): string | null {
   if (typeof link !== "string" || !link.startsWith(QUOTE_FOLDER_LINK_PREFIX)) return null;

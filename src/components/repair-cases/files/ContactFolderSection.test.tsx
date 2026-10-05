@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import ContactFolderEntryOpenButton, { ContactFolderEntryOpenControl } from "./ContactFolderEntryOpenButton";
 import ContactFolderSection, {
   CONTACT_FOLDER_SECTION_EMPTY_TEXT,
   CONTACT_FOLDER_SECTION_FAILED_TEXT,
@@ -11,6 +12,7 @@ import ContactFolderSection, {
   CONTACT_FOLDER_SECTION_MULTIPLE_TEXT,
   CONTACT_FOLDER_SECTION_NOT_FOUND_TEXT,
   ContactFolderSectionView,
+  canOpenContactFolderEntry,
   contactFolderEntriesUrl,
   loadContactFolderEntries,
   readContactFolderEntriesAnswer,
@@ -32,6 +34,14 @@ const sectionSource = readFileSync(new URL("./ContactFolderSection.tsx", import.
   "\n"
 );
 const filesScreen = readFileSync(new URL("./FilesScreen.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const buttonSource = readFileSync(new URL("./ContactFolderEntryOpenButton.tsx", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n"
+);
+const openFlowSource = readFileSync(new URL("./contact-folder-file-open.ts", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n"
+);
 
 function markup(state: ContactFolderSectionState): string {
   return renderToStaticMarkup(createElement(ContactFolderSectionView, { state, repairCaseId: "case-1" }));
@@ -99,13 +109,22 @@ describe("상태 일곱 — 무엇을 보이는가", () => {
     assert.ok(html.includes(FOLDER), html);
   });
 
-  test("🔴 각 줄에 [열기] 단추가 아직 없다 — 이번엔 이름만 보인다", () => {
+  /**
+   * 🔴 2026-10-05(조각 4) — 예전에는 「각 줄에 [열기] 단추가 **아직** 없다」였다. 조각 4 가
+   * 줄마다 [열기]를 달았으므로 그 시험을 새 사실로 다시 쓴다. 지켜지는 것은 그대로다:
+   * **서버 렌더(= Windows 가 아닌 PC)에서는 단추가 하나도 안 그려진다.** 도우미는 Windows
+   * PC 에만 설치되므로 휴대폰 · Mac 에서는 눌러도 할 수 있는 일이 없다.
+   * 어느 줄이 [열기]를 받는가는 아래 「줄마다 [열기]」 블록이 본다.
+   */
+  test("🔴 Windows 가 아니면(서버 렌더) 줄의 [열기]가 안 그려진다 — 링크도 아니다", () => {
     const html = markup(
       foundState({ entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 10 }], totalCount: 1 })
     );
     assert.equal(html.includes("<button"), false, html);
     assert.equal(html.includes("href="), false, html);
     assert.equal(html.includes(">열기<"), false, html);
+    // 단추 자리가 생기는 줄인지는 표시로 남는다(아래 블록).
+    assert.ok(html.includes("data-contact-folder-entry-openable"), html);
   });
 
   test("🔴 multiple — 「맞는 폴더가 여럿입니다」, 목록을 내지 않는다", () => {
@@ -159,8 +178,13 @@ describe("🔴 인쇄에 찍히지 않는다", () => {
   });
 });
 
-describe("🔴 보여 주기만 한다 — 만들지도 올리지도 열지도 지우지도 않는다", () => {
-  test("원본에 쓰기 · 열기 · 내려받기 길이 없다", () => {
+/**
+ * 🔴 2026-10-05(조각 4) — 제목에서 「열지도」를 뺐다. 줄마다 [열기]가 붙었기 때문이다.
+ * 🔴 **그러나 여는 길은 그 PC 의 도우미뿐이다** — 아래 금지 목록은 한 줄도 느슨해지지 않았다:
+ * 서버가 파일 바이트를 중계하는 길(내려받기 · blob) · 쓰기 · 페이지 이동이 여전히 없다.
+ */
+describe("🔴 서버가 중계하지 않는다 — 만들지도 올리지도 지우지도 않는다", () => {
+  test("원본에 쓰기 · 내려받기 · 페이지 이동 길이 없다", () => {
     const code = sectionSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const forbidden of [
       /method:\s*"POST"/,
@@ -199,6 +223,113 @@ describe("🔴 보여 주기만 한다 — 만들지도 올리지도 열지도 �
 
   test("통로 주소는 수리 건 id 를 감싸 만든다", () => {
     assert.equal(contactFolderEntriesUrl("case 1/2"), "/api/repair-cases/case%201%2F2/contact-folder/entries");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 줄마다 [열기] — 누를 수 있는 줄에만 단추가 생긴다 (조각 4)
+ * ============================================================================
+ * 「눌러서 거절당하는 것보다 누를 단추가 없는 것이 낫다」가 이 블록의 전부다.
+ * 서버 렌더에서는 단추 자체가 안 그려지므로(Windows 가 아니다) **어느 줄이 단추 자리를
+ * 갖는가**를 `data-contact-folder-entry-openable` 표시로 본다. 단추가 실제로 어떻게 생겼는지는
+ * 아래 ContactFolderEntryOpenControl 을 직접 그려 본다.
+ * 거절 규칙 자체는 lib/domain/quote-folder-file-link.test.ts 가 값으로 본다.
+ * ============================================================================
+ */
+describe("🔴 줄마다 [열기] — 누를 수 있는 줄에만", () => {
+  const entry = (name: string, isDirectory = false) => ({ name, isDirectory, sizeBytes: 1 });
+
+  test("허용 목록에 든 파일 줄은 단추 자리를 갖는다", () => {
+    for (const name of ["연락서.xlsm", "보고서.pdf", "사진.JPG", "목록.csv", "도면.zip"]) {
+      assert.ok(canOpenContactFolderEntry(entry(name)), name);
+    }
+  });
+
+  test("🔴 폴더 줄에는 [열기] 대신 아무것도 두지 않는다 — 하위 폴더는 범위 밖", () => {
+    for (const name of ["사진", "연락서.pdf", "하위.zip"]) {
+      assert.equal(canOpenContactFolderEntry(entry(name, true)), false, name);
+    }
+    const html = markup(
+      foundState({ entries: [entry("사진", true), entry("자료.zip", true)], totalCount: 2 })
+    );
+    assert.equal(html.includes("data-contact-folder-entry-openable"), false, html);
+  });
+
+  test("🔴 허용 목록 밖 · 확장자 없는 파일 줄에는 단추 자리가 없다", () => {
+    const names = ["설치.exe", "실행.BAT", "바로가기.lnk", "스크립트.ps1", "문서", "보고서.pdf.", "보고서.pdf "];
+    for (const name of names) {
+      assert.equal(canOpenContactFolderEntry(entry(name)), false, name);
+    }
+    const html = markup(foundState({ entries: names.map((name) => entry(name)), totalCount: names.length }));
+    assert.equal(html.includes("data-contact-folder-entry-openable"), false, html);
+    // 이름은 그대로 보인다 — 숨기는 것이 아니라 누를 단추만 없다.
+    assert.ok(html.includes("설치.exe"), html);
+  });
+
+  test("섞여 있으면 열 수 있는 줄에만 표시가 붙는다", () => {
+    const html = markup(
+      foundState({
+        entries: [entry("사진", true), entry("연락서.xlsm"), entry("설치.exe"), entry("보고서.pdf")],
+        totalCount: 4,
+      })
+    );
+    assert.equal(html.match(/data-contact-folder-entry-openable/g)?.length, 2, html);
+  });
+
+  test("🔴 폴더 이름을 모르면 아무 줄에도 단추를 두지 않는다 — 주소를 지어낼 수 없다", () => {
+    const html = markup(foundState({ folderName: "", entries: [entry("연락서.xlsm")], totalCount: 1 }));
+    assert.equal(html.includes("data-contact-folder-entry-openable"), false, html);
+  });
+
+  test("🔴 확장자를 세는 자리는 하나다 — 화면이 제 손으로 목록을 적지 않는다", () => {
+    assert.ok(sectionSource.includes("isOpenableQuoteFolderFileName"), "순수 판정을 쓰지 않는다");
+    // 주석(머리말이 `.exe` 를 예로 든다)을 걷어내고 **코드만** 본다.
+    const code = sectionSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const forbidden of ["xlsm", "\\.exe", "pdf", 'endsWith\\("\\.', "lastIndexOf"]) {
+      assert.equal(new RegExp(forbidden).test(code), false, `화면이 확장자를 직접 센다: ${forbidden}`);
+    }
+  });
+});
+
+describe("🔴 줄의 [열기] 단추 — 그려지는 것", () => {
+  const controlMarkup = () =>
+    renderToStaticMarkup(
+      createElement(ContactFolderEntryOpenControl, { folderName: FOLDER, fileName: "연락서.xlsm" })
+    );
+
+  test("단추 하나 · print:hidden · 링크가 아니다", () => {
+    const html = controlMarkup();
+    assert.ok(html.includes(">열기</button>"), html);
+    assert.ok(html.includes("data-contact-folder-entry-open"), html);
+    assert.ok(html.includes("print:hidden"), html);
+    assert.equal(html.includes("href="), false, html);
+  });
+
+  test("🔴 Windows 가 아니면 아무것도 그리지 않는다 — 서버 렌더 · 첫 렌더도 감춘다", () => {
+    assert.equal(
+      renderToStaticMarkup(
+        createElement(ContactFolderEntryOpenButton, { folderName: FOLDER, fileName: "연락서.xlsm" })
+      ),
+      ""
+    );
+    assert.ok(buttonSource.includes("const hiddenOnServer = () => false;"));
+    assert.ok(buttonSource.includes("useSyncExternalStore(subscribeToNothing, isWindowsDesktopNow, hiddenOnServer)"));
+    assert.ok(buttonSource.includes("if (!isWindows) return null;"));
+  });
+
+  test("🔴 복사 구현을 새로 만들지 않는다 — 견적서 쪽 길을 그대로 가져다 쓴다", () => {
+    assert.ok(buttonSource.includes("runQuoteFolderHelperInstallCommandCopy"));
+    for (const forbidden of ["execCommand", "navigator.clipboard.writeText", "console."]) {
+      assert.equal(buttonSource.includes(forbidden), false, forbidden);
+    }
+  });
+
+  test("🔴 서버 사슬을 부르지 않는다 — 그려 볼 수 있어야 한다", () => {
+    for (const source of [buttonSource, openFlowSource]) {
+      assert.equal(source.includes("@/lib/server/"), false, "서버 모듈을 부른다");
+      assert.equal(source.includes('"server-only"'), false, "server-only 를 부른다");
+    }
   });
 });
 
