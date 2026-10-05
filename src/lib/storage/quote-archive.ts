@@ -6,7 +6,6 @@ import path from "node:path";
 import {
   isQuoteArchiveYearFolder,
   matchesQuoteArchiveFolder,
-  normalizeQuoteArchiveNameForCompare,
   numberedQuoteArchiveName,
   quoteArchiveBaseNumber,
   quoteArchiveFileName,
@@ -17,6 +16,15 @@ import {
   type QuoteArchiveNamingInput,
 } from "@/lib/domain/quote-archive-naming";
 import type { QuoteFileExtension } from "@/lib/domain/quote-file-name";
+import {
+  ShareFolderFailure,
+  assertInsideShareFolderRoot,
+  findShareFolder,
+  requireExistingShareFolderRoot,
+  shareFolderErrorCode,
+  shareFolderReadFailureReason,
+  shareFolderWriteFailureReason,
+} from "./share-folder-fs";
 
 /**
  * ============================================================================
@@ -114,13 +122,11 @@ export type QuoteArchiveSaveResult =
     }
   | { status: "failed"; reason: string };
 
-/** 사람이 읽는 실패 사유를 들고 나오는 내부 오류. 밖으로 던지지 않는다. */
-class QuoteArchiveFailure extends Error {
-  constructor(readonly reason: string) {
-    super(reason);
-    this.name = "QuoteArchiveFailure";
-  }
-}
+/**
+ * 사람이 읽는 실패 사유는 ShareFolderFailure 가 나른다(storage/share-folder-fs.ts).
+ * 루트 확인 · 경로 벗어나기 판정이 공용 도우미에 있어 **같은 종류**여야 한다 —
+ * 그래야 아래 두 catch 가 도우미가 던진 사유도 그대로 받는다. 밖으로 던지지 않는다.
+ */
 
 /**
  * 견적서 파일 하나를 공유폴더에 새로 저장한다. **던지지 않는다.**
@@ -133,7 +139,7 @@ export async function saveToQuoteArchive(input: SaveToQuoteArchiveInput): Promis
   } catch (error) {
     return {
       status: "failed",
-      reason: error instanceof QuoteArchiveFailure ? error.reason : reasonFromFsError(error),
+      reason: error instanceof ShareFolderFailure ? error.reason : reasonFromFsError(error),
     };
   }
 }
@@ -141,7 +147,7 @@ export async function saveToQuoteArchive(input: SaveToQuoteArchiveInput): Promis
 async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveResult> {
   const year = quoteArchiveYearFromDate(input.quoteDate);
   if (year === null) {
-    throw new QuoteArchiveFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
+    throw new ShareFolderFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
   }
 
   let yearFolderName: string;
@@ -155,7 +161,7 @@ async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveRes
         ? quoteArchiveSignedPdfFileName(input.naming)
         : quoteArchiveFileName(input.naming, { extension: input.extension });
   } catch {
-    throw new QuoteArchiveFailure("견적서 정보로 파일 이름을 만들 수 없습니다(발행번호 · 파일 형식을 확인하세요).");
+    throw new ShareFolderFailure("견적서 정보로 파일 이름을 만들 수 없습니다(발행번호 · 파일 형식을 확인하세요).");
   }
 
   const root = await requireExistingRoot(input.root);
@@ -232,7 +238,7 @@ export async function findQuoteArchiveFolder(input: FindQuoteArchiveFolderInput)
   } catch (error) {
     return {
       status: "failed",
-      reason: error instanceof QuoteArchiveFailure ? error.reason : reasonFromFindFsError(error),
+      reason: error instanceof ShareFolderFailure ? error.reason : reasonFromFindFsError(error),
     };
   }
 }
@@ -240,12 +246,12 @@ export async function findQuoteArchiveFolder(input: FindQuoteArchiveFolderInput)
 async function find(input: FindQuoteArchiveFolderInput): Promise<QuoteArchiveFolderLookup> {
   const year = quoteArchiveYearFromDate(input.quoteDate);
   if (year === null) {
-    throw new QuoteArchiveFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
+    throw new ShareFolderFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
   }
   // 저장은 폴더 이름을 만들다 같은 까닭으로 멈춘다. 번호가 비면 어느 폴더와도 맞지 않으므로
   // 「없음」이 아니라 실패다 — 사람이 고칠 것은 번호다.
   if (quoteArchiveBaseNumber(input.naming.quoteNumber).length === 0) {
-    throw new QuoteArchiveFailure("발행번호가 비어 있어 견적서 폴더를 찾을 수 없습니다.");
+    throw new ShareFolderFailure("발행번호가 비어 있어 견적서 폴더를 찾을 수 없습니다.");
   }
 
   const root = await requireExistingRoot(input.root);
@@ -269,54 +275,21 @@ async function find(input: FindQuoteArchiveFolderInput): Promise<QuoteArchiveFol
 }
 
 /** 루트는 이미 있는 폴더여야 한다 — 없으면 만들지 않고 실패한다(머리말 「루트는 만들지 않는다」). */
-async function requireExistingRoot(rawRoot: string): Promise<string> {
-  if (typeof rawRoot !== "string" || rawRoot.trim().length === 0) {
-    throw new QuoteArchiveFailure("공유폴더 위치가 설정되지 않았습니다.");
-  }
-  const root = path.resolve(rawRoot.trim());
-  let info;
-  try {
-    info = await stat(root);
-  } catch (error) {
-    const code = errorCode(error);
-    if (code === "EACCES" || code === "EPERM") {
-      throw new QuoteArchiveFailure("공유폴더에 접근할 권한이 없습니다.");
-    }
-    if (code === "ENOENT" || code === "ENOTDIR") {
-      throw new QuoteArchiveFailure("공유폴더를 찾을 수 없습니다(연결이 끊겼을 수 있습니다).");
-    }
-    throw error;
-  }
-  if (!info.isDirectory()) {
-    throw new QuoteArchiveFailure("공유폴더를 찾을 수 없습니다(폴더가 아닙니다).");
-  }
-  return root;
+function requireExistingRoot(rawRoot: string): Promise<string> {
+  return requireExistingShareFolderRoot(rawRoot);
 }
 
 /** created — 이번 저장에서 mkdir 로 만든 폴더다(비어 있다). 찾은 폴더 · 경합에서 다시 찾은 폴더는 거짓. */
 type FolderPick = { name: string; multiple: boolean; created: boolean };
 
 /**
- * 부모 폴더 안에서 맞는 폴더를 찾는다 — `isDirectory()` 만 본다. readdir 의
+ * 부모 폴더 안에서 맞는 폴더를 찾는다 — `isDirectory()` 만 본다(공용 도우미). readdir 의
  * withFileTypes 는 링크를 따라가지 않으므로 심볼릭 링크는 폴더로 치지 않는다.
  * 여럿이면 이름순 첫째(다듬은 이름으로 비교하고, 같으면 실제 이름으로).
  */
 async function findFolder(parent: string, matches: (name: string) => boolean): Promise<FolderPick | null> {
-  const entries = await readdir(parent, { withFileTypes: true });
-  const names = entries
-    .filter((entry) => entry.isDirectory() && matches(entry.name))
-    .map((entry) => entry.name)
-    .sort(compareFolderNames);
-  if (names.length === 0) return null;
-  return { name: names[0], multiple: names.length > 1, created: false };
-}
-
-function compareFolderNames(a: string, b: string): number {
-  const left = normalizeQuoteArchiveNameForCompare(a);
-  const right = normalizeQuoteArchiveNameForCompare(b);
-  if (left !== right) return left < right ? -1 : 1;
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
+  const found = await findShareFolder(parent, matches);
+  return found === null ? null : { ...found, created: false };
 }
 
 /**
@@ -351,7 +324,7 @@ async function findOrCreateFolder(
     assertInsideRoot(root, path.join(parent, again.name));
     return again;
   }
-  throw new QuoteArchiveFailure("같은 이름의 파일이 자리를 차지하고 있어 폴더를 만들 수 없습니다.");
+  throw new ShareFolderFailure("같은 이름의 파일이 자리를 차지하고 있어 폴더를 만들 수 없습니다.");
 }
 
 /**
@@ -422,7 +395,7 @@ async function writeNewFile(root: string, directory: string, fileName: string, b
     }
     return candidate;
   }
-  throw new QuoteArchiveFailure(
+  throw new ShareFolderFailure(
     `같은 이름의 파일이 너무 많습니다(${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개). 견적서 폴더를 정리한 뒤 다시 시도하세요.`
   );
 }
@@ -431,76 +404,23 @@ const OUTSIDE_ROOT_ON_SAVE = "저장 위치가 공유폴더 밖을 가리켜 저
 const OUTSIDE_ROOT_ON_FIND = "찾은 폴더가 공유폴더 밖을 가리켜 쓰지 않았습니다.";
 
 /**
- * 이은 경로가 루트 밖이면 거절한다. 이름을 다듬으므로 일어나지 않아야 하지만,
- * 디스크의 이름을 그대로 잇는 자리가 있어 방어로 둔다. 사유는 저장 · 찾기가 다르다.
+ * 이은 경로가 루트 밖이면 거절한다(공용 도우미). 이름을 다듬으므로 일어나지 않아야
+ * 하지만, 디스크의 이름을 그대로 잇는 자리가 있어 방어로 둔다. 사유는 저장 · 찾기가 다르다.
  */
 function assertInsideRoot(root: string, target: string, reason: string = OUTSIDE_ROOT_ON_SAVE): void {
-  const relative = path.relative(root, target);
-  if (
-    relative === "" ||
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
-    throw new QuoteArchiveFailure(reason);
-  }
+  assertInsideShareFolderRoot(root, target, reason);
 }
 
 function errorCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" ? code : undefined;
+  return shareFolderErrorCode(error);
 }
 
 /** fs 오류 → 사람이 읽는 짧은 사유. **오류의 message 는 쓰지 않는다**(경로가 들어 있다). */
 function reasonFromFsError(error: unknown): string {
-  switch (errorCode(error)) {
-    case "EACCES":
-    case "EPERM":
-      return "공유폴더에 쓸 권한이 없습니다.";
-    case "ENOENT":
-    case "ENOTDIR":
-      return "공유폴더의 폴더를 찾을 수 없습니다(저장 중 옮겨졌거나 연결이 끊겼을 수 있습니다).";
-    case "ENOSPC":
-    case "EDQUOT":
-      return "공유폴더에 남은 공간이 없습니다.";
-    case "ENAMETOOLONG":
-      return "파일 이름이나 경로가 너무 깁니다.";
-    case "EROFS":
-      return "공유폴더가 읽기 전용입니다.";
-    case "EBUSY":
-      return "공유폴더의 파일이 사용 중이라 저장하지 못했습니다.";
-    case "EIO":
-    case "ETIMEDOUT":
-    case "EHOSTDOWN":
-    case "EHOSTUNREACH":
-    case "ENETUNREACH":
-    case "ECONNRESET":
-      return "공유폴더에 연결할 수 없습니다(네트워크 · NAS 상태를 확인하세요).";
-    default:
-      return "공유폴더에 저장하지 못했습니다.";
-  }
+  return shareFolderWriteFailureReason(error);
 }
 
 /** 찾기의 fs 오류 → 짧은 사유. 저장과 같은 규칙(**message 는 쓰지 않는다**), 낱말만 「읽기」다. */
 function reasonFromFindFsError(error: unknown): string {
-  switch (errorCode(error)) {
-    case "EACCES":
-    case "EPERM":
-      return "공유폴더를 읽을 권한이 없습니다.";
-    case "ENOENT":
-    case "ENOTDIR":
-      return "공유폴더의 폴더를 찾을 수 없습니다(찾는 중 옮겨졌거나 연결이 끊겼을 수 있습니다).";
-    case "ENAMETOOLONG":
-      return "폴더 경로가 너무 깁니다.";
-    case "EIO":
-    case "ETIMEDOUT":
-    case "EHOSTDOWN":
-    case "EHOSTUNREACH":
-    case "ENETUNREACH":
-    case "ECONNRESET":
-      return "공유폴더에 연결할 수 없습니다(네트워크 · NAS 상태를 확인하세요).";
-    default:
-      return "공유폴더를 읽지 못했습니다.";
-  }
+  return shareFolderReadFailureReason(error);
 }

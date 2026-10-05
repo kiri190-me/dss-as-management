@@ -22,8 +22,29 @@
  * 모양일 수 있다. **비교할 때만** NFC + 연속 공백 하나로 다듬고
  * (normalizeQuoteArchiveNameForCompare), 경로를 이을 때는 디스크의 실제 이름을 쓴다 —
  * 다듬은 이름으로 이으면 없는 폴더가 된다. 그 일은 저장 모듈이 한다.
+ *
+ * ── 원시 함수는 공용 모듈에 있다 (2026-10-05) ────────────────────────────
+ * 금지 글자 다듬기 · 비교용 정규화 · 경계 일치 · 길이 줄이기는 연락서 폴더
+ * (domain/contact-folder-naming.ts)도 **똑같이** 써야 한다. 금지 글자 표를 두 벌
+ * 두면 반드시 갈라지므로 domain/share-folder-naming.ts 한 곳에 두고 가져다 쓴다.
+ * 🔴 이 파일의 **공개 이름과 동작은 그대로다** — 아래 두 함수는 같은 것을 이름만
+ * 바꿔 다시 내보내는 것이다.
  * ============================================================================
  */
+
+import {
+  buildShareFolderStem,
+  matchesShareFolderPrefix,
+  normalizeShareFolderNameForCompare,
+  sanitizeShareFolderNamePiece,
+} from "./share-folder-naming";
+
+export {
+  /** 이름 한 조각 다듬기(금지 글자 · 제어문자 → 공백, 공백 접기, 끝의 점 걷기, NFC). */
+  sanitizeShareFolderNamePiece as sanitizeQuoteArchiveNamePiece,
+  /** 디스크에 이미 있는 이름을 **비교할 때만** 쓰는 모양. */
+  normalizeShareFolderNameForCompare as normalizeQuoteArchiveNameForCompare,
+} from "./share-folder-naming";
 
 /**
  * 견적서 종류. schema/quotes.ts 의 quote_kind 와 같은 값들이다.
@@ -87,33 +108,6 @@ const YEAR_FOLDER_BASE = 2005;
 const MIN_ARCHIVE_YEAR = YEAR_FOLDER_BASE + 1; // 01
 const MAX_ARCHIVE_YEAR = YEAR_FOLDER_BASE + 99; // 99 — 앞 번호가 두 자리를 넘지 않는 데까지
 
-/**
- * Windows 가 이름에 허용하지 않는 글자 `\ / : * ? " < > |` 와 제어문자(C0 · DEL · C1),
- * 그리고 보이지 않는 방향 제어문자(RLO 등 — 탐색기에서 확장자를 뒤집어 보이게 한다).
- */
-const FORBIDDEN_IN_NAME = /[\\/:*?"<>|\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
-
-/**
- * 이름 한 조각을 다듬는다: NFC → 금지 글자 · 제어문자를 공백으로 → 연속 공백 하나로 →
- * 앞뒤 공백과 **끝의 점** 걷기. 점만 있던 조각(`.` · `..`)은 빈 문자열이 되어 빠진다 —
- * 경로를 거슬러 오르는 이름이 여기서 사라진다.
- */
-export function sanitizeQuoteArchiveNamePiece(value: string | null | undefined): string {
-  if (typeof value !== "string") return "";
-  return value
-    .normalize("NFC")
-    .replace(FORBIDDEN_IN_NAME, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[.\s]+$/, "")
-    .normalize("NFC");
-}
-
-/** 디스크에 이미 있는 이름을 **비교할 때만** 쓰는 모양: NFC + 연속 공백 하나 + 앞뒤 공백 걷기. */
-export function normalizeQuoteArchiveNameForCompare(name: string): string {
-  return name.normalize("NFC").replace(/\s+/g, " ").trim();
-}
-
 function isArchiveYear(year: number): boolean {
   return Number.isInteger(year) && year >= MIN_ARCHIVE_YEAR && year <= MAX_ARCHIVE_YEAR;
 }
@@ -152,7 +146,7 @@ export function quoteArchiveYearFolderName(year: number): string {
  */
 export function isQuoteArchiveYearFolder(name: string, year: number): boolean {
   if (!isArchiveYear(year)) return false;
-  const normalized = normalizeQuoteArchiveNameForCompare(name);
+  const normalized = normalizeShareFolderNameForCompare(name);
   const suffix = `${year} ${YEAR_FOLDER_LABEL}`;
   if (!normalized.endsWith(suffix)) return false;
   const before = normalized.slice(0, normalized.length - suffix.length);
@@ -178,56 +172,31 @@ export function isQuoteArchiveYearFolder(name: string, year: number): boolean {
  * 한 겹만 뗀다. 돌려주는 값은 다듬은(sanitize) 번호다.
  */
 export function quoteArchiveBaseNumber(quoteNumber: string): string {
-  const number = sanitizeQuoteArchiveNamePiece(quoteNumber);
+  const number = sanitizeShareFolderNamePiece(quoteNumber);
   const match = /^(.*\d{4}-\d+)-\d+$/.exec(number);
   return match ? match[1] : number;
 }
 
 function requireNumber(quoteNumber: string): string {
-  const number = sanitizeQuoteArchiveNamePiece(quoteNumber);
+  const number = sanitizeShareFolderNamePiece(quoteNumber);
   if (number.length === 0) {
     throw new QuoteArchiveNamingError("발행번호가 비어 있어 이름을 만들 수 없습니다.");
   }
   return number;
 }
 
-/** 조각을 자른 자리에 남은 공백 · 점을 걷는다(끝의 점 규칙을 자른 뒤에도 지킨다). */
-function trimPieceEnd(value: string): string {
-  return value.replace(/[.\s]+$/, "").trim();
-}
-
 /**
  * 번호 + 조각들 + 「수리 견적서」. 상한을 넘으면 **가장 긴 조각부터 한 글자씩** 줄인다
  * (길이가 같으면 뒤의 조각 — S/N 쪽부터). 번호와 「수리 견적서」는 자르지 않는다.
+ * 줄이는 규칙 자체는 공용 모듈(buildShareFolderStem)에 있다 — 연락서 폴더도 같은 규칙이다.
  */
 function buildStem(number: string, input: QuoteArchiveNamingInput): string {
-  const pieces = [input.customerName, input.modelName, input.lotNumber, input.serialNumber]
-    .map(sanitizeQuoteArchiveNamePiece)
-    .filter((piece) => piece.length > 0)
-    // 코드 포인트 단위로 자른다 — UTF-16 한 쌍을 반으로 가르지 않게.
-    .map((piece) => Array.from(piece));
-
-  const assemble = (parts: string[][]) =>
-    [number, ...parts.map((part) => part.join("")).filter((part) => part.length > 0), REPAIR_QUOTE_LABEL].join(
-      " "
-    );
-
-  while (assemble(pieces).length > QUOTE_ARCHIVE_MAX_STEM_LENGTH) {
-    let longest = -1;
-    let longestLength = 0;
-    pieces.forEach((part, index) => {
-      const length = part.join("").length;
-      if (length > 0 && length >= longestLength) {
-        longest = index;
-        longestLength = length;
-      }
-    });
-    if (longest < 0) break; // 줄일 조각이 없다 — 번호가 길다. 번호는 자르지 않는다.
-    pieces[longest].pop();
-  }
-
-  const kept = pieces.map((part) => trimPieceEnd(part.join(""))).filter((part) => part.length > 0);
-  return [number, ...kept, REPAIR_QUOTE_LABEL].join(" ").normalize("NFC");
+  return buildShareFolderStem({
+    head: number,
+    pieces: [input.customerName, input.modelName, input.lotNumber, input.serialNumber],
+    tail: REPAIR_QUOTE_LABEL,
+    maxLength: QUOTE_ARCHIVE_MAX_STEM_LENGTH,
+  });
 }
 
 /**
@@ -245,10 +214,8 @@ export function quoteArchiveFolderName(input: QuoteArchiveNamingInput): string {
  * 폴더도 맞는 것으로 본다 — 뒤에 아무것도 없으니 다른 번호일 수 없다.
  */
 export function matchesQuoteArchiveFolder(existingName: string, quoteNumber: string): boolean {
-  const baseNumber = quoteArchiveBaseNumber(quoteNumber);
-  if (baseNumber.length === 0) return false;
-  const normalized = normalizeQuoteArchiveNameForCompare(existingName);
-  return normalized === baseNumber || normalized.startsWith(`${baseNumber} `);
+  // 🔴 견적서 번호는 **대소문자를 접지 않는다** — 지금 동작 그대로다(연락서 쪽은 접는다).
+  return matchesShareFolderPrefix(existingName, quoteArchiveBaseNumber(quoteNumber));
 }
 
 /** 확장자: 앞의 점을 떼고 소문자로. 영숫자 1~10 자가 아니면 던진다. */
