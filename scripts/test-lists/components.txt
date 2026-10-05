@@ -99,6 +99,8 @@ src/components/quotes/quote-folder-open-screens.test.ts
 # 자리 · 그려지는 것을 보는 것 둘.
 src/components/repair-cases/detail/contact-folder-open.test.ts
 src/components/repair-cases/detail/contact-folder-open-screens.test.ts
+# 파일 관리 탭의 공유폴더 구역(조각 3) — 상태별로 그려지는 것과 첨부 목록 불간섭.
+src/components/repair-cases/files/ContactFolderSection.test.tsx
 src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx

@@ -118,6 +118,50 @@ export async function listShareFolderNames(
     .sort(compareShareFolderNames);
 }
 
+/** 폴더 맨 위 칸 하나 — **이름과 종류뿐**이다. 🔴 경로를 담지 않는다. */
+export type ShareFolderDirent = { name: string; isDirectory: boolean };
+
+/**
+ * 폴더 **맨 위 칸**의 폴더와 파일을 그대로 돌려준다(정렬도 거르기도 하지 않는다 —
+ * 그것은 부르는 쪽의 규칙이다).
+ *
+ * 🔴 **하위 폴더로 내려가지 않는다** — `readdir` 에 `recursive` 를 주지 않는다. 사람이
+ * 그 안에 `사진/` · `OLD/` 를 만들어 두었으면 재귀가 그 전부를 끌어온다
+ * (customer-portal-archive.ts 가 `OLD` 로 안 내려가는 것과 같은 절제).
+ *
+ * 심볼릭 링크 · 장치 파일은 담지 않는다 — 링크는 공유폴더 밖을 가리킬 수 있다
+ * (바로 위 listShareFolderNames 와 같은 규율).
+ *
+ * 🔴 크기 · 수정 시각은 **여기서 읽지 않는다.** `readdir` 이 그것을 주지 않아 줄마다
+ * `stat` 을 한 번씩 더 때려야 하는데, 수천 장이 든 폴더에서 그것은 NAS 왕복 수천 번이다.
+ * 보여 줄 것을 **먼저 고른 뒤**(줄 수 상한) 그만큼만 statShareFolderEntry 로 읽는다.
+ */
+export async function listShareFolderDirents(parent: string): Promise<ShareFolderDirent[]> {
+  const dirents = await readdir(parent, { withFileTypes: true });
+  const found: ShareFolderDirent[] = [];
+  for (const dirent of dirents) {
+    if (dirent.isDirectory()) found.push({ name: dirent.name, isDirectory: true });
+    else if (dirent.isFile()) found.push({ name: dirent.name, isDirectory: false });
+  }
+  return found;
+}
+
+/**
+ * 한 줄의 크기 · 수정 시각. **못 읽으면 null** — 그 줄의 이름은 그대로 보여 준다.
+ * 한 파일의 stat 이 막혔다고 목록을 통째로 버리면 사람이 아무것도 못 본다.
+ */
+export async function statShareFolderEntry(
+  parent: string,
+  name: string
+): Promise<{ sizeBytes: number; modifiedAtMs: number } | null> {
+  try {
+    const info = await stat(path.join(parent, name));
+    return { sizeBytes: info.size, modifiedAtMs: info.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
 export type ShareFolderPick = { name: string; multiple: boolean };
 
 /**

@@ -64,6 +64,7 @@ import AttachmentFormDialog, { type AttachmentFormSubmitInput } from "./Attachme
 import AttachmentSummaryCards from "./AttachmentSummaryCards";
 import AttachmentTable from "./AttachmentTable";
 import { ResponsiveList } from "@/components/common/responsive-list";
+import ContactFolderSection from "./ContactFolderSection";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
 import FilesHeaderSummary from "./FilesHeaderSummary";
@@ -987,6 +988,14 @@ function DatabaseFilesScreen({
           isBusy={isMutating}
         />
       )}
+
+      {/*
+        사내 공유폴더(연락서 폴더) 안에 무엇이 있는지 — 🔴 **DB 첨부 목록과 나란히 선
+        형제**다. 위 목록을 감싸지 않으므로 공유폴더가 느리거나 없거나 꺼져 있어도
+        첨부 목록은 그대로 보인다. 읽기도 서버가 아니라 이 구역이 뜬 뒤에 따로 한다
+        (ContactFolderSection.tsx 머리말). 설정이 없는 환경에서는 스스로 사라진다.
+      */}
+      <ContactFolderSection repairCaseId={resolved.id} />
 
       {trashedAttachments.length > 0 && (
         /*
