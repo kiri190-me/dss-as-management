@@ -92,6 +92,44 @@ import {
  * Windows PowerShell 5.1 은 BOM 없는 .ps1 을 ANSI(한국어 Windows 는 CP949)로 읽는다. 루트 · 안내
  * 문장에 한글이 있으므로 BOM 을 붙인다(quoteFolderHelperScriptBytes).
  *
+ * ── 🔴 설치가 **함께** 하는 일 — 「로컬 인트라넷」 영역 등록 (2026-10-05 사용자 결정) ──
+ * 공유폴더의 파일을 [열기]로 열면 Windows 가 「이 파일이 신뢰할 수 있는 출처에서 온 것인가요?」
+ * 확인창을 띄운다. 까닭은 코드가 아니다 — Windows 는 `\\<IP>\…` 처럼 **IP 주소로 된 네트워크
+ * 위치**를 「인터넷 영역」으로 분류하고, 그 영역에서 온 파일을 열 때 저 창을 띄운다(탐색기에서
+ * 더블클릭해도 똑같이 뜬다). 이름(`\\NAS이름\…`)으로 바꾸는 길은 막혀 있다 — 사내 DNS 가 없고
+ * 개발 PC 와 NAS 가 다른 대역이라 NetBIOS 이름 조회도 안 된다(2026-10-05 조사 완료).
+ *
+ * 그래서 **도우미를 설치할 때 그 주소를 「로컬 인트라넷」 영역에 함께 등록한다.** 사용자가
+ * 「바꾸는 범위는 그 주소 하나뿐이고, 그 NAS 에 악성 파일이 올라오면 경고 없이 열리게 된다」를
+ * 듣고 골랐다.
+ *
+ *   HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\Ranges\RangeN
+ *     ":Range" = "<주소>"   (REG_SZ)
+ *     "*"      = 1          (REG_DWORD — 1 = 로컬 인트라넷)
+ *
+ * 🔴 지키는 것 일곱 (QUOTE_FOLDER_HELPER_ZONE_REGISTER_PS · quoteFolderHelperZoneHosts):
+ *   1. **주소는 설정값에서 뽑는다.** 설치본에 심는 UNC 루트들의 호스트 부분을 꺼내 쓴다 —
+ *      코드에도, 설치 명령의 날 글자에도 주소가 박히지 않는다(루트와 같은 규칙: base64 payload
+ *      `ZONEHOSTS` 안에만 있다).
+ *   2. **같은 호스트는 한 번만.** 견적서 · 현황표 · 연락서 루트가 같은 NAS 이면 하나로 줄인다.
+ *   3. **이미 같은 `:Range` 가 있으면 그 키를 쓴다** — 새 `RangeN` 을 만들지 않는다.
+ *   4. **다른 `RangeN` 은 건드리지 않는다** — 사람이 다른 사내 서버를 등록해 두었을 수 있다.
+ *      새로 만들 때는 **안 쓰이는 번호**를 고른다(대소문자 무시).
+ *   5. **HKCU 만.** HKLM 은 관리자 권한이 필요하고 그 PC 의 모든 계정에 영향을 준다.
+ *   6. 🔴 **호스트가 IP 가 아니면(이름이면) 등록하지 않는다** — 점 없는 이름은 Windows 가 이미
+ *      인트라넷으로 본다. 쓸데없이 건드리지 않는다.
+ *   7. 🔴 **곁다리다.** 영역 등록이 실패해도 **도우미 설치는 끝난다**(자기 try/catch 안에서
+ *      조용히 삼키고, 폴더 열기 등록이 **다 끝난 뒤에** 돈다). 사람이 보는 결과 문구에 무엇을
+ *      했는지 한 줄 적는다(ZONE · ZONEFAIL payload).
+ * 🔴 이 조각은 Windows 가 띄우는 **확인창**을 없애는 것이지 **우리 검사 일곱**(위 (a))을 한 뼘도
+ *    느슨하게 하지 않는다 — 스크립트는 글자 하나 바뀌지 않았다.
+ *
+ * ── 🔴 영역 등록을 되돌리는 법 (실행하는 코드로 만들지 않는다) ──────────────
+ * 지우는 기능을 넣으면 그것이 또 하나의 울타리가 된다. 사람이 PowerShell 창에 한 줄 친다
+ * (`<주소>` 자리에 설정한 공유폴더 호스트를 적는다 — 그 주소의 RangeN 하나만 지운다):
+ *
+ *   Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\Ranges' | Where-Object { $_.GetValue(':Range') -eq '<주소>' } | Remove-Item -Recurse -Force
+ *
  * ── 제거 ─────────────────────────────────────────────────────────────────
  * 설치 파일 머리 주석과 스크립트 머리 주석에 적는다:
  *   reg delete "HKCU\Software\Classes\dss-folder" /f
@@ -138,6 +176,16 @@ export const QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE = [
   "(지우는 방법은 이 설치 파일을 메모장으로 열면 맨 위에 있습니다.)",
 ].join("\r\n");
 export const QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE = "설치하지 못했습니다 — 아래 내용을 관리자에게 알려 주세요.";
+
+/**
+ * 🔴 영역 등록까지 끝났을 때 사람이 보는 한 줄. **주소는 적지 않는다** — 설정값이다.
+ * (등록할 주소가 하나도 없으면 이 줄도, 아래 실패 줄도 나오지 않는다.)
+ */
+export const QUOTE_FOLDER_HELPER_ZONE_REGISTERED_MESSAGE =
+  "공유폴더 주소를 「로컬 인트라넷」 영역에 함께 등록했습니다 — 파일을 열 때 뜨던 확인창이 없어집니다.";
+/** 🔴 영역 등록만 못 했을 때 — 도우미 설치 자체는 끝났다는 것을 분명히 말한다. */
+export const QUOTE_FOLDER_HELPER_ZONE_FAILED_MESSAGE =
+  "영역 등록은 하지 못했습니다 — 폴더 열기는 설치되었습니다. 파일을 열 때 확인창이 뜨면 [계속 열기]를 눌러 주세요.";
 
 export class QuoteFolderHelperRootError extends Error {
   constructor() {
@@ -395,6 +443,49 @@ function requireRoots(input: QuoteFolderHelperRootsInput): string[] {
     roots.push(normalized);
   }
   return roots;
+}
+
+/**
+ * 🔴 IPv4 주소 그대로인가 — `192.168.0.222` 처럼 **네 토막 모두 숫자**여야 참이다.
+ * 앞의 0(`010.1.1.1`)은 거짓으로 본다 — Windows 가 다르게 읽을 수 있는 모양은 등록하지 않는다.
+ * 이름(`DSS-NAS` · `nas.example.com`)은 전부 거짓이다.
+ */
+function isIpv4Literal(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) return false;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return false;
+    if (part.length > 1 && part.startsWith("0")) return false;
+    if (Number(part) > 255) return false;
+  }
+  return true;
+}
+
+/**
+ * ============================================================================
+ * 🔴 「로컬 인트라넷」 영역에 등록할 주소들 — 설치본에 심는 루트들에서 뽑는다 (2026-10-05)
+ * ============================================================================
+ * 까닭 · 지키는 것 일곱은 머리말 「설치가 함께 하는 일」. 여기서 하는 일은 셋뿐이다:
+ *  · UNC 루트(`\\<호스트>\공유\…`)의 **호스트 토막**만 꺼낸다. 드라이브 경로(`Z:\…`)는 호스트가
+ *    없으므로 건너뛴다.
+ *  · 🔴 **IP 가 아니면 버린다** — 이름은 Windows 가 이미 인트라넷으로 보므로 건드리지 않는다.
+ *  · 🔴 **같은 호스트는 한 번만** 남긴다(견적서 · 현황표 · 연락서가 같은 NAS 인 경우).
+ * 루트 검사(requireRoots)를 그대로 거치므로 규칙 밖 루트는 여기서도 던진다.
+ * 돌려주는 값은 payload(base64) 안으로만 간다 — 설치 명령의 날 글자에는 나오지 않는다.
+ * ============================================================================
+ */
+export function quoteFolderHelperZoneHosts(input: QuoteFolderHelperRootsInput): string[] {
+  const hosts: string[] = [];
+  const seen = new Set<string>();
+  for (const root of requireRoots(input)) {
+    if (!root.startsWith("\\\\")) continue;
+    const host = root.slice(2).split("\\")[0];
+    if (!isIpv4Literal(host)) continue;
+    if (seen.has(host)) continue;
+    seen.add(host);
+    hosts.push(host);
+  }
+  return hosts;
 }
 
 /**
@@ -696,6 +787,37 @@ export const QUOTE_FOLDER_HELPER_PAYLOAD_READER_PS = String.raw`function Read-Ds
 export const QUOTE_FOLDER_HELPER_COMMAND_BUILDER_PS = String.raw`$q = [string][char]34; $percent = [string][char]37; $command = $q + $powershell + $q + ' -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + $q + $script + $q + ' ' + $q + $percent + '1' + $q`;
 
 /**
+ * 🔴 영역 지정이 들어 있는 레지스트리 자리 — **HKCU 아래** 경로다(HKLM 이 아니다).
+ * 시험은 이 값을 쓰지 않고 `$zoneRangesPath` 에 임시 키를 넣어 돌린다 — 그래야 진짜 영역 설정을
+ * 건드리지 않는다.
+ */
+export const QUOTE_FOLDER_HELPER_ZONE_RANGES_PATH =
+  "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Ranges";
+
+/**
+ * ============================================================================
+ * 🔴 영역 등록 알맹이 (한 줄) — 앞에서 `$zoneHostText` · `$zoneRangesPath` 가 정해져 있어야 한다
+ * ============================================================================
+ * 끝나면 `$zoneWanted`(등록해야 할 주소 수)와 `$zoneCount`(실제로 등록한 수)가 든다.
+ * 🔴 **던지지 않는다** — 통째로 try/catch 안이고 catch 는 비어 있다. 영역 등록은 곁다리라서,
+ * 여기서 막혀 폴더 열기가 안 깔리면 안 된다(머리말 7).
+ *
+ * 하는 일:
+ *  · `$zoneHostText` 를 줄 단위로 끊어 빈 줄을 버린다(payload `ZONEHOSTS`).
+ *  · `Ranges` 키를 **HKCU 에서** 연다(없으면 만든다).
+ *  · 주소마다 — 이미 같은 `:Range` 가 있는 `RangeN` 을 찾으면 **그 키를 쓰고**, 없으면
+ *    **안 쓰이는 번호**(Range1, Range2 … 대소문자 무시)를 골라 새로 만든다.
+ *    🔴 다른 `RangeN` 은 읽기만 한다 — 값을 쓰는 것은 고른 키 하나뿐이다.
+ *  · 그 키에 `:Range`(REG_SZ)와 `*` = 1(REG_DWORD — 로컬 인트라넷)을 적는다.
+ *
+ * 🔴 cmd 줄 안에 들어가므로 `"` · `%` · `!` · `^` · `&` · `|` · `<` · `>` 가 하나도 없다
+ * (시험이 지킨다). 그래서 파이프(Where-Object)를 쓰지 않고 foreach 로만 돈다.
+ * 되돌리는 법은 머리말 「영역 등록을 되돌리는 법」 — 지우는 코드는 **만들지 않는다.**
+ * ============================================================================
+ */
+export const QUOTE_FOLDER_HELPER_ZONE_REGISTER_PS = String.raw`$zoneWanted = 0; $zoneCount = 0; try { $zoneHosts = @(); foreach ($zoneLine in $zoneHostText.Split([char]10)) { $zoneTrimmed = $zoneLine.Trim(); if ($zoneTrimmed.Length -ne 0) { $zoneHosts = $zoneHosts + $zoneTrimmed } }; $zoneWanted = $zoneHosts.Count; if ($zoneWanted -ne 0) { $zoneRanges = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($zoneRangesPath); try { foreach ($zoneHost in $zoneHosts) { $zoneNames = $zoneRanges.GetSubKeyNames(); $zoneName = ''; foreach ($zoneCandidate in $zoneNames) { if ($zoneName -eq '') { $zoneExisting = $zoneRanges.OpenSubKey($zoneCandidate); if ($null -ne $zoneExisting) { $zoneRange = $zoneExisting.GetValue(':Range'); $zoneExisting.Close(); if ($zoneRange -is [string]) { if ([string]::Equals($zoneRange, $zoneHost, [System.StringComparison]::OrdinalIgnoreCase)) { $zoneName = $zoneCandidate } } } } }; if ($zoneName -eq '') { $zoneNumber = 1; $zoneTaken = $true; while ($zoneTaken) { $zoneTaken = $false; foreach ($zoneCandidate in $zoneNames) { if ([string]::Equals($zoneCandidate, 'Range' + $zoneNumber, [System.StringComparison]::OrdinalIgnoreCase)) { $zoneTaken = $true } }; if ($zoneTaken) { $zoneNumber = $zoneNumber + 1 } }; $zoneName = 'Range' + $zoneNumber }; $zoneKey = $zoneRanges.CreateSubKey($zoneName); $zoneKey.SetValue(':Range', $zoneHost, [Microsoft.Win32.RegistryValueKind]::String); $zoneKey.SetValue('*', 1, [Microsoft.Win32.RegistryValueKind]::DWord); $zoneKey.Close(); $zoneCount = $zoneCount + 1 } } finally { $zoneRanges.Close() } } } catch { }`;
+
+/**
  * 설치가 실패했을 때의 끝냄 — 설치 파일(.cmd)에서는 이 코드가 %ERRORLEVEL% 로 이어져야 한다.
  * 창에 붙여넣는 명령에서는 이 조각만 덜어낸다(아래 「파일 없이 도는 설치 명령」 절). 아래
  * INSTALL_STATEMENTS 의 마지막 문장에 **정확히 한 번** 들어 있고, 못 찾으면 명령을 만들지 않는다.
@@ -719,7 +841,15 @@ const INSTALL_STATEMENTS = [
   String.raw`$commandKey.SetValue('', $command)`,
   String.raw`$commandKey.Close()`,
   String.raw`$key.Close()`,
-  String.raw`Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'DONE'))) } catch { Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'FAILED'))); Write-Host $_.Exception.Message; exit 1 }`,
+  // ── 🔴 여기부터는 곁다리다 — 폴더 열기 등록은 **위에서 이미 끝났다**(머리말 7). ──
+  //    payload 를 못 읽어도, 영역 등록이 실패해도 아래 「설치했습니다」까지 간다.
+  String.raw`$zoneHostText = ''`,
+  String.raw`try { $zoneHostText = [System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'ZONEHOSTS')) } catch { $zoneHostText = '' }`,
+  String.raw`$zoneRangesPath = '${QUOTE_FOLDER_HELPER_ZONE_RANGES_PATH}'`,
+  QUOTE_FOLDER_HELPER_ZONE_REGISTER_PS,
+  String.raw`Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'DONE')))`,
+  // 사람이 보는 결과 문구에 **무엇을 했는지** 한 줄. 등록할 주소가 없으면 아무 줄도 내지 않는다.
+  String.raw`if ($zoneWanted -ne 0) { if ($zoneCount -eq $zoneWanted) { Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'ZONE'))) } else { Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'ZONEFAIL'))) } } } catch { Write-Host ([System.Text.Encoding]::UTF8.GetString((Read-DssPayload 'FAILED'))); Write-Host $_.Exception.Message; exit 1 }`,
 ];
 
 /** cmd 줄에 들어가는 PowerShell `-Command` 본문. */
@@ -728,14 +858,28 @@ export function quoteFolderHelperInstallCommand(): string {
 }
 
 /**
- * 설치가 PC 로 옮기는 것 셋 — 도우미 스크립트 · 설치 완료 문구 · 실패 문구.
+ * 🔴 영역 등록할 주소 목록을 payload 바이트로 — 한 줄에 하나, 끝에도 줄바꿈.
+ * 비어 있어도 **빈 payload 를 만들지 않는다**(읽개가 「덩어리가 없다」로 보고 던진다) —
+ * 등록할 주소가 없으면 줄바꿈 하나만 들어가고, PowerShell 쪽에서 빈 줄은 버린다.
+ */
+function quoteFolderHelperZoneHostsBytes(input: QuoteFolderHelperRootsInput): Uint8Array {
+  return new Uint8Array(Buffer.from(`${quoteFolderHelperZoneHosts(input).join("\n")}\n`, "utf8"));
+}
+
+/**
+ * 설치가 PC 로 옮기는 것 — 도우미 스크립트 · 설치 완료 문구 · 실패 문구, 그리고 🔴 영역 등록 셋
+ * (등록할 주소 목록 · 등록했다는 문구 · 등록만 실패했다는 문구).
  * 🔴 설치 파일(base64 덩어리)과 붙여넣는 설치 명령(base64 문자열)이 **이 한 벌**을 함께 쓴다.
+ * 🔴 **차례는 뒤에만 더한다** — 앞의 셋은 글자 하나 움직이지 않는다(이미 설치된 PC 와 비교하기 쉽게).
  */
 function quoteFolderHelperPayloads(input: QuoteFolderHelperRootsInput): ReadonlyArray<{ name: string; bytes: Uint8Array }> {
   return [
     { name: "HELPER", bytes: quoteFolderHelperScriptBytes(input) },
     { name: "DONE", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_INSTALLED_MESSAGE, "utf8")) },
     { name: "FAILED", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_INSTALL_FAILED_MESSAGE, "utf8")) },
+    { name: "ZONEHOSTS", bytes: quoteFolderHelperZoneHostsBytes(input) },
+    { name: "ZONE", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_ZONE_REGISTERED_MESSAGE, "utf8")) },
+    { name: "ZONEFAIL", bytes: new Uint8Array(Buffer.from(QUOTE_FOLDER_HELPER_ZONE_FAILED_MESSAGE, "utf8")) },
   ];
 }
 
@@ -765,6 +909,13 @@ export function buildQuoteFolderHelperInstaller(input: QuoteFolderHelperRootsInp
     "rem         powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden",
     // rem 줄에도 cmd 가 해석할 수 있는 글자(< > | &)를 두지 않는다.
     `rem           -ExecutionPolicy Bypass -File "[helper]" "[link]"`,
+    "rem    3. Adds the share host to the Local intranet zone for this user, so that",
+    "rem       Windows stops asking about every file opened from that share:",
+    "rem         HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+    "rem           \\ZoneMap\\Ranges\\RangeN  [ :Range = host, * = 1 ]",
+    "rem       Only IP hosts are added, each one once, and existing ranges are kept.",
+    "rem       This step is optional - the helper is installed even if it fails.",
+    "rem       Removing that zone entry is not automated - see the server source.",
     "rem  The helper only works under the share roots fixed at install time:",
     "rem    - dss-folder://open/...     opens a folder in Windows Explorer",
     "rem    - dss-folder://openfile/... opens ONE file with its associated program,",

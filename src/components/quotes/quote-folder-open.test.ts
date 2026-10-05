@@ -9,6 +9,7 @@ import {
   QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT,
   QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPY_BLOCKED_TEXT,
   QUOTE_FOLDER_HELPER_INSTALL_COMMAND_URL,
+  QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT,
   QUOTE_FOLDER_HELPER_MISSING_TEXT,
   QUOTE_FOLDER_MULTIPLE_TEXT,
   QUOTE_FOLDER_NOT_FOUND_TEXT,
@@ -497,11 +498,45 @@ describe("④c ② [설치 명령 복사] — 파일 없이 설치하는 길", (
     assert.deepEqual(h.fetched, ["/api/quote-folder-helper/install-command"]);
     assert.equal(QUOTE_FOLDER_HELPER_INSTALL_COMMAND_URL, "/api/quote-folder-helper/install-command");
     assert.deepEqual(copied, [INSTALL_COMMAND_BODY]);
-    assert.deepEqual(lines, [{ text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT, tone: "normal" }]);
+    assert.deepEqual(lines, [
+      { text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT, tone: "normal" },
+      { text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT, tone: "muted" },
+    ]);
     assert.equal(
       QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT,
       "설치 명령을 복사했습니다 — PowerShell 창을 열어 붙여넣고 Enter 를 눌러 주세요. 관리자 권한은 필요 없습니다"
     );
+  });
+
+  /**
+   * 🔴 2026-10-05 — 설치가 **함께** 하는 일(「로컬 인트라넷」 영역 등록)을 사람에게 알린다.
+   * 사용자가 「파일을 열 때마다 확인창이 뜬다」를 없애 달라고 해서 생긴 곁다리다.
+   * 🔴 **주소(IP)는 문구에 없다** — 설정값이라 화면으로 나가면 안 된다.
+   */
+  test("🔴 영역 등록도 함께 된다는 줄을 곁들인다 — 왜 필요한지까지, 주소는 적지 않는다", async () => {
+    assert.equal(
+      QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT,
+      "이 명령은 공유폴더 주소를 「로컬 인트라넷」 영역에도 함께 등록합니다 — 파일을 열 때 뜨는 확인창을 없앱니다"
+    );
+    // 「무엇을」과 「왜」가 둘 다 들어 있다.
+    assert.ok(QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT.includes("로컬 인트라넷"));
+    assert.ok(QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT.includes("확인창"));
+    // 🔴 주소(숫자 네 토막) · 레지스트리 속사정은 화면에 내지 않는다.
+    assert.equal(/\d+\.\d+\.\d+\.\d+/.test(QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT), false);
+    for (const gone of ["HKCU", "HKLM", "레지스트리", "\\\\"]) {
+      assert.ok(!QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT.includes(gone), gone);
+    }
+  });
+
+  test("🔴 복사가 막히면 영역 등록 줄도 내지 않는다 — 붙여넣을 명령이 없다", async () => {
+    for (const copy of BLOCKED_COPIES) {
+      const h = harness({ folder: found() });
+      const lines = await runQuoteFolderHelperInstallCommandCopy({ env: { fetchImpl: h.env.fetchImpl, copy } });
+      assert.equal(
+        lines.some((line) => line.text === QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT),
+        false
+      );
+    }
   });
 
   test("🔴 통로가 실패하면 서버 문장 · 관리자에게 알리라는 줄 — 복사하지 않는다", async () => {
@@ -576,6 +611,7 @@ describe("🔴 ④c 문구 — 없앤 길을 안내하지 않는다", () => {
       QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT,
       QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPY_BLOCKED_TEXT,
       QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ADMIN_HINT_TEXT,
+      QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT,
     ];
     for (const text of shown) {
       // 설치 파일을 주지 않으므로 그 말도 하지 않는다(「차단 해제」 안내도 함께 사라졌다).

@@ -133,6 +133,15 @@ export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT =
   "설치 명령을 복사했습니다 — PowerShell 창을 열어 붙여넣고 Enter 를 눌러 주세요. 관리자 권한은 필요 없습니다";
 
 /**
+ * 🔴 설치가 **함께** 하는 일 — 공유폴더 주소를 「로컬 인트라넷」 영역에 등록한다
+ * (2026-10-05 사용자 결정 · server/quote-folder-helper.ts 머리말 「설치가 함께 하는 일」).
+ * 그래야 공유폴더의 파일을 열 때마다 뜨던 Windows 확인창이 없어진다.
+ * 🔴 **주소(IP)는 적지 않는다** — 설정값이고 화면으로 나가면 안 된다.
+ */
+export const QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT =
+  "이 명령은 공유폴더 주소를 「로컬 인트라넷」 영역에도 함께 등록합니다 — 파일을 열 때 뜨는 확인창을 없앱니다";
+
+/**
  * 🔴 두 갈래 다 막혔을 때 — 명령은 약 10,300자라 화면에 보여 긁게 할 수 없다. 남은 길은
  * 복사가 되는 브라우저로 옮기거나, 도우미 없이 [위치 복사]로 여는 것뿐이다.
  */
@@ -493,8 +502,12 @@ export async function runQuoteFolderHelperInstallCommandCopy({
     ];
   }
 
+  // 🔴 복사가 됐을 때만 영역 등록 줄을 곁들인다 — 막혔으면 붙여넣을 명령 자체가 없다.
   return (await copySafely(asked.command, copy))
-    ? [{ text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT, tone: "normal" }]
+    ? [
+        { text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPIED_TEXT, tone: "normal" },
+        { text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_ZONE_HINT_TEXT, tone: "muted" },
+      ]
     : [{ text: QUOTE_FOLDER_HELPER_INSTALL_COMMAND_COPY_BLOCKED_TEXT, tone: "warning" }];
 }
 
