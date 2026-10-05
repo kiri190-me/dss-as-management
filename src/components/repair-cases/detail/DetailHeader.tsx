@@ -6,6 +6,7 @@ import {
   StatusBadge,
   WorkflowOverrideBadge,
 } from "@/components/repair-cases/badges";
+import ContactFolderOpenButton from "@/components/repair-cases/detail/ContactFolderOpenButton";
 import EngineerEditCell from "@/components/repair-cases/detail/edit/EngineerEditCell";
 import ReportNumberEditCell from "@/components/repair-cases/detail/edit/ReportNumberEditCell";
 import { useUiText } from "@/components/providers/UiTextProvider";
@@ -54,6 +55,9 @@ export default function DetailHeader({
           />
         </div>
       </div>
+      {/* 🔴 연락서 공유폴더를 탐색기로 연다 — 찾기만 한다(없으면 「아직 없습니다」).
+          Windows PC 에서만 그려지고, 인쇄에는 찍히지 않는다(print:hidden). */}
+      <ContactFolderOpenButton repairCaseId={resolved.id} />
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={resolved.effectiveStatus} />
         <PriorityBadge priority={resolved.priority} />

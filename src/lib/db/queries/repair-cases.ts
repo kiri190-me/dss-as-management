@@ -274,6 +274,35 @@ export async function getRepairCaseEditGuardById(id: string): Promise<RepairCase
   return row ?? null;
 }
 
+/** 연락서 공유폴더를 찾는 데 쓰는 최소한의 것 — 🔴 찾는 열쇠는 인수번호 하나뿐이다. */
+export type RepairCaseContactFolderKey = { id: string; intakeNumber: string };
+
+/**
+ * 인수번호만 읽는 조회 — `GET /api/repair-cases/{id}/contact-folder` 하나가 쓴다.
+ *
+ * getRepairCaseById 의 8-테이블 join 을 쓰지 않는 까닭은 위
+ * getRepairCaseEditGuardById · listRepairCasesForFlowchartCreateSelector 와 같다: 그 join 은
+ * 연락처 스냅숏(PII)까지 함께 싣는데, 이 통로가 쓰는 것은 **인수번호 한 칸**뿐이다.
+ *
+ * 휴지통에 있는 건(is_deleted)은 없는 것으로 본다 — 부르는 쪽은 404 로 답한다(그 id 의 건이
+ * 있다는 사실조차 알리지 않는다). 모양이 아닌 id 는 Postgres 에 닿기 전에 null 이다.
+ */
+export async function getRepairCaseContactFolderKeyById(
+  id: string
+): Promise<RepairCaseContactFolderKey | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+
+  const [row] = await db
+    .select({ id: repairCases.id, intakeNumber: repairCases.intakeNumber })
+    .from(repairCases)
+    .where(and(eq(repairCases.isDeleted, false), eq(repairCases.id, id)))
+    .limit(1);
+
+  return row ?? null;
+}
+
 export type RepairCaseFlowchartCreateOption = {
   id: string;
   intakeNumber: string;

@@ -95,6 +95,10 @@ src/components/quotes/quote-excel-autofill-screens.test.tsx
 src/components/quotes/quote-folder-open.test.ts
 src/components/quotes/QuoteFolderOpenButton.test.tsx
 src/components/quotes/quote-folder-open-screens.test.ts
+# 수리 건 상세의 [폴더 열기](연락서 폴더). 견적서 쪽과 같은 짝이다 — 흐름을 값으로 보는 것과
+# 자리 · 그려지는 것을 보는 것 둘.
+src/components/repair-cases/detail/contact-folder-open.test.ts
+src/components/repair-cases/detail/contact-folder-open-screens.test.ts
 src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx

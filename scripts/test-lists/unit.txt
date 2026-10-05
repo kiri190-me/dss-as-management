@@ -239,6 +239,9 @@ src/lib/storage/quote-archive.test.ts
 src/lib/domain/contact-folder-naming.test.ts
 src/lib/storage/contact-folder-archive.test.ts
 src/lib/storage/contact-folder-archive-source.test.ts
+# 연락서 폴더 위치 통로. `[id]` 칸은 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가
+# 글롭 문자클래스로 읽어 `tests 0` 으로 조용히 지나간다(위 견적서 통로들과 같다).
+src/app/api/repair-cases/*/contact-folder/route-source.test.ts
 src/lib/domain/quote-issue-result.test.ts
 src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts

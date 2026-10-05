@@ -35,7 +35,8 @@ import {
  *       **정확히 하나**가 아니면(따옴표를 깨고 인자를 늘린 주소) 끝낸다. 주소의 몸통은 base64url 이다.
  *   (c) 루트(UNC)는 저장소 · 빌드 결과에 남지 않는다 — 설치 파일 · 설치 명령 본문에만 들어가고,
  *       그 본문은 요청마다 환경변수(QUOTE_ARCHIVE_UNC_ROOT · CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT 와
- *       각각의 _ALT — resolveQuoteFolderHelperInstallRoots)로 만든다. 로그에도 찍지 않는다.
+ *       각각의 _ALT, 그리고 CONTACT_FOLDER_ARCHIVE_UNC_ROOT —
+ *       resolveQuoteFolderHelperInstallRoots)로 만든다. 로그에도 찍지 않는다.
  *       (견적서 폴더의 전체 주소를 사람에게 복사해 주는 통로는 아래 「전체 주소」 절.)
  *   (d) 공유폴더 저장 동작은 이 모듈과 무관하다(storage/quote-archive.ts).
  *
@@ -82,6 +83,13 @@ export const QUOTE_FOLDER_HELPER_ROOT_ALT_ENV = "QUOTE_ARCHIVE_UNC_ROOT_ALT";
 export const CUSTOMER_PORTAL_FOLDER_HELPER_ROOT_ENV = "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT";
 /** 위 현황표 루트를 가리키는 **다른 주소**(이름 ↔ IP). 없어도 된다 — 까닭은 견적서 _ALT 와 같다. */
 export const CUSTOMER_PORTAL_FOLDER_HELPER_ROOT_ALT_ENV = "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT";
+/**
+ * 🔴 또 하나의 **다른 폴더** — A/S 수리 건의 **연락서** 공유폴더(견적서 루트 아래가 아니다).
+ * 까닭은 바로 위 현황표 루트와 같다: 도우미는 PC 마다 한 벌뿐이라(레지스트리 `dss-folder`)
+ * 연락서용을 따로 설치하면 그 PC 의 견적서 [폴더 열기]가 죽는다. 그래서 한 벌에 함께 심는다.
+ * 없어도 된다 — 없으면 지금까지와 같다. 불변식 (a) 는 루트마다 그대로 산다.
+ */
+export const CONTACT_FOLDER_HELPER_ROOT_ENV = "CONTACT_FOLDER_ARCHIVE_UNC_ROOT";
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";
 /** 이 값이 "1" 이면 스크립트가 탐색기를 여는 대신 결과를 표준출력에 적고 끝낸다(시험용). */
@@ -213,15 +221,16 @@ export type QuoteFolderHelperInstallRootsResolution =
  * ============================================================================
  * 설치 파일 · 설치 명령에 심을 **루트 전부** — 부르는 시점에 읽는다
  * ============================================================================
- * 차례: 견적서 루트 → 견적서 다른 주소 → 현황표 루트 → 현황표 다른 주소.
+ * 차례: 견적서 루트 → 견적서 다른 주소 → 현황표 루트 → 현황표 다른 주소 → 연락서 루트.
  * 견적서를 먼저 두는 것은 **지금까지 설치된 것과 같은 차례**를 지키기 위해서다 — 설정이 예전
- * 그대로인 PC 에서는 목록이 예전과 글자 하나 다르지 않다.
+ * 그대로인 PC 에서는 목록이 예전과 글자 하나 다르지 않다. 연락서를 **맨 뒤에** 더하는 것도
+ * 같은 까닭이다(먼저 끼워 넣으면 이미 설치된 PC 의 목록 차례가 통째로 밀린다).
  *
  * ── 일부만 설정됐을 때 ────────────────────────────────────────────────────
  *  · 견적서 루트가 **틀리면** invalid — 지금까지와 같다. 첫째 루트의 오타는 크게 울어야 한다.
- *  · 나머지(견적서 _ALT · 현황표 · 현황표 _ALT)가 틀리면 **없는 셈** 친다. 곁다리 설정 하나
- *    때문에 [폴더 열기]가 통째로 죽으면 안 된다(견적서 _ALT 가 이미 그렇게 정해져 있다).
- *    🔴 특히 현황표 루트의 오타로 **견적서 [폴더 열기]가 죽는 일이 없어야 한다.**
+ *  · 나머지(견적서 _ALT · 현황표 · 현황표 _ALT · 연락서)가 틀리면 **없는 셈** 친다. 곁다리 설정
+ *    하나 때문에 [폴더 열기]가 통째로 죽으면 안 된다(견적서 _ALT 가 이미 그렇게 정해져 있다).
+ *    🔴 특히 현황표 · 연락서 루트의 오타로 **견적서 [폴더 열기]가 죽는 일이 없어야 한다.**
  *  · 하나도 설정되지 않으면 unset — 설치 파일을 받을 수 없다(지금까지와 같다).
  *  · 견적서 루트가 비고 현황표 루트만 있으면 현황표 루트 하나로 만든다. 도우미는 자기 루트
  *    아래만 여는 물건이라, 루트가 하나든 둘이든 규칙은 같다.
@@ -242,6 +251,7 @@ export function resolveQuoteFolderHelperInstallRoots(): QuoteFolderHelperInstall
   for (const configured of [
     process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT,
     process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT,
+    process.env.CONTACT_FOLDER_ARCHIVE_UNC_ROOT,
   ]) {
     if (!configured || configured.trim().length === 0) continue;
     const normalized = normalizeQuoteFolderHelperRoot(configured);
