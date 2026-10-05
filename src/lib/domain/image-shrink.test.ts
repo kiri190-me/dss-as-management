@@ -7,6 +7,7 @@ import {
   averagePerImageBytes,
   estimateTotalBytes,
   formatBytes,
+  isShrinkLabel,
   parseTargetBytes,
   ratioLabel,
   resolveTargetBytes,
@@ -179,4 +180,50 @@ test("빠른 선택 비율은 전부 0과 1 사이다 — 100%는 줄이지 않�
   for (const ratio of SHRINK_RATIO_PRESETS) {
     assert.ok(ratio > 0 && ratio < 1, `${ratio}는 범위 밖이다`);
   }
+});
+
+// ─────────────────────────── 줄임 이름표가 서버로 간다 (연락서 조각 12)
+
+test("화면이 만드는 이름표는 전부 통과한다 — 비율 · 목표 용량", () => {
+  for (const ratio of SHRINK_RATIO_PRESETS) {
+    assert.ok(isShrinkLabel(ratioLabel(ratio)), `${ratioLabel(ratio)} 가 막혔다`);
+  }
+  // 목표 용량 쪽은 사람이 적은 숫자 + 고른 단위가 그대로 붙는다(ShrinkDownloadDialog).
+  for (const label of ["500KB", "1MB", "1.5MB", "10pct", "95pct"]) {
+    assert.ok(isShrinkLabel(label), `${label} 가 막혔다`);
+  }
+});
+
+test("🔴 뜻 없는 꼬리는 막는다 — 파일 이름이 되는 값이다", () => {
+  for (const label of [
+    "",
+    "   ",
+    "pct",
+    "50",
+    "50%",
+    "50pct ",
+    "50pct.jpg",
+    "../../etc",
+    "50pct/..",
+    String.raw`50pct\x`,
+    "5e3KB",
+    "-50pct",
+    "50gb",
+    "50KB50KB",
+    "1234567pct",
+  ]) {
+    assert.equal(isShrinkLabel(label), false, `${JSON.stringify(label)} 가 통과했다`);
+  }
+  // 글자가 아닌 값도 막는다 — 쿼리 문자열 밖에서 불릴 수 있다.
+  for (const value of [null, undefined, 50, {}, ["50pct"]]) {
+    assert.equal(isShrinkLabel(value), false, `${JSON.stringify(value)} 가 통과했다`);
+  }
+});
+
+test("통과한 이름표는 줄여받기와 **같은 이름**을 만든다", () => {
+  const label = ratioLabel(0.5);
+  assert.ok(isShrinkLabel(label));
+  assert.equal(shrunkFileName("IMG_2847.jpg", label), "IMG_2847_50pct.jpg");
+  // PNG 도 줄이면 JPEG 라 확장자가 바뀐다(줄여받기와 같다).
+  assert.equal(shrunkFileName("파형.png", "500KB"), "파형_500KB.jpg");
 });

@@ -481,9 +481,33 @@ describe("🔴 DB 첨부 목록을 건드리지 않는다 — 나란히 선 형�
       new URL("../../../app/(app)/repair-cases/[id]/files/page.tsx", import.meta.url),
       "utf8"
     );
-    for (const forbidden of ["contact-folder", "ContactFolderSection", "findContactFolder", "listContactFolderEntries"]) {
+    // 🔴 **디스크를 두드리는 길이 하나도 없다** — NAS 가 느린 날 이 탭이 통째로 안 뜨면 안 된다.
+    for (const forbidden of [
+      "ContactFolderSection",
+      "findContactFolder",
+      "listContactFolderEntries",
+      "createContactFolder",
+      "copyIntoContactFolder",
+      "requireExistingShareFolderRoot",
+      "readdir",
+    ]) {
       assert.equal(page.includes(forbidden), false, `서버 컴포넌트가 공유폴더를 읽는다: ${forbidden}`);
     }
+    // 🔴 2026-10-05(조각 12) — 예전에는 「`contact-folder` 라는 글자가 아예 없다」로 보았다.
+    //    이제 페이지가 **설정 하나**를 읽는다(공유폴더 기능이 켜졌는가 — [DATA에 저장] 단추를
+    //    그릴지 정하는 깃발). 🔴 그것은 `process.env` 를 보는 것이고 **디스크를 건드리지
+    //    않는다** — 위 금지 목록은 한 글자도 느슨해지지 않았고, 대신 그 한 자리만 열어 둔다.
+    assert.deepEqual(
+      [...page.matchAll(/\b(resolve|find|create|copyInto|list)[A-Za-z]*ContactFolder[A-Za-z]*\b/g)]
+        .map((match) => match[0])
+        .filter((name, index, all) => all.indexOf(name) === index),
+      ["resolveContactFolderArchiveRoot"],
+      "공유폴더를 만지는 자리가 「설정 읽기」 하나가 아니다"
+    );
+    assert.ok(page.includes("resolveContactFolderArchiveRoot() !== null"), "설정을 참/거짓으로만 쓰지 않는다");
+    // 🔴 루트 값(.env)은 화면으로 가지 않는다.
+    assert.equal(page.includes("CONTACT_FOLDER_ARCHIVE_DIR"), false, "루트 설정 이름이 페이지에 있다");
+
     assert.ok(sectionSource.startsWith('"use client";'), "클라이언트 조각이 아니다");
     assert.ok(sectionSource.includes("useEffect("), "화면이 뜬 뒤에 부르지 않는다");
   });

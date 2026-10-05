@@ -6,9 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import {
+  CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT,
   CONTACT_FOLDER_COPY_MULTIPLE_TEXT,
   CONTACT_FOLDER_COPY_NO_FOLDER_TEXT,
+  CONTACT_FOLDER_DATA_BLOCKED_TEXT,
   contactFolderCopyNotice,
+  contactFolderDataSaveNotice,
   readContactFolderCopyNote,
   type ContactFolderCopyNote,
 } from "./contact-folder-copy-notice";
@@ -106,6 +109,104 @@ describe("공유폴더 사본 — 올린 결과를 사실대로 말한다", () =
       status: "failed",
       reason: "느립니다.",
     });
+  });
+});
+
+describe("🔴 조각 11 이 남긴 구멍 — 「파일이 자리를 막았다」가 화면에 뜬다 (조각 12)", () => {
+  test("서버가 실은 그 칸을 읽는다 — 참일 때만 싣는다", () => {
+    assert.deepEqual(
+      readContactFolderCopyNote({
+        contactFolderCopy: { status: "copied", fileName: "a.jpg", categoryFolderBlockedByFile: true },
+      }),
+      { status: "copied", fileName: "a.jpg", categoryFolderBlockedByFile: true }
+    );
+    // 🔴 칸이 없거나 거짓이면 싣지 않는다 — 예전 응답을 「막혔다」로 읽지 않는다.
+    assert.deepEqual(
+      readContactFolderCopyNote({
+        contactFolderCopy: { status: "copied", fileName: "a.jpg", categoryFolderBlockedByFile: false },
+      }),
+      { status: "copied", fileName: "a.jpg" }
+    );
+    assert.deepEqual(readContactFolderCopyNote({ contactFolderCopy: { status: "copied", fileName: "a.jpg" } }), {
+      status: "copied",
+      fileName: "a.jpg",
+    });
+  });
+
+  test("🔴 넣기는 넣었어도 **자리가 밀렸으면 말한다** — 안 그러면 사람이 분류 폴더를 열고 못 찾는다", () => {
+    const notice = contactFolderCopyNotice([
+      { status: "copied", fileName: "견적서.xlsx", categoryFolderBlockedByFile: true },
+    ]);
+    assert.equal(notice?.tone, "success");
+    assert.ok(notice?.text.includes("견적서.xlsx"), notice?.text);
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT), notice?.text);
+    // 🔴 사람이 다음에 할 일이 적혀 있다(앱은 그 파일을 지우지 않는다).
+    assert.ok(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT.includes("탐색기"));
+  });
+
+  test("막히지 않았으면 그 줄이 없다 — 예전 문장이 한 글자도 달라지지 않는다", () => {
+    assert.deepEqual(contactFolderCopyNotice([{ status: "copied", fileName: "IMG_2847.jpg" }]), {
+      tone: "success",
+      text: "공유폴더에도 넣었습니다 — IMG_2847.jpg",
+    });
+  });
+
+  test("일부가 실패한 줄에도 그 사실이 함께 붙는다", () => {
+    const notice = contactFolderCopyNotice([
+      { status: "copied", fileName: "a.jpg", categoryFolderBlockedByFile: true },
+      { status: "no-folder" },
+    ]);
+    assert.equal(notice?.tone, "error");
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_NO_FOLDER_TEXT), notice?.text);
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT), notice?.text);
+  });
+});
+
+describe("[DATA에 저장] — 말이 갈린다 (조각 12)", () => {
+  test("🔴 올리기와 다른 말을 쓴다 — 어디를 열어야 하는지 사람이 알아야 한다", () => {
+    const notice = contactFolderDataSaveNotice([{ status: "copied", fileName: "파형.csv" }]);
+    assert.deepEqual(notice, { tone: "success", text: "DATA 폴더에 넣었습니다 — 파형.csv" });
+    // 올리기 쪽 문장과 섞이지 않는다.
+    assert.equal(notice?.text.includes("공유폴더에도"), false, notice?.text);
+  });
+
+  test("이미 같은 파일이 있었다 — 넣었다고 말하지 않는다", () => {
+    const notice = contactFolderDataSaveNotice([{ status: "unchanged", fileName: "파형.csv" }]);
+    assert.equal(notice?.tone, "success");
+    assert.ok(notice?.text.includes("이미 있어"), notice?.text);
+    assert.ok(notice?.text.includes("DATA"), notice?.text);
+  });
+
+  test("🔴 폴더가 없으면 **만들지 않고** [폴더 만들고 열기]로 이끈다", () => {
+    const notice = contactFolderDataSaveNotice([{ status: "no-folder" }]);
+    assert.equal(notice?.tone, "error");
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_NO_FOLDER_TEXT), notice?.text);
+  });
+
+  test("🔴 일부만 실패하면 **건마다** 사실대로 — 몇 건이 빠졌는지 센다", () => {
+    const notice = contactFolderDataSaveNotice([
+      { status: "copied", fileName: "a.csv" },
+      { status: "unchanged", fileName: "b.csv" },
+      { status: "failed", reason: "공유폴더가 느려 응답이 없습니다." },
+      { status: "failed", reason: "공유폴더가 느려 응답이 없습니다." },
+    ]);
+    assert.equal(notice?.tone, "error");
+    assert.ok(notice?.text.includes("2건은 DATA 폴더에 넣지 못했습니다"), notice?.text);
+    // 같은 사유는 한 번만 적는다.
+    assert.equal(notice?.text.match(/공유폴더가 느려/g)?.length, 1, notice?.text);
+  });
+
+  test("🔴 `DATA` 자리를 파일이 막았으면 그것도 말한다", () => {
+    const notice = contactFolderDataSaveNotice([
+      { status: "copied", fileName: "파형.csv", categoryFolderBlockedByFile: true },
+    ]);
+    assert.equal(notice?.tone, "success");
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_DATA_BLOCKED_TEXT), notice?.text);
+    assert.ok(CONTACT_FOLDER_DATA_BLOCKED_TEXT.includes("DATA"));
+  });
+
+  test("할 말이 없으면 null — 아무 알림도 뜨지 않는다", () => {
+    assert.equal(contactFolderDataSaveNotice([]), null);
   });
 });
 

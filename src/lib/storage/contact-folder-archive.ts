@@ -325,11 +325,19 @@ async function makeDataFolder(root: string, folder: string): Promise<void> {
  * 폴더를 만드는 일은 사람이 [폴더 만들고 열기]를 누르는 그때뿐이고(조각 5), 올리기가
  * 지나가며 폴더를 늘리면 폴더가 늘어난 것을 사람이 볼 기회가 없다.
  *
- * ── 🔴 분류 폴더 안에 꽂는다 (조각 11) ──────────────────────────────────
- * 연락서 폴더 **바로 아래**가 아니라 `연락서폴더/인수 사진/…` 처럼 **그 파일의 분류
- * 이름표로 된 하위 폴더** 안에 꽂는다. 폴더 이름은 사람이 보는 한글 이름표다
- * (`INTAKE_PHOTO` 가 아니라 `인수 사진` — domain/contact-folder-naming.ts 의
- * contactFolderCategoryFolderName).
+ * ── 🔴 하위 폴더 안에 꽂는다 (조각 11 · 12) ─────────────────────────────
+ * 연락서 폴더 **바로 아래**가 아니라 한 겹 안에 꽂는다. 어느 겹인지는 **부르는 길**이
+ * 정하고, 지금 둘이다:
+ *
+ *  · **올리기**(조각 11) — `연락서폴더/인수 사진/…` 처럼 그 파일의 **분류 이름표**로 된
+ *    하위 폴더. 이름은 사람이 보는 한글 이름표다(`INTAKE_PHOTO` 가 아니라 `인수 사진` —
+ *    domain/contact-folder-naming.ts 의 contactFolderCategoryFolderName).
+ *  · **[DATA에 저장]**(조각 12) — `연락서폴더/DATA/…`. 사람이 측정 자료를 넣는 자리이고,
+ *    분류와 무관하다(copyIntoContactFolderDataFolder).
+ *
+ * 🔴 **규율은 한 벌이다** — 없으면 만들고 · 있으면 쓰고 · 같은 이름의 **파일**이 막고
+ * 있으면 연락서 폴더 바로 아래로 비켜 가 그 사실을 결과에 싣는다. 두 길에 따로 적지
+ * 않는다(아래 openCategoryFolder 하나가 둘을 다 한다).
  *
  *  · 🔴 **쓰는 분류만 그때그때 만든다** — 분류 전부를 미리 만들지 않는다.
  *  · 🔴 **없으면 만들고 있으면 쓴다**(`EEXIST` 면 그대로 진행).
@@ -389,14 +397,18 @@ export type CopyIntoContactFolderInput = {
 };
 
 /**
- * 사본을 **어디에** 꽂았는가 (조각 11).
+ * 사본을 **어디에** 꽂았는가 (조각 11 · 12).
  *
- *  · `categoryFolderName` 이 있으면 그 **분류 폴더 안**이다.
+ *  · `categoryFolderName` 이 있으면 그 **하위 폴더 안**이다 — 올리기면 분류 이름표
+ *    (`인수 사진`), [DATA에 저장]이면 `DATA` 다.
  *  · `null` 이면 **연락서 폴더 바로 아래**다 — 까닭은 둘뿐이고,
  *    `categoryFolderBlockedByFile` 이 참이면 같은 이름의 **파일**이 자리를 막은 것이다
- *    (거짓이면 분류 이름표를 다듬은 결과가 비었다는 뜻 — 그런 분류는 지금 없다).
+ *    (거짓이면 하위 폴더 이름을 다듬은 결과가 비었다는 뜻 — 지금 그런 길은 없다).
  *
  * 🔴 **경로를 담지 않는다** — 담는 것은 폴더 이름 한 조각뿐이다(사유 규율과 같다).
+ *
+ * 🔴 칸 이름이 `category…` 인 것은 조각 11 이 먼저 썼기 때문이다. 조각 12 의 `DATA` 도
+ * **같은 칸**을 쓴다 — 이름을 둘로 가르면 응답 · 화면 · 시험 네 자리가 함께 갈라진다.
  */
 export type ContactFolderCopyPlace = {
   categoryFolderName: string | null;
@@ -422,6 +434,66 @@ export type ContactFolderCopy =
  * 창고에는 이미 들어갔고 감사도 남았다. 이 결과는 화면에 사실대로 알리기 위한 것이다.
  */
 export async function copyIntoContactFolder(input: CopyIntoContactFolderInput): Promise<ContactFolderCopy> {
+  // 분류 폴더 이름은 domain 이 짓는다(한글 이름표 · 다듬기). 못 지으면 null 이고,
+  // 그때는 연락서 폴더 바로 아래에 꽂는다.
+  return copyInto({ ...input, subfolderName: contactFolderCategoryFolderName(input.category) });
+}
+
+export type CopyIntoContactFolderDataInput = {
+  /** 🔴 찾는 열쇠. 이것 하나로만 찾는다(올리기 사본과 같다). */
+  intakeNumber: string;
+  /** 꽂을 이름의 바탕. 다듬어서 **사람이 읽는 이름**으로 꽂는다. */
+  originalFileName: string;
+  /** 꽂을 내용. 저장된 원본의 바이트이거나, 브라우저가 줄인 사진의 바이트다. */
+  bytes: Uint8Array;
+  /** 공유폴더 루트. 주지 않으면 설정을 읽는다. 시험에서는 임시 폴더를 준다. */
+  root?: string | null;
+  /** 폴더를 **찾는** 동안의 기다리기 상한. 시험에서만 바꾼다. */
+  timeoutMs?: number;
+};
+
+/**
+ * ============================================================================
+ * 🔴 **[DATA에 저장]** — 저장된 파일을 그 건의 `DATA` 폴더에 꽂는다 (연락서 조각 12)
+ * ============================================================================
+ * 사용자는 「내려받을 때 기본으로 `DATA` 에 저장되게」를 바랐지만 **웹페이지는 브라우저의
+ * 저장 위치를 지정할 수 없다**(보안). 그래서 **서버가 직접 꽂는다** — 「받아서 탐색기로
+ * 옮기기」 두 걸음이 한 번 누르기가 된다(2026-10-05 승인).
+ *
+ * 올리기 사본(copyIntoContactFolder)과 **다른 것은 꽂는 자리 하나뿐**이다:
+ *  · 🔴 분류 폴더가 아니라 **`DATA`** 다 — 올리기와 자리가 다르다.
+ *  · 🔴 `DATA` 가 **없으면 만든다.** 조각 11 은 **새로 만든 연락서 폴더에만** `DATA` 를
+ *    두었으므로, 그 전에 생긴 폴더(운영 660 여 개)에는 없다. 만들지 않기로 하면 이
+ *    기능이 정작 필요한 곳에서 전부 「폴더가 없습니다」가 된다. 🔴 조각 5 의 「사람이
+ *    한 번 더 눌러야 만든다」는 **공유폴더 맨 위의 연락서 폴더** 이야기다(거기서 폴더가
+ *    늘면 한 수리 건의 서류가 둘로 갈린다). `DATA` 는 **이미 있는 그 건의 폴더 안**에,
+ *    우리가 이름까지 정해 둔 자리이고(contact-folder-naming.ts), 만드는 때도 사람이
+ *    단추를 누른 그때다 — 올리기가 분류 폴더를 그때그때 만드는 것과 같은 규율이다.
+ *  · 🔴 그래도 **연락서 폴더 자체는 만들지 않는다** — 없으면 `no-folder` 다.
+ *
+ * 덮어쓰지 않기 · 내용이 같으면 쓰지 않기 · NFC/NFD · 번호 비켜 가기는 **한 글자도
+ * 다르지 않다**(같은 put 을 지난다).
+ * ============================================================================
+ */
+export async function copyIntoContactFolderDataFolder(
+  input: CopyIntoContactFolderDataInput
+): Promise<ContactFolderCopy> {
+  return copyInto({ ...input, subfolderName: CONTACT_FOLDER_DATA_FOLDER_NAME });
+}
+
+/**
+ * 두 길(올리기 사본 · [DATA에 저장])이 **함께 쓰는 몸통**. 꽂을 하위 폴더 이름만 다르다.
+ * **던지지 않는다.**
+ */
+async function copyInto(input: {
+  intakeNumber: string;
+  /** 꽂을 하위 폴더 이름. `null` 이면 연락서 폴더 바로 아래다. */
+  subfolderName: string | null;
+  originalFileName: string;
+  bytes: Uint8Array;
+  root?: string | null;
+  timeoutMs?: number;
+}): Promise<ContactFolderCopy> {
   const configured = input.root === undefined || input.root === null ? resolveContactFolderArchiveRoot() : input.root;
   if (configured === null || configured.trim().length === 0) {
     return { status: "disabled" };
@@ -460,9 +532,7 @@ export async function copyIntoContactFolder(input: CopyIntoContactFolderInput): 
 
   try {
     // ── 2) 꽂는다 — 🔴 상한 없이. 끊어도 쓰기는 뒤에서 끝나 파일이 생긴다 ──
-    //    분류 폴더 이름은 domain 이 짓는다(한글 이름표 · 다듬기). 못 지으면 null 이고,
-    //    그때는 연락서 폴더 바로 아래에 꽂는다.
-    return await put(root, picked.folderName, contactFolderCategoryFolderName(input.category), fileName, input.bytes);
+    return await put(root, picked.folderName, input.subfolderName, fileName, input.bytes);
   } catch (error) {
     return {
       status: "failed",

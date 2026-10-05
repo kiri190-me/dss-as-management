@@ -115,6 +115,10 @@ src/components/repair-cases/files/contact-folder-place-open.test.ts
 # 올린 파일이 공유폴더에도 들어갔는가를 **사실대로 말하는** 한 줄(조각 6)과, 휴지통
 # 확인창의 「사본은 그대로 남습니다」. 앱은 공유폴더의 파일을 지우지 않는다.
 src/components/repair-cases/files/contact-folder-copy-notice.test.ts
+# [DATA에 저장](조각 12) — 🔴 낱개로 각각(ZIP 이 안 생긴다) · 한 건씩 차례로 · 건마다 결과 ·
+# 파일 이름을 보내지 않음 · 기능이 꺼져 있으면 단추가 없음 · 꽂은 뒤 공유폴더 구역 다시 읽기 ·
+# 🔴 내려받기는 한 글자도 안 바뀜.
+src/components/repair-cases/files/contact-folder-data-save.test.ts
 src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx

@@ -109,6 +109,11 @@ export default function FilesScreen(props: {
   canUpload?: boolean;
   /** 지우기·되살리기를 보일지. 실제 차단은 서버 액션이 다시 한다. */
   canManage?: boolean;
+  /**
+   * 🔴 사내 공유폴더(연락서 폴더) 기능이 켜져 있는가(조각 12). 서버가 설정을 보고
+   * 정한다 — 꺼져 있으면 목록에 [DATA에 저장]이 **아예 그려지지 않는다.**
+   */
+  contactFolderEnabled?: boolean;
 }) {
   if (props.attachments) {
     return (
@@ -119,6 +124,7 @@ export default function FilesScreen(props: {
         trashedAttachments={props.trashedAttachments ?? []}
         canUpload={props.canUpload ?? false}
         canManage={props.canManage ?? false}
+        contactFolderEnabled={props.contactFolderEnabled ?? false}
       />
     );
   }
@@ -176,6 +182,7 @@ function DatabaseFilesScreen({
   trashedAttachments,
   canUpload,
   canManage,
+  contactFolderEnabled,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -183,6 +190,7 @@ function DatabaseFilesScreen({
   trashedAttachments: TrashedAttachmentListItem[];
   canUpload: boolean;
   canManage: boolean;
+  contactFolderEnabled: boolean;
 }) {
   const router = useRouter();
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
@@ -1027,6 +1035,13 @@ function DatabaseFilesScreen({
           canManage={canManage}
           onDeleteMany={setPendingDeletes}
           isBusy={isMutating}
+          /*
+            🔴 [DATA에 저장](조각 12) — 꺼져 있으면 단추가 아예 그려지지 않는다.
+            꽂은 뒤에는 **올리기와 같은 신호**로 공유폴더 구역을 다시 읽게 한다
+            (조각 10 이 만든 reloadToken — 보고 있던 자리는 그대로다).
+          */
+          contactFolderEnabled={contactFolderEnabled}
+          onSavedToContactFolder={() => setContactFolderReloadToken((token) => token + 1)}
         />
       )}
 

@@ -15,13 +15,27 @@ import {
 import type { RepairCaseAttachmentListItem } from "@/lib/db/queries/attachments";
 import { fetchAttachmentBlob, saveBlobAs, shrinkImageBlob } from "./shrink-image";
 import { createStoredZip, uniqueEntryNames } from "./zip-store";
+import {
+  contactFolderDataSaveNotice,
+  type ContactFolderCopyNotice,
+} from "./contact-folder-copy-notice";
+import { saveEachToDataFolder } from "./contact-folder-data-save";
 
 /**
  * ============================================================================
- * 줄여서 내려받기
+ * 줄여서 내려받기 — 그리고 **줄여서 DATA 에 저장**(조각 12)
  * ============================================================================
  * 원본은 손대지 않는다. 서버에 있는 파일은 그대로이고, **내려받는 순간에만**
  * 브라우저가 줄여서 저장한다. 그래서 몇 번을 줄여 받아도 원본이 상하지 않는다.
+ *
+ * ── 🔴 [DATA에 저장]은 **묶지 않는다** ──────────────────────────────────
+ * 아래 내려받기가 여러 장을 ZIP 으로 묶는 것은 기능이 아니라 **브라우저가 연속
+ * 내려받기를 막기 때문**이다(zip-store.ts 머리말). [DATA에 저장]은 내려받기가 아니라
+ * **서버가 꽂는 것**이라 그 제약이 없다 — 줄인 사진을 **낱개로 각각** 보낸다.
+ *
+ * 🔴 줄이는 쪽은 **여전히 브라우저**다(원본이 안 상한다). 달라지는 것은 그 바이트를
+ * 디스크로 내리느냐, 서버로 보내 공유폴더에 꽂게 하느냐뿐이다. 🔴 파일 이름의 꼬리
+ * (`_50pct`)도 **같은 규칙**이다 — 다만 이름은 서버가 짓는다(통로 머리말).
  *
  * ── 예상 용량은 예상이다 ─────────────────────────────────────────────────
  * 고르자마자 보여 주는 값은 계산값이고, 실제로 인코딩해 보기 전이다. JPEG는
@@ -35,12 +49,22 @@ type ShrinkDownloadDialogProps = {
   /** 줄일 수 있는 사진들만 온다(JPG·PNG). 부르는 쪽이 걸러 넘긴다. */
   items: RepairCaseAttachmentListItem[];
   onClose: () => void;
+  /** 🔴 공유폴더 기능이 꺼져 있으면 [DATA에 저장]을 **아예 그리지 않는다**(조각 12). */
+  contactFolderEnabled?: boolean;
+  /** `DATA` 에 꽂은 뒤 — 공유폴더 구역을 다시 읽게 한다(조각 10 이 만든 신호). */
+  onSavedToContactFolder?: () => void;
 };
 
 type Progress = { current: number; total: number };
+/** 🔴 **내려받은 결과**다 — 조각 12 가 이 모양을 한 글자도 바꾸지 않았다. */
 type Outcome = { savedCount: number; totalBytes: number; missedTarget: number };
 
-export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadDialogProps) {
+export default function ShrinkDownloadDialog({
+  items,
+  onClose,
+  contactFolderEnabled = false,
+  onSavedToContactFolder,
+}: ShrinkDownloadDialogProps) {
   const [mode, setMode] = useState<"ratio" | "bytes">("ratio");
   const [ratio, setRatio] = useState(0.5);
   const [amount, setAmount] = useState("500");
@@ -49,6 +73,16 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
   const [progress, setProgress] = useState<Progress | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 🔴 `DATA` 에 꽂은 결과 — **화면에 남는다**(조각 6·12 와 같은 판단). 저장 팝업은
+   * 0.5 초 뒤 저절로 닫히는 성공 전용이라 읽어야 하는 문장을 담을 자리가 아니다.
+   */
+  const [dataSaveNotice, setDataSaveNotice] = useState<ContactFolderCopyNotice | null>(null);
+  /**
+   * `DATA` 로 보낼 때 **실제로 얼마나 줄었는가**. 🔴 위 `outcome`(내려받은 결과)과 **따로**
+   * 둔다 — 「받았습니다」와 「보냈습니다」는 다른 일이고, 내려받기 쪽 문장을 건드리지 않는다.
+   */
+  const [dataShrinkSummary, setDataShrinkSummary] = useState<Outcome | null>(null);
 
   const originalSizes = useMemo(() => items.map((item) => item.fileSize), [items]);
   const originalTotal = useMemo(
@@ -87,12 +121,21 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
 
   const isBusy = progress !== null;
 
+  /**
+   * 파일 이름에 붙는 꼬리 — 🔴 **내려받기와 [DATA에 저장]이 같은 값을 쓴다.** 둘이
+   * 갈리면 같은 사진이 길에 따라 다른 이름으로 남아 사람이 그것을 설명할 수 없다.
+   * (서버는 이 값을 받아 shrunkFileName 으로 이름을 짓는다 — 통로 머리말.)
+   */
+  const shrinkLabel = target === null ? "" : target.kind === "ratio" ? ratioLabel(target.ratio) : `${amount}${unit}`;
+
   async function run() {
     if (!target) return;
     setError(null);
     setOutcome(null);
+    setDataSaveNotice(null);
+    setDataShrinkSummary(null);
 
-    const label = target.kind === "ratio" ? ratioLabel(target.ratio) : `${amount}${unit}`;
+    const label = shrinkLabel;
     let savedCount = 0;
     let totalBytes = 0;
     let missedTarget = 0;
@@ -138,6 +181,54 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
       setError(caught instanceof Error ? caught.message : "사진을 줄이지 못했습니다.");
     } finally {
       setProgress(null);
+    }
+  }
+
+  /**
+   * 🔴 **줄여서 `DATA` 에 저장**(조각 12) — 줄이는 것은 여전히 브라우저가 하고, 그
+   * 바이트를 서버로 보내 공유폴더 `DATA` 에 꽂게 한다.
+   *
+   * 🔴 **묶지 않는다** — 낱개로 각각, **한 건씩 차례로**(saveEachToDataFolder).
+   * 🔴 사진은 **한 장씩** 줄인다 — 여러 장을 동시에 풀면 폰에서 메모리가 모자라 탭이
+   *    죽는다(위 내려받기와 같은 규율).
+   * 🔴 **원본은 그대로다** — 시스템 창고의 파일에 손대지 않는다.
+   */
+  async function saveToDataFolder() {
+    if (!target) return;
+    setError(null);
+    setOutcome(null);
+    setDataSaveNotice(null);
+    setDataShrinkSummary(null);
+
+    const label = shrinkLabel;
+    let savedCount = 0;
+    let totalBytes = 0;
+    let missedTarget = 0;
+
+    setProgress({ current: 0, total: items.length });
+    try {
+      const notes = await saveEachToDataFolder(
+        items,
+        async (item) => {
+          const source = await fetchAttachmentBlob(item.id);
+          const targetBytes = resolveTargetBytes(target, item.fileSize);
+          const result = await shrinkImageBlob(source, targetBytes);
+          savedCount += 1;
+          totalBytes += result.blob.size;
+          if (!result.reachedTarget) missedTarget += 1;
+          // 한 장을 마칠 때마다 화면에 숨 쉴 틈을 준다(위 내려받기와 같은 까닭).
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+          return { attachmentId: item.id, shrunk: { label, body: result.blob } };
+        },
+        { onProgress: setProgress }
+      );
+      setDataSaveNotice(contactFolderDataSaveNotice(notes));
+      if (savedCount > 0) setDataShrinkSummary({ savedCount, totalBytes, missedTarget });
+    } finally {
+      setProgress(null);
+      // 🔴 꽂은 뒤에는 공유폴더 구역을 다시 읽는다(조각 10 의 신호). 하나도 안 들어갔어도
+      //    부른다 — 그때는 다시 읽어도 달라질 것이 없고, 위 알림은 그대로 남는다.
+      onSavedToContactFolder?.();
     }
   }
 
@@ -315,13 +406,47 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
           </div>
         )}
 
+        {/*
+          🔴 `DATA` 에 꽂은 결과 — **화면에 남는다**(조각 12). 여럿이면 몇 건 되고 몇 건
+          안 됐는지가 이 한 줄에 들어 있다. 위의 초록 상자는 「얼마나 줄었는가」이고,
+          이 줄은 「공유폴더에 들어갔는가」다 — 다른 사실이라 자리를 나눈다.
+        */}
+        {dataSaveNotice && (
+          <p
+            role={dataSaveNotice.tone === "error" ? "alert" : "status"}
+            aria-live="polite"
+            data-contact-folder-data-save-notice=""
+            className={
+              dataSaveNotice.tone === "error"
+                ? "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
+                : "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
+            }
+          >
+            {dataSaveNotice.text}
+          </p>
+        )}
+
+        {/* 🔴 「얼마나 줄었는가」는 「어디에 들어갔는가」와 다른 사실이라 줄을 나눈다. */}
+        {dataShrinkSummary && (
+          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+            줄인 결과 — 실제 한 장 평균{" "}
+            <strong>
+              {formatBytes(averagePerImageBytes(dataShrinkSummary.totalBytes, dataShrinkSummary.savedCount))}
+            </strong>{" "}
+            (합계 {formatBytes(dataShrinkSummary.totalBytes)})
+            {dataShrinkSummary.missedTarget > 0
+              ? ` · 그중 ${dataShrinkSummary.missedTarget}장은 목표까지 줄지 않아 줄일 수 있는 만큼만 줄였습니다.`
+              : ""}
+          </p>
+        )}
+
         {error && (
           <p role="alert" className="text-sm text-red-700 dark:text-red-400">
             {error}
           </p>
         )}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
@@ -330,11 +455,27 @@ export default function ShrinkDownloadDialog({ items, onClose }: ShrinkDownloadD
           >
             {outcome ? "닫기" : "취소"}
           </button>
+          {/*
+            🔴 [줄여서 내려받기] **옆에** 선다 — 대신하지 않는다(조각 12). 공유폴더
+            기능이 꺼져 있으면 아예 없다. 🔴 Windows 가 아니어도 보인다 — 꽂는 일은
+            서버가 하므로 그 PC 의 도우미와 무관하다.
+          */}
+          {contactFolderEnabled && (
+            <button
+              type="button"
+              onClick={() => void saveToDataFolder()}
+              disabled={isBusy || target === null || items.length === 0}
+              title="줄인 사진을 이 건의 연락서 공유폴더 DATA 에 넣습니다"
+              className="print:hidden rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium whitespace-nowrap text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+            >
+              DATA에 저장
+            </button>
+          )}
           <button
             type="button"
             onClick={run}
             disabled={isBusy || target === null || items.length === 0}
-            className="rounded-md bg-primary-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
+            className="rounded-md bg-primary-900 px-4 py-2 text-sm font-medium whitespace-nowrap text-white disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
             {isBusy ? "줄이는 중…" : "줄여서 내려받기"}
           </button>

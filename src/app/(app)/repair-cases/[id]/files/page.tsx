@@ -9,6 +9,7 @@ import {
   listTrashedAttachmentsForRepairCase,
 } from "@/lib/db/queries/attachments";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import { resolveContactFolderArchiveRoot } from "@/lib/storage/contact-folder-archive";
 import FilesScreen from "@/components/repair-cases/files/FilesScreen";
 
 export const metadata: Metadata = {
@@ -55,6 +56,15 @@ export default async function RepairCaseFilesPage({
     ? await hasPermission(actingUser, "repairCases.files", "WRITE")
     : false;
 
+  // 🔴 사내 공유폴더가 설정된 환경인가(조각 12). 꺼져 있으면 화면이 [DATA에 저장]을
+  // **아예 그리지 않는다** — 눌러도 막히는 단추를 내밀지 않는다. 🔴 나가는 것은 참/거짓
+  // 하나뿐이고 루트 값(.env)은 화면으로 가지 않는다.
+  //
+  // 🔴 공유폴더 **읽기**는 여기서 하지 않는다 — 그러면 NAS 가 느린 날 이 탭이 통째로 안
+  // 뜬다(읽기는 화면이 뜬 뒤 공유폴더 구역이 따로 한다). 설정을 보는 것은 `process.env`
+  // 한 줄이라 디스크를 건드리지 않는다.
+  const contactFolderEnabled = resolveContactFolderArchiveRoot() !== null;
+
   return (
     <FilesScreen
       resolved={resolved}
@@ -63,6 +73,7 @@ export default async function RepairCaseFilesPage({
       trashedAttachments={trashedAttachments}
       canUpload={canManageFiles}
       canManage={canManageFiles}
+      contactFolderEnabled={contactFolderEnabled}
     />
   );
 }

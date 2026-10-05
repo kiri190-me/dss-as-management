@@ -51,6 +51,11 @@ import {
 } from "@/lib/hooks/useShiftRangeSelection";
 import { fetchAttachmentBlob, saveBlobAs, uploadPreview } from "./shrink-image";
 import { createStoredZip, uniqueEntryNames } from "./zip-store";
+import {
+  contactFolderDataSaveNotice,
+  type ContactFolderCopyNotice,
+} from "./contact-folder-copy-notice";
+import { saveEachToDataFolder, type DataSaveProgress } from "./contact-folder-data-save";
 
 /**
  * ============================================================================
@@ -89,6 +94,17 @@ type StoredAttachmentListProps = {
   onDeleteMany: (items: RepairCaseAttachmentListItem[]) => void;
   /** 지우기·되살리기가 도는 중 — 그동안 조작을 막는다. */
   isBusy: boolean;
+  /**
+   * 🔴 사내 공유폴더(연락서 폴더) 기능이 **켜져 있는가**(조각 12). 꺼져 있으면
+   * [DATA에 저장]을 **아예 그리지 않는다** — 눌러도 막히는 단추를 내밀지 않는다.
+   * 🔴 값은 **서버가** 정한다(파일 관리 페이지) — 화면은 설정을 읽지 않는다.
+   *
+   * 🔴 **Windows 인지는 보지 않는다.** 꽂는 일은 서버가 하므로 그 PC 의 도우미와
+   * 무관하다(공유폴더 줄의 [열기]와 다른 점이다).
+   */
+  contactFolderEnabled?: boolean;
+  /** `DATA` 에 꽂은 뒤 — 공유폴더 구역을 다시 읽게 한다(조각 10 이 만든 신호). */
+  onSavedToContactFolder?: () => void;
 };
 
 type ViewKind = "list" | "gallery";
@@ -331,6 +347,46 @@ function ImagePreviewButton({
 }
 
 /**
+ * 줄마다 서는 **[DATA에 저장]** — 그 파일 하나를 이 건의 연락서 폴더 `DATA` 에 꽂는다
+ * (연락서 조각 12).
+ *
+ * 🔴 **[내려받기]를 대신하지 않는다 — 길을 하나 더 내는 것이다.** 내려받기는 그대로
+ * 있고, 이 단추는 「받아서 탐색기로 옮기기」 두 걸음을 한 번 누르기로 줄인다.
+ *
+ * 🔴 `<a>` 가 아니라 `<button>` 이다 — 가는 곳이 있는 것이 아니라 서버에게 꽂아 달라고
+ * 하는 것이다. 🔴 `print:hidden` — 공유폴더는 그때그때 달라지는 바깥 사정이라 종이에
+ * 남길 것이 아니다(공유폴더 구역과 같은 판단).
+ *
+ * 보이는 모양은 이웃 단추들에게서 받는다(세 목록이 저마다 다른 크기를 쓴다 — 표 · 카드 ·
+ * 격자). 🔴 **Windows 가 아니어도 보인다** — 꽂는 일은 서버가 하므로 그 PC 의 도우미와
+ * 무관하다.
+ */
+function DataFolderSaveButton({
+  item,
+  onSave,
+  disabled,
+  className,
+}: {
+  item: RepairCaseAttachmentListItem;
+  onSave: (items: RepairCaseAttachmentListItem[]) => void;
+  disabled: boolean;
+  className: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSave([item])}
+      disabled={disabled}
+      // 한 화면에 같은 말이 여럿이라 무엇을 넣는지 이름으로 밝힌다(이웃 단추와 같은 방식).
+      aria-label={`${item.originalFileName} DATA에 저장`}
+      className={`print:hidden ${className}`}
+    >
+      DATA에 저장
+    </button>
+  );
+}
+
+/**
  * ────────────────────────────────────────────────────────────────────────────
  * 미리보기 크기 — 이 브라우저에 적어 두는 자리
  * ────────────────────────────────────────────────────────────────────────────
@@ -403,6 +459,8 @@ export default function StoredAttachmentList({
   canManage,
   onDeleteMany,
   isBusy,
+  contactFolderEnabled = false,
+  onSavedToContactFolder,
 }: StoredAttachmentListProps) {
   const router = useRouter();
   const [view, setView] = useState<ViewKind>("list");
@@ -423,6 +481,13 @@ export default function StoredAttachmentList({
   /** 여러 개를 묶는 중 — 파일을 하나씩 받아 오므로 진행을 보여 준다. */
   const [bundleProgress, setBundleProgress] = useState<{ current: number; total: number } | null>(null);
   const [bundleError, setBundleError] = useState<string | null>(null);
+  /** `DATA` 에 꽂는 중 — 🔴 **한 건씩 차례로** 보내므로 몇 건째인지 보여 준다(조각 12). */
+  const [dataSaveProgress, setDataSaveProgress] = useState<DataSaveProgress | null>(null);
+  /**
+   * 🔴 꽂은 결과는 **화면에 남는 알림**이다(조각 6 과 같은 판단) — 저장 팝업은 0.5 초 뒤
+   * 저절로 닫히는 성공 전용이라 읽어야 하는 문장을 담을 자리가 아니다.
+   */
+  const [dataSaveNotice, setDataSaveNotice] = useState<ContactFolderCopyNotice | null>(null);
 
   const [filters, setFilters] = useState<AttachmentListFilters>(DEFAULT_ATTACHMENT_LIST_FILTERS);
   /** 옛 사진의 미리보기를 채우는 중. */
@@ -668,6 +733,37 @@ export default function StoredAttachmentList({
     }
   }
 
+  /**
+   * 🔴 **[DATA에 저장]** — 그 건의 연락서 폴더 `DATA` 에 서버가 꽂는다 (조각 12).
+   *
+   * 🔴 **묶지 않는다.** 여러 개를 내려받을 때 ZIP 으로 묶는 것은 브라우저가 연속
+   * 내려받기를 막기 때문인데(zip-store.ts), 이 길은 내려받기가 아니라 서버가 꽂는
+   * 것이라 그 제약이 없다 — **낱개로 각각** 간다. 공유폴더에 ZIP 을 두면 탐색기에서 또
+   * 풀어야 하고 [열기]로 바로 못 연다.
+   *
+   * 🔴 **한 건씩 차례로** 보내고 결과는 **건마다** 받는다(saveEachToDataFolder).
+   * 🔴 **내려받기를 대신하지 않는다** — 더하는 길이다. 원본도 그대로다.
+   */
+  async function saveToDataFolder(items: RepairCaseAttachmentListItem[]) {
+    if (items.length === 0) return;
+    setDataSaveNotice(null);
+    setDataSaveProgress({ current: 0, total: items.length });
+    try {
+      const notes = await saveEachToDataFolder(
+        items,
+        async (item) => ({ attachmentId: item.id }),
+        { onProgress: setDataSaveProgress }
+      );
+      setDataSaveNotice(contactFolderDataSaveNotice(notes));
+    } finally {
+      setDataSaveProgress(null);
+      // 🔴 꽂은 뒤에는 공유폴더 구역을 다시 읽는다 — 일부만 들어갔어도, 하나도 못
+      //    들어갔어도 부른다(다시 읽어서 달라질 것이 없을 뿐이고, 읽기가 실패해도 위
+      //    알림은 그대로 남는다 — 조각 10 의 신호).
+      onSavedToContactFolder?.();
+    }
+  }
+
   const filterBar = (
     <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center gap-2">
@@ -858,6 +954,28 @@ export default function StoredAttachmentList({
         >
           줄여서 받기
         </button>
+        {/*
+          🔴 **[DATA에 저장]** — 고른 것들을 그 건의 연락서 폴더 `DATA` 에 서버가 꽂는다
+          (조각 12). [묶어서 받기] 옆이지만 **묶지 않는다** — 낱개로 각각 간다.
+
+          🔴 공유폴더 기능이 꺼져 있으면 **단추가 아예 없다.**
+          🔴 Windows 가 아니어도 보인다 — 꽂는 일은 서버가 하므로 도우미와 무관하다.
+          `print:hidden` 인 까닭은 공유폴더가 그때그때 달라지는 바깥 사정이라 종이에
+          남길 것이 아니기 때문이다(공유폴더 구역과 같은 판단).
+        */}
+        {contactFolderEnabled && (
+          <button
+            type="button"
+            onClick={() => void saveToDataFolder(selected)}
+            disabled={isBusy || selected.length === 0 || dataSaveProgress !== null}
+            title="고른 파일을 이 건의 연락서 공유폴더 DATA 에 넣습니다"
+            className="print:hidden rounded-md border border-zinc-300 px-2 py-1.5 text-xs font-medium whitespace-nowrap text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 sm:px-2.5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {dataSaveProgress
+              ? `넣는 중… ${dataSaveProgress.current}/${dataSaveProgress.total}`
+              : "DATA에 저장"}
+          </button>
+        )}
         {canManage && (
           <button
             type="button"
@@ -1006,6 +1124,15 @@ export default function StoredAttachmentList({
                   >
                     내려받기
                   </a>
+                  {/* 🔴 내려받기 옆에 **하나 더** — 공유폴더 기능이 꺼져 있으면 없다(조각 12). */}
+                  {contactFolderEnabled && (
+                    <DataFolderSaveButton
+                      item={item}
+                      onSave={(items) => void saveToDataFolder(items)}
+                      disabled={isBusy || dataSaveProgress !== null}
+                      className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    />
+                  )}
                   {canManage && (
                     <button
                       type="button"
@@ -1087,6 +1214,14 @@ export default function StoredAttachmentList({
             >
               내려받기
             </a>
+            {contactFolderEnabled && (
+              <DataFolderSaveButton
+                item={item}
+                onSave={(items) => void saveToDataFolder(items)}
+                disabled={isBusy || dataSaveProgress !== null}
+                className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+              />
+            )}
             {canManage && (
               <button
                 type="button"
@@ -1245,6 +1380,14 @@ export default function StoredAttachmentList({
                   >
                     내려받기
                   </a>
+                  {contactFolderEnabled && (
+                    <DataFolderSaveButton
+                      item={item}
+                      onSave={(items) => void saveToDataFolder(items)}
+                      disabled={isBusy || dataSaveProgress !== null}
+                      className="shrink-0 whitespace-nowrap text-[11px] font-medium text-zinc-700 underline disabled:opacity-40 dark:text-zinc-300"
+                    />
+                  )}
                 </div>
                 {canManage && (
                   <button
@@ -1319,6 +1462,27 @@ export default function StoredAttachmentList({
           {bundleError}
         </p>
       )}
+
+      {/*
+        🔴 [DATA에 저장]의 결과는 **화면에 남는다**(조각 12) — 저장 팝업은 0.5 초 뒤
+        저절로 닫히는 성공 전용이라 읽어야 하는 문장을 담을 자리가 아니다(조각 6 과 같은
+        판단). 여럿이면 몇 건 되고 몇 건 안 됐는지가 이 한 줄에 들어 있다.
+        인쇄에는 찍지 않는다 — 공유폴더는 그때그때 달라지는 바깥 사정이다.
+      */}
+      {dataSaveNotice && (
+        <p
+          role={dataSaveNotice.tone === "error" ? "alert" : "status"}
+          aria-live="polite"
+          data-contact-folder-data-save-notice=""
+          className={
+            dataSaveNotice.tone === "error"
+              ? "print:hidden rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400"
+              : "print:hidden rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
+          }
+        >
+          {dataSaveNotice.text}
+        </p>
+      )}
       {visible.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white p-6 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           조건에 맞는 파일이 없습니다.{" "}
@@ -1353,7 +1517,13 @@ export default function StoredAttachmentList({
       )}
 
       {shrinkTargets.length > 0 && (
-        <ShrinkDownloadDialog items={shrinkTargets} onClose={() => setShrinkTargets([])} />
+        <ShrinkDownloadDialog
+          items={shrinkTargets}
+          onClose={() => setShrinkTargets([])}
+          /* 🔴 꺼져 있으면 그 창에도 [DATA에 저장]이 없다(조각 12). */
+          contactFolderEnabled={contactFolderEnabled}
+          onSavedToContactFolder={onSavedToContactFolder}
+        />
       )}
     </div>
   );

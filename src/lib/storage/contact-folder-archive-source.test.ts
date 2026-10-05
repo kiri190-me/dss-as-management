@@ -209,13 +209,14 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
   });
 
   test("🔴 던지지 않는다 — 밖으로 나가는 것은 status 뿐이고, 사유에 경로를 담지 않는다", () => {
-    // 내보내는 함수는 넷뿐이다 — 설정 읽기 · 찾기 · 만들기 · 꽂기.
-    // 🔴 **지우기 · 이름 바꾸기를 내보내지 않는다.**
+    // 내보내는 함수는 다섯뿐이다 — 설정 읽기 · 찾기 · 만들기 · 꽂기(분류 폴더) ·
+    // 꽂기(`DATA` — 조각 12). 🔴 **지우기 · 이름 바꾸기를 내보내지 않는다.**
     const exported = [...source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)]
       .map((match) => match[1])
       .sort();
     assert.deepEqual(exported, [
       "copyIntoContactFolder",
+      "copyIntoContactFolderDataFolder",
       "createContactFolder",
       "findContactFolder",
       "resolveContactFolderArchiveRoot",
