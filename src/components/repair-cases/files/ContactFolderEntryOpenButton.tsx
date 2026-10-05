@@ -144,9 +144,13 @@ export function ContactFolderEntryOpenControl({ folderName, fileName }: ContactF
 }
 
 type ContactFolderEntryOpenButtonProps = {
-  /** 그 수리 건의 연락서 폴더 이름(루트 바로 아래). */
+  /**
+   * 공유폴더 루트 아래의 **폴더 경로**. 맨 위 칸을 보고 있으면 연락서 폴더 이름 하나이고,
+   * 하위 폴더에 들어가 있으면 그 자리까지 이어진 경로다(조각 10 — 부르는 쪽이 잇는다).
+   * 🔴 주소 모양은 바뀌지 않았다 — 도우미는 전부터 여러 마디 경로를 받는다.
+   */
   folderName: string;
-  /** 그 폴더 안에서의 파일 이름. */
+  /** 그 폴더 안에서의 파일 이름 — 🔴 **마디 하나**다(아래 흐름이 그것을 본다). */
   fileName: string;
 };
 

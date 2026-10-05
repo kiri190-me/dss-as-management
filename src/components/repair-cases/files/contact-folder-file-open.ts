@@ -222,8 +222,9 @@ export async function runContactFolderFileOpen({
   const env: ContactFolderFileOpenEnvironment = { ...BROWSER_ENVIRONMENT, ...overrides };
 
   // 🔴 파일 이름은 **그 폴더 안에서의 이름 하나**여야 한다 — `하위/연락서.pdf` 처럼 마디를
-  //    늘려 내려가는 길을 여기서 끊는다(목록이 주는 이름에는 `/` 가 없다. 하위 폴더로
-  //    내려가는 것은 이 조각의 범위 밖이다).
+  //    늘려 내려가는 길을 여기서 끊는다(목록이 주는 이름에는 `/` 가 없다). 조각 10 에서
+  //    화면이 하위 폴더 안으로 들어갈 수 있게 됐지만, 그때 늘어나는 것은 **폴더 쪽 경로**이고
+  //    이 규칙은 그대로다.
   const link = isOpenableQuoteFolderFileName(fileName)
     ? buildQuoteFolderFileLink(contactFolderFileRelativePath(folderName, fileName))
     : null;

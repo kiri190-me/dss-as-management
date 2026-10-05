@@ -5,6 +5,7 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getRepairCaseContactFolderKeyById } from "@/lib/db/queries/repair-cases";
+import { checkQuoteFolderRelativePath } from "@/lib/domain/quote-folder-link";
 import { findContactFolder, resolveContactFolderArchiveRoot } from "@/lib/storage/contact-folder-archive";
 import { listContactFolderEntries } from "@/lib/storage/contact-folder-entries";
 
@@ -36,10 +37,18 @@ import { listContactFolderEntries } from "@/lib/storage/contact-folder-entries";
  * 어느 폴더인지 모르는 채로 내용을 보이면 **남의 수리 건 서류를 보여 줄 수 있다.**
  * 이름만 돌려주고 끝낸다 — 정리는 사람이 한다(pickContactFolder 머리말).
  *
+ * ── 🔴 하위 폴더는 **상대 경로 한 칸**으로만 받는다 (조각 10) ───────────────
+ * `?path=사진/2026` 은 **찾은 연락서 폴더 안에서의 자리**다. 루트도 폴더 이름도 들어오지
+ * 않는다. 검사는 **이미 있는 것을 그대로** 쓴다 — checkQuoteFolderRelativePath
+ * (domain/quote-folder-link.ts)가 빈 마디 · `.` · `..` · 드라이브 문자 · UNC · 제어문자 ·
+ * Windows 금지 글자 · 끝이 점 · 공백인 마디까지 여덟 갈래로 거절한다(도우미 주소가 쓰는
+ * 바로 그 규칙이다). 어긋나면 **400** 이고, 디스크를 보지 않는다. 깊이 상한 · 줄 수 상한 ·
+ * 기다리기 상한은 **저장소 모듈이 쥔다** — 통로가 제 숫자를 들지 않는다.
+ *
  * ── 순서 ────────────────────────────────────────────────────────────────
  *  1) 저장 모드 → 2) 세션 · 살아 있는 계정 · 승인 → 3) 권한(repairCases.files READ)
- *  → 4) 수리 건(휴지통이면 없는 것) → 5) 공유폴더 루트(꺼져 있으면 disabled)
- *  → 6) 폴더 찾기 → 7) **찾았을 때만** 그 안을 읽기 → 8) JSON
+ *  → 4) 수리 건(휴지통이면 없는 것) → 5) 하위 경로 검사 → 6) 공유폴더 루트(꺼져 있으면
+ *  disabled) → 7) 폴더 찾기 → 8) **찾았을 때만** 그 안을 읽기 → 9) JSON
  *
  * 권한 **두 겹**이다(이웃 통로와 같다):
  *  · 넓은 문턱 `repairCases.files` READ 가 없으면 **403** — 조회보다 **앞**이다.
@@ -56,7 +65,14 @@ import { listContactFolderEntries } from "@/lib/storage/contact-folder-entries";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type FailureCode = "DATABASE_MODE_REQUIRED" | "UNAUTHENTICATED" | "ACCOUNT_NOT_APPROVED" | "FORBIDDEN" | "NOT_FOUND";
+type FailureCode =
+  | "DATABASE_MODE_REQUIRED"
+  | "UNAUTHENTICATED"
+  | "ACCOUNT_NOT_APPROVED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  /** 🔴 하위 폴더 경로가 규칙 밖이다 — 디스크를 보기 전에 끝난다. */
+  | "INVALID_PATH";
 
 /** 한 줄. 🔴 **경로를 담는 칸이 타입 수준에 없다** — 이름은 폴더 안에서의 이름뿐이다. */
 type ContactFolderEntryBody = {
@@ -98,7 +114,7 @@ function modifiedAtOf(modifiedAtMs: number | null): { modifiedAt?: string } {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   // ── 1) 저장 모드 ──────────────────────────────────────────────────────
@@ -132,13 +148,19 @@ export async function GET(
     return fail(404, "NOT_FOUND", "해당 수리 건을 찾을 수 없습니다.");
   }
 
-  // ── 5) 공유폴더 루트 — 이 값은 찾기 · 읽기에만 쓰고 응답에 싣지 않는다 ───
+  // ── 5) 하위 폴더 자리 — 🔴 도우미 주소와 **같은 규칙**으로 본다(새로 짜지 않는다) ──
+  const insidePath = request.nextUrl.searchParams.get("path") ?? "";
+  if (insidePath !== "" && checkQuoteFolderRelativePath(insidePath) !== null) {
+    return fail(400, "INVALID_PATH", "하위 폴더 경로가 올바르지 않습니다.");
+  }
+
+  // ── 6) 공유폴더 루트 — 이 값은 찾기 · 읽기에만 쓰고 응답에 싣지 않는다 ───
   const archiveRoot = resolveContactFolderArchiveRoot();
   if (archiveRoot === null) {
     return respond({ status: "disabled" });
   }
 
-  // ── 6) 폴더 찾기 — 읽기만 한다. 없으면 「아직 없습니다」로 끝난다 ────────
+  // ── 7) 폴더 찾기 — 읽기만 한다. 없으면 「아직 없습니다」로 끝난다 ────────
   const found = await findContactFolder({ root: archiveRoot, intakeNumber: repairCase.intakeNumber });
   if (found.status === "multiple") {
     // 🔴 어느 폴더인지 모르는데 내용을 보이면 안 된다 — 이름만 준다.
@@ -155,13 +177,17 @@ export async function GET(
     return respond({ status: "failed", reason: found.reason });
   }
 
-  // ── 7) 그 안을 읽는다 — 🔴 맨 위 칸만, 줄 수 · 기다리는 시간에 상한을 두고 ──
-  const listed = await listContactFolderEntries({ root: archiveRoot, folderName: found.folderName });
+  // ── 8) 그 안을 읽는다 — 🔴 그 자리의 맨 위 칸만, 깊이 · 줄 수 · 기다리는 시간에 상한을 두고 ──
+  const listed = await listContactFolderEntries({
+    root: archiveRoot,
+    folderName: found.folderName,
+    relativePath: insidePath,
+  });
   if (listed.status === "failed") {
     return respond({ status: "failed", reason: listed.reason });
   }
 
-  // ── 8) JSON — 이름 · 크기 · 수정 시각 · 폴더인가. 경로는 나가지 않는다 ───
+  // ── 9) JSON — 이름 · 크기 · 수정 시각 · 폴더인가. 경로는 나가지 않는다 ───
   return respond({
     status: "found",
     folderName: found.folderName,

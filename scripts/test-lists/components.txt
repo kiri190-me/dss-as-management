@@ -108,6 +108,10 @@ src/components/repair-cases/files/ContactFolderSection.test.tsx
 # 예전 도우미는 openfile 주소를 받으면 조용히 끝나므로(exit 2) 화면이 그것을 알 수 없다.
 # 이웃 contact-folder-open.test.ts 와 같은 짝(흐름 · 그려지는 것)이다.
 src/components/repair-cases/files/contact-folder-file-open.test.ts
+# 하위 폴더에 들어가 있을 때의 [폴더 열기](조각 10) — **보고 있는 자리**를 연다. 조각 2 의
+# 단추는 수리 건 id 로 서버에 묻는 모양이라 자리를 받을 칸이 없어, 이 구역에서만 쓰는 흐름을
+# 따로 두었다. 주소 모양 · 도우미 감지는 이웃 둘과 같은 짝이다.
+src/components/repair-cases/files/contact-folder-place-open.test.ts
 # 올린 파일이 공유폴더에도 들어갔는가를 **사실대로 말하는** 한 줄(조각 6)과, 휴지통
 # 확인창의 「사본은 그대로 남습니다」. 앱은 공유폴더의 파일을 지우지 않는다.
 src/components/repair-cases/files/contact-folder-copy-notice.test.ts

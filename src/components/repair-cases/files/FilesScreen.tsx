@@ -200,6 +200,19 @@ function DatabaseFilesScreen({
    * 어디에도 저장하지 않는다. 탭을 다시 열면 접힌 상태로 돌아온다.
    */
   const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false);
+  /**
+   * 🔴 공유폴더 구역에 보내는 **「다시 읽어라」 신호**(2026-10-05 사용자 요청).
+   *
+   * 올린 파일은 그 건의 연락서 폴더에도 한 벌 들어간다(조각 6). 그런데 그 구역은 화면이 뜰
+   * 때 한 번만 읽어서, 올린 직후에는 **새로고침해야** 보였다. 아래 handleUpload 가 DB 목록을
+   * 다시 받아 오는(router.refresh) **바로 그 자리에서** 이 숫자를 하나 올린다.
+   *
+   * 🔴 DB 첨부 목록 갱신 방식은 한 글자도 바뀌지 않았다 — 그 목록은 지금도 서버가 만든다.
+   * 🔴 다시 읽기가 실패해도 **올리기 결과 알림(statusMessage · 저장 팝업)은 그대로다** —
+   *    읽기는 저 구역 안에서 끝나고, 실패하면 그 구역만 「읽지 못했습니다」가 된다.
+   * 🔴 하위 폴더에 들어가 있으면 **그 자리를 그대로 두고** 다시 읽는다(구역이 자리를 쥔다).
+   */
+  const [contactFolderReloadToken, setContactFolderReloadToken] = useState(0);
 
   /**
    * 찍었지만 아직 올리지 않은 사진들.
@@ -630,6 +643,10 @@ function DatabaseFilesScreen({
         setIsUploadPanelOpen(true);
         // 목록은 서버가 만든다 — 화면에서 지어내지 않고 다시 받아 온다.
         router.refresh();
+        // 🔴 공유폴더 구역도 같은 자리에서 다시 읽게 한다 — 올린 사본이 **새로고침 없이**
+        //    보이도록(위 주석). 공유폴더에 못 들어갔거나 기능이 꺼져 있어도 안전하다 —
+        //    그때는 다시 읽어도 달라질 것이 없고, 읽기가 실패해도 이 알림은 그대로 남는다.
+        setContactFolderReloadToken((token) => token + 1);
 
         /**
          * 🔴 **썸네일이 다 올라간 뒤에 한 번 더 받아 온다.**
@@ -1019,7 +1036,7 @@ function DatabaseFilesScreen({
         첨부 목록은 그대로 보인다. 읽기도 서버가 아니라 이 구역이 뜬 뒤에 따로 한다
         (ContactFolderSection.tsx 머리말). 설정이 없는 환경에서는 스스로 사라진다.
       */}
-      <ContactFolderSection repairCaseId={resolved.id} />
+      <ContactFolderSection repairCaseId={resolved.id} reloadToken={contactFolderReloadToken} />
 
       {trashedAttachments.length > 0 && (
         /*

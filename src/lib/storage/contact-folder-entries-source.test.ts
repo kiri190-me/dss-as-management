@@ -58,12 +58,27 @@ describe("연락서 폴더 읽기 — 원본으로 지킨다", () => {
     assert.ok(source.startsWith('import "server-only";'), "server-only 가 맨 앞에 없다");
   });
 
-  test("🔴 하위 폴더로 내려가지 않는다 — 재귀가 없다", () => {
+  /**
+   * 🔴 2026-10-05(조각 10) — 제목에서 「하위 폴더로 내려가지 않는다」를 **「한 번에 한 칸만」**
+   * 으로 고쳤다. 사람이 폴더 줄을 누르면 그 자리를 읽을 수 있게 됐기 때문이다. 🔴 **금지는
+   * 한 줄도 느슨해지지 않았다** — 재귀가 없고(받은 마디 수만큼만 도는 걸음이다), 읽는 길은
+   * 공용 도우미의 「맨 위 칸」 **하나**뿐이다. 그 둘이 곧 「한 화면에 폴더 전부가 쏟아지지
+   * 않는다」를 지킨다.
+   */
+  test("🔴 한 번에 한 칸만 읽는다 — 재귀가 없고, 읽는 길이 하나다", () => {
     for (const forbidden of [/recursive/, /\bwalk\b/, /function\s+\w*[Rr]ecurse/]) {
       assert.equal(forbidden.test(code), false, `재귀 흔적: ${forbidden}`);
     }
     // 읽는 길은 공용 도우미의 「맨 위 칸」 하나뿐이다.
     assert.equal(code.match(/listShareFolderDirents\(/g)?.length, 1);
+    // 🔴 내려가는 길은 **그 자리에 보이는 폴더 줄**뿐이다(바로가기는 폴더로 치지 않는다).
+    assert.ok(code.includes("dirent.isDirectory && dirent.name === next"), "아무 마디나 이어 붙인다");
+    // 🔴 깊이 상한이 있고, 그것을 넘으면 디스크를 보지 않는다.
+    assert.ok(code.includes("CONTACT_FOLDER_ENTRIES_MAX_DEPTH"), "깊이 상한이 없다");
+    assert.ok(
+      code.indexOf("CONTACT_FOLDER_ENTRIES_MAX_DEPTH") < code.indexOf("requireExistingShareFolderRoot("),
+      "깊이를 보기 전에 디스크를 본다"
+    );
   });
 
   test("🔴 기다리는 시간과 줄 수에 상한이 있다", () => {

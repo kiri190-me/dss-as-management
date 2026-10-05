@@ -33,10 +33,19 @@ import {
  * 첨부 통로의 권한 · 확장자 검사 · 앞머리 바이트 대조 **밖**에 있다 — 우리 출처로
  * 내보내면 그 방어선이 통째로 빠진다. 그래서 `readFile` · 스트림이 여기 없다.
  *
- * ── 🔴 하위 폴더로 내려가지 않는다 ───────────────────────────────────────
+ * ── 🔴 한 번에 **한 칸만** 읽는다 — 재귀가 아니다 (조각 10) ────────────────
  * 사람이 그 안에 `사진/` · `OLD/` 를 만들어 두는 일이 실제로 있다. 재귀로 읽으면 그
- * 전부가 한 화면에 쏟아진다. 맨 위 칸만 보고, 하위 폴더는 **폴더 한 줄**로만 보인다
- * (customer-portal-archive.ts 가 `OLD` 안을 안 뒤지는 것과 같은 절제).
+ * 전부가 한 화면에 쏟아진다(customer-portal-archive.ts 가 `OLD` 안을 안 뒤지는 것과 같은
+ * 절제). 그래서 **요청한 자리의 맨 위 칸만** 읽고, 그 아래 폴더는 **폴더 한 줄**로만 보인다.
+ * 조각 10 에서 「어느 자리를 읽을까」를 받는 칸(`relativePath`)이 생겼다 — 사람이 그 폴더
+ * 줄을 눌렀을 때만 **한 칸 더 내려가** 다시 맨 위 칸을 읽는다.
+ *  · 🔴 내려가는 길은 **보이는 폴더 줄**뿐이다 — 마디마다 그 자리의 `readdir` 에 폴더로
+ *    서 있는지 본다. `readdir(withFileTypes)` 의 `isDirectory()` 는 링크를 따라가지 않으므로
+ *    **바로가기(정션 · 심볼릭 링크)는 폴더로 치지 않는다**(공유폴더 밖을 가리킬 수 있다).
+ *    `..` · `.` · 드라이브 문자 · UNC · 끝이 점 · 공백인 마디는 디스크의 이름과 같을 수가
+ *    없어 **같은 한 자리에서** 막힌다(그 위에 assertInsideShareFolderRoot 가 한 겹 더 있다).
+ *  · 🔴 **깊이 상한**(CONTACT_FOLDER_ENTRIES_MAX_DEPTH)이 있다 — 사람이 폴더를 깊게 파
+ *    두었어도 끝없이 내려가지 않는다.
  *
  * ── 🔴 돌려주는 값에 경로가 없다 ─────────────────────────────────────────
  * 파일을 가리키는 값은 **그 폴더 안에서의 이름**뿐이다. 루트(컨테이너 안 경로)도,
@@ -69,12 +78,28 @@ export const CONTACT_FOLDER_ENTRIES_TIMEOUT_MS = 2000;
  */
 export const CONTACT_FOLDER_ENTRIES_LIMIT = 100;
 
+/**
+ * 연락서 폴더 **아래로** 몇 칸까지 들어갈 수 있는가.
+ *
+ * 🔴 **5 다.** 실제로 쓰이는 깊이는 `사진/2026` 정도의 한두 칸이고, 다섯이면 그 두 배가
+ * 넘는다. 더 키우지 않는 까닭은 **한 칸 내려갈 때마다 `readdir` 을 한 번씩 더 때리기**
+ * 때문이다 — 깊이가 곧 NAS 왕복 횟수라, 깊게 두면 느린 날 기다리기 상한에 먼저 걸려
+ * 목록이 통째로 `failed` 가 된다. 더 깊은 자리는 [폴더 열기]로 탐색기에서 보면 된다.
+ */
+export const CONTACT_FOLDER_ENTRIES_MAX_DEPTH = 5;
+
 /** 상한을 넘겼을 때의 사유. 사람이 다시 눌러 볼 수 있게 「잠시 뒤」를 적는다. */
 export const CONTACT_FOLDER_ENTRIES_SLOW_REASON =
   "공유폴더가 느려 목록을 읽지 못했습니다(잠시 뒤 다시 시도하세요).";
 
+/** 🔴 깊이 상한을 넘었다. 사유에 경로를 적지 않는다(머리말의 규율). */
+export const CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON =
+  "폴더가 너무 깊어 더 내려가지 않았습니다 — 그 아래는 [폴더 열기]로 보세요.";
+
 const FOLDER_NAME_MISSING_REASON = "읽을 폴더 이름이 비어 있습니다.";
 const OUTSIDE_ROOT_REASON = "읽으려는 폴더가 공유폴더 밖을 가리켜 읽지 않았습니다.";
+/** 🔴 바로가기(정션 · 심볼릭 링크) · 없는 이름 · 숨은 이름이 모두 여기로 모인다. */
+const SUBFOLDER_MISSING_REASON = "들어가려는 하위 폴더를 찾을 수 없습니다(바로가기는 따라가지 않습니다).";
 
 /** 목록에서 빼는 이름들 — 사람이 만든 것이 아니라 프로그램이 남긴 것이다. */
 const PROGRAM_LEFTOVER_NAMES = new Set(["thumbs.db", "desktop.ini"]);
@@ -125,6 +150,11 @@ export type ListContactFolderEntriesInput = {
   root: string;
   /** 🔴 **디스크의 실제 폴더 이름**(findContactFolder 가 준 그대로). 구분자가 들어올 수 없다. */
   folderName: string;
+  /**
+   * 🔴 그 폴더 **안에서의** 자리(마디 구분자 `/`). 비면 맨 위 칸이다.
+   * 마디마다 「그 자리에 보이는 폴더 줄인가」를 보고 한 칸씩 내려간다 — 머리말의 규율이다.
+   */
+  relativePath?: string;
   /** 줄 수 상한. 시험에서만 바꾼다. */
   limit?: number;
   /** 기다리기 상한. 시험에서만 바꾼다. */
@@ -147,6 +177,18 @@ export async function listContactFolderEntries(
     return { status: "failed", reason: OUTSIDE_ROOT_REASON };
   }
 
+  // 🔴 폴더 안에서의 자리. 빈 값(· 공백뿐)이면 맨 위 칸이다.
+  const inside = typeof input.relativePath === "string" ? input.relativePath : "";
+  const segments = inside.trim().length === 0 ? [] : inside.split("/");
+  if (segments.length > CONTACT_FOLDER_ENTRIES_MAX_DEPTH) {
+    return { status: "failed", reason: CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON };
+  }
+  // 마디 하나는 **이름 하나**여야 한다 — 구분자가 섞여 들어오는 길을 디스크를 보기 전에 끊는다
+  // (아래 「보이는 폴더 줄인가」와 assertInsideShareFolderRoot 까지 세 겹이다).
+  if (segments.some((segment) => segment.length === 0 || segment !== path.basename(segment))) {
+    return { status: "failed", reason: OUTSIDE_ROOT_REASON };
+  }
+
   const limit =
     typeof input.limit === "number" && Number.isFinite(input.limit) && input.limit > 0
       ? Math.floor(input.limit)
@@ -154,7 +196,7 @@ export async function listContactFolderEntries(
   const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : CONTACT_FOLDER_ENTRIES_TIMEOUT_MS;
 
   try {
-    return await withShareFolderTimeout(read(input.root, folderName, limit), timeoutMs);
+    return await withShareFolderTimeout(read(input.root, folderName, segments, limit), timeoutMs);
   } catch (error) {
     if (error instanceof ShareFolderTimeout) {
       return { status: "failed", reason: CONTACT_FOLDER_ENTRIES_SLOW_REASON };
@@ -166,16 +208,36 @@ export async function listContactFolderEntries(
   }
 }
 
-async function read(rawRoot: string, folderName: string, limit: number): Promise<ContactFolderEntriesResult> {
+async function read(
+  rawRoot: string,
+  folderName: string,
+  segments: readonly string[],
+  limit: number
+): Promise<ContactFolderEntriesResult> {
   // 루트는 이미 있는 폴더여야 한다 — 없으면 만들지 않고 실패한다.
   const root = await requireExistingShareFolderRoot(rawRoot);
-  const folder = path.join(root, folderName);
-  assertInsideShareFolderRoot(root, folder, OUTSIDE_ROOT_REASON);
+  let folder = path.join(root, folderName);
+  const remaining = [...segments];
+  let visible: ShareFolderDirent[] = [];
 
-  // 🔴 맨 위 칸만. 하위 폴더는 폴더 한 줄로만 보이고, 그 안을 읽지 않는다.
-  const visible = (await listShareFolderDirents(folder)).filter(
-    (dirent) => !isIgnoredContactFolderEntryName(dirent.name)
-  );
+  // 🔴 한 마디씩 **걸어 내려간다**(재귀가 아니다 — 받은 마디 수만큼만 돈다). 자리마다 맨 위
+  //    칸을 읽고, 다음 마디가 **거기 보이는 폴더 줄**일 때만 들어간다. 바로가기는 폴더로
+  //    치지 않고(isDirectory 는 링크를 따라가지 않는다) `..` · 드라이브 · UNC · 끝이 점 ·
+  //    공백인 마디는 디스크의 이름과 같을 수가 없어 같은 자리에서 막힌다.
+  for (;;) {
+    assertInsideShareFolderRoot(root, folder, OUTSIDE_ROOT_REASON);
+    visible = (await listShareFolderDirents(folder)).filter(
+      (dirent) => !isIgnoredContactFolderEntryName(dirent.name)
+    );
+    const next = remaining.shift();
+    if (next === undefined) break;
+    if (!visible.some((dirent) => dirent.isDirectory && dirent.name === next)) {
+      throw new ShareFolderFailure(SUBFOLDER_MISSING_REASON);
+    }
+    folder = path.join(folder, next);
+  }
+
+  // 🔴 그 자리의 맨 위 칸만. 그 아래 폴더는 폴더 한 줄로만 보이고, 그 안을 읽지 않는다.
   const kept = [...visible].sort(compareContactFolderEntries).slice(0, limit);
 
   // 🔴 stat 은 **남긴 줄에만** 때린다 — 상한이 곧 NAS 왕복 횟수다.

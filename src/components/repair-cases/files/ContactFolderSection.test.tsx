@@ -4,16 +4,23 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { buildQuoteFolderFileLink, parseQuoteFolderFileLink } from "@/lib/domain/quote-folder-file-link";
 import ContactFolderEntryOpenButton, { ContactFolderEntryOpenControl } from "./ContactFolderEntryOpenButton";
+import ContactFolderPlaceOpenButton, { ContactFolderPlaceOpenControl } from "./ContactFolderPlaceOpenButton";
+import { contactFolderFileRelativePath } from "./contact-folder-file-open";
 import ContactFolderSection, {
   CONTACT_FOLDER_SECTION_EMPTY_TEXT,
   CONTACT_FOLDER_SECTION_FAILED_TEXT,
+  CONTACT_FOLDER_SECTION_INSIDE_EMPTY_TEXT,
   CONTACT_FOLDER_SECTION_LOADING_TEXT,
   CONTACT_FOLDER_SECTION_MULTIPLE_TEXT,
   CONTACT_FOLDER_SECTION_NOT_FOUND_TEXT,
   ContactFolderSectionView,
   canOpenContactFolderEntry,
   contactFolderEntriesUrl,
+  contactFolderParentPath,
+  contactFolderPathSegments,
+  contactFolderPlacePath,
   loadContactFolderEntries,
   readContactFolderEntriesAnswer,
   type ContactFolderSectionState,
@@ -207,17 +214,27 @@ describe("🔴 서버가 중계하지 않는다 — 만들지도 올리지도 �
     assert.equal(code.match(/\/contact-folder\/entries/g)?.length, 1);
   });
 
-  test("맨 아래 [폴더 열기]는 조각 2 의 단추를 **그대로** 쓴다 — 새로 만들지 않았다", () => {
+  /**
+   * 🔴 2026-10-05(조각 10) — 맨 아래 단추가 **보고 있는 자리**를 열게 됐다. 맨 위에서는
+   * 조각 2 의 단추를 **그대로** 쓰고(폴더가 없을 때 [폴더 만들고 열기]가 거기 달려 있다),
+   * 하위 폴더에서만 그 자리를 여는 단추가 선다. 지켜지는 것은 그대로다: 조각 2 의 단추를
+   * 새로 만들지 않았고, 구역의 **맨 아래**이며, 둘 가운데 하나만 선다.
+   */
+  test("맨 아래 [폴더 열기] — 맨 위는 조각 2 의 단추 그대로, 하위 폴더에서는 그 자리를 연다", () => {
     assert.ok(
       sectionSource.includes('import ContactFolderOpenButton from "@/components/repair-cases/detail/ContactFolderOpenButton";'),
       "조각 2 의 단추를 가져오지 않는다"
     );
     assert.equal(sectionSource.split("<ContactFolderOpenButton").length - 1, 1, "단추가 둘 이상이다");
-    // 구역의 **맨 아래**다 — 그 뒤에는 닫는 틀뿐이다.
+    assert.equal(sectionSource.split("<ContactFolderPlaceOpenButton").length - 1, 1, "자리 단추가 둘 이상이다");
+    // 구역의 **맨 아래**다 — 그 뒤에는 닫는 틀뿐이고, 둘 중 하나만 그려진다.
     const flat = sectionSource.replace(/\s+/g, " ");
     assert.ok(
-      flat.includes("<ContactFolderOpenButton repairCaseId={repairCaseId} /> </section>"),
-      "단추가 구역 맨 아래가 아니다"
+      flat.includes(
+        '{atTop || placePath === "" ? ( <ContactFolderOpenButton repairCaseId={repairCaseId} /> ) : ' +
+          "( <ContactFolderPlaceOpenButton relativePath={placePath} /> )} </section>"
+      ),
+      "단추가 구역 맨 아래가 아니거나 자리에 따라 갈리지 않는다"
     );
   });
 
@@ -433,7 +450,12 @@ describe("🔴 DB 첨부 목록을 건드리지 않는다 — 나란히 선 형�
     assert.equal(filesScreen.split("<ContactFolderSection").length - 1, 1, "구역이 둘 이상이다");
     assert.ok(/<ContactFolderSection[^>]*\/>/.test(filesScreen), "자기 닫는 태그가 아니다");
     assert.equal(filesScreen.includes("</ContactFolderSection>"), false, "무언가를 감싸고 있다");
-    assert.ok(filesScreen.includes("<ContactFolderSection repairCaseId={resolved.id} />"), "수리 건 id 를 건네지 않는다");
+    // 🔴 2026-10-05(조각 10) — 「다시 읽어라」 신호 하나가 늘었다. 건네는 것은 여전히 **값 둘**
+    //    뿐이고, 구역이 첨부 목록 쪽으로 무언가를 돌려주는 길은 없다.
+    assert.ok(
+      filesScreen.includes("<ContactFolderSection repairCaseId={resolved.id} reloadToken={contactFolderReloadToken} />"),
+      "수리 건 id · 다시 읽기 신호를 건네지 않는다"
+    );
 
     const databaseAt = filesScreen.indexOf("function DatabaseFilesScreen");
     const demoAt = filesScreen.indexOf("function DemoFilesScreen");
@@ -480,5 +502,264 @@ describe("기본 내보내기 — 처음에는 불러오는 중", () => {
     const html = renderToStaticMarkup(createElement(ContactFolderSection, { repairCaseId: "case-1" }));
     assert.ok(html.includes(CONTACT_FOLDER_SECTION_LOADING_TEXT), html);
     assert.ok(html.includes("print:hidden"), html);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 (가) 하위 폴더 안으로 들어간다 (조각 10)
+ * ============================================================================
+ * 폴더 줄을 눌러 들어가고, 길 표시 · [위로]로 돌아 나온다. 들어갈 수 있는 **깊이 · 줄 수 ·
+ * 기다리는 시간**의 상한과 경로 거절은 서버 쪽이 쥔다(lib/storage/contact-folder-entries.test.ts ·
+ * route-source.test.ts). 여기서는 **화면이 무엇을 내는가**만 본다.
+ * ============================================================================
+ */
+describe("🔴 하위 폴더 안으로 — 길 표시 · 들어가기 · 돌아 나오기", () => {
+  const entry = (name: string, isDirectory = false) => ({ name, isDirectory, sizeBytes: 1 });
+  const placeMarkup = (
+    insidePath: string,
+    state: ContactFolderSectionState = foundState({ entries: [entry("사진", true), entry("연락서.xlsm")], totalCount: 2 }),
+    onNavigate?: (next: string) => void
+  ) =>
+    renderToStaticMarkup(
+      createElement(ContactFolderSectionView, {
+        state,
+        repairCaseId: "case-1",
+        insidePath,
+        ...(onNavigate === undefined ? {} : { onNavigate }),
+      })
+    );
+
+  test("통로 주소 — 맨 위는 조각 3 때와 **한 글자도 같고**, 자리가 있을 때만 ?path 가 붙는다", () => {
+    assert.equal(contactFolderEntriesUrl("case-1"), "/api/repair-cases/case-1/contact-folder/entries");
+    assert.equal(contactFolderEntriesUrl("case-1", ""), "/api/repair-cases/case-1/contact-folder/entries");
+    assert.equal(
+      contactFolderEntriesUrl("case-1", "사진/2026"),
+      "/api/repair-cases/case-1/contact-folder/entries?path=%EC%82%AC%EC%A7%84%2F2026"
+    );
+    // 🔴 수상한 값도 그대로 싣지 않는다 — 감싸서 보내고, 거절은 서버가 한다.
+    assert.equal(
+      contactFolderEntriesUrl("case-1", "../비밀"),
+      "/api/repair-cases/case-1/contact-folder/entries?path=..%2F%EB%B9%84%EB%B0%80"
+    );
+  });
+
+  test("길 · 한 칸 위 · 루트 아래 상대 경로를 세는 순수 함수들", () => {
+    assert.deepEqual(contactFolderPathSegments(""), []);
+    assert.deepEqual(contactFolderPathSegments("사진"), ["사진"]);
+    assert.deepEqual(contactFolderPathSegments("사진//2026/"), ["사진", "2026"]);
+    assert.equal(contactFolderParentPath("사진/2026"), "사진");
+    assert.equal(contactFolderParentPath("사진"), "");
+    assert.equal(contactFolderParentPath(""), "");
+    assert.equal(contactFolderPlacePath(FOLDER, ""), FOLDER);
+    assert.equal(contactFolderPlacePath(FOLDER, "사진/2026"), `${FOLDER}/사진/2026`);
+    // 🔴 폴더 이름을 모르면 빈 글자다 — 주소를 지어내지 않는다.
+    assert.equal(contactFolderPlacePath("", "사진"), "");
+  });
+
+  test("맨 위에서는 길 표시도 [위로]도 없다 — 조각 3 때 그대로다", () => {
+    const html = placeMarkup("", undefined, () => undefined);
+    assert.equal(html.includes("data-contact-folder-trail"), false, html);
+    assert.equal(html.includes("data-contact-folder-up"), false, html);
+    // 폴더 이름은 머리에 그대로 적힌다.
+    assert.ok(html.includes(FOLDER), html);
+  });
+
+  test("🔴 길 표시가 맞게 그려진다 — 토막마다 돌아가는 단추, 지금 자리는 단추가 아니다", () => {
+    const html = placeMarkup("사진/2026", undefined, () => undefined);
+    assert.ok(html.includes("data-contact-folder-trail"), html);
+    assert.ok(html.includes(FOLDER), html);
+    assert.ok(html.includes("사진"), html);
+    assert.ok(html.includes("2026"), html);
+    assert.ok(html.indexOf(FOLDER) < html.indexOf("사진"), "길 차례가 뒤바뀌었다");
+    // 되돌아갈 수 있는 토막은 **맨 위 · 사진** 둘이고, 지금 자리(2026)는 단추가 아니다.
+    assert.equal(html.match(/data-contact-folder-trail-step/g)?.length, 2, html);
+    assert.ok(html.includes('aria-current="true"'), html);
+    assert.ok(html.includes("data-contact-folder-up"), html);
+    assert.ok(html.includes(">위로</button>"), html);
+    // 🔴 링크가 아니다 — 눌러도 페이지를 떠나지 않는다.
+    assert.equal(html.includes("href="), false, html);
+  });
+
+  test("🔴 폴더 이름을 모를 때(실패)도 길과 [위로]는 남는다 — 돌아 나올 길이 있어야 한다", () => {
+    const html = placeMarkup("사진/2026", { kind: "failed", reason: "공유폴더를 읽지 못했습니다." }, () => undefined);
+    assert.ok(html.includes(CONTACT_FOLDER_SECTION_FAILED_TEXT), html);
+    assert.ok(html.includes("맨 위 폴더"), html);
+    assert.ok(html.includes("data-contact-folder-up"), html);
+  });
+
+  test("🔴 들어갈 길(onNavigate)이 없으면 누를 수 있는 것이 하나도 생기지 않는다", () => {
+    const html = placeMarkup("사진");
+    assert.equal(html.includes("<button"), false, html);
+    assert.equal(html.includes("data-contact-folder-enter"), false, html);
+    assert.equal(html.includes("data-contact-folder-trail-step"), false, html);
+    assert.equal(html.includes("data-contact-folder-up"), false, html);
+    // 길 자체는 보인다 — 어디에 있는지는 알아야 한다.
+    assert.ok(html.includes("data-contact-folder-trail"), html);
+  });
+
+  test("🔴 폴더 줄만 눌린다 — 파일 줄은 그대로 글자다", () => {
+    const html = placeMarkup(
+      "",
+      foundState({ entries: [entry("사진", true), entry("OLD", true), entry("연락서.xlsm")], totalCount: 3 }),
+      () => undefined
+    );
+    assert.equal(html.match(/data-contact-folder-enter/g)?.length, 2, html);
+    // 파일 이름은 단추 밖에 그대로 있다.
+    assert.ok(html.includes("연락서.xlsm"), html);
+  });
+
+  test("🔴 누르면 지금 자리에 이름을 이어 부른다 — 들어가고, 토막으로 돌아가고, 위로", () => {
+    const asked: string[] = [];
+    const html = placeMarkup(
+      "사진",
+      foundState({ entries: [entry("2026", true)], totalCount: 1 }),
+      (next) => asked.push(next)
+    );
+    assert.ok(html.includes("data-contact-folder-enter"), html);
+
+    // 그려진 것만으로는 누를 수 없으므로, 같은 셈을 값으로 확인한다.
+    const insidePath = "사진";
+    assert.equal([...contactFolderPathSegments(insidePath), "2026"].join("/"), "사진/2026");
+    assert.equal(contactFolderParentPath("사진/2026"), "사진");
+    assert.deepEqual(asked, []);
+  });
+
+  test("🔴 하위 폴더에서도 줄의 [열기]가 산다 — 폴더 경로에 자리가 이어져 들어간다", () => {
+    const html = placeMarkup(
+      "사진/2026",
+      foundState({ entries: [entry("연락서.xlsm"), entry("설치.exe")], totalCount: 2 }),
+      () => undefined
+    );
+    // 열 수 있는 줄에만 단추 자리가 생긴다(허용 목록은 조각 4 그대로다).
+    assert.equal(html.match(/data-contact-folder-entry-openable/g)?.length, 1, html);
+
+    // 🔴 도우미가 받는 주소에 **여러 마디 경로**가 그대로 들어간다 — 되읽어 같은 값이 나온다.
+    const placePath = contactFolderPlacePath(FOLDER, "사진/2026");
+    const relative = contactFolderFileRelativePath(placePath, "연락서.xlsm");
+    assert.equal(relative, `${FOLDER}/사진/2026/연락서.xlsm`);
+    const link = buildQuoteFolderFileLink(relative);
+    assert.ok(link !== null, "하위 폴더 파일의 주소를 만들지 못했다");
+    assert.equal(parseQuoteFolderFileLink(link), relative);
+  });
+
+  test("🔴 빈 폴더 · 잘림은 자리에 맞는 말로", () => {
+    const empty = placeMarkup("사진", foundState(), () => undefined);
+    assert.ok(empty.includes(`>${CONTACT_FOLDER_SECTION_INSIDE_EMPTY_TEXT}<`), empty);
+    assert.equal(empty.includes(`>${CONTACT_FOLDER_SECTION_EMPTY_TEXT}<`), false, empty);
+    assert.ok(markup(foundState()).includes(`>${CONTACT_FOLDER_SECTION_EMPTY_TEXT}<`), "맨 위 말이 바뀌었다");
+  });
+
+  test("🔴 인쇄에는 그대로 안 찍힌다 — 길 표시가 생겨도", () => {
+    assert.ok(placeMarkup("사진/2026", undefined, () => undefined).includes("print:hidden"));
+  });
+
+  test("🔴 하위 폴더에서 여는 단추도 Windows 가 아니면 아무것도 그리지 않는다", () => {
+    assert.equal(
+      renderToStaticMarkup(createElement(ContactFolderPlaceOpenButton, { relativePath: `${FOLDER}/사진` })),
+      ""
+    );
+    const control = renderToStaticMarkup(
+      createElement(ContactFolderPlaceOpenControl, { relativePath: `${FOLDER}/사진` })
+    );
+    assert.ok(control.includes(">폴더 열기</button>"), control);
+    assert.ok(control.includes("data-contact-folder-place-open"), control);
+    assert.ok(control.includes("print:hidden"), control);
+    assert.equal(control.includes("href="), false, control);
+    // 🔴 서버 렌더에서는 구역 안에도 단추가 하나도 안 그려진다(위 Windows 가림과 같다).
+    assert.equal(placeMarkup("사진/2026", undefined, () => undefined).includes("data-contact-folder-place-open"), false);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 (나) 올린 뒤 바로 보인다 (조각 10)
+ * ============================================================================
+ * 올리기가 끝나면 이 구역을 **다시 읽는다**. 🔴 DB 첨부 목록을 갱신하는 방식(router.refresh)은
+ * 한 글자도 바뀌지 않았고, 다시 읽기는 이 구역 안에서 끝난다 — 실패해도 올리기 결과 알림을
+ * 건드릴 수 없다(건드릴 길이 없다).
+ * ============================================================================
+ */
+describe("🔴 올린 뒤 바로 보인다 — 다시 읽기", () => {
+  const uploadBody = filesScreen.slice(
+    filesScreen.indexOf("async function handleUpload"),
+    filesScreen.indexOf("  return (", filesScreen.indexOf("async function handleUpload"))
+  );
+
+  test("올리기가 끝나면 DB 목록을 다시 받는 **그 자리에서** 공유폴더도 다시 읽는다", () => {
+    assert.ok(uploadBody.length > 0, "handleUpload 를 찾지 못했다");
+    const uploadedAt = uploadBody.indexOf("if (uploaded > 0) {");
+    const refreshAt = uploadBody.indexOf("router.refresh();", uploadedAt);
+    const reloadAt = uploadBody.indexOf("setContactFolderReloadToken(");
+    assert.ok(uploadedAt >= 0 && refreshAt >= 0, "올린 뒤 목록을 다시 받는 자리가 사라졌다");
+    assert.ok(reloadAt > refreshAt, "공유폴더 구역에 다시 읽으라고 알리지 않는다");
+    // 🔴 DB 목록 갱신 방식은 그대로다 — 화면에서 지어내지 않고 서버에서 다시 받는다.
+    assert.ok(filesScreen.includes("const router = useRouter();"));
+    assert.equal(uploadBody.match(/setContactFolderReloadToken\(/g)?.length, 1, "여러 번 알린다");
+    assert.ok(filesScreen.includes("setContactFolderReloadToken((token) => token + 1);"));
+  });
+
+  test("🔴 올리기 결과 알림을 건드리지 않는다 — 알린 뒤에는 아무 말도 지우지 않는다", () => {
+    const reloadAt = uploadBody.indexOf("setContactFolderReloadToken(");
+    assert.ok(uploadBody.indexOf("showSavePopup({") < reloadAt, "알림보다 먼저 다시 읽으라고 한다");
+    // 알린 **뒤**(올리기 묶음이 끝날 때까지)에는 알림을 건드리는 곳이 없다. 그 뒤의
+    // `catch` 는 올리기 자체가 깨졌을 때의 길이고, 다시 읽기는 저 구역 안에서 끝난다.
+    const afterReload = uploadBody.slice(reloadAt, uploadBody.indexOf("} catch {", reloadAt));
+    assert.ok(afterReload.length > 0, "올리기 묶음의 끝을 찾지 못했다");
+    assert.equal(afterReload.includes("setStatusMessage("), false, "다시 읽으라고 한 뒤에 알림을 건드린다");
+    assert.equal(afterReload.includes("showSavePopup("), false, "다시 읽으라고 한 뒤에 팝업을 또 띄운다");
+    // 🔴 구역이 올리기 화면 쪽으로 무언가를 돌려주는 길이 없다 — 받는 것은 값 둘뿐이다.
+    assert.ok(
+      sectionSource.includes("export default function ContactFolderSection({\n  repairCaseId,\n  reloadToken = 0,\n}: {"),
+      "구역이 받는 것이 값 둘이 아니다"
+    );
+    for (const forbidden of ["onReload", "onLoaded", "onError", "setStatusMessage"]) {
+      assert.equal(sectionSource.includes(forbidden), false, `구역이 바깥 상태를 건드린다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 다시 읽어도 보고 있던 자리는 그대로다 — 맨 위로 튕기지 않는다", () => {
+    const effect = sectionSource.slice(
+      sectionSource.indexOf("  useEffect(() => {"),
+      sectionSource.indexOf("}, [repairCaseId, insidePath, reloadToken]);")
+    );
+    assert.ok(effect.length > 0, "다시 읽는 효과를 찾지 못했다");
+    assert.ok(effect.includes("loadContactFolderEntries(repairCaseId, undefined, insidePath)"), effect);
+    // 🔴 다시 읽기가 자리를 건드리지 않는다.
+    assert.equal(effect.includes("setPlace("), false, "다시 읽으면서 자리를 옮긴다");
+    // 자리를 옮기는 곳은 사람이 누르는 한 곳뿐이다.
+    assert.equal(sectionSource.match(/setPlace\(/g)?.length, 1, "자리를 옮기는 곳이 여럿이다");
+    assert.ok(sectionSource.includes("onNavigate={(next) => setPlace({ repairCaseId, path: next })}"));
+  });
+
+  test("🔴 다시 읽기가 실패해도 던지지 않는다 — 이 구역만 「읽지 못했습니다」가 된다", async () => {
+    const state = await loadContactFolderEntries("case-1", () => Promise.reject(new Error("끊김")), "사진/2026");
+    assert.equal(state.kind, "failed");
+    const html = renderToStaticMarkup(
+      createElement(ContactFolderSectionView, {
+        state,
+        repairCaseId: "case-1",
+        insidePath: "사진/2026",
+        onNavigate: () => undefined,
+      })
+    );
+    assert.ok(html.includes(CONTACT_FOLDER_SECTION_FAILED_TEXT), html);
+    // 올리기 쪽 말은 이 구역이 그리지 않는다.
+    for (const uploadMarkup of ["올렸습니다", "파일 올리기", "휴지통"]) {
+      assert.equal(html.includes(uploadMarkup), false, html);
+    }
+  });
+
+  test("다시 읽을 때도 같은 자리를 묻는다 — 주소에 그 자리가 실린다", async () => {
+    const urls: string[] = [];
+    await loadContactFolderEntries(
+      "case-1",
+      (url) => {
+        urls.push(url);
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ status: "not-found" }) });
+      },
+      "사진"
+    );
+    assert.deepEqual(urls, ["/api/repair-cases/case-1/contact-folder/entries?path=%EC%82%AC%EC%A7%84"]);
   });
 });

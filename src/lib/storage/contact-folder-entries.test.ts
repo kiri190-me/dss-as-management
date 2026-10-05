@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
 import {
   CONTACT_FOLDER_ENTRIES_LIMIT,
+  CONTACT_FOLDER_ENTRIES_MAX_DEPTH,
   CONTACT_FOLDER_ENTRIES_SLOW_REASON,
   CONTACT_FOLDER_ENTRIES_TIMEOUT_MS,
+  CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON,
   compareContactFolderEntries,
   isIgnoredContactFolderEntryName,
   listContactFolderEntries,
@@ -50,7 +52,10 @@ async function makeCaseFolder(): Promise<{ root: string; folder: string }> {
   return { root, folder };
 }
 
-function list(root: string, overrides: { folderName?: string; limit?: number; timeoutMs?: number } = {}) {
+function list(
+  root: string,
+  overrides: { folderName?: string; relativePath?: string; limit?: number; timeoutMs?: number } = {}
+) {
   return listContactFolderEntries({ root, folderName: FOLDER, ...overrides });
 }
 
@@ -105,7 +110,7 @@ test("맨 위 칸을 읽는다 — 이름 · 크기 · 수정시각 · 폴더인
   assert.deepEqual(await snapshot(root), before, "읽기가 무엇인가를 만들거나 지웠다");
 });
 
-test("🔴 하위 폴더로 내려가지 않는다 — 그 안의 파일은 목록에 없다, 폴더는 한 줄로만 선다", async () => {
+test("🔴 자리를 주지 않으면 하위 폴더로 내려가지 않는다 — 그 안의 파일은 목록에 없다, 폴더는 한 줄로만 선다", async () => {
   const { root, folder } = await makeCaseFolder();
   await mkdir(path.join(folder, "사진"));
   await writeFile(path.join(folder, "사진", "안쪽사진.jpg"), "속");
@@ -249,6 +254,193 @@ test("거르는 규칙은 순수하다 — 디스크 없이도 같은 말을 한
   }
   for (const kept of ["연락서.xlsx", "사진", "D260908 메모.txt", "~연락서.xlsx", "my.desktop.ini"]) {
     assert.equal(isIgnoredContactFolderEntryName(kept), false, kept);
+  }
+});
+
+/*
+ * ============================================================================
+ * 🔴 하위 폴더 **안으로** 들어간다 (조각 10) — 한 칸씩, 보이는 폴더 줄로만
+ * ============================================================================
+ * 사람이 폴더 줄을 눌렀을 때만 한 칸 더 내려간다. 들어가는 길은 **그 자리에 보이는 폴더
+ * 줄** 하나뿐이라 `..` · 드라이브 · UNC · 바로가기(정션)는 같은 자리에서 막힌다. 여기서도
+ * 모든 시험이 임시 폴더에서만 돌고, 「무엇도 만들거나 지우지 않았다」를 함께 본다.
+ * ============================================================================
+ */
+
+test("🔴 한 칸 · 두 칸 내려가면 그 자리의 맨 위 칸이 나온다 — 아무것도 만들거나 지우지 않는다", async () => {
+  const { root, folder } = await makeCaseFolder();
+  await mkdir(path.join(folder, "사진"));
+  await mkdir(path.join(folder, "사진", "2026"));
+  await writeFile(path.join(folder, "사진", "겉사진.jpg"), "겉");
+  await writeFile(path.join(folder, "사진", "2026", "안쪽.jpg"), "안");
+  await writeFile(path.join(folder, "연락서.xlsx"), "맨위");
+  const before = await snapshot(root);
+
+  const top = listedOrFail(await list(root));
+  assert.deepEqual(
+    top.entries.map((entry) => entry.name),
+    ["사진", "연락서.xlsx"]
+  );
+
+  const inside = listedOrFail(await list(root, { relativePath: "사진" }));
+  assert.deepEqual(
+    inside.entries.map((entry) => entry.name),
+    ["2026", "겉사진.jpg"]
+  );
+  assert.equal(inside.totalCount, 2);
+
+  const deeper = listedOrFail(await list(root, { relativePath: "사진/2026" }));
+  assert.deepEqual(
+    deeper.entries.map((entry) => entry.name),
+    ["안쪽.jpg"]
+  );
+  // 🔴 돌려주는 이름은 **그 자리에서의 이름 하나**다 — 경로가 섞여 나오지 않는다.
+  for (const entry of [...inside.entries, ...deeper.entries]) {
+    assert.equal(/[\\/]/.test(entry.name), false, entry.name);
+    assert.deepEqual(Object.keys(entry).sort(), ["isDirectory", "modifiedAtMs", "name", "sizeBytes"]);
+  }
+  // 빈 값 · 공백뿐인 값은 맨 위 칸이다(들어가지 않는다).
+  for (const same of ["", "   "]) {
+    const asTop = listedOrFail(await list(root, { relativePath: same }));
+    assert.deepEqual(
+      asTop.entries.map((entry) => entry.name),
+      ["사진", "연락서.xlsx"]
+    );
+  }
+
+  assert.deepEqual(await snapshot(root), before, "읽기가 무엇인가를 만들거나 지웠다");
+});
+
+test("🔴 하위 폴더 안에서도 제외 규칙 · 줄 수 상한이 그대로다", async () => {
+  const { root, folder } = await makeCaseFolder();
+  const inside = path.join(folder, "사진");
+  await mkdir(inside);
+  for (const hidden of ["~$연락서.xlsx", "Thumbs.db", "desktop.ini", ".DS_Store"]) {
+    await writeFile(path.join(inside, hidden), "x");
+  }
+  for (const name of ["1.jpg", "2.jpg", "3.jpg"]) {
+    await writeFile(path.join(inside, name), name);
+  }
+
+  const all = listedOrFail(await list(root, { relativePath: "사진" }));
+  assert.deepEqual(
+    all.entries.map((entry) => entry.name),
+    ["1.jpg", "2.jpg", "3.jpg"]
+  );
+  assert.equal(all.totalCount, 3);
+  assert.equal(all.truncated, false);
+
+  const cut = listedOrFail(await list(root, { relativePath: "사진", limit: 2 }));
+  assert.deepEqual(
+    cut.entries.map((entry) => entry.name),
+    ["1.jpg", "2.jpg"]
+  );
+  assert.equal(cut.totalCount, 3);
+  assert.equal(cut.truncated, true);
+});
+
+test("🔴 `..` · 절대 경로 · 드라이브 문자 · UNC · 끝이 점 · 공백인 마디가 거절된다 — 디스크는 그대로다", async () => {
+  const { root, folder } = await makeCaseFolder();
+  await mkdir(path.join(folder, "사진"));
+  await writeFile(path.join(folder, "사진", "안쪽.jpg"), "안");
+  await writeFile(path.join(root, "남의건.txt"), "남의 것");
+  const before = await snapshot(root);
+
+  const rejected = [
+    "..",
+    "../..",
+    "사진/..",
+    "사진/../..",
+    ".",
+    "./사진",
+    "/etc",
+    "/",
+    "C:\\Windows",
+    "c:/Windows",
+    "\\\\NAS01\\공유",
+    "사진.",
+    "사진 ",
+    "사진//2026",
+    "사진/",
+    "사진\\2026",
+  ];
+  for (const relativePath of rejected) {
+    const result = await list(root, { relativePath });
+    const reason = assertFailedWithoutPath(result, root);
+    assert.ok(reason.length > 0, relativePath);
+  }
+
+  assert.deepEqual(await snapshot(root), before, "거절하면서 무엇인가를 만들거나 지웠다");
+});
+
+test("🔴 바로가기(정션 · 심볼릭 링크)를 지나는 경로가 거절된다 — 목록에도 서지 않는다", async (t) => {
+  const { root, folder } = await makeCaseFolder();
+  const outside = path.join(root, "바깥폴더");
+  await mkdir(outside);
+  await writeFile(path.join(outside, "남의자료.xlsx"), "남의 것");
+  const link = path.join(folder, "지름길");
+  try {
+    await symlink(outside, link, process.platform === "win32" ? "junction" : "dir");
+  } catch {
+    t.skip("이 환경에서는 바로가기를 만들 수 없다");
+    return;
+  }
+
+  // 목록에 서지도 않는다 — readdir 의 isDirectory() 는 링크를 따라가지 않는다.
+  const top = listedOrFail(await list(root));
+  assert.equal(
+    top.entries.some((entry) => entry.name === "지름길"),
+    false,
+    JSON.stringify(top.entries)
+  );
+
+  // 이름을 직접 적어 넣어도 들어가지 못한다.
+  const result = await list(root, { relativePath: "지름길" });
+  assertFailedWithoutPath(result, root);
+  assert.equal(result.status, "failed");
+  // 링크 너머의 파일이 한 줄도 새어 나오지 않는다.
+  assert.equal(JSON.stringify(result).includes("남의자료"), false, JSON.stringify(result));
+});
+
+test("🔴 깊이 상한을 넘으면 거절된다 — 다섯 칸까지다", async () => {
+  assert.equal(CONTACT_FOLDER_ENTRIES_MAX_DEPTH, 5);
+  // 사유에 경로가 없다.
+  assert.ok(!/[\\/]/.test(CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON), CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON);
+
+  const { root, folder } = await makeCaseFolder();
+  const names = ["a", "b", "c", "d", "e", "f"];
+  let here = folder;
+  for (const name of names) {
+    here = path.join(here, name);
+    await mkdir(here);
+  }
+  await writeFile(path.join(here, "맨아래.txt"), "깊다");
+  const before = await snapshot(root);
+
+  const deepest = listedOrFail(await list(root, { relativePath: names.slice(0, 5).join("/") }));
+  assert.deepEqual(
+    deepest.entries.map((entry) => entry.name),
+    ["f"]
+  );
+
+  const tooDeep = await list(root, { relativePath: names.join("/") });
+  assert.equal(tooDeep.status, "failed");
+  if (tooDeep.status !== "failed") throw new Error("unreachable");
+  assert.equal(tooDeep.reason, CONTACT_FOLDER_ENTRIES_TOO_DEEP_REASON);
+
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test("🔴 보이지 않는 폴더 · 없는 폴더 · 파일 이름으로는 들어가지 못한다", async () => {
+  const { root, folder } = await makeCaseFolder();
+  await mkdir(path.join(folder, ".숨은폴더"));
+  await writeFile(path.join(folder, ".숨은폴더", "숨은자료.txt"), "숨김");
+  await writeFile(path.join(folder, "연락서.xlsx"), "맨위");
+
+  for (const relativePath of [".숨은폴더", "없는폴더", "연락서.xlsx", "연락서.xlsx/안"]) {
+    const result = await list(root, { relativePath });
+    const reason = assertFailedWithoutPath(result, root);
+    assert.equal(JSON.stringify(result).includes("숨은자료"), false, reason);
   }
 });
 
