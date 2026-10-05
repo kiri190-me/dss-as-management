@@ -308,9 +308,10 @@ export async function getRepairCaseContactFolderKeyById(
  * 하나가 쓴다(연락서 조각 5). 폴더 이름은 사람이 목록에서 읽는 줄이라 여섯 조각이
  * 전부 필요하다(domain/contact-folder-naming.ts).
  *
- * 🔴 **찾는 열쇠는 여전히 인수번호 하나뿐이다.** 나머지 다섯은 이름을 지을 때만 쓰고,
- * S/N 은 그 밖에 「비슷한 폴더 훑기」에만 쓴다 — 어느 것도 폴더를 **확정**하지 않는다
- * (같은 장비가 여러 번 수리를 온다 — kyosan/report-match.ts 머리말).
+ * 🔴 **찾는 열쇠는 여전히 인수번호 하나뿐이다.** 나머지 다섯은 **이름을 지을 때만** 쓴다 —
+ * 어느 것도 폴더를 **확정**하지 않는다(같은 장비가 여러 번 수리를 온다 —
+ * kyosan/report-match.ts 머리말). 2026-10-05 조각 8 이 S/N 으로 폴더를 한 번 더 훑던
+ * 장치를 걷어내, 이제 S/N 도 이름 조각일 뿐이다(domain/contact-folder-naming.ts 머리말).
  *
  * 위 getRepairCaseContactFolderKeyById 와 같은 규율로 8-테이블 join 을 쓰지 않는다 —
  * 그 join 은 연락처 스냅숏(PII)까지 싣는데 여기서 쓰는 것은 여섯 칸뿐이다.

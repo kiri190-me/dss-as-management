@@ -23,6 +23,13 @@ import { describe, test } from "node:test";
  *    치우는 길도 들이지 않는다(머리말의 「대가」).
  *  · 🔴 사본 꽂기 쪽에는 **`mkdir` 이 없다** — 이 길은 이미 있는 폴더에만 꽂는다.
  *
+ * ── 🔴 2026-10-05(조각 8) — **S/N 훑기를 걷어냈다** ─────────────────────
+ * 조각 5 가 만들기 직전에 두었던 「비슷한 폴더 훑기」를 사용자 결정으로 없앴다. 같은
+ * 장비가 다시 수리를 오면 S/N · 모델 · L/N 이 같은 폴더가 이미 있는 것이 정상이고, 그때
+ * **새 인수번호로 새 폴더가 생겨야** 한다. 남은 안전장치는 「인수번호로 먼저 찾는다」
+ * 하나뿐이고, 아래 두 시험이 그것과 **자취가 안 남았음**을 함께 못 박는다.
+ * 🔴 **지우기 · 덮어쓰기 금지는 한 글자도 느슨해지지 않았다**(위 두 시험 그대로).
+ *
  * 찾기 · 만들기 · 꽂기 동작 자체는 contact-folder-archive.test.ts ·
  * contact-folder-create.test.ts · contact-folder-copy.test.ts 가, 이름 · 대조 규칙은
  * domain/contact-folder-naming.test.ts 가 본다.
@@ -101,16 +108,28 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
     assert.equal(code.match(/requireExistingShareFolderRoot\(/g)?.length, 2);
   });
 
-  test("🔴 만들기 직전에 비슷한 폴더를 훑는다 — 걸리면 만들지 않는다", () => {
+  test("🔴 만들기 전에 **인수번호로 먼저 찾는다** — 그것이 유일한 안전장치다 (조각 8)", () => {
     const make = code.slice(code.indexOf("async function make("));
-    const scan = make.indexOf("pickSimilarContactFolders(");
+    const look = make.indexOf("pickContactFolder(naming.intakeNumber, names)");
     const create = make.indexOf("await mkdir(");
-    assert.ok(scan >= 0, "비슷한 폴더 훑기가 없다");
+    assert.ok(look >= 0, "인수번호로 먼저 찾지 않는다");
     assert.ok(create >= 0, "만드는 자리가 없다");
-    assert.ok(scan < create, "훑기가 만들기보다 뒤에 있다");
-    assert.ok(make.slice(scan, create).includes('status: "candidates"'), "훑어 놓고 만들었다");
+    assert.ok(look < create, "🔴 찾기가 만들기보다 뒤에 있다");
+    // 찾아 놓고 만들지 않는다 — 하나면 그것을 쓰고, 여럿이면 만들지 않는다.
+    const between = make.slice(look, create);
+    assert.ok(between.includes('picked.status === "found"'), "찾아 놓고 그것을 쓰지 않는다");
+    assert.ok(between.includes('picked.status === "multiple"'), "여럿일 때 만들지 않는 길이 없다");
     // 🔴 이름은 domain 이 지은 것 그대로 쓴다 — 여기서 새로 짓지 않는다.
     assert.ok(make.includes("contactFolderName(naming)"));
+  });
+
+  test("🔴 S/N 훑기를 걷어낸 자취가 코드에 한 글자도 없다 — 되살리지 말 것 (조각 8)", () => {
+    // 2026-10-05 사용자 결정. 같은 S/N · 모델 · L/N 의 폴더가 있어도 **새 인수번호면
+    // 만든다** — 같은 장비가 다시 수리를 오는 것이 정상이기 때문이다. 까닭 전부는
+    // domain/contact-folder-naming.ts 의 「걷어낸 것」 머리말에 있다.
+    for (const gone of ["pickSimilarContactFolders", "contactFolderSerialKey", "candidates", "serialNumber"]) {
+      assert.equal(code.includes(gone), false, `걷어낸 것이 남아 있다: ${gone}`);
+    }
   });
 
   test("🔴 기다리는 시간에 상한이 있다 — 상한을 넘으면 사유를 돌려준다", () => {

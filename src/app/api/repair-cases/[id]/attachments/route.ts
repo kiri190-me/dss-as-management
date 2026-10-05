@@ -77,7 +77,7 @@ import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/stor
  * (`contactFolderCopy`) — 화면이 「시스템에는 저장했지만 공유폴더에는 …」을 낸다.
  *
  * 🔴 **폴더를 만들지 않는다.** 없으면 `no-folder` 로 건너뛴다 — 폴더 만들기는 사람이
- * [폴더 만들고 열기]로 하고, 그 안전장치(비슷한 폴더 훑기)가 거기 있다.
+ * [폴더 만들고 열기]를 누른 그때뿐이고, 폴더가 늘어나는 것은 사람이 보고 정할 일이다.
  *
  * 🔴 **설정(CONTACT_FOLDER_ARCHIVE_DIR)이 비면 아무 일도 하지 않는다** — 기능이 꺼진
  * 환경에서는 DB 조회도 파일 읽기도 하지 않고 응답에 그 칸이 아예 붙지 않는다.
@@ -175,8 +175,13 @@ async function copyToContactFolder(input: {
     if (result.status === "disabled") return null;
     return { status: "failed", reason: result.reason };
   } catch (error) {
-    // 사유에는 오류 message 를 쓰지 않는다 — 경로가 들어 있다. 서버 로그에만 남긴다.
-    console.error("연락서 폴더 사본 실패", error);
+    // 🔴 사유에도 **로그에도** 오류 message 를 쓰지 않는다 — fs 오류의 message 에는 전체
+    //    경로가 들어 있어, 통째로 찍으면 운영 로그에 사내 폴더 구조가 남는다. 남기는 것은
+    //    오류 이름과 수리 건 id 뿐이다(조각 7 의 services/create-repair-case.ts 와 같은 모양).
+    console.error("연락서 폴더 사본 실패", {
+      repairCaseId: input.repairCaseId,
+      name: error instanceof Error ? error.name : typeof error,
+    });
     return { status: "failed", reason: CONTACT_FOLDER_COPY_UNEXPECTED_REASON };
   }
 }

@@ -5,10 +5,8 @@ import {
   CONTACT_FOLDER_MAX_NAME_LENGTH,
   CONTACT_FOLDER_MAX_SYMPTOM_LENGTH,
   contactFolderName,
-  contactFolderSerialKey,
   matchesContactFolder,
   pickContactFolder,
-  pickSimilarContactFolders,
   type ContactFolderNamingInput,
 } from "./contact-folder-naming";
 
@@ -254,53 +252,27 @@ test("🔴 찾기 판정이 돌려주는 이름은 디스크의 실제 이름이
 
 /*
  * ────────────────────────────────────────────────────────────────────────────
- * 🔴 만들기 직전의 안전장치 — 비슷한 폴더 훑기 (조각 5)
+ * 🔴 가르는 기준은 **인수번호 하나뿐**이다 (조각 8 — S/N 훑기를 걷어낸 뒤)
  * ────────────────────────────────────────────────────────────────────────────
+ * 조각 5 는 만들기 직전에 그 건의 S/N 을 품은 폴더를 훑어, 걸리면 만들지 않았다.
+ * 2026-10-05 사용자 결정으로 걷어냈다 — 같은 장비가 다시 수리를 오면 S/N · 모델 · L/N 이
+ * 같은 폴더가 이미 있는 것이 정상이고, 그때 **새 인수번호로 새 폴더가 생겨야** 한다.
+ * 아래 둘이 그 결정을 값으로 못 박는다.
  */
 
-test("S/N 견줌 열쇠 — 공백을 지우고 대문자로, 비면 null", () => {
-  assert.equal(contactFolderSerialKey("1912 120"), "1912120");
-  assert.equal(contactFolderSerialKey(" wn3947 "), "WN3947");
-  // 전각 숫자도 같은 값이 된다(NFKC).
-  assert.equal(contactFolderSerialKey("１８０２０３４"), "1802034");
-  for (const empty of [null, undefined, "", "   "]) {
-    assert.equal(contactFolderSerialKey(empty), null, String(empty));
-  }
+test("🔴 S/N · 모델 · L/N 이 다 같아도 인수번호가 다르면 못 찾는다 — 새로 만들어야 할 건이다", () => {
+  // 같은 장비의 지난번 수리 건. 이름의 나머지 조각이 전부 같다.
+  const lastTime = "D250101 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  // 사람이 인수번호 없이 만들어 둔 폴더도 마찬가지로 **이 건의 폴더가 아니다.**
+  const noNumber = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+
+  assert.deepEqual(pickContactFolder("D260908", [lastTime, noNumber]), { status: "not-found" });
+  assert.equal(matchesContactFolder(lastTime, "D260908"), false);
+  assert.equal(matchesContactFolder(noNumber, "D260908"), false);
 });
 
-test("🔴 인수번호 없이 사람이 만든 폴더만 훑는다 — 하나뿐이어도 돌려준다", () => {
-  const human = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
-  const names = [
-    human,
-    // 🔴 지난번 수리 건 — 인수번호가 붙어 있으므로 후보가 아니다(S/N 은 고유키가 아니다).
-    "D250101 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청",
-    "메모 폴더",
-  ];
+test("🔴 이름의 나머지가 다 달라도 인수번호가 같으면 그 폴더다 — 열쇠는 번호뿐이다", () => {
+  const human = "D260908 전혀 다른 고객사 다른모델 메모";
 
-  assert.deepEqual(pickSimilarContactFolders("1802034", names), [human]);
-});
-
-test("마디 경계를 본다 — 일부로만 들어 있으면 후보가 아니다", () => {
-  const names = ["INVENIA 18020345 점검", "INVENIA X1802034 점검", "INVENIA 180203 점검"];
-  assert.deepEqual(pickSimilarContactFolders("1802034", names), []);
-
-  // 띄어 적은 S/N 은 붙여서 본다(`1912 120` ↔ `1912120`), 소문자도 접는다.
-  assert.deepEqual(pickSimilarContactFolders("1912120", ["주성 1912 120 점검"]), ["주성 1912 120 점검"]);
-  assert.deepEqual(pickSimilarContactFolders("wn3947", ["주성 WN3947 점검"]), ["주성 WN3947 점검"]);
-});
-
-test("🔴 S/N 이 비면 아무것도 걸리지 않는다 — 훑지 않는다", () => {
-  const names = ["INVENIA 1802034 점검", "메모 폴더"];
-  for (const empty of [null, undefined, "", "   "]) {
-    assert.deepEqual(pickSimilarContactFolders(empty, names), [], String(empty));
-  }
-});
-
-test("후보가 여럿이면 이름순으로, 디스크의 실제 이름 그대로 돌려준다", () => {
-  const names = ["나중 1802034 폴더", "가장먼저 1802034 폴더".normalize("NFD")];
-  const picked = pickSimilarContactFolders("1802034", names);
-
-  assert.equal(picked.length, 2);
-  assert.equal(picked[0], "가장먼저 1802034 폴더".normalize("NFD"));
-  assert.equal(picked[1], "나중 1802034 폴더");
+  assert.deepEqual(pickContactFolder("D260908", [human]), { status: "found", folderName: human });
 });

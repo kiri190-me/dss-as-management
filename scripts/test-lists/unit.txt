@@ -255,6 +255,10 @@ src/app/api/repair-cases/*/contact-folder/entries/route-source.test.ts
 # 첨부 올리기 통로의 **차례**(조각 6) — 파일 이동 → DB → 그 다음에 공유폴더 사본,
 # 사본이 실패해도 201. `[id]` 는 위와 같은 까닭으로 `*` 다.
 src/app/api/repair-cases/*/attachments/route-source.test.ts
+# 접수 때 폴더를 만드는 자리(조각 7) — 🔴 EXCEL_IMPORT 제외 · 트랜잭션 바깥 ·
+# 접수를 뒤집지 않음 · 메일과 따로 · 로그에 경로 없음을 **원본 글자로** 본다.
+# 실제 동작(만들고 · 기록하고 · 인수번호가 같은 폴더가 있으면 멈춤)은 db 목록의 통합 시험이 본다.
+src/lib/server/services/create-contact-folder-source.test.ts
 src/lib/domain/quote-issue-result.test.ts
 src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts

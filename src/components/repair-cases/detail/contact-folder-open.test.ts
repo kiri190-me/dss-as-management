@@ -13,7 +13,6 @@ import {
   CONTACT_FOLDER_HELPER_MISSING_TEXT,
   CONTACT_FOLDER_MULTIPLE_TEXT,
   CONTACT_FOLDER_NOT_FOUND_TEXT,
-  contactFolderCandidatesText,
   contactFolderUrl,
   runContactFolderCreateAndOpen,
   runContactFolderOpen,
@@ -422,12 +421,13 @@ describe("🔴 알려지지 않은 칸은 알림까지 오지 않는다 — 루�
  * 불변식 넷:
  *  (a) 🔴 읽기 흐름은 **절대 만들지 않는다** — POST 를 부르면 하네스가 던진다
  *  (b) 🔴 만들었거나 이미 있었을 때만 **열기 흐름**을 탄다
- *  (c) 🔴 비슷한 폴더 · 여럿이면 **열지도 만들지도 않고** 이름만 보인다
+ *  (c) 🔴 인수번호가 같은 폴더가 **여럿**이면 열지도 만들지도 않고 이름만 보인다
  *  (d) 🔴 만들기 단추를 다시 내미는 것은 `not-found` 뿐이다
+ *
+ * 🔴 **걷어낸 것**(조각 8 · 2026-10-05): 서버가 S/N 으로 「비슷한 폴더」를 훑어 돌려주던
+ * 상태와 그 안내 문구. 아래 「자취가 없다」가 화면 쪽 원본을 글자로 본다.
  * ============================================================================
  */
-
-const CANDIDATE = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
 
 describe("🔴 저절로 만들지 않는다", () => {
   test("읽기 흐름([폴더 열기])은 만들기를 부르지 않는다 — 없다고만 말한다", async () => {
@@ -499,25 +499,6 @@ describe("만들고 바로 연다", () => {
 });
 
 describe("🔴 만들지 않는 결과들 — 열지도 않는다", () => {
-  test("candidates — 비슷한 폴더 이름과 할 일을 보이고, 만들기 단추를 다시 내지 않는다", async () => {
-    const { outcome, opened, fetched } = await runCreate({
-      folder: found(),
-      create: {
-        status: 200,
-        json: { status: "candidates", intakeNumber: "D260908", folderNames: [CANDIDATE] },
-      },
-    });
-
-    assert.equal(outcome.kind, "CANDIDATES");
-    assert.equal(outcome.lines[0].text, contactFolderCandidatesText("D260908"));
-    assert.ok(outcome.lines[0].text.includes("D260908"), outcome.lines[0].text);
-    assert.deepEqual(outcome.lines.slice(1), [{ text: CANDIDATE, tone: "muted" }]);
-    assert.notEqual(outcome.offerCreate, true, "🔴 비슷한 폴더가 있는데 만들기 단추를 또 냈다");
-    assert.equal(outcome.offerHelperInstall, false);
-    assert.deepEqual(opened, [], "열었다");
-    assert.deepEqual(fetched, [], "만들지도 않았는데 위치를 물었다");
-  });
-
   test("multiple — 열지 않고 이름만 보인다", async () => {
     const names = [FOLDER_NAME, "D260908 INVENIA(옛것)"];
     const { outcome, opened } = await runCreate({

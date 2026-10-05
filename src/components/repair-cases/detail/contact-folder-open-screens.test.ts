@@ -245,18 +245,18 @@ describe("만들기 단추", () => {
     assert.equal(html.includes("href="), false, html);
   });
 
-  test("🔴 candidates(비슷한 폴더가 있다)에는 단추가 없다 — 할 일은 만들기가 아니다", () => {
-    const html = creatableMarkup({
-      kind: "CANDIDATES",
-      lines: [
-        { text: "인수번호가 없는 비슷한 폴더가 있어 만들지 않았습니다 — …", tone: "warning" },
-        { text: "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청", tone: "muted" },
-      ],
-      offerHelperInstall: false,
-    });
-
-    assert.equal(html.includes("<button"), false, html);
-    assert.ok(html.includes("INVENIA T2RCONT-AD2 WN3947 1802034 점검요청"), html);
+  test("🔴 걷어낸 「비슷한 폴더」 자취가 화면 쪽에 한 글자도 없다 (조각 8)", () => {
+    // 2026-10-05 사용자 결정으로 S/N 훑기를 걷어냈다 — 같은 S/N · 모델 · L/N 의 폴더가
+    // 있어도 **새 인수번호면 만든다.** 까닭은 lib/domain/contact-folder-naming.ts 머리말.
+    for (const gone of ["CANDIDATES", "candidates", "contactFolderCandidatesText"]) {
+      assert.equal(moduleSource.includes(gone), false, `흐름에 남아 있다: ${gone}`);
+      assert.equal(buttonSource.includes(gone), false, `단추에 남아 있다: ${gone}`);
+    }
+    // 🔴 안내 문구도 함께 걷어냈다.
+    for (const source of [moduleSource, buttonSource]) {
+      assert.equal(/붙여\s*주세요/.test(source), false, "걷어낸 안내 문구가 남아 있다");
+      assert.equal(source.includes("비슷한 폴더"), false, "걷어낸 말이 남아 있다");
+    }
   });
 
   test("🔴 열린 뒤 · 여럿 · 실패에도 단추가 없다", () => {

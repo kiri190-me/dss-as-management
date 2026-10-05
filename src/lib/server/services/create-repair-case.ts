@@ -8,6 +8,7 @@ import {
   markIdempotencyKeySucceeded,
 } from "@/lib/db/mutations/idempotency-keys";
 import { createRepairCase, type LegacyImportMetadata } from "@/lib/db/mutations/repair-cases";
+import { createContactFolderForIntake } from "./create-contact-folder";
 import { sendIntakeNotificationMail } from "./send-intake-mail";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import type { Role } from "@/lib/domain/types";
@@ -255,6 +256,54 @@ export async function createRepairCaseWithIdempotency(input: {
           console.error("접수 알림 메일에서 예상치 못한 오류", {
             intakeNumber: result.intakeNumber,
             message: mailError instanceof Error ? mailError.message : String(mailError),
+          });
+        }
+      }
+
+      /*
+       * 연락서 공유폴더 — **접수가 확정된 뒤에, 대화형에서만.** (연락서 조각 7)
+       *
+       * 위 메일이 정해 둔 세 규율을 글자 그대로 따른다. 까닭도 같다:
+       *
+       * ■ EXCEL_IMPORT 를 제외한다
+       *   과거 자료를 옮기는 경로다. 여기서 만들면 이관 한 번에 공유폴더에 폴더가
+       *   수백 개 생긴다 — 이관 건의 폴더는 나중에 사람이 [폴더 만들고 열기]로 만든다.
+       *
+       * ■ 실패해도 접수는 그대로다
+       *   createContactFolderForIntake 는 던지지 않고 값을 돌려준다. 그래도 여기서 한 번
+       *   더 감싸는 이유는 메일과 같다 — 그 약속이 깨져도 접수 응답이 실패로 뒤집히면
+       *   안 된다. 폴더가 안 만들어져도 접수는 성공이다.
+       *
+       * ■ 기다렸다가 응답한다(뒤로 미루지 않는다)
+       *   응답 뒤에 돌리면 그 작업이 죽는다(위 메일 주석의 까닭 그대로). 공유폴더가
+       *   느릴 때의 상한은 storage 쪽이 들고 있다.
+       *
+       * 🔴 **메일과 서로 모른다.** try 를 따로 두어 하나가 실패해도 다른 하나는 돈다.
+       *
+       * 🔴 **로그에 경로 · 루트를 적지 않는다.** 운영 로그가 사내 폴더 구조를 알려 주는
+       *   창구가 되면 안 된다 — 남기는 것은 사유 코드와 수리 건 id 뿐이고, 폴더 이름도
+       *   적지 않는다(고객사 · S/N 이 들어 있다).
+       */
+      if (input.logContext === "INTERACTIVE") {
+        try {
+          const folder = await createContactFolderForIntake({
+            repairCaseId: result.id,
+            actorUserId: actor.userId,
+          });
+          // 만들었다 · 이미 있었다 · 꺼져 있다는 정상 상태라 시끄럽게 굴지 않는다.
+          // 나머지(인수번호가 같은 폴더가 여럿 · 기록 실패 · 실패)는 사람이 손을 대야 한다.
+          if (folder.status !== "created" && folder.status !== "found" && folder.status !== "disabled") {
+            console.error("접수 때 연락서 폴더를 만들지 못했습니다", {
+              repairCaseId: result.id,
+              status: folder.status,
+              ...(folder.status === "failed" ? { reason: folder.reason } : {}),
+            });
+          }
+        } catch (folderError) {
+          // 🔴 오류의 message 를 적지 않는다 — fs 오류에는 경로가 들어 있다.
+          console.error("접수 때 연락서 폴더에서 예상치 못한 오류", {
+            repairCaseId: result.id,
+            name: folderError instanceof Error ? folderError.name : typeof folderError,
           });
         }
       }

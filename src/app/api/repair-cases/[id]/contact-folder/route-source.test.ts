@@ -200,10 +200,9 @@ describe("연락서 폴더 위치 통로 — 소스로 지킨다", () => {
     ].sort());
     // 🔴 만들기 쪽은 더 좁다 — 상대 경로 · 전체 주소도 나가지 않는다(여는 일은 GET 이 한다).
     const createFields = [...createType.matchAll(/(\w+)\??:/g)].map((match) => match[1]);
-    assert.deepEqual(
-      [...new Set(createFields)].sort(),
-      ["folderName", "folderNames", "intakeNumber", "reason", "status"].sort()
-    );
+    // 🔴 `intakeNumber` 도 더는 나가지 않는다 — 그것을 쓰던 「비슷한 폴더」 안내를
+    //    2026-10-05 에 걷어냈다(조각 8).
+    assert.deepEqual([...new Set(createFields)].sort(), ["folderName", "folderNames", "reason", "status"].sort());
   });
 
   test("전체 주소(uncPath) — 찾았을 때만, 설정값 그대로(서버가 이어 붙이지 않는다)", () => {
@@ -310,14 +309,22 @@ describe("연락서 폴더 만들기 통로 — 소스로 지킨다", () => {
     assert.equal(afterLookup.includes("fail(403"), false, "조회 뒤에 403 이 있다");
   });
 
-  test("🔴 여럿 · 비슷한 폴더면 만들지 않고 이름만 돌려준다 — 앱이 고르지 않는다", () => {
-    for (const status of ['status: "multiple"', 'status: "candidates"']) {
-      assert.ok(postBody.includes(status), status);
-    }
+  test("🔴 인수번호가 같은 폴더가 여럿이면 만들지 않고 이름만 돌려준다 — 앱이 고르지 않는다", () => {
+    assert.ok(postBody.includes('status: "multiple"'), 'status: "multiple"');
     const handled = postBody.slice(postBody.indexOf('created.status === "multiple"'));
     assert.equal(handled.includes("[0]"), false, "첫째를 골랐다");
     // 만드는 자리는 하나뿐이다 — 다른 갈래에서 몰래 한 번 더 부르지 않는다.
     assert.equal(postBody.match(/createContactFolder\(/g)?.length, 1);
+  });
+
+  test("🔴 걷어낸 S/N 훑기의 자취가 통로에 한 글자도 없다 (조각 8)", () => {
+    // 2026-10-05 사용자 결정 — 같은 S/N · 모델 · L/N 의 폴더가 있어도 **새 인수번호면
+    // 만든다.** 까닭은 lib/domain/contact-folder-naming.ts 의 「걷어낸 것」 머리말에 있다.
+    for (const gone of ["candidates", "pickSimilarContactFolders", "serialKey"]) {
+      assert.equal(code.includes(gone), false, `걷어낸 것이 남아 있다: ${gone}`);
+    }
+    // 🔴 안내 문구도 함께 걷어냈다 — 「이 폴더 이름 앞에 … 을 적어 주세요」.
+    assert.equal(/붙여\s*주세요/.test(route), false, "걷어낸 안내 문구가 남아 있다");
   });
 
   test("🔴 감사 기록 — 이번에 **만들었을 때만**, 수리 건 id 로 남긴다", () => {
@@ -337,8 +344,8 @@ describe("연락서 폴더 만들기 통로 — 소스로 지킨다", () => {
     assert.ok(postBody.includes("const archiveRoot = resolveContactFolderArchiveRoot();"));
     assert.ok(postBody.includes("root: archiveRoot,"));
     const responses = [...postBody.matchAll(/respondCreate\(\{[\s\S]*?\}\)/g)].map((match) => match[0]);
-    // 꺼짐(루트 없음) · 만들었다 · 이미 있다 · 여럿 · 비슷한 폴더 · 꺼짐(닿지 않는 갈래) · 실패.
-    assert.equal(responses.length, 7);
+    // 꺼짐(루트 없음) · 만들었다 · 이미 있다 · 여럿 · 꺼짐(닿지 않는 갈래) · 실패.
+    assert.equal(responses.length, 6);
     for (const response of responses) {
       assert.equal(response.toLowerCase().includes("root"), false, response);
       assert.equal(response.includes("uncPath"), false, response);

@@ -45,8 +45,10 @@ import {
  *  · 잠금 판정은 올리기 통로(api/repair-cases/{id}/attachments)가 쓰는 조회
  *    `getAttachmentUploadTarget` 을 **그대로 가져왔다** — 「잠긴 건에는 아무것도 더하지
  *    않는다」가 두 벌이 되면 반드시 갈라진다.
- *  · 🔴 맞는 폴더가 **여럿**(multiple)이거나 **비슷한 폴더**(candidates)가 있으면
- *    **만들지 않고** 그 이름들만 돌려준다 — 앱이 고르지 않는다.
+ *  · 🔴 **인수번호가 같은 폴더가 있으면 만들지 않는다** — 그것이 유일한 안전장치다.
+ *    하나면 그 폴더를 쓰고(found), **여럿**(multiple)이면 이름들만 돌려준다(앱이 고르지
+ *    않는다). 거꾸로 같은 S/N · 모델 · L/N 의 폴더가 옆에 있어도 **새 인수번호면 만든다**
+ *    (2026-10-05 S/N 훑기를 걷어냈다 — domain/contact-folder-naming.ts 머리말).
  *  · 🔴 만든 뒤 `audit_logs` 에 한 줄 남긴다(CREATE · repair_case_contact_folder).
  *    새 enum 값은 쓰지 않았다 — db/mutations/contact-folders.ts 머리말 참조.
  *
@@ -122,12 +124,6 @@ type ContactFolderCreateResponse =
   /** 누르는 사이에 생겼거나 사람이 이미 만들어 두었다 — **만들지 않았다.** */
   | { status: "found"; folderName: string }
   | { status: "multiple"; folderNames: string[] }
-  /**
-   * 🔴 인수번호 없이 사람이 만들어 둔 비슷한 폴더가 있다 — 만들지 않았다.
-   * `intakeNumber` 는 화면이 「이 이름 앞에 `D260908 ` 을 붙여 주세요」라고 말하기 위한
-   * 것이다 — 그 건의 제 번호이고, 누른 사람은 이미 화면에서 보고 있다.
-   */
-  | { status: "candidates"; intakeNumber: string; folderNames: string[] }
   | { status: "disabled" }
   | { status: "failed"; reason: string };
 
@@ -227,8 +223,8 @@ export async function GET(
  * 늘리지 않는다 — 폴더가 하나 늘어나는 것은 사람이 보고 정할 일이다.
  *
  * 만드는 것은 **폴더 하나**뿐이다(파일을 쓰지 않는다 · 지우지 않는다 · 이름을 바꾸지
- * 않는다). 이미 있으면 만들지 않고, 여럿이거나 비슷한 폴더가 있으면 **만들지 않고**
- * 사람에게 넘긴다.
+ * 않는다). 🔴 **인수번호가 같은 폴더가 이미 있으면 만들지 않고**, 그런 폴더가 여럿이면
+ * 역시 만들지 않고 사람에게 넘긴다.
  */
 export async function POST(
   request: NextRequest,
@@ -284,7 +280,7 @@ export async function POST(
     return respondCreate({ status: "disabled" });
   }
 
-  // ── 8) 만들기 — 있으면 만들지 않고, 비슷한 폴더가 있으면 사람에게 넘긴다 ──
+  // ── 8) 만들기 — 🔴 인수번호가 같은 폴더가 있으면 만들지 않는다 ─────────
   const created = await createContactFolder({
     root: archiveRoot,
     naming: {
@@ -323,14 +319,6 @@ export async function POST(
   }
   if (created.status === "multiple") {
     return respondCreate({ status: "multiple", folderNames: created.folderNames });
-  }
-  if (created.status === "candidates") {
-    // 🔴 하나뿐이어도 앱이 고르지 않는다 — 사람이 탐색기에서 이름 앞에 인수번호를 붙인다.
-    return respondCreate({
-      status: "candidates",
-      intakeNumber: naming.intakeNumber,
-      folderNames: created.folderNames,
-    });
   }
   if (created.status === "disabled") {
     // 루트를 먼저 보았으므로 여기에 닿지 않지만, 상태가 하나 늘면 컴파일러가 짚게 둔다.

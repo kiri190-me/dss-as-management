@@ -16,9 +16,12 @@ import { createContactFolder, type ContactFolderCreation } from "./contact-folde
  * 고객사 · 모델 · S/N 은 가짜다(저장소가 공개다).
  *
  * 못 박는 것:
- *  · 🔴 **있으면 만들지 않는다** · 🔴 **루트를 만들지 않는다**
+ *  · 🔴 **인수번호가 같은 폴더가 있으면 만들지 않는다** — 2026-10-05 이후 **유일한
+ *    안전장치**다(조각 5 의 S/N 훑기는 걷어냈다). 모양이 달라도 걸린다
+ *  · 🔴 **S/N · 모델 · L/N 이 다 같은 폴더가 있어도 새 인수번호면 만든다** — 같은 장비가
+ *    다시 수리를 오는 것이 정상이다
+ *  · 🔴 **루트를 만들지 않는다**
  *  · 🔴 같은 이름의 **파일**이 자리를 막으면 만들지 않는다
- *  · 🔴 **비슷한 폴더가 있으면 만들지 않는다** — 하나뿐이어도 사람이 고른다
  *  · 🔴 맞는 폴더가 **여럿**이면 만들지 않는다
  *  · 둘이 **동시에** 눌러도 폴더는 하나다(EEXIST 면 다시 찾는다)
  * 찾기 쪽 규율은 contact-folder-archive.test.ts 가, 이름 규칙은
@@ -116,6 +119,31 @@ test("🔴 이미 있으면 만들지 않는다 — 디스크가 한 글자도 �
   assert.equal(await exists(path.join(root, NAME)), false, "앱이 제 이름으로 하나 더 만들었다");
 });
 
+test("🔴 인수번호가 같으면 **모양이 달라도** 만들지 않는다 — 유일한 안전장치다 (조각 8)", async () => {
+  // 사람이 적어 둔 이름의 모양들. 하나하나가 「이것은 그 건의 폴더다」로 판정돼야 한다.
+  const humans = [
+    // 풀어쓴(NFD) 한글 — Mac · 옛 DSM 웹에서 올리면 디스크에 이렇게 앉는다.
+    "D260908 다른 고객사 메모".normalize("NFD"),
+    // 전각 공백 · 소문자 · 이름의 나머지가 전부 다른 폴더.
+    // (탭 · 제어문자는 Windows 가 폴더 이름에 쓰지 못하게 하므로 여기서 만들지 않는다 —
+    //  그 모양의 대조는 domain/contact-folder-naming.test.ts 가 순수 함수로 본다.)
+    `d260908${String.fromCodePoint(0x3000)}아무 말이나 적어 둔 폴더`,
+    // 이름이 인수번호 그 자체인 폴더.
+    "D260908",
+  ];
+
+  for (const human of humans) {
+    const root = await makeRoot();
+    await mkdir(path.join(root, human));
+    const before = await snapshot(root);
+
+    const result = await create(root);
+
+    assert.deepEqual(result, { status: "found", folderName: human }, JSON.stringify(human));
+    assert.deepEqual(await snapshot(root), before, `이미 있는데 또 만들었다: ${JSON.stringify(human)}`);
+  }
+});
+
 test("🔴 맞는 폴더가 여럿이면 만들지 않는다 — 사람이 정리한다", async () => {
   const root = await makeRoot();
   await mkdir(path.join(root, NAME));
@@ -163,52 +191,27 @@ test("🔴 같은 이름의 파일이 자리를 막으면 만들지 않고 faile
   assert.deepEqual(await snapshot(root), before, "파일을 지웠거나 옮겼다");
 });
 
-test("🔴 S/N 을 품은 비슷한 폴더가 있으면 만들지 않는다 — 하나뿐이어도 사람이 고른다", async () => {
+test("🔴 S/N · 모델 · L/N 이 다 같은 폴더가 있어도 **새 인수번호면 만든다** (조각 8)", async () => {
   const root = await makeRoot();
-  // 사람이 인수번호 없이 만들어 둔 폴더. 인수번호가 없으니 찾기로는 안 걸린다.
-  const human = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
-  await mkdir(path.join(root, human));
-  const before = await snapshot(root);
+  // (가) 같은 장비의 지난번 수리 건 — S/N 은 고유키가 아니라 재입고가 흔하다.
+  const lastTime = "D250101 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  // (나) 사람이 인수번호 없이 만들어 둔, 이름이 거의 똑같은 폴더.
+  const noNumber = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  await mkdir(path.join(root, lastTime));
+  await mkdir(path.join(root, noNumber));
 
   const result = await create(root);
 
-  assert.deepEqual(result, { status: "candidates", folderNames: [human] });
-  assert.deepEqual(await snapshot(root), before, "🔴 비슷한 폴더가 있는데 하나 더 만들었다");
-});
-
-test("🔴 S/N 을 띄어 적은 폴더도 걸린다 — 공백을 지우고 마디로 견준다", async () => {
-  const root = await makeRoot();
-  const human = "INVENIA 1912 120 점검요청";
-  await mkdir(path.join(root, human));
-
-  const result = await create(root, { serialNumber: "1912120" });
-
-  assert.deepEqual(result, { status: "candidates", folderNames: [human] });
-});
-
-test("S/N 이 **일부로만** 들어 있는 폴더는 걸리지 않는다 — 마디 경계를 본다", async () => {
-  const root = await makeRoot();
-  await mkdir(path.join(root, "INVENIA 18020345 점검요청"));
-  await mkdir(path.join(root, "INVENIA X1802034 점검요청"));
-
-  const result = await create(root);
-
-  assert.equal(result.status, "created", JSON.stringify(result));
-  assert.equal(await exists(path.join(root, NAME)), true);
-});
-
-test("🔴 인수번호로 시작하는 폴더는 훑지 않는다 — 같은 장비의 지난번 수리 건이다", async () => {
-  const root = await makeRoot();
-  // 같은 S/N 의 지난 건. S/N 은 고유키가 아니라 같은 장비가 여러 번 수리를 온다.
-  await mkdir(path.join(root, "D250101 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청"));
-
-  const result = await create(root);
-
+  // 🔴 조각 5 는 여기서 멈췄다(S/N 훑기). 2026-10-05 그 장치를 걷어냈다 — 새 인수번호에는
+  //    새 폴더가 있어야 한다. 가르는 기준은 인수번호 하나뿐이다.
   assert.deepEqual(result, { status: "created", folderName: NAME });
-  assert.equal(await exists(path.join(root, NAME)), true);
+  assert.deepEqual(await snapshot(root), [`${NAME}/`, `${lastTime}/`, `${noNumber}/`].sort());
+  // 🔴 옆 폴더는 한 글자도 건드리지 않았다.
+  assert.equal(await exists(path.join(root, lastTime)), true);
+  assert.equal(await exists(path.join(root, noNumber)), true);
 });
 
-test("S/N 이 비면 그 훑기를 건너뛴다 — 아무 폴더나 걸리지 않게", async () => {
+test("🔴 S/N 이 비어 있어도 새 인수번호면 만든다 — S/N 은 판단에 쓰이지 않는다", async () => {
   for (const serialNumber of [null, "", "   "] as const) {
     const root = await makeRoot();
     await mkdir(path.join(root, "INVENIA T2RCONT-AD2 점검요청"));

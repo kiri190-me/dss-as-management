@@ -9,7 +9,6 @@ import {
   contactFolderName,
   numberedContactFolderFileName,
   pickContactFolder,
-  pickSimilarContactFolders,
   type ContactFolderMatch,
   type ContactFolderNamingInput,
 } from "@/lib/domain/contact-folder-naming";
@@ -171,8 +170,6 @@ export type ContactFolderCreation =
   | { status: "found"; folderName: string }
   /** 맞는 폴더가 여럿이다 — 🔴 만들지 않는다. 사람이 정리한다. */
   | { status: "multiple"; folderNames: string[] }
-  /** 🔴 인수번호 없이 사람이 만들어 둔 **비슷한 폴더**가 있다 — 만들지 않는다. */
-  | { status: "candidates"; folderNames: string[] }
   | { status: "disabled" }
   | { status: "failed"; reason: string };
 
@@ -184,7 +181,12 @@ export type ContactFolderCreation =
  *  · 🔴 먼저 찾는다 — 있으면 만들지 않고 그것을 쓴다
  *  · 🔴 `recursive` 없이 만든다. `EEXIST` 면 **다시 찾아** 그것을 쓴다(둘이 동시에 눌렀을 때)
  *  · 🔴 같은 이름의 **파일**이 자리를 막고 있으면 만들지 않고 `failed`
- * 여기에 연락서 쪽 안전장치가 하나 더 붙는다 — 🔴 **비슷한 폴더 훑기**(아래).
+ *
+ * 🔴 **안전장치는 「인수번호로 먼저 찾는다」 하나뿐이다.** 조각 5 가 그 위에 S/N 으로
+ * 「비슷한 폴더」를 훑는 장치를 하나 더 얹었지만 2026-10-05 사용자 결정으로 걷어냈다 —
+ * 같은 S/N · 모델 · L/N 의 폴더가 이미 있어도 **새 인수번호면 새 폴더가 생겨야 한다**
+ * (같은 장비가 다시 수리를 오는 것이 정상이다). 까닭 전부는
+ * domain/contact-folder-naming.ts 의 「걷어낸 것」 머리말에 있다. **되살리지 말 것.**
  */
 export async function createContactFolder(input: CreateContactFolderInput): Promise<ContactFolderCreation> {
   const configured = input.root === undefined || input.root === null ? resolveContactFolderArchiveRoot() : input.root;
@@ -223,14 +225,10 @@ async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<
     return picked;
   }
 
-  // ── 🔴 안전장치: 인수번호 없이 사람이 만들어 둔 비슷한 폴더가 있는가 ────
-  //    하나뿐이어도 앱이 고르지 않는다. 사람이 탐색기에서 이름 앞에 인수번호를 붙인다.
-  const similar = pickSimilarContactFolders(naming.serialNumber, names);
-  if (similar.length > 0) {
-    return { status: "candidates", folderNames: similar };
-  }
-
   // ── 만든다 ─────────────────────────────────────────────────────────────
+  // 🔴 여기까지 왔으면 **이 인수번호의 폴더가 없다.** 같은 S/N · 모델 · L/N 의 폴더가
+  //    옆에 있어도 만든다 — 같은 장비가 다시 수리를 오면 그것이 정상이고, 새 인수번호에는
+  //    새 폴더가 있어야 한다(걷어낸 S/N 훑기의 까닭은 머리말 참조).
   let folderName: string;
   try {
     // 🔴 이름은 domain 이 짓는다(길이 상한 · 신고증상 20자 · 빈 조각 빼기가 거기 있다).
@@ -273,7 +271,7 @@ async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<
  * ── 🔴 폴더를 만들지 않는다 ─────────────────────────────────────────────
  * 이 길은 **이미 있는 폴더에만** 꽂는다. 폴더가 없으면 `no-folder` 로 조용히 끝난다 —
  * 폴더를 만드는 일은 사람이 [폴더 만들고 열기]를 누르는 그때뿐이고(조각 5), 올리기가
- * 지나가며 폴더를 늘리면 그 안전장치(비슷한 폴더 훑기)를 건너뛰게 된다.
+ * 지나가며 폴더를 늘리면 폴더가 늘어난 것을 사람이 볼 기회가 없다.
  *
  * ── 🔴 덮어쓰지 않는다 ──────────────────────────────────────────────────
  * `open(…, "wx")` 로만 연다. 이미 있으면 ` (2)` 로 비켜 간다 — 현황표(견적서 쪽 덮어쓰기

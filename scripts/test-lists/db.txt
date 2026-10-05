@@ -164,3 +164,8 @@ src/lib/db/queries/products.integration.test.ts
 # 🔴 격리 이름: 접수 월 "9310" · 제품 모델 "WR-STATUS-TEST-" (다른 스위트와 겹치지
 # 않는다). 고객사·사용자·워크플로는 읽기만 한다.
 src/lib/db/mutations/weekly-report-status.integration.test.ts
+# 접수 직후 연락서 폴더 만들기(조각 7) — 🔴 EXCEL_IMPORT 에서는 안 만든다 · 폴더를
+# 못 만들어도 접수는 성공이다 · 인수번호가 같은 폴더가 있으면 안 만든다 · 감사 기록을 남긴다.
+# 🔴 폴더는 mkdtemp 임시 폴더에서만 만든다 — 실제 공유폴더에 닿지 않는다.
+# 🔴 격리 이름: 인수 달 "9404" · 접두어 "AS-TEST-CF7-".
+src/lib/server/services/create-contact-folder.integration.test.ts

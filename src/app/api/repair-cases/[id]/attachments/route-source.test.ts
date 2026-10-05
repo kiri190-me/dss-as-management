@@ -16,6 +16,8 @@ import { describe, test } from "node:test";
  *  · 🔴 설정이 비면 **DB 도 디스크도 보지 않는다**
  *  · 🔴 이 통로는 공유폴더에 **폴더를 만들지 않는다 · 지우지 않는다**
  *  · 🔴 응답에 공유폴더 루트 · 절대 경로가 없다
+ *  · 🔴 **로그에도** 오류를 통째로 찍지 않는다(조각 8) — fs 오류의 message 에는 전체
+ *    경로가 들어 있어, 통째로 찍으면 운영 로그에 사내 폴더 구조가 남는다
  *
  * 꽂기 자체(덮어쓰지 않기 · NFC/NFD · 길이 상한)는 lib/storage/contact-folder-copy.test.ts 가,
  * 지우기 금지는 lib/storage/contact-folder-archive-source.test.ts 가 원본으로 본다.
@@ -118,6 +120,31 @@ describe("첨부 올리기 통로 — 차례를 소스로 지킨다", () => {
     const note = route.slice(route.indexOf("type ContactFolderCopyNote ="), route.indexOf("const CONTACT_FOLDER_COPY_CASE_GONE_REASON"));
     assert.equal(/\bfolderName\b/.test(note), false, "폴더 이름까지 싣는다");
     assert.equal(/\bpath\b/i.test(note), false, "경로를 담는 칸이 있다");
+  });
+
+  test("🔴 로그에도 오류를 통째로 찍지 않는다 — fs 오류의 message 에 전체 경로가 있다 (조각 8)", () => {
+    // 🔴 이 자리는 연락서 사본 쪽 하나뿐이다. 첨부 임시 저장 · 파일 이동 · 기록 생성의
+    //    기존 로그는 이 시험의 울타리 밖이다(copyBody 만 본다).
+    assert.ok(copyBody.includes("console.error("), "실패를 아무도 모르게 지나간다");
+    assert.equal(
+      /console\.error\([^;]*,\s*error\s*\)/.test(copyBody),
+      false,
+      "🔴 오류 객체를 통째로 찍는다 — message 에 사내 폴더 경로가 들어 있다"
+    );
+    for (const forbidden of ["error.message", "String(error)", "JSON.stringify(error)"]) {
+      assert.equal(copyBody.includes(forbidden), false, `로그에 ${forbidden} 가 들어간다`);
+    }
+    // 남기는 것은 오류 **이름**과 수리 건 id 뿐이다(조각 7 의 접수 후처리와 같은 모양).
+    assert.ok(copyBody.includes("error instanceof Error ? error.name :"), "오류 이름만 적는 모양이 아니다");
+    assert.ok(copyBody.includes("repairCaseId: input.repairCaseId,"), "어느 수리 건인지 적지 않는다");
+    // 사내 폴더 구조를 알려 주는 값들은 로그 자리에 없다.
+    for (const forbidden of ["storedPath", "CONTACT_FOLDER_ARCHIVE_DIR", "folderName"]) {
+      assert.equal(
+        copyBody.slice(copyBody.indexOf("console.error(")).includes(forbidden),
+        false,
+        `로그에 ${forbidden} 가 들어간다`
+      );
+    }
   });
 
   test("🔴 DB 에 「어느 파일이 어느 첨부의 사본인가」를 적지 않는다", () => {

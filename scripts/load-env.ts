@@ -26,4 +26,10 @@ if (process.env.DSS_DB_TEST_MODE === "1" || isIntegrationTestProcess) {
     testDatabaseUrl: process.env.TEST_DATABASE_URL,
   });
   process.env.DSS_DB_TEST_MODE = "1";
+
+  // 🔴 시험은 **실제 공유폴더에 닿지 않는다.** .env.local 의 연락서 공유폴더는 사내
+  // 서류함(UNC)을 가리키는데, 접수 경로가 2026-10-05(연락서 조각 7)부터 접수 직후
+  // 폴더를 만든다 — 시험이 접수를 한 건 만들 때마다 거기에 폴더가 하나 생긴다.
+  // 폴더가 필요한 시험은 mkdtemp 임시 폴더를 **직접** 넣어 쓴다.
+  delete process.env.CONTACT_FOLDER_ARCHIVE_DIR;
 }
