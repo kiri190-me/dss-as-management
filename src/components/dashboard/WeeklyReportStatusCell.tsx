@@ -1,30 +1,44 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
-import { useRouter } from "next/navigation";
-import { showSavePopup } from "@/components/common/SavePopup";
-import { setWeeklyReportStatusAction } from "@/lib/server/actions/set-weekly-report-status";
+import { useWeeklyReportBlockStatusRow } from "./WeeklyReportBlockStatusEdit";
 import {
   WEEKLY_REPORT_ROW_STATUSES,
-  isWeeklyReportRowStatus,
   weeklyReportRowStatusLabels,
-  type WeeklyReportRowStatus,
 } from "@/lib/domain/weekly-report-row-status";
 
 /**
  * ============================================================================
- * 주간보고 상세표의 `현 상태` 한 칸 — 화면에서 바로 바꾸는 자리
+ * 주간보고 상세표의 `현 상태` 한 칸 — 🔴 **여는 것은 블록 머리줄이다**
  * ============================================================================
- * 바로 옆 `비고` 칸(WeeklyReportNotesCell)이 본보기다. 같은 규율 둘을 그대로
- * 따른다:
+ * 이 칸에는 버튼이 없다. 자기 상태도 없다. 그 블록이 편집 중인지, 무엇이 골라져
+ * 있는지, 오류가 무엇인지를 전부 **블록 Provider 에서 읽어** 그리기만 한다
+ * (WeeklyReportBlockStatusEdit). 그래서 받는 prop 도 자기를 가리키는 id 하나다.
  *
- *  - 🔴 **못 바꾸는 사람에게는 이 칸을 아예 그리지 않는다.** 이 표는 250줄이
- *    넘는다. 줄마다 클라이언트 컴포넌트를 붙이면 접수 건의 id 와 version 이
- *    통째로 브라우저로 실려 간다. 그 판정은 부르는 쪽(WeeklyReportScreen)이
- *    하고, 거짓이면 지금까지와 **똑같이 글자만** 그린다.
- *  - 🔴 그 판정은 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 이 칸을 억지로
- *    띄워 요청을 보내도 서버가 세션·역할·보류·잠금·버전을 처음부터 다시 읽어
- *    막는다(server/actions/set-weekly-report-status.ts).
+ * ── 🔴 왜 줄마다 있던 `수정` 버튼을 걷어냈는가 (2026-10-05 사용자 요청) ───
+ * 같은 날 오전에는 이 칸마다 `수정`·`취소`·`저장` 이 붙어 있었다. 사용자가
+ * **「하나하나 눌러야 해서 번거롭다」**고 해서, 그 셋을 **고객사 블록 머리줄의
+ * 버튼 하나**로 옮겼다 — `수정` 한 번에 그 블록의 `현 상태` 칸이 전부 열리고,
+ * `저장` 한 번에 **바뀐 줄만** 나간다.
+ *
+ * 바로 몇 시간 전 결정이 또 바뀐 자리라 경위를 남긴다. 되돌리지 **않은** 것도
+ * 함께 적어 둔다: 고르는 즉시 보내던 맨 처음 방식은 그대로 폐기다. 250줄짜리
+ * 표를 훑어 내려가다 고르개에 손이 닿으면 **확인할 틈 없이 워크플로 단계가
+ * 옮겨지고 이력이 남는다.** `저장` 을 한 번 더 누르게 하는 뜻이 거기 있고, 그
+ * 한 번이 줄마다에서 블록마다로 옮겨 갔을 뿐이다.
+ *
+ * 옆 `비고` 칸(WeeklyReportNotesCell)이 버튼 없이 글자를 눌러 여는 것과 **일부러
+ * 다르다.** 저쪽이 보내는 것은 그 칸의 글자뿐이지만 이쪽이 보내는 것은 **워크플로
+ * 단계 이동**이다 — 되돌리려면 또 한 번 단계를 옮겨야 하고 그만큼 이력이 쌓인다.
+ *
+ * ── 🔴 못 바꾸는 사람에게는 이 칸을 아예 그리지 않는다 ──────────────────
+ * 이 표는 250줄이 넘는다. 줄마다 클라이언트 컴포넌트를 붙이면 접수 건의 id 와
+ * version 이 통째로 브라우저로 실려 간다. 그 판정은 부르는 쪽
+ * (WeeklyReportScreen 의 StatusCell)이 하고, 거짓이면 지금까지와 **똑같이 글자만**
+ * 그린다 — Provider 도 그리지 않는다.
+ *
+ * 🔴 그 판정은 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 이 칸을 억지로
+ * 띄워 요청을 보내도 서버가 세션·역할·보류·잠금·버전을 처음부터 다시 읽어
+ * 막는다(server/actions/set-weekly-report-status.ts).
  *
  * ── 보내는 것은 **칸**이지 단계가 아니다 ─────────────────────────────────
  * 이 칸이 보여 주는 7칸은 저장되는 값이 아니라 지금 서 있는 워크플로 단계에서
@@ -42,75 +56,28 @@ import {
  * 값이 달라진다**(그 값을 고를 수조차 없다). 바로 그것이 이 칸을 7칸으로 늘린
  * 까닭이다.
  *
- * ── `수정` 버튼이 없고, 고르면 곧바로 나간다 ─────────────────────────────
- * 비고 칸이 `수정` 을 달지 않은 것과 같은 까닭이다 — 250줄짜리 표의 오른쪽이
- * 단추로 뒤덮이면 정작 읽어야 할 값이 묻힌다. 고르개는 그 자체가 누를 수 있는
- * 것으로 보이고 키보드로도 닿으므로, 비고 칸이 글자를 `<button>` 으로 만들어
- * 메워야 했던 자리가 여기서는 처음부터 없다.
- *
- * ── 지금과 같은 값을 고르면 아무 일도 하지 않는다 ───────────────────────
- * `<select>` 는 같은 값을 다시 고르면 onChange 가 아예 뜨지 않지만, 저장이
- * 실패해 고르개를 되돌린 뒤에는 다시 뜬다. 그때는 **다시 보내는 것이 맞다**(그
- * 사람은 재시도를 누른 것이다). 그래서 비교 상대는 화면 상태가 아니라 서버가
- * 방금 그려 준 값(reportStatus)이다.
- *
  * ── 오류는 **그 줄에서** 말한다 ─────────────────────────────────────────
  * 250줄짜리 표에서 맨 위 알림은 아무도 못 본다. 성공만 저장 팝업으로 알리고
- * (common/SavePopup 은 0.5초 뒤 저절로 닫히는 성공 전용 알림이다), 실패는 이
- * 칸 아래에 남겨 둔다 — 보류 중이거나 출하 잠금인 줄은 **줄마다 다른 값**이라
- * 화면이 미리 알 수 없고, 그 사실을 사람에게 말해 주는 자리가 여기뿐이다.
+ * (머리줄의 `저장` 이 띄운다), 실패는 그 줄 아래에 남는다 — 보류 중이거나 출하
+ * 잠금인 줄은 **줄마다 다른 값**이라 화면이 미리 알 수 없고, 그 사실을 사람에게
+ * 말해 주는 자리가 여기뿐이다.
+ *
+ * 🔴 고르개는 **종이에 지금까지와 같은 글자로** 찍힌다(아래 인쇄 변형 넷). 이
+ * 화면은 그대로 인쇄해 쓰는 종이라, 250줄이 고르개 상자로 뒤덮이면 읽을 수 없는
+ * 종이가 된다.
  * ============================================================================
  */
-export default function WeeklyReportStatusCell({
-  repairCaseId,
-  version,
-  rowStatus,
-}: {
-  repairCaseId: string;
-  /** repair_cases.version — 낙관적 잠금 값(조회가 줄마다 실어 온다). */
-  version: number;
-  /**
-   * 서버가 방금 계산해 그려 준 **이 줄의 칸**(7칸 중 하나 —
-   * classifyWeeklyReportRowStatus). 글자만 보는 사람이 읽는 값과 **같은 값**이라,
-   * 수리 완료인 건은 '수리 완료'가 골라져 있다.
-   *
-   * **null 이면 분류 안 됨**이고, 그 줄도 바꿀 수 있어야 한다 — 오히려 바꿔야
-   * 할 줄이다. 빨간 딱지는 부르는 쪽이 그대로 그린다(WeeklyReportScreen).
-   */
-  rowStatus: WeeklyReportRowStatus | null;
-}) {
-  const router = useRouter();
-  const [selected, setSelected] = useState<WeeklyReportRowStatus | "">(rowStatus ?? "");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleChange(event: ChangeEvent<HTMLSelectElement>) {
-    const next = event.target.value;
-    // 분류 안 된 줄의 빈 자리(아래 placeholder)를 도로 고른 경우. 보낼 값이 없다.
-    if (!isWeeklyReportRowStatus(next)) return;
-    if (next === rowStatus || isSubmitting) return;
+export default function WeeklyReportStatusCell({ repairCaseId }: { repairCaseId: string }) {
+  const { isEditing, isSubmitting, rowStatus, selected, error, onChange } =
+    useWeeklyReportBlockStatusRow(repairCaseId);
 
-    setSelected(next);
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      const result = await setWeeklyReportStatusAction({
-        repairCaseId,
-        expectedVersion: version,
-        status: next,
-      });
-      if (!result.ok) {
-        // 서버가 막았으면 고르개도 사실대로 되돌린다 — 바뀌지 않은 값을 골라 둔
-        // 채로 두면 다음에 이 화면을 보는 사람이 바뀐 줄로 읽는다.
-        setSelected(rowStatus ?? "");
-        setError(result.message);
-        return;
-      }
-      router.refresh();
-      showSavePopup({ message: "현 상태를 변경했습니다.", redirectTo: null });
-    } finally {
-      setIsSubmitting(false);
-    }
+  if (!isEditing) {
+    // 못 고치는 사람이 보는 것과 **똑같이 글자만**이다. 분류 안 된 줄
+    // (rowStatus === null)에는 **아무 글자도 적지 않는다** — 빨간 딱지를 부르는
+    // 쪽이 이미 그리고 있어(WeeklyReportScreen 의 UNCLASSIFIED_BADGE_TONE)
+    // 여기서 또 적으면 딱지가 둘이 된다.
+    return <>{rowStatus !== null && weeklyReportRowStatusLabels[rowStatus]}</>;
   }
 
   return (
@@ -121,7 +88,7 @@ export default function WeeklyReportStatusCell({
       <select
         value={selected}
         disabled={isSubmitting}
-        onChange={handleChange}
+        onChange={onChange}
         aria-label="현 상태"
         title="현 상태 변경"
         // 🔴 종이에서는 **지금까지와 같은 글자**로 찍힌다(아래 인쇄 변형들). 이 화면은

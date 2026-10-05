@@ -1,5 +1,9 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
+import {
+  WeeklyReportBlockStatusActions,
+  WeeklyReportBlockStatusProvider,
+} from "./WeeklyReportBlockStatusEdit";
 import WeeklyReportDeliveriesPanel from "./WeeklyReportDeliveriesPanel";
 import WeeklyReportGoalsPanel from "./WeeklyReportGoalsPanel";
 import WeeklyReportNotesCell from "./WeeklyReportNotesCell";
@@ -95,12 +99,20 @@ import {
  * **단계가 실제로 옮겨 가고 변경 이력이 남는다** — 저장은 작업내용 탭의
  * 「현재 단계 직접 변경」과 **같은 길**(STEP_SET_MANUALLY)로 나가고, 어느 단계로
  * 갈지는 서버가 정한다(지금 단계에서 가장 가까운 단계). 규칙과 근거는 전부
- * WeeklyReportStatusCell 과 domain/weekly-report-status-step.ts 에 있다.
+ * WeeklyReportBlockStatusEdit · WeeklyReportStatusCell ·
+ * domain/weekly-report-status-step.ts 에 있다.
+ *
+ * 🔴 **고치는 단위는 칸이 아니라 블록이다**(2026-10-05 사용자 요청 — 줄마다 누르는
+ * 것이 번거롭다). 고객사 블록 머리줄의 `수정` 버튼 하나가 그 블록의 `현 상태` 칸을
+ * 전부 열고, `저장` 한 번에 바뀐 줄만 나간다. 그 상태를 들고 있는 것은 블록을
+ * 감싸는 클라이언트 Provider 하나이고(WeeklyReportBlockStatusEdit), 이 파일은
+ * **블록 하나당 그것을 한 번 두를 뿐**이다 — 블록을 통째로 클라이언트로 옮기면
+ * 상세표 250여 줄이 브라우저로 실려 간다(바로 위 '서버 컴포넌트다').
  *
  * 이 파일이 정하는 것은 비고 칸과 똑같이 **어디에 놓는가**와 **누구에게 그리는가**
- * 둘뿐이고, canEditStatus 가 거짓이면 지금까지와 똑같이 글자만 그린다. 🔴 두
- * 권한은 **같은 값이 아니다** — 비고는 수리 건의 필드 권한이고 현 상태는 단계를
- * 옮기는 자격이다.
+ * 둘뿐이고, canEditStatus 가 거짓이면 지금까지와 똑같이 글자만 그린다(Provider 도
+ * 두르지 않는다). 🔴 두 권한은 **같은 값이 아니다** — 비고는 수리 건의 필드
+ * 권한이고 현 상태는 단계를 옮기는 자격이다.
  *
  * ── 갱신 일은 서버가 정한다 ────────────────────────────────────────────
  * 머리말의 날짜를 클라이언트에서 new Date() 로 만들면 서버가 그린 것과 달라져
@@ -347,7 +359,13 @@ const LONG_PENDING_PO_TONE = "font-bold text-red-700 dark:text-red-300";
 /**
  * 상세표의 `현 상태` 한 칸. 분류 안 된 건은 빨갛게 드러난다.
  *
- * 바꿀 수 있는 사람에게는 그 자리가 **고르개**가 된다(WeeklyReportStatusCell).
+ * 🔴 **이 칸에는 버튼이 없다.** 여는 것은 블록 머리줄의 `수정` 하나이고
+ * (WeeklyReportBlockStatusActions), 그것을 누르면 **그 블록의 이 칸들이 한꺼번에**
+ * 고르개가 된다. 그때까지는 바꿀 수 있는 사람에게도 못 바꾸는 사람에게도 **같은
+ * 글자**가 보인다 — 다른 것은 그 글자를 누가 그리는가뿐이다(아래 분기).
+ * 줄마다 `수정`·`취소`·`저장` 을 달았던 같은 날 오전의 모양은 2026-10-05 사용자
+ * 요청으로 걷어냈다(하나하나 누르는 것이 번거롭다 — WeeklyReportStatusCell 머리말).
+ *
  * 못 바꾸는 사람에게는 지금까지와 같은 자리에 글자만 그린다 — 줄마다 클라이언트
  * 컴포넌트를 붙이지 않는 까닭은 비고 칸과 같다(파일 헤더).
  *
@@ -357,9 +375,11 @@ const LONG_PENDING_PO_TONE = "font-bold text-red-700 dark:text-red-300";
  * 2026-10-04). 🔴 **글자와 고르개가 같은 함수를 본다** — 한쪽만 7칸으로 늘리면
  * 영업이 읽는 표와 엔지니어가 고르는 값이 갈라진다.
  *
- * 🔴 **분류 안 됨 줄도 고를 수 있다.** 오히려 고쳐야 할 줄이라, 빨간 딱지는
- * 그대로 두고 그 옆에 고르개를 둔다. (null 이 되는 조합은 6칸 분류와 똑같다 —
- * 이 칸이 7칸이 되었다고 분류 안 됨이 늘거나 줄지 않는다.)
+ * 🔴 **분류 안 됨 줄도 고칠 수 있다.** 오히려 고쳐야 할 줄이라, 빨간 딱지는
+ * 그대로 두고 그 아래에 고르개가 선다. 그 줄에서 **상태 이름 글자는 아무도
+ * 적지 않는다** — 딱지가 곧 그 줄의 상태이고, 저 컴포넌트가 또 적으면 딱지가
+ * 둘이 된다. (null 이 되는 조합은 6칸 분류와 똑같다 — 이 칸이 7칸이 되었다고
+ * 분류 안 됨이 늘거나 줄지 않는다.)
  */
 function StatusCell({ row, canEdit }: { row: WeeklyReportRow; canEdit: boolean }) {
   const rowStatus = classifyWeeklyReportRowStatus(row);
@@ -372,9 +392,13 @@ function StatusCell({ row, canEdit }: { row: WeeklyReportRow; canEdit: boolean }
   }
 
   return (
+    // 🔴 version 과 rowStatus 는 여기서 넘기지 않는다 — 그 둘은 블록 Provider 가
+    // 줄 목록으로 들고 있고(ReportBlock 의 statusRows), 저 칸은 자기를 가리키는
+    // id 하나로 그것을 찾아 읽는다. 둘 데가 한 곳이어야 `router.refresh()` 뒤
+    // 새 version 이 곧바로 따라온다(WeeklyReportBlockStatusEdit 머리말).
     <span className="flex flex-col items-start gap-1">
       {rowStatus === null && <span className={UNCLASSIFIED_BADGE_TONE}>{UNCLASSIFIED_LABEL}</span>}
-      <WeeklyReportStatusCell repairCaseId={row.id} version={row.version} rowStatus={rowStatus} />
+      <WeeklyReportStatusCell repairCaseId={row.id} />
     </span>
   );
 }
@@ -521,11 +545,26 @@ function CountsSummary({
  * 블록 소제목 — 엑셀의 "INVENIA(RFG)". 왼쪽에 이름·종류, 오른쪽에 총 대수다.
  * 고객사 블록과 아래 총합이 같은 줄 모양을 쓰므로, 좌우 두 칸의 첫 줄 높이가
  * 저절로 맞는다.
+ *
+ * ── `actions` — 🔴 **고객사 블록에만 넘어오는 슬롯** ─────────────────────
+ * 이 줄은 세 자리에서 쓰인다: 고객사 블록(ReportBlock) · PO 발행 현황
+ * (PoIssuanceBlock) · 종류별 총합. 그 가운데 **고칠 줄이 있는 것은 고객사 블록
+ * 하나뿐**이라, `현 상태` 를 여는 `수정` 버튼도 거기서만 넘어온다
+ * (WeeklyReportBlockStatusActions). 나머지 둘은 안 넘기고, 안 넘기면 아무것도
+ * 그려지지 않는다.
+ *
+ * 자리는 **왼쪽 묶음(`<h3>`)의 맨 끝**이다 — 고객사 이름 옆이어야 한다는 사용자
+ * 지정이고(2026-10-05), 오른쪽 `총 대수` 와 겹치지 않는 자리다. `<button>` 은
+ * phrasing content 라 `<h3>` 안에 들어가도 된다.
+ *
+ * ⚠️ 넘어오는 조각은 **스스로 `shrink-0` 을 입어야 한다.** 아래 `<h3>` 의
+ * shrink-0 과 같은 까닭이고, 그 까닭은 바로 아래 주석에 있다.
  */
 function BlockHeading({
   name,
   kind,
   total,
+  actions,
   toneClass = PLAIN_TONE,
   toneStyle,
 }: {
@@ -534,6 +573,8 @@ function BlockHeading({
   kind: WeeklyReportKind;
   /** 오른쪽에 적는 숫자. 없으면 적지 않는다. */
   total?: number;
+  /** 이름 묶음 맨 끝에 서는 조각. 🔴 고객사 블록에서만 넘어온다(위 주석). */
+  actions?: ReactNode;
   toneClass?: string;
   /** toneClass 와 짝인 CSS 변수(CountCell). 직접 고른 고객사 색일 때만 있다. */
   toneStyle?: CSSProperties;
@@ -557,6 +598,7 @@ function BlockHeading({
         <span className="text-wr-meta font-normal text-zinc-600 dark:text-zinc-400">
           {weeklyReportKindDescriptions[kind]}
         </span>
+        {actions}
       </h3>
       {total !== undefined && (
         <p className="text-wr-meta whitespace-nowrap text-zinc-600 dark:text-zinc-400">
@@ -628,18 +670,36 @@ function ReportBlock({
   block: WeeklyReportBlock;
   /** `비고` 칸에 `수정` 을 그릴 것인가. 관문이 아니다(파일 헤더). */
   canEditNotes: boolean;
-  /** `현 상태` 칸에 고르개를 그릴 것인가. 이것도 관문이 아니다(파일 헤더). */
+  /**
+   * 머리줄에 `현 상태` 를 여는 `수정` 버튼을 그릴 것인가. 이것도 관문이 아니다
+   * (파일 헤더). 거짓이면 Provider 자체를 두르지 않는다 — 못 고치는 사람의
+   * 브라우저로 접수 건 id 와 version 이 내려가지 않게 하는 기존 규칙이다.
+   */
   canEditStatus: boolean;
 }) {
   const toneClass = customerRowColorClass(block.customerRowColor);
   // 직접 고른 색이면 위 클래스가 읽을 CSS 변수. 팔레트 색·없음이면 undefined 다.
   const toneStyle = customerRowColorStyle(block.customerRowColor);
-  return (
-    <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-wr-block dark:border-zinc-800 dark:bg-zinc-900">
+  // 블록 Provider 가 들고 있을 줄 목록. 🔴 `현 상태` 칸이 읽는 값은 **여기 하나**다
+  // (StatusCell 은 id 만 넘긴다) — 서버가 새로 그릴 때마다 version 과 rowStatus 가
+  // 함께 갱신돼야 저장이 낙관적 잠금에 걸리지 않는다.
+  const statusRows = canEditStatus
+    ? block.rows.map((row) => ({
+        id: row.id,
+        version: row.version,
+        rowStatus: classifyWeeklyReportRowStatus(row),
+      }))
+    : [];
+  // 🔴 `<section>` 이 flex 상자라, 이 안쪽은 Provider 를 둘러도 **한 덩어리로
+  // 묶이면 안 된다.** Provider 와 Fragment 는 둘 다 DOM 을 만들지 않으므로
+  // 머리줄·집계·상세표가 지금까지와 똑같이 section 의 flex 항목으로 선다.
+  const body = (
+    <>
       <BlockHeading
         name={block.customerName}
         kind={block.kind}
         total={block.counts.total}
+        actions={canEditStatus ? <WeeklyReportBlockStatusActions /> : undefined}
         toneClass={toneClass} toneStyle={toneStyle}
       />
       <CountsSummary counts={block.counts} toneClass={toneClass} toneStyle={toneStyle} />
@@ -726,6 +786,18 @@ function ReportBlock({
           </tbody>
         </table>
       </div>
+    </>
+  );
+
+  return (
+    <section className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-wr-block dark:border-zinc-800 dark:bg-zinc-900">
+      {canEditStatus ? (
+        <WeeklyReportBlockStatusProvider blockLabel={block.customerName} rows={statusRows}>
+          {body}
+        </WeeklyReportBlockStatusProvider>
+      ) : (
+        body
+      )}
     </section>
   );
 }
