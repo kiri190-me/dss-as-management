@@ -69,6 +69,22 @@ export default function DeleteAttachmentDialog({
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         소프트 삭제입니다. 기록은 저장소에 남아 있으며 언제든 복원할 수 있습니다.
       </p>
+      {/*
+        🔴 **앱은 공유폴더의 파일을 지우지 않는다**(그것이 규칙이다 —
+        storage/contact-folder-archive.ts 머리말). 그래서 첨부를 휴지통에 넣어도 연락서
+        폴더에 꽂아 둔 사본은 그대로 남는다. 그 사실을 말하지 않으면 사람은 「지웠다」고
+        믿는다.
+
+        🔴 **늘 보인다**(공유폴더 기능이 켜졌을 때만 보이게 하지 않는다). 까닭 둘:
+         · 이 확인창은 서버 설정을 모른다. 그것을 알리려면 페이지 → FilesScreen →
+           이 창으로 깃발 하나를 세 겹 넘겨야 하는데, 한 문장 때문에 치를 값이 아니다.
+         · 문장이 **기능과 무관하게 참이다.** 연락서 폴더에는 직원이 손으로 넣은 사본도
+           있고, 앱은 그것도 지우지 않는다. 더 보여서 치르는 값은 한 줄이지만, 덜 보여서
+           치르는 값은 「지운 줄 알았던 파일」이다.
+      */}
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        공유폴더에 넣어 둔 사본은 그대로 남습니다 — 필요하면 탐색기에서 직접 지워 주세요.
+      </p>
 
       <div className="mt-3 flex flex-col gap-1">
         <label htmlFor="delete-attachment-reason" className="text-xs text-zinc-500 dark:text-zinc-400">

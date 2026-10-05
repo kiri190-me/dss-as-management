@@ -22,8 +22,13 @@ import {
 import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getAttachmentUploadTarget } from "@/lib/db/queries/attachments";
+import { getRepairCaseContactFolderKeyById } from "@/lib/db/queries/repair-cases";
+import {
+  copyIntoContactFolder,
+  resolveContactFolderArchiveRoot,
+} from "@/lib/storage/contact-folder-archive";
 import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
-import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
+import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/storage-adapter";
 
 /**
  * ============================================================================
@@ -56,6 +61,30 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  * 나오지 않는 **깨진 기록**이다. 지금 순서에서 최악의 경우는 주인 없는 파일이
  * 하나 남는 것인데, 그건 나중에 훑어서 치울 수 있는 문제다. 되돌릴 수 없는
  * 고장과 치울 수 있는 찌꺼기 중에서 후자를 고른 것이다.
+ *
+ * ── 6) 사내 공유폴더(연락서 폴더)에 사본 (2026-10-05 연락서 조각 6) ───────
+ * 시스템 창고의 파일은 디스크 이름이 첨부 ID(UUID)라 사람이 탐색기에서 찾을 수
+ * 없다. 그래서 그 건의 **연락서 폴더에 사람이 읽는 이름으로 사본을 하나 더** 꽂는다.
+ * 사용자가 「양방향」을 고른 결과이고, 같은 파일이 두 곳에 있게 되는 것을 **알고
+ * 고른 것**이다(그래야 공유폴더 목록의 [열기]로 그 파일을 열 수 있다).
+ *
+ * 🔴 **DB 보다 뒤다.** 순서를 바꾸면 DB 기록이 실패했을 때 공유폴더에 주인 없는
+ * 사본이 남는다 — 그것은 앱이 지울 수 없는 자리다(사람의 서류함이라 지우지 않는다).
+ *
+ * 🔴 **실패해도 올리기는 성공(201)으로 끝낸다.** 시스템 창고에는 이미 들어갔고
+ * 감사도 남았다. 공유폴더가 느리거나 꺼졌다고 올리기를 되돌리면, 사람은 멀쩡히
+ * 저장된 파일을 다시 올리게 된다. 대신 **무슨 일이 있었는지 응답에 싣는다**
+ * (`contactFolderCopy`) — 화면이 「시스템에는 저장했지만 공유폴더에는 …」을 낸다.
+ *
+ * 🔴 **폴더를 만들지 않는다.** 없으면 `no-folder` 로 건너뛴다 — 폴더 만들기는 사람이
+ * [폴더 만들고 열기]로 하고, 그 안전장치(비슷한 폴더 훑기)가 거기 있다.
+ *
+ * 🔴 **설정(CONTACT_FOLDER_ARCHIVE_DIR)이 비면 아무 일도 하지 않는다** — 기능이 꺼진
+ * 환경에서는 DB 조회도 파일 읽기도 하지 않고 응답에 그 칸이 아예 붙지 않는다.
+ *
+ * 🔴 **DB 에 「어느 파일이 어느 첨부의 사본인가」를 적지 않는다.** 적는 순간 지우기
+ * 동기화 요구가 따라오고, 앱이 사람의 서류함에서 파일을 지우게 된다. 한쪽에서 지워도
+ * 다른 쪽은 그대로 둔다 — 그것이 사본의 뜻이다(휴지통 확인창이 그 사실을 알린다).
  * ============================================================================
  */
 
@@ -90,6 +119,67 @@ function fail(status: number, code: FailureCode, message: string): NextResponse 
 
 const MAX_ORIGINAL_FILE_NAME_LENGTH = 255;
 const MAX_DESCRIPTION_LENGTH = 500;
+
+/**
+ * 공유폴더 사본의 결과 — 🔴 **응답에 절대 경로 · 루트 값을 담는 칸이 없다.** 나가는 것은
+ * 디스크에 실제로 쓴 **파일 이름**과 경로 없는 짧은 사유뿐이다.
+ * 설정이 비어 기능이 꺼져 있으면 이 칸 자체가 응답에 붙지 않는다(null).
+ */
+type ContactFolderCopyNote =
+  | { status: "copied"; fileName: string }
+  | { status: "unchanged"; fileName: string }
+  /** 🔴 연락서 폴더가 아직 없다 — 만들지 않고 건너뛰었다. */
+  | { status: "no-folder" }
+  /** 맞는 폴더가 여럿이라 어디에 넣을지 앱이 고르지 않았다. */
+  | { status: "multiple" }
+  | { status: "failed"; reason: string };
+
+const CONTACT_FOLDER_COPY_CASE_GONE_REASON = "수리 건 정보를 읽지 못해 연락서 폴더를 찾을 수 없습니다.";
+const CONTACT_FOLDER_COPY_UNEXPECTED_REASON = "공유폴더에 사본을 넣는 중 문제가 발생했습니다.";
+
+/**
+ * 방금 올린 파일의 사본을 그 건의 연락서 폴더에 꽂는다. 🔴 **절대 던지지 않는다** —
+ * 여기서 무슨 일이 생겨도 올리기는 이미 끝났고 응답은 201 이어야 한다.
+ *
+ * ⚠️ 여기서 파일을 **한 번 더 읽는다**(최대 20MB). 받을 때는 스트림으로 흘려보냈지만,
+ * 사본은 이미 디스크에 앉은 파일에서 뜬다 — 같은 바이트가 공유폴더로 가야 하고, 「내용이
+ * 같으면 새로 쓰지 않는다」 판정에도 바이트가 필요하다. 올리기 한 번에 잠깐 머무는 양이고
+ * 상한(MAX_ATTACHMENT_SIZE_BYTES)이 그것을 묶어 둔다.
+ */
+async function copyToContactFolder(input: {
+  storage: StorageAdapter;
+  repairCaseId: string;
+  storedPath: string;
+  originalFileName: string;
+}): Promise<ContactFolderCopyNote | null> {
+  // 🔴 기능이 꺼진 환경에서는 올리기가 한 글자도 달라지지 않는다 — DB 도 디스크도 보지 않는다.
+  if (resolveContactFolderArchiveRoot() === null) return null;
+
+  try {
+    // 찾는 열쇠는 인수번호 하나뿐이다(domain/contact-folder-naming.ts 머리말).
+    const key = await getRepairCaseContactFolderKeyById(input.repairCaseId);
+    if (!key) return { status: "failed", reason: CONTACT_FOLDER_COPY_CASE_GONE_REASON };
+
+    const bytes = new Uint8Array(await new Response(await input.storage.read(input.storedPath)).arrayBuffer());
+    const result = await copyIntoContactFolder({
+      intakeNumber: key.intakeNumber,
+      originalFileName: input.originalFileName,
+      bytes,
+    });
+
+    if (result.status === "copied") return { status: "copied", fileName: result.fileName };
+    if (result.status === "unchanged") return { status: "unchanged", fileName: result.fileName };
+    if (result.status === "no-folder") return { status: "no-folder" };
+    if (result.status === "multiple") return { status: "multiple" };
+    // 루트를 먼저 보았으므로 disabled 에 닿지 않지만, 상태가 하나 늘면 컴파일러가 짚게 둔다.
+    if (result.status === "disabled") return null;
+    return { status: "failed", reason: result.reason };
+  } catch (error) {
+    // 사유에는 오류 message 를 쓰지 않는다 — 경로가 들어 있다. 서버 로그에만 남긴다.
+    console.error("연락서 폴더 사본 실패", error);
+    return { status: "failed", reason: CONTACT_FOLDER_COPY_UNEXPECTED_REASON };
+  }
+}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   // ── 1) 본문을 받기 전에 끝내야 하는 확인들 ────────────────────────────
@@ -249,6 +339,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return fail(500, "RECORD_FAILED", "파일 기록을 저장하는 중 문제가 발생했습니다.");
   }
 
+  // ── 6) 그 다음에 공유폴더 사본 (DB보다 뒤 — 파일 상단 6) 참조) ─────────
+  // 🔴 이 결과가 무엇이든 올리기는 201 이다. 실어 보내기만 한다.
+  const contactFolderCopy = await copyToContactFolder({
+    storage,
+    repairCaseId: target.id,
+    storedPath,
+    originalFileName,
+  });
+
   return NextResponse.json(
     {
       id: created.id,
@@ -258,6 +357,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       fileSize: written.size,
       checksumSha256: written.sha256,
       uploadedAt: created.uploadedAt,
+      // 기능이 꺼져 있으면 이 칸이 아예 붙지 않는다 — 화면도 아무 말을 하지 않는다.
+      ...(contactFolderCopy === null ? {} : { contactFolderCopy }),
     },
     { status: 201 }
   );

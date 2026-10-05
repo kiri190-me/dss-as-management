@@ -3,7 +3,9 @@ import {
   buildShareFolderStem,
   compareShareFolderNames,
   matchesShareFolderPrefix,
+  numberedShareFolderFileName,
   sanitizeShareFolderNamePiece,
+  shareFolderNameByteLength,
   truncateShareFolderNamePiece,
 } from "./share-folder-naming";
 
@@ -147,6 +149,115 @@ export function contactFolderName(input: ContactFolderNamingInput): string {
     ],
     maxLength: CONTACT_FOLDER_MAX_NAME_LENGTH,
   });
+}
+
+/**
+ * ============================================================================
+ * 연락서 폴더 **안에 꽂는 파일**의 이름 규칙 (연락서 조각 6)
+ * ============================================================================
+ * [파일 관리]에서 올린 파일은 시스템 창고(UPLOADS_DIR)에 UUID 이름으로 들어간다 —
+ * 사람이 탐색기에서 찾을 수 없는 이름이다. 그래서 그 건의 연락서 폴더에 **사람이 읽는
+ * 이름으로 사본**을 하나 더 꽂는다(2026-10-05 사용자가 「양방향」을 고른 결과 — 같은
+ * 파일이 두 곳에 있게 되는 것을 알고 고른 것이다).
+ *
+ * 이름은 `{다듬은 원본 이름}.{확장자}` 하나뿐이다. 🔴 **분류 라벨을 앞에 붙이지
+ * 않는다**(「인수 사진 — IMG_2847.jpg」 같은 것) — 사람의 서류함이 앱 용어로 오염되면
+ * 안 된다. 사람이 손으로 넣은 파일과 같은 모양으로 섞여 있어야 한다.
+ * ============================================================================
+ */
+
+/**
+ * 연락서 폴더에 꽂는 파일 이름의 **글자 수 상한**(UTF-16 — Windows 경로 한도가 세는 단위).
+ *
+ *   루트 `\\192.168.0.222\2_AS센터\1. 수리 관련\3. 연락서(활용)\2. 연락서` = **49 자**
+ *   경로 = 루트(49) + `\`(1) + 폴더 이름(최대 72 — 위 CONTACT_FOLDER_MAX_NAME_LENGTH)
+ *          + `\`(1) + 파일 이름(F)
+ *
+ *   **엑셀은 전체 경로 218 자를 넘는 파일을 열지 못한다**(폴더 이름 상한을 뽑을 때 쓴 것과
+ *   같은 한도다).  49 + 1 + 72 + 1 + F ≤ 218  →  **F ≤ 95**
+ *   (Windows 탐색기의 260 자 한도는 이보다 넉넉하다.)
+ */
+export const CONTACT_FOLDER_FILE_MAX_NAME_LENGTH = 95;
+
+/**
+ * 같은 이름의 **바이트 수 상한**(UTF-8).
+ *
+ * 🔴 글자 수만 보면 틀린다. 운영은 NAS(리눅스)이고 리눅스의 파일 이름 한도는 **255
+ * 바이트**다 — 한글 한 자가 3 바이트라 한글 95 자는 285 바이트로 `ENAMETOOLONG` 이 난다.
+ * 올리기 통로의 `MAX_ORIGINAL_FILE_NAME_LENGTH = 255` 도 **UTF-16 글자 수**라 이 한도를
+ * 막아 주지 못한다(한글 255 자 = 765 바이트).
+ *
+ * 그래서 두 상한을 **둘 다** 만족할 때까지 줄기를 줄인다. 한글만 든 이름은 바이트 쪽이
+ * 먼저 걸려 (255 − 꼬리 6) ÷ 3 = **83 자**에서 멈추고, 영문만 든 이름은 글자 수 쪽이 먼저
+ * 걸려 **89 자**에서 멈춘다.
+ */
+export const CONTACT_FOLDER_FILE_MAX_NAME_BYTES = 255;
+
+/**
+ * 같은 이름이 있을 때 붙이는 번호의 상한.
+ *
+ * 🔴 **견적서의 99 를 그대로 쓰지 않는다**(quote-archive.ts). 견적서 폴더에는 파일이
+ * 서넛뿐이지만 수리 건의 연락서 폴더에는 **사진이 수십 장** 들어가고, 폰 · 스캐너가
+ * 내놓는 이름은 `image.jpg` · `scan.pdf` 처럼 **늘 같은 이름**인 기계가 흔하다 — 한 건에서
+ * 99 를 채우는 일이 실제로 일어난다. 번호를 못 붙이면 그 파일만 조용히 공유폴더에 빠진다.
+ *
+ * 1000 을 넘기지 않는 까닭은 꼬리 길이다 — ` (999)` 는 6 자이고, 그만큼을 위 두 상한에서
+ * 미리 빼 두면 번호가 붙은 이름도 **자르지 않고** 상한 안에 들어온다(네 자리가 되면
+ * 꼬리가 7 자가 되어 그 계산을 다시 해야 한다).
+ *
+ * 비싼 값이 아니다: 빈 번호는 폴더 목록을 **한 번 읽어** 메모리에서 고르고, 디스크를
+ * 두드리는 것은 고른 번호 하나뿐이다(storage/contact-folder-archive.ts 의 writeNewFile).
+ */
+export const CONTACT_FOLDER_MAX_NUMBERED_COPIES = 999;
+
+/** 번호 꼬리가 가장 길 때의 길이 — ` (999)`. 글자 수도 바이트 수도 6 이다(ASCII). */
+const NUMBER_TAIL_RESERVE = ` (${CONTACT_FOLDER_MAX_NUMBERED_COPIES})`.length;
+
+/**
+ * 같은 이름이 있을 때의 후보 이름 — 규칙은 견적서와 **한 벌**이다(share-folder-naming.ts).
+ * `n = 1` 이면 그대로, 2 이상이면 확장자 앞에 ` (n)`.
+ */
+export function numberedContactFolderFileName(fileName: string, n: number): string {
+  if (!Number.isInteger(n) || n < 1) {
+    throw new ContactFolderNamingError("번호는 1 이상의 정수여야 합니다.");
+  }
+  return numberedShareFolderFileName(fileName, n);
+}
+
+/**
+ * 올린 파일의 원본 이름 → 연락서 폴더에 꽂을 이름. 쓸 수 있는 이름이 안 나오면 **null**
+ * (부르는 쪽이 「넣지 못했습니다」로 끝낸다 — 억지로 이름을 지어내지 않는다).
+ *
+ *  · 다듬기는 폴더 이름과 **같은 한 벌**이다(sanitizeShareFolderNamePiece) — 금지 글자 ·
+ *    제어문자 · 방향 뒤집기 글자가 여기서 사라지고, 끝의 점도 걷힌다.
+ *  · 🔴 **줄기만 자른다.** 확장자는 자르지 않는다 — `.xlsx` 가 `.xls` 가 되면 사람이 그
+ *    파일을 두 번 누르게 되고, 번호 꼬리는 자르면 덮어쓰기를 막는 뜻이 사라진다.
+ *  · 상한은 **글자 수와 바이트 수 둘 다**이고, 번호 꼬리 자리를 미리 빼 둔다(위 주석).
+ */
+export function contactFolderCopyFileName(originalFileName: string): string | null {
+  const name = typeof originalFileName === "string" ? originalFileName.normalize("NFC") : "";
+  // 맨 앞의 점은 확장자 구분자가 아니다(`.gitignore` 는 줄기가 `.gitignore` 다).
+  const dot = name.lastIndexOf(".");
+  const stem = sanitizeShareFolderNamePiece(dot > 0 ? name.slice(0, dot) : name);
+  const extension = dot > 0 ? sanitizeShareFolderNamePiece(name.slice(dot + 1)) : "";
+  if (stem.length === 0) return null;
+  const suffix = extension.length === 0 ? "" : `.${extension}`;
+
+  const maxLength = CONTACT_FOLDER_FILE_MAX_NAME_LENGTH - NUMBER_TAIL_RESERVE;
+  const maxBytes = CONTACT_FOLDER_FILE_MAX_NAME_BYTES - NUMBER_TAIL_RESERVE;
+
+  // 긴 쪽부터 한 글자씩 줄인다(코드 포인트 단위 — UTF-16 한 쌍을 반으로 가르지 않게).
+  // 자른 자리의 공백 · 점은 truncateShareFolderNamePiece 가 걷는다.
+  for (let kept = Array.from(stem).length; kept >= 1; kept -= 1) {
+    const piece = truncateShareFolderNamePiece(stem, kept);
+    if (piece.length === 0) break;
+    const candidate = `${piece}${suffix}`;
+    if (candidate.length <= maxLength && shareFolderNameByteLength(candidate) <= maxBytes) {
+      return candidate;
+    }
+  }
+  // 확장자 하나만으로도 상한을 넘는다 — 올 수 없는 자리지만 null 로 끝낸다(던지지 않는다).
+  return null;
 }
 
 /**

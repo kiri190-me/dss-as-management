@@ -55,6 +55,11 @@ import {
   useShiftRangeSelection,
 } from "@/lib/hooks/useShiftRangeSelection";
 import InAppCamera from "./InAppCamera";
+import {
+  contactFolderCopyNotice,
+  readContactFolderCopyNote,
+  type ContactFolderCopyNote,
+} from "./contact-folder-copy-notice";
 import { uploadPreview } from "./shrink-image";
 import StoredAttachmentList from "./StoredAttachmentList";
 import AttachmentCardList from "./AttachmentCardList";
@@ -431,7 +436,10 @@ function DatabaseFilesScreen({
    */
   async function uploadOne(
     file: File
-  ): Promise<{ ok: true; previewUpload: Promise<void> | null } | { ok: false; reason: string }> {
+  ): Promise<
+    | { ok: true; previewUpload: Promise<void> | null; contactFolderCopy: ContactFolderCopyNote | null }
+    | { ok: false; reason: string }
+  > {
     try {
       // 본문은 파일 바이트 그 자체이고 메타데이터는 쿼리 문자열이다 —
       // multipart로 보내면 서버가 파일 전체를 메모리에 올려야 한다
@@ -463,7 +471,10 @@ function DatabaseFilesScreen({
       const created = (await response.json().catch(() => null)) as { id?: string } | null;
       const previewUpload = created?.id ? uploadPreview(created.id, file) : null;
 
-      return { ok: true, previewUpload };
+      // 🔴 공유폴더(연락서 폴더) 사본의 결과. 서버는 **올리기와 따로** 알려 준다 — 사본이
+      // 실패해도 올리기는 성공이므로 여기서 ok 를 뒤집지 않는다. 기능이 꺼진 환경에서는
+      // 이 칸이 아예 없고, 그때는 화면도 아무 말을 하지 않는다.
+      return { ok: true, previewUpload, contactFolderCopy: readContactFolderCopyNote(created) };
     } catch {
       return { ok: false, reason: "네트워크 문제" };
     }
@@ -529,6 +540,11 @@ function DatabaseFilesScreen({
      * 뒤에 목록을 한 번 더 받아 오려면 끝을 알아야 한다(아래).
      */
     const previewUploads: Promise<void>[] = [];
+    /**
+     * 장마다의 **공유폴더 사본 결과.** 올리기 성공/실패와 **따로** 모은다 — 사본이
+     * 실패해도 올리기는 성공이고(라우트 머리말 6), 그 사실만 아래에서 한 줄로 알린다.
+     */
+    const contactFolderCopies: ContactFolderCopyNote[] = [];
     let uploaded = 0;
 
     try {
@@ -547,6 +563,7 @@ function DatabaseFilesScreen({
         if (result.ok) {
           uploaded += 1;
           if (result.previewUpload) previewUploads.push(result.previewUpload);
+          if (result.contactFolderCopy) contactFolderCopies.push(result.contactFolderCopy);
           if (fromCamera) uploadedPhotoIds.push(chosenPhotos[index].id);
         } else {
           failures.push({ name: file.name, reason: result.reason });
@@ -564,6 +581,13 @@ function DatabaseFilesScreen({
         });
       }
 
+      /**
+       * 🔴 공유폴더 쪽 결과는 **저장 팝업에 싣지 않는다** — 그 팝업은 0.5 초 뒤 저절로
+       * 닫히는 성공 전용이라 읽어야 하는 문장을 담을 자리가 아니다. 화면에 남는 알림 칸
+       * (statusMessage)으로 보낸다. 기능이 꺼진 환경에서는 null 이라 예전 그대로다.
+       */
+      const copyNotice = contactFolderCopyNotice(contactFolderCopies);
+
       if (uploaded > 0 && failures.length === 0) {
         const remaining = stagedPhotos.length - uploadedPhotoIds.length;
         // 다 올라갔으면 저장 팝업으로 알린다(접수 건 안에 딸린 것이라 머문다).
@@ -574,13 +598,13 @@ function DatabaseFilesScreen({
             ? `"${files[0].name}"을(를) 올렸습니다.`
             : `${uploaded}장을 모두 올렸습니다.`;
         showSavePopup({ message, redirectTo: null });
+        if (copyNotice) setStatusMessage({ type: copyNotice.tone, text: copyNotice.text });
       } else if (uploaded > 0) {
-        setStatusMessage({
-          type: "error",
-          text: `${uploaded}장을 올렸고 ${failures.length}장은 빠졌습니다 — ${failures
-            .map((item) => `${item.name}(${item.reason})`)
-            .join(", ")}`,
-        });
+        const text = `${uploaded}장을 올렸고 ${failures.length}장은 빠졌습니다 — ${failures
+          .map((item) => `${item.name}(${item.reason})`)
+          .join(", ")}`;
+        // 올린 것 가운데 공유폴더에 못 들어간 것이 있으면 그 줄도 함께 남긴다.
+        setStatusMessage({ type: "error", text: copyNotice ? `${text} / ${copyNotice.text}` : text });
       } else {
         setStatusMessage({
           type: "error",

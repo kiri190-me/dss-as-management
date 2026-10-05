@@ -242,6 +242,9 @@ src/lib/storage/contact-folder-archive-source.test.ts
 # 그 폴더를 **만드는** 쪽(조각 5). 찾기 시험과 한 모듈이지만, 만들기만 보는 시험이라
 # 따로 둔다 — 임시 폴더(mkdtemp)에서만 돌고 실제 공유폴더에는 닿지 않는다.
 src/lib/storage/contact-folder-create.test.ts
+# 그 폴더에 **파일을 꽂는** 쪽(조각 6) — 덮어쓰지 않기 · NFC/NFD · 길이 상한(글자 수와
+# 바이트 수) · 폴더가 없으면 건너뛰기. 역시 임시 폴더(mkdtemp)에서만 돈다.
+src/lib/storage/contact-folder-copy.test.ts
 src/lib/storage/contact-folder-entries.test.ts
 src/lib/storage/contact-folder-entries-source.test.ts
 # 연락서 폴더 위치 통로. `[id]` 칸은 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가
@@ -249,6 +252,9 @@ src/lib/storage/contact-folder-entries-source.test.ts
 src/app/api/repair-cases/*/contact-folder/route-source.test.ts
 # 그 폴더 **안**을 읽는 통로(조각 3). 위 패턴은 한 칸만 덮으므로 따로 적는다.
 src/app/api/repair-cases/*/contact-folder/entries/route-source.test.ts
+# 첨부 올리기 통로의 **차례**(조각 6) — 파일 이동 → DB → 그 다음에 공유폴더 사본,
+# 사본이 실패해도 201. `[id]` 는 위와 같은 까닭으로 `*` 다.
+src/app/api/repair-cases/*/attachments/route-source.test.ts
 src/lib/domain/quote-issue-result.test.ts
 src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts

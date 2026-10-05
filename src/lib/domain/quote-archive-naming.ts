@@ -36,6 +36,7 @@ import {
   buildShareFolderStem,
   matchesShareFolderPrefix,
   normalizeShareFolderNameForCompare,
+  numberedShareFolderFileName,
   sanitizeShareFolderNamePiece,
 } from "./share-folder-naming";
 
@@ -250,13 +251,14 @@ export function quoteArchiveSignedPdfFileName(input: QuoteArchiveNamingInput): s
  * 같은 이름이 있을 때의 후보: n = 1 이면 그대로, 2 이상이면 확장자 앞에 ` (n)`.
  *   `…수리 견적서.xlsx` → `…수리 견적서 (2).xlsx`
  *   `…수리 견적서 - 有印.pdf` → `…수리 견적서 - 有印 (2).pdf`
+ *
+ * 🔴 **규칙 자체는 share-folder-naming.ts 에 한 벌로 있다**(2026-10-05 연락서 조각 6 —
+ * 연락서 폴더도 같은 번호 모양을 쓴다). 여기 남은 것은 **견적서의 입력 검사**뿐이고,
+ * 거절하는 값 · 던지는 오류 종류는 한 글자도 바뀌지 않았다.
  */
 export function numberedQuoteArchiveName(name: string, n: number): string {
   if (!Number.isInteger(n) || n < 1) {
     throw new QuoteArchiveNamingError("번호는 1 이상의 정수여야 합니다.");
   }
-  if (n === 1) return name;
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return `${name} (${n})`;
-  return `${name.slice(0, dot)} (${n})${name.slice(dot)}`;
+  return numberedShareFolderFileName(name, n);
 }

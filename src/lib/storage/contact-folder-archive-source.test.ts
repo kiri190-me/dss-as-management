@@ -4,21 +4,27 @@ import { describe, test } from "node:test";
 
 /**
  * ============================================================================
- * 연락서 폴더 — **지우지 않는다 · 파일을 쓰지 않는다**를 원본으로 지킨다
+ * 연락서 폴더 — **지우지 않는다 · 덮어쓰지 않는다**를 원본으로 지킨다
  * ============================================================================
  * 「지금은 안 쓴다」는 시험으로 지켜지지 않는다 — 누군가 `rm` 한 줄을 들이면 **앱이
  * 사람의 서류함에서 파일을 지운다.** 그래서 동작이 아니라 **원본 글자**를 본다.
  *
  * ── 🔴 2026-10-05(조각 5) — `mkdir` 만 금지에서 허용으로 옮겼다 ──────────
- * 이 조각이 처음으로 **폴더를 만든다**(createContactFolder). 그래서 `mkdir` 한 낱말만
- * 옮기고 **나머지 금지는 한 줄도 느슨하게 하지 않았다**: `unlink` · `rm` · `rmdir` ·
- * `rename` · `truncate` · `cp` 는 그대로 없어야 하고, 파일을 쓰는 길(`writeFile` ·
- * `appendFile` · `createWriteStream` · `"wx"`)도 그대로 없어야 한다 — 파일 쓰기는 뒤
- * 조각이다. 파일시스템을 가져오는 자리도 **`node:fs/promises` 에서 `mkdir` 하나**로
- * 못 박는다(전보다 좁다 — 이름을 적어 고정한다).
+ * 그 조각이 처음으로 **폴더를 만들었다**(createContactFolder).
  *
- * 찾기 · 만들기 동작 자체는 contact-folder-archive.test.ts ·
- * contact-folder-create.test.ts 가, 이름 · 대조 규칙은
+ * ── 🔴 2026-10-05(조각 6) — **파일 쓰기**를 열었다 ──────────────────────
+ * 이 조각이 처음으로 연락서 폴더에 **파일을 꽂는다**(copyIntoContactFolder). 그래서
+ * `writeFile` · `"wx"` · `open(` 금지를 풀었다. 대신 **무엇을 열었는지 이름으로 못 박는다**:
+ *  · 파일시스템에서 가져오는 것은 `mkdir` · `open` · `readdir` · `readFile` · `stat`
+ *    **다섯뿐**이고 하나씩 까닭이 있다(모듈 머리말).
+ *  · 🔴 여는 방식은 **`"wx"` 하나**다 — 덮어쓰는 길(`"w"` · `"a"` · `"r+"`)이 없다.
+ *  · 🔴 **지우기 · 옮기기 금지는 한 글자도 느슨하게 하지 않았다** — `unlink` · `rm` ·
+ *    `rmdir` · `rename` · `truncate` · `cp` 는 그대로 없어야 한다. 쓰다 실패한 조각을
+ *    치우는 길도 들이지 않는다(머리말의 「대가」).
+ *  · 🔴 사본 꽂기 쪽에는 **`mkdir` 이 없다** — 이 길은 이미 있는 폴더에만 꽂는다.
+ *
+ * 찾기 · 만들기 · 꽂기 동작 자체는 contact-folder-archive.test.ts ·
+ * contact-folder-create.test.ts · contact-folder-copy.test.ts 가, 이름 · 대조 규칙은
  * domain/contact-folder-naming.test.ts 가 본다.
  * ============================================================================
  */
@@ -39,24 +45,48 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
     }
   });
 
-  test("🔴 파일을 쓰는 길이 한 글자도 없다 — 폴더만 만든다(파일은 뒤 조각이다)", () => {
-    for (const forbidden of [/\bwriteFile\b/, /\bappendFile\b/, /\bcreateWriteStream\b/, /"wx"/, /\bopen\(/]) {
-      assert.equal(forbidden.test(code), false, `쓰기 흔적: ${forbidden}`);
+  test("🔴 덮어쓰는 길이 없다 — 파일은 `wx` 로만 연다 (조각 6)", () => {
+    // 여는 자리는 하나뿐이고 그 하나가 `wx` 다. 존재 확인과 쓰기 사이에 틈이 없다.
+    assert.equal(code.match(/\bopen\(/g)?.length, 1, "파일을 여는 자리가 하나가 아니다");
+    assert.ok(code.includes('await open(target, "wx");'), "`wx` 말고 다른 방식으로 열었다");
+    // 🔴 덮어쓰는 플래그는 한 글자도 없다.
+    for (const forbidden of ['"w"', '"a"', '"r+"', '"w+"', '"a+"', /\bappendFile\b/, /\bcreateWriteStream\b/]) {
+      const test = typeof forbidden === "string" ? code.includes(forbidden) : forbidden.test(code);
+      assert.equal(test, false, `덮어쓰기 흔적: ${forbidden}`);
     }
+    // 🔴 파일을 쓰는 것은 **연 손잡이**를 통해서다 — fs 의 writeFile 을 직접 부르지 않는다
+    //    (아래 가져오기 고정이 그것을 함께 막는다).
+    assert.ok(code.includes("await handle.writeFile(bytes);"), "쓰는 자리가 사라졌다");
+    assert.equal(/\bawait writeFile\(/.test(code), false, "fs 의 writeFile 을 직접 불렀다");
   });
 
-  test("🔴 파일시스템에서 가져오는 것은 mkdir 하나뿐 — 읽기는 공용 도우미를 거친다", () => {
+  test("🔴 사본을 꽂는 길은 폴더를 만들지 않는다 — 이미 있는 폴더에만 꽂는다 (조각 6)", () => {
+    const copy = code.slice(code.indexOf("export async function copyIntoContactFolder("), code.indexOf("async function look("));
+    assert.ok(copy.length > 0, "사본 꽂기가 없다");
+    assert.equal(/\bmkdir\b/.test(copy), false, "🔴 꽂는 길에서 폴더를 만들었다");
+    assert.ok(copy.includes('status: "no-folder"'), "폴더가 없을 때 건너뛰지 않는다");
+    // 🔴 NFC/NFD — 쓰기 전에 디스크의 이름을 접어서 견준다(`wx` 만으로는 못 막는다).
+    assert.ok(copy.includes("normalizeShareFolderNameForCompare("), "정규화해 견주지 않는다");
+  });
+
+  test("🔴 파일시스템에서 가져오는 것은 다섯뿐 — 폴더 읽기는 공용 도우미를 거친다", () => {
     assert.deepEqual(importedFrom(source), [
       "./share-folder-fs",
       "@/lib/domain/contact-folder-naming",
+      "@/lib/domain/share-folder-naming",
       "node:fs/promises",
       "node:path",
     ].sort());
     // 🔴 이름을 적어 못 박는다 — `node:fs/promises` 에서 더 가져오면 여기서 걸린다.
-    assert.ok(code.includes('import { mkdir } from "node:fs/promises";'), "mkdir 말고 다른 것을 가져왔다");
+    //    `unlink` · `rename` 을 들이려면 **이 줄부터** 고쳐야 한다.
+    assert.ok(
+      code.includes('import { mkdir, open, readdir, readFile, stat } from "node:fs/promises";'),
+      "가져오는 목록이 바뀌었다"
+    );
     assert.equal(code.match(/from "node:fs\/promises"/g)?.length, 1);
     assert.equal(code.match(/\bmkdir\(/g)?.length, 1, "mkdir 을 부르는 자리는 하나뿐이다");
     // 🔴 `recursive` 없이 만든다 — 부모(= 루트)가 없으면 만들지 않고 실패해야 한다.
+    //    `readdir` 도 마찬가지로 하위 폴더를 끌어오지 않는다.
     assert.ok(code.includes("await mkdir(target);"), "mkdir 에 옵션이 붙었다");
     for (const forbidden of ["recursive", "require(", "import(", "child_process", "console."]) {
       assert.equal(code.includes(forbidden), false, `흔적: ${forbidden}`);
@@ -91,11 +121,17 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
   });
 
   test("🔴 던지지 않는다 — 밖으로 나가는 것은 status 뿐이고, 사유에 경로를 담지 않는다", () => {
-    // 내보내는 함수는 셋뿐이다 — 설정 읽기 · 찾기 · 만들기. 🔴 **지우기를 내보내지 않는다.**
+    // 내보내는 함수는 넷뿐이다 — 설정 읽기 · 찾기 · 만들기 · 꽂기.
+    // 🔴 **지우기 · 이름 바꾸기를 내보내지 않는다.**
     const exported = [...source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)]
       .map((match) => match[1])
       .sort();
-    assert.deepEqual(exported, ["createContactFolder", "findContactFolder", "resolveContactFolderArchiveRoot"]);
+    assert.deepEqual(exported, [
+      "copyIntoContactFolder",
+      "createContactFolder",
+      "findContactFolder",
+      "resolveContactFolderArchiveRoot",
+    ]);
 
     // 네 가지 상태가 모두 있다.
     for (const status of ['status: "disabled"', 'status: "failed"']) {

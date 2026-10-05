@@ -111,6 +111,36 @@ export function matchesShareFolderPrefix(
   return left === right || left.startsWith(`${right} `);
 }
 
+/**
+ * 같은 이름이 이미 있을 때의 후보 이름: `n = 1` 이면 그대로, 2 이상이면 **확장자 앞에**
+ * ` (n)` 을 넣는다.
+ *
+ *   `사진.jpg` → `사진 (2).jpg`
+ *   `이름`     → `이름 (2)`        (확장자가 없으면 끝에 붙인다)
+ *   `.gitignore` → `.gitignore (2)` (맨 앞의 점은 확장자 구분자가 아니다)
+ *
+ * 🔴 **한 벌로 둔다.** 견적서(quote-archive-naming.ts)와 연락서(contact-folder-naming.ts)가
+ * 같은 규칙을 쓴다 — 두 벌을 두면 한쪽만 고쳐져 같은 공유폴더 안에서 번호 모양이 갈라진다.
+ * `n` 이 1 이상의 정수인지는 **부르는 쪽이** 본다(서류함마다 던지는 오류가 다르다).
+ */
+export function numberedShareFolderFileName(name: string, n: number): string {
+  if (n === 1) return name;
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return `${name} (${n})`;
+  return `${name.slice(0, dot)} (${n})${name.slice(dot)}`;
+}
+
+/** 바이트 수를 세는 자(바로 아래 shareFolderNameByteLength). 한 벌만 만들어 둔다. */
+const UTF8 = new TextEncoder();
+
+/**
+ * 이름의 **UTF-8 바이트 수**. 리눅스(NAS)의 파일 이름 한도가 글자 수가 아니라 바이트
+ * 수(255)라, 한글 이름은 글자 수만 보면 세 배로 넘친다 — 한 자가 3 바이트다.
+ */
+export function shareFolderNameByteLength(name: string): number {
+  return UTF8.encode(name).length;
+}
+
 export type ShareFolderStemOptions = {
   /** 🔴 **절대 자르지 않는 머리**(견적서 번호 · 인수번호). 이미 다듬은 값을 넘긴다. */
   head: string;
