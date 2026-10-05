@@ -9,7 +9,11 @@ import {
   runQuoteFolderUncPathCopy,
 } from "@/components/quotes/quote-folder-open";
 import type { QuoteIssueNoticeLine, QuoteIssueNoticeTone } from "@/components/quotes/quote-issue-messages";
-import { runContactFolderOpen, type ContactFolderOpenOutcome } from "./contact-folder-open";
+import {
+  runContactFolderCreateAndOpen,
+  runContactFolderOpen,
+  type ContactFolderOpenOutcome,
+} from "./contact-folder-open";
 
 /**
  * ============================================================================
@@ -18,7 +22,12 @@ import { runContactFolderOpen, type ContactFolderOpenOutcome } from "./contact-f
  * 누르면 그 수리 건의 **연락서 공유폴더**가 Windows 탐색기에서 열린다. 누른 뒤의 흐름은
  * runContactFolderOpen(contact-folder-open.ts)이 전부 한다 — 이 파일은 단추와 결과 줄만 그린다.
  *
- * 🔴 **이 조각은 폴더를 만들지 않는다.** 없으면 「아직 없습니다」로 끝난다(만들기는 뒤 조각).
+ * ── 🔴 만들기는 **두 번째 누름**이다 (조각 5) ───────────────────────────────
+ * 폴더가 없으면 결과 줄 아래에 [폴더 만들고 열기]가 선다. 🔴 저절로 만들지 않는다 —
+ * 사람이 그것을 눌러야 폴더가 하나 생기고(runContactFolderCreateAndOpen) 바로 열린다.
+ * 🔴 **비슷한 폴더가 있었을 때(CANDIDATES)는 그 단추를 내지 않는다** — 그때 할 일은
+ * 만들기가 아니라 탐색기에서 폴더 이름 앞에 인수번호를 붙이는 것이다.
+ * 만드는 동안에는 두 단추가 모두 잠긴다(두 번 눌려 폴더가 둘이 되지 않게).
  *
  * ── 🔴 인쇄에 안 찍힌다 ──────────────────────────────────────────────────
  * 이 저장소의 화면은 그대로 인쇄해 쓰는 일이 많다. 종이에 남을 이유가 없는 조작 단추라
@@ -91,13 +100,31 @@ function ContactFolderNoticeLines({ lines }: { lines: readonly QuoteIssueNoticeL
 /** 한 번에 하나만 돈다 — 어느 것이 도는지. */
 type NoticeAction = "command" | "path";
 
+/** 🔴 만들기 단추의 글. 「만들고 연다」까지 적는다 — 누르면 탐색기가 뜨기 때문이다. */
+export const CONTACT_FOLDER_CREATE_BUTTON_TEXT = "폴더 만들고 열기";
+
+export const CONTACT_FOLDER_CREATE_BUTTON_TITLE =
+  "이 수리 건의 연락서 폴더를 사내 공유폴더에 새로 만들고 탐색기로 엽니다 — 이미 있거나 비슷한 폴더가 있으면 만들지 않습니다";
+
 /**
  * [폴더 열기] 결과 — 폴더를 찾아 연 뒤에만 아래 두 길을 함께 내민다.
  *  · [위치 복사] — 🔴 `outcome.uncPath` 가 **있을 때만**. 서버에 주소 설정이 없으면 응답에
  *    그 칸이 아예 없고, 그때는 단추도 없다. 붙여넣으면 도우미 없이도 폴더가 열린다.
  *  · [설치 명령 복사] — 폴더를 찾았으면 늘 낸다(`offerHelperInstall`).
+ *
+ * 🔴 [폴더 만들고 열기]는 **`offerCreate` 가 참이고 부르는 쪽이 `onCreate` 를 주었을 때만**
+ * 그린다 — 결과를 보여 주기만 하는 자리(시험 · 인쇄 미리보기)에서는 만들 길이 없다.
  */
-export function ContactFolderOpenNotice({ outcome }: { outcome: ContactFolderOpenOutcome }) {
+export function ContactFolderOpenNotice({
+  outcome,
+  onCreate,
+  creating = false,
+}: {
+  outcome: ContactFolderOpenOutcome;
+  /** 주지 않으면 만들기 단추를 그리지 않는다. */
+  onCreate?: () => void;
+  creating?: boolean;
+}) {
   // 누른 결과는 어느 결과에 딸린 것인지 함께 든다 — 새로 누르면 지난 줄이 저절로 사라진다.
   const [answer, setAnswer] = useState<{ outcome: ContactFolderOpenOutcome; lines: QuoteIssueNoticeLine[] } | null>(null);
   const [busy, setBusy] = useState<NoticeAction | null>(null);
@@ -116,6 +143,21 @@ export function ContactFolderOpenNotice({ outcome }: { outcome: ContactFolderOpe
   return (
     <div className="flex flex-col gap-1">
       <ContactFolderNoticeLines lines={outcome.lines} />
+      {outcome.offerCreate === true && onCreate !== undefined && (
+        <div>
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={creating}
+            aria-busy={creating}
+            title={CONTACT_FOLDER_CREATE_BUTTON_TITLE}
+            data-contact-folder-create=""
+            className={BUTTON_CLASS}
+          >
+            {creating ? "만드는 중…" : CONTACT_FOLDER_CREATE_BUTTON_TEXT}
+          </button>
+        </div>
+      )}
       {outcome.offerHelperInstall && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           탐색기가 열리지 않았다면{" "}
@@ -157,17 +199,19 @@ type ContactFolderOpenButtonProps = {
 
 /** 단추와 결과 줄 — Windows 판단 없이. 화면에는 기본 내보내기를 쓴다. */
 export function ContactFolderOpenControl({ repairCaseId }: ContactFolderOpenButtonProps) {
-  const [busy, setBusy] = useState(false);
+  // 🔴 「무엇이 도는지」까지 든다 — 만드는 동안 두 단추가 모두 잠긴다(두 번 눌리지 않게).
+  const [busy, setBusy] = useState<"open" | "create" | null>(null);
   const [outcome, setOutcome] = useState<ContactFolderOpenOutcome | null>(null);
 
-  async function handleClick() {
-    if (busy) return;
-    setBusy(true);
-    setOutcome(null);
+  async function run(action: "open" | "create", work: () => Promise<ContactFolderOpenOutcome>) {
+    if (busy !== null) return;
+    setBusy(action);
+    // 만드는 동안에는 지난 줄을 지우지 않는다 — 그 줄에 붙은 단추가 「만드는 중…」이 된다.
+    if (action === "open") setOutcome(null);
     try {
-      setOutcome(await runContactFolderOpen({ repairCaseId }));
+      setOutcome(await work());
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -175,16 +219,23 @@ export function ContactFolderOpenControl({ repairCaseId }: ContactFolderOpenButt
     <div className="print:hidden flex flex-col items-start gap-1">
       <button
         type="button"
-        onClick={() => void handleClick()}
-        disabled={busy}
-        aria-busy={busy}
+        onClick={() => void run("open", () => runContactFolderOpen({ repairCaseId }))}
+        disabled={busy !== null}
+        aria-busy={busy === "open"}
         title={CONTACT_FOLDER_OPEN_BUTTON_TITLE}
         data-contact-folder-open=""
         className={BUTTON_CLASS}
       >
-        {busy ? "여는 중…" : "폴더 열기"}
+        {busy === "open" ? "여는 중…" : "폴더 열기"}
       </button>
-      {outcome && <ContactFolderOpenNotice outcome={outcome} />}
+      {outcome && (
+        <ContactFolderOpenNotice
+          outcome={outcome}
+          creating={busy === "create"}
+          // 🔴 폴더를 만드는 유일한 자리다 — 사람이 이 단추를 누른 그때만 불린다.
+          onCreate={() => void run("create", () => runContactFolderCreateAndOpen({ repairCaseId }))}
+        />
+      )}
     </div>
   );
 }

@@ -303,6 +303,55 @@ export async function getRepairCaseContactFolderKeyById(
   return row ?? null;
 }
 
+/**
+ * 연락서 폴더 **이름을 짓는 데** 쓰는 칸들 — `POST /api/repair-cases/{id}/contact-folder`
+ * 하나가 쓴다(연락서 조각 5). 폴더 이름은 사람이 목록에서 읽는 줄이라 여섯 조각이
+ * 전부 필요하다(domain/contact-folder-naming.ts).
+ *
+ * 🔴 **찾는 열쇠는 여전히 인수번호 하나뿐이다.** 나머지 다섯은 이름을 지을 때만 쓰고,
+ * S/N 은 그 밖에 「비슷한 폴더 훑기」에만 쓴다 — 어느 것도 폴더를 **확정**하지 않는다
+ * (같은 장비가 여러 번 수리를 온다 — kyosan/report-match.ts 머리말).
+ *
+ * 위 getRepairCaseContactFolderKeyById 와 같은 규율로 8-테이블 join 을 쓰지 않는다 —
+ * 그 join 은 연락처 스냅숏(PII)까지 싣는데 여기서 쓰는 것은 여섯 칸뿐이다.
+ * 휴지통에 있는 건은 없는 것으로 본다(부르는 쪽은 404).
+ */
+export type RepairCaseContactFolderNaming = {
+  id: string;
+  intakeNumber: string;
+  customerName: string;
+  modelName: string;
+  lotNumber: string | null;
+  serialNumber: string | null;
+  reportedSymptom: string | null;
+};
+
+export async function getRepairCaseContactFolderNamingById(
+  id: string
+): Promise<RepairCaseContactFolderNaming | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+
+  const [row] = await db
+    .select({
+      id: repairCases.id,
+      intakeNumber: repairCases.intakeNumber,
+      customerName: customers.name,
+      modelName: products.modelName,
+      lotNumber: products.lotNumber,
+      serialNumber: products.serialNumber,
+      reportedSymptom: repairCases.reportedSymptom,
+    })
+    .from(repairCases)
+    .innerJoin(customers, eq(repairCases.customerId, customers.id))
+    .innerJoin(products, eq(repairCases.productId, products.id))
+    .where(and(eq(repairCases.isDeleted, false), eq(repairCases.id, id)))
+    .limit(1);
+
+  return row ?? null;
+}
+
 export type RepairCaseFlowchartCreateOption = {
   id: string;
   intakeNumber: string;

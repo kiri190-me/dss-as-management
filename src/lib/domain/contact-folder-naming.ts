@@ -1,3 +1,4 @@
+import { isValidIntakeNumberFormat } from "./local/intake-number";
 import {
   buildShareFolderStem,
   compareShareFolderNames,
@@ -187,4 +188,77 @@ export function pickContactFolder(intakeNumber: string, existingNames: readonly 
   if (matched.length === 0) return { status: "not-found" };
   if (matched.length === 1) return { status: "found", folderName: matched[0] };
   return { status: "multiple", folderNames: matched };
+}
+
+/**
+ * ============================================================================
+ * 🔴 **만들기 직전의 안전장치** — 비슷한 폴더가 이미 있는가 (연락서 조각 5)
+ * ============================================================================
+ * 인수번호로 찾아 없으면 폴더를 만든다. 그런데 **폴더가 둘이 되는 길이 하나 남아
+ * 있다**: 사람이 인수번호 없이 만들어 둔 폴더다(`INVENIA T2RCONT-AD2 1802034
+ * 점검요청`). 인수번호가 없으니 위 pickContactFolder 가 못 찾고, 앱이 옆에 하나를
+ * 더 만들어 **같은 수리 건의 서류가 두 폴더로 갈라진다.**
+ *
+ * 그래서 만들기 직전에 **S/N 으로 한 번 더 훑는다.** 걸리면 🔴 **만들지 않고 사람에게
+ * 넘긴다** — 하나뿐이어도 앱이 고르지 않는다(kyosan/report-match.ts 의
+ * `identity-candidates` 가 같은 결론에 이른 전례다. 같은 장비가 여러 번 수리를 오기
+ * 때문에 S/N 하나로 짝지으면 지난번 수리 건에 이번 자료를 넣는다).
+ *
+ * ── 🔴 인수번호로 시작하는 폴더는 훑지 않는다 ────────────────────────────
+ * 그 폴더는 **남의 수리 건 폴더**다. 같은 장비가 다시 수리를 오면 S/N 이 같은 폴더가
+ * 당연히 있고(S/N 은 고유키가 아니다), 그것까지 걸면 **재입고 건은 영영 폴더를 만들 수
+ * 없다.** 게다가 화면이 안내하는 「이 폴더 이름 앞에 `D260908 ` 을 붙여 주세요」는 이미
+ * 번호가 붙은 폴더에는 **틀린 안내**다. 운영 공유폴더 실측(2026-10-05)에서도 660 개 중
+ * 656 개가 인수번호로 시작하고, 나머지 넷은 수리 건 폴더가 아니었다.
+ * 번호 모양 판정은 DB 의 CHECK 와 같은 한 벌을 쓴다(domain/local/intake-number.ts).
+ *
+ * ── 마디로 품었는가 ─────────────────────────────────────────────────────
+ * S/N 은 **공백을 지우고** 견준다(`1912 120` ↔ `1912120`) — report-match.ts 의
+ * identifierKey 와 같은 규칙(NFKC · 공백 제거 · 대문자)이다. 다만 폴더 이름 전체에서
+ * 그냥 부분 문자열을 찾지 않고 **마디(공백으로 나뉜 토막)의 경계**를 본다. 안 그러면
+ * S/N `123` 이 `1234` 가 든 폴더에 걸려 멀쩡한 건이 막힌다. 이어진 마디 몇 개를 붙인
+ * 것도 본다 — 사람이 `1912 120` 으로 띄어 적었을 수 있다.
+ * ============================================================================
+ */
+
+/** S/N 견줌용 열쇠 — NFKC · **공백 제거** · 대문자. 비면 null(= 훑지 않는다). */
+export function contactFolderSerialKey(serialNumber: string | null | undefined): string | null {
+  if (typeof serialNumber !== "string") return null;
+  const key = serialNumber.normalize("NFKC").replace(/\s+/g, "").toLocaleUpperCase("en-US");
+  return key === "" ? null : key;
+}
+
+/** 이 폴더 이름이 **인수번호로 시작하는가** — 첫 마디가 `D`+YY+MM+2자리면 참. */
+function startsWithIntakeNumber(name: string): boolean {
+  const first = name.normalize("NFKC").trim().split(/\s+/)[0] ?? "";
+  return isValidIntakeNumberFormat(first.toLocaleUpperCase("en-US"));
+}
+
+/** 이 폴더 이름이 그 S/N 을 **마디로** 품었는가(이어진 마디를 붙인 것도 본다). */
+function containsSerialSegment(name: string, serialKey: string): boolean {
+  const segments = name.normalize("NFKC").toLocaleUpperCase("en-US").split(/\s+/).filter((part) => part.length > 0);
+  for (let start = 0; start < segments.length; start += 1) {
+    let joined = "";
+    for (let end = start; end < segments.length; end += 1) {
+      joined += segments[end];
+      if (joined.length > serialKey.length) break;
+      if (joined === serialKey) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 인수번호가 없는 폴더들 가운데 이 수리 건의 S/N 을 품은 것들(이름순). **순수 함수다.**
+ * S/N 이 비어 있으면 빈 배열이다 — 훑으면 아무 폴더나 걸린다.
+ */
+export function pickSimilarContactFolders(
+  serialNumber: string | null | undefined,
+  existingNames: readonly string[]
+): string[] {
+  const serialKey = contactFolderSerialKey(serialNumber);
+  if (serialKey === null) return [];
+  return existingNames
+    .filter((name) => !startsWithIntakeNumber(name) && containsSerialSegment(name, serialKey))
+    .sort(compareShareFolderNames);
 }

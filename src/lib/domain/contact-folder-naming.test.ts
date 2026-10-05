@@ -5,8 +5,10 @@ import {
   CONTACT_FOLDER_MAX_NAME_LENGTH,
   CONTACT_FOLDER_MAX_SYMPTOM_LENGTH,
   contactFolderName,
+  contactFolderSerialKey,
   matchesContactFolder,
   pickContactFolder,
+  pickSimilarContactFolders,
   type ContactFolderNamingInput,
 } from "./contact-folder-naming";
 
@@ -248,4 +250,57 @@ test("🔴 찾기 판정이 돌려주는 이름은 디스크의 실제 이름이
   if (picked.status !== "found") throw new Error("unreachable");
   assert.equal(picked.folderName, human);
   assert.notEqual(picked.folderName, NAME);
+});
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 만들기 직전의 안전장치 — 비슷한 폴더 훑기 (조각 5)
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+test("S/N 견줌 열쇠 — 공백을 지우고 대문자로, 비면 null", () => {
+  assert.equal(contactFolderSerialKey("1912 120"), "1912120");
+  assert.equal(contactFolderSerialKey(" wn3947 "), "WN3947");
+  // 전각 숫자도 같은 값이 된다(NFKC).
+  assert.equal(contactFolderSerialKey("１８０２０３４"), "1802034");
+  for (const empty of [null, undefined, "", "   "]) {
+    assert.equal(contactFolderSerialKey(empty), null, String(empty));
+  }
+});
+
+test("🔴 인수번호 없이 사람이 만든 폴더만 훑는다 — 하나뿐이어도 돌려준다", () => {
+  const human = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  const names = [
+    human,
+    // 🔴 지난번 수리 건 — 인수번호가 붙어 있으므로 후보가 아니다(S/N 은 고유키가 아니다).
+    "D250101 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청",
+    "메모 폴더",
+  ];
+
+  assert.deepEqual(pickSimilarContactFolders("1802034", names), [human]);
+});
+
+test("마디 경계를 본다 — 일부로만 들어 있으면 후보가 아니다", () => {
+  const names = ["INVENIA 18020345 점검", "INVENIA X1802034 점검", "INVENIA 180203 점검"];
+  assert.deepEqual(pickSimilarContactFolders("1802034", names), []);
+
+  // 띄어 적은 S/N 은 붙여서 본다(`1912 120` ↔ `1912120`), 소문자도 접는다.
+  assert.deepEqual(pickSimilarContactFolders("1912120", ["주성 1912 120 점검"]), ["주성 1912 120 점검"]);
+  assert.deepEqual(pickSimilarContactFolders("wn3947", ["주성 WN3947 점검"]), ["주성 WN3947 점검"]);
+});
+
+test("🔴 S/N 이 비면 아무것도 걸리지 않는다 — 훑지 않는다", () => {
+  const names = ["INVENIA 1802034 점검", "메모 폴더"];
+  for (const empty of [null, undefined, "", "   "]) {
+    assert.deepEqual(pickSimilarContactFolders(empty, names), [], String(empty));
+  }
+});
+
+test("후보가 여럿이면 이름순으로, 디스크의 실제 이름 그대로 돌려준다", () => {
+  const names = ["나중 1802034 폴더", "가장먼저 1802034 폴더".normalize("NFD")];
+  const picked = pickSimilarContactFolders("1802034", names);
+
+  assert.equal(picked.length, 2);
+  assert.equal(picked[0], "가장먼저 1802034 폴더".normalize("NFD"));
+  assert.equal(picked[1], "나중 1802034 폴더");
 });

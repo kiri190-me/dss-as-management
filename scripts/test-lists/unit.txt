@@ -239,6 +239,9 @@ src/lib/storage/quote-archive.test.ts
 src/lib/domain/contact-folder-naming.test.ts
 src/lib/storage/contact-folder-archive.test.ts
 src/lib/storage/contact-folder-archive-source.test.ts
+# 그 폴더를 **만드는** 쪽(조각 5). 찾기 시험과 한 모듈이지만, 만들기만 보는 시험이라
+# 따로 둔다 — 임시 폴더(mkdtemp)에서만 돌고 실제 공유폴더에는 닿지 않는다.
+src/lib/storage/contact-folder-create.test.ts
 src/lib/storage/contact-folder-entries.test.ts
 src/lib/storage/contact-folder-entries-source.test.ts
 # 연락서 폴더 위치 통로. `[id]` 칸은 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가

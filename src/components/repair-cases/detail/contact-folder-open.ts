@@ -22,9 +22,12 @@ import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messa
  *  3) 약 2초 안에 창이 초점을 잃으면 도우미가 있는 것으로 보고 표시를 적는다
  *  4) 아무 일이 없고 표시도 없으면 [설치 명령 복사]로 이끈다
  *
- * ── 🔴 이 조각은 폴더를 만들지 않는다 ─────────────────────────────────────
- * 없으면 「아직 없습니다」로 끝난다. 만들기는 뒤 조각이다 — 그때까지 사람이 눌러 보며
- * 쌓이는 「찾았다 / 못 찾았다」가 실측을 대신한다. 그래서 이 흐름은 **읽기 전용**이다.
+ * ── 🔴 만들기는 **사람이 한 번 더 눌러야** 한다 (조각 5) ────────────────────
+ * 없으면 「아직 없습니다」로 끝나고, 그 줄 옆에 [폴더 만들고 열기]가 선다. 누르면
+ * runContactFolderCreateAndOpen 이 **POST** 로 하나 만들고 **곧바로 위 열기 흐름을 탄다**
+ * (만든 뒤 여는 일은 다시 GET 을 불러서 한다 — 주소 만들기 규칙이 한 자리에만 있게).
+ * 🔴 저절로 만들지 않는다. 폴더가 늘어나는 것은 사람이 보고 정할 일이고, 「비슷한 폴더가
+ * 있습니다」를 보여 줄 자리도 그 단추뿐이다.
  *
  * ── 🔴 견적서 쪽 [폴더 열기] 흐름 함수를 그대로 쓰지 못한 까닭 ──────────────
  * 네 가지다. (a) 그 함수는 **URL 이 아니라 `quoteId` 를 받아** `/api/quotes/{id}/archive-folder`
@@ -72,12 +75,31 @@ export function contactFolderUrl(repairCaseId: string): string {
 
 export const CONTACT_FOLDER_DISABLED_TEXT = "연락서 공유폴더 위치가 설정되지 않았습니다 — 관리자에게 알려 주세요";
 
-/** 🔴 이 조각은 폴더를 만들지 않는다 — 「아직 없습니다」로 끝난다. */
+/** 🔴 저절로 만들지 않는다 — 「없습니다」로 끝나고, 만들려면 사람이 한 번 더 누른다. */
 export const CONTACT_FOLDER_NOT_FOUND_TEXT = "아직 이 수리 건의 연락서 폴더가 없습니다";
 
 /** 🔴 앱이 고르지 않는다 — 열지 않고 사람에게 넘긴다(견적서 쪽과 다른 점이다). */
 export const CONTACT_FOLDER_MULTIPLE_TEXT =
   "인수번호가 같은 폴더가 여럿이라 열지 않았습니다 — 공유폴더에서 하나로 정리해 주세요";
+
+/** 만든 뒤의 첫 줄. 🔴 **만든 폴더 이름을 그대로** 보인다. */
+function createdText(folderName: string): string {
+  return `연락서 폴더를 만들었습니다: ${folderName}`;
+}
+
+/** 누르는 사이에 생겼거나 사람이 먼저 만들어 두었다 — 만들지 않고 그것을 연다. */
+function alreadyThereText(folderName: string): string {
+  return `이미 폴더가 있어 새로 만들지 않았습니다: ${folderName}`;
+}
+
+/**
+ * 🔴 비슷한 폴더가 있어 **만들지 않았다.** 하나뿐이어도 앱이 고르지 않는다 — 폴더가
+ * 둘이 되는 길은 「사람이 인수번호 없이 만들어 둔 폴더」 하나뿐이라, 그것을 쓸지
+ * 새로 만들지는 사람만 안다.
+ */
+export function contactFolderCandidatesText(intakeNumber: string): string {
+  return `인수번호가 없는 비슷한 폴더가 있어 만들지 않았습니다 — 탐색기에서 아래 폴더 이름 앞에 「${intakeNumber} 」을 붙여 주세요`;
+}
 
 /** 🔴 견적서 쪽과 **같은 문장**을 쓴다 — 설치되는 도우미가 똑같은 한 벌이다. */
 export const CONTACT_FOLDER_HELPER_MISSING_TEXT = QUOTE_FOLDER_HELPER_MISSING_TEXT;
@@ -289,6 +311,8 @@ export type ContactFolderOpenOutcomeKind =
   | "NOT_FOUND"
   /** 🔴 맞는 폴더가 여럿이다 — 열지 않았다. 사람이 공유폴더를 정리해야 한다. */
   | "MULTIPLE"
+  /** 🔴 비슷한 폴더가 있어 **만들지 않았다** — 여기서는 만들기 단추를 다시 내지 않는다. */
+  | "CANDIDATES"
   | "FAILED"
   /** 초점을 잃었다 — 도우미가 반응했다. 「확인됨」 표시를 적었다. */
   | "OPENED"
@@ -302,6 +326,12 @@ export type ContactFolderOpenOutcome = {
   lines: QuoteIssueNoticeLine[];
   /** 「탐색기가 열리지 않았다면 …」 곁말과 두 단추를 내미는가 — 폴더를 찾아 연 뒤에만. */
   offerHelperInstall: boolean;
+  /**
+   * 🔴 [폴더 만들고 열기]를 내미는가 — **`not-found` 일 때만** 참이다. 비슷한 폴더가
+   * 있었을 때(`CANDIDATES`)는 내밀지 않는다: 그때 할 일은 만들기가 아니라 탐색기에서
+   * 폴더 이름을 고치는 것이다.
+   */
+  offerCreate?: boolean;
   /**
    * 🔴 서버에 연락서 공유폴더 주소 설정이 있을 때만 있는 전체 주소. 있을 때만 [위치 복사]를
    * 낸다. 알림 줄에는 넣지 않는다 — 복사가 막혔을 때만 화면에 보인다.
@@ -337,10 +367,12 @@ export async function runContactFolderOpen({
         offerHelperInstall: false,
       };
     case "not-found":
+      // 🔴 여기서 만들지 않는다 — 단추를 하나 내밀 뿐이다(사람이 한 번 더 누른다).
       return {
         kind: "NOT_FOUND",
         lines: [{ text: CONTACT_FOLDER_NOT_FOUND_TEXT, tone: "warning" }],
         offerHelperInstall: false,
+        offerCreate: true,
       };
     case "multiple":
       // 🔴 열지 않는다. 이름을 그대로 보여 사람이 어느 쪽을 지울지 고르게 한다.
@@ -391,4 +423,128 @@ export async function runContactFolderOpen({
     offerHelperInstall: true,
     ...withUncPath,
   };
+}
+
+// ── [폴더 만들고 열기] — 🔴 사람이 한 번 더 누른 그때만 (조각 5) ────────────
+
+/**
+ * 만들기 요청. 🔴 **POST 다** — 읽기(fetchImpl)와 **다른 자리**에 둔다. 한 자리로 묶으면
+ * 다음 사람이 읽기 흐름에서 실수로 만들기를 부를 수 있다.
+ */
+export type ContactFolderCreateEnvironment = QuoteFolderOpenEnvironment & {
+  createImpl: (url: string) => Promise<FolderResponse>;
+};
+
+type ContactFolderCreateAnswer =
+  | { status: "created"; folderName: string }
+  | { status: "found"; folderName: string }
+  | { status: "multiple"; folderNames: string[] }
+  | { status: "candidates"; intakeNumber: string; folderNames: string[] }
+  | { status: "disabled" }
+  | { status: "failed"; reason: string };
+
+function readFolderNames(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((name): name is string => typeof name === "string") : [];
+}
+
+/** 🔴 알려진 칸만 옮긴다 — 모양이 다르면 null(알림까지 오지 않는다). */
+function readContactFolderCreateAnswer(payload: unknown): ContactFolderCreateAnswer | null {
+  if (!isRecord(payload)) return null;
+  switch (payload.status) {
+    case "created":
+    case "found": {
+      if (typeof payload.folderName !== "string" || payload.folderName === "") return null;
+      return { status: payload.status, folderName: payload.folderName };
+    }
+    case "multiple":
+      return { status: "multiple", folderNames: readFolderNames(payload.folderNames) };
+    case "candidates":
+      return {
+        status: "candidates",
+        intakeNumber: typeof payload.intakeNumber === "string" ? payload.intakeNumber : "",
+        folderNames: readFolderNames(payload.folderNames),
+      };
+    case "disabled":
+      return { status: "disabled" };
+    case "failed": {
+      const reason = typeof payload.reason === "string" ? payload.reason.trim() : "";
+      return { status: "failed", reason: reason === "" ? UNKNOWN_REASON : reason };
+    }
+    default:
+      return null;
+  }
+}
+
+const BROWSER_CREATE_ENVIRONMENT: ContactFolderCreateEnvironment = {
+  ...BROWSER_ENVIRONMENT,
+  createImpl: (url) => fetch(url, { method: "POST" }),
+};
+
+/**
+ * [폴더 만들고 열기] 한 번. 던지지 않는다.
+ *
+ *  1) POST — 🔴 **폴더 하나를 만든다**(이미 있으면 만들지 않는다)
+ *  2) 만들었거나 이미 있었으면 **곧바로 열기 흐름**을 탄다(runContactFolderOpen)
+ *  3) 🔴 비슷한 폴더 · 여럿이면 **열지도 만들지도 않고** 이름들을 보인다
+ */
+export async function runContactFolderCreateAndOpen({
+  repairCaseId,
+  env: overrides = {},
+}: {
+  repairCaseId: string;
+  env?: Partial<ContactFolderCreateEnvironment>;
+}): Promise<ContactFolderOpenOutcome> {
+  const env: ContactFolderCreateEnvironment = { ...BROWSER_CREATE_ENVIRONMENT, ...overrides };
+
+  let response: FolderResponse;
+  try {
+    response = await env.createImpl(contactFolderUrl(repairCaseId));
+  } catch {
+    return failed(NETWORK_FAILED_REASON);
+  }
+  if (!response.ok) return failed(await failureReason(response));
+
+  const answer = readContactFolderCreateAnswer(await response.json().catch(() => null));
+  if (answer === null) return failed(UNREADABLE_RESPONSE_REASON);
+
+  switch (answer.status) {
+    case "disabled":
+      return {
+        kind: "DISABLED",
+        lines: [{ text: CONTACT_FOLDER_DISABLED_TEXT, tone: "muted" }],
+        offerHelperInstall: false,
+      };
+    case "multiple":
+      return {
+        kind: "MULTIPLE",
+        lines: [
+          { text: CONTACT_FOLDER_MULTIPLE_TEXT, tone: "warning" },
+          ...answer.folderNames.map((name) => ({ text: name, tone: "muted" as const })),
+        ],
+        offerHelperInstall: false,
+      };
+    case "candidates":
+      // 🔴 만들기 단추를 다시 내지 않는다 — 할 일은 만들기가 아니라 폴더 이름 고치기다.
+      return {
+        kind: "CANDIDATES",
+        lines: [
+          { text: contactFolderCandidatesText(answer.intakeNumber), tone: "warning" },
+          ...answer.folderNames.map((name) => ({ text: name, tone: "muted" as const })),
+        ],
+        offerHelperInstall: false,
+      };
+    case "failed":
+      return failed(answer.reason);
+    case "created":
+    case "found":
+      break;
+  }
+
+  // 🔴 만든 뒤 바로 조각 2 의 열기 흐름을 탄다 — 주소를 만드는 규칙은 거기 한 자리뿐이다.
+  const opened = await runContactFolderOpen({ repairCaseId, env });
+  const first: QuoteIssueNoticeLine = {
+    text: answer.status === "created" ? createdText(answer.folderName) : alreadyThereText(answer.folderName),
+    tone: "normal",
+  };
+  return { ...opened, lines: [first, ...opened.lines] };
 }

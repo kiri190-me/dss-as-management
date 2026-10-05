@@ -7,15 +7,17 @@ import {
   QUOTE_FOLDER_HELPER_DETECTION_MS,
   QUOTE_FOLDER_HELPER_MISSING_TEXT,
   type QuoteFolderHelperStorage,
-  type QuoteFolderOpenEnvironment,
 } from "@/components/quotes/quote-folder-open";
 import {
   CONTACT_FOLDER_DISABLED_TEXT,
   CONTACT_FOLDER_HELPER_MISSING_TEXT,
   CONTACT_FOLDER_MULTIPLE_TEXT,
   CONTACT_FOLDER_NOT_FOUND_TEXT,
+  contactFolderCandidatesText,
   contactFolderUrl,
+  runContactFolderCreateAndOpen,
   runContactFolderOpen,
+  type ContactFolderCreateEnvironment,
   type ContactFolderOpenOutcome,
 } from "./contact-folder-open";
 
@@ -27,7 +29,9 @@ import {
  * 서버 응답 모양은 통로(api/repair-cases/{id}/contact-folder)를 그대로 흉내 낸다.
  *
  * 불변식 넷:
- *  (a) 🔴 **폴더를 만들지 않는다** — 부르는 통로는 GET 하나뿐이고, 없으면 「아직 없습니다」다
+ *  (a) 🔴 **[폴더 열기]는 아무것도 만들지 않는다** — GET 하나뿐이고, 없으면 「아직
+ *      없습니다」다. 만드는 것은 **사람이 한 번 더 누르는** [폴더 만들고 열기]뿐이다
+ *      (이 파일 아래쪽 「조각 5」 묶음이 그것을 본다)
  *  (b) 🔴 **여럿이면 열지 않는다** — 앱이 고르지 않는다(견적서 쪽과 다른 점)
  *  (c) 알림 · 부른 주소에 루트 값이 없다
  *  (d) 「도우미 확인됨」 표시는 견적서 쪽과 **같은 열쇠**다 — 도우미가 한 벌이기 때문이다
@@ -59,6 +63,8 @@ function found(extra: Record<string, unknown> = {}): Reply {
 
 type HarnessOptions = {
   folder: Reply;
+  /** POST(만들기)의 답. 주지 않으면 만들기를 부르는 순간 시험이 깨진다. */
+  create?: Reply;
   /** 주소를 연 뒤 창이 초점을 잃는다 — 여는 즉시(sync) 또는 조금 뒤(async). 없으면 무반응. */
   focusLost?: "sync" | "async";
   confirmedBefore?: boolean;
@@ -67,8 +73,22 @@ type HarnessOptions = {
   watchThrows?: boolean;
 };
 
+/** 답 하나를 응답 모양으로 — GET · POST 가 같은 틀을 쓴다. */
+function reply(answer: Reply) {
+  if (answer === "THROW") throw new TypeError("Failed to fetch");
+  return {
+    ok: answer.status >= 200 && answer.status < 300,
+    status: answer.status,
+    json: async () => {
+      if (answer.jsonThrows) throw new SyntaxError("Unexpected token <");
+      return answer.json;
+    },
+  };
+}
+
 function harness(options: HarnessOptions) {
   const fetched: string[] = [];
+  const posted: string[] = [];
   const opened: string[] = [];
   const delays: number[] = [];
   const store = new Map<string, string>();
@@ -91,19 +111,16 @@ function harness(options: HarnessOptions) {
     },
   };
 
-  const env: QuoteFolderOpenEnvironment = {
+  const env: ContactFolderCreateEnvironment = {
     fetchImpl: async (url) => {
       fetched.push(url);
-      const reply = options.folder;
-      if (reply === "THROW") throw new TypeError("Failed to fetch");
-      return {
-        ok: reply.status >= 200 && reply.status < 300,
-        status: reply.status,
-        json: async () => {
-          if (reply.jsonThrows) throw new SyntaxError("Unexpected token <");
-          return reply.json;
-        },
-      };
+      return reply(options.folder);
+    },
+    /** 🔴 만들기는 **다른 자리**다 — 읽기 흐름이 이것을 부르면 시험이 잡아낸다. */
+    createImpl: async (url) => {
+      posted.push(url);
+      if (options.create === undefined) throw new Error("만들기를 부르면 안 되는 시험에서 불렀다");
+      return reply(options.create);
     },
     openLink: (link) => {
       if (options.openThrows) throw new Error("blocked");
@@ -133,6 +150,7 @@ function harness(options: HarnessOptions) {
   return {
     env,
     fetched,
+    posted,
     opened,
     delays,
     store,
@@ -140,16 +158,26 @@ function harness(options: HarnessOptions) {
   };
 }
 
-async function run(options: HarnessOptions): Promise<{
+type Bench = {
   outcome: ContactFolderOpenOutcome;
   fetched: string[];
+  posted: string[];
   opened: string[];
   delays: number[];
   store: Map<string, string>;
   watchersLeft: () => number;
-}> {
+};
+
+async function run(options: HarnessOptions): Promise<Bench> {
   const bench = harness(options);
   const outcome = await runContactFolderOpen({ repairCaseId: CASE_ID, env: bench.env });
+  return { outcome, ...bench };
+}
+
+/** [폴더 만들고 열기] 한 번 — POST 한 뒤 (만들었으면) 열기 흐름까지 탄다. */
+async function runCreate(options: HarnessOptions): Promise<Bench> {
+  const bench = harness(options);
+  const outcome = await runContactFolderCreateAndOpen({ repairCaseId: CASE_ID, env: bench.env });
   return { outcome, ...bench };
 }
 
@@ -178,11 +206,14 @@ describe("결과별 문장", () => {
     assert.deepEqual(opened, [], "열려고 했다");
   });
 
-  test("🔴 not-found — 「아직 없습니다」로 끝난다. 만들라고 하지 않고, 만들지도 않는다", async () => {
-    const { outcome, opened } = await run({ folder: { status: 200, json: { status: "not-found" } } });
+  test("🔴 not-found — 「아직 없습니다」로 끝난다. 만들지 않고 단추 하나를 내밀 뿐이다", async () => {
+    const { outcome, opened, posted } = await run({ folder: { status: 200, json: { status: "not-found" } } });
     assert.equal(outcome.kind, "NOT_FOUND");
     assert.deepEqual(outcome.lines, [{ text: CONTACT_FOLDER_NOT_FOUND_TEXT, tone: "warning" }]);
     assert.equal(outcome.offerHelperInstall, false);
+    // 🔴 만든 것이 아니라 **만들 수 있다**는 표시다 — 누르는 것은 사람이다.
+    assert.equal(outcome.offerCreate, true);
+    assert.deepEqual(posted, [], "읽기 흐름이 만들었다");
     assert.deepEqual(opened, []);
   });
 
@@ -381,5 +412,177 @@ describe("🔴 알려지지 않은 칸은 알림까지 오지 않는다 — 루�
     const everything = `${textOf(outcome)}\n${JSON.stringify(outcome)}\n${opened.join("\n")}`;
     assert.equal(everything.includes(LEAKED_CONTAINER_ROOT), false, everything);
     assert.equal(everything.includes("NAS01"), false, everything);
+  });
+});
+
+/**
+ * ============================================================================
+ * [폴더 만들고 열기] — 🔴 사람이 **한 번 더 누른** 그때만 (조각 5)
+ * ============================================================================
+ * 불변식 넷:
+ *  (a) 🔴 읽기 흐름은 **절대 만들지 않는다** — POST 를 부르면 하네스가 던진다
+ *  (b) 🔴 만들었거나 이미 있었을 때만 **열기 흐름**을 탄다
+ *  (c) 🔴 비슷한 폴더 · 여럿이면 **열지도 만들지도 않고** 이름만 보인다
+ *  (d) 🔴 만들기 단추를 다시 내미는 것은 `not-found` 뿐이다
+ * ============================================================================
+ */
+
+const CANDIDATE = "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+
+describe("🔴 저절로 만들지 않는다", () => {
+  test("읽기 흐름([폴더 열기])은 만들기를 부르지 않는다 — 없다고만 말한다", async () => {
+    const { outcome, posted } = await run({ folder: { status: 200, json: { status: "not-found" } } });
+    assert.equal(outcome.kind, "NOT_FOUND");
+    assert.deepEqual(posted, [], "읽기 흐름이 폴더를 만들었다");
+  });
+
+  test("🔴 만들기 단추를 내미는 것은 not-found 뿐이다", async () => {
+    const notFound = await run({ folder: { status: 200, json: { status: "not-found" } } });
+    assert.equal(notFound.outcome.offerCreate, true);
+
+    const others: Reply[] = [
+      { status: 200, json: { status: "disabled" } },
+      { status: 200, json: { status: "multiple", folderNames: [FOLDER_NAME] } },
+      { status: 200, json: { status: "failed", reason: "공유폴더가 느립니다" } },
+      found(),
+    ];
+    for (const folder of others) {
+      const { outcome } = await run({ folder, focusLost: "sync" });
+      assert.notEqual(outcome.offerCreate, true, `${outcome.kind} 에 만들기 단추가 붙었다`);
+    }
+  });
+});
+
+describe("만들고 바로 연다", () => {
+  test("created — 같은 주소로 POST 한 뒤 열기 흐름을 탄다", async () => {
+    const { outcome, posted, fetched, opened } = await runCreate({
+      folder: found(),
+      create: { status: 200, json: { status: "created", folderName: FOLDER_NAME } },
+      focusLost: "sync",
+    });
+
+    assert.deepEqual(posted, [FOLDER_URL], "만들기를 한 번만 부른다");
+    assert.deepEqual(fetched, [FOLDER_URL], "만든 뒤 위치를 다시 묻는다");
+    assert.equal(outcome.kind, "OPENED");
+    assert.equal(outcome.lines[0].text, `연락서 폴더를 만들었습니다: ${FOLDER_NAME}`);
+    assert.ok(textOf(outcome).includes(`탐색기로 폴더를 엽니다: ${FOLDER_NAME}`), textOf(outcome));
+    assert.equal(opened.length, 1);
+    assert.equal(parseQuoteFolderLink(opened[0]), FOLDER_NAME);
+    // 열렸으니 만들기 단추는 더 내밀지 않는다.
+    assert.notEqual(outcome.offerCreate, true);
+  });
+
+  test("found — 누르는 사이에 생겼다. 만들지 않았다고 적고 그대로 연다", async () => {
+    const { outcome, opened } = await runCreate({
+      folder: found(),
+      create: { status: 200, json: { status: "found", folderName: FOLDER_NAME } },
+      focusLost: "sync",
+    });
+
+    assert.equal(outcome.kind, "OPENED");
+    assert.ok(outcome.lines[0].text.includes("이미 폴더가 있어 새로 만들지 않았습니다"), outcome.lines[0].text);
+    assert.equal(opened.length, 1);
+  });
+
+  test("만든 뒤 도우미가 없으면 — 설치로 이끄는 줄이 그대로 따라온다", async () => {
+    const { outcome } = await runCreate({
+      folder: found({ uncPath: UNC_PATH }),
+      create: { status: 200, json: { status: "created", folderName: FOLDER_NAME } },
+    });
+
+    assert.equal(outcome.kind, "NO_RESPONSE");
+    assert.equal(outcome.offerHelperInstall, true);
+    assert.equal(outcome.uncPath, UNC_PATH);
+    assert.ok(textOf(outcome).includes("연락서 폴더를 만들었습니다"), textOf(outcome));
+    assert.ok(textOf(outcome).includes(CONTACT_FOLDER_HELPER_MISSING_TEXT), textOf(outcome));
+  });
+});
+
+describe("🔴 만들지 않는 결과들 — 열지도 않는다", () => {
+  test("candidates — 비슷한 폴더 이름과 할 일을 보이고, 만들기 단추를 다시 내지 않는다", async () => {
+    const { outcome, opened, fetched } = await runCreate({
+      folder: found(),
+      create: {
+        status: 200,
+        json: { status: "candidates", intakeNumber: "D260908", folderNames: [CANDIDATE] },
+      },
+    });
+
+    assert.equal(outcome.kind, "CANDIDATES");
+    assert.equal(outcome.lines[0].text, contactFolderCandidatesText("D260908"));
+    assert.ok(outcome.lines[0].text.includes("D260908"), outcome.lines[0].text);
+    assert.deepEqual(outcome.lines.slice(1), [{ text: CANDIDATE, tone: "muted" }]);
+    assert.notEqual(outcome.offerCreate, true, "🔴 비슷한 폴더가 있는데 만들기 단추를 또 냈다");
+    assert.equal(outcome.offerHelperInstall, false);
+    assert.deepEqual(opened, [], "열었다");
+    assert.deepEqual(fetched, [], "만들지도 않았는데 위치를 물었다");
+  });
+
+  test("multiple — 열지 않고 이름만 보인다", async () => {
+    const names = [FOLDER_NAME, "D260908 INVENIA(옛것)"];
+    const { outcome, opened } = await runCreate({
+      folder: found(),
+      create: { status: 200, json: { status: "multiple", folderNames: names } },
+    });
+
+    assert.equal(outcome.kind, "MULTIPLE");
+    assert.equal(outcome.lines[0].text, CONTACT_FOLDER_MULTIPLE_TEXT);
+    assert.deepEqual(opened, []);
+    assert.notEqual(outcome.offerCreate, true);
+  });
+
+  test("disabled · failed — 사유를 그대로 전한다", async () => {
+    const disabled = await runCreate({ folder: found(), create: { status: 200, json: { status: "disabled" } } });
+    assert.equal(disabled.outcome.kind, "DISABLED");
+    assert.deepEqual(disabled.outcome.lines, [{ text: CONTACT_FOLDER_DISABLED_TEXT, tone: "muted" }]);
+
+    const reason = "같은 이름의 파일이 자리를 차지하고 있어 폴더를 만들 수 없습니다.";
+    const failed = await runCreate({
+      folder: found(),
+      create: { status: 200, json: { status: "failed", reason } },
+    });
+    assert.equal(failed.outcome.kind, "FAILED");
+    assert.ok(textOf(failed.outcome).includes(reason), textOf(failed.outcome));
+    assert.deepEqual(failed.opened, []);
+  });
+});
+
+describe("만들기가 막혔을 때 — 서버 문장을 그대로 전한다", () => {
+  test("권한이 없다(403) · 잠긴 건(409) · 없는 건(404)", async () => {
+    const replies: Array<{ status: number; error: string; code: string }> = [
+      { status: 403, error: "이 수리 건에 연락서 폴더를 만들 권한이 없습니다.", code: "FORBIDDEN" },
+      { status: 409, error: "출하 완료로 잠긴 수리 건에는 연락서 폴더를 만들 수 없습니다.", code: "CASE_LOCKED" },
+      { status: 404, error: "해당 수리 건을 찾을 수 없습니다.", code: "NOT_FOUND" },
+      {
+        status: 500,
+        error: "연락서 폴더는 만들었지만 기록을 남기지 못했습니다. 관리자에게 알려 주세요.",
+        code: "AUDIT_FAILED",
+      },
+    ];
+    for (const { status, error, code } of replies) {
+      const { outcome, opened } = await runCreate({
+        folder: found(),
+        create: { status, json: { error, code } },
+      });
+      assert.equal(outcome.kind, "FAILED", code);
+      assert.ok(textOf(outcome).includes(error), textOf(outcome));
+      assert.deepEqual(opened, [], code);
+      assert.notEqual(outcome.offerCreate, true, code);
+    }
+  });
+
+  test("네트워크가 끊겼다 · 모양이 다른 응답", async () => {
+    const thrown = await runCreate({ folder: found(), create: "THROW" });
+    assert.equal(thrown.outcome.kind, "FAILED");
+    assert.ok(textOf(thrown.outcome).includes("서버에 닿지 못했습니다"), textOf(thrown.outcome));
+
+    const odd = await runCreate({ folder: found(), create: { status: 200, json: { status: "허허" } } });
+    assert.equal(odd.outcome.kind, "FAILED");
+    assert.ok(textOf(odd.outcome).includes("서버 응답을 읽지 못했습니다"), textOf(odd.outcome));
+
+    // 만들었다면서 이름이 없다 — 알아듣지 못했다고 말한다(열지 않는다).
+    const nameless = await runCreate({ folder: found(), create: { status: 200, json: { status: "created" } } });
+    assert.equal(nameless.outcome.kind, "FAILED");
+    assert.deepEqual(nameless.opened, []);
   });
 });

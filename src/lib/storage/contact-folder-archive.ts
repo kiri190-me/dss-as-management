@@ -1,10 +1,14 @@
 import "server-only";
 
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  contactFolderName,
   pickContactFolder,
+  pickSimilarContactFolders,
   type ContactFolderMatch,
+  type ContactFolderNamingInput,
 } from "@/lib/domain/contact-folder-naming";
 import {
   ShareFolderFailure,
@@ -12,25 +16,30 @@ import {
   assertInsideShareFolderRoot,
   listShareFolderNames,
   requireExistingShareFolderRoot,
+  shareFolderErrorCode,
   shareFolderReadFailureReason,
+  shareFolderWriteFailureReason,
   withShareFolderTimeout,
 } from "./share-folder-fs";
 
 /**
  * ============================================================================
- * 사내 공유폴더에서 그 수리 건의 **연락서 폴더를 찾는다** — 찾기만 한다
+ * 사내 공유폴더에서 그 수리 건의 **연락서 폴더를 찾고, 없으면 만든다**
  * ============================================================================
  *   <루트>/D260908 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청/
  *
  * 이름 규칙 · 찾기 판정은 domain/contact-folder-naming.ts 가 정한다. 이 모듈이 하는
  * 일은 **디스크에서 폴더 이름을 읽어 그 판정에 넘기는 것**뿐이다.
  *
- * ── 🔴 만들지 않는다 · 지우지 않는다 ────────────────────────────────────
- * 이 조각에서는 **찾기만** 한다(만들기는 뒤 조각이다). 그래서 `node:fs/promises` 를
- * 아예 가져오지 않는다 — 읽기는 공용 도우미(storage/share-folder-fs.ts)가 하고,
- * `mkdir` · `writeFile` · `unlink` · `rm` · `rmdir` · `rename` 은 **이 파일에 들어올
- * 길이 없다.** 앱은 사람의 서류함에서 파일을 지우지 않는다. 그 사실을
- * contact-folder-archive-source.test.ts 가 원본을 글자로 읽어 못 박는다.
+ * ── 🔴 폴더만 만든다 · 지우지 않는다 ────────────────────────────────────
+ * 2026-10-05 조각 5 에서 **만들기(mkdir) 하나만** 들였다. 가져오는 것도 `mkdir` 하나뿐이고
+ * `writeFile` · `unlink` · `rm` · `rmdir` · `rename` 은 **여전히 이 파일에 들어올 길이
+ * 없다.** 앱은 사람의 서류함에서 파일을 지우지도 옮기지도 않는다 — 파일을 쓰는 것은 뒤
+ * 조각이다. 그 사실을 contact-folder-archive-source.test.ts 가 원본을 글자로 읽어 못 박는다.
+ *
+ * ── 🔴 조용히 만들지 않는다 ─────────────────────────────────────────────
+ * 이 함수를 부르는 것은 사람이 [폴더 만들고 열기]를 **누른 그때**뿐이다. 접수 · 조회가
+ * 지나가면서 폴더를 늘리지 않는다 — 폴더가 늘어나는 것을 사람이 보고 정해야 한다.
  *
  * ── 🔴 루트를 만들지 않는다 ─────────────────────────────────────────────
  * 운영에서는 공유폴더를 컨테이너에 연결(마운트)해 쓴다. 연결이 빠진 채 루트를 만들면
@@ -42,10 +51,15 @@ import {
  * 루트 값을 담지 않는다** — fs 오류의 `message` 에는 경로가 들어 있으므로 쓰지 않고
  * **오류 코드만 보고** 짧은 한국어로 바꾼다.
  *
- * ── 🔴 기다리는 시간에 상한을 둔다 ──────────────────────────────────────
+ * ── 🔴 기다리는 시간에 상한을 둔다 (찾기만) ─────────────────────────────
  * NAS 가 느려지거나 멎으면 readdir 하나가 몇 십 초를 끈다. 그동안 요청 워커가 거기
  * 매달려 앱 전체가 느려진다. fs 작업 자체는 끊을 수 없지만 **요청은 돌려보낼 수
  * 있다** — 상한을 넘으면 `failed` 로 끝내고, 매달린 작업은 뒤에서 끝나게 둔다.
+ *
+ * 🔴 **만들기에는 상한을 두지 않는다**(견적서 저장 saveToQuoteArchive 와 같다). 끊어도
+ * mkdir 은 뒤에서 계속 돌아 **폴더는 생긴다** — 그때 「실패했습니다」라고 답하면 감사
+ * 기록이 없는 폴더가 하나 남는다. 만들기는 사람이 단추를 눌러 시작하는 한 번짜리 일이라
+ * 느린 것을 기다리는 편이 낫다.
  * ============================================================================
  */
 
@@ -57,6 +71,9 @@ export const CONTACT_FOLDER_SLOW_REASON = "공유폴더가 느려 응답이 없�
 
 const INTAKE_NUMBER_MISSING_REASON = "인수번호가 비어 있어 연락서 폴더를 찾을 수 없습니다.";
 const OUTSIDE_ROOT_ON_FIND = "찾은 폴더가 공유폴더 밖을 가리켜 쓰지 않았습니다.";
+const OUTSIDE_ROOT_ON_CREATE = "만들 자리가 공유폴더 밖을 가리켜 만들지 않았습니다.";
+const NAMING_FAILED_REASON = "수리 건 정보로 연락서 폴더 이름을 만들 수 없습니다.";
+const NAME_TAKEN_BY_FILE_REASON = "같은 이름의 파일이 자리를 차지하고 있어 폴더를 만들 수 없습니다.";
 
 /**
  * 연락서 공유폴더 루트. `CONTACT_FOLDER_ARCHIVE_DIR` 을 **부르는 시점에** 읽는다 —
@@ -118,6 +135,113 @@ export async function findContactFolder(input: FindContactFolderInput): Promise<
       reason: error instanceof ShareFolderFailure ? error.reason : shareFolderReadFailureReason(error),
     };
   }
+}
+
+export type CreateContactFolderInput = {
+  /**
+   * 🔴 이름을 짓는 재료 전부. 찾는 열쇠는 그 가운데 `intakeNumber` 하나뿐이고,
+   * 이름은 **domain 의 contactFolderName 이 지은 것 그대로** 쓴다(여기서 새로 짓지 않는다).
+   */
+  naming: ContactFolderNamingInput;
+  /** 공유폴더 루트. 주지 않으면 설정을 읽는다. 시험에서는 임시 폴더를 준다. */
+  root?: string | null;
+};
+
+export type ContactFolderCreation =
+  /** 이번에 만들었다 — 🔴 감사 기록을 남길 자리는 여기 하나뿐이다. */
+  | { status: "created"; folderName: string }
+  /** 이미 있었다 — **만들지 않았다.** */
+  | { status: "found"; folderName: string }
+  /** 맞는 폴더가 여럿이다 — 🔴 만들지 않는다. 사람이 정리한다. */
+  | { status: "multiple"; folderNames: string[] }
+  /** 🔴 인수번호 없이 사람이 만들어 둔 **비슷한 폴더**가 있다 — 만들지 않는다. */
+  | { status: "candidates"; folderNames: string[] }
+  | { status: "disabled" }
+  | { status: "failed"; reason: string };
+
+/**
+ * 그 수리 건의 연락서 폴더를 **찾고, 없으면 하나 만든다.** **던지지 않는다.**
+ *
+ * 규율은 견적서의 findOrCreateFolder 그대로다:
+ *  · 🔴 루트를 만들지 않는다(연결이 빠졌을 때 컨테이너 임시 디스크에 쌓지 않게)
+ *  · 🔴 먼저 찾는다 — 있으면 만들지 않고 그것을 쓴다
+ *  · 🔴 `recursive` 없이 만든다. `EEXIST` 면 **다시 찾아** 그것을 쓴다(둘이 동시에 눌렀을 때)
+ *  · 🔴 같은 이름의 **파일**이 자리를 막고 있으면 만들지 않고 `failed`
+ * 여기에 연락서 쪽 안전장치가 하나 더 붙는다 — 🔴 **비슷한 폴더 훑기**(아래).
+ */
+export async function createContactFolder(input: CreateContactFolderInput): Promise<ContactFolderCreation> {
+  const configured = input.root === undefined || input.root === null ? resolveContactFolderArchiveRoot() : input.root;
+  if (configured === null || configured.trim().length === 0) {
+    return { status: "disabled" };
+  }
+
+  const intakeNumber = typeof input.naming.intakeNumber === "string" ? input.naming.intakeNumber.trim() : "";
+  if (intakeNumber.length === 0) {
+    return { status: "failed", reason: INTAKE_NUMBER_MISSING_REASON };
+  }
+
+  try {
+    return await make(configured, { ...input.naming, intakeNumber });
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: error instanceof ShareFolderFailure ? error.reason : shareFolderWriteFailureReason(error),
+    };
+  }
+}
+
+async function make(rawRoot: string, naming: ContactFolderNamingInput): Promise<ContactFolderCreation> {
+  // 루트는 이미 있는 폴더여야 한다 — 🔴 루트는 만들지 않는다.
+  const root = await requireExistingShareFolderRoot(rawRoot);
+  const names = await listShareFolderNames(root);
+
+  // ── 🔴 먼저 찾는다. 있으면 만들지 않는다 ───────────────────────────────
+  const picked = pickContactFolder(naming.intakeNumber, names);
+  if (picked.status === "found") {
+    assertInsideShareFolderRoot(root, path.join(root, picked.folderName), OUTSIDE_ROOT_ON_FIND);
+    return picked;
+  }
+  if (picked.status === "multiple") {
+    // 앱이 고르지 않으므로 **어디에 넣을지도 모른다** — 만들면 셋이 된다.
+    return picked;
+  }
+
+  // ── 🔴 안전장치: 인수번호 없이 사람이 만들어 둔 비슷한 폴더가 있는가 ────
+  //    하나뿐이어도 앱이 고르지 않는다. 사람이 탐색기에서 이름 앞에 인수번호를 붙인다.
+  const similar = pickSimilarContactFolders(naming.serialNumber, names);
+  if (similar.length > 0) {
+    return { status: "candidates", folderNames: similar };
+  }
+
+  // ── 만든다 ─────────────────────────────────────────────────────────────
+  let folderName: string;
+  try {
+    // 🔴 이름은 domain 이 짓는다(길이 상한 · 신고증상 20자 · 빈 조각 빼기가 거기 있다).
+    folderName = contactFolderName(naming);
+  } catch {
+    // 던진 오류의 message 를 쓰지 않는다 — 사유는 늘 이 모듈이 정한 짧은 문장이다.
+    throw new ShareFolderFailure(NAMING_FAILED_REASON);
+  }
+
+  const target = path.join(root, folderName);
+  assertInsideShareFolderRoot(root, target, OUTSIDE_ROOT_ON_CREATE);
+  try {
+    // recursive 없이 — 부모(= 루트)가 없으면 만들지 않고 실패해야 한다.
+    await mkdir(target);
+    return { status: "created", folderName };
+  } catch (error) {
+    if (shareFolderErrorCode(error) !== "EEXIST") throw error;
+  }
+
+  // EEXIST — 둘이 동시에 눌렀거나, 같은 이름의 **파일**이 자리를 막고 있다.
+  const again = pickContactFolder(naming.intakeNumber, await listShareFolderNames(root));
+  if (again.status === "found") {
+    assertInsideShareFolderRoot(root, path.join(root, again.folderName), OUTSIDE_ROOT_ON_FIND);
+    return again;
+  }
+  if (again.status === "multiple") return again;
+  // 폴더 목록에 없는데 자리가 차 있다 = 같은 이름의 파일이다. 🔴 지우지 않는다.
+  throw new ShareFolderFailure(NAME_TAKEN_BY_FILE_REASON);
 }
 
 async function look(rawRoot: string, intakeNumber: string): Promise<ContactFolderMatch> {

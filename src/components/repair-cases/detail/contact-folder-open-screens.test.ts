@@ -132,6 +132,13 @@ function noticeMarkup(outcome: ContactFolderOpenOutcome): string {
   return renderToStaticMarkup(createElement(ContactFolderOpenNotice, { outcome }));
 }
 
+/** 만들 길이 있는 자리(수리 건 상세) — 부르는 쪽이 onCreate 를 준 경우. */
+function creatableMarkup(outcome: ContactFolderOpenOutcome, creating = false): string {
+  return renderToStaticMarkup(
+    createElement(ContactFolderOpenNotice, { outcome, creating, onCreate: () => undefined })
+  );
+}
+
 const openedOutcome = (extra: Partial<ContactFolderOpenOutcome> = {}): ContactFolderOpenOutcome => ({
   kind: "OPENED",
   lines: [{ text: "탐색기로 폴더를 엽니다: D260908 INVENIA", tone: "normal" }],
@@ -174,9 +181,15 @@ describe("결과 줄 — 다섯 갈래", () => {
     assert.ok(html.includes("data-contact-folder-helper-install-command"), html);
   });
 
-  test("🔴 not-found · disabled · multiple · failed 에는 아무 단추도 없다", () => {
+  test("🔴 결과를 보여 주기만 하는 자리에는 아무 단추도 없다 — 만들 길(onCreate)이 없으면 그린다고 만들 수 없다", () => {
     const withoutButtons: ContactFolderOpenOutcome[] = [
-      { kind: "NOT_FOUND", lines: [{ text: "아직 이 수리 건의 연락서 폴더가 없습니다", tone: "warning" }], offerHelperInstall: false },
+      // 🔴 만들 수 있다는 표시(offerCreate)가 붙어 있어도, 만들 길이 없으면 단추를 그리지 않는다.
+      {
+        kind: "NOT_FOUND",
+        lines: [{ text: "아직 이 수리 건의 연락서 폴더가 없습니다", tone: "warning" }],
+        offerHelperInstall: false,
+        offerCreate: true,
+      },
       { kind: "DISABLED", lines: [{ text: "연락서 공유폴더 위치가 설정되지 않았습니다", tone: "muted" }], offerHelperInstall: false },
       {
         kind: "MULTIPLE",
@@ -207,5 +220,80 @@ describe("결과 줄 — 다섯 갈래", () => {
     });
     assert.ok(html.includes("D260908 INVENIA(옛것)"), html);
     assert.ok(html.includes("D260908 INVENIA 점검요청"), html);
+  });
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 [폴더 만들고 열기] — not-found 에만 선다 (조각 5)
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("만들기 단추", () => {
+  const notFound: ContactFolderOpenOutcome = {
+    kind: "NOT_FOUND",
+    lines: [{ text: "아직 이 수리 건의 연락서 폴더가 없습니다", tone: "warning" }],
+    offerHelperInstall: false,
+    offerCreate: true,
+  };
+
+  test("not-found 에서는 단추가 선다 — 인쇄에는 안 찍힌다", () => {
+    const html = creatableMarkup(notFound);
+    assert.ok(html.includes(">폴더 만들고 열기</button>"), html);
+    assert.ok(html.includes("data-contact-folder-create"), html);
+    assert.ok(html.includes("print:hidden"), html);
+    // 🔴 링크가 아니다 — 눌러도 페이지를 떠나지 않는다.
+    assert.equal(html.includes("href="), false, html);
+  });
+
+  test("🔴 candidates(비슷한 폴더가 있다)에는 단추가 없다 — 할 일은 만들기가 아니다", () => {
+    const html = creatableMarkup({
+      kind: "CANDIDATES",
+      lines: [
+        { text: "인수번호가 없는 비슷한 폴더가 있어 만들지 않았습니다 — …", tone: "warning" },
+        { text: "INVENIA T2RCONT-AD2 WN3947 1802034 점검요청", tone: "muted" },
+      ],
+      offerHelperInstall: false,
+    });
+
+    assert.equal(html.includes("<button"), false, html);
+    assert.ok(html.includes("INVENIA T2RCONT-AD2 WN3947 1802034 점검요청"), html);
+  });
+
+  test("🔴 열린 뒤 · 여럿 · 실패에도 단추가 없다", () => {
+    for (const outcome of [
+      openedOutcome(),
+      {
+        kind: "MULTIPLE" as const,
+        lines: [{ text: "인수번호가 같은 폴더가 여럿입니다", tone: "warning" as const }],
+        offerHelperInstall: false,
+      },
+      {
+        kind: "FAILED" as const,
+        lines: [{ text: "폴더를 만들지 못했습니다 — 까닭", tone: "warning" as const }],
+        offerHelperInstall: false,
+      },
+    ]) {
+      assert.equal(creatableMarkup(outcome).includes("data-contact-folder-create"), false, outcome.kind);
+    }
+  });
+
+  test("🔴 만드는 동안에는 잠긴다 — 두 번 눌려 폴더가 둘이 되지 않게", () => {
+    const html = creatableMarkup(notFound, true);
+    assert.ok(html.includes(">만드는 중…</button>"), html);
+    assert.ok(html.includes("disabled"), html);
+    assert.ok(html.includes('aria-busy="true"'), html);
+  });
+
+  test("🔴 단추를 누르는 자리는 화면에 하나뿐이고, 그 자리에서만 만들기를 부른다", () => {
+    // 만들기 흐름을 **부르는** 곳은 이 단추의 onCreate 한 곳이다(가져오기 · 머리말은 뺀다).
+    assert.equal(buttonSource.match(/runContactFolderCreateAndOpen\(\{/g)?.length, 1, "부르는 자리가 하나가 아니다");
+    assert.ok(button.includes('onCreate={() => void run("create", () => runContactFolderCreateAndOpen({ repairCaseId }))}'));
+    // 🔴 화면 쪽에는 지우기 · 이름 바꾸기 길이 없다.
+    for (const forbidden of ["method: \"DELETE\"", "method: \"PUT\"", "method: \"PATCH\""]) {
+      assert.equal(buttonSource.includes(forbidden), false, forbidden);
+      assert.equal(moduleSource.includes(forbidden), false, forbidden);
+    }
+    // 만들기 요청은 POST 하나뿐이다.
+    assert.equal(moduleSource.match(/method: "POST"/g)?.length, 1);
   });
 });
