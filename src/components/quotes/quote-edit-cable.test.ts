@@ -226,7 +226,7 @@ describe("㉤ 아홉 줄 — 화면이 미리 막는다", () => {
       "더하는 함수가 상한을 보지 않는다"
     );
     // 🔴 앞에 붙이는 길(설명 줄)도 같은 상한을 본다 — 한쪽만 새면 열째 줄이 들어가고,
-    //    그 증상은 저장은 되는데 [견적서 받기]가 던지는 것이다.
+    //    그 증상은 견적서는 저장되는데 엑셀을 만드는 쪽(저장에 딸린 공유폴더 · 받기 통로)이 던지는 것이다.
     assert.ok(
       sliceBetween(form, "function addNoteRowAtTop(row: ItemRow) {", "}); }").includes(
         "if (prev.length >= maxItemLines) return prev;"
@@ -260,7 +260,10 @@ describe("㉥ 특이사항 · 아직 안 되는 일", () => {
      */
     assert.ok(form.includes("const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });"), "판정이 화면 것이다");
     assert.ok(form.includes('{canGetDocument && ( <button type="button" onClick={() => setShowPreview(true)}'), "미리보기 단추가 그대로 있다");
-    assert.ok(form.includes("{savedQuote && canGetDocument && ( <QuoteIssueButton"), "받기 단추가 그대로 있다");
+    assert.ok(
+      form.includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"),
+      "받기 링크가 그대로 있다"
+    );
     // 못 하는 일을 말없이 감추지 않는다 — 문장은 서버가 돌려주는 그 하나다.
     assert.ok(form.includes("{!canGetDocument && ( <p"), "안내가 없다");
     assert.ok(form.includes("{QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} </p>"), "화면이 문장을 따로 적는다");

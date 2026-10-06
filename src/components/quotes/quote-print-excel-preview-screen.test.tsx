@@ -141,8 +141,6 @@ function screenProps(overrides: Partial<ScreenProps> = {}): ScreenProps {
     quoteId: "q-1",
     signedPdf: SAVED_PDF,
     hasExcel: true,
-    canIssue: false,
-    hasUnsavedChanges: false,
     excel: READY,
     view: "excel",
     onViewChange: () => {},
@@ -321,9 +319,9 @@ describe("🔴 결정 2 — [결재 PDF 보기] ↔ [엑셀 모양 보기]", () 
     assert.deepEqual(seen, ["pdf", "excel"]);
   });
 
-  test("받기 단추는 그대로 — 보기 권한자 링크 · 수정 권한자 발행 단추", () => {
-    assert.ok(renderScreen().includes('href="/api/quotes/q-1/xlsx"'));
-    const issue = renderScreen({ canIssue: true });
-    assert.ok(issue.includes("data-quote-issue") && !issue.includes('href="/api/quotes/q-1/xlsx"'), issue);
+  test("🔴 받기는 누구에게나 링크 하나다 — 부작용 단추가 없다(2026-10-06)", () => {
+    const html = renderScreen();
+    assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'), html);
+    assert.ok(!html.includes("data-quote-issue"), "발행 단추가 남았다");
   });
 });

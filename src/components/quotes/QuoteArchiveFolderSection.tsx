@@ -119,8 +119,9 @@ export function quoteArchiveFolderSectionTitle(label: string): string {
   return label === "" ? QUOTE_ARCHIVE_FOLDER_SECTION_TITLE : `${QUOTE_ARCHIVE_FOLDER_SECTION_TITLE} — ${label}`;
 }
 export const QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT = "불러오는 중…";
+/** 🔴 폴더를 세우는 일은 2026-10-06 부터 [저장]이 한다(server/actions/quotes.ts). */
 export const QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT =
-  "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [견적서 받기]를 누르면 만들어집니다";
+  "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [저장]을 누르면 만들어집니다";
 export const QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT = "폴더가 비어 있습니다";
 /** 🔴 목록을 내지 않는다 — 사람이 공유폴더를 정리해야 한다. */
 export const QUOTE_ARCHIVE_FOLDER_SECTION_MULTIPLE_TEXT =
@@ -419,8 +420,8 @@ export function QuoteArchiveFolderSectionView({
  * 번 더 그리게 된다).
  *
  * 🔴 「다시 읽어라」를 받는 칸을 두지 않았다 — 지금 이 구역을 다시 읽게 만드는 자리가 화면에
- * 없기 때문이다([견적서 받기]가 끝난 뒤 목록을 갱신하는 일은 받기 쪽 결과 처리를 건드려야
- * 한다). 쓰지 않을 칸을 미리 들이지 않는다 — 필요해지면 그 조각에서 더한다.
+ * 없기 때문이다(저장에 딸려 공유폴더가 바뀌면 화면이 통째로 다시 그려진다). 쓰지 않을 칸을
+ * 미리 들이지 않는다 — 필요해지면 그 조각에서 더한다.
  */
 export default function QuoteArchiveFolderSection({
   quoteId,

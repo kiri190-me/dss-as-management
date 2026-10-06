@@ -183,14 +183,16 @@ describe("① 폴더 위치를 묻는다", () => {
     assert.deepEqual(opened, []);
   });
 
-  test("not-found → [견적서 받기]를 먼저 누르라고", async () => {
+  test("🔴 not-found → [저장]을 먼저 누르라고 — 폴더를 세우는 것은 저장이다(2026-10-06)", async () => {
     const { outcome, opened } = await run({ folder: { status: 200, json: { status: "not-found" } } });
     assert.equal(outcome.kind, "NOT_FOUND");
     assert.deepEqual(outcome.lines, [{ text: QUOTE_FOLDER_NOT_FOUND_TEXT, tone: "warning" }]);
     assert.equal(
       QUOTE_FOLDER_NOT_FOUND_TEXT,
-      "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [견적서 받기]를 먼저 눌러 주세요"
+      "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [저장]을 먼저 눌러 주세요"
     );
+    // 없앤 단추를 가리키지 않는다 — 그 단추는 화면에 없다.
+    assert.ok(!QUOTE_FOLDER_NOT_FOUND_TEXT.includes("견적서 받기"), QUOTE_FOLDER_NOT_FOUND_TEXT);
     assert.deepEqual(opened, []);
   });
 

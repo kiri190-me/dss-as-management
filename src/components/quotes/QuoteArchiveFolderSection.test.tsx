@@ -91,6 +91,9 @@ describe("상태 여섯 — 무엇을 보이는가", () => {
   test("폴더가 아직 없으면 — 「아직 … 폴더가 없습니다」", () => {
     const html = markup({ kind: "not-found" });
     assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT), html);
+    // 🔴 가리키는 단추는 [저장]이다(2026-10-06) — [견적서 받기] 단추는 화면에 없다.
+    assert.ok(QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT.includes("[저장]"), QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT);
+    assert.ok(!QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT.includes("견적서 받기"), QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT);
     // 🔴 목록 자리가 서지 않는다.
     assert.equal(html.includes("<ul"), false, html);
   });

@@ -215,14 +215,14 @@ describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
     assert.doesNotMatch(editFormSource, /QuoteApproval/);
   });
 
-  test("[견적서 받기] 단추의 조건이 그대로다 — 저장 여부와 문서 종류 둘뿐", () => {
+  test("[견적서 받기] 링크의 조건이 그대로다 — 저장 여부와 문서 종류 둘뿐", () => {
     assert.ok(
-      flat(editFormSource).includes("{savedQuote && canGetDocument && ( <QuoteIssueButton"),
-      "발행 단추의 조건이 바뀌었다 — 결재 상태가 끼어들지 않았는지 확인할 것"
+      flat(editFormSource).includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"),
+      "받기 링크의 조건이 바뀌었다 — 결재 상태가 끼어들지 않았는지 확인할 것"
     );
   });
 
-  test("발행 단추 자체도 결재를 보지 않는다", () => {
+  test("발행 단추 조각 자체도 결재를 보지 않는다", () => {
     assert.doesNotMatch(issueButtonSource, /approval/i);
   });
 

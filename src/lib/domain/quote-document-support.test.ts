@@ -141,13 +141,13 @@ describe("㉡ 막는 자리 — 다섯 곳이 같은 판정 하나를 부른다"
     );
     // 표와 카드 두 곳 모두 같은 조각을 쓴다 — 폭에 따라 한쪽만 뚫리면 안 된다.
     assert.equal(listScreen.split("<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />").length - 1, 2);
-    assert.equal(listScreen.split("<DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />").length - 1, 2);
+    assert.equal(listScreen.split("<DownloadLink row={row} />").length - 1, 2);
   });
 
   test("🔴 편집 화면 — 화면도 같은 판정을 본다(엑셀 전용 케이블은 열려 있다)", () => {
     assert.ok(editForm.includes("const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });"), editForm.slice(0, 0));
     assert.ok(editForm.includes("{canGetDocument && ( <button type=\"button\" onClick={() => setShowPreview(true)}"));
-    assert.ok(editForm.includes("{savedQuote && canGetDocument && ( <QuoteIssueButton"));
+    assert.ok(editForm.includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"));
     // 안내 문장도 서버가 돌려주는 그 하나다 — 두 벌이면 화면과 통로가 다른 말을 한다.
     assert.ok(editForm.includes("{!canGetDocument && ( <p"));
     assert.ok(editForm.includes("{QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} </p>"));

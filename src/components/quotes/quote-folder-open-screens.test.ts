@@ -17,8 +17,9 @@ import type { QuoteFolderOpenOutcome } from "./quote-folder-open";
  * 읽는다. 단추가 무엇을 그리는지는 QuoteFolderOpenButton.test.tsx, 누른 뒤의 흐름은
  * quote-folder-open.test.ts 가 값으로 본다.
  *
- *  · 자리 = 편집 화면 머리의 [견적서 받기] 곁, 저장된 장에서만(사용자 결정 2026-09-16)
- *  · 결과 줄 = 받기 결과와 같은 자리(머리 아래)
+ *  · 자리 = 편집 화면 머리의 [견적서 받기] 곁, 저장된 장에서만(사용자 결정 2026-09-16).
+ *    🔴 그 곁의 [견적서 받기]는 2026-10-06 부터 발행 단추가 아니라 받기 링크다 — 자리는 그대로다.
+ *  · 결과 줄 = 머리 아래(받기 결과가 있던 그 자리)
  *  · 🔴 처음 렌더는 감춘다 — Windows 판단은 마운트 뒤
  * ============================================================================
  */
@@ -70,8 +71,8 @@ describe("편집 화면 머리 — [견적서 받기] 곁", () => {
   });
 
   test("머리 단추 줄 안 — [견적서 받기] 바로 다음, [취소] 앞", () => {
-    const header = sliceBetween(form, "<h1", "{/* [견적서 받기] 결과");
-    const issue = indexOrFail(header, "<QuoteIssueButton");
+    const header = sliceBetween(form, "<h1", "{/* [폴더 열기] 결과");
+    const issue = indexOrFail(header, "<a href={`/api/quotes/${savedQuote.id}/xlsx`}");
     const folder = indexOrFail(header, "<QuoteFolderOpenButton");
     const cancel = indexOrFail(header, "router.push(returnHref ?? \"/quotes\")");
     assert.ok(issue < folder && folder < cancel, "자리가 [견적서 받기] 곁이 아니다");
@@ -85,12 +86,12 @@ describe("편집 화면 머리 — [견적서 받기] 곁", () => {
     assert.ok(form.includes("const disabled = isSubmitting || isConflict;"));
   });
 
-  test("결과 줄은 받기 결과와 같은 자리 — 머리 아래, 받기 결과 다음, 저장 오류 앞", () => {
+  test("결과 줄은 머리 아래 — 머리 단추 줄 다음, 저장 오류 앞", () => {
     assert.ok(form.includes("useState<QuoteFolderOpenOutcome | null>(null)"));
-    const issueNotice = indexOrFail(form, "<QuoteIssueNoticeLines lines={issueNotice}");
+    const header = indexOrFail(form, "<QuoteFolderOpenButton");
     const notice = indexOrFail(form, "{folderOpenOutcome && ( <div className=\"flex justify-end\"> <QuoteFolderOpenNotice outcome={folderOpenOutcome}");
     const submitError = indexOrFail(form, "{submitError && (");
-    assert.ok(issueNotice < notice && notice < submitError, "결과 자리가 머리 아래가 아니다");
+    assert.ok(header < notice && notice < submitError, "결과 자리가 머리 아래가 아니다");
   });
 });
 

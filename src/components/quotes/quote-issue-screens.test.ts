@@ -4,18 +4,23 @@ import { readFileSync } from "node:fs";
 
 /**
  * ============================================================================
- * 견적서 B1c — 수정 권한자의 [견적서 받기]를 세 화면이 제자리에서 부르는가
+ * 🔴 [견적서 받기] 단추를 화면에서 없앴다 — 받는 길은 링크 하나다 (2026-10-06)
  * ============================================================================
+ * 2026-09-15(견적서 B1c)에는 세 화면(목록 · 편집 · 인쇄 미리보기)이 수정 권한자에게 발행
+ * 단추(POST /api/quotes/{id}/issue — 공유폴더 저장 · 엑셀 칸 교체 · 내려주기)를 그렸다.
+ * 그 셋 가운데 **공유폴더 저장과 엑셀 칸 넣기는 이제 [저장]이 한다**(server/actions/quotes.ts 의
+ * archiveDocumentAfterSave). 남은 일은 **받는 것 하나**라, 화면에는 부작용 없는 링크
+ * (GET /api/quotes/{id}/xlsx)만 둔다.
+ *
  * QuoteListScreen · QuoteEditForm · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
  * 컴포넌트라 이 시험 환경에서 그려 볼 수 없다(`server-only`). 그래서 이웃 시험
  * (quote-attachment-screens.test.ts · QuoteListScreen.test.ts)과 같은 방법으로 원본을 글자로
- * 읽는다. 단추 · 인쇄 미리보기가 무엇을 그리는지는 QuoteIssueButton.test.tsx 가, 누른 뒤의
- * 흐름(저장하지 않은 변경이면 통로를 부르지 않는다)은 quote-issue-download.test.ts 가 값으로 본다.
+ * 읽는다. 인쇄 미리보기가 실제로 무엇을 그리는지는 QuoteIssueButton.test.tsx 가 값으로 본다.
  *
  * 불변식 셋:
- *  (a) 보기 권한자 화면에는 부작용 단추가 없다 — 목록 canEdit · 인쇄 canIssue 로 가른다.
- *  (b) 저장하지 않은 변경은 공유폴더로 가지 않는다 — 편집 화면 · 그 안의 미리보기.
- *  (c) 기존 링크 동작은 그대로다 — 보기 권한자 갈래.
+ *  (a) 🔴 **어느 화면에도 발행 단추(QuoteIssueButton)가 없다.**
+ *  (b) 🔴 **누구나 받을 수 있다** — 권한으로 갈리던 자리가 전부 같은 링크 하나다.
+ *  (c) 통로 · 조각 · 결과 줄은 살아 있다 — 결재 PDF 올리기가 같은 문장 함수를 쓴다.
  * ============================================================================
  */
 
@@ -30,12 +35,6 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
   assert.ok(end > start, `원본에서 '${endMarker}' 를 찾지 못했다`);
   return source.slice(start, end);
 };
-const indexOrFail = (source: string, marker: string) => {
-  const at = source.indexOf(marker);
-  assert.ok(at >= 0, `원본에서 '${marker}' 를 찾지 못했다`);
-  return at;
-};
-
 const list = read("src/components/quotes/QuoteListScreen.tsx");
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 const printPage = flat(read("src/app/(app)/quotes/[id]/print/page.tsx"));
@@ -43,47 +42,52 @@ const printView = flat(read("src/components/quotes/QuotePrintView.tsx"));
 const section = flat(read("src/components/quotes/QuoteAttachmentsSection.tsx"));
 const button = flat(read("src/components/quotes/QuoteIssueButton.tsx"));
 
-describe("목록 — 표와 카드 두 곳 모두", () => {
-  const table = flat(sliceBetween(list, "function QuoteTable(", "function QuoteCardList("));
-  const cards = flat(sliceBetween(list, "function QuoteCardList(", "function PreviewLink("));
-  const CALL = "<DownloadLink row={row} canEdit={canEdit} onIssueOutcome={onIssueOutcome} />";
-
-  test("🔴 표와 카드가 같은 값으로 받기를 부른다 — 창 폭에 따라 권한 갈래가 달라지지 않게", () => {
-    assert.ok(table.includes(CALL), "표의 받기가 권한을 받지 않는다");
-    assert.ok(cards.includes(CALL), "카드의 받기가 권한을 받지 않는다");
-    assert.ok(!flat(list).includes("<DownloadLink row={row} />"), "권한 없이 부르는 곳이 남았다");
-  });
-
-  test("두 곳 모두 부르는 쪽의 canEdit · 결과 받는 곳을 넘겨받는다", () => {
-    const screen = flat(sliceBetween(list, "<ResponsiveList", "/>\n      )}"));
-    for (const props of [sliceBetween(screen, "<QuoteTable", "/>"), sliceBetween(screen, "<QuoteCardList", "/>")]) {
-      assert.ok(props.includes("canEdit={canEdit}"), props);
-      assert.ok(props.includes("onIssueOutcome={handleIssueOutcome}"), props);
+describe("🔴 세 화면 어디에도 발행 단추가 없다", () => {
+  test("목록 · 편집 · 인쇄 미리보기가 QuoteIssueButton 을 그리지 않는다", () => {
+    for (const [name, source] of [
+      ["목록", flat(list)],
+      ["편집 화면", form],
+      ["인쇄 미리보기", printView],
+    ] as const) {
+      assert.ok(!source.includes("<QuoteIssueButton"), `${name} 에 발행 단추가 남았다`);
+      // 발행 통로를 부르는 길은 이 조각 하나다(quote-issue-download.ts) — 들여오지 않으면 못 부른다.
+      assert.ok(!source.includes('from "@/components/quotes/quote-issue-download"'), `${name} 이 발행 흐름을 들여온다`);
     }
   });
 
-  test("🔴 canEdit 거짓 → 지금 링크, 참 → 발행 단추", () => {
+  test("🔴 어느 화면도 발행 통로의 결과를 다루지 않는다 — 딸린 상태 · 핸들러가 남지 않았다", () => {
+    for (const [name, source] of [
+      ["목록", flat(list)],
+      ["편집 화면", form],
+      ["인쇄 미리보기", printView],
+    ] as const) {
+      for (const dead of ["issueNotice", "onIssueOutcome", "shouldReloadSlotsAfterIssue", "hasUnsavedChanges", "canIssue"]) {
+        assert.ok(!source.includes(dead), `${name} 에 '${dead}' 가 남았다`);
+      }
+    }
+  });
+});
+
+describe("목록 — 표와 카드 두 곳 모두", () => {
+  const table = flat(sliceBetween(list, "function QuoteTable(", "function QuoteCardList("));
+  const cards = flat(sliceBetween(list, "function QuoteCardList(", "function PreviewLink("));
+  const CALL = "<DownloadLink row={row} />";
+
+  test("🔴 표와 카드가 같은 값으로 받기를 부른다 — 창 폭에 따라 받는 길이 달라지지 않게", () => {
+    assert.ok(table.includes(CALL), "표의 받기가 바뀌었다");
+    assert.ok(cards.includes(CALL), "카드의 받기가 바뀌었다");
+    assert.equal(flat(list).split(CALL).length - 1, 2, "받기를 부르는 곳이 둘이 아니다");
+  });
+
+  test("🔴 받기는 누구에게나 같은 링크 하나다 — 권한 갈래가 없다", () => {
     const download = flat(sliceBetween(list, "function DownloadLink(", "function IntakeLink("));
-    const branch = indexOrFail(download, "if (canEdit) {");
-    const issue = indexOrFail(download, "<QuoteIssueButton");
-    const link = indexOrFail(download, "href={`/api/quotes/${row.id}/xlsx`}");
-    assert.ok(branch < issue && issue < link, "갈래 차례가 틀렸다");
-    const trueBranch = sliceBetween(download, "if (canEdit) {", "return ( <a");
-    assert.ok(!trueBranch.includes("/xlsx"), trueBranch);
-    assert.ok(trueBranch.includes("showNotice={false}"), trueBranch);
-    assert.ok(trueBranch.includes("onOutcome={(outcome) => onIssueOutcome(row, outcome)}"), trueBranch);
+    assert.ok(download.includes("href={`/api/quotes/${row.id}/xlsx`}"), "받기 링크가 사라졌다");
+    assert.ok(!download.includes("canEdit"), "권한 갈래가 남았다");
+    // 앱 양식이 없는 종류에만 받기를 내밀지 않는다(2026-09-16 케이블 ③) — 그 갈래는 그대로다.
+    assert.ok(download.includes("if (!canRenderQuoteDocument(row)) {"), download);
   });
 
-  test("결과는 화면 위 한 자리에 — 어느 견적서인지 번호를 붙여", () => {
-    const body = flat(list);
-    assert.ok(body.includes("setIssueNotice({ quoteNumber: row.quoteNumber, lines: outcome.lines });"), "번호를 붙이지 않는다");
-    assert.ok(body.includes("[견적서 받기] {issueNotice.quoteNumber}"));
-    assert.ok(body.includes("<QuoteIssueNoticeLines lines={issueNotice.lines}"));
-    // 엑셀 칸이 바뀌면 목록의 표시를 다시 그려 온다.
-    assert.ok(body.includes("if (shouldReloadSlotsAfterIssue(outcome)) router.refresh();"));
-  });
-
-  test("목록을 부르는 두 쪽의 canEdit 은 quotes WRITE 다", () => {
+  test("목록을 부르는 두 쪽의 canEdit 은 quotes WRITE 다 — 받기가 아니라 [새 견적서] 쪽이다", () => {
     const quotesPage = flat(read("src/app/(app)/quotes/page.tsx"));
     assert.ok(quotesPage.includes('hasPermission(actingUser, "quotes", "WRITE")'));
     assert.ok(quotesPage.includes("canEdit={canEdit}"));
@@ -94,73 +98,47 @@ describe("목록 — 표와 카드 두 곳 모두", () => {
 });
 
 describe("인쇄 미리보기 — 🔴 보기 권한자도 들어오는 화면", () => {
-  test("page 가 quotes WRITE 로 계산해 넘긴다 — 견적서를 읽은 뒤에, 살아 있는 계정으로", () => {
-    assert.ok(
-      printPage.includes('const canIssue = actingUser !== null && (await hasPermission(actingUser, "quotes", "WRITE"));'),
-      "인쇄 화면의 받기 권한이 quotes WRITE 가 아니다"
-    );
-    assert.ok(printPage.includes("const actingUser = session ? await resolveActingUserForSession(session) : null;"));
-    assert.ok(printPage.includes("canIssue={canIssue}"), "미리보기에 권한이 넘어가지 않는다");
-    assert.ok(indexOrFail(printPage, "if (!quote) notFound();") < indexOrFail(printPage, "const canIssue ="));
-    // 화면 문턱은 그대로 읽기 권한이다 — 보기 권한자도 미리보기는 연다.
+  test("page 는 받기 때문에 권한을 읽지 않는다 — 화면 문턱은 그대로 읽기 권한", () => {
+    assert.ok(!printPage.includes("canIssue"), "옛 권한 계산이 남았다");
+    assert.ok(!printPage.includes("hasPermission("), "미리보기 화면이 권한을 다시 계산한다");
     assert.ok(printPage.includes('await requireAreaAccessForCurrentUser("quotes");'));
   });
 
-  test("미리보기는 canIssue 일 때만 발행 단추 — 앱 양식 · 엑셀 전용 두 갈래 모두, 기본은 링크", () => {
-    assert.equal(printView.split("<QuoteIssueButton").length - 1, 2, "받기 단추가 두 갈래가 아니다");
-    assert.equal(printView.split(") : canIssue ? (").length - 1, 2, "단추가 권한 갈래 밖에 있다");
-    assert.equal(printView.split("href={`/api/quotes/${quoteId}/xlsx`}").length - 1, 2, "보기 권한자의 링크가 사라졌다");
-    assert.ok(printView.includes("canIssue = false,"), "안 주면 링크여야 한다");
-    assert.ok(printView.includes("canIssue={canIssue} hasUnsavedChanges={hasUnsavedChanges} onIssueOutcome={onIssueOutcome}"));
+  test("🔴 앱 양식 · 엑셀 전용 두 갈래 모두 같은 링크 하나다", () => {
+    assert.equal(printView.split("href={`/api/quotes/${quoteId}/xlsx`}").length - 1, 2, "받기 링크가 두 갈래가 아니다");
+    // 저장 전에는 받을 것이 없다고 적는다 — 그 갈래는 그대로다(두 곳 모두).
+    assert.equal(printView.split("Excel 은 저장한 뒤에 받을 수 있습니다").length - 1, 2);
   });
 });
 
-describe("편집 화면 — 🔴 저장하지 않은 변경은 공유폴더로 가지 않는다", () => {
-  test("머리의 [견적서 받기]는 발행 단추이고 옛 링크가 없다", () => {
-    assert.ok(!form.includes("/xlsx"), "편집 화면에 옛 받기 링크가 남았다");
-    // 🔴 앱 양식이 없는 종류(케이블)에는 이 단추가 없다(2026-09-16 케이블 ③) — 그 장을
+describe("편집 화면 — 🔴 단추 자리에 링크가 남는다", () => {
+  test("머리의 [견적서 받기]는 받기 링크다 — 저장된 장에서만, 앱이 만들 수 있는 종류에서만", () => {
+    // 🔴 앱 양식이 없는 종류(케이블)에는 이것이 없다(2026-09-16 케이블 ③) — 그 장을
     // 채우면 **다른 종류의 문서**가 만들어진다. 판정은 통로 둘과 같은 함수 하나이고
     // (domain/quote-document-support.ts), 통로도 서버에서 거절한다.
     const header = sliceBetween(form, "{savedQuote && canGetDocument && (", ")}");
-    assert.ok(header.includes('<QuoteIssueButton quoteId={savedQuote.id} label="견적서 받기"'), header);
-    assert.ok(header.includes("hasUnsavedChanges={hasUnsavedChanges}"), header);
-    assert.ok(header.includes("disabled={disabled}"), "저장 중 · 충돌에도 받을 수 있다");
-    assert.ok(header.includes("onOutcome={handleIssueOutcome}"), header);
+    assert.ok(header.includes("<a href={`/api/quotes/${savedQuote.id}/xlsx`}"), header);
+    assert.ok(header.includes("견적서 받기"), header);
+    assert.ok(!header.includes("disabled"), "링크에는 잠글 것이 없다");
   });
 
-  test("🔴 저장하지 않은 변경 = 저장이 보내는 값(collectFields)이 마지막 저장값과 다르다", () => {
-    assert.ok(form.includes("useState<string | null>(() => quote ? JSON.stringify(collectFields()) : null"));
-    assert.ok(
-      form.includes(
-        "const hasUnsavedChanges = savedFieldsSnapshot === null || JSON.stringify(collectFields()) !== savedFieldsSnapshot;"
-      )
-    );
-    // 미리보기로 갈아 그리는 자리보다 앞 — 미리보기의 단추도 같은 값을 받는다.
-    assert.ok(indexOrFail(form, "const [savedFieldsSnapshot, setSavedFieldsSnapshot]") < indexOrFail(form, "if (showPreview) {"));
-  });
-
-  test("🔴 [저장]이 성공한 뒤에만 그때 보낸 값으로 기준을 옮긴다", () => {
+  test("🔴 저장하지 않은 변경을 가리던 장치가 남아 있지 않다 — 그 단추만을 위한 것이었다", () => {
+    for (const dead of ["savedFieldsSnapshot", "hasUnsavedChanges"]) {
+      assert.ok(!form.includes(dead), `'${dead}' 가 남았다`);
+    }
+    // [저장]이 보내는 값을 접어 두던 자리가 사라졌으니, 저장은 그 값을 보내기만 한다.
     const submit = sliceBetween(form, "async function handleSubmit(", "const disabled = isSubmitting || isConflict;");
     assert.ok(submit.includes("const fields = collectFields();"));
-    const failed = indexOrFail(submit, "if (!result.ok) {");
-    const moved = indexOrFail(submit, "setSavedFieldsSnapshot(JSON.stringify(fields));");
-    assert.ok(failed < moved, "저장이 실패해도 기준을 옮긴다");
-    assert.ok(moved < indexOrFail(submit, "if (savedQuote) {"));
-    assert.ok(moved < indexOrFail(submit, "await attachments.uploadQueuedAfterCreate("), "새 견적서가 머물 때 기준이 없다");
-    assert.equal(form.split("setSavedFieldsSnapshot(").length - 1, 1, "저장 말고 기준을 옮기는 곳이 생겼다");
   });
 
-  test("🔴 겹쳐 뜬 미리보기의 받기도 같은 규칙", () => {
+  test("🔴 겹쳐 뜬 미리보기에도 받기 값이 넘어가지 않는다 — 미리보기가 스스로 링크를 그린다", () => {
     const preview = sliceBetween(form, "<QuotePrintView", "quoteNumber,");
-    assert.ok(preview.includes("canIssue"), preview);
-    assert.ok(preview.includes("hasUnsavedChanges={hasUnsavedChanges}"), preview);
-    assert.ok(preview.includes("onIssueOutcome={reloadSlotsAfterIssue}"), preview);
+    assert.ok(!preview.includes("canIssue"), preview);
+    assert.ok(!preview.includes("onIssueOutcome"), preview);
   });
 
-  test("발행이 엑셀 칸을 바꾸면 서버 칸을 다시 그려 온다 — 결과 줄은 머리 아래", () => {
-    assert.ok(form.includes("if (shouldReloadSlotsAfterIssue(outcome)) attachments.reloadAfterIssue();"));
+  test("「수기 견적서 엑셀」 칸을 다시 그려 오는 길은 살아 있다 — 결재 PDF 올리기가 쓴다", () => {
     assert.ok(section.includes("function reloadAfterIssue() { setStatusText(null); setArchiveNotice([]); refreshServerSlots(); }"));
-    assert.ok(form.includes("<QuoteIssueNoticeLines lines={issueNotice}"));
   });
 });
 
@@ -172,6 +150,11 @@ describe("결재 PDF 올리기 — 공유폴더 결과를 같은 문장 함수�
 });
 
 describe("단추 · 조각", () => {
+  /**
+   * 🔴 조각 자체는 **그리는 화면이 없어도 성해야 한다** — 통로(POST /api/quotes/{id}/issue)와
+   * 서비스(issueQuoteFile)가 살아 있고, 결과 줄(QuoteIssueNoticeLines)은 결재 PDF 올리기와
+   * [폴더 열기]가 그대로 쓴다. 조각을 정리할지는 사람이 따로 정한다.
+   */
   test("🔴 단추는 저장하지 않은 변경을 runQuoteIssue 에 넘긴다 — 통로를 직접 부르지 않는다", () => {
     assert.ok(button.includes("await runQuoteIssue({ quoteId, hasUnsavedChanges });"));
     assert.ok(!button.includes("fetch("), "단추가 통로를 직접 부른다");

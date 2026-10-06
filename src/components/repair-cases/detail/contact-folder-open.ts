@@ -33,8 +33,8 @@ import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messa
  * 네 가지다. (a) 그 함수는 **URL 이 아니라 `quoteId` 를 받아** `/api/quotes/{id}/archive-folder`
  * 를 스스로 만든다. (b) 응답 모양이 다르다 — 견적서는 여럿을 `found` 안의 boolean 으로 접어
  * 이름순 첫째를 열지만, 연락서는 **여럿이면 열지 않는다**(`multiple` — 앱이 고르면 틀렸을 때
- * 조용히 틀린다: pickContactFolder 머리말). (c) 문장이 견적서 전용이다(「[견적서 받기]를 먼저
- * 눌러 주세요」). (d) quote-folder-open-screens.test.ts 가 그 함수 이름을 적은 **화면 원본
+ * 조용히 틀린다: pickContactFolder 머리말). (c) 문장이 견적서 전용이다(「… 이 견적서의 폴더가
+ * 없습니다」). (d) quote-folder-open-screens.test.ts 가 그 함수 이름을 적은 **화면 원본
  * 파일을 정확히 셋**으로 못 박아 두었다 — 가져다 쓰면 견적서 시험이 깨진다. 그 울타리는
  * 「[폴더 열기]는 편집 화면 머리 한 곳뿐」을 지키는 것이라, 이쪽 사정으로 풀 것이 아니다.
  *

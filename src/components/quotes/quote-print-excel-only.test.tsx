@@ -73,8 +73,6 @@ describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
       quoteId="q-1"
       signedPdf={SAVED_PDF}
       hasExcel
-      canIssue={false}
-      hasUnsavedChanges={false}
       excel={{ kind: "loading" }}
       view="pdf"
       onViewChange={() => {}}
