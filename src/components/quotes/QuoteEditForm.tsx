@@ -99,6 +99,7 @@ import { shouldReloadSlotsAfterIssue, type QuoteIssueRunOutcome } from "@/compon
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import QuoteFolderOpenButton, { QuoteFolderOpenNotice } from "@/components/quotes/QuoteFolderOpenButton";
 import type { QuoteFolderOpenOutcome } from "@/components/quotes/quote-folder-open";
+import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
 
 /**
  * ============================================================================
@@ -2226,6 +2227,16 @@ export default function QuoteEditForm({
           />
         </div>
       )}
+
+      {/* 공유폴더 구역(2026-10-06) — 그 견적서의 폴더 **안에 무엇이 있는지** 줄로 보여 주고,
+          줄마다 [열기]로 그 파일을 이 PC 의 프로그램으로 연다. 자리는 머리의 [폴더 열기]와 그
+          결과 바로 아래다.
+          🔴 **저장된 장에서만** — 폴더를 찾는 열쇠가 발행번호 · 발행일자라 새 견적서에는 물을
+          것이 없다([견적서 받기]와 같은 조건이다).
+          🔴 화면이 뜬 **뒤에** 스스로 통로를 부른다 — NAS 가 느리거나 꺼져 있어도 편집 화면은
+          그대로 뜨고, 이 구역만 「불러오는 중…」 → 「읽지 못했습니다」가 된다.
+          🔴 [폴더 열기]를 여기에 또 만들지 않는다 — 머리에 이미 있다(견적서 ④b). */}
+      {savedQuote && <QuoteArchiveFolderSection quoteId={savedQuote.id} />}
 
       {submitError && (
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

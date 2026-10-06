@@ -1,0 +1,332 @@
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT } from "@/components/repair-cases/files/contact-folder-file-open";
+import { buildQuoteFolderFileLink, parseQuoteFolderFileLink } from "@/lib/domain/quote-folder-file-link";
+import QuoteArchiveFolderSection, {
+  QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT,
+  QUOTE_ARCHIVE_FOLDER_SECTION_FAILED_TEXT,
+  QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT,
+  QUOTE_ARCHIVE_FOLDER_SECTION_MULTIPLE_TEXT,
+  QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT,
+  QuoteArchiveFolderSectionView,
+  canOpenQuoteArchiveFolderEntry,
+  loadQuoteArchiveFolderEntries,
+  quoteArchiveFolderEntriesUrl,
+  quoteArchiveFolderEntryMetaText,
+  quoteArchiveFolderTruncatedText,
+  readQuoteArchiveFolderEntriesAnswer,
+  type QuoteArchiveFolderSectionState,
+} from "./QuoteArchiveFolderSection";
+
+/**
+ * ============================================================================
+ * 견적서 편집 화면의 공유폴더 구역 — 상태 여섯 · 자리 · 인쇄 · 읽기만 (2026-10-06)
+ * ============================================================================
+ * 통로 쪽 규율은 app/api/quotes/[id]/archive-folder/entries/route-source.test.ts 가, 실제
+ * 읽기는 lib/storage/quote-archive-entries.test.ts 가 본다. 여기서는 **화면이 무엇을
+ * 내는가**와 **줄의 [열기]가 어느 줄에만 생기는가**를 본다.
+ *
+ * 🔴 네트워크를 쓰지 않는다 — fetch 는 값을 돌려주는 가짜로 바꿔 끼운다. 공급처 · 모델 ·
+ * L/N · S/N 은 가짜다(저장소가 공개다).
+ * ============================================================================
+ */
+
+const sectionSource = readFileSync(new URL("./QuoteArchiveFolderSection.tsx", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n"
+);
+const editFormSource = readFileSync(new URL("./QuoteEditForm.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+/** 주석을 뺀 코드 — 머리말이 까닭을 설명하느라 적은 낱말(iframe · QuoteFolderOpenButton …)에 걸리지 않게. */
+const sectionCode = sectionSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+/** 🔴 가짜 이름이다 — 모양만 실제와 같다. */
+const RELATIVE_PATH = "21. 2026 내자견적서/DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서";
+
+function markup(state: QuoteArchiveFolderSectionState): string {
+  return renderToStaticMarkup(createElement(QuoteArchiveFolderSectionView, { state }));
+}
+
+const foundState = (
+  overrides: Partial<Extract<QuoteArchiveFolderSectionState, { kind: "found" }>> = {}
+): QuoteArchiveFolderSectionState =>
+  ({
+    kind: "found",
+    relativePath: RELATIVE_PATH,
+    entries: [],
+    totalCount: 0,
+    truncated: false,
+    ...overrides,
+  }) satisfies QuoteArchiveFolderSectionState;
+
+const entry = (name: string, isDirectory = false) => ({ name, isDirectory, sizeBytes: 1024 });
+
+describe("상태 여섯 — 무엇을 보이는가", () => {
+  test("🔴 disabled 면 구역을 **아예 안 그린다** — 설정이 없는 환경에서 빈 상자가 늘지 않게", () => {
+    assert.equal(markup({ kind: "disabled" }), "");
+    assert.deepEqual(readQuoteArchiveFolderEntriesAnswer({ status: "disabled" }), { kind: "disabled" });
+  });
+
+  test("불러오는 중 — 「불러오는 중…」", () => {
+    const html = markup({ kind: "loading" });
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT), html);
+    assert.ok(html.includes("공유폴더"), html);
+  });
+
+  test("폴더가 아직 없으면 — 「아직 … 폴더가 없습니다」", () => {
+    const html = markup({ kind: "not-found" });
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT), html);
+    // 🔴 목록 자리가 서지 않는다.
+    assert.equal(html.includes("<ul"), false, html);
+  });
+
+  test("🔴 맞는 폴더가 여럿이면 — **목록도 폴더 이름도 내지 않는다**", () => {
+    const html = markup({ kind: "multiple" });
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_MULTIPLE_TEXT), html);
+    assert.equal(html.includes("<ul"), false, html);
+    // 어느 폴더인지 모르는 채로 내용을 보이면 남의 견적서 서류를 보일 수 있다.
+    assert.equal(html.includes("DSS 2026-089"), false, html);
+    assert.deepEqual(readQuoteArchiveFolderEntriesAnswer({ status: "multiple" }), { kind: "multiple" });
+  });
+
+  test("읽지 못했으면 — 「공유폴더를 읽지 못했습니다」와 서버가 준 짧은 사유", () => {
+    const html = markup({ kind: "failed", reason: "공유폴더에 연결할 수 없습니다(네트워크 · NAS 상태를 확인하세요)." });
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_FAILED_TEXT), html);
+    assert.ok(html.includes("공유폴더에 연결할 수 없습니다"), html);
+    assert.equal(html.includes("<ul"), false, html);
+  });
+
+  test("빈 폴더 — 「폴더가 비어 있습니다」", () => {
+    const html = markup(foundState());
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT), html);
+    assert.equal(html.includes("<ul"), false, html);
+  });
+
+  test("목록 — 줄마다 이름 · 크기 · 수정시각, 폴더는 폴더 표시", () => {
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0 },
+          { name: "견적서.pdf", isDirectory: false, sizeBytes: 2048, modifiedAt: "2026-09-15T01:02:03.000Z" },
+        ],
+        totalCount: 2,
+      })
+    );
+    assert.ok(html.includes("사진"), html);
+    assert.ok(html.includes("견적서.pdf"), html);
+    assert.ok(html.includes("폴더"), html);
+    assert.ok(html.includes("2.0 KB"), html);
+    // 머리 오른쪽에 **루트 기준 상대 경로**가 보인다(절대 경로가 아니다).
+    assert.ok(html.includes("21. 2026 내자견적서"), html);
+  });
+
+  test("🔴 잘렸으면 「더 있습니다」를 세운다", () => {
+    const html = markup(foundState({ entries: [entry("1.pdf"), entry("2.pdf")], totalCount: 120, truncated: true }));
+    assert.ok(html.includes("더 있습니다"), html);
+    assert.ok(html.includes(quoteArchiveFolderTruncatedText(2, 120)), html);
+  });
+
+  test("그려지는 모든 상태에 print:hidden 이 있다", () => {
+    assert.ok(sectionSource.includes("print:hidden"), "print:hidden 이 없다");
+    const states: QuoteArchiveFolderSectionState[] = [
+      { kind: "loading" },
+      { kind: "not-found" },
+      { kind: "multiple" },
+      { kind: "failed", reason: "x" },
+      foundState(),
+      foundState({ entries: [entry("견적서.pdf")], totalCount: 1 }),
+    ];
+    for (const state of states) {
+      assert.ok(markup(state).includes("print:hidden"), state.kind);
+    }
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 줄의 [열기] — **허용 목록 확장자의 파일 줄에만** 생긴다
+ * ============================================================================
+ * 서버 렌더에서는 단추 자체가 안 그려지므로(도우미는 Windows PC 에만 설치된다) **어느 줄이
+ * 단추 자리를 갖는가**를 `data-quote-archive-folder-entry-openable` 표시로 본다. 단추가
+ * 실제로 어떻게 생겼는지와 누른 뒤의 흐름은 연락서 쪽 시험이 본다 — **같은 한 벌을 그대로
+ * 가져다 쓰기 때문이다**(아래 「베끼지 않았다」).
+ * ============================================================================
+ */
+
+describe("줄의 [열기] — 누를 수 있는 줄에만", () => {
+  test("🔴 폴더 줄 · 확장자 없는 이름 · 허용 목록 밖 확장자에는 단추 자리가 **없다**", () => {
+    for (const bad of [
+      { name: "사진", isDirectory: true, sizeBytes: 0 },
+      { name: "메모", isDirectory: false, sizeBytes: 10 },
+      { name: "설치.exe", isDirectory: false, sizeBytes: 10 },
+      { name: "바로가기.lnk", isDirectory: false, sizeBytes: 10 },
+      { name: "견적서.pdf.", isDirectory: false, sizeBytes: 10 },
+    ]) {
+      assert.equal(canOpenQuoteArchiveFolderEntry(bad), false, bad.name);
+      const html = markup(foundState({ entries: [bad], totalCount: 1 }));
+      assert.equal(html.includes("data-quote-archive-folder-entry-openable"), false, bad.name);
+    }
+  });
+
+  test("🔴 허용 목록 확장자의 파일 줄에만 단추 자리가 선다", () => {
+    for (const good of ["견적서.xlsx", "견적서.xls", "연락서.xlsm", "결재.PDF", "사진.jpg", "자료.zip"]) {
+      assert.equal(canOpenQuoteArchiveFolderEntry(entry(good)), true, good);
+    }
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0 },
+          entry("견적서.xlsx"),
+          entry("설치.exe"),
+          entry("결재.pdf"),
+        ],
+        totalCount: 4,
+      })
+    );
+    assert.equal(html.match(/data-quote-archive-folder-entry-openable/g)?.length, 2, html);
+  });
+
+  test("🔴 폴더 경로를 모르면(빈 글자) 아무 줄에도 단추 자리를 두지 않는다 — 주소를 지어내지 않는다", () => {
+    const html = markup(foundState({ relativePath: "", entries: [entry("견적서.xlsx")], totalCount: 1 }));
+    assert.equal(html.includes("data-quote-archive-folder-entry-openable"), false, html);
+  });
+
+  test("🔴 여는 장치를 **베끼지 않았다** — 연락서 쪽과 같은 한 벌을 그대로 쓴다", () => {
+    assert.ok(
+      sectionSource.includes('import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";'),
+      "줄의 [열기] 단추를 가져다 쓰지 않는다"
+    );
+    // 주소를 만드는 일 · 도우미를 감지하는 일을 이 파일이 다시 짜지 않는다.
+    for (const forbidden of ["dss-folder://", "iframe", "localStorage", "buildQuoteFolderFileLink", "watchFocusLoss"]) {
+      assert.equal(sectionCode.includes(forbidden), false, `여는 장치를 베꼈다: ${forbidden}`);
+    }
+    // 어느 줄에 단추를 그릴지는 순수 함수 하나가 정한다 — 화면이 확장자를 따로 세지 않는다.
+    assert.ok(sectionCode.includes("isOpenableQuoteFolderFileName"));
+    assert.equal(/\.endsWith\(/.test(sectionCode), false, "화면이 확장자를 제 손으로 센다");
+  });
+
+  test("🔴 [열기]를 누르면 **늘** 「설치 명령 복사」로 이끄는 줄이 함께 나온다", () => {
+    // 예전에 설치한 도우미는 파일 열기 주소를 받으면 조용히 끝난다(exit 2) — 화면은 그것을 알 수 없다.
+    assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("설치 명령 복사"));
+    assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("예전에 설치한 도우미는 파일 열기를 모릅니다"));
+  });
+
+  test("견적서 폴더 경로 + 파일 이름이 도우미 주소가 된다 — 되읽으면 같은 글자다", () => {
+    const relative = `${RELATIVE_PATH}/견적서.xlsx`;
+    const link = buildQuoteFolderFileLink(relative);
+    assert.ok(link !== null, "주소를 만들지 못했다");
+    assert.equal(parseQuoteFolderFileLink(link), relative);
+    // 허용 목록 밖은 주소가 만들어지지 않는다.
+    assert.equal(buildQuoteFolderFileLink(`${RELATIVE_PATH}/설치.exe`), null);
+  });
+});
+
+describe("통로를 부르는 길 — 던지지 않는다", () => {
+  test("주소 — 🔴 하위 폴더 칸이 없다", () => {
+    assert.equal(quoteArchiveFolderEntriesUrl("q-1"), "/api/quotes/q-1/archive-folder/entries");
+    assert.equal(quoteArchiveFolderEntriesUrl("a/b"), "/api/quotes/a%2Fb/archive-folder/entries");
+    assert.equal(sectionCode.includes("?path="), false, "하위 폴더로 내려가는 칸이 생겼다");
+  });
+
+  test("🔴 알려진 칸만 옮긴다 — 응답에 다른 칸이 끼어 있어도 화면까지 오지 않는다", () => {
+    const answer = readQuoteArchiveFolderEntriesAnswer({
+      status: "found",
+      relativePath: RELATIVE_PATH,
+      // 🔴 서버가 실수로 실어 보내도 화면 값에는 들어오지 않는다.
+      absolutePath: "/mnt/share/견적서",
+      root: "/mnt/share",
+      entries: [{ name: "견적서.xlsx", isDirectory: false, sizeBytes: 10, absolutePath: "/mnt/share/x" }],
+      totalCount: 1,
+      truncated: false,
+    });
+    assert.ok(answer !== null && answer.kind === "found");
+    if (answer === null || answer.kind !== "found") throw new Error("unreachable");
+    assert.deepEqual(Object.keys(answer).sort(), ["entries", "kind", "relativePath", "totalCount", "truncated"]);
+    assert.deepEqual(Object.keys(answer.entries[0]).sort(), ["isDirectory", "name", "sizeBytes"]);
+    assert.equal(JSON.stringify(answer).includes("/mnt/share"), false, JSON.stringify(answer));
+  });
+
+  test("모양이 다르면 null — 화면은 「읽지 못했습니다」가 된다", () => {
+    for (const bad of [null, "x", 1, [], { status: "뭔가" }]) {
+      assert.equal(readQuoteArchiveFolderEntriesAnswer(bad), null, JSON.stringify(bad));
+    }
+  });
+
+  test("🔴 네트워크가 끊겨도 던지지 않는다 — failed 한 상태로 끝난다", async () => {
+    const thrown = await loadQuoteArchiveFolderEntries("q-1", () => Promise.reject(new Error("끊김")));
+    assert.equal(thrown.kind, "failed");
+
+    const rejected = await loadQuoteArchiveFolderEntries("q-1", () =>
+      Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({ error: "권한이 없습니다.", code: "FORBIDDEN" }) })
+    );
+    assert.deepEqual(rejected, { kind: "failed", reason: "권한이 없습니다." });
+
+    const broken = await loadQuoteArchiveFolderEntries("q-1", () =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new Error("JSON 아님")) })
+    );
+    assert.equal(broken.kind, "failed");
+  });
+
+  test("성공 — 부르는 주소가 그 견적서의 것이고, 받은 상태를 그대로 쓴다", async () => {
+    const called: string[] = [];
+    const state = await loadQuoteArchiveFolderEntries("q-7", (url) => {
+      called.push(url);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            status: "found",
+            relativePath: RELATIVE_PATH,
+            entries: [{ name: "견적서.xlsx", isDirectory: false, sizeBytes: 10 }],
+            totalCount: 1,
+            truncated: false,
+          }),
+      });
+    });
+    assert.deepEqual(called, ["/api/quotes/q-7/archive-folder/entries"]);
+    assert.equal(state.kind, "found");
+  });
+
+  test("줄의 곁말 — 폴더는 「폴더」, 파일은 크기", () => {
+    assert.equal(quoteArchiveFolderEntryMetaText({ name: "사진", isDirectory: true, sizeBytes: 0 }), "폴더");
+    assert.ok(quoteArchiveFolderEntryMetaText({ name: "a.pdf", isDirectory: false, sizeBytes: 2048 }).startsWith("2.0 KB"));
+  });
+});
+
+describe("자리 — 편집 화면의 어디에 붙었나", () => {
+  test("🔴 [폴더 열기] 결과 **아래**, 저장된 장에서만", () => {
+    assert.ok(
+      editFormSource.includes("{savedQuote && <QuoteArchiveFolderSection quoteId={savedQuote.id} />}"),
+      "편집 화면이 이 구역을 그리지 않는다"
+    );
+    // 머리의 [폴더 열기] · 그 결과보다 뒤다.
+    const at = editFormSource.indexOf("<QuoteArchiveFolderSection");
+    assert.ok(at > editFormSource.indexOf("<QuoteFolderOpenButton"), "구역이 [폴더 열기] 단추보다 앞에 있다");
+    assert.ok(at > editFormSource.indexOf("<QuoteFolderOpenNotice"), "구역이 [폴더 열기] 결과보다 앞에 있다");
+  });
+
+  test("🔴 [폴더 열기]를 **중복해서 만들지 않는다** — 머리에 이미 있다", () => {
+    for (const forbidden of ["QuoteFolderOpenButton", "runQuoteFolderOpen", "quote-folder-open"]) {
+      assert.equal(sectionCode.includes(forbidden), false, `구역이 [폴더 열기]를 또 만든다: ${forbidden}`);
+    }
+    // 편집 화면에는 [폴더 열기] 단추가 **하나뿐**이다.
+    assert.equal(editFormSource.match(/<QuoteFolderOpenButton/g)?.length, 1);
+  });
+
+  test("🔴 서버 컴포넌트에서 읽지 않는다 — 화면이 뜬 뒤 스스로 부른다", () => {
+    assert.ok(sectionSource.startsWith('"use client";'), "클라이언트 구역이 아니다");
+    assert.ok(sectionSource.includes("useEffect("), "화면이 뜬 뒤 부르지 않는다");
+    // 서버 액션 · server-only 사슬이 없다 — 그려 보는 시험이 그냥 돈다.
+    assert.equal(sectionSource.includes("server-only"), false);
+    assert.equal(sectionSource.includes('"use server"'), false);
+  });
+
+  test("기본 내보내기도 그려진다 — 처음에는 「불러오는 중…」", () => {
+    const html = renderToStaticMarkup(createElement(QuoteArchiveFolderSection, { quoteId: "q-1" }));
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT), html);
+  });
+});

@@ -87,6 +87,35 @@ export function compareShareFolderNames(a: string, b: string): number {
 }
 
 /**
+ * 목록에서 빼는 이름들 — 사람이 만든 것이 아니라 프로그램이 남긴 것이다.
+ * 대소문자를 접어서 본다(`Thumbs.db` · `thumbs.db` 가 같은 것).
+ */
+const PROGRAM_LEFTOVER_NAMES = new Set(["thumbs.db", "desktop.ini"]);
+
+/**
+ * 공유폴더 목록에서 이 줄을 **빼는가**.
+ *  · `~$…` — 엑셀 · 워드가 **열어 둔 동안** 만드는 잠금 파일이다. 사람이 파일을 닫으면
+ *    사라지므로 목록에 보이면 「이게 뭐죠」만 부른다.
+ *  · `Thumbs.db` · `desktop.ini` — 윈도우 탐색기가 남기는 것이다(대소문자를 접는다).
+ *  · 점으로 시작하는 이름 — 숨김 파일이다(NAS 는 리눅스라 `.DS_Store` · `.@__thumb` 가
+ *    실제로 쌓인다).
+ *
+ * 🔴 **한 벌로 둔다**(2026-10-06, 견적서 폴더 목록). 연락서 폴더 목록
+ * (storage/contact-folder-entries.ts)이 쓰던 규칙을 여기로 끌어냈다 — 베껴 적으면 나중에
+ * 한쪽만 고쳐져 두 서류함의 목록이 서로 다른 것을 숨기게 된다. 🔴 **연락서 쪽 동작은 한
+ * 글자도 바뀌지 않았다** — 저쪽의 isIgnoredContactFolderEntryName 이 이 함수를 그대로 부른다.
+ *
+ * 실측(2026-10-06): 견적서 2026 연도 폴더의 파일 342 개 가운데 **57 개가 찌꺼기**였고 거의
+ * 전부 `Thumbs.db` 였다 — 거르지 않으면 목록의 1/6 이 사람이 넣은 적 없는 줄이다.
+ */
+export function isIgnoredShareFolderEntryName(name: string): boolean {
+  if (typeof name !== "string") return false;
+  if (name.startsWith(".")) return true;
+  if (name.startsWith("~$")) return true;
+  return PROGRAM_LEFTOVER_NAMES.has(name.toLowerCase());
+}
+
+/**
  * 이미 있는 이름이 이 **열쇠로 시작하는가** — 다듬은 이름이 열쇠 그 자체이거나,
  * 열쇠 **바로 뒤가 공백**이어야 맞다.
  *

@@ -2,7 +2,7 @@ import "server-only";
 
 import path from "node:path";
 
-import { compareShareFolderNames } from "@/lib/domain/share-folder-naming";
+import { compareShareFolderNames, isIgnoredShareFolderEntryName } from "@/lib/domain/share-folder-naming";
 import {
   ShareFolderFailure,
   ShareFolderTimeout,
@@ -101,21 +101,17 @@ const OUTSIDE_ROOT_REASON = "읽으려는 폴더가 공유폴더 밖을 가리�
 /** 🔴 바로가기(정션 · 심볼릭 링크) · 없는 이름 · 숨은 이름이 모두 여기로 모인다. */
 const SUBFOLDER_MISSING_REASON = "들어가려는 하위 폴더를 찾을 수 없습니다(바로가기는 따라가지 않습니다).";
 
-/** 목록에서 빼는 이름들 — 사람이 만든 것이 아니라 프로그램이 남긴 것이다. */
-const PROGRAM_LEFTOVER_NAMES = new Set(["thumbs.db", "desktop.ini"]);
-
 /**
- * 이 줄을 목록에서 빼는가.
- *  · `~$…` — 엑셀 · 워드가 **열어 둔 동안** 만드는 잠금 파일이다. 사람이 파일을 닫으면
- *    사라지므로 목록에 보이면 「이게 뭐죠」만 부른다.
- *  · `Thumbs.db` · `desktop.ini` — 윈도우 탐색기가 남기는 것이다(대소문자를 접는다).
- *  · 점으로 시작하는 이름 — 숨김 파일이다(NAS 는 리눅스라 `.DS_Store` · `.@__thumb` 가
- *    실제로 쌓인다).
+ * 이 줄을 목록에서 빼는가 — `~$…`(엑셀 · 워드가 열어 둔 동안 만드는 잠금 파일) ·
+ * `Thumbs.db` · `desktop.ini`(탐색기가 남긴다) · 점으로 시작하는 숨김 이름.
+ *
+ * 🔴 **규칙 자체는 domain/share-folder-naming.ts 에 한 벌로 있다**(2026-10-06). 견적서 폴더
+ * 목록(storage/quote-archive-entries.ts)이 같은 규칙을 쓰게 되면서 끌어냈다 — 베껴 적으면
+ * 나중에 한쪽만 고쳐져 두 서류함이 서로 다른 것을 숨기게 된다. 🔴 **여기서 나가는 답은 한
+ * 글자도 바뀌지 않았다** — 부르는 쪽(이 모듈의 읽기 · 시험)은 이 이름을 그대로 쓴다.
  */
 export function isIgnoredContactFolderEntryName(name: string): boolean {
-  if (name.startsWith(".")) return true;
-  if (name.startsWith("~$")) return true;
-  return PROGRAM_LEFTOVER_NAMES.has(name.toLowerCase());
+  return isIgnoredShareFolderEntryName(name);
 }
 
 /** 폴더를 먼저, 그 안에서 이름순 — 탐색기와 같은 차례다. */
