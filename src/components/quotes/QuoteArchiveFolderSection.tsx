@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
+import ContactFolderPlaceOpenButton from "@/components/repair-cases/files/ContactFolderPlaceOpenButton";
 import { formatBytes } from "@/lib/domain/image-shrink";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
 
@@ -15,12 +16,14 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
  * 「파일 관리」 탭의 연락서 폴더 구역
  * (components/repair-cases/files/ContactFolderSection.tsx)을 본떴다.
  *
- * ── 🔴 **두 화면이 이 한 벌을 함께 쓴다** ────────────────────────────────
- *  · 수리 건 상세 「견적서」 탭 — 견적서 목록 **바로 아래**(사용자 결정 2026-10-06). 한
- *    수리 건에 견적서가 여러 장이라 **본 번호마다 한 구역**이 선다(폴더가 그 단위다 —
- *    quote-archive-folder-groups.ts). 그래서 `label`(본 번호)을 머리에 적어 가른다.
- *  · 견적서 편집 화면 — 머리의 [폴더 열기] 바로 아래. 그 견적서 하나뿐이라 `label` 이 없다.
- * 🔴 베껴 두 벌을 만들지 않는다 — 한쪽만 고쳐지는 날이 온다.
+ * ── 🔴 **서는 자리는 한 곳뿐이다** ───────────────────────────────────────
+ * 수리 건 상세 「견적서」 탭 — 견적서 목록 **바로 아래**(사용자 결정 2026-10-06). 한 수리
+ * 건에 견적서가 여러 장이라 **본 번호마다 한 구역**이 선다(폴더가 그 단위다 —
+ * quote-archive-folder-groups.ts). 그래서 `label`(본 번호)을 머리에 적어 가른다.
+ * 🔴 **견적서 편집 화면에는 세우지 않는다**(사용자 결정 2026-10-06 — 「견적서 수정에서는
+ * 공유폴더가 보이지 않아도 돼」). 한때 편집 화면에도 세웠다가 걷어냈다 — 편집 화면 **머리의
+ * 폴더 열기 단추는 그대로**이고, 걷어낸 것은 이 구역뿐이다. `label` 을 안 주면 머리가 그냥
+ * 「공유폴더」가 되는 길은 남겨 둔다(쓰는 데가 없어도 값싸고, 시험이 지키고 있다).
  *
  * ── 🔴 만들지도 올리지도 지우지도 않는다 — 읽고 여는 것뿐이다 ─────────────
  * 폴더를 만들지도, 파일을 올리지도, 지우지도 않는다. 🔴 **서버가 파일을 중계하는 길도
@@ -29,20 +32,26 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
  *  · 🔴 [열기]는 **허용 목록에 든 확장자의 파일 줄에만** 그린다 — 폴더 줄 · 확장자 없는
  *    이름 · 목록 밖 확장자(`.exe` 등)에는 **단추가 아예 없다**(isOpenableQuoteFolderFileName).
  *
- * ── 🔴 여는 장치는 **이미 있는 것을 그대로 쓴다** ────────────────────────
+ * ── 🔴 여는 장치는 **이미 있는 것을 그대로 쓴다** — 둘 다 연락서 쪽 한 벌 ──
  * 줄의 [열기] 단추와 그 뒤 흐름(숨은 iframe · 도우미 감지 · 「늘 설치로 이끌기」)은
  * 연락서 쪽이 쓰는 ContactFolderEntryOpenButton 을 **한 글자도 고치지 않고 가져다 쓴다.**
  * 그 단추가 받는 `folderName` 은 **공유폴더 루트 아래의 폴더 경로**라 여기서는 통로가 준
  * `연도 폴더/견적서 폴더` 를 그대로 넘기면 된다(도우미는 전부터 여러 마디 경로를 받는다).
+ * 구역 맨 아래의 [폴더 열기]도 마찬가지로 연락서 쪽 자리 열기 단추
+ * (ContactFolderPlaceOpenButton)를 **한 글자도 고치지 않고** 쓴다 — 그것이 받는 값도 같은
+ * `연도 폴더/견적서 폴더` 다. 옆 구역(QuoteArchiveProductFolderSection)이 이미 그 단추를
+ * 그렇게 쓰고 있어 **셋째 벌이 생기지 않는다.**
  * 베껴 두 벌을 만들면 반드시 한쪽만 고쳐진다 — 설치되는 도우미는 **PC 당 한 벌**이다.
  * 🔴 그 흐름이 늘 함께 내는 줄(「열리지 않으면 [설치 명령 복사]로 도우미를 다시 설치해
  * 주세요 — 예전에 설치한 도우미는 파일 열기를 모릅니다」)도 그대로 따라온다. 예전 도우미는
  * 파일 열기 주소를 받으면 조용히 끝나고(exit 2) 화면은 그것을 알 수 없기 때문이다.
+ * 🔴 **그 안내를 끄지 않는다** — 단추가 제 결과 줄로 함께 낸다.
  *
  * ── 🔴 하위 폴더로 들어가는 길이 **없다** ────────────────────────────────
  * 연락서 쪽에는 폴더 줄을 눌러 들어가는 길과 [위로]가 있지만 여기에는 **일부러 넣지
  * 않았다.** 실측(2026-10-06)에서 견적서 폴더 안의 하위 폴더는 **0 개**였다 — 평평하다.
- * 혹시 폴더가 하나 있으면 **폴더 한 줄**로만 보이고, 그 아래는 머리의 [폴더 열기]로 본다.
+ * 혹시 폴더가 하나 있으면 **폴더 한 줄**로만 보이고, 그 아래는 구역 맨 아래의 [폴더 열기]로
+ * 탐색기를 열어 본다.
  *
  * ── 🔴 서버 컴포넌트에서 읽지 않는다 ─────────────────────────────────────
  * 편집 화면이 뜰 때 공유폴더를 읽으면 **NAS 가 느리거나 꺼져 있는 날 편집 화면 자체가 안
@@ -53,12 +62,23 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
  * 공유폴더는 그때그때 달라지는 바깥 사정이라 종이에 남길 것이 아니다 — 바깥 틀에
  * `print:hidden` 을 건다.
  *
- * ── 🔴 [폴더 열기]를 여기에 또 만들지 않는다 ─────────────────────────────
- * 편집 화면 **머리에 이미 있다**(견적서 ④b — 자리는 머리 한 곳이라고 2026-09-16 에 정했다).
- * 같은 일을 하는 단추를 한 화면에 둘 두면 어느 쪽을 눌러야 하는지가 문제가 된다. 이 구역은
- * **보여 주기와 줄마다의 [열기]**까지만 한다. 🔴 그 단추를 부르는 원본이 편집 화면과 제
- * 파일뿐이라는 것을 quote-folder-open-screens.test.ts 가 저장소 전체를 훑어 못 박고 있다 —
- * 이 파일에는 그 이름이 주석에도 들어오지 않는다.
+ * ── 🔴 구역 맨 아래의 [폴더 열기] — **새로 만든 것이 아니다** ────────────
+ * 사용자 지시 2026-10-06: 「견적서 탭의 공유폴더 구역에 [폴더 열기] 단추를 만든다」. 목록만
+ * 보여서는 폴더 안의 다른 것을 손댈 수 없어 결국 탐색기를 따로 열게 된다.
+ *  · 🔴 **`found` 이고 폴더 경로를 받았을 때만 그린다.** `not-found` · `multiple` ·
+ *    `disabled` · `failed` · 불러오는 중에는 **열 자리가 없다** — 단추를 그리지 않는다.
+ *    (`multiple` 은 더욱이 **어느 폴더인지 모른다** — 아무 폴더나 열어 주면 안 된다.)
+ *  · 자리는 **구역 맨 아래**다 — 연락서 쪽 공유폴더 구역이 목록 아래에 세우는 것과 같은 결
+ *    (components/repair-cases/files/ContactFolderSection.tsx). 잘렸을 때 나오는 곁말
+ *    (「나머지는 [폴더 열기]로 보세요」)이 가리키는 단추가 바로 이것이다.
+ *  · 🔴 Windows 가 아니면 단추가 **스스로** 안 그려지고, 인쇄에도 안 찍힌다 — 가져다 쓰는
+ *    단추가 이미 그렇게 한다. 이 파일이 그 판단을 다시 쓰지 않는다.
+ * 🔴 **견적서 편집 화면 머리의 폴더 열기 단추 한 벌은 여기에 들어오지 않는다**(견적서 ④b —
+ * 자리는 머리 한 곳이라고 2026-09-16 에 정했다). 그것은 **견적서 id** 로 서버에 폴더를 묻고
+ * [위치 복사] · [설치 명령 복사]까지 내미는 다른 물건이고, 그것을 부르는 원본이 편집 화면과
+ * 제 파일뿐이라는 것을 quote-folder-open-screens.test.ts 가 저장소 전체를 훑어 못 박고 있다 —
+ * **이 파일에는 그 이름이 주석에도 들어오지 않는다.** 여기서 쓰는 것은 **루트 기준 상대
+ * 경로**를 받아 그 자리를 여는 연락서 쪽 단추다(통로가 그 경로를 이미 준다).
  *
  * ── 상태별로 무엇을 보이는가 ─────────────────────────────────────────────
  *  · `disabled`  → 🔴 **구역 자체를 그리지 않는다**(설정이 없는 환경에서 빈 상자가 늘지 않게)
@@ -70,6 +90,7 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
  *                   모르는데 내용을 보이면 남의 견적서 서류를 보일 수 있다)
  *  · `failed`    → 「공유폴더를 읽지 못했습니다」(warning) + 서버가 준 짧은 사유
  * 🔴 어느 문장에도 **경로를 적지 않는다** — 폴더 이름은 찾았을 때만, 머리 오른쪽에 보인다.
+ * 🔴 맨 아래 [폴더 열기]는 **`found` + 경로가 있을 때만** 선다(위의 「새로 만든 것이 아니다」).
  *
  * 설정이 꺼진 환경에서는 처음 한 번 「불러오는 중…」이 스쳤다가 구역이 사라진다. 서버가
  * 미리 알려 주지 않는 한 피할 수 없고, 꺼진 환경은 개발 PC 뿐이라 그대로 둔다.
@@ -261,6 +282,17 @@ export function canOpenQuoteArchiveFolderEntry(entry: QuoteArchiveFolderEntryVie
   return !entry.isDirectory && isOpenableQuoteFolderFileName(entry.name);
 }
 
+/**
+ * 🔴 **열 수 있는 폴더 경로** — 찾았고 통로가 경로를 줬을 때만 글자가 있고, 아니면 빈 글자다.
+ * 줄의 [열기]와 구역 맨 아래의 [폴더 열기]가 **이 하나**를 함께 본다 — 두 군데에서 따로
+ * 판단하면 한쪽만 고쳐지는 날이 온다. 빈 글자면 **둘 다 그리지 않는다**: `not-found` ·
+ * `multiple`(어느 폴더인지 모른다) · `disabled` · `failed` · 불러오는 중에는 열 자리가 없고,
+ * 주소를 지어내서도 안 된다.
+ */
+export function quoteArchiveFolderOpenPath(state: QuoteArchiveFolderSectionState): string {
+  return state.kind === "found" ? state.relativePath : "";
+}
+
 const ENTRY_NAME_CLASS = "min-w-0 break-all text-left text-sm text-zinc-700 dark:text-zinc-300";
 const MUTED_CLASS = "text-sm text-zinc-500 dark:text-zinc-400";
 const WARNING_CLASS = "text-sm font-medium text-amber-700 dark:text-amber-400";
@@ -315,7 +347,8 @@ export function QuoteArchiveFolderSectionView({
 }) {
   if (state.kind === "disabled") return null;
 
-  const relativePath = state.kind === "found" ? state.relativePath : "";
+  // 🔴 줄의 [열기]와 맨 아래 [폴더 열기]가 **같은 하나**를 본다. 빈 글자면 둘 다 안 그린다.
+  const relativePath = quoteArchiveFolderOpenPath(state);
   const title = quoteArchiveFolderSectionTitle(label);
 
   return (
@@ -364,6 +397,16 @@ export function QuoteArchiveFolderSectionView({
             )}
           </div>
         ))}
+
+      {/*
+        🔴 **폴더를 찾았을 때만** 선다 — 못 찾았거나(not-found) 여럿이거나(multiple) 설정이
+        꺼져 있거나(disabled) 읽다 실패했으면 **열 자리가 없다.** 빈 폴더에는 그대로 선다
+        (폴더는 있다 — 거기에 파일을 넣으러 연다).
+        🔴 여는 장치는 연락서 쪽 자리 열기 단추 한 벌이다 — Windows 가 아니면 스스로 아무것도
+        그리지 않고, 「열리지 않으면 [설치 명령 복사]로 도우미를 다시 설치해 주세요」 안내도
+        그 단추가 제 결과 줄로 함께 낸다. 이 파일이 끄지 않는다.
+      */}
+      {relativePath !== "" && <ContactFolderPlaceOpenButton relativePath={relativePath} />}
     </section>
   );
 }

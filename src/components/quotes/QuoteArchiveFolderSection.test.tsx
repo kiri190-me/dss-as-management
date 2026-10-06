@@ -19,6 +19,7 @@ import QuoteArchiveFolderSection, {
   loadQuoteArchiveFolderEntries,
   quoteArchiveFolderEntriesUrl,
   quoteArchiveFolderEntryMetaText,
+  quoteArchiveFolderOpenPath,
   quoteArchiveFolderTruncatedText,
   readQuoteArchiveFolderEntriesAnswer,
   type QuoteArchiveFolderSectionState,
@@ -235,6 +236,91 @@ describe("줄의 [열기] — 누를 수 있는 줄에만", () => {
   });
 });
 
+/*
+ * ============================================================================
+ * 🔴 구역 맨 아래의 [폴더 열기] — **폴더를 찾았을 때만** (사용자 지시 2026-10-06)
+ * ============================================================================
+ * 「견적서 탭의 공유폴더 구역에 [폴더 열기] 단추를 만든다」. 단추 자체는 연락서 쪽 **자리
+ * 열기 단추 한 벌**을 그대로 쓰므로(ContactFolderPlaceOpenButton) 눌렀을 때의 흐름 ·
+ * Windows 판단 · 「설치 명령 복사」 안내는 그쪽 시험이 본다. 여기서는 **언제 서고 언제 서지
+ * 않는가**를 순수 함수 하나(quoteArchiveFolderOpenPath)로 보고, **베끼지 않았다**는 것을
+ * 원본 글자로 본다.
+ * ============================================================================
+ */
+describe("구역 맨 아래의 [폴더 열기] — 열 자리가 있을 때만", () => {
+  test("🔴 폴더를 찾았으면 선다 — 줄의 [열기]와 **같은 경로**를 쥔다", () => {
+    assert.equal(quoteArchiveFolderOpenPath(foundState()), RELATIVE_PATH);
+    assert.equal(
+      quoteArchiveFolderOpenPath(foundState({ entries: [entry("견적서.xlsx")], totalCount: 1 })),
+      RELATIVE_PATH
+    );
+    // 🔴 빈 폴더에도 선다 — 폴더는 있다(거기에 파일을 넣으러 연다).
+    assert.equal(quoteArchiveFolderOpenPath(foundState({ entries: [], totalCount: 0 })), RELATIVE_PATH);
+  });
+
+  test("🔴 not-found · multiple · disabled · failed · 불러오는 중에는 **안 선다**", () => {
+    for (const state of [
+      { kind: "not-found" },
+      // 어느 폴더인지 모르는 채로 아무 폴더나 열어 주면 안 된다.
+      { kind: "multiple" },
+      { kind: "disabled" },
+      { kind: "failed", reason: "공유폴더에 연결할 수 없습니다" },
+      { kind: "loading" },
+    ] satisfies QuoteArchiveFolderSectionState[]) {
+      assert.equal(quoteArchiveFolderOpenPath(state), "", state.kind);
+    }
+    // disabled 는 구역 자체가 없으니 단추가 설 자리도 없다.
+    assert.equal(markup({ kind: "disabled" }), "");
+  });
+
+  test("🔴 폴더 경로를 모르면(빈 글자) 안 선다 — 주소를 지어내지 않는다", () => {
+    assert.equal(quoteArchiveFolderOpenPath(foundState({ relativePath: "" })), "");
+  });
+
+  test("🔴 판단이 **한 자리**에만 있다 — 줄의 [열기]도 같은 함수를 본다", () => {
+    assert.ok(sectionCode.includes("const relativePath = quoteArchiveFolderOpenPath(state);"), sectionCode);
+    assert.ok(sectionCode.includes("<EntryList entries={state.entries} relativePath={relativePath} />"));
+    assert.ok(
+      sectionCode.includes('{relativePath !== "" && <ContactFolderPlaceOpenButton relativePath={relativePath} />}'),
+      sectionCode.slice(sectionCode.indexOf("ContactFolderPlaceOpenButton relativePath"))
+    );
+  });
+
+  test("🔴 여는 장치를 **베끼지 않았다** — 연락서 쪽 자리 열기 단추 한 벌을 그대로 쓴다", () => {
+    assert.ok(
+      sectionSource.includes(
+        'import ContactFolderPlaceOpenButton from "@/components/repair-cases/files/ContactFolderPlaceOpenButton";'
+      ),
+      "자리 열기 단추를 가져다 쓰지 않는다"
+    );
+    // 🔴 단추를 새로 만들지 않았다 — 이 구역에는 제 <button> 이 하나도 없다.
+    assert.equal(/<button/.test(sectionCode), false, "구역이 제 단추를 그린다");
+    assert.equal(sectionCode.includes("runContactFolderPlaceOpen"), false, "여는 흐름을 직접 부른다");
+  });
+
+  test("🔴 「다시 설치해 주세요」 안내를 끄지 않는다 — 단추가 제 결과 줄로 함께 낸다", () => {
+    // 그 줄을 끄는 칸(그런 것이 있다면) 을 넘기지 않는다 — 넘기는 값은 경로 하나뿐이다.
+    const call = sectionCode.slice(sectionCode.indexOf("<ContactFolderPlaceOpenButton"));
+    assert.ok(call.startsWith("<ContactFolderPlaceOpenButton relativePath={relativePath} />"), call.slice(0, 200));
+  });
+
+  test("자리 — 목록 **아래**, 구역 맨 끝(연락서 쪽 공유폴더 구역과 같은 결)", () => {
+    const list = sectionCode.indexOf("<EntryList");
+    const open = sectionCode.indexOf("<ContactFolderPlaceOpenButton");
+    const close = sectionCode.indexOf("</section>");
+    assert.ok(list >= 0 && list < open && open < close, "단추가 목록 위이거나 구역 밖이다");
+  });
+
+  test("인쇄에는 안 찍힌다 — 바깥 틀과 단추 둘 다 print:hidden", () => {
+    assert.ok(markup(foundState({ entries: [entry("견적서.xlsx")], totalCount: 1 })).includes("print:hidden"));
+    const buttonSource = readFileSync(
+      path.join(srcDir, "components", "repair-cases", "files", "ContactFolderPlaceOpenButton.tsx"),
+      "utf8"
+    );
+    assert.ok(buttonSource.includes("print:hidden"), "자리 열기 단추가 인쇄에 찍힌다");
+  });
+});
+
 describe("통로를 부르는 길 — 던지지 않는다", () => {
   test("주소 — 🔴 하위 폴더 칸이 없다", () => {
     assert.equal(quoteArchiveFolderEntriesUrl("q-1"), "/api/quotes/q-1/archive-folder/entries");
@@ -392,24 +478,45 @@ describe("자리 — 수리 건 「견적서」 탭", () => {
   });
 });
 
-describe("자리 — 견적서 편집 화면에도 그대로 둔다", () => {
-  test("🔴 [폴더 열기] 결과 **아래**, 저장된 장에서만", () => {
-    assert.ok(
-      editFormSource.includes("{savedQuote && <QuoteArchiveFolderSection quoteId={savedQuote.id} />}"),
-      "편집 화면이 이 구역을 그리지 않는다"
+/*
+ * ============================================================================
+ * 🔴 자리 — **견적서 편집 화면에는 세우지 않는다** (사용자 결정 2026-10-06)
+ * ============================================================================
+ * 「견적서 수정에서는 공유폴더가 보이지 않아도 돼」. 한때 편집 화면에도 세웠다가(커밋
+ * 38cb51e) 걷어냈다. 🔴 **머리의 [폴더 열기] 단추는 그대로**다 — 사용자가 없애라고 한 것은
+ * 공유폴더 **구역**이고, 그 단추는 전부터(2026-09-16) 있던 것이다.
+ * ============================================================================
+ */
+describe("자리 — 견적서 편집 화면에는 세우지 않는다", () => {
+  test("🔴 편집 화면에 공유폴더 구역이 **없다** — 그리지도 가져오지도 않는다", () => {
+    assert.equal(editFormSource.includes("<QuoteArchiveFolderSection"), false, "편집 화면에 구역이 남아 있다");
+    assert.equal(
+      editFormSource.includes("QuoteArchiveFolderSection"),
+      false,
+      "편집 화면이 아직 구역을 가져온다(쓰지 않는 import)"
     );
-    // 머리의 [폴더 열기] · 그 결과보다 뒤다.
-    const at = editFormSource.indexOf("<QuoteArchiveFolderSection");
-    assert.ok(at > editFormSource.indexOf("<QuoteFolderOpenButton"), "구역이 [폴더 열기] 단추보다 앞에 있다");
-    assert.ok(at > editFormSource.indexOf("<QuoteFolderOpenNotice"), "구역이 [폴더 열기] 결과보다 앞에 있다");
+    // 통로를 직접 부르는 길도 없다 — 구역만 떼고 fetch 를 남겨 두지 않았다.
+    assert.equal(editFormSource.includes("archive-folder"), false, "편집 화면이 공유폴더 통로를 부른다");
   });
 
-  test("🔴 [폴더 열기]를 **중복해서 만들지 않는다** — 머리에 이미 있다", () => {
+  test("🔴 머리의 [폴더 열기] 단추는 **그대로 하나** 남아 있다", () => {
+    assert.equal(editFormSource.match(/<QuoteFolderOpenButton/g)?.length, 1, "머리 단추가 사라졌거나 둘이 됐다");
+    assert.ok(editFormSource.includes("<QuoteFolderOpenNotice"), "[폴더 열기] 결과 줄이 사라졌다");
+    assert.ok(
+      editFormSource.includes(
+        'import QuoteFolderOpenButton, { QuoteFolderOpenNotice } from "@/components/quotes/QuoteFolderOpenButton";'
+      ),
+      "머리 단추를 가져오지 않는다"
+    );
+  });
+
+  test("🔴 머리 단추 한 벌을 이 구역이 **베끼지 않았다** — 저장소 울타리와 같은 뜻", () => {
+    // 그 단추를 부르는 원본은 편집 화면과 제 파일뿐이다(quote-folder-open-screens.test.ts).
     for (const forbidden of ["QuoteFolderOpenButton", "runQuoteFolderOpen", "quote-folder-open"]) {
-      assert.equal(sectionCode.includes(forbidden), false, `구역이 [폴더 열기]를 또 만든다: ${forbidden}`);
+      assert.equal(sectionCode.includes(forbidden), false, `구역이 머리 단추 한 벌을 가져다 쓴다: ${forbidden}`);
     }
-    // 편집 화면에는 [폴더 열기] 단추가 **하나뿐**이다.
-    assert.equal(editFormSource.match(/<QuoteFolderOpenButton/g)?.length, 1);
+    // 🔴 주석에도 들어오면 안 된다 — 울타리 시험은 글자로 훑는다.
+    assert.equal(sectionSource.includes("QuoteFolderOpenButton"), false, "주석에 그 이름이 들어왔다");
   });
 
   test("🔴 서버 컴포넌트에서 읽지 않는다 — 화면이 뜬 뒤 스스로 부른다", () => {
