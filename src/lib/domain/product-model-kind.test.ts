@@ -8,8 +8,9 @@ import {
   PRODUCT_MODEL_KIND_UNSPECIFIED_LABEL,
   isProductModelKind,
   productModelKindLabel,
+  productModelKindOfWorkflowKind,
 } from "./product-model-kind";
-import { workflowKindLabels } from "./workflow-kind";
+import { WORKFLOW_KIND_CODES, workflowKindLabels, workflowKindOf } from "./workflow-kind";
 
 /**
  * ============================================================================
@@ -106,6 +107,72 @@ describe("제품 종류 이름표 — 한 자리로 모았다", () => {
     // 모델 마스터 쪽은 영문 표기다 — 두 축의 글자가 서로 달라야 섞이지 않았다는 뜻이다.
     assert.notEqual(PRODUCT_MODEL_KIND_LABELS.MATCHER, workflowKindLabels.MATCHER);
     assert.notEqual(PRODUCT_MODEL_KIND_LABELS.GENERATOR, workflowKindLabels.GENERATOR);
+  });
+});
+
+describe("🔴 워크플로 종류 → 제품 종류 — 옮기는 자리는 한 곳뿐이다 (2026-10-06)", () => {
+  test("워크플로 축의 값 셋이 전부 제품 종류로 옮겨진다", () => {
+    assert.equal(productModelKindOfWorkflowKind("GENERATOR"), "GENERATOR");
+    assert.equal(productModelKindOfWorkflowKind("MATCHER"), "MATCHER");
+    assert.equal(productModelKindOfWorkflowKind("TOTAL_CONTROLLER"), "TOTAL_CONTROLLER");
+  });
+
+  test("🔴 어느 워크플로 종류를 넣어도 제품 종류 목록 안의 값이 나온다", () => {
+    for (const kind of WORKFLOW_KIND_CODES) {
+      const mapped = productModelKindOfWorkflowKind(kind);
+      assert.equal(isProductModelKind(mapped), true, `${kind} → ${mapped} 가 종류 목록 밖이다`);
+    }
+    // 두 축의 값 **집합**이 지금 같다. 한쪽에 값이 하나 느는 날 이 줄이 걸려야 한다 —
+    // 그때 위 표(PRODUCT_MODEL_KIND_BY_WORKFLOW_KIND)에 짝을 적어야 컴파일이 된다.
+    assert.deepEqual([...WORKFLOW_KIND_CODES].sort(), [...PRODUCT_MODEL_KIND_CODES].sort());
+  });
+
+  test("🔴 접수 건의 종류는 **접수할 때 고른 워크플로**에서 나온다 — 모델 마스터가 아니다", () => {
+    // 접수 폼이 만들 수 있는 workflowType 전부가 제 종류로 풀린다.
+    const cases: readonly [string, string][] = [
+      ["PAID_GENERATOR", "GENERATOR"],
+      ["WARRANTY_GENERATOR", "GENERATOR"],
+      ["PENDING_GENERATOR", "GENERATOR"],
+      ["PAID_MATCHER", "MATCHER"],
+      ["WARRANTY_MATCHER", "MATCHER"],
+      ["PENDING_MATCHER", "MATCHER"],
+      ["PAID_TOTAL_CONTROLLER", "TOTAL_CONTROLLER"],
+      ["WARRANTY_TOTAL_CONTROLLER", "TOTAL_CONTROLLER"],
+      ["PENDING_TOTAL_CONTROLLER", "TOTAL_CONTROLLER"],
+    ];
+    for (const [workflowType, expected] of cases) {
+      assert.equal(
+        productModelKindOfWorkflowKind(workflowKindOf(workflowType as Parameters<typeof workflowKindOf>[0])),
+        expected,
+        workflowType
+      );
+    }
+  });
+
+  test("🔴 함정 — 레거시 `MATCHER` 는 제너레이터로 읽힌다", () => {
+    // DB enum 에 유·무상 접미사 없는 레거시 값이 아직 남아 있고, workflowKindOf 는
+    // 접미사를 못 찾으면 조용히 GENERATOR 를 돌려준다. 새 접수에는 그 값이 들어오지
+    // 않지만(접수 검증이 허용 목록으로 막는다), 지난 건을 이 길에 태우면 매쳐 건에
+    // 제너레이터 서류가 붙는다 — 소급 적용을 하지 않는 까닭 가운데 하나다.
+    assert.equal(workflowKindOf("MATCHER" as Parameters<typeof workflowKindOf>[0]), "GENERATOR");
+    assert.equal(
+      productModelKindOfWorkflowKind(workflowKindOf("MATCHER" as Parameters<typeof workflowKindOf>[0])),
+      "GENERATOR"
+    );
+  });
+
+  test("🔴 옮기는 자리가 저장소에 하나뿐이다 — 부르는 쪽이 제 손으로 캐스팅하지 않는다", () => {
+    const home = code(read("src/lib/domain/product-model-kind.ts"));
+    assert.ok(home.includes("productModelKindOfWorkflowKind"), "옮기는 함수가 사라졌다");
+    // 종류 공통 서류를 고르는 자리(접수 서비스)는 이 함수를 거친다 — `as ProductModelKind`
+    // 같은 바꿔치기를 제 손으로 적으면 한쪽 축에 값이 느는 날 조용히 틀린다.
+    const intake = code(read("src/lib/server/services/create-repair-case.ts"));
+    assert.ok(intake.includes("productModelKindOfWorkflowKind("), "접수 서비스가 옮기는 함수를 쓰지 않는다");
+    assert.equal(
+      intake.includes("as ProductModelKind"),
+      false,
+      "🔴 접수 서비스가 종류 축을 제 손으로 바꿔치기한다"
+    );
   });
 });
 

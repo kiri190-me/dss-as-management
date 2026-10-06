@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type { AttachmentCategory } from "@/lib/domain/attachment-category";
 import {
+  CONTACT_FOLDER_COMMON_FOLDER_NAME,
   CONTACT_FOLDER_DATA_FOLDER_NAME,
   CONTACT_FOLDER_MAX_NUMBERED_COPIES,
   contactFolderCategoryFolderName,
@@ -49,6 +50,12 @@ import {
  * 🔴 **2026-10-05 조각 11** — 만드는 폴더가 셋이 되었다(연락서 폴더 · 그 안의 `DATA` ·
  * 올린 파일의 분류 폴더). 그래도 **`mkdir` 을 부르는 자리는 `makeOneFolder` 하나**다 —
  * 세 자리에 흩어 적으면 `recursive` 가 하나에만 붙는 날이 온다.
+ *
+ * 🔴 **2026-10-06** — 꽂는 자리가 하나 늘었다: 접수할 때 그 수리품 **종류의 공통 서류**가
+ * 들어가는 `공통/` 이다(copyIntoContactFolderCommonFolder). 🔴 **새로 만든 길이 아니라
+ * 하위 폴더 이름만 다른 위임 한 줄**이다 — `DATA` 와 똑같이 `copyInto` 를 지나므로
+ * 덮어쓰지 않기 · 내용이 같으면 안 쓰기 · NFC/NFD · 번호 비켜 가기가 한 글자도 다르지
+ * 않고, 폴더를 만드는 자리도 여전히 `makeOneFolder` 하나다.
  *
  * 🔴 **`unlink` · `rm` · `rmdir` · `rename` · `truncate` · `cp` 는 여전히 한 글자도 없다.**
  * 앱은 사람의 서류함에서 파일을 지우지도 옮기지도 않는다. 그 사실을
@@ -325,19 +332,22 @@ async function makeDataFolder(root: string, folder: string): Promise<void> {
  * 폴더를 만드는 일은 사람이 [폴더 만들고 열기]를 누르는 그때뿐이고(조각 5), 올리기가
  * 지나가며 폴더를 늘리면 폴더가 늘어난 것을 사람이 볼 기회가 없다.
  *
- * ── 🔴 하위 폴더 안에 꽂는다 (조각 11 · 12) ─────────────────────────────
+ * ── 🔴 하위 폴더 안에 꽂는다 (조각 11 · 12 · 2026-10-06) ────────────────
  * 연락서 폴더 **바로 아래**가 아니라 한 겹 안에 꽂는다. 어느 겹인지는 **부르는 길**이
- * 정하고, 지금 둘이다:
+ * 정하고, 지금 셋이다:
  *
  *  · **올리기**(조각 11) — `연락서폴더/인수 사진/…` 처럼 그 파일의 **분류 이름표**로 된
  *    하위 폴더. 이름은 사람이 보는 한글 이름표다(`INTAKE_PHOTO` 가 아니라 `인수 사진` —
  *    domain/contact-folder-naming.ts 의 contactFolderCategoryFolderName).
  *  · **[DATA에 저장]**(조각 12) — `연락서폴더/DATA/…`. 사람이 측정 자료를 넣는 자리이고,
  *    분류와 무관하다(copyIntoContactFolderDataFolder).
+ *  · **접수할 때의 종류 공통 서류**(2026-10-06) — `연락서폴더/공통/…`. 그 수리품 종류에
+ *    늘 붙는 서류(기본 파라미터 표 · 점검표)가 접수와 함께 들어온다
+ *    (copyIntoContactFolderCommonFolder).
  *
  * 🔴 **규율은 한 벌이다** — 없으면 만들고 · 있으면 쓰고 · 같은 이름의 **파일**이 막고
- * 있으면 연락서 폴더 바로 아래로 비켜 가 그 사실을 결과에 싣는다. 두 길에 따로 적지
- * 않는다(아래 openCategoryFolder 하나가 둘을 다 한다).
+ * 있으면 연락서 폴더 바로 아래로 비켜 가 그 사실을 결과에 싣는다. 세 길에 따로 적지
+ * 않는다(아래 openCategoryFolder 하나가 셋을 다 한다).
  *
  *  · 🔴 **쓰는 분류만 그때그때 만든다** — 분류 전부를 미리 만들지 않는다.
  *  · 🔴 **없으면 만들고 있으면 쓴다**(`EEXIST` 면 그대로 진행).
@@ -481,9 +491,49 @@ export async function copyIntoContactFolderDataFolder(
   return copyInto({ ...input, subfolderName: CONTACT_FOLDER_DATA_FOLDER_NAME });
 }
 
+export type CopyIntoContactFolderCommonInput = {
+  /** 🔴 찾는 열쇠. 이것 하나로만 찾는다(앞의 두 길과 같다). */
+  intakeNumber: string;
+  /** 꽂을 이름의 바탕 — 종류 공통 서류의 **원본 파일 이름**이다. */
+  originalFileName: string;
+  /** 꽂을 내용. 시스템 창고에 들어 있는 그 서류의 바이트다. */
+  bytes: Uint8Array;
+  /** 공유폴더 루트. 주지 않으면 설정을 읽는다. 시험에서는 임시 폴더를 준다. */
+  root?: string | null;
+  /** 폴더를 **찾는** 동안의 기다리기 상한. 시험에서만 바꾼다. */
+  timeoutMs?: number;
+};
+
 /**
- * 두 길(올리기 사본 · [DATA에 저장])이 **함께 쓰는 몸통**. 꽂을 하위 폴더 이름만 다르다.
- * **던지지 않는다.**
+ * ============================================================================
+ * 🔴 **종류 공통 서류** — 접수할 때 그 수리품 종류의 서류를 `공통` 에 꽂는다 (2026-10-06)
+ * ============================================================================
+ * 종류(제너레이터 · 매쳐 · T/C)마다 늘 같은 서류가 붙는다 — 기본 파라미터 표 · 점검표
+ * 같은 것이다. 사람이 건마다 탐색기로 복사해 넣던 일을 **접수가 대신한다.**
+ *
+ * [DATA에 저장](바로 위)과 **다른 것은 꽂는 자리 하나뿐**이다:
+ *  · 🔴 `DATA` 가 아니라 **`공통`** 이다(대괄호 없이 — domain 쪽 상수 주석 참조).
+ *  · 🔴 **없으면 만든다.** `DATA` 와 같은 규율이다 — 우리가 이름까지 정해 둔 자리이고,
+ *    만드는 때도 사람이 접수 단추를 누른 그때다.
+ *  · 🔴 그래도 **연락서 폴더 자체는 만들지 않는다** — 없으면 `no-folder` 다. 접수 흐름은
+ *    폴더를 먼저 만들고(createContactFolder) 그 결과가 `created` · `found` 일 때만
+ *    여기로 온다.
+ *  · 🔴 **빈 `공통` 을 만들지 않는 일은 부르는 쪽의 몫**이다 — 서류가 0 장이면 이 함수를
+ *    아예 부르지 않는다(한 번이라도 부르면 폴더가 선다).
+ *
+ * 덮어쓰지 않기 · 내용이 같으면 쓰지 않기 · NFC/NFD · 번호 비켜 가기는 **한 글자도
+ * 다르지 않다**(같은 put 을 지난다). 그래서 같은 건에 여러 번 불려도 안전하다.
+ * ============================================================================
+ */
+export async function copyIntoContactFolderCommonFolder(
+  input: CopyIntoContactFolderCommonInput
+): Promise<ContactFolderCopy> {
+  return copyInto({ ...input, subfolderName: CONTACT_FOLDER_COMMON_FOLDER_NAME });
+}
+
+/**
+ * 세 길(올리기 사본 · [DATA에 저장] · 종류 공통 서류)이 **함께 쓰는 몸통**. 꽂을 하위
+ * 폴더 이름만 다르다. **던지지 않는다.**
  */
 async function copyInto(input: {
   intakeNumber: string;

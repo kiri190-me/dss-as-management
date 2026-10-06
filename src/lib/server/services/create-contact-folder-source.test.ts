@@ -21,6 +21,11 @@ import { describe, test } from "node:test";
  * 폴더를 만드는 일 자체(인수번호로 먼저 찾기 · 루트를 안 만들기)는
  * lib/storage/contact-folder-create.test.ts 가, 지우기 금지는
  * lib/storage/contact-folder-archive-source.test.ts 가 원본으로 본다.
+ *
+ * ── 🔴 2026-10-06 — 그 바로 뒤에 **종류 공통 서류 꽂기**가 붙었다 ────────
+ * 아래 둘째 describe 가 같은 규율로 그 자리를 본다(EXCEL_IMPORT 제외 · 트랜잭션 바깥 ·
+ * 접수를 뒤집지 않음 · 폴더 만들기와 서로 모름 · 로그에 이름과 경로 없음). 꽂기 동작
+ * 자체는 lib/storage/contact-folder-common-copy.test.ts 가 임시 폴더에서 본다.
  * ============================================================================
  */
 
@@ -187,5 +192,165 @@ describe("접수 때 연락서 폴더 — 끼운 자리", () => {
     const body = folder.slice(folder.indexOf("export async function createContactFolderForIntake("));
     assert.equal(/\bthrow\b/.test(body), false, "후처리 모듈이 던진다");
     assert.ok(body.includes("} catch {"), "예상 못 한 오류를 잡는 자리가 없다");
+  });
+});
+
+/*
+ * ============================================================================
+ * 접수 때 **종류 공통 서류** 꽂기 — 끼운 자리를 소스로 지킨다 (2026-10-06)
+ * ============================================================================
+ * 위 조각 7 과 같은 까닭으로 여기서 직접 부르지 않는다(세션 · DB · 디스크가 있어야
+ * 한다). 실제 동작은 db 목록의 intake-kind-common-files.integration.test.ts 가 시험
+ * DB 와 mkdtemp 임시 폴더에서 보고, 꽂기 자체는
+ * lib/storage/contact-folder-common-copy.test.ts 가 본다.
+ * ============================================================================
+ */
+
+const commonCallIndex = intake.indexOf("await copyKindCommonFilesForIntake(");
+/** 공통 서류를 부르는 토막 — 「폴더가 준비됐는가」 문 하나. */
+const commonBlock = blockAt(intake, intake.lastIndexOf("if (contactFolderReady) {", commonCallIndex));
+/**
+ * 서류를 하나씩 꽂는 몸통(모듈 바깥 자리에 둔 도우미). 🔴 `blockAt` 을 쓰지 않는다 —
+ * 매개변수가 인라인 객체 타입이라 첫 중괄호가 그 타입이다. 다음 내보내는 함수까지 벤다.
+ */
+const commonHelper = intake.slice(
+  intake.indexOf("async function copyKindCommonFilesForIntake("),
+  intake.indexOf("export async function createRepairCaseWithIdempotency(")
+);
+/** 그 토막에서 로그로 나가는 부분만 — 부르는 인자(인수번호 등)와 섞이지 않게. */
+const commonLogs = commonBlock.slice(commonBlock.indexOf("console.error("));
+
+describe("접수 때 종류 공통 서류 — 끼운 자리", () => {
+  test("🔴 EXCEL_IMPORT 에서는 돌지 않는다 — 폴더 만들기와 같은 INTERACTIVE 문 안이다", () => {
+    assert.ok(commonCallIndex >= 0, "공통 서류를 꽂는 자리가 없다");
+    assert.equal(occurrences(intake, "await copyKindCommonFilesForIntake("), 1, "부르는 자리가 둘 이상이다");
+    // 🔴 폴더 만들기를 감싼 그 INTERACTIVE 문 안이다 — 이관 경로는 이 토막에 닿지 않는다.
+    assert.ok(folderBlock.includes("await copyKindCommonFilesForIntake("), "INTERACTIVE 문 밖에서 꽂는다");
+    assert.ok(folderCallIndex < commonCallIndex, "🔴 폴더를 만들기 전에 서류를 꽂는다");
+  });
+
+  test("🔴 폴더가 `created` · `found` 일 때만 꽂는다 — disabled · multiple · failed 면 아무것도 안 한다", () => {
+    assert.ok(
+      folderBlock.includes('contactFolderReady = folder.status === "created" || folder.status === "found";'),
+      "🔴 꽂을지 말지를 폴더 결과로 가르지 않는다"
+    );
+    assert.equal(occurrences(intake, "contactFolderReady = folder.status"), 1, "준비 여부를 여러 곳에서 적는다");
+    // 적는 자리는 셋뿐이다 — 처음 값 · 폴더 결과로 정하기 · 꽂기 전에 보기.
+    assert.equal(occurrences(intake, "contactFolderReady"), 3, "준비 여부를 다른 데서도 건드린다");
+    // 🔴 그 값이 거짓이면 꽂기를 **아예 부르지 않는다**(폴더가 없거나 어느 것인지 모른다).
+    assert.ok(commonBlock.includes("await copyKindCommonFilesForIntake("), "준비 여부를 보지 않고 꽂는다");
+    // 준비 여부를 처음에 거짓으로 두지 않으면 폴더 만들기가 던졌을 때 꽂게 된다.
+    assert.ok(intake.includes("let contactFolderReady = false;"), "🔴 준비 여부의 처음 값이 거짓이 아니다");
+  });
+
+  test("🔴 폴더 만들기와 **서로 모른다** — try 가 따로다", () => {
+    assert.ok(commonBlock.includes("try {"), "감싸지 않았다 — 무엇이든 새어 나오면 안 된다");
+    assert.ok(commonBlock.includes("} catch (commonError) {"), "catch 가 없다");
+    // 🔴 폴더 만들기의 catch 가 이것을 함께 삼키지 않는다.
+    assert.equal(
+      blockAt(intake, intake.indexOf("await createContactFolderForIntake(")).includes(
+        "copyKindCommonFilesForIntake"
+      ),
+      false,
+      "폴더 만들기 토막 안에서 서류를 꽂는다"
+    );
+    assert.equal(commonBlock.includes("createContactFolderForIntake"), false, "서류 토막이 폴더 만들기를 부른다");
+    assert.equal(commonBlock.includes("sendIntakeNotificationMail"), false, "서류 토막이 메일을 안다");
+  });
+
+  test("🔴 서류를 못 꽂아도 접수는 성공이다 — 그 토막에 return 도 throw 도 없다", () => {
+    assert.equal(/\breturn\b/.test(commonBlock), false, "🔴 서류 때문에 접수가 되돌아간다");
+    assert.equal(/\bthrow\b/.test(commonBlock), false, "던지면 접수가 실패로 뒤집힌다");
+    assert.equal(commonBlock.includes("ok: false"), false, "서류 때문에 접수를 실패로 적는다");
+    assert.equal(commonBlock.includes("markIdempotencyKeyFailed"), false, "서류 때문에 멱등 키를 실패로 적는다");
+    // 🔴 한 장이 실패해도 나머지를 계속 꽂는다 — 도우미가 멈추지 않는다.
+    assert.ok(commonHelper.includes("continue;"), "한 장이 실패하면 다음 장으로 가지 않는다");
+    assert.equal(/\bbreak\b/.test(commonHelper), false, "🔴 한 장이 실패하자 나머지를 버린다");
+    // 도우미도 던지지 않는다 — 센 수만 돌려준다.
+    assert.equal(/\bthrow\b/.test(commonHelper), false, "도우미가 던진다");
+  });
+
+  test("🔴 서류가 0 장이면 아무 일도 하지 않는다 — 빈 `공통` 폴더를 만들지 않는다", () => {
+    // 꽂기를 부르는 자리가 **목록을 도는 안**에만 있다. 밖에서 한 번이라도 부르면
+    // 서류가 없는 건에도 폴더가 선다(폴더는 꽂을 때 생긴다).
+    assert.equal(occurrences(commonHelper, "copyIntoContactFolderCommonFolder("), 1, "꽂는 자리가 하나가 아니다");
+    const loop = commonHelper.indexOf("for (const file of files) {");
+    assert.ok(loop >= 0, "목록을 도는 자리가 없다");
+    assert.ok(
+      commonHelper.indexOf("copyIntoContactFolderCommonFolder(") > loop,
+      "🔴 목록을 돌기 전에 꽂는다 — 0 장일 때도 폴더가 선다"
+    );
+    // 폴더 이름을 제 손으로 짓거나 만들지 않는다 — 만드는 규율은 storage 한 자리뿐이다.
+    for (const forbidden of ["공통", "contactFolderName(", "createContactFolder("]) {
+      assert.equal(commonHelper.includes(forbidden), false, `도우미가 ${forbidden} 를 직접 쓴다`);
+    }
+  });
+
+  test("🔴 종류는 **접수할 때 고른 워크플로**에서 나온다 — 모델 마스터의 칸이 아니다", () => {
+    assert.ok(
+      commonBlock.includes("kind: workflowKindOf(validation.data.workflowType),"),
+      "🔴 접수할 때 고른 종류를 쓰지 않는다"
+    );
+    // 두 축을 옮기는 일은 domain 의 함수 하나가 한다(제 손으로 캐스팅하지 않는다).
+    assert.ok(commonHelper.includes("productModelKindOfWorkflowKind("), "종류 축을 옮기는 함수를 쓰지 않는다");
+    assert.equal(intake.includes("as ProductModelKind"), false, "🔴 종류 축을 제 손으로 바꿔치기한다");
+    // 모델 마스터의 kind 를 읽는 길이 없다 — 비어 있는 모델이 많고, 같은 장비가 들어올
+    // 때마다 다른 종류로 다뤄진 사례가 있다.
+    for (const forbidden of ["productModels", "getProductModel", "productModelId"]) {
+      assert.equal(commonHelper.includes(forbidden), false, `도우미가 ${forbidden} 를 본다`);
+    }
+  });
+
+  test("🔴 감사는 **이번에 새로 꽂았을 때만** — 기존 기록 함수를 그대로 쓴다", () => {
+    assert.ok(intake.includes('from "@/lib/db/mutations/contact-folders"'), "조각 12 의 기록을 쓰지 않는다");
+    assert.equal(occurrences(commonHelper, "recordContactFolderFileSaved("), 1, "기록하는 자리가 둘 이상이다");
+    const copied = commonHelper.indexOf("tally.copied += 1;");
+    const audit = commonHelper.indexOf("await recordContactFolderFileSaved({");
+    const skipped = commonHelper.indexOf('if (placed.status !== "copied") {');
+    assert.ok(copied >= 0 && audit >= 0 && skipped >= 0);
+    assert.ok(skipped < copied, "🔴 `copied` 가 아닌 결과를 걸러 내기 전에 센다");
+    assert.ok(copied < audit, "센 뒤에 기록하지 않는다");
+    for (const field of ["actorUserId:", "repairCaseId:", "attachmentId:", "fileName:", "fileSize:"]) {
+      assert.ok(commonHelper.includes(field), `기록에 ${field} 가 없다`);
+    }
+    // 🔴 기록이 실패해도 접수가 멈추지 않는다 — 숨기지 않고 세어서 돌려준다.
+    assert.ok(commonHelper.includes("tally.auditFailed += 1;"), "기록 실패를 숨긴다");
+  });
+
+  test("🔴 로그에 파일 이름 · 폴더 이름 · 경로가 없다 — 센 수와 상태 코드뿐이다", () => {
+    assert.ok(commonLogs.includes("console.error("), "실패를 아무도 모르게 지나간다");
+    assert.ok(commonLogs.includes("repairCaseId: result.id,"), "어느 수리 건인지 적지 않는다");
+    for (const forbidden of [
+      "CONTACT_FOLDER_ARCHIVE_DIR",
+      "folderName",
+      "fileName",
+      "originalFileName",
+      "storedPath",
+      "intakeNumber",
+      "uncPath",
+      "relativePath",
+      "root",
+      "reason",
+    ]) {
+      assert.equal(commonLogs.includes(forbidden), false, `로그에 ${forbidden} 가 들어간다`);
+    }
+    assert.equal(commonLogs.includes("commonError.message"), false, "오류 message 를 로그에 적는다");
+    assert.equal(commonLogs.includes("String(commonError)"), false, "오류를 통째로 글자로 만든다");
+    assert.equal(/console\.error\([^;]*,\s*commonError\s*\)/.test(commonLogs), false, "오류 객체를 통째로 찍는다");
+    // 도우미는 스스로 로그를 남기지 않고, 밖으로 내보내는 칸에 이름 · 경로가 없다.
+    assert.equal(commonHelper.includes("console."), false, "도우미가 로그를 찍는다");
+    const tally = blockAt(intake, intake.indexOf("type IntakeCommonFileTally = {"));
+    for (const forbidden of ["fileName", "folderName", "storedPath", "reason"]) {
+      assert.equal(tally.includes(forbidden), false, `센 결과에 ${forbidden} 칸이 있다`);
+    }
+  });
+
+  test("🔴 접수 서비스가 파일시스템 · 트랜잭션을 제 손으로 열지 않는다", () => {
+    // 위 조각 7 시험과 같은 울타리다 — 서류 꽂기가 들어와도 느슨해지지 않았다.
+    for (const forbidden of ["db.transaction", "node:fs", "mkdir", "unlink", "rmdir", "rename("]) {
+      assert.equal(intake.includes(forbidden), false, `접수 서비스에 ${forbidden} 가 생겼다`);
+    }
+    // 바이트는 저장소 어댑터로 읽는다(경로를 제 손으로 잇지 않는다).
+    assert.ok(commonHelper.includes("getAttachmentStorage().read(file.storedPath)"), "저장소 어댑터를 쓰지 않는다");
   });
 });

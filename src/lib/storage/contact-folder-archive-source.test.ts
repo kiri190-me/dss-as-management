@@ -42,6 +42,14 @@ import { describe, test } from "node:test";
  *    짤 수 없어(갓 만든 빈 폴더다) **여기서 원본 글자로** 본다.
  *  · 🔴 **지우기 · 덮어쓰기 금지는 한 글자도 느슨해지지 않았다**(위 두 시험 그대로).
  *
+ * ── 🔴 2026-10-06 — 꽂는 자리가 **셋**이 되었다 ─────────────────────────
+ * 접수할 때 그 수리품 **종류의 공통 서류**가 들어가는 `공통/` 이 늘었다
+ * (copyIntoContactFolderCommonFolder). 🔴 **금지를 푼 것이 아니다** — 하위 폴더 이름만
+ * 다른 **위임 한 줄**이라 같은 `copyInto` · 같은 `put` · 같은 `makeOneFolder` 를 지난다.
+ * 그래서 아래 시험들의 숫자(여는 자리 하나 · mkdir 하나 · makeOneFolder 넷)가 **한 개도
+ * 늘지 않았고**, 늘어난 것은 내보내는 함수 목록 한 줄뿐이다.
+ * 🔴 **지우기 · 덮어쓰기 금지는 한 글자도 느슨해지지 않았다**(아래 두 시험 그대로).
+ *
  * 찾기 · 만들기 · 꽂기 동작 자체는 contact-folder-archive.test.ts ·
  * contact-folder-create.test.ts · contact-folder-copy.test.ts ·
  * contact-folder-subfolders.test.ts 가, 이름 · 대조 규칙은
@@ -209,13 +217,15 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
   });
 
   test("🔴 던지지 않는다 — 밖으로 나가는 것은 status 뿐이고, 사유에 경로를 담지 않는다", () => {
-    // 내보내는 함수는 다섯뿐이다 — 설정 읽기 · 찾기 · 만들기 · 꽂기(분류 폴더) ·
-    // 꽂기(`DATA` — 조각 12). 🔴 **지우기 · 이름 바꾸기를 내보내지 않는다.**
+    // 내보내는 함수는 여섯뿐이다 — 설정 읽기 · 찾기 · 만들기 · 꽂기(분류 폴더) ·
+    // 꽂기(`DATA` — 조각 12) · 꽂기(`공통` — 2026-10-06).
+    // 🔴 **지우기 · 이름 바꾸기를 내보내지 않는다.**
     const exported = [...source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)]
       .map((match) => match[1])
       .sort();
     assert.deepEqual(exported, [
       "copyIntoContactFolder",
+      "copyIntoContactFolderCommonFolder",
       "copyIntoContactFolderDataFolder",
       "createContactFolder",
       "findContactFolder",

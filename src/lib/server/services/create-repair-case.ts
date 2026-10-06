@@ -7,12 +7,17 @@ import {
   markIdempotencyKeyFailed,
   markIdempotencyKeySucceeded,
 } from "@/lib/db/mutations/idempotency-keys";
+import { recordContactFolderFileSaved } from "@/lib/db/mutations/contact-folders";
 import { createRepairCase, type LegacyImportMetadata } from "@/lib/db/mutations/repair-cases";
+import { listAttachmentsForProductModelKind } from "@/lib/db/queries/product-model-kind-attachments";
 import { createContactFolderForIntake } from "./create-contact-folder";
 import { sendIntakeNotificationMail } from "./send-intake-mail";
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
+import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind";
 import type { Role } from "@/lib/domain/types";
-import { WORKFLOW_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
+import { WORKFLOW_KIND_CODES, workflowKindOf, type WorkflowKind } from "@/lib/domain/workflow-kind";
+import { copyIntoContactFolderCommonFolder } from "@/lib/storage/contact-folder-archive";
+import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
 import {
   isValidIdempotencyKey,
   validateCreateRepairCaseInput,
@@ -120,6 +125,120 @@ function validLegacyImportState(input: NonNullable<Parameters<typeof createRepai
     && validLegacyImportMetadata(input.metadata)
     && (input.productModelKindForNew === undefined
       || (WORKFLOW_KIND_CODES as readonly string[]).includes(input.productModelKindForNew));
+}
+
+/**
+ * ============================================================================
+ * 접수한 건의 연락서 폴더에 **그 종류의 공통 서류**를 꽂는다 (2026-10-06)
+ * ============================================================================
+ * 종류(제너레이터 · 매쳐 · T/C)마다 늘 같은 서류가 붙는다 — 기본 파라미터 표 · 점검표
+ * 같은 것이다. 사람이 건마다 탐색기로 복사해 넣던 일을 접수가 대신한다.
+ *
+ *  · 🔴 **어느 종류인가는 접수할 때 사람이 고른 것**으로 정한다(workflowType → 워크플로
+ *    종류 → 제품 종류). 제품 모델 마스터의 `kind` 를 쓰지 않는 까닭과 두 축을 옮기는
+ *    규율은 domain/product-model-kind.ts 의 productModelKindOfWorkflowKind 머리말에 있다.
+ *  · 🔴 **서류가 0 장이면 아무 일도 하지 않는다** — 빈 `공통/` 폴더가 서지 않게, 한 번도
+ *    꽂기를 부르지 않는다(폴더는 꽂을 때 생긴다).
+ *  · 🔴 **한 장이 실패해도 나머지를 계속** 꽂는다. 원본을 못 읽는 서류 하나 때문에 그 건의
+ *    다른 서류가 통째로 빠지면 안 된다.
+ *  · 🔴 **ZIP 으로 묶지 않는다** — 낱개로 꽂는다([DATA에 저장] 통로와 같은 판단: 공유폴더에
+ *    ZIP 을 두면 사람이 탐색기에서 또 풀어야 한다).
+ *  · 🔴 **감사는 `copied` 일 때만** 남긴다 — 같은 내용이 이미 있어 쓰지 않은 경우
+ *    (`unchanged`)에는 공유폴더에 새로 생긴 것이 없다(db/mutations/contact-folders.ts 의
+ *    recordContactFolderFileSaved 머리말과 같은 규율). 기록이 실패해도 **숨기지 않고**
+ *    세어서 돌려준다 — 접수는 그것 때문에 멈추지 않는다.
+ *  · 🔴 **던지지 않는다.** 밖으로 나가는 것은 센 수뿐이고, 🔴 **파일 이름 · 폴더 이름 ·
+ *    경로 · 오류 메시지를 담는 칸이 없다**(부르는 쪽이 그대로 로그에 적는다).
+ * ============================================================================
+ */
+type IntakeCommonFileTally = {
+  /** 이번에 새로 꽂은 수. */
+  copied: number;
+  /** 같은 내용이 이미 있어 건너뛴 수(`unchanged`). */
+  unchanged: number;
+  /** 꽂지 못한 수 — 원본을 못 읽었거나 꽂기가 실패했다. */
+  failed: number;
+  /** 꽂기는 했는데 감사 기록을 남기지 못한 수. */
+  auditFailed: number;
+  /** 🔴 마지막으로 꽂지 못한 까닭의 **상태 코드**. 사유 문장도 경로도 아니다. */
+  lastFailureStatus: string | null;
+};
+
+/** 저장된 원본을 못 읽었다 — 꽂기 모듈의 상태 코드와 섞이지 않는 이름이다. */
+const COMMON_FILE_READ_FAILED = "read-failed";
+/** 꽂기는 성공했는데 감사 기록이 안 남았다. */
+const COMMON_FILE_AUDIT_FAILED = "audit-failed";
+
+async function copyKindCommonFilesForIntake(input: {
+  repairCaseId: string;
+  /** 🔴 연락서 폴더를 찾는 열쇠는 인수번호 하나뿐이다. */
+  intakeNumber: string;
+  /** 접수할 때 사람이 고른 워크플로의 종류. */
+  kind: WorkflowKind;
+  /** 🔴 접수한 사람. 이 길에도 시스템이 혼자 하는 경우가 없다. */
+  actorUserId: string;
+}): Promise<IntakeCommonFileTally> {
+  const tally: IntakeCommonFileTally = {
+    copied: 0,
+    unchanged: 0,
+    failed: 0,
+    auditFailed: 0,
+    lastFailureStatus: null,
+  };
+
+  // 🔴 **안 지워진** 서류만 온다(휴지통은 빠진다) — 조회가 부분 인덱스를 타는 모양
+  //    그대로 `is_deleted = false` 를 걸고 있다.
+  const files = await listAttachmentsForProductModelKind(productModelKindOfWorkflowKind(input.kind));
+
+  for (const file of files) {
+    // 🔴 바이너리는 DB 에 없다 — 디스크(UPLOADS_DIR)에서 읽는다. stored_path 는 그 루트
+    //    기준 상대 경로이고, 읽는 모양은 [DATA에 저장] 통로와 같다.
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(
+        await new Response(await getAttachmentStorage().read(file.storedPath)).arrayBuffer()
+      );
+    } catch {
+      // 🔴 잡은 오류를 들여다보지 않는다 — message 에 전체 경로가 들어 있다.
+      tally.failed += 1;
+      tally.lastFailureStatus = COMMON_FILE_READ_FAILED;
+      continue;
+    }
+
+    const placed = await copyIntoContactFolderCommonFolder({
+      intakeNumber: input.intakeNumber,
+      originalFileName: file.originalFileName,
+      bytes,
+    });
+
+    if (placed.status === "unchanged") {
+      tally.unchanged += 1;
+      continue;
+    }
+    if (placed.status !== "copied") {
+      tally.failed += 1;
+      tally.lastFailureStatus = placed.status;
+      continue;
+    }
+
+    tally.copied += 1;
+    try {
+      await recordContactFolderFileSaved({
+        actorUserId: input.actorUserId,
+        repairCaseId: input.repairCaseId,
+        attachmentId: file.id,
+        fileName: placed.fileName,
+        // 🔴 적어 둔 칸 값이 아니라 **실제로 쓴 바이트 수**다([DATA에 저장] 통로와 같다).
+        fileSize: bytes.byteLength,
+      });
+    } catch {
+      // 공유폴더에는 이미 들어갔다 — 🔴 지우지 않는다. 숨기지도 않는다.
+      tally.auditFailed += 1;
+      tally.lastFailureStatus = COMMON_FILE_AUDIT_FAILED;
+    }
+  }
+
+  return tally;
 }
 
 /**
@@ -285,11 +404,20 @@ export async function createRepairCaseWithIdempotency(input: {
        *   적지 않는다(고객사 · S/N 이 들어 있다).
        */
       if (input.logContext === "INTERACTIVE") {
+        /*
+         * 🔴 폴더가 **이번에 생겼거나 이미 있었는가.** 아래 공통 서류 꽂기가 이 값만
+         *   본다 — `disabled`(기능이 꺼져 있다) · `multiple`(어느 폴더인지 앱이 고르지
+         *   않는다) · `failed`(폴더가 없다)일 때는 꽂을 자리가 없거나 어디인지 모른다.
+         *   `audit-failed` 도 꽂지 않는다: 디스크에 폴더는 있지만 그 순간 DB 쓰기가
+         *   실패한 것이라, 꽂아 봐야 이어지는 감사 기록도 같이 실패할 자리다.
+         */
+        let contactFolderReady = false;
         try {
           const folder = await createContactFolderForIntake({
             repairCaseId: result.id,
             actorUserId: actor.userId,
           });
+          contactFolderReady = folder.status === "created" || folder.status === "found";
           // 만들었다 · 이미 있었다 · 꺼져 있다는 정상 상태라 시끄럽게 굴지 않는다.
           // 나머지(인수번호가 같은 폴더가 여럿 · 기록 실패 · 실패)는 사람이 손을 대야 한다.
           if (folder.status !== "created" && folder.status !== "found" && folder.status !== "disabled") {
@@ -305,6 +433,53 @@ export async function createRepairCaseWithIdempotency(input: {
             repairCaseId: result.id,
             name: folderError instanceof Error ? folderError.name : typeof folderError,
           });
+        }
+
+        /*
+         * 종류 공통 서류 — **폴더를 만든 바로 뒤에, 독립된 try 로.** (2026-10-06)
+         *
+         * ■ 폴더 만들기와 서로 모른다
+         *   try 가 따로다. 폴더 만들기가 실패해도 거기서 끝나야지 접수가 흔들리면 안
+         *   되고, 서류 꽂기가 실패해도 폴더 만들기의 결과가 뒤집히면 안 된다(위 메일과
+         *   폴더 만들기가 서로 모르는 것과 같은 규율이다).
+         *
+         * ■ 🔴 `created` 만이 아니라 `found` 에서도 꽂는다
+         *   꽂기는 **덮어쓰지 않고, 내용이 같으면 아예 쓰지 않는다**(`unchanged`). 그래서
+         *   여러 번 불려도 같은 서류가 쌓이지 않는다. 그리고 사람이 수기 인수번호로 폴더를
+         *   미리 만들어 둔 건도 **그 종류의 서류를 받아야 한다** — 그 건만 서류가 없으면
+         *   왜 없는지 아무도 설명할 수 없다.
+         *
+         * ■ 🔴 로그에 적는 것은 센 수와 상태 코드뿐이다
+         *   파일 이름 · 폴더 이름 · 경로 · 오류 메시지를 적지 않는다(폴더 이름에는 고객사와
+         *   S/N 이, fs 오류 메시지에는 경로가 들어 있다). 전부 잘 들어간 날은 조용하다 —
+         *   꽂은 한 장마다 감사 기록이 남으므로 로그로 또 알릴 것이 없다.
+         */
+        if (contactFolderReady) {
+          try {
+            const common = await copyKindCommonFilesForIntake({
+              repairCaseId: result.id,
+              intakeNumber: result.intakeNumber,
+              // 🔴 접수할 때 사람이 고른 종류다 — 제품 모델 마스터의 칸이 아니다.
+              kind: workflowKindOf(validation.data.workflowType),
+              actorUserId: actor.userId,
+            });
+            if (common.failed > 0 || common.auditFailed > 0) {
+              console.error("접수 때 종류 공통 서류를 다 넣지 못했습니다", {
+                repairCaseId: result.id,
+                copied: common.copied,
+                unchanged: common.unchanged,
+                failed: common.failed,
+                auditFailed: common.auditFailed,
+                status: common.lastFailureStatus,
+              });
+            }
+          } catch (commonError) {
+            // 🔴 여기서도 오류의 message 를 적지 않는다.
+            console.error("접수 때 종류 공통 서류에서 예상치 못한 오류", {
+              repairCaseId: result.id,
+              name: commonError instanceof Error ? commonError.name : typeof commonError,
+            });
+          }
         }
       }
     } else {
