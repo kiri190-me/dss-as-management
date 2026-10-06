@@ -85,6 +85,11 @@ import {
   type QuoteExcelFieldChange,
   type QuoteExcelFormValues,
 } from "@/components/quotes/quote-excel-autofill";
+import {
+  QUOTE_NUMBER_SUGGESTION_HINT_TEXT,
+  fetchSuggestedQuoteNumber,
+  fillQuoteNumberIfEmpty,
+} from "@/components/quotes/quote-next-number";
 import { scopeLinesFilledFromTemplate, startNewQuoteLines } from "@/components/quotes/quote-new-start";
 import {
   countQuoteLinesForExcelOnly,
@@ -648,6 +653,15 @@ export default function QuoteEditForm({
   );
 
   const [quoteNumber, setQuoteNumber] = useState(quote?.quoteNumber ?? "");
+  /**
+   * 통로에서 받아 번호 칸에 미리 적어 둔 **제안**(2026-10-06 — quote-next-number.ts). 받지
+   * 못했으면(설정 없음 · 느림 · 권한 없음 · 네트워크) null 이고 칸은 지금까지처럼 비어 있다.
+   *
+   * 🔴 값을 **강제하는 데 쓰지 않는다** — 쓰이는 곳은 아래 곁말 한 줄뿐이다. 칸의 값이 이
+   * 제안과 같을 때만 「고치셔도 됩니다」를 보이고, 사람이 한 글자라도 고치면 저절로 사라진다.
+   * 저장 쪽은 이 값을 보지 않는다(견주어 거절하면 승인된 결정이 코드로 뒤집힌다).
+   */
+  const [suggestedQuoteNumber, setSuggestedQuoteNumber] = useState<string | null>(null);
   const [kind, setKind] = useState<QuoteKind>(quote?.kind ?? newQuoteStart?.kind ?? "DOMESTIC");
   const [quoteDate, setQuoteDate] = useState(quote?.quoteDate ?? defaultQuoteDate ?? todayInSeoul());
   /**
@@ -1479,6 +1493,44 @@ export default function QuoteEditForm({
   }, [quote]);
 
   /**
+   * ============================================================================
+   * 발행번호 칸에 다음 번호를 미리 적어 둔다 (2026-10-06)
+   * ============================================================================
+   * 🔴 **새 견적서에서만, 한 번만** 묻는다(GET /api/quotes/next-number — quote-next-number.ts).
+   * 고치기(quote !== null)에는 **묻지 않는다** — 그 장에는 이미 번호가 있다.
+   *
+   * 🔴 **빈 칸일 때만 채운다.** 넣는 길이 `setQuoteNumber((current) => …)` 인 것이 요점이다 —
+   * 받아 오는 사이에 사람이 치기 시작했으면 그 값이 `current` 로 들어와 **그대로 남는다**
+   * (fillQuoteNumberIfEmpty). 효과가 시작될 때의 값으로 재면 그 글자를 덮는다.
+   *
+   * 🔴 **못 받으면 아무 일도 없다.** 공유폴더 설정이 없거나 · 느리거나 · 권한이 없거나 ·
+   * 네트워크가 끊기면 null 이 오고, 칸은 지금까지처럼 빈 칸이다. **오류 상자를 띄우지 않는다** —
+   * 번호를 못 받은 것은 사람이 할 일을 막지 않는다(손으로 적으면 된다).
+   *
+   * 🔴 번호 칸은 **여전히 자유 입력**이다 — 받은 값으로 칸을 잠그지 않고, 저장할 때 이 값과
+   * 견주지도 않는다(승인된 결정 — lib/storage/quote-number-suggestion.ts 머리말).
+   *
+   * 효과 본문에서 곧바로 부르지 않고 한 틱 미루는 까닭 · 깃발을 타이머 안에서 세우는 까닭은
+   * 위 두 효과와 같다(자동 불러오기의 머리말).
+   * ============================================================================
+   */
+  const didAskNextQuoteNumber = useRef(false);
+  useEffect(() => {
+    if (quote !== null) return;
+    const timer = setTimeout(() => {
+      if (didAskNextQuoteNumber.current) return;
+      didAskNextQuoteNumber.current = true;
+      void (async () => {
+        const suggested = await fetchSuggestedQuoteNumber();
+        if (suggested === null) return;
+        setQuoteNumber((current) => fillQuoteNumberIfEmpty(current, suggested));
+        setSuggestedQuoteNumber(suggested);
+      })();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [quote]);
+
+  /**
    * 출고 부품을 부품 줄에 담는다. 하나든 여럿이든 이 함수 하나를 쓴다 —
    * 일괄 담기가 하나씩 담기를 여러 번 부르면 setItems 가 여러 번 돌아 "빈 첫 줄"
    * 처리가 중간 상태에 걸린다.
@@ -2268,6 +2320,7 @@ export default function QuoteEditForm({
           </select>
         </Field>
         <Field label="발행번호" error={fieldErrors.quoteNumber} required>
+          {/* 🔴 자유 입력 그대로다 — 제안을 받아도 읽기 전용으로 만들지 않는다(2026-10-06). */}
           <input
             value={quoteNumber}
             onChange={(e) => setQuoteNumber(e.target.value)}
@@ -2275,6 +2328,13 @@ export default function QuoteEditForm({
             className={editInputClass}
             disabled={disabled}
           />
+          {/* 미리 적어 둔 번호라는 것과 고쳐도 된다는 것을 알린다. 사람이 한 글자라도 고치면
+              값이 제안과 달라져 이 줄은 저절로 사라진다. */}
+          {suggestedQuoteNumber !== null && quoteNumber === suggestedQuoteNumber && (
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {QUOTE_NUMBER_SUGGESTION_HINT_TEXT}
+            </p>
+          )}
         </Field>
         <Field label="발행일자" error={fieldErrors.quoteDate} required>
           <input

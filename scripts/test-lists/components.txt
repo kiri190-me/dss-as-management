@@ -100,6 +100,12 @@ src/components/quotes/quote-excel-autofill-screens.test.tsx
 src/components/quotes/quote-folder-open.test.ts
 src/components/quotes/QuoteFolderOpenButton.test.tsx
 src/components/quotes/quote-folder-open-screens.test.ts
+# [새 견적서]의 발행번호 칸에 **다음 번호를 미리 적어 둔다**(2026-10-06) — 🔴 제안이지
+# 채번이 아니다(승인된 결정): 새 견적서에서만 · 한 번만 묻고 · 빈 칸일 때만 채우고 ·
+# 못 받으면 조용히 빈 칸이다(오류 상자 없음) · 칸은 여전히 자유 입력이고 저장 쪽은 이 값을
+# 보지 않는다. 제안값을 내는 쪽은 unit 목록의 lib/storage/quote-number-suggestion.test.ts 와
+# app/api/quotes/next-number/route-source.test.ts 가 본다.
+src/components/quotes/quote-next-number.test.ts
 # 견적서 편집 화면의 **공유폴더 구역**(2026-10-06) — 그 견적서 폴더 안에 무엇이 있는지 보여
 # 주고 줄마다 [열기]를 낸다. 🔴 `disabled` 면 구역을 아예 안 그린다 · 여럿이면 목록도 폴더
 # 이름도 안 낸다 · [열기]는 **허용 목록 확장자의 파일 줄에만** 생긴다(폴더 · 확장자 없는
