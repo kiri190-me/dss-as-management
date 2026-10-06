@@ -1,4 +1,3 @@
-import DatabaseApprovalHeaderSummary from "./DatabaseApprovalHeaderSummary";
 import DatabaseRepairInspectionCard from "./DatabaseRepairInspectionCard";
 import DatabaseFinalShipmentCard from "./DatabaseFinalShipmentCard";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
@@ -64,7 +63,16 @@ export default function DatabaseApprovalScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <DatabaseApprovalHeaderSummary resolved={resolved} />
+      {/* 🔴 머리말 상자를 여기서 그리지 않는다 (2026-10-06 사용자 지시) — 탭 위의
+          머리 카드(DetailHeader)가 인수번호 · 현재 상태 · 담당 엔지니어 · DB 배지를
+          이미 한 줄로 보여 주고 있어 같은 정보가 두 상자에 나왔다.
+
+          🔴 **안내문은 중복이 아니라서 남긴다.** 머리 카드가 하지 않는 말이고, 이
+          화면에서만 뜻이 있다. 상자가 사라졌으니 두 승인 카드 바로 위로 올려, 카드를
+          누르기 전에 읽히게 둔다. */}
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        이 승인 기록은 데이터베이스에 저장되며, 서버에서 권한과 요청 상태를 재검증합니다.
+      </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DatabaseRepairInspectionCard

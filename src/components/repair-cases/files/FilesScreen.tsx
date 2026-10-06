@@ -72,7 +72,6 @@ import { ResponsiveList } from "@/components/common/responsive-list";
 import ContactFolderSection from "./ContactFolderSection";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
-import FilesHeaderSummary from "./FilesHeaderSummary";
 import RestoreAttachmentDialog from "./RestoreAttachmentDialog";
 import SimulationNoticeDialog from "./SimulationNoticeDialog";
 import StorageDisclaimer from "./StorageDisclaimer";
@@ -688,8 +687,9 @@ function DatabaseFilesScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <FilesHeaderSummary resolved={effective} />
-
+      {/* 🔴 머리말 상자를 여기서 그리지 않는다 (2026-10-06 사용자 지시) — 탭 위의
+          머리 카드(DetailHeader)와 겹쳐 같은 정보가 두 상자에 나왔다. 그 상자에만
+          있던 고객사 · 모델은 카드 한 줄로 옮겨 갔다. */}
       {statusMessage && (
         <p
           role={statusMessage.type === "error" ? "alert" : "status"}
@@ -1303,7 +1303,8 @@ function DemoFilesScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <FilesHeaderSummary resolved={effective} />
+      {/* 🔴 머리말 상자를 여기서 그리지 않는다 — 위 형제 화면과 같은 이유다
+          (탭 위의 머리 카드와 겹친다). */}
       <StorageDisclaimer />
 
       {attachmentStore.isMalformed && (
