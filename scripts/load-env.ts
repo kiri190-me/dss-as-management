@@ -41,4 +41,17 @@ if (process.env.DSS_DB_TEST_MODE === "1" || isIntegrationTestProcess) {
   // 하나만 있어도 사내 서류함에 폴더가 생긴다.
   // 폴더가 필요한 시험은 mkdtemp 임시 폴더를 `root`(`archiveRoot`)로 **직접** 넣어 쓴다.
   delete process.env.QUOTE_ARCHIVE_DIR;
+
+  // 🔴 「업체별 수리품현황」 공유폴더는 앞의 둘보다 더 위험하다. 두 가지 까닭이다.
+  //   ① **루트를 넣어 줄 인자가 없다.** 견적서 · 연락서는 임시 폴더를 `root` 로 넣어
+  //      피해 갈 수 있지만, services/customer-portal-export.ts 는
+  //      resolveCustomerPortalArchiveRoot() 를 **스스로** 불러 그 자리에서
+  //      CUSTOMER_PORTAL_ARCHIVE_DIR 을 읽는다 — 임시 폴더로 돌릴 통로가 아예 없다.
+  //      그래서 설정이 남아 있으면 부르는 순간 **무조건** 사내 서류함에 쓴다.
+  //   ② 🔴 **덮어쓴다.** 견적서는 이름이 겹치면 ` (2)` 로 비켜 가지만, 이쪽은 같은 이름이
+  //      있으면 그 위에 쓴다(storage/customer-portal-archive.ts 머리말, 사용자 결정
+  //      2026-09-30) — 사람이 손으로 고쳐 둔 현황표가 시험 자료로 지워질 수 있다.
+  //      저장 뒤에는 날짜가 다른 옛 파일을 `OLD` 로 옮기기까지 한다.
+  // 지금은 이 길을 지나는 DB 시험이 하나도 없다. 하나만 생겨도 늦으므로 미리 막아 둔다.
+  delete process.env.CUSTOMER_PORTAL_ARCHIVE_DIR;
 }

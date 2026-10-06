@@ -141,6 +141,28 @@ async function createEligibleFlowchart(repairCaseId: string, title: string, extr
   return { id: created.id, repairCaseId, deletedAt: deleted.deletedAt };
 }
 
+/**
+ * Postgres 오류를 오류 사슬에서 찾아낸다 — queries/shipment-approval-routes.integration.test.ts
+ * 와 queries/inventory-part-issue-requests.integration.test.ts 의 같은 이름 함수와 똑같다.
+ * drizzle 이 던지는 바깥 오류의 message 에는 실패한 SQL 문만 들어 있고, 원래
+ * PostgresError 는 `.cause` 에 달려 있다 — 그래서 assert.rejects 의 정규식 형태로는
+ * 오류 코드를 영영 맞춰 볼 수 없다. 사슬을 따라 들어가 code 를 꺼낸다.
+ */
+function findPgError(err: unknown): { code: string; constraint: string } | null {
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+    const candidate = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (typeof candidate.code === "string") {
+      return {
+        code: candidate.code,
+        constraint: typeof candidate.constraint_name === "string" ? candidate.constraint_name : "",
+      };
+    }
+    current = candidate.cause;
+  }
+  return null;
+}
+
 before(async () => {
   const [superAdmin] = await db
     .select({ id: users.id })
@@ -297,7 +319,23 @@ describe("purgeExpiredRepairCaseFlowchart", () => {
   });
 
   test("purgeExpiredRepairCaseFlowchart throws for a malformed id (proves the sweep's per-row try/catch has something real to catch)", async () => {
-    await assert.rejects(() => purgeExpiredRepairCaseFlowchart("not-a-real-uuid"));
+    // A bare assert.rejects() would pass for ANY rejection — including a typo
+    // in this very test (wrong import, missing table) that never reaches
+    // Postgres at all. Pin the actual reason: the malformed id goes straight
+    // into the row-locking SELECT, and Postgres rejects it while casting to
+    // uuid (22P02, invalid_text_representation). That is precisely the kind
+    // of genuine DB failure runFlowchartPurgeSweep's per-row try/catch has to
+    // survive, so the outcome this test guards is the error's *origin*, not
+    // merely that something was thrown.
+    await assert.rejects(
+      () => purgeExpiredRepairCaseFlowchart("not-a-real-uuid"),
+      (err: unknown) => {
+        const pgError = findPgError(err);
+        assert.ok(pgError, `PostgresError 를 찾지 못했다: ${String(err)}`);
+        assert.equal(pgError.code, "22P02", `uuid 형식 오류(22P02)가 아니라 ${pgError.code} 다`);
+        return true;
+      }
+    );
   });
 });
 
