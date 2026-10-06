@@ -68,7 +68,15 @@ describe("㉠ 판정 — 앱 양식이 있는 종류만 지나간다", () => {
   });
 
   test("거절 문장은 「오류」가 아니라 아직 안 되는 일이라고 말한다", () => {
-    assert.match(QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE, /미리보기 · 견적서 받기/);
+    assert.match(QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE, /미리보기/);
+    /**
+     * 🔴 **없어진 기능을 가리키지 않는다**(2026-10-06). 「견적서 받기」는 화면에서 모두
+     * 걷어냈다 — 그 말이 남아 있으면 사람이 있지도 않은 단추를 찾는다. 지금의 사실은
+     * 「저장해도 파일이 만들어지지 않는다」다(services/quote-issue.ts 가 이 판정에 걸리는
+     * 장을 건너뛴다).
+     */
+    assert.ok(!QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE.includes("견적서 받기"), QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE);
+    assert.match(QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE, /저장해도 견적서 파일이 만들어지지 않습니다/);
     assert.match(QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE, /다음 차례/);
     // 지금 할 수 있는 일도 말한다 — 사람이 적어 둔 것이 사라진 줄 알면 안 된다.
     assert.match(QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE, /저장/);
@@ -130,24 +138,27 @@ describe("㉡ 막는 자리 — 다섯 곳이 같은 판정 하나를 부른다"
     assert.ok(printPage.indexOf("<QuotePrintView") > at, "그리기가 거절보다 앞이다");
   });
 
-  test("🔴 목록 — 케이블 줄에는 받기 · 미리보기를 내밀지 않는다", () => {
+  test("🔴 목록 — 케이블 줄에는 미리보기를 내밀지 않고, 까닭을 곁말로 적는다", () => {
+    // 🔴 받기 링크는 2026-10-06 에 네 자리 모두에서 없앴다(quote-issue-screens.test.ts).
+    // 그래서 이 칸이 통째로 비는데, 그 까닭을 말하는 곁말은 남겼다.
     assert.ok(
-      listScreen.includes("if (!canRenderQuoteDocument(row)) { return ( <span title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}"),
-      "목록의 받기가 그대로 있다"
+      listScreen.includes("function DocumentUnsupportedNote({ row }: { row: QuoteListItem }) { if (canRenderQuoteDocument(row)) return null;"),
+      "목록의 곁말이 판정을 보지 않는다"
     );
+    assert.ok(listScreen.includes("<span title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}"), "곁말이 같은 문장을 쓰지 않는다");
     assert.ok(
       listScreen.includes("function PreviewLink({ row, repairCaseId }: { row: QuoteListItem; repairCaseId: string | null }) { if (!canRenderQuoteDocument(row)) return null;"),
       "목록의 미리보기가 그대로 있다"
     );
     // 표와 카드 두 곳 모두 같은 조각을 쓴다 — 폭에 따라 한쪽만 뚫리면 안 된다.
     assert.equal(listScreen.split("<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />").length - 1, 2);
-    assert.equal(listScreen.split("<DownloadLink row={row} />").length - 1, 2);
+    assert.equal(listScreen.split("<DocumentUnsupportedNote row={row} />").length - 1, 2);
   });
 
   test("🔴 편집 화면 — 화면도 같은 판정을 본다(엑셀 전용 케이블은 열려 있다)", () => {
     assert.ok(editForm.includes("const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });"), editForm.slice(0, 0));
     assert.ok(editForm.includes("{canGetDocument && ( <button type=\"button\" onClick={() => setShowPreview(true)}"));
-    assert.ok(editForm.includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"));
+    assert.ok(!editForm.includes("{savedQuote && canGetDocument && ( <a href="), "받기 링크가 되살아났다");
     // 안내 문장도 서버가 돌려주는 그 하나다 — 두 벌이면 화면과 통로가 다른 말을 한다.
     assert.ok(editForm.includes("{!canGetDocument && ( <p"));
     assert.ok(editForm.includes("{QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} </p>"));

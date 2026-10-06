@@ -43,22 +43,28 @@ export type QuoteExcelPreviewFetch = (
 
 const browserFetch: QuoteExcelPreviewFetch = (url, init) => fetch(url, init);
 
-/** 화면에 보이는 문장들. XLS_LEGACY 는 사용자 결정(2026-09-16) 문장 그대로다 — 통로의 문장과 같다(시험). */
+/**
+ * 화면에 보이는 문장들. XLS_LEGACY 는 사용자 결정(2026-09-16) 문장이다 — 통로의 문장과
+ * 같다(시험).
+ *
+ * 🔴 **못 그렸을 때 가리키는 곳이 바뀌었다**(2026-10-06) — [견적서 받기]를 화면에서 없앴다.
+ * 이 화면이 그리려는 것은 **붙인 수기 엑셀**이므로, 그 파일이 있는 칸을 가리킨다.
+ */
 export const QUOTE_EXCEL_PREVIEW_TEXT = {
   UNSAVED: "저장한 뒤 엑셀 모양으로 미리 볼 수 있습니다",
   LOADING: "붙인 수기 견적서 엑셀을 읽는 중입니다…",
   XLS_LEGACY:
-    "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 [견적서 받기]로 받아 보세요",
+    "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 「수기 견적서 엑셀」 칸에서 받아 보세요",
   EXCEL_NOT_ATTACHED:
     "수기 견적서 엑셀이 붙지 않아 엑셀 모양을 그릴 수 없습니다 — 견적서 수정 화면의 「수기 견적서 엑셀」 칸에 붙여 주세요",
   SCAN_BLOCKED: "붙인 엑셀이 악성코드 검사를 통과하지 못해 엑셀 모양을 그릴 수 없습니다",
   NETWORK: "서버에 닿지 못해 엑셀 모양을 그리지 못했습니다(네트워크 상태를 확인해 주세요)",
   BROKEN_RESPONSE:
-    "서버의 응답을 읽지 못해 엑셀 모양을 그리지 못했습니다 — 다시 열어 보거나 [견적서 받기]로 받아 확인해 주세요",
+    "서버의 응답을 읽지 못해 엑셀 모양을 그리지 못했습니다 — 다시 열어 보거나 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요",
 } as const;
 
 function rejectedText(status: number): string {
-  return `엑셀 모양을 그리지 못했습니다(HTTP ${status}) — [견적서 받기]로 받아 확인해 주세요`;
+  return `엑셀 모양을 그리지 못했습니다(HTTP ${status}) — 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요`;
 }
 
 export type QuoteExcelPreviewFailureReason = "XLS_LEGACY" | "EXCEL_NOT_ATTACHED" | "SCAN_BLOCKED" | "OTHER";

@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
  *    바뀌면 창 폭에 따라(ResponsiveList 가 재서 고른다) 돌아가는 곳이 달라진다.
  *  · 기본값이면 PO/내자 목록의 줄 링크는 지금까지 그대로다(프롭 기본값 null).
  *  · [미리보기 · PDF] 도 **표·카드 두 곳 모두** 같은 값을 실어 인쇄 화면을 연다
- *    (기본값이면 옛 `/quotes/{id}/print` 그대로). xlsx 링크는 바뀌지 않는다.
+ *    (기본값이면 옛 `/quotes/{id}/print` 그대로). 🔴 xlsx 받기 링크는 2026-10-06 에 없앴다.
  *  · 「견적서」 탭만 그 건의 id 를 넘기고, PO/내자 목록은 넘기지 않는다.
  *  · 수정 화면은 **읽어 온 견적서와 맞춰 본 뒤에** 돌아갈 곳을 정해 폼에 넘긴다.
  *  · 인쇄 화면도 같은 방식으로 「돌아가기」 주소를 정해 미리보기에 넘긴다 — 그래야
@@ -85,8 +85,8 @@ describe("목록의 줄 링크", () => {
     assert.match(signature, /quoteLinkRepairCaseId = null,/);
   });
 
-  test("xlsx 링크는 그대로다", () => {
-    assert.ok(listSource.includes("href={`/api/quotes/${row.id}/xlsx`}"), "xlsx 주소가 바뀌었다");
+  test("🔴 xlsx 받기 링크는 없다 — 2026-10-06 에 걷어냈다", () => {
+    assert.ok(!listSource.includes("href={`/api/quotes/${row.id}/xlsx`}"), "받기 링크가 되살아났다");
   });
 });
 

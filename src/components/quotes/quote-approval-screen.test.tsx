@@ -215,11 +215,14 @@ describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
     assert.doesNotMatch(editFormSource, /QuoteApproval/);
   });
 
-  test("[견적서 받기] 링크의 조건이 그대로다 — 저장 여부와 문서 종류 둘뿐", () => {
+  test("[미리보기 · PDF] 의 조건이 그대로다 — 문서 종류 하나뿐", () => {
+    // 🔴 곁에 있던 [견적서 받기] 링크는 2026-10-06 에 없앴다(quote-issue-screens.test.ts).
+    // 남은 단추가 결재 상태를 보기 시작하지 않았는지를 여기서 지킨다.
     assert.ok(
-      flat(editFormSource).includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"),
-      "받기 링크의 조건이 바뀌었다 — 결재 상태가 끼어들지 않았는지 확인할 것"
+      flat(editFormSource).includes('{canGetDocument && ( <button type="button" onClick={() => setShowPreview(true)}'),
+      "미리보기 단추의 조건이 바뀌었다 — 결재 상태가 끼어들지 않았는지 확인할 것"
     );
+    assert.ok(!flat(editFormSource).includes("savedQuote.id}/xlsx"), "받기 링크가 되살아났다");
   });
 
   test("발행 단추 조각 자체도 결재를 보지 않는다", () => {

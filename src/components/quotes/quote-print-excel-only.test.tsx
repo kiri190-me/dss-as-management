@@ -8,11 +8,11 @@ import type { QuotePrintSignedPdf } from "./quote-attachment-files";
  * ============================================================================
  * 미리보기 화면의 엑셀 전용 갈래 (2026-09-15 Q3)
  * ============================================================================
- * 엑셀 전용 견적서는 앱 양식 대신 결재 PDF 를 보인다(없으면 [견적서 받기]로 보낸다).
+ * 엑셀 전용 견적서는 앱 양식 대신 결재 PDF 를 보인다(없으면 엑셀이 붙어 있는 칸으로 보낸다).
  * 2026-09-16(견적서 ②b · 사용자 결정 2)부터는 붙인 엑셀의 인쇄 모양이 먼저이고 결재 PDF 는
  * [결재 PDF 보기]로 바꿔 본다 — 엑셀 모양의 상태별 그림은 quote-print-excel-preview-screen.test.tsx.
  * 🔴 일반 견적서는 **한 글자도 달라지지 않아야 한다** — 맨 아래 묶음이 그것을 붙잡는다.
- * 돌아가기 · Excel 받기의 옛 규칙은 QuotePrintView.test.tsx 가 그대로 본다.
+ * 🔴 [견적서 받기]는 2026-10-06 에 없앴다 — 돌아가기와 함께 QuotePrintView.test.tsx 가 본다.
  * ============================================================================
  */
 
@@ -109,9 +109,9 @@ describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
     }
   });
 
-  test("[견적서 받기]는 받기 통로 그대로(붙인 엑셀을 내려준다) · 손으로 적은 공급가액", () => {
-    assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'), html);
-    assert.ok(html.includes(">견적서 받기<"), html);
+  test("🔴 [견적서 받기]가 없다(2026-10-06) · 손으로 적은 공급가액은 그대로", () => {
+    assert.ok(!html.includes("/xlsx"), "받기 주소가 되살아났다");
+    assert.ok(!html.includes(">견적서 받기<"), "받기 링크가 되살아났다");
     assert.ok(html.includes("₩1,500,000 (V.A.T. 별도)"), html);
     assert.ok(html.includes("Q-2026-0001") && html.includes("주성 엔지니어링") && html.includes("MBK200-JS3 수리"), html);
     assert.ok(html.includes("2026년 9월 1일"), html);
@@ -131,9 +131,13 @@ describe("엑셀 전용 — 결재 PDF 가 있을 때", () => {
 });
 
 describe("엑셀 전용 — 결재 PDF 가 없을 때", () => {
-  test("🔴 사용자가 정한 문장으로 [견적서 받기]를 가리킨다", () => {
+  test("🔴 붙인 엑셀이 어디 있는지 가리킨다 — 없어진 [견적서 받기]를 가리키지 않는다", () => {
     const html = render({ quote: EXCEL_ONLY, signedPdf: null, hasExcel: true });
-    assert.ok(html.includes("결재 PDF 가 아직 없습니다 — [견적서 받기]로 붙인 엑셀을 받으세요"), html);
+    assert.ok(
+      html.includes("결재 PDF 가 아직 없습니다 — 붙인 엑셀은 견적서 수정 화면의 「수기 견적서 엑셀」 칸에서 받으세요"),
+      html
+    );
+    assert.ok(!html.includes("견적서 받기"), "없어진 단추를 가리킨다");
     assert.ok(!html.includes("download?view=full"), html);
   });
 
@@ -153,8 +157,8 @@ describe("엑셀 전용 — 결재 PDF 가 없을 때", () => {
       signedPdf: { kind: "pending", fileName: "결재 대기.pdf" },
     });
     assert.ok(html.includes("골라 둔 결재 PDF(결재 대기.pdf)는 [저장]하면 올라갑니다"), html);
-    // 저장 전에는 받을 수 없다 — 옛 규칙과 같은 문장.
-    assert.ok(html.includes("Excel 은 저장한 뒤에 받을 수 있습니다"), html);
+    // 🔴 받기가 없어졌으니 「저장한 뒤에 받을 수 있습니다」도 없다 — 가리킬 데가 없다.
+    assert.ok(!html.includes("Excel 은 저장한 뒤에 받을 수 있습니다"), html);
     assert.ok(!html.includes("/xlsx"), html);
   });
 

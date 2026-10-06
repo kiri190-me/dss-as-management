@@ -425,7 +425,9 @@ describe("목록 표시", () => {
         ["EXCEL_MISSING", "엑셀 없음", "warning"],
       ]
     );
-    assert.ok(badges[1].title.includes("[견적서 받기]"), badges[1].title);
+    // 🔴 없어진 [견적서 받기]를 가리키지 않는다(2026-10-06) — 사실은 「파일이 없다」다.
+    assert.ok(badges[1].title.includes("이 장에는 견적서 파일이 없습니다"), badges[1].title);
+    for (const badge of badges) assert.ok(!badge.title.includes("견적서 받기"), badge.title);
   });
 
   test("엑셀 전용에 엑셀 · 결재 PDF 가 다 있으면 경고 없이 둘", () => {
@@ -467,7 +469,11 @@ describe("미리보기의 재료", () => {
     assert.equal(signedPdfForPreview({ isNewQuote: false, slot: null, pendingFileName: "x.pdf" }), null);
   });
 
-  test("결재 PDF 가 없을 때의 문장은 사용자가 정한 그대로다", () => {
-    assert.equal(EXCEL_ONLY_NO_SIGNED_PDF_TEXT, "결재 PDF 가 아직 없습니다 — [견적서 받기]로 붙인 엑셀을 받으세요");
+  test("🔴 결재 PDF 가 없을 때의 문장은 붙인 엑셀이 있는 칸을 가리킨다 — 없어진 받기가 아니라", () => {
+    assert.equal(
+      EXCEL_ONLY_NO_SIGNED_PDF_TEXT,
+      "결재 PDF 가 아직 없습니다 — 붙인 엑셀은 견적서 수정 화면의 「수기 견적서 엑셀」 칸에서 받으세요"
+    );
+    assert.ok(!EXCEL_ONLY_NO_SIGNED_PDF_TEXT.includes("견적서 받기"), EXCEL_ONLY_NO_SIGNED_PDF_TEXT);
   });
 });

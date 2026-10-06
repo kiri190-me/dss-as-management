@@ -251,19 +251,19 @@ describe("㉥ 특이사항 · 아직 안 되는 일", () => {
     assert.ok(collect().includes("remarks: isCable ? remarks : null,"), "다른 종류에서도 특이사항을 보낸다");
   });
 
-  test("🔴 [미리보기] · [견적서 받기]의 열고 닫음은 화면이 정하지 않는다 — 함수 하나가 정한다", () => {
+  test("🔴 [미리보기]의 열고 닫음은 화면이 정하지 않는다 — 함수 하나가 정한다", () => {
     /**
      * 🔴 판정은 서버 통로들과 **같은 함수 하나**다(domain/quote-document-support.ts) —
-     * 케이블도 2026-09-17(케이블 ④)부터 미리보기와 받기가 **된다.** 화면은 그 함수가
-     * 돌려준 값만 보고 단추를 그리고, 안 되는 종류에는 서버가 쓰는 그 문장을 그대로 적는다.
-     * 화면이 종류를 다시 따지기 시작하면 서버와 갈라져, 눌렀는데 거절당하는 단추가 생긴다.
+     * 케이블도 2026-09-17(케이블 ④)부터 미리보기가 **된다.** 화면은 그 함수가 돌려준 값만
+     * 보고 단추를 그리고, 안 되는 종류에는 서버가 쓰는 그 문장을 그대로 적는다. 화면이
+     * 종류를 다시 따지기 시작하면 서버와 갈라져, 눌렀는데 거절당하는 단추가 생긴다.
+     *
+     * 🔴 곁에 있던 [견적서 받기] 링크는 2026-10-06 에 없앴다 — 같은 판정을 보던 둘째
+     * 자리였다(quote-issue-screens.test.ts 가 네 자리 모두에 없음을 못 박는다).
      */
     assert.ok(form.includes("const canGetDocument = canRenderQuoteDocument({ kind, isExcelOnly });"), "판정이 화면 것이다");
     assert.ok(form.includes('{canGetDocument && ( <button type="button" onClick={() => setShowPreview(true)}'), "미리보기 단추가 그대로 있다");
-    assert.ok(
-      form.includes("{savedQuote && canGetDocument && ( <a href={`/api/quotes/${savedQuote.id}/xlsx`}"),
-      "받기 링크가 그대로 있다"
-    );
+    assert.ok(!form.includes("savedQuote.id}/xlsx"), "받기 링크가 되살아났다");
     // 못 하는 일을 말없이 감추지 않는다 — 문장은 서버가 돌려주는 그 하나다.
     assert.ok(form.includes("{!canGetDocument && ( <p"), "안내가 없다");
     assert.ok(form.includes("{QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} </p>"), "화면이 문장을 따로 적는다");

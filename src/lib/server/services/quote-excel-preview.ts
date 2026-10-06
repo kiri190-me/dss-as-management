@@ -102,18 +102,24 @@ export type QuoteExcelPreviewResult =
   | { ok: true; grid: QuoteExcelPreviewGrid; warnings: string[] }
   | { ok: false; code: QuoteExcelPreviewFailureCode; message: string };
 
-/** 사람이 읽는 까닭. 🔴 XLS_LEGACY 는 사용자 결정(2026-09-16) 문장 그대로다. */
+/**
+ * 사람이 읽는 까닭. 🔴 XLS_LEGACY 는 사용자 결정(2026-09-16) 문장이다 — 화면 쪽 사본
+ * (components/quotes/quote-print-excel-preview.ts)과 글자가 같아야 한다(시험).
+ *
+ * 🔴 **가리키는 곳이 바뀌었다**(2026-10-06) — [견적서 받기]를 화면에서 없앴다. 못 그린 것은
+ * **붙인 수기 엑셀**이므로 그 파일이 있는 칸을 가리킨다.
+ */
 export const QUOTE_EXCEL_PREVIEW_FAILURE_MESSAGES: Record<QuoteExcelPreviewFailureCode, string> = {
   XLS_LEGACY:
-    "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 [견적서 받기]로 받아 보세요",
+    "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 「수기 견적서 엑셀」 칸에서 받아 보세요",
   NOT_XLSX:
-    "엑셀 통합 문서(.xlsx)로 읽을 수 없는 파일이라 미리보기를 그릴 수 없습니다 — [견적서 받기]로 받아 확인해 주세요",
+    "엑셀 통합 문서(.xlsx)로 읽을 수 없는 파일이라 미리보기를 그릴 수 없습니다 — 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요",
   CONTENT_TOO_LARGE:
-    "엑셀 파일 안의 내용이 너무 커서 미리보기를 그리지 않았습니다 — [견적서 받기]로 받아 확인해 주세요",
+    "엑셀 파일 안의 내용이 너무 커서 미리보기를 그리지 않았습니다 — 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요",
   SHEET_UNREADABLE:
-    "엑셀 시트의 모양을 읽지 못해 미리보기를 그릴 수 없습니다 — [견적서 받기]로 받아 확인해 주세요",
+    "엑셀 시트의 모양을 읽지 못해 미리보기를 그릴 수 없습니다 — 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요",
   SHEET_TOO_LARGE:
-    "엑셀 시트에 쓰인 범위가 너무 넓어 미리보기를 그리지 않았습니다 — [견적서 받기]로 받아 확인해 주세요",
+    "엑셀 시트에 쓰인 범위가 너무 넓어 미리보기를 그리지 않았습니다 — 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요",
 };
 
 /**
@@ -374,7 +380,7 @@ function collectPictures(
 
   if (overBudget) {
     warnings.push(
-      `그림을 모두 합하면 ${formatMegabytes(limits.maxPictureBytes)}를 넘어 그림(직인 · 로고 등) 없이 그렸습니다 — 그림까지 보려면 [견적서 받기]로 받아 확인해 주세요.`
+      `그림을 모두 합하면 ${formatMegabytes(limits.maxPictureBytes)}를 넘어 그림(직인 · 로고 등) 없이 그렸습니다 — 그림까지 보려면 「수기 견적서 엑셀」 칸에서 받아 확인해 주세요.`
     );
     return [];
   }

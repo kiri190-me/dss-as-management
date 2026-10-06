@@ -17,8 +17,8 @@ import type { QuoteFolderOpenOutcome } from "./quote-folder-open";
  * 읽는다. 단추가 무엇을 그리는지는 QuoteFolderOpenButton.test.tsx, 누른 뒤의 흐름은
  * quote-folder-open.test.ts 가 값으로 본다.
  *
- *  · 자리 = 편집 화면 머리의 [견적서 받기] 곁, 저장된 장에서만(사용자 결정 2026-09-16).
- *    🔴 그 곁의 [견적서 받기]는 2026-10-06 부터 발행 단추가 아니라 받기 링크다 — 자리는 그대로다.
+ *  · 자리 = 편집 화면 머리, 저장된 장에서만(사용자 결정 2026-09-16).
+ *    🔴 곁에 있던 [견적서 받기]는 2026-10-06 에 없앴다 — 이제 [미리보기 · PDF] 다음, [취소] 앞이다.
  *  · 결과 줄 = 머리 아래(받기 결과가 있던 그 자리)
  *  · 🔴 처음 렌더는 감춘다 — Windows 판단은 마운트 뒤
  * ============================================================================
@@ -62,7 +62,7 @@ const relativeToSrc = (file: string) => path.relative(srcDir, file).split(path.s
  */
 const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
-describe("편집 화면 머리 — [견적서 받기] 곁", () => {
+describe("편집 화면 머리 — [미리보기 · PDF] 곁", () => {
   const BUTTON = "{savedQuote && ( <QuoteFolderOpenButton quoteId={savedQuote.id}";
 
   test("🔴 저장된 장에서만 — savedQuote 가 있을 때 그 id 로", () => {
@@ -70,12 +70,14 @@ describe("편집 화면 머리 — [견적서 받기] 곁", () => {
     assert.equal(form.split("<QuoteFolderOpenButton").length - 1, 1, "편집 화면에 단추가 둘 이상이다");
   });
 
-  test("머리 단추 줄 안 — [견적서 받기] 바로 다음, [취소] 앞", () => {
+  test("머리 단추 줄 안 — [미리보기 · PDF] 바로 다음, [취소] 앞", () => {
+    // 🔴 2026-10-06 까지는 그 사이에 [견적서 받기]가 있었다 — 없애고 자리는 그대로 두었다.
     const header = sliceBetween(form, "<h1", "{/* [폴더 열기] 결과");
-    const issue = indexOrFail(header, "<a href={`/api/quotes/${savedQuote.id}/xlsx`}");
+    const preview = indexOrFail(header, "onClick={() => setShowPreview(true)}");
     const folder = indexOrFail(header, "<QuoteFolderOpenButton");
     const cancel = indexOrFail(header, "router.push(returnHref ?? \"/quotes\")");
-    assert.ok(issue < folder && folder < cancel, "자리가 [견적서 받기] 곁이 아니다");
+    assert.ok(preview < folder && folder < cancel, "자리가 [미리보기 · PDF] 곁이 아니다");
+    assert.ok(!header.includes("savedQuote.id}/xlsx"), "받기 링크가 되살아났다");
   });
 
   test("🔴 저장 중 · 충돌이면 잠그고, 저장하지 않은 변경은 막지 않는다", () => {

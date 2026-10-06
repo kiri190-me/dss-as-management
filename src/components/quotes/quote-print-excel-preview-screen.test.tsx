@@ -260,7 +260,7 @@ describe("🔴 실패 셋 — 실패 문장과 함께 결재 PDF 를 보인다",
       name: "415 옛 .xls",
       excel: { kind: "failed", reason: "XLS_LEGACY", message: QUOTE_EXCEL_PREVIEW_TEXT.XLS_LEGACY },
       expected:
-        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 [견적서 받기]로 받아 보세요",
+        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 「수기 견적서 엑셀」 칸에서 받아 보세요",
     },
     {
       name: "404 엑셀 없음",
@@ -319,9 +319,10 @@ describe("🔴 결정 2 — [결재 PDF 보기] ↔ [엑셀 모양 보기]", () 
     assert.deepEqual(seen, ["pdf", "excel"]);
   });
 
-  test("🔴 받기는 누구에게나 링크 하나다 — 부작용 단추가 없다(2026-10-06)", () => {
+  test("🔴 받는 길이 하나도 없다(2026-10-06) — 발행 단추도 받기 링크도", () => {
     const html = renderScreen();
-    assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'), html);
+    assert.ok(!html.includes("/api/quotes/q-1/xlsx"), "받기 링크가 되살아났다");
+    assert.ok(!html.includes("견적서 받기"), "받기 글자가 되살아났다");
     assert.ok(!html.includes("data-quote-issue"), "발행 단추가 남았다");
   });
 });

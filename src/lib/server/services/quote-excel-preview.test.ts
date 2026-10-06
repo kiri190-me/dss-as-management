@@ -327,7 +327,7 @@ describe("실패 — 던지지 않고 까닭을", () => {
       ok: false,
       code: "XLS_LEGACY",
       message:
-        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 [견적서 받기]로 받아 보세요",
+        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 「수기 견적서 엑셀」 칸에서 받아 보세요",
     });
     assert.equal(QUOTE_EXCEL_PREVIEW_FAILURE_MESSAGES.XLS_LEGACY, QUOTE_EXCEL_PREVIEW_TEXT.XLS_LEGACY);
   });

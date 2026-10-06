@@ -227,8 +227,8 @@ export default function QuotePrintView({
   /**
    * 저장된 견적서면 그 id, **아직 저장하지 않았으면 null**.
    *
-   * 이 값이 갈라 놓는 것은 **Excel 받기 하나**다 — 파일을 만드는 라우트가 DB 의
-   * 그 줄을 읽으므로 저장된 장에만 있다. 값 자체는 미리보기에 쓰이지 않는다.
+   * 🔴 **받기가 없어진 뒤로 앱 양식 갈래에서는 돌아가는 주소에만 쓰인다**(2026-10-06).
+   * 엑셀 전용 갈래는 이 값으로 붙인 엑셀의 격자를 받아 온다(저장된 장에만 있다).
    *
    * 🔴 **돌아가는 길은 이 값으로 갈리지 않는다**(아래 onClose). 저장된 견적서를
    * 고치는 중에도 미리보기는 폼 위에 겹쳐 뜨므로, 저장 여부로 가르면 지금 있는
@@ -281,9 +281,8 @@ export default function QuotePrintView({
    * 도구모음과 인쇄 안내 — **종이가 무엇이든 하나다** (2026-09-17 케이블 ④)
    * ==========================================================================
    * 요소로 한 번 만들어 두 갈래(내자 · OH 종이, 케이블 종이)가 나눠 끼운다. 🔴 **컴포넌트로
-   * 빼지 않은 것은 일부러다** — 그리는 자리가 하나 더 생겨도 받기는 여전히 「앱 양식 하나 ·
-   * 엑셀 전용 하나」 두 벌뿐이어야 한다(quote-issue-screens.test.ts 가 그 수를 센다). 베껴
-   * 두면 저장 전 · 후 갈래를 한쪽만 고치는 날이 온다.
+   * 빼지 않은 것은 일부러다** — 베껴 두면 그리는 자리가 하나 더 생기는 날 한쪽만 고치게 된다
+   * (받기 링크가 있던 시절에 저장 전 · 후 갈래가 어긋나던 그 까닭이다).
    *
    * 값이 아니라 **요소**라 요소 나무의 모양이 예전과 같다 — 시험이 나무를 걸어 단추를
    * 찾는다(QuotePrintView.test.tsx).
@@ -308,18 +307,10 @@ export default function QuotePrintView({
           ← 견적서로 돌아가기
         </Link>
       )}
+      {/* 🔴 [Excel 받기]는 2026-10-06 에 없앴다 — 브라우저로 내려받는 길을 화면에서 모두
+          걷어냈다(사용자 결정). 견적서 엑셀은 [저장]이 사내 공유폴더에 넣는다(server/actions/
+          quotes.ts). 남은 것은 인쇄뿐이고, 저장 여부로 갈릴 일도 없어졌다. */}
       <div className="qp-toolbar-actions">
-        {quoteId === null ? (
-          // 🔴 Excel 은 저장된 장에서만 받을 수 있다 — 파일을 만드는 라우트가
-          // DB 의 그 줄을 읽기 때문이다. 단추를 회색으로 두기만 하면 "왜 안
-          // 눌리지"가 되므로, 왜인지를 그 자리에 적는다.
-          <span className="qp-toolbar-note">Excel 은 저장한 뒤에 받을 수 있습니다</span>
-        ) : (
-          // 🔴 누구에게나 같은 링크 하나다(2026-10-06) — 공유폴더 저장 · 엑셀 칸은 [저장]이 한다.
-          <a href={`/api/quotes/${quoteId}/xlsx`} className="qp-btn">
-            Excel 받기
-          </a>
-        )}
         <button type="button" onClick={() => window.print()} className="qp-btn qp-btn-primary">
           인쇄 · PDF로 저장
         </button>
@@ -793,7 +784,7 @@ const EXCEL_ONLY_PRIMARY_BUTTON_CLASS =
  * 엑셀의 인쇄 설정에서 오고, [인쇄 · PDF로 저장]이 그 모양 그대로 PDF 를 만든다.
  *   · 🔴 편집 폼은 격자를 넘기지 않는다 — 미리보기가 id 로 **스스로** 받아 온다. 저장 전
  *     새 견적서(id 없음)는 「저장한 뒤 엑셀 모양으로 미리 볼 수 있습니다」.
- *   · .xls 는 그리지 않는다(사용자 결정 1) — 까닭과 [견적서 받기]를 알린다.
+ *   · .xls 는 그리지 않는다(사용자 결정 1) — 까닭과 붙인 엑셀이 어디 있는지를 알린다.
  *
  * ── 결재 PDF 와의 관계 (2026-09-16 사용자 결정 2) ───────────────────────────
  * **엑셀 모양이 먼저다.** 결재 PDF 가 올라가 있으면 도구모음의 [결재 PDF 보기]로 아래의
@@ -946,14 +937,8 @@ export function ExcelOnlyQuotePreviewScreen({
               엑셀 모양 보기
             </button>
           ) : null}
-          {quoteId === null ? (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">Excel 은 저장한 뒤에 받을 수 있습니다</span>
-          ) : (
-            // 🔴 누구에게나 같은 링크 하나다(2026-10-06) — 붙인 엑셀을 그대로 내려준다.
-            <a href={`/api/quotes/${quoteId}/xlsx`} className={EXCEL_ONLY_BUTTON_CLASS}>
-              견적서 받기
-            </a>
-          )}
+          {/* 🔴 [견적서 받기]는 2026-10-06 에 없앴다 — 앱 양식 갈래의 도구모음과 같다(위 주석).
+              엑셀 전용 장의 문서는 「수기 견적서 엑셀」 칸에 붙인 그 파일이다. */}
           {layout.canPrint ? (
             <button
               type="button"
@@ -970,7 +955,8 @@ export function ExcelOnlyQuotePreviewScreen({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 print:hidden dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">엑셀 전용 견적서</h1>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          앱 양식이 아니라 손으로 만든 엑셀로 발행한 견적서입니다 — [견적서 받기]는 붙인 엑셀을 내려줍니다.
+          앱 양식이 아니라 손으로 만든 엑셀로 발행한 견적서입니다 — 「수기 견적서 엑셀」 칸에 붙인 그 파일이 곧 보낸
+          견적서입니다.
         </p>
         <dl className="mt-3 flex flex-col gap-1 text-sm">
           {rows.map(([label, value]) => (
@@ -1022,8 +1008,8 @@ export function ExcelOnlyQuotePreviewScreen({
             role="alert"
             className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
           >
-            수기 견적서 엑셀도 아직 붙지 않았습니다 — 견적서 수정 화면의 「수기 견적서 엑셀」 칸에 붙여야 [견적서 받기]가
-            파일을 내줍니다.
+            수기 견적서 엑셀도 아직 붙지 않았습니다 — 견적서 수정 화면의 「수기 견적서 엑셀」 칸에 붙여야 이 장에
+            견적서 파일이 생깁니다.
           </p>
         ) : null}
       </section>
@@ -1082,8 +1068,8 @@ function ExcelOnlyQuoteSheet({ grid, warnings }: { grid: QuoteExcelPreviewGrid; 
         붙인 수기 견적서 엑셀을 <b>PDF 로 만들었을 때의 모양</b>으로 그린 것입니다 — 용지 · 방향 · 배율은 그 엑셀의
         인쇄 설정을 따릅니다. 인쇄 창에서 대상 <b>&ldquo;PDF로 저장&rdquo;</b>, 배율 <b>기본(100%)</b>, 여백{" "}
         <b>기본</b>으로 두세요. 머리글·바닥글(주소·날짜)은 인쇄 창의 <b>&ldquo;머리글 및 바닥글&rdquo;</b> 체크를
-        해제하면 사라집니다. 칸의 글꼴 · 테마 색 · 조건부 서식은 그리지 않습니다 — 정본은 [견적서 받기]로 받는
-        엑셀입니다.
+        해제하면 사라집니다. 칸의 글꼴 · 테마 색 · 조건부 서식은 그리지 않습니다 — 정본은 「수기 견적서 엑셀」 칸에
+        붙인 엑셀입니다.
         {shrunk ? (
           <>
             {" "}
@@ -1263,11 +1249,10 @@ const FALLBACK_WORK_SECTIONS: QuoteWorkSections = {
 const STYLES = `
 .qp-root { background: #fff; color: #000; }
 .qp-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .5rem; }
-/* 수정 권한자의 받기 단추는 아래에 결과 줄을 단다 — 곁의 단추가 늘어나지 않게 위로 붙이고, 좁으면 줄바꿈한다. */
+/* 단추를 위로 붙이고, 좁으면 줄바꿈한다. 지금 안에 있는 것은 [인쇄 · PDF로 저장] 하나다. */
 .qp-toolbar-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem; }
 .qp-btn { border: 1px solid #d4d4d8; border-radius: .375rem; padding: .375rem .75rem; font-size: .875rem; text-decoration: none; color: #3f3f46; background: #fff; cursor: pointer; }
 .qp-btn-primary { border-color: #18181b; background: #18181b; color: #fff; }
-.qp-toolbar-note { align-self: center; font-size: .75rem; color: #71717a; }
 .qp-note { margin-bottom: 1rem; font-size: .75rem; line-height: 1.7; color: #71717a; }
 
 .qp-page { background: #fff; border: 1px solid #e4e4e7; padding: 15pt 10pt; width: fit-content; margin: 0 auto; }

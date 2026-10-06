@@ -400,11 +400,15 @@ export function isQuoteExcelAttachedOrQueued(params: {
 
 /**
  * 엑셀 전용인데 엑셀이 없을 때의 안내 — 저장은 된다(새 견적서는 저장한 뒤에야 올릴 수
- * 있다). 다만 그 장의 [견적서 받기]가 내줄 파일이 없으므로 눈에 띄게 알린다.
+ * 있다). 다만 그 장에는 보낼 문서 자체가 없으므로 눈에 띄게 알린다.
+ *
+ * 🔴 [견적서 받기]를 가리키지 않는다(2026-10-06) — 그 링크는 화면에서 없앴다. 엑셀 전용
+ * 장은 [저장]도 앱 양식을 만들지 않으므로(services/quote-issue.ts), 붙인 엑셀이 없으면
+ * 그 견적서에는 파일이 하나도 없다.
  */
 export function excelOnlyMissingExcelNotice(params: { isExcelOnly: boolean; excelAttachedOrQueued: boolean }): string | null {
   if (!params.isExcelOnly || params.excelAttachedOrQueued) return null;
-  return "수기 견적서 엑셀을 붙여 주세요 — 엑셀 전용 견적서의 [견적서 받기]는 붙인 엑셀을 내려줍니다. 붙이기 전에는 받을 파일이 없습니다(저장은 됩니다).";
+  return "수기 견적서 엑셀을 붙여 주세요 — 엑셀 전용 견적서는 붙인 엑셀이 곧 보낸 견적서입니다. 붙이기 전에는 이 장에 견적서 파일이 없습니다(저장은 됩니다).";
 }
 
 // ────────────────────────────────────────────────── 목록 표시
@@ -431,7 +435,7 @@ export function quoteListFileBadges(row: {
     badges.push({
       key: "EXCEL_ONLY",
       label: "엑셀 전용",
-      title: "품목 없이 손으로 만든 엑셀이 곧 보낸 견적서입니다 — [견적서 받기]가 붙인 엑셀을 내려줍니다.",
+      title: "품목 없이 손으로 만든 엑셀이 곧 보낸 견적서입니다 — 그 엑셀은 「수기 견적서 엑셀」 칸에 붙어 있습니다.",
       tone: "info",
     });
   }
@@ -442,7 +446,7 @@ export function quoteListFileBadges(row: {
     badges.push({
       key: "EXCEL_MISSING",
       label: "엑셀 없음",
-      title: "엑셀 전용인데 수기 견적서 엑셀이 붙지 않아 [견적서 받기]가 내줄 파일이 없습니다. 견적서 수정 화면에서 붙여 주세요.",
+      title: "엑셀 전용인데 수기 견적서 엑셀이 붙지 않아 이 장에는 견적서 파일이 없습니다. 견적서 수정 화면에서 붙여 주세요.",
       tone: "warning",
     });
   }
@@ -484,5 +488,12 @@ export function signedPdfForPreview(params: {
   return null;
 }
 
-/** 엑셀 전용 미리보기에 결재 PDF 가 없을 때의 문장 — 사용자 결정(2026-09-15) 그대로. */
-export const EXCEL_ONLY_NO_SIGNED_PDF_TEXT = "결재 PDF 가 아직 없습니다 — [견적서 받기]로 붙인 엑셀을 받으세요";
+/**
+ * 엑셀 전용 미리보기에 결재 PDF 가 없을 때의 문장.
+ *
+ * 🔴 **가리키는 곳이 바뀌었다**(2026-10-06). 사용자 결정(2026-09-15)의 원래 문장은
+ * 「[견적서 받기]로 붙인 엑셀을 받으세요」였는데, 그 링크를 화면에서 없앴다. 엑셀 전용
+ * 장의 엑셀은 첨부 칸에만 있으므로(저장은 엑셀 전용 장을 건너뛴다) 그 칸을 가리킨다.
+ */
+export const EXCEL_ONLY_NO_SIGNED_PDF_TEXT =
+  "결재 PDF 가 아직 없습니다 — 붙인 엑셀은 견적서 수정 화면의 「수기 견적서 엑셀」 칸에서 받으세요";

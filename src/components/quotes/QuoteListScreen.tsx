@@ -116,7 +116,7 @@ export default function QuoteListScreen({
    *
    * [미리보기 · PDF] 도 이 값을 싣는다(quotePrintHref) — 인쇄 화면의 「돌아가기」가
    * 맨 `/quotes/{id}` 로 가면 거기서 건 id 가 떨어져 [취소]가 다시 `/quotes` 로 간다.
-   * null 이면 지금까지의 `/quotes/{id}/print` 그대로다. xlsx 링크는 건드리지 않는다.
+   * null 이면 지금까지의 `/quotes/{id}/print` 그대로다.
    */
   quoteLinkRepairCaseId?: string | null;
 }) {
@@ -556,7 +556,7 @@ function QuoteTable({
             <td className="whitespace-nowrap px-3 py-2">
               <div className="flex gap-1">
                 <PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />
-                <DownloadLink row={row} />
+                <DocumentUnsupportedNote row={row} />
                 {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
               </div>
             </td>
@@ -613,7 +613,7 @@ function QuoteCardList({
           </p>
           <div className="flex gap-1">
             <PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />
-            <DownloadLink row={row} />
+            <DocumentUnsupportedNote row={row} />
             {canDelete && <DeleteButton row={row} busyId={busyId} onDelete={onDelete} />}
           </div>
         </div>
@@ -629,7 +629,7 @@ function QuoteCardList({
  * 인쇄 화면이 그것을 받아 「돌아가기」를 그 건을 실은 수정 화면으로 보낸다.
  *
  * 🔴 앱 양식이 아직 없는 종류(케이블)에는 **내밀지 않는다** — 그 화면도 서버에서 거절한다
- * (아래 DownloadLink · domain/quote-document-support.ts). 까닭은 그 자리의 곁말이 말한다.
+ * (아래 DocumentUnsupportedNote · domain/quote-document-support.ts). 까닭은 그 곁말이 말한다.
  */
 function PreviewLink({ row, repairCaseId }: { row: QuoteListItem; repairCaseId: string | null }) {
   if (!canRenderQuoteDocument(row)) return null;
@@ -681,43 +681,26 @@ function KindTag({ kind }: { kind: QuoteListItem["kind"] }) {
 }
 
 /**
- * [견적서 받기] — 🔴 **누구에게나 같은 링크 하나다**(2026-10-06).
+ * 앱 양식이 아직 없는 종류의 곁말 — 🔴 **내려받기 링크는 없앴다**(2026-10-06).
  *
- * 전에는 권한으로 두 갈래였다(견적서 B1c) — 수정 권한자에게는 발행 단추(POST …/issue: 공유폴더
- * 저장 · 엑셀 칸 교체), 보기 권한자에게는 링크. 이제 그 일은 [저장]이 한다(server/actions/
- * quotes.ts 의 archiveDocumentAfterSave)므로 **화면에는 받는 길 하나만 남는다.** 권한에 따라
- * 받을 수 있는 사람과 없는 사람이 갈리는 것은 통로가 정한다.
+ * 이 자리에는 받기가 있었다 — 2026-09-15 에는 권한으로 갈리는 발행 단추(POST …/issue),
+ * 그 뒤에는 누구에게나 같은 링크(GET …/xlsx). 사용자 결정으로 **브라우저로 내려받는 길을
+ * 화면에서 모두 걷어냈다.** 견적서 엑셀은 [저장]이 사내 공유폴더에 넣는다(server/actions/
+ * quotes.ts 의 archiveDocumentAfterSave) — 받는 길은 그 폴더 하나다.
  *
- * `<a download>` 가 아니라 그냥 링크다 — 파일 이름은 서버가 Content-Disposition 으로 정한다
- * (domain/quote-file-name.ts). 클라이언트가 이름을 정하면 목록과 상세에서 서로 다른 이름으로
- * 저장되는 날이 온다.
- *
- * 이 주소는 화면이 감추든 말든 스스로 세션·권한을 다시 확인하고, 나갈 때마다 감사
- * 기록(EXCEL_EXPORT)을 남긴다 — 직인이 찍힌 문서다.
+ * 🔴 **곁말만 남는다.** 앱 양식이 없는 종류는 [미리보기 · PDF]도 그리지 않으므로(PreviewLink)
+ * 이 칸이 통째로 비어 「왜 이 줄만 아무것도 없지」가 된다. 문장은 통로 · 미리보기 화면 ·
+ * 편집 화면과 **같은 하나**다(domain/quote-document-support.ts).
  */
-function DownloadLink({ row }: { row: QuoteListItem }) {
-  /**
-   * 🔴 앱 양식이 아직 없는 종류(케이블)에는 **받기를 내밀지 않는다**(2026-09-16 케이블 ③).
-   * 통로가 서버에서 거절하지만, 눌러서 실패하는 링크를 보여 줄 까닭이 없다. 곁말로
-   * 까닭을 달아 둔다 — 빈 칸만 있으면 「왜 이 줄만 받기가 없지」가 된다.
-   */
-  if (!canRenderQuoteDocument(row)) {
-    return (
-      <span
-        title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}
-        className="text-xs text-zinc-400 dark:text-zinc-500"
-      >
-        —
-      </span>
-    );
-  }
+function DocumentUnsupportedNote({ row }: { row: QuoteListItem }) {
+  if (canRenderQuoteDocument(row)) return null;
   return (
-    <a
-      href={`/api/quotes/${row.id}/xlsx`}
-      className="inline-block rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+    <span
+      title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}
+      className="text-xs text-zinc-400 dark:text-zinc-500"
     >
-      견적서 받기
-    </a>
+      —
+    </span>
   );
 }
 

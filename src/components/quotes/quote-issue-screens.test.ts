@@ -4,23 +4,25 @@ import { readFileSync } from "node:fs";
 
 /**
  * ============================================================================
- * 🔴 [견적서 받기] 단추를 화면에서 없앴다 — 받는 길은 링크 하나다 (2026-10-06)
+ * 🔴 견적서를 브라우저로 내려받는 길이 화면에 하나도 없다 (2026-10-06)
  * ============================================================================
  * 2026-09-15(견적서 B1c)에는 세 화면(목록 · 편집 · 인쇄 미리보기)이 수정 권한자에게 발행
  * 단추(POST /api/quotes/{id}/issue — 공유폴더 저장 · 엑셀 칸 교체 · 내려주기)를 그렸다.
- * 그 셋 가운데 **공유폴더 저장과 엑셀 칸 넣기는 이제 [저장]이 한다**(server/actions/quotes.ts 의
- * archiveDocumentAfterSave). 남은 일은 **받는 것 하나**라, 화면에는 부작용 없는 링크
- * (GET /api/quotes/{id}/xlsx)만 둔다.
+ * 같은 날 그 단추를 없애고 받기 링크(GET …/xlsx)를 남겼는데, 사용자가 화면을 보고 다시
+ * 정했다 — 「내려받기도 아예 없앤다」. 그래서 **네 자리(목록의 표 · 카드, 인쇄 미리보기 두
+ * 갈래, 편집 화면 머리)에서 받기를 모두 걷어냈다.** 견적서 엑셀은 [저장]이 사내 공유폴더에
+ * 넣고(server/actions/quotes.ts 의 archiveDocumentAfterSave), 받는 길은 그 폴더 하나다.
  *
  * QuoteListScreen · QuoteEditForm · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
  * 컴포넌트라 이 시험 환경에서 그려 볼 수 없다(`server-only`). 그래서 이웃 시험
  * (quote-attachment-screens.test.ts · QuoteListScreen.test.ts)과 같은 방법으로 원본을 글자로
  * 읽는다. 인쇄 미리보기가 실제로 무엇을 그리는지는 QuoteIssueButton.test.tsx 가 값으로 본다.
  *
- * 불변식 셋:
+ * 불변식 넷:
  *  (a) 🔴 **어느 화면에도 발행 단추(QuoteIssueButton)가 없다.**
- *  (b) 🔴 **누구나 받을 수 있다** — 권한으로 갈리던 자리가 전부 같은 링크 하나다.
- *  (c) 통로 · 조각 · 결과 줄은 살아 있다 — 결재 PDF 올리기가 같은 문장 함수를 쓴다.
+ *  (b) 🔴 **어느 화면에도 받기 주소(`/xlsx`)가 없다** — 슬그머니 되살아나면 여기서 깨진다.
+ *  (c) 못 하는 일은 말없이 감추지 않는다 — 같은 문장 하나로 까닭을 적는다.
+ *  (d) 통로 · 조각 · 결과 줄은 살아 있다 — 결재 PDF 올리기가 같은 문장 함수를 쓴다.
  * ============================================================================
  */
 
@@ -35,12 +37,31 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
   assert.ok(end > start, `원본에서 '${endMarker}' 를 찾지 못했다`);
   return source.slice(start, end);
 };
+/**
+ * 주석을 뺀 원본 — 「무엇을 그리는가」를 볼 때 쓴다(quote-folder-open-screens.test.ts 와 같은
+ * 도구). 머리말은 **없앤 길을 일부러 설명하므로**(「받기 링크는 2026-10-06 에 없앴다 —
+ * GET …/xlsx」) 글자만 찾으면 헛걸린다.
+ */
+const withoutComments = (source: string) =>
+  source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
 const list = read("src/components/quotes/QuoteListScreen.tsx");
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 const printPage = flat(read("src/app/(app)/quotes/[id]/print/page.tsx"));
 const printView = flat(read("src/components/quotes/QuotePrintView.tsx"));
 const section = flat(read("src/components/quotes/QuoteAttachmentsSection.tsx"));
 const button = flat(read("src/components/quotes/QuoteIssueButton.tsx"));
+
+const bareForm = flat(withoutComments(read("src/components/quotes/QuoteEditForm.tsx")));
+const barePrintView = flat(withoutComments(read("src/components/quotes/QuotePrintView.tsx")));
+
+/** 받기가 있던 네 자리를 담은 화면 원본들 — 주석을 뺀 것. */
+const SCREENS_WITHOUT_COMMENTS = [
+  ["목록", flat(withoutComments(list))],
+  ["편집 화면", bareForm],
+  ["인쇄 미리보기", barePrintView],
+  ["인쇄 미리보기 페이지", flat(withoutComments(read("src/app/(app)/quotes/[id]/print/page.tsx")))],
+] as const;
 
 describe("🔴 세 화면 어디에도 발행 단추가 없다", () => {
   test("목록 · 편집 · 인쇄 미리보기가 QuoteIssueButton 을 그리지 않는다", () => {
@@ -68,23 +89,44 @@ describe("🔴 세 화면 어디에도 발행 단추가 없다", () => {
   });
 });
 
+describe("🔴 네 화면 어디에도 받기 주소가 없다 — 되살아나면 여기서 깨진다", () => {
+  test("목록 · 편집 화면 · 인쇄 미리보기(화면 · 페이지)에 '/xlsx' 가 없다", () => {
+    for (const [name, source] of SCREENS_WITHOUT_COMMENTS) {
+      assert.ok(!source.includes("/xlsx"), `${name} 에 받기 주소가 들어왔다`);
+    }
+  });
+
+  test("🔴 받기라고 읽히는 글자도 없다 — [견적서 받기] · [Excel 받기]", () => {
+    for (const [name, source] of SCREENS_WITHOUT_COMMENTS) {
+      assert.ok(!source.includes("견적서 받기<"), `${name} 에 [견적서 받기]가 남았다`);
+      assert.ok(!source.includes("Excel 받기"), `${name} 에 [Excel 받기]가 남았다`);
+      // 받기가 없으니 저장 전후로 갈릴 일도 없다 — 그 곁말도 함께 걷어냈다.
+      assert.ok(!source.includes("Excel 은 저장한 뒤에 받을 수 있습니다"), `${name} 에 옛 곁말이 남았다`);
+    }
+  });
+});
+
 describe("목록 — 표와 카드 두 곳 모두", () => {
   const table = flat(sliceBetween(list, "function QuoteTable(", "function QuoteCardList("));
   const cards = flat(sliceBetween(list, "function QuoteCardList(", "function PreviewLink("));
-  const CALL = "<DownloadLink row={row} />";
+  const CALL = "<DocumentUnsupportedNote row={row} />";
 
-  test("🔴 표와 카드가 같은 값으로 받기를 부른다 — 창 폭에 따라 받는 길이 달라지지 않게", () => {
-    assert.ok(table.includes(CALL), "표의 받기가 바뀌었다");
-    assert.ok(cards.includes(CALL), "카드의 받기가 바뀌었다");
-    assert.equal(flat(list).split(CALL).length - 1, 2, "받기를 부르는 곳이 둘이 아니다");
+  test("🔴 받기를 부르던 조각이 없다 — 표에도 카드에도", () => {
+    for (const [name, source] of [["표", table], ["카드", cards]] as const) {
+      assert.ok(!source.includes("<DownloadLink"), `${name} 에 받기 조각이 남았다`);
+    }
+    assert.ok(!flat(list).includes("function DownloadLink("), "받기 조각 자체가 남았다");
   });
 
-  test("🔴 받기는 누구에게나 같은 링크 하나다 — 권한 갈래가 없다", () => {
-    const download = flat(sliceBetween(list, "function DownloadLink(", "function IntakeLink("));
-    assert.ok(download.includes("href={`/api/quotes/${row.id}/xlsx`}"), "받기 링크가 사라졌다");
-    assert.ok(!download.includes("canEdit"), "권한 갈래가 남았다");
-    // 앱 양식이 없는 종류에만 받기를 내밀지 않는다(2026-09-16 케이블 ③) — 그 갈래는 그대로다.
-    assert.ok(download.includes("if (!canRenderQuoteDocument(row)) {"), download);
+  test("🔴 못 하는 일을 말없이 감추지 않는다 — 표와 카드가 같은 곁말을 부른다", () => {
+    // 앱 양식이 없는 종류는 [미리보기 · PDF]도 없어 칸이 통째로 빈다 — 까닭을 곁말로 적는다.
+    assert.ok(table.includes(CALL), "표의 곁말이 바뀌었다");
+    assert.ok(cards.includes(CALL), "카드의 곁말이 바뀌었다");
+    assert.equal(flat(list).split(CALL).length - 1, 2, "곁말을 부르는 곳이 둘이 아니다");
+    const note = flat(sliceBetween(list, "function DocumentUnsupportedNote(", "function IntakeLink("));
+    assert.ok(note.includes("if (canRenderQuoteDocument(row)) return null;"), note);
+    assert.ok(note.includes("title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}"), note);
+    assert.ok(!note.includes("canEdit"), "권한 갈래가 남았다");
   });
 
   test("목록을 부르는 두 쪽의 canEdit 은 quotes WRITE 다 — 받기가 아니라 [새 견적서] 쪽이다", () => {
@@ -104,22 +146,29 @@ describe("인쇄 미리보기 — 🔴 보기 권한자도 들어오는 화면",
     assert.ok(printPage.includes('await requireAreaAccessForCurrentUser("quotes");'));
   });
 
-  test("🔴 앱 양식 · 엑셀 전용 두 갈래 모두 같은 링크 하나다", () => {
-    assert.equal(printView.split("href={`/api/quotes/${quoteId}/xlsx`}").length - 1, 2, "받기 링크가 두 갈래가 아니다");
-    // 저장 전에는 받을 것이 없다고 적는다 — 그 갈래는 그대로다(두 곳 모두).
-    assert.equal(printView.split("Excel 은 저장한 뒤에 받을 수 있습니다").length - 1, 2);
+  test("🔴 앱 양식 · 엑셀 전용 두 갈래 모두 받기가 없다 — 남은 것은 인쇄뿐", () => {
+    assert.equal(printView.split("href={`/api/quotes/${quoteId}/xlsx`}").length - 1, 0, "받기 링크가 남았다");
+    // 저장 여부로 갈리던 곁말도 함께 걷어냈다 — 가리킬 받기가 없다.
+    assert.equal(printView.split("Excel 은 저장한 뒤에 받을 수 있습니다").length - 1, 0);
+    // [인쇄 · PDF로 저장]은 두 갈래 모두 그대로다 — 이번 일과 무관하다.
+    assert.equal(barePrintView.split("인쇄 · PDF로 저장").length - 1, 2);
   });
 });
 
-describe("편집 화면 — 🔴 단추 자리에 링크가 남는다", () => {
-  test("머리의 [견적서 받기]는 받기 링크다 — 저장된 장에서만, 앱이 만들 수 있는 종류에서만", () => {
-    // 🔴 앱 양식이 없는 종류(케이블)에는 이것이 없다(2026-09-16 케이블 ③) — 그 장을
-    // 채우면 **다른 종류의 문서**가 만들어진다. 판정은 통로 둘과 같은 함수 하나이고
-    // (domain/quote-document-support.ts), 통로도 서버에서 거절한다.
-    const header = sliceBetween(form, "{savedQuote && canGetDocument && (", ")}");
-    assert.ok(header.includes("<a href={`/api/quotes/${savedQuote.id}/xlsx`}"), header);
-    assert.ok(header.includes("견적서 받기"), header);
-    assert.ok(!header.includes("disabled"), "링크에는 잠글 것이 없다");
+describe("편집 화면 — 🔴 받기가 있던 자리", () => {
+  test("머리에 받기가 없다 — [미리보기 · PDF] 다음은 곧바로 [폴더 열기]다", () => {
+    // 🔴 주석을 뺀 원본으로 본다 — 머리말이 **없앤 길을 일부러** 설명한다(파일 맨 위 참조).
+    const header = sliceBetween(bareForm, "<h1", "{!canGetDocument && (");
+    assert.ok(!header.includes("savedQuote.id}/xlsx"), header);
+    assert.ok(!header.includes("견적서 받기"), header);
+    // 🔴 [미리보기 · PDF]는 그대로다 — 다른 기능이고 남는다(2026-09-16 케이블 ③의 판정도 그대로).
+    assert.ok(header.includes('{canGetDocument && ( <button type="button" onClick={() => setShowPreview(true)}'), header);
+    assert.ok(header.includes("<QuoteFolderOpenButton"), header);
+  });
+
+  test("🔴 못 하는 일은 여전히 말한다 — 서버와 같은 문장 하나", () => {
+    assert.ok(form.includes("{!canGetDocument && ( <p"), "안내가 사라졌다");
+    assert.ok(form.includes("{QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE} </p>"), "화면이 문장을 따로 적는다");
   });
 
   test("🔴 저장하지 않은 변경을 가리던 장치가 남아 있지 않다 — 그 단추만을 위한 것이었다", () => {
@@ -131,7 +180,7 @@ describe("편집 화면 — 🔴 단추 자리에 링크가 남는다", () => {
     assert.ok(submit.includes("const fields = collectFields();"));
   });
 
-  test("🔴 겹쳐 뜬 미리보기에도 받기 값이 넘어가지 않는다 — 미리보기가 스스로 링크를 그린다", () => {
+  test("🔴 겹쳐 뜬 미리보기에도 발행 값이 넘어가지 않는다", () => {
     const preview = sliceBetween(form, "<QuotePrintView", "quoteNumber,");
     assert.ok(!preview.includes("canIssue"), preview);
     assert.ok(!preview.includes("onIssueOutcome"), preview);

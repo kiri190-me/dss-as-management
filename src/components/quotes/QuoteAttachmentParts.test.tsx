@@ -229,7 +229,9 @@ describe("엑셀 전용 스위치 · 줄 비우기 확인", () => {
     assert.ok(!off.includes('checked=""'), off);
     assert.ok(on.includes("엑셀 전용 견적서"), on);
     assert.ok(on.includes("공급가액을 직접"), on);
-    assert.ok(on.includes("[견적서 받기]"), on);
+    // 🔴 없어진 [견적서 받기]를 가리키지 않는다(2026-10-06) — 붙인 파일이 곧 그 견적서다.
+    assert.ok(on.includes("「수기 견적서 엑셀」 칸에 붙인 파일이 곧 보낸 견적서입니다"), on);
+    assert.ok(!on.includes("견적서 받기"), on);
   });
 
   test("🔴 줄 비우기 확인 — 줄이 있으면 저장이 거절된다고, 무엇을 비우는지, 끄면 돌아온다고", () => {

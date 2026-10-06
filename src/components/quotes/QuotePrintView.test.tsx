@@ -177,32 +177,36 @@ test("🔴 겹쳐 뜬 미리보기는 돌아가기 주소를 받아도 여전히
   assert.ok(!html.includes(BACK_WITH_CASE), "겹쳐 뜬 미리보기에 주소 링크가 그려졌다");
 });
 
-test("돌아가기 주소를 받아도 Excel 받기는 그대로다", () => {
-  const html = render({ quoteId: "q-1", backHref: BACK_WITH_CASE });
-  assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'));
+// ───────────────────────────── 🔴 Excel 받기는 없앴다 (2026-10-06)
+
+/**
+ * 사용자 결정 — 「내려받기도 아예 없앤다」. 견적서 엑셀은 [저장]이 사내 공유폴더에 넣으므로
+ * (server/actions/quotes.ts) 이 화면에서 받을 일이 없다. **저장 여부로 갈리던 갈래도 함께
+ * 없앴다** — 가리킬 받기가 없으면 「저장한 뒤에 받을 수 있습니다」도 거짓말이 된다.
+ *
+ * 🔴 셋을 함께 보는 까닭: 주소만 지우고 글자를 남기거나, 글자만 지우고 주소를 남기면
+ * 한쪽 시험만 통과한다.
+ */
+function assertNoExcelDownload(html: string) {
+  assert.ok(!html.includes("/xlsx"), "받기 주소가 되살아났다");
+  assert.ok(!html.includes("Excel 받기"), "[Excel 받기]가 되살아났다");
+  assert.ok(!html.includes("Excel 은 저장한 뒤에"), "옛 곁말이 남았다");
+}
+
+test("🔴 돌아가기 주소를 받아도 받기는 없다", () => {
+  assertNoExcelDownload(render({ quoteId: "q-1", backHref: BACK_WITH_CASE }));
 });
 
-// ───────────────────────────── Excel 받기는 종전대로 저장 여부로 갈린다
-
-test("Excel 받기: 저장 전에는 링크 대신 왜 못 받는지 적는다", () => {
-  const html = render({ quoteId: null, onClose: () => {} });
-
-  assert.ok(html.includes("Excel 은 저장한 뒤에 받을 수 있습니다"));
-  assert.ok(!html.includes("/xlsx"), "만들 수 없는 파일의 링크를 내밀면 안 된다");
+test("🔴 저장 전에도 저장 뒤에도 받기가 없다 — 갈래 자체가 사라졌다", () => {
+  assertNoExcelDownload(render({ quoteId: null, onClose: () => {} }));
+  assertNoExcelDownload(render({ quoteId: "q-1", onClose: () => {} }));
+  assertNoExcelDownload(render({ quoteId: "q-1" }));
 });
 
-test("Excel 받기: 저장된 견적서면 겹쳐 뜬 미리보기에서도 받기 링크다", () => {
-  // 돌아가기 기준이 onClose 로 바뀌었다고 이쪽까지 딸려 가면, 수정 중에는
-  // 받을 수 있는 파일을 못 받게 된다.
-  const html = render({ quoteId: "q-1", onClose: () => {} });
-
-  assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'));
-  assert.ok(!html.includes("Excel 은 저장한 뒤에"));
-});
-
-test("Excel 받기: 독립 페이지에서도 받기 링크다", () => {
-  const html = render({ quoteId: "q-1" });
-  assert.ok(html.includes('href="/api/quotes/q-1/xlsx"'));
+test("🔴 [인쇄 · PDF로 저장]은 그대로다 — 미리보기는 없앤 기능이 아니다", () => {
+  for (const html of [render({ quoteId: null, onClose: () => {} }), render({ quoteId: "q-1" })]) {
+    assert.ok(html.includes(">인쇄 · PDF로 저장</button>"), html);
+  }
 });
 
 // ───────────────────────────── 통전작업 제외 — ③ 을 그리지 않는다

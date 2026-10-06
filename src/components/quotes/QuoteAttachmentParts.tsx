@@ -473,7 +473,7 @@ export function ExcelOnlySwitch({
         <span className="font-medium text-zinc-900 dark:text-zinc-50">엑셀 전용 견적서</span>
         <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
           손으로 만든 엑셀로 발행합니다 — 부품 · 수리 작업 · 작업 내역 · 작업비 구역을 쓰지 않고 공급가액을 직접
-          적습니다. [견적서 받기]는 「수기 견적서 엑셀」 칸에 붙인 파일을 내려줍니다.
+          적습니다. 「수기 견적서 엑셀」 칸에 붙인 파일이 곧 보낸 견적서입니다.
         </span>
       </span>
     </label>

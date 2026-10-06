@@ -126,7 +126,7 @@ describe("실패 — 사용자 결정의 셋과 그 밖", () => {
       kind: "failed",
       reason: "XLS_LEGACY",
       message:
-        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 [견적서 받기]로 받아 보세요",
+        "옛 엑셀 형식(.xls)이라 미리보기를 그릴 수 없습니다 — xlsx 로 다시 저장해 올리거나 「수기 견적서 엑셀」 칸에서 받아 보세요",
     });
     // 몸통이 JSON 이 아니어도 415 면 같은 문장.
     const bare = quoteExcelPreviewFailureOf(415, null);

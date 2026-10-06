@@ -224,15 +224,16 @@ describe("㉢ 합계 — 설명 줄은 들어가지 않는다", () => {
 });
 
 describe("㉣ 도구모음 · 내자 · OH 는 그대로", () => {
-  test("받기 · 인쇄 단추가 케이블에도 있다 — 열린 통로다", () => {
+  test("인쇄 단추가 케이블에도 있다 — 🔴 받기는 어느 종류에도 없다(2026-10-06)", () => {
     const html = markup(cableQuote());
-    assert.ok(html.includes("/api/quotes/8f1c0a20-0000-4000-8000-000000000001/xlsx"), "받기 링크가 없다");
     assert.ok(text(html).includes("인쇄 · PDF로 저장"), "인쇄 단추가 없다");
+    assert.ok(!html.includes("/xlsx"), "받기 링크가 되살아났다");
   });
 
-  test("저장 전(새 견적서)에는 받기 대신 까닭을 적는다 — 위 갈래와 같은 규칙", () => {
+  test("저장 전(새 견적서)에도 같다 — 저장 여부로 갈리던 곁말이 없어졌다", () => {
     const body = text(markup(cableQuote(), null));
-    assert.ok(body.includes("Excel 은 저장한 뒤에 받을 수 있습니다"), body);
+    assert.ok(!body.includes("Excel 은 저장한 뒤에 받을 수 있습니다"), body);
+    assert.ok(body.includes("인쇄 · PDF로 저장"), body);
   });
 
   test("🔴 종류를 안 넘긴 장은 예전 그대로다 — 내자 · OH 미리보기가 달라지면 안 된다", () => {
