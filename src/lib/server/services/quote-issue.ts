@@ -328,6 +328,9 @@ function archiveNamingOf(quote: QuoteEditData): QuoteArchiveNamingInput {
     modelName: quote.modelNameText,
     lotNumber: quote.lotNumberText,
     serialNumber: quote.serialNumberText,
+    // 🔴 폴더 · 파일 이름의 **꼬리**다(2026-10-06). 빠뜨리면 견적서를 만들 때 선 폴더는
+    //    증상으로 끝나는데 받은 파일만 「수리 견적서」로 끝나 줄기가 둘로 갈라진다.
+    faultDescription: quote.faultDescriptionText,
   };
 }
 

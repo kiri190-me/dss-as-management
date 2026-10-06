@@ -6,6 +6,7 @@ import {
   matchesQuoteArchiveFolder,
   numberedQuoteArchiveName,
   QUOTE_ARCHIVE_MAX_STEM_LENGTH,
+  QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH,
   quoteArchiveBaseNumber,
   quoteArchiveFileName,
   quoteArchiveFolderName,
@@ -217,6 +218,121 @@ test("파일 이름 — 번호는 이 견적서 번호 그대로, OH 는 `(OH포
 test("결재 PDF — 파일 이름에서 확장자를 떼고 ` - 有印.pdf`", () => {
   assert.equal(quoteArchiveSignedPdfFileName(DOMESTIC), `${STEM} - 有印.pdf`);
   assert.equal(quoteArchiveSignedPdfFileName(OVERHAUL_BRANCH), `${BRANCH_STEM}(OH포함) - 有印.pdf`);
+});
+
+/*
+ * ============================================================================
+ * 꼬리는 **신고증상**이다 (2026-10-06)
+ * ============================================================================
+ * 사내 공유폴더의 2026 년 폴더를 실제로 읽어 보니 꼬리가 「수리 견적서」가 아니라 그 건의
+ * 신고증상이었다. 증상이 없는 건만 「수리 견적서」로 끝난다.
+ *
+ * 🔴 **아래 보기의 공급처 · 모델 · L/N · S/N 은 전부 가짜다** — 이 저장소는 공개다
+ * (위 DOMESTIC 과 같은 규율). 실측한 **모양**(번호 + 네 조각 + 증상)만 그대로 쓴다.
+ * ============================================================================
+ */
+
+/** 사내 폴더와 같은 모양으로 사람이 이미 만들어 둔 폴더 이름(조각은 가짜다). */
+const EXISTING_FOLDER_WITH_SYMPTOM = "DSS 2026-001 가나상사 MODEL-X1 L123 S456 전원 불량 발생";
+
+test("🔴 신고증상이 있으면 폴더 이름이 **그 증상**으로 끝난다", () => {
+  assert.equal(
+    quoteArchiveFolderName({ ...DOMESTIC, faultDescription: "전원 불량 발생" }),
+    "DSS 2026-089 가나상사 MODEL-X1 L123 S456 전원 불량 발생"
+  );
+  // 「수리 견적서」가 증상 뒤에 또 붙지 않는다 — 꼬리는 하나다.
+  assert.equal(
+    quoteArchiveFolderName({ ...DOMESTIC, faultDescription: "전원 불량 발생" }).includes("수리 견적서"),
+    false
+  );
+  // 가지 번호 견적서의 폴더도 본 번호 + 같은 꼬리다.
+  assert.equal(
+    quoteArchiveFolderName({ ...OVERHAUL_BRANCH, faultDescription: "탄내 발생" }),
+    "DSS 2026-089 가나상사 MODEL-X1 L123 S456 탄내 발생"
+  );
+  // 줄바꿈 · 금지 글자가 섞여 들어와도 한 줄이 된다(다듬기는 다른 조각과 한 벌이다).
+  assert.equal(
+    quoteArchiveFolderName({ ...DOMESTIC, faultDescription: "전원\n불량/발생" }),
+    "DSS 2026-089 가나상사 MODEL-X1 L123 S456 전원 불량 발생"
+  );
+});
+
+test("🔴 이름 규칙을 바꿔도 **기존 폴더를 찾는다** — 찾기는 꼬리를 보지 않는다", () => {
+  // 증상으로 끝나는 폴더를 본 번호로 찾는다.
+  assert.equal(matchesQuoteArchiveFolder(EXISTING_FOLDER_WITH_SYMPTOM, "DSS 2026-001"), true);
+  // 가지 번호 견적서도 같은 폴더로 간다.
+  assert.equal(matchesQuoteArchiveFolder(EXISTING_FOLDER_WITH_SYMPTOM, "DSS 2026-001-1"), true);
+  // 「수리 견적서」로 끝나던 옛 폴더도 그대로 찾는다 — 둘을 가르지 않는다.
+  assert.equal(matchesQuoteArchiveFolder(STEM, "DSS 2026-089"), true);
+  // 이웃 번호의 폴더는 여전히 아니다(경계를 본다).
+  assert.equal(matchesQuoteArchiveFolder(EXISTING_FOLDER_WITH_SYMPTOM, "DSS 2026-0011"), false);
+  assert.equal(matchesQuoteArchiveFolder(EXISTING_FOLDER_WITH_SYMPTOM, "DSS 2026-002"), false);
+  // 꼬리가 달라도 **이름을 새로 짓는 쪽**은 그 폴더를 가리킨다 — 찾기가 먼저라 새로 만들지 않는다.
+  assert.equal(
+    matchesQuoteArchiveFolder(
+      EXISTING_FOLDER_WITH_SYMPTOM,
+      // 증상을 그 사이에 고쳤어도 번호가 같으면 같은 폴더다.
+      "DSS 2026-001"
+    ),
+    true
+  );
+});
+
+test("🔴 신고증상이 비면 꼬리는 「수리 견적서」 — 사내 폴더에도 그런 건이 있다", () => {
+  for (const empty of [null, undefined, "", "   ", "\n\t", "...", "."]) {
+    assert.equal(
+      quoteArchiveFolderName({ ...DOMESTIC, faultDescription: empty }),
+      STEM,
+      `빈 증상으로 치지 않았다: ${JSON.stringify(empty)}`
+    );
+  }
+  // 파일 이름 · 결재 PDF 도 같다.
+  assert.equal(quoteArchiveFileName({ ...DOMESTIC, faultDescription: null }, { extension: "xlsx" }), `${STEM}.xlsx`);
+  assert.equal(quoteArchiveSignedPdfFileName({ ...DOMESTIC, faultDescription: "" }), `${STEM} - 有印.pdf`);
+});
+
+test("🔴 아주 긴 증상은 잘려 들어가고, 전체 이름이 상한을 넘지 않는다", () => {
+  const long = quoteArchiveFolderName({ ...DOMESTIC, faultDescription: "증".repeat(400) });
+  assert.ok(long.length <= QUOTE_ARCHIVE_MAX_STEM_LENGTH, `폴더 이름이 길다: ${long.length}`);
+  // 증상 혼자 이름을 다 차지하지 않는다 — 어느 건인지 가리는 넷이 멀쩡히 남는다.
+  assert.equal(long, `DSS 2026-089 가나상사 MODEL-X1 L123 S456 ${"증".repeat(QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH)}`);
+
+  // 네 조각까지 모두 길면 전체 상한이 한 번 더 줄인다(그래도 상한 안이다).
+  const everything = quoteArchiveFolderName({
+    ...DOMESTIC,
+    customerName: "가".repeat(200),
+    modelName: "모".repeat(150),
+    serialNumber: "시".repeat(100),
+    faultDescription: "증".repeat(400),
+  });
+  assert.ok(everything.length <= QUOTE_ARCHIVE_MAX_STEM_LENGTH, `폴더 이름이 길다: ${everything.length}`);
+  assert.ok(everything.startsWith("DSS 2026-089 "), everything);
+
+  // 파일 이름 · 결재 PDF 도 같은 줄기를 쓴다 — NAS 한도(255 바이트)를 번호 꼬리까지 지킨다.
+  const naming = { ...OVERHAUL_BRANCH, faultDescription: "증".repeat(400) };
+  const file = quoteArchiveFileName(naming, { extension: "xlsx" });
+  const pdf = quoteArchiveSignedPdfFileName(naming);
+  assert.ok(file.endsWith(`${"증".repeat(QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH)}(OH포함).xlsx`), file);
+  assert.ok(pdf.endsWith(`${"증".repeat(QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH)}(OH포함) - 有印.pdf`), pdf);
+  assert.ok(Buffer.byteLength(numberedQuoteArchiveName(file, 99)) <= 255);
+  assert.ok(Buffer.byteLength(numberedQuoteArchiveName(pdf, 99)) <= 255);
+
+  // 자른 자리에 공백 · 점이 남지 않는다.
+  const cut = quoteArchiveFolderName({ ...DOMESTIC, faultDescription: `${"증".repeat(19)}. 그 뒤` });
+  assert.ok(cut.endsWith(`${"증".repeat(19)}`), cut);
+});
+
+test("파일 이름의 꼬리도 함께 바뀐다 — 폴더와 같은 줄기를 쓴다", () => {
+  const naming = { ...DOMESTIC, faultDescription: "전원 불량 발생" };
+  const folder = quoteArchiveFolderName(naming);
+  assert.equal(quoteArchiveFileName(naming, { extension: "xlsx" }), `${folder}.xlsx`);
+  assert.equal(quoteArchiveSignedPdfFileName(naming), `${folder} - 有印.pdf`);
+  // 가지 번호 · OH 는 파일 이름만 번호가 다르다(폴더는 본 번호).
+  const branch = { ...OVERHAUL_BRANCH, faultDescription: "전원 불량 발생" };
+  assert.equal(
+    quoteArchiveFileName(branch, { extension: "xls" }),
+    "DSS 2026-089-1 가나상사 MODEL-X1 L123 S456 전원 불량 발생(OH포함).xls"
+  );
 });
 
 test("번호 붙인 후보 — 1 이면 그대로, 2 부터 확장자 앞에 ` (n)`", () => {

@@ -6,10 +6,17 @@
  *
  *   <루트>/
  *     21. 2026 내자견적서/                                  ← 연도 폴더
- *       DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서/    ← 견적서 폴더(본 번호)
- *         DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서.xls
- *         DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서 - 有印.pdf
- *         DSS 2026-089-1 가나상사 MODEL-X1 L123 S456 수리 견적서(OH포함).xls
+ *       DSS 2026-089 가나상사 MODEL-X1 L123 S456 전원 불량/      ← 견적서 폴더(본 번호)
+ *         DSS 2026-089 가나상사 MODEL-X1 L123 S456 전원 불량.xls
+ *         DSS 2026-089 가나상사 MODEL-X1 L123 S456 전원 불량 - 有印.pdf
+ *         DSS 2026-089-1 가나상사 MODEL-X1 L123 S456 전원 불량(OH포함).xls
+ *
+ * ── 꼬리는 **신고증상**이다 (2026-10-06 실측으로 바로잡음) ────────────────
+ * 사내 공유폴더의 2026 년 견적서 폴더 104 개를 실제로 읽어 보니 꼬리가 「수리 견적서」가
+ * 아니라 그 건의 **신고증상**이었다(`REF Hunting 발생` · `탄내 발생` · `Water Shortage
+ * 알람 발생`). 증상이 없는 건만 `수리 견적서` 로 끝난다 — 그래서 **증상이 비었을 때의
+ * 꼬리로** 그 말을 그대로 남겨 둔다. 폴더 이름과 그 안의 파일 이름은 같은 줄기를
+ * 쓰므로(사내 파일들이 그렇게 되어 있다) **파일 이름의 꼬리도 함께 바뀐다.**
  *
  * ── 「UUID 파일명」 규칙의 의도된 예외 ─────────────────────────────────────
  * 앱 저장소(UPLOADS_DIR)의 파일은 디스크 이름이 첨부 ID(UUID)다(attachment-path.ts).
@@ -38,6 +45,7 @@ import {
   normalizeShareFolderNameForCompare,
   numberedShareFolderFileName,
   sanitizeShareFolderNamePiece,
+  truncateShareFolderNamePiece,
 } from "./share-folder-naming";
 
 export {
@@ -68,6 +76,15 @@ export type QuoteArchiveNamingInput = {
   modelName?: string | null;
   lotNumber?: string | null;
   serialNumber?: string | null;
+  /**
+   * 신고증상(quotes.fault_description_text) — **폴더 · 파일 이름의 꼬리**다.
+   *
+   * 🔴 비었으면(null · 빈 글자 · 공백뿐 · 다듬고 나서 빈 조각) 꼬리가 「수리 견적서」다.
+   * 사내 공유폴더에도 그렇게 끝나는 폴더가 실제로 있다(증상을 안 적은 건).
+   *
+   * 🔴 **자유 입력이라 제 상한에서 먼저 잘린다** — 아래 QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH.
+   */
+  faultDescription?: string | null;
 };
 
 /** 이름을 만들 수 없는 입력(번호가 비었다 · 연도가 범위 밖 · 확장자가 이상하다). */
@@ -79,7 +96,7 @@ export class QuoteArchiveNamingError extends Error {
 }
 
 /**
- * 폴더 이름 · 파일 이름의 **줄기**(번호 + 공급처 · 모델 · L/N · S/N + 「수리 견적서」)의
+ * 폴더 이름 · 파일 이름의 **줄기**(번호 + 공급처 · 모델 · L/N · S/N + 신고증상)의
  * 상한, 글자 수(UTF-16 단위 — Windows 경로 한도가 세는 단위).
  *
  * 근거 둘:
@@ -92,13 +109,43 @@ export class QuoteArchiveNamingError extends Error {
  *   2. **NAS(Linux) 파일 이름 한도는 UTF-8 255 바이트다.** 줄기가 모두 한글이어도
  *      72 × 3 = 216 바이트, 가장 긴 꼬리가 29 바이트 — 245 바이트로 들어간다.
  *
- * 줄이는 것은 공급처 · 모델 · L/N · S/N 조각뿐이다. 번호 · 「수리 견적서」 ·
+ * 줄이는 것은 공급처 · 모델 · L/N · S/N · 신고증상 조각뿐이다. 번호 · 「수리 견적서」 ·
  * `(OH포함)` · ` - 有印` · 번호 붙인 꼬리 · 확장자는 절대 자르지 않는다 — 그래서 번호가
  * 비정상적으로 길면 이 상한을 넘는 이름이 나올 수 있다(그때는 디스크가 거절하고 저장
  * 모듈이 `failed` 로 돌려준다).
+ *
+ * 🔴 **값은 2026-10-06 꼬리 바꾸기에서도 그대로다.** 꼬리가 「수리 견적서」(6 자)에서
+ * 신고증상으로 바뀌었지만 위 두 근거(엑셀 218 자 · NAS 255 바이트)는 꼬리의 길이를 쓰지
+ * 않는다 — 가장 긴 파일 꼬리 `(OH포함) - 有印 (99).xlsx` 와 연도 폴더만 쓴다.
  */
 export const QUOTE_ARCHIVE_MAX_STEM_LENGTH = 72;
 
+/**
+ * **신고증상 조각 혼자** 쓸 수 있는 글자 수 상한.
+ *
+ * 🔴 신고증상은 자유 입력이라(화면의 여러 줄 입력칸) 줄바꿈 · 수백 자가 그대로 들어온다.
+ * 전체 상한만 두면 「가장 긴 조각부터 줄인다」 규칙에 걸려 **증상이 이름을 혼자 다 차지하고**
+ * 공급처 · 모델 · L/N · S/N 이 한 글자씩 남는다 — 사람이 탐색기 목록에서 못 알아본다.
+ * 연락서 폴더가 같은 문제를 같은 방식으로 이미 풀었다(CONTACT_FOLDER_MAX_SYMPTOM_LENGTH).
+ *
+ * ── 왜 20 자인가 (🔴 위 72 자 안에서 뽑는다 — 상한을 새로 만들지 않는다) ──
+ *   줄기 = 번호 + 공백 다섯 + 다섯 조각(공급처 · 모델 · L/N · S/N · 신고증상)
+ *   사내 2026 년 폴더의 번호는 모두 `DSS 2026-001` 꼴 **12 자**다.
+ *   → 다섯 조각이 나눠 쓸 자리 = 72 − 12 − 5 = **55 자**
+ *   → 신고증상에 20 자를 주면 나머지 넷에 **35 자**가 남는다.
+ *
+ * 실제 사내 폴더에서 그 넷이 가장 길었던 건이 `INVENIA`(7) · `RFK300FH-AD1`(12) ·
+ * `WU8159`(6) · `1701056`(7) = **32 자**라 세 자가 남는다. 증상 쪽은 `REF Hunting 발생`
+ * (16) · `탄내 발생`(5) 이 그대로 들어가고, `Water Shortage 알람 발생`(22) 처럼 긴 것만
+ * 끝이 잘린다 — 잘려도 **어느 건인지 가리는 넷은 멀쩡하다**, 그것이 이 상한의 목적이다.
+ *
+ * 🔴 **연락서의 20 과 숫자가 같지만 계산은 다르다.** 연락서는 머리가 인수번호 7 자라 넷에
+ * 40 자가 남는다(견적서는 번호가 다섯 자 길다). 한쪽을 고칠 일이 있어도 다른 쪽을 따라
+ * 고치지 말 것.
+ */
+export const QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH = 20;
+
+/** 신고증상이 **빈 장**의 꼬리. 사내 공유폴더에도 이렇게 끝나는 폴더가 실제로 있다. */
 const REPAIR_QUOTE_LABEL = "수리 견적서";
 const OVERHAUL_MARK = "(OH포함)";
 const SIGNED_PDF_MARK = " - 有印";
@@ -187,22 +234,28 @@ function requireNumber(quoteNumber: string): string {
 }
 
 /**
- * 번호 + 조각들 + 「수리 견적서」. 상한을 넘으면 **가장 긴 조각부터 한 글자씩** 줄인다
- * (길이가 같으면 뒤의 조각 — S/N 쪽부터). 번호와 「수리 견적서」는 자르지 않는다.
- * 줄이는 규칙 자체는 공용 모듈(buildShareFolderStem)에 있다 — 연락서 폴더도 같은 규칙이다.
+ * 번호 + 조각들 + 꼬리. 상한을 넘으면 **가장 긴 조각부터 한 글자씩** 줄인다(길이가 같으면
+ * 뒤의 조각 — 신고증상 쪽부터). 번호는 자르지 않는다. 줄이는 규칙 자체는 공용 모듈
+ * (buildShareFolderStem)에 있다 — 연락서 폴더도 같은 규칙이다.
+ *
+ * 🔴 **꼬리는 신고증상이다.** 증상이 있으면 그것이 **마지막 조각**으로 들어가고(전체 상한에
+ * 닿기 전에 제 상한에서 먼저 잘린다), 비어 있을 때만 「수리 견적서」가 꼬리로 붙는다 —
+ * 그 꼬리는 자르지 않는다.
  */
 function buildStem(number: string, input: QuoteArchiveNamingInput): string {
+  const symptom = truncateShareFolderNamePiece(input.faultDescription, QUOTE_ARCHIVE_MAX_SYMPTOM_LENGTH);
   return buildShareFolderStem({
     head: number,
-    pieces: [input.customerName, input.modelName, input.lotNumber, input.serialNumber],
-    tail: REPAIR_QUOTE_LABEL,
+    pieces: [input.customerName, input.modelName, input.lotNumber, input.serialNumber, symptom],
+    tail: symptom.length === 0 ? REPAIR_QUOTE_LABEL : null,
     maxLength: QUOTE_ARCHIVE_MAX_STEM_LENGTH,
   });
 }
 
 /**
- * 새로 만드는 견적서 폴더 이름: `{본 번호} {공급처} {모델} {L/N} {S/N} 수리 견적서`
- * (빈 조각은 뺀다). 가지 번호 견적서도 본 번호 폴더에 들어가므로 번호는 본 번호다.
+ * 새로 만드는 견적서 폴더 이름: `{본 번호} {공급처} {모델} {L/N} {S/N} {신고증상}`
+ * (빈 조각은 뺀다 — 신고증상이 비면 그 자리에 「수리 견적서」가 온다). 가지 번호
+ * 견적서도 본 번호 폴더에 들어가므로 번호는 본 번호다.
  */
 export function quoteArchiveFolderName(input: QuoteArchiveNamingInput): string {
   const baseNumber = quoteArchiveBaseNumber(requireNumber(input.quoteNumber));
@@ -235,8 +288,12 @@ function fileStem(input: QuoteArchiveNamingInput): string {
 }
 
 /**
- * 견적서 파일 이름: `{번호} {공급처} {모델} {L/N} {S/N} 수리 견적서` + (OH 면 `(OH포함)`,
+ * 견적서 파일 이름: `{번호} {공급처} {모델} {L/N} {S/N} {신고증상}` + (OH 면 `(OH포함)`,
  * 앞에 공백 없음) + `.확장자`. 번호는 이 견적서 번호 그대로다.
+ *
+ * 🔴 **폴더 이름과 같은 줄기를 쓴다** — 그래서 꼬리를 신고증상으로 바꾸면 파일 이름도 함께
+ * 바뀐다(사내 파일들이 폴더 이름과 같은 줄기를 쓰고 있다). 🔴 폴더를 **찾는** 일은 꼬리를
+ * 보지 않으므로(matchesQuoteArchiveFolder) 전에 만든 파일 · 폴더는 그대로 찾힌다.
  */
 export function quoteArchiveFileName(input: QuoteArchiveNamingInput, options: { extension: string }): string {
   return `${fileStem(input)}.${normalizeExtension(options.extension)}`;

@@ -72,6 +72,12 @@ import {
  * 첫째 · 디스크의 실제 이름)으로 그 견적서의 폴더를 찾기만 한다 — mkdir · 파일 쓰기가
  * 0 이다. 없으면 `not-found` 로 끝난다(만들어 주지 않는다). 돌려주는 것은 루트 기준
  * 슬래시 상대 경로뿐이다 — 루트 값은 부르는 쪽도 응답에 싣지 않는다.
+ *
+ * ── 폴더만 만들기 (2026-10-06 — 견적서를 새로 만들 때) ────────────────────
+ * createQuoteArchiveFolder 는 **파일을 한 자도 쓰지 않고** 연도 폴더 · 견적서 폴더만
+ * 세운다. 견적서를 저장한 그 자리에서 서류함이 함께 서게 하기 위한 것이다(사람이 그
+ * 폴더에 손으로 서류를 넣기 시작할 수 있다). 폴더를 만드는 코드는 **저장이 쓰는
+ * findOrCreateFolder 그대로**다 — 두 벌이 되면 반드시 갈라진다.
  * ============================================================================
  */
 
@@ -269,6 +275,106 @@ async function find(input: FindQuoteArchiveFolderInput): Promise<QuoteArchiveFol
 
   return {
     status: "found",
+    relativePath: [yearFolder.name, quoteFolder.name].join("/"),
+    multipleFolderMatches: yearFolder.multiple || quoteFolder.multiple,
+  };
+}
+
+export type CreateQuoteArchiveFolderInput = {
+  /**
+   * 공유폴더 루트. 주지 않으면(`undefined` · `null`) 설정을 읽는다 — 비어 있으면
+   * `disabled` 로 끝나고 🔴 **디스크를 한 번도 보지 않는다.** 시험에서는 임시 폴더를 준다.
+   */
+  root?: string | null;
+  /** 발행일자 `"YYYY-MM-DD"` — 연도 폴더를 정한다. */
+  quoteDate: string;
+  naming: QuoteArchiveNamingInput;
+};
+
+export type QuoteArchiveFolderCreation =
+  /** 이번에 만들었다(비어 있는 폴더다). */
+  | {
+      status: "created";
+      /** 루트 기준 슬래시 경로 — `연도 폴더/견적서 폴더`. 디스크의 실제 이름이다. */
+      relativePath: string;
+      /** 맞는 연도 폴더가 둘 이상이어서 이름순 첫째를 골랐다(저장과 같은 선택). */
+      multipleFolderMatches: boolean;
+    }
+  /** 이미 있었다 — **만들지 않았다.** [견적서 받기] 가 먼저 만들었거나 사람이 만들어 둔 폴더다. */
+  | { status: "found"; relativePath: string; multipleFolderMatches: boolean }
+  /** 공유폴더 위치가 설정되지 않았다 — 이 기능만 꺼져 있다. 실패가 아니다. */
+  | { status: "disabled" }
+  | { status: "failed"; reason: string };
+
+/**
+ * 그 견적서의 공유폴더 폴더를 **찾고, 없으면 만든다. 파일은 한 자도 쓰지 않는다.**
+ * **던지지 않는다** — 모든 실패가 `{ status: "failed", reason }` 으로 돌아온다.
+ *
+ * 규율은 저장(saveToQuoteArchive)과 **같은 한 벌**이다:
+ *  · 🔴 **루트를 만들지 않는다**(머리말 「루트는 만들지 않는다」 — 연결이 빠진 채 만들면
+ *    컨테이너 임시 디스크에 쌓고 「만들었습니다」라고 거짓말하게 된다)
+ *  · 🔴 **본 번호로 먼저 찾는다** — 있으면 만들지 않고 그것을 쓴다(꼬리는 보지 않으므로
+ *    이름 규칙이 바뀌어도 사람이 만들어 둔 폴더를 그대로 찾는다)
+ *  · 🔴 `recursive` 없이 만든다. `EEXIST` 면 **다시 찾아** 그것을 쓴다(둘이 동시에 저장)
+ *  · 🔴 사유에 **경로 · 루트를 담지 않는다**
+ *
+ * 🔴 **돌려주는 `relativePath` 에는 고객사 · S/N 이 들어 있다**(폴더 이름이 그렇다) —
+ * 부르는 쪽은 그것을 로그에 적지 않는다.
+ */
+export async function createQuoteArchiveFolder(
+  input: CreateQuoteArchiveFolderInput
+): Promise<QuoteArchiveFolderCreation> {
+  const configured = input.root === undefined || input.root === null ? resolveQuoteArchiveRoot() : input.root;
+  if (configured === null || configured.trim().length === 0) {
+    return { status: "disabled" };
+  }
+
+  try {
+    return await makeFolder(configured, input);
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: error instanceof ShareFolderFailure ? error.reason : reasonFromFsError(error),
+    };
+  }
+}
+
+async function makeFolder(rawRoot: string, input: CreateQuoteArchiveFolderInput): Promise<QuoteArchiveFolderCreation> {
+  const year = quoteArchiveYearFromDate(input.quoteDate);
+  if (year === null) {
+    throw new ShareFolderFailure("발행일자가 올바르지 않아 연도 폴더를 정할 수 없습니다.");
+  }
+
+  let yearFolderName: string;
+  let quoteFolderName: string;
+  try {
+    yearFolderName = quoteArchiveYearFolderName(year);
+    quoteFolderName = quoteArchiveFolderName(input.naming);
+  } catch {
+    throw new ShareFolderFailure("견적서 정보로 폴더 이름을 만들 수 없습니다(발행번호를 확인하세요).");
+  }
+
+  const root = await requireExistingRoot(rawRoot);
+
+  const yearFolder = await findOrCreateFolder(
+    root,
+    root,
+    (name) => isQuoteArchiveYearFolder(name, year),
+    yearFolderName
+  );
+  // 이을 때는 디스크의 실제 이름을 쓴다 — 다듬은 이름으로 이으면 없는 폴더가 된다.
+  const yearDirectory = path.join(root, yearFolder.name);
+
+  const quoteFolder = await findOrCreateFolder(
+    root,
+    yearDirectory,
+    (name) => matchesQuoteArchiveFolder(name, input.naming.quoteNumber),
+    quoteFolderName
+  );
+
+  return {
+    // 연도 폴더를 만들었어도 「만들었다」를 가르는 것은 **견적서 폴더**다 — 사람이 보는 것이 그것이다.
+    status: quoteFolder.created ? "created" : "found",
     relativePath: [yearFolder.name, quoteFolder.name].join("/"),
     multipleFolderMatches: yearFolder.multiple || quoteFolder.multiple,
   };

@@ -8,10 +8,12 @@ import {
   isValidExpectedVersion,
   isValidQuoteId,
   validateQuoteFields,
+  type QuoteFields,
 } from "@/lib/validation/quote-input";
 import { createQuote, updateQuote } from "@/lib/db/mutations/quotes";
 import { permanentlyDeleteQuote, restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
 import { lookupIntakeForQuote, type QuoteIntakeLookup } from "@/lib/db/queries/quotes";
+import { createQuoteArchiveFolder } from "@/lib/storage/quote-archive";
 
 /**
  * ============================================================================
@@ -94,6 +96,48 @@ async function resolveActingUser(required: "READ" | "WRITE") {
   return { ok: true as const, actingUser };
 }
 
+/**
+ * ============================================================================
+ * 🔴 새 견적서를 저장하면 그 순간 **공유폴더에 폴더가 선다** (2026-10-06)
+ * ============================================================================
+ * 전에는 [견적서 받기] · 결재 PDF 저장이 파일을 쓸 때 폴더가 함께 생겼다. 그래서 견적서를
+ * 적어 두기만 한 건은 서류함에 자리가 없었고, 사람이 그 사이에 받은 서류를 넣을 곳이 없었다.
+ * 이제 **만드는 순간**(고치는 순간이 아니다) 빈 폴더를 세운다.
+ *
+ * 접수 때 연락서 폴더를 만드는 자리(services/create-repair-case.ts)가 정해 둔 규율을
+ * 글자 그대로 따른다:
+ *
+ *  · 🔴 **DB 트랜잭션 바깥이다** — mutation 이 돌아온 **뒤**, `if (result.ok)` 블록 안.
+ *    파일시스템 작업은 롤백되지 않는다.
+ *  · 🔴 **폴더를 못 만들어도 견적서 저장은 그대로다.** 이 토막에 `return` 도 `throw` 도
+ *    없고, 끝은 늘 아래의 `return result;` 하나다. 창고가 늦거나 꺼져 있다고 사람이 적은
+ *    견적서가 사라지면 안 된다.
+ *  · 🔴 **고치기(updateQuoteAction)에는 붙이지 않는다.** 이름 재료가 바뀌었다고 폴더를
+ *    하나 더 세우면 같은 견적서의 서류가 두 폴더로 갈라진다(찾기는 번호만 보므로 기존
+ *    폴더를 그대로 쓴다 — 고칠 때 할 일이 없다).
+ *  · 🔴 **로그에 폴더 이름 · 경로 · 오류 message 를 적지 않는다.** 폴더 이름에는 공급처와
+ *    S/N 이, fs 오류 message 에는 경로가 들어 있다. 남기는 것은 견적서 id 와 상태 코드,
+ *    그리고 storage 가 경로 없이 만든 짧은 사유뿐이다.
+ *  · `created` · `found` · `disabled` 는 정상 상태라 조용히 지나간다.
+ *
+ * 폴더를 만드는 일 자체(루트를 만들지 않기 · 본 번호로 먼저 찾기 · 파일을 쓰지 않기)는
+ * storage/quote-archive.ts 의 createQuoteArchiveFolder 한 자리에만 있다.
+ * ============================================================================
+ */
+
+/** 폴더 이름을 짓는 재료 — 🔴 꼬리는 **신고증상**이다(domain/quote-archive-naming.ts). */
+function archiveNamingOfFields(fields: QuoteFields) {
+  return {
+    quoteNumber: fields.quoteNumber,
+    kind: fields.kind,
+    customerName: fields.customerNameText,
+    modelName: fields.modelNameText,
+    lotNumber: fields.lotNumberText,
+    serialNumber: fields.serialNumberText,
+    faultDescription: fields.faultDescriptionText,
+  };
+}
+
 export async function createQuoteAction(input: {
   fields: Record<string, unknown>;
 }): Promise<QuoteActionResult> {
@@ -110,14 +154,40 @@ export async function createQuoteAction(input: {
     };
   }
 
+  let result: QuoteActionResult;
   try {
-    return await createQuote({ fields: validation.data, actorUserId: auth.actingUser.id });
+    result = await createQuote({ fields: validation.data, actorUserId: auth.actingUser.id });
   } catch (err) {
     // 값 자체는 절대 로그에 담지 않는다 — 품명·신고증상에 고객사 사정이 섞일 수
     // 있다(schema/quotes.ts 의 PII 항목).
     console.error("createQuoteAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
+
+  if (result.ok) {
+    try {
+      const folder = await createQuoteArchiveFolder({
+        quoteDate: validation.data.quoteDate,
+        naming: archiveNamingOfFields(validation.data),
+      });
+      // 만들었다 · 이미 있었다 · 꺼져 있다는 정상 상태라 시끄럽게 굴지 않는다.
+      if (folder.status !== "created" && folder.status !== "found" && folder.status !== "disabled") {
+        console.error("새 견적서의 공유폴더 폴더를 만들지 못했습니다", {
+          quoteId: result.id,
+          status: folder.status,
+          reason: folder.reason,
+        });
+      }
+    } catch (folderError) {
+      // 🔴 오류의 message 를 적지 않는다 — fs 오류에는 경로가 들어 있다.
+      console.error("새 견적서의 공유폴더 폴더에서 예상치 못한 오류", {
+        quoteId: result.id,
+        name: folderError instanceof Error ? folderError.name : typeof folderError,
+      });
+    }
+  }
+
+  return result;
 }
 
 export async function updateQuoteAction(input: {

@@ -139,6 +139,9 @@ function namingOf(fields: QuoteFields): QuoteArchiveNamingInput {
     modelName: fields.modelNameText,
     lotNumber: fields.lotNumberText,
     serialNumber: fields.serialNumberText,
+    // 🔴 폴더 · 파일 이름의 **꼬리**다(2026-10-06) — 받기 쪽 archiveNamingOf 와 같은 재료여야
+    //    기대하는 이름이 어긋나지 않는다. 이 파일의 보기는 늘 null 이라 꼬리는 「수리 견적서」다.
+    faultDescription: fields.faultDescriptionText,
   };
 }
 
