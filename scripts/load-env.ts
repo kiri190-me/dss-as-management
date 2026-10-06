@@ -32,4 +32,13 @@ if (process.env.DSS_DB_TEST_MODE === "1" || isIntegrationTestProcess) {
   // 폴더를 만든다 — 시험이 접수를 한 건 만들 때마다 거기에 폴더가 하나 생긴다.
   // 폴더가 필요한 시험은 mkdtemp 임시 폴더를 **직접** 넣어 쓴다.
   delete process.env.CONTACT_FOLDER_ARCHIVE_DIR;
+
+  // 🔴 견적서 공유폴더도 같다. 어제까지는 사람이 [견적서 받기]를 눌러야 닿았지만,
+  // 2026-10-06(견적서 공유폴더 조각)부터는 **견적서를 저장하는 것만으로** 그 폴더에
+  // 연도 폴더 · 견적서 폴더가 서고 엑셀 한 장이 들어간다 — actions/quotes.ts 가
+  // createQuoteArchiveFolder 와 archiveQuoteDocumentOnSave 를 부르고, 둘 다 루트를
+  // 안 받으면 그 자리에서 QUOTE_ARCHIVE_DIR 을 읽는다. 견적서를 만들거나 고치는 시험이
+  // 하나만 있어도 사내 서류함에 폴더가 생긴다.
+  // 폴더가 필요한 시험은 mkdtemp 임시 폴더를 `root`(`archiveRoot`)로 **직접** 넣어 쓴다.
+  delete process.env.QUOTE_ARCHIVE_DIR;
 }

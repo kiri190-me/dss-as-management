@@ -199,7 +199,27 @@ describe("② 주인은 넷 중 하나다 — 나머지 셋은 NULL", () => {
           checksumSha256: "0".repeat(64),
           uploadedBy: uploaderId,
         }),
-      /attachments_kind_owner_alone/,
+      // 🔴 Drizzle 이 "Failed query: ..." 로 한 겹 감싸므로 제약 이름은 cause 에 들어
+      // 있다. 겉 message 만 보는 정규식 형태(`/attachments_kind_owner_alone/`)는 **어떤
+      // 오류든** 통과시켜 — 오타로 엉뚱한 CHECK 나 NOT NULL 에 걸려도 "거부됐다"가 되어 —
+      // 이 시험이 증거 구실을 못 한다. mutations/attachments.integration.test.ts 의
+      // attachments_owner_not_both 확인과 같은 방식으로, **23514(check_violation)와
+      // 제약 이름을 둘 다** 본다.
+      (error: unknown) => {
+        const cause = (error as { cause?: unknown }).cause;
+        assert.ok(cause instanceof Error, "PostgresError 가 cause 로 실려 있어야 한다");
+        assert.equal(
+          (cause as { code?: string }).code,
+          "23514",
+          "CHECK 위반(23514)이 아니라 다른 이유로 거부됐다"
+        );
+        assert.match(
+          cause.message,
+          /attachments_kind_owner_alone/,
+          "다른 제약에 걸렸다 — 이 CHECK 가 서 있다는 증거가 아니다"
+        );
+        return true;
+      },
       "CHECK 가 막지 않는다"
     );
   });
