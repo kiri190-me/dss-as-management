@@ -115,6 +115,15 @@ src/components/quotes/QuoteArchiveFolderSection.test.tsx
 # 발행일자가 가장 이른 장 · 번호가 비면 빠진다 · 본 번호를 새로 짓지 않는다(저장 쪽과 같은
 # 함수) · 파일시스템을 보지 않는다.
 src/components/quotes/quote-archive-folder-groups.test.ts
+# 그 탭 **맨 아래**의 「같은 장비의 지난 견적서」 구역(2026-10-06) — 🔴 바로 위 「이 건의
+# 견적서 폴더」와 **다른 것**이다(사용자 결정 — 구역을 나눠 보여 준다). 🔴 불러오는 중 ·
+# 설정이 꺼짐 · 0 건이면 아무것도 그리지 않고, 읽다 실패했을 때만 짧게 알린다(조용히
+# 사라지면 고장인지 없는 건지 모른다) · 줄마다 연도 · 폴더 이름 · 뽑은 번호 · 파일 수 ·
+# 🔴 L/N 과 S/N 이 둘 다 있어야 그린다(`-` 는 빈 것으로 본다) · 🔴 여는 장치는 연락서 쪽
+# 자리 열기 단추 한 벌을 그대로 쓴다(주소 만들기 · 도우미 감지를 베끼지 않았다) ·
+# 🔴 자리는 「이 건의 견적서 폴더」 구역들 아래이고 앞 조각의 그 구역은 그대로다 ·
+# 탭이 공유폴더를 읽지 않는다 · print:hidden · 네트워크 없이 값으로 본다.
+src/components/quotes/QuoteArchiveProductFolderSection.test.tsx
 # 수리 건 상세의 [폴더 열기](연락서 폴더). 견적서 쪽과 같은 짝이다 — 흐름을 값으로 보는 것과
 # 자리 · 그려지는 것을 보는 것 둘.
 src/components/repair-cases/detail/contact-folder-open.test.ts

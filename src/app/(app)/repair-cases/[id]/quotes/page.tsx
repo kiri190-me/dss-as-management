@@ -3,6 +3,9 @@ import { notFound, redirect } from "next/navigation";
 
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
+import QuoteArchiveProductFolderSection, {
+  hasQuoteArchiveProductKeys,
+} from "@/components/quotes/QuoteArchiveProductFolderSection";
 import { groupQuotesByArchiveBaseNumber } from "@/components/quotes/quote-archive-folder-groups";
 import QuoteListScreen from "@/components/quotes/QuoteListScreen";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
@@ -156,6 +159,20 @@ export default async function RepairCaseQuotesPage({
       {archiveFolderGroups.map((group) => (
         <QuoteArchiveFolderSection key={group.baseNumber} quoteId={group.quoteId} label={group.baseNumber} />
       ))}
+
+      {/*
+        🔴 **「같은 장비의 지난 견적서」는 그 아래**다 — 위는 이 건의 폴더, 여기는 **같은
+        장비가 예전에 받은** 폴더들이다(지금 수리 건과 무관한 옛날 건이 섞인다. 사용자 결정
+        2026-10-06 — 구역을 나눠 따로 보여 준다). 겹치는 폴더는 통로가 뺀다.
+
+        🔴 L/N 이나 S/N 이 없는 건에서는 **구역을 아예 그리지 않는다** — 둘 다 있어야 장비가
+        확정된다(같은 S/N 에 모델이 여럿인 사례가 실제로 있다). 그래야 통로를 부르지도 않는다.
+
+        🔴 여기서도 공유폴더를 읽지 않는다 — 읽기는 화면이 뜬 뒤 구역이 스스로 한다.
+      */}
+      {hasQuoteArchiveProductKeys(resolved.lotNumber, resolved.serialNumber) && (
+        <QuoteArchiveProductFolderSection repairCaseId={resolved.id} />
+      )}
     </>
   );
 }
