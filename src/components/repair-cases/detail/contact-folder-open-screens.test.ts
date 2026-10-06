@@ -71,8 +71,12 @@ describe("자리 — 머리 카드의 인수번호 바로 오른쪽(같은 줄)"
 
   test("🔴 좁은 화면에서 접힌다 — 그 줄과 인수번호 묶음 둘 다 줄바꿈을 허용한다", () => {
     // 오른쪽 끝 보고서번호와 부딪히지 않게, 바깥 줄과 안쪽 묶음 모두 wrap 이다.
+    // 🔴 바깥 줄의 자리 배분은 2026-10-06(알약 조각)에 양끝 정렬에서 마지막 묶음의
+    // 자동 왼쪽 여백으로 바뀌었다 — 접혔을 때 [수정] 묶음이 왼쪽으로 가 버려서다.
+    // 그래서 여기서는 **줄바꿈을 허용하는가**만 못 박는다(정렬 방식은 머리 카드
+    // 시험이 본다: detail-header-placement.test.ts).
     assert.ok(
-      header.includes('<div className="flex flex-wrap items-baseline justify-between gap-2">'),
+      header.includes('<div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">'),
       "머리 줄이 줄바꿈을 허용하지 않는다"
     );
     assert.ok(

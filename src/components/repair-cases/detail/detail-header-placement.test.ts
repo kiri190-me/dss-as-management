@@ -58,6 +58,15 @@ const layout = flat(layoutSource);
 const detailViewSource = read("src/components/repair-cases/detail/RepairCaseDetailView.tsx");
 const headerSource = read("src/components/repair-cases/detail/DetailHeader.tsx");
 const header = flat(headerSource);
+const badgesSource = read("src/components/repair-cases/badges.tsx");
+/**
+ * 🔴 카드가 **실제로 그리는 부분**만 — 설명 주석을 걷어낸 것이다. 이 파일의
+ * 머리말에는 「가운뎃점」·「·」 같은 글자가 설명으로 수없이 나오므로, 「가운뎃점을
+ * 안 그린다」를 원본 전체에서 찾으면 영영 통과하지 못한다.
+ */
+const headerRender = flat(
+  headerSource.slice(headerSource.indexOf("return (")).replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+);
 const filesScreenSource = read("src/components/repair-cases/files/FilesScreen.tsx");
 const approvalScreenSource = read("src/components/repair-cases/approval/DatabaseApprovalScreen.tsx");
 
@@ -209,9 +218,9 @@ describe("🔴 ① 상태 배지는 [폴더 열기]와 **같은 줄**이다", ()
 describe("🔴 ② 값 묶음은 한 줄이고 보고서번호 **왼쪽**이다", () => {
   const reportNumber = indexOrFail(header, "<ReportNumberEditCell");
 
-  test("워크플로 유형 · 담당 엔지니어 · 모델 · L/N · S/N 이 보고서번호보다 앞이다", () => {
+  test("유형 · 담당 엔지니어 · 모델 · L/N · S/N 이 보고서번호보다 앞이다", () => {
     for (const [name, marker] of [
-      ["워크플로 유형", "uiText.workflowType[effective.workflowType]"],
+      ["유형", "uiText.workflowType[effective.workflowType]"],
       ["담당 엔지니어", "<EngineerEditCell"],
       ["모델", "effective.modelName"],
       ["L/N", "effective.lotNumber"],
@@ -234,12 +243,129 @@ describe("🔴 ② 값 묶음은 한 줄이고 보고서번호 **왼쪽**이다"
     assert.ok(block.includes("facts.map("), "값들을 한 자리에서 늘어놓지 않는다");
     assert.match(block, /className="flex flex-wrap items-baseline/, "값 묶음이 한 줄 묶음이 아니다");
   });
+});
 
-  test("뜻은 title 로 남는다 — 값만 보고 헷갈리지 않게", () => {
-    assert.ok(header.includes("title={fact.label}"), "이름표를 지우기만 하고 뜻을 안 남겼다");
-    for (const label of ["워크플로 유형", "담당 엔지니어", "고객사", "모델", "L/N", "S/N"]) {
-      assert.ok(headerSource.includes(`"${label}"`), `뜻이 안 적혀 있다: ${label}`);
+/**
+ * ============================================================================
+ * 🔴 ⑤-2 이름표를 **보이게** 되살렸다 — 알약 안에 (2026-10-06, 같은 날 두 번째)
+ * ============================================================================
+ * 앞 조각이 세로를 줄이려고 이름표를 전부 없앴더니 사용자가 보고 말했다 —
+ * 「워크플로 유형, 고객사, 모델명, L/N, S/N 가 구분감 있는 디자인이였으면
+ * 좋겠어. **지금은 뭐가 뭔지 모르겠어**」.
+ *
+ * 고른 모양: **연한 배경 알약 + 알약 안의 짧은 이름표**. 가운뎃점 구분자는 뺀다
+ * (알약이 가르는데 점까지 있으면 지저분하다). 담당 엔지니어는 알약을 안 입고
+ * 보고서번호 왼쪽, 오른쪽 묶음으로 옮긴다.
+ * ============================================================================
+ */
+describe("🔴 ⑤-2 다섯 조각이 **보이는 이름표**를 가진다", () => {
+  test("유형은 늘 서는 조각이고 이름표가 「유형」이다", () => {
+    assert.ok(
+      header.includes('key: "workflowType", label: "유형"'),
+      "유형 조각의 이름표가 「유형」이 아니다"
+    );
+  });
+
+  test("빠질 수 있는 네 조각도 각자 이름표를 들고 있다", () => {
+    for (const [key, label, field] of [
+      ["customerName", "고객사", "effective.customerName"],
+      ["modelName", "모델", "effective.modelName"],
+      ["lotNumber", "L/N", "effective.lotNumber"],
+      ["serialNumber", "S/N", "effective.serialNumber"],
+    ] as const) {
+      assert.ok(
+        header.includes(`["${key}", "${label}", ${field}]`),
+        `이름표가 값과 함께 서 있지 않다: ${label}`
+      );
     }
+  });
+
+  test("🔴 이름표가 **화면에 그려진다** — title 로 숨지 않는다", () => {
+    assert.ok(headerRender.includes("{fact.label}"), "이름표를 화면에 그리지 않는다");
+    assert.ok(headerRender.includes("{fact.value}"), "값을 화면에 그리지 않는다");
+    assert.equal(
+      headerSource.includes("title={fact.label}"),
+      false,
+      "이름표가 보이는데 title 까지 들고 있다 — 같은 말이 두 벌이면 한쪽만 고쳐진다"
+    );
+    // 이름표가 값보다 앞이다 — 「유상 Matcher 유형」이 되면 안 된다.
+    assert.ok(
+      headerRender.indexOf("{fact.label}") < headerRender.indexOf("{fact.value}"),
+      "이름표가 값 뒤에 붙었다"
+    );
+  });
+
+  test("🔴 이름표는 작고 연하게, 값은 보통 굵기로 또렷하게", () => {
+    const labelLine = indexOrFail(headerRender, "{fact.label}");
+    const valueLine = indexOrFail(headerRender, "{fact.value}");
+    const labelSpan = headerRender.slice(headerRender.lastIndexOf("<span", labelLine), labelLine);
+    const valueSpan = headerRender.slice(headerRender.lastIndexOf("<span", valueLine), valueLine);
+    assert.match(labelSpan, /text-xs/, "이름표가 값과 같은 크기다 — 값이 안 도드라진다");
+    // 🔴 바탕을 100 으로 올리면서 이름표도 600 으로 올렸다 — 500 은 그 바탕 위에서
+    // 명암비 4.45:1 이라 12px 글자 기준(4.5:1) 아래로 내려간다.
+    assert.match(labelSpan, /text-zinc-600/, "이름표가 진한 바탕 위에서 묻히는 회색이다");
+    assert.match(labelSpan, /dark:text-zinc-400/, "어두운 화면 쪽 이름표 색이 없다");
+    assert.match(valueSpan, /text-sm/, "값이 이름표만큼 작아졌다");
+    assert.match(valueSpan, /text-zinc-900/, "값이 또렷한 검정이 아니다");
+    assert.match(valueSpan, /dark:text-zinc/, "어두운 화면에서 값 색이 안 맞춰져 있다");
+  });
+
+  test("🔴 알약 배경이 밝은 화면 · 어두운 화면 **둘 다** 깔린다", () => {
+    // 🔴 처음 지시는 「상태 배지보다 연하게」였지만, 사용자가 화면을 보면서
+    // 「배경 색이 조금 더 찐했으면 좋겠어」라고 해 한 칸 올렸다(50 → 100,
+    // 어두운 쪽은 반투명 800 → 800). 한쪽만 올리면 밤에 보는 사람은 그대로다.
+    assert.match(headerRender, /rounded-full/, "알약 모양이 아니다");
+    assert.match(headerRender, /bg-zinc-100\b/, "밝은 화면 쪽 알약 배경이 없다 — 또는 다시 연해졌다");
+    assert.match(headerRender, /dark:bg-zinc-800\b/, "어두운 화면 쪽 알약 배경이 없다");
+    assert.equal(
+      headerRender.includes("dark:bg-zinc-800/"),
+      false,
+      "어두운 화면 쪽만 반투명으로 남았다 — 밝은 쪽만 진해진다"
+    );
+  });
+
+  test("🔴 알약 안쪽 여백이 상태 배지보다 좁다 — 가로를 아낀다", () => {
+    // 상태 배지는 좌우 2, 알약은 좌우 1.5. 다섯 알약이면 그만큼 가로가 돌아온다.
+    // 배경 단계는 배지와 같아졌지만(위 시험), 여백은 여전히 좁게 둔다.
+    assert.ok(badgesSource.includes("px-2"), "상태 배지의 여백이 바뀌었다 — 알약 쪽을 다시 볼 것");
+    assert.match(headerRender, /rounded-full bg-zinc-100 px-1\.5/, "알약 여백이 배지보다 좁지 않다");
+  });
+
+  test("🔴 가운뎃점 구분자가 없다 — 알약이 그 일을 한다", () => {
+    assert.equal(headerRender.includes("·"), false, "가운뎃점이 알약과 같이 남아 있다");
+  });
+});
+
+describe("🔴 ⑤-3 담당 엔지니어는 보고서번호 **왼쪽**, 오른쪽 묶음에 선다", () => {
+  const rightGroup = indexOrFail(header, "ml-auto");
+  const engineer = indexOrFail(header, "<EngineerEditCell");
+  const reportNumber = indexOrFail(header, "<ReportNumberEditCell");
+
+  test("둘 다 오른쪽으로 밀린 같은 묶음 안이다", () => {
+    assert.ok(engineer > rightGroup, "담당 엔지니어가 오른쪽 묶음 밖이다");
+    assert.ok(reportNumber > rightGroup, "보고서번호가 오른쪽 묶음 밖이다");
+    // 🔴 알약 묶음은 그보다 앞 — 담당 엔지니어가 알약들 사이에 남아 있으면 안 된다.
+    assert.ok(indexOrFail(header, "facts.map(") < rightGroup, "값 알약 묶음이 오른쪽 묶음 뒤에 있다");
+  });
+
+  test("🔴 담당 엔지니어가 보고서번호보다 **왼쪽**이다", () => {
+    assert.ok(engineer < reportNumber, "담당 엔지니어가 보고서번호 오른쪽으로 갔다");
+  });
+
+  test("🔴 접혀도 오른쪽에 붙는다 — 자동 왼쪽 여백", () => {
+    // 양끝 정렬이면 이 묶음만 아랫줄로 접혔을 때 왼쪽으로 가 버린다.
+    assert.match(headerRender, /className="ml-auto flex flex-wrap/, "오른쪽 묶음이 오른쪽으로 안 밀린다");
+  });
+
+  test("담당 엔지니어에도 이름표가 붙는다 — 이름만 있으면 누구인지 모른다", () => {
+    const block = header.slice(rightGroup, reportNumber);
+    assert.ok(block.includes("담당"), "담당 엔지니어 자리에 이름표가 없다");
+    assert.ok(header.slice(reportNumber - 400, reportNumber).includes("보고서번호"), "보고서번호 이름표가 없다");
+  });
+
+  test("🔴 알약을 입지 않는다 — 보고서번호와 같은 결이다", () => {
+    const block = headerRender.slice(indexOrFail(headerRender, "ml-auto"));
+    assert.equal(block.includes("rounded-full"), false, "오른쪽 묶음에 알약이 끼었다");
   });
 });
 
