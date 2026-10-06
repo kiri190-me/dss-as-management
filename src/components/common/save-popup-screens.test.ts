@@ -9,6 +9,11 @@ import { readFileSync } from "node:fs";
  * 이미 목록 위이거나(창) 한 건 안에 딸린 것을 붙이는 곳은 **팝업만** 띄우고 머문다 —
  * 담당자를 셋 붙이려고 매번 목록에서 다시 찾아 들어가게 하지 않으려는 것이다.
  *
+ * 그 뒤 「상세를 열어 칸을 잇달아 고치는」 화면들은 사용자 요청으로 머무는 쪽으로
+ * 옮겨 왔다 — 부품 상세(2026-09-17) · A/S 건 상세(2026-10-06). 문구는 그대로 두고
+ * 넘어갈 곳만 null 로 바꾸되, 머무는 화면은 저장 뒤 router.refresh() 로 값을 다시
+ * 읽어야 한다(목록으로 넘어갈 때 공짜로 얻던 갱신이 사라지기 때문이다).
+ *
  * 브라우저 없이 볼 수 있는 것은 소스뿐이라 부르는 모양을 읽는다. 각 항목은
  * [문구 식, 넘어갈 곳 식] 이고 파일 안에 적힌 순서다. 문구를 앞에서 변수로
  * 만들어 `{ message, … }` 로 넘긴 곳은 문구 식이 "message" 로 읽힌다.
@@ -77,15 +82,30 @@ test("견적서 — 만들기도 고치기도 왔던 목록으로 넘어간다",
   assert.equal(form.match(/leaving = true;\s*showSavePopup\(/g)?.length, 2);
 });
 
-test("A/S 상세의 섹션·칸 저장은 전체 A/S 현황으로 넘어간다 — 훅 한 곳에서", () => {
+test("A/S 상세의 섹션·칸 저장은 팝업만 띄우고 그 상세에 머문다 — 훅 한 곳에서", () => {
   const hook = readFileSync("src/components/repair-cases/detail/edit/useSectionEditSubmit.ts", "utf8");
+  // 2026-09-15 에는 저장하면 전체 A/S 현황(/repair-cases)으로 넘어갔다.
+  // 2026-10-06 사용자 요청으로 「확인 팝업만 뜨고 현재 화면에 그대로」로 되돌렸다 —
+  // 한 건을 열어 담당 엔지니어 따위를 잇달아 고치는데 한 칸마다 목록으로 튕겼기
+  // 때문이다. 바꾼 것은 넘어갈 곳뿐이고 문구는 그대로다.
   assert.match(
     hook,
-    /REPAIR_CASE_SAVED_POPUP: SavePopupRequest = \{\s*message: "A\/S 정보를 저장했습니다\.",\s*redirectTo: "\/repair-cases",\s*\}/
+    /REPAIR_CASE_SAVED_POPUP: SavePopupRequest = \{\s*message: "A\/S 정보를 저장했습니다\.",\s*redirectTo: null,\s*\}/
   );
-  assert.match(hook, /params\.onDone\(\);\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/);
+  assert.doesNotMatch(hook, /redirectTo: "\/repair-cases"/);
+  // 🔴 넘어가면 서버가 목록을 다시 그려 값이 갱신됐다. 그 자리에 남으면 그 갱신이
+  // 사라지므로, **저장이 성공한 경로에서**(실패·충돌은 그 위에서 return 한다) 화면을
+  // 다시 읽어야 한다 — 안 그러면 고친 값이 안 보여 저장이 안 된 것처럼 보이고,
+  // 묵은 version 이 그대로라 이어지는 저장이 충돌로 막힌다.
+  assert.match(
+    hook,
+    /if \(!result\.ok\) \{[\s\S]*?\}\s*router\.refresh\(\);\s*params\.onDone\(\);\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/
+  );
   // 빠뜨리면 타입이 막도록 필수다 — 새로 부르는 곳이 정하고 가야 한다.
   assert.match(hook, /savedPopup: SavePopupRequest \| null;/);
+  // 다섯 곳(접수 정보 · 제품 정보 · 고장/서비스 · 담당 엔지니어 · 보고서 번호)이
+  // 자기 모양을 적지 않고 **같은 상수**를 쓴다 — 그래서 위 한 줄만 고치면 다섯이 다
+  // 따라온다. 한 곳이라도 제 모양을 적으면 그 칸만 동작이 어긋난다.
   for (const name of [
     "IntakeInfoEditForm.tsx",
     "ProductInfoEditForm.tsx",
