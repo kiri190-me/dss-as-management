@@ -1,0 +1,3 @@
+ALTER TABLE "attachments" ADD COLUMN "product_model_kind" "product_model_kind";--> statement-breakpoint
+CREATE INDEX "attachments_product_model_kind_not_deleted_idx" ON "attachments" USING btree ("product_model_kind") WHERE is_deleted = false;--> statement-breakpoint
+ALTER TABLE "attachments" ADD CONSTRAINT "attachments_kind_owner_alone" CHECK ("attachments"."product_model_kind" IS NULL OR ("attachments"."repair_case_id" IS NULL AND "attachments"."product_model_id" IS NULL AND "attachments"."quote_id" IS NULL));
