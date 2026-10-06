@@ -324,3 +324,96 @@ describe("[새 견적서] 팝업", () => {
     assert.match(flat(sliceBetween(listSource, "export default function QuoteListScreen(", "}) {")), /newQuoteHref = "\/quotes\/new",/);
   });
 });
+
+/**
+ * ============================================================================
+ * 줄마다의 [Excel 보기] — 공유폴더에 저장된 그 견적서의 엑셀을 연다 (2026-10-06 사용자 지시)
+ * ============================================================================
+ * 「견적서 목록에서 [미리보기 PDF] 옆에 [EXEL 보기]를 만들어서 폴더에 있는 해당 견적서를
+ * 바로 열 수 있도록 해줘.」
+ *
+ * 누른 뒤의 흐름(어느 파일을 고르는가 · 무엇이라고 알리는가)은 값으로 도는 이웃 시험이
+ * 본다(quote-archive-excel-open.test.ts). 여기서 지키는 것은 **화면 쪽 약속**이다:
+ *  · 자리 = [미리보기 · PDF] 바로 오른쪽, **표와 카드 두 곳 모두**(창 폭에 따라 달라지지 않게)
+ *  · 🔴 **누를 때 찾는다** — 목록을 그릴 때 공유폴더를 미리 읽지 않는다(줄 수만큼 NAS 를 때린다)
+ *  · 🔴 **두 번 눌러도 두 번 열리지 않는다** — 찾는 동안 잠그고 눌린 것이 보인다
+ *  · 🔴 [설치 명령 복사]를 끄지 않는다 · Windows 가 아니면 그리지 않는다
+ *  · 🔴 [미리보기 · PDF]는 한 글자도 건드리지 않았다
+ * 화면을 그려 볼 수 없는 까닭은 이 파일 맨 위 머리말과 같다.
+ * ============================================================================
+ */
+describe("줄마다의 [Excel 보기]", () => {
+  const EXCEL_CALL = "<ArchiveExcelOpenButton row={row} />";
+  const PREVIEW_CALL = "<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />";
+  const buttonAt = listSource.indexOf("function ArchiveExcelOpenButton(");
+  const buttonSource = flat(listSource.slice(buttonAt < 0 ? 0 : buttonAt));
+
+  test("🔴 자리는 [미리보기 · PDF] 바로 오른쪽 — 표와 카드 두 곳 모두", () => {
+    for (const [name, source] of [["표", tableSource], ["카드", cardSource]] as const) {
+      assert.ok(source.includes(EXCEL_CALL), `${name} 에 [Excel 보기]가 없다`);
+      assert.ok(
+        source.includes(`${PREVIEW_CALL} ${EXCEL_CALL}`),
+        `${name} 에서 [미리보기 · PDF] 바로 다음이 아니다: ${source}`
+      );
+    }
+    assert.equal(flat(listSource).split(EXCEL_CALL).length - 1, 2, "부르는 곳이 둘이 아니다");
+  });
+
+  test("🔴 [미리보기 · PDF]는 그대로다 — 앱 양식이 없는 종류에는 여전히 안 내민다", () => {
+    const previewSource = flat(sliceBetween(listSource, "function PreviewLink(", "function DeleteButton("));
+    assert.ok(previewSource.includes("if (!canRenderQuoteDocument(row)) return null;"), previewSource);
+    assert.ok(previewSource.includes("미리보기 · PDF"), previewSource);
+    // [Excel 보기]는 그 판정을 **쓰지 않는다** — 사람이 손으로 넣어 둔 엑셀이 폴더에 있을 수
+    // 있고, 공유폴더 사정은 눌러 보기 전에 알 수 없다. 눌렀을 때 사실대로 말한다.
+    assert.ok(!buttonSource.includes("canRenderQuoteDocument"), buttonSource);
+    assert.ok(!buttonSource.includes("isExcelOnly"), buttonSource);
+  });
+
+  test("🔴 목록을 그릴 때 공유폴더를 미리 읽지 않는다 — 누를 때 한 번 부른다", () => {
+    assert.ok(buttonAt >= 0, "[Excel 보기] 조각이 없다");
+    assert.ok(!listSource.includes("useEffect"), "그릴 때 공유폴더를 읽는 효과가 생겼다");
+    assert.ok(!listSource.includes("loadQuoteArchiveFolderEntries"), "화면이 목록 통로를 직접 부른다");
+    assert.equal(flat(listSource).split("runQuoteArchiveExcelOpen(").length - 1, 1, "흐름을 부르는 곳이 하나가 아니다");
+    assert.ok(
+      buttonSource.includes("setOutcome(await runQuoteArchiveExcelOpen({ quoteId: row.id, quoteNumber: row.quoteNumber }));"),
+      buttonSource
+    );
+  });
+
+  test("🔴 두 번 눌러도 두 번 열리지 않는다 — 잠그고, 눌린 것이 보인다", () => {
+    assert.ok(buttonSource.includes("async function handleOpen() {"), buttonSource);
+    assert.ok(buttonSource.includes("if (busy) return; setBusy(true); setOutcome(null);"), buttonSource);
+    assert.ok(buttonSource.includes("disabled={busy}"), buttonSource);
+    assert.ok(buttonSource.includes("aria-busy={busy}"), buttonSource);
+    assert.ok(buttonSource.includes('{busy ? "여는 중…" : "Excel 보기"}'), buttonSource);
+    // 끝나면 반드시 풀린다 — 실패해도 단추가 영영 잠기지 않는다.
+    assert.ok(buttonSource.includes("} finally { setBusy(false); }"), buttonSource);
+  });
+
+  test("🔴 결과는 그 줄 옆에 적는다 — 화면 위 띠(trashError)를 쓰지 않는다", () => {
+    assert.ok(buttonSource.includes('<span role="status"'), buttonSource);
+    assert.ok(!buttonSource.includes("setTrashError"), "줄마다의 결과를 화면 위 띠에 적는다");
+  });
+
+  test("🔴 [설치 명령 복사]를 끄지 않는다 — 여는 장치가 내는 값을 그대로 따른다", () => {
+    assert.ok(buttonSource.includes("{outcome.offerHelperInstall && ("), buttonSource);
+    assert.ok(buttonSource.includes("setCopyLines(await runQuoteFolderHelperInstallCommandCopy());"), buttonSource);
+    assert.ok(buttonSource.includes("설치 명령 복사"), buttonSource);
+  });
+
+  test("🔴 Windows 가 아니면 그리지 않고, 인쇄에도 안 찍힌다 — 첫 렌더는 감춘다", () => {
+    assert.ok(listSource.includes("const hiddenOnServer = () => false;"), "서버 렌더용 스냅샷이 없다");
+    assert.ok(
+      buttonSource.includes("useSyncExternalStore(subscribeToNothing, isWindowsDesktopNow, hiddenOnServer)"),
+      buttonSource
+    );
+    assert.ok(buttonSource.includes("if (!isWindows) return null;"), buttonSource);
+    assert.ok(buttonSource.includes("print:hidden"), buttonSource);
+  });
+
+  test("🔴 화면이 파일을 만들거나 지우지 않는다 — 읽고 여는 것뿐이다", () => {
+    for (const forbidden of ["method: \"POST\"", "method: \"DELETE\"", "saveBlobAsDownload", ".blob(", "download="]) {
+      assert.ok(!buttonSource.includes(forbidden), `[Excel 보기]가 '${forbidden}' 를 쓴다`);
+    }
+  });
+});
