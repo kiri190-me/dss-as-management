@@ -2,7 +2,11 @@ import { notFound } from "next/navigation";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import { readSession } from "@/lib/auth/session";
+import { getRepairCaseWriteSource } from "@/lib/config/write-source";
+import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
 import DetailTabs from "@/components/repair-cases/detail/DetailTabs";
 
 // This segment resolves session-independent, read-source-dependent data
@@ -52,8 +56,40 @@ export default async function RepairCaseDetailLayout({
   const canViewQuotes =
     actingUser !== null && (await hasPermission(actingUser, "quotes", "READ"));
 
+  /**
+   * 머리 카드(DetailHeader)의 재료 — 2026-10-06 이전에는 「기본 정보」 탭의
+   * RepairCaseDetailView 가 구했다. 카드가 탭 위로 올라오면서 **같은 함수 · 같은
+   * 열쇠**를 이 자리로 옮겨 왔을 뿐, 판정을 새로 만들거나 넓히지 않았다.
+   *
+   *  · referenceData — [id]/page.tsx 와 똑같은 조건(DATABASE 소스 + 쓰기 소스가
+   *    database)일 때만 구한다. 담당 엔지니어 콤보박스의 후보 목록이다.
+   *    🔴 같은 요청 안에서 page.tsx 도 이것을 부르지만 getIntakeReferenceData 가
+   *    cache() 로 감싸여 있어 **질의는 요청당 한 번**이다.
+   *  · canEditEngineer / canEditReportNumber — RepairCaseDetailView 가 쓰던
+   *    isFieldEditable 그대로다(auth/repair-case-edit-authorization.ts). 화면이
+   *    단추를 감추는 것은 UX 편의일 뿐 관문이 아니다 — 저장은 서버 액션이 같은
+   *    표를 보고 처음부터 다시 확인한다.
+   */
+  const isDatabaseBacked =
+    resolved.source === "DATABASE" && getRepairCaseWriteSource() === "database";
+  const referenceData = isDatabaseBacked ? await getIntakeReferenceData() : null;
+  const canEditAtAll = resolved.source === "DATABASE" && actingUser !== null;
+  const canEditEngineer =
+    canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "assignedEngineerId");
+  const canEditReportNumber =
+    canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "legacyReportNumber");
+
   return (
     <div className="flex flex-col gap-4">
+      {/* 🔴 탭 줄보다 **위**다 — 어느 탭을 눌러도 같은 카드가 그대로 남는다
+          (2026-10-06 사용자 지정). 「견적서」 탭처럼 조건부로 사라지는 것이 아니라
+          늘 그려진다. */}
+      <DetailHeader
+        resolved={resolved}
+        canEditEngineer={canEditEngineer}
+        canEditReportNumber={canEditReportNumber}
+        referenceData={referenceData}
+      />
       <DetailTabs id={id} canViewQuotes={canViewQuotes} />
       {children}
     </div>

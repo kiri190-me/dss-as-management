@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
 import LoadingNotice from "@/components/domain/LoadingNotice";
-import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
 import ExceptionStatusNotice from "@/components/repair-cases/detail/ExceptionStatusNotice";
 import IntakeInfoSection from "@/components/repair-cases/detail/IntakeInfoSection";
 import ProductInfoSection from "@/components/repair-cases/detail/ProductInfoSection";
@@ -164,11 +163,6 @@ export default function RepairCaseDetailView({
   const intakeFields = fieldsFor("INTAKE");
   const productFields = fieldsFor("PRODUCT");
   const faultServiceFields = fieldsFor("FAULT_SERVICE");
-  const canEditEngineer = canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "assignedEngineerId");
-  // 보고서번호도 담당 엔지니어와 같은 방식이다 — 상단 카드가 유일한 편집
-  // 지점이고, 권한 판단은 인수 정보 섹션과 같은 필드 매트릭스를 그대로 쓴다.
-  const canEditReportNumber =
-    canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "legacyReportNumber");
 
   function handleDone() {
     setEditingSection(null);
@@ -176,12 +170,9 @@ export default function RepairCaseDetailView({
 
   return (
     <div className="flex flex-col gap-4">
-      <DetailHeader
-        resolved={effective}
-        canEditEngineer={canEditEngineer}
-        canEditReportNumber={canEditReportNumber}
-        referenceData={referenceData}
-      />
+      {/* 🔴 머리 카드(DetailHeader)는 여기에 없다 — 2026-10-06부터 [id]/layout.tsx 가
+          탭 줄보다 위에서 그린다. 여기서 한 번 더 그리면 「기본 정보」 탭에서만
+          카드가 둘로 보인다. */}
       <ExceptionStatusNotice exceptionStatus={effective.exceptionStatus} />
       {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
         <PendingBillingDecisionCard

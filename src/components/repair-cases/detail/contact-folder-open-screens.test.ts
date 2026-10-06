@@ -19,7 +19,8 @@ import type { ContactFolderOpenOutcome } from "./contact-folder-open";
  * 그래서 **자리**는 이웃 시험들과 같은 방법으로 원본을 글자로 읽고, **그려지는 것**은 단추 ·
  * 결과 조각을 직접 렌더해 본다. 누른 뒤의 값은 contact-folder-open.test.ts 가 본다.
  *
- *  · 자리 = 머리 카드의 보고서번호 묶음이 닫힌 뒤, 배지 줄 앞. **정확히 하나.**
+ *  · 자리 = 머리 카드의 **인수번호 바로 오른쪽, 같은 줄**(2026-10-06 사용자 지정으로
+ *    보고서번호 묶음 앞에서 옮겨 왔다). **정확히 하나.**
  *  · 🔴 인쇄에 안 찍힌다(print:hidden)
  *  · 🔴 Windows 가 아니면 아무것도 그리지 않는다 — 서버 · 첫 렌더도 감춘다
  * ============================================================================
@@ -40,26 +41,48 @@ const buttonSource = read("src/components/repair-cases/detail/ContactFolderOpenB
 const button = flat(buttonSource);
 const moduleSource = read("src/components/repair-cases/detail/contact-folder-open.ts");
 
-describe("자리 — 머리 카드의 보고서번호 묶음 뒤, 배지 줄 앞", () => {
+describe("자리 — 머리 카드의 인수번호 바로 오른쪽(같은 줄)", () => {
   test("🔴 정확히 하나다", () => {
     assert.equal(header.split("<ContactFolderOpenButton").length - 1, 1, "머리 카드에 단추가 둘 이상이다");
   });
 
-  test("🔴 보고서번호 묶음이 닫힌 뒤, 배지 줄(StatusBadge) 앞", () => {
-    const reportNumber = indexOrFail(header, "<ReportNumberEditCell");
+  test("🔴 인수번호 뒤, 보고서번호 묶음과 배지 줄(StatusBadge) 앞", () => {
+    const intakeNumber = indexOrFail(header, "{effective.intakeNumber}");
     const folder = indexOrFail(header, "<ContactFolderOpenButton");
+    const reportNumber = indexOrFail(header, "<ReportNumberEditCell");
     const badges = indexOrFail(header, "<StatusBadge");
-    assert.ok(reportNumber < folder, "단추가 보고서번호 묶음보다 앞에 있다");
+    assert.ok(intakeNumber < folder, "단추가 인수번호보다 앞에 있다");
+    assert.ok(folder < reportNumber, "단추가 보고서번호 묶음보다 뒤에 있다");
     assert.ok(folder < badges, "단추가 배지 줄보다 뒤에 있다");
-    // 보고서번호 묶음(그 줄의 바깥 div)이 **닫힌 뒤**다 — 단추가 그 묶음 안에 들어가 있지 않다.
+  });
+
+  test("🔴 인수번호와 **같은 줄**이다 — 사이에서 묶음이 닫히지 않는다", () => {
+    // 인수번호의 h1 이 닫힌 자리와 단추 사이에 </div> 가 하나라도 있으면 단추가
+    // 다른 줄(다른 묶음)로 떨어진 것이다 — 2026-10-06 이전의 모양이 바로 그랬다.
+    const headingEnd = indexOrFail(header, "</h1>");
+    const folder = indexOrFail(header, "<ContactFolderOpenButton");
+    assert.ok(headingEnd < folder, "단추가 인수번호 제목보다 앞에 있다");
+    assert.equal(
+      header.slice(headingEnd, folder).includes("</div>"),
+      false,
+      "인수번호와 단추 사이에서 묶음이 닫힌다 — 같은 줄이 아니다"
+    );
+  });
+
+  test("🔴 좁은 화면에서 접힌다 — 그 줄과 인수번호 묶음 둘 다 줄바꿈을 허용한다", () => {
+    // 오른쪽 끝 보고서번호와 부딪히지 않게, 바깥 줄과 안쪽 묶음 모두 wrap 이다.
     assert.ok(
-      header.slice(reportNumber, folder).includes("</div> </div>"),
-      "보고서번호 묶음이 닫히기 전에 단추가 있다"
+      header.includes('<div className="flex flex-wrap items-baseline justify-between gap-2">'),
+      "머리 줄이 줄바꿈을 허용하지 않는다"
+    );
+    assert.ok(
+      header.includes('<div className="flex flex-wrap items-baseline gap-2">'),
+      "인수번호 · 단추 묶음이 줄바꿈을 허용하지 않는다"
     );
   });
 
   test("수리 건 id 하나만 건넨다 — 상태를 끌어올리지 않는다", () => {
-    assert.ok(header.includes("<ContactFolderOpenButton repairCaseId={resolved.id} />"), header);
+    assert.ok(header.includes("<ContactFolderOpenButton repairCaseId={effective.id} />"), header);
   });
 });
 
