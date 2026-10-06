@@ -317,6 +317,33 @@ export function attachmentCategoriesForOwner(ownerKind: AttachmentOwnerKind): At
 }
 
 /**
+ * ── 넷째 주인 — 제품 **종류** 공통 서류함 (2026-10-06) ─────────────────────
+ *
+ * 🔴 **왜 위 ATTACHMENT_OWNER_KINDS 에 넣지 않았는가.** 그 목록은 첨부 표의
+ * **FK 주인 칸 셋**(repair_case_id · product_model_id · quote_id)과 한 줄씩 짝을
+ * 이루고, 내려받기·지우기 통로가 「주인 종류 → 물을 권한」 표를 그 목록으로 돈다.
+ * 종류 서류함의 주인 칸(product_model_kind)은 **FK 가 아니라 enum** 이라
+ * (schema/attachments.ts 의 "이 주인은 행이 아니라 분류다") 그 짝이 성립하지 않고,
+ * 목록에 끼워 넣으면 「주인 종류는 셋이다」를 못 박아 둔 기존 시험과 통로 표가
+ * 모두 그 사실을 다르게 말하게 된다.
+ *
+ * 🔴 **받는 분류는 제품 모델과 같은 집합이다 — 목록을 베끼지 않는다.** 종류
+ * 서류함에 올라오는 것은 모델 기본 자료와 같은 성격의 서류(점검표 · 파라미터 ·
+ * 통전검사 · 회로도 …)이고, 한 단 위에서 공유된다는 것만 다르다. 그래서 집합을
+ * 손으로 적지 않고 `isAttachmentCategoryAllowedForOwner(…, "PRODUCT_MODEL")` 을
+ * 그대로 돌려 쓴다 — 모델 쪽 집합이 넓어지거나 좁아지는 날 이 서류함이 저절로
+ * 따라온다(한쪽만 고쳐져 「화면에는 보이는데 통로가 거절하는」 날이 오지 않는다).
+ */
+export function isAttachmentCategoryAllowedForProductModelKind(category: AttachmentCategory): boolean {
+  return isAttachmentCategoryAllowedForOwner(category, "PRODUCT_MODEL");
+}
+
+/** 종류 서류함의 올리기 칸에 내놓을 분류 — 모델 파일 구역과 같은 목록·같은 차례다. */
+export function attachmentCategoriesForProductModelKind(): AttachmentCategory[] {
+  return attachmentCategoriesForOwner("PRODUCT_MODEL");
+}
+
+/**
  * ── 악성코드 검사 상태 ────────────────────────────────────────────────────
  * 검사 엔진은 아직 없다. 이번 단계에서 만드는 것은 **상태를 적을 자리**뿐이고,
  * 모든 행은 NOT_SCANNED 로 시작한다.

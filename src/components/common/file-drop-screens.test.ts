@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * ============================================================================
- * 끌어다 놓기 — 여덟 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
+ * 끌어다 놓기 — 아홉 자리가 모두 붙었는가, 그리고 **고르기와 같은 길**인가
  * ============================================================================
  * 이 화면들은 서버 액션 · 브라우저 API 를 끌고 와 통째로 그려 볼 수 없다. 그래서
  * 이웃 시험(quote-attachment-screens.test.ts · save-popup-screens.test.ts)과 같은
@@ -31,7 +31,7 @@ function tsxFilesUnder(directory: string): string[] {
 }
 
 /**
- * 파일을 올리는 여덟 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
+ * 파일을 올리는 아홉 자리. `drop` 은 떨군 파일이 타는 식, `picker` 는 지금 고르기
  * 칸이 타는 식이다 — **두 줄에 같은 함수 이름이 있어야 한다**(같은 길이라는 뜻).
  *
  * 🔴 연락서 한 장 넣기(`kyosan-report-upload`)는 이 목록에 **빠져 있었다**
@@ -70,6 +70,14 @@ const SITES: {
     drop: "onFiles={receiveDroppedFiles}",
     picker: "const files = Array.from(fileInputRef.current?.files ?? []);",
     why: "제품 모델 파일 — 떨군 것을 고르기 칸에 담아 같은 handleUpload 가 읽는다",
+  },
+  {
+    file: "src/components/product-models/ProductModelKindFilesScreen.tsx",
+    zone: 'name="product-model-kind-files-upload"',
+    multiple: true,
+    drop: "onFiles={receiveDroppedFiles}",
+    picker: "const files = Array.from(fileInputRef.current?.files ?? []);",
+    why: "제품 종류 공통 서류(2026-10-06) — 바로 위 모델 파일 구역을 본떴고 길도 같다",
   },
   {
     file: "src/components/quotes/QuoteAttachmentParts.tsx",
@@ -113,7 +121,7 @@ const SITES: {
   },
 ];
 
-describe("🔴 파일을 올리는 여덟 자리가 모두 끌어다 놓기를 받는다", () => {
+describe("🔴 파일을 올리는 아홉 자리가 모두 끌어다 놓기를 받는다", () => {
   for (const site of SITES) {
     test(`${site.file} — ${site.why}`, () => {
       const source = flat(site.file);
@@ -164,7 +172,7 @@ describe("🔴 파일을 올리는 여덟 자리가 모두 끌어다 놓기를 �
       [...new Set(SITES.map((site) => site.file))].sort(),
       "떨구는 자리가 목록과 다르다 — 새로 만든 자리를 SITES 에 적어라"
     );
-    assert.equal(SITES.length, 8);
+    assert.equal(SITES.length, 9);
   });
 });
 
@@ -205,7 +213,7 @@ describe("🔴 앱 안 카메라는 대상이 아니다", () => {
 });
 
 describe("기존 고르기 칸은 그대로다", () => {
-  test("여덟 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
+  test("아홉 자리 모두 고르기 칸(또는 고르기 단추)이 남아 있다", () => {
     // [새 견적서] 팝업은 견적서 첨부 칸의 **고르기 단추 조각**을 그대로 쓴다 — 그 조각 안에
     // 숨긴 `type="file"` 칸이 있다(QuoteAttachmentParts 의 QuoteAttachmentFilePicker).
     assert.ok(

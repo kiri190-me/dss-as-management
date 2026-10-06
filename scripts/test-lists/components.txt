@@ -260,3 +260,15 @@ src/components/customer-portal/customer-form-export-panel.test.ts
 # 부르고 그 통로가 server-only 라 통째로 그릴 수 없다 — 위 이웃들과 같은 방법으로
 # 원본을 글자로 읽는다.
 src/components/repair-cases/workflow/manual-step-set-reason-optional.test.ts
+
+# 「종류별 공통 서류」 화면과 입구(2026-10-06). 🔴 주소의 종류가 셋 중 하나가 아니면
+# notFound() 이고 그 판정이 **권한 확인보다 뒤**다(404 와 「권한 없음」을 갈라 주면
+# 종류 목록이 샌다) · 🔴 서류함 page 의 네 줄이 모델 상세 page 와 같은 글자다(권한을
+# 새로 만들지도 넓히지도 않았다) · 🔴 입구의 서류 수는 **서버가 한 질의로** 세고 화면은
+# 적기만 한다 · 🔴 입구는 목록 **위**에 얹혔고 기존 모델 목록의 검색 · 삭제 모드 ·
+# 휴지통은 그대로다 · 🔴 분류 목록과 종류 이름표를 화면이 베껴 적지 않는다 · 🔴 올리기
+# 본문은 파일 바이트이고 주소의 종류는 enum 코드다 · 🔴 지우기 · 되살리기는 기존 서버
+# 액션을 그대로 쓴다(새 통로를 만들지 않았다). 클라이언트 컴포넌트가 서버 액션을 직접
+# 부르고 그 사슬 끝이 server-only 라 통째로 그릴 수 없다 — 이웃
+# product-model-file-modified-date.test.ts 와 같은 방법으로 원본을 글자로 읽는다.
+src/components/product-models/product-model-kind-files-screen.test.ts

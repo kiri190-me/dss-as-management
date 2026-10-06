@@ -7,11 +7,13 @@ import { insertAuditLog } from "./audit-logs";
 import {
   DEFAULT_MALWARE_SCAN_STATUS,
   isAttachmentCategoryAllowedForOwner,
+  isAttachmentCategoryAllowedForProductModelKind,
   isQuoteAttachmentSlotCategory,
   quoteAttachmentIdsDisplacedBy,
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import { assertPortableStoredPath } from "@/lib/domain/attachment-path";
+import type { ProductModelKind } from "@/lib/domain/product-model-kind";
 
 /**
  * ============================================================================
@@ -88,7 +90,18 @@ export type AttachmentOwnerInput =
    * 판정(글쓴이 · 상태)이 없어 넘길 값이 없다. 이 파일이 보는 것은
    * 자료의 규칙(견적서가 있는가 · 휴지통인가 · 칸마다 하나)뿐이다.
    */
-  | { kind: "QUOTE"; quoteId: string };
+  | { kind: "QUOTE"; quoteId: string }
+  /**
+   * 넷째 주인 — **제품 종류 공통 서류함**(2026-10-06). 앞의 셋과 달리 가리키는 것이
+   * 다른 표의 행이 아니라 enum 값이라 FK 가 없다(schema/attachments.ts 의
+   * product_model_kind 주석).
+   *
+   * 🔴 그래도 **갈래의 성질은 같다** — 이 갈래가 고른 순간 product_model_kind 만
+   * 차고 나머지 세 칸은 NULL 로 정해진다(아래 insert). 세 칸 중 하나라도 함께
+   * 채우는 값은 타입 단계에서 표현할 수 없고, 혹시 만들어도 DB 의
+   * attachments_kind_owner_alone CHECK 가 거절한다.
+   */
+  | { kind: "PRODUCT_MODEL_KIND"; productModelKind: ProductModelKind };
 
 export type CreateAttachmentRecordInput = {
   /** 디스크 경로를 이미 이 값으로 만들었다. 위 'id를 밖에서 받는다' 참조. */
@@ -280,6 +293,10 @@ function ownerAuditValue(owner: AttachmentOwnerInput): Record<string, unknown> {
       return { ownerType: owner.kind, productModelId: owner.productModelId };
     case "QUOTE":
       return { ownerType: owner.kind, quoteId: owner.quoteId };
+    case "PRODUCT_MODEL_KIND":
+      // 종류 서류함(2026-10-06). ID 가 아니라 enum 코드가 주인이다 — 사람이 읽는
+      // 이름을 따로 조인할 것이 없다(코드 자체가 그 이름이다).
+      return { ownerType: owner.kind, productModelKind: owner.productModelKind };
   }
 }
 
@@ -315,7 +332,16 @@ export async function createAttachmentRecordInTx(
   // 분류와 주인의 짝 — 파일 헤더의 '셋째 주인만 ...' 둘째 문단. 올리기 통로들이
   // 먼저 400 으로 거절하므로 여기까지 오는 것은 통로를 거치지 않은 호출뿐이다.
   // 견적서에는 결재 PDF · 수기 엑셀 두 칸만, 그 두 칸은 견적서에만 붙는다.
-  if (!isAttachmentCategoryAllowedForOwner(input.category, owner.kind)) {
+  //
+  // 종류 서류함(넷째 주인)이 받는 집합은 **제품 모델과 같다** — 목록을 여기 베껴
+  // 적지 않고 domain 의 한 함수를 부른다(attachment-category.ts 의
+  // isAttachmentCategoryAllowedForProductModelKind). 모델 쪽 집합이 바뀌는 날 이
+  // 방어선이 저절로 따라온다.
+  const categoryAllowed =
+    owner.kind === "PRODUCT_MODEL_KIND"
+      ? isAttachmentCategoryAllowedForProductModelKind(input.category)
+      : isAttachmentCategoryAllowedForOwner(input.category, owner.kind);
+  if (!categoryAllowed) {
     throw new Error(`'${input.category}' 분류는 이 주인(${owner.kind})의 첨부에 쓸 수 없습니다.`);
   }
 
@@ -345,6 +371,10 @@ export async function createAttachmentRecordInTx(
       repairCaseId: owner.kind === "REPAIR_CASE" ? owner.repairCaseId : null,
       productModelId: owner.kind === "PRODUCT_MODEL" ? owner.productModelId : null,
       quoteId: owner.kind === "QUOTE" ? owner.quoteId : null,
+      // 🔴 넷째 주인(2026-10-06). 위 세 줄과 **같은 판별자 하나**에서 함께
+      // 계산되므로, 종류 서류의 행은 앞의 세 칸이 전부 NULL 인 채로만 만들어진다 —
+      // 그것이 attachments_kind_owner_alone CHECK 가 요구하는 모양이다.
+      productModelKind: owner.kind === "PRODUCT_MODEL_KIND" ? owner.productModelKind : null,
       category: input.category,
       originalFileName: input.originalFileName,
       storedPath: input.storedPath,

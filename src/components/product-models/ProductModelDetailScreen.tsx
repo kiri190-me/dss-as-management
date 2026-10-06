@@ -11,19 +11,18 @@ import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
+import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import ProductModelEditForm from "./ProductModelEditForm";
 import ProductModelFilesSection from "./ProductModelFilesSection";
 import ProductModelHistoryBreakdown from "./ProductModelHistoryBreakdown";
 
-const KIND_LABELS: Record<string, string> = {
-  GENERATOR: "Generator",
-  MATCHER: "Matcher",
-  TOTAL_CONTROLLER: "Total Controller (T/C)",
-};
-
-function kindLabel(kind: string | null): string {
-  return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
-}
+/**
+ * 제품 종류 표기 — 2026-10-06 에 이름표를 domain 한 자리로 모았다
+ * (lib/domain/product-model-kind.ts). 예전에는 이 파일과 형제 화면 셋이 각자 같은
+ * 세 줄을 들고 있었고, 주석이 서로를 가리키고 있었다. **보이는 글자는 한 글자도
+ * 바뀌지 않았다.**
+ */
+const kindLabel = productModelKindLabel;
 
 function InfoField({ label, value }: { label: string; value: string }) {
   return (

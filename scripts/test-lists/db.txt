@@ -174,3 +174,11 @@ src/lib/db/mutations/weekly-report-status.integration.test.ts
 # 🔴 폴더는 mkdtemp 임시 폴더에서만 만든다 — 실제 공유폴더에 닿지 않는다.
 # 🔴 격리 이름: 인수 달 "9404" · 접두어 "AS-TEST-CF7-".
 src/lib/server/services/create-contact-folder.integration.test.ts
+# 종류별 공통 서류함의 조회 셋(2026-10-06). 🔴 종류 서류를 만들면 다른 주인 칸 셋이
+# 전부 NULL 이고, 하나라도 함께 채우면 DB 가 거절한다(attachments_kind_owner_alone) —
+# 값이 그렇게 적히는 것과 반대가 막히는 것을 둘 다 본다 · 🔴 지운 서류는 목록에서
+# 빠지고 휴지통 조회에만 나온다 · 🔴 종류마다 따로 세고 모델 하나에 붙은 첨부는 그
+# 수에 안 섞인다 · 🔴 세는 수와 목록의 줄 수가 같다.
+# 🔴 개수는 **차이**로 잰다 — 이 주인은 enum 이라 스위트마다 격리할 주인 행이 없다.
+# 🔴 격리 이름: 제품 모델 접두어 "PMK-FILES-TEST-". 디스크에는 아무것도 쓰지 않는다.
+src/lib/db/queries/product-model-kind-attachments.integration.test.ts

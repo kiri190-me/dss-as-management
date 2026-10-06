@@ -30,7 +30,9 @@ import { ATTACHMENT_OWNER_KINDS, type AttachmentOwnerKind, type MalwareScanStatu
  *
  * ── 판정 순서 ────────────────────────────────────────────────────────────
  *  1. 주인이 아무도 없는 첨부(repair_case_id · product_model_id ·
- *     quote_id 셋 다 NULL) → 거부
+ *     quote_id · **product_model_kind** 넷 다 NULL) → 거부
+ *     (넷째 칸은 2026-10-06 에 더해졌다 — 종류 서류함. FK 가 아니라 enum 이지만
+ *      "주인이 있는가"에서는 앞의 셋과 똑같이 센다.)
  *  2. 휴지통에 있는 **견적서**의 첨부(2026-09-15 Q2) → 거부
  *  3. 휴지통에 있는 첨부(is_deleted) → 거부
  *  4. 검사 상태 → 표대로
@@ -116,6 +118,18 @@ export type AttachmentOwnerRef = {
    * (내려받기 · 미리보기 · 지우기 · 감사 기록)를 전부 짚었고, 지금은 모두 넘긴다.
    */
   quoteId: string | null;
+  /**
+   * 넷째 주인 — **제품 종류 공통 서류함**(2026-10-06). 차 있으면 앞의 세 칸은 전부
+   * NULL 이다(attachments_kind_owner_alone CHECK).
+   *
+   * 🔴 **선택 칸이다.** 앞의 세 칸과 달리 필수로 두지 않은 까닭: 이 값을 넘기지
+   * 않는 쪽(이 칸이 생기기 전부터 있던 통로·시험)에서 오면 `undefined` 이고, 그때
+   * 이 판정은 **주인 없음**으로 떨어진다 — 즉 닫히는 쪽으로 실패한다(DETACHED).
+   * 열리는 쪽으로 기울지 않으므로 빠뜨림이 파일을 새게 하지 않는다. 반대로 필수로
+   * 두면 이 칸과 무관한 통로 전부가 `productModelKind: null` 한 줄씩을 더 들고
+   * 다녀야 하고, 그 줄은 아무것도 지키지 않는다.
+   */
+  productModelKind?: string | null;
 };
 
 export type AttachmentDownloadSubject = AttachmentOwnerRef & {
@@ -158,7 +172,26 @@ export type AttachmentDownloadSubject = AttachmentOwnerRef & {
  */
 export function isDetachedAttachment(owner: AttachmentOwnerRef): boolean {
   const quoteAbsent = owner.quoteId === null || owner.quoteId === undefined;
-  return owner.repairCaseId === null && owner.productModelId === null && quoteAbsent;
+  return (
+    owner.repairCaseId === null &&
+    owner.productModelId === null &&
+    quoteAbsent &&
+    // 넷째 주인(2026-10-06). 🔴 이 한 줄이 없으면 **종류 서류함의 파일이 전부
+    // DETACHED 로 막힌다** — 그 파일은 FK 칸 셋이 원래 NULL 이기 때문이다. 모델
+    // 첨부가 생길 때 "접수 건이 없다"를 "주인이 없다"로 넓혔던 것과 같은 일이다.
+    !isProductModelKindOwned(owner)
+  );
+}
+
+/**
+ * 주인이 **제품 종류**인가 — 넷째 주인(2026-10-06).
+ *
+ * `== null` 을 쓰지 않고 두 경우를 적어 둔 것은 앞의 칸들과 같은 성질을 따르게
+ * 하려는 것이다("NULL 인가"만 본다 — 빈 문자열을 없음으로 보지 않는다). 칸이 빠진
+ * 채(undefined) 오면 **없음**이고, 그 결과는 닫히는 쪽이다(위 isDetachedAttachment).
+ */
+export function isProductModelKindOwned(owner: AttachmentOwnerRef): boolean {
+  return owner.productModelKind !== null && owner.productModelKind !== undefined;
 }
 
 /**
@@ -267,6 +300,20 @@ export function isAttachmentOwnerAccessAllowed(
   owner: AttachmentOwnerRef,
   access: AttachmentOwnerAccess
 ): boolean {
+  // 🔴 넷째 주인(제품 종류 서류함)은 **제품 모델과 같은 권한을 쓴다**(2026-10-06) —
+  // 보기는 productModels.view READ, 바꾸기는 productModels.files WRITE. 새 권한
+  // 영역을 만들지 않았고 기존 영역을 넓히지도 않았다: 종류 서류함은 제품 모델
+  // 관리 화면 안에 있는 자리라, 모델 자료를 볼 수 있는 사람이 그 종류의 공통
+  // 서류도 볼 수 있고 모델 파일을 바꿀 수 있는 사람이 그것도 바꾼다.
+  //
+  // 그래서 access 표에 칸을 늘리지 않고 PRODUCT_MODEL 칸을 본다 — 칸을 늘리면
+  // 「주인 종류 → 물을 권한」 표(ATTACHMENT_OWNER_PERMISSIONS)를 채우는 네 통로가
+  // 모두 같은 값을 한 줄씩 더 적게 되고, 그 줄들은 아무것도 가르지 않는다.
+  //
+  // 이 줄이 FK 칸 셋을 보는 것보다 **먼저**다. 종류 첨부는 그 셋이 모두 NULL 이라
+  // 아래로 내려가면 접수 건 권한(fallback)으로 판정되는데, 그러면 접수 건 파일
+  // 권한만 가진 사람이 종류 서류를 지울 수 있다.
+  if (isProductModelKindOwned(owner)) return access.PRODUCT_MODEL;
   return access[attachmentOwnerKindOf(owner) ?? "REPAIR_CASE"];
 }
 

@@ -194,6 +194,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     repairCaseId: attachment.repairCaseId,
     productModelId: attachment.productModelId,
     quoteId: attachment.quoteId,
+    // 넷째 주인(2026-10-06 — 제품 종류 공통 서류함). 이 줄이 없으면 종류 서류가
+    // 전부 DETACHED 로 막힌다(FK 칸 셋이 원래 NULL 이다).
+    productModelKind: attachment.productModelKind,
     isDeleted: attachment.isDeleted,
     // 견적서가 휴지통에 있으면 그 파일은 나가지 않는다(2026-09-15 Q2 — 조회가 견적서
     // 표를 붙여 읽는다).
@@ -271,6 +274,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         repairCaseId: attachment.repairCaseId,
         productModelId: attachment.productModelId,
         quoteId: attachment.quoteId,
+        // 종류 서류의 기록에 `ownerType: "NONE"` 이 남지 않게 한다 — 그 줄을 읽는
+        // 사람이 무슨 파일이었는지 알 수 없게 된다(ownerAuditFields 주석).
+        productModelKind: attachment.productModelKind,
       },
       originalFileName: attachment.originalFileName,
       fileSize: attachment.fileSize,

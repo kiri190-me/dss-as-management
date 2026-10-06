@@ -38,6 +38,9 @@ import {
  *
  *   접수 건 첨부     →  repairCases.files WRITE     (예전 그대로)
  *   모델 첨부        →  **productModels.files WRITE**
+ *   종류 서류        →  **productModels.files WRITE** (2026-10-06 — 모델 첨부와 같다.
+ *                       새 권한을 만들지 않았다. 판정은 isAttachmentOwnerAccessAllowed
+ *                       하나가 하고, 이 파일은 고칠 것이 없었다.)
  *   견적서 첨부      →  **quotes WRITE** (2026-09-15 Q2 — 결재 PDF · 수기 엑셀).
  *                       휴지통의 견적서에 딸린 파일은 지우지도 되살리지도 못한다 —
  *                       그 판정은 견적서 행을 잠근 mutation 이 한다(attachment-trash.ts).
@@ -75,6 +78,12 @@ type AttachmentTrashActionTarget = {
   productModelId?: string;
   /** 견적서의 결재 PDF · 수기 엑셀이면 그 견적서의 id — 견적서 수정 화면과 목록을 다시 그린다. */
   quoteId?: string;
+  /**
+   * 제품 종류 공통 서류면 그 종류 코드(2026-10-06) — 서류함 화면과, 「제품 모델
+   * 관리」 목록 위 입구의 **서류 수**를 다시 그린다. 앞의 세 칸과 같이 **권한을
+   * 정하지 않는다**(주인은 DB 에서 다시 읽는다 — 파일 헤더의 🔴 항목).
+   */
+  productModelKind?: string;
 };
 
 async function resolveWriteActor(
@@ -156,6 +165,12 @@ function revalidateAfterTrashChange(target: AttachmentTrashActionTarget): void {
     // 견적서 수정 화면의 첨부 칸과, 목록의 결재 PDF · 엑셀 표시(hasSignedPdf · hasExcel).
     revalidatePath(`/quotes/${target.quoteId}`);
     revalidatePath("/quotes");
+  }
+  if (target.productModelKind) {
+    revalidatePath(`/product-models/kinds/${target.productModelKind}`, "layout");
+    // 목록 위 입구가 종류마다 서류 수를 보인다 — 지우거나 되살리면 그 숫자가
+    // 함께 움직여야 한다(그 수는 서버가 센다).
+    revalidatePath("/product-models");
   }
 }
 

@@ -7,6 +7,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listDeletedProductModels, listProductModels } from "@/lib/db/queries/product-models";
+import { countAttachmentsByProductModelKind } from "@/lib/db/queries/product-model-kind-attachments";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
 export const metadata: Metadata = {
@@ -56,10 +57,25 @@ export default async function ProductModelsPage() {
   // /customers와 같은 규칙이다. 화면에서 감추는 것은 편의일 뿐 경계가
   // 아니므로, 삭제 서버 액션은 이 판정과 무관하게 다시 검사한다.
   const canDelete = await hasPermission(actingUser, "productModels.lifecycle", "MANAGE");
-  const [rows, trashRows] = await Promise.all([
+  // 「종류별 공통 서류」 입구가 보일 숫자도 여기서 센다(2026-10-06). 🔴 **서버가
+  // 센 수만 내려보낸다** — 서류 목록 자체는 보내지 않는다. 이 화면은 숫자를 적기만
+  // 하고, 서류는 종류 서류함(/product-models/kinds/{코드})에서 읽는다.
+  //
+  // 세는 데 쓰는 권한을 따로 묻지 않는다: 이 수를 보는 조건은 모델 목록을 보는
+  // 조건과 같고(둘 다 productModels.view), 그 판정은 바로 위에서 이미 끝났다.
+  // 서류를 실제로 열고 받는 것은 각자 다시 판정한다(내려받기 라우트).
+  const [rows, trashRows, kindAttachmentCounts] = await Promise.all([
     listProductModels(),
     canDelete ? listDeletedProductModels() : Promise.resolve([]),
+    countAttachmentsByProductModelKind(),
   ]);
 
-  return <ProductModelListScreen rows={rows} trashRows={trashRows} canDelete={canDelete} />;
+  return (
+    <ProductModelListScreen
+      rows={rows}
+      trashRows={trashRows}
+      canDelete={canDelete}
+      kindAttachmentCounts={kindAttachmentCounts}
+    />
+  );
 }

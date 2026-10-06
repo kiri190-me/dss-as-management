@@ -57,6 +57,16 @@ export type AttachmentForDownload = {
    */
   quoteId: string | null;
   /**
+   * 제품 **종류** 주인(2026-10-06 — 종류 공통 서류함). 앞의 세 칸과 동시에 채워지지
+   * 않는다(attachments_kind_owner_alone CHECK). 차 있으면 라우트는 제품 모델과 **같은**
+   * 권한을 묻는다 — 보기는 productModels.view READ, 바꾸기는 productModels.files WRITE
+   * (domain/attachment-download-policy.ts 의 isAttachmentOwnerAccessAllowed).
+   *
+   * 🔴 이 칸을 읽지 않으면 종류 서류가 **전부 DETACHED 로 막힌다** — FK 칸 셋이 원래
+   * NULL 이기 때문이다. 판정 함수는 이 값을 받아야 주인이 있다고 본다.
+   */
+  productModelKind: string | null;
+  /**
    * 주인인 견적서가 휴지통에 있는가(견적서 행의 is_deleted). 견적서 주인이 아니면
    * false — 조인이 비어 NULL 이 오는 것을 false 로 접는다. 판정 함수가 QUOTE_IN_TRASH 로
    * 막는 근거다(파일 헤더의 '견적서 표 하나만 붙인다').
@@ -86,6 +96,7 @@ export async function getAttachmentForDownload(
       repairCaseId: attachments.repairCaseId,
       productModelId: attachments.productModelId,
       quoteId: attachments.quoteId,
+      productModelKind: attachments.productModelKind,
       // 견적서 주인이 아니면 조인이 비어 NULL 이다 — 아래에서 false 로 접는다.
       quoteIsDeleted: quotes.isDeleted,
       originalFileName: attachments.originalFileName,

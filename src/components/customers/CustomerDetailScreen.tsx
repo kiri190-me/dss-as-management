@@ -14,6 +14,7 @@ import {
   NO_CUSTOMER_ROW_COLOR_LABEL,
   resolveCustomerRowColor,
 } from "@/lib/domain/customer-row-color";
+import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import CustomerContactList from "./CustomerContactList";
 import CustomerEditForm from "./CustomerEditForm";
 import { CustomerRowColorSwatch } from "./CustomerRowColorField";
@@ -42,20 +43,16 @@ function InfoField({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * 제품 종류 표기. ProductModelDetailScreen / ProductModelListScreen 이 각자
- * 들고 있는 kindLabel 과 **같은 말**을 돌려준다 — 미지정(kind === null)을 이
- * 화면만 다르게 부르면 같은 모델이 화면마다 달라 보인다. (세 화면이 각자 한 줄씩
- * 들고 있는 것이 이 저장소의 모양이다. 두 형제 화면의 주석이 그 판단을 적어 뒀다.)
+ * 제품 종류 표기. ProductModelDetailScreen / ProductModelListScreen /
+ * ProductModelEditForm 과 **같은 말**을 돌려준다 — 미지정(kind === null)을 이
+ * 화면만 다르게 부르면 같은 모델이 화면마다 달라 보인다.
+ *
+ * 2026-10-06: 「각 화면이 한 줄씩 들고 있는 것이 이 저장소의 모양」이던 것을
+ * domain 한 자리로 모았다(lib/domain/product-model-kind.ts). 서로를 가리키는
+ * 주석이 있어도 한 곳만 고쳐지는 날을 막지는 못했고, 그때 아무 오류도 나지
+ * 않는다. **보이는 글자는 한 글자도 바뀌지 않았다.**
  */
-const KIND_LABELS: Record<string, string> = {
-  GENERATOR: "Generator",
-  MATCHER: "Matcher",
-  TOTAL_CONTROLLER: "Total Controller (T/C)",
-};
-
-function kindLabel(kind: string | null): string {
-  return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
-}
+const kindLabel = productModelKindLabel;
 
 /**
  * Customer Management detail screen. Four sections, in the approved

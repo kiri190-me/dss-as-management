@@ -64,6 +64,15 @@ export const ATTACHMENT_MODEL_STORED_PATH_PREFIX = "product-models";
 export const ATTACHMENT_QUOTE_STORED_PATH_PREFIX = "quotes";
 
 /**
+ * 제품 **종류**(제너레이터 / 매쳐 / Total Controller)의 공통 서류가 사는 첫 마디
+ * (2026-10-06). 모델 하나의 자리(`product-models`)와 **한 글자도 겹치지 않게**
+ * 복수형 낱말을 하나 더 붙였다 — 같은 접두어 아래에 두면 `product-models/` 다음
+ * 마디가 어떤 날은 모델 UUID 이고 어떤 날은 종류 코드가 되어, 폴더만 보고는 그
+ * 파일이 무엇인지 알 수 없게 된다(이 파일 머리말의 '첫 마디가 주인을 말한다').
+ */
+export const ATTACHMENT_MODEL_KIND_STORED_PATH_PREFIX = "product-model-kinds";
+
+/**
  * 저장 경로로 인정하는 첫 마디의 **전부**. 여기 없는 접두어는 거부된다 —
  * "옮길 수 있는 경로"의 정의를 한 자리에 모아 두어, 주인이 늘어날 때 검사
  * 함수를 고치지 않고 이 목록만 늘리게 한다.
@@ -73,6 +82,8 @@ const ALLOWED_STORED_PATH_PREFIXES: readonly string[] = [
   ATTACHMENT_MODEL_STORED_PATH_PREFIX,
   // 백업 스크립트가 이 목록으로 전 행을 검사한다 — 빠뜨리면 첫 견적서 파일에서 멈춘다.
   ATTACHMENT_QUOTE_STORED_PATH_PREFIX,
+  // 같은 까닭으로 넷째 접두어도 여기 있어야 한다 — 빠뜨리면 백업이 첫 종류 서류에서 멈춘다.
+  ATTACHMENT_MODEL_KIND_STORED_PATH_PREFIX,
 ];
 
 /** UUID(소문자 hex). 대문자가 섞인 값은 눕혀서 받고, 형태가 아니면 던진다. */
@@ -332,6 +343,98 @@ export function buildQuoteAttachmentStoredPathFromFileName(params: {
   }
   return buildQuoteAttachmentStoredPath({
     quoteId: params.quoteId,
+    attachmentId: params.attachmentId,
+    extension,
+  });
+}
+
+/**
+ * ============================================================================
+ * 제품 종류 공통 서류 — 네 번째 벌 (2026-10-06)
+ * ============================================================================
+ * 모델 하나가 아니라 **종류 전체가 공유하는 서류**(예: 제너레이터 공통 점검표)의
+ * 자리다. 앞의 세 벌과 같은 까닭으로 **건드리지 않고 나란히 새로 둔다.**
+ *
+ * 검사 규칙은 앞의 세 벌과 **글자 하나까지 같다** — 확장자 모양 확인
+ * (isStorableExtension), 소문자 눕히기, path.join 금지. 다른 것은 둘이다:
+ *
+ *  1. 첫 마디가 `product-model-kinds` 다.
+ *  2. 🔴 **둘째 마디가 UUID 가 아니라 종류 코드다.** 이 주인은 다른 표의 행이 아니라
+ *     enum 값이라 가리킬 UUID 가 없다(schema/attachments.ts 의 product_model_kind
+ *     주석 — "이 주인은 행이 아니라 분류다"). 그래서 requireUuid 대신 아래
+ *     requireProductModelKindSegment 가 그 마디를 좁힌다.
+ *
+ * 🔴 **종류 코드는 소문자로 눕혀 적는다** — `GENERATOR` 가 아니라 `generator`.
+ * 이 파일 머리말의 규칙 2가 경로 전체에 걸리기 때문이고(assertPortableStoredPath 가
+ * 대문자가 섞인 값을 거부한다), 까닭도 그대로다: Windows 는 `GENERATOR` 와
+ * `generator` 를 같은 폴더로 보지만 리눅스 NAS 는 다른 폴더로 본다. 한글을 쓰지
+ * 않는 것도 같은 결의 결정이다 — 인코딩이 다르게 풀리면 그 폴더만 안 열린다.
+ * 코드 ↔ 마디의 변환은 **이 파일 안에서만** 일어나고, DB·URL·화면은 enum 코드
+ * 그대로(대문자)를 쓴다.
+ * ============================================================================
+ */
+
+/**
+ * 경로 마디로 쓸 수 있는 종류 코드인가.
+ *
+ * 🔴 **domain/product-model-kind.ts 를 import 하지 않는다.** 이 파일은 지금
+ * 확장자 목록 하나만 보고 도는 자리이고, 여기서 종류 목록을 끌어오면 경로 계산이
+ * 종류 enum 의 변경에 묶인다. 대신 **모양**만 본다 — 영문 대문자와 밑줄로만 된
+ * 짧은 낱말. 셋 중 하나인지(의미)를 보는 것은 통로와 화면의 몫이고
+ * (isProductModelKind), 그 둘은 이 함수보다 **앞에서** 거절한다.
+ */
+const PRODUCT_MODEL_KIND_SEGMENT_PATTERN = /^[A-Z][A-Z_]{0,30}[A-Z]$/;
+
+function requireProductModelKindSegment(value: string): string {
+  const trimmed = value.trim();
+  if (!PRODUCT_MODEL_KIND_SEGMENT_PATTERN.test(trimmed)) {
+    throw new AttachmentPathError(`제품 종류 코드가 올바르지 않습니다: ${trimmed || "(없음)"}`);
+  }
+  // 규칙 2 — 경로는 소문자다. 코드 자체는 대문자 그대로 DB 에 적힌다.
+  return trimmed.toLowerCase();
+}
+
+/**
+ * 제품 종류 공통 서류의 stored_path. `product-model-kinds/{종류코드}/{첨부id}.{확장자}`
+ *
+ * buildProductModelAttachmentStoredPath 와 같은 규칙을 따른다 — 확장자는 정규화된
+ * 소문자 영숫자만 붙고(isStorableExtension), 모양이 아니거나 실행 파일이면 던진다.
+ * 허용목록을 보지 않는 까닭은 그쪽 주석에 있다.
+ */
+export function buildProductModelKindAttachmentStoredPath(params: {
+  /** enum 코드 그대로(대문자). 경로에는 소문자로 눕혀 적힌다. */
+  kind: string;
+  attachmentId: string;
+  /** 원본 파일명이 아니라 정규화된 확장자(점 없음). normalizeFileExtension의 결과. */
+  extension: string;
+}): string {
+  const kindSegment = requireProductModelKindSegment(params.kind);
+  const attachmentId = requireUuid("첨부 ID", params.attachmentId);
+
+  const extension = params.extension.trim().toLowerCase();
+  if (!isStorableExtension(extension)) {
+    throw new AttachmentPathError(`허용되지 않은 확장자입니다: ${extension || "(없음)"}`);
+  }
+
+  // 접수 건 쪽과 같은 이유로 path.join을 쓰지 않는다(파일 헤더 규칙 1).
+  return `${ATTACHMENT_MODEL_KIND_STORED_PATH_PREFIX}/${kindSegment}/${attachmentId}.${extension}`;
+}
+
+/**
+ * 원본 파일명에서 바로 종류 서류의 stored_path를 만드는 편의 함수.
+ * buildAttachmentStoredPathFromFileName과 짝이며, 확장자를 뽑을 수 없으면 던진다.
+ */
+export function buildProductModelKindAttachmentStoredPathFromFileName(params: {
+  kind: string;
+  attachmentId: string;
+  originalFileName: string;
+}): string {
+  const extension = normalizeFileExtension(params.originalFileName);
+  if (!extension) {
+    throw new AttachmentPathError("파일 확장자를 확인할 수 없습니다.");
+  }
+  return buildProductModelKindAttachmentStoredPath({
+    kind: params.kind,
     attachmentId: params.attachmentId,
     extension,
   });

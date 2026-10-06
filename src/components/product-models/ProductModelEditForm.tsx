@@ -14,12 +14,23 @@ import EditSectionActions, {
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { PRODUCT_MODEL_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
+import {
+  PRODUCT_MODEL_KIND_CODES,
+  PRODUCT_MODEL_KIND_UNSPECIFIED_LABEL,
+  productModelKindLabel,
+} from "@/lib/domain/product-model-kind";
 
+/**
+ * 고르개의 선택지. 값도 글자도 예전과 **한 글자도 같다** — 2026-10-06 에 이름표만
+ * domain 한 자리에서 가져오도록 바꿨다(lib/domain/product-model-kind.ts). 코드
+ * 목록도 손으로 적지 않으므로, 종류가 늘어나는 날 이 고르개가 저절로 따라온다.
+ *
+ * 맨 앞의 빈 값(「미지정」)은 그대로 둔다 — "미지정"은 enum 값이 아니라 **값이
+ * 없음**이고, 그 빈 문자열을 서버 검증이 null 로 눕힌다(파일 아래 머리말).
+ */
 const KIND_OPTIONS = [
-  { value: "", label: "미지정" },
-  { value: "GENERATOR", label: "Generator" },
-  { value: "MATCHER", label: "Matcher" },
-  { value: "TOTAL_CONTROLLER", label: "Total Controller (T/C)" },
+  { value: "", label: PRODUCT_MODEL_KIND_UNSPECIFIED_LABEL },
+  ...PRODUCT_MODEL_KIND_CODES.map((code) => ({ value: code, label: productModelKindLabel(code) })),
 ];
 
 /** IntakeInfoEditForm 의 고객사 콤보박스와 같은 수. 같은 부품이라 같게 둔다. */

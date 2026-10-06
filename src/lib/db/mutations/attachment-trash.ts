@@ -119,6 +119,15 @@ export function ownerAuditFields(owner: {
   productModelId: string | null;
   /** 셋째 주인(2026-09-15 Q2). */
   quoteId: string | null;
+  /**
+   * 넷째 주인 — 제품 종류 공통 서류함(2026-10-06).
+   *
+   * 🔴 **선택 칸이다.** 이 칸을 모르는 자리(견적서 휴지통 · 사진 회전 등)가 그대로
+   * 예전처럼 부를 수 있어야 하고, 그 자리들이 다루는 첨부에는 이 주인이 애초에
+   * 나타나지 않는다. 빠뜨리면 「주인 없음」(ownerType "NONE")으로 적히므로, 종류
+   * 서류를 다루는 자리는 **반드시 넘긴다**(loadForTrash 가 함께 읽는다).
+   */
+  productModelKind?: string | null;
   /** 생략하면 이름 키를 싣지 않는다(값이 null 인 것과 다르다). */
   intakeNumber?: string | null;
   /** 생략하면 이름 키를 싣지 않는다(값이 null 인 것과 다르다). */
@@ -147,6 +156,12 @@ export function ownerAuditFields(owner: {
       ...(owner.quoteNumber === undefined ? {} : { quoteNumber: owner.quoteNumber }),
     };
   }
+  // 넷째 주인(2026-10-06) — 앞의 세 FK 가 모두 비어 있을 때에만 올 수 있는 자리다
+  // (attachments_kind_owner_alone CHECK). 사람이 읽는 이름을 따로 싣지 않는 것은
+  // 코드 자체가 그 이름이기 때문이다 — UUID 가 아니라 GENERATOR 같은 낱말이다.
+  if (owner.productModelKind !== null && owner.productModelKind !== undefined) {
+    return { ownerType: "PRODUCT_MODEL_KIND", productModelKind: owner.productModelKind };
+  }
   return { ownerType: "NONE" };
 }
 
@@ -159,6 +174,9 @@ async function loadForTrash(tx: Tx, attachmentId: string) {
       productModelId: attachments.productModelId,
       // 견적서 파일이면 견적서 행을 잠그고 휴지통 · 칸을 본다(파일 헤더의 '셋째 주인').
       quoteId: attachments.quoteId,
+      // 종류 서류함(2026-10-06). 조인할 표가 없다 — 주인이 행이 아니라 enum 이라
+      // 이 칸 하나가 곧 주인이고 곧 그 이름이다.
+      productModelKind: attachments.productModelKind,
       originalFileName: attachments.originalFileName,
       category: attachments.category,
       isDeleted: attachments.isDeleted,
@@ -287,6 +305,7 @@ export async function softDeleteAttachment(params: {
           repairCaseId: current.repairCaseId,
           productModelId: current.productModelId,
           quoteId: current.quoteId,
+          productModelKind: current.productModelKind,
           intakeNumber: current.caseIntakeNumber,
           modelName: current.productModelName,
           quoteNumber: current.quoteNumber,
@@ -356,6 +375,7 @@ export async function restoreAttachment(params: {
           repairCaseId: current.repairCaseId,
           productModelId: current.productModelId,
           quoteId: current.quoteId,
+          productModelKind: current.productModelKind,
           intakeNumber: current.caseIntakeNumber,
           modelName: current.productModelName,
           quoteNumber: current.quoteNumber,
@@ -391,6 +411,8 @@ export async function recordAttachmentDownload(params: {
     repairCaseId: string | null;
     productModelId: string | null;
     quoteId: string | null;
+    /** 종류 서류함(2026-10-06). 넘기지 않으면 그 파일의 기록이 「주인 없음」이 된다. */
+    productModelKind?: string | null;
   };
   originalFileName: string;
   fileSize: number;

@@ -27,16 +27,16 @@ import {
   mergedProductModelCustomerNames,
 } from "@/lib/domain/product-model-customer-merge";
 import type { DeletedProductModelRow, ProductModelListRow } from "@/lib/db/queries/product-models";
+import type { ProductModelKindAttachmentCounts } from "@/lib/db/queries/product-model-kind-attachments";
+import { PRODUCT_MODEL_KIND_CODES, productModelKindLabel } from "@/lib/domain/product-model-kind";
 
-const KIND_LABELS: Record<string, string> = {
-  GENERATOR: "Generator",
-  MATCHER: "Matcher",
-  TOTAL_CONTROLLER: "Total Controller (T/C)",
-};
-
-function kindLabel(kind: string | null): string {
-  return kind ? (KIND_LABELS[kind] ?? kind) : "미지정";
-}
+/**
+ * 제품 종류 표기. 예전에는 이 파일이 이름표 세 줄을 직접 들고 있었고, 형제 화면
+ * 셋(ProductModelDetailScreen · ProductModelEditForm · CustomerDetailScreen)도
+ * 각자 같은 세 줄을 들고 있었다. 2026-10-06 에 그것을 domain 한 자리로 모았다 —
+ * **보이는 글자는 한 글자도 바뀌지 않았다**(네 곳의 값이 서로 같았다).
+ */
+const kindLabel = productModelKindLabel;
 
 /**
  * 이 모델의 고객사를 한 줄로. 사람이 골라 둔 것과 **접수 기록에서 나온 것**을
@@ -77,15 +77,64 @@ function formatDate(iso: string | null): string {
  *  2. **등록 장비가 모델을 따라간다.** 고객사에서 End-User가 딸려 가는 것과
  *     같은 결정이다. 확인 창에서 그 사실을 먼저 말한다.
  */
+/**
+ * 「종류별 공통 서류」 입구 — 목록 **위**에 얹는 구역 (2026-10-06).
+ *
+ * 모델 하나하나가 아니라 **종류 전체가 공유하는 서류**(예: 제너레이터 공통
+ * 점검표)를 두는 자리로 들어가는 문이다. 종류마다 단추 하나이고, 지금 올라와
+ * 있는 서류 수를 함께 보인다.
+ *
+ * 🔴 **수는 서버가 센다.** 화면은 받은 숫자를 적기만 한다 — 여기서 다시 세려면
+ * 서류 목록 전부를 브라우저까지 실어 보내야 하고, 그러면 모델 목록을 여는 것만으로
+ * 모든 종류의 첨부 목록이 따라온다.
+ *
+ * 🔴 **아래 모델 목록은 한 글자도 건드리지 않았다.** 이 구역은 그 위에 하나 얹은
+ * 것뿐이고, 검색·삭제 모드·휴지통 탭은 예전 그대로다.
+ */
+function KindDocumentsEntry({ counts }: { counts: ProductModelKindAttachmentCounts }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">종류별 공통 서류</h2>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        모델마다가 아니라 <strong className="font-medium">종류 전체</strong>가 함께 쓰는 서류를 둡니다.
+      </p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {PRODUCT_MODEL_KIND_CODES.map((code) => (
+          <li key={code}>
+            <Link
+              // 주소의 마디는 **enum 코드**다(한글을 쓰지 않는다 — page.tsx 머리말).
+              href={`/product-models/kinds/${code}`}
+              className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {productModelKindLabel(code)}
+              {/* 건수는 자릿수를 맞춘다 — 이 저장소의 다른 숫자 칸과 같다. */}
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                {counts[code]}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default function ProductModelListScreen({
   rows,
   trashRows = [],
   canDelete = false,
+  kindAttachmentCounts,
 }: {
   rows: ProductModelListRow[];
   /** 휴지통 행. canDelete인 세션에서만 서버가 채워 넘긴다. */
   trashRows?: DeletedProductModelRow[];
   canDelete?: boolean;
+  /**
+   * 종류마다 올라와 있는 공통 서류 수(2026-10-06). 서버가 한 질의로 세어 넘긴다.
+   * 넘어오지 않으면 입구 구역 자체를 그리지 않는다 — 이 화면을 다른 데서 불러
+   * 쓰는 날(시험 포함) 숫자 없는 단추가 먼저 뜨는 것보다 아예 없는 쪽이 낫다.
+   */
+  kindAttachmentCounts?: ProductModelKindAttachmentCounts;
 }) {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"active" | "trash">("active");
@@ -195,6 +244,9 @@ export default function ProductModelListScreen({
           </button>
         )}
       </div>
+
+      {/* 목록 **위**의 입구. 아래 모델 목록은 그대로다(KindDocumentsEntry 주석). */}
+      {kindAttachmentCounts && <KindDocumentsEntry counts={kindAttachmentCounts} />}
 
       {canDelete && (
         <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
