@@ -90,6 +90,10 @@ src/lib/auth/my-active-work-authorization.test.ts
 src/lib/domain/date-only.test.ts
 src/lib/domain/my-active-work-sort.test.ts
 src/lib/domain/my-active-work-filter.test.ts
+# 「내 작업기록」의 달 묶기. 🔴 한국시간 경계가 이 파일의 존재 이유다 — created_at 이
+# timestamptz 라 UTC 로 달을 가르면 매달 첫날 아침(한국시간 00:00~09:00)에 적은 기록이
+# 통째로 전 달에 들어간다. 12개월 창의 시작도 같은 함정을 공유한다.
+src/lib/domain/my-work-record-months.test.ts
 src/lib/domain/local/workflow/workflow-action-availability.test.ts
 src/lib/domain/local/workflow/manual-step-set-permission.test.ts
 src/lib/domain/local/workflow/shipment-approval-checklist.test.ts

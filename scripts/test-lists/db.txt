@@ -56,6 +56,11 @@ src/lib/db/queries/quote-intake-lookup.integration.test.ts
 src/lib/db/queries/part-minimum-quantities.integration.test.ts
 src/lib/db/mutations/repair-case-work-records.integration.test.ts
 src/lib/db/queries/repair-cases-mine.integration.test.ts
+# 같은 메뉴의 둘째 탭 「내 작업기록」 조회. 🔴 못 박는 것은 **안 나와야 할 것이 안
+# 나오는가**다 — 남이 적은 기록 · 무효 처리된 기록 · 12개월 창 밖. 반대로 건이 영구
+# 삭제된 기록(repair_case_id IS NULL)은 **나와야** 한다(INNER JOIN 으로 적으면 조용히
+# 사라진다). 접수 건을 만들지 않고 작업기록만 넣었다 지우는 묶음이다.
+src/lib/db/queries/my-work-records.integration.test.ts
 src/lib/db/queries/repair-case-approvals-pending.integration.test.ts
 src/lib/db/queries/procedure-template-history.integration.test.ts
 src/lib/db/mutations/repair-case-flowchart-schema.integration.test.ts

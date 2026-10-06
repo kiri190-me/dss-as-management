@@ -13,6 +13,11 @@ src/components/common/responsive-list.test.ts
 src/components/procedures/visual/ProcedureNodeChip.test.tsx
 src/components/repair-cases/workflow/WorkflowStageStatus.test.tsx
 src/components/repair-cases/mine/MyActiveWorkScreen.test.tsx
+# 같은 메뉴의 둘째 탭 「내 작업기록」. 값 쪽(달 묶기·12개월 창)은 unit 목록의
+# my-work-record-months.test.ts 가 본다 — 여기서 못 박는 것은 화면이 그 값을 쓰는
+# 방식이다: 🔴 지워진 건에 링크를 안 거는가(누르면 없는 건으로 떨어진다) · 이번 달만
+# 펼치는가 · 빈 달 줄을 안 그리는가 · 메모의 줄바꿈이 살아 있는가.
+src/components/repair-cases/mine/MyWorkRecordsScreen.test.tsx
 src/components/repair-cases/FilterDisclosure.test.tsx
 src/components/graph-editor-core/UndoRedoControls.test.tsx
 src/components/procedures/editor/EditHistoryList.test.tsx
