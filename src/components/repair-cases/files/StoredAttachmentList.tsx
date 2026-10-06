@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import {
@@ -202,6 +202,57 @@ export function previewAffordanceOf(
   if (isViewableImage(item.mimeType)) return "viewer";
   if (isViewablePdf(item.mimeType)) return "new-tab";
   return "none";
+}
+
+/**
+ * ============================================================================
+ * 목록을 상자에 담을 것인가 — 접기/펼치기의 유일한 판단
+ * ============================================================================
+ * 파일이 쌓이면 이 목록 하나로 화면이 한없이 길어진다. 아래에 있는 공유폴더
+ * 구역과 휴지통까지 내려가려면 수십 줄을 지나야 한다. 그래서 **기본은 다섯 줄
+ * 남짓만 보이는 상자**에 담고 나머지는 그 안에서 굴려 본다.
+ *
+ * 🔴 **다섯 개 이하면 접지 않는다.** 접을 것이 없는데 「펼치기」가 떠 있으면
+ *    누를 까닭이 없는 단추가 하나 느는 것이다. 조건을 걸어 다섯 개 이하로
+ *    줄어든 경우도 같다 — 남은 것이 이미 전부 보인다.
+ *
+ * 🔴 세는 것은 **지금 조건에 맞는 개수**(visible)이지 올라온 전체가 아니다.
+ *    화면에 실제로 그려지는 줄이 곧 길이이기 때문이다. 조건이 걸려 있다는
+ *    사실은 위 거르기 칸이 「N건 중 M건」으로 따로 알린다.
+ *
+ * 🔴 **펼친 상태는 접을 것이 없어져도 들고 있는다.** 그래서 isExpanded 를
+ *    canCollapse 로 덮어쓰지 않고 받은 그대로 돌려준다 — 펼쳐 놓고 조건을
+ *    좁혔다 다시 넓히면 펼쳐져 있던 그대로여야 하고, 파일 하나 지웠다고 다시
+ *    접히면 성가시다.
+ *
+ * 판정을 함수로 뽑아 둔 까닭은 이 저장소의 화면 시험이 **정적 렌더**뿐이라
+ * (jsdom 이 없어 단추를 누를 수 없다) 눌린 뒤의 상태를 여기서 못박아야 하기
+ * 때문이다 — previewAffordanceOf 와 같은 방식이다.
+ */
+export const ATTACHMENT_LIST_COLLAPSE_THRESHOLD = 5;
+
+export type AttachmentListCollapse = {
+  /** 접을 것이 있는가. 거짓이면 **상자도 단추도 아예 안 그린다.** */
+  canCollapse: boolean;
+  /** 지금 상자에 갇혀 있는가(= 스크롤 상자로 그린다). */
+  isCollapsed: boolean;
+  /** 단추의 `aria-expanded`. 접을 것이 없어져도 받은 그대로다(위 주석). */
+  isExpanded: boolean;
+  /** 단추 글자. 접혀 있을 때는 **전체 개수**를 함께 보여 준다. */
+  toggleLabel: string;
+};
+
+export function attachmentListCollapse(
+  visibleCount: number,
+  isExpanded: boolean
+): AttachmentListCollapse {
+  const canCollapse = visibleCount > ATTACHMENT_LIST_COLLAPSE_THRESHOLD;
+  return {
+    canCollapse,
+    isCollapsed: canCollapse && !isExpanded,
+    isExpanded,
+    toggleLabel: isExpanded ? "접기" : `펼치기 (전체 ${visibleCount}개)`,
+  };
 }
 
 /**
@@ -501,6 +552,20 @@ export default function StoredAttachmentList({
    */
   const [hasFinishedBackfillRun, setHasFinishedBackfillRun] = useState(false);
 
+  /**
+   * 목록을 펼쳐 놓았는가. 🔴 **그냥 이 컴포넌트 안의 상태다** — 주소에도
+   * 브라우저에도 남기지 않는다. 이 화면의 다른 접기/펴기(FilterDisclosure, 올리기
+   * `<details>`)가 모두 그렇게 하고 있어 결을 맞춘 것이고, 「지금 이 화면에서
+   * 길게 보고 있다」는 그때뿐인 사정이라 다음에 열 때까지 기억할 것이 아니다.
+   *
+   * 🔴 조건을 바꾸거나 파일을 올리고 지워도 **이 값은 그대로다.** 그런 일로
+   * 컴포넌트가 다시 마운트되지 않기 때문이다(조건은 아래 filters 상태, 올리기·
+   * 지우기는 router.refresh() 로 props 만 바뀐다).
+   */
+  const [isListExpanded, setIsListExpanded] = useState(false);
+  /** 단추가 무엇을 여닫는지 가리키는 이름(aria-controls). FilterDisclosure 와 같은 방식. */
+  const listPanelId = useId();
+
   /** 사진인데 미리보기가 없는 것들 — 목록이 원본을 그대로 받아 오는 대상이다. */
   const missingPreview = useMemo(
     () => attachments.filter((item) => isViewableImage(item.mimeType) && !item.previewPath),
@@ -595,6 +660,38 @@ export default function StoredAttachmentList({
     () => applyAttachmentListFilters(attachments, filters),
     [attachments, filters]
   );
+
+  /**
+   * 접을 것이 있는지, 지금 접혀 있는지. 판정은 전부 attachmentListCollapse 에
+   * 있고(위 머리말) 여기서는 **지금 보이는 개수**만 넘긴다.
+   */
+  const collapse = attachmentListCollapse(visible.length, isListExpanded);
+
+  /**
+   * 접힌 상자가 받는 공통 속성 — **표와 카드가 똑같이 받는다.**
+   *
+   * 🔴 `tabIndex` 를 주는 까닭은 **키보드로도 굴러가야** 하기 때문이다. 스크롤
+   *    상자는 포커스를 받을 수 있어야 방향키·PageDown 이 그 상자로 간다.
+   *    펼친 뒤에는 굴릴 것이 없으므로 **그때는 주지 않는다** — 아무 일도 하지
+   *    않는 탭 정거장이 하나 생기는 셈이 된다.
+   *
+   * 🔴 `role`·`aria-label` 은 포커스를 받는 자리에 이름이 없으면 낭독기가
+   *    「그룹」이라고만 읽기 때문이다. 상자가 둘(표·카드) 동시에 읽히는 일은
+   *    없다 — ResponsiveList 는 보이지 않는 표에 aria-hidden 을 걸고, 카드는
+   *    표를 보여 주는 동안 아예 그리지 않는다.
+   *
+   * `data-…` 는 시험이 클래스 이름 대신 잡을 손잡이다(아래 알림 줄의
+   * data-contact-folder-data-save-notice 와 같은 방식).
+   */
+  const collapsedBoxProps = collapse.isCollapsed
+    ? ({
+        "data-attachment-list-collapsed": "",
+        tabIndex: 0,
+        role: "region",
+        "aria-label": `저장된 파일 목록 (전체 ${visible.length}개) — 스크롤해서 나머지를 봅니다`,
+      } as const)
+    : ({} as const);
+
   const kindCounts = useMemo(() => countByKind(attachments), [attachments]);
   /** 지금 목록에 실제로 있는 분류만 고를 수 있게 한다 — 없는 것을 골라 빈 화면을 보지 않도록. */
   const presentCategories = useMemo(
@@ -1021,11 +1118,61 @@ export default function StoredAttachmentList({
   );
 
   // ── 목록: 표 ──────────────────────────────────────────────────────────
+  /**
+   * 🔴 **다섯 줄을 「줄 수」가 아니라 「높이」로 잘랐다.**
+   *
+   * 이 표의 한 줄 높이는 고정이 아니다 — 파일명 칸이 40px 썸네일과 두 줄(이름 +
+   * 설명)을 함께 담고, 조작 칸의 단추 수가 권한·공유폴더 설정·파일 형식에 따라
+   * 달라진다. 줄 수로 자르려면 다섯째 줄 다음부터를 **DOM 에서 빼야** 하는데,
+   * 그러면 「스크롤해서 나머지를 본다」가 성립하지 않는다(아래 ⑤). 반대로
+   * 다섯째 줄까지만 보이게 CSS 로 가리려면 줄마다 높이를 알아야 하고, 그 높이는
+   * 내용마다 다르다. 높이로 자르면 둘 다 피한다 — **모든 줄은 그대로 DOM 에
+   * 있고**, 상자가 제 높이만큼만 보여 준다.
+   *
+   * 20rem(320px)인 근거: 머리글 ≈33px(text-xs 에 위아래 py-2) + 줄 ≈57px
+   * (썸네일 40px 에 위아래 py-2, 설명이 붙어도 썸네일이 더 높아 그대로다)
+   * × 5 = 318px. 그래서 **다섯 줄이 온전히 보이고 여섯째 줄의 머리가 살짝
+   * 걸친다** — 「아래에 더 있다」를 스크롤바 말고도 눈으로 알린다.
+   *
+   * 🔴 세로 스크롤바는 `overflow-y-scroll` 로 **자리를 늘 비워 둔다**(auto 가
+   *    아니다). 숨는 스크롤바를 쓰는 환경에서도 상자라는 것이 드러나야 하고,
+   *    더 있다는 것을 알리는 신호가 「살짝 걸친 줄 + 아래 단추의 전체 개수」와
+   *    함께 셋이 된다.
+   *
+   * 🔴 인쇄할 때는 상자를 푼다 — 스크롤 상자는 쪽 나누기에서 쪼갤 수 없는
+   *    덩어리라 그대로 두면 첫 장에서 잘린다(ResponsiveList 가 같은 이유로
+   *    print:overflow-visible 을 쓴다).
+   */
   const table = (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div
+      {...collapsedBoxProps}
+      className={`overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900${
+        collapse.isCollapsed
+          ? " max-h-80 overflow-y-scroll print:max-h-none print:overflow-visible"
+          : ""
+      }`}
+    >
       <table className="min-w-full text-left text-sm">
-        <thead className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          <tr>
+        {/*
+          🔴 **머리글은 굴러가도 그 자리에 남는다.** 다섯 줄짜리 상자 안에서
+          줄을 내리는데 「파일명·종류·분류…」가 같이 올라가 버리면 지금 보는 칸이
+          무엇인지 알 수 없다. 이 저장소의 다른 붙박이 머리글과 같은 모양이다
+          (RepairCaseTable · MyActiveWorkTable · DomesticOrderListScreen) —
+          `sticky top-0 z-10` 은 <thead> 가 쓰고, 가릴 바탕은 <tr> 이 갖는다.
+          바탕이 없으면 밑으로 지나가는 줄이 글자에 겹쳐 보인다.
+
+          **접었을 때만 붙인다.** sticky 는 가장 가까운 **굴러가는** 상자를
+          기준으로 붙는데, 펼치면 이 껍데기에 높이 제한이 없어 그 안에서는 한
+          번도 굴러가지 않는다. 그때 붙여 두어 봐야 하는 일이 없고(헛도는
+          선언이 하나 남는다), 펼친 화면은 이 변경 전과 한 픽셀도 다르지 않아야
+          한다. 바탕색은 상자 자체가 이미 쓰는 색이라 두 경우 모두 같다.
+        */}
+        <thead
+          className={`border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400${
+            collapse.isCollapsed ? " sticky top-0 z-10" : ""
+          }`}
+        >
+          <tr className="bg-white dark:bg-zinc-900">
             <th scope="col" className="w-10 px-3 py-2" />
             <th scope="col" className="px-3 py-2 font-medium">파일명</th>
             <th scope="col" className="px-3 py-2 font-medium">종류</th>
@@ -1153,89 +1300,115 @@ export default function StoredAttachmentList({
   );
 
   // ── 목록: 카드 (폰) ───────────────────────────────────────────────────
+  /**
+   * 🔴 **카드도 같은 규칙으로 접는다.** 사용자는 「표」를 가리켜 말했지만 같은
+   * 목록이 좁은 화면에서는 카드로 그려진다(ResponsiveList 가 정한다). 카드가
+   * 길어지는 것은 표가 길어지는 것과 같은 문제이고, 오히려 폰에서 더 아프다.
+   *
+   * 🔴 **접는 기준은 표와 똑같이 다섯 개**다(attachmentListCollapse 하나가
+   *    정한다 — 보기 방식마다 기준이 다르면 폭을 바꿨을 때 단추가 있다 없다
+   *    한다). 다른 것은 **상자 높이**뿐이다.
+   *
+   * 24rem(384px)인 근거: 카드 한 장이 ≈112px(안쪽 여백 24 + 썸네일·글자 줄
+   * ≈52 + 단추 줄 ≈36)에 사이 간격 8px 이라 ≈120px 이고, 세 장 남짓이 보인다.
+   * **여기서 「다섯 장」으로 하지 않았다** — 다섯 장이면 600px 이 넘어 폰 화면
+   * 한 판을 그대로 차지하고, 접어서 얻으려던 것이 없어진다. 표의 다섯 줄
+   * (318px)과 비슷한 높이로 맞춘 값이기도 하다.
+   *
+   * 머리글이 없으므로 붙여 둘 것도 없다(표 쪽의 sticky 와 다른 점).
+   */
   const cards = (
-    <ul className="flex flex-col gap-2">
-      {visible.map((item) => (
-        <li
-          key={item.id}
-          className={`rounded-lg border p-3 ${
-            selectedIds.includes(item.id)
-              ? "border-zinc-900 bg-zinc-50 dark:border-zinc-50 dark:bg-zinc-950"
-              : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(item.id)}
-              onChange={(event) => toggle(item.id, shiftKeyOf(event))}
-              onMouseDown={preventShiftClickTextSelection}
-              disabled={isBusy}
-              aria-label={`${item.originalFileName} 선택`}
-              className="mt-1 h-5 w-5 shrink-0"
-            />
-            <Thumbnail item={item} size="small" onOpen={openViewer} />
-            <div className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                {item.originalFileName}
-              </span>
-              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                <KindBadge mimeType={item.mimeType} /> {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)}
-              </span>
-              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                {item.uploadedByName} · {formatTimestamp(item.uploadedAt)}
-              </span>
-              {item.description && (
-                <span className="mt-1 block text-xs text-zinc-600 dark:text-zinc-300">{item.description}</span>
-              )}
+    <div
+      {...collapsedBoxProps}
+      className={
+        collapse.isCollapsed
+          ? "max-h-96 overflow-y-scroll print:max-h-none print:overflow-visible"
+          : undefined
+      }
+    >
+      <ul className="flex flex-col gap-2">
+        {visible.map((item) => (
+          <li
+            key={item.id}
+            className={`rounded-lg border p-3 ${
+              selectedIds.includes(item.id)
+                ? "border-zinc-900 bg-zinc-50 dark:border-zinc-50 dark:bg-zinc-950"
+                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(item.id)}
+                onChange={(event) => toggle(item.id, shiftKeyOf(event))}
+                onMouseDown={preventShiftClickTextSelection}
+                disabled={isBusy}
+                aria-label={`${item.originalFileName} 선택`}
+                className="mt-1 h-5 w-5 shrink-0"
+              />
+              <Thumbnail item={item} size="small" onOpen={openViewer} />
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                  {item.originalFileName}
+                </span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  <KindBadge mimeType={item.mimeType} /> {attachmentCategoryLabels[item.category]} · {formatBytes(item.fileSize)}
+                </span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  {item.uploadedByName} · {formatTimestamp(item.uploadedAt)}
+                </span>
+                {item.description && (
+                  <span className="mt-1 block text-xs text-zinc-600 dark:text-zinc-300">{item.description}</span>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-2 flex justify-end gap-2">
-            {/* 표 보기와 같은 규칙이다 — 사진은 뷰어로, PDF 는 새 탭으로(위 표의 주석 참조). */}
-            <ImagePreviewButton
-              item={item}
-              onOpen={openViewer}
-              className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
-            />
-            {isViewablePdf(item.mimeType) && (
+            <div className="mt-2 flex justify-end gap-2">
+              {/* 표 보기와 같은 규칙이다 — 사진은 뷰어로, PDF 는 새 탭으로(위 표의 주석 참조). */}
+              <ImagePreviewButton
+                item={item}
+                onOpen={openViewer}
+                className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+              />
+              {isViewablePdf(item.mimeType) && (
+                <a
+                  href={inlineViewUrlOf(item.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${item.originalFileName} 미리보기`}
+                  className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+                >
+                  미리보기
+                </a>
+              )}
               <a
-                href={inlineViewUrlOf(item.id)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${item.originalFileName} 미리보기`}
+                href={downloadUrlOf(item.id)}
                 className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
               >
-                미리보기
+                내려받기
               </a>
-            )}
-            <a
-              href={downloadUrlOf(item.id)}
-              className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
-            >
-              내려받기
-            </a>
-            {contactFolderEnabled && (
-              <DataFolderSaveButton
-                item={item}
-                onSave={(items) => void saveToDataFolder(items)}
-                disabled={isBusy || dataSaveProgress !== null}
-                className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
-              />
-            )}
-            {canManage && (
-              <button
-                type="button"
-                onClick={() => onDeleteMany([item])}
-                disabled={isBusy}
-                className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-zinc-700 dark:text-red-400"
-              >
-                지우기
-              </button>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
+              {contactFolderEnabled && (
+                <DataFolderSaveButton
+                  item={item}
+                  onSave={(items) => void saveToDataFolder(items)}
+                  disabled={isBusy || dataSaveProgress !== null}
+                  className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                />
+              )}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteMany([item])}
+                  disabled={isBusy}
+                  className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-zinc-700 dark:text-red-400"
+                >
+                  지우기
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 
   // ── 미리보기: 크기 조절 바 ────────────────────────────────────────────
@@ -1502,7 +1675,46 @@ export default function StoredAttachmentList({
           {gallery}
         </>
       ) : (
-        <ResponsiveList listId="repair-case-stored-attachments" table={table} cards={cards} />
+        /*
+          🔴 접기/펴기는 **표와 카드를 함께** 여닫는다 — 단추가 ResponsiveList
+          바깥에 하나뿐인 까닭이다. 안에 두면 보기 방식을 바꿀 때마다 단추가 두
+          벌이 되고, 같은 id 를 두 상자가 함께 갖게 된다(ResponsiveList 는 보이지
+          않는 표도 DOM 에 남겨 두고 계속 폭을 잰다).
+
+          그래서 aria-controls 가 가리키는 것은 상자 하나가 아니라 **이 목록
+          구역 전체**다. 무엇이 여닫히는지와 실제로 여닫히는 것이 같은 자리다.
+        */
+        <>
+          <div id={listPanelId}>
+            <ResponsiveList listId="repair-case-stored-attachments" table={table} cards={cards} />
+          </div>
+
+          {/*
+            🔴 **접을 것이 있을 때만 그린다.** 다섯 개 이하면 — 조건을 걸어
+            줄어든 경우도 마찬가지로 — 남은 것이 이미 전부 보이므로 단추가 아예
+            없다(attachmentListCollapse).
+
+            🔴 진짜 `<button>` 이고 `aria-expanded` 를 갖는다. 접혀 있을 때
+            글자에 **전체 개수**가 들어가, 지금 보고 있는 다섯 줄이 몇 개 중
+            몇 개인지 눌러 보지 않고도 안다.
+
+            `print:hidden` — 종이에서는 상자를 풀어 전부 찍으므로(위 표·카드의
+            print 규칙) 누를 수 없는 단추를 함께 찍을 이유가 없다.
+          */}
+          {collapse.canCollapse && (
+            <div className="flex justify-center print:hidden">
+              <button
+                type="button"
+                onClick={() => setIsListExpanded((previous) => !previous)}
+                aria-expanded={collapse.isExpanded}
+                aria-controls={listPanelId}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                {collapse.toggleLabel}
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {viewerIndex !== null && (
