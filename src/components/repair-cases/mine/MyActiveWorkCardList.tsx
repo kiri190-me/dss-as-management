@@ -4,7 +4,7 @@ import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
 import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
 import { ExceptionStatusBadge } from "./ExceptionStatusBadge";
-import { formatLastActivity, formatPartsRequestStatus } from "./format";
+import { formatLastActivity, formatLastWorkRecord, formatPartsRequestStatus } from "./format";
 import { daysSinceIntake } from "@/lib/domain/date-only";
 
 /**
@@ -71,6 +71,11 @@ export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[]
             <div className="col-span-2">
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">마지막 작업</dt>
               <dd>{formatLastActivity(row)}</dd>
+            </div>
+            <div className="col-span-2">
+              {/* 표와 같은 문구를 같은 함수로 쓴다. 카드에는 정렬 UI를 두지 않는다 — 지금 없는 것이 설계다. */}
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">작업기록</dt>
+              <dd>{formatLastWorkRecord(row)}</dd>
             </div>
             <div className="col-span-2">
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">부품 요청 상태</dt>

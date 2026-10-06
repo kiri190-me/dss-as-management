@@ -375,6 +375,65 @@ describe("listMyActiveRepairCases: last meaningful activity", () => {
   });
 });
 
+describe("listMyActiveRepairCases: last work record (작업기록이 적힌 시각)", () => {
+  test("작업기록이 하나도 없으면 lastWorkRecordAt은 null이다", async () => {
+    const created = await createTestCase(engineerAId);
+    const rows = await listMyActiveRepairCases(engineerAId);
+    assert.equal(rows.find((r) => r.id === created.id)!.lastWorkRecordAt, null);
+  });
+
+  test("무효 처리되지 않은 작업기록의 시각이 lastWorkRecordAt이 된다", async () => {
+    const created = await createTestCase(engineerAId);
+    const writtenAt = new Date("2099-12-14T00:00:00Z");
+    await insertWorkRecord(created.id, engineerAId, { invalidated: false, createdAt: writtenAt });
+    const rows = await listMyActiveRepairCases(engineerAId);
+    assert.equal(new Date(rows.find((r) => r.id === created.id)!.lastWorkRecordAt!).toISOString(), writtenAt.toISOString());
+  });
+
+  test("무효 처리된 작업기록은 lastWorkRecordAt에 세지 않는다", async () => {
+    const created = await createTestCase(engineerAId);
+    await insertWorkRecord(created.id, engineerAId, { invalidated: true });
+    const rows = await listMyActiveRepairCases(engineerAId);
+    assert.equal(rows.find((r) => r.id === created.id)!.lastWorkRecordAt, null);
+  });
+
+  test("작업기록이 여럿이면 가장 늦게 적힌 것이 lastWorkRecordAt이다", async () => {
+    const created = await createTestCase(engineerAId);
+    const earlier = new Date("2099-12-11T00:00:00Z");
+    const later = new Date("2099-12-13T00:00:00Z");
+    await insertWorkRecord(created.id, engineerAId, { invalidated: false, createdAt: later });
+    await insertWorkRecord(created.id, engineerAId, { invalidated: false, createdAt: earlier });
+    const rows = await listMyActiveRepairCases(engineerAId);
+    assert.equal(new Date(rows.find((r) => r.id === created.id)!.lastWorkRecordAt!).toISOString(), later.toISOString());
+  });
+
+  test("상태 변경·절차 실행만 있는 건은 lastActivityAt만 찍히고 lastWorkRecordAt은 null로 남는다", async () => {
+    // 이 둘이 갈라지는 것이 lastWorkRecordAt을 따로 뽑은 이유 전부다 — 손은 안
+    // 댔는데 "최근 작업"으로 보이는 건을 가려내려는 것이다.
+    const created = await createTestCase(engineerAId);
+    await insertStatusHistory(created.id, engineerAId);
+    await insertExecutionHistory(created.id, engineerAId);
+    const rows = await listMyActiveRepairCases(engineerAId);
+    const row = rows.find((r) => r.id === created.id)!;
+    assert.notEqual(row.lastActivityAt, null, "마지막 활동은 찍혀야 한다");
+    assert.equal(row.lastWorkRecordAt, null, "작업기록은 없어야 한다");
+  });
+
+  test("lastActivityAt은 작업기록을 더해도 여전히 셋 중 가장 늦은 것이다", async () => {
+    // lastWorkRecordAt을 더하면서 기존 lastActivityAt의 뜻이 바뀌지 않았음을 못 박는다.
+    const created = await createTestCase(engineerAId);
+    const workRecordAt = new Date("2099-12-11T00:00:00Z");
+    const statusAt = new Date("2099-12-13T00:00:00Z");
+    await insertWorkRecord(created.id, engineerAId, { invalidated: false, createdAt: workRecordAt });
+    await insertStatusHistory(created.id, engineerAId, statusAt);
+
+    const rows = await listMyActiveRepairCases(engineerAId);
+    const row = rows.find((r) => r.id === created.id)!;
+    assert.equal(new Date(row.lastActivityAt!).toISOString(), statusAt.toISOString(), "마지막 활동은 더 늦은 상태변경 쪽");
+    assert.equal(new Date(row.lastWorkRecordAt!).toISOString(), workRecordAt.toISOString(), "작업기록은 작업기록 쪽");
+  });
+});
+
 describe("listMyActiveRepairCases: parts-request summary", () => {
   test("19. an active PENDING request -> activePartsRequestStatus PENDING", async () => {
     const created = await createTestCase(engineerAId);

@@ -55,7 +55,23 @@ export type MyWorkSortColumn =
   | "customerName"
   | "status"
   | "internalTargetShipmentDate"
-  | "customerRequestedDueDate";
+  | "customerRequestedDueDate"
+  | "lastWorkRecordAt";
+
+/**
+ * 비교 방향이 뒤집힌 열. 다른 열은 처음 누르면 오름차순이 뜻에 맞지만
+ * ("가나다순", "빠른 날짜부터"), 작업기록 시각은 **최근이 위**여야 뜻이 맞는다 —
+ * "요즘 손댄 것부터 보자"가 이 열을 누르는 이유이고, 2019년에 한 번 적고 만
+ * 건이 맨 위에 오면 누른 보람이 없다. 그래서 이 열만 asc 상태에서 최근 순으로
+ * 비교한다(comparePrimary 참조). 머리글 화살표도 같은 이유로 뒤집어 그린다
+ * (MyActiveWorkTable.tsx의 sortIndicator).
+ */
+const REVERSED_SORT_COLUMNS: readonly MyWorkSortColumn[] = ["lastWorkRecordAt"];
+
+/** 이 열은 처음 눌렀을 때 최근 순(내림차순)으로 보이는가. */
+export function isReversedMyWorkSortColumn(column: MyWorkSortColumn): boolean {
+  return REVERSED_SORT_COLUMNS.includes(column);
+}
 
 export type MyWorkSortState = { column: MyWorkSortColumn; direction: "asc" | "desc" };
 
@@ -95,6 +111,9 @@ function primaryValue(row: MyActiveWorkRow, column: MyWorkSortColumn): string | 
       return row.internalTargetShipmentDate;
     case "customerRequestedDueDate":
       return row.customerRequestedDueDate;
+    case "lastWorkRecordAt":
+      // ISO 8601 문자열이라 글자 순서가 곧 시간 순서다(자리수가 늘 같다).
+      return row.lastWorkRecordAt;
     default:
       return null;
   }
@@ -104,7 +123,11 @@ function comparePrimary(a: MyActiveWorkRow, b: MyActiveWorkRow, column: MyWorkSo
   const left = primaryValue(a, column);
   const right = primaryValue(b, column);
   if (left === right) return 0;
+  // 널 처리는 방향 뒤집기보다 먼저다 — 값 없는 행은 어느 방향에서도 맨 뒤.
   if (left === null) return 1;
   if (right === null) return -1;
+  // 뒤집힌 열은 여기서만 좌우를 바꾼다. 바깥 뒤집기(desc의 reverse)를 건드리면
+  // 널 처리까지 같이 흔들린다.
+  if (isReversedMyWorkSortColumn(column)) return right.localeCompare(left);
   return left.localeCompare(right);
 }

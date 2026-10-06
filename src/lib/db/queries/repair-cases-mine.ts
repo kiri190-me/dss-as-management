@@ -55,6 +55,14 @@ export type MyActiveWorkRow = {
   customerRequestedDueDate: string | null;
   /** MAX(created_at) across repair_case_work_records (invalidated excluded), status_change_histories, and procedure_case_execution_history — null when none of the three has ever recorded activity for this case. */
   lastActivityAt: string | null;
+  /**
+   * MAX(created_at) of this case's work records alone (invalidated excluded) —
+   * null when the case has never been written up. Deliberately narrower than
+   * lastActivityAt: a case that only had its step advanced has "activity" but
+   * no one has written down what they did to it, and "작업기록이 적힌 시각이
+   * 최근인 순"으로 줄을 세우려면 그 둘이 갈라져 있어야 한다.
+   */
+  lastWorkRecordAt: string | null;
   /** Most-actionable active (non-terminal) parts-request state for this case, or null when none is active. PENDING outranks PARTIALLY_ISSUED. */
   activePartsRequestStatus: "PENDING" | "PARTIALLY_ISSUED" | null;
 };
@@ -80,6 +88,8 @@ type JoinRow = {
   customerRequestedDueDate: string | null;
   /** Raw driver output for the GREATEST(...) expression — a Date instance for ordinary typed columns, but postgres.js returns computed/aggregate expressions as ISO strings, so both are handled at the mapping boundary. */
   lastActivityAt: Date | string | null;
+  /** Same raw-output caveat as lastActivityAt — a computed aggregate, so Date or ISO string. */
+  lastWorkRecordAt: Date | string | null;
   activePartsRequestStatus: "PENDING" | "PARTIALLY_ISSUED" | null;
 };
 
@@ -99,6 +109,26 @@ function lastActivitySubquery() {
     (select max(${procedureCaseExecutionHistory.createdAt}) from ${procedureCaseExecutionHistory}
       inner join ${procedureCaseExecutions} on ${procedureCaseExecutions.id} = ${procedureCaseExecutionHistory.executionId}
       where ${procedureCaseExecutions.repairCaseId} = ${repairCases.id} and ${procedureCaseExecutions.isDeleted} = false)
+  )`;
+}
+
+/**
+ * Last time someone wrote a work record for this case, as its own correlated
+ * scalar subquery alongside lastActivitySubquery() — same source, same
+ * invalidated-excluded rule (an invalidated memo must never make a case look
+ * recently worked), same partial index
+ * (repair_case_id, record_kind, created_at) WHERE invalidated_at is null.
+ *
+ * Kept separate rather than derived from lastActivityAt because the two
+ * answer different questions: lastActivityAt is "anything happened at all"
+ * (work record / status change / procedure run), this one is "someone wrote
+ * down what they did". Only the latter can order the list by "작업기록이
+ * 적힌 시각이 최근인 순".
+ */
+function lastWorkRecordSubquery() {
+  return sql<Date | null>`(
+    select max(${repairCaseWorkRecords.createdAt}) from ${repairCaseWorkRecords}
+      where ${repairCaseWorkRecords.repairCaseId} = ${repairCases.id} and ${repairCaseWorkRecords.invalidatedAt} is null
   )`;
 }
 
@@ -148,6 +178,7 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     customerRequestedDueDate: row.customerRequestedDueDate,
     lastActivityAt: row.lastActivityAt ? new Date(row.lastActivityAt).toISOString() : null,
+    lastWorkRecordAt: row.lastWorkRecordAt ? new Date(row.lastWorkRecordAt).toISOString() : null,
     activePartsRequestStatus: row.activePartsRequestStatus,
   };
 }
@@ -185,6 +216,7 @@ export async function listMyActiveRepairCases(actorId: string): Promise<MyActive
       internalTargetShipmentDate: repairCases.internalTargetShipmentDate,
       customerRequestedDueDate: repairCases.customerRequestedDueDate,
       lastActivityAt: lastActivitySubquery(),
+      lastWorkRecordAt: lastWorkRecordSubquery(),
       activePartsRequestStatus: activePartsRequestSubquery(),
     })
     .from(repairCases)

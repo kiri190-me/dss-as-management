@@ -28,6 +28,7 @@ function row(overrides: Partial<MyActiveWorkRow>): MyActiveWorkRow {
     internalTargetShipmentDate: null,
     customerRequestedDueDate: null,
     lastActivityAt: null,
+    lastWorkRecordAt: null,
     activePartsRequestStatus: null,
     ...overrides,
   };

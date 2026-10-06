@@ -2,19 +2,29 @@
 
 import Link from "next/link";
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
-import type { MyWorkSortColumn, MyWorkSortState } from "@/lib/domain/my-active-work-sort";
+import {
+  isReversedMyWorkSortColumn,
+  type MyWorkSortColumn,
+  type MyWorkSortState,
+} from "@/lib/domain/my-active-work-sort";
 import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
 import { ExceptionStatusBadge } from "./ExceptionStatusBadge";
-import { formatLastActivity, formatPartsRequestStatus } from "./format";
+import { formatLastActivity, formatLastWorkRecord, formatPartsRequestStatus } from "./format";
 import { daysSinceIntake } from "@/lib/domain/date-only";
 
 const thBaseClass =
   "border-b border-zinc-200 bg-white px-3 py-2 text-left text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
 
+/**
+ * 화살표는 상태 이름이 아니라 "지금 무엇이 위에 있는가"를 가리킨다. 작업기록
+ * 열은 비교 방향이 뒤집혀 있어(my-active-work-sort.ts) asc 상태가 최근 순이므로
+ * 그 열만 화살표도 뒤집어 그린다 — 그러지 않으면 최근 순인데 ▲가 뜬다.
+ */
 function sortIndicator(sort: MyWorkSortState, column: MyWorkSortColumn): string {
   if (sort.column !== column) return "";
-  return sort.direction === "asc" ? "▲" : "▼";
+  const ascending = isReversedMyWorkSortColumn(column) ? sort.direction === "desc" : sort.direction === "asc";
+  return ascending ? "▲" : "▼";
 }
 
 /** 전체 A/S 현황 표의 머리글 버튼과 같은 무게 — 두 화면이 나란히 보여야 한다. */
@@ -127,8 +137,16 @@ export default function MyActiveWorkTable({
               제품
             </th>
             <th scope="col" className={thBaseClass}>
-              {/* 현재 단계(주) + 마지막 작업(보조) */}
-              현재 단계
+              {/*
+                현재 단계(주) + 마지막 작업(보조) + 작업기록(보조, 정렬 가능).
+                "현재 단계" 자체는 여전히 정렬 대상이 아니다 — 단계 이름은 공정 순서가
+                아니라 글자라서 줄을 세워도 뜻이 없다. 정렬이 붙은 것은 이 칸 셋째 줄의
+                작업기록 시각이고, 그래서 머리글도 그 줄 자리에 보조 버튼으로 둔다.
+              */}
+              <div className="flex flex-col gap-0.5">
+                <span>현재 단계</span>
+                <SecondarySortButton column="lastWorkRecordAt" label="작업기록" sort={sort} onSortChange={onSortChange} />
+              </div>
             </th>
             <th scope="col" className={thBaseClass}>
               {/* 사내 목표 출하일(주) + 고객 요청 납기일(보조, 정렬 가능). 목표 검수완료일은 셋째 줄. */}
@@ -209,6 +227,9 @@ export default function MyActiveWorkTable({
                   <span className="whitespace-nowrap">{row.currentWorkflowStepLabel}</span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
                     {formatLastActivity(row)}
+                  </span>
+                  <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
+                    작업기록 {formatLastWorkRecord(row)}
                   </span>
                 </div>
               </td>

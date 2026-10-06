@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import MyActiveWorkScreen from "./MyActiveWorkScreen";
+import MyActiveWorkCardList from "./MyActiveWorkCardList";
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
 
 function row(overrides: Partial<MyActiveWorkRow> = {}): MyActiveWorkRow {
@@ -24,6 +25,7 @@ function row(overrides: Partial<MyActiveWorkRow> = {}): MyActiveWorkRow {
     internalTargetShipmentDate: "2026-08-27",
     customerRequestedDueDate: null,
     lastActivityAt: null,
+    lastWorkRecordAt: null,
     activePartsRequestStatus: null,
     ...overrides,
   };
@@ -180,4 +182,69 @@ test("접었어도 원래 보여 주던 값은 하나도 사라지지 않았다"
     assert.ok(html.includes(value), `${value}가 어딘가에는 남아 있어야 한다`);
   }
   assert.ok(html.includes("입고 후"), "입고 후 경과일도 남아 있어야 한다");
+});
+
+// ──────────────────────────────── 2026-10-06 작업기록이 적힌 시각을 보여 준다
+
+test("작업기록: 적힌 적이 없으면 '작업기록 없음'으로 적는다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row({ lastWorkRecordAt: null })]} />);
+  assert.ok(html.includes("작업기록 없음"), "값이 없으면 '작업기록 없음'이어야 한다");
+});
+
+test("작업기록: 시각이 있으면 마지막 작업과 같은 모양으로 적는다", () => {
+  const html = renderToStaticMarkup(
+    <MyActiveWorkScreen rows={[row({ lastActivityAt: "2026-08-05T08:18:01.241Z", lastWorkRecordAt: "2026-08-05T08:18:01.241Z" })]} />
+  );
+  assert.ok(!html.includes("작업기록 없음"), "값이 있으면 '없음'이 아니다");
+  // 같은 시각이면 두 줄의 글자가 똑같아야 한다 — 한 칸에 나란히 놓이므로 모양이
+  // 어긋나면 바로 눈에 띈다.
+  const formatted = new Date("2026-08-05T08:18:01.241Z").toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  assert.ok(html.includes(`작업기록 ${formatted}`), "표의 셋째 줄이 '작업기록 <시각>'이어야 한다");
+});
+
+test("작업기록과 마지막 작업은 서로 다른 값을 각자 보여 준다", () => {
+  // 상태만 옮긴 건: 활동은 최근이지만 작업기록은 한 번도 없다. 두 줄이 서로를
+  // 덮어쓰면 "아무도 안 적었다"는 사실이 화면에서 사라진다.
+  const html = renderToStaticMarkup(
+    <MyActiveWorkScreen rows={[row({ lastActivityAt: "2026-08-05T08:18:01.241Z", lastWorkRecordAt: null })]} />
+  );
+  assert.ok(!html.includes("활동 없음"), "마지막 작업은 시각이 찍혀야 한다");
+  assert.ok(html.includes("작업기록 없음"), "작업기록은 '없음'이어야 한다");
+});
+
+test("'현재 단계' 칸 머리글에 작업기록 정렬 단추가 붙는다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
+  const headerStart = html.indexOf(">현재 단계<");
+  assert.ok(headerStart >= 0, "'현재 단계' 머리글은 그대로 있어야 한다");
+  // 머리글 쪽에도 '작업기록'이라는 누를 거리가 있어야 한다(본문 줄과 별개로).
+  const buttons = html.match(/<button[^>]*>작업기록/g) ?? [];
+  assert.equal(buttons.length, 1, "작업기록 정렬 단추는 머리글에 하나만 있어야 한다");
+});
+
+test("'현재 단계' 자체는 여전히 정렬 대상이 아니다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkScreen rows={[row()]} />);
+  assert.ok(!/<button[^>]*>현재 단계/.test(html), "단계 이름으로는 줄을 세우지 않는다");
+});
+
+// 카드 목록은 서버 렌더에서 그려지지 않는다(표가 먼저 나온다 — ResponsiveList).
+// 그래서 카드 쪽은 컴포넌트를 직접 그려 확인한다.
+
+test("좁은 화면 카드에도 작업기록 줄이 있고, 문구는 표와 같은 함수에서 나온다", () => {
+  const html = renderToStaticMarkup(<MyActiveWorkCardList rows={[row({ lastWorkRecordAt: null })]} />);
+  assert.ok(html.includes("작업기록"), "카드에 작업기록 항목이 있어야 한다");
+  assert.ok(html.includes("없음"), "값이 없으면 없음으로 적는다");
+  assert.ok(html.includes("마지막 작업"), "기존 마지막 작업 항목은 그대로 남는다");
+});
+
+test("카드 목록에는 정렬 UI를 두지 않는다", () => {
+  // 지금 없는 것이 의도된 설계다 — 카드에서는 머리글이라는 자리 자체가 없다.
+  const html = renderToStaticMarkup(<MyActiveWorkCardList rows={[row()]} />);
+  assert.ok(!html.includes("<button"), "카드에는 누를 수 있는 정렬 단추가 없어야 한다");
+  assert.ok(!html.includes("▲") && !html.includes("▼"), "정렬 화살표도 없어야 한다");
 });
