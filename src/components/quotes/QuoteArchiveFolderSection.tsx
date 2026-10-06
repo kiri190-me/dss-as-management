@@ -8,12 +8,19 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
 
 /**
  * ============================================================================
- * 견적서 편집 화면의 **공유폴더 구역** — 그 견적서의 폴더 안에 무엇이 있는가 (2026-10-06)
+ * **공유폴더 구역** — 그 견적서의 폴더 안에 무엇이 있는가 (2026-10-06)
  * ============================================================================
  * 견적서 하나당 사내 공유폴더에 폴더가 하나 있다(`연도 폴더/견적서 폴더`). 그 안에 무엇이
- * 들어 있는지 보려고 탐색기를 따로 열던 것을, 머리의 [폴더 열기] 바로 아래에서 그대로
- * 보여 준다. 수리 건 「파일 관리」 탭의 연락서 폴더 구역
+ * 들어 있는지 보려고 탐색기를 따로 열던 것을 그 자리에서 그대로 보여 준다. 수리 건
+ * 「파일 관리」 탭의 연락서 폴더 구역
  * (components/repair-cases/files/ContactFolderSection.tsx)을 본떴다.
+ *
+ * ── 🔴 **두 화면이 이 한 벌을 함께 쓴다** ────────────────────────────────
+ *  · 수리 건 상세 「견적서」 탭 — 견적서 목록 **바로 아래**(사용자 결정 2026-10-06). 한
+ *    수리 건에 견적서가 여러 장이라 **본 번호마다 한 구역**이 선다(폴더가 그 단위다 —
+ *    quote-archive-folder-groups.ts). 그래서 `label`(본 번호)을 머리에 적어 가른다.
+ *  · 견적서 편집 화면 — 머리의 [폴더 열기] 바로 아래. 그 견적서 하나뿐이라 `label` 이 없다.
+ * 🔴 베껴 두 벌을 만들지 않는다 — 한쪽만 고쳐지는 날이 온다.
  *
  * ── 🔴 만들지도 올리지도 지우지도 않는다 — 읽고 여는 것뿐이다 ─────────────
  * 폴더를 만들지도, 파일을 올리지도, 지우지도 않는다. 🔴 **서버가 파일을 중계하는 길도
@@ -81,6 +88,15 @@ export function quoteArchiveFolderEntriesUrl(quoteId: string): string {
 // ── 문장 ─────────────────────────────────────────────────────────────────
 
 export const QUOTE_ARCHIVE_FOLDER_SECTION_TITLE = "공유폴더";
+
+/**
+ * 구역의 머리 — 🔴 **한 화면에 구역이 여럿 설 수 있다**(수리 건의 「견적서」 탭. 본 번호가
+ * 다르면 폴더도 다르다). 그때 어느 폴더의 상자인지 알 수 있도록 **본 번호를 머리에 적는다.**
+ * 이름을 주지 않으면(편집 화면 — 그 견적서 하나뿐이다) 예전 그대로 「공유폴더」다.
+ */
+export function quoteArchiveFolderSectionTitle(label: string): string {
+  return label === "" ? QUOTE_ARCHIVE_FOLDER_SECTION_TITLE : `${QUOTE_ARCHIVE_FOLDER_SECTION_TITLE} — ${label}`;
+}
 export const QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT = "불러오는 중…";
 export const QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT =
   "아직 공유폴더에 이 견적서의 폴더가 없습니다 — [견적서 받기]를 누르면 만들어집니다";
@@ -289,24 +305,29 @@ function EntryList({
  * 상태 하나를 그린다. 🔴 `disabled` 면 **아무것도 그리지 않는다**(null).
  * 상태를 직접 넣어 그려 볼 수 있게 따로 두었다(통로 · 네트워크 없이 시험한다).
  */
-export function QuoteArchiveFolderSectionView({ state }: { state: QuoteArchiveFolderSectionState }) {
+export function QuoteArchiveFolderSectionView({
+  state,
+  label = "",
+}: {
+  state: QuoteArchiveFolderSectionState;
+  /** 🔴 어느 폴더의 상자인지 — 본 번호. 한 화면에 여럿 설 때 이것으로 가른다. */
+  label?: string;
+}) {
   if (state.kind === "disabled") return null;
 
   const relativePath = state.kind === "found" ? state.relativePath : "";
+  const title = quoteArchiveFolderSectionTitle(label);
 
   return (
     <section
-      aria-labelledby="quote-archive-folder-section-title"
+      // 🔴 `aria-labelledby` 가 아니라 `aria-label` 이다 — 한 화면에 구역이 여럿 서면 같은
+      //    id 가 여러 번 나와 어느 머리를 가리키는지 알 수 없게 된다.
+      aria-label={title}
       data-quote-archive-folder-section=""
       className="print:hidden flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2
-          id="quote-archive-folder-section-title"
-          className="text-sm font-semibold text-zinc-900 dark:text-zinc-50"
-        >
-          {QUOTE_ARCHIVE_FOLDER_SECTION_TITLE}
-        </h2>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
         {state.kind === "found" && state.relativePath !== "" && (
           <span className="min-w-0 break-all text-xs text-zinc-500 dark:text-zinc-400">{state.relativePath}</span>
         )}
@@ -358,7 +379,17 @@ export function QuoteArchiveFolderSectionView({ state }: { state: QuoteArchiveFo
  * 없기 때문이다([견적서 받기]가 끝난 뒤 목록을 갱신하는 일은 받기 쪽 결과 처리를 건드려야
  * 한다). 쓰지 않을 칸을 미리 들이지 않는다 — 필요해지면 그 조각에서 더한다.
  */
-export default function QuoteArchiveFolderSection({ quoteId }: { quoteId: string }) {
+export default function QuoteArchiveFolderSection({
+  quoteId,
+  label = "",
+}: {
+  quoteId: string;
+  /**
+   * 🔴 구역의 머리에 적는 **본 번호**. 수리 건의 「견적서」 탭은 한 화면에 구역을 여럿
+   * 그리므로(폴더가 여럿일 수 있다) 반드시 준다. 편집 화면은 그 견적서 하나뿐이라 안 준다.
+   */
+  label?: string;
+}) {
   const [answer, setAnswer] = useState<{ quoteId: string; state: QuoteArchiveFolderSectionState } | null>(null);
 
   useEffect(() => {
@@ -374,5 +405,5 @@ export default function QuoteArchiveFolderSection({ quoteId }: { quoteId: string
   const state: QuoteArchiveFolderSectionState =
     answer !== null && answer.quoteId === quoteId ? answer.state : { kind: "loading" };
 
-  return <QuoteArchiveFolderSectionView state={state} />;
+  return <QuoteArchiveFolderSectionView state={state} label={label} />;
 }

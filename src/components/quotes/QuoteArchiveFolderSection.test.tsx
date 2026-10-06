@@ -1,6 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -43,11 +45,20 @@ const editFormSource = readFileSync(new URL("./QuoteEditForm.tsx", import.meta.u
 /** 주석을 뺀 코드 — 머리말이 까닭을 설명하느라 적은 낱말(iframe · QuoteFolderOpenButton …)에 걸리지 않게. */
 const sectionCode = sectionSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
+/** 수리 건 상세 「견적서」 탭 — 구역을 그 목록 아래에 붙인 자리(사용자 결정 2026-10-06). */
+const srcDir = fileURLToPath(new URL("../../", import.meta.url));
+const quotesTabPage = readFileSync(
+  path.join(srcDir, "app", "(app)", "repair-cases", "[id]", "quotes", "page.tsx"),
+  "utf8"
+).replace(/\r\n/g, "\n");
+
 /** 🔴 가짜 이름이다 — 모양만 실제와 같다. */
 const RELATIVE_PATH = "21. 2026 내자견적서/DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서";
 
-function markup(state: QuoteArchiveFolderSectionState): string {
-  return renderToStaticMarkup(createElement(QuoteArchiveFolderSectionView, { state }));
+function markup(state: QuoteArchiveFolderSectionState, label?: string): string {
+  return renderToStaticMarkup(
+    createElement(QuoteArchiveFolderSectionView, label === undefined ? { state } : { state, label })
+  );
 }
 
 const foundState = (
@@ -297,7 +308,91 @@ describe("통로를 부르는 길 — 던지지 않는다", () => {
   });
 });
 
-describe("자리 — 편집 화면의 어디에 붙었나", () => {
+/*
+ * ============================================================================
+ * 🔴 자리 — **수리 건 「견적서」 탭의 목록 바로 아래**(사용자 결정 2026-10-06)
+ * ============================================================================
+ * 한 수리 건에 견적서가 여러 장이고, 폴더를 가르는 것은 **본 번호**라 구역이 여럿 설 수
+ * 있다. 그래서 머리에 본 번호를 적어 가른다. 묶는 규칙 자체는
+ * quote-archive-folder-groups.test.ts 가 본다.
+ *
+ * 🔴 목록 화면(QuoteListScreen)은 vendor/dss-core 에 쌍둥이가 있어 **건드리지 않는다** —
+ * 그 화면 안이 아니라 페이지에서 그 아래에 붙였다.
+ * ============================================================================
+ */
+describe("자리 — 수리 건 「견적서」 탭", () => {
+  test("🔴 목록 바로 **아래**에, 본 번호마다 하나씩", () => {
+    assert.ok(
+      quotesTabPage.includes(
+        'import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";'
+      ),
+      "탭이 이 구역을 가져오지 않는다"
+    );
+    assert.ok(
+      quotesTabPage.includes(
+        "{archiveFolderGroups.map((group) => (\n        <QuoteArchiveFolderSection key={group.baseNumber} quoteId={group.quoteId} label={group.baseNumber} />\n      ))}"
+      ),
+      quotesTabPage.slice(quotesTabPage.indexOf("archiveFolderGroups.map"))
+    );
+    // 🔴 목록보다 **뒤**다.
+    const list = quotesTabPage.indexOf("<QuoteListScreen");
+    const section = quotesTabPage.indexOf("<QuoteArchiveFolderSection");
+    assert.ok(list >= 0 && section > list, "구역이 견적서 목록보다 앞에 있다");
+  });
+
+  test("🔴 묶는 일은 순수 함수가 한다 — 페이지가 공유폴더를 보지 않는다", () => {
+    assert.ok(
+      quotesTabPage.includes(
+        'import { groupQuotesByArchiveBaseNumber } from "@/components/quotes/quote-archive-folder-groups";'
+      )
+    );
+    assert.ok(quotesTabPage.includes("const archiveFolderGroups = groupQuotesByArchiveBaseNumber(rows);"));
+    // 서버 컴포넌트가 공유폴더를 읽으면 NAS 가 느린 날 이 탭 자체가 안 뜬다.
+    for (const forbidden of [
+      "listQuoteArchiveEntries",
+      "resolveQuoteArchiveRoot",
+      "findQuoteArchiveFolder",
+      "node:fs",
+      "@/lib/storage/",
+    ]) {
+      assert.equal(quotesTabPage.includes(forbidden), false, `탭이 공유폴더를 읽는다: ${forbidden}`);
+    }
+    // 🔴 번호를 제 손으로 쪼개지 않는다 — 묶는 규칙은 한 자리에만 있다.
+    assert.equal(quotesTabPage.includes("quoteArchiveBaseNumber"), false);
+  });
+
+  test("🔴 견적서가 없으면 구역을 **아예 안 그린다**", () => {
+    // 묶음이 비면 그릴 것이 없다(map 이 아무것도 내지 않는다). 묶음 쪽 규칙은 이웃 시험이 본다.
+    assert.ok(quotesTabPage.includes("{archiveFolderGroups.map("), quotesTabPage);
+    assert.equal(/archiveFolderGroups\.length/.test(quotesTabPage), false, "빈 묶음을 따로 분기한다");
+  });
+
+  test("🔴 목록 화면(QuoteListScreen)을 건드리지 않는다 — vendor 에 쌍둥이가 있다", () => {
+    const listScreen = readFileSync(path.join(srcDir, "components", "quotes", "QuoteListScreen.tsx"), "utf8");
+    assert.equal(listScreen.includes("QuoteArchiveFolderSection"), false, "목록 화면에 구역을 넣었다");
+    assert.equal(listScreen.includes("archive-folder"), false, "목록 화면이 공유폴더 통로를 안다");
+  });
+
+  test("🔴 구역이 여럿 서도 머리로 가른다 — 같은 id 를 여러 번 쓰지 않는다", () => {
+    const first = markup({ kind: "loading" }, "DSS 2026-078");
+    const second = markup({ kind: "loading" }, "DSS 2026-120");
+    assert.ok(first.includes("공유폴더 — DSS 2026-078"), first);
+    assert.ok(second.includes("공유폴더 — DSS 2026-120"), second);
+    // 접근성 이름도 구역마다 다르다.
+    assert.ok(first.includes('aria-label="공유폴더 — DSS 2026-078"'), first);
+    // 🔴 머리에 id 를 박지 않는다 — 한 화면에 여럿이면 같은 id 가 여러 번 나온다.
+    assert.equal((first + second).includes('id="'), false, first + second);
+    assert.equal((first + second).includes("aria-labelledby"), false, first + second);
+  });
+
+  test("이름을 주지 않으면 머리는 예전 그대로 「공유폴더」다", () => {
+    const html = markup({ kind: "loading" });
+    assert.ok(html.includes(">공유폴더<"), html);
+    assert.equal(html.includes("—"), false, html);
+  });
+});
+
+describe("자리 — 견적서 편집 화면에도 그대로 둔다", () => {
   test("🔴 [폴더 열기] 결과 **아래**, 저장된 장에서만", () => {
     assert.ok(
       editFormSource.includes("{savedQuote && <QuoteArchiveFolderSection quoteId={savedQuote.id} />}"),
