@@ -32,7 +32,9 @@ import ContactFolderPlaceOpenButton from "@/components/repair-cases/files/Contac
  *  · 찾은 것이 0 건 → 안 그린다. 「없습니다」 상자를 괜히 세우지 않는다
  *  · `failed` → **짧게 알린다.** 조용히 사라지면 「없는 것」인지 「못 읽은 것」인지 모른다
  * L/N 이나 S/N 이 없는 수리 건에서는 **부르는 쪽(탭)이** 이 구역을 아예 그리지 않는다
- * (아래 hasQuoteArchiveProductKeys) — 통로를 부르지도 않는다.
+ * (quote-archive-product-keys.ts 의 hasQuoteArchiveProductKeys) — 통로를 부르지도 않는다.
+ * 🔴 그 판정은 **이 파일에 두지 않는다** — 서버 컴포넌트가 부르는데 이 파일은 `"use client"`
+ * 라, 여기서 내보내면 탭이 열리지 않는다. 까닭은 그 파일 머리말에 적었다.
  *
  * ── 🔴 서버 컴포넌트에서 공유폴더를 읽지 않는다 ───────────────────────────
  * 탭이 뜰 때 공유폴더를 읽으면 **NAS 가 느리거나 꺼져 있는 날 탭 자체가 안 뜬다.** 화면이 뜬
@@ -82,29 +84,6 @@ export function quoteArchiveProductFolderNumbersText(quoteNumbers: readonly stri
 /** 줄의 파일 수 곁말. */
 export function quoteArchiveProductFolderFileCountText(fileCount: number): string {
   return `파일 ${fileCount}개`;
-}
-
-// ── 구역을 그릴지 가르는 순수 판정 (부르는 쪽이 쓴다) ──────────────────────
-
-/**
- * 🔴 이 값이 **장비를 가리킬 수 있는가** — 글자나 숫자가 한 자라도 있어야 한다.
- * 수리 건 조회는 빈 칸을 `-` 로 채워 내려보낸다(mappers/repair-case.ts). 그 `-` 를 열쇠로
- * 쓰면 공유폴더에서 엉뚱한 폴더가 걸리므로 **빈 값과 똑같이** 다룬다.
- */
-function isUsableProductKey(value: string | null | undefined): boolean {
-  return typeof value === "string" && /[\p{L}\p{N}]/u.test(value);
-}
-
-/**
- * 🔴 **L/N 과 S/N 이 둘 다 있어야** 이 구역을 그린다. S/N 하나로는 장비가 확정되지 않는다 —
- * 이 시스템에는 같은 S/N 에 모델이 셋인 사례가 실제로 있다. 서버도 같은 판단을 한 번 더
- * 한다(storage/quote-archive-product-folders.ts) — 여기서 거르는 것은 **쓸데없는 왕복**이다.
- */
-export function hasQuoteArchiveProductKeys(
-  lotNumber: string | null | undefined,
-  serialNumber: string | null | undefined
-): boolean {
-  return isUsableProductKey(lotNumber) && isUsableProductKey(serialNumber);
 }
 
 // ── 값 ───────────────────────────────────────────────────────────────────

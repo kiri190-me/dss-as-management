@@ -3,10 +3,14 @@ import { notFound, redirect } from "next/navigation";
 
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
-import QuoteArchiveProductFolderSection, {
-  hasQuoteArchiveProductKeys,
-} from "@/components/quotes/QuoteArchiveProductFolderSection";
+import QuoteArchiveProductFolderSection from "@/components/quotes/QuoteArchiveProductFolderSection";
 import { groupQuotesByArchiveBaseNumber } from "@/components/quotes/quote-archive-folder-groups";
+/**
+ * 🔴 판정은 **구역 파일이 아니라 중립 파일**에서 가져온다. 구역 파일은 `"use client"` 라
+ * 거기서 내보낸 함수를 이 서버 컴포넌트가 부르면 그 자리에서 터진다("Attempted to call …
+ * from the server"). 까닭은 quote-archive-product-keys.ts 머리말에 적었다.
+ */
+import { hasQuoteArchiveProductKeys } from "@/components/quotes/quote-archive-product-keys";
 import QuoteListScreen from "@/components/quotes/QuoteListScreen";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";

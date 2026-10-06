@@ -286,6 +286,11 @@ src/lib/storage/quote-archive-product-folders-source.test.ts
 # `[id]` 는 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가 글롭 문자클래스로 읽어 tests 0 으로
 # 조용히 지나간다.
 src/app/api/repair-cases/*/quote-archive-folders/route-source.test.ts
+# 🔴 서버/클라이언트 경계 감시(2026-10-06) — `src/app/` 아래의 서버 파일이 `"use client"`
+# 파일에서 가져온 이름을 **괄호 붙여 부르지 않는가**를 원본 글자로 본다. 실제로 「견적서」
+# 탭이 통째로 안 열린 적이 있다("Attempted to call … from the server"). 🔴 이 고장은 타입
+# 검사도 단위 시험도 못 잡는다 — build 나 실제 화면에서만 드러나 사용자가 먼저 본다.
+src/app/server-client-boundary-source.test.ts
 src/lib/domain/contact-folder-naming.test.ts
 src/lib/storage/contact-folder-archive.test.ts
 src/lib/storage/contact-folder-archive-source.test.ts

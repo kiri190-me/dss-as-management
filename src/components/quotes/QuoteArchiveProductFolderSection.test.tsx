@@ -10,7 +10,6 @@ import QuoteArchiveProductFolderSection, {
   QUOTE_ARCHIVE_PRODUCT_FOLDER_SECTION_FAILED_TEXT,
   QUOTE_ARCHIVE_PRODUCT_FOLDER_SECTION_TRUNCATED_TEXT,
   QuoteArchiveProductFolderSectionView,
-  hasQuoteArchiveProductKeys,
   loadQuoteArchiveProductFolders,
   quoteArchiveProductFolderNumbersText,
   quoteArchiveProductFolderSectionTitle,
@@ -265,34 +264,26 @@ describe("통로를 부르는 길 — 던지지 않는다", () => {
   });
 });
 
-describe("🔴 L/N · S/N 이 둘 다 있어야 구역을 그린다", () => {
-  test("둘 다 있으면 참", () => {
-    assert.equal(hasQuoteArchiveProductKeys("AB1234", "1234567"), true);
-  });
-
-  test("🔴 하나라도 비면 거짓 — 빈 칸 자리의 `-` 도 빈 것으로 본다", () => {
-    for (const [lot, serial] of [
-      ["", "1234567"],
-      ["AB1234", ""],
-      ["   ", "1234567"],
-      ["-", "1234567"],
-      ["AB1234", "-"],
-      ["-", "-"],
-      [null, "1234567"],
-      ["AB1234", undefined],
-    ] as ReadonlyArray<[string | null | undefined, string | null | undefined]>) {
-      assert.equal(hasQuoteArchiveProductKeys(lot, serial), false, `${lot} / ${serial}`);
-    }
-  });
-});
+/**
+ * 🔴 L/N · S/N 판정(hasQuoteArchiveProductKeys)의 시험은 **여기 없다** — 그 함수가
+ * quote-archive-product-keys.ts 로 옮겨 갔고, 시험도 그 곁(quote-archive-product-keys.test.ts)
+ * 으로 따라갔다. 서버 컴포넌트가 부르는 함수를 `"use client"` 인 이 파일에 둘 수 없다.
+ */
 
 describe("자리 — 「이 건의 견적서 폴더」 구역들 **아래**", () => {
   test("🔴 탭이 이 구역을 그 아래에 붙인다", () => {
     assert.ok(
       quotesTabPage.includes(
-        'import QuoteArchiveProductFolderSection, {\n  hasQuoteArchiveProductKeys,\n} from "@/components/quotes/QuoteArchiveProductFolderSection";'
+        'import QuoteArchiveProductFolderSection from "@/components/quotes/QuoteArchiveProductFolderSection";'
       ),
       "탭이 이 구역을 가져오지 않는다"
+    );
+    // 🔴 판정은 중립 파일에서 가져온다 — 이 파일(`"use client"`)에서 가져오면 탭이 안 열린다.
+    assert.ok(
+      quotesTabPage.includes(
+        'import { hasQuoteArchiveProductKeys } from "@/components/quotes/quote-archive-product-keys";'
+      ),
+      "탭이 판정을 중립 파일에서 가져오지 않는다"
     );
     assert.ok(
       quotesTabPage.includes(
