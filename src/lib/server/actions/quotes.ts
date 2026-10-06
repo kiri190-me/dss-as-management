@@ -13,6 +13,7 @@ import {
 import { createQuote, updateQuote } from "@/lib/db/mutations/quotes";
 import { permanentlyDeleteQuote, restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
 import { lookupIntakeForQuote, type QuoteIntakeLookup } from "@/lib/db/queries/quotes";
+import { archiveQuoteDocumentOnSave } from "@/lib/server/services/quote-issue";
 import { createQuoteArchiveFolder } from "@/lib/storage/quote-archive";
 
 /**
@@ -138,6 +139,48 @@ function archiveNamingOfFields(fields: QuoteFields) {
   };
 }
 
+/**
+ * ============================================================================
+ * 🔴 저장하면 그것만으로 견적서 엑셀이 공유폴더에 들어간다 (2026-10-06)
+ * ============================================================================
+ * 위 폴더 만들기와 **같은 자리 · 같은 규율**이다(트랜잭션 바깥 · 독립 try · 경로를 적지 않는
+ * 로그). 다른 점은 둘이다:
+ *
+ *  · 🔴 **만들기와 고치기 둘 다**에 붙는다. 폴더는 한 번만 서면 되지만 견적서 엑셀은
+ *    **고칠 때마다 내용이 달라진다** — 마지막 판이 서류함에 있어야 한다.
+ *  · 🔴 **쌓이지 않는다.** 공유폴더 쪽은 이름 줄기가 같은 그 한 장을 덮어쓰고
+ *    (storage/quote-archive.ts 의 「덮어쓰기는 QUOTE_FILE 에만」), 내용이 그대로면 아예
+ *    쓰지 않는다. 결재본(有印 PDF)은 그 덮어쓰기에 들어가지 않는다 — 사람이 올린 원본이다.
+ *
+ * 무엇을 만들고 어디에 넣는지는 **services/quote-issue.ts 한 자리**에 있다
+ * (archiveQuoteDocumentOnSave). [견적서 받기]와 같은 도우미를 지나므로 두 벌이 되지 않는다.
+ * 🔴 이 액션은 공유폴더 위치도 파일 이름도 알지 못한다 — 견적서 id 와 행위자만 넘긴다.
+ *
+ * 🔴 **실패해도 저장은 되돌아가지 않는다.** 아래 함수에 `return` 도 `throw` 도 없고, 남기는
+ * 것은 견적서 id + 상태 코드 + 사유 코드뿐이다(파일 이름 · 폴더 이름 · 경로 · 오류 message 를
+ * 적지 않는다 — 폴더 이름에는 공급처와 S/N 이, fs 오류에는 경로가 들어 있다).
+ * ============================================================================
+ */
+async function archiveDocumentAfterSave(quoteId: string, actorUserId: string): Promise<void> {
+  try {
+    const archived = await archiveQuoteDocumentOnSave({ quoteId, actorUserId });
+    // 건너뛴 장(엑셀 전용 · 앱 양식이 없는 종류)과 끝난 장은 정상이라 조용히 지나간다.
+    if (archived.status === "failed") {
+      console.error("견적서 엑셀을 공유폴더에 남기지 못했습니다", {
+        quoteId,
+        status: archived.status,
+        reason: archived.reason,
+      });
+    }
+  } catch (documentError) {
+    // 🔴 오류의 message 를 적지 않는다 — fs · DB 오류에는 경로와 입력값이 들어 있다.
+    console.error("견적서 엑셀을 남기는 중 예상치 못한 오류", {
+      quoteId,
+      name: documentError instanceof Error ? documentError.name : typeof documentError,
+    });
+  }
+}
+
 export async function createQuoteAction(input: {
   fields: Record<string, unknown>;
 }): Promise<QuoteActionResult> {
@@ -185,6 +228,7 @@ export async function createQuoteAction(input: {
         name: folderError instanceof Error ? folderError.name : typeof folderError,
       });
     }
+    await archiveDocumentAfterSave(result.id, auth.actingUser.id);
   }
 
   return result;
@@ -215,8 +259,9 @@ export async function updateQuoteAction(input: {
     };
   }
 
+  let updated: QuoteActionResult;
   try {
-    return await updateQuote({
+    updated = await updateQuote({
       id: input.id,
       expectedVersion: input.expectedVersion,
       fields: validation.data,
@@ -226,6 +271,14 @@ export async function updateQuoteAction(input: {
     console.error("updateQuoteAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
+
+  // 🔴 고친 내용으로 견적서 엑셀을 다시 만들어 서류함의 그 한 장을 바꾼다(위 머리말).
+  //    폴더 만들기는 여기 붙지 않는다 — 번호로 찾으므로 만들 때 선 폴더를 그대로 쓴다.
+  if (updated.ok) {
+    await archiveDocumentAfterSave(updated.id, auth.actingUser.id);
+  }
+
+  return updated;
 }
 
 /**

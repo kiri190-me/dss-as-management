@@ -1,6 +1,6 @@
 import "server-only";
 
-import { mkdir, open, readdir, readFile, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -46,10 +46,31 @@ import {
  * 만들면 컨테이너 안 임시 디스크에 저장하고 「저장했습니다」라고 거짓말하게 된다.
  * 루트가 없거나 폴더가 아니면 `failed` 다. 연도 폴더 · 견적서 폴더만 만든다.
  *
- * ── 덮어쓰지 않는다 ─────────────────────────────────────────────────────
- * 파일은 `open(…, "wx")` 로만 연다 — 이미 있으면 `EEXIST` 로 실패하고 다음 번호
- * ` (2)`, ` (3)` … 로 넘어간다. 존재 확인과 쓰기 사이의 틈이 없으므로 두 사람이 동시에
- * 저장해도 서로 덮지 않는다. 폴더 만들기도 같은 이유로 `EEXIST` 면 다시 찾는다.
+ * ── 🔴 덮어쓰기는 `QUOTE_FILE` 에만 (2026-10-06) ─────────────────────────
+ * 이 함수가 쓰는 파일은 두 가지이고, **주인이 다르다.**
+ *
+ *   · `QUOTE_FILE`  — **앱이 만든 견적서 엑셀.** 같은 견적서를 고쳐 저장할 때마다 새 판이
+ *     나오고, 사람이 보고 싶은 것은 **마지막 한 장**이다. 그래서 이름 줄기가 **정확히 같은**
+ *     파일이 이미 있으면 `open(…, "w")` 로 **그 자리에 다시 쓴다** — 번호를 붙여 비켜 가지
+ *     않는다. 앞으로 ` (2)`, ` (3)` 이 쌓이지 않는다.
+ *   · 🔴 `SIGNED_PDF` — **사람이 올린 결재본**(`… - 有印.pdf`). 앱이 다시 만들 수 없는
+ *     원본이고, 사내 견적서 폴더의 파일 2,100 개 가운데 **542 개가 이것이다**(2026-10-06
+ *     실측). 덮어쓰기를 이 함수 전체에 켜면 그 542 장이 전부 덮어쓰기 대상이 된다.
+ *     🔴 **그래서 결재본은 지금 그대로다** — `open(…, "wx")` 로만 열고, 이미 있으면
+ *     `EEXIST` 로 실패해 다음 번호 ` (2)`, ` (3)` … 로 비켜 간다. 존재 확인과 쓰기 사이의
+ *     틈이 없으므로 두 사람이 동시에 저장해도 서로 덮지 않는다.
+ *
+ * 폴더 만들기는 둘 다 같다 — `EEXIST` 면 다시 찾는다.
+ *
+ * 🔴 **이미 쌓여 있는 ` (2)` 파일들은 건드리지 않는다.** 덮어쓰기는 줄기가 정확히 같은
+ * 자리(번호 없는 이름) 하나뿐이고, 번호가 붙은 이름은 열지도 않는다. 그것들을 치우는 일은
+ * 사람이 탐색기에서 한다.
+ *
+ * 🔴 **지우지 않는다.** 덮어쓰기는 그 이름의 **내용을 바꾸는** 일이지 파일을 없애는 일이
+ * 아니다. 이 모듈의 `unlink` 는 여전히 한 군데뿐이고(writeAndClose), **이번에 만든 파일을**
+ * 쓰다 실패했을 때만 치운다 — 덮어쓰기로 연(이미 있던) 파일은 그 자리에서도 지우지 않는다.
+ * 그 대신 열고 나서 쓰다 실패하면 **앞 판이 잘린 채 남을 수 있다**: 앱이 다시 만들 수 있는
+ * 파일이라(다시 저장하면 그 자리에 다시 쓴다) 지우는 쪽보다 이쪽으로 틀린다.
  *
  * ── 내용이 같으면 새로 쓰지 않는다 (2026-09-15 사용자 결정) ─────────────────
  * 쓰기 전에 그 견적서 폴더에서 **이번 이름의 후보들만**(`이름`, `이름 (2)` … 상한까지)
@@ -58,9 +79,12 @@ import {
  * 같을 때만 내용을 읽어 맞춘다. 다른 이름의 파일은 보지 않는다. 방금 만든 폴더는 비어
  * 있어 비교하지 않는다. 견적서 파일 · 결재 PDF 모두 같다.
  *
- * 비교와 쓰기 사이에는 틈이 있다 — 같은 내용을 **동시에** 두 번 저장하면 둘 다 「같은 파일
- * 없음」을 보고 둘 다 새로 쓸 수 있다(` (2)` 가 하나 더 생긴다). 덮어쓰기는 여전히 0 이라
- * 그대로 둔다: 잠금을 두어 막을 만큼의 손해가 아니다.
+ * 🔴 **이 규칙은 덮어쓰기가 들어와도 그대로다** — 덮어쓰기는 내용이 **다를 때**만 일어난다.
+ * 같은 바이트면 디스크를 한 번도 열지 않는다(저장이 자주 일어나므로 이쪽이 대부분이다).
+ *
+ * 비교와 쓰기 사이에는 틈이 있다 — 결재 PDF 는 같은 내용을 **동시에** 두 번 저장하면 둘 다
+ * 「같은 파일 없음」을 보고 둘 다 새로 쓸 수 있다(` (2)` 가 하나 더 생긴다). 덮어쓰기는
+ * 여전히 0 이라 그대로 둔다: 잠금을 두어 막을 만큼의 손해가 아니다.
  *
  * ── 던지지 않는다 ───────────────────────────────────────────────────────
  * 모든 오류는 `{ status: "failed", reason }` 으로 돌아간다. `reason` 은 화면 · 응답
@@ -204,7 +228,7 @@ async function save(input: SaveToQuoteArchiveInput): Promise<QuoteArchiveSaveRes
     }
   }
 
-  const savedName = await writeNewFile(root, quoteDirectory, fileName, input.bytes);
+  const savedName = await writeArchiveFile(root, quoteDirectory, fileName, input.bytes, input.fileKind);
 
   return {
     status: "saved",
@@ -474,8 +498,51 @@ async function hasSameBytes(target: string, bytes: Uint8Array): Promise<boolean>
 }
 
 /**
+ * 🔴 **종류가 쓰는 방식을 가른다**(머리말 「덮어쓰기는 QUOTE_FILE 에만」).
+ *   · `QUOTE_FILE`  — 이름 줄기가 같은 자리에 **덮어쓴다**(번호를 붙여 비켜 가지 않는다).
+ *   · `SIGNED_PDF`  — 🔴 **지금 그대로** 새로만 쓴다(있으면 ` (2)`, ` (3)` … 로 비켜 간다).
+ */
+function writeArchiveFile(
+  root: string,
+  directory: string,
+  fileName: string,
+  bytes: Uint8Array,
+  fileKind: QuoteArchiveFileKind
+): Promise<string> {
+  return fileKind === "QUOTE_FILE"
+    ? overwriteFile(root, directory, fileName, bytes)
+    : writeNewFile(root, directory, fileName, bytes);
+}
+
+/**
+ * 🔴 **견적서 엑셀 한 장만** — 번호 없는 그 이름 하나에 쓴다. 없으면 `wx` 로 만들고, 있으면
+ * (`EEXIST`) `w` 로 다시 열어 **그 자리에 자르고 쓴다.** 번호가 붙은 이름은 열지도 않으므로
+ * 이미 쌓여 있는 ` (2)` 들은 그대로 남는다. 상한(99)도 보지 않는다 — 더 쌓지 않으니까.
+ */
+async function overwriteFile(root: string, directory: string, fileName: string, bytes: Uint8Array): Promise<string> {
+  const target = path.join(directory, fileName);
+  assertInsideRoot(root, target);
+
+  let handle: FileHandle;
+  let created = true;
+  try {
+    handle = await open(target, "wx");
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+    // 이미 있는 그 파일이다 — 지우고 다시 만드는 것이 아니라 같은 파일을 열어 내용만 바꾼다.
+    created = false;
+    handle = await open(target, "w");
+  }
+
+  await writeAndClose(handle, target, bytes, created);
+  return fileName;
+}
+
+/**
  * 파일을 새로 쓴다. `wx` 로만 연다 — 있으면 다음 번호. 열고 나서 쓰다 실패하면
  * **방금 만든 그 파일만** 지운다(반쯤 쓰인 견적서를 남기지 않는다).
+ *
+ * 🔴 **결재본(SIGNED_PDF)이 타는 길이다 — 한 글자도 바뀌지 않았다.**
  */
 async function writeNewFile(root: string, directory: string, fileName: string, bytes: Uint8Array): Promise<string> {
   for (let n = 1; n <= QUOTE_ARCHIVE_MAX_NUMBERED_COPIES; n += 1) {
@@ -491,19 +558,29 @@ async function writeNewFile(root: string, directory: string, fileName: string, b
       throw error;
     }
 
-    try {
-      await handle.writeFile(bytes);
-      await handle.close();
-    } catch (error) {
-      await handle.close().catch(() => undefined);
-      await unlink(target).catch(() => undefined);
-      throw error;
-    }
+    await writeAndClose(handle, target, bytes, true);
     return candidate;
   }
   throw new ShareFolderFailure(
     `같은 이름의 파일이 너무 많습니다(${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개). 견적서 폴더를 정리한 뒤 다시 시도하세요.`
   );
+}
+
+/**
+ * 연 파일에 쓰고 닫는다. 🔴 **이 모듈에서 파일을 지우는 자리는 여기 하나뿐이다 — 늘리지
+ * 않는다.** 쓰다 실패했을 때 `created` 인 파일(= 이번에 만든 파일)만 치운다. 덮어쓰기로
+ * 연 **이미 있던** 파일은 지우지 않는다: 덮어쓰기는 그 이름의 내용을 바꾸는 일이지 파일을
+ * 없애는 일이 아니고, 지워 버리면 앞 판까지 사라진다.
+ */
+async function writeAndClose(handle: FileHandle, target: string, bytes: Uint8Array, created: boolean): Promise<void> {
+  try {
+    await handle.writeFile(bytes);
+    await handle.close();
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    if (created) await unlink(target).catch(() => undefined);
+    throw error;
+  }
 }
 
 const OUTSIDE_ROOT_ON_SAVE = "저장 위치가 공유폴더 밖을 가리켜 저장하지 않았습니다.";

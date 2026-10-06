@@ -354,6 +354,14 @@ src/app/api/quotes/*/archive-folder/entries/route-source.test.ts
 # 성공한 뒤 · 폴더를 못 만들어도 저장은 성공 · 고치기에는 안 붙음 · 로그에 폴더 이름과
 # 경로 없음을 **원본 글자로** 본다. 실제 동작은 위 quote-archive-create-folder.test.ts 가 본다.
 src/lib/server/actions/quote-archive-folder-source.test.ts
+# 견적서를 **저장할 때 견적서 엑셀이 공유폴더에 들어가는** 자리(2026-10-06) — 🔴 만들기와
+# 고치기 둘 다에 붙음 · 트랜잭션 바깥 · 실패해도 저장은 그대로(return · throw 없음) ·
+# 로그에 파일 이름 · 폴더 이름 · 경로 · 오류 message 없음 · 🔴 덮어쓰기는 `QUOTE_FILE` 에만이고
+# 결재본(`SIGNED_PDF`)은 `wx` + 번호 비켜가기 그대로 · 🔴 `unlink` 는 한 군데뿐이고 `rm` ·
+# `rename` 은 0 · 🔴 저장은 EXCEL_EXPORT 감사를 남기지 않는다(받기 쪽 둘은 그대로)를
+# **원본 글자로** 본다. 덮어쓰기 동작은 위 quote-archive.test.ts 가 임시 폴더에서 보고,
+# 저장 길 전체는 db 목록의 quote-issue.integration.test.ts 가 시험 DB 에서 본다.
+src/lib/server/actions/quote-save-archive-source.test.ts
 src/app/api/quote-folder-helper/installer/route-source.test.ts
 src/app/api/quote-folder-helper/install-command/route-source.test.ts
 src/lib/server/services/quote-excel-preview.test.ts

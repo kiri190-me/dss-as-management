@@ -35,7 +35,12 @@ import { QUOTE_ISSUE_RESULT_HEADER } from "@/lib/domain/quote-issue-result";
 import { createLocalFileSystemStorageAdapter } from "@/lib/storage/local-fs-adapter";
 import type { StorageAdapter } from "@/lib/storage/storage-adapter";
 import type { QuoteFields } from "@/lib/validation/quote-input";
-import { archiveSignedQuotePdf, issueQuoteFile, type IssueQuoteFileOutcome } from "./quote-issue";
+import {
+  archiveQuoteDocumentOnSave,
+  archiveSignedQuotePdf,
+  issueQuoteFile,
+  type IssueQuoteFileOutcome,
+} from "./quote-issue";
 import { renderQuoteWorkbook } from "./quote-workbook";
 
 /**
@@ -425,14 +430,13 @@ describe("일반 견적서 — 채우기 → 공유폴더 → 첨부 칸 → 감
     assert.equal(await exportAuditCount(quote.id), 2, "내려받기는 두 번이라 감사도 두 줄");
   });
 
-  test("내용을 바꿔 받기 — 공유폴더 ` (2)` · replaced 1 · 옛 첨부는 휴지통, 같은 내용이면 다시 unchanged", async () => {
+  test("🔴 내용을 바꿔 받기 — 공유폴더는 **그 한 장을 덮어쓴다**(2026-10-06) · replaced 1 · 옛 첨부는 휴지통", async () => {
     const fields = quoteFields("CHANGED");
     const quote = await createTestQuote(fields);
     const archiveRoot = await makeTempRoot("dss-qi-arc-");
     const naming = namingOf(fields);
     const folder = `${YEAR_FOLDER}/${quoteArchiveFolderName(naming)}`;
     const fileName = quoteArchiveFileName(naming, { extension: "xlsx" });
-    const secondName = numberedQuoteArchiveName(fileName, 2);
 
     const first = expectIssued(await issue(quote.id, archiveRoot));
     const [oldRow] = await liveExcel(quote.id);
@@ -447,13 +451,15 @@ describe("일반 견적서 — 채우기 → 공유폴더 → 첨부 칸 → 감
 
     const second = expectIssued(await issue(quote.id, archiveRoot));
     assert.equal(second.bytes.equals(first.bytes), false, "내용을 바꿨으니 바이트가 달라야 한다");
+    // 🔴 전에는 ` (2)` 가 생겼다. 이제는 이름 줄기가 같은 그 한 장을 덮어쓴다 —
+    //    견적서 엑셀(QUOTE_FILE)은 앱이 다시 만들 수 있고, 사람이 보고 싶은 것은 마지막 판이다.
+    //    🔴 결재본(SIGNED_PDF)은 그대로 번호를 붙여 비켜 간다(아래 「결재 PDF 복사」 묶음).
     assert.deepEqual(second.result, {
-      archive: { status: "saved", relativePath: `${folder}/${secondName}`, multipleFolderMatches: false },
+      archive: { status: "saved", relativePath: `${folder}/${fileName}`, multipleFolderMatches: false },
       attachment: { status: "replaced", displacedCount: 1 },
     });
-    assert.deepEqual(await filesIn(archiveRoot, folder), [fileName, secondName].sort());
-    assert.ok((await readFile(absoluteIn(archiveRoot, `${folder}/${fileName}`))).equals(first.bytes), "앞의 파일은 그대로");
-    assert.ok((await readFile(absoluteIn(archiveRoot, `${folder}/${secondName}`))).equals(second.bytes));
+    assert.deepEqual(await filesIn(archiveRoot, folder), [fileName], "🔴 공유폴더 파일은 여전히 한 장");
+    assert.ok((await readFile(absoluteIn(archiveRoot, `${folder}/${fileName}`))).equals(second.bytes), "마지막 판이 남는다");
 
     const rows = await quoteAttachmentRows(quote.id);
     const old = rows.find((row) => row.id === oldRow.id);
@@ -461,16 +467,17 @@ describe("일반 견적서 — 채우기 → 공유폴더 → 첨부 칸 → 감
     assert.equal(old?.deleteReason, QUOTE_ATTACHMENT_REPLACED_REASON);
     const [live, ...more] = await liveExcel(quote.id);
     assert.equal(more.length, 0);
-    assert.equal(live.originalFileName, secondName);
+    assert.equal(live.originalFileName, fileName);
     assert.ok(second.bytes.equals(await readStored(live.storedPath)));
 
-    // 바꾼 내용 그대로 한 번 더 — ` (2)` 를 가리키고 칸도 그대로다.
+    // 바꾼 내용 그대로 한 번 더 — 같은 바이트라 아예 쓰지 않고(unchanged) 칸도 그대로다.
     const third = expectIssued(await issue(quote.id, archiveRoot));
     assert.deepEqual(third.result, {
-      archive: { status: "unchanged", relativePath: `${folder}/${secondName}`, multipleFolderMatches: false },
+      archive: { status: "unchanged", relativePath: `${folder}/${fileName}`, multipleFolderMatches: false },
       attachment: { status: "unchanged" },
     });
     assert.equal((await quoteAttachmentRows(quote.id)).length, 2);
+    assert.deepEqual(await filesIn(archiveRoot, folder), [fileName]);
   });
 
   test("OH 견적서 — 공유폴더 · 첨부 이름에 `(OH포함)`", async () => {
@@ -768,6 +775,207 @@ describe("케이블 견적서 — 제 양식으로 발행되고 세 곳에 남�
     // 이 시험만은 양식 파일이 없어도 돈다(skip 이 붙지 않은 까닭).
     const issued = expectIssued(outcome);
     assert.equal(sha256(new Uint8Array(issued.bytes)), sha256(content));
+  });
+});
+
+// ───────────────────────────────── 저장에 딸린 견적서 엑셀 (archiveQuoteDocumentOnSave)
+
+/*
+ * ============================================================================
+ * 🔴 [저장]하면 그것만으로 견적서 엑셀이 공유폴더에 들어간다 (2026-10-06)
+ * ============================================================================
+ * 서버 액션(server/actions/quotes.ts)은 세션 · 권한이 있어야 부를 수 있어 여기서는 그
+ * 액션이 부르는 함수를 그대로 부른다 — 끼운 자리(트랜잭션 바깥 · 실패해도 저장은 그대로)는
+ * lib/server/actions/quote-save-archive-source.test.ts 가 원본 글자로 지킨다.
+ *
+ * 🔴 **공유폴더 루트를 늘 손으로 넘긴다**(임시 폴더 또는 null). 인자를 빼면 함수가
+ * QUOTE_ARCHIVE_DIR 을 읽어 **실제 사내 공유폴더**에 쓰게 된다 — 아래 onSave 가 그 인자를
+ * 필수로 받아 그 길을 막는다.
+ * ============================================================================
+ */
+
+/** 🔴 archiveRoot 는 필수다 — `undefined` 를 넘기면 설정(실제 공유폴더)을 읽는다. */
+function onSave(quoteId: string, archiveRoot: string | null) {
+  return archiveQuoteDocumentOnSave({ quoteId, actorUserId, archiveRoot, storage });
+}
+
+describe("저장에 딸린 견적서 엑셀 — 공유폴더 + 첨부 칸, 감사는 남기지 않는다", () => {
+  test(
+    "🔴 ④ 저장하면 공유폴더에 파일이 생기고 첨부 칸에도 올라간다 — EXCEL_EXPORT 감사는 0",
+    { skip: skipRender },
+    async () => {
+      const fields = quoteFields("SAVE-NEW");
+      const quote = await createTestQuote(fields);
+      const archiveRoot = await makeTempRoot("dss-qi-save-");
+      const naming = namingOf(fields);
+      const folder = `${YEAR_FOLDER}/${quoteArchiveFolderName(naming)}`;
+      const fileName = quoteArchiveFileName(naming, { extension: "xlsx" });
+
+      const result = await onSave(quote.id, archiveRoot);
+
+      assert.deepEqual(result, {
+        status: "done",
+        archive: { status: "saved", relativePath: `${folder}/${fileName}`, multipleFolderMatches: false },
+        attachment: { status: "replaced", displacedCount: 0 },
+      });
+
+      // 받기와 **같은 바이트**다 — 같은 채우기 함수를 지난다.
+      const edit = await getQuoteForEdit(quote.id);
+      assert.ok(edit);
+      const expected = await renderQuoteWorkbook(edit);
+      assert.ok((await readFile(absoluteIn(archiveRoot, `${folder}/${fileName}`))).equals(expected));
+
+      const [row, ...rest] = await liveExcel(quote.id);
+      assert.equal(rest.length, 0);
+      assert.equal(row.originalFileName, fileName, "원래 이름은 공유폴더에 쓴 파일 이름");
+      assert.ok(expected.equals(await readStored(row.storedPath)));
+
+      // 🔴 「받아 갔다」가 아니므로 EXCEL_EXPORT 는 남기지 않는다(받기만 남긴다).
+      assert.equal(await exportAuditCount(quote.id), 0, "🔴 저장이 받기 감사를 남겼다");
+    }
+  );
+
+  test(
+    "🔴 ⑤ 고쳐 저장해도 공유폴더 파일은 한 장이다 — 쌓이지 않고 마지막 판이 남는다",
+    { skip: skipRender },
+    async () => {
+      const fields = quoteFields("SAVE-EDIT");
+      const quote = await createTestQuote(fields);
+      const archiveRoot = await makeTempRoot("dss-qi-save-");
+      const naming = namingOf(fields);
+      const folder = `${YEAR_FOLDER}/${quoteArchiveFolderName(naming)}`;
+      const fileName = quoteArchiveFileName(naming, { extension: "xlsx" });
+
+      const first = await onSave(quote.id, archiveRoot);
+      assert.equal(first.status, "done");
+
+      // 세 번 고쳐 저장한다 — 값이 바뀌므로 바이트도 매번 달라진다.
+      let version = quote.version;
+      for (const cost of ["150000.00", "160000.00", "170000.00"]) {
+        const updated = await updateQuote({
+          id: quote.id,
+          expectedVersion: version,
+          fields: quoteFields("SAVE-EDIT", { workCost: cost }),
+          actorUserId,
+        });
+        assert.equal(updated.ok, true, JSON.stringify(updated));
+        if (!updated.ok) throw new Error("unreachable");
+        version = updated.version;
+
+        const result = await onSave(quote.id, archiveRoot);
+        assert.equal(result.status, "done", JSON.stringify(result));
+        if (result.status !== "done") throw new Error("unreachable");
+        assert.deepEqual(result.archive, {
+          status: "saved",
+          relativePath: `${folder}/${fileName}`,
+          multipleFolderMatches: false,
+        });
+      }
+
+      // 🔴 네 번 저장했는데 파일은 한 장이다.
+      assert.deepEqual(await filesIn(archiveRoot, folder), [fileName]);
+      const edit = await getQuoteForEdit(quote.id);
+      assert.ok(edit);
+      assert.ok(
+        (await readFile(absoluteIn(archiveRoot, `${folder}/${fileName}`))).equals(await renderQuoteWorkbook(edit)),
+        "마지막 판이 남지 않았다"
+      );
+      assert.equal(await exportAuditCount(quote.id), 0);
+
+      // 값을 바꾸지 않고 한 번 더 — 같은 바이트라 아예 쓰지 않는다.
+      const again = await onSave(quote.id, archiveRoot);
+      assert.equal(again.status, "done");
+      if (again.status !== "done") throw new Error("unreachable");
+      assert.equal(again.archive.status, "unchanged");
+      assert.equal(again.attachment.status, "unchanged");
+      assert.deepEqual(await filesIn(archiveRoot, folder), [fileName]);
+    }
+  );
+
+  test("🔴 ⑥ 엑셀 전용 견적서는 조용히 건너뛴다 — 오류가 아니고 아무것도 쓰지 않는다", async () => {
+    const quote = await createTestQuote(excelOnlyFields("SAVE-EXCEL"));
+    const content = new Uint8Array(Buffer.from("사람이 붙인 엑셀", "utf8"));
+    await attachStoredFile(quote.id, "QUOTE_EXCEL", content, "xlsx");
+    const before = await quoteAttachmentRows(quote.id);
+    const archiveRoot = await makeTempRoot("dss-qi-save-");
+
+    const result = await onSave(quote.id, archiveRoot);
+
+    assert.deepEqual(result, { status: "skipped", reason: "EXCEL_ONLY" });
+    assert.deepEqual(await readdir(archiveRoot), [], "🔴 공유폴더에 아무것도 쓰지 않았다");
+    assert.deepEqual(
+      (await quoteAttachmentRows(quote.id)).map((row) => [row.id, row.isDeleted]).sort(),
+      before.map((row) => [row.id, row.isDeleted]).sort(),
+      "🔴 사람이 붙인 엑셀이 밀려났다"
+    );
+    assert.equal(await exportAuditCount(quote.id), 0);
+  });
+
+  test(
+    "🔴 ⑦ 공유폴더 저장이 실패해도 던지지 않는다 — 값으로만 알리고 첨부 칸은 그대로 올라간다",
+    { skip: skipRender },
+    async () => {
+      const quote = await createTestQuote(quoteFields("SAVE-ARCFAIL"));
+      const parent = await makeTempRoot("dss-qi-save-");
+      // 연결이 빠진 공유폴더 — 루트가 없으면 만들지 않고 실패한다.
+      const missingRoot = path.join(parent, "연결-안-된-공유폴더");
+
+      const { value: result, logged } = await captureConsoleError(() => onSave(quote.id, missingRoot));
+
+      assert.equal(result.status, "done", JSON.stringify(result));
+      if (result.status !== "done") throw new Error("unreachable");
+      assert.equal(result.archive.status, "failed");
+      // 사유에 경로가 섞이지 않는다.
+      if (result.archive.status === "failed") {
+        assert.equal(result.archive.reason.includes(missingRoot), false);
+        assert.equal(/[\\/]/.test(result.archive.reason), false);
+      }
+      assert.equal(logged.includes(parent), false, "로그에 경로가 들어갔다");
+      assert.equal(await exists(missingRoot), false, "🔴 루트를 만들었다");
+
+      // 🔴 공유폴더가 실패해도 첨부 칸에는 올라간다 — 저장 자체는 어디서도 되돌아가지 않는다.
+      assert.equal(result.attachment.status, "replaced");
+      assert.equal((await liveExcel(quote.id)).length, 1);
+    }
+  );
+
+  test(
+    "🔴 ⑧ 공유폴더 설정이 꺼져 있으면 disabled — 디스크를 아예 안 본다",
+    { skip: skipRender },
+    async () => {
+      const quote = await createTestQuote(quoteFields("SAVE-OFF"));
+      const archiveRoot = await makeTempRoot("dss-qi-save-");
+
+      const result = await onSave(quote.id, null);
+
+      assert.equal(result.status, "done", JSON.stringify(result));
+      if (result.status !== "done") throw new Error("unreachable");
+      assert.deepEqual(result.archive, { status: "disabled" });
+      assert.deepEqual(await readdir(archiveRoot), [], "꺼졌는데 무엇인가를 썼다");
+      // 칸에는 그대로 올라간다 — 앱 쪽 사본은 공유폴더 설정과 무관하다.
+      assert.equal(result.attachment.status, "replaced");
+      assert.equal(await exportAuditCount(quote.id), 0);
+    }
+  );
+
+  test("휴지통으로 간 견적서면 QUOTE_MISSING — 아무것도 쓰지 않는다", async () => {
+    const quote = await createTestQuote(quoteFields("SAVE-GONE"));
+    const trashed = await softDeleteQuote({ quoteId: quote.id, expectedVersion: quote.version, actorUserId, reason: "시험" });
+    assert.equal(trashed.ok, true, JSON.stringify(trashed));
+    const archiveRoot = await makeTempRoot("dss-qi-save-");
+
+    const { value: result } = await captureConsoleError(() => onSave(quote.id, archiveRoot));
+
+    assert.deepEqual(result, { status: "failed", reason: "QUOTE_MISSING" });
+    assert.deepEqual(await readdir(archiveRoot), []);
+    assert.equal((await quoteAttachmentRows(quote.id)).length, 0);
+  });
+
+  test("id 모양이 틀리면 DB 를 때리지 않고 QUOTE_MISSING", async () => {
+    const archiveRoot = await makeTempRoot("dss-qi-save-");
+    const { value: result } = await captureConsoleError(() => onSave("not-a-uuid", archiveRoot));
+    assert.deepEqual(result, { status: "failed", reason: "QUOTE_MISSING" });
+    assert.deepEqual(await readdir(archiveRoot), []);
   });
 });
 

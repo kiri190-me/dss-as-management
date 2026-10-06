@@ -171,7 +171,20 @@ test("맞는 폴더가 둘이면 이름순 첫째를 쓰고 그 사실을 싣는
   assert.deepEqual(await readdir(path.join(yearDirectory, "DSS 2026-089 나 수리 견적서")), []);
 });
 
-test("같은 이름이 있으면 덮어쓰지 않고 ` (2)`, ` (3)` 으로 새로 쓴다 — 결재 PDF 도 같다", async () => {
+// ── 🔴 덮어쓰기는 견적서 엑셀(QUOTE_FILE)에만 (2026-10-06) ───────────────────
+/*
+ * 저장할 때마다 견적서 엑셀이 나가므로, 번호를 붙여 비켜 가면 한 견적서 폴더에 같은 파일이
+ * 수십 장 쌓인다. 그래서 **이름 줄기가 정확히 같은 그 한 장을 덮어쓴다.**
+ *
+ * 🔴 **결재 PDF(SIGNED_PDF)는 그대로다** — 사람이 올린 원본이고 사내 견적서 폴더의 파일
+ * 2,100 개 가운데 542 개가 그것이다. 아래 두 시험이 그 가름을 못 박는다.
+ */
+
+function saveSignedPdf(root: string, content: Uint8Array, naming: QuoteArchiveNamingInput = DOMESTIC) {
+  return saveToQuoteArchive({ root, quoteDate: "2026-09-15", naming, fileKind: "SIGNED_PDF", bytes: content });
+}
+
+test("🔴 ① 견적서 엑셀은 같은 이름이 있으면 그 자리에 덮어쓴다 — ` (2)` 가 생기지 않는다", async () => {
   const root = await makeRoot();
 
   const first = await saveQuoteFile(root, bytes("첫째"));
@@ -180,27 +193,90 @@ test("같은 이름이 있으면 덮어쓰지 않고 ` (2)`, ` (3)` 으로 새�
   assertSaved(first);
   assertSaved(second);
   assertSaved(third);
-  assert.equal(second.relativePath, `${YEAR_2026}/${STEM}/${STEM} (2).xlsx`);
-  assert.equal(third.relativePath, `${YEAR_2026}/${STEM}/${STEM} (3).xlsx`);
-  // 앞의 파일은 그대로다.
-  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "첫째");
-  assert.equal(await readFile(absolute(root, second.relativePath), "utf8"), "둘째");
 
-  const signedInput = {
-    root,
-    quoteDate: "2026-09-15",
-    naming: OVERHAUL_BRANCH,
-    fileKind: "SIGNED_PDF",
-    bytes: bytes("%PDF 결재본"),
-  } as const;
-  const pdf = await saveToQuoteArchive(signedInput);
+  // 셋 다 같은 자리다 — 번호가 붙지 않았다.
+  const expected = `${YEAR_2026}/${STEM}/${STEM}.xlsx`;
+  assert.equal(first.relativePath, expected);
+  assert.equal(second.relativePath, expected);
+  assert.equal(third.relativePath, expected);
+  // 🔴 파일은 한 장이고, 남은 내용은 마지막 판이다.
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+  assert.equal(await readFile(absolute(root, expected), "utf8"), "셋째");
+});
+
+test("🔴 ⑤ 고쳐 저장을 열 번 해도 견적서 폴더의 엑셀은 한 장이다 — 쌓이지 않는다", async () => {
+  const root = await makeRoot();
+  for (let n = 1; n <= 10; n += 1) {
+    const result = await saveQuoteFile(root, bytes(`${n} 번째로 고친 견적서`));
+    assertSaved(result);
+    assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  }
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+  assert.equal(await readFile(path.join(root, YEAR_2026, STEM, `${STEM}.xlsx`), "utf8"), "10 번째로 고친 견적서");
+});
+
+test("🔴 ② 결재 PDF 는 덮어쓰지 않는다 — 지금처럼 ` (2)`, ` (3)` 으로 비켜 간다", async () => {
+  const root = await makeRoot();
+
+  const first = await saveSignedPdf(root, bytes("%PDF 결재본"), OVERHAUL_BRANCH);
   // 같은 이름 자리에 **다른 내용**이 오면 ` (2)` — 같은 바이트면 새로 쓰지 않는다(아래 「내용이 같으면」).
-  const pdfAgain = await saveToQuoteArchive({ ...signedInput, bytes: bytes("%PDF 다시 받은 결재본") });
-  assertSaved(pdf);
-  assertSaved(pdfAgain);
-  assert.equal(pdf.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印.pdf`);
-  assert.equal(pdfAgain.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印 (2).pdf`);
-  assert.equal(await readFile(absolute(root, pdf.relativePath), "utf8"), "%PDF 결재본");
+  const second = await saveSignedPdf(root, bytes("%PDF 다시 받은 결재본"), OVERHAUL_BRANCH);
+  const third = await saveSignedPdf(root, bytes("%PDF 또 받은 결재본"), OVERHAUL_BRANCH);
+  assertSaved(first);
+  assertSaved(second);
+  assertSaved(third);
+  assert.equal(first.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印.pdf`);
+  assert.equal(second.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印 (2).pdf`);
+  assert.equal(third.relativePath, `${YEAR_2026}/${STEM}/${BRANCH_STEM}(OH포함) - 有印 (3).pdf`);
+  // 🔴 앞의 결재본 둘이 그대로 남아 있다 — 사람이 올린 원본은 앱이 다시 만들 수 없다.
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "%PDF 결재본");
+  assert.equal(await readFile(absolute(root, second.relativePath), "utf8"), "%PDF 다시 받은 결재본");
+  assert.equal((await readdir(path.join(root, YEAR_2026, STEM))).length, 3);
+});
+
+test("🔴 한 폴더에 둘이 함께 있어도 서로 건드리지 않는다 — 엑셀만 덮어쓰고 결재본은 쌓인다", async () => {
+  const root = await makeRoot();
+  await saveQuoteFile(root, bytes("견적서 1판"));
+  await saveSignedPdf(root, bytes("%PDF 결재본 1"));
+  await saveQuoteFile(root, bytes("견적서 2판"));
+  await saveSignedPdf(root, bytes("%PDF 결재본 2"));
+
+  assert.deepEqual((await readdir(path.join(root, YEAR_2026, STEM))).sort(), [
+    `${STEM} - 有印 (2).pdf`,
+    `${STEM} - 有印.pdf`,
+    `${STEM}.xlsx`,
+  ]);
+  assert.equal(await readFile(path.join(root, YEAR_2026, STEM, `${STEM}.xlsx`), "utf8"), "견적서 2판");
+  assert.equal(await readFile(path.join(root, YEAR_2026, STEM, `${STEM} - 有印.pdf`), "utf8"), "%PDF 결재본 1");
+});
+
+test("🔴 이미 쌓여 있는 ` (2)` 들과 다른 이름의 파일은 건드리지 않는다 — 줄기가 꼭 같은 한 장만", async () => {
+  const root = await makeRoot();
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  await mkdir(quoteDirectory, { recursive: true });
+  // 전에 쌓인 번호 파일들 · 다른 확장자 · 가지 번호 파일 · 결재본.
+  const untouched: Record<string, string> = {
+    [`${STEM} (2).xlsx`]: "예전 2판",
+    [`${STEM} (3).xlsx`]: "예전 3판",
+    [`${STEM}.xls`]: "예전 xls",
+    [`${BRANCH_STEM}(OH포함).xlsx`]: "가지 번호 견적서",
+    [`${STEM} - 有印.pdf`]: "%PDF 결재본",
+  };
+  for (const [name, content] of Object.entries(untouched)) {
+    await writeFile(path.join(quoteDirectory, name), content);
+  }
+  await writeFile(path.join(quoteDirectory, `${STEM}.xlsx`), "예전 1판");
+
+  const result = await saveQuoteFile(root, bytes("새 판"));
+
+  assertSaved(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  assert.equal(await readFile(path.join(quoteDirectory, `${STEM}.xlsx`), "utf8"), "새 판");
+  // 🔴 나머지는 한 글자도 바뀌지 않았다(지워지지도 않았다).
+  for (const [name, content] of Object.entries(untouched)) {
+    assert.equal(await readFile(path.join(quoteDirectory, name), "utf8"), content, `${name} 가 바뀌었다`);
+  }
+  assert.equal((await readdir(quoteDirectory)).length, Object.keys(untouched).length + 1);
 });
 
 // ── 내용이 같으면 새로 쓰지 않는다 (2026-09-15 사용자 결정) ──────────────────
@@ -243,15 +319,13 @@ test("결재 PDF 도 같다 — 같은 PDF 를 두 번 저장하면 공유폴더
   assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM} - 有印.pdf`]);
 });
 
-test("같은 바이트가 번호 붙은 자리에 있으면 그 자리를 가리킨다 — 다른 내용은 다음 번호", async () => {
+test("같은 바이트가 **전에 쌓인** 번호 자리에 있으면 그 자리를 가리킨다 — 덮어쓰지 않는다", async () => {
   const root = await makeRoot();
-  const a = await saveQuoteFile(root, bytes("가 판"));
-  const b = await saveQuoteFile(root, bytes("나 판"));
-  const c = await saveQuoteFile(root, bytes("다 판"));
-  assertSaved(a);
-  assertSaved(b);
-  assertSaved(c);
-  assert.equal(c.relativePath, `${YEAR_2026}/${STEM}/${STEM} (3).xlsx`);
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  await mkdir(quoteDirectory, { recursive: true });
+  await writeFile(path.join(quoteDirectory, `${STEM}.xlsx`), "가 판");
+  await writeFile(path.join(quoteDirectory, `${STEM} (2).xlsx`), "나 판");
+  await writeFile(path.join(quoteDirectory, `${STEM} (3).xlsx`), "다 판");
 
   const againB = await saveQuoteFile(root, bytes("나 판"));
   assertUnchanged(againB);
@@ -260,20 +334,48 @@ test("같은 바이트가 번호 붙은 자리에 있으면 그 자리를 가리
   assertUnchanged(againA);
   assert.equal(againA.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
 
+  // 🔴 새 내용은 **번호 없는 자리**를 덮어쓴다 — 번호 파일은 그대로다.
   const d = await saveQuoteFile(root, bytes("라 판"));
   assertSaved(d);
-  assert.equal(d.relativePath, `${YEAR_2026}/${STEM}/${STEM} (4).xlsx`);
-  assert.equal((await readdir(path.join(root, YEAR_2026, STEM))).length, 4);
+  assert.equal(d.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  assert.equal((await readdir(quoteDirectory)).length, 3);
+  assert.equal(await readFile(path.join(quoteDirectory, `${STEM} (2).xlsx`), "utf8"), "나 판");
+  assert.equal(await readFile(path.join(quoteDirectory, `${STEM} (3).xlsx`), "utf8"), "다 판");
 });
 
-test("크기가 같아도 내용이 다르면 새로 쓴다", async () => {
+test("결재 PDF — 같은 바이트가 번호 붙은 자리에 있으면 그 자리, 다른 내용은 다음 번호", async () => {
+  const root = await makeRoot();
+  const a = await saveSignedPdf(root, bytes("%PDF 가"));
+  const b = await saveSignedPdf(root, bytes("%PDF 나"));
+  assertSaved(a);
+  assertSaved(b);
+  assert.equal(b.relativePath, `${YEAR_2026}/${STEM}/${STEM} - 有印 (2).pdf`);
+
+  const againA = await saveSignedPdf(root, bytes("%PDF 가"));
+  assertUnchanged(againA);
+  assert.equal(againA.relativePath, `${YEAR_2026}/${STEM}/${STEM} - 有印.pdf`);
+
+  const c = await saveSignedPdf(root, bytes("%PDF 다"));
+  assertSaved(c);
+  assert.equal(c.relativePath, `${YEAR_2026}/${STEM}/${STEM} - 有印 (3).pdf`);
+  assert.equal((await readdir(path.join(root, YEAR_2026, STEM))).length, 3);
+});
+
+test("크기가 같아도 내용이 다르면 쓴다 — 견적서 엑셀은 그 자리에, 결재 PDF 는 다음 번호에", async () => {
   const root = await makeRoot();
   const first = await saveQuoteFile(root, bytes("가나"));
   const second = await saveQuoteFile(root, bytes("나가"));
   assertSaved(first);
   assertSaved(second);
-  assert.equal(second.relativePath, `${YEAR_2026}/${STEM}/${STEM} (2).xlsx`);
-  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "가나");
+  assert.equal(second.relativePath, first.relativePath);
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "나가");
+
+  const pdf = await saveSignedPdf(root, bytes("%PDF 가나"));
+  const pdfAgain = await saveSignedPdf(root, bytes("%PDF 나가"));
+  assertSaved(pdf);
+  assertSaved(pdfAgain);
+  assert.equal(pdfAgain.relativePath, `${YEAR_2026}/${STEM}/${STEM} - 有印 (2).pdf`);
+  assert.equal(await readFile(absolute(root, pdf.relativePath), "utf8"), "%PDF 가나");
 });
 
 test("다른 이름의 파일은 보지 않는다 — 같은 바이트여도 이번 이름의 후보가 아니면 새로 쓴다", async () => {
@@ -306,49 +408,52 @@ test(`${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개가 다 차 있어도 그 가운데
   assert.equal((await readdir(quoteDirectory)).length, QUOTE_ARCHIVE_MAX_NUMBERED_COPIES);
 });
 
-test("같은 내용을 동시에 두 번 — 덮어쓰기 0(둘 다 새로 쓸 수는 있다: 머리말의 틈)", async () => {
-  const root = await makeRoot();
-  const results = await Promise.all([saveQuoteFile(root, bytes("동시 같은 내용")), saveQuoteFile(root, bytes("동시 같은 내용"))]);
-
-  for (const result of results) {
-    assert.ok(result.status === "saved" || result.status === "unchanged", result.status === "failed" ? result.reason : "");
-  }
-  assert.ok(results.some((result) => result.status === "saved"), "적어도 하나는 썼다");
-  const names = await readdir(path.join(root, YEAR_2026, STEM));
-  assert.ok(names.length === 1 || names.length === 2, `파일 수: ${names.length}`);
-  for (const name of names) {
-    assert.equal(await readFile(path.join(root, YEAR_2026, STEM, name), "utf8"), "동시 같은 내용");
-  }
-});
-
-test("동시에 저장해도 덮어쓰기 0 — 파일이 다 남고 내용이 각각 온전하다", async () => {
+test("견적서 엑셀을 동시에 여럿 저장해도 파일은 한 장 — 폴더도 하나씩만 생긴다", async () => {
   const root = await makeRoot();
 
   // 연도 폴더도 견적서 폴더도 없는 상태에서 둘이 동시에 — 폴더 만들기도 겹친다.
   const pair = await Promise.all([saveQuoteFile(root, bytes("가 사람의 견적서")), saveQuoteFile(root, bytes("나 사람의 견적서"))]);
+  for (const result of pair) {
+    assertSaved(result);
+    assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  }
+  // 🔴 덮어쓰기라 자리가 하나다 — 남은 내용은 둘 가운데 하나이고 온전하다.
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+  const left = await readFile(path.join(root, YEAR_2026, STEM, `${STEM}.xlsx`), "utf8");
+  assert.ok(["가 사람의 견적서", "나 사람의 견적서"].includes(left), `남은 내용: ${left}`);
+  // 폴더는 하나씩만 생겼다.
+  assert.deepEqual(await readdir(root), [YEAR_2026]);
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026)), [STEM]);
+
+  // 여섯이 한꺼번에 와도 같다.
+  const many = await Promise.all(Array.from({ length: 6 }, (_, index) => saveQuoteFile(root, bytes(`동시 ${index}`))));
+  for (const result of many) assertSaved(result);
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+});
+
+test("결재 PDF 는 동시에 저장해도 덮어쓰기 0 — 파일이 다 남고 내용이 각각 온전하다", async () => {
+  const root = await makeRoot();
+
+  const pair = await Promise.all([saveSignedPdf(root, bytes("%PDF 가")), saveSignedPdf(root, bytes("%PDF 나"))]);
   const [a, b] = pair;
   assertSaved(a);
   assertSaved(b);
   assert.notEqual(a.relativePath, b.relativePath);
   assert.deepEqual(
     [a.relativePath, b.relativePath].sort(),
-    [`${YEAR_2026}/${STEM}/${STEM} (2).xlsx`, `${YEAR_2026}/${STEM}/${STEM}.xlsx`]
+    [`${YEAR_2026}/${STEM}/${STEM} - 有印 (2).pdf`, `${YEAR_2026}/${STEM}/${STEM} - 有印.pdf`]
   );
-  assert.equal(await readFile(absolute(root, a.relativePath), "utf8"), "가 사람의 견적서");
-  assert.equal(await readFile(absolute(root, b.relativePath), "utf8"), "나 사람의 견적서");
-  // 폴더는 하나씩만 생겼다.
+  assert.equal(await readFile(absolute(root, a.relativePath), "utf8"), "%PDF 가");
+  assert.equal(await readFile(absolute(root, b.relativePath), "utf8"), "%PDF 나");
   assert.deepEqual(await readdir(root), [YEAR_2026]);
-  assert.deepEqual(await readdir(path.join(root, YEAR_2026)), [STEM]);
 
-  // 여섯이 한꺼번에 와도 같다.
-  const many = await Promise.all(
-    Array.from({ length: 6 }, (_, index) => saveQuoteFile(root, bytes(`동시 ${index}`)))
-  );
+  // 여섯이 한꺼번에 와도 같다 — 하나도 덮이지 않는다.
+  const many = await Promise.all(Array.from({ length: 6 }, (_, index) => saveSignedPdf(root, bytes(`%PDF 동시 ${index}`))));
   const paths = new Set<string>();
   for (const [index, result] of many.entries()) {
     assertSaved(result);
     paths.add(result.relativePath);
-    assert.equal(await readFile(absolute(root, result.relativePath), "utf8"), `동시 ${index}`);
+    assert.equal(await readFile(absolute(root, result.relativePath), "utf8"), `%PDF 동시 ${index}`);
   }
   assert.equal(paths.size, 6);
   assert.equal((await readdir(path.join(root, YEAR_2026, STEM))).length, 8);
@@ -416,7 +521,24 @@ test("만들 폴더 자리를 같은 이름의 파일이 차지하고 있으면 
   assert.equal(await readFile(path.join(root, YEAR_2026), "utf8"), "폴더가 아니다");
 });
 
-test(`같은 이름이 ${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개 다 차 있으면 failed — 더 쓰지 않는다`, async () => {
+test(`결재 PDF — 같은 이름이 ${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개 다 차 있으면 failed, 더 쓰지 않는다`, async () => {
+  const root = await makeRoot();
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  await mkdir(quoteDirectory, { recursive: true });
+  await writeFile(path.join(quoteDirectory, `${STEM} - 有印.pdf`), "1");
+  for (let n = 2; n <= QUOTE_ARCHIVE_MAX_NUMBERED_COPIES; n += 1) {
+    await writeFile(path.join(quoteDirectory, `${STEM} - 有印 (${n}).pdf`), String(n));
+  }
+
+  const result = await saveSignedPdf(root, bytes("%PDF 또 하나"));
+
+  const reason = assertFailedWithoutPath(result, root);
+  assert.match(reason, /너무 많습니다/);
+  assert.equal((await readdir(quoteDirectory)).length, QUOTE_ARCHIVE_MAX_NUMBERED_COPIES);
+  assert.equal(await readFile(path.join(quoteDirectory, `${STEM} - 有印.pdf`), "utf8"), "1");
+});
+
+test(`견적서 엑셀은 ${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개가 다 차 있어도 번호 없는 자리를 덮어쓴다 — 상한을 보지 않는다`, async () => {
   const root = await makeRoot();
   const quoteDirectory = path.join(root, YEAR_2026, STEM);
   await mkdir(quoteDirectory, { recursive: true });
@@ -425,26 +547,52 @@ test(`같은 이름이 ${QUOTE_ARCHIVE_MAX_NUMBERED_COPIES}개 다 차 있으면
     await writeFile(path.join(quoteDirectory, `${STEM} (${n}).xlsx`), String(n));
   }
 
-  const result = await saveQuoteFile(root, bytes("견적서"));
+  const result = await saveQuoteFile(root, bytes("새 판"));
 
-  const reason = assertFailedWithoutPath(result, root);
-  assert.match(reason, /너무 많습니다/);
+  assertSaved(result);
+  assert.equal(result.relativePath, `${YEAR_2026}/${STEM}/${STEM}.xlsx`);
+  assert.equal(await readFile(path.join(quoteDirectory, `${STEM}.xlsx`), "utf8"), "새 판");
   assert.equal((await readdir(quoteDirectory)).length, QUOTE_ARCHIVE_MAX_NUMBERED_COPIES);
-  assert.equal(await readFile(path.join(quoteDirectory, `${STEM}.xlsx`), "utf8"), "1");
 });
 
-test("열고 나서 쓰다 실패하면 방금 만든 그 파일만 지우고 failed — 앞의 파일은 그대로", async () => {
+test("결재 PDF — 열고 나서 쓰다 실패하면 방금 만든 그 파일만 지우고 failed, 앞의 파일은 그대로", async () => {
+  const root = await makeRoot();
+  const first = await saveSignedPdf(root, bytes("%PDF 먼저 올린 결재본"));
+  assertSaved(first);
+
+  // 쓸 수 없는 값을 넘겨 「열린 뒤의 쓰기 실패」를 만든다(실제로는 공간 부족 · 연결 끊김).
+  const broken = await saveSignedPdf(root, 12345 as unknown as Uint8Array);
+
+  assertFailedWithoutPath(broken, root);
+  const quoteDirectory = path.join(root, YEAR_2026, STEM);
+  assert.deepEqual(await readdir(quoteDirectory), [`${STEM} - 有印.pdf`]);
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "%PDF 먼저 올린 결재본");
+});
+
+test("견적서 엑셀 — 이번에 만든 파일을 쓰다 실패하면 그 파일만 치우고 failed", async () => {
+  const root = await makeRoot();
+
+  const broken = await saveQuoteFile(root, 12345 as unknown as Uint8Array);
+
+  assertFailedWithoutPath(broken, root);
+  // 폴더는 섰지만 반쯤 쓰인 파일은 남지 않았다(이번에 만든 파일이라 치운다).
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), []);
+});
+
+test("🔴 견적서 엑셀 — 이미 있던 파일을 덮어쓰다 실패해도 **지우지 않는다**(지우기가 아니라 덮어쓰기다)", async () => {
   const root = await makeRoot();
   const first = await saveQuoteFile(root, bytes("먼저 저장한 견적서"));
   assertSaved(first);
 
-  // 쓸 수 없는 값을 넘겨 「열린 뒤의 쓰기 실패」를 만든다(실제로는 공간 부족 · 연결 끊김).
   const broken = await saveQuoteFile(root, 12345 as unknown as Uint8Array);
 
   assertFailedWithoutPath(broken, root);
-  const quoteDirectory = path.join(root, YEAR_2026, STEM);
-  assert.deepEqual(await readdir(quoteDirectory), [`${STEM}.xlsx`]);
-  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "먼저 저장한 견적서");
+  // 🔴 그 자리의 파일이 사라지지 않았다 — 다시 저장하면 그 자리에 다시 쓴다.
+  assert.deepEqual(await readdir(path.join(root, YEAR_2026, STEM)), [`${STEM}.xlsx`]);
+  const again = await saveQuoteFile(root, bytes("다시 저장한 견적서"));
+  assertSaved(again);
+  assert.equal(again.relativePath, first.relativePath);
+  assert.equal(await readFile(absolute(root, first.relativePath), "utf8"), "다시 저장한 견적서");
 });
 
 // ── 읽기 전용 찾기 (견적서 ④a — [폴더 열기]) ────────────────────────────────
