@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>앞으로의 개발 계획 (2026-10-06)</title>
+<style>
+  :root { --ink:#18181b; --dim:#52525b; --line:#e4e4e7; --bg:#fafafa; --box:#fff;
+          --warn:#b45309; --warnbg:#fffbeb; --danger:#b91c1c; --dangerbg:#fef2f2;
+          --ok:#065f46; --okbg:#ecfdf5; --code:#f4f4f5; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:2rem 1rem 6rem; background:var(--bg); color:var(--ink);
+         font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif; line-height:1.75; }
+  .wrap { max-width:54rem; margin:0 auto; }
+  h1 { font-size:1.6rem; margin:0 0 .3rem; }
+  .stamp { color:var(--dim); font-size:.9rem; margin:0 0 2rem; }
+  h2 { font-size:1.25rem; margin:2.5rem 0 .75rem; padding-bottom:.4rem; border-bottom:2px solid var(--ink); }
+  h3 { font-size:1.05rem; margin:1.75rem 0 .5rem; }
+  p, li { font-size:.95rem; }
+  ul, ol { padding-left:1.4rem; }
+  li { margin:.35rem 0; }
+  code { background:var(--code); padding:.1rem .35rem; border-radius:.25rem;
+         font-family:Consolas,"D2Coding",monospace; font-size:.9em; word-break:break-all; }
+  pre { background:var(--code); padding:1rem; border-radius:.5rem; overflow-x:auto;
+        font-family:Consolas,"D2Coding",monospace; font-size:.85rem; line-height:1.6; }
+  .card { background:var(--box); border:1px solid var(--line); border-radius:.6rem;
+          padding:1.1rem 1.25rem; margin:1rem 0; }
+  .warn { background:var(--warnbg); border-color:#fcd34d; }
+  .danger { background:var(--dangerbg); border-color:#fca5a5; }
+  .ok { background:var(--okbg); border-color:#6ee7b7; }
+  .warn b, .warn strong { color:var(--warn); }
+  .danger b, .danger strong { color:var(--danger); }
+  .ok b, .ok strong { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.9rem; }
+  th, td { border:1px solid var(--line); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+  th { background:#f4f4f5; font-weight:600; }
+  .muted { color:var(--dim); font-size:.88rem; }
+  .done { color:var(--ok); font-weight:600; }
+  .now { color:var(--warn); font-weight:600; }
+  .todo { color:var(--dim); }
+  hr { border:0; border-top:1px solid var(--line); margin:2.5rem 0; }
+  .sha { font-family:Consolas,"D2Coding",monospace; font-size:.85em; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>앞으로의 개발 계획</h1>
+<p class="stamp">2026-10-06 작성 · A/S 관리 시스템</p>
+
+<div class="card ok">
+  <p style="margin:0 0 .5rem"><b>오늘까지의 상태</b></p>
+  <p style="margin:0">오늘 만든 것은 <b>전부 GitHub 에 올렸습니다.</b> 이 PC 가 고장 나도
+  잃을 것이 없습니다. 다만 <b>운영(NAS)에는 아직 안 나갔습니다</b> — 아래 「①
+  운영 배포」가 다음 큰 일입니다.</p>
+</div>
+
+<h2>한눈에</h2>
+
+<table>
+  <tr><th style="width:4rem">언제</th><th>무엇</th><th style="width:7rem">상태</th></tr>
+  <tr><td class="muted">오늘</td><td>내 담당 제품 — 작업기록 정렬·달별 모아보기</td><td class="done">끝남</td></tr>
+  <tr><td class="muted">오늘</td><td>종류별 공통 서류 → 연락서 폴더</td><td class="done">끝남</td></tr>
+  <tr><td class="muted">오늘</td><td>파일 목록 다섯 줄로 접기</td><td class="done">끝남</td></tr>
+  <tr><td class="muted">지금</td><td><b>견적서 탭 ↔ 공유폴더 연결</b> (세 조각)</td><td class="now">진행 중</td></tr>
+  <tr><td class="muted">그다음</td><td><b>운영 배포</b> — 오늘 것 전부 + DB 구조 변경</td><td class="todo">대기</td></tr>
+  <tr><td class="muted">그다음</td><td>DB 붙여 보는 시험 30여 개 한 번 돌리기</td><td class="todo">대기</td></tr>
+  <tr><td class="muted">언젠가</td><td>묵혀 둔 숙제 넷 · 오늘 찾은 결함 넷</td><td class="todo">대기</td></tr>
+</table>
+
+<hr>
+
+<h2>오늘 끝낸 것</h2>
+
+<p>전부 커밋하고 올렸습니다. 괄호 안은 커밋 번호입니다.</p>
+
+<table>
+  <tr><th>무엇</th><th>어디서 보이나</th><th style="width:6rem">커밋</th></tr>
+  <tr>
+    <td><b>최근 작업순 정렬</b><br><span class="muted">작업기록이 적힌 시각이 최근인 순</span></td>
+    <td>내 담당 제품 → 「현재 단계」 칸 머리글의 <b>[작업기록]</b></td>
+    <td class="sha">3feb0ba</td>
+  </tr>
+  <tr>
+    <td><b>달별 내 작업기록</b><br><span class="muted">출하 끝난 건까지, 최근 12개월</span></td>
+    <td>내 담당 제품 → <b>[내 작업기록]</b> 탭</td>
+    <td class="sha">e88b149</td>
+  </tr>
+  <tr>
+    <td><b>첨부에 「제품 종류」 자리</b><br><span class="muted">DB 구조 변경</span></td>
+    <td>화면에 안 보임 (아래 셋의 바탕)</td>
+    <td class="sha">9a50e23<br>6914cbf</td>
+  </tr>
+  <tr>
+    <td><b>종류별 공통 서류함</b></td>
+    <td>제품 모델 관리 → 맨 위 <b>「종류별 공통 서류」</b></td>
+    <td class="sha">09814ef</td>
+  </tr>
+  <tr>
+    <td><b>접수하면 공통 서류가 들어간다</b></td>
+    <td>접수하면 연락서 폴더에 <code>공통/</code> 이 생김</td>
+    <td class="sha">54834f3</td>
+  </tr>
+  <tr>
+    <td><b>파일 목록 다섯 줄로 접기</b></td>
+    <td>수리 건 → 파일 관리 탭 → <b>[펼치기]</b></td>
+    <td class="sha">82b30fa</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>지금 하고 있는 것 — 견적서 탭 ↔ 공유폴더</h2>
+
+<p>견적서 탭을 사내 견적서 폴더에 붙이는 일입니다. <b>세 조각</b>으로 나눴습니다.</p>
+
+<div class="card ok">
+  <p style="margin:0 0 .5rem"><b>조사해 보니 이미 많이 돼 있었습니다.</b></p>
+  <p style="margin:0">견적번호로 <b>폴더를 찾고·만들고·파일을 쓰는 코드</b>가 이미
+  있고, 견적서 편집 화면에 <b>[폴더 열기]</b> 단추도 이미 돕니다. 탐색기
+  <b>도우미</b>와 파일 하나를 바로 여는 장치도 전부 있어서 <b>손댈 것이 없습니다.</b></p>
+</div>
+
+<h3>조각 1 — 폴더 이름을 바꾸고, 저장할 때 폴더를 만든다 <span class="now">(진행 중)</span></h3>
+
+<ul>
+  <li>폴더 이름의 꼬리를 <b>「신고증상」</b>으로 바꿉니다. 지금 코드는 늘
+      <code>… 수리 견적서</code> 로 끝내는데, 사내 폴더 104개는
+      <code>… REF Hunting 발생</code> 처럼 증상으로 끝납니다.</li>
+  <li><b>견적서를 새로 저장하면 그 순간 폴더가 섭니다.</b> 지금은 [견적서 받기]를
+      눌러야 생깁니다.</li>
+  <li>이름을 바꿔도 <b>기존 폴더 104개를 계속 찾습니다</b> — 찾을 때는 견적번호와
+      바로 뒤 공백만 보고 꼬리는 안 보기 때문입니다.</li>
+</ul>
+
+<h3>조각 2 — 폴더 안을 보고, 파일을 연다 <span class="todo">(대기)</span></h3>
+
+<ul>
+  <li>그 견적서의 폴더 안에 무엇이 있는지 <b>목록으로 보여 줍니다.</b></li>
+  <li>줄마다 <b>[열기]</b> — 엑셀·PDF 를 그 PC 의 프로그램으로 바로 엽니다.</li>
+  <li>연락서 폴더 쪽에 똑같은 기능이 완성돼 있어서 <b>거의 그대로 가져옵니다.</b></li>
+  <li>🔴 <b>찌꺼기 파일을 거릅니다</b> — 실측해 보니 342개 파일 중 <b>57개가
+      <code>Thumbs.db</code></b> 같은 것이었습니다.</li>
+</ul>
+
+<h3>조각 3 — 기존 폴더를 수리 건에 잇고, 번호를 뽑는다 <span class="todo">(대기)</span></h3>
+
+<ul>
+  <li>이미 폴더가 있는 수리 건이면 <b>그 폴더들을 찾아 보여 줍니다.</b></li>
+  <li>폴더 안 <b>파일 이름에서 견적번호를 뽑아</b> 목록에 적습니다.</li>
+</ul>
+
+<div class="card warn">
+  <p style="margin:0 0 .5rem"><b>이 조각이 가장 어렵습니다 — 까닭 둘</b></p>
+  <p style="margin:0 0 .5rem"><b>(1) 폴더 이름에 인수번호가 없습니다.</b>
+  연락서 폴더는 인수번호 하나로 찾는데, 견적서 폴더에는 그것이 없습니다. 그래서
+  <b>L/N 과 S/N 을 함께</b> 열쇠로 써야 합니다. 같은 장비가 여러 번 수리되면
+  <b>폴더가 여럿 나옵니다</b> — 전부 보여 드리고 사람이 판단하게 하겠습니다.</p>
+  <p style="margin:0"><b>(2) 104개 중 41개는 어떤 수리 건에도 안 붙습니다.</b>
+  케이블·부품·보유분 견적서라 장비 자체가 없습니다. 이건 고장이 아니라 정상입니다.</p>
+</div>
+
+<p><b>실측 자료</b> (2026 연도 폴더 기준)</p>
+
+<table>
+  <tr><th>항목</th><th>수</th><th>뜻</th></tr>
+  <tr><td>견적서 폴더</td><td><b>104개</b></td><td>번호 중복 없음</td></tr>
+  <tr><td>L/N·S/N 둘 다 있음</td><td>63개</td><td>수리 건과 이을 수 있다</td></tr>
+  <tr><td>둘 다 없음</td><td>41개</td><td>케이블·부품·보유분</td></tr>
+  <tr><td>파일</td><td>342개</td><td>하위 폴더는 0개 (평평하다)</td></tr>
+  <tr><td>찌꺼기 파일</td><td><b>57개</b></td><td>거의 전부 <code>Thumbs.db</code> — 걸러야 한다</td></tr>
+  <tr><td>이름에서 번호를 뽑을 수 있는 파일</td><td>282개</td><td>못 뽑는 3개는 견적서가 아닌 파일</td></tr>
+</table>
+
+<p class="muted">번호 모양은 셋입니다 — <code>2026-001</code>(200개) ·
+<code>2026-001-1</code>(55개, 추가 판) · <code>2026-004R1</code>(27개, 개정판).
+개정판은 <b>각자 제 폴더</b>로 두기로 정했고, 지금 코드가 이미 그렇게 동작해서
+고칠 것이 없습니다.</p>
+
+<hr>
+
+<h2>① 운영 배포 — 다음 큰 일</h2>
+
+<div class="card danger">
+  <p style="margin:0 0 .5rem"><b>이번 배포는 DB 구조가 바뀝니다.</b></p>
+  <p style="margin:0 0 .5rem">첨부 표에 칸을 하나 더했습니다(<code>product_model_kind</code>).
+  <b>기존 자료는 그대로 두고 빈 칸만 하나 늘어나는</b> 안전한 변경이고, 개발
+  DB 에서 되돌리기 시험까지 마쳤습니다. 그래도 <b>배포 전에 운영 DB 백업</b>을
+  떠 두시는 것이 좋습니다.</p>
+  <p style="margin:0">운영에서 자동으로 도는 변경은 <b>세 줄</b>뿐입니다 —
+  칸 하나 추가 · 찾기를 빠르게 할 색인 하나 · 규칙 하나. <b>지우는 명령은 한 줄도
+  없습니다.</b></p>
+</div>
+
+<p><b>배포 전에 하면 좋은 것</b></p>
+
+<ol>
+  <li><b>DB 를 붙여 보는 시험 30여 개를 한 번 돌리기.</b> 오늘 여러 조각에서
+      만들었는데 <b>아직 한 번도 안 돌렸습니다.</b> 돌리려면 시험용 DB 를 처음부터
+      다시 까는 절차가 필요해서 승인 없이 못 돌렸습니다.</li>
+  <li><b>운영 DB 백업.</b></li>
+</ol>
+
+<p><b>배포 뒤에 하실 것</b></p>
+
+<ul>
+  <li><b>엔지니어분들 PC 의 「폴더 열기」 도우미 재설치.</b> 대표님 PC 는 끝났지만
+      <b>쓰는 사람마다 각자 한 번씩</b> 해야 합니다. 안 한 분에게는 [폴더 열기]도
+      파일 [열기]도 안 됩니다 — <b>고장이 아니라 설치 전 상태</b>입니다.</li>
+  <li>🔴 <b>설치 명령은 A/S 화면에서만</b> 받으셔야 합니다. PO 에서 받으면 그 PC 의
+      고객사 현황표 [폴더 열기]가 죽습니다(도우미는 PC 당 한 벌입니다).</li>
+</ul>
+
+<hr>
+
+<h2>② 운영에 나가면 달라지는 것</h2>
+
+<div class="card warn">
+  <p style="margin:0 0 .5rem"><b>접수 단추가 조금 느려집니다.</b></p>
+  <p style="margin:0">접수할 때 그 종류의 공통 서류를 연락서 폴더에 꽂는 동안
+  기다립니다. 공유폴더가 느린 날에는 체감이 길어집니다. 종류별 공통 서류를
+  <b>두세 장 수준</b>으로 유지하시면 티가 안 납니다.</p>
+</div>
+
+<div class="card">
+  <p style="margin:0 0 .5rem"><b>기록이 조금 늘어납니다.</b></p>
+  <p style="margin:0">접수 한 건마다 「누가 무슨 파일을 어디에 넣었다」는 기록이
+  <b>공통 서류 수만큼</b> 남습니다. 서류가 5장이면 접수마다 5줄입니다.</p>
+</div>
+
+<div class="card">
+  <p style="margin:0"><b>지난 접수 건에는 소급되지 않습니다.</b> 앞으로 접수되는
+  건부터 공통 서류가 들어갑니다. 지난 건에 소급하지 않는 데에는 까닭이 하나 더
+  있습니다 — 아주 오래된 건에는 종류 정보가 제대로 안 적혀 있어서, 소급하면
+  <b>매쳐 건에 제너레이터 서류가 붙습니다.</b></p>
+</div>
+
+<hr>
+
+<h2>③ 묵혀 둔 숙제</h2>
+
+<p>전부터 넘어온 것들입니다. 급하지 않지만 남아 있습니다.</p>
+
+<table>
+  <tr><th style="width:3rem">급함</th><th>무엇</th><th>왜 남았나</th></tr>
+  <tr>
+    <td>🔴</td>
+    <td><b>명판 글자 인식을 운영 사진으로 다시 재기</b></td>
+    <td>지금 성적은 구 양식 다섯 장 기준이고 그중 넷이 카카오톡으로 줄어든
+        사진입니다. <b>원본 화질 사진</b>이 필요합니다.</td>
+  </tr>
+  <tr>
+    <td>🔴</td>
+    <td><code>2026-09-30-고객사-현황표-설정안내.html</code> <b>고치거나 버리기</b></td>
+    <td>이미 나간 문서인데 <b>틀린 내용</b>이 들어 있습니다. 설정 한 줄을 비우라고
+        적혀 있는데 비우면 [폴더 열기]가 꺼집니다. 변수도 넷으로 적혀 있는데
+        지금은 다섯입니다.</td>
+  </tr>
+  <tr>
+    <td>🔴</td>
+    <td>주간보고 화면의 <b>거짓 주석 둘</b></td>
+    <td>「수정 단추를 누르면 입력칸이 된다」고 적혀 있으나 실제로는 글자를 눌러
+        엽니다. 동작은 맞고 <b>설명만 틀렸습니다</b> — 나중에 그 설명을 믿는
+        사람이 잘못 고칩니다.</td>
+  </tr>
+  <tr>
+    <td class="muted">낮음</td>
+    <td><code>repairLabor</code> 저장값 정리 · 홈페이지에서 안 쓰게 된 파일 둘</td>
+    <td>쓰이지 않는 것이 남아 있습니다.</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>④ 오늘 찾았지만 고치지 않은 것</h2>
+
+<p>작업하다 발견한 기존 결함입니다. <b>이번 요청 범위 밖</b>이라 손대지 않았습니다.</p>
+
+<table>
+  <tr><th>무엇</th><th>지금 어떻게 되나</th><th>고치려면</th></tr>
+  <tr>
+    <td><b>파일 관리 목록이 폰에서 카드로 안 바뀐다</b></td>
+    <td>표가 화면에 들어가는지 재는 장치가 늘 「들어간다」고 답해서, 폰에서도
+        가로로 밀어 보는 표가 나옵니다. 테두리도 두 겹으로 겹쳐 보입니다.</td>
+    <td>폰에서 기본 화면이 표에서 카드로 <b>바뀝니다</b> — 이번 것보다 큰 변화라
+        따로 판단이 필요합니다.</td>
+  </tr>
+  <tr>
+    <td>「미리보기 격자」 보기는 <b>안 접힌다</b></td>
+    <td>표와 카드만 다섯 줄로 접었습니다.</td>
+    <td>원하시면 같이 해 드립니다.</td>
+  </tr>
+  <tr>
+    <td>견적서 폴더 쪽에 <b>안전장치 둘이 없다</b></td>
+    <td>연락서 폴더에는 있는데 견적서에는 없습니다 — ① 한글 이름을 접어 견주는
+        장치(없으면 똑같아 보이는 파일이 둘 생길 수 있습니다) ② 공유폴더가
+        느릴 때 끊는 장치.</td>
+    <td>연락서 쪽에서 가져오면 됩니다. 조각 2·3 과 함께 하면 자연스럽습니다.</td>
+  </tr>
+  <tr>
+    <td>견적번호가 <b>자유 글자</b>다</td>
+    <td>사람이 손으로 적고, 형식을 검사하는 장치가 하나도 없습니다. 공백을
+        빠뜨린 <code>DSS2026-089-1</code> 같은 것이 실제로 들어 있습니다.</td>
+    <td>자동 번호 매기기는 <b>일부러 안 넣은 것</b>입니다(예전 번호 체계를 넘겨받지
+        않으려고). 형식만 느슨하게 검사할지는 결정이 필요합니다.</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>⑤ 다음에 하면 좋을 순서</h2>
+
+<ol>
+  <li><b>견적서 폴더 조각 2·3 을 마무리</b> — 지금 흐름을 끊지 않는 것이 낫습니다.
+      조각 3 을 하면서 위 ④의 「안전장치 둘」도 같이 넣겠습니다.</li>
+  <li><b>DB 붙여 보는 시험 한 번 돌리기</b> — 배포 전 점검입니다.</li>
+  <li><b>운영 배포</b> — 백업 → 배포 → 엔지니어분들 도우미 재설치.</li>
+  <li>그다음에 <b>묵혀 둔 숙제</b> 중 고객사 현황표 안내 문서부터. 이미 나간
+      문서라 틀린 채 두면 따라 하다 기능이 꺼집니다.</li>
+</ol>
+
+<div class="card ok">
+  <p style="margin:0"><b>지금 당장 하실 일은 없습니다.</b> 견적서 폴더 조각 1 이
+  끝나면 화면을 봐 주십사 부탁드리겠습니다.</p>
+</div>
+
+</div>
+</body>
+</html>
