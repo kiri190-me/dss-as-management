@@ -44,6 +44,18 @@ function InfoField({ label, value }: { label: string; value: string }) {
  *
  * 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다(없는 것과 빈 것을 다르게 보이게
  * 할 이유가 없다).
+ *
+ * ── 이름은 **고객사 상세로 가는 링크**다 (2026-10-07 사용자 지시) ─────────
+ * 🔴 **두 갈래 모두** 링크다. 사용자는 「접수 기록」 쪽을 짚어 말했지만, 수기 쪽도
+ * 똑같이 글자만 찍히고 있었고 눌러서 갈 곳도 같은 화면이다 — 한쪽만 링크면 같은
+ * 줄에 놓인 이름 둘이 다르게 동작한다.
+ *
+ * 주소도 생김새도 이 저장소에 이미 있는 것을 그대로 쓴다 — `/customers/{id}` 와
+ * `underline-offset-2 hover:underline`(고객사 목록의 `상세` 링크 ·
+ * 고객사 상세의 `연결된 제품 모델` 링크와 같은 값이다).
+ *
+ * 🔴 딱지는 링크 **밖**에 둔다. 딱지까지 눌리면 "접수 기록"이라는 설명이 누를 수
+ * 있는 것처럼 보이고, 거기 달린 `title` 설명도 링크의 것으로 읽힌다.
  */
 function CustomerField({
   manual,
@@ -63,7 +75,9 @@ function CustomerField({
           <ul className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {merged.map((c) => (
               <li key={c.id} className="flex items-center gap-1 break-words">
-                <span>{c.name}</span>
+                <Link href={`/customers/${c.id}`} className="underline-offset-2 hover:underline">
+                  {c.name}
+                </Link>
                 {c.source === "REPAIR_CASE" && (
                   <span
                     title="A/S 접수 기록에서 자동으로 나온 고객사입니다. 수정 화면에서 지울 수 없습니다."

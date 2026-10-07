@@ -222,3 +222,57 @@ describe("두 화면이 같은 규칙을 쓴다", () => {
     assert.ok(detailScreen.includes("접수 기록"), "딱지에는 글자가 있어야 한다(색만으로 구분 금지)");
   });
 });
+
+/**
+ * ── 고객사 이름이 고객사 상세로 간다 (2026-10-07 사용자 지시) ───────────────
+ * 이름이 글자로만 찍히고 아무 데도 가지 않던 자리다. 고객사 `id` 는 이미 화면까지
+ * 와 있었으므로(합치는 함수가 `{ id, name, source }` 를 돌려준다) 바뀐 것은 보여
+ * 주는 방식뿐이다 — 조회도 합치는 규칙도 그대로다.
+ */
+describe("🔴 고객사 이름은 고객사 상세로 가는 링크다", () => {
+  const customerLink = "<Link href={`/customers/${c.id}`}";
+
+  test("상세 화면의 고객사 이름이 링크다 — 수기 · 기록 두 갈래 모두", () => {
+    // 합친 목록 하나를 그리므로 링크 한 벌이 두 갈래를 모두 덮는다. 한쪽만
+    // 링크면 같은 줄에 놓인 이름 둘이 다르게 동작한다.
+    assert.ok(flat(detailScreen).includes(customerLink), "고객사 상세로 가는 링크가 없다");
+    assert.ok(
+      !flat(code(detailScreen)).includes("<span>{c.name}</span>"),
+      "글자만 찍던 자리가 남아 있다"
+    );
+  });
+
+  test("🔴 딱지와 그 설명은 그대로 남아 있고, 링크 밖이다", () => {
+    const flatDetail = flat(detailScreen);
+    const linkAt = flatDetail.indexOf(customerLink);
+    const badgeAt = flatDetail.indexOf(`c.source === "REPAIR_CASE" && (`);
+    assert.ok(linkAt >= 0 && badgeAt > linkAt, "딱지는 링크를 닫은 뒤에 와야 한다");
+    assert.ok(
+      detailScreen.includes("A/S 접수 기록에서 자동으로 나온 고객사입니다."),
+      "딱지의 title 설명이 사라졌다 — 왜 수정 화면에서 지울 수 없는지 알 길이 없어진다"
+    );
+  });
+
+  test("목록 화면의 표도 같은 주소·같은 밑줄을 쓴다", () => {
+    const flatList = flat(listScreen);
+    assert.ok(flatList.includes(customerLink), "목록 표의 고객사 이름이 링크가 아니다");
+    assert.ok(
+      flatList.includes('className="underline-offset-2 hover:underline"'),
+      "이 저장소에 이미 있는 링크 생김새를 써야 한다"
+    );
+    assert.ok(
+      flatList.includes("<CustomerCell row={row} linked={!isDeleteMode} />"),
+      "🔴 삭제 모드에서는 링크를 꺼야 한다 — 체크하려던 손이 다른 화면으로 넘어간다"
+    );
+  });
+
+  test("🔴 카드 본문에는 링크를 넣지 않는다 — `<a>` 안의 `<a>` 가 된다", () => {
+    // 카드는 통째가 모델 상세로 가는 `<Link>` 다. 그 안에 또 링크를 넣으면 올바르지
+    // 않은 HTML 이 되고, 눌렀을 때 어느 쪽으로 갈지도 정해지지 않는다.
+    const start = listScreen.indexOf("function ProductModelCardFields");
+    assert.ok(start >= 0, "카드 본문 컴포넌트를 찾지 못했다");
+    const body = listScreen.slice(start);
+    assert.ok(body.includes("{customerNames(row)}"), "카드는 이름을 글자 그대로 적는다");
+    assert.ok(!body.includes("<CustomerCell"), "카드 본문에 링크 칸을 넣으면 안 된다");
+  });
+});

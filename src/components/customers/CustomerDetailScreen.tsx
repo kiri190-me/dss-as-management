@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import type {
   CustomerContactRow,
@@ -15,6 +15,13 @@ import {
   resolveCustomerRowColor,
 } from "@/lib/domain/customer-row-color";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
+import {
+  DEFAULT_PRODUCT_MODEL_SORT,
+  PRODUCT_MODEL_SORT_KEYS,
+  PRODUCT_MODEL_SORT_LABELS,
+  sortProductModels,
+  type ProductModelSortKey,
+} from "@/lib/domain/product-model-sort";
 import CustomerContactList from "./CustomerContactList";
 import CustomerEditForm from "./CustomerEditForm";
 import { CustomerRowColorSwatch } from "./CustomerRowColorField";
@@ -112,6 +119,18 @@ export default function CustomerDetailScreen({
   // ProductModelHistoryBreakdown 과 같은 이름·같은 초기값이다. 건수는 단추 글자에
   // 들어 있어서 접힌 채로도 몇 건인지 보인다.
   const [isListOpen, setIsListOpen] = useState(false);
+  /**
+   * [연결된 제품 모델] 의 차례. 🔴 기본값은 **지금까지와 같은 모델명 오름차순**
+   * 이고(조회가 그 차례로 준다 — queries/product-model-customers.ts 의
+   * listProductModelsForCustomer), 고를 수 있는 값·이름표·비교 규칙은
+   * [제품 모델 관리] 목록과 **같은 자리**에서 온다(domain/product-model-sort.ts).
+   * 두 화면이 같은 기능을 다른 말로 부르면 안 된다.
+   */
+  const [modelSortKey, setModelSortKey] = useState<ProductModelSortKey>(DEFAULT_PRODUCT_MODEL_SORT);
+  const sortedProductModels = useMemo(
+    () => sortProductModels(productModels, modelSortKey),
+    [productModels, modelSortKey]
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -214,7 +233,30 @@ export default function CustomerDetailScreen({
           구역 껍데기는 위 `관련 End-User 목록` 과 같은 `rounded-lg border ... p-4`
           짜임을 쓴다. 한 화면에서 구역 모양이 두 가지가 되면 안 된다. */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">연결된 제품 모델</h2>
+        {/* 제목과 차례 고르개가 한 줄에서 마주 본다 — 아래 `A/S 이력` 구역의
+            제목+단추 줄과 같은 짜임이다. 고르개는 **모델이 있을 때만** 그린다:
+            빈 구역에 줄 세우기를 내놓으면 고를 것이 없는 조작이 하나 보인다. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">연결된 제품 모델</h2>
+          {productModels.length > 0 && (
+            // 🔴 보이는 글자를 여기 적지 말 것 — [제품 모델 관리] 목록과 같은
+            // 한 벌을 쓴다(domain/product-model-sort.ts).
+            <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              정렬
+              <select
+                value={modelSortKey}
+                onChange={(e) => setModelSortKey(e.target.value as ProductModelSortKey)}
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                {PRODUCT_MODEL_SORT_KEYS.map((key) => (
+                  <option key={key} value={key}>
+                    {PRODUCT_MODEL_SORT_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         {productModels.length === 0 ? (
           // A/S 이력이 0건일 때 CustomerRepairCaseHistory 가 쓰는 안내와 같은 모양.
           // 연결을 어디서 만드는지 덧붙인다 — 이 화면이 아니라 제품 모델 상세다.
@@ -224,7 +266,7 @@ export default function CustomerDetailScreen({
           </p>
         ) : (
           <ul className="mt-3 flex flex-col gap-2">
-            {productModels.map((model) => (
+            {sortedProductModels.map((model) => (
               <li
                 key={model.id}
                 className="rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800"

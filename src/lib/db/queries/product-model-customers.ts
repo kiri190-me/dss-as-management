@@ -224,5 +224,10 @@ export async function listProductModelsForCustomer(
     )
     // 이름순. id 까지 얹는 것은 정방향과 같은 이유다 — 표시 이름이 같은 두 행이
     // 있을 수 있고, 정렬 없는 조회는 계획이 바뀌면 순서가 바뀐다.
+    //
+    // 🔴 이것이 고객사 상세 [연결된 제품 모델] 의 **기본** 차례다. 「종류별」을
+    // 고르면 화면이 종류로 다시 묶지만, 묶음 안의 차례는 여기서 나온 모델명
+    // 순서가 그대로 남는다(domain/product-model-sort.ts) — 이 줄을 지우면
+    // 두 차례가 다 깨진다.
     .orderBy(productModels.modelName, productModels.id);
 }

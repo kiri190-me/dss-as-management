@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import MasterDataTrashRetentionBadge from "@/components/common/master-data-trash-retention-badge";
 import {
@@ -29,6 +29,13 @@ import {
 import type { DeletedProductModelRow, ProductModelListRow } from "@/lib/db/queries/product-models";
 import type { ProductModelKindAttachmentCounts } from "@/lib/db/queries/product-model-kind-attachments";
 import { PRODUCT_MODEL_KIND_CODES, productModelKindLabel } from "@/lib/domain/product-model-kind";
+import {
+  DEFAULT_PRODUCT_MODEL_SORT,
+  PRODUCT_MODEL_SORT_KEYS,
+  PRODUCT_MODEL_SORT_LABELS,
+  sortProductModels,
+  type ProductModelSortKey,
+} from "@/lib/domain/product-model-sort";
 
 /**
  * 제품 종류 표기. 예전에는 이 파일이 이름표 세 줄을 직접 들고 있었고, 형제 화면
@@ -47,6 +54,41 @@ const kindLabel = productModelKindLabel;
 function customerNames(row: ProductModelListRow): string {
   return mergedProductModelCustomerNames(
     mergeProductModelCustomers(row.customers, row.derivedCustomers)
+  );
+}
+
+/**
+ * 표의 고객사 칸 — 이름마다 **고객사 상세로 가는 링크**다 (2026-10-07 사용자 지시).
+ * 주소와 밑줄 방식은 이 저장소에 이미 있는 것 그대로다(`/customers/{id}` ·
+ * `underline-offset-2 hover:underline` — 고객사 목록의 `상세` 링크와 같은 값).
+ *
+ * 🔴 **삭제 모드에서는 링크가 아니다**(`linked={false}`). 체크하려고 누른 손이
+ * 다른 화면으로 넘어가 버리면 안 된다 — 같은 줄의 모델명 링크를 끄는 것과 같은
+ * 까닭이고, 고객사 목록(CustomerListScreen)이 먼저 쓰던 규칙이다.
+ *
+ * ⚠️ **카드 보기에는 이 링크가 없다**(ProductModelCardFields 는 글자 그대로다).
+ * 카드는 통째가 모델 상세로 가는 `<Link>` 라, 그 안에 고객사 링크를 넣으면 `<a>`
+ * 안에 `<a>` 가 되어 올바르지 않은 HTML 이 된다(React 가 경고하고, 누르면 어느
+ * 쪽으로 갈지도 정해지지 않는다). 카드를 링크에서 떼어내는 것은 이 조각의 범위가
+ * 아니다 — 그쪽에서 고객사로 가려면 모델 상세를 거친다(거기는 두 갈래 모두 링크다).
+ */
+function CustomerCell({ row, linked }: { row: ProductModelListRow; linked: boolean }) {
+  const merged = mergeProductModelCustomers(row.customers, row.derivedCustomers);
+  // 하나도 없을 때의 글자는 한 자리에서 나온다 — 카드와 달라지면 안 된다.
+  if (merged.length === 0 || !linked) return <>{mergedProductModelCustomerNames(merged)}</>;
+  return (
+    <>
+      {merged.map((c, index) => (
+        <Fragment key={c.id}>
+          {/* 구분자는 링크 밖이다 — 쉼표에 밑줄이 그이면 이름의 일부로 읽힌다.
+              글자 자체는 한 줄로 합칠 때(mergedProductModelCustomerNames)와 같다. */}
+          {index > 0 && ", "}
+          <Link href={`/customers/${c.id}`} className="underline-offset-2 hover:underline">
+            {c.name}
+          </Link>
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -137,15 +179,34 @@ export default function ProductModelListScreen({
   kindAttachmentCounts?: ProductModelKindAttachmentCounts;
 }) {
   const [query, setQuery] = useState("");
+  /**
+   * 목록의 차례. 🔴 기본값은 **지금까지와 같은 모델명 오름차순**이다 — 매주 같은
+   * 화면을 보던 사람이 고른 것도 없는데 다른 차례를 보면 안 된다. 고를 수 있는
+   * 값·이름표·비교 규칙은 고객사 상세의 [연결된 제품 모델] 과 **같은 자리**에서
+   * 온다(domain/product-model-sort.ts) — 같은 기능이 두 화면에서 다른 말로 불리면
+   * 안 된다.
+   *
+   * 화면 상태이지 주소(질의문자열)가 아니다 — 바로 위 검색칸이 그렇고, 이 목록의
+   * 탭·삭제 모드도 그렇다. 한 화면의 걸러내기가 두 가지 방식으로 갈리면 안 된다.
+   */
+  const [sortKey, setSortKey] = useState<ProductModelSortKey>(DEFAULT_PRODUCT_MODEL_SORT);
   const [activeTab, setActiveTab] = useState<"active" | "trash">("active");
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [trashSelectedIds, setTrashSelectedIds] = useState<Set<string>>(new Set());
 
-  const filteredRows = useMemo(() => {
+  const matchedRows = useMemo(() => {
     if (!query) return rows;
     return rows.filter((row) => row.modelName.includes(query));
   }, [query, rows]);
+
+  /**
+   * 🔴 걸러낸 **뒤에** 줄을 세운다. 아래에서 `filteredRows` 를 쓰는 자리가 전부
+   * 이 결과를 본다 — 그중 Shift 범위 고르기(useShiftRangeSelection)는 "지금 보이는
+   * 차례"를 그대로 받아야 한다. 걸러내기만 반영하고 차례를 빠뜨리면, 종류별로
+   * 보는 중에 Shift 로 고른 범위가 화면에 보이는 줄과 다르게 잡힌다.
+   */
+  const filteredRows = useMemo(() => sortProductModels(matchedRows, sortKey), [matchedRows, sortKey]);
 
   function leaveDeleteMode() {
     setIsDeleteMode(false);
@@ -280,15 +341,37 @@ export default function ProductModelListScreen({
 
       {activeTab === "active" ? (
         <>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="sr-only">모델명 검색</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="모델명 검색"
-              className="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-          </label>
+          {/* 검색칸과 차례 고르개가 한 줄에 선다. 좁은 화면에서는 고르개가 아래로
+              내려간다(flex-wrap) — 검색이 먼저 보여야 한다. */}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-1 flex-col gap-1 text-xs">
+              <span className="sr-only">모델명 검색</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="모델명 검색"
+                className="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+
+            {/* 고를 수 있는 값도 보이는 글자도 도메인 한 자리에서 온다
+                (domain/product-model-sort.ts) — 고객사 상세의 같은 고르개와
+                글자가 갈라지면 안 된다. 🔴 여기에 글자를 직접 적지 말 것. */}
+            <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              정렬
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as ProductModelSortKey)}
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                {PRODUCT_MODEL_SORT_KEYS.map((key) => (
+                  <option key={key} value={key}>
+                    {PRODUCT_MODEL_SORT_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <p aria-live="polite" className="text-sm text-zinc-600 dark:text-zinc-400">
             조건에 맞는 모델 {filteredRows.length}건
@@ -420,7 +503,7 @@ export default function ProductModelListScreen({
                             브라우저가 셀의 max-width 를 지키지 않기 때문이다. */}
                         <td className="px-3 py-2">
                           <span className="block max-w-[14rem] break-words">
-                            {customerNames(row)}
+                            <CustomerCell row={row} linked={!isDeleteMode} />
                           </span>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">{row.unitCount}</td>

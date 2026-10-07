@@ -65,6 +65,10 @@ export async function listProductModels(): Promise<ProductModelListRow[]> {
       })
       .from(productModels)
       .where(eq(productModels.isDeleted, false))
+      // 모델명 오름차순. 🔴 이것이 화면의 **기본** 차례이고, 화면은 이 차례를
+      // 받은 그대로 보인다 — 「종류별」을 고르면 그때만 화면이 종류로 다시 묶고,
+      // 묶음 안의 차례는 여기서 나온 모델명 순서가 그대로 남는다
+      // (domain/product-model-sort.ts). 그래서 이 줄을 지우면 두 차례가 다 깨진다.
       .orderBy(productModels.modelName),
     db
       .select({ id: products.id, productModelId: products.productModelId })
