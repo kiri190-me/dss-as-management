@@ -1023,44 +1023,70 @@ describe("망가진 파일", () => {
   });
 });
 
+// ── 견적서 번호 칸의 서식 — 「자동 줄 바꿈」과 가운데 맞춤 (2026-10-07) ─────
+
+/**
+ * 그 양식에서 「견적서 번호」 열의 칸 글자. 🔴 이름표가 아니라 **칸 이름**으로 가린다 —
+ * ICD 는 「견적서 No.」, INVENIA 는 「견적서 번호」라 글자로 찾으면 한 양식이 빠진다.
+ */
+function quoteColumnOf(form: CustomerPortalForm): string {
+  const index = form.columns.findIndex(
+    (column) => column.kind === "SYSTEM" && column.field === "quoteNumber"
+  );
+  assert.notEqual(index, -1, `${form.id} 양식에 견적서 번호 열이 없다`);
+  return columnAt(index);
+}
+
+/** 그 칸의 `s=` 값. 없으면 null. */
+function styleOf(sheetXml: string, reference: string): string | null {
+  const cell = new RegExp(`<c r="${reference}"[^>]*`).exec(sheetXml)?.[0] ?? "";
+  return /\ss="([^"]*)"/.exec(cell)?.[1] ?? null;
+}
+
+function cellXfs(bytes: Buffer): string[] {
+  const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
+  const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+  assert.notEqual(block, null, "cellXfs 를 찾지 못했다");
+  return [...block![1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0]);
+}
+
+/** 그 칸이 가리키는 `<xf>` 통째로. 서식이 없는 칸은 0 번이다(OOXML 기본값). */
+function xfOfCell(bytes: Buffer, sheetXml: string, reference: string): string {
+  const style = styleOf(sheetXml, reference);
+  return cellXfs(bytes)[style === null ? 0 : Number(style)];
+}
+
+/** 손대기 전의 `<xf>` 들 — 사본이 **맨 뒤에** 붙었는지 견주는 기준이다. */
+const XFS_BEFORE = [...STYLES_XML.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map(
+  (match) => match[0]
+);
+
+const TWO_QUOTE_NUMBERS = "DSS 2026-100\nDSS 2026-100-1";
+
+/** ICD 표에 줄 하나 — 그 줄의 견적서 번호만 갈아 끼운다. 자료 줄은 6행이다(머리글 5행). */
+function icdWithQuoteNumber(quoteNumber: string): Buffer {
+  return buildCustomerPortalExportWorkbook({
+    previousBytes: icdWorkbook(),
+    form: ICD_FORM,
+    spec: ICD_SPEC,
+    rows: buildPortalExportRows(ICD_FORM, [item({ quoteNumber })]),
+    stamp: STAMP,
+    today: TODAY,
+  }).bytes;
+}
+
 describe("🔴 한 칸 안에 여러 줄 — 값만으로는 모자라다 (2026-10-07)", () => {
-  /** ICD 표에서 「견적서 No.」 열의 칸 주소. */
-  const quoteColumn = columnAt(ICD_FORM.columns.findIndex((column) => column.key === "quoteNumber"));
-  const TWO_NUMBERS = "DSS 2026-100\nDSS 2026-100-1";
-
-  function buildWithQuoteNumber(quoteNumber: string): Buffer {
-    return buildCustomerPortalExportWorkbook({
-      previousBytes: icdWorkbook(),
-      form: ICD_FORM,
-      spec: ICD_SPEC,
-      rows: buildPortalExportRows(ICD_FORM, [item({ quoteNumber })]),
-      stamp: STAMP,
-      today: TODAY,
-    }).bytes;
-  }
-
-  /** 그 칸의 `s=` 값. 없으면 null. */
-  function styleOf(sheetXml: string, reference: string): string | null {
-    const cell = new RegExp(`<c r="${reference}"[^>]*`).exec(sheetXml)?.[0] ?? "";
-    return /\ss="([^"]*)"/.exec(cell)?.[1] ?? null;
-  }
-
-  function cellXfs(bytes: Buffer): string[] {
-    const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
-    const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
-    assert.notEqual(block, null, "cellXfs 를 찾지 못했다");
-    return [...block![1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0]);
-  }
+  const quoteColumn = quoteColumnOf(ICD_FORM);
 
   test("번호가 둘이면 값도 두 줄로 들어간다", () => {
-    const { grid } = gridOf(buildWithQuoteNumber(TWO_NUMBERS), ICD_SHEET_NAME);
+    const { grid } = gridOf(icdWithQuoteNumber(TWO_QUOTE_NUMBERS), ICD_SHEET_NAME);
     const cell = grid.cells(6).get(quoteColumn);
     assert.equal(cell?.kind, "text");
-    assert.equal(cell?.kind === "text" ? cell.text : null, TWO_NUMBERS);
+    assert.equal(cell?.kind === "text" ? cell.text : null, TWO_QUOTE_NUMBERS);
   });
 
   test("🔴 그 칸의 서식에 「자동 줄 바꿈」이 켜져 있다 — 안 켜면 엑셀이 한 줄로 보여 준다", () => {
-    const bytes = buildWithQuoteNumber(TWO_NUMBERS);
+    const bytes = icdWithQuoteNumber(TWO_QUOTE_NUMBERS);
     const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
     const style = styleOf(sheetXml, `${quoteColumn}6`);
     assert.notEqual(style, null, "서식이 없는 칸이 되었다");
@@ -1069,26 +1095,108 @@ describe("🔴 한 칸 안에 여러 줄 — 값만으로는 모자라다 (2026-
   });
 
   test("🔴 서식 사본은 **맨 뒤에** 붙는다 — 양식이 쓰던 번호는 하나도 밀리지 않는다", () => {
-    const bytes = buildWithQuoteNumber(TWO_NUMBERS);
-    const before = [...STYLES_XML.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0]);
+    const bytes = icdWithQuoteNumber(TWO_QUOTE_NUMBERS);
     const after = cellXfs(bytes);
-    assert.deepEqual(after.slice(0, before.length), before, "있던 서식이 바뀌거나 밀렸다");
-    assert.equal(after.length, before.length + 1, "사본이 하나만 늘지 않았다");
+    assert.deepEqual(after.slice(0, XFS_BEFORE.length), XFS_BEFORE, "있던 서식이 바뀌거나 밀렸다");
+    assert.equal(after.length, XFS_BEFORE.length + 1, "사본이 하나만 늘지 않았다");
     // count 가 실제 개수와 다르면 엑셀이 파일을 거부한다.
     const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
     assert.equal(Number(/<cellXfs\b[^>]*\scount="(\d+)"/.exec(stylesXml)?.[1]), after.length);
   });
 
-  test("한 줄짜리 칸은 서식이 그대로다 — 쓸데없이 사본을 늘리지 않는다", () => {
-    const bytes = buildWithQuoteNumber("DSS 2026-100");
+  test("한 줄짜리 칸에는 「자동 줄 바꿈」이 켜지지 않는다 — 켤 까닭이 없다", () => {
+    const bytes = icdWithQuoteNumber("DSS 2026-100");
     const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
-    assert.equal(styleOf(sheetXml, `${quoteColumn}6`), "0");
-    const before = [...STYLES_XML.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)];
-    assert.equal(cellXfs(bytes).length, before.length, "서식이 늘었다");
+    const xf = xfOfCell(bytes, sheetXml, `${quoteColumn}6`);
+    assert.equal(/\swrapText="1"/.test(xf), false, `자동 줄 바꿈이 켜졌다: ${xf}`);
   });
 
   test("빈 칸이면 번호 열도 그대로 빈 칸이다", () => {
-    const { grid } = gridOf(buildWithQuoteNumber(""), ICD_SHEET_NAME);
+    const { grid } = gridOf(icdWithQuoteNumber(""), ICD_SHEET_NAME);
     assert.equal(grid.cells(6).get(quoteColumn), undefined);
+  });
+});
+
+describe("🔴 견적서 번호 열은 **열 전체가** 가운데다 (2026-10-07)", () => {
+  const quoteColumn = quoteColumnOf(ICD_FORM);
+
+  test("🔴 번호가 **하나뿐이라 줄바꿈이 없는** 칸도 가운데다 — 한 열이 들쭉날쭉하면 안 된다", () => {
+    const bytes = icdWithQuoteNumber("DSS 2026-100");
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    const xf = xfOfCell(bytes, sheetXml, `${quoteColumn}6`);
+    assert.match(xf, /\shorizontal="center"/);
+    // applyAlignment 가 꺼져 있으면 엑셀이 맞춤을 읽고도 무시한다.
+    assert.match(xf, /\sapplyAlignment="1"/);
+  });
+
+  test("🔴 번호가 여럿인 칸은 가운데이면서 「자동 줄 바꿈」도 켜져 있다 — 둘 다 한 서식에", () => {
+    const bytes = icdWithQuoteNumber(TWO_QUOTE_NUMBERS);
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    const xf = xfOfCell(bytes, sheetXml, `${quoteColumn}6`);
+    assert.match(xf, /\shorizontal="center"/);
+    assert.match(xf, /\swrapText="1"/);
+  });
+
+  test("값이 없는 칸도 그 열이면 가운데다 — 나중에 사람이 적어도 열이 그대로다", () => {
+    const bytes = icdWithQuoteNumber("");
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    assert.match(xfOfCell(bytes, sheetXml, `${quoteColumn}6`), /\shorizontal="center"/);
+  });
+
+  test("🔴 양식 둘 다 가운데다 — 이름표가 「견적서 No.」·「견적서 번호」로 달라도", () => {
+    const bytes = buildCustomerPortalExportWorkbook({
+      previousBytes: inveniaWorkbook(),
+      form: INVENIA_FORM,
+      spec: INVENIA_SPEC,
+      rows: buildPortalExportRows(INVENIA_FORM, [item({ quoteNumber: "DSS 2026-200" })]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    const { sheetXml } = gridOf(bytes, STAMP);
+    // INVENIA 는 머리글이 3행이라 자료 줄이 4행이다.
+    assert.match(xfOfCell(bytes, sheetXml, `${quoteColumnOf(INVENIA_FORM)}4`), /\shorizontal="center"/);
+  });
+
+  test("🔴 다른 열의 맞춤은 바뀌지 않는다 — 우리가 손댄 것은 번호 열뿐이다", () => {
+    const bytes = icdWithQuoteNumber(TWO_QUOTE_NUMBERS);
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    ICD_FORM.columns.forEach((_column, index) => {
+      const letters = columnAt(index);
+      if (letters === quoteColumn) return;
+      const xf = xfOfCell(bytes, sheetXml, `${letters}6`);
+      assert.equal(/\shorizontal=/.test(xf), false, `${letters}6 의 맞춤이 생겼다: ${xf}`);
+      assert.equal(/\swrapText=/.test(xf), false, `${letters}6 에 줄 바꿈이 켜졌다: ${xf}`);
+    });
+    // 머리글 줄도 그대로다 — 우리가 적는 것은 자료 줄뿐이다.
+    assert.equal(styleOf(sheetXml, `${quoteColumn}5`), "0");
+  });
+
+  test("🔴 사본은 맨 뒤에 하나만 붙고 count 가 맞는다 — 가운데만 입힐 때도", () => {
+    const bytes = icdWithQuoteNumber("DSS 2026-100");
+    const after = cellXfs(bytes);
+    assert.deepEqual(after.slice(0, XFS_BEFORE.length), XFS_BEFORE, "있던 서식이 바뀌거나 밀렸다");
+    assert.equal(after.length, XFS_BEFORE.length + 1, "사본이 하나만 늘지 않았다");
+    const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
+    assert.equal(Number(/<cellXfs\b[^>]*\scount="(\d+)"/.exec(stylesXml)?.[1]), after.length);
+  });
+
+  test("🔴 줄이 여럿이면 가운데 사본을 **함께 쓴다** — 줄마다 서식이 늘지 않는다", () => {
+    const bytes = buildCustomerPortalExportWorkbook({
+      previousBytes: icdWorkbook(),
+      form: ICD_FORM,
+      spec: ICD_SPEC,
+      rows: buildPortalExportRows(ICD_FORM, [
+        item({ quoteNumber: "DSS 2026-100" }),
+        item({ quoteNumber: "DSS 2026-101" }),
+        item({ quoteNumber: "DSS 2026-102" }),
+      ]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    for (const row of [6, 7, 8]) {
+      assert.match(xfOfCell(bytes, sheetXml, `${quoteColumn}${row}`), /\shorizontal="center"/);
+    }
+    assert.equal(cellXfs(bytes).length, XFS_BEFORE.length + 1, "줄마다 사본이 생겼다");
   });
 });

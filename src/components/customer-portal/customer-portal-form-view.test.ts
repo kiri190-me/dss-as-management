@@ -767,9 +767,9 @@ describe("🔴 11. 견적서 번호는 하나가 아니다 (2026-10-07)", () => 
   test("🔴 엑셀은 그 칸에 「자동 줄 바꿈」까지 켠다 — 안 켜면 값이 들어 있어도 한 줄로 보인다", () => {
     const workbook = read("src/lib/xlsx/customer-portal-export-workbook.ts");
     const body = flat(code(workbook));
-    assert.ok(body.includes("createWrapTextCellXfs(stylesXml)"), "줄 바꿈 서식을 만들지 않는다");
+    assert.ok(body.includes("createCellFormatVariants(stylesXml)"), "줄 바꿈 서식을 만들지 않는다");
     assert.ok(
-      body.includes("const cellStyle = isMultiLineText(content) ? params.wrapStyles.indexFor(style) : style;"),
+      body.includes("indexFor(style, { wrapText: isMultiLineText(content),"),
       "줄바꿈이 든 칸에 그 서식을 쓰지 않는다"
     );
     assert.ok(

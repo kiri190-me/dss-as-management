@@ -297,34 +297,47 @@ function withHorizontalAlignment(xf: string, horizontal: string): string {
   return `${open}${inner}</xf>`;
 }
 
-// ── 「자동 줄 바꿈」을 켠 서식 사본 ──────────────────────────────────────
+// ── 쓰면서 하나씩 늘리는 서식 사본 ──────────────────────────────────────
 
 /**
- * 🔴 **한 칸 안에 줄바꿈을 적어도, 그 칸의 서식에 「자동 줄 바꿈」이 꺼져 있으면 엑셀은 한
- * 줄로 보여 준다.** 값은 들어 있는데 사람 눈에는 번호 하나만 보이는 상태가 된다 — 그래서
- * 줄바꿈이 든 칸은 **서식까지** 함께 켜 줘야 한다(2026-10-07, 고객 안내 현황의 견적서 번호).
+ * 그 칸에 더 입힐 모양. **둘 다 없으면 바꿀 것이 없다**(받은 서식을 그대로 쓴다).
  *
+ * 🔴 둘을 한 자리에서 받는 까닭: 한 칸이 둘 다 필요할 수 있다(견적서 번호 — 가운데이면서
+ * 여러 줄). 켜개를 둘로 나눠 styles.xml 을 따로 손보면 **한쪽이 다른 쪽을 덮는다.**
+ */
+export type CellFormatVariant = {
+  /**
+   * 🔴 **한 칸 안에 줄바꿈을 적어도, 그 칸의 서식에 「자동 줄 바꿈」이 꺼져 있으면 엑셀은 한
+   * 줄로 보여 준다.** 값은 들어 있는데 사람 눈에는 번호 하나만 보이는 상태가 된다 — 그래서
+   * 줄바꿈이 든 칸은 **서식까지** 함께 켜 줘야 한다(2026-10-07, 고객 안내 현황의 견적서 번호).
+   */
+  wrapText?: boolean;
+  /** 가로 맞춤(`"center"` 등). 없으면 원본의 맞춤 그대로다. */
+  horizontal?: string;
+};
+
+/**
  * 쓰는 쪽이 「어느 서식 번호가 필요한지」를 **쓰면서** 알게 되므로(그 자리에 원래 있던 칸의
  * 번호다) 미리 모아 두지 못한다. 그래서 위 addAlignedCellXfs 처럼 한 번에 받지 않고,
  * **물어볼 때마다 하나씩 사본을 늘리는** 모양으로 둔다.
  */
-export type WrapTextCellXfs = {
+export type CellFormatVariants = {
   /**
-   * 그 서식에 「자동 줄 바꿈」을 켠 사본의 번호(글자). `null` 은 서식이 없는 칸이고, 그때는
-   * 0 번 서식의 사본을 쓴다. 🔴 **못 만들면 받은 값을 그대로 돌려준다** — 줄 바꿈 하나 때문에
+   * 그 서식에 `variant` 를 입힌 사본의 번호(글자). `null` 은 서식이 없는 칸이고, 그때는
+   * 0 번 서식의 사본을 쓴다. 🔴 **못 만들면 받은 값을 그대로 돌려준다** — 서식 하나 때문에
    * 파일 만들기가 통째로 실패하면 안 된다.
    */
-  indexFor(style: string | null): string | null;
+  indexFor(style: string | null, variant: CellFormatVariant): string | null;
   /** 사본을 하나라도 더했으면 손본 styles.xml, 아니면 null(그러면 바꿔 쓸 것이 없다). */
   stylesXml(): string | null;
 };
 
 /**
- * 🔴 **기존 `xf` 를 고치지 않고, 「자동 줄 바꿈」만 켠 사본을 맨 뒤에 더한다.**
+ * 🔴 **기존 `xf` 를 고치지 않고, 모양만 바꾼 사본을 맨 뒤에 더한다.**
  * 까닭은 위 addAlignedCellXfs 와 같다 — `xf` 하나를 여러 칸이 함께 쓰므로 그것을 고치면
  * 우리가 적지 않은 칸까지 따라 움직인다. 뒤에 더하는 것은 **기존 번호를 밀지 않아** 안전하다.
  */
-export function createWrapTextCellXfs(stylesXml: string | null): WrapTextCellXfs {
+export function createCellFormatVariants(stylesXml: string | null): CellFormatVariants {
   const block = stylesXml === null ? null : /(<cellXfs\b[^>]*>)([\s\S]*?)(<\/cellXfs>)/.exec(stylesXml);
   const xfs = block === null ? [] : [...block[2].matchAll(CELL_XF)].map((match) => match[0]);
   const declared = block === null ? NaN : Number(/\scount="(\d+)"/.exec(block[1])?.[1]);
@@ -332,34 +345,41 @@ export function createWrapTextCellXfs(stylesXml: string | null): WrapTextCellXfs
   // 줄 바꿈이 안 켜진 파일이 나가는 편이 열리지 않는 파일보다 낫다.
   const usable = block !== null && Number.isInteger(declared) && declared === xfs.length && xfs.length > 0;
 
-  const indexBySource = new Map<number, number>();
+  /** 「원본 번호 + 입힐 모양」 → 쓸 번호. 한 원본이 모양마다 다른 사본을 갖는다. */
+  const indexByVariant = new Map<string, number>();
   const added: string[] = [];
 
   return {
-    indexFor(style) {
+    indexFor(style, variant) {
+      const wrapText = variant.wrapText === true;
+      const horizontal = variant.horizontal;
+      if (!wrapText && horizontal === undefined) return style;
       if (!usable) return style;
       // 서식이 없는 칸은 0 번 서식을 쓴다(OOXML 기본값).
       const source = style === null ? 0 : Number(style);
       if (!Number.isInteger(source) || source < 0 || source >= xfs.length) return style;
 
-      const known = indexBySource.get(source);
+      const key = `${source}|${wrapText ? "1" : "0"}|${horizontal ?? ""}`;
+      const known = indexByVariant.get(key);
       if (known !== undefined) return String(known);
 
       const original = xfs[source];
-      if (readWrapText(original)) {
-        indexBySource.set(source, source);
+      let clone = original;
+      if (wrapText) clone = withWrapText(clone);
+      if (horizontal !== undefined) clone = withHorizontalAlignment(clone, horizontal);
+      // 원본이 이미 그 모양이면 사본을 뜨지 않는다 — 쓸데없이 xf 를 늘리지 않는다.
+      if (clone === original) {
+        indexByVariant.set(key, source);
         return String(source);
       }
-
-      const clone = withWrapText(original);
       // 똑같은 서식이 이미 있으면 그것을 쓴다 — 같은 파일을 두 번 손봐도 안 늘어난다.
       const existing = xfs.indexOf(clone);
       if (existing !== -1) {
-        indexBySource.set(source, existing);
+        indexByVariant.set(key, existing);
         return String(existing);
       }
       const next = xfs.length;
-      indexBySource.set(source, next);
+      indexByVariant.set(key, next);
       xfs.push(clone);
       added.push(clone);
       return String(next);
@@ -372,11 +392,6 @@ export function createWrapTextCellXfs(stylesXml: string | null): WrapTextCellXfs
       return stylesXml.slice(0, block.index) + next + stylesXml.slice(block.index + block[0].length);
     },
   };
-}
-
-function readWrapText(xf: string): boolean {
-  const alignment = /<alignment\b[^>]*\/>|<alignment\b[^>]*>[\s\S]*?<\/alignment>/.exec(xf)?.[0];
-  return alignment !== undefined && /\swrapText="(?:1|true)"/.test(alignment);
 }
 
 /**

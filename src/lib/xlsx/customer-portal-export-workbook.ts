@@ -1,4 +1,4 @@
-import type { CustomerPortalForm } from "@/lib/domain/customer-portal-forms";
+import type { CustomerPortalForm, PortalSystemField } from "@/lib/domain/customer-portal-forms";
 import {
   normalizePortalExportHeader,
   type CustomerPortalExportSpec,
@@ -29,8 +29,8 @@ import {
   STYLES_PART,
   WORKBOOK_PART,
   WORKBOOK_RELS_PART,
-  createWrapTextCellXfs,
-  type WrapTextCellXfs,
+  createCellFormatVariants,
+  type CellFormatVariants,
 } from "./workbook-parts";
 import { decodeXmlCharacterData } from "./xml-entities";
 import { ZipArchive } from "./zip-reader";
@@ -91,8 +91,17 @@ import { writeZip } from "./zip-writer";
  * (db/queries/customer-portal.ts 의 quoteNumber). 그런데 **칸의 서식에 「자동 줄 바꿈」이
  * 꺼져 있으면 엑셀은 그것을 한 줄로 보여 준다** — 값은 멀쩡한데 사람 눈에는 번호 하나만
  * 보인다. 그래서 줄바꿈이 든 칸은 그 자리에 있던 서식의 **사본에 wrapText 를 켜서** 쓴다
- * (workbook-parts.ts 의 createWrapTextCellXfs). 사본은 styles.xml 맨 뒤에 붙으므로 기존
+ * (workbook-parts.ts 의 createCellFormatVariants). 사본은 styles.xml 맨 뒤에 붙으므로 기존
  * 서식 번호가 하나도 밀리지 않는다 — 옛 탭과 다른 칸들은 그대로다.
+ *
+ * ── 🔴 견적서 번호 열은 **열 전체가** 가운데다 (2026-10-07) ──────────────────
+ * 번호가 하나뿐이라 줄바꿈이 없는 칸까지 **그 열이면 모두** 가운데로 맞춘다. 줄바꿈이 든
+ * 칸에만 맞추면 한 열 안에서 어떤 줄은 왼쪽 · 어떤 줄은 가운데가 되어 들쭉날쭉해진다 —
+ * 사용자가 본 것은 열 하나다. 「자동 줄 바꿈」과 **같은 사본 한 벌**에 함께 입힌다
+ * (CellFormatVariant) — 서식을 두 번 뜨면 한쪽이 다른 쪽을 덮는다.
+ *
+ * 🔴 어느 열인지는 **칸 이름**(`quoteNumber`)으로 가린다. 이름표가 양식마다 「견적서 No.」·
+ * 「견적서 번호」로 달라 글자로 찾으면 한쪽이 빠진다. 다른 열은 손대지 않는다.
  *
  * 🔴 숫자처럼 보이는 글자를 숫자로 바꾸지 않는다. S/N `0012345` 가 `12345` 가 되기
  * 때문이다 — 고객사 표에서 그것은 다른 물건이다. 엑셀이 「숫자가 글자로 있다」는
@@ -189,8 +198,8 @@ export function buildCustomerPortalExportWorkbook(
   const stylesXml = archive.readTextOrNull(STYLES_PART);
   const dateStyles = readDateStyleIndexes(stylesXml);
   const date1904 = readDate1904(workbookXml);
-  // 🔴 줄바꿈이 든 칸에 켜 줄 「자동 줄 바꿈」 서식(머리말 「한 칸 안에 여러 줄」).
-  const wrapStyles = createWrapTextCellXfs(stylesXml);
+  // 🔴 칸에 더 입힐 서식 사본 — 「자동 줄 바꿈」과 가운데 맞춤이 **한 벌**이다(머리말).
+  const cellFormats = createCellFormatVariants(stylesXml);
 
   const rebuilt = rebuildSheet({
     sheetXml: modelSheetXml,
@@ -201,7 +210,7 @@ export function buildCustomerPortalExportWorkbook(
     dateStyles,
     date1904,
     today: input.today,
-    wrapStyles,
+    cellFormats,
   });
 
   const newSheetName = placementKind === "REPLACE" ? model.name : sheetNameFromStamp(input.stamp);
@@ -249,7 +258,7 @@ export function buildCustomerPortalExportWorkbook(
   replacements.set(WORKBOOK_PART, Buffer.from(nextWorkbookXml, "utf8"));
   // 🔴 서식 사본을 **맨 뒤에** 더했으므로 기존 번호는 하나도 밀리지 않는다 — 옛 탭들의
   //    칸이 가리키던 서식은 그대로다(머리말 「옛 탭은 한 글자도 바뀌지 않는다」와 같은 규율).
-  const nextStylesXml = wrapStyles.stylesXml();
+  const nextStylesXml = cellFormats.stylesXml();
   if (nextStylesXml !== null) replacements.set(STYLES_PART, Buffer.from(nextStylesXml, "utf8"));
   if (nextContentTypesXml !== contentTypesXml) {
     replacements.set(CONTENT_TYPES_PART, Buffer.from(nextContentTypesXml, "utf8"));
@@ -544,10 +553,11 @@ function rebuildSheet(params: {
   dateStyles: ReadonlySet<number>;
   date1904: boolean;
   today: Date;
-  wrapStyles: WrapTextCellXfs;
+  cellFormats: CellFormatVariants;
 }): RebuiltSheet {
   const { spec, form } = params;
   const firstColumnNumber = columnLettersToNumber(spec.firstColumn);
+  const centeredColumns = centeredColumnNumbers(form, firstColumnNumber);
   const grid = buildSheetGrid(params.sheetXml, params.sharedStrings, params.date1904);
 
   verifyHeader(grid, spec, form, firstColumnNumber);
@@ -577,7 +587,8 @@ function rebuildSheet(params: {
       values: params.rows[index],
       dateStyles: params.dateStyles,
       date1904: params.date1904,
-      wrapStyles: params.wrapStyles,
+      cellFormats: params.cellFormats,
+      centeredColumns,
     });
   }
 
@@ -589,7 +600,9 @@ function rebuildSheet(params: {
       values: [{ kind: "date", iso: isoDateOf(params.today) }],
       dateStyles: params.dateStyles,
       date1904: params.date1904,
-      wrapStyles: params.wrapStyles,
+      cellFormats: params.cellFormats,
+      // 머리글 위의 날짜 칸이다 — 표의 열이 아니므로 맞춤에 손대지 않는다.
+      centeredColumns: NO_CENTERED_COLUMNS,
     });
   }
 
@@ -672,6 +685,27 @@ type CellContent =
 const ROW_OPEN_TAG = /^<row\b[^>]*?(\/?)>/;
 const CELL_ELEMENT = /<c\b([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g;
 
+/**
+ * 🔴 **가운데로 맞출 열** — 지금은 견적서 번호 하나다(머리말 「견적서 번호 열은 열 전체가
+ * 가운데다」). 이름표가 아니라 **칸 이름**으로 가린다 — ICD 는 「견적서 No.」, INVENIA 는
+ * 「견적서 번호」라 글자로 찾으면 한 양식이 빠진다.
+ */
+const CENTERED_SYSTEM_FIELDS: ReadonlySet<PortalSystemField> = new Set<PortalSystemField>([
+  "quoteNumber",
+]);
+
+/** 표의 열 번호(엑셀 열 번호)로 바꾼 것. 열 차례는 양식이 정한 그대로다. */
+function centeredColumnNumbers(form: CustomerPortalForm, firstColumnNumber: number): Set<number> {
+  const columns = new Set<number>();
+  form.columns.forEach((column, index) => {
+    if (column.kind !== "SYSTEM") return;
+    if (CENTERED_SYSTEM_FIELDS.has(column.field)) columns.add(firstColumnNumber + index);
+  });
+  return columns;
+}
+
+const NO_CENTERED_COLUMNS: ReadonlySet<number> = new Set<number>();
+
 function writeRowValues(
   rows: readonly SheetRow[],
   rowNumber: number,
@@ -680,7 +714,8 @@ function writeRowValues(
     values: readonly PortalExportCell[];
     dateStyles: ReadonlySet<number>;
     date1904: boolean;
-    wrapStyles: WrapTextCellXfs;
+    cellFormats: CellFormatVariants;
+    centeredColumns: ReadonlySet<number>;
   }
 ): SheetRow[] {
   let found = false;
@@ -701,7 +736,8 @@ function writeCellsInRow(
     values: readonly PortalExportCell[];
     dateStyles: ReadonlySet<number>;
     date1904: boolean;
-    wrapStyles: WrapTextCellXfs;
+    cellFormats: CellFormatVariants;
+    centeredColumns: ReadonlySet<number>;
   }
 ): SheetRow {
   const open = ROW_OPEN_TAG.exec(row.xml);
@@ -725,9 +761,14 @@ function writeCellsInRow(
     const columnNumber = params.firstColumnNumber + index;
     const style = existing.get(columnNumber)?.style ?? null;
     const content = toCellContent(value, style, params.dateStyles, params.date1904);
-    // 🔴 한 칸 안에 **여러 줄**이면 그 칸의 서식에 「자동 줄 바꿈」을 켠 사본을 쓴다 —
-    //    안 켜면 값은 들어 있는데 엑셀에서 한 줄로만 보인다(고객 안내 현황의 견적서 번호).
-    const cellStyle = isMultiLineText(content) ? params.wrapStyles.indexFor(style) : style;
+    // 🔴 그 칸의 서식에 더 입힐 것(머리말):
+    //    · 한 칸 안에 **여러 줄**이면 「자동 줄 바꿈」 — 안 켜면 값은 들어 있는데 한 줄로만 보인다.
+    //    · 견적서 번호 열이면 **가운데** — 줄바꿈이 없는 칸까지 그 열이면 모두다.
+    //    둘 다인 칸이 있으므로 한 번에 묻는다. 입힐 것이 없으면 받은 서식이 그대로 돌아온다.
+    const cellStyle = params.cellFormats.indexFor(style, {
+      wrapText: isMultiLineText(content),
+      horizontal: params.centeredColumns.has(columnNumber) ? "center" : undefined,
+    });
     written.set(columnNumber, buildCellXml(columnNumber, row.rowNumber, cellStyle, content));
   });
 
