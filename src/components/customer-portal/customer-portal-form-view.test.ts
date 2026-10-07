@@ -708,8 +708,18 @@ describe("표를 그리는 일은 양식 정의만 보고 한다", () => {
   });
 });
 
+/**
+ * 🔴 **규칙은 조회 파일 밖으로 나갔다**(2026-10-07 오후). 같은 날 주간보고 상세표도
+ * 줄마다 같은 번호를 보여 주게 되면서, 두 화면이 **같은 함수**를 불러야 했다 —
+ * 베껴 적으면 언젠가 한쪽만 고쳐지고, 두 화면이 서로 다른 견적서 번호를 보이면
+ * 사람은 어느 쪽도 믿지 않는다. 그래서 아래 시험도 **옮겨 간 파일**을 본다.
+ * 고객 안내 현황이 그 함수들을 **부르고 있는지**는 queryBody 가 그대로 지킨다.
+ */
+const quoteNumbers = read("src/lib/db/queries/repair-case-quote-numbers.ts");
+
 describe("🔴 11. 견적서 번호는 하나가 아니다 (2026-10-07)", () => {
   const queryBody = flat(code(query));
+  const sharedBody = flat(code(quoteNumbers));
   const screenBody = flat(code(screen));
   /**
    * 🔴 역슬래시를 이 파일에 **직접 적지 않는다.** 셸 · 도구를 지나며 한 겹이 조용히
@@ -719,37 +729,49 @@ describe("🔴 11. 견적서 번호는 하나가 아니다 (2026-10-07)", () => 
 
   test("🔴 내자 정리에 번호가 있으면 **그것만**이다 — 공유폴더를 보지도 않는다", () => {
     assert.ok(
-      queryBody.includes("const ordered = orderedQuoteNumber(quoteNumber); if (ordered !== null) return [ordered];"),
+      sharedBody.includes("const ordered = orderedQuoteNumber(quoteNumber); if (ordered !== null) return [ordered];"),
       "내자 정리 값이 있어도 공유폴더 번호가 섞인다"
     );
     // 번호가 **없는** 건만 공유폴더를 보는 목록에 들어간다.
     assert.ok(
-      queryBody.includes(
+      sharedBody.includes(
         ".filter((row) => orderedQuoteNumber(quoteInfo.get(row.id)?.quoteNumber ?? null) === null)"
       ),
       "번호가 이미 있는 건까지 공유폴더를 본다 — NAS 왕복이 그만큼 는다"
     );
+    // 🔴 고객 안내 현황이 그 규칙을 **스스로 다시 적지 않는다** — 함수를 부를 뿐이다.
+    assert.ok(
+      queryBody.includes("repairCaseQuoteNumbers( quote?.quoteNumber, archiveNumbers, row.lotNumber, row.serialNumber )"),
+      "조회가 규칙 함수를 부르지 않는다"
+    );
+    assert.ok(!queryBody.includes("orderedQuoteNumber("), "조회가 규칙을 베껴 적었다");
   });
 
   test("🔴 화면 칸과 엑셀 칸이 **같은 값 하나**에서 나온다 — 따로 구하면 언젠가 갈라진다", () => {
-    assert.ok(queryBody.includes("quoteNumber: joinPortalQuoteNumbers(quoteNumbers), quoteNumbers,"));
+    assert.ok(queryBody.includes("quoteNumber: joinQuoteNumbers(quoteNumbers), quoteNumbers,"));
     assert.ok(
-      queryBody.includes(`numbers.length === 0 ? null : numbers.join("${BACKSLASH}n")`),
+      sharedBody.includes(`numbers.length === 0 ? null : numbers.join("${BACKSLASH}n")`),
       "줄바꿈으로 잇지 않는다 — 엑셀 한 칸에 여러 줄로 들어가야 한다"
     );
   });
 
   test("🔴 공유폴더 훑기는 요청 하나에 **한 번**이다 — 양식이 셋이라 안 그러면 셋이 된다", () => {
-    assert.ok(code(query).includes('import { cache } from "react";'), "요청 수명 캐시를 쓰지 않는다");
-    assert.ok(queryBody.includes("const loadQuoteArchiveFolders = cache(async ()"), "훑기가 캐시 밖에 있다");
+    assert.ok(
+      code(quoteNumbers).includes('import { cache } from "react";'),
+      "요청 수명 캐시를 쓰지 않는다"
+    );
+    assert.ok(sharedBody.includes("const loadQuoteArchiveFolders = cache(async ()"), "훑기가 캐시 밖에 있다");
+    // 🔴 캐시가 **한 자리**에 있어야 주간보고와 고객 안내 현황이 한 요청에서 훑기를
+    // 한 번으로 끝낸다. 화면마다 제 cache() 를 두면 요청당 둘이 된다.
+    assert.ok(!code(query).includes("cache("), "조회가 두 번째 캐시를 들였다");
     // 훑기가 꺼져 있거나 실패해도 던지지 않는다 — 그러면 내자 정리 값만 보인다.
-    assert.ok(queryBody.includes('return scanned.status === "found" ? scanned.folders : [];'));
-    assert.ok(queryBody.includes('return read.status === "found" ? read.numbersByProduct : new Map();'));
+    assert.ok(sharedBody.includes('return scanned.status === "found" ? scanned.folders : [];'));
+    assert.ok(sharedBody.includes('return read.status === "found" ? read.numbersByProduct : new Map();'));
   });
 
   test("🔴 열쇠를 손으로 잇지 않는다 — 저장소 모듈의 함수로 만든다", () => {
-    assert.ok(queryBody.includes("quoteArchiveProductKey(lotNumber, serialNumber)"));
-    assert.ok(!queryBody.includes("${lotKey}|${serialKey}"), "조회가 열쇠 모양을 베꼈다");
+    assert.ok(sharedBody.includes("quoteArchiveProductKey(lotNumber, serialNumber)"));
+    assert.ok(!sharedBody.includes("${lotKey}|${serialKey}"), "조회가 열쇠 모양을 베꼈다");
   });
 
   test("🔴 화면은 번호를 위아래 줄로 그린다 — 열이 넓어지지 않게 `block` 이다", () => {

@@ -367,6 +367,24 @@ export type WeeklyReportCase = WeeklyReportClassifiable &
     serialNumber: string | null;
     lotNumber: string | null;
     /**
+     * 그 건의 **견적서 번호 전부**. 없으면 빈 배열이다(2026-10-07 사용자 지시 —
+     * 상세표의 `견적서 발행일` 날짜 옆 역삼각을 누르면 그 칸 안에 펼쳐진다).
+     *
+     * 🔴 **고객 안내 현황과 같은 번호여야 한다.** 그래서 규칙을 여기에도 조회에도
+     * 적지 않고 두 화면이 **같은 함수**를 부른다(queries/repair-case-quote-numbers.ts
+     * 의 repairCaseQuoteNumbers — 내자 정리에 적힌 번호가 있으면 그것만, 없을 때만
+     * 공유폴더의 견적서 폴더 안 파일 이름에서 읽는다). 두 화면이 다른 번호를 보이면
+     * 사람은 어느 쪽도 믿지 않는다.
+     *
+     * 🔴 **날짜는 이 규칙과 상관이 없다.** 주간보고의 `quoteIssuedDate` 는 지금까지와
+     * 똑같이 「발주발행일이 가장 이른 줄, 없으면 견적발행일이 가장 이른 줄」에서 오고
+     * (pickWeeklyReportOrderDates), 고객 안내 현황의 그것과 **일부러 다르다**
+     * (domain/repair-case-domestic-order-dates.ts 머리말). 이번에 맞춘 것은 번호뿐이다.
+     *
+     * **분류에도 집계에도 쓰이지 않는다** — 화면이 펼쳐 보여 줄 뿐이다.
+     */
+    quoteNumbers: string[];
+    /**
      * 상세표의 `비고` — repair_cases.notes. 이 표에서 화면으로 바로 고칠 수 있는
      * 칸 **둘 중 하나**다(권한이 있을 때만). 나머지 하나는 `현 상태` 이고, 그
      * 둘은 고치는 길도 권한도 다르다 — 비고는 수리 건의 필드를 그대로 저장하고,

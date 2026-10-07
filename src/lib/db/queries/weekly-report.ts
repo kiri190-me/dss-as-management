@@ -12,6 +12,11 @@ import {
   workflowVersions,
 } from "../schema";
 import { workflowTypeCodeColumn } from "../workflow-type-column";
+import { listQuoteInfoForRepairCases } from "./domestic-orders";
+import {
+  listArchiveQuoteNumbers,
+  repairCaseQuoteNumbers,
+} from "./repair-case-quote-numbers";
 import {
   pickWeeklyReportOrderDates,
   type WeeklyReportCase,
@@ -44,9 +49,32 @@ import {
  * 더하지 않는다 — 더하면 화면의 `PO 발행일` 칸과 집계가 서로 다른 값을 보게
  * 되어, 언젠가 어긋났을 때 어느 쪽이 맞는지 말할 수 없다.
  *
- * ── 질의는 두 번, N+1 은 없다 ───────────────────────────────────────────
- * 접수 건 한 번 + 내자 날짜 한 번. 건마다 따로 묻는 방식이면 252건짜리 화면에
- * 253번의 왕복이 생긴다.
+ * ── 질의는 세 번, N+1 은 없다 ───────────────────────────────────────────
+ * 접수 건 한 번 + 내자 날짜 한 번 + 내자 **견적서번호** 한 번. 건마다 따로 묻는
+ * 방식이면 252건짜리 화면에 253번의 왕복이 생긴다.
+ *
+ * 셋째가 2026-10-07 에 늘었다(아래 '견적서 번호는 날짜와 다른 길로 온다'). 날짜를
+ * 읽는 둘째 질의로 번호까지 가져오지 **않는다** — 두 화면이 보는 번호가 같아야 하고,
+ * 「완료된 줄은 빼고 견적발행일이 가장 늦은 줄」이라는 그 규칙은 이미
+ * queries/domestic-orders.ts 의 listQuoteInfoForRepairCases 하나가 쥐고 있다. 여기서
+ * 베껴 적으면 고객 안내 현황과 주간보고가 다른 번호를 보이는 날이 온다.
+ *
+ * ── 견적서 번호는 날짜와 **다른 길로** 온다 (2026-10-07) ─────────────────
+ * 상세표의 `견적서 발행일` 칸에 날짜 옆 역삼각이 생기고, 누르면 그 건의 견적서
+ * 번호들이 칸 안에 펼쳐진다(사용자 지시). 그 번호는 **고객 안내 현황에 뜨는 것과
+ * 같아야 해서** 규칙을 쥔 함수를 그대로 부른다
+ * (queries/repair-case-quote-numbers.ts 의 repairCaseQuoteNumbers — 내자 정리에
+ * 번호가 있으면 그것만, 없을 때만 공유폴더의 견적서 폴더 안 파일 이름에서 읽는다).
+ *
+ * 🔴 **날짜 규칙은 한 글자도 바뀌지 않았다.** 주간보고의 두 날짜는 지금까지와 똑같이
+ * pickWeeklyReportOrderDates 가 고른 줄에서 오고, 그것은 고객 안내 현황이 고르는 줄과
+ * **일부러 다르다**(domain/repair-case-domestic-order-dates.ts 머리말). 그래서 한 줄에
+ * 「다른 줄에서 고른 날짜」와 「또 다른 줄에서 고른 번호」가 함께 실릴 수 있다 — 두 값이
+ * 묻는 질문이 서로 다르기 때문이고(언제 견적이 처음 나갔나 / 지금 유효한 견적서가
+ * 무엇인가), 번호 쪽을 날짜에 맞추면 이번에는 고객 안내 현황과 갈라진다.
+ *
+ * 🔴 공유폴더가 꺼져 있거나 못 읽어도 **던지지 않는다** — 그때 번호는 내자 정리 값만
+ * 이거나 빈 배열이고, 화면은 지금까지처럼 날짜만 보인다(그 모듈의 머리말).
  *
  * 2026-10-04 까지는 세 번이었다 — 점검 대기와 점검 중을 **인수점검 결과 기록이
  * 있는가**로 갈라서, 그 유무를 읽는 질의가 하나 더 있었다. 이제 두 칸을 상태가
@@ -123,9 +151,21 @@ export async function listWeeklyReportCases(): Promise<WeeklyReportCase[]> {
   const caseIds = rows.map((row) => row.id);
   const orderDatesByCaseId = await loadOrderDatesByCaseId(caseIds);
 
+  // 🔴 견적서 **번호**는 고객 안내 현황과 **같은 함수**에서 나온다(파일 헤더의
+  //    '견적서 번호는 날짜와 다른 길로 온다'). 날짜는 바로 위 orderDatesByCaseId
+  //    그대로이고, 이 두 줄이 그것을 건드리지 않는다.
+  const quoteInfo = await listQuoteInfoForRepairCases(caseIds);
+  const archiveNumbers = await listArchiveQuoteNumbers(rows, quoteInfo);
+
   return rows.map((row) => ({
     ...row,
     ...(orderDatesByCaseId.get(row.id) ?? { quoteIssuedDate: null, orderIssuedDate: null }),
+    quoteNumbers: repairCaseQuoteNumbers(
+      quoteInfo.get(row.id)?.quoteNumber,
+      archiveNumbers,
+      row.lotNumber,
+      row.serialNumber
+    ),
   }));
 }
 

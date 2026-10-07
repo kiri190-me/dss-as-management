@@ -68,6 +68,9 @@ function makeCase(overrides: Partial<WeeklyReportCase> = {}): WeeklyReportCase {
     modelName: "RFG-1000",
     serialNumber: "SN-1",
     lotNumber: "LN-1",
+    // 상세표의 역삼각이 읽는 값. 이 파일의 시험은 하나도 보지 않지만(셈에
+    // 들어오지 않는다) 타입에 **반드시 있는 값**이라 여기서도 채운다.
+    quoteNumbers: [],
     quoteIssuedDate: null,
     orderIssuedDate: null,
     notes: null,

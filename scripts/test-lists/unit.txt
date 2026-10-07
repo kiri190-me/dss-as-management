@@ -292,6 +292,12 @@ src/lib/storage/quote-archive-case-numbers.test.ts
 # 번호 모양을 다시 짜지 않는다 · 상한을 들고 있다. 이웃 quote-archive-product-folders-source.test.ts
 # 와 같은 규율이다.
 src/lib/storage/quote-archive-case-numbers-source.test.ts
+# 🔴 **두 화면이 같은 견적서 번호를 본다**(2026-10-07) — 「내자 정리에 있으면 그것만, 없으면
+# 공유폴더」 규칙이 queries/customer-portal.ts 밖으로 나와 고객 안내 현황과 **주간보고**가
+# 함께 쓴다. 원본을 글자로 읽어 못 박는다: 훑기 캐시가 한 자리뿐인가(화면마다 두면 한 요청에
+# 851ms 훑기가 둘이다) · DB 를 모르는가(내자 번호는 domestic-orders 조회가 쥔다) · fs 를
+# 직접 만지지 않는가 · 던지지 않는가. 이웃 quote-archive-case-numbers-source.test.ts 와 같은 규율.
+src/lib/db/queries/repair-case-quote-numbers-source.test.ts
 # **다음 견적서 번호 제안**(2026-10-06) — 🔴 채번기가 아니다(번호 칸은 사람이 손으로 적는
 # 자유 텍스트 그대로이고, 이 값은 폼의 초기값으로만 쓴다) · 🔴 그 해의 연도 폴더만 읽는다
 # (번호는 해마다 다시 1 부터다) · 🔴 「가장 큰 것 + 1」이고 빈 자리를 메우지 않는다(취소된
@@ -452,6 +458,13 @@ src/components/dashboard/weekly-report-width-frame-screen.test.ts
 # 그 변경에서 기존 시험 111개가 전부 통과했다. 원본을 글자로 읽으므로 DB 도
 # 브라우저도 없다.
 src/components/dashboard/weekly-report-summary-layout.test.ts
+# 주간보고 상세표의 **견적서 번호 펼치기**(2026-10-07 사용자 지시) — 견적서 발행일 날짜 옆
+# 작은 역삼각 · 고르개 옆 [견적서 번호 보기]로 모두 펼치기/접기. 원본을 글자로 읽어 못 박는다:
+# 🔴 번호가 고객 안내 현황과 **같은 함수**에서 오는가(규칙을 베끼면 두 화면이 갈린다) ·
+# 🔴 날짜 규칙은 그대로인가(주간보고와 고객 안내 현황은 고르는 줄이 일부러 다르다) ·
+# 🔴 번호 없는 줄에 역삼각이 안 서는가 · 🔴 화면이 서버 컴포넌트로 남는가(Provider 가 DOM 을
+# 만들지 않고 children 을 감싼다) · 🔴 단추와 역삼각이 종이에 안 찍히고 펼친 번호는 찍히는가.
+src/components/dashboard/weekly-report-quote-numbers.test.ts
 src/lib/domain/notification-bell-items.test.ts
 src/lib/domain/portal-notification-inbox.test.ts
 src/lib/server/integration/portal-inbox.test.ts

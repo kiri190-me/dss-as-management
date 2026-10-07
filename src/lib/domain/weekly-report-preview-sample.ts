@@ -27,6 +27,7 @@ import { buildWeeklyReport, type WeeklyReport, type WeeklyReportCase } from "./w
  *   · RFG/MB 한쪽만 빈 쌍 — 빈 쪽이 「해당 없음」으로 자리를 지키는지(표 최소 높이)
  *   · 분류 안 됨 — 맨 위 빨간 안내 · 빨간 집계 칸 · 빨간 배지
  *   · 장기 PO 미발행 — 견적서 발행일 빨간 볼드
+ *   · 견적서 번호 — 여럿 · 하나 · 없음 셋 다(없는 줄에는 역삼각을 그리지 않는다)
  *   · PO 발행 완료 — PO 발행일 칸과 겹쳐 세는 칸
  *   · 여러 줄 비고 — 줄 높이와 표 칸 위아래 여백
  *   · 금주 목표 줄 · 납입 예정 줄 — 목표·납입 상자(한쪽은 비워 최소 높이가 보이게)
@@ -65,6 +66,8 @@ const SAMPLE_CASES: readonly WeeklyReportCase[] = [
     modelName: "SAMPLE-RFG-3000",
     serialNumber: "SN-S0001",
     lotNumber: "LN-S01",
+    // 한 건에 견적서가 여럿인 경우 — 역삼각을 눌러 펼친 모습이 보이게.
+    quoteNumbers: ["DSS 2026-100", "DSS 2026-100-1"],
     notes: "1차 점검 완료\n교체 부품 입고 대기 (표본)",
     status: "IN_REPAIR",
     currentWorkflowStepKey: "in_repair",
@@ -82,6 +85,9 @@ const SAMPLE_CASES: readonly WeeklyReportCase[] = [
     modelName: "SAMPLE-TC-200",
     serialNumber: "SN-S0002",
     lotNumber: null,
+    // 번호가 하나뿐인 경우. 🔴 이 줄은 장기 PO 미발행이라 빨간 볼드이기도 하다 —
+    // 역삼각이 그 빨간 옷을 떨어뜨리지 않는지 미리보기에서 바로 보인다.
+    quoteNumbers: ["DSS 2026-104R1"],
     notes: null,
     status: "WAITING_PO",
     currentWorkflowStepKey: "waiting_po",
@@ -99,6 +105,8 @@ const SAMPLE_CASES: readonly WeeklyReportCase[] = [
     modelName: "SAMPLE-MB-10",
     serialNumber: "SN-S0003",
     lotNumber: "LN-S03",
+    // 번호가 하나도 없는 줄 — 🔴 역삼각을 아예 그리지 않는다(사용자 결정 2026-10-07).
+    quoteNumbers: [],
     notes: "외관 손상 사진 첨부 (표본)",
     status: "WAITING_INTAKE_INSPECTION",
     currentWorkflowStepKey: "intake_inspection",
@@ -116,6 +124,7 @@ const SAMPLE_CASES: readonly WeeklyReportCase[] = [
     modelName: "SAMPLE-RFG-1000",
     serialNumber: null,
     lotNumber: null,
+    quoteNumbers: [],
     notes: null,
     status: null,
     currentWorkflowStepKey: "sample_unmapped_step",
@@ -133,6 +142,7 @@ const SAMPLE_CASES: readonly WeeklyReportCase[] = [
     modelName: "SAMPLE-RFG-1000",
     serialNumber: "SN-S0005",
     lotNumber: "LN-S05",
+    quoteNumbers: [],
     notes: null,
     status: "WAITING_SHIPMENT",
     currentWorkflowStepKey: "waiting_shipment",
