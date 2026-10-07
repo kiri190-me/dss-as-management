@@ -45,6 +45,7 @@ import type {
 // 데모 계층에도 같은 이름의 함수가 있어 별칭을 붙인다 — 이름이 같지만 하는 일이
 // 다르다(한쪽은 브라우저 저장소, 한쪽은 실제 DB).
 import {
+  purgeAttachmentAction,
   restoreAttachmentAction,
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
@@ -76,6 +77,7 @@ import CaseKindShareDocsSection from "./CaseKindShareDocsSection";
 import ContactFolderSection from "./ContactFolderSection";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
+import PurgeAttachmentDialog from "./PurgeAttachmentDialog";
 import RestoreAttachmentDialog from "./RestoreAttachmentDialog";
 import SimulationNoticeDialog from "./SimulationNoticeDialog";
 import StorageDisclaimer from "./StorageDisclaimer";
@@ -262,6 +264,11 @@ function DatabaseFilesScreen({
   // 사유도 한 번만 받아야 하므로 이 모양이 자연스럽다.
   const [pendingDeletes, setPendingDeletes] = useState<RepairCaseAttachmentListItem[]>([]);
   const [pendingRestore, setPendingRestore] = useState<TrashedAttachmentListItem | null>(null);
+  /**
+   * 🔴 영구 삭제 대기(2026-10-07). 되살리기와 **다른 상태**다 — 한 창에 두 성질을
+   * 담지 않는다(PurgeAttachmentDialog 머리말). 휴지통 줄에서만 세워진다.
+   */
+  const [pendingPurge, setPendingPurge] = useState<TrashedAttachmentListItem | null>(null);
   const [isMutating, setIsMutating] = useState(false);
 
   async function handleDeleteConfirm(reason: string) {
@@ -332,6 +339,34 @@ function DatabaseFilesScreen({
       }
       setStatusMessage({ type: "success", text: `${pendingRestore.originalFileName} 을(를) 되살렸습니다.` });
       setPendingRestore(null);
+      router.refresh();
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  /** 🔴 되돌릴 수 없다 — 디스크 파일까지 지운다(2026-10-07). */
+  async function handlePurgeConfirm() {
+    const target = pendingPurge;
+    if (!target) return;
+    setIsMutating(true);
+    setStatusMessage(null);
+    try {
+      const result = await purgeAttachmentAction({
+        attachmentId: target.id,
+        repairCaseId: resolved.id,
+      });
+      // 성공이든 실패든 확인 창을 닫는다 — 열어 둔 채 아래에 이유를 적으면 그 글이
+      // 창 뒤에 가려 사용자는 아무 일도 안 일어난 것으로 본다.
+      setPendingPurge(null);
+      if (!result.ok) {
+        setStatusMessage({ type: "error", text: result.message });
+        return;
+      }
+      setStatusMessage({
+        type: "success",
+        text: `${target.originalFileName} 을(를) 영구 삭제했습니다. 되돌릴 수 없습니다.`,
+      });
       router.refresh();
     } finally {
       setIsMutating(false);
@@ -1131,14 +1166,31 @@ function DatabaseFilesScreen({
                     </span>
                   </div>
                   {canManage && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingRestore(item)}
-                      disabled={isMutating}
-                      className="shrink-0 rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                    >
-                      되살리기
-                    </button>
+                    /*
+                      🔴 두 단추를 한 묶음으로 둔다 — 바깥이 justify-between 이라
+                      형제로 나란히 두면 되살리기가 가운데로 흩어진다. 되살리기
+                      단추 자체는 글자도 동작도 그대로다.
+                    */
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPendingRestore(item)}
+                        disabled={isMutating}
+                        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      >
+                        되살리기
+                      </button>
+                      {/* 🔴 되돌릴 수 없는 쪽. 같은 권한(canManage)이 두 단추를 함께 연다. */}
+                      <button
+                        type="button"
+                        data-attachment-purge-button
+                        onClick={() => setPendingPurge(item)}
+                        disabled={isMutating}
+                        className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                      >
+                        영구 삭제
+                      </button>
+                    </div>
                   )}
                 </li>
               ))}
@@ -1169,6 +1221,13 @@ function DatabaseFilesScreen({
         isSubmitting={isMutating}
         onConfirm={handleRestoreConfirm}
         onCancel={() => setPendingRestore(null)}
+      />
+      <PurgeAttachmentDialog
+        isOpen={pendingPurge !== null}
+        displayName={pendingPurge?.originalFileName ?? ""}
+        isSubmitting={isMutating}
+        onConfirm={handlePurgeConfirm}
+        onCancel={() => setPendingPurge(null)}
       />
     </div>
   );

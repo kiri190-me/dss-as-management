@@ -6,8 +6,10 @@ import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
+import { purgeAttachment } from "@/lib/db/mutations/attachment-purge";
 import { restoreAttachment, softDeleteAttachment } from "@/lib/db/mutations/attachment-trash";
 import { getAttachmentForDownload } from "@/lib/db/queries/attachment-download";
+import { getAttachmentStorage } from "@/lib/storage/local-fs-adapter";
 import {
   hasAnyAttachmentOwnerAccess,
   isAttachmentOwnerAccessAllowed,
@@ -186,6 +188,41 @@ export async function softDeleteAttachmentAction(
     attachmentId: input.attachmentId,
     actorUserId: actor.userId,
     reason: reason.length > 0 ? reason.slice(0, 500) : null,
+  });
+
+  if (!result.ok) return { ok: false, code: result.code, message: result.message };
+
+  revalidateAfterTrashChange(input);
+  return { ok: true };
+}
+
+/**
+ * 🔴 휴지통의 첨부를 **영구 삭제한다 — 디스크 파일까지.** 되돌릴 수 없다
+ * (mutations/attachment-purge.ts).
+ *
+ * ── 권한은 휴지통과 **같은 문**이다 ──────────────────────────────────────
+ * resolveWriteActor 를 그대로 쓴다(2026-10-07 사용자 결정) — 휴지통을 보고
+ * 되살리기를 누를 수 있는 사람이 영구 삭제도 할 수 있다. 새 권한을 만들지
+ * 않았으므로 주인별 판정(접수 건 files · 모델 files · 종류 files · 견적서
+ * quotes)도 지우기·되살리기와 한 글자도 다르지 않다.
+ *
+ * ── 어댑터를 **여기서** 집는다 ───────────────────────────────────────────
+ * mutation 은 StorageAdapter 를 인자로 받는다 — 그 안에서 집으면 시험이 진짜
+ * 업로드 폴더를 지운다(그 파일 머리말). 실제 어댑터를 넘기는 자리는 여기 하나다.
+ *
+ * ── 파일 삭제가 실패해도 성공이다 ────────────────────────────────────────
+ * DB 는 이미 커밋됐고 행은 사라졌다 — 사람 눈에는 실제로 없어진 것이 맞다.
+ * 남은 파일은 mutation 이 서버 로그에 적는다.
+ */
+export async function purgeAttachmentAction(
+  input: AttachmentTrashActionTarget
+): Promise<AttachmentTrashActionResult> {
+  const actor = await resolveWriteActor(input.attachmentId);
+  if (!actor.ok) return actor.result;
+
+  const result = await purgeAttachment(getAttachmentStorage(), {
+    attachmentId: input.attachmentId,
+    actorUserId: actor.userId,
   });
 
   if (!result.ok) return { ok: false, code: result.code, message: result.message };

@@ -363,3 +363,17 @@ src/components/product-models/product-model-kind-share-docs-screen.test.tsx
 # 고치고 끝내지 않도록 두 곳을 함께 본다. 고르개(열 머리 누르기)는 그대로다.
 # 렌더하지 않고 원본을 글자로 읽는다 — 그 파일이 Server Action 을 물고 있다.
 src/components/repair-cases/repair-case-list-default-sort.test.ts
+
+# ── 첨부 영구 삭제의 확인 창과 단추 (2026-10-07) ──────────────────────────────
+# 되돌릴 수 없는 길이라 못 박는 것이 「되는가」가 아니라 **「사람이 그 사실을 알고
+# 누르는가」**와 **「누를 수 없어야 하는 사람에게 단추가 아예 없는가」**다.
+# 🔴 창이 「되돌릴 수 없습니다」·「디스크의 파일까지」를 말하고 **사유를 안 받는다** ·
+# 🔴 휴지통 확인 창(DeleteAttachmentDialog)을 고쳐 쓰지 않았다(그 창의 「언제든 복원할
+# 수 있습니다」가 그대로다 — 성질이 정반대인 두 창이다) · 🔴 세 화면이 **창 하나**를
+# 쓰고 단추는 **휴지통 줄에만** 하나다 · 🔴 되살리기와 **같은 깃발**(canManage ·
+# canManageFiles) 아래다 — 새 문턱을 만들지 않았다 · 🔴 서버도 같은 문이다(액션이
+# resolveWriteActor 를 그대로 쓰고, 어댑터는 **액션이** 넘긴다 — mutation 이 집으면
+# 시험이 진짜 업로드 폴더를 지운다) · 🔴 차례가 DB 먼저 · 파일은 커밋 뒤다.
+# 창 자체는 아무것도 물지 않아 **그려 본다**. 세 화면은 서버 액션 사슬 때문에 원본을
+# 글자로 읽는다(이웃 product-model-kind-files-screen.test.ts 와 같은 방법).
+src/components/repair-cases/files/attachment-purge-ui.test.tsx

@@ -7,6 +7,7 @@ import { showSavePopup } from "@/components/common/SavePopup";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import AttachmentViewer from "@/components/repair-cases/files/AttachmentViewer";
 import DeleteAttachmentDialog from "@/components/repair-cases/files/DeleteAttachmentDialog";
+import PurgeAttachmentDialog from "@/components/repair-cases/files/PurgeAttachmentDialog";
 import RestoreAttachmentDialog from "@/components/repair-cases/files/RestoreAttachmentDialog";
 import { uploadPreview } from "@/components/repair-cases/files/shrink-image";
 import type {
@@ -29,6 +30,7 @@ import {
   originalModifiedAtParamValue,
 } from "@/lib/domain/attachment-original-modified-at";
 import {
+  purgeAttachmentAction,
   restoreAttachmentAction,
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
@@ -494,6 +496,8 @@ export default function ProductModelFilesSection({
 
   const [pendingDelete, setPendingDelete] = useState<ProductModelAttachmentListItem | null>(null);
   const [pendingRestore, setPendingRestore] = useState<TrashedProductModelAttachmentListItem | null>(null);
+  /** 🔴 영구 삭제 대기(2026-10-07) — 되살리기와 다른 상태다. 휴지통 줄에서만 세워진다. */
+  const [pendingPurge, setPendingPurge] = useState<TrashedProductModelAttachmentListItem | null>(null);
   const [isMutating, setIsMutating] = useState(false);
 
   /** 크게 보고 있는 사진의 자리. 사진만 모은 목록(viewable) 기준이다. */
@@ -691,6 +695,30 @@ export default function ProductModelFilesSection({
         return;
       }
       setStatusMessage({ type: "success", text: `${target.originalFileName} 을(를) 되살렸습니다.` });
+      router.refresh();
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  /** 🔴 되돌릴 수 없다 — 디스크 파일까지 지운다(2026-10-07). */
+  async function handlePurgeConfirm() {
+    const target = pendingPurge;
+    if (!target) return;
+    setIsMutating(true);
+    setStatusMessage(null);
+    try {
+      const result = await purgeAttachmentAction({ attachmentId: target.id, productModelId });
+      // 지우기 쪽과 같은 이유로 먼저 닫는다(위 주석).
+      setPendingPurge(null);
+      if (!result.ok) {
+        setStatusMessage({ type: "error", text: result.message });
+        return;
+      }
+      setStatusMessage({
+        type: "success",
+        text: `${target.originalFileName} 을(를) 영구 삭제했습니다. 되돌릴 수 없습니다.`,
+      });
       router.refresh();
     } finally {
       setIsMutating(false);
@@ -935,14 +963,31 @@ export default function ProductModelFilesSection({
                     {item.deleteReason ? ` · ${item.deleteReason}` : ""}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPendingRestore(item)}
-                  disabled={isBusy}
-                  className="rounded-md border border-zinc-300 px-2 py-1 text-[11px] font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
-                >
-                  되살리기
-                </button>
+                {/*
+                  🔴 두 단추를 한 묶음으로 둔다 — 바깥이 justify-between 이라 형제로
+                  나란히 두면 되살리기가 가운데로 흩어진다. 되살리기 단추 자체는
+                  글자도 동작도 그대로다. 권한(canManageFiles)은 이 구역 전체가
+                  이미 쥐고 있다 — 영구 삭제에 새 문턱을 만들지 않았다.
+                */}
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingRestore(item)}
+                    disabled={isBusy}
+                    className="rounded-md border border-zinc-300 px-2 py-1 text-[11px] font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                  >
+                    되살리기
+                  </button>
+                  <button
+                    type="button"
+                    data-attachment-purge-button
+                    onClick={() => setPendingPurge(item)}
+                    disabled={isBusy}
+                    className="rounded-md border border-red-300 px-2 py-1 text-[11px] font-medium text-red-700 disabled:opacity-50 dark:border-red-900 dark:text-red-400"
+                  >
+                    영구 삭제
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -970,6 +1015,13 @@ export default function ProductModelFilesSection({
         isSubmitting={isMutating}
         onConfirm={handleRestoreConfirm}
         onCancel={() => setPendingRestore(null)}
+      />
+      <PurgeAttachmentDialog
+        isOpen={pendingPurge !== null}
+        displayName={pendingPurge?.originalFileName ?? ""}
+        isSubmitting={isMutating}
+        onConfirm={handlePurgeConfirm}
+        onCancel={() => setPendingPurge(null)}
       />
     </section>
   );
