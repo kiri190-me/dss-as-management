@@ -142,16 +142,30 @@ describe("견적서 번호 읽기 — 원본으로 지킨다", () => {
     assert.equal(code.match(/resolveQuoteArchiveRoot\(\)/g)?.length, 2);
   });
 
-  test("🔴 기다리는 시간과 폴더 수에 상한이 있다", () => {
+  test("🔴 기다리는 시간에는 상한이 있다 — NAS 가 멎어도 요청이 매달리지 않게", () => {
     assert.equal(code.match(/withShareFolderTimeout\(/g)?.length, 2, "상한 없이 기다리는 길이 있다");
     assert.ok(code.includes("QUOTE_ARCHIVE_CASE_NUMBERS_SCAN_TIMEOUT_MS"));
     assert.ok(code.includes("QUOTE_ARCHIVE_CASE_NUMBERS_READ_TIMEOUT_MS"));
     assert.ok(code.includes("error instanceof ShareFolderTimeout"));
     assert.ok(code.includes("reason: QUOTE_ARCHIVE_CASE_NUMBERS_SLOW_REASON"));
-    assert.ok(code.includes("QUOTE_ARCHIVE_CASE_NUMBERS_FOLDER_LIMIT"), "폴더 수 상한이 없다");
-    assert.ok(code.includes("picked.length >= folderLimit"), "상한대로 끊지 않는다");
-    // 🔴 상한에 걸리면 그 폴더를 **열기 전에** 끝낸다 — 상한이 곧 NAS 왕복 횟수다.
-    assert.ok(code.indexOf("picked.length >= folderLimit") < code.indexOf("async function readNumbers("));
+  });
+
+  test("🔴 **폴더 수**에는 상한이 없다 — 걸린 폴더는 하나도 빼지 않는다 (2026-10-07)", () => {
+    // 상한(200)이 있던 날, 주간보고 ~250 줄 가운데 뒤쪽 줄의 번호가 조용히 빠졌다. 사용자가
+    // 「상한을 아예 없애」로 정했다 — 되돌리려면 그 사실부터 다시 이야기해야 한다.
+    for (const forbidden of ["FOLDER_LIMIT", "folderLimit", "truncated"]) {
+      assert.equal(code.includes(forbidden), false, `폴더 수 상한이 되살아났다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 **반쪽 결과**가 `found` 로 나가지 않는다 — 다 읽거나 `failed` 다", () => {
+    const readAt = code.indexOf("async function readNumbers(");
+    const afterAt = code.indexOf("async function readFileNames(");
+    assert.ok(readAt >= 0 && afterAt > readAt);
+    const readBody = code.slice(readAt, afterAt);
+    // 묶음을 도는 도중에 끊고 돌려주는 길이 없다 — 그것이 곧 「일부만 읽었는데 아무도 모르는」 결과다.
+    assert.equal(readBody.match(/status: "found"/g)?.length, 1, "읽기 도중에 결과를 내는 길이 있다");
+    assert.equal(/\bbreak\b/.test(readBody), false, "읽기를 도중에 끊는다");
   });
 
   test("🔴 던지지 않는다 — 밖으로 나가는 것은 status 뿐이고, 사유에 경로를 담지 않는다", () => {

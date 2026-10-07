@@ -98,7 +98,7 @@ async function snapshot(root: string): Promise<string[]> {
 async function numbersFor(
   root: string,
   products: readonly { lotNumber: string | null; serialNumber: string | null }[],
-  overrides: { folderLimit?: number; timeoutMs?: number } = {}
+  overrides: { timeoutMs?: number } = {}
 ): Promise<Map<string, string[]>> {
   const scanned = await listQuoteArchiveFolderRefs({ root });
   assert.equal(scanned.status, "found", JSON.stringify(scanned));
@@ -334,11 +334,32 @@ test("폴더가 비어 있으면 그 장비는 결과에 없다 — 빈 배열�
   assert.equal(numbers.size, 0);
 });
 
-test("🔴 폴더 수 상한에 걸리면 거기까지 읽고 `truncated` 로 알린다", async () => {
+test("🔴 폴더 수 상한이 없다 — 폴더가 많아도 **전부** 읽는다 (2026-10-07)", async () => {
   const root = await makeRoot();
-  for (const number of ["2026-801", "2026-802", "2026-803"]) {
-    await makeFolder(root, YEAR_2026, folderName(number), [`${folderName(number)}.xls`]);
-  }
+  // 🔴 **210 개다 — 없앤 상한(200)보다 많다.** 운영 공유폴더에 견적서 폴더가 658 개이고 그
+  //    가운데 L/N · S/N 이 든 것이 342 개다. 상한이 남아 있으면 뒤쪽 줄의 번호가 조용히 빠진다.
+  const quoteNumbers = Array.from(
+    { length: 210 },
+    (_unused, index) => `2026-${String(index + 1).padStart(3, "0")}`
+  );
+  // 연도 폴더를 먼저 만들어 두고 견적서 폴더들은 한꺼번에 만든다(시험 준비 시간을 줄인다).
+  await mkdir(path.join(root, YEAR_2026), { recursive: true });
+  await Promise.all(
+    quoteNumbers.map((number) =>
+      makeFolder(root, YEAR_2026, folderName(number), [`${folderName(number)}.xls`])
+    )
+  );
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(
+    numbers.get(keyOf(LOT, SERIAL)),
+    quoteNumbers.map((number) => `DSS ${number}`)
+  );
+});
+
+test("🔴 결과에 「일부만 읽었다」를 담는 칸이 없다 — 반쪽 결과를 내는 길 자체가 없다", async () => {
+  const root = await makeRoot();
+  await makeFolder(root, YEAR_2026, folderName("2026-800"), [`${folderName("2026-800")}.xls`]);
 
   const scanned = await listQuoteArchiveFolderRefs({ root });
   assert.equal(scanned.status, "found");
@@ -346,12 +367,13 @@ test("🔴 폴더 수 상한에 걸리면 거기까지 읽고 `truncated` 로 �
     root,
     folders: scanned.status === "found" ? scanned.folders : [],
     products: [{ lotNumber: LOT, serialNumber: SERIAL }],
-    folderLimit: 2,
   });
+  // 🔴 칸이 둘뿐이다. 「거기까지만 읽었다」를 나르는 칸이 있으면 부르는 쪽이 그것을 버리는
+  //    순간(실제로 버리고 있었다) **일부만 읽었는데 아무도 모르는** 결과가 된다.
+  assert.deepEqual(Object.keys(read).sort(), ["numbersByProduct", "status"]);
   assert.equal(read.status, "found");
   if (read.status !== "found") return;
-  assert.equal(read.truncated, true);
-  assert.deepEqual(read.numbersByProduct.get(keyOf(LOT, SERIAL)), ["DSS 2026-801", "DSS 2026-802"]);
+  assert.deepEqual(read.numbersByProduct.get(keyOf(LOT, SERIAL)), ["DSS 2026-800"]);
 });
 
 test("🔴 볼 장비가 없거나 훑어 둔 폴더가 없으면 디스크를 아예 보지 않는다", async () => {
@@ -365,7 +387,7 @@ test("🔴 볼 장비가 없거나 훑어 둔 폴더가 없으면 디스크를 �
       folders: [],
       products: [{ lotNumber: LOT, serialNumber: SERIAL }],
     }),
-    { status: "found", numbersByProduct: new Map(), truncated: false }
+    { status: "found", numbersByProduct: new Map() }
   );
 
   // 쓸 수 있는 열쇠가 하나도 없다.
@@ -375,7 +397,7 @@ test("🔴 볼 장비가 없거나 훑어 둔 폴더가 없으면 디스크를 �
       folders: [{ yearFolderName: YEAR_2026, folderName: folderName("2026-100") }],
       products: [{ lotNumber: "-", serialNumber: null }],
     }),
-    { status: "found", numbersByProduct: new Map(), truncated: false }
+    { status: "found", numbersByProduct: new Map() }
   );
 
   assert.deepEqual(await readdir(parent), [], "디스크를 보고 없는 루트를 만들었다");

@@ -87,15 +87,19 @@ export const QUOTE_ARCHIVE_CASE_NUMBERS_SCAN_TIMEOUT_MS = 8000;
 export const QUOTE_ARCHIVE_CASE_NUMBERS_READ_TIMEOUT_MS = 8000;
 
 /**
- * 한 번에 **열어 보는 폴더 수**의 상한.
+ * 🔴 **열어 보는 폴더 수에는 상한을 두지 않는다** (2026-10-07 사용자 결정 — 「상한을 아예 없애」).
  *
- * 🔴 **200 이다.** 이 수가 곧 NAS 왕복 횟수다. 실측(2026-10-06)에서 서로 다른 (L/N, S/N)
- * 조합 291 개 가운데 여러 폴더에 걸린 것이 44 건이고 가장 많은 것이 4 개였다 — 진행 중인
- * 건이 양식마다 수십 개이므로 보통은 100 을 넘지 않는다. 상한을 두는 까닭은 사람이 L/N ·
- * S/N 을 짧거나 흔한 값으로 적어 둔 날 폴더가 무더기로 걸리기 때문이다. 그때는 기다리기
- * 상한에 먼저 걸려 **열 전체가 비는 것**보다, 거기까지 읽고 끝내는 쪽이 낫다.
+ * 하루 전까지 여기 「한 번에 200 개까지」가 있었다. 그런데 운영 공유폴더의 견적서 폴더가
+ * **658 개**이고 그 가운데 L/N · S/N 이 든 것이 **342 개**다. 주간보고는 진행 중인 건
+ * **~250 줄**을 한 번에 묻는다 — 200 을 넘는 순간 **뒤쪽 줄의 번호가 조용히 빠지는데 화면에는
+ * 아무 표시가 없었다**(부르는 쪽이 「거기까지만 읽었다」는 값을 쓰지 않는다). 사용자가 속도보다
+ * 번호가 다 나오는 쪽을 골랐다(「주간보고가 1.5 초쯤 느려지는 것은 괜찮다」).
+ *
+ * 🔴 **멈추는 장치는 이제 기다리기 상한(위 8000ms) 하나뿐이고, 그래서 이 모듈은 반쪽 결과를
+ * 내지 않는다** — 걸린 폴더를 다 읽으면 `found`, 느려 그만두거나 못 읽으면 `failed` 둘뿐이다.
+ * 읽는 도중에 끊고 `found` 를 내면 그것이 곧 「일부만 읽었는데 아무도 모르는」 상태다.
+ * 실측(2026-10-06)으로 폴더 하나가 20~40ms 이고 여덟씩 묶어 여니, 342 개라도 1~2 초쯤이다.
  */
-export const QUOTE_ARCHIVE_CASE_NUMBERS_FOLDER_LIMIT = 200;
 
 /**
  * 폴더를 한꺼번에 몇 개씩 여는가.
@@ -155,8 +159,6 @@ export type QuoteArchiveCaseNumbersResult =
        * 열쇠를 만들어 꺼낸다. 번호를 못 찾은 장비는 아예 들어 있지 않다(빈 배열도 아니다).
        */
       numbersByProduct: Map<string, string[]>;
-      /** 🔴 폴더 수 상한에 걸려 일부만 읽었는가. */
-      truncated: boolean;
     }
   | { status: "disabled" }
   | { status: "failed"; reason: string };
@@ -286,8 +288,6 @@ export type ReadQuoteArchiveNumbersInput = {
   folders: readonly QuoteArchiveFolderRef[];
   /** 번호를 찾아 줄 장비들. L/N · S/N 이 둘 다 있는 것만 쓰인다. */
   products: readonly QuoteArchiveProduct[];
-  /** 열어 보는 폴더 수 상한. 시험에서만 바꾼다. */
-  folderLimit?: number;
   /** 기다리기 상한. 시험에서만 바꾼다. */
   timeoutMs?: number;
 };
@@ -308,7 +308,7 @@ export async function readQuoteArchiveNumbersForProducts(
   }
   // 🔴 볼 장비가 없거나 훑어 둔 폴더가 없으면 여기서 끝난다 — 디스크에 닿지 않는다.
   if (keys.size === 0 || input.folders.length === 0) {
-    return { status: "found", numbersByProduct: new Map(), truncated: false };
+    return { status: "found", numbersByProduct: new Map() };
   }
 
   // 🔴 설정이 비어 있으면 여기서 끝난다 — 아래 디스크를 보는 코드에 닿지 않는다.
@@ -317,14 +317,10 @@ export async function readQuoteArchiveNumbersForProducts(
     return { status: "disabled" };
   }
 
-  const folderLimit =
-    typeof input.folderLimit === "number" && Number.isFinite(input.folderLimit) && input.folderLimit > 0
-      ? Math.floor(input.folderLimit)
-      : QUOTE_ARCHIVE_CASE_NUMBERS_FOLDER_LIMIT;
   const timeoutMs =
     typeof input.timeoutMs === "number" ? input.timeoutMs : QUOTE_ARCHIVE_CASE_NUMBERS_READ_TIMEOUT_MS;
 
-  const matched = matchFolders(input.folders, keys, folderLimit);
+  const matched = matchFolders(input.folders, keys);
 
   try {
     return await withShareFolderTimeout(readNumbers(configured, matched), timeoutMs);
@@ -338,17 +334,17 @@ type MatchedFolders = {
   folders: QuoteArchiveFolderRef[];
   /** 폴더 자리번호 → 그 폴더가 걸린 장비 열쇠들. */
   keysByFolder: string[][];
-  truncated: boolean;
 };
 
 /**
  * 훑어 둔 이름들 가운데 **그 장비들의 폴더**를 고른다. 디스크를 보지 않는 순수한 일이라
  * 기다리기 상한 **밖**에 둔다 — 상한은 NAS 를 기다리는 시간에만 걸려야 한다.
+ *
+ * 🔴 **걸린 폴더는 하나도 빼지 않는다**(위 「폴더 수에는 상한을 두지 않는다」).
  */
 function matchFolders(
   folders: readonly QuoteArchiveFolderRef[],
-  keys: ReadonlySet<string>,
-  folderLimit: number
+  keys: ReadonlySet<string>
 ): MatchedFolders {
   // 열쇠를 미리 갈라 둔다 — 폴더마다 다시 가르면 폴더 수 × 장비 수만큼 쪼개게 된다.
   const wanted = [...keys].map((key) => {
@@ -358,7 +354,6 @@ function matchFolders(
 
   const picked: QuoteArchiveFolderRef[] = [];
   const keysByFolder: string[][] = [];
-  let truncated = false;
 
   for (const folder of folders) {
     const nameKeys = archiveFolderNameKeys(folder.folderName);
@@ -368,21 +363,21 @@ function matchFolders(
       if (nameKeys.has(product.lotKey) && nameKeys.has(product.serialKey)) hit.push(product.key);
     }
     if (hit.length === 0) continue;
-    if (picked.length >= folderLimit) {
-      truncated = true;
-      break;
-    }
     picked.push(folder);
     keysByFolder.push(hit);
   }
 
-  return { folders: picked, keysByFolder, truncated };
+  return { folders: picked, keysByFolder };
 }
 
 /**
  * 고른 폴더들을 열어 **파일 이름만** 읽고 번호를 뽑는다. 🔴 내용 · 크기 · 수정 시각을 읽지
  * 않는다. 찌꺼기(Thumbs.db · desktop.ini · `~$…` · 점으로 시작)와 하위 폴더는 빼고 본다 —
  * 실측(2026-10-06)에서 파일 342 개 가운데 57 개가 찌꺼기였다.
+ *
+ * 🔴 **도중에 빠져나가지 않는다** — 묶음을 끝까지 돌고 나서야 `found` 를 낸다. 중간에 끊고
+ * 돌려주면 그것이 곧 「일부만 읽었는데 아무도 모르는」 결과다. 느리면 기다리기 상한이 걸려
+ * 부르는 쪽이 `failed` 를 받는다(여기서 만들던 표는 버려진다).
  */
 async function readNumbers(rawRoot: string, matched: MatchedFolders): Promise<QuoteArchiveCaseNumbersResult> {
   const root = await requireExistingShareFolderRoot(rawRoot);
@@ -415,7 +410,7 @@ async function readNumbers(rawRoot: string, matched: MatchedFolders): Promise<Qu
     }
   }
 
-  return { status: "found", numbersByProduct, truncated: matched.truncated };
+  return { status: "found", numbersByProduct };
 }
 
 async function readFileNames(root: string, folder: QuoteArchiveFolderRef): Promise<string[]> {
