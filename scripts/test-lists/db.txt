@@ -203,3 +203,11 @@ src/lib/server/services/intake-kind-common-files.integration.test.ts
 # 🔴 격리 이름: 접수 월 "9607" · 고객사 "AS-TEST-PORTAL-SAVE-" · 제품 모델과 상태
 # 이름 "PORTAL-SAVE-TEST-". 디스크에는 아무것도 쓰지 않는다.
 src/lib/db/mutations/customer-portal.integration.test.ts
+
+# ── 전체 A/S 현황의 기본 차례 — 인수번호 내림차순 (2026-10-07 사용자 지시) ─────
+# 재는 것은 listRepairCases() 가 돌려주는 **차례** 하나다. 🔴 같은 달 안에서 접수일과
+# 번호 발급 차례를 일부러 어긋나게 만든 자료를 쓴다 — 달이 갈리면 두 차례가 우연히
+# 같아져, 기준을 received_at 으로 되돌려도 시험이 조용히 통과한다.
+# 🔴 격리 이름: 인수 월 "9410" · 고객사 "AS-TEST-CUSTOMER-ORDER-" · 모델
+# "ORDER-TEST-MODEL-". legacyImportState 없이 부르므로 감사 로그·상태 이력은 안 생긴다.
+src/lib/db/queries/repair-cases-list-order.integration.test.ts

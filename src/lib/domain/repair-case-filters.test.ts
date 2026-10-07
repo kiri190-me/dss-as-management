@@ -535,3 +535,61 @@ test("상태순 정렬에서 수리 완료는 수리 중과 출하 승인 대기
     "shipment-completed",
   ]);
 });
+
+// ─────────────────────────────────────────────── 인수번호 차례
+
+/**
+ * 전체 A/S 현황의 **기본 차례**가 인수번호 내림차순이 되었다(2026-10-07 요구).
+ * 그 기본값 자체는 RepairCaseListPage 의 DEFAULT_SORT 가 들고 있고
+ * (components/repair-cases/repair-case-list-default-sort.test.ts 가 못 박는다),
+ * 여기서는 그 값이 가리키는 **정렬 동작**을 본다.
+ *
+ * 🔴 접수일 차례와 **어긋나는** 자료를 쓴다. 두 차례가 같은 자료로 재면 기준을
+ * 접수일로 되돌려도 시험이 조용히 통과한다.
+ *
+ * 인수번호는 `D + YY + MM + 2자리`로 길이가 고정이라 글자 비교가 곧 시간 비교다
+ * (lib/db/queries/repair-cases.ts 의 listRepairCases 머리말).
+ */
+test("인수번호 내림차순은 접수일 차례를 이긴다", () => {
+  const rows = [
+    // 접수일은 가장 늦지만 번호는 가장 작다(같은 달 안에서 늦게 접수된 건이
+    // 먼저 번호를 받을 수 있다 — 월 순번은 만든 차례로 올라간다).
+    row({ id: "low-number-late-date", intakeNumber: "D261001", receivedAt: "2026-10-25" }),
+    row({ id: "high-number-early-date", intakeNumber: "D261003", receivedAt: "2026-10-05" }),
+    row({ id: "mid-number-mid-date", intakeNumber: "D261002", receivedAt: "2026-10-15" }),
+  ];
+
+  assert.deepEqual(idsOf(sortRows(rows, { column: "intakeNumber", direction: "desc" })), [
+    "high-number-early-date",
+    "mid-number-mid-date",
+    "low-number-late-date",
+  ]);
+
+  // 같은 자료를 접수일로 세우면 전혀 다른 차례가 된다 — 위가 우연이 아니라는 증거다.
+  assert.deepEqual(idsOf(sortRows(rows, { column: "receivedAt", direction: "desc" })), [
+    "low-number-late-date",
+    "mid-number-mid-date",
+    "high-number-early-date",
+  ]);
+});
+
+test("인수번호 오름차순은 작은 번호가 먼저다 — 고르개는 그대로 양방향이다", () => {
+  const rows = [
+    row({ id: "b", intakeNumber: "D261002" }),
+    row({ id: "a", intakeNumber: "D261001" }),
+    row({ id: "c", intakeNumber: "D261003" }),
+  ];
+  assert.deepEqual(idsOf(sortRows(rows, { column: "intakeNumber", direction: "asc" })), ["a", "b", "c"]);
+});
+
+/**
+ * 해가 넘어가도 글자 비교로 충분하다는 것 — D260101 > D251231 이다. 자리수가
+ * 흔들리지 않기 때문인데, 형식이 바뀌면 여기서 먼저 깨진다.
+ */
+test("해가 바뀌어도 글자 내림차순이 곧 시간 내림차순이다", () => {
+  const rows = [
+    row({ id: "old", intakeNumber: "D251231", receivedAt: "2025-12-31" }),
+    row({ id: "new", intakeNumber: "D260101", receivedAt: "2026-01-02" }),
+  ];
+  assert.deepEqual(idsOf(sortRows(rows, { column: "intakeNumber", direction: "desc" })), ["new", "old"]);
+});

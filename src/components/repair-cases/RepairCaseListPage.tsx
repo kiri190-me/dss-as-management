@@ -37,7 +37,21 @@ import { restoreRepairCasesAction } from "@/lib/server/actions/restore-repair-ca
 import RepairCasePermanentDeleteDialog from "./trash/RepairCasePermanentDeleteDialog";
 import { permanentlyDeleteRepairCasesAction } from "@/lib/server/actions/permanently-delete-repair-cases";
 
-const DEFAULT_SORT: SortState = { column: "receivedAt", direction: "desc" };
+/**
+ * 전체 A/S 현황이 처음 그리는 차례 — **인수번호 내림차순**이다(2026-10-07 요구).
+ *
+ * 🔴 이 화면은 서버가 보낸 행을 아래 sortRows 로 **다시 정렬한다.** 그래서 눈에
+ * 보이는 첫 차례를 정하는 것은 서버 조회(lib/db/queries/repair-cases.ts 의
+ * listRepairCases)가 아니라 이 상수다 — 서버 쪽만 바꾸면 화면은 그대로다. 둘은
+ * 같은 값으로 맞춰 두었고, 한쪽을 고치면 다른 쪽도 함께 본다.
+ *
+ * 바꾼 것은 **기본값뿐이다.** 열 머리를 눌러 차례를 고르는 기능(handleSortChange)은
+ * 그대로라, 사용자가 접수일로 되돌리는 길은 전과 똑같이 열려 있다.
+ *
+ * 인수번호는 `D + YY + MM + 2자리` 로 길이가 고정이라 글자 정렬이 곧 시간
+ * 정렬이고(서버 쪽 머리말 참조), unique 라 동점이 없어 보조 정렬도 필요 없다.
+ */
+const DEFAULT_SORT: SortState = { column: "intakeNumber", direction: "desc" };
 const DEFAULT_PAGINATION: PaginationState = { page: 1, pageSize: 10 };
 
 type RepairCaseListPageProps = {

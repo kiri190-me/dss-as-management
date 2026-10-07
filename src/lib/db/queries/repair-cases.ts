@@ -121,10 +121,34 @@ function selectRepairCaseTrashJoin() {
     .leftJoin(deletedByUsers, eq(repairCases.deletedBy, deletedByUsers.id));
 }
 
+/**
+ * 전체 A/S 현황(/repair-cases)이 받는 목록 — 기본 차례는 **인수번호 내림차순**이다
+ * (2026-10-07 요구). 접수일(received_at)이 아니라 인수번호로 세운다.
+ *
+ * 🔴 글자(text) 정렬인데 왜 괜찮은가 — 인수번호는 `D + YY + MM + 그 달의 2자리
+ * 일련번호` 로 **길이 7 고정**이고 D 다음은 숫자뿐이다
+ * (vendor/dss-core/src/schema/repair-cases.ts 의 CHECK
+ * `^D[0-9]{2}(0[1-9]|1[0-2])[0-9]{2}$`). 자리수가 흔들리지 않으므로 **글자
+ * 내림차순이 곧 시간 내림차순**이다(D260601 > D260512 > D251231). 숫자로 바꾸거나
+ * 잘라 낼 것이 없다. 🔴 저 형식이 바뀌는 날에는 이 정렬도 함께 봐야 한다.
+ *
+ * 보조 정렬을 두지 않는 까닭: intake_number 에 unique 인덱스가 있어
+ * (`repair_cases_intake_number_unique`, 같은 파일 188줄) 동점 자체가 생길 수 없다.
+ * 같은 인덱스가 정렬도 받쳐 주므로 이 변경에 새 인덱스·마이그레이션이 없다.
+ *
+ * 🔴 같은 파일의 다른 조회들(고객사·제품모델·제품 이력, Flowchart 선택기)은 여전히
+ * 접수일 내림차순이다 — 이번 요구는 「전체 A/S 현황」 한 화면이고, 그것들은 각자
+ * 좁혀진 다른 목록이라 함께 바꾸지 않았다.
+ *
+ * 화면(components/repair-cases/RepairCaseListPage.tsx)은 열 머리를 눌러 차례를
+ * 바꿀 수 있고 그 **기본값**도 인수번호 내림차순이다. 그 화면은 받은 행을 제 손으로
+ * 다시 정렬하므로 눈에 보이는 첫 차례를 정하는 것은 거기 있는 DEFAULT_SORT 다 —
+ * 여기만 바꾸면 이 화면은 아무것도 달라지지 않는다. 두 곳을 늘 함께 본다.
+ */
 export async function listRepairCases(): Promise<ResolvedRepairCase[]> {
   const rows = await selectRepairCaseJoin()
     .where(eq(repairCases.isDeleted, false))
-    .orderBy(desc(repairCases.receivedAt));
+    .orderBy(desc(repairCases.intakeNumber));
 
   return rows.map((row) => mapRepairCaseRow(row));
 }

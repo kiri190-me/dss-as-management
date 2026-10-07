@@ -329,3 +329,10 @@ src/components/repair-cases/workflow/manual-step-set-reason-optional.test.ts
 # 부르고 그 사슬 끝이 server-only 라 통째로 그릴 수 없다 — 이웃
 # product-model-file-modified-date.test.ts 와 같은 방법으로 원본을 글자로 읽는다.
 src/components/product-models/product-model-kind-files-screen.test.ts
+
+# ── 전체 A/S 현황의 기본 차례 — 인수번호 내림차순 (2026-10-07 사용자 지시) ─────
+# 🔴 이 화면은 서버가 보낸 행을 제 손으로 다시 정렬한다 — 눈에 보이는 첫 차례를
+# 정하는 것은 서버 조회가 아니라 RepairCaseListPage 의 DEFAULT_SORT 다. 한쪽만
+# 고치고 끝내지 않도록 두 곳을 함께 본다. 고르개(열 머리 누르기)는 그대로다.
+# 렌더하지 않고 원본을 글자로 읽는다 — 그 파일이 Server Action 을 물고 있다.
+src/components/repair-cases/repair-case-list-default-sort.test.ts
