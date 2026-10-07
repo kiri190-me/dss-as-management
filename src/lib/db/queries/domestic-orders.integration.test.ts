@@ -19,7 +19,11 @@ import {
 import { createRepairCase } from "../mutations/repair-cases";
 import { createDomesticOrder, updateDomesticOrder } from "../mutations/domestic-orders";
 import { createQuote } from "../mutations/quotes";
-import { listDomesticOrderDueDatesForRepairCase, listDomesticOrders } from "./domestic-orders";
+import {
+  listDomesticOrderDueDatesForRepairCase,
+  listDomesticOrders,
+  listQuoteInfoForRepairCases,
+} from "./domestic-orders";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import {
   validateDomesticOrderFields,
@@ -152,12 +156,21 @@ async function createTestCase(
   return created.id;
 }
 
-/** 내자 줄 한 개. 이 시험이 보는 세 칸만 정하면 나머지는 전부 기본값(NULL)이다. */
+/** 내자 줄 한 개. 주지 않은 칸은 전부 기본값(NULL)이다. */
 async function insertOrder(fields: {
   repairCaseId?: string | null;
   deliveredDate?: string | null;
   /** 소프트 삭제된 줄을 만들 때만 준다 — 화면에서 지운 줄이다. */
   isDeleted?: boolean;
+  /** 아래 listQuoteInfoForRepairCases 묶음이 쓰는 칸들. */
+  quoteNumber?: string | null;
+  quoteIssuedDate?: string | null;
+  orderIssuedDate?: string | null;
+  /**
+   * 완료 처리한 시각. 상태는 이 칸 한 곳에만 있다
+   * (schema/domestic-orders.ts 의 completed_at 주석).
+   */
+  completedAt?: Date | null;
 }): Promise<string> {
   const [inserted] = await db
     .insert(domesticOrders)
@@ -165,6 +178,10 @@ async function insertOrder(fields: {
       repairCaseId: fields.repairCaseId ?? null,
       deliveredDate: fields.deliveredDate ?? null,
       isDeleted: fields.isDeleted ?? false,
+      quoteNumber: fields.quoteNumber ?? null,
+      quoteIssuedDate: fields.quoteIssuedDate ?? null,
+      orderIssuedDate: fields.orderIssuedDate ?? null,
+      completedAt: fields.completedAt ?? null,
     })
     .returning({ id: domesticOrders.id });
   createdOrderIds.push(inserted.id);
@@ -668,4 +685,113 @@ test("연결이 없는 내자 줄의 날짜는 어느 건에도 붙지 않는다
   await insertDueDates(orphan, ["2096-01-05"]);
 
   assert.deepEqual(await listDomesticOrderDueDatesForRepairCase(caseId), []);
+});
+
+// ── listQuoteInfoForRepairCases — 완료된 줄은 후보에서 빠진다 (2026-10-07) ──
+//
+// 「고객 안내 현황」이 쓰는 조회다. 내자 정리에서 **완료 처리된 줄은 이미 출하가
+// 끝났다**는 뜻이므로(사용자 설명 2026-10-07), 진행 중인 건의 견적서 번호를 묻는
+// 이 화면에 그 줄의 값이 나오면 안 된다. 완료 판정은 completed_at 한 곳이다
+// (schema/domestic-orders.ts · domain/domestic-order-list.ts 의
+// isDomesticOrderCompleted).
+//
+// 🔴 여기서 꼭 지켜야 하는 것은 **거르는 자리가 "가장 늦은 줄 고르기"보다
+// 앞**이라는 점이다. 뒤에서 번호만 지우면 완료된 줄이 견적발행일이 더 늦을 때
+// 조용히 다시 이긴다 — 아래 두 번째 시험이 그 자리를 지킨다.
+
+/** 완료 시각 한 점. 어느 날인지는 상관없다 — NULL 이 아니라는 것만이 뜻이다. */
+const COMPLETED_AT = new Date("2096-07-15T01:00:00.000Z");
+
+test("완료된 줄과 완료 안 된 줄이 함께 있으면 완료 안 된 줄의 견적서번호가 나온다", async () => {
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "완료-Q-001",
+    quoteIssuedDate: "2096-07-01",
+    orderIssuedDate: "2096-07-02",
+    completedAt: COMPLETED_AT,
+  });
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "진행-Q-002",
+    quoteIssuedDate: "2096-07-05",
+    orderIssuedDate: "2096-07-06",
+  });
+
+  const info = (await listQuoteInfoForRepairCases([caseId])).get(caseId);
+  assert.ok(info, "완료 안 된 줄이 있는데 결과에서 그 건이 통째로 빠졌다");
+  assert.equal(info.quoteNumber, "진행-Q-002", "출하가 끝난 줄의 번호가 나왔다");
+  // 세 값은 같은 줄에서 나와야 한다(RepairCaseQuoteInfo 의 전제).
+  assert.equal(info.quoteIssuedDate, "2096-07-05");
+  assert.equal(info.orderIssuedDate, "2096-07-06");
+});
+
+test("🔴 완료된 줄의 견적발행일이 더 늦어도 완료 안 된 줄이 이긴다", async () => {
+  // 고르는 규칙은 "견적발행일이 가장 늦은 줄"이다. 완료 거르기가 그 비교보다
+  // 뒤에 있으면 이 모양에서 완료된 줄이 이긴다 — 그래서 이 시험이 있다.
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "완료-나중-Q-009",
+    quoteIssuedDate: "2096-12-31",
+    orderIssuedDate: "2096-12-31",
+    completedAt: COMPLETED_AT,
+  });
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "진행-먼저-Q-003",
+    quoteIssuedDate: "2096-01-02",
+    orderIssuedDate: "2096-01-03",
+  });
+
+  const info = (await listQuoteInfoForRepairCases([caseId])).get(caseId);
+  assert.ok(info, "완료 안 된 줄이 있는데 결과에서 그 건이 통째로 빠졌다");
+  assert.equal(info.quoteNumber, "진행-먼저-Q-003", "발행일이 더 늦은 완료 줄이 이겼다");
+  assert.equal(info.quoteIssuedDate, "2096-01-02");
+  assert.equal(info.orderIssuedDate, "2096-01-03");
+});
+
+test("줄이 전부 완료면 그 수리 건은 결과에 없다 — 부르는 쪽이 공유폴더를 본다", async () => {
+  // 결과에 없는 것이 맞는 동작이다. queries/customer-portal.ts 는 번호가 없는
+  // 건에 한해 공유폴더에서 견적서 번호를 읽는다(2026-10-07, 커밋 8a3e7b5).
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "완료-Q-004",
+    quoteIssuedDate: "2096-07-01",
+    orderIssuedDate: "2096-07-02",
+    completedAt: COMPLETED_AT,
+  });
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "완료-Q-005",
+    quoteIssuedDate: "2096-07-08",
+    orderIssuedDate: "2096-07-09",
+    completedAt: COMPLETED_AT,
+  });
+
+  const result = await listQuoteInfoForRepairCases([caseId]);
+  assert.equal(result.has(caseId), false, "전부 출하가 끝났는데 번호가 나왔다");
+});
+
+test("대조 — 같은 줄에서 완료 표시만 빼면 그 번호가 다시 나온다", async () => {
+  // 위 세 시험이 "조회가 이 건을 통째로 못 읽는" 다른 이유로도 초록색이 될 수
+  // 있다. 같은 자료에서 completed_at 만 비워 번호가 돌아오는 것을 확인한다.
+  const caseId = await createTestCase();
+  const orderId = await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "완료-Q-006",
+    quoteIssuedDate: "2096-07-01",
+    orderIssuedDate: "2096-07-02",
+    completedAt: COMPLETED_AT,
+  });
+  assert.equal((await listQuoteInfoForRepairCases([caseId])).has(caseId), false);
+
+  await db.update(domesticOrders).set({ completedAt: null }).where(eq(domesticOrders.id, orderId));
+
+  const info = (await listQuoteInfoForRepairCases([caseId])).get(caseId);
+  assert.ok(info, "완료 표시를 뺐는데도 그 건이 결과에 없다");
+  assert.equal(info.quoteNumber, "완료-Q-006");
+  assert.equal(info.quoteIssuedDate, "2096-07-01");
+  assert.equal(info.orderIssuedDate, "2096-07-02");
 });

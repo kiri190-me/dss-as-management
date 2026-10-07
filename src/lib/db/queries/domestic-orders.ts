@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -953,6 +953,27 @@ export async function listCustomerOptions(): Promise<CustomerOption[]> {
  * 발행일이 없는 줄은 후보에서 빠진다(번호만 있고 날짜가 없으면 어느 것이
  * 최신인지 판단할 근거가 없다).
  *
+ * ── 완료된 줄은 후보에서 뺀다 (2026-10-07) ──────────────────────────────
+ * 내자 정리에서 **완료 처리된 줄은 이미 출하가 끝났다는 뜻**이다(사용자 설명
+ * 2026-10-07). 고객 안내 현황이 묻는 것은 "지금 진행 중인 건의 견적서 번호"라
+ * 끝난 줄의 번호를 내면 안 된다. 그래서 거르는 자리를 **SQL 의 WHERE** 로
+ * 둔다 — 아래 "가장 늦은 줄 고르기"보다 앞이라, 완료된 줄이 견적발행일이 더
+ * 늦어도 이기지 못한다.
+ *
+ * 🔴 완료 판정은 **completed_at 한 곳**이다(schema/domestic-orders.ts 의
+ * completed_at 주석: "NULL 이면 아직 진행 중이다. is_completed 불리언을 따로
+ * 두지 않는다"). 코드에서 그 판정을 하는 자리는
+ * domain/domestic-order-list.ts 의 isDomesticOrderCompleted 이고, 여기서는 그
+ * 함수를 SQL 로 옮긴 것이 아니라 **같은 한 칸**을 본다. 판정을 다른 칸으로
+ * 옮기는 날에는 두 곳을 함께 고쳐야 한다.
+ *
+ * 번호만 빼지 않고 **줄 자체를** 빼는 이유는 아래 RepairCaseQuoteInfo 의
+ * 전제 때문이다 — 세 값이 같은 줄에서 나와야 한다.
+ *
+ * 완료 안 된 줄이 하나도 없으면 그 접수는 결과 Map 에 **들어가지 않는다**(줄이
+ * 아예 없을 때와 같다). 부르는 쪽(queries/customer-portal.ts)은 그때 공유폴더에서
+ * 번호를 읽는다 — 그것이 맞는 동작이다.
+ *
  * 접수 하나씩 부르지 않고 목록을 받는 이유: 현황판은 한 고객사의 접수를 한꺼번에
  * 그린다. 건마다 조회를 돌면 줄 수만큼 왕복이 생긴다.
  */
@@ -996,7 +1017,11 @@ export async function listQuoteInfoForRepairCases(
     .where(
       and(
         eq(domesticOrders.isDeleted, false),
-        inArray(domesticOrders.repairCaseId, repairCaseIds)
+        inArray(domesticOrders.repairCaseId, repairCaseIds),
+        // 완료 처리된 줄은 이미 출하가 끝난 줄이다(머리말). 완료 판정은
+        // completed_at 한 곳 — domain/domestic-order-list.ts 의
+        // isDomesticOrderCompleted 와 같은 칸을 본다.
+        isNull(domesticOrders.completedAt)
       )
     );
 
