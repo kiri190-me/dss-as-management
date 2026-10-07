@@ -23,6 +23,12 @@ import {
   applyPassSlipSuggestions,
   type PassSlipRowOutcome,
 } from "./pass-slip-suggestions";
+import {
+  WEEKLY_REPORT_KIND_FILTERS,
+  weeklyReportKindFilterLabels,
+  type WeeklyReportKindFilter,
+} from "@/lib/domain/weekly-report-kind-filter";
+import { WEEKLY_REPORT_KINDS } from "@/lib/domain/weekly-report";
 import { setCustomerStatusAction } from "@/lib/server/actions/customer-portal";
 
 /**
@@ -54,6 +60,32 @@ import { setCustomerStatusAction } from "@/lib/server/actions/customer-portal";
  * 저장은 사내 기록이고 내보내기는 공유폴더에 파일을 만드는 조작이다. 저장할
  * 때마다 자동으로 나가게 하면, 여러 건을 고치는 동안 **반쯤 고친 표가 파일로
  * 계속 쌓인다.** 다 고치고 한 번 누르게 한다.
+ *
+ * ■ `전체 / RFG / MB` 고르개 — 엑셀의 필터처럼 (2026-10-07 사용자 요청)
+ *
+ * 양식 단추 아래에 단추 셋이 더 선다(KindFilterTabs). 🔴 **낱말은 주간보고에서
+ * 그대로 가져온다**(domain/weekly-report-kind-filter.ts 의
+ * `WEEKLY_REPORT_KIND_FILTERS` · `weeklyReportKindFilterLabels`) — 두 화면이
+ * 같은 축을 다른 말로 부르면 사람은 그 차이를 기능의 차이로 읽는다. 종류를 가르는
+ * 규칙 자체도 그쪽 함수 하나다(queries/customer-portal.ts 의 foldPortalKind).
+ *
+ * 🔴 **주소가 아니라 화면 상태(useState)다 — 주간보고와 다른 점이고, 일부러다.**
+ * 주간보고는 서버 컴포넌트라 고른 값을 서버가 알아야 하고, 그래서 `?kind=` 으로
+ * 오간다. 이 화면은 반대다:
+ *   - 바로 위의 **양식 고르개가 이미 useState** 다. 나란히 선 두 고르개 중 하나만
+ *     주소를 바꾸면, 한쪽은 즉시 바뀌고 한쪽은 페이지가 다시 도는 화면이 된다.
+ *   - 이 페이지는 `dynamic = "force-dynamic"` 이라 주소가 바뀌면 **양식마다의
+ *     목록을 전부 다시 읽는다**(page.tsx). 이미 브라우저에 와 있는 줄을 고르는
+ *     일에 그 왕복을 들일 까닭이 없다.
+ *   - 사용자가 말한 모양이 「엑셀에서 필터를 먹이듯이」다 — 제자리에서 바로 접힌다.
+ * 인쇄·링크로 건네기가 필요해지면 그때 주소로 옮긴다(그때는 양식 고르개도 함께).
+ *
+ * 🔴 **걸렀으면 걸렀다고 적는다**(KindFilterBanner). 줄 수만 조용히 줄면 사람은
+ * 「건이 줄었다」로 읽는다 — 주간보고가 같은 까닭으로 같은 줄을 둔다.
+ *
+ * 🔴 **종류를 알 수 없는 줄은 어느 보기에서도 감추지 않는다**(아래
+ * filterPortalItemsByKind). 감추면 「있던 줄이 없어졌다」가 되고, 그 줄이야말로
+ * 사람이 손봐야 할 줄이다.
  */
 export default function CustomerPortalScreen({
   formIds,
@@ -71,6 +103,12 @@ export default function CustomerPortalScreen({
   const [selectedFormId, setSelectedFormId] = useState<string | null>(
     formIds[0] ?? null
   );
+  /**
+   * 🔴 **처음은 `전체`다** — 고르개가 붙기 전과 똑같은 표가 먼저 보여야 한다.
+   * 양식을 바꿔도 여기 고른 값은 그대로 간다: 「MB 만 본다」는 이 사람이 지금
+   * 하는 일이지 그 양식의 성질이 아니다.
+   */
+  const [kindFilter, setKindFilter] = useState<WeeklyReportKindFilter>("ALL");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
@@ -81,7 +119,15 @@ export default function CustomerPortalScreen({
    * 그때는 표 대신 아무것도 그리지 않는다.
    */
   const form = findPortalFormById(selectedFormId);
-  const items = form ? (itemsByForm[form.id] ?? []) : [];
+  /**
+   * 그 양식의 줄 **전부**. 🔴 걸러도 이 값은 줄지 않는다 — 아래 안내 줄이
+   * 「몇 줄 중 몇 줄인지」를 말하려면 거르기 전의 수가 있어야 하고, 엑셀
+   * 내보내기가 실제로 내보내는 것도 이쪽이다(KindFilterBanner).
+   */
+  const allItems = form ? (itemsByForm[form.id] ?? []) : [];
+  const items = filterPortalItemsByKind(allItems, kindFilter);
+  /** 종류를 알 수 없는 줄. 어느 보기에서도 빠지지 않으므로 그 사실을 적어 둔다. */
+  const unknownKindCount = allItems.filter((item) => item.kind === null).length;
 
   /**
    * [통문증에서 읽기]가 내놓은 결과(줄 열쇠 → 칸 키 → 색과 글자).
@@ -174,6 +220,22 @@ export default function CustomerPortalScreen({
             있습니다.
           </p>
 
+          {/* ───── 종류 고르개 ─────
+              양식 고르개 바로 아래에 둔다 — 두 고르개가 붙어 있어야 「이 표를
+              어떻게 좁혀 보는가」가 한자리에서 읽힌다. 낱말과 방식의 근거는
+              파일 헤더에 있다. */}
+          <KindFilterTabs current={kindFilter} onSelect={setKindFilter} />
+
+          {/* 🔴 걸러져 있을 때만 — 줄 수만 조용히 줄면 「건이 줄었다」로 읽힌다. */}
+          {kindFilter !== "ALL" ? (
+            <KindFilterBanner
+              filter={kindFilter}
+              totalCount={allItems.length}
+              shownCount={items.length}
+              unknownKindCount={unknownKindCount}
+            />
+          ) : null}
+
           {/* ───── 고객사 양식 엑셀 내보내기 ───── */}
           <CustomerFormExportPanel
             formId={form.id}
@@ -184,15 +246,24 @@ export default function CustomerPortalScreen({
           {/* ───── 통문증에서 읽기 ─────
               🔴 그 양식에 읽을 수 있는 칸이 있고 · 고칠 권한이 있을 때만 보인다.
               읽은 값을 **칸에 채워만** 두므로, 고칠 수 없는 사람에게 보이면 누를
-              수는 있는데 아무 일도 일어나지 않는다. */}
+              수는 있는데 아무 일도 일어나지 않는다.
+
+              🔴 **걸러진 줄(items)을 그대로 받는다** — 종류를 걸러 놓으면 그
+              읽기도 보이는 줄만 본다. 안 보이는 줄의 칸이 몰래 채워지면, 사람은
+              자기가 보지 않은 줄에 값이 들어간 것을 모른 채 저장하게 된다. */}
           {passSlipColumns.length > 0 && canEdit ? (
             <PassSlipOcrPanel form={form} items={items} onResults={setPassSlipResults} />
           ) : null}
 
-          {/* ───── 고객사 양식 표 ───── */}
+          {/* ───── 고객사 양식 표 ─────
+              🔴 빈 표의 까닭을 가른다. 걸러서 비었는데 「진행 중인 건이 없습니다」
+              라고 적으면 거짓말이 된다 — 건은 있고 지금 보기에서 빠졌을 뿐이라,
+              사람은 자료가 없어진 줄 알고 엉뚱한 데를 찾는다. */}
           {items.length === 0 ? (
             <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-6 py-12 text-center text-sm text-zinc-500">
-              이 양식에 묶인 고객사에 진행 중인 건이 없습니다.
+              {allItems.length === 0
+                ? "이 양식에 묶인 고객사에 진행 중인 건이 없습니다."
+                : `진행 중인 ${allItems.length}건이 있지만 ${weeklyReportKindFilterLabels[kindFilter]} 에 드는 건은 없습니다 — 위에서 「${weeklyReportKindFilterLabels.ALL}」를 누르면 모두 보입니다.`}
             </p>
           ) : (
             <CustomerFormTable
@@ -207,6 +278,122 @@ export default function CustomerPortalScreen({
         </>
       ) : null}
     </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 종류 고르개 — `전체 / RFG / MB`
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 고른 종류만 남긴다. `전체`면 받은 배열을 **그대로** 돌려준다(베끼지 않는다).
+ *
+ * 🔴 **종류를 알 수 없는 줄(`kind === null`)은 어느 보기에서도 빠지지 않는다.**
+ * 작업 종류를 RFG 에도 MB 에도 접을 수 없는 줄이 그것인데(까닭은
+ * queries/customer-portal.ts 의 foldPortalKind), 거르면서 함께 사라지면 사람은
+ * 「있던 줄이 없어졌다」로 읽는다. 오히려 손이 필요한 줄이라 늘 보이는 편이 맞고,
+ * 몇 줄인지는 아래 안내 줄이 말한다(KindFilterBanner).
+ *
+ * 그래서 `RFG` 와 `MB` 를 더해도 `전체` 보다 줄이 많을 수 있다 — 종류를 알 수
+ * 없는 줄이 양쪽에 다 들어가기 때문이다. 그 사실도 안내 줄이 적는다.
+ */
+function filterPortalItemsByKind(
+  items: CustomerPortalItem[],
+  filter: WeeklyReportKindFilter
+): CustomerPortalItem[] {
+  if (filter === "ALL") return items;
+  return items.filter((item) => item.kind === filter || item.kind === null);
+}
+
+/** 눌린 단추 / 안 눌린 단추. 바로 위 양식 고르개와 같은 색이고 크기만 작다. */
+const KIND_TAB_BASE =
+  "rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors";
+const KIND_TAB_CURRENT = "border-primary-900 bg-primary-900 text-white";
+const KIND_TAB_OTHER = "border-zinc-300 text-zinc-700 hover:border-zinc-500";
+
+/**
+ * 단추 셋. 🔴 **글자도 값도 주간보고에서 그대로 가져온다**
+ * (`WEEKLY_REPORT_KIND_FILTERS` · `weeklyReportKindFilterLabels`) — 여기서 다시
+ * 적으면 두 화면의 말이 갈린다(파일 헤더).
+ *
+ * 🔴 링크가 아니라 **단추**다. 주간보고는 서버 컴포넌트라 주소로 오가지만 이
+ * 화면은 줄이 이미 브라우저에 와 있고, 바로 위 양식 고르개도 단추다 — 까닭은
+ * 파일 헤더에 적어 두었다.
+ */
+function KindFilterTabs({
+  current,
+  onSelect,
+}: {
+  current: WeeklyReportKindFilter;
+  onSelect: (next: WeeklyReportKindFilter) => void;
+}) {
+  return (
+    <nav aria-label="종류로 거르기" className="flex flex-wrap items-center gap-2">
+      {WEEKLY_REPORT_KIND_FILTERS.map((filter) => (
+        <button
+          key={filter}
+          type="button"
+          // 지금 보고 있는 것을 색만으로 말하지 않는다 — 양식 고르개와 같은 방식이다.
+          aria-pressed={filter === current}
+          onClick={() => onSelect(filter)}
+          className={`${KIND_TAB_BASE} ${filter === current ? KIND_TAB_CURRENT : KIND_TAB_OTHER}`}
+        >
+          {weeklyReportKindFilterLabels[filter]}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * 🔴 걸러져 있을 때 표 위에 붙는 한 줄 — **감춘 것을 말하지 않고 감추지 않는다.**
+ * 주간보고의 같은 이름 조각과 같은 판단이고, 거기에 이 화면에만 있는 두 가지를
+ * 더 적는다.
+ *
+ *  1. **엑셀은 이 고르개를 따르지 않는다.** 내보내기는 서버가 양식 식별자
+ *     하나로 같은 조회를 다시 도는 길이라(CustomerFormExportPanel ·
+ *     services/customer-portal-export.ts), 화면에서 RFG 만 보고 있어도 저장되는
+ *     파일에는 그 양식의 건이 전부 들어간다. 적어 두지 않으면 사람은 「보이는
+ *     대로 저장된다」고 믿고 고객사에 보낸다. (고르개가 엑셀까지 가려야 하는지는
+ *     이 조각에서 정하지 않았다 — 정할 때까지는 사실을 적어 둔다.)
+ *  2. **종류를 알 수 없는 줄은 빠지지 않는다**(filterPortalItemsByKind). 0줄이면
+ *     이 문장을 아예 내지 않는다 — 늘 나는 줄은 읽히지 않는다.
+ *
+ * 색은 빨강이 아니다. 고장이 아니라 **사람이 스스로 고른 상태**다.
+ */
+function KindFilterBanner({
+  filter,
+  totalCount,
+  shownCount,
+  unknownKindCount,
+}: {
+  /** 🔴 `ALL` 로는 불리지 않는다 — 부르는 쪽이 걸러져 있을 때만 그린다. */
+  filter: WeeklyReportKindFilter;
+  /** 거르기 **전**의 줄 수. 엑셀에 실제로 들어가는 수이기도 하다. */
+  totalCount: number;
+  shownCount: number;
+  unknownKindCount: number;
+}) {
+  const hiddenKinds = WEEKLY_REPORT_KINDS.filter((kind) => kind !== filter);
+  return (
+    <p
+      role="status"
+      className="rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-xs leading-relaxed text-sky-900"
+    >
+      <strong>{weeklyReportKindFilterLabels[filter]}</strong>만 보고 있습니다 — 이 양식의 진행 중인{" "}
+      <strong className="tabular-nums">{totalCount}</strong>건 가운데{" "}
+      <strong className="tabular-nums">{shownCount}</strong>건이고, {hiddenKinds.join(" · ")}{" "}
+      <strong className="tabular-nums">{totalCount - shownCount}</strong>건은 이 표에서 빠져 있습니다.
+      {unknownKindCount > 0 ? (
+        <>
+          {" "}
+          종류를 알 수 없는 <strong className="tabular-nums">{unknownKindCount}</strong>건은 어느
+          보기에서도 빠지지 않고 그대로 보입니다.
+        </>
+      ) : null}{" "}
+      <strong>엑셀 미리보기 · 공유폴더에 저장은 이 고르개를 따르지 않습니다</strong> — 저장되는
+      파일에는 {totalCount}건이 모두 들어갑니다.
+    </p>
   );
 }
 

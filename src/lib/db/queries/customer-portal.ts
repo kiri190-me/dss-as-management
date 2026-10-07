@@ -14,6 +14,8 @@ import {
   groupCustomersByPortalForm,
   sortPortalRowsByReceivedAt,
 } from "../../domain/customer-portal-forms";
+import { foldWeeklyReportKind, type WeeklyReportKind } from "../../domain/weekly-report";
+import type { WorkflowType } from "../../domain/types";
 import { listQuoteInfoForRepairCases } from "./domestic-orders";
 import { listRepairCasesByCustomerId } from "./repair-cases";
 
@@ -37,6 +39,11 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  * 곳은 사내 화면과 그 화면이 저장하는 고객사 엑셀뿐이다 — 이 줄이 바깥
  * 사이트로 나가는 길은 없다. 링크 목록·암호문 조회와 고객이 보낸 의뢰를 읽던
  * 조회도 함께 없앴다(표 자체는 그대로 둔다).
+ *
+ * ── 줄마다 종류(RFG · MB)를 함께 싣는다 (2026-10-07) ────────────────────
+ * 화면의 `전체 / RFG / MB` 고르개가 읽는 값이다. 🔴 **판정은 주간보고와 같은
+ * 함수**(domain/weekly-report.ts 의 foldWeeklyReportKind)를 그대로 부르고, 접을
+ * 수 없는 줄은 null 이다 — 까닭은 아래 foldPortalKind 에 있다.
  * ============================================================================
  */
 
@@ -71,6 +78,19 @@ export type CustomerPortalItem = {
   quoteIssuedDate: string | null;
   /** 상태를 고칠 때 쓰는 낙관적 잠금 값. 행이 없으면 null. */
   statusVersion: number | null;
+  /**
+   * 이 건의 **종류** — `RFG` · `MB`, 접을 수 없으면 null.
+   *
+   * 화면의 `전체 / RFG / MB` 고르개 하나가 이 값을 읽는다
+   * (CustomerPortalScreen). 🔴 **고객사에 나가는 값이 아니다** — 고객사 엑셀은
+   * 양식이 고른 열만 적으므로(domain/customer-portal-forms.ts), 양식에 없는 이
+   * 칸은 저장되는 파일에 들어가지 않는다.
+   *
+   * 🔴 판정은 여기서 하지 않고 **주간보고와 같은 함수**를 그대로 부른다
+   * (아래 foldPortalKind). 두 화면이 같은 건을 다른 종류로 읽으면, 사람은 그
+   * 차이를 기능의 차이로 읽는다.
+   */
+  kind: WeeklyReportKind | null;
 
   // ───── 아래 여섯은 「고객사 양식」 표만 쓴다. ─────
 
@@ -167,6 +187,30 @@ function toStringMap(value: unknown): Record<string, string> {
     if (typeof raw === "string") result[key] = raw;
   }
   return result;
+}
+
+/**
+ * 접수 건의 **작업 종류** → 이 화면의 `RFG` · `MB`.
+ *
+ * 🔴 **규칙을 여기 다시 적지 않는다.** 주간보고가 쓰는 그 함수
+ * (domain/weekly-report.ts 의 foldWeeklyReportKind)를 그대로 부른다 — 접는 규칙
+ * (Total Controller 를 RFG 로 접는다)은 사용자가 정한 것이고, 대시보드의
+ * 원그래프까지 같은 함수를 본다. 한 벌 더 적으면 언젠가 한쪽만 고쳐져 같은 건이
+ * 화면마다 다른 종류가 된다.
+ *
+ * 🔴 **접을 수 없으면 null 이다.** DB 의 workflow_type enum 에는 도메인에서
+ * 없앤 레거시 `MATCHER` 가 아직 남아 있어(db/workflow-type-column.ts 주석),
+ * 타입이 말하는 것과 달리 그 값이 올라올 수 있다. 그때 표 조회는 undefined 가
+ * 되는데, 그대로 화면에 보내면 RFG 도 MB 도 아닌 값을 쥐고 거르다가 줄이 소리
+ * 없이 사라진다. null 로 받아 「종류를 알 수 없는 줄」로 다루고, 🔴 **화면은 그
+ * 줄을 어느 보기에서도 감추지 않는다**(CustomerPortalScreen 의
+ * filterPortalItemsByKind).
+ */
+function foldPortalKind(workflowType: WorkflowType): WeeklyReportKind | null {
+  // 🔴 undefined 를 받을 수 있게 **일부러 넓혀** 담는다. 저 함수의 반환 타입은
+  //    null 을 말하지 않지만 실제 표 조회는 빠질 수 있다(위 주석).
+  const kind: WeeklyReportKind | undefined = foldWeeklyReportKind(workflowType);
+  return kind ?? null;
 }
 
 /**
@@ -287,6 +331,10 @@ export async function listPortalItemsForCustomer(
       quoteNumber: quote?.quoteNumber ?? null,
       quoteIssuedDate: quote?.quoteIssuedDate ?? null,
       statusVersion: status?.version ?? null,
+      // 🔴 접수 건이 이미 싣고 온 작업 종류를 접을 뿐, 이 조회가 질의를 한 번 더
+      //    쏘지 않는다 — listRepairCasesByCustomerId 가 workflowTypeCodeColumn()
+      //    으로 읽어 둔 값이다(queries/repair-cases.ts).
+      kind: foldPortalKind(row.workflowType),
       endUserName: row.endUserName,
       orderIssuedDate: quote?.orderIssuedDate ?? null,
       // 「납품 요청일」 — 접수 건에 붙은 값이라 따로 읽을 것이 없다.

@@ -30,6 +30,9 @@ import {
  *  7. 가로 스크롤을 **표를 감싼 상자가** 소유한다(표가 페이지를 밀지 않게).
  *  8. 🔴 화면 표와 엑셀이 **같은 조회**를 쓴다(2026-10-04) — 각자 모으면 담당자가
  *     본 표와 저장된 파일이 갈리고, 그 어긋남은 아무도 눈치채지 못한 채 굳는다.
+ *  9. 🔴 **`전체 / RFG / MB` 고르개**(2026-10-07) — 낱말과 판정을 주간보고에서
+ *     그대로 가져오고, 기본은 `전체` 이며, 걸렀으면 그 사실을 화면에 적고, 종류를
+ *     알 수 없는 줄은 어느 보기에서도 감추지 않는다.
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * CustomerPortalScreen 은 서버 액션(actions/customer-portal)을 직접 import 하는
@@ -354,6 +357,118 @@ describe("🔴 7. 표가 페이지를 옆으로 밀지 않는다", () => {
   test("가장 넓은 양식이 열 열세 개다 — 최소 폭을 그만큼 잡아 둔 근거", () => {
     const widest = Math.max(...CUSTOMER_PORTAL_FORMS.map((form) => form.columns.length));
     assert.equal(widest, 13);
+  });
+});
+
+describe("🔴 9. 전체 / RFG / MB 고르개", () => {
+  const body = flat(code(screen));
+  const queryBody = flat(code(query));
+
+  test("조회가 줄마다 종류를 싣는다 — 질의를 한 번 더 쏘지 않는다", () => {
+    assert.ok(
+      queryBody.includes("kind: foldPortalKind(row.workflowType)"),
+      "줄에 종류가 실리지 않는다 — 화면이 거를 근거가 없어진다"
+    );
+    assert.ok(
+      !queryBody.includes("workflowTypeCodeColumn"),
+      "조회가 작업 종류를 직접 또 읽는다 — listRepairCasesByCustomerId 가 이미 싣고 온다"
+    );
+  });
+
+  test("🔴 판정은 주간보고와 같은 함수다 — 규칙을 여기 다시 적지 않는다", () => {
+    assert.ok(
+      queryBody.includes("foldWeeklyReportKind(workflowType)"),
+      "RFG/MB 판정이 주간보고와 갈렸다 — 같은 건이 화면마다 다른 종류가 된다"
+    );
+    for (const rule of ["_MATCHER", "_GENERATOR", "_TOTAL_CONTROLLER"]) {
+      assert.ok(
+        !queryBody.includes(rule),
+        `접는 규칙을 조회에 다시 적었다: ${rule}`
+      );
+    }
+  });
+
+  test("🔴 접을 수 없는 줄은 null 이다 — 레거시 workflow_type 이 남아 있다", () => {
+    assert.ok(
+      queryBody.includes("const kind: WeeklyReportKind | undefined = foldWeeklyReportKind("),
+      "undefined 를 받을 수 있게 넓혀 담는 자리가 사라졌다"
+    );
+    assert.ok(queryBody.includes("return kind ?? null;"));
+    assert.ok(
+      queryBody.includes("kind: WeeklyReportKind | null;"),
+      "줄의 종류 칸이 null 을 말하지 않는다"
+    );
+  });
+
+  test("🔴 낱말을 새로 적지 않고 주간보고의 것을 쓴다", () => {
+    assert.ok(
+      body.includes("WEEKLY_REPORT_KIND_FILTERS") &&
+        body.includes("weeklyReportKindFilterLabels"),
+      "고르개의 값·글자를 주간보고에서 가져오지 않는다"
+    );
+    // 종류 이름을 화면에 박으면 주간보고와 갈린다. 값은 WEEKLY_REPORT_KINDS 가,
+    // 글자는 weeklyReportKindFilterLabels 가 갖는다.
+    for (const label of ['"RFG"', '"MB"', ">RFG<", ">MB<"]) {
+      assert.ok(!body.includes(label), `종류 이름을 화면에 적었다: ${label}`);
+    }
+  });
+
+  test("🔴 기본은 전체다 — 고르개가 붙기 전과 같은 표가 먼저 보인다", () => {
+    assert.ok(
+      body.includes('useState<WeeklyReportKindFilter>("ALL")'),
+      "기본값이 전체가 아니다"
+    );
+  });
+
+  test("표가 거른 줄을 그리고, 거르기 전의 수는 따로 들고 있다", () => {
+    assert.ok(body.includes("const allItems = form ? (itemsByForm[form.id] ?? []) : [];"));
+    assert.ok(body.includes("const items = filterPortalItemsByKind(allItems, kindFilter);"));
+    assert.ok(body.includes("<CustomerFormTable form={form} items={items}"));
+  });
+
+  test("🔴 종류를 알 수 없는 줄은 어느 보기에서도 빠지지 않는다", () => {
+    assert.ok(
+      body.includes("items.filter((item) => item.kind === filter || item.kind === null)"),
+      "거르면서 종류를 모르는 줄까지 떨어뜨린다 — 「있던 줄이 없어졌다」가 된다"
+    );
+    assert.ok(
+      body.includes('if (filter === "ALL") return items;'),
+      "전체일 때 배열을 그대로 돌려주지 않는다"
+    );
+  });
+
+  test("🔴 걸렀으면 그 사실을 화면에 적는다 — 줄 수만 줄면 「건이 줄었다」로 읽힌다", () => {
+    assert.ok(
+      body.includes('{kindFilter !== "ALL" ? ( <KindFilterBanner'),
+      "걸렀을 때 안내 줄이 나오지 않는다"
+    );
+    const banner = flat(code(screen)).slice(flat(code(screen)).indexOf("function KindFilterBanner("));
+    assert.ok(banner.includes("totalCount"), "전체가 몇 건인지 적지 않는다");
+    assert.ok(banner.includes("shownCount"), "보이는 것이 몇 건인지 적지 않는다");
+    assert.ok(banner.includes("unknownKindCount"), "종류를 모르는 줄을 말하지 않는다");
+    assert.ok(
+      banner.includes("엑셀 미리보기 · 공유폴더에 저장은 이 고르개를 따르지 않습니다"),
+      "엑셀이 고르개를 따르지 않는다는 사실을 적지 않는다 — 보이는 대로 저장된다고 믿게 된다"
+    );
+  });
+
+  test("🔴 빈 표의 까닭을 가른다 — 걸러서 비었는데 「건이 없습니다」는 거짓말이다", () => {
+    assert.ok(
+      body.includes("{allItems.length === 0 ? \"이 양식에 묶인 고객사에 진행 중인 건이 없습니다.\""),
+      "걸러서 빈 표와 정말 빈 표가 같은 말을 한다"
+    );
+  });
+
+  test("🔴 고르개는 화면 상태다 — 주소를 바꾸지 않는다(양식 고르개와 같은 방식)", () => {
+    const pageBody = flat(code(read("src/app/(app)/customer-portal/page.tsx")));
+    assert.ok(
+      !pageBody.includes("searchParams"),
+      "페이지가 주소 인자를 읽는다 — 주소로 옮긴다면 양식 고르개도 함께 옮겨야 한다(화면 머리말)"
+    );
+    assert.ok(
+      body.includes("aria-pressed={filter === current}"),
+      "눌린 단추를 색으로만 말한다"
+    );
   });
 });
 
